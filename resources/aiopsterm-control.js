@@ -31,6 +31,7 @@ Commands:
   events [--after <seq>] [--cursor-file <path>] [--name <event>] [--category <category>] [--limit <n>] [--no-ack] [--no-heartbeat]
   tree
   list-windows
+  current-window
   list-panes
   new-window [--name <title>] [--cwd <path>] [--no-focus]
   split-window [-h|-v] [--target <panel-id>] [--no-focus]
@@ -68,6 +69,7 @@ Commands:
   list-buffers
   show-options [-v] [extended-keys]
   set-hook [--list] [--unset <event>] | <event> <command>
+  popup | bind-key | unbind-key | copy-mode
   set-status <key> <value> [--icon <name>] [--color <#hex>] [--priority <n>]
   clear-status <key>
   list-status
@@ -206,7 +208,7 @@ const methodParams = () => {
   if (command === 'wait-for' || command === 'wait_for') return waitForMethodParams()
   if (command === 'display-message' || command === 'display' || command === 'displayp') return displayMessageMethodParams()
   if (['set-buffer', 'paste-buffer', 'list-buffers', 'show-buffer', 'showb', 'save-buffer', 'saveb'].includes(command)) return terminalBufferMethodParams(command)
-  if (['show-options', 'show-option', 'show', 'set-hook', 'set-option', 'set', 'set-window-option', 'setw', 'source-file', 'refresh-client', 'attach-session', 'detach-client'].includes(command)) {
+  if (['show-options', 'show-option', 'show', 'set-hook', 'set-option', 'set', 'set-window-option', 'setw', 'source-file', 'refresh-client', 'attach-session', 'detach-client', 'popup', 'bind-key', 'unbind-key', 'copy-mode'].includes(command)) {
     return tmuxCompatMethodParams(command)
   }
   if (['set-status', 'clear-status', 'list-status', 'set-progress', 'clear-progress', 'log', 'clear-log', 'list-log', 'sidebar-state'].includes(command)) return sidebarMetadataMethodParams(command)
@@ -214,7 +216,7 @@ const methodParams = () => {
   if (['next-window', 'nextw', 'previous-window', 'prev-window', 'previousw', 'prevw', 'last-window', 'lastw', 'select-window', 'selectw', 'select-pane', 'selectp', 'focus-pane', 'last-pane', 'lastp', 'find-window', 'findw'].includes(command)) {
     return paneNavigationMethodParams(command)
   }
-  if (['list-windows', 'lsw', 'list-panes', 'lsp', 'new-window', 'neww', 'split-window', 'splitw', 'rename-window', 'renamew', 'rename-workspace', 'kill-window', 'killw', 'kill-pane', 'killp', 'has-session', 'has', 'select-layout'].includes(command)) {
+  if (['list-windows', 'lsw', 'current-window', 'currentw', 'list-panes', 'lsp', 'new-window', 'neww', 'split-window', 'splitw', 'rename-window', 'renamew', 'rename-workspace', 'kill-window', 'killw', 'kill-pane', 'killp', 'has-session', 'has', 'select-layout'].includes(command)) {
     return paneManagementMethodParams(command)
   }
   if (command === 'tree') return { method: 'workspace.snapshot', params: { format: 'tree' } }
@@ -537,6 +539,7 @@ const tmuxCompatMethodParams = (command) => {
     const option = args.find((arg) => arg !== '--' && !arg.startsWith('-')) || 'extended-keys'
     return { method: 'tmux.option.show', params: { option, name: option, valueOnly, v: valueOnly } }
   }
+  if (command === 'popup' || command === 'bind-key' || command === 'unbind-key' || command === 'copy-mode') return { method: command, params: { command } }
   return { method: command, params: { command, accepted: true } }
 }
 
@@ -643,6 +646,7 @@ const paneNavigationMethodParams = (command) => {
 
 const paneManagementMethodParams = (command) => {
   if (command === 'list-windows' || command === 'lsw') return { method: 'workspace.list', params: { tmuxCompat: true } }
+  if (command === 'current-window' || command === 'currentw') return { method: 'workspace.current', params: { tmuxCompat: true } }
   if (command === 'list-panes' || command === 'lsp') return { method: 'pane.list', params: { tmuxCompat: true } }
   if (command === 'new-window' || command === 'neww') {
     const title = readOption('--name') || readOption('-n') || readOption('--title')
@@ -1029,6 +1033,11 @@ const printAgentSessionLine = (session, prefix = 'agent-session') => {
 }
 
 const printResponse = (response) => {
+  if (!outputJson && !response.ok && response.errorCode === 'TMUX_COMPAT_UNSUPPORTED') {
+    const data = response.data || {}
+    process.stdout.write(['unsupported', data.command || '-', data.unsupportedReason || response.errorMessage || ''].join('\t') + '\n')
+    return
+  }
   if (outputJson || !response.ok) {
     process.stdout.write(`${JSON.stringify(response, null, 2)}\n`)
     return

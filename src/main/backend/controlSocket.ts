@@ -470,7 +470,11 @@ const isTmuxCompatMethod = (method: string) =>
     'source-file',
     'refresh-client',
     'attach-session',
-    'detach-client'
+    'detach-client',
+    'popup',
+    'bind-key',
+    'unbind-key',
+    'copy-mode'
   ].includes(method)
 
 const eventFiltersFromParams = (params: Record<string, unknown> = {}): ControlEventFilters => ({
@@ -2467,6 +2471,13 @@ const handleTmuxCompatControlRequest = (method: string, params: Record<string, u
       reason: 'Accepted as a tmux compatibility no-op.'
     })
   }
+  if (['popup', 'bind-key', 'unbind-key', 'copy-mode'].includes(action)) {
+    return fail('TMUX_COMPAT_UNSUPPORTED', `${action} is not supported yet in aiopsterm tmux compatibility mode.`, {
+      command: action,
+      unsupported: true,
+      unsupportedReason: `${action} is a recognized tmux compatibility placeholder but is not supported yet.`
+    })
+  }
   return fail('UNKNOWN_CONTROL_METHOD', `Unknown aiopsterm tmux compatibility method: ${method}`)
 }
 
@@ -2817,6 +2828,7 @@ const handleControlRequest = async (request: ControlSocketRequest): Promise<Cont
   if (method === 'list_workspaces') return dispatchRendererControlRequest('workspace.list', params)
   if (method === 'list_surfaces') return dispatchRendererControlRequest('surface.list', params)
   if (method === 'list-windows' || method === 'lsw') return dispatchRendererControlRequest('workspace.list', params)
+  if (method === 'current-window' || method === 'currentw') return dispatchRendererControlRequest('workspace.current', params)
   if (method === 'list-panes' || method === 'lsp') return dispatchRendererControlRequest('pane.list', params)
   if (method === 'new-window' || method === 'neww') {
     const response = await dispatchRendererControlRequest('workspace.create', params, { focus: params.focus !== false })

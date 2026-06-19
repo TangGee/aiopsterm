@@ -697,6 +697,7 @@ describe('control socket backend', () => {
     mockWindow = createMockWindow((request) => {
       const params = (request.params as any) || {}
       if (request.method === 'workspace.list') return { ok: true, data: { workspaces: [{ id: 'main', active: true, title: 'Main' }] } }
+      if (request.method === 'workspace.current') return { ok: true, data: { workspace: { panelId: 'panel-1', title: 'Main', active: true }, activePanelId: 'panel-1' } }
       if (request.method === 'pane.list') return { ok: true, data: { panes: [{ panelId: 'panel-1', title: 'Main', surfaceKind: 'terminal' }], count: 1 } }
       if (request.method === 'workspace.has_session') return { ok: true, data: { exists: true, target: params.panelId || 'panel-1' } }
       if (request.method === 'workspace.select_layout') return { ok: true, data: { layout: params.layout, applied: true } }
@@ -709,6 +710,7 @@ describe('control socket backend', () => {
     backend.configureControlSocketRuntime({ getWindows: () => [mockWindow] })
 
     await expect(backend.__testing.handleControlRequest({ method: 'list-windows', params: {} })).resolves.toEqual(expect.objectContaining({ ok: true }))
+    await expect(backend.__testing.handleControlRequest({ method: 'current-window', params: {} })).resolves.toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ activePanelId: 'panel-1' }) }))
     await expect(backend.__testing.handleControlRequest({ method: 'list-panes', params: {} })).resolves.toEqual(expect.objectContaining({ ok: true }))
     await expect(backend.__testing.handleControlRequest({ method: 'new-window', params: { title: 'Scratch', focus: false } })).resolves.toEqual(expect.objectContaining({ ok: true }))
     await expect(backend.__testing.handleControlRequest({ method: 'split-window', params: { paneId: 'panel-1', direction: 'right' } })).resolves.toEqual(expect.objectContaining({ ok: true }))
@@ -720,6 +722,7 @@ describe('control socket backend', () => {
 
     expect(mockWindow.requests).toEqual([
       expect.objectContaining({ method: 'workspace.list' }),
+      expect.objectContaining({ method: 'workspace.current' }),
       expect.objectContaining({ method: 'pane.list' }),
       expect.objectContaining({ method: 'workspace.create', params: expect.objectContaining({ title: 'Scratch' }) }),
       expect.objectContaining({ method: 'surface.split', params: expect.objectContaining({ paneId: 'panel-1' }) }),
@@ -923,6 +926,13 @@ describe('control socket backend', () => {
     )
     await expect(backend.__testing.handleControlRequest({ method: 'set-window-option', params: { option: 'automatic-rename', value: 'off' } })).resolves.toEqual(
       expect.objectContaining({ ok: true, data: expect.objectContaining({ noop: true, accepted: true }) })
+    )
+    await expect(backend.__testing.handleControlRequest({ method: 'popup', params: {} })).resolves.toEqual(
+      expect.objectContaining({
+        ok: false,
+        errorCode: 'TMUX_COMPAT_UNSUPPORTED',
+        data: expect.objectContaining({ command: 'popup', unsupported: true })
+      })
     )
     await expect(backend.__testing.handleControlRequest({ method: 'set-hook', params: { event: 'after-split-window', unset: true } })).resolves.toEqual(
       expect.objectContaining({ ok: true, data: expect.objectContaining({ removed: true }) })

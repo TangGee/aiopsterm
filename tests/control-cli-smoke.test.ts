@@ -273,6 +273,15 @@ describe('aiopsterm-control CLI', () => {
       if (request.method === 'tmux.hook.unset') {
         return { id: request.id, ok: true, data: { hooks: [], count: 0, event: (request.params as any)?.event, removed: true } }
       }
+      if (request.method === 'popup') {
+        return {
+          id: request.id,
+          ok: false,
+          errorCode: 'TMUX_COMPAT_UNSUPPORTED',
+          errorMessage: 'popup is not supported yet in aiopsterm tmux compatibility mode.',
+          data: { command: 'popup', unsupported: true, unsupportedReason: 'popup is a recognized tmux compatibility placeholder but is not supported yet.' }
+        }
+      }
       return {
         id: request.id,
         ok: true,
@@ -291,12 +300,16 @@ describe('aiopsterm-control CLI', () => {
     const hookList = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'set-hook', '--list'], { cwd: process.cwd() })
     expect(hookList.stdout).toContain('hook\tafter-split-window\tdisplay-message split')
     await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'set-hook', '--unset', 'after-split-window'], { cwd: process.cwd() })
+    await expect(execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'popup'], { cwd: process.cwd() })).rejects.toMatchObject({
+      stdout: expect.stringContaining('unsupported\tpopup')
+    })
 
     expect(seen).toEqual([
       expect.objectContaining({ method: 'tmux.option.show', params: expect.objectContaining({ option: 'extended-keys', valueOnly: true }) }),
       expect.objectContaining({ method: 'tmux.hook.set', params: expect.objectContaining({ event: 'after-split-window', command: 'display-message split' }) }),
       expect.objectContaining({ method: 'tmux.hook.list' }),
-      expect.objectContaining({ method: 'tmux.hook.unset', params: expect.objectContaining({ event: 'after-split-window', unset: true }) })
+      expect.objectContaining({ method: 'tmux.hook.unset', params: expect.objectContaining({ event: 'after-split-window', unset: true }) }),
+      expect.objectContaining({ method: 'popup', params: expect.objectContaining({ command: 'popup' }) })
     ])
   })
 
@@ -404,6 +417,9 @@ describe('aiopsterm-control CLI', () => {
       if (request.method === 'workspace.list') {
         return { id: request.id, ok: true, data: { workspaces: [{ id: 'main', active: true, title: 'Main', mode: 'terminal', activeModule: 'workspace' }] } }
       }
+      if (request.method === 'workspace.current') {
+        return { id: request.id, ok: true, data: { workspace: { panelId: 'panel-1', title: 'Main', active: true }, activePanelId: 'panel-1' } }
+      }
       if (request.method === 'pane.list') {
         return { id: request.id, ok: true, data: { panes: [{ panelId: 'panel-1', title: 'Main', surfaceKind: 'terminal', active: true }], count: 1 } }
       }
@@ -423,6 +439,8 @@ describe('aiopsterm-control CLI', () => {
     })
 
     await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'list-windows'], { cwd: process.cwd() })
+    const current = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'current-window'], { cwd: process.cwd() })
+    expect(current.stdout).toContain('selected\tpanel-1')
     await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'list-panes'], { cwd: process.cwd() })
     const created = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'new-window', '--name', 'Scratch', '--no-focus'], { cwd: process.cwd() })
     expect(created.stdout).toContain('created\tpanel-new\tScratch')
@@ -438,6 +456,7 @@ describe('aiopsterm-control CLI', () => {
 
     expect(seen).toEqual([
       expect.objectContaining({ method: 'workspace.list' }),
+      expect.objectContaining({ method: 'workspace.current' }),
       expect.objectContaining({ method: 'pane.list' }),
       expect.objectContaining({ method: 'workspace.create', params: expect.objectContaining({ title: 'Scratch', focus: false }) }),
       expect.objectContaining({ method: 'surface.split', params: expect.objectContaining({ targetPaneId: 'panel-1', direction: 'right' }) }),

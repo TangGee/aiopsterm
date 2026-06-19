@@ -119,6 +119,7 @@ The tmux compatibility metadata slice adds non-structural compatibility commands
 - `tmux.hook.set`, `tmux.hook.list`, `tmux.hook.unset`: store, list, and remove tmux-style hook definitions as automation metadata.
 - `tmux.option.show`: reports supported tmux compatibility options. `extended-keys` is reported as `on`.
 - `set-option`, `set-window-option`, `source-file`, `refresh-client`, `attach-session`, and `detach-client`: accepted as explicit no-op compatibility commands for scripts that probe tmux behavior.
+- `popup`, `bind-key`, `unbind-key`, and `copy-mode`: recognized placeholders that return a structured unsupported response.
 
 The terminal history slice adds renderer-owned scrollback cleanup:
 
@@ -166,13 +167,13 @@ Aliases are accepted for control_compat-compatible scripts where useful:
 - `respawn-pane` and `surface.respawn` map to `terminal.respawn`.
 - `break-pane`, `join-pane`, `swap-pane`, and `resize-pane` map to `pane.break`, `pane.join`, `pane.swap`, and `pane.resize`.
 - `next-window`, `previous-window`, `last-window`, `select-window`, `select-pane`, `last-pane`, and `find-window` map to `workspace.*`, `pane.*`, and shared-panel lookup commands.
-- `list-windows`, `list-panes`, `new-window`, `split-window`, `rename-window`, `kill-window`, `kill-pane`, `has-session`, and `select-layout` map to shared-panel management commands.
+- `list-windows`, `current-window`, `list-panes`, `new-window`, `split-window`, `rename-window`, `kill-window`, `kill-pane`, `has-session`, and `select-layout` map to shared-panel management commands.
 - `send`, `send-panel`, and `surface.send_text` map to `terminal.send_text`.
 - `send-key`, `send-key-panel`, and `surface.send_key` map to `terminal.send_key`.
 - `wait-for` maps to `sync.wait_for`.
 - `display-message` maps to `notification.create`; `display-message -p` prints locally without using the socket.
 - `set-buffer`, `show-buffer`, `save-buffer`, `paste-buffer`, and `list-buffers` map to `terminal.buffer.*`.
-- `set-hook`, `show-options`, `show-option`, `set-option`, `set-window-option`, `source-file`, `refresh-client`, `attach-session`, and `detach-client` map to tmux compatibility metadata/no-op commands.
+- `set-hook`, `show-options`, `show-option`, `set-option`, `set-window-option`, `source-file`, `refresh-client`, `attach-session`, `detach-client`, `popup`, `bind-key`, `unbind-key`, and `copy-mode` map to tmux compatibility metadata/no-op/placeholder commands.
 - `set-status`, `clear-status`, `list-status`, `set-progress`, `clear-progress`, `log`, `clear-log`, `list-log`, and `sidebar-state` map to `sidebar.*` metadata methods.
 - `notify` maps to `notification.create`.
 - `list-notifications` maps to `notification.list`.
@@ -284,6 +285,7 @@ node /path/to/resources/aiopsterm-control.js next-window
 node /path/to/resources/aiopsterm-control.js select-pane --target panel-main
 node /path/to/resources/aiopsterm-control.js find-window --content --select "deploy"
 node /path/to/resources/aiopsterm-control.js list-panes
+node /path/to/resources/aiopsterm-control.js current-window
 node /path/to/resources/aiopsterm-control.js new-window --name "Scratch"
 node /path/to/resources/aiopsterm-control.js split-window -h --target panel-main
 node /path/to/resources/aiopsterm-control.js rename-window --target panel-main "Main Ops"
@@ -305,6 +307,7 @@ node /path/to/resources/aiopsterm-control.js paste-buffer --name deploy --panel 
 node /path/to/resources/aiopsterm-control.js show-options -v extended-keys
 node /path/to/resources/aiopsterm-control.js set-hook after-split-window "display-message split"
 node /path/to/resources/aiopsterm-control.js set-hook --list
+node /path/to/resources/aiopsterm-control.js popup
 node /path/to/resources/aiopsterm-control.js set-status build compiling --priority 80
 node /path/to/resources/aiopsterm-control.js set-progress 0.5 --label "Building"
 node /path/to/resources/aiopsterm-control.js log --level success --source test "All green"
@@ -336,7 +339,7 @@ Future higher-level automation commands should use the control socket but must c
 
 `terminal.buffer.*` stores named text snippets in memory in the running main process. It is a tmux/control_compat compatibility primitive, not the OS clipboard and not persisted across app restarts. `show-buffer` returns the text to the caller, and the CLI helper implements `save-buffer` by writing that returned text in the caller process; the main process does not write arbitrary caller paths. `paste-buffer` writes the stored text through the same raw-input boundary as `terminal.send_text`.
 
-`tmux.hook.*` stores compatibility hook definitions as runtime metadata only. aiopsterm does not execute those hook commands automatically. `show-options extended-keys` returns `on` for agent/tmux compatibility probes; unsupported options fail explicitly instead of returning misleading values. The no-op tmux commands exist so scripts that probe or source tmux configuration can continue when those commands do not affect aiopsterm state.
+`tmux.hook.*` stores compatibility hook definitions as runtime metadata only. aiopsterm does not execute those hook commands automatically. `show-options extended-keys` returns `on` for agent/tmux compatibility probes; unsupported options fail explicitly instead of returning misleading values. The no-op tmux commands exist so scripts that probe or source tmux configuration can continue when those commands do not affect aiopsterm state. `popup`, `bind-key`, `unbind-key`, and `copy-mode` are recognized as tmux compatibility placeholders and return `TMUX_COMPAT_UNSUPPORTED`.
 
 `terminal.clear_history` is renderer-owned because xterm state lives in the active window. It clears the selected terminal surface's visible buffer and aiopsterm's retained panel output; it does not send a command to the shell and does not close or restart the PTY/SSH session.
 
