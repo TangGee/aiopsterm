@@ -62,6 +62,11 @@ The surface resume slice adds control_compat-style resume bindings for visible w
 - `surface.resume.clear`: remove a binding, optionally guarded by checkpoint/source.
 - `surface.resume.run`: explicitly write the stored command into the selected terminal through aiopsterm terminal command security.
 
+The events slice adds a control_compat-style local JSONL stream for automation:
+
+- `events.stream` / `event.subscribe`: take over the socket connection and stream `ack`, replayed `event`, live `event`, and `heartbeat` frames.
+- `events.list`: list retained in-memory events for simple polling and tests.
+
 Aliases are accepted for control_compat-compatible scripts where useful:
 
 - `tree` and `top` map to `workspace.snapshot`.
@@ -136,6 +141,7 @@ node /path/to/resources/aiopsterm-control.js agent resume --session codex-sessio
 node /path/to/resources/aiopsterm-control.js agent team launch --source codex --count 3 --cwd "$PWD" --prompt "review this repo"
 node /path/to/resources/aiopsterm-control.js agent team launch --source claude-code --count 2 --cwd "$PWD" --prompt "investigate flaky tests"
 node /path/to/resources/aiopsterm-control.js agent team launch --source custom --count 2 --command "my-agent --role reviewer --index {{index}}"
+node /path/to/resources/aiopsterm-control.js events --category notification --cursor-file ~/.cache/aiopsterm/events.seq --limit 10
 node /path/to/resources/aiopsterm-control.js tree
 node /path/to/resources/aiopsterm-control.js terminal read-screen --lines 40
 node /path/to/resources/aiopsterm-control.js terminal focus --panel panel-main
@@ -166,6 +172,26 @@ This hibernation slice does not implement an automatic idle reaper. Automatic hi
 The current Teams slice intentionally stops at visible local-terminal orchestration. control_compat's deeper Codex Teams app-server watcher, which bridges Codex private app-server approvals into Feed, is a separate integration because it owns a private Codex websocket lifecycle and approval response mapping.
 
 `surface.resume.*` is restore metadata, not a live process checkpoint. aiopsterm stores a bounded command binding on a visible surface and exposes it through `surface.list`, `surface.current`, and `workspace.snapshot`. Public CLI/socket-created bindings are manual by default; aiopsterm does not auto-run them when the app restarts. `surface.resume.run` is an explicit action and uses the same terminal command security path as AI-generated terminal commands. Environment values supplied with the binding are optional and obvious sensitive keys such as token, password, secret, credential, auth, bearer, and API key names are dropped before storage.
+
+## Events
+
+`events.stream` mirrors the useful part of control_compat's event stream contract for local tools. A client sends one request line and then keeps reading newline-delimited JSON frames on that same socket. The first frame is always:
+
+```json
+{"type":"ack","protocol":"aiopsterm-events","version":1}
+```
+
+After the ack, aiopsterm sends retained replay events whose `seq` is greater than `after_seq`, then live events and optional heartbeat frames. The stream supports `after_seq` / `after`, `names` / `name`, `categories` / `category`, and `include_heartbeats=false`. `events.list` accepts the same filters plus `limit`.
+
+Current event categories are:
+
+- `notification`: generic control notifications created, opened, marked read, dismissed, or cleared.
+- `terminal`: control-socket terminal focus and raw text-send effects. Text payloads include lengths/byte counts only, not the raw terminal input.
+- `workspace`: workspace-group mutations.
+- `surface`: surface resume mutations.
+- `agent`: hibernation and visible agent-team automation mutations.
+
+The event replay buffer is process-local memory capped at 4,096 events. It is not yet written to a durable JSONL file, so clients should refresh state from `workspace.snapshot`, `surface.list`, and `notification.list` when `ack.resume.gap` is true or after app restart. Notification event payloads include bounded title previews and content lengths; they do not copy full notification bodies into the event stream.
 
 ## Generic Notifications
 

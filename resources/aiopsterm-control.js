@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 
 const net = require('net')
+const fs = require('fs')
+const path = require('path')
 
 const args = process.argv.slice(2)
 
@@ -17,6 +19,7 @@ Commands:
   agent-hibernation on|off|status
   agent hibernate|resume --session <id> [--source <source>]
   agent team launch [--source codex|claude-code|custom] [--count <n>] [--cwd <path>] [--prompt <text>] [--command <shell>]
+  events [--after <seq>] [--cursor-file <path>] [--name <event>] [--category <category>] [--limit <n>] [--no-ack] [--no-heartbeat]
   tree
   terminal list
   terminal focus --panel <id>|--session <id>
@@ -115,6 +118,7 @@ const methodParams = () => {
     }
     throw new Error(`Unknown agent command: ${subcommand}`)
   }
+  if (command === 'events' || command === 'event') return eventStreamMethodParams()
   if (command === 'tree') return { method: 'workspace.snapshot', params: { format: 'tree' } }
   if (command === 'list-workspaces') return { method: 'workspace.list', params: {} }
   if (command === 'list-surfaces') return { method: 'surface.list', params: {} }
@@ -156,6 +160,61 @@ const methodParams = () => {
   if (command === 'mark-notification-read') return { method: 'notification.mark_read', params: { id: readOption('--id'), all: hasFlag('--all') } }
   if (command === 'dismiss-notification') return { method: 'notification.dismiss', params: { id: readOption('--id'), allRead: hasFlag('--all-read') } }
   throw new Error(`Unknown command: ${command}`)
+}
+
+const readRepeatOptions = (names) => {
+  const values = []
+  for (;;) {
+    const index = args.findIndex((arg) => names.includes(arg))
+    if (index < 0) break
+    const value = args[index + 1] || ''
+    args.splice(index, 2)
+    if (value) values.push(value)
+  }
+  return values
+}
+
+const readCursorFile = (cursorFile) => {
+  if (!cursorFile) return undefined
+  try {
+    if (!fs.existsSync(cursorFile)) return undefined
+    const value = Number(fs.readFileSync(cursorFile, 'utf8').trim())
+    return Number.isFinite(value) && value >= 0 ? Math.floor(value) : undefined
+  } catch {
+    return undefined
+  }
+}
+
+const writeCursorFile = (cursorFile, seq) => {
+  if (!cursorFile || !Number.isFinite(seq)) return
+  fs.mkdirSync(path.dirname(cursorFile), { recursive: true })
+  fs.writeFileSync(cursorFile, `${seq}\n`)
+}
+
+const eventStreamMethodParams = () => {
+  const cursorFile = readOption('--cursor-file')
+  const afterOption = readOption('--after') || readOption('--after-seq')
+  const after = afterOption ? Number(afterOption) : readCursorFile(cursorFile)
+  const names = readRepeatOptions(['--name'])
+  const categories = readRepeatOptions(['--category'])
+  const limit = Number(readOption('--limit') || 0)
+  const printAck = !hasFlag('--no-ack')
+  const printHeartbeats = !(hasFlag('--no-heartbeat') || hasFlag('--no-heartbeats'))
+  return {
+    method: 'events.stream',
+    params: {
+      include_heartbeats: printHeartbeats,
+      ...(Number.isFinite(after) && after >= 0 ? { after_seq: Math.floor(after), after: Math.floor(after) } : {}),
+      ...(names.length ? { names } : {}),
+      ...(categories.length ? { categories } : {})
+    },
+    stream: {
+      cursorFile,
+      printAck,
+      printHeartbeats,
+      limit: Number.isFinite(limit) && limit > 0 ? Math.floor(limit) : 0
+    }
+  }
 }
 
 const groupIdParams = () => {
@@ -435,25 +494,50 @@ if (!socketPath) {
 const socket = net.createConnection(socketPath)
 let buffer = ''
 let completed = false
+let streamEventCount = 0
 
 socket.on('connect', () => {
-  socket.write(`${JSON.stringify({ id: `cli-${Date.now()}`, ...request })}\n`)
+  socket.write(`${JSON.stringify({ id: `cli-${Date.now()}`, method: request.method, params: request.params || {} })}\n`)
 })
 
 socket.on('data', (chunk) => {
   buffer += chunk.toString('utf8')
-  const newline = buffer.indexOf('\n')
-  if (newline < 0) return
-  completed = true
-  socket.end()
-  const line = buffer.slice(0, newline)
-  try {
-    const response = JSON.parse(line)
-    printResponse(response)
-    process.exit(response.ok ? 0 : 1)
-  } catch (error) {
-    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`)
-    process.exit(1)
+  for (;;) {
+    const newline = buffer.indexOf('\n')
+    if (newline < 0) return
+    const line = buffer.slice(0, newline)
+    buffer = buffer.slice(newline + 1)
+    if (!request.stream) {
+      completed = true
+      socket.end()
+      try {
+        const response = JSON.parse(line)
+        printResponse(response)
+        process.exit(response.ok ? 0 : 1)
+      } catch (error) {
+        process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`)
+        process.exit(1)
+      }
+      return
+    }
+    try {
+      const frame = JSON.parse(line)
+      if (frame.type === 'ack' && !request.stream.printAck) continue
+      if (frame.type === 'heartbeat' && !request.stream.printHeartbeats) continue
+      process.stdout.write(`${line}\n`)
+      if (frame.type === 'event' && Number.isFinite(frame.seq)) {
+        writeCursorFile(request.stream.cursorFile, frame.seq)
+        streamEventCount += 1
+        if (request.stream.limit && streamEventCount >= request.stream.limit) {
+          completed = true
+          socket.end()
+          process.exit(0)
+        }
+      }
+    } catch (error) {
+      process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`)
+      process.exit(1)
+    }
   }
 })
 
@@ -463,7 +547,7 @@ socket.on('error', (error) => {
 })
 
 socket.on('close', () => {
-  if (!completed) {
+  if (!completed && !request.stream) {
     process.stderr.write('aiopsterm control socket closed without a response.\n')
     process.exit(1)
   }

@@ -19,6 +19,8 @@ type ControlSocketBackend = {
     handleControlRequest: (request: { method?: string; params?: Record<string, unknown> }) => Promise<ControlResponse>
     pendingRendererRequestCount: () => number
     listNotifications: () => Array<Record<string, unknown>>
+    listEvents: () => Array<Record<string, unknown>>
+    eventSubscriptionCount: () => number
   }
 }
 
@@ -82,6 +84,50 @@ const socketRequest = (socketPath: string, request: Record<string, unknown>) =>
     })
     socket.on('error', reject)
   })
+
+const socketStreamFrames = (socketPath: string, request: Record<string, unknown>, count: number, trigger?: () => void | Promise<void>) =>
+  new Promise<Record<string, unknown>[]>((resolve, reject) => {
+    const socket = createConnection(socketPath)
+    const frames: Record<string, unknown>[] = []
+    let buffer = ''
+    let triggered = false
+    socket.setEncoding('utf8')
+    socket.setTimeout(5000)
+    socket.on('connect', () => socket.write(`${JSON.stringify(request)}\n`))
+    socket.on('data', (chunk) => {
+      buffer += chunk
+      for (;;) {
+        const newline = buffer.indexOf('\n')
+        if (newline < 0) break
+        const line = buffer.slice(0, newline)
+        buffer = buffer.slice(newline + 1)
+        try {
+          const frame = JSON.parse(line) as Record<string, unknown>
+          frames.push(frame)
+          if (!triggered && frame.type === 'ack' && trigger) {
+            triggered = true
+            void Promise.resolve(trigger()).catch(reject)
+          }
+          if (frames.length >= count) {
+            socket.end()
+            resolve(frames)
+            return
+          }
+        } catch (error) {
+          socket.destroy()
+          reject(error)
+          return
+        }
+      }
+    })
+    socket.on('timeout', () => {
+      socket.destroy()
+      reject(new Error('control socket stream test timed out'))
+    })
+    socket.on('error', reject)
+  })
+
+const nextTick = () => new Promise<void>((resolve) => setTimeout(resolve, 0))
 
 describe('control socket backend', () => {
   afterEach(async () => {
@@ -306,6 +352,91 @@ describe('control socket backend', () => {
     await expect(backend.__testing.handleControlRequest({ method: 'notification.clear' })).resolves.toEqual(
       expect.objectContaining({ ok: true, data: expect.objectContaining({ changed: 2, total: 0 }) })
     )
+  })
+
+  it('records bounded control events and lists them with filters', async () => {
+    const backend = await loadBackend()
+    backend.configureControlSocketRuntime({
+      writeTerminal: (sessionId, data) => ({ ok: true, data: { id: sessionId, bytes: Buffer.byteLength(data, 'utf8') } })
+    })
+
+    await backend.__testing.handleControlRequest({
+      method: 'terminal.send_text',
+      params: { sessionId: 'terminal-1', text: 'secret terminal text\n' }
+    })
+    await backend.__testing.handleControlRequest({
+      method: 'notification.create',
+      params: { title: 'Build done', body: 'full notification body should not be copied into event payload' }
+    })
+
+    const eventsResponse = await backend.__testing.handleControlRequest({ method: 'events.list', params: { category: 'notification' } })
+    expect(eventsResponse).toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
+          protocol: 'aiopsterm-events',
+          count: 1,
+          events: [expect.objectContaining({ name: 'notification.created', category: 'notification' })]
+        })
+      })
+    )
+    const event = (eventsResponse.data?.events as Record<string, unknown>[])[0]
+    expect(event.payload).toEqual(
+      expect.objectContaining({
+        title_preview: 'Build done',
+        body_length: 'full notification body should not be copied into event payload'.length
+      })
+    )
+    expect(JSON.stringify(event)).not.toContain('full notification body should not be copied')
+
+    const terminalEvents = await backend.__testing.handleControlRequest({ method: 'events.list', params: { category: 'terminal' } })
+    expect(JSON.stringify(terminalEvents.data?.events)).not.toContain('secret terminal text')
+  })
+
+  it('streams replayed and live control events over the local socket', async () => {
+    const backend = await loadBackend()
+    const root = await mkdtemp(join(tmpdir(), 'aiopsterm-control-events-'))
+    try {
+      const socketPath = await backend.ensureControlSocketServer(root)
+      await backend.__testing.handleControlRequest({ method: 'notification.create', params: { title: 'Replay me' } })
+      const initialEvents = backend.__testing.listEvents()
+      const replaySeq = Number(initialEvents[0].seq) - 1
+
+      const replayFrames = await socketStreamFrames(socketPath, {
+        id: 'events-replay',
+        method: 'events.stream',
+        params: { after_seq: replaySeq, categories: ['notification'], include_heartbeats: false }
+      }, 2)
+      expect(replayFrames[0]).toEqual(
+        expect.objectContaining({
+          type: 'ack',
+          protocol: 'aiopsterm-events',
+          replay_count: 1,
+          filters: expect.objectContaining({ categories: ['notification'] })
+        })
+      )
+      expect(replayFrames[1]).toEqual(expect.objectContaining({ type: 'event', name: 'notification.created', category: 'notification' }))
+
+      const liveFrames = await socketStreamFrames(
+        socketPath,
+        {
+          id: 'events-live',
+          method: 'events.stream',
+          params: { after_seq: Number(backend.__testing.listEvents().at(-1)?.seq || 0), categories: ['notification'], include_heartbeats: false }
+        },
+        2,
+        async () => {
+          await backend.__testing.handleControlRequest({ method: 'notification.create', params: { title: 'Live me' } })
+        }
+      )
+      expect(liveFrames[0]).toEqual(expect.objectContaining({ type: 'ack', replay_count: 0 }))
+      expect(liveFrames[1]).toEqual(expect.objectContaining({ type: 'event', name: 'notification.created', category: 'notification' }))
+      await nextTick()
+      expect(backend.__testing.eventSubscriptionCount()).toBe(0)
+    } finally {
+      backend.closeControlSocketServer()
+      await rm(root, { recursive: true, force: true })
+    }
   })
 
   it('serves newline-delimited JSON requests over the local socket', async () => {

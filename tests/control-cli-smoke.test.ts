@@ -2,7 +2,7 @@ import { createServer, type Server } from 'net'
 import { execFile } from 'child_process'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { rm } from 'fs/promises'
+import { readFile, rm } from 'fs/promises'
 import { promisify } from 'util'
 import { afterEach, describe, expect, it } from 'vitest'
 
@@ -22,6 +22,29 @@ const startControlServer = async (handler: (request: Record<string, unknown>) =>
       if (newline < 0) return
       const request = JSON.parse(buffer.slice(0, newline)) as Record<string, unknown>
       socket.write(`${JSON.stringify(handler(request))}\n`)
+    })
+  })
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject)
+    server.once('listening', () => resolve())
+    server.listen(socketPath)
+  })
+  servers.push(server)
+  socketPaths.push(socketPath)
+  return socketPath
+}
+
+const startControlStreamServer = async (handler: (request: Record<string, unknown>) => Record<string, unknown>[]) => {
+  const socketPath = join(tmpdir(), `aiopsterm-control-cli-stream-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}.sock`)
+  const server = createServer((socket) => {
+    let buffer = ''
+    socket.setEncoding('utf8')
+    socket.on('data', (chunk) => {
+      buffer += chunk
+      const newline = buffer.indexOf('\n')
+      if (newline < 0) return
+      const request = JSON.parse(buffer.slice(0, newline)) as Record<string, unknown>
+      for (const frame of handler(request)) socket.write(`${JSON.stringify(frame)}\n`)
     })
   })
   await new Promise<void>((resolve, reject) => {
@@ -334,5 +357,56 @@ describe('aiopsterm-control CLI', () => {
       expect.objectContaining({ method: 'surface.resume.clear', params: expect.objectContaining({ panelId: 'panel-1', checkpointId: 'work', checkpoint_id: 'work' }) }),
       expect.objectContaining({ method: 'surface.resume.run', params: expect.objectContaining({ panelId: 'panel-1' }) })
     ])
+  })
+
+  it('streams events and persists the cursor from the CLI helper', async () => {
+    const seen: Record<string, unknown>[] = []
+    const cursorPath = join(tmpdir(), `aiopsterm-events-cursor-${process.pid}-${Date.now()}.seq`)
+    const socketPath = await startControlStreamServer((request) => {
+      seen.push(request)
+      return [
+        {
+          type: 'ack',
+          protocol: 'aiopsterm-events',
+          version: 1,
+          boot_id: 'boot-test',
+          subscription_id: 'sub-test',
+          replay_count: 1,
+          resume: { latest_seq: 41, next_seq: 42 }
+        },
+        {
+          type: 'event',
+          protocol: 'aiopsterm-events',
+          version: 1,
+          boot_id: 'boot-test',
+          seq: 42,
+          id: 'boot-test-42',
+          name: 'notification.created',
+          category: 'notification',
+          source: 'notification.store',
+          occurred_at: '2026-06-19T10:00:00.000Z',
+          payload: { notification_id: 'notification-1' }
+        }
+      ]
+    })
+
+    const result = await execFileAsync(
+      process.execPath,
+      ['resources/aiopsterm-control.js', '--socket', socketPath, 'events', '--category', 'notification', '--limit', '1', '--no-ack', '--no-heartbeat', '--cursor-file', cursorPath],
+      { cwd: process.cwd() }
+    )
+    expect(result.stdout).not.toContain('"type":"ack"')
+    expect(result.stdout).toContain('"type":"event"')
+    expect(await readFile(cursorPath, 'utf8')).toBe('42\n')
+    expect(seen).toEqual([
+      expect.objectContaining({
+        method: 'events.stream',
+        params: expect.objectContaining({
+          categories: ['notification'],
+          include_heartbeats: false
+        })
+      })
+    ])
+    await rm(cursorPath, { force: true })
   })
 })
