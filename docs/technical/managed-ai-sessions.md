@@ -90,6 +90,7 @@ The main process keeps the managed-session fact store in the app user data direc
 
 ```text
 agent-sessions/managed-ai-sessions.json
+agent-sessions/managed-ai-sessions.audit.jsonl
 ```
 
 The store is capped to 200 sessions, 200 timeline events per session, and 40 local decisions per session. Each session record includes:
@@ -104,6 +105,8 @@ The store is capped to 200 sessions, 200 timeline events per session, and 40 loc
 - owning local terminal process and activity facts (`terminalProcessId`, `terminalActivityAt`) when the terminal backend reports them
 
 The renderer hydrates from this store on startup through `listManagedAiSessions()`. Incoming hook events update the in-memory UI immediately and are persisted by the main process.
+
+`managed-ai-sessions.audit.jsonl` is an append-only audit stream inspired by control_compat Feed's workstream log. It records compact entries for incoming hook events, socket completion status, local replies, decision resolution or timeout, renames, clears, and bulk operations. Entries include non-secret routing and state fields such as source, session id, event name, state, request id, decision kind, status, title, and a bounded summary. The audit log does not store full raw hook payloads; detailed payload previews remain bounded inside the capped session timeline.
 
 The current implementation records lifecycle and process facts for visibility, restore, and later automation. It does not hibernate agents or kill agent process groups. Disconnecting or closing a terminal still uses the normal terminal lifecycle path and marks matching managed AI sessions ended.
 

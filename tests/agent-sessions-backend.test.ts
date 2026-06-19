@@ -1,4 +1,4 @@
-import { mkdtemp } from 'fs/promises'
+import { mkdtemp, readFile } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { createConnection } from 'net'
@@ -13,6 +13,12 @@ type AgentSessionsBackend = {
   closeAiAgentSessionServer: () => void
   renameManagedAiSession: (input: Record<string, unknown>) => Promise<unknown>
   replyManagedAiSession: (input: Record<string, unknown>) => Promise<unknown>
+  clearManagedAiSession: (input: Record<string, unknown>) => Promise<unknown>
+  bulkManagedAiSessions: (input: Record<string, unknown>) => Promise<unknown>
+  __testing: {
+    auditPathFor: (userDataPath: string) => string
+    flushManagedAiSessionWrites: () => Promise<void>
+  }
 }
 
 const loadBackend = async () => {
@@ -362,8 +368,85 @@ describe('agent session backend', () => {
     )
   })
 
+  it('writes compact append-only audit entries for events and user mutations', async () => {
+    const {
+      __testing,
+      bulkManagedAiSessions,
+      clearManagedAiSession,
+      configureAiAgentSessionStore,
+      publishAiAgentSessionEvent,
+      renameManagedAiSession,
+      replyManagedAiSession
+    } = await loadBackend()
+    const userDataPath = await mkdtemp(join(tmpdir(), 'aiopsterm-agent-audit-'))
+    await configureAiAgentSessionStore(userDataPath)
+
+    publishAiAgentSessionEvent(
+      {
+        source: 'codex',
+        event: 'PermissionRequest',
+        sessionId: 'codex-audit-1',
+        requestId: 'request-1',
+        actionable: true,
+        cwd: '/work/project',
+        summary: 'approve shell command',
+        receivedAt: 500
+      },
+      null
+    )
+    await replyManagedAiSession({ source: 'codex', sessionId: 'codex-audit-1', kind: 'handled' })
+    await renameManagedAiSession({ source: 'codex', sessionId: 'codex-audit-1', title: 'Audit Session' })
+    await bulkManagedAiSessions({ operation: 'mark-handled' })
+    await clearManagedAiSession({ source: 'codex', sessionId: 'codex-audit-1' })
+    await __testing.flushManagedAiSessionWrites()
+
+    const entries = String(await readFile(__testing.auditPathFor(userDataPath), 'utf-8'))
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as Record<string, unknown>)
+
+    expect(entries).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          at: 500,
+          kind: 'event.received',
+          source: 'codex',
+          sessionId: 'codex-audit-1',
+          event: 'permission_request',
+          state: 'needsInput',
+          requestId: 'request-1',
+          actionable: true,
+          summary: 'approve shell command'
+        }),
+        expect.objectContaining({
+          kind: 'decision.created',
+          source: 'codex',
+          sessionId: 'codex-audit-1',
+          decisionKind: 'handled'
+        }),
+        expect.objectContaining({
+          kind: 'session.renamed',
+          source: 'codex',
+          sessionId: 'codex-audit-1',
+          title: 'Audit Session'
+        }),
+        expect.objectContaining({
+          kind: 'sessions.bulk',
+          operation: 'mark-handled',
+          changed: 0
+        }),
+        expect.objectContaining({
+          kind: 'session.cleared',
+          source: 'codex',
+          sessionId: 'codex-audit-1',
+          title: 'Audit Session'
+        })
+      ])
+    )
+  })
+
   it('waits for actionable Claude decisions and returns Claude hook output to the socket client', async () => {
-    const { ensureAiAgentSessionServer, closeAiAgentSessionServer, listManagedAiSessions, replyManagedAiSession } = await loadBackend()
+    const { __testing, ensureAiAgentSessionServer, closeAiAgentSessionServer, listManagedAiSessions, replyManagedAiSession } = await loadBackend()
     const userDataPath = await mkdtemp(join(tmpdir(), 'aiopsterm-agent-socket-'))
     const socketPath = await ensureAiAgentSessionServer({ userDataPath, emit: vi.fn() })
     try {
@@ -413,6 +496,29 @@ describe('agent session backend', () => {
             }
           }
         })
+      )
+      await __testing.flushManagedAiSessionWrites()
+      const entries = String(await readFile(__testing.auditPathFor(userDataPath), 'utf-8'))
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line) as Record<string, unknown>)
+      expect(entries).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            kind: 'decision.resolved',
+            source: 'claude-code',
+            sessionId: 'claude-blocking-1',
+            requestId: 'request-1',
+            decisionKind: 'reply'
+          }),
+          expect.objectContaining({
+            kind: 'event.socket.completed',
+            source: 'claude-code',
+            sessionId: 'claude-blocking-1',
+            requestId: 'request-1',
+            status: 'resolved'
+          })
+        ])
       )
     } finally {
       closeAiAgentSessionServer()

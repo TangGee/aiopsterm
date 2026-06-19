@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'crypto'
 import { createServer, type Server, type Socket } from 'net'
 import { existsSync, rmSync } from 'fs'
 import { dirname, join } from 'path'
-import { mkdir, readFile, writeFile } from 'fs/promises'
+import { appendFile, mkdir, readFile, writeFile } from 'fs/promises'
 import type {
   AiAgentSessionEvent,
   AiAgentSessionEventInput,
@@ -51,6 +51,35 @@ type PersistedManagedAiSessionSnapshot = ManagedAiSessionSnapshot & {
   version?: number
 }
 
+type ManagedAiSessionAuditKind =
+  | 'event.received'
+  | 'event.socket.completed'
+  | 'decision.created'
+  | 'decision.resolved'
+  | 'decision.timeout'
+  | 'session.renamed'
+  | 'session.cleared'
+  | 'sessions.bulk'
+
+type ManagedAiSessionAuditEntry = {
+  at: number
+  kind: ManagedAiSessionAuditKind
+  source?: AiAgentSessionSource
+  sessionId?: string
+  event?: AiAgentSessionEventName
+  state?: ManagedAiSessionState
+  title?: string
+  summary?: string
+  requestId?: string
+  actionable?: boolean
+  decisionKind?: ManagedAiSessionDecisionKind
+  decisionId?: string
+  status?: AgentSessionSocketResponse['status']
+  operation?: ManagedAiSessionBulkInput['operation']
+  changed?: number
+  errorCode?: string
+}
+
 const storeVersion = 1
 const maxSessions = 200
 const maxEventsPerSession = 200
@@ -95,10 +124,12 @@ let server: Server | null = null
 let socketPath = ''
 let eventSink: AgentSessionEventSink | null = null
 let storePath = ''
+let auditPath = ''
 let sessions = new Map<string, ManagedAiSessionRecord>()
 let pendingDecisions = new Map<string, PendingAgentDecision>()
 let loadedStore = false
 let writeQueue: Promise<void> = Promise.resolve()
+let auditQueue: Promise<void> = Promise.resolve()
 
 const cleanText = (value: unknown) => (typeof value === 'string' ? value.trim() : '')
 
@@ -486,6 +517,73 @@ const compactRawValue = (value: unknown, depth = 0): unknown => {
 
 const compactRawRecord = (record: Record<string, unknown>) => compactRawValue(record) as Record<string, unknown>
 
+const auditPathFor = (userDataPath: string) => join(userDataPath, 'agent-sessions', 'managed-ai-sessions.audit.jsonl')
+
+const appendManagedAiSessionAudit = (entry: ManagedAiSessionAuditEntry) => {
+  if (!auditPath) return
+  const targetAuditPath = auditPath
+  const line = {
+    ...entry,
+    at: entry.at || Date.now(),
+    title: compactString(entry.title, 120),
+    summary: compactString(entry.summary, 240)
+  }
+  auditQueue = auditQueue
+    .catch(() => undefined)
+    .then(async () => {
+      await mkdir(dirname(targetAuditPath), { recursive: true })
+      await appendFile(targetAuditPath, `${JSON.stringify(line)}\n`, 'utf-8')
+    })
+    .catch(() => undefined)
+}
+
+const auditEventReceived = (event: AiAgentSessionEvent, session: ManagedAiSessionRecord) => {
+  appendManagedAiSessionAudit({
+    at: event.receivedAt,
+    kind: 'event.received',
+    source: event.source,
+    sessionId: event.sessionId,
+    event: event.event,
+    state: session.state,
+    title: session.title,
+    summary: event.summary,
+    requestId: event.requestId,
+    actionable: event.actionable
+  })
+}
+
+const auditSocketCompleted = (event: AiAgentSessionEvent, response: AgentSessionSocketResponse) => {
+  appendManagedAiSessionAudit({
+    at: Date.now(),
+    kind: 'event.socket.completed',
+    source: event.source,
+    sessionId: event.sessionId,
+    event: event.event,
+    title: event.title,
+    summary: event.summary,
+    requestId: event.requestId,
+    actionable: event.actionable,
+    status: response.status,
+    errorCode: response.ok ? undefined : response.errorCode
+  })
+}
+
+const auditDecisionCreated = (session: ManagedAiSessionRecord, decision: ManagedAiSessionDecision, kind: ManagedAiSessionAuditKind = 'decision.created') => {
+  appendManagedAiSessionAudit({
+    at: decision.createdAt,
+    kind,
+    source: session.source,
+    sessionId: session.id,
+    event: session.lastEvent,
+    state: session.state,
+    title: session.title,
+    summary: session.summary,
+    requestId: session.pendingRequestId,
+    decisionKind: decision.kind,
+    decisionId: decision.id
+  })
+}
+
 const wordsForAutoTitle = (text: string) =>
   text
     .replace(/[^\p{L}\p{N}\s._/-]+/gu, ' ')
@@ -640,6 +738,7 @@ const snapshot = (): ManagedAiSessionSnapshot => ({
 
 const persistSnapshot = () => {
   if (!storePath) return
+  const targetStorePath = storePath
   const payload: PersistedManagedAiSessionSnapshot = {
     version: storeVersion,
     ...snapshot()
@@ -647,8 +746,8 @@ const persistSnapshot = () => {
   writeQueue = writeQueue
     .catch(() => undefined)
     .then(async () => {
-      await mkdir(dirname(storePath), { recursive: true })
-      await writeFile(storePath, `${JSON.stringify(payload, null, 2)}\n`, 'utf-8')
+      await mkdir(dirname(targetStorePath), { recursive: true })
+      await writeFile(targetStorePath, `${JSON.stringify(payload, null, 2)}\n`, 'utf-8')
     })
 }
 
@@ -670,10 +769,14 @@ const storePathFor = (userDataPath: string) => join(userDataPath, 'agent-session
 
 export const configureAiAgentSessionStore = async (userDataPath: string) => {
   const nextStorePath = storePathFor(userDataPath)
+  const nextAuditPath = auditPathFor(userDataPath)
   if (storePath !== nextStorePath) {
     storePath = nextStorePath
+    auditPath = nextAuditPath
     loadedStore = false
     sessions = new Map()
+  } else {
+    auditPath = nextAuditPath
   }
   await mkdir(join(userDataPath, 'agent-sessions'), { recursive: true })
   await loadStoreIfNeeded()
@@ -781,6 +884,7 @@ const upsertSessionForEvent = (event: AiAgentSessionEvent, raw: Record<string, u
   const ordered = [...sessions.values()].sort((first, second) => second.lastActivityAt - first.lastActivityAt)
   sessions = new Map(ordered.slice(0, maxSessions).map((session) => [sessionKey(session.source, session.id), session]))
   persistSnapshot()
+  auditEventReceived(event, record)
   return record
 }
 
@@ -867,6 +971,7 @@ const resolvePendingDecision = (session: ManagedAiSessionRecord, decision: Manag
   if (!pending) return
   pendingDecisions.delete(key)
   clearTimeout(pending.timer)
+  auditDecisionCreated(session, decision, 'decision.resolved')
   pending.resolve({
     ok: true,
     data: session.events.at(-1),
@@ -886,6 +991,16 @@ const waitForAgentDecision = (event: AiAgentSessionEvent, raw: Record<string, un
     const timeoutMs = normalizeWaitTimeoutMs(raw.waitTimeoutMs || raw.wait_timeout_ms)
     const timer = setTimeout(() => {
       pendingDecisions.delete(key)
+      appendManagedAiSessionAudit({
+        at: Date.now(),
+        kind: 'decision.timeout',
+        source: event.source,
+        sessionId: event.sessionId,
+        event: event.event,
+        title: event.title,
+        summary: event.summary,
+        requestId
+      })
       resolve({ ok: true, data: event, status: 'timeout', agentOutput: {} })
     }, timeoutMs)
     pendingDecisions.set(key, {
@@ -906,8 +1021,14 @@ const publishAiAgentSessionSocketEvent = async (input: AiAgentSessionEventInput,
   const waiter = isBlockingAgentEvent(result.data, raw) ? waitForAgentDecision(result.data, raw) : null
   upsertSessionForEvent(result.data, raw)
   emit?.(result.data)
-  if (!waiter) return { ...result, status: 'acknowledged' }
-  return waiter
+  if (!waiter) {
+    const response: AgentSessionSocketResponse = { ...result, status: 'acknowledged' }
+    auditSocketCompleted(result.data, response)
+    return response
+  }
+  const response = await waiter
+  auditSocketCompleted(result.data, response)
+  return response
 }
 
 export const listManagedAiSessions = async (): Promise<ManagedAiSessionListResult> => {
@@ -949,6 +1070,7 @@ export const replyManagedAiSession = async (input: ManagedAiSessionReplyInput): 
   resolvePendingDecision(session, decision)
   sessions.set(sessionKey(next.source, next.id), next)
   persistSnapshot()
+  auditDecisionCreated(session, decision)
   return { ok: true, data: { session: next, snapshot: snapshot() } }
 }
 
@@ -967,6 +1089,16 @@ export const renameManagedAiSession = async (input: ManagedAiSessionRenameInput)
   }
   sessions.set(sessionKey(next.source, next.id), next)
   persistSnapshot()
+  appendManagedAiSessionAudit({
+    at: updatedAt,
+    kind: 'session.renamed',
+    source: next.source,
+    sessionId: next.id,
+    event: next.lastEvent,
+    state: next.state,
+    title: next.title,
+    summary: next.summary
+  })
   return { ok: true, data: { session: next, snapshot: snapshot() } }
 }
 
@@ -976,9 +1108,20 @@ export const clearManagedAiSession = async (input: ManagedAiSessionClearInput): 
   const sessionId = cleanOptionalText(input?.sessionId)
   if (!source || !sessionId) return mutationError('MANAGED_AI_SESSION_INPUT_INVALID', 'Managed AI session source and sessionId are required.')
   const key = sessionKey(source, sessionId)
-  if (!sessions.has(key)) return mutationError('MANAGED_AI_SESSION_NOT_FOUND', 'Managed AI session was not found.')
+  const session = sessions.get(key)
+  if (!session) return mutationError('MANAGED_AI_SESSION_NOT_FOUND', 'Managed AI session was not found.')
   sessions.delete(key)
   persistSnapshot()
+  appendManagedAiSessionAudit({
+    at: Date.now(),
+    kind: 'session.cleared',
+    source,
+    sessionId,
+    event: session.lastEvent,
+    state: session.state,
+    title: session.title,
+    summary: session.summary
+  })
   return { ok: true, data: { snapshot: snapshot() } }
 }
 
@@ -1021,6 +1164,12 @@ export const bulkManagedAiSessions = async (input: ManagedAiSessionBulkInput): P
     })
   }
   if (changed) persistSnapshot()
+  appendManagedAiSessionAudit({
+    at: now,
+    kind: 'sessions.bulk',
+    operation,
+    changed
+  })
   return { ok: true, data: { changed, snapshot: snapshot() } }
 }
 
@@ -1099,6 +1248,16 @@ export const closeAiAgentSessionServer = () => {
   eventSink = null
   pendingDecisions.forEach((pending) => {
     clearTimeout(pending.timer)
+    appendManagedAiSessionAudit({
+      at: Date.now(),
+      kind: 'decision.timeout',
+      source: pending.source,
+      sessionId: pending.sessionId,
+      event: pending.event.event,
+      title: pending.event.title,
+      summary: pending.event.summary,
+      requestId: pending.requestId
+    })
     pending.resolve({ ok: true, status: 'timeout', agentOutput: {} })
   })
   pendingDecisions = new Map()
@@ -1107,6 +1266,11 @@ export const closeAiAgentSessionServer = () => {
 export const __testing = {
   sourceLabel,
   storePathFor,
+  auditPathFor,
   managedAiSessionStateForEvent,
-  autoTitleFor
+  autoTitleFor,
+  flushManagedAiSessionWrites: async () => {
+    await writeQueue
+    await auditQueue
+  }
 }
