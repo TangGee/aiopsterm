@@ -974,6 +974,8 @@ export type AiAgentSessionEvent = {
   parentProcessId?: number
   processGroupId?: number
   agentLifecycle?: ManagedAiSessionLifecycle
+  terminalProcessId?: number
+  terminalActivityAt?: number
 }
 
 export type AiAgentSessionEventResult = AiopsMutationResult<AiAgentSessionEvent>

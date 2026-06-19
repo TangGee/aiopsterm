@@ -221,6 +221,13 @@ describe('aiopsterm-control CLI', () => {
     await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'agent', 'resume', '--session', 'codex-session-1', '--source', 'codex'], {
       cwd: process.cwd()
     })
+    const preview = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'agent-hibernation', 'preview'], {
+      cwd: process.cwd()
+    })
+    expect(preview.stdout).toContain('agent-hibernation\ton\tmax=12\tidle=300')
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'agent-hibernation', 'sweep', '--no-confirm', '--reason', 'test-reaper'], {
+      cwd: process.cwd()
+    })
 
     expect(seen).toEqual([
       expect.objectContaining({ method: 'agent-hibernation.status' }),
@@ -231,6 +238,11 @@ describe('aiopsterm-control CLI', () => {
       expect.objectContaining({
         method: 'agent.resume',
         params: expect.objectContaining({ sessionId: 'codex-session-1', session_id: 'codex-session-1', source: 'codex' })
+      }),
+      expect.objectContaining({ method: 'agent-hibernation.preview' }),
+      expect.objectContaining({
+        method: 'agent-hibernation.sweep',
+        params: expect.objectContaining({ confirm: false, reason: 'test-reaper' })
       })
     ])
   })

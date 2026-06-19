@@ -53,6 +53,8 @@ The Agent Hibernation slice adds explicit managed-agent lifecycle controls:
 
 - `agent-hibernation.status`: return the current hibernation config, managed session summaries, and a workspace snapshot.
 - `agent-hibernation.on` and `agent-hibernation.off`: enable or disable explicit hibernation controls.
+- `agent-hibernation.preview`: return the current automatic reaper candidates without hibernating anything.
+- `agent-hibernation.sweep`: run one automatic reaper pass.
 - `agent.status`: alias for `agent-hibernation.status`.
 - `agent.hibernate`: hibernate one managed AI session by `sessionId`, with optional `source` when ids are ambiguous.
 - `agent.resume`: focus one managed AI session and write its stored resume command into the owning local terminal.
@@ -155,6 +157,8 @@ node /path/to/resources/aiopsterm-control.js surface resume run --panel panel-ma
 node /path/to/resources/aiopsterm-control.js surface resume clear --checkpoint work
 node /path/to/resources/aiopsterm-control.js agent-hibernation status
 node /path/to/resources/aiopsterm-control.js agent-hibernation on
+node /path/to/resources/aiopsterm-control.js agent-hibernation preview
+node /path/to/resources/aiopsterm-control.js agent-hibernation sweep
 node /path/to/resources/aiopsterm-control.js agent hibernate --session codex-session-1 --source codex
 node /path/to/resources/aiopsterm-control.js agent resume --session codex-session-1 --source codex
 node /path/to/resources/aiopsterm-control.js agent team launch --source codex --count 3 --cwd "$PWD" --prompt "review this repo"
@@ -185,9 +189,11 @@ node /path/to/resources/aiopsterm-control.js --json workspace snapshot
 
 Future higher-level automation commands should use the control socket but must choose their own safety policy explicitly. For example, a future `terminal.run_command` command can route through command security, while `terminal.send_text` remains raw input.
 
-Agent Hibernation is also explicit. It is off by default and only targets coding-agent sessions that were discovered inside aiopsterm-created local connection terminals. `agent.hibernate` asks the renderer to close the owning terminal backend session and then records hibernation metadata in the managed AI session store. It refuses sessions that currently need input or have no resume command. `agent.resume` writes the stored resume command through the same renderer terminal command path used by AI session recovery, so risky commands still pass through terminal command safety approval before any bytes are written to the shell.
+Agent Hibernation is off by default and only targets coding-agent sessions that were discovered inside aiopsterm-created local connection terminals. `agent.hibernate` asks the renderer to close the owning terminal backend session and then records hibernation metadata in the managed AI session store. It refuses sessions that currently need input or have no resume command. `agent.resume` writes the stored resume command through the same renderer terminal command path used by AI session recovery, so risky commands still pass through terminal command safety approval before any bytes are written to the shell.
 
-This hibernation slice does not implement an automatic idle reaper. Automatic hibernation needs reliable terminal activity sampling and a user-visible confirmation window before aiopsterm kills a process group.
+The automatic reaper follows the same safety boundary. `agent-hibernation.sweep` only considers live restorable managed AI sessions with resume commands. It never touches the currently visible terminal panes, sessions that need input, running/working sessions, ended sessions, or non-aiopsterm terminal processes. It only selects candidates when live restorable sessions exceed `maxLiveTerminals`, then chooses the oldest idle background candidates just far enough to get back under the limit.
+
+By default `sweep` uses the configured `confirmationSeconds` settle window. The first pass records a compact fingerprint based on session id, terminal session id, lifecycle, state, terminal process id, and agent process facts. A later pass hibernates only if the same candidate is still selected and the fingerprint is unchanged after the confirmation deadline. Terminal text and command output are not stored in this fingerprint or event payload. Scripts can use `agent-hibernation.preview` to inspect candidates without changing state, or `agent-hibernation sweep --no-confirm` for deterministic test automation.
 
 `agent.team.launch` is visible automation. Every created team member is a real local terminal surface, and every launch command is written through the existing renderer terminal command path. If command security requires approval, the member is returned with `status: "needs-approval"` and the normal terminal security prompt is shown. The command builder supports `source=codex`, `source=claude-code`, and `source=custom`. Custom commands may use `{{index}}`, `{{cwd}}`, `{{prompt}}`, `{{role}}`, and `{{model}}` placeholders.
 

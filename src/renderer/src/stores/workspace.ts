@@ -8742,8 +8742,16 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       ...(event.parentProcessId || existing?.parentProcessId ? { parentProcessId: event.parentProcessId || existing?.parentProcessId } : {}),
       ...(event.processGroupId || existing?.processGroupId ? { processGroupId: event.processGroupId || existing?.processGroupId } : {}),
       ...(event.agentLifecycle || existing?.agentLifecycle ? { agentLifecycle: event.agentLifecycle || existing?.agentLifecycle } : {}),
-      ...(existing?.terminalProcessId ? { terminalProcessId: existing.terminalProcessId } : {}),
-      ...(existing?.terminalActivityAt ? { terminalActivityAt: existing.terminalActivityAt } : {})
+      ...(typeof event.terminalProcessId === 'number'
+        ? { terminalProcessId: event.terminalProcessId }
+        : typeof existing?.terminalProcessId === 'number'
+          ? { terminalProcessId: existing.terminalProcessId }
+          : {}),
+      ...(typeof event.terminalActivityAt === 'number'
+        ? { terminalActivityAt: event.terminalActivityAt }
+        : typeof existing?.terminalActivityAt === 'number'
+          ? { terminalActivityAt: existing.terminalActivityAt }
+          : {})
     }
     managedAiSessions.value = existing
       ? managedAiSessions.value.map((session) => (session.source === next.source && session.id === next.id ? next : session))

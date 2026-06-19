@@ -1551,6 +1551,180 @@ const handleAgentTeamControlRequest = async (method: string, params: Record<stri
   return controlOk({ team, ...workspaceGroupPayload(group) })
 }
 
+type AgentHibernationReaperCandidate = {
+  session: (typeof workspace.managedAiSessions)[number]
+  panel: TerminalPanel
+  terminalSessionId: string
+  lastActivityAt: number
+  fingerprint: string
+}
+
+type AgentHibernationPendingConfirmation = {
+  fingerprint: string
+  sampledAt: number
+  dueAt: number
+}
+
+const agentHibernationConfirmations = ref<Record<string, AgentHibernationPendingConfirmation>>({})
+
+const agentHibernationCandidateKey = (candidate: AgentHibernationReaperCandidate) => `${candidate.session.source}:${candidate.session.id}`
+
+const agentHibernationFingerprint = (session: (typeof workspace.managedAiSessions)[number], panel: TerminalPanel, terminalSessionId: string) =>
+  [
+    session.source,
+    session.id,
+    terminalSessionId,
+    session.terminalProcessId || '',
+    session.processId || '',
+    session.parentProcessId || '',
+    session.processGroupId || '',
+    session.agentLifecycle || '',
+    session.state || '',
+    session.terminalActivityAt || '',
+    panel.sessionId || '',
+    panel.status || ''
+  ].join('|')
+
+const agentHibernationActivityAt = (session: (typeof workspace.managedAiSessions)[number], panel: TerminalPanel) => {
+  const value = Math.max(
+    typeof session.terminalActivityAt === 'number' ? session.terminalActivityAt : 0,
+    typeof session.lastActivityAt === 'number' ? session.lastActivityAt : 0,
+    typeof session.createdAt === 'number' ? session.createdAt : 0
+  )
+  return value > 0 ? value : Date.now()
+}
+
+const liveRestorableAgentSessions = () => {
+  const sessions: AgentHibernationReaperCandidate[] = []
+  workspace.managedAiSessions.forEach((session) => {
+    if (session.hibernated || !session.resumeCommand?.trim()) return
+    const targetId = session.panelId || session.terminalSessionId
+    const panel = targetId ? workspace.panels.find((item) => item.id === targetId || item.sessionId === targetId) : null
+    if (!panel || panel.kind === 'knowledge' || !panel.sessionId || panel.status === 'closed' || panel.status === 'error') return
+    sessions.push({
+      session,
+      panel,
+      terminalSessionId: panel.sessionId,
+      lastActivityAt: agentHibernationActivityAt(session, panel),
+      fingerprint: agentHibernationFingerprint(session, panel, panel.sessionId)
+    })
+  })
+  return sessions
+}
+
+const agentHibernationEligibleCandidates = (now: number) => {
+  const config = workspace.agentHibernationConfig
+  const liveRestorable = liveRestorableAgentSessions()
+  const liveRestorableCount = liveRestorable.length
+  const excess = liveRestorableCount - config.maxLiveTerminals
+  const visiblePanelIds = new Set(visibleTerminalPanels.value.map((panel) => panel.id))
+  if (!config.enabled || excess <= 0) {
+    return { liveRestorableCount, excess: Math.max(0, excess), selected: [] as AgentHibernationReaperCandidate[], eligible: [] as AgentHibernationReaperCandidate[] }
+  }
+  const idleMs = config.idleSeconds * 1000
+  const eligible = liveRestorable
+    .filter((candidate) => {
+      const { session, panel } = candidate
+      if (visiblePanelIds.has(panel.id)) return false
+      if (session.state === 'needsInput' || session.agentLifecycle === 'needsInput') return false
+      if (session.state === 'working' || session.agentLifecycle === 'running') return false
+      if (session.state === 'ended' || session.agentLifecycle === 'ended') return false
+      return now - candidate.lastActivityAt >= idleMs
+    })
+    .sort((left, right) => {
+      if (left.lastActivityAt === right.lastActivityAt) return agentHibernationCandidateKey(left).localeCompare(agentHibernationCandidateKey(right))
+      return left.lastActivityAt - right.lastActivityAt
+    })
+  return { liveRestorableCount, excess, eligible, selected: eligible.slice(0, excess) }
+}
+
+const pruneAgentHibernationConfirmations = (selected: AgentHibernationReaperCandidate[]) => {
+  const selectedKeys = new Set(selected.map(agentHibernationCandidateKey))
+  agentHibernationConfirmations.value = Object.fromEntries(Object.entries(agentHibernationConfirmations.value).filter(([key]) => selectedKeys.has(key)))
+}
+
+const agentHibernationReaperPayload = (
+  selected: AgentHibernationReaperCandidate[],
+  hibernated: ControlManagedAiSessionSummary[],
+  pending: AgentHibernationReaperCandidate[],
+  skipped: Array<{ sessionId: string; source: string; reason: string }>,
+  liveRestorableCount: number,
+  eligibleCount: number,
+  excess: number
+): Record<string, unknown> => ({
+  config: { ...workspace.agentHibernationConfig },
+  liveRestorableCount,
+  eligibleCount,
+  excess,
+  selectedCount: selected.length,
+  pendingCount: pending.length,
+  hibernatedCount: hibernated.length,
+  candidates: selected.map((candidate) => ({
+    session: managedAiSessionSummaryForControl(candidate.session),
+    panel: surfaceSummaryForControl(candidate.panel),
+    terminalSessionId: candidate.terminalSessionId,
+    lastActivityAt: candidate.lastActivityAt,
+    idleSeconds: Math.max(0, Math.floor((Date.now() - candidate.lastActivityAt) / 1000))
+  })),
+  pending: pending.map((candidate) => {
+    const confirmation = agentHibernationConfirmations.value[agentHibernationCandidateKey(candidate)]
+    return {
+      sessionId: candidate.session.id,
+      source: candidate.session.source,
+      dueAt: confirmation?.dueAt,
+      sampledAt: confirmation?.sampledAt
+    }
+  }),
+  hibernated,
+  skipped,
+  snapshot: workspaceSnapshotForControl()
+})
+
+const sweepAgentHibernationReaper = async (params: Record<string, unknown>, previewOnly = false) => {
+  await workspace.refreshAgentHibernationConfig()
+  const now = Date.now()
+  const { liveRestorableCount, excess, eligible, selected } = agentHibernationEligibleCandidates(now)
+  pruneAgentHibernationConfirmations(selected)
+  const pending: AgentHibernationReaperCandidate[] = []
+  const hibernated: ControlManagedAiSessionSummary[] = []
+  const skipped: Array<{ sessionId: string; source: string; reason: string }> = []
+  if (previewOnly || !workspace.agentHibernationConfig.enabled) {
+    return controlOk(agentHibernationReaperPayload(selected, hibernated, pending, skipped, liveRestorableCount, eligible.length, excess))
+  }
+  const confirmationSeconds = controlBool(params.confirm, true) ? workspace.agentHibernationConfig.confirmationSeconds : 0
+  for (const candidate of selected) {
+    const key = agentHibernationCandidateKey(candidate)
+    if (confirmationSeconds > 0) {
+      const confirmation = agentHibernationConfirmations.value[key]
+      if (!confirmation || confirmation.fingerprint !== candidate.fingerprint) {
+        agentHibernationConfirmations.value = {
+          ...agentHibernationConfirmations.value,
+          [key]: {
+            fingerprint: candidate.fingerprint,
+            sampledAt: now,
+            dueAt: now + confirmationSeconds * 1000
+          }
+        }
+        pending.push(candidate)
+        continue
+      }
+      if (now < confirmation.dueAt) {
+        pending.push(candidate)
+        continue
+      }
+    }
+    const ok = await workspace.hibernateManagedAiSession(candidate.session.source, candidate.session.id, controlText(params.reason) || 'auto-reaper')
+    if (ok) {
+      delete agentHibernationConfirmations.value[key]
+      const updatedSession = workspace.managedAiSessions.find((session) => session.source === candidate.session.source && session.id === candidate.session.id) || candidate.session
+      hibernated.push(managedAiSessionSummaryForControl(updatedSession))
+    } else {
+      skipped.push({ sessionId: candidate.session.id, source: candidate.session.source, reason: 'hibernate-failed' })
+    }
+  }
+  return controlOk(agentHibernationReaperPayload(selected, hibernated, pending, skipped, liveRestorableCount, eligible.length, excess))
+}
+
 const handleAgentHibernationControlRequest = async (method: string, params: Record<string, unknown>) => {
   if (method === 'agent-hibernation.status' || method === 'agent.status') {
     await workspace.refreshAgentHibernationConfig()
@@ -1567,6 +1741,12 @@ const handleAgentHibernationControlRequest = async (method: string, params: Reco
   if (method === 'agent-hibernation.off') {
     const changed = await workspace.setAgentHibernationEnabled(false)
     return changed ? controlOk({ config: { ...workspace.agentHibernationConfig } }) : controlFail('AGENT_HIBERNATION_DISABLE_FAILED', 'Agent hibernation could not be disabled.')
+  }
+  if (method === 'agent-hibernation.preview' || method === 'agent.preview') {
+    return sweepAgentHibernationReaper(params, true)
+  }
+  if (method === 'agent-hibernation.sweep' || method === 'agent.sweep') {
+    return sweepAgentHibernationReaper(params)
   }
   const source = controlText(params.source)
   const sessionId = controlText(params.sessionId || params.session_id || params.id)

@@ -17,7 +17,7 @@ Commands:
   session save|list|show|restore|clear [--id <id>] [--name <name>]
   surface list
   surface resume set|show|get|clear|run [--panel <id>|--session <id>] [--shell <command>] [--kind <kind>] [--checkpoint <id>]
-  agent-hibernation on|off|status
+  agent-hibernation on|off|status|preview|sweep [--no-confirm]
   agent hibernate|resume --session <id> [--source <source>]
   agent vault register|list|get|remove|render
   agent team launch [--source codex|claude-code|custom] [--count <n>] [--cwd <path>] [--prompt <text>] [--command <shell>]
@@ -84,6 +84,11 @@ const methodParams = () => {
     if (subcommand === 'on' || subcommand === 'enable') return { method: 'agent-hibernation.on', params: {} }
     if (subcommand === 'off' || subcommand === 'disable') return { method: 'agent-hibernation.off', params: {} }
     if (subcommand === 'status') return { method: 'agent-hibernation.status', params: {} }
+    if (subcommand === 'preview') return { method: 'agent-hibernation.preview', params: {} }
+    if (subcommand === 'sweep' || subcommand === 'reap') {
+      const confirm = !(hasFlag('--no-confirm') || hasFlag('--force'))
+      return { method: 'agent-hibernation.sweep', params: { confirm, reason: readOption('--reason') } }
+    }
     throw new Error(`Unknown agent-hibernation command: ${subcommand}`)
   }
   if (command === 'agent') {
@@ -113,6 +118,11 @@ const methodParams = () => {
         }
       }
       throw new Error(`Unknown agent team command: ${action}`)
+    }
+    if (subcommand === 'preview' || subcommand === 'sweep' || subcommand === 'reap') {
+      const action = subcommand === 'reap' ? 'sweep' : subcommand
+      const confirm = !(hasFlag('--no-confirm') || hasFlag('--force'))
+      return { method: `agent.${action}`, params: { confirm, reason: readOption('--reason') } }
     }
     if (subcommand === 'hibernate' || subcommand === 'resume') {
       const sessionId = readOption('--session') || readOption('--session-id') || args.find((arg) => !arg.startsWith('--')) || ''
@@ -475,6 +485,24 @@ const printResponse = (response) => {
   }
   if (data.config) {
     process.stdout.write(`agent-hibernation\t${data.config.enabled ? 'on' : 'off'}\tmax=${data.config.maxLiveTerminals}\tidle=${data.config.idleSeconds}\n`)
+    if ('liveRestorableCount' in data || 'hibernatedCount' in data || 'pendingCount' in data) {
+      process.stdout.write(
+        `reaper\tlive=${data.liveRestorableCount || 0}\teligible=${data.eligibleCount || 0}\tselected=${data.selectedCount || 0}\tpending=${data.pendingCount || 0}\thibernated=${data.hibernatedCount || 0}\n`
+      )
+      const candidates = Array.isArray(data.candidates) ? data.candidates : []
+      for (const candidate of candidates) {
+        const session = candidate.session || {}
+        process.stdout.write(
+          [
+            'candidate',
+            session.source || '-',
+            session.id || '-',
+            candidate.terminalSessionId || '-',
+            `idle=${candidate.idleSeconds || 0}`
+          ].join('\t') + '\n'
+        )
+      }
+    }
     return
   }
   if (data.team) {

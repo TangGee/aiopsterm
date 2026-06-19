@@ -1034,6 +1034,7 @@ const rendererMutationEventName = (method: string) => {
   if (method === 'agent-hibernation.off') return 'agent_hibernation.disabled'
   if (method === 'agent.hibernate') return 'agent.hibernated'
   if (method === 'agent.resume') return 'agent.resumed'
+  if (method === 'agent-hibernation.sweep' || method === 'agent.sweep') return 'agent_hibernation.swept'
   if (method === 'agent.team.launch') return 'agent_team.launched'
   return ''
 }
@@ -1055,6 +1056,7 @@ const publishRendererMutationEvent = (method: string, params: Record<string, unk
   const session = data.session && typeof data.session === 'object' ? (data.session as Record<string, unknown>) : null
   const surface = data.surface && typeof data.surface === 'object' ? (data.surface as Record<string, unknown>) : null
   const config = data.config && typeof data.config === 'object' ? (data.config as Record<string, unknown>) : null
+  const hibernated = Array.isArray(data.hibernated) ? data.hibernated : []
   publishControlEvent({
     name,
     category: rendererMutationCategory(method),
@@ -1088,6 +1090,18 @@ const publishRendererMutationEvent = (method: string, params: Record<string, unk
         : {}),
       ...(surface ? { surface_id: surface.panelId, surface_kind: surface.surfaceKind } : {}),
       ...(config ? { enabled: config.enabled } : {}),
+      ...(method === 'agent-hibernation.sweep' || method === 'agent.sweep'
+        ? {
+            live_restorable_count: typeof data.liveRestorableCount === 'number' ? data.liveRestorableCount : 0,
+            eligible_count: typeof data.eligibleCount === 'number' ? data.eligibleCount : 0,
+            selected_count: typeof data.selectedCount === 'number' ? data.selectedCount : 0,
+            pending_count: typeof data.pendingCount === 'number' ? data.pendingCount : 0,
+            hibernated_count: typeof data.hibernatedCount === 'number' ? data.hibernatedCount : hibernated.length,
+            hibernated_sessions: hibernated
+              .map((item) => (item && typeof item === 'object' ? { source: (item as Record<string, unknown>).source, session_id: (item as Record<string, unknown>).id } : null))
+              .filter(Boolean)
+          }
+        : {}),
       ...(method.startsWith('surface.resume.') ? { has_resume_binding: Boolean(data.resumeBinding || data.resume_binding) } : {})
     }
   })

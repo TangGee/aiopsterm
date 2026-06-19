@@ -7431,6 +7431,220 @@ describe('AppShell', () => {
     wrapper.unmount()
   })
 
+  it('previews and sweeps automatic agent hibernation without touching visible or busy sessions', async () => {
+    const dateNowSpy = vi.spyOn(Date, 'now').mockReturnValue(1717200020000)
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    mockXtermInstances.length = 0
+    let controlHandler: ((request: any) => Promise<any> | any) | null = null
+    vi.mocked(window.aiops.onControlRequest).mockImplementationOnce((handler: any) => {
+      controlHandler = handler
+      return () => {
+        controlHandler = null
+      }
+    })
+    const enabledHibernationConfig = {
+      ok: true,
+      data: {
+        config: {
+          enabled: true,
+          idleSeconds: 5,
+          maxLiveTerminals: 2,
+          confirmationSeconds: 1
+        }
+      }
+    } as any
+    vi.mocked(window.aiops.getAgentHibernationConfig)
+      .mockResolvedValueOnce(enabledHibernationConfig)
+      .mockResolvedValueOnce(enabledHibernationConfig)
+      .mockResolvedValueOnce(enabledHibernationConfig)
+
+    let wrapper: VueWrapper | null = null
+    try {
+      wrapper = mount(TerminalWorkspace, {
+        attachTo: document.body,
+        global: { plugins: [pinia] }
+      })
+      await flushPromises()
+      const invokeControlHandler = controlHandler as unknown as (request: any) => Promise<any>
+      expect(invokeControlHandler).toBeTruthy()
+      const store = useWorkspaceStore()
+      store.agentHibernationConfig = {
+        enabled: true,
+        idleSeconds: 5,
+        maxLiveTerminals: 2,
+        confirmationSeconds: 1
+      }
+
+      store.applyLocalTerminalSession('panel-main', {
+        id: 'visible-terminal',
+        kind: 'local',
+        shell: '/bin/bash',
+        cwd: '/work/visible'
+      })
+      store.renamePanel('panel-main', 'Visible Agent')
+      store.activePanelId = 'panel-main'
+
+      const backgroundOld = store.createPanel()
+      store.applyLocalTerminalSession(backgroundOld.id, {
+        id: 'background-old-terminal',
+        kind: 'local',
+        shell: '/bin/bash',
+        cwd: '/work/old'
+      })
+      const backgroundNew = store.createPanel()
+      store.applyLocalTerminalSession(backgroundNew.id, {
+        id: 'background-new-terminal',
+        kind: 'local',
+        shell: '/bin/bash',
+        cwd: '/work/new'
+      })
+      const busy = store.createPanel()
+      store.applyLocalTerminalSession(busy.id, {
+        id: 'busy-terminal',
+        kind: 'local',
+        shell: '/bin/bash',
+        cwd: '/work/busy'
+      })
+      store.activePanelId = 'panel-main'
+
+      store.upsertManagedAiSession({
+        source: 'codex',
+        event: 'stop',
+        sessionId: 'visible-session',
+        title: 'Visible',
+        summary: '',
+        panelId: 'panel-main',
+        terminalSessionId: 'visible-terminal',
+        cwd: '/work/visible',
+        resumeCommand: "cd '/work/visible' && codex resume 'visible-session'",
+        agentLifecycle: 'idle',
+        receivedAt: 1717200010000,
+        terminalActivityAt: 1717200010000
+      })
+      store.upsertManagedAiSession({
+        source: 'codex',
+        event: 'stop',
+        sessionId: 'old-session',
+        title: 'Old',
+        summary: '',
+        panelId: backgroundOld.id,
+        terminalSessionId: 'background-old-terminal',
+        cwd: '/work/old',
+        resumeCommand: "cd '/work/old' && codex resume 'old-session'",
+        agentLifecycle: 'idle',
+        receivedAt: 1717200000000,
+        terminalActivityAt: 1717200000000,
+        terminalProcessId: 4001
+      })
+      store.upsertManagedAiSession({
+        source: 'claude-code',
+        event: 'stop',
+        sessionId: 'new-session',
+        title: 'New',
+        summary: '',
+        panelId: backgroundNew.id,
+        terminalSessionId: 'background-new-terminal',
+        cwd: '/work/new',
+        resumeCommand: "cd '/work/new' && claude --resume 'new-session'",
+        agentLifecycle: 'idle',
+        receivedAt: 1717200005000,
+        terminalActivityAt: 1717200005000,
+        terminalProcessId: 4002
+      })
+      store.upsertManagedAiSession({
+        source: 'codex',
+        event: 'pre_tool_use',
+        sessionId: 'busy-session',
+        title: 'Busy',
+        summary: '',
+        panelId: busy.id,
+        terminalSessionId: 'busy-terminal',
+        cwd: '/work/busy',
+        resumeCommand: "cd '/work/busy' && codex resume 'busy-session'",
+        agentLifecycle: 'running',
+        receivedAt: 1717200000000,
+        terminalActivityAt: 1717200000000,
+        terminalProcessId: 4003
+      })
+      vi.mocked(window.aiops.killTerminal).mockClear()
+      const hibernateResult = async (input: any) => {
+        const existing = store.managedAiSessions.find((session) => session.source === input.source && session.id === input.sessionId)!
+        return {
+          ok: true,
+          data: {
+            session: {
+              ...existing,
+              hibernated: true,
+              hibernatedAt: Date.now(),
+              hibernationReason: input.reason || 'auto-reaper',
+              hibernatedTerminalSessionId: input.terminalSessionId,
+              updatedAt: Date.now()
+            },
+            snapshot: {
+              sessions: store.managedAiSessions.map((session) =>
+                session.source === input.source && session.id === input.sessionId
+                  ? {
+                      ...session,
+                      hibernated: true,
+                      hibernatedAt: Date.now(),
+                      hibernationReason: input.reason || 'auto-reaper',
+                      hibernatedTerminalSessionId: input.terminalSessionId,
+                      updatedAt: Date.now()
+                    }
+                  : session
+              )
+            },
+            config: store.agentHibernationConfig
+          }
+        } as any
+      }
+      vi.mocked(window.aiops.hibernateManagedAiSession)
+        .mockImplementationOnce(hibernateResult)
+        .mockImplementationOnce(hibernateResult)
+
+      const preview = await invokeControlHandler({ id: 'reaper-preview', method: 'agent-hibernation.preview', params: {} })
+      expect(preview).toEqual(
+        expect.objectContaining({
+          ok: true,
+          data: expect.objectContaining({
+            liveRestorableCount: 4,
+            eligibleCount: 2,
+            selectedCount: 2,
+            hibernatedCount: 0
+          })
+        })
+      )
+      expect(preview.data.candidates.map((candidate: any) => candidate.session.id)).toEqual(['old-session', 'new-session'])
+      expect(preview.data.candidates.map((candidate: any) => candidate.session.id)).not.toContain('visible-session')
+      expect(preview.data.candidates.map((candidate: any) => candidate.session.id)).not.toContain('busy-session')
+
+      const firstSweep = await invokeControlHandler({ id: 'reaper-sweep-1', method: 'agent-hibernation.sweep', params: {} })
+      expect(firstSweep).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ pendingCount: 2, hibernatedCount: 0 }) }))
+      expect(window.aiops.killTerminal).not.toHaveBeenCalled()
+      dateNowSpy.mockReturnValue(1717200021500)
+      const secondSweep = await invokeControlHandler({ id: 'reaper-sweep-2', method: 'agent-hibernation.sweep', params: {} })
+      await flushPromises()
+
+      expect(secondSweep).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ pendingCount: 0, hibernatedCount: 2 }) }))
+      expect(window.aiops.killTerminal).toHaveBeenCalledWith('background-old-terminal')
+      expect(window.aiops.killTerminal).toHaveBeenCalledWith('background-new-terminal')
+      expect(window.aiops.hibernateManagedAiSession).toHaveBeenCalledWith(
+        expect.objectContaining({ source: 'codex', sessionId: 'old-session', reason: 'auto-reaper', terminalSessionId: 'background-old-terminal' })
+      )
+      expect(window.aiops.hibernateManagedAiSession).toHaveBeenCalledWith(
+        expect.objectContaining({ source: 'claude-code', sessionId: 'new-session', reason: 'auto-reaper', terminalSessionId: 'background-new-terminal' })
+      )
+      expect(store.managedAiSessions.find((session) => session.id === 'old-session')).toEqual(expect.objectContaining({ hibernated: true }))
+      expect(store.managedAiSessions.find((session) => session.id === 'new-session')).toEqual(expect.objectContaining({ hibernated: true }))
+      expect(store.managedAiSessions.find((session) => session.id === 'visible-session')).toEqual(expect.not.objectContaining({ hibernated: true }))
+      expect(store.managedAiSessions.find((session) => session.id === 'busy-session')).toEqual(expect.not.objectContaining({ hibernated: true }))
+    } finally {
+      wrapper?.unmount()
+      dateNowSpy.mockRestore()
+    }
+  })
+
   it('applies terminal type and font settings to active views and new local sessions', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
