@@ -698,6 +698,9 @@ export type ManagedAiSessionRecord = {
   handledAt?: number
   autoTitle?: string
   userTitle?: string
+  autoTitleEventCount?: number
+  autoTitleAttemptedAt?: number
+  autoTitleGeneratedAt?: number
   panelId?: string
   terminalSessionId?: string
   workspaceId?: string
@@ -1649,6 +1652,7 @@ export type AiPreferencesUserConfig = {
   commandOutputFilteringEnabled: boolean
   kbSearchEnabled: boolean
   experienceExtractionEnabled: boolean
+  managedAiAutoNamingEnabled: boolean
   autoApproval: boolean
   reasoningEffort: 'low' | 'medium' | 'high'
   needProxy: boolean

@@ -101,6 +101,19 @@ type PendingAgentDecision = {
   resolve: (response: AgentSessionSocketResponse) => void
 }
 
+export type ManagedAiSessionAutoNamingInput = {
+  session: ManagedAiSessionRecord
+  prompt: string
+}
+
+export type ManagedAiSessionAutoNamingRuntime = {
+  enabled?: boolean
+  minEventGrowth?: number
+  minIntervalMs?: number
+  maxContextMessages?: number
+  generateTitle?: (input: ManagedAiSessionAutoNamingInput) => Promise<string | null | undefined>
+}
+
 type AgentSessionSocketRuntime = {
   userDataPath: string
   emit: AgentSessionEventSink
@@ -117,6 +130,8 @@ type ManagedAiSessionAuditKind =
   | 'decision.resolved'
   | 'decision.timeout'
   | 'session.renamed'
+  | 'session.auto_named'
+  | 'session.auto_name_skipped'
   | 'session.cleared'
   | 'sessions.bulk'
   | 'notification.dismissed'
@@ -141,6 +156,7 @@ type ManagedAiSessionAuditEntry = {
   operation?: ManagedAiSessionBulkInput['operation']
   changed?: number
   errorCode?: string
+  reason?: string
 }
 
 const storeVersion = 1
@@ -153,6 +169,9 @@ const streamHeartbeatIntervalMs = 15_000
 const defaultDecisionWaitTimeoutMs = 120_000
 const maxDecisionWaitTimeoutMs = 125_000
 const maxLaunchCommandLength = 600
+const defaultAutoTitleMinEventGrowth = 4
+const defaultAutoTitleMinIntervalMs = 180_000
+const defaultAutoTitleMaxContextMessages = 8
 const supportedSources = new Set<AiAgentSessionSource>([
   'codex',
   'claude-code',
@@ -199,6 +218,13 @@ let streamSeq = 0
 const streamBootId = randomUUID()
 let streamEvents: AgentSessionEventStreamFrame[] = []
 let streamSubscribers = new Map<string, AgentSessionEventStreamSubscriber>()
+let autoNamingRuntime: Required<Pick<ManagedAiSessionAutoNamingRuntime, 'enabled' | 'minEventGrowth' | 'minIntervalMs' | 'maxContextMessages'>> &
+  Pick<ManagedAiSessionAutoNamingRuntime, 'generateTitle'> = {
+  enabled: false,
+  minEventGrowth: defaultAutoTitleMinEventGrowth,
+  minIntervalMs: defaultAutoTitleMinIntervalMs,
+  maxContextMessages: defaultAutoTitleMaxContextMessages
+}
 
 const cleanText = (value: unknown) => (typeof value === 'string' ? value.trim() : '')
 
@@ -568,6 +594,179 @@ const compactString = (value: unknown, maxLength = 240) => {
   const text = cleanText(value)
   if (!text) return undefined
   return text.length > maxLength ? `${text.slice(0, maxLength - 1)}…` : text
+}
+
+const compactAutoTitle = (value: unknown, currentTitle?: string) => {
+  const raw = cleanText(value)
+  if (!raw) return undefined
+  const firstLine = raw
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find(Boolean)
+  if (!firstLine) return undefined
+  let title = firstLine.replace(/^[`"'\u201c\u201d]+|[`"'\u201c\u201d.。!?！？:：]+$/g, '').trim()
+  title = title
+    .replace(/\s+/g, ' ')
+    .replace(/^title\s*[:：]\s*/i, '')
+    .trim()
+  if (!title || title === currentTitle) return undefined
+  if (title.length > 50) {
+    const prefix = title.slice(0, 50)
+    const lastSpace = prefix.lastIndexOf(' ')
+    title = (lastSpace > 8 ? prefix.slice(0, lastSpace) : prefix).trim()
+  }
+  return title || undefined
+}
+
+const normalizeAutoNamingPositiveInteger = (value: unknown, fallback: number, min: number, max: number) => {
+  const number = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN
+  if (!Number.isFinite(number)) return fallback
+  return Math.max(min, Math.min(max, Math.round(number)))
+}
+
+export const configureManagedAiSessionAutoNamingRuntime = (config: ManagedAiSessionAutoNamingRuntime = {}) => {
+  autoNamingRuntime = {
+    enabled: config.enabled === true,
+    minEventGrowth: normalizeAutoNamingPositiveInteger(config.minEventGrowth, defaultAutoTitleMinEventGrowth, 1, 100),
+    minIntervalMs: normalizeAutoNamingPositiveInteger(config.minIntervalMs, defaultAutoTitleMinIntervalMs, 30_000, 3_600_000),
+    maxContextMessages: normalizeAutoNamingPositiveInteger(config.maxContextMessages, defaultAutoTitleMaxContextMessages, 3, 40),
+    generateTitle: config.generateTitle
+  }
+}
+
+const recentAutoNamingEvents = (session: ManagedAiSessionRecord) => {
+  const useful = session.events.filter((event) => {
+    if (!event.summary && !event.title && !event.cwd) return false
+    if (event.event === 'lifecycle') return false
+    return true
+  })
+  return useful.slice(-autoNamingRuntime.maxContextMessages)
+}
+
+const buildAutoNamingPrompt = (session: ManagedAiSessionRecord) => {
+  const lines: string[] = [
+    'You name AI coding-agent sessions in a terminal workspace.',
+    'Return only a short title, 2-5 words, in the same language as the session content.',
+    'No quotes, punctuation, markdown, prefixes, or explanation.',
+    ''
+  ]
+  if (session.autoTitle) {
+    lines.push(`Current auto title: ${session.autoTitle}`)
+    lines.push('If it is still accurate, return it exactly.')
+    lines.push('')
+  }
+  if (session.cwd) lines.push(`Project path: ${session.cwd}`)
+  lines.push(`Agent: ${sourceLabel(session.source)}`)
+  lines.push('Recent session events:')
+  recentAutoNamingEvents(session).forEach((event) => {
+    const eventText = [
+      event.event,
+      event.summary ? compactString(event.summary, 240) : '',
+      event.title && event.title !== event.summary ? compactString(event.title, 120) : '',
+      event.cwd && event.cwd !== session.cwd ? `cwd=${event.cwd}` : ''
+    ]
+      .filter(Boolean)
+      .join(' | ')
+    if (eventText) lines.push(`- ${eventText}`)
+  })
+  return lines.join('\n')
+}
+
+const autoNamingSkipAudit = (session: ManagedAiSessionRecord, reason: string, at = Date.now()) => {
+  appendManagedAiSessionAudit({
+    at,
+    kind: 'session.auto_name_skipped',
+    source: session.source,
+    sessionId: session.id,
+    event: session.lastEvent,
+    state: session.state,
+    title: session.title,
+    summary: session.summary,
+    reason
+  })
+}
+
+const updateAutoNamingAttempt = (session: ManagedAiSessionRecord, attemptedAt: number, eventCount: number) => {
+  const key = sessionKey(session.source, session.id)
+  const current = sessions.get(key)
+  if (!current || current.userTitle) return null
+  const next = {
+    ...current,
+    autoTitleAttemptedAt: attemptedAt,
+    autoTitleEventCount: eventCount,
+    updatedAt: attemptedAt
+  }
+  sessions.set(key, next)
+  persistSnapshot()
+  return next
+}
+
+const applyAutoNamingTitle = (session: ManagedAiSessionRecord, title: string, generatedAt: number, eventCount: number) => {
+  const key = sessionKey(session.source, session.id)
+  const current = sessions.get(key)
+  if (!current || current.userTitle) return null
+  const next = {
+    ...current,
+    title,
+    autoTitle: title,
+    autoTitleGeneratedAt: generatedAt,
+    autoTitleAttemptedAt: generatedAt,
+    autoTitleEventCount: eventCount,
+    updatedAt: generatedAt
+  }
+  sessions.set(key, next)
+  persistSnapshot()
+  appendManagedAiSessionAudit({
+    at: generatedAt,
+    kind: 'session.auto_named',
+    source: next.source,
+    sessionId: next.id,
+    event: next.lastEvent,
+    state: next.state,
+    title: next.title,
+    summary: next.summary
+  })
+  publishManagedAiStreamFrame('managed_ai.session.renamed', next, { title: next.title, auto: true })
+  return next
+}
+
+const shouldRunAutoNaming = (session: ManagedAiSessionRecord, event: AiAgentSessionEvent) => {
+  if (!autoNamingRuntime.enabled) return 'disabled'
+  if (event.event !== 'stop') return 'not-stop'
+  if (session.userTitle) return 'manual-title'
+  if (typeof autoNamingRuntime.generateTitle !== 'function') return 'missing-generator'
+  if (session.events.length < 2) return 'too-short'
+  if (!recentAutoNamingEvents(session).length) return 'no-context'
+  const now = Date.now()
+  if (session.autoTitleAttemptedAt && now - session.autoTitleAttemptedAt < autoNamingRuntime.minIntervalMs) return 'too-soon'
+  if (session.autoTitleEventCount && session.events.length - session.autoTitleEventCount < autoNamingRuntime.minEventGrowth) return 'insufficient-growth'
+  return ''
+}
+
+const maybeRunAutoNaming = (session: ManagedAiSessionRecord, event: AiAgentSessionEvent) => {
+  const skipReason = shouldRunAutoNaming(session, event)
+  if (skipReason) {
+    if (skipReason !== 'disabled' && skipReason !== 'not-stop') autoNamingSkipAudit(session, skipReason)
+    return
+  }
+  const eventCount = session.events.length
+  const attemptedAt = Date.now()
+  const attempting = updateAutoNamingAttempt(session, attemptedAt, eventCount)
+  if (!attempting) return
+  const prompt = buildAutoNamingPrompt(attempting)
+  void autoNamingRuntime
+    .generateTitle!({ session: attempting, prompt })
+    .then((rawTitle) => {
+      const title = compactAutoTitle(rawTitle, attempting.autoTitle || attempting.title)
+      if (!title) {
+        autoNamingSkipAudit(attempting, 'empty-title')
+        return
+      }
+      applyAutoNamingTitle(attempting, title, Date.now(), eventCount)
+    })
+    .catch(() => {
+      autoNamingSkipAudit(attempting, 'generator-error')
+    })
 }
 
 const compactRawValue = (value: unknown, depth = 0): unknown => {
@@ -965,6 +1164,11 @@ const normalizeStoredSession = (value: unknown): ManagedAiSessionRecord | null =
     ...(typeof value.handledAt === 'number' ? { handledAt: value.handledAt } : {}),
     ...(cleanOptionalText(value.autoTitle) ? { autoTitle: cleanOptionalText(value.autoTitle) } : {}),
     ...(cleanOptionalText(value.userTitle) ? { userTitle: cleanOptionalText(value.userTitle) } : {}),
+    ...(typeof value.autoTitleEventCount === 'number' && Number.isFinite(value.autoTitleEventCount)
+      ? { autoTitleEventCount: Math.max(0, Math.floor(value.autoTitleEventCount)) }
+      : {}),
+    ...(typeof value.autoTitleAttemptedAt === 'number' && Number.isFinite(value.autoTitleAttemptedAt) ? { autoTitleAttemptedAt: value.autoTitleAttemptedAt } : {}),
+    ...(typeof value.autoTitleGeneratedAt === 'number' && Number.isFinite(value.autoTitleGeneratedAt) ? { autoTitleGeneratedAt: value.autoTitleGeneratedAt } : {}),
     ...(cleanOptionalText(value.panelId) ? { panelId: cleanOptionalText(value.panelId) } : {}),
     ...(cleanOptionalText(value.terminalSessionId) ? { terminalSessionId: cleanOptionalText(value.terminalSessionId) } : {}),
     ...(cleanOptionalText(value.workspaceId) ? { workspaceId: cleanOptionalText(value.workspaceId) } : {}),
@@ -1164,6 +1368,9 @@ const upsertSessionForEvent = (event: AiAgentSessionEvent, raw: Record<string, u
     ...(handledAt ? { handledAt } : {}),
     ...(nextAutoTitle ? { autoTitle: nextAutoTitle } : existing?.autoTitle ? { autoTitle: existing.autoTitle } : {}),
     ...(existing?.userTitle ? { userTitle: existing.userTitle } : {}),
+    ...(existing?.autoTitleEventCount ? { autoTitleEventCount: existing.autoTitleEventCount } : {}),
+    ...(existing?.autoTitleAttemptedAt ? { autoTitleAttemptedAt: existing.autoTitleAttemptedAt } : {}),
+    ...(existing?.autoTitleGeneratedAt ? { autoTitleGeneratedAt: existing.autoTitleGeneratedAt } : {}),
     ...(event.panelId || existing?.panelId ? { panelId: event.panelId || existing?.panelId } : {}),
     ...(event.terminalSessionId || existing?.terminalSessionId ? { terminalSessionId: event.terminalSessionId || existing?.terminalSessionId } : {}),
     ...(event.workspaceId || existing?.workspaceId ? { workspaceId: event.workspaceId || existing?.workspaceId } : {}),
@@ -1186,6 +1393,7 @@ const upsertSessionForEvent = (event: AiAgentSessionEvent, raw: Record<string, u
   persistSnapshot()
   auditEventReceived(event, record)
   publishAgentEventStreamFrame(event, record)
+  maybeRunAutoNaming(record, event)
   return record
 }
 

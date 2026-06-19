@@ -64,6 +64,7 @@ import {
   clearManagedAiNotifications,
   clearManagedAiSession,
   closeAiAgentSessionServer,
+  configureManagedAiSessionAutoNamingRuntime,
   dismissManagedAiNotification,
   ensureAiAgentSessionServer,
   getAiAgentSessionSocketPath,
@@ -98,6 +99,8 @@ import {
 import { configureRuntimeLog, logRuntimeEvent, writeRuntimeLog } from './backend/runtimeLog'
 import { applyKnowledgeSearchRuntimeSetting } from './backend/knowledgeSearchRuntime'
 import { writeKnowledgePastedImageFromClipboard } from './backend/knowledgeBaseImage'
+import { createAiProviderProxyFetch } from './backend/aiProviderProxyFetch'
+import { createProviderTextRequest, fetchProviderText, resolveModelProvider } from './backend/modelProviderText'
 import { openSettingsDocumentation, submitSettingsFeedbackReport } from './backend/settingsExternalActions'
 import { broadcastWindowEvent, sendWebContentsEvent, sendWindowEvent } from '@shared/windowEvents'
 import { defaultMcpServers, defaultMcpToolStates } from '@shared/mcpSeed'
@@ -586,6 +589,7 @@ const defaultConfig: UserConfig = {
     commandOutputFilteringEnabled: true,
     kbSearchEnabled: true,
     experienceExtractionEnabled: true,
+    managedAiAutoNamingEnabled: false,
     autoApproval: false,
     reasoningEffort: 'medium',
     needProxy: false,
@@ -2276,6 +2280,40 @@ configureAiChatRuntime({
   }
 })
 
+const syncManagedAiAutoNamingRuntime = (config = getConfig()) => {
+  configureManagedAiSessionAutoNamingRuntime({
+    enabled: config.aiPreferences?.managedAiAutoNamingEnabled === true,
+    generateTitle: async ({ prompt }) => {
+      const current = getConfig()
+      const provider = resolveModelProvider(current)
+      if (!provider) return null
+      const request = createProviderTextRequest(
+        provider,
+        'You create concise titles for AI coding-agent sessions. Return only the title.',
+        prompt,
+        24,
+        { preferences: current.aiPreferences ? { reasoningEffort: current.aiPreferences.reasoningEffort } : undefined }
+      )
+      if (!request) return null
+      const proxyFetch = createAiProviderProxyFetch(current.aiPreferences)
+      const response = await fetchProviderText(request, {
+        fetch:
+          proxyFetch ||
+          ((url, init) => {
+            const target = url instanceof URL ? url.toString() : url
+            return net.fetch(target, init) as unknown as Promise<Response>
+          }),
+        timeoutMs: 20_000,
+        errorCodePrefix: 'MANAGED_AI_AUTO_NAMING_PROVIDER',
+        maxRetries: 1
+      })
+      return response.ok ? response.text : null
+    }
+  })
+}
+
+syncManagedAiAutoNamingRuntime()
+
 const findSkillByName = async (skillName: string) => {
   const skills = await loadSkillsFromDisk()
   return skills.find((skill) => skill.name === skillName) || null
@@ -3044,6 +3082,7 @@ const registerIpc = () => {
   ipcMain.handle('config:save', (_event, patch: Partial<UserConfig>) => {
     const next = mergeConfig(getConfig(), patch)
     store.set('config', next)
+    syncManagedAiAutoNamingRuntime(next)
     return next
   })
   ipcMain.handle('privacy:runtime:apply', (_event, input: PrivacyRuntimeApplyInput) => applyPrivacyRuntimeSettings(input))

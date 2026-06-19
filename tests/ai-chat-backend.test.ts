@@ -343,6 +343,7 @@ describe('ai chat backend response boundary', () => {
             commandOutputFilteringEnabled: false,
             kbSearchEnabled: false,
             experienceExtractionEnabled: false,
+            managedAiAutoNamingEnabled: false,
             autoApproval: true,
             reasoningEffort: 'high',
             needProxy: false,

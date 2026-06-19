@@ -40,6 +40,7 @@ const defaultAiChatPreferences: AiPreferencesUserConfig = {
   commandOutputFilteringEnabled: true,
   kbSearchEnabled: true,
   experienceExtractionEnabled: true,
+  managedAiAutoNamingEnabled: false,
   autoApproval: false,
   reasoningEffort: 'medium',
   needProxy: false,
@@ -119,6 +120,10 @@ const normalizeAiChatPreferences = (source?: Partial<AiPreferencesUserConfig>): 
     kbSearchEnabled: typeof incoming.kbSearchEnabled === 'boolean' ? incoming.kbSearchEnabled : defaultAiChatPreferences.kbSearchEnabled,
     experienceExtractionEnabled:
       typeof incoming.experienceExtractionEnabled === 'boolean' ? incoming.experienceExtractionEnabled : defaultAiChatPreferences.experienceExtractionEnabled,
+    managedAiAutoNamingEnabled:
+      typeof incoming.managedAiAutoNamingEnabled === 'boolean'
+        ? incoming.managedAiAutoNamingEnabled
+        : defaultAiChatPreferences.managedAiAutoNamingEnabled,
     autoApproval: typeof incoming.autoApproval === 'boolean' ? incoming.autoApproval : defaultAiChatPreferences.autoApproval,
     reasoningEffort: stringFromOptions(incoming.reasoningEffort, reasoningEffortValues, defaultAiChatPreferences.reasoningEffort),
     needProxy: typeof incoming.needProxy === 'boolean' ? incoming.needProxy : defaultAiChatPreferences.needProxy,

@@ -22,6 +22,7 @@ type AgentSessionsBackend = {
   replyManagedAiSession: (input: Record<string, unknown>) => Promise<unknown>
   clearManagedAiSession: (input: Record<string, unknown>) => Promise<unknown>
   bulkManagedAiSessions: (input: Record<string, unknown>) => Promise<unknown>
+  configureManagedAiSessionAutoNamingRuntime: (config?: Record<string, unknown>) => void
   __testing: {
     auditPathFor: (userDataPath: string) => string
     streamLatestSeq: () => number
@@ -429,6 +430,117 @@ describe('agent session backend', () => {
         })
       })
     )
+  })
+
+  it('auto-names managed AI sessions on stop without overwriting manual titles', async () => {
+    const {
+      __testing,
+      configureAiAgentSessionStore,
+      configureManagedAiSessionAutoNamingRuntime,
+      listManagedAiSessions,
+      publishAiAgentSessionEvent,
+      renameManagedAiSession
+    } = await loadBackend()
+    const userDataPath = await mkdtemp(join(tmpdir(), 'aiopsterm-agent-auto-name-'))
+    await configureAiAgentSessionStore(userDataPath)
+    const generateTitle = vi.fn(async ({ prompt }: any) => {
+      expect(prompt).toContain('Recent session events:')
+      expect(prompt).toContain('修复发布脚本')
+      return '"发布脚本修复"'
+    })
+    configureManagedAiSessionAutoNamingRuntime({
+      enabled: true,
+      minIntervalMs: 30000,
+      minEventGrowth: 1,
+      generateTitle
+    })
+    try {
+      publishAiAgentSessionEvent(
+        {
+          source: 'codex',
+          event: 'SessionStart',
+          sessionId: 'codex-auto-title-1',
+          cwd: '/work/release-api',
+          receivedAt: 800
+        },
+        null
+      )
+      publishAiAgentSessionEvent(
+        {
+          source: 'codex',
+          event: 'Stop',
+          sessionId: 'codex-auto-title-1',
+          summary: '修复发布脚本失败重试',
+          receivedAt: 900
+        },
+        null
+      )
+
+      await vi.waitFor(async () => {
+        await expect(listManagedAiSessions()).resolves.toEqual(
+          expect.objectContaining({
+            ok: true,
+            data: {
+              sessions: [
+                expect.objectContaining({
+                  id: 'codex-auto-title-1',
+                  title: '发布脚本修复',
+                  autoTitle: '发布脚本修复',
+                  autoTitleEventCount: 2,
+                  autoTitleGeneratedAt: expect.any(Number)
+                })
+              ]
+            }
+          })
+        )
+      })
+
+      await renameManagedAiSession({ source: 'codex', sessionId: 'codex-auto-title-1', title: '手动标题' })
+      publishAiAgentSessionEvent(
+        {
+          source: 'codex',
+          event: 'Stop',
+          sessionId: 'codex-auto-title-1',
+          summary: '实现部署回滚',
+          receivedAt: 1000
+        },
+        null
+      )
+      await new Promise((resolve) => setTimeout(resolve, 20))
+
+      await expect(listManagedAiSessions()).resolves.toEqual(
+        expect.objectContaining({
+          data: {
+            sessions: [
+              expect.objectContaining({
+                id: 'codex-auto-title-1',
+                title: '手动标题',
+                userTitle: '手动标题'
+              })
+            ]
+          }
+        })
+      )
+      expect(generateTitle).toHaveBeenCalledTimes(1)
+
+      await __testing.flushManagedAiSessionWrites()
+      const entries = String(await readFile(__testing.auditPathFor(userDataPath), 'utf-8'))
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line) as Record<string, unknown>)
+      expect(entries).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            kind: 'session.auto_named',
+            source: 'codex',
+            sessionId: 'codex-auto-title-1',
+            title: '发布脚本修复'
+          })
+        ])
+      )
+    } finally {
+      configureManagedAiSessionAutoNamingRuntime()
+    }
   })
 
   it('derives managed AI notifications and supports mark/open/dismiss actions', async () => {

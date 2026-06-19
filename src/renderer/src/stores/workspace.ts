@@ -841,6 +841,7 @@ const defaultConfig: UserConfig = {
     commandOutputFilteringEnabled: true,
     kbSearchEnabled: true,
     experienceExtractionEnabled: true,
+    managedAiAutoNamingEnabled: false,
     autoApproval: false,
     reasoningEffort: 'medium',
     needProxy: false,
@@ -1992,6 +1993,7 @@ const isAiPreferencesSnapshot = (source: unknown): source is AiPreferencesUserCo
     typeof source.commandOutputFilteringEnabled === 'boolean' &&
     typeof source.kbSearchEnabled === 'boolean' &&
     typeof source.experienceExtractionEnabled === 'boolean' &&
+    typeof source.managedAiAutoNamingEnabled === 'boolean' &&
     typeof source.autoApproval === 'boolean' &&
     reasoningEffortValues.includes(source.reasoningEffort as AiPreferenceSettings['reasoningEffort']) &&
     typeof source.needProxy === 'boolean' &&
@@ -2035,6 +2037,10 @@ const normalizeAiPreferencesConfig = (source?: Partial<AiPreferencesUserConfig>)
     kbSearchEnabled: typeof incoming.kbSearchEnabled === 'boolean' ? incoming.kbSearchEnabled : defaultAiPreferencesConfig.kbSearchEnabled,
     experienceExtractionEnabled:
       typeof incoming.experienceExtractionEnabled === 'boolean' ? incoming.experienceExtractionEnabled : defaultAiPreferencesConfig.experienceExtractionEnabled,
+    managedAiAutoNamingEnabled:
+      typeof incoming.managedAiAutoNamingEnabled === 'boolean'
+        ? incoming.managedAiAutoNamingEnabled
+        : defaultAiPreferencesConfig.managedAiAutoNamingEnabled,
     autoApproval: typeof incoming.autoApproval === 'boolean' ? incoming.autoApproval : defaultAiPreferencesConfig.autoApproval,
     reasoningEffort: stringFromOptions(incoming.reasoningEffort, reasoningEffortValues, defaultAiPreferencesConfig.reasoningEffort),
     needProxy: typeof incoming.needProxy === 'boolean' ? incoming.needProxy : defaultAiPreferencesConfig.needProxy,

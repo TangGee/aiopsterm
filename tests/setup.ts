@@ -2540,6 +2540,7 @@ const defaultAiPreferences = {
   commandOutputFilteringEnabled: true,
   kbSearchEnabled: true,
   experienceExtractionEnabled: true,
+  managedAiAutoNamingEnabled: false,
   autoApproval: false,
   reasoningEffort: 'medium',
   needProxy: false,

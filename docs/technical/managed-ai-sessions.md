@@ -102,6 +102,7 @@ The store is capped to 200 sessions, 200 timeline events per session, and 40 loc
 - local decisions such as `allow`, `deny`, `reply`, or `handled`
 - `pendingRequestId` and `actionable` fields for live Claude Code permission/question hooks
 - `autoTitle` and `userTitle` fields so automatic names do not overwrite manual names
+- auto-naming attempt metadata (`autoTitleEventCount`, `autoTitleAttemptedAt`, `autoTitleGeneratedAt`) so turn-end summarization is throttled across restarts
 - sanitized `launchCommand` and native `resumeCommand` metadata when the agent source supports session resume
 - agent process facts (`processId`, `parentProcessId`, `processGroupId`) and normalized lifecycle (`running`, `idle`, `needsInput`, `ended`, or `unknown`)
 - owning local terminal process and activity facts (`terminalProcessId`, `terminalActivityAt`) when the terminal backend reports them
@@ -150,6 +151,10 @@ The notification API is derived from managed session records rather than a separ
 ## Auto Title
 
 On `stop`, aiopsterm can derive a short 2-5 word title from the current turn summary when it is useful. Generic completion text such as `Turn complete` and tool summaries such as `shell: ...` are ignored, and manual titles are never overwritten.
+
+AI-powered auto-naming is controlled by Settings -> AI Preferences -> `AI 会话自动命名` and is off by default. When enabled, the main process builds a bounded context from recent managed session events and asks the currently configured AI model provider for a concise title. The request uses the existing model settings, proxy preferences, and provider timeout path; it does not create AI chat messages, mutate todo state, call Codex/Claude directly, or block the agent hook response. If no model is configured, the provider fails, the title is empty, the session is too short, or the session was manually renamed, aiopsterm keeps the existing title and records only compact audit metadata.
+
+Auto-naming emits `managed_ai.session.renamed` with `auto: true` when it changes a title, records `session.auto_named` in the append-only audit log, and records `session.auto_name_skipped` for non-fatal skips that are useful for diagnostics.
 
 ## UI Behavior
 

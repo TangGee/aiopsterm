@@ -1028,6 +1028,12 @@ const AiPreferenceSettings = defineComponent({
             onChange: (checked: boolean) => workspace.updateAiPreferences({ experienceExtractionEnabled: checked })
           }),
           h(SettingsCheckbox, {
+            label: 'AI 会话自动命名',
+            description: 'Agent 回合结束后用当前模型总结 2-5 个词的会话标题；手动标题不会被覆盖。',
+            checked: workspace.aiPreferences.managedAiAutoNamingEnabled,
+            onChange: (checked: boolean) => workspace.updateAiPreferences({ managedAiAutoNamingEnabled: checked })
+          }),
+          h(SettingsCheckbox, {
             label: '自动批准',
             description: '只允许低风险只读动作自动通过，不绕过高风险命令审批。',
             checked: workspace.aiPreferences.autoApproval,
