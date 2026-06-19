@@ -41,6 +41,15 @@ Commands:
   send-key-panel --panel <id> <key>
   wait-for [-S|--signal] <name> [--timeout <seconds>]
   display-message [-p|--print] <text>
+  set-status <key> <value> [--icon <name>] [--color <#hex>] [--priority <n>]
+  clear-status <key>
+  list-status
+  set-progress <0.0-1.0> [--label <text>]
+  clear-progress
+  log [--level <level>] [--source <name>] <message>
+  clear-log
+  list-log [--limit <n>]
+  sidebar-state
   notify --title <text> [--subtitle <text>] [--body <text>] [--panel <id>] [--session <id>]
   list-notifications
   open-notification --id <id>
@@ -169,6 +178,7 @@ const methodParams = () => {
   if (command === 'events' || command === 'event') return eventStreamMethodParams()
   if (command === 'wait-for' || command === 'wait_for') return waitForMethodParams()
   if (command === 'display-message' || command === 'display' || command === 'displayp') return displayMessageMethodParams()
+  if (['set-status', 'clear-status', 'list-status', 'set-progress', 'clear-progress', 'log', 'clear-log', 'list-log', 'sidebar-state'].includes(command)) return sidebarMetadataMethodParams(command)
   if (command === 'tree') return { method: 'workspace.snapshot', params: { format: 'tree' } }
   if (command === 'list-workspaces') return { method: 'workspace.list', params: {} }
   if (command === 'list-surfaces') return { method: 'surface.list', params: {} }
@@ -437,6 +447,55 @@ const displayMessageMethodParams = () => {
     },
     displayMessageText: text || 'Message'
   }
+}
+
+const sidebarTargetParams = () => {
+  const workspaceId = readOption('--workspace') || readOption('--workspace-id') || readOption('--tab') || readOption('--tab-id') || 'main'
+  const panelId = readOption('--panel') || readOption('--panel-id') || readOption('--surface') || readOption('--surface-id')
+  return { workspaceId, workspace_id: workspaceId, workspace: workspaceId, panelId, panel_id: panelId, surfaceId: panelId }
+}
+
+const sidebarMetadataMethodParams = (command) => {
+  if (command === 'set-status') {
+    const target = sidebarTargetParams()
+    const icon = readOption('--icon')
+    const color = readOption('--color')
+    const priority = Number(readOption('--priority') || 0)
+    const key = readPositional()
+    const value = args.filter((arg) => arg !== '--' && !arg.startsWith('--')).join(' ')
+    return {
+      method: 'sidebar.status.set',
+      params: {
+        ...target,
+        key,
+        value,
+        icon,
+        color,
+        ...(Number.isFinite(priority) ? { priority } : {})
+      }
+    }
+  }
+  if (command === 'clear-status') return { method: 'sidebar.status.clear', params: { ...sidebarTargetParams(), key: readPositional() } }
+  if (command === 'list-status') return { method: 'sidebar.status.list', params: sidebarTargetParams() }
+  if (command === 'set-progress') {
+    const target = sidebarTargetParams()
+    const value = Number(readPositional())
+    return { method: 'sidebar.progress.set', params: { ...target, value, label: readOption('--label') } }
+  }
+  if (command === 'clear-progress') return { method: 'sidebar.progress.clear', params: sidebarTargetParams() }
+  if (command === 'log') {
+    const target = sidebarTargetParams()
+    const level = readOption('--level') || 'info'
+    const source = readOption('--source')
+    const message = args.filter((arg) => arg !== '--' && !arg.startsWith('--')).join(' ')
+    return { method: 'sidebar.log.append', params: { ...target, level, source, message } }
+  }
+  if (command === 'clear-log') return { method: 'sidebar.log.clear', params: sidebarTargetParams() }
+  if (command === 'list-log') {
+    const limit = Number(readOption('--limit') || 0)
+    return { method: 'sidebar.log.list', params: { ...sidebarTargetParams(), ...(Number.isFinite(limit) && limit > 0 ? { limit: Math.floor(limit) } : {}) } }
+  }
+  return { method: 'sidebar.state', params: sidebarTargetParams() }
 }
 
 const readCursorFile = (cursorFile) => {
@@ -866,6 +925,32 @@ const printResponse = (response) => {
     process.stdout.write(`agent-sessions\t${data.count || data.sessions.length}/${data.total || data.sessions.length}\tneeds_input=${data.needsInputCount || 0}\n`)
     for (const session of data.sessions) printAgentSessionLine(session)
     if (data.sessions.length === 0) process.stdout.write('No agent sessions\n')
+    return
+  }
+  if (Array.isArray(data.statuses) || data.progress || Array.isArray(data.logs)) {
+    if (Array.isArray(data.statuses)) {
+      for (const status of data.statuses) {
+        process.stdout.write(['status', status.workspaceId || status.workspace_id || '-', status.key || '-', status.value || '', status.icon || '-', status.color || '-', status.priority ?? 0].join('\t') + '\n')
+      }
+    }
+    if (data.status && !Array.isArray(data.statuses)) {
+      const status = data.status
+      process.stdout.write(['status', status.workspaceId || status.workspace_id || '-', status.key || '-', status.value || '', status.icon || '-', status.color || '-', status.priority ?? 0].join('\t') + '\n')
+    }
+    if (data.progress) {
+      const progress = data.progress
+      process.stdout.write(['progress', progress.workspaceId || progress.workspace_id || '-', progress.value ?? 0, progress.label || ''].join('\t') + '\n')
+    }
+    if (Array.isArray(data.logs)) {
+      for (const log of data.logs) {
+        process.stdout.write(['log', log.workspaceId || log.workspace_id || '-', log.level || 'info', log.source || '-', log.message || ''].join('\t') + '\n')
+      }
+    }
+    if (data.log && !Array.isArray(data.logs)) {
+      const log = data.log
+      process.stdout.write(['log', log.workspaceId || log.workspace_id || '-', log.level || 'info', log.source || '-', log.message || ''].join('\t') + '\n')
+    }
+    if (data.removed !== undefined || data.changed !== undefined) process.stdout.write(`changed\t${data.changed ?? (data.removed ? 1 : 0)}\n`)
     return
   }
   if (!data.config && isManagedAiSessionLike(data.session)) {

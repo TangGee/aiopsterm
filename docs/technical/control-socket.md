@@ -110,6 +110,13 @@ The synchronization slice adds control_compat-style automation rendezvous:
 
 - `sync.wait_for`: wait for or signal a named local token. `wait-for` and `wait_for` are aliases.
 
+The sidebar metadata slice adds control_compat-style status channels for local automation:
+
+- `sidebar.status.set`, `sidebar.status.clear`, `sidebar.status.list`: manage keyed status entries.
+- `sidebar.progress.set`, `sidebar.progress.clear`: manage a workspace progress value.
+- `sidebar.log.append`, `sidebar.log.clear`, `sidebar.log.list`: manage bounded log entries.
+- `sidebar.state`: return status, progress, and log metadata in one payload.
+
 The Agent Vault slice adds custom agent launch metadata for visible local-terminal automation:
 
 - `agent.vault.register`: register a custom agent id and command templates.
@@ -132,6 +139,7 @@ Aliases are accepted for control_compat-compatible scripts where useful:
 - `send-key`, `send-key-panel`, and `surface.send_key` map to `terminal.send_key`.
 - `wait-for` maps to `sync.wait_for`.
 - `display-message` maps to `notification.create`; `display-message -p` prints locally without using the socket.
+- `set-status`, `clear-status`, `list-status`, `set-progress`, `clear-progress`, `log`, `clear-log`, `list-log`, and `sidebar-state` map to `sidebar.*` metadata methods.
 - `notify` maps to `notification.create`.
 - `list-notifications` maps to `notification.list`.
 - `open-notification` maps to `notification.open`.
@@ -241,6 +249,10 @@ node /path/to/resources/aiopsterm-control.js wait-for build-ready --timeout 30
 node /path/to/resources/aiopsterm-control.js wait-for --signal build-ready
 node /path/to/resources/aiopsterm-control.js display-message "deploy done"
 node /path/to/resources/aiopsterm-control.js display-message --print "deploy done"
+node /path/to/resources/aiopsterm-control.js set-status build compiling --priority 80
+node /path/to/resources/aiopsterm-control.js set-progress 0.5 --label "Building"
+node /path/to/resources/aiopsterm-control.js log --level success --source test "All green"
+node /path/to/resources/aiopsterm-control.js sidebar-state
 node /path/to/resources/aiopsterm-control.js notify --title "Build done" --body "All tests passed"
 node /path/to/resources/aiopsterm-control.js list-notifications
 node /path/to/resources/aiopsterm-control.js jump-to-unread
@@ -265,6 +277,8 @@ node /path/to/resources/aiopsterm-control.js --json workspace snapshot
 Future higher-level automation commands should use the control socket but must choose their own safety policy explicitly. For example, a future `terminal.run_command` command can route through command security, while `terminal.send_text` remains raw input.
 
 `sync.wait_for` is an in-process local rendezvous primitive for scripts talking to the same running aiopsterm app. Token names are limited to letters, numbers, `.`, `_`, `:`, and `-`; they are not filesystem paths and are not shared across app restarts. Signaling wakes all current waiters and leaves a bounded one-shot signal for a later waiter. Timeouts return `WAIT_FOR_TIMEOUT`.
+
+`sidebar.*` metadata is a lightweight automation state source, not a command runner. It is stored in memory in the main process, exposed through the socket and events stream, and scoped by `workspaceId` with the current shared work panel defaulting to `main`. The current slice does not force a new right-sidebar UI; renderer surfaces or future MCP tools can consume the metadata through `sidebar.state`.
 
 Agent Hibernation is off by default and only targets coding-agent sessions that were discovered inside aiopsterm-created local connection terminals. `agent.hibernate` asks the renderer to close the owning terminal backend session and then records hibernation metadata in the managed AI session store. It refuses sessions that currently need input or have no resume command. `agent.resume` writes the stored resume command through the same renderer terminal command path used by AI session recovery, so risky commands still pass through terminal command safety approval before any bytes are written to the shell.
 

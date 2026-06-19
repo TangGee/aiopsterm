@@ -728,6 +728,50 @@ describe('control socket backend', () => {
     }
   })
 
+  it('stores sidebar-style status, progress, and log metadata for automation', async () => {
+    const backend = await loadBackend()
+
+    await expect(
+      backend.__testing.handleControlRequest({
+        method: 'sidebar.status.set',
+        params: { workspaceId: 'main', key: 'build', value: 'compiling', icon: 'hammer', color: '#ff9500', priority: 80 }
+      })
+    ).resolves.toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
+          status: expect.objectContaining({ key: 'build', value: 'compiling', priority: 80 }),
+          statuses: [expect.objectContaining({ key: 'build' })]
+        })
+      })
+    )
+    await expect(backend.__testing.handleControlRequest({ method: 'set-progress', params: { workspaceId: 'main', value: 0.5, label: 'Building' } })).resolves.toEqual(
+      expect.objectContaining({ ok: true, data: expect.objectContaining({ progress: expect.objectContaining({ value: 0.5, label: 'Building' }) }) })
+    )
+    await expect(backend.__testing.handleControlRequest({ method: 'log', params: { workspaceId: 'main', level: 'success', source: 'test', message: 'All green' } })).resolves.toEqual(
+      expect.objectContaining({ ok: true, data: expect.objectContaining({ log: expect.objectContaining({ level: 'success', source: 'test', message: 'All green' }) }) })
+    )
+    await expect(backend.__testing.handleControlRequest({ method: 'sidebar.state', params: { workspaceId: 'main' } })).resolves.toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
+          statuses: [expect.objectContaining({ key: 'build' })],
+          progress: expect.objectContaining({ value: 0.5 }),
+          logs: [expect.objectContaining({ message: 'All green' })]
+        })
+      })
+    )
+    await expect(backend.__testing.handleControlRequest({ method: 'clear-status', params: { workspaceId: 'main', key: 'build' } })).resolves.toEqual(
+      expect.objectContaining({ ok: true, data: expect.objectContaining({ removed: true, statuses: [] }) })
+    )
+    await expect(backend.__testing.handleControlRequest({ method: 'clear-progress', params: { workspaceId: 'main' } })).resolves.toEqual(
+      expect.objectContaining({ ok: true, data: expect.objectContaining({ removed: true, progress: null }) })
+    )
+    await expect(backend.__testing.handleControlRequest({ method: 'clear-log', params: { workspaceId: 'main' } })).resolves.toEqual(
+      expect.objectContaining({ ok: true, data: expect.objectContaining({ changed: 1, logs: [] }) })
+    )
+  })
+
   it('persists control events to JSONL and replays them after socket restart', async () => {
     const backend = await loadBackend()
     const root = await mkdtemp(join(tmpdir(), 'aiopsterm-control-events-jsonl-'))

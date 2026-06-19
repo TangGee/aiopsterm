@@ -420,6 +420,63 @@ describe('aiopsterm-control CLI', () => {
     ])
   })
 
+  it('sends sidebar-style status, progress, and log metadata requests', async () => {
+    const seen: Record<string, unknown>[] = []
+    const socketPath = await startControlServer((request) => {
+      seen.push(request)
+      const method = String(request.method || '')
+      const workspaceId = (request.params as any)?.workspaceId || 'main'
+      return {
+        id: request.id,
+        ok: true,
+        data: {
+          statuses:
+            method === 'sidebar.status.clear'
+              ? []
+              : [{ workspaceId, key: (request.params as any)?.key || 'build', value: (request.params as any)?.value || 'compiling', priority: (request.params as any)?.priority || 0 }],
+          progress: method === 'sidebar.progress.clear' ? null : method === 'sidebar.progress.set' ? { workspaceId, value: (request.params as any)?.value, label: (request.params as any)?.label } : null,
+          logs: method === 'sidebar.log.append' ? [{ workspaceId, level: (request.params as any)?.level || 'info', source: (request.params as any)?.source, message: (request.params as any)?.message }] : [],
+          removed: method.includes('clear'),
+          changed: method === 'sidebar.log.clear' ? 1 : undefined
+        }
+      }
+    })
+
+    const status = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'set-status', 'build', 'compiling', '--priority', '80'], {
+      cwd: process.cwd()
+    })
+    expect(status.stdout).toContain('status\tmain\tbuild\tcompiling')
+
+    const progress = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'set-progress', '0.5', '--label', 'Building'], {
+      cwd: process.cwd()
+    })
+    expect(progress.stdout).toContain('progress\tmain\t0.5\tBuilding')
+
+    const log = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'log', '--level', 'success', '--source', 'test', 'All green'], {
+      cwd: process.cwd()
+    })
+    expect(log.stdout).toContain('log\tmain\tsuccess\ttest\tAll green')
+
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'list-status'], { cwd: process.cwd() })
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'list-log', '--limit', '5'], { cwd: process.cwd() })
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'sidebar-state'], { cwd: process.cwd() })
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'clear-status', 'build'], { cwd: process.cwd() })
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'clear-progress'], { cwd: process.cwd() })
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'clear-log'], { cwd: process.cwd() })
+
+    expect(seen).toEqual([
+      expect.objectContaining({ method: 'sidebar.status.set', params: expect.objectContaining({ key: 'build', value: 'compiling', priority: 80 }) }),
+      expect.objectContaining({ method: 'sidebar.progress.set', params: expect.objectContaining({ value: 0.5, label: 'Building' }) }),
+      expect.objectContaining({ method: 'sidebar.log.append', params: expect.objectContaining({ level: 'success', source: 'test', message: 'All green' }) }),
+      expect.objectContaining({ method: 'sidebar.status.list' }),
+      expect.objectContaining({ method: 'sidebar.log.list', params: expect.objectContaining({ limit: 5 }) }),
+      expect.objectContaining({ method: 'sidebar.state' }),
+      expect.objectContaining({ method: 'sidebar.status.clear', params: expect.objectContaining({ key: 'build' }) }),
+      expect.objectContaining({ method: 'sidebar.progress.clear' }),
+      expect.objectContaining({ method: 'sidebar.log.clear' })
+    ])
+  })
+
   it('sends agent hibernation requests over the configured socket', async () => {
     const seen: Record<string, unknown>[] = []
     const socketPath = await startControlServer((request) => {
