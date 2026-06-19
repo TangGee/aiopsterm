@@ -2281,6 +2281,161 @@ describe('control socket backend', () => {
     }
   })
 
+  it('accepts control_compat-style feed push, jump, and reply commands', async () => {
+    const backend = await loadBackend()
+    const agentSessions = await loadAgentSessionsBackend()
+    const root = await mkdtemp(join(tmpdir(), 'aiopsterm-control-feed-compat-'))
+    try {
+      await backend.ensureControlSocketServer(root)
+      await agentSessions.configureAiAgentSessionStore(root)
+
+      const pushed = await backend.__testing.handleControlRequest({
+        method: 'feed.push',
+        params: {
+          event: {
+            source: 'claude-code',
+            hook_event_name: 'PermissionRequest',
+            session_id: 'claude-feed-compat-1',
+            request_id: 'permission-request-1',
+            wait_for_decision: true,
+            actionable: true,
+            panel_id: 'panel-feed',
+            terminal_session_id: 'terminal-feed',
+            cwd: '/work/feed',
+            title: 'Feed approval',
+            summary: 'Approve feed command',
+            tool_name: 'Bash',
+            raw_secret: 'do-not-return'
+          },
+          wait_timeout_seconds: 5
+        }
+      })
+      expect(pushed).toEqual(
+        expect.objectContaining({
+          ok: true,
+          data: expect.objectContaining({
+            status: 'acknowledged',
+            waited: false,
+            unsupported_wait: true,
+            request_id: 'permission-request-1',
+            session_id: 'claude-feed-compat-1',
+            session: expect.objectContaining({
+              source: 'claude-code',
+              sessionId: 'claude-feed-compat-1',
+              state: 'needsInput',
+              pendingRequestId: 'permission-request-1',
+              panelId: 'panel-feed'
+            })
+          })
+        })
+      )
+      expect(JSON.stringify(pushed)).not.toContain('raw_secret')
+      expect(JSON.stringify(pushed)).not.toContain('do-not-return')
+
+      await expect(backend.__testing.handleControlRequest({ method: 'feed.jump', params: { workstream_id: 'permission-request-1' } })).resolves.toEqual(
+        expect.objectContaining({
+          ok: true,
+          data: expect.objectContaining({
+            workstream_id: 'permission-request-1',
+            matched: true,
+            panelId: 'panel-feed',
+            session: expect.objectContaining({ sessionId: 'claude-feed-compat-1' })
+          })
+        })
+      )
+
+      await expect(
+        backend.__testing.handleControlRequest({
+          method: 'feed.permission.reply',
+          params: { request_id: 'permission-request-1', mode: 'deny', message: 'Use staging first' }
+        })
+      ).resolves.toEqual(
+        expect.objectContaining({
+          ok: true,
+          data: expect.objectContaining({
+            delivered: true,
+            request_id: 'permission-request-1',
+            kind: 'deny',
+            mode: 'deny',
+            needsInputCount: 0,
+            session: expect.objectContaining({
+              sessionId: 'claude-feed-compat-1',
+              state: 'idle',
+              decisions: [expect.objectContaining({ kind: 'deny', message: 'Use staging first' })]
+            })
+          })
+        })
+      )
+
+      await backend.__testing.handleControlRequest({
+        method: 'feed.push',
+        params: {
+          source: 'claude-code',
+          event: 'question',
+          session_id: 'claude-feed-question-1',
+          request_id: 'question-request-1',
+          wait_for_decision: true,
+          actionable: true,
+          summary: 'Which environment?'
+        }
+      })
+      await expect(
+        backend.__testing.handleControlRequest({
+          method: 'feed.question.reply',
+          params: { request_id: 'question-request-1', selections: ['staging', 'blue'] }
+        })
+      ).resolves.toEqual(
+        expect.objectContaining({
+          ok: true,
+          data: expect.objectContaining({
+            delivered: true,
+            kind: 'reply',
+            session: expect.objectContaining({
+              sessionId: 'claude-feed-question-1',
+              decisions: [expect.objectContaining({ kind: 'reply', message: 'staging\nblue' })]
+            })
+          })
+        })
+      )
+
+      await backend.__testing.handleControlRequest({
+        method: 'feed.push',
+        params: {
+          source: 'claude-code',
+          event: 'PermissionRequest',
+          session_id: 'claude-feed-plan-1',
+          request_id: 'plan-request-1',
+          wait_for_decision: true,
+          actionable: true,
+          tool_name: 'ExitPlanMode',
+          summary: 'Review implementation plan'
+        }
+      })
+      await expect(
+        backend.__testing.handleControlRequest({
+          method: 'feed.exit_plan.reply',
+          params: { request_id: 'plan-request-1', mode: 'bypassPermissions', feedback: 'Proceed' }
+        })
+      ).resolves.toEqual(
+        expect.objectContaining({
+          ok: true,
+          data: expect.objectContaining({
+            delivered: true,
+            kind: 'bypass',
+            session: expect.objectContaining({
+              sessionId: 'claude-feed-plan-1',
+              decisions: [expect.objectContaining({ kind: 'bypass', message: 'Proceed' })]
+            })
+          })
+        })
+      )
+    } finally {
+      await agentSessions.__testing.flushManagedAiSessionWrites()
+      backend.closeControlSocketServer()
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   it('serves newline-delimited JSON requests over the local socket', async () => {
     const backend = await loadBackend()
     const root = await mkdtemp(join(tmpdir(), 'aiopsterm-control-socket-'))

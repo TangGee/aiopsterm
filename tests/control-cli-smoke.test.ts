@@ -1303,6 +1303,79 @@ describe('aiopsterm-control CLI', () => {
     const seen: Record<string, unknown>[] = []
     const socketPath = await startControlServer((request) => {
       seen.push(request)
+      if (request.method === 'feed.jump') {
+        return {
+          id: request.id,
+          ok: true,
+          data: {
+            workstream_id: (request.params as any)?.workstream_id,
+            matched: true,
+            panelId: 'panel-ai',
+            session: {
+              source: 'claude-code',
+              sessionId: 'claude-feed-1',
+              id: 'claude-feed-1',
+              title: 'Deploy review',
+              summary: 'Approve deploy command',
+              state: 'needsInput',
+              needsInput: true,
+              requestKind: 'permission',
+              panelId: 'panel-ai'
+            }
+          }
+        }
+      }
+      if (request.method === 'feed.push') {
+        return {
+          id: request.id,
+          ok: true,
+          data: {
+            status: 'acknowledged',
+            waited: false,
+            session_id: (request.params as any)?.sessionId,
+            request_id: (request.params as any)?.requestId,
+            workstream_id: (request.params as any)?.sessionId,
+            session: {
+              source: (request.params as any)?.source,
+              sessionId: (request.params as any)?.sessionId,
+              id: (request.params as any)?.sessionId,
+              title: 'Deploy review',
+              summary: (request.params as any)?.summary,
+              state: 'needsInput',
+              needsInput: true,
+              requestKind: 'permission',
+              panelId: 'panel-ai'
+            }
+          }
+        }
+      }
+      if (request.method === 'feed.permission.reply' || request.method === 'feed.question.reply' || request.method === 'feed.exit_plan.reply') {
+        return {
+          id: request.id,
+          ok: true,
+          data: {
+            delivered: true,
+            request_id: (request.params as any)?.request_id,
+            kind: request.method === 'feed.permission.reply' ? 'deny' : request.method === 'feed.question.reply' ? 'reply' : 'bypass',
+            mode: (request.params as any)?.mode || 'reply',
+            session: {
+              source: 'claude-code',
+              sessionId: 'claude-feed-1',
+              id: 'claude-feed-1',
+              title: 'Deploy review',
+              summary: 'Approve deploy command',
+              state: 'idle',
+              needsInput: false,
+              requestKind: 'permission',
+              panelId: 'panel-ai',
+              eventCount: 1,
+              decisionCount: 1
+            },
+            count: 1,
+            needsInputCount: 0
+          }
+        }
+      }
       return {
         id: request.id,
         ok: true,
@@ -1339,6 +1412,55 @@ describe('aiopsterm-control CLI', () => {
     })
     expect(handled.stdout).toContain('agent-session-bulk\tmark-handled\tchanged=1')
 
+    const jumped = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'feed', 'jump', 'permission-request-1'], {
+      cwd: process.cwd()
+    })
+    expect(jumped.stdout).toContain('feed-jump\tmatched\tpermission-request-1\tpanel-ai')
+
+    const pushed = await execFileAsync(
+      process.execPath,
+      [
+        'resources/aiopsterm-control.js',
+        '--socket',
+        socketPath,
+        'feed',
+        'push',
+        '--source',
+        'claude-code',
+        '--session',
+        'claude-feed-1',
+        '--request',
+        'permission-request-1',
+        '--event',
+        'PermissionRequest',
+        '--summary',
+        'Approve deploy command'
+      ],
+      { cwd: process.cwd() }
+    )
+    expect(pushed.stdout).toContain('feed-push\tacknowledged\tclaude-feed-1\tpermission-request-1\tnonblocking')
+
+    const permissionReply = await execFileAsync(
+      process.execPath,
+      ['resources/aiopsterm-control.js', '--socket', socketPath, 'feed', 'permission-reply', 'permission-request-1', '--mode', 'deny', '--message', 'Use staging first'],
+      { cwd: process.cwd() }
+    )
+    expect(permissionReply.stdout).toContain('feed-reply\tdeny\tdeny\tpermission-request-1')
+
+    const questionReply = await execFileAsync(
+      process.execPath,
+      ['resources/aiopsterm-control.js', '--socket', socketPath, 'feed', 'question-reply', 'question-request-1', '--selection', 'staging'],
+      { cwd: process.cwd() }
+    )
+    expect(questionReply.stdout).toContain('feed-reply\treply\treply\tquestion-request-1')
+
+    const planReply = await execFileAsync(
+      process.execPath,
+      ['resources/aiopsterm-control.js', '--socket', socketPath, 'feed', 'exit-plan-reply', 'plan-request-1', '--mode', 'bypassPermissions'],
+      { cwd: process.cwd() }
+    )
+    expect(planReply.stdout).toContain('feed-reply\tbypass\tbypassPermissions\tplan-request-1')
+
     await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'agent', 'session', 'clear-ended'], {
       cwd: process.cwd()
     })
@@ -1349,6 +1471,14 @@ describe('aiopsterm-control CLI', () => {
     expect(seen).toEqual([
       expect.objectContaining({ method: 'feed.list', params: expect.objectContaining({ needsInput: true }) }),
       expect.objectContaining({ method: 'feed.mark-handled' }),
+      expect.objectContaining({ method: 'feed.jump', params: expect.objectContaining({ workstream_id: 'permission-request-1' }) }),
+      expect.objectContaining({
+        method: 'feed.push',
+        params: expect.objectContaining({ source: 'claude-code', sessionId: 'claude-feed-1', requestId: 'permission-request-1', event: 'PermissionRequest' })
+      }),
+      expect.objectContaining({ method: 'feed.permission.reply', params: expect.objectContaining({ request_id: 'permission-request-1', mode: 'deny', message: 'Use staging first' }) }),
+      expect.objectContaining({ method: 'feed.question.reply', params: expect.objectContaining({ request_id: 'question-request-1', selections: ['staging'] }) }),
+      expect.objectContaining({ method: 'feed.exit_plan.reply', params: expect.objectContaining({ request_id: 'plan-request-1', mode: 'bypassPermissions' }) }),
       expect.objectContaining({ method: 'agent.session.bulk', params: expect.objectContaining({ operation: 'clear-ended' }) }),
       expect.objectContaining({ method: 'feed.clear', params: expect.objectContaining({ confirm: true, yes: true }) })
     ])

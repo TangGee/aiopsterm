@@ -18,7 +18,15 @@ import type {
   ManagedAiSessionBulkOperation,
   ManagedAiSessionRecord
 } from '@shared/preload'
-import { bulkManagedAiSessions, clearManagedAiSession, configureAiAgentSessionStore, listManagedAiSessions, renameManagedAiSession, replyManagedAiSession } from './agentSessions'
+import {
+  bulkManagedAiSessions,
+  clearManagedAiSession,
+  configureAiAgentSessionStore,
+  listManagedAiSessions,
+  publishAiAgentSessionEvent,
+  renameManagedAiSession,
+  replyManagedAiSession
+} from './agentSessions'
 import { installAgentHook, listAgentHookInstallers, uninstallAgentHook } from './agentHookInstaller'
 
 type ControlSocketRequest = {
@@ -260,7 +268,8 @@ const controlSocketCapabilities = [
   'agent.team',
   'agent.vault',
   'agent.session',
-  'agent.hooks'
+  'agent.hooks',
+  'feed'
 ]
 
 let server: Server | null = null
@@ -1848,6 +1857,123 @@ const resolveManagedAiControlSession = async (params: Record<string, unknown>) =
   return { session: matches[0], snapshot: snapshot.data }
 }
 
+const managedAiSessionMatchesWorkstream = (session: ManagedAiSessionRecord, workstreamId: string) =>
+  session.id === workstreamId ||
+  session.pendingRequestId === workstreamId ||
+  session.panelId === workstreamId ||
+  session.terminalSessionId === workstreamId ||
+  session.workspaceId === workstreamId ||
+  session.events.some((event) => event.id === workstreamId || event.requestId === workstreamId)
+
+const resolveManagedAiControlSessionByRequest = async (params: Record<string, unknown>) => {
+  const requestId = cleanText(params.requestId || params.request_id || params.id)
+  if (!requestId) return { error: fail('FEED_REQUEST_ID_REQUIRED', 'feed reply requires request_id.') }
+  const source = cleanText(params.source || params.agent)
+  const snapshot = await listManagedAiSessions()
+  if (!snapshot.ok || !snapshot.data) return { error: fail(snapshot.errorCode || 'AGENT_SESSIONS_UNAVAILABLE', snapshot.errorMessage || 'Managed AI sessions are unavailable.') }
+  const matches = snapshot.data.sessions.filter(
+    (session) =>
+      (!source || session.source === source) &&
+      (session.pendingRequestId === requestId || session.events.some((event) => event.requestId === requestId || event.id === requestId))
+  )
+  if (!matches.length) return { error: fail('FEED_REQUEST_NOT_FOUND', `Managed AI request was not found: ${source ? `${source}:` : ''}${requestId}`) }
+  if (matches.length > 1) return { error: fail('FEED_REQUEST_SOURCE_REQUIRED', `Multiple managed AI requests match ${requestId}; pass source.`) }
+  return { requestId, session: matches[0], snapshot: snapshot.data }
+}
+
+const control_compatFeedEventFromParams = (params: Record<string, unknown>) => {
+  const nestedEvent = params.event && typeof params.event === 'object' && !Array.isArray(params.event) ? (params.event as Record<string, unknown>) : {}
+  const topLevelEventName = typeof params.event === 'string' ? params.event : ''
+  const event: Record<string, unknown> = { ...params, ...nestedEvent }
+  delete event.event
+  if (nestedEvent.event !== undefined) event.event = nestedEvent.event
+  const source = cleanText(event.source || event.agent || event.agent_name || event.agentName || params._source || params.source)
+  const sessionId = cleanText(
+    event.sessionId ||
+      event.session_id ||
+      event.conversationId ||
+      event.conversation_id ||
+      event.workstream_id ||
+      event.workstreamId ||
+      event.id ||
+      params.workstream_id ||
+      params.workstreamId
+  )
+  const eventName = cleanText(event.event || event.hookEventName || event.hook_event_name || event.type || event.kind || params.hook_event_name || params.hookEventName || topLevelEventName)
+  if (params._source && !event.source && !event.agent) event.source = params._source
+  if (source && !event.source) event.source = source
+  if (sessionId && !event.sessionId && !event.session_id) event.sessionId = sessionId
+  if (eventName && !event.event) event.event = eventName
+  if (params.request_id && !event.request_id && !event.requestId) event.request_id = params.request_id
+  if (params.requestId && !event.requestId && !event.request_id) event.requestId = params.requestId
+  if (params.wait_timeout_seconds !== undefined && event.waitTimeoutMs === undefined && event.wait_timeout_ms === undefined) {
+    const seconds = Number(params.wait_timeout_seconds)
+    if (Number.isFinite(seconds) && seconds > 0) {
+      event.waitTimeoutMs = Math.round(seconds * 1000)
+      event.wait_timeout_ms = event.waitTimeoutMs
+    }
+  }
+  if (params.wait === true || params.block === true || Number(params.wait_timeout_seconds) > 0) {
+    event.waitForDecision = event.waitForDecision ?? event.wait_for_decision ?? true
+    event.wait_for_decision = event.wait_for_decision ?? event.waitForDecision
+  }
+  return event
+}
+
+const feedDecisionKindForPermissionMode = (modeValue: unknown) => {
+  const mode = cleanText(modeValue).toLowerCase().replace(/[\s_-]+/g, '')
+  if (!mode) return ''
+  if (mode === 'once' || mode === 'allow' || mode === 'approve' || mode === 'approved') return 'allow'
+  if (mode === 'always' || mode === 'all') return 'always'
+  if (mode === 'bypass' || mode === 'bypasspermissions') return 'bypass'
+  if (mode === 'deny' || mode === 'denied' || mode === 'reject' || mode === 'rejected') return 'deny'
+  return ''
+}
+
+const feedDecisionKindForExitPlanMode = (modeValue: unknown) => {
+  const mode = cleanText(modeValue).toLowerCase().replace(/[\s_-]+/g, '')
+  if (!mode) return ''
+  if (mode === 'deny' || mode === 'rejected' || mode === 'reject') return 'deny'
+  if (mode === 'bypasspermissions' || mode === 'bypass') return 'bypass'
+  if (mode === 'ultraplan' || mode === 'autoaccept' || mode === 'manual' || mode === 'accept' || mode === 'allow' || mode === 'approve') return 'allow'
+  return ''
+}
+
+const feedReplyMessage = (params: Record<string, unknown>) => {
+  const selections = cleanTextList(params.selections || params.selection || params.selected)
+  const message = cleanText(params.message || params.feedback || params.answer || params.reply || params.text)
+  return selections.length ? selections.join('\n') : message
+}
+
+const handleFeedReply = async (
+  params: Record<string, unknown>,
+  kind: ManagedAiSessionDecisionKind,
+  mode: string,
+  message = ''
+) => {
+  const resolved = await resolveManagedAiControlSessionByRequest(params)
+  if (resolved.error) return resolved.error
+  const result = await replyManagedAiSession({ source: resolved.session!.source, sessionId: resolved.session!.id, kind, ...(message ? { message } : {}) })
+  if (!result.ok || !result.data) return fail(result.errorCode || 'FEED_REPLY_FAILED', result.errorMessage || 'Managed AI feed reply failed.')
+  const nextSession = result.data.session || resolved.session!
+  publishControlEvent({
+    name: 'feed.reply',
+    category: 'agent',
+    source: 'control.socket',
+    surfaceId: nextSession.panelId,
+    payload: { request_id: resolved.requestId, source: nextSession.source, session_id: nextSession.id, kind, mode, state: nextSession.state }
+  })
+  return ok({
+    delivered: true,
+    request_id: resolved.requestId,
+    mode,
+    kind,
+    session: managedAiControlSummary(nextSession, { includeEvents: true, includeDecisions: true }),
+    count: result.data.snapshot.sessions.length,
+    needsInputCount: result.data.snapshot.sessions.filter((session) => session.state === 'needsInput').length
+  })
+}
+
 const handleAgentSessionControlRequest = async (method: string, params: Record<string, unknown>) => {
   if (runtime.userDataPath) await configureAiAgentSessionStore(runtime.userDataPath)
   const action = method.startsWith('agent.sessions.')
@@ -2050,7 +2176,95 @@ const handleAgentHooksControlRequest = async (method: string, params: Record<str
 const handleFeedControlRequest = async (method: string, params: Record<string, unknown>) => {
   if (runtime.userDataPath) await configureAiAgentSessionStore(runtime.userDataPath)
   const action = method.slice('feed.'.length)
-  if (action === 'list' || action === 'status') return handleAgentSessionControlRequest('agent.session.list', { ...params, needsInput: params.needsInput ?? params.needs_input ?? true })
+  if (action === 'list' || action === 'status') {
+    const control_compatPendingOnly = typeof params.pending_only === 'boolean' ? params.pending_only : typeof params.pendingOnly === 'boolean' ? params.pendingOnly : undefined
+    return handleAgentSessionControlRequest('agent.session.list', { ...params, needsInput: params.needsInput ?? params.needs_input ?? control_compatPendingOnly ?? true })
+  }
+  if (action === 'jump') {
+    const workstreamId = cleanText(params.workstream_id || params.workstreamId || params.sessionId || params.session_id || params.id || params.request_id || params.requestId)
+    if (!workstreamId) return fail('FEED_WORKSTREAM_ID_REQUIRED', 'feed.jump requires workstream_id.')
+    const snapshot = await listManagedAiSessions()
+    if (!snapshot.ok || !snapshot.data) return fail(snapshot.errorCode || 'AGENT_SESSIONS_UNAVAILABLE', snapshot.errorMessage || 'Managed AI sessions are unavailable.')
+    const session = snapshot.data.sessions.find((candidate) => managedAiSessionMatchesWorkstream(candidate, workstreamId))
+    return ok({
+      workstream_id: workstreamId,
+      matched: Boolean(session),
+      ...(session ? { session: managedAiControlSummary(session), panelId: session.panelId, surfaceId: session.panelId, terminalSessionId: session.terminalSessionId } : {})
+    })
+  }
+  if (action === 'push') {
+    const event = control_compatFeedEventFromParams(params)
+    const result = publishAiAgentSessionEvent(event, null)
+    if (!result.ok || !result.data) return fail(result.errorCode || 'FEED_PUSH_FAILED', result.errorMessage || 'Managed AI feed event was not accepted.')
+    const snapshot = await listManagedAiSessions()
+    const session = snapshot.data?.sessions.find((candidate) => candidate.source === result.data!.source && candidate.id === result.data!.sessionId)
+    publishControlEvent({
+      name: 'feed.pushed',
+      category: 'agent',
+      source: 'control.socket',
+      surfaceId: result.data.panelId,
+      payload: {
+        source: result.data.source,
+        session_id: result.data.sessionId,
+        event: result.data.event,
+        request_id: result.data.requestId,
+        request_kind: result.data.requestKind,
+        decision_mode: result.data.decisionMode
+      }
+    })
+    return ok({
+      status: 'acknowledged',
+      waited: false,
+      unsupported_wait: Boolean(params.wait === true || params.block === true || Number(params.wait_timeout_seconds) > 0),
+      item_id: result.data.requestId || result.data.sessionId,
+      request_id: result.data.requestId,
+      session_id: result.data.sessionId,
+      workstream_id: result.data.sessionId,
+      event: managedAiTimelineSummary(
+        {
+          id: result.data.sessionId,
+          source: result.data.source,
+          title: result.data.title,
+          summary: result.data.summary,
+          state: 'unknown',
+          lastEvent: result.data.event,
+          lastActivityAt: result.data.receivedAt,
+          createdAt: result.data.receivedAt,
+          updatedAt: result.data.receivedAt,
+          requestKind: result.data.requestKind || 'telemetry',
+          decisionMode: result.data.decisionMode || 'telemetry',
+          events: [
+            {
+              ...result.data,
+              id: `${result.data.receivedAt}-${result.data.event}`,
+              requestKind: result.data.requestKind || 'telemetry',
+              decisionMode: result.data.decisionMode || 'telemetry'
+            }
+          ],
+          decisions: []
+        },
+        1
+      )[0],
+      ...(session ? { session: managedAiControlSummary(session, { includeEvents: true, includeDecisions: true }) } : {})
+    })
+  }
+  if (action === 'permission.reply') {
+    const mode = cleanText(params.mode || params.decision || params.kind || 'once') || 'once'
+    const kind = feedDecisionKindForPermissionMode(mode)
+    if (!kind) return fail('FEED_PERMISSION_MODE_INVALID', 'feed.permission.reply mode must be once, always, all, bypass, or deny.')
+    return handleFeedReply(params, kind as ManagedAiSessionDecisionKind, mode, cleanText(params.message || params.reason || params.feedback))
+  }
+  if (action === 'question.reply') {
+    const message = feedReplyMessage(params)
+    if (!message) return fail('FEED_QUESTION_REPLY_REQUIRED', 'feed.question.reply requires selections, answer, or message.')
+    return handleFeedReply(params, 'reply', 'reply', message)
+  }
+  if (action === 'exit_plan.reply') {
+    const mode = cleanText(params.mode || params.decision || params.kind || 'manual') || 'manual'
+    const kind = feedDecisionKindForExitPlanMode(mode)
+    if (!kind) return fail('FEED_EXIT_PLAN_MODE_INVALID', 'feed.exit_plan.reply mode must be ultraplan, bypassPermissions, autoAccept, manual, or deny.')
+    return handleFeedReply(params, kind as ManagedAiSessionDecisionKind, mode, cleanText(params.feedback || params.message || params.reason))
+  }
   if (action === 'mark-handled' || action === 'mark_read' || action === 'mark-read') {
     return handleAgentSessionControlRequest('agent.session.bulk', { ...params, operation: 'mark-handled' })
   }

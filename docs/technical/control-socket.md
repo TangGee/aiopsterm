@@ -125,7 +125,12 @@ The Agent Session slice adds control_compat-style local socket primitives for AI
 
 The Feed aliases expose the same managed AI queue with control_compat-style names:
 
-- `feed.list`: list sessions that currently need input.
+- `feed.list`: list sessions that currently need input. Passing `pending_only=false` over the raw socket lists all managed AI sessions, while the CLI keeps `feed list` focused on pending items unless `--all` is used.
+- `feed.jump`: resolve a control_compat-style `workstream_id` to a managed AI session, matching session id, request id, event id, panel id, terminal session id, or workspace id when present.
+- `feed.push`: accept a control_compat-style feed event and record it in the managed AI session store. aiopsterm returns immediately with `waited=false`; blocking hook decisions should be completed with the reply methods instead of keeping the control socket open.
+- `feed.permission.reply`: resolve a pending managed AI request by `request_id` and record a permission decision. Supported modes map to managed decisions: `once` -> `allow`, `always`/`all` -> `always`, `bypass` -> `bypass`, and `deny` -> `deny`.
+- `feed.question.reply`: resolve a pending question by `request_id` and record a text or selection reply.
+- `feed.exit_plan.reply`: resolve a pending plan request by `request_id` and record the selected mode. `bypassPermissions` maps to `bypass`, `deny` maps to `deny`, and accepted plan modes map to `allow`.
 - `feed.mark-handled`: mark all pending managed AI requests handled.
 - `feed.clear-ended`: remove ended managed AI sessions.
 - `feed.clear`: clear all managed AI session records; this requires `confirm=true`.

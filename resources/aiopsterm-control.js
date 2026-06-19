@@ -33,7 +33,7 @@ Commands:
   app simulate-active
   window list|current|focus|create|close|displays|display
   hooks list|setup|install|uninstall [--agent <name>]
-  feed list|mark-handled|clear-ended|clear [--yes]
+  feed list|jump|push|permission-reply|question-reply|exit-plan-reply|mark-handled|clear-ended|clear [--yes]
   workspace snapshot
   workspace list|current
   workspace env [--workspace <id>|--surface <id>] [--mask]
@@ -1524,7 +1524,84 @@ const agentSessionMethodParams = (subcommand) => {
 const feedMethodParams = (subcommand) => {
   if (subcommand === 'status') subcommand = 'list'
   if (subcommand === 'done' || subcommand === 'mark-read') subcommand = 'mark-handled'
-  if (subcommand === 'list') return { method: 'feed.list', params: { needsInput: true } }
+  if (subcommand === 'permission' && args[0] === 'reply') {
+    args.shift()
+    subcommand = 'permission-reply'
+  }
+  if (subcommand === 'question' && args[0] === 'reply') {
+    args.shift()
+    subcommand = 'question-reply'
+  }
+  if ((subcommand === 'exit-plan' || subcommand === 'exit_plan') && args[0] === 'reply') {
+    args.shift()
+    subcommand = 'exit-plan-reply'
+  }
+  if (subcommand === 'list') {
+    const pendingOnly = hasFlag('--all') ? false : true
+    return { method: 'feed.list', params: { needsInput: pendingOnly, needs_input: pendingOnly, pending_only: pendingOnly } }
+  }
+  if (subcommand === 'jump') {
+    const workstreamId = readOption('--workstream') || readOption('--workstream-id') || readOption('--session') || readOption('--request') || readPositional()
+    return { method: 'feed.jump', params: { workstream_id: workstreamId, workstreamId, sessionId: workstreamId, request_id: workstreamId } }
+  }
+  if (subcommand === 'push') {
+    const eventJson = readOption('--event-json')
+    const paramsJson = readOption('--params-json') || readOption('--json-params') || readOption('--params')
+    const params = eventJson ? JSON.parse(eventJson) : paramsJson ? JSON.parse(paramsJson) : {}
+    const source = readOption('--source') || readOption('--agent')
+    const sessionId = readOption('--session') || readOption('--session-id') || readOption('--workstream') || readOption('--workstream-id')
+    const requestId = readOption('--request') || readOption('--request-id')
+    const event = readOption('--event') || readOption('--hook-event') || readOption('--kind')
+    const title = readOption('--title')
+    const summary = readOption('--summary')
+    const cwd = readOption('--cwd')
+    const toolName = readOption('--tool')
+    const waitTimeoutSeconds = Number(readOption('--wait-timeout-seconds') || 0)
+    return {
+      method: 'feed.push',
+      params: {
+        ...params,
+        ...(source ? { source, agent: source } : {}),
+        ...(sessionId ? { sessionId, session_id: sessionId, workstream_id: sessionId } : {}),
+        ...(requestId ? { requestId, request_id: requestId } : {}),
+        ...(event ? { event, hook_event_name: event } : {}),
+        ...(title ? { title } : {}),
+        ...(summary ? { summary } : {}),
+        ...(cwd ? { cwd } : {}),
+        ...(toolName ? { toolName, tool_name: toolName } : {}),
+        ...(hasFlag('--wait') || waitTimeoutSeconds > 0 ? { wait: true, wait_timeout_seconds: waitTimeoutSeconds || undefined } : {})
+      }
+    }
+  }
+  if (subcommand === 'permission-reply') {
+    const source = readOption('--source') || readOption('--agent')
+    const mode = readOption('--mode') || readOption('--decision') || readOption('--kind') || 'once'
+    const messageOption = readOption('--message') || readOption('--reason') || readOption('--feedback')
+    const requestId = readOption('--request') || readOption('--request-id') || readOption('--id') || readPositional()
+    const message = messageOption || args.join(' ')
+    return { method: 'feed.permission.reply', params: { request_id: requestId, requestId, mode, source, agent: source, message, reason: message, feedback: message } }
+  }
+  if (subcommand === 'question-reply') {
+    const source = readOption('--source') || readOption('--agent')
+    const selections = []
+    for (;;) {
+      const selection = readOption('--selection')
+      if (!selection) break
+      selections.push(selection)
+    }
+    const answerOption = readOption('--answer') || readOption('--message') || readOption('--reply')
+    const requestId = readOption('--request') || readOption('--request-id') || readOption('--id') || readPositional()
+    const answer = answerOption || args.join(' ')
+    return { method: 'feed.question.reply', params: { request_id: requestId, requestId, source, agent: source, selections, selection: selections, answer, message: answer, reply: answer } }
+  }
+  if (subcommand === 'exit-plan-reply') {
+    const source = readOption('--source') || readOption('--agent')
+    const mode = readOption('--mode') || readOption('--decision') || readOption('--kind') || 'manual'
+    const feedbackOption = readOption('--feedback') || readOption('--message') || readOption('--reason')
+    const requestId = readOption('--request') || readOption('--request-id') || readOption('--id') || readPositional()
+    const feedback = feedbackOption || args.join(' ')
+    return { method: 'feed.exit_plan.reply', params: { request_id: requestId, requestId, source, agent: source, mode, feedback, message: feedback, reason: feedback } }
+  }
   if (subcommand === 'mark-handled' || subcommand === 'clear-ended') return { method: `feed.${subcommand}`, params: {} }
   if (subcommand === 'clear') {
     const confirm = hasFlag('--yes') || hasFlag('--confirm')
@@ -1982,6 +2059,22 @@ const printResponse = (response) => {
     process.stdout.write(`agent-sessions\t${data.count || data.sessions.length}/${data.total || data.sessions.length}\tneeds_input=${data.needsInputCount || 0}\n`)
     for (const session of data.sessions) printAgentSessionLine(session)
     if (data.sessions.length === 0) process.stdout.write('No agent sessions\n')
+    return
+  }
+  if (data.workstream_id && Object.prototype.hasOwnProperty.call(data, 'matched')) {
+    process.stdout.write(['feed-jump', data.matched ? 'matched' : 'missing', data.workstream_id, data.panelId || data.surfaceId || data.terminalSessionId || '-'].join('\t') + '\n')
+    if (isManagedAiSessionLike(data.session)) printAgentSessionLine(data.session)
+    return
+  }
+  if (data.status && data.session_id && data.workstream_id) {
+    process.stdout.write(['feed-push', data.status, data.session_id, data.request_id || '-', data.waited === false ? 'nonblocking' : ''].join('\t') + '\n')
+    if (isManagedAiSessionLike(data.session)) printAgentSessionLine(data.session)
+    return
+  }
+  if (data.delivered && data.request_id) {
+    process.stdout.write(['feed-reply', data.kind || '-', data.mode || '-', data.request_id].join('\t') + '\n')
+    if (isManagedAiSessionLike(data.session)) printAgentSessionLine(data.session)
+    if (typeof data.needsInputCount === 'number') process.stdout.write(`agent-sessions\t${data.count || 0}\tneeds_input=${data.needsInputCount}\n`)
     return
   }
   if (Array.isArray(data.statuses) || data.progress || Array.isArray(data.logs)) {
