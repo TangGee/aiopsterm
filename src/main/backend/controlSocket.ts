@@ -238,6 +238,7 @@ const handleControlRequest = async (request: ControlSocketRequest): Promise<Cont
     method === 'workspace.snapshot' ||
     method === 'workspace.list' ||
     method === 'workspace.current' ||
+    method.startsWith('workspace.group.') ||
     method === 'surface.list' ||
     method === 'surface.current' ||
     method === 'tree' ||

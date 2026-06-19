@@ -30,6 +30,17 @@ The workspace metadata slice adds read-only model snapshots:
 - `surface.list`: list terminal and editor surfaces in the shared main work panel.
 - `surface.current`: return the currently active surface.
 
+The workspace group slice adds control_compat-style group metadata for the shared main work panel:
+
+- `workspace.group.list`: list automation-visible surface groups.
+- `workspace.group.create`: create a group over one or more current surfaces.
+- `workspace.group.ungroup`: remove a group while keeping all surfaces open.
+- `workspace.group.delete`: close every surface in the group. This requires `confirm=true`.
+- `workspace.group.rename`, `collapse`, `expand`, `pin`, `unpin`: update group metadata.
+- `workspace.group.add`, `remove`, `set_anchor`: manage group membership and anchor surface.
+- `workspace.group.new_workspace`: create a new local terminal panel and add it to the group.
+- `workspace.group.focus`: focus the group anchor surface.
+
 Aliases are accepted for control_compat-compatible scripts where useful:
 
 - `tree` and `top` map to `workspace.snapshot`.
@@ -89,6 +100,9 @@ The packaged helper is `resources/aiopsterm-control.js`. It defaults to `AIOPSTE
 ```bash
 node /path/to/resources/aiopsterm-control.js terminal list
 node /path/to/resources/aiopsterm-control.js workspace snapshot
+node /path/to/resources/aiopsterm-control.js workspace-group list
+node /path/to/resources/aiopsterm-control.js workspace-group create --name "deploy" --from panel-1,panel-2
+node /path/to/resources/aiopsterm-control.js workspace-group focus workspace_group:1
 node /path/to/resources/aiopsterm-control.js surface list
 node /path/to/resources/aiopsterm-control.js tree
 node /path/to/resources/aiopsterm-control.js terminal read-screen --lines 40
@@ -130,9 +144,20 @@ The queue is intentionally not persisted in this slice. Session restore and pers
 - `surfaces`: terminal panels and knowledge editor panels with active/split metadata.
 - `terminals`: terminal-only summaries with connection, cwd, SSH target, and xterm size when available.
 - `splitGroups`: grouped panel ids for split layouts.
+- `workspaceGroups`: control_compat-style surface group metadata for the shared main work panel.
 - `notifications`: generic control notifications currently held by the main process and synced into the renderer.
 - `managedAiSessions`: Claude/Codex session summaries without full event transcripts.
 - `attention`: top-bell pending items, including managed AI requests and unread generic notifications.
 - `counts`: stable totals for scripts that only need status checks.
 
 The snapshot does not include terminal screen text. Use `terminal.read_screen` for screen content after selecting a target `panelId` or `sessionId` from the snapshot.
+
+## Workspace Groups
+
+aiopsterm keeps the user's design constraint that the AI session manager and SSH/local terminal work share one main work panel. Because of that, `workspace.group.*` does not create a second primary workspace surface. It groups existing main-panel surfaces so external automation can name, focus, and restore related terminal/editor panels.
+
+Group members are `panelId` values. For compatibility, CLI flags still use control_compat wording such as `--workspace`; aiopsterm resolves those values as either `panelId` or `sessionId`.
+
+`workspace.group.delete` is destructive because it closes the member panels and attempts to kill any backing terminal sessions. It fails unless the request includes `confirm=true`, or the CLI uses `--confirm`. Use `workspace.group.ungroup` when the intent is only to remove grouping metadata.
+
+Group state is renderer memory in this slice. The later session restore slice will persist and restore group metadata alongside terminal/session state.

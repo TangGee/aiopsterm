@@ -10,6 +10,8 @@ Commands:
   ping
   workspace snapshot
   workspace list
+  workspace group <subcommand>
+  workspace-group <subcommand>
   surface list
   tree
   terminal list
@@ -56,8 +58,10 @@ const methodParams = () => {
     if (subcommand === 'snapshot') return { method: 'workspace.snapshot', params: {} }
     if (subcommand === 'list') return { method: 'workspace.list', params: {} }
     if (subcommand === 'current') return { method: 'workspace.current', params: {} }
+    if (subcommand === 'group') return workspaceGroupMethodParams(args.shift() || 'list')
     throw new Error(`Unknown workspace command: ${subcommand}`)
   }
+  if (command === 'workspace-group') return workspaceGroupMethodParams(args.shift() || 'list')
   if (command === 'surface') {
     const subcommand = args.shift() || 'list'
     if (subcommand === 'list') return { method: 'surface.list', params: {} }
@@ -107,6 +111,48 @@ const methodParams = () => {
   throw new Error(`Unknown command: ${command}`)
 }
 
+const groupIdParams = () => {
+  const groupId = readOption('--group') || readOption('--group-id') || args.find((arg) => !arg.startsWith('--')) || ''
+  return { groupId, group_id: groupId }
+}
+
+const workspaceGroupMethodParams = (subcommand) => {
+  if (subcommand === 'list') return { method: 'workspace.group.list', params: {} }
+  if (subcommand === 'create') {
+    const name = readOption('--name') || args.find((arg) => !arg.startsWith('--')) || ''
+    const cwd = readOption('--cwd')
+    const from = readOption('--from')
+    return { method: 'workspace.group.create', params: { name, cwd, from, childWorkspaceIds: from } }
+  }
+  if (subcommand === 'ungroup') return { method: 'workspace.group.ungroup', params: groupIdParams() }
+  if (subcommand === 'delete') return { method: 'workspace.group.delete', params: { ...groupIdParams(), confirm: hasFlag('--confirm') || hasFlag('--force') } }
+  if (subcommand === 'rename') {
+    const name = readOption('--name') || args.slice(1).find((arg) => !arg.startsWith('--')) || ''
+    return { method: 'workspace.group.rename', params: { ...groupIdParams(), name } }
+  }
+  if (subcommand === 'collapse' || subcommand === 'expand' || subcommand === 'pin' || subcommand === 'unpin' || subcommand === 'focus') {
+    return { method: `workspace.group.${subcommand}`, params: groupIdParams() }
+  }
+  if (subcommand === 'add') {
+    return { method: 'workspace.group.add', params: { ...groupIdParams(), workspaceId: readOption('--workspace') || readOption('--panel') || readOption('--surface') } }
+  }
+  if (subcommand === 'remove') {
+    const workspaceId = readOption('--workspace') || readOption('--panel') || readOption('--surface') || args.find((arg) => !arg.startsWith('--')) || ''
+    return { method: 'workspace.group.remove', params: { workspaceId, workspace_id: workspaceId } }
+  }
+  if (subcommand === 'set-anchor') {
+    const workspaceId = readOption('--workspace') || readOption('--panel') || readOption('--surface')
+    return { method: 'workspace.group.set_anchor', params: { ...groupIdParams(), workspaceId, workspace_id: workspaceId } }
+  }
+  if (subcommand === 'new-workspace') {
+    const placement = readOption('--placement')
+    return { method: 'workspace.group.new_workspace', params: { ...groupIdParams(), placement } }
+  }
+  if (subcommand === 'set-color') return { method: 'workspace.group.set_color', params: { ...groupIdParams(), hex: readOption('--hex') || readOption('--color') } }
+  if (subcommand === 'set-icon') return { method: 'workspace.group.set_icon', params: { ...groupIdParams(), symbol: readOption('--symbol') || readOption('--icon') } }
+  throw new Error(`Unknown workspace-group command: ${subcommand}`)
+}
+
 const printResponse = (response) => {
   if (outputJson || !response.ok) {
     process.stdout.write(`${JSON.stringify(response, null, 2)}\n`)
@@ -118,8 +164,22 @@ const printResponse = (response) => {
     const counts = snapshot.counts || {}
     process.stdout.write(`workspace\t${snapshot.mode || '-'}\t${snapshot.activeModule || '-'}\tactive=${snapshot.activePanelId || '-'}\n`)
     process.stdout.write(
-      `counts\tterminals=${counts.terminals || 0}\tsurfaces=${counts.surfaces || 0}\tsplits=${counts.splitGroups || 0}\tai=${counts.managedAiSessions || 0}\tattention=${counts.attentionItems || 0}\n`
+      `counts\tterminals=${counts.terminals || 0}\tsurfaces=${counts.surfaces || 0}\tgroups=${counts.workspaceGroups || 0}\tsplits=${counts.splitGroups || 0}\tai=${counts.managedAiSessions || 0}\tattention=${counts.attentionItems || 0}\n`
     )
+    if (Array.isArray(snapshot.workspaceGroups) && snapshot.workspaceGroups.length) {
+      for (const group of snapshot.workspaceGroups) {
+        process.stdout.write(
+          [
+            group.active ? '*' : ' ',
+            group.ref || group.id || '-',
+            group.pinned ? 'pinned' : '-',
+            group.collapsed ? 'collapsed' : 'expanded',
+            `${group.memberCount || 0} members`,
+            group.name || ''
+          ].join('\t') + '\n'
+        )
+      }
+    }
     if (Array.isArray(snapshot.surfaces)) {
       for (const surface of snapshot.surfaces) {
         process.stdout.write(
@@ -140,6 +200,27 @@ const printResponse = (response) => {
         process.stdout.write(['!', item.id || '-', item.source || '-', item.kind || '-', item.title || ''].join('\t') + '\n')
       }
     }
+    return
+  }
+  if (data.group) {
+    const group = data.group
+    process.stdout.write(`OK\t${group.ref || group.id || '-'}\t${group.name || ''}\t${group.memberCount || 0} members\n`)
+    return
+  }
+  if (Array.isArray(data.groups)) {
+    for (const group of data.groups) {
+      process.stdout.write(
+        [
+          group.active ? '*' : ' ',
+          group.ref || group.id || '-',
+          group.pinned ? 'pinned' : '-',
+          group.collapsed ? 'collapsed' : 'expanded',
+          `${group.memberCount || group.member_count || 0} members`,
+          group.name || ''
+        ].join('\t') + '\n'
+      )
+    }
+    if (data.groups.length === 0) process.stdout.write('No groups\n')
     return
   }
   if (Array.isArray(data.workspaces)) {

@@ -171,6 +171,8 @@ export type ControlSurfaceSummary = {
   splitSourceId?: string
   splitGroupId?: string
   splitOrder?: number
+  workspaceGroupId?: string
+  workspaceGroupName?: string
   knowledge?: {
     relPath: string
     isImage: boolean
@@ -185,6 +187,24 @@ export type ControlSplitGroupSummary = {
   count: number
   activePanelId?: string
   direction: 'right' | 'below' | 'mixed'
+}
+
+export type ControlWorkspaceGroupSummary = {
+  id: string
+  ref: string
+  name: string
+  anchorPanelId: string
+  memberPanelIds: string[]
+  memberCount: number
+  collapsed: boolean
+  pinned: boolean
+  index: number
+  createdAt: number
+  updatedAt: number
+  cwd?: string
+  color?: string
+  icon?: string
+  active: boolean
 }
 
 export type ControlNotificationRecord = {
@@ -268,6 +288,7 @@ export type ControlWorkspaceSnapshot = {
   terminals: ControlTerminalSummary[]
   surfaces: ControlSurfaceSummary[]
   splitGroups: ControlSplitGroupSummary[]
+  workspaceGroups: ControlWorkspaceGroupSummary[]
   notifications: ControlNotificationRecord[]
   managedAiSessions: ControlManagedAiSessionSummary[]
   attention: {
@@ -280,6 +301,7 @@ export type ControlWorkspaceSnapshot = {
     connectedTerminals: number
     surfaces: number
     splitGroups: number
+    workspaceGroups: number
     notifications: number
     unreadNotifications: number
     managedAiSessions: number

@@ -172,6 +172,33 @@ describe('control socket backend', () => {
     expect(mockWindow.requests).toEqual([expect.objectContaining({ method: 'workspace.snapshot' })])
   })
 
+  it('routes workspace group requests to the renderer window', async () => {
+    const backend = await loadBackend()
+    backend.registerControlSocketIpc({
+      handle: (_channel, handler) => {
+        mockIpcHandler = handler
+      }
+    })
+    mockWindow = createMockWindow((request) => ({
+      ok: true,
+      data: {
+        groups: [{ id: 'group-1', ref: 'workspace_group:1', name: 'Ops', memberCount: 2, collapsed: false, pinned: true }],
+        count: 1
+      }
+    }))
+    backend.configureControlSocketRuntime({ getWindows: () => [mockWindow] })
+
+    await expect(backend.__testing.handleControlRequest({ method: 'workspace.group.list' })).resolves.toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
+          groups: [expect.objectContaining({ ref: 'workspace_group:1', name: 'Ops' })]
+        })
+      })
+    )
+    expect(mockWindow.requests).toEqual([expect.objectContaining({ method: 'workspace.group.list' })])
+  })
+
   it('writes terminal text through the runtime without requiring renderer focus', async () => {
     const backend = await loadBackend()
     const writes: Array<{ sessionId: string; data: string }> = []

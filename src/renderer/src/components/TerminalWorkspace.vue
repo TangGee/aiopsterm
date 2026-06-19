@@ -482,6 +482,7 @@ import type {
   ControlSplitGroupSummary,
   ControlSurfaceSummary,
   ControlTerminalSummary,
+  ControlWorkspaceGroupSummary,
   ControlWorkspaceSnapshot,
   RuntimeLogLevel,
   TerminalCommandSuggestion,
@@ -593,6 +594,55 @@ const controlNumber = (value: unknown, fallback: number, min: number, max: numbe
   return Math.max(min, Math.min(max, Math.floor(numberValue)))
 }
 
+type ControlWorkspaceGroupState = Omit<ControlWorkspaceGroupSummary, 'ref' | 'memberCount' | 'active'>
+
+const controlWorkspaceGroups = ref<ControlWorkspaceGroupState[]>([])
+
+const normalizeWorkspaceGroupId = (value: unknown) => {
+  const text = controlText(value)
+  if (!text) return ''
+  const refMatch = text.match(/^workspace_group:(\d+)$/i)
+  if (!refMatch) return text
+  const index = Number(refMatch[1])
+  if (!Number.isFinite(index) || index < 1) return text
+  return controlWorkspaceGroups.value[index - 1]?.id || text
+}
+
+const workspaceGroupRefForControl = (groupId: string) => {
+  const index = controlWorkspaceGroups.value.findIndex((group) => group.id === groupId)
+  return index >= 0 ? `workspace_group:${index + 1}` : groupId
+}
+
+const panelMatchesControlId = (panel: TerminalPanel, id: string) => panel.id === id || panel.sessionId === id
+
+const resolveControlPanelId = (value: unknown) => {
+  const id = controlText(value)
+  if (!id) return ''
+  const panel = workspace.panels.find((item) => panelMatchesControlId(item, id))
+  return panel?.id || ''
+}
+
+const resolveWorkspaceGroup = (value: unknown) => {
+  const groupId = normalizeWorkspaceGroupId(value)
+  return controlWorkspaceGroups.value.find((group) => group.id === groupId || workspaceGroupRefForControl(group.id) === groupId) || null
+}
+
+const pruneWorkspaceGroups = () => {
+  const panelIds = new Set(workspace.panels.map((panel) => panel.id))
+  controlWorkspaceGroups.value = controlWorkspaceGroups.value
+    .map((group) => {
+      const memberPanelIds = group.memberPanelIds.filter((panelId) => panelIds.has(panelId))
+      const anchorPanelId = panelIds.has(group.anchorPanelId) ? group.anchorPanelId : memberPanelIds[0] || ''
+      return { ...group, anchorPanelId, memberPanelIds: [...new Set(memberPanelIds)] }
+    })
+    .filter((group) => group.anchorPanelId && group.memberPanelIds.length)
+}
+
+const groupForPanelId = (panelId: string) => {
+  pruneWorkspaceGroups()
+  return controlWorkspaceGroups.value.find((group) => group.memberPanelIds.includes(panelId)) || null
+}
+
 const terminalKindForControl = (panel: TerminalPanel): ControlTerminalSummary['kind'] => {
   if (panel.sshSession) return 'ssh'
   if (panel.sessionId || panel.terminalLifecycle?.kind === 'local') return 'local'
@@ -619,30 +669,34 @@ const terminalSummaryForControl = (panel: TerminalPanel): ControlTerminalSummary
   }
 }
 
-const surfaceSummaryForControl = (panel: TerminalPanel): ControlSurfaceSummary => ({
-  panelId: panel.id,
-  title: panel.title,
-  surfaceKind: panel.kind === 'knowledge' ? 'knowledge' : 'terminal',
-  active: panel.id === workspace.activePanelId,
-  status: panel.status,
-  cwd: panel.cwd,
-  ...(panel.sessionId ? { sessionId: panel.sessionId } : {}),
-  ...(panel.kind === 'knowledge' ? {} : { terminalKind: terminalKindForControl(panel), connected: Boolean(panel.sessionId) }),
-  ...(panel.split ? { split: panel.split } : {}),
-  ...(panel.splitSourceId ? { splitSourceId: panel.splitSourceId } : {}),
-  ...(panel.splitGroupId ? { splitGroupId: panel.splitGroupId } : {}),
-  ...(typeof panel.splitOrder === 'number' ? { splitOrder: panel.splitOrder } : {}),
-  ...(panel.knowledge
-    ? {
-        knowledge: {
-          relPath: panel.knowledge.relPath,
-          isImage: panel.knowledge.isImage,
-          ...(typeof panel.knowledge.startLine === 'number' ? { startLine: panel.knowledge.startLine } : {}),
-          ...(typeof panel.knowledge.endLine === 'number' ? { endLine: panel.knowledge.endLine } : {})
+const surfaceSummaryForControl = (panel: TerminalPanel): ControlSurfaceSummary => {
+  const workspaceGroup = groupForPanelId(panel.id)
+  return {
+    panelId: panel.id,
+    title: panel.title,
+    surfaceKind: panel.kind === 'knowledge' ? 'knowledge' : 'terminal',
+    active: panel.id === workspace.activePanelId,
+    status: panel.status,
+    cwd: panel.cwd,
+    ...(panel.sessionId ? { sessionId: panel.sessionId } : {}),
+    ...(panel.kind === 'knowledge' ? {} : { terminalKind: terminalKindForControl(panel), connected: Boolean(panel.sessionId) }),
+    ...(panel.split ? { split: panel.split } : {}),
+    ...(panel.splitSourceId ? { splitSourceId: panel.splitSourceId } : {}),
+    ...(panel.splitGroupId ? { splitGroupId: panel.splitGroupId } : {}),
+    ...(typeof panel.splitOrder === 'number' ? { splitOrder: panel.splitOrder } : {}),
+    ...(workspaceGroup ? { workspaceGroupId: workspaceGroup.id, workspaceGroupName: workspaceGroup.name } : {}),
+    ...(panel.knowledge
+      ? {
+          knowledge: {
+            relPath: panel.knowledge.relPath,
+            isImage: panel.knowledge.isImage,
+            ...(typeof panel.knowledge.startLine === 'number' ? { startLine: panel.knowledge.startLine } : {}),
+            ...(typeof panel.knowledge.endLine === 'number' ? { endLine: panel.knowledge.endLine } : {})
+          }
         }
-      }
-    : {})
-})
+      : {})
+  }
+}
 
 const splitGroupsForControl = (surfaces: ControlSurfaceSummary[]): ControlSplitGroupSummary[] => {
   const groups = new Map<string, ControlSurfaceSummary[]>()
@@ -664,6 +718,24 @@ const splitGroupsForControl = (surfaces: ControlSurfaceSummary[]): ControlSplitG
       }
     })
 }
+
+const workspaceGroupSummaryForControl = (group: ControlWorkspaceGroupState): ControlWorkspaceGroupSummary => ({
+  id: group.id,
+  ref: workspaceGroupRefForControl(group.id),
+  name: group.name,
+  anchorPanelId: group.anchorPanelId,
+  memberPanelIds: [...group.memberPanelIds],
+  memberCount: group.memberPanelIds.length,
+  collapsed: group.collapsed,
+  pinned: group.pinned,
+  index: group.index,
+  createdAt: group.createdAt,
+  updatedAt: group.updatedAt,
+  ...(group.cwd ? { cwd: group.cwd } : {}),
+  ...(group.color ? { color: group.color } : {}),
+  ...(group.icon ? { icon: group.icon } : {}),
+  active: group.memberPanelIds.includes(workspace.activePanelId)
+})
 
 const aiAttentionSummaryForControl = (item: (typeof workspace.pendingAiAttentionItems)[number]): ControlAiAttentionSummary => ({
   id: item.id,
@@ -712,9 +784,11 @@ const managedAiSessionSummaryForControl = (session: (typeof workspace.managedAiS
 })
 
 const workspaceSnapshotForControl = (): ControlWorkspaceSnapshot => {
+  pruneWorkspaceGroups()
   const terminals = workspace.panels.filter((panel) => panel.kind !== 'knowledge').map(terminalSummaryForControl)
   const surfaces = workspace.panels.map(surfaceSummaryForControl)
   const splitGroups = splitGroupsForControl(surfaces)
+  const workspaceGroups = controlWorkspaceGroups.value.map(workspaceGroupSummaryForControl)
   const attentionItems = workspace.pendingAiAttentionItems.map(aiAttentionSummaryForControl)
   const managedAiSessions = workspace.managedAiSessions.map(managedAiSessionSummaryForControl)
   return {
@@ -735,6 +809,7 @@ const workspaceSnapshotForControl = (): ControlWorkspaceSnapshot => {
     terminals,
     surfaces,
     splitGroups,
+    workspaceGroups,
     notifications: workspace.controlNotifications.map((notification) => ({ ...notification })),
     managedAiSessions,
     attention: {
@@ -747,6 +822,7 @@ const workspaceSnapshotForControl = (): ControlWorkspaceSnapshot => {
       connectedTerminals: terminals.filter((terminal) => terminal.connected).length,
       surfaces: surfaces.length,
       splitGroups: splitGroups.length,
+      workspaceGroups: workspaceGroups.length,
       notifications: workspace.controlNotifications.length,
       unreadNotifications: workspace.controlNotifications.filter((notification) => !notification.read).length,
       managedAiSessions: managedAiSessions.length,
@@ -776,8 +852,186 @@ const terminalBufferText = (view: TerminalView, tailLines: number) => {
   return lines.join('\n').replace(/\s+$/g, '')
 }
 
+const workspaceGroupPayload = (group?: ControlWorkspaceGroupState | null) => {
+  const groups = controlWorkspaceGroups.value.map(workspaceGroupSummaryForControl)
+  return {
+    groups,
+    count: groups.length,
+    ...(group ? { group: workspaceGroupSummaryForControl(group) } : {}),
+    snapshot: workspaceSnapshotForControl()
+  }
+}
+
+const createWorkspaceGroupForControl = (params: Record<string, unknown>) => {
+  const panelInputs = [
+    ...(Array.isArray(params.childPanelIds) ? params.childPanelIds : []),
+    ...(Array.isArray(params.child_workspace_ids) ? params.child_workspace_ids : []),
+    ...(Array.isArray(params.workspaceIds) ? params.workspaceIds : []),
+    ...(typeof params.from === 'string' ? params.from.split(',') : []),
+    ...(typeof params.childWorkspaceIds === 'string' ? params.childWorkspaceIds.split(',') : [])
+  ]
+  const memberPanelIds = [...new Set(panelInputs.map(resolveControlPanelId).filter(Boolean))]
+  if (!memberPanelIds.length) {
+    const visiblePanelIds = workspace.panels.filter((panel) => !isWelcomePlaceholderPanel(panel)).map((panel) => panel.id)
+    memberPanelIds.push(...(visiblePanelIds.length ? visiblePanelIds : workspace.panels.map((panel) => panel.id)))
+  }
+  if (!memberPanelIds.length) return controlFail('WORKSPACE_GROUP_NO_MEMBERS', 'Workspace group needs at least one surface.')
+  const anchorPanelId = resolveControlPanelId(params.anchorPanelId || params.anchor_workspace_id) || memberPanelIds[0]
+  if (!memberPanelIds.includes(anchorPanelId)) memberPanelIds.unshift(anchorPanelId)
+  const now = Date.now()
+  const group: ControlWorkspaceGroupState = {
+    id: `workspace-group-${now}-${Math.random().toString(16).slice(2)}`,
+    name: controlText(params.name) || `Group ${controlWorkspaceGroups.value.length + 1}`,
+    anchorPanelId,
+    memberPanelIds,
+    collapsed: false,
+    pinned: params.pinned === true || params.is_pinned === true,
+    index: controlWorkspaceGroups.value.length,
+    createdAt: now,
+    updatedAt: now,
+    ...(controlText(params.cwd) ? { cwd: controlText(params.cwd) } : {}),
+    ...(controlText(params.color || params.hex || params.customColor) ? { color: controlText(params.color || params.hex || params.customColor) } : {}),
+    ...(controlText(params.icon || params.symbol || params.iconSymbol) ? { icon: controlText(params.icon || params.symbol || params.iconSymbol) } : {})
+  }
+  const assigned = new Set(group.memberPanelIds)
+  controlWorkspaceGroups.value = [
+    ...controlWorkspaceGroups.value
+      .map((item) => ({ ...item, memberPanelIds: item.memberPanelIds.filter((panelId) => !assigned.has(panelId)) }))
+      .filter((item) => item.memberPanelIds.length),
+    group
+  ].map((item, index) => ({ ...item, index }))
+  return controlOk(workspaceGroupPayload(group))
+}
+
+const updateWorkspaceGroupForControl = (params: Record<string, unknown>, update: (group: ControlWorkspaceGroupState) => ControlWorkspaceGroupState | null) => {
+  const group = resolveWorkspaceGroup(params.groupId || params.group_id || params.id)
+  if (!group) return controlFail('WORKSPACE_GROUP_NOT_FOUND', 'Workspace group not found.')
+  const next = update(group)
+  if (!next) return controlFail('WORKSPACE_GROUP_UPDATE_REJECTED', 'Workspace group update was rejected.')
+  controlWorkspaceGroups.value = controlWorkspaceGroups.value.map((item) => (item.id === group.id ? { ...next, updatedAt: Date.now() } : item))
+  return controlOk(workspaceGroupPayload(controlWorkspaceGroups.value.find((item) => item.id === group.id)))
+}
+
+const addWorkspaceToGroupForControl = (params: Record<string, unknown>) => {
+  const panelId = resolveControlPanelId(params.panelId || params.workspaceId || params.workspace_id)
+  if (!panelId) return controlFail('WORKSPACE_GROUP_PANEL_NOT_FOUND', 'Surface not found for workspace group add.')
+  return updateWorkspaceGroupForControl(params, (group) => {
+    controlWorkspaceGroups.value = controlWorkspaceGroups.value
+      .map((item) => (item.id === group.id ? item : { ...item, memberPanelIds: item.memberPanelIds.filter((id) => id !== panelId) }))
+      .filter((item) => item.memberPanelIds.length)
+    return {
+      ...group,
+      memberPanelIds: [...new Set([...group.memberPanelIds, panelId])],
+      anchorPanelId: group.anchorPanelId || panelId
+    }
+  })
+}
+
+const removeWorkspaceFromGroupForControl = (params: Record<string, unknown>) => {
+  const panelId = resolveControlPanelId(params.panelId || params.workspaceId || params.workspace_id)
+  if (!panelId) return controlFail('WORKSPACE_GROUP_PANEL_NOT_FOUND', 'Surface not found for workspace group remove.')
+  const group = controlWorkspaceGroups.value.find((item) => item.memberPanelIds.includes(panelId))
+  if (!group) return controlFail('WORKSPACE_GROUP_NOT_FOUND', 'Surface is not in a workspace group.')
+  controlWorkspaceGroups.value = controlWorkspaceGroups.value
+    .map((item) => {
+      if (item.id !== group.id) return item
+      const memberPanelIds = item.memberPanelIds.filter((id) => id !== panelId)
+      const anchorPanelId = item.anchorPanelId === panelId ? memberPanelIds[0] || '' : item.anchorPanelId
+      return { ...item, anchorPanelId, memberPanelIds, updatedAt: Date.now() }
+    })
+    .filter((item) => item.anchorPanelId && item.memberPanelIds.length)
+    .map((item, index) => ({ ...item, index }))
+  return controlOk(workspaceGroupPayload())
+}
+
+const closeWorkspaceGroupPanelsForControl = async (panelIds: string[]) => {
+  const closedPanelIds: string[] = []
+  const killedSessionIds: string[] = []
+  for (const panelId of panelIds) {
+    const panel = workspace.panels.find((item) => item.id === panelId)
+    if (!panel) continue
+    if (panel.sessionId && typeof window.aiops?.killTerminal === 'function') {
+      const sessionId = panel.sessionId
+      try {
+        const result = await window.aiops.killTerminal(sessionId)
+        if (result?.ok && isTerminalKillSuccess(result, sessionId)) killedSessionIds.push(sessionId)
+      } catch {
+        // Closing a group is best effort after explicit confirmation; the UI panel is still removed.
+      }
+    }
+    workspace.closePanel(panel.id)
+    closedPanelIds.push(panel.id)
+  }
+  return { closedPanelIds, killedSessionIds }
+}
+
+const deleteWorkspaceGroupForControl = async (params: Record<string, unknown>) => {
+  const group = resolveWorkspaceGroup(params.groupId || params.group_id || params.id)
+  if (!group) return controlFail('WORKSPACE_GROUP_NOT_FOUND', 'Workspace group not found.')
+  if (params.confirm !== true && params.force !== true) {
+    return controlFail('WORKSPACE_GROUP_DELETE_REQUIRES_CONFIRM', 'Deleting a workspace group closes its surfaces. Pass confirm=true to continue.', {
+      group: workspaceGroupSummaryForControl(group)
+    })
+  }
+  const memberPanelIds = [...group.memberPanelIds]
+  controlWorkspaceGroups.value = controlWorkspaceGroups.value.filter((item) => item.id !== group.id).map((item, index) => ({ ...item, index }))
+  const closed = await closeWorkspaceGroupPanelsForControl(memberPanelIds)
+  return controlOk({ deletedPanelIds: memberPanelIds, ...closed, ...workspaceGroupPayload() })
+}
+
+const handleWorkspaceGroupControlRequest = async (method: string, params: Record<string, unknown>) => {
+  if (method === 'workspace.group.list') return controlOk(workspaceGroupPayload())
+  if (method === 'workspace.group.create') return createWorkspaceGroupForControl(params)
+  if (method === 'workspace.group.ungroup') {
+    const group = resolveWorkspaceGroup(params.groupId || params.group_id || params.id)
+    if (!group) return controlFail('WORKSPACE_GROUP_NOT_FOUND', 'Workspace group not found.')
+    controlWorkspaceGroups.value = controlWorkspaceGroups.value.filter((item) => item.id !== group.id).map((item, index) => ({ ...item, index }))
+    return controlOk(workspaceGroupPayload())
+  }
+  if (method === 'workspace.group.delete') return deleteWorkspaceGroupForControl(params)
+  if (method === 'workspace.group.rename') {
+    const name = controlText(params.name)
+    if (!name) return controlFail('WORKSPACE_GROUP_NAME_REQUIRED', 'Workspace group name is required.')
+    return updateWorkspaceGroupForControl(params, (group) => ({ ...group, name }))
+  }
+  if (method === 'workspace.group.collapse') return updateWorkspaceGroupForControl(params, (group) => ({ ...group, collapsed: true }))
+  if (method === 'workspace.group.expand') return updateWorkspaceGroupForControl(params, (group) => ({ ...group, collapsed: false }))
+  if (method === 'workspace.group.pin') return updateWorkspaceGroupForControl(params, (group) => ({ ...group, pinned: true }))
+  if (method === 'workspace.group.unpin') return updateWorkspaceGroupForControl(params, (group) => ({ ...group, pinned: false }))
+  if (method === 'workspace.group.set_color') return updateWorkspaceGroupForControl(params, (group) => ({ ...group, color: controlText(params.hex || params.color) || undefined }))
+  if (method === 'workspace.group.set_icon') return updateWorkspaceGroupForControl(params, (group) => ({ ...group, icon: controlText(params.symbol || params.icon) || undefined }))
+  if (method === 'workspace.group.add') return addWorkspaceToGroupForControl(params)
+  if (method === 'workspace.group.remove') return removeWorkspaceFromGroupForControl(params)
+  if (method === 'workspace.group.set_anchor') {
+    const panelId = resolveControlPanelId(params.panelId || params.workspaceId || params.workspace_id)
+    if (!panelId) return controlFail('WORKSPACE_GROUP_PANEL_NOT_FOUND', 'Surface not found for workspace group anchor.')
+    return updateWorkspaceGroupForControl(params, (group) => ({
+      ...group,
+      anchorPanelId: panelId,
+      memberPanelIds: [...new Set([panelId, ...group.memberPanelIds])]
+    }))
+  }
+  if (method === 'workspace.group.new_workspace') {
+    const group = resolveWorkspaceGroup(params.groupId || params.group_id || params.id)
+    if (!group) return controlFail('WORKSPACE_GROUP_NOT_FOUND', 'Workspace group not found.')
+    const panel = workspace.createPanel()
+    const memberPanelIds = [...new Set([...group.memberPanelIds, panel.id])]
+    controlWorkspaceGroups.value = controlWorkspaceGroups.value.map((item) => (item.id === group.id ? { ...item, memberPanelIds, updatedAt: Date.now() } : item))
+    return controlOk({ panel: surfaceSummaryForControl(panel), workspace_ref: panel.id, ...workspaceGroupPayload(controlWorkspaceGroups.value.find((item) => item.id === group.id)) })
+  }
+  if (method === 'workspace.group.focus') {
+    const group = resolveWorkspaceGroup(params.groupId || params.group_id || params.id)
+    if (!group) return controlFail('WORKSPACE_GROUP_NOT_FOUND', 'Workspace group not found.')
+    workspace.activeModule = 'workspace'
+    workspace.activePanelId = group.anchorPanelId
+    return controlOk(workspaceGroupPayload(group))
+  }
+  return controlFail('UNKNOWN_CONTROL_RENDERER_METHOD', `Unknown renderer control method: ${method}`)
+}
+
 const handleControlRequest = async (request: ControlRequest): Promise<ControlResponse> => {
   const params = request.params || {}
+  if (request.method.startsWith('workspace.group.')) return handleWorkspaceGroupControlRequest(request.method, params)
   if (request.method === 'workspace.snapshot' || request.method === 'tree' || request.method === 'top') {
     return controlOk({ snapshot: workspaceSnapshotForControl() })
   }

@@ -95,6 +95,57 @@ describe('aiopsterm-control CLI', () => {
     expect(seen).toEqual([expect.objectContaining({ method: 'workspace.snapshot' })])
   })
 
+  it('sends workspace group requests over the configured socket', async () => {
+    const seen: Record<string, unknown>[] = []
+    const socketPath = await startControlServer((request) => {
+      seen.push(request)
+      return {
+        id: request.id,
+        ok: true,
+        data: {
+          group: {
+            id: 'group-1',
+            ref: 'workspace_group:1',
+            name: request.params && typeof request.params === 'object' ? (request.params as Record<string, unknown>).name || 'Ops' : 'Ops',
+            memberCount: 2
+          },
+          groups: [{ id: 'group-1', ref: 'workspace_group:1', name: 'Ops', memberCount: 2, collapsed: false, pinned: false }]
+        }
+      }
+    })
+
+    const result = await execFileAsync(
+      process.execPath,
+      ['resources/aiopsterm-control.js', '--socket', socketPath, 'workspace-group', 'create', '--name', 'Ops', '--from', 'panel-1,panel-2'],
+      { cwd: process.cwd() }
+    )
+    expect(result.stdout).toContain('OK\tworkspace_group:1\tOps\t2 members')
+    expect(seen).toEqual([
+      expect.objectContaining({
+        method: 'workspace.group.create',
+        params: expect.objectContaining({ name: 'Ops', from: 'panel-1,panel-2', childWorkspaceIds: 'panel-1,panel-2' })
+      })
+    ])
+  })
+
+  it('requires an explicit confirm flag for workspace group delete commands', async () => {
+    const seen: Record<string, unknown>[] = []
+    const socketPath = await startControlServer((request) => {
+      seen.push(request)
+      return { id: request.id, ok: true, data: { groups: [] } }
+    })
+
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'workspace-group', 'delete', 'workspace_group:1', '--confirm'], {
+      cwd: process.cwd()
+    })
+    expect(seen).toEqual([
+      expect.objectContaining({
+        method: 'workspace.group.delete',
+        params: expect.objectContaining({ groupId: 'workspace_group:1', group_id: 'workspace_group:1', confirm: true })
+      })
+    ])
+  })
+
   it('sends notification requests over the configured socket', async () => {
     const seen: Record<string, unknown>[] = []
     const socketPath = await startControlServer((request) => {
