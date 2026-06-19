@@ -474,6 +474,9 @@ import { copyTextToClipboard, mirrorTextToClipboardQuietly, readTextFromClipboar
 import { createTerminalZmodemRuntime, type TerminalZmodemProgress } from '@/services/zmodemRuntime'
 import type {
   ControlAiAttentionSummary,
+  ControlAgentTeamLaunchMember,
+  ControlAgentTeamLaunchResult,
+  ControlAgentTeamLaunchSource,
   ControlManagedAiSessionSummary,
   ControlRequest,
   ControlResponse,
@@ -488,7 +491,8 @@ import type {
   TerminalCommandSuggestion,
   TerminalCommandSuggestionContext,
   TerminalDataEvent,
-  TerminalKillResult
+  TerminalKillResult,
+  TerminalSessionInfo
 } from '@shared/preload'
 
 const workspace = useWorkspaceStore()
@@ -592,6 +596,16 @@ const controlNumber = (value: unknown, fallback: number, min: number, max: numbe
   const numberValue = Number(value)
   if (!Number.isFinite(numberValue)) return fallback
   return Math.max(min, Math.min(max, Math.floor(numberValue)))
+}
+
+const controlBool = (value: unknown, fallback = false) => {
+  if (typeof value === 'boolean') return value
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase()
+    if (normalized === 'true' || normalized === '1' || normalized === 'yes') return true
+    if (normalized === 'false' || normalized === '0' || normalized === 'no') return false
+  }
+  return fallback
 }
 
 type ControlWorkspaceGroupState = Omit<ControlWorkspaceGroupSummary, 'ref' | 'memberCount' | 'active'>
@@ -1034,6 +1048,147 @@ const handleWorkspaceGroupControlRequest = async (method: string, params: Record
   return controlFail('UNKNOWN_CONTROL_RENDERER_METHOD', `Unknown renderer control method: ${method}`)
 }
 
+const normalizeAgentTeamSource = (value: unknown): ControlAgentTeamLaunchSource => {
+  const source = controlText(value).toLowerCase()
+  if (source === 'claude' || source === 'claude-code' || source === 'claude_code') return 'claude-code'
+  if (source === 'custom') return 'custom'
+  return 'codex'
+}
+
+const shellQuoteForControl = (value: string) => `'${value.replace(/'/g, `'\"'\"'`)}'`
+
+const buildAgentTeamCommand = (params: Record<string, unknown>, source: ControlAgentTeamLaunchSource, index: number) => {
+  const custom = controlText(params.command || params.shell || params.commandText)
+  const cwd = controlText(params.cwd)
+  const prompt = controlText(params.prompt || params.message || params.instruction)
+  const role = controlText(params.role || params.agentRole)
+  const model = controlText(params.model)
+  const prefix = cwd ? `cd ${shellQuoteForControl(cwd)} && ` : ''
+  if (custom) {
+    return custom
+      .replace(/\{\{index\}\}/g, String(index))
+      .replace(/\{\{cwd\}\}/g, cwd)
+      .replace(/\{\{prompt\}\}/g, prompt)
+      .replace(/\{\{role\}\}/g, role)
+      .replace(/\{\{model\}\}/g, model)
+  }
+  const promptSuffix = prompt ? ` ${shellQuoteForControl(prompt)}` : ''
+  if (source === 'claude-code') {
+    const modelArgs = model ? ` --model ${shellQuoteForControl(model)}` : ''
+    return `${prefix}claude${modelArgs}${promptSuffix}`
+  }
+  const modelArgs = model ? ` --model ${shellQuoteForControl(model)}` : ''
+  return `${prefix}codex${modelArgs}${promptSuffix}`
+}
+
+const createAgentTeamGroup = (params: Record<string, unknown>, panelIds: string[], source: ControlAgentTeamLaunchSource, cwd: string) => {
+  const now = Date.now()
+  const name = controlText(params.name || params.groupName || params.title) || `${source === 'claude-code' ? 'Claude Code' : source === 'codex' ? 'Codex' : 'Agent'} Team`
+  const group: ControlWorkspaceGroupState = {
+    id: `workspace-group-${now}-${Math.random().toString(16).slice(2)}`,
+    name,
+    anchorPanelId: panelIds[0],
+    memberPanelIds: [...new Set(panelIds)],
+    collapsed: false,
+    pinned: controlBool(params.pinned, true),
+    index: controlWorkspaceGroups.value.length,
+    createdAt: now,
+    updatedAt: now,
+    ...(cwd ? { cwd } : {}),
+    color: controlText(params.color || params.hex) || '#3b82f6',
+    icon: controlText(params.icon || params.symbol) || 'bot'
+  }
+  const assigned = new Set(group.memberPanelIds)
+  controlWorkspaceGroups.value = [
+    ...controlWorkspaceGroups.value
+      .map((item) => ({ ...item, memberPanelIds: item.memberPanelIds.filter((panelId) => !assigned.has(panelId)) }))
+      .filter((item) => item.memberPanelIds.length),
+    group
+  ].map((item, index) => ({ ...item, index }))
+  return group
+}
+
+const createLocalAgentTeamTerminal = async (panel: TerminalPanel, title: string, cwd: string) => {
+  if (!window.aiops?.createTerminal) {
+    throw new Error('本地终端启动服务不可用')
+  }
+  await nextTick()
+  const size = terminalViewSize(panel.id)
+  const session = (await window.aiops.createTerminal({
+    kind: 'local',
+    panelId: panel.id,
+    workspaceId: 'workspace',
+    title,
+    ...(cwd ? { cwd } : {}),
+    cols: size.cols,
+    rows: size.rows,
+    terminalType: workspace.terminalSettings.terminalType
+  })) as TerminalSessionInfo
+  const connected = workspace.applyLocalTerminalSession(panel.id, session)
+  if (!connected) throw new Error('本地终端启动失败')
+  workspace.renamePanel(panel.id, title)
+  return connected
+}
+
+const handleAgentTeamControlRequest = async (method: string, params: Record<string, unknown>) => {
+  if (method !== 'agent.team.launch') return controlFail('UNKNOWN_CONTROL_RENDERER_METHOD', `Unknown renderer control method: ${method}`)
+  const source = normalizeAgentTeamSource(params.source || params.agent)
+  const count = controlNumber(params.count || params.n, 2, 1, 12)
+  const cwd = controlText(params.cwd) || (workspace.activePanel.kind === 'terminal' ? workspace.activePanel.cwd : '')
+  const focus = controlBool(params.focus, true)
+  const members: ControlAgentTeamLaunchMember[] = []
+  const panelIds: string[] = []
+  const previousActivePanelId = workspace.activePanelId
+
+  for (let index = 1; index <= count; index += 1) {
+    const panel = workspace.createPanel()
+    const title = `${source === 'claude-code' ? 'Claude Code' : source === 'codex' ? 'Codex' : 'Agent'} ${index}`
+    workspace.renamePanel(panel.id, title)
+    panelIds.push(panel.id)
+    const command = buildAgentTeamCommand(params, source, index)
+    try {
+      const connected = await createLocalAgentTeamTerminal(panel, title, cwd)
+      const decision = await workspace.runTerminalCommand(panel.id, command, { source: 'agent', writeToShell: true })
+      members.push({
+        index,
+        source,
+        command,
+        panel: surfaceSummaryForControl(connected),
+        terminal: terminalSummaryForControl(connected),
+        status: decision.status === 'allow' ? 'launched' : decision.status === 'needs-approval' ? 'needs-approval' : 'failed',
+        ...(decision.status !== 'allow' && decision.status !== 'needs-approval' ? { errorMessage: 'Agent team command was not launched.' } : {})
+      })
+    } catch (error) {
+      members.push({
+        index,
+        source,
+        command,
+        panel: surfaceSummaryForControl(panel),
+        status: 'failed',
+        errorMessage: error instanceof Error ? error.message : 'Agent team terminal launch failed.'
+      })
+    }
+  }
+
+  const group = createAgentTeamGroup(params, panelIds, source, cwd)
+  workspace.activeModule = 'workspace'
+  if (focus && panelIds[0]) workspace.activePanelId = panelIds[0]
+  if (!focus && workspace.panels.some((panel) => panel.id === previousActivePanelId)) workspace.activePanelId = previousActivePanelId
+  const team: ControlAgentTeamLaunchResult = {
+    source,
+    ...(cwd ? { cwd } : {}),
+    requestedCount: count,
+    launchedCount: members.filter((member) => member.status === 'launched').length,
+    approvalCount: members.filter((member) => member.status === 'needs-approval').length,
+    failedCount: members.filter((member) => member.status === 'failed').length,
+    group: workspaceGroupSummaryForControl(group),
+    members,
+    snapshot: workspaceSnapshotForControl()
+  }
+  workspace.setTopNotice(`已创建 ${team.launchedCount} 个 ${source === 'claude-code' ? 'Claude Code' : source === 'codex' ? 'Codex' : 'Agent'} Team 会话`)
+  return controlOk({ team, ...workspaceGroupPayload(group) })
+}
+
 const handleAgentHibernationControlRequest = async (method: string, params: Record<string, unknown>) => {
   if (method === 'agent-hibernation.status' || method === 'agent.status') {
     await workspace.refreshAgentHibernationConfig()
@@ -1070,6 +1225,7 @@ const handleAgentHibernationControlRequest = async (method: string, params: Reco
 const handleControlRequest = async (request: ControlRequest): Promise<ControlResponse> => {
   const params = request.params || {}
   if (request.method.startsWith('workspace.group.')) return handleWorkspaceGroupControlRequest(request.method, params)
+  if (request.method.startsWith('agent.team.')) return handleAgentTeamControlRequest(request.method, params)
   if (request.method.startsWith('agent-hibernation.') || request.method.startsWith('agent.')) return handleAgentHibernationControlRequest(request.method, params)
   if (request.method === 'workspace.snapshot' || request.method === 'tree' || request.method === 'top') {
     return controlOk({ snapshot: workspaceSnapshotForControl() })

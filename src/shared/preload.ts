@@ -207,6 +207,30 @@ export type ControlWorkspaceGroupSummary = {
   active: boolean
 }
 
+export type ControlAgentTeamLaunchSource = 'codex' | 'claude-code' | 'custom'
+
+export type ControlAgentTeamLaunchMember = {
+  index: number
+  source: ControlAgentTeamLaunchSource
+  command: string
+  panel: ControlSurfaceSummary
+  terminal?: ControlTerminalSummary
+  status: 'launched' | 'needs-approval' | 'failed'
+  errorMessage?: string
+}
+
+export type ControlAgentTeamLaunchResult = {
+  source: ControlAgentTeamLaunchSource
+  cwd?: string
+  requestedCount: number
+  launchedCount: number
+  approvalCount: number
+  failedCount: number
+  group: ControlWorkspaceGroupSummary
+  members: ControlAgentTeamLaunchMember[]
+  snapshot: ControlWorkspaceSnapshot
+}
+
 export type ControlNotificationRecord = {
   id: string
   title: string

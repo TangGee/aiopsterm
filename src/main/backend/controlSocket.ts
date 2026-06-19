@@ -243,6 +243,7 @@ const handleControlRequest = async (request: ControlSocketRequest): Promise<Cont
     method === 'surface.current' ||
     method.startsWith('agent-hibernation.') ||
     method.startsWith('agent.') ||
+    method.startsWith('agent.team.') ||
     method === 'tree' ||
     method === 'top'
   ) {

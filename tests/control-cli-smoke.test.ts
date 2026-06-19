@@ -211,4 +211,67 @@ describe('aiopsterm-control CLI', () => {
       })
     ])
   })
+
+  it('sends agent team launch requests over the configured socket', async () => {
+    const seen: Record<string, unknown>[] = []
+    const socketPath = await startControlServer((request) => {
+      seen.push(request)
+      return {
+        id: request.id,
+        ok: true,
+        data: {
+          team: {
+            source: 'codex',
+            requestedCount: 2,
+            launchedCount: 2,
+            approvalCount: 0,
+            failedCount: 0,
+            group: { ref: 'workspace_group:1', name: 'Review Team', memberCount: 2 },
+            members: [
+              { index: 1, status: 'launched', panel: { panelId: 'panel-1' }, terminal: { sessionId: 'terminal-1' }, command: 'codex' },
+              { index: 2, status: 'launched', panel: { panelId: 'panel-2' }, terminal: { sessionId: 'terminal-2' }, command: 'codex' }
+            ]
+          }
+        }
+      }
+    })
+
+    const result = await execFileAsync(
+      process.execPath,
+      [
+        'resources/aiopsterm-control.js',
+        '--socket',
+        socketPath,
+        'agent',
+        'team',
+        'launch',
+        '--source',
+        'codex',
+        '--count',
+        '2',
+        '--cwd',
+        '/work/project',
+        '--prompt',
+        'review this repo',
+        '--name',
+        'Review Team'
+      ],
+      { cwd: process.cwd() }
+    )
+
+    expect(result.stdout).toContain('agent-team\tcodex\tlaunched=2\tapproval=0\tfailed=0')
+    expect(result.stdout).toContain('group\tworkspace_group:1\tReview Team\t2 members')
+    expect(seen).toEqual([
+      expect.objectContaining({
+        method: 'agent.team.launch',
+        params: expect.objectContaining({
+          source: 'codex',
+          count: 2,
+          cwd: '/work/project',
+          prompt: 'review this repo',
+          name: 'Review Team'
+        })
+      })
+    ])
+  })
 })

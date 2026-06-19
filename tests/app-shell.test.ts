@@ -7112,6 +7112,87 @@ describe('AppShell', () => {
     wrapper.unmount()
   })
 
+  it('launches control_compat-style agent teams as grouped visible local terminals through the control socket', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    mockXtermInstances.length = 0
+    let controlHandler: ((request: any) => Promise<any> | any) | null = null
+    vi.mocked(window.aiops.onControlRequest).mockImplementationOnce((handler: any) => {
+      controlHandler = handler
+      return () => {
+        controlHandler = null
+      }
+    })
+    let terminalIndex = 0
+    vi.mocked(window.aiops.createTerminal).mockImplementation(async (options?: any) => {
+      terminalIndex += 1
+      const id = `team-terminal-${terminalIndex}`
+      return {
+        id,
+        shell: '/bin/bash',
+        cwd: options?.cwd || '/work/project',
+        kind: 'local',
+        lifecycle: {
+          id,
+          kind: 'local',
+          stage: 'shell-ready',
+          shell: '/bin/bash',
+          cwd: options?.cwd || '/work/project',
+          at: 1717200007000 + terminalIndex
+        }
+      }
+    })
+
+    const wrapper = mount(TerminalWorkspace, {
+      attachTo: document.body,
+      global: { plugins: [pinia] }
+    })
+    await flushPromises()
+    expect(controlHandler).toBeTruthy()
+    const invokeControlHandler = controlHandler as unknown as (request: any) => Promise<any>
+    const store = useWorkspaceStore()
+
+    const response = await invokeControlHandler({
+      id: 'team-1',
+      method: 'agent.team.launch',
+      params: {
+        source: 'codex',
+        count: 2,
+        cwd: '/work/project',
+        prompt: 'review this repo',
+        name: 'Review Team'
+      }
+    })
+    await flushPromises()
+
+    expect(response).toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
+          team: expect.objectContaining({
+            source: 'codex',
+            requestedCount: 2,
+            launchedCount: 2,
+            failedCount: 0,
+            group: expect.objectContaining({ name: 'Review Team', memberCount: 2 })
+          })
+        })
+      })
+    )
+    expect(window.aiops.createTerminal).toHaveBeenCalledTimes(2)
+    expect(window.aiops.createTerminal).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ kind: 'local', title: 'Codex 1', cwd: '/work/project', terminalType: expect.any(String) })
+    )
+    expect(window.aiops.writeTerminal).toHaveBeenCalledWith('team-terminal-1', "cd '/work/project' && codex 'review this repo'\n")
+    expect(window.aiops.writeTerminal).toHaveBeenCalledWith('team-terminal-2', "cd '/work/project' && codex 'review this repo'\n")
+    expect(store.panels.filter((panel) => panel.title.startsWith('Codex'))).toHaveLength(2)
+    expect(response?.data?.snapshot.workspaceGroups).toEqual([expect.objectContaining({ name: 'Review Team', memberCount: 2, active: true })])
+    expect(store.topNotice).toBe('已创建 2 个 Codex Team 会话')
+
+    wrapper.unmount()
+  })
+
   it('applies terminal type and font settings to active views and new local sessions', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)

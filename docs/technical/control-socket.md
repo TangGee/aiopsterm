@@ -49,6 +49,12 @@ The Agent Hibernation slice adds explicit managed-agent lifecycle controls:
 - `agent.hibernate`: hibernate one managed AI session by `sessionId`, with optional `source` when ids are ambiguous.
 - `agent.resume`: focus one managed AI session and write its stored resume command into the owning local terminal.
 
+The Agent Teams slice adds control_compat-style multi-agent launch primitives for aiopsterm local connection terminals:
+
+- `agent.team.launch`: create one or more visible local terminal surfaces, start local shells, write each agent launch command through terminal command security, and group the created surfaces.
+
+This starts agents in terminals owned by aiopsterm's main work panel. It does not manage the embedded right-side Codex panel and does not use external OS terminals.
+
 Aliases are accepted for control_compat-compatible scripts where useful:
 
 - `tree` and `top` map to `workspace.snapshot`.
@@ -116,6 +122,9 @@ node /path/to/resources/aiopsterm-control.js agent-hibernation status
 node /path/to/resources/aiopsterm-control.js agent-hibernation on
 node /path/to/resources/aiopsterm-control.js agent hibernate --session codex-session-1 --source codex
 node /path/to/resources/aiopsterm-control.js agent resume --session codex-session-1 --source codex
+node /path/to/resources/aiopsterm-control.js agent team launch --source codex --count 3 --cwd "$PWD" --prompt "review this repo"
+node /path/to/resources/aiopsterm-control.js agent team launch --source claude-code --count 2 --cwd "$PWD" --prompt "investigate flaky tests"
+node /path/to/resources/aiopsterm-control.js agent team launch --source custom --count 2 --command "my-agent --role reviewer --index {{index}}"
 node /path/to/resources/aiopsterm-control.js tree
 node /path/to/resources/aiopsterm-control.js terminal read-screen --lines 40
 node /path/to/resources/aiopsterm-control.js terminal focus --panel panel-main
@@ -140,6 +149,10 @@ Future higher-level automation commands should use the control socket but must c
 Agent Hibernation is also explicit. It is off by default and only targets coding-agent sessions that were discovered inside aiopsterm-created local connection terminals. `agent.hibernate` asks the renderer to close the owning terminal backend session and then records hibernation metadata in the managed AI session store. It refuses sessions that currently need input or have no resume command. `agent.resume` writes the stored resume command through the same renderer terminal command path used by AI session recovery, so risky commands still pass through terminal command safety approval before any bytes are written to the shell.
 
 This hibernation slice does not implement an automatic idle reaper. Automatic hibernation needs reliable terminal activity sampling and a user-visible confirmation window before aiopsterm kills a process group.
+
+`agent.team.launch` is visible automation. Every created team member is a real local terminal surface, and every launch command is written through the existing renderer terminal command path. If command security requires approval, the member is returned with `status: "needs-approval"` and the normal terminal security prompt is shown. The command builder supports `source=codex`, `source=claude-code`, and `source=custom`. Custom commands may use `{{index}}`, `{{cwd}}`, `{{prompt}}`, `{{role}}`, and `{{model}}` placeholders.
+
+The current Teams slice intentionally stops at visible local-terminal orchestration. control_compat's deeper Codex Teams app-server watcher, which bridges Codex private app-server approvals into Feed, is a separate integration because it owns a private Codex websocket lifecycle and approval response mapping.
 
 ## Generic Notifications
 

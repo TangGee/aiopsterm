@@ -15,6 +15,7 @@ Commands:
   surface list
   agent-hibernation on|off|status
   agent hibernate|resume --session <id> [--source <source>]
+  agent team launch [--source codex|claude-code|custom] [--count <n>] [--cwd <path>] [--prompt <text>] [--command <shell>]
   tree
   terminal list
   terminal focus --panel <id>|--session <id>
@@ -80,6 +81,30 @@ const methodParams = () => {
   if (command === 'agent') {
     const subcommand = args.shift() || 'status'
     if (subcommand === 'status') return { method: 'agent.status', params: {} }
+    if (subcommand === 'team' || subcommand === 'teams') {
+      const action = args.shift() || 'launch'
+      if (action === 'launch' || action === 'start') {
+        const source = readOption('--source') || readOption('--agent') || 'codex'
+        const count = Number(readOption('--count') || readOption('-n') || 2)
+        const cwd = readOption('--cwd') || readOption('-C')
+        const prompt = readOption('--prompt') || readOption('-p')
+        const commandText = readOption('--command') || readOption('--shell')
+        const name = readOption('--name') || readOption('--group-name')
+        return {
+          method: 'agent.team.launch',
+          params: {
+            source,
+            count,
+            cwd,
+            prompt,
+            command: commandText,
+            name,
+            groupName: name
+          }
+        }
+      }
+      throw new Error(`Unknown agent team command: ${action}`)
+    }
     if (subcommand === 'hibernate' || subcommand === 'resume') {
       const sessionId = readOption('--session') || readOption('--session-id') || args.find((arg) => !arg.startsWith('--')) || ''
       const source = readOption('--source') || readOption('--agent')
@@ -232,6 +257,26 @@ const printResponse = (response) => {
   }
   if (data.config) {
     process.stdout.write(`agent-hibernation\t${data.config.enabled ? 'on' : 'off'}\tmax=${data.config.maxLiveTerminals}\tidle=${data.config.idleSeconds}\n`)
+    return
+  }
+  if (data.team) {
+    const team = data.team
+    process.stdout.write(`agent-team\t${team.source || '-'}\tlaunched=${team.launchedCount || 0}\tapproval=${team.approvalCount || 0}\tfailed=${team.failedCount || 0}\n`)
+    if (team.group) process.stdout.write(`group\t${team.group.ref || team.group.id || '-'}\t${team.group.name || ''}\t${team.group.memberCount || 0} members\n`)
+    if (Array.isArray(team.members)) {
+      for (const member of team.members) {
+        process.stdout.write(
+          [
+            member.status === 'launched' ? '*' : member.status === 'needs-approval' ? '?' : '!',
+            member.index ?? '-',
+            member.panel?.panelId || '-',
+            member.terminal?.sessionId || '-',
+            member.status || '-',
+            member.errorMessage || member.command || ''
+          ].join('\t') + '\n'
+        )
+      }
+    }
     return
   }
   if (Array.isArray(data.groups)) {
