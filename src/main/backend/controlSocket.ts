@@ -2,7 +2,7 @@ import { createServer, type Server, type Socket } from 'net'
 import { randomUUID } from 'crypto'
 import { existsSync, rmSync } from 'fs'
 import { dirname, join } from 'path'
-import { mkdir } from 'fs/promises'
+import { mkdir, readFile, writeFile } from 'fs/promises'
 import type { BrowserWindow, IpcMain } from 'electron'
 import { sendWindowEvent } from '@shared/windowEvents'
 import type { ControlNotificationFocusRequest, ControlNotificationRecord, ControlRequest, ControlResponse } from '@shared/preload'
@@ -56,12 +56,28 @@ type ControlEventSubscription = {
   heartbeatTimer?: NodeJS.Timeout
 }
 
+type AgentVaultEntry = {
+  id: string
+  name: string
+  description?: string
+  executable?: string
+  launchCommand?: string
+  resumeCommand?: string
+  forkCommand?: string
+  sessionDirectory?: string
+  icon?: string
+  createdAt: number
+  updatedAt: number
+}
+
 const defaultTimeoutMs = 5000
 const maxTimeoutMs = 30000
 const maxNotifications = 500
 const eventReplayLimit = 4096
 const eventHeartbeatIntervalMs = 15000
 const eventProtocol = 'aiopsterm-events' as const
+const maxAgentVaultEntries = 200
+const maxAgentVaultCommandLength = 2000
 
 let server: Server | null = null
 let socketPath = ''
@@ -72,6 +88,10 @@ const eventBootId = randomUUID()
 let nextEventSeq = 1
 let eventLog: ControlEventFrame[] = []
 const eventSubscriptions = new Map<string, ControlEventSubscription>()
+let agentVaultStorePath = ''
+let agentVaultLoadedPath = ''
+let agentVaultEntries = new Map<string, AgentVaultEntry>()
+let agentVaultWriteQueue: Promise<void> = Promise.resolve()
 
 const cleanText = (value: unknown) => (typeof value === 'string' ? value.trim() : '')
 
@@ -117,12 +137,16 @@ const socketPathFor = (userDataPath: string) => {
   return join(userDataPath, 'control', `aiopsterm-control-${process.pid}.sock`)
 }
 
+const agentVaultPathFor = (userDataPath: string) => join(userDataPath, 'control', 'agent-vault.json')
+
 const isEventStreamMethod = (method: unknown) => {
   const normalized = cleanText(method)
   return normalized === 'events.stream' || normalized === 'event.stream' || normalized === 'event.subscribe' || normalized === 'events.subscribe'
 }
 
 const isEventListMethod = (method: string) => method === 'events.list' || method === 'event.list'
+
+const isAgentVaultMethod = (method: string) => method.startsWith('agent.vault.') || method.startsWith('agent-vault.')
 
 const eventFiltersFromParams = (params: Record<string, unknown> = {}): ControlEventFilters => ({
   names: new Set([...cleanTextList(params.names), ...cleanTextList(params.name)]),
@@ -196,6 +220,177 @@ const notificationEventPayload = (notification: ControlNotificationRecord) => ({
   ...(notification.sessionId ? { session_id: notification.sessionId, sessionId: notification.sessionId } : {}),
   ...(notification.source ? { source: notification.source } : {})
 })
+
+const normalizeAgentVaultId = (value: unknown) => cleanText(value).toLowerCase()
+
+const isValidAgentVaultId = (value: string) => /^[a-z0-9][a-z0-9._-]{0,63}$/.test(value)
+
+const cleanAgentVaultCommand = (value: unknown) => {
+  const text = cleanText(value)
+  return text && text.length <= maxAgentVaultCommandLength ? text : ''
+}
+
+const cloneAgentVaultEntry = (entry: AgentVaultEntry): AgentVaultEntry => ({ ...entry })
+
+const sortedAgentVaultEntries = () => [...agentVaultEntries.values()].sort((left, right) => left.id.localeCompare(right.id)).map(cloneAgentVaultEntry)
+
+const agentVaultPayload = (agent?: AgentVaultEntry | null) => ({
+  agents: sortedAgentVaultEntries(),
+  count: agentVaultEntries.size,
+  ...(agent ? { agent: cloneAgentVaultEntry(agent) } : {})
+})
+
+const normalizeAgentVaultEntry = (value: unknown, existing?: AgentVaultEntry): AgentVaultEntry | null => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const record = value as Record<string, unknown>
+  const id = normalizeAgentVaultId(record.id || existing?.id)
+  if (!id || !isValidAgentVaultId(id)) return null
+  const name = cleanText(record.name) || existing?.name || id
+  const launchCommand = cleanAgentVaultCommand(record.launchCommand || record.launch_command || record.launch || record.command) || existing?.launchCommand
+  const resumeCommand = cleanAgentVaultCommand(record.resumeCommand || record.resume_command || record.resume) || existing?.resumeCommand
+  const forkCommand = cleanAgentVaultCommand(record.forkCommand || record.fork_command || record.fork) || existing?.forkCommand
+  if (!launchCommand && !resumeCommand && !forkCommand) return null
+  const now = Date.now()
+  return {
+    id,
+    name,
+    ...(cleanText(record.description) || existing?.description ? { description: cleanText(record.description) || existing?.description } : {}),
+    ...(cleanText(record.executable) || existing?.executable ? { executable: cleanText(record.executable) || existing?.executable } : {}),
+    ...(launchCommand ? { launchCommand } : {}),
+    ...(resumeCommand ? { resumeCommand } : {}),
+    ...(forkCommand ? { forkCommand } : {}),
+    ...(cleanText(record.sessionDirectory || record.session_directory || record.sessionDir) || existing?.sessionDirectory
+      ? { sessionDirectory: cleanText(record.sessionDirectory || record.session_directory || record.sessionDir) || existing?.sessionDirectory }
+      : {}),
+    ...(cleanText(record.icon || record.iconAssetName) || existing?.icon ? { icon: cleanText(record.icon || record.iconAssetName) || existing?.icon } : {}),
+    createdAt: existing?.createdAt || now,
+    updatedAt: now
+  }
+}
+
+const loadAgentVaultStore = async (userDataPath?: string) => {
+  if (userDataPath) agentVaultStorePath = agentVaultPathFor(userDataPath)
+  if (!agentVaultStorePath || agentVaultLoadedPath === agentVaultStorePath) return
+  agentVaultEntries = new Map()
+  agentVaultLoadedPath = agentVaultStorePath
+  if (!existsSync(agentVaultStorePath)) return
+  try {
+    const raw = await readFile(agentVaultStorePath, 'utf-8')
+    const parsed = JSON.parse(raw) as unknown
+    const items = Array.isArray(parsed) ? parsed : parsed && typeof parsed === 'object' && Array.isArray((parsed as Record<string, unknown>).agents) ? ((parsed as Record<string, unknown>).agents as unknown[]) : []
+    for (const item of items.slice(0, maxAgentVaultEntries)) {
+      const entry = normalizeAgentVaultEntry(item)
+      if (entry) agentVaultEntries.set(entry.id, entry)
+    }
+  } catch {
+    agentVaultEntries = new Map()
+  }
+}
+
+const persistAgentVaultStore = async () => {
+  if (!agentVaultStorePath) return
+  const payload = {
+    version: 1,
+    agents: sortedAgentVaultEntries()
+  }
+  agentVaultWriteQueue = agentVaultWriteQueue
+    .catch(() => undefined)
+    .then(async () => {
+      await mkdir(dirname(agentVaultStorePath), { recursive: true })
+      await writeFile(agentVaultStorePath, `${JSON.stringify(payload, null, 2)}\n`, 'utf-8')
+    })
+  await agentVaultWriteQueue
+}
+
+const agentVaultEntryFor = (value: unknown) => {
+  const id = normalizeAgentVaultId(value)
+  return id ? agentVaultEntries.get(id) || null : null
+}
+
+const renderAgentVaultTemplate = (entry: AgentVaultEntry, template: string, params: Record<string, unknown>, options: { preserveDynamic?: boolean } = {}) => {
+  const dynamic = new Set(['index', 'count', 'cwd', 'prompt', 'role', 'model'])
+  const values: Record<string, string> = {
+    agentId: entry.id,
+    agentName: entry.name,
+    executable: cleanText(params.executable) || entry.executable || entry.id,
+    cwd: cleanText(params.cwd),
+    prompt: cleanText(params.prompt || params.message || params.instruction),
+    role: cleanText(params.role || params.agentRole),
+    model: cleanText(params.model),
+    index: cleanText(params.index) || '1',
+    count: cleanText(params.count) || cleanText(params.n) || '1',
+    sessionId: cleanText(params.sessionId || params.session_id),
+    sessionPath: cleanText(params.sessionPath || params.session_path),
+    sessionDir: cleanText(params.sessionDir || params.sessionDirectory || params.session_directory) || entry.sessionDirectory || ''
+  }
+  return template.replace(/\{\{([a-zA-Z][a-zA-Z0-9_]*)\}\}/g, (match, key: string) => {
+    if (options.preserveDynamic && dynamic.has(key)) return match
+    return Object.prototype.hasOwnProperty.call(values, key) ? values[key] : match
+  })
+}
+
+const handleAgentVaultControlRequest = async (method: string, params: Record<string, unknown>) => {
+  await loadAgentVaultStore(runtime.userDataPath)
+  const action = method.startsWith('agent-vault.') ? method.slice('agent-vault.'.length) : method.slice('agent.vault.'.length)
+  if (action === 'list') return ok(agentVaultPayload())
+  if (action === 'register' || action === 'set') {
+    if (agentVaultEntries.size >= maxAgentVaultEntries && !agentVaultEntryFor(params.id)) {
+      return fail('AGENT_VAULT_LIMIT_REACHED', `Agent vault supports at most ${maxAgentVaultEntries} entries.`)
+    }
+    const existing = agentVaultEntryFor(params.id)
+    const entry = normalizeAgentVaultEntry(params, existing || undefined)
+    if (!entry) return fail('AGENT_VAULT_ENTRY_INVALID', 'Agent vault entry needs a valid id and at least one launch/resume/fork command template.')
+    agentVaultEntries.set(entry.id, entry)
+    await persistAgentVaultStore()
+    publishControlEvent({
+      name: existing ? 'agent_vault.updated' : 'agent_vault.registered',
+      category: 'agent',
+      payload: { agent_id: entry.id, agent_name: entry.name, has_launch: Boolean(entry.launchCommand), has_resume: Boolean(entry.resumeCommand), has_fork: Boolean(entry.forkCommand) }
+    })
+    return ok(agentVaultPayload(entry))
+  }
+  if (action === 'get') {
+    const entry = agentVaultEntryFor(params.id || params.agent || params.source)
+    if (!entry) return fail('AGENT_VAULT_ENTRY_NOT_FOUND', 'Agent vault entry was not found.')
+    return ok(agentVaultPayload(entry))
+  }
+  if (action === 'remove' || action === 'delete' || action === 'unset') {
+    const entry = agentVaultEntryFor(params.id || params.agent || params.source)
+    if (!entry) return fail('AGENT_VAULT_ENTRY_NOT_FOUND', 'Agent vault entry was not found.')
+    agentVaultEntries.delete(entry.id)
+    await persistAgentVaultStore()
+    publishControlEvent({ name: 'agent_vault.removed', category: 'agent', payload: { agent_id: entry.id, agent_name: entry.name } })
+    return ok({ removed: true, removedId: entry.id, ...agentVaultPayload() })
+  }
+  if (action === 'render') {
+    const entry = agentVaultEntryFor(params.id || params.agent || params.source)
+    if (!entry) return fail('AGENT_VAULT_ENTRY_NOT_FOUND', 'Agent vault entry was not found.')
+    const kind = cleanText(params.kind || params.commandKind || params.command_kind || 'launch') || 'launch'
+    const template = kind === 'resume' ? entry.resumeCommand : kind === 'fork' ? entry.forkCommand : entry.launchCommand
+    if (!template) return fail('AGENT_VAULT_TEMPLATE_NOT_FOUND', `Agent vault entry has no ${kind} command template.`)
+    return ok({ agent: cloneAgentVaultEntry(entry), kind, command: renderAgentVaultTemplate(entry, template, params) })
+  }
+  return fail('UNKNOWN_CONTROL_METHOD', `Unknown aiopsterm agent vault method: ${method}`)
+}
+
+const prepareAgentTeamLaunchParams = async (params: Record<string, unknown>): Promise<Record<string, unknown> | ControlResponse> => {
+  await loadAgentVaultStore(runtime.userDataPath)
+  const source = normalizeAgentVaultId(params.source || params.agent)
+  const explicitCommand = cleanAgentVaultCommand(params.command || params.shell || params.commandText)
+  if (!source || explicitCommand || source === 'codex' || source === 'claude' || source === 'claude-code' || source === 'claude_code' || source === 'custom') return params
+  const entry = agentVaultEntryFor(source)
+  if (!entry) return params
+  if (!entry.launchCommand) return fail('AGENT_VAULT_LAUNCH_UNAVAILABLE', `Agent vault entry ${entry.id} has no launch command template.`)
+  return {
+    ...params,
+    source: 'custom',
+    agentVaultId: entry.id,
+    agentVaultName: entry.name,
+    command: renderAgentVaultTemplate(entry, entry.launchCommand, params, { preserveDynamic: true }),
+    name: cleanText(params.name || params.groupName || params.title) || `${entry.name} Team`,
+    groupName: cleanText(params.groupName || params.name || params.title) || `${entry.name} Team`
+  }
+}
 
 const listEvents = (params: Record<string, unknown>) => {
   const filters = eventFiltersFromParams(params)
@@ -566,6 +761,7 @@ const handleControlRequest = async (request: ControlSocketRequest): Promise<Cont
   const params = request.params || {}
   if (!method || method === 'ping') return ok({ pong: true, socketPath })
   if (isEventListMethod(method)) return listEvents(params)
+  if (isAgentVaultMethod(method)) return handleAgentVaultControlRequest(method, params)
   if (
     method === 'workspace.snapshot' ||
     method === 'workspace.list' ||
@@ -580,8 +776,11 @@ const handleControlRequest = async (request: ControlSocketRequest): Promise<Cont
     method === 'tree' ||
     method === 'top'
   ) {
-    const response = await dispatchRendererControlRequest(method, params)
-    publishRendererMutationEvent(method, params, response)
+    const rendererParamsOrResponse = method === 'agent.team.launch' ? await prepareAgentTeamLaunchParams(params) : params
+    if ('ok' in rendererParamsOrResponse && rendererParamsOrResponse.ok === false) return rendererParamsOrResponse as ControlResponse
+    const rendererParams = rendererParamsOrResponse as Record<string, unknown>
+    const response = await dispatchRendererControlRequest(method, rendererParams)
+    publishRendererMutationEvent(method, rendererParams, response)
     return response
   }
   if (method === 'list_workspaces') return dispatchRendererControlRequest('workspace.list', params)
@@ -623,6 +822,10 @@ const writeSocketResponse = (socket: Socket, id: string | undefined, response: C
 
 export const configureControlSocketRuntime = (config: ControlSocketRuntime = {}) => {
   runtime = { ...runtime, ...config }
+  if (config.userDataPath) {
+    agentVaultStorePath = agentVaultPathFor(config.userDataPath)
+    if (agentVaultLoadedPath && agentVaultLoadedPath !== agentVaultStorePath) agentVaultLoadedPath = ''
+  }
 }
 
 export const getControlSocketPath = () => socketPath
@@ -642,6 +845,8 @@ export const registerControlSocketIpc = (ipcMain: IpcMain) => {
 export const ensureControlSocketServer = async (userDataPath: string) => {
   if (server && socketPath) return socketPath
   socketPath = socketPathFor(userDataPath)
+  runtime = { ...runtime, userDataPath }
+  await loadAgentVaultStore(userDataPath)
   if (process.platform !== 'win32') {
     await mkdir(dirname(socketPath), { recursive: true })
     if (existsSync(socketPath)) rmSync(socketPath, { force: true })
@@ -706,6 +911,9 @@ export const closeControlSocketServer = () => {
   notifications = []
   eventLog = []
   nextEventSeq = 1
+  agentVaultEntries = new Map()
+  agentVaultLoadedPath = ''
+  agentVaultStorePath = ''
   server?.close()
   server = null
   if (socketPath && process.platform !== 'win32' && existsSync(socketPath)) rmSync(socketPath, { force: true })
@@ -717,6 +925,8 @@ export const invokeControlSocketMethod = (method: string, params?: Record<string
 export const __testing = {
   handleControlRequest,
   listEvents: () => eventLog,
+  listAgentVaultEntries: () => sortedAgentVaultEntries(),
+  agentVaultPathFor,
   listNotifications: () => notifications,
   pendingRendererRequestCount: () => pendingRendererRequests.size,
   eventSubscriptionCount: () => eventSubscriptions.size

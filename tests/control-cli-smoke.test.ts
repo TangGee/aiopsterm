@@ -298,6 +298,78 @@ describe('aiopsterm-control CLI', () => {
     ])
   })
 
+  it('sends agent vault requests over the configured socket', async () => {
+    const seen: Record<string, unknown>[] = []
+    const socketPath = await startControlServer((request) => {
+      seen.push(request)
+      return {
+        id: request.id,
+        ok: true,
+        data: {
+          agent: {
+            id: 'my-agent',
+            name: 'My Agent',
+            launchCommand: 'my-agent --index {{index}} {{prompt}}',
+            resumeCommand: 'my-agent --session {{sessionId}}'
+          },
+          agents: [
+            {
+              id: 'my-agent',
+              name: 'My Agent',
+              launchCommand: 'my-agent --index {{index}} {{prompt}}',
+              resumeCommand: 'my-agent --session {{sessionId}}'
+            }
+          ],
+          command: 'my-agent --session session-1'
+        }
+      }
+    })
+
+    const register = await execFileAsync(
+      process.execPath,
+      [
+        'resources/aiopsterm-control.js',
+        '--socket',
+        socketPath,
+        'agent',
+        'vault',
+        'register',
+        '--id',
+        'my-agent',
+        '--name',
+        'My Agent',
+        '--launch-command',
+        'my-agent --index {{index}} {{prompt}}',
+        '--resume-command',
+        'my-agent --session {{sessionId}}'
+      ],
+      { cwd: process.cwd() }
+    )
+    expect(register.stdout).toContain('agent-vault\tmy-agent\tMy Agent\tlaunch\tresume')
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'agent', 'vault', 'list'], { cwd: process.cwd() })
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'agent', 'vault', 'render', '--id', 'my-agent', '--kind', 'resume', '--session', 'session-1'], {
+      cwd: process.cwd()
+    })
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'agent', 'vault', 'remove', '--id', 'my-agent'], { cwd: process.cwd() })
+
+    expect(seen).toEqual([
+      expect.objectContaining({
+        method: 'agent.vault.register',
+        params: expect.objectContaining({
+          id: 'my-agent',
+          name: 'My Agent',
+          launchCommand: 'my-agent --index {{index}} {{prompt}}',
+          launch_command: 'my-agent --index {{index}} {{prompt}}',
+          resumeCommand: 'my-agent --session {{sessionId}}',
+          resume_command: 'my-agent --session {{sessionId}}'
+        })
+      }),
+      expect.objectContaining({ method: 'agent.vault.list' }),
+      expect.objectContaining({ method: 'agent.vault.render', params: expect.objectContaining({ id: 'my-agent', kind: 'resume', sessionId: 'session-1' }) }),
+      expect.objectContaining({ method: 'agent.vault.remove', params: expect.objectContaining({ id: 'my-agent' }) })
+    ])
+  })
+
   it('sends surface resume requests over the configured socket', async () => {
     const seen: Record<string, unknown>[] = []
     const socketPath = await startControlServer((request) => {

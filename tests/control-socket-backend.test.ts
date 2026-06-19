@@ -1,5 +1,5 @@
 import { createConnection } from 'net'
-import { mkdtemp, rm } from 'fs/promises'
+import { mkdtemp, readFile, rm } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -7,6 +7,7 @@ import type { ControlRequest, ControlResponse } from '@shared/preload'
 
 type ControlSocketBackend = {
   configureControlSocketRuntime: (config?: {
+    userDataPath?: string
     getWindows?: () => Array<Record<string, unknown>>
     focusWindow?: (window?: Record<string, unknown> | null) => Record<string, unknown> | null
     writeTerminal?: (sessionId: string, data: string) => Promise<ControlResponse> | ControlResponse
@@ -20,6 +21,8 @@ type ControlSocketBackend = {
     pendingRendererRequestCount: () => number
     listNotifications: () => Array<Record<string, unknown>>
     listEvents: () => Array<Record<string, unknown>>
+    listAgentVaultEntries: () => Array<Record<string, unknown>>
+    agentVaultPathFor: (userDataPath: string) => string
     eventSubscriptionCount: () => number
   }
 }
@@ -433,6 +436,89 @@ describe('control socket backend', () => {
       expect(liveFrames[1]).toEqual(expect.objectContaining({ type: 'event', name: 'notification.created', category: 'notification' }))
       await nextTick()
       expect(backend.__testing.eventSubscriptionCount()).toBe(0)
+    } finally {
+      backend.closeControlSocketServer()
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('registers, persists, renders, and routes agent vault entries for visible team launch', async () => {
+    const backend = await loadBackend()
+    const root = await mkdtemp(join(tmpdir(), 'aiopsterm-control-vault-'))
+    try {
+      await backend.ensureControlSocketServer(root)
+      const registered = await backend.__testing.handleControlRequest({
+        method: 'agent.vault.register',
+        params: {
+          id: 'my-agent',
+          name: 'My Agent',
+          executable: 'my-agent',
+          launchCommand: 'my-agent --cwd {{cwd}} --role {{role}} --index {{index}} {{prompt}}',
+          resumeCommand: 'my-agent --session {{sessionId}}',
+          forkCommand: 'my-agent --session {{sessionId}} --fork'
+        }
+      })
+      expect(registered).toEqual(
+        expect.objectContaining({
+          ok: true,
+          data: expect.objectContaining({
+            agent: expect.objectContaining({ id: 'my-agent', name: 'My Agent', launchCommand: expect.stringContaining('{{index}}') })
+          })
+        })
+      )
+      expect(backend.__testing.listAgentVaultEntries()).toEqual([expect.objectContaining({ id: 'my-agent' })])
+
+      await expect(
+        backend.__testing.handleControlRequest({
+          method: 'agent.vault.render',
+          params: { id: 'my-agent', kind: 'resume', sessionId: 'session-1' }
+        })
+      ).resolves.toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ command: 'my-agent --session session-1' }) }))
+
+      backend.registerControlSocketIpc({
+        handle: (_channel, handler) => {
+          mockIpcHandler = handler
+        }
+      })
+      mockWindow = createMockWindow((request) => ({
+        ok: true,
+        data: {
+          team: {
+            source: 'custom',
+            requestedCount: 2,
+            launchedCount: 2,
+            approvalCount: 0,
+            failedCount: 0,
+            members: [],
+            group: { ref: 'workspace_group:1', name: 'My Agent Team', memberCount: 2 }
+          }
+        }
+      }))
+      backend.configureControlSocketRuntime({ userDataPath: root, getWindows: () => [mockWindow] })
+      await expect(
+        backend.__testing.handleControlRequest({
+          method: 'agent.team.launch',
+          params: { source: 'my-agent', count: 2, cwd: '/work/project', prompt: 'review', role: 'reviewer' }
+        })
+      ).resolves.toEqual(expect.objectContaining({ ok: true }))
+      expect(mockWindow.requests).toEqual([
+        expect.objectContaining({
+          method: 'agent.team.launch',
+          params: expect.objectContaining({
+            source: 'custom',
+            agentVaultId: 'my-agent',
+            agentVaultName: 'My Agent',
+            command: 'my-agent --cwd {{cwd}} --role {{role}} --index {{index}} {{prompt}}',
+            cwd: '/work/project',
+            prompt: 'review',
+            role: 'reviewer',
+            name: 'My Agent Team'
+          })
+        })
+      ])
+
+      const storeFile = await readFile(backend.__testing.agentVaultPathFor(root), 'utf-8')
+      expect(storeFile).toContain('"id": "my-agent"')
     } finally {
       backend.closeControlSocketServer()
       await rm(root, { recursive: true, force: true })

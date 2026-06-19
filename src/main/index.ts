@@ -1572,6 +1572,7 @@ configureLocalTerminalBackendRuntime({
   getControlSocketPath
 })
 configureControlSocketRuntime({
+  userDataPath: app.getPath('userData'),
   getWindows: () => BrowserWindow.getAllWindows(),
   focusWindow,
   writeTerminal: writeTerminalBySessionId,

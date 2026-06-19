@@ -67,6 +67,14 @@ The events slice adds a control_compat-style local JSONL stream for automation:
 - `events.stream` / `event.subscribe`: take over the socket connection and stream `ack`, replayed `event`, live `event`, and `heartbeat` frames.
 - `events.list`: list retained in-memory events for simple polling and tests.
 
+The Agent Vault slice adds custom agent launch metadata for visible local-terminal automation:
+
+- `agent.vault.register`: register a custom agent id and command templates.
+- `agent.vault.list`: list registered custom agents.
+- `agent.vault.get`: read one custom agent definition.
+- `agent.vault.render`: render a launch, resume, or fork command from a template.
+- `agent.vault.remove`: remove one custom agent definition.
+
 Aliases are accepted for control_compat-compatible scripts where useful:
 
 - `tree` and `top` map to `workspace.snapshot`.
@@ -141,6 +149,9 @@ node /path/to/resources/aiopsterm-control.js agent resume --session codex-sessio
 node /path/to/resources/aiopsterm-control.js agent team launch --source codex --count 3 --cwd "$PWD" --prompt "review this repo"
 node /path/to/resources/aiopsterm-control.js agent team launch --source claude-code --count 2 --cwd "$PWD" --prompt "investigate flaky tests"
 node /path/to/resources/aiopsterm-control.js agent team launch --source custom --count 2 --command "my-agent --role reviewer --index {{index}}"
+node /path/to/resources/aiopsterm-control.js agent vault register --id my-agent --name "My Agent" --launch-command "my-agent --cwd {{cwd}} --index {{index}} {{prompt}}" --resume-command "my-agent --session {{sessionId}}"
+node /path/to/resources/aiopsterm-control.js agent vault render --id my-agent --kind resume --session session-1
+node /path/to/resources/aiopsterm-control.js agent team launch --source my-agent --count 3 --cwd "$PWD" --prompt "review this repo"
 node /path/to/resources/aiopsterm-control.js events --category notification --cursor-file ~/.cache/aiopsterm/events.seq --limit 10
 node /path/to/resources/aiopsterm-control.js tree
 node /path/to/resources/aiopsterm-control.js terminal read-screen --lines 40
@@ -192,6 +203,24 @@ Current event categories are:
 - `agent`: hibernation and visible agent-team automation mutations.
 
 The event replay buffer is process-local memory capped at 4,096 events. It is not yet written to a durable JSONL file, so clients should refresh state from `workspace.snapshot`, `surface.list`, and `notification.list` when `ack.resume.gap` is true or after app restart. Notification event payloads include bounded title previews and content lengths; they do not copy full notification bodies into the event stream.
+
+## Agent Vault
+
+Agent Vault is aiopsterm's custom-agent registry for local-terminal automation. It is inspired by control_compat Vault's custom agent registrations, but the current aiopsterm slice is intentionally limited to command templates. It does not inspect process tables or discover native session ids by itself.
+
+Definitions are stored under the app user-data control directory as `agent-vault.json`. A definition includes:
+
+- `id`: stable lowercase id used by `agent team launch --source <id>`.
+- `name`: display name used for generated workspace group titles.
+- `executable`: optional executable placeholder value.
+- `launchCommand`: template used by visible team launch.
+- `resumeCommand`: template for external scripts that need to resume a native session.
+- `forkCommand`: template for external scripts that support branching a session.
+- `sessionDirectory`: optional default for `{{sessionDir}}`.
+
+Supported placeholders are `{{agentId}}`, `{{agentName}}`, `{{executable}}`, `{{cwd}}`, `{{prompt}}`, `{{role}}`, `{{model}}`, `{{index}}`, `{{count}}`, `{{sessionId}}`, `{{sessionPath}}`, and `{{sessionDir}}`.
+
+When `agent team launch --source <registered-id>` is called, the main process renders static placeholders and forwards the request to the existing renderer `agent.team.launch` path as `source=custom`. Dynamic placeholders such as `{{index}}` are preserved for the renderer to expand per visible terminal. The final command is still written through aiopsterm terminal command security, so risky commands keep the same approval behavior as built-in team launch.
 
 ## Generic Notifications
 

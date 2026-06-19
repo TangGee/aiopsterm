@@ -18,6 +18,7 @@ Commands:
   surface resume set|show|get|clear|run [--panel <id>|--session <id>] [--shell <command>] [--kind <kind>] [--checkpoint <id>]
   agent-hibernation on|off|status
   agent hibernate|resume --session <id> [--source <source>]
+  agent vault register|list|get|remove|render
   agent team launch [--source codex|claude-code|custom] [--count <n>] [--cwd <path>] [--prompt <text>] [--command <shell>]
   events [--after <seq>] [--cursor-file <path>] [--name <event>] [--category <category>] [--limit <n>] [--no-ack] [--no-heartbeat]
   tree
@@ -86,6 +87,7 @@ const methodParams = () => {
   if (command === 'agent') {
     const subcommand = args.shift() || 'status'
     if (subcommand === 'status') return { method: 'agent.status', params: {} }
+    if (subcommand === 'vault' || subcommand === 'agent-vault') return agentVaultMethodParams(args.shift() || 'list')
     if (subcommand === 'team' || subcommand === 'teams') {
       const action = args.shift() || 'launch'
       if (action === 'launch' || action === 'start') {
@@ -160,6 +162,61 @@ const methodParams = () => {
   if (command === 'mark-notification-read') return { method: 'notification.mark_read', params: { id: readOption('--id'), all: hasFlag('--all') } }
   if (command === 'dismiss-notification') return { method: 'notification.dismiss', params: { id: readOption('--id'), allRead: hasFlag('--all-read') } }
   throw new Error(`Unknown command: ${command}`)
+}
+
+const agentVaultMethodParams = (subcommand) => {
+  if (subcommand === 'list') return { method: 'agent.vault.list', params: {} }
+  if (subcommand === 'register' || subcommand === 'set') {
+    const id = readOption('--id') || readOption('--agent') || args.find((arg) => !arg.startsWith('--')) || ''
+    const launchCommand = readOption('--launch-command') || readOption('--launch') || readOption('--command') || readOption('--shell')
+    const resumeCommand = readOption('--resume-command') || readOption('--resume')
+    const forkCommand = readOption('--fork-command') || readOption('--fork')
+    return {
+      method: 'agent.vault.register',
+      params: {
+        id,
+        name: readOption('--name') || id,
+        description: readOption('--description'),
+        executable: readOption('--executable'),
+        launchCommand,
+        launch_command: launchCommand,
+        resumeCommand,
+        resume_command: resumeCommand,
+        forkCommand,
+        fork_command: forkCommand,
+        sessionDirectory: readOption('--session-directory') || readOption('--session-dir'),
+        icon: readOption('--icon')
+      }
+    }
+  }
+  if (subcommand === 'get' || subcommand === 'show') {
+    const id = readOption('--id') || readOption('--agent') || args.find((arg) => !arg.startsWith('--')) || ''
+    return { method: 'agent.vault.get', params: { id } }
+  }
+  if (subcommand === 'remove' || subcommand === 'delete' || subcommand === 'unset') {
+    const id = readOption('--id') || readOption('--agent') || args.find((arg) => !arg.startsWith('--')) || ''
+    return { method: 'agent.vault.remove', params: { id } }
+  }
+  if (subcommand === 'render') {
+    const id = readOption('--id') || readOption('--agent') || args.find((arg) => !arg.startsWith('--')) || ''
+    return {
+      method: 'agent.vault.render',
+      params: {
+        id,
+        kind: readOption('--kind') || 'launch',
+        cwd: readOption('--cwd'),
+        prompt: readOption('--prompt'),
+        role: readOption('--role'),
+        model: readOption('--model'),
+        index: readOption('--index'),
+        count: readOption('--count'),
+        sessionId: readOption('--session') || readOption('--session-id'),
+        sessionPath: readOption('--session-path'),
+        sessionDir: readOption('--session-dir')
+      }
+    }
+  }
+  throw new Error(`Unknown agent vault command: ${subcommand}`)
 }
 
 const readRepeatOptions = (names) => {
@@ -404,6 +461,36 @@ const printResponse = (response) => {
         )
       }
     }
+    return
+  }
+  if (data.agent) {
+    const agent = data.agent
+    process.stdout.write(
+      [
+        'agent-vault',
+        agent.id || '-',
+        agent.name || '-',
+        agent.launchCommand ? 'launch' : '-',
+        agent.resumeCommand ? 'resume' : '-',
+        agent.forkCommand ? 'fork' : '-'
+      ].join('\t') + '\n'
+    )
+    if (data.command) process.stdout.write(`${data.command}\n`)
+    return
+  }
+  if (Array.isArray(data.agents)) {
+    for (const agent of data.agents) {
+      process.stdout.write(
+        [
+          agent.id || '-',
+          agent.name || '-',
+          agent.launchCommand ? 'launch' : '-',
+          agent.resumeCommand ? 'resume' : '-',
+          agent.forkCommand ? 'fork' : '-'
+        ].join('\t') + '\n'
+      )
+    }
+    if (data.agents.length === 0) process.stdout.write('No agent vault entries\n')
     return
   }
   if (Array.isArray(data.groups)) {
