@@ -446,6 +446,69 @@ describe('control socket backend', () => {
     expect(writes).toEqual([{ sessionId: 'terminal-1', data: 'pwd\n' }])
   })
 
+  it('writes terminal keys through session ids and resolves panel ids through the renderer', async () => {
+    const backend = await loadBackend()
+    const writes: Array<{ sessionId: string; data: string }> = []
+    backend.registerControlSocketIpc({
+      handle: (_channel, handler) => {
+        mockIpcHandler = handler
+      }
+    })
+    mockWindow = createMockWindow((request) => {
+      if (request.method === 'terminal.focus') {
+        return {
+          ok: true,
+          data: {
+            terminal: { panelId: 'panel-1', sessionId: 'terminal-1', title: 'Local', kind: 'local', active: true, connected: true }
+          }
+        }
+      }
+      return { ok: true, data: {} }
+    })
+    backend.configureControlSocketRuntime({
+      getWindows: () => [mockWindow],
+      writeTerminal: (sessionId, data) => {
+        writes.push({ sessionId, data })
+        return { ok: true, data: { id: sessionId, bytes: Buffer.byteLength(data, 'utf8') } }
+      }
+    })
+
+    await expect(
+      backend.__testing.handleControlRequest({
+        method: 'terminal.send_key',
+        params: { sessionId: 'terminal-2', key: 'ctrl+c' }
+      })
+    ).resolves.toEqual({ ok: true, data: { id: 'terminal-2', bytes: 1, key: 'ctrl+c' } })
+
+    await expect(
+      backend.__testing.handleControlRequest({
+        method: 'send-key-panel',
+        params: { panelId: 'panel-1', key: 'enter' }
+      })
+    ).resolves.toEqual({ ok: true, data: { id: 'terminal-1', bytes: 1, key: 'enter' } })
+
+    await expect(
+      backend.__testing.handleControlRequest({
+        method: 'terminal.send_key',
+        params: { sessionId: 'terminal-2', key: 'not-a-key-name' }
+      })
+    ).resolves.toEqual(expect.objectContaining({ ok: false, errorCode: 'TERMINAL_KEY_UNKNOWN' }))
+
+    expect(writes).toEqual([
+      { sessionId: 'terminal-2', data: '\x03' },
+      { sessionId: 'terminal-1', data: '\r' }
+    ])
+    expect(mockWindow.requests).toEqual([expect.objectContaining({ method: 'terminal.focus', params: expect.objectContaining({ panelId: 'panel-1' }) })])
+
+    const terminalEvents = await backend.__testing.handleControlRequest({ method: 'events.list', params: { category: 'terminal' } })
+    expect(terminalEvents.data?.events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'terminal.key_sent', payload: expect.objectContaining({ key: 'ctrl+c', bytes: 1 }) }),
+        expect.objectContaining({ name: 'terminal.key_sent', payload: expect.objectContaining({ key: 'enter', panel_id: 'panel-1' }) })
+      ])
+    )
+  })
+
   it('creates, lists, opens, marks, dismisses, and clears generic notifications', async () => {
     const backend = await loadBackend()
     backend.registerControlSocketIpc({

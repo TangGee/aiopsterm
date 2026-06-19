@@ -158,6 +158,7 @@ const controlSocketCapabilities = [
   'terminal.focus',
   'terminal.read_screen',
   'terminal.send_text',
+  'terminal.send_key',
   'notification',
   'events.stream',
   'events.list',
@@ -1787,11 +1788,85 @@ const terminalWriteData = (params: Record<string, unknown>) => {
   return ''
 }
 
-const sendTerminalText = async (params: Record<string, unknown>) => {
+const terminalPanelId = (params: Record<string, unknown>) => cleanText(params.panelId || params.panel_id || params.surfaceId || params.surface_id || params.panel || params.surface)
+
+const keyDataForTerminal = (value: unknown) => {
+  const raw = cleanText(value)
+  if (!raw) return null
+  const normalized = raw.toLowerCase().replace(/[\s_-]+/g, '')
+  const namedKeys: Record<string, string> = {
+    enter: '\r',
+    return: '\r',
+    cr: '\r',
+    tab: '\t',
+    space: ' ',
+    escape: '\x1b',
+    esc: '\x1b',
+    backspace: '\x7f',
+    bs: '\x7f',
+    delete: '\x1b[3~',
+    del: '\x1b[3~',
+    insert: '\x1b[2~',
+    ins: '\x1b[2~',
+    up: '\x1b[A',
+    arrowup: '\x1b[A',
+    down: '\x1b[B',
+    arrowdown: '\x1b[B',
+    right: '\x1b[C',
+    arrowright: '\x1b[C',
+    left: '\x1b[D',
+    arrowleft: '\x1b[D',
+    home: '\x1b[H',
+    end: '\x1b[F',
+    pageup: '\x1b[5~',
+    pgup: '\x1b[5~',
+    pagedown: '\x1b[6~',
+    pgdn: '\x1b[6~',
+    f1: '\x1bOP',
+    f2: '\x1bOQ',
+    f3: '\x1bOR',
+    f4: '\x1bOS',
+    f5: '\x1b[15~',
+    f6: '\x1b[17~',
+    f7: '\x1b[18~',
+    f8: '\x1b[19~',
+    f9: '\x1b[20~',
+    f10: '\x1b[21~',
+    f11: '\x1b[23~',
+    f12: '\x1b[24~'
+  }
+  if (namedKeys[normalized]) return { key: raw, data: namedKeys[normalized] }
+  const ctrlMatch = raw.match(/^(?:c|ctrl|control)[+-](.)$/i) || raw.match(/^\^(.)$/)
+  if (ctrlMatch?.[1]) {
+    const char = ctrlMatch[1].toUpperCase()
+    if (char === '?') return { key: raw, data: '\x7f' }
+    const code = char.charCodeAt(0)
+    if (code >= 64 && code <= 95) return { key: raw, data: String.fromCharCode(code - 64) }
+    if (code >= 65 && code <= 90) return { key: raw, data: String.fromCharCode(code - 64) }
+  }
+  if (raw.length === 1) return { key: raw, data: raw }
+  return null
+}
+
+const resolveTerminalSessionForInput = async (params: Record<string, unknown>) => {
   const sessionId = terminalSessionId(params)
+  if (sessionId) return { sessionId }
+  const panelId = terminalPanelId(params)
+  if (!panelId) return { error: fail('TERMINAL_SESSION_REQUIRED', 'sessionId is required.') }
+  const response = await dispatchRendererControlRequest('terminal.focus', { ...params, panelId, surfaceId: panelId }, { focus: true })
+  if (!response.ok) return { error: response }
+  const terminal = response.data?.terminal && typeof response.data.terminal === 'object' ? (response.data.terminal as Record<string, unknown>) : null
+  const resolvedSessionId = cleanText(terminal?.sessionId || terminal?.terminalSessionId)
+  if (!resolvedSessionId) return { error: fail('TERMINAL_SESSION_NOT_FOUND', 'Selected terminal has no connected session id.', { panelId }) }
+  return { sessionId: resolvedSessionId, panelId: cleanText(terminal?.panelId || panelId) }
+}
+
+const sendTerminalText = async (params: Record<string, unknown>) => {
   const text = terminalWriteData(params)
-  if (!sessionId) return fail('TERMINAL_SESSION_REQUIRED', 'sessionId is required.')
   if (!text) return fail('TERMINAL_TEXT_REQUIRED', 'text is required.')
+  const resolved = await resolveTerminalSessionForInput(params)
+  if (resolved.error) return resolved.error
+  const sessionId = resolved.sessionId!
   if (!runtime.writeTerminal) return fail('TERMINAL_WRITE_UNAVAILABLE', 'Terminal write runtime is not available.')
   const response = await runtime.writeTerminal(sessionId, text)
   if (response.ok) {
@@ -1805,6 +1880,31 @@ const sendTerminalText = async (params: Record<string, unknown>) => {
         bytes: Buffer.byteLength(text, 'utf8')
       }
     })
+  }
+  return response
+}
+
+const sendTerminalKey = async (params: Record<string, unknown>) => {
+  const key = keyDataForTerminal(params.key || params.name || params.text || params.data)
+  if (!key) return fail('TERMINAL_KEY_UNKNOWN', 'Unknown terminal key. Use names like enter, tab, esc, up, ctrl+c, or a single character.')
+  const resolved = await resolveTerminalSessionForInput(params)
+  if (resolved.error) return resolved.error
+  const sessionId = resolved.sessionId!
+  if (!runtime.writeTerminal) return fail('TERMINAL_WRITE_UNAVAILABLE', 'Terminal write runtime is not available.')
+  const response = await runtime.writeTerminal(sessionId, key.data)
+  if (response.ok) {
+    publishControlEvent({
+      name: 'terminal.key_sent',
+      category: 'terminal',
+      payload: {
+        session_id: sessionId,
+        sessionId,
+        ...(resolved.panelId ? { panel_id: resolved.panelId, panelId: resolved.panelId } : {}),
+        key: key.key,
+        bytes: Buffer.byteLength(key.data, 'utf8')
+      }
+    })
+    response.data = { ...(response.data || {}), key: key.key }
   }
   return response
 }
@@ -2101,7 +2201,8 @@ const handleControlRequest = async (request: ControlSocketRequest): Promise<Cont
     return response
   }
   if (method === 'terminal.read_screen' || method === 'read-screen') return dispatchRendererControlRequest('terminal.read_screen', params)
-  if (method === 'terminal.send_text' || method === 'send' || method === 'send-panel') return sendTerminalText(params)
+  if (method === 'terminal.send_text' || method === 'surface.send_text' || method === 'send' || method === 'send-panel') return sendTerminalText(params)
+  if (method === 'terminal.send_key' || method === 'surface.send_key' || method === 'send-key' || method === 'send-key-panel') return sendTerminalKey(params)
   if (method === 'notification.create' || method === 'notify') return createNotification(params)
   if (method === 'notification.list' || method === 'list-notifications') return listNotifications(params)
   if (method === 'notification.mark_read' || method === 'mark-notification-read') return markNotificationRead(params)

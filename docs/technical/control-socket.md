@@ -16,7 +16,8 @@ The first control-socket slice supports these terminal primitives:
 - `terminal.list`: list visible terminal panels.
 - `terminal.focus`: focus a terminal panel by `panelId` or `sessionId`.
 - `terminal.read_screen`: read recent visible xterm buffer text from a terminal panel.
-- `terminal.send_text`: send raw text to a connected terminal session by `sessionId`.
+- `terminal.send_text`: send raw text to a connected terminal session by `sessionId`, or resolve one from `panelId`/`surfaceId`.
+- `terminal.send_key`: send a named key such as `enter`, `tab`, `esc`, `up`, `f1`, or `ctrl+c` to a connected terminal session.
 
 The notification slice adds these generic notification primitives:
 
@@ -123,7 +124,8 @@ Aliases are accepted for control_compat-compatible scripts where useful:
 - `list_terminals` and `debug.terminals` map to `terminal.list`.
 - `focus_terminal` and `focus-panel` map to `terminal.focus`.
 - `read-screen` maps to `terminal.read_screen`.
-- `send` and `send-panel` map to `terminal.send_text`.
+- `send`, `send-panel`, and `surface.send_text` map to `terminal.send_text`.
+- `send-key`, `send-key-panel`, and `surface.send_key` map to `terminal.send_key`.
 - `notify` maps to `notification.create`.
 - `list-notifications` maps to `notification.list`.
 - `open-notification` maps to `notification.open`.
@@ -224,6 +226,9 @@ node /path/to/resources/aiopsterm-control.js tree
 node /path/to/resources/aiopsterm-control.js terminal read-screen --lines 40
 node /path/to/resources/aiopsterm-control.js terminal focus --panel panel-main
 node /path/to/resources/aiopsterm-control.js terminal send --session "$AIOPSTERM_TERMINAL_SESSION_ID" --text $'pwd\n'
+node /path/to/resources/aiopsterm-control.js terminal send-key --session "$AIOPSTERM_TERMINAL_SESSION_ID" ctrl+c
+node /path/to/resources/aiopsterm-control.js send-panel --panel panel-main "echo hello\n"
+node /path/to/resources/aiopsterm-control.js send-key-panel --panel panel-main enter
 node /path/to/resources/aiopsterm-control.js notify --title "Build done" --body "All tests passed"
 node /path/to/resources/aiopsterm-control.js list-notifications
 node /path/to/resources/aiopsterm-control.js jump-to-unread
@@ -241,7 +246,7 @@ node /path/to/resources/aiopsterm-control.js --json workspace snapshot
 
 `agent.hooks.*` reuses the same explicit installer used by Settings -> AI Preferences. It only writes aiopsterm-owned hook commands, plugin files, or marked config blocks, and uninstall removes only those owned entries. `setup` mirrors control_compat's convenience behavior by skipping installers whose agent binary is not on `PATH`; `install` is for an explicit selected source when the user wants the config written anyway. Hook commands fail open outside aiopsterm-managed local connection terminals and do not take over external OS terminals.
 
-`terminal.send_text` is a raw terminal input primitive, equivalent to text typed into the terminal. It does not run the existing AI command security approval flow, because it may need to send non-command input, prompts, or key sequences. Command-generation and AI-command execution still use the existing renderer security path.
+`terminal.send_text` and `terminal.send_key` are raw terminal input primitives, equivalent to typed text or a physical key press in the terminal. They do not run the existing AI command security approval flow, because they may need to send non-command input, prompts, or control sequences. Command-generation and AI-command execution still use the existing renderer security path.
 
 Future higher-level automation commands should use the control socket but must choose their own safety policy explicitly. For example, a future `terminal.run_command` command can route through command security, while `terminal.send_text` remains raw input.
 

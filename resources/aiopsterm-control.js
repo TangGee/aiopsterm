@@ -32,7 +32,10 @@ Commands:
   terminal list
   terminal focus --panel <id>|--session <id>
   terminal read-screen [--panel <id>|--session <id>] [--lines <n>]
-  terminal send --session <id> --text <text>
+  terminal send [--panel <id>|--session <id>] --text <text>
+  terminal send-key [--panel <id>|--session <id>] <key>
+  send-panel --panel <id> <text>
+  send-key-panel --panel <id> <key>
   notify --title <text> [--subtitle <text>] [--body <text>] [--panel <id>] [--session <id>]
   list-notifications
   open-notification --id <id>
@@ -56,6 +59,14 @@ const hasFlag = (name) => {
   args.splice(index, 1)
   return true
 }
+
+const unescapeTerminalText = (value) =>
+  String(value || '').replace(/\\([nrt\\])/g, (_match, code) => {
+    if (code === 'n') return '\n'
+    if (code === 'r') return '\r'
+    if (code === 't') return '\t'
+    return '\\'
+  })
 
 const socketPath = readOption('--socket') || process.env.AIOPSTERM_CONTROL_SOCKET || process.env.AIOPSTERM_SOCKET_PATH || ''
 const outputJson = hasFlag('--json')
@@ -171,11 +182,19 @@ const methodParams = () => {
     const lines = Number(readOption('--lines') || readOption('--tail-lines') || 0)
     return { method: 'terminal.read_screen', params: { panelId, sessionId, ...(Number.isFinite(lines) && lines > 0 ? { tailLines: lines } : {}) } }
   }
-  if (command === 'send' || (command === 'terminal' && args[0] === 'send')) {
+  if (command === 'send' || command === 'send-panel' || (command === 'terminal' && args[0] === 'send')) {
     if (command === 'terminal') args.shift()
+    const panelId = readOption('--panel') || readOption('--panel-id') || readOption('--surface') || readOption('--surface-id')
     const sessionId = readOption('--session') || readOption('--session-id')
-    const text = readOption('--text') || args.join(' ')
-    return { method: 'terminal.send_text', params: { sessionId, text } }
+    const text = unescapeTerminalText(readOption('--text') || args.join(' '))
+    return { method: 'terminal.send_text', params: { panelId, surfaceId: panelId, sessionId, terminalSessionId: sessionId, text } }
+  }
+  if (command === 'send-key' || command === 'send-key-panel' || (command === 'terminal' && args[0] === 'send-key')) {
+    if (command === 'terminal') args.shift()
+    const panelId = readOption('--panel') || readOption('--panel-id') || readOption('--surface') || readOption('--surface-id')
+    const sessionId = readOption('--session') || readOption('--session-id')
+    const key = readOption('--key') || args.find((arg) => arg !== '--' && !arg.startsWith('--')) || ''
+    return { method: 'terminal.send_key', params: { panelId, surfaceId: panelId, sessionId, terminalSessionId: sessionId, key } }
   }
   if (command === 'notify') {
     const title = readOption('--title') || 'Notification'
@@ -735,6 +754,10 @@ const printResponse = (response) => {
   if (data.snapshot && Array.isArray(data.snapshot.panels) && data.snapshot.version === 1) {
     const snapshot = data.snapshot
     process.stdout.write(`session\t${snapshot.id || '-'}\t${snapshot.name || '-'}\tpanels=${snapshot.panels.length}\tgroups=${(snapshot.workspaceGroups || []).length}\n`)
+    return
+  }
+  if (typeof data.bytes === 'number' && (data.id || data.sessionId || data.key)) {
+    process.stdout.write(['terminal-write', data.id || data.sessionId || '-', `bytes=${data.bytes}`, data.key || ''].filter(Boolean).join('\t') + '\n')
     return
   }
   if (Array.isArray(data.snapshots)) {

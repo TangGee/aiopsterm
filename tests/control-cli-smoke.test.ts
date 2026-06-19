@@ -90,6 +90,46 @@ describe('aiopsterm-control CLI', () => {
     expect(seen).toEqual([expect.objectContaining({ method: 'terminal.list' })])
   })
 
+  it('sends terminal text and key input requests over the configured socket', async () => {
+    const seen: Record<string, unknown>[] = []
+    const socketPath = await startControlServer((request) => {
+      seen.push(request)
+      return {
+        id: request.id,
+        ok: true,
+        data: {
+          id: (request.params as any)?.sessionId || 'terminal-1',
+          bytes: request.method === 'terminal.send_key' ? 1 : 4,
+          key: request.method === 'terminal.send_key' ? (request.params as any)?.key : undefined
+        }
+      }
+    })
+
+    const sentText = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'terminal', 'send', '--session', 'terminal-1', '--text', 'pwd\\n'], {
+      cwd: process.cwd()
+    })
+    expect(sentText.stdout).toContain('terminal-write\tterminal-1\tbytes=4')
+
+    const sentKey = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'send-key-panel', '--panel', 'panel-1', 'ctrl+c'], {
+      cwd: process.cwd()
+    })
+    expect(sentKey.stdout).toContain('terminal-write\tterminal-1\tbytes=1\tctrl+c')
+
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'send-panel', '--panel', 'panel-1', 'echo hello\\n'], {
+      cwd: process.cwd()
+    })
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'terminal', 'send-key', '--session', 'terminal-2', 'enter'], {
+      cwd: process.cwd()
+    })
+
+    expect(seen).toEqual([
+      expect.objectContaining({ method: 'terminal.send_text', params: expect.objectContaining({ sessionId: 'terminal-1', text: 'pwd\n' }) }),
+      expect.objectContaining({ method: 'terminal.send_key', params: expect.objectContaining({ panelId: 'panel-1', surfaceId: 'panel-1', key: 'ctrl+c' }) }),
+      expect.objectContaining({ method: 'terminal.send_text', params: expect.objectContaining({ panelId: 'panel-1', text: 'echo hello\n' }) }),
+      expect.objectContaining({ method: 'terminal.send_key', params: expect.objectContaining({ sessionId: 'terminal-2', key: 'enter' }) })
+    ])
+  })
+
   it('sends system probe and raw rpc requests over the configured socket', async () => {
     const seen: Record<string, unknown>[] = []
     const socketPath = await startControlServer((request) => {
