@@ -390,6 +390,49 @@ describe('aiopsterm-control CLI', () => {
     ])
   })
 
+  it('sends control_compat-style mobile attach ticket requests from the CLI helper', async () => {
+    const seen: Record<string, unknown>[] = []
+    const socketPath = await startControlServer((request) => {
+      seen.push(request)
+      return {
+        id: request.id,
+        ok: true,
+        data: {
+          ticket: {
+            version: 1,
+            workspaceID: 'main',
+            terminalID: 'panel-ai',
+            macDeviceID: 'aiopsterm-test',
+            routes: [{ id: 'local_control_socket', kind: 'websocket', endpoint: { type: 'url', url: 'aiopsterm-control://local' }, priority: 0 }],
+            expiresAt: '2024-06-01T00:10:00.000Z',
+            auth_token: 'secret-token'
+          },
+          attach_url: 'aiopsterm-control://attach?v=1',
+          routes: [{ id: 'local_control_socket', kind: 'websocket', endpoint: { type: 'url', url: 'aiopsterm-control://local' }, local_socket_path: socketPath }],
+          expires_at: '2024-06-01T00:10:00.000Z',
+          ttl_seconds: 600,
+          unsupported_remote: true,
+          unsupported_reason: 'local only'
+        }
+      }
+    })
+
+    const result = await execFileAsync(
+      process.execPath,
+      ['resources/aiopsterm-control.js', '--socket', socketPath, 'mobile', 'attach-ticket', 'create', '--workspace', 'main', '--terminal', 'panel-ai', '--ttl-seconds', '120'],
+      { cwd: process.cwd() }
+    )
+    expect(result.stdout).toContain('mobile-attach-ticket\tmain\t2024-06-01T00:10:00.000Z\tlocal-only')
+    expect(result.stdout).toContain('mobile-route\tlocal_control_socket\twebsocket\turl\taiopsterm-control://local')
+    expect(result.stdout).not.toContain('secret-token')
+    expect(seen).toEqual([
+      expect.objectContaining({
+        method: 'mobile.attach_ticket.create',
+        params: expect.objectContaining({ workspace_id: 'main', terminal_id: 'panel-ai', ttl_seconds: 120 })
+      })
+    ])
+  })
+
   it('sends tmux-style buffer requests from the CLI helper', async () => {
     const seen: Record<string, unknown>[] = []
     const savePath = join(tmpdir(), `aiopsterm-buffer-${process.pid}-${Date.now()}.txt`)

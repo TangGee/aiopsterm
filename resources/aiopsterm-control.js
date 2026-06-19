@@ -96,6 +96,7 @@ Commands:
   mobile chat send --session <id> --text <text>
   mobile chat interrupt --session <id> [--hard]
   mobile chat answer --session <id> --option-index <n>
+  mobile attach-ticket create [--scope mac] [--ttl-seconds <n>] [--workspace <id>] [--terminal <id>]
   chat sessions dump
   capture-pane [--panel <id>|--session <id>] [--scrollback] [--lines <n>]
   pipe-pane [--panel <id>|--session <id>] --command <shell-command>
@@ -684,6 +685,8 @@ const mobileMethodParams = (subcommand) => {
   if (subcommand === 'chat') return mobileChatMethodParams(args.shift() || 'sessions')
   if (subcommand.startsWith('chat.')) return mobileChatMethodParams(subcommand.slice('chat.'.length))
   if (subcommand.startsWith('chat-')) return mobileChatMethodParams(subcommand.slice('chat-'.length))
+  if (subcommand === 'attach-ticket' || subcommand === 'attach_ticket') return mobileAttachTicketMethodParams(args.shift() || 'create')
+  if (subcommand === 'attach-ticket.create' || subcommand === 'attach_ticket.create') return mobileAttachTicketMethodParams('create')
   if (subcommand === 'events' || subcommand === 'event') {
     const action = args.shift() || 'subscribe'
     return mobileEventsMethodParams(action)
@@ -693,6 +696,26 @@ const mobileMethodParams = (subcommand) => {
   if (subcommand === 'events-subscribe' || subcommand === 'event-subscribe') return mobileEventsMethodParams('subscribe')
   if (subcommand === 'events-unsubscribe' || subcommand === 'event-unsubscribe') return mobileEventsMethodParams('unsubscribe')
   throw new Error(`Unknown mobile command: ${subcommand}`)
+}
+
+const mobileAttachTicketMethodParams = (action) => {
+  if (action !== 'create') throw new Error(`Unknown mobile attach-ticket command: ${action}`)
+  const ttlSeconds = Number(readOption('--ttl-seconds') || readOption('--ttl_seconds') || readOption('--ttl') || 0)
+  const workspaceId = readOption('--workspace') || readOption('--workspace-id')
+  const terminalId = readOption('--terminal') || readOption('--terminal-id') || readOption('--surface') || readOption('--surface-id') || readOption('--panel') || readOption('--panel-id')
+  return {
+    method: 'mobile.attach_ticket.create',
+    params: {
+      scope: readOption('--scope') || (hasFlag('--mac') ? 'mac' : ''),
+      ...(Number.isFinite(ttlSeconds) && ttlSeconds > 0 ? { ttlSeconds: Math.floor(ttlSeconds), ttl_seconds: Math.floor(ttlSeconds) } : {}),
+      workspaceId,
+      workspace_id: workspaceId,
+      terminalId,
+      terminal_id: terminalId,
+      surfaceId: terminalId,
+      surface_id: terminalId
+    }
+  }
 }
 
 const mobileChatSelectorParams = () => {
@@ -1974,6 +1997,13 @@ const printResponse = (response) => {
   }
   if (data.stream_id !== undefined && data.removed !== undefined) {
     process.stdout.write(['mobile-events', 'unsubscribe', data.stream_id || '-', data.removed ? 'removed' : 'missing'].join('\t') + '\n')
+    return
+  }
+  if (data.ticket && data.expires_at && Array.isArray(data.routes)) {
+    const ticket = data.ticket || {}
+    process.stdout.write(['mobile-attach-ticket', ticket.workspaceID || 'mac', data.expires_at, data.unsupported_remote ? 'local-only' : 'remote'].join('\t') + '\n')
+    for (const route of data.routes) process.stdout.write(['mobile-route', route.id || '-', route.kind || '-', route.endpoint?.type || '-', route.endpoint?.url || route.local_socket_path || ''].join('\t') + '\n')
+    if (data.unsupported_remote) process.stdout.write(`note\t${data.unsupported_reason || 'local control socket only'}\n`)
     return
   }
   if (Array.isArray(data.capabilities) && data.protocol === 'aiopsterm-control') {

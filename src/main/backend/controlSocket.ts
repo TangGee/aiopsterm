@@ -1,5 +1,5 @@
 import { createServer, type Server, type Socket } from 'net'
-import { randomUUID } from 'crypto'
+import { randomBytes, randomUUID } from 'crypto'
 import { appendFileSync, existsSync, rmSync } from 'fs'
 import { basename, dirname, join } from 'path'
 import { mkdir, readdir, readFile, readlink, writeFile } from 'fs/promises'
@@ -257,6 +257,7 @@ const controlSocketCapabilities = [
   'mobile.workspace',
   'mobile.terminal',
   'mobile.chat',
+  'mobile.attach_ticket',
   'terminal.list',
   'terminal.focus',
   'terminal.read_screen',
@@ -475,6 +476,8 @@ const isEventListMethod = (method: string) => method === 'events.list' || method
 const isMobileEventsMethod = (method: string) => method === 'mobile.events.subscribe' || method === 'mobile.events.unsubscribe'
 
 const isMobileChatMethod = (method: string) => method.startsWith('mobile.chat.') || method === 'chat.sessions.dump'
+
+const isMobileAttachTicketMethod = (method: string) => method === 'mobile.attach_ticket.create'
 
 const isAgentVaultMethod = (method: string) => method.startsWith('agent.vault.') || method.startsWith('agent-vault.')
 
@@ -2127,6 +2130,81 @@ const handleMobileChatControlRequest = async (method: string, params: Record<str
     return ok({ answered: true, option_index: optionIndex, session_id: session.id, terminal: response.data || {} })
   }
   return fail('UNKNOWN_CONTROL_METHOD', `Unknown aiopsterm mobile chat method: ${method}`)
+}
+
+const normalizeAttachTicketTtlSeconds = (value: unknown) => {
+  const numberValue = Number(value)
+  if (!Number.isFinite(numberValue)) return 600
+  return Math.max(30, Math.min(3600, Math.floor(numberValue)))
+}
+
+const attachTicketDeviceId = () => {
+  const seed = runtime.userDataPath || process.cwd()
+  return `aiopsterm-${Buffer.from(seed).toString('base64url').slice(0, 24) || process.pid}`
+}
+
+const handleMobileAttachTicketControlRequest = (params: Record<string, unknown>) => {
+  const ttlSeconds = normalizeAttachTicketTtlSeconds(params.ttl_seconds ?? params.ttlSeconds ?? params.ttl)
+  const issuedAt = new Date()
+  const expiresAt = new Date(issuedAt.getTime() + ttlSeconds * 1000).toISOString()
+  const workspaceId = cleanText(params.scope).toLowerCase() === 'mac' ? '' : cleanText(params.workspace_id || params.workspaceId || params.workspace) || 'main'
+  const terminalId = cleanText(params.terminal_id || params.terminalId || params.surface_id || params.surfaceId || params.panelId)
+  const authToken = randomBytes(32).toString('base64url')
+  const route = {
+    id: 'local_control_socket',
+    kind: 'websocket',
+    endpoint: {
+      type: 'url',
+      url: socketPath ? `aiopsterm-control://local?socket=${encodeURIComponent(socketPath)}` : 'aiopsterm-control://local'
+    },
+    priority: 0,
+    local_socket_path: socketPath,
+    transport_note: 'aiopsterm exposes this ticket for local control-socket automation; it is not a remote mobile network route.'
+  }
+  const ticket = {
+    version: 1,
+    workspaceID: workspaceId,
+    ...(terminalId ? { terminalID: terminalId } : {}),
+    macDeviceID: attachTicketDeviceId(),
+    macDisplayName: process.env.HOSTNAME || 'aiopsterm',
+    macPairingCompatibilityVersion: 1,
+    macAppVersion: process.env.npm_package_version || '0.1.0',
+    macAppBuild: process.env.npm_package_version || '0.1.0',
+    routes: [
+      {
+        id: route.id,
+        kind: route.kind,
+        endpoint: route.endpoint,
+        priority: route.priority
+      }
+    ],
+    expiresAt,
+    auth_token: authToken
+  }
+  publishControlEvent({
+    name: 'mobile_attach_ticket.created',
+    category: 'system',
+    source: 'control.socket',
+    workspaceId: workspaceId || undefined,
+    surfaceId: terminalId || undefined,
+    payload: {
+      workspace_id: workspaceId,
+      terminal_id: terminalId,
+      ttl_seconds: ttlSeconds,
+      expires_at: expiresAt,
+      route_id: route.id,
+      route_kind: route.kind
+    }
+  })
+  return ok({
+    ticket,
+    attach_url: `aiopsterm-control://attach?v=1&socket=${encodeURIComponent(socketPath)}&token=${encodeURIComponent(authToken)}`,
+    routes: [route],
+    expires_at: expiresAt,
+    ttl_seconds: ttlSeconds,
+    unsupported_remote: true,
+    unsupported_reason: 'aiopsterm currently exposes attach tickets only for the local control socket, not a control_compat mobile network listener.'
+  })
 }
 
 const resolveManagedAiControlSessionByRequest = async (params: Record<string, unknown>) => {
@@ -3792,6 +3870,7 @@ const handleControlRequest = async (request: ControlSocketRequest): Promise<Cont
   if (isEventListMethod(method)) return listEvents(params)
   if (isMobileEventsMethod(method)) return handleMobileEventsControlRequest(method, params)
   if (isMobileChatMethod(method)) return handleMobileChatControlRequest(method, params)
+  if (isMobileAttachTicketMethod(method)) return handleMobileAttachTicketControlRequest(params)
   if (isFeedMethod(method)) return handleFeedControlRequest(method, params)
   if (isAgentHooksMethod(method)) return handleAgentHooksControlRequest(method, params)
   if (isAgentVaultMethod(method)) return handleAgentVaultControlRequest(method, params)

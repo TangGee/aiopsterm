@@ -2695,6 +2695,45 @@ describe('control socket backend', () => {
     }
   })
 
+  it('creates local-only control_compat-style mobile attach tickets', async () => {
+    const backend = await loadBackend()
+    const root = await mkdtemp(join(tmpdir(), 'aiopsterm-control-attach-ticket-'))
+    try {
+      const socketPath = await backend.ensureControlSocketServer(root)
+      const result = await backend.__testing.handleControlRequest({
+        method: 'mobile.attach_ticket.create',
+        params: { ttl_seconds: 5, workspace_id: 'main', terminal_id: 'panel-ai' }
+      })
+      expect(result).toEqual(
+        expect.objectContaining({
+          ok: true,
+          data: expect.objectContaining({
+            ttl_seconds: 30,
+            unsupported_remote: true,
+            ticket: expect.objectContaining({
+              version: 1,
+              workspaceID: 'main',
+              terminalID: 'panel-ai',
+              auth_token: expect.any(String),
+              routes: [expect.objectContaining({ id: 'local_control_socket', kind: 'websocket' })]
+            }),
+            routes: [
+              expect.objectContaining({
+                id: 'local_control_socket',
+                endpoint: expect.objectContaining({ type: 'url', url: expect.stringContaining(encodeURIComponent(socketPath)) }),
+                local_socket_path: socketPath
+              })
+            ]
+          })
+        })
+      )
+      expect((result.data?.ticket as Record<string, unknown>).auth_token).not.toHaveLength(0)
+    } finally {
+      backend.closeControlSocketServer()
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   it('serves newline-delimited JSON requests over the local socket', async () => {
     const backend = await loadBackend()
     const root = await mkdtemp(join(tmpdir(), 'aiopsterm-control-socket-'))
