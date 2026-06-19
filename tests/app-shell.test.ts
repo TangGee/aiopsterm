@@ -7766,6 +7766,133 @@ describe('AppShell', () => {
     wrapper.unmount()
   })
 
+  it('opens project, markdown, and file surfaces through the shared terminal workspace control handler', async () => {
+    ;(globalThis as any).__resetKnowledgeTreeMock?.()
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    mockXtermInstances.length = 0
+    let controlHandler: ((request: any) => Promise<any> | any) | null = null
+    vi.mocked(window.aiops.onControlRequest).mockImplementationOnce((handler: any) => {
+      controlHandler = handler
+      return () => {
+        controlHandler = null
+      }
+    })
+    const wrapper = mount(TerminalWorkspace, {
+      attachTo: document.body,
+      global: { plugins: [pinia] }
+    })
+    await flushPromises()
+    const invokeControlHandler = controlHandler as unknown as (request: any) => Promise<any>
+    expect(invokeControlHandler).toBeTruthy()
+    const store = useWorkspaceStore()
+
+    const markdownResponse = await invokeControlHandler({
+      id: 'markdown-open',
+      method: 'markdown.open',
+      params: { path: 'commands/diagnose.md', line: 2, endLine: 8 }
+    })
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+    expect(markdownResponse).toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
+          opened: true,
+          surfaceId: 'kb:commands/diagnose.md',
+          relPath: 'commands/diagnose.md',
+          surface: expect.objectContaining({ surfaceKind: 'knowledge', knowledge: expect.objectContaining({ startLine: 2, endLine: 8 }) })
+        })
+      })
+    )
+    expect(store.activeModule).toBe('workspace')
+    expect(store.activePanel).toEqual(expect.objectContaining({ id: 'kb:commands/diagnose.md', kind: 'knowledge' }))
+    expect(wrapper.find('.kb-editor-root').exists()).toBe(true)
+
+    const unsupportedAbsolute = await invokeControlHandler({
+      id: 'file-open-absolute',
+      method: 'file.open',
+      params: { path: '/tmp/outside.md' }
+    })
+    expect(unsupportedAbsolute).toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
+          opened: false,
+          unsupported: true,
+          unsupportedReason: expect.stringContaining('arbitrary local files')
+        })
+      })
+    )
+
+    const fileResponse = await invokeControlHandler({
+      id: 'file-open-many',
+      method: 'file.open',
+      params: { paths: ['commands/diagnose.md', 'Markdown语法指南.md'], focus: true }
+    })
+    expect(fileResponse).toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
+          opened: true,
+          surfaceId: 'kb:Markdown语法指南.md',
+          surfaces: expect.arrayContaining([
+            expect.objectContaining({ panelId: 'kb:commands/diagnose.md' }),
+            expect.objectContaining({ panelId: 'kb:Markdown语法指南.md' })
+          ])
+        })
+      })
+    )
+    expect(store.activePanelId).toBe('kb:Markdown语法指南.md')
+
+    const projectOpen = await invokeControlHandler({
+      id: 'project-open',
+      method: 'project.open',
+      params: { path: 'commands/diagnose.md', focus: true }
+    })
+    expect(projectOpen).toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
+          opened: true,
+          surfaceId: 'kb:commands/diagnose.md',
+          project: expect.objectContaining({ projectUrl: 'commands/diagnose.md', selectedFile: 'commands/diagnose.md', unsupported: true })
+        })
+      })
+    )
+
+    const setTab = await invokeControlHandler({
+      id: 'project-set-tab',
+      method: 'project.set_tab',
+      params: { surfaceId: 'kb:commands/diagnose.md', tab: 'targets' }
+    })
+    expect(setTab).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ activeTab: 'targets', active_tab: 'targets' }) }))
+    const setFile = await invokeControlHandler({
+      id: 'project-set-file',
+      method: 'project.set_selected_file',
+      params: { surfaceId: 'kb:commands/diagnose.md', path: 'commands/Summary to Doc.md' }
+    })
+    expect(setFile).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ selectedFile: 'commands/Summary to Doc.md' }) }))
+    const state = await invokeControlHandler({
+      id: 'project-state',
+      method: 'project.get_state',
+      params: { surfaceId: 'kb:commands/diagnose.md' }
+    })
+    expect(state).toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
+          surfaceId: 'kb:commands/diagnose.md',
+          activeTab: 'targets',
+          selectedFile: 'commands/Summary to Doc.md',
+          unsupported: true
+        })
+      })
+    )
+
+    wrapper.unmount()
+  })
+
   it('exports and restores control_compat-style session snapshots in the shared terminal workspace', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)

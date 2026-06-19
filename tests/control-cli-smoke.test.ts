@@ -128,6 +128,50 @@ describe('aiopsterm-control CLI', () => {
     ])
   })
 
+  it('sends project, markdown, and file compatibility requests from the CLI helper', async () => {
+    const seen: Record<string, unknown>[] = []
+    const socketPath = await startControlServer((request) => {
+      seen.push(request)
+      return {
+        id: request.id,
+        ok: true,
+        data:
+          request.method === 'project.get_state' || String(request.method).startsWith('project.')
+            ? {
+                projectUrl: '/work/project',
+                surfaceId: 'panel-project',
+                activeTab: (request.params as any)?.tab || 'files',
+                unsupported: true
+              }
+            : {
+                opened: true,
+                surfaceId: 'kb:commands/diagnose.md',
+                relPath: 'commands/diagnose.md',
+                surfaces: [{ panelId: 'kb:commands/diagnose.md', title: 'diagnose.md', knowledge: { relPath: 'commands/diagnose.md' } }]
+              }
+      }
+    })
+
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'project', 'open', '/work/project', '--surface', 'panel-1', '--no-focus'], { cwd: process.cwd() })
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'project', 'set-tab', 'targets', '--surface', 'panel-project'], { cwd: process.cwd() })
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'project', 'get-state', '--surface', 'panel-project'], { cwd: process.cwd() })
+    const markdown = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'markdown', 'open', 'commands/diagnose.md', '--line', '2', '--end-line', '8'], {
+      cwd: process.cwd()
+    })
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'file', 'open', 'commands/diagnose.md', 'Markdown语法指南.md', '--surface', 'panel-1'], {
+      cwd: process.cwd()
+    })
+
+    expect(markdown.stdout).toContain('file\topened\tkb:commands/diagnose.md\tcommands/diagnose.md')
+    expect(seen).toEqual([
+      expect.objectContaining({ method: 'project.open', params: expect.objectContaining({ path: '/work/project', surfaceId: 'panel-1', focus: false }) }),
+      expect.objectContaining({ method: 'project.set_tab', params: expect.objectContaining({ tab: 'targets', surfaceId: 'panel-project' }) }),
+      expect.objectContaining({ method: 'project.get_state', params: expect.objectContaining({ surfaceId: 'panel-project' }) }),
+      expect.objectContaining({ method: 'markdown.open', params: expect.objectContaining({ path: 'commands/diagnose.md', line: 2, startLine: 2, endLine: 8 }) }),
+      expect.objectContaining({ method: 'file.open', params: expect.objectContaining({ paths: ['commands/diagnose.md', 'Markdown语法指南.md'], surfaceId: 'panel-1' }) })
+    ])
+  })
+
   it('sends terminal text and key input requests over the configured socket', async () => {
     const seen: Record<string, unknown>[] = []
     const socketPath = await startControlServer((request) => {

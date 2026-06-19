@@ -19,6 +19,16 @@ Commands:
   feedback open
   sidebar snapshot
   system tree
+  project open <path> [--surface <id>] [--no-focus]
+  project get-state [--surface <id>]
+  project set-tab files|targets|buildSettings|schemes [--surface <id>]
+  project set-scheme <name> [--surface <id>]
+  project set-configuration <name> [--surface <id>]
+  project set-selected-target <name> [--surface <id>]
+  project set-selected-file <path> [--surface <id>]
+  project set-settings-filter <text> [--surface <id>]
+  markdown open <path> [--surface <id>] [--line <n>] [--end-line <n>] [--no-focus]
+  file open <path>... [--surface <id>] [--line <n>] [--end-line <n>] [--no-focus]
   app focus-override active|inactive|clear
   app simulate-active
   window list|current|focus|create|close|displays|display
@@ -155,6 +165,9 @@ const methodParams = () => {
   if (command === 'feedback') return feedbackMethodParams(args.shift() || 'open')
   if (command === 'sidebar' && args[0] === 'snapshot') return sidebarSnapshotMethodParams()
   if (command === 'system') return systemMethodParams(args.shift() || 'tree')
+  if (command === 'project') return projectMethodParams(args.shift() || 'open')
+  if (command === 'markdown') return markdownMethodParams(args.shift() || 'open')
+  if (command === 'file') return fileMethodParams(args.shift() || 'open')
   if (command === 'app') return appMethodParams(args.shift() || '')
   if (command === 'window') return windowMethodParams(args.shift() || 'list')
   if (command === 'rpc') {
@@ -590,6 +603,110 @@ const windowMethodParams = (subcommand) => {
     return { method: 'window.display', params: { ...selector, display } }
   }
   throw new Error(`Unknown window command: ${subcommand}`)
+}
+
+const surfaceSelectorParams = () => {
+  const surfaceId = readOption('--surface') || readOption('--surface-id') || readOption('--panel') || readOption('--panel-id') || readOption('--pane') || readOption('--pane-id')
+  const workspaceId = readOption('--workspace') || readOption('--workspace-id')
+  return {
+    ...(surfaceId ? { surfaceId, surface_id: surfaceId, panelId: surfaceId, paneId: surfaceId } : {}),
+    ...(workspaceId ? { workspaceId, workspace_id: workspaceId } : {})
+  }
+}
+
+const focusParam = () => ({ focus: !(hasFlag('--no-focus') || hasFlag('--background')) })
+
+const lineRangeParams = () => {
+  const line = Number(readOption('--line') || readOption('--start-line') || readOption('--start') || 0)
+  const endLine = Number(readOption('--end-line') || readOption('--end') || 0)
+  return {
+    ...(Number.isFinite(line) && line > 0 ? { line: Math.floor(line), startLine: Math.floor(line), start_line: Math.floor(line) } : {}),
+    ...(Number.isFinite(endLine) && endLine > 0 ? { endLine: Math.floor(endLine), end_line: Math.floor(endLine) } : {})
+  }
+}
+
+const projectMethodParams = (subcommand) => {
+  if (subcommand === 'open') {
+    const explicitPath = readOption('--path') || readOption('--project')
+    const selector = surfaceSelectorParams()
+    const focus = focusParam()
+    const path = explicitPath || readPositional()
+    return { method: 'project.open', params: { path, ...selector, ...focus } }
+  }
+  if (subcommand === 'get-state' || subcommand === 'get_state' || subcommand === 'state') {
+    return { method: 'project.get_state', params: surfaceSelectorParams() }
+  }
+  if (subcommand === 'set-tab' || subcommand === 'set_tab') {
+    const explicitTab = readOption('--tab')
+    const selector = surfaceSelectorParams()
+    const tab = explicitTab || readPositional()
+    return { method: 'project.set_tab', params: { tab, ...selector } }
+  }
+  if (subcommand === 'set-scheme' || subcommand === 'set_scheme') {
+    const explicitName = readOption('--name') || readOption('--scheme')
+    const selector = surfaceSelectorParams()
+    const name = explicitName || readPositional()
+    return { method: 'project.set_scheme', params: { name, ...selector } }
+  }
+  if (subcommand === 'set-configuration' || subcommand === 'set_configuration') {
+    const explicitName = readOption('--name') || readOption('--configuration')
+    const selector = surfaceSelectorParams()
+    const name = explicitName || readPositional()
+    return { method: 'project.set_configuration', params: { name, ...selector } }
+  }
+  if (subcommand === 'set-selected-target' || subcommand === 'set_selected_target') {
+    const explicitName = readOption('--name') || readOption('--target')
+    const selector = surfaceSelectorParams()
+    const name = explicitName || readPositional()
+    return { method: 'project.set_selected_target', params: { name, ...selector } }
+  }
+  if (subcommand === 'set-selected-file' || subcommand === 'set_selected_file') {
+    const explicitPath = readOption('--path') || readOption('--file')
+    const selector = surfaceSelectorParams()
+    const path = explicitPath || readPositional()
+    return { method: 'project.set_selected_file', params: { path, ...selector } }
+  }
+  if (subcommand === 'set-settings-filter' || subcommand === 'set_settings_filter') {
+    const explicitText = readOption('--text') || readOption('--filter')
+    const selector = surfaceSelectorParams()
+    const text = explicitText || args.filter((arg) => arg !== '--').join(' ')
+    return { method: 'project.set_settings_filter', params: { text, ...selector } }
+  }
+  throw new Error(`Unknown project command: ${subcommand}`)
+}
+
+const markdownMethodParams = (subcommand) => {
+  if (subcommand !== 'open') throw new Error(`Unknown markdown command: ${subcommand}`)
+  const explicitPath = readOption('--path') || readOption('--file')
+  const selector = surfaceSelectorParams()
+  const range = lineRangeParams()
+  const focus = focusParam()
+  const path = explicitPath || readPositional()
+  return { method: 'markdown.open', params: { path, ...selector, ...range, ...focus } }
+}
+
+const fileMethodParams = (subcommand) => {
+  if (subcommand !== 'open') throw new Error(`Unknown file command: ${subcommand}`)
+  const explicitPaths = []
+  for (;;) {
+    const value = readOption('--path') || readOption('--file')
+    if (!value) break
+    explicitPaths.push(value)
+  }
+  const selector = surfaceSelectorParams()
+  const range = lineRangeParams()
+  const focus = focusParam()
+  const positionalPaths = args.filter((arg) => arg !== '--' && !arg.startsWith('--'))
+  const paths = [...explicitPaths, ...positionalPaths]
+  return {
+    method: 'file.open',
+    params: {
+      ...(paths.length > 1 ? { paths } : { path: paths[0] || '' }),
+      ...selector,
+      ...range,
+      ...focus
+    }
+  }
 }
 
 const waitForMethodParams = () => {
@@ -1408,6 +1525,34 @@ const printResponse = (response) => {
   }
   if (data.noop && data.command) {
     process.stdout.write('OK\n')
+    return
+  }
+  if (data.project || data.project_url || data.projectUrl) {
+    const project = data.project || data
+    process.stdout.write(
+      [
+        'project',
+        data.opened === false ? 'not-opened' : 'ok',
+        project.surfaceId || project.surface_id || data.surfaceId || data.surface_id || '-',
+        project.activeTab || project.active_tab || '-',
+        project.projectUrl || project.project_url || data.path || ''
+      ].join('\t') + '\n'
+    )
+    return
+  }
+  if ((data.opened !== undefined || data.surfaceId || data.surface_id) && (data.relPath !== undefined || data.rel_path !== undefined || Array.isArray(data.surfaces))) {
+    process.stdout.write(
+      [
+        'file',
+        data.opened ? 'opened' : data.unsupported ? 'unsupported' : 'not-opened',
+        data.surfaceId || data.surface_id || '-',
+        data.relPath || data.rel_path || data.path || '-',
+        data.unsupportedReason || ''
+      ].join('\t') + '\n'
+    )
+    if (Array.isArray(data.surfaces) && data.surfaces.length > 1) {
+      for (const surface of data.surfaces) process.stdout.write(['surface', surface.panelId || '-', surface.title || '', surface.knowledge?.relPath || ''].join('\t') + '\n')
+    }
     return
   }
   if (data.command && data.decision) {

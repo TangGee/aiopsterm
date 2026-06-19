@@ -220,6 +220,9 @@ const controlSocketCapabilities = [
   'extension.sidebar.snapshot',
   'window.control',
   'app.focus',
+  'project.compat',
+  'file.open',
+  'markdown.open',
   'workspace.snapshot',
   'workspace.list',
   'workspace.current',
@@ -1132,6 +1135,21 @@ const handleSystemCompatibilityRequest = async (method: string, params: Record<s
   }
   return fail('UNKNOWN_CONTROL_METHOD', `Unknown aiopsterm system compatibility method: ${method}`)
 }
+
+const projectFileControlMethods = new Set([
+  'project.open',
+  'project.set_tab',
+  'project.set_scheme',
+  'project.set_configuration',
+  'project.set_selected_target',
+  'project.set_selected_file',
+  'project.set_settings_filter',
+  'project.get_state',
+  'markdown.open',
+  'file.open'
+])
+
+const isProjectFileControlMethod = (method: string) => projectFileControlMethods.has(method)
 
 const normalizeAgentVaultEntry = (value: unknown, existing?: AgentVaultEntry): AgentVaultEntry | null => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
@@ -2920,6 +2938,10 @@ const jumpToUnreadNotification = async () => {
 }
 
 const rendererMutationEventName = (method: string) => {
+  if (method === 'project.open') return 'project.opened'
+  if (method.startsWith('project.set_')) return 'project.updated'
+  if (method === 'markdown.open') return 'markdown.opened'
+  if (method === 'file.open') return 'file.opened'
   if (method.startsWith('workspace.group.') && method !== 'workspace.group.list') return method.replace('workspace.group.', 'workspace_group.')
   if (method.startsWith('surface.resume.') && !['surface.resume.get', 'surface.resume.show', 'surface.resume.preview', 'surface.resume.autorun.preview'].includes(method)) return method.replace('surface.resume.', 'surface_resume.')
   if (method === 'surface.move') return 'surface.moved'
@@ -2957,6 +2979,7 @@ const rendererMutationEventName = (method: string) => {
 }
 
 const rendererMutationCategory = (method: string) => {
+  if (method.startsWith('project.') || method === 'markdown.open' || method === 'file.open') return 'project'
   if (method.startsWith('workspace.group.')) return 'workspace'
   if (method.startsWith('workspace.')) return 'workspace'
   if (method.startsWith('surface.')) return method === 'surface.split' || method === 'surface.close' ? 'pane' : 'surface'
@@ -3087,6 +3110,11 @@ const handleControlRequest = async (request: ControlSocketRequest): Promise<Cont
   if (isAgentVaultMethod(method)) return handleAgentVaultControlRequest(method, params)
   if (isAgentSessionMethod(method)) return handleAgentSessionControlRequest(method, params)
   if (isSessionMethod(method)) return handleSessionControlRequest(method, params)
+  if (isProjectFileControlMethod(method)) {
+    const response = await dispatchRendererControlRequest(method, params, { focus: ['project.open', 'markdown.open', 'file.open'].includes(method) && params.focus !== false })
+    publishRendererMutationEvent(method, params, response)
+    return response
+  }
   if (
     method === 'workspace.snapshot' ||
     method === 'workspace.list' ||

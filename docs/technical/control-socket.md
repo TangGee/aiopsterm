@@ -49,6 +49,14 @@ The control_compat system/window/settings compatibility slice adds non-browser a
 - `extension.sidebar.snapshot`: expose a control_compat-style sidebar feed derived from `workspace.snapshot`.
 - `app.focus_override.set` and `app.simulate_active`: accepted app-focus compatibility controls. They update control metadata and focus the active aiopsterm window where applicable.
 
+The project/file compatibility slice maps control_compat project openers onto aiopsterm's shared main work panel:
+
+- `markdown.open`: open a Knowledge file as a knowledge surface in the shared main work panel, with optional `line` / `startLine` and `endLine` jump metadata.
+- `file.open`: open one or more Knowledge files through `path` or `paths`. Arbitrary absolute local files are recognized but return `unsupported=true` because aiopsterm does not yet expose a generic local-file surface in the shared terminal workspace.
+- `project.open`: create or focus a project compatibility surface. If `path` points to a Knowledge file, the file is opened; otherwise aiopsterm records project metadata on a terminal surface without creating an Xcode-style project browser.
+- `project.set_tab`, `project.set_scheme`, `project.set_configuration`, `project.set_selected_target`, `project.set_selected_file`, and `project.set_settings_filter`: update renderer-owned project compatibility metadata for automation scripts that expect these control_compat methods.
+- `project.get_state`: return the stored project compatibility state. Xcode-only concepts such as schemes, targets, and build settings are marked with `unsupported=true` until aiopsterm has a native equivalent.
+
 The workspace group slice adds control_compat-style group metadata for the shared main work panel:
 
 - `workspace.group.list`: list automation-visible surface groups.
@@ -188,6 +196,7 @@ Aliases are accepted for control_compat-compatible scripts where useful:
 - `list-windows`, `current-window`, `list-panes`, `new-window`, `split-window`, `rename-window`, `kill-window`, `kill-pane`, `has-session`, and `select-layout` map to shared-panel management commands.
 - `send`, `send-panel`, and `surface.send_text` map to `terminal.send_text`.
 - `send-key`, `send-key-panel`, and `surface.send_key` map to `terminal.send_key`.
+- `project open`, `project get-state`, `project set-*`, `markdown open`, and `file open` map to the `project.*`, `markdown.open`, and `file.open` compatibility methods.
 - `wait-for` maps to `sync.wait_for`.
 - `display-message` maps to `notification.create`; `display-message -p` prints locally without using the socket.
 - `set-buffer`, `show-buffer`, `save-buffer`, `paste-buffer`, and `list-buffers` map to `terminal.buffer.*`.
@@ -254,6 +263,10 @@ node /path/to/resources/aiopsterm-control.js system tree
 node /path/to/resources/aiopsterm-control.js settings open --target models
 node /path/to/resources/aiopsterm-control.js feedback open
 node /path/to/resources/aiopsterm-control.js sidebar snapshot
+node /path/to/resources/aiopsterm-control.js markdown open commands/diagnose.md --line 2
+node /path/to/resources/aiopsterm-control.js file open commands/diagnose.md Markdown语法指南.md
+node /path/to/resources/aiopsterm-control.js project open commands/diagnose.md
+node /path/to/resources/aiopsterm-control.js project get-state --surface kb:commands/diagnose.md
 node /path/to/resources/aiopsterm-control.js window list
 node /path/to/resources/aiopsterm-control.js window focus --window window:1
 node /path/to/resources/aiopsterm-control.js app focus-override active

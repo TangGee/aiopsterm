@@ -539,6 +539,56 @@ describe('control socket backend', () => {
     ])
   })
 
+  it('routes project, markdown, and file open compatibility requests to the renderer window', async () => {
+    const backend = await loadBackend()
+    backend.registerControlSocketIpc({
+      handle: (_channel, handler) => {
+        mockIpcHandler = handler
+      }
+    })
+    mockWindow = createMockWindow((request) => {
+      if (request.method === 'project.open') {
+        return { ok: true, data: { opened: true, surfaceId: 'panel-project', project: { surfaceId: 'panel-project', projectUrl: (request.params as any).path, activeTab: 'files' } } }
+      }
+      if (request.method === 'project.set_tab') {
+        return { ok: true, data: { surfaceId: 'panel-project', projectUrl: '/work/project', activeTab: (request.params as any).tab, unsupported: true } }
+      }
+      if (request.method === 'markdown.open' || request.method === 'file.open') {
+        return { ok: true, data: { opened: true, surfaceId: 'kb:commands/diagnose.md', relPath: 'commands/diagnose.md', surfaces: [{ panelId: 'kb:commands/diagnose.md' }] } }
+      }
+      return { ok: true, data: {} }
+    })
+    backend.configureControlSocketRuntime({ getWindows: () => [mockWindow] })
+
+    await expect(backend.__testing.handleControlRequest({ method: 'project.open', params: { path: '/work/project' } })).resolves.toEqual(
+      expect.objectContaining({ ok: true, data: expect.objectContaining({ opened: true, surfaceId: 'panel-project' }) })
+    )
+    await expect(backend.__testing.handleControlRequest({ method: 'project.set_tab', params: { surfaceId: 'panel-project', tab: 'targets' } })).resolves.toEqual(
+      expect.objectContaining({ ok: true, data: expect.objectContaining({ activeTab: 'targets' }) })
+    )
+    await expect(backend.__testing.handleControlRequest({ method: 'markdown.open', params: { path: 'commands/diagnose.md', line: 2 } })).resolves.toEqual(
+      expect.objectContaining({ ok: true, data: expect.objectContaining({ relPath: 'commands/diagnose.md' }) })
+    )
+    await expect(backend.__testing.handleControlRequest({ method: 'file.open', params: { paths: ['commands/diagnose.md'] } })).resolves.toEqual(
+      expect.objectContaining({ ok: true, data: expect.objectContaining({ opened: true }) })
+    )
+    expect(mockWindow.requests).toEqual([
+      expect.objectContaining({ method: 'project.open', params: expect.objectContaining({ path: '/work/project' }) }),
+      expect.objectContaining({ method: 'project.set_tab', params: expect.objectContaining({ surfaceId: 'panel-project', tab: 'targets' }) }),
+      expect.objectContaining({ method: 'markdown.open', params: expect.objectContaining({ path: 'commands/diagnose.md', line: 2 }) }),
+      expect.objectContaining({ method: 'file.open', params: expect.objectContaining({ paths: ['commands/diagnose.md'] }) })
+    ])
+    const projectEvents = await backend.__testing.handleControlRequest({ method: 'events.list', params: { category: 'project' } })
+    expect(projectEvents.data?.events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'project.opened' }),
+        expect.objectContaining({ name: 'project.updated' }),
+        expect.objectContaining({ name: 'markdown.opened' }),
+        expect.objectContaining({ name: 'file.opened' })
+      ])
+    )
+  })
+
   it('writes terminal text through the runtime without requiring renderer focus', async () => {
     const backend = await loadBackend()
     const writes: Array<{ sessionId: string; data: string }> = []
