@@ -259,6 +259,7 @@ describe('control socket backend', () => {
               'auth.sign_out',
               'vm.compat',
               'remotes.compat',
+              'sidebar.custom',
               'feedback.submit',
               'agent.session',
               'events.stream'
@@ -445,6 +446,52 @@ describe('control socket backend', () => {
         expect.objectContaining({
           ok: true,
           data: expect.objectContaining({ ok: false, removed: false, target: 'desk', unsupported: true })
+        })
+      )
+
+      await mkdir(join(root, 'custom-sidebars'), { recursive: true })
+      await writeFile(join(root, 'custom-sidebars', 'ops.json'), '{"title":"Ops"}', 'utf-8')
+      await expect(backend.__testing.handleControlRequest({ method: 'sidebar.custom.validate' })).resolves.toEqual(
+        expect.objectContaining({
+          ok: true,
+          data: expect.objectContaining({
+            directory: join(root, 'custom-sidebars'),
+            valid_count: 0,
+            error_count: 1,
+            unsupported: true,
+            sidebars: [expect.objectContaining({ name: 'ops', kind: 'json', ok: false, error: expect.stringContaining('custom sidebar rendering is not implemented') })]
+          })
+        })
+      )
+
+      await expect(backend.__testing.handleControlRequest({ method: 'sidebar.custom.reload', params: { name: 'ops' } })).resolves.toEqual(
+        expect.objectContaining({
+          ok: true,
+          data: expect.objectContaining({
+            reloaded_count: 0,
+            reloaded_names: [],
+            reloaded: false,
+            sidebars: [expect.objectContaining({ name: 'ops' })]
+          })
+        })
+      )
+
+      await expect(backend.__testing.handleControlRequest({ method: 'sidebar.custom.select', params: { name: 'missing' } })).resolves.toEqual(
+        expect.objectContaining({
+          ok: true,
+          data: expect.objectContaining({
+            selected: false,
+            selected_name: null,
+            sidebars: [expect.objectContaining({ name: 'missing', ok: false, error: 'Sidebar file is missing.' })]
+          })
+        })
+      )
+
+      await expect(backend.__testing.handleControlRequest({ method: 'sidebar.custom.select' })).resolves.toEqual(
+        expect.objectContaining({
+          ok: false,
+          errorCode: 'INVALID_PARAMS',
+          data: { field: 'name' }
         })
       )
     } finally {

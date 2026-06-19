@@ -114,6 +114,9 @@ describe('aiopsterm-control CLI', () => {
     await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'feedback', 'open'], { cwd: process.cwd() })
     await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'feedback', 'submit', '--email', 'dev@example.test', '--body', 'hello', '--image-path', '/tmp/a.png'], { cwd: process.cwd() })
     await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'sidebar', 'snapshot', '--window', 'window:1'], { cwd: process.cwd() })
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'sidebar', 'custom', 'validate', 'ops'], { cwd: process.cwd() })
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'sidebar', 'custom', 'reload', '--name', 'ops'], { cwd: process.cwd() })
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'sidebar', 'custom', 'select', 'ops'], { cwd: process.cwd() })
     await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'system', 'ping'], { cwd: process.cwd() })
     await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'system', 'tree', '--workspace', 'main'], { cwd: process.cwd() })
     await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'system', 'top', '--include-processes', '--top-group-limit', '5'], { cwd: process.cwd() })
@@ -140,6 +143,9 @@ describe('aiopsterm-control CLI', () => {
       expect.objectContaining({ method: 'feedback.open', params: expect.objectContaining({ activate: true }) }),
       expect.objectContaining({ method: 'feedback.submit', params: expect.objectContaining({ email: 'dev@example.test', body: 'hello', image_paths: ['/tmp/a.png'] }) }),
       expect.objectContaining({ method: 'extension.sidebar.snapshot', params: expect.objectContaining({ windowId: 'window:1' }) }),
+      expect.objectContaining({ method: 'sidebar.custom.validate', params: expect.objectContaining({ name: 'ops' }) }),
+      expect.objectContaining({ method: 'sidebar.custom.reload', params: expect.objectContaining({ name: 'ops' }) }),
+      expect.objectContaining({ method: 'sidebar.custom.select', params: expect.objectContaining({ name: 'ops' }) }),
       expect.objectContaining({ method: 'system.ping' }),
       expect.objectContaining({ method: 'system.tree', params: expect.objectContaining({ workspaceId: 'main' }) }),
       expect.objectContaining({ method: 'system.top', params: expect.objectContaining({ includeProcesses: true, include_processes: true, topGroupLimit: 5, top_group_limit: 5 }) }),

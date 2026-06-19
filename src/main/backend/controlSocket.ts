@@ -241,6 +241,7 @@ const controlSocketCapabilities = [
   'auth.sign_out',
   'vm.compat',
   'remotes.compat',
+  'sidebar.custom',
   'settings.open',
   'feedback.open',
   'feedback.submit',
@@ -501,6 +502,8 @@ const isFeedMethod = (method: string) => method.startsWith('feed.')
 const isCloudVmMethod = (method: string) => method.startsWith('vm.')
 
 const isCloudRemotesMethod = (method: string) => method.startsWith('remotes.')
+
+const isSidebarCustomMethod = (method: string) => method.startsWith('sidebar.custom.')
 
 const isSessionMethod = (method: string) => method.startsWith('session.') || method.startsWith('restore-session.')
 
@@ -1476,6 +1479,114 @@ const handleCloudRemotesControlRequest = (method: string, params: Record<string,
     return ok(cloudUnsupportedData(method, { ok: false, removed: false, target, deviceId: null }))
   }
   return fail('UNKNOWN_CONTROL_METHOD', `Unknown aiopsterm remotes compatibility method: ${method}`)
+}
+
+type CustomSidebarValidationEntry = {
+  name: string
+  path: string
+  kind: 'swift' | 'json'
+  ok: boolean
+  error: string | null
+}
+
+const customSidebarDirectory = () => join(runtime.userDataPath || process.cwd(), 'custom-sidebars')
+
+const customSidebarName = (params: Record<string, unknown>) => {
+  if (!Object.prototype.hasOwnProperty.call(params, 'name')) return undefined
+  return cleanText(params.name)
+}
+
+const customSidebarPathFor = (directory: string, name: string, kind: 'swift' | 'json') => join(directory, `${name}.${kind}`)
+
+const discoverCustomSidebarFiles = async (directory: string, requestedName?: string) => {
+  let names: string[] = []
+  try {
+    names = await readdir(directory)
+  } catch {
+    return []
+  }
+  const byName = new Map<string, { name: string; path: string; kind: 'swift' | 'json' }>()
+  for (const entry of names) {
+    const match = /^(.+)\.(swift|json)$/i.exec(entry)
+    if (!match) continue
+    const name = match[1]
+    const kind = match[2].toLowerCase() as 'swift' | 'json'
+    if (requestedName && requestedName !== name) continue
+    const existing = byName.get(name)
+    if (existing?.kind === 'swift') continue
+    byName.set(name, { name, kind, path: join(directory, entry) })
+  }
+  return [...byName.values()].sort((left, right) => left.name.localeCompare(right.name))
+}
+
+const validateCustomSidebarFile = async (file: { name: string; path: string; kind: 'swift' | 'json' }): Promise<CustomSidebarValidationEntry> => {
+  if (file.kind === 'swift') {
+    return {
+      ...file,
+      ok: false,
+      error: 'aiopsterm does not execute or interpret control_compat custom Swift sidebars through the control socket.'
+    }
+  }
+  try {
+    JSON.parse(await readFile(file.path, 'utf-8'))
+    return { ...file, ok: false, error: 'aiopsterm can parse this JSON file, but custom sidebar rendering is not implemented.' }
+  } catch (error) {
+    return { ...file, ok: false, error: error instanceof Error ? error.message : 'Failed to read sidebar JSON.' }
+  }
+}
+
+const customSidebarReport = async (name?: string) => {
+  const directory = customSidebarDirectory()
+  const files = await discoverCustomSidebarFiles(directory, name)
+  const entries =
+    name && files.length === 0
+      ? [
+          {
+            name,
+            path: customSidebarPathFor(directory, name, 'json'),
+            kind: 'json' as const,
+            ok: false,
+            error: 'Sidebar file is missing.'
+          }
+        ]
+      : await Promise.all(files.map(validateCustomSidebarFile))
+  return {
+    directory,
+    valid_count: entries.filter((entry) => entry.ok).length,
+    error_count: entries.filter((entry) => !entry.ok).length,
+    sidebars: entries,
+    unsupported: true,
+    unsupportedReason: 'aiopsterm does not implement control_compat custom sidebar rendering or selection.',
+    unsupported_reason: 'aiopsterm does not implement control_compat custom sidebar rendering or selection.'
+  }
+}
+
+const handleSidebarCustomControlRequest = async (method: string, params: Record<string, unknown>) => {
+  const name = customSidebarName(params)
+  if ((method === 'sidebar.custom.validate' || method === 'sidebar.custom.reload') && name === '') {
+    return fail('INVALID_PARAMS', 'Sidebar name must not be empty.')
+  }
+  if (method === 'sidebar.custom.validate') return ok(await customSidebarReport(name))
+  if (method === 'sidebar.custom.reload') {
+    const report = await customSidebarReport(name)
+    return ok({
+      ...report,
+      reloaded_count: 0,
+      reloaded_names: [],
+      reloaded: false
+    })
+  }
+  if (method === 'sidebar.custom.select') {
+    if (!name) return fail('INVALID_PARAMS', 'Select requires a sidebar name.', { field: 'name' })
+    const report = await customSidebarReport(name)
+    return ok({
+      ...report,
+      selected_name: null,
+      selected_provider_id: null,
+      selected: false
+    })
+  }
+  return fail('UNKNOWN_CONTROL_METHOD', `Unknown aiopsterm custom sidebar compatibility method: ${method}`)
 }
 
 const handleSystemCompatibilityRequest = async (method: string, params: Record<string, unknown>) => {
@@ -4234,6 +4345,7 @@ const handleControlRequest = async (request: ControlSocketRequest): Promise<Cont
   }
   if (method.startsWith('window.')) return handleWindowControlRequest(method, params)
   if (isWaitForMethod(method)) return handleWaitForControlRequest(method, params)
+  if (isSidebarCustomMethod(method)) return handleSidebarCustomControlRequest(method, params)
   if (isSidebarMetadataMethod(method)) return handleSidebarMetadataControlRequest(method, params)
   if (isTerminalBufferMethod(method)) return handleTerminalBufferControlRequest(method, params)
   if (isTmuxCompatMethod(method)) return handleTmuxCompatControlRequest(method, params)

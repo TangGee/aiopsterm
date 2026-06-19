@@ -17,7 +17,7 @@ Commands:
   auth login|status|sign-in-url|begin-sign-in|sign-out
   settings open [--target <section>]
   feedback open|submit [--email <email>] [--body <text>] [--image-path <path>...]
-  sidebar snapshot
+  sidebar snapshot | sidebar custom validate|reload|select [name]
   system ping|tree|top|memory|identify|capabilities [--include-processes]
   project open <path> [--surface <id>] [--no-focus]
   project get-state [--surface <id>]
@@ -188,7 +188,7 @@ const methodParams = () => {
   if (command === 'auth') return authMethodParams(args.shift() || 'login')
   if (command === 'settings') return settingsMethodParams(args.shift() || 'open')
   if (command === 'feedback') return feedbackMethodParams(args.shift() || 'open')
-  if (command === 'sidebar' && args[0] === 'snapshot') return sidebarSnapshotMethodParams()
+  if (command === 'sidebar') return sidebarMethodParams(args.shift() || 'snapshot')
   if (command === 'system') return systemMethodParams(args.shift() || 'tree')
   if (command === 'project') return projectMethodParams(args.shift() || 'open')
   if (command === 'markdown') return markdownMethodParams(args.shift() || 'open')
@@ -845,7 +845,6 @@ const chatMethodParams = (subcommand) => {
 }
 
 const sidebarSnapshotMethodParams = () => {
-  args.shift()
   return {
     method: 'extension.sidebar.snapshot',
     params: {
@@ -853,6 +852,27 @@ const sidebarSnapshotMethodParams = () => {
       workspaceId: readOption('--workspace') || readOption('--workspace-id')
     }
   }
+}
+
+const sidebarMethodParams = (subcommand) => {
+  if (subcommand === 'snapshot') return sidebarSnapshotMethodParams()
+  if (subcommand === 'custom') {
+    const action = args.shift() || 'validate'
+    if (action === 'validate' || action === 'reload' || action === 'select') {
+      return {
+        method: `sidebar.custom.${action}`,
+        params: {
+          name: readOption('--name') || readPositional()
+        }
+      }
+    }
+    throw new Error(`Unknown sidebar custom command: ${action}`)
+  }
+  if (subcommand.startsWith('custom.')) {
+    const action = subcommand.slice('custom.'.length)
+    if (action === 'validate' || action === 'reload' || action === 'select') return { method: `sidebar.custom.${action}`, params: { name: readOption('--name') || readPositional() } }
+  }
+  throw new Error(`Unknown sidebar command: ${subcommand}`)
 }
 
 const systemMethodParams = (subcommand) => {
@@ -2282,6 +2302,12 @@ const printResponse = (response) => {
     }
     if (data.hooks.length === 0) process.stdout.write('No hooks configured\n')
     for (const hook of data.hooks) process.stdout.write(['hook', hook.event || '-', hook.command || ''].join('\t') + '\n')
+    return
+  }
+  if (Array.isArray(data.sidebars) && data.unsupported !== undefined) {
+    process.stdout.write(['sidebar-custom', data.valid_count || 0, data.error_count || 0, data.directory || '-'].join('\t') + '\n')
+    for (const sidebar of data.sidebars) process.stdout.write([sidebar.ok ? 'ok' : 'error', sidebar.name || '-', sidebar.kind || '-', sidebar.path || '-', sidebar.error || ''].join('\t') + '\n')
+    if (data.unsupported) process.stdout.write(`note\t${data.unsupportedReason || data.unsupported_reason || ''}\n`)
     return
   }
   if (data.option && data.option.name) {
