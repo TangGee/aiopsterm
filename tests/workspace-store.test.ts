@@ -545,6 +545,67 @@ describe('workspace store', () => {
     expect(store.aiAttentionUnreadCount).toBe(0)
   })
 
+  it('resumes managed AI sessions by writing the resume command to the owning terminal', async () => {
+    const store = useWorkspaceStore()
+    store.applyLocalTerminalSession('panel-main', {
+      id: 'terminal-session-1',
+      kind: 'local',
+      shell: '/bin/bash',
+      cwd: '/work/project'
+    })
+    vi.mocked(window.aiops.writeTerminal).mockClear()
+
+    store.upsertManagedAiSession({
+      source: 'codex',
+      event: 'session_start',
+      sessionId: 'codex-session-1',
+      title: 'Codex · project',
+      summary: '',
+      panelId: 'panel-main',
+      terminalSessionId: 'terminal-session-1',
+      cwd: '/work/project',
+      resumeCommand: "cd '/work/project' && codex resume 'codex-session-1'",
+      receivedAt: 500
+    })
+
+    await expect(store.resumeManagedAiSession('codex', 'codex-session-1')).resolves.toBe(true)
+
+    expect(store.activePanelId).toBe('panel-main')
+    expect(store.selectedManagedAiSessionKey).toBe('codex:codex-session-1')
+    expect(window.aiops.writeTerminal).toHaveBeenCalledWith('terminal-session-1', "cd '/work/project' && codex resume 'codex-session-1'\n")
+    expect(store.topNotice).toBe('已向所属终端写入 AI 会话恢复命令')
+  })
+
+  it('routes risky managed AI session resume commands through terminal security approval', async () => {
+    const store = useWorkspaceStore()
+    store.applyLocalTerminalSession('panel-main', {
+      id: 'terminal-session-1',
+      kind: 'local',
+      shell: '/bin/bash',
+      cwd: '/work/project'
+    })
+    vi.mocked(window.aiops.writeTerminal).mockClear()
+
+    store.upsertManagedAiSession({
+      source: 'codex',
+      event: 'session_start',
+      sessionId: 'codex-risky-1',
+      title: 'Codex · project',
+      summary: '',
+      panelId: 'panel-main',
+      terminalSessionId: 'terminal-session-1',
+      cwd: '/work/project',
+      resumeCommand: 'rm -rf /tmp/aiopsterm-risk',
+      receivedAt: 600
+    })
+
+    await expect(store.resumeManagedAiSession('codex', 'codex-risky-1')).resolves.toBe(false)
+
+    expect(window.aiops.writeTerminal).not.toHaveBeenCalled()
+    expect(store.terminalSecurityPrompt?.command).toBe('rm -rf /tmp/aiopsterm-risk')
+    expect(store.topNotice).toBe('AI 会话恢复命令等待安全审批')
+  })
+
   it('creates, renames, splits, and closes terminal panels', () => {
     const store = useWorkspaceStore()
 

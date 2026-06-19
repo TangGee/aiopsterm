@@ -619,6 +619,10 @@ export type AiAgentSessionEventInput = {
   wait_for_decision?: boolean
   waitTimeoutMs?: number
   wait_timeout_ms?: number
+  launchCommand?: string
+  launch_command?: string
+  resumeCommand?: string
+  resume_command?: string
   receivedAt?: number
   [key: string]: unknown
 }
@@ -637,6 +641,8 @@ export type AiAgentSessionEvent = {
   transcriptPath?: string
   requestId?: string
   actionable?: boolean
+  launchCommand?: string
+  resumeCommand?: string
 }
 
 export type AiAgentSessionEventResult = AiopsMutationResult<AiAgentSessionEvent>
@@ -677,6 +683,8 @@ export type ManagedAiSessionRecord = {
   transcriptPath?: string
   pendingRequestId?: string
   actionable?: boolean
+  launchCommand?: string
+  resumeCommand?: string
   events: ManagedAiSessionTimelineEvent[]
   decisions: ManagedAiSessionDecision[]
 }

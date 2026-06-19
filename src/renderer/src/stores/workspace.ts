@@ -4118,7 +4118,9 @@ const isManagedAiSessionTimelineEvent = (value: unknown): value is ManagedAiSess
   isNonEmptyString(value.sessionId) &&
   isNonEmptyString(value.title) &&
   typeof value.summary === 'string' &&
-  typeof value.receivedAt === 'number'
+  typeof value.receivedAt === 'number' &&
+  isOptionalField(value, 'launchCommand', isNonEmptyText) &&
+  isOptionalField(value, 'resumeCommand', isNonEmptyText)
 
 const isManagedAiSessionDecision = (value: unknown): value is ManagedAiSessionDecision =>
   isRecord(value) &&
@@ -4137,6 +4139,8 @@ const isManagedAiSessionRecord = (value: unknown): value is ManagedAiSessionReco
   typeof value.lastActivityAt === 'number' &&
   typeof value.createdAt === 'number' &&
   typeof value.updatedAt === 'number' &&
+  isOptionalField(value, 'launchCommand', isNonEmptyText) &&
+  isOptionalField(value, 'resumeCommand', isNonEmptyText) &&
   Array.isArray(value.events) &&
   value.events.every(isManagedAiSessionTimelineEvent) &&
   Array.isArray(value.decisions) &&
@@ -8511,7 +8515,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       source: event.source,
       title: existing?.userTitle || existing?.title || event.title || event.source,
       summary: event.summary || existing?.summary || '',
-    state: managedAiSessionStateForEvent(event.event, existing?.state),
+      state: managedAiSessionStateForEvent(event.event, existing?.state),
       lastEvent: event.event,
       lastActivityAt: event.receivedAt,
       createdAt: existing?.createdAt || event.receivedAt,
@@ -8526,7 +8530,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       ...(event.cwd || existing?.cwd ? { cwd: event.cwd || existing?.cwd } : {}),
       ...(event.transcriptPath || existing?.transcriptPath ? { transcriptPath: event.transcriptPath || existing?.transcriptPath } : {}),
       ...(event.requestId && event.actionable ? { pendingRequestId: event.requestId } : {}),
-      ...(typeof event.actionable === 'boolean' ? { actionable: event.actionable } : existing?.actionable ? { actionable: existing.actionable } : {})
+      ...(typeof event.actionable === 'boolean' ? { actionable: event.actionable } : existing?.actionable ? { actionable: existing.actionable } : {}),
+      ...(event.launchCommand || existing?.launchCommand ? { launchCommand: event.launchCommand || existing?.launchCommand } : {}),
+      ...(event.resumeCommand || existing?.resumeCommand ? { resumeCommand: event.resumeCommand || existing?.resumeCommand } : {})
     }
     managedAiSessions.value = existing
       ? managedAiSessions.value.map((session) => (session.source === next.source && session.id === next.id ? next : session))
@@ -8667,6 +8673,36 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       session
     }
     return session
+  }
+
+  const resumeManagedAiSession = async (source: AiAgentSessionSource, sessionId: string) => {
+    const session = managedAiSessions.value.find((item) => item.source === source && item.id === sessionId)
+    if (!session) {
+      setTopNotice('AI 会话不存在')
+      return false
+    }
+    const command = session.resumeCommand?.trim()
+    if (!command) {
+      setTopNotice('此 AI 会话没有可用的恢复命令')
+      return false
+    }
+    const focused = focusManagedAiSession(session.id)
+    const targetId = focused?.panelId || focused?.terminalSessionId || session.panelId || session.terminalSessionId
+    const panel = targetId ? panels.value.find((item) => item.id === targetId || item.sessionId === targetId) : null
+    if (!panel?.sessionId) {
+      setTopNotice('恢复 AI 会话需要先打开它所属的本地连接终端')
+      return false
+    }
+    const decision = await runTerminalCommand(panel.id, command, { source: 'agent', writeToShell: true })
+    if (decision.status === 'allow') {
+      setTopNotice('已向所属终端写入 AI 会话恢复命令')
+      return true
+    }
+    if (decision.status === 'needs-approval') {
+      setTopNotice('AI 会话恢复命令等待安全审批')
+      return false
+    }
+    return false
   }
 
   const jumpToNextAiAttention = () => {
@@ -14651,6 +14687,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     bulkManagedAiSessions,
     managedAiSessionNeedsAttentionForPanel,
     focusManagedAiSession,
+    resumeManagedAiSession,
     removeAiAttentionItem,
     markAiAttentionHandled,
     clearAiAttentionForConversation,

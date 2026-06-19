@@ -124,6 +124,98 @@ describe('agent session backend', () => {
     })
   })
 
+  it('builds native resume commands and sanitizes launch commands', async () => {
+    const { normalizeAiAgentSessionEventInput } = await loadBackend()
+    expect(
+      normalizeAiAgentSessionEventInput(
+        {
+          source: 'codex',
+          event: 'SessionStart',
+          session_id: 'codex-session-1',
+          cwd: '/work/project',
+          launchCommand: 'codex -m gpt-5 --approval on-request --api-key sk-secret -p "do this" --sandbox workspace-write'
+        },
+        250
+      )
+    ).toEqual({
+      ok: true,
+      data: expect.objectContaining({
+        source: 'codex',
+        sessionId: 'codex-session-1',
+        launchCommand: 'codex -m gpt-5 --approval on-request --sandbox workspace-write',
+        resumeCommand: "cd '/work/project' && codex resume 'codex-session-1'"
+      })
+    })
+
+    expect(
+      normalizeAiAgentSessionEventInput(
+        {
+          source: 'claude-code',
+          event: 'SessionStart',
+          session_id: 'claude-session-1',
+          project_dir: "/work/project's app",
+          launch_command: 'claude --model opus --permission-mode plan --prompt "secret prompt"'
+        },
+        260
+      )
+    ).toEqual({
+      ok: true,
+      data: expect.objectContaining({
+        source: 'claude-code',
+        sessionId: 'claude-session-1',
+        launchCommand: 'claude --model opus --permission-mode plan',
+        resumeCommand: "cd '/work/project'\\''s app' && claude --resume 'claude-session-1'"
+      })
+    })
+  })
+
+  it('persists resume command metadata across later events that omit it', async () => {
+    const { configureAiAgentSessionStore, listManagedAiSessions, publishAiAgentSessionEvent } = await loadBackend()
+    await configureAiAgentSessionStore(await mkdtemp(join(tmpdir(), 'aiopsterm-agent-resume-')))
+
+    publishAiAgentSessionEvent(
+      {
+        source: 'codex',
+        event: 'SessionStart',
+        sessionId: 'codex-persist-1',
+        cwd: '/work/project',
+        launchCommand: 'codex -m gpt-5 --approval on-request',
+        receivedAt: 300
+      },
+      null
+    )
+    publishAiAgentSessionEvent(
+      {
+        source: 'codex',
+        event: 'Stop',
+        sessionId: 'codex-persist-1',
+        summary: 'turn complete',
+        receivedAt: 400
+      },
+      null
+    )
+
+    expect(await listManagedAiSessions()).toEqual({
+      ok: true,
+      data: {
+        sessions: [
+          expect.objectContaining({
+            id: 'codex-persist-1',
+            launchCommand: 'codex -m gpt-5 --approval on-request',
+            resumeCommand: "cd '/work/project' && codex resume 'codex-persist-1'",
+            events: expect.arrayContaining([
+              expect.objectContaining({
+                event: 'session_start',
+                resumeCommand: "cd '/work/project' && codex resume 'codex-persist-1'"
+              }),
+              expect.objectContaining({ event: 'stop' })
+            ])
+          })
+        ]
+      }
+    })
+  })
+
   it('persists managed session records with timeline, decisions, and auto titles', async () => {
     const { configureAiAgentSessionStore, listManagedAiSessions, publishAiAgentSessionEvent, renameManagedAiSession, replyManagedAiSession } = await loadBackend()
     await configureAiAgentSessionStore(await mkdtemp(join(tmpdir(), 'aiopsterm-agent-sessions-')))

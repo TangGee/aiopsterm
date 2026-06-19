@@ -145,6 +145,8 @@ const createEvent = (payload) => {
     cleanText(options.cwd || payload.cwd || payload.workingDirectory || payload.working_directory || payload.project_dir || payload.projectDir) ||
     cleanText(process.cwd())
   const requestId = cleanText(options['request-id'] || payload.requestId || payload.request_id || payload.tool_use_id || payload.toolUseID)
+  const launchCommand = cleanText(options['launch-command'] || payload.launchCommand || payload.launch_command || process.env.AIOPSTERM_AGENT_LAUNCH_COMMAND)
+  const resumeCommand = cleanText(options['resume-command'] || payload.resumeCommand || payload.resume_command)
   return {
     source,
     event,
@@ -159,7 +161,9 @@ const createEvent = (payload) => {
     requestId: requestId || undefined,
     actionable: waitDecision || undefined,
     waitForDecision: waitDecision || undefined,
-    waitTimeoutMs: waitDecision ? Number(options['wait-timeout-ms'] || 120000) : undefined
+    waitTimeoutMs: waitDecision ? Number(options['wait-timeout-ms'] || 120000) : undefined,
+    launchCommand: launchCommand || undefined,
+    resumeCommand: resumeCommand || undefined
   }
 }
 

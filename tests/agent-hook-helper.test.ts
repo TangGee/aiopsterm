@@ -186,6 +186,41 @@ describe('aiopsterm agent hook helper', () => {
     }
   })
 
+  it('posts launch and resume command metadata when hook payloads provide it', async () => {
+    const server = await startSocketServer()
+    try {
+      const result = await runHelper(
+        ['--source', 'codex', '--event', 'SessionStart', '--launch-command', 'codex -m gpt-5 --approval on-request -p secret prompt'],
+        JSON.stringify({
+          session_id: 'codex-resume-metadata-1',
+          cwd: '/work/project',
+          resume_command: 'codex resume codex-resume-metadata-1'
+        }),
+        {
+          ...process.env,
+          AIOPSTERM_MANAGED_TERMINAL: '1',
+          AIOPSTERM_AGENT_SOCKET_PATH: server.socketPath,
+          AIOPSTERM_TERMINAL_SESSION_ID: 'terminal-1',
+          AIOPSTERM_PANEL_ID: 'panel-1',
+          AIOPSTERM_WORKSPACE_ID: 'workspace-1'
+        }
+      )
+
+      expect(result.code).toBe(0)
+      expect(server.received).toEqual([
+        expect.objectContaining({
+          source: 'codex',
+          event: 'SessionStart',
+          sessionId: 'codex-resume-metadata-1',
+          launchCommand: 'codex -m gpt-5 --approval on-request -p secret prompt',
+          resumeCommand: 'codex resume codex-resume-metadata-1'
+        })
+      ])
+    } finally {
+      await server.close()
+    }
+  })
+
   it('derives project titles, cwd, transcript path, and question summaries from real hook payloads', async () => {
     const server = await startSocketServer()
     const projectDir = join(tmpdir(), 'aiopsterm-hook-project')

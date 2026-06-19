@@ -122,12 +122,21 @@
               @blur="renameSelectedSession"
             />
           </div>
-          <button
-            title="定位终端"
-            @click="workspace.focusManagedAiSession(selectedSession.id)"
-          >
-            <LocateFixed />
-          </button>
+          <div class="ai-session-detail-actions">
+            <button
+              v-if="selectedSession.resumeCommand"
+              title="恢复会话"
+              @click="workspace.resumeManagedAiSession(selectedSession.source, selectedSession.id)"
+            >
+              <RotateCcw />
+            </button>
+            <button
+              title="定位终端"
+              @click="workspace.focusManagedAiSession(selectedSession.id)"
+            >
+              <LocateFixed />
+            </button>
+          </div>
         </header>
 
         <dl class="ai-session-meta">
@@ -142,6 +151,14 @@
           <div v-if="selectedSession.transcriptPath">
             <dt>记录</dt>
             <dd>{{ selectedSession.transcriptPath }}</dd>
+          </div>
+          <div v-if="selectedSession.launchCommand">
+            <dt>启动命令</dt>
+            <dd class="ai-session-command">{{ selectedSession.launchCommand }}</dd>
+          </div>
+          <div v-if="selectedSession.resumeCommand">
+            <dt>恢复命令</dt>
+            <dd class="ai-session-command">{{ selectedSession.resumeCommand }}</dd>
           </div>
         </dl>
 
@@ -247,7 +264,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { ArchiveX, Ban, Check, CheckCheck, LocateFixed, RefreshCw, Search, Send, Settings, ShieldCheck, Trash2 } from 'lucide-vue-next'
+import { ArchiveX, Ban, Check, CheckCheck, LocateFixed, RefreshCw, RotateCcw, Search, Send, Settings, ShieldCheck, Trash2 } from 'lucide-vue-next'
 import { useWorkspaceStore, type ManagedAiSession, type ManagedAiSessionState } from '@/stores/workspace'
 import type { AiAgentSessionEventName, AiAgentSessionSource } from '@shared/preload'
 
@@ -401,6 +418,7 @@ const formatTime = (timestamp: number) =>
 
 .ai-sessions-header-actions,
 .ai-sessions-bulk,
+.ai-session-detail-actions,
 .ai-session-actions {
   display: inline-flex;
   align-items: center;
@@ -671,6 +689,14 @@ const formatTime = (timestamp: number) =>
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.ai-session-meta dd.ai-session-command {
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .ai-session-actions {

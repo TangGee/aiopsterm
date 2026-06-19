@@ -57,6 +57,7 @@ const maxDecisionsPerSession = 40
 const maxRawKeys = 80
 const defaultDecisionWaitTimeoutMs = 120_000
 const maxDecisionWaitTimeoutMs = 125_000
+const maxLaunchCommandLength = 600
 const supportedSources = new Set<AiAgentSessionSource>([
   'codex',
   'claude-code',
@@ -103,6 +104,10 @@ const cleanOptionalText = (value: unknown) => {
   const text = cleanText(value)
   return text || undefined
 }
+
+const shellQuote = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`
+
+const shellToken = (value: string) => (/^[A-Za-z0-9_./:=@+-]+$/.test(value) ? value : shellQuote(value))
 
 const sessionKey = (source: AiAgentSessionSource, id: string) => `${source}:${id}`
 
@@ -211,6 +216,136 @@ const firstText = (record: Record<string, unknown>, keys: string[]) => {
     if (text) return text
   }
   return undefined
+}
+
+const commandTokens = (command: string) => {
+  const tokens: string[] = []
+  let current = ''
+  let quote: '"' | "'" | '' = ''
+  let escaped = false
+  for (const char of command.trim()) {
+    if (escaped) {
+      current += char
+      escaped = false
+      continue
+    }
+    if (char === '\\' && quote !== "'") {
+      escaped = true
+      continue
+    }
+    if (quote) {
+      if (char === quote) quote = ''
+      else current += char
+      continue
+    }
+    if (char === '"' || char === "'") {
+      quote = char
+      continue
+    }
+    if (/\s/.test(char)) {
+      if (current) {
+        tokens.push(current)
+        current = ''
+      }
+      continue
+    }
+    current += char
+  }
+  if (current) tokens.push(current)
+  return tokens
+}
+
+const safeLaunchFlags = new Set([
+  '-m',
+  '--model',
+  '--model-id',
+  '--sandbox',
+  '--approval',
+  '--approval-policy',
+  '--permission-mode',
+  '--config',
+  '--settings',
+  '--profile',
+  '--cwd',
+  '-C',
+  '--cd'
+])
+
+const blockedLaunchFlags = new Set([
+  '-p',
+  '--prompt',
+  '--api-key',
+  '--token',
+  '--auth-token',
+  '--resume',
+  '-r',
+  '--session',
+  '--session-id',
+  '--conversation',
+  '--execute',
+  'exec',
+  'review'
+])
+
+const sanitizeLaunchCommand = (value: unknown) => {
+  const text = cleanText(value)
+  if (!text) return undefined
+  const tokens = commandTokens(text).slice(0, 80)
+  if (!tokens.length) return undefined
+  const executable = tokens[0]
+  const base = executable.split(/[\\/]/).pop() || executable
+  const preserved = [base]
+  for (let index = 1; index < tokens.length; index += 1) {
+    const token = tokens[index]
+    const [flagName] = token.split('=', 1)
+    if (blockedLaunchFlags.has(token) || blockedLaunchFlags.has(flagName)) {
+      if (!token.includes('=') && index + 1 < tokens.length) index += 1
+      continue
+    }
+    if (safeLaunchFlags.has(token)) {
+      if (index + 1 < tokens.length) {
+        preserved.push(token, tokens[index + 1])
+        index += 1
+      }
+      continue
+    }
+    if ([...safeLaunchFlags].some((flag) => token.startsWith(`${flag}=`))) {
+      preserved.push(token)
+    }
+  }
+  return preserved.map(shellToken).join(' ').slice(0, maxLaunchCommandLength)
+}
+
+const resumeCommandFor = (source: AiAgentSessionSource, sessionId: string, cwd?: string, provided?: unknown) => {
+  const explicit = sanitizeLaunchCommand(provided)
+  if (explicit && /\b(resume|--resume|-r|--session|--session-id)\b/.test(explicit)) return cwd ? `cd ${shellQuote(cwd)} && ${explicit}` : explicit
+  const id = shellQuote(sessionId)
+  const command =
+    source === 'codex'
+      ? `codex resume ${id}`
+      : source === 'claude-code'
+        ? `claude --resume ${id}`
+        : source === 'grok'
+          ? `grok -r ${id}`
+          : source === 'opencode'
+            ? `opencode --session ${id}`
+            : source === 'cursor'
+              ? `cursor-agent --resume ${id}`
+              : source === 'gemini'
+                ? `gemini --resume ${id}`
+                : source === 'kiro'
+                  ? `kiro-cli chat --resume-id ${id}`
+                  : source === 'copilot'
+                    ? `copilot --resume ${id}`
+                    : source === 'codebuddy'
+                      ? `codebuddy --resume ${id}`
+                      : source === 'factory'
+                        ? `droid --resume ${id}`
+                        : source === 'qoder'
+                          ? `qodercli --resume ${id}`
+                          : ''
+  if (!command) return undefined
+  return cwd ? `cd ${shellQuote(cwd)} && ${command}` : command
 }
 
 const nestedRecord = (record: Record<string, unknown>, key: string) => {
@@ -394,6 +529,8 @@ const normalizeStoredSession = (value: unknown): ManagedAiSessionRecord | null =
     ...(cleanOptionalText(value.transcriptPath) ? { transcriptPath: cleanOptionalText(value.transcriptPath) } : {}),
     ...(cleanOptionalText(value.pendingRequestId) ? { pendingRequestId: cleanOptionalText(value.pendingRequestId) } : {}),
     ...(typeof value.actionable === 'boolean' ? { actionable: value.actionable } : {}),
+    ...(cleanOptionalText(value.launchCommand) ? { launchCommand: cleanOptionalText(value.launchCommand) } : {}),
+    ...(cleanOptionalText(value.resumeCommand) ? { resumeCommand: cleanOptionalText(value.resumeCommand) } : {}),
     events: events.slice(-maxEventsPerSession) as ManagedAiSessionTimelineEvent[],
     decisions: decisions.slice(-maxDecisionsPerSession) as ManagedAiSessionDecision[]
   }
@@ -419,6 +556,8 @@ const normalizeStoredTimelineEvent = (value: Record<string, unknown>, fallbackSo
     ...(cleanOptionalText(value.transcriptPath) ? { transcriptPath: cleanOptionalText(value.transcriptPath) } : {}),
     ...(cleanOptionalText(value.requestId) ? { requestId: cleanOptionalText(value.requestId) } : {}),
     ...(typeof value.actionable === 'boolean' ? { actionable: value.actionable } : {}),
+    ...(cleanOptionalText(value.launchCommand) ? { launchCommand: cleanOptionalText(value.launchCommand) } : {}),
+    ...(cleanOptionalText(value.resumeCommand) ? { resumeCommand: cleanOptionalText(value.resumeCommand) } : {}),
     ...(isRecord(value.raw) ? { raw: compactRawRecord(value.raw) } : {})
   } satisfies ManagedAiSessionTimelineEvent
 }
@@ -509,6 +648,8 @@ export const normalizeAiAgentSessionEventInput = (input: unknown, now = Date.now
   const transcriptPath = cleanOptionalText(record.transcriptPath || record.transcript_path)
   const requestId = cleanOptionalText(record.requestId || record.request_id || record.tool_use_id)
   const actionable = normalizeBoolean(record.actionable ?? record.waitForDecision ?? record.wait_for_decision)
+  const launchCommand = sanitizeLaunchCommand(record.launchCommand || record.launch_command)
+  const resumeCommand = resumeCommandFor(source, sessionId, cwd, record.resumeCommand || record.resume_command || record.launchCommand || record.launch_command)
   const normalized: AiAgentSessionEvent = {
     source,
     event,
@@ -522,7 +663,9 @@ export const normalizeAiAgentSessionEventInput = (input: unknown, now = Date.now
     ...(cwd ? { cwd } : {}),
     ...(transcriptPath ? { transcriptPath } : {}),
     ...(requestId ? { requestId } : {}),
-    ...(typeof actionable === 'boolean' ? { actionable } : {})
+    ...(typeof actionable === 'boolean' ? { actionable } : {}),
+    ...(launchCommand ? { launchCommand } : {}),
+    ...(resumeCommand ? { resumeCommand } : {})
   }
   return { ok: true, data: normalized }
 }
@@ -535,6 +678,9 @@ const upsertSessionForEvent = (event: AiAgentSessionEvent, raw: Record<string, u
   const title = existing?.userTitle || nextAutoTitle || event.title || existing?.title || sourceLabel(event.source)
   const handledAt = state === 'needsInput' ? undefined : existing?.handledAt
   const pendingRequestId = state === 'needsInput' && event.actionable && event.requestId ? event.requestId : undefined
+  const cwd = event.cwd || existing?.cwd
+  const launchCommand = event.launchCommand || existing?.launchCommand
+  const resumeCommand = event.resumeCommand && event.cwd ? event.resumeCommand : existing?.resumeCommand || resumeCommandFor(event.source, event.sessionId, cwd, launchCommand)
   const record: ManagedAiSessionRecord = {
     id: event.sessionId,
     source: event.source,
@@ -551,10 +697,12 @@ const upsertSessionForEvent = (event: AiAgentSessionEvent, raw: Record<string, u
     ...(event.panelId || existing?.panelId ? { panelId: event.panelId || existing?.panelId } : {}),
     ...(event.terminalSessionId || existing?.terminalSessionId ? { terminalSessionId: event.terminalSessionId || existing?.terminalSessionId } : {}),
     ...(event.workspaceId || existing?.workspaceId ? { workspaceId: event.workspaceId || existing?.workspaceId } : {}),
-    ...(event.cwd || existing?.cwd ? { cwd: event.cwd || existing?.cwd } : {}),
+    ...(cwd ? { cwd } : {}),
     ...(event.transcriptPath || existing?.transcriptPath ? { transcriptPath: event.transcriptPath || existing?.transcriptPath } : {}),
     ...(pendingRequestId ? { pendingRequestId } : {}),
     ...(typeof event.actionable === 'boolean' ? { actionable: event.actionable } : existing?.actionable ? { actionable: existing.actionable } : {}),
+    ...(launchCommand ? { launchCommand } : {}),
+    ...(resumeCommand ? { resumeCommand } : {}),
     events: [...(existing?.events || []), normalizeRecordEvent(event, raw)].slice(-maxEventsPerSession),
     decisions: [...(existing?.decisions || [])].slice(-maxDecisionsPerSession)
   }
