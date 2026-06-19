@@ -113,6 +113,13 @@ type TerminalBufferEntry = {
   updatedAt: number
 }
 
+type TmuxCompatHookEntry = {
+  event: string
+  command: string
+  createdAt: number
+  updatedAt: number
+}
+
 type AgentVaultEntry = {
   id: string
   name: string
@@ -194,6 +201,8 @@ const maxSidebarStatusEntries = 200
 const maxSidebarLogEntries = 500
 const maxTerminalBuffers = 100
 const maxTerminalBufferBytes = 1024 * 1024
+const maxTmuxCompatHooks = 100
+const maxTmuxCompatHookCommandLength = 2000
 const controlSocketCapabilities = [
   'ping',
   'system.capabilities',
@@ -216,6 +225,7 @@ const controlSocketCapabilities = [
   'terminal.send_text',
   'terminal.send_key',
   'terminal.buffer',
+  'tmux.compat',
   'notification',
   'events.stream',
   'events.list',
@@ -253,6 +263,7 @@ let sidebarStatusEntries = new Map<string, SidebarStatusEntry>()
 let sidebarProgressEntries = new Map<string, SidebarProgressEntry>()
 let sidebarLogEntries: SidebarLogEntry[] = []
 let terminalBuffers = new Map<string, TerminalBufferEntry>()
+let tmuxCompatHooks = new Map<string, TmuxCompatHookEntry>()
 
 const cleanText = (value: unknown) => (typeof value === 'string' ? value.trim() : '')
 
@@ -320,6 +331,18 @@ const cleanTerminalBufferName = (value: unknown) => {
   const text = cleanText(value) || 'default'
   if (text.length > 80) return ''
   return /^[A-Za-z0-9._:-]+$/.test(text) ? text : ''
+}
+
+const cleanTmuxCompatHookEvent = (value: unknown) => {
+  const text = cleanText(value)
+  if (!text || text.length > 120) return ''
+  return /^[A-Za-z0-9._:-]+$/.test(text) ? text : ''
+}
+
+const cleanTmuxCompatHookCommand = (value: unknown) => {
+  const text = typeof value === 'string' ? value.trim() : ''
+  if (!text || Buffer.byteLength(text, 'utf8') > maxTmuxCompatHookCommandLength) return ''
+  return text
 }
 
 const terminalBufferText = (params: Record<string, unknown>) => {
@@ -428,7 +451,27 @@ const isSidebarMetadataMethod = (method: string) =>
   ].includes(method)
 
 const isTerminalBufferMethod = (method: string) =>
-  method.startsWith('terminal.buffer.') || method.startsWith('buffer.') || ['set-buffer', 'paste-buffer', 'list-buffers'].includes(method)
+  method.startsWith('terminal.buffer.') ||
+  method.startsWith('buffer.') ||
+  ['set-buffer', 'paste-buffer', 'list-buffers', 'show-buffer', 'showb', 'save-buffer', 'saveb'].includes(method)
+
+const isTmuxCompatMethod = (method: string) =>
+  method.startsWith('tmux.') ||
+  [
+    'set-hook',
+    'show-hooks',
+    'show-options',
+    'show-option',
+    'show',
+    'set-option',
+    'set',
+    'set-window-option',
+    'setw',
+    'source-file',
+    'refresh-client',
+    'attach-session',
+    'detach-client'
+  ].includes(method)
 
 const eventFiltersFromParams = (params: Record<string, unknown> = {}): ControlEventFilters => ({
   names: new Set([...cleanTextList(params.names), ...cleanTextList(params.name)]),
@@ -2254,6 +2297,13 @@ const terminalBufferPayload = (buffer?: TerminalBufferEntry | null) => {
   }
 }
 
+const terminalBufferReadPayload = (entry: TerminalBufferEntry) => ({
+  buffer: terminalBufferSummary(entry),
+  name: entry.name,
+  text: entry.text,
+  size: entry.size
+})
+
 const handleTerminalBufferControlRequest = async (method: string, params: Record<string, unknown>) => {
   const action = method.startsWith('terminal.buffer.')
     ? method.slice('terminal.buffer.'.length)
@@ -2293,6 +2343,17 @@ const handleTerminalBufferControlRequest = async (method: string, params: Record
     })
     return ok(terminalBufferPayload(entry))
   }
+  if (action === 'show' || action === 'show-buffer' || action === 'showb' || action === 'save' || action === 'save-buffer' || action === 'saveb') {
+    const name = cleanTerminalBufferName(params.name || params.buffer || params.bufferName || params.buffer_name)
+    if (!name) return fail('TERMINAL_BUFFER_NAME_INVALID', 'Buffer name must use letters, numbers, dot, underscore, colon, or dash.')
+    const entry = terminalBuffers.get(name)
+    if (!entry) return fail('TERMINAL_BUFFER_NOT_FOUND', `Buffer not found: ${name}`)
+    return ok({
+      ...terminalBufferReadPayload(entry),
+      action,
+      ...(action === 'save' || action === 'save-buffer' || action === 'saveb' ? { path: cleanText(params.path || params.output || params.file) } : {})
+    })
+  }
   if (action === 'paste' || action === 'paste-buffer') {
     const name = cleanTerminalBufferName(params.name || params.buffer || params.bufferName || params.buffer_name)
     if (!name) return fail('TERMINAL_BUFFER_NAME_INVALID', 'Buffer name must use letters, numbers, dot, underscore, colon, or dash.')
@@ -2317,6 +2378,96 @@ const handleTerminalBufferControlRequest = async (method: string, params: Record
     return response
   }
   return fail('UNKNOWN_CONTROL_METHOD', `Unknown aiopsterm terminal buffer method: ${method}`)
+}
+
+const tmuxCompatHookSummary = (entry: TmuxCompatHookEntry) => ({
+  event: entry.event,
+  command: entry.command,
+  createdAt: entry.createdAt,
+  created_at: entry.createdAt,
+  updatedAt: entry.updatedAt,
+  updated_at: entry.updatedAt
+})
+
+const tmuxCompatHooksPayload = (hook?: TmuxCompatHookEntry | null) => {
+  const hooks = [...tmuxCompatHooks.values()].sort((left, right) => left.event.localeCompare(right.event)).map(tmuxCompatHookSummary)
+  return {
+    hooks,
+    count: hooks.length,
+    ...(hook ? { hook: tmuxCompatHookSummary(hook) } : {})
+  }
+}
+
+const tmuxCompatOptionPayload = (name: string, value: string) => ({
+  option: { name, value },
+  name,
+  value,
+  text: `${name} ${value}`
+})
+
+const handleTmuxCompatControlRequest = (method: string, params: Record<string, unknown>) => {
+  const action = method.startsWith('tmux.') ? method.slice('tmux.'.length) : method
+  if (action === 'hook.list' || action === 'hooks.list' || action === 'show-hooks') return ok(tmuxCompatHooksPayload())
+  if (action === 'hook.unset' || action === 'set-hook.unset') {
+    const event = cleanTmuxCompatHookEvent(params.event || params.name || params.hook)
+    if (!event) return fail('TMUX_HOOK_EVENT_INVALID', 'set-hook --unset requires a valid event name.')
+    const existing = tmuxCompatHooks.get(event) || null
+    tmuxCompatHooks.delete(event)
+    publishControlEvent({
+      name: 'tmux.hook.unset',
+      category: 'tmux',
+      source: 'control.socket',
+      payload: { event, removed: Boolean(existing) }
+    })
+    return ok({ ...tmuxCompatHooksPayload(), event, removed: Boolean(existing) })
+  }
+  if (action === 'hook.set' || action === 'set-hook' || action === 'set_hook') {
+    const list = Boolean(params.list || params.show || params.ls)
+    if (list) return ok(tmuxCompatHooksPayload())
+    const unset = Boolean(params.unset || params.remove || params.delete)
+    if (unset) return handleTmuxCompatControlRequest('tmux.hook.unset', params)
+    const event = cleanTmuxCompatHookEvent(params.event || params.name || params.hook)
+    if (!event) return fail('TMUX_HOOK_EVENT_INVALID', 'set-hook requires a valid event name.')
+    const command = cleanTmuxCompatHookCommand(params.command || params.text || params.value)
+    if (!command) return fail('TMUX_HOOK_COMMAND_REQUIRED', `set-hook requires a command no larger than ${maxTmuxCompatHookCommandLength} bytes.`)
+    const now = Date.now()
+    const existing = tmuxCompatHooks.get(event)
+    const entry: TmuxCompatHookEntry = {
+      event,
+      command,
+      createdAt: existing?.createdAt || now,
+      updatedAt: now
+    }
+    tmuxCompatHooks.set(event, entry)
+    if (tmuxCompatHooks.size > maxTmuxCompatHooks) {
+      const oldest = [...tmuxCompatHooks.values()].sort((left, right) => left.updatedAt - right.updatedAt)[0]
+      if (oldest) tmuxCompatHooks.delete(oldest.event)
+    }
+    publishControlEvent({
+      name: 'tmux.hook.set',
+      category: 'tmux',
+      source: 'control.socket',
+      payload: { event }
+    })
+    return ok(tmuxCompatHooksPayload(entry))
+  }
+  if (action === 'option.show' || action === 'show-options' || action === 'show-option' || action === 'show') {
+    const optionName = cleanText(params.option || params.name || params.optionName || params.option_name) || 'extended-keys'
+    if (optionName !== 'extended-keys') return fail('TMUX_OPTION_UNSUPPORTED', `Unsupported tmux compatibility option: ${optionName}`, { option: optionName, unsupported: true })
+    return ok({
+      ...tmuxCompatOptionPayload(optionName, 'on'),
+      valueOnly: Boolean(params.valueOnly || params.value_only || params.v)
+    })
+  }
+  if (['set-option', 'set', 'set-window-option', 'setw', 'source-file', 'refresh-client', 'attach-session', 'detach-client'].includes(action)) {
+    return ok({
+      command: action,
+      accepted: true,
+      noop: true,
+      reason: 'Accepted as a tmux compatibility no-op.'
+    })
+  }
+  return fail('UNKNOWN_CONTROL_METHOD', `Unknown aiopsterm tmux compatibility method: ${method}`)
 }
 
 const notificationPayload = (items = notifications, params: Record<string, unknown> = {}) => {
@@ -2615,6 +2766,7 @@ const handleControlRequest = async (request: ControlSocketRequest): Promise<Cont
   if (isWaitForMethod(method)) return handleWaitForControlRequest(method, params)
   if (isSidebarMetadataMethod(method)) return handleSidebarMetadataControlRequest(method, params)
   if (isTerminalBufferMethod(method)) return handleTerminalBufferControlRequest(method, params)
+  if (isTmuxCompatMethod(method)) return handleTmuxCompatControlRequest(method, params)
   if (isEventListMethod(method)) return listEvents(params)
   if (isFeedMethod(method)) return handleFeedControlRequest(method, params)
   if (isAgentHooksMethod(method)) return handleAgentHooksControlRequest(method, params)
@@ -2931,6 +3083,7 @@ export const closeControlSocketServer = () => {
   sidebarProgressEntries.clear()
   sidebarLogEntries = []
   terminalBuffers.clear()
+  tmuxCompatHooks.clear()
   notifications = []
   eventLog = []
   nextEventSeq = 1
@@ -2960,6 +3113,7 @@ export const __testing = {
   agentVaultPathFor,
   listNotifications: () => notifications,
   listTerminalBuffers: () => [...terminalBuffers.values()].sort((left, right) => left.name.localeCompare(right.name)),
+  listTmuxCompatHooks: () => [...tmuxCompatHooks.values()].sort((left, right) => left.event.localeCompare(right.event)),
   pendingRendererRequestCount: () => pendingRendererRequests.size,
   eventSubscriptionCount: () => eventSubscriptions.size
 }

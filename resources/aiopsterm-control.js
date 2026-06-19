@@ -62,8 +62,12 @@ Commands:
   wait-for [-S|--signal] <name> [--timeout <seconds>]
   display-message [-p|--print] <text>
   set-buffer [--name <name>] <text>
+  show-buffer [-b|--name <name>]
+  save-buffer [-b|--name <name>] [path]
   paste-buffer [--name <name>] [--panel <id>|--session <id>]
   list-buffers
+  show-options [-v] [extended-keys]
+  set-hook [--list] [--unset <event>] | <event> <command>
   set-status <key> <value> [--icon <name>] [--color <#hex>] [--priority <n>]
   clear-status <key>
   list-status
@@ -201,7 +205,10 @@ const methodParams = () => {
   if (command === 'events' || command === 'event') return eventStreamMethodParams()
   if (command === 'wait-for' || command === 'wait_for') return waitForMethodParams()
   if (command === 'display-message' || command === 'display' || command === 'displayp') return displayMessageMethodParams()
-  if (['set-buffer', 'paste-buffer', 'list-buffers'].includes(command)) return terminalBufferMethodParams(command)
+  if (['set-buffer', 'paste-buffer', 'list-buffers', 'show-buffer', 'showb', 'save-buffer', 'saveb'].includes(command)) return terminalBufferMethodParams(command)
+  if (['show-options', 'show-option', 'show', 'set-hook', 'set-option', 'set', 'set-window-option', 'setw', 'source-file', 'refresh-client', 'attach-session', 'detach-client'].includes(command)) {
+    return tmuxCompatMethodParams(command)
+  }
   if (['set-status', 'clear-status', 'list-status', 'set-progress', 'clear-progress', 'log', 'clear-log', 'list-log', 'sidebar-state'].includes(command)) return sidebarMetadataMethodParams(command)
   if (['resize-pane', 'resizep', 'swap-pane', 'swapp', 'break-pane', 'breakp', 'join-pane', 'joinp'].includes(command)) return paneLayoutMethodParams(command)
   if (['next-window', 'nextw', 'previous-window', 'prev-window', 'previousw', 'prevw', 'last-window', 'lastw', 'select-window', 'selectw', 'select-pane', 'selectp', 'focus-pane', 'last-pane', 'lastp', 'find-window', 'findw'].includes(command)) {
@@ -493,14 +500,44 @@ const displayMessageMethodParams = () => {
 
 const terminalBufferMethodParams = (command) => {
   if (command === 'list-buffers') return { method: 'terminal.buffer.list', params: {} }
-  const name = readOption('--name') || readOption('--buffer') || 'default'
+  const name = readOption('--name') || readOption('--buffer') || readOption('-b') || 'default'
   if (command === 'set-buffer') {
     const text = args.filter((arg) => arg !== '--' && !arg.startsWith('--')).join(' ')
     return { method: 'terminal.buffer.set', params: { name, text } }
   }
+  if (command === 'show-buffer' || command === 'showb') return { method: 'terminal.buffer.show', params: { name } }
+  if (command === 'save-buffer' || command === 'saveb') {
+    const outputPath = args.find((arg) => arg !== '--' && !arg.startsWith('--')) || ''
+    return {
+      method: 'terminal.buffer.save',
+      params: { name, path: outputPath },
+      saveBufferPath: outputPath
+    }
+  }
   const panelId = readOption('--panel') || readOption('--panel-id') || readOption('--surface') || readOption('--surface-id')
   const sessionId = readOption('--session') || readOption('--session-id')
   return { method: 'terminal.buffer.paste', params: { name, panelId, surfaceId: panelId, sessionId, terminalSessionId: sessionId } }
+}
+
+const tmuxCompatMethodParams = (command) => {
+  if (command === 'set-hook') {
+    if (hasFlag('--list') || hasFlag('-l')) return { method: 'tmux.hook.list', params: {} }
+    const unset = hasFlag('--unset') || hasFlag('-u')
+    const event = readPositional()
+    if (unset) return { method: 'tmux.hook.unset', params: { event, unset: true } }
+    const commandText = args.filter((arg) => arg !== '--').join(' ').trim()
+    return { method: 'tmux.hook.set', params: { event, command: commandText } }
+  }
+  if (command === 'show-options' || command === 'show-option' || command === 'show') {
+    const valueOnly = hasFlag('-v') || hasFlag('--value') || hasFlag('--value-only')
+    hasFlag('-g')
+    hasFlag('-q')
+    hasFlag('-s')
+    hasFlag('-w')
+    const option = args.find((arg) => arg !== '--' && !arg.startsWith('-')) || 'extended-keys'
+    return { method: 'tmux.option.show', params: { option, name: option, valueOnly, v: valueOnly } }
+  }
+  return { method: command, params: { command, accepted: true } }
 }
 
 const readPaneTarget = (fallbackFlag = '--pane') => {
@@ -1075,6 +1112,10 @@ const printResponse = (response) => {
     process.stdout.write(['wait-for', data.status, data.name, `waited=${data.waitedMs || data.waited_ms || 0}`].join('\t') + '\n')
     return
   }
+  if (typeof data.text === 'string' && data.buffer) {
+    process.stdout.write(`${data.text}${data.text.endsWith('\n') ? '' : '\n'}`)
+    return
+  }
   if (Array.isArray(data.buffers)) {
     if (data.buffer) {
       process.stdout.write(['buffer', data.buffer.name || '-', data.buffer.size ?? 0].join('\t') + '\n')
@@ -1082,6 +1123,23 @@ const printResponse = (response) => {
     }
     for (const buffer of data.buffers) process.stdout.write(['buffer', buffer.name || '-', buffer.size ?? 0].join('\t') + '\n')
     if (data.buffers.length === 0) process.stdout.write('No buffers\n')
+    return
+  }
+  if (Array.isArray(data.hooks)) {
+    if (data.hook) {
+      process.stdout.write(['hook', data.hook.event || '-', data.hook.command || ''].join('\t') + '\n')
+      return
+    }
+    if (data.hooks.length === 0) process.stdout.write('No hooks configured\n')
+    for (const hook of data.hooks) process.stdout.write(['hook', hook.event || '-', hook.command || ''].join('\t') + '\n')
+    return
+  }
+  if (data.option && data.option.name) {
+    process.stdout.write(data.valueOnly ? `${data.option.value || ''}\n` : `${data.option.name} ${data.option.value || ''}\n`)
+    return
+  }
+  if (data.noop && data.command) {
+    process.stdout.write('OK\n')
     return
   }
   if (data.command && data.decision) {
@@ -1495,6 +1553,16 @@ socket.on('data', (chunk) => {
         }
         if (request.displayMessageText && response.ok && !outputJson) {
           process.stdout.write(`${request.displayMessageText}\n`)
+          process.exit(0)
+        }
+        if (request.saveBufferPath && response.ok) {
+          const text = typeof response.data?.text === 'string' ? response.data.text : ''
+          if (request.saveBufferPath) {
+            fs.writeFileSync(path.resolve(request.saveBufferPath), text)
+            process.stdout.write(`saved\t${path.resolve(request.saveBufferPath)}\tbytes=${Buffer.byteLength(text, 'utf8')}\n`)
+          } else {
+            process.stdout.write(`${text}${text.endsWith('\n') ? '' : '\n'}`)
+          }
           process.exit(0)
         }
         printResponse(response)

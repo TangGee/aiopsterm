@@ -187,6 +187,7 @@ describe('aiopsterm-control CLI', () => {
 
   it('sends tmux-style buffer requests from the CLI helper', async () => {
     const seen: Record<string, unknown>[] = []
+    const savePath = join(tmpdir(), `aiopsterm-buffer-${process.pid}-${Date.now()}.txt`)
     const socketPath = await startControlServer((request) => {
       seen.push(request)
       if (request.method === 'terminal.buffer.paste') {
@@ -198,6 +199,17 @@ describe('aiopsterm-control CLI', () => {
             bytes: 33,
             buffer: { name: (request.params as any)?.name || 'default', size: 33 },
             bufferName: (request.params as any)?.name || 'default'
+          }
+        }
+      }
+      if (request.method === 'terminal.buffer.show' || request.method === 'terminal.buffer.save') {
+        return {
+          id: request.id,
+          ok: true,
+          data: {
+            buffer: { name: (request.params as any)?.name || 'deploy', size: 33 },
+            text: 'kubectl rollout status deploy/api\n',
+            path: (request.params as any)?.path
           }
         }
       }
@@ -222,6 +234,18 @@ describe('aiopsterm-control CLI', () => {
     })
     expect(list.stdout).toContain('buffer\tdeploy')
 
+    const shown = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'show-buffer', '-b', 'deploy'], {
+      cwd: process.cwd()
+    })
+    expect(shown.stdout).toBe('kubectl rollout status deploy/api\n')
+
+    const saved = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'save-buffer', '-b', 'deploy', savePath], {
+      cwd: process.cwd()
+    })
+    expect(saved.stdout).toContain(`saved\t${savePath}`)
+    await expect(readFile(savePath, 'utf-8')).resolves.toBe('kubectl rollout status deploy/api\n')
+    await rm(savePath, { force: true })
+
     const paste = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'paste-buffer', '--name', 'deploy', '--panel', 'panel-1'], {
       cwd: process.cwd()
     })
@@ -230,7 +254,49 @@ describe('aiopsterm-control CLI', () => {
     expect(seen).toEqual([
       expect.objectContaining({ method: 'terminal.buffer.set', params: expect.objectContaining({ name: 'deploy', text: 'kubectl rollout status deploy/api\\n' }) }),
       expect.objectContaining({ method: 'terminal.buffer.list' }),
+      expect.objectContaining({ method: 'terminal.buffer.show', params: expect.objectContaining({ name: 'deploy' }) }),
+      expect.objectContaining({ method: 'terminal.buffer.save', params: expect.objectContaining({ name: 'deploy', path: savePath }) }),
       expect.objectContaining({ method: 'terminal.buffer.paste', params: expect.objectContaining({ name: 'deploy', panelId: 'panel-1', surfaceId: 'panel-1' }) })
+    ])
+  })
+
+  it('sends tmux-compatible hook and option requests from the CLI helper', async () => {
+    const seen: Record<string, unknown>[] = []
+    const socketPath = await startControlServer((request) => {
+      seen.push(request)
+      if (request.method === 'tmux.option.show') {
+        return { id: request.id, ok: true, data: { option: { name: (request.params as any)?.option || 'extended-keys', value: 'on' }, valueOnly: (request.params as any)?.valueOnly } }
+      }
+      if (request.method === 'tmux.hook.list') {
+        return { id: request.id, ok: true, data: { hooks: [{ event: 'after-split-window', command: 'display-message split' }], count: 1 } }
+      }
+      if (request.method === 'tmux.hook.unset') {
+        return { id: request.id, ok: true, data: { hooks: [], count: 0, event: (request.params as any)?.event, removed: true } }
+      }
+      return {
+        id: request.id,
+        ok: true,
+        data: {
+          hook: { event: (request.params as any)?.event, command: (request.params as any)?.command },
+          hooks: [{ event: (request.params as any)?.event, command: (request.params as any)?.command }],
+          count: 1
+        }
+      }
+    })
+
+    const option = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'show-options', '-v', 'extended-keys'], { cwd: process.cwd() })
+    expect(option.stdout).toBe('on\n')
+    const hookSet = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'set-hook', 'after-split-window', 'display-message', 'split'], { cwd: process.cwd() })
+    expect(hookSet.stdout).toContain('hook\tafter-split-window\tdisplay-message split')
+    const hookList = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'set-hook', '--list'], { cwd: process.cwd() })
+    expect(hookList.stdout).toContain('hook\tafter-split-window\tdisplay-message split')
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'set-hook', '--unset', 'after-split-window'], { cwd: process.cwd() })
+
+    expect(seen).toEqual([
+      expect.objectContaining({ method: 'tmux.option.show', params: expect.objectContaining({ option: 'extended-keys', valueOnly: true }) }),
+      expect.objectContaining({ method: 'tmux.hook.set', params: expect.objectContaining({ event: 'after-split-window', command: 'display-message split' }) }),
+      expect.objectContaining({ method: 'tmux.hook.list' }),
+      expect.objectContaining({ method: 'tmux.hook.unset', params: expect.objectContaining({ event: 'after-split-window', unset: true }) })
     ])
   })
 

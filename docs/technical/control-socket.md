@@ -112,7 +112,13 @@ The synchronization slice adds control_compat-style automation rendezvous:
 
 The terminal buffer slice adds tmux/control_compat-style runtime text buffers:
 
-- `terminal.buffer.set`, `terminal.buffer.list`, `terminal.buffer.paste`: set, list, and paste named text buffers.
+- `terminal.buffer.set`, `terminal.buffer.list`, `terminal.buffer.show`, `terminal.buffer.save`, `terminal.buffer.paste`: set, list, read, export, and paste named text buffers.
+
+The tmux compatibility metadata slice adds non-structural compatibility commands:
+
+- `tmux.hook.set`, `tmux.hook.list`, `tmux.hook.unset`: store, list, and remove tmux-style hook definitions as automation metadata.
+- `tmux.option.show`: reports supported tmux compatibility options. `extended-keys` is reported as `on`.
+- `set-option`, `set-window-option`, `source-file`, `refresh-client`, `attach-session`, and `detach-client`: accepted as explicit no-op compatibility commands for scripts that probe tmux behavior.
 
 The terminal history slice adds renderer-owned scrollback cleanup:
 
@@ -165,7 +171,8 @@ Aliases are accepted for control_compat-compatible scripts where useful:
 - `send-key`, `send-key-panel`, and `surface.send_key` map to `terminal.send_key`.
 - `wait-for` maps to `sync.wait_for`.
 - `display-message` maps to `notification.create`; `display-message -p` prints locally without using the socket.
-- `set-buffer`, `paste-buffer`, and `list-buffers` map to `terminal.buffer.*`.
+- `set-buffer`, `show-buffer`, `save-buffer`, `paste-buffer`, and `list-buffers` map to `terminal.buffer.*`.
+- `set-hook`, `show-options`, `show-option`, `set-option`, `set-window-option`, `source-file`, `refresh-client`, `attach-session`, and `detach-client` map to tmux compatibility metadata/no-op commands.
 - `set-status`, `clear-status`, `list-status`, `set-progress`, `clear-progress`, `log`, `clear-log`, `list-log`, and `sidebar-state` map to `sidebar.*` metadata methods.
 - `notify` maps to `notification.create`.
 - `list-notifications` maps to `notification.list`.
@@ -292,7 +299,12 @@ node /path/to/resources/aiopsterm-control.js display-message "deploy done"
 node /path/to/resources/aiopsterm-control.js display-message --print "deploy done"
 node /path/to/resources/aiopsterm-control.js set-buffer --name deploy "kubectl rollout status deploy/api"
 node /path/to/resources/aiopsterm-control.js list-buffers
+node /path/to/resources/aiopsterm-control.js show-buffer --name deploy
+node /path/to/resources/aiopsterm-control.js save-buffer --name deploy /tmp/deploy-buffer.txt
 node /path/to/resources/aiopsterm-control.js paste-buffer --name deploy --panel panel-main
+node /path/to/resources/aiopsterm-control.js show-options -v extended-keys
+node /path/to/resources/aiopsterm-control.js set-hook after-split-window "display-message split"
+node /path/to/resources/aiopsterm-control.js set-hook --list
 node /path/to/resources/aiopsterm-control.js set-status build compiling --priority 80
 node /path/to/resources/aiopsterm-control.js set-progress 0.5 --label "Building"
 node /path/to/resources/aiopsterm-control.js log --level success --source test "All green"
@@ -322,7 +334,9 @@ Future higher-level automation commands should use the control socket but must c
 
 `sync.wait_for` is an in-process local rendezvous primitive for scripts talking to the same running aiopsterm app. Token names are limited to letters, numbers, `.`, `_`, `:`, and `-`; they are not filesystem paths and are not shared across app restarts. Signaling wakes all current waiters and leaves a bounded one-shot signal for a later waiter. Timeouts return `WAIT_FOR_TIMEOUT`.
 
-`terminal.buffer.*` stores named text snippets in memory in the running main process. It is a tmux/control_compat compatibility primitive, not the OS clipboard and not persisted across app restarts. `paste-buffer` writes the stored text through the same raw-input boundary as `terminal.send_text`.
+`terminal.buffer.*` stores named text snippets in memory in the running main process. It is a tmux/control_compat compatibility primitive, not the OS clipboard and not persisted across app restarts. `show-buffer` returns the text to the caller, and the CLI helper implements `save-buffer` by writing that returned text in the caller process; the main process does not write arbitrary caller paths. `paste-buffer` writes the stored text through the same raw-input boundary as `terminal.send_text`.
+
+`tmux.hook.*` stores compatibility hook definitions as runtime metadata only. aiopsterm does not execute those hook commands automatically. `show-options extended-keys` returns `on` for agent/tmux compatibility probes; unsupported options fail explicitly instead of returning misleading values. The no-op tmux commands exist so scripts that probe or source tmux configuration can continue when those commands do not affect aiopsterm state.
 
 `terminal.clear_history` is renderer-owned because xterm state lives in the active window. It clears the selected terminal surface's visible buffer and aiopsterm's retained panel output; it does not send a command to the shell and does not close or restart the PTY/SSH session.
 

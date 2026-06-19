@@ -28,6 +28,7 @@ type ControlSocketBackend = {
     listAgentVaultEntries: () => Array<Record<string, unknown>>
     agentVaultPathFor: (userDataPath: string) => string
     listTerminalBuffers: () => Array<Record<string, unknown>>
+    listTmuxCompatHooks: () => Array<Record<string, unknown>>
     eventSubscriptionCount: () => number
   }
 }
@@ -852,6 +853,26 @@ describe('control socket backend', () => {
       expect.objectContaining({ ok: true, data: expect.objectContaining({ count: 1, buffers: [expect.objectContaining({ name: 'deploy' })] }) })
     )
 
+    await expect(backend.__testing.handleControlRequest({ method: 'show-buffer', params: { name: 'deploy' } })).resolves.toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
+          text: deployCommand,
+          buffer: expect.objectContaining({ name: 'deploy', size: deployBytes })
+        })
+      })
+    )
+
+    await expect(backend.__testing.handleControlRequest({ method: 'save-buffer', params: { name: 'deploy', path: '/tmp/deploy.txt' } })).resolves.toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
+          text: deployCommand,
+          path: '/tmp/deploy.txt'
+        })
+      })
+    )
+
     await expect(
       backend.__testing.handleControlRequest({
         method: 'paste-buffer',
@@ -873,6 +894,45 @@ describe('control socket backend', () => {
     )
     expect(writes).toEqual([{ sessionId: 'terminal-1', data: deployCommand }])
     expect(backend.__testing.listTerminalBuffers()).toEqual([expect.objectContaining({ name: 'deploy' })])
+  })
+
+  it('stores tmux-compatible hooks and reports supported tmux options', async () => {
+    const backend = await loadBackend()
+
+    await expect(
+      backend.__testing.handleControlRequest({
+        method: 'set-hook',
+        params: { event: 'after-split-window', command: 'display-message split' }
+      })
+    ).resolves.toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
+          hook: expect.objectContaining({ event: 'after-split-window', command: 'display-message split' })
+        })
+      })
+    )
+    await expect(backend.__testing.handleControlRequest({ method: 'tmux.hook.list', params: {} })).resolves.toEqual(
+      expect.objectContaining({ ok: true, data: expect.objectContaining({ count: 1, hooks: [expect.objectContaining({ event: 'after-split-window' })] }) })
+    )
+    await expect(backend.__testing.handleControlRequest({ method: 'show-options', params: { option: 'extended-keys', valueOnly: true } })).resolves.toEqual(
+      expect.objectContaining({ ok: true, data: expect.objectContaining({ name: 'extended-keys', value: 'on', valueOnly: true }) })
+    )
+    await expect(backend.__testing.handleControlRequest({ method: 'show-options', params: { option: 'escape-time' } })).resolves.toEqual(
+      expect.objectContaining({ ok: false, errorCode: 'TMUX_OPTION_UNSUPPORTED' })
+    )
+    await expect(backend.__testing.handleControlRequest({ method: 'set-window-option', params: { option: 'automatic-rename', value: 'off' } })).resolves.toEqual(
+      expect.objectContaining({ ok: true, data: expect.objectContaining({ noop: true, accepted: true }) })
+    )
+    await expect(backend.__testing.handleControlRequest({ method: 'set-hook', params: { event: 'after-split-window', unset: true } })).resolves.toEqual(
+      expect.objectContaining({ ok: true, data: expect.objectContaining({ removed: true }) })
+    )
+    expect(backend.__testing.listTmuxCompatHooks()).toEqual([])
+
+    const tmuxEvents = await backend.__testing.handleControlRequest({ method: 'events.list', params: { category: 'tmux' } })
+    expect(tmuxEvents.data?.events).toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: 'tmux.hook.set' }), expect.objectContaining({ name: 'tmux.hook.unset' })])
+    )
   })
 
   it('creates, lists, opens, marks, dismisses, and clears generic notifications', async () => {
