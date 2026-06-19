@@ -14,6 +14,7 @@ Commands:
   workspace list
   workspace group <subcommand>
   workspace-group <subcommand>
+  session save|list|show|restore|clear [--id <id>] [--name <name>]
   surface list
   surface resume set|show|get|clear|run [--panel <id>|--session <id>] [--shell <command>] [--kind <kind>] [--checkpoint <id>]
   agent-hibernation on|off|status
@@ -70,6 +71,7 @@ const methodParams = () => {
     throw new Error(`Unknown workspace command: ${subcommand}`)
   }
   if (command === 'workspace-group') return workspaceGroupMethodParams(args.shift() || 'list')
+  if (command === 'session' || command === 'restore-session') return sessionMethodParams(command === 'restore-session' ? 'restore' : args.shift() || 'list')
   if (command === 'surface') {
     const subcommand = args.shift() || 'list'
     if (subcommand === 'list') return { method: 'surface.list', params: {} }
@@ -279,6 +281,19 @@ const groupIdParams = () => {
   return { groupId, group_id: groupId }
 }
 
+const sessionMethodParams = (subcommand) => {
+  if (subcommand === 'reopen') subcommand = 'restore'
+  if (subcommand === 'delete' || subcommand === 'remove') subcommand = 'clear'
+  const id = readOption('--id') || readOption('--snapshot') || args.find((arg) => !arg.startsWith('--')) || ''
+  const name = readOption('--name')
+  if (subcommand === 'list') return { method: 'session.list', params: {} }
+  if (subcommand === 'save') return { method: 'session.save', params: { id: id || 'latest', name } }
+  if (subcommand === 'show' || subcommand === 'get') return { method: 'session.show', params: { id: id || 'latest', name } }
+  if (subcommand === 'restore') return { method: 'session.restore', params: { id: id || 'latest', name } }
+  if (subcommand === 'clear') return { method: 'session.clear', params: { id: id || 'latest', name } }
+  throw new Error(`Unknown session command: ${subcommand}`)
+}
+
 const workspaceGroupMethodParams = (subcommand) => {
   if (subcommand === 'list') return { method: 'workspace.group.list', params: {} }
   if (subcommand === 'create') {
@@ -418,6 +433,25 @@ const printResponse = (response) => {
   if (data.group) {
     const group = data.group
     process.stdout.write(`OK\t${group.ref || group.id || '-'}\t${group.name || ''}\t${group.memberCount || 0} members\n`)
+    return
+  }
+  if (data.snapshot && Array.isArray(data.snapshot.panels) && data.snapshot.version === 1) {
+    const snapshot = data.snapshot
+    process.stdout.write(`session\t${snapshot.id || '-'}\t${snapshot.name || '-'}\tpanels=${snapshot.panels.length}\tgroups=${(snapshot.workspaceGroups || []).length}\n`)
+    return
+  }
+  if (Array.isArray(data.snapshots)) {
+    for (const snapshot of data.snapshots) {
+      process.stdout.write([snapshot.id || '-', snapshot.name || '-', `panels=${(snapshot.panels || []).length}`, `groups=${(snapshot.workspaceGroups || []).length}`, snapshot.updatedAt || '-'].join('\t') + '\n')
+    }
+    if (data.snapshots.length === 0) process.stdout.write('No session snapshots\n')
+    return
+  }
+  if (data.restoredSnapshot) {
+    const restored = data.restoredSnapshot
+    process.stdout.write(
+      `restored\t${restored.id || '-'}\tpanels=${data.restoredPanels || 0}\tlocal=${data.launchedLocalTerminals || 0}\tremote_skipped=${data.skippedRemoteTerminals || 0}\n`
+    )
     return
   }
   if ('resumeBinding' in data || 'resume_binding' in data) {

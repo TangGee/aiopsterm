@@ -360,6 +360,65 @@ export type ControlWorkspaceSnapshot = {
   }
 }
 
+export type ControlSessionPanelSnapshot = {
+  id: string
+  title: string
+  cwd?: string
+  kind: 'terminal' | 'knowledge'
+  status?: string
+  terminalKind?: ControlTerminalSummary['kind']
+  split?: 'right' | 'below'
+  splitSourceId?: string
+  splitGroupId?: string
+  splitOrder?: number
+  sshSession?: {
+    host: string
+    port: number
+    username: string
+    assetId?: string
+    assetName?: string
+    assetType?: string
+    organizationId?: string
+    jumpHostId?: string
+    authType?: string
+    needProxy?: boolean
+    proxyName?: string
+    forkFromConnectionId?: string
+  }
+  knowledge?: {
+    relPath: string
+    isImage: boolean
+    startLine?: number
+    endLine?: number
+  }
+  resumeBinding?: ControlSurfaceResumeBindingSummary
+}
+
+export type ControlSessionSnapshot = {
+  id: string
+  name: string
+  version: 1
+  createdAt: number
+  updatedAt: number
+  activePanelId: string
+  mode: string
+  activeModule: string
+  panels: ControlSessionPanelSnapshot[]
+  workspaceGroups: Omit<ControlWorkspaceGroupSummary, 'ref' | 'memberCount' | 'active'>[]
+  agentHibernation?: AgentHibernationConfig
+  source?: string
+}
+
+export type ControlSessionRestoreResult = {
+  snapshot: ControlWorkspaceSnapshot
+  restoredSnapshot: ControlSessionSnapshot
+  restoredPanels: number
+  restoredWorkspaceGroups: number
+  restoredResumeBindings: number
+  launchedLocalTerminals: number
+  skippedRemoteTerminals: number
+}
+
 export type ControlNotificationFocusRequest = {
   notification: ControlNotificationRecord
   panelId?: string

@@ -41,6 +41,14 @@ The workspace group slice adds control_compat-style group metadata for the share
 - `workspace.group.new_workspace`: create a new local terminal panel and add it to the group.
 - `workspace.group.focus`: focus the group anchor surface.
 
+The session restore slice adds control_compat-style saved layouts for the shared main work panel:
+
+- `session.save`: ask the active renderer to export the current work-panel layout and persist it.
+- `session.list`: list saved session snapshots.
+- `session.show`: inspect one saved snapshot, defaulting to `latest`.
+- `session.restore`: restore one saved snapshot into the shared main work panel.
+- `session.clear`: remove one saved snapshot.
+
 The Agent Hibernation slice adds explicit managed-agent lifecycle controls:
 
 - `agent-hibernation.status`: return the current hibernation config, managed session summaries, and a workspace snapshot.
@@ -137,6 +145,9 @@ node /path/to/resources/aiopsterm-control.js workspace snapshot
 node /path/to/resources/aiopsterm-control.js workspace-group list
 node /path/to/resources/aiopsterm-control.js workspace-group create --name "deploy" --from panel-1,panel-2
 node /path/to/resources/aiopsterm-control.js workspace-group focus workspace_group:1
+node /path/to/resources/aiopsterm-control.js session save --id latest --name "Work Layout"
+node /path/to/resources/aiopsterm-control.js session list
+node /path/to/resources/aiopsterm-control.js session restore --id latest
 node /path/to/resources/aiopsterm-control.js surface list
 node /path/to/resources/aiopsterm-control.js surface resume set --kind tmux --checkpoint work --shell "tmux attach -t work"
 node /path/to/resources/aiopsterm-control.js surface resume show --json
@@ -183,6 +194,8 @@ This hibernation slice does not implement an automatic idle reaper. Automatic hi
 The current Teams slice intentionally stops at visible local-terminal orchestration. control_compat's deeper Codex Teams app-server watcher, which bridges Codex private app-server approvals into Feed, is a separate integration because it owns a private Codex websocket lifecycle and approval response mapping.
 
 `surface.resume.*` is restore metadata, not a live process checkpoint. aiopsterm stores a bounded command binding on a visible surface and exposes it through `surface.list`, `surface.current`, and `workspace.snapshot`. Public CLI/socket-created bindings are manual by default; aiopsterm does not auto-run them when the app restarts. `surface.resume.run` is an explicit action and uses the same terminal command security path as AI-generated terminal commands. Environment values supplied with the binding are optional and obvious sensitive keys such as token, password, secret, credential, auth, bearer, and API key names are dropped before storage.
+
+`session.restore` restores layout and metadata; it does not checkpoint arbitrary live process state. Local terminal panels are recreated as new local shells in the saved working directory. SSH panels are restored as disconnected surfaces with their connection metadata so the user can explicitly reconnect. Saved resume bindings are restored for inspection and manual `surface.resume.run`, but aiopsterm does not automatically run resume commands from a session snapshot.
 
 ## Events
 
@@ -262,3 +275,14 @@ Group members are `panelId` values. For compatibility, CLI flags still use contr
 `workspace.group.delete` is destructive because it closes the member panels and attempts to kill any backing terminal sessions. It fails unless the request includes `confirm=true`, or the CLI uses `--confirm`. Use `workspace.group.ungroup` when the intent is only to remove grouping metadata.
 
 Group state is renderer memory in this slice. The later session restore slice will persist and restore group metadata alongside terminal/session state.
+
+## Session Restore
+
+Session snapshots are stored under `<userData>/control/session-snapshots.json`. A snapshot contains:
+
+- terminal and knowledge surface ids, titles, working directories, split metadata, and active panel id.
+- workspace group metadata for the shared main work panel.
+- SSH connection metadata needed for explicit reconnect.
+- surface resume bindings.
+
+Snapshots do not include terminal screen text, typed input, command history, or full managed AI event transcripts. Restoring a snapshot replaces the visible main work-panel layout, closes existing live terminal sessions best-effort, starts saved local shell panels, and leaves saved SSH panels disconnected. This keeps restore visible and avoids silently reconnecting to remote hosts or running saved agent commands.

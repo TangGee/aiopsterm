@@ -5,7 +5,7 @@ import { dirname, join } from 'path'
 import { mkdir, readFile, writeFile } from 'fs/promises'
 import type { BrowserWindow, IpcMain } from 'electron'
 import { sendWindowEvent } from '@shared/windowEvents'
-import type { ControlNotificationFocusRequest, ControlNotificationRecord, ControlRequest, ControlResponse } from '@shared/preload'
+import type { ControlNotificationFocusRequest, ControlNotificationRecord, ControlRequest, ControlResponse, ControlSessionSnapshot } from '@shared/preload'
 
 type ControlSocketRequest = {
   id?: string
@@ -70,6 +70,11 @@ type AgentVaultEntry = {
   updatedAt: number
 }
 
+type SessionSnapshotStore = {
+  version: 1
+  snapshots: ControlSessionSnapshot[]
+}
+
 const defaultTimeoutMs = 5000
 const maxTimeoutMs = 30000
 const maxNotifications = 500
@@ -78,6 +83,7 @@ const eventHeartbeatIntervalMs = 15000
 const eventProtocol = 'aiopsterm-events' as const
 const maxAgentVaultEntries = 200
 const maxAgentVaultCommandLength = 2000
+const maxSessionSnapshots = 20
 
 let server: Server | null = null
 let socketPath = ''
@@ -94,6 +100,10 @@ let agentVaultStorePath = ''
 let agentVaultLoadedPath = ''
 let agentVaultEntries = new Map<string, AgentVaultEntry>()
 let agentVaultWriteQueue: Promise<void> = Promise.resolve()
+let sessionSnapshotStorePath = ''
+let sessionSnapshotLoadedPath = ''
+let sessionSnapshots: ControlSessionSnapshot[] = []
+let sessionSnapshotWriteQueue: Promise<void> = Promise.resolve()
 
 const cleanText = (value: unknown) => (typeof value === 'string' ? value.trim() : '')
 
@@ -141,6 +151,7 @@ const socketPathFor = (userDataPath: string) => {
 
 const agentVaultPathFor = (userDataPath: string) => join(userDataPath, 'control', 'agent-vault.json')
 const eventLogPathFor = (userDataPath: string) => join(userDataPath, 'control', 'events.jsonl')
+const sessionSnapshotPathFor = (userDataPath: string) => join(userDataPath, 'control', 'session-snapshots.json')
 
 const isEventStreamMethod = (method: unknown) => {
   const normalized = cleanText(method)
@@ -150,6 +161,8 @@ const isEventStreamMethod = (method: unknown) => {
 const isEventListMethod = (method: string) => method === 'events.list' || method === 'event.list'
 
 const isAgentVaultMethod = (method: string) => method.startsWith('agent.vault.') || method.startsWith('agent-vault.')
+
+const isSessionMethod = (method: string) => method.startsWith('session.') || method.startsWith('restore-session.')
 
 const eventFiltersFromParams = (params: Record<string, unknown> = {}): ControlEventFilters => ({
   names: new Set([...cleanTextList(params.names), ...cleanTextList(params.name)]),
@@ -316,6 +329,146 @@ const agentVaultPayload = (agent?: AgentVaultEntry | null) => ({
   ...(agent ? { agent: cloneAgentVaultEntry(agent) } : {})
 })
 
+const cloneSessionSnapshot = (snapshot: ControlSessionSnapshot): ControlSessionSnapshot => JSON.parse(JSON.stringify(snapshot)) as ControlSessionSnapshot
+
+const normalizeSessionPanelSnapshot = (value: unknown): ControlSessionSnapshot['panels'][number] | null => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const record = value as Record<string, unknown>
+  const id = cleanText(record.id)
+  const title = cleanText(record.title) || id
+  const kind = record.kind === 'knowledge' ? 'knowledge' : 'terminal'
+  if (!id || !title) return null
+  const terminalKind = record.terminalKind === 'ssh' || record.terminalKind === 'local' || record.terminalKind === 'unknown' ? record.terminalKind : undefined
+  const split = record.split === 'right' || record.split === 'below' ? record.split : undefined
+  const splitOrder = Number(record.splitOrder)
+  const knowledge = record.knowledge && typeof record.knowledge === 'object' && !Array.isArray(record.knowledge) ? (record.knowledge as Record<string, unknown>) : null
+  const sshSession = record.sshSession && typeof record.sshSession === 'object' && !Array.isArray(record.sshSession) ? (record.sshSession as Record<string, unknown>) : null
+  const resumeBinding = record.resumeBinding && typeof record.resumeBinding === 'object' && !Array.isArray(record.resumeBinding) ? (record.resumeBinding as Record<string, unknown>) : null
+  const command = cleanText(resumeBinding?.command)
+  return {
+    id,
+    title,
+    kind,
+    ...(cleanText(record.cwd) ? { cwd: cleanText(record.cwd) } : {}),
+    ...(cleanText(record.status) ? { status: cleanText(record.status) } : {}),
+    ...(terminalKind ? { terminalKind } : {}),
+    ...(split ? { split } : {}),
+    ...(cleanText(record.splitSourceId) ? { splitSourceId: cleanText(record.splitSourceId) } : {}),
+    ...(cleanText(record.splitGroupId) ? { splitGroupId: cleanText(record.splitGroupId) } : {}),
+    ...(Number.isFinite(splitOrder) ? { splitOrder: Math.floor(splitOrder) } : {}),
+    ...(sshSession && cleanText(sshSession.host)
+      ? {
+          sshSession: {
+            host: cleanText(sshSession.host),
+            port: Math.max(1, Math.min(65535, Math.floor(Number(sshSession.port) || 22))),
+            username: cleanText(sshSession.username) || 'root',
+            ...(cleanText(sshSession.assetId) ? { assetId: cleanText(sshSession.assetId) } : {}),
+            ...(cleanText(sshSession.assetName) ? { assetName: cleanText(sshSession.assetName) } : {}),
+            ...(cleanText(sshSession.assetType) ? { assetType: cleanText(sshSession.assetType) } : {}),
+            ...(cleanText(sshSession.organizationId) ? { organizationId: cleanText(sshSession.organizationId) } : {}),
+            ...(cleanText(sshSession.jumpHostId) ? { jumpHostId: cleanText(sshSession.jumpHostId) } : {}),
+            ...(cleanText(sshSession.authType) ? { authType: cleanText(sshSession.authType) } : {}),
+            ...(typeof sshSession.needProxy === 'boolean' ? { needProxy: sshSession.needProxy } : {}),
+            ...(cleanText(sshSession.proxyName) ? { proxyName: cleanText(sshSession.proxyName) } : {}),
+            ...(cleanText(sshSession.forkFromConnectionId) ? { forkFromConnectionId: cleanText(sshSession.forkFromConnectionId) } : {})
+          }
+        }
+      : {}),
+    ...(knowledge && cleanText(knowledge.relPath)
+      ? {
+          knowledge: {
+            relPath: cleanText(knowledge.relPath),
+            isImage: knowledge.isImage === true,
+            ...(Number.isFinite(knowledge.startLine) ? { startLine: Math.floor(Number(knowledge.startLine)) } : {}),
+            ...(Number.isFinite(knowledge.endLine) ? { endLine: Math.floor(Number(knowledge.endLine)) } : {})
+          }
+        }
+      : {}),
+    ...(resumeBinding && command
+      ? {
+          resumeBinding: {
+            ...(cleanText(resumeBinding.name) ? { name: cleanText(resumeBinding.name) } : {}),
+            ...(cleanText(resumeBinding.kind) ? { kind: cleanText(resumeBinding.kind) } : {}),
+            command,
+            ...(cleanText(resumeBinding.cwd) ? { cwd: cleanText(resumeBinding.cwd) } : {}),
+            ...(cleanText(resumeBinding.checkpointId || resumeBinding.checkpoint_id) ? { checkpointId: cleanText(resumeBinding.checkpointId || resumeBinding.checkpoint_id), checkpoint_id: cleanText(resumeBinding.checkpointId || resumeBinding.checkpoint_id) } : {}),
+            ...(cleanText(resumeBinding.source) ? { source: cleanText(resumeBinding.source) } : {}),
+            autoResume: resumeBinding.autoResume === true || resumeBinding.auto_resume === true,
+            updatedAt: Number.isFinite(resumeBinding.updatedAt) ? Number(resumeBinding.updatedAt) : Date.now(),
+            updated_at: Number.isFinite(resumeBinding.updated_at) ? Number(resumeBinding.updated_at) : Number.isFinite(resumeBinding.updatedAt) ? Number(resumeBinding.updatedAt) : Date.now()
+          }
+        }
+      : {})
+  }
+}
+
+const normalizeWorkspaceGroupSnapshot = (value: unknown): ControlSessionSnapshot['workspaceGroups'][number] | null => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const record = value as Record<string, unknown>
+  const id = cleanText(record.id)
+  const name = cleanText(record.name)
+  const anchorPanelId = cleanText(record.anchorPanelId)
+  const memberPanelIds = Array.isArray(record.memberPanelIds) ? record.memberPanelIds.map(cleanText).filter(Boolean) : []
+  if (!id || !name || !anchorPanelId || !memberPanelIds.length) return null
+  return {
+    id,
+    name,
+    anchorPanelId,
+    memberPanelIds: [...new Set(memberPanelIds)],
+    collapsed: record.collapsed === true,
+    pinned: record.pinned === true,
+    index: Number.isFinite(record.index) ? Math.floor(Number(record.index)) : 0,
+    createdAt: Number.isFinite(record.createdAt) ? Number(record.createdAt) : Date.now(),
+    updatedAt: Number.isFinite(record.updatedAt) ? Number(record.updatedAt) : Date.now(),
+    ...(cleanText(record.cwd) ? { cwd: cleanText(record.cwd) } : {}),
+    ...(cleanText(record.color) ? { color: cleanText(record.color) } : {}),
+    ...(cleanText(record.icon) ? { icon: cleanText(record.icon) } : {})
+  }
+}
+
+const normalizeSessionSnapshot = (value: unknown, fallbackId = 'latest'): ControlSessionSnapshot | null => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const record = value as Record<string, unknown>
+  const panels = Array.isArray(record.panels) ? record.panels.map(normalizeSessionPanelSnapshot).filter((item): item is ControlSessionSnapshot['panels'][number] => Boolean(item)) : []
+  if (!panels.length) return null
+  const panelIds = new Set(panels.map((panel) => panel.id))
+  const workspaceGroups = (Array.isArray(record.workspaceGroups) ? record.workspaceGroups : [])
+    .map(normalizeWorkspaceGroupSnapshot)
+    .filter((group): group is ControlSessionSnapshot['workspaceGroups'][number] => Boolean(group))
+    .map((group) => ({
+      ...group,
+      anchorPanelId: panelIds.has(group.anchorPanelId) ? group.anchorPanelId : group.memberPanelIds.find((panelId) => panelIds.has(panelId)) || '',
+      memberPanelIds: group.memberPanelIds.filter((panelId) => panelIds.has(panelId))
+    }))
+    .filter((group) => group.anchorPanelId && group.memberPanelIds.length)
+    .map((group, index) => ({ ...group, index }))
+  const now = Date.now()
+  const id = cleanText(record.id) || fallbackId
+  return {
+    id,
+    name: cleanText(record.name) || id,
+    version: 1,
+    createdAt: Number.isFinite(record.createdAt) ? Number(record.createdAt) : now,
+    updatedAt: Number.isFinite(record.updatedAt) ? Number(record.updatedAt) : now,
+    activePanelId: panelIds.has(cleanText(record.activePanelId)) ? cleanText(record.activePanelId) : panels[0].id,
+    mode: cleanText(record.mode) || 'terminal',
+    activeModule: cleanText(record.activeModule) || 'workspace',
+    panels,
+    workspaceGroups,
+    ...(record.agentHibernation && typeof record.agentHibernation === 'object' && !Array.isArray(record.agentHibernation) ? { agentHibernation: record.agentHibernation as ControlSessionSnapshot['agentHibernation'] } : {}),
+    ...(cleanText(record.source) ? { source: cleanText(record.source) } : {})
+  }
+}
+
+const sortedSessionSnapshots = () => [...sessionSnapshots].sort((left, right) => right.updatedAt - left.updatedAt).map(cloneSessionSnapshot)
+
+const sessionSnapshotPayload = (snapshot?: ControlSessionSnapshot | null) => ({
+  snapshots: sortedSessionSnapshots(),
+  count: sessionSnapshots.length,
+  latest: sortedSessionSnapshots()[0] || null,
+  ...(snapshot ? { snapshot: cloneSessionSnapshot(snapshot) } : {})
+})
+
 const normalizeAgentVaultEntry = (value: unknown, existing?: AgentVaultEntry): AgentVaultEntry | null => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
   const record = value as Record<string, unknown>
@@ -376,6 +529,40 @@ const persistAgentVaultStore = async () => {
       await writeFile(agentVaultStorePath, `${JSON.stringify(payload, null, 2)}\n`, 'utf-8')
     })
   await agentVaultWriteQueue
+}
+
+const loadSessionSnapshotStore = async (userDataPath?: string) => {
+  if (userDataPath) sessionSnapshotStorePath = sessionSnapshotPathFor(userDataPath)
+  if (!sessionSnapshotStorePath || sessionSnapshotLoadedPath === sessionSnapshotStorePath) return
+  sessionSnapshotLoadedPath = sessionSnapshotStorePath
+  sessionSnapshots = []
+  if (!existsSync(sessionSnapshotStorePath)) return
+  try {
+    const raw = await readFile(sessionSnapshotStorePath, 'utf-8')
+    const parsed = JSON.parse(raw) as unknown
+    const items = parsed && typeof parsed === 'object' && Array.isArray((parsed as SessionSnapshotStore).snapshots) ? (parsed as SessionSnapshotStore).snapshots : []
+    sessionSnapshots = items
+      .map((item) => normalizeSessionSnapshot(item))
+      .filter((item): item is ControlSessionSnapshot => Boolean(item))
+      .slice(0, maxSessionSnapshots)
+  } catch {
+    sessionSnapshots = []
+  }
+}
+
+const persistSessionSnapshotStore = async () => {
+  if (!sessionSnapshotStorePath) return
+  const payload: SessionSnapshotStore = {
+    version: 1,
+    snapshots: sortedSessionSnapshots().slice(0, maxSessionSnapshots)
+  }
+  sessionSnapshotWriteQueue = sessionSnapshotWriteQueue
+    .catch(() => undefined)
+    .then(async () => {
+      await mkdir(dirname(sessionSnapshotStorePath), { recursive: true })
+      await writeFile(sessionSnapshotStorePath, `${JSON.stringify(payload, null, 2)}\n`, 'utf-8')
+    })
+  await sessionSnapshotWriteQueue
 }
 
 const agentVaultEntryFor = (value: unknown) => {
@@ -466,6 +653,80 @@ const prepareAgentTeamLaunchParams = async (params: Record<string, unknown>): Pr
     name: cleanText(params.name || params.groupName || params.title) || `${entry.name} Team`,
     groupName: cleanText(params.groupName || params.name || params.title) || `${entry.name} Team`
   }
+}
+
+const sessionSnapshotFor = (value: unknown) => {
+  const id = cleanText(value)
+  if (!id || id === 'latest') return sortedSessionSnapshots()[0] || null
+  return sessionSnapshots.find((snapshot) => snapshot.id === id || snapshot.name === id) || null
+}
+
+const handleSessionControlRequest = async (method: string, params: Record<string, unknown>) => {
+  await loadSessionSnapshotStore(runtime.userDataPath)
+  const action = method.startsWith('session.') ? method.slice('session.'.length) : method.slice('restore-session.'.length)
+  if (action === 'list') return ok(sessionSnapshotPayload())
+  if (action === 'show' || action === 'get') {
+    const snapshot = sessionSnapshotFor(params.id || params.name || 'latest')
+    if (!snapshot) return fail('SESSION_SNAPSHOT_NOT_FOUND', 'Session snapshot was not found.')
+    return ok(sessionSnapshotPayload(snapshot))
+  }
+  if (action === 'clear' || action === 'delete' || action === 'remove') {
+    const snapshot = sessionSnapshotFor(params.id || params.name || 'latest')
+    if (!snapshot) return fail('SESSION_SNAPSHOT_NOT_FOUND', 'Session snapshot was not found.')
+    sessionSnapshots = sessionSnapshots.filter((item) => item.id !== snapshot.id)
+    await persistSessionSnapshotStore()
+    publishControlEvent({ name: 'session.cleared', category: 'workspace', payload: { snapshot_id: snapshot.id, snapshot_name: snapshot.name } })
+    return ok({ removed: true, removedId: snapshot.id, ...sessionSnapshotPayload() })
+  }
+  if (action === 'save') {
+    const response = await dispatchRendererControlRequest('session.export', params)
+    if (!response.ok) return response
+    const exported = normalizeSessionSnapshot(response.data?.snapshot, cleanText(params.id || params.name) || 'latest')
+    if (!exported) return fail('SESSION_SNAPSHOT_INVALID', 'Renderer returned an invalid session snapshot.')
+    const now = Date.now()
+    const snapshot: ControlSessionSnapshot = {
+      ...exported,
+      id: cleanText(params.id || exported.id) || 'latest',
+      name: cleanText(params.name || exported.name) || cleanText(params.id || exported.id) || 'Latest Session',
+      createdAt: sessionSnapshots.find((item) => item.id === (cleanText(params.id || exported.id) || 'latest'))?.createdAt || exported.createdAt || now,
+      updatedAt: now,
+      source: cleanText(params.source) || 'manual'
+    }
+    sessionSnapshots = [snapshot, ...sessionSnapshots.filter((item) => item.id !== snapshot.id)].slice(0, maxSessionSnapshots)
+    await persistSessionSnapshotStore()
+    publishControlEvent({
+      name: 'session.saved',
+      category: 'workspace',
+      payload: {
+        snapshot_id: snapshot.id,
+        snapshot_name: snapshot.name,
+        panel_count: snapshot.panels.length,
+        workspace_group_count: snapshot.workspaceGroups.length
+      }
+    })
+    return ok(sessionSnapshotPayload(snapshot))
+  }
+  if (action === 'restore' || action === 'run' || action === 'reopen') {
+    const snapshot = sessionSnapshotFor(params.id || params.name || 'latest')
+    if (!snapshot) return fail('SESSION_SNAPSHOT_NOT_FOUND', 'Session snapshot was not found.')
+    const response = await dispatchRendererControlRequest('session.restore', {
+      ...params,
+      snapshot
+    }, { focus: true })
+    if (!response.ok) return response
+    publishControlEvent({
+      name: 'session.restored',
+      category: 'workspace',
+      payload: {
+        snapshot_id: snapshot.id,
+        snapshot_name: snapshot.name,
+        panel_count: snapshot.panels.length,
+        workspace_group_count: snapshot.workspaceGroups.length
+      }
+    })
+    return response
+  }
+  return fail('UNKNOWN_CONTROL_METHOD', `Unknown aiopsterm session method: ${method}`)
 }
 
 const listEvents = (params: Record<string, unknown>) => {
@@ -838,6 +1099,7 @@ const handleControlRequest = async (request: ControlSocketRequest): Promise<Cont
   if (!method || method === 'ping') return ok({ pong: true, socketPath })
   if (isEventListMethod(method)) return listEvents(params)
   if (isAgentVaultMethod(method)) return handleAgentVaultControlRequest(method, params)
+  if (isSessionMethod(method)) return handleSessionControlRequest(method, params)
   if (
     method === 'workspace.snapshot' ||
     method === 'workspace.list' ||
@@ -846,6 +1108,7 @@ const handleControlRequest = async (request: ControlSocketRequest): Promise<Cont
     method === 'surface.list' ||
     method === 'surface.current' ||
     method.startsWith('surface.resume.') ||
+    method.startsWith('session.') ||
     method.startsWith('agent-hibernation.') ||
     method.startsWith('agent.') ||
     method.startsWith('agent.team.') ||
@@ -903,6 +1166,8 @@ export const configureControlSocketRuntime = (config: ControlSocketRuntime = {})
     if (agentVaultLoadedPath && agentVaultLoadedPath !== agentVaultStorePath) agentVaultLoadedPath = ''
     eventLogStorePath = eventLogPathFor(config.userDataPath)
     if (eventLogLoadedPath && eventLogLoadedPath !== eventLogStorePath) eventLogLoadedPath = ''
+    sessionSnapshotStorePath = sessionSnapshotPathFor(config.userDataPath)
+    if (sessionSnapshotLoadedPath && sessionSnapshotLoadedPath !== sessionSnapshotStorePath) sessionSnapshotLoadedPath = ''
   }
 }
 
@@ -926,6 +1191,7 @@ export const ensureControlSocketServer = async (userDataPath: string) => {
   runtime = { ...runtime, userDataPath }
   await loadDurableEventLog(userDataPath)
   await loadAgentVaultStore(userDataPath)
+  await loadSessionSnapshotStore(userDataPath)
   if (process.platform !== 'win32') {
     await mkdir(dirname(socketPath), { recursive: true })
     if (existsSync(socketPath)) rmSync(socketPath, { force: true })
@@ -995,6 +1261,9 @@ export const closeControlSocketServer = () => {
   agentVaultEntries = new Map()
   agentVaultLoadedPath = ''
   agentVaultStorePath = ''
+  sessionSnapshots = []
+  sessionSnapshotLoadedPath = ''
+  sessionSnapshotStorePath = ''
   server?.close()
   server = null
   if (socketPath && process.platform !== 'win32' && existsSync(socketPath)) rmSync(socketPath, { force: true })
@@ -1007,6 +1276,8 @@ export const __testing = {
   handleControlRequest,
   listEvents: () => eventLog,
   eventLogPathFor,
+  listSessionSnapshots: () => sortedSessionSnapshots(),
+  sessionSnapshotPathFor,
   listAgentVaultEntries: () => sortedAgentVaultEntries(),
   agentVaultPathFor,
   listNotifications: () => notifications,

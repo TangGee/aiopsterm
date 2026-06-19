@@ -223,7 +223,7 @@ import { shortcutRuntime } from '@/services/shortcutRuntime'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { settingsBackgroundPresets } from '@/config/settings'
 import { DEFAULT_KNOWLEDGE_INTERFACE_IMAGE_BASE64 } from '@shared/knowledgeBaseSeed'
-import type { FileSessionInfo, KeywordHighlightUserConfig, TerminalKeyboardInteractiveRequest } from '@shared/preload'
+import type { FileSessionInfo, KeywordHighlightUserConfig, TerminalCreateOptions, TerminalKeyboardInteractiveRequest, TerminalSessionInfo } from '@shared/preload'
 
 const prodKeychainSshAgentFingerprint = 'SHA256:KW/btgUSM+Gu9ht4gyd2CMSZB/1setTDE0+Uik88xGE'
 
@@ -7123,25 +7123,26 @@ describe('AppShell', () => {
         controlHandler = null
       }
     })
-    let terminalIndex = 0
-    vi.mocked(window.aiops.createTerminal).mockImplementation(async (options?: any) => {
-      terminalIndex += 1
-      const id = `team-terminal-${terminalIndex}`
+    const createTeamTerminal = async (index: number, options?: TerminalCreateOptions): Promise<TerminalSessionInfo> => {
+      const id = `team-terminal-${index}`
       return {
         id,
         shell: '/bin/bash',
         cwd: options?.cwd || '/work/project',
-        kind: 'local',
+        kind: 'local' as const,
         lifecycle: {
           id,
-          kind: 'local',
-          stage: 'shell-ready',
+          kind: 'local' as const,
+          stage: 'shell-ready' as const,
           shell: '/bin/bash',
           cwd: options?.cwd || '/work/project',
-          at: 1717200007000 + terminalIndex
+          at: 1717200007000 + index
         }
       }
-    })
+    }
+    vi.mocked(window.aiops.createTerminal)
+      .mockImplementationOnce((options?: TerminalCreateOptions) => createTeamTerminal(1, options))
+      .mockImplementationOnce((options?: TerminalCreateOptions) => createTeamTerminal(2, options))
 
     const wrapper = mount(TerminalWorkspace, {
       attachTo: document.body,
@@ -7264,6 +7265,168 @@ describe('AppShell', () => {
     expect(clearResponse).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ cleared: true, resumeBinding: null }) }))
     const finalGetResponse = await invokeControlHandler({ id: 'resume-get-empty', method: 'surface.resume.get', params: { panelId: store.activePanelId } })
     expect(finalGetResponse.data.resumeBinding).toBeNull()
+
+    wrapper.unmount()
+  })
+
+  it('exports and restores control_compat-style session snapshots in the shared terminal workspace', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    mockXtermInstances.length = 0
+    let controlHandler: ((request: any) => Promise<any> | any) | null = null
+    vi.mocked(window.aiops.onControlRequest).mockImplementationOnce((handler: any) => {
+      controlHandler = handler
+      return () => {
+        controlHandler = null
+      }
+    })
+    const createSessionRestoreTerminal = async (id: string, at: number, options?: TerminalCreateOptions): Promise<TerminalSessionInfo> => {
+      return {
+        id,
+        shell: '/bin/bash',
+        cwd: options?.cwd || '/home/unit',
+        kind: 'local' as const,
+        lifecycle: {
+          id,
+          kind: 'local' as const,
+          stage: 'shell-ready' as const,
+          shell: '/bin/bash',
+          cwd: options?.cwd || '/home/unit',
+          at
+        }
+      }
+    }
+    vi.mocked(window.aiops.createTerminal)
+      .mockImplementationOnce((options?: TerminalCreateOptions) => createSessionRestoreTerminal('session-restore-1', 1717200010001, options))
+
+    const wrapper = mount(TerminalWorkspace, {
+      attachTo: document.body,
+      global: { plugins: [pinia] }
+    })
+    await flushPromises()
+    const invokeControlHandler = controlHandler as unknown as (request: any) => Promise<any>
+    expect(invokeControlHandler).toBeTruthy()
+    const store = useWorkspaceStore()
+
+    store.appendTerminalOutput(store.activePanelId, 'screen output must not be persisted\n')
+    await openLocalShellFromActiveTab(wrapper)
+    const localPanelId = store.activePanelId
+    store.activePanel.cwd = '/work/project'
+    store.activePanel.title = 'Local Work'
+    await invokeControlHandler({
+      id: 'restore-group-create',
+      method: 'workspace.group.create',
+      params: { name: 'Restore Group', from: localPanelId }
+    })
+    await invokeControlHandler({
+      id: 'restore-resume-set',
+      method: 'surface.resume.set',
+      params: { panelId: localPanelId, kind: 'tmux', checkpointId: 'work', command: 'tmux attach -t work' }
+    })
+
+    const exportResponse = await invokeControlHandler({ id: 'session-export', method: 'session.export', params: { id: 'latest', name: 'Restore Layout' } })
+    expect(exportResponse).toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
+          snapshot: expect.objectContaining({
+            id: 'latest',
+            name: 'Restore Layout',
+            panels: expect.arrayContaining([expect.objectContaining({ id: localPanelId, title: 'Local Work', cwd: '/work/project', terminalKind: 'local' })]),
+            workspaceGroups: [expect.objectContaining({ name: 'Restore Group', memberPanelIds: [localPanelId] })]
+          })
+        })
+      })
+    )
+    expect(JSON.stringify(exportResponse.data.snapshot)).not.toContain('screen output must not be persisted')
+    expect((exportResponse.data.snapshot as any).panels.find((panel: any) => panel.id === localPanelId)?.resumeBinding).toEqual(expect.objectContaining({ command: 'tmux attach -t work' }))
+
+    const restoreSnapshot = {
+      id: 'latest',
+      name: 'Restore Layout',
+      version: 1,
+      createdAt: 1717200011000,
+      updatedAt: 1717200011000,
+      activePanelId: 'restore-ssh',
+      mode: 'terminal',
+      activeModule: 'workspace',
+      panels: [
+        {
+          id: 'restore-local',
+          title: 'Restored Local',
+          cwd: '/work/restored',
+          kind: 'terminal',
+          status: 'running',
+          terminalKind: 'local',
+          resumeBinding: { command: 'codex resume session-1', kind: 'codex', autoResume: false, updatedAt: 1717200011001 }
+        },
+        {
+          id: 'restore-ssh',
+          title: 'Restored SSH',
+          cwd: '/home/ops',
+          kind: 'terminal',
+          status: 'closed',
+          terminalKind: 'ssh',
+          split: 'right',
+          splitSourceId: 'restore-local',
+          splitGroupId: 'restore-local',
+          splitOrder: 1717200011002,
+          sshSession: { host: '10.0.0.8', port: 2222, username: 'ops', assetId: 'asset-restore', assetName: 'Restored SSH' }
+        }
+      ],
+      workspaceGroups: [
+        {
+          id: 'restore-group',
+          name: 'Restored Group',
+          anchorPanelId: 'restore-local',
+          memberPanelIds: ['restore-local', 'restore-ssh'],
+          collapsed: false,
+          pinned: true,
+          index: 0,
+          createdAt: 1717200011000,
+          updatedAt: 1717200011000
+        }
+      ]
+    }
+    vi.mocked(window.aiops.killTerminal).mockClear()
+    vi.mocked(window.aiops.createTerminal).mockClear()
+    vi.mocked(window.aiops.createTerminal).mockImplementationOnce((options?: TerminalCreateOptions) => createSessionRestoreTerminal('restored-local-session', 1717200010002, options))
+    const restoreResponse = await invokeControlHandler({ id: 'session-restore', method: 'session.restore', params: { snapshot: restoreSnapshot } })
+    await flushPromises()
+
+    expect(window.aiops.killTerminal).toHaveBeenCalledWith('session-restore-1')
+    expect(window.aiops.createTerminal).toHaveBeenCalledTimes(1)
+    expect(window.aiops.createTerminal).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 'local', panelId: 'restore-local', cwd: '/work/restored', title: 'Restored Local' })
+    )
+    expect(restoreResponse).toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
+          restoredPanels: 2,
+          restoredWorkspaceGroups: 1,
+          restoredResumeBindings: 1,
+          launchedLocalTerminals: 1,
+          skippedRemoteTerminals: 1
+        })
+      })
+    )
+    expect(store.panels.map((panel) => panel.id)).toEqual(['restore-local', 'restore-ssh'])
+    expect(store.panels[0]).toEqual(expect.objectContaining({ title: 'Restored Local', sessionId: 'restored-local-session', cwd: '/work/restored', status: 'running' }))
+    expect(store.panels[1]).toEqual(
+      expect.objectContaining({
+        title: 'Restored SSH',
+        status: 'closed',
+        split: 'right',
+        splitSourceId: 'restore-local',
+        sshSession: expect.objectContaining({ host: '10.0.0.8', port: 2222, username: 'ops' })
+      })
+    )
+    expect(store.panels[1].sessionId).toBeUndefined()
+    expect(restoreResponse.data.snapshot.workspaceGroups).toEqual([expect.objectContaining({ name: 'Restored Group', memberCount: 2, active: true })])
+    const resumeAfterRestore = await invokeControlHandler({ id: 'resume-after-restore', method: 'surface.resume.get', params: { panelId: 'restore-local' } })
+    expect(resumeAfterRestore.data.resumeBinding).toEqual(expect.objectContaining({ command: 'codex resume session-1', kind: 'codex' }))
+    expect(store.topNotice).toBe('已恢复会话 Restore Layout')
 
     wrapper.unmount()
   })

@@ -22,6 +22,8 @@ type ControlSocketBackend = {
     listNotifications: () => Array<Record<string, unknown>>
     listEvents: () => Array<Record<string, unknown>>
     eventLogPathFor: (userDataPath: string) => string
+    listSessionSnapshots: () => Array<Record<string, unknown>>
+    sessionSnapshotPathFor: (userDataPath: string) => string
     listAgentVaultEntries: () => Array<Record<string, unknown>>
     agentVaultPathFor: (userDataPath: string) => string
     eventSubscriptionCount: () => number
@@ -570,6 +572,105 @@ describe('control socket backend', () => {
 
       const storeFile = await readFile(backend.__testing.agentVaultPathFor(root), 'utf-8')
       expect(storeFile).toContain('"id": "my-agent"')
+    } finally {
+      backend.closeControlSocketServer()
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('saves, persists, restores, and clears control session snapshots', async () => {
+    const backend = await loadBackend()
+    const root = await mkdtemp(join(tmpdir(), 'aiopsterm-control-session-'))
+    try {
+      await backend.ensureControlSocketServer(root)
+      backend.registerControlSocketIpc({
+        handle: (_channel, handler) => {
+          mockIpcHandler = handler
+        }
+      })
+      mockWindow = createMockWindow((request) => {
+        if (request.method === 'session.export') {
+          return {
+            ok: true,
+            data: {
+              snapshot: {
+                id: request.params?.id || 'latest',
+                name: request.params?.name || 'Latest Session',
+                version: 1,
+                createdAt: 1717200000000,
+                updatedAt: 1717200000000,
+                activePanelId: 'panel-local',
+                mode: 'terminal',
+                activeModule: 'workspace',
+                panels: [
+                  { id: 'panel-local', title: 'Local', cwd: '/work/project', kind: 'terminal', status: 'running', terminalKind: 'local' },
+                  {
+                    id: 'panel-ssh',
+                    title: 'Prod',
+                    cwd: '/home/ops',
+                    kind: 'terminal',
+                    status: 'closed',
+                    terminalKind: 'ssh',
+                    split: 'right',
+                    splitSourceId: 'panel-local',
+                    splitGroupId: 'panel-local',
+                    sshSession: { host: '10.0.0.5', port: 22, username: 'ops', assetId: 'asset-prod', assetName: 'Prod' },
+                    resumeBinding: { command: 'tmux attach -t prod', autoResume: false, updatedAt: 1717200000001 }
+                  }
+                ],
+                workspaceGroups: [
+                  {
+                    id: 'group-1',
+                    name: 'Ops',
+                    anchorPanelId: 'panel-local',
+                    memberPanelIds: ['panel-local', 'panel-ssh'],
+                    collapsed: false,
+                    pinned: true,
+                    index: 0,
+                    createdAt: 1717200000000,
+                    updatedAt: 1717200000000
+                  }
+                ]
+              }
+            }
+          }
+        }
+        if (request.method === 'session.restore') {
+          return {
+            ok: true,
+            data: {
+              restoredSnapshot: request.params?.snapshot,
+              restoredPanels: (request.params?.snapshot as any)?.panels?.length || 0,
+              launchedLocalTerminals: 1,
+              skippedRemoteTerminals: 1
+            }
+          }
+        }
+        return { ok: true, data: {} }
+      })
+      backend.configureControlSocketRuntime({ userDataPath: root, getWindows: () => [mockWindow] })
+
+      const saved = await backend.__testing.handleControlRequest({ method: 'session.save', params: { id: 'latest', name: 'Work Layout' } })
+      expect(saved).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ snapshot: expect.objectContaining({ id: 'latest', name: 'Work Layout' }) }) }))
+      expect(backend.__testing.listSessionSnapshots()).toEqual([expect.objectContaining({ id: 'latest', panels: expect.arrayContaining([expect.objectContaining({ id: 'panel-local' })]) })])
+      const storeFile = await readFile(backend.__testing.sessionSnapshotPathFor(root), 'utf-8')
+      expect(storeFile).toContain('"id": "latest"')
+      expect(storeFile).not.toContain('secret')
+
+      backend.closeControlSocketServer()
+      await backend.ensureControlSocketServer(root)
+      backend.configureControlSocketRuntime({ userDataPath: root, getWindows: () => [mockWindow] })
+      await expect(backend.__testing.handleControlRequest({ method: 'session.list' })).resolves.toEqual(
+        expect.objectContaining({ ok: true, data: expect.objectContaining({ count: 1, snapshots: [expect.objectContaining({ id: 'latest' })] }) })
+      )
+      await expect(backend.__testing.handleControlRequest({ method: 'session.restore', params: { id: 'latest' } })).resolves.toEqual(
+        expect.objectContaining({ ok: true, data: expect.objectContaining({ restoredPanels: 2, launchedLocalTerminals: 1, skippedRemoteTerminals: 1 }) })
+      )
+      expect(mockWindow.requests.some((request) => request.method === 'session.restore' && (request.params?.snapshot as any)?.id === 'latest')).toBe(true)
+
+      await expect(backend.__testing.handleControlRequest({ method: 'session.clear', params: { id: 'latest' } })).resolves.toEqual(
+        expect.objectContaining({ ok: true, data: expect.objectContaining({ removed: true, count: 0 }) })
+      )
     } finally {
       backend.closeControlSocketServer()
       await rm(root, { recursive: true, force: true })
