@@ -31,6 +31,8 @@ type ControlSocketBackend = {
     listTerminalBuffers: () => Array<Record<string, unknown>>
     listTmuxCompatHooks: () => Array<Record<string, unknown>>
     eventSubscriptionCount: () => number
+    mobileEventSubscriptionCount: () => number
+    listMobileEventSubscriptions: () => Array<Record<string, unknown>>
   }
 }
 
@@ -1710,6 +1712,60 @@ describe('control socket backend', () => {
       backend.closeControlSocketServer()
       await rm(root, { recursive: true, force: true })
     }
+  })
+
+  it('acknowledges control_compat-style mobile event subscription probes', async () => {
+    const backend = await loadBackend()
+
+    await expect(
+      backend.__testing.handleControlRequest({
+        method: 'mobile.events.subscribe',
+        params: { stream_id: 'mobile-stream-1', topics: ['terminal.render_grid', 'workspace.updated'] }
+      })
+    ).resolves.toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
+          stream_id: 'mobile-stream-1',
+          topics: ['terminal.render_grid', 'workspace.updated'],
+          already_subscribed: false,
+          event_stream_method: 'events.stream'
+        })
+      })
+    )
+    expect(backend.__testing.mobileEventSubscriptionCount()).toBe(1)
+    expect(backend.__testing.listMobileEventSubscriptions()).toEqual([
+      expect.objectContaining({ streamId: 'mobile-stream-1', topics: ['terminal.render_grid', 'workspace.updated'] })
+    ])
+
+    await expect(
+      backend.__testing.handleControlRequest({
+        method: 'mobile.events.subscribe',
+        params: { stream_id: 'mobile-stream-1', topics: ['workspace.updated'] }
+      })
+    ).resolves.toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
+          stream_id: 'mobile-stream-1',
+          topics: ['workspace.updated'],
+          already_subscribed: true
+        })
+      })
+    )
+    expect(backend.__testing.listMobileEventSubscriptions()).toEqual([expect.objectContaining({ streamId: 'mobile-stream-1', topics: ['workspace.updated'] })])
+
+    await expect(backend.__testing.handleControlRequest({ method: 'mobile.events.subscribe', params: { stream_id: 'missing-topics' } })).resolves.toEqual(
+      expect.objectContaining({ ok: false, errorCode: 'INVALID_PARAMS' })
+    )
+
+    await expect(backend.__testing.handleControlRequest({ method: 'mobile.events.unsubscribe', params: { stream_id: 'mobile-stream-1' } })).resolves.toEqual(
+      expect.objectContaining({ ok: true, data: expect.objectContaining({ stream_id: 'mobile-stream-1', removed: true }) })
+    )
+    await expect(backend.__testing.handleControlRequest({ method: 'mobile.events.unsubscribe', params: { stream_id: 'mobile-stream-1' } })).resolves.toEqual(
+      expect.objectContaining({ ok: true, data: expect.objectContaining({ stream_id: 'mobile-stream-1', removed: false }) })
+    )
+    expect(backend.__testing.mobileEventSubscriptionCount()).toBe(0)
   })
 
   it('coordinates local automation with wait-for signals over the control socket', async () => {

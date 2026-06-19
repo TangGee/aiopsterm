@@ -1880,4 +1880,60 @@ describe('aiopsterm-control CLI', () => {
     ])
     await rm(cursorPath, { force: true })
   })
+
+  it('sends control_compat-style mobile event subscription probes from the CLI helper', async () => {
+    const seen: Record<string, unknown>[] = []
+    const socketPath = await startControlServer((request) => {
+      seen.push(request)
+      const params = (request.params as any) || {}
+      if (request.method === 'mobile.events.subscribe') {
+        return {
+          id: request.id,
+          ok: true,
+          data: {
+            stream_id: params.stream_id || 'generated-stream',
+            topics: params.topics || [],
+            already_subscribed: false,
+            event_stream_method: 'events.stream'
+          }
+        }
+      }
+      return {
+        id: request.id,
+        ok: true,
+        data: {
+          stream_id: params.stream_id || '',
+          removed: params.stream_id === 'mobile-stream-1'
+        }
+      }
+    })
+
+    const subscribed = await execFileAsync(
+      process.execPath,
+      ['resources/aiopsterm-control.js', '--socket', socketPath, 'mobile', 'events', 'subscribe', '--stream', 'mobile-stream-1', '--topic', 'terminal.render_grid', 'workspace.updated'],
+      { cwd: process.cwd() }
+    )
+    expect(subscribed.stdout).toContain('mobile-events\tsubscribe\tmobile-stream-1\tnew\tterminal.render_grid,workspace.updated')
+
+    const unsubscribed = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'mobile', 'events', 'unsubscribe', 'mobile-stream-1'], {
+      cwd: process.cwd()
+    })
+    expect(unsubscribed.stdout).toContain('mobile-events\tunsubscribe\tmobile-stream-1\tremoved')
+
+    expect(seen).toEqual([
+      expect.objectContaining({
+        method: 'mobile.events.subscribe',
+        params: expect.objectContaining({
+          stream_id: 'mobile-stream-1',
+          topics: ['terminal.render_grid', 'workspace.updated']
+        })
+      }),
+      expect.objectContaining({
+        method: 'mobile.events.unsubscribe',
+        params: expect.objectContaining({
+          stream_id: 'mobile-stream-1'
+        })
+      })
+    ])
+  })
 })

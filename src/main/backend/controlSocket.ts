@@ -84,6 +84,14 @@ type ControlEventSubscription = {
   heartbeatTimer?: NodeJS.Timeout
 }
 
+type MobileEventSubscription = {
+  streamId: string
+  topics: string[]
+  createdAt: number
+  updatedAt: number
+  latestSeq: number
+}
+
 type ControlWaitForWaiter = {
   id: string
   name: string
@@ -265,6 +273,7 @@ const controlSocketCapabilities = [
   'notification.targeted',
   'events.stream',
   'events.list',
+  'mobile.events',
   'sync.wait_for',
   'sidebar.metadata',
   'agent.hibernation',
@@ -286,6 +295,7 @@ let eventLog: ControlEventFrame[] = []
 let eventLogStorePath = ''
 let eventLogLoadedPath = ''
 const eventSubscriptions = new Map<string, ControlEventSubscription>()
+let mobileEventSubscriptions = new Map<string, MobileEventSubscription>()
 let agentVaultStorePath = ''
 let agentVaultLoadedPath = ''
 let agentVaultEntries = new Map<string, AgentVaultEntry>()
@@ -460,6 +470,8 @@ const isEventStreamMethod = (method: unknown) => {
 }
 
 const isEventListMethod = (method: string) => method === 'events.list' || method === 'event.list'
+
+const isMobileEventsMethod = (method: string) => method === 'mobile.events.subscribe' || method === 'mobile.events.unsubscribe'
 
 const isAgentVaultMethod = (method: string) => method.startsWith('agent.vault.') || method.startsWith('agent-vault.')
 
@@ -2385,6 +2397,42 @@ const listEvents = (params: Record<string, unknown>) => {
   })
 }
 
+const handleMobileEventsControlRequest = (method: string, params: Record<string, unknown>) => {
+  if (method === 'mobile.events.subscribe') {
+    const streamId = cleanText(params.stream_id || params.streamId) || randomUUID()
+    const topics = [...new Set(cleanTextList(params.topics || params.topic || params.categories || params.category))].sort()
+    if (!topics.length) return fail('INVALID_PARAMS', 'topics is required')
+    const now = Date.now()
+    const existing = mobileEventSubscriptions.get(streamId)
+    const alreadySubscribed = Boolean(existing)
+    mobileEventSubscriptions.set(streamId, {
+      streamId,
+      topics,
+      createdAt: existing?.createdAt || now,
+      updatedAt: now,
+      latestSeq: nextEventSeq - 1
+    })
+    return ok({
+      stream_id: streamId,
+      streamId,
+      topics,
+      already_subscribed: alreadySubscribed,
+      alreadySubscribed,
+      latest_seq: nextEventSeq - 1,
+      event_stream_method: 'events.stream',
+      note: 'Use events.stream for live newline-delimited event frames; mobile.events.subscribe records the control_compat-compatible subscription handshake.'
+    })
+  }
+  const streamId = cleanText(params.stream_id || params.streamId)
+  const removed = streamId ? mobileEventSubscriptions.delete(streamId) : false
+  return ok({
+    stream_id: streamId,
+    streamId,
+    removed,
+    latest_seq: nextEventSeq - 1
+  })
+}
+
 const startEventStream = (socket: Socket, request: ControlSocketRequest) => {
   const params = request.params || {}
   const filters = eventFiltersFromParams(params)
@@ -3493,6 +3541,7 @@ const handleControlRequest = async (request: ControlSocketRequest): Promise<Cont
   if (isTerminalBufferMethod(method)) return handleTerminalBufferControlRequest(method, params)
   if (isTmuxCompatMethod(method)) return handleTmuxCompatControlRequest(method, params)
   if (isEventListMethod(method)) return listEvents(params)
+  if (isMobileEventsMethod(method)) return handleMobileEventsControlRequest(method, params)
   if (isFeedMethod(method)) return handleFeedControlRequest(method, params)
   if (isAgentHooksMethod(method)) return handleAgentHooksControlRequest(method, params)
   if (isAgentVaultMethod(method)) return handleAgentVaultControlRequest(method, params)
@@ -3929,6 +3978,7 @@ export const closeControlSocketServer = () => {
     subscription.socket.destroy()
   }
   eventSubscriptions.clear()
+  mobileEventSubscriptions.clear()
   for (const waiters of waitForWaiters.values()) {
     for (const waiter of waiters) {
       clearTimeout(waiter.timer)
@@ -3973,5 +4023,7 @@ export const __testing = {
   listTerminalBuffers: () => [...terminalBuffers.values()].sort((left, right) => left.name.localeCompare(right.name)),
   listTmuxCompatHooks: () => [...tmuxCompatHooks.values()].sort((left, right) => left.event.localeCompare(right.event)),
   pendingRendererRequestCount: () => pendingRendererRequests.size,
-  eventSubscriptionCount: () => eventSubscriptions.size
+  eventSubscriptionCount: () => eventSubscriptions.size,
+  mobileEventSubscriptionCount: () => mobileEventSubscriptions.size,
+  listMobileEventSubscriptions: () => [...mobileEventSubscriptions.values()].sort((left, right) => left.streamId.localeCompare(right.streamId))
 }

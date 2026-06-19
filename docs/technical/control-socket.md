@@ -169,6 +169,8 @@ The events slice adds a control_compat-style local JSONL stream for automation:
 
 - `events.stream` / `event.subscribe`: take over the socket connection and stream `ack`, replayed `event`, live `event`, and `heartbeat` frames.
 - `events.list`: list retained events for simple polling and tests.
+- `mobile.events.subscribe`: accept control_compat mobile-event subscription probes using `stream_id` plus `topics`, returning `already_subscribed` with idempotent replace semantics.
+- `mobile.events.unsubscribe`: remove a registered mobile event subscription and return `removed`.
 
 The synchronization slice adds control_compat-style automation rendezvous:
 
@@ -242,6 +244,7 @@ Aliases are accepted for control_compat-compatible scripts where useful:
 - `list_terminals` and `debug.terminals` map to `terminal.list`.
 - `focus_terminal` and `focus-panel` map to `terminal.focus`.
 - `mobile host-status` maps to `mobile.host.status`; `mobile workspace-list` maps to `mobile.workspace.list`.
+- `mobile events subscribe` and `mobile events unsubscribe` map to `mobile.events.subscribe` and `mobile.events.unsubscribe`.
 - `terminal create`, `terminal input`, `terminal paste`, `terminal replay`, and `terminal viewport` map to the matching control_compat-style terminal data-plane methods.
 - `read-screen`, `capture-pane`, and `surface.read_text` map to `terminal.read_screen`.
 - `clear-history` and `surface.clear_history` map to `terminal.clear_history`.
@@ -485,6 +488,8 @@ The current Teams slice intentionally stops at visible local-terminal orchestrat
 ```
 
 After the ack, aiopsterm sends retained replay events whose `seq` is greater than `after_seq`, then live events and optional heartbeat frames. The stream supports `after_seq` / `after`, `names` / `name`, `categories` / `category`, and `include_heartbeats=false`. `events.list` accepts the same filters plus `limit`.
+
+`mobile.events.subscribe` / `mobile.events.unsubscribe` are request/response compatibility handshakes for clients that follow control_compat's mobile RPC contract. They record the requested `stream_id` and `topics` and return `already_subscribed` so a liveness probe can decide whether it needs a catch-up replay. Live event frames are still delivered through `events.stream`, which keeps the socket in streaming mode and is safe for local CLI consumers.
 
 Current event categories are:
 

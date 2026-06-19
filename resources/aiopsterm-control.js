@@ -33,6 +33,7 @@ Commands:
   app simulate-active
   window list|current|focus|create|close|displays|display
   mobile host-status
+  mobile events subscribe|unsubscribe [--stream <id>] [--topic <name>...]
   hooks list|setup|install|uninstall [--agent <name>]
   feed list|jump|push|permission-reply|question-reply|exit-plan-reply|mark-handled|clear-ended|clear [--yes]
   workspace snapshot
@@ -673,7 +674,48 @@ const feedbackMethodParams = (subcommand) => {
 const mobileMethodParams = (subcommand) => {
   if (subcommand === 'host-status' || subcommand === 'host.status' || subcommand === 'status') return { method: 'mobile.host.status', params: {} }
   if (subcommand === 'workspace-list' || subcommand === 'workspace.list') return { method: 'mobile.workspace.list', params: {} }
+  if (subcommand === 'events' || subcommand === 'event') {
+    const action = args.shift() || 'subscribe'
+    return mobileEventsMethodParams(action)
+  }
+  if (subcommand === 'events.subscribe' || subcommand === 'event.subscribe') return mobileEventsMethodParams('subscribe')
+  if (subcommand === 'events.unsubscribe' || subcommand === 'event.unsubscribe') return mobileEventsMethodParams('unsubscribe')
+  if (subcommand === 'events-subscribe' || subcommand === 'event-subscribe') return mobileEventsMethodParams('subscribe')
+  if (subcommand === 'events-unsubscribe' || subcommand === 'event-unsubscribe') return mobileEventsMethodParams('unsubscribe')
   throw new Error(`Unknown mobile command: ${subcommand}`)
+}
+
+const mobileEventsMethodParams = (action) => {
+  if (action === 'subscribe' || action === 'sub') {
+    const streamId = readOption('--stream') || readOption('--stream-id') || readOption('--id') || readOption('--stream_id')
+    const topics = [
+      ...readRepeatOptions(['--topic']),
+      ...readRepeatOptions(['--category']),
+      ...readRepeatOptions(['--name'])
+    ]
+    const positionalTopics = args.filter((arg) => !arg.startsWith('--'))
+    args.splice(0, args.length)
+    const normalizedTopics = [...topics, ...positionalTopics].filter(Boolean)
+    return {
+      method: 'mobile.events.subscribe',
+      params: {
+        stream_id: streamId,
+        streamId,
+        topics: normalizedTopics
+      }
+    }
+  }
+  if (action === 'unsubscribe' || action === 'unsub') {
+    const streamId = readOption('--stream') || readOption('--stream-id') || readOption('--id') || readOption('--stream_id') || readPositional()
+    return {
+      method: 'mobile.events.unsubscribe',
+      params: {
+        stream_id: streamId,
+        streamId
+      }
+    }
+  }
+  throw new Error(`Unknown mobile events command: ${action}`)
 }
 
 const sidebarSnapshotMethodParams = () => {
@@ -1840,6 +1882,14 @@ const printResponse = (response) => {
     return
   }
   const data = response.data || {}
+  if (data.stream_id && Array.isArray(data.topics)) {
+    process.stdout.write(['mobile-events', 'subscribe', data.stream_id, data.already_subscribed ? 'existing' : 'new', data.topics.join(',')].join('\t') + '\n')
+    return
+  }
+  if (data.stream_id !== undefined && data.removed !== undefined) {
+    process.stdout.write(['mobile-events', 'unsubscribe', data.stream_id || '-', data.removed ? 'removed' : 'missing'].join('\t') + '\n')
+    return
+  }
   if (Array.isArray(data.capabilities) && data.protocol === 'aiopsterm-control') {
     const app = data.app || {}
     const processInfo = data.process || {}
