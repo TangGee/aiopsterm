@@ -310,6 +310,77 @@ describe('aiopsterm-control CLI', () => {
     ])
   })
 
+  it('sends managed AI session requests over the configured socket', async () => {
+    const seen: Record<string, unknown>[] = []
+    const socketPath = await startControlServer((request) => {
+      seen.push(request)
+      const session = {
+        source: 'claude-code',
+        sessionId: 'claude-cli-1',
+        id: 'claude-cli-1',
+        title: 'Deploy review',
+        summary: 'Approve deploy command',
+        state: request.method === 'agent.session.reply' || request.method === 'agent.session.handle' ? 'idle' : 'needsInput',
+        needsInput: request.method !== 'agent.session.reply' && request.method !== 'agent.session.handle',
+        requestKind: 'permission',
+        panelId: 'panel-ai',
+        eventCount: 1,
+        decisionCount: request.method === 'agent.session.reply' || request.method === 'agent.session.handle' ? 1 : 0,
+        events: [{ event: 'permission_request', requestKind: 'permission', actionable: true, receivedAt: 1717200000000, summary: 'Approve deploy command' }],
+        decisions:
+          request.method === 'agent.session.reply' || request.method === 'agent.session.handle'
+            ? [{ kind: request.method === 'agent.session.reply' ? 'deny' : 'handled', createdAt: 1717200000100, message: (request.params as any)?.message }]
+            : []
+      }
+      if (request.method === 'agent.session.list') {
+        return { id: request.id, ok: true, data: { sessions: [session], count: 1, total: 1, needsInputCount: 1 } }
+      }
+      if (request.method === 'agent.session.show') return { id: request.id, ok: true, data: { session } }
+      return { id: request.id, ok: true, data: { session, count: 1, needsInputCount: session.needsInput ? 1 : 0 } }
+    })
+
+    const listed = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'agent', 'session', 'list', '--needs-input', '--source', 'claude-code'], {
+      cwd: process.cwd()
+    })
+    expect(listed.stdout).toContain('agent-sessions\t1/1\tneeds_input=1')
+    expect(listed.stdout).toContain('claude-code\tclaude-cli-1\tneedsInput')
+
+    const shown = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'agent-session', 'show', 'claude-cli-1', '--source', 'claude-code'], {
+      cwd: process.cwd()
+    })
+    expect(shown.stdout).toContain('event\tpermission_request\tpermission\tactionable')
+
+    const replied = await execFileAsync(
+      process.execPath,
+      ['resources/aiopsterm-control.js', '--socket', socketPath, 'agent', 'session', 'reply', 'claude-cli-1', '--source', 'claude-code', '--kind', 'deny', '--message', 'Use staging first'],
+      { cwd: process.cwd() }
+    )
+    expect(replied.stdout).toContain('decision\tdeny')
+
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'agent', 'session', 'handle', 'claude-cli-1', '--source', 'claude-code'], {
+      cwd: process.cwd()
+    })
+
+    expect(seen).toEqual([
+      expect.objectContaining({
+        method: 'agent.session.list',
+        params: expect.objectContaining({ needsInput: true, needs_input: true, source: 'claude-code' })
+      }),
+      expect.objectContaining({
+        method: 'agent.session.show',
+        params: expect.objectContaining({ sessionId: 'claude-cli-1', session_id: 'claude-cli-1', source: 'claude-code' })
+      }),
+      expect.objectContaining({
+        method: 'agent.session.reply',
+        params: expect.objectContaining({ sessionId: 'claude-cli-1', source: 'claude-code', kind: 'deny', message: 'Use staging first' })
+      }),
+      expect.objectContaining({
+        method: 'agent.session.handle',
+        params: expect.objectContaining({ sessionId: 'claude-cli-1', source: 'claude-code' })
+      })
+    ])
+  })
+
   it('sends agent vault requests over the configured socket', async () => {
     const seen: Record<string, unknown>[] = []
     const socketPath = await startControlServer((request) => {

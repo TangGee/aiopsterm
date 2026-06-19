@@ -19,6 +19,7 @@ Commands:
   surface resume set|show|get|clear|run|trust|preview|autorun [--panel <id>|--session <id>] [--shell <command>] [--kind <kind>] [--checkpoint <id>]
   agent-hibernation on|off|status|preview|sweep [--no-confirm]
   agent hibernate|resume --session <id> [--source <source>]
+  agent session list|show|reply|approve|deny|handle|rename|clear [--session <id>] [--source <source>]
   agent vault register|list|get|remove|render|identify|scan
   agent team launch [--source codex|claude-code|custom] [--count <n>] [--cwd <path>] [--prompt <text>] [--command <shell>]
   events [--after <seq>] [--cursor-file <path>] [--name <event>] [--category <category>] [--limit <n>] [--no-ack] [--no-heartbeat]
@@ -72,6 +73,7 @@ const methodParams = () => {
   }
   if (command === 'workspace-group') return workspaceGroupMethodParams(args.shift() || 'list')
   if (command === 'session' || command === 'restore-session') return sessionMethodParams(command === 'restore-session' ? 'restore' : args.shift() || 'list')
+  if (command === 'agent-session' || command === 'ai-session' || command === 'ai-sessions') return agentSessionMethodParams(args.shift() || 'list')
   if (command === 'surface') {
     const subcommand = args.shift() || 'list'
     if (subcommand === 'list') return { method: 'surface.list', params: {} }
@@ -94,6 +96,7 @@ const methodParams = () => {
   if (command === 'agent') {
     const subcommand = args.shift() || 'status'
     if (subcommand === 'status') return { method: 'agent.status', params: {} }
+    if (subcommand === 'session' || subcommand === 'sessions' || subcommand === 'ai-session') return agentSessionMethodParams(args.shift() || 'list')
     if (subcommand === 'vault' || subcommand === 'agent-vault') return agentVaultMethodParams(args.shift() || 'list')
     if (subcommand === 'team' || subcommand === 'teams') {
       const action = args.shift() || 'launch'
@@ -314,6 +317,14 @@ const readRepeatOptions = (names) => {
   return values
 }
 
+const readPositional = () => {
+  const index = args.findIndex((arg) => !arg.startsWith('--'))
+  if (index < 0) return ''
+  const value = args[index]
+  args.splice(index, 1)
+  return value
+}
+
 const readCursorFile = (cursorFile) => {
   if (!cursorFile) return undefined
   try {
@@ -373,6 +384,89 @@ const sessionMethodParams = (subcommand) => {
   if (subcommand === 'restore') return { method: 'session.restore', params: { id: id || 'latest', name } }
   if (subcommand === 'clear') return { method: 'session.clear', params: { id: id || 'latest', name } }
   throw new Error(`Unknown session command: ${subcommand}`)
+}
+
+const agentSessionSelectorParams = () => {
+  const sessionId = readOption('--session') || readOption('--session-id') || readOption('--id') || readPositional()
+  const source = readOption('--source') || readOption('--agent')
+  return { sessionId, session_id: sessionId, id: sessionId, source, agent: source }
+}
+
+const agentSessionMethodParams = (subcommand) => {
+  if (subcommand === 'ls') subcommand = 'list'
+  if (subcommand === 'get') subcommand = 'show'
+  if (subcommand === 'mark-handled' || subcommand === 'done') subcommand = 'handle'
+  if (subcommand === 'delete' || subcommand === 'remove') subcommand = 'clear'
+  if (subcommand === 'list') {
+    const limit = Number(readOption('--limit') || 0)
+    const eventLimit = Number(readOption('--event-limit') || 0)
+    const decisionLimit = Number(readOption('--decision-limit') || 0)
+    const needsInput = hasFlag('--needs-input') || hasFlag('--needs_input') || hasFlag('--unread')
+    const includeEvents = hasFlag('--include-events')
+    const includeDecisions = hasFlag('--include-decisions')
+    return {
+      method: 'agent.session.list',
+      params: {
+        source: readOption('--source') || readOption('--agent'),
+        state: readOption('--state'),
+        query: readOption('--query') || readOption('-q'),
+        needsInput,
+        needs_input: needsInput,
+        includeEvents,
+        include_events: includeEvents,
+        includeDecisions,
+        include_decisions: includeDecisions,
+        ...(Number.isFinite(limit) && limit > 0 ? { limit: Math.floor(limit) } : {}),
+        ...(Number.isFinite(eventLimit) && eventLimit > 0 ? { eventLimit: Math.floor(eventLimit), event_limit: Math.floor(eventLimit) } : {}),
+        ...(Number.isFinite(decisionLimit) && decisionLimit > 0 ? { decisionLimit: Math.floor(decisionLimit), decision_limit: Math.floor(decisionLimit) } : {})
+      }
+    }
+  }
+  if (subcommand === 'show') {
+    const eventLimit = Number(readOption('--event-limit') || 0)
+    const decisionLimit = Number(readOption('--decision-limit') || 0)
+    const noEvents = hasFlag('--no-events')
+    const noDecisions = hasFlag('--no-decisions')
+    return {
+      method: 'agent.session.show',
+      params: {
+        ...agentSessionSelectorParams(),
+        includeEvents: !noEvents,
+        include_events: !noEvents,
+        includeDecisions: !noDecisions,
+        include_decisions: !noDecisions,
+        ...(Number.isFinite(eventLimit) && eventLimit > 0 ? { eventLimit: Math.floor(eventLimit), event_limit: Math.floor(eventLimit) } : {}),
+        ...(Number.isFinite(decisionLimit) && decisionLimit > 0 ? { decisionLimit: Math.floor(decisionLimit), decision_limit: Math.floor(decisionLimit) } : {})
+      }
+    }
+  }
+  if (subcommand === 'reply' || subcommand === 'approve' || subcommand === 'deny' || subcommand === 'handle') {
+    const selector = agentSessionSelectorParams()
+    const reason = readOption('--reason')
+    const answer = readOption('--answer')
+    return {
+      method: `agent.session.${subcommand}`,
+      params: {
+        ...selector,
+        kind: readOption('--kind') || readOption('--decision'),
+        message: readOption('--message') || reason || answer || readOption('--reply') || args.join(' '),
+        reason,
+        answer
+      }
+    }
+  }
+  if (subcommand === 'rename') {
+    return {
+      method: 'agent.session.rename',
+      params: {
+        ...agentSessionSelectorParams(),
+        title: readOption('--title') || readOption('--name') || args.join(' '),
+        name: readOption('--name')
+      }
+    }
+  }
+  if (subcommand === 'clear') return { method: 'agent.session.clear', params: agentSessionSelectorParams() }
+  throw new Error(`Unknown agent session command: ${subcommand}`)
 }
 
 const workspaceGroupMethodParams = (subcommand) => {
@@ -471,6 +565,24 @@ const surfaceResumeMethodParams = (subcommand) => {
   throw new Error(`Unknown surface resume command: ${subcommand}`)
 }
 
+const isManagedAiSessionLike = (session) =>
+  session && typeof session === 'object' && (typeof session.sessionId === 'string' || typeof session.id === 'string') && typeof session.source === 'string' && typeof session.state === 'string'
+
+const printAgentSessionLine = (session, prefix = 'agent-session') => {
+  process.stdout.write(
+    [
+      prefix,
+      session.needsInput ? '!' : session.actionable ? '?' : ' ',
+      session.source || '-',
+      session.sessionId || session.id || '-',
+      session.state || '-',
+      session.requestKind || '-',
+      session.panelId || session.terminalSessionId || '-',
+      session.title || session.summary || ''
+    ].join('\t') + '\n'
+  )
+}
+
 const printResponse = (response) => {
   if (outputJson || !response.ok) {
     process.stdout.write(`${JSON.stringify(response, null, 2)}\n`)
@@ -545,6 +657,36 @@ const printResponse = (response) => {
     process.stdout.write(
       `restored\t${restored.id || '-'}\tpanels=${data.restoredPanels || 0}\tlocal=${data.launchedLocalTerminals || 0}\tremote_skipped=${data.skippedRemoteTerminals || 0}\n`
     )
+    return
+  }
+  if (Array.isArray(data.sessions) && data.sessions.every(isManagedAiSessionLike)) {
+    process.stdout.write(`agent-sessions\t${data.count || data.sessions.length}/${data.total || data.sessions.length}\tneeds_input=${data.needsInputCount || 0}\n`)
+    for (const session of data.sessions) printAgentSessionLine(session)
+    if (data.sessions.length === 0) process.stdout.write('No agent sessions\n')
+    return
+  }
+  if (!data.config && isManagedAiSessionLike(data.session)) {
+    printAgentSessionLine(data.session)
+    if (Array.isArray(data.session.events) && data.session.events.length) {
+      for (const event of data.session.events) {
+        process.stdout.write(
+          [
+            'event',
+            event.event || '-',
+            event.requestKind || '-',
+            event.actionable ? 'actionable' : '-',
+            event.receivedAt || '-',
+            event.summary || event.title || ''
+          ].join('\t') + '\n'
+        )
+      }
+    }
+    if (Array.isArray(data.session.decisions) && data.session.decisions.length) {
+      for (const decision of data.session.decisions) {
+        process.stdout.write(['decision', decision.kind || '-', decision.createdAt || '-', decision.message || ''].join('\t') + '\n')
+      }
+    }
+    if (data.cleared) process.stdout.write('cleared\ttrue\n')
     return
   }
   if (Array.isArray(data.candidates)) {

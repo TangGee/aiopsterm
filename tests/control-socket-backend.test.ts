@@ -31,6 +31,15 @@ type ControlSocketBackend = {
   }
 }
 
+type AgentSessionsBackend = {
+  configureAiAgentSessionStore: (userDataPath: string) => Promise<void>
+  publishAiAgentSessionEvent: (input: Record<string, unknown>, emit?: ((event: unknown) => void) | null) => unknown
+  listManagedAiSessions: () => Promise<unknown>
+  __testing: {
+    flushManagedAiSessionWrites: () => Promise<void>
+  }
+}
+
 type MockWindow = {
   focused?: boolean
   requests: ControlRequest[]
@@ -45,6 +54,11 @@ type MockWindow = {
 const loadBackend = async () => {
   const modulePath = '../src/main/backend/controlSocket'
   return (await import(modulePath)) as unknown as ControlSocketBackend
+}
+
+const loadAgentSessionsBackend = async () => {
+  const modulePath = '../src/main/backend/agentSessions'
+  return (await import(modulePath)) as AgentSessionsBackend
 }
 
 const createMockWindow = (handler: (request: ControlRequest) => ControlResponse | Promise<ControlResponse>): MockWindow => ({
@@ -852,6 +866,106 @@ describe('control socket backend', () => {
         expect.objectContaining({ ok: true, data: expect.objectContaining({ removed: true, count: 0 }) })
       )
     } finally {
+      backend.closeControlSocketServer()
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('manages captured AI sessions through local control primitives without raw hook payloads', async () => {
+    const backend = await loadBackend()
+    const agentSessions = await loadAgentSessionsBackend()
+    const root = await mkdtemp(join(tmpdir(), 'aiopsterm-control-agent-session-'))
+    try {
+      await backend.ensureControlSocketServer(root)
+      await agentSessions.configureAiAgentSessionStore(root)
+      agentSessions.publishAiAgentSessionEvent(
+        {
+          source: 'claude-code',
+          event: 'PermissionRequest',
+          sessionId: 'claude-control-1',
+          requestId: 'request-1',
+          waitForDecision: true,
+          actionable: true,
+          panelId: 'panel-ai',
+          terminalSessionId: 'terminal-ai',
+          cwd: '/work/project',
+          title: 'Deploy review',
+          summary: 'Approve deploy command',
+          toolName: 'Bash',
+          raw_secret: 'do-not-return',
+          receivedAt: 1717200000000
+        },
+        null
+      )
+
+      await expect(backend.__testing.handleControlRequest({ method: 'agent.session.list', params: { needsInput: true } })).resolves.toEqual(
+        expect.objectContaining({
+          ok: true,
+          data: expect.objectContaining({
+            count: 1,
+            total: 1,
+            needsInputCount: 1,
+            sessions: [
+              expect.objectContaining({
+                source: 'claude-code',
+                sessionId: 'claude-control-1',
+                state: 'needsInput',
+                needsInput: true,
+                eventCount: 1,
+                decisionCount: 0
+              })
+            ]
+          })
+        })
+      )
+
+      const shown = await backend.__testing.handleControlRequest({ method: 'agent.session.show', params: { sessionId: 'claude-control-1', source: 'claude-code' } })
+      expect(shown).toEqual(
+        expect.objectContaining({
+          ok: true,
+          data: expect.objectContaining({
+            session: expect.objectContaining({
+              source: 'claude-code',
+              sessionId: 'claude-control-1',
+              events: [expect.objectContaining({ event: 'permission_request', summary: 'Approve deploy command' })]
+            })
+          })
+        })
+      )
+      expect(JSON.stringify(shown)).not.toContain('raw_secret')
+      expect(JSON.stringify(shown)).not.toContain('do-not-return')
+
+      await expect(
+        backend.__testing.handleControlRequest({
+          method: 'agent.session.reply',
+          params: { sessionId: 'claude-control-1', source: 'claude-code', kind: 'deny', message: 'Use staging first' }
+        })
+      ).resolves.toEqual(
+        expect.objectContaining({
+          ok: true,
+          data: expect.objectContaining({
+            session: expect.objectContaining({
+              state: 'idle',
+              decisions: [expect.objectContaining({ kind: 'deny', message: 'Use staging first' })]
+            }),
+            needsInputCount: 0
+          })
+        })
+      )
+
+      await expect(
+        backend.__testing.handleControlRequest({ method: 'agent.session.rename', params: { sessionId: 'claude-control-1', source: 'claude-code', title: 'Deploy Approval' } })
+      ).resolves.toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ session: expect.objectContaining({ title: 'Deploy Approval' }) }) }))
+
+      await expect(backend.__testing.handleControlRequest({ method: 'agent.session.clear', params: { sessionId: 'claude-control-1', source: 'claude-code' } })).resolves.toEqual(
+        expect.objectContaining({
+          ok: true,
+          data: expect.objectContaining({ cleared: true, count: 0, needsInputCount: 0 })
+        })
+      )
+      await expect(agentSessions.listManagedAiSessions()).resolves.toEqual(expect.objectContaining({ ok: true, data: { sessions: [] } }))
+    } finally {
+      await agentSessions.__testing.flushManagedAiSessionWrites()
       backend.closeControlSocketServer()
       await rm(root, { recursive: true, force: true })
     }

@@ -5,7 +5,17 @@ import { basename, dirname, join } from 'path'
 import { mkdir, readdir, readFile, readlink, writeFile } from 'fs/promises'
 import type { BrowserWindow, IpcMain } from 'electron'
 import { sendWindowEvent } from '@shared/windowEvents'
-import type { ControlNotificationFocusRequest, ControlNotificationRecord, ControlRequest, ControlResponse, ControlSessionSnapshot, ControlTerminalSummary } from '@shared/preload'
+import type {
+  ControlNotificationFocusRequest,
+  ControlNotificationRecord,
+  ControlRequest,
+  ControlResponse,
+  ControlSessionSnapshot,
+  ControlTerminalSummary,
+  ManagedAiSessionDecisionKind,
+  ManagedAiSessionRecord
+} from '@shared/preload'
+import { clearManagedAiSession, configureAiAgentSessionStore, listManagedAiSessions, renameManagedAiSession, replyManagedAiSession } from './agentSessions'
 
 type ControlSocketRequest = {
   id?: string
@@ -205,6 +215,8 @@ const isEventStreamMethod = (method: unknown) => {
 const isEventListMethod = (method: string) => method === 'events.list' || method === 'event.list'
 
 const isAgentVaultMethod = (method: string) => method.startsWith('agent.vault.') || method.startsWith('agent-vault.')
+
+const isAgentSessionMethod = (method: string) => method.startsWith('agent.session.') || method.startsWith('agent.sessions.') || method.startsWith('ai.session.')
 
 const isSessionMethod = (method: string) => method.startsWith('session.') || method.startsWith('restore-session.')
 
@@ -1185,6 +1197,195 @@ const handleAgentVaultControlRequest = async (method: string, params: Record<str
   return fail('UNKNOWN_CONTROL_METHOD', `Unknown aiopsterm agent vault method: ${method}`)
 }
 
+const managedAiTimelineSummary = (session: ManagedAiSessionRecord, eventLimit: number) =>
+  session.events.slice(-eventLimit).map((event) => ({
+    id: event.id,
+    source: event.source,
+    event: event.event,
+    sessionId: event.sessionId,
+    title: event.title,
+    summary: event.summary,
+    receivedAt: event.receivedAt,
+    requestKind: event.requestKind,
+    decisionMode: event.decisionMode,
+    ...(event.waitTimeoutMs ? { waitTimeoutMs: event.waitTimeoutMs } : {}),
+    ...(event.toolName ? { toolName: event.toolName } : {}),
+    ...(event.requestId ? { requestId: event.requestId } : {}),
+    ...(typeof event.actionable === 'boolean' ? { actionable: event.actionable } : {}),
+    ...(event.cwd ? { cwd: event.cwd } : {}),
+    ...(event.transcriptPath ? { transcriptPath: event.transcriptPath } : {}),
+    ...(event.agentLifecycle ? { agentLifecycle: event.agentLifecycle } : {})
+  }))
+
+const managedAiDecisionSummary = (session: ManagedAiSessionRecord, decisionLimit: number) =>
+  session.decisions.slice(-decisionLimit).map((decision) => ({
+    id: decision.id,
+    kind: decision.kind,
+    ...(decision.message ? { message: decision.message } : {}),
+    createdAt: decision.createdAt
+  }))
+
+const managedAiControlSummary = (
+  session: ManagedAiSessionRecord,
+  options: { includeEvents?: boolean; includeDecisions?: boolean; eventLimit?: number; decisionLimit?: number } = {}
+) => {
+  const eventLimit = normalizeLimit(options.eventLimit, 10)
+  const decisionLimit = normalizeLimit(options.decisionLimit, 10)
+  return {
+    source: session.source,
+    sessionId: session.id,
+    id: session.id,
+    title: session.title,
+    summary: session.summary,
+    state: session.state,
+    needsInput: session.state === 'needsInput',
+    lastEvent: session.lastEvent,
+    requestKind: session.requestKind,
+    decisionMode: session.decisionMode,
+    ...(session.waitTimeoutMs ? { waitTimeoutMs: session.waitTimeoutMs } : {}),
+    ...(session.toolName ? { toolName: session.toolName } : {}),
+    actionable: session.actionable === true,
+    ...(session.pendingRequestId ? { pendingRequestId: session.pendingRequestId } : {}),
+    ...(session.panelId ? { panelId: session.panelId } : {}),
+    ...(session.terminalSessionId ? { terminalSessionId: session.terminalSessionId } : {}),
+    ...(session.workspaceId ? { workspaceId: session.workspaceId } : {}),
+    ...(session.cwd ? { cwd: session.cwd } : {}),
+    ...(session.transcriptPath ? { transcriptPath: session.transcriptPath } : {}),
+    ...(session.launchCommand ? { launchCommand: session.launchCommand } : {}),
+    ...(session.resumeCommand ? { resumeCommand: session.resumeCommand } : {}),
+    ...(session.processId ? { processId: session.processId } : {}),
+    ...(session.parentProcessId ? { parentProcessId: session.parentProcessId } : {}),
+    ...(session.processGroupId ? { processGroupId: session.processGroupId } : {}),
+    ...(session.agentLifecycle ? { agentLifecycle: session.agentLifecycle } : {}),
+    ...(session.hibernated ? { hibernated: true } : {}),
+    ...(session.hibernatedAt ? { hibernatedAt: session.hibernatedAt } : {}),
+    ...(session.hibernationReason ? { hibernationReason: session.hibernationReason } : {}),
+    createdAt: session.createdAt,
+    updatedAt: session.updatedAt,
+    lastActivityAt: session.lastActivityAt,
+    ...(session.handledAt ? { handledAt: session.handledAt } : {}),
+    eventCount: session.events.length,
+    decisionCount: session.decisions.length,
+    ...(options.includeEvents ? { events: managedAiTimelineSummary(session, eventLimit) } : {}),
+    ...(options.includeDecisions ? { decisions: managedAiDecisionSummary(session, decisionLimit) } : {})
+  }
+}
+
+const resolveManagedAiControlSession = async (params: Record<string, unknown>) => {
+  const sessionId = cleanText(params.sessionId || params.session_id || params.id)
+  if (!sessionId) return { error: fail('AGENT_SESSION_ID_REQUIRED', 'Managed AI session id is required.') }
+  const source = cleanText(params.source || params.agent)
+  const snapshot = await listManagedAiSessions()
+  if (!snapshot.ok || !snapshot.data) return { error: fail(snapshot.errorCode || 'AGENT_SESSIONS_UNAVAILABLE', snapshot.errorMessage || 'Managed AI sessions are unavailable.') }
+  const matches = snapshot.data.sessions.filter((session) => session.id === sessionId && (!source || session.source === source))
+  if (!matches.length) return { error: fail('AGENT_SESSION_NOT_FOUND', `Managed AI session was not found: ${source ? `${source}:` : ''}${sessionId}`) }
+  if (matches.length > 1) return { error: fail('AGENT_SESSION_SOURCE_REQUIRED', `Multiple managed AI sessions match ${sessionId}; pass source.`) }
+  return { session: matches[0], snapshot: snapshot.data }
+}
+
+const handleAgentSessionControlRequest = async (method: string, params: Record<string, unknown>) => {
+  if (runtime.userDataPath) await configureAiAgentSessionStore(runtime.userDataPath)
+  const action = method.startsWith('agent.sessions.')
+    ? method.slice('agent.sessions.'.length)
+    : method.startsWith('ai.session.')
+      ? method.slice('ai.session.'.length)
+      : method.slice('agent.session.'.length)
+  if (action === 'list') {
+    const snapshot = await listManagedAiSessions()
+    if (!snapshot.ok || !snapshot.data) return fail(snapshot.errorCode || 'AGENT_SESSIONS_UNAVAILABLE', snapshot.errorMessage || 'Managed AI sessions are unavailable.')
+    const query = cleanText(params.query).toLowerCase()
+    const source = cleanText(params.source || params.agent)
+    const state = cleanText(params.state)
+    const needsInput = params.needsInput === true || params.needs_input === true
+    const includeEvents = params.includeEvents === true || params.include_events === true
+    const includeDecisions = params.includeDecisions === true || params.include_decisions === true
+    const eventLimit = normalizeLimit(params.eventLimit || params.event_limit, 5)
+    const decisionLimit = normalizeLimit(params.decisionLimit || params.decision_limit, 5)
+    const limit = normalizeLimit(params.limit, 50)
+    const filtered = snapshot.data.sessions.filter((session) => {
+      if (source && session.source !== source) return false
+      if (state && session.state !== state) return false
+      if (needsInput && session.state !== 'needsInput') return false
+      if (!query) return true
+      return [session.source, session.id, session.title, session.summary, session.cwd || '', session.panelId || '', session.terminalSessionId || ''].some((value) =>
+        value.toLowerCase().includes(query)
+      )
+    })
+    return ok({
+      sessions: filtered.slice(0, limit).map((session) => managedAiControlSummary(session, { includeEvents, includeDecisions, eventLimit, decisionLimit })),
+      count: filtered.length,
+      total: snapshot.data.sessions.length,
+      needsInputCount: snapshot.data.sessions.filter((session) => session.state === 'needsInput').length
+    })
+  }
+  if (action === 'show' || action === 'get') {
+    const resolved = await resolveManagedAiControlSession(params)
+    if (resolved.error) return resolved.error
+    const includeEvents = params.includeEvents !== false && params.include_events !== false
+    const includeDecisions = params.includeDecisions !== false && params.include_decisions !== false
+    return ok({
+      session: managedAiControlSummary(resolved.session!, {
+        includeEvents,
+        includeDecisions,
+        eventLimit: normalizeLimit(params.eventLimit || params.event_limit, 25),
+        decisionLimit: normalizeLimit(params.decisionLimit || params.decision_limit, 25)
+      })
+    })
+  }
+  if (action === 'reply' || action === 'approve' || action === 'deny' || action === 'handle') {
+    const resolved = await resolveManagedAiControlSession(params)
+    if (resolved.error) return resolved.error
+    const kind = (
+      action === 'approve' ? 'allow' : action === 'deny' ? 'deny' : action === 'handle' ? 'handled' : cleanText(params.kind || params.decision || 'handled')
+    ) as ManagedAiSessionDecisionKind
+    const message = cleanText(params.message || params.reason || params.answer || params.reply)
+    const result = await replyManagedAiSession({ source: resolved.session!.source, sessionId: resolved.session!.id, kind, ...(message ? { message } : {}) })
+    if (!result.ok || !result.data) return fail(result.errorCode || 'AGENT_SESSION_REPLY_FAILED', result.errorMessage || 'Managed AI session reply failed.')
+    const nextSession = result.data.session || resolved.session!
+    publishControlEvent({
+      name: 'agent_session.replied',
+      category: 'agent',
+      source: 'control.socket',
+      surfaceId: nextSession.panelId,
+      payload: { source: nextSession.source, session_id: nextSession.id, kind, state: nextSession.state }
+    })
+    return ok({
+      session: managedAiControlSummary(nextSession, { includeEvents: true, includeDecisions: true }),
+      count: result.data.snapshot.sessions.length,
+      needsInputCount: result.data.snapshot.sessions.filter((session) => session.state === 'needsInput').length
+    })
+  }
+  if (action === 'rename') {
+    const resolved = await resolveManagedAiControlSession(params)
+    if (resolved.error) return resolved.error
+    const title = cleanText(params.title || params.name)
+    if (!title) return fail('AGENT_SESSION_TITLE_REQUIRED', 'Managed AI session title is required.')
+    const result = await renameManagedAiSession({ source: resolved.session!.source, sessionId: resolved.session!.id, title })
+    if (!result.ok || !result.data) return fail(result.errorCode || 'AGENT_SESSION_RENAME_FAILED', result.errorMessage || 'Managed AI session rename failed.')
+    return ok({ session: managedAiControlSummary(result.data.session || resolved.session!, { includeEvents: true, includeDecisions: true }) })
+  }
+  if (action === 'clear' || action === 'delete' || action === 'remove') {
+    const resolved = await resolveManagedAiControlSession(params)
+    if (resolved.error) return resolved.error
+    const result = await clearManagedAiSession({ source: resolved.session!.source, sessionId: resolved.session!.id })
+    if (!result.ok || !result.data) return fail(result.errorCode || 'AGENT_SESSION_CLEAR_FAILED', result.errorMessage || 'Managed AI session clear failed.')
+    publishControlEvent({
+      name: 'agent_session.cleared',
+      category: 'agent',
+      source: 'control.socket',
+      surfaceId: resolved.session!.panelId,
+      payload: { source: resolved.session!.source, session_id: resolved.session!.id }
+    })
+    return ok({
+      cleared: true,
+      session: managedAiControlSummary(resolved.session!),
+      count: result.data.snapshot.sessions.length,
+      needsInputCount: result.data.snapshot.sessions.filter((session) => session.state === 'needsInput').length
+    })
+  }
+  return fail('UNKNOWN_CONTROL_METHOD', `Unknown aiopsterm agent session method: ${method}`)
+}
+
 const prepareAgentTeamLaunchParams = async (params: Record<string, unknown>): Promise<Record<string, unknown> | ControlResponse> => {
   await loadAgentVaultStore(runtime.userDataPath)
   const source = normalizeAgentVaultId(params.source || params.agent)
@@ -1662,6 +1863,7 @@ const handleControlRequest = async (request: ControlSocketRequest): Promise<Cont
   if (!method || method === 'ping') return ok({ pong: true, socketPath })
   if (isEventListMethod(method)) return listEvents(params)
   if (isAgentVaultMethod(method)) return handleAgentVaultControlRequest(method, params)
+  if (isAgentSessionMethod(method)) return handleAgentSessionControlRequest(method, params)
   if (isSessionMethod(method)) return handleSessionControlRequest(method, params)
   if (
     method === 'workspace.snapshot' ||
@@ -1755,6 +1957,7 @@ export const ensureControlSocketServer = async (userDataPath: string) => {
   await loadDurableEventLog(userDataPath)
   await loadAgentVaultStore(userDataPath)
   await loadSessionSnapshotStore(userDataPath)
+  await configureAiAgentSessionStore(userDataPath)
   if (process.platform !== 'win32') {
     await mkdir(dirname(socketPath), { recursive: true })
     if (existsSync(socketPath)) rmSync(socketPath, { force: true })
