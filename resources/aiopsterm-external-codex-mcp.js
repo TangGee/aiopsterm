@@ -259,6 +259,28 @@ const tools = [
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }
   },
   {
+    name: 'list_ai_approvals',
+    title: 'List aiopsterm AI approvals',
+    description:
+      'List approval, question, and plan requests reported by agents running inside aiopsterm-managed local terminals. Stock Codex hook approvals remain native Codex TUI prompts; this tool marks them local-only instead of blocking them.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Optional case-insensitive filter across source, title, summary, cwd, and terminal ids.' },
+        source: { type: 'string', description: 'Optional agent source filter, for example codex or claude-code.' },
+        pendingOnly: { type: 'boolean', description: 'When true, return only approvals currently waiting for input.' },
+        pending_only: { type: 'boolean', description: 'Alias for pendingOnly.' },
+        includeHandled: { type: 'boolean', description: 'When true, include approval records already handled locally.' },
+        include_handled: { type: 'boolean', description: 'Alias for includeHandled.' },
+        includeEvents: { type: 'boolean', description: 'Include a compact tail of recent non-secret timeline event summaries.' },
+        eventLimit: { type: 'number', description: 'Maximum recent timeline events per approval when includeEvents is true. Defaults to 5.' },
+        limit: { type: 'number', description: 'Maximum approvals to return. Defaults to 50 and is capped by aiopsterm.' }
+      },
+      additionalProperties: false
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }
+  },
+  {
     name: 'focus_ai_session',
     title: 'Focus aiopsterm managed AI session',
     description:
@@ -291,6 +313,82 @@ const tools = [
       additionalProperties: false
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }
+  },
+  {
+    name: 'approve_ai_session',
+    title: 'Approve aiopsterm AI session request',
+    description:
+      'Approve a managed AI approval or plan request. For blocking Claude Code requests this can unblock the waiting hook; local-only requests record handling state but may still require the agent native TUI.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...aiSessionSelectorProperties,
+        mode: {
+          type: 'string',
+          enum: ['allow', 'once', 'always', 'all', 'bypass', 'handled'],
+          description: 'Approval mode. once maps to allow; all maps to the persistent allow behavior when supported.'
+        },
+        kind: {
+          type: 'string',
+          enum: ['allow', 'once', 'always', 'all', 'bypass', 'handled'],
+          description: 'Alias for mode.'
+        },
+        message: { type: 'string', description: 'Optional handling note.' }
+      },
+      required: ['sessionId'],
+      additionalProperties: false
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }
+  },
+  {
+    name: 'deny_ai_session',
+    title: 'Deny aiopsterm AI session request',
+    description:
+      'Deny a managed AI approval, question, or plan request. For blocking Claude Code requests this can unblock the waiting hook with a denial response.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...aiSessionSelectorProperties,
+        message: { type: 'string', description: 'Optional denial reason or feedback.' }
+      },
+      required: ['sessionId'],
+      additionalProperties: false
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }
+  },
+  {
+    name: 'answer_ai_question',
+    title: 'Answer aiopsterm AI question',
+    description:
+      'Answer a managed AI question request. For blocking Claude Code AskUserQuestion hooks this can unblock the waiting hook with the supplied answer.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...aiSessionSelectorProperties,
+        message: { type: 'string', description: 'Question answer text.' },
+        answer: { type: 'string', description: 'Alias for message.' },
+        reply: { type: 'string', description: 'Alias for message.' }
+      },
+      required: ['sessionId'],
+      additionalProperties: false
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }
+  },
+  {
+    name: 'handle_ai_session',
+    title: 'Mark aiopsterm AI session handled',
+    description:
+      'Mark a managed AI approval, question, plan, notification, or local-only request handled in aiopsterm without claiming to approve the agent native prompt.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...aiSessionSelectorProperties,
+        message: { type: 'string', description: 'Optional handling note.' }
+      },
+      required: ['sessionId'],
+      additionalProperties: false
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false }
   },
   {
     name: 'clear_ai_session',

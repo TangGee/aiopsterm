@@ -721,6 +721,56 @@ const managedAiSessionSummary = (session: ManagedAiSessionRecord, options: { inc
   }
 }
 
+const managedAiApprovalRequestKinds = new Set(['permission', 'question', 'plan'])
+
+const managedAiApprovalCapabilities = (session: ManagedAiSessionRecord) => {
+  const localOnly = session.decisionMode !== 'blocking'
+  const canUnblockAgent = session.decisionMode === 'blocking' && session.state === 'needsInput' && Boolean(session.pendingRequestId)
+  const decisions: ManagedAiSessionDecisionKind[] = []
+  const noteParts: string[] = []
+
+  if (!managedAiApprovalRequestKinds.has(session.requestKind)) {
+    decisions.push('handled')
+    noteParts.push('This managed AI item is informational; aiopsterm can only mark it handled.')
+  } else if (session.source === 'codex' && session.requestKind === 'permission' && session.decisionMode === 'local' && session.actionable !== true) {
+    decisions.push('handled')
+    noteParts.push('Stock Codex hook permission requests stay in the Codex TUI; aiopsterm records local visibility only.')
+  } else if (session.requestKind === 'question') {
+    decisions.push('reply', 'deny', 'handled')
+  } else if (session.requestKind === 'plan') {
+    decisions.push('allow', 'deny', 'handled')
+  } else if (session.requestKind === 'permission') {
+    decisions.push('allow', 'always', 'bypass', 'deny', 'handled')
+  }
+
+  if (localOnly && !noteParts.length) {
+    noteParts.push('This request is local to aiopsterm; a decision records handling state but may not unblock the agent process.')
+  }
+
+  return {
+    decisions: [...new Set(decisions)],
+    canAllow: decisions.includes('allow'),
+    canAlwaysAllow: decisions.includes('always'),
+    canBypass: decisions.includes('bypass'),
+    canDeny: decisions.includes('deny'),
+    canReply: decisions.includes('reply'),
+    canHandle: decisions.includes('handled'),
+    canUnblockAgent,
+    blocking: session.decisionMode === 'blocking',
+    localOnly,
+    nativePrompt: session.source === 'codex' && session.requestKind === 'permission' && session.decisionMode === 'local' && session.actionable !== true,
+    ...(noteParts.length ? { note: noteParts.join(' ') } : {})
+  }
+}
+
+const managedAiApprovalSummary = (session: ManagedAiSessionRecord, options: { includeEvents?: boolean; eventLimit?: number } = {}) => ({
+  ...managedAiSessionSummary(session, options),
+  approvalId: `managed-ai:${session.source}:${session.id}`,
+  pending: session.state === 'needsInput',
+  approvalKind: session.requestKind,
+  capabilities: managedAiApprovalCapabilities(session)
+})
+
 const managedAiNotificationSummary = (notification: ManagedAiNotificationRecord) => ({
   id: notification.id,
   source: notification.source,
@@ -777,6 +827,36 @@ const listAiSessions = async (params: Record<string, unknown>) => {
   })
 }
 
+const listAiApprovals = async (params: Record<string, unknown>) => {
+  const snapshot = await listManagedAiSessions()
+  if (!snapshot.ok || !snapshot.data) return fail(snapshot.errorCode || 'MANAGED_AI_SESSIONS_UNAVAILABLE', snapshot.errorMessage || 'Managed AI sessions are unavailable.')
+  const query = cleanText(params.query).toLowerCase()
+  const source = cleanOptionalText(params.source)
+  const pendingOnly = params.pendingOnly === true || params.pending_only === true
+  const includeHandled = params.includeHandled === true || params.include_handled === true
+  const includeEvents = params.includeEvents === true || params.include_events === true
+  const eventLimit = normalizeInteger(params.eventLimit || params.event_limit, 5, 1, 50)
+  const limit = normalizeInteger(params.limit, 50, 1, 200)
+  const filtered = snapshot.data.sessions.filter((session) => {
+    if (!managedAiApprovalRequestKinds.has(session.requestKind)) return false
+    if (source && session.source !== source) return false
+    if (!includeHandled && session.handledAt) return false
+    if (pendingOnly && session.state !== 'needsInput') return false
+    if (!query) return true
+    return [session.source, session.id, session.title, session.summary, session.cwd || '', session.panelId || '', session.terminalSessionId || ''].some((value) =>
+      value.toLowerCase().includes(query)
+    )
+  })
+  return ok({
+    approvals: filtered.slice(0, limit).map((session) => managedAiApprovalSummary(session, { includeEvents, eventLimit })),
+    count: filtered.length,
+    total: snapshot.data.sessions.filter((session) => managedAiApprovalRequestKinds.has(session.requestKind)).length,
+    pendingCount: snapshot.data.sessions.filter((session) => managedAiApprovalRequestKinds.has(session.requestKind) && session.state === 'needsInput').length,
+    blockingCount: snapshot.data.sessions.filter((session) => managedAiApprovalRequestKinds.has(session.requestKind) && session.decisionMode === 'blocking').length,
+    localOnlyCount: snapshot.data.sessions.filter((session) => managedAiApprovalRequestKinds.has(session.requestKind) && session.decisionMode !== 'blocking').length
+  })
+}
+
 const resolveManagedAiSession = async (params: Record<string, unknown>) => {
   const sessionId = cleanText(params.sessionId || params.session_id)
   if (!sessionId) return { error: fail('AI_SESSION_ID_REQUIRED', 'sessionId is required.') }
@@ -790,6 +870,67 @@ const resolveManagedAiSession = async (params: Record<string, unknown>) => {
   if (matches.length > 1) return { error: fail('AI_SESSION_SOURCE_REQUIRED', `Multiple managed AI sessions match ${sessionId}; pass source.`) }
   return { session: matches[0] }
 }
+
+const normalizeAiApprovalDecisionKind = (value: unknown, fallback: ManagedAiSessionDecisionKind = 'allow'): ManagedAiSessionDecisionKind | 'all' | '' => {
+  const text = cleanText(value).toLowerCase()
+  if (!text) return fallback
+  if (text === 'once') return 'allow'
+  if (text === 'all' || text === 'all-tools' || text === 'all_tools') return 'all'
+  if (text === 'allow' || text === 'always' || text === 'bypass' || text === 'deny' || text === 'reply' || text === 'handled') return text
+  return ''
+}
+
+const replyAiApproval = async (
+  params: Record<string, unknown>,
+  requestedKind: ManagedAiSessionDecisionKind | 'all',
+  options: { requireMessage?: boolean } = {}
+) => {
+  const resolved = await resolveManagedAiSession(params)
+  if (resolved.error) return resolved.error
+  const session = resolved.session!
+  const kind: ManagedAiSessionDecisionKind = requestedKind === 'all' ? 'always' : requestedKind
+  const capabilities = managedAiApprovalCapabilities(session)
+  if (!capabilities.decisions.includes(kind)) {
+    return fail('AI_APPROVAL_DECISION_UNSUPPORTED', `Decision ${requestedKind} is not supported for ${session.source}:${session.id}.`, {
+      approval: managedAiApprovalSummary(session)
+    })
+  }
+  const message = cleanOptionalText(params.message || params.answer || params.reply)
+  if (options.requireMessage && !message) {
+    return fail('AI_APPROVAL_MESSAGE_REQUIRED', 'A message is required for this AI approval decision.', {
+      approval: managedAiApprovalSummary(session)
+    })
+  }
+  const result = await replyManagedAiSession({
+    source: session.source,
+    sessionId: session.id,
+    kind,
+    ...(message ? { message } : {})
+  })
+  if (!result.ok || !result.data) return fail(result.errorCode || 'AI_APPROVAL_REPLY_FAILED', result.errorMessage || 'Managed AI approval reply failed.')
+  const nextSession = result.data.session || session
+  return ok({
+    decisionKind: kind,
+    approval: managedAiApprovalSummary(nextSession),
+    session: managedAiSessionSummary(nextSession),
+    count: result.data.snapshot.sessions.length,
+    needsInputCount: result.data.snapshot.sessions.filter((item) => item.state === 'needsInput').length
+  })
+}
+
+const approveAiSession = async (params: Record<string, unknown>) => {
+  const kind = normalizeAiApprovalDecisionKind(params.kind || params.mode, 'allow')
+  if (!kind || kind === 'deny' || kind === 'reply') {
+    return fail('AI_APPROVAL_DECISION_INVALID', 'approve_ai_session mode must be allow, once, always, all, bypass, or handled.')
+  }
+  return replyAiApproval(params, kind)
+}
+
+const denyAiSession = async (params: Record<string, unknown>) => replyAiApproval(params, 'deny')
+
+const answerAiQuestion = async (params: Record<string, unknown>) => replyAiApproval(params, 'reply', { requireMessage: true })
+
+const handleAiSession = async (params: Record<string, unknown>) => replyAiApproval(params, 'handled')
 
 const focusAiSession = async (params: Record<string, unknown>) => {
   const resolved = await resolveManagedAiSession(params)
@@ -965,8 +1106,13 @@ export const handleExternalCodexMcpBridgeRequest = async (request: ExternalCodex
   if (request.method === 'glob_search') return globSearch(params)
   if (request.method === 'grep_search') return grepSearch(params)
   if (request.method === 'list_ai_sessions') return listAiSessions(params)
+  if (request.method === 'list_ai_approvals') return listAiApprovals(params)
   if (request.method === 'focus_ai_session') return focusAiSession(params)
   if (request.method === 'reply_ai_session') return replyAiSession(params)
+  if (request.method === 'approve_ai_session') return approveAiSession(params)
+  if (request.method === 'deny_ai_session') return denyAiSession(params)
+  if (request.method === 'answer_ai_question') return answerAiQuestion(params)
+  if (request.method === 'handle_ai_session') return handleAiSession(params)
   if (request.method === 'clear_ai_session') return clearAiSession(params)
   if (request.method === 'list_ai_session_events') return listAiSessionEvents(params)
   if (request.method === 'list_ai_notifications') return listAiNotifications(params)

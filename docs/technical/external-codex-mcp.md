@@ -31,8 +31,13 @@ The external server currently exposes:
 - `glob_search`: Finds remote files by glob pattern with bounded output.
 - `grep_search`: Searches remote file contents with bounded output.
 - `list_ai_sessions`: Lists managed AI sessions with compact state, routing, and recent-event summaries.
+- `list_ai_approvals`: Lists approval, question, and plan requests with their supported decision capabilities.
 - `focus_ai_session`: Requests aiopsterm to open the AI session manager and focus the owning visible terminal when it exists.
 - `reply_ai_session`: Sends an allow/deny/reply/handled decision through the managed session backend.
+- `approve_ai_session`: Approval-oriented alias for allowing a managed AI approval or plan request.
+- `deny_ai_session`: Approval-oriented alias for denying a managed AI request.
+- `answer_ai_question`: Approval-oriented alias for replying to a managed AI question.
+- `handle_ai_session`: Marks a managed AI item handled without claiming to approve an agent-native prompt.
 - `clear_ai_session`: Removes a managed AI session record without killing the owning terminal or agent process.
 - `list_ai_session_events`: Reads recent managed AI event-stream frames with a sequence cursor.
 - `list_ai_notifications`: Lists notification-style attention items derived from managed AI sessions.
@@ -45,6 +50,8 @@ The external server currently exposes:
 `list_hosts` returns identifiers, host metadata, tags, proxy/jump-host labels, and auth method labels. It does not return passwords, private keys, passphrases, or token material.
 
 `list_ai_sessions` returns non-secret routing fields such as source, session id, title, summary, state, request kind, decision mode, optional wait timeout/tool name, cwd, panel id, terminal session id, transcript path, process ids, and a compact recent timeline when requested. It does not return full raw hook payloads.
+
+`list_ai_approvals` is a Feed-style view over the same managed AI session store. It includes permission, question, and plan records, plus a `capabilities` block that says which decisions are meaningful for that session. Blocking Claude Code requests can report `canUnblockAgent: true` when the waiting hook is still live. Stock Codex hook `PermissionRequest` records are marked `localOnly`/`nativePrompt` and expose only `handled`; aiopsterm does not preempt Codex's native TUI or app-server approval flow. The approval action tools are ergonomic aliases over `reply_ai_session`, so they do not create a second approval store.
 
 `list_ai_session_events` is the request-response MCP form of the managed-AI event stream. It accepts `afterSeq`/`after_seq`, `name`/`names`, `category`/`categories`, `source`/`sources`, `sessionId`/`sessionIds`, and `limit`, then returns `boot_id`, cursor metadata, `gap`, and matching event frames. The frames come from the in-memory replay ring; use `list_ai_sessions` to refresh state if `gap` is true.
 
@@ -93,5 +100,6 @@ The external MCP is different: it is a headless host gateway for an external Cod
 - destructive tool annotations on `run_command` and `disconnect_host`
 - destructive tool annotations on `clear_ai_session`
 - bounded output and timeout caps for command/file/search operations
+- approval aliases that route through the existing managed AI decision backend and respect per-session capabilities
 
 Do not reuse external MCP connection ids for UI terminals, and do not register external MCP sessions with `codexTerminalBridge.ts`.

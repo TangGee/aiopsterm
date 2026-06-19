@@ -605,6 +605,232 @@ describe('external Codex MCP bridge runtime', () => {
     expect(clearResponse).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ cleared: true, count: 0 }) }))
   })
 
+  it('exposes feed-style managed AI approvals through external Codex MCP aliases', async () => {
+    const { bridge, agentSessions } = await loadBackends()
+    activeBridge = bridge
+    activeAgentSessions = agentSessions
+    agentSessions.publishAiAgentSessionEvent(
+      {
+        source: 'claude-code',
+        event: 'PermissionRequest',
+        sessionId: 'claude-approval-1',
+        requestId: 'claude-permission-1',
+        actionable: true,
+        title: 'Claude Code · deploy',
+        summary: 'run deploy script',
+        cwd: '/work/deploy',
+        toolName: 'Bash',
+        panelId: 'panel-approval',
+        terminalSessionId: 'terminal-approval',
+        receivedAt: 820
+      },
+      null
+    )
+    agentSessions.publishAiAgentSessionEvent(
+      {
+        source: 'codex',
+        event: 'PermissionRequest',
+        sessionId: 'codex-local-approval-1',
+        requestId: 'codex-permission-1',
+        title: 'Codex · api-service',
+        summary: 'approve npm test',
+        cwd: '/work/api-service',
+        receivedAt: 830
+      },
+      null
+    )
+
+    const listResponse = await bridge.handleExternalCodexMcpBridgeRequest({
+      method: 'list_ai_approvals',
+      token: 'test-token',
+      params: { includeEvents: true }
+    })
+    expect(listResponse).toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
+          count: 2,
+          pendingCount: 1,
+          blockingCount: 1,
+          localOnlyCount: 1,
+          approvals: expect.arrayContaining([
+            expect.objectContaining({
+              approvalId: 'managed-ai:claude-code:claude-approval-1',
+              source: 'claude-code',
+              sessionId: 'claude-approval-1',
+              state: 'needsInput',
+              pending: true,
+              approvalKind: 'permission',
+              decisionMode: 'blocking',
+              capabilities: expect.objectContaining({
+                decisions: ['allow', 'always', 'bypass', 'deny', 'handled'],
+                canUnblockAgent: true,
+                localOnly: false,
+                nativePrompt: false
+              }),
+              events: [expect.objectContaining({ requestKind: 'permission', decisionMode: 'blocking' })]
+            }),
+            expect.objectContaining({
+              approvalId: 'managed-ai:codex:codex-local-approval-1',
+              source: 'codex',
+              sessionId: 'codex-local-approval-1',
+              state: 'working',
+              pending: false,
+              approvalKind: 'permission',
+              decisionMode: 'local',
+              capabilities: expect.objectContaining({
+                decisions: ['handled'],
+                canUnblockAgent: false,
+                localOnly: true,
+                nativePrompt: true
+              })
+            })
+          ])
+        })
+      })
+    )
+    expect(JSON.stringify(listResponse)).not.toContain('raw')
+
+    const approveResponse = await bridge.handleExternalCodexMcpBridgeRequest({
+      method: 'approve_ai_session',
+      token: 'test-token',
+      params: { source: 'claude-code', sessionId: 'claude-approval-1', mode: 'always' }
+    })
+    expect(approveResponse).toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
+          decisionKind: 'always',
+          approval: expect.objectContaining({
+            sessionId: 'claude-approval-1',
+            state: 'idle',
+            needsInput: false
+          }),
+          needsInputCount: 0
+        })
+      })
+    )
+
+    const unsupportedCodexApproval = await bridge.handleExternalCodexMcpBridgeRequest({
+      method: 'approve_ai_session',
+      token: 'test-token',
+      params: { source: 'codex', sessionId: 'codex-local-approval-1', mode: 'allow' }
+    })
+    expect(unsupportedCodexApproval).toEqual(
+      expect.objectContaining({
+        ok: false,
+        errorCode: 'AI_APPROVAL_DECISION_UNSUPPORTED',
+        data: expect.objectContaining({
+          approval: expect.objectContaining({
+            source: 'codex',
+            capabilities: expect.objectContaining({ decisions: ['handled'], nativePrompt: true })
+          })
+        })
+      })
+    )
+
+    const handledCodexApproval = await bridge.handleExternalCodexMcpBridgeRequest({
+      method: 'handle_ai_session',
+      token: 'test-token',
+      params: { source: 'codex', sessionId: 'codex-local-approval-1', message: 'handled in Codex TUI' }
+    })
+    expect(handledCodexApproval).toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
+          decisionKind: 'handled',
+          approval: expect.objectContaining({
+            source: 'codex',
+            sessionId: 'codex-local-approval-1',
+            capabilities: expect.objectContaining({ decisions: ['handled'], nativePrompt: true })
+          })
+        })
+      })
+    )
+  })
+
+  it('answers and denies managed AI approval aliases through the external Codex MCP bridge', async () => {
+    const { bridge, agentSessions } = await loadBackends()
+    activeBridge = bridge
+    activeAgentSessions = agentSessions
+    agentSessions.publishAiAgentSessionEvent(
+      {
+        source: 'claude-code',
+        event: 'AskUserQuestion',
+        sessionId: 'claude-question-approval-1',
+        requestId: 'claude-question-1',
+        actionable: true,
+        title: 'Claude Code · release',
+        summary: 'choose release window',
+        cwd: '/work/release',
+        receivedAt: 840
+      },
+      null
+    )
+    agentSessions.publishAiAgentSessionEvent(
+      {
+        source: 'claude-code',
+        event: 'PermissionRequest',
+        sessionId: 'claude-deny-approval-1',
+        requestId: 'claude-deny-1',
+        actionable: true,
+        title: 'Claude Code · database',
+        summary: 'drop staging database',
+        cwd: '/work/database',
+        receivedAt: 850
+      },
+      null
+    )
+
+    const missingAnswer = await bridge.handleExternalCodexMcpBridgeRequest({
+      method: 'answer_ai_question',
+      token: 'test-token',
+      params: { source: 'claude-code', sessionId: 'claude-question-approval-1' }
+    })
+    expect(missingAnswer).toEqual(expect.objectContaining({ ok: false, errorCode: 'AI_APPROVAL_MESSAGE_REQUIRED' }))
+
+    const answerResponse = await bridge.handleExternalCodexMcpBridgeRequest({
+      method: 'answer_ai_question',
+      token: 'test-token',
+      params: { source: 'claude-code', sessionId: 'claude-question-approval-1', answer: 'Friday night' }
+    })
+    expect(answerResponse).toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
+          decisionKind: 'reply',
+          approval: expect.objectContaining({
+            source: 'claude-code',
+            sessionId: 'claude-question-approval-1',
+            approvalKind: 'question',
+            state: 'idle'
+          })
+        })
+      })
+    )
+
+    const denyResponse = await bridge.handleExternalCodexMcpBridgeRequest({
+      method: 'deny_ai_session',
+      token: 'test-token',
+      params: { source: 'claude-code', sessionId: 'claude-deny-approval-1', message: 'too destructive' }
+    })
+    expect(denyResponse).toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
+          decisionKind: 'deny',
+          approval: expect.objectContaining({
+            source: 'claude-code',
+            sessionId: 'claude-deny-approval-1',
+            approvalKind: 'permission',
+            state: 'idle'
+          }),
+          needsInputCount: 0
+        })
+      })
+    )
+  })
+
   it('returns managed AI session event frames through external Codex MCP cursors', async () => {
     const { bridge, agentSessions } = await loadBackends()
     activeBridge = bridge
@@ -861,8 +1087,13 @@ describe('external Codex MCP bridge runtime', () => {
           'glob_search',
           'grep_search',
           'list_ai_sessions',
+          'list_ai_approvals',
           'focus_ai_session',
           'reply_ai_session',
+          'approve_ai_session',
+          'deny_ai_session',
+          'answer_ai_question',
+          'handle_ai_session',
           'clear_ai_session',
           'list_ai_session_events',
           'list_ai_notifications',
@@ -876,6 +1107,10 @@ describe('external Codex MCP bridge runtime', () => {
         expect(runCommandTool?.annotations).toEqual(expect.objectContaining({ destructiveHint: true }))
         const listAiSessionsTool = tools.result?.tools?.find((tool) => tool.name === 'list_ai_sessions')
         expect(listAiSessionsTool?.annotations).toEqual(expect.objectContaining({ readOnlyHint: true }))
+        const listAiApprovalsTool = tools.result?.tools?.find((tool) => tool.name === 'list_ai_approvals')
+        expect(listAiApprovalsTool?.annotations).toEqual(expect.objectContaining({ readOnlyHint: true }))
+        const approveAiSessionTool = tools.result?.tools?.find((tool) => tool.name === 'approve_ai_session')
+        expect(approveAiSessionTool?.annotations).toEqual(expect.objectContaining({ idempotentHint: false }))
         const clearAiSessionTool = tools.result?.tools?.find((tool) => tool.name === 'clear_ai_session')
         expect(clearAiSessionTool?.annotations).toEqual(expect.objectContaining({ destructiveHint: true }))
         const listAiSessionEventsTool = tools.result?.tools?.find((tool) => tool.name === 'list_ai_session_events')

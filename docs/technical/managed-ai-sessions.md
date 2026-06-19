@@ -160,6 +160,8 @@ The preload boundary exposes:
 
 Bulk operations currently support `mark-handled`, `clear-ended`, and `clear-all`. For actionable Claude Code hooks, `allow`, `always`, `bypass`, `deny`, and `reply` resolve the waiting hook with Claude-native output. Stock Codex `PermissionRequest` hooks remain local visibility only: they can be inspected and focused from the AI session manager, but they are not unread notifications and are not answered by aiopsterm.
 
+The external Codex MCP gateway exposes the same decision path through Feed-style aliases: `list_ai_approvals`, `approve_ai_session`, `deny_ai_session`, `answer_ai_question`, and `handle_ai_session`. These tools are derived from managed session records and report per-session capabilities. They do not add a second approval queue, and they keep stock Codex hook approvals local-only unless aiopsterm owns a future Codex app-server watcher.
+
 The notification API is derived from managed session records rather than a separate notification store. Notification ids use `managed-ai:<source>:<sessionId>`. A session is unread while its state is `needsInput` and it has not been handled. `open` and `jump` return a focus request for the renderer to select the AI session panel and the owning visible terminal. `dismiss` only removes read notifications; unread notifications must be marked read first so an active approval or question is not hidden accidentally. `clear` removes all managed AI notification records, matching control_compat's bulk clear semantics, but it still does not kill the owning terminal or agent process.
 
 ## Auto Title
