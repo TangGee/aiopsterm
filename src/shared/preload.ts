@@ -580,6 +580,10 @@ export type AiAgentSessionEventName =
   | 'stop'
   | 'session_end'
 
+export type ManagedAiRequestKind = 'permission' | 'question' | 'plan' | 'notification' | 'telemetry'
+
+export type ManagedAiDecisionMode = 'blocking' | 'telemetry' | 'local'
+
 export type AiAgentSessionEventInput = {
   source?: string
   agent?: string
@@ -618,6 +622,12 @@ export type AiAgentSessionEventInput = {
   prompt?: string
   requestId?: string
   request_id?: string
+  requestKind?: string
+  request_kind?: string
+  decisionMode?: string
+  decision_mode?: string
+  toolName?: string
+  tool_name?: string
   waitForDecision?: boolean
   wait_for_decision?: boolean
   waitTimeoutMs?: number
@@ -656,6 +666,10 @@ export type AiAgentSessionEvent = {
   cwd?: string
   transcriptPath?: string
   requestId?: string
+  requestKind?: ManagedAiRequestKind
+  decisionMode?: ManagedAiDecisionMode
+  waitTimeoutMs?: number
+  toolName?: string
   actionable?: boolean
   launchCommand?: string
   resumeCommand?: string
@@ -675,6 +689,8 @@ export type ManagedAiSessionDecisionKind = 'allow' | 'always' | 'bypass' | 'deny
 
 export type ManagedAiSessionTimelineEvent = AiAgentSessionEvent & {
   id: string
+  requestKind: ManagedAiRequestKind
+  decisionMode: ManagedAiDecisionMode
   raw?: Record<string, unknown>
 }
 
@@ -707,6 +723,10 @@ export type ManagedAiSessionRecord = {
   cwd?: string
   transcriptPath?: string
   pendingRequestId?: string
+  requestKind: ManagedAiRequestKind
+  decisionMode: ManagedAiDecisionMode
+  waitTimeoutMs?: number
+  toolName?: string
   actionable?: boolean
   launchCommand?: string
   resumeCommand?: string
@@ -793,6 +813,10 @@ export type ManagedAiNotificationRecord = {
   isRead: boolean
   needsInput: boolean
   actionable?: boolean
+  requestKind: ManagedAiRequestKind
+  decisionMode: ManagedAiDecisionMode
+  waitTimeoutMs?: number
+  toolName?: string
   pendingRequestId?: string
   panelId?: string
   terminalSessionId?: string

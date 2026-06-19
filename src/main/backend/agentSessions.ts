@@ -27,6 +27,8 @@ import type {
   ManagedAiNotificationOpenInput,
   ManagedAiNotificationRecord,
   ManagedAiNotificationSelectorInput,
+  ManagedAiDecisionMode,
+  ManagedAiRequestKind,
   ManagedAiSessionRecord,
   ManagedAiSessionRenameInput,
   ManagedAiSessionReplyInput,
@@ -152,6 +154,10 @@ type ManagedAiSessionAuditEntry = {
   title?: string
   summary?: string
   requestId?: string
+  requestKind?: ManagedAiRequestKind
+  decisionMode?: ManagedAiDecisionMode
+  waitTimeoutMs?: number
+  toolName?: string
   actionable?: boolean
   decisionKind?: ManagedAiSessionDecisionKind
   decisionId?: string
@@ -279,6 +285,26 @@ const normalizeBoolean = (value: unknown) => {
     if (normalized === 'true' || normalized === '1' || normalized === 'yes') return true
     if (normalized === 'false' || normalized === '0' || normalized === 'no') return false
   }
+  return undefined
+}
+
+const normalizeRequestKind = (value: unknown): ManagedAiRequestKind | undefined => {
+  const normalized = cleanText(value).toLowerCase().replace(/[\s_-]+/g, '')
+  if (!normalized) return undefined
+  if (normalized === 'permission' || normalized === 'approval' || normalized === 'permissionrequest') return 'permission'
+  if (normalized === 'question' || normalized === 'askuserquestion' || normalized === 'askuser') return 'question'
+  if (normalized === 'plan' || normalized === 'exitplan' || normalized === 'exitplanmode') return 'plan'
+  if (normalized === 'notification' || normalized === 'notify') return 'notification'
+  if (normalized === 'telemetry' || normalized === 'info' || normalized === 'event') return 'telemetry'
+  return undefined
+}
+
+const normalizeDecisionMode = (value: unknown): ManagedAiDecisionMode | undefined => {
+  const normalized = cleanText(value).toLowerCase().replace(/[\s_-]+/g, '')
+  if (!normalized) return undefined
+  if (normalized === 'blocking' || normalized === 'wait' || normalized === 'waitdecision' || normalized === 'waitfordecision') return 'blocking'
+  if (normalized === 'telemetry' || normalized === 'readonly' || normalized === 'nonblocking') return 'telemetry'
+  if (normalized === 'local' || normalized === 'handled' || normalized === 'advisory') return 'local'
   return undefined
 }
 
@@ -522,6 +548,14 @@ const nestedRecord = (record: Record<string, unknown>, key: string) => {
   return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
 }
 
+const firstNestedRecord = (record: Record<string, unknown>, keys: string[]) => {
+  for (const key of keys) {
+    const nested = nestedRecord(record, key)
+    if (Object.keys(nested).length) return nested
+  }
+  return {}
+}
+
 const baseNameFromPath = (value: unknown) => {
   const text = cleanText(value).replace(/[\\/]+$/, '')
   if (!text) return ''
@@ -570,6 +604,40 @@ const questionSummary = (input: Record<string, unknown>) => {
   const questions = Array.isArray(toolInput.questions) ? toolInput.questions : []
   const question = questions.find((item) => item && typeof item === 'object' && !Array.isArray(item)) as Record<string, unknown> | undefined
   return question ? firstText(question, ['question', 'header', 'prompt']) : undefined
+}
+
+const toolNameFor = (input: Record<string, unknown>) =>
+  firstText(input, ['toolName', 'tool_name', 'tool', 'name']) || firstText(firstNestedRecord(input, ['tool', 'tool_input', 'toolInput']), ['name', 'toolName', 'tool_name'])
+
+const isExitPlanTool = (toolName?: string) => cleanText(toolName).toLowerCase().replace(/[\s_-]+/g, '') === 'exitplanmode'
+
+const isAskUserQuestionTool = (toolName?: string) => cleanText(toolName).toLowerCase().replace(/[\s_-]+/g, '') === 'askuserquestion'
+
+const requestKindFor = (source: AiAgentSessionSource, event: AiAgentSessionEventName, input: Record<string, unknown>, toolName?: string): ManagedAiRequestKind => {
+  const explicit = normalizeRequestKind(input.requestKind || input.request_kind || input.feedKind || input.feed_kind)
+  if (explicit) return explicit
+  if (event === 'question' || isAskUserQuestionTool(toolName)) return 'question'
+  if (isExitPlanTool(toolName)) return 'plan'
+  if (event === 'permission_request') return 'permission'
+  if (event === 'notification') return 'notification'
+  return 'telemetry'
+}
+
+const decisionModeFor = (source: AiAgentSessionSource, event: AiAgentSessionEventName, input: Record<string, unknown>, requestKind: ManagedAiRequestKind): ManagedAiDecisionMode => {
+  const explicit = normalizeDecisionMode(input.decisionMode || input.decision_mode)
+  if (explicit) return explicit
+  const waitForDecision = normalizeBoolean(input.actionable ?? input.waitForDecision ?? input.wait_for_decision)
+  if (source === 'claude-code' && waitForDecision === true && (requestKind === 'permission' || requestKind === 'question' || requestKind === 'plan')) return 'blocking'
+  if (requestKind === 'permission' || requestKind === 'question' || requestKind === 'plan' || requestKind === 'notification') return 'local'
+  return 'telemetry'
+}
+
+const actionableFor = (source: AiAgentSessionSource, event: AiAgentSessionEventName, input: Record<string, unknown>, requestKind: ManagedAiRequestKind, decisionMode: ManagedAiDecisionMode) => {
+  const explicit = normalizeBoolean(input.actionable ?? input.waitForDecision ?? input.wait_for_decision)
+  if (typeof explicit === 'boolean') return explicit
+  if (decisionMode === 'blocking') return true
+  if (source === 'codex' && event === 'permission_request') return false
+  return requestKind === 'permission' || requestKind === 'question' || requestKind === 'plan'
 }
 
 const eventSummary = (event: AiAgentSessionEventName, input: Record<string, unknown>) =>
@@ -849,6 +917,10 @@ const publishAgentEventStreamFrame = (event: AiAgentSessionEvent, session: Manag
         summary: event.summary,
         state: session.state,
         requestId: event.requestId,
+        requestKind: event.requestKind,
+        decisionMode: event.decisionMode,
+        waitTimeoutMs: event.waitTimeoutMs,
+        toolName: event.toolName,
         actionable: event.actionable,
         cwd: event.cwd,
         transcriptPath: event.transcriptPath,
@@ -874,7 +946,11 @@ const publishManagedAiStreamFrame = (name: string, session: ManagedAiSessionReco
             sessionId: session.id,
             title: session.title,
             state: session.state,
-            lastEvent: session.lastEvent
+            lastEvent: session.lastEvent,
+            requestKind: session.requestKind,
+            decisionMode: session.decisionMode,
+            waitTimeoutMs: session.waitTimeoutMs,
+            toolName: session.toolName
           }
         : {}),
       ...payload
@@ -1063,6 +1139,10 @@ const auditEventReceived = (event: AiAgentSessionEvent, session: ManagedAiSessio
     title: session.title,
     summary: event.summary,
     requestId: event.requestId,
+    requestKind: event.requestKind,
+    decisionMode: event.decisionMode,
+    waitTimeoutMs: event.waitTimeoutMs,
+    toolName: event.toolName,
     actionable: event.actionable
   })
 }
@@ -1077,6 +1157,10 @@ const auditSocketCompleted = (event: AiAgentSessionEvent, response: AgentSession
     title: event.title,
     summary: event.summary,
     requestId: event.requestId,
+    requestKind: event.requestKind,
+    decisionMode: event.decisionMode,
+    waitTimeoutMs: event.waitTimeoutMs,
+    toolName: event.toolName,
     actionable: event.actionable,
     status: response.status,
     errorCode: response.ok ? undefined : response.errorCode
@@ -1094,6 +1178,10 @@ const auditDecisionCreated = (session: ManagedAiSessionRecord, decision: Managed
     title: session.title,
     summary: session.summary,
     requestId: session.pendingRequestId,
+    requestKind: session.requestKind,
+    decisionMode: session.decisionMode,
+    waitTimeoutMs: session.waitTimeoutMs,
+    toolName: session.toolName,
     decisionKind: decision.kind,
     decisionId: decision.id
   })
@@ -1140,6 +1228,8 @@ const autoTitleFor = (event: AiAgentSessionEvent, existing?: ManagedAiSessionRec
 
 const normalizeRecordEvent = (event: AiAgentSessionEvent, raw: Record<string, unknown>): ManagedAiSessionTimelineEvent => ({
   ...event,
+  requestKind: event.requestKind || 'telemetry',
+  decisionMode: event.decisionMode || 'telemetry',
   id: createEventId(event),
   raw: compactRawRecord(raw)
 })
@@ -1167,6 +1257,10 @@ const normalizeStoredSession = (value: unknown): ManagedAiSessionRecord | null =
   const decisions = Array.isArray(value.decisions)
     ? value.decisions.filter(isRecord).map(normalizeStoredDecision).filter(Boolean)
     : []
+  const latestEvent = events.at(-1) as ManagedAiSessionTimelineEvent | undefined
+  const storedToolName = cleanOptionalText(value.toolName || value.tool_name)
+  const requestKind = normalizeRequestKind(value.requestKind || value.request_kind) || latestEvent?.requestKind || requestKindFor(source, lastEvent, value, storedToolName)
+  const decisionMode = normalizeDecisionMode(value.decisionMode || value.decision_mode) || latestEvent?.decisionMode || decisionModeFor(source, lastEvent, value, requestKind)
   return {
     id,
     source,
@@ -1191,6 +1285,10 @@ const normalizeStoredSession = (value: unknown): ManagedAiSessionRecord | null =
     ...(cleanOptionalText(value.cwd) ? { cwd: cleanOptionalText(value.cwd) } : {}),
     ...(cleanOptionalText(value.transcriptPath) ? { transcriptPath: cleanOptionalText(value.transcriptPath) } : {}),
     ...(cleanOptionalText(value.pendingRequestId) ? { pendingRequestId: cleanOptionalText(value.pendingRequestId) } : {}),
+    requestKind,
+    decisionMode,
+    ...(cleanPositiveInteger(value.waitTimeoutMs || value.wait_timeout_ms) ? { waitTimeoutMs: cleanPositiveInteger(value.waitTimeoutMs || value.wait_timeout_ms) } : latestEvent?.waitTimeoutMs ? { waitTimeoutMs: latestEvent.waitTimeoutMs } : {}),
+    ...(storedToolName ? { toolName: storedToolName } : latestEvent?.toolName ? { toolName: latestEvent.toolName } : {}),
     ...(typeof value.actionable === 'boolean' ? { actionable: value.actionable } : {}),
     ...(cleanOptionalText(value.launchCommand) ? { launchCommand: cleanOptionalText(value.launchCommand) } : {}),
     ...(cleanOptionalText(value.resumeCommand) ? { resumeCommand: cleanOptionalText(value.resumeCommand) } : {}),
@@ -1210,6 +1308,9 @@ const normalizeStoredTimelineEvent = (value: Record<string, unknown>, fallbackSo
   const event = normalizeEventName(value.event)
   if (!event) return null
   const receivedAt = typeof value.receivedAt === 'number' ? value.receivedAt : Date.now()
+  const toolName = cleanOptionalText(value.toolName || value.tool_name)
+  const requestKind = normalizeRequestKind(value.requestKind || value.request_kind) || requestKindFor(source, event, value, toolName)
+  const decisionMode = normalizeDecisionMode(value.decisionMode || value.decision_mode) || decisionModeFor(source, event, value, requestKind)
   return {
     source,
     event,
@@ -1218,12 +1319,16 @@ const normalizeStoredTimelineEvent = (value: Record<string, unknown>, fallbackSo
     summary: cleanOptionalText(value.summary) || '',
     receivedAt,
     id: cleanOptionalText(value.id) || `${receivedAt}-${randomUUID()}`,
+    requestKind,
+    decisionMode,
     ...(cleanOptionalText(value.panelId) ? { panelId: cleanOptionalText(value.panelId) } : {}),
     ...(cleanOptionalText(value.terminalSessionId) ? { terminalSessionId: cleanOptionalText(value.terminalSessionId) } : {}),
     ...(cleanOptionalText(value.workspaceId) ? { workspaceId: cleanOptionalText(value.workspaceId) } : {}),
     ...(cleanOptionalText(value.cwd) ? { cwd: cleanOptionalText(value.cwd) } : {}),
     ...(cleanOptionalText(value.transcriptPath) ? { transcriptPath: cleanOptionalText(value.transcriptPath) } : {}),
     ...(cleanOptionalText(value.requestId) ? { requestId: cleanOptionalText(value.requestId) } : {}),
+    ...(cleanPositiveInteger(value.waitTimeoutMs || value.wait_timeout_ms) ? { waitTimeoutMs: cleanPositiveInteger(value.waitTimeoutMs || value.wait_timeout_ms) } : {}),
+    ...(toolName ? { toolName } : {}),
     ...(typeof value.actionable === 'boolean' ? { actionable: value.actionable } : {}),
     ...(cleanOptionalText(value.launchCommand) ? { launchCommand: cleanOptionalText(value.launchCommand) } : {}),
     ...(cleanOptionalText(value.resumeCommand) ? { resumeCommand: cleanOptionalText(value.resumeCommand) } : {}),
@@ -1325,7 +1430,12 @@ export const normalizeAiAgentSessionEventInput = (input: unknown, now = Date.now
   const cwd = cleanOptionalText(record.cwd || record.workingDirectory || record.working_directory || record.project_dir || record.projectDir || record.project_path || record.projectPath)
   const transcriptPath = cleanOptionalText(record.transcriptPath || record.transcript_path)
   const requestId = cleanOptionalText(record.requestId || record.request_id || record.tool_use_id)
-  const actionable = normalizeBoolean(record.actionable ?? record.waitForDecision ?? record.wait_for_decision)
+  const toolName = toolNameFor(record)
+  const requestKind = requestKindFor(source, event, record, toolName)
+  const decisionMode = decisionModeFor(source, event, record, requestKind)
+  const waitTimeoutInput = record.waitTimeoutMs ?? record.wait_timeout_ms
+  const waitTimeoutMs = decisionMode === 'blocking' || waitTimeoutInput !== undefined ? normalizeWaitTimeoutMs(waitTimeoutInput) : undefined
+  const actionable = actionableFor(source, event, record, requestKind, decisionMode)
   const launchCommand = sanitizeLaunchCommand(record.launchCommand || record.launch_command)
   const resumeCommand = resumeCommandFor(source, sessionId, cwd, record.resumeCommand || record.resume_command || record.launchCommand || record.launch_command)
   const processId = cleanPositiveInteger(record.processId || record.process_id || record.pid || process.env.AIOPSTERM_AGENT_PID)
@@ -1345,6 +1455,10 @@ export const normalizeAiAgentSessionEventInput = (input: unknown, now = Date.now
     ...(cwd ? { cwd } : {}),
     ...(transcriptPath ? { transcriptPath } : {}),
     ...(requestId ? { requestId } : {}),
+    requestKind,
+    decisionMode,
+    ...(waitTimeoutMs ? { waitTimeoutMs } : {}),
+    ...(toolName ? { toolName } : {}),
     ...(typeof actionable === 'boolean' ? { actionable } : {}),
     ...(launchCommand ? { launchCommand } : {}),
     ...(resumeCommand ? { resumeCommand } : {}),
@@ -1364,6 +1478,10 @@ const upsertSessionForEvent = (event: AiAgentSessionEvent, raw: Record<string, u
   const title = existing?.userTitle || nextAutoTitle || event.title || existing?.title || sourceLabel(event.source)
   const handledAt = state === 'needsInput' ? undefined : existing?.handledAt
   const pendingRequestId = state === 'needsInput' && event.actionable && event.requestId ? event.requestId : undefined
+  const requestKind = event.requestKind || existing?.requestKind || 'telemetry'
+  const decisionMode = event.decisionMode || existing?.decisionMode || 'telemetry'
+  const waitTimeoutMs = event.waitTimeoutMs || existing?.waitTimeoutMs
+  const toolName = event.toolName || existing?.toolName
   const cwd = event.cwd || existing?.cwd
   const launchCommand = event.launchCommand || existing?.launchCommand
   const resumeCommand = event.resumeCommand && event.cwd ? event.resumeCommand : existing?.resumeCommand || resumeCommandFor(event.source, event.sessionId, cwd, launchCommand)
@@ -1393,6 +1511,10 @@ const upsertSessionForEvent = (event: AiAgentSessionEvent, raw: Record<string, u
     ...(cwd ? { cwd } : {}),
     ...(event.transcriptPath || existing?.transcriptPath ? { transcriptPath: event.transcriptPath || existing?.transcriptPath } : {}),
     ...(pendingRequestId ? { pendingRequestId } : {}),
+    requestKind,
+    decisionMode,
+    ...(waitTimeoutMs ? { waitTimeoutMs } : {}),
+    ...(toolName ? { toolName } : {}),
     ...(typeof event.actionable === 'boolean' ? { actionable: event.actionable } : existing?.actionable ? { actionable: existing.actionable } : {}),
     ...(launchCommand ? { launchCommand } : {}),
     ...(resumeCommand ? { resumeCommand } : {}),
@@ -1423,7 +1545,8 @@ export const publishAiAgentSessionEvent = (input: AiAgentSessionEventInput, emit
 
 const isBlockingAgentEvent = (event: AiAgentSessionEvent, raw: Record<string, unknown>) =>
   event.source === 'claude-code' &&
-  (event.event === 'permission_request' || event.event === 'question') &&
+  (event.requestKind === 'permission' || event.requestKind === 'question' || event.requestKind === 'plan') &&
+  event.decisionMode === 'blocking' &&
   event.actionable === true &&
   Boolean(event.requestId || cleanOptionalText(raw.requestId || raw.request_id || raw.tool_use_id))
 
@@ -1513,7 +1636,7 @@ const waitForAgentDecision = (event: AiAgentSessionEvent, raw: Record<string, un
       return
     }
     const key = pendingDecisionKey(event.source, event.sessionId, requestId)
-    const timeoutMs = normalizeWaitTimeoutMs(raw.waitTimeoutMs || raw.wait_timeout_ms)
+    const timeoutMs = event.waitTimeoutMs || normalizeWaitTimeoutMs(raw.waitTimeoutMs || raw.wait_timeout_ms)
     const timer = setTimeout(() => {
       pendingDecisions.delete(key)
       appendManagedAiSessionAudit({
@@ -1524,7 +1647,11 @@ const waitForAgentDecision = (event: AiAgentSessionEvent, raw: Record<string, un
         event: event.event,
         title: event.title,
         summary: event.summary,
-        requestId
+        requestId,
+        requestKind: event.requestKind,
+        decisionMode: event.decisionMode,
+        waitTimeoutMs: timeoutMs,
+        toolName: event.toolName
       })
       resolve({ ok: true, data: event, status: 'timeout', agentOutput: {} })
     }, timeoutMs)
@@ -1597,6 +1724,10 @@ const notificationForSession = (session: ManagedAiSessionRecord): ManagedAiNotif
     read,
     isRead: read,
     needsInput: session.state === 'needsInput',
+    requestKind: session.requestKind,
+    decisionMode: session.decisionMode,
+    ...(session.waitTimeoutMs ? { waitTimeoutMs: session.waitTimeoutMs } : {}),
+    ...(session.toolName ? { toolName: session.toolName } : {}),
     ...(typeof session.actionable === 'boolean' ? { actionable: session.actionable } : {}),
     ...(session.pendingRequestId ? { pendingRequestId: session.pendingRequestId } : {}),
     ...(session.panelId ? { panelId: session.panelId } : {}),

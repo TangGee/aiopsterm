@@ -44,11 +44,11 @@ The external server currently exposes:
 
 `list_hosts` returns identifiers, host metadata, tags, proxy/jump-host labels, and auth method labels. It does not return passwords, private keys, passphrases, or token material.
 
-`list_ai_sessions` returns non-secret routing fields such as source, session id, title, summary, state, cwd, panel id, terminal session id, transcript path, process ids, and a compact recent timeline when requested. It does not return full raw hook payloads.
+`list_ai_sessions` returns non-secret routing fields such as source, session id, title, summary, state, request kind, decision mode, optional wait timeout/tool name, cwd, panel id, terminal session id, transcript path, process ids, and a compact recent timeline when requested. It does not return full raw hook payloads.
 
 `list_ai_session_events` is the request-response MCP form of the managed-AI event stream. It accepts `afterSeq`/`after_seq`, `name`/`names`, `category`/`categories`, `source`/`sources`, `sessionId`/`sessionIds`, and `limit`, then returns `boot_id`, cursor metadata, `gap`, and matching event frames. The frames come from the in-memory replay ring; use `list_ai_sessions` to refresh state if `gap` is true.
 
-`list_ai_notifications` returns compact attention items with `id`, source, session id, title, summary, read state, event type, cwd, and visible-terminal routing fields. Notification ids use `managed-ai:<source>:<sessionId>`. Opening or jumping to a notification does not mark it read. Dismissing an unread notification is rejected; call `mark_ai_notification_read` first when the user has handled it. `clear_ai_notifications` is the bulk-clear form and removes all managed AI notification records regardless of read state, but it does not close the owning visible terminal or the agent process.
+`list_ai_notifications` returns compact attention items with `id`, source, session id, title, summary, read state, event type, request kind, decision mode, cwd, and visible-terminal routing fields. Notification ids use `managed-ai:<source>:<sessionId>`. Opening or jumping to a notification does not mark it read. Dismissing an unread notification is rejected; call `mark_ai_notification_read` first when the user has handled it. `clear_ai_notifications` is the bulk-clear form and removes all managed AI notification records regardless of read state, but it does not close the owning visible terminal or the agent process.
 
 ## Enablement
 

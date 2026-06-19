@@ -446,6 +446,32 @@ describe('workspace store', () => {
     expect(store.managedAiSessionFocusRequest.session?.id).toBe('codex-session-1')
   })
 
+  it('classifies managed AI plan requests as plan attention items', () => {
+    const store = useWorkspaceStore()
+    store.upsertManagedAiSession({
+      source: 'claude-code',
+      event: 'permission_request',
+      sessionId: 'claude-plan-1',
+      title: 'Plan ready',
+      summary: 'Review plan before editing',
+      requestKind: 'plan',
+      decisionMode: 'blocking',
+      actionable: true,
+      receivedAt: 550
+    })
+
+    expect(store.managedAiSessions[0]).toEqual(
+      expect.objectContaining({
+        requestKind: 'plan',
+        decisionMode: 'blocking'
+      })
+    )
+    expect(store.currentAiAttentionItem).toMatchObject({
+      id: 'managed-ai:claude-code:claude-plan-1',
+      kind: 'plan'
+    })
+  })
+
   it('moves the AI attention bell to the next managed AI session after handling the current one', () => {
     const store = useWorkspaceStore()
     const firstPanelId = store.activePanelId

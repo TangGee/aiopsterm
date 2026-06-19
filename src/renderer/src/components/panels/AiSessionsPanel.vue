@@ -78,7 +78,7 @@
           <span :class="`ai-session-state state-${session.state}`"></span>
           <span>
             <strong>{{ session.title }}</strong>
-            <small>{{ sourceLabel(session.source) }} · {{ stateLabel(session.state) }}{{ session.summary ? ` · ${session.summary}` : '' }}</small>
+            <small>{{ sourceLabel(session.source) }} · {{ stateLabel(session.state) }} · {{ requestKindLabel(session.requestKind) }}{{ session.summary ? ` · ${session.summary}` : '' }}</small>
             <small
               v-if="session.cwd"
               class="ai-session-cwd"
@@ -115,7 +115,7 @@
       >
         <header>
           <div>
-            <p>{{ sourceLabel(selectedSession.source) }} · {{ stateLabel(selectedSession.state) }}</p>
+            <p>{{ sourceLabel(selectedSession.source) }} · {{ stateLabel(selectedSession.state) }} · {{ requestKindLabel(selectedSession.requestKind) }}</p>
             <input
               v-model="renameTitle"
               @keydown.enter.prevent="renameSelectedSession"
@@ -151,6 +151,22 @@
           <div v-if="selectedSession.agentLifecycle">
             <dt>Agent 状态</dt>
             <dd>{{ lifecycleLabel(selectedSession.agentLifecycle) }}</dd>
+          </div>
+          <div>
+            <dt>请求类型</dt>
+            <dd>{{ requestKindLabel(selectedSession.requestKind) }}</dd>
+          </div>
+          <div>
+            <dt>处理模式</dt>
+            <dd>{{ decisionModeLabel(selectedSession.decisionMode) }}</dd>
+          </div>
+          <div v-if="selectedSession.waitTimeoutMs">
+            <dt>等待超时</dt>
+            <dd>{{ Math.round(selectedSession.waitTimeoutMs / 1000) }}s</dd>
+          </div>
+          <div v-if="selectedSession.toolName">
+            <dt>工具</dt>
+            <dd>{{ selectedSession.toolName }}</dd>
           </div>
           <div v-if="selectedSession.processId">
             <dt>Agent PID</dt>
@@ -191,28 +207,28 @@
           class="ai-session-actions"
         >
           <button
-            v-if="selectedSession.lastEvent === 'question'"
+            v-if="selectedSession.requestKind === 'question'"
             @click="submitQuestionReply"
           >
             <Send />
             提交回答
           </button>
           <button
-            v-if="selectedSession.lastEvent !== 'question'"
+            v-if="selectedSession.requestKind !== 'question' && selectedSession.requestKind !== 'notification'"
             @click="workspace.replyManagedAiSession(selectedSession.source, selectedSession.id, 'allow')"
           >
             <Check />
             允许
           </button>
           <button
-            v-if="selectedSession.lastEvent === 'permission_request' && selectedSession.actionable"
+            v-if="selectedSession.requestKind === 'permission' && selectedSession.actionable"
             @click="workspace.replyManagedAiSession(selectedSession.source, selectedSession.id, 'always')"
           >
             <CheckCheck />
             持续允许
           </button>
           <button
-            v-if="selectedSession.lastEvent === 'permission_request' && selectedSession.actionable"
+            v-if="selectedSession.requestKind === 'permission' && selectedSession.actionable"
             @click="workspace.replyManagedAiSession(selectedSession.source, selectedSession.id, 'bypass')"
           >
             <ShieldCheck />
@@ -232,10 +248,10 @@
           <textarea
             v-model="replyText"
             rows="2"
-            :placeholder="selectedSession.lastEvent === 'question' ? '输入要回复给 AI 的答案' : '可选：拒绝原因或处理说明'"
+            :placeholder="selectedSession.requestKind === 'question' ? '输入要回复给 AI 的答案' : '可选：拒绝原因或处理说明'"
           ></textarea>
           <button
-            v-if="selectedSession.lastEvent === 'question'"
+            v-if="selectedSession.requestKind === 'question'"
             :disabled="replyText.trim() === ''"
             @click="submitReply"
           >
@@ -253,7 +269,7 @@
             <span :class="`ai-session-state state-${eventState(event.event)}`"></span>
             <div>
               <strong>{{ eventLabel(event.event) }}</strong>
-              <small>{{ formatTime(event.receivedAt) }}</small>
+              <small>{{ formatTime(event.receivedAt) }} · {{ requestKindLabel(event.requestKind) }} · {{ decisionModeLabel(event.decisionMode) }}</small>
               <p v-if="event.summary">{{ event.summary }}</p>
             </div>
           </div>
@@ -342,6 +358,20 @@ const lifecycleLabel = (lifecycle: NonNullable<ManagedAiSession['agentLifecycle'
   if (lifecycle === 'needsInput') return '待处理'
   if (lifecycle === 'ended') return '已结束'
   return '未知'
+}
+
+const requestKindLabel = (kind: ManagedAiSession['requestKind']) => {
+  if (kind === 'permission') return '权限审批'
+  if (kind === 'question') return '用户提问'
+  if (kind === 'plan') return '计划确认'
+  if (kind === 'notification') return '通知'
+  return '遥测'
+}
+
+const decisionModeLabel = (mode: ManagedAiSession['decisionMode']) => {
+  if (mode === 'blocking') return '等待响应'
+  if (mode === 'local') return '本地处理'
+  return '仅记录'
 }
 
 const eventLabel = (event: AiAgentSessionEventName) => {

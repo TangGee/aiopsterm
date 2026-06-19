@@ -30,6 +30,13 @@ The helper reads hook JSON from stdin, adds the managed terminal identifiers, po
 
 Claude Code `PermissionRequest` and `AskUserQuestion` hooks are actionable. The installed command passes `--wait-decision`, so the helper can wait up to roughly two minutes for the AI session panel to reply, then prints Claude's native `hookSpecificOutput` JSON. Timeout or missing aiopsterm still falls back to `{}` so Claude's own terminal prompt remains usable. Codex hook-level `PermissionRequest` remains telemetry because stock Codex performs its own approval flow outside the hook response path.
 
+aiopsterm normalizes hook activity into Feed-style request semantics before it stores or displays a session:
+
+- `requestKind`: `permission`, `question`, `plan`, `notification`, or `telemetry`
+- `decisionMode`: `blocking`, `local`, or `telemetry`
+
+Claude Code requests launched with `--wait-decision` can be `blocking`, which lets the AI session panel answer the waiting hook. Codex stock hooks remain local visibility or telemetry; aiopsterm records and routes them but does not preempt Codex's native approval UI.
+
 ## Hook Installer
 
 Settings -> AI Preferences includes an `Agent Hook 安装器` section.
@@ -79,6 +86,8 @@ Optional fields such as `panelId`, `terminalSessionId`, `cwd`, `project_dir`, `t
 
 When hooks omit a display title, aiopsterm derives one from project/workspace fields or the basename of `cwd`/`project_dir`, for example `Codex · api-service` or `Claude Code · release-api`. Claude Code `AskUserQuestion` payloads can also derive the row summary from `tool_input.questions[0].question`, and tool payloads with `tool_name` plus `tool_input.command` are shown as `tool: command`.
 
+`toolName`/`tool_name` is also used to classify dedicated agent requests. `AskUserQuestion` becomes `requestKind: "question"` and `ExitPlanMode` becomes `requestKind: "plan"` even when they arrive through a generic `PermissionRequest` hook. `waitTimeoutMs` records the soft wait window for blocking hooks.
+
 When `launchCommand` is present, the backend stores only a sanitized display form. Model, sandbox, approval, permission-mode, config/profile, and cwd-like flags are preserved. Prompts, credentials, previous session selectors, and noninteractive execution verbs are dropped. If no trusted `resumeCommand` is provided, aiopsterm builds a native resume command from `source`, `sessionId`, and `cwd`, for example:
 
 ```sh
@@ -98,6 +107,7 @@ agent-sessions/managed-ai-sessions.audit.jsonl
 The store is capped to 200 sessions, 200 timeline events per session, and 40 local decisions per session. Each session record includes:
 
 - source, session id, state, title, summary, cwd, transcript path, terminal panel id, and terminal session id
+- request kind, decision mode, optional wait timeout, and optional tool name
 - a chronological event timeline with compact raw payload previews
 - local decisions such as `allow`, `deny`, `reply`, or `handled`
 - `pendingRequestId` and `actionable` fields for live Claude Code permission/question hooks
@@ -109,7 +119,7 @@ The store is capped to 200 sessions, 200 timeline events per session, and 40 loc
 
 The renderer hydrates from this store on startup through `listManagedAiSessions()`. Incoming hook events update the in-memory UI immediately and are persisted by the main process.
 
-`managed-ai-sessions.audit.jsonl` is an append-only audit stream inspired by control_compat Feed's workstream log. It records compact entries for incoming hook events, socket completion status, local replies, decision resolution or timeout, renames, clears, and bulk operations. Entries include non-secret routing and state fields such as source, session id, event name, state, request id, decision kind, status, title, and a bounded summary. The audit log does not store full raw hook payloads; detailed payload previews remain bounded inside the capped session timeline.
+`managed-ai-sessions.audit.jsonl` is an append-only audit stream inspired by control_compat Feed's workstream log. It records compact entries for incoming hook events, socket completion status, local replies, decision resolution or timeout, renames, clears, and bulk operations. Entries include non-secret routing and state fields such as source, session id, event name, request kind, decision mode, state, request id, decision kind, status, title, and a bounded summary. The audit log does not store full raw hook payloads; detailed payload previews remain bounded inside the capped session timeline.
 
 The current implementation records lifecycle and process facts for visibility, restore, and later automation. It does not hibernate agents or kill agent process groups. Disconnecting or closing a terminal still uses the normal terminal lifecycle path and marks matching managed AI sessions ended.
 
@@ -125,6 +135,8 @@ The first frame is an `ack` with protocol `aiopsterm-agent-events`, a process `b
 
 - `agent`: incoming hook events, named as `agent.hook.<EventName>`, for example `agent.hook.PermissionRequest`.
 - `managed-ai`: local session mutations such as `managed_ai.decision.created`, `managed_ai.session.renamed`, `managed_ai.session.cleared`, `managed_ai.sessions.bulk`, and notification operations such as `managed_ai.notification.opened`, `managed_ai.notification.mark_read`, and `managed_ai.notification.dismissed`.
+
+Agent and managed-AI payloads include the normalized `requestKind`, `decisionMode`, optional `waitTimeoutMs`, and optional `toolName` so MCP clients and UI consumers do not have to infer behavior from raw hook names.
 
 Clients can filter by `name`/`names` and `category`/`categories`, resume with `after_seq` or `after`, and disable heartbeat frames with `include_heartbeats: false`. Replay is kept in a bounded in-memory ring of recent events; the JSONL audit file remains the durable long-term record.
 
@@ -167,7 +179,7 @@ Auto-naming emits `managed_ai.session.renamed` with `auto: true` when it changes
 - Details also show normalized agent lifecycle, agent PID/PPID/PGID, terminal PID, and latest terminal activity when those facts are available from hooks or the local terminal backend.
 - When a session has a `resumeCommand`, the detail header shows a resume action. Clicking it writes the resume command into the owning aiopsterm local-connection terminal. It does not create a new terminal, close an existing terminal, or touch SSH connections.
 - Manual resume uses the same terminal command security pipeline as direct command execution. If the configured security policy requires approval, the normal terminal approval prompt appears before anything is written to the shell.
-- `permission_request`, `question`, and `notification` create top-bar bell entries.
+- `permission`, `question`, `plan`, and `notification` request kinds create top-bar bell entries. The bell category is derived from `requestKind`, so a plan confirmation such as Claude Code `ExitPlanMode` is shown as a plan item rather than a generic approval.
 - The main process also emits a desktop notification for `permission_request`, `question`, and `notification` events when Electron notifications are supported.
 - Clicking the bell focuses the AI session manager and selects the owning terminal when `panelId` or `terminalSessionId` is known. It does not mark the session handled.
 - The AI session row stays selected until the user explicitly marks that pending item handled. Handling clears the unread count and lets the next bell click move to the next pending managed session.

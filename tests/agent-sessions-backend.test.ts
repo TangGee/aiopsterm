@@ -137,7 +137,39 @@ describe('agent session backend', () => {
         terminalSessionId: 'terminal-1',
         cwd: '/work/project',
         summary: 'Approve shell command',
+        requestKind: 'permission',
+        decisionMode: 'local',
+        actionable: false,
         receivedAt: 100
+      })
+    })
+  })
+
+  it('classifies ExitPlanMode as plan input without treating Codex hook telemetry as blocking', async () => {
+    const { normalizeAiAgentSessionEventInput } = await loadBackend()
+    expect(
+      normalizeAiAgentSessionEventInput(
+        {
+          source: 'codex',
+          hookEventName: 'PermissionRequest',
+          session_id: 'codex-plan-1',
+          tool_name: 'ExitPlanMode',
+          request_id: 'plan-1',
+          summary: 'Review implementation plan',
+          waitForDecision: true
+        },
+        150
+      )
+    ).toEqual({
+      ok: true,
+      data: expect.objectContaining({
+        source: 'codex',
+        event: 'permission_request',
+        sessionId: 'codex-plan-1',
+        requestKind: 'plan',
+        decisionMode: 'local',
+        toolName: 'ExitPlanMode',
+        actionable: true
       })
     })
   })
@@ -189,6 +221,9 @@ describe('agent session backend', () => {
         summary: 'Deploy to staging or production?',
         cwd: '/work/release-api',
         transcriptPath: '/tmp/claude.jsonl',
+        requestKind: 'question',
+        decisionMode: 'local',
+        actionable: true,
         receivedAt: 200
       })
     })
@@ -977,6 +1012,9 @@ describe('agent session backend', () => {
           id: 'claude-blocking-1',
           state: 'needsInput',
           pendingRequestId: 'request-1',
+          requestKind: 'question',
+          decisionMode: 'blocking',
+          waitTimeoutMs: 5000,
           actionable: true
         })
       })
@@ -1016,6 +1054,8 @@ describe('agent session backend', () => {
             source: 'claude-code',
             sessionId: 'claude-blocking-1',
             requestId: 'request-1',
+            requestKind: 'question',
+            decisionMode: 'blocking',
             decisionKind: 'reply'
           }),
           expect.objectContaining({
@@ -1023,6 +1063,8 @@ describe('agent session backend', () => {
             source: 'claude-code',
             sessionId: 'claude-blocking-1',
             requestId: 'request-1',
+            requestKind: 'question',
+            decisionMode: 'blocking',
             status: 'resolved'
           })
         ])

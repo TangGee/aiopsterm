@@ -533,10 +533,12 @@ describe('external Codex MCP bridge runtime', () => {
               title: 'Codex · api-service',
               summary: 'approve npm test',
               needsInput: true,
+              requestKind: 'permission',
+              decisionMode: 'local',
               panelId: 'panel-1',
               terminalSessionId: 'terminal-1',
               eventCount: 1,
-              events: [expect.objectContaining({ event: 'permission_request', summary: 'approve npm test' })]
+              events: [expect.objectContaining({ event: 'permission_request', summary: 'approve npm test', requestKind: 'permission', decisionMode: 'local' })]
             })
           ]
         })
@@ -628,7 +630,9 @@ describe('external Codex MCP bridge runtime', () => {
               source: 'codex',
               payload: expect.objectContaining({
                 sessionId: 'codex-event-cursor-1',
-                state: 'needsInput'
+                state: 'needsInput',
+                requestKind: 'permission',
+                decisionMode: 'local'
               })
             }),
             expect.objectContaining({
@@ -690,6 +694,8 @@ describe('external Codex MCP bridge runtime', () => {
               sessionId: 'codex-notification-mcp-1',
               read: false,
               needsInput: true,
+              requestKind: 'question',
+              decisionMode: 'local',
               panelId: 'panel-notification-mcp',
               terminalSessionId: 'terminal-notification-mcp'
             })

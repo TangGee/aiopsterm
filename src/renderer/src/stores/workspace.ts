@@ -4123,6 +4123,10 @@ const isManagedAiSessionState = (value: unknown): value is ManagedAiSessionState
 
 const isManagedAiSessionLifecycle = (value: unknown) => value === 'idle' || value === 'running' || value === 'needsInput' || value === 'ended' || value === 'unknown'
 
+const isManagedAiRequestKind = (value: unknown) => value === 'permission' || value === 'question' || value === 'plan' || value === 'notification' || value === 'telemetry'
+
+const isManagedAiDecisionMode = (value: unknown) => value === 'blocking' || value === 'telemetry' || value === 'local'
+
 const isManagedAiSessionTimelineEvent = (value: unknown): value is ManagedAiSessionTimelineEvent =>
   isRecord(value) &&
   isNonEmptyString(value.id) &&
@@ -4132,6 +4136,10 @@ const isManagedAiSessionTimelineEvent = (value: unknown): value is ManagedAiSess
   isNonEmptyString(value.title) &&
   typeof value.summary === 'string' &&
   typeof value.receivedAt === 'number' &&
+  isOptionalField(value, 'requestKind', isManagedAiRequestKind) &&
+  isOptionalField(value, 'decisionMode', isManagedAiDecisionMode) &&
+  isOptionalField(value, 'waitTimeoutMs', isPositiveInteger) &&
+  isOptionalField(value, 'toolName', isNonEmptyText) &&
   isOptionalField(value, 'launchCommand', isNonEmptyText) &&
   isOptionalField(value, 'resumeCommand', isNonEmptyText) &&
   isOptionalField(value, 'processId', isPositiveInteger) &&
@@ -4153,9 +4161,13 @@ const isManagedAiSessionRecord = (value: unknown): value is ManagedAiSessionReco
   typeof value.summary === 'string' &&
   isManagedAiSessionState(value.state) &&
   isAiAgentSessionEventName(value.lastEvent) &&
+  isOptionalField(value, 'requestKind', isManagedAiRequestKind) &&
+  isOptionalField(value, 'decisionMode', isManagedAiDecisionMode) &&
   typeof value.lastActivityAt === 'number' &&
   typeof value.createdAt === 'number' &&
   typeof value.updatedAt === 'number' &&
+  isOptionalField(value, 'waitTimeoutMs', isPositiveInteger) &&
+  isOptionalField(value, 'toolName', isNonEmptyText) &&
   isOptionalField(value, 'launchCommand', isNonEmptyText) &&
   isOptionalField(value, 'resumeCommand', isNonEmptyText) &&
   isOptionalField(value, 'processId', isPositiveInteger) &&
@@ -8456,6 +8468,27 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return previous
   }
 
+  const managedAiRequestKindForEvent = (event: AiAgentSessionEvent): ManagedAiSession['requestKind'] => {
+    if (event.requestKind) return event.requestKind
+    if (event.event === 'permission_request') return 'permission'
+    if (event.event === 'question') return 'question'
+    if (event.event === 'notification') return 'notification'
+    return 'telemetry'
+  }
+
+  const managedAiDecisionModeForEvent = (event: AiAgentSessionEvent): ManagedAiSession['decisionMode'] => {
+    if (event.decisionMode) return event.decisionMode
+    if (event.actionable === true) return 'local'
+    return managedAiRequestKindForEvent(event) === 'telemetry' ? 'telemetry' : 'local'
+  }
+
+  const managedAiAttentionKindForSession = (session: Pick<ManagedAiSession, 'requestKind' | 'lastEvent'>): AiAttentionKind => {
+    if (session.requestKind === 'plan') return 'plan'
+    if (session.requestKind === 'permission' || session.lastEvent === 'permission_request') return 'approval'
+    if (session.requestKind === 'notification') return 'done'
+    return 'question'
+  }
+
   const sortedManagedAiSessions = computed(() => [...managedAiSessions.value].sort((first, second) => second.lastActivityAt - first.lastActivityAt))
   const managedAiNeedsInputSessions = computed(() => sortedManagedAiSessions.value.filter((session) => session.state === 'needsInput'))
   const selectedManagedAiSession = computed(() => sortedManagedAiSessions.value.find((session) => managedAiSessionKey(session) === selectedManagedAiSessionKey.value) || null)
@@ -8477,7 +8510,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         upsertAiAttentionItem({
           id,
           source: session.source,
-          kind: session.lastEvent === 'permission_request' ? 'approval' : 'question',
+          kind: managedAiAttentionKindForSession(session),
           title: session.title,
           summary: session.summary,
           sessionId: session.id,
@@ -8494,7 +8527,17 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const applyManagedAiSessionSnapshot = (snapshot: ManagedAiSessionSnapshot) => {
     managedAiSessions.value = snapshot.sessions.map((session) => ({
       ...session,
-      events: session.events.map((event) => ({ ...event, raw: event.raw ? { ...event.raw } : undefined })),
+      requestKind: session.requestKind || (session.lastEvent === 'permission_request' ? 'permission' : session.lastEvent === 'question' ? 'question' : session.lastEvent === 'notification' ? 'notification' : 'telemetry'),
+      decisionMode: session.decisionMode || (session.actionable === true ? 'local' : 'telemetry'),
+      events: session.events.map((event) => {
+        const requestKind = event.requestKind || (event.event === 'permission_request' ? 'permission' : event.event === 'question' ? 'question' : event.event === 'notification' ? 'notification' : 'telemetry')
+        return {
+          ...event,
+          requestKind,
+          decisionMode: event.decisionMode || (event.actionable === true ? 'local' : requestKind === 'telemetry' ? 'telemetry' : 'local'),
+          raw: event.raw ? { ...event.raw } : undefined
+        }
+      }),
       decisions: session.decisions.map((decision) => ({ ...decision }))
     }))
     managedAiSessionsError.value = ''
@@ -8544,8 +8587,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const upsertManagedAiSession = (event: AiAgentSessionEvent) => {
     const existing = managedAiSessions.value.find((session) => session.source === event.source && session.id === event.sessionId)
     const now = Date.now()
+    const requestKind = managedAiRequestKindForEvent(event)
+    const decisionMode = event.decisionMode || (event.actionable === true ? 'local' : requestKind === 'telemetry' ? 'telemetry' : 'local')
     const timelineEvent: ManagedAiSessionTimelineEvent = {
       ...event,
+      requestKind,
+      decisionMode,
       id: `${event.receivedAt}-${event.event}`
     }
     const next: ManagedAiSession = {
@@ -8568,6 +8615,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       ...(event.cwd || existing?.cwd ? { cwd: event.cwd || existing?.cwd } : {}),
       ...(event.transcriptPath || existing?.transcriptPath ? { transcriptPath: event.transcriptPath || existing?.transcriptPath } : {}),
       ...(event.requestId && event.actionable ? { pendingRequestId: event.requestId } : {}),
+      requestKind,
+      decisionMode,
+      ...(event.waitTimeoutMs || existing?.waitTimeoutMs ? { waitTimeoutMs: event.waitTimeoutMs || existing?.waitTimeoutMs } : {}),
+      ...(event.toolName || existing?.toolName ? { toolName: event.toolName || existing?.toolName } : {}),
       ...(typeof event.actionable === 'boolean' ? { actionable: event.actionable } : existing?.actionable ? { actionable: existing.actionable } : {}),
       ...(event.launchCommand || existing?.launchCommand ? { launchCommand: event.launchCommand || existing?.launchCommand } : {}),
       ...(event.resumeCommand || existing?.resumeCommand ? { resumeCommand: event.resumeCommand || existing?.resumeCommand } : {}),
