@@ -314,6 +314,28 @@ describe('aiopsterm-control CLI', () => {
     const seen: Record<string, unknown>[] = []
     const socketPath = await startControlServer((request) => {
       seen.push(request)
+      if (request.method === 'agent.vault.identify') {
+        return {
+          id: request.id,
+          ok: true,
+          data: {
+            matches: [
+              {
+                agent: {
+                  id: 'my-agent',
+                  name: 'My Agent',
+                  resumeCommand: 'my-agent --session {{sessionId}}'
+                },
+                matched: true,
+                sessionId: 'session-1',
+                canResume: true,
+                canFork: false,
+                resumeCommand: 'my-agent --session session-1'
+              }
+            ]
+          }
+        }
+      }
       return {
         id: request.id,
         ok: true,
@@ -321,6 +343,8 @@ describe('aiopsterm-control CLI', () => {
           agent: {
             id: 'my-agent',
             name: 'My Agent',
+            detect: { processName: 'my-agent', argvContains: ['--session'] },
+            sessionIdSource: { type: 'argvOption', argvOption: '--session' },
             launchCommand: 'my-agent --index {{index}} {{prompt}}',
             resumeCommand: 'my-agent --session {{sessionId}}'
           },
@@ -328,6 +352,8 @@ describe('aiopsterm-control CLI', () => {
             {
               id: 'my-agent',
               name: 'My Agent',
+              detect: { processName: 'my-agent', argvContains: ['--session'] },
+              sessionIdSource: { type: 'argvOption', argvOption: '--session' },
               launchCommand: 'my-agent --index {{index}} {{prompt}}',
               resumeCommand: 'my-agent --session {{sessionId}}'
             }
@@ -350,6 +376,12 @@ describe('aiopsterm-control CLI', () => {
         'my-agent',
         '--name',
         'My Agent',
+        '--process-name',
+        'my-agent',
+        '--argv-contains',
+        '--session',
+        '--session-option',
+        '--session',
         '--launch-command',
         'my-agent --index {{index}} {{prompt}}',
         '--resume-command',
@@ -362,6 +394,27 @@ describe('aiopsterm-control CLI', () => {
     await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'agent', 'vault', 'render', '--id', 'my-agent', '--kind', 'resume', '--session', 'session-1'], {
       cwd: process.cwd()
     })
+    const identify = await execFileAsync(
+      process.execPath,
+      [
+        'resources/aiopsterm-control.js',
+        '--socket',
+        socketPath,
+        'agent',
+        'vault',
+        'identify',
+        '--process-name',
+        'my-agent',
+        '--argv',
+        '/usr/local/bin/my-agent',
+        '--argv',
+        '--session',
+        '--argv',
+        'session-1'
+      ],
+      { cwd: process.cwd() }
+    )
+    expect(identify.stdout).toContain('agent-match\tmy-agent\tMy Agent\tsession-1\tresume')
     await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'agent', 'vault', 'remove', '--id', 'my-agent'], { cwd: process.cwd() })
 
     expect(seen).toEqual([
@@ -370,6 +423,12 @@ describe('aiopsterm-control CLI', () => {
         params: expect.objectContaining({
           id: 'my-agent',
           name: 'My Agent',
+          processName: 'my-agent',
+          process_name: 'my-agent',
+          argvContains: ['--session'],
+          argv_contains: ['--session'],
+          sessionIdSource: { type: 'argvOption', argvOption: '--session' },
+          session_id_source: { type: 'argvOption', argvOption: '--session' },
           launchCommand: 'my-agent --index {{index}} {{prompt}}',
           launch_command: 'my-agent --index {{index}} {{prompt}}',
           resumeCommand: 'my-agent --session {{sessionId}}',
@@ -378,6 +437,15 @@ describe('aiopsterm-control CLI', () => {
       }),
       expect.objectContaining({ method: 'agent.vault.list' }),
       expect.objectContaining({ method: 'agent.vault.render', params: expect.objectContaining({ id: 'my-agent', kind: 'resume', sessionId: 'session-1' }) }),
+      expect.objectContaining({
+        method: 'agent.vault.identify',
+        params: expect.objectContaining({
+          process: expect.objectContaining({
+            processName: 'my-agent',
+            argv: ['/usr/local/bin/my-agent', '--session', 'session-1']
+          })
+        })
+      }),
       expect.objectContaining({ method: 'agent.vault.remove', params: expect.objectContaining({ id: 'my-agent' }) })
     ])
   })

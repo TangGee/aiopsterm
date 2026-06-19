@@ -19,7 +19,7 @@ Commands:
   surface resume set|show|get|clear|run [--panel <id>|--session <id>] [--shell <command>] [--kind <kind>] [--checkpoint <id>]
   agent-hibernation on|off|status|preview|sweep [--no-confirm]
   agent hibernate|resume --session <id> [--source <source>]
-  agent vault register|list|get|remove|render
+  agent vault register|list|get|remove|render|identify
   agent team launch [--source codex|claude-code|custom] [--count <n>] [--cwd <path>] [--prompt <text>] [--command <shell>]
   events [--after <seq>] [--cursor-file <path>] [--name <event>] [--category <category>] [--limit <n>] [--no-ack] [--no-heartbeat]
   tree
@@ -183,6 +183,17 @@ const agentVaultMethodParams = (subcommand) => {
     const launchCommand = readOption('--launch-command') || readOption('--launch') || readOption('--command') || readOption('--shell')
     const resumeCommand = readOption('--resume-command') || readOption('--resume')
     const forkCommand = readOption('--fork-command') || readOption('--fork')
+    const processName = readOption('--process-name')
+    const argvContains = readRepeatOptions(['--argv-contains'])
+    const commandContains = readRepeatOptions(['--command-contains'])
+    const executableContains = readOption('--executable-contains')
+    const sessionOption = readOption('--session-option')
+    const sessionEnv = readOption('--session-env')
+    const sessionSource = sessionOption
+      ? { type: 'argvOption', argvOption: sessionOption }
+      : sessionEnv
+        ? { type: 'env', envVar: sessionEnv }
+        : undefined
     return {
       method: 'agent.vault.register',
       params: {
@@ -190,6 +201,25 @@ const agentVaultMethodParams = (subcommand) => {
         name: readOption('--name') || id,
         description: readOption('--description'),
         executable: readOption('--executable'),
+        detect:
+          processName || argvContains.length || commandContains.length || executableContains
+            ? {
+                processName,
+                argvContains,
+                commandContains,
+                executableContains
+              }
+            : undefined,
+        processName,
+        process_name: processName,
+        argvContains,
+        argv_contains: argvContains,
+        commandContains,
+        command_contains: commandContains,
+        executableContains,
+        executable_contains: executableContains,
+        sessionIdSource: sessionSource,
+        session_id_source: sessionSource,
         launchCommand,
         launch_command: launchCommand,
         resumeCommand,
@@ -197,6 +227,7 @@ const agentVaultMethodParams = (subcommand) => {
         forkCommand,
         fork_command: forkCommand,
         sessionDirectory: readOption('--session-directory') || readOption('--session-dir'),
+        cwd: readOption('--cwd-mode') || readOption('--cwd'),
         icon: readOption('--icon')
       }
     }
@@ -225,6 +256,36 @@ const agentVaultMethodParams = (subcommand) => {
         sessionId: readOption('--session') || readOption('--session-id'),
         sessionPath: readOption('--session-path'),
         sessionDir: readOption('--session-dir')
+      }
+    }
+  }
+  if (subcommand === 'identify' || subcommand === 'detect') {
+    const id = readOption('--id') || readOption('--agent') || readOption('--source')
+    const argvOptionValues = readRepeatOptions(['--argv'])
+    const argvText = readOption('--argv-line') || readOption('--command-line')
+    const envValues = readRepeatOptions(['--env'])
+    const env = {}
+    for (const item of envValues) {
+      const index = item.indexOf('=')
+      if (index > 0) env[item.slice(0, index)] = item.slice(index + 1)
+    }
+    return {
+      method: 'agent.vault.identify',
+      params: {
+        id,
+        process: {
+          pid: Number(readOption('--pid') || 0) || undefined,
+          ppid: Number(readOption('--ppid') || 0) || undefined,
+          pgid: Number(readOption('--pgid') || 0) || undefined,
+          processName: readOption('--process-name'),
+          executable: readOption('--executable'),
+          argv: argvOptionValues.length ? argvOptionValues : undefined,
+          commandLine: argvText,
+          cwd: readOption('--cwd'),
+          env,
+          sessionId: readOption('--session') || readOption('--session-id'),
+          sessionPath: readOption('--session-path')
+        }
       }
     }
   }
@@ -522,6 +583,27 @@ const printResponse = (response) => {
           ].join('\t') + '\n'
         )
       }
+    }
+    return
+  }
+  if (Array.isArray(data.matches)) {
+    if (data.matches.length === 0) {
+      process.stdout.write('No agent vault matches\n')
+      return
+    }
+    for (const match of data.matches) {
+      const agent = match.agent || {}
+      process.stdout.write(
+        [
+          'agent-match',
+          agent.id || '-',
+          agent.name || '-',
+          match.sessionId || '-',
+          match.canResume ? 'resume' : '-',
+          match.canFork ? 'fork' : '-'
+        ].join('\t') + '\n'
+      )
+      if (match.resumeCommand) process.stdout.write(`${match.resumeCommand}\n`)
     }
     return
   }

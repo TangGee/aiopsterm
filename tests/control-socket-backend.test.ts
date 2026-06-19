@@ -506,9 +506,15 @@ describe('control socket backend', () => {
           id: 'my-agent',
           name: 'My Agent',
           executable: 'my-agent',
+          detect: {
+            processName: 'my-agent',
+            argvContains: ['--session']
+          },
+          sessionIdSource: { type: 'argvOption', argvOption: '--session' },
           launchCommand: 'my-agent --cwd {{cwd}} --role {{role}} --index {{index}} {{prompt}}',
           resumeCommand: 'my-agent --session {{sessionId}}',
-          forkCommand: 'my-agent --session {{sessionId}} --fork'
+          forkCommand: 'my-agent --session {{sessionId}} --fork',
+          cwd: 'preserve'
         }
       })
       expect(registered).toEqual(
@@ -527,6 +533,44 @@ describe('control socket backend', () => {
           params: { id: 'my-agent', kind: 'resume', sessionId: 'session-1' }
         })
       ).resolves.toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ command: 'my-agent --session session-1' }) }))
+      await expect(
+        backend.__testing.handleControlRequest({
+          method: 'agent.vault.identify',
+          params: {
+            process: {
+              pid: 4242,
+              processName: 'my-agent',
+              executable: '/usr/local/bin/my-agent',
+              argv: ['/usr/local/bin/my-agent', '--session', 'session-42'],
+              cwd: '/work/project'
+            }
+          }
+        })
+      ).resolves.toEqual(
+        expect.objectContaining({
+          ok: true,
+          data: expect.objectContaining({
+            matched: true,
+            count: 1,
+            matches: [
+              expect.objectContaining({
+                sessionId: 'session-42',
+                cwd: '/work/project',
+                canResume: true,
+                canFork: true,
+                resumeCommand: 'my-agent --session session-42',
+                forkCommand: 'my-agent --session session-42 --fork',
+                agent: expect.objectContaining({
+                  id: 'my-agent',
+                  detect: expect.objectContaining({ processName: 'my-agent', argvContains: ['--session'] }),
+                  sessionIdSource: { type: 'argvOption', argvOption: '--session' }
+                }),
+                process: expect.objectContaining({ pid: 4242, processName: 'my-agent' })
+              })
+            ]
+          })
+        })
+      )
 
       backend.registerControlSocketIpc({
         handle: (_channel, handler) => {

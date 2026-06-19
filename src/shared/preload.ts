@@ -269,6 +269,64 @@ export type ControlNotificationRecord = {
   source?: string
 }
 
+export type ControlAgentVaultDetectRule = {
+  processName?: string
+  argvContains?: string[]
+  executableContains?: string
+  commandContains?: string[]
+}
+
+export type ControlAgentVaultSessionIdSource =
+  | { type: 'provided' }
+  | { type: 'argvOption'; argvOption: string }
+  | { type: 'env'; envVar: string }
+  | { type: 'fixed'; value: string }
+  | { type: 'piSessionFile' }
+
+export type ControlAgentVaultEntry = {
+  id: string
+  name: string
+  description?: string
+  executable?: string
+  detect?: ControlAgentVaultDetectRule
+  sessionIdSource?: ControlAgentVaultSessionIdSource
+  launchCommand?: string
+  resumeCommand?: string
+  forkCommand?: string
+  sessionDirectory?: string
+  cwd?: 'preserve' | 'ignore'
+  icon?: string
+  createdAt: number
+  updatedAt: number
+}
+
+export type ControlAgentVaultProcessSnapshot = {
+  pid?: number
+  ppid?: number
+  pgid?: number
+  processName?: string
+  executable?: string
+  argv: string[]
+  commandLine?: string
+  cwd?: string
+  env?: Record<string, string>
+  sessionId?: string
+  sessionPath?: string
+}
+
+export type ControlAgentVaultIdentifyMatch = {
+  agent: ControlAgentVaultEntry
+  matched: true
+  sessionId: string
+  sessionPath?: string
+  cwd?: string
+  process: Pick<ControlAgentVaultProcessSnapshot, 'pid' | 'ppid' | 'pgid' | 'processName' | 'executable' | 'argv'>
+  canResume: boolean
+  canFork: boolean
+  resumeCommand?: string
+  forkCommand?: string
+}
+
 export type ControlAiAttentionSummary = {
   id: string
   source: string

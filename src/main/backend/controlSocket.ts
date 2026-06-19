@@ -1,7 +1,7 @@
 import { createServer, type Server, type Socket } from 'net'
 import { randomUUID } from 'crypto'
 import { appendFileSync, existsSync, rmSync } from 'fs'
-import { dirname, join } from 'path'
+import { basename, dirname, join } from 'path'
 import { mkdir, readFile, writeFile } from 'fs/promises'
 import type { BrowserWindow, IpcMain } from 'electron'
 import { sendWindowEvent } from '@shared/windowEvents'
@@ -61,13 +61,44 @@ type AgentVaultEntry = {
   name: string
   description?: string
   executable?: string
+  detect?: AgentVaultDetectRule
+  sessionIdSource?: AgentVaultSessionIdSource
   launchCommand?: string
   resumeCommand?: string
   forkCommand?: string
   sessionDirectory?: string
+  cwd?: 'preserve' | 'ignore'
   icon?: string
   createdAt: number
   updatedAt: number
+}
+
+type AgentVaultDetectRule = {
+  processName?: string
+  argvContains?: string[]
+  executableContains?: string
+  commandContains?: string[]
+}
+
+type AgentVaultSessionIdSource =
+  | { type: 'provided' }
+  | { type: 'argvOption'; argvOption: string }
+  | { type: 'env'; envVar: string }
+  | { type: 'fixed'; value: string }
+  | { type: 'piSessionFile' }
+
+type AgentVaultProcessSnapshot = {
+  pid?: number
+  ppid?: number
+  pgid?: number
+  processName?: string
+  executable?: string
+  argv: string[]
+  commandLine?: string
+  cwd?: string
+  env?: Record<string, string>
+  sessionId?: string
+  sessionPath?: string
 }
 
 type SessionSnapshotStore = {
@@ -319,7 +350,67 @@ const cleanAgentVaultCommand = (value: unknown) => {
   return text && text.length <= maxAgentVaultCommandLength ? text : ''
 }
 
-const cloneAgentVaultEntry = (entry: AgentVaultEntry): AgentVaultEntry => ({ ...entry })
+const cleanAgentVaultTextList = (value: unknown): string[] => {
+  if (Array.isArray(value)) return value.map(cleanText).filter(Boolean).slice(0, 20)
+  const text = cleanText(value)
+  if (!text) return []
+  return text
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .slice(0, 20)
+}
+
+const nestedRecord = (value: unknown) => (value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null)
+
+const normalizeAgentVaultDetectRule = (value: unknown, existing?: AgentVaultDetectRule): AgentVaultDetectRule | undefined => {
+  const record = nestedRecord(value)
+  const processName = cleanText(record?.processName || record?.process_name || record?.name || existing?.processName)
+  const executableContains = cleanText(record?.executableContains || record?.executable_contains || existing?.executableContains)
+  const argvContains = cleanAgentVaultTextList(record?.argvContains || record?.argv_contains)
+  const commandContains = cleanAgentVaultTextList(record?.commandContains || record?.command_contains)
+  const mergedArgvContains = argvContains.length ? argvContains : existing?.argvContains || []
+  const mergedCommandContains = commandContains.length ? commandContains : existing?.commandContains || []
+  const rule: AgentVaultDetectRule = {
+    ...(processName ? { processName } : {}),
+    ...(mergedArgvContains.length ? { argvContains: mergedArgvContains } : {}),
+    ...(executableContains ? { executableContains } : {}),
+    ...(mergedCommandContains.length ? { commandContains: mergedCommandContains } : {})
+  }
+  return Object.keys(rule).length ? rule : undefined
+}
+
+const normalizeAgentVaultSessionIdSource = (value: unknown, existing?: AgentVaultSessionIdSource): AgentVaultSessionIdSource | undefined => {
+  const record = nestedRecord(value)
+  const rawType = cleanText(record?.type || value || existing?.type)
+    .toLowerCase()
+    .replace(/[\s_-]+/g, '')
+  if (!rawType) return existing
+  if (rawType === 'provided') return { type: 'provided' }
+  if (rawType === 'argvoption' || rawType === 'argv') {
+    const argvOption = cleanText(record?.argvOption || record?.argv_option || record?.option || (existing?.type === 'argvOption' ? existing.argvOption : ''))
+    return argvOption ? { type: 'argvOption', argvOption } : existing
+  }
+  if (rawType === 'env' || rawType === 'environment') {
+    const envVar = cleanText(record?.envVar || record?.env_var || record?.name || (existing?.type === 'env' ? existing.envVar : ''))
+    return envVar ? { type: 'env', envVar } : existing
+  }
+  if (rawType === 'fixed' || rawType === 'constant') {
+    const fixed = cleanText(record?.value || record?.sessionId || record?.session_id || (existing?.type === 'fixed' ? existing.value : ''))
+    return fixed ? { type: 'fixed', value: fixed } : existing
+  }
+  if (rawType === 'pisessionfile') return { type: 'piSessionFile' }
+  return existing
+}
+
+const normalizeAgentVaultCwdMode = (value: unknown, existing?: AgentVaultEntry['cwd']) => {
+  const text = cleanText(value).toLowerCase()
+  if (text === 'preserve' || text === 'keep') return 'preserve'
+  if (text === 'ignore' || text === 'none') return 'ignore'
+  return existing
+}
+
+const cloneAgentVaultEntry = (entry: AgentVaultEntry): AgentVaultEntry => JSON.parse(JSON.stringify(entry)) as AgentVaultEntry
 
 const sortedAgentVaultEntries = () => [...agentVaultEntries.values()].sort((left, right) => left.id.localeCompare(right.id)).map(cloneAgentVaultEntry)
 
@@ -478,6 +569,22 @@ const normalizeAgentVaultEntry = (value: unknown, existing?: AgentVaultEntry): A
   const launchCommand = cleanAgentVaultCommand(record.launchCommand || record.launch_command || record.launch || record.command) || existing?.launchCommand
   const resumeCommand = cleanAgentVaultCommand(record.resumeCommand || record.resume_command || record.resume) || existing?.resumeCommand
   const forkCommand = cleanAgentVaultCommand(record.forkCommand || record.fork_command || record.fork) || existing?.forkCommand
+  const flatDetect = {
+    processName: record.processName || record.process_name,
+    argvContains: record.argvContains || record.argv_contains,
+    executableContains: record.executableContains || record.executable_contains,
+    commandContains: record.commandContains || record.command_contains
+  }
+  const detect = normalizeAgentVaultDetectRule(record.detect || flatDetect, existing?.detect)
+  const flatSessionSource = record.sessionIdSource || record.session_id_source
+    ? record.sessionIdSource || record.session_id_source
+    : record.argvOption || record.argv_option
+      ? { type: 'argvOption', argvOption: record.argvOption || record.argv_option }
+      : record.envVar || record.env_var
+        ? { type: 'env', envVar: record.envVar || record.env_var }
+        : undefined
+  const sessionIdSource = normalizeAgentVaultSessionIdSource(flatSessionSource, existing?.sessionIdSource)
+  const cwd = normalizeAgentVaultCwdMode(record.cwd || record.cwdMode || record.cwd_mode, existing?.cwd)
   if (!launchCommand && !resumeCommand && !forkCommand) return null
   const now = Date.now()
   return {
@@ -485,12 +592,15 @@ const normalizeAgentVaultEntry = (value: unknown, existing?: AgentVaultEntry): A
     name,
     ...(cleanText(record.description) || existing?.description ? { description: cleanText(record.description) || existing?.description } : {}),
     ...(cleanText(record.executable) || existing?.executable ? { executable: cleanText(record.executable) || existing?.executable } : {}),
+    ...(detect ? { detect } : {}),
+    ...(sessionIdSource ? { sessionIdSource } : {}),
     ...(launchCommand ? { launchCommand } : {}),
     ...(resumeCommand ? { resumeCommand } : {}),
     ...(forkCommand ? { forkCommand } : {}),
     ...(cleanText(record.sessionDirectory || record.session_directory || record.sessionDir) || existing?.sessionDirectory
       ? { sessionDirectory: cleanText(record.sessionDirectory || record.session_directory || record.sessionDir) || existing?.sessionDirectory }
       : {}),
+    ...(cwd ? { cwd } : {}),
     ...(cleanText(record.icon || record.iconAssetName) || existing?.icon ? { icon: cleanText(record.icon || record.iconAssetName) || existing?.icon } : {}),
     createdAt: existing?.createdAt || now,
     updatedAt: now
@@ -592,6 +702,178 @@ const renderAgentVaultTemplate = (entry: AgentVaultEntry, template: string, para
   })
 }
 
+const cleanPositiveInteger = (value: unknown) => {
+  const numberValue = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN
+  if (!Number.isFinite(numberValue)) return undefined
+  const normalized = Math.floor(numberValue)
+  return normalized > 0 ? normalized : undefined
+}
+
+const splitCommandLine = (value: string) => {
+  const tokens: string[] = []
+  let current = ''
+  let quote: '"' | "'" | '' = ''
+  let escaped = false
+  for (const char of value.trim()) {
+    if (escaped) {
+      current += char
+      escaped = false
+      continue
+    }
+    if (char === '\\' && quote !== "'") {
+      escaped = true
+      continue
+    }
+    if ((char === '"' || char === "'") && (!quote || quote === char)) {
+      quote = quote ? '' : char
+      continue
+    }
+    if (!quote && /\s/.test(char)) {
+      if (current) tokens.push(current)
+      current = ''
+      continue
+    }
+    current += char
+  }
+  if (current) tokens.push(current)
+  return tokens
+}
+
+const normalizeAgentVaultProcessSnapshot = (value: unknown): AgentVaultProcessSnapshot | null => {
+  const record = nestedRecord(value)
+  if (!record) return null
+  const commandLine = cleanText(record.commandLine || record.command_line || record.command)
+  const argv = Array.isArray(record.argv)
+    ? record.argv.map(cleanText).filter(Boolean).slice(0, 200)
+    : Array.isArray(record.args)
+      ? record.args.map(cleanText).filter(Boolean).slice(0, 200)
+      : commandLine
+        ? splitCommandLine(commandLine).slice(0, 200)
+        : []
+  const envRecord = nestedRecord(record.env || record.environment)
+  const env = envRecord
+    ? Object.fromEntries(
+        Object.entries(envRecord)
+          .map(([key, val]) => [cleanText(key), cleanText(val)] as const)
+          .filter(([key, val]) => key && val)
+          .slice(0, 200)
+      )
+    : undefined
+  const executable = cleanText(record.executable || record.exe || record.path || argv[0])
+  const processName = cleanText(record.processName || record.process_name || record.name || (executable ? basename(executable) : ''))
+  return {
+    ...(cleanPositiveInteger(record.pid || record.processId || record.process_id) ? { pid: cleanPositiveInteger(record.pid || record.processId || record.process_id) } : {}),
+    ...(cleanPositiveInteger(record.ppid || record.parentProcessId || record.parent_process_id) ? { ppid: cleanPositiveInteger(record.ppid || record.parentProcessId || record.parent_process_id) } : {}),
+    ...(cleanPositiveInteger(record.pgid || record.processGroupId || record.process_group_id) ? { pgid: cleanPositiveInteger(record.pgid || record.processGroupId || record.process_group_id) } : {}),
+    ...(processName ? { processName } : {}),
+    ...(executable ? { executable } : {}),
+    argv,
+    ...(commandLine ? { commandLine } : argv.length ? { commandLine: argv.join(' ') } : {}),
+    ...(cleanText(record.cwd || record.workingDirectory || record.working_directory) ? { cwd: cleanText(record.cwd || record.workingDirectory || record.working_directory) } : {}),
+    ...(env ? { env } : {}),
+    ...(cleanText(record.sessionId || record.session_id) ? { sessionId: cleanText(record.sessionId || record.session_id) } : {}),
+    ...(cleanText(record.sessionPath || record.session_path) ? { sessionPath: cleanText(record.sessionPath || record.session_path) } : {})
+  }
+}
+
+const normalizedProcessName = (value?: string) => basename(cleanText(value)).toLowerCase()
+
+const agentVaultProcessNameMatches = (candidate: string, expected: string) => {
+  const left = normalizedProcessName(candidate)
+  const right = normalizedProcessName(expected)
+  return Boolean(left && right && (left === right || left.replace(/\.(exe|cmd|bat)$/i, '') === right.replace(/\.(exe|cmd|bat)$/i, '')))
+}
+
+const agentVaultEntryMatchesProcess = (entry: AgentVaultEntry, process: AgentVaultProcessSnapshot) => {
+  const detect = entry.detect
+  const argvText = process.argv.join('\n').toLowerCase()
+  const commandText = cleanText(process.commandLine || process.argv.join(' ')).toLowerCase()
+  const executableText = cleanText(process.executable).toLowerCase()
+  if (detect) {
+    if (detect.processName && !agentVaultProcessNameMatches(process.processName || process.executable || process.argv[0] || '', detect.processName)) return false
+    if (detect.executableContains && !executableText.includes(detect.executableContains.toLowerCase())) return false
+    if (detect.argvContains?.some((needle) => !argvText.includes(needle.toLowerCase()))) return false
+    if (detect.commandContains?.some((needle) => !commandText.includes(needle.toLowerCase()))) return false
+    return true
+  }
+  const fallbackNames = [entry.executable, entry.id].map(cleanText).filter(Boolean)
+  return fallbackNames.some((name) => agentVaultProcessNameMatches(process.processName || process.executable || process.argv[0] || '', name))
+}
+
+const sessionIdFromArgvOption = (argv: string[], option: string) => {
+  const optionText = cleanText(option)
+  if (!optionText) return undefined
+  const prefix = `${optionText}=`
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index]
+    if (arg === optionText) return cleanText(argv[index + 1])
+    if (arg.startsWith(prefix)) return cleanText(arg.slice(prefix.length))
+  }
+  return undefined
+}
+
+const agentVaultSessionIdFromProcess = (entry: AgentVaultEntry, process: AgentVaultProcessSnapshot, params: Record<string, unknown>) => {
+  const explicit = cleanText(params.sessionId || params.session_id || process.sessionId)
+  const source = entry.sessionIdSource || (explicit ? { type: 'provided' as const } : undefined)
+  if (!source) return explicit
+  if (source.type === 'provided') return explicit
+  if (source.type === 'fixed') return source.value
+  if (source.type === 'env') return cleanText(process.env?.[source.envVar])
+  if (source.type === 'argvOption') return sessionIdFromArgvOption(process.argv, source.argvOption)
+  if (source.type === 'piSessionFile') return explicit || cleanText(process.sessionPath)
+  return explicit
+}
+
+const agentVaultIdentify = async (params: Record<string, unknown>) => {
+  await loadAgentVaultStore(runtime.userDataPath)
+  const process = normalizeAgentVaultProcessSnapshot(params.process || params)
+  if (!process) return fail('AGENT_VAULT_PROCESS_INVALID', 'Agent vault identify requires a process snapshot.')
+  const source = normalizeAgentVaultId(params.id || params.agent || params.source)
+  const candidates = (source ? [agentVaultEntryFor(source)].filter(Boolean) : sortedAgentVaultEntries()) as AgentVaultEntry[]
+  const matches = candidates
+    .filter((entry) => agentVaultEntryMatchesProcess(entry, process))
+    .map((entry) => {
+      const sessionId = agentVaultSessionIdFromProcess(entry, process, params)
+      const sessionPath = cleanText(params.sessionPath || params.session_path || process.sessionPath || sessionId)
+      const cwd = entry.cwd === 'ignore' ? '' : cleanText(params.cwd || process.cwd)
+      const renderParams = {
+        ...params,
+        executable: process.executable || entry.executable,
+        cwd,
+        sessionId,
+        session_id: sessionId,
+        sessionPath,
+        session_path: sessionPath,
+        sessionDir: params.sessionDir || params.sessionDirectory || params.session_directory || entry.sessionDirectory
+      }
+      return {
+        agent: cloneAgentVaultEntry(entry),
+        matched: true,
+        sessionId: sessionId || '',
+        ...(sessionPath ? { sessionPath } : {}),
+        ...(cwd ? { cwd } : {}),
+        process: {
+          ...(process.pid ? { pid: process.pid } : {}),
+          ...(process.ppid ? { ppid: process.ppid } : {}),
+          ...(process.pgid ? { pgid: process.pgid } : {}),
+          ...(process.processName ? { processName: process.processName } : {}),
+          ...(process.executable ? { executable: process.executable } : {}),
+          argv: process.argv
+        },
+        canResume: Boolean(entry.resumeCommand && sessionId),
+        canFork: Boolean(entry.forkCommand && sessionId),
+        ...(entry.resumeCommand && sessionId ? { resumeCommand: renderAgentVaultTemplate(entry, entry.resumeCommand, renderParams) } : {}),
+        ...(entry.forkCommand && sessionId ? { forkCommand: renderAgentVaultTemplate(entry, entry.forkCommand, renderParams) } : {})
+      }
+    })
+  return ok({
+    matches,
+    count: matches.length,
+    matched: matches.length > 0,
+    process
+  })
+}
+
 const handleAgentVaultControlRequest = async (method: string, params: Record<string, unknown>) => {
   await loadAgentVaultStore(runtime.userDataPath)
   const action = method.startsWith('agent-vault.') ? method.slice('agent-vault.'.length) : method.slice('agent.vault.'.length)
@@ -633,6 +915,7 @@ const handleAgentVaultControlRequest = async (method: string, params: Record<str
     if (!template) return fail('AGENT_VAULT_TEMPLATE_NOT_FOUND', `Agent vault entry has no ${kind} command template.`)
     return ok({ agent: cloneAgentVaultEntry(entry), kind, command: renderAgentVaultTemplate(entry, template, params) })
   }
+  if (action === 'identify' || action === 'detect') return agentVaultIdentify(params)
   return fail('UNKNOWN_CONTROL_METHOD', `Unknown aiopsterm agent vault method: ${method}`)
 }
 
