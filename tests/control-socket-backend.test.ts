@@ -10,6 +10,7 @@ type ControlSocketBackend = {
     getWindows?: () => Array<Record<string, unknown>>
     focusWindow?: (window?: Record<string, unknown> | null) => Record<string, unknown> | null
     writeTerminal?: (sessionId: string, data: string) => Promise<ControlResponse> | ControlResponse
+    showNotification?: (notification: Record<string, unknown>) => void
   }) => void
   ensureControlSocketServer: (userDataPath: string) => Promise<string>
   closeControlSocketServer: () => void
@@ -17,6 +18,7 @@ type ControlSocketBackend = {
   __testing: {
     handleControlRequest: (request: { method?: string; params?: Record<string, unknown> }) => Promise<ControlResponse>
     pendingRendererRequestCount: () => number
+    listNotifications: () => Array<Record<string, unknown>>
   }
 }
 
@@ -135,6 +137,56 @@ describe('control socket backend', () => {
       })
     ).resolves.toEqual({ ok: true, data: { id: 'terminal-1', bytes: 4 } })
     expect(writes).toEqual([{ sessionId: 'terminal-1', data: 'pwd\n' }])
+  })
+
+  it('creates, lists, opens, marks, dismisses, and clears generic notifications', async () => {
+    const backend = await loadBackend()
+    backend.registerControlSocketIpc({
+      handle: (_channel, handler) => {
+        mockIpcHandler = handler
+      }
+    })
+    mockWindow = createMockWindow((request) => {
+      if (request.method === 'notification.open') return { ok: true, data: { focused: true } }
+      if (request.method === 'notification.sync') return { ok: true, data: { synced: true } }
+      return { ok: true, data: {} }
+    })
+    const shown: Record<string, unknown>[] = []
+    backend.configureControlSocketRuntime({
+      getWindows: () => [mockWindow],
+      showNotification: (notification) => shown.push(notification)
+    })
+
+    const created = await backend.__testing.handleControlRequest({
+      method: 'notification.create',
+      params: { title: 'Build done', subtitle: 'tests', body: 'All green', panelId: 'panel-1', sessionId: 'terminal-1' }
+    })
+    const notification = created.data?.notification as Record<string, unknown>
+    expect(created).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ unreadCount: 1 }) }))
+    expect(notification).toEqual(expect.objectContaining({ title: 'Build done', panelId: 'panel-1', sessionId: 'terminal-1', read: false }))
+    expect(shown).toEqual([expect.objectContaining({ title: 'Build done' })])
+
+    await expect(backend.__testing.handleControlRequest({ method: 'notification.list', params: { unread: true } })).resolves.toEqual(
+      expect.objectContaining({ ok: true, data: expect.objectContaining({ count: 1, unreadCount: 1 }) })
+    )
+
+    await expect(backend.__testing.handleControlRequest({ method: 'notification.open', params: { id: String(notification.id) } })).resolves.toEqual(
+      expect.objectContaining({ ok: true, data: expect.objectContaining({ unreadCount: 0, focusRequest: expect.objectContaining({ panelId: 'panel-1' }) }) })
+    )
+    expect(mockWindow.requests.some((request) => request.method === 'notification.open')).toBe(true)
+
+    await expect(backend.__testing.handleControlRequest({ method: 'notification.dismiss', params: { id: String(notification.id) } })).resolves.toEqual(
+      expect.objectContaining({ ok: true, data: expect.objectContaining({ changed: 1, total: 0 }) })
+    )
+
+    await backend.__testing.handleControlRequest({ method: 'notification.create', params: { title: 'One' } })
+    await backend.__testing.handleControlRequest({ method: 'notification.create', params: { title: 'Two' } })
+    await expect(backend.__testing.handleControlRequest({ method: 'notification.mark_read', params: { all: true } })).resolves.toEqual(
+      expect.objectContaining({ ok: true, data: expect.objectContaining({ changed: 2, unreadCount: 0 }) })
+    )
+    await expect(backend.__testing.handleControlRequest({ method: 'notification.clear' })).resolves.toEqual(
+      expect.objectContaining({ ok: true, data: expect.objectContaining({ changed: 2, total: 0 }) })
+    )
   })
 
   it('serves newline-delimited JSON requests over the local socket', async () => {

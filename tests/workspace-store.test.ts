@@ -571,6 +571,67 @@ describe('workspace store', () => {
     expect(store.selectedManagedAiSessionKey).toBe('claude-code:claude-second')
   })
 
+  it('routes generic control notifications from the attention bell to their terminal panel', async () => {
+    const store = useWorkspaceStore()
+    store.applyLocalTerminalSession('panel-main', {
+      id: 'terminal-main',
+      kind: 'local',
+      shell: '/bin/bash',
+      cwd: '/work/main'
+    })
+    const secondPanel = store.createPanel()
+    store.applyLocalTerminalSession(secondPanel.id, {
+      id: 'terminal-second',
+      kind: 'local',
+      shell: '/bin/bash',
+      cwd: '/work/second'
+    })
+    vi.mocked(window.aiops.invokeControlRequest).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        focusRequest: {
+          notification: {
+            id: 'notification-1',
+            title: 'Build done',
+            read: true,
+            isRead: true,
+            createdAt: 100,
+            updatedAt: 200,
+            panelId: secondPanel.id,
+            sessionId: 'terminal-second'
+          },
+          panelId: secondPanel.id,
+          sessionId: 'terminal-second'
+        },
+        notifications: []
+      }
+    })
+
+    store.applyControlNotificationSnapshot([
+      {
+        id: 'notification-1',
+        title: 'Build done',
+        body: 'All green',
+        read: false,
+        isRead: false,
+        createdAt: 100,
+        updatedAt: 100,
+        panelId: secondPanel.id,
+        sessionId: 'terminal-second',
+        terminalSessionId: 'terminal-second'
+      }
+    ])
+
+    expect(store.aiAttentionUnreadCount).toBe(1)
+    expect(store.jumpToNextAiAttention()?.id).toBe('notification:notification-1')
+    await Promise.resolve()
+
+    expect(window.aiops.invokeControlRequest).toHaveBeenCalledWith('notification.open', { id: 'notification-1' })
+    expect(store.activeModule).toBe('workspace')
+    expect(store.activePanelId).toBe(secondPanel.id)
+    expect(store.aiAttentionUnreadCount).toBe(0)
+  })
+
   it('clears managed AI attention when the agent stops or terminal exits', () => {
     const store = useWorkspaceStore()
     store.applyLocalTerminalSession('panel-main', {

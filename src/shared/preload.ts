@@ -157,6 +157,30 @@ export type ControlTerminalSummary = {
   rows?: number
 }
 
+export type ControlNotificationRecord = {
+  id: string
+  title: string
+  subtitle?: string
+  body?: string
+  read: boolean
+  isRead: boolean
+  createdAt: number
+  updatedAt: number
+  readAt?: number
+  panelId?: string
+  sessionId?: string
+  terminalSessionId?: string
+  workspaceId?: string
+  source?: string
+}
+
+export type ControlNotificationFocusRequest = {
+  notification: ControlNotificationRecord
+  panelId?: string
+  sessionId?: string
+  terminalSessionId?: string
+}
+
 export type ControlRequest = {
   id: string
   method: string
@@ -3722,6 +3746,7 @@ export type AiopsPreloadApi = {
   clearManagedAiNotifications: () => Promise<ManagedAiNotificationClearResult>
   openManagedAiNotification: (input: ManagedAiNotificationOpenInput) => Promise<ManagedAiNotificationMutationResult>
   jumpToUnreadManagedAiNotification: () => Promise<ManagedAiNotificationMutationResult>
+  invokeControlRequest: (method: string, params?: Record<string, unknown>) => Promise<ControlResponse>
   respondControlRequest: (id: string, response: ControlResponse) => void
   onControlRequest: (listener: ControlRequestHandler) => () => void
   respondTerminalKeyboardInteractive: (id: string, response: string[] | TerminalKeyboardInteractiveResponse) => void

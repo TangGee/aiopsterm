@@ -223,6 +223,7 @@ import {
   configureControlSocketRuntime,
   ensureControlSocketServer,
   getControlSocketPath,
+  invokeControlSocketMethod,
   registerControlSocketIpc
 } from './backend/controlSocket'
 import {
@@ -503,6 +504,21 @@ const writeTerminalBySessionId = async (id: string, data: string) => {
     ok: true,
     data: { id, bytes }
   }
+}
+
+const showControlNotification = (notification: import('@shared/preload').ControlNotificationRecord) => {
+  if (!Notification.isSupported()) return
+  const desktop = new Notification({
+    title: notification.title,
+    body: [notification.subtitle, notification.body].filter(Boolean).join('\n') || notification.title,
+    silent: false
+  })
+  desktop.on('click', () => {
+    const target = BrowserWindow.getFocusedWindow() || mainWindow || BrowserWindow.getAllWindows()[0]
+    focusWindow(target)
+    void invokeControlSocketMethod('notification.open', { id: notification.id })
+  })
+  desktop.show()
 }
 
 type KnowledgeBaseEntry = {
@@ -1554,7 +1570,8 @@ configureLocalTerminalBackendRuntime({
 configureControlSocketRuntime({
   getWindows: () => BrowserWindow.getAllWindows(),
   focusWindow,
-  writeTerminal: writeTerminalBySessionId
+  writeTerminal: writeTerminalBySessionId,
+  showNotification: showControlNotification
 })
 configureAgentHookInstallerRuntime({
   getHomeDir: () => app.getPath('home'),

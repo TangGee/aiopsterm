@@ -138,6 +138,8 @@ import type {
   AiModelCatalog,
   AiModelCatalogOption,
   AiopsPreloadApi,
+  ControlNotificationFocusRequest,
+  ControlNotificationRecord,
   AliasCommandConfig,
   AliasCommandSaveInput,
   AiopsTrustedDevice,
@@ -265,7 +267,7 @@ type ManagedAiSessionMutationData = NonNullable<ManagedAiSessionMutationResult['
 type ManagedAiSessionBulkData = NonNullable<ManagedAiSessionBulkResult['data']>
 type TopUpdateState = 'idle' | 'checking' | 'local' | 'available' | 'install-requested'
 export type AiAttentionKind = 'approval' | 'question' | 'plan' | 'error' | 'done'
-export type AiAttentionSource = AiAgentSessionSource | 'classic-chat'
+export type AiAttentionSource = AiAgentSessionSource | 'classic-chat' | 'control-notification'
 export type AiAttentionItem = {
   id: string
   source: AiAttentionSource
@@ -277,6 +279,7 @@ export type AiAttentionItem = {
   conversationId?: string
   sessionId?: string
   surfaceId?: string
+  notificationId?: string
   handledAt?: number
 }
 export type AiAttentionInput = Omit<AiAttentionItem, 'createdAt' | 'priority'> & {
@@ -4229,6 +4232,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const topUpdateState = ref<TopUpdateState>('idle')
   const topNotice = ref('')
   const aiAttentionItems = ref<AiAttentionItem[]>([])
+  const controlNotifications = ref<ControlNotificationRecord[]>([])
   const aiAttentionFocusRequest = ref<AiAttentionFocusRequest>({ sequence: 0, item: null })
   const managedAiSessions = ref<ManagedAiSession[]>([])
   const managedAiSessionsLoading = ref(false)
@@ -8424,7 +8428,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       ...(handledAt ? { handledAt } : {}),
       ...(input.conversationId ? { conversationId: input.conversationId } : {}),
       ...(input.sessionId ? { sessionId: input.sessionId } : {}),
-      ...(input.surfaceId ? { surfaceId: input.surfaceId } : {})
+      ...(input.surfaceId ? { surfaceId: input.surfaceId } : {}),
+      ...(input.notificationId ? { notificationId: input.notificationId } : {})
     }
     aiAttentionItems.value = existing ? aiAttentionItems.value.map((item) => (item.id === input.id ? next : item)) : [next, ...aiAttentionItems.value]
     return next
@@ -8448,6 +8453,78 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   const clearAiAttentionForConversation = (conversationId: string) => {
     aiAttentionItems.value = aiAttentionItems.value.filter((item) => item.conversationId !== conversationId)
+  }
+
+  const controlNotificationAttentionId = (notification: Pick<ControlNotificationRecord, 'id'>) => `notification:${notification.id}`
+
+  const refreshControlNotificationAttentionItems = () => {
+    const notificationIds = new Set(controlNotifications.value.map(controlNotificationAttentionId))
+    aiAttentionItems.value = aiAttentionItems.value.filter((item) => !item.id.startsWith('notification:') || notificationIds.has(item.id))
+    controlNotifications.value.forEach((notification) => {
+      const id = controlNotificationAttentionId(notification)
+      if (!notification.read) {
+        upsertAiAttentionItem({
+          id,
+          source: 'control-notification',
+          kind: 'done',
+          title: notification.title,
+          summary: [notification.subtitle, notification.body].filter(Boolean).join(' · '),
+          sessionId: notification.sessionId || notification.terminalSessionId,
+          surfaceId: notification.panelId || notification.sessionId || notification.terminalSessionId,
+          notificationId: notification.id,
+          createdAt: notification.createdAt,
+          priority: 30
+        })
+      } else {
+        removeAiAttentionItem(id)
+      }
+    })
+  }
+
+  const applyControlNotificationSnapshot = (notifications: ControlNotificationRecord[] = []) => {
+    controlNotifications.value = notifications.map((notification) => ({ ...notification }))
+    refreshControlNotificationAttentionItems()
+  }
+
+  const focusControlNotification = (request: ControlNotificationFocusRequest | ControlNotificationRecord) => {
+    const notification = 'notification' in request ? request.notification : request
+    const panelId = 'panelId' in request && request.panelId ? request.panelId : notification.panelId
+    const sessionId = 'sessionId' in request && request.sessionId ? request.sessionId : notification.sessionId || notification.terminalSessionId
+    const target = panels.value.find((panel) => panel.kind !== 'knowledge' && (panel.id === panelId || panel.sessionId === sessionId))
+    if (!target) {
+      setTopNotice(`通知已打开：${notification.title}`)
+      return false
+    }
+    mode.value = 'terminal'
+    activeModule.value = 'workspace'
+    activePanelId.value = target.id
+    markAiAttentionHandled(controlNotificationAttentionId(notification))
+    setTopNotice(`已定位通知：${notification.title}`)
+    return true
+  }
+
+  const openControlNotification = async (notificationId: string) => {
+    const bridge = window.aiops?.invokeControlRequest
+    if (typeof bridge !== 'function') {
+      const notification = controlNotifications.value.find((item) => item.id === notificationId)
+      if (notification) return focusControlNotification(notification)
+      return false
+    }
+    try {
+      const result = await bridge('notification.open', { id: notificationId })
+      if (!result?.ok) {
+        setTopNotice(result?.errorMessage || '通知打开失败')
+        return false
+      }
+      const data = result.data || {}
+      if (Array.isArray(data.notifications)) applyControlNotificationSnapshot(data.notifications as ControlNotificationRecord[])
+      const focusRequest = data.focusRequest as ControlNotificationFocusRequest | undefined
+      if (focusRequest?.notification) focusControlNotification(focusRequest)
+      return true
+    } catch (error) {
+      setTopNotice(error instanceof Error ? error.message : '通知打开失败')
+      return false
+    }
   }
 
   const aiSessionAttentionId = (session: Pick<ManagedAiSession, 'source' | 'id'>) => `managed-ai:${session.source}:${session.id}`
@@ -8846,6 +8923,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (managedSession) {
       activeModule.value = 'aiSessions'
       leftPanelOpen.value = true
+    } else if (item.notificationId) {
+      void openControlNotification(item.notificationId)
     } else if (item.surfaceId === 'terminal-ai-panel') {
       mode.value = 'terminal'
       activeModule.value = 'workspace'
@@ -14803,6 +14882,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     topNotice,
     setTopNotice,
     aiAttentionItems,
+    controlNotifications,
     pendingAiAttentionItems,
     aiAttentionUnreadCount,
     currentAiAttentionItem,
@@ -14832,6 +14912,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     removeAiAttentionItem,
     markAiAttentionHandled,
     clearAiAttentionForConversation,
+    applyControlNotificationSnapshot,
+    focusControlNotification,
+    openControlNotification,
     jumpToNextAiAttention,
     onboardingCompleted,
     onboardingActiveTour,

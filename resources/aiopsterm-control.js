@@ -12,6 +12,13 @@ Commands:
   terminal focus --panel <id>|--session <id>
   terminal read-screen [--panel <id>|--session <id>] [--lines <n>]
   terminal send --session <id> --text <text>
+  notify --title <text> [--subtitle <text>] [--body <text>] [--panel <id>] [--session <id>]
+  list-notifications
+  open-notification --id <id>
+  mark-notification-read (--id <id> | --all)
+  dismiss-notification (--id <id> | --all-read)
+  jump-to-unread
+  clear-notifications
 `
 
 const readOption = (name) => {
@@ -63,6 +70,20 @@ const methodParams = () => {
     const text = readOption('--text') || args.join(' ')
     return { method: 'terminal.send_text', params: { sessionId, text } }
   }
+  if (command === 'notify') {
+    const title = readOption('--title') || 'Notification'
+    const subtitle = readOption('--subtitle')
+    const body = readOption('--body')
+    const panelId = readOption('--panel') || readOption('--surface')
+    const sessionId = readOption('--session') || readOption('--session-id')
+    return { method: 'notification.create', params: { title, subtitle, body, panelId, sessionId } }
+  }
+  if (command === 'list-notifications') return { method: 'notification.list', params: {} }
+  if (command === 'open-notification') return { method: 'notification.open', params: { id: readOption('--id') } }
+  if (command === 'jump-to-unread') return { method: 'notification.jump_to_unread', params: {} }
+  if (command === 'clear-notifications') return { method: 'notification.clear', params: {} }
+  if (command === 'mark-notification-read') return { method: 'notification.mark_read', params: { id: readOption('--id'), all: hasFlag('--all') } }
+  if (command === 'dismiss-notification') return { method: 'notification.dismiss', params: { id: readOption('--id'), allRead: hasFlag('--all-read') } }
   throw new Error(`Unknown command: ${command}`)
 }
 
@@ -89,6 +110,25 @@ const printResponse = (response) => {
   }
   if (typeof data.text === 'string') {
     process.stdout.write(`${data.text}${data.text.endsWith('\n') ? '' : '\n'}`)
+    return
+  }
+  if (Array.isArray(data.notifications)) {
+    for (const notification of data.notifications) {
+      process.stdout.write(
+        [
+          notification.read ? ' ' : '*',
+          notification.id || '-',
+          notification.panelId || notification.sessionId || '-',
+          notification.title || '',
+          notification.subtitle || '',
+          notification.body || ''
+        ].join('\t') + '\n'
+      )
+    }
+    return
+  }
+  if (data.notification) {
+    process.stdout.write(`${JSON.stringify(data.notification)}\n`)
     return
   }
   process.stdout.write(`${JSON.stringify(data)}\n`)

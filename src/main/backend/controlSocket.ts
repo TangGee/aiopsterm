@@ -5,7 +5,7 @@ import { dirname, join } from 'path'
 import { mkdir } from 'fs/promises'
 import type { BrowserWindow, IpcMain } from 'electron'
 import { sendWindowEvent } from '@shared/windowEvents'
-import type { ControlRequest, ControlResponse } from '@shared/preload'
+import type { ControlNotificationFocusRequest, ControlNotificationRecord, ControlRequest, ControlResponse } from '@shared/preload'
 
 type ControlSocketRequest = {
   id?: string
@@ -18,6 +18,7 @@ type ControlSocketRuntime = {
   getWindows?: () => BrowserWindow[]
   focusWindow?: (window?: BrowserWindow) => BrowserWindow | null
   writeTerminal?: (sessionId: string, data: string) => Promise<ControlResponse> | ControlResponse
+  showNotification?: (notification: ControlNotificationRecord) => void
 }
 
 type PendingRendererRequest = {
@@ -27,11 +28,13 @@ type PendingRendererRequest = {
 
 const defaultTimeoutMs = 5000
 const maxTimeoutMs = 30000
+const maxNotifications = 500
 
 let server: Server | null = null
 let socketPath = ''
 let runtime: ControlSocketRuntime = {}
 const pendingRendererRequests = new Map<string, PendingRendererRequest>()
+let notifications: ControlNotificationRecord[] = []
 
 const cleanText = (value: unknown) => (typeof value === 'string' ? value.trim() : '')
 
@@ -39,6 +42,12 @@ const normalizeTimeoutMs = (value: unknown) => {
   const numberValue = Number(value)
   if (!Number.isFinite(numberValue)) return defaultTimeoutMs
   return Math.max(500, Math.min(maxTimeoutMs, Math.round(numberValue)))
+}
+
+const normalizeLimit = (value: unknown, fallback = 50) => {
+  const numberValue = Number(value)
+  if (!Number.isFinite(numberValue)) return fallback
+  return Math.max(1, Math.min(200, Math.floor(numberValue)))
 }
 
 const ok = (data: Record<string, unknown> = {}): ControlResponse => ({ ok: true, data })
@@ -82,6 +91,10 @@ const dispatchRendererControlRequest = (method: string, params: Record<string, u
   })
 }
 
+const syncNotificationsToRenderer = () => {
+  void dispatchRendererControlRequest('notification.sync', notificationPayload())
+}
+
 const terminalSessionId = (params: Record<string, unknown>) => cleanText(params.sessionId || params.terminalSessionId)
 
 const terminalWriteData = (params: Record<string, unknown>) => {
@@ -99,6 +112,124 @@ const sendTerminalText = async (params: Record<string, unknown>) => {
   return runtime.writeTerminal(sessionId, text)
 }
 
+const notificationPayload = (items = notifications, params: Record<string, unknown> = {}) => {
+  const query = cleanText(params.query).toLowerCase()
+  const unreadOnly = params.unread === true && params.read !== true
+  const readOnly = params.read === true && params.unread !== true
+  const limit = normalizeLimit(params.limit)
+  const filtered = items.filter((notification) => {
+    if (unreadOnly && notification.read) return false
+    if (readOnly && !notification.read) return false
+    if (!query) return true
+    return [notification.id, notification.title, notification.subtitle || '', notification.body || '', notification.panelId || '', notification.sessionId || '', notification.source || '']
+      .join('\n')
+      .toLowerCase()
+      .includes(query)
+  })
+  return {
+    notifications: filtered.slice(0, limit),
+    count: Math.min(filtered.length, limit),
+    total: filtered.length,
+    unreadCount: notifications.filter((notification) => !notification.read).length
+  }
+}
+
+const createNotification = (params: Record<string, unknown>) => {
+  const title = cleanText(params.title) || 'Notification'
+  const subtitle = cleanText(params.subtitle)
+  const body = typeof params.body === 'string' ? params.body.trim() : ''
+  const now = Date.now()
+  const notification: ControlNotificationRecord = {
+    id: cleanText(params.id) || `notification-${now}-${Math.random().toString(16).slice(2)}`,
+    title,
+    ...(subtitle ? { subtitle } : {}),
+    ...(body ? { body } : {}),
+    read: false,
+    isRead: false,
+    createdAt: now,
+    updatedAt: now,
+    ...(cleanText(params.panelId || params.surfaceId) ? { panelId: cleanText(params.panelId || params.surfaceId) } : {}),
+    ...(cleanText(params.sessionId || params.terminalSessionId) ? { sessionId: cleanText(params.sessionId || params.terminalSessionId), terminalSessionId: cleanText(params.sessionId || params.terminalSessionId) } : {}),
+    ...(cleanText(params.workspaceId) ? { workspaceId: cleanText(params.workspaceId) } : {}),
+    ...(cleanText(params.source) ? { source: cleanText(params.source) } : {})
+  }
+  notifications = [notification, ...notifications.filter((item) => item.id !== notification.id)].slice(0, maxNotifications)
+  syncNotificationsToRenderer()
+  runtime.showNotification?.(notification)
+  return ok({ notification, ...notificationPayload() })
+}
+
+const resolveNotification = (params: Record<string, unknown>) => {
+  const id = cleanText(params.id || params.notificationId)
+  if (!id) return null
+  return notifications.find((notification) => notification.id === id) || null
+}
+
+const listNotifications = (params: Record<string, unknown>) => ok(notificationPayload(notifications, params))
+
+const markNotificationRead = (params: Record<string, unknown>) => {
+  const now = Date.now()
+  let changed = 0
+  const all = params.all === true
+  const target = all ? null : resolveNotification(params)
+  if (!all && !target) return fail('NOTIFICATION_NOT_FOUND', 'Notification was not found.')
+  notifications = notifications.map((notification) => {
+    if (!all && notification.id !== target?.id) return notification
+    if (notification.read) return notification
+    changed += 1
+    return { ...notification, read: true, isRead: true, readAt: now, updatedAt: now }
+  })
+  syncNotificationsToRenderer()
+  const notification = target ? notifications.find((item) => item.id === target.id) : undefined
+  return ok({ changed, ...(notification ? { notification } : {}), ...notificationPayload() })
+}
+
+const dismissNotification = (params: Record<string, unknown>) => {
+  const before = notifications.length
+  if (params.allRead === true || params.all_read === true) {
+    notifications = notifications.filter((notification) => !notification.read)
+    syncNotificationsToRenderer()
+    return ok({ changed: before - notifications.length, ...notificationPayload() })
+  }
+  const target = resolveNotification(params)
+  if (!target) return fail('NOTIFICATION_NOT_FOUND', 'Notification was not found.')
+  if (!target.read) return fail('NOTIFICATION_UNREAD', 'Unread notification must be marked read before dismissal.')
+  notifications = notifications.filter((notification) => notification.id !== target.id)
+  syncNotificationsToRenderer()
+  return ok({ changed: 1, notification: target, ...notificationPayload() })
+}
+
+const clearNotifications = () => {
+  const changed = notifications.length
+  notifications = []
+  syncNotificationsToRenderer()
+  return ok({ changed, ...notificationPayload() })
+}
+
+const openNotification = async (params: Record<string, unknown>) => {
+  const target = resolveNotification(params)
+  if (!target) return fail('NOTIFICATION_NOT_FOUND', 'Notification was not found.')
+  const now = Date.now()
+  notifications = notifications.map((notification) => (notification.id === target.id ? { ...notification, read: true, isRead: true, readAt: notification.readAt || now, updatedAt: now } : notification))
+  const notification = notifications.find((item) => item.id === target.id) || target
+  syncNotificationsToRenderer()
+  const focusRequest: ControlNotificationFocusRequest = {
+    notification,
+    ...(notification.panelId ? { panelId: notification.panelId } : {}),
+    ...(notification.sessionId ? { sessionId: notification.sessionId } : {}),
+    ...(notification.terminalSessionId ? { terminalSessionId: notification.terminalSessionId } : {})
+  }
+  const focusResponse = await dispatchRendererControlRequest('notification.open', focusRequest as unknown as Record<string, unknown>, { focus: true })
+  if (!focusResponse.ok) return focusResponse
+  return ok({ changed: target.read ? 0 : 1, notification, focusRequest, focus: focusResponse.data, ...notificationPayload() })
+}
+
+const jumpToUnreadNotification = async () => {
+  const notification = notifications.find((item) => !item.read)
+  if (!notification) return ok({ changed: 0, notifications, count: notifications.length, unreadCount: 0 })
+  return openNotification({ id: notification.id })
+}
+
 const handleControlRequest = async (request: ControlSocketRequest): Promise<ControlResponse> => {
   const method = cleanText(request.method)
   const params = request.params || {}
@@ -109,6 +240,13 @@ const handleControlRequest = async (request: ControlSocketRequest): Promise<Cont
   }
   if (method === 'terminal.read_screen' || method === 'read-screen') return dispatchRendererControlRequest('terminal.read_screen', params)
   if (method === 'terminal.send_text' || method === 'send' || method === 'send-panel') return sendTerminalText(params)
+  if (method === 'notification.create' || method === 'notify') return createNotification(params)
+  if (method === 'notification.list' || method === 'list-notifications') return listNotifications(params)
+  if (method === 'notification.mark_read' || method === 'mark-notification-read') return markNotificationRead(params)
+  if (method === 'notification.dismiss' || method === 'dismiss-notification') return dismissNotification(params)
+  if (method === 'notification.clear' || method === 'clear-notifications') return clearNotifications()
+  if (method === 'notification.open' || method === 'open-notification') return openNotification(params)
+  if (method === 'notification.jump_to_unread' || method === 'jump-to-unread') return jumpToUnreadNotification()
   return fail('UNKNOWN_CONTROL_METHOD', `Unknown aiopsterm control method: ${method}`)
 }
 
@@ -123,6 +261,7 @@ export const configureControlSocketRuntime = (config: ControlSocketRuntime = {})
 export const getControlSocketPath = () => socketPath
 
 export const registerControlSocketIpc = (ipcMain: IpcMain) => {
+  ipcMain.handle('control:invoke', (_event, method: string, params?: Record<string, unknown>) => handleControlRequest({ method, params }))
   ipcMain.handle('control:response', (_event, id: string, response: ControlResponse) => {
     const pending = pendingRendererRequests.get(id)
     if (!pending) return false
@@ -185,13 +324,17 @@ export const closeControlSocketServer = () => {
     pending.resolve(fail('CONTROL_SOCKET_CLOSED', 'aiopsterm control socket closed before the renderer replied.'))
   }
   pendingRendererRequests.clear()
+  notifications = []
   server?.close()
   server = null
   if (socketPath && process.platform !== 'win32' && existsSync(socketPath)) rmSync(socketPath, { force: true })
   socketPath = ''
 }
 
+export const invokeControlSocketMethod = (method: string, params?: Record<string, unknown>) => handleControlRequest({ method, params })
+
 export const __testing = {
   handleControlRequest,
+  listNotifications: () => notifications,
   pendingRendererRequestCount: () => pendingRendererRequests.size
 }

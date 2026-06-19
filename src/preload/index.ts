@@ -239,6 +239,7 @@ const api: AiopsPreloadApi = {
   clearManagedAiNotifications: () => ipcRenderer.invoke('ai-agent:notifications:clear'),
   openManagedAiNotification: (input) => ipcRenderer.invoke('ai-agent:notifications:open', input),
   jumpToUnreadManagedAiNotification: () => ipcRenderer.invoke('ai-agent:notifications:jump-unread'),
+  invokeControlRequest: (method, params) => ipcRenderer.invoke('control:invoke', method, params),
   respondControlRequest: (id, response) => ipcRenderer.invoke('control:response', id, response),
   onControlRequest: (listener) => {
     const wrapped = (_event: Electron.IpcRendererEvent, payload: Parameters<typeof listener>[0]) => {

@@ -9129,6 +9129,9 @@ Object.defineProperty(window, 'aiops', {
       return { ok: true, data: { id, taskIds, status: 'aborted' as const } }
     }),
     listFileTransferTasks: vi.fn(async () => fileTransferTasksMock.map((task) => ({ ...task, children: task.children?.map((child: any) => ({ ...child })) }))),
+    invokeControlRequest: vi.fn(async () => ({ ok: true, data: {} })),
+    respondControlRequest: vi.fn(async () => undefined),
+    onControlRequest: vi.fn(() => () => undefined),
     onTerminalData: vi.fn(() => () => undefined),
     onTerminalLifecycle: vi.fn(() => () => undefined),
     onTerminalExit: vi.fn(() => () => undefined),

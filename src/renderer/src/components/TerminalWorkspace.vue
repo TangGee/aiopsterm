@@ -475,6 +475,8 @@ import { createTerminalZmodemRuntime, type TerminalZmodemProgress } from '@/serv
 import type {
   ControlRequest,
   ControlResponse,
+  ControlNotificationFocusRequest,
+  ControlNotificationRecord,
   ControlTerminalSummary,
   RuntimeLogLevel,
   TerminalCommandSuggestion,
@@ -662,6 +664,17 @@ const handleControlRequest = async (request: ControlRequest): Promise<ControlRes
       text: terminalBufferText(view, tailLines),
       tailLines
     })
+  }
+  if (request.method === 'notification.sync') {
+    const notifications = Array.isArray(params.notifications) ? (params.notifications as ControlNotificationRecord[]) : []
+    workspace.applyControlNotificationSnapshot(notifications)
+    return controlOk({ count: notifications.length })
+  }
+  if (request.method === 'notification.open') {
+    const focusRequest = params as ControlNotificationFocusRequest
+    if (!focusRequest.notification) return controlFail('NOTIFICATION_PAYLOAD_INVALID', 'Notification focus payload is invalid.')
+    const focused = workspace.focusControlNotification(focusRequest)
+    return controlOk({ focused })
   }
   return controlFail('UNKNOWN_CONTROL_RENDERER_METHOD', `Unknown renderer control method: ${request.method}`)
 }

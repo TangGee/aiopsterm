@@ -66,4 +66,29 @@ describe('aiopsterm-control CLI', () => {
     )
     expect(seen).toEqual([expect.objectContaining({ method: 'terminal.list' })])
   })
+
+  it('sends notification requests over the configured socket', async () => {
+    const seen: Record<string, unknown>[] = []
+    const socketPath = await startControlServer((request) => {
+      seen.push(request)
+      return {
+        id: request.id,
+        ok: true,
+        data: {
+          notification: {
+            id: 'notification-1',
+            title: request.params && typeof request.params === 'object' ? (request.params as Record<string, unknown>).title : 'Notification',
+            read: false
+          },
+          notifications: []
+        }
+      }
+    })
+
+    const result = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, '--json', 'notify', '--title', 'Done', '--body', 'All green'], {
+      cwd: process.cwd()
+    })
+    expect(JSON.parse(result.stdout)).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ notification: expect.objectContaining({ title: 'Done' }) }) }))
+    expect(seen).toEqual([expect.objectContaining({ method: 'notification.create', params: expect.objectContaining({ title: 'Done', body: 'All green' }) })])
+  })
 })
