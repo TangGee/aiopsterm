@@ -237,6 +237,8 @@ const controlSocketCapabilities = [
   'auth.login',
   'auth.status',
   'auth.sign_in_url',
+  'auth.begin_sign_in',
+  'auth.sign_out',
   'settings.open',
   'feedback.open',
   'feedback.submit',
@@ -1368,6 +1370,16 @@ const authStatusPayload = () => ({
   unsupported_reason: 'aiopsterm does not use control_compat Stack Auth for the local control socket.'
 })
 
+const unsupportedAuthStatusPayload = (action: 'begin_sign_in' | 'sign_out') => ({
+  ...authStatusPayload(),
+  action,
+  completed: false,
+  unsupported_reason:
+    action === 'begin_sign_in'
+      ? 'aiopsterm does not expose a control_compat Stack Auth browser sign-in flow.'
+      : 'aiopsterm has no control_compat Stack Auth session to sign out from.'
+})
+
 const feedbackSubmitPayload = (params: Record<string, unknown>) => {
   const email = cleanText(params.email)
   const body = cleanText(params.body || params.message || params.text)
@@ -1400,6 +1412,8 @@ const handleSystemCompatibilityRequest = async (method: string, params: Record<s
       url: null
     })
   }
+  if (method === 'auth.begin_sign_in') return ok(unsupportedAuthStatusPayload('begin_sign_in'))
+  if (method === 'auth.sign_out') return ok(unsupportedAuthStatusPayload('sign_out'))
   if (method === 'feedback.submit') return feedbackSubmitPayload(params)
   if (method === 'session.restore_previous') return handleSessionControlRequest('session.restore', { ...params, id: params.id || 'latest' })
   if (method === 'system.tree') {
@@ -4127,6 +4141,8 @@ const handleControlRequest = async (request: ControlSocketRequest): Promise<Cont
     method === 'auth.login' ||
     method === 'auth.status' ||
     method === 'auth.sign_in_url' ||
+    method === 'auth.begin_sign_in' ||
+    method === 'auth.sign_out' ||
     method === 'session.restore_previous' ||
     method === 'system.tree' ||
     method === 'system.top' ||

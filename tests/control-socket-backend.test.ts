@@ -249,7 +249,18 @@ describe('control socket backend', () => {
             app: expect.objectContaining({ name: 'aiopsterm' }),
             process: expect.objectContaining({ pid: process.pid, platform: process.platform, arch: process.arch }),
             socketPath: expect.any(String),
-            capabilities: expect.arrayContaining(['system.capabilities', 'system.identify', 'system.top', 'system.memory', 'auth.status', 'feedback.submit', 'agent.session', 'events.stream'])
+            capabilities: expect.arrayContaining([
+              'system.capabilities',
+              'system.identify',
+              'system.top',
+              'system.memory',
+              'auth.status',
+              'auth.begin_sign_in',
+              'auth.sign_out',
+              'feedback.submit',
+              'agent.session',
+              'events.stream'
+            ])
           })
         })
       )
@@ -289,6 +300,30 @@ describe('control socket backend', () => {
         expect.objectContaining({
           ok: true,
           data: expect.objectContaining({ unsupported: true, url: null })
+        })
+      )
+
+      await expect(backend.__testing.handleControlRequest({ method: 'auth.begin_sign_in', params: { timeout_seconds: 1 } })).resolves.toEqual(
+        expect.objectContaining({
+          ok: true,
+          data: expect.objectContaining({
+            signed_in: false,
+            action: 'begin_sign_in',
+            completed: false,
+            unsupported: true
+          })
+        })
+      )
+
+      await expect(backend.__testing.handleControlRequest({ method: 'auth.sign_out' })).resolves.toEqual(
+        expect.objectContaining({
+          ok: true,
+          data: expect.objectContaining({
+            signed_in: false,
+            action: 'sign_out',
+            completed: false,
+            unsupported: true
+          })
         })
       )
 

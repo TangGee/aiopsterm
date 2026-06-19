@@ -108,6 +108,8 @@ describe('aiopsterm-control CLI', () => {
     await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'auth', 'login'], { cwd: process.cwd() })
     await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'auth', 'status'], { cwd: process.cwd() })
     await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'auth', 'sign-in-url'], { cwd: process.cwd() })
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'auth', 'begin-sign-in', '--timeout-seconds', '2'], { cwd: process.cwd() })
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'auth', 'sign-out'], { cwd: process.cwd() })
     await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'settings', 'open', '--target', 'models'], { cwd: process.cwd() })
     await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'feedback', 'open'], { cwd: process.cwd() })
     await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'feedback', 'submit', '--email', 'dev@example.test', '--body', 'hello', '--image-path', '/tmp/a.png'], { cwd: process.cwd() })
@@ -125,6 +127,8 @@ describe('aiopsterm-control CLI', () => {
       expect.objectContaining({ method: 'auth.login' }),
       expect.objectContaining({ method: 'auth.status' }),
       expect.objectContaining({ method: 'auth.sign_in_url' }),
+      expect.objectContaining({ method: 'auth.begin_sign_in', params: expect.objectContaining({ timeout_seconds: 2, timeoutSeconds: 2 }) }),
+      expect.objectContaining({ method: 'auth.sign_out' }),
       expect.objectContaining({ method: 'settings.open', params: expect.objectContaining({ target: 'models', activate: true }) }),
       expect.objectContaining({ method: 'feedback.open', params: expect.objectContaining({ activate: true }) }),
       expect.objectContaining({ method: 'feedback.submit', params: expect.objectContaining({ email: 'dev@example.test', body: 'hello', image_paths: ['/tmp/a.png'] }) }),

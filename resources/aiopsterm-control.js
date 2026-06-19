@@ -14,7 +14,7 @@ Commands:
   capabilities
   identify
   rpc <method> [--params-json <json>]
-  auth login|status|sign-in-url
+  auth login|status|sign-in-url|begin-sign-in|sign-out
   settings open [--target <section>]
   feedback open|submit [--email <email>] [--body <text>] [--image-path <path>...]
   sidebar snapshot
@@ -668,6 +668,14 @@ const authMethodParams = (subcommand) => {
   if (subcommand === 'login') return { method: 'auth.login', params: {} }
   if (subcommand === 'status') return { method: 'auth.status', params: {} }
   if (subcommand === 'sign-in-url' || subcommand === 'sign_in_url' || subcommand === 'signin-url') return { method: 'auth.sign_in_url', params: {} }
+  if (subcommand === 'begin-sign-in' || subcommand === 'begin_sign_in' || subcommand === 'signin' || subcommand === 'sign-in') {
+    const timeoutSeconds = Number(readOption('--timeout-seconds') || readOption('--timeout') || 0)
+    return {
+      method: 'auth.begin_sign_in',
+      params: Number.isFinite(timeoutSeconds) && timeoutSeconds > 0 ? { timeout_seconds: timeoutSeconds, timeoutSeconds } : {}
+    }
+  }
+  if (subcommand === 'sign-out' || subcommand === 'sign_out' || subcommand === 'logout') return { method: 'auth.sign_out', params: {} }
   throw new Error(`Unknown auth command: ${subcommand}`)
 }
 
