@@ -7605,12 +7605,16 @@ describe('AppShell', () => {
     const createResponse = await invokeControlHandler({
       id: 'new-window',
       method: 'workspace.create',
-      params: { title: 'Scratch', cwd: '/tmp/scratch', focus: false }
+      params: { title: 'Scratch', cwd: '/tmp/scratch', focus: false, workspace_env: { SAFE_ENV: 'yes', EMPTY_VALUE: '', 'BAD=KEY': 'no' } }
     })
     expect(createResponse).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ action: 'new-window' }) }))
     const scratchPanel = store.panels.find((panel) => panel.title === 'Scratch')
     expect(scratchPanel).toEqual(expect.objectContaining({ cwd: '/tmp/scratch' }))
     expect(store.activePanelId).toBe(firstPanelId)
+
+    const envResponse = await invokeControlHandler({ id: 'workspace-env', method: 'workspace.env', params: {} })
+    expect(envResponse).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ env: { SAFE_ENV: 'yes' }, count: 1, keys: ['SAFE_ENV'] }) }))
+    expect(envResponse.data.snapshot.workspaceEnvironment).toEqual(expect.objectContaining({ count: 1, keys: ['SAFE_ENV'] }))
 
     const splitResponse = await invokeControlHandler({
       id: 'split-window',
@@ -7691,6 +7695,18 @@ describe('AppShell', () => {
     })
     expect(renameResponse).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ title: 'Renamed Sidecar' }) }))
     expect(store.panels.find((panel) => panel.id === sidecarPanel?.id)?.title).toBe('Renamed Sidecar')
+    expect(store.panels.find((panel) => panel.id === sidecarPanel?.id)?.titleSource).toBe('user')
+
+    const autoTitleProbe = await invokeControlHandler({ id: 'auto-title-probe', method: 'workspace.set_auto_title', params: { panelId: sidecarPanel!.id, probe: true } })
+    expect(autoTitleProbe).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ enabled: true, workspace_user_owned: true }) }))
+    const skippedAutoTitle = await invokeControlHandler({ id: 'auto-title-skip', method: 'workspace.set_auto_title', params: { panelId: sidecarPanel!.id, title: 'Generated Sidecar' } })
+    expect(skippedAutoTitle).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ workspaceApplied: false, workspaceUserOwned: true }) }))
+    expect(store.panels.find((panel) => panel.id === sidecarPanel?.id)?.title).toBe('Renamed Sidecar')
+
+    store.panels.find((panel) => panel.id === scratchPanel?.id)!.titleSource = 'system'
+    const autoTitleResponse = await invokeControlHandler({ id: 'auto-title-apply', method: 'workspace.set_auto_title', params: { panelId: scratchPanel!.id, title: 'Generated Scratch' } })
+    expect(autoTitleResponse).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ workspaceApplied: true, panelId: scratchPanel!.id }) }))
+    expect(store.panels.find((panel) => panel.id === scratchPanel?.id)).toEqual(expect.objectContaining({ title: 'Generated Scratch', titleSource: 'auto' }))
 
     const hasResponse = await invokeControlHandler({ id: 'has-session', method: 'workspace.has_session', params: { panelId: sidecarPanel!.id } })
     expect(hasResponse).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ exists: true, target: sidecarPanel!.id }) }))

@@ -491,6 +491,7 @@ export type TerminalOutputSegment = {
 export type TerminalPanel = {
   id: string
   title: string
+  titleSource?: 'system' | 'user' | 'auto'
   cwd: string
   output: string
   outputSegments: TerminalOutputSegment[]
@@ -3988,6 +3989,7 @@ const createEmptyTerminalPanel = (
 ): TerminalPanel => ({
   id,
   title,
+  titleSource: sourcePanel?.titleSource || 'system',
   cwd: sourcePanel?.cwd || '~',
   kind: 'terminal',
   output: '',
@@ -13336,6 +13338,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       const panel = panels.value[0]
       panel.id = createRendererLocalId('panel')
       panel.title = 'Terminal 1'
+      panel.titleSource = 'system'
       activePanelId.value = panel.id
       return panel
     }
@@ -13616,11 +13619,23 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
   }
 
-  const renamePanel = (id: string, title: string) => {
+  const renamePanel = (id: string, title: string, source: TerminalPanel['titleSource'] = 'user') => {
     const panel = panels.value.find((item) => item.id === id)
     if (panel && title.trim()) {
       panel.title = title.trim()
+      panel.titleSource = source
     }
+  }
+
+  const setPanelAutoTitle = (id: string, title: string, options: { panelOnlyIfMultiple?: boolean } = {}) => {
+    const panel = panels.value.find((item) => item.id === id)
+    const normalizedTitle = title.trim()
+    if (!panel || !normalizedTitle) return { found: Boolean(panel), applied: false, userOwned: panel?.titleSource === 'user' }
+    if (panel.titleSource === 'user') return { found: true, applied: false, userOwned: true }
+    if (options.panelOnlyIfMultiple && panels.value.length < 2) return { found: true, applied: false, userOwned: false }
+    panel.title = normalizedTitle
+    panel.titleSource = 'auto'
+    return { found: true, applied: true, userOwned: false }
   }
 
   const canForkSshPanel = (panelId: string) => {
@@ -15544,6 +15559,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     closeAllPanels,
     closePanels,
     renamePanel,
+    setPanelAutoTitle,
     appendTerminalOutput,
     applyTerminalLifecycle,
     applyTerminalExit,

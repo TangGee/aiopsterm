@@ -650,12 +650,17 @@ type ControlWorkspaceRemoteState = {
   foregroundAuthReadyAt?: number
   updatedAt: number
 }
+type ControlWorkspaceEnvironmentState = {
+  env: Record<string, string>
+  updatedAt: number
+}
 
 const controlWorkspaceGroups = ref<ControlWorkspaceGroupState[]>([])
 const controlSurfaceResumeBindings = ref<Record<string, ControlSurfaceResumeBindingState>>({})
 const controlProjectStates = ref<Record<string, ControlProjectState>>({})
 const controlSurfaceTelemetry = ref<Record<string, ControlSurfaceTelemetryState>>({})
 const controlWorkspaceRemote = ref<ControlWorkspaceRemoteState | null>(null)
+const controlWorkspaceEnvironment = ref<ControlWorkspaceEnvironmentState>({ env: {}, updatedAt: Date.now() })
 const lastActiveControlPanelId = ref('')
 const controlFlashingPanelIds = ref<string[]>([])
 let controlFlashTimer: number | null = null
@@ -796,6 +801,7 @@ const terminalSummaryForControl = (panel: TerminalPanel): ControlTerminalSummary
     panelId: panel.id,
     ...(panel.sessionId ? { sessionId: panel.sessionId } : {}),
     title: panel.title,
+    ...(panel.titleSource ? { titleSource: panel.titleSource, title_source: panel.titleSource } : {}),
     kind: terminalKindForControl(panel),
     active: panel.id === workspace.activePanelId,
     connected: Boolean(panel.sessionId),
@@ -832,6 +838,7 @@ const surfaceSummaryForControl = (panel: TerminalPanel): ControlSurfaceSummary =
   return {
     panelId: panel.id,
     title: panel.title,
+    ...(panel.titleSource ? { titleSource: panel.titleSource, title_source: panel.titleSource } : {}),
     surfaceKind: panel.kind === 'knowledge' ? 'knowledge' : 'terminal',
     active: panel.id === workspace.activePanelId,
     status: panel.status,
@@ -1012,6 +1019,7 @@ const workspaceSnapshotForControl = (): ControlWorkspaceSnapshot => {
   const attentionItems = workspace.pendingAiAttentionItems.map(aiAttentionSummaryForControl)
   const managedAiSessions = workspace.managedAiSessions.map(managedAiSessionSummaryForControl)
   const remote = workspaceRemoteSummaryForControl()
+  const environmentSummary = workspaceEnvironmentSummaryForControl()
   return {
     generatedAt: Date.now(),
     mode: workspace.mode,
@@ -1021,6 +1029,10 @@ const workspaceSnapshotForControl = (): ControlWorkspaceSnapshot => {
       {
         id: 'main',
         title: 'Main Workspace',
+        autoTitle: null,
+        auto_title: null,
+        titleSource: 'system',
+        title_source: 'system',
         active: true,
         mode: workspace.mode,
         activeModule: workspace.activeModule,
@@ -1040,6 +1052,12 @@ const workspaceSnapshotForControl = (): ControlWorkspaceSnapshot => {
     managedAiSessions,
     agentHibernation: { ...workspace.agentHibernationConfig },
     remote,
+    workspaceEnvironment: environmentSummary,
+    workspace_environment: {
+      keys: environmentSummary.keys,
+      count: environmentSummary.count,
+      updated_at: environmentSummary.updated_at
+    },
     attention: {
       unreadCount: workspace.aiAttentionUnreadCount,
       items: attentionItems,
@@ -2119,6 +2137,10 @@ const handlePaneManagementControlRequest = async (method: string, params: Record
     if (title) workspace.renamePanel(panel.id, title)
     const cwd = controlText(params.cwd || params.workingDirectory || params.working_directory)
     if (cwd) panel.cwd = cwd
+    const workspaceEnv = cleanWorkspaceEnvironmentForControl(params.workspace_env || params.workspaceEnv)
+    if (Object.keys(workspaceEnv).length) {
+      controlWorkspaceEnvironment.value = { env: workspaceEnv, updatedAt: Date.now() }
+    }
     if (!focus && workspace.panels.some((item) => item.id === previousActivePanelId)) {
       workspace.activePanelId = previousActivePanelId
     }
@@ -2258,6 +2280,82 @@ const handlePaneManagementControlRequest = async (method: string, params: Record
       snapshot: workspaceSnapshotForControl()
     })
   }
+  return controlFail('UNKNOWN_CONTROL_RENDERER_METHOD', `Unknown renderer control method: ${method}`)
+}
+
+const workspaceMetadataPayload = (extra: Record<string, unknown> = {}) =>
+  controlOk({
+    window_id: null,
+    window_ref: null,
+    workspaceId: 'main',
+    workspace_id: 'main',
+    workspaceRef: 'workspace:1',
+    workspace_ref: 'workspace:1',
+    ...extra,
+    snapshot: workspaceSnapshotForControl()
+  })
+
+const handleWorkspaceMetadataControlRequest = async (method: string, params: Record<string, unknown>) => {
+  if (method === 'workspace.env') {
+    const explicitTarget = controlText(params.workspaceId || params.workspace_id || params.surfaceId || params.surface_id || params.panelId || params.panel_id || params.paneId || params.pane_id || params.terminalId || params.terminal_id)
+    if (explicitTarget && explicitTarget !== 'main' && !resolveControlSelectablePanel(explicitTarget)) return controlFail('WORKSPACE_NOT_FOUND', 'Workspace or panel not found.')
+    const env = { ...controlWorkspaceEnvironment.value.env }
+    return workspaceMetadataPayload({
+      env,
+      count: Object.keys(env).length,
+      keys: Object.keys(env).sort()
+    })
+  }
+
+  if (method === 'workspace.set_auto_title') {
+    const enabled = true
+    if (controlBool(params.probe, false)) {
+      const panel = resolveControlSelectablePanel(controlTargetValue(params))
+      return workspaceMetadataPayload({
+        enabled,
+        summarizer_agent: null,
+        workspace_user_owned: panel ? panel.titleSource === 'user' : false,
+        panel_user_owned: panel ? panel.titleSource === 'user' : false
+      })
+    }
+    const failure = controlText(params.failure)
+    if (failure) {
+      return workspaceMetadataPayload({
+        enabled,
+        recorded: true,
+        failure,
+        agent: controlText(params.agent)
+      })
+    }
+    const title = controlText(params.title || params.name)
+    if (!title) return controlFail('WORKSPACE_TITLE_REQUIRED', 'Workspace title is required.', { enabled })
+    const panel =
+      resolveControlSelectablePanel(controlTargetValue(params)) ||
+      (controlText(params.workspaceId || params.workspace_id) ? workspace.panels.find((item) => item.id === workspace.activePanelId) || null : null)
+    if (!panel) return controlFail('WORKSPACE_NOT_FOUND', 'Workspace or panel not found.', { enabled })
+    const result = workspace.setPanelAutoTitle(panel.id, title, {
+      panelOnlyIfMultiple: controlBool(params.panelOnlyIfMultiple ?? params.panel_only_if_multiple, false)
+    })
+    await nextTick()
+    return workspaceMetadataPayload({
+      enabled,
+      title,
+      workspaceApplied: result.applied,
+      workspace_applied: result.applied,
+      panelApplied: result.applied,
+      panel_applied: result.applied,
+      workspaceUserOwned: result.userOwned,
+      workspace_user_owned: result.userOwned,
+      panelUserOwned: result.userOwned,
+      panel_user_owned: result.userOwned,
+      panelId: panel.id,
+      panel_id: panel.id,
+      surfaceId: panel.id,
+      surface_id: panel.id,
+      surface: surfaceSummaryForControl(panel)
+    })
+  }
+
   return controlFail('UNKNOWN_CONTROL_RENDERER_METHOD', `Unknown renderer control method: ${method}`)
 }
 
@@ -2772,6 +2870,25 @@ const cleanSurfaceResumeEnvironment = (value: unknown) => {
     .map(([key, entry]) => [key.trim(), typeof entry === 'string' ? entry.trim() : ''] as const)
     .filter(([key, entry]) => key && entry && !/(token|password|passwd|secret|api[_-]?key|credential|auth|bearer)/i.test(key))
   return entries.length ? Object.fromEntries(entries) : undefined
+}
+
+const cleanWorkspaceEnvironmentForControl = (value: unknown) => {
+  if (!isRecord(value)) return {}
+  return Object.fromEntries(
+    Object.entries(value)
+      .map(([key, entry]) => [key.trim(), typeof entry === 'string' ? entry : controlText(entry)] as const)
+      .filter(([key, entry]) => key && entry && !key.includes('\0') && !key.includes('=') && !entry.includes('\0'))
+  )
+}
+
+const workspaceEnvironmentSummaryForControl = () => {
+  const keys = Object.keys(controlWorkspaceEnvironment.value.env).sort()
+  return {
+    keys,
+    count: keys.length,
+    updatedAt: controlWorkspaceEnvironment.value.updatedAt,
+    updated_at: controlWorkspaceEnvironment.value.updatedAt
+  }
 }
 
 const surfaceResumeBindingPayload = (binding?: ControlSurfaceResumeBindingState | null) => {
@@ -3408,6 +3525,7 @@ const handleControlRequest = async (request: ControlRequest): Promise<ControlRes
   ) {
     return handleProjectFileControlRequest(request.method, params)
   }
+  if (request.method === 'workspace.env' || request.method === 'workspace.set_auto_title') return handleWorkspaceMetadataControlRequest(request.method, params)
   if (request.method.startsWith('workspace.remote.') || request.method.startsWith('remote.tmux.')) return handleWorkspaceRemoteControlRequest(request.method, params)
   if (request.method.startsWith('workspace.group.')) return handleWorkspaceGroupControlRequest(request.method, params)
   if (request.method.startsWith('surface.resume.')) return handleSurfaceResumeControlRequest(request.method, params)

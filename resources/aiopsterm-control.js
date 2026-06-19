@@ -36,6 +36,8 @@ Commands:
   feed list|mark-handled|clear-ended|clear [--yes]
   workspace snapshot
   workspace list|current
+  workspace env [--workspace <id>|--surface <id>] [--mask]
+  workspace set-auto-title <title> [--workspace <id>|--panel <id>] [--probe]
   workspace remote status|configure|reconnect|disconnect|pty-sessions
   workspace group <subcommand>
   workspace-group <subcommand>
@@ -187,6 +189,8 @@ const methodParams = () => {
     if (subcommand === 'snapshot') return { method: 'workspace.snapshot', params: {} }
     if (subcommand === 'list') return { method: 'workspace.list', params: {} }
     if (subcommand === 'current') return { method: 'workspace.current', params: {} }
+    if (subcommand === 'env') return workspaceEnvMethodParams()
+    if (subcommand === 'set-auto-title' || subcommand === 'set_auto_title' || subcommand === 'auto-title') return workspaceAutoTitleMethodParams()
     if (subcommand === 'remote') return workspaceRemoteMethodParams(args.shift() || 'status')
     if (subcommand === 'group') return workspaceGroupMethodParams(args.shift() || 'list')
     throw new Error(`Unknown workspace command: ${subcommand}`)
@@ -554,6 +558,15 @@ const readRepeatOptions = (names) => {
   return values
 }
 
+const readEnvAssignments = (names) => {
+  const env = {}
+  for (const item of readRepeatOptions(names)) {
+    const index = item.indexOf('=')
+    if (index > 0) env[item.slice(0, index)] = item.slice(index + 1)
+  }
+  return env
+}
+
 const readPositional = () => {
   const index = args.findIndex((arg) => !arg.startsWith('--'))
   if (index < 0) return ''
@@ -878,7 +891,8 @@ const surfaceWorkspaceAliasMethodParams = (command) => {
     const title = readOption('--name') || readOption('-n') || readOption('--title')
     const cwd = readOption('--cwd') || readOption('-c')
     const focus = !(hasFlag('--no-focus') || hasFlag('-d'))
-    return { method: 'workspace.create', params: { title, name: title, cwd, focus } }
+    const workspaceEnv = readEnvAssignments(['--workspace-env'])
+    return { method: 'workspace.create', params: { title, name: title, cwd, focus, ...(Object.keys(workspaceEnv).length ? { workspace_env: workspaceEnv, workspaceEnv } : {}) } }
   }
   if (command === 'current-workspace') return { method: 'workspace.current', params: {} }
   if (command === 'select-workspace') {
@@ -1078,6 +1092,37 @@ const workspaceRemoteTargetParams = () => {
   return { workspaceId, workspace_id: workspaceId, surfaceId, surface_id: surfaceId, panelId: surfaceId }
 }
 
+const workspaceControlTargetParams = () => {
+  const workspaceId = readOption('--workspace') || readOption('--workspace-id') || readOption('--tab') || readOption('--tab-id') || 'main'
+  const panelId = readOption('--panel') || readOption('--panel-id') || readOption('--surface') || readOption('--surface-id') || readOption('-t')
+  return { workspaceId, workspace_id: workspaceId, panelId, panel_id: panelId, surfaceId: panelId, surface_id: panelId }
+}
+
+const workspaceEnvMethodParams = () => {
+  const mask = hasFlag('--mask')
+  return { method: 'workspace.env', params: { ...workspaceControlTargetParams(), mask } }
+}
+
+const workspaceAutoTitleMethodParams = () => {
+  const target = workspaceControlTargetParams()
+  const probe = hasFlag('--probe')
+  const panelOnlyIfMultiple = hasFlag('--panel-only-if-multiple')
+  const title = readOption('--title') || readOption('--name') || args.filter((arg) => arg !== '--' && !arg.startsWith('--')).join(' ').trim()
+  return {
+    method: 'workspace.set_auto_title',
+    params: {
+      ...target,
+      title,
+      name: title,
+      probe,
+      panelOnlyIfMultiple,
+      panel_only_if_multiple: panelOnlyIfMultiple,
+      failure: readOption('--failure'),
+      agent: readOption('--agent')
+    }
+  }
+}
+
 const workspaceRemoteMethodParams = (subcommand) => {
   if (subcommand === 'status' || subcommand === 'show') return { method: 'workspace.remote.status', params: workspaceRemoteTargetParams() }
   if (subcommand === 'configure' || subcommand === 'config') {
@@ -1233,7 +1278,8 @@ const paneManagementMethodParams = (command) => {
     const title = readOption('--name') || readOption('-n') || readOption('--title')
     const cwd = readOption('--cwd') || readOption('-c')
     const focus = !(hasFlag('--no-focus') || hasFlag('-d'))
-    return { method: 'workspace.create', params: { title, name: title, cwd, focus } }
+    const workspaceEnv = readEnvAssignments(['--workspace-env'])
+    return { method: 'workspace.create', params: { title, name: title, cwd, focus, ...(Object.keys(workspaceEnv).length ? { workspace_env: workspaceEnv, workspaceEnv } : {}) } }
   }
   if (command === 'split-window' || command === 'splitw') {
     const target = readOption('--target') || readOption('--pane') || readOption('--panel') || readOption('-t')
@@ -1730,6 +1776,24 @@ const printResponse = (response) => {
   }
   if (data.noop && data.command) {
     process.stdout.write('OK\n')
+    return
+  }
+  if (data.env && typeof data.env === 'object' && typeof data.count === 'number') {
+    const keys = Object.keys(data.env).sort()
+    process.stdout.write(`workspace-env\t${data.workspace_id || data.workspaceId || 'main'}\t${keys.length}\n`)
+    for (const key of keys) process.stdout.write(`${key}=${data.env[key]}\n`)
+    return
+  }
+  if (data.enabled !== undefined && (data.workspaceApplied !== undefined || data.workspace_applied !== undefined || data.workspace_user_owned !== undefined || data.recorded !== undefined)) {
+    process.stdout.write(
+      [
+        'auto-title',
+        data.enabled ? 'enabled' : 'disabled',
+        data.recorded ? 'recorded' : data.workspaceApplied || data.workspace_applied || data.panelApplied || data.panel_applied ? 'applied' : 'skipped',
+        data.panel_id || data.panelId || '-',
+        data.title || ''
+      ].join('\t') + '\n'
+    )
     return
   }
   const remoteSessionsPayload =

@@ -187,6 +187,13 @@ The pane layout slice adds control_compat/tmux-style structural controls over th
 - `workspace.reorder`, `workspace.reorder_many`, and `workspace.equalize_splits`: reorder shared-work-panel surfaces or refit equal-size split panes. `workspace.move_to_window` is recognized but returns `unsupported=true` because aiopsterm currently exposes one main work panel per app window.
 - `workspace.prompt_submit`: writes the prompt text to the selected terminal surface through the existing terminal command security path. It may return `needs-approval` when the command security policy requires confirmation.
 
+The workspace metadata compatibility slice adds control_compat-style workspace metadata controls:
+
+- `workspace.env`: returns workspace environment metadata that was supplied through `workspace.create` / CLI `new-window --workspace-env KEY=VALUE`. Like control_compat, these values are not included in `workspace.list` or ordinary snapshot summaries except for key/count metadata.
+- `workspace.set_auto_title`: applies an automation-generated title to the selected visible panel only when the title is not user-owned. `probe=true` reports whether the target is user-owned without changing titles.
+
+aiopsterm records workspace env metadata for compatibility, but this slice does not inject those variables into already-running terminal sessions. Future terminal creation can decide explicitly whether to merge this metadata into launch environments.
+
 The sidebar metadata slice adds control_compat-style status channels for local automation:
 
 - `sidebar.status.set`, `sidebar.status.clear`, `sidebar.status.list`: manage keyed status entries.
@@ -217,6 +224,7 @@ Aliases are accepted for control_compat-compatible scripts where useful:
 - `break-pane`, `join-pane`, `swap-pane`, and `resize-pane` map to `pane.break`, `pane.join`, `pane.swap`, and `pane.resize`.
 - `next-window`, `previous-window`, `last-window`, `select-window`, `select-pane`, `last-pane`, and `find-window` map to `workspace.*`, `pane.*`, and shared-panel lookup commands.
 - `list-windows`, `current-window`, `list-panes`, `new-window`, `split-window`, `rename-window`, `kill-window`, `kill-pane`, `has-session`, and `select-layout` map to shared-panel management commands.
+- `workspace env` and `workspace set-auto-title` map to `workspace.env` and `workspace.set_auto_title`.
 - `surface focus`, `surface create`, `pane create`, `surface report-tty`, `surface report-shell-state`, and `surface ports-kick` map to the matching structured `surface.*` / `pane.*` primitives.
 - `workspace remote status`, `configure`, `reconnect`, `disconnect`, `foreground-auth-ready`, and `pty-sessions` map to `workspace.remote.*` visible SSH panel controls.
 - `remote tmux sessions`, `attach`, `detach`, `state`, `mirror`, and `window` map to `remote.tmux.*` compatibility placeholders.

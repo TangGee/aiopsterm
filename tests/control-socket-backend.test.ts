@@ -499,6 +499,58 @@ describe('control socket backend', () => {
     expect(mockWindow.requests).toEqual([expect.objectContaining({ method: 'workspace.group.list' })])
   })
 
+  it('routes workspace env and auto-title compatibility controls to the renderer', async () => {
+    const backend = await loadBackend()
+    backend.registerControlSocketIpc({
+      handle: (_channel, handler) => {
+        mockIpcHandler = handler
+      }
+    })
+    mockWindow = createMockWindow((request) => {
+      const params = (request.params as any) || {}
+      if (request.method === 'workspace.env') {
+        return { ok: true, data: { workspace_id: 'main', workspace_ref: 'workspace:1', env: { SAFE_ENV: 'yes' }, count: 1, keys: ['SAFE_ENV'] } }
+      }
+      return {
+        ok: true,
+        data: {
+          enabled: true,
+          title: params.title,
+          workspaceApplied: params.probe === true ? false : true,
+          workspace_applied: params.probe === true ? false : true,
+          panelApplied: params.probe === true ? false : true,
+          panel_applied: params.probe === true ? false : true,
+          workspace_user_owned: params.probe === true,
+          panelId: params.panelId || 'panel-1',
+          panel_id: params.panelId || 'panel-1'
+        }
+      }
+    })
+    backend.configureControlSocketRuntime({ getWindows: () => [mockWindow] })
+
+    await expect(backend.__testing.handleControlRequest({ method: 'workspace.env', params: { workspaceId: 'main' } })).resolves.toEqual(
+      expect.objectContaining({ ok: true, data: expect.objectContaining({ env: { SAFE_ENV: 'yes' }, count: 1 }) })
+    )
+    await expect(backend.__testing.handleControlRequest({ method: 'workspace.set_auto_title', params: { panelId: 'panel-1', title: 'Generated Title' } })).resolves.toEqual(
+      expect.objectContaining({ ok: true, data: expect.objectContaining({ workspaceApplied: true }) })
+    )
+    await expect(backend.__testing.handleControlRequest({ method: 'workspace.set_auto_title', params: { panelId: 'panel-1', probe: true } })).resolves.toEqual(
+      expect.objectContaining({ ok: true, data: expect.objectContaining({ workspace_user_owned: true }) })
+    )
+
+    expect(mockWindow.requests).toEqual([
+      expect.objectContaining({ method: 'workspace.env', params: expect.objectContaining({ workspaceId: 'main' }) }),
+      expect.objectContaining({ method: 'workspace.set_auto_title', params: expect.objectContaining({ panelId: 'panel-1', title: 'Generated Title' }) }),
+      expect.objectContaining({ method: 'workspace.set_auto_title', params: expect.objectContaining({ panelId: 'panel-1', probe: true }) })
+    ])
+    const workspaceEvents = await backend.__testing.handleControlRequest({ method: 'events.list', params: { category: 'workspace' } })
+    expect(workspaceEvents.data?.events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'workspace.auto_title_set', payload: expect.objectContaining({ title: 'Generated Title', workspace_applied: true, panel_id: 'panel-1' }) })
+      ])
+    )
+  })
+
   it('routes workspace remote controls to the renderer and records sanitized workspace events', async () => {
     const backend = await loadBackend()
     backend.registerControlSocketIpc({

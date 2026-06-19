@@ -143,6 +143,8 @@ export type ControlTerminalSummary = {
   panelId: string
   sessionId?: string
   title: string
+  titleSource?: 'system' | 'user' | 'auto'
+  title_source?: 'system' | 'user' | 'auto'
   kind: 'local' | 'ssh' | 'unknown'
   active: boolean
   connected: boolean
@@ -201,6 +203,8 @@ export type ControlSurfaceTelemetrySummary = {
 export type ControlSurfaceSummary = {
   panelId: string
   title: string
+  titleSource?: 'system' | 'user' | 'auto'
+  title_source?: 'system' | 'user' | 'auto'
   surfaceKind: 'terminal' | 'knowledge'
   active: boolean
   status?: string
@@ -439,6 +443,10 @@ export type ControlWorkspaceRemoteSummary = {
 export type ControlWorkspaceSummary = {
   id: string
   title: string
+  autoTitle?: string | null
+  auto_title?: string | null
+  titleSource?: 'system' | 'user' | 'auto'
+  title_source?: 'system' | 'user' | 'auto'
   active: boolean
   mode: string
   activeModule: string
@@ -464,6 +472,16 @@ export type ControlWorkspaceSnapshot = {
   managedAiSessions: ControlManagedAiSessionSummary[]
   agentHibernation: AgentHibernationConfig
   remote?: ControlWorkspaceRemoteSummary | null
+  workspaceEnvironment?: {
+    keys: string[]
+    count: number
+    updatedAt?: number
+  }
+  workspace_environment?: {
+    keys: string[]
+    count: number
+    updated_at?: number
+  }
   attention: {
     unreadCount: number
     items: ControlAiAttentionSummary[]

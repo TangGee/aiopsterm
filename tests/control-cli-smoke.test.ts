@@ -514,6 +514,12 @@ describe('aiopsterm-control CLI', () => {
       if (request.method === 'workspace.rename') {
         return { id: request.id, ok: true, data: { renamedPane: { panelId: params.panelId || 'panel-1', title: params.title }, action: 'rename-window' } }
       }
+      if (request.method === 'workspace.env') {
+        return { id: request.id, ok: true, data: { workspace_id: 'main', env: { SAFE_ENV: 'yes' }, count: 1, keys: ['SAFE_ENV'] } }
+      }
+      if (request.method === 'workspace.set_auto_title') {
+        return { id: request.id, ok: true, data: { enabled: true, title: params.title, workspaceApplied: true, workspace_applied: true, panelId: params.panelId || 'panel-1', panel_id: params.panelId || 'panel-1' } }
+      }
       if (request.method === 'workspace.close' || request.method === 'surface.close') {
         return { id: request.id, ok: true, data: { closedPane: { panelId: params.panelId || params.paneId || 'panel-1', title: 'Closed' }, action: request.method === 'workspace.close' ? 'kill-window' : 'kill-pane' } }
       }
@@ -524,8 +530,12 @@ describe('aiopsterm-control CLI', () => {
     const current = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'current-window'], { cwd: process.cwd() })
     expect(current.stdout).toContain('selected\tpanel-1')
     await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'list-panes'], { cwd: process.cwd() })
-    const created = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'new-window', '--name', 'Scratch', '--no-focus'], { cwd: process.cwd() })
+    const created = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'new-window', '--name', 'Scratch', '--no-focus', '--workspace-env', 'SAFE_ENV=yes'], { cwd: process.cwd() })
     expect(created.stdout).toContain('created\tpanel-new\tScratch')
+    const env = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'workspace', 'env'], { cwd: process.cwd() })
+    expect(env.stdout).toContain('workspace-env\tmain\t1')
+    const autoTitle = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'workspace', 'set-auto-title', '--panel', 'panel-1', 'Generated Main'], { cwd: process.cwd() })
+    expect(autoTitle.stdout).toContain('auto-title\tenabled\tapplied\tpanel-1\tGenerated Main')
     await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'split-window', '-h', '--target', 'panel-1'], { cwd: process.cwd() })
     const renamed = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'rename-window', '--target', 'panel-1', 'Main Ops'], { cwd: process.cwd() })
     expect(renamed.stdout).toContain('renamed\tpanel-1\tMain Ops')
@@ -540,7 +550,9 @@ describe('aiopsterm-control CLI', () => {
       expect.objectContaining({ method: 'workspace.list' }),
       expect.objectContaining({ method: 'workspace.current' }),
       expect.objectContaining({ method: 'pane.list' }),
-      expect.objectContaining({ method: 'workspace.create', params: expect.objectContaining({ title: 'Scratch', focus: false }) }),
+      expect.objectContaining({ method: 'workspace.create', params: expect.objectContaining({ title: 'Scratch', focus: false, workspace_env: { SAFE_ENV: 'yes' } }) }),
+      expect.objectContaining({ method: 'workspace.env', params: expect.objectContaining({ workspaceId: 'main' }) }),
+      expect.objectContaining({ method: 'workspace.set_auto_title', params: expect.objectContaining({ panelId: 'panel-1', title: 'Generated Main' }) }),
       expect.objectContaining({ method: 'surface.split', params: expect.objectContaining({ targetPaneId: 'panel-1', direction: 'right' }) }),
       expect.objectContaining({ method: 'workspace.rename', params: expect.objectContaining({ panelId: 'panel-1', title: 'Main Ops' }) }),
       expect.objectContaining({ method: 'workspace.close', params: expect.objectContaining({ panelId: 'panel-1' }) }),

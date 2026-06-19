@@ -226,6 +226,8 @@ const controlSocketCapabilities = [
   'workspace.snapshot',
   'workspace.list',
   'workspace.current',
+  'workspace.env',
+  'workspace.auto_title',
   'workspace.remote',
   'workspace.group',
   'session.restore',
@@ -2992,6 +2994,7 @@ const rendererMutationEventName = (method: string) => {
   if (method === 'workspace.reorder_many') return 'workspace.reordered_many'
   if (method === 'workspace.equalize_splits') return 'workspace.splits_equalized'
   if (method === 'workspace.prompt_submit') return 'workspace.prompt_submitted'
+  if (method === 'workspace.set_auto_title') return 'workspace.auto_title_set'
   if (method === 'workspace.remote.configure') return 'workspace_remote.configured'
   if (method === 'workspace.remote.reconnect') return 'workspace_remote.reconnected'
   if (method === 'workspace.remote.disconnect') return 'workspace_remote.disconnected'
@@ -3042,6 +3045,16 @@ const publishRendererMutationEvent = (method: string, params: Record<string, unk
   const name = rendererMutationEventName(method)
   if (!name) return
   const data = response.data || {}
+  if (
+    method === 'workspace.set_auto_title' &&
+    data.workspaceApplied !== true &&
+    data.workspace_applied !== true &&
+    data.panelApplied !== true &&
+    data.panel_applied !== true &&
+    data.recorded !== true
+  ) {
+    return
+  }
   const group = data.group && typeof data.group === 'object' ? (data.group as Record<string, unknown>) : null
   const team = data.team && typeof data.team === 'object' ? (data.team as Record<string, unknown>) : null
   const session = data.session && typeof data.session === 'object' ? (data.session as Record<string, unknown>) : null
@@ -3140,6 +3153,14 @@ const publishRendererMutationEvent = (method: string, params: Record<string, unk
           }
         : {}),
       ...(typeof data.unsupportedReason === 'string' ? { unsupported_reason: data.unsupportedReason } : {}),
+      ...(method === 'workspace.set_auto_title'
+        ? {
+            title: cleanText(data.title),
+            workspace_applied: data.workspaceApplied === true || data.workspace_applied === true,
+            panel_applied: data.panelApplied === true || data.panel_applied === true,
+            panel_id: cleanText(data.panel_id || data.panelId || params.panel_id || params.panelId)
+          }
+        : {}),
       ...(config ? { enabled: config.enabled } : {}),
       ...(method === 'agent-hibernation.sweep' || method === 'agent.sweep'
         ? {
@@ -3218,6 +3239,8 @@ const handleControlRequest = async (request: ControlSocketRequest): Promise<Cont
     method === 'workspace.move_to_window' ||
     method === 'workspace.equalize_splits' ||
     method === 'workspace.prompt_submit' ||
+    method === 'workspace.env' ||
+    method === 'workspace.set_auto_title' ||
     method.startsWith('workspace.remote.') ||
     method.startsWith('remote.tmux.') ||
     method === 'workspace.has_session' ||
