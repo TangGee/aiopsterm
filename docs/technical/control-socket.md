@@ -22,6 +22,8 @@ The first control-socket slice supports these terminal primitives:
 The notification slice adds these generic notification primitives:
 
 - `notification.create`: create an unread notification.
+- `notification.create_for_surface`: create an unread notification targeted at a visible surface id.
+- `notification.create_for_target`: create an unread notification targeted at a workspace id plus visible surface id.
 - `notification.list`: list queued notifications.
 - `notification.open`: focus the target terminal and mark one notification read.
 - `notification.jump_to_unread`: open the newest unread notification.
@@ -36,6 +38,12 @@ The workspace metadata slice adds read-only model snapshots:
 - `workspace.current`: return the currently selected logical workspace metadata.
 - `surface.list`: list terminal and editor surfaces in the shared main work panel.
 - `surface.current`: return the currently active surface.
+- `surface.focus`: focus one visible surface in the shared main work panel.
+- `surface.create`: create one new local terminal surface in the shared main work panel. Browser/url surfaces are explicitly rejected because aiopsterm does not implement control_compat's browser surface.
+- `pane.create`: split from a source surface into one new shared-work-panel terminal surface.
+- `surface.report_tty`: record a surface TTY name reported by shell/bootstrap automation.
+- `surface.report_shell_state`: record whether a surface shell is at `prompt`, `running`, or `unknown`.
+- `surface.ports_kick`: record that automation requested a port-scan refresh for a surface. aiopsterm currently stores the kick metadata but does not synthesize listening-port results.
 
 The control_compat system/window/settings compatibility slice adds non-browser app automation:
 
@@ -159,6 +167,8 @@ The pane layout slice adds control_compat/tmux-style structural controls over th
 - `pane.list`, `workspace.create`, `surface.split`, `workspace.rename`, `workspace.close`, `surface.close`, `workspace.has_session`, and `workspace.select_layout`: tmux-compatible list/create/rename/close/layout verbs over the shared main work panel.
 - `pane.surfaces`: return the surface hosted by a selected shared-work-panel pane. In aiopsterm's current model a pane maps to one visible terminal/knowledge surface.
 - `new-workspace`, `current-workspace`, `select-workspace`, `close-workspace`, `list-panels`, `list-pane-surfaces`, `close-surface`, `new-split`, and `new-pane`: control_compat legacy aliases accepted by the CLI/backend and routed to the structured workspace, surface, and pane methods above. `new-pane` currently creates a split-compatible shared work-panel surface rather than a separate hidden pane container.
+- `surface.focus`, `surface.create`, and `pane.create`: structured control_compat primitives accepted by the CLI/backend and implemented by the existing shared main work panel. They create or focus aiopsterm-owned visible local terminal surfaces only.
+- `surface.report_tty`, `surface.report_shell_state`, and `surface.ports_kick`: terminal-side telemetry primitives. They update renderer-owned surface metadata and are exposed through `surface.list`, `surface.current`, and `workspace.snapshot`.
 - `surface.move`, `surface.reorder`, and `surface.split_off`: reorder visible surfaces or detach a split surface inside the shared main work panel. Moving a surface to a target pane maps to the existing split attach behavior.
 - `surface.refresh`, `surface.health`, and `surface.trigger_flash`: refit visible terminal surfaces, report surface render readiness, and visually flash/focus a selected surface.
 - `workspace.reorder`, `workspace.reorder_many`, and `workspace.equalize_splits`: reorder shared-work-panel surfaces or refit equal-size split panes. `workspace.move_to_window` is recognized but returns `unsupported=true` because aiopsterm currently exposes one main work panel per app window.
@@ -194,6 +204,7 @@ Aliases are accepted for control_compat-compatible scripts where useful:
 - `break-pane`, `join-pane`, `swap-pane`, and `resize-pane` map to `pane.break`, `pane.join`, `pane.swap`, and `pane.resize`.
 - `next-window`, `previous-window`, `last-window`, `select-window`, `select-pane`, `last-pane`, and `find-window` map to `workspace.*`, `pane.*`, and shared-panel lookup commands.
 - `list-windows`, `current-window`, `list-panes`, `new-window`, `split-window`, `rename-window`, `kill-window`, `kill-pane`, `has-session`, and `select-layout` map to shared-panel management commands.
+- `surface focus`, `surface create`, `pane create`, `surface report-tty`, `surface report-shell-state`, and `surface ports-kick` map to the matching structured `surface.*` / `pane.*` primitives.
 - `send`, `send-panel`, and `surface.send_text` map to `terminal.send_text`.
 - `send-key`, `send-key-panel`, and `surface.send_key` map to `terminal.send_key`.
 - `project open`, `project get-state`, `project set-*`, `markdown open`, and `file open` map to the `project.*`, `markdown.open`, and `file.open` compatibility methods.
@@ -203,6 +214,7 @@ Aliases are accepted for control_compat-compatible scripts where useful:
 - `set-hook`, `show-options`, `show-option`, `set-option`, `set-window-option`, `source-file`, `refresh-client`, `attach-session`, `detach-client`, `popup`, `bind-key`, `unbind-key`, and `copy-mode` map to tmux compatibility metadata/no-op/placeholder commands.
 - `set-status`, `clear-status`, `list-status`, `set-progress`, `clear-progress`, `log`, `clear-log`, `list-log`, and `sidebar-state` map to `sidebar.*` metadata methods.
 - `notify` maps to `notification.create`.
+- `notify-surface` and `notify-target` map to `notification.create_for_surface` and `notification.create_for_target`.
 - `list-notifications` maps to `notification.list`.
 - `open-notification` maps to `notification.open`.
 - `jump-to-unread` maps to `notification.jump_to_unread`.
@@ -386,6 +398,8 @@ Future higher-level automation commands should use the control socket but must c
 
 `pane.break`, `pane.join`, and `pane.swap` are renderer-owned structural controls. They only update the main work panel's surface layout metadata. They do not write to any shell, close terminal sessions, or reuse the terminal raw-input path. `pane.resize` is deliberately explicit about the current limitation: it returns `unsupported=true`, `resized=false`, and `unsupportedReason` instead of pretending to resize equal-split panes.
 
+`surface.focus`, `surface.create`, and `pane.create` are also renderer-owned. They operate on aiopsterm's visible shared main work panel and do not create hidden OS terminals or manage external shell processes. `surface.report_tty`, `surface.report_shell_state`, and `surface.ports_kick` are metadata reports only: they do not write to the terminal, do not close or reconnect a session, and do not claim that a port scan has completed.
+
 `window.close`, `window.create`, and `window.display` are deliberately non-destructive compatibility probes in this slice. They do not close user windows or create separate native workspaces. `settings.open`, `feedback.open`, `extension.sidebar.snapshot`, and `system.tree` route through the active renderer because those operations depend on UI state; they do not write terminal input or bypass terminal command approval.
 
 Navigation commands are also renderer-owned. Because aiopsterm currently exposes one shared main work panel instead of control_compat's independent workspace windows, `next-window`, `previous-window`, `last-window`, `select-window`, `select-pane`, `last-pane`, and `find-window` move focus among visible aiopsterm surfaces in that shared panel. They do not create windows, start processes, or write terminal input.
@@ -429,7 +443,7 @@ Current event categories are:
 - `notification`: generic control notifications created, opened, marked read, dismissed, or cleared.
 - `terminal`: control-socket terminal focus and raw text-send effects. Text payloads include lengths/byte counts only, not the raw terminal input.
 - `workspace`: workspace-group mutations.
-- `surface`: surface resume mutations.
+- `surface`: surface resume mutations, surface create/focus events, and surface telemetry reports.
 - `agent`: hibernation and visible agent-team automation mutations.
 
 Events are appended to `<userData>/control/events.jsonl` and the app reloads the newest 4,096 events on startup for replay. `seq` continues from the largest durable event sequence, so cursor files remain useful across app restarts. Clients should still refresh state from `workspace.snapshot`, `surface.list`, and `notification.list` when `ack.resume.gap` is true, because the replay window is bounded.

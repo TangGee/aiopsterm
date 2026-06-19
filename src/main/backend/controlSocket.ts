@@ -231,7 +231,9 @@ const controlSocketCapabilities = [
   'surface.list',
   'surface.current',
   'surface.operations',
+  'surface.telemetry',
   'surface.resume',
+  'surface.create',
   'terminal.list',
   'terminal.focus',
   'terminal.read_screen',
@@ -239,11 +241,13 @@ const controlSocketCapabilities = [
   'terminal.respawn',
   'pane.layout',
   'pane.navigation',
+  'pane.create',
   'terminal.send_text',
   'terminal.send_key',
   'terminal.buffer',
   'tmux.compat',
   'notification',
+  'notification.targeted',
   'events.stream',
   'events.list',
   'sync.wait_for',
@@ -2836,6 +2840,34 @@ const createNotification = (params: Record<string, unknown>) => {
   return ok({ notification, ...notificationPayload() })
 }
 
+const createTargetedNotification = (method: string, params: Record<string, unknown>) => {
+  const surfaceId = cleanText(params.surfaceId || params.surface_id || params.panelId || params.panel_id || params.target)
+  if (!surfaceId) return fail('NOTIFICATION_SURFACE_REQUIRED', 'Targeted notification requires surface_id.')
+  const workspaceId = cleanText(params.workspaceId || params.workspace_id || params.workspace) || 'main'
+  const response = createNotification({
+    ...params,
+    panelId: surfaceId,
+    surfaceId,
+    workspaceId,
+    workspace_id: workspaceId
+  })
+  if (!response.ok) return response
+  const data = response.data || {}
+  return ok({
+    ...data,
+    workspaceId,
+    workspace_id: workspaceId,
+    workspaceRef: workspaceId === 'main' ? 'workspace:1' : workspaceId,
+    workspace_ref: workspaceId === 'main' ? 'workspace:1' : workspaceId,
+    surfaceId,
+    surface_id: surfaceId,
+    surfaceRef: surfaceId,
+    surface_ref: surfaceId,
+    targeted: true,
+    method
+  })
+}
+
 const resolveNotification = (params: Record<string, unknown>) => {
   const id = cleanText(params.id || params.notificationId)
   if (!id) return null
@@ -2944,6 +2976,11 @@ const rendererMutationEventName = (method: string) => {
   if (method === 'file.open') return 'file.opened'
   if (method.startsWith('workspace.group.') && method !== 'workspace.group.list') return method.replace('workspace.group.', 'workspace_group.')
   if (method.startsWith('surface.resume.') && !['surface.resume.get', 'surface.resume.show', 'surface.resume.preview', 'surface.resume.autorun.preview'].includes(method)) return method.replace('surface.resume.', 'surface_resume.')
+  if (method === 'surface.focus') return 'surface.focused'
+  if (method === 'surface.create') return 'surface.created'
+  if (method === 'surface.report_tty') return 'surface.tty_reported'
+  if (method === 'surface.report_shell_state') return 'surface.shell_state_reported'
+  if (method === 'surface.ports_kick') return 'surface.ports_kicked'
   if (method === 'surface.move') return 'surface.moved'
   if (method === 'surface.reorder') return 'surface.reordered'
   if (method === 'surface.split_off') return 'surface.split_off'
@@ -2964,6 +3001,7 @@ const rendererMutationEventName = (method: string) => {
   if (method === 'workspace.previous') return 'workspace.selected'
   if (method === 'workspace.last') return 'workspace.selected'
   if (method === 'workspace.create') return 'workspace.created'
+  if (method === 'pane.create') return 'pane.created'
   if (method === 'surface.split') return 'pane.created'
   if (method === 'workspace.rename') return 'workspace.renamed'
   if (method === 'workspace.close') return 'workspace.closed'
@@ -2998,6 +3036,8 @@ const publishRendererMutationEvent = (method: string, params: Record<string, unk
   const session = data.session && typeof data.session === 'object' ? (data.session as Record<string, unknown>) : null
   const surface = data.surface && typeof data.surface === 'object' ? (data.surface as Record<string, unknown>) : null
   const pane = data.pane && typeof data.pane === 'object' ? (data.pane as Record<string, unknown>) : null
+  const createdSurface = data.createdSurface && typeof data.createdSurface === 'object' ? (data.createdSurface as Record<string, unknown>) : null
+  const created_surface = data.created_surface && typeof data.created_surface === 'object' ? (data.created_surface as Record<string, unknown>) : null
   const selectedPane = data.selectedPane && typeof data.selectedPane === 'object' ? (data.selectedPane as Record<string, unknown>) : null
   const createdPane = data.createdPane && typeof data.createdPane === 'object' ? (data.createdPane as Record<string, unknown>) : null
   const closedPane = data.closedPane && typeof data.closedPane === 'object' ? (data.closedPane as Record<string, unknown>) : null
@@ -3009,7 +3049,7 @@ const publishRendererMutationEvent = (method: string, params: Record<string, unk
     name,
     category: rendererMutationCategory(method),
     source: 'control.socket',
-    surfaceId: cleanText(data.surfaceId || data.surface_id || surface?.panelId || pane?.panelId || selectedPane?.panelId || createdPane?.panelId || closedPane?.panelId || renamedPane?.panelId || params.panelId || params.surfaceId || params.paneId),
+    surfaceId: cleanText(data.surfaceId || data.surface_id || surface?.panelId || pane?.panelId || createdSurface?.panelId || created_surface?.panelId || selectedPane?.panelId || createdPane?.panelId || closedPane?.panelId || renamedPane?.panelId || params.panelId || params.surfaceId || params.paneId),
     payload: {
       method,
       ...(group
@@ -3044,6 +3084,7 @@ const publishRendererMutationEvent = (method: string, params: Record<string, unk
             split_group_id: pane.splitGroupId
           }
         : {}),
+      ...(createdSurface || created_surface ? { created_surface_id: cleanText(createdSurface?.panelId || created_surface?.panelId), created_panel_id: cleanText(createdSurface?.panelId || created_surface?.panelId) } : {}),
       ...(selectedPane
         ? {
             selected_pane_id: selectedPane.panelId,
@@ -3060,6 +3101,20 @@ const publishRendererMutationEvent = (method: string, params: Record<string, unk
             target_pane_id: targetPane.panelId,
             target_panel_id: targetPane.panelId,
             target_split_group_id: targetPane.splitGroupId
+          }
+        : {}),
+      ...(method === 'surface.report_tty' ? { tty_name: cleanText(data.ttyName || data.tty_name || params.ttyName || params.tty_name) } : {}),
+      ...(method === 'surface.report_shell_state'
+        ? {
+            state: cleanText(data.state || data.shellState || data.shell_state || params.state || params.shellState || params.shell_state),
+            published: data.published === true
+          }
+        : {}),
+      ...(method === 'surface.ports_kick'
+        ? {
+            reason: cleanText(data.reason || params.reason) || 'command',
+            kicked: data.kicked === true,
+            port_scan_started: data.portScanStarted === true || data.port_scan_started === true
           }
         : {}),
       ...(typeof data.unsupportedReason === 'string' ? { unsupported_reason: data.unsupportedReason } : {}),
@@ -3123,6 +3178,11 @@ const handleControlRequest = async (request: ControlSocketRequest): Promise<Cont
     method === 'surface.list' ||
     method === 'surface.current' ||
     method.startsWith('surface.resume.') ||
+    method === 'surface.focus' ||
+    method === 'surface.create' ||
+    method === 'surface.report_tty' ||
+    method === 'surface.report_shell_state' ||
+    method === 'surface.ports_kick' ||
     method === 'workspace.next' ||
     method === 'workspace.previous' ||
     method === 'workspace.last' ||
@@ -3140,6 +3200,7 @@ const handleControlRequest = async (request: ControlSocketRequest): Promise<Cont
     method === 'workspace.select_layout' ||
     method === 'pane.list' ||
     method === 'pane.surfaces' ||
+    method === 'pane.create' ||
     method === 'pane.focus' ||
     method === 'pane.last' ||
     method === 'surface.split' ||
@@ -3232,6 +3293,36 @@ const handleControlRequest = async (request: ControlSocketRequest): Promise<Cont
   if (method === 'close-surface') {
     const response = await dispatchRendererControlRequest('surface.close', params)
     publishRendererMutationEvent('surface.close', params, response)
+    return response
+  }
+  if (method === 'surface-focus' || method === 'focus-surface') {
+    const response = await dispatchRendererControlRequest('surface.focus', params, { focus: true })
+    publishRendererMutationEvent('surface.focus', params, response)
+    return response
+  }
+  if (method === 'create-surface' || method === 'new-surface') {
+    const response = await dispatchRendererControlRequest('surface.create', params, { focus: params.focus === true })
+    publishRendererMutationEvent('surface.create', params, response)
+    return response
+  }
+  if (method === 'create-pane') {
+    const response = await dispatchRendererControlRequest('pane.create', params, { focus: params.focus === true })
+    publishRendererMutationEvent('pane.create', params, response)
+    return response
+  }
+  if (method === 'report_tty' || method === 'report-tty') {
+    const response = await dispatchRendererControlRequest('surface.report_tty', params)
+    publishRendererMutationEvent('surface.report_tty', params, response)
+    return response
+  }
+  if (method === 'report_shell_state' || method === 'report-shell-state') {
+    const response = await dispatchRendererControlRequest('surface.report_shell_state', params)
+    publishRendererMutationEvent('surface.report_shell_state', params, response)
+    return response
+  }
+  if (method === 'ports_kick' || method === 'ports-kick') {
+    const response = await dispatchRendererControlRequest('surface.ports_kick', params)
+    publishRendererMutationEvent('surface.ports_kick', params, response)
     return response
   }
   if (method === 'new-split' || method === 'new-pane') {
@@ -3387,6 +3478,8 @@ const handleControlRequest = async (request: ControlSocketRequest): Promise<Cont
   if (method === 'terminal.send_text' || method === 'surface.send_text' || method === 'send' || method === 'send-panel') return sendTerminalText(params)
   if (method === 'terminal.send_key' || method === 'surface.send_key' || method === 'send-key' || method === 'send-key-panel') return sendTerminalKey(params)
   if (method === 'notification.create' || method === 'notify') return createNotification(params)
+  if (method === 'notification.create_for_surface' || method === 'notify-surface') return createTargetedNotification(method, params)
+  if (method === 'notification.create_for_target' || method === 'notify-target') return createTargetedNotification(method, params)
   if (method === 'notification.list' || method === 'list-notifications') return listNotifications(params)
   if (method === 'notification.mark_read' || method === 'mark-notification-read') return markNotificationRead(params)
   if (method === 'notification.dismiss' || method === 'dismiss-notification') return dismissNotification(params)

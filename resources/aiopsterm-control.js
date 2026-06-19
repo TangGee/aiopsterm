@@ -39,8 +39,9 @@ Commands:
   workspace group <subcommand>
   workspace-group <subcommand>
   session save|list|show|restore|clear [--id <id>] [--name <name>]
-  surface list
+  surface list|current|focus|create|report-tty|report-shell-state|ports-kick
   surface resume set|show|get|clear|run|trust|preview|autorun [--panel <id>|--session <id>] [--shell <command>] [--kind <kind>] [--checkpoint <id>]
+  pane create [--direction right|below] [--surface <id>] [--focus <true|false>]
   agent-hibernation on|off|status|preview|sweep [--no-confirm]
   agent hibernate|resume --session <id> [--source <source>]
   agent session list|show|reply|approve|deny|handle|rename|clear [--session <id>] [--source <source>]
@@ -116,6 +117,8 @@ Commands:
   list-log [--limit <n>]
   sidebar-state
   notify --title <text> [--subtitle <text>] [--body <text>] [--panel <id>] [--session <id>]
+  notify-surface --surface <id> --title <text> [--subtitle <text>] [--body <text>]
+  notify-target --workspace <id> --surface <id> --title <text> [--subtitle <text>] [--body <text>]
   list-notifications
   open-notification --id <id>
   mark-notification-read (--id <id> | --all)
@@ -193,7 +196,18 @@ const methodParams = () => {
     if (subcommand === 'list') return { method: 'surface.list', params: {} }
     if (subcommand === 'current') return { method: 'surface.current', params: {} }
     if (subcommand === 'resume') return surfaceResumeMethodParams(args.shift() || 'show')
+    if (subcommand === 'focus' || subcommand === 'select') return surfaceFocusMethodParams()
+    if (subcommand === 'create' || subcommand === 'new') return surfaceCreateMethodParams()
+    if (subcommand === 'report-tty' || subcommand === 'report_tty') return surfaceReportTtyMethodParams()
+    if (subcommand === 'report-shell-state' || subcommand === 'report_shell_state') return surfaceReportShellStateMethodParams()
+    if (subcommand === 'ports-kick' || subcommand === 'ports_kick') return surfacePortsKickMethodParams()
     throw new Error(`Unknown surface command: ${subcommand}`)
+  }
+  if (command === 'pane') {
+    const subcommand = args.shift() || 'list'
+    if (subcommand === 'create' || subcommand === 'new') return paneCreateMethodParams()
+    if (subcommand === 'list') return { method: 'pane.list', params: {} }
+    throw new Error(`Unknown pane command: ${subcommand}`)
   }
   if (command === 'agent-hibernation') {
     const subcommand = args.shift() || 'status'
@@ -261,6 +275,17 @@ const methodParams = () => {
   if (['resize-pane', 'resizep', 'swap-pane', 'swapp', 'break-pane', 'breakp', 'join-pane', 'joinp'].includes(command)) return paneLayoutMethodParams(command)
   if (
     [
+      'surface-focus',
+      'focus-surface',
+      'create-surface',
+      'new-surface',
+      'create-pane',
+      'report-tty',
+      'report_tty',
+      'report-shell-state',
+      'report_shell_state',
+      'ports-kick',
+      'ports_kick',
       'move-surface',
       'reorder-surface',
       'split-off',
@@ -273,6 +298,12 @@ const methodParams = () => {
       'move-workspace-to-window'
     ].includes(command)
   ) {
+    if (command === 'surface-focus' || command === 'focus-surface') return surfaceFocusMethodParams()
+    if (command === 'create-surface' || command === 'new-surface') return surfaceCreateMethodParams()
+    if (command === 'create-pane') return paneCreateMethodParams()
+    if (command === 'report-tty' || command === 'report_tty') return surfaceReportTtyMethodParams()
+    if (command === 'report-shell-state' || command === 'report_shell_state') return surfaceReportShellStateMethodParams()
+    if (command === 'ports-kick' || command === 'ports_kick') return surfacePortsKickMethodParams()
     return surfaceOperationMethodParams(command)
   }
   if (['new-workspace', 'current-workspace', 'select-workspace', 'close-workspace', 'list-panels', 'list-pane-surfaces', 'close-surface', 'new-split', 'new-pane'].includes(command)) {
@@ -356,6 +387,21 @@ const methodParams = () => {
     const panelId = readOption('--panel') || readOption('--surface')
     const sessionId = readOption('--session') || readOption('--session-id')
     return { method: 'notification.create', params: { title, subtitle, body, panelId, sessionId } }
+  }
+  if (command === 'notify-surface') {
+    const title = readOption('--title') || 'Notification'
+    const subtitle = readOption('--subtitle')
+    const body = readOption('--body')
+    const surfaceId = readOption('--surface') || readOption('--panel') || readOption('--target') || readPositional()
+    return { method: 'notification.create_for_surface', params: { title, subtitle, body, surfaceId, surface_id: surfaceId, panelId: surfaceId } }
+  }
+  if (command === 'notify-target') {
+    const title = readOption('--title') || 'Notification'
+    const subtitle = readOption('--subtitle')
+    const body = readOption('--body')
+    const workspaceId = readOption('--workspace') || readOption('--workspace-id') || 'main'
+    const surfaceId = readOption('--surface') || readOption('--panel') || readOption('--target') || readPositional()
+    return { method: 'notification.create_for_target', params: { title, subtitle, body, workspaceId, workspace_id: workspaceId, surfaceId, surface_id: surfaceId, panelId: surfaceId } }
   }
   if (command === 'list-notifications') return { method: 'notification.list', params: {} }
   if (command === 'open-notification') return { method: 'notification.open', params: { id: readOption('--id') } }
@@ -857,6 +903,78 @@ const surfaceWorkspaceAliasMethodParams = (command) => {
       focus: readFocusOption()
     }
   }
+}
+
+const surfaceFocusMethodParams = () => {
+  const surfaceId = readOption('--surface') || readOption('--panel') || readOption('--target') || readOption('-t') || readPositional()
+  return { method: 'surface.focus', params: { surfaceId, surface_id: surfaceId, panelId: surfaceId } }
+}
+
+const surfaceCreateMethodParams = () => {
+  const paneId = readOption('--pane') || readOption('--panel') || readOption('--surface') || readOption('--target') || readOption('-t')
+  const title = readOption('--title') || readOption('--name') || readOption('-n')
+  const cwd = readOption('--cwd') || readOption('-c') || readOption('--working-directory')
+  const type = readOption('--type')
+  const url = readOption('--url')
+  return {
+    method: 'surface.create',
+    params: {
+      paneId,
+      pane_id: paneId,
+      panelId: paneId,
+      surfaceId: paneId,
+      title,
+      name: title,
+      cwd,
+      workingDirectory: cwd,
+      working_directory: cwd,
+      type,
+      url,
+      focus: readFocusOption()
+    }
+  }
+}
+
+const paneCreateMethodParams = () => {
+  const source = readOption('--surface') || readOption('--panel') || readOption('--pane') || readOption('--target') || readOption('-t')
+  const title = readOption('--title') || readOption('--name') || readOption('-n')
+  const cwd = readOption('--cwd') || readOption('-c') || readOption('--working-directory')
+  const type = readOption('--type')
+  return {
+    method: 'pane.create',
+    params: {
+      paneId: source,
+      pane_id: source,
+      panelId: source,
+      surfaceId: source,
+      title,
+      name: title,
+      cwd,
+      workingDirectory: cwd,
+      working_directory: cwd,
+      type,
+      direction: readSplitDirectionValue(),
+      focus: readFocusOption()
+    }
+  }
+}
+
+const surfaceReportTtyMethodParams = () => {
+  const surfaceId = readOption('--surface') || readOption('--panel') || readOption('--target') || readOption('-t')
+  const ttyName = readOption('--tty-name') || readOption('--tty') || readPositional()
+  return { method: 'surface.report_tty', params: { surfaceId, surface_id: surfaceId, panelId: surfaceId, ttyName, tty_name: ttyName } }
+}
+
+const surfaceReportShellStateMethodParams = () => {
+  const surfaceId = readOption('--surface') || readOption('--panel') || readOption('--target') || readOption('-t')
+  const state = readOption('--state') || readOption('--shell-state') || readPositional()
+  return { method: 'surface.report_shell_state', params: { surfaceId, surface_id: surfaceId, panelId: surfaceId, state, shellState: state, shell_state: state } }
+}
+
+const surfacePortsKickMethodParams = () => {
+  const surfaceId = readOption('--surface') || readOption('--panel') || readOption('--target') || readOption('-t')
+  const reason = readOption('--reason') || readPositional() || 'command'
+  return { method: 'surface.ports_kick', params: { surfaceId, surface_id: surfaceId, panelId: surfaceId, reason } }
 }
 
 const surfaceOperationTargetParams = () => {

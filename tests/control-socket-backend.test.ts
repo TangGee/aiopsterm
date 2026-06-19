@@ -1003,6 +1003,68 @@ describe('control socket backend', () => {
     expect(workspaceEvents.data?.events).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'workspace.reordered' }), expect.objectContaining({ name: 'workspace.reordered_many' })]))
   })
 
+  it('routes control_compat-style surface telemetry and create/focus primitives to the renderer', async () => {
+    const backend = await loadBackend()
+    backend.registerControlSocketIpc({
+      handle: (_channel, handler) => {
+        mockIpcHandler = handler
+      }
+    })
+    mockWindow = createMockWindow((request) => {
+      const params = (request.params as any) || {}
+      if (request.method === 'surface.focus') {
+        return { ok: true, data: { surface: { panelId: params.surfaceId || 'panel-1', surfaceKind: 'terminal' }, selectedPane: { panelId: params.surfaceId || 'panel-1', surfaceKind: 'terminal' }, action: 'surface.focus' } }
+      }
+      if (request.method === 'surface.create') {
+        return { ok: true, data: { surface: { panelId: 'panel-new', surfaceKind: 'terminal' }, createdPane: { panelId: 'panel-new', surfaceKind: 'terminal', title: params.title || 'New' }, createdSurface: { panelId: 'panel-new', surfaceKind: 'terminal' }, action: 'surface.create' } }
+      }
+      if (request.method === 'pane.create') {
+        return { ok: true, data: { pane: { panelId: 'panel-split', surfaceKind: 'terminal' }, createdPane: { panelId: 'panel-split', surfaceKind: 'terminal', title: params.title || 'Split' }, action: 'pane.create' } }
+      }
+      return {
+        ok: true,
+        data: {
+          surface: { panelId: params.surfaceId || params.panelId || 'panel-1', surfaceKind: 'terminal' },
+          action: request.method,
+          ttyName: params.ttyName || params.tty_name,
+          state: params.state,
+          reason: params.reason || 'command',
+          published: request.method === 'surface.report_shell_state',
+          kicked: request.method === 'surface.ports_kick'
+        }
+      }
+    })
+    backend.configureControlSocketRuntime({ getWindows: () => [mockWindow] })
+
+    await expect(backend.__testing.handleControlRequest({ method: 'surface.focus', params: { surfaceId: 'panel-1' } })).resolves.toEqual(expect.objectContaining({ ok: true }))
+    await expect(backend.__testing.handleControlRequest({ method: 'surface.create', params: { title: 'Scratch', focus: true } })).resolves.toEqual(expect.objectContaining({ ok: true }))
+    await expect(backend.__testing.handleControlRequest({ method: 'pane.create', params: { surfaceId: 'panel-1', direction: 'below', title: 'Split' } })).resolves.toEqual(expect.objectContaining({ ok: true }))
+    await expect(backend.__testing.handleControlRequest({ method: 'report-tty', params: { surfaceId: 'panel-1', ttyName: '/dev/pts/7' } })).resolves.toEqual(expect.objectContaining({ ok: true }))
+    await expect(backend.__testing.handleControlRequest({ method: 'report-shell-state', params: { surfaceId: 'panel-1', state: 'prompt' } })).resolves.toEqual(expect.objectContaining({ ok: true }))
+    await expect(backend.__testing.handleControlRequest({ method: 'ports-kick', params: { surfaceId: 'panel-1', reason: 'refresh' } })).resolves.toEqual(expect.objectContaining({ ok: true }))
+
+    expect(mockWindow.requests).toEqual([
+      expect.objectContaining({ method: 'surface.focus', params: expect.objectContaining({ surfaceId: 'panel-1' }) }),
+      expect.objectContaining({ method: 'surface.create', params: expect.objectContaining({ title: 'Scratch' }) }),
+      expect.objectContaining({ method: 'pane.create', params: expect.objectContaining({ surfaceId: 'panel-1', direction: 'below' }) }),
+      expect.objectContaining({ method: 'surface.report_tty', params: expect.objectContaining({ surfaceId: 'panel-1', ttyName: '/dev/pts/7' }) }),
+      expect.objectContaining({ method: 'surface.report_shell_state', params: expect.objectContaining({ surfaceId: 'panel-1', state: 'prompt' }) }),
+      expect.objectContaining({ method: 'surface.ports_kick', params: expect.objectContaining({ surfaceId: 'panel-1', reason: 'refresh' }) })
+    ])
+    const surfaceEvents = await backend.__testing.handleControlRequest({ method: 'events.list', params: { category: 'surface' } })
+    expect(surfaceEvents.data?.events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'surface.focused' }),
+        expect.objectContaining({ name: 'surface.created' }),
+        expect.objectContaining({ name: 'surface.tty_reported', payload: expect.objectContaining({ tty_name: '/dev/pts/7' }) }),
+        expect.objectContaining({ name: 'surface.shell_state_reported', payload: expect.objectContaining({ state: 'prompt', published: true }) }),
+        expect.objectContaining({ name: 'surface.ports_kicked', payload: expect.objectContaining({ reason: 'refresh', kicked: true }) })
+      ])
+    )
+    const paneEvents = await backend.__testing.handleControlRequest({ method: 'events.list', params: { category: 'pane' } })
+    expect(paneEvents.data?.events).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'pane.created' })]))
+  })
+
   it('writes terminal keys through session ids and resolves panel ids through the renderer', async () => {
     const backend = await loadBackend()
     const writes: Array<{ sessionId: string; data: string }> = []
@@ -1251,6 +1313,47 @@ describe('control socket backend', () => {
     await expect(backend.__testing.handleControlRequest({ method: 'notification.clear' })).resolves.toEqual(
       expect.objectContaining({ ok: true, data: expect.objectContaining({ changed: 2, total: 0 }) })
     )
+  })
+
+  it('creates control_compat-style targeted notifications for surfaces and targets', async () => {
+    const backend = await loadBackend()
+    const shown: Record<string, unknown>[] = []
+    backend.configureControlSocketRuntime({
+      showNotification: (notification) => shown.push(notification)
+    })
+
+    const surfaceNotification = await backend.__testing.handleControlRequest({
+      method: 'notification.create_for_surface',
+      params: { surface_id: 'panel-1', title: 'Needs review', body: 'approval pending' }
+    })
+    expect(surfaceNotification).toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
+          targeted: true,
+          surface_id: 'panel-1',
+          workspace_id: 'main',
+          notification: expect.objectContaining({ title: 'Needs review', panelId: 'panel-1', workspaceId: 'main' })
+        })
+      })
+    )
+
+    const targetNotification = await backend.__testing.handleControlRequest({
+      method: 'notification.create_for_target',
+      params: { workspace_id: 'main', surface_id: 'panel-2', title: 'Done' }
+    })
+    expect(targetNotification).toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
+          targeted: true,
+          surface_id: 'panel-2',
+          notification: expect.objectContaining({ title: 'Done', panelId: 'panel-2', workspaceId: 'main' })
+        })
+      })
+    )
+    expect(shown).toEqual([expect.objectContaining({ panelId: 'panel-1' }), expect.objectContaining({ panelId: 'panel-2' })])
+    await expect(backend.__testing.handleControlRequest({ method: 'notification.create_for_surface', params: { title: 'Missing' } })).resolves.toEqual(expect.objectContaining({ ok: false, errorCode: 'NOTIFICATION_SURFACE_REQUIRED' }))
   })
 
   it('records bounded control events and lists them with filters', async () => {

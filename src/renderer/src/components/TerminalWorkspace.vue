@@ -487,6 +487,7 @@ import type {
   ControlSessionRestoreResult,
   ControlSessionSnapshot,
   ControlSplitGroupSummary,
+  ControlSurfaceTelemetrySummary,
   ControlSurfaceResumeBindingSummary,
   ControlSurfaceSummary,
   ControlTerminalSummary,
@@ -626,10 +627,19 @@ type ControlProjectState = {
   settingsFilter: string
   updatedAt: number
 }
+type ControlSurfaceTelemetryState = {
+  ttyName?: string
+  shellState?: 'prompt' | 'running' | 'unknown'
+  lastShellStateAt?: number
+  lastTtyAt?: number
+  lastPortsKickAt?: number
+  lastPortsKickReason?: 'command' | 'refresh'
+}
 
 const controlWorkspaceGroups = ref<ControlWorkspaceGroupState[]>([])
 const controlSurfaceResumeBindings = ref<Record<string, ControlSurfaceResumeBindingState>>({})
 const controlProjectStates = ref<Record<string, ControlProjectState>>({})
+const controlSurfaceTelemetry = ref<Record<string, ControlSurfaceTelemetryState>>({})
 const lastActiveControlPanelId = ref('')
 const controlFlashingPanelIds = ref<string[]>([])
 let controlFlashTimer: number | null = null
@@ -748,6 +758,7 @@ const pruneWorkspaceGroups = () => {
     .filter((group) => group.anchorPanelId && group.memberPanelIds.length)
   controlSurfaceResumeBindings.value = Object.fromEntries(Object.entries(controlSurfaceResumeBindings.value).filter(([panelId]) => panelIds.has(panelId)))
   controlProjectStates.value = Object.fromEntries(Object.entries(controlProjectStates.value).filter(([panelId]) => panelIds.has(panelId)))
+  controlSurfaceTelemetry.value = Object.fromEntries(Object.entries(controlSurfaceTelemetry.value).filter(([panelId]) => panelIds.has(panelId)))
 }
 
 const groupForPanelId = (panelId: string) => {
@@ -785,9 +796,22 @@ const terminalSummaryForControl = (panel: TerminalPanel): ControlTerminalSummary
   }
 }
 
+const surfaceTelemetrySummaryForControl = (state?: ControlSurfaceTelemetryState): ControlSurfaceTelemetrySummary | undefined => {
+  if (!state) return undefined
+  return {
+    ...(state.ttyName ? { ttyName: state.ttyName, tty_name: state.ttyName } : {}),
+    ...(state.shellState ? { shellState: state.shellState, shell_state: state.shellState } : {}),
+    ...(typeof state.lastShellStateAt === 'number' ? { lastShellStateAt: state.lastShellStateAt, last_shell_state_at: state.lastShellStateAt } : {}),
+    ...(typeof state.lastTtyAt === 'number' ? { lastTtyAt: state.lastTtyAt, last_tty_at: state.lastTtyAt } : {}),
+    ...(typeof state.lastPortsKickAt === 'number' ? { lastPortsKickAt: state.lastPortsKickAt, last_ports_kick_at: state.lastPortsKickAt } : {}),
+    ...(state.lastPortsKickReason ? { lastPortsKickReason: state.lastPortsKickReason, last_ports_kick_reason: state.lastPortsKickReason } : {})
+  }
+}
+
 const surfaceSummaryForControl = (panel: TerminalPanel): ControlSurfaceSummary => {
   const workspaceGroup = groupForPanelId(panel.id)
   const resumeBinding = controlSurfaceResumeBindings.value[panel.id]
+  const telemetry = surfaceTelemetrySummaryForControl(controlSurfaceTelemetry.value[panel.id])
   return {
     panelId: panel.id,
     title: panel.title,
@@ -803,6 +827,7 @@ const surfaceSummaryForControl = (panel: TerminalPanel): ControlSurfaceSummary =
     ...(typeof panel.splitOrder === 'number' ? { splitOrder: panel.splitOrder } : {}),
     ...(workspaceGroup ? { workspaceGroupId: workspaceGroup.id, workspaceGroupName: workspaceGroup.name } : {}),
     ...(resumeBinding ? { resumeBinding, resume_binding: resumeBinding } : {}),
+    ...(telemetry ? { telemetry } : {}),
     ...(panel.knowledge
       ? {
           knowledge: {
@@ -1557,6 +1582,16 @@ const selectedPanePayload = (panel: TerminalPanel, action: string, previousActiv
     },
     selectedPane: surfaceSummaryForControl(panel),
     selectedSurface: surfaceSummaryForControl(panel),
+    workspaceId: 'main',
+    workspace_id: 'main',
+    workspaceRef: 'workspace:1',
+    workspace_ref: 'workspace:1',
+    paneId: panel.id,
+    pane_id: panel.id,
+    surfaceId: panel.id,
+    surface_id: panel.id,
+    surfaceRef: panelRefForControl(panel.id),
+    surface_ref: panelRefForControl(panel.id),
     activePanelId: panel.id,
     previousActivePanelId,
     action,
@@ -1693,6 +1728,11 @@ const handlePaneNavigationControlRequest = async (method: string, params: Record
     if (!panel) return controlFail('PANE_NOT_FOUND', 'Pane not found.')
     return focusControlPanel(panel, 'select-pane')
   }
+  if (method === 'surface.focus') {
+    const panel = resolveControlSourceSurfacePanel(params)
+    if (!panel) return controlFail('SURFACE_NOT_FOUND', 'Surface not found.')
+    return focusControlPanel(panel, 'surface.focus')
+  }
   if (method === 'workspace.find') {
     const query = controlText(params.query || params.q || params.text)
     const includeContent = controlBool(params.content ?? params.includeContent ?? params.include_content, false)
@@ -1782,7 +1822,62 @@ const handlePaneManagementControlRequest = async (method: string, params: Record
     await nextTick()
     return managementPanelPayload(panel, 'new-window', 'createdPane', { previousActivePanelId })
   }
-  if (method === 'surface.split') {
+  if (method === 'surface.create') {
+    const type = controlText(params.type).toLowerCase()
+    const url = controlText(params.url)
+    if (type === 'browser' || url) {
+      return controlFail('BROWSER_DISABLED', 'aiopsterm does not implement control_compat browser surfaces.', {
+        unsupported: true,
+        browserDisabled: true,
+        browser_disabled: true,
+        ...(url ? { url } : {}),
+        ...(type ? { type } : {})
+      })
+    }
+    const pane = resolveControlPanePanel(params)
+    if (controlText(params.paneId || params.pane_id || params.panelId || params.panel_id || params.surfaceId || params.surface_id) && !pane) {
+      return controlFail('PANE_NOT_FOUND', 'Pane not found.')
+    }
+    const focus = controlBool(params.focus, false)
+    const previousActivePanelId = workspace.activePanelId
+    if (pane) workspace.activePanelId = pane.id
+    const panel = workspace.createPanel()
+    const title = controlText(params.title || params.name)
+    if (title) workspace.renamePanel(panel.id, title)
+    const cwd = controlText(params.cwd || params.workingDirectory || params.working_directory)
+    if (cwd) panel.cwd = cwd
+    if (!focus && workspace.panels.some((item) => item.id === previousActivePanelId)) {
+      workspace.activePanelId = previousActivePanelId
+    }
+    await nextTick()
+    if (focus) terminalViews.get(panel.id)?.terminal.focus()
+    return managementPanelPayload(panel, 'surface.create', 'createdPane', {
+      workspaceId: 'main',
+      workspace_id: 'main',
+      workspaceRef: 'workspace:1',
+      workspace_ref: 'workspace:1',
+      paneId: panel.id,
+      pane_id: panel.id,
+      surfaceId: panel.id,
+      surface_id: panel.id,
+      surfaceRef: panelRefForControl(panel.id),
+      surface_ref: panelRefForControl(panel.id),
+      surface: surfaceSummaryForControl(panel),
+      pane: surfaceSummaryForControl(panel),
+      type: type || 'terminal',
+      previousActivePanelId,
+      ...(pane ? { targetPane: surfaceSummaryForControl(pane), targetPaneId: pane.id, target_pane_id: pane.id } : {})
+    })
+  }
+  if (method === 'surface.split' || method === 'pane.create') {
+    if (method === 'pane.create') {
+      const type = controlText(params.type).toLowerCase().replace(/[-_\s]/g, '')
+      if (type === 'agentsession') {
+        return controlFail('PANE_AGENT_SESSION_UNSUPPORTED', 'agent-session is only supported by surface.create.', {
+          type: controlText(params.type) || 'agentSession'
+        })
+      }
+    }
     const target = resolveControlPanePanel(params, 'target') || resolveControlPanePanel(params)
     if (!target) return controlFail('PANE_NOT_FOUND', 'Pane not found.')
     const previousActivePanelId = workspace.activePanelId
@@ -1796,7 +1891,25 @@ const handlePaneManagementControlRequest = async (method: string, params: Record
       workspace.activePanelId = previousActivePanelId
     }
     await nextTick()
-    return managementPanelPayload(panel, 'split-window', 'createdPane', { targetPane: surfaceSummaryForControl(target), previousActivePanelId })
+    return managementPanelPayload(panel, method === 'pane.create' ? 'pane.create' : 'split-window', 'createdPane', {
+      targetPane: surfaceSummaryForControl(target),
+      previousActivePanelId,
+      workspaceId: 'main',
+      workspace_id: 'main',
+      workspaceRef: 'workspace:1',
+      workspace_ref: 'workspace:1',
+      paneId: panel.id,
+      pane_id: panel.id,
+      surfaceId: panel.id,
+      surface_id: panel.id,
+      surfaceRef: panelRefForControl(panel.id),
+      surface_ref: panelRefForControl(panel.id),
+      surface: surfaceSummaryForControl(panel),
+      pane: surfaceSummaryForControl(panel),
+      createdSurface: surfaceSummaryForControl(panel),
+      created_surface: surfaceSummaryForControl(panel),
+      type: controlText(params.type) || 'terminal'
+    })
   }
   if (method === 'workspace.rename') {
     const panel = resolveControlSelectablePanel(controlTargetValue(params))
@@ -1849,6 +1962,18 @@ const normalizePaneLayoutDirection = (value: unknown) => {
   const direction = controlText(value).toLowerCase()
   if (direction === 'below' || direction === 'down' || direction === 'vertical') return 'below'
   return 'right'
+}
+
+const normalizeSurfaceShellState = (value: unknown): ControlSurfaceTelemetryState['shellState'] | '' => {
+  const state = controlText(value).toLowerCase()
+  if (state === 'prompt' || state === 'running' || state === 'unknown') return state
+  return ''
+}
+
+const normalizePortsKickReason = (value: unknown): NonNullable<ControlSurfaceTelemetryState['lastPortsKickReason']> | '' => {
+  const reason = controlText(value || 'command').toLowerCase()
+  if (reason === 'command' || reason === 'refresh') return reason
+  return ''
 }
 
 const handlePaneLayoutControlRequest = async (method: string, params: Record<string, unknown>) => {
@@ -1931,6 +2056,60 @@ const handlePaneLayoutControlRequest = async (method: string, params: Record<str
 }
 
 const handleSurfaceOperationsControlRequest = async (method: string, params: Record<string, unknown>) => {
+  if (method === 'surface.report_tty') {
+    const panel = resolveControlSourceSurfacePanel(params)
+    if (!panel) return controlFail('SURFACE_NOT_FOUND', 'Surface not found.')
+    const ttyName = controlText(params.ttyName || params.tty_name || params.tty)
+    if (!ttyName) return controlFail('SURFACE_TTY_REQUIRED', 'surface.report_tty requires tty_name.')
+    const now = Date.now()
+    const previous = controlSurfaceTelemetry.value[panel.id] || {}
+    const telemetry: ControlSurfaceTelemetryState = { ...previous, ttyName, lastTtyAt: now }
+    controlSurfaceTelemetry.value = { ...controlSurfaceTelemetry.value, [panel.id]: telemetry }
+    return surfaceOperationPayload(panel, 'surface.report_tty', {
+      ttyName,
+      tty_name: ttyName,
+      telemetry: surfaceTelemetrySummaryForControl(telemetry),
+      recorded: true
+    })
+  }
+
+  if (method === 'surface.report_shell_state') {
+    const panel = resolveControlSourceSurfacePanel(params)
+    if (!panel) return controlFail('SURFACE_NOT_FOUND', 'Surface not found.')
+    const shellState = normalizeSurfaceShellState(params.state || params.shellState || params.shell_state || params.activity)
+    if (!shellState) return controlFail('SURFACE_SHELL_STATE_INVALID', 'state must be prompt, running, or unknown.')
+    const now = Date.now()
+    const previous = controlSurfaceTelemetry.value[panel.id] || {}
+    const telemetry: ControlSurfaceTelemetryState = { ...previous, shellState, lastShellStateAt: now }
+    controlSurfaceTelemetry.value = { ...controlSurfaceTelemetry.value, [panel.id]: telemetry }
+    return surfaceOperationPayload(panel, 'surface.report_shell_state', {
+      state: shellState,
+      shellState,
+      shell_state: shellState,
+      telemetry: surfaceTelemetrySummaryForControl(telemetry),
+      published: true
+    })
+  }
+
+  if (method === 'surface.ports_kick') {
+    const panel = resolveControlSourceSurfacePanel(params)
+    if (!panel) return controlFail('SURFACE_NOT_FOUND', 'Surface not found.')
+    const reason = normalizePortsKickReason(params.reason)
+    if (!reason) return controlFail('SURFACE_PORTS_KICK_REASON_INVALID', 'reason must be command or refresh.')
+    const now = Date.now()
+    const previous = controlSurfaceTelemetry.value[panel.id] || {}
+    const telemetry: ControlSurfaceTelemetryState = { ...previous, lastPortsKickAt: now, lastPortsKickReason: reason }
+    controlSurfaceTelemetry.value = { ...controlSurfaceTelemetry.value, [panel.id]: telemetry }
+    return surfaceOperationPayload(panel, 'surface.ports_kick', {
+      reason,
+      telemetry: surfaceTelemetrySummaryForControl(telemetry),
+      kicked: true,
+      portScanStarted: false,
+      port_scan_started: false,
+      unsupported: false
+    })
+  }
+
   if (method === 'surface.health') {
     const panels = selectableControlPanels()
     return controlOk({
@@ -2928,10 +3107,10 @@ const handleControlRequest = async (request: ControlRequest): Promise<ControlRes
   }
   if (request.method.startsWith('workspace.group.')) return handleWorkspaceGroupControlRequest(request.method, params)
   if (request.method.startsWith('surface.resume.')) return handleSurfaceResumeControlRequest(request.method, params)
-  if (['workspace.next', 'workspace.previous', 'workspace.last', 'workspace.select', 'workspace.find', 'pane.focus', 'pane.last'].includes(request.method)) {
+  if (['workspace.next', 'workspace.previous', 'workspace.last', 'workspace.select', 'workspace.find', 'pane.focus', 'pane.last', 'surface.focus'].includes(request.method)) {
     return handlePaneNavigationControlRequest(request.method, params)
   }
-  if (['pane.list', 'pane.surfaces', 'workspace.create', 'surface.split', 'workspace.rename', 'workspace.close', 'surface.close', 'workspace.has_session', 'workspace.select_layout'].includes(request.method)) {
+  if (['pane.list', 'pane.surfaces', 'pane.create', 'workspace.create', 'surface.create', 'surface.split', 'workspace.rename', 'workspace.close', 'surface.close', 'workspace.has_session', 'workspace.select_layout'].includes(request.method)) {
     return handlePaneManagementControlRequest(request.method, params)
   }
   if (request.method.startsWith('pane.')) return handlePaneLayoutControlRequest(request.method, params)
@@ -2943,6 +3122,9 @@ const handleControlRequest = async (request: ControlRequest): Promise<ControlRes
       'surface.refresh',
       'surface.health',
       'surface.trigger_flash',
+      'surface.report_tty',
+      'surface.report_shell_state',
+      'surface.ports_kick',
       'workspace.reorder',
       'workspace.reorder_many',
       'workspace.move_to_window',

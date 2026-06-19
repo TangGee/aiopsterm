@@ -7710,6 +7710,79 @@ describe('AppShell', () => {
     wrapper.unmount()
   })
 
+  it('tracks surface telemetry and control_compat create/focus primitives through the control socket', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    mockXtermInstances.length = 0
+    let controlHandler: ((request: any) => Promise<any> | any) | null = null
+    vi.mocked(window.aiops.onControlRequest).mockImplementationOnce((handler: any) => {
+      controlHandler = handler
+      return () => {
+        controlHandler = null
+      }
+    })
+
+    const wrapper = mount(TerminalWorkspace, {
+      attachTo: document.body,
+      global: { plugins: [pinia] }
+    })
+    await flushPromises()
+    const invokeControlHandler = controlHandler as unknown as (request: any) => Promise<any>
+    expect(invokeControlHandler).toBeTruthy()
+    const store = useWorkspaceStore()
+    await openLocalShellFromActiveTab(wrapper)
+    await flushPromises()
+    const firstPanelId = store.activePanelId
+    vi.mocked(window.aiops.writeTerminal).mockClear()
+
+    const createResponse = await invokeControlHandler({
+      id: 'surface-create',
+      method: 'surface.create',
+      params: { title: 'Created Surface', cwd: '/tmp/created', focus: true }
+    })
+    expect(createResponse).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ surfaceId: expect.any(String), action: 'surface.create' }) }))
+    const createdPanelId = createResponse.data.surfaceId
+    expect(store.panels.find((panel) => panel.id === createdPanelId)).toEqual(expect.objectContaining({ title: 'Created Surface', cwd: '/tmp/created' }))
+    expect(store.activePanelId).toBe(createdPanelId)
+
+    const focusResponse = await invokeControlHandler({ id: 'surface-focus', method: 'surface.focus', params: { surface_id: firstPanelId } })
+    expect(focusResponse).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ surface_id: firstPanelId, action: 'surface.focus' }) }))
+    expect(store.activePanelId).toBe(firstPanelId)
+
+    const paneCreateResponse = await invokeControlHandler({
+      id: 'pane-create',
+      method: 'pane.create',
+      params: { surface_id: firstPanelId, direction: 'below', title: 'Pane Created', focus: false }
+    })
+    expect(paneCreateResponse).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ action: 'pane.create' }) }))
+    const paneCreated = store.panels.find((panel) => panel.title === 'Pane Created')
+    expect(paneCreated).toEqual(expect.objectContaining({ split: 'below', splitSourceId: firstPanelId, splitGroupId: firstPanelId }))
+
+    const reportTty = await invokeControlHandler({ id: 'report-tty', method: 'surface.report_tty', params: { surface_id: firstPanelId, tty_name: '/dev/pts/7' } })
+    expect(reportTty).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ tty_name: '/dev/pts/7', recorded: true }) }))
+    const reportState = await invokeControlHandler({ id: 'report-state', method: 'surface.report_shell_state', params: { surface_id: firstPanelId, state: 'prompt' } })
+    expect(reportState).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ state: 'prompt', published: true }) }))
+    const portsKick = await invokeControlHandler({ id: 'ports-kick', method: 'surface.ports_kick', params: { surface_id: firstPanelId, reason: 'refresh' } })
+    expect(portsKick).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ reason: 'refresh', kicked: true, port_scan_started: false }) }))
+
+    const listResponse = await invokeControlHandler({ id: 'surface-list', method: 'surface.list', params: {} })
+    expect(listResponse.data.surfaces).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          panelId: firstPanelId,
+          telemetry: expect.objectContaining({
+            tty_name: '/dev/pts/7',
+            shell_state: 'prompt',
+            last_ports_kick_reason: 'refresh'
+          })
+        })
+      ])
+    )
+    expect(window.aiops.writeTerminal).not.toHaveBeenCalled()
+
+    wrapper.unmount()
+  })
+
   it('opens control_compat-style settings, feedback, and sidebar snapshots through the shared terminal workspace control handler', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)

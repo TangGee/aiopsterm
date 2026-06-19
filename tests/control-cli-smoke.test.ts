@@ -858,6 +858,53 @@ describe('aiopsterm-control CLI', () => {
     ])
   })
 
+  it('sends control_compat-style surface telemetry and create/focus requests from the CLI helper', async () => {
+    const seen: Record<string, unknown>[] = []
+    const socketPath = await startControlServer((request) => {
+      seen.push(request)
+      const params = (request.params as any) || {}
+      if (request.method === 'surface.focus') {
+        return { id: request.id, ok: true, data: { surface: { panelId: params.surfaceId || 'panel-1', surfaceKind: 'terminal' }, selectedPane: { panelId: params.surfaceId || 'panel-1', surfaceKind: 'terminal' }, action: 'surface.focus' } }
+      }
+      if (request.method === 'surface.create') {
+        return { id: request.id, ok: true, data: { createdPane: { panelId: 'panel-new', title: params.title || 'New', surfaceKind: 'terminal' }, surface: { panelId: 'panel-new', surfaceKind: 'terminal' }, action: 'surface.create' } }
+      }
+      if (request.method === 'pane.create') {
+        return { id: request.id, ok: true, data: { createdPane: { panelId: 'panel-split', title: params.title || 'Split', surfaceKind: 'terminal' }, pane: { panelId: 'panel-split', surfaceKind: 'terminal' }, action: 'pane.create' } }
+      }
+      return {
+        id: request.id,
+        ok: true,
+        data: {
+          surface: { panelId: params.surfaceId || 'panel-1', title: 'Main', surfaceKind: 'terminal' },
+          action: request.method,
+          ttyName: params.ttyName,
+          state: params.state,
+          reason: params.reason || 'command',
+          published: request.method === 'surface.report_shell_state',
+          kicked: request.method === 'surface.ports_kick'
+        }
+      }
+    })
+
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'surface', 'focus', '--surface', 'panel-1'], { cwd: process.cwd() })
+    const created = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'surface', 'create', '--title', 'Scratch', '--cwd', '/tmp/scratch', '--focus', 'true'], { cwd: process.cwd() })
+    expect(created.stdout).toContain('created\tpanel-new\tScratch')
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'pane', 'create', '--surface', 'panel-1', '--direction', 'below', '--title', 'Split'], { cwd: process.cwd() })
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'surface', 'report-tty', '--surface', 'panel-1', '/dev/pts/7'], { cwd: process.cwd() })
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'surface', 'report-shell-state', '--surface', 'panel-1', 'prompt'], { cwd: process.cwd() })
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'surface', 'ports-kick', '--surface', 'panel-1', '--reason', 'refresh'], { cwd: process.cwd() })
+
+    expect(seen).toEqual([
+      expect.objectContaining({ method: 'surface.focus', params: expect.objectContaining({ surfaceId: 'panel-1' }) }),
+      expect.objectContaining({ method: 'surface.create', params: expect.objectContaining({ title: 'Scratch', cwd: '/tmp/scratch', focus: true }) }),
+      expect.objectContaining({ method: 'pane.create', params: expect.objectContaining({ surfaceId: 'panel-1', direction: 'below', title: 'Split' }) }),
+      expect.objectContaining({ method: 'surface.report_tty', params: expect.objectContaining({ surfaceId: 'panel-1', ttyName: '/dev/pts/7' }) }),
+      expect.objectContaining({ method: 'surface.report_shell_state', params: expect.objectContaining({ surfaceId: 'panel-1', state: 'prompt' }) }),
+      expect.objectContaining({ method: 'surface.ports_kick', params: expect.objectContaining({ surfaceId: 'panel-1', reason: 'refresh' }) })
+    ])
+  })
+
   it('sends notification requests over the configured socket', async () => {
     const seen: Record<string, unknown>[] = []
     const socketPath = await startControlServer((request) => {
@@ -881,6 +928,40 @@ describe('aiopsterm-control CLI', () => {
     })
     expect(JSON.parse(result.stdout)).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ notification: expect.objectContaining({ title: 'Done' }) }) }))
     expect(seen).toEqual([expect.objectContaining({ method: 'notification.create', params: expect.objectContaining({ title: 'Done', body: 'All green' }) })])
+  })
+
+  it('sends targeted notification requests over the configured socket', async () => {
+    const seen: Record<string, unknown>[] = []
+    const socketPath = await startControlServer((request) => {
+      seen.push(request)
+      const params = (request.params as any) || {}
+      return {
+        id: request.id,
+        ok: true,
+        data: {
+          notification: {
+            id: 'notification-1',
+            title: params.title,
+            panelId: params.surfaceId || params.panelId,
+            workspaceId: params.workspaceId || 'main',
+            read: false
+          },
+          targeted: true
+        }
+      }
+    })
+
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'notify-surface', '--surface', 'panel-1', '--title', 'Needs review'], {
+      cwd: process.cwd()
+    })
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'notify-target', '--workspace', 'main', '--surface', 'panel-2', '--title', 'Done'], {
+      cwd: process.cwd()
+    })
+
+    expect(seen).toEqual([
+      expect.objectContaining({ method: 'notification.create_for_surface', params: expect.objectContaining({ surfaceId: 'panel-1', surface_id: 'panel-1', title: 'Needs review' }) }),
+      expect.objectContaining({ method: 'notification.create_for_target', params: expect.objectContaining({ workspaceId: 'main', surfaceId: 'panel-2', title: 'Done' }) })
+    ])
   })
 
   it('prints or sends display-message through the notification bridge', async () => {

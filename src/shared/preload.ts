@@ -183,6 +183,21 @@ export type ControlSurfaceResumeBindingSummary = {
   updated_at?: number
 }
 
+export type ControlSurfaceTelemetrySummary = {
+  ttyName?: string
+  tty_name?: string
+  shellState?: 'prompt' | 'running' | 'unknown'
+  shell_state?: 'prompt' | 'running' | 'unknown'
+  lastShellStateAt?: number
+  last_shell_state_at?: number
+  lastTtyAt?: number
+  last_tty_at?: number
+  lastPortsKickAt?: number
+  last_ports_kick_at?: number
+  lastPortsKickReason?: 'command' | 'refresh'
+  last_ports_kick_reason?: 'command' | 'refresh'
+}
+
 export type ControlSurfaceSummary = {
   panelId: string
   title: string
@@ -201,6 +216,7 @@ export type ControlSurfaceSummary = {
   workspaceGroupName?: string
   resumeBinding?: ControlSurfaceResumeBindingSummary
   resume_binding?: ControlSurfaceResumeBindingSummary
+  telemetry?: ControlSurfaceTelemetrySummary
   knowledge?: {
     relPath: string
     isImage: boolean
