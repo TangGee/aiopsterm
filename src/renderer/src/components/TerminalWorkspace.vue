@@ -1325,6 +1325,23 @@ const handlePaneManagementControlRequest = async (method: string, params: Record
       activePanelId: workspace.activePanelId
     })
   }
+  if (method === 'pane.surfaces') {
+    const panel = resolveControlPanePanel(params)
+    if (!panel) return controlFail('PANE_NOT_FOUND', 'Pane not found.')
+    const surface = surfaceSummaryForControl(panel)
+    return controlOk({
+      workspaceId: 'main',
+      workspace_id: 'main',
+      paneId: panel.id,
+      pane_id: panel.id,
+      panelId: panel.id,
+      surfaceId: panel.id,
+      surface_id: panel.id,
+      surfaces: [{ ...surface, id: panel.id, ref: 'surface:1', index: 1, selected: true }],
+      count: 1,
+      activePanelId: workspace.activePanelId
+    })
+  }
   if (method === 'workspace.create') {
     const focus = controlBool(params.focus, true)
     const previousActivePanelId = workspace.activePanelId
@@ -2254,7 +2271,7 @@ const handleControlRequest = async (request: ControlRequest): Promise<ControlRes
   if (['workspace.next', 'workspace.previous', 'workspace.last', 'workspace.select', 'workspace.find', 'pane.focus', 'pane.last'].includes(request.method)) {
     return handlePaneNavigationControlRequest(request.method, params)
   }
-  if (['pane.list', 'workspace.create', 'surface.split', 'workspace.rename', 'workspace.close', 'surface.close', 'workspace.has_session', 'workspace.select_layout'].includes(request.method)) {
+  if (['pane.list', 'pane.surfaces', 'workspace.create', 'surface.split', 'workspace.rename', 'workspace.close', 'surface.close', 'workspace.has_session', 'workspace.select_layout'].includes(request.method)) {
     return handlePaneManagementControlRequest(request.method, params)
   }
   if (request.method.startsWith('pane.')) return handlePaneLayoutControlRequest(request.method, params)

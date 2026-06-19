@@ -17,7 +17,7 @@ Commands:
   hooks list|setup|install|uninstall [--agent <name>]
   feed list|mark-handled|clear-ended|clear [--yes]
   workspace snapshot
-  workspace list
+  workspace list|current
   workspace group <subcommand>
   workspace-group <subcommand>
   session save|list|show|restore|clear [--id <id>] [--name <name>]
@@ -30,6 +30,15 @@ Commands:
   agent team launch [--source codex|claude-code|custom] [--count <n>] [--cwd <path>] [--prompt <text>] [--command <shell>]
   events [--after <seq>] [--cursor-file <path>] [--name <event>] [--category <category>] [--limit <n>] [--no-ack] [--no-heartbeat]
   tree
+  new-workspace [--name <title>] [--cwd <path>] [--no-focus]
+  current-workspace
+  select-workspace --workspace <panel-id>
+  close-workspace --workspace <panel-id>
+  list-panels
+  list-pane-surfaces [--pane <panel-id>]
+  close-surface [--surface <panel-id>]
+  new-split [right|below|left|up] [--surface <panel-id>] [--focus <true|false>]
+  new-pane [--direction right|below] [--focus <true|false>]
   list-windows
   current-window
   list-panes
@@ -213,6 +222,9 @@ const methodParams = () => {
   }
   if (['set-status', 'clear-status', 'list-status', 'set-progress', 'clear-progress', 'log', 'clear-log', 'list-log', 'sidebar-state'].includes(command)) return sidebarMetadataMethodParams(command)
   if (['resize-pane', 'resizep', 'swap-pane', 'swapp', 'break-pane', 'breakp', 'join-pane', 'joinp'].includes(command)) return paneLayoutMethodParams(command)
+  if (['new-workspace', 'current-workspace', 'select-workspace', 'close-workspace', 'list-panels', 'list-pane-surfaces', 'close-surface', 'new-split', 'new-pane'].includes(command)) {
+    return surfaceWorkspaceAliasMethodParams(command)
+  }
   if (['next-window', 'nextw', 'previous-window', 'prev-window', 'previousw', 'prevw', 'last-window', 'lastw', 'select-window', 'selectw', 'select-pane', 'selectp', 'focus-pane', 'last-pane', 'lastp', 'find-window', 'findw'].includes(command)) {
     return paneNavigationMethodParams(command)
   }
@@ -572,6 +584,50 @@ const readPaneDirection = () => {
   if (hasFlag('--below') || hasFlag('-v')) return 'below'
   if (hasFlag('--right') || hasFlag('-h')) return 'right'
   return 'right'
+}
+
+const readSplitDirectionValue = () => {
+  const direction = (readOption('--direction') || readOption('--split') || args.find((arg) => arg !== '--' && !arg.startsWith('-')) || '').trim().toLowerCase()
+  if (direction === 'left' || direction === 'right' || direction === 'up' || direction === 'down' || direction === 'below') return direction === 'down' ? 'below' : direction
+  if (hasFlag('-v')) return 'below'
+  if (hasFlag('-h')) return 'right'
+  return 'right'
+}
+
+const surfaceWorkspaceAliasMethodParams = (command) => {
+  if (command === 'new-workspace') {
+    const title = readOption('--name') || readOption('-n') || readOption('--title')
+    const cwd = readOption('--cwd') || readOption('-c')
+    const focus = !(hasFlag('--no-focus') || hasFlag('-d'))
+    return { method: 'workspace.create', params: { title, name: title, cwd, focus } }
+  }
+  if (command === 'current-workspace') return { method: 'workspace.current', params: {} }
+  if (command === 'select-workspace') {
+    const target = readOption('--workspace') || readOption('--target') || readOption('--panel') || args.find((arg) => arg !== '--' && !arg.startsWith('--')) || ''
+    return { method: 'workspace.select', params: { workspaceId: target, workspace_id: target, panelId: target, surfaceId: target } }
+  }
+  if (command === 'close-workspace') {
+    const target = readOption('--workspace') || readOption('--target') || readOption('--panel') || args.find((arg) => arg !== '--' && !arg.startsWith('--')) || ''
+    return { method: 'workspace.close', params: { workspaceId: target, workspace_id: target, panelId: target, surfaceId: target } }
+  }
+  if (command === 'list-panels') return { method: 'surface.list', params: {} }
+  if (command === 'list-pane-surfaces') return { method: 'pane.surfaces', params: readPaneTarget() }
+  if (command === 'close-surface') {
+    const target = readOption('--surface') || readOption('--panel') || readOption('--target') || readOption('-t') || args.find((arg) => arg !== '--' && !arg.startsWith('--')) || ''
+    return { method: 'surface.close', params: { paneId: target, pane_id: target, panelId: target, surfaceId: target } }
+  }
+  const target = readOption('--surface') || readOption('--panel') || readOption('--target') || readOption('-t')
+  return {
+    method: 'surface.split',
+    params: {
+      paneId: target,
+      panelId: target,
+      surfaceId: target,
+      targetPaneId: target,
+      direction: readSplitDirectionValue(),
+      focus: readFocusOption()
+    }
+  }
 }
 
 const paneLayoutMethodParams = (command) => {

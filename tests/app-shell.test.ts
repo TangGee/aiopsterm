@@ -7626,6 +7626,18 @@ describe('AppShell', () => {
     expect(listPanes).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ count: store.panels.length }) }))
     expect(listPanes.data.panes).toEqual(expect.arrayContaining([expect.objectContaining({ panelId: firstPanelId }), expect.objectContaining({ panelId: sidecarPanel?.id })]))
 
+    const paneSurfaces = await invokeControlHandler({ id: 'list-pane-surfaces', method: 'pane.surfaces', params: { paneId: sidecarPanel!.id } })
+    expect(paneSurfaces).toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
+          paneId: sidecarPanel!.id,
+          count: 1,
+          surfaces: [expect.objectContaining({ panelId: sidecarPanel!.id, selected: true })]
+        })
+      })
+    )
+
     const renameResponse = await invokeControlHandler({
       id: 'rename-window',
       method: 'workspace.rename',

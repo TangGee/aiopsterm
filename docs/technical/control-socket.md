@@ -137,6 +137,8 @@ The pane layout slice adds control_compat/tmux-style structural controls over th
 - `pane.resize`: accepted as a compatibility command, but currently returns `unsupported=true` because aiopsterm split panes use an equal-size layout and do not store per-pane dimensions.
 - `workspace.next`, `workspace.previous`, `workspace.last`, `workspace.select`, `pane.focus`, `pane.last`, and `workspace.find`: control_compat/tmux-style navigation and lookup over the same shared main work panel.
 - `pane.list`, `workspace.create`, `surface.split`, `workspace.rename`, `workspace.close`, `surface.close`, `workspace.has_session`, and `workspace.select_layout`: tmux-compatible list/create/rename/close/layout verbs over the shared main work panel.
+- `pane.surfaces`: return the surface hosted by a selected shared-work-panel pane. In aiopsterm's current model a pane maps to one visible terminal/knowledge surface.
+- `new-workspace`, `current-workspace`, `select-workspace`, `close-workspace`, `list-panels`, `list-pane-surfaces`, `close-surface`, `new-split`, and `new-pane`: control_compat legacy aliases accepted by the CLI/backend and routed to the structured workspace, surface, and pane methods above. `new-pane` currently creates a split-compatible shared work-panel surface rather than a separate hidden pane container.
 
 The sidebar metadata slice adds control_compat-style status channels for local automation:
 

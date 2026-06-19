@@ -745,6 +745,53 @@ describe('control socket backend', () => {
     expect(paneEvents.data?.events).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'pane.created' }), expect.objectContaining({ name: 'pane.closed' })]))
   })
 
+  it('routes control_compat-style surface and workspace aliases to the renderer', async () => {
+    const backend = await loadBackend()
+    backend.registerControlSocketIpc({
+      handle: (_channel, handler) => {
+        mockIpcHandler = handler
+      }
+    })
+    mockWindow = createMockWindow((request) => {
+      const params = (request.params as any) || {}
+      if (request.method === 'workspace.current') return { ok: true, data: { workspace: { panelId: 'panel-1', title: 'Main', active: true }, activePanelId: 'panel-1' } }
+      if (request.method === 'workspace.select') return { ok: true, data: { selectedPane: { panelId: params.panelId || 'panel-1', title: 'Main' }, activePanelId: params.panelId || 'panel-1', action: 'select-workspace' } }
+      if (request.method === 'surface.list') return { ok: true, data: { surfaces: [{ panelId: 'panel-1', title: 'Main', surfaceKind: 'terminal' }], count: 1 } }
+      if (request.method === 'pane.surfaces') return { ok: true, data: { paneId: params.paneId || 'panel-1', surfaces: [{ panelId: params.paneId || 'panel-1', title: 'Main', surfaceKind: 'terminal', selected: true }], count: 1 } }
+      if (request.method === 'workspace.close' || request.method === 'surface.close') {
+        return { ok: true, data: { closedPane: { panelId: params.panelId || params.paneId || 'panel-1', title: 'Closed' }, action: request.method } }
+      }
+      return { ok: true, data: { createdPane: { panelId: 'panel-new', title: params.title || 'New' }, action: request.method } }
+    })
+    backend.configureControlSocketRuntime({ getWindows: () => [mockWindow] })
+
+    await expect(backend.__testing.handleControlRequest({ method: 'new-workspace', params: { title: 'Scratch', focus: false } })).resolves.toEqual(expect.objectContaining({ ok: true }))
+    await expect(backend.__testing.handleControlRequest({ method: 'current-workspace', params: {} })).resolves.toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ activePanelId: 'panel-1' }) }))
+    await expect(backend.__testing.handleControlRequest({ method: 'select-workspace', params: { panelId: 'panel-2' } })).resolves.toEqual(expect.objectContaining({ ok: true }))
+    await expect(backend.__testing.handleControlRequest({ method: 'close-workspace', params: { panelId: 'panel-2' } })).resolves.toEqual(expect.objectContaining({ ok: true }))
+    await expect(backend.__testing.handleControlRequest({ method: 'list-panels', params: {} })).resolves.toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ count: 1 }) }))
+    await expect(backend.__testing.handleControlRequest({ method: 'list-pane-surfaces', params: { paneId: 'panel-1' } })).resolves.toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ count: 1 }) }))
+    await expect(backend.__testing.handleControlRequest({ method: 'close-surface', params: { paneId: 'panel-1' } })).resolves.toEqual(expect.objectContaining({ ok: true }))
+    await expect(backend.__testing.handleControlRequest({ method: 'new-split', params: { surfaceId: 'panel-1', direction: 'below', focus: true } })).resolves.toEqual(expect.objectContaining({ ok: true }))
+    await expect(backend.__testing.handleControlRequest({ method: 'new-pane', params: { direction: 'right' } })).resolves.toEqual(expect.objectContaining({ ok: true }))
+
+    expect(mockWindow.requests).toEqual([
+      expect.objectContaining({ method: 'workspace.create', params: expect.objectContaining({ title: 'Scratch' }) }),
+      expect.objectContaining({ method: 'workspace.current' }),
+      expect.objectContaining({ method: 'workspace.select', params: expect.objectContaining({ panelId: 'panel-2' }) }),
+      expect.objectContaining({ method: 'workspace.close', params: expect.objectContaining({ panelId: 'panel-2' }) }),
+      expect.objectContaining({ method: 'surface.list' }),
+      expect.objectContaining({ method: 'pane.surfaces', params: expect.objectContaining({ paneId: 'panel-1' }) }),
+      expect.objectContaining({ method: 'surface.close', params: expect.objectContaining({ paneId: 'panel-1' }) }),
+      expect.objectContaining({ method: 'surface.split', params: expect.objectContaining({ surfaceId: 'panel-1', direction: 'below' }) }),
+      expect.objectContaining({ method: 'surface.split', params: expect.objectContaining({ direction: 'right' }) })
+    ])
+    const workspaceEvents = await backend.__testing.handleControlRequest({ method: 'events.list', params: { category: 'workspace' } })
+    expect(workspaceEvents.data?.events).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'workspace.created' }), expect.objectContaining({ name: 'workspace.selected' }), expect.objectContaining({ name: 'workspace.closed' })]))
+    const paneEvents = await backend.__testing.handleControlRequest({ method: 'events.list', params: { category: 'pane' } })
+    expect(paneEvents.data?.events).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'pane.created' }), expect.objectContaining({ name: 'pane.closed' })]))
+  })
+
   it('writes terminal keys through session ids and resolves panel ids through the renderer', async () => {
     const backend = await loadBackend()
     const writes: Array<{ sessionId: string; data: string }> = []

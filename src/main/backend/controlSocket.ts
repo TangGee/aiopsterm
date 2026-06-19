@@ -2803,6 +2803,7 @@ const handleControlRequest = async (request: ControlSocketRequest): Promise<Cont
     method === 'workspace.has_session' ||
     method === 'workspace.select_layout' ||
     method === 'pane.list' ||
+    method === 'pane.surfaces' ||
     method === 'pane.focus' ||
     method === 'pane.last' ||
     method === 'surface.split' ||
@@ -2827,6 +2828,34 @@ const handleControlRequest = async (request: ControlSocketRequest): Promise<Cont
   }
   if (method === 'list_workspaces') return dispatchRendererControlRequest('workspace.list', params)
   if (method === 'list_surfaces') return dispatchRendererControlRequest('surface.list', params)
+  if (method === 'new-workspace') {
+    const response = await dispatchRendererControlRequest('workspace.create', params, { focus: params.focus !== false })
+    publishRendererMutationEvent('workspace.create', params, response)
+    return response
+  }
+  if (method === 'current-workspace') return dispatchRendererControlRequest('workspace.current', params)
+  if (method === 'select-workspace') {
+    const response = await dispatchRendererControlRequest('workspace.select', params, { focus: true })
+    publishRendererMutationEvent('workspace.select', params, response)
+    return response
+  }
+  if (method === 'close-workspace') {
+    const response = await dispatchRendererControlRequest('workspace.close', params)
+    publishRendererMutationEvent('workspace.close', params, response)
+    return response
+  }
+  if (method === 'list-panels') return dispatchRendererControlRequest('surface.list', params)
+  if (method === 'list-pane-surfaces') return dispatchRendererControlRequest('pane.surfaces', params)
+  if (method === 'close-surface') {
+    const response = await dispatchRendererControlRequest('surface.close', params)
+    publishRendererMutationEvent('surface.close', params, response)
+    return response
+  }
+  if (method === 'new-split' || method === 'new-pane') {
+    const response = await dispatchRendererControlRequest('surface.split', params, { focus: params.focus === true })
+    publishRendererMutationEvent('surface.split', params, response)
+    return response
+  }
   if (method === 'list-windows' || method === 'lsw') return dispatchRendererControlRequest('workspace.list', params)
   if (method === 'current-window' || method === 'currentw') return dispatchRendererControlRequest('workspace.current', params)
   if (method === 'list-panes' || method === 'lsp') return dispatchRendererControlRequest('pane.list', params)
