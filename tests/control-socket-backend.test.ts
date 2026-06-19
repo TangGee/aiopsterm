@@ -1481,6 +1481,7 @@ describe('control socket backend', () => {
     await expect(backend.__testing.handleControlRequest({ method: 'move-surface', params: { surfaceId: 'panel-2', paneId: 'panel-1' } })).resolves.toEqual(expect.objectContaining({ ok: true }))
     await expect(backend.__testing.handleControlRequest({ method: 'reorder-surface', params: { surfaceId: 'panel-2', index: 0 } })).resolves.toEqual(expect.objectContaining({ ok: true }))
     await expect(backend.__testing.handleControlRequest({ method: 'split-off', params: { surfaceId: 'panel-2' } })).resolves.toEqual(expect.objectContaining({ ok: true }))
+    await expect(backend.__testing.handleControlRequest({ method: 'surface.drag_to_split', params: { surfaceId: 'panel-3', direction: 'right' } })).resolves.toEqual(expect.objectContaining({ ok: true }))
     await expect(backend.__testing.handleControlRequest({ method: 'refresh-surfaces', params: {} })).resolves.toEqual(expect.objectContaining({ ok: true }))
     await expect(backend.__testing.handleControlRequest({ method: 'surface-health', params: {} })).resolves.toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ count: 1 }) }))
     await expect(backend.__testing.handleControlRequest({ method: 'trigger-flash', params: { surfaceId: 'panel-1' } })).resolves.toEqual(expect.objectContaining({ ok: true }))
@@ -1495,6 +1496,7 @@ describe('control socket backend', () => {
       expect.objectContaining({ method: 'surface.move', params: expect.objectContaining({ surfaceId: 'panel-2', paneId: 'panel-1' }) }),
       expect.objectContaining({ method: 'surface.reorder', params: expect.objectContaining({ surfaceId: 'panel-2', index: 0 }) }),
       expect.objectContaining({ method: 'surface.split_off', params: expect.objectContaining({ surfaceId: 'panel-2' }) }),
+      expect.objectContaining({ method: 'surface.drag_to_split', params: expect.objectContaining({ surfaceId: 'panel-3', direction: 'right' }) }),
       expect.objectContaining({ method: 'surface.refresh' }),
       expect.objectContaining({ method: 'surface.health' }),
       expect.objectContaining({ method: 'surface.trigger_flash', params: expect.objectContaining({ surfaceId: 'panel-1' }) }),
@@ -1860,7 +1862,22 @@ describe('control socket backend', () => {
         })
       })
     )
-    expect(shown).toEqual([expect.objectContaining({ panelId: 'panel-1' }), expect.objectContaining({ panelId: 'panel-2' })])
+    const callerNotification = await backend.__testing.handleControlRequest({
+      method: 'notification.create_for_caller',
+      params: { caller: { panelId: 'panel-3', workspaceId: 'main' }, title: 'Caller' }
+    })
+    expect(callerNotification).toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
+          method: 'notification.create_for_caller',
+          targeted: true,
+          surface_id: 'panel-3',
+          notification: expect.objectContaining({ title: 'Caller', panelId: 'panel-3', workspaceId: 'main' })
+        })
+      })
+    )
+    expect(shown).toEqual([expect.objectContaining({ panelId: 'panel-1' }), expect.objectContaining({ panelId: 'panel-2' }), expect.objectContaining({ panelId: 'panel-3' })])
     await expect(backend.__testing.handleControlRequest({ method: 'notification.create_for_surface', params: { title: 'Missing' } })).resolves.toEqual(expect.objectContaining({ ok: false, errorCode: 'NOTIFICATION_SURFACE_REQUIRED' }))
   })
 

@@ -841,6 +841,7 @@ describe('aiopsterm-control CLI', () => {
     await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'move-surface', '--surface', 'panel-2', '--pane', 'panel-1', '--focus', 'true'], { cwd: process.cwd() })
     await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'reorder-surface', '--surface', 'panel-2', '--before', 'panel-1'], { cwd: process.cwd() })
     await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'split-off', '--surface', 'panel-2', 'below'], { cwd: process.cwd() })
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'drag-surface-to-split', '--surface', 'panel-3', 'right'], { cwd: process.cwd() })
     await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'refresh-surfaces'], { cwd: process.cwd() })
     const health = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'surface-health'], { cwd: process.cwd() })
     expect(health.stdout).toContain('panel-1\tterminal')
@@ -853,6 +854,7 @@ describe('aiopsterm-control CLI', () => {
       expect.objectContaining({ method: 'surface.move', params: expect.objectContaining({ surfaceId: 'panel-2', paneId: 'panel-1', focus: true }) }),
       expect.objectContaining({ method: 'surface.reorder', params: expect.objectContaining({ surfaceId: 'panel-2', beforeSurfaceId: 'panel-1' }) }),
       expect.objectContaining({ method: 'surface.split_off', params: expect.objectContaining({ surfaceId: 'panel-2', direction: 'below' }) }),
+      expect.objectContaining({ method: 'surface.drag_to_split', params: expect.objectContaining({ surfaceId: 'panel-3', direction: 'right' }) }),
       expect.objectContaining({ method: 'surface.refresh' }),
       expect.objectContaining({ method: 'surface.health' }),
       expect.objectContaining({ method: 'surface.trigger_flash', params: expect.objectContaining({ surfaceId: 'panel-1' }) }),
@@ -1232,12 +1234,16 @@ describe('aiopsterm-control CLI', () => {
     await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'notify-surface', '--surface', 'panel-1', '--title', 'Needs review'], {
       cwd: process.cwd()
     })
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'notify-caller', '--panel', 'panel-3', '--title', 'Caller'], {
+      cwd: process.cwd()
+    })
     await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'notify-target', '--workspace', 'main', '--surface', 'panel-2', '--title', 'Done'], {
       cwd: process.cwd()
     })
 
     expect(seen).toEqual([
       expect.objectContaining({ method: 'notification.create_for_surface', params: expect.objectContaining({ surfaceId: 'panel-1', surface_id: 'panel-1', title: 'Needs review' }) }),
+      expect.objectContaining({ method: 'notification.create_for_caller', params: expect.objectContaining({ caller: expect.objectContaining({ panelId: 'panel-3', surfaceId: 'panel-3' }), title: 'Caller' }) }),
       expect.objectContaining({ method: 'notification.create_for_target', params: expect.objectContaining({ workspaceId: 'main', surfaceId: 'panel-2', title: 'Done' }) })
     ])
   })

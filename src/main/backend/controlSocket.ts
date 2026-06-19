@@ -4008,6 +4008,33 @@ const createTargetedNotification = (method: string, params: Record<string, unkno
   })
 }
 
+const createCallerNotification = (params: Record<string, unknown>) => {
+  const caller = params.caller && typeof params.caller === 'object' && !Array.isArray(params.caller) ? (params.caller as Record<string, unknown>) : {}
+  const surfaceId = cleanText(caller.surfaceId || caller.surface_id || caller.panelId || caller.panel_id || params.surfaceId || params.surface_id || params.panelId || params.panel_id)
+  const workspaceId = cleanText(caller.workspaceId || caller.workspace_id || params.workspaceId || params.workspace_id || params.workspace) || 'main'
+  const response = createNotification({
+    ...params,
+    ...(surfaceId ? { panelId: surfaceId, surfaceId } : {}),
+    workspaceId,
+    workspace_id: workspaceId
+  })
+  if (!response.ok) return response
+  return ok({
+    ...(response.data || {}),
+    workspaceId,
+    workspace_id: workspaceId,
+    workspaceRef: workspaceId === 'main' ? 'workspace:1' : workspaceId,
+    workspace_ref: workspaceId === 'main' ? 'workspace:1' : workspaceId,
+    surfaceId: surfaceId || null,
+    surface_id: surfaceId || null,
+    surfaceRef: surfaceId || null,
+    surface_ref: surfaceId || null,
+    caller,
+    targeted: Boolean(surfaceId),
+    method: 'notification.create_for_caller'
+  })
+}
+
 const resolveNotification = (params: Record<string, unknown>) => {
   const id = cleanText(params.id || params.notificationId)
   if (!id) return null
@@ -4124,7 +4151,7 @@ const rendererMutationEventName = (method: string) => {
   if (method === 'surface.ports_kick') return 'surface.ports_kicked'
   if (method === 'surface.move') return 'surface.moved'
   if (method === 'surface.reorder') return 'surface.reordered'
-  if (method === 'surface.split_off') return 'surface.split_off'
+  if (method === 'surface.drag_to_split' || method === 'surface.split_off') return 'surface.split_off'
   if (method === 'surface.refresh') return 'surface.refreshed'
   if (method === 'surface.trigger_flash') return 'surface.flashed'
   if (method === 'workspace.reorder') return 'workspace.reordered'
@@ -4410,6 +4437,7 @@ const handleControlRequest = async (request: ControlSocketRequest): Promise<Cont
     method === 'surface.reorder' ||
     method === 'surface.action' ||
     method === 'tab.action' ||
+    method === 'surface.drag_to_split' ||
     method === 'surface.split_off' ||
     method === 'surface.refresh' ||
     method === 'surface.health' ||
@@ -4681,6 +4709,7 @@ const handleControlRequest = async (request: ControlSocketRequest): Promise<Cont
   if (method === 'terminal.send_text' || method === 'surface.send_text' || method === 'send' || method === 'send-panel') return sendTerminalText(params)
   if (method === 'terminal.send_key' || method === 'surface.send_key' || method === 'send-key' || method === 'send-key-panel') return sendTerminalKey(params)
   if (method === 'notification.create' || method === 'notify') return createNotification(params)
+  if (method === 'notification.create_for_caller') return createCallerNotification(params)
   if (method === 'notification.create_for_surface' || method === 'notify-surface') return createTargetedNotification(method, params)
   if (method === 'notification.create_for_target' || method === 'notify-target') return createTargetedNotification(method, params)
   if (method === 'notification.list' || method === 'list-notifications') return listNotifications(params)

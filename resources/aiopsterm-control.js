@@ -139,6 +139,7 @@ Commands:
   list-log [--limit <n>]
   sidebar-state
   notify --title <text> [--subtitle <text>] [--body <text>] [--panel <id>] [--session <id>]
+  notify-caller --title <text> [--subtitle <text>] [--body <text>] [--panel <id>]
   notify-surface --surface <id> --title <text> [--subtitle <text>] [--body <text>]
   notify-target --workspace <id> --surface <id> --title <text> [--subtitle <text>] [--body <text>]
   list-notifications
@@ -467,6 +468,14 @@ const methodParams = () => {
     const panelId = readOption('--panel') || readOption('--surface')
     const sessionId = readOption('--session') || readOption('--session-id')
     return { method: 'notification.create', params: { title, subtitle, body, panelId, sessionId } }
+  }
+  if (command === 'notify-caller') {
+    const title = readOption('--title') || 'Notification'
+    const subtitle = readOption('--subtitle')
+    const body = readOption('--body')
+    const panelId = readOption('--panel') || readOption('--surface')
+    const workspaceId = readOption('--workspace') || readOption('--workspace-id')
+    return { method: 'notification.create_for_caller', params: { title, subtitle, body, caller: { panelId, surfaceId: panelId, workspaceId } } }
   }
   if (command === 'notify-surface') {
     const title = readOption('--title') || 'Notification'
@@ -1308,7 +1317,7 @@ const surfaceOperationMethodParams = (command) => {
     const directionRaw = readOption('--direction') || readOption('--split') || (explicitSurface ? firstPositional : secondPositional) || (!explicitSurface && ['left', 'right', 'up', 'down', 'below'].includes(firstPositional) ? firstPositional : '')
     const direction = ['left', 'right', 'up', 'down', 'below'].includes(directionRaw.trim().toLowerCase()) ? directionRaw.trim().toLowerCase().replace('down', 'below') : readSplitDirectionValue()
     return {
-      method: 'surface.split_off',
+      method: command === 'drag-surface-to-split' ? 'surface.drag_to_split' : 'surface.split_off',
       params: {
         surfaceId,
         surface_id: surfaceId,

@@ -22,6 +22,7 @@ The first control-socket slice supports these terminal primitives:
 The notification slice adds these generic notification primitives:
 
 - `notification.create`: create an unread notification.
+- `notification.create_for_caller`: create an unread notification targeted from a control_compat-style `caller` object when it includes a surface/panel id, otherwise fall back to the normal notification target.
 - `notification.create_for_surface`: create an unread notification targeted at a visible surface id.
 - `notification.create_for_target`: create an unread notification targeted at a workspace id plus visible surface id.
 - `notification.list`: list queued notifications.
@@ -226,7 +227,7 @@ The pane layout slice adds control_compat/tmux-style structural controls over th
 - `new-workspace`, `current-workspace`, `select-workspace`, `close-workspace`, `list-panels`, `list-pane-surfaces`, `close-surface`, `new-split`, and `new-pane`: control_compat legacy aliases accepted by the CLI/backend and routed to the structured workspace, surface, and pane methods above. `new-pane` currently creates a split-compatible shared work-panel surface rather than a separate hidden pane container.
 - `surface.focus`, `surface.create`, and `pane.create`: structured control_compat primitives accepted by the CLI/backend and implemented by the existing shared main work panel. They create or focus aiopsterm-owned visible local terminal surfaces only.
 - `surface.report_tty`, `surface.report_shell_state`, and `surface.ports_kick`: terminal-side telemetry primitives. They update renderer-owned surface metadata and are exposed through `surface.list`, `surface.current`, and `workspace.snapshot`.
-- `surface.move`, `surface.reorder`, and `surface.split_off`: reorder visible surfaces or detach a split surface inside the shared main work panel. Moving a surface to a target pane maps to the existing split attach behavior.
+- `surface.move`, `surface.reorder`, `surface.split_off`, and `surface.drag_to_split`: reorder visible surfaces or detach a split surface inside the shared main work panel. `surface.drag_to_split` is a control_compat-compatible alias that routes through the same renderer path as `surface.split_off`.
 - `surface.refresh`, `surface.health`, and `surface.trigger_flash`: refit visible terminal surfaces, report surface render readiness, and visually flash/focus a selected surface.
 - `workspace.reorder`, `workspace.reorder_many`, and `workspace.equalize_splits`: reorder shared-work-panel surfaces or refit equal-size split panes. `workspace.move_to_window` is recognized but returns `unsupported=true` because aiopsterm currently exposes one main work panel per app window.
 - `workspace.prompt_submit`: writes the prompt text to the selected terminal surface through the existing terminal command security path. It may return `needs-approval` when the command security policy requires confirmation.
