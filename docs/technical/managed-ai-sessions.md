@@ -28,6 +28,8 @@ node "$AIOPSTERM_AGENT_HOOK_PATH" --source codex --event PermissionRequest
 
 The helper reads hook JSON from stdin, adds the managed terminal identifiers, posts the event to `AIOPSTERM_AGENT_SOCKET_PATH`, prints `{}`, and exits zero when it is not running inside an aiopsterm-managed terminal. In installed fail-open mode it still waits for aiopsterm to acknowledge the socket event before returning, so the agent keeps running while the notification is not lost. This keeps agent CLI execution from blocking or failing when aiopsterm is not present.
 
+Claude Code `PermissionRequest` and `AskUserQuestion` hooks are actionable. The installed command passes `--wait-decision`, so the helper can wait up to roughly two minutes for the AI session panel to reply, then prints Claude's native `hookSpecificOutput` JSON. Timeout or missing aiopsterm still falls back to `{}` so Claude's own terminal prompt remains usable. Codex hook-level `PermissionRequest` remains telemetry because stock Codex performs its own approval flow outside the hook response path.
+
 ## Hook Installer
 
 Settings -> AI Preferences includes an `Agent Hook 安装器` section.
@@ -88,6 +90,7 @@ The store is capped to 200 sessions, 200 timeline events per session, and 40 loc
 - source, session id, state, title, summary, cwd, transcript path, terminal panel id, and terminal session id
 - a chronological event timeline with compact raw payload previews
 - local decisions such as `allow`, `deny`, `reply`, or `handled`
+- `pendingRequestId` and `actionable` fields for live Claude Code permission/question hooks
 - `autoTitle` and `userTitle` fields so automatic names do not overwrite manual names
 
 The renderer hydrates from this store on startup through `listManagedAiSessions()`. Incoming hook events update the in-memory UI immediately and are persisted by the main process.
@@ -102,7 +105,7 @@ The preload boundary exposes:
 - `clearManagedAiSession({ source, sessionId })`
 - `bulkManagedAiSessions({ operation })`
 
-Bulk operations currently support `mark-handled`, `clear-ended`, and `clear-all`. These actions are aiopsterm management records. They do not impersonate the agent's native blocking approval protocol; Codex hook approvals remain telemetry/visibility unless the agent itself asks through its native approval path.
+Bulk operations currently support `mark-handled`, `clear-ended`, and `clear-all`. For actionable Claude Code hooks, `allow`, `always`, `bypass`, `deny`, and `reply` resolve the waiting hook with Claude-native output. Codex hook approvals remain telemetry/visibility unless the agent itself asks through its native approval path.
 
 ## Auto Title
 

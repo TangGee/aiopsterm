@@ -613,6 +613,12 @@ export type AiAgentSessionEventInput = {
   body?: string
   text?: string
   prompt?: string
+  requestId?: string
+  request_id?: string
+  waitForDecision?: boolean
+  wait_for_decision?: boolean
+  waitTimeoutMs?: number
+  wait_timeout_ms?: number
   receivedAt?: number
   [key: string]: unknown
 }
@@ -629,13 +635,15 @@ export type AiAgentSessionEvent = {
   workspaceId?: string
   cwd?: string
   transcriptPath?: string
+  requestId?: string
+  actionable?: boolean
 }
 
 export type AiAgentSessionEventResult = AiopsMutationResult<AiAgentSessionEvent>
 
 export type ManagedAiSessionState = 'idle' | 'working' | 'needsInput' | 'ended' | 'unknown'
 
-export type ManagedAiSessionDecisionKind = 'allow' | 'deny' | 'reply' | 'handled'
+export type ManagedAiSessionDecisionKind = 'allow' | 'always' | 'bypass' | 'deny' | 'reply' | 'handled'
 
 export type ManagedAiSessionTimelineEvent = AiAgentSessionEvent & {
   id: string
@@ -667,6 +675,8 @@ export type ManagedAiSessionRecord = {
   workspaceId?: string
   cwd?: string
   transcriptPath?: string
+  pendingRequestId?: string
+  actionable?: boolean
   events: ManagedAiSessionTimelineEvent[]
   decisions: ManagedAiSessionDecision[]
 }

@@ -87,8 +87,8 @@ const hookDefinitions: AgentHookDefinition[] = [
       { agentEvent: 'Stop', hookEvent: 'Stop', timeout: 5 },
       { agentEvent: 'Notification', hookEvent: 'Notification', timeout: 5 },
       { agentEvent: 'PreToolUse', hookEvent: 'PreToolUse', timeout: 5 },
-      { agentEvent: 'PermissionRequest', hookEvent: 'PermissionRequest', timeout: 5 },
-      { agentEvent: 'AskUserQuestion', hookEvent: 'AskUserQuestion', timeout: 5 }
+      { agentEvent: 'PermissionRequest', hookEvent: 'PermissionRequest', timeout: 125 },
+      { agentEvent: 'AskUserQuestion', hookEvent: 'AskUserQuestion', timeout: 125 }
     ]
   },
   {
@@ -281,12 +281,14 @@ export const agentHookCommandFor = (source: AgentHookInstallerSource, hookEvent:
   const script = cleanText(scriptPath)
   if (!script) throw new AgentHookInstallerError('AGENT_HOOK_SCRIPT_MISSING', 'Agent hook helper path is unavailable.')
   const normalizedSource = normalizeSource(source) || source
+  const waitDecision = normalizedSource === 'claude-code' && (hookEvent === 'PermissionRequest' || hookEvent === 'AskUserQuestion')
   const dispatch = [
     `AIOPSTERM_AGENT_HOOK_MARKER=${ownedMarker}`,
     'node',
     shellSingleQuote(script),
     `--source ${shellSingleQuote(normalizedSource)}`,
-    `--event ${shellSingleQuote(hookEvent)}`
+    `--event ${shellSingleQuote(hookEvent)}`,
+    ...(waitDecision ? ['--wait-decision', '--wait-timeout-ms 120000'] : [])
   ].join(' ')
   return `command -v node >/dev/null 2>&1 && ${dispatch} || echo '{}'`
 }

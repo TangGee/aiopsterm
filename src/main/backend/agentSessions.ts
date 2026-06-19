@@ -26,6 +26,21 @@ import type {
 
 export type AgentSessionEventSink = (event: AiAgentSessionEvent) => void
 
+type AgentSessionSocketResponse = AiAgentSessionEventResult & {
+  status?: 'acknowledged' | 'pending' | 'resolved' | 'timeout'
+  agentOutput?: Record<string, unknown>
+}
+
+type PendingAgentDecision = {
+  source: AiAgentSessionSource
+  sessionId: string
+  requestId: string
+  event: AiAgentSessionEvent
+  raw: Record<string, unknown>
+  timer: NodeJS.Timeout
+  resolve: (response: AgentSessionSocketResponse) => void
+}
+
 type AgentSessionSocketRuntime = {
   userDataPath: string
   emit: AgentSessionEventSink
@@ -40,6 +55,8 @@ const maxSessions = 200
 const maxEventsPerSession = 200
 const maxDecisionsPerSession = 40
 const maxRawKeys = 80
+const defaultDecisionWaitTimeoutMs = 120_000
+const maxDecisionWaitTimeoutMs = 125_000
 const supportedSources = new Set<AiAgentSessionSource>([
   'codex',
   'claude-code',
@@ -69,13 +86,14 @@ const supportedEvents = new Set<AiAgentSessionEventName>([
   'stop',
   'session_end'
 ])
-const decisionKinds = new Set<ManagedAiSessionDecisionKind>(['allow', 'deny', 'reply', 'handled'])
+const decisionKinds = new Set<ManagedAiSessionDecisionKind>(['allow', 'always', 'bypass', 'deny', 'reply', 'handled'])
 
 let server: Server | null = null
 let socketPath = ''
 let eventSink: AgentSessionEventSink | null = null
 let storePath = ''
 let sessions = new Map<string, ManagedAiSessionRecord>()
+let pendingDecisions = new Map<string, PendingAgentDecision>()
 let loadedStore = false
 let writeQueue: Promise<void> = Promise.resolve()
 
@@ -87,6 +105,8 @@ const cleanOptionalText = (value: unknown) => {
 }
 
 const sessionKey = (source: AiAgentSessionSource, id: string) => `${source}:${id}`
+
+const pendingDecisionKey = (source: AiAgentSessionSource, sessionId: string, requestId: string) => `${source}:${sessionId}:${requestId}`
 
 const normalizeSource = (value: unknown): AiAgentSessionSource | null => {
   const source = cleanText(value).toLowerCase().replace(/_/g, '-')
@@ -112,6 +132,22 @@ const normalizeSource = (value: unknown): AiAgentSessionSource | null => {
   }
   const normalized = aliases[source] || (source as AiAgentSessionSource)
   return supportedSources.has(normalized) ? normalized : null
+}
+
+const normalizeBoolean = (value: unknown) => {
+  if (typeof value === 'boolean') return value
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase()
+    if (normalized === 'true' || normalized === '1' || normalized === 'yes') return true
+    if (normalized === 'false' || normalized === '0' || normalized === 'no') return false
+  }
+  return undefined
+}
+
+const normalizeWaitTimeoutMs = (value: unknown) => {
+  const number = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN
+  if (!Number.isFinite(number) || number <= 0) return defaultDecisionWaitTimeoutMs
+  return Math.max(1000, Math.min(maxDecisionWaitTimeoutMs, Math.round(number)))
 }
 
 const normalizeEventName = (value: unknown): AiAgentSessionEventName | null => {
@@ -356,6 +392,8 @@ const normalizeStoredSession = (value: unknown): ManagedAiSessionRecord | null =
     ...(cleanOptionalText(value.workspaceId) ? { workspaceId: cleanOptionalText(value.workspaceId) } : {}),
     ...(cleanOptionalText(value.cwd) ? { cwd: cleanOptionalText(value.cwd) } : {}),
     ...(cleanOptionalText(value.transcriptPath) ? { transcriptPath: cleanOptionalText(value.transcriptPath) } : {}),
+    ...(cleanOptionalText(value.pendingRequestId) ? { pendingRequestId: cleanOptionalText(value.pendingRequestId) } : {}),
+    ...(typeof value.actionable === 'boolean' ? { actionable: value.actionable } : {}),
     events: events.slice(-maxEventsPerSession) as ManagedAiSessionTimelineEvent[],
     decisions: decisions.slice(-maxDecisionsPerSession) as ManagedAiSessionDecision[]
   }
@@ -379,6 +417,8 @@ const normalizeStoredTimelineEvent = (value: Record<string, unknown>, fallbackSo
     ...(cleanOptionalText(value.workspaceId) ? { workspaceId: cleanOptionalText(value.workspaceId) } : {}),
     ...(cleanOptionalText(value.cwd) ? { cwd: cleanOptionalText(value.cwd) } : {}),
     ...(cleanOptionalText(value.transcriptPath) ? { transcriptPath: cleanOptionalText(value.transcriptPath) } : {}),
+    ...(cleanOptionalText(value.requestId) ? { requestId: cleanOptionalText(value.requestId) } : {}),
+    ...(typeof value.actionable === 'boolean' ? { actionable: value.actionable } : {}),
     ...(isRecord(value.raw) ? { raw: compactRawRecord(value.raw) } : {})
   } satisfies ManagedAiSessionTimelineEvent
 }
@@ -467,6 +507,8 @@ export const normalizeAiAgentSessionEventInput = (input: unknown, now = Date.now
   const workspaceId = cleanOptionalText(record.workspaceId || record.workspace_id)
   const cwd = cleanOptionalText(record.cwd || record.workingDirectory || record.working_directory || record.project_dir || record.projectDir || record.project_path || record.projectPath)
   const transcriptPath = cleanOptionalText(record.transcriptPath || record.transcript_path)
+  const requestId = cleanOptionalText(record.requestId || record.request_id || record.tool_use_id)
+  const actionable = normalizeBoolean(record.actionable ?? record.waitForDecision ?? record.wait_for_decision)
   const normalized: AiAgentSessionEvent = {
     source,
     event,
@@ -478,7 +520,9 @@ export const normalizeAiAgentSessionEventInput = (input: unknown, now = Date.now
     ...(terminalSessionId ? { terminalSessionId } : {}),
     ...(workspaceId ? { workspaceId } : {}),
     ...(cwd ? { cwd } : {}),
-    ...(transcriptPath ? { transcriptPath } : {})
+    ...(transcriptPath ? { transcriptPath } : {}),
+    ...(requestId ? { requestId } : {}),
+    ...(typeof actionable === 'boolean' ? { actionable } : {})
   }
   return { ok: true, data: normalized }
 }
@@ -490,6 +534,7 @@ const upsertSessionForEvent = (event: AiAgentSessionEvent, raw: Record<string, u
   const nextAutoTitle = event.event === 'stop' ? autoTitleFor(event, existing) : existing?.autoTitle
   const title = existing?.userTitle || nextAutoTitle || event.title || existing?.title || sourceLabel(event.source)
   const handledAt = state === 'needsInput' ? undefined : existing?.handledAt
+  const pendingRequestId = state === 'needsInput' && event.actionable && event.requestId ? event.requestId : undefined
   const record: ManagedAiSessionRecord = {
     id: event.sessionId,
     source: event.source,
@@ -508,6 +553,8 @@ const upsertSessionForEvent = (event: AiAgentSessionEvent, raw: Record<string, u
     ...(event.workspaceId || existing?.workspaceId ? { workspaceId: event.workspaceId || existing?.workspaceId } : {}),
     ...(event.cwd || existing?.cwd ? { cwd: event.cwd || existing?.cwd } : {}),
     ...(event.transcriptPath || existing?.transcriptPath ? { transcriptPath: event.transcriptPath || existing?.transcriptPath } : {}),
+    ...(pendingRequestId ? { pendingRequestId } : {}),
+    ...(typeof event.actionable === 'boolean' ? { actionable: event.actionable } : existing?.actionable ? { actionable: existing.actionable } : {}),
     events: [...(existing?.events || []), normalizeRecordEvent(event, raw)].slice(-maxEventsPerSession),
     decisions: [...(existing?.decisions || [])].slice(-maxDecisionsPerSession)
   }
@@ -524,6 +571,124 @@ export const publishAiAgentSessionEvent = (input: AiAgentSessionEventInput, emit
   upsertSessionForEvent(result.data, input as Record<string, unknown>)
   emit?.(result.data)
   return result
+}
+
+const isBlockingAgentEvent = (event: AiAgentSessionEvent, raw: Record<string, unknown>) =>
+  event.source === 'claude-code' &&
+  (event.event === 'permission_request' || event.event === 'question') &&
+  event.actionable === true &&
+  Boolean(event.requestId || cleanOptionalText(raw.requestId || raw.request_id || raw.tool_use_id))
+
+const questionAnswersFromMessage = (raw: Record<string, unknown>, message?: string) => {
+  const text = cleanText(message)
+  if (!text) return {}
+  const toolInput = nestedRecord(raw, 'tool_input')
+  const questions = Array.isArray(toolInput.questions) ? toolInput.questions : []
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+  const answers: Record<string, string> = {}
+  ;(lines.length ? lines : [text]).forEach((answer, index) => {
+    const question = questions[index] && typeof questions[index] === 'object' && !Array.isArray(questions[index]) ? (questions[index] as Record<string, unknown>) : null
+    const key = firstText(question || {}, ['question', 'header', 'prompt']) || `Answer ${index + 1}`
+    answers[key] = answer
+  })
+  return answers
+}
+
+const renderClaudeHookOutput = (session: ManagedAiSessionRecord, decision: ManagedAiSessionDecision, pending?: PendingAgentDecision) => {
+  const latest = session.events.slice().reverse().find((event) => event.requestId === session.pendingRequestId) || session.events.at(-1)
+  const raw = pending?.raw || latest?.raw || {}
+  const hookDecision = (behavior: 'allow' | 'deny', options: { message?: string; updatedInput?: Record<string, unknown>; updatedPermissions?: unknown[] } = {}) => {
+    const inner: Record<string, unknown> = { behavior }
+    if (behavior === 'deny') inner.message = cleanOptionalText(options.message) || 'User denied permission via aiopsterm.'
+    if (options.updatedInput && Object.keys(options.updatedInput).length) inner.updatedInput = options.updatedInput
+    if (options.updatedPermissions && options.updatedPermissions.length) inner.updatedPermissions = options.updatedPermissions
+    return {
+      hookSpecificOutput: {
+        hookEventName: 'PermissionRequest',
+        decision: inner
+      }
+    }
+  }
+
+  if (decision.kind === 'handled') return {}
+  if (decision.kind === 'deny') return hookDecision('deny', { message: decision.message })
+  if (pending?.event.event === 'question' || session.lastEvent === 'question' || latest?.event === 'question') {
+    const toolInput = nestedRecord(raw, 'tool_input')
+    const updatedInput = {
+      ...toolInput,
+      answers: questionAnswersFromMessage(raw, decision.message)
+    }
+    return hookDecision('allow', { updatedInput })
+  }
+
+  const permissionSuggestions = Array.isArray(raw.permission_suggestions) ? raw.permission_suggestions : []
+  if (decision.kind === 'always') return hookDecision('allow', { updatedPermissions: permissionSuggestions })
+  if (decision.kind === 'bypass') {
+    return hookDecision('allow', {
+      updatedPermissions: [
+        {
+          type: 'setMode',
+          mode: 'bypassPermissions',
+          destination: 'session'
+        }
+      ]
+    })
+  }
+  return hookDecision('allow')
+}
+
+const resolvePendingDecision = (session: ManagedAiSessionRecord, decision: ManagedAiSessionDecision) => {
+  const requestId = session.pendingRequestId
+  if (!requestId) return
+  const key = pendingDecisionKey(session.source, session.id, requestId)
+  const pending = pendingDecisions.get(key)
+  if (!pending) return
+  pendingDecisions.delete(key)
+  clearTimeout(pending.timer)
+  pending.resolve({
+    ok: true,
+    data: session.events.at(-1),
+    status: 'resolved',
+    agentOutput: session.source === 'claude-code' ? renderClaudeHookOutput(session, decision, pending) : {}
+  })
+}
+
+const waitForAgentDecision = (event: AiAgentSessionEvent, raw: Record<string, unknown>) =>
+  new Promise<AgentSessionSocketResponse>((resolve) => {
+    const requestId = event.requestId || cleanOptionalText(raw.requestId || raw.request_id || raw.tool_use_id)
+    if (!requestId) {
+      resolve({ ok: true, data: event, status: 'acknowledged' })
+      return
+    }
+    const key = pendingDecisionKey(event.source, event.sessionId, requestId)
+    const timeoutMs = normalizeWaitTimeoutMs(raw.waitTimeoutMs || raw.wait_timeout_ms)
+    const timer = setTimeout(() => {
+      pendingDecisions.delete(key)
+      resolve({ ok: true, data: event, status: 'timeout', agentOutput: {} })
+    }, timeoutMs)
+    pendingDecisions.set(key, {
+      source: event.source,
+      sessionId: event.sessionId,
+      requestId,
+      event,
+      raw,
+      timer,
+      resolve
+    })
+  })
+
+const publishAiAgentSessionSocketEvent = async (input: AiAgentSessionEventInput, emit: AgentSessionEventSink | null): Promise<AgentSessionSocketResponse> => {
+  const result = normalizeAiAgentSessionEventInput(input)
+  if (!result.ok || !result.data) return result
+  const raw = input as Record<string, unknown>
+  const waiter = isBlockingAgentEvent(result.data, raw) ? waitForAgentDecision(result.data, raw) : null
+  upsertSessionForEvent(result.data, raw)
+  emit?.(result.data)
+  if (!waiter) return { ...result, status: 'acknowledged' }
+  return waiter
 }
 
 export const listManagedAiSessions = async (): Promise<ManagedAiSessionListResult> => {
@@ -554,13 +719,15 @@ export const replyManagedAiSession = async (input: ManagedAiSessionReplyInput): 
     ...(cleanOptionalText(input.message) ? { message: cleanOptionalText(input.message) } : {}),
     createdAt: Date.now()
   }
+  const { pendingRequestId: _pendingRequestId, ...sessionWithoutPending } = session
   const next: ManagedAiSessionRecord = {
-    ...session,
+    ...sessionWithoutPending,
     state: session.state === 'needsInput' ? 'idle' : session.state,
     handledAt: decision.createdAt,
     updatedAt: decision.createdAt,
     decisions: [...session.decisions, decision].slice(-maxDecisionsPerSession)
   }
+  resolvePendingDecision(session, decision)
   sessions.set(sessionKey(next.source, next.id), next)
   persistSnapshot()
   return { ok: true, data: { session: next, snapshot: snapshot() } }
@@ -638,13 +805,13 @@ export const bulkManagedAiSessions = async (input: ManagedAiSessionBulkInput): P
   return { ok: true, data: { changed, snapshot: snapshot() } }
 }
 
-const writeSocketResponse = (socket: Socket, response: AiAgentSessionEventResult) => {
+const writeSocketResponse = (socket: Socket, response: AgentSessionSocketResponse) => {
   socket.write(`${JSON.stringify(response)}\n`)
 }
 
-const handleSocketLine = (socket: Socket, line: string, emit: AgentSessionEventSink) => {
+const handleSocketLine = async (socket: Socket, line: string, emit: AgentSessionEventSink) => {
   try {
-    writeSocketResponse(socket, publishAiAgentSessionEvent(JSON.parse(line) as AiAgentSessionEventInput, emit))
+    writeSocketResponse(socket, await publishAiAgentSessionSocketEvent(JSON.parse(line) as AiAgentSessionEventInput, emit))
   } catch {
     writeSocketResponse(socket, {
       ok: false,
@@ -711,6 +878,11 @@ export const closeAiAgentSessionServer = () => {
   if (socketPath && process.platform !== 'win32' && existsSync(socketPath)) rmSync(socketPath, { force: true })
   socketPath = ''
   eventSink = null
+  pendingDecisions.forEach((pending) => {
+    clearTimeout(pending.timer)
+    pending.resolve({ ok: true, status: 'timeout', agentOutput: {} })
+  })
+  pendingDecisions = new Map()
 }
 
 export const __testing = {

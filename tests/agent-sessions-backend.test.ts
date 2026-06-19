@@ -1,6 +1,7 @@
 import { mkdtemp } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
+import { createConnection } from 'net'
 import { describe, expect, it, vi } from 'vitest'
 
 type AgentSessionsBackend = {
@@ -8,6 +9,8 @@ type AgentSessionsBackend = {
   listManagedAiSessions: () => Promise<unknown>
   normalizeAiAgentSessionEventInput: (input: unknown, now?: number) => unknown
   publishAiAgentSessionEvent: (input: Record<string, unknown>, emit?: ((event: unknown) => void) | null) => unknown
+  ensureAiAgentSessionServer: (input: { userDataPath: string; emit: (event: unknown) => void }) => Promise<string>
+  closeAiAgentSessionServer: () => void
   renameManagedAiSession: (input: Record<string, unknown>) => Promise<unknown>
   replyManagedAiSession: (input: Record<string, unknown>) => Promise<unknown>
 }
@@ -16,6 +19,26 @@ const loadBackend = async () => {
   const modulePath = '../src/main/backend/agentSessions'
   return (await import(modulePath)) as AgentSessionsBackend
 }
+
+const socketRequest = (socketPath: string, payload: Record<string, unknown>) =>
+  new Promise<Record<string, unknown>>((resolve, reject) => {
+    const socket = createConnection(socketPath)
+    let buffer = ''
+    socket.setEncoding('utf8')
+    socket.setTimeout(5000)
+    socket.on('connect', () => {
+      socket.write(`${JSON.stringify(payload)}\n`)
+    })
+    socket.on('data', (chunk) => {
+      buffer += chunk
+      const newlineIndex = buffer.indexOf('\n')
+      if (newlineIndex < 0) return
+      socket.end()
+      resolve(JSON.parse(buffer.slice(0, newlineIndex)) as Record<string, unknown>)
+    })
+    socket.on('timeout', () => reject(new Error('agent session socket response timed out')))
+    socket.on('error', reject)
+  })
 
 describe('agent session backend', () => {
   it('normalizes Codex hook payloads into managed AI session events', async () => {
@@ -164,5 +187,62 @@ describe('agent session backend', () => {
         })
       })
     )
+  })
+
+  it('waits for actionable Claude decisions and returns Claude hook output to the socket client', async () => {
+    const { ensureAiAgentSessionServer, closeAiAgentSessionServer, listManagedAiSessions, replyManagedAiSession } = await loadBackend()
+    const userDataPath = await mkdtemp(join(tmpdir(), 'aiopsterm-agent-socket-'))
+    const socketPath = await ensureAiAgentSessionServer({ userDataPath, emit: vi.fn() })
+    try {
+      const responsePromise = socketRequest(socketPath, {
+        source: 'claude-code',
+        event: 'AskUserQuestion',
+        session_id: 'claude-blocking-1',
+        request_id: 'request-1',
+        waitForDecision: true,
+        waitTimeoutMs: 5000,
+        project_dir: '/work/release-api',
+        tool_input: {
+          questions: [{ question: 'Which environment?', options: [{ label: 'staging' }, { label: 'prod' }] }]
+        }
+      })
+
+      await vi.waitFor(async () => {
+        const snapshot = (await listManagedAiSessions()) as any
+        expect(snapshot.data.sessions[0]).toMatchObject({
+          source: 'claude-code',
+          id: 'claude-blocking-1',
+          state: 'needsInput',
+          pendingRequestId: 'request-1',
+          actionable: true
+        })
+      })
+
+      await expect(replyManagedAiSession({ source: 'claude-code', sessionId: 'claude-blocking-1', kind: 'reply', message: 'staging' })).resolves.toEqual(
+        expect.objectContaining({ ok: true })
+      )
+
+      await expect(responsePromise).resolves.toEqual(
+        expect.objectContaining({
+          ok: true,
+          status: 'resolved',
+          agentOutput: {
+            hookSpecificOutput: {
+              hookEventName: 'PermissionRequest',
+              decision: {
+                behavior: 'allow',
+                updatedInput: expect.objectContaining({
+                  answers: {
+                    'Which environment?': 'staging'
+                  }
+                })
+              }
+            }
+          }
+        })
+      )
+    } finally {
+      closeAiAgentSessionServer()
+    }
   })
 })

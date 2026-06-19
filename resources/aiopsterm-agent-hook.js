@@ -30,6 +30,7 @@ const parseArgs = (items) => {
 const options = parseArgs(args)
 const strict = options.strict === 'true'
 const printResponse = options['print-response'] === 'true'
+const waitDecision = options['wait-decision'] === 'true'
 
 const cleanText = (value) => (typeof value === 'string' ? value.trim() : '')
 
@@ -143,6 +144,7 @@ const createEvent = (payload) => {
   const cwd =
     cleanText(options.cwd || payload.cwd || payload.workingDirectory || payload.working_directory || payload.project_dir || payload.projectDir) ||
     cleanText(process.cwd())
+  const requestId = cleanText(options['request-id'] || payload.requestId || payload.request_id || payload.tool_use_id || payload.toolUseID)
   return {
     source,
     event,
@@ -153,7 +155,11 @@ const createEvent = (payload) => {
     terminalSessionId: terminalSessionId || undefined,
     workspaceId: cleanText(options['workspace-id'] || payload.workspaceId || payload.workspace_id || process.env.AIOPSTERM_WORKSPACE_ID) || undefined,
     cwd: cwd || undefined,
-    transcriptPath: cleanText(options['transcript-path'] || payload.transcriptPath || payload.transcript_path) || undefined
+    transcriptPath: cleanText(options['transcript-path'] || payload.transcriptPath || payload.transcript_path) || undefined,
+    requestId: requestId || undefined,
+    actionable: waitDecision || undefined,
+    waitForDecision: waitDecision || undefined,
+    waitTimeoutMs: waitDecision ? Number(options['wait-timeout-ms'] || 120000) : undefined
   }
 }
 
@@ -166,8 +172,13 @@ const removeEmpty = (record) => {
 }
 
 const finish = (code, output) => {
-  if (printResponse && output) {
-    process.stdout.write(`${JSON.stringify(output)}\n`)
+  const agentOutput = output && output.agentOutput && typeof output.agentOutput === 'object' ? output.agentOutput : undefined
+  if (agentOutput) {
+    process.stdout.write(`${JSON.stringify(agentOutput)}\n`)
+  } else if (printResponse && output) {
+    const visible = { ...output }
+    delete visible.agentOutput
+    process.stdout.write(`${JSON.stringify(visible)}\n`)
   } else {
     process.stdout.write('{}\n')
   }
@@ -187,7 +198,7 @@ const publishEvent = (socketPath, event) =>
       else resolve(result)
     }
     socket.setEncoding('utf8')
-    socket.setTimeout(Number(options.timeout || 1500))
+    socket.setTimeout(Number(options.timeout || (waitDecision ? 125000 : 1500)))
     socket.on('connect', () => {
       socket.write(`${JSON.stringify(event)}\n`)
     })

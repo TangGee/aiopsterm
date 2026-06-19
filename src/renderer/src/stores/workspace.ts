@@ -4123,7 +4123,7 @@ const isManagedAiSessionTimelineEvent = (value: unknown): value is ManagedAiSess
 const isManagedAiSessionDecision = (value: unknown): value is ManagedAiSessionDecision =>
   isRecord(value) &&
   isNonEmptyString(value.id) &&
-  (value.kind === 'allow' || value.kind === 'deny' || value.kind === 'reply' || value.kind === 'handled') &&
+  (value.kind === 'allow' || value.kind === 'always' || value.kind === 'bypass' || value.kind === 'deny' || value.kind === 'reply' || value.kind === 'handled') &&
   typeof value.createdAt === 'number'
 
 const isManagedAiSessionRecord = (value: unknown): value is ManagedAiSessionRecord =>
@@ -8511,7 +8511,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       source: event.source,
       title: existing?.userTitle || existing?.title || event.title || event.source,
       summary: event.summary || existing?.summary || '',
-      state: managedAiSessionStateForEvent(event.event, existing?.state),
+    state: managedAiSessionStateForEvent(event.event, existing?.state),
       lastEvent: event.event,
       lastActivityAt: event.receivedAt,
       createdAt: existing?.createdAt || event.receivedAt,
@@ -8524,7 +8524,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       ...(event.terminalSessionId || existing?.terminalSessionId ? { terminalSessionId: event.terminalSessionId || existing?.terminalSessionId } : {}),
       ...(event.workspaceId || existing?.workspaceId ? { workspaceId: event.workspaceId || existing?.workspaceId } : {}),
       ...(event.cwd || existing?.cwd ? { cwd: event.cwd || existing?.cwd } : {}),
-      ...(event.transcriptPath || existing?.transcriptPath ? { transcriptPath: event.transcriptPath || existing?.transcriptPath } : {})
+      ...(event.transcriptPath || existing?.transcriptPath ? { transcriptPath: event.transcriptPath || existing?.transcriptPath } : {}),
+      ...(event.requestId && event.actionable ? { pendingRequestId: event.requestId } : {}),
+      ...(typeof event.actionable === 'boolean' ? { actionable: event.actionable } : existing?.actionable ? { actionable: existing.actionable } : {})
     }
     managedAiSessions.value = existing
       ? managedAiSessions.value.map((session) => (session.source === next.source && session.id === next.id ? next : session))
@@ -8566,7 +8568,19 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         return false
       }
       applyManagedAiSessionSnapshot(result.data.snapshot)
-      setTopNotice(kind === 'allow' ? '已记录允许' : kind === 'deny' ? '已记录拒绝' : kind === 'reply' ? '已记录回复' : '已标记处理')
+      setTopNotice(
+        kind === 'allow'
+          ? '已允许 AI 请求'
+          : kind === 'always'
+            ? '已持续允许 AI 请求'
+            : kind === 'bypass'
+              ? '已允许本会话绕过审批'
+              : kind === 'deny'
+                ? '已拒绝 AI 请求'
+                : kind === 'reply'
+                  ? '已回复 AI 问题'
+                  : '已标记处理'
+      )
       return true
     } catch (error) {
       setTopNotice(error instanceof Error ? error.message : 'AI 会话处理失败')

@@ -49,6 +49,41 @@ const startSocketServer = async () => {
   }
 }
 
+const startDecisionSocketServer = async (response: Record<string, unknown>) => {
+  const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-agent-hook-decision-'))
+  cleanupDirs.push(dir)
+  const socketPath = join(dir, 'agent.sock')
+  const received: unknown[] = []
+  const server = createServer((socket) => {
+    socket.setEncoding('utf8')
+    let buffer = ''
+    socket.on('data', (chunk) => {
+      buffer += chunk
+      const newlineIndex = buffer.indexOf('\n')
+      if (newlineIndex < 0) return
+      const line = buffer.slice(0, newlineIndex).trim()
+      if (line) received.push(JSON.parse(line))
+      socket.write(`${JSON.stringify(response)}\n`)
+      socket.end()
+    })
+  })
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject)
+    server.listen(socketPath, () => {
+      server.off('error', reject)
+      resolve()
+    })
+  })
+  return {
+    socketPath,
+    received,
+    close: () =>
+      new Promise<void>((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()))
+      })
+  }
+}
+
 const runHelper = (args: string[], input: string, env: NodeJS.ProcessEnv) =>
   new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve, reject) => {
     const child = spawn(process.execPath, [helperPath, ...args], {
@@ -187,6 +222,64 @@ describe('aiopsterm agent hook helper', () => {
           summary: 'Which environment should be deployed?',
           cwd: projectDir,
           transcriptPath: '/tmp/claude-transcript.jsonl'
+        })
+      ])
+    } finally {
+      await server.close()
+    }
+  })
+
+  it('prints backend agentOutput for blocking Claude hook decisions', async () => {
+    const agentOutput = {
+      hookSpecificOutput: {
+        hookEventName: 'PermissionRequest',
+        decision: {
+          behavior: 'allow',
+          updatedInput: {
+            answers: {
+              'Which environment?': 'staging'
+            }
+          }
+        }
+      }
+    }
+    const server = await startDecisionSocketServer({
+      ok: true,
+      status: 'resolved',
+      agentOutput
+    })
+    try {
+      const result = await runHelper(
+        ['--source', 'claude-code', '--event', 'AskUserQuestion', '--wait-decision', '--wait-timeout-ms', '5000'],
+        JSON.stringify({
+          session_id: 'claude-decision-1',
+          request_id: 'request-1',
+          project_dir: '/work/project',
+          tool_input: {
+            questions: [{ question: 'Which environment?', options: [{ label: 'staging' }, { label: 'prod' }] }]
+          }
+        }),
+        {
+          ...process.env,
+          AIOPSTERM_MANAGED_TERMINAL: '1',
+          AIOPSTERM_AGENT_SOCKET_PATH: server.socketPath,
+          AIOPSTERM_TERMINAL_SESSION_ID: 'terminal-1',
+          AIOPSTERM_PANEL_ID: 'panel-1',
+          AIOPSTERM_WORKSPACE_ID: 'workspace-1'
+        }
+      )
+
+      expect(result.code).toBe(0)
+      expect(JSON.parse(result.stdout.trim())).toEqual(agentOutput)
+      expect(server.received).toEqual([
+        expect.objectContaining({
+          source: 'claude-code',
+          event: 'AskUserQuestion',
+          sessionId: 'claude-decision-1',
+          requestId: 'request-1',
+          actionable: true,
+          waitForDecision: true,
+          waitTimeoutMs: 5000
         })
       ])
     } finally {

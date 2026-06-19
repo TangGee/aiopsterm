@@ -149,11 +149,35 @@
           v-if="selectedSession.state === 'needsInput'"
           class="ai-session-actions"
         >
-          <button @click="workspace.replyManagedAiSession(selectedSession.source, selectedSession.id, 'allow')">
+          <button
+            v-if="selectedSession.lastEvent === 'question'"
+            @click="submitQuestionReply"
+          >
+            <Send />
+            提交回答
+          </button>
+          <button
+            v-if="selectedSession.lastEvent !== 'question'"
+            @click="workspace.replyManagedAiSession(selectedSession.source, selectedSession.id, 'allow')"
+          >
             <Check />
             允许
           </button>
-          <button @click="workspace.replyManagedAiSession(selectedSession.source, selectedSession.id, 'deny')">
+          <button
+            v-if="selectedSession.lastEvent === 'permission_request' && selectedSession.actionable"
+            @click="workspace.replyManagedAiSession(selectedSession.source, selectedSession.id, 'always')"
+          >
+            <CheckCheck />
+            持续允许
+          </button>
+          <button
+            v-if="selectedSession.lastEvent === 'permission_request' && selectedSession.actionable"
+            @click="workspace.replyManagedAiSession(selectedSession.source, selectedSession.id, 'bypass')"
+          >
+            <ShieldCheck />
+            本会话绕过
+          </button>
+          <button @click="workspace.replyManagedAiSession(selectedSession.source, selectedSession.id, 'deny', replyText.trim() || undefined)">
             <Ban />
             拒绝
           </button>
@@ -167,9 +191,10 @@
           <textarea
             v-model="replyText"
             rows="2"
-            placeholder="记录处理说明"
+            :placeholder="selectedSession.lastEvent === 'question' ? '输入要回复给 AI 的答案' : '可选：拒绝原因或处理说明'"
           ></textarea>
           <button
+            v-if="selectedSession.lastEvent === 'question'"
             :disabled="replyText.trim() === ''"
             @click="submitReply"
           >
@@ -222,7 +247,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { ArchiveX, Ban, Check, CheckCheck, LocateFixed, RefreshCw, Search, Send, Settings, Trash2 } from 'lucide-vue-next'
+import { ArchiveX, Ban, Check, CheckCheck, LocateFixed, RefreshCw, Search, Send, Settings, ShieldCheck, Trash2 } from 'lucide-vue-next'
 import { useWorkspaceStore, type ManagedAiSession, type ManagedAiSessionState } from '@/stores/workspace'
 import type { AiAgentSessionEventName, AiAgentSessionSource } from '@shared/preload'
 
@@ -290,6 +315,8 @@ const eventState = (event: AiAgentSessionEventName): ManagedAiSessionState => {
 
 const decisionLabel = (kind: string) => {
   if (kind === 'allow') return '允许'
+  if (kind === 'always') return '持续允许'
+  if (kind === 'bypass') return '本会话绕过'
   if (kind === 'deny') return '拒绝'
   if (kind === 'reply') return '回复'
   return '已处理'
@@ -329,6 +356,14 @@ const renameSelectedSession = () => {
 }
 
 const submitReply = async () => {
+  const session = selectedSession.value
+  const message = replyText.value.trim()
+  if (!session || !message) return
+  const ok = await workspace.replyManagedAiSession(session.source, session.id, 'reply', message)
+  if (ok) replyText.value = ''
+}
+
+const submitQuestionReply = async () => {
   const session = selectedSession.value
   const message = replyText.value.trim()
   if (!session || !message) return
