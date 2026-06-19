@@ -127,7 +127,7 @@ Aliases are accepted for control_compat-compatible scripts where useful:
 - `list_surfaces` and `list-surfaces` map to `surface.list`.
 - `list_terminals` and `debug.terminals` map to `terminal.list`.
 - `focus_terminal` and `focus-panel` map to `terminal.focus`.
-- `read-screen` maps to `terminal.read_screen`.
+- `read-screen`, `capture-pane`, and `surface.read_text` map to `terminal.read_screen`.
 - `send`, `send-panel`, and `surface.send_text` map to `terminal.send_text`.
 - `send-key`, `send-key-panel`, and `surface.send_key` map to `terminal.send_key`.
 - `wait-for` maps to `sync.wait_for`.
@@ -229,6 +229,8 @@ node /path/to/resources/aiopsterm-control.js agent team launch --source my-agent
 node /path/to/resources/aiopsterm-control.js events --category notification --cursor-file ~/.cache/aiopsterm/events.seq --limit 10
 node /path/to/resources/aiopsterm-control.js tree
 node /path/to/resources/aiopsterm-control.js terminal read-screen --lines 40
+node /path/to/resources/aiopsterm-control.js capture-pane --panel panel-main --lines 200
+node /path/to/resources/aiopsterm-control.js pipe-pane --panel panel-main --command "grep ERROR"
 node /path/to/resources/aiopsterm-control.js terminal focus --panel panel-main
 node /path/to/resources/aiopsterm-control.js terminal send --session "$AIOPSTERM_TERMINAL_SESSION_ID" --text $'pwd\n'
 node /path/to/resources/aiopsterm-control.js terminal send-key --session "$AIOPSTERM_TERMINAL_SESSION_ID" ctrl+c
@@ -254,6 +256,8 @@ node /path/to/resources/aiopsterm-control.js --json workspace snapshot
 `agent.hooks.*` reuses the same explicit installer used by Settings -> AI Preferences. It only writes aiopsterm-owned hook commands, plugin files, or marked config blocks, and uninstall removes only those owned entries. `setup` mirrors control_compat's convenience behavior by skipping installers whose agent binary is not on `PATH`; `install` is for an explicit selected source when the user wants the config written anyway. Hook commands fail open outside aiopsterm-managed local connection terminals and do not take over external OS terminals.
 
 `terminal.send_text` and `terminal.send_key` are raw terminal input primitives, equivalent to typed text or a physical key press in the terminal. They do not run the existing AI command security approval flow, because they may need to send non-command input, prompts, or control sequences. Command-generation and AI-command execution still use the existing renderer security path.
+
+`terminal.read_screen`, `capture-pane`, and `surface.read_text` read visible terminal buffer text from the renderer. The control event stream does not copy that text into event payloads. `pipe-pane` is a CLI-helper convenience: after reading the screen through the socket, the helper runs the user-provided shell command locally with the captured text on stdin.
 
 Future higher-level automation commands should use the control socket but must choose their own safety policy explicitly. For example, a future `terminal.run_command` command can route through command security, while `terminal.send_text` remains raw input.
 

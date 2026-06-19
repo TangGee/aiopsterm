@@ -446,6 +446,39 @@ describe('control socket backend', () => {
     expect(writes).toEqual([{ sessionId: 'terminal-1', data: 'pwd\n' }])
   })
 
+  it('routes control_compat-style screen capture aliases to terminal read-screen', async () => {
+    const backend = await loadBackend()
+    backend.registerControlSocketIpc({
+      handle: (_channel, handler) => {
+        mockIpcHandler = handler
+      }
+    })
+    mockWindow = createMockWindow((request) => {
+      if (request.method === 'terminal.read_screen') {
+        return { ok: true, data: { text: 'alpha\nbeta\n', tailLines: 2 } }
+      }
+      return { ok: true, data: {} }
+    })
+    backend.configureControlSocketRuntime({ getWindows: () => [mockWindow] })
+
+    await expect(
+      backend.__testing.handleControlRequest({
+        method: 'surface.read_text',
+        params: { surfaceId: 'panel-1', lines: 2 }
+      })
+    ).resolves.toEqual({ ok: true, data: { text: 'alpha\nbeta\n', tailLines: 2 } })
+    await expect(
+      backend.__testing.handleControlRequest({
+        method: 'capture-pane',
+        params: { panelId: 'panel-1', lines: 2 }
+      })
+    ).resolves.toEqual({ ok: true, data: { text: 'alpha\nbeta\n', tailLines: 2 } })
+    expect(mockWindow.requests).toEqual([
+      expect.objectContaining({ method: 'terminal.read_screen', params: expect.objectContaining({ surfaceId: 'panel-1' }) }),
+      expect.objectContaining({ method: 'terminal.read_screen', params: expect.objectContaining({ panelId: 'panel-1' }) })
+    ])
+  })
+
   it('writes terminal keys through session ids and resolves panel ids through the renderer', async () => {
     const backend = await loadBackend()
     const writes: Array<{ sessionId: string; data: string }> = []

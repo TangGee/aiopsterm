@@ -130,6 +130,36 @@ describe('aiopsterm-control CLI', () => {
     ])
   })
 
+  it('captures and pipes terminal screen text from the CLI helper', async () => {
+    const seen: Record<string, unknown>[] = []
+    const socketPath = await startControlServer((request) => {
+      seen.push(request)
+      return {
+        id: request.id,
+        ok: true,
+        data: {
+          text: 'alpha\nbeta\n',
+          tailLines: (request.params as any)?.tailLines || 2
+        }
+      }
+    })
+
+    const captured = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'capture-pane', '--panel', 'panel-1', '--lines', '2'], {
+      cwd: process.cwd()
+    })
+    expect(captured.stdout).toBe('alpha\nbeta\n')
+
+    const piped = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'pipe-pane', '--panel', 'panel-1', '--command', 'wc -l'], {
+      cwd: process.cwd()
+    })
+    expect(piped.stdout.trim()).toBe('2')
+
+    expect(seen).toEqual([
+      expect.objectContaining({ method: 'terminal.read_screen', params: expect.objectContaining({ panelId: 'panel-1', tailLines: 2, lines: 2 }) }),
+      expect.objectContaining({ method: 'terminal.read_screen', params: expect.objectContaining({ panelId: 'panel-1', scrollback: true }) })
+    ])
+  })
+
   it('sends wait-for synchronization requests over the configured socket', async () => {
     const seen: Record<string, unknown>[] = []
     const socketPath = await startControlServer((request) => {

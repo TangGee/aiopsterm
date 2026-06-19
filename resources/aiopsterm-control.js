@@ -3,6 +3,7 @@
 const net = require('net')
 const fs = require('fs')
 const path = require('path')
+const { spawnSync } = require('child_process')
 
 const args = process.argv.slice(2)
 
@@ -32,6 +33,8 @@ Commands:
   terminal list
   terminal focus --panel <id>|--session <id>
   terminal read-screen [--panel <id>|--session <id>] [--lines <n>]
+  capture-pane [--panel <id>|--session <id>] [--scrollback] [--lines <n>]
+  pipe-pane [--panel <id>|--session <id>] --command <shell-command>
   terminal send [--panel <id>|--session <id>] --text <text>
   terminal send-key [--panel <id>|--session <id>] <key>
   send-panel --panel <id> <text>
@@ -177,12 +180,32 @@ const methodParams = () => {
     const sessionId = readOption('--session') || readOption('--session-id')
     return { method: 'terminal.focus', params: { panelId, sessionId } }
   }
-  if (command === 'read-screen' || (command === 'terminal' && args[0] === 'read-screen')) {
+  if (command === 'read-screen' || command === 'capture-pane' || (command === 'terminal' && args[0] === 'read-screen')) {
     if (command === 'terminal') args.shift()
     const panelId = readOption('--panel') || readOption('--panel-id')
     const sessionId = readOption('--session') || readOption('--session-id')
     const lines = Number(readOption('--lines') || readOption('--tail-lines') || 0)
-    return { method: 'terminal.read_screen', params: { panelId, sessionId, ...(Number.isFinite(lines) && lines > 0 ? { tailLines: lines } : {}) } }
+    const scrollback = command === 'capture-pane' && hasFlag('--scrollback')
+    return { method: 'terminal.read_screen', params: { panelId, surfaceId: panelId, sessionId, scrollback, ...(Number.isFinite(lines) && lines > 0 ? { tailLines: lines, lines: Math.floor(lines) } : {}) } }
+  }
+  if (command === 'pipe-pane') {
+    const panelId = readOption('--panel') || readOption('--panel-id') || readOption('--surface') || readOption('--surface-id')
+    const sessionId = readOption('--session') || readOption('--session-id')
+    const lines = Number(readOption('--lines') || 0)
+    const pipeCommand = readOption('--command') || args.join(' ')
+    return {
+      method: 'terminal.read_screen',
+      params: {
+        panelId,
+        surfaceId: panelId,
+        sessionId,
+        scrollback: true,
+        ...(Number.isFinite(lines) && lines > 0 ? { tailLines: Math.floor(lines), lines: Math.floor(lines) } : {})
+      },
+      pipe: {
+        command: pipeCommand
+      }
+    }
   }
   if (command === 'send' || command === 'send-panel' || (command === 'terminal' && args[0] === 'send')) {
     if (command === 'terminal') args.shift()
@@ -1078,6 +1101,28 @@ socket.on('data', (chunk) => {
       socket.end()
       try {
         const response = JSON.parse(line)
+        if (request.pipe) {
+          if (!response.ok) {
+            printResponse(response)
+            process.exit(1)
+          }
+          const command = String(request.pipe.command || '').trim()
+          if (!command) {
+            process.stderr.write('pipe-pane requires --command <shell-command>\n')
+            process.exit(2)
+          }
+          const child = spawnSync(process.env.SHELL || '/bin/sh', ['-lc', command], {
+            input: typeof response.data?.text === 'string' ? response.data.text : '',
+            encoding: 'utf8'
+          })
+          if (child.stdout) process.stdout.write(child.stdout)
+          if (child.stderr) process.stderr.write(child.stderr)
+          if (child.error) {
+            process.stderr.write(`${child.error.message}\n`)
+            process.exit(1)
+          }
+          process.exit(child.status === null ? 1 : child.status)
+        }
         printResponse(response)
         process.exit(response.ok ? 0 : 1)
       } catch (error) {
