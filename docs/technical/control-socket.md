@@ -229,12 +229,13 @@ Notification event payloads include bounded title previews and content lengths; 
 
 ## Agent Vault
 
-Agent Vault is aiopsterm's custom-agent registry for local-terminal automation. It is inspired by control_compat Vault's custom agent registrations. The current aiopsterm slice stores command templates plus process-detection metadata, and can identify an agent from a process snapshot supplied by the caller. It does not yet scan the operating-system process table by itself.
+Agent Vault is aiopsterm's custom-agent registry for local-terminal automation. It is inspired by control_compat Vault's custom agent registrations. The current aiopsterm slice stores command templates plus process-detection metadata, and can identify an agent from a process snapshot supplied by the caller. Pi and OMP are registered by default with `piSessionFile` session ids and `{{executable}} --session {{sessionId}}` resume/fork commands. It does not yet scan the operating-system process table by itself.
 
 Definitions are stored under the app user-data control directory as `agent-vault.json`. A definition includes:
 
 - `id`: stable lowercase id used by `agent team launch --source <id>`.
 - `name`: display name used for generated workspace group titles.
+- `builtIn`: true for built-in defaults such as Pi and OMP. Built-in entries appear in `agent.vault.list` but are not written as user records when the vault file is persisted.
 - `executable`: optional executable placeholder value.
 - `detect`: optional process detection rule with `processName`, `argvContains`, `executableContains`, and `commandContains`.
 - `sessionIdSource`: optional native session id source. Supported types are `provided`, `argvOption`, `env`, `fixed`, and `piSessionFile`.

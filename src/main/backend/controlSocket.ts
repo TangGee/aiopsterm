@@ -59,6 +59,7 @@ type ControlEventSubscription = {
 type AgentVaultEntry = {
   id: string
   name: string
+  builtIn?: boolean
   description?: string
   executable?: string
   detect?: AgentVaultDetectRule
@@ -607,10 +608,51 @@ const normalizeAgentVaultEntry = (value: unknown, existing?: AgentVaultEntry): A
   }
 }
 
+const defaultAgentVaultEntries = (): AgentVaultEntry[] => {
+  const now = Date.now()
+  return [
+    {
+      id: 'omp',
+      name: 'OMP',
+      builtIn: true,
+      executable: 'omp',
+      detect: { processName: 'omp' },
+      sessionIdSource: { type: 'piSessionFile' },
+      resumeCommand: '{{executable}} --session {{sessionId}}',
+      forkCommand: '{{executable}} --session {{sessionId}} --fork',
+      sessionDirectory: '~/.omp/agent/sessions',
+      cwd: 'preserve',
+      createdAt: now,
+      updatedAt: now
+    },
+    {
+      id: 'pi',
+      name: 'Pi',
+      builtIn: true,
+      executable: 'pi',
+      detect: { processName: 'pi', argvContains: ['pi'] },
+      sessionIdSource: { type: 'piSessionFile' },
+      resumeCommand: '{{executable}} --session {{sessionId}}',
+      forkCommand: '{{executable}} --session {{sessionId}} --fork',
+      sessionDirectory: '~/.pi/agent/sessions',
+      cwd: 'preserve',
+      createdAt: now,
+      updatedAt: now
+    }
+  ]
+}
+
+const seedDefaultAgentVaultEntries = () => {
+  for (const entry of defaultAgentVaultEntries()) {
+    if (!agentVaultEntries.has(entry.id)) agentVaultEntries.set(entry.id, entry)
+  }
+}
+
 const loadAgentVaultStore = async (userDataPath?: string) => {
   if (userDataPath) agentVaultStorePath = agentVaultPathFor(userDataPath)
   if (!agentVaultStorePath || agentVaultLoadedPath === agentVaultStorePath) return
   agentVaultEntries = new Map()
+  seedDefaultAgentVaultEntries()
   agentVaultLoadedPath = agentVaultStorePath
   if (!existsSync(agentVaultStorePath)) return
   try {
@@ -623,6 +665,7 @@ const loadAgentVaultStore = async (userDataPath?: string) => {
     }
   } catch {
     agentVaultEntries = new Map()
+    seedDefaultAgentVaultEntries()
   }
 }
 
@@ -630,7 +673,7 @@ const persistAgentVaultStore = async () => {
   if (!agentVaultStorePath) return
   const payload = {
     version: 1,
-    agents: sortedAgentVaultEntries()
+    agents: sortedAgentVaultEntries().filter((entry) => entry.builtIn !== true)
   }
   agentVaultWriteQueue = agentVaultWriteQueue
     .catch(() => undefined)

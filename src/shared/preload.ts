@@ -286,6 +286,7 @@ export type ControlAgentVaultSessionIdSource =
 export type ControlAgentVaultEntry = {
   id: string
   name: string
+  builtIn?: boolean
   description?: string
   executable?: string
   detect?: ControlAgentVaultDetectRule

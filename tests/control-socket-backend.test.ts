@@ -525,7 +525,13 @@ describe('control socket backend', () => {
           })
         })
       )
-      expect(backend.__testing.listAgentVaultEntries()).toEqual([expect.objectContaining({ id: 'my-agent' })])
+      expect(backend.__testing.listAgentVaultEntries()).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: 'my-agent' }),
+          expect.objectContaining({ id: 'omp', sessionIdSource: { type: 'piSessionFile' } }),
+          expect.objectContaining({ id: 'pi', sessionIdSource: { type: 'piSessionFile' } })
+        ])
+      )
 
       await expect(
         backend.__testing.handleControlRequest({
@@ -568,6 +574,35 @@ describe('control socket backend', () => {
                 process: expect.objectContaining({ pid: 4242, processName: 'my-agent' })
               })
             ]
+          })
+        })
+      )
+      await expect(
+        backend.__testing.handleControlRequest({
+          method: 'agent.vault.identify',
+          params: {
+            process: {
+              processName: 'omp',
+              executable: '/usr/local/bin/omp',
+              argv: ['/usr/local/bin/omp'],
+              sessionPath: '/home/user/.omp/agent/sessions/omp-session-1',
+              cwd: '/work/omp'
+            }
+          }
+        })
+      ).resolves.toEqual(
+        expect.objectContaining({
+          ok: true,
+          data: expect.objectContaining({
+            matched: true,
+            matches: expect.arrayContaining([
+              expect.objectContaining({
+                sessionId: '/home/user/.omp/agent/sessions/omp-session-1',
+                resumeCommand: '/usr/local/bin/omp --session /home/user/.omp/agent/sessions/omp-session-1',
+                forkCommand: '/usr/local/bin/omp --session /home/user/.omp/agent/sessions/omp-session-1 --fork',
+                agent: expect.objectContaining({ id: 'omp', name: 'OMP' })
+              })
+            ])
           })
         })
       )
