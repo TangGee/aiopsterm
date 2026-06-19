@@ -484,6 +484,61 @@ describe('aiopsterm-control CLI', () => {
     ])
   })
 
+  it('sends feed and bulk managed AI session requests over the configured socket', async () => {
+    const seen: Record<string, unknown>[] = []
+    const socketPath = await startControlServer((request) => {
+      seen.push(request)
+      return {
+        id: request.id,
+        ok: true,
+        data: {
+          operation: request.method === 'feed.list' ? undefined : (request.params as any)?.operation || 'mark-handled',
+          changed: request.method === 'feed.list' ? undefined : 1,
+          sessions: [
+            {
+              source: 'claude-code',
+              sessionId: 'claude-feed-1',
+              id: 'claude-feed-1',
+              title: 'Deploy review',
+              summary: 'Approve deploy command',
+              state: request.method === 'feed.list' ? 'needsInput' : 'idle',
+              needsInput: request.method === 'feed.list',
+              requestKind: 'permission',
+              eventCount: 1,
+              decisionCount: request.method === 'feed.list' ? 0 : 1
+            }
+          ],
+          count: 1,
+          needsInputCount: request.method === 'feed.list' ? 1 : 0
+        }
+      }
+    })
+
+    const listed = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'feed', 'list'], {
+      cwd: process.cwd()
+    })
+    expect(listed.stdout).toContain('agent-sessions\t1/1\tneeds_input=1')
+
+    const handled = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'feed', 'mark-handled'], {
+      cwd: process.cwd()
+    })
+    expect(handled.stdout).toContain('agent-session-bulk\tmark-handled\tchanged=1')
+
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'agent', 'session', 'clear-ended'], {
+      cwd: process.cwd()
+    })
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'feed', 'clear', '--yes'], {
+      cwd: process.cwd()
+    })
+
+    expect(seen).toEqual([
+      expect.objectContaining({ method: 'feed.list', params: expect.objectContaining({ needsInput: true }) }),
+      expect.objectContaining({ method: 'feed.mark-handled' }),
+      expect.objectContaining({ method: 'agent.session.bulk', params: expect.objectContaining({ operation: 'clear-ended' }) }),
+      expect.objectContaining({ method: 'feed.clear', params: expect.objectContaining({ confirm: true, yes: true }) })
+    ])
+  })
+
   it('sends agent vault requests over the configured socket', async () => {
     const seen: Record<string, unknown>[] = []
     const socketPath = await startControlServer((request) => {

@@ -14,6 +14,7 @@ Commands:
   identify
   rpc <method> [--params-json <json>]
   hooks list|setup|install|uninstall [--agent <name>]
+  feed list|mark-handled|clear-ended|clear [--yes]
   workspace snapshot
   workspace list
   workspace group <subcommand>
@@ -75,6 +76,7 @@ const methodParams = () => {
     return { method, params: readJsonParams() }
   }
   if (command === 'hooks' || command === 'hook') return agentHooksMethodParams(args.shift() || 'list')
+  if (command === 'feed') return feedMethodParams(args.shift() || 'list')
   if (command === 'workspace') {
     const subcommand = args.shift() || 'snapshot'
     if (subcommand === 'snapshot') return { method: 'workspace.snapshot', params: {} }
@@ -429,7 +431,7 @@ const agentSessionSelectorParams = () => {
 const agentSessionMethodParams = (subcommand) => {
   if (subcommand === 'ls') subcommand = 'list'
   if (subcommand === 'get') subcommand = 'show'
-  if (subcommand === 'mark-handled' || subcommand === 'done') subcommand = 'handle'
+  if (subcommand === 'done') subcommand = 'handle'
   if (subcommand === 'delete' || subcommand === 'remove') subcommand = 'clear'
   if (subcommand === 'list') {
     const limit = Number(readOption('--limit') || 0)
@@ -500,7 +502,37 @@ const agentSessionMethodParams = (subcommand) => {
     }
   }
   if (subcommand === 'clear') return { method: 'agent.session.clear', params: agentSessionSelectorParams() }
+  if (subcommand === 'bulk' || subcommand === 'mark-handled' || subcommand === 'clear-ended' || subcommand === 'clear-all') {
+    const operation = subcommand === 'bulk' ? readOption('--operation') || readOption('--op') || 'mark-handled' : subcommand
+    const source = readOption('--source') || readOption('--agent')
+    const sessionId = readOption('--session') || readOption('--session-id') || readOption('--id')
+    const confirm = hasFlag('--yes') || hasFlag('--confirm')
+    return {
+      method: 'agent.session.bulk',
+      params: {
+        operation,
+        source,
+        sources: source ? source.split(',').map((item) => item.trim()).filter(Boolean) : undefined,
+        sessionId,
+        sessionIds: sessionId ? sessionId.split(',').map((item) => item.trim()).filter(Boolean) : undefined,
+        confirm,
+        yes: confirm
+      }
+    }
+  }
   throw new Error(`Unknown agent session command: ${subcommand}`)
+}
+
+const feedMethodParams = (subcommand) => {
+  if (subcommand === 'status') subcommand = 'list'
+  if (subcommand === 'done' || subcommand === 'mark-read') subcommand = 'mark-handled'
+  if (subcommand === 'list') return { method: 'feed.list', params: { needsInput: true } }
+  if (subcommand === 'mark-handled' || subcommand === 'clear-ended') return { method: `feed.${subcommand}`, params: {} }
+  if (subcommand === 'clear') {
+    const confirm = hasFlag('--yes') || hasFlag('--confirm')
+    return { method: 'feed.clear', params: { confirm, yes: confirm } }
+  }
+  throw new Error(`Unknown feed command: ${subcommand}`)
 }
 
 const agentHooksMethodParams = (subcommand) => {
@@ -744,6 +776,7 @@ const printResponse = (response) => {
     return
   }
   if (Array.isArray(data.sessions) && data.sessions.every(isManagedAiSessionLike)) {
+    if (data.operation || typeof data.changed === 'number') process.stdout.write(`agent-session-bulk\t${data.operation || '-'}\tchanged=${data.changed || 0}\n`)
     process.stdout.write(`agent-sessions\t${data.count || data.sessions.length}/${data.total || data.sessions.length}\tneeds_input=${data.needsInputCount || 0}\n`)
     for (const session of data.sessions) printAgentSessionLine(session)
     if (data.sessions.length === 0) process.stdout.write('No agent sessions\n')

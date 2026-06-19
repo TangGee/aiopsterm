@@ -7,6 +7,7 @@ import type { BrowserWindow, IpcMain } from 'electron'
 import { sendWindowEvent } from '@shared/windowEvents'
 import type {
   AgentHookInstallerSource,
+  AiAgentSessionSource,
   ControlNotificationFocusRequest,
   ControlNotificationRecord,
   ControlRequest,
@@ -14,9 +15,10 @@ import type {
   ControlSessionSnapshot,
   ControlTerminalSummary,
   ManagedAiSessionDecisionKind,
+  ManagedAiSessionBulkOperation,
   ManagedAiSessionRecord
 } from '@shared/preload'
-import { clearManagedAiSession, configureAiAgentSessionStore, listManagedAiSessions, renameManagedAiSession, replyManagedAiSession } from './agentSessions'
+import { bulkManagedAiSessions, clearManagedAiSession, configureAiAgentSessionStore, listManagedAiSessions, renameManagedAiSession, replyManagedAiSession } from './agentSessions'
 import { installAgentHook, listAgentHookInstallers, uninstallAgentHook } from './agentHookInstaller'
 
 type ControlSocketRequest = {
@@ -293,6 +295,8 @@ const isAgentVaultMethod = (method: string) => method.startsWith('agent.vault.')
 const isAgentSessionMethod = (method: string) => method.startsWith('agent.session.') || method.startsWith('agent.sessions.') || method.startsWith('ai.session.')
 
 const isAgentHooksMethod = (method: string) => method.startsWith('agent.hooks.') || method.startsWith('hooks.')
+
+const isFeedMethod = (method: string) => method.startsWith('feed.')
 
 const isSessionMethod = (method: string) => method.startsWith('session.') || method.startsWith('restore-session.')
 
@@ -1459,6 +1463,29 @@ const handleAgentSessionControlRequest = async (method: string, params: Record<s
       needsInputCount: result.data.snapshot.sessions.filter((session) => session.state === 'needsInput').length
     })
   }
+  if (action === 'bulk' || action === 'mark-handled' || action === 'clear-ended' || action === 'clear-all') {
+    const operation = (action === 'bulk' ? cleanText(params.operation || params.op) : action) as ManagedAiSessionBulkOperation
+    const sources = cleanTextList(params.sources || params.source || params.agent) as AiAgentSessionSource[]
+    const sessionIds = cleanTextList(params.sessionIds || params.session_ids || params.id || params.sessionId || params.session_id)
+    if (operation === 'clear-all' && params.confirm !== true && params.yes !== true) {
+      return fail('AGENT_SESSION_CLEAR_ALL_CONFIRM_REQUIRED', 'Pass confirm=true to clear all managed AI sessions.')
+    }
+    const result = await bulkManagedAiSessions({ operation, sources, sessionIds })
+    if (!result.ok || !result.data) return fail(result.errorCode || 'AGENT_SESSION_BULK_FAILED', result.errorMessage || 'Managed AI session bulk operation failed.')
+    publishControlEvent({
+      name: 'agent_session.bulk',
+      category: 'agent',
+      source: 'control.socket',
+      payload: { operation, changed: result.data.changed }
+    })
+    return ok({
+      operation,
+      changed: result.data.changed,
+      sessions: result.data.snapshot.sessions.map((session) => managedAiControlSummary(session)),
+      count: result.data.snapshot.sessions.length,
+      needsInputCount: result.data.snapshot.sessions.filter((session) => session.state === 'needsInput').length
+    })
+  }
   return fail('UNKNOWN_CONTROL_METHOD', `Unknown aiopsterm agent session method: ${method}`)
 }
 
@@ -1533,6 +1560,18 @@ const handleAgentHooksControlRequest = async (method: string, params: Record<str
     })
   }
   return fail('UNKNOWN_CONTROL_METHOD', `Unknown aiopsterm agent hook method: ${method}`)
+}
+
+const handleFeedControlRequest = async (method: string, params: Record<string, unknown>) => {
+  if (runtime.userDataPath) await configureAiAgentSessionStore(runtime.userDataPath)
+  const action = method.slice('feed.'.length)
+  if (action === 'list' || action === 'status') return handleAgentSessionControlRequest('agent.session.list', { ...params, needsInput: params.needsInput ?? params.needs_input ?? true })
+  if (action === 'mark-handled' || action === 'mark_read' || action === 'mark-read') {
+    return handleAgentSessionControlRequest('agent.session.bulk', { ...params, operation: 'mark-handled' })
+  }
+  if (action === 'clear-ended') return handleAgentSessionControlRequest('agent.session.bulk', { ...params, operation: 'clear-ended' })
+  if (action === 'clear') return handleAgentSessionControlRequest('agent.session.bulk', { ...params, operation: 'clear-all', confirm: params.confirm === true || params.yes === true })
+  return fail('UNKNOWN_CONTROL_METHOD', `Unknown aiopsterm feed method: ${method}`)
 }
 
 const prepareAgentTeamLaunchParams = async (params: Record<string, unknown>): Promise<Record<string, unknown> | ControlResponse> => {
@@ -2013,6 +2052,7 @@ const handleControlRequest = async (request: ControlSocketRequest): Promise<Cont
   if (method === 'system.capabilities' || method === 'capabilities') return systemCapabilities()
   if (method === 'system.identify' || method === 'identify') return systemIdentify(params)
   if (isEventListMethod(method)) return listEvents(params)
+  if (isFeedMethod(method)) return handleFeedControlRequest(method, params)
   if (isAgentHooksMethod(method)) return handleAgentHooksControlRequest(method, params)
   if (isAgentVaultMethod(method)) return handleAgentVaultControlRequest(method, params)
   if (isAgentSessionMethod(method)) return handleAgentSessionControlRequest(method, params)

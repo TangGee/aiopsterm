@@ -1082,6 +1082,74 @@ describe('control socket backend', () => {
     }
   })
 
+  it('bulk manages captured AI sessions through feed-style control commands', async () => {
+    const backend = await loadBackend()
+    const agentSessions = await loadAgentSessionsBackend()
+    const root = await mkdtemp(join(tmpdir(), 'aiopsterm-control-agent-session-bulk-'))
+    try {
+      await backend.ensureControlSocketServer(root)
+      await agentSessions.configureAiAgentSessionStore(root)
+      agentSessions.publishAiAgentSessionEvent(
+        {
+          source: 'claude-code',
+          event: 'PermissionRequest',
+          sessionId: 'claude-bulk-1',
+          requestId: 'request-1',
+          waitForDecision: true,
+          actionable: true,
+          summary: 'Approve command',
+          receivedAt: 1717200000000
+        },
+        null
+      )
+      agentSessions.publishAiAgentSessionEvent(
+        {
+          source: 'codex',
+          event: 'SessionEnd',
+          sessionId: 'codex-ended-1',
+          summary: 'Finished old task',
+          receivedAt: 1717200000100
+        },
+        null
+      )
+
+      await expect(backend.__testing.handleControlRequest({ method: 'feed.mark-handled' })).resolves.toEqual(
+        expect.objectContaining({
+          ok: true,
+          data: expect.objectContaining({
+            operation: 'mark-handled',
+            changed: 1,
+            needsInputCount: 0,
+            sessions: expect.arrayContaining([expect.objectContaining({ sessionId: 'claude-bulk-1', state: 'idle' })])
+          })
+        })
+      )
+      await expect(backend.__testing.handleControlRequest({ method: 'agent.session.bulk', params: { operation: 'clear-ended' } })).resolves.toEqual(
+        expect.objectContaining({
+          ok: true,
+          data: expect.objectContaining({
+            operation: 'clear-ended',
+            changed: 1,
+            sessions: expect.not.arrayContaining([expect.objectContaining({ sessionId: 'codex-ended-1' })])
+          })
+        })
+      )
+      await expect(backend.__testing.handleControlRequest({ method: 'feed.clear' })).resolves.toEqual(
+        expect.objectContaining({ ok: false, errorCode: 'AGENT_SESSION_CLEAR_ALL_CONFIRM_REQUIRED' })
+      )
+      await expect(backend.__testing.handleControlRequest({ method: 'feed.clear', params: { yes: true } })).resolves.toEqual(
+        expect.objectContaining({
+          ok: true,
+          data: expect.objectContaining({ operation: 'clear-all', changed: 1, count: 0 })
+        })
+      )
+    } finally {
+      await agentSessions.__testing.flushManagedAiSessionWrites()
+      backend.closeControlSocketServer()
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   it('serves newline-delimited JSON requests over the local socket', async () => {
     const backend = await loadBackend()
     const root = await mkdtemp(join(tmpdir(), 'aiopsterm-control-socket-'))

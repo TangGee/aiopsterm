@@ -79,6 +79,14 @@ The Agent Session slice adds control_compat-style local socket primitives for AI
 - `agent.session.approve`, `agent.session.deny`, and `agent.session.handle`: convenience aliases over `reply`.
 - `agent.session.rename`: set the user-facing managed session title.
 - `agent.session.clear`: remove the managed AI session record.
+- `agent.session.bulk`: run `mark-handled`, `clear-ended`, or `clear-all` over managed AI session records, optionally filtered by source/session id.
+
+The Feed aliases expose the same managed AI queue with control_compat-style names:
+
+- `feed.list`: list sessions that currently need input.
+- `feed.mark-handled`: mark all pending managed AI requests handled.
+- `feed.clear-ended`: remove ended managed AI sessions.
+- `feed.clear`: clear all managed AI session records; this requires `confirm=true`.
 
 `agent.sessions.*` and `ai.session.*` are accepted aliases for scripts that group these methods differently.
 
@@ -199,6 +207,10 @@ node /path/to/resources/aiopsterm-control.js agent session approve claude-sessio
 node /path/to/resources/aiopsterm-control.js agent session deny claude-session-1 --source claude-code --message "Use staging first"
 node /path/to/resources/aiopsterm-control.js agent session rename claude-session-1 --source claude-code --title "Deploy review"
 node /path/to/resources/aiopsterm-control.js agent session clear claude-session-1 --source claude-code
+node /path/to/resources/aiopsterm-control.js feed list
+node /path/to/resources/aiopsterm-control.js feed mark-handled
+node /path/to/resources/aiopsterm-control.js feed clear-ended
+node /path/to/resources/aiopsterm-control.js feed clear --yes
 node /path/to/resources/aiopsterm-control.js agent team launch --source codex --count 3 --cwd "$PWD" --prompt "review this repo"
 node /path/to/resources/aiopsterm-control.js agent team launch --source claude-code --count 2 --cwd "$PWD" --prompt "investigate flaky tests"
 node /path/to/resources/aiopsterm-control.js agent team launch --source custom --count 2 --command "my-agent --role reviewer --index {{index}}"
@@ -244,6 +256,8 @@ By default `sweep` uses the configured `confirmationSeconds` settle window. The 
 The current Teams slice intentionally stops at visible local-terminal orchestration. control_compat's deeper Codex Teams app-server watcher, which bridges Codex private app-server approvals into Feed, is a separate integration because it owns a private Codex websocket lifecycle and approval response mapping.
 
 `agent.session.*` operates only on the managed AI session store built from hooks/events emitted by agents running in aiopsterm-created local connection terminals. It does not close terminal panels, kill agent processes, disconnect SSH sessions, or take ownership of the visible terminal connection. `clear` removes the AI session manager record only. `reply` records a compact decision; for blocking Claude Code hooks it may resolve the waiting hook through the existing managed-session backend, while stock Codex permission events remain visibility-only because Codex keeps its native approval path. Session summaries intentionally omit raw hook payloads, terminal screen text, typed input, and command output.
+
+`agent.session.bulk` and `feed.*` are batch operations over the same managed session records. `mark-handled` can resolve waiting Claude Code hooks as locally handled, while `clear-ended` and `clear-all` remove only aiopsterm's AI session records. `clear-all` requires an explicit confirmation flag (`confirm=true` or CLI `--yes`) and still does not kill agent processes or terminal panels.
 
 `surface.resume.*` is restore metadata, not a live process checkpoint. aiopsterm stores a bounded command binding on a visible surface and exposes it through `surface.list`, `surface.current`, and `workspace.snapshot`. Public CLI/socket-created bindings are manual by default; setting `autoResume=true` alone does not authorize automatic execution. A binding becomes auto-runnable only after `surface.resume.trust --policy auto`, which records a command fingerprint and trust metadata on that binding. `surface.resume.preview` reports `ready`, `manual`, `untrusted`, or `terminal-not-connected` reasons before anything runs.
 
