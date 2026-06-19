@@ -260,9 +260,22 @@
         </div>
 
         <section class="ai-session-timeline">
-          <h3>事件流</h3>
+          <div class="ai-session-section-header">
+            <h3>事件流</h3>
+            <span>{{ filteredTimelineEvents.length }} / {{ selectedSession.events.length }}</span>
+          </div>
+          <div class="ai-session-event-filters">
+            <button
+              v-for="option in eventFilters"
+              :key="option.key"
+              :class="{ active: eventFilter === option.key }"
+              @click="eventFilter = option.key"
+            >
+              {{ option.label }}
+            </button>
+          </div>
           <div
-            v-for="event in selectedSession.events.slice().reverse()"
+            v-for="event in filteredTimelineEvents"
             :key="event.id"
             class="ai-session-event"
           >
@@ -272,6 +285,13 @@
               <small>{{ formatTime(event.receivedAt) }} · {{ requestKindLabel(event.requestKind) }} · {{ decisionModeLabel(event.decisionMode) }}</small>
               <p v-if="event.summary">{{ event.summary }}</p>
             </div>
+            <button
+              class="ai-session-event-copy"
+              title="复制事件"
+              @click="copyTimelineEvent(event)"
+            >
+              <Copy />
+            </button>
           </div>
         </section>
 
@@ -304,13 +324,15 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { ArchiveX, Ban, Check, CheckCheck, LocateFixed, RefreshCw, RotateCcw, Search, Send, Settings, ShieldCheck, Trash2 } from 'lucide-vue-next'
+import { ArchiveX, Ban, Check, CheckCheck, Copy, LocateFixed, RefreshCw, RotateCcw, Search, Send, Settings, ShieldCheck, Trash2 } from 'lucide-vue-next'
 import { useWorkspaceStore, type ManagedAiSession, type ManagedAiSessionState } from '@/stores/workspace'
+import { copyTextToClipboard } from '@/services/clipboardRuntime'
 import type { AiAgentSessionEventName, AiAgentSessionSource } from '@shared/preload'
 
 const workspace = useWorkspaceStore()
 const query = ref('')
 const filter = ref<'all' | ManagedAiSessionState>('all')
+const eventFilter = ref<'all' | ManagedAiSession['events'][number]['requestKind']>('all')
 const replyText = ref('')
 const renameTitle = ref('')
 const filters: Array<{ key: 'all' | ManagedAiSessionState; label: string }> = [
@@ -319,6 +341,14 @@ const filters: Array<{ key: 'all' | ManagedAiSessionState; label: string }> = [
   { key: 'working', label: '运行中' },
   { key: 'idle', label: '空闲' },
   { key: 'ended', label: '已结束' }
+]
+const eventFilters: Array<{ key: 'all' | ManagedAiSession['events'][number]['requestKind']; label: string }> = [
+  { key: 'all', label: '全部' },
+  { key: 'permission', label: '权限' },
+  { key: 'question', label: '提问' },
+  { key: 'plan', label: '计划' },
+  { key: 'notification', label: '通知' },
+  { key: 'telemetry', label: '遥测' }
 ]
 
 const sourceLabel = (source: AiAgentSessionSource) => {
@@ -423,11 +453,18 @@ const visibleSessions = computed(() => {
 
 const selectedSession = computed(() => workspace.selectedManagedAiSession || visibleSessions.value[0] || null)
 
+const filteredTimelineEvents = computed(() => {
+  const events = selectedSession.value?.events.slice().reverse() || []
+  if (eventFilter.value === 'all') return events
+  return events.filter((event) => event.requestKind === eventFilter.value)
+})
+
 watch(
   selectedSession,
   (session) => {
     renameTitle.value = session?.title || ''
     replyText.value = ''
+    eventFilter.value = 'all'
   },
   { immediate: true }
 )
@@ -457,6 +494,34 @@ const submitQuestionReply = async () => {
   if (!session || !message) return
   const ok = await workspace.replyManagedAiSession(session.source, session.id, 'reply', message)
   if (ok) replyText.value = ''
+}
+
+const timelineEventCopyPayload = (event: ManagedAiSession['events'][number]) =>
+  JSON.stringify(
+    {
+      id: event.id,
+      source: event.source,
+      event: event.event,
+      sessionId: event.sessionId,
+      title: event.title,
+      summary: event.summary,
+      receivedAt: event.receivedAt,
+      requestKind: event.requestKind,
+      decisionMode: event.decisionMode,
+      ...(event.requestId ? { requestId: event.requestId } : {}),
+      ...(event.toolName ? { toolName: event.toolName } : {}),
+      ...(typeof event.actionable === 'boolean' ? { actionable: event.actionable } : {}),
+      ...(event.cwd ? { cwd: event.cwd } : {}),
+      ...(event.transcriptPath ? { transcriptPath: event.transcriptPath } : {}),
+      ...(event.agentLifecycle ? { agentLifecycle: event.agentLifecycle } : {})
+    },
+    null,
+    2
+  )
+
+const copyTimelineEvent = async (event: ManagedAiSession['events'][number]) => {
+  const copied = await copyTextToClipboard(timelineEventCopyPayload(event))
+  workspace.setTopNotice(copied ? 'AI 会话事件已复制' : 'AI 会话事件复制失败')
 }
 
 const formatTime = (timestamp: number) =>
@@ -798,6 +863,13 @@ const formatTime = (timestamp: number) =>
   gap: 6px;
 }
 
+.ai-session-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 .ai-session-timeline h3,
 .ai-session-decisions h3 {
   margin: 0;
@@ -805,9 +877,36 @@ const formatTime = (timestamp: number) =>
   font-size: 12px;
 }
 
+.ai-session-section-header span {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.ai-session-event-filters {
+  display: flex;
+  gap: 5px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.ai-session-event-filters button {
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font-size: 11px;
+  padding: 3px 6px;
+  white-space: nowrap;
+}
+
+.ai-session-event-filters button.active {
+  color: var(--text-primary);
+  border-color: var(--accent-color);
+}
+
 .ai-session-event {
   display: grid;
-  grid-template-columns: 10px minmax(0, 1fr);
+  grid-template-columns: 10px minmax(0, 1fr) 24px;
   gap: 8px;
   align-items: start;
   padding: 6px 0;
@@ -825,6 +924,28 @@ const formatTime = (timestamp: number) =>
   font-size: 12px;
   line-height: 1.35;
   overflow-wrap: anywhere;
+}
+
+.ai-session-event-copy {
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface-2);
+  color: var(--text-muted);
+}
+
+.ai-session-event-copy:hover {
+  color: var(--text-primary);
+  border-color: var(--accent-color);
+}
+
+.ai-session-event-copy svg {
+  width: 13px;
+  height: 13px;
 }
 
 .ai-session-decisions > div {

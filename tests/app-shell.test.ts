@@ -758,6 +758,62 @@ describe('AppShell', () => {
     expect(store.activePanelId).toBe('panel-main')
   })
 
+  it('filters and copies managed AI session timeline events', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const store = useWorkspaceStore()
+    vi.mocked(navigator.clipboard.writeText).mockClear()
+    store.upsertManagedAiSession({
+      source: 'claude-code',
+      event: 'permission_request',
+      sessionId: 'claude-timeline-1',
+      title: 'Timeline audit',
+      summary: 'Approve deployment command',
+      requestId: 'permission-1',
+      requestKind: 'permission',
+      decisionMode: 'blocking',
+      actionable: true,
+      receivedAt: 100
+    })
+    store.upsertManagedAiSession({
+      source: 'claude-code',
+      event: 'question',
+      sessionId: 'claude-timeline-1',
+      title: 'Timeline audit',
+      summary: 'Which window should deploy?',
+      requestId: 'question-1',
+      requestKind: 'question',
+      decisionMode: 'blocking',
+      actionable: true,
+      receivedAt: 200
+    })
+    store.focusManagedAiSession('claude-timeline-1')
+
+    const wrapper = mount(AiSessionsPanel, {
+      global: {
+        plugins: [pinia]
+      }
+    })
+    await flushPromises()
+
+    expect(wrapper.find('.ai-session-section-header').text()).toContain('2 / 2')
+    const questionFilter = wrapper.findAll('.ai-session-event-filters button').find((button) => button.text() === '提问')
+    expect(questionFilter).toBeTruthy()
+    await questionFilter!.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.ai-session-section-header').text()).toContain('1 / 2')
+    expect(wrapper.find('.ai-session-timeline').text()).toContain('Which window should deploy?')
+    expect(wrapper.find('.ai-session-timeline').text()).not.toContain('Approve deployment command')
+
+    await wrapper.find('.ai-session-event-copy').trigger('click')
+    await flushPromises()
+
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(expect.stringContaining('"requestKind": "question"'))
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(expect.not.stringContaining('"raw"'))
+    expect(store.topNotice).toBe('AI 会话事件已复制')
+  })
+
   it('links the empty AI session panel to AI settings for hook setup', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
