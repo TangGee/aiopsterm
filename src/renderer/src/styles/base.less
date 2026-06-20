@@ -7883,6 +7883,97 @@ code {
   background: var(--readable-surface);
 }
 
+.terminal-context-bar {
+  min-height: 34px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface) 82%, transparent);
+}
+
+.terminal-context-bar-main,
+.terminal-context-bar-meta {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.terminal-context-bar-main strong,
+.terminal-context-bar-main span,
+.terminal-context-bar-meta span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.terminal-context-bar-main strong {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.terminal-context-bar-main span,
+.terminal-context-bar-meta span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.terminal-context-bar-main span {
+  flex: 0 0 auto;
+  padding: 1px 5px;
+  border: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--surface-2) 56%, transparent);
+}
+
+.terminal-context-bar-meta button {
+  flex: 0 0 auto;
+  min-height: 22px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 0 7px;
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.terminal-context-bar-meta button:hover {
+  background: var(--surface-3);
+}
+
+.terminal-context-bar-meta .terminal-context-attention {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface-2));
+}
+
+.app-shell.has-app-background .terminal-context-bar {
+  background: var(--glass-surface);
+  backdrop-filter: blur(14px);
+}
+
+.app-shell.has-app-background .terminal-context-bar-main span,
+.app-shell.has-app-background .terminal-context-bar-meta button {
+  background: var(--glass-surface-2);
+}
+
+@media (max-width: 760px) {
+  .terminal-context-bar {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+  }
+
+  .terminal-context-bar-meta {
+    justify-content: flex-start;
+  }
+}
+
 .terminal-security-prompt {
   min-height: 48px;
   padding: 7px 10px;

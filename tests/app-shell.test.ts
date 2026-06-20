@@ -8967,6 +8967,63 @@ describe('AppShell', () => {
     wrapper.unmount()
   })
 
+  it('shows and copies the active terminal context bar with pending AI attention', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    mockXtermInstances.length = 0
+    vi.mocked(navigator.clipboard.writeText).mockClear()
+    const wrapper = mount(TerminalWorkspace, {
+      attachTo: document.body,
+      global: { plugins: [pinia] }
+    })
+    const store = useWorkspaceStore()
+
+    const panel = store.createPanel()
+    panel.title = 'Deploy shell'
+    panel.cwd = '/srv/projects/deploy'
+    store.applyLocalTerminalSession(panel.id, {
+      id: 'terminal-deploy',
+      kind: 'local',
+      shell: '/bin/bash',
+      cwd: '/srv/projects/deploy'
+    })
+    store.upsertManagedAiSession({
+      source: 'claude-code',
+      event: 'permission_request',
+      sessionId: 'claude-deploy-approval',
+      title: 'Deploy approval',
+      summary: 'Approve deployment command',
+      panelId: panel.id,
+      terminalSessionId: 'terminal-deploy',
+      cwd: '/srv/projects/deploy',
+      requestKind: 'permission',
+      decisionMode: 'blocking',
+      actionable: true,
+      receivedAt: 100
+    })
+    await wrapper.vm.$nextTick()
+    await wrapper.vm.$nextTick()
+
+    const contextBar = wrapper.find('.terminal-context-bar')
+    expect(contextBar.exists()).toBe(true)
+    expect(contextBar.text()).toContain('bash')
+    expect(contextBar.text()).toContain('Local')
+    expect(contextBar.text()).toContain('/srv/projects/deploy')
+    expect(contextBar.text()).toContain('1 AI')
+
+    await contextBar.findAll('button').find((button) => button.text().includes('复制上下文'))!.trigger('click')
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(expect.stringContaining('Title: bash'))
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(expect.stringContaining('CWD: /srv/projects/deploy'))
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(expect.stringContaining('Pending AI: claude-code/Deploy approval'))
+    expect(store.topNotice).toBe('终端上下文已复制')
+
+    await contextBar.find('.terminal-context-attention').trigger('click')
+    expect(store.activeModule).toBe('aiSessions')
+    expect(store.selectedManagedAiSession?.id).toBe('claude-deploy-approval')
+
+    wrapper.unmount()
+  })
+
   it('restores and reattaches terminal splits from context menus and tab dragging', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)

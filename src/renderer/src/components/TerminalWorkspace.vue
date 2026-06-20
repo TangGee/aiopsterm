@@ -163,6 +163,41 @@
     </div>
 
     <div
+      v-if="activeTerminalContextBar"
+      class="terminal-context-bar"
+    >
+      <div class="terminal-context-bar-main">
+        <strong>{{ activeTerminalContextBar.title }}</strong>
+        <span>{{ activeTerminalContextBar.kindLabel }}</span>
+        <span>{{ activeTerminalContextBar.statusLabel }}</span>
+      </div>
+      <div class="terminal-context-bar-meta">
+        <span
+          v-if="activeTerminalContextBar.target"
+          :title="activeTerminalContextBar.target"
+        >{{ activeTerminalContextBar.target }}</span>
+        <span
+          v-if="activeTerminalContextBar.path"
+          :title="activeTerminalContextBar.path"
+        >{{ activeTerminalContextBar.path }}</span>
+        <button
+          v-if="activeTerminalContextBar.pendingAiCount"
+          class="terminal-context-attention"
+          title="定位待处理 AI 会话"
+          @click="workspace.jumpToNextAiAttention"
+        >
+          {{ activeTerminalContextBar.pendingAiCount }} AI
+        </button>
+        <button
+          title="复制当前终端上下文"
+          @click="copyActiveTerminalContext"
+        >
+          复制上下文
+        </button>
+      </div>
+    </div>
+
+    <div
       v-if="workspace.terminalSecurityPrompt"
       class="terminal-security-prompt"
     >
@@ -4018,6 +4053,30 @@ const terminalTabTooltip = (panel: TerminalPanel) => {
   if (panel.sessionId) lines.push(`会话: ${panel.sessionId}`)
   return lines.filter(Boolean).join('\n')
 }
+const terminalContextKindLabel = (panel: TerminalPanel) => {
+  if (panel.kind === 'knowledge') return 'Editor'
+  if (panel.sshSession) return 'SSH'
+  return 'Local'
+}
+const pendingAiSessionsForPanel = (panel: TerminalPanel) =>
+  workspace.managedAiSessions.filter(
+    (session) => session.state === 'needsInput' && (session.panelId === panel.id || Boolean(panel.sessionId && session.terminalSessionId === panel.sessionId))
+  )
+const terminalContextText = (panel: TerminalPanel) => {
+  const pendingSessions = pendingAiSessionsForPanel(panel)
+  return [
+    `Title: ${panel.title}`,
+    `Type: ${terminalContextKindLabel(panel)}`,
+    `Status: ${terminalStatusLabel(panel)}`,
+    terminalSshTargetLabel(panel) ? `Host: ${terminalSshTargetLabel(panel)}` : '',
+    panel.cwd ? `CWD: ${panel.cwd}` : '',
+    panel.knowledge?.relPath ? `File: ${panel.knowledge.relPath}` : '',
+    panel.sessionId ? `Terminal Session: ${panel.sessionId}` : '',
+    pendingSessions.length ? `Pending AI: ${pendingSessions.map((session) => `${session.source}/${session.title}`).join(', ')}` : ''
+  ]
+    .filter(Boolean)
+    .join('\n')
+}
 const panelNeedsAiAttention = (panel: TerminalPanel) =>
   workspace.managedAiSessionNeedsAttentionForPanel(panel.id) || Boolean(panel.sessionId && workspace.managedAiSessionNeedsAttentionForPanel(panel.sessionId))
 const terminalTabDragType = 'application/x-aiopsterm-terminal-tab'
@@ -4045,6 +4104,26 @@ const isWelcomePlaceholderPanel = (panel?: TerminalPanel | null) =>
 const visibleTerminalTabPanels = computed(() => workspace.panels.filter((panel) => !isWelcomePlaceholderPanel(panel)))
 const connectedTerminalPanels = computed(() => visibleTerminalTabPanels.value.filter((panel) => panel.kind !== 'knowledge'))
 const activeTerminalPanel = computed(() => workspace.panels.find((panel) => panel.id === workspace.activePanelId) || visibleTerminalTabPanels.value[0] || workspace.panels[0])
+const activeTerminalContextBar = computed(() => {
+  const panel = activeTerminalPanel.value
+  if (!panel || isWelcomePlaceholderPanel(panel)) return null
+  const pendingAiCount = pendingAiSessionsForPanel(panel).length
+  return {
+    title: panel.title,
+    kindLabel: terminalContextKindLabel(panel),
+    statusLabel: terminalStatusLabel(panel),
+    target: terminalSshTargetLabel(panel),
+    path: panel.knowledge?.relPath || panel.cwd,
+    pendingAiCount,
+    text: terminalContextText(panel)
+  }
+})
+const copyActiveTerminalContext = async () => {
+  const context = activeTerminalContextBar.value
+  if (!context) return
+  const copied = await copyTextToClipboard(context.text)
+  workspace.setTopNotice(copied ? '终端上下文已复制' : '终端上下文复制失败')
+}
 const visibleTerminalPanels = computed(() => {
   const active = activeTerminalPanel.value
   if (!active) return []
