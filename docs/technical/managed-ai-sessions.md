@@ -118,7 +118,7 @@ The store is capped to 200 sessions, 200 timeline events per session, and 40 loc
 - agent process facts (`processId`, `parentProcessId`, `processGroupId`) and normalized lifecycle (`running`, `idle`, `needsInput`, `ended`, or `unknown`)
 - owning local terminal process and activity facts (`terminalProcessId`, `terminalActivityAt`) when the terminal backend reports them
 
-The renderer hydrates from this store on startup through `listManagedAiSessions()`. Incoming hook events update the in-memory UI immediately and are persisted by the main process.
+The renderer hydrates from this store on startup through `src/renderer/src/services/managedAiClient.ts`, which owns `listManagedAiSessions()` bridge lookup and binding. Incoming hook events update the in-memory UI immediately and are persisted by the main process.
 
 `managed-ai-sessions.audit.jsonl` is an append-only audit stream inspired by control_compat Feed's workstream log. It records compact entries for incoming hook events, socket completion status, local replies, decision resolution or timeout, renames, clears, and bulk operations. Entries include non-secret routing and state fields such as source, session id, event name, request kind, decision mode, state, request id, decision kind, status, title, and a bounded summary. The audit log does not store full raw hook payloads; detailed payload previews remain bounded inside the capped session timeline.
 
@@ -141,7 +141,7 @@ Agent and managed-AI payloads include the normalized `requestKind`, `decisionMod
 
 Clients can filter by `name`/`names` and `category`/`categories`, resume with `after_seq` or `after`, and disable heartbeat frames with `include_heartbeats: false`. Replay is kept in a bounded in-memory ring of recent events; the JSONL audit file remains the durable long-term record.
 
-The main process also forwards live `managed-ai` stream frames to renderer windows through the preload `onManagedAiSessionEvent()` channel. The renderer treats that notification as an invalidation signal and reloads `listManagedAiSessions()` instead of trusting the event payload as state. This keeps local UI rows synchronized with backend-only mutations such as auto-naming, notification clearing, and external MCP decisions.
+The main process also forwards live `managed-ai` stream frames to renderer windows through the preload `onManagedAiSessionEvent()` channel. The renderer treats that notification as an invalidation signal and reloads through `managedAiClient.listManagedAiSessions()` instead of trusting the event payload as state. This keeps local UI rows synchronized with backend-only mutations such as auto-naming, notification clearing, and external MCP decisions.
 
 ## Actions And Bulk API
 
@@ -158,6 +158,8 @@ The preload boundary exposes:
 - `clearManagedAiNotifications()`
 - `openManagedAiNotification({ id, source, sessionId })`
 - `jumpToUnreadManagedAiNotification()`
+
+The workspace store calls `listManagedAiSessions()` and `replyManagedAiSession()` through `managedAiClient`, while the store remains responsible for validating returned snapshots, updating attention items, preserving selected-session state, and showing user notices.
 
 Bulk operations currently support `mark-handled`, `clear-ended`, and `clear-all`. For actionable Claude Code hooks, `allow`, `always`, `bypass`, `deny`, and `reply` resolve the waiting hook with Claude-native output. Stock Codex `PermissionRequest` hooks remain local visibility only: they can be inspected and focused from the AI session manager, but they are not unread notifications and are not answered by aiopsterm.
 

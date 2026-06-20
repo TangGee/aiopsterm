@@ -25,6 +25,7 @@ import {
   malformedExtensionBackendResultMessage
 } from '@/services/extensionBackendGuards'
 import { applyKeywordHighlight } from '@/services/keywordHighlightRuntime'
+import { managedAiClient } from '@/services/managedAiClient'
 import {
   isFileSessionCatalogData,
   isFileSessionFolderDeleteData,
@@ -8616,15 +8617,15 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const refreshManagedAiSessions = async (options: { silent?: boolean } = {}) => {
-    const listBridge = window.aiops?.listManagedAiSessions
-    if (typeof listBridge !== 'function') {
+    const listManagedAiSessions = managedAiClient.listManagedAiSessions()
+    if (!listManagedAiSessions) {
       managedAiSessionsError.value = i18nText('aiSessions.notice.serviceUnavailable')
       if (!options.silent) setTopNotice(managedAiSessionsError.value)
       return false
     }
     managedAiSessionsLoading.value = true
     try {
-      const result = (await listBridge()) as ManagedAiSessionListResult
+      const result = (await listManagedAiSessions()) as ManagedAiSessionListResult
       if (!result?.ok || !isManagedAiSessionSnapshot(result.data)) {
         managedAiSessionsError.value = result?.errorMessage || i18nText('aiSessions.notice.listFailed')
         if (!options.silent) setTopNotice(managedAiSessionsError.value)
@@ -8723,9 +8724,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     session.updatedAt = now
     session.decisions = [...session.decisions, { id: `${now}-handled`, kind: 'handled', createdAt: now }]
     if (selectedManagedAiSessionKey.value === managedAiSessionKey(session)) selectedManagedAiSessionKey.value = ''
-    const bridge = window.aiops?.replyManagedAiSession
-    if (typeof bridge === 'function') {
-      void bridge({ source, sessionId, kind: 'handled' }).then((result: ManagedAiSessionMutationResult) => {
+    const replyManagedAiSessionBridge = managedAiClient.replyManagedAiSession()
+    if (replyManagedAiSessionBridge) {
+      void replyManagedAiSessionBridge({ source, sessionId, kind: 'handled' }).then((result: ManagedAiSessionMutationResult) => {
         if (result?.ok && isManagedAiSessionMutationData(result.data)) applyManagedAiSessionSnapshot(result.data.snapshot)
       })
     }
@@ -8733,13 +8734,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const replyManagedAiSession = async (source: AiAgentSessionSource, sessionId: string, kind: ManagedAiSessionDecision['kind'], message?: string) => {
-    const bridge = window.aiops?.replyManagedAiSession
-    if (typeof bridge !== 'function') {
+    const replyManagedAiSessionBridge = managedAiClient.replyManagedAiSession()
+    if (!replyManagedAiSessionBridge) {
       setTopNotice(i18nText('aiSessions.notice.serviceUnavailable'))
       return false
     }
     try {
-      const result = (await bridge({ source, sessionId, kind, message })) as ManagedAiSessionMutationResult
+      const result = (await replyManagedAiSessionBridge({ source, sessionId, kind, message })) as ManagedAiSessionMutationResult
       if (!result?.ok || !isManagedAiSessionMutationData(result.data)) {
         setTopNotice(result?.errorMessage || i18nText('aiSessions.notice.processFailed'))
         return false
