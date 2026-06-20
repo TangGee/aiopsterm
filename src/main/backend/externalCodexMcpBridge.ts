@@ -7,7 +7,7 @@ import type {
   ExternalCodexMcpConnection,
   ExternalCodexMcpHost,
   ExternalCodexMcpResponse
-} from '@shared/preload'
+} from '@shared/contracts/control'
 import type {
   ManagedAiSessionClearInput,
   ManagedAiSessionDecisionKind,

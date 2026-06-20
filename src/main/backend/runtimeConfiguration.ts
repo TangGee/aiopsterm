@@ -53,12 +53,11 @@ import {
 } from '@shared/runtimeSwitches'
 import { broadcastWindowEvent } from '@shared/windowEvents'
 import type {
-  ControlNotificationRecord,
-  ControlResponse,
   KubernetesTerminalDataEvent,
   KubernetesTerminalExitEvent,
   UserConfig
 } from '@shared/preload'
+import type { ControlNotificationRecord, ControlResponse } from '@shared/contracts/control'
 import type { McpConfigFile } from '@shared/contracts/mcp'
 import type { ManagedAiSessionEvent, ManagedAiSessionFocusRequest } from '@shared/contracts/managedAiSessions'
 import type { SkillUserConfig } from '@shared/contracts/skills'

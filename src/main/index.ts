@@ -117,6 +117,7 @@ import type {
 } from '@shared/contracts/terminalSessions'
 import type { AiAgentSessionEvent, ManagedAiSessionEvent, ManagedAiSessionFocusRequest } from '@shared/contracts/managedAiSessions'
 import type { AliasCommandConfig } from '@shared/contracts/aliases'
+import type { ControlNotificationRecord } from '@shared/contracts/control'
 import type {
   EditorUserConfig,
   KeywordHighlightUserConfig,
@@ -197,7 +198,7 @@ const writeTerminalBySessionId = async (id: string, data: string) => {
   }
 }
 
-const showControlNotification = (notification: import('@shared/preload').ControlNotificationRecord) => {
+const showControlNotification = (notification: ControlNotificationRecord) => {
   if (!getConfig().notifications?.desktopNotifications) return
   if (!Notification.isSupported()) return
   const desktop = new Notification({

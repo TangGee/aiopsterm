@@ -4,7 +4,7 @@ import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { afterEach, describe, expect, it } from 'vitest'
-import type { ControlRequest, ControlResponse } from '@shared/preload'
+import type { ControlRequest, ControlResponse } from '@shared/contracts/control'
 
 type ControlSocketBackend = {
   configureControlSocketRuntime: (config?: {

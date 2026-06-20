@@ -279,6 +279,26 @@ import type {
   SaveDialogOptions as SaveDialogOptionsPreload,
   SaveDialogResult as SaveDialogResultPreload
 } from '../src/shared/preload'
+import type {
+  ControlAgentTeamLaunchResult as ControlAgentTeamLaunchResultContract,
+  ControlNotificationRecord as ControlNotificationRecordContract,
+  ControlRequest as ControlRequestContract,
+  ControlResponse as ControlResponseContract,
+  ControlSessionSnapshot as ControlSessionSnapshotContract,
+  ControlWorkspaceSnapshot as ControlWorkspaceSnapshotContract,
+  ExternalCodexMcpConnection as ExternalCodexMcpConnectionContract,
+  ExternalCodexMcpResponse as ExternalCodexMcpResponseContract
+} from '../src/shared/contracts/control'
+import type {
+  ControlAgentTeamLaunchResult as ControlAgentTeamLaunchResultPreload,
+  ControlNotificationRecord as ControlNotificationRecordPreload,
+  ControlRequest as ControlRequestPreload,
+  ControlResponse as ControlResponsePreload,
+  ControlSessionSnapshot as ControlSessionSnapshotPreload,
+  ControlWorkspaceSnapshot as ControlWorkspaceSnapshotPreload,
+  ExternalCodexMcpConnection as ExternalCodexMcpConnectionPreload,
+  ExternalCodexMcpResponse as ExternalCodexMcpResponsePreload
+} from '../src/shared/preload'
 
 type AssertAssignable<From, To extends From> = true
 
@@ -515,6 +535,22 @@ type ChatImageAttachmentValidateResultPreloadMatchesContract = AssertAssignable<
 type ChatImageAttachmentValidateResultContractMatchesPreload = AssertAssignable<ChatImageAttachmentValidateResultPreload, ChatImageAttachmentValidateResultContract>
 type ChatImageAttachmentPrepareResultPreloadMatchesContract = AssertAssignable<ChatImageAttachmentPrepareResultContract, ChatImageAttachmentPrepareResultPreload>
 type ChatImageAttachmentPrepareResultContractMatchesPreload = AssertAssignable<ChatImageAttachmentPrepareResultPreload, ChatImageAttachmentPrepareResultContract>
+type ControlWorkspaceSnapshotPreloadMatchesContract = AssertAssignable<ControlWorkspaceSnapshotContract, ControlWorkspaceSnapshotPreload>
+type ControlWorkspaceSnapshotContractMatchesPreload = AssertAssignable<ControlWorkspaceSnapshotPreload, ControlWorkspaceSnapshotContract>
+type ControlSessionSnapshotPreloadMatchesContract = AssertAssignable<ControlSessionSnapshotContract, ControlSessionSnapshotPreload>
+type ControlSessionSnapshotContractMatchesPreload = AssertAssignable<ControlSessionSnapshotPreload, ControlSessionSnapshotContract>
+type ControlNotificationRecordPreloadMatchesContract = AssertAssignable<ControlNotificationRecordContract, ControlNotificationRecordPreload>
+type ControlNotificationRecordContractMatchesPreload = AssertAssignable<ControlNotificationRecordPreload, ControlNotificationRecordContract>
+type ControlRequestPreloadMatchesContract = AssertAssignable<ControlRequestContract, ControlRequestPreload>
+type ControlRequestContractMatchesPreload = AssertAssignable<ControlRequestPreload, ControlRequestContract>
+type ControlResponsePreloadMatchesContract = AssertAssignable<ControlResponseContract, ControlResponsePreload>
+type ControlResponseContractMatchesPreload = AssertAssignable<ControlResponsePreload, ControlResponseContract>
+type ControlAgentTeamLaunchResultPreloadMatchesContract = AssertAssignable<ControlAgentTeamLaunchResultContract, ControlAgentTeamLaunchResultPreload>
+type ControlAgentTeamLaunchResultContractMatchesPreload = AssertAssignable<ControlAgentTeamLaunchResultPreload, ControlAgentTeamLaunchResultContract>
+type ExternalCodexMcpConnectionPreloadMatchesContract = AssertAssignable<ExternalCodexMcpConnectionContract, ExternalCodexMcpConnectionPreload>
+type ExternalCodexMcpConnectionContractMatchesPreload = AssertAssignable<ExternalCodexMcpConnectionPreload, ExternalCodexMcpConnectionContract>
+type ExternalCodexMcpResponsePreloadMatchesContract = AssertAssignable<ExternalCodexMcpResponseContract, ExternalCodexMcpResponsePreload>
+type ExternalCodexMcpResponseContractMatchesPreload = AssertAssignable<ExternalCodexMcpResponsePreload, ExternalCodexMcpResponseContract>
 
 describe('shared contract compatibility exports', () => {
   it('keeps Codex session contracts compatible through the preload export', () => {
@@ -967,5 +1003,28 @@ describe('shared contract compatibility exports', () => {
     ] = [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true]
 
     expect(checks).toEqual([true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true])
+  })
+
+  it('keeps Control contracts compatible through the preload export', () => {
+    const checks: [
+      ControlWorkspaceSnapshotPreloadMatchesContract,
+      ControlWorkspaceSnapshotContractMatchesPreload,
+      ControlSessionSnapshotPreloadMatchesContract,
+      ControlSessionSnapshotContractMatchesPreload,
+      ControlNotificationRecordPreloadMatchesContract,
+      ControlNotificationRecordContractMatchesPreload,
+      ControlRequestPreloadMatchesContract,
+      ControlRequestContractMatchesPreload,
+      ControlResponsePreloadMatchesContract,
+      ControlResponseContractMatchesPreload,
+      ControlAgentTeamLaunchResultPreloadMatchesContract,
+      ControlAgentTeamLaunchResultContractMatchesPreload,
+      ExternalCodexMcpConnectionPreloadMatchesContract,
+      ExternalCodexMcpConnectionContractMatchesPreload,
+      ExternalCodexMcpResponsePreloadMatchesContract,
+      ExternalCodexMcpResponseContractMatchesPreload
+    ] = [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true]
+
+    expect(checks).toEqual([true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true])
   })
 })

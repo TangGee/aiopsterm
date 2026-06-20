@@ -541,10 +541,10 @@ import type {
   ControlAgentTeamLaunchResult,
   ControlAgentTeamLaunchSource,
   ControlManagedAiSessionSummary,
-  ControlRequest,
-  ControlResponse,
   ControlNotificationFocusRequest,
   ControlNotificationRecord,
+  ControlRequest,
+  ControlResponse,
   ControlSessionPanelSnapshot,
   ControlSessionRestoreResult,
   ControlSessionSnapshot,
@@ -555,7 +555,9 @@ import type {
   ControlSurfaceSummary,
   ControlTerminalSummary,
   ControlWorkspaceGroupSummary,
-  ControlWorkspaceSnapshot,
+  ControlWorkspaceSnapshot
+} from '@shared/contracts/control'
+import type {
   RuntimeLogLevel,
   TerminalCommandSuggestion,
   TerminalCommandSuggestionContext

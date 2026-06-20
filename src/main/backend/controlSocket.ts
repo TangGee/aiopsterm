@@ -14,7 +14,7 @@ import type {
   ControlSessionSnapshot,
   ControlTerminalSummary,
   ControlWorkspaceSnapshot
-} from '@shared/preload'
+} from '@shared/contracts/control'
 import type { AgentHookInstallerSource } from '@shared/contracts/agentHooks'
 import type { AiAgentSessionSource, ManagedAiSessionBulkOperation, ManagedAiSessionDecisionKind, ManagedAiSessionRecord } from '@shared/contracts/managedAiSessions'
 import {

@@ -115,8 +115,6 @@ import type {
   AiTextContentPart,
   AiTodoItem,
   AiopsPreloadApi,
-  ControlNotificationFocusRequest,
-  ControlNotificationRecord,
   KubernetesAgentProxyConfig,
   KubernetesBastionGroup,
   KubernetesCatalog,
@@ -199,6 +197,7 @@ import type {
   ManagedAiSessionSnapshot,
   ManagedAiSessionTimelineEvent
 } from '@shared/contracts/managedAiSessions'
+import type { ControlNotificationFocusRequest, ControlNotificationRecord } from '@shared/contracts/control'
 import type {
   AgentHookInstallerOperationResult,
   AgentHookInstallerSnapshot,
