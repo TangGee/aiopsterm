@@ -8,6 +8,7 @@ import {
 } from '@/services/aiBackendGuards'
 import { aiCatalogClient } from '@/services/aiCatalogClient'
 import { agentHookClient } from '@/services/agentHookClient'
+import { assetsClient } from '@/services/assetsClient'
 import { chatHistoryClient } from '@/services/chatHistoryClient'
 import { validateCommandSecurity, type CommandSecurityResult } from '@/services/commandSecurityRuntime'
 import { applyEditorSettingsToDocument } from '@/services/editorRuntime'
@@ -5171,13 +5172,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const onboardingActiveStep = computed(() => onboardingActiveSteps.value[onboardingActiveStepIndex.value] || null)
 
   const refreshSshAgentKeychainOptions = async () => {
-    const listSshAgentKeychainOptionsBridge = window.aiops?.listSshAgentKeychainOptions
-    if (typeof listSshAgentKeychainOptionsBridge !== 'function') {
+    const listSshAgentKeychainOptions = assetsClient.listSshAgentKeychainOptions()
+    if (!listSshAgentKeychainOptions) {
       setSettingsNotice('SSH Agent 密钥列表服务不可用')
       return false
     }
     try {
-      const options = readSshAgentKeychainOptionsSnapshot(await listSshAgentKeychainOptionsBridge())
+      const options = readSshAgentKeychainOptionsSnapshot(await listSshAgentKeychainOptions())
       if (!options) {
         setSettingsNotice('SSH Agent 密钥列表返回数据无效')
         return false
