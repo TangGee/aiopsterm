@@ -61,6 +61,15 @@ import {
 } from '@/services/managedAiBackendGuards'
 import { mcpClient } from '@/services/mcpClient'
 import {
+  createMcpOperationKey,
+  formatMcpResourceReadContent,
+  formatMcpToolCallContent,
+  isMcpResourceReadResultData,
+  isMcpToolCallResultData,
+  malformedMcpResourceResultMessage,
+  malformedMcpToolResultMessage
+} from '@/services/mcpBackendGuards'
+import {
   isFileSessionCatalogData,
   isFileSessionFolderDeleteData,
   isFileSessionFolderMutationData,
@@ -174,6 +183,16 @@ import {
   validateTerminalWriteResult
 } from '@/services/terminalBackendGuards'
 import { userAccountClient } from '@/services/userAccountClient'
+import {
+  createEmptyUserProfile,
+  isTrustedDeviceRevokeData,
+  isUserAccountSnapshot,
+  isUserAvatarPrepareData,
+  isUserCodeDataForRequest,
+  isUserExternalActionData,
+  isUserMutationData,
+  type UserCodeData
+} from '@/services/userAccountBackendGuards'
 import { isAiopstermDeepLinkPayload } from '@shared/deepLink'
 import { createDefaultOnboardingCompleted, onboardingTourSteps } from '@/config/onboarding'
 import type { ModuleKey } from '@/config/navigation'
@@ -343,10 +362,10 @@ import type {
 } from '@shared/contracts/appRuntime'
 import type { AliasCommandConfig, AliasCommandSaveInput } from '@shared/contracts/aliases'
 import type { FileSessionCatalog, FileSessionFolderRecord, FileSessionFolderSaveInput, FileSessionInfo, FileSessionPatch, FileSessionTerminalContext, FileTransferTask } from '@shared/contracts/files'
-import type { AiopsTrustedDevice, AiopsTrustedDeviceRevokeResult, AiopsUserAccountSnapshot, AiopsUserAvatarPrepareResult, AiopsUserCodeResult, AiopsUserExternalAction, AiopsUserExternalActionResult, AiopsUserMutationResult, AiopsUserProfile } from '@shared/contracts/userAccount'
+import type { AiopsTrustedDevice, AiopsUserAccountSnapshot, AiopsUserExternalAction, AiopsUserExternalActionResult, AiopsUserMutationResult, AiopsUserProfile } from '@shared/contracts/userAccount'
 import type { ExtensionInstallProgress as BackendExtensionInstallProgress, ExtensionInstallStage, ExtensionPluginOperation, ExtensionPluginRuntimeConfig, ExtensionUserConfig } from '@shared/contracts/extensions'
 import type { QuickCommandGroupConfig, QuickCommandScriptPlan, QuickCommandScriptSegment, QuickCommandSnippetConfig } from '@shared/contracts/quickCommands'
-import type { McpConfigFile, McpResourceReadContent, McpResourceReadResult, McpServerUserConfig, McpToolCallContent, McpToolCallResult, McpToolStatesUserConfig } from '@shared/contracts/mcp'
+import type { McpConfigFile, McpServerUserConfig, McpToolStatesUserConfig } from '@shared/contracts/mcp'
 import type { SettingsPreferencesSnapshot, ShortcutUserConfig, UserRuleConfig } from '@shared/contracts/settingsPreferences'
 import type { SkillUserConfig } from '@shared/contracts/skills'
 import type {
@@ -414,7 +433,6 @@ type KbClipboard = { mode: 'copy' | 'cut'; sources: string[] } | null
 type SnippetGroup = QuickCommandGroupConfig
 type QuickCommandSnippet = QuickCommandSnippetConfig
 type AliasCommand = AliasCommandConfig & { edit?: boolean }
-type UserCodeResultData = NonNullable<AiopsUserCodeResult['data']>
 type TopUpdateState = 'idle' | 'checking' | 'local' | 'available' | 'install-requested'
 export type AiAttentionKind = 'approval' | 'question' | 'plan' | 'error' | 'done'
 export type AiAttentionSource = AiAgentSessionSource | 'classic-chat' | 'control-notification'
@@ -460,11 +478,6 @@ type OnboardingAiRequest =
 type OnboardingAssetRequest = 'none' | 'open-host-management' | 'open-create-form'
 type AssetManagementViewRequest = 'assetConfig' | 'assetManagement' | 'keyManagement' | 'proxyManagement'
 type AssetManagementOpenAction = 'none' | 'create-key' | 'create-proxy'
-type UserExternalActionData = NonNullable<AiopsUserExternalActionResult['data']>
-type UserMutationData = NonNullable<AiopsUserMutationResult['data']>
-type UserCodeData = NonNullable<AiopsUserCodeResult['data']>
-type UserAvatarPrepareData = NonNullable<AiopsUserAvatarPrepareResult['data']>
-type UserTrustedDeviceRevokeData = NonNullable<AiopsTrustedDeviceRevokeResult['data']>
 type PrivacyRuntimeApplyData = PrivacyRuntimeSnapshot
 type KnowledgeSearchRuntimeApplyData = KnowledgeSearchRuntimeSnapshot
 
@@ -761,31 +774,6 @@ export type AboutSettings = {
   progress: number
 }
 
-const createEmptyUserProfile = (): AiopsUserProfile => ({
-  uid: 0,
-  name: '',
-  username: '',
-  avatarInitials: 'AI',
-  avatarImageUrl: '',
-  registrationType: 'personal',
-  registrationCode: 9,
-  authProvider: 'local',
-  subscription: 'free',
-  subscriptionExpiresAt: '',
-  email: '',
-  mobile: '',
-  localIp: '',
-  macAddress: '',
-  isOfficeDevice: false,
-  needDeviceVerification: false,
-  skippedLogin: true,
-  localDatabaseReady: false,
-  lastLoginMethod: 'skip',
-  lastLoginAt: '',
-  passwordUpdatedAt: '',
-  avatarUpdatedAt: ''
-})
-
 const ONBOARDING_VERSION = defaultConfig.onboarding!.version
 type RendererLocalIdPrefix = 'panel' | 'terminal-security' | 'aichat-agent-loop'
 const createRendererLocalId = (prefix: RendererLocalIdPrefix) => `${prefix}-${Math.random().toString(36).slice(2, 9)}`
@@ -887,79 +875,6 @@ const ctrlSequences = Object.entries(ctrlKeyMap).sort(([, first], [, second]) =>
 const defaultTerminalPanelTitle = '欢迎'
 
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value)
-const malformedMcpToolResultMessage = 'MCP Tool 服务返回数据无效'
-const malformedMcpResourceResultMessage = 'MCP Resource 服务返回数据无效'
-
-const createMcpOperationKey = (kind: 'tool' | 'resource', serverName: string, operationName: string) => JSON.stringify([kind, serverName, operationName])
-
-const isMcpToolCallContentList = (value: unknown): value is McpToolCallContent[] =>
-  Array.isArray(value) &&
-  value.every(
-    (item) =>
-      isRecord(item) &&
-      typeof item.type === 'string' &&
-      (item.text === undefined || typeof item.text === 'string') &&
-      (item.data === undefined || typeof item.data === 'string') &&
-      (item.mimeType === undefined || typeof item.mimeType === 'string')
-  )
-
-const isMcpResourceReadContentList = (value: unknown): value is McpResourceReadContent[] =>
-  Array.isArray(value) &&
-  value.every(
-    (item) =>
-      isRecord(item) &&
-      typeof item.uri === 'string' &&
-      (item.text === undefined || typeof item.text === 'string') &&
-      (item.blob === undefined || typeof item.blob === 'string') &&
-      (item.mimeType === undefined || typeof item.mimeType === 'string')
-  )
-
-const isMcpToolCallResultData = (value: unknown, serverName: string, toolName: string): value is NonNullable<McpToolCallResult['data']> =>
-  isRecord(value) &&
-  value.serverName === serverName &&
-  value.toolName === toolName &&
-  isMcpToolCallContentList(value.content) &&
-  typeof value.isError === 'boolean' &&
-  typeof value.durationMs === 'number' &&
-  Number.isFinite(value.durationMs)
-
-const isMcpResourceReadResultData = (value: unknown, serverName: string, uri: string): value is NonNullable<McpResourceReadResult['data']> =>
-  isRecord(value) &&
-  value.serverName === serverName &&
-  value.uri === uri &&
-  isMcpResourceReadContentList(value.contents) &&
-  typeof value.durationMs === 'number' &&
-  Number.isFinite(value.durationMs)
-
-const stringifyMcpPayload = (value: unknown) => {
-  try {
-    return JSON.stringify(value, null, 2)
-  } catch {
-    return String(value)
-  }
-}
-
-const formatMcpToolCallContent = (content: McpToolCallContent[]) => {
-  if (!content.length) return '[]'
-  return content
-    .map((item) => {
-      if (typeof item.text === 'string') return item.text
-      if (typeof item.data === 'string') return item.data
-      return stringifyMcpPayload(item)
-    })
-    .join('\n\n')
-}
-
-const formatMcpResourceReadContent = (contents: McpResourceReadContent[]) => {
-  if (!contents.length) return '[]'
-  return contents
-    .map((item) => {
-      if (typeof item.text === 'string') return item.text
-      if (typeof item.blob === 'string') return item.blob
-      return stringifyMcpPayload(item)
-    })
-    .join('\n\n')
-}
 
 const numberInRange = (value: unknown, fallback: number, min: number, max?: number) =>
   typeof value === 'number' && Number.isFinite(value) && value >= min && (max === undefined || value <= max) ? value : fallback
@@ -968,142 +883,6 @@ const integerInRange = (value: unknown, fallback: number, min: number) =>
   typeof value === 'number' && Number.isInteger(value) && value >= min ? value : fallback
 
 const stringFromOptions = <T extends string>(value: unknown, options: readonly T[], fallback: T) => (typeof value === 'string' && options.includes(value as T) ? (value as T) : fallback)
-
-const userRegistrationCodes: AiopsUserProfile['registrationCode'][] = [1, 2, 3, 4, 6, 7, 9]
-const userRegistrationTypes: AiopsUserProfile['registrationType'][] = ['enterprise', 'personal']
-const userAuthProviders: AiopsUserProfile['authProvider'][] = ['local', 'sso', 'oauth']
-const userSubscriptions: AiopsUserProfile['subscription'][] = ['free', 'pro', 'ultra']
-const userLastLoginMethods: AiopsUserProfile['lastLoginMethod'][] = ['account', 'email', 'mobile', 'skip', 'external']
-const userExternalActions: AiopsUserExternalAction[] = ['login', 'account-center']
-const userCodeKinds: UserCodeData['kind'][] = ['email', 'mobile']
-const userAvatarMimeTypes = ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/bmp', 'image/svg+xml']
-const userAvatarAssetUrlPattern = /^aiopsterm-user-avatar:\/\/[a-f0-9]{64}\.(png|jpg|gif|webp|bmp|svg)$/i
-
-const isUserProfileSnapshot = (source: unknown): source is AiopsUserProfile =>
-  isRecord(source) &&
-  typeof source.uid === 'number' &&
-  Number.isInteger(source.uid) &&
-  source.uid >= 0 &&
-  typeof source.name === 'string' &&
-  typeof source.username === 'string' &&
-  typeof source.avatarInitials === 'string' &&
-  typeof source.avatarImageUrl === 'string' &&
-  userRegistrationTypes.includes(source.registrationType as AiopsUserProfile['registrationType']) &&
-  userRegistrationCodes.includes(source.registrationCode as AiopsUserProfile['registrationCode']) &&
-  userAuthProviders.includes(source.authProvider as AiopsUserProfile['authProvider']) &&
-  userSubscriptions.includes(source.subscription as AiopsUserProfile['subscription']) &&
-  typeof source.subscriptionExpiresAt === 'string' &&
-  typeof source.email === 'string' &&
-  typeof source.mobile === 'string' &&
-  typeof source.localIp === 'string' &&
-  typeof source.macAddress === 'string' &&
-  typeof source.isOfficeDevice === 'boolean' &&
-  typeof source.needDeviceVerification === 'boolean' &&
-  typeof source.skippedLogin === 'boolean' &&
-  typeof source.localDatabaseReady === 'boolean' &&
-  userLastLoginMethods.includes(source.lastLoginMethod as AiopsUserProfile['lastLoginMethod']) &&
-  typeof source.lastLoginAt === 'string' &&
-  typeof source.passwordUpdatedAt === 'string' &&
-  typeof source.avatarUpdatedAt === 'string'
-
-const isTrustedDeviceSnapshot = (source: unknown): source is AiopsTrustedDevice =>
-  isRecord(source) &&
-  typeof source.id === 'number' &&
-  Number.isInteger(source.id) &&
-  source.id > 0 &&
-  typeof source.deviceName === 'string' &&
-  source.deviceName.trim() !== '' &&
-  typeof source.macAddress === 'string' &&
-  typeof source.lastLoginIp === 'string' &&
-  typeof source.location === 'string' &&
-  typeof source.lastLoginUserAgent === 'string' &&
-  typeof source.current === 'boolean'
-
-const isUserAccountSnapshot = (source: unknown): source is AiopsUserAccountSnapshot =>
-  isRecord(source) && isUserProfileSnapshot(source.profile) && Array.isArray(source.trustedDevices) && source.trustedDevices.every(isTrustedDeviceSnapshot)
-
-const isUserMutationData = (source: unknown): source is UserMutationData => {
-  if (!isRecord(source) || !isUserAccountSnapshot(source)) return false
-  return typeof (source as Record<string, unknown>).message === 'string'
-}
-
-const isHttpUrl = (value: unknown) => {
-  if (typeof value !== 'string' || !value.trim() || value.trim().startsWith('//')) return false
-  try {
-    const url = new URL(value)
-    return (url.protocol === 'http:' || url.protocol === 'https:') && Boolean(url.hostname.trim()) && !url.username && !url.password
-  } catch {
-    return false
-  }
-}
-
-const isUserExternalActionData = (source: unknown, action: AiopsUserExternalAction): source is UserExternalActionData =>
-  isRecord(source) &&
-  source.action === action &&
-  userExternalActions.includes(source.action as AiopsUserExternalAction) &&
-  isHttpUrl(source.url) &&
-  source.opened === true &&
-  typeof source.openedAt === 'string' &&
-  source.openedAt.trim() !== '' &&
-  typeof source.message === 'string' &&
-  source.message.trim() !== ''
-
-const isUserCodeData = (source: unknown): source is UserCodeData =>
-  isRecord(source) &&
-  typeof source.challengeId === 'string' &&
-  /^[a-f0-9]{16,64}$/i.test(source.challengeId) &&
-  userCodeKinds.includes(source.kind as UserCodeData['kind']) &&
-  typeof source.target === 'string' &&
-  source.target.trim() !== '' &&
-  typeof source.countdownSeconds === 'number' &&
-  Number.isFinite(source.countdownSeconds) &&
-  source.countdownSeconds >= 0 &&
-  typeof source.remainingSeconds === 'number' &&
-  Number.isFinite(source.remainingSeconds) &&
-  source.remainingSeconds >= 0 &&
-  typeof source.expiresAt === 'number' &&
-  Number.isFinite(source.expiresAt) &&
-  typeof source.message === 'string' &&
-  source.message.trim() !== ''
-
-const normalizeUserCodeTarget = (kind: UserCodeData['kind'], value: string) => {
-  const normalized = value.trim()
-  return kind === 'email' ? normalized.toLowerCase() : normalized
-}
-
-const isUserCodeDataForRequest = (source: unknown, kind: UserCodeData['kind'], value: string): source is UserCodeData =>
-  isUserCodeData(source) && source.kind === kind && normalizeUserCodeTarget(source.kind, source.target) === normalizeUserCodeTarget(kind, value)
-
-const isUserAvatarPrepareData = (source: unknown): source is UserAvatarPrepareData =>
-  isRecord(source) &&
-  typeof source.filePath === 'string' &&
-  source.filePath.trim() !== '' &&
-  typeof source.name === 'string' &&
-  source.name.trim() !== '' &&
-  typeof source.mimeType === 'string' &&
-  userAvatarMimeTypes.includes(source.mimeType) &&
-  typeof source.size === 'number' &&
-  Number.isFinite(source.size) &&
-  source.size > 0 &&
-  typeof source.dataUrl === 'string' &&
-  /^data:image\/[a-z0-9.+-]+;base64,/i.test(source.dataUrl) &&
-  typeof source.avatarImageUrl === 'string' &&
-  userAvatarAssetUrlPattern.test(source.avatarImageUrl) &&
-  typeof source.assetFileName === 'string' &&
-  /^[a-f0-9]{64}\.(png|jpg|gif|webp|bmp|svg)$/i.test(source.assetFileName) &&
-  source.avatarImageUrl === `aiopsterm-user-avatar://${source.assetFileName}` &&
-  typeof source.message === 'string' &&
-  source.message.trim() !== ''
-
-const isTrustedDeviceRevokeData = (source: unknown): source is UserTrustedDeviceRevokeData =>
-  isRecord(source) &&
-  typeof source.deviceId === 'number' &&
-  Number.isInteger(source.deviceId) &&
-  source.deviceId > 0 &&
-  Array.isArray(source.trustedDevices) &&
-  source.trustedDevices.every(isTrustedDeviceSnapshot) &&
-  typeof source.message === 'string' &&
-  source.message.trim() !== ''
 
 const createMacroSnippetName = () => {
   const now = new Date()
@@ -4935,10 +4714,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   const userCooldownRemainingSeconds = (expiresAt: number) => Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000))
 
-  const isValidUserCodeCooldown = (cooldown: UserCodeResultData | undefined): cooldown is UserCodeResultData =>
+  const isValidUserCodeCooldown = (cooldown: UserCodeData | undefined): cooldown is UserCodeData =>
     Boolean(cooldown && typeof cooldown.expiresAt === 'number' && Number.isFinite(cooldown.expiresAt) && typeof cooldown.message === 'string')
 
-  const startUserCountdown = (target: 'login' | 'contact', kind: 'email' | 'mobile', cooldown: UserCodeResultData) => {
+  const startUserCountdown = (target: 'login' | 'contact', kind: 'email' | 'mobile', cooldown: UserCodeData) => {
     const sendingRef = target === 'login' ? userLoginCodeSending : userContactCodeSending
     const countdownRef = target === 'login' ? userLoginCodeCountdown : userContactCodeCountdown
     const timers = target === 'login' ? userLoginCodeTimers : userContactCodeTimers
