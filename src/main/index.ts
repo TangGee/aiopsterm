@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Notification, dialog, ipcMain, net, protocol, screen, shell, type IpcMainEvent } from 'electron'
+import { app, BrowserWindow, Notification, dialog, ipcMain, net, protocol, shell, type IpcMainEvent } from 'electron'
 import { basename, dirname, extname, isAbsolute, join, posix, relative, resolve, sep } from 'path'
 import { pathToFileURL } from 'url'
 import { randomUUID } from 'crypto'
@@ -8,8 +8,6 @@ import { access, cp, mkdir, readFile, readdir, rename, rm, stat, unlink, writeFi
 import Store from 'electron-store'
 import AdmZip from 'adm-zip'
 import {
-  configureAssetBackendRuntime,
-  configureAssetConnectionRuntime,
   confirmAssetImport,
   deleteAsset,
   deleteAssetGroup,
@@ -33,15 +31,14 @@ import {
   saveKeychain,
   testAssetConnection
 } from './backend/assets'
-import { cancelAiChatResponse, configureAiChatRuntime, createAiChatExchangeRequest, formatMcpResourceReadContent, generateAiChatResponse } from './backend/aiChat'
-import { configureAiCommandBackendRuntime, listAiCommandCatalog } from './backend/aiCommands'
-import { configureAiContextBackendRuntime, listAiContextCatalog } from './backend/aiContext'
-import { configureAiTodoBackendRuntime, listAiTodoSnapshot } from './backend/aiTodos'
+import { cancelAiChatResponse, createAiChatExchangeRequest, formatMcpResourceReadContent, generateAiChatResponse } from './backend/aiChat'
+import { listAiCommandCatalog } from './backend/aiCommands'
+import { listAiContextCatalog } from './backend/aiContext'
+import { listAiTodoSnapshot } from './backend/aiTodos'
 import { exportChat } from './backend/chatExport'
 import { stageChatAttachment } from './backend/chatAttachments'
-import { configureAliasBackendRuntime, deleteAliasCommand, listAliasCommands, saveAliasCommand } from './backend/aliases'
+import { deleteAliasCommand, listAliasCommands, saveAliasCommand } from './backend/aliases'
 import {
-  configureCodexCliRuntime,
   createCodexSession,
   killCodexSession,
   resizeCodexSession,
@@ -52,22 +49,18 @@ import {
   appendCodexTerminalBridgeData,
   closeCodexTerminalBridgeServer,
   ensureCodexTerminalBridgeServer,
-  getCodexTerminalBridgeSocketPath,
   registerCodexTerminalBridgeSession,
   updateCodexTerminalBridgeSessionTarget,
   unregisterCodexTerminalBridgeSession
 } from './backend/codexTerminalBridge'
-import { closeExternalCodexMcpBridgeServer, ensureExternalCodexMcpBridgeServer } from './backend/externalCodexMcpBridge'
+import { closeExternalCodexMcpBridgeServer } from './backend/externalCodexMcpBridge'
 import {
-  agentHookScriptPathFor,
   bulkManagedAiSessions,
   clearManagedAiNotifications,
   clearManagedAiSession,
   closeAiAgentSessionServer,
-  configureManagedAiSessionAutoNamingRuntime,
   dismissManagedAiNotification,
   ensureAiAgentSessionServer,
-  getAiAgentSessionSocketPath,
   getAgentHibernationConfig,
   hibernateManagedAiSession,
   jumpToUnreadManagedAiNotification,
@@ -81,10 +74,9 @@ import {
   setAgentHibernationConfig,
   wakeManagedAiSession
 } from './backend/agentSessions'
-import { configureAgentHookInstallerRuntime, installAgentHook, listAgentHookInstallers, uninstallAgentHook } from './backend/agentHookInstaller'
-import { checkAppUpdate, configureAppUpdateRuntime, downloadAppUpdate, installAppUpdate } from './backend/appUpdate'
+import { installAgentHook, listAgentHookInstallers, uninstallAgentHook } from './backend/agentHookInstaller'
+import { checkAppUpdate, downloadAppUpdate, installAppUpdate } from './backend/appUpdate'
 import {
-  configureChatHistoryBackendRuntime,
   createChatConversation,
   deleteChatConversation,
   getChatConversationMessages,
@@ -100,38 +92,21 @@ import {
   prepareChatImageAttachmentFromFile,
   validateChatImageAttachment
 } from './backend/chatImageAttachment'
-import { configureRuntimeLog, logRuntimeEvent, writeRuntimeLog } from './backend/runtimeLog'
+import { logRuntimeEvent, writeRuntimeLog } from './backend/runtimeLog'
 import { applyKnowledgeSearchRuntimeSetting } from './backend/knowledgeSearchRuntime'
 import { writeKnowledgePastedImageFromClipboard } from './backend/knowledgeBaseImage'
-import { createAiProviderProxyFetch } from './backend/aiProviderProxyFetch'
-import { createProviderTextRequest, fetchProviderText, resolveModelProvider } from './backend/modelProviderText'
 import { openSettingsDocumentation, submitSettingsFeedbackReport } from './backend/settingsExternalActions'
 import { broadcastWindowEvent, sendWebContentsEvent, sendWindowEvent } from '@shared/windowEvents'
 import { defaultMcpServers, defaultMcpToolStates } from '@shared/mcpSeed'
 import {
   shouldRunMcpDiscovery,
   shouldUseAiChatBackendDouble,
-  shouldUseAliasesSeedData,
-  shouldUseAiTodoSeedData,
-  shouldUseAssetsSeedData,
-  shouldUseChatHistorySeedData,
-  shouldUseDataSyncBackendDouble,
-  shouldUseDatabaseAiBackendDouble,
-  shouldUseDatabaseSeedData,
   shouldUseE2eDialogFixtures,
-  shouldUseFilesSeedData,
-  shouldUseKubernetesSeedData,
-  shouldUseQuickCommandsSeedData,
-  shouldUseSettingsPreferencesSeedData,
-  shouldUseSshTerminalBackendDouble,
-  shouldUseUserAccountSeedData,
-  shouldUseUserExternalOpenBackendDouble
 } from '@shared/runtimeSwitches'
 import { normalizeExternalHttpUrl } from '@shared/externalUrl'
 import {
   cancelDatabaseAiDrawerResponse,
   cancelDatabaseAiPaneResponse,
-  configureDatabaseBackendRuntime,
   connectDatabaseConnection,
   createDatabaseAiDrawerRequest,
   createDatabaseAiPaneRequest,
@@ -160,11 +135,10 @@ import {
   startDatabaseAiPaneResponse,
   testDatabaseConnection
 } from './backend/database'
-import { configureDatabaseCommentsRuntime, getDatabasePageComment, saveDatabasePageComment } from './backend/databaseComments'
+import { getDatabasePageComment, saveDatabasePageComment } from './backend/databaseComments'
 import { exportDatabaseRows } from './backend/databaseExport'
 import {
   cancelExtensionInstall,
-  configureExtensionBackendRuntime,
   downloadExtensionPackage,
   installExtensionPackage,
   installExtensionPluginFromUrl,
@@ -189,7 +163,6 @@ import {
   saveFileSessionFromTerminalContext,
   transferFileEntry,
   updateFileSession,
-  configureFilesBackendRuntime,
   writeFileContent
 } from './backend/files'
 import { saveCustomBackgroundFile, writeLocalTextFile } from './backend/localFileWrites'
@@ -197,7 +170,6 @@ import { callMcpTool, clearMcpRuntimeClientCache, discoverMcpServerSnapshot, rea
 import {
   addKubernetesCluster,
   cleanupKubernetesAgent,
-  configureKubernetesBackendRuntime,
   connectKubernetesCluster,
   closeKubernetesTerminal,
   createKubernetesTerminal,
@@ -212,7 +184,6 @@ import {
   refreshKubernetesResources,
   resizeKubernetesTerminal,
   saveKubernetesAgentProxyConfig,
-  setKubernetesTerminalEventSink,
   switchKubernetesContext,
   syncKubernetesBastion,
   testKubernetesClusterConnection,
@@ -221,17 +192,14 @@ import {
 } from './backend/kubernetes'
 import { checkModelProvider, listAiModels } from './backend/modelProviders'
 import { normalizeConfigModelName, normalizeConfigModelProvider } from './backend/configBoundary'
-import { configureLocalTerminalBackendRuntime, createLocalTerminalSession, type LocalTerminalSession } from './backend/localTerminal'
+import { createLocalTerminalSession, type LocalTerminalSession } from './backend/localTerminal'
 import {
   closeControlSocketServer,
-  configureControlSocketRuntime,
   ensureControlSocketServer,
-  getControlSocketPath,
   invokeControlSocketMethod,
   registerControlSocketIpc
 } from './backend/controlSocket'
 import {
-  configureQuickCommandBackendRuntime,
   deleteQuickCommandGroup,
   deleteQuickCommandSnippet,
   getQuickCommands,
@@ -242,19 +210,16 @@ import {
   saveQuickCommandSnippet
 } from './backend/quickCommands'
 import {
-  configureSettingsPreferencesBackendRuntime,
   deleteSettingsRule,
   getSettingsPreferences,
   resetSettingsShortcuts,
   saveSettingsRule,
   saveSettingsShortcut
 } from './backend/settingsPreferences'
-import { applyPrivacyRuntimeSettings, configurePrivacyRuntime } from './backend/privacyRuntime'
-import { createSshProxySocket } from './backend/sshProxy'
-import { configureSshTunnelBackendRuntime, startSshTunnel, stopSshTunnel } from './backend/sshTunnels'
-import { configureSshTerminalBackendRuntime, createSshTerminalSession, type SshTerminalSession } from './backend/sshTerminal'
+import { applyPrivacyRuntimeSettings } from './backend/privacyRuntime'
+import { startSshTunnel, stopSshTunnel } from './backend/sshTunnels'
+import { createSshTerminalSession, type SshTerminalSession } from './backend/sshTerminal'
 import {
-  configureTerminalSuggestionsRuntime,
   generateTerminalCommand,
   getTerminalCommandSuggestions,
   recordTerminalCommandHistory
@@ -268,7 +233,6 @@ import {
 } from './backend/terminal'
 import {
   bindUserContact,
-  configureUserAccountBackendRuntime,
   deactivateUserAccount,
   getUserAccount,
   loginUserAccount,
@@ -284,7 +248,7 @@ import {
   skipUserLogin,
   updateUserProfile
 } from './backend/userAccount'
-import { configureVoiceBackendRuntime, transcribeVoiceInput } from './backend/voice'
+import { transcribeVoiceInput } from './backend/voice'
 import {
   closeZmodemStream,
   openZmodemStream,
@@ -292,6 +256,7 @@ import {
   pickZmodemUploadFiles,
   writeZmodemChunk
 } from './backend/zmodem'
+import { configureMainBackendRuntimes } from './backend/runtimeConfiguration'
 import {
   aiopstermProtocolPrefix,
   aiopstermProtocolScheme,
@@ -399,8 +364,6 @@ import type {
   KubernetesResourceActionInput,
   KubernetesResourceRefreshInput,
   KubernetesTerminalCreateInput,
-  KubernetesTerminalDataEvent,
-  KubernetesTerminalExitEvent,
   KnowledgeBaseUserConfig,
   KnowledgeSearchRuntimeApplyInput,
   McpConfigFile,
@@ -1546,138 +1509,6 @@ const normalizeTerminalType = (value: unknown, fallback: string) => {
   const terminalType = typeof value === 'string' ? value.trim() : ''
   return terminalTypeOptions.has(terminalType) ? terminalType : fallback
 }
-configureTerminalSuggestionsRuntime({ getConfig })
-configureAssetConnectionRuntime({ getConfig })
-configureDatabaseBackendRuntime({
-  getConfig,
-  fetch,
-  createSshProxySocket,
-  localBackendDouble: shouldUseDatabaseAiBackendDouble(),
-  stateFilePath: join(app.getPath('userData'), 'database-workspace.json'),
-  useSeedData: shouldUseDatabaseSeedData()
-})
-configureDatabaseCommentsRuntime({
-  stateFilePath: join(app.getPath('userData'), 'database-comments.json')
-})
-configureVoiceBackendRuntime({ getConfig })
-configureAssetBackendRuntime({
-  useSeedData: shouldUseAssetsSeedData()
-})
-configureFilesBackendRuntime({
-  getConfig,
-  useSeedData: shouldUseFilesSeedData()
-})
-configurePrivacyRuntime({
-  dataSyncStateFilePath: join(app.getPath('userData'), 'data-sync-runtime.json'),
-  useDataSyncBackendDouble: shouldUseDataSyncBackendDouble()
-})
-configureSshTunnelBackendRuntime({ getConfig })
-configureLocalTerminalBackendRuntime({
-  getDefaultShell,
-  getDefaultCwd: () => app.getPath('home'),
-  getEnv: () => process.env,
-  getAgentSocketPath: getAiAgentSessionSocketPath,
-  getAgentHookScriptPath: () => agentHookScriptPathFor(app.getAppPath(), process.resourcesPath || ''),
-  getControlSocketPath
-})
-configureControlSocketRuntime({
-  userDataPath: app.getPath('userData'),
-  getWindows: () => BrowserWindow.getAllWindows(),
-  focusWindow,
-  getDisplays: () => screen.getAllDisplays().map((display) => ({ id: display.id, label: display.label, bounds: display.bounds, workArea: display.workArea })),
-  writeTerminal: writeTerminalBySessionId,
-  showNotification: showControlNotification
-})
-configureAgentHookInstallerRuntime({
-  getHomeDir: () => app.getPath('home'),
-  getEnv: () => process.env,
-  getAgentHookScriptPath: () => agentHookScriptPathFor(app.getAppPath(), process.resourcesPath || '')
-})
-configureCodexCliRuntime({
-  getUserDataPath: () => app.getPath('userData'),
-  getAppPath: () => app.getAppPath(),
-  getResourcesPath: () => process.resourcesPath,
-  getConfig,
-  getEnv: () => process.env,
-  getBridgeSocketPath: () => getCodexTerminalBridgeSocketPath()
-})
-configureSshTerminalBackendRuntime({
-  getConfig,
-  getAsset,
-  getAssetSecret,
-  getKeychainSecret,
-  rememberAssetPassword: rememberTerminalPassword,
-  getSshControlDir: () => join(app.getPath('userData'), 'ssh-control'),
-  useBackendDouble: shouldUseSshTerminalBackendDouble()
-})
-void ensureExternalCodexMcpBridgeServer({
-  enabled: process.env.AIOPSTERM_EXTERNAL_CODEX_MCP_ENABLE === '1',
-  token: process.env.AIOPSTERM_EXTERNAL_CODEX_MCP_TOKEN,
-  socketPath: process.env.AIOPSTERM_EXTERNAL_CODEX_MCP_SOCKET,
-  userDataPath: app.getPath('userData'),
-  focusManagedAiSession: broadcastManagedAiSessionFocusRequest
-})
-  .then((externalCodexMcpSocketPath) => {
-    if (!externalCodexMcpSocketPath) return
-    logRuntimeEvent('info', 'external-codex-mcp.started', { socketPath: externalCodexMcpSocketPath })
-  })
-  .catch((error) => {
-    logRuntimeEvent('error', 'external-codex-mcp.start-failed', {
-      errorMessage: error instanceof Error ? error.message : String(error)
-    })
-  })
-configureExtensionBackendRuntime({
-  extensionRootDir: join(app.getPath('userData'), 'extensions'),
-  fetch: (url, init) => net.fetch(url, init)
-})
-configureKubernetesBackendRuntime({
-  stateDir: join(app.getPath('userData'), 'kubernetes'),
-  useSeedData: shouldUseKubernetesSeedData(),
-  refreshOrganizationAssets
-})
-setKubernetesTerminalEventSink((event: KubernetesTerminalDataEvent | KubernetesTerminalExitEvent) => {
-  const channel = 'data' in event ? 'kubernetes:terminal:data' : 'kubernetes:terminal:exit'
-  broadcastWindowEvent(BrowserWindow.getAllWindows(), channel, event)
-})
-configureUserAccountBackendRuntime({
-  stateFilePath: join(app.getPath('userData'), 'user-account.json'),
-  useSeedData: shouldUseUserAccountSeedData(),
-  loginUrl: process.env.AIOPSTERM_USER_LOGIN_URL,
-  accountCenterUrl: process.env.AIOPSTERM_USER_ACCOUNT_CENTER_URL,
-  openExternal: shouldUseUserExternalOpenBackendDouble() ? async () => undefined : (url) => shell.openExternal(url)
-})
-configureSettingsPreferencesBackendRuntime({
-  useSeedData: shouldUseSettingsPreferencesSeedData()
-})
-configureAiTodoBackendRuntime({
-  stateFilePath: join(app.getPath('userData'), 'ai-todos.json'),
-  useSeedData: shouldUseAiTodoSeedData()
-})
-configureChatHistoryBackendRuntime({
-  stateFilePath: join(app.getPath('userData'), 'chat-history.json'),
-  useSeedData: shouldUseChatHistorySeedData()
-})
-configureQuickCommandBackendRuntime({
-  databasePath: join(app.getPath('userData'), 'aiopsterm-state.db'),
-  useSeedData: shouldUseQuickCommandsSeedData()
-})
-configureAliasBackendRuntime({
-  databasePath: join(app.getPath('userData'), 'aiopsterm-state.db'),
-  useSeedData: shouldUseAliasesSeedData()
-})
-configureAppUpdateRuntime({
-  installer: async (update) => {
-    const errorMessage = await shell.openPath(update.filePath)
-    if (errorMessage) throw new Error(errorMessage)
-    return {
-      handoff: {
-        kind: 'os-open',
-        accepted: true
-      },
-      message: `Update ${update.version} handed off to the operating system installer.`
-    }
-  }
-})
 
 const getSecurityConfigPath = () => join(app.getPath('userData'), 'security-config.json')
 const getKeywordHighlightConfigPath = () => join(app.getPath('userData'), 'keyword-highlight.json')
@@ -1690,7 +1521,6 @@ const getKnowledgeBaseInitMarkerPath = () => join(getKnowledgeBasePath(), '.aiop
 const getChatAttachmentsPath = () => join(app.getPath('userData'), 'chat-attachments')
 const getCustomBackgroundsPath = () => join(app.getPath('userData'), 'backgrounds')
 const getLogDirPath = () => join(app.getPath('userData'), 'logs')
-configureRuntimeLog({ getLogDir: getLogDirPath })
 const settingsExternalActionRuntime = () => ({
   userDataPath: app.getPath('userData'),
   appPath: app.getAppPath(),
@@ -2346,63 +2176,6 @@ const startSkillsWatcher = async () => {
   await syncSkillsConfigFromDisk()
 }
 
-configureAiContextBackendRuntime({
-  listKnowledgeTree: () => buildKnowledgeTreeFromDisk(),
-  listSkills: () => loadSkillsFromDisk()
-})
-configureAiCommandBackendRuntime({
-  listKnowledgeDir: (relDir) => listKnowledgeDir(relDir)
-})
-configureAiChatRuntime({
-  getConfig,
-  listSkills: () => loadSkillsFromDisk(),
-  localBackendDouble: shouldUseAiChatBackendDouble(),
-  callMcpTool: async (input) => {
-    const current = getConfig()
-    return callMcpTool(await loadCurrentMcpConfigFile(), input, {
-      servers: current.mcpServers || [],
-      toolStates: current.mcpToolStates || {},
-      clientName: 'aiopsterm',
-      clientVersion: app.getVersion()
-    })
-  }
-})
-
-const syncManagedAiAutoNamingRuntime = (config = getConfig()) => {
-  configureManagedAiSessionAutoNamingRuntime({
-    enabled: config.aiPreferences?.managedAiAutoNamingEnabled === true,
-    emit: broadcastManagedAiSessionEvent,
-    generateTitle: async ({ prompt }) => {
-      const current = getConfig()
-      const provider = resolveModelProvider(current)
-      if (!provider) return null
-      const request = createProviderTextRequest(
-        provider,
-        'You create concise titles for AI coding-agent sessions. Return only the title.',
-        prompt,
-        24,
-        { preferences: current.aiPreferences ? { reasoningEffort: current.aiPreferences.reasoningEffort } : undefined }
-      )
-      if (!request) return null
-      const proxyFetch = createAiProviderProxyFetch(current.aiPreferences)
-      const response = await fetchProviderText(request, {
-        fetch:
-          proxyFetch ||
-          ((url, init) => {
-            const target = url instanceof URL ? url.toString() : url
-            return net.fetch(target, init) as unknown as Promise<Response>
-          }),
-        timeoutMs: 20_000,
-        errorCodePrefix: 'MANAGED_AI_AUTO_NAMING_PROVIDER',
-        maxRetries: 1
-      })
-      return response.ok ? response.text : null
-    }
-  })
-}
-
-syncManagedAiAutoNamingRuntime()
-
 const findSkillByName = async (skillName: string) => {
   const skills = await loadSkillsFromDisk()
   return skills.find((skill) => skill.name === skillName) || null
@@ -2645,6 +2418,23 @@ const loadCurrentMcpConfigFile = async () => {
   const configPath = await ensureMcpConfigFile()
   return normalizeMcpConfigFile(JSON.parse(await readFile(configPath, 'utf-8')))
 }
+
+const runtimeConfiguration = configureMainBackendRuntimes({
+  getConfig,
+  getDefaultShell,
+  getLogDirPath,
+  focusWindow,
+  loadCurrentMcpConfigFile,
+  listKnowledgeDir,
+  buildKnowledgeTreeFromDisk: () => buildKnowledgeTreeFromDisk(),
+  loadSkillsFromDisk,
+  rememberTerminalPassword,
+  refreshOrganizationAssets,
+  writeTerminalBySessionId,
+  showControlNotification,
+  broadcastManagedAiSessionFocusRequest,
+  broadcastManagedAiSessionEvent
+})
 
 const setMcpToolState = async (serverName: string, toolName: string, enabled: boolean) => {
   const normalizedServerName = serverName.trim()
@@ -3172,7 +2962,7 @@ const registerIpc = () => {
   ipcMain.handle('config:save', (_event, patch: Partial<UserConfig>) => {
     const next = mergeConfig(getConfig(), patch)
     store.set('config', next)
-    syncManagedAiAutoNamingRuntime(next)
+    runtimeConfiguration.syncManagedAiAutoNamingRuntime(next)
     return next
   })
   ipcMain.handle('privacy:runtime:apply', (_event, input: PrivacyRuntimeApplyInput) => applyPrivacyRuntimeSettings(input))
