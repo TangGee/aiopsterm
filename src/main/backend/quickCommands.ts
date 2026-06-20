@@ -2,8 +2,8 @@ import { app } from 'electron'
 import Store from 'electron-store'
 import { randomUUID } from 'crypto'
 import { isAbsolute, join, resolve } from 'path'
+import type { AiopsMutationResult } from '@shared/contracts/common'
 import type {
-  AiopsMutationResult,
   QuickCommandGroupConfig,
   QuickCommandGroupDeleteResult,
   QuickCommandGroupMutationResult,
@@ -22,7 +22,7 @@ import type {
   QuickCommandScriptPlanResult,
   QuickCommandScriptSegment,
   QuickCommandsUserConfig
-} from '@shared/preload'
+} from '@shared/contracts/quickCommands'
 import { shouldUseQuickCommandsSeedData } from '@shared/runtimeSwitches'
 
 type QuickCommandStoreShape = {

@@ -15,7 +15,7 @@ import type {
   QuickCommandReorderInput,
   QuickCommandScriptPlanInput,
   QuickCommandSnippetSaveInput
-} from '@shared/preload'
+} from '@shared/contracts/quickCommands'
 
 export const registerQuickCommandsIpc = (ipcMain: IpcMain) => {
   ipcMain.handle('quick-commands:get', () => getQuickCommands())

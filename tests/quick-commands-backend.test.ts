@@ -3,8 +3,8 @@ import Database from 'better-sqlite3'
 import { mkdtemp, rm } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
+import type { AiopsMutationResult } from '@shared/contracts/common'
 import type {
-  AiopsMutationResult,
   QuickCommandGroupDeleteResult,
   QuickCommandGroupMutationResult,
   QuickCommandGroupSaveInput,
@@ -18,7 +18,7 @@ import type {
   QuickCommandSnippetMutationResult,
   QuickCommandSnippetSaveInput,
   QuickCommandsUserConfig
-} from '@shared/preload'
+} from '@shared/contracts/quickCommands'
 
 vi.mock('electron', () => ({
   app: {

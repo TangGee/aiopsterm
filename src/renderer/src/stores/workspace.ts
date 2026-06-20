@@ -166,11 +166,6 @@ import type {
   OpenSettingsDocumentationInput,
   PrivacyUserConfig,
   PrivacyRuntimeSnapshot,
-  QuickCommandGroupConfig,
-  QuickCommandScriptPlan,
-  QuickCommandScriptSegment,
-  QuickCommandSnippetConfig,
-  QuickCommandsUserConfig,
   SecurityUserConfig,
   SettingsDocumentationPage,
   SettingsPreferencesSnapshot,
@@ -191,6 +186,7 @@ import type {
 import type { FileSessionCatalog, FileSessionFolderRecord, FileSessionFolderSaveInput, FileSessionInfo, FileSessionPatch, FileSessionTerminalContext, FileTransferTask } from '@shared/contracts/files'
 import type { AiopsTrustedDevice, AiopsTrustedDeviceRevokeResult, AiopsUserAccountSnapshot, AiopsUserAvatarPrepareResult, AiopsUserCodeResult, AiopsUserExternalAction, AiopsUserExternalActionResult, AiopsUserMutationResult, AiopsUserProfile } from '@shared/contracts/userAccount'
 import type { ExtensionInstallProgress as BackendExtensionInstallProgress, ExtensionInstallStage, ExtensionPluginOperation, ExtensionPluginRuntimeConfig, ExtensionUserConfig } from '@shared/contracts/extensions'
+import type { QuickCommandGroupConfig, QuickCommandScriptPlan, QuickCommandScriptSegment, QuickCommandSnippetConfig, QuickCommandsUserConfig } from '@shared/contracts/quickCommands'
 import type {
   AiAgentSessionEvent,
   AiAgentSessionEventName,

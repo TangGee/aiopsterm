@@ -99,6 +99,18 @@ import type {
   ExtensionPluginRuntimeConfig as ExtensionPluginRuntimeConfigPreload,
   ExtensionUserConfig as ExtensionUserConfigPreload
 } from '../src/shared/preload'
+import type {
+  QuickCommandScriptPlanResult as QuickCommandScriptPlanResultContract,
+  QuickCommandSnippetMutationResult as QuickCommandSnippetMutationResultContract,
+  QuickCommandSnippetSaveInput as QuickCommandSnippetSaveInputContract,
+  QuickCommandsUserConfig as QuickCommandsUserConfigContract
+} from '../src/shared/contracts/quickCommands'
+import type {
+  QuickCommandScriptPlanResult as QuickCommandScriptPlanResultPreload,
+  QuickCommandSnippetMutationResult as QuickCommandSnippetMutationResultPreload,
+  QuickCommandSnippetSaveInput as QuickCommandSnippetSaveInputPreload,
+  QuickCommandsUserConfig as QuickCommandsUserConfigPreload
+} from '../src/shared/preload'
 
 type AssertAssignable<From, To extends From> = true
 
@@ -175,6 +187,14 @@ type ExtensionDownloadPreloadMatchesContract = AssertAssignable<ExtensionPackage
 type ExtensionDownloadContractMatchesPreload = AssertAssignable<ExtensionPackageDownloadResultPreload, ExtensionPackageDownloadResultContract>
 type ExtensionUserConfigPreloadMatchesContract = AssertAssignable<ExtensionUserConfigContract, ExtensionUserConfigPreload>
 type ExtensionUserConfigContractMatchesPreload = AssertAssignable<ExtensionUserConfigPreload, ExtensionUserConfigContract>
+type QuickCommandsSnapshotPreloadMatchesContract = AssertAssignable<QuickCommandsUserConfigContract, QuickCommandsUserConfigPreload>
+type QuickCommandsSnapshotContractMatchesPreload = AssertAssignable<QuickCommandsUserConfigPreload, QuickCommandsUserConfigContract>
+type QuickCommandSnippetSavePreloadMatchesContract = AssertAssignable<QuickCommandSnippetSaveInputContract, QuickCommandSnippetSaveInputPreload>
+type QuickCommandSnippetSaveContractMatchesPreload = AssertAssignable<QuickCommandSnippetSaveInputPreload, QuickCommandSnippetSaveInputContract>
+type QuickCommandSnippetMutationPreloadMatchesContract = AssertAssignable<QuickCommandSnippetMutationResultContract, QuickCommandSnippetMutationResultPreload>
+type QuickCommandSnippetMutationContractMatchesPreload = AssertAssignable<QuickCommandSnippetMutationResultPreload, QuickCommandSnippetMutationResultContract>
+type QuickCommandScriptPlanPreloadMatchesContract = AssertAssignable<QuickCommandScriptPlanResultContract, QuickCommandScriptPlanResultPreload>
+type QuickCommandScriptPlanContractMatchesPreload = AssertAssignable<QuickCommandScriptPlanResultPreload, QuickCommandScriptPlanResultContract>
 
 describe('shared contract compatibility exports', () => {
   it('keeps Codex session contracts compatible through the preload export', () => {
@@ -295,5 +315,20 @@ describe('shared contract compatibility exports', () => {
     ] = [true, true, true, true, true, true, true, true, true, true]
 
     expect(checks).toEqual([true, true, true, true, true, true, true, true, true, true])
+  })
+
+  it('keeps Quick Commands contracts compatible through the preload export', () => {
+    const checks: [
+      QuickCommandsSnapshotPreloadMatchesContract,
+      QuickCommandsSnapshotContractMatchesPreload,
+      QuickCommandSnippetSavePreloadMatchesContract,
+      QuickCommandSnippetSaveContractMatchesPreload,
+      QuickCommandSnippetMutationPreloadMatchesContract,
+      QuickCommandSnippetMutationContractMatchesPreload,
+      QuickCommandScriptPlanPreloadMatchesContract,
+      QuickCommandScriptPlanContractMatchesPreload
+    ] = [true, true, true, true, true, true, true, true]
+
+    expect(checks).toEqual([true, true, true, true, true, true, true, true])
   })
 })

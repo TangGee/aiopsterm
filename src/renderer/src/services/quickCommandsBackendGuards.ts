@@ -9,7 +9,7 @@ import type {
   QuickCommandSnippetDeleteResult,
   QuickCommandSnippetMutationResult,
   QuickCommandsUserConfig
-} from '@shared/preload'
+} from '@shared/contracts/quickCommands'
 
 export const malformedQuickCommandsBackendResultMessage = '快捷命令服务返回数据无效'
 
