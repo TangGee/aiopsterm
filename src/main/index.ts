@@ -7,30 +7,7 @@ import type { FSWatcher } from 'fs'
 import { access, cp, mkdir, readFile, readdir, rename, rm, stat, unlink, writeFile } from 'fs/promises'
 import Store from 'electron-store'
 import AdmZip from 'adm-zip'
-import {
-  confirmAssetImport,
-  deleteAsset,
-  deleteAssetGroup,
-  deleteAssetFolder,
-  deleteKeychain,
-  exportAssets,
-  getAsset,
-  getAssetEditableSecret,
-  getAssetSecret,
-  getKeychain,
-  getKeychainSecret,
-  listAssets,
-  listAssetGroups,
-  listKeychains,
-  listSshAgentKeychainOptions,
-  previewAssetImport,
-  refreshOrganizationAssets,
-  renameAssetGroup,
-  saveAsset,
-  saveAssetFolder,
-  saveKeychain,
-  testAssetConnection
-} from './backend/assets'
+import { getAsset, getAssetSecret, getKeychainSecret, refreshOrganizationAssets, saveAsset } from './backend/assets'
 import { formatMcpResourceReadContent } from './backend/aiChat'
 import { exportChat } from './backend/chatExport'
 import { stageChatAttachment } from './backend/chatAttachments'
@@ -84,7 +61,6 @@ import {
   invokeControlSocketMethod,
   registerControlSocketIpc
 } from './backend/controlSocket'
-import { startSshTunnel, stopSshTunnel } from './backend/sshTunnels'
 import { createSshTerminalSession, type SshTerminalSession } from './backend/sshTerminal'
 import { recordTerminalCommandHistory } from './backend/terminalSuggestions'
 import {
@@ -102,6 +78,7 @@ import { registerAgentHooksIpc } from './ipc/agentHooks'
 import { registerAliasesIpc } from './ipc/aliases'
 import { registerAppRuntimeIpc } from './ipc/appRuntime'
 import { registerAppUpdateIpc } from './ipc/appUpdate'
+import { registerAssetsIpc } from './ipc/assets'
 import { registerChatHistoryIpc } from './ipc/chatHistory'
 import { registerDatabaseIpc } from './ipc/database'
 import { registerExtensionsIpc } from './ipc/extensions'
@@ -143,10 +120,6 @@ import type {
   AiMcpToolCallActionResult,
   CodexSessionCreateOptions,
   CodexSessionTargetContext,
-  AiopsAssetInput,
-  AiopsCustomFolderSaveInput,
-  AiopsKeychainInput,
-  AiopsOrganizationAssetRefreshInput,
   AiAgentSessionEvent,
   ManagedAiSessionEvent,
   ManagedAiSessionFocusRequest,
@@ -190,13 +163,7 @@ import type {
   KnowledgeBasePastedImageInput,
   UserConfig,
   WorkspaceUserConfig,
-  UserRuleConfig,
-  AiopsAssetGroupDeleteInput,
-  AiopsAssetGroupListInput,
-  AiopsAssetGroupRenameInput,
-  AiopsAssetExportInput,
-  AiopsSshTunnelStartInput,
-  AiopsSshTunnelStopInput
+  UserRuleConfig
 } from '@shared/preload'
 
 if (process.env.NODE_ENV === 'test') {
@@ -2647,6 +2614,18 @@ const registerIpc = () => {
     },
     shouldSkipOpenPath: shouldUseE2eDialogFixtures
   })
+  registerAssetsIpc(ipcMain, {
+    showSaveDialog: (options) => {
+      const owner = BrowserWindow.getFocusedWindow()
+      if (shouldUseE2eDialogFixtures()) {
+        return Promise.resolve({
+          canceled: false,
+          filePath: join(app.getPath('downloads'), basename(options.defaultPath))
+        })
+      }
+      return owner ? dialog.showSaveDialog(owner, options) : dialog.showSaveDialog(options)
+    }
+  })
   registerAliasesIpc(ipcMain)
   registerChatHistoryIpc(ipcMain)
   registerDatabaseIpc(ipcMain, {
@@ -2970,40 +2949,6 @@ const registerIpc = () => {
       exportedAt: new Date().toISOString()
     }
   })
-  ipcMain.handle('assets:list', () => listAssets())
-  ipcMain.handle('assets:groups:list', (_event, input?: AiopsAssetGroupListInput) => listAssetGroups(input))
-  ipcMain.handle('assets:groups:rename', (_event, input: AiopsAssetGroupRenameInput) => renameAssetGroup(input))
-  ipcMain.handle('assets:groups:delete', (_event, input: AiopsAssetGroupDeleteInput) => deleteAssetGroup(input))
-  ipcMain.handle('assets:save', (_event, asset: AiopsAssetInput) => saveAsset(asset))
-  ipcMain.handle('assets:editable-secret:get', (_event, id: string) => getAssetEditableSecret(id))
-  ipcMain.handle('assets:test-connection', (_event, input) => testAssetConnection(input))
-  ipcMain.handle('assets:delete', (_event, id: string) => deleteAsset(id))
-  ipcMain.handle('assets:organization:refresh', (_event, input?: AiopsOrganizationAssetRefreshInput) => refreshOrganizationAssets(input))
-  ipcMain.handle('assets:import:preview', (_event, input) => previewAssetImport(input))
-  ipcMain.handle('assets:import:confirm', (_event, input) => confirmAssetImport(input))
-  ipcMain.handle('assets:export', async (event, input: AiopsAssetExportInput) => {
-    const owner = BrowserWindow.fromWebContents(event.sender)
-    return exportAssets(input, {
-      showSaveDialog: (options) => {
-        if (shouldUseE2eDialogFixtures()) {
-          return Promise.resolve({
-            canceled: false,
-            filePath: join(app.getPath('downloads'), basename(options.defaultPath))
-          })
-        }
-        return owner ? dialog.showSaveDialog(owner, options) : dialog.showSaveDialog(options)
-      }
-    })
-  })
-  ipcMain.handle('ssh:tunnel:start', (_event, input: AiopsSshTunnelStartInput) => startSshTunnel(input))
-  ipcMain.handle('ssh:tunnel:stop', (_event, input: AiopsSshTunnelStopInput) => stopSshTunnel(input))
-  ipcMain.handle('assets:folder:save', (_event, folder: AiopsCustomFolderSaveInput) => saveAssetFolder(folder))
-  ipcMain.handle('assets:folder:delete', (_event, uuid: string) => deleteAssetFolder(uuid))
-  ipcMain.handle('assets:keychains:list', () => listKeychains())
-  ipcMain.handle('assets:keychains:ssh-agent-options', () => listSshAgentKeychainOptions())
-  ipcMain.handle('assets:keychains:get', (_event, id: string) => getKeychain(id))
-  ipcMain.handle('assets:keychains:save', (_event, keychain: AiopsKeychainInput) => saveKeychain(keychain))
-  ipcMain.handle('assets:keychains:delete', (_event, id: string) => deleteKeychain(id))
   ipcMain.handle('dialog:open-file', async (event, options) => {
     const useE2eDialogFixtures = shouldUseE2eDialogFixtures()
     if (
