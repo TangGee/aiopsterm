@@ -10,8 +10,28 @@ import {
   isSettingsDocumentationResult,
   resolveUpdateVersion
 } from '@/services/appRuntimeClient'
+import type { UserConfig } from '@shared/contracts/userConfig'
 
 const originalAiops = window.aiops
+
+const configFixture: UserConfig = {
+  language: 'zh-CN',
+  theme: 'dark',
+  defaultMode: 'terminal',
+  leftPanelOpen: true,
+  rightPanelOpen: true,
+  agentsLeftOpen: true,
+  modelProvider: 'local',
+  modelEndpoint: '',
+  modelName: 'aiopsterm-local-agent',
+  watermark: 'open',
+  background: {
+    mode: 'none',
+    image: '',
+    opacity: 0.18,
+    brightness: 1
+  }
+}
 
 afterEach(() => {
   window.aiops = originalAiops
@@ -21,20 +41,72 @@ describe('appRuntimeClient', () => {
   it('returns undefined for unavailable bridge methods and binds available methods', async () => {
     window.aiops = {
       ...originalAiops,
+      getConfig: vi.fn(async () => ({ ...configFixture })),
+      saveConfig: vi.fn(async (patch) => ({ ...configFixture, ...patch })),
+      applyPrivacyRuntimeSettings: vi.fn(async (input) => ({
+        ok: true as const,
+        data: {
+          telemetry: input.nextPrivacy.telemetry,
+          dataSync: input.nextPrivacy.dataSync,
+          dataSyncRuntime: input.nextPrivacy.dataSync === 'enabled' ? ('local-file' as const) : ('disabled' as const),
+          syncStatus: input.nextPrivacy.dataSync === 'enabled' ? ('synced' as const) : ('disabled' as const),
+          appliedAt: '2026-06-20T00:00:00.000Z',
+          message: 'privacy applied'
+        }
+      })),
+      applyKnowledgeSearchRuntimeSetting: vi.fn(async (input) => ({
+        ok: true as const,
+        data: {
+          enabled: input.nextEnabled,
+          appliedAt: '2026-06-20T00:00:00.000Z',
+          source: 'settings' as const,
+          message: 'knowledge search applied'
+        }
+      })),
       checkUpdate: vi.fn(async () => ({ available: false, channel: 'local' as const })),
       openSettingsDocumentation: vi.fn(async () => ({ path: '/tmp/docs/index.md', title: 'Docs', content: '# Docs' })),
       openLogDir: undefined as any
     }
 
     expect(appRuntimeClient.openLogDir()).toBeUndefined()
+    await expect(appRuntimeClient.getConfig()?.()).resolves.toEqual(expect.objectContaining({ theme: 'dark' }))
+    await expect(appRuntimeClient.saveConfig()?.({ theme: 'light' })).resolves.toEqual(expect.objectContaining({ theme: 'light' }))
+    await expect(
+      appRuntimeClient.applyPrivacyRuntimeSettings()?.({
+        previousPrivacy: { telemetry: 'enabled', secretRedaction: 'enabled', dataSync: 'disabled' },
+        nextPrivacy: { telemetry: 'disabled', secretRedaction: 'enabled', dataSync: 'enabled' }
+      })
+    ).resolves.toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ telemetry: 'disabled', dataSync: 'enabled' }) }))
+    await expect(appRuntimeClient.applyKnowledgeSearchRuntimeSetting()?.({ previousEnabled: false, nextEnabled: true })).resolves.toEqual(
+      expect.objectContaining({ ok: true, data: expect.objectContaining({ enabled: true }) })
+    )
     await expect(appRuntimeClient.checkUpdate()?.()).resolves.toEqual({ available: false, channel: 'local' })
     await expect(appRuntimeClient.openSettingsDocumentation()?.({ page: 'general', locale: 'zh-CN' })).resolves.toEqual({
       path: '/tmp/docs/index.md',
       title: 'Docs',
       content: '# Docs'
     })
+    expect(window.aiops.getConfig).toHaveBeenCalledTimes(1)
+    expect(window.aiops.saveConfig).toHaveBeenCalledWith({ theme: 'light' })
+    expect(window.aiops.applyPrivacyRuntimeSettings).toHaveBeenCalledWith({
+      previousPrivacy: { telemetry: 'enabled', secretRedaction: 'enabled', dataSync: 'disabled' },
+      nextPrivacy: { telemetry: 'disabled', secretRedaction: 'enabled', dataSync: 'enabled' }
+    })
+    expect(window.aiops.applyKnowledgeSearchRuntimeSetting).toHaveBeenCalledWith({ previousEnabled: false, nextEnabled: true })
     expect(window.aiops.checkUpdate).toHaveBeenCalledTimes(1)
     expect(window.aiops.openSettingsDocumentation).toHaveBeenCalledWith({ page: 'general', locale: 'zh-CN' })
+
+    window.aiops = {
+      ...originalAiops,
+      getConfig: undefined as any,
+      saveConfig: undefined as any,
+      applyPrivacyRuntimeSettings: undefined as any,
+      applyKnowledgeSearchRuntimeSetting: undefined as any
+    }
+    expect(appRuntimeClient.getConfig()).toBeUndefined()
+    expect(appRuntimeClient.saveConfig()).toBeUndefined()
+    expect(appRuntimeClient.applyPrivacyRuntimeSettings()).toBeUndefined()
+    expect(appRuntimeClient.applyKnowledgeSearchRuntimeSetting()).toBeUndefined()
   })
 
   it('validates app update and open path bridge payloads', () => {

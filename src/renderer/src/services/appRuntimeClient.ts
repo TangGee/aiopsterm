@@ -9,6 +9,10 @@ import type {
 
 type AppRuntimeBridge = Pick<
   AiopsPreloadApi,
+  | 'getConfig'
+  | 'saveConfig'
+  | 'applyPrivacyRuntimeSettings'
+  | 'applyKnowledgeSearchRuntimeSetting'
   | 'checkUpdate'
   | 'downloadAppUpdate'
   | 'installAppUpdate'
@@ -33,6 +37,10 @@ const bridgeMethod = <Name extends keyof AppRuntimeBridge>(name: Name): AppRunti
 }
 
 export const appRuntimeClient = {
+  getConfig: () => bridgeMethod('getConfig'),
+  saveConfig: () => bridgeMethod('saveConfig'),
+  applyPrivacyRuntimeSettings: () => bridgeMethod('applyPrivacyRuntimeSettings'),
+  applyKnowledgeSearchRuntimeSetting: () => bridgeMethod('applyKnowledgeSearchRuntimeSetting'),
   checkUpdate: () => bridgeMethod('checkUpdate'),
   downloadAppUpdate: () => bridgeMethod('downloadAppUpdate'),
   installAppUpdate: () => bridgeMethod('installAppUpdate'),

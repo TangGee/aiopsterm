@@ -5198,8 +5198,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const hydrateConfig = async () => {
-    if (!window.aiops) return
-    const savedConfig = await window.aiops.getConfig()
+    const getConfigBridge = appRuntimeClient.getConfig()
+    if (!getConfigBridge) return
+    const savedConfig = await getConfigBridge()
     const missingAgentsLeftOpen = typeof savedConfig.agentsLeftOpen !== 'boolean'
     const missingTerminalConfig = !isRecord(savedConfig.terminal)
     const missingWorkspacePreferences = !isRecord(savedConfig.workspacePreferences)
@@ -5392,9 +5393,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       savedMcpSnapshot.changed ||
       missingMcpServers
     ) {
+      const saveConfigBridge = appRuntimeClient.saveConfig()
+      if (!saveConfigBridge) return
       config.value = mergeGenericSavedConfig(
         config.value,
-        await window.aiops.saveConfig({
+        await saveConfigBridge({
           agentsLeftOpen: config.value.agentsLeftOpen,
           terminal: normalizedTerminal,
           workspacePreferences: normalizedWorkspacePreferences,
@@ -5444,8 +5447,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     config.value.theme = normalizeThemeId(config.value.theme)
     applyCurrentTheme()
     setupThemeBridge()
-    if (window.aiops) {
-      config.value = mergeGenericSavedConfig(config.value, await window.aiops.saveConfig(normalizedPatch))
+    const saveConfigBridge = appRuntimeClient.saveConfig()
+    if (saveConfigBridge) {
+      config.value = mergeGenericSavedConfig(config.value, await saveConfigBridge(normalizedPatch))
     }
     config.value.theme = normalizeThemeId(config.value.theme)
     editorSettings.value = normalizeEditorSettingsConfig(config.value.editorSettings).normalized
@@ -5597,7 +5601,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const getExtensionSettingsSnapshot = (): ExtensionUserConfig => ({ ...extensionSettings.value })
 
   const persistExtensionSettings = async (nextSettings: ExtensionSettings) => {
-    const saveConfigBridge = window.aiops?.saveConfig
+    const saveConfigBridge = appRuntimeClient.saveConfig()
     if (typeof saveConfigBridge !== 'function') {
       setSettingsNotice('扩展设置保存服务不可用')
       return false
@@ -5679,7 +5683,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const persistPrivacySettings = async (previousPrivacy: PrivacyUserConfig, nextPrivacy: PrivacyUserConfig) => {
-    const saveConfigBridge = window.aiops?.saveConfig
+    const saveConfigBridge = appRuntimeClient.saveConfig()
     if (typeof saveConfigBridge !== 'function') {
       setSettingsNotice('隐私设置保存服务不可用')
       return false
@@ -5697,7 +5701,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       const runtimeChanged = previousPrivacy.telemetry !== nextPrivacy.telemetry || previousPrivacy.dataSync !== nextPrivacy.dataSync
       let runtimeSnapshot: PrivacyRuntimeApplyData | null = null
       if (runtimeChanged) {
-        const runtimeBridge = window.aiops?.applyPrivacyRuntimeSettings
+        const runtimeBridge = appRuntimeClient.applyPrivacyRuntimeSettings()
         if (typeof runtimeBridge !== 'function') {
           return failPrivacyRuntime(saveConfigBridge, previousPrivacy, '隐私运行时服务不可用')
         }
@@ -5784,7 +5788,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const persistAiPreferences = async (previousPreferences: AiPreferenceSettings, nextPreferences: AiPreferenceSettings) => {
-    const saveConfigBridge = window.aiops?.saveConfig
+    const saveConfigBridge = appRuntimeClient.saveConfig()
     if (typeof saveConfigBridge !== 'function') {
       setSettingsNotice('AI 偏好设置保存服务不可用')
       return false
@@ -5801,7 +5805,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       }
 
       if (previousPreferences.kbSearchEnabled !== normalizedPreferences.kbSearchEnabled) {
-        const runtimeBridge = window.aiops?.applyKnowledgeSearchRuntimeSetting
+        const runtimeBridge = appRuntimeClient.applyKnowledgeSearchRuntimeSetting()
         if (typeof runtimeBridge !== 'function') {
           return failAiPreferencesRuntime(saveConfigBridge, previousPreferences, '知识库搜索运行时服务不可用')
         }
@@ -5926,7 +5930,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     unavailableMessage = '模型设置保存服务不可用',
     failureMessage = '模型设置保存失败'
   ) => {
-    const saveConfigBridge = window.aiops?.saveConfig
+    const saveConfigBridge = appRuntimeClient.saveConfig()
     if (typeof saveConfigBridge !== 'function') {
       setSettingsNotice(unavailableMessage)
       return false
@@ -6510,7 +6514,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     applyThemeToDocument(nextTheme)
     setupThemeBridge()
 
-    const saveConfigBridge = window.aiops?.saveConfig
+    const saveConfigBridge = appRuntimeClient.saveConfig()
     if (typeof saveConfigBridge !== 'function') {
       applyThemeToDocument(previousTheme)
       setSettingsNotice('主题设置保存服务不可用')
@@ -6545,7 +6549,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const getBackgroundSnapshot = (): BackgroundUserConfig => cloneBackgroundSnapshot(config.value.background)
 
   const persistBackground = async (nextBackground: BackgroundUserConfig) => {
-    const saveConfigBridge = window.aiops?.saveConfig
+    const saveConfigBridge = appRuntimeClient.saveConfig()
     if (typeof saveConfigBridge !== 'function') {
       setSettingsNotice('背景设置保存服务不可用')
       return false
@@ -6676,7 +6680,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const saveGeneralBaseSettings = async (patch: GeneralBaseSettingsPatch) => {
-    const saveConfigBridge = window.aiops?.saveConfig
+    const saveConfigBridge = appRuntimeClient.saveConfig()
     if (typeof saveConfigBridge !== 'function') {
       setSettingsNotice('基础设置保存服务不可用')
       return false
@@ -6727,7 +6731,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const persistLayoutPreferences = async (patch: LayoutPreferencesPatch) => {
-    const saveConfigBridge = window.aiops?.saveConfig
+    const saveConfigBridge = appRuntimeClient.saveConfig()
     if (typeof saveConfigBridge !== 'function') {
       setTopNotice('布局设置保存服务不可用')
       return false
@@ -6759,7 +6763,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     JSON.stringify(cloneEditorSettingsSnapshot(left)) === JSON.stringify(cloneEditorSettingsSnapshot(right))
 
   const persistEditorSettings = async (nextSettings: EditorSettings) => {
-    const saveConfigBridge = window.aiops?.saveConfig
+    const saveConfigBridge = appRuntimeClient.saveConfig()
     if (typeof saveConfigBridge !== 'function') {
       setSettingsNotice('编辑器设置保存服务不可用')
       return false
@@ -6807,7 +6811,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     JSON.stringify(cloneTerminalSettingsSnapshot(left)) === JSON.stringify(cloneTerminalSettingsSnapshot(right))
 
   const persistTerminalSettings = async (nextSettings: TerminalSettings) => {
-    const saveConfigBridge = window.aiops?.saveConfig
+    const saveConfigBridge = appRuntimeClient.saveConfig()
     if (typeof saveConfigBridge !== 'function') {
       setSettingsNotice(i18nText('settings.terminal.saveUnavailable'))
       return false
@@ -6886,7 +6890,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const persistSshProxyConfigs = async (nextConfigs: SshProxyConfig[], unavailableNotice: string, failureNotice: string) => {
-    const saveConfigBridge = window.aiops?.saveConfig
+    const saveConfigBridge = appRuntimeClient.saveConfig()
     if (typeof saveConfigBridge !== 'function') {
       setSettingsNotice(unavailableNotice)
       return false
@@ -6950,7 +6954,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const persistSshAgentKeys = async (nextKeys: SshAgentKeyConfig[], unavailableNotice: string, failureNotice: string) => {
-    const saveConfigBridge = window.aiops?.saveConfig
+    const saveConfigBridge = appRuntimeClient.saveConfig()
     if (typeof saveConfigBridge !== 'function') {
       setSettingsNotice(unavailableNotice)
       return false
@@ -7034,7 +7038,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   const updateWorkspacePreferences = async (patch: Partial<WorkspaceUserConfig>) => {
     const nextPreferences = normalizeWorkspacePreferences({ ...workspacePreferences.value, ...patch }).normalized
-    const saveConfigBridge = window.aiops?.saveConfig
+    const saveConfigBridge = appRuntimeClient.saveConfig()
     if (typeof saveConfigBridge !== 'function') {
       setTopNotice('资源树偏好保存服务不可用')
       return false
@@ -7073,7 +7077,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
     const nextModelProvider = normalizeCatalogModelProvider(modelOption?.apiProvider || config.value.modelProvider)
     if (nextModelName === config.value.modelName && nextModelProvider === config.value.modelProvider) return true
-    const saveConfigBridge = window.aiops?.saveConfig
+    const saveConfigBridge = appRuntimeClient.saveConfig()
     if (typeof saveConfigBridge !== 'function') {
       setTopNotice('AI 模型保存服务不可用')
       return false
@@ -7178,7 +7182,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const saveModelProvider = async (provider: ModelProviderKey) => {
-    const saveConfigBridge = window.aiops?.saveConfig
+    const saveConfigBridge = appRuntimeClient.saveConfig()
     if (typeof saveConfigBridge !== 'function') {
       setSettingsNotice('模型 Provider 保存服务不可用')
       return false
@@ -7269,7 +7273,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const updateNotificationSettings = async (patch: Partial<NotificationUserConfig>) => {
-    const saveConfigBridge = window.aiops?.saveConfig
+    const saveConfigBridge = appRuntimeClient.saveConfig()
     if (typeof saveConfigBridge !== 'function') {
       setSettingsNotice('通知设置保存服务不可用')
       return false
