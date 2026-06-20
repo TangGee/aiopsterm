@@ -9017,6 +9017,27 @@ describe('AppShell', () => {
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith(expect.stringContaining('Pending AI: claude-code/Deploy approval'))
     expect(store.topNotice).toBe('终端上下文已复制')
 
+    vi.mocked(window.aiops.listManagedAiSessions).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        sessions: store.managedAiSessions.map((session) => ({
+          ...session,
+          events: session.events || [],
+          decisions: session.decisions || []
+        }))
+      }
+    } as any)
+    await contextBar.findAll('button').find((button) => button.text().includes('AI 会话'))!.trigger('click')
+    expect(store.activeModule).toBe('aiSessions')
+    await contextBar.findAll('button').find((button) => button.text() === '刷新')!.trigger('click')
+    await flushPromises()
+    expect(window.aiops.listManagedAiSessions).toHaveBeenCalled()
+    expect(store.topNotice).toBe('AI 会话已刷新')
+    await contextBar.findAll('button').find((button) => button.text() === '聚焦')!.trigger('click')
+    await wrapper.vm.$nextTick()
+    expect(store.activeModule).toBe('workspace')
+    expect(mockXtermInstances.at(-1)!.focus).toHaveBeenCalled()
+
     await contextBar.find('.terminal-context-attention').trigger('click')
     expect(store.activeModule).toBe('aiSessions')
     expect(store.selectedManagedAiSession?.id).toBe('claude-deploy-approval')

@@ -189,6 +189,25 @@
           {{ activeTerminalContextBar.pendingAiCount }} AI
         </button>
         <button
+          title="打开 AI 会话管理"
+          @click="openAiSessionsFromContextBar"
+        >
+          AI 会话
+        </button>
+        <button
+          title="刷新 AI 会话状态"
+          @click="refreshAiSessionsFromContextBar"
+        >
+          刷新
+        </button>
+        <button
+          v-if="activeTerminalContextBar.focusable"
+          title="聚焦当前终端"
+          @click="focusActiveTerminalFromContextBar"
+        >
+          聚焦
+        </button>
+        <button
           title="复制当前终端上下文"
           @click="copyActiveTerminalContext"
         >
@@ -4115,9 +4134,25 @@ const activeTerminalContextBar = computed(() => {
     target: terminalSshTargetLabel(panel),
     path: panel.knowledge?.relPath || panel.cwd,
     pendingAiCount,
+    focusable: panel.kind !== 'knowledge',
     text: terminalContextText(panel)
   }
 })
+const openAiSessionsFromContextBar = () => {
+  workspace.activeModule = 'aiSessions'
+  workspace.leftPanelOpen = true
+}
+const refreshAiSessionsFromContextBar = async () => {
+  const refreshed = await workspace.refreshManagedAiSessions()
+  if (!refreshed && !workspace.managedAiSessionsError) workspace.setTopNotice('AI 会话刷新失败')
+}
+const focusActiveTerminalFromContextBar = () => {
+  const panel = activeTerminalPanel.value
+  if (!panel || panel.kind === 'knowledge') return
+  workspace.activeModule = 'workspace'
+  workspace.activePanelId = panel.id
+  nextTick(() => terminalViews.get(panel.id)?.terminal.focus())
+}
 const copyActiveTerminalContext = async () => {
   const context = activeTerminalContextBar.value
   if (!context) return
