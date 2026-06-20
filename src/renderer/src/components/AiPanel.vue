@@ -1716,6 +1716,22 @@ import {
   visibleAiHistoryConversations,
   type AiPanelChatSearchMatch
 } from '@/services/aiPanelConversationRuntime'
+import {
+  aiPanelChatAttachmentFilters,
+  aiPanelDropEffect,
+  aiPanelImagePickerFilters,
+  aiPanelVoiceRecordingLimitMs,
+  bestVoiceMimeType as bestAiPanelVoiceMimeType,
+  canAcceptAiPanelDrop as canAcceptAiPanelRuntimeDrop,
+  clipboardHasImageItems,
+  docPartFromStagedAttachment,
+  imagePartFromChatImagePrepareResult,
+  planAiPanelDrop,
+  prepareVoiceTranscriptionCompletion,
+  prepareVoiceTranscriptionInputFromBlob,
+  voiceRecordingStartFailureMessage,
+  voiceTextFromTranscriptionResult
+} from '@/services/aiPanelMediaRuntime'
 import { aiChatClient } from '@/services/aiChatClient'
 import { copyTextToClipboard } from '@/services/clipboardRuntime'
 import { codexSessionClient } from '@/services/codexSessionClient'
@@ -1749,12 +1765,8 @@ import { writeRendererRuntimeLog as writeAiRuntimeLog } from '@/services/runtime
 import { voiceClient } from '@/services/voiceClient'
 import {
   isAiChatExportData,
-  isChatAttachmentStageData,
-  isChatImageAttachmentPrepareData,
-  isVoiceTranscriptionData,
   malformedAiBackendResultMessage
 } from '@/services/aiBackendGuards'
-import { chatAttachmentPathSegments, normalizeChatAttachmentPath, normalizeChatAttachmentTaskId, parseChatAttachmentRef } from '@shared/chatAttachment'
 import { useI18n } from '@/i18n'
 import type {
   AiChatChipContentPart,
@@ -1769,7 +1781,6 @@ import type {
   TerminalPanel
 } from '@/stores/workspace'
 import type { AiCommandCatalogOption, AiContextKind, AiContextOption } from '@shared/contracts/aiChat'
-import type { VoiceTranscriptionInput } from '@shared/contracts/voice'
 import type { CodexSessionTargetContext } from '@shared/contracts/codexSessions'
 
 type XtermRuntimeOptions = XtermTerminal['options'] & { termName?: string }
@@ -1888,47 +1899,8 @@ let voiceRecordingLimitTimer: number | undefined
 let chatScrollFrame: number | undefined
 const historyPageSize = 20
 const historyFavoriteLabel = computed(() => t('ai.historyFavoriteGroup'))
-const voiceRecordingLimitMs = 60_000
-const voiceRecordingMinimumMs = 220
-const voiceMaxAudioBytes = 50 * 1024 * 1024
-const preferredVoiceMimeTypes = [
-  'audio/webm',
-  'audio/ogg;codecs=opus',
-  'audio/webm;codecs=opus',
-  'audio/mp3',
-  'audio/m4a',
-  'audio/aac',
-  'audio/wav'
-]
 const imagePartMediaTypes = aiPanelImagePartMediaTypes
-const chatAttachmentFilters = [
-  {
-    name: 'Text',
-    extensions: [
-      'txt',
-      'md',
-      'js',
-      'ts',
-      'py',
-      'java',
-      'cpp',
-      'c',
-      'html',
-      'css',
-      'json',
-      'xml',
-      'yaml',
-      'yml',
-      'sql',
-      'sh',
-      'bat',
-      'ps1',
-      'log',
-      'csv',
-      'tsv'
-    ]
-  }
-]
+const chatAttachmentFilters = aiPanelChatAttachmentFilters
 const maxHostContexts = 5
 const streaming = computed(() => workspace.chatMessages.some((message) => message.state === 'streaming'))
 const activeCodexConversation = computed(() => codexConversations.value.find((conversation) => conversation.id === activeCodexConversationId.value) || null)
@@ -3497,7 +3469,7 @@ const insertFileChipAtEditCursor = (part: AiDocChipContentPart) => {
   return insertChipIntoEditableCursor(editTarget, part, handleEditEditableInput, '@')
 }
 
-const clipboardHasImage = (event: ClipboardEvent) => Array.from(event.clipboardData?.items || []).some((item) => item.type.startsWith('image/'))
+const clipboardHasImage = (event: ClipboardEvent) => clipboardHasImageItems(event.clipboardData?.items)
 
 const preparePastedImagePart = async (): Promise<AiImageContentPart | null> => {
   const prepareClipboardImage = localFilesClient.prepareChatImageAttachmentFromClipboard()
@@ -3507,20 +3479,10 @@ const preparePastedImagePart = async (): Promise<AiImageContentPart | null> => {
   }
   try {
     const result = await prepareClipboardImage()
-    if (!result?.ok) {
-      showInputPlaceholderNotice(`图片上传失败：${result?.errorMessage || result?.errorCode || '图片处理失败'}`)
-      return null
-    }
-    if (!isChatImageAttachmentPrepareData(result.data)) {
-      showInputPlaceholderNotice(`图片上传失败：${malformedAiBackendResultMessage}`)
-      return null
-    }
-    return {
-      type: 'image',
-      mediaType: result.data.mediaType,
-      data: result.data.data,
-      name: result.data.name
-    }
+    const imagePart = imagePartFromChatImagePrepareResult(result)
+    if (imagePart.ok) return imagePart.data
+    showInputPlaceholderNotice(`图片上传失败：${imagePart.message}`)
+    return null
   } catch (error) {
     showInputPlaceholderNotice(`图片上传失败：${error instanceof Error ? error.message : String(error)}`)
     return null
@@ -4210,7 +4172,7 @@ const handleEditablePaste = (event: ClipboardEvent) => {
   insertPlainTextAtEditableCursor(event.clipboardData?.getData('text/plain') || '')
 }
 
-const imagePickerFilters = [{ name: 'Images', extensions: ['jpg', 'jpeg', 'png', 'gif', 'webp'] }]
+const imagePickerFilters = aiPanelImagePickerFilters
 
 const processImageFilePath = async (filePath: string): Promise<AiImageContentPart | null> => {
   const prepareImageFromFile = localFilesClient.prepareChatImageAttachmentFromFile()
@@ -4220,20 +4182,10 @@ const processImageFilePath = async (filePath: string): Promise<AiImageContentPar
   }
   try {
     const result = await prepareImageFromFile({ filePath })
-    if (!result?.ok) {
-      showInputPlaceholderNotice(`图片上传失败：${result?.errorMessage || result?.errorCode || '图片处理失败'}`)
-      return null
-    }
-    if (!isChatImageAttachmentPrepareData(result.data)) {
-      showInputPlaceholderNotice(`图片上传失败：${malformedAiBackendResultMessage}`)
-      return null
-    }
-    return {
-      type: 'image',
-      mediaType: result.data.mediaType,
-      data: result.data.data,
-      name: result.data.name
-    }
+    const imagePart = imagePartFromChatImagePrepareResult(result)
+    if (imagePart.ok) return imagePart.data
+    showInputPlaceholderNotice(`图片上传失败：${imagePart.message}`)
+    return null
   } catch (error) {
     showInputPlaceholderNotice(`图片上传失败：${error instanceof Error ? error.message : String(error)}`)
     return null
@@ -4287,18 +4239,6 @@ const ensureAttachmentConversationId = async () => {
   return created?.id || ''
 }
 
-const isStagedAttachmentForRequest = (staged: unknown, taskId: string, srcAbsPath: string) => {
-  if (!isChatAttachmentStageData(staged)) return false
-  const expectedTaskId = normalizeChatAttachmentTaskId(taskId)
-  const expectedSource = normalizeChatAttachmentPath(srcAbsPath)
-  if (staged.taskId !== expectedTaskId || normalizeChatAttachmentPath(staged.srcAbsPath) !== expectedSource) return false
-  if (staged.name === '.' || staged.name === '..' || staged.name.includes('/') || staged.name.includes('\\')) return false
-  const ref = parseChatAttachmentRef(staged.refPath)
-  if (!ref || ref.taskId !== expectedTaskId || ref.name !== staged.name) return false
-  const stagedParts = chatAttachmentPathSegments(staged.stagedPath)
-  return stagedParts.at(-3) === 'chat-attachments' && stagedParts.at(-2) === expectedTaskId && stagedParts.at(-1) === staged.name
-}
-
 const handleFileUpload = async () => {
   if (streaming.value) return
   const showOpenDialog = localFilesClient.showOpenDialog()
@@ -4324,25 +4264,13 @@ const handleFileUpload = async () => {
     if (!result || result.canceled || !result.filePaths?.length) return
     const srcAbsPath = result.filePaths[0]
     const staged = await stageAttachment({ taskId, srcAbsPath })
-    if (!isStagedAttachmentForRequest(staged, taskId, srcAbsPath)) {
-      throw new Error(malformedAiBackendResultMessage)
-    }
-    const displayName = staged.name || srcAbsPath.split(/[/\\]/).pop() || 'file'
-    const part: AiDocChipContentPart = {
-      type: 'chip',
-      chipType: 'doc',
-      ref: {
-        absPath: staged.refPath,
-        relPath: staged.refPath,
-        name: displayName,
-        type: 'file'
-      }
-    }
-    const inserted = editingMessageId.value ? insertFileChipAtEditCursor(part) : insertFileChipAtMainCursor(part)
+    const stagedPart = docPartFromStagedAttachment(staged, taskId, srcAbsPath)
+    if (!stagedPart.ok) throw new Error(stagedPart.message)
+    const inserted = editingMessageId.value ? insertFileChipAtEditCursor(stagedPart.data.part) : insertFileChipAtMainCursor(stagedPart.data.part)
     if (!inserted) {
       throw new Error('文件输入框不可用')
     }
-    showInputPlaceholderNotice(`已添加文件：${displayName}`)
+    showInputPlaceholderNotice(`已添加文件：${stagedPart.data.displayName}`)
   } catch (error) {
     showInputPlaceholderNotice(`文件上传失败：${error instanceof Error ? error.message : String(error)}`)
   }
@@ -4378,33 +4306,32 @@ const clearVoiceMedia = () => {
 
 const bestVoiceMimeType = () => {
   if (typeof MediaRecorder === 'undefined') return ''
-  return preferredVoiceMimeTypes.find((format) => MediaRecorder.isTypeSupported(format)) || ''
+  return bestAiPanelVoiceMimeType((format) => MediaRecorder.isTypeSupported(format))
 }
 
 const canUseBrowserVoiceRecorder = () => typeof MediaRecorder !== 'undefined' && Boolean(navigator.mediaDevices?.getUserMedia)
 
 const appendVoiceTranscriptionToInput = (text: string) => {
   restoreEditableSelection()
-  const prefix = draft.value.trim() && !/\s$/.test(draft.value) ? ' ' : ''
-  insertPlainTextAtEditableCursor(`${prefix}${text}`)
+  insertPlainTextAtEditableCursor(text)
   requestAnimationFrame(moveEditableCaretToEnd)
 }
 
 const handleVoiceTranscriptionComplete = async (text: string) => {
-  const normalized = text.trim()
-  if (!normalized) {
-    showInputPlaceholderNotice('语音识别结果为空。')
+  const completion = prepareVoiceTranscriptionCompletion(text, draft.value, voiceAutoSendAfterInput.value)
+  if (!completion.ok) {
+    showInputPlaceholderNotice(completion.message)
     return
   }
-  appendVoiceTranscriptionToInput(normalized)
-  showInputPlaceholderNotice(`语音转写完成：${normalized}`)
-  if (voiceAutoSendAfterInput.value) {
+  appendVoiceTranscriptionToInput(completion.data.insertionText)
+  showInputPlaceholderNotice(completion.data.notice)
+  if (completion.data.autoSend) {
     await nextTick()
     handleSend()
   }
 }
 
-const transcribeVoiceInput = async (input: VoiceTranscriptionInput) => {
+const transcribeVoiceInput = async (input: Parameters<NonNullable<ReturnType<typeof voiceClient.transcribeVoiceInput>>>[0]) => {
   const transcribeVoice = voiceClient.transcribeVoiceInput()
   if (typeof transcribeVoice !== 'function') {
     showInputPlaceholderNotice('语音识别失败：语音识别服务不可用')
@@ -4413,15 +4340,12 @@ const transcribeVoiceInput = async (input: VoiceTranscriptionInput) => {
   voiceTranscribing.value = true
   try {
     const result = await transcribeVoice(input)
-    if (!result?.ok) {
-      showInputPlaceholderNotice(`语音识别失败：${result?.errorMessage || result?.errorCode || '识别结果为空'}`)
+    const text = voiceTextFromTranscriptionResult(result)
+    if (!text.ok) {
+      showInputPlaceholderNotice(`语音识别失败：${text.message}`)
       return
     }
-    if (!isVoiceTranscriptionData(result.data)) {
-      showInputPlaceholderNotice(`语音识别失败：${malformedAiBackendResultMessage}`)
-      return
-    }
-    await handleVoiceTranscriptionComplete(result.data.text)
+    await handleVoiceTranscriptionComplete(text.data)
   } catch (error) {
     showInputPlaceholderNotice(`语音识别失败：${error instanceof Error ? error.message : String(error)}`)
   } finally {
@@ -4430,37 +4354,12 @@ const transcribeVoiceInput = async (input: VoiceTranscriptionInput) => {
 }
 
 const processVoiceRecording = async (elapsed: number, options: { reachedLimit?: boolean; audioBlob?: Blob } = {}) => {
-  if (!options.audioBlob) {
-    showInputPlaceholderNotice('未获取到录音音频，无法进行语音识别。')
+  const transcriptionInput = await prepareVoiceTranscriptionInputFromBlob(elapsed, options)
+  if (!transcriptionInput.ok) {
+    showInputPlaceholderNotice(transcriptionInput.message)
     return
   }
-  if (!options.reachedLimit && elapsed < voiceRecordingMinimumMs) {
-    showInputPlaceholderNotice('录制时间过短，请录制更长的语音内容。')
-    return
-  }
-  if (options.audioBlob.size < 1024) {
-    showInputPlaceholderNotice('录制时间过短，请录制更长的语音内容。')
-    return
-  }
-  if (options.audioBlob.size > voiceMaxAudioBytes) {
-    showInputPlaceholderNotice('音频文件超过 50 MiB，无法识别。')
-    return
-  }
-  let audioBytes: ArrayBuffer
-  try {
-    audioBytes = await options.audioBlob.arrayBuffer()
-  } catch (error) {
-    showInputPlaceholderNotice(`语音识别失败：${error instanceof Error ? error.message : String(error)}`)
-    return
-  }
-  const transcriptionInput: VoiceTranscriptionInput = {
-    durationMs: elapsed,
-    source: 'browser',
-    audioBytes,
-    audioFormat: options.audioBlob.type,
-    audioSize: options.audioBlob.size
-  }
-  await transcribeVoiceInput(transcriptionInput)
+  await transcribeVoiceInput(transcriptionInput.data)
 }
 
 const scheduleVoiceRecordingLimit = () => {
@@ -4470,7 +4369,7 @@ const scheduleVoiceRecordingLimit = () => {
     if (!voiceRecording.value) return
     showInputPlaceholderNotice('录制时间到达上限，已自动停止录制。')
     void finishVoiceRecording({ reachedLimit: true })
-  }, voiceRecordingLimitMs)
+  }, aiPanelVoiceRecordingLimitMs)
 }
 
 const startBrowserVoiceRecorder = async () => {
@@ -4522,13 +4421,7 @@ const startVoiceRecording = async () => {
   try {
     await startBrowserVoiceRecorder()
   } catch (error) {
-    let message = '麦克风不可用，无法开始语音输入。'
-    if (error instanceof Error) {
-      if (error.name === 'NotAllowedError') message = '麦克风权限被拒绝，请允许麦克风访问后重试。'
-      else if (error.name === 'NotFoundError') message = '未找到麦克风设备，无法开始语音输入。'
-      else if (error.name === 'NotReadableError') message = '麦克风正被其他应用占用，无法开始语音输入。'
-    }
-    showInputPlaceholderNotice(message)
+    showInputPlaceholderNotice(voiceRecordingStartFailureMessage(error))
     clearVoiceMedia()
   }
 }
@@ -4558,58 +4451,7 @@ const toggleVoiceInput = () => {
   void startVoiceRecording()
 }
 
-type AiopstermDragPayload = {
-  contextType?: string
-  relPath?: string
-  name?: string
-  id?: string
-  kind?: AiContextKind
-  label?: string
-  detail?: string
-  host?: string
-  port?: number
-  username?: string
-  assetName?: string
-  isLocalShell?: boolean
-}
-
-const terminalTabDragType = 'application/x-aiopsterm-terminal-tab'
-
-const parseAiopstermDragPayload = (dataTransfer: DataTransfer | null): AiopstermDragPayload | null => {
-  if (!dataTransfer) return null
-  const direct = dataTransfer.getData('application/x-aiopsterm-context')
-  if (direct) {
-    try {
-      return JSON.parse(direct) as AiopstermDragPayload
-    } catch {
-      return null
-    }
-  }
-  const html = dataTransfer.getData('text/html')
-  if (!html) return null
-  const match = html.match(/data-aiopsterm-context="([^"]+)"/)
-  if (!match) return null
-  try {
-    return JSON.parse(decodeURIComponent(match[1])) as AiopstermDragPayload
-  } catch {
-    return null
-  }
-}
-
-const isKnowledgeDragPayload = (payload: AiopstermDragPayload | null) =>
-  Boolean(payload?.relPath && (payload.contextType === 'doc' || payload.contextType === 'image'))
-
-const isHostDragPayload = (payload: AiopstermDragPayload | null): payload is AiopstermDragPayload & { id: string } =>
-  Boolean(payload?.id && (payload.kind === 'hosts' || payload.contextType === 'host'))
-
-const draggedTerminalPanelId = (dataTransfer: DataTransfer | null) => dataTransfer?.getData(terminalTabDragType) || ''
-
-const canAcceptAiPanelDrop = (event: DragEvent) => {
-  const terminalPanelId = draggedTerminalPanelId(event.dataTransfer)
-  const payload = parseAiopstermDragPayload(event.dataTransfer)
-  if (aiPanelMode.value === 'codex') return Boolean(terminalPanelId || isHostDragPayload(payload))
-  return isKnowledgeDragPayload(payload)
-}
+const canAcceptAiPanelDrop = (event: DragEvent) => canAcceptAiPanelRuntimeDrop(aiPanelMode.value, event.dataTransfer)
 
 const handleDragEnter = (event: DragEvent) => {
   if (canAcceptAiPanelDrop(event)) {
@@ -4620,38 +4462,26 @@ const handleDragEnter = (event: DragEvent) => {
 const handleDragOver = (event: DragEvent) => {
   if (!canAcceptAiPanelDrop(event)) return
   dropActive.value = true
-  if (event.dataTransfer) event.dataTransfer.dropEffect = aiPanelMode.value === 'codex' ? 'move' : 'copy'
+  if (event.dataTransfer) event.dataTransfer.dropEffect = aiPanelDropEffect(aiPanelMode.value)
 }
 
 const handleClassicDrop = async (event: DragEvent) => {
-  const payload = parseAiopstermDragPayload(event.dataTransfer)
-  if (!isKnowledgeDragPayload(payload) || !payload?.relPath) return
-  await workspace.addKnowledgeFilesToChat([payload.relPath])
-  if (!draft.value.trim()) setDraft(`引用知识库：${payload.name || payload.relPath}`)
+  const plan = planAiPanelDrop('classic', event.dataTransfer)
+  if (plan.kind !== 'classic-knowledge') return
+  await workspace.addKnowledgeFilesToChat([plan.relPath])
+  if (!draft.value.trim()) setDraft(plan.draftText)
   requestAnimationFrame(moveEditableCaretToEnd)
   closePopups()
 }
 
 const handleCodexDrop = async (event: DragEvent) => {
-  const panelId = draggedTerminalPanelId(event.dataTransfer)
-  if (panelId) {
-    const panel = workspace.panels.find((item) => item.id === panelId)
+  const plan = planAiPanelDrop('codex', event.dataTransfer)
+  if (plan.kind === 'codex-terminal') {
+    const panel = workspace.panels.find((item) => item.id === plan.panelId)
     if (panel?.sessionId) await bindCodexTarget(codexTargetContextFromPanel(panel), { reason: 'drop-terminal-tab' })
     return
   }
-  const payload = parseAiopstermDragPayload(event.dataTransfer)
-  if (!isHostDragPayload(payload)) return
-  await bindHostContextToCodex({
-    id: payload.id,
-    kind: 'hosts',
-    label: payload.label || payload.host || payload.name || payload.id,
-    detail: payload.detail || payload.name,
-    host: payload.host,
-    port: payload.port,
-    username: payload.username,
-    assetName: payload.assetName || payload.name,
-    isLocalShell: payload.isLocalShell
-  })
+  if (plan.kind === 'codex-host') await bindHostContextToCodex(plan.context)
 }
 
 const handleDragLeave = (event: DragEvent) => {
