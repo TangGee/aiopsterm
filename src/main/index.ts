@@ -107,9 +107,9 @@ import { defaultModelSettingsConfig } from '@shared/modelSettingsSeed'
 import { defaultSettingsRulesConfig } from '@shared/settingsPreferencesSeed'
 import { defaultSkillSeedData, defaultSkillsConfig, shouldUseSkillSeedData } from '@shared/skillsSeed'
 import { defaultWorkspacePreferencesConfig } from '@shared/workspacePreferencesSeed'
+import type { CodexSessionCreateOptions, CodexSessionLifecycleEvent } from '@shared/contracts/codexSessions'
 import type {
   AliasCommandConfig,
-  CodexSessionCreateOptions,
   AiAgentSessionEvent,
   ManagedAiSessionEvent,
   ManagedAiSessionFocusRequest,
@@ -415,7 +415,7 @@ const sendTerminalData = (owner: BrowserWindow, id: string, chunk: string | Buff
   sendWindowEvent(owner, 'terminal:data', terminalDataPayload(id, chunk))
 }
 
-const sendCodexExit = (owner: BrowserWindow, lifecycle: import('@shared/preload').CodexSessionLifecycleEvent, code = lifecycle.code ?? null) => {
+const sendCodexExit = (owner: BrowserWindow, lifecycle: CodexSessionLifecycleEvent, code = lifecycle.code ?? null) => {
   sendWindowEvent(owner, 'codex:exit', {
     id: lifecycle.id,
     code,

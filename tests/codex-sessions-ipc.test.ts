@@ -5,7 +5,7 @@ import type {
   CodexSessionInfo,
   CodexSessionLifecycleEvent,
   CodexSessionTargetContext
-} from '../src/shared/preload'
+} from '../src/shared/contracts/codexSessions'
 
 type IpcHandler = (event: unknown, ...args: any[]) => unknown
 

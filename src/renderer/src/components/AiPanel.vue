@@ -1690,9 +1690,9 @@ import type {
   AiCommandCatalogOption,
   AiContextKind,
   AiContextOption,
-  CodexSessionTargetContext,
   VoiceTranscriptionInput
 } from '@shared/preload'
+import type { CodexSessionTargetContext } from '@shared/contracts/codexSessions'
 import type { RuntimeLogLevel } from '@shared/preload'
 
 type XtermRuntimeOptions = XtermTerminal['options'] & { termName?: string }

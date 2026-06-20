@@ -1,7 +1,6 @@
 import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron'
 import type {
   AiopsAssetRecord,
-  CodexSessionCreateOptions,
   RuntimeLogLevel,
   TerminalBinaryWriteResult,
   TerminalCreateOptions,
@@ -12,6 +11,7 @@ import type {
   TerminalWriteResult,
   UserConfig
 } from '@shared/preload'
+import type { CodexSessionCreateOptions } from '@shared/contracts/codexSessions'
 
 type TerminalRuntimeProcess = {
   write: (data: string | Buffer) => void

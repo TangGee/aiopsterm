@@ -3,7 +3,7 @@ import { existsSync, rmSync } from 'fs'
 import { dirname, join } from 'path'
 import { mkdir } from 'fs/promises'
 import type { BrowserWindow } from 'electron'
-import type { CodexSessionTargetContext } from '@shared/preload'
+import type { CodexSessionTargetContext } from '@shared/contracts/codexSessions'
 
 export type CodexTerminalBridgeSession = {
   id: string

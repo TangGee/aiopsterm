@@ -7,9 +7,9 @@ import type {
   CodexSessionPendingContextResult,
   CodexSessionTargetContext,
   CodexSessionTargetUpdateResult,
-  CodexSessionWriteResult,
-  RuntimeLogLevel
-} from '@shared/preload'
+  CodexSessionWriteResult
+} from '@shared/contracts/codexSessions'
+import type { RuntimeLogLevel } from '@shared/preload'
 
 type CodexTerminalBridgeTargetUpdateResult = {
   sessionId?: string

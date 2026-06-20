@@ -8,9 +8,9 @@ import type {
   CodexSessionLifecycleEvent,
   CodexSessionPendingContextResult,
   CodexSessionWriteResult,
-  CodexSessionKillResult,
-  UserConfig
-} from '@shared/preload'
+  CodexSessionKillResult
+} from '@shared/contracts/codexSessions'
+import type { UserConfig } from '@shared/preload'
 import { buildAiopstermCodexConfigToml, codexBridgeScriptPath, resolveAiopstermCodexProviderConfig } from './codexConfig'
 
 export type CodexPtyProcess = {
