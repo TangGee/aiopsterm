@@ -1719,7 +1719,31 @@ import {
 import { aiChatClient } from '@/services/aiChatClient'
 import { copyTextToClipboard } from '@/services/clipboardRuntime'
 import { codexSessionClient } from '@/services/codexSessionClient'
-import { codexTargetSignature, formatCodexTargetEvent, type CodexTargetEventKind } from '@/services/codexTargetRuntime'
+import { codexTargetSignature, type CodexTargetEventKind } from '@/services/codexTargetRuntime'
+import {
+  applyCodexExitEvent,
+  applyCodexLifecycleEvent,
+  applyCodexSessionStarted,
+  applyCodexTargetBinding,
+  applyCodexTargetUnbinding,
+  closeCodexConversationRecord,
+  codexAttentionId as codexRuntimeAttentionId,
+  codexBoundTargetDetail as codexRuntimeBoundTargetDetail,
+  codexBoundTargetLabel as codexRuntimeBoundTargetLabel,
+  codexConversationTitle as codexRuntimeConversationTitle,
+  codexStatusLabelKey,
+  codexTargetContextFromPanel,
+  codexTargetTitle as codexRuntimeTargetTitle,
+  createCodexConversationRecord as createCodexConversationRuntimeRecord,
+  currentBoundCodexTarget as currentBoundCodexRuntimeTarget,
+  markCodexPendingTargetDelivered as markCodexRuntimePendingTargetDelivered,
+  markCodexTargetSyncFailed,
+  prepareCodexPendingTargetContext,
+  prepareCodexTargetSync,
+  resetCodexConversationForRestart,
+  terminalSettingsSignature as codexTerminalSettingsSignature,
+  type AiPanelCodexConversationRuntimeState
+} from '@/services/aiPanelCodexRuntime'
 import { localFilesClient } from '@/services/localFilesClient'
 import { writeRendererRuntimeLog as writeAiRuntimeLog } from '@/services/runtimeLogClient'
 import { voiceClient } from '@/services/voiceClient'
@@ -1845,24 +1869,11 @@ const commandAuditDialog = ref({
 })
 const codexTargetPickerOpen = ref(false)
 const codexTargetQuery = ref('')
-type CodexConversation = {
-  id: string
-  title: string
-  sessionId: string
-  status: 'idle' | 'starting' | 'ready' | 'error' | 'closed'
-  error: string
-  boundTarget: CodexSessionTargetContext | null
+type CodexConversation = AiPanelCodexConversationRuntimeState & {
   host: HTMLElement | null
   terminal: XtermTerminal | null
   fit: FitAddon | null
   resizeObserver: ResizeObserver | null
-  lastFitCols: number
-  lastFitRows: number
-  lastTargetSignature: string
-  deliveredTargetSignature: string
-  pendingTargetSignature: string
-  pendingTargetContextActive: boolean
-  startPromise: Promise<void> | null
 }
 const codexConversations = ref<CodexConversation[]>([])
 const activeCodexConversationId = ref('')
@@ -1921,34 +1932,18 @@ const chatAttachmentFilters = [
 const maxHostContexts = 5
 const streaming = computed(() => workspace.chatMessages.some((message) => message.state === 'streaming'))
 const activeCodexConversation = computed(() => codexConversations.value.find((conversation) => conversation.id === activeCodexConversationId.value) || null)
-const terminalSettingsSignature = () => {
-  const settings = workspace.terminalSettings
-  return [
-    settings.terminalType,
-    settings.fontFamily,
-    settings.fontSize,
-    settings.lineHeight,
-    settings.cursorBlink,
-    settings.cursorStyle,
-    settings.scrollBack
-  ].join('|')
-}
+const terminalSettingsSignature = () => codexTerminalSettingsSignature(workspace.terminalSettings)
 const activeCodexBoundTarget = computed(() => activeCodexConversation.value?.boundTarget || null)
 const codexStatusLabel = computed(() => {
-  const status = activeCodexConversation.value?.status || 'idle'
-  if (status === 'starting') return t('ai.codexStarting')
-  if (status === 'ready') return t('ai.codexReady')
-  if (status === 'error') return t('ai.codexError')
-  if (status === 'closed') return t('ai.codexClosed')
+  const labelKey = codexStatusLabelKey(activeCodexConversation.value?.status || 'idle')
+  if (labelKey === 'starting') return t('ai.codexStarting')
+  if (labelKey === 'ready') return t('ai.codexReady')
+  if (labelKey === 'error') return t('ai.codexError')
+  if (labelKey === 'closed') return t('ai.codexClosed')
   return t('ai.codexIdle')
 })
-const codexBoundTargetLabel = computed(() => activeCodexBoundTarget.value?.assetName || activeCodexBoundTarget.value?.label || t('ai.codexTargetUnbound'))
-const codexBoundTargetDetail = computed(() => {
-  const target = activeCodexBoundTarget.value
-  if (!target) return t('ai.codexTargetDropHint')
-  const endpoint = target.host ? `${target.username ? `${target.username}@` : ''}${target.host}${target.port ? `:${target.port}` : ''}` : target.kind || ''
-  return [endpoint, target.cwd].filter(Boolean).join(' · ') || target.sessionId || ''
-})
+const codexBoundTargetLabel = computed(() => codexRuntimeBoundTargetLabel(activeCodexBoundTarget.value, t('ai.codexTargetUnbound')))
+const codexBoundTargetDetail = computed(() => codexRuntimeBoundTargetDetail(activeCodexBoundTarget.value, t('ai.codexTargetDropHint')))
 const currentAiPanelModeLabel = computed(() => (aiPanelMode.value === 'codex' ? t('ai.codexCliMode') : t('ai.classicChatMode')))
 const voiceButtonTitle = computed(() => {
   if (voiceRecording.value) return '停止语音录制'
@@ -1977,13 +1972,12 @@ let codexConversationSequence = 0
 
 const nextCodexConversationId = () => `codex-${Date.now().toString(36)}-${++codexConversationSequence}`
 
-const codexTargetTitle = (target?: CodexSessionTargetContext | null) =>
-  target?.assetName || target?.label || target?.host || target?.sessionId || t('ai.codexCliMode')
+const codexTargetTitle = (target?: CodexSessionTargetContext | null) => codexRuntimeTargetTitle(target, t('ai.codexCliMode'))
 
 const codexConversationTitle = (conversation: Pick<CodexConversation, 'title' | 'boundTarget'>) =>
-  conversation.title.trim() || codexTargetTitle(conversation.boundTarget)
+  codexRuntimeConversationTitle(conversation, t('ai.codexCliMode'))
 
-const codexAttentionId = (conversation: Pick<CodexConversation, 'id'>) => `codex:${conversation.id}`
+const codexAttentionId = (conversation: Pick<CodexConversation, 'id'>) => codexRuntimeAttentionId(conversation)
 
 const syncCodexAttentionState = (conversation: CodexConversation) => {
   const id = codexAttentionId(conversation)
@@ -2003,24 +1997,12 @@ const syncCodexAttentionState = (conversation: CodexConversation) => {
   })
 }
 
-const createCodexConversationRecord = (target?: CodexSessionTargetContext | null): CodexConversation => ({
-  id: nextCodexConversationId(),
-  title: codexTargetTitle(target),
-  sessionId: '',
-  status: 'idle',
-  error: '',
-  boundTarget: target ? { ...target } : null,
+const createCodexConversationRecord = (target?: CodexSessionTargetContext | null): CodexConversation =>
+  createCodexConversationRuntimeRecord<CodexConversation>(nextCodexConversationId(), target, {
   host: null,
   terminal: null,
   fit: null,
-  resizeObserver: null,
-  lastFitCols: 0,
-  lastFitRows: 0,
-  lastTargetSignature: '',
-  deliveredTargetSignature: '',
-  pendingTargetSignature: '',
-  pendingTargetContextActive: false,
-  startPromise: null
+  resizeObserver: null
 })
 
 const setCodexTerminalHostRef = (conversationId: string, element: Element | ComponentPublicInstance | null) => {
@@ -2162,28 +2144,22 @@ const subscribeCodexBridge = () => {
   codexOffLifecycle = onCodexSessionLifecycle?.((event) => {
     const conversation = codexConversations.value.find((item) => item.sessionId === event.id)
     if (!conversation) return
-    if (event.stage === 'starting') conversation.status = 'starting'
+    applyCodexLifecycleEvent(conversation, event, t('ai.codexError'))
     if (event.stage === 'ready') {
-      conversation.status = 'ready'
-      conversation.error = ''
       syncCodexAttentionState(conversation)
       fitCodexTerminal({ force: true, conversation })
     }
     if (event.stage === 'error') {
-      conversation.status = 'error'
-      conversation.error = event.errorMessage || event.message || t('ai.codexError')
       syncCodexAttentionState(conversation)
     }
     if (event.stage === 'closed') {
-      conversation.status = 'closed'
       syncCodexAttentionState(conversation)
     }
   }) || null
   codexOffExit = onCodexSessionExit?.((event) => {
     const conversation = codexConversations.value.find((item) => item.sessionId === event.id)
     if (!conversation) return
-    conversation.status = event.errorCode ? 'error' : 'closed'
-    if (event.errorMessage) conversation.error = event.errorMessage
+    applyCodexExitEvent(conversation, event)
     syncCodexAttentionState(conversation)
   }) || null
 }
@@ -2269,67 +2245,31 @@ const applyCodexTerminalSettings = (
   }
 }
 
-const codexTargetContextFromPanel = (panel?: TerminalPanel | null): CodexSessionTargetContext => {
-  const ssh = panel?.sshSession
-  if (ssh) {
-    return {
-      kind: 'ssh',
-      panelId: panel.id,
-      ...(panel.sessionId ? { sessionId: panel.sessionId } : {}),
-      label: ssh.assetName || panel.title || `${ssh.username}@${ssh.host}`,
-      host: ssh.host,
-      port: ssh.port,
-      username: ssh.username,
-      ...(ssh.assetId ? { assetId: ssh.assetId } : {}),
-      assetName: ssh.assetName,
-      cwd: panel.cwd
-    }
-  }
-  return {
-    kind: panel?.sessionId ? 'local' : 'unknown',
-    panelId: panel?.id,
-    ...(panel?.sessionId ? { sessionId: panel.sessionId } : {}),
-    label: panel?.title || 'Selected terminal',
-    cwd: panel?.cwd
-  }
-}
-
 const currentCodexTargetContext = (): CodexSessionTargetContext => codexTargetContextFromPanel(workspace.activePanel)
 
-const currentBoundCodexTarget = (conversation = activeCodexConversation.value) => {
-  const target = conversation?.boundTarget
-  if (!target?.sessionId) return null
-  const panel = workspace.panels.find((item) => item.id === target.panelId || item.sessionId === target.sessionId)
-  if (!panel?.sessionId || panel.status === 'closed' || panel.status === 'error') {
-    return target
-  }
-  return codexTargetContextFromPanel(panel)
-}
+const currentBoundCodexTarget = (conversation = activeCodexConversation.value) => currentBoundCodexRuntimeTarget(conversation, workspace.panels)
 
 const syncCodexTargetContext = async (options: { force?: boolean; conversation?: CodexConversation | null } = {}) => {
   const conversation = options.conversation || activeCodexConversation.value
   const setCodexSessionTarget = codexSessionClient.setCodexSessionTarget()
-  if (!setCodexSessionTarget) return
-  if (!conversation || (!conversation.sessionId && !conversation.startPromise)) return
+  if (!conversation || !setCodexSessionTarget) return
   const target = currentBoundCodexTarget(conversation)
-  if (!target) return
-  const signature = codexTargetSignature(target)
-  if (!options.force && signature === conversation.lastTargetSignature) return
-  conversation.lastTargetSignature = signature
+  const syncPlan = prepareCodexTargetSync(conversation, target, options.force)
+  if (!syncPlan) return
   try {
-    const result = await setCodexSessionTarget(target)
+    const result = await setCodexSessionTarget(syncPlan.target)
     writeAiRuntimeLog(result?.data?.registered ? 'debug' : 'warn', result?.data?.registered ? 'renderer.codex-target.updated' : 'renderer.codex-target.unavailable', {
       sessionId: conversation.sessionId,
-      targetSessionId: target.sessionId,
-      targetKind: target.kind,
-      targetLabel: target.label,
+      targetSessionId: syncPlan.target.sessionId,
+      targetKind: syncPlan.target.kind,
+      targetLabel: syncPlan.target.label,
       registered: Boolean(result?.data?.registered)
     })
   } catch (error) {
-    conversation.lastTargetSignature = ''
+    markCodexTargetSyncFailed(conversation)
     writeAiRuntimeLog('warn', 'renderer.codex-target.update-failed', {
       sessionId: conversation.sessionId,
-      targetSessionId: target.sessionId,
+      targetSessionId: syncPlan.target.sessionId,
       message: error instanceof Error ? error.message : String(error)
     })
   }
@@ -2343,22 +2283,16 @@ const setCodexPendingTargetContext = async (
 ) => {
   const setCodexSessionPendingContext = codexSessionClient.setCodexSessionPendingContext()
   if (!conversation.sessionId || !setCodexSessionPendingContext) return
-  const nextSignature = target ? codexTargetSignature(target) : ''
-  conversation.pendingTargetSignature = nextSignature
-  if (nextSignature === conversation.deliveredTargetSignature) {
-    conversation.pendingTargetContextActive = false
+  const pending = prepareCodexPendingTargetContext(conversation, kind, target)
+  if (pending.clear) {
     await setCodexSessionPendingContext(conversation.sessionId, '')
     return
   }
-  const text = formatCodexTargetEvent(kind, target)
-  conversation.pendingTargetContextActive = Boolean(text.trim())
-  await setCodexSessionPendingContext(conversation.sessionId, text)
+  await setCodexSessionPendingContext(conversation.sessionId, pending.text)
 }
 
 const markCodexPendingTargetDelivered = (conversation: CodexConversation) => {
-  if (!conversation.pendingTargetContextActive) return
-  conversation.deliveredTargetSignature = conversation.pendingTargetSignature
-  conversation.pendingTargetContextActive = false
+  markCodexRuntimePendingTargetDelivered(conversation)
 }
 
 const bindCodexTarget = async (target: CodexSessionTargetContext | null, options: { reason?: string; start?: boolean } = {}) => {
@@ -2367,13 +2301,9 @@ const bindCodexTarget = async (target: CodexSessionTargetContext | null, options
     conversation.error = t('ai.codexTargetMissing')
     return false
   }
-  const previous = conversation.boundTarget
-  conversation.boundTarget = { ...target }
-  conversation.title = codexTargetTitle(target)
-  conversation.error = ''
+  const previous = applyCodexTargetBinding(conversation, target, { fallbackLabel: t('ai.codexCliMode') })
   codexTargetPickerOpen.value = false
   codexTargetQuery.value = ''
-  conversation.lastTargetSignature = ''
   writeAiRuntimeLog('info', 'renderer.codex-target.bound', {
     reason: options.reason,
     sessionId: target.sessionId,
@@ -2394,10 +2324,7 @@ const bindCodexTarget = async (target: CodexSessionTargetContext | null, options
 const unbindCodexTarget = async () => {
   const conversation = activeCodexConversation.value
   if (!conversation) return
-  const previous = conversation.boundTarget
-  conversation.boundTarget = null
-  conversation.title = t('ai.codexCliMode')
-  conversation.lastTargetSignature = ''
+  const previous = applyCodexTargetUnbinding(conversation, t('ai.codexCliMode'))
   codexTargetPickerOpen.value = false
   codexTargetQuery.value = ''
   const setCodexSessionTarget = codexSessionClient.setCodexSessionTarget()
@@ -2474,11 +2401,7 @@ const startCodexSession = async (targetConversation?: CodexConversation | null) 
     const rows = conversation.terminal?.rows || 30
     try {
       const session = await createCodexSession({ cols, rows, target })
-      conversation.sessionId = session.id
-      conversation.status = session.lifecycle?.stage === 'ready' ? 'ready' : 'starting'
-      conversation.deliveredTargetSignature = codexTargetSignature(target)
-      conversation.pendingTargetSignature = ''
-      conversation.pendingTargetContextActive = false
+      applyCodexSessionStarted(conversation, session, target)
       subscribeCodexBridge()
       await syncCodexTargetContext({ force: true, conversation })
       fitCodexTerminal({ force: true, conversation })
@@ -2520,10 +2443,7 @@ const stopCodexSession = async (conversation = activeCodexConversation.value) =>
 const restartCodexSession = async () => {
   const conversation = ensureActiveCodexConversation()
   await stopCodexSession(conversation)
-  conversation.sessionId = ''
-  conversation.lastTargetSignature = ''
-  conversation.status = 'idle'
-  conversation.error = ''
+  resetCodexConversationForRestart(conversation)
   syncCodexAttentionState(conversation)
   conversation.terminal?.clear()
   await startCodexSession(conversation)
@@ -2571,21 +2491,21 @@ const focusAiAttentionItem = async (item: typeof workspace.currentAiAttentionIte
 }
 
 const closeCodexConversation = async (id: string) => {
-  const conversation = codexConversations.value.find((item) => item.id === id)
-  if (!conversation) return
-  if (codexConversations.value.length <= 1) {
+  const closeResult = closeCodexConversationRecord(codexConversations.value, activeCodexConversationId.value, id)
+  if (closeResult.status === 'missing') return
+  if (closeResult.status === 'keep-one') {
     showChatExportNotice(t('ai.keepOneTab'))
     return
   }
+  const conversation = closeResult.conversation
   await stopCodexSession(conversation)
   workspace.removeAiAttentionItem(codexAttentionId(conversation))
   conversation.resizeObserver?.disconnect()
   conversation.terminal?.dispose()
-  const currentIndex = codexConversations.value.findIndex((item) => item.id === id)
-  const nextConversation = codexConversations.value[currentIndex + 1] || codexConversations.value[currentIndex - 1]
-  codexConversations.value = codexConversations.value.filter((item) => item.id !== id)
-  if (activeCodexConversationId.value === id && nextConversation) {
-    activeCodexConversationId.value = nextConversation.id
+  codexConversations.value = closeResult.nextConversations
+  if (closeResult.status === 'closed-active' && closeResult.nextConversation) {
+    const nextConversation = closeResult.nextConversation
+    activeCodexConversationId.value = closeResult.nextActiveId
     await nextTick()
     ensureCodexTerminal(nextConversation)
     await syncActiveCodexBridgeTarget()
