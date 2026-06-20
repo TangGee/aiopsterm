@@ -182,6 +182,31 @@ import {
   terminalWriteExceptionReason,
   validateTerminalWriteResult
 } from '@/services/terminalBackendGuards'
+import {
+  MACRO_DEFAULT_SLEEP_THRESHOLD_MS,
+  MACRO_MAX_COMMAND_COUNT,
+  MACRO_MAX_RECORDING_DURATION_MS,
+  createMacroSnippetName,
+  normalizeMacroSleepThreshold,
+  parseMacroTerminalInput,
+  type MacroCommandEntry
+} from '@/services/terminalMacroRuntime'
+import {
+  appendTerminalSegment,
+  clearTerminalPanelSplitState,
+  createEmptyTerminalPanel,
+  createForkSshTerminalPanel,
+  createTerminalSegments,
+  defaultTerminalPanelTitle,
+  isNonEmptyText,
+  isWelcomeTerminalPanelPlaceholder,
+  resetTerminalPanelToDefault,
+  setTerminalOutput,
+  type PanelDirection,
+  type TerminalOutputScope,
+  type TerminalPanel,
+  type TerminalSshSession
+} from '@/services/terminalPanelRuntime'
 import { userAccountClient } from '@/services/userAccountClient'
 import {
   createEmptyUserProfile,
@@ -398,6 +423,13 @@ import type { AgentHookInstallerSnapshot, AgentHookInstallerStatus, AgentHookIns
 import type { TerminalExitEvent, TerminalLifecycleEvent, TerminalSessionInfo } from '@shared/contracts/terminalSessions'
 
 export type {
+  PanelDirection,
+  TerminalOutputScope,
+  TerminalOutputSegment,
+  TerminalPanel,
+  TerminalSshSession
+} from '@/services/terminalPanelRuntime'
+export type {
   AiChatChipContentPart,
   AiChatChipRef,
   AiChatContextUsageSnapshot,
@@ -426,7 +458,6 @@ export type {
   TerminalSettings
 } from '@/services/workspaceConfigRuntime'
 
-type PanelDirection = 'right' | 'below'
 type CloseMode = 'current' | 'others' | 'all'
 type FilesUiMode = 'transfer' | 'default'
 type KbClipboard = { mode: 'copy' | 'cut'; sources: string[] } | null
@@ -481,7 +512,6 @@ type AssetManagementOpenAction = 'none' | 'create-key' | 'create-proxy'
 type PrivacyRuntimeApplyData = PrivacyRuntimeSnapshot
 type KnowledgeSearchRuntimeApplyData = KnowledgeSearchRuntimeSnapshot
 
-type TerminalOutputScope = 'output' | 'input'
 type SendChatOptions = {
   mode?: NonNullable<AiChatResponseInput['mode']>
   skipKnowledgeSearch?: boolean
@@ -546,11 +576,6 @@ type K8sAgentRunRecord = {
 }
 type ExtensionPlugin = ExtensionPluginRuntimeConfig
 
-type MacroCommandEntry = {
-  command: string
-  timestamp: number
-}
-
 export type TerminalSecurityExecution = {
   command: string
   securityCommands?: string[]
@@ -580,55 +605,6 @@ export type TerminalSecurityDecision =
 type QuickCommandScriptPlanResolution =
   | { ok: true; plan: QuickCommandScriptPlan }
   | { ok: false; reason: string }
-
-export type TerminalOutputSegment = {
-  text: string
-  scope: TerminalOutputScope
-}
-
-export type TerminalPanel = {
-  id: string
-  title: string
-  titleSource?: 'system' | 'user' | 'auto'
-  cwd: string
-  output: string
-  outputSegments: TerminalOutputSegment[]
-  status: 'ready' | 'connecting' | 'running' | 'closed' | 'error'
-  kind?: 'terminal' | 'knowledge'
-  split?: PanelDirection
-  splitSourceId?: string
-  splitGroupId?: string
-  splitOrder?: number
-  sessionId?: string
-  knowledge?: {
-    relPath: string
-    isImage: boolean
-    startLine?: number
-    endLine?: number
-    jumpToken?: number
-  }
-  sshSession?: TerminalSshSession
-  terminalLifecycle?: TerminalLifecycleEvent
-  terminalExit?: TerminalExitEvent
-}
-
-export type TerminalSshSession = {
-  connectionId?: string
-  sourcePanelId?: string
-  forkFromConnectionId?: string
-  host: string
-  port: number
-  username: string
-  assetId?: string
-  assetName: string
-  assetType?: string
-  organizationId?: string
-  jumpHostId?: string
-  authType?: string
-  needProxy?: boolean
-  proxyName?: string
-  createdAt?: number
-}
 
 export type ChatMessage = {
   id: string
@@ -778,9 +754,6 @@ const ONBOARDING_VERSION = defaultConfig.onboarding!.version
 type RendererLocalIdPrefix = 'panel' | 'terminal-security' | 'aichat-agent-loop'
 const createRendererLocalId = (prefix: RendererLocalIdPrefix) => `${prefix}-${Math.random().toString(36).slice(2, 9)}`
 const normalizeThemeId = (theme: string): ThemeId => (isThemeId(theme) ? theme : 'dark')
-const MACRO_MAX_RECORDING_DURATION_MS = 5 * 60 * 1000
-const MACRO_MAX_COMMAND_COUNT = 50
-const MACRO_DEFAULT_SLEEP_THRESHOLD_MS = 500
 const autoNamedConversationTitles = new Set([
   '新会话',
   '新建会话',
@@ -840,39 +813,6 @@ const k8sTerminalTabFromRecord = (record: KubernetesTerminalRecord): K8sTerminal
   collectingAiOutput: false,
   aiCommandTabId: null
 })
-const ctrlKeyMap: Record<string, string> = {
-  'ctrl+a': '\x01',
-  'ctrl+b': '\x02',
-  'ctrl+c': '\x03',
-  'ctrl+d': '\x04',
-  'ctrl+e': '\x05',
-  'ctrl+f': '\x06',
-  'ctrl+g': '\x07',
-  'ctrl+h': '\x08',
-  'ctrl+k': '\x0b',
-  'ctrl+l': '\x0c',
-  'ctrl+n': '\x0e',
-  'ctrl+p': '\x10',
-  'ctrl+r': '\x12',
-  'ctrl+t': '\x14',
-  'ctrl+u': '\x15',
-  'ctrl+w': '\x17',
-  'ctrl+z': '\x1a'
-}
-const keyMap: Record<string, string> = {
-  esc: '\x1b',
-  tab: '\t',
-  return: '\r',
-  backspace: '\b',
-  up: '\x1b[A',
-  down: '\x1b[B',
-  right: '\x1b[C',
-  left: '\x1b[D'
-}
-const keySequences = Object.entries(keyMap).sort(([, first], [, second]) => second.length - first.length)
-const ctrlSequences = Object.entries(ctrlKeyMap).sort(([, first], [, second]) => second.length - first.length)
-
-const defaultTerminalPanelTitle = '欢迎'
 
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 
@@ -883,17 +823,6 @@ const integerInRange = (value: unknown, fallback: number, min: number) =>
   typeof value === 'number' && Number.isInteger(value) && value >= min ? value : fallback
 
 const stringFromOptions = <T extends string>(value: unknown, options: readonly T[], fallback: T) => (typeof value === 'string' && options.includes(value as T) ? (value as T) : fallback)
-
-const createMacroSnippetName = () => {
-  const now = new Date()
-  const year = now.getFullYear()
-  const month = String(now.getMonth() + 1).padStart(2, '0')
-  const day = String(now.getDate()).padStart(2, '0')
-  const hour = String(now.getHours()).padStart(2, '0')
-  const minute = String(now.getMinutes()).padStart(2, '0')
-  const second = String(now.getSeconds()).padStart(2, '0')
-  return `macro-${year}${month}${day}-${hour}${minute}${second}`
-}
 
 const knowledgeEntryToNode = (entry: KnowledgeBaseEntry): KnowledgeNode => ({
   id: `kb-${entry.relPath.replace(/[^a-zA-Z0-9_-]/g, '-') || 'root'}`,
@@ -955,52 +884,6 @@ const mediaTypeFromKnowledgePath = (relPath: string) => {
   }
   return mediaTypes[ext] || 'application/octet-stream'
 }
-
-const createTerminalSegments = (text: string, scope: TerminalOutputScope = 'output'): TerminalOutputSegment[] => (text ? [{ text, scope }] : [])
-const isNonEmptyText = (value: unknown): value is string => typeof value === 'string' && value.trim() !== ''
-
-const appendTerminalSegment = (panel: TerminalPanel, text: string, scope: TerminalOutputScope = 'output') => {
-  if (!text) return
-  panel.output += text
-  if (!panel.outputSegments) {
-    panel.outputSegments = []
-  }
-  panel.outputSegments.push({ text, scope })
-}
-
-const setTerminalOutput = (panel: TerminalPanel, text: string, scope: TerminalOutputScope = 'output') => {
-  panel.output = text
-  panel.outputSegments = createTerminalSegments(text, scope)
-}
-
-const createEmptyTerminalPanel = (
-  id: string,
-  title: string,
-  split?: PanelDirection,
-  splitSourceId?: string,
-  splitGroupId?: string,
-  splitOrder?: number,
-  sourcePanel?: TerminalPanel
-): TerminalPanel => ({
-  id,
-  title,
-  titleSource: sourcePanel?.titleSource || 'system',
-  cwd: sourcePanel?.cwd || '~',
-  kind: 'terminal',
-  output: '',
-  outputSegments: [],
-  status: sourcePanel?.sessionId ? 'connecting' : 'ready',
-  ...(split ? { split, splitSourceId, splitGroupId, splitOrder } : {}),
-  ...(split && sourcePanel?.sshSession
-    ? {
-        sshSession: {
-          ...sourcePanel.sshSession,
-          connectionId: undefined,
-          sourcePanelId: sourcePanel.id
-        }
-      }
-    : {})
-})
 
 const cloneStructuredValue = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T
 
@@ -7952,7 +7835,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const setMacroSleepThreshold = (milliseconds: number) => {
-    macroSleepThresholdMs.value = Math.max(0, Math.round(milliseconds))
+    macroSleepThresholdMs.value = normalizeMacroSleepThreshold(milliseconds)
   }
 
   const recordMacroTerminalInput = (panelId: string, data: string, timestamp = Date.now()) => {
@@ -7963,53 +7846,19 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       return
     }
 
-    let cursor = 0
-    while (cursor < data.length) {
-      if (!isMacroRecording.value) return
-      const remaining = data.slice(cursor)
-      const keyMatch = keySequences.find(([, sequence]) => remaining.startsWith(sequence))
-      if (keyMatch) {
-        const [key, sequence] = keyMatch
-        if (key === 'return') {
-          commitMacroCurrentLine(timestamp)
-        } else if (key === 'backspace') {
-          macroCurrentLineBuffer.value = macroCurrentLineBuffer.value.slice(0, -1)
-        } else if (macroRecordControlKeys.value) {
-          commitMacroCurrentLine(timestamp)
-          addMacroCommandEntry(key, timestamp)
-        }
-        cursor += sequence.length
-        continue
-      }
-
-      const ctrlMatch = ctrlSequences.find(([, sequence]) => remaining.startsWith(sequence))
-      if (ctrlMatch) {
-        const [ctrl, sequence] = ctrlMatch
-        if (macroRecordControlKeys.value) {
-          commitMacroCurrentLine(timestamp)
-          addMacroCommandEntry(ctrl, timestamp)
-        }
-        if (ctrl === 'ctrl+c') {
-          macroCurrentLineBuffer.value = ''
-        }
-        cursor += sequence.length
-        continue
-      }
-
-      const char = data[cursor]
-      if (char === '\n' || char === '\r') {
-        commitMacroCurrentLine(timestamp)
-      } else if (char === '\b' || char === '\x7f') {
-        macroCurrentLineBuffer.value = macroCurrentLineBuffer.value.slice(0, -1)
-      } else if (char === '\t') {
-        if (macroRecordControlKeys.value) {
-          commitMacroCurrentLine(timestamp)
-          addMacroCommandEntry('tab', timestamp)
-        }
-      } else if (char.charCodeAt(0) >= 32) {
-        macroCurrentLineBuffer.value += char
-      }
-      cursor += 1
+    const parsed = parseMacroTerminalInput(
+      {
+        lineBuffer: macroCurrentLineBuffer.value,
+        commands: []
+      },
+      data,
+      { recordControlKeys: macroRecordControlKeys.value, timestamp }
+    )
+    for (const entry of parsed.commands) {
+      if (!addMacroCommandEntry(entry.command, entry.timestamp)) break
+    }
+    if (isMacroRecording.value) {
+      macroCurrentLineBuffer.value = parsed.lineBuffer
     }
   }
 
@@ -10244,14 +10093,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const welcomePlaceholder =
       !split &&
       panels.value.length === 1 &&
-      panels.value[0].id === 'panel-main' &&
-      panels.value[0].title === defaultTerminalPanelTitle &&
-      panels.value[0].kind !== 'knowledge' &&
-      !panels.value[0].sessionId &&
-      !panels.value[0].output &&
-      panels.value[0].outputSegments.length === 0 &&
-      !panels.value[0].sshSession &&
-      panels.value[0].status === 'ready'
+      isWelcomeTerminalPanelPlaceholder(panels.value[0])
     if (welcomePlaceholder) {
       const panel = panels.value[0]
       panel.id = createRendererLocalId('panel')
@@ -10373,13 +10215,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
   }
 
-  const clearPanelSplitState = (panel: TerminalPanel) => {
-    panel.split = undefined
-    panel.splitSourceId = undefined
-    panel.splitGroupId = undefined
-    panel.splitOrder = undefined
-  }
-
   const hasSplitState = (panelId: string) => {
     const panel = panels.value.find((item) => item.id === panelId)
     if (!panel) return false
@@ -10396,7 +10231,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         return
       }
       if (panel.split && (!panel.splitSourceId || !ids.has(panel.splitSourceId) || panel.splitSourceId === panel.id)) {
-        clearPanelSplitState(panel)
+        clearTerminalPanelSplitState(panel)
         return
       }
       if (panel.splitGroupId) {
@@ -10405,7 +10240,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     })
     panels.value.forEach((panel) => {
       if (panel.splitGroupId && (groupCounts.get(panel.splitGroupId) || 0) < 2) {
-        clearPanelSplitState(panel)
+        clearTerminalPanelSplitState(panel)
       }
     })
   }
@@ -10420,11 +10255,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       (previousSourceId && groupSiblings.some((item) => item.id === previousSourceId) ? previousSourceId : undefined) ||
       groupSiblings[0]?.id
 
-    clearPanelSplitState(panel)
+    clearTerminalPanelSplitState(panel)
     panels.value.forEach((item) => {
       if (item.id === panel.id || item.splitSourceId !== panel.id) return
       if (!fallbackSourceId) {
-        clearPanelSplitState(item)
+        clearTerminalPanelSplitState(item)
         return
       }
       if (item.id === fallbackSourceId) {
@@ -10470,24 +10305,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return true
   }
 
-  const resetToDefaultTerminalPanel = (panel: TerminalPanel) => {
-    panel.id = 'panel-main'
-    panel.title = defaultTerminalPanelTitle
-    panel.cwd = '~'
-    panel.kind = 'terminal'
-    panel.status = 'ready'
-    clearPanelSplitState(panel)
-    panel.sessionId = undefined
-    panel.knowledge = undefined
-    panel.sshSession = undefined
-    panel.terminalLifecycle = undefined
-    panel.terminalExit = undefined
-    setTerminalOutput(panel, '')
-  }
-
   const closePanel = (id = activePanelId.value) => {
     if (panels.value.length === 1) {
-      resetToDefaultTerminalPanel(panels.value[0])
+      resetTerminalPanelToDefault(panels.value[0])
       activePanelId.value = panels.value[0].id
       return
     }
@@ -10502,7 +10322,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const panel = panels.value.find((item) => item.id === id)
     if (!panel || panel.kind !== 'terminal' || panel.sessionId) return false
     if (panels.value.length === 1) {
-      resetToDefaultTerminalPanel(panel)
+      resetTerminalPanelToDefault(panel)
       activePanelId.value = panel.id
       return true
     }
@@ -10519,7 +10339,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   const closeOthers = () => {
     panels.value = panels.value.filter((panel) => panel.id === activePanelId.value)
-    panels.value.forEach(clearPanelSplitState)
+    panels.value.forEach(clearTerminalPanelSplitState)
   }
 
   const closeAllPanels = () => {
@@ -10565,33 +10385,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const forkSshPanel = (panelId: string) => {
     const source = panels.value.find((item) => item.id === panelId)
     if (!source?.sshSession?.connectionId) return null
-    const sourceSession = source.sshSession
-    const forkSession: TerminalSshSession = {
-      host: sourceSession.host,
-      port: sourceSession.port,
-      username: sourceSession.username,
-      assetId: sourceSession.assetId,
-      assetName: sourceSession.assetName,
-      assetType: sourceSession.assetType,
-      organizationId: sourceSession.organizationId,
-      jumpHostId: sourceSession.jumpHostId,
-      authType: sourceSession.authType,
-      needProxy: sourceSession.needProxy,
-      proxyName: sourceSession.proxyName,
-      sourcePanelId: source.id,
-      forkFromConnectionId: sourceSession.connectionId
-    }
-    const forkPanel: TerminalPanel = {
-      id: createRendererLocalId('panel'),
-      title: `${source.title} fork`,
-      cwd: source.cwd,
-      kind: 'terminal',
-      output: '',
-      outputSegments: [],
-      status: 'ready',
-      split: source.split,
-      sshSession: forkSession
-    }
+    const forkPanel = createForkSshTerminalPanel(createRendererLocalId('panel'), source)
+    if (!forkPanel) return null
     panels.value.push(forkPanel)
     activePanelId.value = forkPanel.id
     return forkPanel
