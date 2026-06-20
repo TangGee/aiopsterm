@@ -31,7 +31,6 @@ import { agentHookClient } from '@/services/agentHookClient'
 import { aliasClient } from '@/services/aliasClient'
 import { assetsClient } from '@/services/assetsClient'
 import { chatHistoryClient } from '@/services/chatHistoryClient'
-import { validateCommandSecurity, type CommandSecurityResult } from '@/services/commandSecurityRuntime'
 import { controlClient } from '@/services/controlClient'
 import { applyEditorSettingsToDocument } from '@/services/editorRuntime'
 import {
@@ -181,6 +180,22 @@ import {
   terminalWriteExceptionReason,
   validateTerminalWriteResult
 } from '@/services/terminalBackendGuards'
+import {
+  commandSecurityNotice,
+  createGlobalTerminalSecurityExecution,
+  createTerminalSecurityExecution,
+  prepareTerminalSecurityExecution as prepareTerminalSecurityExecutionRuntime,
+  quickCommandPlanUnavailable,
+  resolveQuickCommandPanelIds,
+  terminalExecutionUnavailable,
+  terminalSecurityExecutionShouldWrite,
+  terminalSecurityPromptCancellationNotice,
+  type TerminalCommandExecutionOptions,
+  type TerminalCommandSource,
+  type TerminalSecurityDecision,
+  type TerminalSecurityExecution,
+  type TerminalSecurityPrompt
+} from '@/services/terminalExecutionRuntime'
 import {
   MACRO_DEFAULT_SLEEP_THRESHOLD_MS,
   MACRO_MAX_COMMAND_COUNT,
@@ -414,7 +429,7 @@ import type { AliasCommandConfig, AliasCommandSaveInput } from '@shared/contract
 import type { FileSessionCatalog, FileSessionFolderRecord, FileSessionFolderSaveInput, FileSessionInfo, FileSessionPatch, FileSessionTerminalContext, FileTransferTask } from '@shared/contracts/files'
 import type { AiopsTrustedDevice, AiopsUserAccountSnapshot, AiopsUserExternalAction, AiopsUserExternalActionResult, AiopsUserMutationResult, AiopsUserProfile } from '@shared/contracts/userAccount'
 import type { ExtensionInstallProgress as BackendExtensionInstallProgress, ExtensionInstallStage, ExtensionPluginOperation, ExtensionPluginRuntimeConfig, ExtensionUserConfig } from '@shared/contracts/extensions'
-import type { QuickCommandGroupConfig, QuickCommandScriptPlan, QuickCommandScriptSegment, QuickCommandSnippetConfig } from '@shared/contracts/quickCommands'
+import type { QuickCommandGroupConfig, QuickCommandScriptPlan, QuickCommandSnippetConfig } from '@shared/contracts/quickCommands'
 import type { McpConfigFile, McpServerUserConfig, McpToolStatesUserConfig } from '@shared/contracts/mcp'
 import type { SettingsPreferencesSnapshot, ShortcutUserConfig, UserRuleConfig } from '@shared/contracts/settingsPreferences'
 import type { SkillUserConfig } from '@shared/contracts/skills'
@@ -545,7 +560,6 @@ type SendChatOptions = {
 const agentCommandOutputFilterLimit = 12000
 const agentCommandOutputFilterHead = 4000
 const agentCommandOutputFilterTail = 6000
-type TerminalCommandSource = 'direct' | 'global' | 'snippet' | 'agent'
 type ExtensionInstallProgress = {
   pluginId: string
   stage: ExtensionInstallStage
@@ -601,31 +615,7 @@ type K8sAgentRunRecord = {
 }
 type ExtensionPlugin = ExtensionPluginRuntimeConfig
 
-export type TerminalSecurityExecution = {
-  command: string
-  securityCommands?: string[]
-  panelIds: string[]
-  inputText: string
-  shellText?: string
-  writeToShell: boolean
-  source: TerminalCommandSource
-  snippetSegments?: QuickCommandScriptSegment[]
-}
-
-export type TerminalSecurityPrompt = {
-  id: string
-  command: string
-  panelIds: string[]
-  source: TerminalCommandSource
-  result: CommandSecurityResult
-  execution: TerminalSecurityExecution
-} | null
-
-export type TerminalSecurityDecision =
-  | { status: 'allow'; execution?: TerminalSecurityExecution }
-  | { status: 'blocked'; result: CommandSecurityResult }
-  | { status: 'needs-approval'; prompt: NonNullable<TerminalSecurityPrompt> }
-  | { status: 'unavailable'; command: string; panelIds: string[]; reason: string }
+export type { TerminalCommandSource, TerminalSecurityDecision, TerminalSecurityExecution, TerminalSecurityPrompt }
 
 type QuickCommandScriptPlanResolution =
   | { ok: true; plan: QuickCommandScriptPlan }
@@ -7610,20 +7600,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return true
   }
 
-  const resolveQuickCommandPanelIds = (allTabs: boolean) => {
-    const terminalPanels = panels.value.filter((panel) => panel.kind !== 'knowledge')
-    if (allTabs) {
-      const writablePanelIds = terminalPanels.filter((panel) => panel.sessionId).map((panel) => panel.id)
-      return writablePanelIds.length ? writablePanelIds : terminalPanels.map((panel) => panel.id)
-    }
-    const targetPanel = activePanel.value.kind === 'knowledge' ? terminalPanels[0] || activePanel.value : activePanel.value
-    return [targetPanel.id]
-  }
-
   const reportQuickCommandPlanUnavailable = (command: string, panelIds: string[], reason = '快捷命令执行计划服务不可用') => {
     setTopNotice(reason)
     terminalSecurityPrompt.value = null
-    return { status: 'unavailable', command, panelIds, reason } as TerminalSecurityDecision
+    return quickCommandPlanUnavailable(command, panelIds, reason)
   }
 
   const resolveQuickCommandScriptPlan = async (command: QuickCommandSnippet, autoExecute: boolean): Promise<QuickCommandScriptPlanResolution> => {
@@ -7645,7 +7625,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const runQuickCommand = async (id: number, autoExecute = true, allTabs = false) => {
     const command = quickCommands.value.find((item) => item.id === id)
     if (!command) return
-    const targetPanelIds = resolveQuickCommandPanelIds(allTabs)
+    const targetPanelIds = resolveQuickCommandPanelIds(panels.value, activePanel.value, allTabs)
     const planResolution = await resolveQuickCommandScriptPlan(command, autoExecute)
     if (!planResolution.ok) {
       return reportQuickCommandPlanUnavailable(command.snippet_name, targetPanelIds, planResolution.reason)
@@ -10371,11 +10351,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       .join('')
   }
 
-  const commandSecurityNotice = (result: CommandSecurityResult, command: string) => {
-    const reason = result.reason || 'Security policy requires review'
-    return `命令已被安全策略阻止：${command}（${reason}）`
-  }
-
   const applyTerminalExecution = (execution: TerminalSecurityExecution) => {
     applyTerminalInputExecutionToPanels(panels.value, execution).forEach(({ panel, text }) => recordMacroTerminalInput(panel.id, text))
   }
@@ -10387,7 +10362,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const reportTerminalExecutionUnavailable = (command: string, panelIds: string[] = [], reason = '终端会话不可用，请先打开本地 shell 或连接 SSH') => {
     setTopNotice(reason)
     terminalSecurityPrompt.value = null
-    return { status: 'unavailable', command, panelIds, reason } as TerminalSecurityDecision
+    return terminalExecutionUnavailable(command, panelIds, reason)
   }
 
   const writeTerminalSegment = async (sessionId: string, data: string) => {
@@ -10410,33 +10385,22 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const prepareTerminalSecurityExecution = (execution: TerminalSecurityExecution): TerminalSecurityDecision => {
-    const securityCommands = execution.securityCommands?.length ? execution.securityCommands : [execution.command]
-    for (const securityCommand of securityCommands) {
-      const result = validateCommandSecurity(securitySettings.value, securityCommand)
-      if (result.requiresApproval) {
-        const promptExecution = { ...execution, command: securityCommand }
-        const prompt = {
-          id: createRendererLocalId('terminal-security'),
-          command: securityCommand,
-          panelIds: execution.panelIds,
-          source: execution.source,
-          result,
-          execution: promptExecution
-        }
-        terminalSecurityPrompt.value = prompt
-        return { status: 'needs-approval', prompt }
-      }
-
-      if (!result.isAllowed) {
-        setTopNotice(commandSecurityNotice(result, securityCommand))
-        terminalSecurityPrompt.value = null
-        return { status: 'blocked', result }
-      }
+    const decision = prepareTerminalSecurityExecutionRuntime(execution, {
+      securitySettings: securitySettings.value,
+      promptId: createRendererLocalId('terminal-security')
+    })
+    if (decision.status === 'needs-approval') {
+      terminalSecurityPrompt.value = decision.prompt
+      return decision
     }
-
+    if (decision.status === 'blocked') {
+      setTopNotice(commandSecurityNotice(decision.result, decision.command))
+      terminalSecurityPrompt.value = null
+      return decision
+    }
     terminalSecurityPrompt.value = null
     if (!execution.writeToShell) applyTerminalExecution(execution)
-    return { status: 'allow', execution }
+    return decision
   }
 
   const writeTerminalExecution = async (execution: TerminalSecurityExecution): Promise<TerminalSecurityDecision> => {
@@ -10470,52 +10434,36 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return { status: 'allow', execution }
   }
 
-  const executeTerminalCommand = (panelId: string, command: string, options: Partial<Pick<TerminalSecurityExecution, 'inputText' | 'shellText' | 'writeToShell' | 'source'>> = {}) => {
-    const text = command.trim()
-    if (!text) return { status: 'allow' } as TerminalSecurityDecision
-    const writeToShell = options.writeToShell ?? true
-    const execution: TerminalSecurityExecution = {
-      command: text,
-      panelIds: [panelId],
-      inputText: options.inputText ?? `${text}\n`,
-      shellText: options.shellText ?? `${text}\n`,
-      writeToShell,
-      source: options.source ?? 'direct'
-    }
-    return prepareTerminalSecurityExecution(execution)
+  const executeTerminalCommand = (panelId: string, command: string, options: TerminalCommandExecutionOptions = {}) => {
+    const decision = createTerminalSecurityExecution(panelId, command, options)
+    if (decision.status !== 'allow' || !decision.execution) return decision
+    return prepareTerminalSecurityExecution(decision.execution)
   }
 
   const runTerminalCommand = async (
     panelId: string,
     command: string,
-    options: Partial<Pick<TerminalSecurityExecution, 'inputText' | 'shellText' | 'writeToShell' | 'source'>> = {}
+    options: TerminalCommandExecutionOptions = {}
   ) => {
     const decision = executeTerminalCommand(panelId, command, options)
-    if (decision.status !== 'allow' || !decision.execution?.writeToShell) return decision
+    if (!terminalSecurityExecutionShouldWrite(decision)) return decision
     return writeTerminalExecution(decision.execution)
   }
 
   const executeGlobalTerminalCommand = (command: string) => {
-    const text = command.trim()
-    if (!text) return { status: 'allow' } as TerminalSecurityDecision
-    const writablePanelIds = liveTerminalPanelIds(panels.value)
-    if (!writablePanelIds.length || !terminalClient.writeTerminal()) {
-      return reportTerminalExecutionUnavailable(text, terminalPanelIds(panels.value))
+    const decision = createGlobalTerminalSecurityExecution(command, liveTerminalPanelIds(panels.value), terminalPanelIds(panels.value), Boolean(terminalClient.writeTerminal()))
+    if (decision.status === 'unavailable') {
+      setTopNotice(decision.reason)
+      terminalSecurityPrompt.value = null
+      return decision
     }
-    const execution: TerminalSecurityExecution = {
-      command: text,
-      panelIds: writablePanelIds,
-      inputText: `${text}\n`,
-      shellText: `${text}\n`,
-      writeToShell: true,
-      source: 'global'
-    }
-    return prepareTerminalSecurityExecution(execution)
+    if (decision.status !== 'allow' || !decision.execution) return decision
+    return prepareTerminalSecurityExecution(decision.execution)
   }
 
   const runGlobalTerminalCommand = async (command: string) => {
     const decision = executeGlobalTerminalCommand(command)
-    if (decision.status !== 'allow' || !decision.execution?.writeToShell) return decision
+    if (!terminalSecurityExecutionShouldWrite(decision)) return decision
     return writeTerminalExecution(decision.execution)
   }
 
@@ -10534,7 +10482,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const cancelTerminalSecurityPrompt = () => {
     const prompt = terminalSecurityPrompt.value
     if (!prompt) return null
-    setTopNotice(`命令执行已取消：${prompt.command}`)
+    setTopNotice(terminalSecurityPromptCancellationNotice(prompt.command))
     terminalSecurityPrompt.value = null
     return prompt.execution
   }
