@@ -78,6 +78,7 @@ import { registerFilesIpc } from './ipc/files'
 import { registerKubernetesIpc } from './ipc/kubernetes'
 import { registerLocalFilesIpc } from './ipc/localFiles'
 import { registerManagedAiSessionsIpc } from './ipc/managedAiSessions'
+import { registerMcpConfigIpc } from './ipc/mcpConfig'
 import { registerModelsIpc } from './ipc/models'
 import { registerQuickCommandsIpc } from './ipc/quickCommands'
 import { registerSettingsPreferencesIpc } from './ipc/settingsPreferences'
@@ -2672,6 +2673,30 @@ const registerIpc = () => {
       return owner ? dialog.showSaveDialog(owner, options) : dialog.showSaveDialog(options)
     }
   })
+  registerMcpConfigIpc(ipcMain, {
+    ensureSecurityConfigFile,
+    ensureKeywordHighlightConfigFile,
+    ensureMcpConfigFile,
+    removeJsonComments,
+    normalizeSecurityConfig,
+    normalizeKeywordHighlightConfig,
+    normalizeMcpConfigFile,
+    saveConfigPatch: (patch) => {
+      const next = mergeConfig(getConfig(), patch)
+      store.set('config', next)
+      return next
+    },
+    getMcpServers: () => cloneMcpServers(getConfig().mcpServers) || [],
+    applyMcpConfigFileSnapshot,
+    syncMcpConfigFromContent,
+    setMcpToolState,
+    setMcpToolAutoApprove,
+    callMcpTool: callCurrentMcpTool,
+    readMcpResource: readCurrentMcpResource,
+    broadcastSecurityConfigChanged,
+    broadcastKeywordHighlightConfigChanged,
+    broadcastMcpConfigChanged
+  })
   ipcMain.handle('ai:mcp-tool-call:approve', (_event, input: AiMcpToolCallActionInput) => handleAiMcpToolCallAction(input, true))
   ipcMain.handle('ai:mcp-tool-call:reject', (_event, input: AiMcpToolCallActionInput) => handleAiMcpToolCallAction(input, false))
   ipcMain.handle('ai:mcp-resource-access:approve', (_event, input: AiMcpResourceAccessActionInput) => handleAiMcpResourceAccessAction(input, true))
@@ -2689,143 +2714,6 @@ const registerIpc = () => {
         return owner ? dialog.showSaveDialog(owner, options) : dialog.showSaveDialog(options)
       }
     })
-  })
-  ipcMain.handle('security-config:path', async () => ensureSecurityConfigFile())
-  ipcMain.handle('security-config:read', async () => {
-    const configPath = await ensureSecurityConfigFile()
-    return readFile(configPath, 'utf-8')
-  })
-  ipcMain.handle('security-config:write', async (_event, content: string) => {
-    const configPath = await ensureSecurityConfigFile()
-    const parsed = JSON.parse(removeJsonComments(content)) as Partial<UserConfig>
-    if (!parsed.securityConfig && !('security' in parsed)) {
-      return { ok: false, errorCode: 'SECURITY_CONFIG_INVALID', errorMessage: 'Security config content is missing the security root.' }
-    }
-    const securityConfig = normalizeSecurityConfig(parsed.securityConfig || parsed)
-    await writeFile(configPath, content, 'utf-8')
-    store.set('config', mergeConfig(getConfig(), { securityConfig }))
-    broadcastSecurityConfigChanged(content)
-    return { ok: true, data: { securityConfig } }
-  })
-  ipcMain.handle('keyword-highlight-config:path', async () => ensureKeywordHighlightConfigFile())
-  ipcMain.handle('keyword-highlight-config:read', async () => {
-    const configPath = await ensureKeywordHighlightConfigFile()
-    return readFile(configPath, 'utf-8')
-  })
-  ipcMain.handle('keyword-highlight-config:write', async (_event, content: string) => {
-    const configPath = await ensureKeywordHighlightConfigFile()
-    const parsed = JSON.parse(content) as Partial<UserConfig>
-    if (!parsed.keywordHighlight && !('keyword-highlight' in parsed)) {
-      return { ok: false, errorCode: 'KEYWORD_HIGHLIGHT_CONFIG_INVALID', errorMessage: 'Keyword highlight config content is missing the keyword-highlight root.' }
-    }
-    const keywordHighlight = normalizeKeywordHighlightConfig(parsed.keywordHighlight || parsed)
-    await writeFile(configPath, content, 'utf-8')
-    store.set('config', mergeConfig(getConfig(), { keywordHighlight }))
-    broadcastKeywordHighlightConfigChanged(content)
-    return { ok: true, data: { keywordHighlight } }
-  })
-  ipcMain.handle('mcp-config:path', async () => ensureMcpConfigFile())
-  ipcMain.handle('mcp:get-servers', async () => {
-    const configPath = await ensureMcpConfigFile()
-    await syncMcpConfigFromContent(await readFile(configPath, 'utf-8'))
-    return cloneMcpServers(getConfig().mcpServers) || []
-  })
-  ipcMain.handle('mcp-config:read', async () => {
-    const configPath = await ensureMcpConfigFile()
-    return readFile(configPath, 'utf-8')
-  })
-  ipcMain.handle('mcp-config:write', async (_event, content: string) => {
-    const configPath = await ensureMcpConfigFile()
-    const normalized = normalizeMcpConfigFile(JSON.parse(content))
-    const nextContent = JSON.stringify(normalized, null, 2)
-    await writeFile(configPath, nextContent, 'utf-8')
-    const snapshot = await applyMcpConfigFileSnapshot(normalized)
-    broadcastMcpConfigChanged(nextContent)
-    return mcpConfigWriteSuccess(snapshot)
-  })
-  ipcMain.handle('mcp-config:toggle-server', async (_event, serverName: string, disabled: boolean) => {
-    try {
-      const normalizedServerName = String(serverName || '').trim()
-      if (!normalizedServerName) throw new Error('MCP server name is required')
-      const configPath = await ensureMcpConfigFile()
-      const parsed = normalizeMcpConfigFile(JSON.parse(await readFile(configPath, 'utf-8')))
-      if (!parsed.mcpServers[normalizedServerName]) throw new Error(`MCP server not found: ${normalizedServerName}`)
-      parsed.mcpServers[normalizedServerName].disabled = disabled
-      const nextContent = JSON.stringify(parsed, null, 2)
-      await writeFile(configPath, nextContent, 'utf-8')
-      const snapshot = await applyMcpConfigFileSnapshot(parsed)
-      broadcastMcpConfigChanged(nextContent)
-      return mcpConfigWriteSuccess(snapshot)
-    } catch (error) {
-      return mcpConfigWriteError(error, 'MCP_SERVER_TOGGLE_FAILED', 'MCP server toggle failed.')
-    }
-  })
-  ipcMain.handle('mcp-config:delete-server', async (_event, serverName: string) => {
-    try {
-      const normalizedServerName = String(serverName || '').trim()
-      if (!normalizedServerName) throw new Error('MCP server name is required')
-      const configPath = await ensureMcpConfigFile()
-      const parsed = normalizeMcpConfigFile(JSON.parse(await readFile(configPath, 'utf-8')))
-      if (!parsed.mcpServers[normalizedServerName]) throw new Error(`MCP server not found: ${normalizedServerName}`)
-      delete parsed.mcpServers[normalizedServerName]
-      const nextContent = JSON.stringify(parsed, null, 2)
-      await writeFile(configPath, nextContent, 'utf-8')
-      const snapshot = await applyMcpConfigFileSnapshot(parsed)
-      broadcastMcpConfigChanged(nextContent)
-      return mcpConfigWriteSuccess(snapshot)
-    } catch (error) {
-      return mcpConfigWriteError(error, 'MCP_SERVER_DELETE_FAILED', 'MCP server delete failed.')
-    }
-  })
-  ipcMain.handle('mcp:set-tool-state', async (_event, serverName: string, toolName: string, enabled: boolean) => {
-    try {
-      return await setMcpToolState(serverName, toolName, Boolean(enabled))
-    } catch (error) {
-      return mcpConfigWriteError(error, 'MCP_TOOL_STATE_FAILED', 'MCP tool state update failed.')
-    }
-  })
-  ipcMain.handle('mcp:set-tool-auto-approve', async (_event, serverName: string, toolName: string, autoApprove: boolean) => {
-    try {
-      return await setMcpToolAutoApprove(serverName, toolName, Boolean(autoApprove))
-    } catch (error) {
-      return {
-        ok: false,
-        errorCode: 'MCP_TOOL_AUTO_APPROVE_FAILED',
-        errorMessage: error instanceof Error ? error.message : 'MCP tool auto approve update failed.'
-      }
-    }
-  })
-  ipcMain.handle('mcp:tool-call', async (_event, input: McpToolCallInput) => {
-    try {
-      const current = getConfig()
-      return callMcpTool(await loadCurrentMcpConfigFile(), input, {
-        servers: current.mcpServers || [],
-        toolStates: current.mcpToolStates || {},
-        clientName: 'aiopsterm',
-        clientVersion: app.getVersion()
-      })
-    } catch (error) {
-      return {
-        ok: false,
-        errorCode: 'MCP_CONFIG_INVALID',
-        errorMessage: error instanceof Error ? error.message : 'MCP config could not be read.'
-      }
-    }
-  })
-  ipcMain.handle('mcp:resource-read', async (_event, input: McpResourceReadInput) => {
-    try {
-      return readMcpResource(await loadCurrentMcpConfigFile(), input, {
-        servers: getConfig().mcpServers || [],
-        clientName: 'aiopsterm',
-        clientVersion: app.getVersion()
-      })
-    } catch (error) {
-      return {
-        ok: false,
-        errorCode: 'MCP_CONFIG_INVALID',
-        errorMessage: error instanceof Error ? error.message : 'MCP config could not be read.'
-      }
-    }
   })
   ipcMain.handle('skills:get-all', async () => syncSkillsConfigFromDisk())
   ipcMain.handle('skills:get-enabled', async () => {
