@@ -1,6 +1,6 @@
 import type { IpcMain } from 'electron'
 import { deleteAliasCommand, listAliasCommands, saveAliasCommand } from '../backend/aliases'
-import type { AliasCommandDeleteInput, AliasCommandSaveInput } from '@shared/preload'
+import type { AliasCommandDeleteInput, AliasCommandSaveInput } from '@shared/contracts/aliases'
 
 export const registerAliasesIpc = (ipcMain: IpcMain) => {
   ipcMain.handle('aliases:list', (_event, query?: string) => listAliasCommands(query || ''))

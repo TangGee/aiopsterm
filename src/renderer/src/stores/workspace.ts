@@ -125,8 +125,6 @@ import type {
   AiopsPreloadApi,
   ControlNotificationFocusRequest,
   ControlNotificationRecord,
-  AliasCommandConfig,
-  AliasCommandSaveInput,
   EditorUserConfig,
   KeywordHighlightRuleConfig,
   KeywordHighlightUserConfig,
@@ -183,6 +181,7 @@ import type {
   UserRuleConfig,
   WorkspaceUserConfig
 } from '@shared/preload'
+import type { AliasCommandConfig, AliasCommandSaveInput } from '@shared/contracts/aliases'
 import type { FileSessionCatalog, FileSessionFolderRecord, FileSessionFolderSaveInput, FileSessionInfo, FileSessionPatch, FileSessionTerminalContext, FileTransferTask } from '@shared/contracts/files'
 import type { AiopsTrustedDevice, AiopsTrustedDeviceRevokeResult, AiopsUserAccountSnapshot, AiopsUserAvatarPrepareResult, AiopsUserCodeResult, AiopsUserExternalAction, AiopsUserExternalActionResult, AiopsUserMutationResult, AiopsUserProfile } from '@shared/contracts/userAccount'
 import type { ExtensionInstallProgress as BackendExtensionInstallProgress, ExtensionInstallStage, ExtensionPluginOperation, ExtensionPluginRuntimeConfig, ExtensionUserConfig } from '@shared/contracts/extensions'

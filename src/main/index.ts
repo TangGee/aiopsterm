@@ -116,8 +116,8 @@ import type {
   TerminalLifecycleEvent
 } from '@shared/contracts/terminalSessions'
 import type { AiAgentSessionEvent, ManagedAiSessionEvent, ManagedAiSessionFocusRequest } from '@shared/contracts/managedAiSessions'
+import type { AliasCommandConfig } from '@shared/contracts/aliases'
 import type {
-  AliasCommandConfig,
   EditorUserConfig,
   KeywordHighlightUserConfig,
   KnowledgeBaseCreateResult,

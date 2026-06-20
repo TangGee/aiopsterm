@@ -3,7 +3,7 @@ import type {
   AliasCommandDeleteResult,
   AliasCommandListResult,
   AliasCommandMutationResult
-} from '@shared/preload'
+} from '@shared/contracts/aliases'
 import type {
   ExtensionInstallProgress,
   ExtensionPluginCancelResult,

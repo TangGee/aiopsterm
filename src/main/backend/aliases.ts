@@ -2,15 +2,15 @@ import { app } from 'electron'
 import Store from 'electron-store'
 import { randomUUID } from 'crypto'
 import { isAbsolute, join, resolve } from 'path'
+import type { AiopsMutationResult } from '@shared/contracts/common'
 import type {
-  AiopsMutationResult,
   AliasCommandConfig,
   AliasCommandDeleteInput,
   AliasCommandDeleteResult,
   AliasCommandListResult,
   AliasCommandMutationResult,
   AliasCommandSaveInput
-} from '@shared/preload'
+} from '@shared/contracts/aliases'
 import { shouldUseAliasesSeedData } from '@shared/runtimeSwitches'
 
 type AliasStoreShape = {

@@ -162,6 +162,14 @@ import type {
   QuickCommandSnippetSaveInput,
   QuickCommandsUserConfig
 } from './contracts/quickCommands'
+import type {
+  AliasCommandConfig,
+  AliasCommandDeleteInput,
+  AliasCommandDeleteResult,
+  AliasCommandListResult,
+  AliasCommandMutationResult,
+  AliasCommandSaveInput
+} from './contracts/aliases'
 
 export type { AiopsMutationResult } from './contracts/common'
 export type {
@@ -374,6 +382,14 @@ export type {
   QuickCommandSnippetSaveInput,
   QuickCommandsUserConfig
 } from './contracts/quickCommands'
+export type {
+  AliasCommandConfig,
+  AliasCommandDeleteInput,
+  AliasCommandDeleteResult,
+  AliasCommandListResult,
+  AliasCommandMutationResult,
+  AliasCommandSaveInput
+} from './contracts/aliases'
 
 export type RuntimeLogLevel = 'debug' | 'info' | 'warn' | 'error'
 
@@ -1634,38 +1650,6 @@ export type KnowledgeBaseSearchStatus = {
   model: string
   updatedAt: number
 }
-
-export type AliasCommandConfig = {
-  id: string
-  alias: string
-  command: string
-  createdAt?: number
-}
-
-export type AliasCommandSaveInput = {
-  id?: string
-  previousAlias?: string
-  alias: string
-  command: string
-  createdAt?: number
-}
-
-export type AliasCommandDeleteInput = {
-  id?: string
-  alias?: string
-}
-
-export type AliasCommandListResult = AiopsMutationResult<AliasCommandConfig[]>
-
-export type AliasCommandMutationResult = AiopsMutationResult<{
-  command: AliasCommandConfig
-  commands: AliasCommandConfig[]
-}>
-
-export type AliasCommandDeleteResult = AiopsMutationResult<{
-  deleted: AliasCommandConfig
-  commands: AliasCommandConfig[]
-}>
 
 export type SkillUserConfig = {
   name: string

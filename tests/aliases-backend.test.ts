@@ -3,7 +3,7 @@ import Database from 'better-sqlite3'
 import { mkdtemp, rm } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import type { AliasCommandConfig, AliasCommandDeleteInput, AliasCommandSaveInput } from '@shared/preload'
+import type { AliasCommandConfig, AliasCommandDeleteInput, AliasCommandSaveInput } from '@shared/contracts/aliases'
 
 vi.mock('electron', () => ({
   app: {
