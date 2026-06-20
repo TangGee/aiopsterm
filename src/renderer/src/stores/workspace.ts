@@ -81,7 +81,7 @@ import {
 import { shortcutRuntime, type ShortcutActionHandler } from '@/services/shortcutRuntime'
 import { addSystemThemeListener, applyThemeToDocument, isThemeId, type ThemeId } from '@/services/themeRuntime'
 import { isAiopstermDeepLinkPayload } from '@shared/deepLink'
-import { isLegacyLocalModelName, isLegacyLocalModelProvider } from '@shared/modelConfigBoundary'
+import { isLegacyLocalModelName } from '@shared/modelConfigBoundary'
 import { createDefaultOnboardingCompleted, onboardingTourSteps } from '@/config/onboarding'
 import type { ModuleKey } from '@/config/navigation'
 import type { OnboardingModuleId } from '@/config/onboarding'
@@ -101,6 +101,7 @@ import {
 } from '@/services/appRuntimeClient'
 import {
   isModelProviderCheckDataForRequest,
+  listAiModelCatalog,
   malformedModelProviderResultMessage,
   modelProviderClient
 } from '@/services/modelProviderClient'
@@ -609,14 +610,6 @@ type SettingsModelOption = {
   checked: boolean
   type?: 'standard' | 'custom'
   apiProvider?: string
-}
-
-type AiModelOption = AiModelCatalogOption
-
-const defaultAiModelCatalog: AiModelCatalog = {
-  chatModels: [],
-  lockedChatModels: [],
-  settingsModels: []
 }
 
 type SshProxyForm = SshProxyConfig
@@ -1335,43 +1328,6 @@ const normalizeModelSettingsOptions = (source: unknown, fallback: ModelOptionUse
 }
 
 const isVisibleModelSettingsOption = (model: ModelOptionUserConfig | SettingsModelOption) => model.name !== 'aiopsterm-local-agent'
-
-const normalizeAiModelOption = (source: unknown): AiModelOption | null => {
-  if (!isRecord(source)) return null
-  const id = typeof source.id === 'string' ? source.id.trim() : ''
-  const displayName = typeof source.displayName === 'string' ? source.displayName.trim() : ''
-  const label = typeof source.label === 'string' && source.label.trim() ? source.label.trim() : displayName || id
-  if (!id || !label || isLegacyLocalModelName(id)) return null
-  if (typeof source.apiProvider === 'string' && isLegacyLocalModelProvider(source.apiProvider)) return null
-  const locked = Boolean(source.locked)
-  return {
-    id,
-    label,
-    detail: typeof source.detail === 'string' ? source.detail.trim() : '',
-    displayName: displayName && displayName !== id ? displayName : undefined,
-    checked: source.checked !== undefined ? Boolean(source.checked) : true,
-    locked,
-    tier: typeof source.tier === 'string' ? source.tier.trim() : undefined,
-    type: stringFromOptions(source.type, modelOptionTypes, locked ? 'standard' : 'standard'),
-    apiProvider: typeof source.apiProvider === 'string' && source.apiProvider.trim() ? source.apiProvider.trim() : 'default'
-  }
-}
-
-const normalizeAiModelCatalog = (source?: Partial<AiModelCatalog> | null): AiModelCatalog => {
-  const incoming = isRecord(source) ? source : {}
-  const chatModels = (Array.isArray(incoming.chatModels) ? incoming.chatModels : defaultAiModelCatalog.chatModels)
-    .map(normalizeAiModelOption)
-    .filter((model): model is AiModelOption => Boolean(model))
-  const lockedChatModels = (Array.isArray(incoming.lockedChatModels) ? incoming.lockedChatModels : defaultAiModelCatalog.lockedChatModels)
-    .map(normalizeAiModelOption)
-    .filter((model): model is AiModelOption => Boolean(model))
-    .map((model) => ({ ...model, locked: true }))
-  const settingsModels = normalizeModelSettingsOptions(
-    Array.isArray(incoming.settingsModels) ? incoming.settingsModels : defaultAiModelCatalog.settingsModels,
-    defaultAiModelCatalog.settingsModels
-  ).normalized
-  return { chatModels, lockedChatModels, settingsModels }
-}
 
 const createMacroSnippetName = () => {
   const now = new Date()
@@ -4485,8 +4441,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const sshAgentConfigModalOpen = ref(false)
   const sshAgentSelectedKey = ref('')
   const sshAgentKeyChainOptions = ref<SshAgentKeychainOption[]>([])
-  const aiModelOptions = ref<AiModelOption[]>([])
-  const lockedAiModelOptions = ref<AiModelOption[]>([])
+  const aiModelOptions = ref<AiModelCatalogOption[]>([])
+  const lockedAiModelOptions = ref<AiModelCatalogOption[]>([])
   const settingModelOptions = ref<SettingsModelOption[]>([])
   const addModelSwitch = ref(true)
   const modelProviders = ref<Record<ModelProviderKey, ModelProviderSettings>>({
@@ -5043,13 +4999,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
   const refreshAiModelCatalog = async (options: { replaceSettingsOptions?: boolean } = {}) => {
     const replaceSettingsOptions = options.replaceSettingsOptions ?? settingModelOptions.value.length === 0
-    const listAiModelsBridge = window.aiops?.listAiModels
-    if (typeof listAiModelsBridge !== 'function') {
+    if (!modelProviderClient.listAiModels()) {
       setSettingsNoticeText('模型列表加载服务不可用')
       return null
     }
-    aiModelCatalogLoadPromise ||= listAiModelsBridge({ modelSettings: normalizeModelSettingsConfig(config.value.modelSettings).normalized })
-      .then((catalog) => normalizeAiModelCatalog(catalog))
+    aiModelCatalogLoadPromise ||= listAiModelCatalog({ modelSettings: normalizeModelSettingsConfig(config.value.modelSettings).normalized })
+      .then((catalog) => catalog || Promise.reject(new Error('模型列表加载服务不可用')))
       .finally(() => {
         aiModelCatalogLoadPromise = null
       })
