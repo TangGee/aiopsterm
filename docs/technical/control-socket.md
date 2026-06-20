@@ -19,6 +19,10 @@ The first control-socket slice supports these terminal primitives:
 - `terminal.send_text`: send raw text to a connected terminal session by `sessionId`, or resolve one from `panelId`/`surfaceId`.
 - `terminal.send_key`: send a named key such as `enter`, `tab`, `esc`, `up`, `f1`, or `ctrl+c` to a connected terminal session.
 
+The bundled CLI helper also has a no-socket discovery command:
+
+- `aiopsterm-control recipes [context|notify|agent|terminal|remote|session]`: print copyable automation recipes without connecting to the control socket. This is the fastest entry point for scripts that need the current workspace context, notifications, managed AI sessions, visible terminal primitives, SSH remote controls, or session restore/resume commands.
+
 The notification slice adds these generic notification primitives:
 
 - `notification.create`: create an unread notification.

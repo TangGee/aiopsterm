@@ -63,6 +63,32 @@ describe('aiopsterm-control CLI', () => {
     await Promise.all(socketPaths.splice(0).map((socketPath) => rm(socketPath, { force: true })))
   })
 
+  it('prints automation recipes without requiring a control socket', async () => {
+    const all = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', 'recipes'], {
+      cwd: process.cwd(),
+      env: { ...process.env, AIOPSTERM_CONTROL_SOCKET: '' }
+    })
+    expect(all.stdout).toContain('aiopsterm-control recipes')
+    expect(all.stdout).toContain('aiopsterm-control context')
+    expect(all.stdout).toContain('aiopsterm-control notify --source ci')
+    expect(all.stdout).toContain('aiopsterm-control agent session list --needs-input')
+
+    const remote = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', 'recipes', 'remote'], {
+      cwd: process.cwd(),
+      env: { ...process.env, AIOPSTERM_CONTROL_SOCKET: '' }
+    })
+    expect(remote.stdout).toContain('Visible SSH Remote (remote)')
+    expect(remote.stdout).toContain('workspace remote reconnect')
+    expect(remote.stdout).not.toContain('AI Sessions (agent)')
+
+    const unknown = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', 'recipes', '--topic', 'missing'], {
+      cwd: process.cwd(),
+      env: { ...process.env, AIOPSTERM_CONTROL_SOCKET: '' }
+    })
+    expect(unknown.stdout).toContain('Unknown recipe topic: missing')
+    expect(unknown.stdout).toContain('Available topics: context, notify, agent, terminal, remote, session')
+  })
+
   it('sends terminal list requests over the configured socket', async () => {
     const seen: Record<string, unknown>[] = []
     const socketPath = await startControlServer((request) => {

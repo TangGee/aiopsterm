@@ -14,6 +14,7 @@ Commands:
   capabilities
   identify
   context [--include-snapshot]
+  recipes [context|notify|agent|terminal|remote|session]
   rpc <method> [--params-json <json>]
   auth login|status|sign-in-url|begin-sign-in|sign-out
   settings open [--target <section>]
@@ -188,6 +189,7 @@ const methodParams = () => {
   if (command === 'capabilities' || command === 'system-capabilities') return { method: 'system.capabilities', params: {} }
   if (command === 'identify' || command === 'system-identify') return { method: 'system.identify', params: { caller: readCallerParams() } }
   if (command === 'context') return workspaceContextMethodParams()
+  if (command === 'recipes' || command === 'recipe' || command === 'examples') return controlRecipesMethodParams()
   if (command === 'auth') return authMethodParams(args.shift() || 'login')
   if (command === 'settings') return settingsMethodParams(args.shift() || 'open')
   if (command === 'feedback') return feedbackMethodParams(args.shift() || 'open')
@@ -709,6 +711,94 @@ const workspaceContextMethodParams = () => {
     }
   }
 }
+
+const controlRecipeSections = [
+  {
+    topic: 'context',
+    title: 'Current Workspace Context',
+    rows: [
+      ['Inspect active terminal and pending work', 'aiopsterm-control context'],
+      ['Include the full renderer snapshot', 'aiopsterm-control context --include-snapshot'],
+      ['List surfaces in the shared work panel', 'aiopsterm-control surface list']
+    ]
+  },
+  {
+    topic: 'notify',
+    title: 'Notifications',
+    rows: [
+      ['Notify the active queue from a script', 'aiopsterm-control notify --source ci --level warning --title "Build needs review" --body "npm test failed"'],
+      ['Open the newest unread item', 'aiopsterm-control jump-to-unread'],
+      ['List unread deploy notifications', 'aiopsterm-control list-notifications --unread --source deploy']
+    ]
+  },
+  {
+    topic: 'agent',
+    title: 'AI Sessions',
+    rows: [
+      ['Install detected agent hooks', 'aiopsterm-control hooks setup'],
+      ['List sessions that need input', 'aiopsterm-control agent session list --needs-input'],
+      ['Jump to a pending feed item', 'aiopsterm-control feed jump --workstream <id>'],
+      ['Launch a visible local agent team', 'aiopsterm-control agent team launch --source codex --count 3 --cwd "$PWD" --prompt "review this repo"']
+    ]
+  },
+  {
+    topic: 'terminal',
+    title: 'Terminal Primitives',
+    rows: [
+      ['Read visible screen text', 'aiopsterm-control terminal read-screen --panel <panel-id> --lines 80'],
+      ['Send text to a connected terminal', 'aiopsterm-control terminal send --session <terminal-session-id> --text "pwd\\n"'],
+      ['Split the active surface', 'aiopsterm-control new-split right --surface <panel-id>'],
+      ['Copy screen text through a shell command', 'aiopsterm-control pipe-pane --panel <panel-id> --command "tail -40"']
+    ]
+  },
+  {
+    topic: 'remote',
+    title: 'Visible SSH Remote',
+    rows: [
+      ['Show current remote panel state', 'aiopsterm-control workspace remote status'],
+      ['Configure SSH metadata without connecting', 'aiopsterm-control workspace remote configure --surface <panel-id> --host example.com --user root --port 22'],
+      ['Reconnect a visible SSH panel', 'aiopsterm-control workspace remote reconnect --surface <panel-id>'],
+      ['Disconnect without clearing terminal metadata', 'aiopsterm-control workspace remote disconnect --surface <panel-id>']
+    ]
+  },
+  {
+    topic: 'session',
+    title: 'Restore And Resume',
+    rows: [
+      ['Save the current panel layout', 'aiopsterm-control session save --name work'],
+      ['Restore a saved layout', 'aiopsterm-control session restore --name work'],
+      ['Bind a manual resume command to a surface', 'aiopsterm-control surface resume set --panel <panel-id> --kind custom --shell "tmux attach -t work"'],
+      ['Preview trusted resume bindings', 'aiopsterm-control surface resume preview']
+    ]
+  }
+]
+
+const controlRecipesText = (topic = '') => {
+  const normalized = String(topic || '').trim().toLowerCase()
+  const sections = normalized ? controlRecipeSections.filter((section) => section.topic === normalized) : controlRecipeSections
+  if (!sections.length) {
+    return [
+      `Unknown recipe topic: ${topic}`,
+      `Available topics: ${controlRecipeSections.map((section) => section.topic).join(', ')}`
+    ].join('\n')
+  }
+  return [
+    'aiopsterm-control recipes',
+    'Run inside an aiopsterm-managed local terminal, or pass --socket <path>.',
+    '',
+    ...sections.flatMap((section) => [
+      `${section.title} (${section.topic})`,
+      ...section.rows.map(([label, command]) => `  - ${label}\n    ${command}`),
+      ''
+    ])
+  ]
+    .join('\n')
+    .trimEnd()
+}
+
+const controlRecipesMethodParams = () => ({
+  localPrint: controlRecipesText(readOption('--topic') || readOption('--section') || readPositional())
+})
 
 const notificationMetadataParams = () => ({
   source: readOption('--source') || readOption('--from') || readOption('--app'),
