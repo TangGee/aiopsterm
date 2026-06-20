@@ -1,13 +1,16 @@
 import { _electron as electron, expect, test, type Page } from '@playwright/test'
 import { createServer } from 'http'
-import { chmod, mkdir, readFile, rm, writeFile } from 'fs/promises'
-import type { AddressInfo } from 'net'
+import { spawn, type ChildProcessWithoutNullStreams } from 'child_process'
+import { chmod, mkdir, readFile, readdir, rm, writeFile } from 'fs/promises'
+import { createConnection, type AddressInfo } from 'net'
 import os from 'os'
 import path from 'path'
 import { deflateRawSync } from 'zlib'
 
-const launchApp = async (name: string, env: NodeJS.ProcessEnv = {}) => {
-  const userDataDir = path.join(os.tmpdir(), `aiopsterm-e2e-${name}-${Date.now()}`)
+const e2eUserDataDir = (name: string) => path.join(os.tmpdir(), `aiopsterm-e2e-${name}-${Date.now()}`)
+
+const launchApp = async (name: string, env: NodeJS.ProcessEnv = {}, options: { userDataDir?: string } = {}) => {
+  const userDataDir = options.userDataDir || e2eUserDataDir(name)
   await mkdir(userDataDir, { recursive: true })
   return electron.launch({
     args: ['.'],
@@ -45,12 +48,165 @@ const launchApp = async (name: string, env: NodeJS.ProcessEnv = {}) => {
 }
 
 const commandExists = async (command: string) => {
-  const { spawn } = await import('child_process')
   return new Promise<boolean>((resolve) => {
     const child = spawn('sh', ['-lc', `command -v ${command} >/dev/null 2>&1`], { stdio: 'ignore' })
     child.on('error', () => resolve(false))
     child.on('close', (code) => resolve(code === 0))
   })
+}
+
+type JsonObject = Record<string, any>
+
+const pollValue = async <T>(producer: () => Promise<T> | T, predicate: (value: T) => boolean, timeoutMs = 10_000) => {
+  const deadline = Date.now() + timeoutMs
+  let lastValue: T
+  let lastError: unknown
+  while (Date.now() < deadline) {
+    try {
+      lastValue = await producer()
+      if (predicate(lastValue)) return lastValue
+    } catch (error) {
+      lastError = error
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100))
+  }
+  if (lastError) throw lastError
+  throw new Error('Timed out waiting for E2E poll value.')
+}
+
+const socketJsonRequest = <T extends JsonObject = JsonObject>(socketPath: string, request: JsonObject) =>
+  new Promise<T>((resolve, reject) => {
+    const socket = createConnection(socketPath)
+    let buffer = ''
+    socket.setEncoding('utf8')
+    socket.setTimeout(10_000)
+    socket.on('connect', () => {
+      socket.write(`${JSON.stringify(request)}\n`)
+    })
+    socket.on('data', (chunk) => {
+      buffer += chunk
+      const newlineIndex = buffer.indexOf('\n')
+      if (newlineIndex < 0) return
+      const line = buffer.slice(0, newlineIndex).trim()
+      socket.end()
+      try {
+        resolve(JSON.parse(line) as T)
+      } catch (error) {
+        reject(error)
+      }
+    })
+    socket.on('timeout', () => {
+      socket.destroy()
+      reject(new Error(`socket request timed out: ${socketPath}`))
+    })
+    socket.on('error', reject)
+  })
+
+const firstSocketFile = async (directory: string) => {
+  const entries = await readdir(directory).catch(() => [])
+  return entries.find((entry) => entry.endsWith('.sock')) || ''
+}
+
+const setRangeInputValue = async (page: Page, selector: string, index: number, value: string) => {
+  await page.locator(selector).nth(index).evaluate((input, nextValue) => {
+    const element = input as HTMLInputElement
+    element.value = nextValue
+    element.dispatchEvent(new Event('input', { bubbles: true }))
+    element.dispatchEvent(new Event('change', { bubbles: true }))
+  }, value)
+}
+
+const setNumberInputValue = async (page: Page, selector: string, value: string) => {
+  await page.locator(selector).evaluate((input, nextValue) => {
+    const element = input as HTMLInputElement
+    element.value = nextValue
+    element.dispatchEvent(new Event('input', { bubbles: true }))
+    element.dispatchEvent(new Event('change', { bubbles: true }))
+  }, value)
+}
+
+const sendTerminalCommand = async (page: Page, command: string) => {
+  await page.locator('.terminal-pane .xterm-host').last().click({ button: 'right' })
+  await expect(page.locator('.terminal-context-menu')).toBeVisible()
+  await page.locator('.terminal-context-menu button').filter({ hasText: '输入命令' }).click()
+  const input = page.locator('.command-line.floating input')
+  await expect(input).toBeVisible()
+  await input.fill(command)
+  await input.press('Enter')
+  await expect(input).toHaveCount(0)
+}
+
+type McpJsonRpcResponse = {
+  jsonrpc: '2.0'
+  id: string | number
+  result?: JsonObject
+  error?: { code: number; message: string }
+}
+
+const startExternalCodexMcpScript = (socketPath: string, token: string) => {
+  const child = spawn(process.execPath, [path.join(process.cwd(), 'resources', 'aiopsterm-external-codex-mcp.js')], {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      AIOPSTERM_EXTERNAL_CODEX_MCP_SOCKET: socketPath,
+      AIOPSTERM_EXTERNAL_CODEX_MCP_TOKEN: token
+    },
+    stdio: 'pipe'
+  }) as ChildProcessWithoutNullStreams
+  const pending = new Map<string, { resolve: (response: McpJsonRpcResponse) => void; reject: (error: Error) => void; timer: NodeJS.Timeout }>()
+  let buffer = ''
+  let stderr = ''
+  child.stdout.setEncoding('utf8')
+  child.stderr.setEncoding('utf8')
+  child.stdout.on('data', (chunk) => {
+    buffer += chunk
+    for (;;) {
+      const newlineIndex = buffer.indexOf('\n')
+      if (newlineIndex < 0) return
+      const line = buffer.slice(0, newlineIndex).trim()
+      buffer = buffer.slice(newlineIndex + 1)
+      if (!line) continue
+      const response = JSON.parse(line) as McpJsonRpcResponse
+      const waiter = pending.get(String(response.id))
+      if (!waiter) continue
+      clearTimeout(waiter.timer)
+      pending.delete(String(response.id))
+      waiter.resolve(response)
+    }
+  })
+  child.stderr.on('data', (chunk) => {
+    stderr += chunk
+  })
+  child.on('exit', (code) => {
+    for (const [id, waiter] of pending) {
+      clearTimeout(waiter.timer)
+      waiter.reject(new Error(`external MCP script exited before response ${id}: ${code}; stderr=${stderr}`))
+    }
+    pending.clear()
+  })
+  return {
+    request: (message: JsonObject) =>
+      new Promise<McpJsonRpcResponse>((resolve, reject) => {
+        const id = Object.prototype.hasOwnProperty.call(message, 'id') ? String(message.id) : ''
+        const timer = setTimeout(() => {
+          pending.delete(id)
+          reject(new Error(`external MCP response timed out for ${id}; stderr=${stderr}`))
+        }, 10_000)
+        pending.set(id, { resolve, reject, timer })
+        child.stdin.write(`${JSON.stringify(message)}\n`)
+      }),
+    close: async () => {
+      child.kill()
+      await new Promise<void>((resolve) => {
+        if (child.exitCode !== null) {
+          resolve()
+          return
+        }
+        child.once('exit', () => resolve())
+        setTimeout(() => resolve(), 1000)
+      })
+    }
+  }
 }
 
 const hookCommandFromConfig = (config: unknown, eventName: string) => {
@@ -468,18 +624,8 @@ test('managed AI session notifications flow through real local terminal hooks', 
     await expect(page.locator('.terminal-pane.active .xterm-host')).toBeVisible()
     await expect(page.getByTestId('ai-attention-count')).toHaveCount(0)
 
-    const sendTerminalCommand = async (command: string) => {
-      await page.locator('.terminal-pane.active .xterm-host').click({ button: 'right' })
-      await expect(page.locator('.terminal-context-menu')).toBeVisible()
-      await page.locator('.terminal-context-menu button').filter({ hasText: '输入命令' }).click()
-      const input = page.locator('.command-line.floating input')
-      await expect(input).toBeVisible()
-      await input.fill(command)
-      await input.press('Enter')
-      await expect(input).toHaveCount(0)
-    }
-
     await sendTerminalCommand(
+      page,
       runInstalledHookCommand(codexPermissionCommand, {
           session_id: `codex-e2e-${runId}`,
           project_dir: `/tmp/aiopsterm-codex-project-${runId}`,
@@ -500,6 +646,7 @@ test('managed AI session notifications flow through real local terminal hooks', 
     await expect(page.locator('.ai-session-detail')).toContainText('本地处理')
     await expect(page.locator('.terminal-tab').filter({ hasText: '127.0.0.1' })).toHaveClass(/active/)
     await sendTerminalCommand(
+      page,
       runInstalledHookCommand(codexStopCommand, {
         session_id: `codex-e2e-${runId}`,
         project_dir: `/tmp/aiopsterm-codex-project-${runId}`,
@@ -509,6 +656,7 @@ test('managed AI session notifications flow through real local terminal hooks', 
     await expect(page.getByTestId('ai-attention-count')).toHaveCount(0)
     await expect(codexRow).toContainText('空闲')
     await sendTerminalCommand(
+      page,
       runInstalledHookCommand(codexPermissionCommand, {
         session_id: `codex-e2e-${runId}`,
         project_dir: `/tmp/aiopsterm-codex-project-${runId}`,
@@ -521,6 +669,7 @@ test('managed AI session notifications flow through real local terminal hooks', 
     await expect(codexRow).toContainText('运行中')
 
     await sendTerminalCommand(
+      page,
       runInstalledHookCommand(claudeQuestionCommand, {
           session_id: `claude-question-e2e-${runId}`,
           project_dir: `/tmp/aiopsterm-claude-question-${runId}`,
@@ -542,6 +691,7 @@ test('managed AI session notifications flow through real local terminal hooks', 
     await expect(questionRow).toContainText('空闲')
 
     await sendTerminalCommand(
+      page,
       runInstalledHookCommand(claudeNotificationCommand, {
           session_id: `claude-notification-e2e-${runId}`,
           project_dir: `/tmp/aiopsterm-claude-notification-${runId}`,
@@ -557,6 +707,7 @@ test('managed AI session notifications flow through real local terminal hooks', 
     await expect(notificationRow).toContainText(`/tmp/aiopsterm-claude-notification-${runId}`)
 
     await sendTerminalCommand(
+      page,
       runInstalledHookCommand(claudeStopCommand, {
           session_id: `claude-notification-e2e-${runId}`,
           project_dir: `/tmp/aiopsterm-claude-notification-${runId}`,
@@ -568,6 +719,248 @@ test('managed AI session notifications flow through real local terminal hooks', 
   } finally {
     await app.close()
     await rm(hookHome, { recursive: true, force: true })
+  }
+})
+
+test('control socket and external Codex MCP expose automation without browser compatibility leaks', async () => {
+  test.setTimeout(120_000)
+  const userDataDir = e2eUserDataDir('automation')
+  const externalSocketPath = path.join(userDataDir, 'external-codex-mcp.sock')
+  const externalToken = `e2e-token-${Date.now()}`
+  const app = await launchApp(
+    'automation',
+    {
+      AIOPSTERM_EXTERNAL_CODEX_MCP_ENABLE: '1',
+      AIOPSTERM_EXTERNAL_CODEX_MCP_TOKEN: externalToken,
+      AIOPSTERM_EXTERNAL_CODEX_MCP_SOCKET: externalSocketPath
+    },
+    { userDataDir }
+  )
+  let mcp: ReturnType<typeof startExternalCodexMcpScript> | null = null
+
+  try {
+    const page = await app.firstWindow()
+    await page.waitForLoadState('domcontentloaded')
+    await disableE2eMotion(page)
+    await expect(page.locator('.terminal-dashboard')).toContainText('与AI对话')
+  } catch (error) {
+    await app.close()
+    await rm(userDataDir, { recursive: true, force: true })
+    throw error
+  }
+
+  try {
+    const page = await app.firstWindow()
+    const controlSocket = await pollValue(
+      async () => {
+        const socketFile = await firstSocketFile(path.join(userDataDir, 'control'))
+        return socketFile ? path.join(userDataDir, 'control', socketFile) : ''
+      },
+      (value) => typeof value === 'string' && value.length > 0
+    )
+
+    const ping = await socketJsonRequest(controlSocket, { id: 'e2e-ping', method: 'system.ping' })
+    expect(ping).toEqual(expect.objectContaining({ id: 'e2e-ping', ok: true, data: expect.objectContaining({ pong: true }) }))
+
+    const capabilities = await socketJsonRequest(controlSocket, { id: 'e2e-capabilities', method: 'system.capabilities' })
+    expect(capabilities).toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
+          protocol: 'aiopsterm-control',
+          capabilities: expect.arrayContaining(['workspace.snapshot', 'surface.create', 'surface.operations', 'settings.open'])
+        })
+      })
+    )
+    expect(JSON.stringify(capabilities)).not.toContain('browserDisabled')
+    expect(JSON.stringify(capabilities)).not.toContain('BROWSER_DISABLED')
+
+    const createdSurface = await socketJsonRequest(controlSocket, {
+      id: 'e2e-surface-create',
+      method: 'surface.create',
+      params: { title: 'E2E Control Surface', cwd: '/tmp', focus: true }
+    })
+    expect(createdSurface).toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
+          action: 'surface.create',
+          surface: expect.objectContaining({ title: 'E2E Control Surface' })
+        })
+      })
+    )
+    const surfaceId = createdSurface.data.surfaceId || createdSurface.data.surface_id
+    expect(surfaceId).toBeTruthy()
+    await expect(page.locator('.terminal-tab').filter({ hasText: 'E2E Control Surface' })).toBeVisible()
+
+    const renamed = await socketJsonRequest(controlSocket, {
+      id: 'e2e-surface-rename',
+      method: 'surface.action',
+      params: { surfaceId, action: 'rename', title: 'E2E Renamed Surface' }
+    })
+    expect(renamed).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ action: 'rename', title: 'E2E Renamed Surface' }) }))
+    await expect(page.locator('.terminal-tab').filter({ hasText: 'E2E Renamed Surface' })).toBeVisible()
+
+    const unknownAction = await socketJsonRequest(controlSocket, {
+      id: 'e2e-surface-unknown',
+      method: 'surface.action',
+      params: { surfaceId, action: 'open_preview_right' }
+    })
+    expect(unknownAction).toEqual(expect.objectContaining({ ok: false, errorCode: 'SURFACE_ACTION_UNKNOWN' }))
+    expect(JSON.stringify(unknownAction)).not.toContain('browserDisabled')
+
+    const settingsOpen = await socketJsonRequest(controlSocket, {
+      id: 'e2e-settings-open',
+      method: 'settings.open',
+      params: { target: 'ai-preferences' }
+    })
+    expect(settingsOpen).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ target: 'ai' }) }))
+    await expect(page.locator('.settings-workspace-title').getByRole('heading', { name: '设置' })).toBeVisible()
+    await expect(page.locator('.settings-nav-item').filter({ hasText: 'AI 偏好设置' })).toHaveClass(/active/)
+
+    await pollValue(() => socketJsonRequest(externalSocketPath, { id: 'external-ping', method: 'list_hosts', params: {}, token: externalToken }), (response) => response.ok === true)
+    mcp = startExternalCodexMcpScript(externalSocketPath, externalToken)
+    const initialize = await mcp.request({ jsonrpc: '2.0', id: 'mcp-init', method: 'initialize', params: { protocolVersion: '2025-03-26' } })
+    expect(initialize.result?.serverInfo?.name).toBe('aiopsterm-hosts')
+
+    const tools = await mcp.request({ jsonrpc: '2.0', id: 'mcp-tools', method: 'tools/list', params: {} })
+    expect((tools.result?.tools || []).map((tool: JsonObject) => tool.name)).toEqual(
+      expect.arrayContaining(['list_hosts', 'list_connections', 'disconnect_host', 'list_ai_sessions', 'list_ai_notifications'])
+    )
+
+    const hosts = await mcp.request({ jsonrpc: '2.0', id: 'mcp-hosts', method: 'tools/call', params: { name: 'list_hosts', arguments: { query: 'prod' } } })
+    expect(hosts.result?.isError).toBe(false)
+    expect(hosts.result?.structuredContent).toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
+          hosts: expect.arrayContaining([expect.objectContaining({ assetId: 'asset-1', title: 'prod-bastion' })])
+        })
+      })
+    )
+    expect(JSON.stringify(hosts)).not.toContain('password')
+
+    const connections = await mcp.request({ jsonrpc: '2.0', id: 'mcp-connections', method: 'tools/call', params: { name: 'list_connections', arguments: {} } })
+    expect(connections.result?.structuredContent).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ count: 0, connections: [] }) }))
+
+    const refusedTerminalDisconnect = await mcp.request({
+      jsonrpc: '2.0',
+      id: 'mcp-disconnect-visible',
+      method: 'tools/call',
+      params: { name: 'disconnect_host', arguments: { connectionId: 'terminal-visible-1' } }
+    })
+    expect(refusedTerminalDisconnect.result?.isError).toBe(true)
+    expect(refusedTerminalDisconnect.result?.structuredContent).toEqual(expect.objectContaining({ ok: false, errorCode: 'TERMINAL_OWNED_CONNECTION' }))
+
+    const aiSessions = await mcp.request({ jsonrpc: '2.0', id: 'mcp-ai-sessions', method: 'tools/call', params: { name: 'list_ai_sessions', arguments: { includeEvents: true } } })
+    expect(aiSessions.result?.structuredContent).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ sessions: expect.any(Array) }) }))
+  } finally {
+    await mcp?.close()
+    await app.close()
+    await rm(userDataDir, { recursive: true, force: true })
+  }
+})
+
+test('settings background and terminal preferences persist after restart', async () => {
+  test.setTimeout(120_000)
+  const userDataDir = e2eUserDataDir('settings-persist')
+  let app = await launchApp('settings-persist', {}, { userDataDir })
+
+  try {
+    let page = await app.firstWindow()
+    await page.waitForLoadState('domcontentloaded')
+    await disableE2eMotion(page)
+    await page.getByTitle('设置').click()
+    await expect(page.locator('.settings-workspace-title').getByRole('heading', { name: '设置' })).toBeVisible()
+    await page.locator('.settings-bg-tile.preset').nth(1).click()
+    await expect(page.locator('.settings-sliders')).toBeVisible()
+    await setRangeInputValue(page, '.settings-sliders input[type="range"]', 0, '0.7')
+    await setRangeInputValue(page, '.settings-sliders input[type="range"]', 1, '0.9')
+    await page.locator('.settings-nav-item').filter({ hasText: '终端' }).click()
+    await page.locator('.settings-form-row').filter({ hasText: '终端类型' }).locator('select').selectOption('vt100')
+    await page.locator('.settings-form-row').filter({ hasText: '字体' }).locator('select').selectOption('"Liberation Mono", "DejaVu Sans Mono", "Noto Sans Mono", monospace')
+    await setNumberInputValue(page, '.settings-form-row:has-text("字体大小") input', '18')
+
+    await expect
+      .poll(
+        () =>
+          page.evaluate(async () => {
+            const config = await (window as unknown as { aiops: { getConfig: () => Promise<JsonObject> } }).aiops.getConfig()
+            return {
+              background: config.background,
+              terminal: config.terminal,
+              shellClass: document.querySelector('.app-shell')?.className || '',
+              shellStyle: (document.querySelector('.app-shell') as HTMLElement | null)?.getAttribute('style') || ''
+            }
+          }),
+        { timeout: 10_000 }
+      )
+      .toEqual(
+        expect.objectContaining({
+          background: expect.objectContaining({ mode: 'preset', image: expect.any(String), opacity: 0.7, brightness: 0.9 }),
+          terminal: expect.objectContaining({
+            terminalType: 'vt100',
+            fontFamily: '"Liberation Mono", "DejaVu Sans Mono", "Noto Sans Mono", monospace',
+            fontSize: 18
+          }),
+          shellClass: expect.stringContaining('has-app-background'),
+          shellStyle: expect.stringContaining('--app-bg-opacity: 0.7')
+        })
+      )
+    await app.close()
+
+    app = await launchApp('settings-persist', {}, { userDataDir })
+    page = await app.firstWindow()
+    await page.waitForLoadState('domcontentloaded')
+    await disableE2eMotion(page)
+    await expect(page.locator('.app-shell')).toHaveClass(/has-app-background/)
+    await expect(page.locator('.app-shell')).toHaveAttribute('style', /--app-bg-opacity: 0\.7/)
+
+    const configAfterRestart = await page.evaluate(async () => {
+      const config = await (window as unknown as { aiops: { getConfig: () => Promise<JsonObject> } }).aiops.getConfig()
+      return { background: config.background, terminal: config.terminal }
+    })
+    expect(configAfterRestart).toEqual(
+      expect.objectContaining({
+        background: expect.objectContaining({ mode: 'preset', opacity: 0.7, brightness: 0.9 }),
+        terminal: expect.objectContaining({ terminalType: 'vt100', fontSize: 18 })
+      })
+    )
+
+    await page.getByTitle('工作区').click()
+    await expect(page.locator('.workspace-search input')).toBeVisible()
+    await page.locator('.workspace-search input').fill('127.0.0.1')
+    const localRow = page.locator('.workspace-host-row').filter({ hasText: '127.0.0.1' }).first()
+    await expect(localRow).toBeVisible()
+    await localRow.dblclick()
+    await expect(page.locator('.terminal-tab').filter({ hasText: '127.0.0.1' })).toBeVisible()
+    await expect(page.locator('.terminal-pane .xterm-host').last()).toBeVisible()
+    await expect
+      .poll(
+        () =>
+          page.evaluate(() => {
+            const pane = Array.from(document.querySelectorAll<HTMLElement>('.terminal-pane')).at(-1) || document.querySelector<HTMLElement>('.terminal-pane')
+            const xtermRows = pane?.querySelector('.xterm-rows') as HTMLElement | null
+            const xterm = pane?.querySelector('.xterm') as HTMLElement | null
+            const style = window.getComputedStyle(xtermRows || xterm || document.body)
+            return {
+              fontSize: style.fontSize,
+              fontFamily: style.fontFamily
+            }
+          }),
+        { timeout: 10_000 }
+      )
+      .toEqual(
+        expect.objectContaining({
+          fontSize: '18px',
+          fontFamily: expect.stringMatching(/Liberation Mono|DejaVu Sans Mono|Noto Sans Mono|monospace/i)
+        })
+      )
+    await sendTerminalCommand(page, 'printf "E2E_TERM=$TERM\\n"')
+    await expect(page.locator('.terminal-pane .terminal-output-mirror').last()).toContainText('E2E_TERM=vt100', { timeout: 10_000 })
+  } finally {
+    await app.close()
+    await rm(userDataDir, { recursive: true, force: true })
   }
 })
 
