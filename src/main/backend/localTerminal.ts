@@ -1,6 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'child_process'
 import { basename } from 'path'
-import type { TerminalCreateOptions, TerminalDisconnectReason, TerminalLifecycleEvent } from '@shared/preload'
+import type { TerminalCreateOptions, TerminalDisconnectReason, TerminalLifecycleEvent } from '@shared/contracts/terminalSessions'
 import { createTerminalErrorLifecycleEvent, createTerminalLifecycleEvent } from './terminal'
 
 export type LocalPtyProcess = {

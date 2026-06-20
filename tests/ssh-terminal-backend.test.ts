@@ -1,7 +1,12 @@
 import { EventEmitter } from 'events'
 import { PassThrough } from 'stream'
 import { beforeEach, describe, expect, it } from 'vitest'
-import type { TerminalKeyboardInteractivePrompt, TerminalKeyboardInteractiveRequest, TerminalKeyboardInteractiveResult, TerminalLifecycleEvent } from '../src/shared/preload'
+import type {
+  TerminalKeyboardInteractivePrompt,
+  TerminalKeyboardInteractiveRequest,
+  TerminalKeyboardInteractiveResult,
+  TerminalLifecycleEvent
+} from '../src/shared/contracts/terminalSessions'
 
 type RecordedEvents = {
   lifecycle: TerminalLifecycleEvent[]

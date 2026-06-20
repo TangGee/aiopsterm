@@ -193,7 +193,7 @@ import { layoutWidthLimits, useWorkspaceStore } from '@/stores/workspace'
 import { backgroundStyleVars } from '@/services/backgroundRuntime'
 import { applyDocumentLocale, useI18n, type I18nKey } from '@/i18n'
 import { isAiopstermDeepLinkPayload } from '@shared/deepLink'
-import type { TerminalKeyboardInteractiveRequest, TerminalKeyboardInteractiveResult } from '@shared/preload'
+import type { TerminalKeyboardInteractiveRequest, TerminalKeyboardInteractiveResult } from '@shared/contracts/terminalSessions'
 
 const workspace = useWorkspaceStore()
 const { locale, t } = useI18n()

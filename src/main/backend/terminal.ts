@@ -1,14 +1,14 @@
+import type { AiopsAssetRecord } from '@shared/preload'
 import type {
-  AiopsAssetRecord,
   TerminalCreateOptions,
   TerminalBinaryWriteResult,
   TerminalDataEvent,
   TerminalDisconnectReason,
   TerminalKillResult,
   TerminalLifecycleEvent,
-  TerminalWriteResult,
-  TerminalSshConnectionInfo
-} from '@shared/preload'
+  TerminalSshConnectionInfo,
+  TerminalWriteResult
+} from '@shared/contracts/terminalSessions'
 
 export type SshTerminalConnectionTarget = {
   asset?: Partial<

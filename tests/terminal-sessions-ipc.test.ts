@@ -3,9 +3,9 @@ import type { IpcMain } from 'electron'
 import {
   type TerminalCreateOptions,
   type TerminalLifecycleEvent,
-  type TerminalSshConnectionInfo,
-  type UserConfig
-} from '../src/shared/preload'
+  type TerminalSshConnectionInfo
+} from '../src/shared/contracts/terminalSessions'
+import type { UserConfig } from '../src/shared/preload'
 
 type IpcHandler = (event: unknown, ...args: any[]) => unknown
 

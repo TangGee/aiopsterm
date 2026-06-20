@@ -27,10 +27,12 @@ import type {
   AiAgentSessionEvent,
   ManagedAiSessionEvent,
   McpServerUserConfig,
-  SshAgentKeychainOption,
+  SshAgentKeychainOption
+} from '@shared/preload'
+import type {
   TerminalKeyboardInteractiveRequest,
   TerminalKeyboardInteractiveResult
-} from '@shared/preload'
+} from '@shared/contracts/terminalSessions'
 import { parseAssetImportContent, type ImportedAssetDraft } from '@shared/assetImport'
 import { buildChatExportMarkdown, sanitizeChatExportFileName } from '@shared/chatExport'
 import { prepareChatImageAttachment, validateChatImageAttachment } from '@shared/chatImageAttachment'

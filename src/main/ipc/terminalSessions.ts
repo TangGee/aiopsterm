@@ -2,15 +2,17 @@ import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron'
 import type {
   AiopsAssetRecord,
   RuntimeLogLevel,
+  UserConfig
+} from '@shared/preload'
+import type {
   TerminalBinaryWriteResult,
   TerminalCreateOptions,
   TerminalDisconnectReason,
   TerminalKillResult,
   TerminalLifecycleEvent,
   TerminalSshConnectionInfo,
-  TerminalWriteResult,
-  UserConfig
-} from '@shared/preload'
+  TerminalWriteResult
+} from '@shared/contracts/terminalSessions'
 import type { CodexSessionCreateOptions } from '@shared/contracts/codexSessions'
 
 type TerminalRuntimeProcess = {

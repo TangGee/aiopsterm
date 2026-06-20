@@ -4,7 +4,7 @@ import { createRequire } from 'module'
 import { tmpdir } from 'os'
 import { join, posix } from 'path'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
-import type { TerminalLifecycleEvent } from '../src/shared/preload'
+import type { TerminalLifecycleEvent } from '../src/shared/contracts/terminalSessions'
 
 const requireNative = createRequire(__filename)
 const Database = requireNative('better-sqlite3')

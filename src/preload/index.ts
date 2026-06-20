@@ -3,13 +3,6 @@ import type {
   AiopsPreloadApi,
   FileListEntry,
   KeywordHighlightConfigWriteResult,
-  TerminalCreateOptions,
-  TerminalDataEvent,
-  TerminalExitEvent,
-  TerminalKeyboardInteractiveRequest,
-  TerminalKeyboardInteractiveResult,
-  TerminalLifecycleEvent,
-  TerminalSessionInfo,
   KnowledgeBaseTransferProgress,
   KnowledgeBaseSearchResult,
   KnowledgeBaseSearchStatus,
@@ -18,6 +11,15 @@ import type {
   UserConfig,
   SkillUserConfig
 } from '@shared/preload'
+import type {
+  TerminalCreateOptions,
+  TerminalDataEvent,
+  TerminalExitEvent,
+  TerminalKeyboardInteractiveRequest,
+  TerminalKeyboardInteractiveResult,
+  TerminalLifecycleEvent,
+  TerminalSessionInfo
+} from '@shared/contracts/terminalSessions'
 
 const api: AiopsPreloadApi = {
   getPathForFile: (file: File) => webUtils.getPathForFile(file),

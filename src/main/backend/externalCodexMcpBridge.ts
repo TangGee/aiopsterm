@@ -14,8 +14,8 @@ import type {
   ManagedAiNotificationRecord,
   ManagedAiSessionRecord,
   ManagedAiSessionReplyInput,
-  TerminalLifecycleEvent
 } from '@shared/preload'
+import type { TerminalLifecycleEvent } from '@shared/contracts/terminalSessions'
 import {
   clearManagedAiSession,
   clearManagedAiNotifications,

@@ -223,7 +223,8 @@ import { shortcutRuntime } from '@/services/shortcutRuntime'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { settingsBackgroundPresets } from '@/config/settings'
 import { DEFAULT_KNOWLEDGE_INTERFACE_IMAGE_BASE64 } from '@shared/knowledgeBaseSeed'
-import type { FileSessionInfo, KeywordHighlightUserConfig, TerminalCreateOptions, TerminalKeyboardInteractiveRequest, TerminalSessionInfo } from '@shared/preload'
+import type { FileSessionInfo, KeywordHighlightUserConfig } from '@shared/preload'
+import type { TerminalCreateOptions, TerminalKeyboardInteractiveRequest, TerminalSessionInfo } from '@shared/contracts/terminalSessions'
 
 const prodKeychainSshAgentFingerprint = 'SHA256:KW/btgUSM+Gu9ht4gyd2CMSZB/1setTDE0+Uik88xGE'
 

@@ -109,6 +109,13 @@ import { defaultSkillSeedData, defaultSkillsConfig, shouldUseSkillSeedData } fro
 import { defaultWorkspacePreferencesConfig } from '@shared/workspacePreferencesSeed'
 import type { CodexSessionCreateOptions, CodexSessionLifecycleEvent } from '@shared/contracts/codexSessions'
 import type {
+  TerminalCreateOptions,
+  TerminalKeyboardInteractiveRequest,
+  TerminalKeyboardInteractiveResponse,
+  TerminalKeyboardInteractiveResult,
+  TerminalLifecycleEvent
+} from '@shared/contracts/terminalSessions'
+import type {
   AliasCommandConfig,
   AiAgentSessionEvent,
   ManagedAiSessionEvent,
@@ -140,11 +147,6 @@ import type {
   SkillWriteResult,
   SshAgentKeyConfig,
   SshProxyConfig,
-  TerminalCreateOptions,
-  TerminalKeyboardInteractiveResponse,
-  TerminalKeyboardInteractiveRequest,
-  TerminalKeyboardInteractiveResult,
-  TerminalLifecycleEvent,
   UserConfig,
   WorkspaceUserConfig,
   UserRuleConfig

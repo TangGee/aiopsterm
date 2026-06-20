@@ -3,18 +3,16 @@ import { mkdirSync, statSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import type { ClientChannel, ConnectConfig } from 'ssh2'
+import type { AiopsAssetRecord, SshProxyConfig, UserConfig } from '@shared/preload'
 import type {
-  AiopsAssetRecord,
-  SshProxyConfig,
   TerminalCreateOptions,
   TerminalDisconnectReason,
   TerminalKeyboardInteractivePrompt,
   TerminalKeyboardInteractiveRequest,
   TerminalKeyboardInteractiveResponse,
   TerminalKeyboardInteractiveResult,
-  TerminalLifecycleEvent,
-  UserConfig
-} from '@shared/preload'
+  TerminalLifecycleEvent
+} from '@shared/contracts/terminalSessions'
 import { shouldUseSshTerminalBackendDouble } from '@shared/runtimeSwitches'
 import { applyConfiguredSshAgentAuth } from './sshAgent'
 import { createSshProxySocketForAsset, resolveSshProxyConfigForAsset, type SshProxySocket } from './sshProxy'

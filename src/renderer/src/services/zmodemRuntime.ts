@@ -1,13 +1,13 @@
 import Zmodem, { type ZmodemSession, type ZmodemTransfer } from 'zmodem.js'
 import type {
   AiopsPreloadApi,
-  TerminalDataEvent,
   ZmodemSavePathPickResult,
   ZmodemStreamCloseResult,
   ZmodemStreamOpenResult,
   ZmodemUploadFile,
   ZmodemUploadPickResult
 } from '@shared/preload'
+import type { TerminalDataEvent } from '@shared/contracts/terminalSessions'
 
 export type TerminalZmodemProgress = {
   visible: boolean

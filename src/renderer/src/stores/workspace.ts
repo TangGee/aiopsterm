@@ -222,18 +222,13 @@ import type {
   SshProxyType,
   TerminalCommandGenerationContext,
   TerminalCommandGenerationRecord,
-  TerminalDisconnectReason,
-  TerminalExitEvent,
-  TerminalLifecycleEvent,
-  TerminalLifecycleStage,
-  TerminalSessionInfo,
   TerminalMouseEventAction,
-  TerminalSshConnectionInfo,
   TerminalUserConfig,
   UserConfig,
   UserRuleConfig,
   WorkspaceUserConfig
 } from '@shared/preload'
+import type { TerminalDisconnectReason, TerminalExitEvent, TerminalLifecycleEvent, TerminalLifecycleStage, TerminalSessionInfo, TerminalSshConnectionInfo } from '@shared/contracts/terminalSessions'
 
 export type {
   AiChatChipContentPart,
