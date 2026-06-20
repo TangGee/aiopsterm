@@ -1324,19 +1324,19 @@
       <div
         ref="editableRef"
         class="chat-editable"
-        :class="{ 'is-empty': !draft.trim() && !workspace.selectedContexts.length && !imageInputParts.length && !fileInputParts.length && !selectedCommand }"
+        :class="{ 'is-empty': composerIsEmpty }"
         :data-placeholder="t('ai.inputPlaceholder')"
         data-testid="ai-message-input"
         data-onboarding-id="ai-input-editable"
         contenteditable="true"
         spellcheck="false"
         role="textbox"
-        @click="handleEditableClick"
-        @input="handleEditableInput"
+        @click="aiPanelComposerRuntime.handleClick"
+        @input="aiPanelComposerRuntime.handleInput"
         @keydown="handleEditableKeydown"
         @keyup="saveEditableSelection"
         @mouseup="saveEditableSelection"
-        @paste="handleEditablePaste"
+        @paste="aiPanelComposerRuntime.handlePaste"
       ></div>
 
       <div class="input-controls-row">
@@ -1678,7 +1678,6 @@ import {
   removeAiPanelTokenFromEditableCursor,
   renderAiPanelMainEditableFromState,
   renderAiPanelPartsIntoEditable,
-  syncAiPanelMainInputPartsFromEditable,
   type AiPanelEditableRenderOptions
 } from '@/services/aiPanelEditableRuntime'
 import {
@@ -1761,6 +1760,7 @@ import {
   startAiPanelMessageEdit,
   syncAiPanelEditStateFromParts
 } from '@/services/aiPanelEditRuntime'
+import { createAiPanelComposerRuntime, isAiPanelComposerEmpty } from '@/services/aiPanelComposerRuntime'
 import { createAiPanelVoiceRuntime } from '@/services/aiPanelVoiceRuntime'
 import { aiChatClient } from '@/services/aiChatClient'
 import { copyTextToClipboard } from '@/services/clipboardRuntime'
@@ -3084,6 +3084,15 @@ const modelCatalogReady = computed(() =>
   workspace.aiModelOptions.length > 0 || workspace.lockedAiModelOptions.length > 0 || workspace.settingModelOptions.length > 0
 )
 const showNoAvailableModelPrompt = computed(() => modelCatalogReady.value && !hasAvailableModels.value)
+const composerIsEmpty = computed(() =>
+  isAiPanelComposerEmpty({
+    draft: draft.value,
+    selectedContextCount: workspace.selectedContexts.length,
+    images: imageInputParts.value,
+    files: fileInputParts.value,
+    selectedCommand: selectedCommand.value
+  })
+)
 
 const measureUiTextWidthPx = (text: string) => {
   if (!text) return 0
@@ -3575,15 +3584,6 @@ const handleEditEditableKeydown = (event: KeyboardEvent) => {
   }
 }
 
-const syncStorePartsFromEditable = () => {
-  const parts = syncAiPanelMainInputPartsFromEditable(editableRef.value)
-  if (!parts.commandPresent && workspace.selectedCommandId) {
-    workspace.selectCommandPreset(null)
-  }
-  fileInputParts.value = parts.files
-  imageInputParts.value = parts.images
-}
-
 const saveEditableSelection = () => {
   const selection = window.getSelection()
   if (!selection || selection.rangeCount === 0 || !editableRef.value) return
@@ -3603,89 +3603,6 @@ const moveEditableCaretToEnd = () => {
   selection?.removeAllRanges()
   selection?.addRange(range)
   saveEditableSelection()
-}
-
-const handleEditableInput = () => {
-  syncingFromEditable.value = true
-  syncStorePartsFromEditable()
-  draft.value = editablePlainText()
-  saveEditableSelection()
-  void nextTick(() => {
-    syncingFromEditable.value = false
-  })
-}
-
-const handleEditableClick = (event: MouseEvent) => {
-  const target = event.target as HTMLElement
-  const removeContextButton = target.closest('[data-remove-context]') as HTMLElement | null
-  const removeContextId = removeContextButton?.dataset.contextId
-  if (removeContextId) {
-    workspace.removeContext(removeContextId)
-    requestAnimationFrame(moveEditableCaretToEnd)
-    return
-  }
-  if (target.dataset.removeCommand || target.closest('[data-remove-command]')) {
-    workspace.selectCommandPreset(null)
-    requestAnimationFrame(moveEditableCaretToEnd)
-    return
-  }
-  if (target.dataset.removeImage || target.closest('[data-remove-image]')) {
-    const wrapper = target.closest('.image-preview-wrapper')
-    wrapper?.remove()
-    handleEditableInput()
-    requestAnimationFrame(moveEditableCaretToEnd)
-    return
-  }
-  saveEditableSelection()
-}
-
-const insertPlainTextAtEditableCursor = (text: string) => {
-  const editable = editableRef.value
-  if (!editable) return
-  editable.focus()
-
-  const selection = window.getSelection()
-  if (!selection) return
-  let range = selection.rangeCount > 0 ? selection.getRangeAt(0) : null
-  if (!range || !editable.contains(range.startContainer)) {
-    moveEditableCaretToEnd()
-    range = selection.rangeCount > 0 ? selection.getRangeAt(0) : null
-  }
-  if (!range) return
-
-  const normalizedText = text.replace(/\r\n/g, '\n')
-  const fragment = document.createDocumentFragment()
-  normalizedText.split('\n').forEach((line, index, lines) => {
-    fragment.appendChild(document.createTextNode(line))
-    if (index < lines.length - 1) {
-      fragment.appendChild(document.createElement('br'))
-    }
-  })
-  const marker = document.createTextNode('')
-  fragment.appendChild(marker)
-
-  range.deleteContents()
-  range.insertNode(fragment)
-
-  const nextRange = document.createRange()
-  nextRange.setStart(marker, 0)
-  nextRange.collapse(true)
-  selection.removeAllRanges()
-  selection.addRange(nextRange)
-  marker.remove()
-
-  handleEditableInput()
-}
-
-const handleEditablePaste = (event: ClipboardEvent) => {
-  if (clipboardHasImage(event)) {
-    event.preventDefault()
-    void insertPastedImage()
-    return
-  }
-
-  event.preventDefault()
-  insertPlainTextAtEditableCursor(event.clipboardData?.getData('text/plain') || '')
 }
 
 const showInputPlaceholderNotice = (message: string) => {
@@ -3721,6 +3638,47 @@ const {
   openImagePicker,
   handleFileUpload
 } = aiPanelAttachmentRuntime
+
+const aiPanelComposerRuntime = createAiPanelComposerRuntime({
+  editable: () => editableRef.value,
+  draft: () => draft.value,
+  selectedCommandId: () => workspace.selectedCommandId,
+  streaming: () => streaming.value,
+  noModelPrompt: () => showNoAvailableModelPrompt.value,
+  chatMode: () => chatMode.value,
+  agentMode: () => props.agentMode,
+  clipboardHasImage,
+  extractContentParts: extractEditableContentParts,
+  cancelStreaming: () => workspace.cancelStreamingAiChatResponse(),
+  sendChat: (text, contentParts, mode) => workspace.sendChat(text, contentParts, undefined, { mode }),
+  clearSelectedCommand: () => workspace.selectCommandPreset(null),
+  removeContext: (id) => workspace.removeContext(id),
+  setDraftFromEditable: (value) => {
+    draft.value = value
+  },
+  resetDraft: setDraft,
+  setImageInputParts: (parts) => {
+    imageInputParts.value = parts
+  },
+  setFileInputParts: (parts) => {
+    fileInputParts.value = parts
+  },
+  saveSelection: saveEditableSelection,
+  setSyncingFromEditable: (value) => {
+    syncingFromEditable.value = value
+  },
+  afterInputSync: () => nextTick(),
+  insertPastedImage,
+  scheduleCaretToEnd: () => requestAnimationFrame(moveEditableCaretToEnd),
+  closePopups: () => closePopups(),
+  notify: showInputPlaceholderNotice
+})
+
+const handleEditableInput = () => aiPanelComposerRuntime.handleInput()
+const insertPlainTextAtEditableCursor = (text: string) => aiPanelComposerRuntime.insertPlainTextAtCursor(text)
+const handleSend = async () => {
+  await aiPanelComposerRuntime.send()
+}
 
 const appendVoiceTranscriptionToInput = (text: string) => {
   restoreEditableSelection()
@@ -3800,26 +3758,6 @@ const closePopups = (options: { restoreCommandFocus?: boolean; restoreContextFoc
   panelModeMenuOpen.value = false
   closeModelMenu()
   closeHistoryMenu()
-}
-
-const handleSend = async () => {
-  if (streaming.value) {
-    await workspace.cancelStreamingAiChatResponse()
-    return
-  }
-  if (showNoAvailableModelPrompt.value) {
-    showInputPlaceholderNotice('请先配置可用模型。')
-    return
-  }
-  const contentParts = extractEditableContentParts()
-  const sent = await workspace.sendChat(draft.value, contentParts, undefined, {
-    mode: chatMode.value === 'agent' || props.agentMode ? 'agent' : 'command'
-  })
-  if (!sent) return
-  imageInputParts.value = []
-  fileInputParts.value = []
-  setDraft('')
-  closePopups()
 }
 
 const toggleContextPopup = () => {

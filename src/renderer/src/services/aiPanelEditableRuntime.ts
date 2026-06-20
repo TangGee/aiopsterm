@@ -281,6 +281,7 @@ export const insertAiPanelImageIntoEditableCursor = (
 
 export const insertAiPanelPlainTextIntoEditableCursor = (editable: HTMLElement | null, text: string, onInserted: () => void) => {
   if (!editable || !text) return
+  editable.focus()
   const selection = window.getSelection()
   if (!selection) return
   const range = activeEditableRange(editable, selection)
@@ -290,13 +291,23 @@ export const insertAiPanelPlainTextIntoEditableCursor = (editable: HTMLElement |
     return
   }
   range.deleteContents()
-  const textNode = document.createTextNode(text)
-  range.insertNode(textNode)
+  const fragment = document.createDocumentFragment()
+  const normalizedText = text.replace(/\r\n/g, '\n')
+  normalizedText.split('\n').forEach((line, index, lines) => {
+    fragment.appendChild(document.createTextNode(line))
+    if (index < lines.length - 1) {
+      fragment.appendChild(document.createElement('br'))
+    }
+  })
+  const marker = document.createTextNode('')
+  fragment.appendChild(marker)
+  range.insertNode(fragment)
   const nextRange = document.createRange()
-  nextRange.setStart(textNode, text.length)
+  nextRange.setStart(marker, 0)
   nextRange.collapse(true)
   selection.removeAllRanges()
   selection.addRange(nextRange)
+  marker.remove()
   onInserted()
 }
 
