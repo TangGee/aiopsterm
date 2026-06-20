@@ -87,6 +87,7 @@ import {
 import { shortcutRuntime, type ShortcutActionHandler } from '@/services/shortcutRuntime'
 import { skillsClient } from '@/services/skillsClient'
 import { settingsConfigClient } from '@/services/settingsConfigClient'
+import { settingsPreferencesClient } from '@/services/settingsPreferencesClient'
 import { addSystemThemeListener, applyThemeToDocument, isThemeId, type ThemeId } from '@/services/themeRuntime'
 import { isAiopstermDeepLinkPayload } from '@shared/deepLink'
 import { isLegacyLocalModelName } from '@shared/modelConfigBoundary'
@@ -5301,7 +5302,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       rules: normalizeRulesConfig(savedConfig.rules, savedConfig.customInstructions).normalized
     }
     try {
-      const result = await window.aiops.getSettingsPreferences?.()
+      const getSettingsPreferences = settingsPreferencesClient.getSettingsPreferences()
+      const result = await getSettingsPreferences?.()
       if (result?.ok && isSettingsPreferencesSnapshot(result.data)) {
         bridgeSettingsPreferences = result.data
       } else if (result?.ok) {
@@ -9826,8 +9828,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       }
       return deleteSettingsRule(id)
     }
-    const saveSettingsRuleBridge = window.aiops?.saveSettingsRule
-    if (typeof saveSettingsRuleBridge !== 'function') {
+    const saveSettingsRuleBridge = settingsPreferencesClient.saveSettingsRule()
+    if (!saveSettingsRuleBridge) {
       setSettingsNotice('规则保存服务不可用')
       return false
     }
@@ -9874,8 +9876,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const rule = settingsRules.value.find((item) => item.id === id)
     if (!rule) return false
     const nextEnabled = !rule.enabled
-    const saveSettingsRuleBridge = window.aiops?.saveSettingsRule
-    if (typeof saveSettingsRuleBridge !== 'function') {
+    const saveSettingsRuleBridge = settingsPreferencesClient.saveSettingsRule()
+    if (!saveSettingsRuleBridge) {
       setSettingsNotice('规则更新服务不可用')
       return false
     }
@@ -9909,8 +9911,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       settingsRules.value = settingsRules.value.filter((item) => item.id !== id)
       return true
     }
-    const deleteSettingsRuleBridge = window.aiops?.deleteSettingsRule
-    if (typeof deleteSettingsRuleBridge !== 'function') {
+    const deleteSettingsRuleBridge = settingsPreferencesClient.deleteSettingsRule()
+    if (!deleteSettingsRuleBridge) {
       setSettingsNotice('规则删除服务不可用')
       return false
     }
@@ -9957,8 +9959,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       setSettingsNotice('快捷键已被占用')
       return false
     }
-    const saveSettingsShortcutBridge = window.aiops?.saveSettingsShortcut
-    if (typeof saveSettingsShortcutBridge !== 'function') {
+    const saveSettingsShortcutBridge = settingsPreferencesClient.saveSettingsShortcut()
+    if (!saveSettingsShortcutBridge) {
       setSettingsNotice('快捷键保存服务不可用')
       return false
     }
@@ -9992,8 +9994,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const resetAllShortcuts = async () => {
-    const resetSettingsShortcutsBridge = window.aiops?.resetSettingsShortcuts
-    if (typeof resetSettingsShortcutsBridge !== 'function') {
+    const resetSettingsShortcutsBridge = settingsPreferencesClient.resetSettingsShortcuts()
+    if (!resetSettingsShortcutsBridge) {
       setSettingsNotice('快捷键重置服务不可用')
       return false
     }
