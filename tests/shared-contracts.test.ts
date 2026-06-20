@@ -401,6 +401,16 @@ import type {
   KubernetesTerminalExitEvent as KubernetesTerminalExitEventPreload,
   KubernetesTerminalWriteResult as KubernetesTerminalWriteResultPreload
 } from '../src/shared/preload'
+import type {
+  VoiceTranscriptionInput as VoiceTranscriptionInputContract,
+  VoiceTranscriptionProvider as VoiceTranscriptionProviderContract,
+  VoiceTranscriptionResult as VoiceTranscriptionResultContract
+} from '../src/shared/contracts/voice'
+import type {
+  VoiceTranscriptionInput as VoiceTranscriptionInputPreload,
+  VoiceTranscriptionProvider as VoiceTranscriptionProviderPreload,
+  VoiceTranscriptionResult as VoiceTranscriptionResultPreload
+} from '../src/shared/preload'
 
 type AssertAssignable<From, To extends From> = true
 
@@ -739,6 +749,12 @@ type KubernetesAgentProxyConfigPreloadMatchesContract = AssertAssignable<Kuberne
 type KubernetesAgentProxyConfigContractMatchesPreload = AssertAssignable<KubernetesAgentProxyConfigResultPreload, KubernetesAgentProxyConfigResultContract>
 type KubernetesAgentCleanupPreloadMatchesContract = AssertAssignable<KubernetesAgentCleanupResultContract, KubernetesAgentCleanupResultPreload>
 type KubernetesAgentCleanupContractMatchesPreload = AssertAssignable<KubernetesAgentCleanupResultPreload, KubernetesAgentCleanupResultContract>
+type VoiceTranscriptionInputPreloadMatchesContract = AssertAssignable<VoiceTranscriptionInputContract, VoiceTranscriptionInputPreload>
+type VoiceTranscriptionInputContractMatchesPreload = AssertAssignable<VoiceTranscriptionInputPreload, VoiceTranscriptionInputContract>
+type VoiceTranscriptionProviderPreloadMatchesContract = AssertAssignable<VoiceTranscriptionProviderContract, VoiceTranscriptionProviderPreload>
+type VoiceTranscriptionProviderContractMatchesPreload = AssertAssignable<VoiceTranscriptionProviderPreload, VoiceTranscriptionProviderContract>
+type VoiceTranscriptionResultPreloadMatchesContract = AssertAssignable<VoiceTranscriptionResultContract, VoiceTranscriptionResultPreload>
+type VoiceTranscriptionResultContractMatchesPreload = AssertAssignable<VoiceTranscriptionResultPreload, VoiceTranscriptionResultContract>
 
 describe('shared contract compatibility exports', () => {
   it('keeps Codex session contracts compatible through the preload export', () => {
@@ -1440,5 +1456,18 @@ describe('shared contract compatibility exports', () => {
       true,
       true
     ])
+  })
+
+  it('keeps Voice transcription contracts compatible through the preload export', () => {
+    const checks: [
+      VoiceTranscriptionInputPreloadMatchesContract,
+      VoiceTranscriptionInputContractMatchesPreload,
+      VoiceTranscriptionProviderPreloadMatchesContract,
+      VoiceTranscriptionProviderContractMatchesPreload,
+      VoiceTranscriptionResultPreloadMatchesContract,
+      VoiceTranscriptionResultContractMatchesPreload
+    ] = [true, true, true, true, true, true]
+
+    expect(checks).toEqual([true, true, true, true, true, true])
   })
 })

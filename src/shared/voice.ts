@@ -1,4 +1,4 @@
-import type { VoiceTranscriptionInput, VoiceTranscriptionProvider, VoiceTranscriptionResult } from './preload'
+import type { VoiceTranscriptionInput, VoiceTranscriptionProvider, VoiceTranscriptionResult } from './contracts/voice'
 
 const supportedAudioFormats = new Set(['wav', 'pcm', 'ogg-opus', 'speex', 'silk', 'mp3', 'm4a', 'aac', 'amr'])
 const maxAudioBytes = 50 * 1024 * 1024

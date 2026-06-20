@@ -224,7 +224,6 @@ import type {
   KnowledgeSearchRuntimeApplyInput,
   KnowledgeSearchRuntimeApplyResult,
   ModelProviderCheckInput,
-  ModelProviderCheckKey,
   ModelProviderCheckResult,
   ModelSettingsUserConfig,
   NotificationUserConfig,
@@ -242,6 +241,10 @@ import type {
   TerminalUserConfig,
   WorkspaceUserConfig
 } from './contracts/appRuntime'
+import type {
+  VoiceTranscriptionInput,
+  VoiceTranscriptionResult
+} from './contracts/voice'
 import type {
   ChatAttachmentStageResult,
   ChatImageAttachmentClipboardInput,
@@ -689,6 +692,11 @@ export type {
   WorkspaceUserConfig
 } from './contracts/appRuntime'
 export type {
+  VoiceTranscriptionInput,
+  VoiceTranscriptionProvider,
+  VoiceTranscriptionResult
+} from './contracts/voice'
+export type {
   ChatAttachmentStageResult,
   ChatImageAttachmentClipboardInput,
   ChatImageAttachmentFileInput,
@@ -973,23 +981,6 @@ export type UserConfig = {
     completedModules: Record<string, boolean>
   }
 }
-
-export type VoiceTranscriptionInput = {
-  audioData?: string
-  audioBytes?: ArrayBuffer | Uint8Array | number[]
-  audioFormat?: string
-  audioSize?: number
-  durationMs?: number
-  source?: 'browser'
-}
-
-export type VoiceTranscriptionProvider = 'aiopsterm-local' | ModelProviderCheckKey
-
-export type VoiceTranscriptionResult = AiopsMutationResult<{
-  text: string
-  provider: VoiceTranscriptionProvider
-  model?: string
-}>
 
 export type AiopsPreloadApi = {
   getPathForFile: (file: File) => string

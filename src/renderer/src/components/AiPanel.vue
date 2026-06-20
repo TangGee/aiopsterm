@@ -1685,7 +1685,7 @@ import type {
   TerminalPanel
 } from '@/stores/workspace'
 import type { AiChatExportMessage, AiChatHistoryHostContext, AiCommandCatalogOption, AiContextKind, AiContextOption } from '@shared/contracts/aiChat'
-import type { VoiceTranscriptionInput } from '@shared/preload'
+import type { VoiceTranscriptionInput } from '@shared/contracts/voice'
 import type { CodexSessionTargetContext } from '@shared/contracts/codexSessions'
 import type { RuntimeLogLevel } from '@shared/preload'
 

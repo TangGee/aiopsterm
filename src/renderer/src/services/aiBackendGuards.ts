@@ -13,7 +13,7 @@ import type {
 import type {
   VoiceTranscriptionProvider,
   VoiceTranscriptionResult
-} from '@shared/preload'
+} from '@shared/contracts/voice'
 import type { ChatAttachmentStageResult, ChatImageAttachmentMediaType, ChatImageAttachmentPrepareResult } from '@shared/contracts/localFiles'
 
 export const malformedAiBackendResultMessage = 'AI 服务返回数据无效'
