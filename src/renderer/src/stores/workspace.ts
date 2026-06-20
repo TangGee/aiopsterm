@@ -98,6 +98,28 @@ import {
 } from '@/services/knowledgeBackendGuards'
 import { knowledgeClient } from '@/services/knowledgeClient'
 import {
+  addCompletedKnowledgeImportJob,
+  cloneKnowledgeNodes,
+  filterKnowledgeTree,
+  findKnowledgeNode as findKnowledgeNodeInTree,
+  getKnowledgeParent,
+  isKnowledgeImagePath,
+  knowledgeCapacityPercent,
+  knowledgeContentSearchVisible,
+  knowledgeEntryToNode,
+  knowledgeRelPathParentMatches,
+  mediaTypeFromKnowledgePath,
+  missingKnowledgeRelPaths,
+  pruneKnowledgeUiState,
+  removeKnowledgeImportJob,
+  resolveKnowledgePasteTarget,
+  selectKnowledgeNodeKeys,
+  uniqueKnowledgeFileName as uniqueKnowledgeFileNameInTree,
+  upsertKnowledgeImportJob,
+  type KbClipboard,
+  type KnowledgeImportJob
+} from '@/services/knowledgeRuntime'
+import {
   isK8sAgentCleanupData,
   isK8sBackendCommandForRequest,
   isK8sBackendResourceActionData,
@@ -291,7 +313,6 @@ import {
   backgroundSnapshotsMatch,
   cloneBackgroundSnapshot,
   cloneWorkspacePreferencesSnapshot,
-  createKbRelPath,
   defaultAiPreferences,
   defaultConfig,
   defaultEditorSettings,
@@ -457,7 +478,6 @@ import type { McpConfigFile, McpServerUserConfig, McpToolStatesUserConfig } from
 import type { SettingsPreferencesSnapshot, ShortcutUserConfig, UserRuleConfig } from '@shared/contracts/settingsPreferences'
 import type { SkillUserConfig } from '@shared/contracts/skills'
 import type {
-  KnowledgeBaseEntry,
   KnowledgeBaseSearchResult,
   KnowledgeBaseSearchStatus,
   KnowledgeBaseTransferProgress,
@@ -523,7 +543,6 @@ export type {
 
 type CloseMode = 'current' | 'others' | 'all'
 type FilesUiMode = 'transfer' | 'default'
-type KbClipboard = { mode: 'copy' | 'cut'; sources: string[] } | null
 type AliasCommand = AliasCommandConfig & { edit?: boolean }
 type TopUpdateState = 'idle' | 'checking' | 'local' | 'available' | 'install-requested'
 export type AiAttentionKind = 'approval' | 'question' | 'plan' | 'error' | 'done'
@@ -702,10 +721,6 @@ type AiPreferencePatch = Partial<Omit<AiPreferenceSettings, 'proxy'>> & {
   proxy?: Partial<AiPreferenceSettings['proxy']>
 }
 
-function cloneKnowledgeNodes(nodes: KnowledgeNode[]): KnowledgeNode[] {
-  return nodes.map((node) => ({ ...node, children: node.children ? cloneKnowledgeNodes(node.children) : undefined }))
-}
-
 const cloneShortcutConfig = (shortcuts: SettingsShortcut[]): ShortcutUserConfig[] =>
   shortcuts.map((shortcut) => ({
     id: shortcut.id,
@@ -857,15 +872,6 @@ const integerInRange = (value: unknown, fallback: number, min: number) =>
 
 const stringFromOptions = <T extends string>(value: unknown, options: readonly T[], fallback: T) => (typeof value === 'string' && options.includes(value as T) ? (value as T) : fallback)
 
-const knowledgeEntryToNode = (entry: KnowledgeBaseEntry): KnowledgeNode => ({
-  id: `kb-${entry.relPath.replace(/[^a-zA-Z0-9_-]/g, '-') || 'root'}`,
-  key: entry.relPath,
-  relPath: entry.relPath,
-  title: entry.name,
-  type: entry.type,
-  ...(entry.type === 'file' ? { size: entry.size || 0 } : { children: [] })
-})
-
 const parseMcpEditorContent = (content: string) => JSON.parse(content)
 
 const isThemeSnapshot = (value: unknown): value is ThemeId => typeof value === 'string' && isThemeId(value)
@@ -884,38 +890,6 @@ const defaultAboutSettings: AboutSettings = {
   updateStatus: 'idle',
   newVersion: '',
   progress: 0
-}
-
-const getKbParent = (relPath: string) => {
-  const parts = relPath.split('/').filter(Boolean)
-  if (parts.length <= 1) return ''
-  return parts.slice(0, -1).join('/')
-}
-
-const knowledgePathContains = (relPath: string, candidate: string) => candidate === relPath || candidate.startsWith(`${relPath}/`)
-
-const imageFileExtensions = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg'])
-
-const getFileExtension = (relPath: string) => {
-  const fileName = relPath.split('/').pop() || relPath
-  const dotIndex = fileName.lastIndexOf('.')
-  return dotIndex >= 0 ? fileName.slice(dotIndex).toLowerCase() : ''
-}
-
-const isKnowledgeImagePath = (relPath: string) => imageFileExtensions.has(getFileExtension(relPath))
-
-const mediaTypeFromKnowledgePath = (relPath: string) => {
-  const ext = getFileExtension(relPath)
-  const mediaTypes: Record<string, string> = {
-    '.png': 'image/png',
-    '.jpg': 'image/jpeg',
-    '.jpeg': 'image/jpeg',
-    '.gif': 'image/gif',
-    '.webp': 'image/webp',
-    '.bmp': 'image/bmp',
-    '.svg': 'image/svg+xml'
-  }
-  return mediaTypes[ext] || 'application/octet-stream'
 }
 
 const cloneStructuredValue = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T
@@ -1068,7 +1042,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const kbSearchLoading = ref(false)
   const kbSearchError = ref('')
   const kbClipboard = ref<KbClipboard>(null)
-  const kbImportJobs = ref<Array<{ id: string; destRelPath: string; percent: number }>>([])
+  const kbImportJobs = ref<KnowledgeImportJob[]>([])
   const kbUsedBytes = ref(0)
   const kbTotalBytes = ref(1024 * 1024 * 1024)
   const extensionSearchQuery = ref('')
@@ -1740,22 +1714,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
   const filteredQuickCommands = computed(() => filterQuickCommands(quickCommands.value, snippetSearchQuery.value, selectedSnippetGroupUuid.value))
   const currentSnippetGroupName = computed(() => resolveCurrentSnippetGroupName(snippetGroups.value, selectedSnippetGroupUuid.value))
-  const filteredKnowledgeTree = computed(() => {
-    const query = kbSearchQuery.value.trim().toLowerCase()
-    if (!query) return knowledgeTree.value
-    const filter = (nodes: KnowledgeNode[]): KnowledgeNode[] =>
-      nodes
-        .map((node) => {
-          const hit = node.title.toLowerCase().includes(query)
-          const children = node.children ? filter(node.children) : []
-          if (hit || children.length) return { ...node, children: children.length ? children : node.children }
-          return null
-        })
-        .filter(Boolean) as KnowledgeNode[]
-    return filter(knowledgeTree.value)
-  })
-  const kbContentSearchVisible = computed(() => kbSearchQuery.value.trim().length > 1)
-  const kbCapacityPercent = computed(() => Math.min(100, Math.round((kbUsedBytes.value / kbTotalBytes.value) * 100)))
+  const filteredKnowledgeTree = computed(() => filterKnowledgeTree(knowledgeTree.value, kbSearchQuery.value))
+  const kbContentSearchVisible = computed(() => knowledgeContentSearchVisible(kbSearchQuery.value))
+  const kbCapacityPercent = computed(() => knowledgeCapacityPercent(kbUsedBytes.value, kbTotalBytes.value))
   const visibleExtensionPlugins = computed(() =>
     extensionPlugins.value
       .filter((plugin) => plugin.show && (plugin.pluginId !== 'Alias' || extensionSettings.value.aliasStatus))
@@ -2229,18 +2190,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       setTopNotice(malformedKnowledgeBackendResultMessage)
       return
     }
-    const total = event.total || 1
-    const percent = Math.min(100, Math.round((event.transferred / total) * 100))
-    const existing = kbImportJobs.value.find((job) => job.id === event.jobId)
-    if (existing) {
-      existing.destRelPath = event.destRelPath
-      existing.percent = percent
-    } else {
-      kbImportJobs.value.push({ id: event.jobId, destRelPath: event.destRelPath, percent })
-    }
+    const { jobs, percent } = upsertKnowledgeImportJob(kbImportJobs.value, event)
+    kbImportJobs.value = jobs
     if (percent >= 100) {
       window.setTimeout(() => {
-        kbImportJobs.value = kbImportJobs.value.filter((job) => job.id !== event.jobId)
+        kbImportJobs.value = removeKnowledgeImportJob(kbImportJobs.value, event.jobId)
       }, 500)
     }
   }
@@ -7785,25 +7739,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     resetMacroRecordingState()
   }
 
-  const findKnowledgeNode = (relPath: string, nodes = knowledgeTree.value): KnowledgeNode | null => {
-    for (const node of nodes) {
-      if (node.relPath === relPath) return node
-      if (node.children) {
-        const hit = findKnowledgeNode(relPath, node.children)
-        if (hit) return hit
-      }
-    }
-    return null
-  }
+  const findKnowledgeNode = (relPath: string, nodes = knowledgeTree.value): KnowledgeNode | null => findKnowledgeNodeInTree(nodes, relPath)
 
   const selectKnowledgeNode = (relPath: string, multi = false) => {
-    if (!multi) {
-      kbSelectedKeys.value = [relPath]
-      return
-    }
-    kbSelectedKeys.value = kbSelectedKeys.value.includes(relPath)
-      ? kbSelectedKeys.value.filter((item) => item !== relPath)
-      : [...kbSelectedKeys.value, relPath]
+    kbSelectedKeys.value = selectKnowledgeNodeKeys(kbSelectedKeys.value, relPath, multi)
   }
 
   const refreshKnowledgeSearchStatus = async () => {
@@ -7926,13 +7865,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return result
   }
 
-  const knowledgeRelPathParentMatches = (relPath: string, expectedParentRelDir: string) => getKbParent(relPath.trim()) === expectedParentRelDir.trim().replace(/^\/+|\/+$/g, '')
-
   const pruneMissingKnowledgeUiState = (candidateRelPaths: string[]) => {
-    const missingRelPaths = [...new Set(candidateRelPaths.filter(Boolean))].filter((relPath) => !findKnowledgeNode(relPath))
+    const missingRelPaths = missingKnowledgeRelPaths(knowledgeTree.value, candidateRelPaths)
     if (!missingRelPaths.length) return
-    kbSelectedKeys.value = kbSelectedKeys.value.filter((key) => !missingRelPaths.some((relPath) => knowledgePathContains(relPath, key)))
-    kbExpandedKeys.value = kbExpandedKeys.value.filter((key) => !missingRelPaths.some((relPath) => knowledgePathContains(relPath, key)))
+    const pruned = pruneKnowledgeUiState(kbSelectedKeys.value, kbExpandedKeys.value, missingRelPaths)
+    kbSelectedKeys.value = pruned.selectedKeys
+    kbExpandedKeys.value = pruned.expandedKeys
     closeKnowledgePanelsForRemoved(missingRelPaths)
   }
 
@@ -8002,7 +7940,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const entry = backendKnowledgeEntryOrNotice(result, malformedKnowledgeBackendResultMessage)
     if (!entry) return
     const nextRelPath = entry.relPath.trim()
-    if (nextRelPath !== expectedKnowledgeRelPath(getKbParent(relPath), name)) {
+    if (nextRelPath !== expectedKnowledgeRelPath(getKnowledgeParent(relPath), name)) {
       setTopNotice(malformedKnowledgeBackendResultMessage)
       return
     }
@@ -8066,7 +8004,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const pasteKnowledgeNodes = async (targetRelDir: string) => {
     if (!kbClipboard.value) return
     const destination = findKnowledgeNode(targetRelDir)
-    const dstRelDir = destination?.type === 'file' ? getKbParent(destination.relPath) : targetRelDir
+    const dstRelDir = resolveKnowledgePasteTarget(targetRelDir, destination)
     const kbCopy = knowledgeClient.kbCopy()
     const kbMove = knowledgeClient.kbMove()
     if (!kbCopy || !kbMove) {
@@ -8131,16 +8069,16 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       setTopNotice('知识库导入服务不可用')
       return false
     }
-    const dstRelDir = getKbParent(destRelPath)
+    const dstRelDir = getKnowledgeParent(destRelPath)
     const result = sourceType === 'folder' ? await kbImportFolder(srcAbsPath, dstRelDir) : await kbImportFile(srcAbsPath, dstRelDir)
     if (!isKnowledgeImportResultForRequest(result, dstRelDir, sourceType)) {
       setTopNotice(malformedKnowledgeBackendResultMessage)
       return false
     }
     if (!kbImportJobs.value.some((job) => job.id === result.jobId)) {
-      kbImportJobs.value.push({ id: result.jobId, destRelPath: result.relPath, percent: 100 })
+      kbImportJobs.value = addCompletedKnowledgeImportJob(kbImportJobs.value, result.jobId, result.relPath)
       window.setTimeout(() => {
-        kbImportJobs.value = kbImportJobs.value.filter((job) => job.id !== result.jobId)
+        kbImportJobs.value = removeKnowledgeImportJob(kbImportJobs.value, result.jobId)
       }, 500)
     }
     const refreshed = await refreshKnowledgeTree()
@@ -10187,7 +10125,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const panel: TerminalPanel = {
       id: knowledgePanelId(relPath),
       title: node.title || relPath.split('/').pop() || 'KnowledgeCenter',
-      cwd: getKbParent(relPath) || '@knowledgebase',
+      cwd: getKnowledgeParent(relPath) || '@knowledgebase',
       kind: 'knowledge',
       status: 'ready',
       output: '',
@@ -10213,7 +10151,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       const oldPanelId = panel.id
       panel.id = knowledgePanelId(nextRelPath)
       panel.title = nextRelPath.split('/').pop() || nextRelPath
-      panel.cwd = getKbParent(nextRelPath) || '@knowledgebase'
+      panel.cwd = getKnowledgeParent(nextRelPath) || '@knowledgebase'
       panel.knowledge = {
         relPath: nextRelPath,
         isImage: isKnowledgeImagePath(nextRelPath)
@@ -11174,19 +11112,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return `ai-message-${safeId}.md`
   }
 
-  const uniqueKnowledgeFileName = (parentRelDir: string, fileName: string) => {
-    const dotIndex = fileName.lastIndexOf('.')
-    const base = dotIndex >= 0 ? fileName.slice(0, dotIndex) : fileName
-    const ext = dotIndex >= 0 ? fileName.slice(dotIndex) : ''
-    let candidate = fileName
-    let index = 1
-    while (findKnowledgeNode(createKbRelPath(parentRelDir, candidate))) {
-      candidate = `${base}-${index}${ext}`
-      index += 1
-    }
-    return candidate
-  }
-
   const ensureLocalKnowledgeDir = async (title: string) => {
     const relPath = title
     const existing = findKnowledgeNode(relPath)
@@ -11220,7 +11145,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const content = messageSummaryContent(message)
     const summaryDir = await ensureLocalKnowledgeDir('summary')
     if (!summaryDir) return null
-    const fileName = uniqueKnowledgeFileName('summary', knowledgeFileNameForMessage(message))
+    const fileName = uniqueKnowledgeFileNameInTree(knowledgeTree.value, 'summary', knowledgeFileNameForMessage(message))
     const kbCreateFile = knowledgeClient.kbCreateFile()
     const kbWriteFile = knowledgeClient.kbWriteFile()
     if (!kbCreateFile || !kbWriteFile) {
