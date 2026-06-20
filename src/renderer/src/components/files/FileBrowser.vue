@@ -513,9 +513,27 @@ import {
 import { useWorkspaceStore } from '@/stores/workspace'
 import { copyTextToClipboard } from '@/services/clipboardRuntime'
 import { filesClient } from '@/services/filesClient'
+import {
+  fileBrowserDirname,
+  fileBrowserEntryDropDirectory,
+  fileBrowserRenamePath,
+  fileBrowserRowsForDirectory,
+  fileBrowserTargetBreadcrumb,
+  fileBrowserTargetPathForBreadcrumbIndex,
+  filePermissionCode,
+  formatFileSize,
+  isDraggableFileBrowserEntry,
+  joinFileBrowserPath,
+  localPathName,
+  nextFileBrowserSortState,
+  normalizeFileBrowserPath,
+  parseFilePermissionMode,
+  uniqueConflictFileName,
+  visibleFileBrowserEntries,
+  type FileBrowserEntry
+} from '@/services/filesRuntime'
 import { localFilesClient } from '@/services/localFilesClient'
 import {
-  isFileEntryMutationData,
   isFileEntryMutationDataForRequest,
   isFileListEntryData,
   isFileTransferOperationData,
@@ -525,20 +543,12 @@ import {
 import type {
   FileEntryMutation,
   FileEntryMutationResult,
-  FileListEntry,
   FileListOptions,
   FileSessionInfo,
   FileTransferOperation,
   FileTransferOperationResult,
   FileTransferTask
 } from '@shared/contracts/files'
-
-type FileBrowserEntry = Omit<FileListEntry, 'mode' | 'modifiedAt'> & {
-  mode: string
-  modifiedAt: string
-  modifiedAtMs: number
-  linkTarget?: string
-}
 
 const props = defineProps<{
   session: FileSessionInfo
@@ -622,64 +632,11 @@ const permissionGroups = [
   { key: 'public' as const, label: '公共组' }
 ]
 const permissionOptions = ['读', '写', '执行']
-const permissionToModePrefix = (type: FileBrowserEntry['type']) => {
-  if (type === 'directory') return 'd'
-  if (type === 'link') return 'l'
-  return '-'
-}
-const permissionCode = computed(() => {
-  const score = (items: string[]) => (items.includes('读') ? 4 : 0) + (items.includes('写') ? 2 : 0) + (items.includes('执行') ? 1 : 0)
-  return `${score(permissions.owner)}${score(permissions.group)}${score(permissions.public)}`
-})
-const visibleEntries = computed(() => {
-  const visible = showHidden.value ? entries.value : entries.value.filter((entry) => entry.name === '..' || !entry.name.startsWith('.'))
-  const parentRows = visible.filter((entry) => entry.name === '..')
-  const rows = visible.filter((entry) => entry.name !== '..')
-  const direction = sortState.direction === 'asc' ? 1 : -1
-  const typeRank = (entry: FileBrowserEntry) => (entry.type === 'directory' ? 0 : entry.type === 'link' ? 1 : 2)
-  const compareName = (left: FileBrowserEntry, right: FileBrowserEntry) => left.name.localeCompare(right.name, undefined, { numeric: true, sensitivity: 'base' })
-  rows.sort((left, right) => {
-    const rankDelta = typeRank(left) - typeRank(right)
-    if (rankDelta !== 0) return rankDelta
-    if (sortState.key === 'name') return compareName(left, right) * direction
-    if (sortState.key === 'size') {
-      const sizeDelta = left.size - right.size
-      return (sizeDelta === 0 ? compareName(left, right) : sizeDelta) * direction
-    }
-    const dateDelta = left.modifiedAtMs - right.modifiedAtMs
-    return (dateDelta === 0 ? compareName(left, right) : dateDelta) * direction
-  })
-  return [...parentRows, ...rows]
-})
-const targetBreadcrumb = computed(() => ['/', ...moveDialog.targetPath.split('/').filter(Boolean)])
-
-const normalizePath = (path: string) => {
-  const next = path.trim().replace(/\/+/g, '/')
-  return next === '' ? '/' : next
-}
-
-const joinPath = (...parts: string[]) => parts.join('/').replace(/\/+/g, '/')
-
-const dirname = (path: string) => {
-  const index = path.lastIndexOf('/')
-  if (index <= 0) return '/'
-  return path.slice(0, index)
-}
-
-const formatSize = (size: number) => {
-  if (size < 1024) return `${size} B`
-  if (size < 1024 * 1024) return `${Math.round(size / 1024)} KB`
-  if (size < 1024 * 1024 * 1024) return `${(size / 1024 / 1024).toFixed(1)} MB`
-  return `${(size / 1024 / 1024 / 1024).toFixed(1)} GB`
-}
-
-const getLocalPathName = (path: string, fallback = 'upload') => path.split(/[\\/]/).filter(Boolean).at(-1) || fallback
-
-const formatDate = (time: number) => {
-  if (!time) return ''
-  const date = new Date(time)
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
-}
+const permissionCode = computed(() => filePermissionCode(permissions))
+const visibleEntries = computed(() => visibleFileBrowserEntries(entries.value, showHidden.value, sortState))
+const targetBreadcrumb = computed(() => fileBrowserTargetBreadcrumb(moveDialog.targetPath))
+const dirname = fileBrowserDirname
+const formatSize = formatFileSize
 
 const setFileNotice = (message: string) => {
   fileNotice.value = message
@@ -698,12 +655,9 @@ const cleanFileErrorMessage = (fileError: unknown, fallback: string) => {
 }
 
 const toggleSort = (key: typeof sortState.key) => {
-  if (sortState.key === key) {
-    sortState.direction = sortState.direction === 'asc' ? 'desc' : 'asc'
-    return
-  }
-  sortState.key = key
-  sortState.direction = key === 'modifiedAt' ? 'desc' : 'asc'
+  const nextSort = nextFileBrowserSortState(sortState, key)
+  sortState.key = nextSort.key
+  sortState.direction = nextSort.direction
 }
 
 const getListOptions = (overrides: Partial<FileListOptions> = {}): FileListOptions => ({
@@ -750,42 +704,16 @@ const applyTransferResult = (transfer: FileTransferOperationResult, fallbackErro
   return true
 }
 
-const mapFileEntry = (entry: FileListEntry): FileBrowserEntry => ({
-  name: entry.name,
-  path: entry.path,
-  type: entry.type,
-  mode: entry.mode || (entry.type === 'directory' ? 'drwxr-xr-x' : entry.type === 'link' ? 'lrwxrwxrwx' : '-rw-r--r--'),
-  size: entry.size,
-  modifiedAt: formatDate(entry.modifiedAt),
-  modifiedAtMs: entry.modifiedAt,
-  linkTarget: entry.linkTarget
-})
-
-const resolveListedDirectoryPath = (requestedPath: string, rows: FileBrowserEntry[]) => {
-  const firstChild = rows.find((entry) => entry.name !== '..')
-  if (!firstChild) return requestedPath
-  const parentPath = dirname(firstChild.path)
-  return parentPath || requestedPath
-}
-
 const loadDirectoryEntries = async (path: string) => {
   const listFiles = filesClient.listFiles()
   if (!listFiles) throw new Error('文件列表服务不可用')
   const list = await listFiles(path, getListOptions())
   if (!Array.isArray(list) || !list.every(isFileListEntryData)) throw new Error(malformedFilesBackendResultMessage)
-  const rows = list.map(mapFileEntry)
-  const listedDirectoryPath = resolveListedDirectoryPath(path, rows)
-  if (rows.some((entry) => entry.name === '..') || listedDirectoryPath === '/') {
-    return { rows, path: listedDirectoryPath }
-  }
-  return {
-    rows: [{ name: '..', path: dirname(listedDirectoryPath), type: 'directory' as const, mode: 'drwxr-xr-x', size: 0, modifiedAt: '', modifiedAtMs: 0 }, ...rows],
-    path: listedDirectoryPath
-  }
+  return fileBrowserRowsForDirectory(path, list)
 }
 
 const listDirectoryEntries = async (path: string) => {
-  const normalized = normalizePath(path)
+  const normalized = normalizeFileBrowserPath(path)
   return (await loadDirectoryEntries(normalized)).rows
 }
 
@@ -860,7 +788,7 @@ const clearTargetSubDirs = () => {
 }
 
 const loadEntries = async (path = currentPath.value, options: { preserveOnFailure?: boolean } = {}) => {
-  const normalizedPath = normalizePath(path)
+  const normalizedPath = normalizeFileBrowserPath(path)
   loading.value = true
   error.value = ''
   try {
@@ -887,8 +815,6 @@ const commitPath = async () => {
   const loaded = await loadEntries(pathInput.value)
   if (!loaded) pathInput.value = currentPath.value
 }
-
-const canAttemptOpenDirectory = (entry: FileBrowserEntry) => entry.name === '..' || entry.type === 'directory' || entry.type === 'link'
 
 const openDirectory = async (entry: FileBrowserEntry) => {
   selectedPath.value = entry.path
@@ -946,7 +872,7 @@ const queueUpload = async (kind: 'file' | 'directory') => {
     kind === 'file' ? '上传文件选择对话框失败' : '上传目录选择对话框失败'
   )
   if (!localPath) return
-  const name = getLocalPathName(localPath, kind === 'file' ? 'upload-file.txt' : 'upload-directory')
+  const name = localPathName(localPath, kind === 'file' ? 'upload-file.txt' : 'upload-directory')
   loading.value = true
   try {
     const transfer = await runObservedFileTransfer(
@@ -969,7 +895,7 @@ const setGlobalDragSide = (side: 'left' | 'right' | null) => {
 
 const getGlobalDragSide = () => ((globalThis as any)[GLOBAL_DND_SIDE_KEY] as 'left' | 'right' | null) || null
 
-const isDraggableEntry = (entry: FileBrowserEntry) => props.uiMode === 'transfer' && !!props.panelSide && entry.name !== '..' && entry.type !== 'link'
+const isDraggableEntry = (entry: FileBrowserEntry) => isDraggableFileBrowserEntry(entry, props.uiMode, props.panelSide)
 
 const startFileDrag = (event: DragEvent, entry: FileBrowserEntry) => {
   if (!isDraggableEntry(entry) || !event.dataTransfer || !props.panelSide) return
@@ -1013,16 +939,11 @@ const readFsDragPayload = (event: DragEvent): FsDragPayload | null => {
   }
 }
 
-const getEntryDropDirectory = (entry?: FileBrowserEntry | null) => {
-  if (entry?.type === 'directory' && entry.name !== '..') return entry.path
-  return currentPath.value
-}
-
 const getDropTargetDirectory = (event: DragEvent) => {
   const row = (event.target as HTMLElement | null)?.closest?.('tr') as HTMLTableRowElement | null
   const rowPath = row?.dataset?.path || ''
   const entry = entries.value.find((item) => item.path === rowPath)
-  return getEntryDropDirectory(entry)
+  return fileBrowserEntryDropDirectory(entry, currentPath.value)
 }
 
 const getTargetType = () => (props.session.kind === 'local' ? 'local' : 'remote')
@@ -1045,7 +966,7 @@ const handleOsFileDrop = async (event: DragEvent) => {
     return
   }
 
-  const name = getLocalPathName(localPath)
+  const name = localPathName(localPath)
   loading.value = true
   try {
     const transfer = await runObservedFileTransfer({ kind: 'upload-path', localPath, remoteDirectory: currentPath.value }, getListOptions())
@@ -1063,7 +984,7 @@ const queueCrossTransfer = async (payload: FsDragPayload, targetDir: string) => 
   const sourceSession = workspace.fileSessions.find((session) => session.id === payload.fromUuid)
   const sourceIsLocal = sourceSession?.kind === 'local'
   const targetIsLocal = getTargetType() === 'local'
-  const targetPath = payload.isDir ? targetDir : joinPath(targetDir, payload.name)
+  const targetPath = payload.isDir ? targetDir : joinFileBrowserPath(targetDir, payload.name)
   loading.value = true
   try {
     const operation = sourceIsLocal
@@ -1161,7 +1082,7 @@ const handleEntryDrop = async (event: DragEvent, entry: FileBrowserEntry) => {
   }
   const payload = readFsDragPayload(event)
   const sourceSide = getGlobalDragSide()
-  const targetDir = getEntryDropDirectory(entry)
+  const targetDir = fileBrowserEntryDropDirectory(entry, currentPath.value)
   if (payload && props.panelSide) {
     clearOutgoingFileDrag()
     if (!sourceSide || payload.fromSide === props.panelSide || payload.fromUuid === props.session.id) {
@@ -1193,7 +1114,7 @@ const confirmRename = async (entry: FileBrowserEntry) => {
     setFileNotice('请输入新文件名')
     return
   }
-  const newPath = `${dirname(entry.path)}/${name}`.replace(/\/+/g, '/')
+  const newPath = fileBrowserRenamePath(entry.path, name)
   if (newPath === entry.path) {
     cancelRename()
     return
@@ -1224,19 +1145,11 @@ const openPermissions = (entry: FileBrowserEntry) => {
 }
 
 const parsePermissionMode = (mode: string) => {
-  const digits = mode.match(/[0-7]{3}$/)?.[0]
-  if (!digits) return
-  const applyDigit = (digit: string) => {
-    const value = Number(digit)
-    const next: string[] = []
-    if (value & 4) next.push('读')
-    if (value & 2) next.push('写')
-    if (value & 1) next.push('执行')
-    return next
-  }
-  permissions.owner = applyDigit(digits[0])
-  permissions.group = applyDigit(digits[1])
-  permissions.public = applyDigit(digits[2])
+  const parsed = parseFilePermissionMode(mode)
+  if (!parsed) return
+  permissions.owner = parsed.owner
+  permissions.group = parsed.group
+  permissions.public = parsed.public
 }
 
 const confirmPermissions = async () => {
@@ -1313,8 +1226,7 @@ const closeMoveDialog = () => {
 }
 
 const getTargetPathForIndex = (index: number) => {
-  const parts = targetBreadcrumb.value.slice(0, index + 1)
-  return normalizePath(parts[0] === '/' ? `/${parts.slice(1).join('/')}` : parts.join('/'))
+  return fileBrowserTargetPathForBreadcrumbIndex(moveDialog.targetPath, index)
 }
 
 const startTargetPathEdit = () => {
@@ -1323,7 +1235,7 @@ const startTargetPathEdit = () => {
 }
 
 const stopTargetPathEdit = () => {
-  moveDialog.targetPath = normalizePath(moveDialog.targetPath)
+  moveDialog.targetPath = normalizeFileBrowserPath(moveDialog.targetPath)
   moveDialog.editingPath = false
 }
 
@@ -1346,14 +1258,14 @@ const toggleTargetMenu = async (index: number) => {
 
 const enterTargetSubDir = (index: number, name: string) => {
   const basePath = getTargetPathForIndex(index)
-  moveDialog.targetPath = normalizePath(`${basePath}/${name}`)
+  moveDialog.targetPath = joinFileBrowserPath(basePath, name)
   moveDialog.editingPath = false
   moveDialog.activeMenuIndex = null
   clearTargetSubDirs()
 }
 
 const getTargetDirectoryNames = async (targetPath: string) => {
-  if (normalizePath(targetPath) === normalizePath(currentPath.value)) {
+  if (normalizeFileBrowserPath(targetPath) === normalizeFileBrowserPath(currentPath.value)) {
     return entries.value.map((entry) => entry.name).filter((name) => name !== '..')
   }
   const list = await listDirectoryEntries(targetPath)
@@ -1365,22 +1277,12 @@ const targetFileExists = async (targetPath: string, name: string) => {
 }
 
 const buildConflictName = async (targetPath: string, name: string) => {
-  const names = new Set(await getTargetDirectoryNames(targetPath))
-  const dotIndex = name.lastIndexOf('.')
-  const base = dotIndex > 0 ? name.slice(0, dotIndex) : name
-  const ext = dotIndex > 0 ? name.slice(dotIndex) : ''
-  let index = 1
-  let candidate = `${base}_${index}${ext}`
-  while (names.has(candidate)) {
-    index += 1
-    candidate = `${base}_${index}${ext}`
-  }
-  return candidate
+  return uniqueConflictFileName(await getTargetDirectoryNames(targetPath), name)
 }
 
 const confirmMove = async () => {
   if (!moveDialog.entry) return
-  moveDialog.targetPath = normalizePath(moveDialog.targetPath)
+  moveDialog.targetPath = normalizeFileBrowserPath(moveDialog.targetPath)
   moveDialog.editingPath = false
   moveDialog.activeMenuIndex = null
   const targetName = moveDialog.entry.name
@@ -1401,7 +1303,7 @@ const confirmMove = async () => {
 const queueMoveTarget = async (name: string, overwrite = false) => {
   if (!moveDialog.entry) return
   const entry = moveDialog.entry
-  const targetPath = `${moveDialog.targetPath}/${name}`.replace(/\/+/g, '/')
+  const targetPath = joinFileBrowserPath(moveDialog.targetPath, name)
   loading.value = true
   try {
     await mutateEntry(
@@ -1492,7 +1394,7 @@ const onGlobalClick = (event: MouseEvent) => {
 watch(
   () => props.session.id,
   async () => {
-    currentPath.value = normalizePath(props.session.rootPath)
+    currentPath.value = normalizeFileBrowserPath(props.session.rootPath)
     pathInput.value = currentPath.value
     entries.value = []
     await loadEntries(currentPath.value, { preserveOnFailure: false })

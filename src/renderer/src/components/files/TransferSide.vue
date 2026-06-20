@@ -71,6 +71,7 @@
 import { computed, ref } from 'vue'
 import { ChevronDown, Plus, X } from 'lucide-vue-next'
 import FileBrowser from '@/components/files/FileBrowser.vue'
+import { isSelectedFileSessionSftpPayload, selectedFileSessionSnapshot } from '@/services/filesRuntime'
 import { useWorkspaceStore } from '@/stores/workspace'
 import type { FileSessionInfo } from '@shared/contracts/files'
 
@@ -118,13 +119,8 @@ const readSftpDragPayload = (event: DragEvent) => {
 }
 
 const isDuplicatePayload = (payload: Record<string, unknown>) => {
-  const payloadId = String(payload.uuid || payload.id || '')
-  const payloadHost = String(payload.host || payload.ip || '')
-  return [store.selectedLeftFileSession, store.selectedRightFileSession].some((session) => {
-    if (!session) return false
-    if (payloadId && session.id === payloadId) return true
-    return payloadHost && session.host === payloadHost
-  })
+  const selection = selectedFileSessionSnapshot(store.fileSessions, store.selectedLeftFileSessionId, store.selectedRightFileSessionId)
+  return isSelectedFileSessionSftpPayload(selection, payload)
 }
 
 const openDroppedSession = async (event: DragEvent) => {

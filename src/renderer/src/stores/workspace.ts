@@ -80,6 +80,27 @@ import {
 } from '@/services/filesBackendGuards'
 import { filesClient } from '@/services/filesClient'
 import {
+  affectedFileTransferTaskIds as affectedFileTransferTaskIdsRuntime,
+  cloneFileSessionCatalog,
+  defaultFileOpenSide,
+  defaultFileSessionSide,
+  fileTransferOverallPercent,
+  fileTransferTaskRemovalDelay,
+  fileSessionTerminalContextForPanel,
+  findFileSessionForSftpPayload,
+  findFileSession,
+  groupFileTransferTasks,
+  hasRunningFileTransferTasks as hasRunningFileTransferTasksRuntime,
+  markFileTransferTasksCancelled as markFileTransferTasksCancelledRuntime,
+  mergeFileTransferTaskSnapshot as mergeFileTransferTaskSnapshotRuntime,
+  nextSelectedFileSessionIds,
+  normalizeFileSessionFolderSaveInput,
+  normalizeFileTransferTask,
+  normalizeFileTransferTaskSnapshot,
+  openFileSessionSelection,
+  upsertFileTransferTask
+} from '@/services/filesRuntime'
+import {
   expectedKnowledgeRelPath,
   isKnowledgeDeleteResultData,
   isKnowledgeEnsureRootResultData,
@@ -470,7 +491,7 @@ import type {
   WorkspaceUserConfig
 } from '@shared/contracts/appRuntime'
 import type { AliasCommandConfig, AliasCommandSaveInput } from '@shared/contracts/aliases'
-import type { FileSessionCatalog, FileSessionFolderRecord, FileSessionFolderSaveInput, FileSessionInfo, FileSessionPatch, FileSessionTerminalContext, FileTransferTask } from '@shared/contracts/files'
+import type { FileSessionCatalog, FileSessionFolderRecord, FileSessionFolderSaveInput, FileSessionInfo, FileSessionPatch, FileTransferTask } from '@shared/contracts/files'
 import type { AiopsTrustedDevice, AiopsUserAccountSnapshot, AiopsUserExternalAction, AiopsUserExternalActionResult, AiopsUserMutationResult, AiopsUserProfile } from '@shared/contracts/userAccount'
 import type { ExtensionInstallProgress as BackendExtensionInstallProgress, ExtensionInstallStage, ExtensionPluginOperation, ExtensionPluginRuntimeConfig, ExtensionUserConfig } from '@shared/contracts/extensions'
 import type { QuickCommandScriptPlan } from '@shared/contracts/quickCommands'
@@ -1654,23 +1675,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const syncCurrentConversationSnapshot = (options: { notifyUnavailable?: boolean; notifyFailure?: boolean } = {}) =>
     updateCurrentConversationSnapshot(undefined, options)
 
-  const selectedLeftFileSession = computed(() => fileSessions.value.find((session) => session.id === selectedLeftFileSessionId.value) || null)
-  const selectedRightFileSession = computed(() => fileSessions.value.find((session) => session.id === selectedRightFileSessionId.value) || null)
-  const transferTaskGroups = computed(() => {
-    const groups = {
-      download: fileTransferTasks.value.filter((task) => task.type === 'download'),
-      upload: fileTransferTasks.value.filter((task) => task.type === 'upload'),
-      r2r: fileTransferTasks.value.filter((task) => task.type === 'r2r')
-    }
-    return groups
-  })
+  const selectedLeftFileSession = computed(() => findFileSession(fileSessions.value, selectedLeftFileSessionId.value))
+  const selectedRightFileSession = computed(() => findFileSession(fileSessions.value, selectedRightFileSessionId.value))
+  const transferTaskGroups = computed(() => groupFileTransferTasks(fileTransferTasks.value))
   const transferTaskCount = computed(() => fileTransferTasks.value.length)
-  const transferOverallPercent = computed(() => {
-    if (!fileTransferTasks.value.length) return 0
-    const sum = fileTransferTasks.value.reduce((acc, task) => acc + task.progress, 0)
-    return Math.round(sum / fileTransferTasks.value.length)
-  })
-  const hasRunningFileTransferTasks = computed(() => fileTransferTasks.value.some((task) => task.status === 'running'))
+  const transferOverallPercent = computed(() => fileTransferOverallPercent(fileTransferTasks.value))
+  const hasRunningFileTransferTasks = computed(() => hasRunningFileTransferTasksRuntime(fileTransferTasks.value))
   const terminalCommandModelOptions = computed(() =>
     settingModelOptions.value.filter((model) => model.checked && !model.locked && !model.name.endsWith('-Thinking')).map((model) => model.name)
   )
@@ -6856,56 +6866,16 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     fileTransferTaskRemovalTimers.delete(id)
   }
 
-  const normalizeFileTransferTask = (value: unknown): FileTransferTask | null => {
-    if (!isRecord(value)) return null
-    const type = value.type === 'download' || value.type === 'upload' || value.type === 'r2r' ? value.type : null
-    const name = typeof value.name === 'string' ? value.name.trim() : ''
-    const source = typeof value.source === 'string' ? value.source : ''
-    const target = typeof value.target === 'string' ? value.target : ''
-    const id = typeof value.id === 'string' && value.id.trim() ? value.id.trim() : ''
-    if (!id || !type || !name || !source || !target) return null
-    const status =
-      value.status === 'running' || value.status === 'success' || value.status === 'failed' || value.status === 'error'
-        ? value.status
-        : 'running'
-    const progress = typeof value.progress === 'number' && Number.isFinite(value.progress) ? Math.min(100, Math.max(0, Math.round(value.progress))) : 0
-    const stage = value.stage === 'scanning' || value.stage === 'pending' ? value.stage : undefined
-    const task: FileTransferTask = {
-      id,
-      type,
-      name,
-      source,
-      target,
-      progress,
-      speed: typeof value.speed === 'string' && value.speed.trim() ? value.speed : status === 'running' ? 'pending' : '',
-      status,
-      ...(stage ? { stage } : {}),
-      ...(value.isGroup === true ? { isGroup: true } : {}),
-      ...(typeof value.fromHost === 'string' && value.fromHost ? { fromHost: value.fromHost } : {}),
-      ...(typeof value.toHost === 'string' && value.toHost ? { toHost: value.toHost } : {}),
-      ...(typeof value.totalFiles === 'number' && Number.isFinite(value.totalFiles) ? { totalFiles: Math.max(0, Math.round(value.totalFiles)) } : {}),
-      ...(typeof value.finishedFiles === 'number' && Number.isFinite(value.finishedFiles)
-        ? { finishedFiles: Math.max(0, Math.round(value.finishedFiles)) }
-        : {})
-    }
-    const children = Array.isArray(value.children) ? value.children.map(normalizeFileTransferTask).filter((child): child is FileTransferTask => !!child) : []
-    if (children.length) task.children = children
-    return task
-  }
-
   const normalizedFileTransferTaskSnapshot = (tasks: unknown[]) => {
     if (!tasks.every(isFileTransferTaskData)) {
       setTopNotice(malformedFilesBackendResultMessage)
       return null
     }
-    return tasks.map(normalizeFileTransferTask).filter((task): task is FileTransferTask => !!task)
+    return normalizeFileTransferTaskSnapshot(tasks)
   }
 
   const mergeFileTransferTaskSnapshot = (snapshot: FileTransferTask[], options: { replaceCompleted?: boolean } = {}) => {
-    const replaceCompleted = options.replaceCompleted === true
-    const activeIds = new Set(snapshot.map((task) => task.id))
-    const finished = fileTransferTasks.value.filter((task) => task.status !== 'running' && !activeIds.has(task.id))
-    fileTransferTasks.value = replaceCompleted ? snapshot : [...snapshot, ...finished]
+    fileTransferTasks.value = mergeFileTransferTaskSnapshotRuntime(fileTransferTasks.value, snapshot, options)
     snapshot.forEach((task) => clearFileTransferTaskRemovalTimer(task.id))
     return true
   }
@@ -6937,14 +6907,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       setTopNotice(malformedFilesBackendResultMessage)
       return null
     }
-    fileSessions.value = catalog.sessions.map((session) => ({ ...session }))
-    fileSessionFolders.value = catalog.folders.map((folder) => ({ ...folder }))
-    if (!fileSessions.value.some((session) => session.id === selectedLeftFileSessionId.value)) {
-      selectedLeftFileSessionId.value = null
-    }
-    if (!fileSessions.value.some((session) => session.id === selectedRightFileSessionId.value)) {
-      selectedRightFileSessionId.value = fileSessions.value.some((session) => session.id === 'local') ? 'local' : fileSessions.value[0]?.id || null
-    }
+    const nextCatalog = cloneFileSessionCatalog(catalog)
+    fileSessions.value = nextCatalog.sessions
+    fileSessionFolders.value = nextCatalog.folders
+    const selection = nextSelectedFileSessionIds(fileSessions.value, selectedLeftFileSessionId.value, selectedRightFileSessionId.value)
+    selectedLeftFileSessionId.value = selection.left
+    selectedRightFileSessionId.value = selection.right
     return catalog
   }
 
@@ -7050,14 +7018,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const saveFileSessionFolder = async (folder: FileSessionFolderSaveInput) => {
-    const normalized = {
-      ...(folder.uuid ? { uuid: folder.uuid } : {}),
-      name: folder.name.trim(),
-      description: (folder.description || '').trim(),
-      ...(folder.parentUuid ? { parentUuid: folder.parentUuid } : {}),
-      ...(folder.scope ? { scope: folder.scope } : {})
-    }
-    if (!normalized.name) return null
+    const normalized = normalizeFileSessionFolderSaveInput(folder)
+    if (!normalized) return null
     const saveFileSessionFolderBridge = filesClient.saveFileSessionFolder()
     if (!saveFileSessionFolderBridge) {
       setTopNotice('文件会话文件夹写入服务不可用')
@@ -7131,56 +7093,14 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     selectedRightFileSessionId.value = id
   }
 
-  const openFileSession = (sessionId: string, side: 'left' | 'right' = selectedLeftFileSessionId.value ? 'right' : 'left') => {
-    const session = fileSessions.value.find((item) => item.id === sessionId)
-    if (!session) return
-    selectFileSession(side, session.id)
+  const openFileSession = (sessionId: string, side: 'left' | 'right' = defaultFileOpenSide(selectedLeftFileSessionId.value)) => {
+    const selection = openFileSessionSelection(fileSessions.value, sessionId, side, selectedLeftFileSessionId.value, selectedRightFileSessionId.value)
+    if (!selection.session) return
+    selectedLeftFileSessionId.value = selection.left
+    selectedRightFileSessionId.value = selection.right
   }
 
-  const fileSideForTerminalPanel = () => {
-    if (!selectedLeftFileSessionId.value) return 'left'
-    if (!selectedRightFileSessionId.value) return 'right'
-    return 'left'
-  }
-
-  const fileSessionPanelStatus = (status: TerminalPanel['status']): FileSessionTerminalContext['panelStatus'] => {
-    if (status === 'error') return 'closed'
-    if (status === 'connecting') return 'running'
-    return status
-  }
-
-  const fileSessionTerminalContextForPanel = (panel: TerminalPanel): FileSessionTerminalContext => {
-    const ssh = panel.sshSession
-    const hasSshBackendConnection = Boolean(ssh?.connectionId)
-    return {
-      kind: ssh ? 'ssh' : 'local',
-      panelId: panel.id,
-      panelTitle: panel.title,
-      panelStatus: fileSessionPanelStatus(panel.status),
-      sessionId: ssh && !hasSshBackendConnection ? undefined : panel.sessionId,
-      cwd: ssh && !hasSshBackendConnection ? undefined : panel.cwd,
-      ...(ssh
-        ? {
-            ssh: {
-              connectionId: ssh.connectionId,
-              host: ssh.host,
-              port: ssh.port,
-              username: ssh.username,
-              assetId: ssh.assetId,
-              assetName: ssh.assetName,
-              assetType: ssh.assetType,
-              organizationId: ssh.organizationId,
-              jumpHostId: ssh.jumpHostId,
-              authType: ssh.authType,
-              needProxy: ssh.needProxy,
-              proxyName: ssh.proxyName,
-              createdAt: ssh.createdAt,
-              forkFromConnectionId: ssh.forkFromConnectionId
-            }
-          }
-        : {})
-    }
-  }
+  const fileSideForTerminalPanel = () => defaultFileSessionSide(selectedLeftFileSessionId.value, selectedRightFileSessionId.value)
 
   const ensureFileSessionForTerminalPanel = async (panelId = activePanelId.value, side: 'left' | 'right' = fileSideForTerminalPanel()) => {
     const panel = panels.value.find((item) => item.id === panelId || item.sessionId === panelId)
@@ -7258,9 +7178,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const addRemoteFileSessionFromSftpPayload = async (payload: Record<string, unknown>, side: 'left' | 'right' = 'left') => {
-    const payloadId = String(payload.uuid || payload.id || payload.assetId || '').trim()
-    const payloadHost = String(payload.host || payload.ip || '').trim()
-    const known = fileSessions.value.find((item) => (payloadId && item.id === payloadId) || (payloadHost && item.host === payloadHost))
+    const known = findFileSessionForSftpPayload(fileSessions.value, payload)
     if (known) {
       openFileSession(known.id, side)
       return known
@@ -7296,42 +7214,18 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const normalized = normalizeFileTransferTask(task)
     if (!normalized) return null
     clearFileTransferTaskRemovalTimer(normalized.id)
-    fileTransferTasks.value = fileTransferTasks.value.filter((item) => item.id !== normalized.id)
-    fileTransferTasks.value.unshift(normalized)
-    if (normalized.status === 'success' || normalized.status === 'failed' || normalized.status === 'error') {
-      scheduleFileTransferTaskRemoval(normalized.id, normalized.status === 'success' ? 2500 : 8000)
-    }
+    fileTransferTasks.value = upsertFileTransferTask(fileTransferTasks.value, normalized)
+    const removalDelay = fileTransferTaskRemovalDelay(normalized)
+    if (removalDelay !== null) scheduleFileTransferTaskRemoval(normalized.id, removalDelay)
     return normalized
   }
 
-  const affectedFileTransferTaskIds = (id: string) => {
-    const taskIds = new Set<string>([id])
-    fileTransferTasks.value.forEach((item) => {
-      if (item.children?.some((child) => child.id === id)) {
-        taskIds.add(item.id)
-        item.children?.forEach((child) => taskIds.add(child.id))
-      }
-      if (item.id === id && item.children?.length) {
-        item.children.forEach((child) => taskIds.add(child.id))
-      }
-    })
-    return taskIds
-  }
+  const affectedFileTransferTaskIds = (id: string) => affectedFileTransferTaskIdsRuntime(fileTransferTasks.value, id)
 
   const markFileTransferTasksCancelled = (ids: Iterable<string>) => {
     const taskIds = new Set(ids)
-    const affected = fileTransferTasks.value.filter((item) => taskIds.has(item.id))
-    affected.forEach((task) => {
-      task.status = 'failed'
-      task.speed = '已取消'
-      task.progress = Math.min(task.progress, 99)
-      task.children?.forEach((child) => {
-        child.status = 'failed'
-        child.speed = '已取消'
-        child.progress = Math.min(child.progress, 99)
-      })
-      scheduleFileTransferTaskRemoval(task.id, 800)
-    })
+    fileTransferTasks.value = markFileTransferTasksCancelledRuntime(fileTransferTasks.value, taskIds)
+    fileTransferTasks.value.filter((task) => taskIds.has(task.id)).forEach((task) => scheduleFileTransferTaskRemoval(task.id, 800))
   }
 
   const cancelFileTransferTask = async (id: string) => {
