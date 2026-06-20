@@ -1023,6 +1023,48 @@ describe('aiopsterm-control CLI', () => {
     expect(seen).toEqual([expect.objectContaining({ method: 'workspace.snapshot' })])
   })
 
+  it('prints the current automation context over the configured socket', async () => {
+    const seen: Record<string, unknown>[] = []
+    const socketPath = await startControlServer((request) => {
+      seen.push(request)
+      return {
+        id: request.id,
+        ok: true,
+        data: {
+          activeSurface: { panelId: 'panel-1', kind: 'terminal', connected: true, title: 'Local API' },
+          activeTerminal: { panelId: 'panel-1', sessionId: 'terminal-1', kind: 'local', cwd: '/work/api', title: 'Local API' },
+          writableTerminals: [{ panelId: 'panel-1', sessionId: 'terminal-1', kind: 'local', connected: true }],
+          pendingAiSessions: [
+            {
+              source: 'claude-code',
+              sessionId: 'claude-approval-1',
+              id: 'claude-approval-1',
+              title: 'Deploy approval',
+              summary: 'Approve rollout',
+              state: 'needsInput',
+              needsInput: true,
+              requestKind: 'permission',
+              decisionMode: 'blocking',
+              panelId: 'panel-1'
+            }
+          ],
+          unreadNotifications: [{ id: 'notify-1', source: 'ci', level: 'success', title: 'Deploy done' }],
+          counts: { writableTerminals: 1, pendingAiSessions: 1, unreadNotifications: 1 },
+          suggestions: [{ label: 'Read active terminal screen', command: 'aiopsterm-control terminal read-screen --panel panel-1 --lines 80' }]
+        }
+      }
+    })
+
+    const result = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'context'], {
+      cwd: process.cwd()
+    })
+    expect(result.stdout).toContain('context\tactive=panel-1\tterminal=terminal-1\twritable=1\tpending_ai=1\tunread=1')
+    expect(result.stdout).toContain('active-terminal\tpanel-1\tterminal-1\tlocal\t/work/api\tLocal API')
+    expect(result.stdout).toContain('pending-ai\t!\tclaude-code\tclaude-approval-1\tneedsInput\tpermission\tpanel-1\tDeploy approval')
+    expect(result.stdout).toContain('suggest\tRead active terminal screen\taiopsterm-control terminal read-screen --panel panel-1 --lines 80')
+    expect(seen).toEqual([expect.objectContaining({ method: 'workspace.context' })])
+  })
+
   it('sends workspace group requests over the configured socket', async () => {
     const seen: Record<string, unknown>[] = []
     const socketPath = await startControlServer((request) => {

@@ -613,6 +613,87 @@ describe('control socket backend', () => {
     expect(mockWindow.requests).toEqual([expect.objectContaining({ method: 'workspace.snapshot' })])
   })
 
+  it('summarizes the current automation context from the renderer workspace snapshot', async () => {
+    const backend = await loadBackend()
+    backend.registerControlSocketIpc({
+      handle: (_channel, handler) => {
+        mockIpcHandler = handler
+      }
+    })
+    mockWindow = createMockWindow(() => ({
+      ok: true,
+      data: {
+        snapshot: {
+          generatedAt: 1000,
+          mode: 'terminal',
+          activeModule: 'workspace',
+          activePanelId: 'panel-1',
+          workspaces: [{ id: 'main', title: 'Main Workspace', active: true, mode: 'terminal', activeModule: 'workspace', activePanelId: 'panel-1' }],
+          terminals: [{ panelId: 'panel-1', sessionId: 'terminal-1', title: 'Local API', kind: 'local', active: true, connected: true, cwd: '/work/api' }],
+          surfaces: [{ panelId: 'panel-1', title: 'Local API', surfaceKind: 'terminal', active: true, sessionId: 'terminal-1', terminalKind: 'local', connected: true, cwd: '/work/api' }],
+          splitGroups: [],
+          workspaceGroups: [],
+          notifications: [{ id: 'notify-1', title: 'Deploy done', body: 'All green', read: false, source: 'ci', level: 'success', group: 'build', createdAt: 900, updatedAt: 900 }],
+          managedAiSessions: [
+            {
+              id: 'claude-approval-1',
+              source: 'claude-code',
+              title: 'Deploy approval',
+              summary: 'Approve rollout',
+              state: 'needsInput',
+              lastEvent: 'permission_request',
+              lastActivityAt: 950,
+              createdAt: 900,
+              updatedAt: 950,
+              needsInput: true,
+              requestKind: 'permission',
+              decisionMode: 'blocking',
+              actionable: true,
+              pendingRequestId: 'request-1',
+              panelId: 'panel-1',
+              terminalSessionId: 'terminal-1',
+              cwd: '/work/api',
+              eventCount: 1,
+              decisionCount: 0
+            }
+          ],
+          agentHibernation: { enabled: false, idleSeconds: 300, maxLiveTerminals: 12, confirmationSeconds: 60 },
+          attention: { unreadCount: 1, items: [{ id: 'managed-ai:claude-code:claude-approval-1', source: 'claude-code', kind: 'permission', title: 'Deploy approval', summary: 'Approve rollout', priority: 100, createdAt: 950, sessionId: 'claude-approval-1', surfaceId: 'panel-1' }] },
+          counts: {
+            terminals: 1,
+            connectedTerminals: 1,
+            surfaces: 1,
+            splitGroups: 0,
+            workspaceGroups: 0,
+            notifications: 1,
+            unreadNotifications: 1,
+            managedAiSessions: 1,
+            managedAiNeedsInput: 1,
+            attentionItems: 1
+          }
+        }
+      }
+    }))
+    backend.configureControlSocketRuntime({ getWindows: () => [mockWindow] })
+
+    await expect(backend.__testing.handleControlRequest({ method: 'workspace.context' })).resolves.toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
+          activeTerminal: expect.objectContaining({ panelId: 'panel-1', sessionId: 'terminal-1', cwd: '/work/api' }),
+          counts: expect.objectContaining({ writableTerminals: 1, pendingAiSessions: 1, unreadNotifications: 1 }),
+          pendingAiSessions: [expect.objectContaining({ source: 'claude-code', sessionId: 'claude-approval-1', pendingRequestId: 'request-1' })],
+          unreadNotifications: [expect.objectContaining({ id: 'notify-1', title: 'Deploy done' })],
+          suggestions: expect.arrayContaining([
+            expect.objectContaining({ label: 'Read active terminal screen', rpc: expect.objectContaining({ method: 'terminal.read_screen' }) }),
+            expect.objectContaining({ label: 'Open next pending AI session', rpc: expect.objectContaining({ method: 'feed.jump' }) })
+          ])
+        })
+      })
+    )
+    expect(mockWindow.requests).toEqual([expect.objectContaining({ method: 'workspace.snapshot' })])
+  })
+
   it('exposes control_compat-style system and window compatibility controls without closing user windows', async () => {
     const backend = await loadBackend()
     backend.registerControlSocketIpc({

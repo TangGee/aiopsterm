@@ -13,6 +13,7 @@ Commands:
   ping
   capabilities
   identify
+  context [--include-snapshot]
   rpc <method> [--params-json <json>]
   auth login|status|sign-in-url|begin-sign-in|sign-out
   settings open [--target <section>]
@@ -36,7 +37,7 @@ Commands:
   mobile events subscribe|unsubscribe [--stream <id>] [--topic <name>...]
   hooks list|setup|install|uninstall [--agent <name>]
   feed list|jump|push|permission-reply|question-reply|exit-plan-reply|mark-handled|clear-ended|clear [--yes]
-  workspace snapshot
+  workspace snapshot|context
   workspace list|current
   workspace env [--workspace <id>|--surface <id>] [--mask]
   workspace set-auto-title <title> [--workspace <id>|--panel <id>] [--probe]
@@ -186,6 +187,7 @@ const methodParams = () => {
   if (command === 'ping') return { method: 'ping', params: {} }
   if (command === 'capabilities' || command === 'system-capabilities') return { method: 'system.capabilities', params: {} }
   if (command === 'identify' || command === 'system-identify') return { method: 'system.identify', params: { caller: readCallerParams() } }
+  if (command === 'context') return workspaceContextMethodParams()
   if (command === 'auth') return authMethodParams(args.shift() || 'login')
   if (command === 'settings') return settingsMethodParams(args.shift() || 'open')
   if (command === 'feedback') return feedbackMethodParams(args.shift() || 'open')
@@ -208,6 +210,7 @@ const methodParams = () => {
   if (command === 'workspace') {
     const subcommand = args.shift() || 'snapshot'
     if (subcommand === 'snapshot') return { method: 'workspace.snapshot', params: {} }
+    if (subcommand === 'context') return workspaceContextMethodParams()
     if (subcommand === 'list') return { method: 'workspace.list', params: {} }
     if (subcommand === 'current') return { method: 'workspace.current', params: {} }
     if (subcommand === 'action') return workspaceOrSurfaceActionMethodParams('workspace.action')
@@ -693,6 +696,18 @@ const readCallerParams = () => {
   if (workspaceId) caller.workspaceId = workspaceId
   if (cwd) caller.cwd = cwd
   return caller
+}
+
+const workspaceContextMethodParams = () => {
+  const includeSnapshot = hasFlag('--include-snapshot') || hasFlag('--include_snapshot')
+  return {
+    method: 'workspace.context',
+    params: {
+      caller: readCallerParams(),
+      includeSnapshot,
+      include_snapshot: includeSnapshot
+    }
+  }
 }
 
 const notificationMetadataParams = () => ({
@@ -2228,6 +2243,37 @@ const printResponse = (response) => {
     process.stdout.write(['memory', `system=${memory.system?.used_bytes || 0}/${memory.system?.total_bytes || 0}`, `children=${children.recursive_rss_bytes || 0}`, `child_processes=${children.process_count || 0}`].join('\t') + '\n')
     if (Array.isArray(data.coding_agents)) {
       for (const agent of data.coding_agents) process.stdout.write(['agent', agent.id || '-', agent.session_count || 0].join('\t') + '\n')
+    }
+    return
+  }
+  if (data.activeSurface || data.activeTerminal || Array.isArray(data.pendingAiSessions) || Array.isArray(data.suggestions)) {
+    const counts = data.counts || {}
+    const activeSurface = data.activeSurface || {}
+    const activeTerminal = data.activeTerminal || {}
+    process.stdout.write(
+      [
+        'context',
+        `active=${activeSurface.panelId || activeTerminal.panelId || '-'}`,
+        `terminal=${activeTerminal.sessionId || '-'}`,
+        `writable=${counts.writableTerminals || 0}`,
+        `pending_ai=${counts.pendingAiSessions || 0}`,
+        `unread=${counts.unreadNotifications || 0}`
+      ].join('\t') + '\n'
+    )
+    if (activeTerminal.panelId || activeTerminal.sessionId) {
+      process.stdout.write(['active-terminal', activeTerminal.panelId || '-', activeTerminal.sessionId || '-', activeTerminal.kind || '-', activeTerminal.cwd || '-', activeTerminal.title || ''].join('\t') + '\n')
+    }
+    if (activeSurface.panelId && activeSurface.panelId !== activeTerminal.panelId) {
+      process.stdout.write(['active-surface', activeSurface.panelId || '-', activeSurface.kind || '-', activeSurface.connected ? 'connected' : '-', activeSurface.title || ''].join('\t') + '\n')
+    }
+    if (Array.isArray(data.pendingAiSessions)) {
+      for (const session of data.pendingAiSessions) printAgentSessionLine(session, 'pending-ai')
+    }
+    if (Array.isArray(data.unreadNotifications)) {
+      for (const notification of data.unreadNotifications) process.stdout.write(['notification', '!', notification.id || '-', notification.source || '-', notification.level || '-', notification.title || ''].join('\t') + '\n')
+    }
+    if (Array.isArray(data.suggestions)) {
+      for (const suggestion of data.suggestions) process.stdout.write(['suggest', suggestion.label || '-', suggestion.command || ''].join('\t') + '\n')
     }
     return
   }

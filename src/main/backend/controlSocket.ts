@@ -15,6 +15,7 @@ import type {
   ControlResponse,
   ControlSessionSnapshot,
   ControlTerminalSummary,
+  ControlWorkspaceSnapshot,
   ManagedAiSessionDecisionKind,
   ManagedAiSessionBulkOperation,
   ManagedAiSessionRecord
@@ -252,6 +253,7 @@ const controlSocketCapabilities = [
   'file.open',
   'markdown.open',
   'workspace.snapshot',
+  'workspace.context',
   'workspace.list',
   'workspace.current',
   'workspace.env',
@@ -1336,6 +1338,149 @@ const workspaceSnapshotOrNull = async (params: Record<string, unknown>) => {
   const snapshot = response.data?.snapshot && typeof response.data.snapshot === 'object' ? (response.data.snapshot as Record<string, unknown>) : null
   if (!snapshot) return { snapshot: null, warning: fail('SYSTEM_TOP_SNAPSHOT_INVALID', 'Renderer returned an invalid workspace snapshot.') }
   return { snapshot, warning: null }
+}
+
+const asWorkspaceSnapshot = (value: Record<string, unknown>): ControlWorkspaceSnapshot => value as unknown as ControlWorkspaceSnapshot
+
+const targetFlagsForContext = (target: { panelId?: string; sessionId?: string; terminalSessionId?: string }) => ({
+  ...(target.panelId ? { panelId: target.panelId, surfaceId: target.panelId } : {}),
+  ...(target.sessionId || target.terminalSessionId ? { sessionId: target.sessionId || target.terminalSessionId, terminalSessionId: target.sessionId || target.terminalSessionId } : {})
+})
+
+const commandSuggestion = (label: string, command: string, method: string, params: Record<string, unknown> = {}) => ({
+  label,
+  command,
+  rpc: { method, params }
+})
+
+const surfaceContextSummary = (surface: ControlWorkspaceSnapshot['surfaces'][number]) => ({
+  panelId: surface.panelId,
+  surfaceId: surface.panelId,
+  title: surface.title,
+  kind: surface.surfaceKind,
+  active: surface.active,
+  connected: surface.connected === true,
+  ...(surface.sessionId ? { sessionId: surface.sessionId, terminalSessionId: surface.sessionId } : {}),
+  ...(surface.terminalKind ? { terminalKind: surface.terminalKind } : {}),
+  ...(surface.cwd ? { cwd: surface.cwd } : {}),
+  ...(surface.splitGroupId ? { splitGroupId: surface.splitGroupId } : {}),
+  ...(surface.knowledge ? { knowledge: surface.knowledge } : {})
+})
+
+const terminalContextSummary = (terminal: ControlTerminalSummary) => ({
+  panelId: terminal.panelId,
+  surfaceId: terminal.panelId,
+  sessionId: terminal.sessionId,
+  terminalSessionId: terminal.sessionId,
+  title: terminal.title,
+  kind: terminal.kind,
+  active: terminal.active,
+  connected: terminal.connected === true,
+  ...(terminal.cwd ? { cwd: terminal.cwd } : {}),
+  ...(terminal.shell ? { shell: terminal.shell } : {}),
+  ...(terminal.kind === 'ssh' ? { ssh: { host: terminal.host, port: terminal.port, username: terminal.username, assetId: terminal.assetId, assetName: terminal.assetName } } : {}),
+  ...(terminal.cols ? { columns: terminal.cols, cols: terminal.cols } : {}),
+  ...(terminal.rows ? { rows: terminal.rows } : {})
+})
+
+const managedAiContextSummary = (session: ControlWorkspaceSnapshot['managedAiSessions'][number]) => ({
+  id: session.id,
+  sessionId: session.id,
+  source: session.source,
+  title: session.title,
+  summary: session.summary,
+  state: session.state,
+  needsInput: session.needsInput,
+  requestKind: session.requestKind,
+  decisionMode: session.decisionMode,
+  ...(session.pendingRequestId ? { pendingRequestId: session.pendingRequestId } : {}),
+  ...(session.panelId ? { panelId: session.panelId, surfaceId: session.panelId } : {}),
+  ...(session.terminalSessionId ? { terminalSessionId: session.terminalSessionId } : {}),
+  ...(session.cwd ? { cwd: session.cwd } : {}),
+  ...(session.resumeCommand ? { resumeCommand: session.resumeCommand } : {}),
+  lastActivityAt: session.lastActivityAt
+})
+
+const workspaceContextPayload = async (params: Record<string, unknown>) => {
+  const response = await dispatchRendererControlRequest('workspace.snapshot', params)
+  if (!response.ok) return response
+  const rawSnapshot = response.data?.snapshot && typeof response.data.snapshot === 'object' ? (response.data.snapshot as Record<string, unknown>) : null
+  if (!rawSnapshot) return fail('WORKSPACE_CONTEXT_SNAPSHOT_INVALID', 'Renderer returned an invalid workspace snapshot.')
+  const snapshot = asWorkspaceSnapshot(rawSnapshot)
+  const activeSurface = snapshot.surfaces.find((surface) => surface.panelId === snapshot.activePanelId) || snapshot.surfaces.find((surface) => surface.active) || snapshot.surfaces[0] || null
+  const activeTerminal =
+    snapshot.terminals.find((terminal) => terminal.panelId === activeSurface?.panelId || terminal.sessionId === activeSurface?.sessionId) ||
+    snapshot.terminals.find((terminal) => terminal.active) ||
+    snapshot.terminals[0] ||
+    null
+  const writableTerminals = snapshot.terminals.filter((terminal) => terminal.connected === true)
+  const pendingAiSessions = snapshot.managedAiSessions.filter((session) => session.needsInput || session.state === 'needsInput')
+  const activeAiSessions = snapshot.managedAiSessions.filter((session) => session.panelId === activeSurface?.panelId || session.terminalSessionId === activeTerminal?.sessionId)
+  const unreadNotifications = snapshot.notifications.filter((notification) => !notification.read)
+  const suggestions = [
+    activeTerminal
+      ? commandSuggestion(
+          'Read active terminal screen',
+          `aiopsterm-control terminal read-screen --panel ${activeTerminal.panelId} --lines 80`,
+          'terminal.read_screen',
+          { panelId: activeTerminal.panelId, surfaceId: activeTerminal.panelId, sessionId: activeTerminal.sessionId, lines: 80, tailLines: 80 }
+        )
+      : null,
+    activeTerminal
+      ? commandSuggestion(
+          'Send text to active terminal',
+          `aiopsterm-control terminal send --panel ${activeTerminal.panelId} --text <text>`,
+          'terminal.send_text',
+          { panelId: activeTerminal.panelId, surfaceId: activeTerminal.panelId, sessionId: activeTerminal.sessionId, text: '<text>' }
+        )
+      : null,
+    pendingAiSessions[0]
+      ? commandSuggestion(
+          'Open next pending AI session',
+          `aiopsterm-control feed jump ${pendingAiSessions[0].pendingRequestId || pendingAiSessions[0].id}`,
+          'feed.jump',
+          { workstream_id: pendingAiSessions[0].pendingRequestId || pendingAiSessions[0].id, source: pendingAiSessions[0].source }
+        )
+      : null,
+    unreadNotifications[0]
+      ? commandSuggestion(
+          'Open next unread notification',
+          'aiopsterm-control jump-to-unread',
+          'notification.jump_to_unread',
+          {}
+        )
+      : null,
+    commandSuggestion('List all surfaces', 'aiopsterm-control surface list', 'surface.list', {}),
+    commandSuggestion('List managed AI sessions', 'aiopsterm-control agent session list --all', 'agent.session.list', {})
+  ].filter(Boolean)
+  return ok({
+    generatedAt: Date.now(),
+    workspace: snapshot.workspaces.find((workspace) => workspace.active) || snapshot.workspaces[0] || null,
+    activeSurface: activeSurface ? surfaceContextSummary(activeSurface) : null,
+    activeTerminal: activeTerminal ? terminalContextSummary(activeTerminal) : null,
+    writableTerminals: writableTerminals.map(terminalContextSummary),
+    pendingAiSessions: pendingAiSessions.map(managedAiContextSummary),
+    activeAiSessions: activeAiSessions.map(managedAiContextSummary),
+    unreadNotifications: unreadNotifications.map((notification) => ({
+      id: notification.id,
+      title: notification.title,
+      subtitle: notification.subtitle,
+      body: notification.body,
+      source: notification.source,
+      level: notification.level,
+      group: notification.group,
+      ...targetFlagsForContext({ panelId: notification.panelId, sessionId: notification.sessionId })
+    })),
+    attention: snapshot.attention,
+    counts: {
+      ...snapshot.counts,
+      writableTerminals: writableTerminals.length,
+      pendingAiSessions: pendingAiSessions.length,
+      unreadNotifications: unreadNotifications.length
+    },
+    suggestions,
+    snapshot: params.includeSnapshot === true || params.include_snapshot === true ? snapshot : undefined
+  })
 }
 
 const systemTopPayload = async (params: Record<string, unknown>, options: { memoryOnly?: boolean } = {}) => {
@@ -4406,6 +4551,7 @@ const handleControlRequest = async (request: ControlSocketRequest): Promise<Cont
   if (!method || method === 'ping' || method === 'system.ping') return ok({ pong: true, socketPath })
   if (method === 'system.capabilities' || method === 'capabilities') return systemCapabilities()
   if (method === 'system.identify' || method === 'identify') return systemIdentify(params)
+  if (method === 'workspace.context' || method === 'context') return workspaceContextPayload(params)
   if (method === 'mobile.host.status') return mobileHostStatus(params)
   if (
     method === 'auth.login' ||

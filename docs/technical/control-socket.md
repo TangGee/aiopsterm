@@ -48,6 +48,7 @@ When `key` is present and no explicit `id` is supplied, aiopsterm generates a st
 The workspace metadata slice adds read-only model snapshots:
 
 - `workspace.snapshot`: return the current main workspace, terminal surfaces, split groups, generic notifications, managed AI session summaries, and top-bell attention items in one payload.
+- `workspace.context` / `context`: return a compact read-only automation context derived from `workspace.snapshot`: active surface, active writable terminal, pending AI sessions, unread notifications, counts, and suggested follow-up socket/CLI commands.
 - `workspace.list`: list the logical aiopsterm workspaces exposed to automation. This currently returns the single shared main workspace.
 - `workspace.current`: return the currently selected logical workspace metadata.
 - `surface.list`: list terminal and editor surfaces in the shared main work panel.
@@ -466,6 +467,7 @@ Use `--json` for scripting:
 
 ```bash
 node /path/to/resources/aiopsterm-control.js --json workspace snapshot
+node /path/to/resources/aiopsterm-control.js context
 ```
 
 ## Safety Boundary
@@ -617,6 +619,8 @@ The queue is intentionally not persisted in this slice. Session restore and pers
 - `counts`: stable totals for scripts that only need status checks.
 
 The snapshot does not include terminal screen text. Use `terminal.read_screen` for screen content after selecting a target `panelId` or `sessionId` from the snapshot.
+
+`workspace.context` is the recommended first call for external Codex/MCP clients and shell scripts that need to discover what can be safely operated on. It is read-only and does not focus a window, write terminal input, connect/disconnect SSH, or mark notifications handled. Suggestions in the response are explicit follow-up commands; callers still invoke those commands through their normal safety boundaries.
 
 ## Workspace Groups
 
