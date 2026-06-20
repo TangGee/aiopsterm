@@ -364,6 +364,7 @@ import {
   X
 } from 'lucide-vue-next'
 import { useWorkspaceStore } from '@/stores/workspace'
+import { assetsClient } from '@/services/assetsClient'
 import {
   isAiopsAssetSnapshot,
   isAiopsJumpserverOrganization,
@@ -451,7 +452,7 @@ const jumpserverOnlineSyncedAssets = computed(() => jumpserverSyncedAssets.value
 
 const loadJumpserverAssetSnapshot = async () => {
   if (workspace.selectedExtension?.pluginId !== 'jumpserverSupport') return false
-  const listAssets = window.aiops?.listAssets
+  const listAssets = assetsClient.listAssets()
   if (typeof listAssets !== 'function') {
     jumpserverAssetError.value = '资产列表服务不可用'
     return false
@@ -484,7 +485,7 @@ const applyJumpserverRefreshSnapshot = (snapshot: unknown) => {
 }
 
 const refreshJumpserverAssets = async (organizationId?: string) => {
-  const refreshOrganizationAssets = window.aiops?.refreshOrganizationAssets
+  const refreshOrganizationAssets = assetsClient.refreshOrganizationAssets()
   if (typeof refreshOrganizationAssets !== 'function') {
     jumpserverAssetError.value = '组织资产刷新服务不可用'
     return false

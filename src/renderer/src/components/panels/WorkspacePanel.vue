@@ -1205,6 +1205,7 @@ import type {
   AiopsSshTunnelType
 } from '@shared/contracts/assets'
 import { useWorkspaceStore } from '@/stores/workspace'
+import { assetsClient } from '@/services/assetsClient'
 import { localFilesClient } from '@/services/localFilesClient'
 import {
   isAiopsAssetConnectionTestInfo,
@@ -1636,7 +1637,7 @@ const applyWorkspaceAssetState = (snapshot: unknown, groups: AiopsAssetGroupReco
 }
 
 const loadDirectGroupOptions = async () => {
-  const listAssetGroups = window.aiops?.listAssetGroups
+  const listAssetGroups = assetsClient.listAssetGroups()
   if (typeof listAssetGroups !== 'function') throw new Error('资产分组服务不可用')
   const groups = await listAssetGroups({
     assetTypes: ['person', 'switch']
@@ -1646,7 +1647,7 @@ const loadDirectGroupOptions = async () => {
 }
 
 const refreshAssets = async () => {
-  const listAssets = window.aiops?.listAssets
+  const listAssets = assetsClient.listAssets()
   if (typeof listAssets !== 'function') throw new Error('资产列表服务不可用')
   const snapshot = await listAssets()
   if (!isAiopsAssetSnapshot(snapshot)) throw new Error(malformedAssetBackendResultMessage)
@@ -1655,7 +1656,7 @@ const refreshAssets = async () => {
 }
 
 const loadWorkspaceAssetRefresh = async () => {
-  const listAssets = window.aiops?.listAssets
+  const listAssets = assetsClient.listAssets()
   if (typeof listAssets !== 'function') throw new Error('资产列表服务不可用')
   const snapshot = await listAssets()
   if (!isAiopsAssetSnapshot(snapshot)) throw new Error(malformedAssetBackendResultMessage)
@@ -1664,7 +1665,7 @@ const loadWorkspaceAssetRefresh = async () => {
 }
 
 const loadKeychainOptions = async () => {
-  const listKeychains = window.aiops?.listKeychains
+  const listKeychains = assetsClient.listKeychains()
   if (typeof listKeychains !== 'function') {
     keychainOptions.value = []
     return
@@ -1681,7 +1682,7 @@ const resetHostConnectionTest = () => {
 }
 
 const saveAssetRecord = async (input: AiopsAssetInput) => {
-  const saveAsset = window.aiops?.saveAsset
+  const saveAsset = assetsClient.saveAsset()
   if (typeof saveAsset !== 'function') {
     throw new Error('资产保存服务不可用')
   }
@@ -1803,7 +1804,7 @@ const saveHostKeyForm = async () => {
     hostChildFormError.value = `密钥 ${name} 已存在`
     return
   }
-  const saveKeychain = window.aiops?.saveKeychain
+  const saveKeychain = assetsClient.saveKeychain()
   if (typeof saveKeychain !== 'function') {
     hostChildFormError.value = '密钥保存服务不可用'
     return
@@ -1880,7 +1881,7 @@ const saveHostJumpHostForm = async () => {
 }
 
 const deleteAssetRecord = async (assetId: string) => {
-  const deleteAsset = window.aiops?.deleteAsset
+  const deleteAsset = assetsClient.deleteAsset()
   if (typeof deleteAsset !== 'function') throw new Error('资产删除服务不可用')
   const result = await deleteAsset(assetId)
   if (!result?.ok) throw new Error(result?.errorMessage || '资产删除失败')
@@ -1891,7 +1892,7 @@ const deleteAssetRecord = async (assetId: string) => {
 }
 
 const saveFolderRecord = async (folder: AiopsCustomFolderSaveInput) => {
-  const saveAssetFolder = window.aiops?.saveAssetFolder
+  const saveAssetFolder = assetsClient.saveAssetFolder()
   if (typeof saveAssetFolder !== 'function') throw new Error('文件夹保存服务不可用')
   const result = await saveAssetFolder(folder)
   if (!result?.ok) throw new Error(result?.errorMessage || '文件夹保存失败')
@@ -1904,7 +1905,7 @@ const saveFolderRecord = async (folder: AiopsCustomFolderSaveInput) => {
 }
 
 const deleteFolderRecord = async (folderUuid: string) => {
-  const deleteAssetFolder = window.aiops?.deleteAssetFolder
+  const deleteAssetFolder = assetsClient.deleteAssetFolder()
   if (typeof deleteAssetFolder !== 'function') throw new Error('文件夹删除服务不可用')
   const result = await deleteAssetFolder(folderUuid)
   if (!result?.ok) throw new Error(result?.errorMessage || '文件夹删除失败')
@@ -2228,7 +2229,7 @@ const saveFolderForm = async () => {
     assetTypes: ['person' as const, 'switch' as const]
   }
   try {
-    const renameAssetGroup = window.aiops?.renameAssetGroup
+    const renameAssetGroup = assetsClient.renameAssetGroup()
     if (typeof renameAssetGroup !== 'function') throw new Error('资产分组保存服务不可用')
     const result = await renameAssetGroup(input)
     if (!result?.ok) throw new Error(result?.errorMessage || '分组保存失败')
@@ -2567,7 +2568,7 @@ const toggleTunnel = async () => {
   if (!asset) return
   try {
     if (asset.tunnelState === 'active') {
-      const stopTunnel = window.aiops?.stopSshTunnel
+      const stopTunnel = assetsClient.stopSshTunnel()
       if (typeof stopTunnel !== 'function') {
         notice.value = '隧道运行时服务不可用'
         return
@@ -2587,7 +2588,7 @@ const startTunnelFromModal = async () => {
     tunnelFormError.value = '隧道主机不存在'
     return
   }
-  const startTunnel = window.aiops?.startSshTunnel
+  const startTunnel = assetsClient.startSshTunnel()
   if (typeof startTunnel !== 'function') {
     tunnelFormError.value = '隧道运行时服务不可用'
     return
@@ -2667,7 +2668,7 @@ const refreshGroup = async (groupKey: string) => {
   const organization = organizationAssets.value.find((asset) => asset.uuid === groupKey)
   try {
     const expectedOrganizationId = organization?.id
-    const refreshOrganizationAssets = window.aiops?.refreshOrganizationAssets
+    const refreshOrganizationAssets = assetsClient.refreshOrganizationAssets()
     if (typeof refreshOrganizationAssets !== 'function') throw new Error('组织资产刷新服务不可用')
     const result = await refreshOrganizationAssets(expectedOrganizationId ? { organizationId: expectedOrganizationId } : undefined)
     if (!result?.ok) throw new Error(result?.errorMessage || '刷新堡垒机资源失败')
@@ -2758,7 +2759,7 @@ const confirmDeleteGroup = () => {
         })
       return
     }
-    const deleteAssetGroup = window.aiops?.deleteAssetGroup
+    const deleteAssetGroup = assetsClient.deleteAssetGroup()
     if (typeof deleteAssetGroup !== 'function') {
       notice.value = '资产分组删除服务不可用'
       return
@@ -2790,7 +2791,7 @@ const confirmDeleteGroup = () => {
 }
 
 const loadHostEditablePassword = async (requestId: number, assetId: string) => {
-  const bridge = window.aiops?.getAssetEditableSecret
+  const bridge = assetsClient.getAssetEditableSecret()
   if (typeof bridge !== 'function') return
   try {
     const result = await bridge(assetId)
@@ -2942,7 +2943,7 @@ const validateHostConnectionDraft = () => {
 }
 
 const testHostFormConnection = async () => {
-  const testAssetConnection = window.aiops?.testAssetConnection
+  const testAssetConnection = assetsClient.testAssetConnection()
   if (typeof testAssetConnection !== 'function') {
     hostTestOk.value = false
     hostTestMessage.value = '连接测试服务不可用'

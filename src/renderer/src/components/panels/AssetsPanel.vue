@@ -1235,6 +1235,7 @@ import {
   X
 } from 'lucide-vue-next'
 import { assetManagementEntries } from '@/config/assets'
+import { assetsClient } from '@/services/assetsClient'
 import { localFilesClient } from '@/services/localFilesClient'
 import type {
   AiopsAssetAuthType,
@@ -1406,8 +1407,8 @@ const filteredManagementEntries = computed(() => {
 const firstAssetGroupName = computed(() => assetGroupOptions.value[0]?.name || '')
 
 const loadAssetGroupOptions = async () => {
-  const listAssetGroups = window.aiops?.listAssetGroups
-  if (typeof listAssetGroups !== 'function') throw new Error('资产分组服务不可用。')
+  const listAssetGroups = assetsClient.listAssetGroups()
+  if (!listAssetGroups) throw new Error('资产分组服务不可用。')
   const groups = await listAssetGroups({
     assetTypes: ['person', 'switch']
   })
@@ -1416,8 +1417,8 @@ const loadAssetGroupOptions = async () => {
 }
 
 const loadAssetSnapshot = async () => {
-  const listAssets = window.aiops?.listAssets
-  if (typeof listAssets !== 'function') throw new Error('资产列表服务不可用。')
+  const listAssets = assetsClient.listAssets()
+  if (!listAssets) throw new Error('资产列表服务不可用。')
   const snapshot = await listAssets()
   if (!isAiopsAssetSnapshot(snapshot)) throw new Error(malformedAssetBackendResultMessage)
   return snapshot
@@ -1457,8 +1458,8 @@ const refreshHostManagement = async () => {
 }
 
 const refreshKeychains = async () => {
-  const listKeychains = window.aiops?.listKeychains
-  if (typeof listKeychains !== 'function') {
+  const listKeychains = assetsClient.listKeychains()
+  if (!listKeychains) {
     keyServiceNotice.value = '密钥列表服务不可用。'
     throw new Error(keyServiceNotice.value)
   }
@@ -1500,8 +1501,8 @@ const toAssetInput = (asset: AssetRecord, patch: Partial<AiopsAssetInput> = {}):
 })
 
 const saveAssetRecord = async (input: AiopsAssetInput, options: { requireGroups?: boolean } = {}) => {
-  const saveAsset = window.aiops?.saveAsset
-  if (typeof saveAsset !== 'function') throw new Error('资产保存服务不可用。')
+  const saveAsset = assetsClient.saveAsset()
+  if (!saveAsset) throw new Error('资产保存服务不可用。')
   const result = await saveAsset(input)
   if (!result?.ok) throw new Error(result?.errorMessage || '资产保存失败')
   const saved = result.data
@@ -1531,8 +1532,8 @@ const applyHostManagementState = (snapshot: unknown, groups: AiopsAssetGroupReco
 }
 
 const deleteAssetRecords = async (assetIds: string[], options: { requireGroups?: boolean } = {}) => {
-  const deleteAsset = window.aiops?.deleteAsset
-  if (typeof deleteAsset !== 'function') throw new Error('资产删除服务不可用。')
+  const deleteAsset = assetsClient.deleteAsset()
+  if (!deleteAsset) throw new Error('资产删除服务不可用。')
   for (const id of assetIds) {
     const result = await deleteAsset(id)
     if (!result?.ok) throw new Error(result?.errorMessage || '资产删除失败')
@@ -1851,8 +1852,8 @@ const closeAssetEditor = () => {
 }
 
 const saveAssetFolderRecord = async (folder: AiopsCustomFolderSaveInput) => {
-  const saveAssetFolder = window.aiops?.saveAssetFolder
-  if (typeof saveAssetFolder !== 'function') throw new Error('目录保存服务不可用。')
+  const saveAssetFolder = assetsClient.saveAssetFolder()
+  if (!saveAssetFolder) throw new Error('目录保存服务不可用。')
   const result = await saveAssetFolder(folder)
   if (!result?.ok) throw new Error(result?.errorMessage || '目录保存失败')
   if (!isAiopsSavedCustomFolderRecord(result.data, folder)) throw new Error(malformedAssetBackendResultMessage)
@@ -2023,8 +2024,8 @@ const openJumpHostCreateFromHostForm = () => {
 }
 
 const loadAssetEditablePassword = async (requestId: number, assetId: string, mode: 'edit' | 'clone' = 'edit') => {
-  const bridge = window.aiops?.getAssetEditableSecret
-  if (typeof bridge !== 'function') return
+  const bridge = assetsClient.getAssetEditableSecret()
+  if (!bridge) return
   try {
     const result = await bridge(assetId)
     const stillEditingSource = mode === 'edit' && form.id === assetId && editMode.value
@@ -2376,8 +2377,8 @@ const AssetTreeGroupNode = defineComponent({
 })
 
 const testAssetFormConnection = async () => {
-  const testAssetConnection = window.aiops?.testAssetConnection
-  if (typeof testAssetConnection !== 'function') {
+  const testAssetConnection = assetsClient.testAssetConnection()
+  if (!testAssetConnection) {
     assetTestOk.value = false
     assetTestMessage.value = '连接测试服务不可用。'
     return
@@ -2425,8 +2426,8 @@ const refreshOrganizationAsset = async () => {
   if (contextAsset.value) {
     try {
       const expectedOrganizationId = contextAsset.value.id
-      const refreshOrganizationAssets = window.aiops?.refreshOrganizationAssets
-      if (typeof refreshOrganizationAssets !== 'function') throw new Error('组织资产刷新服务不可用。')
+      const refreshOrganizationAssets = assetsClient.refreshOrganizationAssets()
+      if (!refreshOrganizationAssets) throw new Error('组织资产刷新服务不可用。')
       const result = await refreshOrganizationAssets({ organizationId: expectedOrganizationId })
       if (!result?.ok) throw new Error(result?.errorMessage || '刷新堡垒机资源失败。')
       if (!isAiopsJumpserverOrganizationAssetRefreshData(result.data, expectedOrganizationId)) throw new Error(malformedAssetBackendResultMessage)
@@ -2519,8 +2520,8 @@ const submitManagedForm = async () => {
 const refreshManagedAssets = async () => {
   try {
     const expectedOrganizationId = managedOrganization.value?.id
-    const refreshOrganizationAssets = window.aiops?.refreshOrganizationAssets
-    if (typeof refreshOrganizationAssets !== 'function') throw new Error('组织资产刷新服务不可用。')
+    const refreshOrganizationAssets = assetsClient.refreshOrganizationAssets()
+    if (!refreshOrganizationAssets) throw new Error('组织资产刷新服务不可用。')
     const result = await refreshOrganizationAssets(expectedOrganizationId ? { organizationId: expectedOrganizationId } : undefined)
     if (!result?.ok) throw new Error(result?.errorMessage || '刷新资产表失败。')
     if (!isAiopsJumpserverOrganizationAssetRefreshData(result.data, expectedOrganizationId)) throw new Error(malformedAssetBackendResultMessage)
@@ -2556,8 +2557,8 @@ const selectAllExportKeys = () => {
 
 const confirmExport = async () => {
   if (!resolvedExportIds.value.length) return
-  const exportAssets = window.aiops?.exportAssets
-  if (typeof exportAssets !== 'function') {
+  const exportAssets = assetsClient.exportAssets()
+  if (!exportAssets) {
     importNotice.value = '资产导出服务不可用。'
     return
   }
@@ -2588,8 +2589,8 @@ const loadAssetImportPreviewFromPath = async (filePath: string) => {
     importNotice.value = '没有选择导入文件。'
     return
   }
-  const previewAssetImport = window.aiops?.previewAssetImport
-  if (typeof previewAssetImport !== 'function') {
+  const previewAssetImport = assetsClient.previewAssetImport()
+  if (!previewAssetImport) {
     importNotice.value = '导入文件预览服务不可用。'
     return
   }
@@ -2649,8 +2650,8 @@ const confirmImportAssets = async (overwrite: boolean) => {
     importNotice.value = '导入文件路径缺失。'
     return
   }
-  const confirmAssetImport = window.aiops?.confirmAssetImport
-  if (typeof confirmAssetImport !== 'function') {
+  const confirmAssetImport = assetsClient.confirmAssetImport()
+  if (!confirmAssetImport) {
     importNotice.value = '资产导入确认服务不可用。'
     return
   }
@@ -2685,8 +2686,8 @@ const openNewKeyPanel = () => {
 
 const editKey = async (keyId: string | null) => {
   if (!keyId) return
-  const getKeychain = window.aiops?.getKeychain
-  if (typeof getKeychain !== 'function') {
+  const getKeychain = assetsClient.getKeychain()
+  if (!getKeychain) {
     keyServiceNotice.value = '密钥详情服务不可用。'
     keyContextMenuId.value = null
     return
@@ -2758,8 +2759,8 @@ const validateKeyForm = () => {
 }
 
 const saveKeychainRecord = async (input: AiopsKeychainInput) => {
-  const saveKeychain = window.aiops?.saveKeychain
-  if (typeof saveKeychain !== 'function') {
+  const saveKeychain = assetsClient.saveKeychain()
+  if (!saveKeychain) {
     throw new Error('密钥保存服务不可用。')
   }
   const result = await saveKeychain(input)
@@ -2812,8 +2813,8 @@ const removeKey = (keyId: string | null) => {
   confirmState.message = `确定删除密钥 ${key.name}？`
   confirmState.expectedText = key.name
   confirmState.action = async () => {
-    const deleteKeychain = window.aiops?.deleteKeychain
-    if (typeof deleteKeychain !== 'function') {
+    const deleteKeychain = assetsClient.deleteKeychain()
+    if (!deleteKeychain) {
       keyServiceNotice.value = '密钥删除服务不可用。'
       keyImportNotice.value = '密钥删除服务不可用。'
       return
