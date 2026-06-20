@@ -99,6 +99,11 @@ import {
   isSettingsDocumentationResult,
   resolveUpdateVersion
 } from '@/services/appRuntimeClient'
+import {
+  isModelProviderCheckDataForRequest,
+  malformedModelProviderResultMessage,
+  modelProviderClient
+} from '@/services/modelProviderClient'
 import { applyDocumentLocale, isLocaleSetting, resolveLocale, translateWithLocale } from '@/i18n/runtime'
 import type { I18nKey } from '@/i18n/messages'
 import type { AiopsPreloadApi } from '@shared/contracts/preloadApi'
@@ -362,7 +367,6 @@ type K8sClusterTestData = NonNullable<Awaited<ReturnType<AiopsPreloadApi['testKu
 type K8sProxyConfigData = NonNullable<Awaited<ReturnType<AiopsPreloadApi['saveKubernetesAgentProxyConfig']>>['data']>
 type K8sTerminalCloseData = NonNullable<Awaited<ReturnType<AiopsPreloadApi['closeKubernetesTerminal']>>['data']>
 type K8sTerminalWriteData = NonNullable<Awaited<ReturnType<AiopsPreloadApi['writeKubernetesTerminal']>>['data']>
-type ModelProviderCheckData = NonNullable<Awaited<ReturnType<AiopsPreloadApi['checkModelProvider']>>['data']>
 type AiChatHistorySnapshotData = NonNullable<Awaited<ReturnType<AiopsPreloadApi['listChatConversations']>>['data']>
 type AiChatConversationMutationData = NonNullable<Awaited<ReturnType<AiopsPreloadApi['createChatConversation']>>['data']>
 type AiChatConversationDeleteData = NonNullable<Awaited<ReturnType<AiopsPreloadApi['deleteChatConversation']>>['data']>
@@ -1053,7 +1057,6 @@ const sshProxyTypes: SshProxyType[] = ['HTTP', 'HTTPS', 'SOCKS4', 'SOCKS5', 'TCP
 const standardProxyTypes: Array<Exclude<SshProxyType, 'TCP'>> = ['HTTP', 'HTTPS', 'SOCKS4', 'SOCKS5']
 
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value)
-const malformedModelProviderResultMessage = '模型 Provider 检查服务返回数据无效'
 const malformedTerminalWriteResultMessage = '终端写入服务返回数据无效'
 const malformedMcpToolResultMessage = 'MCP Tool 服务返回数据无效'
 const malformedMcpResourceResultMessage = 'MCP Resource 服务返回数据无效'
@@ -1369,21 +1372,6 @@ const normalizeAiModelCatalog = (source?: Partial<AiModelCatalog> | null): AiMod
   ).normalized
   return { chatModels, lockedChatModels, settingsModels }
 }
-
-const isModelProviderCheckDataForRequest = (source: unknown, provider: ModelProviderKey, expectedConfig: ModelProviderSettings): source is ModelProviderCheckData =>
-  isRecord(source) &&
-  source.provider === provider &&
-  typeof source.label === 'string' &&
-  source.label.trim() !== '' &&
-  typeof source.modelId === 'string' &&
-  source.modelId.trim() === expectedConfig.modelId.trim() &&
-  typeof source.endpoint === 'string' &&
-  source.endpoint.trim() !== '' &&
-  typeof source.message === 'string' &&
-  source.message.trim() !== '' &&
-  typeof source.durationMs === 'number' &&
-  Number.isFinite(source.durationMs) &&
-  source.durationMs >= 0
 
 const createMacroSnippetName = () => {
   const now = new Date()
@@ -7178,7 +7166,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     modelCheckRequestSeq.value = { ...modelCheckRequestSeq.value, [provider]: requestSeq }
     modelCheckState.value = { ...modelCheckState.value, [provider]: 'checking' }
     const config = { ...modelProviders.value[provider] }
-    const checkProviderBridge = window.aiops?.checkModelProvider
+    const checkProviderBridge = modelProviderClient.checkModelProvider()
     if (typeof checkProviderBridge !== 'function') {
       if (modelCheckRequestSeq.value[provider] !== requestSeq) return
       modelCheckState.value = { ...modelCheckState.value, [provider]: 'error' }
