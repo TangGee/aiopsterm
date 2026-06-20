@@ -2,20 +2,20 @@
   <section class="ai-sessions-panel">
     <header class="panel-header">
       <div>
-        <p class="eyebrow">AI Sessions</p>
-        <h2>AI 会话</h2>
+        <p class="eyebrow">{{ t('aiSessions.eyebrow') }}</p>
+        <h2>{{ t('module.aiSessions') }}</h2>
       </div>
       <div class="ai-sessions-header-actions">
         <button
           class="ai-sessions-settings"
-          title="打开 AI 设置"
+          :title="t('aiSessions.openSettings')"
           @click="workspace.openAiSessionSettings"
         >
           <Settings />
         </button>
         <button
           class="ai-sessions-settings"
-          title="刷新 AI 会话"
+          :title="t('aiSessions.refresh')"
           @click="workspace.refreshManagedAiSessions()"
         >
           <RefreshCw />
@@ -28,7 +28,7 @@
       <Search />
       <input
         v-model="query"
-        placeholder="搜索会话"
+        :placeholder="t('aiSessions.searchPlaceholder')"
       />
     </div>
 
@@ -52,9 +52,9 @@
       class="ai-sessions-context"
     >
       <label>
-        <span>Agent</span>
+        <span>{{ t('aiSessions.agent') }}</span>
         <select v-model="sourceFilter">
-          <option value="all">全部</option>
+          <option value="all">{{ t('common.all') }}</option>
           <option
             v-for="source in sourceOptions"
             :key="source"
@@ -65,9 +65,9 @@
         </select>
       </label>
       <label>
-        <span>项目</span>
+        <span>{{ t('aiSessions.project') }}</span>
         <select v-model="projectFilter">
-          <option value="all">全部</option>
+          <option value="all">{{ t('common.all') }}</option>
           <option
             v-for="project in projectOptions"
             :key="project.key"
@@ -84,7 +84,7 @@
       class="ai-sessions-attention-strip"
     >
       <button @click="selectSession(attentionQueue[0])">
-        <strong>{{ attentionQueue.length }} 个待处理</strong>
+        <strong>{{ t('aiSessions.pendingCount', { count: attentionQueue.length }) }}</strong>
         <span>{{ attentionQueue[0].title }} · {{ attentionQueue[0].summary || requestKindLabel(attentionQueue[0].requestKind) }}</span>
       </button>
     </section>
@@ -94,26 +94,26 @@
       class="ai-sessions-queue-bar"
     >
       <div>
-        <strong>{{ visibleSessions.length }} 个当前会话</strong>
-        <span>{{ visiblePendingSessions.length }} 个待处理 · {{ activeScopeLabel }}</span>
+        <strong>{{ t('aiSessions.currentCount', { count: visibleSessions.length }) }}</strong>
+        <span>{{ t('aiSessions.pendingScopedCount', { count: visiblePendingSessions.length, scope: activeScopeLabel }) }}</span>
       </div>
       <div class="ai-sessions-queue-actions">
         <button
-          title="定位下一条待处理"
+          :title="t('aiSessions.nextPending')"
           :disabled="visiblePendingSessions.length === 0"
           @click="focusNextVisiblePending"
         >
           <LocateFixed />
         </button>
         <button
-          title="复制当前队列摘要"
+          :title="t('aiSessions.copyQueueSummary')"
           :disabled="visibleSessions.length === 0"
           @click="copyVisibleSessionQueue"
         >
           <Copy />
         </button>
         <button
-          title="处理当前筛选的待处理项"
+          :title="t('aiSessions.handleFilteredPending')"
           :disabled="visiblePendingSessions.length === 0"
           @click="markVisiblePendingHandled"
         >
@@ -143,11 +143,11 @@
     <div class="ai-sessions-bulk">
       <button @click="workspace.bulkManagedAiSessions({ operation: 'mark-handled' })">
         <CheckCheck />
-        全部已处理
+        {{ t('aiSessions.markAllHandled') }}
       </button>
       <button @click="workspace.bulkManagedAiSessions({ operation: 'clear-ended' })">
         <ArchiveX />
-        清理已结束
+        {{ t('aiSessions.clearEnded') }}
       </button>
     </div>
 
@@ -174,13 +174,13 @@
               class="ai-session-cwd"
             >{{ session.cwd }}</small>
             <small class="ai-session-foot">
-              {{ formatRelativeTime(session.lastActivityAt) }}{{ session.resumeCommand ? ' · 可恢复' : '' }}{{ session.hibernated ? ' · 已休眠' : '' }}
+              {{ formatRelativeTime(session.lastActivityAt) }}{{ session.resumeCommand ? ` · ${t('aiSessions.restorable')}` : '' }}{{ session.hibernated ? ` · ${t('aiSessions.hibernated')}` : '' }}
             </small>
           </span>
           <button
             v-if="session.state === 'needsInput'"
             class="ai-session-handle"
-            title="标记已处理"
+            :title="t('aiSessions.markHandled')"
             @click.stop="workspace.markManagedAiSessionHandled(session.source, session.id)"
           >
             <Check />
@@ -190,14 +190,14 @@
           v-if="visibleSessions.length === 0"
           class="ai-sessions-empty"
         >
-          <p>暂无 AI 会话</p>
-          <small>安装并启用 Agent Hook 后，通过 aiopsterm 本地连接启动的 Codex / Claude Code / Cursor / Gemini 等会显示在这里。</small>
+          <p>{{ t('aiSessions.emptyTitle') }}</p>
+          <small>{{ t('aiSessions.emptyDescription') }}</small>
           <button
             class="ai-sessions-empty-action"
             @click="workspace.openAiSessionSettings"
           >
             <Settings />
-            打开 AI 设置
+            {{ t('aiSessions.openSettings') }}
           </button>
         </div>
       </div>
@@ -218,13 +218,13 @@
           <div class="ai-session-detail-actions">
             <button
               v-if="selectedSession.resumeCommand"
-              title="恢复会话"
+              :title="t('aiSessions.resume')"
               @click="workspace.resumeManagedAiSession(selectedSession.source, selectedSession.id)"
             >
               <RotateCcw />
             </button>
             <button
-              title="定位终端"
+              :title="t('aiSessions.locateTerminal')"
               @click="workspace.focusManagedAiSession(selectedSession.id)"
             >
               <LocateFixed />
@@ -234,63 +234,63 @@
 
         <dl class="ai-session-meta">
           <div>
-            <dt>路径</dt>
+            <dt>{{ t('aiSessions.meta.path') }}</dt>
             <dd>{{ selectedSession.cwd || '-' }}</dd>
           </div>
           <div>
-            <dt>会话</dt>
+            <dt>{{ t('aiSessions.meta.session') }}</dt>
             <dd>{{ selectedSession.id }}</dd>
           </div>
           <div v-if="selectedSession.agentLifecycle">
-            <dt>Agent 状态</dt>
+            <dt>{{ t('aiSessions.meta.agentLifecycle') }}</dt>
             <dd>{{ lifecycleLabel(selectedSession.agentLifecycle) }}</dd>
           </div>
           <div>
-            <dt>请求类型</dt>
+            <dt>{{ t('aiSessions.meta.requestKind') }}</dt>
             <dd>{{ requestKindLabel(selectedSession.requestKind) }}</dd>
           </div>
           <div>
-            <dt>处理模式</dt>
+            <dt>{{ t('aiSessions.meta.decisionMode') }}</dt>
             <dd>{{ decisionModeLabel(selectedSession.decisionMode) }}</dd>
           </div>
           <div v-if="selectedSession.waitTimeoutMs">
-            <dt>等待超时</dt>
+            <dt>{{ t('aiSessions.meta.waitTimeout') }}</dt>
             <dd>{{ Math.round(selectedSession.waitTimeoutMs / 1000) }}s</dd>
           </div>
           <div v-if="selectedSession.toolName">
-            <dt>工具</dt>
+            <dt>{{ t('aiSessions.meta.tool') }}</dt>
             <dd>{{ selectedSession.toolName }}</dd>
           </div>
           <div v-if="selectedSession.processId">
-            <dt>Agent PID</dt>
+            <dt>{{ t('aiSessions.meta.agentPid') }}</dt>
             <dd>{{ selectedSession.processId }}</dd>
           </div>
           <div v-if="selectedSession.parentProcessId">
-            <dt>父进程</dt>
+            <dt>{{ t('aiSessions.meta.parentProcess') }}</dt>
             <dd>{{ selectedSession.parentProcessId }}</dd>
           </div>
           <div v-if="selectedSession.processGroupId">
-            <dt>进程组</dt>
+            <dt>{{ t('aiSessions.meta.processGroup') }}</dt>
             <dd>{{ selectedSession.processGroupId }}</dd>
           </div>
           <div v-if="selectedSession.terminalProcessId">
-            <dt>终端 PID</dt>
+            <dt>{{ t('aiSessions.meta.terminalPid') }}</dt>
             <dd>{{ selectedSession.terminalProcessId }}</dd>
           </div>
           <div v-if="selectedSession.terminalActivityAt">
-            <dt>终端活动</dt>
+            <dt>{{ t('aiSessions.meta.terminalActivity') }}</dt>
             <dd>{{ formatTime(selectedSession.terminalActivityAt) }}</dd>
           </div>
           <div v-if="selectedSession.transcriptPath">
-            <dt>记录</dt>
+            <dt>{{ t('aiSessions.meta.transcript') }}</dt>
             <dd>{{ selectedSession.transcriptPath }}</dd>
           </div>
           <div v-if="selectedSession.launchCommand">
-            <dt>启动命令</dt>
+            <dt>{{ t('aiSessions.meta.launchCommand') }}</dt>
             <dd class="ai-session-command">{{ selectedSession.launchCommand }}</dd>
           </div>
           <div v-if="selectedSession.resumeCommand">
-            <dt>恢复命令</dt>
+            <dt>{{ t('aiSessions.meta.resumeCommand') }}</dt>
             <dd class="ai-session-command">{{ selectedSession.resumeCommand }}</dd>
           </div>
         </dl>
@@ -304,36 +304,36 @@
             @click="submitQuestionReply"
           >
             <Send />
-            提交回答
+            {{ t('aiSessions.action.submitReply') }}
           </button>
           <button
             v-if="selectedSession.requestKind !== 'question' && selectedSession.requestKind !== 'notification'"
             @click="workspace.replyManagedAiSession(selectedSession.source, selectedSession.id, 'allow')"
           >
             <Check />
-            允许
+            {{ t('aiSessions.action.allow') }}
           </button>
           <button
             v-if="selectedSession.requestKind === 'permission' && selectedSession.actionable"
             @click="workspace.replyManagedAiSession(selectedSession.source, selectedSession.id, 'always')"
           >
             <CheckCheck />
-            持续允许
+            {{ t('aiSessions.action.alwaysAllow') }}
           </button>
           <button
             v-if="selectedSession.requestKind === 'permission' && selectedSession.actionable"
             @click="workspace.replyManagedAiSession(selectedSession.source, selectedSession.id, 'bypass')"
           >
             <ShieldCheck />
-            本会话绕过
+            {{ t('aiSessions.action.bypassSession') }}
           </button>
           <button @click="workspace.replyManagedAiSession(selectedSession.source, selectedSession.id, 'deny', replyText.trim() || undefined)">
             <Ban />
-            拒绝
+            {{ t('aiSessions.action.deny') }}
           </button>
           <button @click="workspace.replyManagedAiSession(selectedSession.source, selectedSession.id, 'handled')">
             <CheckCheck />
-            已处理
+            {{ t('aiSessions.action.handled') }}
           </button>
         </div>
 
@@ -341,7 +341,7 @@
           <textarea
             v-model="replyText"
             rows="2"
-            :placeholder="selectedSession.requestKind === 'question' ? '输入要回复给 AI 的答案' : '可选：拒绝原因或处理说明'"
+            :placeholder="selectedSession.requestKind === 'question' ? t('aiSessions.replyQuestionPlaceholder') : t('aiSessions.replyOptionalPlaceholder')"
           ></textarea>
           <button
             v-if="selectedSession.requestKind === 'question'"
@@ -354,7 +354,7 @@
 
         <section class="ai-session-timeline">
           <div class="ai-session-section-header">
-            <h3>事件流</h3>
+            <h3>{{ t('aiSessions.timeline') }}</h3>
             <span>{{ filteredTimelineEvents.length }} / {{ selectedSession.events.length }}</span>
           </div>
           <div class="ai-session-event-filters">
@@ -380,7 +380,7 @@
             </div>
             <button
               class="ai-session-event-copy"
-              title="复制事件"
+              :title="t('aiSessions.copyEvent')"
               @click="copyTimelineEvent(event)"
             >
               <Copy />
@@ -392,7 +392,7 @@
           v-if="selectedSession.decisions.length"
           class="ai-session-decisions"
         >
-          <h3>处理记录</h3>
+          <h3>{{ t('aiSessions.decisions') }}</h3>
           <div
             v-for="decision in selectedSession.decisions.slice().reverse()"
             :key="decision.id"
@@ -408,7 +408,7 @@
           @click="workspace.clearManagedAiSession(selectedSession.source, selectedSession.id)"
         >
           <Trash2 />
-          清理此会话
+          {{ t('aiSessions.clearSession') }}
         </button>
       </aside>
     </div>
@@ -420,9 +420,11 @@ import { computed, ref, watch } from 'vue'
 import { ArchiveX, Ban, Check, CheckCheck, Copy, LocateFixed, RefreshCw, RotateCcw, Search, Send, Settings, ShieldCheck, Trash2 } from 'lucide-vue-next'
 import { useWorkspaceStore, type ManagedAiSession, type ManagedAiSessionState } from '@/stores/workspace'
 import { copyTextToClipboard } from '@/services/clipboardRuntime'
+import { useI18n } from '@/i18n'
 import type { AiAgentSessionEventName, AiAgentSessionSource } from '@shared/preload'
 
 const workspace = useWorkspaceStore()
+const { t } = useI18n()
 const query = ref('')
 const filter = ref<'all' | ManagedAiSessionState>('all')
 const eventFilter = ref<'all' | ManagedAiSession['events'][number]['requestKind']>('all')
@@ -432,21 +434,21 @@ const hibernatedOnly = ref(false)
 const replyText = ref('')
 const renameTitle = ref('')
 type CockpitFilterKey = 'all' | 'needsInput' | 'working' | 'idle' | 'ended' | 'hibernated'
-const filters: Array<{ key: 'all' | ManagedAiSessionState; label: string }> = [
-  { key: 'all', label: '全部' },
-  { key: 'needsInput', label: '待处理' },
-  { key: 'working', label: '运行中' },
-  { key: 'idle', label: '空闲' },
-  { key: 'ended', label: '已结束' }
-]
-const eventFilters: Array<{ key: 'all' | ManagedAiSession['events'][number]['requestKind']; label: string }> = [
-  { key: 'all', label: '全部' },
-  { key: 'permission', label: '权限' },
-  { key: 'question', label: '提问' },
-  { key: 'plan', label: '计划' },
-  { key: 'notification', label: '通知' },
-  { key: 'telemetry', label: '遥测' }
-]
+const filters = computed<Array<{ key: 'all' | ManagedAiSessionState; label: string }>>(() => [
+  { key: 'all', label: t('aiSessions.filter.all') },
+  { key: 'needsInput', label: t('aiSessions.filter.needsInput') },
+  { key: 'working', label: t('aiSessions.filter.working') },
+  { key: 'idle', label: t('aiSessions.filter.idle') },
+  { key: 'ended', label: t('aiSessions.filter.ended') }
+])
+const eventFilters = computed<Array<{ key: 'all' | ManagedAiSession['events'][number]['requestKind']; label: string }>>(() => [
+  { key: 'all', label: t('aiSessions.filter.all') },
+  { key: 'permission', label: t('aiSessions.eventFilter.permission') },
+  { key: 'question', label: t('aiSessions.eventFilter.question') },
+  { key: 'plan', label: t('aiSessions.eventFilter.plan') },
+  { key: 'notification', label: t('aiSessions.eventFilter.notification') },
+  { key: 'telemetry', label: t('aiSessions.eventFilter.telemetry') }
+])
 
 const sourceLabel = (source: AiAgentSessionSource) => {
   const labels: Record<AiAgentSessionSource, string> = {
@@ -472,45 +474,45 @@ const sourceLabel = (source: AiAgentSessionSource) => {
 }
 
 const stateLabel = (state: ManagedAiSessionState) => {
-  if (state === 'needsInput') return '待处理'
-  if (state === 'working') return '运行中'
-  if (state === 'idle') return '空闲'
-  if (state === 'ended') return '已结束'
-  return '未知'
+  if (state === 'needsInput') return t('aiSessions.filter.needsInput')
+  if (state === 'working') return t('aiSessions.filter.working')
+  if (state === 'idle') return t('aiSessions.filter.idle')
+  if (state === 'ended') return t('aiSessions.filter.ended')
+  return t('aiSessions.state.unknown')
 }
 
 const lifecycleLabel = (lifecycle: NonNullable<ManagedAiSession['agentLifecycle']>) => {
-  if (lifecycle === 'running') return '运行中'
-  if (lifecycle === 'idle') return '空闲'
-  if (lifecycle === 'needsInput') return '待处理'
-  if (lifecycle === 'ended') return '已结束'
-  return '未知'
+  if (lifecycle === 'running') return t('aiSessions.filter.working')
+  if (lifecycle === 'idle') return t('aiSessions.filter.idle')
+  if (lifecycle === 'needsInput') return t('aiSessions.filter.needsInput')
+  if (lifecycle === 'ended') return t('aiSessions.filter.ended')
+  return t('aiSessions.state.unknown')
 }
 
 const requestKindLabel = (kind: ManagedAiSession['requestKind']) => {
-  if (kind === 'permission') return '权限审批'
-  if (kind === 'question') return '用户提问'
-  if (kind === 'plan') return '计划确认'
-  if (kind === 'notification') return '通知'
-  return '遥测'
+  if (kind === 'permission') return t('aiSessions.request.permission')
+  if (kind === 'question') return t('aiSessions.request.question')
+  if (kind === 'plan') return t('aiSessions.request.plan')
+  if (kind === 'notification') return t('aiSessions.request.notification')
+  return t('aiSessions.request.telemetry')
 }
 
 const decisionModeLabel = (mode: ManagedAiSession['decisionMode']) => {
-  if (mode === 'blocking') return '等待响应'
-  if (mode === 'local') return '本地处理'
-  return '仅记录'
+  if (mode === 'blocking') return t('aiSessions.decision.blocking')
+  if (mode === 'local') return t('aiSessions.decision.local')
+  return t('aiSessions.decision.telemetry')
 }
 
 const eventLabel = (event: AiAgentSessionEventName) => {
-  if (event === 'session_start') return '会话开始'
-  if (event === 'prompt_submit') return '提交提示'
-  if (event === 'pre_tool_use') return '工具调用'
-  if (event === 'permission_request') return '权限请求'
-  if (event === 'question') return '提问'
-  if (event === 'notification') return '通知'
-  if (event === 'lifecycle') return '生命周期'
-  if (event === 'stop') return '轮次结束'
-  return '会话结束'
+  if (event === 'session_start') return t('aiSessions.event.sessionStart')
+  if (event === 'prompt_submit') return t('aiSessions.event.promptSubmit')
+  if (event === 'pre_tool_use') return t('aiSessions.event.toolUse')
+  if (event === 'permission_request') return t('aiSessions.event.permissionRequest')
+  if (event === 'question') return t('aiSessions.event.question')
+  if (event === 'notification') return t('aiSessions.event.notification')
+  if (event === 'lifecycle') return t('aiSessions.event.lifecycle')
+  if (event === 'stop') return t('aiSessions.event.stop')
+  return t('aiSessions.event.sessionEnd')
 }
 
 const timelineEventNeedsInput = (event: ManagedAiSession['events'][number]) => {
@@ -529,12 +531,12 @@ const eventState = (event: ManagedAiSession['events'][number]): ManagedAiSession
 }
 
 const decisionLabel = (kind: string) => {
-  if (kind === 'allow') return '允许'
-  if (kind === 'always') return '持续允许'
-  if (kind === 'bypass') return '本会话绕过'
-  if (kind === 'deny') return '拒绝'
-  if (kind === 'reply') return '回复'
-  return '已处理'
+  if (kind === 'allow') return t('aiSessions.decision.allow')
+  if (kind === 'always') return t('aiSessions.decision.always')
+  if (kind === 'bypass') return t('aiSessions.decision.bypass')
+  if (kind === 'deny') return t('aiSessions.decision.deny')
+  if (kind === 'reply') return t('aiSessions.decision.reply')
+  return t('aiSessions.decision.handled')
 }
 
 const sessionKey = (session: Pick<ManagedAiSession, 'source' | 'id'>) => `${session.source}:${session.id}`
@@ -546,7 +548,7 @@ const projectKeyFor = (cwd?: string) => {
 
 const projectLabelFor = (cwd?: string) => {
   const normalized = String(cwd || '').trim()
-  if (!normalized) return '未知路径'
+  if (!normalized) return t('aiSessions.unknownPath')
   const parts = normalized.split(/[\\/]+/).filter(Boolean)
   return parts.at(-1) || normalized
 }
@@ -584,12 +586,12 @@ const attentionQueue = computed(() =>
 const hibernatedSessions = computed(() => workspace.sortedManagedAiSessions.filter((session) => session.hibernated))
 
 const cockpitCards = computed<Array<{ key: CockpitFilterKey; label: string; value: number; active: boolean }>>(() => [
-  { key: 'all', label: '总会话', value: workspace.managedAiSessions.length, active: filter.value === 'all' && !hibernatedOnly.value },
-  { key: 'needsInput', label: '待处理', value: attentionQueue.value.length, active: filter.value === 'needsInput' && !hibernatedOnly.value },
-  { key: 'working', label: '运行中', value: workspace.managedAiSessions.filter((session) => session.state === 'working').length, active: filter.value === 'working' && !hibernatedOnly.value },
-  { key: 'idle', label: '空闲', value: workspace.managedAiSessions.filter((session) => session.state === 'idle').length, active: filter.value === 'idle' && !hibernatedOnly.value },
-  { key: 'ended', label: '已结束', value: workspace.managedAiSessions.filter((session) => session.state === 'ended').length, active: filter.value === 'ended' && !hibernatedOnly.value },
-  { key: 'hibernated', label: '已休眠', value: hibernatedSessions.value.length, active: hibernatedOnly.value }
+  { key: 'all', label: t('aiSessions.cockpit.total'), value: workspace.managedAiSessions.length, active: filter.value === 'all' && !hibernatedOnly.value },
+  { key: 'needsInput', label: t('aiSessions.filter.needsInput'), value: attentionQueue.value.length, active: filter.value === 'needsInput' && !hibernatedOnly.value },
+  { key: 'working', label: t('aiSessions.filter.working'), value: workspace.managedAiSessions.filter((session) => session.state === 'working').length, active: filter.value === 'working' && !hibernatedOnly.value },
+  { key: 'idle', label: t('aiSessions.filter.idle'), value: workspace.managedAiSessions.filter((session) => session.state === 'idle').length, active: filter.value === 'idle' && !hibernatedOnly.value },
+  { key: 'ended', label: t('aiSessions.filter.ended'), value: workspace.managedAiSessions.filter((session) => session.state === 'ended').length, active: filter.value === 'ended' && !hibernatedOnly.value },
+  { key: 'hibernated', label: t('aiSessions.filter.hibernated'), value: hibernatedSessions.value.length, active: hibernatedOnly.value }
 ])
 
 const applyStateFilter = (key: 'all' | ManagedAiSessionState) => {
@@ -623,11 +625,11 @@ const visiblePendingSessions = computed(() => visibleSessions.value.filter((sess
 const activeScopeLabel = computed(() => {
   const parts: string[] = []
   if (filter.value !== 'all') parts.push(stateLabel(filter.value))
-  if (hibernatedOnly.value) parts.push('已休眠')
+  if (hibernatedOnly.value) parts.push(t('aiSessions.filter.hibernated'))
   if (sourceFilter.value !== 'all') parts.push(sourceLabel(sourceFilter.value))
   if (projectFilter.value !== 'all') parts.push(projectOptions.value.find((project) => project.key === projectFilter.value)?.label || projectFilter.value)
-  if (query.value.trim()) parts.push(`搜索：${query.value.trim()}`)
-  return parts.length ? parts.join(' / ') : '全部范围'
+  if (query.value.trim()) parts.push(t('aiSessions.scopeSearch', { query: query.value.trim() }))
+  return parts.length ? parts.join(' / ') : t('aiSessions.scopeAll')
 })
 
 const selectedSession = computed(() => {
@@ -705,24 +707,24 @@ const timelineEventCopyPayload = (event: ManagedAiSession['events'][number]) =>
 
 const copyTimelineEvent = async (event: ManagedAiSession['events'][number]) => {
   const copied = await copyTextToClipboard(timelineEventCopyPayload(event))
-  workspace.setTopNotice(copied ? 'AI 会话事件已复制' : 'AI 会话事件复制失败')
+  workspace.setTopNotice(copied ? t('aiSessions.eventCopied') : t('aiSessions.eventCopyFailed'))
 }
 
 const visibleSessionSummaryPayload = () =>
   [
-    `AI 会话队列：${activeScopeLabel.value}`,
-    `当前会话：${visibleSessions.value.length}，待处理：${visiblePendingSessions.value.length}`,
+    t('aiSessions.queueHeader', { scope: activeScopeLabel.value }),
+    t('aiSessions.queueCounts', { current: visibleSessions.value.length, pending: visiblePendingSessions.value.length }),
     '',
     ...visibleSessions.value.map((session, index) => {
       const status = `${stateLabel(session.state)} / ${requestKindLabel(session.requestKind)} / ${decisionModeLabel(session.decisionMode)}`
       const lines = [
         `${index + 1}. ${session.title}`,
-        `   Agent: ${sourceLabel(session.source)} (${session.source})`,
-        `   状态: ${status}`,
-        `   会话: ${session.id}`,
-        session.cwd ? `   路径: ${session.cwd}` : '',
-        session.summary ? `   摘要: ${session.summary}` : '',
-        session.resumeCommand ? `   恢复: ${session.resumeCommand}` : ''
+        `   ${t('aiSessions.copy.agent')}: ${sourceLabel(session.source)} (${session.source})`,
+        `   ${t('aiSessions.copy.status')}: ${status}`,
+        `   ${t('aiSessions.copy.session')}: ${session.id}`,
+        session.cwd ? `   ${t('aiSessions.copy.path')}: ${session.cwd}` : '',
+        session.summary ? `   ${t('aiSessions.copy.summary')}: ${session.summary}` : '',
+        session.resumeCommand ? `   ${t('aiSessions.copy.resume')}: ${session.resumeCommand}` : ''
       ].filter(Boolean)
       return lines.join('\n')
     })
@@ -730,7 +732,7 @@ const visibleSessionSummaryPayload = () =>
 
 const copyVisibleSessionQueue = async () => {
   const copied = await copyTextToClipboard(visibleSessionSummaryPayload())
-  workspace.setTopNotice(copied ? 'AI 会话队列摘要已复制' : 'AI 会话队列摘要复制失败')
+  workspace.setTopNotice(copied ? t('aiSessions.queueCopied') : t('aiSessions.queueCopyFailed'))
 }
 
 const focusNextVisiblePending = () => {
@@ -753,7 +755,7 @@ const markVisiblePendingHandled = async () => {
       sessionIds
     })
   }
-  workspace.setTopNotice(`已处理 ${pending.length} 个 AI 会话`)
+  workspace.setTopNotice(t('aiSessions.visibleHandled', { count: pending.length }))
 }
 
 const formatTime = (timestamp: number) =>
@@ -765,12 +767,12 @@ const formatTime = (timestamp: number) =>
 
 const formatRelativeTime = (timestamp: number) => {
   const deltaSeconds = Math.max(0, Math.round((Date.now() - timestamp) / 1000))
-  if (deltaSeconds < 60) return `${deltaSeconds}s 前`
+  if (deltaSeconds < 60) return t('aiSessions.relative.secondsAgo', { count: deltaSeconds })
   const deltaMinutes = Math.round(deltaSeconds / 60)
-  if (deltaMinutes < 60) return `${deltaMinutes}m 前`
+  if (deltaMinutes < 60) return t('aiSessions.relative.minutesAgo', { count: deltaMinutes })
   const deltaHours = Math.round(deltaMinutes / 60)
-  if (deltaHours < 24) return `${deltaHours}h 前`
-  return `${Math.round(deltaHours / 24)}d 前`
+  if (deltaHours < 24) return t('aiSessions.relative.hoursAgo', { count: deltaHours })
+  return t('aiSessions.relative.daysAgo', { count: Math.round(deltaHours / 24) })
 }
 </script>
 

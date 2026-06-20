@@ -197,9 +197,9 @@ const terminalFonts = [
   { value: 'Menlo, Monaco, "Courier New", Consolas, "DejaVu Sans Mono", monospace', label: 'Menlo / Monaco (if installed)' }
 ]
 const cursorStyles = [
-  { value: 'block' as const, label: '块状光标' },
-  { value: 'bar' as const, label: '竖线光标' },
-  { value: 'underline' as const, label: '下划线光标' }
+  { value: 'block' as const, labelKey: 'settings.terminal.cursorBlock' as const },
+  { value: 'bar' as const, labelKey: 'settings.terminal.cursorBar' as const },
+  { value: 'underline' as const, labelKey: 'settings.terminal.cursorUnderline' as const }
 ]
 type SettingsModelProviderKey = 'litellm' | 'openai' | 'bedrock' | 'deepseek' | 'anthropic' | 'ollama' | 'lmstudio'
 const modelProviderCards: Array<{ provider: SettingsModelProviderKey; title: string }> = [
@@ -247,7 +247,7 @@ const agentHookInstallerFallbacks: AgentHookInstallerStatus[] = [
     installed: false,
     scriptPath: '',
     extraConfigPath: '~/.codex/config.toml',
-    warnings: ['状态未加载']
+    warnings: []
   },
   {
     source: 'claude-code',
@@ -258,7 +258,7 @@ const agentHookInstallerFallbacks: AgentHookInstallerStatus[] = [
     configExists: false,
     installed: false,
     scriptPath: '',
-    warnings: ['状态未加载']
+    warnings: []
   },
   {
     source: 'cursor',
@@ -269,7 +269,7 @@ const agentHookInstallerFallbacks: AgentHookInstallerStatus[] = [
     configExists: false,
     installed: false,
     scriptPath: '',
-    warnings: ['状态未加载']
+    warnings: []
   },
   {
     source: 'gemini',
@@ -280,7 +280,7 @@ const agentHookInstallerFallbacks: AgentHookInstallerStatus[] = [
     configExists: false,
     installed: false,
     scriptPath: '',
-    warnings: ['状态未加载']
+    warnings: []
   },
   {
     source: 'copilot',
@@ -291,7 +291,7 @@ const agentHookInstallerFallbacks: AgentHookInstallerStatus[] = [
     configExists: false,
     installed: false,
     scriptPath: '',
-    warnings: ['状态未加载']
+    warnings: []
   },
   {
     source: 'grok',
@@ -302,7 +302,7 @@ const agentHookInstallerFallbacks: AgentHookInstallerStatus[] = [
     configExists: false,
     installed: false,
     scriptPath: '',
-    warnings: ['状态未加载']
+    warnings: []
   },
   {
     source: 'opencode',
@@ -313,7 +313,7 @@ const agentHookInstallerFallbacks: AgentHookInstallerStatus[] = [
     configExists: false,
     installed: false,
     scriptPath: '',
-    warnings: ['状态未加载']
+    warnings: []
   },
   {
     source: 'codebuddy',
@@ -324,7 +324,7 @@ const agentHookInstallerFallbacks: AgentHookInstallerStatus[] = [
     configExists: false,
     installed: false,
     scriptPath: '',
-    warnings: ['状态未加载']
+    warnings: []
   },
   {
     source: 'factory',
@@ -335,7 +335,7 @@ const agentHookInstallerFallbacks: AgentHookInstallerStatus[] = [
     configExists: false,
     installed: false,
     scriptPath: '',
-    warnings: ['状态未加载']
+    warnings: []
   },
   {
     source: 'qoder',
@@ -346,7 +346,7 @@ const agentHookInstallerFallbacks: AgentHookInstallerStatus[] = [
     configExists: false,
     installed: false,
     scriptPath: '',
-    warnings: ['状态未加载']
+    warnings: []
   },
   {
     source: 'amp',
@@ -357,7 +357,7 @@ const agentHookInstallerFallbacks: AgentHookInstallerStatus[] = [
     configExists: false,
     installed: false,
     scriptPath: '',
-    warnings: ['状态未加载']
+    warnings: []
   },
   {
     source: 'pi',
@@ -368,7 +368,7 @@ const agentHookInstallerFallbacks: AgentHookInstallerStatus[] = [
     configExists: false,
     installed: false,
     scriptPath: '',
-    warnings: ['状态未加载']
+    warnings: []
   },
   {
     source: 'omp',
@@ -379,7 +379,7 @@ const agentHookInstallerFallbacks: AgentHookInstallerStatus[] = [
     configExists: false,
     installed: false,
     scriptPath: '',
-    warnings: ['状态未加载']
+    warnings: []
   },
   {
     source: 'kiro',
@@ -390,7 +390,7 @@ const agentHookInstallerFallbacks: AgentHookInstallerStatus[] = [
     configExists: false,
     installed: false,
     scriptPath: '',
-    warnings: ['状态未加载']
+    warnings: []
   },
   {
     source: 'rovodev',
@@ -401,12 +401,12 @@ const agentHookInstallerFallbacks: AgentHookInstallerStatus[] = [
     configExists: false,
     installed: false,
     scriptPath: '',
-    warnings: ['状态未加载']
+    warnings: []
   }
 ]
 
 const agentHookInstallerRows = () =>
-  agentHookInstallerFallbacks.map((fallback) => workspace.agentHookInstallers.find((installer) => installer.source === fallback.source) || fallback)
+  agentHookInstallerFallbacks.map((fallback) => workspace.agentHookInstallers.find((installer) => installer.source === fallback.source) || { ...fallback, warnings: [t('settings.ai.agentHook.statusNotLoaded')] })
 
 const agentHibernationLimits = {
   idleSeconds: { min: 5, max: 604800 },
@@ -417,27 +417,27 @@ const agentHibernationLimits = {
 const automationSnippetRows = [
   {
     label: 'Control Socket',
-    description: 'aiopsterm 本地连接终端会注入该变量，外部脚本通过它调用控制协议。',
+    descriptionKey: 'settings.ai.automation.controlSocketDescription' as const,
     value: 'AIOPSTERM_CONTROL_SOCKET'
   },
   {
     label: 'CLI Helper',
-    description: '在带 Control Socket 环境的终端中使用，用于通知、会话和自动化控制。',
+    descriptionKey: 'settings.ai.automation.cliHelperDescription' as const,
     value: 'node resources/aiopsterm-control.js list-notifications'
   },
   {
     label: 'External Codex MCP',
-    description: '给外部 Codex 使用的 MCP 桥接服务，当前通过环境变量启用，修改后需要重启 aiopsterm。',
+    descriptionKey: 'settings.ai.automation.externalCodexMcpDescription' as const,
     value: 'AIOPSTERM_EXTERNAL_CODEX_MCP_ENABLE=1'
   },
   {
     label: 'External Codex MCP Token',
-    description: '可选访问令牌；设置后外部 Codex MCP 客户端需要携带同一个 token。',
+    descriptionKey: 'settings.ai.automation.externalCodexMcpTokenDescription' as const,
     value: 'AIOPSTERM_EXTERNAL_CODEX_MCP_TOKEN'
   },
   {
     label: 'External Codex MCP Socket',
-    description: '可选 socket 路径；未设置时使用应用数据目录下的默认路径。',
+    descriptionKey: 'settings.ai.automation.externalCodexMcpSocketDescription' as const,
     value: 'AIOPSTERM_EXTERNAL_CODEX_MCP_SOCKET'
   }
 ]
@@ -756,15 +756,15 @@ const TerminalSettings = defineComponent({
   setup() {
     return () =>
       h('div', [
-        settingsPageTitle('终端设置', 'terminal'),
-        h('p', { class: 'settings-description' }, '终端类型主要影响 TERM 和程序能力探测，通常不会直接改变外观。字体只有系统已安装或能匹配到对应字体时才会明显变化。'),
+        settingsPageTitle(t('settings.terminal.title'), 'terminal'),
+        h('p', { class: 'settings-description' }, t('settings.terminal.description')),
         h('div', { class: 'settings-form-card' }, [
-          selectRow('终端类型', workspace.terminalSettings.terminalType, terminalTypes.map((item) => ({ value: item, label: item })), (value) => workspace.updateTerminalSettings({ terminalType: value })),
-          selectRow('字体', workspace.terminalSettings.fontFamily, terminalFonts, (value) => workspace.updateTerminalSettings({ fontFamily: value })),
-          numberRow('字体大小', workspace.terminalSettings.fontSize, 8, 64, (value) => workspace.updateTerminalSettings({ fontSize: value })),
-          numberRow('ScrollBack', workspace.terminalSettings.scrollBack, 1, undefined, (value) => workspace.updateTerminalSettings({ scrollBack: value })),
+          selectRow(t('settings.terminal.terminalType'), workspace.terminalSettings.terminalType, terminalTypes.map((item) => ({ value: item, label: item })), (value) => workspace.updateTerminalSettings({ terminalType: value })),
+          selectRow(t('settings.terminal.font'), workspace.terminalSettings.fontFamily, terminalFonts, (value) => workspace.updateTerminalSettings({ fontFamily: value })),
+          numberRow(t('settings.terminal.fontSize'), workspace.terminalSettings.fontSize, 8, 64, (value) => workspace.updateTerminalSettings({ fontSize: value })),
+          numberRow(t('settings.terminal.scrollBack'), workspace.terminalSettings.scrollBack, 1, undefined, (value) => workspace.updateTerminalSettings({ scrollBack: value })),
           h('div', { class: 'settings-form-row' }, [
-            h('label', '光标样式'),
+            h('label', t('settings.terminal.cursorStyle')),
             h(
               'div',
               { class: 'cursor-style-group' },
@@ -773,7 +773,7 @@ const TerminalSettings = defineComponent({
                   'button',
                   {
                     class: ['cursor-style-button', { active: workspace.terminalSettings.cursorStyle === cursor.value }],
-                    title: cursor.label,
+                    title: t(cursor.labelKey),
                     onClick: () => workspace.updateTerminalSettings({ cursorStyle: cursor.value })
                   },
                   [h('span', { class: `cursor-preview ${cursor.value}` })]
@@ -781,22 +781,22 @@ const TerminalSettings = defineComponent({
               )
             )
           ]),
-          switchRow('光标闪烁', workspace.terminalSettings.cursorBlink, (checked) => workspace.updateTerminalSettings({ cursorBlink: checked })),
-          numberRow('行高', workspace.terminalSettings.lineHeight, 1, 3, (value) => workspace.updateTerminalSettings({ lineHeight: value }), 0.1),
-          switchRow('Pinch Zoom', workspace.terminalSettings.pinchZoomStatus, (checked) => workspace.updateTerminalSettings({ pinchZoomStatus: checked })),
-          switchRow('显示关闭按钮', workspace.terminalSettings.showCloseButton, (checked) => workspace.updateTerminalSettings({ showCloseButton: checked })),
-          switchRow('SSH Agents', workspace.terminalSettings.sshAgentsStatus, (checked) => workspace.updateTerminalSettings({ sshAgentsStatus: checked })),
+          switchRow(t('settings.terminal.cursorBlink'), workspace.terminalSettings.cursorBlink, (checked) => workspace.updateTerminalSettings({ cursorBlink: checked })),
+          numberRow(t('settings.terminal.lineHeight'), workspace.terminalSettings.lineHeight, 1, 3, (value) => workspace.updateTerminalSettings({ lineHeight: value }), 0.1),
+          switchRow(t('settings.terminal.pinchZoom'), workspace.terminalSettings.pinchZoomStatus, (checked) => workspace.updateTerminalSettings({ pinchZoomStatus: checked })),
+          switchRow(t('settings.terminal.showCloseButton'), workspace.terminalSettings.showCloseButton, (checked) => workspace.updateTerminalSettings({ showCloseButton: checked })),
+          switchRow(t('settings.terminal.sshAgents'), workspace.terminalSettings.sshAgentsStatus, (checked) => workspace.updateTerminalSettings({ sshAgentsStatus: checked })),
           workspace.terminalSettings.sshAgentsStatus
             ? h('div', { class: 'settings-form-row' }, [
-                h('label', 'SSH Agent 设置'),
-                h('button', { class: 'settings-button', onClick: () => workspace.openSshAgentConfig() }, '设置')
+                h('label', t('settings.terminal.sshAgentSettings')),
+                h('button', { class: 'settings-button', onClick: () => workspace.openSshAgentConfig() }, t('common.settings'))
               ])
             : null,
           h('div', { class: 'settings-form-row align-start' }, [
-            h('label', '鼠标事件'),
+            h('label', t('settings.terminal.mouseEvents')),
             h('div', { class: 'mouse-event-settings' }, [
               h('label', [
-                h('span', '中键:'),
+                h('span', t('settings.terminal.middleMouse')),
                 h(
                   'select',
                   {
@@ -808,15 +808,15 @@ const TerminalSettings = defineComponent({
                       )
                   },
                   [
-                    h('option', { value: 'none' }, '无'),
-                    h('option', { value: 'paste' }, '粘贴剪贴板'),
-                    h('option', { value: 'contextMenu' }, '显示右键菜单'),
-                    h('option', { value: 'closeTab' }, '关闭当前标签')
+                    h('option', { value: 'none' }, t('settings.terminal.mouseNone')),
+                    h('option', { value: 'paste' }, t('settings.terminal.mousePaste')),
+                    h('option', { value: 'contextMenu' }, t('settings.terminal.mouseContextMenu')),
+                    h('option', { value: 'closeTab' }, t('settings.terminal.mouseCloseTab'))
                   ]
                 )
               ]),
               h('label', [
-                h('span', '右键:'),
+                h('span', t('settings.terminal.rightMouse')),
                 h(
                   'select',
                   {
@@ -827,7 +827,7 @@ const TerminalSettings = defineComponent({
                         workspace.updateTerminalSettings({ rightMouseEvent: value as any })
                       )
                   },
-                  [h('option', { value: 'none' }, '无'), h('option', { value: 'paste' }, '粘贴剪贴板'), h('option', { value: 'contextMenu' }, '显示右键菜单')]
+                  [h('option', { value: 'none' }, t('settings.terminal.mouseNone')), h('option', { value: 'paste' }, t('settings.terminal.mousePaste')), h('option', { value: 'contextMenu' }, t('settings.terminal.mouseContextMenu'))]
                 )
               ])
             ])
@@ -836,14 +836,14 @@ const TerminalSettings = defineComponent({
         workspace.sshAgentConfigModalOpen
           ? h('div', { class: 'settings-modal agent-config-modal' }, [
               h('div', { class: 'settings-modal-card agent-config-card' }, [
-                h('header', [h('h3', 'SSH Agent 设置'), h('button', { title: '关闭', onClick: () => workspace.closeSshAgentConfig() }, '×')]),
+                h('header', [h('h3', t('settings.terminal.sshAgentTitle')), h('button', { title: t('common.close'), onClick: () => workspace.closeSshAgentConfig() }, '×')]),
                 workspace.sshAgentKeys.length
                   ? h('div', { class: 'settings-table agent-config-table' }, [
                       h('div', { class: 'settings-table-row head' }, [
-                        h('span', '指纹'),
-                        h('span', '备注'),
-                        h('span', '类型'),
-                        h('span', '操作')
+                        h('span', t('settings.terminal.sshAgentFingerprint')),
+                        h('span', t('settings.terminal.sshAgentComment')),
+                        h('span', t('settings.terminal.sshAgentType')),
+                        h('span', t('settings.terminal.sshAgentAction'))
                       ]),
                       ...workspace.sshAgentKeys.map((key) =>
                         h('div', { class: 'settings-table-row', key: key.id }, [
@@ -857,16 +857,16 @@ const TerminalSettings = defineComponent({
                                 class: 'settings-link-button danger',
                                 onClick: () => workspace.removeSshAgentKey(key.id)
                               },
-                              '删除'
+                              t('common.delete')
                             )
                           ])
                         ])
                       )
                     ])
-                  : h('div', { class: 'settings-empty-state' }, '暂无密钥添加'),
+                  : h('div', { class: 'settings-empty-state' }, t('settings.terminal.sshAgentEmpty')),
                 h('div', { class: 'agent-key-form' }, [
                   h('label', [
-                    h('span', '密钥'),
+                    h('span', t('settings.terminal.sshAgentKey')),
                     h(
                       'select',
                       {
@@ -875,7 +875,7 @@ const TerminalSettings = defineComponent({
                         onChange: (event: Event) => workspace.setSshAgentSelectedKey((event.target as HTMLSelectElement).value)
                       },
                       [
-                        h('option', { value: '' }, '请选择密钥'),
+                        h('option', { value: '' }, t('settings.terminal.sshAgentSelectKey')),
                         ...workspace.sshAgentKeyChainOptions.map((option) =>
                           h(
                             'option',
@@ -889,9 +889,9 @@ const TerminalSettings = defineComponent({
                       ]
                     )
                   ]),
-                  h('button', { class: 'settings-button primary', onClick: () => workspace.addSshAgentKey() }, '添加')
+                  h('button', { class: 'settings-button primary', onClick: () => workspace.addSshAgentKey() }, t('common.add'))
                 ]),
-                h('footer', [h('button', { class: 'settings-button', onClick: () => workspace.closeSshAgentConfig() }, '关闭')])
+                h('footer', [h('button', { class: 'settings-button', onClick: () => workspace.closeSshAgentConfig() }, t('common.close'))])
               ])
             ])
           : null,
@@ -1147,16 +1147,16 @@ const AiPreferenceSettings = defineComponent({
   setup() {
     return () =>
       h('div', [
-        settingsPageTitle('AI 偏好设置', 'ai'),
-        h('h3', 'Agent Hook 安装器'),
+        settingsPageTitle(t('settings.ai.title'), 'ai'),
+        h('h3', t('settings.ai.agentHookInstaller')),
         h(AgentHookInstallerCard),
-        h('h3', 'AI 会话休眠'),
+        h('h3', t('settings.ai.hibernation')),
         h(AgentHibernationSettingsCard),
-        h('h3', '通知'),
+        h('h3', t('settings.ai.notifications')),
         h(NotificationPreferenceSettingsCard),
-        h('h3', '自动化与开发者'),
+        h('h3', t('settings.ai.automationDeveloper')),
         h(AutomationDeveloperSettingsCard),
-        h('h3', '通用'),
+        h('h3', t('settings.ai.general')),
         h('div', { class: 'settings-section-card ai-preferences' }, [
           h('label', { class: 'settings-check-line' }, [
             h('input', {
@@ -1167,7 +1167,7 @@ const AiPreferenceSettings = defineComponent({
                   workspace.updateAiPreferences({ enableExtendedThinking: checked })
                 )
             }),
-            '启用 Extended Thinking'
+            t('settings.ai.extendedThinking')
           ]),
           workspace.aiPreferences.enableExtendedThinking
             ? h('div', { class: 'settings-budget' }, [
@@ -1183,66 +1183,66 @@ const AiPreferenceSettings = defineComponent({
                       workspace.updateAiPreferences({ thinkingBudgetTokens: Number(value) })
                     )
                 }),
-                h('small', '影响 AI 对话请求的输出 token 预算，并写入对话系统约束。')
+                h('small', t('settings.ai.thinkingBudgetDescription'))
               ])
             : null,
           h(SettingsCheckbox, {
-            label: '自动执行只读命令',
-            description: '只读命令可在确认范围内自动执行。',
+            label: t('settings.ai.autoExecuteReadOnly'),
+            description: t('settings.ai.autoExecuteReadOnlyDescription'),
             checked: workspace.aiPreferences.autoExecuteReadOnlyCommands,
             onChange: (checked: boolean) => workspace.updateAiPreferences({ autoExecuteReadOnlyCommands: checked })
           }),
           h(SettingsCheckbox, {
-            label: '命令输出过滤',
-            description: 'Agent 回传长命令输出时压缩中间部分，界面仍保留完整输出。',
+            label: t('settings.ai.commandOutputFiltering'),
+            description: t('settings.ai.commandOutputFilteringDescription'),
             checked: workspace.aiPreferences.commandOutputFilteringEnabled,
             onChange: (checked: boolean) => workspace.updateAiPreferences({ commandOutputFilteringEnabled: checked })
           }),
           h(SettingsCheckbox, {
-            label: '知识库搜索',
-            description: '发送普通 AI 对话时自动检索并附加相关知识库文档。',
+            label: t('settings.ai.kbSearch'),
+            description: t('settings.ai.kbSearchDescription'),
             checked: workspace.aiPreferences.kbSearchEnabled,
             onChange: (checked: boolean) => workspace.updateAiPreferences({ kbSearchEnabled: checked })
           }),
           h(SettingsCheckbox, {
-            label: '经验抽取',
-            description: '影响 AI 回答中是否提炼可复用运维经验。',
+            label: t('settings.ai.experienceExtraction'),
+            description: t('settings.ai.experienceExtractionDescription'),
             checked: workspace.aiPreferences.experienceExtractionEnabled,
             onChange: (checked: boolean) => workspace.updateAiPreferences({ experienceExtractionEnabled: checked })
           }),
           h(SettingsCheckbox, {
-            label: 'AI 会话自动命名',
-            description: 'Agent 回合结束后用当前模型总结 2-5 个词的会话标题；手动标题不会被覆盖。',
+            label: t('settings.ai.managedAiAutoNaming'),
+            description: t('settings.ai.managedAiAutoNamingDescription'),
             checked: workspace.aiPreferences.managedAiAutoNamingEnabled,
             onChange: (checked: boolean) => workspace.updateAiPreferences({ managedAiAutoNamingEnabled: checked })
           }),
           h(SettingsCheckbox, {
-            label: '自动批准',
-            description: '只允许低风险只读动作自动通过，不绕过高风险命令审批。',
+            label: t('settings.ai.autoApproval'),
+            description: t('settings.ai.autoApprovalDescription'),
             checked: workspace.aiPreferences.autoApproval,
             onboardingId: 'settings-ai-auto-approval',
             onChange: (checked: boolean) => workspace.updateAiPreferences({ autoApproval: checked })
           }),
           h('div', { class: 'security-config-row' }, [
-            h('span', '安全配置'),
-            h('button', { class: 'settings-button', onClick: () => workspace.openSecurityConfigEditor() }, '打开安全配置')
+            h('span', t('settings.ai.securityConfig')),
+            h('button', { class: 'settings-button', onClick: () => workspace.openSecurityConfigEditor() }, t('settings.ai.openSecurityConfig'))
           ])
         ]),
-        h('h3', '功能'),
+        h('h3', t('settings.ai.features')),
         h('div', { class: 'settings-section-card' }, [
           selectRow(
             'OpenAI Reasoning Effort',
             workspace.aiPreferences.reasoningEffort,
             [
-              { value: 'low', label: '低' },
-              { value: 'medium', label: '中' },
-              { value: 'high', label: '高' }
+              { value: 'low', label: t('settings.ai.reasoningLow') },
+              { value: 'medium', label: t('settings.ai.reasoningMedium') },
+              { value: 'high', label: t('settings.ai.reasoningHigh') }
             ],
             (value) => workspace.updateAiPreferences({ reasoningEffort: value as any }),
             true
           )
         ]),
-        h('h3', 'AI 模型代理'),
+        h('h3', t('settings.ai.modelProxy')),
         h('div', { class: 'settings-section-card' }, [
           h('label', { class: 'settings-check-line' }, [
             h('input', {
@@ -1251,13 +1251,13 @@ const AiPreferenceSettings = defineComponent({
               onChange: (event: Event) =>
                 restoreCheckboxOnFailedSave(event, workspace.aiPreferences.needProxy, (checked) => workspace.updateAiPreferences({ needProxy: checked }))
             }),
-            '启用代理'
+            t('settings.ai.enableProxy')
           ]),
           workspace.aiPreferences.needProxy
             ? h('div', [
                 h('div', { class: 'proxy-grid' }, [
                   h('label', [
-                    h('span', '代理类型'),
+                    h('span', t('settings.ai.proxyType')),
                     h(
                       'select',
                       {
@@ -1304,7 +1304,7 @@ const AiPreferenceSettings = defineComponent({
                         workspace.updateAiPreferences({ proxy: { enableProxyIdentity: checked } })
                       )
                   }),
-                  '启用代理身份'
+                  t('settings.ai.enableProxyIdentity')
                 ]),
                 workspace.aiPreferences.proxy.enableProxyIdentity
                   ? h('div', { class: 'proxy-grid credentials' }, [
@@ -1336,10 +1336,10 @@ const AiPreferenceSettings = defineComponent({
               ])
             : null
         ]),
-        h('h3', '终端'),
+        h('h3', t('settings.ai.terminal')),
         h('div', { class: 'settings-section-card' }, [
-          numberRow('Shell Integration Timeout', workspace.aiPreferences.shellIntegrationTimeout, 1, 300, (value) => workspace.updateAiPreferences({ shellIntegrationTimeout: value }), 1, true),
-          h('p', { class: 'setting-description-no-padding' }, 'Agent 等待终端命令输出的默认超时时间，单位为秒。')
+          numberRow(t('settings.ai.shellIntegrationTimeout'), workspace.aiPreferences.shellIntegrationTimeout, 1, 300, (value) => workspace.updateAiPreferences({ shellIntegrationTimeout: value }), 1, true),
+          h('p', { class: 'setting-description-no-padding' }, t('settings.ai.shellIntegrationTimeoutDescription'))
         ])
       ])
   }
@@ -1354,13 +1354,19 @@ const AgentHookInstallerCard = defineComponent({
         {
           class: ['agent-hook-status-pill', installer.installed ? 'installed' : installer.error ? 'error' : installer.binaryPath ? 'ready' : 'missing']
         },
-        installer.installed ? '已安装' : installer.error ? '配置异常' : installer.binaryPath ? '可安装' : '未检测到 CLI'
+        installer.installed
+          ? t('settings.ai.agentHook.installed')
+          : installer.error
+            ? t('settings.ai.agentHook.configError')
+            : installer.binaryPath
+              ? t('settings.ai.agentHook.ready')
+              : t('settings.ai.agentHook.cliMissing')
       )
 
     const renderMeta = (label: string, value: string) =>
       h('div', { class: 'agent-hook-meta-row' }, [
         h('span', label),
-        h('code', { title: value || '未检测到' }, value || '未检测到')
+        h('code', { title: value || t('settings.ai.agentHook.detectedMissing') }, value || t('settings.ai.agentHook.detectedMissing'))
       ])
 
     const renderInstaller = (installer: AgentHookInstallerStatus) => {
@@ -1369,15 +1375,15 @@ const AgentHookInstallerCard = defineComponent({
       return h('article', { class: 'agent-hook-installer-row' }, [
         h('div', { class: 'agent-hook-installer-main' }, [
           h('header', [
-            h('div', [h('strong', installer.label), h('small', `启动命令: ${installer.binaryName}`)]),
+            h('div', [h('strong', installer.label), h('small', `${t('settings.ai.agentHook.launchCommand')}: ${installer.binaryName}`)]),
             renderStatusPill(installer)
           ]),
-          h('p', { class: 'agent-hook-description' }, '安装后，只会捕获通过 aiopsterm 本地连接终端启动的会话；外部系统终端会自动空返回，不接管审批。'),
+          h('p', { class: 'agent-hook-description' }, t('settings.ai.agentHook.description')),
           h('div', { class: 'agent-hook-meta-grid' }, [
             renderMeta('CLI', installer.binaryPath),
-            renderMeta('Hook 配置', installer.configPath),
-            installer.extraConfigPath ? renderMeta('附加配置', installer.extraConfigPath) : null,
-            renderMeta('Hook Helper', installer.scriptPath)
+            renderMeta(t('settings.ai.agentHook.config'), installer.configPath),
+            installer.extraConfigPath ? renderMeta(t('settings.ai.agentHook.extraConfig'), installer.extraConfigPath) : null,
+            renderMeta(t('settings.ai.agentHook.helper'), installer.scriptPath)
           ]),
           installer.error ? h('p', { class: 'agent-hook-error' }, installer.error) : null,
           installer.warnings.length ? h('ul', { class: 'agent-hook-warnings' }, installer.warnings.map((warning) => h('li', warning))) : null
@@ -1390,7 +1396,7 @@ const AgentHookInstallerCard = defineComponent({
               disabled,
               onClick: () => workspace.installAgentHookInstaller(installer.source)
             },
-            busy ? '处理中' : installer.installed ? '重新安装' : '安装'
+            busy ? t('common.processing') : installer.installed ? t('common.reinstall') : t('common.install')
           ),
           h(
             'button',
@@ -1399,7 +1405,7 @@ const AgentHookInstallerCard = defineComponent({
               disabled: disabled || !installer.installed,
               onClick: () => workspace.uninstallAgentHookInstaller(installer.source)
             },
-            '卸载'
+            t('common.uninstall')
           )
         ])
       ])
@@ -1409,8 +1415,8 @@ const AgentHookInstallerCard = defineComponent({
       h('div', { class: 'settings-section-card agent-hook-installer-card' }, [
         h('header', { class: 'agent-hook-card-header' }, [
           h('div', [
-            h('strong', 'Codex / Claude Code 会话管理 Hook'),
-            h('small', '显式写入用户级 Hook 配置，用于让 AI 会话面板发现并定位需要处理的本地连接会话。')
+            h('strong', t('settings.ai.agentHook.title')),
+            h('small', t('settings.ai.agentHook.subtitle'))
           ]),
           h(
             'button',
@@ -1419,7 +1425,7 @@ const AgentHookInstallerCard = defineComponent({
               disabled: workspace.agentHookInstallersLoading,
               onClick: () => workspace.refreshAgentHookInstallers()
             },
-            workspace.agentHookInstallersLoading ? '刷新中' : '刷新'
+            workspace.agentHookInstallersLoading ? t('common.refreshing') : t('common.refresh')
           )
         ]),
         workspace.agentHookInstallerError ? h('p', { class: 'agent-hook-error' }, workspace.agentHookInstallerError) : null,
@@ -1435,13 +1441,13 @@ const AgentHibernationSettingsCard = defineComponent({
     return () =>
       h('div', { class: 'settings-section-card' }, [
         h(SettingsCheckbox, {
-          label: '启用 Agent Hibernation',
-          description: '后台 AI 会话超过空闲阈值且超过最大活跃终端数时，允许先提示再休眠对应终端，保留可恢复会话记录。',
+          label: t('settings.ai.hibernation.enable'),
+          description: t('settings.ai.hibernation.description'),
           checked: workspace.agentHibernationConfig.enabled,
           onChange: (checked: boolean) => workspace.setAgentHibernationEnabled(checked)
         }),
         numberRow(
-          '空闲时间（秒）',
+          t('settings.ai.hibernation.idleSeconds'),
           workspace.agentHibernationConfig.idleSeconds,
           agentHibernationLimits.idleSeconds.min,
           agentHibernationLimits.idleSeconds.max,
@@ -1449,9 +1455,9 @@ const AgentHibernationSettingsCard = defineComponent({
           1,
           true
         ),
-        h('p', { class: 'setting-description-no-padding' }, '只有超过该时间没有终端活动的可恢复 AI 会话才会成为休眠候选。'),
+        h('p', { class: 'setting-description-no-padding' }, t('settings.ai.hibernation.idleDescription')),
         numberRow(
-          '最大活跃终端数',
+          t('settings.ai.hibernation.maxLiveTerminals'),
           workspace.agentHibernationConfig.maxLiveTerminals,
           agentHibernationLimits.maxLiveTerminals.min,
           agentHibernationLimits.maxLiveTerminals.max,
@@ -1459,9 +1465,9 @@ const AgentHibernationSettingsCard = defineComponent({
           1,
           true
         ),
-        h('p', { class: 'setting-description-no-padding' }, '活跃可恢复 AI 终端数量超过该值后，才会从后台最旧的候选开始休眠。'),
+        h('p', { class: 'setting-description-no-padding' }, t('settings.ai.hibernation.maxLiveDescription')),
         numberRow(
-          '确认倒计时（秒）',
+          t('settings.ai.hibernation.confirmationSeconds'),
           workspace.agentHibernationConfig.confirmationSeconds,
           agentHibernationLimits.confirmationSeconds.min,
           agentHibernationLimits.confirmationSeconds.max,
@@ -1469,7 +1475,7 @@ const AgentHibernationSettingsCard = defineComponent({
           1,
           true
         ),
-        h('p', { class: 'setting-description-no-padding' }, '设置为 0 时不显示倒计时确认，符合条件后直接休眠后台候选。')
+        h('p', { class: 'setting-description-no-padding' }, t('settings.ai.hibernation.confirmationDescription'))
       ])
   }
 })
@@ -1480,14 +1486,14 @@ const NotificationPreferenceSettingsCard = defineComponent({
     return () =>
       h('div', { class: 'settings-section-card' }, [
         h(SettingsCheckbox, {
-          label: '桌面通知',
-          description: '控制外部通知协议和 AI 会话事件触发的系统桌面通知。关闭后应用内通知列表仍会保留。',
+          label: t('settings.ai.notification.desktop'),
+          description: t('settings.ai.notification.desktopDescription'),
           checked: workspace.notificationSettings.desktopNotifications,
           onChange: (checked: boolean) => workspace.updateNotificationSettings({ desktopNotifications: checked })
         }),
         h(SettingsCheckbox, {
-          label: '顶部铃铛提醒控制通知',
-          description: '控制外部通知协议产生的未读通知是否进入顶部铃铛队列；AI 会话审批、问题和待处理提醒始终保留。',
+          label: t('settings.ai.notification.controlBell'),
+          description: t('settings.ai.notification.controlBellDescription'),
           checked: workspace.notificationSettings.controlNotificationBell,
           onChange: (checked: boolean) => workspace.updateNotificationSettings({ controlNotificationBell: checked })
         })
@@ -1502,14 +1508,14 @@ const AutomationDeveloperSettingsCard = defineComponent({
       h('div', { class: 'automation-snippet-row' }, [
         h('div', [
           h('strong', item.label),
-          h('small', item.description),
+          h('small', t(item.descriptionKey)),
           h('code', item.value)
         ]),
         h(
           'button',
           {
             class: 'settings-button icon-button',
-            title: `复制 ${item.label}`,
+            title: t('settings.ai.automation.copySnippet', { label: item.label }),
             onClick: () => workspace.copySettingsText(item.value, item.label)
           },
           [h(Copy)]
@@ -1518,7 +1524,7 @@ const AutomationDeveloperSettingsCard = defineComponent({
 
     return () =>
       h('div', { class: 'settings-section-card automation-settings-card' }, [
-        h('p', { class: 'setting-description-no-padding' }, '这些入口用于脚本、CLI、外部 Codex MCP 和本地连接终端自动化；能否生效取决于运行时环境变量和是否从 aiopsterm 本地连接终端启动。'),
+        h('p', { class: 'setting-description-no-padding' }, t('settings.ai.automation.description')),
         ...automationSnippetRows.map((item) => renderSnippet(item)),
         h('div', { class: 'settings-action-row' }, [
           h(
@@ -1527,7 +1533,7 @@ const AutomationDeveloperSettingsCard = defineComponent({
               class: 'settings-button',
               onClick: () => workspace.openSettingsDocumentationFile('technical/control-socket.md')
             },
-            '控制协议文档'
+            t('settings.ai.automation.controlProtocolDocs')
           ),
           h(
             'button',
@@ -1535,7 +1541,7 @@ const AutomationDeveloperSettingsCard = defineComponent({
               class: 'settings-button',
               onClick: () => workspace.openSettingsDocumentationFile('technical/external-codex-mcp.md')
             },
-            '外部 Codex MCP 文档'
+            t('settings.ai.automation.externalCodexMcpDocs')
           )
         ])
       ])

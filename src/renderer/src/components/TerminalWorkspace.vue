@@ -183,35 +183,35 @@
         <button
           v-if="activeTerminalContextBar.pendingAiCount"
           class="terminal-context-attention"
-          title="定位待处理 AI 会话"
+          :title="t('terminal.context.locatePendingAi')"
           @click="workspace.jumpToNextAiAttention"
         >
           {{ activeTerminalContextBar.pendingAiCount }} AI
         </button>
         <button
-          title="打开 AI 会话管理"
+          :title="t('terminal.context.openAiSessions')"
           @click="openAiSessionsFromContextBar"
         >
-          AI 会话
+          {{ t('terminal.context.aiSessions') }}
         </button>
         <button
-          title="刷新 AI 会话状态"
+          :title="t('terminal.context.refreshAiSessions')"
           @click="refreshAiSessionsFromContextBar"
         >
-          刷新
+          {{ t('terminal.context.refresh') }}
         </button>
         <button
           v-if="activeTerminalContextBar.focusable"
-          title="聚焦当前终端"
+          :title="t('terminal.context.focusTerminal')"
           @click="focusActiveTerminalFromContextBar"
         >
-          聚焦
+          {{ t('terminal.context.focus') }}
         </button>
         <button
-          title="复制当前终端上下文"
+          :title="t('terminal.context.copyContext')"
           @click="copyActiveTerminalContext"
         >
-          复制上下文
+          {{ t('terminal.context.copyContextButton') }}
         </button>
       </div>
     </div>
@@ -534,6 +534,7 @@ import type { SettingSectionKey } from '@/config/settings'
 import { useWorkspaceStore, type TerminalPanel, type TerminalSettings } from '@/stores/workspace'
 import { copyTextToClipboard, mirrorTextToClipboardQuietly, readTextFromClipboard } from '@/services/clipboardRuntime'
 import { createTerminalZmodemRuntime, type TerminalZmodemProgress } from '@/services/zmodemRuntime'
+import { useI18n } from '@/i18n'
 import type {
   ControlAiAttentionSummary,
   ControlAgentTeamLaunchMember,
@@ -564,6 +565,7 @@ import type {
 } from '@shared/preload'
 
 const workspace = useWorkspaceStore()
+const { t } = useI18n()
 type XtermRuntimeOptions = XtermTerminal['options'] & { termName?: string }
 const setXtermTermName = (terminal: XtermTerminal, terminalType: string) => {
   ;(terminal.options as XtermRuntimeOptions).termName = terminalType || 'xterm-256color'
@@ -4030,11 +4032,11 @@ const connectionActionLabel = (panel?: TerminalPanel | null) => {
 }
 const connectionActionShortcut = (panel?: TerminalPanel | null) => (panel?.sessionId ? 'Ctrl+D' : 'Enter')
 const terminalStatusLabel = (panel: TerminalPanel) => {
-  if (panel.kind === 'knowledge') return '编辑器'
-  if (panel.status === 'connecting') return '连接中'
-  if (panel.status === 'error') return '异常'
-  if (panel.status === 'closed') return '已断开'
-  return '已连接'
+  if (panel.kind === 'knowledge') return t('terminal.status.editor')
+  if (panel.status === 'connecting') return t('terminal.status.connecting')
+  if (panel.status === 'error') return t('terminal.status.error')
+  if (panel.status === 'closed') return t('terminal.status.closed')
+  return t('terminal.status.connected')
 }
 const pathBaseName = (value?: string) => {
   const normalized = String(value || '').trim().replace(/\\/g, '/').replace(/\/+$/, '')
@@ -4062,20 +4064,20 @@ const terminalTabKindBadge = (panel: TerminalPanel) => {
 const terminalTabTooltip = (panel: TerminalPanel) => {
   const lines = [
     panel.title,
-    `类型: ${panel.kind === 'knowledge' ? '编辑器' : panel.sshSession ? 'SSH' : '本地终端'}`,
-    `状态: ${terminalStatusLabel(panel)}`
+    `${t('terminal.tab.type')}: ${panel.kind === 'knowledge' ? t('terminal.status.editor') : panel.sshSession ? 'SSH' : t('terminal.kind.localTerminal')}`,
+    `${t('terminal.tab.status')}: ${terminalStatusLabel(panel)}`
   ]
   const sshTarget = terminalSshTargetLabel(panel)
-  if (sshTarget) lines.push(`主机: ${sshTarget}`)
-  if (panel.cwd) lines.push(`路径: ${panel.cwd}`)
-  if (panel.knowledge?.relPath) lines.push(`文件: ${panel.knowledge.relPath}`)
-  if (panel.sessionId) lines.push(`会话: ${panel.sessionId}`)
+  if (sshTarget) lines.push(`${t('terminal.tab.host')}: ${sshTarget}`)
+  if (panel.cwd) lines.push(`${t('terminal.tab.path')}: ${panel.cwd}`)
+  if (panel.knowledge?.relPath) lines.push(`${t('terminal.tab.file')}: ${panel.knowledge.relPath}`)
+  if (panel.sessionId) lines.push(`${t('terminal.tab.session')}: ${panel.sessionId}`)
   return lines.filter(Boolean).join('\n')
 }
 const terminalContextKindLabel = (panel: TerminalPanel) => {
-  if (panel.kind === 'knowledge') return 'Editor'
+  if (panel.kind === 'knowledge') return t('terminal.kind.editor')
   if (panel.sshSession) return 'SSH'
-  return 'Local'
+  return t('terminal.kind.local')
 }
 const pendingAiSessionsForPanel = (panel: TerminalPanel) =>
   workspace.managedAiSessions.filter(
@@ -4144,7 +4146,7 @@ const openAiSessionsFromContextBar = () => {
 }
 const refreshAiSessionsFromContextBar = async () => {
   const refreshed = await workspace.refreshManagedAiSessions()
-  if (!refreshed && !workspace.managedAiSessionsError) workspace.setTopNotice('AI 会话刷新失败')
+  if (!refreshed && !workspace.managedAiSessionsError) workspace.setTopNotice(t('terminal.context.refreshFailed'))
 }
 const focusActiveTerminalFromContextBar = () => {
   const panel = activeTerminalPanel.value
@@ -4157,7 +4159,7 @@ const copyActiveTerminalContext = async () => {
   const context = activeTerminalContextBar.value
   if (!context) return
   const copied = await copyTextToClipboard(context.text)
-  workspace.setTopNotice(copied ? '终端上下文已复制' : '终端上下文复制失败')
+  workspace.setTopNotice(copied ? t('terminal.context.copied') : t('terminal.context.copyFailed'))
 }
 const visibleTerminalPanels = computed(() => {
   const active = activeTerminalPanel.value

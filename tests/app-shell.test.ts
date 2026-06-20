@@ -1716,6 +1716,68 @@ describe('AppShell', () => {
     wrapper.unmount()
   })
 
+  it('localizes managed AI session and terminal context controls', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const store = useWorkspaceStore()
+    store.config = {
+      ...store.config,
+      language: 'en-US'
+    }
+    store.upsertManagedAiSession({
+      source: 'claude-code',
+      event: 'permission_request',
+      sessionId: 'claude-i18n-approval',
+      title: 'Deploy approval',
+      summary: 'Approve deployment command',
+      panelId: 'panel-i18n',
+      terminalSessionId: 'terminal-i18n',
+      cwd: '/srv/i18n',
+      requestKind: 'permission',
+      decisionMode: 'blocking',
+      actionable: true,
+      receivedAt: 100
+    })
+
+    const sessions = mount(AiSessionsPanel, {
+      global: { plugins: [pinia] }
+    })
+    await flushPromises()
+
+    expect(sessions.text()).toContain('AI Sessions')
+    expect(sessions.find('input').attributes('placeholder')).toBe('Search sessions')
+    expect(sessions.find('.ai-sessions-queue-bar').text()).toContain('1 current sessions')
+    expect(sessions.find('.ai-sessions-queue-bar').text()).toContain('1 pending')
+    expect(sessions.text()).toContain('Permission approval')
+
+    const terminal = mount(TerminalWorkspace, {
+      attachTo: document.body,
+      global: { plugins: [pinia] }
+    })
+    store.createPanel()
+    const panel = store.panels.find((item) => item.id === store.activePanelId)!
+    panel.id = 'panel-i18n'
+    panel.title = 'Deploy shell'
+    panel.cwd = '/srv/i18n'
+    store.applyLocalTerminalSession(panel.id, {
+      id: 'terminal-i18n',
+      kind: 'local',
+      shell: '/bin/bash',
+      cwd: '/srv/i18n'
+    })
+    await terminal.vm.$nextTick()
+    await terminal.vm.$nextTick()
+
+    const contextBar = terminal.find('.terminal-context-bar')
+    expect(contextBar.text()).toContain('Local')
+    expect(contextBar.text()).toContain('AI Sessions')
+    expect(contextBar.text()).toContain('Copy context')
+    expect(contextBar.findAll('button').find((button) => button.text() === 'Refresh')?.attributes('title')).toBe('Refresh AI session status')
+
+    sessions.unmount()
+    terminal.unmount()
+  })
+
   it('opens asset management as a full workspace instead of a narrow side panel', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)

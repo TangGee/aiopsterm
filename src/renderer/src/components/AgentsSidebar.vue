@@ -5,13 +5,13 @@
         <Search />
         <input
           v-model="query"
-          placeholder="搜索会话"
+          :placeholder="t('agents.searchConversations')"
           @keydown.esc.prevent="clearSearch"
         />
         <button
           v-if="query"
           class="agents-search-clear"
-          title="清空搜索"
+          :title="t('ai.clearSearch')"
           type="button"
           @click="clearSearch"
         >
@@ -20,11 +20,11 @@
       </div>
       <button
         class="new-chat-btn"
-        title="新建会话"
+        :title="t('ai.newChat')"
         @click="handleNewChat"
       >
         <Plus />
-        <span>New Chat</span>
+        <span>{{ t('ai.newChat') }}</span>
       </button>
     </header>
 
@@ -33,7 +33,7 @@
         v-if="visibleConversations.length === 0"
         class="empty-state"
       >
-        <span class="empty-text">暂无数据</span>
+        <span class="empty-text">{{ t('ai.noData') }}</span>
       </div>
 
       <div
@@ -66,7 +66,7 @@
           </div>
           <button
             class="delete-btn"
-            title="删除会话"
+            :title="t('ai.deleteHistory')"
             @click.stop="handleDeleteConversation(conversation.id)"
           >
             <Trash2 />
@@ -79,7 +79,7 @@
           :disabled="isLoadingMore"
           @click="loadMoreConversations"
         >
-          {{ isLoadingMore ? '加载中...' : '加载更多' }}
+          {{ isLoadingMore ? t('ai.loadingMore') : t('ai.loadMore') }}
         </button>
       </div>
     </div>
@@ -90,8 +90,10 @@
 import { computed, ref, watch } from 'vue'
 import { Plus, Search, Trash2, X } from 'lucide-vue-next'
 import { useWorkspaceStore } from '@/stores/workspace'
+import { useI18n } from '@/i18n'
 
 const workspace = useWorkspaceStore()
+const { locale, t } = useI18n()
 const query = ref('')
 const pageSize = 20
 const currentPage = ref(1)
@@ -116,14 +118,14 @@ const formatConversationTime = (timestamp: number) => {
   const days = Math.floor(diff / dayMs)
 
   if (days === 0) {
-    return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+    return date.toLocaleTimeString(locale.value, { hour: '2-digit', minute: '2-digit' })
   }
 
   if (days < 7) {
-    return `${days}天前`
+    return t('ai.historyDaysAgo', { count: days })
   }
 
-  return date.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' })
+  return date.toLocaleDateString(locale.value, { month: '2-digit', day: '2-digit' })
 }
 
 watch(query, () => {

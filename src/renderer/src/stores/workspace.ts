@@ -4961,7 +4961,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const refreshAgentHookInstallers = async (options: { silent?: boolean } = {}) => {
     const listBridge = window.aiops?.listAgentHookInstallers
     if (typeof listBridge !== 'function') {
-      agentHookInstallerError.value = 'Agent Hook 安装器服务不可用'
+      agentHookInstallerError.value = i18nText('settings.ai.agentHook.serviceUnavailable')
       if (!options.silent) setTopNotice(agentHookInstallerError.value)
       return false
     }
@@ -4969,20 +4969,20 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     try {
       const result = await listBridge()
       if (!result?.ok) {
-        agentHookInstallerError.value = result?.errorMessage || 'Agent Hook 安装器状态加载失败'
+        agentHookInstallerError.value = result?.errorMessage || i18nText('settings.ai.agentHook.statusLoadFailed')
         if (!options.silent) setTopNotice(agentHookInstallerError.value)
         return false
       }
       if (!isAgentHookInstallerSnapshot(result.data)) {
-        agentHookInstallerError.value = 'Agent Hook 安装器状态加载失败'
+        agentHookInstallerError.value = i18nText('settings.ai.agentHook.statusLoadFailed')
         if (!options.silent) setTopNotice(agentHookInstallerError.value)
         return false
       }
       applyAgentHookInstallerSnapshot(result.data)
-      if (!options.silent) setTopNotice('Agent Hook 状态已刷新')
+      if (!options.silent) setTopNotice(i18nText('settings.ai.agentHook.statusRefreshed'))
       return true
     } catch (error) {
-      agentHookInstallerError.value = error instanceof Error ? error.message : 'Agent Hook 安装器状态加载失败'
+      agentHookInstallerError.value = error instanceof Error ? error.message : i18nText('settings.ai.agentHook.statusLoadFailed')
       if (!options.silent) setTopNotice(agentHookInstallerError.value)
       return false
     } finally {
@@ -4993,7 +4993,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const runAgentHookInstallerOperation = async (source: AgentHookInstallerSource, operation: 'install' | 'uninstall') => {
     const bridge = operation === 'install' ? window.aiops?.installAgentHook : window.aiops?.uninstallAgentHook
     if (typeof bridge !== 'function') {
-      setTopNotice('Agent Hook 安装器服务不可用')
+      setTopNotice(i18nText('settings.ai.agentHook.serviceUnavailable'))
       return false
     }
     agentHookInstallerBusySource.value = source
@@ -5001,22 +5001,26 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     try {
       const result = await bridge({ source })
       if (!result?.ok) {
-        const message = result?.errorMessage || (operation === 'install' ? 'Agent Hook 安装失败' : 'Agent Hook 卸载失败')
+        const message = result?.errorMessage || (operation === 'install' ? i18nText('settings.ai.agentHook.installFailed') : i18nText('settings.ai.agentHook.uninstallFailed'))
         agentHookInstallerError.value = message
         setTopNotice(message)
         return false
       }
       if (!isAgentHookInstallOperationData(result.data)) {
-        const message = operation === 'install' ? 'Agent Hook 安装结果异常' : 'Agent Hook 卸载结果异常'
+        const message = operation === 'install' ? i18nText('settings.ai.agentHook.installMalformed') : i18nText('settings.ai.agentHook.uninstallMalformed')
         agentHookInstallerError.value = message
         setTopNotice(message)
         return false
       }
       applyAgentHookInstallerSnapshot(result.data.snapshot)
-      setTopNotice(`${result.data.status.label} Agent Hook 已${operation === 'install' ? '安装' : '卸载'}`)
+      setTopNotice(
+        i18nText(operation === 'install' ? 'settings.ai.agentHook.installedNotice' : 'settings.ai.agentHook.uninstalledNotice', {
+          label: result.data.status.label
+        })
+      )
       return true
     } catch (error) {
-      const message = error instanceof Error ? error.message : operation === 'install' ? 'Agent Hook 安装失败' : 'Agent Hook 卸载失败'
+      const message = error instanceof Error ? error.message : operation === 'install' ? i18nText('settings.ai.agentHook.installFailed') : i18nText('settings.ai.agentHook.uninstallFailed')
       agentHookInstallerError.value = message
       setTopNotice(message)
       return false
@@ -6943,7 +6947,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const persistTerminalSettings = async (nextSettings: TerminalSettings) => {
     const saveConfigBridge = window.aiops?.saveConfig
     if (typeof saveConfigBridge !== 'function') {
-      setSettingsNotice('终端设置保存服务不可用')
+      setSettingsNotice(i18nText('settings.terminal.saveUnavailable'))
       return false
     }
     const normalizedSettings = normalizeTerminalConfig(nextSettings).normalized
@@ -6952,12 +6956,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         terminal: cloneTerminalSettingsSnapshot(normalizedSettings)
       })
       if (!isRecord(savedConfig) || !isTerminalSettingsSnapshot(savedConfig.terminal)) {
-        setSettingsNotice('终端设置保存失败')
+        setSettingsNotice(i18nText('settings.terminal.saveFailed'))
         return false
       }
       const savedSettings = normalizeTerminalConfig(savedConfig.terminal).normalized
       if (!terminalSettingsSnapshotsMatch(savedSettings, normalizedSettings)) {
-        setSettingsNotice('终端设置保存失败')
+        setSettingsNotice(i18nText('settings.terminal.saveFailed'))
         return false
       }
       config.value = mergeGenericSavedConfig(config.value, savedConfig, {
@@ -6966,7 +6970,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       terminalSettings.value = cloneTerminalSettingsSnapshot(savedSettings)
       return true
     } catch (error) {
-      setSettingsNotice(error instanceof Error ? error.message : '终端设置保存失败')
+      setSettingsNotice(error instanceof Error ? error.message : i18nText('settings.terminal.saveFailed'))
       return false
     }
   }
@@ -6975,7 +6979,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const nextSettings = normalizeTerminalConfig({ ...getTerminalSettingsSnapshot(), ...patch }).normalized
     const saved = await persistTerminalSettings(nextSettings)
     if (saved) {
-      setSettingsNotice('终端设置已保存')
+      setSettingsNotice(i18nText('settings.terminal.saved'))
     }
     return saved
   }
@@ -8768,7 +8772,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const refreshManagedAiSessions = async (options: { silent?: boolean } = {}) => {
     const listBridge = window.aiops?.listManagedAiSessions
     if (typeof listBridge !== 'function') {
-      managedAiSessionsError.value = 'AI 会话管理服务不可用'
+      managedAiSessionsError.value = i18nText('aiSessions.notice.serviceUnavailable')
       if (!options.silent) setTopNotice(managedAiSessionsError.value)
       return false
     }
@@ -8776,15 +8780,15 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     try {
       const result = (await listBridge()) as ManagedAiSessionListResult
       if (!result?.ok || !isManagedAiSessionSnapshot(result.data)) {
-        managedAiSessionsError.value = result?.errorMessage || 'AI 会话列表加载失败'
+        managedAiSessionsError.value = result?.errorMessage || i18nText('aiSessions.notice.listFailed')
         if (!options.silent) setTopNotice(managedAiSessionsError.value)
         return false
       }
       applyManagedAiSessionSnapshot(result.data)
-      if (!options.silent) setTopNotice('AI 会话已刷新')
+      if (!options.silent) setTopNotice(i18nText('aiSessions.notice.refreshed'))
       return true
     } catch (error) {
-      managedAiSessionsError.value = error instanceof Error ? error.message : 'AI 会话列表加载失败'
+      managedAiSessionsError.value = error instanceof Error ? error.message : i18nText('aiSessions.notice.listFailed')
       if (!options.silent) setTopNotice(managedAiSessionsError.value)
       return false
     } finally {
@@ -8885,32 +8889,32 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const replyManagedAiSession = async (source: AiAgentSessionSource, sessionId: string, kind: ManagedAiSessionDecision['kind'], message?: string) => {
     const bridge = window.aiops?.replyManagedAiSession
     if (typeof bridge !== 'function') {
-      setTopNotice('AI 会话管理服务不可用')
+      setTopNotice(i18nText('aiSessions.notice.serviceUnavailable'))
       return false
     }
     try {
       const result = (await bridge({ source, sessionId, kind, message })) as ManagedAiSessionMutationResult
       if (!result?.ok || !isManagedAiSessionMutationData(result.data)) {
-        setTopNotice(result?.errorMessage || 'AI 会话处理失败')
+        setTopNotice(result?.errorMessage || i18nText('aiSessions.notice.processFailed'))
         return false
       }
       applyManagedAiSessionSnapshot(result.data.snapshot)
       setTopNotice(
         kind === 'allow'
-          ? '已允许 AI 请求'
+          ? i18nText('aiSessions.notice.allowed')
           : kind === 'always'
-            ? '已持续允许 AI 请求'
+            ? i18nText('aiSessions.notice.alwaysAllowed')
             : kind === 'bypass'
-              ? '已允许本会话绕过审批'
+              ? i18nText('aiSessions.notice.bypassAllowed')
               : kind === 'deny'
-                ? '已拒绝 AI 请求'
+                ? i18nText('aiSessions.notice.denied')
                 : kind === 'reply'
-                  ? '已回复 AI 问题'
-                  : '已标记处理'
+                  ? i18nText('aiSessions.notice.replied')
+                  : i18nText('aiSessions.notice.handled')
       )
       return true
     } catch (error) {
-      setTopNotice(error instanceof Error ? error.message : 'AI 会话处理失败')
+      setTopNotice(error instanceof Error ? error.message : i18nText('aiSessions.notice.processFailed'))
       return false
     }
   }
@@ -8918,20 +8922,20 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const renameManagedAiSession = async (source: AiAgentSessionSource, sessionId: string, title: string) => {
     const bridge = window.aiops?.renameManagedAiSession
     if (typeof bridge !== 'function') {
-      setTopNotice('AI 会话管理服务不可用')
+      setTopNotice(i18nText('aiSessions.notice.serviceUnavailable'))
       return false
     }
     try {
       const result = (await bridge({ source, sessionId, title })) as ManagedAiSessionMutationResult
       if (!result?.ok || !isManagedAiSessionMutationData(result.data)) {
-        setTopNotice(result?.errorMessage || 'AI 会话重命名失败')
+        setTopNotice(result?.errorMessage || i18nText('aiSessions.notice.renameFailed'))
         return false
       }
       applyManagedAiSessionSnapshot(result.data.snapshot)
-      setTopNotice('AI 会话已重命名')
+      setTopNotice(i18nText('aiSessions.notice.renamed'))
       return true
     } catch (error) {
-      setTopNotice(error instanceof Error ? error.message : 'AI 会话重命名失败')
+      setTopNotice(error instanceof Error ? error.message : i18nText('aiSessions.notice.renameFailed'))
       return false
     }
   }
@@ -8939,20 +8943,20 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const clearManagedAiSession = async (source: AiAgentSessionSource, sessionId: string) => {
     const bridge = window.aiops?.clearManagedAiSession
     if (typeof bridge !== 'function') {
-      setTopNotice('AI 会话管理服务不可用')
+      setTopNotice(i18nText('aiSessions.notice.serviceUnavailable'))
       return false
     }
     try {
       const result = (await bridge({ source, sessionId })) as ManagedAiSessionMutationResult
       if (!result?.ok || !isManagedAiSessionMutationData(result.data)) {
-        setTopNotice(result?.errorMessage || 'AI 会话清理失败')
+        setTopNotice(result?.errorMessage || i18nText('aiSessions.notice.clearFailed'))
         return false
       }
       applyManagedAiSessionSnapshot(result.data.snapshot)
-      setTopNotice('AI 会话已清理')
+      setTopNotice(i18nText('aiSessions.notice.cleared'))
       return true
     } catch (error) {
-      setTopNotice(error instanceof Error ? error.message : 'AI 会话清理失败')
+      setTopNotice(error instanceof Error ? error.message : i18nText('aiSessions.notice.clearFailed'))
       return false
     }
   }
@@ -8960,20 +8964,20 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const bulkManagedAiSessions = async (input: ManagedAiSessionBulkInput) => {
     const bridge = window.aiops?.bulkManagedAiSessions
     if (typeof bridge !== 'function') {
-      setTopNotice('AI 会话管理服务不可用')
+      setTopNotice(i18nText('aiSessions.notice.serviceUnavailable'))
       return false
     }
     try {
       const result = (await bridge(input)) as ManagedAiSessionBulkResult
       if (!result?.ok || !isManagedAiSessionBulkData(result.data)) {
-        setTopNotice(result?.errorMessage || 'AI 会话批量操作失败')
+        setTopNotice(result?.errorMessage || i18nText('aiSessions.notice.bulkFailed'))
         return false
       }
       applyManagedAiSessionSnapshot(result.data.snapshot)
-      setTopNotice(`已处理 ${result.data.changed} 个 AI 会话`)
+      setTopNotice(i18nText('aiSessions.visibleHandled', { count: result.data.changed }))
       return true
     } catch (error) {
-      setTopNotice(error instanceof Error ? error.message : 'AI 会话批量操作失败')
+      setTopNotice(error instanceof Error ? error.message : i18nText('aiSessions.notice.bulkFailed'))
       return false
     }
   }
@@ -8984,13 +8988,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     try {
       const result = (await bridge()) as AgentHibernationConfigResult
       if (!result?.ok || !isRecord(result.data) || !isAgentHibernationConfig(result.data.config)) {
-        setTopNotice(result?.errorMessage || 'Agent Hibernation 配置加载失败')
+        setTopNotice(result?.errorMessage || i18nText('settings.ai.hibernation.loadFailed'))
         return false
       }
       agentHibernationConfig.value = { ...result.data.config }
       return true
     } catch (error) {
-      setTopNotice(error instanceof Error ? error.message : 'Agent Hibernation 配置加载失败')
+      setTopNotice(error instanceof Error ? error.message : i18nText('settings.ai.hibernation.loadFailed'))
       return false
     }
   }
@@ -8998,47 +9002,47 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const updateAgentHibernationConfig = async (patch: Partial<AgentHibernationConfig>) => {
     const bridge = window.aiops?.setAgentHibernationConfig
     if (typeof bridge !== 'function') {
-      setTopNotice('Agent Hibernation 服务不可用')
+      setTopNotice(i18nText('settings.ai.hibernation.serviceUnavailable'))
       return false
     }
     const nextConfig = { ...agentHibernationConfig.value, ...patch }
     try {
       const result = (await bridge(nextConfig)) as AgentHibernationConfigResult
       if (!result?.ok || !isRecord(result.data) || !isAgentHibernationConfig(result.data.config)) {
-        setTopNotice(result?.errorMessage || 'Agent Hibernation 配置保存失败')
+        setTopNotice(result?.errorMessage || i18nText('settings.ai.hibernation.saveFailed'))
         return false
       }
       agentHibernationConfig.value = { ...result.data.config }
-      setTopNotice('Agent Hibernation 配置已保存')
+      setTopNotice(i18nText('settings.ai.hibernation.saved'))
       return true
     } catch (error) {
-      setTopNotice(error instanceof Error ? error.message : 'Agent Hibernation 配置保存失败')
+      setTopNotice(error instanceof Error ? error.message : i18nText('settings.ai.hibernation.saveFailed'))
       return false
     }
   }
 
   const setAgentHibernationEnabled = async (enabled: boolean) => {
     const saved = await updateAgentHibernationConfig({ enabled })
-    if (saved) setTopNotice(enabled ? 'Agent Hibernation 已开启' : 'Agent Hibernation 已关闭')
+    if (saved) setTopNotice(enabled ? i18nText('settings.ai.hibernation.enabledNotice') : i18nText('settings.ai.hibernation.disabledNotice'))
     return saved
   }
 
   const hibernateManagedAiSession = async (source: AiAgentSessionSource, sessionId: string, reason = 'manual') => {
     const session = managedAiSessions.value.find((item) => item.source === source && item.id === sessionId)
     if (!session) {
-      setTopNotice('AI 会话不存在')
+      setTopNotice(i18nText('aiSessions.notice.missing'))
       return false
     }
     if (!agentHibernationConfig.value.enabled) {
-      setTopNotice('Agent Hibernation 未开启')
+      setTopNotice(i18nText('aiSessions.notice.hibernationDisabled'))
       return false
     }
     if (session.state === 'needsInput' || session.agentLifecycle === 'needsInput') {
-      setTopNotice('等待输入的 AI 会话不能休眠')
+      setTopNotice(i18nText('aiSessions.notice.cannotHibernateNeedsInput'))
       return false
     }
     if (!session.resumeCommand?.trim()) {
-      setTopNotice('此 AI 会话没有可用的恢复命令')
+      setTopNotice(i18nText('aiSessions.notice.noResumeCommand'))
       return false
     }
     const targetId = session.panelId || session.terminalSessionId
@@ -9047,7 +9051,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (terminalSessionId && typeof window.aiops?.killTerminal === 'function') {
       const killResult = await window.aiops.killTerminal(terminalSessionId)
       if (!killResult?.ok) {
-        setTopNotice(killResult?.errorMessage || 'AI 会话休眠失败')
+        setTopNotice(killResult?.errorMessage || i18nText('aiSessions.notice.hibernateFailed'))
         return false
       }
       if (panel?.sessionId === terminalSessionId) {
@@ -9057,17 +9061,17 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
     const bridge = window.aiops?.hibernateManagedAiSession
     if (typeof bridge !== 'function') {
-      setTopNotice('Agent Hibernation 服务不可用')
+      setTopNotice(i18nText('settings.ai.hibernation.serviceUnavailable'))
       return false
     }
     const result = (await bridge({ source, sessionId, reason, terminalSessionId })) as ManagedAiSessionHibernateResult
     if (!result?.ok || !isManagedAiSessionHibernateData(result.data)) {
-      setTopNotice(result?.errorMessage || 'AI 会话休眠失败')
+      setTopNotice(result?.errorMessage || i18nText('aiSessions.notice.hibernateFailed'))
       return false
     }
     agentHibernationConfig.value = { ...result.data.config }
     applyManagedAiSessionSnapshot(result.data.snapshot)
-    setTopNotice('AI 会话已休眠')
+    setTopNotice(i18nText('aiSessions.notice.hibernated'))
     return true
   }
 
@@ -9114,19 +9118,19 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const resumeManagedAiSession = async (source: AiAgentSessionSource, sessionId: string) => {
     const session = managedAiSessions.value.find((item) => item.source === source && item.id === sessionId)
     if (!session) {
-      setTopNotice('AI 会话不存在')
+      setTopNotice(i18nText('aiSessions.notice.missing'))
       return false
     }
     const command = session.resumeCommand?.trim()
     if (!command) {
-      setTopNotice('此 AI 会话没有可用的恢复命令')
+      setTopNotice(i18nText('aiSessions.notice.noResumeCommand'))
       return false
     }
     const focused = focusManagedAiSession(session.id)
     const targetId = focused?.panelId || focused?.terminalSessionId || session.panelId || session.terminalSessionId
     const panel = targetId ? panels.value.find((item) => item.id === targetId || item.sessionId === targetId) : null
     if (!panel?.sessionId) {
-      setTopNotice('恢复 AI 会话需要先打开它所属的本地连接终端')
+      setTopNotice(i18nText('aiSessions.notice.resumeNeedsTerminal'))
       return false
     }
     const decision = await runTerminalCommand(panel.id, command, { source: 'agent', writeToShell: true })
@@ -9139,11 +9143,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
           applyManagedAiSessionSnapshot(result.data.snapshot)
         }
       }
-      setTopNotice('已向所属终端写入 AI 会话恢复命令')
+      setTopNotice(i18nText('aiSessions.notice.resumeCommandWritten'))
       return true
     }
     if (decision.status === 'needs-approval') {
-      setTopNotice('AI 会话恢复命令等待安全审批')
+      setTopNotice(i18nText('aiSessions.notice.resumeCommandNeedsApproval'))
       return false
     }
     return false
@@ -9155,7 +9159,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       mode.value = 'terminal'
       activeModule.value = 'aiSessions'
       leftPanelOpen.value = true
-      setTopNotice('没有待处理的 AI 消息')
+      setTopNotice(i18nText('aiSessions.notice.noPendingMessages'))
       return null
     }
     const managedSession = item.id.startsWith('managed-ai:') && item.sessionId ? focusManagedAiSession(item.sessionId) : null
@@ -10261,7 +10265,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     onboardingGuideOpen.value = false
     setActiveSettingsSection('ai')
     void refreshAgentHookInstallers({ silent: true })
-    setTopNotice('已打开 AI 设置')
+    setTopNotice(i18nText('aiSessions.notice.openedSettings'))
   }
 
   const handleDeepLink = (payload: unknown) => {
