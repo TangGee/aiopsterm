@@ -1,4 +1,5 @@
-import type { AiCommandCatalog, AiCommandCatalogOption, AiCommandCatalogResult, KnowledgeBaseEntry } from '@shared/preload'
+import type { AiCommandCatalog, AiCommandCatalogOption, AiCommandCatalogResult } from '@shared/preload'
+import type { KnowledgeBaseEntry } from '@shared/contracts/knowledgeBase'
 
 type AiCommandBackendRuntime = {
   listKnowledgeDir?: (relDir: string) => KnowledgeBaseEntry[] | Promise<KnowledgeBaseEntry[]>

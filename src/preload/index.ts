@@ -2,15 +2,13 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type {
   AiopsPreloadApi,
   KeywordHighlightConfigWriteResult,
-  KnowledgeBaseTransferProgress,
-  KnowledgeBaseSearchResult,
-  KnowledgeBaseSearchStatus,
   SecurityConfigWriteResult,
   UserConfig
 } from '@shared/preload'
 import type { McpConfigWriteResult } from '@shared/contracts/mcp'
 import type { FileListEntry } from '@shared/contracts/files'
 import type { SkillUserConfig } from '@shared/contracts/skills'
+import type { KnowledgeBaseSearchResult, KnowledgeBaseSearchStatus, KnowledgeBaseTransferProgress } from '@shared/contracts/knowledgeBase'
 import type {
   TerminalCreateOptions,
   TerminalDataEvent,

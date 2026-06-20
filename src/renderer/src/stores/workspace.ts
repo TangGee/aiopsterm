@@ -128,14 +128,7 @@ import type {
   EditorUserConfig,
   KeywordHighlightRuleConfig,
   KeywordHighlightUserConfig,
-  KnowledgeBaseEntry,
-  KnowledgeBaseSearchResult,
-  KnowledgeBaseSearchStatus,
-  KnowledgeBaseTransferProgress,
-  KnowledgeBaseUserConfig,
   KnowledgeSearchRuntimeSnapshot,
-  KnowledgeNode,
-  KnowledgeNodeType,
   KubernetesAgentProxyConfig,
   KubernetesBastionGroup,
   KubernetesCatalog,
@@ -178,6 +171,15 @@ import type { QuickCommandGroupConfig, QuickCommandScriptPlan, QuickCommandScrip
 import type { McpConfigFile, McpResourceReadContent, McpResourceReadResult, McpServerUserConfig, McpToolCallContent, McpToolCallResult, McpToolStatesUserConfig } from '@shared/contracts/mcp'
 import type { SettingsPreferencesSnapshot, ShortcutUserConfig, UserRuleConfig } from '@shared/contracts/settingsPreferences'
 import type { SkillUserConfig } from '@shared/contracts/skills'
+import type {
+  KnowledgeBaseEntry,
+  KnowledgeBaseSearchResult,
+  KnowledgeBaseSearchStatus,
+  KnowledgeBaseTransferProgress,
+  KnowledgeBaseUserConfig,
+  KnowledgeNode,
+  KnowledgeNodeType
+} from '@shared/contracts/knowledgeBase'
 import type {
   AiAgentSessionEvent,
   AiAgentSessionEventName,

@@ -1,7 +1,7 @@
 import { clipboard } from 'electron'
 import { basename, extname, join, posix } from 'path'
 import { mkdir, stat, writeFile } from 'fs/promises'
-import type { KnowledgeBasePastedImageInput, KnowledgeBasePastedImageResult } from '@shared/preload'
+import type { KnowledgeBasePastedImageInput, KnowledgeBasePastedImageResult } from '@shared/contracts/knowledgeBase'
 
 export type KnowledgeBasePathResolver = (relPath: string) => { absPath: string; relPath: string }
 

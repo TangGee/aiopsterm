@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { KnowledgeBaseEntry } from '../src/shared/preload'
+import type { KnowledgeBaseEntry } from '../src/shared/contracts/knowledgeBase'
 
 const loadBackend = async () => {
   vi.resetModules()

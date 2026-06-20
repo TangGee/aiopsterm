@@ -187,6 +187,38 @@ import type {
   SkillUserConfig as SkillUserConfigPreload,
   SkillWriteResult as SkillWriteResultPreload
 } from '../src/shared/preload'
+import type {
+  KnowledgeBaseCreateResult as KnowledgeBaseCreateResultContract,
+  KnowledgeBaseDeleteResult as KnowledgeBaseDeleteResultContract,
+  KnowledgeBaseEntry as KnowledgeBaseEntryContract,
+  KnowledgeBaseImportResult as KnowledgeBaseImportResultContract,
+  KnowledgeBaseNodeConfig as KnowledgeBaseNodeConfigContract,
+  KnowledgeBasePastedImageResult as KnowledgeBasePastedImageResultContract,
+  KnowledgeBaseReadResult as KnowledgeBaseReadResultContract,
+  KnowledgeBaseSearchResult as KnowledgeBaseSearchResultContract,
+  KnowledgeBaseSearchStatus as KnowledgeBaseSearchStatusContract,
+  KnowledgeBaseTransferProgress as KnowledgeBaseTransferProgressContract,
+  KnowledgeBaseUserConfig as KnowledgeBaseUserConfigContract,
+  KnowledgeBaseWriteResult as KnowledgeBaseWriteResultContract,
+  KnowledgeNode as KnowledgeNodeContract,
+  KnowledgeNodeType as KnowledgeNodeTypeContract
+} from '../src/shared/contracts/knowledgeBase'
+import type {
+  KnowledgeBaseCreateResult as KnowledgeBaseCreateResultPreload,
+  KnowledgeBaseDeleteResult as KnowledgeBaseDeleteResultPreload,
+  KnowledgeBaseEntry as KnowledgeBaseEntryPreload,
+  KnowledgeBaseImportResult as KnowledgeBaseImportResultPreload,
+  KnowledgeBaseNodeConfig as KnowledgeBaseNodeConfigPreload,
+  KnowledgeBasePastedImageResult as KnowledgeBasePastedImageResultPreload,
+  KnowledgeBaseReadResult as KnowledgeBaseReadResultPreload,
+  KnowledgeBaseSearchResult as KnowledgeBaseSearchResultPreload,
+  KnowledgeBaseSearchStatus as KnowledgeBaseSearchStatusPreload,
+  KnowledgeBaseTransferProgress as KnowledgeBaseTransferProgressPreload,
+  KnowledgeBaseUserConfig as KnowledgeBaseUserConfigPreload,
+  KnowledgeBaseWriteResult as KnowledgeBaseWriteResultPreload,
+  KnowledgeNode as KnowledgeNodePreload,
+  KnowledgeNodeType as KnowledgeNodeTypePreload
+} from '../src/shared/preload'
 
 type AssertAssignable<From, To extends From> = true
 
@@ -337,6 +369,34 @@ type SkillImportResultPreloadMatchesContract = AssertAssignable<SkillImportResul
 type SkillImportResultContractMatchesPreload = AssertAssignable<SkillImportResultPreload, SkillImportResultContract>
 type SkillExportResultPreloadMatchesContract = AssertAssignable<SkillExportResultContract, SkillExportResultPreload>
 type SkillExportResultContractMatchesPreload = AssertAssignable<SkillExportResultPreload, SkillExportResultContract>
+type KnowledgeNodeConfigPreloadMatchesContract = AssertAssignable<KnowledgeBaseNodeConfigContract, KnowledgeBaseNodeConfigPreload>
+type KnowledgeNodeConfigContractMatchesPreload = AssertAssignable<KnowledgeBaseNodeConfigPreload, KnowledgeBaseNodeConfigContract>
+type KnowledgeNodeTypePreloadMatchesContract = AssertAssignable<KnowledgeNodeTypeContract, KnowledgeNodeTypePreload>
+type KnowledgeNodeTypeContractMatchesPreload = AssertAssignable<KnowledgeNodeTypePreload, KnowledgeNodeTypeContract>
+type KnowledgeNodePreloadMatchesContract = AssertAssignable<KnowledgeNodeContract, KnowledgeNodePreload>
+type KnowledgeNodeContractMatchesPreload = AssertAssignable<KnowledgeNodePreload, KnowledgeNodeContract>
+type KnowledgeUserConfigPreloadMatchesContract = AssertAssignable<KnowledgeBaseUserConfigContract, KnowledgeBaseUserConfigPreload>
+type KnowledgeUserConfigContractMatchesPreload = AssertAssignable<KnowledgeBaseUserConfigPreload, KnowledgeBaseUserConfigContract>
+type KnowledgeEntryPreloadMatchesContract = AssertAssignable<KnowledgeBaseEntryContract, KnowledgeBaseEntryPreload>
+type KnowledgeEntryContractMatchesPreload = AssertAssignable<KnowledgeBaseEntryPreload, KnowledgeBaseEntryContract>
+type KnowledgeReadResultPreloadMatchesContract = AssertAssignable<KnowledgeBaseReadResultContract, KnowledgeBaseReadResultPreload>
+type KnowledgeReadResultContractMatchesPreload = AssertAssignable<KnowledgeBaseReadResultPreload, KnowledgeBaseReadResultContract>
+type KnowledgeWriteResultPreloadMatchesContract = AssertAssignable<KnowledgeBaseWriteResultContract, KnowledgeBaseWriteResultPreload>
+type KnowledgeWriteResultContractMatchesPreload = AssertAssignable<KnowledgeBaseWriteResultPreload, KnowledgeBaseWriteResultContract>
+type KnowledgeCreateResultPreloadMatchesContract = AssertAssignable<KnowledgeBaseCreateResultContract, KnowledgeBaseCreateResultPreload>
+type KnowledgeCreateResultContractMatchesPreload = AssertAssignable<KnowledgeBaseCreateResultPreload, KnowledgeBaseCreateResultContract>
+type KnowledgeDeleteResultPreloadMatchesContract = AssertAssignable<KnowledgeBaseDeleteResultContract, KnowledgeBaseDeleteResultPreload>
+type KnowledgeDeleteResultContractMatchesPreload = AssertAssignable<KnowledgeBaseDeleteResultPreload, KnowledgeBaseDeleteResultContract>
+type KnowledgeImportResultPreloadMatchesContract = AssertAssignable<KnowledgeBaseImportResultContract, KnowledgeBaseImportResultPreload>
+type KnowledgeImportResultContractMatchesPreload = AssertAssignable<KnowledgeBaseImportResultPreload, KnowledgeBaseImportResultContract>
+type KnowledgePastedImageResultPreloadMatchesContract = AssertAssignable<KnowledgeBasePastedImageResultContract, KnowledgeBasePastedImageResultPreload>
+type KnowledgePastedImageResultContractMatchesPreload = AssertAssignable<KnowledgeBasePastedImageResultPreload, KnowledgeBasePastedImageResultContract>
+type KnowledgeTransferProgressPreloadMatchesContract = AssertAssignable<KnowledgeBaseTransferProgressContract, KnowledgeBaseTransferProgressPreload>
+type KnowledgeTransferProgressContractMatchesPreload = AssertAssignable<KnowledgeBaseTransferProgressPreload, KnowledgeBaseTransferProgressContract>
+type KnowledgeSearchResultPreloadMatchesContract = AssertAssignable<KnowledgeBaseSearchResultContract, KnowledgeBaseSearchResultPreload>
+type KnowledgeSearchResultContractMatchesPreload = AssertAssignable<KnowledgeBaseSearchResultPreload, KnowledgeBaseSearchResultContract>
+type KnowledgeSearchStatusPreloadMatchesContract = AssertAssignable<KnowledgeBaseSearchStatusContract, KnowledgeBaseSearchStatusPreload>
+type KnowledgeSearchStatusContractMatchesPreload = AssertAssignable<KnowledgeBaseSearchStatusPreload, KnowledgeBaseSearchStatusContract>
 
 describe('shared contract compatibility exports', () => {
   it('keeps Codex session contracts compatible through the preload export', () => {
@@ -560,5 +620,98 @@ describe('shared contract compatibility exports', () => {
     ] = [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true]
 
     expect(checks).toEqual([true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true])
+  })
+
+  it('keeps Knowledge Base contracts compatible through the preload export', () => {
+    const checks: [
+      KnowledgeNodeConfigPreloadMatchesContract,
+      KnowledgeNodeConfigContractMatchesPreload,
+      KnowledgeNodeTypePreloadMatchesContract,
+      KnowledgeNodeTypeContractMatchesPreload,
+      KnowledgeNodePreloadMatchesContract,
+      KnowledgeNodeContractMatchesPreload,
+      KnowledgeUserConfigPreloadMatchesContract,
+      KnowledgeUserConfigContractMatchesPreload,
+      KnowledgeEntryPreloadMatchesContract,
+      KnowledgeEntryContractMatchesPreload,
+      KnowledgeReadResultPreloadMatchesContract,
+      KnowledgeReadResultContractMatchesPreload,
+      KnowledgeWriteResultPreloadMatchesContract,
+      KnowledgeWriteResultContractMatchesPreload,
+      KnowledgeCreateResultPreloadMatchesContract,
+      KnowledgeCreateResultContractMatchesPreload,
+      KnowledgeDeleteResultPreloadMatchesContract,
+      KnowledgeDeleteResultContractMatchesPreload,
+      KnowledgeImportResultPreloadMatchesContract,
+      KnowledgeImportResultContractMatchesPreload,
+      KnowledgePastedImageResultPreloadMatchesContract,
+      KnowledgePastedImageResultContractMatchesPreload,
+      KnowledgeTransferProgressPreloadMatchesContract,
+      KnowledgeTransferProgressContractMatchesPreload,
+      KnowledgeSearchResultPreloadMatchesContract,
+      KnowledgeSearchResultContractMatchesPreload,
+      KnowledgeSearchStatusPreloadMatchesContract,
+      KnowledgeSearchStatusContractMatchesPreload
+    ] = [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+
+    expect(checks).toEqual([
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ])
   })
 })

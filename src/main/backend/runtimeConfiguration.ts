@@ -55,8 +55,6 @@ import { broadcastWindowEvent } from '@shared/windowEvents'
 import type {
   ControlNotificationRecord,
   ControlResponse,
-  KnowledgeBaseEntry,
-  KnowledgeBaseNodeConfig,
   KubernetesTerminalDataEvent,
   KubernetesTerminalExitEvent,
   UserConfig
@@ -64,6 +62,7 @@ import type {
 import type { McpConfigFile } from '@shared/contracts/mcp'
 import type { ManagedAiSessionEvent, ManagedAiSessionFocusRequest } from '@shared/contracts/managedAiSessions'
 import type { SkillUserConfig } from '@shared/contracts/skills'
+import type { KnowledgeBaseEntry, KnowledgeBaseNodeConfig } from '@shared/contracts/knowledgeBase'
 
 type ConfigureMainRuntimeInput = {
   getConfig: () => UserConfig

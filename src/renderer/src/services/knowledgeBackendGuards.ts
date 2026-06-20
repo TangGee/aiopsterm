@@ -9,7 +9,7 @@ import type {
   KnowledgeBaseSearchStatus,
   KnowledgeBaseTransferProgress,
   KnowledgeBaseWriteResult
-} from '@shared/preload'
+} from '@shared/contracts/knowledgeBase'
 
 export const malformedKnowledgeBackendResultMessage = '知识库服务返回数据无效'
 

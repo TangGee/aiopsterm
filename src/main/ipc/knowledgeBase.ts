@@ -15,7 +15,7 @@ import type {
   KnowledgeBaseSearchStatus,
   KnowledgeBaseTransferProgress,
   KnowledgeBaseWriteResult
-} from '@shared/preload'
+} from '@shared/contracts/knowledgeBase'
 
 type ResolvedKnowledgePath = {
   rootAbs?: string

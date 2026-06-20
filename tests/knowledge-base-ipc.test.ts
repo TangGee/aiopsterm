@@ -8,7 +8,7 @@ import type {
   KnowledgeBaseDeleteResult,
   KnowledgeBaseEntry,
   KnowledgeBaseWriteResult
-} from '../src/shared/preload'
+} from '../src/shared/contracts/knowledgeBase'
 
 const backendMocks = vi.hoisted(() => ({
   writeKnowledgePastedImageFromClipboard: vi.fn()

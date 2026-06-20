@@ -259,7 +259,7 @@ import { ChevronDown, ChevronRight, Cloud, File, FilePlus, Folder, FolderPlus, P
 import { useWorkspaceStore } from '@/stores/workspace'
 import { copyTextToClipboard } from '@/services/clipboardRuntime'
 import { isKnowledgePathCheckResultData, malformedKnowledgeBackendResultMessage } from '@/services/knowledgeBackendGuards'
-import type { KnowledgeBaseSearchResult, KnowledgeNode } from '@shared/preload'
+import type { KnowledgeBaseSearchResult, KnowledgeNode } from '@shared/contracts/knowledgeBase'
 
 const props = defineProps<{ query?: string }>()
 const workspace = useWorkspaceStore()

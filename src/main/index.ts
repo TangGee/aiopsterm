@@ -120,14 +120,6 @@ import type { AliasCommandConfig } from '@shared/contracts/aliases'
 import type {
   EditorUserConfig,
   KeywordHighlightUserConfig,
-  KnowledgeBaseCreateResult,
-  KnowledgeBaseDeleteResult,
-  KnowledgeBaseImportResult,
-  KnowledgeBaseNodeConfig,
-  KnowledgeBaseSearchResult,
-  KnowledgeBaseSearchStatus,
-  KnowledgeBaseWriteResult,
-  KnowledgeBaseUserConfig,
   ModelSettingsUserConfig,
   SecurityUserConfig,
   SshAgentKeyConfig,
@@ -137,6 +129,18 @@ import type {
 } from '@shared/preload'
 import type { McpConfigFile, McpResourceReadInput, McpServerUserConfig, McpToolCallInput, McpToolStatesUserConfig } from '@shared/contracts/mcp'
 import type { ShortcutUserConfig, UserRuleConfig } from '@shared/contracts/settingsPreferences'
+import type {
+  KnowledgeBaseCreateResult,
+  KnowledgeBaseDeleteResult,
+  KnowledgeBaseEntry,
+  KnowledgeBaseImportResult,
+  KnowledgeBaseNodeConfig,
+  KnowledgeBaseSearchResult,
+  KnowledgeBaseSearchStatus,
+  KnowledgeBaseTransferProgress,
+  KnowledgeBaseUserConfig,
+  KnowledgeBaseWriteResult
+} from '@shared/contracts/knowledgeBase'
 import type {
   SkillDeleteResult,
   SkillEnabledResult,
@@ -207,21 +211,6 @@ const showControlNotification = (notification: import('@shared/preload').Control
     void invokeControlSocketMethod('notification.open', { id: notification.id })
   })
   desktop.show()
-}
-
-type KnowledgeBaseEntry = {
-  name: string
-  relPath: string
-  type: 'file' | 'dir'
-  size?: number
-  mtimeMs?: number
-}
-
-type KnowledgeBaseTransferProgress = {
-  jobId: string
-  transferred: number
-  total: number
-  destRelPath: string
 }
 
 const defaultKeywordHighlightConfig: KeywordHighlightUserConfig = {
