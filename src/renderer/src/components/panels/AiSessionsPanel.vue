@@ -83,18 +83,51 @@
       v-if="attentionQueue.length"
       class="ai-sessions-attention-strip"
     >
-      <button @click="selectSession(attentionQueue[0].id)">
+      <button @click="selectSession(attentionQueue[0])">
         <strong>{{ attentionQueue.length }} 个待处理</strong>
         <span>{{ attentionQueue[0].title }} · {{ attentionQueue[0].summary || requestKindLabel(attentionQueue[0].requestKind) }}</span>
       </button>
+    </section>
+
+    <section
+      v-if="workspace.managedAiSessions.length"
+      class="ai-sessions-queue-bar"
+    >
+      <div>
+        <strong>{{ visibleSessions.length }} 个当前会话</strong>
+        <span>{{ visiblePendingSessions.length }} 个待处理 · {{ activeScopeLabel }}</span>
+      </div>
+      <div class="ai-sessions-queue-actions">
+        <button
+          title="定位下一条待处理"
+          :disabled="visiblePendingSessions.length === 0"
+          @click="focusNextVisiblePending"
+        >
+          <LocateFixed />
+        </button>
+        <button
+          title="复制当前队列摘要"
+          :disabled="visibleSessions.length === 0"
+          @click="copyVisibleSessionQueue"
+        >
+          <Copy />
+        </button>
+        <button
+          title="处理当前筛选的待处理项"
+          :disabled="visiblePendingSessions.length === 0"
+          @click="markVisiblePendingHandled"
+        >
+          <CheckCheck />
+        </button>
+      </div>
     </section>
 
     <div class="ai-sessions-filter">
       <button
         v-for="option in filters"
         :key="option.key"
-        :class="{ active: filter === option.key }"
-        @click="filter = option.key"
+        :class="{ active: filter === option.key && !hibernatedOnly }"
+        @click="applyStateFilter(option.key)"
       >
         {{ option.label }}
       </button>
@@ -127,10 +160,10 @@
           role="button"
           tabindex="0"
           :class="{ active: sessionKey(session) === workspace.selectedManagedAiSessionKey, attention: session.state === 'needsInput' }"
-          @click="selectSession(session.id)"
+          @click="selectSession(session)"
           @dblclick="workspace.focusManagedAiSession(session.id)"
-          @keydown.enter.prevent="selectSession(session.id)"
-          @keydown.space.prevent="selectSession(session.id)"
+          @keydown.enter.prevent="selectSession(session)"
+          @keydown.space.prevent="selectSession(session)"
         >
           <span :class="`ai-session-state state-${session.state}`"></span>
           <span>
@@ -559,14 +592,18 @@ const cockpitCards = computed<Array<{ key: CockpitFilterKey; label: string; valu
   { key: 'hibernated', label: '已休眠', value: hibernatedSessions.value.length, active: hibernatedOnly.value }
 ])
 
+const applyStateFilter = (key: 'all' | ManagedAiSessionState) => {
+  filter.value = key
+  hibernatedOnly.value = false
+}
+
 const applyCockpitFilter = (key: CockpitFilterKey) => {
   if (key === 'hibernated') {
     filter.value = 'all'
     hibernatedOnly.value = true
     return
   }
-  filter.value = key
-  hibernatedOnly.value = false
+  applyStateFilter(key)
 }
 
 const visibleSessions = computed(() => {
@@ -581,7 +618,23 @@ const visibleSessions = computed(() => {
   })
 })
 
-const selectedSession = computed(() => workspace.selectedManagedAiSession || visibleSessions.value[0] || null)
+const visiblePendingSessions = computed(() => visibleSessions.value.filter((session) => session.state === 'needsInput'))
+
+const activeScopeLabel = computed(() => {
+  const parts: string[] = []
+  if (filter.value !== 'all') parts.push(stateLabel(filter.value))
+  if (hibernatedOnly.value) parts.push('已休眠')
+  if (sourceFilter.value !== 'all') parts.push(sourceLabel(sourceFilter.value))
+  if (projectFilter.value !== 'all') parts.push(projectOptions.value.find((project) => project.key === projectFilter.value)?.label || projectFilter.value)
+  if (query.value.trim()) parts.push(`搜索：${query.value.trim()}`)
+  return parts.length ? parts.join(' / ') : '全部范围'
+})
+
+const selectedSession = computed(() => {
+  const selected = workspace.selectedManagedAiSession
+  if (selected && visibleSessions.value.some((session) => sessionKey(session) === sessionKey(selected))) return selected
+  return visibleSessions.value[0] || null
+})
 
 const filteredTimelineEvents = computed(() => {
   const events = selectedSession.value?.events.slice().reverse() || []
@@ -599,8 +652,9 @@ watch(
   { immediate: true }
 )
 
-const selectSession = (sessionId: string) => {
-  workspace.focusManagedAiSession(sessionId)
+const selectSession = (session: Pick<ManagedAiSession, 'source' | 'id' | 'panelId' | 'terminalSessionId'>) => {
+  workspace.focusManagedAiSession(session.panelId || session.terminalSessionId || session.id)
+  workspace.selectedManagedAiSessionKey = sessionKey(session)
 }
 
 const renameSelectedSession = () => {
@@ -652,6 +706,54 @@ const timelineEventCopyPayload = (event: ManagedAiSession['events'][number]) =>
 const copyTimelineEvent = async (event: ManagedAiSession['events'][number]) => {
   const copied = await copyTextToClipboard(timelineEventCopyPayload(event))
   workspace.setTopNotice(copied ? 'AI 会话事件已复制' : 'AI 会话事件复制失败')
+}
+
+const visibleSessionSummaryPayload = () =>
+  [
+    `AI 会话队列：${activeScopeLabel.value}`,
+    `当前会话：${visibleSessions.value.length}，待处理：${visiblePendingSessions.value.length}`,
+    '',
+    ...visibleSessions.value.map((session, index) => {
+      const status = `${stateLabel(session.state)} / ${requestKindLabel(session.requestKind)} / ${decisionModeLabel(session.decisionMode)}`
+      const lines = [
+        `${index + 1}. ${session.title}`,
+        `   Agent: ${sourceLabel(session.source)} (${session.source})`,
+        `   状态: ${status}`,
+        `   会话: ${session.id}`,
+        session.cwd ? `   路径: ${session.cwd}` : '',
+        session.summary ? `   摘要: ${session.summary}` : '',
+        session.resumeCommand ? `   恢复: ${session.resumeCommand}` : ''
+      ].filter(Boolean)
+      return lines.join('\n')
+    })
+  ].join('\n')
+
+const copyVisibleSessionQueue = async () => {
+  const copied = await copyTextToClipboard(visibleSessionSummaryPayload())
+  workspace.setTopNotice(copied ? 'AI 会话队列摘要已复制' : 'AI 会话队列摘要复制失败')
+}
+
+const focusNextVisiblePending = () => {
+  const selectedKey = selectedSession.value ? sessionKey(selectedSession.value) : ''
+  const selectedIndex = visiblePendingSessions.value.findIndex((session) => sessionKey(session) === selectedKey)
+  const next = visiblePendingSessions.value[(selectedIndex + 1) % visiblePendingSessions.value.length]
+  if (!next) return
+  selectSession(next)
+}
+
+const markVisiblePendingHandled = async () => {
+  const pending = visiblePendingSessions.value
+  if (!pending.length) return
+  const groups = new Map<AiAgentSessionSource, string[]>()
+  pending.forEach((session) => groups.set(session.source, [...(groups.get(session.source) || []), session.id]))
+  for (const [source, sessionIds] of groups) {
+    await workspace.bulkManagedAiSessions({
+      operation: 'mark-handled',
+      sources: [source],
+      sessionIds
+    })
+  }
+  workspace.setTopNotice(`已处理 ${pending.length} 个 AI 会话`)
 }
 
 const formatTime = (timestamp: number) =>
@@ -843,6 +945,70 @@ const formatRelativeTime = (timestamp: number) => {
   margin-top: 3px;
   color: var(--text-muted);
   font-size: 11px;
+}
+
+.ai-sessions-queue-bar {
+  margin: 8px 12px 0;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--surface-2);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+}
+
+.ai-sessions-queue-bar strong,
+.ai-sessions-queue-bar span {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-sessions-queue-bar strong {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.ai-sessions-queue-bar span {
+  margin-top: 2px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.ai-sessions-queue-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.ai-sessions-queue-actions button {
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface-1);
+  color: var(--text-secondary);
+}
+
+.ai-sessions-queue-actions button:not(:disabled):hover {
+  color: var(--text-primary);
+  border-color: var(--accent-color);
+}
+
+.ai-sessions-queue-actions button:disabled {
+  opacity: 0.45;
+}
+
+.ai-sessions-queue-actions svg {
+  width: 14px;
+  height: 14px;
 }
 
 .ai-sessions-filter button,

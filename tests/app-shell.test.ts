@@ -836,6 +836,97 @@ describe('AppShell', () => {
     }
   })
 
+  it('copies and handles the currently filtered AI session queue', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const store = useWorkspaceStore()
+    vi.mocked(navigator.clipboard.writeText).mockClear()
+    store.upsertManagedAiSession({
+      source: 'claude-code',
+      event: 'permission_request',
+      sessionId: 'claude-api-approval',
+      title: 'API approval',
+      summary: 'Approve deploy command',
+      cwd: '/work/api',
+      requestKind: 'permission',
+      decisionMode: 'blocking',
+      actionable: true,
+      receivedAt: 1717200500000
+    })
+    store.upsertManagedAiSession({
+      source: 'claude-code',
+      event: 'permission_request',
+      sessionId: 'claude-docs-approval',
+      title: 'Docs approval',
+      summary: 'Approve docs cleanup',
+      cwd: '/work/docs',
+      requestKind: 'permission',
+      decisionMode: 'blocking',
+      actionable: true,
+      receivedAt: 1717200400000
+    })
+    store.upsertManagedAiSession({
+      source: 'gemini',
+      event: 'pre_tool_use',
+      sessionId: 'gemini-api-work',
+      title: 'API work',
+      summary: 'Inspecting routes',
+      cwd: '/work/api',
+      requestKind: 'telemetry',
+      decisionMode: 'telemetry',
+      receivedAt: 1717200550000
+    })
+    vi.mocked(window.aiops.bulkManagedAiSessions).mockImplementationOnce(async (input) => ({
+      ok: true,
+      data: {
+        changed: 1,
+        snapshot: {
+          sessions: store.managedAiSessions.map((session) =>
+            input.sources?.includes(session.source) && input.sessionIds?.includes(session.id)
+              ? { ...session, state: 'idle' as const, handledAt: 1717200600000, updatedAt: 1717200600000 }
+              : session
+          )
+        }
+      }
+    }))
+
+    const wrapper = mount(AiSessionsPanel, {
+      global: {
+        plugins: [pinia]
+      }
+    })
+    await flushPromises()
+
+    const projectSelect = wrapper.findAll('.ai-sessions-context select').at(1)!
+    await projectSelect.setValue('/work/api')
+    await flushPromises()
+
+    expect(wrapper.find('.ai-sessions-queue-bar').text()).toContain('2 个当前会话')
+    expect(wrapper.find('.ai-sessions-queue-bar').text()).toContain('1 个待处理')
+    const queueButtons = wrapper.findAll('.ai-sessions-queue-actions button')
+    await queueButtons.at(1)!.trigger('click')
+    await flushPromises()
+
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(expect.stringContaining('AI 会话队列：api (2)'))
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(expect.stringContaining('API approval'))
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(expect.stringContaining('API work'))
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(expect.not.stringContaining('Docs approval'))
+
+    await queueButtons.at(2)!.trigger('click')
+    await flushPromises()
+
+    expect(window.aiops.bulkManagedAiSessions).toHaveBeenCalledWith({
+      operation: 'mark-handled',
+      sources: ['claude-code'],
+      sessionIds: ['claude-api-approval']
+    })
+    expect(store.managedAiSessions.find((session) => session.id === 'claude-api-approval')?.state).toBe('idle')
+    expect(store.managedAiSessions.find((session) => session.id === 'claude-docs-approval')?.state).toBe('needsInput')
+    expect(store.topNotice).toBe('已处理 1 个 AI 会话')
+
+    wrapper.unmount()
+  })
+
   it('filters and copies managed AI session timeline events', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
