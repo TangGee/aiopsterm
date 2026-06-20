@@ -203,12 +203,29 @@ import {
   type TerminalSecurityPrompt
 } from '@/services/terminalExecutionRuntime'
 import {
+  addMacroCommandEntry as addMacroCommandEntryRuntime,
+  cloneMacroRecordingState,
+  cloneQuickCommandsSnapshot,
+  commitMacroCurrentLine as commitMacroCurrentLineRuntime,
+  createEmptyMacroRecordingState,
+  currentSnippetGroupName as resolveCurrentSnippetGroupName,
+  filteredQuickCommands as filterQuickCommands,
+  macroSaveDraft,
+  recordMacroCommandText,
+  recordedMacroCommands,
+  recordMacroTerminalInputState,
+  reorderQuickCommandPlan,
+  resetMacroRecordingState as resetMacroRecordingStateRuntime,
+  selectedGroupAfterDelete,
+  startMacroRecordingState,
+  type MacroRecordingState,
+  type QuickCommandSnippet,
+  type SnippetGroup
+} from '@/services/quickCommandsRuntime'
+import {
   MACRO_DEFAULT_SLEEP_THRESHOLD_MS,
-  MACRO_MAX_COMMAND_COUNT,
   MACRO_MAX_RECORDING_DURATION_MS,
-  createMacroSnippetName,
   normalizeMacroSleepThreshold,
-  parseMacroTerminalInput,
   type MacroCommandEntry
 } from '@/services/terminalMacroRuntime'
 import {
@@ -435,7 +452,7 @@ import type { AliasCommandConfig, AliasCommandSaveInput } from '@shared/contract
 import type { FileSessionCatalog, FileSessionFolderRecord, FileSessionFolderSaveInput, FileSessionInfo, FileSessionPatch, FileSessionTerminalContext, FileTransferTask } from '@shared/contracts/files'
 import type { AiopsTrustedDevice, AiopsUserAccountSnapshot, AiopsUserExternalAction, AiopsUserExternalActionResult, AiopsUserMutationResult, AiopsUserProfile } from '@shared/contracts/userAccount'
 import type { ExtensionInstallProgress as BackendExtensionInstallProgress, ExtensionInstallStage, ExtensionPluginOperation, ExtensionPluginRuntimeConfig, ExtensionUserConfig } from '@shared/contracts/extensions'
-import type { QuickCommandGroupConfig, QuickCommandScriptPlan, QuickCommandSnippetConfig } from '@shared/contracts/quickCommands'
+import type { QuickCommandScriptPlan } from '@shared/contracts/quickCommands'
 import type { McpConfigFile, McpServerUserConfig, McpToolStatesUserConfig } from '@shared/contracts/mcp'
 import type { SettingsPreferencesSnapshot, ShortcutUserConfig, UserRuleConfig } from '@shared/contracts/settingsPreferences'
 import type { SkillUserConfig } from '@shared/contracts/skills'
@@ -507,8 +524,6 @@ export type {
 type CloseMode = 'current' | 'others' | 'all'
 type FilesUiMode = 'transfer' | 'default'
 type KbClipboard = { mode: 'copy' | 'cut'; sources: string[] } | null
-type SnippetGroup = QuickCommandGroupConfig
-type QuickCommandSnippet = QuickCommandSnippetConfig
 type AliasCommand = AliasCommandConfig & { edit?: boolean }
 type TopUpdateState = 'idle' | 'checking' | 'local' | 'available' | 'install-requested'
 export type AiAttentionKind = 'approval' | 'question' | 'plan' | 'error' | 'done'
@@ -1035,17 +1050,14 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const quickCommands = ref<QuickCommandSnippet[]>([])
   const selectedSnippetGroupUuid = ref<string | null>(null)
   const snippetSearchQuery = ref('')
-  const isMacroRecording = ref(false)
-  const macroCommandBuffer = ref<MacroCommandEntry[]>([])
-  const recordedCommands = computed(() => macroCommandBuffer.value.map((entry) => entry.command))
-  const macroCurrentLineBuffer = ref('')
-  const macroRecordingStartTime = ref<number | null>(null)
-  const macroTerminalId = ref<string | null>(null)
+  const macroRecording = ref<MacroRecordingState>(createEmptyMacroRecordingState())
+  const isMacroRecording = computed(() => macroRecording.value.isRecording)
+  const recordedCommands = computed(() => recordedMacroCommands(macroRecording.value))
+  const macroCurrentLineBuffer = computed(() => macroRecording.value.currentLineBuffer)
+  const macroTerminalId = computed(() => macroRecording.value.terminalId)
   const macroRecordControlKeys = ref(true)
   const macroSleepThresholdMs = ref(MACRO_DEFAULT_SLEEP_THRESHOLD_MS)
-  const macroDefaultName = ref('')
-  const macroTargetGroupUuid = ref<string | null>(null)
-  const macroLimitReason = ref<'time' | 'count' | null>(null)
+  const macroLimitReason = computed(() => macroRecording.value.limitReason)
   let macroAutoStopTimer: ReturnType<typeof globalThis.setTimeout> | null = null
   const knowledgeTree = ref<KnowledgeNode[]>([])
   const kbExpandedKeys = ref<string[]>(['commands', 'images'])
@@ -1726,19 +1738,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       return null
     }
   }
-  const filteredQuickCommands = computed(() => {
-    const query = snippetSearchQuery.value.trim().toLowerCase()
-    if (query) {
-      return quickCommands.value.filter(
-        (command) => command.snippet_name.toLowerCase().includes(query) || command.snippet_content.toLowerCase().includes(query)
-      )
-    }
-    if (selectedSnippetGroupUuid.value) {
-      return quickCommands.value.filter((command) => command.group_uuid === selectedSnippetGroupUuid.value)
-    }
-    return quickCommands.value.filter((command) => !command.group_uuid)
-  })
-  const currentSnippetGroupName = computed(() => snippetGroups.value.find((group) => group.uuid === selectedSnippetGroupUuid.value)?.group_name || '')
+  const filteredQuickCommands = computed(() => filterQuickCommands(quickCommands.value, snippetSearchQuery.value, selectedSnippetGroupUuid.value))
+  const currentSnippetGroupName = computed(() => resolveCurrentSnippetGroupName(snippetGroups.value, selectedSnippetGroupUuid.value))
   const filteredKnowledgeTree = computed(() => {
     const query = kbSearchQuery.value.trim().toLowerCase()
     if (!query) return knowledgeTree.value
@@ -1973,8 +1974,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     } else {
       setTopNotice('快捷命令加载服务不可用')
     }
-    snippetGroups.value = normalizedQuickCommands.groups.map((group) => ({ ...group }))
-    quickCommands.value = normalizedQuickCommands.snippets.map((snippet) => ({ ...snippet }))
+    const quickCommandsSnapshot = cloneQuickCommandsSnapshot(normalizedQuickCommands)
+    snippetGroups.value = quickCommandsSnapshot.groups
+    quickCommands.value = quickCommandsSnapshot.snippets
     const {
       normalized: normalizedKnowledgeBase
     } = normalizeKnowledgeBaseConfig(savedConfig.knowledgeBase)
@@ -2156,9 +2158,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       setTopNotice(malformedQuickCommandsBackendResultMessage)
       return false
     }
-    snippetGroups.value = snapshot.groups.map((group) => ({ ...group }))
-    quickCommands.value = snapshot.snippets.map((snippet) => ({ ...snippet }))
-    config.value = mergeUserConfig(config.value, { quickCommands: snapshot })
+    const quickCommandsSnapshot = cloneQuickCommandsSnapshot(snapshot)
+    snippetGroups.value = quickCommandsSnapshot.groups
+    quickCommands.value = quickCommandsSnapshot.snippets
+    config.value = mergeUserConfig(config.value, { quickCommands: quickCommandsSnapshot })
     return true
   }
 
@@ -7483,7 +7486,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       return false
     }
     applyQuickCommandsSnapshot(result.data)
-    if (selectedSnippetGroupUuid.value === uuid) selectedSnippetGroupUuid.value = null
+    selectedSnippetGroupUuid.value = selectedGroupAfterDelete(selectedSnippetGroupUuid.value, uuid)
     return true
   }
 
@@ -7578,14 +7581,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       setTopNotice('快捷命令排序服务不可用')
       return false
     }
-    const currentList = [...filteredQuickCommands.value]
-    const sourceIndex = currentList.findIndex((command) => command.id === sourceId)
-    const targetIndex = currentList.findIndex((command) => command.id === targetId)
-    if (sourceIndex < 0 || targetIndex < 0 || sourceIndex === targetIndex) return false
-    const [moved] = currentList.splice(sourceIndex, 1)
-    currentList.splice(targetIndex, 0, moved)
-    const groupUuid = selectedSnippetGroupUuid.value || null
-    const orderedIds = currentList.map((command) => command.id)
+    const plan = reorderQuickCommandPlan(filteredQuickCommands.value, sourceId, targetId, selectedSnippetGroupUuid.value || null)
+    if (!plan) return false
+    const { orderedIds, groupUuid } = plan
     const result = await reorderQuickCommands({ orderedIds, groupUuid }).catch(() => null)
     if (!result) {
       setTopNotice('快捷命令排序失败')
@@ -7658,30 +7656,28 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
   }
 
+  const applyMacroRecordingState = (state: MacroRecordingState) => {
+    macroRecording.value = cloneMacroRecordingState(state)
+  }
+
   const commitMacroCurrentLine = (timestamp = Date.now()) => {
-    if (!macroCurrentLineBuffer.value.length) return true
-    const added = addMacroCommandEntry(macroCurrentLineBuffer.value, timestamp)
-    macroCurrentLineBuffer.value = ''
-    return added
+    const result = commitMacroCurrentLineRuntime(macroRecording.value, timestamp)
+    applyMacroRecordingState(result.state)
+    if (result.limitReached) void autoStopMacroRecording('count')
+    return result.added
   }
 
   function addMacroCommandEntry(command: string, timestamp = Date.now()) {
-    if (!isMacroRecording.value) return false
-    if (macroCommandBuffer.value.length >= MACRO_MAX_COMMAND_COUNT) {
-      void autoStopMacroRecording('count')
-      return false
-    }
-    macroCommandBuffer.value.push({ command, timestamp })
-    if (macroCommandBuffer.value.length >= MACRO_MAX_COMMAND_COUNT) {
-      void autoStopMacroRecording('count')
-    }
-    return true
+    const result = addMacroCommandEntryRuntime(macroRecording.value, command, timestamp)
+    applyMacroRecordingState(result.state)
+    if (result.limitReached) void autoStopMacroRecording('count')
+    return result.added
   }
 
   const saveMacroSnippet = async (
     entries: MacroCommandEntry[],
-    snippetName = macroDefaultName.value || createMacroSnippetName(),
-    groupUuid = macroTargetGroupUuid.value,
+    snippetName: string,
+    groupUuid: string | null,
     sleepThresholdMs = macroSleepThresholdMs.value
   ) => {
     if (!entries.length) return null
@@ -7717,39 +7713,28 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   const resetMacroRecordingState = () => {
     clearMacroAutoStopTimer()
-    isMacroRecording.value = false
-    macroTerminalId.value = null
-    macroCommandBuffer.value = []
-    macroCurrentLineBuffer.value = ''
-    macroRecordingStartTime.value = null
-    macroDefaultName.value = ''
-    macroTargetGroupUuid.value = null
+    applyMacroRecordingState(resetMacroRecordingStateRuntime(macroRecording.value.limitReason))
   }
 
   async function autoStopMacroRecording(reason: 'time' | 'count') {
     if (!isMacroRecording.value) return null
-    macroLimitReason.value = reason
+    applyMacroRecordingState({ ...macroRecording.value, limitReason: reason })
     commitMacroCurrentLine()
-    const entries = macroCommandBuffer.value.map((entry) => ({ ...entry }))
-    const snippetName = macroDefaultName.value || createMacroSnippetName()
-    const groupUuid = macroTargetGroupUuid.value
-    const sleepThresholdMs = macroSleepThresholdMs.value
+    const draft = macroSaveDraft(macroRecording.value, macroSleepThresholdMs.value)
     resetMacroRecordingState()
-    const saved = await saveMacroSnippet(entries, snippetName, groupUuid, sleepThresholdMs)
+    const saved = await saveMacroSnippet(draft.entries, draft.snippetName, draft.groupUuid, draft.sleepThresholdMs)
     if (saved) setTopNotice(reason === 'count' ? '宏录制达到命令上限，已保存为快捷命令。' : '宏录制达到时间上限，已保存为快捷命令。')
     return saved
   }
 
   const startMacroRecording = (terminalId?: string | null) => {
     if (isMacroRecording.value) return
-    isMacroRecording.value = true
-    macroTerminalId.value = terminalId || (activePanel.value.kind === 'knowledge' ? panels.value.find((panel) => panel.kind !== 'knowledge')?.id || null : activePanel.value.id)
-    macroCommandBuffer.value = []
-    macroCurrentLineBuffer.value = ''
-    macroRecordingStartTime.value = Date.now()
-    macroDefaultName.value = createMacroSnippetName()
-    macroTargetGroupUuid.value = selectedSnippetGroupUuid.value
-    macroLimitReason.value = null
+    applyMacroRecordingState(
+      startMacroRecordingState({
+        terminalId: terminalId || (activePanel.value.kind === 'knowledge' ? panels.value.find((panel) => panel.kind !== 'knowledge')?.id || null : activePanel.value.id),
+        selectedGroupUuid: selectedSnippetGroupUuid.value
+      })
+    )
     clearMacroAutoStopTimer()
     macroAutoStopTimer = setTimeout(() => {
       void autoStopMacroRecording('time')
@@ -7757,9 +7742,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const recordMacroCommand = (command: string, timestamp = Date.now()) => {
-    const text = command.trim()
-    if (!text) return
-    addMacroCommandEntry(text, timestamp)
+    const result = recordMacroCommandText(macroRecording.value, command, timestamp)
+    applyMacroRecordingState(result.state)
+    if (result.limitReached) void autoStopMacroRecording('count')
   }
 
   const setMacroRecordControlKeys = (enabled: boolean) => {
@@ -7771,42 +7756,26 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const recordMacroTerminalInput = (panelId: string, data: string, timestamp = Date.now()) => {
-    if (!isMacroRecording.value || !data) return
-    if (macroTerminalId.value && panelId !== macroTerminalId.value) return
-    if (macroRecordingStartTime.value && timestamp - macroRecordingStartTime.value >= MACRO_MAX_RECORDING_DURATION_MS) {
-      void autoStopMacroRecording('time')
-      return
-    }
-
-    const parsed = parseMacroTerminalInput(
-      {
-        lineBuffer: macroCurrentLineBuffer.value,
-        commands: []
-      },
+    const result = recordMacroTerminalInputState(macroRecording.value, {
+      panelId,
       data,
-      { recordControlKeys: macroRecordControlKeys.value, timestamp }
-    )
-    for (const entry of parsed.commands) {
-      if (!addMacroCommandEntry(entry.command, entry.timestamp)) break
-    }
-    if (isMacroRecording.value) {
-      macroCurrentLineBuffer.value = parsed.lineBuffer
-    }
+      recordControlKeys: macroRecordControlKeys.value,
+      timestamp
+    })
+    applyMacroRecordingState(result.state)
+    if (result.shouldAutoStop) void autoStopMacroRecording(result.shouldAutoStop)
   }
 
   const stopMacroRecording = async () => {
     if (!isMacroRecording.value) return
     commitMacroCurrentLine()
-    const entries = macroCommandBuffer.value.map((entry) => ({ ...entry }))
-    const snippetName = macroDefaultName.value || createMacroSnippetName()
-    const groupUuid = macroTargetGroupUuid.value
-    const sleepThresholdMs = macroSleepThresholdMs.value
-    if (!entries.length) {
+    const draft = macroSaveDraft(macroRecording.value, macroSleepThresholdMs.value)
+    if (!draft.entries.length) {
       resetMacroRecordingState()
       setTopNotice('没有录制到命令。')
       return null
     }
-    const saved = await saveMacroSnippet(entries, snippetName, groupUuid, sleepThresholdMs)
+    const saved = await saveMacroSnippet(draft.entries, draft.snippetName, draft.groupUuid, draft.sleepThresholdMs)
     if (saved) resetMacroRecordingState()
     return saved
   }
