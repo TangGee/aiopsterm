@@ -50,6 +50,15 @@ import { extensionsClient } from '@/services/extensionsClient'
 import { applyKeywordHighlight } from '@/services/keywordHighlightRuntime'
 import { localFilesClient } from '@/services/localFilesClient'
 import { managedAiClient } from '@/services/managedAiClient'
+import {
+  isAgentHibernationConfigData,
+  isAgentHookInstallOperationData,
+  isAgentHookInstallerSnapshot,
+  isManagedAiSessionBulkData,
+  isManagedAiSessionHibernateData,
+  isManagedAiSessionMutationData,
+  isManagedAiSessionSnapshot
+} from '@/services/managedAiBackendGuards'
 import { mcpClient } from '@/services/mcpClient'
 import {
   isFileSessionCatalogData,
@@ -154,6 +163,16 @@ import { settingsConfigClient } from '@/services/settingsConfigClient'
 import { settingsPreferencesClient } from '@/services/settingsPreferencesClient'
 import { addSystemThemeListener, applyThemeToDocument, isThemeId, type ThemeId } from '@/services/themeRuntime'
 import { terminalClient } from '@/services/terminalClient'
+import {
+  isLocalTerminalSessionInfo,
+  isSshTerminalSessionInfo,
+  isTerminalCommandGenerationRecord,
+  isTerminalLifecycleEvent,
+  isTerminalPort,
+  isTerminalExitEvent,
+  terminalWriteExceptionReason,
+  validateTerminalWriteResult
+} from '@/services/terminalBackendGuards'
 import { userAccountClient } from '@/services/userAccountClient'
 import { isAiopstermDeepLinkPayload } from '@shared/deepLink'
 import { createDefaultOnboardingCompleted, onboardingTourSteps } from '@/config/onboarding'
@@ -341,7 +360,6 @@ import type {
 } from '@shared/contracts/knowledgeBase'
 import type {
   AiAgentSessionEvent,
-  AiAgentSessionEventName,
   AiAgentSessionSource,
   AgentHibernationConfig,
   AgentHibernationConfigResult,
@@ -357,13 +375,8 @@ import type {
   ManagedAiSessionTimelineEvent
 } from '@shared/contracts/managedAiSessions'
 import type { ControlNotificationFocusRequest, ControlNotificationRecord } from '@shared/contracts/control'
-import type {
-  AgentHookInstallerOperationResult,
-  AgentHookInstallerSnapshot,
-  AgentHookInstallerStatus,
-  AgentHookInstallerSource
-} from '@shared/contracts/agentHooks'
-import type { TerminalDisconnectReason, TerminalExitEvent, TerminalLifecycleEvent, TerminalLifecycleStage, TerminalSessionInfo, TerminalSshConnectionInfo } from '@shared/contracts/terminalSessions'
+import type { AgentHookInstallerSnapshot, AgentHookInstallerStatus, AgentHookInstallerSource } from '@shared/contracts/agentHooks'
+import type { TerminalExitEvent, TerminalLifecycleEvent, TerminalSessionInfo } from '@shared/contracts/terminalSessions'
 
 export type {
   AiChatChipContentPart,
@@ -402,10 +415,6 @@ type SnippetGroup = QuickCommandGroupConfig
 type QuickCommandSnippet = QuickCommandSnippetConfig
 type AliasCommand = AliasCommandConfig & { edit?: boolean }
 type UserCodeResultData = NonNullable<AiopsUserCodeResult['data']>
-type AgentHookInstallOperationData = NonNullable<AgentHookInstallerOperationResult['data']>
-type ManagedAiSessionMutationData = NonNullable<ManagedAiSessionMutationResult['data']>
-type ManagedAiSessionBulkData = NonNullable<ManagedAiSessionBulkResult['data']>
-type ManagedAiSessionHibernateData = NonNullable<ManagedAiSessionHibernateResult['data']>
 type TopUpdateState = 'idle' | 'checking' | 'local' | 'available' | 'install-requested'
 export type AiAttentionKind = 'approval' | 'question' | 'plan' | 'error' | 'done'
 export type AiAttentionSource = AiAgentSessionSource | 'classic-chat' | 'control-notification'
@@ -558,11 +567,6 @@ export type TerminalSecurityDecision =
 type QuickCommandScriptPlanResolution =
   | { ok: true; plan: QuickCommandScriptPlan }
   | { ok: false; reason: string }
-
-type TerminalWriteBridgeResult = Awaited<ReturnType<AiopsPreloadApi['writeTerminal']>>
-type TerminalWriteValidation = { ok: true } | { ok: false; reason: string }
-const terminalLifecycleStages: TerminalLifecycleStage[] = ['starting', 'connecting', 'proxy-opening', 'connected', 'shell-ready', 'error', 'closed']
-const terminalDisconnectReasons: TerminalDisconnectReason[] = ['manual', 'network', 'process', 'error', 'unknown']
 
 export type TerminalOutputSegment = {
   text: string
@@ -883,7 +887,6 @@ const ctrlSequences = Object.entries(ctrlKeyMap).sort(([, first], [, second]) =>
 const defaultTerminalPanelTitle = '欢迎'
 
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value)
-const malformedTerminalWriteResultMessage = '终端写入服务返回数据无效'
 const malformedMcpToolResultMessage = 'MCP Tool 服务返回数据无效'
 const malformedMcpResourceResultMessage = 'MCP Resource 服务返回数据无效'
 
@@ -960,16 +963,6 @@ const formatMcpResourceReadContent = (contents: McpResourceReadContent[]) => {
 
 const numberInRange = (value: unknown, fallback: number, min: number, max?: number) =>
   typeof value === 'number' && Number.isFinite(value) && value >= min && (max === undefined || value <= max) ? value : fallback
-
-const terminalWriteByteLength = (data: string) => new TextEncoder().encode(data).length
-
-const isTerminalWriteResultData = (value: unknown, sessionId: string, data: string) =>
-  isRecord(value) &&
-  value.id === sessionId &&
-  typeof value.bytes === 'number' &&
-  Number.isInteger(value.bytes) &&
-  value.bytes >= 0 &&
-  value.bytes === terminalWriteByteLength(data)
 
 const integerInRange = (value: unknown, fallback: number, min: number) =>
   typeof value === 'number' && Number.isInteger(value) && value >= min ? value : fallback
@@ -1134,39 +1127,6 @@ const knowledgeEntryToNode = (entry: KnowledgeBaseEntry): KnowledgeNode => ({
 
 const parseMcpEditorContent = (content: string) => JSON.parse(content)
 
-const isNonNegativeFiniteNumber = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0
-const isPositiveInteger = (value: unknown): value is number => typeof value === 'number' && Number.isInteger(value) && value > 0
-const isFiniteNumber = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value)
-const isPositiveFiniteNumber = (value: unknown): value is number => isFiniteNumber(value) && value > 0
-
-const isOptionalString = (value: unknown) => value === undefined || typeof value === 'string'
-const isOptionalBoolean = (value: unknown) => value === undefined || typeof value === 'boolean'
-const isOptionalFiniteNumber = (value: unknown) => value === undefined || (typeof value === 'number' && Number.isFinite(value))
-const isOptionalNonNegativeFiniteNumber = (value: unknown) => value === undefined || isNonNegativeFiniteNumber(value)
-const isNonEmptyString = (value: unknown): value is string => typeof value === 'string' && value.trim() !== ''
-const aiProviderKeys = ['aiopsterm-local', 'litellm', 'openai', 'bedrock', 'deepseek', 'anthropic', 'ollama']
-const isAiProviderKey = (value: unknown) => typeof value === 'string' && aiProviderKeys.includes(value)
-
-const isTerminalCommandGenerationContext = (source: unknown): source is TerminalCommandGenerationContext =>
-  isRecord(source) &&
-  isNonEmptyString(source.host) &&
-  isNonEmptyString(source.username) &&
-  typeof source.cwd === 'string' &&
-  isNonEmptyString(source.shell) &&
-  (source.connectionType === 'local' || source.connectionType === 'ssh')
-
-const isTerminalCommandGenerationRecord = (source: unknown): source is TerminalCommandGenerationRecord =>
-  isRecord(source) &&
-  isNonEmptyString(source.id) &&
-  isNonEmptyString(source.panelId) &&
-  isNonEmptyString(source.instruction) &&
-  isNonEmptyString(source.command) &&
-  isNonEmptyString(source.modelName) &&
-  isTerminalCommandGenerationContext(source.context) &&
-  source.status === 'done' &&
-  isNonNegativeFiniteNumber(source.createdAt) &&
-  isAiProviderKey(source.provider)
-
 const isThemeSnapshot = (value: unknown): value is ThemeId => typeof value === 'string' && isThemeId(value)
 
 const defaultBillingSettings: BillingSettings = {
@@ -1218,18 +1178,7 @@ const mediaTypeFromKnowledgePath = (relPath: string) => {
 }
 
 const createTerminalSegments = (text: string, scope: TerminalOutputScope = 'output'): TerminalOutputSegment[] => (text ? [{ text, scope }] : [])
-
 const isNonEmptyText = (value: unknown): value is string => typeof value === 'string' && value.trim() !== ''
-const hasOwnField = (record: Record<string, unknown>, key: string) => Object.prototype.hasOwnProperty.call(record, key)
-const isOptionalField = (record: Record<string, unknown>, key: string, guard: (value: unknown) => boolean) =>
-  !hasOwnField(record, key) || record[key] === undefined || guard(record[key])
-const isTerminalKind = (value: unknown): value is 'local' | 'ssh' => value === 'local' || value === 'ssh'
-const isTerminalExitCode = (value: unknown): value is number | null => value === null || (typeof value === 'number' && Number.isFinite(value))
-const isTerminalPort = (value: unknown): value is number =>
-  typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 65535
-const isTerminalDisconnectReason = (value: unknown): value is TerminalDisconnectReason =>
-  terminalDisconnectReasons.includes(value as TerminalDisconnectReason)
-const isOptionalNonEmptyText = (record: Record<string, unknown>, key: string) => isOptionalField(record, key, isNonEmptyText)
 
 const appendTerminalSegment = (panel: TerminalPanel, text: string, scope: TerminalOutputScope = 'output') => {
   if (!text) return
@@ -1273,252 +1222,6 @@ const createEmptyTerminalPanel = (
       }
     : {})
 })
-
-const isTerminalLifecycleEvent = (value: unknown, expectedId?: string, expectedKind?: 'local' | 'ssh'): value is TerminalLifecycleEvent => {
-  if (
-    !isRecord(value) ||
-    !isNonEmptyText(value.id) ||
-    (expectedId !== undefined && value.id !== expectedId) ||
-    !isTerminalKind(value.kind) ||
-    (expectedKind !== undefined && value.kind !== expectedKind) ||
-    !terminalLifecycleStages.includes(value.stage as TerminalLifecycleStage) ||
-    typeof value.at !== 'number' ||
-    !Number.isFinite(value.at)
-  ) {
-    return false
-  }
-  return (
-    isOptionalField(value, 'processId', isPositiveInteger) &&
-    isOptionalField(value, 'processGroupId', isPositiveInteger) &&
-    isOptionalNonEmptyText(value, 'shell') &&
-    isOptionalNonEmptyText(value, 'cwd') &&
-    isOptionalNonEmptyText(value, 'host') &&
-    isOptionalField(value, 'port', isTerminalPort) &&
-    isOptionalNonEmptyText(value, 'username') &&
-    isOptionalNonEmptyText(value, 'targetHost') &&
-    isOptionalField(value, 'targetPort', isTerminalPort) &&
-    isOptionalNonEmptyText(value, 'targetUsername') &&
-    isOptionalNonEmptyText(value, 'jumpHost') &&
-    isOptionalField(value, 'jumpPort', isTerminalPort) &&
-    isOptionalNonEmptyText(value, 'jumpUsername') &&
-    isOptionalField(value, 'authScope', (field) => field === 'target' || field === 'jump') &&
-    isOptionalField(value, 'authPurpose', (field) => field === 'password' || field === 'keyboard-interactive') &&
-    isOptionalField(value, 'sshTransport', (field) => field === 'direct' || field === 'proxy' || field === 'jump' || field === 'relay-shell') &&
-    isOptionalNonEmptyText(value, 'sshAuthMethods') &&
-    isOptionalField(value, 'connectionReuse', (field) => field === 'created' || field === 'reused') &&
-    isOptionalField(value, 'remoteHop', (field) => field === 'relay' || field === 'target' || field === 'unknown') &&
-    isOptionalNonEmptyText(value, 'expectedHost') &&
-    isOptionalNonEmptyText(value, 'actualHost') &&
-    isOptionalNonEmptyText(value, 'actualUsername') &&
-    isOptionalField(value, 'endpointConfidence', (field) => field === 'confirmed' || field === 'inferred' || field === 'unknown') &&
-    isOptionalNonEmptyText(value, 'connectionId') &&
-    isOptionalNonEmptyText(value, 'proxyName') &&
-    isOptionalNonEmptyText(value, 'message') &&
-    isOptionalField(value, 'code', isTerminalExitCode) &&
-    isOptionalField(value, 'reason', isTerminalDisconnectReason) &&
-    isOptionalField(value, 'isNetworkDisconnect', (field) => typeof field === 'boolean') &&
-    isOptionalNonEmptyText(value, 'errorCode') &&
-    isOptionalNonEmptyText(value, 'errorMessage')
-  )
-}
-
-const isTerminalExitEvent = (value: unknown): value is TerminalExitEvent => {
-  if (!isRecord(value) || !isNonEmptyText(value.id) || !isTerminalExitCode(value.code)) return false
-  return (
-    isOptionalField(value, 'kind', isTerminalKind) &&
-    isOptionalField(value, 'reason', isTerminalDisconnectReason) &&
-    isOptionalField(value, 'isNetworkDisconnect', (field) => typeof field === 'boolean') &&
-    isOptionalNonEmptyText(value, 'errorCode') &&
-    isOptionalNonEmptyText(value, 'errorMessage')
-  )
-}
-
-const isLocalTerminalSessionInfo = (value: unknown): value is TerminalSessionInfo =>
-  isRecord(value) &&
-  isNonEmptyText(value.id) &&
-  value.kind === 'local' &&
-  isNonEmptyText(value.shell) &&
-  isNonEmptyText(value.cwd) &&
-  (value.lifecycle === undefined || isTerminalLifecycleEvent(value.lifecycle, value.id, 'local'))
-
-const isSshTerminalSessionInfo = (value: unknown): value is TerminalSessionInfo & { connection: TerminalSshConnectionInfo } => {
-  if (!isRecord(value) || !isNonEmptyText(value.id) || value.kind !== 'ssh' || !isNonEmptyText(value.shell) || !isNonEmptyText(value.cwd)) return false
-  if (value.lifecycle !== undefined && !isTerminalLifecycleEvent(value.lifecycle, value.id, 'ssh')) return false
-  const connection = value.connection
-  return (
-    isRecord(connection) &&
-    isNonEmptyText(connection.connectionId) &&
-    isNonEmptyText(connection.host) &&
-    typeof connection.port === 'number' &&
-    Number.isInteger(connection.port) &&
-    connection.port >= 1 &&
-    connection.port <= 65535 &&
-    isNonEmptyText(connection.username) &&
-    isNonEmptyText(connection.assetName) &&
-    typeof connection.createdAt === 'number' &&
-    Number.isFinite(connection.createdAt)
-  )
-}
-
-const isAgentHookInstallerSource = (value: unknown): value is AgentHookInstallerSource =>
-  value === 'codex' ||
-  value === 'claude-code' ||
-  value === 'cursor' ||
-  value === 'gemini' ||
-  value === 'copilot' ||
-  value === 'grok' ||
-  value === 'opencode' ||
-  value === 'codebuddy' ||
-  value === 'factory' ||
-  value === 'qoder' ||
-  value === 'amp' ||
-  value === 'pi' ||
-  value === 'omp' ||
-  value === 'kiro' ||
-  value === 'rovodev'
-
-const isAiAgentSessionSource = (value: unknown): value is AiAgentSessionSource =>
-  value === 'codex' ||
-  value === 'claude-code' ||
-  value === 'cursor' ||
-  value === 'gemini' ||
-  value === 'copilot' ||
-  value === 'grok' ||
-  value === 'opencode' ||
-  value === 'codebuddy' ||
-  value === 'factory' ||
-  value === 'qoder' ||
-  value === 'antigravity' ||
-  value === 'kiro' ||
-  value === 'hermes-agent' ||
-  value === 'rovodev' ||
-  value === 'amp' ||
-  value === 'pi' ||
-  value === 'omp'
-
-const isAiAgentSessionEventName = (value: unknown): value is AiAgentSessionEventName =>
-  value === 'session_start' ||
-  value === 'prompt_submit' ||
-  value === 'pre_tool_use' ||
-  value === 'permission_request' ||
-  value === 'question' ||
-  value === 'notification' ||
-  value === 'lifecycle' ||
-  value === 'stop' ||
-  value === 'session_end'
-
-const isManagedAiSessionState = (value: unknown): value is ManagedAiSessionState =>
-  value === 'idle' || value === 'working' || value === 'needsInput' || value === 'ended' || value === 'unknown'
-
-const isManagedAiSessionLifecycle = (value: unknown) => value === 'idle' || value === 'running' || value === 'needsInput' || value === 'ended' || value === 'unknown'
-
-const isManagedAiRequestKind = (value: unknown) => value === 'permission' || value === 'question' || value === 'plan' || value === 'notification' || value === 'telemetry'
-
-const isManagedAiDecisionMode = (value: unknown) => value === 'blocking' || value === 'telemetry' || value === 'local'
-
-const isManagedAiSessionTimelineEvent = (value: unknown): value is ManagedAiSessionTimelineEvent =>
-  isRecord(value) &&
-  isNonEmptyString(value.id) &&
-  isAiAgentSessionSource(value.source) &&
-  isAiAgentSessionEventName(value.event) &&
-  isNonEmptyString(value.sessionId) &&
-  isNonEmptyString(value.title) &&
-  typeof value.summary === 'string' &&
-  typeof value.receivedAt === 'number' &&
-  isOptionalField(value, 'requestKind', isManagedAiRequestKind) &&
-  isOptionalField(value, 'decisionMode', isManagedAiDecisionMode) &&
-  isOptionalField(value, 'waitTimeoutMs', isPositiveInteger) &&
-  isOptionalField(value, 'toolName', isNonEmptyText) &&
-  isOptionalField(value, 'launchCommand', isNonEmptyText) &&
-  isOptionalField(value, 'resumeCommand', isNonEmptyText) &&
-  isOptionalField(value, 'processId', isPositiveInteger) &&
-  isOptionalField(value, 'parentProcessId', isPositiveInteger) &&
-  isOptionalField(value, 'processGroupId', isPositiveInteger) &&
-  isOptionalField(value, 'agentLifecycle', isManagedAiSessionLifecycle)
-
-const isManagedAiSessionDecision = (value: unknown): value is ManagedAiSessionDecision =>
-  isRecord(value) &&
-  isNonEmptyString(value.id) &&
-  (value.kind === 'allow' || value.kind === 'always' || value.kind === 'bypass' || value.kind === 'deny' || value.kind === 'reply' || value.kind === 'handled') &&
-  typeof value.createdAt === 'number'
-
-const isAgentHibernationConfig = (value: unknown): value is AgentHibernationConfig =>
-  isRecord(value) &&
-  typeof value.enabled === 'boolean' &&
-  isPositiveInteger(value.idleSeconds) &&
-  isPositiveInteger(value.maxLiveTerminals) &&
-  typeof value.confirmationSeconds === 'number' &&
-  Number.isFinite(value.confirmationSeconds) &&
-  value.confirmationSeconds >= 0
-
-const isManagedAiSessionRecord = (value: unknown): value is ManagedAiSessionRecord =>
-  isRecord(value) &&
-  isNonEmptyString(value.id) &&
-  isAiAgentSessionSource(value.source) &&
-  isNonEmptyString(value.title) &&
-  typeof value.summary === 'string' &&
-  isManagedAiSessionState(value.state) &&
-  isAiAgentSessionEventName(value.lastEvent) &&
-  isOptionalField(value, 'requestKind', isManagedAiRequestKind) &&
-  isOptionalField(value, 'decisionMode', isManagedAiDecisionMode) &&
-  typeof value.lastActivityAt === 'number' &&
-  typeof value.createdAt === 'number' &&
-  typeof value.updatedAt === 'number' &&
-  isOptionalField(value, 'waitTimeoutMs', isPositiveInteger) &&
-  isOptionalField(value, 'toolName', isNonEmptyText) &&
-  isOptionalField(value, 'launchCommand', isNonEmptyText) &&
-  isOptionalField(value, 'resumeCommand', isNonEmptyText) &&
-  isOptionalField(value, 'processId', isPositiveInteger) &&
-  isOptionalField(value, 'parentProcessId', isPositiveInteger) &&
-  isOptionalField(value, 'processGroupId', isPositiveInteger) &&
-  isOptionalField(value, 'agentLifecycle', isManagedAiSessionLifecycle) &&
-  isOptionalField(value, 'terminalProcessId', isPositiveInteger) &&
-  isOptionalField(value, 'terminalActivityAt', (item) => typeof item === 'number' && Number.isFinite(item)) &&
-  isOptionalField(value, 'hibernated', (item) => typeof item === 'boolean') &&
-  isOptionalField(value, 'hibernatedAt', (item) => typeof item === 'number' && Number.isFinite(item)) &&
-  isOptionalField(value, 'hibernationReason', isNonEmptyText) &&
-  isOptionalField(value, 'hibernatedTerminalSessionId', isNonEmptyText) &&
-  Array.isArray(value.events) &&
-  value.events.every(isManagedAiSessionTimelineEvent) &&
-  Array.isArray(value.decisions) &&
-  value.decisions.every(isManagedAiSessionDecision)
-
-const isManagedAiSessionSnapshot = (value: unknown): value is ManagedAiSessionSnapshot =>
-  isRecord(value) && Array.isArray(value.sessions) && value.sessions.every(isManagedAiSessionRecord)
-
-const isManagedAiSessionMutationData = (value: unknown): value is ManagedAiSessionMutationData =>
-  isRecord(value) && isManagedAiSessionSnapshot(value.snapshot) && (value.session === undefined || isManagedAiSessionRecord(value.session))
-
-const isManagedAiSessionBulkData = (value: unknown): value is ManagedAiSessionBulkData =>
-  isRecord(value) && typeof value.changed === 'number' && isManagedAiSessionSnapshot(value.snapshot)
-
-const isManagedAiSessionHibernateData = (value: unknown): value is ManagedAiSessionHibernateData =>
-  isRecord(value) && isManagedAiSessionRecord(value.session) && isManagedAiSessionSnapshot(value.snapshot) && isAgentHibernationConfig(value.config)
-
-const isAgentHookInstallerStatus = (value: unknown): value is AgentHookInstallerStatus =>
-  isRecord(value) &&
-  isAgentHookInstallerSource(value.source) &&
-  isNonEmptyText(value.label) &&
-  isNonEmptyText(value.binaryName) &&
-  typeof value.binaryPath === 'string' &&
-  isNonEmptyText(value.configPath) &&
-  typeof value.configExists === 'boolean' &&
-  typeof value.installed === 'boolean' &&
-  typeof value.scriptPath === 'string' &&
-  Array.isArray(value.warnings) &&
-  value.warnings.every((item) => typeof item === 'string') &&
-  isOptionalField(value, 'extraConfigPath', isNonEmptyText) &&
-  isOptionalField(value, 'error', isNonEmptyText)
-
-const isAgentHookInstallerSnapshot = (value: unknown): value is AgentHookInstallerSnapshot =>
-  isRecord(value) && Array.isArray(value.installers) && value.installers.every(isAgentHookInstallerStatus)
-
-const isAgentHookInstallOperationData = (value: unknown): value is AgentHookInstallOperationData =>
-  isRecord(value) &&
-  (value.operation === 'install' || value.operation === 'uninstall') &&
-  isAgentHookInstallerSource(value.source) &&
-  isAgentHookInstallerStatus(value.status) &&
-  isAgentHookInstallerSnapshot(value.snapshot)
 
 const cloneStructuredValue = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T
 
@@ -6253,7 +5956,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (!getAgentHibernationConfig) return false
     try {
       const result = (await getAgentHibernationConfig()) as AgentHibernationConfigResult
-      if (!result?.ok || !isRecord(result.data) || !isAgentHibernationConfig(result.data.config)) {
+      if (!result?.ok || !isAgentHibernationConfigData(result.data)) {
         setTopNotice(result?.errorMessage || i18nText('settings.ai.hibernation.loadFailed'))
         return false
       }
@@ -6274,7 +5977,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const nextConfig = { ...agentHibernationConfig.value, ...patch }
     try {
       const result = (await setAgentHibernationConfig(nextConfig)) as AgentHibernationConfigResult
-      if (!result?.ok || !isRecord(result.data) || !isAgentHibernationConfig(result.data.config)) {
+      if (!result?.ok || !isAgentHibernationConfigData(result.data)) {
         setTopNotice(result?.errorMessage || i18nText('settings.ai.hibernation.saveFailed'))
         return false
       }
@@ -11379,21 +11082,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return { status: 'unavailable', command, panelIds, reason } as TerminalSecurityDecision
   }
 
-  const terminalWriteFailureReason = (result?: TerminalWriteBridgeResult) => result?.errorMessage || '终端写入失败，请重新打开本地 shell 或连接 SSH'
-
-  const terminalWriteExceptionReason = (error: unknown) =>
-    error instanceof Error && error.message.trim() ? error.message.trim() : '终端写入失败，请重新打开本地 shell 或连接 SSH'
-
-  const validateTerminalWriteResult = (result: TerminalWriteBridgeResult | undefined, sessionId: string, data: string): TerminalWriteValidation => {
-    if (!isRecord(result)) return { ok: false, reason: malformedTerminalWriteResultMessage }
-    if (result.ok === false) return { ok: false, reason: terminalWriteFailureReason(result as TerminalWriteBridgeResult) }
-    if (result.ok !== true || !isTerminalWriteResultData(result.data, sessionId, data)) {
-      return { ok: false, reason: malformedTerminalWriteResultMessage }
-    }
-    return { ok: true }
-  }
-
-  const writeTerminalSegment = async (sessionId: string, data: string): Promise<TerminalWriteValidation> => {
+  const writeTerminalSegment = async (sessionId: string, data: string) => {
     const writeTerminal = terminalClient.writeTerminal()
     if (!writeTerminal) return { ok: false, reason: '终端写入服务不可用' }
     try {
