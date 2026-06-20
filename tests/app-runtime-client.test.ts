@@ -7,6 +7,7 @@ import {
   isAppUpdateInstallData,
   isAppUpdateProgressEvent,
   isOpenPathResult,
+  isSettingsDocumentationResult,
   resolveUpdateVersion
 } from '@/services/appRuntimeClient'
 
@@ -21,12 +22,19 @@ describe('appRuntimeClient', () => {
     window.aiops = {
       ...originalAiops,
       checkUpdate: vi.fn(async () => ({ available: false, channel: 'local' as const })),
+      openSettingsDocumentation: vi.fn(async () => ({ path: '/tmp/docs/index.md', title: 'Docs', content: '# Docs' })),
       openLogDir: undefined as any
     }
 
     expect(appRuntimeClient.openLogDir()).toBeUndefined()
     await expect(appRuntimeClient.checkUpdate()?.()).resolves.toEqual({ available: false, channel: 'local' })
+    await expect(appRuntimeClient.openSettingsDocumentation()?.({ page: 'general', locale: 'zh-CN' })).resolves.toEqual({
+      path: '/tmp/docs/index.md',
+      title: 'Docs',
+      content: '# Docs'
+    })
     expect(window.aiops.checkUpdate).toHaveBeenCalledTimes(1)
+    expect(window.aiops.openSettingsDocumentation).toHaveBeenCalledWith({ page: 'general', locale: 'zh-CN' })
   })
 
   it('validates app update and open path bridge payloads', () => {
@@ -86,5 +94,8 @@ describe('appRuntimeClient', () => {
     expect(isAppUpdateProgressEvent({ status: 'downloading', version: '', percent: 50 })).toBe(false)
     expect(isOpenPathResult({ path: '/tmp/aiopsterm/logs' })).toBe(true)
     expect(isOpenPathResult({ path: '   ' })).toBe(false)
+    expect(isSettingsDocumentationResult({ path: '/tmp/docs/index.md', title: 'Docs', content: '# Docs' })).toBe(true)
+    expect(isSettingsDocumentationResult({ path: '/tmp/docs/index.md', title: '   ', content: '# Docs' })).toBe(false)
+    expect(isSettingsDocumentationResult({ path: '/tmp/docs/index.md', title: 'Docs' })).toBe(false)
   })
 })

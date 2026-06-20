@@ -96,6 +96,7 @@ import {
   isAppUpdateInstallData,
   isAppUpdateProgressEvent,
   isOpenPathResult,
+  isSettingsDocumentationResult,
   resolveUpdateVersion
 } from '@/services/appRuntimeClient'
 import { applyDocumentLocale, isLocaleSetting, resolveLocale, translateWithLocale } from '@/i18n/runtime'
@@ -3843,14 +3844,6 @@ const defaultAboutSettings: AboutSettings = {
   progress: 0
 }
 
-const hasAiopsBridgeMethod = (name: string) => typeof (window.aiops as Record<string, unknown> | undefined)?.[name] === 'function'
-const isSettingsDocumentationResult = (result: unknown): result is { path: string; title: string; content: string } => {
-  if (!isOpenPathResult(result)) return false
-  const title = (result as Record<string, unknown>).title
-  const content = (result as Record<string, unknown>).content
-  return typeof title === 'string' && Boolean(title.trim()) && typeof content === 'string'
-}
-
 const getKbParent = (relPath: string) => {
   const parts = relPath.split('/').filter(Boolean)
   if (parts.length <= 1) return ''
@@ -6317,7 +6310,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const readSettingsDocumentation = async (input?: OpenSettingsDocumentationInput) => {
-    const result = await window.aiops.openSettingsDocumentation(input)
+    const openSettingsDocumentationBridge = appRuntimeClient.openSettingsDocumentation()
+    if (!openSettingsDocumentationBridge) {
+      setSettingsNotice('文档入口服务不可用')
+      return false
+    }
+    const result = await openSettingsDocumentationBridge(input)
     if (!isSettingsDocumentationResult(result)) {
       setSettingsNotice('文档入口打开失败')
       return false
@@ -6336,10 +6334,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (mcpConfigEditorOpen.value) closeMcpConfigEditor()
     onboardingGuideOpen.value = false
     if (!page) activeSettingsSection.value = 'general'
-    if (!hasAiopsBridgeMethod('openSettingsDocumentation')) {
-      setSettingsNotice('文档入口服务不可用')
-      return false
-    }
     try {
       return await readSettingsDocumentation(page ? { page, locale: resolveLocale(config.value.language, typeof navigator === 'undefined' ? [] : navigator.languages || [navigator.language]) } : undefined)
     } catch {
@@ -6353,10 +6347,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const openSettingsDocumentationLink = async (documentPath: string) => {
     const normalizedPath = documentPath.trim()
     if (!normalizedPath) return false
-    if (!hasAiopsBridgeMethod('openSettingsDocumentation')) {
-      setSettingsNotice('文档入口服务不可用')
-      return false
-    }
     try {
       return await readSettingsDocumentation({ documentPath: normalizedPath, basePath: settingsDocumentationPath.value })
     } catch {
@@ -6368,10 +6358,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const openSettingsDocumentationFile = async (documentPath: string) => {
     const normalizedPath = documentPath.trim()
     if (!normalizedPath) return false
-    if (!hasAiopsBridgeMethod('openSettingsDocumentation')) {
-      setSettingsNotice('文档入口服务不可用')
-      return false
-    }
     try {
       return await readSettingsDocumentation({ documentPath: normalizedPath })
     } catch {

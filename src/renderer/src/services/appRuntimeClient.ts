@@ -3,12 +3,19 @@ import type {
   AppUpdateCheckResult,
   AppUpdateDownloadResult,
   AppUpdateInstallResult,
-  AppUpdateProgressEvent
+  AppUpdateProgressEvent,
+  SettingsDocumentationResult
 } from '@shared/contracts/appRuntime'
 
 type AppRuntimeBridge = Pick<
   AiopsPreloadApi,
-  'checkUpdate' | 'downloadAppUpdate' | 'installAppUpdate' | 'onAppUpdateProgress' | 'openLogDir' | 'submitSettingsFeedbackReport'
+  | 'checkUpdate'
+  | 'downloadAppUpdate'
+  | 'installAppUpdate'
+  | 'onAppUpdateProgress'
+  | 'openLogDir'
+  | 'openSettingsDocumentation'
+  | 'submitSettingsFeedbackReport'
 >
 
 export type AppUpdateDownloadData = NonNullable<AppUpdateDownloadResult['data']>
@@ -31,10 +38,18 @@ export const appRuntimeClient = {
   installAppUpdate: () => bridgeMethod('installAppUpdate'),
   onAppUpdateProgress: () => bridgeMethod('onAppUpdateProgress'),
   openLogDir: () => bridgeMethod('openLogDir'),
+  openSettingsDocumentation: () => bridgeMethod('openSettingsDocumentation'),
   submitSettingsFeedbackReport: () => bridgeMethod('submitSettingsFeedbackReport')
 }
 
 export const isOpenPathResult = (result: unknown): result is { path: string } => isRecord(result) && typeof result.path === 'string' && Boolean(result.path.trim())
+
+export const isSettingsDocumentationResult = (result: unknown): result is SettingsDocumentationResult => {
+  if (!isRecord(result) || typeof result.path !== 'string' || !result.path.trim()) return false
+  const title = result.title
+  const content = result.content
+  return typeof title === 'string' && Boolean(title.trim()) && typeof content === 'string'
+}
 
 const appUpdateChannels: AppUpdateCheckResult['channel'][] = ['local', 'manual', 'auto']
 
