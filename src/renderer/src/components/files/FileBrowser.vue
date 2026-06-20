@@ -512,6 +512,7 @@ import {
 } from 'lucide-vue-next'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { copyTextToClipboard } from '@/services/clipboardRuntime'
+import { localFilesClient } from '@/services/localFilesClient'
 import {
   isFileEntryMutationData,
   isFileEntryMutationDataForRequest,
@@ -805,8 +806,8 @@ const pickLocalPath = async (
   unavailableMessage: string,
   failureMessage: string
 ) => {
-  const showOpenDialog = window.aiops?.showOpenDialog
-  if (typeof showOpenDialog !== 'function') {
+  const showOpenDialog = localFilesClient.showOpenDialog()
+  if (!showOpenDialog) {
     setFileNotice(unavailableMessage)
     return ''
   }
@@ -824,8 +825,8 @@ const pickSavePath = async (
   unavailableMessage: string,
   failureMessage: string
 ) => {
-  const showSaveDialog = window.aiops?.showSaveDialog
-  if (typeof showSaveDialog !== 'function') {
+  const showSaveDialog = localFilesClient.showSaveDialog()
+  if (!showSaveDialog) {
     setFileNotice(unavailableMessage)
     return ''
   }

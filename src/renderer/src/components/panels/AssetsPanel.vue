@@ -1235,6 +1235,7 @@ import {
   X
 } from 'lucide-vue-next'
 import { assetManagementEntries } from '@/config/assets'
+import { localFilesClient } from '@/services/localFilesClient'
 import type {
   AiopsAssetAuthType,
   AiopsAssetGroupRecord,
@@ -2615,8 +2616,8 @@ const loadAssetImportPreviewFromPath = async (filePath: string) => {
 }
 
 const openImportDialog = async () => {
-  const showOpenDialog = window.aiops?.showOpenDialog
-  if (typeof showOpenDialog !== 'function') {
+  const showOpenDialog = localFilesClient.showOpenDialog()
+  if (!showOpenDialog) {
     importNotice.value = '导入文件选择服务不可用。'
     return
   }
@@ -2875,8 +2876,8 @@ const applyImportedKeyFile = (fileName: string, content: string) => {
 const localFileName = (filePath: string) => filePath.split(/[/\\]/).filter(Boolean).at(-1) || filePath
 
 const readLocalTextFile = async (filePath: string, unavailableMessage: string) => {
-  const readLocalFile = window.aiops?.readLocalFile
-  if (typeof readLocalFile !== 'function') throw new Error(unavailableMessage)
+  const readLocalFile = localFilesClient.readLocalFile()
+  if (!readLocalFile) throw new Error(unavailableMessage)
   const result = await readLocalFile(filePath)
   return result.content
 }
@@ -2897,8 +2898,8 @@ const importKeyFileFromPath = async (filePath: string) => {
 
 const openKeyImportDialog = async () => {
   keyImportNotice.value = '请选择 .pem、.key、.pub、.ppk 等密钥文件。'
-  const showOpenDialog = window.aiops?.showOpenDialog
-  if (typeof showOpenDialog !== 'function') {
+  const showOpenDialog = localFilesClient.showOpenDialog()
+  if (!showOpenDialog) {
     keyImportNotice.value = '密钥文件选择服务不可用。'
     return
   }
@@ -2929,9 +2930,9 @@ const handleKeyDrop = async (event: DragEvent) => {
     keyImportNotice.value = '没有检测到可导入的密钥文件。'
     return
   }
-  const getPathForFile = window.aiops?.getPathForFile
+  const getPathForFile = localFilesClient.getPathForFile()
   const filePath =
-    (typeof getPathForFile === 'function' ? getPathForFile(file) : '') || String((file as File & { path?: string }).path || '').trim()
+    (getPathForFile ? getPathForFile(file) : '') || String((file as File & { path?: string }).path || '').trim()
   if (!filePath) {
     keyImportNotice.value = '拖拽导入需要本地文件路径。'
     return

@@ -258,6 +258,8 @@ import { computed, defineComponent, h, nextTick, onBeforeUnmount, onMounted, rea
 import { ChevronDown, ChevronRight, Cloud, File, FilePlus, Folder, FolderPlus, Plus, RefreshCw, Search, UploadCloud, X } from 'lucide-vue-next'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { copyTextToClipboard } from '@/services/clipboardRuntime'
+import { knowledgeClient } from '@/services/knowledgeClient'
+import { localFilesClient } from '@/services/localFilesClient'
 import { isKnowledgePathCheckResultData, malformedKnowledgeBackendResultMessage } from '@/services/knowledgeBackendGuards'
 import type { KnowledgeBaseSearchResult, KnowledgeNode } from '@shared/contracts/knowledgeBase'
 
@@ -621,13 +623,14 @@ const addToChat = async () => {
 }
 
 const importKnowledgePath = async (filePath: string, targetDir: string, fallbackName: string) => {
-  if (!window.aiops?.kbCheckPath) {
+  const kbCheckPath = knowledgeClient.kbCheckPath()
+  if (!kbCheckPath) {
     workspace.setTopNotice('知识库导入需要路径检查服务')
     return
   }
   let info: unknown
   try {
-    info = await window.aiops.kbCheckPath(filePath)
+    info = await kbCheckPath(filePath)
   } catch {
     workspace.setTopNotice('知识库导入路径检查失败')
     return
@@ -660,11 +663,12 @@ const uploadFile = async (targetDirOverride?: string) => {
   addMenuOpen.value = false
   nodeMenu.visible = false
   blankMenu.visible = false
-  if (!window.aiops?.showOpenDialog) {
+  const showOpenDialog = localFilesClient.showOpenDialog()
+  if (!showOpenDialog) {
     workspace.setTopNotice('知识库导入需要文件选择服务')
     return
   }
-  const result = await window.aiops.showOpenDialog({
+  const result = await showOpenDialog({
     properties: ['openFile', 'openDirectory', 'multiSelections']
   })
   if (result?.canceled || !result?.filePaths.length) return

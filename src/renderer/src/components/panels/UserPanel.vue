@@ -689,6 +689,7 @@
 import { computed, onUnmounted, reactive, ref } from 'vue'
 import { Camera, Check, Gauge, LogOut, Pencil, Trash2, User, X } from 'lucide-vue-next'
 import { useWorkspaceStore } from '@/stores/workspace'
+import { localFilesClient } from '@/services/localFilesClient'
 
 const workspace = useWorkspaceStore()
 const editing = ref(false)
@@ -848,8 +849,8 @@ const openAvatarModal = () => {
 }
 
 const chooseAvatarImage = async () => {
-  const showOpenDialog = window.aiops?.showOpenDialog
-  if (typeof showOpenDialog !== 'function') {
+  const showOpenDialog = localFilesClient.showOpenDialog()
+  if (!showOpenDialog) {
     workspace.setUserNotice('头像选择服务不可用')
     return
   }

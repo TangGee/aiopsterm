@@ -2335,11 +2335,11 @@ import {
   TextCursorInput,
   Unplug,
   WandSparkles,
-  X,
-  Zap
+  X, Zap
 } from 'lucide-vue-next'
 import { copyTextToClipboard } from '@/services/clipboardRuntime'
 import { editorLineHeightPx } from '@/services/editorRuntime'
+import { localFilesClient } from '@/services/localFilesClient'
 import DatabaseSqlEditor, { type DatabaseSqlEditorMetrics } from '@/components/database/DatabaseSqlEditor.vue'
 import { useWorkspaceStore } from '@/stores/workspace'
 import type {
@@ -5459,8 +5459,8 @@ function fileNameFromPath(filePath: string) {
 }
 
 async function pickSqlSavePath(tab: Extract<WorkspaceTab, { kind: 'sql' }>) {
-  const showSaveDialog = window.aiops?.showSaveDialog
-  if (typeof showSaveDialog !== 'function') {
+  const showSaveDialog = localFilesClient.showSaveDialog()
+  if (!showSaveDialog) {
     return { ok: false as const, error: 'SQL save dialog service unavailable' }
   }
   try {
@@ -5478,8 +5478,8 @@ async function pickSqlSavePath(tab: Extract<WorkspaceTab, { kind: 'sql' }>) {
 async function saveActiveSql(forceSaveAs: boolean) {
   const tab = activeSqlTab.value
   if (!tab || tab.saving) return
-  const writeLocalFile = window.aiops?.writeLocalFile
-  if (typeof writeLocalFile !== 'function') {
+  const writeLocalFile = localFilesClient.writeLocalFile()
+  if (!writeLocalFile) {
     tab.saveError = 'SQL file writer service unavailable'
     showNotice(tab.saveError)
     return
@@ -7628,8 +7628,8 @@ function closeConnectionModal() {
 }
 
 async function pickSqliteFile() {
-  const showOpenDialog = window.aiops?.showOpenDialog
-  if (typeof showOpenDialog !== 'function') {
+  const showOpenDialog = localFilesClient.showOpenDialog()
+  if (!showOpenDialog) {
     connectionFeedbackKind.value = 'error'
     connectionFeedback.value = 'SQLite file picker service is unavailable.'
     return

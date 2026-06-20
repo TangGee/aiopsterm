@@ -599,6 +599,7 @@
 import { computed, defineComponent, h, onMounted, reactive, ref, watch } from 'vue'
 import { Bot, ChevronRight, Clipboard, Cloud, FileSearch, FileText, Link, LoaderCircle, Plus, RefreshCw, ScrollText, Search, Settings, Terminal, Trash2, Unplug, X } from 'lucide-vue-next'
 import { useWorkspaceStore } from '@/stores/workspace'
+import { localFilesClient } from '@/services/localFilesClient'
 import type { KubernetesClusterRecord, KubernetesConnectionStatus, KubernetesResourceKind } from '@shared/contracts/kubernetes'
 
 const workspace = useWorkspaceStore()
@@ -735,7 +736,12 @@ const K8sAddClusterModal = defineComponent({
 
     const browseKubeconfig = async () => {
       formError.value = ''
-      const result = await window.aiops.showOpenDialog({
+      const showOpenDialog = localFilesClient.showOpenDialog()
+      if (!showOpenDialog) {
+        formError.value = 'Kubeconfig 文件选择服务不可用'
+        return
+      }
+      const result = await showOpenDialog({
         defaultPath: form.kubeconfigPath.includes('/') ? form.kubeconfigPath.slice(0, form.kubeconfigPath.lastIndexOf('/')) : undefined,
         properties: ['openFile'],
         filters: [

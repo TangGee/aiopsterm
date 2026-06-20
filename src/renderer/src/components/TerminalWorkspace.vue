@@ -533,6 +533,7 @@ import KnowledgeCenterEditor from '@/components/KnowledgeCenterEditor.vue'
 import type { SettingSectionKey } from '@/config/settings'
 import { useWorkspaceStore, type TerminalPanel, type TerminalSettings } from '@/stores/workspace'
 import { copyTextToClipboard, mirrorTextToClipboardQuietly, readTextFromClipboard } from '@/services/clipboardRuntime'
+import { controlClient } from '@/services/controlClient'
 import { terminalBracketedPasteText, terminalSubmitKeyData, writeControlTerminalText } from '@/services/terminalControlRuntime'
 import { terminalClient } from '@/services/terminalClient'
 import { createTerminalZmodemRuntime, type TerminalZmodemProgress } from '@/services/zmodemRuntime'
@@ -5732,7 +5733,7 @@ onMounted(() => {
   offData = terminalClient.onTerminalData()?.(handleTerminalData) || null
   offLifecycle = terminalClient.onTerminalLifecycle()?.((event) => workspace.applyTerminalLifecycle(event)) || null
   offExit = terminalClient.onTerminalExit()?.((event) => workspace.applyTerminalExit(event)) || null
-  offControlRequest = window.aiops?.onControlRequest(handleControlRequest) || null
+  offControlRequest = controlClient.onControlRequest()?.(handleControlRequest) || null
   document.addEventListener('click', closeTerminalMenusFromDocument)
   window.addEventListener('keydown', handleShortcut)
 })

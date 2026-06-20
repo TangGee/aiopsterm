@@ -9,9 +9,11 @@ import {
 import { aiCatalogClient } from '@/services/aiCatalogClient'
 import { aiChatClient } from '@/services/aiChatClient'
 import { agentHookClient } from '@/services/agentHookClient'
+import { aliasClient } from '@/services/aliasClient'
 import { assetsClient } from '@/services/assetsClient'
 import { chatHistoryClient } from '@/services/chatHistoryClient'
 import { validateCommandSecurity, type CommandSecurityResult } from '@/services/commandSecurityRuntime'
+import { controlClient } from '@/services/controlClient'
 import { applyEditorSettingsToDocument } from '@/services/editorRuntime'
 import {
   isAliasCommandDeleteData,
@@ -27,6 +29,7 @@ import {
 } from '@/services/extensionBackendGuards'
 import { extensionsClient } from '@/services/extensionsClient'
 import { applyKeywordHighlight } from '@/services/keywordHighlightRuntime'
+import { localFilesClient } from '@/services/localFilesClient'
 import { managedAiClient } from '@/services/managedAiClient'
 import { mcpClient } from '@/services/mcpClient'
 import {
@@ -5566,7 +5569,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         createdAt: alias.createdAt
       }))
 
-  const hasAliasListBridge = () => typeof (window.aiops as { listAliasCommands?: unknown } | undefined)?.listAliasCommands === 'function'
+  const hasAliasListBridge = () => Boolean(aliasClient.listAliasCommands())
 
   const applyAliasCommandsFromBackend = (commands: AliasCommandConfig[]) => {
     const { normalized } = normalizeAliasCommandsConfig(commands)
@@ -5576,8 +5579,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const loadAliasCommandsFromBackend = async () => {
-    if (!hasAliasListBridge()) throw new Error('Alias 服务不可用')
-    const result = await window.aiops.listAliasCommands()
+    const listAliasCommands = aliasClient.listAliasCommands()
+    if (!listAliasCommands) throw new Error('Alias 服务不可用')
+    const result = await listAliasCommands()
     if (!result?.ok) throw new Error(result?.errorMessage || 'Alias 加载失败')
     if (!isAliasCommandListData(result.data)) throw new Error(malformedAliasBackendResultMessage)
     return result.data
@@ -6594,13 +6598,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const uploadCustomBackground = async () => {
-    const showOpenDialog = window.aiops?.showOpenDialog
-    if (typeof showOpenDialog !== 'function') {
+    const showOpenDialog = localFilesClient.showOpenDialog()
+    if (!showOpenDialog) {
       setSettingsNotice('自定义背景选择服务不可用')
       return false
     }
-    const saveCustomBackground = window.aiops?.saveCustomBackground
-    if (typeof saveCustomBackground !== 'function') {
+    const saveCustomBackground = localFilesClient.saveCustomBackground()
+    if (!saveCustomBackground) {
       setSettingsNotice('自定义背景保存服务不可用')
       return false
     }
@@ -8518,8 +8522,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const openControlNotification = async (notificationId: string) => {
-    const bridge = window.aiops?.invokeControlRequest
-    if (typeof bridge !== 'function') {
+    const bridge = controlClient.invokeControlRequest()
+    if (!bridge) {
       const notification = controlNotifications.value.find((item) => item.id === notificationId)
       if (notification) return focusControlNotification(notification)
       return false
@@ -9752,8 +9756,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         showSkillImportError(overwriteResult.errorCode)
         return false
       }
-      const showOpenDialog = window.aiops?.showOpenDialog
-      if (typeof showOpenDialog !== 'function') {
+      const showOpenDialog = localFilesClient.showOpenDialog()
+      if (!showOpenDialog) {
         setSettingsNotice('Skill ZIP 选择服务不可用')
         return false
       }
@@ -12052,12 +12056,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       command,
       createdAt: target.createdAt
     }
-    if (!window.aiops?.saveAliasCommand) {
+    const saveAliasCommandBridge = aliasClient.saveAliasCommand()
+    if (!saveAliasCommandBridge) {
       setExtensionNotice('Alias 保存服务不可用')
       return { ok: false, reason: 'backend' as const }
     }
     try {
-      const result = await window.aiops.saveAliasCommand(payload)
+      const result = await saveAliasCommandBridge(payload)
       if (!result?.ok) {
         if (result?.errorCode === 'ALIAS_DUPLICATE') {
           setExtensionNotice('Alias 已存在')
@@ -12100,12 +12105,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const deleteAliasCommand = async (id: string) => {
     const target = aliasCommands.value.find((item) => item.id === id)
     if (!target) return { ok: false, reason: 'not-found' as const }
-    if (!window.aiops?.deleteAliasCommand) {
+    const deleteAliasCommandBridge = aliasClient.deleteAliasCommand()
+    if (!deleteAliasCommandBridge) {
       setExtensionNotice('Alias 删除服务不可用')
       return { ok: false, reason: 'backend' as const }
     }
     try {
-      const result = await window.aiops.deleteAliasCommand({ id: target.id, alias: target.alias })
+      const result = await deleteAliasCommandBridge({ id: target.id, alias: target.alias })
       if (!result?.ok) {
         setExtensionNotice(result?.errorMessage || 'Alias 删除失败')
         return { ok: false, reason: 'backend' as const }

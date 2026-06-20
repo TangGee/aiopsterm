@@ -1662,6 +1662,7 @@ import {
 import { useWorkspaceStore, type TerminalSettings } from '@/stores/workspace'
 import { readStoredAiPanelMode, storeAiPanelMode, type AiPanelMode } from '@/services/aiPanelModeRuntime'
 import { copyTextToClipboard } from '@/services/clipboardRuntime'
+import { localFilesClient } from '@/services/localFilesClient'
 import {
   isAiChatExportData,
   isChatAttachmentStageData,
@@ -4082,8 +4083,8 @@ const insertFileChipAtEditCursor = (part: AiDocChipContentPart) => {
 const clipboardHasImage = (event: ClipboardEvent) => Array.from(event.clipboardData?.items || []).some((item) => item.type.startsWith('image/'))
 
 const preparePastedImagePart = async (): Promise<AiImageContentPart | null> => {
-  const prepareClipboardImage = window.aiops?.prepareChatImageAttachmentFromClipboard
-  if (typeof prepareClipboardImage !== 'function') {
+  const prepareClipboardImage = localFilesClient.prepareChatImageAttachmentFromClipboard()
+  if (!prepareClipboardImage) {
     showInputPlaceholderNotice('图片上传失败：剪贴板图片服务不可用')
     return null
   }
@@ -4822,8 +4823,8 @@ const handleEditablePaste = (event: ClipboardEvent) => {
 const imagePickerFilters = [{ name: 'Images', extensions: ['jpg', 'jpeg', 'png', 'gif', 'webp'] }]
 
 const processImageFilePath = async (filePath: string): Promise<AiImageContentPart | null> => {
-  const prepareImageFromFile = window.aiops?.prepareChatImageAttachmentFromFile
-  if (typeof prepareImageFromFile !== 'function') {
+  const prepareImageFromFile = localFilesClient.prepareChatImageAttachmentFromFile()
+  if (!prepareImageFromFile) {
     showInputPlaceholderNotice('图片上传失败：图片读取服务不可用')
     return null
   }
@@ -4864,8 +4865,8 @@ const insertPastedImage = async () => {
 
 const openImagePicker = async () => {
   if (streaming.value) return
-  const showOpenDialog = window.aiops?.showOpenDialog
-  if (typeof showOpenDialog !== 'function') {
+  const showOpenDialog = localFilesClient.showOpenDialog()
+  if (!showOpenDialog) {
     showInputPlaceholderNotice('图片上传失败：文件选择服务不可用')
     return
   }
@@ -4910,13 +4911,13 @@ const isStagedAttachmentForRequest = (staged: unknown, taskId: string, srcAbsPat
 
 const handleFileUpload = async () => {
   if (streaming.value) return
-  const showOpenDialog = window.aiops?.showOpenDialog
-  if (typeof showOpenDialog !== 'function') {
+  const showOpenDialog = localFilesClient.showOpenDialog()
+  if (!showOpenDialog) {
     showInputPlaceholderNotice('文件上传失败：文件选择服务不可用')
     return
   }
-  const stageAttachment = window.aiops?.stageChatAttachment
-  if (typeof stageAttachment !== 'function') {
+  const stageAttachment = localFilesClient.stageChatAttachment()
+  if (!stageAttachment) {
     showInputPlaceholderNotice('文件上传失败：文件暂存服务不可用')
     return
   }
