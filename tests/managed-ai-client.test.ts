@@ -23,12 +23,19 @@ const managedAiSnapshot = {
   ]
 }
 
+const hibernationConfig = {
+  enabled: true,
+  idleSeconds: 300,
+  maxLiveTerminals: 12,
+  confirmationSeconds: 60
+}
+
 afterEach(() => {
   window.aiops = originalAiops
 })
 
 describe('managedAiClient', () => {
-  it('returns undefined for unavailable bridge methods and binds managed AI session list/reply methods', async () => {
+  it('returns undefined for unavailable bridge methods and binds managed AI session methods', async () => {
     window.aiops = {
       ...originalAiops,
       listManagedAiSessions: vi.fn(async () => ({
@@ -48,6 +55,52 @@ describe('managedAiClient', () => {
               }
             ]
           }
+        }
+      })),
+      renameManagedAiSession: vi.fn(async (input) => ({
+        ok: true,
+        data: {
+          session: { ...managedAiSnapshot.sessions[0], title: input.title },
+          snapshot: {
+            sessions: [{ ...managedAiSnapshot.sessions[0], title: input.title }]
+          }
+        }
+      })),
+      clearManagedAiSession: vi.fn(async () => ({
+        ok: true,
+        data: {
+          snapshot: { sessions: [] }
+        }
+      })),
+      bulkManagedAiSessions: vi.fn(async (input) => ({
+        ok: true,
+        data: {
+          changed: input.operation === 'mark-handled' ? 1 : 0,
+          snapshot: { sessions: [] }
+        }
+      })),
+      getAgentHibernationConfig: vi.fn(async () => ({
+        ok: true,
+        data: { config: hibernationConfig }
+      })),
+      setAgentHibernationConfig: vi.fn(async (input) => ({
+        ok: true,
+        data: { config: { ...hibernationConfig, ...input } }
+      })),
+      hibernateManagedAiSession: vi.fn(async (input) => ({
+        ok: true,
+        data: {
+          session: { ...managedAiSnapshot.sessions[0], hibernated: true, hibernationReason: input.reason },
+          snapshot: { sessions: [{ ...managedAiSnapshot.sessions[0], hibernated: true, hibernationReason: input.reason }] },
+          config: hibernationConfig
+        }
+      })),
+      wakeManagedAiSession: vi.fn(async (input) => ({
+        ok: true,
+        data: {
+          session: { ...managedAiSnapshot.sessions[0], hibernated: false, hibernationReason: input.reason },
+          snapshot: { sessions: [{ ...managedAiSnapshot.sessions[0], hibernated: false, hibernationReason: input.reason }] },
+          config: hibernationConfig
         }
       }))
     }
@@ -80,13 +133,96 @@ describe('managedAiClient', () => {
       kind: 'reply',
       message: 'Use staging'
     })
+    await expect(
+      managedAiClient.renameManagedAiSession()?.({
+        source: 'claude-code',
+        sessionId: 'claude-session-1',
+        title: 'Deploy approval'
+      })
+    ).resolves.toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
+          session: expect.objectContaining({ title: 'Deploy approval' })
+        })
+      })
+    )
+    await expect(managedAiClient.clearManagedAiSession()?.({ source: 'claude-code', sessionId: 'claude-session-1' })).resolves.toEqual({
+      ok: true,
+      data: { snapshot: { sessions: [] } }
+    })
+    await expect(managedAiClient.bulkManagedAiSessions()?.({ operation: 'mark-handled', sources: ['claude-code'] })).resolves.toEqual({
+      ok: true,
+      data: { changed: 1, snapshot: { sessions: [] } }
+    })
+    await expect(managedAiClient.getAgentHibernationConfig()?.()).resolves.toEqual({
+      ok: true,
+      data: { config: hibernationConfig }
+    })
+    await expect(managedAiClient.setAgentHibernationConfig()?.({ enabled: false })).resolves.toEqual({
+      ok: true,
+      data: { config: { ...hibernationConfig, enabled: false } }
+    })
+    await expect(
+      managedAiClient.hibernateManagedAiSession()?.({
+        source: 'claude-code',
+        sessionId: 'claude-session-1',
+        reason: 'manual',
+        terminalSessionId: 'terminal-session-1'
+      })
+    ).resolves.toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
+          session: expect.objectContaining({ hibernated: true, hibernationReason: 'manual' })
+        })
+      })
+    )
+    await expect(managedAiClient.wakeManagedAiSession()?.({ source: 'claude-code', sessionId: 'claude-session-1', reason: 'resume' })).resolves.toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
+          session: expect.objectContaining({ hibernated: false, hibernationReason: 'resume' })
+        })
+      })
+    )
+    expect(window.aiops.renameManagedAiSession).toHaveBeenCalledWith({
+      source: 'claude-code',
+      sessionId: 'claude-session-1',
+      title: 'Deploy approval'
+    })
+    expect(window.aiops.clearManagedAiSession).toHaveBeenCalledWith({ source: 'claude-code', sessionId: 'claude-session-1' })
+    expect(window.aiops.bulkManagedAiSessions).toHaveBeenCalledWith({ operation: 'mark-handled', sources: ['claude-code'] })
+    expect(window.aiops.getAgentHibernationConfig).toHaveBeenCalledTimes(1)
+    expect(window.aiops.setAgentHibernationConfig).toHaveBeenCalledWith({ enabled: false })
+    expect(window.aiops.hibernateManagedAiSession).toHaveBeenCalledWith({
+      source: 'claude-code',
+      sessionId: 'claude-session-1',
+      reason: 'manual',
+      terminalSessionId: 'terminal-session-1'
+    })
+    expect(window.aiops.wakeManagedAiSession).toHaveBeenCalledWith({ source: 'claude-code', sessionId: 'claude-session-1', reason: 'resume' })
 
     window.aiops = {
       ...originalAiops,
       listManagedAiSessions: undefined as any,
-      replyManagedAiSession: undefined as any
+      replyManagedAiSession: undefined as any,
+      renameManagedAiSession: undefined as any,
+      clearManagedAiSession: undefined as any,
+      bulkManagedAiSessions: undefined as any,
+      getAgentHibernationConfig: undefined as any,
+      setAgentHibernationConfig: undefined as any,
+      hibernateManagedAiSession: undefined as any,
+      wakeManagedAiSession: undefined as any
     }
     expect(managedAiClient.listManagedAiSessions()).toBeUndefined()
     expect(managedAiClient.replyManagedAiSession()).toBeUndefined()
+    expect(managedAiClient.renameManagedAiSession()).toBeUndefined()
+    expect(managedAiClient.clearManagedAiSession()).toBeUndefined()
+    expect(managedAiClient.bulkManagedAiSessions()).toBeUndefined()
+    expect(managedAiClient.getAgentHibernationConfig()).toBeUndefined()
+    expect(managedAiClient.setAgentHibernationConfig()).toBeUndefined()
+    expect(managedAiClient.hibernateManagedAiSession()).toBeUndefined()
+    expect(managedAiClient.wakeManagedAiSession()).toBeUndefined()
   })
 })

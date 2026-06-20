@@ -8767,13 +8767,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const renameManagedAiSession = async (source: AiAgentSessionSource, sessionId: string, title: string) => {
-    const bridge = window.aiops?.renameManagedAiSession
-    if (typeof bridge !== 'function') {
+    const renameManagedAiSessionBridge = managedAiClient.renameManagedAiSession()
+    if (!renameManagedAiSessionBridge) {
       setTopNotice(i18nText('aiSessions.notice.serviceUnavailable'))
       return false
     }
     try {
-      const result = (await bridge({ source, sessionId, title })) as ManagedAiSessionMutationResult
+      const result = (await renameManagedAiSessionBridge({ source, sessionId, title })) as ManagedAiSessionMutationResult
       if (!result?.ok || !isManagedAiSessionMutationData(result.data)) {
         setTopNotice(result?.errorMessage || i18nText('aiSessions.notice.renameFailed'))
         return false
@@ -8788,13 +8788,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const clearManagedAiSession = async (source: AiAgentSessionSource, sessionId: string) => {
-    const bridge = window.aiops?.clearManagedAiSession
-    if (typeof bridge !== 'function') {
+    const clearManagedAiSessionBridge = managedAiClient.clearManagedAiSession()
+    if (!clearManagedAiSessionBridge) {
       setTopNotice(i18nText('aiSessions.notice.serviceUnavailable'))
       return false
     }
     try {
-      const result = (await bridge({ source, sessionId })) as ManagedAiSessionMutationResult
+      const result = (await clearManagedAiSessionBridge({ source, sessionId })) as ManagedAiSessionMutationResult
       if (!result?.ok || !isManagedAiSessionMutationData(result.data)) {
         setTopNotice(result?.errorMessage || i18nText('aiSessions.notice.clearFailed'))
         return false
@@ -8809,13 +8809,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const bulkManagedAiSessions = async (input: ManagedAiSessionBulkInput) => {
-    const bridge = window.aiops?.bulkManagedAiSessions
-    if (typeof bridge !== 'function') {
+    const bulkManagedAiSessionsBridge = managedAiClient.bulkManagedAiSessions()
+    if (!bulkManagedAiSessionsBridge) {
       setTopNotice(i18nText('aiSessions.notice.serviceUnavailable'))
       return false
     }
     try {
-      const result = (await bridge(input)) as ManagedAiSessionBulkResult
+      const result = (await bulkManagedAiSessionsBridge(input)) as ManagedAiSessionBulkResult
       if (!result?.ok || !isManagedAiSessionBulkData(result.data)) {
         setTopNotice(result?.errorMessage || i18nText('aiSessions.notice.bulkFailed'))
         return false
@@ -8830,10 +8830,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const refreshAgentHibernationConfig = async () => {
-    const bridge = window.aiops?.getAgentHibernationConfig
-    if (typeof bridge !== 'function') return false
+    const getAgentHibernationConfig = managedAiClient.getAgentHibernationConfig()
+    if (!getAgentHibernationConfig) return false
     try {
-      const result = (await bridge()) as AgentHibernationConfigResult
+      const result = (await getAgentHibernationConfig()) as AgentHibernationConfigResult
       if (!result?.ok || !isRecord(result.data) || !isAgentHibernationConfig(result.data.config)) {
         setTopNotice(result?.errorMessage || i18nText('settings.ai.hibernation.loadFailed'))
         return false
@@ -8847,14 +8847,14 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const updateAgentHibernationConfig = async (patch: Partial<AgentHibernationConfig>) => {
-    const bridge = window.aiops?.setAgentHibernationConfig
-    if (typeof bridge !== 'function') {
+    const setAgentHibernationConfig = managedAiClient.setAgentHibernationConfig()
+    if (!setAgentHibernationConfig) {
       setTopNotice(i18nText('settings.ai.hibernation.serviceUnavailable'))
       return false
     }
     const nextConfig = { ...agentHibernationConfig.value, ...patch }
     try {
-      const result = (await bridge(nextConfig)) as AgentHibernationConfigResult
+      const result = (await setAgentHibernationConfig(nextConfig)) as AgentHibernationConfigResult
       if (!result?.ok || !isRecord(result.data) || !isAgentHibernationConfig(result.data.config)) {
         setTopNotice(result?.errorMessage || i18nText('settings.ai.hibernation.saveFailed'))
         return false
@@ -8906,12 +8906,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         panel.status = 'closed'
       }
     }
-    const bridge = window.aiops?.hibernateManagedAiSession
-    if (typeof bridge !== 'function') {
+    const hibernateManagedAiSessionBridge = managedAiClient.hibernateManagedAiSession()
+    if (!hibernateManagedAiSessionBridge) {
       setTopNotice(i18nText('settings.ai.hibernation.serviceUnavailable'))
       return false
     }
-    const result = (await bridge({ source, sessionId, reason, terminalSessionId })) as ManagedAiSessionHibernateResult
+    const result = (await hibernateManagedAiSessionBridge({ source, sessionId, reason, terminalSessionId })) as ManagedAiSessionHibernateResult
     if (!result?.ok || !isManagedAiSessionHibernateData(result.data)) {
       setTopNotice(result?.errorMessage || i18nText('aiSessions.notice.hibernateFailed'))
       return false
@@ -8982,9 +8982,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
     const decision = await runTerminalCommand(panel.id, command, { source: 'agent', writeToShell: true })
     if (decision.status === 'allow') {
-      const wakeBridge = window.aiops?.wakeManagedAiSession
-      if (session.hibernated && typeof wakeBridge === 'function') {
-        const result = (await wakeBridge({ source, sessionId, reason: 'resume' })) as ManagedAiSessionHibernateResult
+      const wakeManagedAiSession = managedAiClient.wakeManagedAiSession()
+      if (session.hibernated && wakeManagedAiSession) {
+        const result = (await wakeManagedAiSession({ source, sessionId, reason: 'resume' })) as ManagedAiSessionHibernateResult
         if (result?.ok && isManagedAiSessionHibernateData(result.data)) {
           agentHibernationConfig.value = { ...result.data.config }
           applyManagedAiSessionSnapshot(result.data.snapshot)

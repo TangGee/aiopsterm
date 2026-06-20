@@ -159,7 +159,7 @@ The preload boundary exposes:
 - `openManagedAiNotification({ id, source, sessionId })`
 - `jumpToUnreadManagedAiNotification()`
 
-The workspace store calls `listManagedAiSessions()` and `replyManagedAiSession()` through `managedAiClient`, while the store remains responsible for validating returned snapshots, updating attention items, preserving selected-session state, and showing user notices.
+The workspace store calls session list/reply/rename/clear/bulk and hibernation config/hibernate/wake bridges through `managedAiClient`, while the store remains responsible for validating returned snapshots, updating attention items, coordinating terminal lifecycle effects, preserving selected-session state, and showing user notices.
 
 Bulk operations currently support `mark-handled`, `clear-ended`, and `clear-all`. For actionable Claude Code hooks, `allow`, `always`, `bypass`, `deny`, and `reply` resolve the waiting hook with Claude-native output. Stock Codex `PermissionRequest` hooks remain local visibility only: they can be inspected and focused from the AI session manager, but they are not unread notifications and are not answered by aiopsterm.
 
