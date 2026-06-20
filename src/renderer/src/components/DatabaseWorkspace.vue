@@ -2338,51 +2338,20 @@ import {
   X, Zap
 } from 'lucide-vue-next'
 import { copyTextToClipboard } from '@/services/clipboardRuntime'
+import { databaseClient } from '@/services/databaseClient'
 import { editorLineHeightPx } from '@/services/editorRuntime'
 import { localFilesClient } from '@/services/localFilesClient'
 import DatabaseSqlEditor, { type DatabaseSqlEditorMetrics } from '@/components/database/DatabaseSqlEditor.vue'
 import { useWorkspaceStore } from '@/stores/workspace'
 import type {
-  DatabaseAiDrawerResponseInput,
-  DatabaseAiDrawerResponseResult,
-  DatabaseAiDrawerLifecycleResult,
-  DatabaseAiDrawerRequestResult,
-  DatabaseAiDrawerRequestRecord,
-  DatabaseAiPaneLifecycleResult,
-  DatabaseAiPaneMessageRecord,
-  DatabaseAiPaneRequestResult,
-  DatabaseAiPaneResponseResult,
-  DatabaseAiPaneStateSnapshot,
-  DatabaseCatalogInfo,
-  DatabaseColumnInfo,
-  DatabaseConnectionDeleteResult,
-  DatabaseConnectionInfo,
-  DatabaseConnectionMoveInput,
-  DatabaseConnectionMutationResult,
-  DatabaseCreateDatabaseResult,
-  DatabaseConnectionSaveInput,
-  DatabaseConnectionSaveResult,
-  DatabaseConnectionTestInput,
-  DatabaseConnectionTestResult,
-  DatabaseEngineCode,
-  DatabaseEngineInfo,
-  DatabaseExportResult,
-  DatabaseGroupCreateInput,
-  DatabaseGroupInfo,
-  DatabaseGroupDeleteResult,
-  DatabaseGroupMutationResult,
-  DatabaseGroupUpdateInput,
-  DatabasePageCommentKey,
-  DatabasePageCommentRecord,
-  DatabaseSqlExecutionRecord,
-  DatabaseSqlExecuteResult,
-  DatabaseTableDdlResult,
-  DatabaseTableInfo,
-  DatabaseTableMutation,
-  DatabaseTableMutationPlanResult,
-  DatabaseTableMutationResult,
-  DatabaseTableQueryResult,
-  DatabaseWorkspaceCatalog
+  DatabaseAiDrawerLifecycleResult, DatabaseAiDrawerRequestRecord, DatabaseAiDrawerRequestResult, DatabaseAiDrawerResponseInput, DatabaseAiDrawerResponseResult,
+  DatabaseAiPaneLifecycleResult, DatabaseAiPaneMessageRecord, DatabaseAiPaneRequestResult, DatabaseAiPaneResponseResult, DatabaseAiPaneStateSnapshot,
+  DatabaseCatalogInfo, DatabaseColumnInfo, DatabaseConnectionDeleteResult, DatabaseConnectionInfo, DatabaseConnectionMoveInput, DatabaseConnectionMutationResult,
+  DatabaseConnectionSaveInput, DatabaseConnectionSaveResult, DatabaseConnectionTestInput, DatabaseConnectionTestResult, DatabaseCreateDatabaseResult,
+  DatabaseEngineCode, DatabaseEngineInfo, DatabaseExportInput, DatabaseExportResult, DatabaseGroupCreateInput, DatabaseGroupDeleteResult, DatabaseGroupInfo,
+  DatabaseGroupMutationResult, DatabaseGroupUpdateInput, DatabasePageCommentKey, DatabasePageCommentRecord, DatabaseSqlExecutionRecord, DatabaseSqlExecuteResult,
+  DatabaseTableDdlResult, DatabaseTableInfo, DatabaseTableMutation, DatabaseTableMutationInput, DatabaseTableMutationPlanResult, DatabaseTableMutationResult,
+  DatabaseTableQueryResult, DatabaseWorkspaceCatalog
 } from '@shared/contracts/database'
 import type { LocalFileWriteResult } from '@shared/contracts/localFiles'
 
@@ -4581,8 +4550,13 @@ function applyDatabaseCatalog(catalog: DatabaseWorkspaceCatalog) {
 }
 
 async function loadDatabaseCatalog() {
+  const listDatabaseCatalog = databaseClient.listDatabaseCatalog()
+  if (!listDatabaseCatalog) {
+    showNotice('Database catalog backend is unavailable')
+    return
+  }
   try {
-    const result = await window.aiops.listDatabaseCatalog()
+    const result = await listDatabaseCatalog()
     if (!result.ok) {
       showNotice(result.errorMessage || 'Database catalog backend is unavailable')
       return
@@ -4970,8 +4944,8 @@ async function sendDbAiPaneMessage(promptOverride = '') {
     activeSql: activeSqlTab.value?.sql ?? '',
     messages: dbAiPaneMessages.value.slice(-12).map((message) => ({ role: message.role, content: message.content }))
   }
-  const createBridge = window.aiops?.createDatabaseAiPaneRequest
-  if (typeof createBridge !== 'function') {
+  const createBridge = databaseClient.createDatabaseAiPaneRequest()
+  if (!createBridge) {
     showNotice('DB AI pane request service unavailable')
     return
   }
@@ -4998,8 +4972,8 @@ async function sendDbAiPaneMessage(promptOverride = '') {
 }
 
 async function requestDbAiPaneResponse(messageId: string, prompt: string, context: DbAiPaneContext, contextSummary: string, requestId: string) {
-  const startBridge = window.aiops?.startDatabaseAiPaneResponse
-  if (typeof startBridge !== 'function') {
+  const startBridge = databaseClient.startDatabaseAiPaneResponse()
+  if (!startBridge) {
     const message = 'DB AI pane start service unavailable'
     showNotice(message)
     return
@@ -5023,8 +4997,8 @@ async function requestDbAiPaneResponse(messageId: string, prompt: string, contex
     return
   }
   applyDbAiPaneAssistantMessage(started.data.assistantMessage)
-  const generateBridge = window.aiops?.generateDatabaseAiPaneResponse
-  if (typeof generateBridge !== 'function') {
+  const generateBridge = databaseClient.generateDatabaseAiPaneResponse()
+  if (!generateBridge) {
     const message = 'DB AI pane response service unavailable'
     showNotice(message)
     return
@@ -5085,8 +5059,8 @@ async function cancelDbAiPaneResponse() {
     .reverse()
     .find((message) => message.role === 'assistant' && (message.status === 'queued' || message.status === 'streaming'))
   if (!activeAssistant) return
-  const cancelBridge = window.aiops?.cancelDatabaseAiPaneResponse
-  if (typeof cancelBridge !== 'function') {
+  const cancelBridge = databaseClient.cancelDatabaseAiPaneResponse()
+  if (!cancelBridge) {
     showNotice('DB AI pane cancel service unavailable')
     return
   }
@@ -5186,8 +5160,8 @@ function currentDbAiPaneStateSnapshot(): DatabaseAiPaneStateSnapshot {
 async function loadDbAiPaneState() {
   dbAiPaneStateHydrating = true
   try {
-    const bridge = window.aiops.getDatabaseAiPaneState
-    if (typeof bridge !== 'function') {
+    const bridge = databaseClient.getDatabaseAiPaneState()
+    if (!bridge) {
       ensureDbAiPaneContextInitialized(true)
       showNotice('DB AI pane state service unavailable')
       return
@@ -5214,8 +5188,8 @@ async function loadDbAiPaneState() {
 
 async function persistDbAiPaneState() {
   if (dbAiPaneStateHydrating) return
-  const bridge = window.aiops.saveDatabaseAiPaneState
-  if (typeof bridge !== 'function') {
+  const bridge = databaseClient.saveDatabaseAiPaneState()
+  if (!bridge) {
     if (!dbAiPaneStateNoticeShown) {
       dbAiPaneStateNoticeShown = true
       showNotice('DB AI pane state service unavailable')
@@ -5364,8 +5338,8 @@ function createRunningSqlResult(tab: Extract<WorkspaceTab, { kind: 'sql' }>, sql
 }
 
 async function executeSqlThroughBackend(tab: Extract<WorkspaceTab, { kind: 'sql' }>, sql: string): Promise<DatabaseSqlExecuteResult> {
-  const executeDatabaseSql = window.aiops?.executeDatabaseSql
-  if (typeof executeDatabaseSql !== 'function') {
+  const executeDatabaseSql = databaseClient.executeDatabaseSql()
+  if (!executeDatabaseSql) {
     return { ok: false, errorCode: 'DB_PRELOAD_UNAVAILABLE', errorMessage: DATABASE_SQL_EXECUTOR_UNAVAILABLE_MESSAGE }
   }
   const connection = findConnection(tab.connectionId)
@@ -5992,8 +5966,8 @@ async function refreshDataMutationPlan(tab: Extract<WorkspaceTab, { kind: 'data'
   const key = JSON.stringify(input)
   if (!force && tab.mutationPlan.key === key && !tab.mutationPlan.loading) return tab.mutationPlan
   tab.mutationPlan = makeDataMutationPlanState({ key, loading: true })
-  const planDatabaseTableMutation = window.aiops?.planDatabaseTableMutation
-  if (typeof planDatabaseTableMutation !== 'function') {
+  const planDatabaseTableMutation = databaseClient.planDatabaseTableMutation()
+  if (!planDatabaseTableMutation) {
     tab.mutationPlan = makeDataMutationPlanState({
       key,
       error: DATABASE_TABLE_MUTATION_PLAN_UNAVAILABLE_MESSAGE
@@ -6206,9 +6180,9 @@ async function mutateDataTabThroughBackend(tab: Extract<WorkspaceTab, { kind: 'd
   })
 }
 
-async function mutateDatabaseTableThroughBackend(input: Parameters<typeof window.aiops.mutateDatabaseTable>[0]): Promise<DatabaseTableMutationResult> {
-  const mutateDatabaseTable = window.aiops?.mutateDatabaseTable
-  if (typeof mutateDatabaseTable !== 'function') {
+async function mutateDatabaseTableThroughBackend(input: DatabaseTableMutationInput): Promise<DatabaseTableMutationResult> {
+  const mutateDatabaseTable = databaseClient.mutateDatabaseTable()
+  if (!mutateDatabaseTable) {
     return { ok: false, errorCode: 'DB_PRELOAD_UNAVAILABLE', errorMessage: DATABASE_TABLE_MUTATION_UNAVAILABLE_MESSAGE }
   }
   try {
@@ -6218,13 +6192,14 @@ async function mutateDatabaseTableThroughBackend(input: Parameters<typeof window
   }
 }
 
-async function exportDatabaseRowsThroughBackend(input: Parameters<typeof window.aiops.exportDatabaseRows>[0]) {
-  if (typeof window.aiops.exportDatabaseRows !== 'function') {
+async function exportDatabaseRowsThroughBackend(input: DatabaseExportInput) {
+  const exportDatabaseRows = databaseClient.exportDatabaseRows()
+  if (!exportDatabaseRows) {
     showNotice('Database export service unavailable')
     return null
   }
   try {
-    const result = await window.aiops.exportDatabaseRows(input)
+    const result = await exportDatabaseRows(input)
     if (!result.ok) {
       showNotice(result.errorMessage || 'Database export failed')
       return null
@@ -6416,14 +6391,15 @@ async function openCommentModal(input: { title: string; scopeLabel: string; key:
   commentModal.loading = true
   commentModal.saving = false
   commentModal.error = ''
-  if (typeof window.aiops.getDatabasePageComment !== 'function') {
+  const getDatabasePageComment = databaseClient.getDatabasePageComment()
+  if (!getDatabasePageComment) {
     commentModal.loading = false
     commentModal.error = 'Database comment service unavailable'
     showNotice(commentModal.error)
     return
   }
   try {
-    const result = await window.aiops.getDatabasePageComment(input.key)
+    const result = await getDatabasePageComment(input.key)
     if (!commentModal.key || databasePageCommentKeyId(commentModal.key) !== databasePageCommentKeyId(input.key)) return
     commentModal.loading = false
     if (!result.ok) {
@@ -6476,7 +6452,8 @@ function openActiveDataComment() {
 async function saveActiveComment() {
   const key = commentModal.key
   if (!key || commentModal.loading || commentModal.saving) return
-  if (typeof window.aiops.saveDatabasePageComment !== 'function') {
+  const saveDatabasePageComment = databaseClient.saveDatabasePageComment()
+  if (!saveDatabasePageComment) {
     commentModal.error = 'Database comment service unavailable'
     showNotice(commentModal.error)
     return
@@ -6484,7 +6461,7 @@ async function saveActiveComment() {
   commentModal.saving = true
   commentModal.error = ''
   try {
-    const result = await window.aiops.saveDatabasePageComment({ key, comment: commentModal.draft })
+    const result = await saveDatabasePageComment({ key, comment: commentModal.draft })
     if (!commentModal.key || databasePageCommentKeyId(commentModal.key) !== databasePageCommentKeyId(key)) return
     commentModal.saving = false
     if (!result.ok) {
@@ -6601,8 +6578,8 @@ async function reloadDataTab(tab: Extract<WorkspaceTab, { kind: 'data' }>, optio
 }
 
 async function queryDataTabThroughBackend(tab: Extract<WorkspaceTab, { kind: 'data' }>, withTotal: boolean): Promise<DatabaseTableQueryResult> {
-  const queryDatabaseTable = window.aiops?.queryDatabaseTable
-  if (typeof queryDatabaseTable !== 'function') {
+  const queryDatabaseTable = databaseClient.queryDatabaseTable()
+  if (!queryDatabaseTable) {
     return { ok: false, errorCode: 'DB_PRELOAD_UNAVAILABLE', errorMessage: DATABASE_TABLE_QUERY_UNAVAILABLE_MESSAGE }
   }
   const connection = findConnection(tab.connectionId)
@@ -7335,8 +7312,8 @@ function fetchTableDdl(ctx: {
   tableId: string
   tableName: string
 }): Promise<TableDdlResult> {
-  const getTableDdl = window.aiops?.getDatabaseTableDdl
-  if (typeof getTableDdl !== 'function') {
+  const getTableDdl = databaseClient.getDatabaseTableDdl()
+  if (!getTableDdl) {
     return Promise.resolve({ ok: false, errorCode: 'DB_PRELOAD_UNAVAILABLE', errorMessage: 'Database DDL API is unavailable.' })
   }
   const connection = findConnection(ctx.connectionId)
@@ -7730,10 +7707,11 @@ function databaseConnectionResultMessage(result: DatabaseConnectionTestResult) {
 }
 
 async function testConnectionDraftViaBackend(): Promise<DatabaseConnectionTestResult> {
-  if (!window.aiops?.testDatabaseConnection) {
+  const testDatabaseConnection = databaseClient.testDatabaseConnection()
+  if (!testDatabaseConnection) {
     return { ok: false, errorCode: 'DB_PRELOAD_UNAVAILABLE', errorMessage: 'Database connection test API is unavailable.' }
   }
-  return window.aiops.testDatabaseConnection(databaseConnectionTestInput())
+  return testDatabaseConnection(databaseConnectionTestInput())
 }
 
 async function saveConnectionDraft() {
@@ -7794,73 +7772,83 @@ function databaseConnectionSaveInput(): DatabaseConnectionSaveInput {
 }
 
 async function saveConnectionDraftViaBackend(input = databaseConnectionSaveInput()): Promise<DatabaseConnectionSaveResult> {
-  if (!window.aiops?.saveDatabaseConnection) {
+  const saveDatabaseConnection = databaseClient.saveDatabaseConnection()
+  if (!saveDatabaseConnection) {
     return { ok: false, errorCode: 'DB_PRELOAD_UNAVAILABLE', errorMessage: 'Database connection save API is unavailable.' }
   }
-  return window.aiops.saveDatabaseConnection(input)
+  return saveDatabaseConnection(input)
 }
 
 async function createDatabaseGroupViaBackend(input: DatabaseGroupCreateInput): Promise<DatabaseGroupMutationResult> {
-  if (!window.aiops?.createDatabaseGroup) {
+  const createDatabaseGroup = databaseClient.createDatabaseGroup()
+  if (!createDatabaseGroup) {
     return { ok: false, errorCode: 'DB_PRELOAD_UNAVAILABLE', errorMessage: 'Database group create API is unavailable.' }
   }
-  return window.aiops.createDatabaseGroup(input)
+  return createDatabaseGroup(input)
 }
 
 async function renameDatabaseGroupViaBackend(input: DatabaseGroupUpdateInput): Promise<DatabaseGroupMutationResult> {
-  if (!window.aiops?.renameDatabaseGroup) {
+  const renameDatabaseGroup = databaseClient.renameDatabaseGroup()
+  if (!renameDatabaseGroup) {
     return { ok: false, errorCode: 'DB_PRELOAD_UNAVAILABLE', errorMessage: 'Database group rename API is unavailable.' }
   }
-  return window.aiops.renameDatabaseGroup(input)
+  return renameDatabaseGroup(input)
 }
 
 async function moveDatabaseGroupViaBackend(input: DatabaseGroupUpdateInput): Promise<DatabaseGroupMutationResult> {
-  if (!window.aiops?.moveDatabaseGroup) {
+  const moveDatabaseGroup = databaseClient.moveDatabaseGroup()
+  if (!moveDatabaseGroup) {
     return { ok: false, errorCode: 'DB_PRELOAD_UNAVAILABLE', errorMessage: 'Database group move API is unavailable.' }
   }
-  return window.aiops.moveDatabaseGroup(input)
+  return moveDatabaseGroup(input)
 }
 
 async function deleteDatabaseGroupViaBackend(id: string): Promise<DatabaseGroupDeleteResult> {
-  if (!window.aiops?.deleteDatabaseGroup) {
+  const deleteDatabaseGroup = databaseClient.deleteDatabaseGroup()
+  if (!deleteDatabaseGroup) {
     return { ok: false, errorCode: 'DB_PRELOAD_UNAVAILABLE', errorMessage: 'Database group delete API is unavailable.' }
   }
-  return window.aiops.deleteDatabaseGroup(id)
+  return deleteDatabaseGroup(id)
 }
 
 async function moveDatabaseConnectionViaBackend(input: DatabaseConnectionMoveInput): Promise<DatabaseConnectionMutationResult> {
-  if (!window.aiops?.moveDatabaseConnection) {
+  const moveDatabaseConnection = databaseClient.moveDatabaseConnection()
+  if (!moveDatabaseConnection) {
     return { ok: false, errorCode: 'DB_PRELOAD_UNAVAILABLE', errorMessage: 'Database connection move API is unavailable.' }
   }
-  return window.aiops.moveDatabaseConnection(input)
+  return moveDatabaseConnection(input)
 }
 
 async function removeDatabaseConnectionViaBackend(connectionId: string): Promise<DatabaseConnectionDeleteResult> {
-  if (!window.aiops?.removeDatabaseConnection) {
+  const removeDatabaseConnection = databaseClient.removeDatabaseConnection()
+  if (!removeDatabaseConnection) {
     return { ok: false, errorCode: 'DB_PRELOAD_UNAVAILABLE', errorMessage: 'Database connection remove API is unavailable.' }
   }
-  return window.aiops.removeDatabaseConnection(connectionId)
+  return removeDatabaseConnection(connectionId)
 }
 
 async function connectDatabaseConnectionViaBackend(connectionId: string): Promise<DatabaseConnectionMutationResult> {
-  if (!window.aiops?.connectDatabaseConnection) {
+  const connectDatabaseConnection = databaseClient.connectDatabaseConnection()
+  if (!connectDatabaseConnection) {
     return { ok: false, errorCode: 'DB_PRELOAD_UNAVAILABLE', errorMessage: 'Database connection API is unavailable.' }
   }
-  return window.aiops.connectDatabaseConnection(connectionId)
+  return connectDatabaseConnection(connectionId)
 }
 
 async function disconnectDatabaseConnectionViaBackend(connectionId: string): Promise<DatabaseConnectionMutationResult> {
-  if (!window.aiops?.disconnectDatabaseConnection) {
+  const disconnectDatabaseConnection = databaseClient.disconnectDatabaseConnection()
+  if (!disconnectDatabaseConnection) {
     return { ok: false, errorCode: 'DB_PRELOAD_UNAVAILABLE', errorMessage: 'Database disconnect API is unavailable.' }
   }
-  return window.aiops.disconnectDatabaseConnection(connectionId)
+  return disconnectDatabaseConnection(connectionId)
 }
 
 async function refreshDatabaseConnectionViaBackend(connectionId: string): Promise<DatabaseConnectionMutationResult> {
-  if (!window.aiops?.refreshDatabaseConnection) {
+  const refreshDatabaseConnection = databaseClient.refreshDatabaseConnection()
+  if (!refreshDatabaseConnection) {
     return { ok: false, errorCode: 'DB_PRELOAD_UNAVAILABLE', errorMessage: 'Database refresh API is unavailable.' }
   }
-  return window.aiops.refreshDatabaseConnection(connectionId)
+  return refreshDatabaseConnection(connectionId)
 }
 
 function openCreateDatabaseModal(connectionId: string) {
@@ -7925,10 +7913,11 @@ async function createDatabase() {
 }
 
 async function createDatabaseViaBackend(connectionId: string, sql: string, requestedName: string): Promise<DatabaseCreateDatabaseResult> {
-  if (!window.aiops?.createDatabaseCatalog) {
+  const createDatabaseCatalog = databaseClient.createDatabaseCatalog()
+  if (!createDatabaseCatalog) {
     return { ok: false, errorCode: 'DB_PRELOAD_UNAVAILABLE', errorMessage: 'Database create API is unavailable.' }
   }
-  return window.aiops.createDatabaseCatalog({ connectionId, sql, requestedName })
+  return createDatabaseCatalog({ connectionId, sql, requestedName })
 }
 
 function parseCreateDatabaseName(sql: string) {
@@ -8012,8 +8001,8 @@ async function openDbAi(action: DbAiAction, sql: string, context = '', backendCo
           ? 'postgresql'
           : activeDialect || 'postgresql'
   const targetDialect: DbAiTargetDialect = action === 'convert' ? normalizedDialect : normalizedDialect
-  const createBridge = window.aiops?.createDatabaseAiDrawerRequest
-  if (typeof createBridge !== 'function') {
+  const createBridge = databaseClient.createDatabaseAiDrawerRequest()
+  if (!createBridge) {
     showNotice('DB AI drawer request service unavailable')
     return
   }
@@ -8058,8 +8047,8 @@ async function requestDbAiDrawerResponse(reqId: string) {
   const request = dbAiRequests.value[reqId]
   if (!request) return
   const expectedDialect = request.targetDialect
-  const startBridge = window.aiops?.startDatabaseAiDrawerResponse
-  if (typeof startBridge !== 'function') {
+  const startBridge = databaseClient.startDatabaseAiDrawerResponse()
+  if (!startBridge) {
     const message = 'DB AI drawer start service unavailable'
     showNotice(message)
     return
@@ -8083,8 +8072,8 @@ async function requestDbAiDrawerResponse(reqId: string) {
     return
   }
   patchDbAiRequest(reqId, { status: started.data.status, text: started.data.text, updatedAt: started.data.updatedAt })
-  const generateBridge = window.aiops?.generateDatabaseAiDrawerResponse
-  if (typeof generateBridge !== 'function') {
+  const generateBridge = databaseClient.generateDatabaseAiDrawerResponse()
+  if (!generateBridge) {
     const message = 'DB AI drawer response service unavailable'
     showNotice(message)
     return
@@ -8200,8 +8189,8 @@ async function diagnoseSqlError(result: SqlResult) {
 
   try {
     const connection = findConnection(tab.connectionId)
-    const diagnoseBridge = window.aiops?.diagnoseDatabaseSqlError
-    if (typeof diagnoseBridge !== 'function') {
+    const diagnoseBridge = databaseClient.diagnoseDatabaseSqlError()
+    if (!diagnoseBridge) {
       sqlDiagnose.running = false
       sqlDiagnose.success = false
       sqlDiagnose.error = 'DB AI diagnosis service unavailable'
@@ -8259,8 +8248,8 @@ async function cancelDbAiRequest() {
   const request = activeDbAiRequest.value
   if (!request) return
   if (request.status === 'done' || request.status === 'error') return
-  const cancelBridge = window.aiops?.cancelDatabaseAiDrawerResponse
-  if (typeof cancelBridge !== 'function') {
+  const cancelBridge = databaseClient.cancelDatabaseAiDrawerResponse()
+  if (!cancelBridge) {
     showNotice('DB AI drawer cancel service unavailable')
     return
   }
