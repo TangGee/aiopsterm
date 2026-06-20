@@ -1662,16 +1662,32 @@ import { readStoredAiPanelMode, storeAiPanelMode, type AiPanelMode } from '@/ser
 import {
   aiChipPartFromContext,
   aiImagePartFromContext,
-  aiMediaTypeFromContext,
-  aiPanelImagePartMediaTypes,
   cloneAiContextOption,
-  editablePlainTextFromElement,
-  extractEditablePlainTextFromNode,
   fallbackAiContentPartsForMessage,
   hasSendableAiContent,
-  mergeAdjacentTextContentParts,
   splitAiContentInputParts
 } from '@/services/aiPanelInputRuntime'
+import {
+  aiPanelChipLabel,
+  aiPanelEditablePlainText,
+  chipPartFromAiPanelChipElement,
+  createAiPanelChipElement,
+  createAiPanelCommandChipElement,
+  createAiPanelContextChipElement,
+  createAiPanelIconElement,
+  createAiPanelImageElement,
+  extractAiPanelContentPartsFromEditable,
+  extractAiPanelEditablePlainTextFromNode,
+  insertAiPanelChipIntoEditableCursor,
+  insertAiPanelImageIntoEditableCursor,
+  insertAiPanelPlainTextIntoEditableCursor,
+  removeAiPanelTokenBeforeRange,
+  removeAiPanelTokenFromEditableCursor,
+  renderAiPanelMainEditableFromState,
+  renderAiPanelPartsIntoEditable,
+  syncAiPanelMainInputPartsFromEditable,
+  type AiPanelEditableRenderOptions
+} from '@/services/aiPanelEditableRuntime'
 import {
   allVisibleAiPanelHostsSelected,
   backAiPanelDocsDir,
@@ -1791,14 +1807,10 @@ import {
 } from '@/services/aiBackendGuards'
 import { useI18n } from '@/i18n'
 import type {
-  AiChatChipContentPart,
   AiChipContentPart,
-  AiCommandChipContentPart,
   AiContentPart,
   AiDocChipContentPart,
   AiImageContentPart,
-  AiSkillChipContentPart,
-  AiSupportedImageType,
   ConversationItem,
   TerminalPanel
 } from '@/stores/workspace'
@@ -1916,7 +1928,6 @@ let voiceRecordingLimitTimer: number | undefined
 let chatScrollFrame: number | undefined
 const historyPageSize = 20
 const historyFavoriteLabel = computed(() => t('ai.historyFavoriteGroup'))
-const imagePartMediaTypes = aiPanelImagePartMediaTypes
 const chatAttachmentFilters = aiPanelChatAttachmentFilters
 const maxHostContexts = 5
 const streaming = computed(() => workspace.chatMessages.some((message) => message.state === 'streaming'))
@@ -3174,25 +3185,8 @@ const iconMarkupByChipType: Record<AiChipContentPart['chipType'], string> = {
   skill: iconMarkupByContextKind.skills
 }
 
-const createIconElement = (kind: AiContextKind | 'command') => {
-  const span = document.createElement('span')
-  span.className = 'mention-icon'
-  span.innerHTML = kind === 'command' ? commandIconMarkup : iconMarkupByContextKind[kind]
-  return span
-}
-
-const mediaTypeFromContext = aiMediaTypeFromContext
-
-const getChipLabel = (part: AiChipContentPart) => {
-  if (part.chipType === 'doc') return part.ref.name || part.ref.absPath
-  if (part.chipType === 'command') return part.ref.label || part.ref.command
-  if (part.chipType === 'skill') return part.ref.skillName
-  return part.ref.title || part.ref.taskId
-}
-
-const chipPartFromContext = aiChipPartFromContext
-
 const imagePartFromContext = aiImagePartFromContext
+const chipPartFromContext = aiChipPartFromContext
 
 const cloneContextOption = cloneAiContextOption
 
@@ -3204,200 +3198,28 @@ const openEditContextPopup = () => {
   openContextPopupForTarget('edit')
 }
 
-const setChipElementAttributes = (chip: HTMLElement, part: AiChipContentPart) => {
-  chip.dataset.chipType = part.chipType
-  chip.title = getChipLabel(part)
-  if (part.chipType === 'doc') {
-    chip.dataset.absPath = part.ref.absPath
-    if (part.ref.relPath) chip.dataset.relPath = part.ref.relPath
-    if (part.ref.name) chip.dataset.name = part.ref.name
-    if (part.ref.type) chip.dataset.docType = part.ref.type
-    return
-  }
-  if (part.chipType === 'chat') {
-    chip.dataset.chatId = part.ref.taskId
-    if (part.ref.title) chip.dataset.title = part.ref.title
-    return
-  }
-  if (part.chipType === 'command') {
-    chip.dataset.command = part.ref.command
-    if (part.ref.label) chip.dataset.label = part.ref.label
-    if (part.ref.path) chip.dataset.path = part.ref.path
-    return
-  }
-  chip.dataset.skillName = part.ref.skillName
-  if (part.ref.description) chip.dataset.description = part.ref.description
-}
+const editableRenderOptions = computed<AiPanelEditableRenderOptions>(() => ({
+  iconMarkupByContextKind,
+  commandIconMarkup
+}))
+
+const getChipLabel = aiPanelChipLabel
+
+const createIconElement = (kind: AiContextKind | 'command') => createAiPanelIconElement(kind, editableRenderOptions.value)
 
 const createChipElement = (
   part: AiChipContentPart,
   options: { removableContextId?: string; removableCommand?: boolean; removablePart?: boolean } = {}
-) => {
-  const chip = document.createElement('span')
-  chip.className = `mention-chip mention-chip-${part.chipType}`
-  chip.contentEditable = 'false'
-  setChipElementAttributes(chip, part)
+) => createAiPanelChipElement(part, editableRenderOptions.value, options)
 
-  if (options.removableContextId) chip.dataset.contextId = options.removableContextId
-  if (options.removableCommand) chip.dataset.commandChip = 'true'
+const createContextChipElement = (context: AiContextOption) => createAiPanelContextChipElement(context, editableRenderOptions.value)
 
-  if (part.chipType !== 'command') {
-    const icon = document.createElement('span')
-    icon.className = 'mention-icon'
-    icon.innerHTML = iconMarkupByChipType[part.chipType]
-    chip.appendChild(icon)
-  }
+const createCommandChipElement = () => createAiPanelCommandChipElement(selectedCommandRef.value, editableRenderOptions.value)
 
-  const label = document.createElement('span')
-  label.className = 'mention-label'
-  label.textContent = getChipLabel(part)
-  chip.appendChild(label)
+const createImageElement = createAiPanelImageElement
 
-  if (options.removableContextId || options.removableCommand || options.removablePart) {
-    const remove = document.createElement('button')
-    remove.type = 'button'
-    if (options.removableContextId) {
-      remove.dataset.removeContext = 'true'
-      remove.dataset.contextId = options.removableContextId
-      remove.title = '移除上下文'
-    } else if (options.removableCommand) {
-      remove.dataset.removeCommand = 'true'
-      remove.title = '移除命令'
-    } else {
-      remove.dataset.removeChip = 'true'
-      remove.title = '移除上下文'
-    }
-    remove.textContent = 'x'
-    chip.appendChild(remove)
-  }
-
-  return chip
-}
-
-const createContextChipElement = (context: AiContextOption) => {
-  const chipPart = chipPartFromContext(context)
-  if (chipPart) return createChipElement(chipPart, { removableContextId: context.id })
-
-  const chip = document.createElement('span')
-  chip.className = `mention-chip mention-chip-${context.kind}`
-  chip.contentEditable = 'false'
-  chip.dataset.contextId = context.id
-  chip.dataset.contextKind = context.kind
-  chip.title = context.detail || context.label
-  chip.appendChild(createIconElement(context.kind))
-
-  if (context.kind === 'images' && context.data) {
-    const image = document.createElement('img')
-    image.className = 'mention-image-thumb'
-    image.src = `data:${context.mediaType || 'image/png'};base64,${context.data}`
-    image.alt = ''
-    chip.appendChild(image)
-  }
-
-  const label = document.createElement('span')
-  label.className = 'mention-label'
-  label.textContent = context.label
-  chip.appendChild(label)
-
-  const remove = document.createElement('button')
-  remove.type = 'button'
-  remove.dataset.removeContext = 'true'
-  remove.dataset.contextId = context.id
-  remove.title = '移除上下文'
-  remove.textContent = 'x'
-  chip.appendChild(remove)
-
-  return chip
-}
-
-const createCommandChipElement = () => {
-  if (!selectedCommandRef.value) return null
-  return createChipElement(
-    {
-      type: 'chip',
-      chipType: 'command',
-      ref: {
-        command: selectedCommandRef.value.command,
-        label: selectedCommandRef.value.label,
-        path: selectedCommandRef.value.path
-      }
-    },
-    { removableCommand: true }
-  )
-}
-
-const createImageElement = (part: AiImageContentPart) => {
-  const wrapper = document.createElement('span')
-  wrapper.className = 'image-preview-wrapper'
-  wrapper.contentEditable = 'false'
-  wrapper.dataset.imageType = 'true'
-  wrapper.dataset.mediaType = part.mediaType
-  wrapper.dataset.imageData = part.data
-  if (part.name) wrapper.dataset.name = part.name
-
-  const image = document.createElement('img')
-  image.className = 'image-preview-thumbnail'
-  image.src = `data:${part.mediaType};base64,${part.data}`
-  image.alt = part.name || 'uploaded image'
-  wrapper.appendChild(image)
-
-  const remove = document.createElement('button')
-  remove.type = 'button'
-  remove.className = 'image-remove'
-  remove.dataset.removeImage = 'true'
-  remove.title = '移除图片'
-  remove.textContent = 'x'
-  wrapper.appendChild(remove)
-
-  return wrapper
-}
-
-const insertImageIntoEditableCursor = (editable: HTMLElement | null, part: AiImageContentPart, onInserted: () => void) => {
-  if (!editable) return false
-  editable.focus()
-
-  const appendImageAtEnd = () => {
-    const imageElement = createImageElement(part)
-    editable.appendChild(imageElement)
-    editable.appendChild(document.createTextNode(' '))
-    onInserted()
-    return true
-  }
-
-  const selection = window.getSelection()
-  if (!selection) {
-    appendImageAtEnd()
-    return true
-  }
-  let range = selection.rangeCount > 0 ? selection.getRangeAt(0) : null
-  if (!range || !editable.contains(range.startContainer)) {
-    const endRange = document.createRange()
-    endRange.selectNodeContents(editable)
-    endRange.collapse(false)
-    selection.removeAllRanges()
-    selection.addRange(endRange)
-    range = selection.rangeCount > 0 ? selection.getRangeAt(0) : null
-  }
-  if (!range) {
-    appendImageAtEnd()
-    return true
-  }
-
-  const imageElement = createImageElement(part)
-  range.deleteContents()
-  range.insertNode(imageElement)
-  const spacer = document.createTextNode(' ')
-  imageElement.after(spacer)
-
-  const nextRange = document.createRange()
-  nextRange.setStart(spacer, 1)
-  nextRange.collapse(true)
-  selection.removeAllRanges()
-  selection.addRange(nextRange)
-
-  onInserted()
-  return true
-}
+const insertImageIntoEditableCursor = (editable: HTMLElement | null, part: AiImageContentPart, onInserted: () => void) =>
+  insertAiPanelImageIntoEditableCursor(editable, part, onInserted)
 
 const insertImageAtEditableCursor = (part: AiImageContentPart) => {
   return insertImageIntoEditableCursor(editableRef.value, part, () => {
@@ -3465,108 +3287,19 @@ const insertPastedImageIntoEdit = async () => {
   if (part) insertImageAtEditCursor(part)
 }
 
-const insertPlainTextIntoEditableCursor = (editable: HTMLElement | null, text: string, onInserted: () => void) => {
-  if (!editable || !text) return
-  const selection = window.getSelection()
-  if (!selection) return
-  let range = selection.rangeCount > 0 ? selection.getRangeAt(0) : null
-  if (!range || !editable.contains(range.startContainer)) {
-    editable.appendChild(document.createTextNode(text))
-    onInserted()
-    return
-  }
-  range.deleteContents()
-  const textNode = document.createTextNode(text)
-  range.insertNode(textNode)
-  range = document.createRange()
-  range.setStart(textNode, text.length)
-  range.collapse(true)
-  selection.removeAllRanges()
-  selection.addRange(range)
-  onInserted()
-}
+const insertPlainTextIntoEditableCursor = (editable: HTMLElement | null, text: string, onInserted: () => void) =>
+  insertAiPanelPlainTextIntoEditableCursor(editable, text, onInserted)
 
 const insertPlainTextAtEditCursor = (text: string) => {
   insertPlainTextIntoEditableCursor(editEditableRef.value, text, handleEditEditableInput)
 }
 
-const removeTokenBeforeRange = (range: Range, token: string) => {
-  if (range.startContainer.nodeType !== Node.TEXT_NODE) return
-  const textNode = range.startContainer as Text
-  const offset = range.startOffset
-  if (offset > 0 && textNode.data[offset - 1] === token) {
-    textNode.data = textNode.data.slice(0, offset - 1) + textNode.data.slice(offset)
-    range.setStart(textNode, offset - 1)
-    range.collapse(true)
-  }
-}
+const removeTokenBeforeRange = removeAiPanelTokenBeforeRange
 
-const removeTokenFromEditableCursor = (
-  editable: HTMLElement | null,
-  rangeRef: { value: Range | null },
-  token: string,
-  onRemoved: () => void
-) => {
-  if (!editable) return
-  const selection = window.getSelection()
-  if (!selection) return
-  if (rangeRef.value) {
-    selection.removeAllRanges()
-    selection.addRange(rangeRef.value.cloneRange())
-  }
-  const range = selection.rangeCount > 0 ? selection.getRangeAt(0) : null
-  if (!range || !editable.contains(range.startContainer)) return
-  removeTokenBeforeRange(range, token)
-  selection.removeAllRanges()
-  selection.addRange(range)
-  onRemoved()
-}
+const removeTokenFromEditableCursor = removeAiPanelTokenFromEditableCursor
 
-const insertChipIntoEditableCursor = (editable: HTMLElement | null, part: AiChipContentPart, onInserted: () => void, triggerToken = '/') => {
-  if (!editable) return false
-  editable.focus()
-
-  const insertAtEnd = () => {
-    if (editable.lastChild) editable.appendChild(document.createTextNode(' '))
-    const chip = createChipElement(part, { removablePart: true })
-    editable.appendChild(chip)
-    editable.appendChild(document.createTextNode(' '))
-    onInserted()
-    return true
-  }
-
-  const selection = window.getSelection()
-  if (!selection) {
-    return insertAtEnd()
-  }
-  let range = selection.rangeCount > 0 ? selection.getRangeAt(0) : null
-  if (!range || !editable.contains(range.startContainer)) {
-    const endRange = document.createRange()
-    endRange.selectNodeContents(editable)
-    endRange.collapse(false)
-    selection.removeAllRanges()
-    selection.addRange(endRange)
-    range = selection.rangeCount > 0 ? selection.getRangeAt(0) : null
-  }
-  if (!range) {
-    return insertAtEnd()
-  }
-
-  removeTokenBeforeRange(range, triggerToken)
-  const chip = createChipElement(part, { removablePart: true })
-  range.deleteContents()
-  range.insertNode(chip)
-  const spacer = document.createTextNode(' ')
-  chip.after(spacer)
-
-  const nextRange = document.createRange()
-  nextRange.setStart(spacer, 1)
-  nextRange.collapse(true)
-  selection.removeAllRanges()
-  selection.addRange(nextRange)
-  onInserted()
-  return true
-}
+const insertChipIntoEditableCursor = (editable: HTMLElement | null, part: AiChipContentPart, onInserted: () => void, triggerToken = '/') =>
+  insertAiPanelChipIntoEditableCursor(editable, part, editableRenderOptions.value, onInserted, triggerToken)
 
 const saveEditSelection = () => {
   const selection = window.getSelection()
@@ -3699,48 +3432,24 @@ function openContextPopupForTarget(target: 'main' | 'edit', level: 'main' | AiCo
   void nextTick(() => contextSearchInputRef.value?.focus())
 }
 
-const renderPartsIntoEditable = (editable: HTMLElement, parts: AiContentPart[]) => {
-  editable.replaceChildren()
-  parts.forEach((part, index) => {
-    if (part.type === 'text') {
-      editable.appendChild(document.createTextNode(part.text))
-    } else if (part.type === 'image') {
-      if (index > 0) editable.appendChild(document.createTextNode(' '))
-      editable.appendChild(createImageElement(part))
-      editable.appendChild(document.createTextNode(' '))
-    } else {
-      if (index > 0) editable.appendChild(document.createTextNode(' '))
-      editable.appendChild(createChipElement(part, { removablePart: true }))
-      editable.appendChild(document.createTextNode(' '))
-    }
-  })
-}
+const renderPartsIntoEditable = (editable: HTMLElement, parts: AiContentPart[]) =>
+  renderAiPanelPartsIntoEditable(editable, parts, editableRenderOptions.value)
 
 const renderEditableFromState = () => {
   const editable = editableRef.value
   if (!editable) return
   syncingFromEditable.value = true
   const active = document.activeElement === editable
-  editable.replaceChildren()
-  if (draft.value) {
-    editable.appendChild(document.createTextNode(draft.value))
-  }
-  imageInputParts.value.forEach((part) => {
-    editable.appendChild(document.createTextNode(' '))
-    editable.appendChild(createImageElement(part))
-    editable.appendChild(document.createTextNode(' '))
-  })
-  fileInputParts.value.forEach((part) => {
-    editable.appendChild(document.createTextNode(' '))
-    editable.appendChild(createChipElement(part, { removablePart: true }))
-    editable.appendChild(document.createTextNode(' '))
-  })
-  if (selectedCommandRef.value) {
-    editable.appendChild(document.createTextNode(' '))
-    const commandChip = createCommandChipElement()
-    if (commandChip) editable.appendChild(commandChip)
-    editable.appendChild(document.createTextNode(' '))
-  }
+  renderAiPanelMainEditableFromState(
+    editable,
+    {
+      draft: draft.value,
+      images: imageInputParts.value,
+      files: fileInputParts.value,
+      command: selectedCommandRef.value
+    },
+    editableRenderOptions.value
+  )
   if (active && !contextPopupOpen.value && !commandPopupOpen.value && !modelMenuOpen.value) {
     moveEditableCaretToEnd()
   }
@@ -3756,119 +3465,28 @@ const setDraft = (value: string) => {
   })
 }
 
-const extractEditableTextFromNode = extractEditablePlainTextFromNode
+const extractEditableTextFromNode = extractAiPanelEditablePlainTextFromNode
 
 const editablePlainText = () => {
-  return editablePlainTextFromElement(editableRef.value)
+  return aiPanelEditablePlainText(editableRef.value)
 }
 
-const contentPartFromContextChip = (chip: HTMLElement): AiContentPart | null => {
-  const contextId = chip.dataset.contextId
-  const context = workspace.selectedContexts.find((item) => item.id === contextId)
-  if (!context) return null
-  return imagePartFromContext(context) || chipPartFromContext(context)
-}
+const chipPartFromChipElement = chipPartFromAiPanelChipElement
 
-const chipPartFromChipElement = (chip: HTMLElement): AiChipContentPart | null => {
-  if (chip.dataset.chipType === 'doc') {
-    const part: AiDocChipContentPart = {
-      type: 'chip',
-      chipType: 'doc',
-      ref: {
-        absPath: chip.dataset.absPath || '',
-        relPath: chip.dataset.relPath || undefined,
-        name: chip.dataset.name || undefined,
-        type: (chip.dataset.docType as 'file' | 'dir' | undefined) || undefined
-      }
-    }
-    return part
-  }
-  if (chip.dataset.chipType === 'chat') {
-    const part: AiChatChipContentPart = {
-      type: 'chip',
-      chipType: 'chat',
-      ref: {
-        taskId: chip.dataset.chatId || '',
-        title: chip.dataset.title || undefined
-      }
-    }
-    return part
-  }
-  if (chip.dataset.chipType === 'command') {
-    const part: AiCommandChipContentPart = {
-      type: 'chip',
-      chipType: 'command',
-      ref: {
-        command: chip.dataset.command || '',
-        label: chip.dataset.label || undefined,
-        path: chip.dataset.path || undefined
-      }
-    }
-    return part
-  }
-  if (chip.dataset.chipType === 'skill') {
-    const part: AiSkillChipContentPart = {
-      type: 'chip',
-      chipType: 'skill',
-      ref: {
-        skillName: chip.dataset.skillName || '',
-        description: chip.dataset.description || undefined
-      }
-    }
-    return part
-  }
-  return null
-}
-
-const extractContentPartsFromNode = (node: Node): AiContentPart[] => {
-  if (node.nodeType === Node.TEXT_NODE) {
-    const text = node.textContent || ''
-    return text ? [{ type: 'text', text }] : []
-  }
-  if (node.nodeType !== Node.ELEMENT_NODE) return []
-  const element = node as HTMLElement
-  if (element.classList.contains('mention-chip')) {
-    if (element.dataset.contextId) {
-      const part = contentPartFromContextChip(element)
-      return part ? [part] : []
-    }
-    if (element.dataset.chipType) {
-      const part = chipPartFromChipElement(element)
-      return part ? [part] : []
-    }
-    return []
-  }
-  if (element.dataset.imageType) {
-    const mediaType = element.dataset.mediaType
-    const data = element.dataset.imageData
-    if (!mediaType || !data || !imagePartMediaTypes.includes(mediaType as AiSupportedImageType)) return []
-    return [{ type: 'image', mediaType: mediaType as AiSupportedImageType, data, name: element.dataset.name }]
-  }
-  if (element.tagName === 'BR') return [{ type: 'text', text: '\n' }]
-  return Array.from(element.childNodes).flatMap(extractContentPartsFromNode)
-}
-
-const mergeAdjacentTextParts = mergeAdjacentTextContentParts
+const contextById = (id: string) => workspace.selectedContexts.find((item) => item.id === id) || null
 
 const extractEditableContentParts = () => {
-  const editable = editableRef.value
-  if (!editable) return []
-  return mergeAdjacentTextParts(Array.from(editable.childNodes).flatMap(extractContentPartsFromNode)).filter(
-    (part) => part.type !== 'text' || part.text.trim()
-  )
+  return extractAiPanelContentPartsFromEditable(editableRef.value, { contextById })
 }
 
 const extractContentPartsFromEditable = (editable: HTMLElement | null) => {
-  if (!editable) return []
-  return mergeAdjacentTextParts(Array.from(editable.childNodes).flatMap(extractContentPartsFromNode)).filter(
-    (part) => part.type !== 'text' || part.text.trim()
-  )
+  return extractAiPanelContentPartsFromEditable(editable, { contextById })
 }
 
 const fallbackPartsForMessage = fallbackAiContentPartsForMessage
 
 const editableTextFromElement = (editable: HTMLElement | null) => {
-  return editablePlainTextFromElement(editable)
+  return aiPanelEditablePlainText(editable)
 }
 
 const renderEditEditableFromParts = (parts: AiContentPart[]) => {
@@ -4015,28 +3633,12 @@ const handleEditEditableKeydown = (event: KeyboardEvent) => {
 }
 
 const syncStorePartsFromEditable = () => {
-  const editable = editableRef.value
-  if (!editable) return
-  const commandPresent = Boolean(editable.querySelector('.mention-chip[data-command-chip]'))
-  const domFileParts = Array.from(editable.querySelectorAll<HTMLElement>('.mention-chip[data-chip-type="doc"]:not([data-context-id])'))
-    .map(chipPartFromChipElement)
-    .filter((part): part is AiDocChipContentPart => Boolean(part && part.chipType === 'doc'))
-  const domImages = Array.from(editable.querySelectorAll<HTMLElement>('.image-preview-wrapper[data-image-type]'))
-    .map((element): AiImageContentPart | null => {
-      const mediaType = element.dataset.mediaType
-      const data = element.dataset.imageData
-      if (!mediaType || !data || !imagePartMediaTypes.includes(mediaType as AiSupportedImageType)) return null
-      const part: AiImageContentPart = { type: 'image', mediaType: mediaType as AiSupportedImageType, data }
-      if (element.dataset.name) part.name = element.dataset.name
-      return part
-    })
-    .filter((part): part is AiImageContentPart => part !== null)
-
-  if (!commandPresent && workspace.selectedCommandId) {
+  const parts = syncAiPanelMainInputPartsFromEditable(editableRef.value)
+  if (!parts.commandPresent && workspace.selectedCommandId) {
     workspace.selectCommandPreset(null)
   }
-  fileInputParts.value = domFileParts
-  imageInputParts.value = domImages
+  fileInputParts.value = parts.files
+  imageInputParts.value = parts.images
 }
 
 const saveEditableSelection = () => {
