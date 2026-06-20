@@ -1,22 +1,47 @@
 import { describe, expect, it } from 'vitest'
 import {
+  appendGeneratedTerminalCommandToPanel,
+  appendTerminalInputToPanelInCollection,
+  appendTerminalOutputToPanelInCollection,
+  applyLocalTerminalSessionToPanel,
+  applySshTerminalSessionToPanel,
+  applyTerminalExitToPanel,
+  applyTerminalInputExecutionToPanels,
+  applyTerminalLifecycleToPanel,
   appendTerminalSegment,
   attachTerminalPanelToSplit,
+  canForkSshTerminalPanel,
+  canWriteTerminalPanels,
   clearTerminalPanelSplitState,
   closeOtherTerminalPanelsInCollection,
   closeTerminalPanelInCollection,
+  collectTerminalInputExecutionRecords,
   createEmptyTerminalPanel,
   createForkSshTerminalPanel,
+  createForkSshTerminalPanelInCollection,
   createTerminalPanelInCollection,
   createTerminalSegments,
   defaultTerminalPanelTitle,
   detachTerminalPanelFromSplit,
   discardPendingTerminalPanelInCollection,
+  ensureTerminalPanelOutputSegments,
+  findTerminalPanelByIdOrSession,
+  findTerminalPanelBySessionOrId,
   hasTerminalPanelSplitState,
   isWelcomeTerminalPanelPlaceholder,
+  liveTerminalPanelIds,
+  renameTerminalPanelInCollection,
+  registerTerminalSshSession,
+  replaceTerminalOutputInPanelCollection,
+  resolveActiveWritableTerminalPanel,
+  resolveTerminalPanelSessionWrite,
+  resolveTerminalPanelSessionWrites,
   resetTerminalPanelCollectionToDefault,
   resetTerminalPanelToDefault,
   setTerminalOutput,
+  setTerminalPanelAutoTitleInCollection,
+  terminalLifecycleMatchesPanel,
+  terminalPanelIds,
   type TerminalPanel
 } from '@/services/terminalPanelRuntime'
 
@@ -243,5 +268,269 @@ describe('terminalPanelRuntime', () => {
 
     expect(resetTerminalPanelCollectionToDefault(panels)).toBe('panel-main')
     expect(panels).toEqual([createEmptyTerminalPanel('panel-main', defaultTerminalPanelTitle)])
+  })
+
+  it('updates terminal panel collection titles, fork state, and active writable resolution', () => {
+    const source = sshSourcePanel()
+    const knowledge: TerminalPanel = {
+      id: 'kb:readme',
+      title: 'README.md',
+      cwd: '@knowledgebase',
+      output: '',
+      outputSegments: [],
+      status: 'ready',
+      kind: 'knowledge',
+      knowledge: { relPath: 'README.md', isImage: false }
+    }
+    const panels = [knowledge, source, createEmptyTerminalPanel('plain', 'Plain')]
+
+    expect(resolveActiveWritableTerminalPanel(panels, knowledge)).toBe(source)
+    expect(renameTerminalPanelInCollection(panels, source.id, '  Prod API  ', 'user')).toBe(source)
+    expect(source).toEqual(expect.objectContaining({ title: 'Prod API', titleSource: 'user' }))
+    expect(setTerminalPanelAutoTitleInCollection(panels, source.id, 'Auto title')).toEqual({ found: true, applied: false, userOwned: true })
+
+    source.titleSource = 'system'
+    expect(setTerminalPanelAutoTitleInCollection(panels, source.id, 'Auto title')).toEqual({ found: true, applied: true, userOwned: false })
+    expect(source.title).toBe('Auto title')
+    expect(canForkSshTerminalPanel(source)).toBe(true)
+
+    const fork = createForkSshTerminalPanelInCollection(panels, source.id, 'forked-panel')
+    expect(fork).toEqual(expect.objectContaining({ id: 'forked-panel', title: 'Auto title fork' }))
+    expect(panels.at(-1)).toBe(fork)
+    expect(createForkSshTerminalPanelInCollection(panels, 'plain', 'forked-plain')).toBeNull()
+    expect(terminalPanelIds(panels)).toEqual(['panel-source', 'plain', 'forked-panel'])
+  })
+
+  it('applies collection-level terminal IO, input records, and writable session resolution', () => {
+    const local = createEmptyTerminalPanel('panel-local', 'Local')
+    local.sessionId = 'terminal-local'
+    const ssh = sshSourcePanel()
+    const knowledge: TerminalPanel = {
+      id: 'kb:notes',
+      title: 'Notes',
+      cwd: '@knowledgebase',
+      output: '',
+      outputSegments: [],
+      status: 'ready',
+      kind: 'knowledge',
+      knowledge: { relPath: 'notes.md', isImage: false }
+    }
+    const panels = [local, ssh, knowledge]
+
+    expect(findTerminalPanelByIdOrSession(panels, 'terminal-local')).toBe(local)
+    expect(appendTerminalOutputToPanelInCollection(panels, 'terminal-local', 'ready\n')).toBe(local)
+    expect(local).toEqual(expect.objectContaining({ output: 'ready\n', status: 'running' }))
+    expect(appendTerminalInputToPanelInCollection(panels, 'panel-local', 'pwd\n')).toBe(local)
+    expect(local.outputSegments.at(-1)).toEqual({ text: 'pwd\n', scope: 'input' })
+
+    local.outputSegments = []
+    expect(ensureTerminalPanelOutputSegments(local)).toEqual([{ text: 'ready\npwd\n', scope: 'output' }])
+    expect(replaceTerminalOutputInPanelCollection(panels, 'terminal-local', 'fresh\n', 'input')).toBe(local)
+    expect(local.outputSegments).toEqual([{ text: 'fresh\n', scope: 'input' }])
+
+    const records = applyTerminalInputExecutionToPanels(panels, {
+      panelIds: ['panel-local', 'terminal-ssh-1', 'missing-panel'],
+      inputText: 'ls\n',
+      shellText: 'ls -la\n',
+      source: 'direct',
+      writeToShell: false
+    })
+    expect(records.map(({ panel, text }) => [panel.id, text])).toEqual([
+      ['panel-local', 'ls -la\n'],
+      ['panel-source', 'ls -la\n']
+    ])
+    expect(local.output).toContain('ls\n')
+    expect(ssh.output).toContain('ls\n')
+
+    expect(
+      collectTerminalInputExecutionRecords(panels, {
+        panelIds: ['panel-local', 'terminal-ssh-1'],
+        inputText: 'echo hidden\n',
+        source: 'snippet',
+        writeToShell: true
+      })
+    ).toEqual([])
+    expect(resolveTerminalPanelSessionWrites(panels, ['panel-local', 'terminal-ssh-1'])?.map((write) => write.sessionId)).toEqual([
+      'terminal-local',
+      'terminal-ssh-1'
+    ])
+    expect(resolveTerminalPanelSessionWrite(panels, 'terminal-local')).toEqual({ panel: local, sessionId: 'terminal-local' })
+    expect(resolveTerminalPanelSessionWrites(panels, ['panel-local', 'missing'])).toBeNull()
+    expect(canWriteTerminalPanels(panels, { panelIds: ['panel-local', 'terminal-ssh-1'], writeToShell: true })).toBe(true)
+    expect(canWriteTerminalPanels(panels, { panelIds: ['missing'], writeToShell: true })).toBe(false)
+    expect(liveTerminalPanelIds(panels)).toEqual(['panel-local', 'panel-source'])
+
+    const generated = appendGeneratedTerminalCommandToPanel(panels, 'terminal-local', '  whoami  ')
+    expect(generated).toEqual({ panel: local, text: 'whoami' })
+    expect(local.outputSegments.at(-1)).toEqual({ text: 'whoami', scope: 'input' })
+    expect(appendGeneratedTerminalCommandToPanel(panels, knowledge.id, 'cat README.md')).toBeNull()
+  })
+
+  it('applies local and SSH terminal sessions to panel state', () => {
+    const local = createEmptyTerminalPanel('panel-local', 'Welcome')
+    expect(
+      applyLocalTerminalSessionToPanel(local, {
+        id: 'terminal-local-1',
+        shell: '/bin/zsh',
+        cwd: '/work',
+        kind: 'local'
+      })
+    ).toBe(local)
+    expect(local).toEqual(
+      expect.objectContaining({
+        sessionId: 'terminal-local-1',
+        title: 'zsh',
+        cwd: '/work',
+        kind: 'terminal',
+        status: 'running',
+        sshSession: undefined
+      })
+    )
+
+    const ssh = createEmptyTerminalPanel('panel-ssh', 'SSH')
+    registerTerminalSshSession(ssh, {
+      id: 'asset-1',
+      name: 'prod-host',
+      host: '10.0.0.5',
+      port: 2222,
+      username: 'ops',
+      group_name: 'prod',
+      asset_type: 'server',
+      auth_type: 'key',
+      needProxy: true,
+      proxyName: 'corp-proxy',
+      jumpHostId: 'jump-1'
+    })
+    const applied = applySshTerminalSessionToPanel(
+      ssh,
+      {
+        id: 'terminal-ssh-1',
+        shell: 'ssh',
+        cwd: '/home/ops',
+        kind: 'ssh',
+        connection: {
+          connectionId: 'ssh-connection-1',
+          forkFromConnectionId: 'ssh-parent',
+          host: '10.0.0.5',
+          port: 2222,
+          username: 'ops',
+          assetId: 'asset-1',
+          assetName: 'prod-host',
+          assetType: 'server',
+          organizationId: 'prod',
+          authType: 'key',
+          needProxy: true,
+          proxyName: 'corp-proxy',
+          createdAt: 1781884800000
+        }
+      },
+      { jumpHostId: 'jump-1' }
+    )
+    expect(applied).toEqual(
+      expect.objectContaining({
+        connectionId: 'ssh-connection-1',
+        forkFromConnectionId: 'ssh-parent',
+        host: '10.0.0.5',
+        assetName: 'prod-host',
+        jumpHostId: 'jump-1',
+        proxyName: 'corp-proxy'
+      })
+    )
+    expect(ssh).toEqual(expect.objectContaining({ sessionId: 'terminal-ssh-1', cwd: '/home/ops', title: 'prod-host', status: 'connecting' }))
+  })
+
+  it('applies terminal lifecycle events with kind and SSH endpoint safeguards', () => {
+    const panel = createEmptyTerminalPanel('panel-life', 'Life')
+    applyLocalTerminalSessionToPanel(panel, {
+      id: 'terminal-life-local',
+      shell: '/bin/bash',
+      cwd: '/home/unit',
+      kind: 'local'
+    })
+    expect(terminalLifecycleMatchesPanel(panel, { id: 'terminal-life-local', kind: 'local', stage: 'shell-ready', at: 1 })).toBe(true)
+    expect(
+      applyTerminalLifecycleToPanel(panel, {
+        id: 'terminal-life-local',
+        kind: 'local',
+        stage: 'shell-ready',
+        cwd: '/tmp',
+        at: 1781884800000
+      })
+    ).toBe(panel)
+    expect(panel).toEqual(expect.objectContaining({ status: 'running', cwd: '/tmp', sessionId: 'terminal-life-local' }))
+
+    expect(
+      applyTerminalLifecycleToPanel(panel, {
+        id: 'terminal-life-local',
+        kind: 'ssh',
+        stage: 'shell-ready',
+        connectionId: 'ssh-1',
+        host: '10.0.0.5',
+        port: 22,
+        username: 'root',
+        at: 1781884800010
+      })
+    ).toBeNull()
+
+    expect(
+      applyTerminalLifecycleToPanel(panel, {
+        id: 'terminal-life-local',
+        kind: 'local',
+        stage: 'closed',
+        code: 0,
+        reason: 'manual',
+        at: 1781884800020
+      })
+    ).toBe(panel)
+    expect(panel).toEqual(expect.objectContaining({ status: 'closed', sessionId: undefined }))
+    expect(panel.terminalExit).toEqual(expect.objectContaining({ id: 'terminal-life-local', code: 0, reason: 'manual' }))
+
+    const ssh = sshSourcePanel()
+    ssh.sessionId = 'terminal-life-ssh'
+    ssh.terminalLifecycle = undefined
+    expect(
+      applyTerminalLifecycleToPanel(ssh, {
+        id: 'terminal-life-ssh',
+        kind: 'ssh',
+        stage: 'error',
+        connectionId: 'ssh-connection-1',
+        host: '10.0.0.5',
+        port: 22,
+        username: 'root',
+        reason: 'network',
+        errorCode: 'ECONNRESET',
+        errorMessage: 'read ECONNRESET',
+        at: 1781884800030
+      })
+    ).toBe(ssh)
+    expect(ssh.status).toBe('error')
+    expect(ssh.sessionId).toBeUndefined()
+    expect(ssh.sshSession).toEqual(expect.objectContaining({ connectionId: 'ssh-connection-1', assetId: 'asset-1' }))
+  })
+
+  it('applies terminal exit events and finds panels by session, panel, or lifecycle id', () => {
+    const panel = createEmptyTerminalPanel('panel-exit', 'Exit')
+    applyLocalTerminalSessionToPanel(panel, {
+      id: 'terminal-exit-1',
+      shell: '/bin/bash',
+      cwd: '/work',
+      kind: 'local'
+    })
+    const panels = [panel]
+    expect(findTerminalPanelBySessionOrId(panels, 'terminal-exit-1')).toBe(panel)
+    expect(findTerminalPanelBySessionOrId(panels, 'panel-exit')).toBe(panel)
+
+    expect(applyTerminalExitToPanel(panel, { id: 'terminal-exit-1', kind: 'local', code: 1, reason: 'error', errorMessage: 'boom' })).toBe(panel)
+    expect(panel).toEqual(expect.objectContaining({ status: 'error', sessionId: undefined }))
+    expect(panel.output).toContain('[process exited: 1]')
+    expect(findTerminalPanelBySessionOrId(panels, 'terminal-exit-1')).toBeNull()
+    expect(findTerminalPanelBySessionOrId(panels, 'panel-exit')).toBe(panel)
+    panel.terminalLifecycle = { id: 'terminal-exit-1', kind: 'local', stage: 'closed', at: 1781884800000 }
+    expect(findTerminalPanelBySessionOrId(panels, 'terminal-exit-1')).toBe(panel)
+
+    const sshPanel = sshSourcePanel()
+    sshPanel.sessionId = 'terminal-ssh-exit'
+    expect(applyTerminalExitToPanel(sshPanel, { id: 'terminal-ssh-exit', kind: 'local', code: 0, reason: 'manual' })).toBeNull()
+    expect(sshPanel.sessionId).toBe('terminal-ssh-exit')
   })
 })

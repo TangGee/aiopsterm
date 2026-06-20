@@ -1,4 +1,9 @@
-import type { TerminalExitEvent, TerminalLifecycleEvent } from '@shared/contracts/terminalSessions'
+import type {
+  TerminalExitEvent,
+  TerminalLifecycleEvent,
+  TerminalSessionInfo,
+  TerminalSshConnectionInfo
+} from '@shared/contracts/terminalSessions'
 
 export type PanelDirection = 'right' | 'below'
 export type TerminalOutputScope = 'output' | 'input'
@@ -52,9 +57,47 @@ export type TerminalPanel = {
   terminalExit?: TerminalExitEvent
 }
 
+export type TerminalLaunchAsset = {
+  id?: string
+  name?: string
+  title?: string
+  host: string
+  port?: number
+  username?: string
+  group_name?: string
+  asset_type?: string
+  auth_type?: string
+  needProxy?: boolean
+  proxyName?: string
+  jumpHostId?: string
+}
+
+export type TerminalSessionAsset = Partial<TerminalLaunchAsset>
+
+export type TerminalPanelInputExecution = {
+  panelIds: string[]
+  inputText: string
+  shellText?: string
+  source?: string
+  writeToShell?: boolean
+}
+
+export type TerminalPanelInputRecord = {
+  panel: TerminalPanel
+  text: string
+}
+
+export type TerminalPanelSessionWrite = {
+  panel: TerminalPanel
+  sessionId: string
+}
+
 export const defaultTerminalPanelTitle = '欢迎'
 
 export const isNonEmptyText = (value: unknown): value is string => typeof value === 'string' && value.trim() !== ''
+
+export const isTerminalPanelPort = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 65535
 
 export const createTerminalSegments = (text: string, scope: TerminalOutputScope = 'output'): TerminalOutputSegment[] => (text ? [{ text, scope }] : [])
 
@@ -328,4 +371,304 @@ export const closeOtherTerminalPanelsInCollection = (panels: TerminalPanel[], ac
 export const resetTerminalPanelCollectionToDefault = (panels: TerminalPanel[]) => {
   panels.splice(0, panels.length, createEmptyTerminalPanel('panel-main', defaultTerminalPanelTitle))
   return 'panel-main'
+}
+
+export const terminalShellTitle = (shell: string) => shell.replace(/\\/g, '/').split('/').filter(Boolean).pop() || shell || 'local shell'
+
+export const findTerminalPanelByIdOrSession = (panels: TerminalPanel[], id: string) =>
+  panels.find((item) => item.id === id || item.sessionId === id) || null
+
+export const findTerminalPanelBySessionOrId = (panels: TerminalPanel[], id: string) =>
+  panels.find((item) => item.sessionId === id || item.id === id || item.terminalLifecycle?.id === id) || null
+
+export const renameTerminalPanelInCollection = (
+  panels: TerminalPanel[],
+  id: string,
+  title: string,
+  source: TerminalPanel['titleSource'] = 'user'
+) => {
+  const panel = panels.find((item) => item.id === id)
+  const normalizedTitle = title.trim()
+  if (!panel || !normalizedTitle) return null
+  panel.title = normalizedTitle
+  panel.titleSource = source
+  return panel
+}
+
+export const setTerminalPanelAutoTitleInCollection = (
+  panels: TerminalPanel[],
+  id: string,
+  title: string,
+  options: { panelOnlyIfMultiple?: boolean } = {}
+) => {
+  const panel = panels.find((item) => item.id === id)
+  const normalizedTitle = title.trim()
+  if (!panel || !normalizedTitle) return { found: Boolean(panel), applied: false, userOwned: panel?.titleSource === 'user' }
+  if (panel.titleSource === 'user') return { found: true, applied: false, userOwned: true }
+  if (options.panelOnlyIfMultiple && panels.length < 2) return { found: true, applied: false, userOwned: false }
+  panel.title = normalizedTitle
+  panel.titleSource = 'auto'
+  return { found: true, applied: true, userOwned: false }
+}
+
+export const canForkSshTerminalPanel = (panel?: TerminalPanel | null) => Boolean(panel?.kind === 'terminal' && panel.sshSession?.connectionId)
+
+export const createForkSshTerminalPanelInCollection = (panels: TerminalPanel[], sourcePanelId: string, forkPanelId: string) => {
+  const source = panels.find((item) => item.id === sourcePanelId)
+  if (!canForkSshTerminalPanel(source)) return null
+  const forkPanel = createForkSshTerminalPanel(forkPanelId, source!)
+  if (!forkPanel) return null
+  panels.push(forkPanel)
+  return forkPanel
+}
+
+export const appendTerminalOutputToPanelInCollection = (panels: TerminalPanel[], id: string, data: string) => {
+  const panel = findTerminalPanelByIdOrSession(panels, id)
+  if (!panel) return null
+  appendTerminalSegment(panel, data, 'output')
+  panel.status = 'running'
+  return panel
+}
+
+export const appendTerminalInputToPanelInCollection = (panels: TerminalPanel[], id: string, data: string) => {
+  const panel = findTerminalPanelByIdOrSession(panels, id)
+  if (!panel) return null
+  appendTerminalSegment(panel, data, 'input')
+  return panel
+}
+
+export const replaceTerminalOutputInPanelCollection = (
+  panels: TerminalPanel[],
+  id: string,
+  data: string,
+  scope: TerminalOutputScope = 'output'
+) => {
+  const panel = findTerminalPanelByIdOrSession(panels, id)
+  if (!panel) return null
+  setTerminalOutput(panel, data, scope)
+  return panel
+}
+
+export const ensureTerminalPanelOutputSegments = (panel: TerminalPanel) => {
+  if (!panel.outputSegments?.length) {
+    panel.outputSegments = createTerminalSegments(panel.output)
+  }
+  return panel.outputSegments
+}
+
+export const applyTerminalInputExecutionToPanels = (
+  panels: TerminalPanel[],
+  execution: TerminalPanelInputExecution
+): TerminalPanelInputRecord[] => {
+  const records: TerminalPanelInputRecord[] = []
+  execution.panelIds.forEach((panelId) => {
+    const panel = findTerminalPanelByIdOrSession(panels, panelId)
+    if (!panel) return
+    appendTerminalSegment(panel, execution.inputText, 'input')
+    if (execution.source !== 'snippet') {
+      records.push({ panel, text: execution.shellText || execution.inputText })
+    }
+  })
+  return records
+}
+
+export const collectTerminalInputExecutionRecords = (
+  panels: TerminalPanel[],
+  execution: TerminalPanelInputExecution
+): TerminalPanelInputRecord[] => {
+  if (execution.source === 'snippet') return []
+  return execution.panelIds.flatMap((panelId) => {
+    const panel = findTerminalPanelByIdOrSession(panels, panelId)
+    return panel ? [{ panel, text: execution.shellText || execution.inputText }] : []
+  })
+}
+
+export const resolveTerminalPanelSessionWrite = (panels: TerminalPanel[], panelId: string): TerminalPanelSessionWrite | null => {
+  const panel = findTerminalPanelByIdOrSession(panels, panelId)
+  if (!panel?.sessionId) return null
+  return { panel, sessionId: panel.sessionId }
+}
+
+export const resolveTerminalPanelSessionWrites = (
+  panels: TerminalPanel[],
+  panelIds: string[]
+): TerminalPanelSessionWrite[] | null => {
+  const writes: TerminalPanelSessionWrite[] = []
+  for (const panelId of panelIds) {
+    const write = resolveTerminalPanelSessionWrite(panels, panelId)
+    if (!write) return null
+    writes.push(write)
+  }
+  return writes
+}
+
+export const canWriteTerminalPanels = (panels: TerminalPanel[], execution: Pick<TerminalPanelInputExecution, 'panelIds' | 'writeToShell'>) => {
+  if (!execution.writeToShell) return true
+  return Boolean(resolveTerminalPanelSessionWrites(panels, execution.panelIds))
+}
+
+export const liveTerminalPanelIds = (panels: TerminalPanel[]) =>
+  panels.filter((panel) => panel.kind !== 'knowledge' && panel.sessionId).map((panel) => panel.id)
+
+export const terminalPanelIds = (panels: TerminalPanel[]) => panels.filter((panel) => panel.kind !== 'knowledge').map((panel) => panel.id)
+
+export const resolveActiveWritableTerminalPanel = (panels: TerminalPanel[], activePanel: TerminalPanel) =>
+  activePanel.kind === 'knowledge' ? panels.find((item) => item.kind !== 'knowledge') || null : activePanel
+
+export const appendGeneratedTerminalCommandToPanel = (panels: TerminalPanel[], panelId: string, command: string) => {
+  const panel = findTerminalPanelByIdOrSession(panels, panelId)
+  const text = command.trim()
+  if (!panel || panel.kind === 'knowledge' || !text) return null
+  appendTerminalSegment(panel, text, 'input')
+  return { panel, text }
+}
+
+export const registerTerminalSshSession = (panel: TerminalPanel, asset: TerminalLaunchAsset): TerminalSshSession => {
+  const title = asset.name || asset.title || asset.host
+  const session: TerminalSshSession = {
+    host: asset.host,
+    port: Number(asset.port) || 22,
+    username: asset.username || 'root',
+    assetId: asset.id,
+    assetName: title,
+    assetType: asset.asset_type,
+    organizationId: asset.group_name,
+    authType: asset.auth_type,
+    needProxy: Boolean(asset.needProxy),
+    proxyName: asset.proxyName || '',
+    jumpHostId: asset.jumpHostId
+  }
+  panel.kind = 'terminal'
+  panel.sshSession = session
+  return session
+}
+
+export const terminalSshSessionFromConnection = (
+  connection: TerminalSshConnectionInfo,
+  asset: TerminalSessionAsset | undefined,
+  previous: TerminalSshSession | undefined
+): TerminalSshSession => ({
+  connectionId: connection.connectionId,
+  sourcePanelId: previous?.sourcePanelId,
+  forkFromConnectionId: connection.forkFromConnectionId || previous?.forkFromConnectionId,
+  host: connection.host || asset?.host || previous?.host || '',
+  port: Number(connection.port || asset?.port || previous?.port || 22),
+  username: connection.username || asset?.username || previous?.username || 'root',
+  assetId: connection.assetId || asset?.id || previous?.assetId,
+  assetName: connection.assetName || asset?.name || asset?.title || previous?.assetName || connection.host || 'ssh',
+  assetType: connection.assetType || asset?.asset_type || previous?.assetType,
+  organizationId: connection.organizationId || asset?.group_name || previous?.organizationId,
+  authType: connection.authType || asset?.auth_type || previous?.authType,
+  needProxy: Boolean(connection.needProxy || asset?.needProxy || previous?.needProxy),
+  proxyName: connection.proxyName || asset?.proxyName || previous?.proxyName || '',
+  jumpHostId: asset?.jumpHostId || previous?.jumpHostId,
+  createdAt: connection.createdAt
+})
+
+export const applySshTerminalSessionToPanel = (
+  panel: TerminalPanel,
+  terminalSession: TerminalSessionInfo & { connection: TerminalSshConnectionInfo },
+  asset?: TerminalSessionAsset
+) => {
+  const session = terminalSshSessionFromConnection(terminalSession.connection, asset, panel.sshSession)
+  panel.sessionId = terminalSession.id
+  panel.cwd = terminalSession.cwd || panel.cwd
+  panel.kind = 'terminal'
+  panel.status = 'connecting'
+  panel.sshSession = session
+  panel.title = session.assetName || session.host || panel.title
+  return session
+}
+
+export const applyLocalTerminalSessionToPanel = (panel: TerminalPanel, terminalSession: TerminalSessionInfo) => {
+  panel.sessionId = terminalSession.id
+  panel.cwd = terminalSession.cwd || panel.cwd
+  panel.title = terminalShellTitle(terminalSession.shell)
+  panel.kind = 'terminal'
+  panel.status = 'running'
+  panel.sshSession = undefined
+  return panel
+}
+
+export const terminalLifecycleMatchesPanel = (panel: TerminalPanel, event: TerminalLifecycleEvent) => {
+  if (panel.terminalLifecycle?.id === event.id && panel.terminalLifecycle.kind !== event.kind) return false
+  if (event.kind === 'local' && panel.sshSession && (panel.sessionId === event.id || panel.terminalLifecycle?.id === event.id)) return false
+  return true
+}
+
+export const terminalExitMatchesPanel = (panel: TerminalPanel, event: TerminalExitEvent) => {
+  if (event.kind && panel.terminalLifecycle?.id === event.id && panel.terminalLifecycle.kind !== event.kind) return false
+  if (event.kind === 'local' && panel.sshSession && (panel.sessionId === event.id || panel.terminalLifecycle?.id === event.id)) return false
+  if (event.kind === 'ssh' && !panel.sshSession && panel.terminalLifecycle?.kind !== 'ssh') return false
+  return true
+}
+
+export const terminalSshSessionFromLifecycle = (panel: TerminalPanel, event: TerminalLifecycleEvent): TerminalSshSession | null => {
+  const previous = panel.sshSession
+  const connectionId = event.connectionId || previous?.connectionId
+  const host = event.host || previous?.host
+  const port = isTerminalPanelPort(event.port) ? event.port : previous?.port
+  const username = event.username || previous?.username
+  if (!isNonEmptyText(connectionId) || !isNonEmptyText(host) || !isTerminalPanelPort(port) || !isNonEmptyText(username)) return null
+  if (!previous && (!event.connectionId || !event.host || !event.username || !isTerminalPanelPort(event.port))) return null
+  return {
+    connectionId,
+    sourcePanelId: previous?.sourcePanelId,
+    forkFromConnectionId: previous?.forkFromConnectionId,
+    host,
+    port,
+    username,
+    assetId: previous?.assetId,
+    assetName: previous?.assetName || host,
+    assetType: previous?.assetType,
+    organizationId: previous?.organizationId,
+    jumpHostId: previous?.jumpHostId,
+    authType: previous?.authType,
+    needProxy: previous?.needProxy === true,
+    proxyName: event.proxyName || previous?.proxyName || '',
+    createdAt: previous?.createdAt
+  }
+}
+
+export const applyTerminalLifecycleToPanel = (panel: TerminalPanel, event: TerminalLifecycleEvent) => {
+  if (!terminalLifecycleMatchesPanel(panel, event)) return null
+  const nextSshSession = event.kind === 'ssh' ? terminalSshSessionFromLifecycle(panel, event) : null
+  if (event.kind === 'ssh' && !nextSshSession) return null
+  panel.terminalLifecycle = event
+  panel.kind = 'terminal'
+  if (event.cwd) panel.cwd = event.cwd
+  if (nextSshSession) panel.sshSession = nextSshSession
+  if (event.stage === 'starting' || event.stage === 'connecting' || event.stage === 'proxy-opening') {
+    panel.status = 'connecting'
+    return panel
+  }
+  if (event.stage === 'connected' || event.stage === 'shell-ready') {
+    panel.status = 'running'
+    return panel
+  }
+  panel.status = event.stage === 'error' ? 'error' : 'closed'
+  panel.terminalExit = {
+    id: event.id,
+    code: event.code ?? null,
+    kind: event.kind,
+    reason: event.reason,
+    isNetworkDisconnect: event.isNetworkDisconnect,
+    errorCode: event.errorCode,
+    errorMessage: event.errorMessage
+  }
+  if (panel.sessionId === event.id) {
+    panel.sessionId = undefined
+  }
+  return panel
+}
+
+export const applyTerminalExitToPanel = (panel: TerminalPanel, event: TerminalExitEvent) => {
+  if (!terminalExitMatchesPanel(panel, event)) return null
+  panel.terminalExit = event
+  if (panel.sessionId === event.id) {
+    panel.sessionId = undefined
+  }
+  panel.status = event.reason === 'error' || event.reason === 'network' || event.errorMessage ? 'error' : 'closed'
+  appendTerminalSegment(panel, `\n[process exited: ${event.code ?? 'unknown'}]\n`, 'output')
+  return panel
 }

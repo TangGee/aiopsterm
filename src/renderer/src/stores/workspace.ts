@@ -177,7 +177,6 @@ import {
   isSshTerminalSessionInfo,
   isTerminalCommandGenerationRecord,
   isTerminalLifecycleEvent,
-  isTerminalPort,
   isTerminalExitEvent,
   terminalWriteExceptionReason,
   validateTerminalWriteResult
@@ -192,24 +191,45 @@ import {
   type MacroCommandEntry
 } from '@/services/terminalMacroRuntime'
 import {
-  appendTerminalSegment,
+  applyLocalTerminalSessionToPanel,
+  applySshTerminalSessionToPanel,
+  applyTerminalExitToPanel,
+  applyTerminalInputExecutionToPanels,
+  applyTerminalLifecycleToPanel,
+  appendGeneratedTerminalCommandToPanel,
+  appendTerminalInputToPanelInCollection,
+  appendTerminalOutputToPanelInCollection,
   attachTerminalPanelToSplit,
+  canForkSshTerminalPanel,
+  canWriteTerminalPanels,
   closeOtherTerminalPanelsInCollection,
   closeTerminalPanelInCollection,
+  collectTerminalInputExecutionRecords,
   createEmptyTerminalPanel,
-  createForkSshTerminalPanel,
+  createForkSshTerminalPanelInCollection,
   createTerminalPanelInCollection,
-  createTerminalSegments,
   defaultTerminalPanelTitle,
   detachTerminalPanelFromSplit,
   discardPendingTerminalPanelInCollection,
+  ensureTerminalPanelOutputSegments,
+  findTerminalPanelByIdOrSession,
+  findTerminalPanelBySessionOrId,
   hasTerminalPanelSplitState,
-  isNonEmptyText,
+  liveTerminalPanelIds,
+  renameTerminalPanelInCollection,
+  registerTerminalSshSession,
+  replaceTerminalOutputInPanelCollection,
+  resolveActiveWritableTerminalPanel as resolveActiveWritableTerminalPanelFromCollection,
+  resolveTerminalPanelSessionWrite,
+  resolveTerminalPanelSessionWrites,
   resetTerminalPanelCollectionToDefault,
-  setTerminalOutput,
+  setTerminalPanelAutoTitleInCollection,
+  terminalPanelIds,
   type PanelDirection,
   type TerminalOutputScope,
   type TerminalPanel,
+  type TerminalSessionAsset,
+  type TerminalLaunchAsset,
   type TerminalSshSession
 } from '@/services/terminalPanelRuntime'
 import { userAccountClient } from '@/services/userAccountClient'
@@ -981,104 +1001,28 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const aiCommandOptions = ref<AiCommandCatalogOption[]>([])
   const selectedContexts = ref<AiContextOption[]>([])
 
-  const registerSshSession = (
-    panelId: string,
-    asset: {
-      id?: string
-      name?: string
-      title?: string
-      host: string
-      port?: number
-      username?: string
-      group_name?: string
-      asset_type?: string
-      auth_type?: string
-      needProxy?: boolean
-      proxyName?: string
-      jumpHostId?: string
-    }
-  ) => {
-    const panel = panels.value.find((item) => item.id === panelId || item.sessionId === panelId)
+  const registerSshSession = (panelId: string, asset: TerminalLaunchAsset) => {
+    const panel = findTerminalPanelByIdOrSession(panels.value, panelId)
     if (!panel) return null
-    const title = asset.name || asset.title || asset.host
-    const session: TerminalSshSession = {
-      host: asset.host,
-      port: Number(asset.port) || 22,
-      username: asset.username || 'root',
-      assetId: asset.id,
-      assetName: title,
-      assetType: asset.asset_type,
-      organizationId: asset.group_name,
-      authType: asset.auth_type,
-      needProxy: Boolean(asset.needProxy),
-      proxyName: asset.proxyName || '',
-      jumpHostId: asset.jumpHostId
-    }
-    panel.kind = 'terminal'
-    panel.sshSession = session
-    return session
+    return registerTerminalSshSession(panel, asset)
   }
 
   const applySshTerminalSession = (
     panelId: string,
     terminalSession?: TerminalSessionInfo | null,
-    asset?: {
-      id?: string
-      name?: string
-      title?: string
-      host?: string
-      port?: number
-      username?: string
-      group_name?: string
-      asset_type?: string
-      auth_type?: string
-      needProxy?: boolean
-      proxyName?: string
-      jumpHostId?: string
-    }
+    asset?: TerminalSessionAsset
   ) => {
-    const panel = panels.value.find((item) => item.id === panelId || item.sessionId === panelId)
+    const panel = findTerminalPanelByIdOrSession(panels.value, panelId)
     if (!panel || !isSshTerminalSessionInfo(terminalSession)) return null
-    const connection = terminalSession.connection
-    const previous = panel.sshSession
-    const session: TerminalSshSession = {
-      connectionId: connection.connectionId,
-      sourcePanelId: previous?.sourcePanelId,
-      forkFromConnectionId: connection.forkFromConnectionId || previous?.forkFromConnectionId,
-      host: connection.host || asset?.host || previous?.host || '',
-      port: Number(connection.port || asset?.port || previous?.port || 22),
-      username: connection.username || asset?.username || previous?.username || 'root',
-      assetId: connection.assetId || asset?.id || previous?.assetId,
-      assetName: connection.assetName || asset?.name || asset?.title || previous?.assetName || connection.host || 'ssh',
-      assetType: connection.assetType || asset?.asset_type || previous?.assetType,
-      organizationId: connection.organizationId || asset?.group_name || previous?.organizationId,
-      authType: connection.authType || asset?.auth_type || previous?.authType,
-      needProxy: Boolean(connection.needProxy || asset?.needProxy || previous?.needProxy),
-      proxyName: connection.proxyName || asset?.proxyName || previous?.proxyName || '',
-      jumpHostId: asset?.jumpHostId || previous?.jumpHostId,
-      createdAt: connection.createdAt
-    }
-    panel.sessionId = terminalSession.id
-    panel.cwd = terminalSession.cwd || panel.cwd
-    panel.kind = 'terminal'
-    panel.status = 'connecting'
-    panel.sshSession = session
-    panel.title = session.assetName || session.host || panel.title
+    const session = applySshTerminalSessionToPanel(panel, terminalSession, asset)
     if (terminalSession.lifecycle) applyTerminalLifecycle(terminalSession.lifecycle)
     return session
   }
 
-  const terminalShellTitle = (shell: string) => shell.replace(/\\/g, '/').split('/').filter(Boolean).pop() || shell || 'local shell'
-
   const applyLocalTerminalSession = (panelId: string, terminalSession?: TerminalSessionInfo | null) => {
-    const panel = panels.value.find((item) => item.id === panelId || item.sessionId === panelId)
+    const panel = findTerminalPanelByIdOrSession(panels.value, panelId)
     if (!panel || !isLocalTerminalSessionInfo(terminalSession)) return null
-    panel.sessionId = terminalSession.id
-    panel.cwd = terminalSession.cwd || panel.cwd
-    panel.title = terminalShellTitle(terminalSession.shell)
-    panel.kind = 'terminal'
-    panel.status = 'running'
-    panel.sshSession = undefined
+    applyLocalTerminalSessionToPanel(panel, terminalSession)
     if (terminalSession.lifecycle) applyTerminalLifecycle(terminalSession.lifecycle)
     return panel
   }
@@ -10242,35 +10186,20 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const renamePanel = (id: string, title: string, source: TerminalPanel['titleSource'] = 'user') => {
-    const panel = panels.value.find((item) => item.id === id)
-    if (panel && title.trim()) {
-      panel.title = title.trim()
-      panel.titleSource = source
-    }
+    renameTerminalPanelInCollection(panels.value, id, title, source)
   }
 
   const setPanelAutoTitle = (id: string, title: string, options: { panelOnlyIfMultiple?: boolean } = {}) => {
-    const panel = panels.value.find((item) => item.id === id)
-    const normalizedTitle = title.trim()
-    if (!panel || !normalizedTitle) return { found: Boolean(panel), applied: false, userOwned: panel?.titleSource === 'user' }
-    if (panel.titleSource === 'user') return { found: true, applied: false, userOwned: true }
-    if (options.panelOnlyIfMultiple && panels.value.length < 2) return { found: true, applied: false, userOwned: false }
-    panel.title = normalizedTitle
-    panel.titleSource = 'auto'
-    return { found: true, applied: true, userOwned: false }
+    return setTerminalPanelAutoTitleInCollection(panels.value, id, title, options)
   }
 
   const canForkSshPanel = (panelId: string) => {
-    const panel = panels.value.find((item) => item.id === panelId)
-    return Boolean(panel?.kind === 'terminal' && panel.sshSession?.connectionId)
+    return canForkSshTerminalPanel(panels.value.find((item) => item.id === panelId))
   }
 
   const forkSshPanel = (panelId: string) => {
-    const source = panels.value.find((item) => item.id === panelId)
-    if (!source?.sshSession?.connectionId) return null
-    const forkPanel = createForkSshTerminalPanel(createRendererLocalId('panel'), source)
+    const forkPanel = createForkSshTerminalPanelInCollection(panels.value, panelId, createRendererLocalId('panel'))
     if (!forkPanel) return null
-    panels.value.push(forkPanel)
     activePanelId.value = forkPanel.id
     return forkPanel
   }
@@ -10360,10 +10289,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const appendTerminalOutput = (id: string, data: string) => {
-    const panel = panels.value.find((item) => item.sessionId === id || item.id === id)
+    const panel = appendTerminalOutputToPanelInCollection(panels.value, id, data)
     if (!panel) return
-    appendTerminalSegment(panel, data, 'output')
-    panel.status = 'running'
     const now = Date.now()
     managedAiSessions.value = managedAiSessions.value.map((session) =>
       session.terminalSessionId === panel.sessionId || session.panelId === panel.id ? { ...session, terminalActivityAt: now, updatedAt: now } : session
@@ -10372,68 +10299,16 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   const applyTerminalLifecycle = (event: TerminalLifecycleEvent) => {
     if (!isTerminalLifecycleEvent(event)) return null
-    const panel = panels.value.find((item) => item.sessionId === event.id || item.id === event.id || item.terminalLifecycle?.id === event.id)
+    const panel = findTerminalPanelBySessionOrId(panels.value, event.id)
     if (!panel) return null
-    if (panel.terminalLifecycle?.id === event.id && panel.terminalLifecycle.kind !== event.kind) return null
-    if (event.kind === 'local' && panel.sshSession && (panel.sessionId === event.id || panel.terminalLifecycle?.id === event.id)) return null
-    let nextSshSession: TerminalSshSession | null = null
-    if (event.kind === 'ssh') {
-      const previous = panel.sshSession
-      const connectionId = event.connectionId || previous?.connectionId
-      const host = event.host || previous?.host
-      const port = isTerminalPort(event.port) ? event.port : previous?.port
-      const username = event.username || previous?.username
-      if (!isNonEmptyText(connectionId) || !isNonEmptyText(host) || !isTerminalPort(port) || !isNonEmptyText(username)) return null
-      if (!previous && (!event.connectionId || !event.host || !event.username || !isTerminalPort(event.port))) return null
-      nextSshSession = {
-        connectionId,
-        sourcePanelId: previous?.sourcePanelId,
-        forkFromConnectionId: previous?.forkFromConnectionId,
-        host,
-        port,
-        username,
-        assetId: previous?.assetId,
-        assetName: previous?.assetName || host,
-        assetType: previous?.assetType,
-        organizationId: previous?.organizationId,
-        jumpHostId: previous?.jumpHostId,
-        authType: previous?.authType,
-        needProxy: previous?.needProxy === true,
-        proxyName: event.proxyName || previous?.proxyName || '',
-        createdAt: previous?.createdAt
-      }
-    }
-    panel.terminalLifecycle = event
-    panel.kind = 'terminal'
-    if (event.cwd) panel.cwd = event.cwd
-    if (nextSshSession) panel.sshSession = nextSshSession
+    const applied = applyTerminalLifecycleToPanel(panel, event)
+    if (!applied) return null
     if (event.processId) {
       managedAiSessions.value = managedAiSessions.value.map((session) =>
         session.terminalSessionId === event.id || session.panelId === panel.id
           ? { ...session, terminalProcessId: event.processId, terminalActivityAt: event.at, updatedAt: Date.now() }
           : session
       )
-    }
-    if (event.stage === 'starting' || event.stage === 'connecting' || event.stage === 'proxy-opening') {
-      panel.status = 'connecting'
-      return panel
-    }
-    if (event.stage === 'connected' || event.stage === 'shell-ready') {
-      panel.status = 'running'
-      return panel
-    }
-    panel.status = event.stage === 'error' ? 'error' : 'closed'
-    panel.terminalExit = {
-      id: event.id,
-      code: event.code ?? null,
-      kind: event.kind,
-      reason: event.reason,
-      isNetworkDisconnect: event.isNetworkDisconnect,
-      errorCode: event.errorCode,
-      errorMessage: event.errorMessage
-    }
-    if (panel.sessionId === event.id) {
-      panel.sessionId = undefined
     }
     if (event.stage === 'closed' || event.stage === 'error') {
       managedAiSessions.value
@@ -10456,17 +10331,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   const applyTerminalExit = (event: TerminalExitEvent) => {
     if (!isTerminalExitEvent(event)) return null
-    const panel = panels.value.find((item) => item.sessionId === event.id || item.id === event.id || item.terminalLifecycle?.id === event.id)
+    const panel = findTerminalPanelBySessionOrId(panels.value, event.id)
     if (!panel) return null
-    if (event.kind && panel.terminalLifecycle?.id === event.id && panel.terminalLifecycle.kind !== event.kind) return null
-    if (event.kind === 'local' && panel.sshSession && (panel.sessionId === event.id || panel.terminalLifecycle?.id === event.id)) return null
-    if (event.kind === 'ssh' && !panel.sshSession && panel.terminalLifecycle?.kind !== 'ssh') return null
-    panel.terminalExit = event
-    if (panel.sessionId === event.id) {
-      panel.sessionId = undefined
-    }
-    panel.status = event.reason === 'error' || event.reason === 'network' || event.errorMessage ? 'error' : 'closed'
-    appendTerminalSegment(panel, `\n[process exited: ${event.code ?? 'unknown'}]\n`, 'output')
+    const applied = applyTerminalExitToPanel(panel, event)
+    if (!applied) return null
     managedAiSessions.value
       .filter((session) => session.terminalSessionId === event.id || session.panelId === panel.id)
       .forEach((session) =>
@@ -10485,26 +10353,20 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const appendTerminalInput = (id: string, data: string) => {
-    const panel = panels.value.find((item) => item.sessionId === id || item.id === id)
+    const panel = appendTerminalInputToPanelInCollection(panels.value, id, data)
     if (!panel) return
-    appendTerminalSegment(panel, data, 'input')
     recordMacroTerminalInput(panel.id, data)
   }
 
   const replaceTerminalOutput = (id: string, data: string, scope: TerminalOutputScope = 'output') => {
-    const panel = panels.value.find((item) => item.sessionId === id || item.id === id)
-    if (!panel) return
-    setTerminalOutput(panel, data, scope)
+    replaceTerminalOutputInPanelCollection(panels.value, id, data, scope)
   }
 
   const getHighlightedTerminalOutput = (id: string) => {
-    const panel = panels.value.find((item) => item.id === id || item.sessionId === id)
+    const panel = findTerminalPanelByIdOrSession(panels.value, id)
     if (!panel) return ''
     if (!extensionSettings.value.highlightStatus) return panel.output
-    if (!panel.outputSegments?.length) {
-      panel.outputSegments = createTerminalSegments(panel.output)
-    }
-    return panel.outputSegments
+    return ensureTerminalPanelOutputSegments(panel)
       .map((segment) => applyKeywordHighlight(keywordHighlightSettings.value, segment.text, segment.scope))
       .join('')
   }
@@ -10515,22 +10377,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const applyTerminalExecution = (execution: TerminalSecurityExecution) => {
-    execution.panelIds.forEach((panelId) => {
-      const panel = panels.value.find((item) => item.id === panelId || item.sessionId === panelId)
-      if (!panel) return
-      appendTerminalSegment(panel, execution.inputText, 'input')
-      if (execution.source !== 'snippet') {
-        recordMacroTerminalInput(panel.id, execution.shellText || execution.inputText)
-      }
-    })
+    applyTerminalInputExecutionToPanels(panels.value, execution).forEach(({ panel, text }) => recordMacroTerminalInput(panel.id, text))
   }
 
   const recordTerminalExecutionInput = (execution: TerminalSecurityExecution) => {
-    if (execution.source === 'snippet') return
-    execution.panelIds.forEach((panelId) => {
-      const panel = panels.value.find((item) => item.id === panelId || item.sessionId === panelId)
-      if (panel) recordMacroTerminalInput(panel.id, execution.shellText || execution.inputText)
-    })
+    collectTerminalInputExecutionRecords(panels.value, execution).forEach(({ panel, text }) => recordMacroTerminalInput(panel.id, text))
   }
 
   const reportTerminalExecutionUnavailable = (command: string, panelIds: string[] = [], reason = '终端会话不可用，请先打开本地 shell 或连接 SSH') => {
@@ -10555,10 +10406,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const canWriteTerminalExecution = (execution: Pick<TerminalSecurityExecution, 'panelIds' | 'writeToShell'>) => {
     if (!execution.writeToShell) return true
     if (!terminalClient.writeTerminal()) return false
-    return execution.panelIds.every((panelId) => {
-      const panel = panels.value.find((item) => item.id === panelId || item.sessionId === panelId)
-      return Boolean(panel?.sessionId)
-    })
+    return canWriteTerminalPanels(panels.value, execution)
   }
 
   const prepareTerminalSecurityExecution = (execution: TerminalSecurityExecution): TerminalSecurityDecision => {
@@ -10603,19 +10451,19 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       for (const segment of execution.snippetSegments) {
         if (segment.delayBeforeMs > 0) await waitForSnippetDelay(segment.delayBeforeMs)
         for (const panelId of execution.panelIds) {
-          const panel = panels.value.find((item) => item.id === panelId || item.sessionId === panelId)
-          if (!panel?.sessionId) return reportTerminalExecutionUnavailable(execution.command, execution.panelIds)
-          const writeResult = await writeTerminalSegment(panel.sessionId, segment.text)
+          const write = resolveTerminalPanelSessionWrite(panels.value, panelId)
+          if (!write) return reportTerminalExecutionUnavailable(execution.command, execution.panelIds)
+          const writeResult = await writeTerminalSegment(write.sessionId, segment.text)
           if (!writeResult.ok) return reportTerminalExecutionUnavailable(execution.command, execution.panelIds, writeResult.reason)
         }
       }
       return { status: 'allow', execution }
     }
     for (const panelId of execution.panelIds) {
-      const panel = panels.value.find((item) => item.id === panelId || item.sessionId === panelId)
-      if (!panel?.sessionId) return reportTerminalExecutionUnavailable(execution.command, execution.panelIds)
+      const write = resolveTerminalPanelSessionWrite(panels.value, panelId)
+      if (!write) return reportTerminalExecutionUnavailable(execution.command, execution.panelIds)
       const writeData = execution.shellText || execution.inputText
-      const writeResult = await writeTerminalSegment(panel.sessionId, writeData)
+      const writeResult = await writeTerminalSegment(write.sessionId, writeData)
       if (!writeResult.ok) return reportTerminalExecutionUnavailable(execution.command, execution.panelIds, writeResult.reason)
     }
     recordTerminalExecutionInput(execution)
@@ -10650,13 +10498,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const executeGlobalTerminalCommand = (command: string) => {
     const text = command.trim()
     if (!text) return { status: 'allow' } as TerminalSecurityDecision
-    const terminalPanelIds = panels.value.filter((panel) => panel.kind !== 'knowledge' && panel.sessionId).map((panel) => panel.id)
-    if (!terminalPanelIds.length || !terminalClient.writeTerminal()) {
-      return reportTerminalExecutionUnavailable(text, panels.value.filter((panel) => panel.kind !== 'knowledge').map((panel) => panel.id))
+    const writablePanelIds = liveTerminalPanelIds(panels.value)
+    if (!writablePanelIds.length || !terminalClient.writeTerminal()) {
+      return reportTerminalExecutionUnavailable(text, terminalPanelIds(panels.value))
     }
     const execution: TerminalSecurityExecution = {
       command: text,
-      panelIds: terminalPanelIds,
+      panelIds: writablePanelIds,
       inputText: `${text}\n`,
       shellText: `${text}\n`,
       writeToShell: true,
@@ -10692,7 +10540,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const resolveActiveWritableTerminalPanel = () =>
-    activePanel.value.kind === 'knowledge' ? panels.value.find((item) => item.kind !== 'knowledge') : activePanel.value
+    resolveActiveWritableTerminalPanelFromCollection(panels.value, activePanel.value)
 
   const sleep = (delayMs: number) => new Promise<void>((resolve) => window.setTimeout(resolve, Math.max(0, delayMs)))
 
@@ -10837,7 +10685,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const generateTerminalCommand = async (panelId: string, instruction: string, modelName?: string) => {
-    const panel = panels.value.find((item) => item.id === panelId || item.sessionId === panelId)
+    const panel = findTerminalPanelByIdOrSession(panels.value, panelId)
     const prompt = instruction.trim()
     if (!panel || panel.kind === 'knowledge' || !prompt) return null
     const selectedModel = modelName || terminalCommandModelOptions.value[0]
@@ -10877,11 +10725,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const injectGeneratedTerminalCommand = (panelId: string, command: string) => {
-    const panel = panels.value.find((item) => item.id === panelId || item.sessionId === panelId)
-    const text = command.trim()
-    if (!panel || panel.kind === 'knowledge' || !text) return null
-    appendTerminalSegment(panel, text, 'input')
-    recordMacroTerminalInput(panel.id, text)
+    const applied = appendGeneratedTerminalCommandToPanel(panels.value, panelId, command)
+    if (!applied) return null
+    recordMacroTerminalInput(applied.panel.id, applied.text)
     return { status: 'allow' } as TerminalSecurityDecision
   }
 
