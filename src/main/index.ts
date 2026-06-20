@@ -64,10 +64,8 @@ import {
   prepareChatImageAttachmentFromFile,
   validateChatImageAttachment
 } from './backend/chatImageAttachment'
-import { logRuntimeEvent, writeRuntimeLog } from './backend/runtimeLog'
-import { applyKnowledgeSearchRuntimeSetting } from './backend/knowledgeSearchRuntime'
+import { logRuntimeEvent } from './backend/runtimeLog'
 import { writeKnowledgePastedImageFromClipboard } from './backend/knowledgeBaseImage'
-import { openSettingsDocumentation, submitSettingsFeedbackReport } from './backend/settingsExternalActions'
 import { broadcastWindowEvent, sendWindowEvent } from '@shared/windowEvents'
 import { defaultMcpServers, defaultMcpToolStates } from '@shared/mcpSeed'
 import {
@@ -86,7 +84,6 @@ import {
   invokeControlSocketMethod,
   registerControlSocketIpc
 } from './backend/controlSocket'
-import { applyPrivacyRuntimeSettings } from './backend/privacyRuntime'
 import { startSshTunnel, stopSshTunnel } from './backend/sshTunnels'
 import { createSshTerminalSession, type SshTerminalSession } from './backend/sshTerminal'
 import { recordTerminalCommandHistory } from './backend/terminalSuggestions'
@@ -103,6 +100,7 @@ import { registerAiChatIpc } from './ipc/aiChat'
 import { configureMainBackendRuntimes } from './backend/runtimeConfiguration'
 import { registerAgentHooksIpc } from './ipc/agentHooks'
 import { registerAliasesIpc } from './ipc/aliases'
+import { registerAppRuntimeIpc } from './ipc/appRuntime'
 import { registerAppUpdateIpc } from './ipc/appUpdate'
 import { registerChatHistoryIpc } from './ipc/chatHistory'
 import { registerDatabaseIpc } from './ipc/database'
@@ -152,7 +150,6 @@ import type {
   AiAgentSessionEvent,
   ManagedAiSessionEvent,
   ManagedAiSessionFocusRequest,
-  PrivacyRuntimeApplyInput,
   EditorUserConfig,
   KeywordHighlightUserConfig,
   KnowledgeBaseCreateResult,
@@ -163,7 +160,6 @@ import type {
   KnowledgeBaseSearchStatus,
   KnowledgeBaseWriteResult,
   KnowledgeBaseUserConfig,
-  KnowledgeSearchRuntimeApplyInput,
   McpConfigFile,
   McpResourceReadInput,
   McpServerUserConfig,
@@ -172,7 +168,6 @@ import type {
   McpToolStatesUserConfig,
   ModelSettingsUserConfig,
   SecurityUserConfig,
-  SettingsDocumentationPage,
   ShortcutUserConfig,
   SkillDeleteResult,
   SkillEnabledResult,
@@ -826,31 +821,6 @@ const normalizeStringArray = (source: unknown, fallback: string[]) =>
   Array.isArray(source) ? source.filter((item): item is string => typeof item === 'string' && item.trim().length > 0).map((item) => item.trim()) : [...fallback]
 
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value)
-
-const settingsDocumentationPages = new Set<SettingsDocumentationPage>([
-  'general',
-  'terminal',
-  'extensions',
-  'models',
-  'billing',
-  'ai',
-  'mcp',
-  'skills',
-  'rules',
-  'shortcuts',
-  'trustedDevices',
-  'privacy',
-  'about'
-])
-
-const normalizeSettingsDocumentationInput = (source: unknown) => {
-  if (!isRecord(source)) return {}
-  const page = typeof source.page === 'string' && settingsDocumentationPages.has(source.page as SettingsDocumentationPage) ? (source.page as SettingsDocumentationPage) : undefined
-  const locale = typeof source.locale === 'string' ? source.locale : undefined
-  const documentPath = typeof source.documentPath === 'string' ? source.documentPath : undefined
-  const basePath = typeof source.basePath === 'string' ? source.basePath : undefined
-  return { ...(page ? { page } : {}), ...(locale ? { locale } : {}), ...(documentPath ? { documentPath } : {}), ...(basePath ? { basePath } : {}) }
-}
 
 const toStringArray = (source: unknown) =>
   Array.isArray(source) ? source.filter((item): item is string => typeof item === 'string' && item.trim().length > 0).map((item) => item.trim()) : undefined
@@ -2655,6 +2625,28 @@ const registerIpc = () => {
     getVersion: () => app.getVersion(),
     getUserDataPath: () => app.getPath('userData')
   })
+  registerAppRuntimeIpc(ipcMain, {
+    getPlatform: () => process.platform,
+    getDefaultShell,
+    handleProtocolUrl: (rawUrl) => handleDeepLinkUrl(rawUrl),
+    consumeDeepLinks: () => {
+      const queue = [...pendingDeepLinks]
+      pendingDeepLinks.length = 0
+      return queue
+    },
+    openExternal: (url) => shell.openExternal(url),
+    openPath: (targetPath) => shell.openPath(targetPath),
+    getLogDirPath,
+    createSettingsExternalActionRuntime: settingsExternalActionRuntime,
+    getConfig,
+    saveConfigPatch: (patch) => {
+      const next = mergeConfig(getConfig(), patch)
+      store.set('config', next)
+      runtimeConfiguration.syncManagedAiAutoNamingRuntime(next)
+      return next
+    },
+    shouldSkipOpenPath: shouldUseE2eDialogFixtures
+  })
   registerAliasesIpc(ipcMain)
   registerChatHistoryIpc(ipcMain)
   registerDatabaseIpc(ipcMain, {
@@ -2699,8 +2691,6 @@ const registerIpc = () => {
       return owner ? dialog.showSaveDialog(owner, options) : dialog.showSaveDialog(options)
     }
   })
-  ipcMain.handle('app:platform', () => process.platform)
-  ipcMain.handle('app:shell', () => getDefaultShell())
   ipcMain.handle('ai:mcp-tool-call:approve', (_event, input: AiMcpToolCallActionInput) => handleAiMcpToolCallAction(input, true))
   ipcMain.handle('ai:mcp-tool-call:reject', (_event, input: AiMcpToolCallActionInput) => handleAiMcpToolCallAction(input, false))
   ipcMain.handle('ai:mcp-resource-access:approve', (_event, input: AiMcpResourceAccessActionInput) => handleAiMcpResourceAccessAction(input, true))
@@ -2719,50 +2709,6 @@ const registerIpc = () => {
       }
     })
   })
-  ipcMain.handle('app:get-protocol-prefix', () => aiopstermProtocolPrefix)
-  ipcMain.handle('app:handle-protocol-url', async (_event, rawUrl: string) => handleDeepLinkUrl(rawUrl))
-  ipcMain.handle('app:consume-deep-links', async () => {
-    const queue = [...pendingDeepLinks]
-    pendingDeepLinks.length = 0
-    return queue
-  })
-  ipcMain.handle('app:open-external-url', async (_event, rawUrl: string) => {
-    const normalized = normalizeExternalHttpUrl(rawUrl)
-    if (!normalized.valid) {
-      throw new Error('Only http and https URLs can be opened')
-    }
-    await shell.openExternal(normalized.url)
-  })
-  ipcMain.handle('settings:open-documentation', async (_event, input: unknown) =>
-    openSettingsDocumentation(settingsExternalActionRuntime(), normalizeSettingsDocumentationInput(input))
-  )
-  ipcMain.handle('settings:submit-feedback-report', async () => submitSettingsFeedbackReport(settingsExternalActionRuntime()))
-  ipcMain.handle('app:open-log-dir', async () => {
-    const logDir = getLogDirPath()
-    await mkdir(logDir, { recursive: true })
-    if (shouldUseE2eDialogFixtures()) {
-      return { path: logDir }
-    }
-    const result = await shell.openPath(logDir)
-    if (result) throw new Error(result)
-    return { path: logDir }
-  })
-  ipcMain.handle('app:runtime-log', async (_event, level: unknown, eventName: unknown, fields: unknown) => {
-    const cleanLevel = level === 'debug' || level === 'info' || level === 'warn' || level === 'error' ? level : 'info'
-    const cleanEvent = typeof eventName === 'string' && eventName.trim() ? eventName.trim().slice(0, 120) : 'renderer.event'
-    const cleanFields = fields && typeof fields === 'object' && !Array.isArray(fields) ? (fields as Record<string, unknown>) : {}
-    await writeRuntimeLog(cleanLevel, cleanEvent, cleanFields)
-    return { ok: true, data: { event: cleanEvent } }
-  })
-  ipcMain.handle('config:get', () => getConfig())
-  ipcMain.handle('config:save', (_event, patch: Partial<UserConfig>) => {
-    const next = mergeConfig(getConfig(), patch)
-    store.set('config', next)
-    runtimeConfiguration.syncManagedAiAutoNamingRuntime(next)
-    return next
-  })
-  ipcMain.handle('privacy:runtime:apply', (_event, input: PrivacyRuntimeApplyInput) => applyPrivacyRuntimeSettings(input))
-  ipcMain.handle('knowledge-search:runtime:apply', (_event, input: KnowledgeSearchRuntimeApplyInput) => applyKnowledgeSearchRuntimeSetting(input))
   ipcMain.handle('security-config:path', async () => ensureSecurityConfigFile())
   ipcMain.handle('security-config:read', async () => {
     const configPath = await ensureSecurityConfigFile()
