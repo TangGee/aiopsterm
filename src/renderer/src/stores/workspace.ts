@@ -178,6 +178,40 @@ import {
 } from '@/services/kubernetesBackendGuards'
 import { kubernetesClient } from '@/services/kubernetesClient'
 import {
+  activatedK8sTerminalTabs as activatedK8sTerminalTabsRuntime,
+  addK8sAgentRunRecord,
+  applyK8sTerminalDataEvent,
+  applyK8sTerminalExitEvent,
+  applyKubernetesCatalogState,
+  cloneK8sProxyConfig,
+  closeK8sTerminalTabState,
+  completeK8sTerminalConnectTabs,
+  createK8sAgentRunRecord,
+  currentK8sOutputCommand as currentK8sOutputCommandRuntime,
+  defaultK8sProxyConfig,
+  filteredK8sBastions as filteredK8sBastionsRuntime,
+  filteredK8sClusters as filteredK8sClustersRuntime,
+  filteredK8sResources as filteredK8sResourcesRuntime,
+  k8sActiveNamespaces as k8sActiveNamespacesRuntime,
+  k8sKindLabels,
+  k8sProxyConfigValid,
+  k8sResourceCluster as k8sResourceClusterRuntime,
+  k8sResourceSummary as k8sResourceSummaryRuntime,
+  k8sTerminalTabFromRecord,
+  markK8sClusterTerminalTabsEnded,
+  nextK8sActiveTerminalId,
+  selectK8sAgentClusterState,
+  setK8sResourceKindState,
+  startK8sTerminalAiCollection,
+  stopK8sTerminalAiCollection,
+  updateK8sIdSet,
+  updateK8sProxyDraft,
+  updateK8sTerminalTabCommandResult,
+  updateK8sTerminalTabFromRecord,
+  type K8sAgentRunRecord,
+  type K8sTerminalTab
+} from '@/services/kubernetesRuntime'
+import {
   isQuickCommandGroupDeleteData,
   isQuickCommandGroupSaveData,
   isQuickCommandMacroSaveData,
@@ -450,9 +484,7 @@ import type {
   KubernetesCatalog,
   KubernetesClusterTestInput,
   KubernetesTerminalDataEvent,
-  KubernetesTerminalExitEvent,
-  KubernetesTerminalRecord,
-  KubernetesTerminalStatus
+  KubernetesTerminalExitEvent
 } from '@shared/contracts/kubernetes'
 import type { TerminalCommandGenerationContext, TerminalCommandGenerationRecord } from '@shared/contracts/terminalTools'
 import type {
@@ -625,52 +657,6 @@ type ExtensionInstallProgress = {
 }
 
 type AiContextUsage = AiChatContextUsageSnapshot
-const defaultK8sProxyConfig: K8sProxyConfig = {
-  enabled: false,
-  type: 'SOCKS5',
-  host: '127.0.0.1',
-  port: 1080,
-  enableProxyIdentity: false,
-  username: '',
-  password: '',
-  updatedAt: ''
-}
-
-const cloneK8sProxyConfig = (config: K8sProxyConfig): K8sProxyConfig => ({ ...config })
-
-type K8sTerminalStatus = KubernetesTerminalStatus
-type K8sTerminalTab = {
-  id: string
-  sessionId: string
-  clusterId: string
-  name: string
-  namespace: string
-  isActive: boolean
-  output: string
-  status: K8sTerminalStatus
-  cols: number
-  rows: number
-  createdAt: string
-  updatedAt: string
-  exitCode: number | null
-  commandHistory: string[]
-  lastCommand: string
-  lastCommandOutput: string
-  collectingAiOutput: boolean
-  aiCommandTabId: string | null
-}
-type K8sAgentRunRecord = {
-  id: string
-  command: string
-  status: 'queued' | 'running' | 'success' | 'error' | 'cancelled'
-  output: string
-  error?: string
-  clusterId: string | null
-  contextName: string | null
-  namespace: string
-  startedAt: string
-  durationMs: number
-}
 type ExtensionPlugin = ExtensionPluginRuntimeConfig
 
 export type { TerminalCommandSource, TerminalSecurityDecision, TerminalSecurityExecution, TerminalSecurityPrompt }
@@ -856,33 +842,6 @@ const conversationTitleFromPrompt = (prompt: string) => {
   if (!normalized) return ''
   return normalized.length > 28 ? `${normalized.slice(0, 28)}...` : normalized
 }
-const k8sKindLabels: Record<K8sResourceKind, string> = {
-  pods: 'Pods',
-  deployments: 'Deployments',
-  services: 'Services',
-  nodes: 'Nodes'
-}
-const k8sTerminalTabFromRecord = (record: KubernetesTerminalRecord): K8sTerminalTab => ({
-  id: record.id,
-  sessionId: record.sessionId,
-  clusterId: record.clusterId,
-  name: record.name,
-  namespace: record.namespace,
-  isActive: false,
-  output: record.output,
-  status: record.status,
-  cols: record.cols,
-  rows: record.rows,
-  createdAt: record.createdAt,
-  updatedAt: record.updatedAt,
-  exitCode: null,
-  commandHistory: [],
-  lastCommand: '',
-  lastCommandOutput: '',
-  collectingAiOutput: false,
-  aiCommandTabId: null
-})
-
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 
 const numberInRange = (value: unknown, fallback: number, min: number, max?: number) =>
@@ -1765,78 +1724,28 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const k8sSelectedCluster = computed(() => k8sClusters.value.find((cluster) => cluster.id === k8sSelectedClusterId.value) || null)
   const k8sActiveCluster = computed(() => k8sClusters.value.find((cluster) => cluster.id === k8sActiveClusterId.value) || null)
   const k8sDeleteConfirmCluster = computed(() => k8sClusters.value.find((cluster) => cluster.id === k8sDeleteConfirmClusterId.value) || null)
-  const filteredK8sClusters = computed(() => {
-    const query = k8sSearchQuery.value.trim().toLowerCase()
-    return k8sClusters.value.filter((cluster) => {
-      if (!query) return true
-      return [cluster.name, cluster.context_name, cluster.server_url, cluster.default_namespace].some((value) => value.toLowerCase().includes(query))
-    })
-  })
+  const filteredK8sClusters = computed(() => filteredK8sClustersRuntime(k8sClusters.value, k8sSearchQuery.value))
   const localK8sClusters = computed(() => filteredK8sClusters.value.filter((cluster) => cluster.source_type === 'local'))
-  const filteredK8sBastions = computed(() => {
-    const query = k8sSearchQuery.value.trim().toLowerCase()
-    if (!query) return k8sBastions.value
-    return k8sBastions.value.filter((bastion) => {
-      if ([bastion.label, bastion.ip].some((value) => value.toLowerCase().includes(query))) return true
-      return k8sClusters.value.some(
-        (cluster) =>
-          cluster.source_type === 'jumpserver' &&
-          cluster.bastion_uuid === bastion.uuid &&
-          [cluster.name, cluster.server_url].some((value) => value.toLowerCase().includes(query))
-      )
-    })
-  })
+  const filteredK8sBastions = computed(() => filteredK8sBastionsRuntime(k8sBastions.value, k8sClusters.value, k8sSearchQuery.value))
   const k8sActiveTerminal = computed(() => k8sTerminalTabs.value.find((tab) => tab.id === k8sActiveTerminalId.value) || null)
   const k8sAgentCluster = computed(() => (k8sAgentClusterId.value ? k8sClusters.value.find((cluster) => cluster.id === k8sAgentClusterId.value) || null : null))
   const k8sAgentCurrentCluster = computed(() => ({
     clusterId: k8sAgentCluster.value?.id || null,
     contextName: k8sAgentCluster.value?.context_name || k8sAgentContextName.value || null
   }))
-  const k8sResourceCluster = computed(() => k8sActiveCluster.value || k8sSelectedCluster.value || k8sClusters.value[0] || null)
-  const k8sActiveNamespaces = computed(() => {
-    const clusterId = k8sResourceCluster.value?.id
-    if (!clusterId) return []
-    const namespaceNames = new Set<string>()
-    k8sNamespaces.value
-      .filter((namespace) => namespace.clusterId === clusterId)
-      .forEach((namespace) => namespaceNames.add(namespace.name))
-    k8sResources.value
-      .filter((resource) => resource.clusterId === clusterId && resource.kind !== 'nodes')
-      .forEach((resource) => namespaceNames.add(resource.namespace))
-    return [...namespaceNames].sort((a, b) => a.localeCompare(b))
-  })
-  const filteredK8sResources = computed(() => {
-    const clusterId = k8sResourceCluster.value?.id
-    if (!clusterId) return []
-    const query = k8sResourceQuery.value.trim().toLowerCase()
-    return k8sResources.value.filter((resource) => {
-      if (resource.clusterId !== clusterId || resource.kind !== k8sResourceKind.value) return false
-      if (resource.kind !== 'nodes' && k8sResourceNamespace.value !== 'all' && resource.namespace !== k8sResourceNamespace.value) return false
-      if (!query) return true
-      return [
-        resource.name,
-        resource.namespace,
-        resource.status,
-        resource.ready,
-        resource.detail,
-        resource.node || '',
-        resource.image || '',
-        resource.ports || '',
-        resource.selector || ''
-      ].some((value) => value.toLowerCase().includes(query))
+  const k8sResourceCluster = computed(() => k8sResourceClusterRuntime(k8sClusters.value, k8sActiveClusterId.value, k8sSelectedClusterId.value))
+  const k8sActiveNamespaces = computed(() => k8sActiveNamespacesRuntime(k8sNamespaces.value, k8sResources.value, k8sResourceCluster.value?.id || null))
+  const filteredK8sResources = computed(() =>
+    filteredK8sResourcesRuntime(k8sResources.value, {
+      clusterId: k8sResourceCluster.value?.id || null,
+      kind: k8sResourceKind.value,
+      namespace: k8sResourceNamespace.value,
+      query: k8sResourceQuery.value
     })
-  })
-  const k8sResourceSummary = computed<Record<K8sResourceKind, number>>(() => {
-    const clusterId = k8sResourceCluster.value?.id
-    const summary: Record<K8sResourceKind, number> = { pods: 0, deployments: 0, services: 0, nodes: 0 }
-    if (!clusterId) return summary
-    k8sResources.value.forEach((resource) => {
-      if (resource.clusterId !== clusterId) return
-      if (resource.kind !== 'nodes' && k8sResourceNamespace.value !== 'all' && resource.namespace !== k8sResourceNamespace.value) return
-      summary[resource.kind] += 1
-    })
-    return summary
-  })
+  )
+  const k8sResourceSummary = computed<Record<K8sResourceKind, number>>(() =>
+    k8sResourceSummaryRuntime(k8sResources.value, k8sResourceCluster.value?.id || null, k8sResourceNamespace.value)
+  )
   const onboardingCompletedCount = computed(() => Object.values(onboardingCompleted.value).filter(Boolean).length)
   const onboardingActiveSteps = computed(() => (onboardingActiveTour.value ? onboardingTourSteps[onboardingActiveTour.value] : []))
   const onboardingActiveStep = computed(() => onboardingActiveSteps.value[onboardingActiveStepIndex.value] || null)
@@ -8586,48 +8495,49 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   const activateK8sTerminal = (id: string) => {
     k8sActiveTerminalId.value = id
-    k8sTerminalTabs.value.forEach((tab) => {
-      tab.isActive = tab.id === id
+    k8sTerminalTabs.value = activatedK8sTerminalTabsRuntime(k8sTerminalTabs.value, id)
+  }
+
+  const updateK8sTerminalTabState = (id: string, update: (tab: K8sTerminalTab) => K8sTerminalTab) => {
+    let updated: K8sTerminalTab | null = null
+    k8sTerminalTabs.value = k8sTerminalTabs.value.map((tab) => {
+      if (tab.id !== id && tab.sessionId !== id) return tab
+      updated = update(tab)
+      return updated
     })
+    return updated
   }
 
   const applyKubernetesCatalog = (catalog: KubernetesCatalog) => {
-    k8sContexts.value = catalog.contexts.map((context) => ({ ...context }))
-    k8sClusters.value = catalog.clusters.map((cluster) => ({ ...cluster }))
-    k8sBastions.value = catalog.bastions.map((bastion) => ({ ...bastion }))
-    k8sNamespaces.value = catalog.namespaces.map((namespace) => ({ ...namespace }))
-    k8sResources.value = catalog.resources.map((resource) => ({ ...resource }))
-    k8sImportContexts.value = catalog.importContexts.map((context) => ({ ...context }))
-    k8sActiveClusterId.value = catalog.activeClusterId
-    if (!k8sSelectedClusterId.value || !k8sClusters.value.some((cluster) => cluster.id === k8sSelectedClusterId.value)) {
-      k8sSelectedClusterId.value = catalog.selectedClusterId
-    }
-    k8sConnectingClusterIds.value = k8sConnectingClusterIds.value.filter((id) => k8sClusters.value.some((cluster) => cluster.id === id))
-    k8sSyncingBastionIds.value = k8sSyncingBastionIds.value.filter((id) => k8sBastions.value.some((bastion) => bastion.uuid === id))
-    k8sTerminalTabs.value = k8sTerminalTabs.value.filter((tab) => k8sClusters.value.some((cluster) => cluster.id === tab.clusterId))
-
-    if (!k8sTerminalTabs.value.length) {
-      k8sActiveTerminalId.value = null
-    } else if (!k8sActiveTerminalId.value || !k8sTerminalTabs.value.some((tab) => tab.id === k8sActiveTerminalId.value)) {
-      activateK8sTerminal(k8sTerminalTabs.value[0].id)
-    }
-
-    const agentProxyConfig = catalog.agentProxyConfig || defaultK8sProxyConfig
-    savedK8sProxyConfig.value = cloneK8sProxyConfig(agentProxyConfig)
-    if (!k8sProxyConfigOpen.value) {
-      k8sProxyConfig.value = cloneK8sProxyConfig(agentProxyConfig)
-    }
-
-    const activeCluster = k8sClusters.value.find((cluster) => cluster.id === k8sActiveClusterId.value)
-    if (activeCluster && (!k8sAgentClusterId.value || !k8sClusters.value.some((cluster) => cluster.id === k8sAgentClusterId.value))) {
-      k8sAgentClusterId.value = activeCluster.id
-      k8sAgentContextName.value = activeCluster.context_name
-      k8sAgentStatus.value = 'ready'
-    } else if (!activeCluster && k8sAgentClusterId.value && !k8sClusters.value.some((cluster) => cluster.id === k8sAgentClusterId.value)) {
-      k8sAgentClusterId.value = null
-      k8sAgentContextName.value = ''
-      k8sAgentStatus.value = 'idle'
-    }
+    const applied = applyKubernetesCatalogState(catalog, {
+      selectedClusterId: k8sSelectedClusterId.value,
+      connectingClusterIds: k8sConnectingClusterIds.value,
+      syncingBastionIds: k8sSyncingBastionIds.value,
+      terminalTabs: k8sTerminalTabs.value,
+      activeTerminalId: k8sActiveTerminalId.value,
+      proxyConfigOpen: k8sProxyConfigOpen.value,
+      proxyConfig: k8sProxyConfig.value,
+      agentClusterId: k8sAgentClusterId.value,
+      agentContextName: k8sAgentContextName.value,
+      agentStatus: k8sAgentStatus.value
+    })
+    k8sContexts.value = applied.contexts
+    k8sClusters.value = applied.clusters
+    k8sBastions.value = applied.bastions
+    k8sNamespaces.value = applied.namespaces
+    k8sResources.value = applied.resources
+    k8sImportContexts.value = applied.importContexts
+    k8sActiveClusterId.value = applied.activeClusterId
+    k8sSelectedClusterId.value = applied.selectedClusterId
+    k8sConnectingClusterIds.value = applied.connectingClusterIds
+    k8sSyncingBastionIds.value = applied.syncingBastionIds
+    k8sTerminalTabs.value = applied.terminalTabs
+    k8sActiveTerminalId.value = applied.activeTerminalId
+    savedK8sProxyConfig.value = applied.savedProxyConfig
+    k8sProxyConfig.value = applied.proxyConfig
+    k8sAgentClusterId.value = applied.agentClusterId
+    k8sAgentContextName.value = applied.agentContextName
+    k8sAgentStatus.value = applied.agentStatus
 
     return catalog
   }
@@ -8683,15 +8593,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const setK8sConnecting = (clusterId: string, connecting: boolean) => {
-    k8sConnectingClusterIds.value = connecting
-      ? [...new Set([...k8sConnectingClusterIds.value, clusterId])]
-      : k8sConnectingClusterIds.value.filter((id) => id !== clusterId)
+    k8sConnectingClusterIds.value = updateK8sIdSet(k8sConnectingClusterIds.value, clusterId, connecting)
   }
 
   const setK8sSyncingBastion = (bastionUuid: string, syncing: boolean) => {
-    k8sSyncingBastionIds.value = syncing
-      ? [...new Set([...k8sSyncingBastionIds.value, bastionUuid])]
-      : k8sSyncingBastionIds.value.filter((id) => id !== bastionUuid)
+    k8sSyncingBastionIds.value = updateK8sIdSet(k8sSyncingBastionIds.value, bastionUuid, syncing)
   }
 
   const selectK8sCluster = (id: string | null) => {
@@ -8709,19 +8615,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const updateK8sProxyConfig = (patch: Partial<K8sProxyConfig>) => {
-    k8sProxyConfig.value = {
-      ...k8sProxyConfig.value,
-      ...patch,
-      port: patch.port === undefined ? k8sProxyConfig.value.port : Math.max(1, Math.min(65535, Number(patch.port) || 1))
-    }
-    if (!k8sProxyConfig.value.enableProxyIdentity) {
-      k8sProxyConfig.value.username = ''
-      k8sProxyConfig.value.password = ''
-    }
+    k8sProxyConfig.value = updateK8sProxyDraft(k8sProxyConfig.value, patch)
   }
 
   const saveK8sProxyConfig = async () => {
-    if (k8sProxyConfig.value.enabled && (!k8sProxyConfig.value.host.trim() || !k8sProxyConfig.value.port)) {
+    if (!k8sProxyConfigValid(k8sProxyConfig.value)) {
       setK8sNotice('请补全 Kubernetes Agent 代理主机和端口')
       return false
     }
@@ -8753,10 +8651,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const setK8sAgentCluster = (clusterId: string | null) => {
-    const cluster = clusterId ? k8sClusters.value.find((item) => item.id === clusterId) : null
-    k8sAgentClusterId.value = cluster?.id || null
-    k8sAgentContextName.value = cluster?.context_name || ''
-    k8sAgentStatus.value = cluster ? 'ready' : 'idle'
+    const selection = selectK8sAgentClusterState(k8sClusters.value, clusterId)
+    k8sAgentClusterId.value = selection.agentClusterId
+    k8sAgentContextName.value = selection.agentContextName
+    k8sAgentStatus.value = selection.agentStatus
+    const cluster = selection.cluster
     if (cluster) setK8sNotice(`Kubernetes Agent 已切换到 ${cluster.name}`)
     return Boolean(cluster)
   }
@@ -8831,14 +8730,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         k8sAgentContextName.value = ''
         k8sAgentStatus.value = 'idle'
       }
-      k8sTerminalTabs.value
-        .filter((tab) => tab.clusterId === id && tab.status !== 'ended')
-        .forEach((tab) => {
-          tab.status = 'ended'
-          tab.exitCode = 0
-          tab.collectingAiOutput = false
-          tab.updatedAt = '刚刚'
-        })
+      k8sTerminalTabs.value = markK8sClusterTerminalTabsEnded(k8sTerminalTabs.value, id)
       setK8sNotice(`${cluster.name} 已断开`)
       return true
     } catch (error) {
@@ -8847,28 +8739,18 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
   }
 
-  const appendK8sTerminalOutput = (tab: K8sTerminalTab, text: string) => {
-    tab.output = tab.output.endsWith('\n') || !tab.output ? `${tab.output}${text}` : `${tab.output}\n${text}`
-    tab.updatedAt = '刚刚'
-  }
-
   const handleK8sTerminalData = (event: KubernetesTerminalDataEvent) => {
     if (!isK8sTerminalDataEvent(event)) return
     const tab = k8sTerminalTabs.value.find((item) => item.sessionId === event.sessionId && item.id === event.id && item.clusterId === event.clusterId)
     if (!tab || tab.status === 'ended' || tab.status === 'error') return
-    if (event.data) appendK8sTerminalOutput(tab, event.data)
-    tab.lastCommandOutput = event.data
-    tab.updatedAt = event.emittedAt
+    k8sTerminalTabs.value = applyK8sTerminalDataEvent(k8sTerminalTabs.value, event)
   }
 
   const handleK8sTerminalExit = (event: KubernetesTerminalExitEvent) => {
     if (!isK8sTerminalExitEvent(event)) return
     const tab = k8sTerminalTabs.value.find((item) => item.sessionId === event.sessionId && item.id === event.id && item.clusterId === event.clusterId)
     if (!tab) return
-    tab.status = event.reason === 'error' ? 'error' : 'ended'
-    tab.exitCode = event.exitCode
-    tab.collectingAiOutput = false
-    tab.updatedAt = event.emittedAt
+    k8sTerminalTabs.value = applyK8sTerminalExitEvent(k8sTerminalTabs.value, event)
     if (event.reason === 'error' && event.error) setK8sNotice(event.error)
   }
 
@@ -8884,12 +8766,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const completeK8sTerminalConnect = (clusterId: string) => {
-    k8sTerminalTabs.value
-      .filter((tab) => tab.clusterId === clusterId && tab.status === 'connecting')
-      .forEach((tab) => {
-        tab.status = 'connected'
-        tab.updatedAt = '刚刚'
-      })
+    k8sTerminalTabs.value = completeK8sTerminalConnectTabs(k8sTerminalTabs.value, clusterId)
   }
 
   const openK8sTerminal = async (clusterId: string, options: { forceNew?: boolean; namespace?: string; cols?: number; rows?: number } = {}) => {
@@ -8921,11 +8798,17 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       k8sTerminalTabs.value.push(tab)
     }
     activateK8sTerminal(tab.id)
+    const tabId = tab.id
     if (cluster.connection_status !== 'connected') {
       const connected = await connectK8sCluster(clusterId)
-      if (!connected && tab.status === 'connecting') tab.status = 'error'
-    } else if (tab.status === 'connecting') completeK8sTerminalConnect(clusterId)
-    return tab
+      const current = k8sTerminalTabs.value.find((item) => item.id === tabId)
+      if (!connected && current?.status === 'connecting') {
+        updateK8sTerminalTabState(current.id, (item) => ({ ...item, status: 'error' }))
+      }
+    } else if (tab.status === 'connecting') {
+      completeK8sTerminalConnect(clusterId)
+    }
+    return k8sTerminalTabs.value.find((item) => item.id === tabId) || tab
   }
 
   const createNewK8sTerminalTab = async (clusterId?: string) => {
@@ -8959,12 +8842,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         updatedAt: result.data.updatedAt
       }
     }
-    k8sTerminalTabs.value.splice(index, 1)
-    if (k8sActiveTerminalId.value === id) {
-      const next = k8sTerminalTabs.value[Math.min(index, k8sTerminalTabs.value.length - 1)]
-      if (next) activateK8sTerminal(next.id)
-      else k8sActiveTerminalId.value = null
-    }
+    const closed = closeK8sTerminalTabState(k8sTerminalTabs.value, k8sActiveTerminalId.value, id)
+    k8sTerminalTabs.value = closed.tabs
+    k8sActiveTerminalId.value = closed.activeTerminalId
   }
 
   const setActiveK8sTerminal = (id: string) => {
@@ -8986,15 +8866,15 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         setK8sNotice('Kubernetes terminal backend returned malformed result data.')
         return false
       }
-      tab.cols = result.data.cols
-      tab.rows = result.data.rows
-      tab.updatedAt = result.data.updatedAt
-      tab.status = result.data.status
+      const record = result.data
+      const updated = updateK8sTerminalTabState(tab.id, (item) => updateK8sTerminalTabFromRecord(item, record))
+      if (!updated) return false
     } else {
       setK8sNotice('Kubernetes terminal API 不可用')
       return false
     }
-    setK8sNotice(`${tab.name} 终端尺寸已同步 ${tab.cols}x${tab.rows}`)
+    const current = k8sTerminalTabs.value.find((item) => item.id === tab.id) || tab
+    setK8sNotice(`${current.name} 终端尺寸已同步 ${current.cols}x${current.rows}`)
     return true
   }
 
@@ -9034,13 +8914,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (!tab || !text || tab.status === 'ended') return ''
     if (tab.status !== 'connected') {
       setK8sNotice('Kubernetes terminal is not connected.')
-      tab.collectingAiOutput = false
+      updateK8sTerminalTabState(tab.id, stopK8sTerminalAiCollection)
       return ''
     }
     const writeKubernetesTerminal = kubernetesClient.writeKubernetesTerminal()
     if (!writeKubernetesTerminal) {
       setK8sNotice('Kubernetes terminal write API 不可用')
-      tab.collectingAiOutput = false
+      updateK8sTerminalTabState(tab.id, stopK8sTerminalAiCollection)
       return ''
     }
     const payload = text.endsWith('\n') ? text : `${text}\n`
@@ -9049,39 +8929,43 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       result = await writeKubernetesTerminal(tab.sessionId, payload)
     } catch (error) {
       setK8sNotice(error instanceof Error ? error.message : 'Kubernetes terminal command failed.')
-      tab.collectingAiOutput = false
+      updateK8sTerminalTabState(tab.id, stopK8sTerminalAiCollection)
       return ''
     }
     if (!result?.ok) {
       setK8sNotice(result?.errorMessage || 'Kubernetes terminal command failed.')
-      tab.collectingAiOutput = false
+      updateK8sTerminalTabState(tab.id, stopK8sTerminalAiCollection)
       return ''
     }
     if (!isK8sTerminalWriteDataForRequest(result.data, { id: tab.sessionId, data: payload, command: text })) {
       setK8sNotice('Kubernetes terminal backend returned malformed write data.')
-      tab.collectingAiOutput = false
+      updateK8sTerminalTabState(tab.id, stopK8sTerminalAiCollection)
       return ''
     }
-    const terminalOutput = result.data.terminalOutput || ''
-    tab.commandHistory = [text, ...tab.commandHistory.filter((item) => item !== text)].slice(0, 20)
-    tab.lastCommand = text
-    tab.updatedAt = result.data.updatedAt
-    if (tab.collectingAiOutput) {
-      tab.collectingAiOutput = false
+    const writeData = result.data
+    const terminalOutput = writeData.terminalOutput || ''
+    const latestTab = k8sTerminalTabs.value.find((item) => item.id === tab.id) || tab
+    const wasCollectingAiOutput = latestTab.collectingAiOutput
+    const updatedTab =
+      updateK8sTerminalTabState(latestTab.id, (item) => {
+        const withCommand = updateK8sTerminalTabCommandResult(item, text, writeData.updatedAt)
+        return wasCollectingAiOutput ? stopK8sTerminalAiCollection(withCommand) : withCommand
+      }) || latestTab
+    if (wasCollectingAiOutput) {
       if (!terminalOutput.trim()) {
         setK8sNotice('Kubernetes terminal backend returned no output to send.')
       } else {
-        const cluster = k8sClusters.value.find((item) => item.id === tab.clusterId)
+        const cluster = k8sClusters.value.find((item) => item.id === updatedTab.clusterId)
         const host: AiContextOption | undefined = cluster
           ? {
               id: `k8s-${cluster.id}`,
               kind: 'hosts',
               label: cluster.name,
-              detail: `${cluster.context_name} / ${tab.namespace}`
+              detail: `${cluster.context_name} / ${updatedTab.namespace}`
             }
           : undefined
         void sendChat(`Terminal output:\n\`\`\`\n${terminalOutput}\n\`\`\``, undefined, host ? [host] : undefined, { skipKnowledgeSearch: true })
-        setK8sNotice(`${tab.name} 命令输出已发送到 AI`)
+        setK8sNotice(`${updatedTab.name} 命令输出已发送到 AI`)
       }
     }
     return terminalOutput
@@ -9092,14 +8976,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (!target || target.status === 'ended') return false
     const text = command.trim()
     if (!text) {
-      target.collectingAiOutput = false
-      target.aiCommandTabId = null
+      updateK8sTerminalTabState(target.id, stopK8sTerminalAiCollection)
       setK8sNotice('当前没有可采集到 AI 的 kubectl 命令')
       return false
     }
     activateK8sTerminal(target.id)
-    target.collectingAiOutput = true
-    target.aiCommandTabId = tabId || target.id
+    updateK8sTerminalTabState(target.id, (tab) => startK8sTerminalAiCollection(tab, text, tabId))
     const terminalOutput = await sendK8sTerminalCommand(text)
     return Boolean(terminalOutput.trim())
   }
@@ -9118,19 +9000,23 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         setK8sNotice('Kubernetes terminal backend returned malformed result data.')
         return false
       }
-      tab.updatedAt = result.data.updatedAt
-      tab.status = result.data.status
-      tab.exitCode = result.data.exitCode
+      const closeData = result.data
+      updateK8sTerminalTabState(tab.id, (item) => ({
+        ...item,
+        status: closeData.status,
+        exitCode: closeData.exitCode,
+        updatedAt: closeData.updatedAt
+      }))
     } else {
       setK8sNotice('Kubernetes terminal API 不可用')
       return false
     }
-    tab.collectingAiOutput = false
-    setK8sNotice(`${tab.name} 终端会话已结束`)
+    const endedTab = updateK8sTerminalTabState(tab.id, stopK8sTerminalAiCollection) || tab
+    setK8sNotice(`${endedTab.name} 终端会话已结束`)
     return true
   }
 
-  const currentK8sOutputCommand = () => k8sResourceOutput.value.split('\n').find((line) => line.trim().startsWith('kubectl '))?.trim() || ''
+  const currentK8sOutputCommand = () => currentK8sOutputCommandRuntime(k8sResourceOutput.value)
 
   const planK8sResourceAction = async (resourceId: string, action: K8sResourceAction = 'get'): Promise<K8sBackendResourceActionPlanData | null> => {
     const planKubernetesResourceAction = kubernetesClient.planKubernetesResourceAction()
@@ -9177,8 +9063,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const setK8sResourceKind = (kind: K8sResourceKind) => {
-    k8sResourceKind.value = kind
-    if (kind === 'nodes') k8sResourceNamespace.value = 'all'
+    const next = setK8sResourceKindState(kind, k8sResourceNamespace.value)
+    k8sResourceKind.value = next.kind
+    k8sResourceNamespace.value = next.namespace
   }
 
   const setK8sResourceNamespace = (namespace: string) => {
@@ -9187,19 +9074,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   const addK8sAgentRun = (result: K8sBackendCommandData | K8sBackendResourceRefreshData, fallbackCluster?: K8sCluster | null) => {
     const cluster = fallbackCluster ?? k8sAgentCluster.value
-    const record: K8sAgentRunRecord = {
-      id: result.runId,
-      command: result.command,
-      status: result.success ? 'success' : 'error',
-      output: result.output,
-      error: result.error || undefined,
-      clusterId: result.clusterId || cluster?.id || null,
-      contextName: result.contextName || cluster?.context_name || k8sAgentContextName.value || null,
-      namespace: result.namespace,
-      startedAt: result.startedAt,
-      durationMs: result.durationMs
-    }
-    k8sAgentRuns.value = [record, ...k8sAgentRuns.value].slice(0, 12)
+    const record = createK8sAgentRunRecord(result, { fallbackCluster: cluster, agentContextName: k8sAgentContextName.value })
+    k8sAgentRuns.value = addK8sAgentRunRecord(k8sAgentRuns.value, record)
     k8sAgentLastResult.value = record
     return record
   }
@@ -9705,12 +9581,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     k8sTerminalTabs.value = k8sTerminalTabs.value.filter((tab) => tab.clusterId !== id)
     if (k8sSelectedClusterId.value === id) k8sSelectedClusterId.value = null
     if (k8sActiveClusterId.value === id) k8sActiveClusterId.value = null
-    if (k8sActiveTerminalId.value && !k8sTerminalTabs.value.some((tab) => tab.id === k8sActiveTerminalId.value)) {
-      k8sActiveTerminalId.value = k8sTerminalTabs.value[0]?.id || null
-      k8sTerminalTabs.value.forEach((tab) => {
-        tab.isActive = tab.id === k8sActiveTerminalId.value
-      })
-    }
+    k8sActiveTerminalId.value = nextK8sActiveTerminalId(k8sTerminalTabs.value, k8sActiveTerminalId.value)
+    if (k8sActiveTerminalId.value) k8sTerminalTabs.value = activatedK8sTerminalTabsRuntime(k8sTerminalTabs.value, k8sActiveTerminalId.value)
     setK8sNotice(`${cluster?.name || '集群'} 已删除`)
     return true
   }
