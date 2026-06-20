@@ -31,13 +31,9 @@ import {
   saveKeychain,
   testAssetConnection
 } from './backend/assets'
-import { cancelAiChatResponse, createAiChatExchangeRequest, formatMcpResourceReadContent, generateAiChatResponse } from './backend/aiChat'
-import { listAiCommandCatalog } from './backend/aiCommands'
-import { listAiContextCatalog } from './backend/aiContext'
-import { listAiTodoSnapshot } from './backend/aiTodos'
+import { formatMcpResourceReadContent } from './backend/aiChat'
 import { exportChat } from './backend/chatExport'
 import { stageChatAttachment } from './backend/chatAttachments'
-import { deleteAliasCommand, listAliasCommands, saveAliasCommand } from './backend/aliases'
 import {
   createCodexSession,
   killCodexSession,
@@ -74,17 +70,9 @@ import {
   setAgentHibernationConfig,
   wakeManagedAiSession
 } from './backend/agentSessions'
-import { installAgentHook, listAgentHookInstallers, uninstallAgentHook } from './backend/agentHookInstaller'
-import { checkAppUpdate, downloadAppUpdate, installAppUpdate } from './backend/appUpdate'
 import {
-  createChatConversation,
-  deleteChatConversation,
   getChatConversationMessages,
-  listChatConversations,
   replaceChatConversationMessages,
-  restoreChatConversation,
-  saveChatMessageMetadata,
-  updateChatConversation
 } from './backend/chatHistory'
 import {
   prepareChatImageAttachment,
@@ -96,7 +84,7 @@ import { logRuntimeEvent, writeRuntimeLog } from './backend/runtimeLog'
 import { applyKnowledgeSearchRuntimeSetting } from './backend/knowledgeSearchRuntime'
 import { writeKnowledgePastedImageFromClipboard } from './backend/knowledgeBaseImage'
 import { openSettingsDocumentation, submitSettingsFeedbackReport } from './backend/settingsExternalActions'
-import { broadcastWindowEvent, sendWebContentsEvent, sendWindowEvent } from '@shared/windowEvents'
+import { broadcastWindowEvent, sendWindowEvent } from '@shared/windowEvents'
 import { defaultMcpServers, defaultMcpToolStates } from '@shared/mcpSeed'
 import {
   shouldRunMcpDiscovery,
@@ -104,93 +92,8 @@ import {
   shouldUseE2eDialogFixtures,
 } from '@shared/runtimeSwitches'
 import { normalizeExternalHttpUrl } from '@shared/externalUrl'
-import {
-  cancelDatabaseAiDrawerResponse,
-  cancelDatabaseAiPaneResponse,
-  connectDatabaseConnection,
-  createDatabaseAiDrawerRequest,
-  createDatabaseAiPaneRequest,
-  createDatabaseCatalog,
-  createDatabaseGroup,
-  deleteDatabaseGroup,
-  diagnoseDatabaseSqlError,
-  disconnectDatabaseConnection,
-  executeDatabaseSql,
-  generateDatabaseAiDrawerResponse,
-  generateDatabaseAiPaneResponse,
-  getDatabaseAiPaneState,
-  getDatabaseTableDdl,
-  listDatabaseCatalog,
-  moveDatabaseConnection,
-  moveDatabaseGroup,
-  mutateDatabaseTable,
-  planDatabaseTableMutation,
-  queryDatabaseTable,
-  refreshDatabaseConnection,
-  removeDatabaseConnection,
-  renameDatabaseGroup,
-  saveDatabaseAiPaneState,
-  saveDatabaseConnection,
-  startDatabaseAiDrawerResponse,
-  startDatabaseAiPaneResponse,
-  testDatabaseConnection
-} from './backend/database'
-import { getDatabasePageComment, saveDatabasePageComment } from './backend/databaseComments'
-import { exportDatabaseRows } from './backend/databaseExport'
-import {
-  cancelExtensionInstall,
-  downloadExtensionPackage,
-  installExtensionPackage,
-  installExtensionPluginFromUrl,
-  installExtensionPlugin,
-  listExtensionPlugins,
-  openExtensionSubscription,
-  uninstallExtensionPlugin,
-  updateExtensionPlugin
-} from './backend/extensions'
-import {
-  cancelFileTransferTask,
-  deleteFileSession,
-  deleteFileSessionFolder,
-  listFileSessionCatalog,
-  listFileTransferTasks,
-  listFiles as listBackendFiles,
-  mutateFileEntry,
-  readFileContent,
-  saveFileSession,
-  saveFileSessionFolder,
-  saveFileSessionFromSftpPayload,
-  saveFileSessionFromTerminalContext,
-  transferFileEntry,
-  updateFileSession,
-  writeFileContent
-} from './backend/files'
 import { saveCustomBackgroundFile, writeLocalTextFile } from './backend/localFileWrites'
 import { callMcpTool, clearMcpRuntimeClientCache, discoverMcpServerSnapshot, readMcpResource } from './backend/mcpRuntime'
-import {
-  addKubernetesCluster,
-  cleanupKubernetesAgent,
-  connectKubernetesCluster,
-  closeKubernetesTerminal,
-  createKubernetesTerminal,
-  deleteKubernetesCluster,
-  disconnectKubernetesCluster,
-  executeKubernetesCommand,
-  executeKubernetesResourceAction,
-  getKubernetesAgentProxyConfig,
-  importKubernetesKubeconfig,
-  listKubernetesCatalog,
-  planKubernetesResourceAction,
-  refreshKubernetesResources,
-  resizeKubernetesTerminal,
-  saveKubernetesAgentProxyConfig,
-  switchKubernetesContext,
-  syncKubernetesBastion,
-  testKubernetesClusterConnection,
-  updateKubernetesCluster,
-  writeKubernetesTerminal
-} from './backend/kubernetes'
-import { checkModelProvider, listAiModels } from './backend/modelProviders'
 import { normalizeConfigModelName, normalizeConfigModelProvider } from './backend/configBoundary'
 import { createLocalTerminalSession, type LocalTerminalSession } from './backend/localTerminal'
 import {
@@ -199,31 +102,10 @@ import {
   invokeControlSocketMethod,
   registerControlSocketIpc
 } from './backend/controlSocket'
-import {
-  deleteQuickCommandGroup,
-  deleteQuickCommandSnippet,
-  getQuickCommands,
-  planQuickCommandScript,
-  reorderQuickCommands,
-  saveQuickCommandGroup,
-  saveQuickCommandMacro,
-  saveQuickCommandSnippet
-} from './backend/quickCommands'
-import {
-  deleteSettingsRule,
-  getSettingsPreferences,
-  resetSettingsShortcuts,
-  saveSettingsRule,
-  saveSettingsShortcut
-} from './backend/settingsPreferences'
 import { applyPrivacyRuntimeSettings } from './backend/privacyRuntime'
 import { startSshTunnel, stopSshTunnel } from './backend/sshTunnels'
 import { createSshTerminalSession, type SshTerminalSession } from './backend/sshTerminal'
-import {
-  generateTerminalCommand,
-  getTerminalCommandSuggestions,
-  recordTerminalCommandHistory
-} from './backend/terminalSuggestions'
+import { recordTerminalCommandHistory } from './backend/terminalSuggestions'
 import {
   createSshTerminalConnectionInfo,
   createTerminalBinaryWriteResult,
@@ -231,32 +113,26 @@ import {
   createTerminalKillResult,
   createTerminalWriteResult
 } from './backend/terminal'
-import {
-  bindUserContact,
-  deactivateUserAccount,
-  getUserAccount,
-  loginUserAccount,
-  logoutUserAccount,
-  openUserAccountCenter,
-  openUserLogin,
-  prepareUserAvatarImage,
-  resolveUserAvatarAssetPath,
-  resetUserPassword,
-  revokeTrustedDevice,
-  sendUserContactCode,
-  sendUserLoginCode,
-  skipUserLogin,
-  updateUserProfile
-} from './backend/userAccount'
-import { transcribeVoiceInput } from './backend/voice'
-import {
-  closeZmodemStream,
-  openZmodemStream,
-  pickZmodemSavePath,
-  pickZmodemUploadFiles,
-  writeZmodemChunk
-} from './backend/zmodem'
+import { resolveUserAvatarAssetPath } from './backend/userAccount'
+import { registerAiCatalogIpc } from './ipc/aiCatalog'
+import { registerAiChatIpc } from './ipc/aiChat'
 import { configureMainBackendRuntimes } from './backend/runtimeConfiguration'
+import { registerAgentHooksIpc } from './ipc/agentHooks'
+import { registerAliasesIpc } from './ipc/aliases'
+import { registerAppUpdateIpc } from './ipc/appUpdate'
+import { registerChatHistoryIpc } from './ipc/chatHistory'
+import { registerDatabaseIpc } from './ipc/database'
+import { registerExtensionsIpc } from './ipc/extensions'
+import { registerFilesIpc } from './ipc/files'
+import { registerKubernetesIpc } from './ipc/kubernetes'
+import { registerModelsIpc } from './ipc/models'
+import { registerQuickCommandsIpc } from './ipc/quickCommands'
+import { registerSettingsPreferencesIpc } from './ipc/settingsPreferences'
+import { registerTerminalToolsIpc } from './ipc/terminalTools'
+import { registerUserAccountIpc } from './ipc/userAccount'
+import { registerVoiceIpc } from './ipc/voice'
+import { registerWindowIpc } from './ipc/window'
+import { registerZmodemIpc } from './ipc/zmodem'
 import {
   aiopstermProtocolPrefix,
   aiopstermProtocolScheme,
@@ -276,23 +152,14 @@ import { defaultSkillSeedData, defaultSkillsConfig, shouldUseSkillSeedData } fro
 import { defaultWorkspacePreferencesConfig } from '@shared/workspacePreferencesSeed'
 import type {
   AliasCommandConfig,
-  AliasCommandDeleteInput,
-  AliasCommandSaveInput,
-  AiChatCancelInput,
-  AiChatExchangeRequestInput,
   AiChatExportInput,
   AiChatHistoryMessage,
-  AiChatMessageMetadataInput,
   AiMcpResourceAccessActionInput,
   AiMcpResourceAccessActionResult,
   AiMcpToolCallActionInput,
   AiMcpToolCallActionResult,
-  AiChatResponseInput,
-  AiModelCatalogInput,
   CodexSessionCreateOptions,
   CodexSessionTargetContext,
-  AppUpdateProgressEvent,
-  AiChatConversationUpdateInput,
   AiopsAssetInput,
   AiopsCustomFolderSaveInput,
   AiopsKeychainInput,
@@ -301,52 +168,8 @@ import type {
   AiAgentSessionEventInput,
   ManagedAiSessionEvent,
   ManagedAiSessionFocusRequest,
-  AiopsUserAvatarPrepareInput,
-  AiopsUserCodeInput,
-  AiopsUserContactBindInput,
-  AiopsUserDeactivateInput,
-  AiopsUserLoginInput,
-  AiopsUserPasswordInput,
-  AiopsUserProfileUpdateInput,
   PrivacyRuntimeApplyInput,
   EditorUserConfig,
-  DatabaseConnectionSaveInput,
-  DatabaseConnectionTestInput,
-  DatabaseCreateDatabaseInput,
-  DatabaseConnectionMoveInput,
-  DatabaseGroupCreateInput,
-  DatabaseGroupUpdateInput,
-  DatabaseAiDrawerLifecycleInput,
-  DatabaseAiDrawerRequestInput,
-  DatabaseAiDrawerResponseInput,
-  DatabaseAiPaneLifecycleInput,
-  DatabaseAiPaneRequestInput,
-  DatabaseAiPaneResponseInput,
-  DatabaseAiPaneStateSnapshot,
-  DatabaseExportInput,
-  DatabasePageCommentKey,
-  DatabasePageCommentSaveInput,
-  DatabaseSqlErrorDiagnosisInput,
-  DatabaseSqlExecuteInput,
-  DatabaseTableDdlInput,
-  DatabaseTableMutationInput,
-  DatabaseTableMutationPlanInput,
-  DatabaseTableQueryInput,
-  ExtensionInstallProgress,
-  ExtensionPackageDownloadInput,
-  ExtensionPackageInstallInput,
-  ExtensionPluginOperationInput,
-  ExtensionPluginUrlInstallInput,
-  ExtensionSubscriptionInput,
-  FileContentOptions,
-  FileEntryMutation,
-  FileListOptions,
-  FileSessionFolderSaveInput,
-  FileSessionInfo,
-  FileSessionPatch,
-  FileSessionTerminalContext,
-  FileTransferTaskCancelInput,
-  FileTransferOperation,
   KeywordHighlightUserConfig,
   KnowledgeBaseCreateResult,
   KnowledgeBaseDeleteResult,
@@ -355,15 +178,6 @@ import type {
   KnowledgeBaseSearchResult,
   KnowledgeBaseSearchStatus,
   KnowledgeBaseWriteResult,
-  KubernetesAgentProxyConfigInput,
-  KubernetesClusterInput,
-  KubernetesKubeconfigImportInput,
-  KubernetesClusterTestInput,
-  KubernetesClusterUpdateInput,
-  KubernetesCommandInput,
-  KubernetesResourceActionInput,
-  KubernetesResourceRefreshInput,
-  KubernetesTerminalCreateInput,
   KnowledgeBaseUserConfig,
   KnowledgeSearchRuntimeApplyInput,
   McpConfigFile,
@@ -372,17 +186,9 @@ import type {
   McpToolCallInput,
   McpToolCallResult,
   McpToolStatesUserConfig,
-  ModelProviderCheckInput,
   ModelSettingsUserConfig,
-  QuickCommandGroupSaveInput,
-  QuickCommandMacroSaveInput,
-  QuickCommandReorderInput,
-  QuickCommandScriptPlanInput,
-  QuickCommandSnippetSaveInput,
   SecurityUserConfig,
-  SettingsRuleSaveInput,
   SettingsDocumentationPage,
-  SettingsShortcutSaveInput,
   ShortcutUserConfig,
   SkillDeleteResult,
   SkillEnabledResult,
@@ -393,8 +199,6 @@ import type {
   SkillWriteResult,
   SshAgentKeyConfig,
   SshProxyConfig,
-  TerminalCommandGenerationInput,
-  TerminalCommandSuggestionContext,
   TerminalCreateOptions,
   TerminalKeyboardInteractiveResponse,
   TerminalKeyboardInteractiveRequest,
@@ -406,7 +210,6 @@ import type {
   ChatImageAttachmentValidateInput,
   KnowledgeBasePastedImageInput,
   UserConfig,
-  VoiceTranscriptionInput,
   WorkspaceUserConfig,
   UserRuleConfig,
   AiopsAssetGroupDeleteInput,
@@ -2861,20 +2664,55 @@ const createSshTerminal = (owner: BrowserWindow, id: string, options: TerminalCr
 
 const registerIpc = () => {
   registerControlSocketIpc(ipcMain)
+  registerAgentHooksIpc(ipcMain)
+  registerAiCatalogIpc(ipcMain)
+  registerAiChatIpc(ipcMain)
+  registerAppUpdateIpc(ipcMain, {
+    getVersion: () => app.getVersion(),
+    getUserDataPath: () => app.getPath('userData')
+  })
+  registerAliasesIpc(ipcMain)
+  registerChatHistoryIpc(ipcMain)
+  registerDatabaseIpc(ipcMain, {
+    showSaveDialog: (options) => {
+      const owner = BrowserWindow.getFocusedWindow()
+      return owner ? dialog.showSaveDialog(owner, options) : dialog.showSaveDialog(options)
+    }
+  })
+  registerExtensionsIpc(ipcMain, {
+    openExternal: (url) => shell.openExternal(url)
+  })
+  registerFilesIpc(ipcMain)
+  registerKubernetesIpc(ipcMain)
+  registerModelsIpc(ipcMain, {
+    getConfig,
+    isLocalChatBackendAvailable: shouldUseAiChatBackendDouble
+  })
+  registerQuickCommandsIpc(ipcMain)
+  registerSettingsPreferencesIpc(ipcMain, {
+    getConfig,
+    saveConfigPatch: (patch) => {
+      const next = mergeConfig(getConfig(), patch)
+      store.set('config', next)
+      return next
+    }
+  })
+  registerTerminalToolsIpc(ipcMain)
+  registerUserAccountIpc(ipcMain)
+  registerVoiceIpc(ipcMain)
+  registerWindowIpc(ipcMain)
+  registerZmodemIpc(ipcMain, {
+    showOpenDialog: (options) => {
+      const owner = BrowserWindow.getFocusedWindow()
+      return owner ? dialog.showOpenDialog(owner, options) : dialog.showOpenDialog(options)
+    },
+    showSaveDialog: (options) => {
+      const owner = BrowserWindow.getFocusedWindow()
+      return owner ? dialog.showSaveDialog(owner, options) : dialog.showSaveDialog(options)
+    }
+  })
   ipcMain.handle('app:platform', () => process.platform)
   ipcMain.handle('app:shell', () => getDefaultShell())
-  ipcMain.handle('app:check-update', () => checkAppUpdate(app.getVersion()))
-  ipcMain.handle('app:download-update', (event, version: string) => {
-    const emit = (progress: AppUpdateProgressEvent) => sendWebContentsEvent(event.sender, 'app:update-progress', progress)
-    return downloadAppUpdate({ version }, emit, { cacheDir: join(app.getPath('userData'), 'updates') })
-  })
-  ipcMain.handle('app:install-update', (_event, version?: string) => installAppUpdate({ version }))
-  ipcMain.handle('chat-history:list', () => listChatConversations())
-  ipcMain.handle('chat-history:create', () => createChatConversation())
-  ipcMain.handle('chat-history:update', (_event, input: AiChatConversationUpdateInput) => updateChatConversation(input))
-  ipcMain.handle('chat-history:delete', (_event, id: string) => deleteChatConversation(id))
-  ipcMain.handle('chat-history:restore', (_event, id: string) => restoreChatConversation(id))
-  ipcMain.handle('chat-history:message-metadata', (_event, input: AiChatMessageMetadataInput) => saveChatMessageMetadata(input))
   ipcMain.handle('ai:mcp-tool-call:approve', (_event, input: AiMcpToolCallActionInput) => handleAiMcpToolCallAction(input, true))
   ipcMain.handle('ai:mcp-tool-call:reject', (_event, input: AiMcpToolCallActionInput) => handleAiMcpToolCallAction(input, false))
   ipcMain.handle('ai:mcp-resource-access:approve', (_event, input: AiMcpResourceAccessActionInput) => handleAiMcpResourceAccessAction(input, true))
@@ -2893,23 +2731,6 @@ const registerIpc = () => {
       }
     })
   })
-  ipcMain.handle('ai:todo-snapshot', () => listAiTodoSnapshot())
-  ipcMain.handle('ai:context-catalog', () => listAiContextCatalog())
-  ipcMain.handle('ai:command-catalog', () => listAiCommandCatalog())
-  ipcMain.handle('user:get-account', () => getUserAccount())
-  ipcMain.handle('user:open-login', () => openUserLogin())
-  ipcMain.handle('user:open-account-center', () => openUserAccountCenter())
-  ipcMain.handle('user:login', (_event, input: AiopsUserLoginInput) => loginUserAccount(input))
-  ipcMain.handle('user:logout', () => logoutUserAccount())
-  ipcMain.handle('user:skip-login', () => skipUserLogin())
-  ipcMain.handle('user:send-login-code', (_event, input: AiopsUserCodeInput) => sendUserLoginCode(input))
-  ipcMain.handle('user:avatar:prepare', (_event, input: AiopsUserAvatarPrepareInput) => prepareUserAvatarImage(input))
-  ipcMain.handle('user:update-profile', (_event, input: AiopsUserProfileUpdateInput) => updateUserProfile(input))
-  ipcMain.handle('user:reset-password', (_event, input: AiopsUserPasswordInput) => resetUserPassword(input))
-  ipcMain.handle('user:send-contact-code', (_event, input: AiopsUserCodeInput) => sendUserContactCode(input))
-  ipcMain.handle('user:bind-contact', (_event, input: AiopsUserContactBindInput) => bindUserContact(input))
-  ipcMain.handle('user:deactivate-account', (_event, input: AiopsUserDeactivateInput) => deactivateUserAccount(input))
-  ipcMain.handle('user:revoke-trusted-device', (_event, id: number) => revokeTrustedDevice(id))
   ipcMain.handle('app:get-protocol-prefix', () => aiopstermProtocolPrefix)
   ipcMain.handle('app:handle-protocol-url', async (_event, rawUrl: string) => handleDeepLinkUrl(rawUrl))
   ipcMain.handle('app:consume-deep-links', async () => {
@@ -2945,19 +2766,6 @@ const registerIpc = () => {
     await writeRuntimeLog(cleanLevel, cleanEvent, cleanFields)
     return { ok: true, data: { event: cleanEvent } }
   })
-  ipcMain.handle('window:minimize', (event) => {
-    BrowserWindow.fromWebContents(event.sender)?.minimize()
-  })
-  ipcMain.handle('window:maximize', (event) => {
-    BrowserWindow.fromWebContents(event.sender)?.maximize()
-  })
-  ipcMain.handle('window:unmaximize', (event) => {
-    BrowserWindow.fromWebContents(event.sender)?.unmaximize()
-  })
-  ipcMain.handle('window:is-maximized', (event) => BrowserWindow.fromWebContents(event.sender)?.isMaximized() || false)
-  ipcMain.handle('window:close', (event) => {
-    BrowserWindow.fromWebContents(event.sender)?.close()
-  })
   ipcMain.handle('config:get', () => getConfig())
   ipcMain.handle('config:save', (_event, patch: Partial<UserConfig>) => {
     const next = mergeConfig(getConfig(), patch)
@@ -2967,41 +2775,6 @@ const registerIpc = () => {
   })
   ipcMain.handle('privacy:runtime:apply', (_event, input: PrivacyRuntimeApplyInput) => applyPrivacyRuntimeSettings(input))
   ipcMain.handle('knowledge-search:runtime:apply', (_event, input: KnowledgeSearchRuntimeApplyInput) => applyKnowledgeSearchRuntimeSetting(input))
-  ipcMain.handle('settings-preferences:get', () => {
-    const result = getSettingsPreferences(getConfig())
-    if (result.ok && result.data) {
-      store.set('config', mergeConfig(getConfig(), { shortcuts: result.data.shortcuts, rules: result.data.rules, customInstructions: '' }))
-    }
-    return result
-  })
-  ipcMain.handle('settings-preferences:save-rule', (_event, input: SettingsRuleSaveInput) => {
-    const result = saveSettingsRule(input)
-    if (result.ok && result.data) {
-      store.set('config', mergeConfig(getConfig(), { rules: result.data.rules, customInstructions: '' }))
-    }
-    return result
-  })
-  ipcMain.handle('settings-preferences:delete-rule', (_event, id: string) => {
-    const result = deleteSettingsRule(id)
-    if (result.ok && result.data) {
-      store.set('config', mergeConfig(getConfig(), { rules: result.data.rules, customInstructions: '' }))
-    }
-    return result
-  })
-  ipcMain.handle('settings-preferences:save-shortcut', (_event, input: SettingsShortcutSaveInput) => {
-    const result = saveSettingsShortcut(input)
-    if (result.ok && result.data) {
-      store.set('config', mergeConfig(getConfig(), { shortcuts: result.data.shortcuts }))
-    }
-    return result
-  })
-  ipcMain.handle('settings-preferences:reset-shortcuts', () => {
-    const result = resetSettingsShortcuts()
-    if (result.ok && result.data) {
-      store.set('config', mergeConfig(getConfig(), { shortcuts: result.data.shortcuts }))
-    }
-    return result
-  })
   ipcMain.handle('security-config:path', async () => ensureSecurityConfigFile())
   ipcMain.handle('security-config:read', async () => {
     const configPath = await ensureSecurityConfigFile()
@@ -3297,17 +3070,6 @@ const registerIpc = () => {
   ipcMain.handle('assets:keychains:get', (_event, id: string) => getKeychain(id))
   ipcMain.handle('assets:keychains:save', (_event, keychain: AiopsKeychainInput) => saveKeychain(keychain))
   ipcMain.handle('assets:keychains:delete', (_event, id: string) => deleteKeychain(id))
-  ipcMain.handle('quick-commands:get', () => getQuickCommands())
-  ipcMain.handle('quick-commands:group:save', (_event, input: QuickCommandGroupSaveInput) => saveQuickCommandGroup(input))
-  ipcMain.handle('quick-commands:group:delete', (_event, uuid: string) => deleteQuickCommandGroup(uuid))
-  ipcMain.handle('quick-commands:snippet:save', (_event, input: QuickCommandSnippetSaveInput) => saveQuickCommandSnippet(input))
-  ipcMain.handle('quick-commands:macro:save', (_event, input: QuickCommandMacroSaveInput) => saveQuickCommandMacro(input))
-  ipcMain.handle('quick-commands:snippet:delete', (_event, id: number) => deleteQuickCommandSnippet(id))
-  ipcMain.handle('quick-commands:reorder', (_event, input: QuickCommandReorderInput) => reorderQuickCommands(input))
-  ipcMain.handle('quick-commands:script:plan', (_event, input: QuickCommandScriptPlanInput) => planQuickCommandScript(input))
-  ipcMain.handle('aliases:list', (_event, query?: string) => listAliasCommands(query || ''))
-  ipcMain.handle('aliases:save', (_event, input: AliasCommandSaveInput) => saveAliasCommand(input))
-  ipcMain.handle('aliases:delete', (_event, input: AliasCommandDeleteInput) => deleteAliasCommand(input))
   ipcMain.handle('dialog:open-file', async (event, options) => {
     const useE2eDialogFixtures = shouldUseE2eDialogFixtures()
     if (
@@ -3891,10 +3653,6 @@ const registerIpc = () => {
     if (result.ok && result.data?.focusRequest) broadcastManagedAiSessionFocusRequest(result.data.focusRequest)
     return result
   })
-  ipcMain.handle('agent-hooks:list', async () => ({ ok: true, data: await listAgentHookInstallers() }))
-  ipcMain.handle('agent-hooks:install', (_event, input) => installAgentHook(input))
-  ipcMain.handle('agent-hooks:uninstall', (_event, input) => uninstallAgentHook(input))
-
   ipcMain.handle('codex:create', async (event, options: CodexSessionCreateOptions = {}) => {
     const owner = BrowserWindow.fromWebContents(event.sender)
     if (!owner) {
@@ -4017,149 +3775,6 @@ const registerIpc = () => {
     return result
   })
 
-  ipcMain.handle('zmodem:pick-upload-files', async (event) => {
-    const owner = BrowserWindow.fromWebContents(event.sender)
-    return pickZmodemUploadFiles({
-      showOpenDialog: () => {
-        const options = { properties: ['openFile', 'multiSelections'] as Electron.OpenDialogOptions['properties'] }
-        return owner ? dialog.showOpenDialog(owner, options) : dialog.showOpenDialog(options)
-      }
-    })
-  })
-  ipcMain.handle('zmodem:pick-save-path', async (event, name: string) => {
-    const owner = BrowserWindow.fromWebContents(event.sender)
-    return pickZmodemSavePath(name, {
-      showSaveDialog: (defaultName) => {
-        const options = { defaultPath: defaultName }
-        return owner ? dialog.showSaveDialog(owner, options) : dialog.showSaveDialog(options)
-      }
-    })
-  })
-  ipcMain.handle('zmodem:open-stream', (_event, savePath: string) => openZmodemStream(savePath))
-  ipcMain.handle('zmodem:write-chunk', (_event, streamId: string, chunk: unknown) => writeZmodemChunk(streamId, chunk))
-  ipcMain.handle('zmodem:close-stream', (_event, streamId: string) => closeZmodemStream(streamId))
-
-  ipcMain.handle('terminal:suggestions', (_event, query: string, context?: TerminalCommandSuggestionContext) =>
-    getTerminalCommandSuggestions(query, context)
-  )
-  ipcMain.handle('terminal:command:generate', (_event, input: TerminalCommandGenerationInput) => generateTerminalCommand(input))
-  ipcMain.handle('models:list', (_event, input?: AiModelCatalogInput) =>
-    listAiModels({
-      modelSettings: input?.modelSettings || getConfig().modelSettings,
-      localChatBackendAvailable: shouldUseAiChatBackendDouble()
-    })
-  )
-  ipcMain.handle('models:check-provider', (_event, input: ModelProviderCheckInput) => checkModelProvider(input))
-  ipcMain.handle('extensions:list', () => listExtensionPlugins())
-  ipcMain.handle('extensions:install-plugin', (event, input: ExtensionPluginOperationInput) => {
-    const emit = (progress: ExtensionInstallProgress) => sendWebContentsEvent(event.sender, 'extensions:install-progress', progress)
-    return installExtensionPlugin(input, emit)
-  })
-  ipcMain.handle('extensions:update-plugin', (event, input: ExtensionPluginOperationInput) => {
-    const emit = (progress: ExtensionInstallProgress) => sendWebContentsEvent(event.sender, 'extensions:install-progress', progress)
-    return updateExtensionPlugin(input, emit)
-  })
-  ipcMain.handle('extensions:install-package', (event, input: ExtensionPackageInstallInput) => {
-    const emit = (progress: ExtensionInstallProgress) => sendWebContentsEvent(event.sender, 'extensions:install-progress', progress)
-    return installExtensionPackage(input, emit)
-  })
-  ipcMain.handle('extensions:download-package', (_event, input: ExtensionPackageDownloadInput) => downloadExtensionPackage(input))
-  ipcMain.handle('extensions:install-plugin-from-url', (event, input: ExtensionPluginUrlInstallInput) => {
-    const emit = (progress: ExtensionInstallProgress) => sendWebContentsEvent(event.sender, 'extensions:install-progress', progress)
-    return installExtensionPluginFromUrl(input, emit)
-  })
-  ipcMain.handle('extensions:uninstall-plugin', (_event, input: ExtensionPluginOperationInput) => uninstallExtensionPlugin(input))
-  ipcMain.handle('extensions:open-subscription', (_event, input: ExtensionSubscriptionInput) =>
-    openExtensionSubscription(input, (url) => shell.openExternal(url))
-  )
-  ipcMain.handle('extensions:cancel-install', (_event, pluginId: string) => cancelExtensionInstall(pluginId))
-  ipcMain.handle('ai:chat-exchange-request', (_event, input: AiChatExchangeRequestInput) => createAiChatExchangeRequest(input))
-  ipcMain.handle('ai:chat-response', (_event, input: AiChatResponseInput) => generateAiChatResponse(input))
-  ipcMain.handle('ai:chat-response:cancel', (_event, input: AiChatCancelInput) => cancelAiChatResponse(input))
-  ipcMain.handle('voice:transcribe', (_event, input?: VoiceTranscriptionInput) => transcribeVoiceInput(input))
-  ipcMain.handle('database:catalog', () => listDatabaseCatalog())
-  ipcMain.handle('database:test-connection', (_event, input: DatabaseConnectionTestInput) => testDatabaseConnection(input))
-  ipcMain.handle('database:save-connection', (_event, input: DatabaseConnectionSaveInput) => saveDatabaseConnection(input))
-  ipcMain.handle('database:group:create', (_event, input: DatabaseGroupCreateInput) => createDatabaseGroup(input))
-  ipcMain.handle('database:group:rename', (_event, input: DatabaseGroupUpdateInput) => renameDatabaseGroup(input))
-  ipcMain.handle('database:group:move', (_event, input: DatabaseGroupUpdateInput) => moveDatabaseGroup(input))
-  ipcMain.handle('database:group:delete', (_event, id: string) => deleteDatabaseGroup(id))
-  ipcMain.handle('database:connection:move', (_event, input: DatabaseConnectionMoveInput) => moveDatabaseConnection(input))
-  ipcMain.handle('database:connection:remove', (_event, connectionId: string) => removeDatabaseConnection(connectionId))
-  ipcMain.handle('database:connection:connect', (_event, connectionId: string) => connectDatabaseConnection(connectionId))
-  ipcMain.handle('database:connection:disconnect', (_event, connectionId: string) => disconnectDatabaseConnection(connectionId))
-  ipcMain.handle('database:connection:refresh', (_event, connectionId: string) => refreshDatabaseConnection(connectionId))
-  ipcMain.handle('database:create-database', (_event, input: DatabaseCreateDatabaseInput) => createDatabaseCatalog(input))
-  ipcMain.handle('database:execute-sql', (_event, input: DatabaseSqlExecuteInput) => executeDatabaseSql(input))
-  ipcMain.handle('database:table-ddl', (_event, input: DatabaseTableDdlInput) => getDatabaseTableDdl(input))
-  ipcMain.handle('database:query-table', (_event, input: DatabaseTableQueryInput) => queryDatabaseTable(input))
-  ipcMain.handle('database:mutation-plan', (_event, input: DatabaseTableMutationPlanInput) => planDatabaseTableMutation(input))
-  ipcMain.handle('database:mutate-table', (_event, input: DatabaseTableMutationInput) => mutateDatabaseTable(input))
-  ipcMain.handle('database:export-rows', (_event, input: DatabaseExportInput) =>
-    exportDatabaseRows(input, {
-      showSaveDialog: (options) => {
-        const owner = BrowserWindow.getFocusedWindow()
-        return owner ? dialog.showSaveDialog(owner, options) : dialog.showSaveDialog(options)
-      }
-    })
-  )
-  ipcMain.handle('database:comment:get', (_event, input: DatabasePageCommentKey) => getDatabasePageComment(input))
-  ipcMain.handle('database:comment:save', (_event, input: DatabasePageCommentSaveInput) => saveDatabasePageComment(input))
-  ipcMain.handle('database:ai-pane-state:get', () => getDatabaseAiPaneState())
-  ipcMain.handle('database:ai-pane-state:save', (_event, input: DatabaseAiPaneStateSnapshot) => saveDatabaseAiPaneState(input))
-  ipcMain.handle('database:ai-pane-request', (_event, input: DatabaseAiPaneRequestInput) => createDatabaseAiPaneRequest(input))
-  ipcMain.handle('database:ai-pane-start', (_event, input: DatabaseAiPaneLifecycleInput) => startDatabaseAiPaneResponse(input))
-  ipcMain.handle('database:ai-pane-cancel', (_event, input: DatabaseAiPaneLifecycleInput) => cancelDatabaseAiPaneResponse(input))
-  ipcMain.handle('database:ai-pane-response', (_event, input: DatabaseAiPaneResponseInput) => generateDatabaseAiPaneResponse(input))
-  ipcMain.handle('database:ai-drawer-request', (_event, input: DatabaseAiDrawerRequestInput) => createDatabaseAiDrawerRequest(input))
-  ipcMain.handle('database:ai-drawer-start', (_event, input: DatabaseAiDrawerLifecycleInput) => startDatabaseAiDrawerResponse(input))
-  ipcMain.handle('database:ai-drawer-cancel', (_event, input: DatabaseAiDrawerLifecycleInput) => cancelDatabaseAiDrawerResponse(input))
-  ipcMain.handle('database:ai-drawer-response', (_event, input: DatabaseAiDrawerResponseInput) => generateDatabaseAiDrawerResponse(input))
-  ipcMain.handle('database:ai-diagnose-sql-error', (_event, input: DatabaseSqlErrorDiagnosisInput) => diagnoseDatabaseSqlError(input))
-  ipcMain.handle('kubernetes:catalog', () => listKubernetesCatalog())
-  ipcMain.handle('kubernetes:context:switch', (_event, contextName: string) => switchKubernetesContext(contextName))
-  ipcMain.handle('kubernetes:cluster:add', (_event, input: KubernetesClusterInput) => addKubernetesCluster(input))
-  ipcMain.handle('kubernetes:cluster:update', (_event, id: string, input: KubernetesClusterUpdateInput) => updateKubernetesCluster(id, input))
-  ipcMain.handle('kubernetes:cluster:test', (_event, input: KubernetesClusterTestInput) => testKubernetesClusterConnection(input))
-  ipcMain.handle('kubernetes:kubeconfig:import', (_event, input: KubernetesKubeconfigImportInput) => importKubernetesKubeconfig(input))
-  ipcMain.handle('kubernetes:cluster:delete', (_event, id: string) => deleteKubernetesCluster(id))
-  ipcMain.handle('kubernetes:cluster:connect', (_event, id: string) => connectKubernetesCluster(id))
-  ipcMain.handle('kubernetes:cluster:disconnect', (_event, id: string) => disconnectKubernetesCluster(id))
-  ipcMain.handle('kubernetes:bastion:sync', (_event, bastionUuid: string) => syncKubernetesBastion(bastionUuid))
-  ipcMain.handle('kubernetes:terminal:create', (_event, input: KubernetesTerminalCreateInput) => createKubernetesTerminal(input))
-  ipcMain.handle('kubernetes:terminal:write', (_event, id: string, data: string) => writeKubernetesTerminal(id, data))
-  ipcMain.handle('kubernetes:terminal:resize', (_event, id: string, cols: number, rows: number) => resizeKubernetesTerminal(id, cols, rows))
-  ipcMain.handle('kubernetes:terminal:close', (_event, id: string, exitCode?: number) => closeKubernetesTerminal(id, exitCode))
-  ipcMain.handle('kubernetes:execute-command', (_event, input: KubernetesCommandInput) => executeKubernetesCommand(input))
-  ipcMain.handle('kubernetes:resource-action:plan', (_event, input: KubernetesResourceActionInput) => planKubernetesResourceAction(input))
-  ipcMain.handle('kubernetes:resource-action:execute', (_event, input: KubernetesResourceActionInput) => executeKubernetesResourceAction(input))
-  ipcMain.handle('kubernetes:resources:refresh', (_event, input: KubernetesResourceRefreshInput) => refreshKubernetesResources(input))
-  ipcMain.handle('kubernetes:agent:proxy:get', () => getKubernetesAgentProxyConfig())
-  ipcMain.handle('kubernetes:agent:proxy:save', (_event, input: KubernetesAgentProxyConfigInput) => saveKubernetesAgentProxyConfig(input))
-  ipcMain.handle('kubernetes:agent:cleanup', () => cleanupKubernetesAgent())
-  ipcMain.handle('files:sessions:catalog', () => listFileSessionCatalog())
-  ipcMain.handle('files:sessions:save', (_event, session: FileSessionInfo) => saveFileSession(session))
-  ipcMain.handle('files:sessions:save-from-sftp-payload', (_event, payload: Record<string, unknown>) => saveFileSessionFromSftpPayload(payload))
-  ipcMain.handle('files:sessions:save-from-terminal-context', (_event, context: FileSessionTerminalContext) =>
-    saveFileSessionFromTerminalContext(context)
-  )
-  ipcMain.handle('files:sessions:update', (_event, id: string, patch: FileSessionPatch) => updateFileSession(id, patch))
-  ipcMain.handle('files:sessions:delete', (_event, id: string) => deleteFileSession(id))
-  ipcMain.handle('files:sessions:folder:save', (_event, folder: FileSessionFolderSaveInput) => saveFileSessionFolder(folder))
-  ipcMain.handle('files:sessions:folder:delete', (_event, uuid: string) => deleteFileSessionFolder(uuid))
-  ipcMain.handle('files:list', async (_event, directory: string, options?: FileListOptions) => listBackendFiles(directory, options))
-  ipcMain.handle('files:read-content', async (_event, filePath: string, options?: FileContentOptions) => readFileContent(filePath, options))
-  ipcMain.handle('files:write-content', async (_event, filePath: string, content: string, options?: FileContentOptions) =>
-    writeFileContent(filePath, content, options)
-  )
-  ipcMain.handle('files:mutate-entry', async (_event, mutation: FileEntryMutation, options?: FileListOptions) =>
-    mutateFileEntry(mutation, options)
-  )
-  ipcMain.handle('files:transfer-entry', async (_event, operation: FileTransferOperation, options?: FileListOptions) =>
-    transferFileEntry(operation, options)
-  )
-  ipcMain.handle('files:transfer-task:cancel', async (_event, input: FileTransferTaskCancelInput) => cancelFileTransferTask(input))
-  ipcMain.handle('files:list-transfer-tasks', async () => listFileTransferTasks())
 }
 
 app.whenReady().then(async () => {

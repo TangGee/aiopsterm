@@ -25,6 +25,7 @@
     "test:live:ssh": "vitest run tests/live-ssh-backend.test.ts",
     "e2e": "npm run test:e2e",
     "test:e2e": "npm run build && playwright test",
+    "test:e2e:quick": "npm run build && playwright test --grep @quick",
     "generate:icons": "node scripts/generate-app-icons.mjs",
     "smoke:packaged": "xvfb-run -a node scripts/smoke-packaged-app.mjs",
     "audit:codex-runtime": "node scripts/audit-codex-runtime.mjs",

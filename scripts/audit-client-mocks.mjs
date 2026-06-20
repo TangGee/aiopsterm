@@ -15,6 +15,35 @@ const scriptPath = fileURLToPath(import.meta.url)
 
 const skippedDirs = new Set(['.git', 'node_modules', 'out', 'dist', 'test-results', 'playwright-report', 'coverage', 'external-reference'])
 const sourceExtensions = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.vue', '.json'])
+const largeFileThresholds = [
+  { root: ['src', 'main'], extensions: new Set(['.ts']), maxLines: 1800 },
+  { root: ['src', 'preload'], extensions: new Set(['.ts']), maxLines: 800 },
+  { root: ['src', 'shared'], extensions: new Set(['.ts']), maxLines: 2500 },
+  { root: ['src', 'renderer', 'src', 'stores'], extensions: new Set(['.ts']), maxLines: 2500 },
+  { root: ['src', 'renderer', 'src', 'components'], extensions: new Set(['.vue']), maxLines: 1800 },
+  { root: ['src', 'renderer', 'src', 'styles'], extensions: new Set(['.less', '.css']), maxLines: 2500 }
+]
+const largeFileBaselines = new Map(
+  Object.entries({
+    'src/renderer/src/styles/base.less': 17154,
+    'src/renderer/src/stores/workspace.ts': 15723,
+    'src/renderer/src/components/DatabaseWorkspace.vue': 8463,
+    'src/shared/database.ts': 6941,
+    'src/renderer/src/components/AiPanel.vue': 5938,
+    'src/renderer/src/components/TerminalWorkspace.vue': 5899,
+    'src/main/backend/controlSocket.ts': 5073,
+    'src/shared/preload.ts': 4304,
+    'src/main/index.ts': 4220,
+    'src/renderer/src/components/panels/WorkspacePanel.vue': 3112,
+    'src/renderer/src/components/panels/AssetsPanel.vue': 3070,
+    'src/shared/kubernetes.ts': 2791,
+    'src/main/backend/files.ts': 2596,
+    'src/renderer/src/components/SettingsWorkspace.vue': 2462,
+    'src/main/backend/agentSessions.ts': 2428,
+    'src/main/backend/sshTerminal.ts': 1851,
+    'src/main/backend/assets.ts': 1818
+  })
+)
 const rootBoundaryFiles = [
   'package.json',
   'electron.vite.config.ts',
@@ -95,6 +124,40 @@ const rendererConfigBusinessFieldPattern =
 const rendererConfigFixtureExportPattern =
   /\bexport\s+(?:const|let|var)\s+(?=[A-Za-z0-9_]*(?:default|mock|fixture|fake|dummy|seed|sample|demo))(?=[A-Za-z0-9_]*(?:Asset|Assets|Host|Hosts|Connection|Connections|Conversation|Conversations|Chat|Chats|Command|Commands|Snippet|Snippets|Alias|Aliases|Rule|Rules|Skill|Skills|Mcp|Database|Kubernetes|Knowledge|File|Files|User|Credential|Secret))[A-Za-z0-9_]*\s*=/i
 
+const importSpecifierPatterns = [
+  /\bfrom\s+['"]([^'"]+)['"]/g,
+  /\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/g,
+  /\brequire\s*\(\s*['"]([^'"]+)['"]\s*\)/g
+]
+
+const importSpecifiersFromLine = (line) => {
+  const specifiers = []
+  for (const pattern of importSpecifierPatterns) {
+    pattern.lastIndex = 0
+    for (;;) {
+      const match = pattern.exec(line)
+      if (!match) break
+      specifiers.push(match[1])
+    }
+  }
+  return specifiers
+}
+
+const isRendererMainOrPreloadSpecifier = (specifier) => {
+  const normalized = specifier.replace(/\\/g, '/')
+  return (
+    normalized === '@main' ||
+    normalized.startsWith('@main/') ||
+    normalized === 'main' ||
+    normalized.startsWith('main/') ||
+    normalized === 'preload' ||
+    normalized.startsWith('preload/') ||
+    normalized.includes('/src/main/') ||
+    normalized.includes('/src/preload/') ||
+    /(?:^|\/)\.\.\/(?:\.\.\/)*(?:main|preload)(?:\/|$)/.test(normalized)
+  )
+}
+
 const rendererBusinessIdFailures = (filePath, content) => {
   const failures = []
   content.split(/\r?\n/).forEach((line, index) => {
@@ -111,6 +174,30 @@ const rendererBusinessIdFailures = (filePath, content) => {
         filePath,
         rule: 'renderer-generic-id-helper',
         message: 'Renderer id helpers must use explicit UI-only prefix unions instead of accepting arbitrary string prefixes.',
+        lineNumber: index + 1
+      })
+    }
+  })
+  return failures
+}
+
+const rendererArchitectureBoundaryFailures = (filePath, content) => {
+  const failures = []
+  content.split(/\r?\n/).forEach((line, index) => {
+    const specifiers = importSpecifiersFromLine(line)
+    if (specifiers.some(isRendererMainOrPreloadSpecifier)) {
+      failures.push({
+        filePath,
+        rule: 'renderer-main-preload-import',
+        message: 'Renderer source must not import main/preload implementation modules; use shared contracts plus the preload bridge.',
+        lineNumber: index + 1
+      })
+    }
+    if (specifiers.includes('electron')) {
+      failures.push({
+        filePath,
+        rule: 'renderer-electron-import',
+        message: 'Renderer source must not import Electron directly; expose required capabilities through preload/main boundaries.',
         lineNumber: index + 1
       })
     }
@@ -170,6 +257,28 @@ const external-referenceTreeReferenceFailures = (filePath, content, message) => 
   return failures
 }
 
+const countLines = (content) => (content ? content.split(/\r?\n/).filter((line, index, lines) => index < lines.length - 1 || line.length > 0).length : 0)
+
+const largeFileAuditFailures = (repoRoot) => {
+  const failures = []
+  for (const threshold of largeFileThresholds) {
+    const rootPath = join(repoRoot, ...threshold.root)
+    for (const filePath of walkFiles(rootPath)) {
+      if (!threshold.extensions.has(extname(filePath))) continue
+      const relativePath = toPosix(relative(repoRoot, filePath))
+      const lines = countLines(readFileSync(filePath, 'utf8'))
+      const maxLines = largeFileBaselines.get(relativePath) || threshold.maxLines
+      if (lines <= maxLines) continue
+      failures.push({
+        filePath,
+        rule: 'large-source-file',
+        message: `Source file has ${lines} lines, above the architecture threshold of ${maxLines}. Split by domain/responsibility before adding more behavior.`
+      })
+    }
+  }
+  return failures
+}
+
 export const auditClientMocks = (root = repoRootFromArg()) => {
   const repoRoot = resolve(root)
   const rendererRoot = join(repoRoot, 'src', 'renderer', 'src')
@@ -201,6 +310,7 @@ export const auditClientMocks = (root = repoRootFromArg()) => {
         failures.push({ filePath, rule: rule.id, message: rule.message })
       }
     })
+    failures.push(...rendererArchitectureBoundaryFailures(filePath, content))
     failures.push(...rendererBusinessIdFailures(filePath, content))
     if (isUnder(filePath, rendererConfigRoot)) {
       failures.push(...rendererConfigStaticMetadataFailures(filePath, content))
@@ -247,6 +357,8 @@ export const auditClientMocks = (root = repoRootFromArg()) => {
     )
   }
 
+  failures.push(...largeFileAuditFailures(repoRoot))
+
   return failures.map((failure) => ({
     ...failure,
     relativePath: `${toPosix(relative(repoRoot, failure.filePath))}${failure.lineNumber ? `:${failure.lineNumber}` : ''}`
@@ -256,7 +368,7 @@ export const auditClientMocks = (root = repoRootFromArg()) => {
 const main = () => {
   const failures = auditClientMocks()
   if (failures.length) {
-    console.error('client-mock-audit-failed')
+    console.error('client-mock-and-architecture-audit-failed')
     failures.forEach((failure) => {
       console.error(`${failure.relativePath}: ${failure.rule}: ${failure.message}`)
     })
@@ -264,6 +376,7 @@ const main = () => {
     return
   }
   console.log('client-mock-audit-ok')
+  console.log('client-mock-and-architecture-audit-ok')
 }
 
 if (isUnder(scriptPath, resolve('scripts')) && process.argv[1] && resolve(process.argv[1]) === scriptPath) {

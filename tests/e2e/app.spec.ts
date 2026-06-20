@@ -571,6 +571,77 @@ const disableE2eMotion = async (page: Page) => {
   })
 }
 
+test('quick architecture migration baseline @quick', async () => {
+  test.setTimeout(120_000)
+  const userDataDir = e2eUserDataDir('quick-architecture-baseline')
+  let app = await launchApp('quick-architecture-baseline', {}, { userDataDir })
+
+  try {
+    let page = await app.firstWindow()
+    await page.waitForLoadState('domcontentloaded')
+    await disableE2eMotion(page)
+
+    await expect(page.getByText('aiopsterm', { exact: true })).toBeVisible()
+    await expect(page.locator('.terminal-dashboard')).toContainText('与AI对话')
+    await expect(page.locator('.ai-header h2')).toHaveText('AI')
+    await expect(page.locator('.ai-panel')).toBeVisible()
+    await expect(page.locator('.message.assistant').filter({ hasText: '欢迎' })).toHaveCount(0)
+
+    await page.locator('.workspace-search input').fill('127.0.0.1')
+    const localRow = page.locator('.workspace-host-row').filter({ hasText: '127.0.0.1' }).first()
+    await expect(localRow).toBeVisible()
+    await localRow.dblclick()
+    await expect(page.locator('.terminal-tab').filter({ hasText: '127.0.0.1' })).toBeVisible()
+    await expect(page.locator('.terminal-pane.active .xterm-host')).toBeVisible()
+    await expect(page.locator('.terminal-output-mirror').filter({ hasText: 'aiopsterm ssh' })).toHaveCount(0)
+
+    await page.getByTitle('设置').click()
+    await expect(page.locator('.settings-workspace-title').getByRole('heading', { name: '设置' })).toBeVisible()
+    await page.locator('.settings-nav-item').filter({ hasText: '终端' }).click()
+    await page.locator('.settings-form-row').filter({ hasText: '终端类型' }).locator('select').selectOption('vt100')
+    await setNumberInputValue(page, '.settings-form-row:has-text("字体大小") input', '17')
+    await expect
+      .poll(
+        () =>
+          page.evaluate(async () => {
+            const config = await (window as unknown as { aiops: { getConfig: () => Promise<JsonObject> } }).aiops.getConfig()
+            return config.terminal
+          }),
+        { timeout: 10_000 }
+      )
+      .toEqual(expect.objectContaining({ terminalType: 'vt100', fontSize: 17 }))
+
+    const deepLinkResult = await page.evaluate(async () => {
+      const aiops = (window as unknown as {
+        aiops: {
+          handleProtocolUrl: (url: string) => Promise<JsonObject>
+          consumeDeepLinks: () => Promise<JsonObject[]>
+        }
+      }).aiops
+      const result = await aiops.handleProtocolUrl('aiopsterm://open/settings?section=mcp&source=e2e')
+      return { result, pending: await aiops.consumeDeepLinks() }
+    })
+    expect(deepLinkResult.result).toEqual(expect.objectContaining({ success: true }))
+    expect(deepLinkResult.pending).toEqual(
+      expect.arrayContaining([expect.objectContaining({ target: 'settings', module: 'settings', settingsSection: 'mcp' })])
+    )
+
+    await app.close()
+    app = await launchApp('quick-architecture-baseline', {}, { userDataDir })
+    page = await app.firstWindow()
+    await page.waitForLoadState('domcontentloaded')
+    await disableE2eMotion(page)
+    const configAfterRestart = await page.evaluate(async () => {
+      const config = await (window as unknown as { aiops: { getConfig: () => Promise<JsonObject> } }).aiops.getConfig()
+      return config.terminal
+    })
+    expect(configAfterRestart).toEqual(expect.objectContaining({ terminalType: 'vt100', fontSize: 17 }))
+  } finally {
+    await app.close().catch(() => undefined)
+    await rm(userDataDir, { recursive: true, force: true })
+  }
+})
+
 test('managed AI session notifications flow through real local terminal hooks', async () => {
   test.setTimeout(120_000)
   const hasCodex = await commandExists('codex')

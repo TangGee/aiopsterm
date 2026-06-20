@@ -68,6 +68,42 @@ describe('client mock audit', () => {
     expect(result.output).toContain('external-reference-source-import')
   })
 
+  it('rejects renderer imports from Electron and main or preload implementation modules', async () => {
+    const root = await createAuditRepo()
+    await writeFile(
+      join(root, 'src', 'renderer', 'src', 'components', 'BadBoundaries.vue'),
+      [
+        '<script setup lang="ts">',
+        "import { ipcRenderer } from 'electron'",
+        "import { createWindow } from '../../../main/index'",
+        "const preload = await import('../../../preload/index')",
+        'void ipcRenderer',
+        'void createWindow',
+        'void preload',
+        '</script>'
+      ].join('\n')
+    )
+
+    const result = await runAudit(root)
+    expect(result.ok).toBe(false)
+    expect(result.output).toContain('renderer-electron-import')
+    expect(result.output).toContain('renderer-main-preload-import')
+    expect(result.output).toContain('BadBoundaries.vue')
+  })
+
+  it('rejects new oversized source files outside the recorded large-file baseline', async () => {
+    const root = await createAuditRepo()
+    await writeFile(
+      join(root, 'src', 'renderer', 'src', 'components', 'Oversized.vue'),
+      Array.from({ length: 1801 }, (_, index) => (index === 0 ? '<template><div>large</div></template>' : `<!-- ${index} -->`)).join('\n')
+    )
+
+    const result = await runAudit(root)
+    expect(result.ok).toBe(false)
+    expect(result.output).toContain('large-source-file')
+    expect(result.output).toContain('Oversized.vue')
+  })
+
   it('rejects scripts and build config that copy or package the reference external-reference tree', async () => {
     const root = await createAuditRepo()
     await writeFile(join(root, 'electron-builder.yml'), "files:\n  - out/**\n  - '!external-reference/**'\n")
