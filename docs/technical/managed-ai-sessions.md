@@ -40,6 +40,7 @@ Claude Code requests launched with `--wait-decision` can be `blocking`, which le
 ## Hook Installer
 
 Settings -> AI Preferences includes an `Agent Hook 安装器` section.
+The renderer reaches `listAgentHookInstallers`, `installAgentHook`, and `uninstallAgentHook` through `src/renderer/src/services/agentHookClient.ts` before crossing the preload/main `agent-hooks:*` boundary, so Settings state owns UI application while the client owns bridge lookup and binding.
 
 - Codex installation merges aiopsterm-owned commands into `~/.codex/hooks.json` and enables the Codex hooks feature in `~/.codex/config.toml` inside an aiopsterm-marked block.
 - Codex installation also writes matching `hooks.state."<hooks.json path>:<event>:<group>:<handler>"` trust entries into `config.toml`. This is required because Codex disables user hooks whose current hash is new or modified. The trust hash follows Codex's command-hook identity format, including the normalized event label, command, timeout, type, and matcher when present.

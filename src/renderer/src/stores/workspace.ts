@@ -7,6 +7,7 @@ import {
   malformedAiBackendResultMessage
 } from '@/services/aiBackendGuards'
 import { aiCatalogClient } from '@/services/aiCatalogClient'
+import { agentHookClient } from '@/services/agentHookClient'
 import { chatHistoryClient } from '@/services/chatHistoryClient'
 import { validateCommandSecurity, type CommandSecurityResult } from '@/services/commandSecurityRuntime'
 import { applyEditorSettingsToDocument } from '@/services/editorRuntime'
@@ -4808,15 +4809,15 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const refreshAgentHookInstallers = async (options: { silent?: boolean } = {}) => {
-    const listBridge = window.aiops?.listAgentHookInstallers
-    if (typeof listBridge !== 'function') {
+    const listAgentHookInstallers = agentHookClient.listAgentHookInstallers()
+    if (!listAgentHookInstallers) {
       agentHookInstallerError.value = i18nText('settings.ai.agentHook.serviceUnavailable')
       if (!options.silent) setTopNotice(agentHookInstallerError.value)
       return false
     }
     agentHookInstallersLoading.value = true
     try {
-      const result = await listBridge()
+      const result = await listAgentHookInstallers()
       if (!result?.ok) {
         agentHookInstallerError.value = result?.errorMessage || i18nText('settings.ai.agentHook.statusLoadFailed')
         if (!options.silent) setTopNotice(agentHookInstallerError.value)
@@ -4840,15 +4841,15 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const runAgentHookInstallerOperation = async (source: AgentHookInstallerSource, operation: 'install' | 'uninstall') => {
-    const bridge = operation === 'install' ? window.aiops?.installAgentHook : window.aiops?.uninstallAgentHook
-    if (typeof bridge !== 'function') {
+    const runOperation = operation === 'install' ? agentHookClient.installAgentHook() : agentHookClient.uninstallAgentHook()
+    if (!runOperation) {
       setTopNotice(i18nText('settings.ai.agentHook.serviceUnavailable'))
       return false
     }
     agentHookInstallerBusySource.value = source
     agentHookInstallerError.value = ''
     try {
-      const result = await bridge({ source })
+      const result = await runOperation({ source })
       if (!result?.ok) {
         const message = result?.errorMessage || (operation === 'install' ? i18nText('settings.ai.agentHook.installFailed') : i18nText('settings.ai.agentHook.uninstallFailed'))
         agentHookInstallerError.value = message
