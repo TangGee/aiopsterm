@@ -8,7 +8,7 @@ import type {
   TerminalCommandSuggestion,
   TerminalCommandSuggestionContext
 } from '@shared/contracts/terminalTools'
-import type { UserConfig } from '@shared/preload'
+import type { UserConfig } from '@shared/contracts/userConfig'
 
 type TerminalSuggestionsBackend = {
   configureTerminalSuggestionsRuntime: (config?: {

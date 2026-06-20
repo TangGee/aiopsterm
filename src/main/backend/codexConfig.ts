@@ -1,7 +1,7 @@
 import { existsSync } from 'fs'
 import { join } from 'path'
 import type { CodexSessionTargetContext } from '@shared/contracts/codexSessions'
-import type { UserConfig } from '@shared/preload'
+import type { UserConfig } from '@shared/contracts/userConfig'
 import { resolveModelProvider } from './modelProviderText'
 
 const codexOpenAiProviderId = 'aiopsterm_openai_responses'

@@ -11,7 +11,7 @@ import type {
   DatabasePageCommentGetResult,
   DatabasePageCommentSaveResult
 } from '@shared/contracts/database'
-import type { UserConfig } from '@shared/preload'
+import type { UserConfig } from '@shared/contracts/userConfig'
 import { sanitizeDatabaseExportFileName } from '../src/shared/databaseExport'
 import {
   cancelDatabaseAiDrawerResponse,

@@ -2,7 +2,7 @@ import { EventEmitter } from 'events'
 import { PassThrough } from 'stream'
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { CodexSessionCreateOptions } from '@shared/contracts/codexSessions'
-import type { UserConfig } from '@shared/preload'
+import type { UserConfig } from '@shared/contracts/userConfig'
 
 type CodexLifecycleEvent = {
   id: string

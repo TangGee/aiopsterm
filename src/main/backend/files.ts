@@ -28,7 +28,7 @@ import type {
   FileTransferOperationResult,
   FileWriteContentResult
 } from '@shared/contracts/files'
-import type { UserConfig } from '@shared/preload'
+import type { UserConfig } from '@shared/contracts/userConfig'
 import type { AiopsAssetInput } from '@shared/contracts/assets'
 import { shouldUseFilesSeedData } from '@shared/runtimeSwitches'
 import type { ConnectConfig, FileEntry as SftpFileEntry, SFTPWrapper, Stats as SftpStats } from 'ssh2'

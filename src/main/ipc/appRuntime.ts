@@ -12,7 +12,7 @@ import type {
   PrivacyRuntimeApplyInput,
   SettingsDocumentationPage
 } from '@shared/contracts/appRuntime'
-import type { UserConfig } from '@shared/preload'
+import type { UserConfig } from '@shared/contracts/userConfig'
 
 type SettingsExternalActionRuntime = Parameters<typeof openSettingsDocumentation>[0]
 

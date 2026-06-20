@@ -1,5 +1,5 @@
 import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron'
-import type { UserConfig } from '@shared/preload'
+import type { UserConfig } from '@shared/contracts/userConfig'
 import type { RuntimeLogLevel } from '@shared/contracts/appRuntime'
 import type { AiopsAssetRecord } from '@shared/contracts/assets'
 import type {

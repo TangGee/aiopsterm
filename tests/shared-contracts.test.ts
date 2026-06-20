@@ -413,6 +413,8 @@ import type {
   VoiceTranscriptionProvider as VoiceTranscriptionProviderPreload,
   VoiceTranscriptionResult as VoiceTranscriptionResultPreload
 } from '../src/shared/preload'
+import type { UserConfig as UserConfigContract } from '../src/shared/contracts/userConfig'
+import type { UserConfig as UserConfigPreload } from '../src/shared/preload'
 
 type AssertAssignable<From, To extends From> = true
 
@@ -759,6 +761,8 @@ type VoiceTranscriptionProviderPreloadMatchesContract = AssertAssignable<VoiceTr
 type VoiceTranscriptionProviderContractMatchesPreload = AssertAssignable<VoiceTranscriptionProviderPreload, VoiceTranscriptionProviderContract>
 type VoiceTranscriptionResultPreloadMatchesContract = AssertAssignable<VoiceTranscriptionResultContract, VoiceTranscriptionResultPreload>
 type VoiceTranscriptionResultContractMatchesPreload = AssertAssignable<VoiceTranscriptionResultPreload, VoiceTranscriptionResultContract>
+type UserConfigPreloadMatchesContract = AssertAssignable<UserConfigContract, UserConfigPreload>
+type UserConfigContractMatchesPreload = AssertAssignable<UserConfigPreload, UserConfigContract>
 
 describe('shared contract compatibility exports', () => {
   it('keeps Codex session contracts compatible through the preload export', () => {
@@ -1442,5 +1446,11 @@ describe('shared contract compatibility exports', () => {
     ] = [true, true, true, true, true, true]
 
     expect(checks).toEqual([true, true, true, true, true, true])
+  })
+
+  it('keeps User Config compatible through the preload export', () => {
+    const checks: [UserConfigPreloadMatchesContract, UserConfigContractMatchesPreload] = [true, true]
+
+    expect(checks).toEqual([true, true])
   })
 })

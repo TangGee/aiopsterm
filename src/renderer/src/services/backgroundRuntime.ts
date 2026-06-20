@@ -1,5 +1,5 @@
 import { settingsBackgroundPresets } from '@/config/settings'
-import type { UserConfig } from '@shared/preload'
+import type { UserConfig } from '@shared/contracts/userConfig'
 
 export const backgroundImageCss = (image: string) => {
   if (!image) return 'none'

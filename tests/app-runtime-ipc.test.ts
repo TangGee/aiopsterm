@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { IpcMain } from 'electron'
-import type { UserConfig } from '@shared/preload'
+import type { UserConfig } from '@shared/contracts/userConfig'
 
 const backendMocks = vi.hoisted(() => ({
   applyKnowledgeSearchRuntimeSetting: vi.fn(),

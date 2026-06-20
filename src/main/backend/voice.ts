@@ -4,7 +4,7 @@ import {
   type VoiceTranscriptionProviderInput,
   type VoiceTranscriptionProviderResult
 } from '@shared/voice'
-import type { UserConfig } from '@shared/preload'
+import type { UserConfig } from '@shared/contracts/userConfig'
 import type { ModelProviderCheckKey, ModelProviderUserConfig } from '@shared/contracts/appRuntime'
 import { resolveModelProvider } from './modelProviderText'
 

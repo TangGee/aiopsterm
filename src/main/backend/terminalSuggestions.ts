@@ -8,7 +8,7 @@ import type {
   TerminalCommandSuggestion,
   TerminalCommandSuggestionContext
 } from '@shared/contracts/terminalTools'
-import type { UserConfig } from '@shared/preload'
+import type { UserConfig } from '@shared/contracts/userConfig'
 import type { ModelProviderCheckKey } from '@shared/contracts/appRuntime'
 import { createProviderTextRequest, fetchProviderText, resolveModelProvider, type AiProviderResolvedConfig, type AiProviderTextRequest } from './modelProviderText'
 

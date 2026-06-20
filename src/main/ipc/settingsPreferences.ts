@@ -6,7 +6,7 @@ import {
   saveSettingsRule,
   saveSettingsShortcut
 } from '../backend/settingsPreferences'
-import type { UserConfig } from '@shared/preload'
+import type { UserConfig } from '@shared/contracts/userConfig'
 import type { SettingsRuleSaveInput, SettingsShortcutSaveInput } from '@shared/contracts/settingsPreferences'
 
 type RegisterSettingsPreferencesIpcInput = {

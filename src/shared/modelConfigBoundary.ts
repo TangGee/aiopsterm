@@ -1,4 +1,4 @@
-import type { UserConfig } from './preload'
+import type { UserConfig } from './contracts/userConfig'
 
 export type ModelConfigDefaults = Pick<UserConfig, 'modelProvider' | 'modelName'>
 

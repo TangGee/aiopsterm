@@ -3,7 +3,7 @@ import type { IpcMain } from 'electron'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import type { UserConfig } from '../src/shared/preload'
+import type { UserConfig } from '../src/shared/contracts/userConfig'
 import type { KeywordHighlightUserConfig, SecurityUserConfig } from '../src/shared/contracts/appRuntime'
 import type { McpConfigFile } from '../src/shared/contracts/mcp'
 

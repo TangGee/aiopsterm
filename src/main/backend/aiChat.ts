@@ -14,9 +14,7 @@ import type {
   AiChatResponseResult,
   AiChatSkillInput
 } from '@shared/contracts/aiChat'
-import type {
-  UserConfig
-} from '@shared/preload'
+import type { UserConfig } from '@shared/contracts/userConfig'
 import type { AiPreferencesUserConfig, ModelProviderCheckKey } from '@shared/contracts/appRuntime'
 import type { McpResourceReadInput, McpResourceReadResult, McpToolCallInput, McpToolCallResult } from '@shared/contracts/mcp'
 import type { SkillUserConfig } from '@shared/contracts/skills'

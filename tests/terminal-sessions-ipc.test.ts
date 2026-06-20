@@ -5,7 +5,7 @@ import {
   type TerminalLifecycleEvent,
   type TerminalSshConnectionInfo
 } from '../src/shared/contracts/terminalSessions'
-import type { UserConfig } from '../src/shared/preload'
+import type { UserConfig } from '../src/shared/contracts/userConfig'
 
 type IpcHandler = (event: unknown, ...args: any[]) => unknown
 

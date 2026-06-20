@@ -6,7 +6,7 @@ import {
   type DatabaseRuntimeConfig
 } from '@shared/database'
 import type { DatabaseConnectionTestInput } from '@shared/contracts/database'
-import type { UserConfig } from '@shared/preload'
+import type { UserConfig } from '@shared/contracts/userConfig'
 import { createProviderTextRequest, fetchProviderText, resolveModelProvider, type AiProviderTextMessage } from './modelProviderText'
 import { createSshProxySocket, type SshProxySocket } from './sshProxy'
 

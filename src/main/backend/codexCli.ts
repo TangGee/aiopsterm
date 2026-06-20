@@ -10,7 +10,7 @@ import type {
   CodexSessionWriteResult,
   CodexSessionKillResult
 } from '@shared/contracts/codexSessions'
-import type { UserConfig } from '@shared/preload'
+import type { UserConfig } from '@shared/contracts/userConfig'
 import { buildAiopstermCodexConfigToml, codexBridgeScriptPath, resolveAiopstermCodexProviderConfig } from './codexConfig'
 
 export type CodexPtyProcess = {

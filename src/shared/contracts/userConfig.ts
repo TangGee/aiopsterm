@@ -1,0 +1,69 @@
+import type { AliasCommandConfig } from './aliases'
+import type { ExtensionUserConfig } from './extensions'
+import type { KnowledgeBaseUserConfig } from './knowledgeBase'
+import type { McpServerUserConfig, McpToolStatesUserConfig } from './mcp'
+import type { QuickCommandsUserConfig } from './quickCommands'
+import type { ShortcutUserConfig, UserRuleConfig } from './settingsPreferences'
+import type { SkillUserConfig } from './skills'
+import type {
+  AiPreferencesUserConfig,
+  EditorUserConfig,
+  KeywordHighlightUserConfig,
+  ModelSettingsUserConfig,
+  NotificationUserConfig,
+  PrivacyUserConfig,
+  SecurityUserConfig,
+  SshAgentKeyConfig,
+  SshProxyConfig,
+  TerminalUserConfig,
+  WorkspaceUserConfig
+} from './appRuntime'
+
+export type UserConfig = {
+  language: string
+  theme: string
+  defaultMode: 'terminal' | 'agents'
+  leftPanelOpen: boolean
+  rightPanelOpen: boolean
+  agentsLeftOpen: boolean
+  leftPanelWidth?: number
+  rightPanelWidth?: number
+  agentsLeftWidth?: number
+  modelProvider: 'local' | 'litellm' | 'openai-compatible' | 'ollama' | 'lmstudio' | 'bedrock' | 'deepseek' | 'anthropic'
+  modelEndpoint: string
+  modelName: string
+  watermark: 'open' | 'close'
+  background: {
+    mode: 'none' | 'preset' | 'custom'
+    image: string
+    opacity: number
+    brightness: number
+    lastCustomImage?: string
+  }
+  terminal?: TerminalUserConfig
+  workspacePreferences?: WorkspaceUserConfig
+  editorSettings?: EditorUserConfig
+  sshProxyConfigs?: SshProxyConfig[]
+  sshAgentKeys?: SshAgentKeyConfig[]
+  extensionSettings?: ExtensionUserConfig
+  keywordHighlight?: KeywordHighlightUserConfig
+  securityConfig?: SecurityUserConfig
+  privacy?: PrivacyUserConfig
+  aiPreferences?: AiPreferencesUserConfig
+  notifications?: NotificationUserConfig
+  modelSettings?: ModelSettingsUserConfig
+  shortcuts?: ShortcutUserConfig[]
+  rules?: UserRuleConfig[]
+  skills?: SkillUserConfig[]
+  customInstructions?: string
+  mcpServers?: McpServerUserConfig[]
+  mcpToolStates?: McpToolStatesUserConfig
+  quickCommands?: QuickCommandsUserConfig
+  knowledgeBase?: KnowledgeBaseUserConfig
+  aliasCommands?: AliasCommandConfig[]
+  onboarding?: {
+    version: number
+    guideTabAutoOpened: boolean
+    completedModules: Record<string, boolean>
+  }
+}

@@ -1,5 +1,5 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
-import type { UserConfig } from '../src/shared/preload'
+import type { UserConfig } from '../src/shared/contracts/userConfig'
 
 let transcribeVoiceInput: (input?: Record<string, unknown>) => Promise<any>
 let configureVoiceBackendRuntime: (config?: { getConfig?: () => UserConfig; fetch?: typeof fetch; timeoutMs?: number }) => void

@@ -52,11 +52,8 @@ import {
   shouldUseUserExternalOpenBackendDouble
 } from '@shared/runtimeSwitches'
 import { broadcastWindowEvent } from '@shared/windowEvents'
-import type {
-  KubernetesTerminalDataEvent,
-  KubernetesTerminalExitEvent,
-  UserConfig
-} from '@shared/preload'
+import type { KubernetesTerminalDataEvent, KubernetesTerminalExitEvent } from '@shared/contracts/kubernetes'
+import type { UserConfig } from '@shared/contracts/userConfig'
 import type { ControlNotificationRecord, ControlResponse } from '@shared/contracts/control'
 import type { McpConfigFile } from '@shared/contracts/mcp'
 import type { ManagedAiSessionEvent, ManagedAiSessionFocusRequest } from '@shared/contracts/managedAiSessions'

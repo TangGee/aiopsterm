@@ -1,8 +1,6 @@
 import type { IpcMain } from 'electron'
 import { readFile, writeFile } from 'fs/promises'
-import type {
-  UserConfig
-} from '@shared/preload'
+import type { UserConfig } from '@shared/contracts/userConfig'
 import type {
   KeywordHighlightConfigWriteResult,
   KeywordHighlightUserConfig,
