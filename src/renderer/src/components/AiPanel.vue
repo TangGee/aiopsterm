@@ -1661,6 +1661,23 @@ import {
 } from 'lucide-vue-next'
 import { useWorkspaceStore, type TerminalSettings } from '@/stores/workspace'
 import { readStoredAiPanelMode, storeAiPanelMode, type AiPanelMode } from '@/services/aiPanelModeRuntime'
+import {
+  aiChipPartFromContext,
+  aiImagePartFromContext,
+  aiMediaTypeFromContext,
+  aiPanelImagePartMediaTypes,
+  cloneAiContextOption,
+  editablePlainTextFromElement,
+  extractEditablePlainTextFromNode,
+  fallbackAiContentPartsForMessage,
+  hasSendableAiContent,
+  isLocalhostAiContext,
+  mergeAdjacentTextContentParts,
+  plainTextForAiContentPart,
+  selectedVisibleHostAiContexts,
+  splitAiContentInputParts,
+  toggleHostAiContextInList
+} from '@/services/aiPanelInputRuntime'
 import { aiChatClient } from '@/services/aiChatClient'
 import { copyTextToClipboard } from '@/services/clipboardRuntime'
 import { codexSessionClient } from '@/services/codexSessionClient'
@@ -1835,7 +1852,7 @@ const preferredVoiceMimeTypes = [
   'audio/aac',
   'audio/wav'
 ]
-const imagePartMediaTypes: AiSupportedImageType[] = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/bmp', 'image/svg+xml']
+const imagePartMediaTypes = aiPanelImagePartMediaTypes
 const chatAttachmentFilters = [
   {
     name: 'Text',
@@ -2607,17 +2624,10 @@ const chatSearchMatches: ChatSearchMatch[] = []
 const getCurrentConversationTitle = () =>
   workspace.conversations.find((conversation) => conversation.id === workspace.selectedConversationId)?.title || 'Chat Export'
 
-const plainTextForPart = (part: AiContentPart) => {
-  if (part.type === 'text') return part.text
-  if (part.type === 'image') return `[image: ${part.name || part.mediaType}]`
-  if (part.chipType === 'doc') return `@${part.ref.name || part.ref.relPath || part.ref.absPath}`
-  if (part.chipType === 'chat') return `@${part.ref.title || part.ref.taskId}`
-  if (part.chipType === 'command') return part.ref.label || part.ref.command
-  return `@skill:${part.ref.skillName}`
-}
+const plainTextForPart = plainTextForAiContentPart
 
 const messagePlainText = (message: { text: string; contentParts?: AiContentPart[] }) =>
-  message.contentParts?.length ? message.contentParts.map(plainTextForPart).join('') : message.text
+  message.contentParts?.length ? message.contentParts.map((part) => plainTextForPart(part)).join('') : message.text
 
 type RenderedMarkdownPart =
   | {
@@ -3736,8 +3746,7 @@ const createIconElement = (kind: AiContextKind | 'command') => {
   return span
 }
 
-const mediaTypeFromContext = (context: AiContextOption): AiSupportedImageType =>
-  imagePartMediaTypes.includes(context.mediaType as AiSupportedImageType) ? (context.mediaType as AiSupportedImageType) : 'image/png'
+const mediaTypeFromContext = aiMediaTypeFromContext
 
 const getChipLabel = (part: AiChipContentPart) => {
   if (part.chipType === 'doc') return part.ref.name || part.ref.absPath
@@ -3746,75 +3755,15 @@ const getChipLabel = (part: AiChipContentPart) => {
   return part.ref.title || part.ref.taskId
 }
 
-const chipPartFromContext = (context: AiContextOption): AiChipContentPart | null => {
-  if (context.kind === 'docs') {
-    const absPath = context.relPath || context.detail || context.label
-    return {
-      type: 'chip',
-      chipType: 'doc',
-      ref: {
-        absPath,
-        relPath: context.relPath,
-        name: context.label,
-        type: 'file'
-      }
-    }
-  }
-  if (context.kind === 'chats') {
-    return {
-      type: 'chip',
-      chipType: 'chat',
-      ref: {
-        taskId: context.id.replace(/^chat:/, ''),
-        title: context.label
-      }
-    }
-  }
-  if (context.kind === 'skills') {
-    return {
-      type: 'chip',
-      chipType: 'skill',
-      ref: {
-        skillName: context.label,
-        description: context.detail
-      }
-    }
-  }
-  return null
-}
+const chipPartFromContext = aiChipPartFromContext
 
-const imagePartFromContext = (context: AiContextOption): AiImageContentPart | null => {
-  if (context.kind !== 'images' || !context.data) return null
-  return {
-    type: 'image',
-    mediaType: mediaTypeFromContext(context),
-    data: context.data,
-    name: context.label
-  }
-}
+const imagePartFromContext = aiImagePartFromContext
 
-const cloneContextOption = (context: AiContextOption): AiContextOption => ({ ...context })
+const cloneContextOption = cloneAiContextOption
 
-const hostContextFromOption = (context: AiContextOption): AiContextOption | null =>
-  context.kind === 'hosts' ? cloneContextOption(context) : null
+const isLocalhostContext = isLocalhostAiContext
 
-const isLocalhostContext = (context: AiContextOption) => context.label === '127.0.0.1' || context.id === 'opened-local'
-
-const toggleHostContextInList = (contexts: AiContextOption[], context: AiContextOption) => {
-  const host = hostContextFromOption(context)
-  if (!host) return contexts
-  if (contexts.some((item) => item.id === host.id)) {
-    return contexts.filter((item) => item.id !== host.id)
-  }
-  let nextContexts = [...contexts]
-  if (!isLocalhostContext(host)) {
-    nextContexts = nextContexts.filter((item) => !isLocalhostContext(item))
-  }
-  if (nextContexts.filter((item) => item.kind === 'hosts').length >= maxHostContexts) {
-    return nextContexts
-  }
-  return [...nextContexts, host]
-}
+const toggleHostContextInList = (contexts: AiContextOption[], context: AiContextOption) => toggleHostAiContextInList(contexts, context, maxHostContexts)
 
 const removeEditHostContext = (id: string) => {
   editHostContexts.value = editHostContexts.value.filter((context) => context.id !== id)
@@ -4386,22 +4335,10 @@ const setDraft = (value: string) => {
   })
 }
 
-const extractEditableTextFromNode = (node: Node): string => {
-  if (node.nodeType === Node.TEXT_NODE) {
-    return node.textContent || ''
-  }
-  if (node.nodeType !== Node.ELEMENT_NODE) return ''
-  const element = node as HTMLElement
-  if (element.classList.contains('mention-chip')) return ''
-  if (element.dataset.imageType) return ''
-  if (element.tagName === 'BR') return '\n'
-  return Array.from(element.childNodes).map(extractEditableTextFromNode).join('')
-}
+const extractEditableTextFromNode = extractEditablePlainTextFromNode
 
 const editablePlainText = () => {
-  const editable = editableRef.value
-  if (!editable) return ''
-  return Array.from(editable.childNodes).map(extractEditableTextFromNode).join('').replace(/\u00a0/g, ' ').trim()
+  return editablePlainTextFromElement(editableRef.value)
 }
 
 const contentPartFromContextChip = (chip: HTMLElement): AiContentPart | null => {
@@ -4490,17 +4427,7 @@ const extractContentPartsFromNode = (node: Node): AiContentPart[] => {
   return Array.from(element.childNodes).flatMap(extractContentPartsFromNode)
 }
 
-const mergeAdjacentTextParts = (parts: AiContentPart[]) => {
-  return parts.reduce<AiContentPart[]>((acc, part) => {
-    const previous = acc.at(-1)
-    if (part.type === 'text' && previous?.type === 'text') {
-      previous.text += part.text
-      return acc
-    }
-    acc.push(part)
-    return acc
-  }, [])
-}
+const mergeAdjacentTextParts = mergeAdjacentTextContentParts
 
 const extractEditableContentParts = () => {
   const editable = editableRef.value
@@ -4517,12 +4444,10 @@ const extractContentPartsFromEditable = (editable: HTMLElement | null) => {
   )
 }
 
-const fallbackPartsForMessage = (message: { text: string; contentParts?: AiContentPart[] }) =>
-  message.contentParts?.length ? message.contentParts.map((part) => ({ ...part })) : [{ type: 'text' as const, text: message.text }]
+const fallbackPartsForMessage = fallbackAiContentPartsForMessage
 
 const editableTextFromElement = (editable: HTMLElement | null) => {
-  if (!editable) return ''
-  return Array.from(editable.childNodes).map(extractEditableTextFromNode).join('').replace(/\u00a0/g, ' ').trim()
+  return editablePlainTextFromElement(editable)
 }
 
 const renderEditEditableFromParts = (parts: AiContentPart[]) => {
@@ -4530,8 +4455,9 @@ const renderEditEditableFromParts = (parts: AiContentPart[]) => {
   if (!editable) return
   renderPartsIntoEditable(editable, parts)
   editDraft.value = editableTextFromElement(editable)
-  editImageInputParts.value = parts.filter((part): part is AiImageContentPart => part.type === 'image')
-  editFileInputParts.value = parts.filter((part): part is AiDocChipContentPart => part.type === 'chip' && part.chipType === 'doc')
+  const splitParts = splitAiContentInputParts(parts)
+  editImageInputParts.value = splitParts.images
+  editFileInputParts.value = splitParts.docs
   requestAnimationFrame(() => {
     const range = document.createRange()
     range.selectNodeContents(editable)
@@ -4563,12 +4489,9 @@ const cancelMessageEdit = () => {
 
 const handleEditEditableInput = () => {
   editDraft.value = editableTextFromElement(editEditableRef.value)
-  editImageInputParts.value = extractContentPartsFromEditable(editEditableRef.value).filter(
-    (part): part is AiImageContentPart => part.type === 'image'
-  )
-  editFileInputParts.value = extractContentPartsFromEditable(editEditableRef.value).filter(
-    (part): part is AiDocChipContentPart => part.type === 'chip' && part.chipType === 'doc'
-  )
+  const splitParts = splitAiContentInputParts(extractContentPartsFromEditable(editEditableRef.value))
+  editImageInputParts.value = splitParts.images
+  editFileInputParts.value = splitParts.docs
   saveEditSelection()
 }
 
@@ -4603,8 +4526,7 @@ const handleEditEditablePaste = (event: ClipboardEvent) => {
 const confirmMessageEdit = async () => {
   if (!editingMessageId.value) return
   const contentParts = extractContentPartsFromEditable(editEditableRef.value)
-  const hasSendableContent = contentParts.some((part) => part.type !== 'text' || part.text.trim())
-  if (!hasSendableContent) return
+  if (!hasSendableAiContent(contentParts)) return
   const sent = await workspace.resendUserMessageFromParts(editingMessageId.value, contentParts, editHostContexts.value.map(cloneContextOption))
   if (sent) cancelMessageEdit()
 }
@@ -5490,21 +5412,7 @@ const addMainContextFromPopup = (context: AiContextOption) => {
 }
 
 const buildSelectedHostContextsFromVisible = (currentHosts: AiContextOption[]) => {
-  const selectable = visibleHostContextOptions.value
-  const hasRemoteHost = selectable.some((context) => !isLocalhostContext(context))
-  let nextHosts = currentHosts.map(cloneContextOption)
-  if (hasRemoteHost) {
-    nextHosts = nextHosts.filter((context) => !isLocalhostContext(context))
-  }
-
-  for (const context of selectable) {
-    if (hasRemoteHost && isLocalhostContext(context)) continue
-    if (nextHosts.some((item) => item.id === context.id)) continue
-    if (nextHosts.length >= maxHostContexts) break
-    nextHosts = [...nextHosts, cloneContextOption(context)]
-  }
-
-  return nextHosts.slice(0, maxHostContexts)
+  return selectedVisibleHostAiContexts(currentHosts, visibleHostContextOptions.value, maxHostContexts)
 }
 
 const selectAllVisibleHostContexts = () => {

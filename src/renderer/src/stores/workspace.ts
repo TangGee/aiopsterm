@@ -27,6 +27,11 @@ import {
   type AiMcpToolCallActionData
 } from '@/services/aiChatBackendGuards'
 import { aiChatClient } from '@/services/aiChatClient'
+import {
+  hasStructuredAiContentParts,
+  plainTextFromAiContentParts,
+  sendableAiContentParts
+} from '@/services/aiPanelInputRuntime'
 import { agentHookClient } from '@/services/agentHookClient'
 import { aliasClient } from '@/services/aliasClient'
 import { assetsClient } from '@/services/assetsClient'
@@ -10288,18 +10293,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return { status: 'allow' } as TerminalSecurityDecision
   }
 
-  const buildPlainTextFromAiParts = (parts: AiContentPart[]) =>
-    parts
-      .map((part) => {
-        if (part.type === 'text') return part.text
-        if (part.type === 'image') return '[image]'
-        if (part.chipType === 'doc') return `@${part.ref.absPath || ''}`
-        if (part.chipType === 'command') return part.ref.command
-        if (part.chipType === 'skill') return `@skill:${part.ref.skillName}`
-        const taskName = part.ref.title || ''
-        return taskName ? `@${part.ref.taskId}_${taskName}` : `@${part.ref.taskId}`
-      })
-      .join('')
+  const buildPlainTextFromAiParts = (parts: AiContentPart[]) => plainTextFromAiContentParts(parts, { mode: 'exchange' })
 
   const agentAutoRunCommandMessageIds = new Set<string>()
   const agentReadOnlyAutoRunConversationIds = new Set<string>()
@@ -10510,8 +10504,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     overrideHosts?: AiContextOption[],
     options: SendChatOptions = {}
   ) => {
-    const safeContentParts = contentParts?.filter((part) => part.type !== 'text' || part.text.trim()) || []
-    const hasStructuredParts = safeContentParts.some((part) => part.type !== 'text')
+    const safeContentParts = sendableAiContentParts(contentParts)
+    const hasStructuredParts = hasStructuredAiContentParts(safeContentParts)
     const prompt = text.trim() || buildPlainTextFromAiParts(safeContentParts).trim()
     if (!prompt && !hasStructuredParts) return false
     const baseMessageContexts = overrideHosts ? [...overrideHosts, ...selectedContexts.value.filter((item) => item.kind !== 'hosts')] : [...selectedContexts.value]
@@ -10589,7 +10583,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (index === -1) return false
     const originalHosts = chatMessages.value[index].hosts
     const prompt = buildPlainTextFromAiParts(contentParts).trim()
-    const hasStructuredParts = contentParts.some((part) => part.type !== 'text')
+    const hasStructuredParts = hasStructuredAiContentParts(contentParts)
     if (!prompt && !hasStructuredParts) return false
     chatMessages.value.splice(index)
     clearAiContextUsage()
