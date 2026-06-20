@@ -193,14 +193,19 @@ import {
 } from '@/services/terminalMacroRuntime'
 import {
   appendTerminalSegment,
-  clearTerminalPanelSplitState,
+  attachTerminalPanelToSplit,
+  closeOtherTerminalPanelsInCollection,
+  closeTerminalPanelInCollection,
   createEmptyTerminalPanel,
   createForkSshTerminalPanel,
+  createTerminalPanelInCollection,
   createTerminalSegments,
   defaultTerminalPanelTitle,
+  detachTerminalPanelFromSplit,
+  discardPendingTerminalPanelInCollection,
+  hasTerminalPanelSplitState,
   isNonEmptyText,
-  isWelcomeTerminalPanelPlaceholder,
-  resetTerminalPanelToDefault,
+  resetTerminalPanelCollectionToDefault,
   setTerminalOutput,
   type PanelDirection,
   type TerminalOutputScope,
@@ -10089,38 +10094,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const createPanel = (split?: PanelDirection) => {
-    const sourcePanel = split ? panels.value.find((panel) => panel.id === activePanelId.value) : undefined
-    const welcomePlaceholder =
-      !split &&
-      panels.value.length === 1 &&
-      isWelcomeTerminalPanelPlaceholder(panels.value[0])
-    if (welcomePlaceholder) {
-      const panel = panels.value[0]
-      panel.id = createRendererLocalId('panel')
-      panel.title = 'Terminal 1'
-      panel.titleSource = 'system'
-      activePanelId.value = panel.id
-      return panel
-    }
-    const sourceId = sourcePanel?.id
-    const groupId = split ? sourcePanel?.splitGroupId || sourceId : undefined
-    const splitOrder = split ? Date.now() + panels.value.length : undefined
-    const panel = createEmptyTerminalPanel(
-      createRendererLocalId('panel'),
-      split && sourcePanel ? sourcePanel.title : `Terminal ${panels.value.length}`,
+    const panel = createTerminalPanelInCollection(panels.value, {
+      id: createRendererLocalId('panel'),
+      activePanelId: activePanelId.value,
       split,
-      sourceId,
-      groupId,
-      splitOrder,
-      sourcePanel
-    )
-    if (split && sourcePanel && groupId) {
-      sourcePanel.splitGroupId = groupId
-      const sourceIndex = panels.value.findIndex((item) => item.id === sourcePanel.id)
-      panels.value.splice(sourceIndex + 1, 0, panel)
-    } else {
-      panels.value.push(panel)
-    }
+      splitOrder: split ? Date.now() + panels.value.length : undefined
+    })
     activePanelId.value = panel.id
     return panel
   }
@@ -10216,135 +10195,39 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const hasSplitState = (panelId: string) => {
-    const panel = panels.value.find((item) => item.id === panelId)
-    if (!panel) return false
-    if (panel.split || panel.splitGroupId) return true
-    return panels.value.some((item) => item.splitSourceId === panel.id || (panel.splitGroupId && item.splitGroupId === panel.splitGroupId))
-  }
-
-  const normalizeSplitState = () => {
-    const ids = new Set(panels.value.map((panel) => panel.id))
-    const groupCounts = new Map<string, number>()
-    panels.value.forEach((panel) => {
-      if (!panel.split && !panel.splitGroupId) {
-        panel.splitSourceId = undefined
-        return
-      }
-      if (panel.split && (!panel.splitSourceId || !ids.has(panel.splitSourceId) || panel.splitSourceId === panel.id)) {
-        clearTerminalPanelSplitState(panel)
-        return
-      }
-      if (panel.splitGroupId) {
-        groupCounts.set(panel.splitGroupId, (groupCounts.get(panel.splitGroupId) || 0) + 1)
-      }
-    })
-    panels.value.forEach((panel) => {
-      if (panel.splitGroupId && (groupCounts.get(panel.splitGroupId) || 0) < 2) {
-        clearTerminalPanelSplitState(panel)
-      }
-    })
-  }
-
-  const detachPanelFromSplit = (panel: TerminalPanel) => {
-    const previousGroupId = panel.splitGroupId
-    const previousSourceId = panel.splitSourceId
-    const groupSiblings = previousGroupId
-      ? panels.value.filter((item) => item.id !== panel.id && item.splitGroupId === previousGroupId)
-      : []
-    const fallbackSourceId =
-      (previousSourceId && groupSiblings.some((item) => item.id === previousSourceId) ? previousSourceId : undefined) ||
-      groupSiblings[0]?.id
-
-    clearTerminalPanelSplitState(panel)
-    panels.value.forEach((item) => {
-      if (item.id === panel.id || item.splitSourceId !== panel.id) return
-      if (!fallbackSourceId) {
-        clearTerminalPanelSplitState(item)
-        return
-      }
-      if (item.id === fallbackSourceId) {
-        item.split = undefined
-        item.splitSourceId = undefined
-        item.splitOrder = undefined
-        item.splitGroupId = previousGroupId
-        return
-      }
-      item.splitSourceId = fallbackSourceId
-    })
-    normalizeSplitState()
+    return hasTerminalPanelSplitState(panels.value, panelId)
   }
 
   const unsplitPanel = (panelId = activePanelId.value) => {
-    const panel = panels.value.find((item) => item.id === panelId)
-    if (!panel) return false
-    detachPanelFromSplit(panel)
-    activePanelId.value = panel.id
+    const changed = detachTerminalPanelFromSplit(panels.value, panelId)
+    if (!changed) return false
+    activePanelId.value = panelId
     return true
   }
 
   const attachPanelToSplit = (panelId: string, targetPanelId: string, direction: PanelDirection = 'right') => {
-    const panel = panels.value.find((item) => item.id === panelId)
-    const target = panels.value.find((item) => item.id === targetPanelId)
-    if (!panel || !target || panel.id === target.id) return false
-    detachPanelFromSplit(panel)
-    const groupId = target.splitGroupId || target.id
-    target.splitGroupId = groupId
-    panel.split = direction
-    panel.splitSourceId = target.id
-    panel.splitGroupId = groupId
-    panel.splitOrder = Date.now() + panels.value.length
-    const currentIndex = panels.value.findIndex((item) => item.id === panel.id)
-    const targetIndex = panels.value.findIndex((item) => item.id === target.id)
-    if (currentIndex >= 0 && targetIndex >= 0 && currentIndex !== targetIndex + 1) {
-      const [moved] = panels.value.splice(currentIndex, 1)
-      const nextTargetIndex = panels.value.findIndex((item) => item.id === target.id)
-      panels.value.splice(nextTargetIndex + 1, 0, moved)
-    }
-    normalizeSplitState()
-    activePanelId.value = panel.id
+    const changed = attachTerminalPanelToSplit(panels.value, panelId, targetPanelId, direction, Date.now() + panels.value.length)
+    if (!changed) return false
+    activePanelId.value = panelId
     return true
   }
 
   const closePanel = (id = activePanelId.value) => {
-    if (panels.value.length === 1) {
-      resetTerminalPanelToDefault(panels.value[0])
-      activePanelId.value = panels.value[0].id
-      return
-    }
-    panels.value = panels.value.filter((panel) => panel.id !== id)
-    normalizeSplitState()
-    if (!panels.value.some((panel) => panel.id === activePanelId.value)) {
-      activePanelId.value = panels.value[0].id
-    }
+    activePanelId.value = closeTerminalPanelInCollection(panels.value, id, activePanelId.value)
   }
 
   const discardPendingTerminalPanel = (id: string, preferredActiveId?: string) => {
-    const panel = panels.value.find((item) => item.id === id)
-    if (!panel || panel.kind !== 'terminal' || panel.sessionId) return false
-    if (panels.value.length === 1) {
-      resetTerminalPanelToDefault(panel)
-      activePanelId.value = panel.id
-      return true
-    }
-    const wasActive = activePanelId.value === id
-    panels.value = panels.value.filter((item) => item.id !== id)
-    normalizeSplitState()
-    if (preferredActiveId && panels.value.some((item) => item.id === preferredActiveId)) {
-      activePanelId.value = preferredActiveId
-    } else if (wasActive || !panels.value.some((item) => item.id === activePanelId.value)) {
-      activePanelId.value = panels.value[0].id
-    }
-    return true
+    const result = discardPendingTerminalPanelInCollection(panels.value, id, activePanelId.value, preferredActiveId)
+    activePanelId.value = result.activePanelId
+    return result.discarded
   }
 
   const closeOthers = () => {
-    panels.value = panels.value.filter((panel) => panel.id === activePanelId.value)
-    panels.value.forEach(clearTerminalPanelSplitState)
+    closeOtherTerminalPanelsInCollection(panels.value, activePanelId.value)
   }
 
   const closeAllPanels = () => {
-    panels.value = [createEmptyTerminalPanel('panel-main', defaultTerminalPanelTitle)]
-    activePanelId.value = 'panel-main'
+    activePanelId.value = resetTerminalPanelCollectionToDefault(panels.value)
   }
 
   const closePanels = (mode: CloseMode, id = activePanelId.value) => {
