@@ -6,6 +6,7 @@ import {
   isAiTodoSnapshotData,
   malformedAiBackendResultMessage
 } from '@/services/aiBackendGuards'
+import { chatHistoryClient } from '@/services/chatHistoryClient'
 import { validateCommandSecurity, type CommandSecurityResult } from '@/services/commandSecurityRuntime'
 import { applyEditorSettingsToDocument } from '@/services/editorRuntime'
 import {
@@ -4674,13 +4675,14 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const currentChatHistoryMessages = () => chatMessages.value.map(chatMessageToHistoryMessage).filter(Boolean) as AiChatHistoryMessage[]
 
   const restoreChatMessagesFromBackend = async (id: string) => {
-    if (!window.aiops?.restoreChatConversation) {
+    const restoreChatConversation = chatHistoryClient.restoreChatConversation()
+    if (!restoreChatConversation) {
       setTopNotice('会话历史加载服务不可用')
       return false
     }
     let result
     try {
-      result = await window.aiops.restoreChatConversation(id)
+      result = await restoreChatConversation(id)
     } catch {
       setTopNotice('会话历史加载失败')
       return false
@@ -4709,13 +4711,14 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const loadChatConversationsFromBackend = async (options: { restoreIfEmpty?: boolean } = {}) => {
-    if (!window.aiops?.listChatConversations) {
+    const listChatConversations = chatHistoryClient.listChatConversations()
+    if (!listChatConversations) {
       setTopNotice('会话历史加载服务不可用')
       return false
     }
     let result
     try {
-      result = await window.aiops.listChatConversations()
+      result = await listChatConversations()
     } catch {
       setTopNotice('会话历史加载失败')
       return false
@@ -4915,17 +4918,19 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const updateCurrentConversationSnapshot = async (summary?: string, options: { notifyUnavailable?: boolean; notifyFailure?: boolean } = {}) => {
-    if (!window.aiops?.updateChatConversation) {
+    const updateChatConversation = chatHistoryClient.updateChatConversation()
+    if (!updateChatConversation) {
       if (options.notifyUnavailable) setTopNotice('会话历史写入服务不可用')
       return false
     }
     let id = selectedConversationId.value
     if (!id || !conversations.value.some((conversation) => conversation.id === id)) {
-      if (!window.aiops.createChatConversation) {
+      const createChatConversation = chatHistoryClient.createChatConversation()
+      if (!createChatConversation) {
         if (options.notifyUnavailable) setTopNotice('会话历史写入服务不可用')
         return false
       }
-      const created = await window.aiops.createChatConversation()
+      const created = await createChatConversation()
       if (!created?.ok || !isAiChatConversationMutationData(created.data)) {
         if (options.notifyFailure) setTopNotice(created?.errorMessage || '会话历史写入失败')
         return false
@@ -4939,7 +4944,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const conversation = conversations.value.find((item) => item.id === id)
     if (!conversation) return false
     const nextTitle = summary && isAutoNamedConversationTitle(conversation.title) ? conversationTitleFromPrompt(summary) || conversation.title : conversation.title
-    const result = await window.aiops.updateChatConversation({
+    const result = await updateChatConversation({
       id,
       title: nextTitle,
       summary: summary || conversation.summary,
@@ -14558,8 +14563,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const createConversation = async () => {
-    if (!window.aiops?.createChatConversation) return null
-    const result = await window.aiops.createChatConversation()
+    const createChatConversation = chatHistoryClient.createChatConversation()
+    if (!createChatConversation) return null
+    const result = await createChatConversation()
     if (!result?.ok || !isAiChatConversationMutationData(result.data)) return null
     applyChatHistorySnapshot({
       conversations: result.data.conversations,
@@ -14570,8 +14576,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const deleteConversation = async (id: string) => {
-    if (!window.aiops?.deleteChatConversation) return false
-    const result = await window.aiops.deleteChatConversation(id)
+    const deleteChatConversation = chatHistoryClient.deleteChatConversation()
+    if (!deleteChatConversation) return false
+    const result = await deleteChatConversation(id)
     if (!result?.ok || !isAiChatConversationDeleteData(result.data)) return false
     applyChatHistorySnapshot({
       conversations: result.data.conversations,
@@ -14595,11 +14602,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const nextTitle = title.trim()
     const conversation = conversations.value.find((item) => item.id === id)
     if (!conversation || !nextTitle) return false
-    if (!window.aiops?.updateChatConversation) {
+    const updateChatConversation = chatHistoryClient.updateChatConversation()
+    if (!updateChatConversation) {
       setTopNotice('会话历史写入服务不可用')
       return false
     }
-    const result = await window.aiops.updateChatConversation({
+    const result = await updateChatConversation({
       id,
       title: nextTitle,
       summary: conversation.summary,
@@ -14618,11 +14626,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const conversation = conversations.value.find((item) => item.id === id)
     if (!conversation) return false
     const nextFavorite = !conversation.favorite
-    if (!window.aiops?.updateChatConversation) {
+    const updateChatConversation = chatHistoryClient.updateChatConversation()
+    if (!updateChatConversation) {
       setTopNotice('会话历史写入服务不可用')
       return false
     }
-    const result = await window.aiops.updateChatConversation({
+    const result = await updateChatConversation({
       id,
       title: conversation.title,
       summary: conversation.summary,
@@ -14769,12 +14778,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const setMessageFeedback = async (id: string, feedback: 'up' | 'down') => {
     const message = chatMessages.value.find((item) => item.id === id)
     if (!message || !selectedConversationId.value) return false
-    if (!window.aiops?.saveChatMessageMetadata) {
+    const saveChatMessageMetadata = chatHistoryClient.saveChatMessageMetadata()
+    if (!saveChatMessageMetadata) {
       setTopNotice('AI 消息写入服务不可用')
       return false
     }
     const nextFeedback = message.feedback === feedback ? null : feedback
-    const result = await window.aiops.saveChatMessageMetadata({
+    const result = await saveChatMessageMetadata({
       conversationId: selectedConversationId.value,
       messageId: id,
       feedback: nextFeedback
@@ -14786,11 +14796,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const toggleMessageFavorite = async (id: string) => {
     const message = chatMessages.value.find((item) => item.id === id)
     if (!message || !selectedConversationId.value) return false
-    if (!window.aiops?.saveChatMessageMetadata) {
+    const saveChatMessageMetadata = chatHistoryClient.saveChatMessageMetadata()
+    if (!saveChatMessageMetadata) {
       setTopNotice('AI 消息写入服务不可用')
       return false
     }
-    const result = await window.aiops.saveChatMessageMetadata({
+    const result = await saveChatMessageMetadata({
       conversationId: selectedConversationId.value,
       messageId: id,
       favorite: !message.favorite
