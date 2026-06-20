@@ -51,24 +51,8 @@ import {
 } from './backend/codexTerminalBridge'
 import { closeExternalCodexMcpBridgeServer } from './backend/externalCodexMcpBridge'
 import {
-  bulkManagedAiSessions,
-  clearManagedAiNotifications,
-  clearManagedAiSession,
   closeAiAgentSessionServer,
-  dismissManagedAiNotification,
   ensureAiAgentSessionServer,
-  getAgentHibernationConfig,
-  hibernateManagedAiSession,
-  jumpToUnreadManagedAiNotification,
-  listManagedAiNotifications,
-  listManagedAiSessions,
-  markManagedAiNotificationRead,
-  openManagedAiNotification,
-  publishAiAgentSessionEvent,
-  renameManagedAiSession,
-  replyManagedAiSession,
-  setAgentHibernationConfig,
-  wakeManagedAiSession
 } from './backend/agentSessions'
 import {
   getChatConversationMessages,
@@ -125,6 +109,7 @@ import { registerDatabaseIpc } from './ipc/database'
 import { registerExtensionsIpc } from './ipc/extensions'
 import { registerFilesIpc } from './ipc/files'
 import { registerKubernetesIpc } from './ipc/kubernetes'
+import { registerManagedAiSessionsIpc } from './ipc/managedAiSessions'
 import { registerModelsIpc } from './ipc/models'
 import { registerQuickCommandsIpc } from './ipc/quickCommands'
 import { registerSettingsPreferencesIpc } from './ipc/settingsPreferences'
@@ -165,7 +150,6 @@ import type {
   AiopsKeychainInput,
   AiopsOrganizationAssetRefreshInput,
   AiAgentSessionEvent,
-  AiAgentSessionEventInput,
   ManagedAiSessionEvent,
   ManagedAiSessionFocusRequest,
   PrivacyRuntimeApplyInput,
@@ -2684,6 +2668,10 @@ const registerIpc = () => {
   })
   registerFilesIpc(ipcMain)
   registerKubernetesIpc(ipcMain)
+  registerManagedAiSessionsIpc(ipcMain, {
+    emitAgentSessionEvent: broadcastAiAgentSessionEvent,
+    focusManagedAiSession: broadcastManagedAiSessionFocusRequest
+  })
   registerModelsIpc(ipcMain, {
     getConfig,
     isLocalChatBackendAvailable: shouldUseAiChatBackendDouble
@@ -3629,30 +3617,6 @@ const registerIpc = () => {
     return createTerminalKillResult(id, true)
   })
 
-  ipcMain.handle('ai-agent:session-event', (_event, input: AiAgentSessionEventInput) => publishAiAgentSessionEvent(input, broadcastAiAgentSessionEvent))
-  ipcMain.handle('ai-agent:sessions:list', () => listManagedAiSessions())
-  ipcMain.handle('ai-agent:hibernation:config:get', () => getAgentHibernationConfig())
-  ipcMain.handle('ai-agent:hibernation:config:set', (_event, input) => setAgentHibernationConfig(input))
-  ipcMain.handle('ai-agent:sessions:hibernate', (_event, input) => hibernateManagedAiSession(input))
-  ipcMain.handle('ai-agent:sessions:wake', (_event, input) => wakeManagedAiSession(input))
-  ipcMain.handle('ai-agent:sessions:reply', (_event, input) => replyManagedAiSession(input))
-  ipcMain.handle('ai-agent:sessions:rename', (_event, input) => renameManagedAiSession(input))
-  ipcMain.handle('ai-agent:sessions:clear', (_event, input) => clearManagedAiSession(input))
-  ipcMain.handle('ai-agent:sessions:bulk', (_event, input) => bulkManagedAiSessions(input))
-  ipcMain.handle('ai-agent:notifications:list', (_event, input) => listManagedAiNotifications(input))
-  ipcMain.handle('ai-agent:notifications:mark-read', (_event, input) => markManagedAiNotificationRead(input))
-  ipcMain.handle('ai-agent:notifications:dismiss', (_event, input) => dismissManagedAiNotification(input))
-  ipcMain.handle('ai-agent:notifications:clear', () => clearManagedAiNotifications())
-  ipcMain.handle('ai-agent:notifications:open', async (_event, input) => {
-    const result = await openManagedAiNotification(input)
-    if (result.ok && result.data?.focusRequest) broadcastManagedAiSessionFocusRequest(result.data.focusRequest)
-    return result
-  })
-  ipcMain.handle('ai-agent:notifications:jump-unread', async () => {
-    const result = await jumpToUnreadManagedAiNotification()
-    if (result.ok && result.data?.focusRequest) broadcastManagedAiSessionFocusRequest(result.data.focusRequest)
-    return result
-  })
   ipcMain.handle('codex:create', async (event, options: CodexSessionCreateOptions = {}) => {
     const owner = BrowserWindow.fromWebContents(event.sender)
     if (!owner) {
