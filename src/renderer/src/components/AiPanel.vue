@@ -1669,12 +1669,34 @@ import {
   extractEditablePlainTextFromNode,
   fallbackAiContentPartsForMessage,
   hasSendableAiContent,
-  isLocalhostAiContext,
   mergeAdjacentTextContentParts,
-  selectedVisibleHostAiContexts,
-  splitAiContentInputParts,
-  toggleHostAiContextInList
+  splitAiContentInputParts
 } from '@/services/aiPanelInputRuntime'
+import {
+  allVisibleAiPanelHostsSelected,
+  backAiPanelDocsDir,
+  clearAiPanelHostContexts,
+  cloneAiPanelCommandOptions,
+  cloneAiPanelContextCategories,
+  enterAiPanelDocsDir,
+  filteredAiPanelCommands,
+  filteredAiPanelContextOptions,
+  filteredAiPanelOpenedHosts,
+  mainContextKeyboardSelection,
+  modelMatchesAiPanelQuery,
+  nextAiPanelPopupKeyboardIndex,
+  planAiPanelCommandApply,
+  planAiPanelContextApply,
+  resetAiPanelDocsNavigation,
+  selectedAiPanelCommand,
+  selectedAiPanelCommandRef,
+  selectedAiPanelContextCategory,
+  selectedAiPanelVisibleHostContexts,
+  sortedAiPanelDocsContextOptions,
+  visibleAiPanelContextCategories,
+  visibleAiPanelHostContextOptions,
+  type AiPanelContextCategoryView
+} from '@/services/aiPanelPopupRuntime'
 import {
   aiPanelChatExportMessage as chatExportMessage,
   aiPanelMessagePlainText as messagePlainText,
@@ -1793,12 +1815,7 @@ const props = defineProps<{ agentMode?: boolean }>()
 const workspace = useWorkspaceStore()
 const { locale, t } = useI18n()
 type AiChatMode = 'agent' | 'cmd'
-type AiContextCategoryView = {
-  id: AiContextKind
-  label: string
-  icon: Component
-  options: AiContextOption[]
-}
+type AiContextCategoryView = AiPanelContextCategoryView<Component>
 
 const aiChatModeOptions: Array<{ id: AiChatMode; label: string; detail: string }> = [
   { id: 'agent', label: 'Agent', detail: '上下文辅助与工具调用' },
@@ -3030,58 +3047,33 @@ const setEditEditableRef = (el: Element | ComponentPublicInstance | null) => {
 }
 
 const aiContextCategories = computed<AiContextCategoryView[]>(() =>
-  workspace.aiContextCatalog.categories.map((category) => ({
-    ...category,
-    icon: aiContextCategoryIcons[category.id] || Search,
-    options: category.options.map((option) => ({ ...option }))
-  }))
+  cloneAiPanelContextCategories(workspace.aiContextCatalog.categories, (kind) => aiContextCategoryIcons[kind] || Search)
 )
-const selectedContextCategory = computed(() => aiContextCategories.value.find((category) => category.id === contextLevel.value))
+const selectedContextCategory = computed(() => selectedAiPanelContextCategory(aiContextCategories.value, contextLevel.value))
 const docsContextOptions = computed<AiContextOption[]>(() =>
-  (selectedContextCategory.value?.options || [])
-    .filter((option) => option.parentRelPath === docsCurrentRelDir.value)
-    .map((option) => ({ ...option }))
-    .sort((first, second) => {
-      if (first.contextType !== second.contextType) return first.contextType === 'dir' ? -1 : 1
-      return first.label.localeCompare(second.label, 'zh-CN', { numeric: true, sensitivity: 'base' })
-    })
+  sortedAiPanelDocsContextOptions(selectedContextCategory.value?.options || [], docsCurrentRelDir.value)
 )
-const commandOptions = computed<AiCommandOption[]>(() => workspace.aiCommandOptions.map((command) => ({ ...command })))
-const displayedOpenedHosts = computed(() => {
-  if (chatMode.value !== 'agent') return []
-  const keyword = contextQuery.value.trim().toLowerCase()
-  return workspace.aiContextCatalog.openedHosts
-    .filter((host) => !keyword || `${host.label} ${host.detail || ''}`.toLowerCase().includes(keyword))
-    .slice(0, 4)
-})
-const visibleContextCategories = computed(() => aiContextCategories.value.filter((category) => category.id !== 'hosts' || chatMode.value === 'agent'))
-const filteredContextOptions = computed(() => {
-  const options =
-    contextLevel.value === 'docs'
-      ? docsContextOptions.value
-      : contextLevel.value === 'skills'
-        ? workspace.aiSkillContextOptions
-        : selectedContextCategory.value?.options || []
-  const keyword = contextQuery.value.trim().toLowerCase()
-  if (!keyword) return options
-  return options.filter((option) => `${option.label} ${option.detail || ''}`.toLowerCase().includes(keyword))
-})
-const visibleHostContextOptions = computed(() => filteredContextOptions.value.filter((option) => option.kind === 'hosts'))
+const commandOptions = computed<AiCommandOption[]>(() => cloneAiPanelCommandOptions(workspace.aiCommandOptions))
+const displayedOpenedHosts = computed(() =>
+  filteredAiPanelOpenedHosts(workspace.aiContextCatalog.openedHosts, contextQuery.value, chatMode.value)
+)
+const visibleContextCategories = computed(() => visibleAiPanelContextCategories(aiContextCategories.value, chatMode.value))
+const filteredContextOptions = computed(() =>
+  filteredAiPanelContextOptions({
+    level: contextLevel.value,
+    selectedCategoryOptions: selectedContextCategory.value?.options,
+    docsOptions: docsContextOptions.value,
+    skillOptions: workspace.aiSkillContextOptions,
+    query: contextQuery.value
+  })
+)
+const visibleHostContextOptions = computed(() => visibleAiPanelHostContextOptions(filteredContextOptions.value))
 const hostContextsForPopup = computed(() =>
   contextTarget.value === 'edit' ? editHostContexts.value : workspace.selectedContexts.filter((context) => context.kind === 'hosts')
 )
-const allVisibleHostContextsSelected = computed(() => {
-  const hosts = visibleHostContextOptions.value
-  const hasRemoteHost = hosts.some((host) => !isLocalhostContext(host))
-  const selectableHosts = hasRemoteHost ? hosts.filter((host) => !isLocalhostContext(host)) : hosts
-  return selectableHosts.length > 0 && selectableHosts.every((host) => hostContextsForPopup.value.some((context) => context.id === host.id))
-})
-const filteredCommands = computed(() => {
-  const keyword = commandQuery.value.trim().toLowerCase()
-  if (!keyword) return commandOptions.value
-  return commandOptions.value.filter((preset) => preset.name.toLowerCase().includes(keyword))
-})
-const selectedCommand = computed(() => commandOptions.value.find((preset) => preset.id === workspace.selectedCommandId))
+const allVisibleHostContextsSelected = computed(() => allVisibleAiPanelHostsSelected(visibleHostContextOptions.value, hostContextsForPopup.value))
+const filteredCommands = computed(() => filteredAiPanelCommands(commandOptions.value, commandQuery.value))
+const selectedCommand = computed(() => selectedAiPanelCommand(commandOptions.value, workspace.selectedCommandId))
 const SELECT_CHROME_PX = 48
 const THINKING_ICON_SELECT_EXTRA_PX = 22
 const DROPDOWN_ROW_CHROME_PX = 52
@@ -3097,11 +3089,8 @@ const selectedModelLabel = computed(() => {
   const model = workspace.aiModelOptions.find((option) => option.id === workspace.config.modelName)
   return model ? displayModelName(model) : displayModelName(workspace.config.modelName)
 })
-const matchesModelQuery = (model: { id: string; label: string; detail?: string; tier?: string; displayName?: string }) => {
-  const keyword = modelQuery.value.trim().toLowerCase()
-  if (!keyword) return true
-  return `${model.id} ${model.label} ${displayModelName(model)} ${model.detail || ''} ${model.tier || ''}`.toLowerCase().includes(keyword)
-}
+const matchesModelQuery = (model: { id: string; label: string; detail?: string; tier?: string; displayName?: string }) =>
+  modelMatchesAiPanelQuery(model, modelQuery.value, displayModelName)
 const filteredModelOptions = computed(() => workspace.aiModelOptions.filter(matchesModelQuery))
 const filteredLockedModelOptions = computed(() => workspace.lockedAiModelOptions.filter(matchesModelQuery))
 const hasAvailableModels = computed(() => workspace.aiModelOptions.some((model) => !model.locked))
@@ -3142,21 +3131,7 @@ const modelDropdownWidthPx = computed(() => {
   return Math.min(Math.max(maxWidth, 120), 720)
 })
 const selectedCommandRef = computed(() => {
-  if (workspace.selectedCommandRef) return workspace.selectedCommandRef
-  if (selectedCommand.value) {
-    return {
-      command: selectedCommand.value.command,
-      label: selectedCommand.value.label,
-      path: selectedCommand.value.path
-    }
-  }
-  if (workspace.selectedCommandId) {
-    return {
-      command: workspace.selectedCommandId,
-      label: workspace.selectedCommandId
-    }
-  }
-  return null
+  return selectedAiPanelCommandRef(selectedCommand.value, workspace.selectedCommandId, workspace.selectedCommandRef)
 })
 
 const contextUsage = computed(() => {
@@ -3220,10 +3195,6 @@ const chipPartFromContext = aiChipPartFromContext
 const imagePartFromContext = aiImagePartFromContext
 
 const cloneContextOption = cloneAiContextOption
-
-const isLocalhostContext = isLocalhostAiContext
-
-const toggleHostContextInList = (contexts: AiContextOption[], context: AiContextOption) => toggleHostAiContextInList(contexts, context, maxHostContexts)
 
 const removeEditHostContext = (id: string) => {
   editHostContexts.value = editHostContexts.value.filter((context) => context.id !== id)
@@ -4595,8 +4566,11 @@ const handleModelKeydown = async (event: KeyboardEvent) => {
 }
 
 const resetDocsContextNavigation = () => {
-  docsCurrentRelDir.value = ''
-  docsDirStack.value = []
+  const next = resetAiPanelDocsNavigation()
+  docsCurrentRelDir.value = next.currentRelDir
+  docsDirStack.value = next.dirStack
+  contextQuery.value = next.query
+  contextKeyboardIndex.value = next.keyboardIndex
 }
 
 const focusContextSearchInput = () => {
@@ -4606,20 +4580,22 @@ const focusContextSearchInput = () => {
 }
 
 const enterDocsDir = (context: AiContextOption) => {
-  if (context.kind !== 'docs' || context.contextType !== 'dir' || !context.relPath) return
-  docsDirStack.value = [...docsDirStack.value, docsCurrentRelDir.value]
-  docsCurrentRelDir.value = context.relPath
-  contextQuery.value = ''
-  contextKeyboardIndex.value = -1
+  const next = enterAiPanelDocsDir({ currentRelDir: docsCurrentRelDir.value, dirStack: docsDirStack.value }, context)
+  if (!next) return
+  docsCurrentRelDir.value = next.currentRelDir
+  docsDirStack.value = next.dirStack
+  contextQuery.value = next.query
+  contextKeyboardIndex.value = next.keyboardIndex
   focusContextSearchInput()
 }
 
 const goBackDocsDir = () => {
-  if (docsDirStack.value.length === 0) return false
-  docsCurrentRelDir.value = docsDirStack.value.at(-1) || ''
-  docsDirStack.value = docsDirStack.value.slice(0, -1)
-  contextQuery.value = ''
-  contextKeyboardIndex.value = -1
+  const next = backAiPanelDocsDir({ dirStack: docsDirStack.value })
+  if (!next) return false
+  docsCurrentRelDir.value = next.currentRelDir
+  docsDirStack.value = next.dirStack
+  contextQuery.value = next.query
+  contextKeyboardIndex.value = next.keyboardIndex
   focusContextSearchInput()
   return true
 }
@@ -4723,15 +4699,8 @@ const openContextCategory = async (category: AiContextKind) => {
 
 const isContextSelected = (context: AiContextOption) => workspace.selectedContexts.some((item) => item.id === context.id)
 
-const addMainContextFromPopup = (context: AiContextOption) => {
-  if (!isContextSelected(context)) {
-    workspace.selectedContexts = [...workspace.selectedContexts, cloneContextOption(context)]
-  }
-}
-
-const buildSelectedHostContextsFromVisible = (currentHosts: AiContextOption[]) => {
-  return selectedVisibleHostAiContexts(currentHosts, visibleHostContextOptions.value, maxHostContexts)
-}
+const buildSelectedHostContextsFromVisible = (currentHosts: AiContextOption[]) =>
+  selectedAiPanelVisibleHostContexts(currentHosts, visibleHostContextOptions.value, maxHostContexts)
 
 const selectAllVisibleHostContexts = () => {
   const nextHosts = buildSelectedHostContextsFromVisible(hostContextsForPopup.value)
@@ -4749,7 +4718,7 @@ const clearHostContexts = () => {
     editHostContexts.value = []
     return
   }
-  workspace.selectedContexts = workspace.selectedContexts.filter((context) => context.kind !== 'hosts')
+  workspace.selectedContexts = clearAiPanelHostContexts(workspace.selectedContexts)
   renderEditableFromState()
   requestAnimationFrame(moveEditableCaretToEnd)
 }
@@ -4762,33 +4731,49 @@ const isContextSelectedForPopup = (context: AiContextOption) =>
 
 const applyHostContextToEdit = (context: AiContextOption) => {
   removeTokenFromEditableCursor(editEditableRef.value, editSavedRange, '@', handleEditEditableInput)
-  editHostContexts.value = toggleHostContextInList(editHostContexts.value, context)
+  const plan = planAiPanelContextApply({
+    target: 'edit',
+    context,
+    mainContexts: workspace.selectedContexts,
+    editHostContexts: editHostContexts.value,
+    maxHostContexts
+  })
+  if (plan.kind === 'edit-host') editHostContexts.value = plan.nextHosts
   closeContextPopup({ restoreFocus: true })
 }
 
 const applyContext = (context: AiContextOption) => {
-  if (context.kind === 'docs' && context.contextType === 'dir') {
+  const plan = planAiPanelContextApply({
+    target: contextTarget.value,
+    context,
+    mainContexts: workspace.selectedContexts,
+    editHostContexts: editHostContexts.value,
+    maxHostContexts
+  })
+  if (plan.kind === 'enter-docs-dir') {
     enterDocsDir(context)
     return
   }
 
-  if (contextTarget.value === 'edit') {
-    if (context.kind === 'hosts') {
-      applyHostContextToEdit(context)
-      return
-    }
-    insertContextAtEditCursor(context)
+  if (plan.kind === 'edit-host') {
+    removeTokenFromEditableCursor(editEditableRef.value, editSavedRange, '@', handleEditEditableInput)
+    editHostContexts.value = plan.nextHosts
+    closeContextPopup({ restoreFocus: true })
+    return
+  }
+  if (plan.kind === 'edit-insert') {
+    insertContextAtEditCursor(plan.context)
     closeContextPopup({ restoreFocus: true })
     return
   }
 
-  if (context.kind === 'hosts') {
+  if (plan.kind === 'main-host') {
     removeTokenFromEditableCursor(editableRef.value, savedRange, '@', handleEditableInput)
-    workspace.selectedContexts = toggleHostContextInList(workspace.selectedContexts, context)
+    workspace.selectedContexts = plan.nextContexts
     renderEditableFromState()
-  } else {
+  } else if (plan.kind === 'main-insert') {
     removeTokenFromEditableCursor(editableRef.value, savedRange, '@', handleEditableInput)
-    addMainContextFromPopup(context)
+    workspace.selectedContexts = plan.nextContexts
     closeContextPopup({ restoreFocus: true })
     renderEditableFromState()
   }
@@ -4797,7 +4782,14 @@ const applyContext = (context: AiContextOption) => {
 
 const applyCommand = (preset: AiCommandOption) => {
   const editCommandTarget = editEditableRef.value || (document.querySelector('.user-message-edit-container .message-editable') as HTMLElement | null)
-  if (commandTarget.value === 'edit' || (editingMessageId.value && editCommandTarget)) {
+  const plan = planAiPanelCommandApply({
+    target: commandTarget.value,
+    editingMessageId: editingMessageId.value,
+    hasEditTarget: Boolean(editCommandTarget),
+    command: preset,
+    draft: draft.value
+  })
+  if (plan.kind === 'edit-command') {
     restoreEditSelection()
     insertChipIntoEditableCursor(
       editCommandTarget,
@@ -4805,9 +4797,9 @@ const applyCommand = (preset: AiCommandOption) => {
         type: 'chip',
         chipType: 'command',
         ref: {
-          command: preset.command,
-          label: preset.label,
-          path: preset.path
+          command: plan.command.command,
+          label: plan.command.label,
+          path: plan.command.path
         }
       },
       handleEditEditableInput
@@ -4816,13 +4808,9 @@ const applyCommand = (preset: AiCommandOption) => {
     return
   }
 
-  workspace.selectCommandPreset(preset.id, {
-    command: preset.command,
-    label: preset.label,
-    path: preset.path
-  })
+  workspace.selectCommandPreset(plan.id, plan.commandRef)
   closeCommandPopup()
-  setDraft(draft.value.replace(/\/$/, ''))
+  setDraft(plan.nextDraft)
   requestAnimationFrame(moveEditableCaretToEnd)
 }
 
@@ -4869,32 +4857,20 @@ const handleContextKeydown = (event: KeyboardEvent) => {
     contextLevel.value === 'main' ? displayedOpenedHosts.value.length + visibleContextCategories.value.length : filteredContextOptions.value.length
   if (event.key === 'ArrowDown') {
     event.preventDefault()
-    if (contextLevel.value === 'main') {
-      const maxIndex = Math.max(0, listLength - 1)
-      contextKeyboardIndex.value = Math.min(contextKeyboardIndex.value + 1, maxIndex)
-      return
-    }
-    if (listLength === 0) return
-    contextKeyboardIndex.value =
-      contextKeyboardIndex.value === -1 ? 0 : Math.min(contextKeyboardIndex.value + 1, listLength - 1)
+    contextKeyboardIndex.value = nextAiPanelPopupKeyboardIndex(contextKeyboardIndex.value, listLength, 'down', {
+      mainLevel: contextLevel.value === 'main'
+    })
   } else if (event.key === 'ArrowUp') {
     event.preventDefault()
-    if (contextLevel.value === 'main') {
-      contextKeyboardIndex.value = Math.max(contextKeyboardIndex.value - 1, 0)
-      return
-    }
-    if (listLength === 0) return
-    contextKeyboardIndex.value =
-      contextKeyboardIndex.value === -1 ? listLength - 1 : Math.max(contextKeyboardIndex.value - 1, 0)
+    contextKeyboardIndex.value = nextAiPanelPopupKeyboardIndex(contextKeyboardIndex.value, listLength, 'up', {
+      mainLevel: contextLevel.value === 'main'
+    })
   } else if (event.key === 'Enter') {
     event.preventDefault()
     if (contextLevel.value === 'main') {
-      if (contextKeyboardIndex.value >= 0 && contextKeyboardIndex.value < displayedOpenedHosts.value.length) {
-        applyContext(displayedOpenedHosts.value[contextKeyboardIndex.value])
-      } else if (contextKeyboardIndex.value >= displayedOpenedHosts.value.length) {
-        const category = visibleContextCategories.value[contextKeyboardIndex.value - displayedOpenedHosts.value.length]
-        if (category) void openContextCategory(category.id)
-      }
+      const selection = mainContextKeyboardSelection(contextKeyboardIndex.value, displayedOpenedHosts.value, visibleContextCategories.value)
+      if (selection.kind === 'host') applyContext(selection.context)
+      if (selection.kind === 'category') void openContextCategory(selection.category.id)
     } else {
       const option = filteredContextOptions.value[contextKeyboardIndex.value]
       if (option) applyContext(option)
@@ -4952,14 +4928,10 @@ const handleCommandKeydown = (event: KeyboardEvent) => {
   const list = filteredCommands.value
   if (event.key === 'ArrowDown') {
     event.preventDefault()
-    if (list.length === 0) return
-    commandKeyboardIndex.value =
-      commandKeyboardIndex.value === -1 ? 0 : Math.min(commandKeyboardIndex.value + 1, list.length - 1)
+    commandKeyboardIndex.value = nextAiPanelPopupKeyboardIndex(commandKeyboardIndex.value, list.length, 'down')
   } else if (event.key === 'ArrowUp') {
     event.preventDefault()
-    if (list.length === 0) return
-    commandKeyboardIndex.value =
-      commandKeyboardIndex.value === -1 ? list.length - 1 : Math.max(commandKeyboardIndex.value - 1, 0)
+    commandKeyboardIndex.value = nextAiPanelPopupKeyboardIndex(commandKeyboardIndex.value, list.length, 'up')
   } else if (event.key === 'Enter') {
     event.preventDefault()
     const preset = list[commandKeyboardIndex.value]
