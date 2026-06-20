@@ -533,6 +533,8 @@ import KnowledgeCenterEditor from '@/components/KnowledgeCenterEditor.vue'
 import type { SettingSectionKey } from '@/config/settings'
 import { useWorkspaceStore, type TerminalPanel, type TerminalSettings } from '@/stores/workspace'
 import { copyTextToClipboard, mirrorTextToClipboardQuietly, readTextFromClipboard } from '@/services/clipboardRuntime'
+import { terminalBracketedPasteText, terminalSubmitKeyData, writeControlTerminalText } from '@/services/terminalControlRuntime'
+import { terminalClient } from '@/services/terminalClient'
 import { createTerminalZmodemRuntime, type TerminalZmodemProgress } from '@/services/zmodemRuntime'
 import { useI18n } from '@/i18n'
 import type {
@@ -1616,12 +1618,13 @@ const panelFromSessionSnapshot = (item: ControlSessionPanelSnapshot): TerminalPa
 })
 
 const closeCurrentTerminalSessionsForRestore = async () => {
-  if (typeof window.aiops?.killTerminal !== 'function') return
+  const killTerminal = terminalClient.killTerminal()
+  if (!killTerminal) return
   const sessionIds = [...new Set(workspace.panels.map((panel) => panel.sessionId).filter((sessionId): sessionId is string => Boolean(sessionId)))]
   await Promise.all(
     sessionIds.map(async (sessionId) => {
       try {
-        await window.aiops!.killTerminal(sessionId)
+        await killTerminal(sessionId)
       } catch {
         // Restore replaces the visible panels even if an old session already exited.
       }
@@ -1631,11 +1634,12 @@ const closeCurrentTerminalSessionsForRestore = async () => {
 
 const restoreLocalSessionPanel = async (panel: TerminalPanel) => {
   if (panel.kind === 'knowledge' || panel.sshSession) return false
-  if (typeof window.aiops?.createTerminal !== 'function') return false
+  const createTerminal = terminalClient.createTerminal()
+  if (!createTerminal) return false
   await nextTick()
   const size = terminalViewSize(panel.id)
   const restoredTitle = panel.title
-  const session = await window.aiops.createTerminal({
+  const session = await createTerminal({
     kind: 'local',
     panelId: panel.id,
     workspaceId: 'workspace',
@@ -1991,23 +1995,13 @@ const terminalBufferText = (view: TerminalView, tailLines: number) => {
   return lines.join('\n').replace(/\s+$/g, '')
 }
 
-const terminalBracketedPasteText = (text: string) => `\x1b[200~${text}\x1b[201~`
-
-const terminalSubmitKeyData = (value: unknown) => {
-  const normalized = controlText(value || 'return').toLowerCase().replace(/[\s_]+/g, '')
-  if (!normalized || normalized === 'return' || normalized === 'enter') return '\r'
-  if (normalized === 'none') return ''
-  if (normalized === 'ctrl+enter' || normalized === 'control+enter' || normalized === 'ctrl-enter' || normalized === 'control-enter') return '\x1b[13;5u'
-  return null
-}
-
 const handleMobileTerminalInputControlRequest = async (params: Record<string, unknown>) => {
   const text = typeof params.text === 'string' ? params.text : typeof params.data === 'string' ? params.data : ''
   if (!text) return controlFail('TERMINAL_TEXT_REQUIRED', 'terminal.input requires text.')
   const panel = resolveControlTerminalPanel(params)
   if (!panel) return controlFail('TERMINAL_PANEL_NOT_FOUND', 'Terminal panel not found.')
   if (!panel.sessionId) return controlFail('TERMINAL_SESSION_NOT_FOUND', 'Selected terminal has no connected session id.', { panelId: panel.id, surface_id: panel.id })
-  const ok = Boolean(await window.aiops?.writeTerminal(panel.sessionId, text))
+  const ok = await writeControlTerminalText(panel.sessionId, text)
   if (!ok) return controlFail('TERMINAL_WRITE_FAILED', 'Terminal input could not be delivered.', { panelId: panel.id, sessionId: panel.sessionId })
   return controlOk(terminalMobileTargetPayload(panel, { queued: false, bytes: new TextEncoder().encode(text).length, textLength: text.length, text_length: text.length }))
 }
@@ -2021,7 +2015,7 @@ const handleMobileTerminalPasteControlRequest = async (params: Record<string, un
   if (!panel) return controlFail('TERMINAL_PANEL_NOT_FOUND', 'Terminal panel not found.')
   if (!panel.sessionId) return controlFail('TERMINAL_SESSION_NOT_FOUND', 'Selected terminal has no connected session id.', { panelId: panel.id, surface_id: panel.id })
   const payload = `${terminalBracketedPasteText(text)}${submitKey}`
-  const ok = Boolean(await window.aiops?.writeTerminal(panel.sessionId, payload))
+  const ok = await writeControlTerminalText(panel.sessionId, payload)
   if (!ok) return controlFail('TERMINAL_WRITE_FAILED', 'Terminal paste could not be delivered.', { panelId: panel.id, sessionId: panel.sessionId })
   return controlOk(
     terminalMobileTargetPayload(panel, {
@@ -3106,13 +3100,14 @@ const removeWorkspaceFromGroupForControl = (params: Record<string, unknown>) => 
 const closeWorkspaceGroupPanelsForControl = async (panelIds: string[]) => {
   const closedPanelIds: string[] = []
   const killedSessionIds: string[] = []
+  const killTerminal = terminalClient.killTerminal()
   for (const panelId of panelIds) {
     const panel = workspace.panels.find((item) => item.id === panelId)
     if (!panel) continue
-    if (panel.sessionId && typeof window.aiops?.killTerminal === 'function') {
+    if (panel.sessionId && killTerminal) {
       const sessionId = panel.sessionId
       try {
-        const result = await window.aiops.killTerminal(sessionId)
+        const result = await killTerminal(sessionId)
         if (result?.ok && isTerminalKillSuccess(result, sessionId)) killedSessionIds.push(sessionId)
       } catch {
         // Closing a group is best effort after explicit confirmation; the UI panel is still removed.
@@ -3505,12 +3500,13 @@ const createAgentTeamGroup = (params: Record<string, unknown>, panelIds: string[
 }
 
 const createLocalAgentTeamTerminal = async (panel: TerminalPanel, title: string, cwd: string) => {
-  if (!window.aiops?.createTerminal) {
+  const createTerminal = terminalClient.createTerminal()
+  if (!createTerminal) {
     throw new Error('本地终端启动服务不可用')
   }
   await nextTick()
   const size = terminalViewSize(panel.id)
-  const session = (await window.aiops.createTerminal({
+  const session = (await createTerminal({
     kind: 'local',
     panelId: panel.id,
     workspaceId: 'workspace',
@@ -4372,11 +4368,12 @@ const syncTerminalView = (panel: TerminalPanel, options: { suppressInputReplies?
 
 const notifyBackendResize = (panelId: string, view: TerminalView) => {
   const panel = workspace.panels.find((item) => item.id === panelId)
-  if (!panel?.sessionId || !window.aiops) return
+  const resizeTerminal = terminalClient.resizeTerminal()
+  if (!panel?.sessionId || !resizeTerminal) return
   if (view.lastFitCols === view.terminal.cols && view.lastFitRows === view.terminal.rows) return
   view.lastFitCols = view.terminal.cols
   view.lastFitRows = view.terminal.rows
-  window.aiops.resizeTerminal(panel.sessionId, view.terminal.cols, view.terminal.rows)
+  resizeTerminal(panel.sessionId, view.terminal.cols, view.terminal.rows)
   writeRuntimeLog('debug', 'renderer.terminal.fit-resize', {
     panelId,
     sessionId: panel.sessionId,
@@ -4489,8 +4486,9 @@ const createTerminalView = (panel: TerminalPanel, element: HTMLElement) => {
     updateSelectionButtonPosition(panel.id)
   })
   terminal.onResize(({ cols, rows }) => {
-    if (panel.sessionId && window.aiops) {
-      window.aiops.resizeTerminal(panel.sessionId, cols, rows)
+    const resizeTerminal = terminalClient.resizeTerminal()
+    if (panel.sessionId && resizeTerminal) {
+      resizeTerminal(panel.sessionId, cols, rows)
       writeRuntimeLog('debug', 'renderer.terminal.resize', {
         panelId: panel.id,
         sessionId: panel.sessionId,
@@ -4523,7 +4521,8 @@ const writeXtermInput = async (panelId: string, data: string) => {
     })
     return
   }
-  if (typeof window.aiops?.writeTerminal !== 'function') {
+  const writeTerminal = terminalClient.writeTerminal()
+  if (!writeTerminal) {
     workspace.setTopNotice('终端写入服务不可用')
     writeRuntimeLog('warn', 'renderer.terminal-input.missing-bridge', {
       panelId,
@@ -4538,7 +4537,7 @@ const writeXtermInput = async (panelId: string, data: string) => {
       sessionId,
       bytes
     })
-    const result = await window.aiops.writeTerminal(sessionId, data)
+    const result = await writeTerminal(sessionId, data)
     if (!result?.ok || !isRecord(result.data) || result.data.id !== sessionId || result.data.bytes !== bytes) {
       workspace.setTopNotice(result?.errorMessage || '终端写入服务返回数据无效')
       writeRuntimeLog('warn', 'renderer.terminal-input.write-rejected', {
@@ -4812,14 +4811,15 @@ const terminalViewSize = (panelId: string) => {
 }
 
 const startLocalTerminalForPanel = async (panel: TerminalPanel) => {
-  if (!window.aiops?.createTerminal) {
+  const createTerminal = terminalClient.createTerminal()
+  if (!createTerminal) {
     workspace.setTopNotice('本地终端启动服务不可用')
     return false
   }
   await nextTick()
   const size = terminalViewSize(panel.id)
   try {
-    const session = await window.aiops.createTerminal({
+    const session = await createTerminal({
       kind: 'local',
       panelId: panel.id,
       workspaceId: 'workspace',
@@ -4839,14 +4839,15 @@ const startLocalTerminalForPanel = async (panel: TerminalPanel) => {
 const startSshTerminalForPanel = async (panel: TerminalPanel) => {
   const ssh = panel.sshSession
   if (!ssh) return false
-  if (!window.aiops?.createTerminal) {
+  const createTerminal = terminalClient.createTerminal()
+  if (!createTerminal) {
     workspace.setTopNotice('SSH 终端启动服务不可用')
     return false
   }
   await nextTick()
   const size = terminalViewSize(panel.id)
   try {
-    const session = await window.aiops.createTerminal({
+    const session = await createTerminal({
       kind: 'ssh',
       assetId: ssh.assetId,
       title: panel.title,
@@ -5617,14 +5618,7 @@ const toggleGlobalInput = () => {
 }
 
 const reconnectTerminalPanel = async (panel: TerminalPanel) => {
-  if (!window.aiops?.createTerminal) {
-    workspace.setTopNotice('终端启动服务不可用')
-    return false
-  }
-  if (panel.sshSession) {
-    return startSshTerminalForPanel(panel)
-  }
-  return startLocalTerminalForPanel(panel)
+  return panel.sshSession ? startSshTerminalForPanel(panel) : startLocalTerminalForPanel(panel)
 }
 
 const disconnectTerminalPanel = async (panel: TerminalPanel) => {
@@ -5632,14 +5626,15 @@ const disconnectTerminalPanel = async (panel: TerminalPanel) => {
     workspace.setTopNotice('终端会话不可用，请先打开本地 shell 或连接 SSH')
     return false
   }
-  if (!window.aiops?.killTerminal) {
+  const killTerminal = terminalClient.killTerminal()
+  if (!killTerminal) {
     workspace.setTopNotice('终端断开服务不可用')
     return false
   }
   const sessionId = panel.sessionId
   let result: TerminalKillResult
   try {
-    result = await window.aiops.killTerminal(sessionId)
+    result = await killTerminal(sessionId)
   } catch (error) {
     workspace.setTopNotice(error instanceof Error ? error.message : '终端断开失败')
     return false
@@ -5734,9 +5729,9 @@ const chatSelectionToAi = (panelId: string) => {
 }
 
 onMounted(() => {
-  offData = window.aiops?.onTerminalData(handleTerminalData) || null
-  offLifecycle = window.aiops?.onTerminalLifecycle((event) => workspace.applyTerminalLifecycle(event)) || null
-  offExit = window.aiops?.onTerminalExit((event) => workspace.applyTerminalExit(event)) || null
+  offData = terminalClient.onTerminalData()?.(handleTerminalData) || null
+  offLifecycle = terminalClient.onTerminalLifecycle()?.((event) => workspace.applyTerminalLifecycle(event)) || null
+  offExit = terminalClient.onTerminalExit()?.((event) => workspace.applyTerminalExit(event)) || null
   offControlRequest = window.aiops?.onControlRequest(handleControlRequest) || null
   document.addEventListener('click', closeTerminalMenusFromDocument)
   window.addEventListener('keydown', handleShortcut)

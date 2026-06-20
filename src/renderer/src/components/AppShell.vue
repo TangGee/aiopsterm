@@ -191,6 +191,7 @@ import UserPanel from '@/components/panels/UserPanel.vue'
 import OnboardingSpotlight from '@/components/onboarding/OnboardingSpotlight.vue'
 import { layoutWidthLimits, useWorkspaceStore } from '@/stores/workspace'
 import { backgroundStyleVars } from '@/services/backgroundRuntime'
+import { terminalClient } from '@/services/terminalClient'
 import { applyDocumentLocale, useI18n, type I18nKey } from '@/i18n'
 import { isAiopstermDeepLinkPayload } from '@shared/deepLink'
 import type { TerminalKeyboardInteractiveRequest, TerminalKeyboardInteractiveResult } from '@shared/contracts/terminalSessions'
@@ -462,8 +463,8 @@ onMounted(() => {
   stopDeepLink = window.aiops?.onDeepLink?.((payload) => {
     applyDeepLinkPayload(payload)
   })
-  stopKeyboardInteractiveRequest = window.aiops?.onTerminalKeyboardInteractiveRequest?.(handleTerminalMfaRequest)
-  stopKeyboardInteractiveResult = window.aiops?.onTerminalKeyboardInteractiveResult?.(handleTerminalMfaResult)
+  stopKeyboardInteractiveRequest = terminalClient.onTerminalKeyboardInteractiveRequest()?.(handleTerminalMfaRequest)
+  stopKeyboardInteractiveResult = terminalClient.onTerminalKeyboardInteractiveResult()?.(handleTerminalMfaResult)
   stopAiAgentSessionEvent = window.aiops?.onAiAgentSessionEvent?.((event) => {
     workspace.upsertManagedAiSession(event)
   })

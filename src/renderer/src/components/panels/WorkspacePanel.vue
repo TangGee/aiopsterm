@@ -1221,6 +1221,7 @@ import {
   isAiopsSshTunnelMutationData,
   malformedAssetBackendResultMessage
 } from '@/services/assetBackendGuards'
+import { openLocalTerminalLaunch, openSshTerminalLaunch } from '@/services/terminalLaunchRuntime'
 
 const workspace = useWorkspaceStore()
 type WorkspaceTabKey = 'direct' | 'bastion'
@@ -2316,62 +2317,25 @@ const connectAsset = async (assetId: string) => {
   workspace.replaceTerminalOutput(workspace.activePanelId, '')
   const panelId = workspace.activePanelId
   const discardPendingPanel = () => workspace.discardPendingTerminalPanel(panelId, previousActivePanelId)
+  const launchContext = {
+    panelId,
+    terminalType: workspace.terminalSettings.terminalType,
+    discardPendingPanel,
+    setNotice: (message: string) => {
+      notice.value = message
+    },
+    applyLocalTerminalSession: workspace.applyLocalTerminalSession,
+    applySshTerminalSession: workspace.applySshTerminalSession,
+    registerSshSession: workspace.registerSshSession,
+    renamePanel: workspace.renamePanel
+  }
   if (asset.isLocalShell) {
-    if (!window.aiops?.createTerminal) {
-      notice.value = '本地终端启动服务不可用'
-      discardPendingPanel()
-      return
-    }
-    try {
-      const session = await window.aiops.createTerminal({
-        kind: 'local',
-        panelId,
-        workspaceId: 'workspace',
-        title: asset.name,
-        cols: 100,
-        rows: 30,
-        terminalType: workspace.terminalSettings.terminalType
-      })
-      const panel = workspace.applyLocalTerminalSession(panelId, session)
-      if (!panel) {
-        notice.value = '本地终端启动失败'
-        discardPendingPanel()
-        return
-      }
-      workspace.renamePanel(panelId, asset.name)
-      notice.value = `已打开本地 shell ${asset.host}`
-    } catch (error) {
-      notice.value = error instanceof Error ? error.message : '本地终端启动失败'
-      discardPendingPanel()
-      return
-    }
+    const panel = await openLocalTerminalLaunch(launchContext, { title: asset.name })
+    if (!panel) return
+    notice.value = `已打开本地 shell ${asset.host}`
   } else {
-    if (!window.aiops?.createTerminal) {
-      notice.value = 'SSH 终端启动服务不可用'
-      discardPendingPanel()
-      return
-    }
-    workspace.registerSshSession(panelId, asset)
-    try {
-      const session = await window.aiops.createTerminal({
-        kind: 'ssh',
-        assetId: asset.id,
-        title: asset.name,
-        cols: 100,
-        rows: 30,
-        terminalType: workspace.terminalSettings.terminalType
-      })
-      const connected = Boolean(workspace.applySshTerminalSession(panelId, session, asset))
-      if (!connected) {
-        notice.value = 'SSH 终端启动失败'
-        discardPendingPanel()
-        return
-      }
-    } catch (error) {
-      notice.value = error instanceof Error ? error.message : 'SSH 终端启动失败'
-      discardPendingPanel()
-      return
-    }
+    const panel = await openSshTerminalLaunch(launchContext, asset, { title: asset.name })
+    if (!panel) return
   }
   workspace.selectedContexts = [
     ...workspace.selectedContexts.filter((item) => item.id !== asset.id),

@@ -1265,6 +1265,7 @@ import {
   isAiopsSavedCustomFolderRecord,
   malformedAssetBackendResultMessage
 } from '@/services/assetBackendGuards'
+import { openSshTerminalLaunch } from '@/services/terminalLaunchRuntime'
 
 const props = withDefaults(defineProps<{ query: string; mode?: 'panel' | 'workspace' }>(), {
   mode: 'panel'
@@ -2154,35 +2155,23 @@ const connectAsset = async (assetId: string | null) => {
   workspace.replaceTerminalOutput(workspace.activePanelId, '')
   const panelId = workspace.activePanelId
   const discardPendingPanel = () => workspace.discardPendingTerminalPanel(panelId, previousActivePanelId)
-  if (!window.aiops?.createTerminal) {
-    importNotice.value = 'SSH 终端启动服务不可用'
-    discardPendingPanel()
-    closeAssetContextMenus()
-    return
-  }
-  workspace.registerSshSession(panelId, asset)
-  try {
-    const session = await window.aiops.createTerminal({
-      kind: 'ssh',
-      assetId: asset.id,
-      title: asset.name || asset.title,
-      cols: 100,
-      rows: 30,
-      terminalType: workspace.terminalSettings.terminalType
-    })
-    const connected = Boolean(workspace.applySshTerminalSession(panelId, session, asset))
-    if (!connected) {
-      importNotice.value = 'SSH 终端启动失败'
-      discardPendingPanel()
-      closeAssetContextMenus()
-      return
-    }
-  } catch (error) {
-    importNotice.value = error instanceof Error ? error.message : 'SSH 终端启动失败'
-    discardPendingPanel()
-    closeAssetContextMenus()
-    return
-  }
+  const connected = await openSshTerminalLaunch(
+    {
+      panelId,
+      terminalType: workspace.terminalSettings.terminalType,
+      discardPendingPanel,
+      setNotice: (message) => {
+        importNotice.value = message
+        closeAssetContextMenus()
+      },
+      applyLocalTerminalSession: workspace.applyLocalTerminalSession,
+      applySshTerminalSession: workspace.applySshTerminalSession,
+      registerSshSession: workspace.registerSshSession
+    },
+    asset,
+    { title: asset.name || asset.title }
+  )
+  if (!connected) return
   workspace.selectedContexts = [
     ...workspace.selectedContexts.filter((item) => item.id !== asset.id),
     { id: asset.id, kind: 'hosts', label: asset.host, detail: asset.name || asset.title }

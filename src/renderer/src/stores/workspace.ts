@@ -94,6 +94,7 @@ import { skillsClient } from '@/services/skillsClient'
 import { settingsConfigClient } from '@/services/settingsConfigClient'
 import { settingsPreferencesClient } from '@/services/settingsPreferencesClient'
 import { addSystemThemeListener, applyThemeToDocument, isThemeId, type ThemeId } from '@/services/themeRuntime'
+import { terminalClient } from '@/services/terminalClient'
 import { userAccountClient } from '@/services/userAccountClient'
 import { isAiopstermDeepLinkPayload } from '@shared/deepLink'
 import { isLegacyLocalModelName } from '@shared/modelConfigBoundary'
@@ -8922,8 +8923,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const targetId = session.panelId || session.terminalSessionId
     const panel = targetId ? panels.value.find((item) => item.id === targetId || item.sessionId === targetId) : null
     const terminalSessionId = panel?.sessionId || session.terminalSessionId
-    if (terminalSessionId && typeof window.aiops?.killTerminal === 'function') {
-      const killResult = await window.aiops.killTerminal(terminalSessionId)
+    const killTerminal = terminalClient.killTerminal()
+    if (terminalSessionId && killTerminal) {
+      const killResult = await killTerminal(terminalSessionId)
       if (!killResult?.ok) {
         setTopNotice(killResult?.errorMessage || i18nText('aiSessions.notice.hibernateFailed'))
         return false
@@ -13429,14 +13431,15 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     renamePanel(panelId, label)
     replaceTerminalOutput(panelId, '')
     const discardPendingPanel = () => discardPendingTerminalPanel(panelId, previousActivePanelId)
-    if (!window.aiops?.createTerminal) {
+    const createTerminal = terminalClient.createTerminal()
+    if (!createTerminal) {
       discardPendingPanel()
       setTopNotice('终端启动服务不可用')
       return null
     }
     if (host.isLocalShell || host.id === 'opened-local') {
       try {
-        const session = await window.aiops.createTerminal({
+        const session = await createTerminal({
           kind: 'local',
           panelId,
           workspaceId: 'workspace',
@@ -13471,7 +13474,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
     registerSshSession(panelId, asset)
     try {
-      const session = await window.aiops.createTerminal({
+      const session = await createTerminal({
         kind: 'ssh',
         assetId: host.id,
         title: label,
@@ -13998,8 +14001,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const writeTerminalSegment = async (sessionId: string, data: string): Promise<TerminalWriteValidation> => {
+    const writeTerminal = terminalClient.writeTerminal()
+    if (!writeTerminal) return { ok: false, reason: '终端写入服务不可用' }
     try {
-      const result = await window.aiops.writeTerminal(sessionId, data)
+      const result = await writeTerminal(sessionId, data)
       return validateTerminalWriteResult(result, sessionId, data)
     } catch (error) {
       return { ok: false, reason: terminalWriteExceptionReason(error) }
@@ -14010,7 +14015,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   const canWriteTerminalExecution = (execution: Pick<TerminalSecurityExecution, 'panelIds' | 'writeToShell'>) => {
     if (!execution.writeToShell) return true
-    if (typeof window.aiops?.writeTerminal !== 'function') return false
+    if (!terminalClient.writeTerminal()) return false
     return execution.panelIds.every((panelId) => {
       const panel = panels.value.find((item) => item.id === panelId || item.sessionId === panelId)
       return Boolean(panel?.sessionId)
@@ -14107,7 +14112,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const text = command.trim()
     if (!text) return { status: 'allow' } as TerminalSecurityDecision
     const terminalPanelIds = panels.value.filter((panel) => panel.kind !== 'knowledge' && panel.sessionId).map((panel) => panel.id)
-    if (!terminalPanelIds.length || typeof window.aiops?.writeTerminal !== 'function') {
+    if (!terminalPanelIds.length || !terminalClient.writeTerminal()) {
       return reportTerminalExecutionUnavailable(text, panels.value.filter((panel) => panel.kind !== 'knowledge').map((panel) => panel.id))
     }
     const execution: TerminalSecurityExecution = {
@@ -14301,15 +14306,15 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       setTopNotice('请先配置可用模型')
       return null
     }
-    const generateBridge = window.aiops?.generateTerminalCommand
-    if (typeof generateBridge !== 'function') {
+    const generateTerminalCommandBridge = terminalClient.generateTerminalCommand()
+    if (!generateTerminalCommandBridge) {
       setTopNotice('终端命令生成服务不可用')
       return null
     }
 
     let result: Awaited<ReturnType<AiopsPreloadApi['generateTerminalCommand']>>
     try {
-      result = await generateBridge({
+      result = await generateTerminalCommandBridge({
         panelId: panel.id,
         instruction: prompt,
         modelName: selectedModel,
