@@ -280,6 +280,12 @@ import {
   type TerminalSecurityPrompt
 } from '@/services/terminalExecutionRuntime'
 import {
+  addTerminalCommandGenerationRecord,
+  prepareTerminalCommandGeneration,
+  terminalCommandGenerationRecordMatchesRequest,
+  terminalCommandModelOptions as terminalCommandModelOptionsRuntime
+} from '@/services/terminalCommandRuntime'
+import {
   addMacroCommandEntry as addMacroCommandEntryRuntime,
   cloneMacroRecordingState,
   cloneQuickCommandsSnapshot,
@@ -486,7 +492,7 @@ import type {
   KubernetesTerminalDataEvent,
   KubernetesTerminalExitEvent
 } from '@shared/contracts/kubernetes'
-import type { TerminalCommandGenerationContext, TerminalCommandGenerationRecord } from '@shared/contracts/terminalTools'
+import type { TerminalCommandGenerationRecord } from '@shared/contracts/terminalTools'
 import type {
   AiChatContextUsageSnapshot,
   AiChatConversationRecord,
@@ -1640,9 +1646,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const transferTaskCount = computed(() => fileTransferTasks.value.length)
   const transferOverallPercent = computed(() => fileTransferOverallPercent(fileTransferTasks.value))
   const hasRunningFileTransferTasks = computed(() => hasRunningFileTransferTasksRuntime(fileTransferTasks.value))
-  const terminalCommandModelOptions = computed(() =>
-    settingModelOptions.value.filter((model) => model.checked && !model.locked && !model.name.endsWith('-Thinking')).map((model) => model.name)
-  )
+  const terminalCommandModelOptions = computed(() => terminalCommandModelOptionsRuntime(settingModelOptions.value))
   const applyAiModelCatalog = (catalog: AiModelCatalog, options: { replaceSettingsOptions?: boolean } = {}) => {
     aiModelOptions.value = catalog.chatModels.map((model) => ({ ...model }))
     lockedAiModelOptions.value = catalog.lockedChatModels.map((model) => ({ ...model, locked: true }))
@@ -10233,23 +10237,21 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return executeTerminalCommand(panel.id, command, { writeToShell: false, source: 'agent' })
   }
 
-  const buildTerminalCommandContext = (panel: TerminalPanel): TerminalCommandGenerationContext => {
-    const ssh = panel.sshSession
-    return {
-      host: ssh?.host || '127.0.0.1',
-      username: ssh?.username || 'local',
-      cwd: panel.cwd || '~',
-      shell: panel.sessionId ? 'local-shell' : 'bash',
-      connectionType: ssh ? ('ssh' as const) : ('local' as const)
-    }
-  }
-
   const generateTerminalCommand = async (panelId: string, instruction: string, modelName?: string) => {
-    const panel = findTerminalPanelByIdOrSession(panels.value, panelId)
-    const prompt = instruction.trim()
-    if (!panel || panel.kind === 'knowledge' || !prompt) return null
-    const selectedModel = modelName || terminalCommandModelOptions.value[0]
-    if (!selectedModel) {
+    const plan = prepareTerminalCommandGeneration(panels.value, {
+      panelId,
+      instruction,
+      modelName,
+      modelOptions: terminalCommandModelOptions.value
+    })
+    if (!plan.ok) {
+      if (plan.reason === 'missing-model') {
+        setTopNotice('请先配置可用模型')
+      }
+      return null
+    }
+    const { request } = plan
+    if (!request.modelName) {
       setTopNotice('请先配置可用模型')
       return null
     }
@@ -10261,12 +10263,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
     let result: Awaited<ReturnType<AiopsPreloadApi['generateTerminalCommand']>>
     try {
-      result = await generateTerminalCommandBridge({
-        panelId: panel.id,
-        instruction: prompt,
-        modelName: selectedModel,
-        context: buildTerminalCommandContext(panel)
-      })
+      result = await generateTerminalCommandBridge(request)
     } catch (error) {
       setTopNotice(aiBridgeErrorMessage(error, '终端命令生成失败'))
       return null
@@ -10275,12 +10272,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       setTopNotice(result.errorMessage || '终端命令生成失败')
       return null
     }
-    if (!isTerminalCommandGenerationRecord(result.data) || result.data.panelId !== panel.id || result.data.instruction !== prompt) {
+    if (!isTerminalCommandGenerationRecord(result.data) || !terminalCommandGenerationRecordMatchesRequest(result.data, request)) {
       setTopNotice('终端命令生成结果无效')
       return null
     }
     const record = result.data
-    terminalCommandGenerationRecords.value = [record, ...terminalCommandGenerationRecords.value].slice(0, 20)
+    terminalCommandGenerationRecords.value = addTerminalCommandGenerationRecord(terminalCommandGenerationRecords.value, record)
     return record
   }
 
