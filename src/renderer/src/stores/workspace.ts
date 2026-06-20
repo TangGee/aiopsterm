@@ -57,6 +57,7 @@ import {
   malformedKnowledgeBackendResultMessage
 } from '@/services/knowledgeBackendGuards'
 import { knowledgeClient } from '@/services/knowledgeClient'
+import { kubernetesClient } from '@/services/kubernetesClient'
 import {
   isQuickCommandGroupDeleteData,
   isQuickCommandGroupSaveData,
@@ -12173,8 +12174,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const refreshKubernetesCatalog = async () => {
-    if (!window.aiops?.listKubernetesCatalog) return null
-    const result = await window.aiops.listKubernetesCatalog()
+    const listKubernetesCatalog = kubernetesClient.listKubernetesCatalog()
+    if (!listKubernetesCatalog) return null
+    const result = await listKubernetesCatalog()
     if (!result?.ok) {
       setK8sNotice(result?.errorMessage || 'Kubernetes 配置加载失败')
       return null
@@ -12187,11 +12189,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const switchK8sContext = async (name: string) => {
-    if (!window.aiops?.switchKubernetesContext) {
+    const switchKubernetesContext = kubernetesClient.switchKubernetesContext()
+    if (!switchKubernetesContext) {
       setK8sNotice('Kubernetes context API 不可用')
       return false
     }
-    const result = await window.aiops.switchKubernetesContext(name)
+    const result = await switchKubernetesContext(name)
     if (!result?.ok) {
       setK8sNotice(result?.errorMessage || 'Kubernetes Context 切换失败')
       return false
@@ -12263,13 +12266,14 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       setK8sNotice('请补全 Kubernetes Agent 代理主机和端口')
       return false
     }
-    if (!window.aiops?.saveKubernetesAgentProxyConfig) {
+    const saveKubernetesAgentProxyConfig = kubernetesClient.saveKubernetesAgentProxyConfig()
+    if (!saveKubernetesAgentProxyConfig) {
       setK8sNotice('Kubernetes Agent 代理配置服务不可用')
       return false
     }
     const draft = cloneK8sProxyConfig(k8sProxyConfig.value)
     try {
-      const result = await window.aiops.saveKubernetesAgentProxyConfig(draft)
+      const result = await saveKubernetesAgentProxyConfig(draft)
       if (!result?.ok) {
         setK8sNotice(result?.errorMessage || 'Kubernetes Agent 代理配置保存失败')
         return false
@@ -12301,7 +12305,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const connectK8sCluster = async (id: string) => {
     const cluster = k8sClusters.value.find((item) => item.id === id)
     if (!cluster) return false
-    if (!window.aiops?.connectKubernetesCluster) {
+    const connectKubernetesCluster = kubernetesClient.connectKubernetesCluster()
+    if (!connectKubernetesCluster) {
       setK8sNotice('Kubernetes cluster API 不可用')
       return false
     }
@@ -12309,7 +12314,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     setK8sConnecting(id, true)
     setK8sNotice(`正在连接 ${cluster.name}`)
     try {
-      const result = await window.aiops.connectKubernetesCluster(id)
+      const result = await connectKubernetesCluster(id)
       if (!result?.ok) {
         setK8sNotice(result?.errorMessage || `${cluster.name} 连接失败`)
         return false
@@ -12344,14 +12349,15 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const disconnectK8sCluster = async (id: string) => {
     const cluster = k8sClusters.value.find((item) => item.id === id)
     if (!cluster) return false
-    if (!window.aiops?.disconnectKubernetesCluster) {
+    const disconnectKubernetesCluster = kubernetesClient.disconnectKubernetesCluster()
+    if (!disconnectKubernetesCluster) {
       setK8sNotice('Kubernetes cluster API 不可用')
       return false
     }
     setK8sActionMenu(null)
     setK8sConnecting(id, false)
     try {
-      const result = await window.aiops.disconnectKubernetesCluster(id)
+      const result = await disconnectKubernetesCluster(id)
       if (!result?.ok) {
         setK8sNotice(result?.errorMessage || `${cluster.name} 断开失败`)
         return false
@@ -12408,11 +12414,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const installK8sTerminalListeners = () => {
-    if (!removeK8sTerminalDataListener && typeof window.aiops?.onKubernetesTerminalData === 'function') {
-      removeK8sTerminalDataListener = window.aiops.onKubernetesTerminalData(handleK8sTerminalData)
+    const onKubernetesTerminalData = kubernetesClient.onKubernetesTerminalData()
+    if (!removeK8sTerminalDataListener && onKubernetesTerminalData) {
+      removeK8sTerminalDataListener = onKubernetesTerminalData(handleK8sTerminalData)
     }
-    if (!removeK8sTerminalExitListener && typeof window.aiops?.onKubernetesTerminalExit === 'function') {
-      removeK8sTerminalExitListener = window.aiops.onKubernetesTerminalExit(handleK8sTerminalExit)
+    const onKubernetesTerminalExit = kubernetesClient.onKubernetesTerminalExit()
+    if (!removeK8sTerminalExitListener && onKubernetesTerminalExit) {
+      removeK8sTerminalExitListener = onKubernetesTerminalExit(handleK8sTerminalExit)
     }
   }
 
@@ -12431,11 +12439,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     installK8sTerminalListeners()
     let tab = options.forceNew ? undefined : k8sTerminalTabs.value.find((item) => item.clusterId === clusterId && item.status !== 'ended')
     if (!tab) {
-      if (!window.aiops?.createKubernetesTerminal) {
+      const createKubernetesTerminal = kubernetesClient.createKubernetesTerminal()
+      if (!createKubernetesTerminal) {
         setK8sNotice('Kubernetes terminal API 不可用')
         return null
       }
-      const result = await window.aiops.createKubernetesTerminal({
+      const result = await createKubernetesTerminal({
         clusterId,
         namespace: options.namespace,
         cols: options.cols,
@@ -12470,11 +12479,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (index < 0) return
     const tab = k8sTerminalTabs.value[index]
     if (tab.status !== 'ended') {
-      if (!window.aiops?.closeKubernetesTerminal) {
+      const closeKubernetesTerminal = kubernetesClient.closeKubernetesTerminal()
+      if (!closeKubernetesTerminal) {
         setK8sNotice('Kubernetes terminal API 不可用')
         return
       }
-      const result = await window.aiops.closeKubernetesTerminal(tab.sessionId, 0)
+      const result = await closeKubernetesTerminal(tab.sessionId, 0)
       if (!result?.ok) {
         setK8sNotice(result?.errorMessage || 'Kubernetes 终端关闭失败')
         return
@@ -12506,8 +12516,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const resizeK8sTerminal = async (id: string, cols: number, rows: number) => {
     const tab = k8sTerminalTabs.value.find((item) => item.id === id || item.sessionId === id)
     if (!tab) return false
-    if (window.aiops?.resizeKubernetesTerminal) {
-      const result = await window.aiops.resizeKubernetesTerminal(tab.sessionId, cols, rows)
+    const resizeKubernetesTerminal = kubernetesClient.resizeKubernetesTerminal()
+    if (resizeKubernetesTerminal) {
+      const result = await resizeKubernetesTerminal(tab.sessionId, cols, rows)
       if (!result?.ok) {
         setK8sNotice(result?.errorMessage || 'Kubernetes 终端尺寸同步失败')
         return false
@@ -12530,12 +12541,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   const executeK8sBackendCommand = async (command: string, clusterId: string, namespace: string, source: 'terminal' | 'agent' | 'resource'): Promise<K8sBackendCommandData | null> => {
     const cluster = k8sClusters.value.find((item) => item.id === clusterId)
-    if (!window.aiops?.executeKubernetesCommand) {
+    const executeKubernetesCommand = kubernetesClient.executeKubernetesCommand()
+    if (!executeKubernetesCommand) {
       setK8sNotice('Kubernetes command API 不可用')
       return null
     }
     try {
-      const result = await window.aiops.executeKubernetesCommand({
+      const result = await executeKubernetesCommand({
         command,
         clusterId,
         clusterName: cluster?.name,
@@ -12566,8 +12578,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       tab.collectingAiOutput = false
       return ''
     }
-    const writeKubernetesTerminal = window.aiops?.writeKubernetesTerminal
-    if (typeof writeKubernetesTerminal !== 'function') {
+    const writeKubernetesTerminal = kubernetesClient.writeKubernetesTerminal()
+    if (!writeKubernetesTerminal) {
       setK8sNotice('Kubernetes terminal write API 不可用')
       tab.collectingAiOutput = false
       return ''
@@ -12636,8 +12648,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const endK8sTerminalSession = async (id: string, exitCode = 0) => {
     const tab = k8sTerminalTabs.value.find((item) => item.id === id || item.sessionId === id)
     if (!tab) return false
-    if (window.aiops?.closeKubernetesTerminal) {
-      const result = await window.aiops.closeKubernetesTerminal(tab.sessionId, exitCode)
+    const closeKubernetesTerminal = kubernetesClient.closeKubernetesTerminal()
+    if (closeKubernetesTerminal) {
+      const result = await closeKubernetesTerminal(tab.sessionId, exitCode)
       if (!result?.ok) {
         setK8sNotice(result?.errorMessage || 'Kubernetes 终端会话结束失败')
         return false
@@ -12661,12 +12674,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const currentK8sOutputCommand = () => k8sResourceOutput.value.split('\n').find((line) => line.trim().startsWith('kubectl '))?.trim() || ''
 
   const planK8sResourceAction = async (resourceId: string, action: K8sResourceAction = 'get'): Promise<K8sBackendResourceActionPlanData | null> => {
-    if (!window.aiops?.planKubernetesResourceAction) {
+    const planKubernetesResourceAction = kubernetesClient.planKubernetesResourceAction()
+    if (!planKubernetesResourceAction) {
       setK8sNotice('Kubernetes resource action API 不可用')
       return null
     }
     try {
-      const result = await window.aiops.planKubernetesResourceAction({ resourceId, action })
+      const result = await planKubernetesResourceAction({ resourceId, action })
       const resource = k8sResources.value.find((item) => item.id === resourceId)
       if (result.ok && isK8sResourceActionPlanData(result.data, { resourceId, action, resource })) return result.data
       if (result.ok) {
@@ -12682,12 +12696,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const executeK8sResourceAction = async (resourceId: string, action: K8sResourceAction = 'get'): Promise<K8sBackendResourceActionData | null> => {
-    if (!window.aiops?.executeKubernetesResourceAction) {
+    const executeKubernetesResourceAction = kubernetesClient.executeKubernetesResourceAction()
+    if (!executeKubernetesResourceAction) {
       setK8sNotice('Kubernetes resource action API 不可用')
       return null
     }
     try {
-      const result = await window.aiops.executeKubernetesResourceAction({ resourceId, action })
+      const result = await executeKubernetesResourceAction({ resourceId, action })
       const resource = k8sResources.value.find((item) => item.id === resourceId)
       if (result.ok && isK8sBackendResourceActionData(result.data, { resourceId, action, resource })) return result.data
       if (result.ok) {
@@ -12803,7 +12818,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const cleanupK8sAgent = async () => {
-    if (!window.aiops?.cleanupKubernetesAgent) {
+    const cleanupKubernetesAgent = kubernetesClient.cleanupKubernetesAgent()
+    if (!cleanupKubernetesAgent) {
       setK8sNotice('Kubernetes Agent cleanup API 不可用')
       return false
     }
@@ -12811,7 +12827,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const requestedClusterId = k8sAgentClusterId.value
     const requestedContextName = k8sAgentContextName.value
     try {
-      const result = await window.aiops.cleanupKubernetesAgent()
+      const result = await cleanupKubernetesAgent()
       if (!result?.ok) {
         setK8sNotice(result?.errorMessage || 'Kubernetes Agent 清理失败')
         return false
@@ -12839,14 +12855,15 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       setK8sNotice('请选择 Kubernetes 集群')
       return
     }
-    if (!window.aiops?.refreshKubernetesResources) {
+    const refreshKubernetesResources = kubernetesClient.refreshKubernetesResources()
+    if (!refreshKubernetesResources) {
       setK8sNotice('Kubernetes resource refresh API 不可用')
       return null
     }
     k8sResourceLoading.value = true
     k8sResourceOutputTitle.value = `${cluster.name} / ${k8sKindLabels[k8sResourceKind.value]}`
     try {
-      const result = await window.aiops.refreshKubernetesResources({
+      const result = await refreshKubernetesResources({
         clusterId: cluster.id,
         namespace: k8sResourceNamespace.value,
         kind: k8sResourceKind.value
@@ -12967,7 +12984,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const testK8sClusterConnection = async (input: Partial<KubernetesClusterTestInput>) => {
-    if (!window.aiops?.testKubernetesClusterConnection) {
+    const testKubernetesClusterConnection = kubernetesClient.testKubernetesClusterConnection()
+    if (!testKubernetesClusterConnection) {
       k8sTestResult.value = false
       setK8sNotice('Kubernetes cluster test API 不可用')
       return false
@@ -12978,7 +12996,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       kubeconfigPath: input.kubeconfigPath,
       kubeconfigContent: input.kubeconfigContent
     }
-    const result = await window.aiops.testKubernetesClusterConnection(request)
+    const result = await testKubernetesClusterConnection(request)
     if (result?.ok && !isK8sClusterTestDataForRequest(result.data, request)) {
       k8sTestResult.value = false
       setK8sNotice('Kubernetes cluster test backend returned malformed result data.')
@@ -13039,8 +13057,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const importK8sKubeconfigContent = async (content: string) => {
-    const importKubeconfig = window.aiops?.importKubernetesKubeconfig
-    if (typeof importKubeconfig !== 'function') {
+    const importKubeconfig = kubernetesClient.importKubernetesKubeconfig()
+    if (!importKubeconfig) {
       const failed: K8sKubeconfigImportResult = {
         success: false,
         contexts: [],
@@ -13081,8 +13099,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       return emptyResult
     }
     try {
-      const importKubeconfig = window.aiops?.importKubernetesKubeconfig
-      if (typeof importKubeconfig !== 'function') {
+      const importKubeconfig = kubernetesClient.importKubernetesKubeconfig()
+      if (!importKubeconfig) {
         const failed: K8sKubeconfigImportResult = {
           success: false,
           contexts: [],
@@ -13137,11 +13155,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       setK8sNotice('请补全集群名称、Context 和 Server URL')
       return null
     }
-    if (!window.aiops?.addKubernetesCluster) {
+    const addKubernetesCluster = kubernetesClient.addKubernetesCluster()
+    if (!addKubernetesCluster) {
       setK8sNotice('Kubernetes cluster API 不可用')
       return null
     }
-    const result = await window.aiops.addKubernetesCluster({
+    const result = await addKubernetesCluster({
       name,
       contextName,
       serverUrl,
@@ -13170,11 +13189,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const updateK8sCluster = async (id: string, patch: { name?: string; defaultNamespace?: string; autoConnect?: boolean }) => {
     const cluster = k8sClusters.value.find((item) => item.id === id)
     if (!cluster) return null
-    if (!window.aiops?.updateKubernetesCluster) {
+    const updateKubernetesCluster = kubernetesClient.updateKubernetesCluster()
+    if (!updateKubernetesCluster) {
       setK8sNotice('Kubernetes cluster API 不可用')
       return null
     }
-    const result = await window.aiops.updateKubernetesCluster(id, patch)
+    const result = await updateKubernetesCluster(id, patch)
     if (!result?.ok) {
       setK8sNotice(result?.errorMessage || `${cluster.name} 更新失败`)
       return null
@@ -13208,11 +13228,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   const deleteK8sCluster = async (id: string) => {
     const cluster = k8sClusters.value.find((item) => item.id === id)
-    if (!window.aiops?.deleteKubernetesCluster) {
+    const deleteKubernetesCluster = kubernetesClient.deleteKubernetesCluster()
+    if (!deleteKubernetesCluster) {
       setK8sNotice('Kubernetes cluster API 不可用')
       return false
     }
-    const result = await window.aiops.deleteKubernetesCluster(id)
+    const result = await deleteKubernetesCluster(id)
     if (!result?.ok) {
       setK8sNotice(result?.errorMessage || `${cluster?.name || '集群'} 删除失败`)
       return false
@@ -13238,14 +13259,14 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const syncK8sBastion = (bastionUuid: string) => {
     const bastion = k8sBastions.value.find((item) => item.uuid === bastionUuid)
     if (!bastion) return false
-    if (!window.aiops?.syncKubernetesBastion) {
+    const syncKubernetesBastion = kubernetesClient.syncKubernetesBastion()
+    if (!syncKubernetesBastion) {
       setK8sNotice('Kubernetes bastion API 不可用')
       return false
     }
     setK8sSyncingBastion(bastionUuid, true)
     setK8sNotice(`正在同步 ${bastion.label}`)
-    void window.aiops
-      .syncKubernetesBastion(bastionUuid)
+    void syncKubernetesBastion(bastionUuid)
       .then((result) => {
         if (!result?.ok) {
           setK8sNotice(result?.errorMessage || `${bastion.label} Kubernetes 资产同步失败`)
