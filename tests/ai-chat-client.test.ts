@@ -112,6 +112,14 @@ describe('aiChatClient', () => {
           conversation,
           messages: [{ ...assistantMessage, state: 'done' as const, ask: 'mcp_resource_access' as const, action: 'rejected' as const }]
         }
+      })),
+      exportChat: vi.fn(async (input) => ({
+        ok: true,
+        data: {
+          exported: input.messages.length,
+          fileName: 'operations-chat.md',
+          markdown: '# Operations chat'
+        }
       }))
     }
 
@@ -163,6 +171,12 @@ describe('aiChatClient', () => {
         data: expect.objectContaining({ status: 'rejected' })
       })
     )
+    await expect(aiChatClient.exportChat()?.({ title: conversation.title, messages: [userMessage, assistantMessage] })).resolves.toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({ exported: 2, fileName: 'operations-chat.md' })
+      })
+    )
 
     expect(window.aiops.createAiChatExchangeRequest).toHaveBeenCalledWith({ text: userMessage.text })
     expect(window.aiops.generateAiChatResponse).toHaveBeenCalledWith({
@@ -191,6 +205,7 @@ describe('aiChatClient', () => {
       conversationId: conversation.id,
       messageId: assistantMessage.id
     })
+    expect(window.aiops.exportChat).toHaveBeenCalledWith({ title: conversation.title, messages: [userMessage, assistantMessage] })
 
     window.aiops = {
       ...originalAiops,
@@ -200,7 +215,8 @@ describe('aiChatClient', () => {
       approveAiMcpToolCall: undefined as any,
       rejectAiMcpToolCall: undefined as any,
       approveAiMcpResourceAccess: undefined as any,
-      rejectAiMcpResourceAccess: undefined as any
+      rejectAiMcpResourceAccess: undefined as any,
+      exportChat: undefined as any
     }
     expect(aiChatClient.createAiChatExchangeRequest()).toBeUndefined()
     expect(aiChatClient.generateAiChatResponse()).toBeUndefined()
@@ -209,5 +225,6 @@ describe('aiChatClient', () => {
     expect(aiChatClient.rejectAiMcpToolCall()).toBeUndefined()
     expect(aiChatClient.approveAiMcpResourceAccess()).toBeUndefined()
     expect(aiChatClient.rejectAiMcpResourceAccess()).toBeUndefined()
+    expect(aiChatClient.exportChat()).toBeUndefined()
   })
 })

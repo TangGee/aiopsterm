@@ -1,4 +1,5 @@
 import type { AiopsPreloadApi } from '@shared/contracts/preloadApi'
+import { createBridgeMethod } from '@/services/preloadBridgeClient'
 
 type KubernetesBridge = Pick<
   AiopsPreloadApi,
@@ -27,10 +28,7 @@ type KubernetesBridge = Pick<
   | 'onKubernetesTerminalExit'
 >
 
-const bridgeMethod = <Name extends keyof KubernetesBridge>(name: Name): KubernetesBridge[Name] | undefined => {
-  const method = window.aiops?.[name]
-  return typeof method === 'function' ? (method.bind(window.aiops) as KubernetesBridge[Name]) : undefined
-}
+const bridgeMethod = createBridgeMethod<KubernetesBridge>()
 
 export const kubernetesClient = {
   listKubernetesCatalog: () => bridgeMethod('listKubernetesCatalog'),

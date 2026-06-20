@@ -1,4 +1,5 @@
 import type { AiopsPreloadApi } from '@shared/contracts/preloadApi'
+import { createBridgeMethod } from '@/services/preloadBridgeClient'
 
 type ExtensionsBridge = Pick<
   AiopsPreloadApi,
@@ -14,10 +15,7 @@ type ExtensionsBridge = Pick<
   | 'onExtensionInstallProgress'
 >
 
-const bridgeMethod = <Name extends keyof ExtensionsBridge>(name: Name): ExtensionsBridge[Name] | undefined => {
-  const method = window.aiops?.[name]
-  return typeof method === 'function' ? (method.bind(window.aiops) as ExtensionsBridge[Name]) : undefined
-}
+const bridgeMethod = createBridgeMethod<ExtensionsBridge>()
 
 export const extensionsClient = {
   listExtensionPlugins: () => bridgeMethod('listExtensionPlugins'),

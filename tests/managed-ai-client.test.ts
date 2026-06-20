@@ -36,6 +36,13 @@ afterEach(() => {
 
 describe('managedAiClient', () => {
   it('returns undefined for unavailable bridge methods and binds managed AI session methods', async () => {
+    const offAiAgentSessionEvent = vi.fn()
+    const offManagedAiSessionEvent = vi.fn()
+    const offManagedAiSessionFocusRequest = vi.fn()
+    const aiAgentSessionEventListener = vi.fn()
+    const managedAiSessionEventListener = vi.fn()
+    const managedAiSessionFocusRequestListener = vi.fn()
+
     window.aiops = {
       ...originalAiops,
       listManagedAiSessions: vi.fn(async () => ({
@@ -102,7 +109,10 @@ describe('managedAiClient', () => {
           snapshot: { sessions: [{ ...managedAiSnapshot.sessions[0], hibernated: false, hibernationReason: input.reason }] },
           config: hibernationConfig
         }
-      }))
+      })),
+      onAiAgentSessionEvent: vi.fn(() => offAiAgentSessionEvent),
+      onManagedAiSessionEvent: vi.fn(() => offManagedAiSessionEvent),
+      onManagedAiSessionFocusRequest: vi.fn(() => offManagedAiSessionFocusRequest)
     }
 
     await expect(managedAiClient.listManagedAiSessions()?.()).resolves.toEqual({
@@ -186,6 +196,9 @@ describe('managedAiClient', () => {
         })
       })
     )
+    expect(managedAiClient.onAiAgentSessionEvent()?.(aiAgentSessionEventListener)).toBe(offAiAgentSessionEvent)
+    expect(managedAiClient.onManagedAiSessionEvent()?.(managedAiSessionEventListener)).toBe(offManagedAiSessionEvent)
+    expect(managedAiClient.onManagedAiSessionFocusRequest()?.(managedAiSessionFocusRequestListener)).toBe(offManagedAiSessionFocusRequest)
     expect(window.aiops.renameManagedAiSession).toHaveBeenCalledWith({
       source: 'claude-code',
       sessionId: 'claude-session-1',
@@ -202,6 +215,9 @@ describe('managedAiClient', () => {
       terminalSessionId: 'terminal-session-1'
     })
     expect(window.aiops.wakeManagedAiSession).toHaveBeenCalledWith({ source: 'claude-code', sessionId: 'claude-session-1', reason: 'resume' })
+    expect(window.aiops.onAiAgentSessionEvent).toHaveBeenCalledWith(aiAgentSessionEventListener)
+    expect(window.aiops.onManagedAiSessionEvent).toHaveBeenCalledWith(managedAiSessionEventListener)
+    expect(window.aiops.onManagedAiSessionFocusRequest).toHaveBeenCalledWith(managedAiSessionFocusRequestListener)
 
     window.aiops = {
       ...originalAiops,
@@ -213,7 +229,10 @@ describe('managedAiClient', () => {
       getAgentHibernationConfig: undefined as any,
       setAgentHibernationConfig: undefined as any,
       hibernateManagedAiSession: undefined as any,
-      wakeManagedAiSession: undefined as any
+      wakeManagedAiSession: undefined as any,
+      onAiAgentSessionEvent: undefined as any,
+      onManagedAiSessionEvent: undefined as any,
+      onManagedAiSessionFocusRequest: undefined as any
     }
     expect(managedAiClient.listManagedAiSessions()).toBeUndefined()
     expect(managedAiClient.replyManagedAiSession()).toBeUndefined()
@@ -224,5 +243,8 @@ describe('managedAiClient', () => {
     expect(managedAiClient.setAgentHibernationConfig()).toBeUndefined()
     expect(managedAiClient.hibernateManagedAiSession()).toBeUndefined()
     expect(managedAiClient.wakeManagedAiSession()).toBeUndefined()
+    expect(managedAiClient.onAiAgentSessionEvent()).toBeUndefined()
+    expect(managedAiClient.onManagedAiSessionEvent()).toBeUndefined()
+    expect(managedAiClient.onManagedAiSessionFocusRequest()).toBeUndefined()
   })
 })

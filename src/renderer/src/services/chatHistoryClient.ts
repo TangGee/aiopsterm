@@ -1,4 +1,5 @@
 import type { AiopsPreloadApi } from '@shared/contracts/preloadApi'
+import { createBridgeMethod } from '@/services/preloadBridgeClient'
 
 type ChatHistoryBridge = Pick<
   AiopsPreloadApi,
@@ -10,10 +11,7 @@ type ChatHistoryBridge = Pick<
   | 'saveChatMessageMetadata'
 >
 
-const bridgeMethod = <Name extends keyof ChatHistoryBridge>(name: Name): ChatHistoryBridge[Name] | undefined => {
-  const method = window.aiops?.[name]
-  return typeof method === 'function' ? (method.bind(window.aiops) as ChatHistoryBridge[Name]) : undefined
-}
+const bridgeMethod = createBridgeMethod<ChatHistoryBridge>()
 
 export const chatHistoryClient = {
   listChatConversations: () => bridgeMethod('listChatConversations'),

@@ -126,6 +126,7 @@ import {
 } from 'lucide-vue-next'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useI18n } from '@/i18n'
+import { windowControlsClient } from '@/services/windowControlsClient'
 
 const workspace = useWorkspaceStore()
 const { t } = useI18n()
@@ -174,30 +175,30 @@ const aiAttentionTitle = computed(() => {
 })
 
 const minimizeWindow = () => {
-  window.aiops?.minimizeWindow()
+  windowControlsClient.minimizeWindow()?.()
 }
 
 const toggleMaximize = async () => {
   if (isMaximized.value) {
-    await window.aiops?.unmaximizeWindow()
+    await windowControlsClient.unmaximizeWindow()?.()
     isMaximized.value = false
   } else {
-    await window.aiops?.maximizeWindow()
+    await windowControlsClient.maximizeWindow()?.()
     isMaximized.value = true
   }
 }
 
 const closeWindow = () => {
-  window.aiops?.closeWindow()
+  windowControlsClient.closeWindow()?.()
 }
 
 onMounted(async () => {
-  platform.value = (await window.aiops?.platform()) || ''
-  isMaximized.value = (await window.aiops?.isMaximized()) || false
-  stopMaximized = window.aiops?.onMaximized(() => {
+  platform.value = (await windowControlsClient.platform()?.()) || ''
+  isMaximized.value = (await windowControlsClient.isMaximized()?.()) || false
+  stopMaximized = windowControlsClient.onMaximized()?.(() => {
     isMaximized.value = true
   })
-  stopUnmaximized = window.aiops?.onUnmaximized(() => {
+  stopUnmaximized = windowControlsClient.onUnmaximized()?.(() => {
     isMaximized.value = false
   })
   workspace.checkTopUpdate()

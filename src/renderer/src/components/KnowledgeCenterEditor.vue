@@ -126,6 +126,7 @@ import {
   isKnowledgeWriteResultData,
   malformedKnowledgeBackendResultMessage
 } from '@/services/knowledgeBackendGuards'
+import { knowledgeClient } from '@/services/knowledgeClient'
 import { useWorkspaceStore } from '@/stores/workspace'
 
 const props = defineProps<{
@@ -320,16 +321,17 @@ const loadFile = async () => {
   imageDataUrl.value = ''
   markdownHtml.value = ''
   try {
-    if (!window.aiops?.kbReadFile) {
+    const kbReadFile = knowledgeClient.kbReadFile()
+    if (!kbReadFile) {
       throw new Error('Knowledge bridge unavailable')
     }
     if (isImage.value) {
-      const result = await window.aiops.kbReadFile(relPath.value, 'base64')
+      const result = await kbReadFile(relPath.value, 'base64')
       if (token !== loadToken) return
       if (!isKnowledgeReadResultData(result, 'base64')) throw new Error(malformedKnowledgeBackendResultMessage)
       imageDataUrl.value = `data:${result.mimeType || 'application/octet-stream'};base64,${result.content}`
     } else {
-      const result = await window.aiops.kbReadFile(relPath.value)
+      const result = await kbReadFile(relPath.value)
       if (token !== loadToken) return
       if (!isKnowledgeReadResultData(result)) throw new Error(malformedKnowledgeBackendResultMessage)
       content.value = result.content
@@ -353,10 +355,11 @@ const saveNow = async () => {
   saving.value = true
   error.value = ''
   try {
-    if (!window.aiops?.kbWriteFile) {
+    const kbWriteFile = knowledgeClient.kbWriteFile()
+    if (!kbWriteFile) {
       throw new Error('Knowledge bridge unavailable')
     }
-    const result = await window.aiops.kbWriteFile(relPath.value, content.value)
+    const result = await kbWriteFile(relPath.value, content.value)
     if (!isKnowledgeWriteResultData(result) || result.relPath.trim() !== relPath.value) throw new Error(malformedKnowledgeBackendResultMessage)
     dirty.value = false
   } catch (saveError) {
@@ -416,9 +419,10 @@ const loadMarkdownImage = async (src: string) => {
   const imageRelPath = resolveMarkdownResource(src)
   if (!imageRelPath) return null
   if (imageCache.has(imageRelPath)) return imageCache.get(imageRelPath)!
-  if (!window.aiops?.kbReadFile) return null
+  const kbReadFile = knowledgeClient.kbReadFile()
+  if (!kbReadFile) return null
   try {
-    const result = await window.aiops.kbReadFile(imageRelPath, 'base64')
+    const result = await kbReadFile(imageRelPath, 'base64')
     if (!isKnowledgeReadResultData(result, 'base64')) throw new Error(malformedKnowledgeBackendResultMessage)
     const mimeType =
       result.mimeType && result.mimeType !== 'application/octet-stream'
@@ -629,8 +633,8 @@ const handlePaste = async (event: ClipboardEvent) => {
   if (!hasImage) return
   event.preventDefault()
   error.value = ''
-  const pasteImage = window.aiops?.kbPasteImageFromClipboard
-  if (typeof pasteImage !== 'function') {
+  const pasteImage = knowledgeClient.kbPasteImageFromClipboard()
+  if (!pasteImage) {
     error.value = 'Knowledge image paste service unavailable'
     return
   }

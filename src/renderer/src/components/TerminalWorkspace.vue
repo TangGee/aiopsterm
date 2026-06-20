@@ -534,6 +534,7 @@ import type { SettingSectionKey } from '@/config/settings'
 import { useWorkspaceStore, type TerminalPanel, type TerminalSettings } from '@/stores/workspace'
 import { copyTextToClipboard, mirrorTextToClipboardQuietly, readTextFromClipboard } from '@/services/clipboardRuntime'
 import { controlClient } from '@/services/controlClient'
+import { writeRendererRuntimeLog as writeRuntimeLog } from '@/services/runtimeLogClient'
 import { terminalBracketedPasteText, terminalSubmitKeyData, writeControlTerminalText } from '@/services/terminalControlRuntime'
 import { terminalClient } from '@/services/terminalClient'
 import { createTerminalZmodemRuntime, type TerminalZmodemProgress } from '@/services/zmodemRuntime'
@@ -560,7 +561,6 @@ import type {
   ControlWorkspaceGroupSummary,
   ControlWorkspaceSnapshot
 } from '@shared/contracts/control'
-import type { RuntimeLogLevel } from '@shared/contracts/appRuntime'
 import type { TerminalCommandSuggestion, TerminalCommandSuggestionContext } from '@shared/contracts/terminalTools'
 import type { TerminalDataEvent, TerminalKillResult, TerminalSessionInfo } from '@shared/contracts/terminalSessions'
 
@@ -4238,10 +4238,6 @@ const showTerminalDashboard = computed(() => {
   )
 })
 
-const writeRuntimeLog = (level: RuntimeLogLevel, event: string, fields: Record<string, unknown> = {}) => {
-  void window.aiops?.writeRuntimeLog?.(level, event, fields)
-}
-
 const emptyZmodemProgress = (): TerminalZmodemProgress => ({
   visible: false,
   type: 'download',
@@ -5501,12 +5497,12 @@ const updateSuggestions = async (panelId: string) => {
   let base: TerminalSuggestion[] = []
   let suggestionNotice = ''
   try {
-    const suggestionBridge = window.aiops?.getTerminalCommandSuggestions
-    if (typeof suggestionBridge !== 'function') {
+    const getTerminalCommandSuggestions = terminalClient.getTerminalCommandSuggestions()
+    if (!getTerminalCommandSuggestions) {
       suggestionNotice = unavailableTerminalSuggestionMessage
       throw new Error(unavailableTerminalSuggestionMessage)
     }
-    const result = await suggestionBridge(rawQuery, getSuggestionContext(panelId, 'base'))
+    const result = await getTerminalCommandSuggestions(rawQuery, getSuggestionContext(panelId, 'base'))
     const normalized = normalizeTerminalSuggestions(result)
     if (!normalized) {
       suggestionNotice = malformedTerminalSuggestionMessage
@@ -5562,12 +5558,12 @@ const triggerAiSuggestion = async () => {
   updateSuggestionsPosition()
   let suggestionErrorMessage = ''
   try {
-    const suggestionBridge = window.aiops?.getTerminalCommandSuggestions
-    if (typeof suggestionBridge !== 'function') {
+    const getTerminalCommandSuggestions = terminalClient.getTerminalCommandSuggestions()
+    if (!getTerminalCommandSuggestions) {
       suggestionErrorMessage = unavailableTerminalSuggestionMessage
       throw new Error(unavailableTerminalSuggestionMessage)
     }
-    const result = await suggestionBridge(rawQuery, getSuggestionContext(panelId, 'ai'))
+    const result = await getTerminalCommandSuggestions(rawQuery, getSuggestionContext(panelId, 'ai'))
     const aiSuggestions = normalizeTerminalSuggestions(result)
     if (!aiSuggestions) {
       suggestionErrorMessage = malformedTerminalSuggestionMessage

@@ -1,4 +1,5 @@
 import type { AiopsPreloadApi } from '@shared/contracts/preloadApi'
+import { createBridgeMethod } from '@/services/preloadBridgeClient'
 
 type DatabaseBridge = Pick<
   AiopsPreloadApi,
@@ -36,10 +37,7 @@ type DatabaseBridge = Pick<
   | 'diagnoseDatabaseSqlError'
 >
 
-const bridgeMethod = <Name extends keyof DatabaseBridge>(name: Name): DatabaseBridge[Name] | undefined => {
-  const method = window.aiops?.[name]
-  return typeof method === 'function' ? (method.bind(window.aiops) as DatabaseBridge[Name]) : undefined
-}
+const bridgeMethod = createBridgeMethod<DatabaseBridge>()
 
 export const databaseClient = {
   listDatabaseCatalog: () => bridgeMethod('listDatabaseCatalog'),

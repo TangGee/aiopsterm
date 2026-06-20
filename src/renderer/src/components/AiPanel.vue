@@ -1661,8 +1661,13 @@ import {
 } from 'lucide-vue-next'
 import { useWorkspaceStore, type TerminalSettings } from '@/stores/workspace'
 import { readStoredAiPanelMode, storeAiPanelMode, type AiPanelMode } from '@/services/aiPanelModeRuntime'
+import { aiChatClient } from '@/services/aiChatClient'
 import { copyTextToClipboard } from '@/services/clipboardRuntime'
+import { codexSessionClient } from '@/services/codexSessionClient'
+import { codexTargetSignature, formatCodexTargetEvent, type CodexTargetEventKind } from '@/services/codexTargetRuntime'
 import { localFilesClient } from '@/services/localFilesClient'
+import { writeRendererRuntimeLog as writeAiRuntimeLog } from '@/services/runtimeLogClient'
+import { voiceClient } from '@/services/voiceClient'
 import {
   isAiChatExportData,
   isChatAttachmentStageData,
@@ -1688,7 +1693,6 @@ import type {
 import type { AiChatExportMessage, AiChatHistoryHostContext, AiCommandCatalogOption, AiContextKind, AiContextOption } from '@shared/contracts/aiChat'
 import type { VoiceTranscriptionInput } from '@shared/contracts/voice'
 import type { CodexSessionTargetContext } from '@shared/contracts/codexSessions'
-import type { RuntimeLogLevel } from '@shared/contracts/appRuntime'
 
 type XtermRuntimeOptions = XtermTerminal['options'] & { termName?: string }
 const setXtermTermName = (terminal: XtermTerminal, terminalType: string) => {
@@ -2031,10 +2035,6 @@ const groupedVisibleHistory = computed(() => {
   }))
 })
 
-const writeAiRuntimeLog = (level: RuntimeLogLevel, event: string, fields: Record<string, unknown> = {}) => {
-  void window.aiops?.writeRuntimeLog?.(level, event, fields)
-}
-
 const loadClassicChatData = async () => {
   if (classicChatDataLoaded) return
   classicChatDataLoaded = true
@@ -2048,11 +2048,12 @@ const fitCodexTerminal = (options: { force?: boolean; conversation?: CodexConver
     if (activeCodexConversation.value?.id !== conversation.id) return
     if (!conversation.terminal || !conversation.fit || !conversation.host?.isConnected) return
     conversation.fit.fit()
-    if (!conversation.sessionId || !window.aiops?.resizeCodexSession) return
+    const resizeCodexSession = codexSessionClient.resizeCodexSession()
+    if (!conversation.sessionId || !resizeCodexSession) return
     if (!options.force && conversation.terminal.cols === conversation.lastFitCols && conversation.terminal.rows === conversation.lastFitRows) return
     conversation.lastFitCols = conversation.terminal.cols
     conversation.lastFitRows = conversation.terminal.rows
-    void window.aiops.resizeCodexSession(conversation.sessionId, conversation.terminal.cols, conversation.terminal.rows)
+    void resizeCodexSession(conversation.sessionId, conversation.terminal.cols, conversation.terminal.rows)
     writeAiRuntimeLog('debug', 'renderer.codex.fit-resize', {
       sessionId: conversation.sessionId,
       cols: conversation.terminal.cols,
@@ -2105,12 +2106,16 @@ const disposeCodexSubscriptions = () => {
 }
 
 const subscribeCodexBridge = () => {
-  if (!window.aiops || codexOffData || codexOffLifecycle || codexOffExit) return
-  codexOffData = window.aiops.onCodexSessionData?.((event) => {
+  if (codexOffData || codexOffLifecycle || codexOffExit) return
+  const onCodexSessionData = codexSessionClient.onCodexSessionData()
+  const onCodexSessionLifecycle = codexSessionClient.onCodexSessionLifecycle()
+  const onCodexSessionExit = codexSessionClient.onCodexSessionExit()
+  if (!onCodexSessionData && !onCodexSessionLifecycle && !onCodexSessionExit) return
+  codexOffData = onCodexSessionData?.((event) => {
     const conversation = codexConversations.value.find((item) => item.sessionId === event.id)
     conversation?.terminal?.write(event.data)
   }) || null
-  codexOffLifecycle = window.aiops.onCodexSessionLifecycle?.((event) => {
+  codexOffLifecycle = onCodexSessionLifecycle?.((event) => {
     const conversation = codexConversations.value.find((item) => item.sessionId === event.id)
     if (!conversation) return
     if (event.stage === 'starting') conversation.status = 'starting'
@@ -2130,7 +2135,7 @@ const subscribeCodexBridge = () => {
       syncCodexAttentionState(conversation)
     }
   }) || null
-  codexOffExit = window.aiops.onCodexSessionExit?.((event) => {
+  codexOffExit = onCodexSessionExit?.((event) => {
     const conversation = codexConversations.value.find((item) => item.sessionId === event.id)
     if (!conversation) return
     conversation.status = event.errorCode ? 'error' : 'closed'
@@ -2141,7 +2146,7 @@ const subscribeCodexBridge = () => {
 
 const syncActiveCodexBridgeTarget = async () => {
   const conversation = activeCodexConversation.value
-  if (!conversation?.sessionId || !conversation.boundTarget || !window.aiops?.setCodexSessionTarget) return
+  if (!conversation?.sessionId || !conversation.boundTarget || !codexSessionClient.setCodexSessionTarget()) return
   await syncCodexTargetContext({ force: true, conversation })
 }
 
@@ -2178,17 +2183,19 @@ const ensureCodexTerminal = (conversation = ensureActiveCodexConversation()) => 
     return false
   })
   terminal.onData((data) => {
-    if (!conversation.sessionId || !window.aiops?.writeCodexSession) return
+    const writeCodexSession = codexSessionClient.writeCodexSession()
+    if (!conversation.sessionId || !writeCodexSession) return
     void syncCodexTargetContext({ force: true, conversation }).finally(() => {
       markCodexPendingTargetDelivered(conversation)
-      void window.aiops?.writeCodexSession?.(conversation.sessionId, data)
+      void writeCodexSession(conversation.sessionId, data)
     })
   })
   terminal.onResize(({ cols, rows }) => {
-    if (!conversation.sessionId || !window.aiops?.resizeCodexSession) return
+    const resizeCodexSession = codexSessionClient.resizeCodexSession()
+    if (!conversation.sessionId || !resizeCodexSession) return
     conversation.lastFitCols = cols
     conversation.lastFitRows = rows
-    void window.aiops.resizeCodexSession(conversation.sessionId, cols, rows)
+    void resizeCodexSession(conversation.sessionId, cols, rows)
   })
   if (typeof ResizeObserver !== 'undefined') {
     conversation.resizeObserver?.disconnect()
@@ -2255,23 +2262,10 @@ const currentBoundCodexTarget = (conversation = activeCodexConversation.value) =
   return codexTargetContextFromPanel(panel)
 }
 
-const codexTargetSignature = (target: CodexSessionTargetContext) =>
-  [
-    target.panelId || '',
-    target.sessionId || '',
-    target.kind || '',
-    target.label || '',
-    target.host || '',
-    target.port || '',
-    target.username || '',
-    target.assetId || '',
-    target.assetName || '',
-    target.cwd || ''
-  ].join('\u001f')
-
 const syncCodexTargetContext = async (options: { force?: boolean; conversation?: CodexConversation | null } = {}) => {
   const conversation = options.conversation || activeCodexConversation.value
-  if (!window.aiops?.setCodexSessionTarget) return
+  const setCodexSessionTarget = codexSessionClient.setCodexSessionTarget()
+  if (!setCodexSessionTarget) return
   if (!conversation || (!conversation.sessionId && !conversation.startPromise)) return
   const target = currentBoundCodexTarget(conversation)
   if (!target) return
@@ -2279,7 +2273,7 @@ const syncCodexTargetContext = async (options: { force?: boolean; conversation?:
   if (!options.force && signature === conversation.lastTargetSignature) return
   conversation.lastTargetSignature = signature
   try {
-    const result = await window.aiops.setCodexSessionTarget(target)
+    const result = await setCodexSessionTarget(target)
     writeAiRuntimeLog(result?.data?.registered ? 'debug' : 'warn', result?.data?.registered ? 'renderer.codex-target.updated' : 'renderer.codex-target.unavailable', {
       sessionId: conversation.sessionId,
       targetSessionId: target.sessionId,
@@ -2297,41 +2291,24 @@ const syncCodexTargetContext = async (options: { force?: boolean; conversation?:
   }
 }
 
-const formatCodexTargetEvent = (kind: 'bound' | 'changed' | 'unbound', target?: CodexSessionTargetContext | null, _previous?: CodexSessionTargetContext | null) => {
-  if (kind === 'unbound') {
-    return '\n[aiopsterm target unbound]\nThis AI session no longer has a managed terminal bound. Do not run host tools until the user binds a terminal again.\n'
-  }
-  const currentLabel = target?.label || target?.assetName || target?.host || target?.sessionId || 'unknown'
-  return [
-    '',
-    kind === 'changed' ? '[aiopsterm target changed]' : '[aiopsterm target bound]',
-    `Current target: ${currentLabel}`,
-    target?.host ? `Endpoint: ${target.username ? `${target.username}@` : ''}${target.host}${target.port ? `:${target.port}` : ''}` : '',
-    target?.cwd ? `CWD: ${target.cwd}` : '',
-    'Before host-specific actions, call target_context and verify hostname/whoami/pwd.',
-    ''
-  ]
-    .filter((line) => line !== '')
-    .join('\n')
-}
-
 const setCodexPendingTargetContext = async (
   conversation: CodexConversation,
-  kind: 'bound' | 'changed' | 'unbound',
+  kind: CodexTargetEventKind,
   target?: CodexSessionTargetContext | null,
   previous?: CodexSessionTargetContext | null
 ) => {
-  if (!conversation.sessionId || !window.aiops?.setCodexSessionPendingContext) return
+  const setCodexSessionPendingContext = codexSessionClient.setCodexSessionPendingContext()
+  if (!conversation.sessionId || !setCodexSessionPendingContext) return
   const nextSignature = target ? codexTargetSignature(target) : ''
   conversation.pendingTargetSignature = nextSignature
   if (nextSignature === conversation.deliveredTargetSignature) {
     conversation.pendingTargetContextActive = false
-    await window.aiops.setCodexSessionPendingContext(conversation.sessionId, '')
+    await setCodexSessionPendingContext(conversation.sessionId, '')
     return
   }
-  const text = formatCodexTargetEvent(kind, target, previous)
+  const text = formatCodexTargetEvent(kind, target)
   conversation.pendingTargetContextActive = Boolean(text.trim())
-  await window.aiops.setCodexSessionPendingContext(conversation.sessionId, text)
+  await setCodexSessionPendingContext(conversation.sessionId, text)
 }
 
 const markCodexPendingTargetDelivered = (conversation: CodexConversation) => {
@@ -2379,8 +2356,9 @@ const unbindCodexTarget = async () => {
   conversation.lastTargetSignature = ''
   codexTargetPickerOpen.value = false
   codexTargetQuery.value = ''
-  if (conversation.sessionId && window.aiops?.setCodexSessionTarget) {
-    await window.aiops.setCodexSessionTarget(undefined)
+  const setCodexSessionTarget = codexSessionClient.setCodexSessionTarget()
+  if (conversation.sessionId && setCodexSessionTarget) {
+    await setCodexSessionTarget(undefined)
     await setCodexPendingTargetContext(conversation, 'unbound', null, previous)
   }
 }
@@ -2434,7 +2412,8 @@ const startCodexSession = async (targetConversation?: CodexConversation | null) 
   conversation.startPromise = (async () => {
     await nextTick()
     ensureCodexTerminal(conversation)
-    if (!window.aiops?.createCodexSession) {
+    const createCodexSession = codexSessionClient.createCodexSession()
+    if (!createCodexSession) {
       conversation.status = 'error'
       conversation.error = t('ai.codexBridgeMissing')
       syncCodexAttentionState(conversation)
@@ -2450,7 +2429,7 @@ const startCodexSession = async (targetConversation?: CodexConversation | null) 
     const cols = conversation.terminal?.cols || 100
     const rows = conversation.terminal?.rows || 30
     try {
-      const session = await window.aiops.createCodexSession({ cols, rows, target })
+      const session = await createCodexSession({ cols, rows, target })
       conversation.sessionId = session.id
       conversation.status = session.lifecycle?.stage === 'ready' ? 'ready' : 'starting'
       conversation.deliveredTargetSignature = codexTargetSignature(target)
@@ -2482,9 +2461,10 @@ const startCodexSession = async (targetConversation?: CodexConversation | null) 
 
 const stopCodexSession = async (conversation = activeCodexConversation.value) => {
   const sessionId = conversation?.sessionId
-  if (!sessionId || !window.aiops?.killCodexSession) return
+  const killCodexSession = codexSessionClient.killCodexSession()
+  if (!sessionId || !killCodexSession) return
   try {
-    await window.aiops.killCodexSession(sessionId)
+    await killCodexSession(sessionId)
   } catch (error) {
     writeAiRuntimeLog('warn', 'renderer.codex-session.kill-failed', {
       sessionId,
@@ -3271,7 +3251,7 @@ const exportCurrentChat = async () => {
     showChatExportNotice('当前会话为空，无法导出。')
     return
   }
-  const exportChat = window.aiops?.exportChat
+  const exportChat = aiChatClient.exportChat()
   if (typeof exportChat !== 'function') {
     showChatExportNotice('聊天导出服务不可用。')
     return
@@ -5015,7 +4995,7 @@ const handleVoiceTranscriptionComplete = async (text: string) => {
 }
 
 const transcribeVoiceInput = async (input: VoiceTranscriptionInput) => {
-  const transcribeVoice = window.aiops?.transcribeVoiceInput
+  const transcribeVoice = voiceClient.transcribeVoiceInput()
   if (typeof transcribeVoice !== 'function') {
     showInputPlaceholderNotice('语音识别失败：语音识别服务不可用')
     return

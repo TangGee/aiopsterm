@@ -191,6 +191,8 @@ import UserPanel from '@/components/panels/UserPanel.vue'
 import OnboardingSpotlight from '@/components/onboarding/OnboardingSpotlight.vue'
 import { layoutWidthLimits, useWorkspaceStore } from '@/stores/workspace'
 import { backgroundStyleVars } from '@/services/backgroundRuntime'
+import { appRuntimeClient } from '@/services/appRuntimeClient'
+import { managedAiClient } from '@/services/managedAiClient'
 import { terminalClient } from '@/services/terminalClient'
 import { applyDocumentLocale, useI18n, type I18nKey } from '@/i18n'
 import { isAiopstermDeepLinkPayload } from '@shared/deepLink'
@@ -326,7 +328,7 @@ const submitTerminalMfa = () => {
   }
   terminalMfaDialog.value.submitting = true
   terminalMfaDialog.value.error = ''
-  window.aiops?.respondTerminalKeyboardInteractive?.(
+  terminalClient.respondTerminalKeyboardInteractive()?.(
     request.id,
     isTerminalPasswordPrompt.value
       ? {
@@ -340,7 +342,7 @@ const submitTerminalMfa = () => {
 const cancelTerminalMfa = () => {
   const request = terminalMfaDialog.value.request
   if (request) {
-    window.aiops?.cancelTerminalKeyboardInteractive?.(request.id)
+    terminalClient.cancelTerminalKeyboardInteractive()?.(request.id)
   }
   resetTerminalMfaDialog()
 }
@@ -386,7 +388,7 @@ const applyDeepLinkPayload = (payload: unknown) => {
 }
 
 const consumePendingDeepLinks = async () => {
-  const consumeDeepLinks = window.aiops?.consumeDeepLinks
+  const consumeDeepLinks = appRuntimeClient.consumeDeepLinks()
   if (typeof consumeDeepLinks !== 'function') return
   try {
     const payloads = await consumeDeepLinks()
@@ -460,18 +462,18 @@ onMounted(() => {
   workspace.installShortcutRuntime()
   workspace.hydrateConfig()
   void workspace.refreshManagedAiSessions({ silent: true })
-  stopDeepLink = window.aiops?.onDeepLink?.((payload) => {
+  stopDeepLink = appRuntimeClient.onDeepLink()?.((payload) => {
     applyDeepLinkPayload(payload)
   })
   stopKeyboardInteractiveRequest = terminalClient.onTerminalKeyboardInteractiveRequest()?.(handleTerminalMfaRequest)
   stopKeyboardInteractiveResult = terminalClient.onTerminalKeyboardInteractiveResult()?.(handleTerminalMfaResult)
-  stopAiAgentSessionEvent = window.aiops?.onAiAgentSessionEvent?.((event) => {
+  stopAiAgentSessionEvent = managedAiClient.onAiAgentSessionEvent()?.((event) => {
     workspace.upsertManagedAiSession(event)
   })
-  stopManagedAiSessionEvent = window.aiops?.onManagedAiSessionEvent?.(() => {
+  stopManagedAiSessionEvent = managedAiClient.onManagedAiSessionEvent()?.(() => {
     workspace.refreshManagedAiSessionsDebounced()
   })
-  stopManagedAiSessionFocusRequest = window.aiops?.onManagedAiSessionFocusRequest?.((request) => {
+  stopManagedAiSessionFocusRequest = managedAiClient.onManagedAiSessionFocusRequest()?.((request) => {
     void workspace.focusManagedAiSessionRequest(request)
   })
   void consumePendingDeepLinks()

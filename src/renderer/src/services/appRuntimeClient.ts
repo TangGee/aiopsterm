@@ -1,4 +1,5 @@
 import type { AiopsPreloadApi } from '@shared/contracts/preloadApi'
+import { createBridgeMethod } from '@/services/preloadBridgeClient'
 import type {
   AppUpdateCheckResult,
   AppUpdateDownloadResult,
@@ -17,7 +18,10 @@ type AppRuntimeBridge = Pick<
   | 'downloadAppUpdate'
   | 'installAppUpdate'
   | 'onAppUpdateProgress'
+  | 'consumeDeepLinks'
+  | 'onDeepLink'
   | 'openLogDir'
+  | 'writeRuntimeLog'
   | 'openSettingsDocumentation'
   | 'submitSettingsFeedbackReport'
 >
@@ -31,10 +35,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> => typeof va
 
 const isNonEmptyString = (value: unknown): value is string => typeof value === 'string' && value.trim().length > 0
 
-const bridgeMethod = <Name extends keyof AppRuntimeBridge>(name: Name): AppRuntimeBridge[Name] | undefined => {
-  const method = window.aiops?.[name]
-  return typeof method === 'function' ? (method.bind(window.aiops) as AppRuntimeBridge[Name]) : undefined
-}
+const bridgeMethod = createBridgeMethod<AppRuntimeBridge>()
 
 export const appRuntimeClient = {
   getConfig: () => bridgeMethod('getConfig'),
@@ -45,7 +46,10 @@ export const appRuntimeClient = {
   downloadAppUpdate: () => bridgeMethod('downloadAppUpdate'),
   installAppUpdate: () => bridgeMethod('installAppUpdate'),
   onAppUpdateProgress: () => bridgeMethod('onAppUpdateProgress'),
+  consumeDeepLinks: () => bridgeMethod('consumeDeepLinks'),
+  onDeepLink: () => bridgeMethod('onDeepLink'),
   openLogDir: () => bridgeMethod('openLogDir'),
+  writeRuntimeLog: () => bridgeMethod('writeRuntimeLog'),
   openSettingsDocumentation: () => bridgeMethod('openSettingsDocumentation'),
   submitSettingsFeedbackReport: () => bridgeMethod('submitSettingsFeedbackReport')
 }

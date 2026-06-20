@@ -1,4 +1,5 @@
 import type { AiopsPreloadApi } from '@shared/contracts/preloadApi'
+import { createBridgeMethod } from '@/services/preloadBridgeClient'
 
 type UserAccountBridge = Pick<
   AiopsPreloadApi,
@@ -18,10 +19,7 @@ type UserAccountBridge = Pick<
   | 'revokeTrustedDevice'
 >
 
-const bridgeMethod = <Name extends keyof UserAccountBridge>(name: Name): UserAccountBridge[Name] | undefined => {
-  const method = window.aiops?.[name]
-  return typeof method === 'function' ? (method.bind(window.aiops) as UserAccountBridge[Name]) : undefined
-}
+const bridgeMethod = createBridgeMethod<UserAccountBridge>()
 
 export const userAccountClient = {
   getUserAccount: () => bridgeMethod('getUserAccount'),

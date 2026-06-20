@@ -1,4 +1,5 @@
 import type { AiopsPreloadApi } from '@shared/contracts/preloadApi'
+import { createBridgeMethod } from '@/services/preloadBridgeClient'
 
 type SettingsConfigBridge = Pick<
   AiopsPreloadApi,
@@ -12,10 +13,7 @@ type SettingsConfigBridge = Pick<
   | 'onKeywordHighlightConfigFileChanged'
 >
 
-const bridgeMethod = <Name extends keyof SettingsConfigBridge>(name: Name): SettingsConfigBridge[Name] | undefined => {
-  const method = window.aiops?.[name]
-  return typeof method === 'function' ? (method.bind(window.aiops) as SettingsConfigBridge[Name]) : undefined
-}
+const bridgeMethod = createBridgeMethod<SettingsConfigBridge>()
 
 export const settingsConfigClient = {
   getSecurityConfigPath: () => bridgeMethod('getSecurityConfigPath'),

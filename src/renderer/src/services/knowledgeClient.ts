@@ -1,4 +1,5 @@
 import type { AiopsPreloadApi } from '@shared/contracts/preloadApi'
+import { createBridgeMethod } from '@/services/preloadBridgeClient'
 
 type KnowledgeBridge = Pick<
   AiopsPreloadApi,
@@ -23,10 +24,7 @@ type KnowledgeBridge = Pick<
   | 'onKbTransferProgress'
 >
 
-const bridgeMethod = <Name extends keyof KnowledgeBridge>(name: Name): KnowledgeBridge[Name] | undefined => {
-  const method = window.aiops?.[name]
-  return typeof method === 'function' ? (method.bind(window.aiops) as KnowledgeBridge[Name]) : undefined
-}
+const bridgeMethod = createBridgeMethod<KnowledgeBridge>()
 
 export const knowledgeClient = {
   kbCheckPath: () => bridgeMethod('kbCheckPath'),

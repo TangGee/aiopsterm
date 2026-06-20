@@ -28,6 +28,14 @@ const commandRecord = {
   provider: 'aiopsterm-local' as const
 }
 
+const suggestions = [
+  {
+    command: 'git status',
+    source: 'base' as const,
+    explanation: 'Show repository status'
+  }
+]
+
 afterEach(() => {
   window.aiops = originalAiops
 })
@@ -39,6 +47,10 @@ describe('terminalClient', () => {
     const offExit = vi.fn()
     const offKeyboardRequest = vi.fn()
     const offKeyboardResult = vi.fn()
+    const keyboardResponse = {
+      responses: ['secret'],
+      rememberPassword: true
+    }
 
     window.aiops = {
       ...originalAiops,
@@ -54,11 +66,14 @@ describe('terminalClient', () => {
       resizeTerminal: vi.fn(async () => undefined),
       killTerminal: vi.fn(async (id: string) => ({ ok: true, data: { id } })),
       generateTerminalCommand: vi.fn(async () => ({ ok: true, data: commandRecord })),
+      getTerminalCommandSuggestions: vi.fn(async () => suggestions),
       onTerminalData: vi.fn(() => offData),
       onTerminalLifecycle: vi.fn(() => offLifecycle),
       onTerminalExit: vi.fn(() => offExit),
       onTerminalKeyboardInteractiveRequest: vi.fn(() => offKeyboardRequest),
-      onTerminalKeyboardInteractiveResult: vi.fn(() => offKeyboardResult)
+      onTerminalKeyboardInteractiveResult: vi.fn(() => offKeyboardResult),
+      respondTerminalKeyboardInteractive: vi.fn(),
+      cancelTerminalKeyboardInteractive: vi.fn()
     }
 
     await expect(terminalClient.createTerminal()?.({ kind: 'local', panelId: 'panel-1' })).resolves.toEqual(terminalSession)
@@ -74,6 +89,7 @@ describe('terminalClient', () => {
         context: commandRecord.context
       })
     ).resolves.toEqual({ ok: true, data: commandRecord })
+    await expect(terminalClient.getTerminalCommandSuggestions()?.('git st', { mode: 'base', host: '127.0.0.1' })).resolves.toEqual(suggestions)
 
     const onData = vi.fn()
     const onLifecycle = vi.fn()
@@ -85,6 +101,8 @@ describe('terminalClient', () => {
     expect(terminalClient.onTerminalExit()?.(onExit)).toBe(offExit)
     expect(terminalClient.onTerminalKeyboardInteractiveRequest()?.(onKeyboardRequest)).toBe(offKeyboardRequest)
     expect(terminalClient.onTerminalKeyboardInteractiveResult()?.(onKeyboardResult)).toBe(offKeyboardResult)
+    expect(terminalClient.respondTerminalKeyboardInteractive()?.('keyboard-request-1', keyboardResponse)).toBeUndefined()
+    expect(terminalClient.cancelTerminalKeyboardInteractive()?.('keyboard-request-1')).toBeUndefined()
 
     expect(window.aiops.createTerminal).toHaveBeenCalledWith({ kind: 'local', panelId: 'panel-1' })
     expect(window.aiops.writeTerminal).toHaveBeenCalledWith('terminal-1', 'pwd\n')
@@ -97,11 +115,14 @@ describe('terminalClient', () => {
       modelName: commandRecord.modelName,
       context: commandRecord.context
     })
+    expect(window.aiops.getTerminalCommandSuggestions).toHaveBeenCalledWith('git st', { mode: 'base', host: '127.0.0.1' })
     expect(window.aiops.onTerminalData).toHaveBeenCalledWith(onData)
     expect(window.aiops.onTerminalLifecycle).toHaveBeenCalledWith(onLifecycle)
     expect(window.aiops.onTerminalExit).toHaveBeenCalledWith(onExit)
     expect(window.aiops.onTerminalKeyboardInteractiveRequest).toHaveBeenCalledWith(onKeyboardRequest)
     expect(window.aiops.onTerminalKeyboardInteractiveResult).toHaveBeenCalledWith(onKeyboardResult)
+    expect(window.aiops.respondTerminalKeyboardInteractive).toHaveBeenCalledWith('keyboard-request-1', keyboardResponse)
+    expect(window.aiops.cancelTerminalKeyboardInteractive).toHaveBeenCalledWith('keyboard-request-1')
 
     window.aiops = {
       ...originalAiops,
@@ -111,11 +132,14 @@ describe('terminalClient', () => {
       resizeTerminal: undefined as any,
       killTerminal: undefined as any,
       generateTerminalCommand: undefined as any,
+      getTerminalCommandSuggestions: undefined as any,
       onTerminalData: undefined as any,
       onTerminalLifecycle: undefined as any,
       onTerminalExit: undefined as any,
       onTerminalKeyboardInteractiveRequest: undefined as any,
-      onTerminalKeyboardInteractiveResult: undefined as any
+      onTerminalKeyboardInteractiveResult: undefined as any,
+      respondTerminalKeyboardInteractive: undefined as any,
+      cancelTerminalKeyboardInteractive: undefined as any
     }
     expect(terminalClient.createTerminal()).toBeUndefined()
     expect(terminalClient.writeTerminal()).toBeUndefined()
@@ -123,10 +147,13 @@ describe('terminalClient', () => {
     expect(terminalClient.resizeTerminal()).toBeUndefined()
     expect(terminalClient.killTerminal()).toBeUndefined()
     expect(terminalClient.generateTerminalCommand()).toBeUndefined()
+    expect(terminalClient.getTerminalCommandSuggestions()).toBeUndefined()
     expect(terminalClient.onTerminalData()).toBeUndefined()
     expect(terminalClient.onTerminalLifecycle()).toBeUndefined()
     expect(terminalClient.onTerminalExit()).toBeUndefined()
     expect(terminalClient.onTerminalKeyboardInteractiveRequest()).toBeUndefined()
     expect(terminalClient.onTerminalKeyboardInteractiveResult()).toBeUndefined()
+    expect(terminalClient.respondTerminalKeyboardInteractive()).toBeUndefined()
+    expect(terminalClient.cancelTerminalKeyboardInteractive()).toBeUndefined()
   })
 })

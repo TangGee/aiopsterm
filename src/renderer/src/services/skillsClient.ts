@@ -1,4 +1,5 @@
 import type { AiopsPreloadApi } from '@shared/contracts/preloadApi'
+import { createBridgeMethod } from '@/services/preloadBridgeClient'
 
 type SkillsBridge = Pick<
   AiopsPreloadApi,
@@ -16,10 +17,7 @@ type SkillsBridge = Pick<
   | 'onSkillsUpdate'
 >
 
-const bridgeMethod = <Name extends keyof SkillsBridge>(name: Name): SkillsBridge[Name] | undefined => {
-  const method = window.aiops?.[name]
-  return typeof method === 'function' ? (method.bind(window.aiops) as SkillsBridge[Name]) : undefined
-}
+const bridgeMethod = createBridgeMethod<SkillsBridge>()
 
 export const skillsClient = {
   getSkills: () => bridgeMethod('getSkills'),

@@ -1,4 +1,5 @@
 import type { AiopsPreloadApi } from '@shared/contracts/preloadApi'
+import { createBridgeMethod } from '@/services/preloadBridgeClient'
 
 type ManagedAiBridge = Pick<
   AiopsPreloadApi,
@@ -11,12 +12,12 @@ type ManagedAiBridge = Pick<
   | 'setAgentHibernationConfig'
   | 'hibernateManagedAiSession'
   | 'wakeManagedAiSession'
+  | 'onAiAgentSessionEvent'
+  | 'onManagedAiSessionEvent'
+  | 'onManagedAiSessionFocusRequest'
 >
 
-const bridgeMethod = <Name extends keyof ManagedAiBridge>(name: Name): ManagedAiBridge[Name] | undefined => {
-  const method = window.aiops?.[name]
-  return typeof method === 'function' ? (method.bind(window.aiops) as ManagedAiBridge[Name]) : undefined
-}
+const bridgeMethod = createBridgeMethod<ManagedAiBridge>()
 
 export const managedAiClient = {
   listManagedAiSessions: () => bridgeMethod('listManagedAiSessions'),
@@ -27,5 +28,8 @@ export const managedAiClient = {
   getAgentHibernationConfig: () => bridgeMethod('getAgentHibernationConfig'),
   setAgentHibernationConfig: () => bridgeMethod('setAgentHibernationConfig'),
   hibernateManagedAiSession: () => bridgeMethod('hibernateManagedAiSession'),
-  wakeManagedAiSession: () => bridgeMethod('wakeManagedAiSession')
+  wakeManagedAiSession: () => bridgeMethod('wakeManagedAiSession'),
+  onAiAgentSessionEvent: () => bridgeMethod('onAiAgentSessionEvent'),
+  onManagedAiSessionEvent: () => bridgeMethod('onManagedAiSessionEvent'),
+  onManagedAiSessionFocusRequest: () => bridgeMethod('onManagedAiSessionFocusRequest')
 }

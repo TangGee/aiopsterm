@@ -1,4 +1,5 @@
 import type { AiopsPreloadApi } from '@shared/contracts/preloadApi'
+import { createBridgeMethod } from '@/services/preloadBridgeClient'
 
 type LocalFilesBridge = Pick<
   AiopsPreloadApi,
@@ -15,10 +16,7 @@ type LocalFilesBridge = Pick<
   | 'prepareChatImageAttachmentFromClipboard'
 >
 
-const bridgeMethod = <Name extends keyof LocalFilesBridge>(name: Name): LocalFilesBridge[Name] | undefined => {
-  const method = window.aiops?.[name]
-  return typeof method === 'function' ? (method.bind(window.aiops) as LocalFilesBridge[Name]) : undefined
-}
+const bridgeMethod = createBridgeMethod<LocalFilesBridge>()
 
 export const localFilesClient = {
   getPathForFile: () => bridgeMethod('getPathForFile'),

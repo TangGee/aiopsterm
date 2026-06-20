@@ -39,6 +39,17 @@ afterEach(() => {
 
 describe('appRuntimeClient', () => {
   it('returns undefined for unavailable bridge methods and binds available methods', async () => {
+    const deepLinkPayload = {
+      url: 'aiopsterm://open/settings?section=general',
+      action: 'open' as const,
+      target: 'settings' as const,
+      module: 'settings' as const,
+      settingsSection: 'general' as const,
+      acceptedAt: 1781884800000
+    }
+    const offDeepLink = vi.fn()
+    const onDeepLink = vi.fn()
+
     window.aiops = {
       ...originalAiops,
       getConfig: vi.fn(async () => ({ ...configFixture })),
@@ -64,6 +75,12 @@ describe('appRuntimeClient', () => {
         }
       })),
       checkUpdate: vi.fn(async () => ({ available: false, channel: 'local' as const })),
+      consumeDeepLinks: vi.fn(async () => [deepLinkPayload]),
+      onDeepLink: vi.fn(() => offDeepLink),
+      writeRuntimeLog: vi.fn(async (level: string, event: string, fields?: Record<string, unknown>) => ({
+        ok: true as const,
+        data: { event: `${level}:${event}:${Object.keys(fields || {}).length}` }
+      })),
       openSettingsDocumentation: vi.fn(async () => ({ path: '/tmp/docs/index.md', title: 'Docs', content: '# Docs' })),
       openLogDir: undefined as any
     }
@@ -81,6 +98,12 @@ describe('appRuntimeClient', () => {
       expect.objectContaining({ ok: true, data: expect.objectContaining({ enabled: true }) })
     )
     await expect(appRuntimeClient.checkUpdate()?.()).resolves.toEqual({ available: false, channel: 'local' })
+    await expect(appRuntimeClient.consumeDeepLinks()?.()).resolves.toEqual([deepLinkPayload])
+    expect(appRuntimeClient.onDeepLink()?.(onDeepLink)).toBe(offDeepLink)
+    await expect(appRuntimeClient.writeRuntimeLog()?.('info', 'renderer.event', { panelId: 'panel-1' })).resolves.toEqual({
+      ok: true,
+      data: { event: 'info:renderer.event:1' }
+    })
     await expect(appRuntimeClient.openSettingsDocumentation()?.({ page: 'general', locale: 'zh-CN' })).resolves.toEqual({
       path: '/tmp/docs/index.md',
       title: 'Docs',
@@ -94,6 +117,9 @@ describe('appRuntimeClient', () => {
     })
     expect(window.aiops.applyKnowledgeSearchRuntimeSetting).toHaveBeenCalledWith({ previousEnabled: false, nextEnabled: true })
     expect(window.aiops.checkUpdate).toHaveBeenCalledTimes(1)
+    expect(window.aiops.consumeDeepLinks).toHaveBeenCalledTimes(1)
+    expect(window.aiops.onDeepLink).toHaveBeenCalledWith(onDeepLink)
+    expect(window.aiops.writeRuntimeLog).toHaveBeenCalledWith('info', 'renderer.event', { panelId: 'panel-1' })
     expect(window.aiops.openSettingsDocumentation).toHaveBeenCalledWith({ page: 'general', locale: 'zh-CN' })
 
     window.aiops = {
@@ -101,12 +127,18 @@ describe('appRuntimeClient', () => {
       getConfig: undefined as any,
       saveConfig: undefined as any,
       applyPrivacyRuntimeSettings: undefined as any,
-      applyKnowledgeSearchRuntimeSetting: undefined as any
+      applyKnowledgeSearchRuntimeSetting: undefined as any,
+      consumeDeepLinks: undefined as any,
+      onDeepLink: undefined as any,
+      writeRuntimeLog: undefined as any
     }
     expect(appRuntimeClient.getConfig()).toBeUndefined()
     expect(appRuntimeClient.saveConfig()).toBeUndefined()
     expect(appRuntimeClient.applyPrivacyRuntimeSettings()).toBeUndefined()
     expect(appRuntimeClient.applyKnowledgeSearchRuntimeSetting()).toBeUndefined()
+    expect(appRuntimeClient.consumeDeepLinks()).toBeUndefined()
+    expect(appRuntimeClient.onDeepLink()).toBeUndefined()
+    expect(appRuntimeClient.writeRuntimeLog()).toBeUndefined()
   })
 
   it('validates app update and open path bridge payloads', () => {

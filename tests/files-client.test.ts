@@ -1,13 +1,18 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { filesClient } from '@/services/filesClient'
 import type {
+  FileEntryMutationResult,
+  FileListEntry,
+  FileReadContentResult,
   FileSessionCatalog,
   FileSessionFolderDeleteResult,
   FileSessionFolderMutationResult,
   FileSessionInfo,
   FileSessionMutationResult,
+  FileTransferOperationResult,
   FileTransferTaskCancelResult,
-  FileTransferTask
+  FileTransferTask,
+  FileWriteContentResult
 } from '@shared/contracts/files'
 
 const originalAiops = window.aiops
@@ -47,6 +52,58 @@ const transferTask: FileTransferTask = {
   status: 'running'
 }
 
+const fileEntry: FileListEntry = {
+  name: 'app.log',
+  path: '/var/log/app.log',
+  type: 'file',
+  size: 42,
+  modifiedAt: 1781913600000,
+  mode: '-rw-r--r--'
+}
+
+const fileReadResult: FileReadContentResult = {
+  ok: true,
+  data: {
+    content: 'hello',
+    action: 'edit',
+    mtimeMs: 1781913600000,
+    size: 5
+  }
+}
+
+const fileWriteResult: FileWriteContentResult = {
+  ok: true,
+  data: {
+    mtimeMs: 1781913601000,
+    size: 7,
+    task: transferTask
+  }
+}
+
+const fileEntryMutationResult: FileEntryMutationResult = {
+  ok: true,
+  data: {
+    affected: 1,
+    path: '/var/log/app-renamed.log',
+    mtimeMs: 1781913601000,
+    task: transferTask
+  }
+}
+
+const fileTransferResult: FileTransferOperationResult = {
+  ok: true,
+  data: {
+    status: 'success',
+    source: fileEntry.path,
+    target: '/tmp/app.log',
+    bytes: 42,
+    files: 1,
+    mtimeMs: 1781913601000,
+    itemKind: 'file',
+    task: transferTask
+  }
+}
+
 afterEach(() => {
   window.aiops = originalAiops
 })
@@ -84,6 +141,11 @@ describe('filesClient', () => {
           }
         })
       ),
+      listFiles: vi.fn(async () => [fileEntry]),
+      readFileContent: vi.fn(async () => fileReadResult),
+      writeFileContent: vi.fn(async () => fileWriteResult),
+      mutateFileEntry: vi.fn(async () => fileEntryMutationResult),
+      transferFileEntry: vi.fn(async () => fileTransferResult),
       cancelFileTransferTask: vi.fn(
         async (input): Promise<FileTransferTaskCancelResult> => ({ ok: true, data: { id: input.id, status: 'aborted', taskIds: [input.id] } })
       ),
@@ -103,6 +165,18 @@ describe('filesClient', () => {
     await expect(filesClient.deleteFileSessionFolder()?.('folder-1')).resolves.toEqual(
       expect.objectContaining({ data: expect.objectContaining({ folderUuid: 'folder-1' }) })
     )
+    await expect(filesClient.listFiles()?.('/var/log', { sessionId: fileSession.id, kind: fileSession.kind })).resolves.toEqual([fileEntry])
+    await expect(filesClient.readFileContent()?.(fileEntry.path, { sessionId: fileSession.id, kind: fileSession.kind })).resolves.toEqual(fileReadResult)
+    await expect(filesClient.writeFileContent()?.(fileEntry.path, 'updated', { sessionId: fileSession.id, kind: fileSession.kind })).resolves.toEqual(
+      fileWriteResult
+    )
+    await expect(
+      filesClient.mutateFileEntry()?.(
+        { kind: 'rename', oldPath: fileEntry.path, newPath: '/var/log/app-renamed.log' },
+        { sessionId: fileSession.id, kind: fileSession.kind }
+      )
+    ).resolves.toEqual(fileEntryMutationResult)
+    await expect(filesClient.transferFileEntry()?.({ kind: 'download-file', remotePath: fileEntry.path, localPath: '/tmp/app.log' }, { sessionId: fileSession.id, kind: fileSession.kind })).resolves.toEqual(fileTransferResult)
     await expect(filesClient.cancelFileTransferTask()?.({ id: 'task-1' })).resolves.toEqual(
       expect.objectContaining({ data: expect.objectContaining({ id: 'task-1', status: 'aborted' }) })
     )
@@ -114,6 +188,17 @@ describe('filesClient', () => {
     expect(window.aiops.updateFileSession).toHaveBeenCalledWith('local', { label: 'Local files' })
     expect(window.aiops.saveFileSessionFolder).toHaveBeenCalledWith({ name: 'Production' })
     expect(window.aiops.deleteFileSessionFolder).toHaveBeenCalledWith('folder-1')
+    expect(window.aiops.listFiles).toHaveBeenCalledWith('/var/log', { sessionId: fileSession.id, kind: fileSession.kind })
+    expect(window.aiops.readFileContent).toHaveBeenCalledWith(fileEntry.path, { sessionId: fileSession.id, kind: fileSession.kind })
+    expect(window.aiops.writeFileContent).toHaveBeenCalledWith(fileEntry.path, 'updated', { sessionId: fileSession.id, kind: fileSession.kind })
+    expect(window.aiops.mutateFileEntry).toHaveBeenCalledWith(
+      { kind: 'rename', oldPath: fileEntry.path, newPath: '/var/log/app-renamed.log' },
+      { sessionId: fileSession.id, kind: fileSession.kind }
+    )
+    expect(window.aiops.transferFileEntry).toHaveBeenCalledWith(
+      { kind: 'download-file', remotePath: fileEntry.path, localPath: '/tmp/app.log' },
+      { sessionId: fileSession.id, kind: fileSession.kind }
+    )
     expect(window.aiops.cancelFileTransferTask).toHaveBeenCalledWith({ id: 'task-1' })
 
     window.aiops = {
@@ -125,6 +210,11 @@ describe('filesClient', () => {
       updateFileSession: undefined as any,
       saveFileSessionFolder: undefined as any,
       deleteFileSessionFolder: undefined as any,
+      listFiles: undefined as any,
+      readFileContent: undefined as any,
+      writeFileContent: undefined as any,
+      mutateFileEntry: undefined as any,
+      transferFileEntry: undefined as any,
       cancelFileTransferTask: undefined as any,
       listFileTransferTasks: undefined as any
     }
@@ -135,6 +225,11 @@ describe('filesClient', () => {
     expect(filesClient.updateFileSession()).toBeUndefined()
     expect(filesClient.saveFileSessionFolder()).toBeUndefined()
     expect(filesClient.deleteFileSessionFolder()).toBeUndefined()
+    expect(filesClient.listFiles()).toBeUndefined()
+    expect(filesClient.readFileContent()).toBeUndefined()
+    expect(filesClient.writeFileContent()).toBeUndefined()
+    expect(filesClient.mutateFileEntry()).toBeUndefined()
+    expect(filesClient.transferFileEntry()).toBeUndefined()
     expect(filesClient.cancelFileTransferTask()).toBeUndefined()
     expect(filesClient.listFileTransferTasks()).toBeUndefined()
   })

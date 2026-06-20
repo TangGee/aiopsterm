@@ -1,4 +1,5 @@
 import type { AiopsPreloadApi } from '@shared/contracts/preloadApi'
+import { createBridgeMethod } from '@/services/preloadBridgeClient'
 
 type TerminalBridge = Pick<
   AiopsPreloadApi,
@@ -8,17 +9,17 @@ type TerminalBridge = Pick<
   | 'resizeTerminal'
   | 'killTerminal'
   | 'generateTerminalCommand'
+  | 'getTerminalCommandSuggestions'
   | 'onTerminalData'
   | 'onTerminalLifecycle'
   | 'onTerminalExit'
   | 'onTerminalKeyboardInteractiveRequest'
   | 'onTerminalKeyboardInteractiveResult'
+  | 'respondTerminalKeyboardInteractive'
+  | 'cancelTerminalKeyboardInteractive'
 >
 
-const bridgeMethod = <Name extends keyof TerminalBridge>(name: Name): TerminalBridge[Name] | undefined => {
-  const method = window.aiops?.[name]
-  return typeof method === 'function' ? (method.bind(window.aiops) as TerminalBridge[Name]) : undefined
-}
+const bridgeMethod = createBridgeMethod<TerminalBridge>()
 
 export const terminalClient = {
   createTerminal: () => bridgeMethod('createTerminal'),
@@ -27,9 +28,12 @@ export const terminalClient = {
   resizeTerminal: () => bridgeMethod('resizeTerminal'),
   killTerminal: () => bridgeMethod('killTerminal'),
   generateTerminalCommand: () => bridgeMethod('generateTerminalCommand'),
+  getTerminalCommandSuggestions: () => bridgeMethod('getTerminalCommandSuggestions'),
   onTerminalData: () => bridgeMethod('onTerminalData'),
   onTerminalLifecycle: () => bridgeMethod('onTerminalLifecycle'),
   onTerminalExit: () => bridgeMethod('onTerminalExit'),
   onTerminalKeyboardInteractiveRequest: () => bridgeMethod('onTerminalKeyboardInteractiveRequest'),
-  onTerminalKeyboardInteractiveResult: () => bridgeMethod('onTerminalKeyboardInteractiveResult')
+  onTerminalKeyboardInteractiveResult: () => bridgeMethod('onTerminalKeyboardInteractiveResult'),
+  respondTerminalKeyboardInteractive: () => bridgeMethod('respondTerminalKeyboardInteractive'),
+  cancelTerminalKeyboardInteractive: () => bridgeMethod('cancelTerminalKeyboardInteractive')
 }

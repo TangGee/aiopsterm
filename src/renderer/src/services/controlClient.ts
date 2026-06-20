@@ -1,11 +1,9 @@
 import type { AiopsPreloadApi } from '@shared/contracts/preloadApi'
+import { createBridgeMethod } from '@/services/preloadBridgeClient'
 
 type ControlBridge = Pick<AiopsPreloadApi, 'invokeControlRequest' | 'respondControlRequest' | 'onControlRequest'>
 
-const bridgeMethod = <Name extends keyof ControlBridge>(name: Name): ControlBridge[Name] | undefined => {
-  const method = window.aiops?.[name]
-  return typeof method === 'function' ? (method.bind(window.aiops) as ControlBridge[Name]) : undefined
-}
+const bridgeMethod = createBridgeMethod<ControlBridge>()
 
 export const controlClient = {
   invokeControlRequest: () => bridgeMethod('invokeControlRequest'),

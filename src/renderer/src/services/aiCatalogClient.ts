@@ -1,11 +1,9 @@
 import type { AiopsPreloadApi } from '@shared/contracts/preloadApi'
+import { createBridgeMethod } from '@/services/preloadBridgeClient'
 
 type AiCatalogBridge = Pick<AiopsPreloadApi, 'listAiContextCatalog' | 'listAiCommandCatalog' | 'listAiTodoSnapshot'>
 
-const bridgeMethod = <Name extends keyof AiCatalogBridge>(name: Name): AiCatalogBridge[Name] | undefined => {
-  const method = window.aiops?.[name]
-  return typeof method === 'function' ? (method.bind(window.aiops) as AiCatalogBridge[Name]) : undefined
-}
+const bridgeMethod = createBridgeMethod<AiCatalogBridge>()
 
 export const aiCatalogClient = {
   listAiContextCatalog: () => bridgeMethod('listAiContextCatalog'),

@@ -1,4 +1,5 @@
 import type { AiopsPreloadApi } from '@shared/contracts/preloadApi'
+import { createBridgeMethod } from '@/services/preloadBridgeClient'
 
 type AiChatBridge = Pick<
   AiopsPreloadApi,
@@ -9,12 +10,10 @@ type AiChatBridge = Pick<
   | 'rejectAiMcpToolCall'
   | 'approveAiMcpResourceAccess'
   | 'rejectAiMcpResourceAccess'
+  | 'exportChat'
 >
 
-const bridgeMethod = <Name extends keyof AiChatBridge>(name: Name): AiChatBridge[Name] | undefined => {
-  const method = window.aiops?.[name]
-  return typeof method === 'function' ? (method.bind(window.aiops) as AiChatBridge[Name]) : undefined
-}
+const bridgeMethod = createBridgeMethod<AiChatBridge>()
 
 export const aiChatClient = {
   createAiChatExchangeRequest: () => bridgeMethod('createAiChatExchangeRequest'),
@@ -23,5 +22,6 @@ export const aiChatClient = {
   approveAiMcpToolCall: () => bridgeMethod('approveAiMcpToolCall'),
   rejectAiMcpToolCall: () => bridgeMethod('rejectAiMcpToolCall'),
   approveAiMcpResourceAccess: () => bridgeMethod('approveAiMcpResourceAccess'),
-  rejectAiMcpResourceAccess: () => bridgeMethod('rejectAiMcpResourceAccess')
+  rejectAiMcpResourceAccess: () => bridgeMethod('rejectAiMcpResourceAccess'),
+  exportChat: () => bridgeMethod('exportChat')
 }

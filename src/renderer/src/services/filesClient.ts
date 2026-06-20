@@ -1,4 +1,5 @@
 import type { AiopsPreloadApi } from '@shared/contracts/preloadApi'
+import { createBridgeMethod } from '@/services/preloadBridgeClient'
 
 type FilesBridge = Pick<
   AiopsPreloadApi,
@@ -9,14 +10,16 @@ type FilesBridge = Pick<
   | 'updateFileSession'
   | 'saveFileSessionFolder'
   | 'deleteFileSessionFolder'
+  | 'listFiles'
+  | 'readFileContent'
+  | 'writeFileContent'
+  | 'mutateFileEntry'
+  | 'transferFileEntry'
   | 'cancelFileTransferTask'
   | 'listFileTransferTasks'
 >
 
-const bridgeMethod = <Name extends keyof FilesBridge>(name: Name): FilesBridge[Name] | undefined => {
-  const method = window.aiops?.[name]
-  return typeof method === 'function' ? (method.bind(window.aiops) as FilesBridge[Name]) : undefined
-}
+const bridgeMethod = createBridgeMethod<FilesBridge>()
 
 export const filesClient = {
   listFileSessionCatalog: () => bridgeMethod('listFileSessionCatalog'),
@@ -26,6 +29,11 @@ export const filesClient = {
   updateFileSession: () => bridgeMethod('updateFileSession'),
   saveFileSessionFolder: () => bridgeMethod('saveFileSessionFolder'),
   deleteFileSessionFolder: () => bridgeMethod('deleteFileSessionFolder'),
+  listFiles: () => bridgeMethod('listFiles'),
+  readFileContent: () => bridgeMethod('readFileContent'),
+  writeFileContent: () => bridgeMethod('writeFileContent'),
+  mutateFileEntry: () => bridgeMethod('mutateFileEntry'),
+  transferFileEntry: () => bridgeMethod('transferFileEntry'),
   cancelFileTransferTask: () => bridgeMethod('cancelFileTransferTask'),
   listFileTransferTasks: () => bridgeMethod('listFileTransferTasks')
 }

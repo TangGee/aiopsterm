@@ -219,6 +219,7 @@ import FileBrowser from '@/components/files/FileBrowser.vue'
 import FilesMonacoEditor from '@/components/files/FilesMonacoEditor.vue'
 import TransferProgress from '@/components/files/TransferProgress.vue'
 import TransferSide from '@/components/files/TransferSide.vue'
+import { filesClient } from '@/services/filesClient'
 import {
   isFileReadContentData,
   isFileTransferTaskData,
@@ -410,7 +411,9 @@ const openFileEditor = async (payload: { filePath: string; sessionId: string; se
   const editor = fileEditors.value[fileEditors.value.length - 1]
   activeEditorKey.value = key
   try {
-    const result = await window.aiops.readFileContent(payload.filePath, fileContentOptions(payload))
+    const readFileContent = filesClient.readFileContent()
+    if (!readFileContent) throw new Error('读取文件服务不可用')
+    const result = await readFileContent(payload.filePath, fileContentOptions(payload))
     if (!result.ok) {
       editor.error = result.errorMessage || '读取文件失败'
       return
@@ -516,7 +519,9 @@ const saveFileEditor = async (key: string, needClose: boolean) => {
   editor.loading = true
   editor.error = ''
   try {
-    const result = await window.aiops.writeFileContent(
+    const writeFileContent = filesClient.writeFileContent()
+    if (!writeFileContent) throw new Error('文件保存服务不可用')
+    const result = await writeFileContent(
       editor.filePath,
       editor.content,
       fileContentOptions(editor, {

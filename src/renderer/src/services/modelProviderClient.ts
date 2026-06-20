@@ -1,4 +1,5 @@
 import type { AiopsPreloadApi } from '@shared/contracts/preloadApi'
+import { createBridgeMethod } from '@/services/preloadBridgeClient'
 import type {
   AiModelCatalog,
   AiModelCatalogInput,
@@ -29,10 +30,7 @@ const modelOptionTypes: NonNullable<ModelOptionUserConfig['type']>[] = ['standar
 const stringFromOptions = <T extends string>(value: unknown, options: readonly T[], fallback: T) =>
   typeof value === 'string' && options.includes(value as T) ? (value as T) : fallback
 
-const bridgeMethod = <Name extends keyof ModelProviderBridge>(name: Name): ModelProviderBridge[Name] | undefined => {
-  const method = window.aiops?.[name]
-  return typeof method === 'function' ? (method.bind(window.aiops) as ModelProviderBridge[Name]) : undefined
-}
+const bridgeMethod = createBridgeMethod<ModelProviderBridge>()
 
 export const modelProviderClient = {
   checkModelProvider: () => bridgeMethod('checkModelProvider'),

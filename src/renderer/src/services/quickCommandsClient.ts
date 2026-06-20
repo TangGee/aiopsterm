@@ -1,4 +1,5 @@
 import type { AiopsPreloadApi } from '@shared/contracts/preloadApi'
+import { createBridgeMethod } from '@/services/preloadBridgeClient'
 
 type QuickCommandsBridge = Pick<
   AiopsPreloadApi,
@@ -12,10 +13,7 @@ type QuickCommandsBridge = Pick<
   | 'planQuickCommandScript'
 >
 
-const bridgeMethod = <Name extends keyof QuickCommandsBridge>(name: Name): QuickCommandsBridge[Name] | undefined => {
-  const method = window.aiops?.[name]
-  return typeof method === 'function' ? (method.bind(window.aiops) as QuickCommandsBridge[Name]) : undefined
-}
+const bridgeMethod = createBridgeMethod<QuickCommandsBridge>()
 
 export const quickCommandsClient = {
   getQuickCommands: () => bridgeMethod('getQuickCommands'),

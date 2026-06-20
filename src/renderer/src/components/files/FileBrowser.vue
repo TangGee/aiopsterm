@@ -512,6 +512,7 @@ import {
 } from 'lucide-vue-next'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { copyTextToClipboard } from '@/services/clipboardRuntime'
+import { filesClient } from '@/services/filesClient'
 import { localFilesClient } from '@/services/localFilesClient'
 import {
   isFileEntryMutationData,
@@ -521,7 +522,16 @@ import {
   isFileTransferTaskData,
   malformedFilesBackendResultMessage
 } from '@/services/filesBackendGuards'
-import type { FileEntryMutation, FileEntryMutationResult, FileListEntry, FileListOptions, FileSessionInfo, FileTransferOperationResult, FileTransferTask } from '@shared/contracts/files'
+import type {
+  FileEntryMutation,
+  FileEntryMutationResult,
+  FileListEntry,
+  FileListOptions,
+  FileSessionInfo,
+  FileTransferOperation,
+  FileTransferOperationResult,
+  FileTransferTask
+} from '@shared/contracts/files'
 
 type FileBrowserEntry = Omit<FileListEntry, 'mode' | 'modifiedAt'> & {
   mode: string
@@ -603,9 +613,8 @@ type FsDragPayload = {
   isDir: boolean
 }
 
-type AiopsBridge = NonNullable<typeof window.aiops>
-type OpenDialogBridge = NonNullable<AiopsBridge['showOpenDialog']>
-type SaveDialogBridge = NonNullable<AiopsBridge['showSaveDialog']>
+type OpenDialogBridge = NonNullable<ReturnType<typeof localFilesClient.showOpenDialog>>
+type SaveDialogBridge = NonNullable<ReturnType<typeof localFilesClient.showSaveDialog>>
 
 const permissionGroups = [
   { key: 'owner' as const, label: '所有者' },
@@ -760,8 +769,9 @@ const resolveListedDirectoryPath = (requestedPath: string, rows: FileBrowserEntr
 }
 
 const loadDirectoryEntries = async (path: string) => {
-  if (typeof window.aiops?.listFiles !== 'function') throw new Error('文件列表服务不可用')
-  const list = await window.aiops.listFiles(path, getListOptions())
+  const listFiles = filesClient.listFiles()
+  if (!listFiles) throw new Error('文件列表服务不可用')
+  const list = await listFiles(path, getListOptions())
   if (!Array.isArray(list) || !list.every(isFileListEntryData)) throw new Error(malformedFilesBackendResultMessage)
   const rows = list.map(mapFileEntry)
   const listedDirectoryPath = resolveListedDirectoryPath(path, rows)
@@ -788,14 +798,18 @@ const applyMutationResult = (result: FileEntryMutationResult, mutation: FileEntr
 }
 
 const mutateEntry = async (mutation: FileEntryMutation, fallbackError = '文件操作失败') => {
-  const result = await window.aiops.mutateFileEntry(mutation, getListOptions())
+  const mutateFileEntry = filesClient.mutateFileEntry()
+  if (!mutateFileEntry) throw new Error('文件操作服务不可用')
+  const result = await mutateFileEntry(mutation, getListOptions())
   return applyMutationResult(result, mutation, fallbackError)
 }
 
-const runObservedFileTransfer = async (operation: Parameters<AiopsBridge['transferFileEntry']>[0], options: FileListOptions) => {
+const runObservedFileTransfer = async (operation: FileTransferOperation, options: FileListOptions) => {
+  const transferFileEntry = filesClient.transferFileEntry()
+  if (!transferFileEntry) throw new Error('文件传输服务不可用')
   const stopObserving = workspace.observeFileTransferTasks()
   try {
-    return await window.aiops.transferFileEntry(operation, options)
+    return await transferFileEntry(operation, options)
   } finally {
     stopObserving()
   }

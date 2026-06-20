@@ -1,4 +1,5 @@
 import type { AiopsPreloadApi } from '@shared/contracts/preloadApi'
+import { createBridgeMethod } from '@/services/preloadBridgeClient'
 
 type McpBridge = Pick<
   AiopsPreloadApi,
@@ -15,10 +16,7 @@ type McpBridge = Pick<
   | 'onMcpConfigFileChanged'
 >
 
-const bridgeMethod = <Name extends keyof McpBridge>(name: Name): McpBridge[Name] | undefined => {
-  const method = window.aiops?.[name]
-  return typeof method === 'function' ? (method.bind(window.aiops) as McpBridge[Name]) : undefined
-}
+const bridgeMethod = createBridgeMethod<McpBridge>()
 
 export const mcpClient = {
   getMcpConfigPath: () => bridgeMethod('getMcpConfigPath'),
