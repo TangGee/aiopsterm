@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { AiContextCategoryInfo } from '../src/shared/preload'
+import type { AiContextCategoryInfo } from '../src/shared/contracts/aiChat'
 
 vi.mock('electron', () => ({
   app: {

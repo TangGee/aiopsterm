@@ -1,4 +1,4 @@
-import type { AiChatCancelInput, AiChatCancelResult, AiChatExchangeRequestInput, AiChatResponseInput, AiChatResponseResult, AiTodoItem, AiTodoSnapshot, AiTodoSnapshotResult } from '@shared/preload'
+import type { AiChatCancelInput, AiChatCancelResult, AiChatExchangeRequestInput, AiChatResponseInput, AiChatResponseResult, AiTodoItem, AiTodoSnapshot, AiTodoSnapshotResult } from '@shared/contracts/aiChat'
 import { shouldUseAiTodoSeedData } from '@shared/runtimeSwitches'
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs'
 import { dirname, isAbsolute, resolve } from 'path'

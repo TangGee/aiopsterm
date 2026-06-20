@@ -1,6 +1,6 @@
 import { stat, writeFile } from 'fs/promises'
 import { isAbsolute } from 'path'
-import type { AiChatExportInput, AiChatExportResult } from '@shared/preload'
+import type { AiChatExportInput, AiChatExportResult } from '@shared/contracts/aiChat'
 import { buildChatExportMarkdown, sanitizeChatExportFileName } from '@shared/chatExport'
 
 type ChatExportWriteResult =

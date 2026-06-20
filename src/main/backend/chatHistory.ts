@@ -10,9 +10,9 @@ import type {
   AiChatHistoryListResult,
   AiChatHistoryMessage,
   AiChatMessageMetadataInput,
-  AiChatMessageMetadataResult,
-  AiopsMutationResult
-} from '@shared/preload'
+  AiChatMessageMetadataResult
+} from '@shared/contracts/aiChat'
+import type { AiopsMutationResult } from '@shared/contracts/common'
 import { shouldUseChatHistorySeedData } from '@shared/runtimeSwitches'
 
 type ChatHistoryBackendRuntimeConfig = {

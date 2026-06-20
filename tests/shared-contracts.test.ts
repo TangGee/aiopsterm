@@ -299,6 +299,32 @@ import type {
   ExternalCodexMcpConnection as ExternalCodexMcpConnectionPreload,
   ExternalCodexMcpResponse as ExternalCodexMcpResponsePreload
 } from '../src/shared/preload'
+import type {
+  AiChatCancelResult as AiChatCancelResultContract,
+  AiChatConversationMutationResult as AiChatConversationMutationResultContract,
+  AiChatExchangeRequestInput as AiChatExchangeRequestInputContract,
+  AiChatExchangeRequestResult as AiChatExchangeRequestResultContract,
+  AiChatHistoryMessage as AiChatHistoryMessageContract,
+  AiChatResponseResult as AiChatResponseResultContract,
+  AiCommandCatalogResult as AiCommandCatalogResultContract,
+  AiContentPart as AiContentPartContract,
+  AiContextCatalogResult as AiContextCatalogResultContract,
+  AiMcpToolCallActionResult as AiMcpToolCallActionResultContract,
+  AiTodoSnapshotResult as AiTodoSnapshotResultContract
+} from '../src/shared/contracts/aiChat'
+import type {
+  AiChatCancelResult as AiChatCancelResultPreload,
+  AiChatConversationMutationResult as AiChatConversationMutationResultPreload,
+  AiChatExchangeRequestInput as AiChatExchangeRequestInputPreload,
+  AiChatExchangeRequestResult as AiChatExchangeRequestResultPreload,
+  AiChatHistoryMessage as AiChatHistoryMessagePreload,
+  AiChatResponseResult as AiChatResponseResultPreload,
+  AiCommandCatalogResult as AiCommandCatalogResultPreload,
+  AiContentPart as AiContentPartPreload,
+  AiContextCatalogResult as AiContextCatalogResultPreload,
+  AiMcpToolCallActionResult as AiMcpToolCallActionResultPreload,
+  AiTodoSnapshotResult as AiTodoSnapshotResultPreload
+} from '../src/shared/preload'
 
 type AssertAssignable<From, To extends From> = true
 
@@ -551,6 +577,28 @@ type ExternalCodexMcpConnectionPreloadMatchesContract = AssertAssignable<Externa
 type ExternalCodexMcpConnectionContractMatchesPreload = AssertAssignable<ExternalCodexMcpConnectionPreload, ExternalCodexMcpConnectionContract>
 type ExternalCodexMcpResponsePreloadMatchesContract = AssertAssignable<ExternalCodexMcpResponseContract, ExternalCodexMcpResponsePreload>
 type ExternalCodexMcpResponseContractMatchesPreload = AssertAssignable<ExternalCodexMcpResponsePreload, ExternalCodexMcpResponseContract>
+type AiContextCatalogPreloadMatchesContract = AssertAssignable<AiContextCatalogResultContract, AiContextCatalogResultPreload>
+type AiContextCatalogContractMatchesPreload = AssertAssignable<AiContextCatalogResultPreload, AiContextCatalogResultContract>
+type AiCommandCatalogPreloadMatchesContract = AssertAssignable<AiCommandCatalogResultContract, AiCommandCatalogResultPreload>
+type AiCommandCatalogContractMatchesPreload = AssertAssignable<AiCommandCatalogResultPreload, AiCommandCatalogResultContract>
+type AiContentPartPreloadMatchesContract = AssertAssignable<AiContentPartContract, AiContentPartPreload>
+type AiContentPartContractMatchesPreload = AssertAssignable<AiContentPartPreload, AiContentPartContract>
+type AiChatHistoryMessagePreloadMatchesContract = AssertAssignable<AiChatHistoryMessageContract, AiChatHistoryMessagePreload>
+type AiChatHistoryMessageContractMatchesPreload = AssertAssignable<AiChatHistoryMessagePreload, AiChatHistoryMessageContract>
+type AiChatConversationMutationPreloadMatchesContract = AssertAssignable<AiChatConversationMutationResultContract, AiChatConversationMutationResultPreload>
+type AiChatConversationMutationContractMatchesPreload = AssertAssignable<AiChatConversationMutationResultPreload, AiChatConversationMutationResultContract>
+type AiMcpToolCallActionPreloadMatchesContract = AssertAssignable<AiMcpToolCallActionResultContract, AiMcpToolCallActionResultPreload>
+type AiMcpToolCallActionContractMatchesPreload = AssertAssignable<AiMcpToolCallActionResultPreload, AiMcpToolCallActionResultContract>
+type AiTodoSnapshotPreloadMatchesContract = AssertAssignable<AiTodoSnapshotResultContract, AiTodoSnapshotResultPreload>
+type AiTodoSnapshotContractMatchesPreload = AssertAssignable<AiTodoSnapshotResultPreload, AiTodoSnapshotResultContract>
+type AiChatExchangeRequestInputPreloadMatchesContract = AssertAssignable<AiChatExchangeRequestInputContract, AiChatExchangeRequestInputPreload>
+type AiChatExchangeRequestInputContractMatchesPreload = AssertAssignable<AiChatExchangeRequestInputPreload, AiChatExchangeRequestInputContract>
+type AiChatExchangeRequestPreloadMatchesContract = AssertAssignable<AiChatExchangeRequestResultContract, AiChatExchangeRequestResultPreload>
+type AiChatExchangeRequestContractMatchesPreload = AssertAssignable<AiChatExchangeRequestResultPreload, AiChatExchangeRequestResultContract>
+type AiChatResponsePreloadMatchesContract = AssertAssignable<AiChatResponseResultContract, AiChatResponseResultPreload>
+type AiChatResponseContractMatchesPreload = AssertAssignable<AiChatResponseResultPreload, AiChatResponseResultContract>
+type AiChatCancelPreloadMatchesContract = AssertAssignable<AiChatCancelResultContract, AiChatCancelResultPreload>
+type AiChatCancelContractMatchesPreload = AssertAssignable<AiChatCancelResultPreload, AiChatCancelResultContract>
 
 describe('shared contract compatibility exports', () => {
   it('keeps Codex session contracts compatible through the preload export', () => {
@@ -1026,5 +1074,34 @@ describe('shared contract compatibility exports', () => {
     ] = [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true]
 
     expect(checks).toEqual([true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true])
+  })
+
+  it('keeps AI Chat contracts compatible through the preload export', () => {
+    const checks: [
+      AiContextCatalogPreloadMatchesContract,
+      AiContextCatalogContractMatchesPreload,
+      AiCommandCatalogPreloadMatchesContract,
+      AiCommandCatalogContractMatchesPreload,
+      AiContentPartPreloadMatchesContract,
+      AiContentPartContractMatchesPreload,
+      AiChatHistoryMessagePreloadMatchesContract,
+      AiChatHistoryMessageContractMatchesPreload,
+      AiChatConversationMutationPreloadMatchesContract,
+      AiChatConversationMutationContractMatchesPreload,
+      AiMcpToolCallActionPreloadMatchesContract,
+      AiMcpToolCallActionContractMatchesPreload,
+      AiTodoSnapshotPreloadMatchesContract,
+      AiTodoSnapshotContractMatchesPreload,
+      AiChatExchangeRequestInputPreloadMatchesContract,
+      AiChatExchangeRequestInputContractMatchesPreload,
+      AiChatExchangeRequestPreloadMatchesContract,
+      AiChatExchangeRequestContractMatchesPreload,
+      AiChatResponsePreloadMatchesContract,
+      AiChatResponseContractMatchesPreload,
+      AiChatCancelPreloadMatchesContract,
+      AiChatCancelContractMatchesPreload
+    ] = [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true]
+
+    expect(checks).toEqual([true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true])
   })
 })

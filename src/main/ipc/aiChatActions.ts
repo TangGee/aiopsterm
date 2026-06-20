@@ -8,9 +8,9 @@ import type {
   AiMcpResourceAccessActionInput,
   AiMcpResourceAccessActionResult,
   AiMcpToolCallActionInput,
-  AiMcpToolCallActionResult,
-  AiopsMutationResult
-} from '@shared/preload'
+  AiMcpToolCallActionResult
+} from '@shared/contracts/aiChat'
+import type { AiopsMutationResult } from '@shared/contracts/common'
 import type {
   McpConfigWriteResult,
   McpResourceReadInput,

@@ -1,5 +1,4 @@
 import type {
-  AiChatExportInput,
   DatabaseCatalogInfo,
   DatabaseColumnInfo,
   DatabaseConnectionInfo,
@@ -22,11 +21,10 @@ import type {
   DatabaseTableMutation,
   DatabaseTableMutationPlanInput,
   DatabaseTableInfo,
-  AiTodoItem,
-  AiTodoSnapshotResult,
   AiAgentSessionEvent,
   ManagedAiSessionEvent
 } from '@shared/preload'
+import type { AiChatExportInput, AiTodoItem, AiTodoSnapshotResult } from '@shared/contracts/aiChat'
 import type { SshAgentKeychainOption } from '@shared/contracts/appRuntime'
 import type { McpServerUserConfig } from '@shared/contracts/mcp'
 import type {

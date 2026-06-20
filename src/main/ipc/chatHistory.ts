@@ -7,7 +7,7 @@ import {
   saveChatMessageMetadata,
   updateChatConversation
 } from '../backend/chatHistory'
-import type { AiChatConversationUpdateInput, AiChatMessageMetadataInput } from '@shared/preload'
+import type { AiChatConversationUpdateInput, AiChatMessageMetadataInput } from '@shared/contracts/aiChat'
 
 export const registerChatHistoryIpc = (ipcMain: IpcMain) => {
   ipcMain.handle('chat-history:list', () => listChatConversations())

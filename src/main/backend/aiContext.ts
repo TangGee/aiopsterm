@@ -3,7 +3,7 @@ import type {
   AiContextCatalogResult,
   AiContextCategoryInfo,
   AiContextOption
-} from '@shared/preload'
+} from '@shared/contracts/aiChat'
 import type { AiopsAssetRecord } from '@shared/contracts/assets'
 import type { KnowledgeBaseNodeConfig } from '@shared/contracts/knowledgeBase'
 import type { SkillUserConfig } from '@shared/contracts/skills'

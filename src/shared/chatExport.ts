@@ -1,4 +1,4 @@
-import type { AiChatExportMessage, AiChatExportInput, AiContentPart } from './preload'
+import type { AiChatExportInput, AiChatExportMessage, AiContentPart } from './contracts/aiChat'
 
 export const sanitizeChatExportFileName = (value: string) => {
   const safeName = String(value || '')

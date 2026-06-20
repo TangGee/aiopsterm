@@ -12,7 +12,9 @@ import type {
   AiChatMessageInput,
   AiChatResponseInput,
   AiChatResponseResult,
-  AiChatSkillInput,
+  AiChatSkillInput
+} from '@shared/contracts/aiChat'
+import type {
   UserConfig
 } from '@shared/preload'
 import type { AiPreferencesUserConfig, ModelProviderCheckKey } from '@shared/contracts/appRuntime'

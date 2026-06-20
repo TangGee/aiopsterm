@@ -8,7 +8,9 @@ import type {
   AiContextOption,
   AiTodoItem,
   AiTodoSnapshot,
-  AiTodoStatus,
+  AiTodoStatus
+} from '@shared/contracts/aiChat'
+import type {
   VoiceTranscriptionProvider,
   VoiceTranscriptionResult
 } from '@shared/preload'

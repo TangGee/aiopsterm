@@ -3,7 +3,7 @@ import type { IpcMain } from 'electron'
 import { mkdir, mkdtemp, readFile, rm, stat } from 'fs/promises'
 import { tmpdir } from 'os'
 import { basename, join } from 'path'
-import type { AiChatConversationRecord, AiChatHistoryMessage } from '../src/shared/preload'
+import type { AiChatConversationRecord, AiChatHistoryMessage } from '../src/shared/contracts/aiChat'
 import type { McpResourceReadContent, McpToolCallContent } from '../src/shared/contracts/mcp'
 
 type IpcHandler = (event: unknown, ...args: any[]) => unknown

@@ -90,30 +90,6 @@ import { readStoredAiPanelMode } from '@/services/aiPanelModeRuntime'
 import { applyDocumentLocale, isLocaleSetting, resolveLocale, translateWithLocale } from '@/i18n/runtime'
 import type { I18nKey } from '@/i18n/messages'
 import type {
-  AiChatChipContentPart,
-  AiChatChipRef,
-  AiCommandCatalogOption,
-  AiCommandChipContentPart,
-  AiCommandChipRef,
-  AiContextCatalog,
-  AiContextOption,
-  AiChatContextUsageSnapshot,
-  AiChatConversationRecord,
-  AiChatExchangeRequestInput,
-  AiChatHistoryMessage,
-  AiChatMessageState,
-  AiChatMessageInput,
-  AiChatResponseInput,
-  AiChipContentPart,
-  AiContentPart,
-  AiDocChipContentPart,
-  AiDocChipRef,
-  AiImageContentPart,
-  AiSkillChipContentPart,
-  AiSkillChipRef,
-  AiSupportedImageType,
-  AiTextContentPart,
-  AiTodoItem,
   AiopsPreloadApi,
   KubernetesAgentProxyConfig,
   KubernetesBastionGroup,
@@ -134,6 +110,32 @@ import type {
   TerminalCommandGenerationRecord,
   UserConfig
 } from '@shared/preload'
+import type {
+  AiChatChipContentPart,
+  AiChatChipRef,
+  AiChatContextUsageSnapshot,
+  AiChatConversationRecord,
+  AiChatExchangeRequestInput,
+  AiChatHistoryMessage,
+  AiChatMessageInput,
+  AiChatMessageState,
+  AiChatResponseInput,
+  AiChipContentPart,
+  AiCommandCatalogOption,
+  AiCommandChipContentPart,
+  AiCommandChipRef,
+  AiContentPart,
+  AiContextCatalog,
+  AiContextOption,
+  AiDocChipContentPart,
+  AiDocChipRef,
+  AiImageContentPart,
+  AiSkillChipContentPart,
+  AiSkillChipRef,
+  AiSupportedImageType,
+  AiTextContentPart,
+  AiTodoItem
+} from '@shared/contracts/aiChat'
 import type {
   AiModelCatalog,
   AiModelCatalogOption,
@@ -221,7 +223,7 @@ export type {
   AiSkillChipRef,
   AiSupportedImageType,
   AiTextContentPart
-} from '@shared/preload'
+} from '@shared/contracts/aiChat'
 import { defaultModelSettingsData } from '@shared/modelSettingsDefaults'
 import { defaultWorkspacePreferencesData } from '@shared/workspacePreferencesDefaults'
 

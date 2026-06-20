@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, stat, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { sanitizeChatExportFileName } from '../src/shared/chatExport'
-import type { AiChatExportInput, AiChatExportResult } from '../src/shared/preload'
+import type { AiChatExportInput, AiChatExportResult } from '../src/shared/contracts/aiChat'
 
 type ChatExportBackend = {
   exportChat: (
