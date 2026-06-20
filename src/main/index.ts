@@ -71,6 +71,7 @@ import { registerAppRuntimeIpc } from './ipc/appRuntime'
 import { registerAppUpdateIpc } from './ipc/appUpdate'
 import { registerAssetsIpc } from './ipc/assets'
 import { registerChatHistoryIpc } from './ipc/chatHistory'
+import { registerCodexSessionsIpc } from './ipc/codexSessions'
 import { registerDatabaseIpc } from './ipc/database'
 import { registerExtensionsIpc } from './ipc/extensions'
 import { registerFilesIpc } from './ipc/files'
@@ -115,7 +116,6 @@ import type {
   AiMcpToolCallActionInput,
   AiMcpToolCallActionResult,
   CodexSessionCreateOptions,
-  CodexSessionTargetContext,
   AiAgentSessionEvent,
   ManagedAiSessionEvent,
   ManagedAiSessionFocusRequest,
@@ -2788,126 +2788,21 @@ const registerIpc = () => {
     recordTerminalCommandHistory
   })
 
-  ipcMain.handle('codex:create', async (event, options: CodexSessionCreateOptions = {}) => {
-    const owner = BrowserWindow.fromWebContents(event.sender)
-    if (!owner) {
-      logRuntimeEvent('error', 'codex.create.no-owner')
-      throw new Error('No owner window for Codex session')
-    }
-    const id = randomUUID()
-    logRuntimeEvent('info', 'codex.create.request', {
-      id,
-      cols: options.cols,
-      rows: options.rows,
-      targetSessionId: options.target?.sessionId,
-      targetKind: options.target?.kind,
-      targetLabel: options.target?.label
-    })
-    try {
-      await ensureCodexTerminalBridgeServer(app.getPath('userData'))
-      const targetUpdate = updateCodexTerminalBridgeSessionTarget(options.target)
-      logRuntimeEvent(targetUpdate.registered ? 'info' : 'warn', targetUpdate.registered ? 'codex.target.initialized' : 'codex.target.initial-missing', {
-        id,
-        sessionId: targetUpdate.sessionId,
-        targetKind: targetUpdate.target?.kind || options.target?.kind,
-        targetLabel: targetUpdate.target?.label || options.target?.label,
-        registered: targetUpdate.registered
-      })
-      const session = await createCodexSession(id, options, {
-        lifecycle: (lifecycle) => {
-          logRuntimeEvent(lifecycle.stage === 'error' ? 'error' : 'info', 'codex.lifecycle', {
-            id: lifecycle.id,
-            stage: lifecycle.stage,
-            binaryPath: lifecycle.binaryPath,
-            codexHome: lifecycle.codexHome,
-            cwd: lifecycle.cwd,
-            runtimeKind: lifecycle.runtimeKind,
-            code: lifecycle.code,
-            errorCode: lifecycle.errorCode,
-            errorMessage: lifecycle.errorMessage
-          })
-          sendWindowEvent(owner, 'codex:lifecycle', lifecycle)
-        },
-        exit: (lifecycle, code) => {
-          logRuntimeEvent('info', 'codex.exit', {
-            id: lifecycle.id,
-            code: code ?? lifecycle.code ?? null,
-            errorCode: lifecycle.errorCode,
-            errorMessage: lifecycle.errorMessage
-          })
-          sendCodexExit(owner, lifecycle, code ?? lifecycle.code ?? null)
-        },
-        data: (sessionId, chunk) => sendCodexData(owner, sessionId, chunk),
-        closed: (sessionId) => {
-          logRuntimeEvent('info', 'codex.session-removed', { id: sessionId })
-        }
-      })
-      logRuntimeEvent('info', 'codex.create.ready', {
-        id,
-        binaryPath: session.binaryPath,
-        codexHome: session.codexHome,
-        cwd: session.cwd,
-        runtimeKind: session.runtimeKind
-      })
-      return session
-    } catch (error) {
-      logRuntimeEvent('error', 'codex.create.failed', {
-        id,
-        error
-      })
-      throw error
-    }
-  })
-
-  ipcMain.handle('codex:set-target', (_event, target: CodexSessionTargetContext | null | undefined) => {
-    const targetContext = target && typeof target === 'object' && !Array.isArray(target) ? target : undefined
-    const result = updateCodexTerminalBridgeSessionTarget(targetContext)
-    logRuntimeEvent(result.registered ? 'debug' : 'warn', result.registered ? 'codex.target.updated' : 'codex.target.unavailable', {
-      sessionId: result.sessionId || targetContext?.sessionId,
-      targetKind: result.target?.kind || targetContext?.kind,
-      targetLabel: result.target?.label || targetContext?.label,
-      registered: result.registered
-    })
-    return { ok: true, data: result }
-  })
-
-  ipcMain.handle('codex:set-pending-context', async (_event, id: string, text?: string) => {
-    const result = await setCodexSessionPendingContext(String(id || ''), text)
-    logRuntimeEvent(result.ok ? 'debug' : 'warn', result.ok ? 'codex.pending-context.updated' : 'codex.pending-context.rejected', {
-      id,
-      bytes: result.data?.bytes,
-      cleared: result.data?.cleared,
-      errorCode: result.errorCode,
-      errorMessage: result.errorMessage
-    })
-    return result
-  })
-
-  ipcMain.handle('codex:write', (_event, id: string, data: string) => {
-    const bytes = Buffer.byteLength(String(data || ''), 'utf8')
-    logRuntimeEvent('debug', 'codex.write.request', { id, bytes })
-    const result = writeCodexSession(id, data)
-    logRuntimeEvent(result.ok ? 'debug' : 'warn', result.ok ? 'codex.write.accepted' : 'codex.write.rejected', {
-      id,
-      bytes,
-      errorCode: result.errorCode,
-      errorMessage: result.errorMessage
-    })
-    return result
-  })
-
-  ipcMain.handle('codex:resize', (_event, id: string, cols: number, rows: number) => {
-    const resized = resizeCodexSession(id, cols, rows)
-    logRuntimeEvent(resized ? 'debug' : 'warn', resized ? 'codex.resize' : 'codex.resize.missing-session', { id, cols, rows })
-  })
-
-  ipcMain.handle('codex:kill', (_event, id: string) => {
-    logRuntimeEvent('info', 'codex.kill.request', { id })
-    const result = killCodexSession(id)
-    if (!result.ok) {
-      logRuntimeEvent('warn', 'codex.kill.rejected', { id, errorCode: result.errorCode, errorMessage: result.errorMessage })
-    }
-    return result
+  registerCodexSessionsIpc(ipcMain, {
+    getOwnerWindow: (event) => BrowserWindow.fromWebContents(event.sender),
+    createId: () => randomUUID(),
+    getUserDataPath: () => app.getPath('userData'),
+    logRuntimeEvent,
+    ensureCodexTerminalBridgeServer,
+    updateCodexTerminalBridgeSessionTarget,
+    createCodexSession,
+    setCodexSessionPendingContext,
+    writeCodexSession,
+    resizeCodexSession,
+    killCodexSession,
+    sendCodexLifecycle: (owner, lifecycle) => sendWindowEvent(owner, 'codex:lifecycle', lifecycle),
+    sendCodexExit,
+    sendCodexData
   })
 
 }
