@@ -511,6 +511,7 @@ const writeTerminalBySessionId = async (id: string, data: string) => {
 }
 
 const showControlNotification = (notification: import('@shared/preload').ControlNotificationRecord) => {
+  if (!getConfig().notifications?.desktopNotifications) return
   if (!Notification.isSupported()) return
   const desktop = new Notification({
     title: notification.source ? `${notification.source}: ${notification.title}` : notification.title,
@@ -654,6 +655,10 @@ const defaultConfig: UserConfig = {
       password: ''
     },
     shellIntegrationTimeout: 4
+  },
+  notifications: {
+    desktopNotifications: true,
+    controlNotificationBell: true
   },
   modelSettings: defaultModelSettingsUserConfig,
   shortcuts: [
@@ -1503,6 +1508,10 @@ const mergeConfig = (base: UserConfig, patch: Partial<UserConfig> = {}): UserCon
       ...base.aiPreferences!.proxy,
       ...(patch.aiPreferences?.proxy || {})
     }
+  },
+  notifications: {
+    ...base.notifications!,
+    ...(patch.notifications || {})
   },
   quickCommands:
     base.quickCommands || patch.quickCommands

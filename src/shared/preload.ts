@@ -2189,6 +2189,11 @@ export type AiPreferencesUserConfig = {
   shellIntegrationTimeout: number
 }
 
+export type NotificationUserConfig = {
+  desktopNotifications: boolean
+  controlNotificationBell: boolean
+}
+
 export type KnowledgeSearchRuntimeApplyInput = {
   previousEnabled: boolean
   nextEnabled: boolean
@@ -2899,6 +2904,7 @@ export type UserConfig = {
   securityConfig?: SecurityUserConfig
   privacy?: PrivacyUserConfig
   aiPreferences?: AiPreferencesUserConfig
+  notifications?: NotificationUserConfig
   modelSettings?: ModelSettingsUserConfig
   shortcuts?: ShortcutUserConfig[]
   rules?: UserRuleConfig[]

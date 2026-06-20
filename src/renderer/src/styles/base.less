@@ -2642,6 +2642,12 @@ em {
   flex: 0 0 15px;
 }
 
+.settings-button.icon-button {
+  min-width: 32px;
+  width: 32px;
+  padding: 0;
+}
+
 .settings-button.primary {
   background: #1677ff;
   border-color: #1677ff;
@@ -3212,6 +3218,49 @@ em {
 .agent-hook-warnings {
   margin: 0;
   padding-left: 16px;
+}
+
+.automation-settings-card {
+  display: grid;
+  gap: 12px;
+}
+
+.automation-snippet-row {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+
+.automation-snippet-row > div {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.automation-snippet-row strong,
+.automation-snippet-row small,
+.automation-snippet-row code {
+  min-width: 0;
+}
+
+.automation-snippet-row small {
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.automation-snippet-row code {
+  width: max-content;
+  max-width: 100%;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--surface) 72%, transparent);
+  color: var(--text);
+  padding: 4px 6px;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 @media (max-width: 920px) {

@@ -122,6 +122,7 @@ import type {
   AiContextOption,
   AiChatContextUsageSnapshot,
   AiPreferencesUserConfig,
+  NotificationUserConfig,
   AiChatConversationRecord,
   AiChatExchangeRequestInput,
   AiChatHistoryMessage,
@@ -302,6 +303,11 @@ const defaultAgentHibernationConfig: AgentHibernationConfig = {
   idleSeconds: 300,
   maxLiveTerminals: 12,
   confirmationSeconds: 60
+}
+
+const defaultNotificationSettings: NotificationUserConfig = {
+  desktopNotifications: true,
+  controlNotificationBell: true
 }
 
 export const layoutWidthLimits: {
@@ -870,6 +876,7 @@ const defaultConfig: UserConfig = {
     },
     shellIntegrationTimeout: 4
   },
+  notifications: { ...defaultNotificationSettings },
   modelSettings: defaultModelSettingsUserConfig,
   shortcuts: [],
   rules: [],
@@ -1993,6 +2000,24 @@ const privacyRuntimeSettingsFromSnapshot = (snapshot?: PrivacyRuntimeApplyData |
   dataSyncSyncedScopes: snapshot?.syncedScopes ? [...snapshot.syncedScopes] : [],
   dataSyncErrorMessage: snapshot?.errorMessage || ''
 })
+
+const normalizeNotificationConfig = (source?: Partial<NotificationUserConfig>) => {
+  const incoming = isRecord(source) ? source : {}
+  const normalized: NotificationUserConfig = {
+    desktopNotifications: typeof incoming.desktopNotifications === 'boolean' ? incoming.desktopNotifications : defaultNotificationSettings.desktopNotifications,
+    controlNotificationBell: typeof incoming.controlNotificationBell === 'boolean' ? incoming.controlNotificationBell : defaultNotificationSettings.controlNotificationBell
+  }
+  const changed =
+    isRecord(source) &&
+    (incoming.desktopNotifications !== normalized.desktopNotifications ||
+      incoming.controlNotificationBell !== normalized.controlNotificationBell ||
+      Object.keys(incoming).some((key) => key !== 'desktopNotifications' && key !== 'controlNotificationBell'))
+
+  return {
+    normalized,
+    changed
+  }
+}
 
 const reasoningEffortValues = ['low', 'medium', 'high'] as const
 const proxyTypeValues: AiPreferenceSettings['proxy']['type'][] = ['HTTP', 'HTTPS', 'SOCKS4', 'SOCKS5']
@@ -3652,6 +3677,10 @@ const mergeUserConfig = (base: UserConfig, patch: Partial<UserConfig> = {}): Use
       ...(patch.aiPreferences?.proxy || {})
     }
   }).normalized,
+  notifications: normalizeNotificationConfig({
+    ...(base.notifications || defaultNotificationSettings),
+    ...(patch.notifications || {})
+  }).normalized,
   modelSettings: normalizeModelSettingsConfig(patch.modelSettings || base.modelSettings).normalized,
   quickCommands:
     base.quickCommands || patch.quickCommands
@@ -4100,9 +4129,15 @@ const isAgentHookInstallerSource = (value: unknown): value is AgentHookInstaller
   value === 'gemini' ||
   value === 'copilot' ||
   value === 'grok' ||
+  value === 'opencode' ||
   value === 'codebuddy' ||
   value === 'factory' ||
-  value === 'qoder'
+  value === 'qoder' ||
+  value === 'amp' ||
+  value === 'pi' ||
+  value === 'omp' ||
+  value === 'kiro' ||
+  value === 'rovodev'
 
 const isAiAgentSessionSource = (value: unknown): value is AiAgentSessionSource =>
   value === 'codex' ||
@@ -4598,6 +4633,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     ...defaultAiPreferences,
     proxy: { ...defaultAiPreferences.proxy }
   })
+  const notificationSettings = ref<NotificationUserConfig>({ ...defaultNotificationSettings })
   const extensionSettings = ref<ExtensionSettings>({ ...defaultExtensionSettings })
   const keywordHighlightSettings = ref<KeywordHighlightSettings>(normalizeKeywordHighlightConfig(defaultKeywordHighlightSettings).normalized)
   const keywordHighlightEditorOpen = ref(false)
@@ -5352,6 +5388,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       ...normalizedAiPreferences,
       proxy: { ...normalizedAiPreferences.proxy }
     }
+    const { normalized: normalizedNotifications, changed: notificationsChanged } = normalizeNotificationConfig(savedConfig.notifications)
+    notificationSettings.value = { ...normalizedNotifications }
     const aiStartupRefresh = readStoredAiPanelMode() === 'classic' ? hydrateClassicChatData({ restoreIfEmpty: true }) : Promise.resolve(true)
     const modelCatalog = await refreshAiModelCatalog({ replaceSettingsOptions: false })
     const modelCatalogSettingsOptions = modelCatalog?.settingsModels || []
@@ -5445,6 +5483,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       securityConfig: normalizedSecurityConfig,
       privacy: normalizedPrivacy,
       aiPreferences: normalizedAiPreferences,
+      notifications: normalizedNotifications,
       modelSettings: normalizedModelSettings,
       quickCommands: normalizedQuickCommands,
       knowledgeBase: normalizedKnowledgeBase,
@@ -5480,6 +5519,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       missingPrivacy ||
       aiPreferencesChanged ||
       missingAiPreferences ||
+      notificationsChanged ||
       missingAgentsLeftOpen ||
       modelSettingsChanged ||
       missingModelSettings ||
@@ -5502,6 +5542,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
           securityConfig: normalizedSecurityConfig,
           privacy: normalizedPrivacy,
           aiPreferences: normalizedAiPreferences,
+          notifications: normalizedNotifications,
           modelSettings: normalizedModelSettings,
           skills: normalizedSkills,
           customInstructions: '',
@@ -6345,6 +6386,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     setSettingsNoticeText(text)
   }
 
+  const copySettingsText = async (text: string, label = '内容') => {
+    const copied = await copyTextToClipboard(text)
+    setSettingsNotice(copied ? `${label}已复制` : `${label}复制失败`)
+    return copied
+  }
+
   const closeSettingsInlineEditors = () => {
     if (keywordHighlightEditorOpen.value) {
       closeKeywordHighlightEditor()
@@ -6402,6 +6449,21 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
     try {
       return await readSettingsDocumentation({ documentPath: normalizedPath, basePath: settingsDocumentationPath.value })
+    } catch {
+      setSettingsNotice('文档入口打开失败')
+      return false
+    }
+  }
+
+  const openSettingsDocumentationFile = async (documentPath: string) => {
+    const normalizedPath = documentPath.trim()
+    if (!normalizedPath) return false
+    if (!hasAiopsBridgeMethod('openSettingsDocumentation')) {
+      setSettingsNotice('文档入口服务不可用')
+      return false
+    }
+    try {
+      return await readSettingsDocumentation({ documentPath: normalizedPath })
     } catch {
       setSettingsNotice('文档入口打开失败')
       return false
@@ -7338,6 +7400,40 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
     setSettingsNotice('AI 偏好设置已保存')
     return true
+  }
+
+  const updateNotificationSettings = async (patch: Partial<NotificationUserConfig>) => {
+    const saveConfigBridge = window.aiops?.saveConfig
+    if (typeof saveConfigBridge !== 'function') {
+      setSettingsNotice('通知设置保存服务不可用')
+      return false
+    }
+    const nextSettings = normalizeNotificationConfig({
+      ...notificationSettings.value,
+      ...patch
+    }).normalized
+    try {
+      const savedConfig = await saveConfigBridge({ notifications: nextSettings })
+      if (!isRecord(savedConfig)) {
+        setSettingsNotice('通知设置保存失败')
+        return false
+      }
+      const savedSettings = normalizeNotificationConfig(savedConfig.notifications).normalized
+      if (JSON.stringify(savedSettings) !== JSON.stringify(nextSettings)) {
+        setSettingsNotice('通知设置保存失败')
+        return false
+      }
+      notificationSettings.value = { ...savedSettings }
+      config.value = mergeGenericSavedConfig(config.value, savedConfig as Partial<UserConfig>, {
+        notifications: { ...savedSettings }
+      })
+      refreshControlNotificationAttentionItems()
+      setSettingsNotice('通知设置已保存')
+      return true
+    } catch (error) {
+      setSettingsNotice(error instanceof Error ? error.message : '通知设置保存失败')
+      return false
+    }
   }
 
   const updateExtensionSettings = async (patch: Partial<ExtensionSettings>) => {
@@ -8490,6 +8586,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const refreshControlNotificationAttentionItems = () => {
     const notificationIds = new Set(controlNotifications.value.map(controlNotificationAttentionId))
     aiAttentionItems.value = aiAttentionItems.value.filter((item) => !item.id.startsWith('notification:') || notificationIds.has(item.id))
+    if (!notificationSettings.value.controlNotificationBell) {
+      controlNotifications.value.forEach((notification) => removeAiAttentionItem(controlNotificationAttentionId(notification)))
+      return
+    }
     controlNotifications.value.forEach((notification) => {
       const id = controlNotificationAttentionId(notification)
       if (!notification.read) {
@@ -8895,25 +8995,32 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
   }
 
-  const setAgentHibernationEnabled = async (enabled: boolean) => {
+  const updateAgentHibernationConfig = async (patch: Partial<AgentHibernationConfig>) => {
     const bridge = window.aiops?.setAgentHibernationConfig
     if (typeof bridge !== 'function') {
       setTopNotice('Agent Hibernation 服务不可用')
       return false
     }
+    const nextConfig = { ...agentHibernationConfig.value, ...patch }
     try {
-      const result = (await bridge({ ...agentHibernationConfig.value, enabled })) as AgentHibernationConfigResult
+      const result = (await bridge(nextConfig)) as AgentHibernationConfigResult
       if (!result?.ok || !isRecord(result.data) || !isAgentHibernationConfig(result.data.config)) {
         setTopNotice(result?.errorMessage || 'Agent Hibernation 配置保存失败')
         return false
       }
       agentHibernationConfig.value = { ...result.data.config }
-      setTopNotice(enabled ? 'Agent Hibernation 已开启' : 'Agent Hibernation 已关闭')
+      setTopNotice('Agent Hibernation 配置已保存')
       return true
     } catch (error) {
       setTopNotice(error instanceof Error ? error.message : 'Agent Hibernation 配置保存失败')
       return false
     }
+  }
+
+  const setAgentHibernationEnabled = async (enabled: boolean) => {
+    const saved = await updateAgentHibernationConfig({ enabled })
+    if (saved) setTopNotice(enabled ? 'Agent Hibernation 已开启' : 'Agent Hibernation 已关闭')
+    return saved
   }
 
   const hibernateManagedAiSession = async (source: AiAgentSessionSource, sessionId: string, reason = 'manual') => {
@@ -15034,6 +15141,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     aiAttentionFocusRequest,
     managedAiSessions,
     agentHibernationConfig,
+    notificationSettings,
     managedAiSessionsLoading,
     managedAiSessionsError,
     sortedManagedAiSessions,
@@ -15052,6 +15160,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     clearManagedAiSession,
     bulkManagedAiSessions,
     refreshAgentHibernationConfig,
+    updateAgentHibernationConfig,
     setAgentHibernationEnabled,
     hibernateManagedAiSession,
     managedAiSessionNeedsAttentionForPanel,
@@ -15299,9 +15408,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     uninstallAgentHookInstaller,
     saveConfig,
     setSettingsNotice,
+    copySettingsText,
     setActiveSettingsSection,
     openSettingsPageDocumentation,
     openSettingsDocumentationLink,
+    openSettingsDocumentationFile,
     closeSettingsDocumentation,
     openOnboardingGuide,
     startOnboardingTour,
@@ -15345,6 +15456,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     checkModelProvider,
     saveModelProvider,
     updateAiPreferences,
+    updateNotificationSettings,
     updateExtensionSettings,
     openKeywordHighlightEditor,
     closeKeywordHighlightEditor,

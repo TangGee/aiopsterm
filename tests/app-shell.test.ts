@@ -15348,7 +15348,11 @@ describe('AppShell', () => {
     expect(workspace.find('.settings-page-help-button').exists()).toBe(true)
     expect(workspace.text()).toContain('启用 Extended Thinking')
     expect(workspace.text()).toContain('OpenAI Reasoning Effort')
-    expect(workspace.find('.settings-number.wide').attributes('max')).toBe('300')
+    expect(workspace.text()).toContain('AI 会话休眠')
+    expect(workspace.text()).toContain('通知')
+    expect(workspace.text()).toContain('自动化与开发者')
+    const shellTimeoutRow = workspace.findAll('.settings-form-row.full-label').find((row) => row.text().includes('Shell Integration Timeout'))!
+    expect(shellTimeoutRow.find('.settings-number.wide').attributes('max')).toBe('300')
     await workspace.find('.settings-budget input[type="range"]').setValue('5000')
     await flushPromises()
     expect(store.aiPreferences.thinkingBudgetTokens).toBe(5000)
@@ -15359,7 +15363,7 @@ describe('AppShell', () => {
         })
       })
     )
-    await workspace.findAll('.settings-check-line input').find((input) => (input.element as HTMLInputElement).checked === false)!.setValue(true)
+    await workspace.findAll('.settings-checkbox-item').find((row) => row.text().includes('自动执行只读命令'))!.find('input').setValue(true)
     await flushPromises()
     expect(store.aiPreferences.autoExecuteReadOnlyCommands).toBe(true)
     await workspace.findAll('.security-config-row button').find((button) => button.text().includes('打开安全配置'))!.trigger('click')
@@ -15832,6 +15836,10 @@ describe('AppShell', () => {
     expect(workspace.text()).toContain('Codex / Claude Code 会话管理 Hook')
     expect(workspace.text()).toContain('/home/test/.codex/hooks.json')
     expect(workspace.text()).toContain('/home/test/.claude/settings.json')
+    expect(workspace.text()).toContain('OpenCode')
+    expect(workspace.text()).toContain('Amp')
+    expect(workspace.text()).toContain('Rovo Dev')
+    expect(workspace.findAll('.agent-hook-installer-row').length).toBeGreaterThanOrEqual(15)
     expect(workspace.text()).toContain('只会捕获通过 aiopsterm 本地连接终端启动的会话')
 
     const codexRow = workspace.findAll('.agent-hook-installer-row').find((row) => row.text().includes('Codex'))!
@@ -15841,6 +15849,51 @@ describe('AppShell', () => {
     expect(window.aiops.installAgentHook).toHaveBeenCalledWith({ source: 'codex' })
     expect(store.agentHookInstallers.find((installer) => installer.source === 'codex')?.installed).toBe(true)
     expect(workspace.text()).toContain('已安装')
+  })
+
+  it('persists AI hibernation and notification settings from the AI preferences page', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const workspace = mount(SettingsWorkspace, {
+      global: { plugins: [pinia] }
+    })
+    const store = useWorkspaceStore()
+    store.setActiveSettingsSection('ai')
+    vi.mocked(window.aiops.setAgentHibernationConfig).mockClear()
+    vi.mocked(window.aiops.saveConfig).mockClear()
+    await workspace.vm.$nextTick()
+    await flushPromises()
+
+    const row = (label: string) => workspace.findAll('.settings-form-row.full-label').find((item) => item.text().includes(label))!
+    expect(row('空闲时间').exists()).toBe(true)
+    await row('空闲时间').find('input.settings-number').setValue('120')
+    await flushPromises()
+    expect(window.aiops.setAgentHibernationConfig).toHaveBeenCalledWith(
+      expect.objectContaining({
+        enabled: false,
+        idleSeconds: 120,
+        maxLiveTerminals: 12,
+        confirmationSeconds: 60
+      })
+    )
+    expect(store.agentHibernationConfig.idleSeconds).toBe(120)
+
+    const desktopNotification = workspace.findAll('.settings-checkbox-item').find((item) => item.text().includes('桌面通知'))!.find('input')
+    expect((desktopNotification.element as HTMLInputElement).checked).toBe(true)
+    await desktopNotification.setValue(false)
+    await flushPromises()
+
+    expect(store.notificationSettings.desktopNotifications).toBe(false)
+    expect(window.aiops.saveConfig).toHaveBeenCalledWith(
+      expect.objectContaining({
+        notifications: expect.objectContaining({
+          desktopNotifications: false,
+          controlNotificationBell: true
+        })
+      })
+    )
+
+    workspace.unmount()
   })
 
   it('does not leave terminal setting controls visually changed when the config bridge rejects the snapshot', async () => {

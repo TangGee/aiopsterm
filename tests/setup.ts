@@ -5374,6 +5374,10 @@ const createDefaultConfigMock = () => ({
   securityConfig: defaultSecurityConfig,
   privacy: defaultPrivacy,
   aiPreferences: defaultAiPreferences,
+  notifications: {
+    desktopNotifications: true,
+    controlNotificationBell: true
+  },
   modelSettings: defaultModelSettings,
   shortcuts: defaultShortcuts,
   rules: defaultRules,
@@ -5863,14 +5867,14 @@ Object.defineProperty(window, 'aiops', {
         }
       }
     })),
-    setAgentHibernationConfig: vi.fn(async (input: { enabled?: boolean } = {}) => ({
+    setAgentHibernationConfig: vi.fn(async (input: { enabled?: boolean; idleSeconds?: number; maxLiveTerminals?: number; confirmationSeconds?: number } = {}) => ({
       ok: true,
       data: {
         config: {
           enabled: input.enabled === true,
-          idleSeconds: 300,
-          maxLiveTerminals: 12,
-          confirmationSeconds: 60
+          idleSeconds: Number.isFinite(input.idleSeconds) ? Number(input.idleSeconds) : 300,
+          maxLiveTerminals: Number.isFinite(input.maxLiveTerminals) ? Number(input.maxLiveTerminals) : 12,
+          confirmationSeconds: Number.isFinite(input.confirmationSeconds) ? Number(input.confirmationSeconds) : 60
         }
       }
     })),
@@ -6378,6 +6382,7 @@ Object.defineProperty(window, 'aiops', {
         workspacePreferences: { ...configStoreMock.workspacePreferences, ...(patch?.workspacePreferences || {}) },
         editorSettings: { ...configStoreMock.editorSettings, ...(patch?.editorSettings || {}) },
         aiPreferences: { ...configStoreMock.aiPreferences, ...(patch?.aiPreferences || {}), proxy: { ...configStoreMock.aiPreferences.proxy, ...(patch?.aiPreferences?.proxy || {}) } },
+        notifications: { ...configStoreMock.notifications, ...(patch?.notifications || {}) },
         modelSettings: patch?.modelSettings || configStoreMock.modelSettings,
         shortcuts: patch?.shortcuts || configStoreMock.shortcuts,
         rules: patch?.rules || configStoreMock.rules,

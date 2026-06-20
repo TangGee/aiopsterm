@@ -164,7 +164,7 @@
 
 <script setup lang="ts">
 import { computed, defineComponent, h, ref } from 'vue'
-import { BookOpen, Brain, CircleHelp, ExternalLink, Eye, EyeOff, FolderOpen, LockKeyhole, MessageSquare, Monitor, Play, Trash2, Upload, X } from 'lucide-vue-next'
+import { BookOpen, Brain, CircleHelp, Copy, ExternalLink, Eye, EyeOff, FolderOpen, LockKeyhole, MessageSquare, Monitor, Play, Trash2, Upload, X } from 'lucide-vue-next'
 import {
   settingsBackgroundPresets,
   settingsLanguageOptions,
@@ -259,11 +259,188 @@ const agentHookInstallerFallbacks: AgentHookInstallerStatus[] = [
     installed: false,
     scriptPath: '',
     warnings: ['状态未加载']
+  },
+  {
+    source: 'cursor',
+    label: 'Cursor',
+    binaryName: 'cursor-agent',
+    binaryPath: '',
+    configPath: '~/.cursor/hooks.json',
+    configExists: false,
+    installed: false,
+    scriptPath: '',
+    warnings: ['状态未加载']
+  },
+  {
+    source: 'gemini',
+    label: 'Gemini',
+    binaryName: 'gemini',
+    binaryPath: '',
+    configPath: '~/.gemini/settings.json',
+    configExists: false,
+    installed: false,
+    scriptPath: '',
+    warnings: ['状态未加载']
+  },
+  {
+    source: 'copilot',
+    label: 'Copilot',
+    binaryName: 'copilot',
+    binaryPath: '',
+    configPath: '~/.copilot/config.json',
+    configExists: false,
+    installed: false,
+    scriptPath: '',
+    warnings: ['状态未加载']
+  },
+  {
+    source: 'grok',
+    label: 'Grok',
+    binaryName: 'grok',
+    binaryPath: '',
+    configPath: '~/.grok/hooks/aiopsterm-session.json',
+    configExists: false,
+    installed: false,
+    scriptPath: '',
+    warnings: ['状态未加载']
+  },
+  {
+    source: 'opencode',
+    label: 'OpenCode',
+    binaryName: 'opencode',
+    binaryPath: '',
+    configPath: '~/.config/opencode/plugins/aiopsterm-session.js',
+    configExists: false,
+    installed: false,
+    scriptPath: '',
+    warnings: ['状态未加载']
+  },
+  {
+    source: 'codebuddy',
+    label: 'CodeBuddy',
+    binaryName: 'codebuddy',
+    binaryPath: '',
+    configPath: '~/.codebuddy/settings.json',
+    configExists: false,
+    installed: false,
+    scriptPath: '',
+    warnings: ['状态未加载']
+  },
+  {
+    source: 'factory',
+    label: 'Factory',
+    binaryName: 'droid',
+    binaryPath: '',
+    configPath: '~/.factory/settings.json',
+    configExists: false,
+    installed: false,
+    scriptPath: '',
+    warnings: ['状态未加载']
+  },
+  {
+    source: 'qoder',
+    label: 'Qoder',
+    binaryName: 'qodercli',
+    binaryPath: '',
+    configPath: '~/.qoder/settings.json',
+    configExists: false,
+    installed: false,
+    scriptPath: '',
+    warnings: ['状态未加载']
+  },
+  {
+    source: 'amp',
+    label: 'Amp',
+    binaryName: 'amp',
+    binaryPath: '',
+    configPath: '~/.config/amp/plugins/aiopsterm-session.ts',
+    configExists: false,
+    installed: false,
+    scriptPath: '',
+    warnings: ['状态未加载']
+  },
+  {
+    source: 'pi',
+    label: 'Pi',
+    binaryName: 'pi',
+    binaryPath: '',
+    configPath: '~/.pi/agent/extensions/aiopsterm-session.ts',
+    configExists: false,
+    installed: false,
+    scriptPath: '',
+    warnings: ['状态未加载']
+  },
+  {
+    source: 'omp',
+    label: 'OMP',
+    binaryName: 'omp',
+    binaryPath: '',
+    configPath: '~/.omp/agent/extensions/aiopsterm-omp-session.ts',
+    configExists: false,
+    installed: false,
+    scriptPath: '',
+    warnings: ['状态未加载']
+  },
+  {
+    source: 'kiro',
+    label: 'Kiro',
+    binaryName: 'kiro-cli',
+    binaryPath: '',
+    configPath: '~/.kiro/agents/aiopsterm.json',
+    configExists: false,
+    installed: false,
+    scriptPath: '',
+    warnings: ['状态未加载']
+  },
+  {
+    source: 'rovodev',
+    label: 'Rovo Dev',
+    binaryName: 'acli',
+    binaryPath: '',
+    configPath: '~/.rovodev/config.yml',
+    configExists: false,
+    installed: false,
+    scriptPath: '',
+    warnings: ['状态未加载']
   }
 ]
 
 const agentHookInstallerRows = () =>
   agentHookInstallerFallbacks.map((fallback) => workspace.agentHookInstallers.find((installer) => installer.source === fallback.source) || fallback)
+
+const agentHibernationLimits = {
+  idleSeconds: { min: 5, max: 604800 },
+  maxLiveTerminals: { min: 1, max: 256 },
+  confirmationSeconds: { min: 0, max: 3600 }
+}
+
+const automationSnippetRows = [
+  {
+    label: 'Control Socket',
+    description: 'aiopsterm 本地连接终端会注入该变量，外部脚本通过它调用控制协议。',
+    value: 'AIOPSTERM_CONTROL_SOCKET'
+  },
+  {
+    label: 'CLI Helper',
+    description: '在带 Control Socket 环境的终端中使用，用于通知、会话和自动化控制。',
+    value: 'node resources/aiopsterm-control.js list-notifications'
+  },
+  {
+    label: 'External Codex MCP',
+    description: '给外部 Codex 使用的 MCP 桥接服务，当前通过环境变量启用，修改后需要重启 aiopsterm。',
+    value: 'AIOPSTERM_EXTERNAL_CODEX_MCP_ENABLE=1'
+  },
+  {
+    label: 'External Codex MCP Token',
+    description: '可选访问令牌；设置后外部 Codex MCP 客户端需要携带同一个 token。',
+    value: 'AIOPSTERM_EXTERNAL_CODEX_MCP_TOKEN'
+  },
+  {
+    label: 'External Codex MCP Socket',
+    description: '可选 socket 路径；未设置时使用应用数据目录下的默认路径。',
+    value: 'AIOPSTERM_EXTERNAL_CODEX_MCP_SOCKET'
+  }
+]
 
 const displayModelLabel = (model: { name: string; displayName?: string }) => model.displayName || model.name.replace(/-Thinking$/, '')
 const awsRegionOptions = [
@@ -973,6 +1150,12 @@ const AiPreferenceSettings = defineComponent({
         settingsPageTitle('AI 偏好设置', 'ai'),
         h('h3', 'Agent Hook 安装器'),
         h(AgentHookInstallerCard),
+        h('h3', 'AI 会话休眠'),
+        h(AgentHibernationSettingsCard),
+        h('h3', '通知'),
+        h(NotificationPreferenceSettingsCard),
+        h('h3', '自动化与开发者'),
+        h(AutomationDeveloperSettingsCard),
         h('h3', '通用'),
         h('div', { class: 'settings-section-card ai-preferences' }, [
           h('label', { class: 'settings-check-line' }, [
@@ -1241,6 +1424,120 @@ const AgentHookInstallerCard = defineComponent({
         ]),
         workspace.agentHookInstallerError ? h('p', { class: 'agent-hook-error' }, workspace.agentHookInstallerError) : null,
         ...agentHookInstallerRows().map((installer) => renderInstaller(installer))
+      ])
+  }
+})
+
+const AgentHibernationSettingsCard = defineComponent({
+  name: 'AgentHibernationSettingsCard',
+  setup() {
+    void workspace.refreshAgentHibernationConfig()
+    return () =>
+      h('div', { class: 'settings-section-card' }, [
+        h(SettingsCheckbox, {
+          label: '启用 Agent Hibernation',
+          description: '后台 AI 会话超过空闲阈值且超过最大活跃终端数时，允许先提示再休眠对应终端，保留可恢复会话记录。',
+          checked: workspace.agentHibernationConfig.enabled,
+          onChange: (checked: boolean) => workspace.setAgentHibernationEnabled(checked)
+        }),
+        numberRow(
+          '空闲时间（秒）',
+          workspace.agentHibernationConfig.idleSeconds,
+          agentHibernationLimits.idleSeconds.min,
+          agentHibernationLimits.idleSeconds.max,
+          (value) => workspace.updateAgentHibernationConfig({ idleSeconds: value }),
+          1,
+          true
+        ),
+        h('p', { class: 'setting-description-no-padding' }, '只有超过该时间没有终端活动的可恢复 AI 会话才会成为休眠候选。'),
+        numberRow(
+          '最大活跃终端数',
+          workspace.agentHibernationConfig.maxLiveTerminals,
+          agentHibernationLimits.maxLiveTerminals.min,
+          agentHibernationLimits.maxLiveTerminals.max,
+          (value) => workspace.updateAgentHibernationConfig({ maxLiveTerminals: value }),
+          1,
+          true
+        ),
+        h('p', { class: 'setting-description-no-padding' }, '活跃可恢复 AI 终端数量超过该值后，才会从后台最旧的候选开始休眠。'),
+        numberRow(
+          '确认倒计时（秒）',
+          workspace.agentHibernationConfig.confirmationSeconds,
+          agentHibernationLimits.confirmationSeconds.min,
+          agentHibernationLimits.confirmationSeconds.max,
+          (value) => workspace.updateAgentHibernationConfig({ confirmationSeconds: value }),
+          1,
+          true
+        ),
+        h('p', { class: 'setting-description-no-padding' }, '设置为 0 时不显示倒计时确认，符合条件后直接休眠后台候选。')
+      ])
+  }
+})
+
+const NotificationPreferenceSettingsCard = defineComponent({
+  name: 'NotificationPreferenceSettingsCard',
+  setup() {
+    return () =>
+      h('div', { class: 'settings-section-card' }, [
+        h(SettingsCheckbox, {
+          label: '桌面通知',
+          description: '控制外部通知协议和 AI 会话事件触发的系统桌面通知。关闭后应用内通知列表仍会保留。',
+          checked: workspace.notificationSettings.desktopNotifications,
+          onChange: (checked: boolean) => workspace.updateNotificationSettings({ desktopNotifications: checked })
+        }),
+        h(SettingsCheckbox, {
+          label: '顶部铃铛提醒控制通知',
+          description: '控制外部通知协议产生的未读通知是否进入顶部铃铛队列；AI 会话审批、问题和待处理提醒始终保留。',
+          checked: workspace.notificationSettings.controlNotificationBell,
+          onChange: (checked: boolean) => workspace.updateNotificationSettings({ controlNotificationBell: checked })
+        })
+      ])
+  }
+})
+
+const AutomationDeveloperSettingsCard = defineComponent({
+  name: 'AutomationDeveloperSettingsCard',
+  setup() {
+    const renderSnippet = (item: (typeof automationSnippetRows)[number]) =>
+      h('div', { class: 'automation-snippet-row' }, [
+        h('div', [
+          h('strong', item.label),
+          h('small', item.description),
+          h('code', item.value)
+        ]),
+        h(
+          'button',
+          {
+            class: 'settings-button icon-button',
+            title: `复制 ${item.label}`,
+            onClick: () => workspace.copySettingsText(item.value, item.label)
+          },
+          [h(Copy)]
+        )
+      ])
+
+    return () =>
+      h('div', { class: 'settings-section-card automation-settings-card' }, [
+        h('p', { class: 'setting-description-no-padding' }, '这些入口用于脚本、CLI、外部 Codex MCP 和本地连接终端自动化；能否生效取决于运行时环境变量和是否从 aiopsterm 本地连接终端启动。'),
+        ...automationSnippetRows.map((item) => renderSnippet(item)),
+        h('div', { class: 'settings-action-row' }, [
+          h(
+            'button',
+            {
+              class: 'settings-button',
+              onClick: () => workspace.openSettingsDocumentationFile('technical/control-socket.md')
+            },
+            '控制协议文档'
+          ),
+          h(
+            'button',
+            {
+              class: 'settings-button',
+              onClick: () => workspace.openSettingsDocumentationFile('technical/external-codex-mcp.md')
+            },
+            '外部 Codex MCP 文档'
+          )
+        ])
       ])
   }
 })

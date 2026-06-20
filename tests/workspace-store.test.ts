@@ -5010,6 +5010,11 @@ describe('workspace store', () => {
         },
         shellIntegrationTimeout: 0
       },
+      notifications: {
+        desktopNotifications: 'yes' as any,
+        controlNotificationBell: false,
+        extra: true
+      } as any,
       quickCommands: {
         groups: [],
         snippets: []
@@ -5068,9 +5073,17 @@ describe('workspace store', () => {
             type: 'HTTP',
             port: 7890
           })
-        })
+        }),
+        notifications: {
+          desktopNotifications: true,
+          controlNotificationBell: false
+        }
       })
     )
+    expect(store.notificationSettings).toEqual({
+      desktopNotifications: true,
+      controlNotificationBell: false
+    })
   })
 
   it('hydrates persisted External reference-style knowledge base tree and capacity state', async () => {
