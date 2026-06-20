@@ -83,6 +83,7 @@ import { registerModelsIpc } from './ipc/models'
 import { registerQuickCommandsIpc } from './ipc/quickCommands'
 import { registerSettingsPreferencesIpc } from './ipc/settingsPreferences'
 import { registerSkillsIpc } from './ipc/skills'
+import { registerTerminalSessionsIpc, terminalHistoryLinesFromWrite, type TerminalSession } from './ipc/terminalSessions'
 import { registerTerminalToolsIpc } from './ipc/terminalTools'
 import { registerUserAccountIpc } from './ipc/userAccount'
 import { registerVoiceIpc } from './ipc/voice'
@@ -158,16 +159,6 @@ import type {
 
 if (process.env.NODE_ENV === 'test') {
   app.disableHardwareAcceleration()
-}
-
-type TerminalSession = {
-  id: string
-  process: LocalTerminalSession | SshTerminalSession
-  shell: string
-  cwd: string
-  window: BrowserWindow
-  kind: 'local' | 'ssh'
-  host?: string
 }
 
 const registerTerminalForCodexBridge = (session: TerminalSession, target?: CodexSessionCreateOptions['target']) => {
@@ -618,13 +609,6 @@ const requestTerminalKeyboardInteractive = (owner: BrowserWindow, request: Termi
     })
     sendWindowEvent(owner, 'terminal:keyboard-interactive:request', request)
   })
-
-const terminalBinaryPayload = (payload: unknown): Buffer => {
-  if (payload instanceof ArrayBuffer) return Buffer.from(payload)
-  if (ArrayBuffer.isView(payload)) return Buffer.from(payload.buffer, payload.byteOffset, payload.byteLength)
-  if (Array.isArray(payload)) return Buffer.from(payload)
-  return Buffer.alloc(0)
-}
 
 const cloneKnowledgeBaseNodes = (nodes: KnowledgeBaseNodeConfig[] = []): KnowledgeBaseNodeConfig[] =>
   nodes.map((node) => ({
@@ -1121,14 +1105,6 @@ const getDefaultShell = () => {
     return process.env.COMSPEC || 'powershell.exe'
   }
   return process.env.SHELL || '/bin/bash'
-}
-
-const terminalHistoryLinesFromWrite = (data: string) => {
-  const text = String(data || '')
-  if (!/[\r\n]/.test(text)) return []
-  const lines = text.split(/[\r\n]+/)
-  if (!/[\r\n]$/.test(text)) lines.pop()
-  return lines.map((line) => line.trim()).filter(Boolean)
 }
 
 const normalizeModelProvider = (value: unknown): UserConfig['modelProvider'] => {
@@ -2762,206 +2738,54 @@ const registerIpc = () => {
       knowledgeSearchIndex = index
     }
   })
-  ipcMain.handle('terminal:create', (event, inputOptions: TerminalCreateOptions = {}) => {
-    const savedConfig = getConfig()
-    const defaultTerminalType = normalizeTerminalType(defaultConfig.terminal?.terminalType, 'xterm-256color')
-    const savedTerminalType = normalizeTerminalType(savedConfig.terminal?.terminalType, defaultTerminalType)
-    const options: TerminalCreateOptions = {
-      ...inputOptions,
-      terminalType: normalizeTerminalType(inputOptions.terminalType, savedTerminalType)
-    }
-    const owner = BrowserWindow.fromWebContents(event.sender)
-    if (!owner) {
-      logRuntimeEvent('error', 'terminal.create.no-owner', { kind: options.kind || (options.ssh || options.assetId ? 'ssh' : 'local') })
-      throw new Error('No owner window for terminal session')
-    }
-
-    const id = randomUUID()
-    const requestedKind = options.kind || (options.ssh || options.assetId ? 'ssh' : 'local')
-    logRuntimeEvent('info', 'terminal.create.request', {
-      id,
-      kind: requestedKind,
-      cols: options.cols,
-      rows: options.rows,
-      terminalType: options.terminalType,
-      panelId: options.panelId,
-      workspaceId: options.workspaceId,
-      hasAssetId: Boolean(options.assetId),
-      hasSshOptions: Boolean(options.ssh)
-    })
-    if (options.kind === 'ssh' || options.ssh || options.assetId) {
-      const result = createSshTerminal(owner, id, options)
-      const connection = createSshTerminalConnectionInfo(id, result.connection, options)
-      if (result.session) {
-        const terminalRecord: TerminalSession = {
-          id,
-          process: result.session,
-          shell: result.shell,
-          cwd: result.cwd,
-          window: owner,
-          kind: 'ssh',
-          host: result.connection.host
+  registerTerminalSessionsIpc(ipcMain, {
+    sessions,
+    getConfig,
+    defaultTerminalType: defaultConfig.terminal?.terminalType,
+    normalizeTerminalType,
+    getOwnerWindow: (event) => BrowserWindow.fromWebContents(event.sender),
+    createId: () => randomUUID(),
+    logRuntimeEvent,
+    createSshTerminal,
+    createSshTerminalConnectionInfo,
+    createTerminalWriteResult,
+    createTerminalBinaryWriteResult,
+    createTerminalKillResult,
+    createLocalTerminal: (owner, id, options) =>
+      createLocalTerminalSession(id, options, {
+        lifecycle: (event) => {
+          logRuntimeEvent(event.stage === 'error' ? 'error' : 'info', 'terminal.lifecycle', {
+            id: event.id,
+            kind: event.kind,
+            stage: event.stage,
+            shell: event.shell,
+            cwd: event.cwd,
+            reason: event.reason,
+            errorCode: event.errorCode,
+            errorMessage: event.errorMessage
+          })
+          sendWindowEvent(owner, 'terminal:lifecycle', event)
+        },
+        exit: (event, code) => {
+          logRuntimeEvent('info', 'terminal.exit', {
+            id: event.id,
+            kind: event.kind,
+            code: code ?? event.code ?? null,
+            reason: event.reason,
+            errorCode: event.errorCode,
+            errorMessage: event.errorMessage
+          })
+          sendTerminalExit(owner, event, code ?? event.code ?? null)
+        },
+        data: (chunk) => sendTerminalData(owner, id, chunk),
+        closed: () => {
+          unregisterCodexTerminalBridgeSession(id)
+          sessions.delete(id)
+          logRuntimeEvent('info', 'terminal.session-removed', { id, kind: 'local' })
         }
-        sessions.set(id, terminalRecord)
-        registerTerminalForCodexBridge(terminalRecord, {
-          kind: 'ssh',
-          sessionId: id,
-          label: connection.assetName || connection.title || `${connection.username}@${connection.host}`,
-          host: connection.host,
-          port: connection.port,
-          username: connection.username,
-          ...(connection.assetId ? { assetId: connection.assetId } : {}),
-          assetName: connection.assetName,
-          cwd: result.cwd
-        })
-        logRuntimeEvent('info', 'terminal.create.ready', {
-          id,
-          kind: 'ssh',
-          shell: result.shell,
-          cwd: result.cwd,
-          host: result.connection.host,
-          username: result.connection.username
-        })
-      }
-      return {
-        id,
-        shell: result.shell,
-        cwd: result.cwd,
-        kind: 'ssh' as const,
-        connection,
-        lifecycle: result.lifecycle
-      }
-    }
-
-    const result = createLocalTerminalSession(id, options, {
-      lifecycle: (event) => {
-        logRuntimeEvent(event.stage === 'error' ? 'error' : 'info', 'terminal.lifecycle', {
-          id: event.id,
-          kind: event.kind,
-          stage: event.stage,
-          shell: event.shell,
-          cwd: event.cwd,
-          reason: event.reason,
-          errorCode: event.errorCode,
-          errorMessage: event.errorMessage
-        })
-        sendWindowEvent(owner, 'terminal:lifecycle', event)
-      },
-      exit: (event, code) => {
-        logRuntimeEvent('info', 'terminal.exit', {
-          id: event.id,
-          kind: event.kind,
-          code: code ?? event.code ?? null,
-          reason: event.reason,
-          errorCode: event.errorCode,
-          errorMessage: event.errorMessage
-        })
-        sendTerminalExit(owner, event, code ?? event.code ?? null)
-      },
-      data: (chunk) => sendTerminalData(owner, id, chunk),
-      closed: () => {
-        unregisterCodexTerminalBridgeSession(id)
-        sessions.delete(id)
-        logRuntimeEvent('info', 'terminal.session-removed', { id, kind: 'local' })
-      }
-    })
-    const terminalRecord: TerminalSession = {
-      id,
-      process: result.session,
-      shell: result.shell,
-      cwd: result.cwd,
-      window: owner,
-      kind: 'local',
-      host: 'local'
-    }
-    sessions.set(id, terminalRecord)
-    registerTerminalForCodexBridge(terminalRecord, {
-      kind: 'local',
-      panelId: options.panelId,
-      sessionId: id,
-      label: 'Local terminal',
-      cwd: result.cwd
-    })
-    logRuntimeEvent('info', 'terminal.create.ready', {
-      id,
-      kind: 'local',
-      shell: result.shell,
-      cwd: result.cwd,
-      runtimeKind: result.runtimeKind
-    })
-
-    return { id, shell: result.shell, cwd: result.cwd, kind: 'local' as const, lifecycle: result.lifecycle }
-  })
-
-  ipcMain.handle('terminal:write', (_event, id: string, data: string) => {
-    const session = sessions.get(id)
-    const bytes = Buffer.byteLength(String(data || ''), 'utf8')
-    if (!session) {
-      logRuntimeEvent('warn', 'terminal.write.missing-session', { id, bytes })
-      return createTerminalWriteResult(id, data, false)
-    }
-    logRuntimeEvent('debug', 'terminal.write.request', { id, kind: session.kind, bytes })
-    if (session.kind === 'ssh') {
-      ;(session.process as SshTerminalSession).write(data)
-    } else {
-      ;(session.process as LocalTerminalSession).write(data)
-    }
-    terminalHistoryLinesFromWrite(data).forEach((command) => recordTerminalCommandHistory(command, { host: session.host }))
-    logRuntimeEvent('debug', 'terminal.write.accepted', { id, kind: session.kind, bytes })
-    return createTerminalWriteResult(id, data, true)
-  })
-
-  ipcMain.handle('terminal:write-binary', (_event, id: string, payload: unknown) => {
-    const session = sessions.get(id)
-    const buffer = terminalBinaryPayload(payload)
-    if (!session) return createTerminalBinaryWriteResult(id, buffer.byteLength, false)
-    if (!buffer.byteLength) {
-      return {
-        ok: false,
-        errorCode: 'TERMINAL_BINARY_EMPTY',
-        errorMessage: 'Terminal binary payload is empty.'
-      }
-    }
-    if (session.kind === 'local' && !(session.process as LocalTerminalSession).writeBinary(buffer)) {
-      return {
-        ok: false,
-        errorCode: 'TERMINAL_BINARY_UNSUPPORTED',
-        errorMessage: 'This terminal runtime does not support binary writes.'
-      }
-    }
-    if (session.kind === 'ssh') {
-      ;(session.process as SshTerminalSession).write(buffer)
-    }
-    return createTerminalBinaryWriteResult(id, buffer.byteLength, true)
-  })
-
-  ipcMain.handle('terminal:resize', (_event, id: string, cols: number, rows: number) => {
-    const session = sessions.get(id)
-    if (!session) {
-      logRuntimeEvent('warn', 'terminal.resize.missing-session', { id, cols, rows })
-      return
-    }
-    logRuntimeEvent('debug', 'terminal.resize', { id, kind: session.kind, cols, rows })
-    if (session.kind === 'ssh') {
-      ;(session.process as SshTerminalSession).resize(cols, rows)
-    } else {
-      ;(session.process as LocalTerminalSession).resize(cols, rows)
-    }
-  })
-
-  ipcMain.handle('terminal:kill', (_event, id: string) => {
-    const session = sessions.get(id)
-    if (!session) {
-      logRuntimeEvent('warn', 'terminal.kill.missing-session', { id })
-      return createTerminalKillResult(id, false)
-    }
-    logRuntimeEvent('info', 'terminal.kill.request', { id, kind: session.kind })
-    if (session.kind === 'ssh') {
-      ;(session.process as SshTerminalSession).kill('manual')
-    } else {
-      ;(session.process as LocalTerminalSession).kill('manual')
-    }
-    return createTerminalKillResult(id, true)
+      }),
+    registerTerminalForCodexBridge,
+    recordTerminalCommandHistory
   })
 
   ipcMain.handle('codex:create', async (event, options: CodexSessionCreateOptions = {}) => {
