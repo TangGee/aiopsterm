@@ -371,6 +371,36 @@ import type {
   DatabaseTableQueryInput as DatabaseTableQueryInputPreload,
   DatabaseWorkspaceCatalog as DatabaseWorkspaceCatalogPreload
 } from '../src/shared/preload'
+import type {
+  KubernetesAgentCleanupResult as KubernetesAgentCleanupResultContract,
+  KubernetesAgentProxyConfigResult as KubernetesAgentProxyConfigResultContract,
+  KubernetesCatalog as KubernetesCatalogContract,
+  KubernetesClusterInput as KubernetesClusterInputContract,
+  KubernetesClusterTestResult as KubernetesClusterTestResultContract,
+  KubernetesCommandResult as KubernetesCommandResultContract,
+  KubernetesKubeconfigImportResult as KubernetesKubeconfigImportResultContract,
+  KubernetesResourceActionPlanResult as KubernetesResourceActionPlanResultContract,
+  KubernetesResourceRefreshResult as KubernetesResourceRefreshResultContract,
+  KubernetesTerminalCreateResult as KubernetesTerminalCreateResultContract,
+  KubernetesTerminalDataEvent as KubernetesTerminalDataEventContract,
+  KubernetesTerminalExitEvent as KubernetesTerminalExitEventContract,
+  KubernetesTerminalWriteResult as KubernetesTerminalWriteResultContract
+} from '../src/shared/contracts/kubernetes'
+import type {
+  KubernetesAgentCleanupResult as KubernetesAgentCleanupResultPreload,
+  KubernetesAgentProxyConfigResult as KubernetesAgentProxyConfigResultPreload,
+  KubernetesCatalog as KubernetesCatalogPreload,
+  KubernetesClusterInput as KubernetesClusterInputPreload,
+  KubernetesClusterTestResult as KubernetesClusterTestResultPreload,
+  KubernetesCommandResult as KubernetesCommandResultPreload,
+  KubernetesKubeconfigImportResult as KubernetesKubeconfigImportResultPreload,
+  KubernetesResourceActionPlanResult as KubernetesResourceActionPlanResultPreload,
+  KubernetesResourceRefreshResult as KubernetesResourceRefreshResultPreload,
+  KubernetesTerminalCreateResult as KubernetesTerminalCreateResultPreload,
+  KubernetesTerminalDataEvent as KubernetesTerminalDataEventPreload,
+  KubernetesTerminalExitEvent as KubernetesTerminalExitEventPreload,
+  KubernetesTerminalWriteResult as KubernetesTerminalWriteResultPreload
+} from '../src/shared/preload'
 
 type AssertAssignable<From, To extends From> = true
 
@@ -683,6 +713,32 @@ type DatabaseAiDrawerResponsePreloadMatchesContract = AssertAssignable<DatabaseA
 type DatabaseAiDrawerResponseContractMatchesPreload = AssertAssignable<DatabaseAiDrawerResponseResultPreload, DatabaseAiDrawerResponseResultContract>
 type DatabaseSqlErrorDiagnosisInputPreloadMatchesContract = AssertAssignable<DatabaseSqlErrorDiagnosisInputContract, DatabaseSqlErrorDiagnosisInputPreload>
 type DatabaseSqlErrorDiagnosisInputContractMatchesPreload = AssertAssignable<DatabaseSqlErrorDiagnosisInputPreload, DatabaseSqlErrorDiagnosisInputContract>
+type KubernetesCatalogPreloadMatchesContract = AssertAssignable<KubernetesCatalogContract, KubernetesCatalogPreload>
+type KubernetesCatalogContractMatchesPreload = AssertAssignable<KubernetesCatalogPreload, KubernetesCatalogContract>
+type KubernetesClusterInputPreloadMatchesContract = AssertAssignable<KubernetesClusterInputContract, KubernetesClusterInputPreload>
+type KubernetesClusterInputContractMatchesPreload = AssertAssignable<KubernetesClusterInputPreload, KubernetesClusterInputContract>
+type KubernetesClusterTestPreloadMatchesContract = AssertAssignable<KubernetesClusterTestResultContract, KubernetesClusterTestResultPreload>
+type KubernetesClusterTestContractMatchesPreload = AssertAssignable<KubernetesClusterTestResultPreload, KubernetesClusterTestResultContract>
+type KubernetesKubeconfigImportPreloadMatchesContract = AssertAssignable<KubernetesKubeconfigImportResultContract, KubernetesKubeconfigImportResultPreload>
+type KubernetesKubeconfigImportContractMatchesPreload = AssertAssignable<KubernetesKubeconfigImportResultPreload, KubernetesKubeconfigImportResultContract>
+type KubernetesTerminalCreatePreloadMatchesContract = AssertAssignable<KubernetesTerminalCreateResultContract, KubernetesTerminalCreateResultPreload>
+type KubernetesTerminalCreateContractMatchesPreload = AssertAssignable<KubernetesTerminalCreateResultPreload, KubernetesTerminalCreateResultContract>
+type KubernetesTerminalWritePreloadMatchesContract = AssertAssignable<KubernetesTerminalWriteResultContract, KubernetesTerminalWriteResultPreload>
+type KubernetesTerminalWriteContractMatchesPreload = AssertAssignable<KubernetesTerminalWriteResultPreload, KubernetesTerminalWriteResultContract>
+type KubernetesTerminalDataEventPreloadMatchesContract = AssertAssignable<KubernetesTerminalDataEventContract, KubernetesTerminalDataEventPreload>
+type KubernetesTerminalDataEventContractMatchesPreload = AssertAssignable<KubernetesTerminalDataEventPreload, KubernetesTerminalDataEventContract>
+type KubernetesTerminalExitEventPreloadMatchesContract = AssertAssignable<KubernetesTerminalExitEventContract, KubernetesTerminalExitEventPreload>
+type KubernetesTerminalExitEventContractMatchesPreload = AssertAssignable<KubernetesTerminalExitEventPreload, KubernetesTerminalExitEventContract>
+type KubernetesCommandPreloadMatchesContract = AssertAssignable<KubernetesCommandResultContract, KubernetesCommandResultPreload>
+type KubernetesCommandContractMatchesPreload = AssertAssignable<KubernetesCommandResultPreload, KubernetesCommandResultContract>
+type KubernetesResourceActionPlanPreloadMatchesContract = AssertAssignable<KubernetesResourceActionPlanResultContract, KubernetesResourceActionPlanResultPreload>
+type KubernetesResourceActionPlanContractMatchesPreload = AssertAssignable<KubernetesResourceActionPlanResultPreload, KubernetesResourceActionPlanResultContract>
+type KubernetesResourceRefreshPreloadMatchesContract = AssertAssignable<KubernetesResourceRefreshResultContract, KubernetesResourceRefreshResultPreload>
+type KubernetesResourceRefreshContractMatchesPreload = AssertAssignable<KubernetesResourceRefreshResultPreload, KubernetesResourceRefreshResultContract>
+type KubernetesAgentProxyConfigPreloadMatchesContract = AssertAssignable<KubernetesAgentProxyConfigResultContract, KubernetesAgentProxyConfigResultPreload>
+type KubernetesAgentProxyConfigContractMatchesPreload = AssertAssignable<KubernetesAgentProxyConfigResultPreload, KubernetesAgentProxyConfigResultContract>
+type KubernetesAgentCleanupPreloadMatchesContract = AssertAssignable<KubernetesAgentCleanupResultContract, KubernetesAgentCleanupResultPreload>
+type KubernetesAgentCleanupContractMatchesPreload = AssertAssignable<KubernetesAgentCleanupResultPreload, KubernetesAgentCleanupResultContract>
 
 describe('shared contract compatibility exports', () => {
   it('keeps Codex session contracts compatible through the preload export', () => {
@@ -1270,6 +1326,93 @@ describe('shared contract compatibility exports', () => {
     expect(checks).toEqual([
       true,
       true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ])
+  })
+
+  it('keeps Kubernetes contracts compatible through the preload export', () => {
+    const checks: [
+      KubernetesCatalogPreloadMatchesContract,
+      KubernetesCatalogContractMatchesPreload,
+      KubernetesClusterInputPreloadMatchesContract,
+      KubernetesClusterInputContractMatchesPreload,
+      KubernetesClusterTestPreloadMatchesContract,
+      KubernetesClusterTestContractMatchesPreload,
+      KubernetesKubeconfigImportPreloadMatchesContract,
+      KubernetesKubeconfigImportContractMatchesPreload,
+      KubernetesTerminalCreatePreloadMatchesContract,
+      KubernetesTerminalCreateContractMatchesPreload,
+      KubernetesTerminalWritePreloadMatchesContract,
+      KubernetesTerminalWriteContractMatchesPreload,
+      KubernetesTerminalDataEventPreloadMatchesContract,
+      KubernetesTerminalDataEventContractMatchesPreload,
+      KubernetesTerminalExitEventPreloadMatchesContract,
+      KubernetesTerminalExitEventContractMatchesPreload,
+      KubernetesCommandPreloadMatchesContract,
+      KubernetesCommandContractMatchesPreload,
+      KubernetesResourceActionPlanPreloadMatchesContract,
+      KubernetesResourceActionPlanContractMatchesPreload,
+      KubernetesResourceRefreshPreloadMatchesContract,
+      KubernetesResourceRefreshContractMatchesPreload,
+      KubernetesAgentProxyConfigPreloadMatchesContract,
+      KubernetesAgentProxyConfigContractMatchesPreload,
+      KubernetesAgentCleanupPreloadMatchesContract,
+      KubernetesAgentCleanupContractMatchesPreload
+    ] = [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+
+    expect(checks).toEqual([
       true,
       true,
       true,

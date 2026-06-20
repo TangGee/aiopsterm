@@ -91,6 +91,9 @@ import { applyDocumentLocale, isLocaleSetting, resolveLocale, translateWithLocal
 import type { I18nKey } from '@/i18n/messages'
 import type {
   AiopsPreloadApi,
+  UserConfig
+} from '@shared/preload'
+import type {
   KubernetesAgentProxyConfig,
   KubernetesBastionGroup,
   KubernetesCatalog,
@@ -98,16 +101,15 @@ import type {
   KubernetesClusterTestInput,
   KubernetesConnectionStatus,
   KubernetesContextInfo,
-  KubernetesTerminalDataEvent,
-  KubernetesTerminalExitEvent,
   KubernetesImportContextInfo,
   KubernetesNamespaceInfo,
   KubernetesResource,
   KubernetesResourceKind,
+  KubernetesTerminalDataEvent,
+  KubernetesTerminalExitEvent,
   KubernetesTerminalRecord,
-  KubernetesTerminalStatus,
-  UserConfig
-} from '@shared/preload'
+  KubernetesTerminalStatus
+} from '@shared/contracts/kubernetes'
 import type { TerminalCommandGenerationContext, TerminalCommandGenerationRecord } from '@shared/contracts/terminalTools'
 import type {
   AiChatChipContentPart,

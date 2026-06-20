@@ -599,7 +599,7 @@
 import { computed, defineComponent, h, onMounted, reactive, ref, watch } from 'vue'
 import { Bot, ChevronRight, Clipboard, Cloud, FileSearch, FileText, Link, LoaderCircle, Plus, RefreshCw, ScrollText, Search, Settings, Terminal, Trash2, Unplug, X } from 'lucide-vue-next'
 import { useWorkspaceStore } from '@/stores/workspace'
-import type { KubernetesClusterRecord, KubernetesConnectionStatus, KubernetesResourceKind } from '@shared/preload'
+import type { KubernetesClusterRecord, KubernetesConnectionStatus, KubernetesResourceKind } from '@shared/contracts/kubernetes'
 
 const workspace = useWorkspaceStore()
 const command = ref('')

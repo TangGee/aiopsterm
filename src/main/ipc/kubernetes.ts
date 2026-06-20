@@ -32,7 +32,7 @@ import type {
   KubernetesResourceActionInput,
   KubernetesResourceRefreshInput,
   KubernetesTerminalCreateInput
-} from '@shared/preload'
+} from '@shared/contracts/kubernetes'
 
 export const registerKubernetesIpc = (ipcMain: IpcMain) => {
   ipcMain.handle('kubernetes:catalog', () => listKubernetesCatalog())

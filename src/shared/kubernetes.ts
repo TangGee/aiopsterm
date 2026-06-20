@@ -4,10 +4,9 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from '
 import { mkdtemp, readFile, rm, writeFile } from 'fs/promises'
 import { homedir, tmpdir } from 'os'
 import { isAbsolute, join, resolve } from 'path'
+import type { AiopsAssetRecord, AiopsOrganizationAssetRefreshResult } from './contracts/assets'
+import type { AiopsMutationResult } from './contracts/common'
 import type {
-  AiopsMutationResult,
-  AiopsAssetRecord,
-  AiopsOrganizationAssetRefreshResult,
   KubernetesAgentProxyConfig,
   KubernetesAgentProxyConfigInput,
   KubernetesAgentProxyConfigResult,
@@ -47,7 +46,7 @@ import type {
   KubernetesTerminalMutationResult,
   KubernetesTerminalRecord,
   KubernetesTerminalWriteResult
-} from './preload'
+} from './contracts/kubernetes'
 import { shouldUseKubernetesSeedData as runtimeShouldUseKubernetesSeedData } from './runtimeSwitches'
 
 const nowLabel = () => '刚刚'
