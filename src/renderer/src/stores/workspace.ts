@@ -181,6 +181,12 @@ import {
   validateTerminalWriteResult
 } from '@/services/terminalBackendGuards'
 import {
+  buildAgentCommandOutputMessagesForRequest,
+  buildAgentCommandOutputPrompt,
+  createAgentCommandOutputMessages,
+  waitForTerminalOutputAfter as waitForTerminalOutputAfterRuntime
+} from '@/services/terminalAgentLoopRuntime'
+import {
   commandSecurityNotice,
   createGlobalTerminalSecurityExecution,
   createTerminalSecurityExecution,
@@ -557,9 +563,6 @@ type SendChatOptions = {
   skipKnowledgeSearch?: boolean
 }
 
-const agentCommandOutputFilterLimit = 12000
-const agentCommandOutputFilterHead = 4000
-const agentCommandOutputFilterTail = 6000
 type ExtensionInstallProgress = {
   pluginId: string
   stage: ExtensionInstallStage
@@ -10490,23 +10493,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const resolveActiveWritableTerminalPanel = () =>
     resolveActiveWritableTerminalPanelFromCollection(panels.value, activePanel.value)
 
-  const sleep = (delayMs: number) => new Promise<void>((resolve) => window.setTimeout(resolve, Math.max(0, delayMs)))
-
-  const waitForTerminalOutputAfter = async (panelId: string, startLength: number, timeoutMs = 2_500) => {
-    const startedAt = Date.now()
-    const panelForOutput = () => panels.value.find((item) => item.id === panelId || item.sessionId === panelId)
-    let panel = panelForOutput()
-    if (!panel) return ''
-    while (Date.now() - startedAt < timeoutMs) {
-      panel = panelForOutput()
-      if (!panel) return ''
-      const output = panel.output.slice(startLength)
-      if (output.trim()) return output
-      await sleep(80)
-    }
-    panel = panelForOutput()
-    return panel?.output.slice(startLength) || ''
-  }
+  const waitForTerminalOutputAfter = (panelId: string, startLength: number, timeoutMs = 2_500) =>
+    waitForTerminalOutputAfterRuntime(() => panels.value.find((item) => item.id === panelId || item.sessionId === panelId), startLength, timeoutMs)
 
   const stageActiveTerminalCommand = (command: string) => {
     const panel = resolveActiveWritableTerminalPanel()
@@ -10521,42 +10509,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (!panel || !text) return null
     return runTerminalCommand(panel.id, text, { source, writeToShell: true })
   }
-
-  const aiChatMessageInputFromChatMessage = (message: ChatMessage): AiChatMessageInput => ({
-    role: message.role,
-    text: message.text,
-    ask: message.ask,
-    say: message.say,
-    action: message.action,
-    commandExecution: message.commandExecution ? cloneStructuredValue(message.commandExecution) : undefined
-  })
-
-  const filterAgentCommandOutputForPrompt = (output: string) => {
-    const trimmed = output.trimEnd()
-    if (!aiPreferences.value.commandOutputFilteringEnabled || trimmed.length <= agentCommandOutputFilterLimit) return trimmed
-    const omittedChars = trimmed.length - agentCommandOutputFilterHead - agentCommandOutputFilterTail
-    return [
-      trimmed.slice(0, agentCommandOutputFilterHead).trimEnd(),
-      '',
-      `[aiopsterm omitted ${omittedChars.toLocaleString()} characters from the middle of this command output because AI command output filtering is enabled.]`,
-      '',
-      trimmed.slice(-agentCommandOutputFilterTail).trimStart()
-    ].join('\n')
-  }
-
-  const buildAgentCommandOutputPrompt = (command: string, output: string) =>
-    [
-      'Command output from the approved execute_command tool is available.',
-      '',
-      `<command>${command}</command>`,
-      '',
-      'Output:',
-      '```',
-      filterAgentCommandOutputForPrompt(output),
-      '```',
-      '',
-      'Continue the Agent loop: analyze this observation, request another <execute_command> block only if another terminal step is needed, otherwise provide the final answer.'
-    ].join('\n')
 
   const continueAgentCommandLoop = async (input: {
     commandMessageId: string
@@ -10579,29 +10531,16 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       return { status: 'no-output' as const, reason: commandMessage.commandExecutionMessage }
     }
     const requestId = createRendererLocalId('aichat-agent-loop')
-    const commandOutputMessage: ChatMessage = {
-      id: `${requestId}-command-output`,
-      role: 'assistant',
-      text: output,
-      state: 'done',
-      say: 'command_output',
-      action: 'approved',
-      commandExecution: input.commandExecution ? cloneStructuredValue(input.commandExecution) : undefined,
-      executedCommand: command
-    }
-    const assistantMessage: ChatMessage = {
-      id: `${requestId}-assistant`,
-      role: 'assistant',
-      text: '正在分析命令输出...',
-      state: 'streaming'
-    }
-    chatMessages.value.push(commandOutputMessage, assistantMessage)
-    const prompt = buildAgentCommandOutputPrompt(command, output)
-    const messages: AiChatMessageInput[] = chatMessages.value.slice(-16).map((message) => {
-      const mapped = aiChatMessageInputFromChatMessage(message)
-      if (message.id === commandOutputMessage.id) mapped.text = filterAgentCommandOutputForPrompt(message.text)
-      return mapped
+    const { commandOutputMessage, assistantMessage } = createAgentCommandOutputMessages({
+      requestId,
+      command,
+      output,
+      commandExecution: input.commandExecution
     })
+    chatMessages.value.push(commandOutputMessage, assistantMessage)
+    const filterOptions = { enabled: aiPreferences.value.commandOutputFilteringEnabled }
+    const prompt = buildAgentCommandOutputPrompt(command, output, filterOptions)
+    const messages: AiChatMessageInput[] = buildAgentCommandOutputMessagesForRequest(chatMessages.value.slice(-16), commandOutputMessage.id, filterOptions)
     void refreshAiTodoSnapshot()
     void generateAiResponseForMessage(assistantMessage.id, {
       requestId,
