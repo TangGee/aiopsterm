@@ -1,12 +1,12 @@
 import Zmodem, { type ZmodemSession, type ZmodemTransfer } from 'zmodem.js'
+import type { AiopsPreloadApi } from '@shared/preload'
 import type {
-  AiopsPreloadApi,
   ZmodemSavePathPickResult,
   ZmodemStreamCloseResult,
   ZmodemStreamOpenResult,
   ZmodemUploadFile,
   ZmodemUploadPickResult
-} from '@shared/preload'
+} from '@shared/contracts/zmodem'
 import type { TerminalDataEvent } from '@shared/contracts/terminalSessions'
 
 export type TerminalZmodemProgress = {

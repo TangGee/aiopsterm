@@ -53,6 +53,14 @@ import type {
   AgentHookInstallerOperationResult as AgentHookInstallerOperationResultPreload,
   AgentHookInstallerStatus as AgentHookInstallerStatusPreload
 } from '../src/shared/preload'
+import type {
+  ZmodemStreamOpenResult as ZmodemStreamOpenResultContract,
+  ZmodemUploadPickResult as ZmodemUploadPickResultContract
+} from '../src/shared/contracts/zmodem'
+import type {
+  ZmodemStreamOpenResult as ZmodemStreamOpenResultPreload,
+  ZmodemUploadPickResult as ZmodemUploadPickResultPreload
+} from '../src/shared/preload'
 
 type AssertAssignable<From, To extends From> = true
 
@@ -99,6 +107,10 @@ type AgentHookStatusPreloadMatchesContract = AssertAssignable<AgentHookInstaller
 type AgentHookStatusContractMatchesPreload = AssertAssignable<AgentHookInstallerStatusPreload, AgentHookInstallerStatusContract>
 type AgentHookOperationPreloadMatchesContract = AssertAssignable<AgentHookInstallerOperationResultContract, AgentHookInstallerOperationResultPreload>
 type AgentHookOperationContractMatchesPreload = AssertAssignable<AgentHookInstallerOperationResultPreload, AgentHookInstallerOperationResultContract>
+type ZmodemUploadPickPreloadMatchesContract = AssertAssignable<ZmodemUploadPickResultContract, ZmodemUploadPickResultPreload>
+type ZmodemUploadPickContractMatchesPreload = AssertAssignable<ZmodemUploadPickResultPreload, ZmodemUploadPickResultContract>
+type ZmodemStreamOpenPreloadMatchesContract = AssertAssignable<ZmodemStreamOpenResultContract, ZmodemStreamOpenResultPreload>
+type ZmodemStreamOpenContractMatchesPreload = AssertAssignable<ZmodemStreamOpenResultPreload, ZmodemStreamOpenResultContract>
 
 describe('shared contract compatibility exports', () => {
   it('keeps Codex session contracts compatible through the preload export', () => {
@@ -161,5 +173,16 @@ describe('shared contract compatibility exports', () => {
     ] = [true, true, true, true, true, true, true, true, true, true, true, true]
 
     expect(checks).toEqual([true, true, true, true, true, true, true, true, true, true, true, true])
+  })
+
+  it('keeps ZMODEM contracts compatible through the preload export', () => {
+    const checks: [
+      ZmodemUploadPickPreloadMatchesContract,
+      ZmodemUploadPickContractMatchesPreload,
+      ZmodemStreamOpenPreloadMatchesContract,
+      ZmodemStreamOpenContractMatchesPreload
+    ] = [true, true, true, true]
+
+    expect(checks).toEqual([true, true, true, true])
   })
 })

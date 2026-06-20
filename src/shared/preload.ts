@@ -88,6 +88,13 @@ import type {
   AgentHookInstallerOperationInput,
   AgentHookInstallerOperationResult
 } from './contracts/agentHooks'
+import type {
+  ZmodemSavePathPickResult,
+  ZmodemStreamCloseResult,
+  ZmodemStreamOpenResult,
+  ZmodemStreamWriteResult,
+  ZmodemUploadPickResult
+} from './contracts/zmodem'
 
 export type { AiopsMutationResult } from './contracts/common'
 export type {
@@ -204,6 +211,14 @@ export type {
   AgentHookInstallerSource,
   AgentHookInstallerStatus
 } from './contracts/agentHooks'
+export type {
+  ZmodemSavePathPickResult,
+  ZmodemStreamCloseResult,
+  ZmodemStreamOpenResult,
+  ZmodemStreamWriteResult,
+  ZmodemUploadFile,
+  ZmodemUploadPickResult
+} from './contracts/zmodem'
 
 export type RuntimeLogLevel = 'debug' | 'info' | 'warn' | 'error'
 
@@ -701,40 +716,6 @@ export type ExternalCodexMcpConnection = {
 export type ExternalCodexMcpResponse<T extends Record<string, unknown> = Record<string, unknown>> = AiopsMutationResult<T> & {
   target?: Record<string, unknown>
 }
-
-export type ZmodemUploadFile = {
-  name: string
-  size: number
-  lastModified: number
-  data: number[]
-}
-
-export type ZmodemUploadPickResult = AiopsMutationResult<{
-  files: ZmodemUploadFile[]
-  canceled?: boolean
-}>
-
-export type ZmodemSavePathPickResult = AiopsMutationResult<{
-  filePath?: string
-  canceled?: boolean
-}>
-
-export type ZmodemStreamOpenResult = AiopsMutationResult<{
-  streamId: string
-  filePath: string
-}>
-
-export type ZmodemStreamWriteResult = AiopsMutationResult<{
-  streamId: string
-  bytes: number
-  totalBytes: number
-}>
-
-export type ZmodemStreamCloseResult = AiopsMutationResult<{
-  streamId: string
-  filePath: string
-  bytes: number
-}>
 
 export type FileSessionKind = 'local' | 'remote'
 

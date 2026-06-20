@@ -8,7 +8,7 @@ import type {
   ZmodemStreamOpenResult,
   ZmodemStreamWriteResult,
   ZmodemUploadPickResult
-} from '@shared/preload'
+} from '@shared/contracts/zmodem'
 
 type OpenDialogResult = {
   canceled?: boolean
