@@ -1609,8 +1609,6 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, type Component, type ComponentPublicInstance } from 'vue'
-import { Terminal as XtermTerminal } from '@xterm/xterm'
-import { FitAddon } from '@xterm/addon-fit'
 import 'highlight.js/styles/atom-one-dark.css'
 import '@xterm/xterm/css/xterm.css'
 import {
@@ -1657,7 +1655,7 @@ import {
   X,
   Zap
 } from 'lucide-vue-next'
-import { useWorkspaceStore, type TerminalSettings } from '@/stores/workspace'
+import { useWorkspaceStore } from '@/stores/workspace'
 import { readStoredAiPanelMode, storeAiPanelMode, type AiPanelMode } from '@/services/aiPanelModeRuntime'
 import {
   aiChipPartFromContext,
@@ -1764,12 +1762,8 @@ import { createAiPanelComposerRuntime, isAiPanelComposerEmpty } from '@/services
 import { createAiPanelVoiceRuntime } from '@/services/aiPanelVoiceRuntime'
 import { aiChatClient } from '@/services/aiChatClient'
 import { copyTextToClipboard } from '@/services/clipboardRuntime'
-import { codexSessionClient } from '@/services/codexSessionClient'
-import { codexTargetSignature, type CodexTargetEventKind } from '@/services/codexTargetRuntime'
+import { codexTargetSignature } from '@/services/codexTargetRuntime'
 import {
-  applyCodexExitEvent,
-  applyCodexLifecycleEvent,
-  applyCodexSessionStarted,
   applyCodexTargetBinding,
   applyCodexTargetUnbinding,
   closeCodexConversationRecord,
@@ -1782,14 +1776,14 @@ import {
   codexTargetTitle as codexRuntimeTargetTitle,
   createCodexConversationRecord as createCodexConversationRuntimeRecord,
   currentBoundCodexTarget as currentBoundCodexRuntimeTarget,
-  markCodexPendingTargetDelivered as markCodexRuntimePendingTargetDelivered,
-  markCodexTargetSyncFailed,
-  prepareCodexPendingTargetContext,
-  prepareCodexTargetSync,
   resetCodexConversationForRestart,
   terminalSettingsSignature as codexTerminalSettingsSignature,
   type AiPanelCodexConversationRuntimeState
 } from '@/services/aiPanelCodexRuntime'
+import {
+  createAiPanelCodexTerminalRuntime,
+  type AiPanelCodexTerminalConversation
+} from '@/services/aiPanelCodexTerminalRuntime'
 import { writeRendererRuntimeLog as writeAiRuntimeLog } from '@/services/runtimeLogClient'
 import {
   isAiChatExportData,
@@ -1806,11 +1800,6 @@ import type {
 } from '@/stores/workspace'
 import type { AiCommandCatalogOption, AiContextKind, AiContextOption } from '@shared/contracts/aiChat'
 import type { CodexSessionTargetContext } from '@shared/contracts/codexSessions'
-
-type XtermRuntimeOptions = XtermTerminal['options'] & { termName?: string }
-const setXtermTermName = (terminal: XtermTerminal, terminalType: string) => {
-  ;(terminal.options as XtermRuntimeOptions).termName = terminalType || 'xterm-256color'
-}
 
 const props = defineProps<{ agentMode?: boolean }>()
 
@@ -1891,17 +1880,11 @@ const commandAuditDialog = ref({
 })
 const codexTargetPickerOpen = ref(false)
 const codexTargetQuery = ref('')
-type CodexConversation = AiPanelCodexConversationRuntimeState & {
+type CodexConversation = AiPanelCodexConversationRuntimeState & AiPanelCodexTerminalConversation & {
   host: HTMLElement | null
-  terminal: XtermTerminal | null
-  fit: FitAddon | null
-  resizeObserver: ResizeObserver | null
 }
 const codexConversations = ref<CodexConversation[]>([])
 const activeCodexConversationId = ref('')
-let codexOffData: (() => void) | null = null
-let codexOffLifecycle: (() => void) | null = null
-let codexOffExit: (() => void) | null = null
 let classicChatDataLoaded = false
 let inputPlaceholderNoticeTimer: number | undefined
 let chatSearchTimer: number | undefined
@@ -1980,18 +1963,6 @@ const createCodexConversationRecord = (target?: CodexSessionTargetContext | null
   resizeObserver: null
 })
 
-const setCodexTerminalHostRef = (conversationId: string, element: Element | ComponentPublicInstance | null) => {
-  const conversation = codexConversations.value.find((item) => item.id === conversationId)
-  if (!conversation) return
-  conversation.host = element instanceof HTMLElement ? element : null
-  if (!conversation.host) {
-    conversation.resizeObserver?.disconnect()
-    conversation.resizeObserver = null
-    return
-  }
-  ensureCodexTerminal(conversation)
-}
-
 const ensureActiveCodexConversation = (target?: CodexSessionTargetContext | null) => {
   let conversation = activeCodexConversation.value
   if (conversation) return conversation
@@ -2042,233 +2013,46 @@ const loadClassicChatData = async () => {
   await Promise.all([workspace.refreshAiModelCatalog({ replaceSettingsOptions: false }), workspace.hydrateClassicChatData()])
 }
 
-const fitCodexTerminal = (options: { force?: boolean; conversation?: CodexConversation | null } = {}) => {
-  const conversation = options.conversation || activeCodexConversation.value
-  if (!conversation?.terminal || !conversation.fit || !conversation.host?.isConnected) return
-  window.requestAnimationFrame(() => {
-    if (activeCodexConversation.value?.id !== conversation.id) return
-    if (!conversation.terminal || !conversation.fit || !conversation.host?.isConnected) return
-    conversation.fit.fit()
-    const resizeCodexSession = codexSessionClient.resizeCodexSession()
-    if (!conversation.sessionId || !resizeCodexSession) return
-    if (!options.force && conversation.terminal.cols === conversation.lastFitCols && conversation.terminal.rows === conversation.lastFitRows) return
-    conversation.lastFitCols = conversation.terminal.cols
-    conversation.lastFitRows = conversation.terminal.rows
-    void resizeCodexSession(conversation.sessionId, conversation.terminal.cols, conversation.terminal.rows)
-    writeAiRuntimeLog('debug', 'renderer.codex.fit-resize', {
-      sessionId: conversation.sessionId,
-      cols: conversation.terminal.cols,
-      rows: conversation.terminal.rows
-    })
-  })
-}
-
-const focusCodexTerminal = () => {
-  activeCodexConversation.value?.terminal?.focus()
-}
-
-const codexCopyShortcut = (event: KeyboardEvent) => {
-  const key = event.key.toLowerCase()
-  if (key !== 'c') return false
-  if (event.shiftKey && (event.ctrlKey || event.metaKey)) return true
-  return event.metaKey && !event.ctrlKey && !event.altKey
-}
-
-const copyCodexSelection = async (source: 'contextmenu' | 'keyboard') => {
-  const selectedText = activeCodexConversation.value?.terminal?.getSelection() || ''
-  if (!selectedText) {
-    workspace.setTopNotice('请先选择 Codex 终端内容')
-    writeAiRuntimeLog('debug', 'renderer.codex.copy.empty', { source })
-    return false
-  }
-  const copied = await copyTextToClipboard(selectedText)
-  workspace.setTopNotice(copied ? 'Codex 终端内容已复制' : 'Codex 终端复制失败')
-  writeAiRuntimeLog(copied ? 'debug' : 'warn', copied ? 'renderer.codex.copy' : 'renderer.codex.copy.failed', {
-    source,
-    bytes: new TextEncoder().encode(selectedText).length
-  })
-  return copied
-}
-
-const copyCodexSelectionFromContextMenu = (event: MouseEvent) => {
-  event.preventDefault()
-  event.stopPropagation()
-  focusCodexTerminal()
-  void copyCodexSelection('contextmenu')
-}
-
-const disposeCodexSubscriptions = () => {
-  codexOffData?.()
-  codexOffLifecycle?.()
-  codexOffExit?.()
-  codexOffData = null
-  codexOffLifecycle = null
-  codexOffExit = null
-}
-
-const subscribeCodexBridge = () => {
-  if (codexOffData || codexOffLifecycle || codexOffExit) return
-  const onCodexSessionData = codexSessionClient.onCodexSessionData()
-  const onCodexSessionLifecycle = codexSessionClient.onCodexSessionLifecycle()
-  const onCodexSessionExit = codexSessionClient.onCodexSessionExit()
-  if (!onCodexSessionData && !onCodexSessionLifecycle && !onCodexSessionExit) return
-  codexOffData = onCodexSessionData?.((event) => {
-    const conversation = codexConversations.value.find((item) => item.sessionId === event.id)
-    conversation?.terminal?.write(event.data)
-  }) || null
-  codexOffLifecycle = onCodexSessionLifecycle?.((event) => {
-    const conversation = codexConversations.value.find((item) => item.sessionId === event.id)
-    if (!conversation) return
-    applyCodexLifecycleEvent(conversation, event, t('ai.codexError'))
-    if (event.stage === 'ready') {
-      syncCodexAttentionState(conversation)
-      fitCodexTerminal({ force: true, conversation })
-    }
-    if (event.stage === 'error') {
-      syncCodexAttentionState(conversation)
-    }
-    if (event.stage === 'closed') {
-      syncCodexAttentionState(conversation)
-    }
-  }) || null
-  codexOffExit = onCodexSessionExit?.((event) => {
-    const conversation = codexConversations.value.find((item) => item.sessionId === event.id)
-    if (!conversation) return
-    applyCodexExitEvent(conversation, event)
-    syncCodexAttentionState(conversation)
-  }) || null
-}
-
-const syncActiveCodexBridgeTarget = async () => {
-  const conversation = activeCodexConversation.value
-  if (!conversation?.sessionId || !conversation.boundTarget || !codexSessionClient.setCodexSessionTarget()) return
-  await syncCodexTargetContext({ force: true, conversation })
-}
-
-const ensureCodexTerminal = (conversation = ensureActiveCodexConversation()) => {
-  const element = conversation.host
-  if (!element || conversation.terminal) return
-  const terminal = new XtermTerminal({
-    allowTransparency: true,
-    cursorBlink: workspace.terminalSettings.cursorBlink,
-    convertEol: true,
-    cursorStyle: workspace.terminalSettings.cursorStyle,
-    fontFamily: workspace.terminalSettings.fontFamily || '"JetBrains Mono", "SFMono-Regular", Consolas, monospace',
-    fontSize: workspace.terminalSettings.fontSize || 12,
-    lineHeight: workspace.terminalSettings.lineHeight || 1,
-    scrollback: workspace.terminalSettings.scrollBack,
-    theme: {
-      background: 'rgba(9, 11, 16, 0)',
-      foreground: '#d7dae3',
-      cursor: '#8ccf7e',
-      selectionBackground: '#2d4059'
-    }
-  })
-  const fit = new FitAddon()
-  terminal.loadAddon(fit)
-  terminal.open(element)
-  conversation.terminal = terminal
-  conversation.fit = fit
-  applyCodexTerminalSettings(conversation, workspace.terminalSettings, { refit: false })
-  terminal.attachCustomKeyEventHandler((event) => {
-    if (!codexCopyShortcut(event)) return true
-    event.preventDefault()
-    event.stopPropagation()
-    void copyCodexSelection('keyboard')
-    return false
-  })
-  terminal.onData((data) => {
-    const writeCodexSession = codexSessionClient.writeCodexSession()
-    if (!conversation.sessionId || !writeCodexSession) return
-    void syncCodexTargetContext({ force: true, conversation }).finally(() => {
-      markCodexPendingTargetDelivered(conversation)
-      void writeCodexSession(conversation.sessionId, data)
-    })
-  })
-  terminal.onResize(({ cols, rows }) => {
-    const resizeCodexSession = codexSessionClient.resizeCodexSession()
-    if (!conversation.sessionId || !resizeCodexSession) return
-    conversation.lastFitCols = cols
-    conversation.lastFitRows = rows
-    void resizeCodexSession(conversation.sessionId, cols, rows)
-  })
-  if (typeof ResizeObserver !== 'undefined') {
-    conversation.resizeObserver?.disconnect()
-    conversation.resizeObserver = new ResizeObserver(() => fitCodexTerminal({ conversation }))
-    conversation.resizeObserver.observe(element)
-  }
-  fitCodexTerminal({ force: true, conversation })
-  writeAiRuntimeLog('debug', 'renderer.codex-terminal.created', { localId: conversation.id })
-}
-
-const applyCodexTerminalSettings = (
-  conversation: CodexConversation,
-  settings: TerminalSettings = workspace.terminalSettings,
-  options: { refit?: boolean } = {}
-) => {
-  const terminal = conversation.terminal
-  if (!terminal) return
-  setXtermTermName(terminal, settings.terminalType)
-  terminal.options.fontFamily = settings.fontFamily || '"JetBrains Mono", "SFMono-Regular", Consolas, monospace'
-  terminal.options.fontSize = settings.fontSize || 12
-  terminal.options.lineHeight = settings.lineHeight || 1
-  terminal.options.cursorBlink = settings.cursorBlink
-  terminal.options.cursorStyle = settings.cursorStyle
-  terminal.options.scrollback = settings.scrollBack
-  if (options.refit !== false) {
-    fitCodexTerminal({ force: true, conversation })
-  }
-}
-
 const currentCodexTargetContext = (): CodexSessionTargetContext => codexTargetContextFromPanel(workspace.activePanel)
 
 const currentBoundCodexTarget = (conversation = activeCodexConversation.value) => currentBoundCodexRuntimeTarget(conversation, workspace.panels)
 
-const syncCodexTargetContext = async (options: { force?: boolean; conversation?: CodexConversation | null } = {}) => {
-  const conversation = options.conversation || activeCodexConversation.value
-  const setCodexSessionTarget = codexSessionClient.setCodexSessionTarget()
-  if (!conversation || !setCodexSessionTarget) return
-  const target = currentBoundCodexTarget(conversation)
-  const syncPlan = prepareCodexTargetSync(conversation, target, options.force)
-  if (!syncPlan) return
-  try {
-    const result = await setCodexSessionTarget(syncPlan.target)
-    writeAiRuntimeLog(result?.data?.registered ? 'debug' : 'warn', result?.data?.registered ? 'renderer.codex-target.updated' : 'renderer.codex-target.unavailable', {
-      sessionId: conversation.sessionId,
-      targetSessionId: syncPlan.target.sessionId,
-      targetKind: syncPlan.target.kind,
-      targetLabel: syncPlan.target.label,
-      registered: Boolean(result?.data?.registered)
-    })
-  } catch (error) {
-    markCodexTargetSyncFailed(conversation)
-    writeAiRuntimeLog('warn', 'renderer.codex-target.update-failed', {
-      sessionId: conversation.sessionId,
-      targetSessionId: syncPlan.target.sessionId,
-      message: error instanceof Error ? error.message : String(error)
-    })
-  }
+const aiPanelCodexTerminalRuntime = createAiPanelCodexTerminalRuntime<CodexConversation>({
+  conversations: () => codexConversations.value,
+  activeConversation: () => activeCodexConversation.value,
+  activeConversationId: () => activeCodexConversationId.value,
+  terminalSettings: () => workspace.terminalSettings,
+  currentBoundTarget: (conversation) => currentBoundCodexTarget(conversation),
+  syncAttentionState: syncCodexAttentionState,
+  labels: {
+    error: () => t('ai.codexError'),
+    bridgeMissing: () => t('ai.codexBridgeMissing'),
+    startFailed: () => t('ai.codexStartFailed'),
+    copyEmpty: () => '请先选择 Codex 终端内容',
+    copySuccess: () => 'Codex 终端内容已复制',
+    copyFailure: () => 'Codex 终端复制失败'
+  },
+  notify: (message) => workspace.setTopNotice(message),
+  afterDomUpdate: () => nextTick(),
+  log: writeAiRuntimeLog
+})
+
+const setCodexTerminalHostRef = (conversationId: string, element: Element | ComponentPublicInstance | null) => {
+  const conversation = codexConversations.value.find((item) => item.id === conversationId)
+  if (!conversation) return
+  aiPanelCodexTerminalRuntime.setHostElement(conversation, element instanceof HTMLElement ? element : null)
 }
 
-const setCodexPendingTargetContext = async (
-  conversation: CodexConversation,
-  kind: CodexTargetEventKind,
-  target?: CodexSessionTargetContext | null,
-  previous?: CodexSessionTargetContext | null
-) => {
-  const setCodexSessionPendingContext = codexSessionClient.setCodexSessionPendingContext()
-  if (!conversation.sessionId || !setCodexSessionPendingContext) return
-  const pending = prepareCodexPendingTargetContext(conversation, kind, target)
-  if (pending.clear) {
-    await setCodexSessionPendingContext(conversation.sessionId, '')
-    return
-  }
-  await setCodexSessionPendingContext(conversation.sessionId, pending.text)
-}
-
-const markCodexPendingTargetDelivered = (conversation: CodexConversation) => {
-  markCodexRuntimePendingTargetDelivered(conversation)
-}
+const fitCodexTerminal = aiPanelCodexTerminalRuntime.fitTerminal
+const focusCodexTerminal = aiPanelCodexTerminalRuntime.focusActiveTerminal
+const copyCodexSelectionFromContextMenu = aiPanelCodexTerminalRuntime.copySelectionFromContextMenu
+const syncActiveCodexBridgeTarget = aiPanelCodexTerminalRuntime.syncActiveBridgeTarget
+const syncCodexTargetContext = aiPanelCodexTerminalRuntime.syncTargetContext
+const setCodexPendingTargetContext = aiPanelCodexTerminalRuntime.setPendingTargetContext
+const ensureCodexTerminal = (conversation = ensureActiveCodexConversation()) => aiPanelCodexTerminalRuntime.ensureTerminal(conversation)
+const applyCodexTerminalSettings = (conversation: CodexConversation) => aiPanelCodexTerminalRuntime.applyTerminalSettings(conversation)
+const stopCodexSession = (conversation = activeCodexConversation.value) => aiPanelCodexTerminalRuntime.stopSession(conversation)
+const disposeCodexSubscriptions = aiPanelCodexTerminalRuntime.disposeSubscriptions
 
 const bindCodexTarget = async (target: CodexSessionTargetContext | null, options: { reason?: string; start?: boolean } = {}) => {
   const conversation = ensureActiveCodexConversation(target)
@@ -2289,7 +2073,7 @@ const bindCodexTarget = async (target: CodexSessionTargetContext | null, options
   })
   if (conversation.sessionId) {
     await syncCodexTargetContext({ force: true, conversation })
-    await setCodexPendingTargetContext(conversation, previous ? 'changed' : 'bound', target, previous)
+    await setCodexPendingTargetContext(conversation, previous ? 'changed' : 'bound', target)
   } else if (options.start !== false && aiPanelMode.value === 'codex') {
     await startCodexSession(conversation)
   }
@@ -2302,11 +2086,8 @@ const unbindCodexTarget = async () => {
   const previous = applyCodexTargetUnbinding(conversation, t('ai.codexCliMode'))
   codexTargetPickerOpen.value = false
   codexTargetQuery.value = ''
-  const setCodexSessionTarget = codexSessionClient.setCodexSessionTarget()
-  if (conversation.sessionId && setCodexSessionTarget) {
-    await setCodexSessionTarget(undefined)
-    await setCodexPendingTargetContext(conversation, 'unbound', null, previous)
-  }
+  void previous
+  await aiPanelCodexTerminalRuntime.clearSessionTarget(conversation, 'unbound')
 }
 
 const locateCodexBoundTarget = () => {
@@ -2348,71 +2129,7 @@ const bindHostContextToCodex = async (host: AiContextOption) => {
 const startCodexSession = async (targetConversation?: CodexConversation | null) => {
   if (aiPanelMode.value !== 'codex') return
   const conversation = targetConversation || ensureActiveCodexConversation()
-  const target = currentBoundCodexTarget(conversation)
-  if (!target) {
-    conversation.status = 'idle'
-    conversation.error = ''
-    return
-  }
-  if (conversation.startPromise) return conversation.startPromise
-  conversation.startPromise = (async () => {
-    await nextTick()
-    ensureCodexTerminal(conversation)
-    const createCodexSession = codexSessionClient.createCodexSession()
-    if (!createCodexSession) {
-      conversation.status = 'error'
-      conversation.error = t('ai.codexBridgeMissing')
-      syncCodexAttentionState(conversation)
-      return
-    }
-    if (conversation.sessionId && conversation.status === 'ready') {
-      await syncCodexTargetContext({ force: true, conversation })
-      return
-    }
-    conversation.status = 'starting'
-    conversation.error = ''
-    fitCodexTerminal({ force: true, conversation })
-    const cols = conversation.terminal?.cols || 100
-    const rows = conversation.terminal?.rows || 30
-    try {
-      const session = await createCodexSession({ cols, rows, target })
-      applyCodexSessionStarted(conversation, session, target)
-      subscribeCodexBridge()
-      await syncCodexTargetContext({ force: true, conversation })
-      fitCodexTerminal({ force: true, conversation })
-      focusCodexTerminal()
-      writeAiRuntimeLog('info', 'renderer.codex-session.started', {
-        sessionId: session.id,
-        runtimeKind: session.runtimeKind,
-        binaryPath: session.binaryPath,
-        codexHome: session.codexHome,
-        cwd: session.cwd,
-        target
-      })
-    } catch (error) {
-      conversation.status = 'error'
-      conversation.error = error instanceof Error && error.message.trim() ? error.message : t('ai.codexStartFailed')
-      syncCodexAttentionState(conversation)
-      writeAiRuntimeLog('error', 'renderer.codex-session.start-failed', { message: conversation.error })
-    }
-  })().finally(() => {
-    conversation.startPromise = null
-  })
-  return conversation.startPromise
-}
-
-const stopCodexSession = async (conversation = activeCodexConversation.value) => {
-  const sessionId = conversation?.sessionId
-  const killCodexSession = codexSessionClient.killCodexSession()
-  if (!sessionId || !killCodexSession) return
-  try {
-    await killCodexSession(sessionId)
-  } catch (error) {
-    writeAiRuntimeLog('warn', 'renderer.codex-session.kill-failed', {
-      sessionId,
-      message: error instanceof Error ? error.message : String(error)
-    })
-  }
+  return aiPanelCodexTerminalRuntime.startSession(conversation)
 }
 
 const restartCodexSession = async () => {
@@ -2475,8 +2192,7 @@ const closeCodexConversation = async (id: string) => {
   const conversation = closeResult.conversation
   await stopCodexSession(conversation)
   workspace.removeAiAttentionItem(codexAttentionId(conversation))
-  conversation.resizeObserver?.disconnect()
-  conversation.terminal?.dispose()
+  aiPanelCodexTerminalRuntime.disposeConversation(conversation)
   codexConversations.value = closeResult.nextConversations
   if (closeResult.status === 'closed-active' && closeResult.nextConversation) {
     const nextConversation = closeResult.nextConversation
@@ -4352,8 +4068,7 @@ onBeforeUnmount(() => {
   codexConversations.value.forEach((conversation) => {
     workspace.removeAiAttentionItem(codexAttentionId(conversation))
     void stopCodexSession(conversation)
-    conversation.resizeObserver?.disconnect()
-    conversation.terminal?.dispose()
+    aiPanelCodexTerminalRuntime.disposeConversation(conversation)
   })
   disposeCodexSubscriptions()
   if (chatScrollFrame !== undefined) window.cancelAnimationFrame(chatScrollFrame)
