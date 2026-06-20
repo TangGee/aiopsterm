@@ -7,6 +7,7 @@ import {
   malformedAiBackendResultMessage
 } from '@/services/aiBackendGuards'
 import { aiCatalogClient } from '@/services/aiCatalogClient'
+import { aiChatClient } from '@/services/aiChatClient'
 import { agentHookClient } from '@/services/agentHookClient'
 import { assetsClient } from '@/services/assetsClient'
 import { chatHistoryClient } from '@/services/chatHistoryClient'
@@ -14464,7 +14465,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const generateAiResponseForMessage = async (assistantId: string, input: AiChatResponseInput) => {
-    const responseBridge = window.aiops?.generateAiChatResponse
+    const responseBridge = aiChatClient.generateAiChatResponse()
     const failGeneration = (messageText: string) => {
       const message = chatMessages.value.find((item) => item.id === assistantId)
       if (message && message.state === 'streaming') {
@@ -14519,7 +14520,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const cancelStreamingAiChatResponse = async () => {
     const message = [...chatMessages.value].reverse().find((item) => item.role === 'assistant' && item.state === 'streaming')
     if (!message) return false
-    const cancelBridge = window.aiops?.cancelAiChatResponse
+    const cancelBridge = aiChatClient.cancelAiChatResponse()
     if (typeof cancelBridge !== 'function') {
       setTopNotice('AI 生成取消服务不可用')
       return false
@@ -14579,7 +14580,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const historyForBackend: AiChatMessageInput[] = chatMessages.value.slice(-12).map((message) => ({ role: message.role, text: message.text }))
     const hostContexts = overrideHosts ?? selectedContexts.value.filter((item) => item.kind === 'hosts')
     const responseMode = options.mode || (mode.value === 'agents' ? 'agent' : 'command')
-    const exchangeBridge = window.aiops?.createAiChatExchangeRequest
+    const exchangeBridge = aiChatClient.createAiChatExchangeRequest()
     if (typeof exchangeBridge !== 'function') {
       setTopNotice('AI 请求创建服务不可用')
       return false
@@ -14813,7 +14814,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       setTopNotice('会话历史写入服务不可用')
       return false
     }
-    const bridge = action === 'approve' ? window.aiops?.approveAiMcpToolCall : window.aiops?.rejectAiMcpToolCall
+    const bridge = action === 'approve' ? aiChatClient.approveAiMcpToolCall() : aiChatClient.rejectAiMcpToolCall()
     if (typeof bridge !== 'function') {
       setTopNotice('AI MCP 工具审批服务不可用')
       return false
@@ -14844,7 +14845,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       setTopNotice('会话历史写入服务不可用')
       return false
     }
-    const bridge = action === 'approve' ? window.aiops?.approveAiMcpResourceAccess : window.aiops?.rejectAiMcpResourceAccess
+    const bridge = action === 'approve' ? aiChatClient.approveAiMcpResourceAccess() : aiChatClient.rejectAiMcpResourceAccess()
     if (typeof bridge !== 'function') {
       setTopNotice('AI MCP 资源审批服务不可用')
       return false
