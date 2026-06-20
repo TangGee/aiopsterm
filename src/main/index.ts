@@ -10,7 +10,6 @@ import AdmZip from 'adm-zip'
 import { getAsset, getAssetSecret, getKeychainSecret, refreshOrganizationAssets, saveAsset } from './backend/assets'
 import { formatMcpResourceReadContent } from './backend/aiChat'
 import { exportChat } from './backend/chatExport'
-import { stageChatAttachment } from './backend/chatAttachments'
 import {
   createCodexSession,
   killCodexSession,
@@ -35,12 +34,6 @@ import {
   getChatConversationMessages,
   replaceChatConversationMessages,
 } from './backend/chatHistory'
-import {
-  prepareChatImageAttachment,
-  prepareChatImageAttachmentFromClipboard,
-  prepareChatImageAttachmentFromFile,
-  validateChatImageAttachment
-} from './backend/chatImageAttachment'
 import { logRuntimeEvent } from './backend/runtimeLog'
 import { writeKnowledgePastedImageFromClipboard } from './backend/knowledgeBaseImage'
 import { broadcastWindowEvent, sendWindowEvent } from '@shared/windowEvents'
@@ -51,7 +44,6 @@ import {
   shouldUseE2eDialogFixtures,
 } from '@shared/runtimeSwitches'
 import { normalizeExternalHttpUrl } from '@shared/externalUrl'
-import { saveCustomBackgroundFile, writeLocalTextFile } from './backend/localFileWrites'
 import { callMcpTool, clearMcpRuntimeClientCache, discoverMcpServerSnapshot, readMcpResource } from './backend/mcpRuntime'
 import { normalizeConfigModelName, normalizeConfigModelProvider } from './backend/configBoundary'
 import { createLocalTerminalSession, type LocalTerminalSession } from './backend/localTerminal'
@@ -84,6 +76,7 @@ import { registerDatabaseIpc } from './ipc/database'
 import { registerExtensionsIpc } from './ipc/extensions'
 import { registerFilesIpc } from './ipc/files'
 import { registerKubernetesIpc } from './ipc/kubernetes'
+import { registerLocalFilesIpc } from './ipc/localFiles'
 import { registerManagedAiSessionsIpc } from './ipc/managedAiSessions'
 import { registerModelsIpc } from './ipc/models'
 import { registerQuickCommandsIpc } from './ipc/quickCommands'
@@ -156,10 +149,6 @@ import type {
   TerminalKeyboardInteractiveRequest,
   TerminalKeyboardInteractiveResult,
   TerminalLifecycleEvent,
-  ChatImageAttachmentPrepareInput,
-  ChatImageAttachmentClipboardInput,
-  ChatImageAttachmentFileInput,
-  ChatImageAttachmentValidateInput,
   KnowledgeBasePastedImageInput,
   UserConfig,
   WorkspaceUserConfig,
@@ -1329,9 +1318,6 @@ const knowledgeSearchExtensions = new Set([
 const maxKnowledgeImportBytes = 10 * 1024 * 1024
 const maxKnowledgeSearchFileBytes = 2 * 1024 * 1024
 const maxKnowledgeSearchQueryLength = 512
-const maxCustomBackgroundBytes = 20 * 1024 * 1024
-const maxLocalTextReadBytes = 2 * 1024 * 1024
-const allowedCustomBackgroundExtensions = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp'])
 
 const normalizeKnowledgeRelPath = (relPath: string) => relPath.replace(/\\/g, '/').replace(/^\/+/, '')
 
@@ -2626,6 +2612,22 @@ const registerIpc = () => {
       return owner ? dialog.showSaveDialog(owner, options) : dialog.showSaveDialog(options)
     }
   })
+  registerLocalFilesIpc(ipcMain, {
+    showOpenDialog: (event, options) => {
+      const owner = BrowserWindow.fromWebContents(event.sender)
+      return owner ? dialog.showOpenDialog(owner, options) : dialog.showOpenDialog(options)
+    },
+    showSaveDialog: (event, options) => {
+      const owner = BrowserWindow.fromWebContents(event.sender)
+      return owner ? dialog.showSaveDialog(owner, options) : dialog.showSaveDialog(options)
+    },
+    shouldUseE2eDialogFixtures,
+    getUserDataPath: () => app.getPath('userData'),
+    getDownloadsPath: () => app.getPath('downloads'),
+    getChatAttachmentsPath,
+    getCustomBackgroundsPath,
+    customBackgroundUrlForPath
+  })
   registerAliasesIpc(ipcMain)
   registerChatHistoryIpc(ipcMain)
   registerDatabaseIpc(ipcMain, {
@@ -2949,132 +2951,6 @@ const registerIpc = () => {
       exportedAt: new Date().toISOString()
     }
   })
-  ipcMain.handle('dialog:open-file', async (event, options) => {
-    const useE2eDialogFixtures = shouldUseE2eDialogFixtures()
-    if (
-      useE2eDialogFixtures &&
-      Array.isArray(options?.properties) &&
-      options.properties.includes('openFile') &&
-      Array.isArray(options?.filters) &&
-      options.filters.some((filter: { name?: string }) => filter?.name === 'Asset Import Files')
-    ) {
-      const assetImportPath = join(app.getPath('userData'), 'e2e-external-reference-assets.json')
-      await writeFile(
-        assetImportPath,
-        JSON.stringify([{ username: 'ops', ip: '10.73.0.9', label: 'e2e-imported-json', group_name: 'E2E', port: 2299 }]),
-        'utf-8'
-      )
-      return { canceled: false, filePaths: [assetImportPath] }
-    }
-    if (
-      useE2eDialogFixtures &&
-      Array.isArray(options?.properties) &&
-      options.properties.includes('openFile') &&
-      Array.isArray(options?.filters) &&
-      options.filters.some((filter: { name?: string }) => filter?.name === 'Key Files')
-    ) {
-      const keyImportPath = join(app.getPath('userData'), 'e2e-import-rsa.pem')
-      await writeFile(keyImportPath, '-----BEGIN RSA PRIVATE KEY-----\ne2e import\n-----END RSA PRIVATE KEY-----', 'utf-8')
-      return { canceled: false, filePaths: [keyImportPath] }
-    }
-    if (
-      useE2eDialogFixtures &&
-      Array.isArray(options?.properties) &&
-      options.properties.includes('openFile') &&
-      Array.isArray(options?.filters) &&
-      options.filters.some((filter: { name?: string }) => filter?.name === 'Images')
-    ) {
-      const backgroundPath = join(app.getPath('userData'), 'e2e-background.png')
-      const png1x1 = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=', 'base64')
-      await writeFile(backgroundPath, png1x1)
-      return { canceled: false, filePaths: [backgroundPath] }
-    }
-    if (
-      useE2eDialogFixtures &&
-      Array.isArray(options?.properties) &&
-      options.properties.includes('openFile') &&
-      Array.isArray(options?.filters) &&
-      options.filters.some((filter: { name?: string }) => filter?.name === 'Text')
-    ) {
-      const attachmentPath = join(app.getPath('userData'), 'e2e-chat-attachment.md')
-      await writeFile(attachmentPath, '# E2E chat attachment\n\nGenerated by the aiopsterm test harness.\n', 'utf-8')
-      return { canceled: false, filePaths: [attachmentPath] }
-    }
-    if (
-      useE2eDialogFixtures &&
-      Array.isArray(options?.properties) &&
-      options.properties.includes('openFile') &&
-      Array.isArray(options?.filters) &&
-      options.filters.some((filter: { name?: string }) => filter?.name === 'YAML Files')
-    ) {
-      const kubeconfigPath = join(app.getPath('userData'), 'e2e-kubeconfig.yaml')
-      await writeFile(
-        kubeconfigPath,
-        [
-          'apiVersion: v1',
-          'kind: Config',
-          'current-context: e2e/admin',
-          'clusters:',
-          '- name: e2e-cluster',
-          '  cluster:',
-          '    server: https://e2e.k8s.local:6443',
-          'contexts:',
-          '- name: e2e/admin',
-          '  context:',
-          '    cluster: e2e-cluster',
-          '    namespace: e2e'
-        ].join('\n'),
-        'utf-8'
-      )
-      return { canceled: false, filePaths: [kubeconfigPath] }
-    }
-    if (useE2eDialogFixtures && Array.isArray(options?.properties) && options.properties.includes('openDirectory')) {
-      const importPath = join(app.getPath('userData'), 'e2e-imported-note.md')
-      await writeFile(importPath, '# E2E imported note\n\nGenerated by the aiopsterm test harness.\n', 'utf-8')
-      return { canceled: false, filePaths: [importPath] }
-    }
-    const owner = BrowserWindow.fromWebContents(event.sender)
-    return owner ? dialog.showOpenDialog(owner, options) : dialog.showOpenDialog(options)
-  })
-  ipcMain.handle('dialog:save-file', async (event, options) => {
-    if (shouldUseE2eDialogFixtures()) {
-      return { canceled: false, filePath: join(app.getPath('downloads'), options?.defaultPath ? basename(String(options.defaultPath)) : 'downloaded-file') }
-    }
-    const owner = BrowserWindow.fromWebContents(event.sender)
-    return owner ? dialog.showSaveDialog(owner, options) : dialog.showSaveDialog(options)
-  })
-  ipcMain.handle('settings:save-custom-background', async (_event, srcAbsPath: string) => {
-    return saveCustomBackgroundFile(srcAbsPath, {
-      backgroundDir: getCustomBackgroundsPath(),
-      maxBytes: maxCustomBackgroundBytes,
-      allowedExtensions: allowedCustomBackgroundExtensions,
-      toUrl: customBackgroundUrlForPath
-    })
-  })
-  ipcMain.handle('files:read-local', async (_event, filePath: string) => {
-    if (!filePath || typeof filePath !== 'string') throw new Error('filePath is required')
-    if (!isAbsolute(filePath)) throw new Error('filePath must be absolute')
-    const metadata = await stat(filePath)
-    if (!metadata.isFile()) throw new Error('Source must be a file')
-    if (metadata.size > maxLocalTextReadBytes) throw new Error('File too large')
-    return {
-      content: await readFile(filePath, 'utf-8'),
-      mtimeMs: metadata.mtimeMs,
-      size: metadata.size
-    }
-  })
-  ipcMain.handle('files:write-local', async (_event, filePath: string, content: string) => {
-    return writeLocalTextFile(filePath, content)
-  })
-  ipcMain.handle('chat:stage-attachment', async (_event, payload: { taskId: string; srcAbsPath: string }) => {
-    return stageChatAttachment(payload, getChatAttachmentsPath())
-  })
-  ipcMain.handle('chat:validate-image-attachment', (_event, input?: ChatImageAttachmentValidateInput) => validateChatImageAttachment(input || {}))
-  ipcMain.handle('chat:prepare-image-attachment', (_event, input?: ChatImageAttachmentPrepareInput) => prepareChatImageAttachment(input || {}))
-  ipcMain.handle('chat:prepare-image-attachment-from-file', (_event, input?: ChatImageAttachmentFileInput) => prepareChatImageAttachmentFromFile(input || {}))
-  ipcMain.handle('chat:prepare-image-attachment-from-clipboard', (_event, input?: ChatImageAttachmentClipboardInput) =>
-    prepareChatImageAttachmentFromClipboard(input || {})
-  )
   ipcMain.handle('kb:check-path', async (_event, payload: { absPath: string }) => {
     const absPath = typeof payload?.absPath === 'string' ? payload.absPath : ''
     try {
