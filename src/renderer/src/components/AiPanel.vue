@@ -1758,18 +1758,13 @@ import {
   aiPanelChatAttachmentFilters,
   aiPanelDropEffect,
   aiPanelImagePickerFilters,
-  aiPanelVoiceRecordingLimitMs,
-  bestVoiceMimeType as bestAiPanelVoiceMimeType,
   canAcceptAiPanelDrop as canAcceptAiPanelRuntimeDrop,
   clipboardHasImageItems,
   docPartFromStagedAttachment,
   imagePartFromChatImagePrepareResult,
-  planAiPanelDrop,
-  prepareVoiceTranscriptionCompletion,
-  prepareVoiceTranscriptionInputFromBlob,
-  voiceRecordingStartFailureMessage,
-  voiceTextFromTranscriptionResult
+  planAiPanelDrop
 } from '@/services/aiPanelMediaRuntime'
+import { createAiPanelVoiceRuntime } from '@/services/aiPanelVoiceRuntime'
 import { aiChatClient } from '@/services/aiChatClient'
 import { copyTextToClipboard } from '@/services/clipboardRuntime'
 import { codexSessionClient } from '@/services/codexSessionClient'
@@ -1800,7 +1795,6 @@ import {
 } from '@/services/aiPanelCodexRuntime'
 import { localFilesClient } from '@/services/localFilesClient'
 import { writeRendererRuntimeLog as writeAiRuntimeLog } from '@/services/runtimeLogClient'
-import { voiceClient } from '@/services/voiceClient'
 import {
   isAiChatExportData,
   malformedAiBackendResultMessage
@@ -1878,14 +1872,6 @@ const modelQuery = ref('')
 const dropActive = ref(false)
 const syncingFromEditable = ref(false)
 const inputPlaceholderNotice = ref('')
-const voiceRecording = ref(false)
-const voiceTranscribing = ref(false)
-const voiceRecordingStartedAt = ref(0)
-const voiceAutoSendAfterInput = ref(false)
-const voiceMediaRecorder = ref<MediaRecorder | null>(null)
-const voiceMediaStream = ref<MediaStream | null>(null)
-const voiceAudioChunks = ref<Blob[]>([])
-const voiceRecordingMimeType = ref('')
 const chatSearchOpen = ref(false)
 const chatSearchTerm = ref('')
 const chatSearchMatchCount = ref(0)
@@ -1924,7 +1910,6 @@ let classicChatDataLoaded = false
 let inputPlaceholderNoticeTimer: number | undefined
 let chatSearchTimer: number | undefined
 let chatExportNoticeTimer: number | undefined
-let voiceRecordingLimitTimer: number | undefined
 let chatScrollFrame: number | undefined
 const historyPageSize = 20
 const historyFavoriteLabel = computed(() => t('ai.historyFavoriteGroup'))
@@ -1945,11 +1930,6 @@ const codexStatusLabel = computed(() => {
 const codexBoundTargetLabel = computed(() => codexRuntimeBoundTargetLabel(activeCodexBoundTarget.value, t('ai.codexTargetUnbound')))
 const codexBoundTargetDetail = computed(() => codexRuntimeBoundTargetDetail(activeCodexBoundTarget.value, t('ai.codexTargetDropHint')))
 const currentAiPanelModeLabel = computed(() => (aiPanelMode.value === 'codex' ? t('ai.codexCliMode') : t('ai.classicChatMode')))
-const voiceButtonTitle = computed(() => {
-  if (voiceRecording.value) return '停止语音录制'
-  if (voiceTranscribing.value) return '语音转写中'
-  return '开始语音输入'
-})
 const currentChatMode = computed(() => aiChatModeOptions.find((option) => option.id === chatMode.value) || aiChatModeOptions[0])
 const visibleConversationTabs = computed(() => visibleAiConversationTabs(openConversationTabIds.value, workspace.conversations))
 const displayConversationTitle = (conversation: Pick<ConversationItem, 'title'>) =>
@@ -3849,180 +3829,24 @@ const handleFileUpload = async () => {
   }
 }
 
-const clearVoiceTimers = () => {
-  if (voiceRecordingLimitTimer) {
-    window.clearTimeout(voiceRecordingLimitTimer)
-    voiceRecordingLimitTimer = undefined
-  }
-}
-
-const clearVoiceMedia = () => {
-  const recorder = voiceMediaRecorder.value
-  if (recorder) {
-    recorder.ondataavailable = null
-    recorder.onerror = null
-    recorder.onstop = null
-  }
-  if (recorder && recorder.state !== 'inactive') {
-    try {
-      recorder.stop()
-    } catch {
-      // Recorder can already be inactive while the stop event is queued.
-    }
-  }
-  voiceMediaRecorder.value = null
-  voiceMediaStream.value?.getTracks().forEach((track) => track.stop())
-  voiceMediaStream.value = null
-  voiceAudioChunks.value = []
-  voiceRecordingMimeType.value = ''
-}
-
-const bestVoiceMimeType = () => {
-  if (typeof MediaRecorder === 'undefined') return ''
-  return bestAiPanelVoiceMimeType((format) => MediaRecorder.isTypeSupported(format))
-}
-
-const canUseBrowserVoiceRecorder = () => typeof MediaRecorder !== 'undefined' && Boolean(navigator.mediaDevices?.getUserMedia)
-
 const appendVoiceTranscriptionToInput = (text: string) => {
   restoreEditableSelection()
   insertPlainTextAtEditableCursor(text)
   requestAnimationFrame(moveEditableCaretToEnd)
 }
 
-const handleVoiceTranscriptionComplete = async (text: string) => {
-  const completion = prepareVoiceTranscriptionCompletion(text, draft.value, voiceAutoSendAfterInput.value)
-  if (!completion.ok) {
-    showInputPlaceholderNotice(completion.message)
-    return
-  }
-  appendVoiceTranscriptionToInput(completion.data.insertionText)
-  showInputPlaceholderNotice(completion.data.notice)
-  if (completion.data.autoSend) {
-    await nextTick()
-    handleSend()
-  }
-}
+const aiPanelVoiceRuntime = createAiPanelVoiceRuntime({
+  streaming: () => streaming.value,
+  draft: () => draft.value,
+  closePopups: () => closePopups(),
+  restoreSelection: () => restoreEditableSelection(),
+  insertTranscription: appendVoiceTranscriptionToInput,
+  afterInsert: () => nextTick(),
+  sendAfterTranscription: () => handleSend(),
+  notify: showInputPlaceholderNotice
+})
 
-const transcribeVoiceInput = async (input: Parameters<NonNullable<ReturnType<typeof voiceClient.transcribeVoiceInput>>>[0]) => {
-  const transcribeVoice = voiceClient.transcribeVoiceInput()
-  if (typeof transcribeVoice !== 'function') {
-    showInputPlaceholderNotice('语音识别失败：语音识别服务不可用')
-    return
-  }
-  voiceTranscribing.value = true
-  try {
-    const result = await transcribeVoice(input)
-    const text = voiceTextFromTranscriptionResult(result)
-    if (!text.ok) {
-      showInputPlaceholderNotice(`语音识别失败：${text.message}`)
-      return
-    }
-    await handleVoiceTranscriptionComplete(text.data)
-  } catch (error) {
-    showInputPlaceholderNotice(`语音识别失败：${error instanceof Error ? error.message : String(error)}`)
-  } finally {
-    voiceTranscribing.value = false
-  }
-}
-
-const processVoiceRecording = async (elapsed: number, options: { reachedLimit?: boolean; audioBlob?: Blob } = {}) => {
-  const transcriptionInput = await prepareVoiceTranscriptionInputFromBlob(elapsed, options)
-  if (!transcriptionInput.ok) {
-    showInputPlaceholderNotice(transcriptionInput.message)
-    return
-  }
-  await transcribeVoiceInput(transcriptionInput.data)
-}
-
-const scheduleVoiceRecordingLimit = () => {
-  voiceRecordingStartedAt.value = Date.now()
-  voiceRecording.value = true
-  voiceRecordingLimitTimer = window.setTimeout(() => {
-    if (!voiceRecording.value) return
-    showInputPlaceholderNotice('录制时间到达上限，已自动停止录制。')
-    void finishVoiceRecording({ reachedLimit: true })
-  }, aiPanelVoiceRecordingLimitMs)
-}
-
-const startBrowserVoiceRecorder = async () => {
-  if (!canUseBrowserVoiceRecorder()) {
-    throw new Error('Browser voice recording is unavailable.')
-  }
-  const stream = await navigator.mediaDevices.getUserMedia({
-    audio: {
-      echoCancellation: true,
-      noiseSuppression: true,
-      autoGainControl: true,
-      sampleRate: 16000
-    }
-  })
-  const mimeType = bestVoiceMimeType()
-  const recorder = new MediaRecorder(stream, {
-    ...(mimeType ? { mimeType } : {}),
-    audioBitsPerSecond: 128000
-  })
-
-  voiceMediaStream.value = stream
-  voiceMediaRecorder.value = recorder
-  voiceRecordingMimeType.value = mimeType
-  voiceAudioChunks.value = []
-
-  recorder.ondataavailable = (event) => {
-    if (event.data.size > 0) voiceAudioChunks.value.push(event.data)
-  }
-  recorder.onerror = () => {
-    voiceRecording.value = false
-    clearVoiceTimers()
-    clearVoiceMedia()
-    showInputPlaceholderNotice('语音录制失败。')
-  }
-  recorder.onstop = () => {
-    const elapsed = Date.now() - voiceRecordingStartedAt.value
-    const audioBlob = new Blob(voiceAudioChunks.value, { type: voiceRecordingMimeType.value || 'audio/webm' })
-    clearVoiceMedia()
-    void processVoiceRecording(elapsed, { audioBlob })
-  }
-  recorder.start(100)
-  scheduleVoiceRecordingLimit()
-}
-
-const startVoiceRecording = async () => {
-  if (streaming.value || voiceRecording.value || voiceTranscribing.value) return
-  closePopups()
-  restoreEditableSelection()
-  try {
-    await startBrowserVoiceRecorder()
-  } catch (error) {
-    showInputPlaceholderNotice(voiceRecordingStartFailureMessage(error))
-    clearVoiceMedia()
-  }
-}
-
-const finishVoiceRecording = async (options: { reachedLimit?: boolean } = {}) => {
-  if (!voiceRecording.value) return
-  const elapsed = Date.now() - voiceRecordingStartedAt.value
-  voiceRecording.value = false
-  if (voiceRecordingLimitTimer) {
-    window.clearTimeout(voiceRecordingLimitTimer)
-    voiceRecordingLimitTimer = undefined
-  }
-  const recorder = voiceMediaRecorder.value
-  if (recorder) {
-    if (recorder.state !== 'inactive') recorder.stop()
-    return
-  }
-  await processVoiceRecording(elapsed, options)
-}
-
-const toggleVoiceInput = () => {
-  if (streaming.value || voiceTranscribing.value) return
-  if (voiceRecording.value) {
-    void finishVoiceRecording()
-    return
-  }
-  void startVoiceRecording()
-}
+const { voiceRecording, voiceTranscribing, voiceButtonTitle, toggleVoiceInput } = aiPanelVoiceRuntime
 
 const canAcceptAiPanelDrop = (event: DragEvent) => canAcceptAiPanelRuntimeDrop(aiPanelMode.value, event.dataTransfer)
 
@@ -4705,8 +4529,7 @@ onBeforeUnmount(() => {
   if (chatSearchTimer) window.clearTimeout(chatSearchTimer)
   if (chatExportNoticeTimer) window.clearTimeout(chatExportNoticeTimer)
   if (inputPlaceholderNoticeTimer) window.clearTimeout(inputPlaceholderNoticeTimer)
-  clearVoiceTimers()
-  clearVoiceMedia()
+  aiPanelVoiceRuntime.dispose()
   clearChatHighlights()
 })
 
