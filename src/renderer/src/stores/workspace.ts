@@ -106,10 +106,9 @@ import type {
   KubernetesResourceKind,
   KubernetesTerminalRecord,
   KubernetesTerminalStatus,
-  TerminalCommandGenerationContext,
-  TerminalCommandGenerationRecord,
   UserConfig
 } from '@shared/preload'
+import type { TerminalCommandGenerationContext, TerminalCommandGenerationRecord } from '@shared/contracts/terminalTools'
 import type {
   AiChatChipContentPart,
   AiChatChipRef,

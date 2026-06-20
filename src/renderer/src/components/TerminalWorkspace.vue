@@ -557,11 +557,8 @@ import type {
   ControlWorkspaceGroupSummary,
   ControlWorkspaceSnapshot
 } from '@shared/contracts/control'
-import type {
-  RuntimeLogLevel,
-  TerminalCommandSuggestion,
-  TerminalCommandSuggestionContext
-} from '@shared/preload'
+import type { RuntimeLogLevel } from '@shared/preload'
+import type { TerminalCommandSuggestion, TerminalCommandSuggestionContext } from '@shared/contracts/terminalTools'
 import type { TerminalDataEvent, TerminalKillResult, TerminalSessionInfo } from '@shared/contracts/terminalSessions'
 
 const workspace = useWorkspaceStore()

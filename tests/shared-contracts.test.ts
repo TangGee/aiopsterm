@@ -22,6 +22,20 @@ import type {
   TerminalWriteResult as TerminalWriteResultPreload
 } from '../src/shared/preload'
 import type {
+  TerminalCommandGenerationInput as TerminalCommandGenerationInputContract,
+  TerminalCommandGenerationRecord as TerminalCommandGenerationRecordContract,
+  TerminalCommandGenerationResult as TerminalCommandGenerationResultContract,
+  TerminalCommandSuggestion as TerminalCommandSuggestionContract,
+  TerminalCommandSuggestionContext as TerminalCommandSuggestionContextContract
+} from '../src/shared/contracts/terminalTools'
+import type {
+  TerminalCommandGenerationInput as TerminalCommandGenerationInputPreload,
+  TerminalCommandGenerationRecord as TerminalCommandGenerationRecordPreload,
+  TerminalCommandGenerationResult as TerminalCommandGenerationResultPreload,
+  TerminalCommandSuggestion as TerminalCommandSuggestionPreload,
+  TerminalCommandSuggestionContext as TerminalCommandSuggestionContextPreload
+} from '../src/shared/preload'
+import type {
   AiopsAssetImportPreviewResult as AiopsAssetImportPreviewResultContract,
   AiopsAssetInput as AiopsAssetInputContract,
   AiopsAssetSnapshot as AiopsAssetSnapshotContract,
@@ -380,6 +394,16 @@ type TerminalKeyboardInteractiveContractMatchesPreload = AssertAssignable<
 >
 type TerminalWriteResultPreloadMatchesContract = AssertAssignable<TerminalWriteResultContract, TerminalWriteResultPreload>
 type TerminalWriteResultContractMatchesPreload = AssertAssignable<TerminalWriteResultPreload, TerminalWriteResultContract>
+type TerminalCommandSuggestionPreloadMatchesContract = AssertAssignable<TerminalCommandSuggestionContract, TerminalCommandSuggestionPreload>
+type TerminalCommandSuggestionContractMatchesPreload = AssertAssignable<TerminalCommandSuggestionPreload, TerminalCommandSuggestionContract>
+type TerminalCommandSuggestionContextPreloadMatchesContract = AssertAssignable<TerminalCommandSuggestionContextContract, TerminalCommandSuggestionContextPreload>
+type TerminalCommandSuggestionContextContractMatchesPreload = AssertAssignable<TerminalCommandSuggestionContextPreload, TerminalCommandSuggestionContextContract>
+type TerminalCommandGenerationInputPreloadMatchesContract = AssertAssignable<TerminalCommandGenerationInputContract, TerminalCommandGenerationInputPreload>
+type TerminalCommandGenerationInputContractMatchesPreload = AssertAssignable<TerminalCommandGenerationInputPreload, TerminalCommandGenerationInputContract>
+type TerminalCommandGenerationRecordPreloadMatchesContract = AssertAssignable<TerminalCommandGenerationRecordContract, TerminalCommandGenerationRecordPreload>
+type TerminalCommandGenerationRecordContractMatchesPreload = AssertAssignable<TerminalCommandGenerationRecordPreload, TerminalCommandGenerationRecordContract>
+type TerminalCommandGenerationResultPreloadMatchesContract = AssertAssignable<TerminalCommandGenerationResultContract, TerminalCommandGenerationResultPreload>
+type TerminalCommandGenerationResultContractMatchesPreload = AssertAssignable<TerminalCommandGenerationResultPreload, TerminalCommandGenerationResultContract>
 type AssetInputPreloadMatchesContract = AssertAssignable<AiopsAssetInputContract, AiopsAssetInputPreload>
 type AssetInputContractMatchesPreload = AssertAssignable<AiopsAssetInputPreload, AiopsAssetInputContract>
 type AssetSnapshotPreloadMatchesContract = AssertAssignable<AiopsAssetSnapshotContract, AiopsAssetSnapshotPreload>
@@ -687,6 +711,23 @@ describe('shared contract compatibility exports', () => {
     ] = [true, true, true, true, true, true, true, true]
 
     expect(checks).toEqual([true, true, true, true, true, true, true, true])
+  })
+
+  it('keeps terminal tools contracts compatible through the preload export', () => {
+    const checks: [
+      TerminalCommandSuggestionPreloadMatchesContract,
+      TerminalCommandSuggestionContractMatchesPreload,
+      TerminalCommandSuggestionContextPreloadMatchesContract,
+      TerminalCommandSuggestionContextContractMatchesPreload,
+      TerminalCommandGenerationInputPreloadMatchesContract,
+      TerminalCommandGenerationInputContractMatchesPreload,
+      TerminalCommandGenerationRecordPreloadMatchesContract,
+      TerminalCommandGenerationRecordContractMatchesPreload,
+      TerminalCommandGenerationResultPreloadMatchesContract,
+      TerminalCommandGenerationResultContractMatchesPreload
+    ] = [true, true, true, true, true, true, true, true, true, true]
+
+    expect(checks).toEqual([true, true, true, true, true, true, true, true, true, true])
   })
 
   it('keeps asset contracts compatible through the preload export', () => {

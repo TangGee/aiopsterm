@@ -334,6 +334,12 @@ import type {
   DatabaseTableQueryInput,
   DatabaseTableQueryResult
 } from './contracts/database'
+import type {
+  TerminalCommandGenerationInput,
+  TerminalCommandGenerationResult,
+  TerminalCommandSuggestion,
+  TerminalCommandSuggestionContext
+} from './contracts/terminalTools'
 
 export type { AiopsMutationResult } from './contracts/common'
 export type {
@@ -834,6 +840,14 @@ export type {
   DatabaseTableQueryResult,
   DatabaseWorkspaceCatalog
 } from './contracts/database'
+export type {
+  TerminalCommandGenerationContext,
+  TerminalCommandGenerationInput,
+  TerminalCommandGenerationRecord,
+  TerminalCommandGenerationResult,
+  TerminalCommandSuggestion,
+  TerminalCommandSuggestionContext
+} from './contracts/terminalTools'
 
 export type RuntimeLogLevel = 'debug' | 'info' | 'warn' | 'error'
 
@@ -885,49 +899,6 @@ export type UserConfig = {
     completedModules: Record<string, boolean>
   }
 }
-
-export type TerminalCommandSuggestion = {
-  command: string
-  source: 'base' | 'history' | 'ai'
-  explanation?: string
-}
-
-export type TerminalCommandSuggestionContext = {
-  panelId?: string
-  host?: string
-  shell?: string
-  modelName?: string
-  mode?: 'base' | 'ai'
-}
-
-export type TerminalCommandGenerationContext = {
-  host: string
-  username: string
-  cwd: string
-  shell: string
-  connectionType: 'local' | 'ssh'
-}
-
-export type TerminalCommandGenerationInput = {
-  panelId: string
-  instruction: string
-  modelName?: string
-  context: TerminalCommandGenerationContext
-}
-
-export type TerminalCommandGenerationRecord = {
-  id: string
-  panelId: string
-  instruction: string
-  command: string
-  modelName: string
-  context: TerminalCommandGenerationContext
-  status: 'done'
-  createdAt: number
-  provider: 'aiopsterm-local' | ModelProviderCheckKey
-}
-
-export type TerminalCommandGenerationResult = AiopsMutationResult<TerminalCommandGenerationRecord>
 
 export type VoiceTranscriptionInput = {
   audioData?: string
