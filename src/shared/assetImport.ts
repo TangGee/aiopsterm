@@ -1,4 +1,4 @@
-import type { AiopsAssetAuthType, AiopsAssetType } from './preload'
+import type { AiopsAssetAuthType, AiopsAssetType } from './contracts/assets'
 
 export type ImportedAssetDraft = {
   title: string

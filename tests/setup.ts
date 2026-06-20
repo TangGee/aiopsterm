@@ -25,7 +25,7 @@ import type {
 import type {
   AiAgentSessionEvent,
   ManagedAiSessionEvent
-} from '@shared/preload'
+} from '@shared/contracts/managedAiSessions'
 import type { AiChatExportInput, AiTodoItem, AiTodoSnapshotResult } from '@shared/contracts/aiChat'
 import type { SshAgentKeychainOption } from '@shared/contracts/appRuntime'
 import type { McpServerUserConfig } from '@shared/contracts/mcp'
