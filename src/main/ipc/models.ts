@@ -1,6 +1,7 @@
 import type { IpcMain } from 'electron'
 import { checkModelProvider, listAiModels } from '../backend/modelProviders'
-import type { AiModelCatalogInput, ModelProviderCheckInput, UserConfig } from '@shared/preload'
+import type { UserConfig } from '@shared/preload'
+import type { AiModelCatalogInput, ModelProviderCheckInput } from '@shared/contracts/appRuntime'
 
 type RegisterModelsIpcInput = {
   getConfig: () => UserConfig

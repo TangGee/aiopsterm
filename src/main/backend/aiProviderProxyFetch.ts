@@ -3,7 +3,7 @@ import https from 'https'
 import type { Socket } from 'net'
 import tls from 'tls'
 import { URL } from 'url'
-import type { AiPreferencesUserConfig, SshProxyConfig } from '@shared/preload'
+import type { AiPreferencesUserConfig, SshProxyConfig } from '@shared/contracts/appRuntime'
 import { createSshProxySocket } from './sshProxy'
 
 const normalizeText = (value: unknown) => String(value || '').trim()

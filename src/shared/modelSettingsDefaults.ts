@@ -1,4 +1,4 @@
-import type { ModelOptionUserConfig, ModelSettingsUserConfig } from './preload'
+import type { ModelOptionUserConfig, ModelSettingsUserConfig } from './contracts/appRuntime'
 
 const defaultModelOptions: ModelOptionUserConfig[] = []
 

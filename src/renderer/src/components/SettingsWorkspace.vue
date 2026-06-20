@@ -174,7 +174,7 @@ import SettingsJsonEditor from '@/components/settings/SettingsJsonEditor.vue'
 import OnboardingGuide from '@/components/onboarding/OnboardingGuide.vue'
 import { useI18n } from '@/i18n'
 import type { AgentHookInstallerStatus } from '@shared/contracts/agentHooks'
-import type { SettingsDocumentationPage } from '@shared/preload'
+import type { SettingsDocumentationPage } from '@shared/contracts/appRuntime'
 
 const workspace = useWorkspaceStore()
 const { t } = useI18n()

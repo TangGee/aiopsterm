@@ -219,6 +219,44 @@ import type {
   KnowledgeNode as KnowledgeNodePreload,
   KnowledgeNodeType as KnowledgeNodeTypePreload
 } from '../src/shared/preload'
+import type {
+  AiModelCatalog as AiModelCatalogContract,
+  AiPreferencesUserConfig as AiPreferencesUserConfigContract,
+  AppUpdateCheckResult as AppUpdateCheckResultContract,
+  AppUpdateDownloadResult as AppUpdateDownloadResultContract,
+  CustomBackgroundSaveResult as CustomBackgroundSaveResultContract,
+  EditorUserConfig as EditorUserConfigContract,
+  KeywordHighlightUserConfig as KeywordHighlightUserConfigContract,
+  KnowledgeSearchRuntimeApplyResult as KnowledgeSearchRuntimeApplyResultContract,
+  ModelProviderCheckInput as ModelProviderCheckInputContract,
+  ModelSettingsUserConfig as ModelSettingsUserConfigContract,
+  OpenSettingsDocumentationInput as OpenSettingsDocumentationInputContract,
+  PrivacyRuntimeApplyResult as PrivacyRuntimeApplyResultContract,
+  SecurityUserConfig as SecurityUserConfigContract,
+  SshAgentKeychainOption as SshAgentKeychainOptionContract,
+  SshProxyConfig as SshProxyConfigContract,
+  TerminalUserConfig as TerminalUserConfigContract,
+  WorkspaceUserConfig as WorkspaceUserConfigContract
+} from '../src/shared/contracts/appRuntime'
+import type {
+  AiModelCatalog as AiModelCatalogPreload,
+  AiPreferencesUserConfig as AiPreferencesUserConfigPreload,
+  AppUpdateCheckResult as AppUpdateCheckResultPreload,
+  AppUpdateDownloadResult as AppUpdateDownloadResultPreload,
+  CustomBackgroundSaveResult as CustomBackgroundSaveResultPreload,
+  EditorUserConfig as EditorUserConfigPreload,
+  KeywordHighlightUserConfig as KeywordHighlightUserConfigPreload,
+  KnowledgeSearchRuntimeApplyResult as KnowledgeSearchRuntimeApplyResultPreload,
+  ModelProviderCheckInput as ModelProviderCheckInputPreload,
+  ModelSettingsUserConfig as ModelSettingsUserConfigPreload,
+  OpenSettingsDocumentationInput as OpenSettingsDocumentationInputPreload,
+  PrivacyRuntimeApplyResult as PrivacyRuntimeApplyResultPreload,
+  SecurityUserConfig as SecurityUserConfigPreload,
+  SshAgentKeychainOption as SshAgentKeychainOptionPreload,
+  SshProxyConfig as SshProxyConfigPreload,
+  TerminalUserConfig as TerminalUserConfigPreload,
+  WorkspaceUserConfig as WorkspaceUserConfigPreload
+} from '../src/shared/preload'
 
 type AssertAssignable<From, To extends From> = true
 
@@ -397,6 +435,46 @@ type KnowledgeSearchResultPreloadMatchesContract = AssertAssignable<KnowledgeBas
 type KnowledgeSearchResultContractMatchesPreload = AssertAssignable<KnowledgeBaseSearchResultPreload, KnowledgeBaseSearchResultContract>
 type KnowledgeSearchStatusPreloadMatchesContract = AssertAssignable<KnowledgeBaseSearchStatusContract, KnowledgeBaseSearchStatusPreload>
 type KnowledgeSearchStatusContractMatchesPreload = AssertAssignable<KnowledgeBaseSearchStatusPreload, KnowledgeBaseSearchStatusContract>
+type TerminalUserConfigPreloadMatchesContract = AssertAssignable<TerminalUserConfigContract, TerminalUserConfigPreload>
+type TerminalUserConfigContractMatchesPreload = AssertAssignable<TerminalUserConfigPreload, TerminalUserConfigContract>
+type WorkspaceUserConfigPreloadMatchesContract = AssertAssignable<WorkspaceUserConfigContract, WorkspaceUserConfigPreload>
+type WorkspaceUserConfigContractMatchesPreload = AssertAssignable<WorkspaceUserConfigPreload, WorkspaceUserConfigContract>
+type EditorUserConfigPreloadMatchesContract = AssertAssignable<EditorUserConfigContract, EditorUserConfigPreload>
+type EditorUserConfigContractMatchesPreload = AssertAssignable<EditorUserConfigPreload, EditorUserConfigContract>
+type SshProxyConfigPreloadMatchesContract = AssertAssignable<SshProxyConfigContract, SshProxyConfigPreload>
+type SshProxyConfigContractMatchesPreload = AssertAssignable<SshProxyConfigPreload, SshProxyConfigContract>
+type SshAgentKeychainPreloadMatchesContract = AssertAssignable<SshAgentKeychainOptionContract, SshAgentKeychainOptionPreload>
+type SshAgentKeychainContractMatchesPreload = AssertAssignable<SshAgentKeychainOptionPreload, SshAgentKeychainOptionContract>
+type KeywordHighlightUserConfigPreloadMatchesContract = AssertAssignable<KeywordHighlightUserConfigContract, KeywordHighlightUserConfigPreload>
+type KeywordHighlightUserConfigContractMatchesPreload = AssertAssignable<KeywordHighlightUserConfigPreload, KeywordHighlightUserConfigContract>
+type SecurityUserConfigPreloadMatchesContract = AssertAssignable<SecurityUserConfigContract, SecurityUserConfigPreload>
+type SecurityUserConfigContractMatchesPreload = AssertAssignable<SecurityUserConfigPreload, SecurityUserConfigContract>
+type PrivacyRuntimeApplyResultPreloadMatchesContract = AssertAssignable<PrivacyRuntimeApplyResultContract, PrivacyRuntimeApplyResultPreload>
+type PrivacyRuntimeApplyResultContractMatchesPreload = AssertAssignable<PrivacyRuntimeApplyResultPreload, PrivacyRuntimeApplyResultContract>
+type AiPreferencesUserConfigPreloadMatchesContract = AssertAssignable<AiPreferencesUserConfigContract, AiPreferencesUserConfigPreload>
+type AiPreferencesUserConfigContractMatchesPreload = AssertAssignable<AiPreferencesUserConfigPreload, AiPreferencesUserConfigContract>
+type KnowledgeSearchRuntimeApplyResultPreloadMatchesContract = AssertAssignable<
+  KnowledgeSearchRuntimeApplyResultContract,
+  KnowledgeSearchRuntimeApplyResultPreload
+>
+type KnowledgeSearchRuntimeApplyResultContractMatchesPreload = AssertAssignable<
+  KnowledgeSearchRuntimeApplyResultPreload,
+  KnowledgeSearchRuntimeApplyResultContract
+>
+type ModelSettingsUserConfigPreloadMatchesContract = AssertAssignable<ModelSettingsUserConfigContract, ModelSettingsUserConfigPreload>
+type ModelSettingsUserConfigContractMatchesPreload = AssertAssignable<ModelSettingsUserConfigPreload, ModelSettingsUserConfigContract>
+type AiModelCatalogPreloadMatchesContract = AssertAssignable<AiModelCatalogContract, AiModelCatalogPreload>
+type AiModelCatalogContractMatchesPreload = AssertAssignable<AiModelCatalogPreload, AiModelCatalogContract>
+type ModelProviderCheckInputPreloadMatchesContract = AssertAssignable<ModelProviderCheckInputContract, ModelProviderCheckInputPreload>
+type ModelProviderCheckInputContractMatchesPreload = AssertAssignable<ModelProviderCheckInputPreload, ModelProviderCheckInputContract>
+type AppUpdateCheckResultPreloadMatchesContract = AssertAssignable<AppUpdateCheckResultContract, AppUpdateCheckResultPreload>
+type AppUpdateCheckResultContractMatchesPreload = AssertAssignable<AppUpdateCheckResultPreload, AppUpdateCheckResultContract>
+type AppUpdateDownloadResultPreloadMatchesContract = AssertAssignable<AppUpdateDownloadResultContract, AppUpdateDownloadResultPreload>
+type AppUpdateDownloadResultContractMatchesPreload = AssertAssignable<AppUpdateDownloadResultPreload, AppUpdateDownloadResultContract>
+type OpenSettingsDocumentationInputPreloadMatchesContract = AssertAssignable<OpenSettingsDocumentationInputContract, OpenSettingsDocumentationInputPreload>
+type OpenSettingsDocumentationInputContractMatchesPreload = AssertAssignable<OpenSettingsDocumentationInputPreload, OpenSettingsDocumentationInputContract>
+type CustomBackgroundSaveResultPreloadMatchesContract = AssertAssignable<CustomBackgroundSaveResultContract, CustomBackgroundSaveResultPreload>
+type CustomBackgroundSaveResultContractMatchesPreload = AssertAssignable<CustomBackgroundSaveResultPreload, CustomBackgroundSaveResultContract>
 
 describe('shared contract compatibility exports', () => {
   it('keeps Codex session contracts compatible through the preload export', () => {
@@ -684,6 +762,117 @@ describe('shared contract compatibility exports', () => {
     ]
 
     expect(checks).toEqual([
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ])
+  })
+
+  it('keeps App Runtime contracts compatible through the preload export', () => {
+    const checks: [
+      TerminalUserConfigPreloadMatchesContract,
+      TerminalUserConfigContractMatchesPreload,
+      WorkspaceUserConfigPreloadMatchesContract,
+      WorkspaceUserConfigContractMatchesPreload,
+      EditorUserConfigPreloadMatchesContract,
+      EditorUserConfigContractMatchesPreload,
+      SshProxyConfigPreloadMatchesContract,
+      SshProxyConfigContractMatchesPreload,
+      SshAgentKeychainPreloadMatchesContract,
+      SshAgentKeychainContractMatchesPreload,
+      KeywordHighlightUserConfigPreloadMatchesContract,
+      KeywordHighlightUserConfigContractMatchesPreload,
+      SecurityUserConfigPreloadMatchesContract,
+      SecurityUserConfigContractMatchesPreload,
+      PrivacyRuntimeApplyResultPreloadMatchesContract,
+      PrivacyRuntimeApplyResultContractMatchesPreload,
+      AiPreferencesUserConfigPreloadMatchesContract,
+      AiPreferencesUserConfigContractMatchesPreload,
+      KnowledgeSearchRuntimeApplyResultPreloadMatchesContract,
+      KnowledgeSearchRuntimeApplyResultContractMatchesPreload,
+      ModelSettingsUserConfigPreloadMatchesContract,
+      ModelSettingsUserConfigContractMatchesPreload,
+      AiModelCatalogPreloadMatchesContract,
+      AiModelCatalogContractMatchesPreload,
+      ModelProviderCheckInputPreloadMatchesContract,
+      ModelProviderCheckInputContractMatchesPreload,
+      AppUpdateCheckResultPreloadMatchesContract,
+      AppUpdateCheckResultContractMatchesPreload,
+      AppUpdateDownloadResultPreloadMatchesContract,
+      AppUpdateDownloadResultContractMatchesPreload,
+      OpenSettingsDocumentationInputPreloadMatchesContract,
+      OpenSettingsDocumentationInputContractMatchesPreload,
+      CustomBackgroundSaveResultPreloadMatchesContract,
+      CustomBackgroundSaveResultContractMatchesPreload
+    ] = [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+
+    expect(checks).toEqual([
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
       true,
       true,
       true,

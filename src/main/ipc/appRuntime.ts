@@ -10,9 +10,9 @@ import type {
   KnowledgeSearchRuntimeApplyInput,
   OpenSettingsDocumentationInput,
   PrivacyRuntimeApplyInput,
-  SettingsDocumentationPage,
-  UserConfig
-} from '@shared/preload'
+  SettingsDocumentationPage
+} from '@shared/contracts/appRuntime'
+import type { UserConfig } from '@shared/preload'
 
 type SettingsExternalActionRuntime = Parameters<typeof openSettingsDocumentation>[0]
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { applyKeywordHighlight } from '@/services/keywordHighlightRuntime'
-import type { KeywordHighlightUserConfig } from '@shared/preload'
+import type { KeywordHighlightUserConfig } from '@shared/contracts/appRuntime'
 
 const createConfig = (rules: KeywordHighlightUserConfig['keyword-highlight']['rules'], applyTo = { output: true, input: true }): KeywordHighlightUserConfig => ({
   'keyword-highlight': {

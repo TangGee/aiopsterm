@@ -3,13 +3,13 @@ import { delimiter, dirname, join } from 'path'
 import { mkdirSync, readdirSync, statSync, type Dirent } from 'fs'
 import { pathToFileURL } from 'url'
 import type {
-  ModelProviderCheckKey,
   TerminalCommandGenerationInput,
   TerminalCommandGenerationResult,
   TerminalCommandSuggestion,
   TerminalCommandSuggestionContext,
   UserConfig
 } from '@shared/preload'
+import type { ModelProviderCheckKey } from '@shared/contracts/appRuntime'
 import { createProviderTextRequest, fetchProviderText, resolveModelProvider, type AiProviderResolvedConfig, type AiProviderTextRequest } from './modelProviderText'
 
 type SqliteRunResult = { changes: number; lastInsertRowid: number | bigint }

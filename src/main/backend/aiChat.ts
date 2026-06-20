@@ -10,13 +10,12 @@ import type {
   AiChatHistoryHostContext,
   AiChatHistoryMessage,
   AiChatMessageInput,
-  AiPreferencesUserConfig,
   AiChatResponseInput,
   AiChatResponseResult,
   AiChatSkillInput,
-  ModelProviderCheckKey,
   UserConfig
 } from '@shared/preload'
+import type { AiPreferencesUserConfig, ModelProviderCheckKey } from '@shared/contracts/appRuntime'
 import type { McpResourceReadInput, McpResourceReadResult, McpToolCallInput, McpToolCallResult } from '@shared/contracts/mcp'
 import type { SkillUserConfig } from '@shared/contracts/skills'
 import { shouldUseAiChatBackendDouble } from '@shared/runtimeSwitches'

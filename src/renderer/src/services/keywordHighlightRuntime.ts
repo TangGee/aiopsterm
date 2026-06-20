@@ -1,4 +1,4 @@
-import type { KeywordHighlightRuleConfig, KeywordHighlightUserConfig } from '@shared/preload'
+import type { KeywordHighlightRuleConfig, KeywordHighlightUserConfig } from '@shared/contracts/appRuntime'
 
 type KeywordHighlightScope = 'output' | 'input'
 

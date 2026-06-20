@@ -1,7 +1,7 @@
 import { mkdir, readFile as fsReadFile, stat as fsStat, writeFile as fsWriteFile } from 'fs/promises'
 import { dirname, isAbsolute, join, relative, resolve } from 'path'
 import type { Stats } from 'fs'
-import type { OpenPathResult, OpenSettingsDocumentationInput, SettingsDocumentationPage, SettingsDocumentationResult } from '@shared/preload'
+import type { OpenPathResult, OpenSettingsDocumentationInput, SettingsDocumentationPage, SettingsDocumentationResult } from '@shared/contracts/appRuntime'
 
 type SettingsExternalActionRuntime = {
   userDataPath: string

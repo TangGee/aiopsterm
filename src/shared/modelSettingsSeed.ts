@@ -1,4 +1,4 @@
-import type { ModelOptionUserConfig } from './preload'
+import type { ModelOptionUserConfig } from './contracts/appRuntime'
 import { defaultModelSettingsData } from './modelSettingsDefaults'
 import { shouldUseModelSettingsSeedData as runtimeShouldUseModelSettingsSeedData } from './runtimeSwitches'
 

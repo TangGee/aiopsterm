@@ -1,4 +1,4 @@
-import type { PrivacyRuntimeApplyInput, PrivacyRuntimeApplyResult, PrivacyRuntimeSnapshot, PrivacyUserConfig } from '@shared/preload'
+import type { PrivacyRuntimeApplyInput, PrivacyRuntimeApplyResult, PrivacyRuntimeSnapshot, PrivacyUserConfig } from '@shared/contracts/appRuntime'
 import { shouldUseDataSyncBackendDouble } from '@shared/runtimeSwitches'
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs'
 import { dirname, isAbsolute, resolve } from 'path'

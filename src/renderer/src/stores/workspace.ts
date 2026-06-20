@@ -90,10 +90,6 @@ import { readStoredAiPanelMode } from '@/services/aiPanelModeRuntime'
 import { applyDocumentLocale, isLocaleSetting, resolveLocale, translateWithLocale } from '@/i18n/runtime'
 import type { I18nKey } from '@/i18n/messages'
 import type {
-  AppUpdateCheckResult,
-  AppUpdateDownloadResult,
-  AppUpdateInstallResult,
-  AppUpdateProgressEvent,
   AiChatChipContentPart,
   AiChatChipRef,
   AiCommandCatalogOption,
@@ -102,8 +98,6 @@ import type {
   AiContextCatalog,
   AiContextOption,
   AiChatContextUsageSnapshot,
-  AiPreferencesUserConfig,
-  NotificationUserConfig,
   AiChatConversationRecord,
   AiChatExchangeRequestInput,
   AiChatHistoryMessage,
@@ -120,15 +114,9 @@ import type {
   AiSupportedImageType,
   AiTextContentPart,
   AiTodoItem,
-  AiModelCatalog,
-  AiModelCatalogOption,
   AiopsPreloadApi,
   ControlNotificationFocusRequest,
   ControlNotificationRecord,
-  EditorUserConfig,
-  KeywordHighlightRuleConfig,
-  KeywordHighlightUserConfig,
-  KnowledgeSearchRuntimeSnapshot,
   KubernetesAgentProxyConfig,
   KubernetesBastionGroup,
   KubernetesCatalog,
@@ -144,25 +132,39 @@ import type {
   KubernetesResourceKind,
   KubernetesTerminalRecord,
   KubernetesTerminalStatus,
-  ModelProviderCheckKey,
+  TerminalCommandGenerationContext,
+  TerminalCommandGenerationRecord,
+  UserConfig
+} from '@shared/preload'
+import type {
+  AiModelCatalog,
+  AiModelCatalogOption,
+  AiPreferencesUserConfig,
+  AppUpdateCheckResult,
+  AppUpdateDownloadResult,
+  AppUpdateInstallResult,
+  AppUpdateProgressEvent,
+  EditorUserConfig,
+  KeywordHighlightRuleConfig,
+  KeywordHighlightUserConfig,
+  KnowledgeSearchRuntimeSnapshot,
   ModelOptionUserConfig,
+  ModelProviderCheckKey,
   ModelSettingsUserConfig,
+  NotificationUserConfig,
   OpenSettingsDocumentationInput,
-  PrivacyUserConfig,
   PrivacyRuntimeSnapshot,
+  PrivacyUserConfig,
   SecurityUserConfig,
   SettingsDocumentationPage,
   SshAgentKeyConfig,
   SshAgentKeychainOption,
   SshProxyConfig,
   SshProxyType,
-  TerminalCommandGenerationContext,
-  TerminalCommandGenerationRecord,
   TerminalMouseEventAction,
   TerminalUserConfig,
-  UserConfig,
   WorkspaceUserConfig
-} from '@shared/preload'
+} from '@shared/contracts/appRuntime'
 import type { AliasCommandConfig, AliasCommandSaveInput } from '@shared/contracts/aliases'
 import type { FileSessionCatalog, FileSessionFolderRecord, FileSessionFolderSaveInput, FileSessionInfo, FileSessionPatch, FileSessionTerminalContext, FileTransferTask } from '@shared/contracts/files'
 import type { AiopsTrustedDevice, AiopsTrustedDeviceRevokeResult, AiopsUserAccountSnapshot, AiopsUserAvatarPrepareResult, AiopsUserCodeResult, AiopsUserExternalAction, AiopsUserExternalActionResult, AiopsUserMutationResult, AiopsUserProfile } from '@shared/contracts/userAccount'

@@ -1,6 +1,6 @@
 import net from 'net'
 import { afterEach, beforeAll, describe, expect, it } from 'vitest'
-import type { SshProxyConfig } from '../src/shared/preload'
+import type { SshProxyConfig } from '../src/shared/contracts/appRuntime'
 
 let createSshProxySocket: (config: SshProxyConfig, targetHost: string, targetPort: number, options?: { timeoutMs?: number }) => Promise<net.Socket>
 let createSshProxySocketForAsset: (

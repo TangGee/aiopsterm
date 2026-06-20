@@ -1,5 +1,6 @@
 import { createHash, createHmac } from 'crypto'
-import type { AiPreferencesUserConfig, ModelProviderCheckKey, ModelProviderUserConfig, UserConfig } from '@shared/preload'
+import type { UserConfig } from '@shared/preload'
+import type { AiPreferencesUserConfig, ModelProviderCheckKey, ModelProviderUserConfig } from '@shared/contracts/appRuntime'
 
 export type AiProviderResolvedConfig = {
   provider: ModelProviderCheckKey

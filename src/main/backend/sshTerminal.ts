@@ -3,7 +3,8 @@ import { mkdirSync, statSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import type { ClientChannel, ConnectConfig } from 'ssh2'
-import type { SshProxyConfig, UserConfig } from '@shared/preload'
+import type { UserConfig } from '@shared/preload'
+import type { SshProxyConfig } from '@shared/contracts/appRuntime'
 import type { AiopsAssetRecord } from '@shared/contracts/assets'
 import type {
   TerminalCreateOptions,

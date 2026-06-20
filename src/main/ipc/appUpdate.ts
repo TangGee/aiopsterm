@@ -2,7 +2,7 @@ import type { IpcMain } from 'electron'
 import { join } from 'path'
 import { checkAppUpdate, downloadAppUpdate, installAppUpdate } from '../backend/appUpdate'
 import { sendWebContentsEvent } from '@shared/windowEvents'
-import type { AppUpdateProgressEvent } from '@shared/preload'
+import type { AppUpdateProgressEvent } from '@shared/contracts/appRuntime'
 
 type RegisterAppUpdateIpcInput = {
   getVersion: () => string

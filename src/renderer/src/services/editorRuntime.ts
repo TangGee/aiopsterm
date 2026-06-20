@@ -1,4 +1,4 @@
-import type { EditorUserConfig } from '@shared/preload'
+import type { EditorUserConfig } from '@shared/contracts/appRuntime'
 
 export type EditorRuntimeSettings = EditorUserConfig
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { validateCommandSecurity } from '@/services/commandSecurityRuntime'
-import type { SecurityUserConfig } from '@shared/preload'
+import type { SecurityUserConfig } from '@shared/contracts/appRuntime'
 
 const config = (patch: Partial<SecurityUserConfig['security']> = {}): SecurityUserConfig => {
   const { securityPolicy, ...restPatch } = patch

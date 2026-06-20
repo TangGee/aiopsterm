@@ -1,4 +1,4 @@
-import type { SecurityUserConfig } from '@shared/preload'
+import type { SecurityUserConfig } from '@shared/contracts/appRuntime'
 
 export type CommandSecurityResult = {
   isAllowed: boolean

@@ -1,4 +1,4 @@
-import type { WorkspaceUserConfig } from './preload'
+import type { WorkspaceUserConfig } from './contracts/appRuntime'
 
 const defaultExpandedGroups = ['recent_connections', 'local_connections']
 

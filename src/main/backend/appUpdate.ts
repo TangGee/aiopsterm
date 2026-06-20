@@ -3,7 +3,7 @@ import { createReadStream, createWriteStream, readFileSync, statSync } from 'fs'
 import { mkdir, rename, rm, stat } from 'fs/promises'
 import { tmpdir } from 'os'
 import { basename, dirname, isAbsolute, join, resolve } from 'path'
-import type { AppUpdateCheckResult, AppUpdateDownloadResult, AppUpdateInstallResult, AppUpdateProgressEvent } from '@shared/preload'
+import type { AppUpdateCheckResult, AppUpdateDownloadResult, AppUpdateInstallResult, AppUpdateProgressEvent } from '@shared/contracts/appRuntime'
 
 type AppUpdateManifest = {
   version?: unknown

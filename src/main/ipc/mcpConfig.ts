@@ -1,12 +1,14 @@
 import type { IpcMain } from 'electron'
 import { readFile, writeFile } from 'fs/promises'
 import type {
+  UserConfig
+} from '@shared/preload'
+import type {
   KeywordHighlightConfigWriteResult,
   KeywordHighlightUserConfig,
   SecurityConfigWriteResult,
-  SecurityUserConfig,
-  UserConfig
-} from '@shared/preload'
+  SecurityUserConfig
+} from '@shared/contracts/appRuntime'
 import type {
   McpConfigFile,
   McpConfigWriteResult,

@@ -223,7 +223,7 @@ import { shortcutRuntime } from '@/services/shortcutRuntime'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { settingsBackgroundPresets } from '@/config/settings'
 import { DEFAULT_KNOWLEDGE_INTERFACE_IMAGE_BASE64 } from '@shared/knowledgeBaseSeed'
-import type { KeywordHighlightUserConfig } from '@shared/preload'
+import type { KeywordHighlightUserConfig } from '@shared/contracts/appRuntime'
 import type { FileSessionInfo } from '@shared/contracts/files'
 import type { TerminalCreateOptions, TerminalKeyboardInteractiveRequest, TerminalSessionInfo } from '@shared/contracts/terminalSessions'
 

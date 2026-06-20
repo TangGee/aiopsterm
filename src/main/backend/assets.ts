@@ -34,7 +34,9 @@ import type {
   AiopsOrganizationAssetRefreshInput,
   AiopsOrganizationAssetRefreshResult
 } from '@shared/contracts/assets'
-import type { AiopsMutationResult, SshAgentKeychainOption, UserConfig } from '@shared/preload'
+import type { UserConfig } from '@shared/preload'
+import type { AiopsMutationResult } from '@shared/contracts/common'
+import type { SshAgentKeychainOption } from '@shared/contracts/appRuntime'
 import { parseAssetImportContent, type ImportedAssetDraft } from '@shared/assetImport'
 import { shouldUseAssetsSeedData } from '@shared/runtimeSwitches'
 import { createConfiguredSshAgentAuth } from './sshAgent'

@@ -9,7 +9,7 @@ import type {
   SignCallback,
   SigningRequestOptions
 } from 'ssh2'
-import type { SshAgentKeyConfig, TerminalUserConfig } from '@shared/preload'
+import type { SshAgentKeyConfig, TerminalUserConfig } from '@shared/contracts/appRuntime'
 
 export type SshAgentRuntimeConfig = {
   terminal?: Partial<Pick<TerminalUserConfig, 'sshAgentsStatus'>> | null

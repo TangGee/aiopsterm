@@ -124,9 +124,9 @@ import type {
   SecurityUserConfig,
   SshAgentKeyConfig,
   SshProxyConfig,
-  UserConfig,
   WorkspaceUserConfig
-} from '@shared/preload'
+} from '@shared/contracts/appRuntime'
+import type { UserConfig } from '@shared/preload'
 import type { McpConfigFile, McpResourceReadInput, McpServerUserConfig, McpToolCallInput, McpToolStatesUserConfig } from '@shared/contracts/mcp'
 import type { ShortcutUserConfig, UserRuleConfig } from '@shared/contracts/settingsPreferences'
 import type {

@@ -1,4 +1,4 @@
-import type { KnowledgeSearchRuntimeApplyInput, KnowledgeSearchRuntimeApplyResult, KnowledgeSearchRuntimeSnapshot } from '@shared/preload'
+import type { KnowledgeSearchRuntimeApplyInput, KnowledgeSearchRuntimeApplyResult, KnowledgeSearchRuntimeSnapshot } from '@shared/contracts/appRuntime'
 
 let runtimeSnapshot: KnowledgeSearchRuntimeSnapshot = {
   enabled: true,

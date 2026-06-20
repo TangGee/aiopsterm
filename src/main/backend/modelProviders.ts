@@ -1,15 +1,15 @@
 import { createHash, createHmac } from 'crypto'
+import type { AiopsMutationResult } from '@shared/contracts/common'
 import type {
   AiModelCatalog,
   AiModelCatalogInput,
-  AiopsMutationResult,
   ModelOptionUserConfig,
   ModelProviderCheckInput,
   ModelProviderCheckKey,
   ModelProviderCheckResult,
   ModelProviderUserConfig,
   ModelSettingsUserConfig
-} from '@shared/preload'
+} from '@shared/contracts/appRuntime'
 
 const defaultSettingsModelOptions: ModelOptionUserConfig[] = []
 
