@@ -1,7 +1,6 @@
 import { appendFile, mkdir } from 'fs/promises'
 import { join } from 'path'
-
-export type RuntimeLogLevel = 'debug' | 'info' | 'warn' | 'error'
+import type { RuntimeLogLevel } from '@shared/contracts/appRuntime'
 
 type RuntimeLogConfig = {
   getLogDir?: () => string

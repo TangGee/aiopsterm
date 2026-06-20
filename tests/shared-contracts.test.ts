@@ -246,6 +246,7 @@ import type {
   ModelSettingsUserConfig as ModelSettingsUserConfigContract,
   OpenSettingsDocumentationInput as OpenSettingsDocumentationInputContract,
   PrivacyRuntimeApplyResult as PrivacyRuntimeApplyResultContract,
+  RuntimeLogLevel as RuntimeLogLevelContract,
   SecurityUserConfig as SecurityUserConfigContract,
   SshAgentKeychainOption as SshAgentKeychainOptionContract,
   SshProxyConfig as SshProxyConfigContract,
@@ -265,6 +266,7 @@ import type {
   ModelSettingsUserConfig as ModelSettingsUserConfigPreload,
   OpenSettingsDocumentationInput as OpenSettingsDocumentationInputPreload,
   PrivacyRuntimeApplyResult as PrivacyRuntimeApplyResultPreload,
+  RuntimeLogLevel as RuntimeLogLevelPreload,
   SecurityUserConfig as SecurityUserConfigPreload,
   SshAgentKeychainOption as SshAgentKeychainOptionPreload,
   SshProxyConfig as SshProxyConfigPreload,
@@ -601,6 +603,8 @@ type KnowledgeSearchStatusPreloadMatchesContract = AssertAssignable<KnowledgeBas
 type KnowledgeSearchStatusContractMatchesPreload = AssertAssignable<KnowledgeBaseSearchStatusPreload, KnowledgeBaseSearchStatusContract>
 type TerminalUserConfigPreloadMatchesContract = AssertAssignable<TerminalUserConfigContract, TerminalUserConfigPreload>
 type TerminalUserConfigContractMatchesPreload = AssertAssignable<TerminalUserConfigPreload, TerminalUserConfigContract>
+type RuntimeLogLevelPreloadMatchesContract = AssertAssignable<RuntimeLogLevelContract, RuntimeLogLevelPreload>
+type RuntimeLogLevelContractMatchesPreload = AssertAssignable<RuntimeLogLevelPreload, RuntimeLogLevelContract>
 type WorkspaceUserConfigPreloadMatchesContract = AssertAssignable<WorkspaceUserConfigContract, WorkspaceUserConfigPreload>
 type WorkspaceUserConfigContractMatchesPreload = AssertAssignable<WorkspaceUserConfigPreload, WorkspaceUserConfigContract>
 type EditorUserConfigPreloadMatchesContract = AssertAssignable<EditorUserConfigContract, EditorUserConfigPreload>
@@ -1094,6 +1098,8 @@ describe('shared contract compatibility exports', () => {
     const checks: [
       TerminalUserConfigPreloadMatchesContract,
       TerminalUserConfigContractMatchesPreload,
+      RuntimeLogLevelPreloadMatchesContract,
+      RuntimeLogLevelContractMatchesPreload,
       WorkspaceUserConfigPreloadMatchesContract,
       WorkspaceUserConfigContractMatchesPreload,
       EditorUserConfigPreloadMatchesContract,
@@ -1160,45 +1166,12 @@ describe('shared contract compatibility exports', () => {
       true,
       true,
       true,
+      true,
+      true,
       true
     ]
 
-    expect(checks).toEqual([
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      true
-    ])
+    expect(checks).toEqual(Array.from({ length: checks.length }, () => true))
   })
 
   it('keeps Local Files contracts compatible through the preload export', () => {

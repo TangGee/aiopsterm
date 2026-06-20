@@ -9,7 +9,7 @@ import type {
   CodexSessionTargetUpdateResult,
   CodexSessionWriteResult
 } from '@shared/contracts/codexSessions'
-import type { RuntimeLogLevel } from '@shared/preload'
+import type { RuntimeLogLevel } from '@shared/contracts/appRuntime'
 
 type CodexTerminalBridgeTargetUpdateResult = {
   sessionId?: string

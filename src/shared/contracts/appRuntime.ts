@@ -1,5 +1,7 @@
 import type { AiopsMutationResult } from './common'
 
+export type RuntimeLogLevel = 'debug' | 'info' | 'warn' | 'error'
+
 export type TerminalCursorStyle = 'block' | 'bar' | 'underline'
 
 export type TerminalMouseEventAction = 'none' | 'paste' | 'contextMenu' | 'closeTab'

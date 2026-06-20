@@ -1687,7 +1687,7 @@ import type {
 import type { AiChatExportMessage, AiChatHistoryHostContext, AiCommandCatalogOption, AiContextKind, AiContextOption } from '@shared/contracts/aiChat'
 import type { VoiceTranscriptionInput } from '@shared/contracts/voice'
 import type { CodexSessionTargetContext } from '@shared/contracts/codexSessions'
-import type { RuntimeLogLevel } from '@shared/preload'
+import type { RuntimeLogLevel } from '@shared/contracts/appRuntime'
 
 type XtermRuntimeOptions = XtermTerminal['options'] & { termName?: string }
 const setXtermTermName = (terminal: XtermTerminal, terminalType: string) => {

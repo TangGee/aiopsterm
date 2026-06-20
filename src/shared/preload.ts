@@ -232,6 +232,7 @@ import type {
   PrivacyRuntimeApplyInput,
   PrivacyRuntimeApplyResult,
   PrivacyUserConfig,
+  RuntimeLogLevel,
   SecurityConfigWriteResult,
   SecurityUserConfig,
   SettingsDocumentationResult,
@@ -678,6 +679,7 @@ export type {
   PrivacyRuntimeApplyResult,
   PrivacyRuntimeSnapshot,
   PrivacyUserConfig,
+  RuntimeLogLevel,
   SecurityConfigWriteResult,
   SecurityUserConfig,
   SettingsDocumentationPage,
@@ -930,8 +932,6 @@ export type {
   KubernetesTerminalWriteData,
   KubernetesTerminalWriteResult
 } from './contracts/kubernetes'
-
-export type RuntimeLogLevel = 'debug' | 'info' | 'warn' | 'error'
 
 export type UserConfig = {
   language: string
