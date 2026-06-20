@@ -6,6 +6,7 @@ import {
   isAiTodoSnapshotData,
   malformedAiBackendResultMessage
 } from '@/services/aiBackendGuards'
+import { aiCatalogClient } from '@/services/aiCatalogClient'
 import { chatHistoryClient } from '@/services/chatHistoryClient'
 import { validateCommandSecurity, type CommandSecurityResult } from '@/services/commandSecurityRuntime'
 import { applyEditorSettingsToDocument } from '@/services/editorRuntime'
@@ -4739,13 +4740,14 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const refreshAiContextCatalog = async (options: { hydrateSelection?: boolean } = { hydrateSelection: false }) => {
-    if (!window.aiops?.listAiContextCatalog) {
+    const listAiContextCatalog = aiCatalogClient.listAiContextCatalog()
+    if (!listAiContextCatalog) {
       setTopNotice('AI 上下文加载服务不可用')
       return false
     }
     let result
     try {
-      result = await window.aiops.listAiContextCatalog()
+      result = await listAiContextCatalog()
     } catch {
       setTopNotice('AI 上下文加载失败')
       return false
@@ -4773,13 +4775,14 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const refreshAiCommandCatalog = async () => {
-    if (!window.aiops?.listAiCommandCatalog) {
+    const listAiCommandCatalog = aiCatalogClient.listAiCommandCatalog()
+    if (!listAiCommandCatalog) {
       setTopNotice('AI 命令加载服务不可用')
       return false
     }
     let result
     try {
-      result = await window.aiops.listAiCommandCatalog()
+      result = await listAiCommandCatalog()
     } catch {
       setTopNotice('AI 命令加载失败')
       return false
@@ -4884,8 +4887,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   )
 
   const refreshAiTodoSnapshot = async () => {
-    const listAiTodoSnapshot = window.aiops?.listAiTodoSnapshot
-    if (typeof listAiTodoSnapshot !== 'function') return false
+    const listAiTodoSnapshot = aiCatalogClient.listAiTodoSnapshot()
+    if (!listAiTodoSnapshot) return false
     let result
     try {
       result = await listAiTodoSnapshot()
