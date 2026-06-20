@@ -37,6 +37,7 @@ import {
   isFileTransferTaskData,
   malformedFilesBackendResultMessage
 } from '@/services/filesBackendGuards'
+import { filesClient } from '@/services/filesClient'
 import {
   expectedKnowledgeRelPath,
   isKnowledgeDeleteResultData,
@@ -66,6 +67,7 @@ import {
   isQuickCommandSnippetSaveData,
   malformedQuickCommandsBackendResultMessage
 } from '@/services/quickCommandsBackendGuards'
+import { quickCommandsClient } from '@/services/quickCommandsClient'
 import {
   isSettingsPreferencesMutationData,
   isSettingsPreferencesSnapshot,
@@ -89,6 +91,7 @@ import { skillsClient } from '@/services/skillsClient'
 import { settingsConfigClient } from '@/services/settingsConfigClient'
 import { settingsPreferencesClient } from '@/services/settingsPreferencesClient'
 import { addSystemThemeListener, applyThemeToDocument, isThemeId, type ThemeId } from '@/services/themeRuntime'
+import { userAccountClient } from '@/services/userAccountClient'
 import { isAiopstermDeepLinkPayload } from '@shared/deepLink'
 import { isLegacyLocalModelName } from '@shared/modelConfigBoundary'
 import { createDefaultOnboardingCompleted, onboardingTourSteps } from '@/config/onboarding'
@@ -5264,9 +5267,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const { changed: modelSettingsChanged } = normalizeModelSettingsConfig(modelSettingsSource, modelCatalogSettingsOptions)
     const normalizedModelSettings = applyModelSettingsSnapshot(modelSettingsSource)
     let normalizedQuickCommands = normalizeQuickCommandsConfig().normalized
-    if (window.aiops.getQuickCommands) {
+    const getQuickCommands = quickCommandsClient.getQuickCommands()
+    if (getQuickCommands) {
       try {
-        const bridgeQuickCommands = await window.aiops.getQuickCommands()
+        const bridgeQuickCommands = await getQuickCommands()
         if (isQuickCommandsSnapshotData(bridgeQuickCommands)) {
           normalizedQuickCommands = bridgeQuickCommands
         } else {
@@ -5465,12 +5469,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const refreshQuickCommands = async () => {
-    if (!window.aiops?.getQuickCommands) {
+    const getQuickCommands = quickCommandsClient.getQuickCommands()
+    if (!getQuickCommands) {
       setTopNotice('快捷命令加载服务不可用')
       return false
     }
     try {
-      const snapshot = await window.aiops.getQuickCommands()
+      const snapshot = await getQuickCommands()
       return applyQuickCommandsSnapshot(snapshot)
     } catch {
       setTopNotice('快捷命令加载失败')
@@ -7816,9 +7821,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const refreshUserAccount = async () => {
-    if (!window.aiops?.getUserAccount) return false
+    const getUserAccount = userAccountClient.getUserAccount()
+    if (!getUserAccount) return false
     try {
-      const result = await window.aiops.getUserAccount()
+      const result = await getUserAccount()
       if (!result?.ok || !result.data) {
         setUserNotice(result?.errorMessage || '用户信息加载失败')
         return false
@@ -7871,13 +7877,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const openAccountCenter = async (options: { activateUserModule?: boolean; notifySettings?: boolean } = {}) => {
-    if (!window.aiops?.getUserAccount) {
+    if (!userAccountClient.getUserAccount()) {
       setUserNotice('账号中心服务不可用')
       if (options.notifySettings) setSettingsNotice('账户中心服务不可用')
       return false
     }
-    const openUserAccountCenterBridge = window.aiops?.openUserAccountCenter
-    if (typeof openUserAccountCenterBridge !== 'function') {
+    const openUserAccountCenterBridge = userAccountClient.openUserAccountCenter()
+    if (!openUserAccountCenterBridge) {
       setUserNotice('账号中心服务不可用')
       if (options.notifySettings) setSettingsNotice('账户中心服务不可用')
       return false
@@ -7910,8 +7916,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const openUserLogin = async () => {
-    const openUserLoginBridge = window.aiops?.openUserLogin
-    if (typeof openUserLoginBridge !== 'function') {
+    const openUserLoginBridge = userAccountClient.openUserLogin()
+    if (!openUserLoginBridge) {
       setUserNotice('登录服务不可用')
       return false
     }
@@ -7934,8 +7940,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const loginUser = async (username = '', password = '') => {
-    const loginUserAccountBridge = window.aiops?.loginUserAccount
-    if (typeof loginUserAccountBridge !== 'function') {
+    const loginUserAccountBridge = userAccountClient.loginUserAccount()
+    if (!loginUserAccountBridge) {
       setUserNotice('账号登录服务不可用')
       return false
     }
@@ -7951,8 +7957,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     userAccountCenterOpen.value = false
     resetUserCodeState('login')
     resetUserCodeState('contact')
-    const logoutUserAccountBridge = window.aiops?.logoutUserAccount
-    if (typeof logoutUserAccountBridge !== 'function') {
+    const logoutUserAccountBridge = userAccountClient.logoutUserAccount()
+    if (!logoutUserAccountBridge) {
       setUserNotice('登出服务不可用')
       return false
     }
@@ -7970,8 +7976,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       setSettingsNotice('请输入 DEACTIVATE 以确认停用账户')
       return false
     }
-    const deactivateUserAccountBridge = window.aiops?.deactivateUserAccount
-    if (typeof deactivateUserAccountBridge !== 'function') {
+    const deactivateUserAccountBridge = userAccountClient.deactivateUserAccount()
+    if (!deactivateUserAccountBridge) {
       setSettingsNotice('账户停用服务不可用')
       setUserNotice('账户停用服务不可用')
       return false
@@ -8017,8 +8023,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const skipUserLogin = async () => {
-    const skipUserLoginBridge = window.aiops?.skipUserLogin
-    if (typeof skipUserLoginBridge !== 'function') {
+    const skipUserLoginBridge = userAccountClient.skipUserLogin()
+    if (!skipUserLoginBridge) {
       setUserNotice('跳过登录服务不可用')
       return false
     }
@@ -8032,8 +8038,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   const sendUserLoginCode = async (kind: 'email' | 'mobile', value: string) => {
     if (userLoginCodeCountdown.value[kind] > 0 || userLoginCodeSending.value[kind]) return false
-    const sendUserLoginCodeBridge = window.aiops?.sendUserLoginCode
-    if (typeof sendUserLoginCodeBridge !== 'function') {
+    const sendUserLoginCodeBridge = userAccountClient.sendUserLoginCode()
+    if (!sendUserLoginCodeBridge) {
       setUserNotice('登录验证码发送服务不可用')
       return false
     }
@@ -8059,8 +8065,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const loginWithAccount = async (username: string, password: string) => {
-    const loginUserAccountBridge = window.aiops?.loginUserAccount
-    if (typeof loginUserAccountBridge !== 'function') {
+    const loginUserAccountBridge = userAccountClient.loginUserAccount()
+    if (!loginUserAccountBridge) {
       userLoginLoading.value = false
       setUserNotice('账号登录服务不可用')
       return false
@@ -8076,8 +8082,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const loginWithEmail = async (email: string, code: string) => {
-    const loginUserAccountBridge = window.aiops?.loginUserAccount
-    if (typeof loginUserAccountBridge !== 'function') {
+    const loginUserAccountBridge = userAccountClient.loginUserAccount()
+    if (!loginUserAccountBridge) {
       userLoginLoading.value = false
       setUserNotice('邮箱登录服务不可用')
       return false
@@ -8095,8 +8101,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const loginWithMobile = async (mobile: string, code: string) => {
-    const loginUserAccountBridge = window.aiops?.loginUserAccount
-    if (typeof loginUserAccountBridge !== 'function') {
+    const loginUserAccountBridge = userAccountClient.loginUserAccount()
+    if (!loginUserAccountBridge) {
       userLoginLoading.value = false
       setUserNotice('手机号登录服务不可用')
       return false
@@ -8116,8 +8122,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const updateUserProfile = async (
     patch: Partial<Pick<AiopsUserProfile, 'name' | 'username' | 'avatarInitials' | 'avatarImageUrl'>>
   ) => {
-    const updateUserProfileBridge = window.aiops?.updateUserProfile
-    if (typeof updateUserProfileBridge !== 'function') {
+    const updateUserProfileBridge = userAccountClient.updateUserProfile()
+    if (!updateUserProfileBridge) {
       setUserNotice('用户资料保存服务不可用')
       return false
     }
@@ -8130,8 +8136,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const resetUserPassword = async (password = '') => {
-    const resetUserPasswordBridge = window.aiops?.resetUserPassword
-    if (typeof resetUserPasswordBridge !== 'function') {
+    const resetUserPasswordBridge = userAccountClient.resetUserPassword()
+    if (!resetUserPasswordBridge) {
       setUserNotice('密码重置服务不可用')
       return false
     }
@@ -8145,8 +8151,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   const sendUserContactCode = async (kind: 'email' | 'mobile', value: string) => {
     if (userContactCodeCountdown.value[kind] > 0 || userContactCodeSending.value[kind]) return false
-    const sendUserContactCodeBridge = window.aiops?.sendUserContactCode
-    if (typeof sendUserContactCodeBridge !== 'function') {
+    const sendUserContactCodeBridge = userAccountClient.sendUserContactCode()
+    if (!sendUserContactCodeBridge) {
       setUserNotice('联系方式验证码发送服务不可用')
       return false
     }
@@ -8172,8 +8178,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const bindUserContact = async (kind: 'email' | 'mobile', value: string, code = '') => {
-    const bindUserContactBridge = window.aiops?.bindUserContact
-    if (typeof bindUserContactBridge !== 'function') {
+    const bindUserContactBridge = userAccountClient.bindUserContact()
+    if (!bindUserContactBridge) {
       setUserNotice('联系方式绑定服务不可用')
       return false
     }
@@ -8188,8 +8194,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const prepareUserAvatarImage = async (filePath: string) => {
-    const prepareUserAvatarImageBridge = window.aiops?.prepareUserAvatarImage
-    if (typeof prepareUserAvatarImageBridge !== 'function') {
+    const prepareUserAvatarImageBridge = userAccountClient.prepareUserAvatarImage()
+    if (!prepareUserAvatarImageBridge) {
       setUserNotice('头像读取服务不可用')
       return null
     }
@@ -10075,8 +10081,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const confirmTrustedDeviceRevoke = async () => {
     const id = trustedDeviceModal.value.id
     if (id === null) return false
-    const revokeTrustedDeviceBridge = window.aiops?.revokeTrustedDevice
-    if (typeof revokeTrustedDeviceBridge !== 'function') {
+    const revokeTrustedDeviceBridge = userAccountClient.revokeTrustedDevice()
+    if (!revokeTrustedDeviceBridge) {
       setSettingsNotice('可信设备移除服务不可用')
       setUserNotice('可信设备移除服务不可用')
       return false
@@ -10251,8 +10257,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const refreshFileTransferTasks = async (options: { replaceCompleted?: boolean } = {}) => {
-    const listFileTransferTasksBridge = window.aiops?.listFileTransferTasks
-    if (typeof listFileTransferTasksBridge !== 'function') {
+    const listFileTransferTasksBridge = filesClient.listFileTransferTasks()
+    if (!listFileTransferTasksBridge) {
       setTopNotice('文件传输任务加载服务不可用')
       return false
     }
@@ -10289,8 +10295,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const refreshFileSessionCatalog = async () => {
-    const listFileSessionCatalogBridge = window.aiops?.listFileSessionCatalog
-    if (typeof listFileSessionCatalogBridge !== 'function') {
+    const listFileSessionCatalogBridge = filesClient.listFileSessionCatalog()
+    if (!listFileSessionCatalogBridge) {
       setTopNotice('文件会话加载服务不可用')
       return null
     }
@@ -10354,8 +10360,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const persistFileSession = async (session: FileSessionInfo) => {
-    const saveFileSessionBridge = window.aiops?.saveFileSession
-    if (typeof saveFileSessionBridge !== 'function') {
+    const saveFileSessionBridge = filesClient.saveFileSession()
+    if (!saveFileSessionBridge) {
       setTopNotice('文件会话写入服务不可用')
       return null
     }
@@ -10370,8 +10376,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const updateFileSession = async (id: string, patch: FileSessionPatch) => {
     const session = fileSessions.value.find((item) => item.id === id)
     if (!session) return null
-    const updateFileSessionBridge = window.aiops?.updateFileSession
-    if (typeof updateFileSessionBridge !== 'function') {
+    const updateFileSessionBridge = filesClient.updateFileSession()
+    if (!updateFileSessionBridge) {
       setTopNotice('文件会话写入服务不可用')
       return null
     }
@@ -10398,8 +10404,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       ...(folder.scope ? { scope: folder.scope } : {})
     }
     if (!normalized.name) return null
-    const saveFileSessionFolderBridge = window.aiops?.saveFileSessionFolder
-    if (typeof saveFileSessionFolderBridge !== 'function') {
+    const saveFileSessionFolderBridge = filesClient.saveFileSessionFolder()
+    if (!saveFileSessionFolderBridge) {
       setTopNotice('文件会话文件夹写入服务不可用')
       return null
     }
@@ -10414,8 +10420,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const deleteFileSessionFolder = async (uuid: string) => {
-    const deleteFileSessionFolderBridge = window.aiops?.deleteFileSessionFolder
-    if (typeof deleteFileSessionFolderBridge !== 'function') {
+    const deleteFileSessionFolderBridge = filesClient.deleteFileSessionFolder()
+    if (!deleteFileSessionFolderBridge) {
       setTopNotice('文件会话文件夹删除服务不可用')
       return false
     }
@@ -10525,8 +10531,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const ensureFileSessionForTerminalPanel = async (panelId = activePanelId.value, side: 'left' | 'right' = fileSideForTerminalPanel()) => {
     const panel = panels.value.find((item) => item.id === panelId || item.sessionId === panelId)
     if (!panel || panel.kind === 'knowledge') return null
-    const saveFileSessionFromTerminalContextBridge = window.aiops?.saveFileSessionFromTerminalContext
-    if (typeof saveFileSessionFromTerminalContextBridge !== 'function') {
+    const saveFileSessionFromTerminalContextBridge = filesClient.saveFileSessionFromTerminalContext()
+    if (!saveFileSessionFromTerminalContextBridge) {
       setTopNotice('文件会话写入服务不可用')
       return null
     }
@@ -10564,8 +10570,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       openFileSession(assetId, side)
       return known
     }
-    const saveFileSessionFromTerminalContextBridge = window.aiops?.saveFileSessionFromTerminalContext
-    if (typeof saveFileSessionFromTerminalContextBridge !== 'function') {
+    const saveFileSessionFromTerminalContextBridge = filesClient.saveFileSessionFromTerminalContext()
+    if (!saveFileSessionFromTerminalContextBridge) {
       setTopNotice('文件会话写入服务不可用')
       return null
     }
@@ -10605,8 +10611,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       openFileSession(known.id, side)
       return known
     }
-    const saveFileSessionFromSftpPayloadBridge = window.aiops?.saveFileSessionFromSftpPayload
-    if (typeof saveFileSessionFromSftpPayloadBridge !== 'function') {
+    const saveFileSessionFromSftpPayloadBridge = filesClient.saveFileSessionFromSftpPayload()
+    if (!saveFileSessionFromSftpPayloadBridge) {
       setTopNotice('文件会话写入服务不可用')
       return null
     }
@@ -10675,8 +10681,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const cancelFileTransferTask = async (id: string) => {
-    const cancelFileTransferTaskBridge = window.aiops?.cancelFileTransferTask
-    if (typeof cancelFileTransferTaskBridge !== 'function') {
+    const cancelFileTransferTaskBridge = filesClient.cancelFileTransferTask()
+    if (!cancelFileTransferTaskBridge) {
       setTopNotice('取消传输任务服务不可用')
       return false
     }
@@ -10707,13 +10713,14 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const createSnippetGroup = async (groupName: string) => {
     const name = groupName.trim()
     if (!name) return null
-    if (!window.aiops?.saveQuickCommandGroup) {
+    const saveQuickCommandGroup = quickCommandsClient.saveQuickCommandGroup()
+    if (!saveQuickCommandGroup) {
       setTopNotice('快捷命令分组写入服务不可用')
       return null
     }
     let result
     try {
-      result = await window.aiops.saveQuickCommandGroup({ group_name: name })
+      result = await saveQuickCommandGroup({ group_name: name })
     } catch {
       setTopNotice('快捷命令分组写入失败')
       return null
@@ -10733,13 +10740,14 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const renameSnippetGroup = async (uuid: string, groupName: string) => {
     const name = groupName.trim()
     if (!name) return false
-    if (!window.aiops?.saveQuickCommandGroup) {
+    const saveQuickCommandGroup = quickCommandsClient.saveQuickCommandGroup()
+    if (!saveQuickCommandGroup) {
       setTopNotice('快捷命令分组写入服务不可用')
       return false
     }
     let result
     try {
-      result = await window.aiops.saveQuickCommandGroup({ uuid, group_name: name })
+      result = await saveQuickCommandGroup({ uuid, group_name: name })
     } catch {
       setTopNotice('快捷命令分组写入失败')
       return false
@@ -10757,13 +10765,14 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const deleteSnippetGroup = async (uuid: string) => {
-    if (!window.aiops?.deleteQuickCommandGroup) {
+    const deleteQuickCommandGroup = quickCommandsClient.deleteQuickCommandGroup()
+    if (!deleteQuickCommandGroup) {
       setTopNotice('快捷命令分组删除服务不可用')
       return false
     }
     let result
     try {
-      result = await window.aiops.deleteQuickCommandGroup(uuid)
+      result = await deleteQuickCommandGroup(uuid)
     } catch {
       setTopNotice('快捷命令分组删除失败')
       return false
@@ -10784,11 +10793,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const createQuickCommand = async (payload: Pick<QuickCommandSnippet, 'snippet_name' | 'snippet_content'> & { group_uuid?: string | null }) => {
     const snippetName = payload.snippet_name.trim()
     if (!snippetName || !payload.snippet_content) return null
-    if (!window.aiops?.saveQuickCommandSnippet) {
+    const saveQuickCommandSnippet = quickCommandsClient.saveQuickCommandSnippet()
+    if (!saveQuickCommandSnippet) {
       setTopNotice('快捷命令写入服务不可用')
       return null
     }
-    const result = await window.aiops.saveQuickCommandSnippet({
+    const result = await saveQuickCommandSnippet({
       snippet_name: snippetName,
       snippet_content: payload.snippet_content,
       group_uuid: payload.group_uuid ?? null
@@ -10813,12 +10823,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const updateQuickCommand = async (id: number, payload: Pick<QuickCommandSnippet, 'snippet_name' | 'snippet_content'> & { group_uuid?: string | null }) => {
     const snippetName = payload.snippet_name.trim()
     if (!snippetName || !payload.snippet_content) return false
-    if (!window.aiops?.saveQuickCommandSnippet) {
+    const saveQuickCommandSnippet = quickCommandsClient.saveQuickCommandSnippet()
+    if (!saveQuickCommandSnippet) {
       setTopNotice('快捷命令写入服务不可用')
       return false
     }
-    const result = await window.aiops
-      .saveQuickCommandSnippet({
+    const result = await saveQuickCommandSnippet({
         id,
         snippet_name: snippetName,
         snippet_content: payload.snippet_content,
@@ -10843,11 +10853,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const deleteQuickCommand = async (id: number) => {
-    if (!window.aiops?.deleteQuickCommandSnippet) {
+    const deleteQuickCommandSnippet = quickCommandsClient.deleteQuickCommandSnippet()
+    if (!deleteQuickCommandSnippet) {
       setTopNotice('快捷命令删除服务不可用')
       return false
     }
-    const result = await window.aiops.deleteQuickCommandSnippet(id).catch(() => null)
+    const result = await deleteQuickCommandSnippet(id).catch(() => null)
     if (!result) {
       setTopNotice('快捷命令删除失败')
       return false
@@ -10865,7 +10876,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const reorderQuickCommand = async (sourceId: number, targetId: number) => {
-    if (!window.aiops?.reorderQuickCommands) {
+    const reorderQuickCommands = quickCommandsClient.reorderQuickCommands()
+    if (!reorderQuickCommands) {
       setTopNotice('快捷命令排序服务不可用')
       return false
     }
@@ -10877,7 +10889,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     currentList.splice(targetIndex, 0, moved)
     const groupUuid = selectedSnippetGroupUuid.value || null
     const orderedIds = currentList.map((command) => command.id)
-    const result = await window.aiops.reorderQuickCommands({ orderedIds, groupUuid }).catch(() => null)
+    const result = await reorderQuickCommands({ orderedIds, groupUuid }).catch(() => null)
     if (!result) {
       setTopNotice('快捷命令排序失败')
       return false
@@ -10911,8 +10923,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const resolveQuickCommandScriptPlan = async (command: QuickCommandSnippet, autoExecute: boolean): Promise<QuickCommandScriptPlanResolution> => {
-    const planQuickCommandScriptBridge = window.aiops?.planQuickCommandScript
-    if (typeof planQuickCommandScriptBridge !== 'function') return { ok: false, reason: '快捷命令执行计划服务不可用' }
+    const planQuickCommandScriptBridge = quickCommandsClient.planQuickCommandScript()
+    if (!planQuickCommandScriptBridge) return { ok: false, reason: '快捷命令执行计划服务不可用' }
     try {
       const result = await planQuickCommandScriptBridge({ snippetId: command.id, autoExecute })
       if (!result) return { ok: false, reason: '快捷命令执行计划生成失败' }
@@ -10986,13 +10998,14 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     sleepThresholdMs = macroSleepThresholdMs.value
   ) => {
     if (!entries.length) return null
-    if (!window.aiops?.saveQuickCommandMacro) {
+    const saveQuickCommandMacro = quickCommandsClient.saveQuickCommandMacro()
+    if (!saveQuickCommandMacro) {
       setTopNotice('宏录制保存服务不可用')
       return null
     }
     let result
     try {
-      result = await window.aiops.saveQuickCommandMacro({
+      result = await saveQuickCommandMacro({
         snippet_name: snippetName,
         group_uuid: groupUuid,
         entries: entries.map((entry) => ({ command: entry.command, timestamp: entry.timestamp })),
