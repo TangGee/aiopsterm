@@ -20,7 +20,9 @@ import type {
   DatabaseWorkspaceCatalog,
   DatabaseTableMutation,
   DatabaseTableMutationPlanInput,
-  DatabaseTableInfo,
+  DatabaseTableInfo
+} from '@shared/contracts/database'
+import type {
   AiAgentSessionEvent,
   ManagedAiSessionEvent
 } from '@shared/preload'

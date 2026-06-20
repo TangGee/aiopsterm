@@ -2383,7 +2383,7 @@ import type {
   DatabaseTableMutationResult,
   DatabaseTableQueryResult,
   DatabaseWorkspaceCatalog
-} from '@shared/preload'
+} from '@shared/contracts/database'
 import type { LocalFileWriteResult } from '@shared/contracts/localFiles'
 
 type DbFilter =

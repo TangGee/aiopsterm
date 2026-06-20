@@ -55,7 +55,7 @@ import type {
   DatabaseTableMutationInput,
   DatabaseTableMutationPlanInput,
   DatabaseTableQueryInput
-} from '@shared/preload'
+} from '@shared/contracts/database'
 
 type RegisterDatabaseIpcInput = {
   showSaveDialog: (options: { defaultPath: string; filters: Array<{ name: string; extensions: string[] }> }) => Promise<{ canceled?: boolean; filePath?: string }>

@@ -6,7 +6,7 @@ import type {
   DatabasePageCommentRecord,
   DatabasePageCommentSaveInput,
   DatabasePageCommentSaveResult
-} from '@shared/preload'
+} from '@shared/contracts/database'
 
 type DatabaseCommentsRuntimeConfig = {
   stateFilePath?: string

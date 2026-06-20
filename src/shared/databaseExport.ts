@@ -1,4 +1,4 @@
-import type { DatabaseExportInput } from './preload'
+import type { DatabaseExportInput } from './contracts/database'
 
 const fileNameDatePart = (date: Date) => {
   const pad = (value: number) => String(value).padStart(2, '0')

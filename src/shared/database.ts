@@ -62,7 +62,7 @@ import type {
   DatabaseTableQueryResult,
   DatabaseSqlErrorDiagnosisInput,
   DatabaseSqlErrorDiagnosisResult
-} from './preload'
+} from './contracts/database'
 import { shouldUseDatabaseAiBackendDouble, shouldUseDatabaseSeedData as runtimeShouldUseDatabaseSeedData } from './runtimeSwitches'
 
 const supportedEngines = new Set(['mysql', 'mariadb', 'oceanbase', 'postgresql', 'kingbase', 'sqlite', 'oracle', 'sqlserver', 'clickhouse', 'presto'])

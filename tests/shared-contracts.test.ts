@@ -325,6 +325,38 @@ import type {
   AiMcpToolCallActionResult as AiMcpToolCallActionResultPreload,
   AiTodoSnapshotResult as AiTodoSnapshotResultPreload
 } from '../src/shared/preload'
+import type {
+  DatabaseAiDrawerResponseInput as DatabaseAiDrawerResponseInputContract,
+  DatabaseAiDrawerResponseResult as DatabaseAiDrawerResponseResultContract,
+  DatabaseAiPaneResponseResult as DatabaseAiPaneResponseResultContract,
+  DatabaseAiPaneStateSnapshot as DatabaseAiPaneStateSnapshotContract,
+  DatabaseConnectionSaveInput as DatabaseConnectionSaveInputContract,
+  DatabaseConnectionTestInput as DatabaseConnectionTestInputContract,
+  DatabaseConnectionTestResult as DatabaseConnectionTestResultContract,
+  DatabaseExportResult as DatabaseExportResultContract,
+  DatabasePageCommentKey as DatabasePageCommentKeyContract,
+  DatabaseSqlErrorDiagnosisInput as DatabaseSqlErrorDiagnosisInputContract,
+  DatabaseSqlExecuteResult as DatabaseSqlExecuteResultContract,
+  DatabaseTableMutationPlanResult as DatabaseTableMutationPlanResultContract,
+  DatabaseTableQueryInput as DatabaseTableQueryInputContract,
+  DatabaseWorkspaceCatalog as DatabaseWorkspaceCatalogContract
+} from '../src/shared/contracts/database'
+import type {
+  DatabaseAiDrawerResponseInput as DatabaseAiDrawerResponseInputPreload,
+  DatabaseAiDrawerResponseResult as DatabaseAiDrawerResponseResultPreload,
+  DatabaseAiPaneResponseResult as DatabaseAiPaneResponseResultPreload,
+  DatabaseAiPaneStateSnapshot as DatabaseAiPaneStateSnapshotPreload,
+  DatabaseConnectionSaveInput as DatabaseConnectionSaveInputPreload,
+  DatabaseConnectionTestInput as DatabaseConnectionTestInputPreload,
+  DatabaseConnectionTestResult as DatabaseConnectionTestResultPreload,
+  DatabaseExportResult as DatabaseExportResultPreload,
+  DatabasePageCommentKey as DatabasePageCommentKeyPreload,
+  DatabaseSqlErrorDiagnosisInput as DatabaseSqlErrorDiagnosisInputPreload,
+  DatabaseSqlExecuteResult as DatabaseSqlExecuteResultPreload,
+  DatabaseTableMutationPlanResult as DatabaseTableMutationPlanResultPreload,
+  DatabaseTableQueryInput as DatabaseTableQueryInputPreload,
+  DatabaseWorkspaceCatalog as DatabaseWorkspaceCatalogPreload
+} from '../src/shared/preload'
 
 type AssertAssignable<From, To extends From> = true
 
@@ -599,6 +631,34 @@ type AiChatResponsePreloadMatchesContract = AssertAssignable<AiChatResponseResul
 type AiChatResponseContractMatchesPreload = AssertAssignable<AiChatResponseResultPreload, AiChatResponseResultContract>
 type AiChatCancelPreloadMatchesContract = AssertAssignable<AiChatCancelResultContract, AiChatCancelResultPreload>
 type AiChatCancelContractMatchesPreload = AssertAssignable<AiChatCancelResultPreload, AiChatCancelResultContract>
+type DatabaseWorkspaceCatalogPreloadMatchesContract = AssertAssignable<DatabaseWorkspaceCatalogContract, DatabaseWorkspaceCatalogPreload>
+type DatabaseWorkspaceCatalogContractMatchesPreload = AssertAssignable<DatabaseWorkspaceCatalogPreload, DatabaseWorkspaceCatalogContract>
+type DatabaseConnectionTestInputPreloadMatchesContract = AssertAssignable<DatabaseConnectionTestInputContract, DatabaseConnectionTestInputPreload>
+type DatabaseConnectionTestInputContractMatchesPreload = AssertAssignable<DatabaseConnectionTestInputPreload, DatabaseConnectionTestInputContract>
+type DatabaseConnectionTestPreloadMatchesContract = AssertAssignable<DatabaseConnectionTestResultContract, DatabaseConnectionTestResultPreload>
+type DatabaseConnectionTestContractMatchesPreload = AssertAssignable<DatabaseConnectionTestResultPreload, DatabaseConnectionTestResultContract>
+type DatabaseConnectionSaveInputPreloadMatchesContract = AssertAssignable<DatabaseConnectionSaveInputContract, DatabaseConnectionSaveInputPreload>
+type DatabaseConnectionSaveInputContractMatchesPreload = AssertAssignable<DatabaseConnectionSaveInputPreload, DatabaseConnectionSaveInputContract>
+type DatabaseSqlExecutePreloadMatchesContract = AssertAssignable<DatabaseSqlExecuteResultContract, DatabaseSqlExecuteResultPreload>
+type DatabaseSqlExecuteContractMatchesPreload = AssertAssignable<DatabaseSqlExecuteResultPreload, DatabaseSqlExecuteResultContract>
+type DatabaseTableQueryInputPreloadMatchesContract = AssertAssignable<DatabaseTableQueryInputContract, DatabaseTableQueryInputPreload>
+type DatabaseTableQueryInputContractMatchesPreload = AssertAssignable<DatabaseTableQueryInputPreload, DatabaseTableQueryInputContract>
+type DatabaseTableMutationPlanPreloadMatchesContract = AssertAssignable<DatabaseTableMutationPlanResultContract, DatabaseTableMutationPlanResultPreload>
+type DatabaseTableMutationPlanContractMatchesPreload = AssertAssignable<DatabaseTableMutationPlanResultPreload, DatabaseTableMutationPlanResultContract>
+type DatabaseExportPreloadMatchesContract = AssertAssignable<DatabaseExportResultContract, DatabaseExportResultPreload>
+type DatabaseExportContractMatchesPreload = AssertAssignable<DatabaseExportResultPreload, DatabaseExportResultContract>
+type DatabasePageCommentKeyPreloadMatchesContract = AssertAssignable<DatabasePageCommentKeyContract, DatabasePageCommentKeyPreload>
+type DatabasePageCommentKeyContractMatchesPreload = AssertAssignable<DatabasePageCommentKeyPreload, DatabasePageCommentKeyContract>
+type DatabaseAiPaneStatePreloadMatchesContract = AssertAssignable<DatabaseAiPaneStateSnapshotContract, DatabaseAiPaneStateSnapshotPreload>
+type DatabaseAiPaneStateContractMatchesPreload = AssertAssignable<DatabaseAiPaneStateSnapshotPreload, DatabaseAiPaneStateSnapshotContract>
+type DatabaseAiPaneResponsePreloadMatchesContract = AssertAssignable<DatabaseAiPaneResponseResultContract, DatabaseAiPaneResponseResultPreload>
+type DatabaseAiPaneResponseContractMatchesPreload = AssertAssignable<DatabaseAiPaneResponseResultPreload, DatabaseAiPaneResponseResultContract>
+type DatabaseAiDrawerResponseInputPreloadMatchesContract = AssertAssignable<DatabaseAiDrawerResponseInputContract, DatabaseAiDrawerResponseInputPreload>
+type DatabaseAiDrawerResponseInputContractMatchesPreload = AssertAssignable<DatabaseAiDrawerResponseInputPreload, DatabaseAiDrawerResponseInputContract>
+type DatabaseAiDrawerResponsePreloadMatchesContract = AssertAssignable<DatabaseAiDrawerResponseResultContract, DatabaseAiDrawerResponseResultPreload>
+type DatabaseAiDrawerResponseContractMatchesPreload = AssertAssignable<DatabaseAiDrawerResponseResultPreload, DatabaseAiDrawerResponseResultContract>
+type DatabaseSqlErrorDiagnosisInputPreloadMatchesContract = AssertAssignable<DatabaseSqlErrorDiagnosisInputContract, DatabaseSqlErrorDiagnosisInputPreload>
+type DatabaseSqlErrorDiagnosisInputContractMatchesPreload = AssertAssignable<DatabaseSqlErrorDiagnosisInputPreload, DatabaseSqlErrorDiagnosisInputContract>
 
 describe('shared contract compatibility exports', () => {
   it('keeps Codex session contracts compatible through the preload export', () => {
@@ -1103,5 +1163,98 @@ describe('shared contract compatibility exports', () => {
     ] = [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true]
 
     expect(checks).toEqual([true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true])
+  })
+
+  it('keeps Database contracts compatible through the preload export', () => {
+    const checks: [
+      DatabaseWorkspaceCatalogPreloadMatchesContract,
+      DatabaseWorkspaceCatalogContractMatchesPreload,
+      DatabaseConnectionTestInputPreloadMatchesContract,
+      DatabaseConnectionTestInputContractMatchesPreload,
+      DatabaseConnectionTestPreloadMatchesContract,
+      DatabaseConnectionTestContractMatchesPreload,
+      DatabaseConnectionSaveInputPreloadMatchesContract,
+      DatabaseConnectionSaveInputContractMatchesPreload,
+      DatabaseSqlExecutePreloadMatchesContract,
+      DatabaseSqlExecuteContractMatchesPreload,
+      DatabaseTableQueryInputPreloadMatchesContract,
+      DatabaseTableQueryInputContractMatchesPreload,
+      DatabaseTableMutationPlanPreloadMatchesContract,
+      DatabaseTableMutationPlanContractMatchesPreload,
+      DatabaseExportPreloadMatchesContract,
+      DatabaseExportContractMatchesPreload,
+      DatabasePageCommentKeyPreloadMatchesContract,
+      DatabasePageCommentKeyContractMatchesPreload,
+      DatabaseAiPaneStatePreloadMatchesContract,
+      DatabaseAiPaneStateContractMatchesPreload,
+      DatabaseAiPaneResponsePreloadMatchesContract,
+      DatabaseAiPaneResponseContractMatchesPreload,
+      DatabaseAiDrawerResponseInputPreloadMatchesContract,
+      DatabaseAiDrawerResponseInputContractMatchesPreload,
+      DatabaseAiDrawerResponsePreloadMatchesContract,
+      DatabaseAiDrawerResponseContractMatchesPreload,
+      DatabaseSqlErrorDiagnosisInputPreloadMatchesContract,
+      DatabaseSqlErrorDiagnosisInputContractMatchesPreload
+    ] = [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+
+    expect(checks).toEqual([
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ])
   })
 })

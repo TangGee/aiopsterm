@@ -5,7 +5,8 @@ import {
   type DatabaseAiProviderTextResult,
   type DatabaseRuntimeConfig
 } from '@shared/database'
-import type { DatabaseConnectionTestInput, UserConfig } from '@shared/preload'
+import type { DatabaseConnectionTestInput } from '@shared/contracts/database'
+import type { UserConfig } from '@shared/preload'
 import { createProviderTextRequest, fetchProviderText, resolveModelProvider, type AiProviderTextMessage } from './modelProviderText'
 import { createSshProxySocket, type SshProxySocket } from './sshProxy'
 

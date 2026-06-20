@@ -1,6 +1,6 @@
 import { stat, writeFile } from 'fs/promises'
 import { isAbsolute } from 'path'
-import type { DatabaseExportInput, DatabaseExportResult } from '@shared/preload'
+import type { DatabaseExportInput, DatabaseExportResult } from '@shared/contracts/database'
 import { buildDatabaseExportCsv, sanitizeDatabaseExportFileName } from '@shared/databaseExport'
 
 type DatabaseExportWriteResult =
