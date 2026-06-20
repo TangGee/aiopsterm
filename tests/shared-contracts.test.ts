@@ -73,6 +73,18 @@ import type {
   FileSessionInfo as FileSessionInfoPreload,
   FileTransferOperationResult as FileTransferOperationResultPreload
 } from '../src/shared/preload'
+import type {
+  AiopsTrustedDeviceRevokeResult as AiopsTrustedDeviceRevokeResultContract,
+  AiopsUserAccountResult as AiopsUserAccountResultContract,
+  AiopsUserLoginInput as AiopsUserLoginInputContract,
+  AiopsUserMutationResult as AiopsUserMutationResultContract
+} from '../src/shared/contracts/userAccount'
+import type {
+  AiopsTrustedDeviceRevokeResult as AiopsTrustedDeviceRevokeResultPreload,
+  AiopsUserAccountResult as AiopsUserAccountResultPreload,
+  AiopsUserLoginInput as AiopsUserLoginInputPreload,
+  AiopsUserMutationResult as AiopsUserMutationResultPreload
+} from '../src/shared/preload'
 
 type AssertAssignable<From, To extends From> = true
 
@@ -131,6 +143,14 @@ type FileListEntryPreloadMatchesContract = AssertAssignable<FileListEntryContrac
 type FileListEntryContractMatchesPreload = AssertAssignable<FileListEntryPreload, FileListEntryContract>
 type FileTransferOperationPreloadMatchesContract = AssertAssignable<FileTransferOperationResultContract, FileTransferOperationResultPreload>
 type FileTransferOperationContractMatchesPreload = AssertAssignable<FileTransferOperationResultPreload, FileTransferOperationResultContract>
+type UserAccountResultPreloadMatchesContract = AssertAssignable<AiopsUserAccountResultContract, AiopsUserAccountResultPreload>
+type UserAccountResultContractMatchesPreload = AssertAssignable<AiopsUserAccountResultPreload, AiopsUserAccountResultContract>
+type UserLoginInputPreloadMatchesContract = AssertAssignable<AiopsUserLoginInputContract, AiopsUserLoginInputPreload>
+type UserLoginInputContractMatchesPreload = AssertAssignable<AiopsUserLoginInputPreload, AiopsUserLoginInputContract>
+type UserMutationPreloadMatchesContract = AssertAssignable<AiopsUserMutationResultContract, AiopsUserMutationResultPreload>
+type UserMutationContractMatchesPreload = AssertAssignable<AiopsUserMutationResultPreload, AiopsUserMutationResultContract>
+type TrustedDeviceRevokePreloadMatchesContract = AssertAssignable<AiopsTrustedDeviceRevokeResultContract, AiopsTrustedDeviceRevokeResultPreload>
+type TrustedDeviceRevokeContractMatchesPreload = AssertAssignable<AiopsTrustedDeviceRevokeResultPreload, AiopsTrustedDeviceRevokeResultContract>
 
 describe('shared contract compatibility exports', () => {
   it('keeps Codex session contracts compatible through the preload export', () => {
@@ -216,6 +236,21 @@ describe('shared contract compatibility exports', () => {
       FileListEntryContractMatchesPreload,
       FileTransferOperationPreloadMatchesContract,
       FileTransferOperationContractMatchesPreload
+    ] = [true, true, true, true, true, true, true, true]
+
+    expect(checks).toEqual([true, true, true, true, true, true, true, true])
+  })
+
+  it('keeps User Account contracts compatible through the preload export', () => {
+    const checks: [
+      UserAccountResultPreloadMatchesContract,
+      UserAccountResultContractMatchesPreload,
+      UserLoginInputPreloadMatchesContract,
+      UserLoginInputContractMatchesPreload,
+      UserMutationPreloadMatchesContract,
+      UserMutationContractMatchesPreload,
+      TrustedDeviceRevokePreloadMatchesContract,
+      TrustedDeviceRevokeContractMatchesPreload
     ] = [true, true, true, true, true, true, true, true]
 
     expect(checks).toEqual([true, true, true, true, true, true, true, true])

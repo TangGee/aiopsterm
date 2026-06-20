@@ -23,7 +23,7 @@ import type {
   AiopsUserLoginInput,
   AiopsUserPasswordInput,
   AiopsUserProfileUpdateInput
-} from '@shared/preload'
+} from '@shared/contracts/userAccount'
 
 export const registerUserAccountIpc = (ipcMain: IpcMain) => {
   ipcMain.handle('user:get-account', () => getUserAccount())

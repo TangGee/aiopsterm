@@ -1,5 +1,5 @@
+import type { AiopsMutationResult } from '@shared/contracts/common'
 import type {
-  AiopsMutationResult,
   AiopsTrustedDevice,
   AiopsTrustedDeviceRevokeResult,
   AiopsUserAvatarPrepareInput,
@@ -17,7 +17,7 @@ import type {
   AiopsUserPasswordInput,
   AiopsUserProfile,
   AiopsUserProfileUpdateInput
-} from '@shared/preload'
+} from '@shared/contracts/userAccount'
 import { normalizeExternalHttpUrl } from '@shared/externalUrl'
 import { shouldUseUserAccountCodeBackendDouble, shouldUseUserAccountSeedData } from '@shared/runtimeSwitches'
 import { createHash, randomBytes, randomInt, scryptSync, timingSafeEqual } from 'crypto'
