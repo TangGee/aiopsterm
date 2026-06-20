@@ -7,19 +7,16 @@ import { freemem, loadavg, totalmem, uptime } from 'os'
 import type { BrowserWindow, IpcMain } from 'electron'
 import { sendWindowEvent } from '@shared/windowEvents'
 import type {
-  AgentHookInstallerSource,
-  AiAgentSessionSource,
   ControlNotificationFocusRequest,
   ControlNotificationRecord,
   ControlRequest,
   ControlResponse,
   ControlSessionSnapshot,
   ControlTerminalSummary,
-  ControlWorkspaceSnapshot,
-  ManagedAiSessionDecisionKind,
-  ManagedAiSessionBulkOperation,
-  ManagedAiSessionRecord
+  ControlWorkspaceSnapshot
 } from '@shared/preload'
+import type { AgentHookInstallerSource } from '@shared/contracts/agentHooks'
+import type { AiAgentSessionSource, ManagedAiSessionBulkOperation, ManagedAiSessionDecisionKind, ManagedAiSessionRecord } from '@shared/contracts/managedAiSessions'
 import {
   bulkManagedAiSessions,
   clearManagedAiSession,

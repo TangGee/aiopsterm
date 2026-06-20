@@ -7,7 +7,7 @@ import type {
   AgentHookInstallerSnapshot,
   AgentHookInstallerStatus,
   AgentHookInstallerSource
-} from '@shared/preload'
+} from '@shared/contracts/agentHooks'
 
 type AgentHookInstallerRuntimeConfig = {
   getEnv?: () => NodeJS.ProcessEnv

@@ -6,14 +6,16 @@ import { randomUUID } from 'crypto'
 import type {
   ExternalCodexMcpConnection,
   ExternalCodexMcpHost,
-  ExternalCodexMcpResponse,
+  ExternalCodexMcpResponse
+} from '@shared/preload'
+import type {
   ManagedAiSessionClearInput,
   ManagedAiSessionDecisionKind,
   ManagedAiSessionFocusRequest,
   ManagedAiNotificationRecord,
   ManagedAiSessionRecord,
-  ManagedAiSessionReplyInput,
-} from '@shared/preload'
+  ManagedAiSessionReplyInput
+} from '@shared/contracts/managedAiSessions'
 import type { AiopsAssetRecord } from '@shared/contracts/assets'
 import type { TerminalLifecycleEvent } from '@shared/contracts/terminalSessions'
 import {

@@ -421,7 +421,7 @@ import { ArchiveX, Ban, Check, CheckCheck, Copy, LocateFixed, RefreshCw, RotateC
 import { useWorkspaceStore, type ManagedAiSession, type ManagedAiSessionState } from '@/stores/workspace'
 import { copyTextToClipboard } from '@/services/clipboardRuntime'
 import { useI18n } from '@/i18n'
-import type { AiAgentSessionEventName, AiAgentSessionSource } from '@shared/preload'
+import type { AiAgentSessionEventName, AiAgentSessionSource } from '@shared/contracts/managedAiSessions'
 
 const workspace = useWorkspaceStore()
 const { t } = useI18n()

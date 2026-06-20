@@ -39,7 +39,7 @@ import type {
   ManagedAiSessionSnapshot,
   ManagedAiSessionState,
   ManagedAiSessionTimelineEvent
-} from '@shared/preload'
+} from '@shared/contracts/managedAiSessions'
 
 export type AgentSessionEventSink = (event: AiAgentSessionEvent) => void
 export type ManagedAiSessionEventSink = (event: ManagedAiSessionEvent) => void

@@ -17,7 +17,7 @@ import {
   setAgentHibernationConfig,
   wakeManagedAiSession
 } from '../backend/agentSessions'
-import type { AiAgentSessionEventInput, ManagedAiSessionFocusRequest } from '@shared/preload'
+import type { AiAgentSessionEventInput, ManagedAiSessionFocusRequest } from '@shared/contracts/managedAiSessions'
 
 type RegisterManagedAiSessionsIpcInput = {
   emitAgentSessionEvent: Parameters<typeof publishAiAgentSessionEvent>[1]

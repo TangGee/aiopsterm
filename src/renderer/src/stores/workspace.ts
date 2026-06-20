@@ -94,25 +94,6 @@ import type {
   AppUpdateDownloadResult,
   AppUpdateInstallResult,
   AppUpdateProgressEvent,
-  AiAgentSessionEvent,
-  AiAgentSessionEventName,
-  AiAgentSessionSource,
-  AgentHookInstallerOperationResult,
-  AgentHookInstallerSnapshot,
-  AgentHookInstallerStatus,
-  AgentHookInstallerSource,
-  AgentHibernationConfig,
-  AgentHibernationConfigResult,
-  ManagedAiSessionBulkInput,
-  ManagedAiSessionBulkResult,
-  ManagedAiSessionHibernateResult,
-  ManagedAiSessionDecision,
-  ManagedAiSessionFocusRequest,
-  ManagedAiSessionListResult,
-  ManagedAiSessionMutationResult,
-  ManagedAiSessionRecord,
-  ManagedAiSessionSnapshot,
-  ManagedAiSessionTimelineEvent,
   AiChatChipContentPart,
   AiChatChipRef,
   AiCommandCatalogOption,
@@ -228,6 +209,29 @@ import type {
   UserRuleConfig,
   WorkspaceUserConfig
 } from '@shared/preload'
+import type {
+  AiAgentSessionEvent,
+  AiAgentSessionEventName,
+  AiAgentSessionSource,
+  AgentHibernationConfig,
+  AgentHibernationConfigResult,
+  ManagedAiSessionBulkInput,
+  ManagedAiSessionBulkResult,
+  ManagedAiSessionDecision,
+  ManagedAiSessionFocusRequest,
+  ManagedAiSessionHibernateResult,
+  ManagedAiSessionListResult,
+  ManagedAiSessionMutationResult,
+  ManagedAiSessionRecord,
+  ManagedAiSessionSnapshot,
+  ManagedAiSessionTimelineEvent
+} from '@shared/contracts/managedAiSessions'
+import type {
+  AgentHookInstallerOperationResult,
+  AgentHookInstallerSnapshot,
+  AgentHookInstallerStatus,
+  AgentHookInstallerSource
+} from '@shared/contracts/agentHooks'
 import type { TerminalDisconnectReason, TerminalExitEvent, TerminalLifecycleEvent, TerminalLifecycleStage, TerminalSessionInfo, TerminalSshConnectionInfo } from '@shared/contracts/terminalSessions'
 
 export type {

@@ -33,6 +33,26 @@ import type {
   AiopsAssetSnapshot as AiopsAssetSnapshotPreload,
   AiopsSshTunnelMutationResult as AiopsSshTunnelMutationResultPreload
 } from '../src/shared/preload'
+import type {
+  AiAgentSessionEvent as AiAgentSessionEventContract,
+  AgentHibernationConfigResult as AgentHibernationConfigResultContract,
+  ManagedAiNotificationMutationResult as ManagedAiNotificationMutationResultContract,
+  ManagedAiSessionMutationResult as ManagedAiSessionMutationResultContract
+} from '../src/shared/contracts/managedAiSessions'
+import type {
+  AiAgentSessionEvent as AiAgentSessionEventPreload,
+  AgentHibernationConfigResult as AgentHibernationConfigResultPreload,
+  ManagedAiNotificationMutationResult as ManagedAiNotificationMutationResultPreload,
+  ManagedAiSessionMutationResult as ManagedAiSessionMutationResultPreload
+} from '../src/shared/preload'
+import type {
+  AgentHookInstallerOperationResult as AgentHookInstallerOperationResultContract,
+  AgentHookInstallerStatus as AgentHookInstallerStatusContract
+} from '../src/shared/contracts/agentHooks'
+import type {
+  AgentHookInstallerOperationResult as AgentHookInstallerOperationResultPreload,
+  AgentHookInstallerStatus as AgentHookInstallerStatusPreload
+} from '../src/shared/preload'
 
 type AssertAssignable<From, To extends From> = true
 
@@ -64,6 +84,21 @@ type AssetImportPreviewPreloadMatchesContract = AssertAssignable<AiopsAssetImpor
 type AssetImportPreviewContractMatchesPreload = AssertAssignable<AiopsAssetImportPreviewResultPreload, AiopsAssetImportPreviewResultContract>
 type SshTunnelMutationPreloadMatchesContract = AssertAssignable<AiopsSshTunnelMutationResultContract, AiopsSshTunnelMutationResultPreload>
 type SshTunnelMutationContractMatchesPreload = AssertAssignable<AiopsSshTunnelMutationResultPreload, AiopsSshTunnelMutationResultContract>
+type AiAgentSessionEventPreloadMatchesContract = AssertAssignable<AiAgentSessionEventContract, AiAgentSessionEventPreload>
+type AiAgentSessionEventContractMatchesPreload = AssertAssignable<AiAgentSessionEventPreload, AiAgentSessionEventContract>
+type ManagedAiSessionMutationPreloadMatchesContract = AssertAssignable<ManagedAiSessionMutationResultContract, ManagedAiSessionMutationResultPreload>
+type ManagedAiSessionMutationContractMatchesPreload = AssertAssignable<ManagedAiSessionMutationResultPreload, ManagedAiSessionMutationResultContract>
+type AgentHibernationConfigPreloadMatchesContract = AssertAssignable<AgentHibernationConfigResultContract, AgentHibernationConfigResultPreload>
+type AgentHibernationConfigContractMatchesPreload = AssertAssignable<AgentHibernationConfigResultPreload, AgentHibernationConfigResultContract>
+type ManagedAiNotificationMutationPreloadMatchesContract = AssertAssignable<ManagedAiNotificationMutationResultContract, ManagedAiNotificationMutationResultPreload>
+type ManagedAiNotificationMutationContractMatchesPreload = AssertAssignable<
+  ManagedAiNotificationMutationResultPreload,
+  ManagedAiNotificationMutationResultContract
+>
+type AgentHookStatusPreloadMatchesContract = AssertAssignable<AgentHookInstallerStatusContract, AgentHookInstallerStatusPreload>
+type AgentHookStatusContractMatchesPreload = AssertAssignable<AgentHookInstallerStatusPreload, AgentHookInstallerStatusContract>
+type AgentHookOperationPreloadMatchesContract = AssertAssignable<AgentHookInstallerOperationResultContract, AgentHookInstallerOperationResultPreload>
+type AgentHookOperationContractMatchesPreload = AssertAssignable<AgentHookInstallerOperationResultPreload, AgentHookInstallerOperationResultContract>
 
 describe('shared contract compatibility exports', () => {
   it('keeps Codex session contracts compatible through the preload export', () => {
@@ -107,5 +142,24 @@ describe('shared contract compatibility exports', () => {
     ] = [true, true, true, true, true, true, true, true]
 
     expect(checks).toEqual([true, true, true, true, true, true, true, true])
+  })
+
+  it('keeps managed AI and agent hook contracts compatible through the preload export', () => {
+    const checks: [
+      AiAgentSessionEventPreloadMatchesContract,
+      AiAgentSessionEventContractMatchesPreload,
+      ManagedAiSessionMutationPreloadMatchesContract,
+      ManagedAiSessionMutationContractMatchesPreload,
+      AgentHibernationConfigPreloadMatchesContract,
+      AgentHibernationConfigContractMatchesPreload,
+      ManagedAiNotificationMutationPreloadMatchesContract,
+      ManagedAiNotificationMutationContractMatchesPreload,
+      AgentHookStatusPreloadMatchesContract,
+      AgentHookStatusContractMatchesPreload,
+      AgentHookOperationPreloadMatchesContract,
+      AgentHookOperationContractMatchesPreload
+    ] = [true, true, true, true, true, true, true, true, true, true, true, true]
+
+    expect(checks).toEqual([true, true, true, true, true, true, true, true, true, true, true, true])
   })
 })

@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createServer as createSocketServer } from 'node:net'
 import { afterEach, describe, expect, it } from 'vitest'
-import type { AgentHookInstallerSource } from '../src/shared/preload'
+import type { AgentHookInstallerSource } from '../src/shared/contracts/agentHooks'
 
 type AgentHookInstallerBackend = {
   configureAgentHookInstallerRuntime: (config?: {

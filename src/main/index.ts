@@ -115,11 +115,9 @@ import type {
   TerminalKeyboardInteractiveResult,
   TerminalLifecycleEvent
 } from '@shared/contracts/terminalSessions'
+import type { AiAgentSessionEvent, ManagedAiSessionEvent, ManagedAiSessionFocusRequest } from '@shared/contracts/managedAiSessions'
 import type {
   AliasCommandConfig,
-  AiAgentSessionEvent,
-  ManagedAiSessionEvent,
-  ManagedAiSessionFocusRequest,
   EditorUserConfig,
   KeywordHighlightUserConfig,
   KnowledgeBaseCreateResult,

@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import type { AgentHookInstallerSource } from '../src/shared/preload'
+import type { AgentHookInstallerSource } from '../src/shared/contracts/agentHooks'
 
 type AgentHookInstallerBackend = {
   agentHookCommandFor: (source: AgentHookInstallerSource, hookEvent: string, scriptPath?: string) => string

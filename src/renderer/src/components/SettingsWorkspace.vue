@@ -165,13 +165,7 @@
 <script setup lang="ts">
 import { computed, defineComponent, h, ref } from 'vue'
 import { BookOpen, Brain, CircleHelp, Copy, ExternalLink, Eye, EyeOff, FolderOpen, LockKeyhole, MessageSquare, Monitor, Play, Trash2, Upload, X } from 'lucide-vue-next'
-import {
-  settingsBackgroundPresets,
-  settingsLanguageOptions,
-  settingsNavItems,
-  settingsSecretPatterns,
-  settingsThemeOptions
-} from '@/config/settings'
+import { settingsBackgroundPresets, settingsLanguageOptions, settingsNavItems, settingsSecretPatterns, settingsThemeOptions } from '@/config/settings'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { backgroundImageCss } from '@/services/backgroundRuntime'
 import { renderMarkdownDocumentHtml } from '@/services/markdownRuntime'
@@ -179,7 +173,8 @@ import SettingsPanel from '@/components/panels/SettingsPanel.vue'
 import SettingsJsonEditor from '@/components/settings/SettingsJsonEditor.vue'
 import OnboardingGuide from '@/components/onboarding/OnboardingGuide.vue'
 import { useI18n } from '@/i18n'
-import type { AgentHookInstallerStatus, SettingsDocumentationPage } from '@shared/preload'
+import type { AgentHookInstallerStatus } from '@shared/contracts/agentHooks'
+import type { SettingsDocumentationPage } from '@shared/preload'
 
 const workspace = useWorkspaceStore()
 const { t } = useI18n()

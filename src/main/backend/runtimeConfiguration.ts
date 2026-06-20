@@ -59,12 +59,11 @@ import type {
   KnowledgeBaseNodeConfig,
   KubernetesTerminalDataEvent,
   KubernetesTerminalExitEvent,
-  ManagedAiSessionEvent,
-  ManagedAiSessionFocusRequest,
   McpConfigFile,
   SkillUserConfig,
   UserConfig
 } from '@shared/preload'
+import type { ManagedAiSessionEvent, ManagedAiSessionFocusRequest } from '@shared/contracts/managedAiSessions'
 
 type ConfigureMainRuntimeInput = {
   getConfig: () => UserConfig
