@@ -32,6 +32,63 @@
       />
     </div>
 
+    <section
+      v-if="workspace.managedAiSessions.length"
+      class="ai-sessions-cockpit"
+    >
+      <button
+        v-for="card in cockpitCards"
+        :key="card.key"
+        :class="{ active: card.active }"
+        @click="applyCockpitFilter(card.key)"
+      >
+        <strong>{{ card.value }}</strong>
+        <span>{{ card.label }}</span>
+      </button>
+    </section>
+
+    <section
+      v-if="workspace.managedAiSessions.length"
+      class="ai-sessions-context"
+    >
+      <label>
+        <span>Agent</span>
+        <select v-model="sourceFilter">
+          <option value="all">全部</option>
+          <option
+            v-for="source in sourceOptions"
+            :key="source"
+            :value="source"
+          >
+            {{ sourceLabel(source) }}
+          </option>
+        </select>
+      </label>
+      <label>
+        <span>项目</span>
+        <select v-model="projectFilter">
+          <option value="all">全部</option>
+          <option
+            v-for="project in projectOptions"
+            :key="project.key"
+            :value="project.key"
+          >
+            {{ project.label }}
+          </option>
+        </select>
+      </label>
+    </section>
+
+    <section
+      v-if="attentionQueue.length"
+      class="ai-sessions-attention-strip"
+    >
+      <button @click="selectSession(attentionQueue[0].id)">
+        <strong>{{ attentionQueue.length }} 个待处理</strong>
+        <span>{{ attentionQueue[0].title }} · {{ attentionQueue[0].summary || requestKindLabel(attentionQueue[0].requestKind) }}</span>
+      </button>
+    </section>
+
     <div class="ai-sessions-filter">
       <button
         v-for="option in filters"
@@ -83,6 +140,9 @@
               v-if="session.cwd"
               class="ai-session-cwd"
             >{{ session.cwd }}</small>
+            <small class="ai-session-foot">
+              {{ formatRelativeTime(session.lastActivityAt) }}{{ session.resumeCommand ? ' · 可恢复' : '' }}{{ session.hibernated ? ' · 已休眠' : '' }}
+            </small>
           </span>
           <button
             v-if="session.state === 'needsInput'"
@@ -333,8 +393,12 @@ const workspace = useWorkspaceStore()
 const query = ref('')
 const filter = ref<'all' | ManagedAiSessionState>('all')
 const eventFilter = ref<'all' | ManagedAiSession['events'][number]['requestKind']>('all')
+const sourceFilter = ref<'all' | AiAgentSessionSource>('all')
+const projectFilter = ref('all')
+const hibernatedOnly = ref(false)
 const replyText = ref('')
 const renameTitle = ref('')
+type CockpitFilterKey = 'all' | 'needsInput' | 'working' | 'idle' | 'ended' | 'hibernated'
 const filters: Array<{ key: 'all' | ManagedAiSessionState; label: string }> = [
   { key: 'all', label: '全部' },
   { key: 'needsInput', label: '待处理' },
@@ -442,10 +506,76 @@ const decisionLabel = (kind: string) => {
 
 const sessionKey = (session: Pick<ManagedAiSession, 'source' | 'id'>) => `${session.source}:${session.id}`
 
+const projectKeyFor = (cwd?: string) => {
+  const normalized = String(cwd || '').trim()
+  return normalized || '__unknown__'
+}
+
+const projectLabelFor = (cwd?: string) => {
+  const normalized = String(cwd || '').trim()
+  if (!normalized) return '未知路径'
+  const parts = normalized.split(/[\\/]+/).filter(Boolean)
+  return parts.at(-1) || normalized
+}
+
+const sourceOptions = computed(() => {
+  const sources = new Set<AiAgentSessionSource>()
+  workspace.sortedManagedAiSessions.forEach((session) => sources.add(session.source))
+  return [...sources].sort((first, second) => sourceLabel(first).localeCompare(sourceLabel(second)))
+})
+
+const projectOptions = computed(() => {
+  const projects = new Map<string, { key: string; label: string; count: number; latest: number }>()
+  workspace.sortedManagedAiSessions.forEach((session) => {
+    const key = projectKeyFor(session.cwd)
+    const existing = projects.get(key)
+    projects.set(key, {
+      key,
+      label: existing?.label || projectLabelFor(session.cwd),
+      count: (existing?.count || 0) + 1,
+      latest: Math.max(existing?.latest || 0, session.lastActivityAt || 0)
+    })
+  })
+  return [...projects.values()]
+    .sort((first, second) => second.latest - first.latest || first.label.localeCompare(second.label))
+    .map((project) => ({
+      ...project,
+      label: `${project.label} (${project.count})`
+    }))
+})
+
+const attentionQueue = computed(() =>
+  workspace.sortedManagedAiSessions.filter((session) => session.state === 'needsInput').sort((first, second) => second.lastActivityAt - first.lastActivityAt)
+)
+
+const hibernatedSessions = computed(() => workspace.sortedManagedAiSessions.filter((session) => session.hibernated))
+
+const cockpitCards = computed<Array<{ key: CockpitFilterKey; label: string; value: number; active: boolean }>>(() => [
+  { key: 'all', label: '总会话', value: workspace.managedAiSessions.length, active: filter.value === 'all' && !hibernatedOnly.value },
+  { key: 'needsInput', label: '待处理', value: attentionQueue.value.length, active: filter.value === 'needsInput' && !hibernatedOnly.value },
+  { key: 'working', label: '运行中', value: workspace.managedAiSessions.filter((session) => session.state === 'working').length, active: filter.value === 'working' && !hibernatedOnly.value },
+  { key: 'idle', label: '空闲', value: workspace.managedAiSessions.filter((session) => session.state === 'idle').length, active: filter.value === 'idle' && !hibernatedOnly.value },
+  { key: 'ended', label: '已结束', value: workspace.managedAiSessions.filter((session) => session.state === 'ended').length, active: filter.value === 'ended' && !hibernatedOnly.value },
+  { key: 'hibernated', label: '已休眠', value: hibernatedSessions.value.length, active: hibernatedOnly.value }
+])
+
+const applyCockpitFilter = (key: CockpitFilterKey) => {
+  if (key === 'hibernated') {
+    filter.value = 'all'
+    hibernatedOnly.value = true
+    return
+  }
+  filter.value = key
+  hibernatedOnly.value = false
+}
+
 const visibleSessions = computed(() => {
   const needle = query.value.trim().toLowerCase()
   return workspace.sortedManagedAiSessions.filter((session) => {
+    if (hibernatedOnly.value && session.hibernated !== true) return false
     if (filter.value !== 'all' && session.state !== filter.value) return false
+    if (sourceFilter.value !== 'all' && session.source !== sourceFilter.value) return false
+    if (projectFilter.value !== 'all' && projectKeyFor(session.cwd) !== projectFilter.value) return false
     if (!needle) return true
     return [session.title, session.summary, session.source, session.cwd, session.id].some((value) => String(value || '').toLowerCase().includes(needle))
   })
@@ -530,6 +660,16 @@ const formatTime = (timestamp: number) =>
     minute: '2-digit',
     second: '2-digit'
   }).format(new Date(timestamp))
+
+const formatRelativeTime = (timestamp: number) => {
+  const deltaSeconds = Math.max(0, Math.round((Date.now() - timestamp) / 1000))
+  if (deltaSeconds < 60) return `${deltaSeconds}s 前`
+  const deltaMinutes = Math.round(deltaSeconds / 60)
+  if (deltaMinutes < 60) return `${deltaMinutes}m 前`
+  const deltaHours = Math.round(deltaMinutes / 60)
+  if (deltaHours < 24) return `${deltaHours}h 前`
+  return `${Math.round(deltaHours / 24)}d 前`
+}
 </script>
 
 <style scoped>
@@ -596,6 +736,113 @@ const formatTime = (timestamp: number) =>
   gap: 6px;
   padding: 8px 12px;
   overflow-x: auto;
+}
+
+.ai-sessions-cockpit {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  padding: 8px 12px 0;
+}
+
+.ai-sessions-cockpit button {
+  min-width: 0;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--text-secondary);
+  padding: 7px 8px;
+  text-align: left;
+}
+
+.ai-sessions-cockpit button.active,
+.ai-sessions-cockpit button:hover {
+  border-color: var(--accent-color);
+  color: var(--text-primary);
+}
+
+.ai-sessions-cockpit strong,
+.ai-sessions-cockpit span {
+  display: block;
+}
+
+.ai-sessions-cockpit strong {
+  font-size: 16px;
+  line-height: 1.1;
+}
+
+.ai-sessions-cockpit span {
+  margin-top: 3px;
+  color: var(--text-muted);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-sessions-context {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px;
+  padding: 8px 12px 0;
+}
+
+.ai-sessions-context label {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.ai-sessions-context span {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.ai-sessions-context select {
+  width: 100%;
+  min-width: 0;
+  height: 28px;
+  border: 1px solid var(--border-color);
+  border-radius: 7px;
+  background: var(--surface-2);
+  color: var(--text-secondary);
+  outline: 0;
+  padding: 0 7px;
+}
+
+.ai-sessions-context select:focus {
+  border-color: var(--accent-color);
+  color: var(--text-primary);
+}
+
+.ai-sessions-attention-strip {
+  padding: 8px 12px 0;
+}
+
+.ai-sessions-attention-strip button {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid rgba(59, 130, 246, 0.38);
+  border-radius: 8px;
+  background: rgba(59, 130, 246, 0.12);
+  color: var(--text-primary);
+  padding: 8px 10px;
+  text-align: left;
+}
+
+.ai-sessions-attention-strip strong,
+.ai-sessions-attention-strip span {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-sessions-attention-strip span {
+  margin-top: 3px;
+  color: var(--text-muted);
+  font-size: 11px;
 }
 
 .ai-sessions-filter button,
@@ -686,6 +933,10 @@ const formatTime = (timestamp: number) =>
 }
 
 .ai-session-cwd {
+  color: var(--text-muted);
+}
+
+.ai-session-foot {
   color: var(--text-muted);
 }
 

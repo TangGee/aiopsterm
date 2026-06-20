@@ -758,6 +758,84 @@ describe('AppShell', () => {
     expect(store.activePanelId).toBe('panel-main')
   })
 
+  it('summarizes and filters managed AI sessions by status, agent, and project', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const store = useWorkspaceStore()
+    const dateNowSpy = vi.spyOn(Date, 'now').mockReturnValue(1717200600000)
+    let wrapper: VueWrapper | null = null
+    try {
+      store.upsertManagedAiSession({
+        source: 'claude-code',
+        event: 'permission_request',
+        sessionId: 'claude-attention-1',
+        title: 'Deploy approval',
+        summary: 'Approve release',
+        cwd: '/work/api',
+        requestKind: 'permission',
+        decisionMode: 'blocking',
+        actionable: true,
+        receivedAt: 1717200500000
+      })
+      store.upsertManagedAiSession({
+        source: 'codex',
+        event: 'stop',
+        sessionId: 'codex-idle-1',
+        title: 'Docs cleanup',
+        summary: 'Round finished',
+        cwd: '/work/docs',
+        requestKind: 'telemetry',
+        decisionMode: 'telemetry',
+        receivedAt: 1717200400000
+      })
+      store.upsertManagedAiSession({
+        source: 'gemini',
+        event: 'pre_tool_use',
+        sessionId: 'gemini-work-1',
+        title: 'API refactor',
+        summary: 'Reading files',
+        cwd: '/work/api',
+        requestKind: 'telemetry',
+        decisionMode: 'telemetry',
+        receivedAt: 1717200550000
+      })
+
+      wrapper = mount(AiSessionsPanel, {
+        global: {
+          plugins: [pinia]
+        }
+      })
+      await flushPromises()
+
+      expect(wrapper.find('.ai-sessions-cockpit').text()).toContain('总会话')
+      expect(wrapper.find('.ai-sessions-cockpit').text()).toContain('待处理')
+      expect(wrapper.find('.ai-sessions-attention-strip').text()).toContain('Deploy approval')
+      expect(wrapper.findAll('.ai-session-row')).toHaveLength(3)
+
+      await wrapper.find('.ai-sessions-attention-strip button').trigger('click')
+      await flushPromises()
+      expect(store.selectedManagedAiSessionKey).toBe('claude-code:claude-attention-1')
+
+      const sourceSelect = wrapper.findAll('.ai-sessions-context select').at(0)!
+      await sourceSelect.setValue('gemini')
+      await flushPromises()
+      expect(wrapper.findAll('.ai-session-row')).toHaveLength(1)
+      expect(wrapper.find('.ai-session-row').text()).toContain('API refactor')
+
+      await sourceSelect.setValue('all')
+      const projectSelect = wrapper.findAll('.ai-sessions-context select').at(1)!
+      await projectSelect.setValue('/work/api')
+      await flushPromises()
+      expect(wrapper.findAll('.ai-session-row')).toHaveLength(2)
+      expect(wrapper.text()).toContain('Deploy approval')
+      expect(wrapper.text()).toContain('API refactor')
+      expect(wrapper.text()).not.toContain('Docs cleanup')
+    } finally {
+      wrapper?.unmount()
+      dateNowSpy.mockRestore()
+    }
+  })
+
   it('filters and copies managed AI session timeline events', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
