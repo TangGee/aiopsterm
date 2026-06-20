@@ -2146,17 +2146,6 @@ const surfaceOperationPayload = (panel: TerminalPanel, action: string, extra: Re
 
 const normalizedSurfaceAction = (value: unknown) => controlText(value).toLowerCase().replace(/[-\s]+/g, '_')
 
-const unsupportedSurfaceActionPayload = (action: string, params: Record<string, unknown>, reason: string) =>
-  controlOk({
-    action,
-    unsupported: true,
-    unsupportedReason: reason,
-    browserDisabled: true,
-    browser_disabled: true,
-    ...(controlText(params.url) ? { url: controlText(params.url) } : {}),
-    snapshot: workspaceSnapshotForControl()
-  })
-
 const closeRelativeControlPanels = async (panel: TerminalPanel, mode: 'left' | 'right' | 'others') => {
   const panels = selectableControlPanels()
   const index = panels.findIndex((item) => item.id === panel.id)
@@ -2186,9 +2175,6 @@ const closeRelativeControlPanels = async (panel: TerminalPanel, mode: 'left' | '
 const handleSurfaceActionControlRequest = async (method: string, params: Record<string, unknown>) => {
   const action = normalizedSurfaceAction(params.action || params.name || params.command)
   if (!action) return controlFail('SURFACE_ACTION_REQUIRED', `${method} requires action.`)
-  if (['reload', 'reload_tab', 'duplicate', 'duplicate_tab', 'new_browser_right', 'new_browser_to_right', 'new_browser_tab_to_right'].includes(action)) {
-    return unsupportedSurfaceActionPayload(action, params, 'aiopsterm does not implement control_compat browser surfaces.')
-  }
   const panel = resolveControlSourceSurfacePanel(params)
   if (!panel) return controlFail('SURFACE_NOT_FOUND', 'Surface not found.')
   if (action === 'rename') {
@@ -2493,12 +2479,8 @@ const handlePaneManagementControlRequest = async (method: string, params: Record
   if (method === 'surface.create') {
     const type = controlText(params.type).toLowerCase()
     const url = controlText(params.url)
-    if (type === 'browser' || url) {
-      return controlFail('BROWSER_DISABLED', 'aiopsterm does not implement control_compat browser surfaces.', {
-        unsupported: true,
-        browserDisabled: true,
-        browser_disabled: true,
-        ...(url ? { url } : {}),
+    if (url || (type && !['terminal', 'local', 'shell'].includes(type))) {
+      return controlFail('SURFACE_CREATE_TYPE_UNSUPPORTED', 'surface.create only supports local terminal surfaces.', {
         ...(type ? { type } : {})
       })
     }

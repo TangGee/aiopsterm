@@ -58,18 +58,18 @@ The workspace metadata slice adds read-only model snapshots:
 - `surface.list`: list terminal and editor surfaces in the shared main work panel.
 - `surface.current`: return the currently active surface.
 - `surface.focus`: focus one visible surface in the shared main work panel.
-- `surface.create`: create one new local terminal surface in the shared main work panel. Browser/url surfaces are explicitly rejected because aiopsterm does not implement control_compat's browser surface.
+- `surface.create`: create one new local terminal surface in the shared main work panel.
 - `pane.create`: split from a source surface into one new shared-work-panel terminal surface.
 - `surface.report_tty`: record a surface TTY name reported by shell/bootstrap automation.
 - `surface.report_shell_state`: record whether a surface shell is at `prompt`, `running`, or `unknown`.
 - `surface.ports_kick`: record that automation requested a port-scan refresh for a surface. aiopsterm currently stores the kick metadata but does not synthesize listening-port results.
 
-The control_compat system/window/settings compatibility slice adds non-browser app automation:
+The control_compat system/window/settings compatibility slice adds local app automation:
 
 - `auth.login`: acknowledge the local control socket auth handshake. aiopsterm currently returns `authenticated=true` and `required=false` because access is scoped to the local per-process socket.
 - `auth.status`: return a control_compat-shaped auth status for automation probes. aiopsterm marks it unauthenticated/unconfigured because the local control socket does not use control_compat Stack Auth.
 - `auth.sign_in_url`: return an explicit unsupported local response with `url=null`; aiopsterm does not expose a control_compat Stack Auth sign-in flow.
-- `auth.begin_sign_in` and `auth.sign_out`: recognized control_compat auth-flow controls that return the same unauthenticated local status plus `unsupported=true`. aiopsterm does not launch a browser sign-in flow or mutate cloud auth state through the control socket.
+- `auth.begin_sign_in` and `auth.sign_out`: recognized control_compat auth-flow controls that return the same unauthenticated local status plus `unsupported=true`. aiopsterm does not mutate cloud auth state through the control socket.
 - `system.tree`: build a control_compat-style window/workspace/pane/surface tree from the renderer `workspace.snapshot` read model. aiopsterm maps the shared main work panel to one selected workspace named `main`.
 - `system.top`: return a control_compat-shaped task-manager payload with `sample`, `totals`, `memory_diagnostic`, `program_totals`, `coding_agents`, and `windows`. aiopsterm samples the main Node/Electron process and OS memory through Node APIs; it does not claim control_compat's macOS `proc_pidinfo` process tree attribution.
 - `system.memory`: return the memory-focused subset of `system.top`, including the same renderer tree when available and a Node/OS memory diagnostic.
@@ -89,7 +89,7 @@ The mobile terminal compatibility slice maps control_compat's mobile-host data-p
 
 - `mobile.host.status`: return local app/process identity, advertised mobile-terminal capability tokens, visible workspace/terminal counts, active surface id, and the current renderer snapshot when available.
 - `mobile.workspace.list`: return the same shared main workspace and visible terminal/surface list in a mobile-friendly shape. The bare `workspace.list` continues to use the normal workspace list payload.
-- `mobile.terminal.create` / `terminal.create`: create a visible local terminal surface through the existing `surface.create` path. Browser surfaces remain unsupported.
+- `mobile.terminal.create` / `terminal.create`: create a visible local terminal surface through the existing `surface.create` path.
 - `mobile.terminal.input` / `terminal.input`: write raw typed text to the resolved aiopsterm terminal session. Targets may use `surface_id`, `terminal_id`, `panelId`, or `session_id` style selectors.
 - `mobile.terminal.paste` / `terminal.paste`: send bracketed paste text to the resolved terminal and optionally submit it. Supported `submit_key` values are `return`, `enter`, `ctrl+enter`, and `none`.
 - `mobile.terminal.replay` / `terminal.replay`: return a cold-attach text snapshot from the xterm buffer, plus the effective terminal `columns` and `rows`. aiopsterm uses `snapshot_format=aiopsterm.text` instead of control_compat's Ghostty render-grid payload.
@@ -111,7 +111,7 @@ The project/file compatibility slice maps control_compat project openers onto ai
 
 - `markdown.open`: open a Knowledge file as a knowledge surface in the shared main work panel, with optional `line` / `startLine` and `endLine` jump metadata.
 - `file.open`: open one or more Knowledge files through `path` or `paths`. Arbitrary absolute local files are recognized but return `unsupported=true` because aiopsterm does not yet expose a generic local-file surface in the shared terminal workspace.
-- `project.open`: create or focus a project compatibility surface. If `path` points to a Knowledge file, the file is opened; otherwise aiopsterm records project metadata on a terminal surface without creating an Xcode-style project browser.
+- `project.open`: create or focus a project compatibility surface. If `path` points to a Knowledge file, the file is opened; otherwise aiopsterm records project metadata on a terminal surface without creating an Xcode-style project navigator.
 - `project.set_tab`, `project.set_scheme`, `project.set_configuration`, `project.set_selected_target`, `project.set_selected_file`, and `project.set_settings_filter`: update renderer-owned project compatibility metadata for automation scripts that expect these control_compat methods.
 - `project.get_state`: return the stored project compatibility state. Xcode-only concepts such as schemes, targets, and build settings are marked with `unsupported=true` until aiopsterm has a native equivalent.
 
@@ -199,8 +199,7 @@ The surface resume slice adds control_compat-style resume bindings for visible w
 
 The surface action slice adds control_compat-style action dispatch for shared work-panel terminal surfaces:
 
-- `surface.action`, `tab.action`, and `workspace.action`: run non-browser actions against the selected surface or workspace. Implemented actions include `rename`, `clear_name`, `new_terminal_right`, `close_left`, `close_right`, `close_others`, and the detach-to-workspace aliases, which map to aiopsterm's visible terminal panel model.
-- Browser actions such as `reload`, `duplicate`, and `new_browser_right` return structured unsupported responses because aiopsterm does not implement control_compat browser surfaces.
+- `surface.action`, `tab.action`, and `workspace.action`: run supported actions against the selected surface or workspace. Implemented actions include `rename`, `clear_name`, `new_terminal_right`, `close_left`, `close_right`, `close_others`, and the detach-to-workspace aliases, which map to aiopsterm's visible terminal panel model.
 - `pin`, `unpin`, `mark_read`, and `mark_unread` currently return structured unsupported responses; aiopsterm has workspace-group pinning and AI/notification unread state, but not per-surface pin/unread state.
 
 The events slice adds a control_compat-style local JSONL stream for automation:

@@ -7345,8 +7345,8 @@ describe('AppShell', () => {
     expect(store.panels).toHaveLength(1)
     expect(store.activePanelId).toBe(anchorPanelId)
 
-    const unsupportedBrowser = await controlHandler!({ id: 'surface-action-browser', method: 'surface.action', params: { surfaceId: anchorPanelId, action: 'new_browser_right', url: 'https://example.com' } })
-    expect(unsupportedBrowser).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ unsupported: true, browserDisabled: true }) }))
+    const unknownAction = await controlHandler!({ id: 'surface-action-unknown', method: 'surface.action', params: { surfaceId: anchorPanelId, action: 'open_preview_right' } })
+    expect(unknownAction).toEqual(expect.objectContaining({ ok: false, errorCode: 'SURFACE_ACTION_UNKNOWN' }))
 
     const workspaceRename = await controlHandler!({ id: 'workspace-action-rename', method: 'workspace.action', params: { workspaceId: anchorPanelId, action: 'rename', title: 'Workspace Shell' } })
     expect(workspaceRename).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ action: 'rename', workspaceId: 'main' }) }))

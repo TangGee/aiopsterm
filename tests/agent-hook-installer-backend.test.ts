@@ -139,7 +139,7 @@ describe('agent hook installer backend', () => {
     expect(geminiHooks.SessionStart[0].hooks[0].command).toBe(agentHookCommandFor('gemini', 'SessionStart', '/opt/aiopsterm/aiopsterm-agent-hook.js'))
   })
 
-  it('exposes control_compat-style non-browser agent installers', async () => {
+  it('exposes control_compat-style agent installers', async () => {
     const { __testing } = await loadBackend()
     expect(__testing.hookDefinitions.map((definition) => definition.source)).toEqual(
       expect.arrayContaining(['opencode', 'amp', 'pi', 'omp', 'kiro', 'rovodev'])

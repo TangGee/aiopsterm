@@ -1547,7 +1547,7 @@ const unsupportedAuthStatusPayload = (action: 'begin_sign_in' | 'sign_out') => (
   completed: false,
   unsupported_reason:
     action === 'begin_sign_in'
-      ? 'aiopsterm does not expose a control_compat Stack Auth browser sign-in flow.'
+      ? 'aiopsterm does not use control_compat Stack Auth for the local control socket.'
       : 'aiopsterm has no control_compat Stack Auth session to sign out from.'
 })
 

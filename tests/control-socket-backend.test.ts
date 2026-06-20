@@ -1541,8 +1541,7 @@ describe('control socket backend', () => {
             surface: { panelId: params.surfaceId || params.panelId || params.workspaceId || 'panel-1', surfaceKind: 'terminal' },
             action: params.action,
             changed: true,
-            createdSurface: params.action === 'new_terminal_right' ? { panelId: 'panel-new', surfaceKind: 'terminal' } : undefined,
-            unsupported: params.action === 'new_browser_right'
+            createdSurface: params.action === 'new_terminal_right' ? { panelId: 'panel-new', surfaceKind: 'terminal' } : undefined
           }
         }
       }
