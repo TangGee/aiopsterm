@@ -1695,6 +1695,27 @@ import {
   setAiPanelCommandExecutionState as setCommandExecutionState,
   type AiPanelCommandSuggestionMessage as CommandSuggestionMessage
 } from '@/services/aiPanelMessageRuntime'
+import {
+  activateAiChatSearchMatch,
+  aiConversationTabTooltip,
+  aiHistoryDateLabel,
+  clearAiChatSearchHighlights,
+  closeAiConversationTab,
+  displayAiConversationTitle,
+  ensureAiConversationTabId,
+  filterAiHistoryConversations,
+  formatAiHistoryTime,
+  groupAiHistoryConversations,
+  hasMoreAiHistoryConversations,
+  nextAiChatSearchPosition,
+  nextAiHistoryPageAfterDelete,
+  previousAiChatSearchPosition,
+  pruneAiConversationTabIds,
+  runAiChatSearchHighlights,
+  visibleAiConversationTabs,
+  visibleAiHistoryConversations,
+  type AiPanelChatSearchMatch
+} from '@/services/aiPanelConversationRuntime'
 import { aiChatClient } from '@/services/aiChatClient'
 import { copyTextToClipboard } from '@/services/clipboardRuntime'
 import { codexSessionClient } from '@/services/codexSessionClient'
@@ -1935,16 +1956,10 @@ const voiceButtonTitle = computed(() => {
   return '开始语音输入'
 })
 const currentChatMode = computed(() => aiChatModeOptions.find((option) => option.id === chatMode.value) || aiChatModeOptions[0])
-const visibleConversationTabs = computed(() => {
-  const conversationsById = new Map(workspace.conversations.map((conversation) => [conversation.id, conversation]))
-  return openConversationTabIds.value.map((id) => conversationsById.get(id)).filter((conversation): conversation is ConversationItem => Boolean(conversation))
-})
-const displayConversationTitle = (conversation: Pick<ConversationItem, 'title'>) => conversation.title.trim() || t('ai.untitledChat')
-const conversationTabTooltip = (conversation: ConversationItem) => {
-  const title = displayConversationTitle(conversation)
-  const summary = conversation.summary.trim()
-  return summary && summary !== title ? `${title}\n${summary}` : title
-}
+const visibleConversationTabs = computed(() => visibleAiConversationTabs(openConversationTabIds.value, workspace.conversations))
+const displayConversationTitle = (conversation: Pick<ConversationItem, 'title'>) =>
+  displayAiConversationTitle(conversation, t('ai.untitledChat'))
+const conversationTabTooltip = (conversation: ConversationItem) => aiConversationTabTooltip(conversation, t('ai.untitledChat'))
 const currentPanelTarget = computed(() => {
   const target = currentCodexTargetContext()
   return target.sessionId && target.kind !== 'unknown' ? target : null
@@ -2036,36 +2051,32 @@ const filteredCodexHostTargets = computed(() => {
     .slice(0, 20)
 })
 const ensureConversationTab = (id: string) => {
-  if (!id || openConversationTabIds.value.includes(id) || !workspace.conversations.some((conversation) => conversation.id === id)) return
-  openConversationTabIds.value = [...openConversationTabIds.value, id]
+  openConversationTabIds.value = ensureAiConversationTabId(openConversationTabIds.value, workspace.conversations, id)
 }
 
 const pruneConversationTabs = () => {
-  const existingIds = new Set(workspace.conversations.map((conversation) => conversation.id))
-  const nextIds = openConversationTabIds.value.filter((id) => existingIds.has(id))
-  if (nextIds.length !== openConversationTabIds.value.length) openConversationTabIds.value = nextIds
+  openConversationTabIds.value = pruneAiConversationTabIds(openConversationTabIds.value, workspace.conversations)
 }
-const filteredHistoryConversations = computed(() => {
-  const keyword = historySearchTerm.value.trim().toLowerCase()
-  return workspace.sortedConversations.filter((conversation) => {
-    const matchesSearch = !keyword || conversation.title.toLowerCase().includes(keyword)
-    const matchesFavorite = !historyFavoritesOnly.value || conversation.favorite
-    return matchesSearch && matchesFavorite
-  })
-})
-const visibleHistoryConversations = computed(() => filteredHistoryConversations.value.slice(0, historyCurrentPage.value * historyPageSize))
-const hasMoreHistoryConversations = computed(() => visibleHistoryConversations.value.length < filteredHistoryConversations.value.length)
+const historyLabels = computed(() => ({
+  today: t('ai.historyToday'),
+  yesterday: t('ai.historyYesterday'),
+  daysAgo: (count: number) => t('ai.historyDaysAgo').replace('{count}', String(count)),
+  favoriteGroup: t('ai.historyFavoriteGroup')
+}))
+const filteredHistoryConversations = computed(() =>
+  filterAiHistoryConversations(workspace.sortedConversations, historySearchTerm.value, historyFavoritesOnly.value)
+)
+const visibleHistoryConversations = computed(() =>
+  visibleAiHistoryConversations(filteredHistoryConversations.value, historyCurrentPage.value, historyPageSize)
+)
+const hasMoreHistoryConversations = computed(() =>
+  hasMoreAiHistoryConversations(filteredHistoryConversations.value.length, visibleHistoryConversations.value.length)
+)
 const groupedVisibleHistory = computed(() => {
-  const groups = new Map<string, ConversationItem[]>()
-  visibleHistoryConversations.value.forEach((conversation) => {
-    const label = historyFavoritesOnly.value ? historyFavoriteLabel.value : historyDateLabel(conversation.ts)
-    if (!groups.has(label)) groups.set(label, [])
-    groups.get(label)!.push(conversation)
-  })
-  return Array.from(groups.entries()).map(([label, items]) => ({
-    label,
-    items: [...items].sort((first, second) => second.ts - first.ts)
-  }))
+  const labels = historyLabels.value
+  return groupAiHistoryConversations(visibleHistoryConversations.value, (conversation) =>
+    historyFavoritesOnly.value ? labels.favoriteGroup : aiHistoryDateLabel(conversation.ts, new Date(), locale.value, labels)
+  )
 })
 
 const loadClassicChatData = async () => {
@@ -2609,33 +2620,10 @@ const closeModelMenu = () => {
   modelQuery.value = ''
 }
 
-const historyDateLabel = (timestamp: number) => {
-  const date = new Date(timestamp || Date.now())
-  const today = new Date()
-  const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime()
-  const startOfTarget = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime()
-  const diffDays = Math.floor((startOfToday - startOfTarget) / (1000 * 60 * 60 * 24))
-  if (diffDays <= 0) return t('ai.historyToday')
-  if (diffDays === 1) return t('ai.historyYesterday')
-  if (diffDays < 7) return t('ai.historyDaysAgo').replace('{count}', String(diffDays))
-  return date.toLocaleDateString(locale.value, { month: '2-digit', day: '2-digit' })
-}
-
-const formatHistoryTime = (timestamp: number) => {
-  const date = new Date(timestamp || Date.now())
-  const today = new Date()
-  if (date.toDateString() === today.toDateString()) {
-    return date.toLocaleTimeString(locale.value, { hour: '2-digit', minute: '2-digit' })
-  }
-  return historyDateLabel(timestamp)
-}
-
-type ChatSearchMatch = {
-  element: HTMLElement
-}
-
 const chatSearchMarks: HTMLElement[] = []
-const chatSearchMatches: ChatSearchMatch[] = []
+const chatSearchMatches: AiPanelChatSearchMatch[] = []
+
+const formatHistoryTime = (timestamp: number) => formatAiHistoryTime(timestamp, new Date(), locale.value, historyLabels.value)
 
 const getCurrentConversationTitle = () =>
   workspace.conversations.find((conversation) => conversation.id === workspace.selectedConversationId)?.title || 'Chat Export'
@@ -3004,23 +2992,17 @@ const restoreConversationFromTab = async (id: string) => {
 
 const closeConversationTab = async (id: string) => {
   closeHistoryMenu()
-  const visibleTabs = visibleConversationTabs.value
-  if (visibleTabs.length <= 1) {
+  const result = closeAiConversationTab(openConversationTabIds.value, visibleConversationTabs.value, workspace.selectedConversationId, id)
+  if (result.status === 'keep-one') {
     showChatExportNotice(t('ai.keepOneTab'))
     return
   }
-  openConversationTabIds.value = openConversationTabIds.value.filter((openId) => openId !== id)
-  if (workspace.selectedConversationId !== id) {
+  openConversationTabIds.value = result.openIds
+  if (result.status === 'closed-inactive' || result.status === 'closed') {
     showChatExportNotice(t('ai.tabClosed'))
     return
   }
-  const closedIndex = visibleTabs.findIndex((conversation) => conversation.id === id)
-  const nextConversation = visibleTabs[closedIndex + 1] || visibleTabs[closedIndex - 1]
-  if (nextConversation) {
-    await restoreConversationById(nextConversation.id, t('ai.tabClosed'), t('ai.chatRestoreFailed'))
-    return
-  }
-  showChatExportNotice(t('ai.tabClosed'))
+  await restoreConversationById(result.nextConversationId, t('ai.tabClosed'), t('ai.chatRestoreFailed'))
 }
 
 const restoreHistoryConversation = async (id: string) => {
@@ -3055,9 +3037,7 @@ const saveHistoryTitle = async (id: string) => {
 
 const deleteHistoryConversation = async (id: string) => {
   const deleted = await workspace.deleteConversation(id)
-  if (visibleHistoryConversations.value.length === 0 && historyCurrentPage.value > 1) {
-    historyCurrentPage.value -= 1
-  }
+  historyCurrentPage.value = nextAiHistoryPageAfterDelete(visibleHistoryConversations.value.length, historyCurrentPage.value)
   showChatExportNotice(deleted ? t('ai.chatDeleted') : t('ai.chatDeleteFailed'))
 }
 
@@ -3080,63 +3060,14 @@ const loadMoreHistoryConversations = async () => {
 }
 
 const clearChatHighlights = () => {
-  chatSearchMarks.splice(0).forEach((mark) => {
-    const parent = mark.parentNode
-    if (!parent) return
-    parent.replaceChild(document.createTextNode(mark.textContent || ''), mark)
-    parent.normalize()
-  })
+  clearAiChatSearchHighlights(chatSearchMarks)
   chatSearchMatches.splice(0)
   chatSearchMatchCount.value = 0
   chatSearchCurrentIndex.value = 0
 }
 
-const isSearchableChatTextNode = (node: Node) => {
-  const parent = node.parentElement
-  if (!parent) return false
-  if (!node.textContent?.trim()) return false
-  if (parent.closest('.ai-chat-search-bar')) return false
-  if (parent.closest('.chat-input')) return false
-  if (parent.closest('.user-message-edit-container')) return false
-  if (parent.closest('button')) return false
-  return Boolean(parent.closest('.message'))
-}
-
-const findChatTextRanges = (root: HTMLElement, term: string) => {
-  const ranges: Range[] = []
-  const lowerTerm = term.toLowerCase()
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
-    acceptNode(node) {
-      return isSearchableChatTextNode(node) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT
-    }
-  })
-
-  let node = walker.nextNode() as Text | null
-  while (node) {
-    const text = node.data.toLowerCase()
-    let offset = 0
-    while (true) {
-      const index = text.indexOf(lowerTerm, offset)
-      if (index === -1) break
-      const range = document.createRange()
-      range.setStart(node, index)
-      range.setEnd(node, index + term.length)
-      ranges.push(range)
-      offset = index + 1
-    }
-    node = walker.nextNode() as Text | null
-  }
-  return ranges
-}
-
 const setActiveChatSearchMatch = (index: number) => {
-  chatSearchMatches.forEach((match) => match.element.classList.remove('active'))
-  const match = chatSearchMatches[index]
-  if (!match) return
-  match.element.classList.add('active')
-  if (typeof match.element.scrollIntoView === 'function') {
-    match.element.scrollIntoView({ behavior: 'smooth', block: 'center' })
-  }
+  activateAiChatSearchMatch(chatSearchMatches, index)
 }
 
 const runChatSearch = () => {
@@ -3145,23 +3076,11 @@ const runChatSearch = () => {
   const term = chatSearchTerm.value.trim()
   if (!root || !term) return
 
-  const ranges = findChatTextRanges(root, term)
-  for (let index = ranges.length - 1; index >= 0; index -= 1) {
-    const mark = document.createElement('mark')
-    mark.className = 'ai-chat-search-highlight'
-    try {
-      ranges[index].surroundContents(mark)
-      chatSearchMarks.unshift(mark)
-    } catch {
-      // Ignore ranges that cannot be wrapped in the rendered DOM.
-    }
-  }
-  chatSearchMarks.forEach((element) => chatSearchMatches.push({ element }))
-  chatSearchMatchCount.value = chatSearchMatches.length
-  if (chatSearchMatches.length > 0) {
-    chatSearchCurrentIndex.value = 1
-    setActiveChatSearchMatch(0)
-  }
+  const result = runAiChatSearchHighlights(root, term)
+  chatSearchMarks.push(...result.marks)
+  chatSearchMatches.push(...result.matches)
+  chatSearchMatchCount.value = result.matchCount
+  chatSearchCurrentIndex.value = result.currentIndex
 }
 
 const scheduleChatSearch = () => {
@@ -3199,17 +3118,17 @@ const clearChatSearch = async () => {
 }
 
 const findNextChatMatch = () => {
-  if (chatSearchMatches.length === 0) return
-  const nextIndex = chatSearchCurrentIndex.value >= chatSearchMatches.length ? 0 : chatSearchCurrentIndex.value
-  chatSearchCurrentIndex.value = nextIndex + 1
-  setActiveChatSearchMatch(nextIndex)
+  const next = nextAiChatSearchPosition(chatSearchCurrentIndex.value, chatSearchMatches.length)
+  if (!next) return
+  chatSearchCurrentIndex.value = next.currentIndex
+  setActiveChatSearchMatch(next.activeIndex)
 }
 
 const findPreviousChatMatch = () => {
-  if (chatSearchMatches.length === 0) return
-  const previousIndex = chatSearchCurrentIndex.value <= 1 ? chatSearchMatches.length - 1 : chatSearchCurrentIndex.value - 2
-  chatSearchCurrentIndex.value = previousIndex + 1
-  setActiveChatSearchMatch(previousIndex)
+  const previous = previousAiChatSearchPosition(chatSearchCurrentIndex.value, chatSearchMatches.length)
+  if (!previous) return
+  chatSearchCurrentIndex.value = previous.currentIndex
+  setActiveChatSearchMatch(previous.activeIndex)
 }
 
 type AiCommandOption = AiCommandCatalogOption
