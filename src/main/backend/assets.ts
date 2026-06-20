@@ -31,12 +31,10 @@ import type {
   AiopsKeychainInput,
   AiopsKeychainRecord,
   AiopsKeychainType,
-  AiopsMutationResult,
   AiopsOrganizationAssetRefreshInput,
-  AiopsOrganizationAssetRefreshResult,
-  SshAgentKeychainOption,
-  UserConfig
-} from '@shared/preload'
+  AiopsOrganizationAssetRefreshResult
+} from '@shared/contracts/assets'
+import type { AiopsMutationResult, SshAgentKeychainOption, UserConfig } from '@shared/preload'
 import { parseAssetImportContent, type ImportedAssetDraft } from '@shared/assetImport'
 import { shouldUseAssetsSeedData } from '@shared/runtimeSwitches'
 import { createConfiguredSshAgentAuth } from './sshAgent'

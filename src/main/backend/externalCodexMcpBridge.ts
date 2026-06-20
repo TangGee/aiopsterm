@@ -4,7 +4,6 @@ import { dirname, join } from 'path'
 import { mkdir } from 'fs/promises'
 import { randomUUID } from 'crypto'
 import type {
-  AiopsAssetRecord,
   ExternalCodexMcpConnection,
   ExternalCodexMcpHost,
   ExternalCodexMcpResponse,
@@ -15,6 +14,7 @@ import type {
   ManagedAiSessionRecord,
   ManagedAiSessionReplyInput,
 } from '@shared/preload'
+import type { AiopsAssetRecord } from '@shared/contracts/assets'
 import type { TerminalLifecycleEvent } from '@shared/contracts/terminalSessions'
 import {
   clearManagedAiSession,

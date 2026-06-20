@@ -21,6 +21,18 @@ import type {
   TerminalLifecycleEvent as TerminalLifecycleEventPreload,
   TerminalWriteResult as TerminalWriteResultPreload
 } from '../src/shared/preload'
+import type {
+  AiopsAssetImportPreviewResult as AiopsAssetImportPreviewResultContract,
+  AiopsAssetInput as AiopsAssetInputContract,
+  AiopsAssetSnapshot as AiopsAssetSnapshotContract,
+  AiopsSshTunnelMutationResult as AiopsSshTunnelMutationResultContract
+} from '../src/shared/contracts/assets'
+import type {
+  AiopsAssetImportPreviewResult as AiopsAssetImportPreviewResultPreload,
+  AiopsAssetInput as AiopsAssetInputPreload,
+  AiopsAssetSnapshot as AiopsAssetSnapshotPreload,
+  AiopsSshTunnelMutationResult as AiopsSshTunnelMutationResultPreload
+} from '../src/shared/preload'
 
 type AssertAssignable<From, To extends From> = true
 
@@ -44,6 +56,14 @@ type TerminalKeyboardInteractiveContractMatchesPreload = AssertAssignable<
 >
 type TerminalWriteResultPreloadMatchesContract = AssertAssignable<TerminalWriteResultContract, TerminalWriteResultPreload>
 type TerminalWriteResultContractMatchesPreload = AssertAssignable<TerminalWriteResultPreload, TerminalWriteResultContract>
+type AssetInputPreloadMatchesContract = AssertAssignable<AiopsAssetInputContract, AiopsAssetInputPreload>
+type AssetInputContractMatchesPreload = AssertAssignable<AiopsAssetInputPreload, AiopsAssetInputContract>
+type AssetSnapshotPreloadMatchesContract = AssertAssignable<AiopsAssetSnapshotContract, AiopsAssetSnapshotPreload>
+type AssetSnapshotContractMatchesPreload = AssertAssignable<AiopsAssetSnapshotPreload, AiopsAssetSnapshotContract>
+type AssetImportPreviewPreloadMatchesContract = AssertAssignable<AiopsAssetImportPreviewResultContract, AiopsAssetImportPreviewResultPreload>
+type AssetImportPreviewContractMatchesPreload = AssertAssignable<AiopsAssetImportPreviewResultPreload, AiopsAssetImportPreviewResultContract>
+type SshTunnelMutationPreloadMatchesContract = AssertAssignable<AiopsSshTunnelMutationResultContract, AiopsSshTunnelMutationResultPreload>
+type SshTunnelMutationContractMatchesPreload = AssertAssignable<AiopsSshTunnelMutationResultPreload, AiopsSshTunnelMutationResultContract>
 
 describe('shared contract compatibility exports', () => {
   it('keeps Codex session contracts compatible through the preload export', () => {
@@ -69,6 +89,21 @@ describe('shared contract compatibility exports', () => {
       TerminalKeyboardInteractiveContractMatchesPreload,
       TerminalWriteResultPreloadMatchesContract,
       TerminalWriteResultContractMatchesPreload
+    ] = [true, true, true, true, true, true, true, true]
+
+    expect(checks).toEqual([true, true, true, true, true, true, true, true])
+  })
+
+  it('keeps asset contracts compatible through the preload export', () => {
+    const checks: [
+      AssetInputPreloadMatchesContract,
+      AssetInputContractMatchesPreload,
+      AssetSnapshotPreloadMatchesContract,
+      AssetSnapshotContractMatchesPreload,
+      AssetImportPreviewPreloadMatchesContract,
+      AssetImportPreviewContractMatchesPreload,
+      SshTunnelMutationPreloadMatchesContract,
+      SshTunnelMutationContractMatchesPreload
     ] = [true, true, true, true, true, true, true, true]
 
     expect(checks).toEqual([true, true, true, true, true, true, true, true])

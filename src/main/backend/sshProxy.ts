@@ -1,6 +1,7 @@
 import net from 'net'
 import tls from 'tls'
-import type { AiopsAssetRecord, SshProxyConfig } from '@shared/preload'
+import type { AiopsAssetRecord } from '@shared/contracts/assets'
+import type { SshProxyConfig } from '@shared/preload'
 
 export type SshProxySocket = net.Socket | tls.TLSSocket
 

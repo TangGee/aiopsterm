@@ -15,7 +15,6 @@ import type {
   FileSessionPatch,
   FileSessionSftpPayload,
   FileSessionTerminalContext,
-  AiopsAssetInput,
   FileContentOptions,
   FileEntryMutation,
   FileEntryMutationResult,
@@ -30,6 +29,7 @@ import type {
   FileWriteContentResult,
   UserConfig
 } from '@shared/preload'
+import type { AiopsAssetInput } from '@shared/contracts/assets'
 import { shouldUseFilesSeedData } from '@shared/runtimeSwitches'
 import type { ConnectConfig, FileEntry as SftpFileEntry, SFTPWrapper, Stats as SftpStats } from 'ssh2'
 import { deleteAssetFolder, getAsset, getAssetSecret, getKeychainSecret, listAssets, saveAsset, saveAssetFolder } from './assets'

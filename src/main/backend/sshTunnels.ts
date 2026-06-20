@@ -8,9 +8,9 @@ import type {
   AiopsSshTunnelRecord,
   AiopsSshTunnelStartInput,
   AiopsSshTunnelStopInput,
-  AiopsSshTunnelType,
-  UserConfig
-} from '@shared/preload'
+  AiopsSshTunnelType
+} from '@shared/contracts/assets'
+import type { UserConfig } from '@shared/preload'
 import { getAsset, getAssetSecret, getKeychainSecret, listAssets, saveAsset } from './assets'
 import { applyConfiguredSshAgentAuth } from './sshAgent'
 import { loadSsh2 } from './ssh2Runtime'

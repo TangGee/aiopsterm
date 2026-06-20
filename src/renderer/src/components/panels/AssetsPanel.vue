@@ -1247,7 +1247,7 @@ import type {
   AiopsKeychainInput,
   AiopsKeychainRecord,
   AiopsKeychainType
-} from '@shared/preload'
+} from '@shared/contracts/assets'
 import { useWorkspaceStore } from '@/stores/workspace'
 import {
   isAiopsAssetConnectionTestInfo,

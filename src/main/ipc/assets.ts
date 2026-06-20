@@ -32,7 +32,7 @@ import type {
   AiopsOrganizationAssetRefreshInput,
   AiopsSshTunnelStartInput,
   AiopsSshTunnelStopInput
-} from '@shared/preload'
+} from '@shared/contracts/assets'
 
 type RegisterAssetsIpcInput = {
   showSaveDialog: (options: { defaultPath: string; filters: Array<{ name: string; extensions: string[] }> }) => Promise<{ canceled?: boolean; filePath?: string }>

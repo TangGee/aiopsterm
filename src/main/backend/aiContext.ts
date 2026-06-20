@@ -3,10 +3,10 @@ import type {
   AiContextCatalogResult,
   AiContextCategoryInfo,
   AiContextOption,
-  AiopsAssetRecord,
   KnowledgeBaseNodeConfig,
   SkillUserConfig
 } from '@shared/preload'
+import type { AiopsAssetRecord } from '@shared/contracts/assets'
 import { listAssets } from './assets'
 import { listChatConversations } from './chatHistory'
 

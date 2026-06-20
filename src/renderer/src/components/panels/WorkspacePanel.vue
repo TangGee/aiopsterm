@@ -1203,7 +1203,7 @@ import type {
   AiopsKeychainType,
   AiopsSshTunnelMutationResult,
   AiopsSshTunnelType
-} from '@shared/preload'
+} from '@shared/contracts/assets'
 import { useWorkspaceStore } from '@/stores/workspace'
 import {
   isAiopsAssetConnectionTestInfo,

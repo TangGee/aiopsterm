@@ -1,9 +1,9 @@
 import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron'
 import type {
-  AiopsAssetRecord,
   RuntimeLogLevel,
   UserConfig
 } from '@shared/preload'
+import type { AiopsAssetRecord } from '@shared/contracts/assets'
 import type {
   TerminalBinaryWriteResult,
   TerminalCreateOptions,

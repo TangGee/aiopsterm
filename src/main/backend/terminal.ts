@@ -1,4 +1,4 @@
-import type { AiopsAssetRecord } from '@shared/preload'
+import type { AiopsAssetRecord } from '@shared/contracts/assets'
 import type {
   TerminalCreateOptions,
   TerminalBinaryWriteResult,

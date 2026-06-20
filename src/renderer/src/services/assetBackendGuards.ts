@@ -16,7 +16,7 @@ import type {
   AiopsKeychainRecord,
   AiopsSshTunnelMutationResult,
   AiopsSshTunnelRecord
-} from '@shared/preload'
+} from '@shared/contracts/assets'
 
 export const malformedAssetBackendResultMessage = '资产服务返回数据无效'
 
