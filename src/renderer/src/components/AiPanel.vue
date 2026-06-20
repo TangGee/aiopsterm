@@ -1661,23 +1661,16 @@ import { useWorkspaceStore, type TerminalSettings } from '@/stores/workspace'
 import { readStoredAiPanelMode, storeAiPanelMode, type AiPanelMode } from '@/services/aiPanelModeRuntime'
 import {
   aiChipPartFromContext,
-  aiImagePartFromContext,
-  cloneAiContextOption,
-  fallbackAiContentPartsForMessage,
-  hasSendableAiContent,
-  splitAiContentInputParts
+  aiImagePartFromContext
 } from '@/services/aiPanelInputRuntime'
 import {
   aiPanelChipLabel,
   aiPanelEditablePlainText,
-  chipPartFromAiPanelChipElement,
   createAiPanelChipElement,
   createAiPanelCommandChipElement,
   createAiPanelContextChipElement,
-  createAiPanelIconElement,
   createAiPanelImageElement,
   extractAiPanelContentPartsFromEditable,
-  extractAiPanelEditablePlainTextFromNode,
   insertAiPanelChipIntoEditableCursor,
   insertAiPanelImageIntoEditableCursor,
   insertAiPanelPlainTextIntoEditableCursor,
@@ -1761,6 +1754,13 @@ import {
   planAiPanelDrop
 } from '@/services/aiPanelMediaRuntime'
 import { createAiPanelAttachmentRuntime } from '@/services/aiPanelAttachmentRuntime'
+import {
+  cancelAiPanelMessageEdit,
+  prepareAiPanelMessageEditConfirmation,
+  removeAiPanelEditPartFromClickTarget,
+  startAiPanelMessageEdit,
+  syncAiPanelEditStateFromParts
+} from '@/services/aiPanelEditRuntime'
 import { createAiPanelVoiceRuntime } from '@/services/aiPanelVoiceRuntime'
 import { aiChatClient } from '@/services/aiChatClient'
 import { copyTextToClipboard } from '@/services/clipboardRuntime'
@@ -3163,8 +3163,6 @@ const iconMarkupByChipType: Record<AiChipContentPart['chipType'], string> = {
 const imagePartFromContext = aiImagePartFromContext
 const chipPartFromContext = aiChipPartFromContext
 
-const cloneContextOption = cloneAiContextOption
-
 const removeEditHostContext = (id: string) => {
   editHostContexts.value = editHostContexts.value.filter((context) => context.id !== id)
 }
@@ -3180,18 +3178,10 @@ const editableRenderOptions = computed<AiPanelEditableRenderOptions>(() => ({
 
 const getChipLabel = aiPanelChipLabel
 
-const createIconElement = (kind: AiContextKind | 'command') => createAiPanelIconElement(kind, editableRenderOptions.value)
-
 const createChipElement = (
   part: AiChipContentPart,
   options: { removableContextId?: string; removableCommand?: boolean; removablePart?: boolean } = {}
 ) => createAiPanelChipElement(part, editableRenderOptions.value, options)
-
-const createContextChipElement = (context: AiContextOption) => createAiPanelContextChipElement(context, editableRenderOptions.value)
-
-const createCommandChipElement = () => createAiPanelCommandChipElement(selectedCommandRef.value, editableRenderOptions.value)
-
-const createImageElement = createAiPanelImageElement
 
 const insertImageIntoEditableCursor = (editable: HTMLElement | null, part: AiImageContentPart, onInserted: () => void) =>
   insertAiPanelImageIntoEditableCursor(editable, part, onInserted)
@@ -3417,13 +3407,9 @@ const setDraft = (value: string) => {
   })
 }
 
-const extractEditableTextFromNode = extractAiPanelEditablePlainTextFromNode
-
 const editablePlainText = () => {
   return aiPanelEditablePlainText(editableRef.value)
 }
-
-const chipPartFromChipElement = chipPartFromAiPanelChipElement
 
 const contextById = (id: string) => workspace.selectedContexts.find((item) => item.id === id) || null
 
@@ -3435,8 +3421,6 @@ const extractContentPartsFromEditable = (editable: HTMLElement | null) => {
   return extractAiPanelContentPartsFromEditable(editable, { contextById })
 }
 
-const fallbackPartsForMessage = fallbackAiContentPartsForMessage
-
 const editableTextFromElement = (editable: HTMLElement | null) => {
   return aiPanelEditablePlainText(editable)
 }
@@ -3445,10 +3429,10 @@ const renderEditEditableFromParts = (parts: AiContentPart[]) => {
   const editable = editEditableRef.value
   if (!editable) return
   renderPartsIntoEditable(editable, parts)
-  editDraft.value = editableTextFromElement(editable)
-  const splitParts = splitAiContentInputParts(parts)
-  editImageInputParts.value = splitParts.images
-  editFileInputParts.value = splitParts.docs
+  const nextState = syncAiPanelEditStateFromParts(parts, editableTextFromElement(editable))
+  editDraft.value = nextState.editDraft
+  editImageInputParts.value = nextState.editImageInputParts
+  editFileInputParts.value = nextState.editFileInputParts
   requestAnimationFrame(() => {
     const range = document.createRange()
     range.selectNodeContents(editable)
@@ -3461,43 +3445,44 @@ const renderEditEditableFromParts = (parts: AiContentPart[]) => {
 }
 
 const startMessageEdit = async (message: { id: string; role: string; text: string; contentParts?: AiContentPart[]; hosts?: AiContextOption[] }) => {
-  if (message.role !== 'user') return
-  editingMessageId.value = message.id
-  editHostContexts.value = message.hosts?.map(cloneContextOption) || []
+  const edit = startAiPanelMessageEdit(message)
+  if (!edit) return
+  editingMessageId.value = edit.state.editingMessageId
+  editDraft.value = edit.state.editDraft
+  editImageInputParts.value = edit.state.editImageInputParts
+  editFileInputParts.value = edit.state.editFileInputParts
+  editHostContexts.value = edit.state.editHostContexts
   closePopups()
   await nextTick()
-  renderEditEditableFromParts(fallbackPartsForMessage(message))
+  renderEditEditableFromParts(edit.parts)
 }
 
 const cancelMessageEdit = () => {
-  editingMessageId.value = null
-  editDraft.value = ''
-  editImageInputParts.value = []
-  editFileInputParts.value = []
-  editHostContexts.value = []
+  const nextState = cancelAiPanelMessageEdit()
+  editingMessageId.value = nextState.editingMessageId
+  editDraft.value = nextState.editDraft
+  editImageInputParts.value = nextState.editImageInputParts
+  editFileInputParts.value = nextState.editFileInputParts
+  editHostContexts.value = nextState.editHostContexts
   editSavedRange.value = null
 }
 
 const handleEditEditableInput = () => {
-  editDraft.value = editableTextFromElement(editEditableRef.value)
-  const splitParts = splitAiContentInputParts(extractContentPartsFromEditable(editEditableRef.value))
-  editImageInputParts.value = splitParts.images
-  editFileInputParts.value = splitParts.docs
+  const nextState = syncAiPanelEditStateFromParts(
+    extractContentPartsFromEditable(editEditableRef.value),
+    editableTextFromElement(editEditableRef.value)
+  )
+  editDraft.value = nextState.editDraft
+  editImageInputParts.value = nextState.editImageInputParts
+  editFileInputParts.value = nextState.editFileInputParts
   saveEditSelection()
 }
 
 const handleEditEditableClick = (event: MouseEvent) => {
-  const target = event.target as HTMLElement
-  if (target.dataset.removeImage || target.closest('[data-remove-image]')) {
-    const wrapper = target.closest('.image-preview-wrapper')
-    wrapper?.remove()
+  const removed = removeAiPanelEditPartFromClickTarget(event.target as HTMLElement)
+  if (removed) {
     handleEditEditableInput()
     return
-  }
-  if (target.dataset.removeChip || target.closest('[data-remove-chip]')) {
-    const chip = target.closest('.mention-chip')
-    chip?.remove()
-    handleEditEditableInput()
   }
   saveEditSelection()
 }
@@ -3515,10 +3500,16 @@ const handleEditEditablePaste = (event: ClipboardEvent) => {
 }
 
 const confirmMessageEdit = async () => {
-  if (!editingMessageId.value) return
   const contentParts = extractContentPartsFromEditable(editEditableRef.value)
-  if (!hasSendableAiContent(contentParts)) return
-  const sent = await workspace.resendUserMessageFromParts(editingMessageId.value, contentParts, editHostContexts.value.map(cloneContextOption))
+  const confirmation = prepareAiPanelMessageEditConfirmation(
+    {
+      editingMessageId: editingMessageId.value,
+      editHostContexts: editHostContexts.value
+    },
+    contentParts
+  )
+  if (!confirmation) return
+  const sent = await workspace.resendUserMessageFromParts(confirmation.messageId, confirmation.contentParts, confirmation.hostContexts)
   if (sent) cancelMessageEdit()
 }
 
