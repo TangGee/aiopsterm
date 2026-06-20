@@ -9,7 +9,6 @@ import Store from 'electron-store'
 import AdmZip from 'adm-zip'
 import { getAsset, getAssetSecret, getKeychainSecret, refreshOrganizationAssets, saveAsset } from './backend/assets'
 import { formatMcpResourceReadContent } from './backend/aiChat'
-import { exportChat } from './backend/chatExport'
 import {
   createCodexSession,
   killCodexSession,
@@ -64,6 +63,7 @@ import {
 import { resolveUserAvatarAssetPath } from './backend/userAccount'
 import { registerAiCatalogIpc } from './ipc/aiCatalog'
 import { registerAiChatIpc } from './ipc/aiChat'
+import { registerAiChatActionsIpc } from './ipc/aiChatActions'
 import { configureMainBackendRuntimes } from './backend/runtimeConfiguration'
 import { registerAgentHooksIpc } from './ipc/agentHooks'
 import { registerAliasesIpc } from './ipc/aliases'
@@ -109,12 +109,6 @@ import { defaultSkillSeedData, defaultSkillsConfig, shouldUseSkillSeedData } fro
 import { defaultWorkspacePreferencesConfig } from '@shared/workspacePreferencesSeed'
 import type {
   AliasCommandConfig,
-  AiChatExportInput,
-  AiChatHistoryMessage,
-  AiMcpResourceAccessActionInput,
-  AiMcpResourceAccessActionResult,
-  AiMcpToolCallActionInput,
-  AiMcpToolCallActionResult,
   CodexSessionCreateOptions,
   AiAgentSessionEvent,
   ManagedAiSessionEvent,
@@ -133,7 +127,6 @@ import type {
   McpResourceReadInput,
   McpServerUserConfig,
   McpToolCallInput,
-  McpToolCallResult,
   McpToolStatesUserConfig,
   ModelSettingsUserConfig,
   SecurityUserConfig,
@@ -2198,24 +2191,6 @@ const setMcpToolAutoApprove = async (serverName: string, toolName: string, autoA
   return mcpConfigWriteSuccess(snapshot)
 }
 
-const cloneJsonRecord = (value: unknown): Record<string, unknown> | undefined => {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
-  return JSON.parse(JSON.stringify(value)) as Record<string, unknown>
-}
-
-const cloneChatHistoryMessages = (messages: AiChatHistoryMessage[]) => JSON.parse(JSON.stringify(messages)) as AiChatHistoryMessage[]
-
-const formatMcpToolCallContent = (content: NonNullable<McpToolCallResult['data']>['content']) => {
-  if (!content.length) return '[]'
-  return content
-    .map((item) => {
-      if (typeof item.text === 'string') return item.text
-      if (typeof item.data === 'string') return item.data
-      return JSON.stringify(item, null, 2)
-    })
-    .join('\n\n')
-}
-
 const callCurrentMcpTool = async (input: McpToolCallInput) => {
   const current = getConfig()
   return callMcpTool(await loadCurrentMcpConfigFile(), input, {
@@ -2233,186 +2208,6 @@ const readCurrentMcpResource = async (input: McpResourceReadInput) => {
     clientName: 'aiopsterm',
     clientVersion: app.getVersion()
   })
-}
-
-const handleAiMcpToolCallAction = async (input: AiMcpToolCallActionInput, approve: boolean): Promise<AiMcpToolCallActionResult> => {
-  const conversationId = String(input?.conversationId || '').trim()
-  const messageId = String(input?.messageId || '').trim()
-  if (!conversationId || !messageId) {
-    return {
-      ok: false,
-      errorCode: 'AI_MCP_TOOL_CALL_TARGET_REQUIRED',
-      errorMessage: 'AI MCP tool call approval requires a conversation and message id.'
-    }
-  }
-  const snapshot = getChatConversationMessages(conversationId)
-  if (!snapshot.ok || !snapshot.data) {
-    return {
-      ok: false,
-      errorCode: snapshot.errorCode || 'AI_MCP_TOOL_CALL_HISTORY_UNAVAILABLE',
-      errorMessage: snapshot.errorMessage || 'AI chat history is unavailable.'
-    }
-  }
-  const messageIndex = snapshot.data.messages.findIndex((message) => message.id === messageId)
-  const message = messageIndex >= 0 ? snapshot.data.messages[messageIndex] : undefined
-  if (!message || message.ask !== 'mcp_tool_call' || !message.mcpToolCall) {
-    return {
-      ok: false,
-      errorCode: 'AI_MCP_TOOL_CALL_NOT_FOUND',
-      errorMessage: 'AI MCP tool call message was not found.'
-    }
-  }
-  const nextMessages = cloneChatHistoryMessages(snapshot.data.messages)
-  const nextMessage = nextMessages[messageIndex]
-  if (!approve) {
-    nextMessage.action = 'rejected'
-    nextMessage.state = 'done'
-    const saved = replaceChatConversationMessages(conversationId, nextMessages)
-    if (!saved.ok || !saved.data) {
-      return {
-        ok: false,
-        errorCode: saved.errorCode || 'AI_MCP_TOOL_CALL_REJECT_SAVE_FAILED',
-        errorMessage: saved.errorMessage || 'AI MCP tool rejection could not be saved.'
-      }
-    }
-    return {
-      ok: true,
-      data: {
-        status: 'rejected',
-        conversation: saved.data.conversation,
-        messages: saved.data.messages
-      }
-    }
-  }
-
-  let mcpConfig: NonNullable<AiMcpToolCallActionResult['data']>['mcpConfig']
-  if (input.autoApprove) {
-    try {
-      const autoApproveResult = await setMcpToolAutoApprove(message.mcpToolCall.serverName, message.mcpToolCall.toolName, true)
-      mcpConfig = autoApproveResult.data
-    } catch (error) {
-      return {
-        ok: false,
-        errorCode: 'AI_MCP_TOOL_AUTO_APPROVE_FAILED',
-        errorMessage: error instanceof Error ? error.message : 'AI MCP tool auto approve could not be saved.'
-      }
-    }
-  }
-
-  const toolInput: McpToolCallInput = {
-    serverName: message.mcpToolCall.serverName,
-    toolName: message.mcpToolCall.toolName,
-    arguments: cloneJsonRecord(message.mcpToolCall.arguments) || {}
-  }
-  const toolResult = await callCurrentMcpTool(toolInput)
-  nextMessage.action = 'approved'
-  nextMessage.state = toolResult.ok && toolResult.data && !toolResult.data.isError ? 'done' : 'error'
-  nextMessage.say = 'command_output'
-  nextMessage.text = toolResult.ok && toolResult.data ? formatMcpToolCallContent(toolResult.data.content) : toolResult.errorMessage || 'MCP tool call failed.'
-  const saved = replaceChatConversationMessages(conversationId, nextMessages)
-  if (!saved.ok || !saved.data) {
-    return {
-      ok: false,
-      errorCode: saved.errorCode || 'AI_MCP_TOOL_CALL_SAVE_FAILED',
-      errorMessage: saved.errorMessage || 'AI MCP tool call result could not be saved.'
-    }
-  }
-  return {
-    ok: true,
-    data: {
-      status: 'approved',
-      conversation: saved.data.conversation,
-      messages: saved.data.messages,
-      ...(toolResult.ok && toolResult.data
-        ? { toolCall: toolResult.data }
-        : { toolCallError: { errorCode: toolResult.errorCode, errorMessage: toolResult.errorMessage || 'MCP tool call failed.' } }),
-      ...(mcpConfig ? { mcpConfig } : {})
-    }
-  }
-}
-
-const handleAiMcpResourceAccessAction = async (
-  input: AiMcpResourceAccessActionInput,
-  approve: boolean
-): Promise<AiMcpResourceAccessActionResult> => {
-  const conversationId = String(input?.conversationId || '').trim()
-  const messageId = String(input?.messageId || '').trim()
-  if (!conversationId || !messageId) {
-    return {
-      ok: false,
-      errorCode: 'AI_MCP_RESOURCE_ACCESS_TARGET_REQUIRED',
-      errorMessage: 'AI MCP resource access approval requires a conversation and message id.'
-    }
-  }
-  const snapshot = getChatConversationMessages(conversationId)
-  if (!snapshot.ok || !snapshot.data) {
-    return {
-      ok: false,
-      errorCode: snapshot.errorCode || 'AI_MCP_RESOURCE_ACCESS_HISTORY_UNAVAILABLE',
-      errorMessage: snapshot.errorMessage || 'AI chat history is unavailable.'
-    }
-  }
-  const messageIndex = snapshot.data.messages.findIndex((message) => message.id === messageId)
-  const message = messageIndex >= 0 ? snapshot.data.messages[messageIndex] : undefined
-  if (!message || message.ask !== 'mcp_resource_access' || !message.mcpResourceAccess) {
-    return {
-      ok: false,
-      errorCode: 'AI_MCP_RESOURCE_ACCESS_NOT_FOUND',
-      errorMessage: 'AI MCP resource access message was not found.'
-    }
-  }
-  const nextMessages = cloneChatHistoryMessages(snapshot.data.messages)
-  const nextMessage = nextMessages[messageIndex]
-  if (!approve) {
-    nextMessage.action = 'rejected'
-    nextMessage.state = 'done'
-    const saved = replaceChatConversationMessages(conversationId, nextMessages)
-    if (!saved.ok || !saved.data) {
-      return {
-        ok: false,
-        errorCode: saved.errorCode || 'AI_MCP_RESOURCE_ACCESS_REJECT_SAVE_FAILED',
-        errorMessage: saved.errorMessage || 'AI MCP resource access rejection could not be saved.'
-      }
-    }
-    return {
-      ok: true,
-      data: {
-        status: 'rejected',
-        conversation: saved.data.conversation,
-        messages: saved.data.messages
-      }
-    }
-  }
-
-  const resourceInput: McpResourceReadInput = {
-    serverName: message.mcpResourceAccess.serverName,
-    uri: message.mcpResourceAccess.uri
-  }
-  const resourceResult = await readCurrentMcpResource(resourceInput)
-  nextMessage.action = 'approved'
-  nextMessage.say = 'command_output'
-  nextMessage.state = resourceResult.ok && resourceResult.data ? 'done' : 'error'
-  nextMessage.text =
-    resourceResult.ok && resourceResult.data ? formatMcpResourceReadContent(resourceResult.data.contents) : resourceResult.errorMessage || 'MCP resource access failed.'
-  const saved = replaceChatConversationMessages(conversationId, nextMessages)
-  if (!saved.ok || !saved.data) {
-    return {
-      ok: false,
-      errorCode: saved.errorCode || 'AI_MCP_RESOURCE_ACCESS_SAVE_FAILED',
-      errorMessage: saved.errorMessage || 'AI MCP resource access result could not be saved.'
-    }
-  }
-  return {
-    ok: true,
-    data: {
-      status: 'approved',
-      conversation: saved.data.conversation,
-      messages: saved.data.messages,
-      ...(resourceResult.ok && resourceResult.data
-        ? { resourceAccess: resourceResult.data }
-        : { resourceAccessError: { errorCode: resourceResult.errorCode, errorMessage: resourceResult.errorMessage || 'MCP resource access failed.' } })
-    }
-  }
 }
 
 const broadcastMcpConfigChanged = (content: string) => {
@@ -2673,23 +2468,23 @@ const registerIpc = () => {
     broadcastKeywordHighlightConfigChanged,
     broadcastMcpConfigChanged
   })
-  ipcMain.handle('ai:mcp-tool-call:approve', (_event, input: AiMcpToolCallActionInput) => handleAiMcpToolCallAction(input, true))
-  ipcMain.handle('ai:mcp-tool-call:reject', (_event, input: AiMcpToolCallActionInput) => handleAiMcpToolCallAction(input, false))
-  ipcMain.handle('ai:mcp-resource-access:approve', (_event, input: AiMcpResourceAccessActionInput) => handleAiMcpResourceAccessAction(input, true))
-  ipcMain.handle('ai:mcp-resource-access:reject', (_event, input: AiMcpResourceAccessActionInput) => handleAiMcpResourceAccessAction(input, false))
-  ipcMain.handle('chat:export', async (event, input: AiChatExportInput) => {
-    const owner = BrowserWindow.fromWebContents(event.sender)
-    return exportChat(input, {
-      showSaveDialog: (options) => {
-        if (shouldUseE2eDialogFixtures()) {
-          return Promise.resolve({
-            canceled: false,
-            filePath: join(app.getPath('downloads'), basename(options.defaultPath))
-          })
-        }
-        return owner ? dialog.showSaveDialog(owner, options) : dialog.showSaveDialog(options)
+  registerAiChatActionsIpc(ipcMain, {
+    getChatConversationMessages,
+    replaceChatConversationMessages,
+    setMcpToolAutoApprove,
+    callMcpTool: callCurrentMcpTool,
+    readMcpResource: readCurrentMcpResource,
+    formatMcpResourceReadContent,
+    showChatExportSaveDialog: (event, options) => {
+      const owner = BrowserWindow.fromWebContents(event.sender)
+      if (shouldUseE2eDialogFixtures()) {
+        return Promise.resolve({
+          canceled: false,
+          filePath: join(app.getPath('downloads'), basename(options.defaultPath))
+        })
       }
-    })
+      return owner ? dialog.showSaveDialog(owner, options) : dialog.showSaveDialog(options)
+    }
   })
   registerSkillsIpc(ipcMain, {
     syncSkillsConfigFromDisk,
