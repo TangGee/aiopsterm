@@ -24,6 +24,7 @@ import {
   malformedAliasBackendResultMessage,
   malformedExtensionBackendResultMessage
 } from '@/services/extensionBackendGuards'
+import { extensionsClient } from '@/services/extensionsClient'
 import { applyKeywordHighlight } from '@/services/keywordHighlightRuntime'
 import { managedAiClient } from '@/services/managedAiClient'
 import { mcpClient } from '@/services/mcpClient'
@@ -55,6 +56,7 @@ import {
   isKnowledgeWriteResultData,
   malformedKnowledgeBackendResultMessage
 } from '@/services/knowledgeBackendGuards'
+import { knowledgeClient } from '@/services/knowledgeClient'
 import {
   isQuickCommandGroupDeleteData,
   isQuickCommandGroupSaveData,
@@ -260,7 +262,6 @@ type KbClipboard = { mode: 'copy' | 'cut'; sources: string[] } | null
 type SnippetGroup = QuickCommandGroupConfig
 type QuickCommandSnippet = QuickCommandSnippetConfig
 type AliasCommand = AliasCommandConfig & { edit?: boolean }
-type KnowledgeBridgeApi = Pick<AiopsPreloadApi, 'kbEnsureRoot' | 'kbListDir'>
 type ModelProviderKey = ModelProviderCheckKey
 type UserCodeResultData = NonNullable<AiopsUserCodeResult['data']>
 type AgentHookInstallOperationData = NonNullable<AgentHookInstallerOperationResult['data']>
@@ -442,12 +443,6 @@ type ExtensionPlugin = ExtensionPluginRuntimeConfig
 type MacroCommandEntry = {
   command: string
   timestamp: number
-}
-
-const getKnowledgeBridge = (): KnowledgeBridgeApi | null => {
-  const api = window.aiops as unknown as Partial<Record<keyof KnowledgeBridgeApi, unknown>> | undefined
-  if (typeof api?.kbEnsureRoot !== 'function' || typeof api?.kbListDir !== 'function') return null
-  return api as KnowledgeBridgeApi
 }
 
 export type TerminalSecurityExecution = {
@@ -5484,9 +5479,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const loadKnowledgeTreeFromBridge = async (relDir = ''): Promise<KnowledgeNode[]> => {
-    const knowledgeBridge = getKnowledgeBridge()
-    if (!knowledgeBridge) throw new Error('KNOWLEDGE_BRIDGE_UNAVAILABLE')
-    const entries = await knowledgeBridge.kbListDir(relDir)
+    const kbListDir = knowledgeClient.kbListDir()
+    if (!kbListDir) throw new Error('KNOWLEDGE_BRIDGE_UNAVAILABLE')
+    const entries = await kbListDir(relDir)
     if (!isKnowledgeEntryListData(entries)) throw new Error(malformedKnowledgeBackendResultMessage)
     const nodes: KnowledgeNode[] = []
     for (const entry of entries) {
@@ -5501,13 +5496,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   const refreshKnowledgeTree = async (options: { persist?: boolean } = {}) => {
     void options
-    const knowledgeBridge = getKnowledgeBridge()
-    if (!knowledgeBridge) {
+    const kbEnsureRoot = knowledgeClient.kbEnsureRoot()
+    if (!kbEnsureRoot || !knowledgeClient.kbListDir()) {
       setTopNotice('知识库加载服务不可用')
       return false
     }
     try {
-      const rootResult = await knowledgeBridge.kbEnsureRoot()
+      const rootResult = await kbEnsureRoot()
       if (!isKnowledgeEnsureRootResultData(rootResult)) {
         setTopNotice(malformedKnowledgeBackendResultMessage)
         return false
@@ -5549,8 +5544,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const setupKnowledgeBridgeListeners = () => {
-    if (removeKnowledgeProgressListener || !window.aiops?.onKbTransferProgress) return
-    removeKnowledgeProgressListener = window.aiops.onKbTransferProgress(handleKnowledgeTransferProgress)
+    const onKbTransferProgress = knowledgeClient.onKbTransferProgress()
+    if (removeKnowledgeProgressListener || !onKbTransferProgress) return
+    removeKnowledgeProgressListener = onKbTransferProgress(handleKnowledgeTransferProgress)
   }
 
   const getAliasCommandsSnapshot = (): AliasCommandConfig[] =>
@@ -11185,9 +11181,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const refreshKnowledgeSearchStatus = async () => {
-    if (!window.aiops?.kbSearchStatus) return false
+    const kbSearchStatusBridge = knowledgeClient.kbSearchStatus()
+    if (!kbSearchStatusBridge) return false
     try {
-      const status = await window.aiops.kbSearchStatus()
+      const status = await kbSearchStatusBridge()
       if (!isKnowledgeSearchStatusData(status)) {
         setTopNotice(malformedKnowledgeBackendResultMessage)
         return false
@@ -11208,7 +11205,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       kbSearchError.value = ''
       return []
     }
-    if (!window.aiops?.kbSearch) {
+    const kbSearch = knowledgeClient.kbSearch()
+    if (!kbSearch) {
       kbSearchLoading.value = false
       kbSearchError.value = '知识库搜索服务不可用'
       return kbContentSearchResults.value
@@ -11216,7 +11214,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     kbSearchLoading.value = true
     kbSearchError.value = ''
     try {
-      const results = await window.aiops.kbSearch(normalizedQuery, { maxResults: 12, minScore: 0.15 })
+      const results = await kbSearch(normalizedQuery, { maxResults: 12, minScore: 0.15 })
       if (request !== kbSearchRequest) return kbContentSearchResults.value
       if (!isKnowledgeSearchResultListData(results)) {
         kbSearchError.value = malformedKnowledgeBackendResultMessage
@@ -11250,9 +11248,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   const resolveAiKnowledgeSearchContexts = async (query: string, existingContexts: AiContextOption[]) => {
     const normalizedQuery = query.trim()
-    if (!aiPreferences.value.kbSearchEnabled || normalizedQuery.length <= 1 || typeof window.aiops?.kbSearch !== 'function') return []
+    const kbSearch = knowledgeClient.kbSearch()
+    if (!aiPreferences.value.kbSearchEnabled || normalizedQuery.length <= 1 || !kbSearch) return []
     try {
-      const results = await window.aiops.kbSearch(normalizedQuery, { maxResults: 3, minScore: 0.25 })
+      const results = await kbSearch(normalizedQuery, { maxResults: 3, minScore: 0.25 })
       if (!isKnowledgeSearchResultListData(results)) return []
       const existingIds = new Set(existingContexts.map((context) => context.id))
       return results
@@ -11264,12 +11263,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const reindexKnowledgeContent = async () => {
-    if (!window.aiops?.kbReindex) {
+    const kbReindex = knowledgeClient.kbReindex()
+    if (!kbReindex) {
       setTopNotice('知识库索引服务不可用')
       return null
     }
     try {
-      const result = await window.aiops.kbReindex()
+      const result = await kbReindex()
       if (!isKnowledgeReindexResultData(result)) {
         setTopNotice(malformedKnowledgeBackendResultMessage)
         return null
@@ -11321,14 +11321,16 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const createKnowledgeNode = async (kind: KnowledgeNodeType, parentRelDir: string, title: string) => {
     const name = title.trim()
     if (!name) return null
-    if (!window.aiops?.kbCreateFile || !window.aiops?.kbMkdir) {
+    const kbCreateFile = knowledgeClient.kbCreateFile()
+    const kbMkdir = knowledgeClient.kbMkdir()
+    if (!kbCreateFile || !kbMkdir) {
       setTopNotice('知识库写入服务不可用')
       return null
     }
     const result =
       kind === 'dir'
-        ? await window.aiops.kbMkdir(parentRelDir, name)
-        : await window.aiops.kbCreateFile(parentRelDir, name, '')
+        ? await kbMkdir(parentRelDir, name)
+        : await kbCreateFile(parentRelDir, name, '')
     const entry = backendKnowledgeEntryOrNotice(result, malformedKnowledgeBackendResultMessage)
     if (!entry) return null
     const relPath = entry.relPath.trim()
@@ -11365,11 +11367,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const node = findKnowledgeNode(relPath)
     const name = title.trim()
     if (!node || !name) return
-    if (!window.aiops?.kbRename) {
+    const kbRename = knowledgeClient.kbRename()
+    if (!kbRename) {
       setTopNotice('知识库重命名服务不可用')
       return
     }
-    const result = await window.aiops.kbRename(relPath, name)
+    const result = await kbRename(relPath, name)
     const entry = backendKnowledgeEntryOrNotice(result, malformedKnowledgeBackendResultMessage)
     if (!entry) return
     const nextRelPath = entry.relPath.trim()
@@ -11393,7 +11396,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const deleteKnowledgeNodes = async (relPaths: string[]) => {
-    if (!window.aiops?.kbDelete) {
+    const kbDelete = knowledgeClient.kbDelete()
+    if (!kbDelete) {
       setTopNotice('知识库删除服务不可用')
       return
     }
@@ -11403,7 +11407,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       if (!node) continue
       let result: unknown
       try {
-        result = await window.aiops.kbDelete(relPath, node.type === 'dir')
+        result = await kbDelete(relPath, node.type === 'dir')
       } catch {
         await refreshKnowledgeTreeAfterMutationFailure('知识库删除服务不可用', [...candidateRemovedRelPaths, relPath])
         return
@@ -11437,7 +11441,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (!kbClipboard.value) return
     const destination = findKnowledgeNode(targetRelDir)
     const dstRelDir = destination?.type === 'file' ? getKbParent(destination.relPath) : targetRelDir
-    if (!window.aiops?.kbCopy || !window.aiops?.kbMove) {
+    const kbCopy = knowledgeClient.kbCopy()
+    const kbMove = knowledgeClient.kbMove()
+    if (!kbCopy || !kbMove) {
       setTopNotice('知识库复制移动服务不可用')
       return
     }
@@ -11451,9 +11457,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       let result: unknown
       try {
         if (mode === 'copy') {
-          result = await window.aiops.kbCopy(source, dstRelDir)
+          result = await kbCopy(source, dstRelDir)
         } else {
-          result = await window.aiops.kbMove(source, dstRelDir)
+          result = await kbMove(source, dstRelDir)
         }
       } catch {
         await refreshKnowledgeTreeAfterMutationFailure('知识库复制移动服务不可用', mode === 'cut' ? [...candidateRemovedSources, source] : [])
@@ -11493,12 +11499,14 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       setTopNotice('知识库导入需要真实本地路径')
       return false
     }
-    if (!window.aiops?.kbImportFile || !window.aiops?.kbImportFolder) {
+    const kbImportFile = knowledgeClient.kbImportFile()
+    const kbImportFolder = knowledgeClient.kbImportFolder()
+    if (!kbImportFile || !kbImportFolder) {
       setTopNotice('知识库导入服务不可用')
       return false
     }
     const dstRelDir = getKbParent(destRelPath)
-    const result = sourceType === 'folder' ? await window.aiops.kbImportFolder(srcAbsPath, dstRelDir) : await window.aiops.kbImportFile(srcAbsPath, dstRelDir)
+    const result = sourceType === 'folder' ? await kbImportFolder(srcAbsPath, dstRelDir) : await kbImportFile(srcAbsPath, dstRelDir)
     if (!isKnowledgeImportResultForRequest(result, dstRelDir, sourceType)) {
       setTopNotice(malformedKnowledgeBackendResultMessage)
       return false
@@ -11525,6 +11533,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       const node = findKnowledgeNode(relPath)
       const label = node?.title || relPath.split('/').pop() || relPath
       if (isKnowledgeImagePath(relPath)) {
+        const kbReadFile = knowledgeClient.kbReadFile()
         let imageContext: AiContextOption = {
           id: `kb-image:${relPath}`,
           kind: 'images',
@@ -11533,9 +11542,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
           relPath,
           mediaType: mediaTypeFromKnowledgePath(relPath)
         }
-        if (window.aiops?.kbReadFile) {
+        if (kbReadFile) {
           try {
-            const result = await window.aiops.kbReadFile(relPath, 'base64')
+            const result = await kbReadFile(relPath, 'base64')
             if (isKnowledgeReadResultData(result, 'base64')) {
               imageContext = {
                 ...imageContext,
@@ -11666,8 +11675,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const installExtensionInstallProgressListener = () => {
-    if (removeExtensionInstallProgressListener || !window.aiops?.onExtensionInstallProgress) return
-    removeExtensionInstallProgressListener = window.aiops.onExtensionInstallProgress(handleExtensionInstallProgress)
+    const onExtensionInstallProgress = extensionsClient.onExtensionInstallProgress()
+    if (removeExtensionInstallProgressListener || !onExtensionInstallProgress) return
+    removeExtensionInstallProgressListener = onExtensionInstallProgress(handleExtensionInstallProgress)
   }
 
   const clearExtensionInstallProgressLater = (pluginId: string) => {
@@ -11715,8 +11725,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const refreshExtensionPlugins = async () => {
-    const listExtensionPluginsBridge = window.aiops?.listExtensionPlugins
-    if (typeof listExtensionPluginsBridge !== 'function') {
+    const listExtensionPluginsBridge = extensionsClient.listExtensionPlugins()
+    if (!listExtensionPluginsBridge) {
       setExtensionNotice('插件列表加载服务不可用')
       ensureSelectedExtensionVisible()
       return false
@@ -11763,8 +11773,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       setExtensionNotice('该插件需要订阅后安装')
       return
     }
-    const installExtensionPluginBridge = window.aiops?.installExtensionPlugin
-    if (typeof installExtensionPluginBridge !== 'function') {
+    const installExtensionPluginBridge = extensionsClient.installExtensionPlugin()
+    if (!installExtensionPluginBridge) {
       setExtensionNotice(`${plugin.name} 安装服务不可用`)
       return
     }
@@ -11804,8 +11814,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const updateExtensionPlugin = async (pluginId: string) => {
     const plugin = extensionPlugins.value.find((item) => item.pluginId === pluginId)
     if (!plugin || !plugin.isPlugin || !plugin.installed || !plugin.hasUpdate) return
-    const updateExtensionPluginBridge = window.aiops?.updateExtensionPlugin
-    if (typeof updateExtensionPluginBridge !== 'function') {
+    const updateExtensionPluginBridge = extensionsClient.updateExtensionPlugin()
+    if (!updateExtensionPluginBridge) {
       setExtensionNotice(`${plugin.name} 更新服务不可用`)
       return
     }
@@ -11845,8 +11855,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const uninstallExtensionPlugin = async (pluginId: string) => {
     const plugin = extensionPlugins.value.find((item) => item.pluginId === pluginId)
     if (!plugin || !plugin.isPlugin || plugin.required) return
-    const uninstallExtensionPluginBridge = window.aiops?.uninstallExtensionPlugin
-    if (typeof uninstallExtensionPluginBridge !== 'function') {
+    const uninstallExtensionPluginBridge = extensionsClient.uninstallExtensionPlugin()
+    if (!uninstallExtensionPluginBridge) {
       setExtensionNotice(`${plugin.name} 卸载服务不可用`)
       return
     }
@@ -11870,8 +11880,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const subscribeExtensionPlugin = async (pluginId: string) => {
     const plugin = extensionPlugins.value.find((item) => item.pluginId === pluginId)
     if (!plugin || !plugin.isPlugin) return
-    const openExtensionSubscriptionBridge = window.aiops?.openExtensionSubscription
-    if (typeof openExtensionSubscriptionBridge !== 'function') {
+    const openExtensionSubscriptionBridge = extensionsClient.openExtensionSubscription()
+    if (!openExtensionSubscriptionBridge) {
       setExtensionNotice(`${plugin.name} 订阅服务不可用`)
       return
     }
@@ -11894,8 +11904,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const cancelExtensionInstall = async (pluginId: string) => {
     if (!extensionHasActiveOperation(pluginId)) return
     const plugin = extensionPlugins.value.find((item) => item.pluginId === pluginId)
-    const cancelExtensionInstallBridge = window.aiops?.cancelExtensionInstall
-    if (typeof cancelExtensionInstallBridge !== 'function') {
+    const cancelExtensionInstallBridge = extensionsClient.cancelExtensionInstall()
+    if (!cancelExtensionInstallBridge) {
       setExtensionNotice(`${plugin?.name || '插件'} 取消服务不可用`)
       return
     }
@@ -11937,8 +11947,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       setExtensionNotice(`${packageName} 安装需要真实本地路径，请从桌面客户端拖入 .external-reference 文件`)
       return false
     }
-    const installExtensionPackageBridge = window.aiops?.installExtensionPackage
-    if (typeof installExtensionPackageBridge !== 'function') {
+    const installExtensionPackageBridge = extensionsClient.installExtensionPackage()
+    if (!installExtensionPackageBridge) {
       setExtensionNotice(`${packageName} 安装服务不可用`)
       return false
     }
@@ -14914,11 +14924,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const relPath = title
     const existing = findKnowledgeNode(relPath)
     if (existing?.type === 'dir') return existing
-    if (!window.aiops?.kbMkdir) {
+    const kbMkdir = knowledgeClient.kbMkdir()
+    if (!kbMkdir) {
       setTopNotice('知识库写入服务不可用')
       return null
     }
-    const result = await window.aiops.kbMkdir('', title)
+    const result = await kbMkdir('', title)
     const entry = backendKnowledgeEntryOrNotice(result, malformedKnowledgeBackendResultMessage)
     if (!entry) return null
     const createdRelPath = entry.relPath.trim()
@@ -14943,11 +14954,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const summaryDir = await ensureLocalKnowledgeDir('summary')
     if (!summaryDir) return null
     const fileName = uniqueKnowledgeFileName('summary', knowledgeFileNameForMessage(message))
-    if (!window.aiops?.kbCreateFile || !window.aiops?.kbWriteFile) {
+    const kbCreateFile = knowledgeClient.kbCreateFile()
+    const kbWriteFile = knowledgeClient.kbWriteFile()
+    if (!kbCreateFile || !kbWriteFile) {
       setTopNotice('知识库写入服务不可用')
       return null
     }
-    const result = await window.aiops.kbCreateFile('summary', fileName, content)
+    const result = await kbCreateFile('summary', fileName, content)
     const entry = backendKnowledgeEntryOrNotice(result, malformedKnowledgeBackendResultMessage)
     if (!entry) return null
     const relPath = entry.relPath.trim()
@@ -14955,7 +14968,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       setTopNotice(malformedKnowledgeBackendResultMessage)
       return null
     }
-    const writeResult = await window.aiops.kbWriteFile(relPath, content)
+    const writeResult = await kbWriteFile(relPath, content)
     if (!isKnowledgeWriteResultData(writeResult) || writeResult.relPath.trim() !== relPath) {
       setTopNotice(malformedKnowledgeBackendResultMessage)
       return null
