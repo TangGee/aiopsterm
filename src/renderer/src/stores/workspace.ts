@@ -86,6 +86,7 @@ import {
 } from '@/services/skillsBackendGuards'
 import { shortcutRuntime, type ShortcutActionHandler } from '@/services/shortcutRuntime'
 import { skillsClient } from '@/services/skillsClient'
+import { settingsConfigClient } from '@/services/settingsConfigClient'
 import { addSystemThemeListener, applyThemeToDocument, isThemeId, type ThemeId } from '@/services/themeRuntime'
 import { isAiopstermDeepLinkPayload } from '@shared/deepLink'
 import { isLegacyLocalModelName } from '@shared/modelConfigBoundary'
@@ -7352,8 +7353,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const installKeywordHighlightConfigFileListener = () => {
-    if (removeKeywordHighlightConfigFileListener || !window.aiops?.onKeywordHighlightConfigFileChanged) return
-    removeKeywordHighlightConfigFileListener = window.aiops.onKeywordHighlightConfigFileChanged((content) => {
+    const onKeywordHighlightConfigFileChanged = settingsConfigClient.onKeywordHighlightConfigFileChanged()
+    if (removeKeywordHighlightConfigFileListener || !onKeywordHighlightConfigFileChanged) return
+    removeKeywordHighlightConfigFileListener = onKeywordHighlightConfigFileChanged((content) => {
       applyKeywordHighlightConfigFileContent(content, true)
     })
   }
@@ -7371,9 +7373,14 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     keywordHighlightEditorError.value = ''
     keywordHighlightEditorLastSaved.value = false
     installKeywordHighlightConfigFileListener()
-    if (!window.aiops) return
+    const getKeywordHighlightConfigPath = settingsConfigClient.getKeywordHighlightConfigPath()
+    const readKeywordHighlightConfig = settingsConfigClient.readKeywordHighlightConfig()
+    if (!getKeywordHighlightConfigPath || !readKeywordHighlightConfig) {
+      keywordHighlightEditorError.value = 'Failed to read keyword highlight config: keyword highlight config service unavailable'
+      return
+    }
     try {
-      const [path, content] = await Promise.all([window.aiops.getKeywordHighlightConfigPath(), window.aiops.readKeywordHighlightConfig()])
+      const [path, content] = await Promise.all([getKeywordHighlightConfigPath(), readKeywordHighlightConfig()])
       if (requestId !== keywordHighlightLoadRequest) return
       keywordHighlightConfigPath.value = path
       applyKeywordHighlightConfigFileContent(content, false)
@@ -7431,8 +7438,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
     const { normalized } = normalizeKeywordHighlightConfig(parsed)
     const normalizedContent = JSON.stringify(normalized, null, 2)
-    const writeKeywordHighlightConfig = window.aiops?.writeKeywordHighlightConfig
-    if (typeof writeKeywordHighlightConfig !== 'function') {
+    const writeKeywordHighlightConfig = settingsConfigClient.writeKeywordHighlightConfig()
+    if (!writeKeywordHighlightConfig) {
       keywordHighlightEditorError.value = 'Save failed: keyword highlight config service unavailable'
       keywordHighlightEditorLastSaved.value = false
       return false
@@ -7457,8 +7464,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
     const normalized = normalizeKeywordHighlightConfig(defaultKeywordHighlightSettings).normalized
     const normalizedContent = JSON.stringify(normalized, null, 2)
-    const writeKeywordHighlightConfig = window.aiops?.writeKeywordHighlightConfig
-    if (typeof writeKeywordHighlightConfig !== 'function') {
+    const writeKeywordHighlightConfig = settingsConfigClient.writeKeywordHighlightConfig()
+    if (!writeKeywordHighlightConfig) {
       keywordHighlightEditorError.value = 'Reset failed: keyword highlight config service unavailable'
       keywordHighlightEditorLastSaved.value = false
       return false
@@ -7525,8 +7532,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const installSecurityConfigFileListener = () => {
-    if (removeSecurityConfigFileListener || !window.aiops?.onSecurityConfigFileChanged) return
-    removeSecurityConfigFileListener = window.aiops.onSecurityConfigFileChanged((content) => {
+    const onSecurityConfigFileChanged = settingsConfigClient.onSecurityConfigFileChanged()
+    if (removeSecurityConfigFileListener || !onSecurityConfigFileChanged) return
+    removeSecurityConfigFileListener = onSecurityConfigFileChanged((content) => {
       applySecurityConfigFileContent(content, true)
     })
   }
@@ -7544,9 +7552,14 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     securityConfigEditorError.value = ''
     securityConfigEditorLastSaved.value = false
     installSecurityConfigFileListener()
-    if (!window.aiops) return
+    const getSecurityConfigPath = settingsConfigClient.getSecurityConfigPath()
+    const readSecurityConfig = settingsConfigClient.readSecurityConfig()
+    if (!getSecurityConfigPath || !readSecurityConfig) {
+      securityConfigEditorError.value = 'Failed to read security config: security config service unavailable'
+      return
+    }
     try {
-      const [path, content] = await Promise.all([window.aiops.getSecurityConfigPath(), window.aiops.readSecurityConfig()])
+      const [path, content] = await Promise.all([getSecurityConfigPath(), readSecurityConfig()])
       if (requestId !== securityConfigLoadRequest) return
       securityConfigPath.value = path
       applySecurityConfigFileContent(content, false)
@@ -7604,8 +7617,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
     const { normalized } = normalizeSecurityConfig(parsed)
     const normalizedContent = JSON.stringify(normalized, null, 2)
-    const writeSecurityConfig = window.aiops?.writeSecurityConfig
-    if (typeof writeSecurityConfig !== 'function') {
+    const writeSecurityConfig = settingsConfigClient.writeSecurityConfig()
+    if (!writeSecurityConfig) {
       securityConfigEditorError.value = 'Save failed: security config service unavailable'
       securityConfigEditorLastSaved.value = false
       return false
@@ -7630,8 +7643,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
     const normalized = normalizeSecurityConfig(defaultSecuritySettings).normalized
     const normalizedContent = JSON.stringify(normalized, null, 2)
-    const writeSecurityConfig = window.aiops?.writeSecurityConfig
-    if (typeof writeSecurityConfig !== 'function') {
+    const writeSecurityConfig = settingsConfigClient.writeSecurityConfig()
+    if (!writeSecurityConfig) {
       securityConfigEditorError.value = 'Reset failed: security config service unavailable'
       securityConfigEditorLastSaved.value = false
       return false
