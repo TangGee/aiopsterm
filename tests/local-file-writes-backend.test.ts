@@ -2,8 +2,8 @@ import { mkdtemp, readFile, rm, stat, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { LocalFileWriteResult } from '../src/shared/preload'
 import type { CustomBackgroundSaveResult } from '../src/shared/contracts/appRuntime'
+import type { LocalFileWriteResult } from '../src/shared/contracts/localFiles'
 
 type LocalFileWritesBackend = {
   saveCustomBackgroundFile: (

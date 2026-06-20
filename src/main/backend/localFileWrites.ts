@@ -1,8 +1,8 @@
 import { cp, mkdir, stat, writeFile } from 'fs/promises'
 import { basename, dirname, extname, isAbsolute, join } from 'path'
 import { pathToFileURL } from 'url'
-import type { LocalFileWriteResult } from '@shared/preload'
 import type { CustomBackgroundSaveResult } from '@shared/contracts/appRuntime'
+import type { LocalFileWriteResult } from '@shared/contracts/localFiles'
 
 const defaultAllowedCustomBackgroundExtensions = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp'])
 const defaultMaxCustomBackgroundBytes = 20 * 1024 * 1024

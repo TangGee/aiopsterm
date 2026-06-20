@@ -6,7 +6,7 @@ import type {
   ChatImageAttachmentPrepareResult,
   ChatImageAttachmentValidateInput,
   ChatImageAttachmentValidateResult
-} from '@shared/preload'
+} from '@shared/contracts/localFiles'
 import { prepareChatImageAttachment as prepareChatImageAttachmentFromData, validateChatImageAttachment } from '@shared/chatImageAttachment'
 import { clipboard } from 'electron'
 import { readFile, stat } from 'fs/promises'

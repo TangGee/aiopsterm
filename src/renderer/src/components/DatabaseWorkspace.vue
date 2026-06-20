@@ -2372,7 +2372,6 @@ import type {
   DatabaseGroupDeleteResult,
   DatabaseGroupMutationResult,
   DatabaseGroupUpdateInput,
-  LocalFileWriteResult,
   DatabasePageCommentKey,
   DatabasePageCommentRecord,
   DatabaseSqlExecutionRecord,
@@ -2385,6 +2384,7 @@ import type {
   DatabaseTableQueryResult,
   DatabaseWorkspaceCatalog
 } from '@shared/preload'
+import type { LocalFileWriteResult } from '@shared/contracts/localFiles'
 
 type DbFilter =
   | { column: string; operator: 'like' | 'eq' | 'neq'; value: string }

@@ -1,4 +1,4 @@
-import type { ChatAttachmentStageResult } from '@shared/preload'
+import type { ChatAttachmentStageResult } from '@shared/contracts/localFiles'
 import { normalizeChatAttachmentTaskId } from '@shared/chatAttachment'
 import { basename, extname, isAbsolute, join } from 'path'
 import { access, cp, mkdir, stat } from 'fs/promises'

@@ -1,4 +1,4 @@
-import type { IpcMain, IpcMainInvokeEvent, OpenDialogOptions, SaveDialogOptions } from 'electron'
+import type { IpcMain, IpcMainInvokeEvent, OpenDialogOptions as ElectronOpenDialogOptions, SaveDialogOptions as ElectronSaveDialogOptions } from 'electron'
 import { basename, isAbsolute, join } from 'path'
 import { readFile, stat, writeFile } from 'fs/promises'
 import { stageChatAttachment } from '../backend/chatAttachments'
@@ -13,16 +13,18 @@ import type {
   ChatImageAttachmentClipboardInput,
   ChatImageAttachmentFileInput,
   ChatImageAttachmentPrepareInput,
-  ChatImageAttachmentValidateInput
-} from '@shared/preload'
+  ChatImageAttachmentValidateInput,
+  OpenDialogOptions,
+  SaveDialogOptions
+} from '@shared/contracts/localFiles'
 
 type DialogResult = { canceled?: boolean; filePaths?: string[]; filePath?: string }
 type WriteFixtureFile = (filePath: string, content: string | Buffer, encoding?: BufferEncoding) => Promise<void>
 type OpenDialogProperty = NonNullable<OpenDialogOptions['properties']>[number]
 
 type RegisterLocalFilesIpcInput = {
-  showOpenDialog: (event: IpcMainInvokeEvent, options: OpenDialogOptions) => Promise<DialogResult | undefined>
-  showSaveDialog: (event: IpcMainInvokeEvent, options: SaveDialogOptions) => Promise<DialogResult | undefined>
+  showOpenDialog: (event: IpcMainInvokeEvent, options: ElectronOpenDialogOptions) => Promise<DialogResult | undefined>
+  showSaveDialog: (event: IpcMainInvokeEvent, options: ElectronSaveDialogOptions) => Promise<DialogResult | undefined>
   shouldUseE2eDialogFixtures: () => boolean
   getUserDataPath: () => string
   getDownloadsPath: () => string

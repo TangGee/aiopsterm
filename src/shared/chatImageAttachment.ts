@@ -4,7 +4,7 @@ import type {
   ChatImageAttachmentPrepareResult,
   ChatImageAttachmentValidateInput,
   ChatImageAttachmentValidateResult
-} from './preload'
+} from './contracts/localFiles'
 
 export const SUPPORTED_CHAT_IMAGE_ATTACHMENT_TYPES: ChatImageAttachmentMediaType[] = ['image/jpeg', 'image/png', 'image/gif', 'image/webp']
 export const MAX_CHAT_IMAGE_ATTACHMENT_BYTES = 10 * 1024 * 1024

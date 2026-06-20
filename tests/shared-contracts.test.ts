@@ -257,6 +257,28 @@ import type {
   TerminalUserConfig as TerminalUserConfigPreload,
   WorkspaceUserConfig as WorkspaceUserConfigPreload
 } from '../src/shared/preload'
+import type {
+  ChatAttachmentStageResult as ChatAttachmentStageResultContract,
+  ChatImageAttachmentPrepareResult as ChatImageAttachmentPrepareResultContract,
+  ChatImageAttachmentValidateResult as ChatImageAttachmentValidateResultContract,
+  LocalFileReadResult as LocalFileReadResultContract,
+  LocalFileWriteResult as LocalFileWriteResultContract,
+  OpenDialogOptions as OpenDialogOptionsContract,
+  OpenDialogResult as OpenDialogResultContract,
+  SaveDialogOptions as SaveDialogOptionsContract,
+  SaveDialogResult as SaveDialogResultContract
+} from '../src/shared/contracts/localFiles'
+import type {
+  ChatAttachmentStageResult as ChatAttachmentStageResultPreload,
+  ChatImageAttachmentPrepareResult as ChatImageAttachmentPrepareResultPreload,
+  ChatImageAttachmentValidateResult as ChatImageAttachmentValidateResultPreload,
+  LocalFileReadResult as LocalFileReadResultPreload,
+  LocalFileWriteResult as LocalFileWriteResultPreload,
+  OpenDialogOptions as OpenDialogOptionsPreload,
+  OpenDialogResult as OpenDialogResultPreload,
+  SaveDialogOptions as SaveDialogOptionsPreload,
+  SaveDialogResult as SaveDialogResultPreload
+} from '../src/shared/preload'
 
 type AssertAssignable<From, To extends From> = true
 
@@ -475,6 +497,24 @@ type OpenSettingsDocumentationInputPreloadMatchesContract = AssertAssignable<Ope
 type OpenSettingsDocumentationInputContractMatchesPreload = AssertAssignable<OpenSettingsDocumentationInputPreload, OpenSettingsDocumentationInputContract>
 type CustomBackgroundSaveResultPreloadMatchesContract = AssertAssignable<CustomBackgroundSaveResultContract, CustomBackgroundSaveResultPreload>
 type CustomBackgroundSaveResultContractMatchesPreload = AssertAssignable<CustomBackgroundSaveResultPreload, CustomBackgroundSaveResultContract>
+type OpenDialogOptionsPreloadMatchesContract = AssertAssignable<OpenDialogOptionsContract, OpenDialogOptionsPreload>
+type OpenDialogOptionsContractMatchesPreload = AssertAssignable<OpenDialogOptionsPreload, OpenDialogOptionsContract>
+type OpenDialogResultPreloadMatchesContract = AssertAssignable<OpenDialogResultContract, OpenDialogResultPreload>
+type OpenDialogResultContractMatchesPreload = AssertAssignable<OpenDialogResultPreload, OpenDialogResultContract>
+type SaveDialogOptionsPreloadMatchesContract = AssertAssignable<SaveDialogOptionsContract, SaveDialogOptionsPreload>
+type SaveDialogOptionsContractMatchesPreload = AssertAssignable<SaveDialogOptionsPreload, SaveDialogOptionsContract>
+type SaveDialogResultPreloadMatchesContract = AssertAssignable<SaveDialogResultContract, SaveDialogResultPreload>
+type SaveDialogResultContractMatchesPreload = AssertAssignable<SaveDialogResultPreload, SaveDialogResultContract>
+type LocalFileReadResultPreloadMatchesContract = AssertAssignable<LocalFileReadResultContract, LocalFileReadResultPreload>
+type LocalFileReadResultContractMatchesPreload = AssertAssignable<LocalFileReadResultPreload, LocalFileReadResultContract>
+type LocalFileWriteResultPreloadMatchesContract = AssertAssignable<LocalFileWriteResultContract, LocalFileWriteResultPreload>
+type LocalFileWriteResultContractMatchesPreload = AssertAssignable<LocalFileWriteResultPreload, LocalFileWriteResultContract>
+type ChatAttachmentStageResultPreloadMatchesContract = AssertAssignable<ChatAttachmentStageResultContract, ChatAttachmentStageResultPreload>
+type ChatAttachmentStageResultContractMatchesPreload = AssertAssignable<ChatAttachmentStageResultPreload, ChatAttachmentStageResultContract>
+type ChatImageAttachmentValidateResultPreloadMatchesContract = AssertAssignable<ChatImageAttachmentValidateResultContract, ChatImageAttachmentValidateResultPreload>
+type ChatImageAttachmentValidateResultContractMatchesPreload = AssertAssignable<ChatImageAttachmentValidateResultPreload, ChatImageAttachmentValidateResultContract>
+type ChatImageAttachmentPrepareResultPreloadMatchesContract = AssertAssignable<ChatImageAttachmentPrepareResultContract, ChatImageAttachmentPrepareResultPreload>
+type ChatImageAttachmentPrepareResultContractMatchesPreload = AssertAssignable<ChatImageAttachmentPrepareResultPreload, ChatImageAttachmentPrepareResultContract>
 
 describe('shared contract compatibility exports', () => {
   it('keeps Codex session contracts compatible through the preload export', () => {
@@ -902,5 +942,30 @@ describe('shared contract compatibility exports', () => {
       true,
       true
     ])
+  })
+
+  it('keeps Local Files contracts compatible through the preload export', () => {
+    const checks: [
+      OpenDialogOptionsPreloadMatchesContract,
+      OpenDialogOptionsContractMatchesPreload,
+      OpenDialogResultPreloadMatchesContract,
+      OpenDialogResultContractMatchesPreload,
+      SaveDialogOptionsPreloadMatchesContract,
+      SaveDialogOptionsContractMatchesPreload,
+      SaveDialogResultPreloadMatchesContract,
+      SaveDialogResultContractMatchesPreload,
+      LocalFileReadResultPreloadMatchesContract,
+      LocalFileReadResultContractMatchesPreload,
+      LocalFileWriteResultPreloadMatchesContract,
+      LocalFileWriteResultContractMatchesPreload,
+      ChatAttachmentStageResultPreloadMatchesContract,
+      ChatAttachmentStageResultContractMatchesPreload,
+      ChatImageAttachmentValidateResultPreloadMatchesContract,
+      ChatImageAttachmentValidateResultContractMatchesPreload,
+      ChatImageAttachmentPrepareResultPreloadMatchesContract,
+      ChatImageAttachmentPrepareResultContractMatchesPreload
+    ] = [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true]
+
+    expect(checks).toEqual([true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true])
   })
 })

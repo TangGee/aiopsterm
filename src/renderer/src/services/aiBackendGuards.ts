@@ -9,12 +9,10 @@ import type {
   AiTodoItem,
   AiTodoSnapshot,
   AiTodoStatus,
-  ChatAttachmentStageResult,
-  ChatImageAttachmentMediaType,
-  ChatImageAttachmentPrepareResult,
   VoiceTranscriptionProvider,
   VoiceTranscriptionResult
 } from '@shared/preload'
+import type { ChatAttachmentStageResult, ChatImageAttachmentMediaType, ChatImageAttachmentPrepareResult } from '@shared/contracts/localFiles'
 
 export const malformedAiBackendResultMessage = 'AI 服务返回数据无效'
 
