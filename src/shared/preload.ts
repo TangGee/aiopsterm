@@ -177,6 +177,15 @@ import type {
   McpToolCallResult,
   McpToolStatesUserConfig
 } from './contracts/mcp'
+import type {
+  SettingsPreferencesMutationResult,
+  SettingsPreferencesResult,
+  SettingsRuleDeleteResult,
+  SettingsRuleSaveInput,
+  SettingsShortcutSaveInput,
+  ShortcutUserConfig,
+  UserRuleConfig
+} from './contracts/settingsPreferences'
 
 export type { AiopsMutationResult } from './contracts/common'
 export type {
@@ -413,6 +422,16 @@ export type {
   McpToolConfig,
   McpToolStatesUserConfig
 } from './contracts/mcp'
+export type {
+  SettingsPreferencesMutationResult,
+  SettingsPreferencesResult,
+  SettingsPreferencesSnapshot,
+  SettingsRuleDeleteResult,
+  SettingsRuleSaveInput,
+  SettingsShortcutSaveInput,
+  ShortcutUserConfig,
+  UserRuleConfig
+} from './contracts/settingsPreferences'
 
 export type RuntimeLogLevel = 'debug' | 'info' | 'warn' | 'error'
 
@@ -1444,41 +1463,6 @@ export type ModelSettingsUserConfig = {
 export type AiModelCatalogInput = {
   modelSettings?: ModelSettingsUserConfig
   localChatBackendAvailable?: boolean
-}
-
-export type ShortcutUserConfig = {
-  id: string
-  action: string
-  shortcut: string
-  suffix?: string
-}
-
-export type UserRuleConfig = {
-  id: string
-  content: string
-  enabled: boolean
-}
-
-export type SettingsPreferencesSnapshot = {
-  shortcuts: ShortcutUserConfig[]
-  rules: UserRuleConfig[]
-}
-
-export type SettingsPreferencesResult = AiopsMutationResult<SettingsPreferencesSnapshot>
-
-export type SettingsRuleSaveInput = {
-  id?: string
-  content: string
-  enabled?: boolean
-}
-
-export type SettingsRuleDeleteResult = AiopsMutationResult<SettingsPreferencesSnapshot & { deleted: UserRuleConfig }>
-
-export type SettingsPreferencesMutationResult = AiopsMutationResult<SettingsPreferencesSnapshot & { message: string }>
-
-export type SettingsShortcutSaveInput = {
-  id: string
-  shortcut: string
 }
 
 export type KnowledgeBaseNodeConfig = {

@@ -4,7 +4,7 @@ import type {
   SettingsRuleDeleteResult,
   ShortcutUserConfig,
   UserRuleConfig
-} from '@shared/preload'
+} from '@shared/contracts/settingsPreferences'
 
 export const malformedSettingsBackendResultMessage = '设置服务返回数据无效'
 

@@ -1,4 +1,4 @@
-import type { UserRuleConfig } from './preload'
+import type { UserRuleConfig } from './contracts/settingsPreferences'
 import { shouldUseSettingsPreferencesSeedData as runtimeShouldUseSettingsPreferencesSeedData } from './runtimeSwitches'
 
 const defaultSettingsRuleSeeds: UserRuleConfig[] = [

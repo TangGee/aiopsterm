@@ -1,4 +1,4 @@
-import type { ShortcutUserConfig } from '@shared/preload'
+import type { ShortcutUserConfig } from '@shared/contracts/settingsPreferences'
 
 export type ShortcutActionHandler = (payload?: { digit?: number }) => void
 

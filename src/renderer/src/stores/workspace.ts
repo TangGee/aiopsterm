@@ -159,8 +159,6 @@ import type {
   PrivacyRuntimeSnapshot,
   SecurityUserConfig,
   SettingsDocumentationPage,
-  SettingsPreferencesSnapshot,
-  ShortcutUserConfig,
   SkillUserConfig,
   SshAgentKeyConfig,
   SshAgentKeychainOption,
@@ -171,7 +169,6 @@ import type {
   TerminalMouseEventAction,
   TerminalUserConfig,
   UserConfig,
-  UserRuleConfig,
   WorkspaceUserConfig
 } from '@shared/preload'
 import type { AliasCommandConfig, AliasCommandSaveInput } from '@shared/contracts/aliases'
@@ -180,6 +177,7 @@ import type { AiopsTrustedDevice, AiopsTrustedDeviceRevokeResult, AiopsUserAccou
 import type { ExtensionInstallProgress as BackendExtensionInstallProgress, ExtensionInstallStage, ExtensionPluginOperation, ExtensionPluginRuntimeConfig, ExtensionUserConfig } from '@shared/contracts/extensions'
 import type { QuickCommandGroupConfig, QuickCommandScriptPlan, QuickCommandScriptSegment, QuickCommandSnippetConfig, QuickCommandsUserConfig } from '@shared/contracts/quickCommands'
 import type { McpConfigFile, McpResourceReadContent, McpResourceReadResult, McpServerUserConfig, McpToolCallContent, McpToolCallResult, McpToolStatesUserConfig } from '@shared/contracts/mcp'
+import type { SettingsPreferencesSnapshot, ShortcutUserConfig, UserRuleConfig } from '@shared/contracts/settingsPreferences'
 import type {
   AiAgentSessionEvent,
   AiAgentSessionEventName,

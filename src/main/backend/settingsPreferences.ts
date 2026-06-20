@@ -2,8 +2,8 @@ import { app } from 'electron'
 import Store from 'electron-store'
 import { randomUUID } from 'crypto'
 import { join } from 'path'
+import type { AiopsMutationResult } from '@shared/contracts/common'
 import type {
-  AiopsMutationResult,
   SettingsPreferencesResult,
   SettingsPreferencesSnapshot,
   SettingsRuleDeleteResult,
@@ -12,7 +12,7 @@ import type {
   SettingsShortcutSaveInput,
   ShortcutUserConfig,
   UserRuleConfig
-} from '@shared/preload'
+} from '@shared/contracts/settingsPreferences'
 import { defaultSettingsRuleSeedData, shouldUseSettingsPreferencesSeedData } from '@shared/settingsPreferencesSeed'
 
 type SettingsPreferencesStoreShape = {

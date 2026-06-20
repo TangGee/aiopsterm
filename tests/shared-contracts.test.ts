@@ -145,6 +145,26 @@ import type {
   McpToolCallInput as McpToolCallInputPreload,
   McpToolCallResult as McpToolCallResultPreload
 } from '../src/shared/preload'
+import type {
+  SettingsPreferencesMutationResult as SettingsPreferencesMutationResultContract,
+  SettingsPreferencesResult as SettingsPreferencesResultContract,
+  SettingsPreferencesSnapshot as SettingsPreferencesSnapshotContract,
+  SettingsRuleDeleteResult as SettingsRuleDeleteResultContract,
+  SettingsRuleSaveInput as SettingsRuleSaveInputContract,
+  SettingsShortcutSaveInput as SettingsShortcutSaveInputContract,
+  ShortcutUserConfig as ShortcutUserConfigContract,
+  UserRuleConfig as UserRuleConfigContract
+} from '../src/shared/contracts/settingsPreferences'
+import type {
+  SettingsPreferencesMutationResult as SettingsPreferencesMutationResultPreload,
+  SettingsPreferencesResult as SettingsPreferencesResultPreload,
+  SettingsPreferencesSnapshot as SettingsPreferencesSnapshotPreload,
+  SettingsRuleDeleteResult as SettingsRuleDeleteResultPreload,
+  SettingsRuleSaveInput as SettingsRuleSaveInputPreload,
+  SettingsShortcutSaveInput as SettingsShortcutSaveInputPreload,
+  ShortcutUserConfig as ShortcutUserConfigPreload,
+  UserRuleConfig as UserRuleConfigPreload
+} from '../src/shared/preload'
 
 type AssertAssignable<From, To extends From> = true
 
@@ -255,6 +275,28 @@ type McpResourceReadInputPreloadMatchesContract = AssertAssignable<McpResourceRe
 type McpResourceReadInputContractMatchesPreload = AssertAssignable<McpResourceReadInputPreload, McpResourceReadInputContract>
 type McpResourceReadResultPreloadMatchesContract = AssertAssignable<McpResourceReadResultContract, McpResourceReadResultPreload>
 type McpResourceReadResultContractMatchesPreload = AssertAssignable<McpResourceReadResultPreload, McpResourceReadResultContract>
+type ShortcutUserConfigPreloadMatchesContract = AssertAssignable<ShortcutUserConfigContract, ShortcutUserConfigPreload>
+type ShortcutUserConfigContractMatchesPreload = AssertAssignable<ShortcutUserConfigPreload, ShortcutUserConfigContract>
+type UserRuleConfigPreloadMatchesContract = AssertAssignable<UserRuleConfigContract, UserRuleConfigPreload>
+type UserRuleConfigContractMatchesPreload = AssertAssignable<UserRuleConfigPreload, UserRuleConfigContract>
+type SettingsPreferencesSnapshotPreloadMatchesContract = AssertAssignable<SettingsPreferencesSnapshotContract, SettingsPreferencesSnapshotPreload>
+type SettingsPreferencesSnapshotContractMatchesPreload = AssertAssignable<SettingsPreferencesSnapshotPreload, SettingsPreferencesSnapshotContract>
+type SettingsPreferencesResultPreloadMatchesContract = AssertAssignable<SettingsPreferencesResultContract, SettingsPreferencesResultPreload>
+type SettingsPreferencesResultContractMatchesPreload = AssertAssignable<SettingsPreferencesResultPreload, SettingsPreferencesResultContract>
+type SettingsRuleSaveInputPreloadMatchesContract = AssertAssignable<SettingsRuleSaveInputContract, SettingsRuleSaveInputPreload>
+type SettingsRuleSaveInputContractMatchesPreload = AssertAssignable<SettingsRuleSaveInputPreload, SettingsRuleSaveInputContract>
+type SettingsRuleDeleteResultPreloadMatchesContract = AssertAssignable<SettingsRuleDeleteResultContract, SettingsRuleDeleteResultPreload>
+type SettingsRuleDeleteResultContractMatchesPreload = AssertAssignable<SettingsRuleDeleteResultPreload, SettingsRuleDeleteResultContract>
+type SettingsPreferencesMutationPreloadMatchesContract = AssertAssignable<
+  SettingsPreferencesMutationResultContract,
+  SettingsPreferencesMutationResultPreload
+>
+type SettingsPreferencesMutationContractMatchesPreload = AssertAssignable<
+  SettingsPreferencesMutationResultPreload,
+  SettingsPreferencesMutationResultContract
+>
+type SettingsShortcutSaveInputPreloadMatchesContract = AssertAssignable<SettingsShortcutSaveInputContract, SettingsShortcutSaveInputPreload>
+type SettingsShortcutSaveInputContractMatchesPreload = AssertAssignable<SettingsShortcutSaveInputPreload, SettingsShortcutSaveInputContract>
 
 describe('shared contract compatibility exports', () => {
   it('keeps Codex session contracts compatible through the preload export', () => {
@@ -430,5 +472,28 @@ describe('shared contract compatibility exports', () => {
     ] = [true, true, true, true, true, true, true, true, true, true, true, true, true, true]
 
     expect(checks).toEqual([true, true, true, true, true, true, true, true, true, true, true, true, true, true])
+  })
+
+  it('keeps Settings Preferences contracts compatible through the preload export', () => {
+    const checks: [
+      ShortcutUserConfigPreloadMatchesContract,
+      ShortcutUserConfigContractMatchesPreload,
+      UserRuleConfigPreloadMatchesContract,
+      UserRuleConfigContractMatchesPreload,
+      SettingsPreferencesSnapshotPreloadMatchesContract,
+      SettingsPreferencesSnapshotContractMatchesPreload,
+      SettingsPreferencesResultPreloadMatchesContract,
+      SettingsPreferencesResultContractMatchesPreload,
+      SettingsRuleSaveInputPreloadMatchesContract,
+      SettingsRuleSaveInputContractMatchesPreload,
+      SettingsRuleDeleteResultPreloadMatchesContract,
+      SettingsRuleDeleteResultContractMatchesPreload,
+      SettingsPreferencesMutationPreloadMatchesContract,
+      SettingsPreferencesMutationContractMatchesPreload,
+      SettingsShortcutSaveInputPreloadMatchesContract,
+      SettingsShortcutSaveInputContractMatchesPreload
+    ] = [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true]
+
+    expect(checks).toEqual([true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true])
   })
 })
