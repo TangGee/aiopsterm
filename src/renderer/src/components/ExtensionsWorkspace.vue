@@ -370,7 +370,7 @@ import {
   isAiopsJumpserverOrganizationAssetRefreshData,
   malformedAssetBackendResultMessage
 } from '@/services/assetBackendGuards'
-import type { ExtensionIconKey, ExtensionInstallStage, ExtensionPluginRuntimeConfig } from '@shared/preload'
+import type { ExtensionIconKey, ExtensionInstallStage, ExtensionPluginRuntimeConfig } from '@shared/contracts/extensions'
 import type { AiopsAssetRecord, AiopsAssetSnapshot } from '@shared/contracts/assets'
 
 type ExtensionPlugin = ExtensionPluginRuntimeConfig

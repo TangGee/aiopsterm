@@ -17,7 +17,7 @@ import type {
   ExtensionPackageDownloadInput,
   ExtensionPackageDownloadResult,
   ExtensionPluginUrlInstallInput
-} from '@shared/preload'
+} from '@shared/contracts/extensions'
 import { normalizeExternalHttpUrl } from '@shared/externalUrl'
 
 export const EXTENSION_INSTALL_STEP_DELAY_MS = 120

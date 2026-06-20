@@ -128,11 +128,6 @@ import type {
   AliasCommandConfig,
   AliasCommandSaveInput,
   EditorUserConfig,
-  ExtensionInstallProgress as BackendExtensionInstallProgress,
-  ExtensionInstallStage,
-  ExtensionPluginOperation,
-  ExtensionPluginRuntimeConfig,
-  ExtensionUserConfig,
   KeywordHighlightRuleConfig,
   KeywordHighlightUserConfig,
   KnowledgeBaseEntry,
@@ -195,6 +190,7 @@ import type {
 } from '@shared/preload'
 import type { FileSessionCatalog, FileSessionFolderRecord, FileSessionFolderSaveInput, FileSessionInfo, FileSessionPatch, FileSessionTerminalContext, FileTransferTask } from '@shared/contracts/files'
 import type { AiopsTrustedDevice, AiopsTrustedDeviceRevokeResult, AiopsUserAccountSnapshot, AiopsUserAvatarPrepareResult, AiopsUserCodeResult, AiopsUserExternalAction, AiopsUserExternalActionResult, AiopsUserMutationResult, AiopsUserProfile } from '@shared/contracts/userAccount'
+import type { ExtensionInstallProgress as BackendExtensionInstallProgress, ExtensionInstallStage, ExtensionPluginOperation, ExtensionPluginRuntimeConfig, ExtensionUserConfig } from '@shared/contracts/extensions'
 import type {
   AiAgentSessionEvent,
   AiAgentSessionEventName,

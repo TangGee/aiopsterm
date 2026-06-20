@@ -18,7 +18,7 @@ import type {
   ExtensionPluginOperationInput,
   ExtensionPluginUrlInstallInput,
   ExtensionSubscriptionInput
-} from '@shared/preload'
+} from '@shared/contracts/extensions'
 
 type RegisterExtensionsIpcInput = {
   openExternal: (url: string) => Promise<void> | void

@@ -85,6 +85,20 @@ import type {
   AiopsUserLoginInput as AiopsUserLoginInputPreload,
   AiopsUserMutationResult as AiopsUserMutationResultPreload
 } from '../src/shared/preload'
+import type {
+  ExtensionInstallProgress as ExtensionInstallProgressContract,
+  ExtensionPackageDownloadResult as ExtensionPackageDownloadResultContract,
+  ExtensionPluginOperationResult as ExtensionPluginOperationResultContract,
+  ExtensionPluginRuntimeConfig as ExtensionPluginRuntimeConfigContract,
+  ExtensionUserConfig as ExtensionUserConfigContract
+} from '../src/shared/contracts/extensions'
+import type {
+  ExtensionInstallProgress as ExtensionInstallProgressPreload,
+  ExtensionPackageDownloadResult as ExtensionPackageDownloadResultPreload,
+  ExtensionPluginOperationResult as ExtensionPluginOperationResultPreload,
+  ExtensionPluginRuntimeConfig as ExtensionPluginRuntimeConfigPreload,
+  ExtensionUserConfig as ExtensionUserConfigPreload
+} from '../src/shared/preload'
 
 type AssertAssignable<From, To extends From> = true
 
@@ -151,6 +165,16 @@ type UserMutationPreloadMatchesContract = AssertAssignable<AiopsUserMutationResu
 type UserMutationContractMatchesPreload = AssertAssignable<AiopsUserMutationResultPreload, AiopsUserMutationResultContract>
 type TrustedDeviceRevokePreloadMatchesContract = AssertAssignable<AiopsTrustedDeviceRevokeResultContract, AiopsTrustedDeviceRevokeResultPreload>
 type TrustedDeviceRevokeContractMatchesPreload = AssertAssignable<AiopsTrustedDeviceRevokeResultPreload, AiopsTrustedDeviceRevokeResultContract>
+type ExtensionRuntimePreloadMatchesContract = AssertAssignable<ExtensionPluginRuntimeConfigContract, ExtensionPluginRuntimeConfigPreload>
+type ExtensionRuntimeContractMatchesPreload = AssertAssignable<ExtensionPluginRuntimeConfigPreload, ExtensionPluginRuntimeConfigContract>
+type ExtensionOperationPreloadMatchesContract = AssertAssignable<ExtensionPluginOperationResultContract, ExtensionPluginOperationResultPreload>
+type ExtensionOperationContractMatchesPreload = AssertAssignable<ExtensionPluginOperationResultPreload, ExtensionPluginOperationResultContract>
+type ExtensionProgressPreloadMatchesContract = AssertAssignable<ExtensionInstallProgressContract, ExtensionInstallProgressPreload>
+type ExtensionProgressContractMatchesPreload = AssertAssignable<ExtensionInstallProgressPreload, ExtensionInstallProgressContract>
+type ExtensionDownloadPreloadMatchesContract = AssertAssignable<ExtensionPackageDownloadResultContract, ExtensionPackageDownloadResultPreload>
+type ExtensionDownloadContractMatchesPreload = AssertAssignable<ExtensionPackageDownloadResultPreload, ExtensionPackageDownloadResultContract>
+type ExtensionUserConfigPreloadMatchesContract = AssertAssignable<ExtensionUserConfigContract, ExtensionUserConfigPreload>
+type ExtensionUserConfigContractMatchesPreload = AssertAssignable<ExtensionUserConfigPreload, ExtensionUserConfigContract>
 
 describe('shared contract compatibility exports', () => {
   it('keeps Codex session contracts compatible through the preload export', () => {
@@ -254,5 +278,22 @@ describe('shared contract compatibility exports', () => {
     ] = [true, true, true, true, true, true, true, true]
 
     expect(checks).toEqual([true, true, true, true, true, true, true, true])
+  })
+
+  it('keeps Extensions contracts compatible through the preload export', () => {
+    const checks: [
+      ExtensionRuntimePreloadMatchesContract,
+      ExtensionRuntimeContractMatchesPreload,
+      ExtensionOperationPreloadMatchesContract,
+      ExtensionOperationContractMatchesPreload,
+      ExtensionProgressPreloadMatchesContract,
+      ExtensionProgressContractMatchesPreload,
+      ExtensionDownloadPreloadMatchesContract,
+      ExtensionDownloadContractMatchesPreload,
+      ExtensionUserConfigPreloadMatchesContract,
+      ExtensionUserConfigContractMatchesPreload
+    ] = [true, true, true, true, true, true, true, true, true, true]
+
+    expect(checks).toEqual([true, true, true, true, true, true, true, true, true, true])
   })
 })

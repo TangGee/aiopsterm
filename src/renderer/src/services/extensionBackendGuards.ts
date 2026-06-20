@@ -2,7 +2,9 @@ import type {
   AliasCommandConfig,
   AliasCommandDeleteResult,
   AliasCommandListResult,
-  AliasCommandMutationResult,
+  AliasCommandMutationResult
+} from '@shared/preload'
+import type {
   ExtensionInstallProgress,
   ExtensionPluginCancelResult,
   ExtensionPluginListResult,
@@ -10,7 +12,7 @@ import type {
   ExtensionPluginOperationResult,
   ExtensionPluginRuntimeConfig,
   ExtensionSubscriptionResult
-} from '@shared/preload'
+} from '@shared/contracts/extensions'
 
 export const malformedExtensionBackendResultMessage = '扩展服务返回数据无效'
 export const malformedAliasBackendResultMessage = 'Alias 服务返回数据无效'
