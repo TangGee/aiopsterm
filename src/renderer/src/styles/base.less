@@ -7655,17 +7655,46 @@ code {
   animation: control-surface-flash 0.9s ease-out;
 }
 
-.terminal-tab-title {
+.terminal-tab-label {
   flex: 1 1 auto;
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+  align-content: center;
+}
+
+.terminal-tab-title,
+.terminal-tab-meta {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.terminal-tab-title {
+  display: block;
+  font-size: 12px;
+  font-weight: 550;
+  line-height: 1;
+}
+
+.terminal-tab-meta {
+  display: block;
+  color: color-mix(in srgb, var(--muted) 82%, var(--text));
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1;
+}
+
 .terminal-tab-kind {
   flex: 0 0 auto;
+  align-self: center;
+  padding: 1px 4px;
+  border: 1px solid color-mix(in srgb, var(--border) 76%, transparent);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--surface) 32%, transparent);
   font-size: 10px;
+  line-height: 1.2;
 }
 
 .terminal-tab-state {

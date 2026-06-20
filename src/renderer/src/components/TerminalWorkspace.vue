@@ -15,6 +15,7 @@
         :class="{ active: panel.id === workspace.activePanelId, 'drag-over': tabDragOverPanelId === panel.id, 'ai-attention': panelNeedsAiAttention(panel), 'control-flash': controlFlashingPanelIds.includes(panel.id) }"
         role="button"
         tabindex="0"
+        :title="terminalTabTooltip(panel)"
         :draggable="panel.kind === 'terminal' || panel.kind === 'knowledge'"
         @click="workspace.activePanelId = panel.id"
         @keydown.enter.prevent="workspace.activePanelId = panel.id"
@@ -29,9 +30,15 @@
       >
         <span
           v-if="renamingId !== panel.id"
-          class="terminal-tab-title"
+          class="terminal-tab-label"
           @dblclick.stop="startRename(panel.id, panel.title)"
-        >{{ panel.title }}</span>
+        >
+          <strong class="terminal-tab-title">{{ panel.title }}</strong>
+          <small
+            v-if="terminalTabMeta(panel)"
+            class="terminal-tab-meta"
+          >{{ terminalTabMeta(panel) }}</small>
+        </span>
         <input
           v-else
           v-model="renameText"
@@ -40,9 +47,9 @@
           @keydown.esc="renamingId = ''"
         />
         <span
-          v-if="panel.kind === 'knowledge'"
+          v-if="terminalTabKindBadge(panel)"
           class="terminal-tab-kind"
-        >editor</span>
+        >{{ terminalTabKindBadge(panel) }}</span>
         <span
           v-else-if="panel.status === 'connecting' || panel.status === 'error' || panel.status === 'closed'"
           class="terminal-tab-state"
@@ -3974,6 +3981,42 @@ const terminalStatusLabel = (panel: TerminalPanel) => {
   if (panel.status === 'error') return '异常'
   if (panel.status === 'closed') return '已断开'
   return '已连接'
+}
+const pathBaseName = (value?: string) => {
+  const normalized = String(value || '').trim().replace(/\\/g, '/').replace(/\/+$/, '')
+  if (!normalized) return ''
+  if (normalized === '~' || normalized === '/') return normalized
+  return normalized.split('/').filter(Boolean).pop() || normalized
+}
+const terminalSshTargetLabel = (panel: TerminalPanel) => {
+  const ssh = panel.sshSession
+  if (!ssh?.host) return ''
+  const userHost = `${ssh.username ? `${ssh.username}@` : ''}${ssh.host}`
+  return `${userHost}${ssh.port && ssh.port !== 22 ? `:${ssh.port}` : ''}`
+}
+const terminalTabMeta = (panel: TerminalPanel) => {
+  if (panel.kind === 'knowledge') return panel.knowledge?.relPath || panel.cwd || ''
+  const sshTarget = terminalSshTargetLabel(panel)
+  if (sshTarget) return sshTarget
+  return pathBaseName(panel.cwd) || 'local'
+}
+const terminalTabKindBadge = (panel: TerminalPanel) => {
+  if (panel.kind === 'knowledge') return 'editor'
+  if (panel.sshSession) return 'ssh'
+  return ''
+}
+const terminalTabTooltip = (panel: TerminalPanel) => {
+  const lines = [
+    panel.title,
+    `类型: ${panel.kind === 'knowledge' ? '编辑器' : panel.sshSession ? 'SSH' : '本地终端'}`,
+    `状态: ${terminalStatusLabel(panel)}`
+  ]
+  const sshTarget = terminalSshTargetLabel(panel)
+  if (sshTarget) lines.push(`主机: ${sshTarget}`)
+  if (panel.cwd) lines.push(`路径: ${panel.cwd}`)
+  if (panel.knowledge?.relPath) lines.push(`文件: ${panel.knowledge.relPath}`)
+  if (panel.sessionId) lines.push(`会话: ${panel.sessionId}`)
+  return lines.filter(Boolean).join('\n')
 }
 const panelNeedsAiAttention = (panel: TerminalPanel) =>
   workspace.managedAiSessionNeedsAttentionForPanel(panel.id) || Boolean(panel.sessionId && workspace.managedAiSessionNeedsAttentionForPanel(panel.sessionId))

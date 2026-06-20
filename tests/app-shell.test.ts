@@ -8918,6 +8918,55 @@ describe('AppShell', () => {
     wrapper.unmount()
   })
 
+  it('shows compact terminal tab context for local and SSH sessions', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    mockXtermInstances.length = 0
+    const wrapper = mount(TerminalWorkspace, {
+      attachTo: document.body,
+      global: { plugins: [pinia] }
+    })
+    const store = useWorkspaceStore()
+
+    const localPanel = store.createPanel()
+    localPanel.title = 'API shell'
+    localPanel.cwd = '/srv/projects/api'
+    store.appendTerminalOutput(localPanel.id, 'local ready\n')
+    await wrapper.vm.$nextTick()
+    await wrapper.vm.$nextTick()
+
+    const localTab = wrapper.find('.terminal-tab.active')
+    expect(localTab.find('.terminal-tab-title').text()).toBe('API shell')
+    expect(localTab.find('.terminal-tab-meta').text()).toBe('api')
+    expect(localTab.attributes('title')).toContain('本地终端')
+    expect(localTab.attributes('title')).toContain('/srv/projects/api')
+
+    const sshPanel = store.createPanel()
+    sshPanel.title = 'Prod SSH'
+    sshPanel.cwd = '/var/log/nginx'
+    sshPanel.sshSession = {
+      host: '10.0.0.8',
+      port: 2222,
+      username: 'ops',
+      assetId: 'asset-prod',
+      assetName: 'Prod'
+    }
+    store.appendTerminalOutput(sshPanel.id, 'ssh ready\n')
+    await wrapper.vm.$nextTick()
+    await wrapper.vm.$nextTick()
+
+    const sshTab = wrapper.find('.terminal-tab.active')
+    expect(sshTab.find('.terminal-tab-title').text()).toBe('Prod SSH')
+    expect(sshTab.find('.terminal-tab-meta').text()).toBe('ops@10.0.0.8:2222')
+    expect(sshTab.find('.terminal-tab-kind').text()).toBe('ssh')
+    expect(sshTab.attributes('title')).toContain('SSH')
+    expect(sshTab.attributes('title')).toContain('状态:')
+    expect(sshTab.attributes('title')).toContain('主机: ops@10.0.0.8:2222')
+    expect(sshTab.attributes('title')).toContain('/var/log/nginx')
+
+    wrapper.unmount()
+  })
+
   it('restores and reattaches terminal splits from context menus and tab dragging', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
