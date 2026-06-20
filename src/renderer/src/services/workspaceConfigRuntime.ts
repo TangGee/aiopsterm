@@ -1,5 +1,7 @@
+import { isLocaleSetting } from '@/i18n/runtime'
 import type {
   AiPreferencesUserConfig,
+  CustomBackgroundSaveResult,
   EditorUserConfig,
   KeywordHighlightRuleConfig,
   KeywordHighlightUserConfig,
@@ -19,7 +21,13 @@ import type {
   TerminalUserConfig,
   WorkspaceUserConfig
 } from '@shared/contracts/appRuntime'
+import type { AliasCommandConfig } from '@shared/contracts/aliases'
 import type { ExtensionUserConfig } from '@shared/contracts/extensions'
+import type { KnowledgeBaseUserConfig, KnowledgeNode } from '@shared/contracts/knowledgeBase'
+import type { McpConfigFile, McpServerUserConfig, McpToolStatesUserConfig } from '@shared/contracts/mcp'
+import type { QuickCommandGroupConfig, QuickCommandSnippetConfig, QuickCommandsUserConfig } from '@shared/contracts/quickCommands'
+import type { ShortcutUserConfig, UserRuleConfig } from '@shared/contracts/settingsPreferences'
+import type { SkillUserConfig } from '@shared/contracts/skills'
 import type { UserConfig } from '@shared/contracts/userConfig'
 import { defaultModelSettingsData } from '@shared/modelSettingsDefaults'
 import { defaultWorkspacePreferencesData } from '@shared/workspacePreferencesDefaults'
@@ -329,6 +337,24 @@ export const defaultPrivacySettings: PrivacySettings = {
   deactivateLoading: false
 }
 
+export const defaultQuickCommands: QuickCommandsUserConfig = {
+  groups: [],
+  snippets: []
+}
+
+export const defaultKnowledgeBase: KnowledgeBaseUserConfig = {
+  tree: [],
+  usedBytes: defaultConfig.knowledgeBase!.usedBytes,
+  totalBytes: defaultConfig.knowledgeBase!.totalBytes
+}
+
+export const defaultAliasCommands: AliasCommandConfig[] = []
+export const defaultShortcuts: ShortcutUserConfig[] = []
+export const defaultRules: UserRuleConfig[] = []
+export const defaultSkills: SkillUserConfig[] = []
+export const defaultMcpServers: McpServerUserConfig[] = []
+export const defaultMcpToolStates: McpToolStatesUserConfig = {}
+
 export const terminalTypes = ['xterm', 'xterm-256color', 'vt100', 'vt102', 'vt220', 'vt320', 'linux', 'scoansi', 'ansi'] as const
 export const terminalCursorStyles = ['block', 'bar', 'underline'] as const
 export const middleMouseEventActions: TerminalMouseEventAction[] = ['none', 'paste', 'contextMenu', 'closeTab']
@@ -358,13 +384,22 @@ const privacySyncStatusValues = ['disabled', 'idle', 'syncing', 'synced', 'error
 const privacySyncedScopeValues = ['config', 'knowledge', 'chat', 'assets', 'skills'] as const
 const reasoningEffortValues = ['low', 'medium', 'high'] as const
 const proxyTypeValues: AiPreferenceSettings['proxy']['type'][] = ['HTTP', 'HTTPS', 'SOCKS4', 'SOCKS5']
+const shortcutDefaultsById = new Map(defaultShortcuts.map((shortcut) => [shortcut.id, shortcut]))
+const shortcutModifierTokens = new Set(['ctrl', 'control', 'shift', 'alt', 'option', 'cmd', 'command', 'meta'])
+const mcpStatusValues: McpServerUserConfig['status'][] = ['connected', 'connecting', 'disconnected', 'disabled', 'error']
+const backgroundModeValues = ['none', 'preset', 'custom'] as const
+const ONBOARDING_VERSION = defaultConfig.onboarding!.version
+const onboardingModuleIds = ['interfaceGuide', 'systemSettings', 'addAndConnectHost', 'aiChat'] as const
 const defaultAiPreferencesConfig = defaultConfig.aiPreferences!
 const defaultModelSettingsConfig = defaultConfig.modelSettings!
 
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 const numberInRange = (value: unknown, fallback: number, min: number, max?: number) =>
   typeof value === 'number' && Number.isFinite(value) && value >= min && (max === undefined || value <= max) ? value : fallback
+const integerInRange = (value: unknown, fallback: number, min: number) =>
+  typeof value === 'number' && Number.isInteger(value) && value >= min ? value : fallback
 const stringFromOptions = <T extends string>(value: unknown, options: readonly T[], fallback: T) => (typeof value === 'string' && options.includes(value as T) ? (value as T) : fallback)
+const isNonEmptyString = (value: unknown): value is string => typeof value === 'string' && value.trim() !== ''
 
 export const normalizeModelSettingsOptions = (source: unknown, fallback: ModelOptionUserConfig[] = []) => {
   const rawOptions = Array.isArray(source) ? source : fallback
@@ -1167,3 +1202,890 @@ export const modelSettingsSnapshotsMatch = (left: ModelSettingsUserConfig, right
   modelOptionsSnapshotsMatch(left.options, right.options)
 
 export const modelOptionProviderForSavedProvider = (provider: ModelProviderKey): string => (provider === 'openai' ? 'openai' : provider)
+
+export type GeneralBaseSettingsPatch = Partial<Pick<UserConfig, 'defaultMode' | 'language' | 'watermark'>>
+export type LayoutPreferencesPatch = Partial<
+  Pick<UserConfig, 'defaultMode' | 'leftPanelOpen' | 'rightPanelOpen' | 'agentsLeftOpen' | 'leftPanelWidth' | 'rightPanelWidth' | 'agentsLeftWidth'>
+>
+export type BackgroundUserConfig = UserConfig['background']
+export type McpServersConfigNormalization = ReturnType<typeof normalizeMcpServersConfig>
+
+export const createKbRelPath = (parentRelDir: string, name: string) => [parentRelDir, name].filter(Boolean).join('/')
+
+export const knowledgeNodeSize = (node: KnowledgeNode): number => (node.size || 0) + (node.children?.reduce((total, child) => total + knowledgeNodeSize(child), 0) || 0)
+
+export const knowledgeTreeSize = (nodes: KnowledgeNode[]) => nodes.reduce((total, node) => total + knowledgeNodeSize(node), 0)
+
+export const defaultMcpConfigFile = (): McpConfigFile => ({
+  mcpServers: Object.fromEntries(
+    defaultMcpServers.map((server) => {
+      const autoApprove = server.tools.filter((tool) => tool.autoApprove).map((tool) => tool.name)
+      return [
+        server.name,
+        {
+          type: 'stdio' as const,
+          disabled: server.disabled,
+          ...(autoApprove.length ? { autoApprove } : {}),
+          command: server.name === 'filesystem' ? 'npx' : server.name,
+          args: server.name === 'filesystem' ? ['-y', '@modelcontextprotocol/server-filesystem', '~'] : [],
+          timeout: 60
+        }
+      ]
+    })
+  )
+})
+
+export const normalizeMcpConfigFile = (source?: unknown): McpConfigFile => {
+  const root = isRecord(source) ? source : {}
+  const serverRoot = isRecord(root.mcpServers) ? root.mcpServers : {}
+  const mcpServers: McpConfigFile['mcpServers'] = {}
+  Object.entries(serverRoot).forEach(([name, value]) => {
+    if (!name.trim() || !isRecord(value)) return
+    const type = value.type === 'sse' || value.type === 'streamableHttp' ? value.type : 'stdio'
+    const autoApprove = Array.isArray(value.autoApprove)
+      ? value.autoApprove.filter((item): item is string => typeof item === 'string' && item.trim().length > 0).map((item) => item.trim())
+      : undefined
+    const args = Array.isArray(value.args)
+      ? value.args
+          .filter((item): item is string => typeof item === 'string')
+          .map((item) => item.trim())
+          .filter(Boolean)
+      : undefined
+    const stringRecord = (record: unknown) =>
+      isRecord(record) ? Object.fromEntries(Object.entries(record).filter((entry): entry is [string, string] => typeof entry[1] === 'string')) : undefined
+    mcpServers[name.trim()] = {
+      type,
+      ...(typeof value.disabled === 'boolean' ? { disabled: value.disabled } : {}),
+      ...(autoApprove?.length ? { autoApprove } : {}),
+      ...(typeof value.timeout === 'number' && value.timeout > 0 ? { timeout: value.timeout } : {}),
+      ...(typeof value.command === 'string' && value.command.trim() ? { command: value.command.trim() } : {}),
+      ...(args?.length ? { args } : {}),
+      ...(typeof value.cwd === 'string' && value.cwd.trim() ? { cwd: value.cwd.trim() } : {}),
+      ...(stringRecord(value.env) ? { env: stringRecord(value.env) } : {}),
+      ...(typeof value.url === 'string' && value.url.trim() ? { url: value.url.trim() } : {}),
+      ...(stringRecord(value.headers) ? { headers: stringRecord(value.headers) } : {})
+    }
+  })
+  return { mcpServers }
+}
+
+export const mcpConfigFilesMatch = (left: McpConfigFile, right: McpConfigFile) =>
+  JSON.stringify(normalizeMcpConfigFile(left)) === JSON.stringify(normalizeMcpConfigFile(right))
+
+export const normalizeQuickCommandsConfig = (source?: Partial<QuickCommandsUserConfig>) => {
+  const incoming = isRecord(source) ? source : {}
+  const rawGroups = Array.isArray(incoming.groups) ? incoming.groups : defaultQuickCommands.groups
+  const rawSnippets = Array.isArray(incoming.snippets) ? incoming.snippets : defaultQuickCommands.snippets
+  const groupUuids = new Set<string>()
+  const snippetIds = new Set<number>()
+  const snippetUuids = new Set<string>()
+
+  const groups = rawGroups
+    .map((item, index): QuickCommandGroupConfig | null => {
+      if (!isRecord(item)) return null
+      const groupName = typeof item.group_name === 'string' ? item.group_name.trim() : ''
+      if (!groupName) return null
+      const uuid = typeof item.uuid === 'string' ? item.uuid.trim() : ''
+      if (!uuid) return null
+      if (groupUuids.has(uuid)) return null
+      groupUuids.add(uuid)
+      return {
+        id: integerInRange(item.id, index + 1, 1),
+        uuid,
+        group_name: groupName
+      }
+    })
+    .filter(Boolean) as QuickCommandGroupConfig[]
+
+  const normalizedSnippets: QuickCommandSnippetConfig[] = []
+  rawSnippets.forEach((item, index) => {
+    if (!isRecord(item)) return
+    const snippetName = typeof item.snippet_name === 'string' ? item.snippet_name.trim() : ''
+    const snippetContent = typeof item.snippet_content === 'string' ? item.snippet_content : ''
+    if (!snippetName || !snippetContent) return
+
+    let id = integerInRange(item.id, index + 1, 1)
+    while (snippetIds.has(id)) id += 1
+    snippetIds.add(id)
+
+    const uuid = typeof item.uuid === 'string' ? item.uuid.trim() : ''
+    if (!uuid) return
+    if (snippetUuids.has(uuid)) return
+    snippetUuids.add(uuid)
+
+    const groupUuid = typeof item.group_uuid === 'string' && groupUuids.has(item.group_uuid) ? item.group_uuid : null
+    const snippet: QuickCommandSnippetConfig = {
+      id,
+      uuid,
+      snippet_name: snippetName,
+      snippet_content: snippetContent,
+      group_uuid: groupUuid
+    }
+    if (typeof item.create_at === 'string') snippet.create_at = item.create_at
+    if (typeof item.update_at === 'string') snippet.update_at = item.update_at
+    normalizedSnippets.push(snippet)
+  })
+
+  const normalized: QuickCommandsUserConfig = {
+    groups,
+    snippets: normalizedSnippets
+  }
+  const comparable = {
+    groups: Array.isArray(incoming.groups) ? incoming.groups : defaultQuickCommands.groups,
+    snippets: Array.isArray(incoming.snippets) ? incoming.snippets : defaultQuickCommands.snippets
+  }
+  const changed =
+    !isRecord(source) ||
+    !Array.isArray(incoming.groups) ||
+    !Array.isArray(incoming.snippets) ||
+    JSON.stringify(comparable) !== JSON.stringify(normalized)
+
+  return {
+    normalized,
+    changed
+  }
+}
+
+const normalizeKnowledgeNodes = (source: unknown, parentRelDir = '', seen = new Set<string>()): KnowledgeNode[] => {
+  const rawNodes = Array.isArray(source) ? source : []
+  const nodes: KnowledgeNode[] = []
+  rawNodes.forEach((item, index) => {
+    if (!isRecord(item)) return
+    const rawTitle = typeof item.title === 'string' ? item.title.trim() : ''
+    if (!rawTitle) return
+    const type = item.type === 'dir' || item.type === 'file' ? item.type : 'file'
+    const fallbackRelPath = createKbRelPath(parentRelDir, rawTitle)
+    const relPath = typeof item.relPath === 'string' && item.relPath.trim() ? item.relPath.trim() : fallbackRelPath
+    if (!relPath || seen.has(relPath)) return
+    seen.add(relPath)
+    const node: KnowledgeNode = {
+      id: typeof item.id === 'string' && item.id.trim() ? item.id : `kb-${relPath.replace(/[^a-zA-Z0-9_-]/g, '-') || index}`,
+      key: relPath,
+      relPath,
+      title: rawTitle,
+      type
+    }
+    if (type === 'file') {
+      node.size = numberInRange(item.size, 0, 0)
+    } else {
+      node.children = normalizeKnowledgeNodes(item.children, relPath, seen)
+    }
+    nodes.push(node)
+  })
+  return nodes
+}
+
+export const normalizeKnowledgeBaseConfig = (source?: Partial<KnowledgeBaseUserConfig>) => {
+  const incoming = isRecord(source) ? source : {}
+  const normalizedTree = normalizeKnowledgeNodes(Array.isArray(incoming.tree) ? incoming.tree : defaultKnowledgeBase.tree)
+  const normalized: KnowledgeBaseUserConfig = {
+    tree: normalizedTree,
+    usedBytes: numberInRange(incoming.usedBytes, defaultKnowledgeBase.usedBytes, 0),
+    totalBytes: numberInRange(incoming.totalBytes, defaultKnowledgeBase.totalBytes, 1)
+  }
+  if (normalized.usedBytes === 0 && normalizedTree.length > 0 && incoming.usedBytes === undefined) {
+    normalized.usedBytes = knowledgeTreeSize(normalizedTree)
+  }
+  const comparable = {
+    tree: Array.isArray(incoming.tree) ? incoming.tree : defaultKnowledgeBase.tree,
+    usedBytes: typeof incoming.usedBytes === 'number' ? incoming.usedBytes : defaultKnowledgeBase.usedBytes,
+    totalBytes: typeof incoming.totalBytes === 'number' ? incoming.totalBytes : defaultKnowledgeBase.totalBytes
+  }
+  const changed =
+    !isRecord(source) ||
+    !Array.isArray(incoming.tree) ||
+    typeof incoming.usedBytes !== 'number' ||
+    typeof incoming.totalBytes !== 'number' ||
+    JSON.stringify(comparable) !== JSON.stringify(normalized)
+
+  return {
+    normalized,
+    changed
+  }
+}
+
+export const normalizeAliasCommandsConfig = (source?: AliasCommandConfig[]) => {
+  const rawCommands = Array.isArray(source) ? source : defaultAliasCommands
+  const seenAliases = new Set<string>()
+  const seenIds = new Set<string>()
+  const normalized: AliasCommandConfig[] = []
+
+  rawCommands.forEach((item, index) => {
+    if (!isRecord(item)) return
+    const alias = typeof item.alias === 'string' ? item.alias.trim() : ''
+    const command = typeof item.command === 'string' ? item.command.trim() : ''
+    if (!alias || !command || seenAliases.has(alias)) return
+    let id = typeof item.id === 'string' && item.id.trim() && item.id !== 'new' ? item.id.trim() : ''
+    if (!id) return
+    while (seenIds.has(id)) id = `${id}-${index + 1}`
+    seenAliases.add(alias)
+    seenIds.add(id)
+    const commandConfig: AliasCommandConfig = { id, alias, command }
+    if (typeof item.createdAt === 'number' && Number.isFinite(item.createdAt)) {
+      commandConfig.createdAt = item.createdAt
+    }
+    normalized.push(commandConfig)
+  })
+
+  const changed = !Array.isArray(source) || JSON.stringify(source) !== JSON.stringify(normalized)
+
+  return {
+    normalized,
+    changed
+  }
+}
+
+const getShortcutParts = (shortcut: string) =>
+  shortcut
+    .split('+')
+    .map((part) => part.trim())
+    .filter(Boolean)
+
+export const isValidShortcutForAction = (actionId: string, shortcut: string) => {
+  const parts = getShortcutParts(shortcut)
+  if (!parts.length) return false
+  if (actionId !== 'switchToSpecificTab') return true
+
+  const hasDigit = parts.some((part) => /^\d$/.test(part))
+  const hasModifier = parts.some((part) => shortcutModifierTokens.has(part.toLowerCase()))
+  return !hasDigit && hasModifier
+}
+
+export const normalizeShortcutsConfig = (source?: unknown) => {
+  const shortcutsById = new Map<string, ShortcutUserConfig>()
+  let changed = !Array.isArray(source)
+
+  if (Array.isArray(source)) {
+    source.forEach((item) => {
+      if (!isRecord(item)) {
+        changed = true
+        return
+      }
+      const id = typeof item.id === 'string' ? item.id.trim() : ''
+      const action = typeof item.action === 'string' && item.action.trim() ? item.action.trim() : id
+      const shortcut = typeof item.shortcut === 'string' ? item.shortcut.trim() : ''
+      if (!id || !action || !shortcut || shortcutsById.has(id) || !isValidShortcutForAction(id, shortcut)) {
+        changed = true
+        return
+      }
+      const normalizedShortcut: ShortcutUserConfig = {
+        id,
+        action,
+        shortcut,
+        ...(typeof item.suffix === 'string' && item.suffix.trim() ? { suffix: item.suffix.trim() } : {})
+      }
+      shortcutsById.set(id, normalizedShortcut)
+      const allowedKeys = new Set(['id', 'action', 'shortcut', 'suffix'])
+      if (
+        item.id !== id ||
+        item.shortcut !== shortcut ||
+        item.action !== action ||
+        item.suffix !== normalizedShortcut.suffix ||
+        Object.keys(item).some((key) => !allowedKeys.has(key))
+      ) {
+        changed = true
+      }
+    })
+  } else if (isRecord(source)) {
+    Object.entries(source).forEach(([id, value]) => {
+      const defaultShortcut = shortcutDefaultsById.get(id)
+      const shortcut = typeof value === 'string' ? value.trim() : ''
+      if (!defaultShortcut || !shortcut || shortcutsById.has(id) || !isValidShortcutForAction(id, shortcut)) {
+        changed = true
+        return
+      }
+      shortcutsById.set(id, { ...defaultShortcut, shortcut })
+      if (value !== shortcut) changed = true
+    })
+  }
+
+  const normalized = Array.from(shortcutsById.values())
+
+  return {
+    normalized,
+    changed
+  }
+}
+
+export const normalizeRulesConfig = (source?: unknown, customInstructions?: unknown) => {
+  const rawRules = Array.isArray(source) ? source : defaultRules
+  const seenIds = new Set<string>()
+  const normalized: UserRuleConfig[] = []
+  let changed = !Array.isArray(source)
+
+  rawRules.forEach((item, index) => {
+    if (!isRecord(item)) {
+      changed = true
+      return
+    }
+    const content = typeof item.content === 'string' ? item.content.trim() : ''
+    if (!content) {
+      changed = true
+      return
+    }
+    let id = typeof item.id === 'string' ? item.id.trim() : ''
+    if (!id) {
+      changed = true
+      return
+    }
+    while (seenIds.has(id)) id = `${id}-${index + 1}`
+    seenIds.add(id)
+    const rule = {
+      id,
+      content,
+      enabled: item.enabled !== undefined ? Boolean(item.enabled) : true
+    }
+    normalized.push(rule)
+    const allowedKeys = new Set(['id', 'content', 'enabled'])
+    if (
+      item.id !== rule.id ||
+      item.content !== rule.content ||
+      item.enabled !== rule.enabled ||
+      Object.keys(item).some((key) => !allowedKeys.has(key))
+    ) {
+      changed = true
+    }
+  })
+
+  const migratedInstruction = typeof customInstructions === 'string' ? customInstructions.trim() : ''
+  if (migratedInstruction) {
+    let id = 'rule-custom-instructions'
+    let suffix = 1
+    while (seenIds.has(id)) {
+      suffix += 1
+      id = `rule-custom-instructions-${suffix}`
+    }
+    normalized.unshift({
+      id,
+      content: migratedInstruction,
+      enabled: true
+    })
+    changed = true
+  }
+
+  return {
+    normalized,
+    changed
+  }
+}
+
+export const normalizeSkillsConfig = (source?: unknown) => {
+  const rawSkills = Array.isArray(source) ? source : defaultSkills
+  const seenNames = new Set<string>()
+  const normalized: SkillUserConfig[] = []
+  let changed = !Array.isArray(source)
+
+  rawSkills.forEach((item) => {
+    if (!isRecord(item)) {
+      changed = true
+      return
+    }
+    const name = typeof item.name === 'string' ? item.name.trim() : ''
+    const description = typeof item.description === 'string' ? item.description.trim() : ''
+    const content = typeof item.content === 'string' ? item.content.trim() : ''
+    if (!name || !description || !content || seenNames.has(name)) {
+      changed = true
+      return
+    }
+    seenNames.add(name)
+    const skill: SkillUserConfig = {
+      name,
+      description,
+      enabled: item.enabled !== undefined ? Boolean(item.enabled) : true,
+      editable: item.editable !== undefined ? Boolean(item.editable) : true,
+      content
+    }
+    if (typeof item.path === 'string' && item.path.trim()) {
+      skill.path = item.path.trim()
+    }
+    normalized.push(skill)
+    const allowedKeys = new Set(['name', 'description', 'enabled', 'editable', 'content', 'path'])
+    if (
+      item.name !== skill.name ||
+      item.description !== skill.description ||
+      item.enabled !== skill.enabled ||
+      item.editable !== skill.editable ||
+      item.content !== skill.content ||
+      item.path !== skill.path ||
+      Object.keys(item).some((key) => !allowedKeys.has(key))
+    ) {
+      changed = true
+    }
+  })
+
+  return {
+    normalized,
+    changed
+  }
+}
+
+export const normalizeMcpToolStatesConfig = (source?: unknown): McpToolStatesUserConfig => {
+  if (!isRecord(source)) return { ...defaultMcpToolStates }
+  const normalized: McpToolStatesUserConfig = {}
+  Object.entries(source).forEach(([key, value]) => {
+    if (typeof key === 'string' && key.includes(':') && typeof value === 'boolean') {
+      normalized[key] = value
+    }
+  })
+  return normalized
+}
+
+export const normalizeMcpServersConfig = (source?: unknown, toolStatesSource?: unknown) => {
+  const rawServers = Array.isArray(source) ? source : defaultMcpServers
+  const toolStates = normalizeMcpToolStatesConfig(toolStatesSource)
+  const seenServers = new Set<string>()
+  let changed = !Array.isArray(source)
+
+  const normalized: McpServerUserConfig[] = []
+  rawServers.forEach((item) => {
+    if (!isRecord(item)) {
+      changed = true
+      return
+    }
+    const name = typeof item.name === 'string' ? item.name.trim() : ''
+    if (!name || seenServers.has(name)) {
+      changed = true
+      return
+    }
+    seenServers.add(name)
+    const disabled = typeof item.disabled === 'boolean' ? item.disabled : false
+    const status = disabled ? 'disabled' : stringFromOptions(item.status, mcpStatusValues, 'disconnected')
+    const seenTools = new Set<string>()
+    const tools = (Array.isArray(item.tools) ? item.tools : [])
+      .map((tool): McpServerUserConfig['tools'][number] | null => {
+        if (!isRecord(tool)) {
+          changed = true
+          return null
+        }
+        const toolName = typeof tool.name === 'string' ? tool.name.trim() : ''
+        if (!toolName || seenTools.has(toolName)) {
+          changed = true
+          return null
+        }
+        seenTools.add(toolName)
+        const stateKey = `${name}:${toolName}`
+        const enabled = typeof toolStates[stateKey] === 'boolean' ? toolStates[stateKey] : typeof tool.enabled === 'boolean' ? tool.enabled : true
+        const parameters = (Array.isArray(tool.parameters) ? tool.parameters : [])
+          .map((parameter): McpServerUserConfig['tools'][number]['parameters'][number] | null => {
+            if (!isRecord(parameter)) {
+              changed = true
+              return null
+            }
+            const parameterName = typeof parameter.name === 'string' ? parameter.name.trim() : ''
+            if (!parameterName) {
+              changed = true
+              return null
+            }
+            return {
+              name: parameterName,
+              description: typeof parameter.description === 'string' ? parameter.description : '',
+              ...(parameter.required !== undefined ? { required: Boolean(parameter.required) } : {})
+            }
+          })
+          .filter(Boolean) as McpServerUserConfig['tools'][number]['parameters']
+        const normalizedTool = {
+          name: toolName,
+          description: typeof tool.description === 'string' ? tool.description : '',
+          enabled,
+          ...(tool.autoApprove === true ? { autoApprove: true } : {}),
+          parameters
+        }
+        if (
+          tool.name !== normalizedTool.name ||
+          tool.description !== normalizedTool.description ||
+          tool.enabled !== normalizedTool.enabled ||
+          Boolean(tool.autoApprove) !== Boolean(normalizedTool.autoApprove)
+        ) {
+          changed = true
+        }
+        return normalizedTool
+      })
+      .filter(Boolean) as McpServerUserConfig['tools']
+
+    const seenResources = new Set<string>()
+    const resources = (Array.isArray(item.resources) ? item.resources : [])
+      .map((resource): McpServerUserConfig['resources'][number] | null => {
+        if (!isRecord(resource)) {
+          changed = true
+          return null
+        }
+        const uri = typeof resource.uri === 'string' ? resource.uri.trim() : ''
+        const resourceName = typeof resource.name === 'string' && resource.name.trim() ? resource.name.trim() : uri
+        if (!uri || !resourceName || seenResources.has(uri)) {
+          changed = true
+          return null
+        }
+        seenResources.add(uri)
+        return {
+          name: resourceName,
+          description: typeof resource.description === 'string' ? resource.description : '',
+          uri
+        }
+      })
+      .filter(Boolean) as McpServerUserConfig['resources']
+
+    const server: McpServerUserConfig = {
+      name,
+      status,
+      disabled,
+      ...(typeof item.error === 'string' && item.error.trim() ? { error: item.error.trim() } : {}),
+      tools,
+      resources
+    }
+    normalized.push(server)
+    const allowedKeys = new Set(['name', 'status', 'disabled', 'error', 'tools', 'resources'])
+    if (
+      item.name !== server.name ||
+      item.status !== server.status ||
+      item.disabled !== server.disabled ||
+      item.error !== server.error ||
+      Object.keys(item).some((key) => !allowedKeys.has(key))
+    ) {
+      changed = true
+    }
+  })
+
+  const normalizedToolStates: McpToolStatesUserConfig = {}
+  normalized.forEach((server) => {
+    server.tools.forEach((tool) => {
+      normalizedToolStates[`${server.name}:${tool.name}`] = tool.enabled
+    })
+  })
+
+  if (JSON.stringify(toolStates) !== JSON.stringify(normalizedToolStates)) {
+    changed = true
+  }
+
+  return {
+    normalized,
+    toolStates: normalizedToolStates,
+    changed
+  }
+}
+
+export const normalizeUserModelProvider = (value: unknown): UserConfig['modelProvider'] => {
+  const provider = String(value || '').trim()
+  if (!provider || provider === 'local') return 'local'
+  if (
+    provider === 'litellm' ||
+    provider === 'openai-compatible' ||
+    provider === 'ollama' ||
+    provider === 'lmstudio' ||
+    provider === 'bedrock' ||
+    provider === 'deepseek' ||
+    provider === 'anthropic'
+  ) {
+    return provider
+  }
+  return defaultConfig.modelProvider
+}
+
+export const normalizeUserModelName = (value: unknown) => {
+  const modelName = String(value || '').trim()
+  if (!modelName) return defaultConfig.modelName
+  return modelName
+}
+
+export const normalizeCatalogModelProvider = (value: unknown): UserConfig['modelProvider'] => {
+  const provider = String(value || '').trim()
+  if (!provider || provider === 'default' || provider === 'local') return 'local'
+  if (provider === 'openai') return 'openai-compatible'
+  return normalizeUserModelProvider(provider)
+}
+
+const isDefaultModeValue = (value: unknown): value is UserConfig['defaultMode'] => value === 'terminal' || value === 'agents'
+
+const isBooleanValue = (value: unknown): value is boolean => typeof value === 'boolean'
+
+const isWatermarkValue = (value: unknown): value is UserConfig['watermark'] => value === 'open' || value === 'close'
+
+const isSettingsLanguageValue = (value: unknown): value is string => isLocaleSetting(value)
+
+export const normalizeGeneralBaseSettingsPatch = (patch: GeneralBaseSettingsPatch) => {
+  const normalized: GeneralBaseSettingsPatch = {}
+  if (patch.defaultMode !== undefined) {
+    if (!isDefaultModeValue(patch.defaultMode)) return null
+    normalized.defaultMode = patch.defaultMode
+  }
+  if (patch.language !== undefined) {
+    if (!isSettingsLanguageValue(patch.language)) return null
+    normalized.language = patch.language
+  }
+  if (patch.watermark !== undefined) {
+    if (!isWatermarkValue(patch.watermark)) return null
+    normalized.watermark = patch.watermark
+  }
+  return normalized
+}
+
+export const generalBaseSettingsPatchMatches = (patch: GeneralBaseSettingsPatch, savedConfig: Record<string, unknown>) => {
+  if (patch.defaultMode !== undefined && savedConfig.defaultMode !== patch.defaultMode) return false
+  if (patch.language !== undefined && savedConfig.language !== patch.language) return false
+  if (patch.watermark !== undefined && savedConfig.watermark !== patch.watermark) return false
+  return true
+}
+
+export const isGeneralBaseSettingsSnapshot = (source: unknown): source is Pick<UserConfig, 'defaultMode' | 'language' | 'watermark'> =>
+  isRecord(source) && isDefaultModeValue(source.defaultMode) && isSettingsLanguageValue(source.language) && isWatermarkValue(source.watermark)
+
+export const normalizeLayoutPreferencesPatch = (patch: LayoutPreferencesPatch) => {
+  const normalized: LayoutPreferencesPatch = {}
+  if (patch.defaultMode !== undefined) {
+    if (!isDefaultModeValue(patch.defaultMode)) return null
+    normalized.defaultMode = patch.defaultMode
+  }
+  if (patch.leftPanelOpen !== undefined) {
+    if (!isBooleanValue(patch.leftPanelOpen)) return null
+    normalized.leftPanelOpen = patch.leftPanelOpen
+  }
+  if (patch.rightPanelOpen !== undefined) {
+    if (!isBooleanValue(patch.rightPanelOpen)) return null
+    normalized.rightPanelOpen = patch.rightPanelOpen
+  }
+  if (patch.agentsLeftOpen !== undefined) {
+    if (!isBooleanValue(patch.agentsLeftOpen)) return null
+    normalized.agentsLeftOpen = patch.agentsLeftOpen
+  }
+  if (patch.leftPanelWidth !== undefined) {
+    const width = numberInRange(patch.leftPanelWidth, 0, layoutWidthLimits.min, layoutWidthLimits.max)
+    if (!width) return null
+    normalized.leftPanelWidth = Math.round(width)
+  }
+  if (patch.rightPanelWidth !== undefined) {
+    const width = numberInRange(patch.rightPanelWidth, 0, layoutWidthLimits.min, layoutWidthLimits.max)
+    if (!width) return null
+    normalized.rightPanelWidth = Math.round(width)
+  }
+  if (patch.agentsLeftWidth !== undefined) {
+    const width = numberInRange(patch.agentsLeftWidth, 0, layoutWidthLimits.min, layoutWidthLimits.max)
+    if (!width) return null
+    normalized.agentsLeftWidth = Math.round(width)
+  }
+  return normalized
+}
+
+export const layoutPreferencesPatchMatches = (patch: LayoutPreferencesPatch, savedConfig: Record<string, unknown>) => {
+  if (patch.defaultMode !== undefined && savedConfig.defaultMode !== patch.defaultMode) return false
+  if (patch.leftPanelOpen !== undefined && savedConfig.leftPanelOpen !== patch.leftPanelOpen) return false
+  if (patch.rightPanelOpen !== undefined && savedConfig.rightPanelOpen !== patch.rightPanelOpen) return false
+  if (patch.agentsLeftOpen !== undefined && savedConfig.agentsLeftOpen !== patch.agentsLeftOpen) return false
+  if (patch.leftPanelWidth !== undefined && savedConfig.leftPanelWidth !== patch.leftPanelWidth) return false
+  if (patch.rightPanelWidth !== undefined && savedConfig.rightPanelWidth !== patch.rightPanelWidth) return false
+  if (patch.agentsLeftWidth !== undefined && savedConfig.agentsLeftWidth !== patch.agentsLeftWidth) return false
+  return true
+}
+
+const isLayoutWidthValue = (value: unknown) =>
+  typeof value === 'number' && Number.isFinite(value) && value >= layoutWidthLimits.min && value <= layoutWidthLimits.max
+
+export const layoutWidthFromConfig = (value: unknown, fallback: number) => numberInRange(value, fallback, layoutWidthLimits.min, layoutWidthLimits.max)
+
+export const isLayoutPreferencesSnapshot = (
+  source: unknown
+): source is Pick<UserConfig, 'defaultMode' | 'leftPanelOpen' | 'rightPanelOpen' | 'agentsLeftOpen' | 'leftPanelWidth' | 'rightPanelWidth' | 'agentsLeftWidth'> =>
+  isRecord(source) &&
+  isDefaultModeValue(source.defaultMode) &&
+  isBooleanValue(source.leftPanelOpen) &&
+  isBooleanValue(source.rightPanelOpen) &&
+  isBooleanValue(source.agentsLeftOpen) &&
+  isLayoutWidthValue(source.leftPanelWidth) &&
+  isLayoutWidthValue(source.rightPanelWidth) &&
+  isLayoutWidthValue(source.agentsLeftWidth)
+
+export const normalizeBackgroundConfig = (source?: Partial<BackgroundUserConfig>) => {
+  const incoming = isRecord(source) ? source : {}
+  const mode = stringFromOptions(incoming.mode, backgroundModeValues, defaultConfig.background.mode)
+  const normalized: BackgroundUserConfig = {
+    mode,
+    image: typeof incoming.image === 'string' ? incoming.image : defaultConfig.background.image,
+    opacity: numberInRange(incoming.opacity, defaultConfig.background.opacity, 0, 1),
+    brightness: numberInRange(incoming.brightness, defaultConfig.background.brightness, 0, 1),
+    lastCustomImage: typeof incoming.lastCustomImage === 'string' ? incoming.lastCustomImage : defaultConfig.background.lastCustomImage
+  }
+  if (normalized.mode === 'none') {
+    normalized.image = ''
+  }
+  const changed =
+    !isRecord(source) ||
+    (Object.keys(normalized) as Array<keyof BackgroundUserConfig>).some((key) => incoming[key] !== normalized[key])
+  return { normalized, changed }
+}
+
+export const isBackgroundSnapshot = (source: unknown): source is BackgroundUserConfig => {
+  if (!isRecord(source)) return false
+  return (
+    backgroundModeValues.includes(source.mode as BackgroundUserConfig['mode']) &&
+    typeof source.image === 'string' &&
+    typeof source.opacity === 'number' &&
+    Number.isFinite(source.opacity) &&
+    source.opacity >= 0 &&
+    source.opacity <= 1 &&
+    typeof source.brightness === 'number' &&
+    Number.isFinite(source.brightness) &&
+    source.brightness >= 0 &&
+    source.brightness <= 1 &&
+    (source.lastCustomImage === undefined || typeof source.lastCustomImage === 'string')
+  )
+}
+
+export const cloneBackgroundSnapshot = (background: BackgroundUserConfig): BackgroundUserConfig => ({ ...background })
+
+export const backgroundSnapshotsMatch = (left: BackgroundUserConfig, right: BackgroundUserConfig) =>
+  JSON.stringify(cloneBackgroundSnapshot(left)) === JSON.stringify(cloneBackgroundSnapshot(right))
+
+export const visibleBackgroundTuning = (background: BackgroundUserConfig): BackgroundUserConfig => {
+  if (background.mode === 'none') return background
+  const wasLegacyLowVisibility = background.opacity <= 0.5 && background.brightness <= 0.85
+  if (!wasLegacyLowVisibility) return background
+  return {
+    ...background,
+    opacity: defaultConfig.background.opacity,
+    brightness: defaultConfig.background.brightness
+  }
+}
+
+export const isCustomBackgroundSaveResult = (source: unknown): source is CustomBackgroundSaveResult =>
+  isRecord(source) &&
+  isNonEmptyString(source.filePath) &&
+  isNonEmptyString(source.url) &&
+  isNonEmptyString(source.name) &&
+  typeof source.size === 'number' &&
+  Number.isInteger(source.size) &&
+  source.size > 0 &&
+  typeof source.bytes === 'number' &&
+  Number.isInteger(source.bytes) &&
+  source.bytes === source.size &&
+  typeof source.mtimeMs === 'number' &&
+  Number.isFinite(source.mtimeMs) &&
+  source.mtimeMs > 0
+
+const normalizeOnboardingCompleted = (source?: UserConfig['onboarding']) => {
+  const incomingCompleted = source?.completedModules || {}
+  return {
+    interfaceGuide: Boolean(incomingCompleted.interfaceGuide),
+    systemSettings: Boolean(incomingCompleted.systemSettings),
+    addAndConnectHost: Boolean(incomingCompleted.addAndConnectHost),
+    aiChat: Boolean(incomingCompleted.aiChat)
+  }
+}
+
+export const normalizeOnboardingConfig = (source?: UserConfig['onboarding']) => {
+  const completed = normalizeOnboardingCompleted(source)
+
+  const normalized = {
+    version: ONBOARDING_VERSION,
+    guideTabAutoOpened: Boolean(source?.guideTabAutoOpened),
+    completedModules: completed
+  }
+
+  const isCurrent =
+    source?.version === ONBOARDING_VERSION &&
+    onboardingModuleIds.every((moduleId) => typeof source.completedModules?.[moduleId] === 'boolean')
+
+  return {
+    normalized,
+    changed: !isCurrent
+  }
+}
+
+export const stripBusinessDataConfig = (source: Partial<UserConfig>): Partial<UserConfig> => {
+  const { quickCommands, knowledgeBase, aliasCommands, ...rest } = source
+  void quickCommands
+  void knowledgeBase
+  void aliasCommands
+  return rest
+}
+
+export const mergeUserConfig = (base: UserConfig, patch: Partial<UserConfig> = {}): UserConfig => {
+  const normalizedMcp = normalizeMcpServersConfig(patch.mcpServers || base.mcpServers, patch.mcpToolStates || base.mcpToolStates)
+
+  return {
+    ...base,
+    ...patch,
+    defaultMode: isDefaultModeValue(patch.defaultMode) ? patch.defaultMode : isDefaultModeValue(base.defaultMode) ? base.defaultMode : defaultConfig.defaultMode,
+    leftPanelOpen: typeof patch.leftPanelOpen === 'boolean' ? patch.leftPanelOpen : typeof base.leftPanelOpen === 'boolean' ? base.leftPanelOpen : defaultConfig.leftPanelOpen,
+    rightPanelOpen: typeof patch.rightPanelOpen === 'boolean' ? patch.rightPanelOpen : typeof base.rightPanelOpen === 'boolean' ? base.rightPanelOpen : defaultConfig.rightPanelOpen,
+    agentsLeftOpen:
+      typeof patch.agentsLeftOpen === 'boolean' ? patch.agentsLeftOpen : typeof base.agentsLeftOpen === 'boolean' ? base.agentsLeftOpen : defaultConfig.agentsLeftOpen,
+    leftPanelWidth: layoutWidthFromConfig(patch.leftPanelWidth, layoutWidthFromConfig(base.leftPanelWidth, defaultConfig.leftPanelWidth!)),
+    rightPanelWidth: layoutWidthFromConfig(patch.rightPanelWidth, layoutWidthFromConfig(base.rightPanelWidth, defaultConfig.rightPanelWidth!)),
+    agentsLeftWidth: layoutWidthFromConfig(patch.agentsLeftWidth, layoutWidthFromConfig(base.agentsLeftWidth, defaultConfig.agentsLeftWidth!)),
+    modelProvider: normalizeUserModelProvider(patch.modelProvider || base.modelProvider),
+    modelName: normalizeUserModelName(patch.modelName || base.modelName),
+    background: normalizeBackgroundConfig({
+      ...base.background,
+      ...(patch.background || {})
+    }).normalized,
+    terminal: {
+      ...(base.terminal || defaultTerminalSettings),
+      ...(patch.terminal || {})
+    },
+    workspacePreferences: {
+      ...(base.workspacePreferences || defaultWorkspacePreferences),
+      ...(patch.workspacePreferences || {}),
+      expandedGroups: patch.workspacePreferences?.expandedGroups || base.workspacePreferences?.expandedGroups || defaultWorkspacePreferences.expandedGroups,
+      recentAssetIds: patch.workspacePreferences?.recentAssetIds || base.workspacePreferences?.recentAssetIds || defaultWorkspacePreferences.recentAssetIds || []
+    },
+    editorSettings: normalizeEditorSettingsConfig({
+      ...(base.editorSettings || defaultEditorSettings),
+      ...(patch.editorSettings || {})
+    }).normalized,
+    sshProxyConfigs: normalizeSshProxyConfigs(patch.sshProxyConfigs || base.sshProxyConfigs).normalized,
+    sshAgentKeys: normalizeSshAgentKeys(patch.sshAgentKeys || base.sshAgentKeys).normalized,
+    extensionSettings: normalizeExtensionSettingsConfig({
+      ...(base.extensionSettings || defaultExtensionSettings),
+      ...(patch.extensionSettings || {})
+    }).normalized,
+    keywordHighlight: normalizeKeywordHighlightConfig(patch.keywordHighlight || base.keywordHighlight).normalized,
+    securityConfig: normalizeSecurityConfig(patch.securityConfig || base.securityConfig).normalized,
+    privacy: normalizePrivacyConfig({
+      ...(base.privacy || defaultConfig.privacy!),
+      ...(patch.privacy || {})
+    }).normalized,
+    aiPreferences: normalizeAiPreferencesConfig({
+      ...(base.aiPreferences || defaultAiPreferences),
+      ...(patch.aiPreferences || {}),
+      proxy: {
+        ...(base.aiPreferences?.proxy || defaultAiPreferences.proxy),
+        ...(patch.aiPreferences?.proxy || {})
+      }
+    }).normalized,
+    notifications: normalizeNotificationConfig({
+      ...(base.notifications || defaultNotificationSettings),
+      ...(patch.notifications || {})
+    }).normalized,
+    modelSettings: normalizeModelSettingsConfig(patch.modelSettings || base.modelSettings).normalized,
+    quickCommands:
+      base.quickCommands || patch.quickCommands
+        ? {
+            groups: [...(patch.quickCommands?.groups || base.quickCommands?.groups || defaultQuickCommands.groups)],
+            snippets: [...(patch.quickCommands?.snippets || base.quickCommands?.snippets || defaultQuickCommands.snippets)]
+          }
+        : undefined,
+    knowledgeBase: patch.knowledgeBase || base.knowledgeBase ? normalizeKnowledgeBaseConfig(patch.knowledgeBase || base.knowledgeBase).normalized : undefined,
+    aliasCommands: patch.aliasCommands || base.aliasCommands ? normalizeAliasCommandsConfig(patch.aliasCommands || base.aliasCommands).normalized : undefined,
+    shortcuts: normalizeShortcutsConfig(patch.shortcuts || base.shortcuts).normalized,
+    rules: normalizeRulesConfig(patch.rules || base.rules, patch.customInstructions || base.customInstructions).normalized,
+    skills: normalizeSkillsConfig(patch.skills || base.skills).normalized,
+    customInstructions: patch.customInstructions !== undefined ? patch.customInstructions : base.customInstructions,
+    mcpServers: normalizedMcp.normalized,
+    mcpToolStates: normalizedMcp.toolStates,
+    onboarding:
+      base.onboarding || patch.onboarding
+        ? {
+            ...(base.onboarding || defaultConfig.onboarding!),
+            ...(patch.onboarding || {}),
+            completedModules: {
+              ...(base.onboarding?.completedModules || defaultConfig.onboarding!.completedModules),
+              ...(patch.onboarding?.completedModules || {})
+            }
+          }
+        : undefined
+  }
+}
+
+export const mergeGenericSavedConfig = (base: UserConfig, savedConfig: Partial<UserConfig>, patch: Partial<UserConfig> = {}) =>
+  mergeUserConfig(base, {
+    ...stripBusinessDataConfig(savedConfig),
+    ...patch
+  })

@@ -1,24 +1,57 @@
 import { describe, expect, it } from 'vitest'
 import {
+  backgroundSnapshotsMatch,
+  cloneBackgroundSnapshot,
+  createKbRelPath,
   defaultAiPreferences,
+  defaultConfig,
   defaultKeywordHighlightSettings,
+  defaultMcpConfigFile,
   defaultPrivacySettings,
+  generalBaseSettingsPatchMatches,
+  isBackgroundSnapshot,
+  isCustomBackgroundSaveResult,
+  isGeneralBaseSettingsSnapshot,
   isKnowledgeSearchRuntimeSnapshotForRequest,
+  isLayoutPreferencesSnapshot,
   isPrivacyRuntimeSnapshotForRequest,
+  isValidShortcutForAction,
   isVisibleModelSettingsOption,
+  knowledgeTreeSize,
   keywordHighlightEditorContentFromFile,
   keywordHighlightSettingsSnapshotsMatch,
+  layoutPreferencesPatchMatches,
+  layoutWidthFromConfig,
+  mcpConfigFilesMatch,
+  mergeGenericSavedConfig,
+  mergeUserConfig,
   modelOptionProviderForSavedProvider,
   modelSettingsSnapshotsMatch,
+  normalizeAliasCommandsConfig,
   normalizeAiPreferencesConfig,
+  normalizeBackgroundConfig,
+  normalizeCatalogModelProvider,
   normalizeEditorSettingsConfig,
+  normalizeGeneralBaseSettingsPatch,
   normalizeKeywordHighlightConfig,
+  normalizeKnowledgeBaseConfig,
+  normalizeLayoutPreferencesPatch,
+  normalizeMcpConfigFile,
+  normalizeMcpServersConfig,
+  normalizeMcpToolStatesConfig,
   normalizeModelSettingsConfig,
+  normalizeOnboardingConfig,
   normalizePrivacyConfig,
+  normalizeQuickCommandsConfig,
+  normalizeRulesConfig,
   normalizeSecurityConfig,
+  normalizeShortcutsConfig,
+  normalizeSkillsConfig,
   normalizeSshAgentKeys,
   normalizeSshProxyConfigs,
   normalizeTerminalConfig,
+  normalizeUserModelName,
+  normalizeUserModelProvider,
   normalizeWorkspacePreferences,
   parseKeywordHighlightEditorContent,
   parseSecurityEditorContent,
@@ -26,6 +59,8 @@ import {
   readSshAgentKeychainOptionsSnapshot,
   securityEditorContentFromFile,
   securitySettingsSnapshotsMatch,
+  stripBusinessDataConfig,
+  visibleBackgroundTuning,
   sshAgentKeySnapshotsMatch,
   sshProxyConfigSnapshotsMatch,
   type SecuritySettings
@@ -324,5 +359,305 @@ describe('workspaceConfigRuntime', () => {
     expect(modelOptionProviderForSavedProvider('openai')).toBe('openai')
     expect(modelOptionProviderForSavedProvider('litellm')).toBe('litellm')
     expect(modelSettingsSnapshotsMatch(modelSettings.normalized, normalizeModelSettingsConfig(modelSettings.normalized).normalized)).toBe(true)
+  })
+
+  it('normalizes base, layout, background, onboarding, and model selection runtime patches', () => {
+    const generalPatch = normalizeGeneralBaseSettingsPatch({
+      defaultMode: 'agents',
+      language: 'system',
+      watermark: 'close'
+    })
+    expect(generalPatch).toEqual({ defaultMode: 'agents', language: 'system', watermark: 'close' })
+    expect(normalizeGeneralBaseSettingsPatch({ language: 'xx-XX' as any })).toBeNull()
+    expect(generalBaseSettingsPatchMatches(generalPatch!, { defaultMode: 'agents', language: 'system', watermark: 'close' })).toBe(true)
+    expect(isGeneralBaseSettingsSnapshot({ defaultMode: 'terminal', language: 'zh-CN', watermark: 'open' })).toBe(true)
+
+    const layoutPatch = normalizeLayoutPreferencesPatch({
+      defaultMode: 'terminal',
+      leftPanelOpen: false,
+      rightPanelOpen: true,
+      agentsLeftOpen: false,
+      leftPanelWidth: 321.6,
+      rightPanelWidth: 640,
+      agentsLeftWidth: 220
+    })
+    expect(layoutPatch).toEqual({
+      defaultMode: 'terminal',
+      leftPanelOpen: false,
+      rightPanelOpen: true,
+      agentsLeftOpen: false,
+      leftPanelWidth: 322,
+      rightPanelWidth: 640,
+      agentsLeftWidth: 220
+    })
+    expect(normalizeLayoutPreferencesPatch({ leftPanelWidth: 100 })).toBeNull()
+    expect(layoutPreferencesPatchMatches(layoutPatch!, layoutPatch!)).toBe(true)
+    expect(isLayoutPreferencesSnapshot(layoutPatch)).toBe(true)
+    expect(layoutWidthFromConfig(9999, 286)).toBe(286)
+
+    const background = normalizeBackgroundConfig({
+      mode: 'custom',
+      image: 'aiopsterm://bg/custom.png',
+      opacity: 0.4,
+      brightness: 0.8,
+      lastCustomImage: 'aiopsterm://bg/custom.png'
+    }).normalized
+    expect(isBackgroundSnapshot(background)).toBe(true)
+    expect(visibleBackgroundTuning(background)).toMatchObject({ opacity: defaultConfig.background.opacity, brightness: defaultConfig.background.brightness })
+    expect(normalizeBackgroundConfig({ ...background, mode: 'none' }).normalized.image).toBe('')
+    expect(backgroundSnapshotsMatch(background, cloneBackgroundSnapshot(background))).toBe(true)
+    expect(isCustomBackgroundSaveResult({ filePath: '/tmp/a.png', url: 'aiopsterm://bg/a.png', name: 'a.png', size: 10, bytes: 10, mtimeMs: 1 })).toBe(true)
+    expect(isCustomBackgroundSaveResult({ filePath: '/tmp/a.png', url: 'aiopsterm://bg/a.png', name: 'a.png', size: 10, bytes: 9, mtimeMs: 1 })).toBe(false)
+
+    const onboarding = normalizeOnboardingConfig({
+      version: 1,
+      guideTabAutoOpened: true,
+      completedModules: { interfaceGuide: true, legacy: true }
+    })
+    expect(onboarding.changed).toBe(true)
+    expect(onboarding.normalized).toEqual({
+      version: 2,
+      guideTabAutoOpened: true,
+      completedModules: {
+        interfaceGuide: true,
+        systemSettings: false,
+        addAndConnectHost: false,
+        aiChat: false
+      }
+    })
+
+    expect(normalizeUserModelProvider(' openai-compatible ')).toBe('openai-compatible')
+    expect(normalizeUserModelProvider('bad-provider')).toBe(defaultConfig.modelProvider)
+    expect(normalizeUserModelName('  gpt-test  ')).toBe('gpt-test')
+    expect(normalizeUserModelName('')).toBe(defaultConfig.modelName)
+    expect(normalizeCatalogModelProvider('openai')).toBe('openai-compatible')
+  })
+
+  it('normalizes persisted quick commands, knowledge, aliases, shortcuts, rules, and skills', () => {
+    const quickCommands = normalizeQuickCommandsConfig({
+      groups: [
+        { id: 0, uuid: ' group-1 ', group_name: ' Ops ' },
+        { id: 2, uuid: 'group-1', group_name: 'Duplicate' },
+        { id: 3, uuid: '', group_name: 'bad' }
+      ] as any,
+      snippets: [
+        {
+          id: 0,
+          uuid: 'snip-1',
+          snippet_name: ' Restart ',
+          snippet_content: 'systemctl restart app',
+          group_uuid: ' group-1 ',
+          create_at: '2026-06-21T00:00:00.000Z'
+        },
+        { id: 1, uuid: 'snip-1', snippet_name: 'dup', snippet_content: 'echo dup', group_uuid: 'group-1' },
+        { id: 2, uuid: 'snip-2', snippet_name: '', snippet_content: 'echo bad' }
+      ] as any
+    })
+    expect(quickCommands.changed).toBe(true)
+    expect(quickCommands.normalized).toEqual({
+      groups: [{ id: 1, uuid: 'group-1', group_name: 'Ops' }],
+      snippets: [
+        {
+          id: 1,
+          uuid: 'snip-1',
+          snippet_name: 'Restart',
+          snippet_content: 'systemctl restart app',
+          group_uuid: null,
+          create_at: '2026-06-21T00:00:00.000Z'
+        }
+      ]
+    })
+
+    const knowledge = normalizeKnowledgeBaseConfig({
+      tree: [
+        {
+          id: '',
+          key: '',
+          relPath: '',
+          title: ' Runbook ',
+          type: 'dir',
+          children: [
+            { id: '', key: '', relPath: '', title: ' app.md ', type: 'file', size: 12 },
+            { id: 'dup', key: 'Runbook/app.md', relPath: 'Runbook/app.md', title: 'dup.md', type: 'file', size: 99 }
+          ]
+        }
+      ] as any,
+      totalBytes: 100
+    })
+    expect(knowledge.changed).toBe(true)
+    expect(knowledge.normalized.tree[0]).toMatchObject({
+      relPath: 'Runbook',
+      title: 'Runbook',
+      type: 'dir',
+      children: [{ relPath: 'Runbook/app.md', title: 'app.md', size: 12 }]
+    })
+    expect(knowledge.normalized.usedBytes).toBe(12)
+    expect(knowledgeTreeSize(knowledge.normalized.tree)).toBe(12)
+    expect(createKbRelPath('Runbook', 'next.md')).toBe('Runbook/next.md')
+
+    const aliases = normalizeAliasCommandsConfig([
+      { id: ' a1 ', alias: ' ll ', command: ' ls -la ', createdAt: 1 },
+      { id: 'a2', alias: 'll', command: 'ignored' },
+      { id: 'new', alias: 'bad', command: 'ignored' }
+    ] as any)
+    expect(aliases.normalized).toEqual([{ id: 'a1', alias: 'll', command: 'ls -la', createdAt: 1 }])
+
+    const shortcuts = normalizeShortcutsConfig([
+      { id: 'openSettings', action: ' openSettings ', shortcut: ' Ctrl+, ', extra: true },
+      { id: 'switchToSpecificTab', action: 'switchToSpecificTab', shortcut: 'Ctrl+1' },
+      { id: 'switchToSpecificTab', action: 'switchToSpecificTab', shortcut: 'Ctrl+Shift+T' }
+    ])
+    expect(shortcuts.changed).toBe(true)
+    expect(shortcuts.normalized).toEqual([
+      { id: 'openSettings', action: 'openSettings', shortcut: 'Ctrl+,' },
+      { id: 'switchToSpecificTab', action: 'switchToSpecificTab', shortcut: 'Ctrl+Shift+T' }
+    ])
+    expect(isValidShortcutForAction('switchToSpecificTab', 'Ctrl+1')).toBe(false)
+    expect(isValidShortcutForAction('switchToSpecificTab', 'Ctrl+Shift+T')).toBe(true)
+
+    const rules = normalizeRulesConfig([{ id: ' rule-1 ', content: ' Always check cwd ', enabled: 1, extra: true }], ' Legacy instruction ')
+    expect(rules.changed).toBe(true)
+    expect(rules.normalized).toEqual([
+      { id: 'rule-custom-instructions', content: 'Legacy instruction', enabled: true },
+      { id: 'rule-1', content: 'Always check cwd', enabled: true }
+    ])
+
+    const skills = normalizeSkillsConfig([
+      { name: ' Deploy ', description: ' Deploy app ', content: 'Use deploy script', enabled: 1, editable: 0, path: ' /skills/deploy/SKILL.md ' },
+      { name: 'Deploy', description: 'dup', content: 'dup', enabled: true, editable: true }
+    ])
+    expect(skills.normalized).toEqual([
+      {
+        name: 'Deploy',
+        description: 'Deploy app',
+        enabled: true,
+        editable: false,
+        content: 'Use deploy script',
+        path: '/skills/deploy/SKILL.md'
+      }
+    ])
+  })
+
+  it('normalizes MCP config files, server snapshots, and aggregate user config merges', () => {
+    expect(defaultMcpConfigFile()).toEqual({ mcpServers: {} })
+    const mcpConfig = normalizeMcpConfigFile({
+      mcpServers: {
+        ' fs ': {
+          type: 'bad',
+          disabled: true,
+          autoApprove: [' read ', '', 1],
+          timeout: 30,
+          command: ' npx ',
+          args: [' -y ', '', 2],
+          cwd: ' /tmp ',
+          env: { A: '1', B: 2 },
+          headers: { Authorization: 'token', Skip: false }
+        },
+        empty: null
+      }
+    })
+    expect(mcpConfig).toEqual({
+      mcpServers: {
+        fs: {
+          type: 'stdio',
+          disabled: true,
+          autoApprove: ['read'],
+          timeout: 30,
+          command: 'npx',
+          args: ['-y'],
+          cwd: '/tmp',
+          env: { A: '1' },
+          headers: { Authorization: 'token' }
+        }
+      }
+    })
+    expect(mcpConfigFilesMatch(mcpConfig, normalizeMcpConfigFile(mcpConfig))).toBe(true)
+
+    const toolStates = normalizeMcpToolStatesConfig({ 'fs:read': false, invalid: true, 'fs:bad': 'yes' })
+    expect(toolStates).toEqual({ 'fs:read': false })
+    const mcpServers = normalizeMcpServersConfig(
+      [
+        {
+          name: ' fs ',
+          status: 'connected',
+          disabled: false,
+          tools: [
+            {
+              name: ' read ',
+              description: 'Read file',
+              enabled: true,
+              autoApprove: true,
+              parameters: [{ name: ' path ', description: 'Path', required: 1 }]
+            },
+            { name: 'read', description: 'dup', enabled: true, parameters: [] }
+          ],
+          resources: [{ uri: ' file:///tmp ', name: '', description: 'Tmp' }],
+          extra: true
+        }
+      ],
+      toolStates
+    )
+    expect(mcpServers.changed).toBe(true)
+    expect(mcpServers.normalized).toEqual([
+      {
+        name: 'fs',
+        status: 'connected',
+        disabled: false,
+        tools: [
+          {
+            name: 'read',
+            description: 'Read file',
+            enabled: false,
+            autoApprove: true,
+            parameters: [{ name: 'path', description: 'Path', required: true }]
+          }
+        ],
+        resources: [{ name: 'file:///tmp', description: 'Tmp', uri: 'file:///tmp' }]
+      }
+    ])
+    expect(mcpServers.toolStates).toEqual({ 'fs:read': false })
+
+    const merged = mergeUserConfig(defaultConfig, {
+      defaultMode: 'bad' as any,
+      leftPanelWidth: 100,
+      modelProvider: 'openai-compatible',
+      modelName: ' gpt-ops ',
+      background: { mode: 'none', image: 'should-clear', opacity: 0.7, brightness: 0.9 },
+      knowledgeBase: { tree: [{ id: '', key: '', relPath: '', title: 'kb.md', type: 'file', size: 5 }], usedBytes: 0, totalBytes: 100 },
+      aliasCommands: [{ id: 'a1', alias: 'k', command: 'kubectl get pods' }],
+      shortcuts: [{ id: 'openSettings', action: 'openSettings', shortcut: 'Ctrl+,' }],
+      rules: [{ id: 'r1', content: 'Check status', enabled: true }],
+      skills: [{ name: 'Ops', description: 'Ops skill', enabled: true, editable: true, content: 'Run checks' }],
+      mcpServers: mcpServers.normalized,
+      mcpToolStates: { 'fs:read': true },
+      onboarding: { version: 2, guideTabAutoOpened: true, completedModules: { interfaceGuide: true } }
+    })
+    expect(merged.defaultMode).toBe(defaultConfig.defaultMode)
+    expect(merged.leftPanelWidth).toBe(defaultConfig.leftPanelWidth)
+    expect(merged.modelName).toBe('gpt-ops')
+    expect(merged.background.image).toBe('')
+    expect(merged.knowledgeBase?.usedBytes).toBe(0)
+    expect(merged.aliasCommands).toEqual([{ id: 'a1', alias: 'k', command: 'kubectl get pods' }])
+    expect(merged.mcpToolStates).toEqual({ 'fs:read': true })
+    expect(merged.onboarding?.completedModules.interfaceGuide).toBe(true)
+
+    const generic = mergeGenericSavedConfig(
+      defaultConfig,
+      {
+        quickCommands: { groups: [{ id: 1, uuid: 'g', group_name: 'G' }], snippets: [] },
+        knowledgeBase: { tree: [], usedBytes: 1, totalBytes: 2 },
+        aliasCommands: [{ id: 'a', alias: 'a', command: 'a' }],
+        watermark: 'close'
+      },
+      { language: 'system' }
+    )
+    expect(generic.quickCommands).toEqual(defaultConfig.quickCommands)
+    expect(generic.knowledgeBase).toEqual(defaultConfig.knowledgeBase)
+    expect(generic.aliasCommands).toEqual(defaultConfig.aliasCommands)
+    expect(generic.watermark).toBe('close')
+    expect(generic.language).toBe('system')
+    expect(stripBusinessDataConfig({ quickCommands: { groups: [], snippets: [] }, knowledgeBase: { tree: [], usedBytes: 0, totalBytes: 1 }, aliasCommands: [], theme: 'dark' })).toEqual({
+      theme: 'dark'
+    })
   })
 })
