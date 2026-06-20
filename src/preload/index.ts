@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
-import type { AiopsPreloadApi } from '@shared/preload'
+import type { AiopsPreloadApi } from '@shared/contracts/preloadApi'
 import type { UserConfig } from '@shared/contracts/userConfig'
 import type { KeywordHighlightConfigWriteResult, SecurityConfigWriteResult } from '@shared/contracts/appRuntime'
 import type { McpConfigWriteResult } from '@shared/contracts/mcp'

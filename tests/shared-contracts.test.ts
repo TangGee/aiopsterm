@@ -415,6 +415,8 @@ import type {
 } from '../src/shared/preload'
 import type { UserConfig as UserConfigContract } from '../src/shared/contracts/userConfig'
 import type { UserConfig as UserConfigPreload } from '../src/shared/preload'
+import type { AiopsPreloadApi as AiopsPreloadApiContract } from '../src/shared/contracts/preloadApi'
+import type { AiopsPreloadApi as AiopsPreloadApiPreload } from '../src/shared/preload'
 
 type AssertAssignable<From, To extends From> = true
 
@@ -763,6 +765,8 @@ type VoiceTranscriptionResultPreloadMatchesContract = AssertAssignable<VoiceTran
 type VoiceTranscriptionResultContractMatchesPreload = AssertAssignable<VoiceTranscriptionResultPreload, VoiceTranscriptionResultContract>
 type UserConfigPreloadMatchesContract = AssertAssignable<UserConfigContract, UserConfigPreload>
 type UserConfigContractMatchesPreload = AssertAssignable<UserConfigPreload, UserConfigContract>
+type AiopsPreloadApiPreloadMatchesContract = AssertAssignable<AiopsPreloadApiContract, AiopsPreloadApiPreload>
+type AiopsPreloadApiContractMatchesPreload = AssertAssignable<AiopsPreloadApiPreload, AiopsPreloadApiContract>
 
 describe('shared contract compatibility exports', () => {
   it('keeps Codex session contracts compatible through the preload export', () => {
@@ -1450,6 +1454,12 @@ describe('shared contract compatibility exports', () => {
 
   it('keeps User Config compatible through the preload export', () => {
     const checks: [UserConfigPreloadMatchesContract, UserConfigContractMatchesPreload] = [true, true]
+
+    expect(checks).toEqual([true, true])
+  })
+
+  it('keeps preload API compatible through the preload export', () => {
+    const checks: [AiopsPreloadApiPreloadMatchesContract, AiopsPreloadApiContractMatchesPreload] = [true, true]
 
     expect(checks).toEqual([true, true])
   })

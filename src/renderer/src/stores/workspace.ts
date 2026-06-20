@@ -89,7 +89,7 @@ import { type SettingSectionKey } from '@/config/settings'
 import { readStoredAiPanelMode } from '@/services/aiPanelModeRuntime'
 import { applyDocumentLocale, isLocaleSetting, resolveLocale, translateWithLocale } from '@/i18n/runtime'
 import type { I18nKey } from '@/i18n/messages'
-import type { AiopsPreloadApi } from '@shared/preload'
+import type { AiopsPreloadApi } from '@shared/contracts/preloadApi'
 import type { UserConfig } from '@shared/contracts/userConfig'
 import type {
   KubernetesAgentProxyConfig,

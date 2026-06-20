@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createTerminalZmodemRuntime, type TerminalZmodemProgress } from '@/services/zmodemRuntime'
-import type { AiopsPreloadApi } from '@shared/preload'
+import type { AiopsPreloadApi } from '@shared/contracts/preloadApi'
 
 type FakeDetection = {
   confirm: () => any

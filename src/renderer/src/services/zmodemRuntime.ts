@@ -1,5 +1,5 @@
 import Zmodem, { type ZmodemSession, type ZmodemTransfer } from 'zmodem.js'
-import type { AiopsPreloadApi } from '@shared/preload'
+import type { AiopsPreloadApi } from '@shared/contracts/preloadApi'
 import type {
   ZmodemSavePathPickResult,
   ZmodemStreamCloseResult,

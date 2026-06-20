@@ -4,6 +4,6 @@ export {}
 
 declare global {
   interface Window {
-    aiops: import('@shared/preload').AiopsPreloadApi
+    aiops: import('@shared/contracts/preloadApi').AiopsPreloadApi
   }
 }
