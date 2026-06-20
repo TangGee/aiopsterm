@@ -1755,15 +1755,12 @@ import {
   type AiPanelChatSearchMatch
 } from '@/services/aiPanelConversationRuntime'
 import {
-  aiPanelChatAttachmentFilters,
   aiPanelDropEffect,
-  aiPanelImagePickerFilters,
   canAcceptAiPanelDrop as canAcceptAiPanelRuntimeDrop,
   clipboardHasImageItems,
-  docPartFromStagedAttachment,
-  imagePartFromChatImagePrepareResult,
   planAiPanelDrop
 } from '@/services/aiPanelMediaRuntime'
+import { createAiPanelAttachmentRuntime } from '@/services/aiPanelAttachmentRuntime'
 import { createAiPanelVoiceRuntime } from '@/services/aiPanelVoiceRuntime'
 import { aiChatClient } from '@/services/aiChatClient'
 import { copyTextToClipboard } from '@/services/clipboardRuntime'
@@ -1793,7 +1790,6 @@ import {
   terminalSettingsSignature as codexTerminalSettingsSignature,
   type AiPanelCodexConversationRuntimeState
 } from '@/services/aiPanelCodexRuntime'
-import { localFilesClient } from '@/services/localFilesClient'
 import { writeRendererRuntimeLog as writeAiRuntimeLog } from '@/services/runtimeLogClient'
 import {
   isAiChatExportData,
@@ -1913,7 +1909,6 @@ let chatExportNoticeTimer: number | undefined
 let chatScrollFrame: number | undefined
 const historyPageSize = 20
 const historyFavoriteLabel = computed(() => t('ai.historyFavoriteGroup'))
-const chatAttachmentFilters = aiPanelChatAttachmentFilters
 const maxHostContexts = 5
 const streaming = computed(() => workspace.chatMessages.some((message) => message.state === 'streaming'))
 const activeCodexConversation = computed(() => codexConversations.value.find((conversation) => conversation.id === activeCodexConversationId.value) || null)
@@ -3244,29 +3239,6 @@ const insertFileChipAtEditCursor = (part: AiDocChipContentPart) => {
 
 const clipboardHasImage = (event: ClipboardEvent) => clipboardHasImageItems(event.clipboardData?.items)
 
-const preparePastedImagePart = async (): Promise<AiImageContentPart | null> => {
-  const prepareClipboardImage = localFilesClient.prepareChatImageAttachmentFromClipboard()
-  if (!prepareClipboardImage) {
-    showInputPlaceholderNotice('图片上传失败：剪贴板图片服务不可用')
-    return null
-  }
-  try {
-    const result = await prepareClipboardImage()
-    const imagePart = imagePartFromChatImagePrepareResult(result)
-    if (imagePart.ok) return imagePart.data
-    showInputPlaceholderNotice(`图片上传失败：${imagePart.message}`)
-    return null
-  } catch (error) {
-    showInputPlaceholderNotice(`图片上传失败：${error instanceof Error ? error.message : String(error)}`)
-    return null
-  }
-}
-
-const insertPastedImageIntoEdit = async () => {
-  const part = await preparePastedImagePart()
-  if (part) insertImageAtEditCursor(part)
-}
-
 const insertPlainTextIntoEditableCursor = (editable: HTMLElement | null, text: string, onInserted: () => void) =>
   insertAiPanelPlainTextIntoEditableCursor(editable, text, onInserted)
 
@@ -3725,58 +3697,6 @@ const handleEditablePaste = (event: ClipboardEvent) => {
   insertPlainTextAtEditableCursor(event.clipboardData?.getData('text/plain') || '')
 }
 
-const imagePickerFilters = aiPanelImagePickerFilters
-
-const processImageFilePath = async (filePath: string): Promise<AiImageContentPart | null> => {
-  const prepareImageFromFile = localFilesClient.prepareChatImageAttachmentFromFile()
-  if (!prepareImageFromFile) {
-    showInputPlaceholderNotice('图片上传失败：图片读取服务不可用')
-    return null
-  }
-  try {
-    const result = await prepareImageFromFile({ filePath })
-    const imagePart = imagePartFromChatImagePrepareResult(result)
-    if (imagePart.ok) return imagePart.data
-    showInputPlaceholderNotice(`图片上传失败：${imagePart.message}`)
-    return null
-  } catch (error) {
-    showInputPlaceholderNotice(`图片上传失败：${error instanceof Error ? error.message : String(error)}`)
-    return null
-  }
-}
-
-const insertImageFilePaths = async (filePaths: string[]) => {
-  if (streaming.value) return
-  for (const filePath of filePaths) {
-    const part = await processImageFilePath(filePath)
-    if (part) insertImageAtEditableCursor(part)
-  }
-}
-
-const insertPastedImage = async () => {
-  const part = await preparePastedImagePart()
-  if (part) insertImageAtEditableCursor(part)
-}
-
-const openImagePicker = async () => {
-  if (streaming.value) return
-  const showOpenDialog = localFilesClient.showOpenDialog()
-  if (!showOpenDialog) {
-    showInputPlaceholderNotice('图片上传失败：文件选择服务不可用')
-    return
-  }
-  try {
-    const result = await showOpenDialog({
-      properties: ['openFile', 'multiSelections'],
-      filters: imagePickerFilters
-    })
-    if (!result || result.canceled || !result.filePaths?.length) return
-    await insertImageFilePaths(result.filePaths)
-  } catch (error) {
-    showInputPlaceholderNotice(`图片上传失败：${error instanceof Error ? error.message : String(error)}`)
-  }
-}
-
 const showInputPlaceholderNotice = (message: string) => {
   inputPlaceholderNotice.value = message
   if (inputPlaceholderNoticeTimer) window.clearTimeout(inputPlaceholderNoticeTimer)
@@ -3792,42 +3712,24 @@ const ensureAttachmentConversationId = async () => {
   return created?.id || ''
 }
 
-const handleFileUpload = async () => {
-  if (streaming.value) return
-  const showOpenDialog = localFilesClient.showOpenDialog()
-  if (!showOpenDialog) {
-    showInputPlaceholderNotice('文件上传失败：文件选择服务不可用')
-    return
-  }
-  const stageAttachment = localFilesClient.stageChatAttachment()
-  if (!stageAttachment) {
-    showInputPlaceholderNotice('文件上传失败：文件暂存服务不可用')
-    return
-  }
-  const taskId = await ensureAttachmentConversationId()
-  if (!taskId) {
-    showInputPlaceholderNotice('请先创建会话后再上传文件。')
-    return
-  }
-  try {
-    const result = await showOpenDialog({
-      properties: ['openFile'],
-      filters: chatAttachmentFilters
-    })
-    if (!result || result.canceled || !result.filePaths?.length) return
-    const srcAbsPath = result.filePaths[0]
-    const staged = await stageAttachment({ taskId, srcAbsPath })
-    const stagedPart = docPartFromStagedAttachment(staged, taskId, srcAbsPath)
-    if (!stagedPart.ok) throw new Error(stagedPart.message)
-    const inserted = editingMessageId.value ? insertFileChipAtEditCursor(stagedPart.data.part) : insertFileChipAtMainCursor(stagedPart.data.part)
-    if (!inserted) {
-      throw new Error('文件输入框不可用')
-    }
-    showInputPlaceholderNotice(`已添加文件：${stagedPart.data.displayName}`)
-  } catch (error) {
-    showInputPlaceholderNotice(`文件上传失败：${error instanceof Error ? error.message : String(error)}`)
-  }
-}
+const aiPanelAttachmentRuntime = createAiPanelAttachmentRuntime({
+  streaming: () => streaming.value,
+  editingMessageId: () => editingMessageId.value,
+  ensureConversationId: ensureAttachmentConversationId,
+  insertImageAtMainCursor: insertImageAtEditableCursor,
+  insertImageAtEditCursor,
+  insertFileChipAtMainCursor,
+  insertFileChipAtEditCursor,
+  notify: showInputPlaceholderNotice
+})
+
+const {
+  insertImageFilePaths,
+  insertPastedImage,
+  insertPastedImageIntoEdit,
+  openImagePicker,
+  handleFileUpload
+} = aiPanelAttachmentRuntime
 
 const appendVoiceTranscriptionToInput = (text: string) => {
   restoreEditableSelection()
