@@ -186,6 +186,16 @@ import type {
   ShortcutUserConfig,
   UserRuleConfig
 } from './contracts/settingsPreferences'
+import type {
+  SkillContentResult,
+  SkillDeleteResult,
+  SkillEnabledResult,
+  SkillExportResult,
+  SkillImportResult,
+  SkillMetadataConfig,
+  SkillUserConfig,
+  SkillWriteResult
+} from './contracts/skills'
 
 export type { AiopsMutationResult } from './contracts/common'
 export type {
@@ -432,6 +442,17 @@ export type {
   ShortcutUserConfig,
   UserRuleConfig
 } from './contracts/settingsPreferences'
+export type {
+  SkillContentResult,
+  SkillDeleteResult,
+  SkillEnabledResult,
+  SkillExportResult,
+  SkillImportErrorCode,
+  SkillImportResult,
+  SkillMetadataConfig,
+  SkillUserConfig,
+  SkillWriteResult
+} from './contracts/skills'
 
 export type RuntimeLogLevel = 'debug' | 'info' | 'warn' | 'error'
 
@@ -1563,48 +1584,6 @@ export type KnowledgeBaseSearchStatus = {
   updatedAt: number
 }
 
-export type SkillUserConfig = {
-  name: string
-  description: string
-  enabled: boolean
-  editable: boolean
-  content: string
-  path?: string
-}
-
-export type SkillMetadataConfig = {
-  name: string
-  description: string
-}
-
-export type SkillContentResult = {
-  metadata: Partial<SkillMetadataConfig>
-  content: string
-}
-
-export type SkillWriteResult = {
-  skill: SkillUserConfig
-  filePath: string
-  bytes: number
-  size: number
-  mtimeMs: number
-}
-
-export type SkillEnabledResult = {
-  skill: SkillUserConfig
-  skills: SkillUserConfig[]
-  enabled: boolean
-  updatedAt: string
-}
-
-export type SkillDeleteResult = {
-  skillName: string
-  deleted: true
-  deletedPath: string
-  remainingSkills: SkillUserConfig[]
-  deletedAt: string
-}
-
 export type FileDialogFilter = {
   name: string
   extensions: string[]
@@ -1785,29 +1764,6 @@ export type CustomBackgroundSaveResult = {
   size: number
   bytes: number
   mtimeMs: number
-}
-
-export type SkillImportErrorCode = 'INVALID_ZIP' | 'NO_SKILL_MD' | 'INVALID_METADATA' | 'DIR_EXISTS' | 'EXTRACT_FAILED' | 'UNKNOWN'
-
-export type SkillImportResult = {
-  success: boolean
-  skillName?: string
-  skill?: SkillUserConfig
-  importedPath?: string
-  bytes?: number
-  files?: number
-  importedAt?: string
-  error?: string
-  errorCode?: SkillImportErrorCode
-}
-
-export type SkillExportResult = {
-  success: boolean
-  filePath?: string
-  skillName?: string
-  bytes?: number
-  exportedAt?: string
-  error?: string
 }
 
 export type UserConfig = {

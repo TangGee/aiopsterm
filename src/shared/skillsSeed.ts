@@ -1,4 +1,4 @@
-import type { SkillUserConfig } from './preload'
+import type { SkillUserConfig } from './contracts/skills'
 import { shouldUseSkillsSeedData } from './runtimeSwitches'
 
 const defaultSkillSeeds: SkillUserConfig[] = [

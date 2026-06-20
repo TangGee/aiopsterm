@@ -6,11 +6,11 @@ import type {
   KnowledgeBaseSearchResult,
   KnowledgeBaseSearchStatus,
   SecurityConfigWriteResult,
-  UserConfig,
-  SkillUserConfig
+  UserConfig
 } from '@shared/preload'
 import type { McpConfigWriteResult } from '@shared/contracts/mcp'
 import type { FileListEntry } from '@shared/contracts/files'
+import type { SkillUserConfig } from '@shared/contracts/skills'
 import type {
   TerminalCreateOptions,
   TerminalDataEvent,

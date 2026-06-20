@@ -165,6 +165,28 @@ import type {
   ShortcutUserConfig as ShortcutUserConfigPreload,
   UserRuleConfig as UserRuleConfigPreload
 } from '../src/shared/preload'
+import type {
+  SkillContentResult as SkillContentResultContract,
+  SkillDeleteResult as SkillDeleteResultContract,
+  SkillEnabledResult as SkillEnabledResultContract,
+  SkillExportResult as SkillExportResultContract,
+  SkillImportErrorCode as SkillImportErrorCodeContract,
+  SkillImportResult as SkillImportResultContract,
+  SkillMetadataConfig as SkillMetadataConfigContract,
+  SkillUserConfig as SkillUserConfigContract,
+  SkillWriteResult as SkillWriteResultContract
+} from '../src/shared/contracts/skills'
+import type {
+  SkillContentResult as SkillContentResultPreload,
+  SkillDeleteResult as SkillDeleteResultPreload,
+  SkillEnabledResult as SkillEnabledResultPreload,
+  SkillExportResult as SkillExportResultPreload,
+  SkillImportErrorCode as SkillImportErrorCodePreload,
+  SkillImportResult as SkillImportResultPreload,
+  SkillMetadataConfig as SkillMetadataConfigPreload,
+  SkillUserConfig as SkillUserConfigPreload,
+  SkillWriteResult as SkillWriteResultPreload
+} from '../src/shared/preload'
 
 type AssertAssignable<From, To extends From> = true
 
@@ -297,6 +319,24 @@ type SettingsPreferencesMutationContractMatchesPreload = AssertAssignable<
 >
 type SettingsShortcutSaveInputPreloadMatchesContract = AssertAssignable<SettingsShortcutSaveInputContract, SettingsShortcutSaveInputPreload>
 type SettingsShortcutSaveInputContractMatchesPreload = AssertAssignable<SettingsShortcutSaveInputPreload, SettingsShortcutSaveInputContract>
+type SkillUserConfigPreloadMatchesContract = AssertAssignable<SkillUserConfigContract, SkillUserConfigPreload>
+type SkillUserConfigContractMatchesPreload = AssertAssignable<SkillUserConfigPreload, SkillUserConfigContract>
+type SkillMetadataConfigPreloadMatchesContract = AssertAssignable<SkillMetadataConfigContract, SkillMetadataConfigPreload>
+type SkillMetadataConfigContractMatchesPreload = AssertAssignable<SkillMetadataConfigPreload, SkillMetadataConfigContract>
+type SkillContentResultPreloadMatchesContract = AssertAssignable<SkillContentResultContract, SkillContentResultPreload>
+type SkillContentResultContractMatchesPreload = AssertAssignable<SkillContentResultPreload, SkillContentResultContract>
+type SkillWriteResultPreloadMatchesContract = AssertAssignable<SkillWriteResultContract, SkillWriteResultPreload>
+type SkillWriteResultContractMatchesPreload = AssertAssignable<SkillWriteResultPreload, SkillWriteResultContract>
+type SkillEnabledResultPreloadMatchesContract = AssertAssignable<SkillEnabledResultContract, SkillEnabledResultPreload>
+type SkillEnabledResultContractMatchesPreload = AssertAssignable<SkillEnabledResultPreload, SkillEnabledResultContract>
+type SkillDeleteResultPreloadMatchesContract = AssertAssignable<SkillDeleteResultContract, SkillDeleteResultPreload>
+type SkillDeleteResultContractMatchesPreload = AssertAssignable<SkillDeleteResultPreload, SkillDeleteResultContract>
+type SkillImportErrorCodePreloadMatchesContract = AssertAssignable<SkillImportErrorCodeContract, SkillImportErrorCodePreload>
+type SkillImportErrorCodeContractMatchesPreload = AssertAssignable<SkillImportErrorCodePreload, SkillImportErrorCodeContract>
+type SkillImportResultPreloadMatchesContract = AssertAssignable<SkillImportResultContract, SkillImportResultPreload>
+type SkillImportResultContractMatchesPreload = AssertAssignable<SkillImportResultPreload, SkillImportResultContract>
+type SkillExportResultPreloadMatchesContract = AssertAssignable<SkillExportResultContract, SkillExportResultPreload>
+type SkillExportResultContractMatchesPreload = AssertAssignable<SkillExportResultPreload, SkillExportResultContract>
 
 describe('shared contract compatibility exports', () => {
   it('keeps Codex session contracts compatible through the preload export', () => {
@@ -495,5 +535,30 @@ describe('shared contract compatibility exports', () => {
     ] = [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true]
 
     expect(checks).toEqual([true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true])
+  })
+
+  it('keeps Skills contracts compatible through the preload export', () => {
+    const checks: [
+      SkillUserConfigPreloadMatchesContract,
+      SkillUserConfigContractMatchesPreload,
+      SkillMetadataConfigPreloadMatchesContract,
+      SkillMetadataConfigContractMatchesPreload,
+      SkillContentResultPreloadMatchesContract,
+      SkillContentResultContractMatchesPreload,
+      SkillWriteResultPreloadMatchesContract,
+      SkillWriteResultContractMatchesPreload,
+      SkillEnabledResultPreloadMatchesContract,
+      SkillEnabledResultContractMatchesPreload,
+      SkillDeleteResultPreloadMatchesContract,
+      SkillDeleteResultContractMatchesPreload,
+      SkillImportErrorCodePreloadMatchesContract,
+      SkillImportErrorCodeContractMatchesPreload,
+      SkillImportResultPreloadMatchesContract,
+      SkillImportResultContractMatchesPreload,
+      SkillExportResultPreloadMatchesContract,
+      SkillExportResultContractMatchesPreload
+    ] = [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true]
+
+    expect(checks).toEqual([true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true])
   })
 })

@@ -159,7 +159,6 @@ import type {
   PrivacyRuntimeSnapshot,
   SecurityUserConfig,
   SettingsDocumentationPage,
-  SkillUserConfig,
   SshAgentKeyConfig,
   SshAgentKeychainOption,
   SshProxyConfig,
@@ -178,6 +177,7 @@ import type { ExtensionInstallProgress as BackendExtensionInstallProgress, Exten
 import type { QuickCommandGroupConfig, QuickCommandScriptPlan, QuickCommandScriptSegment, QuickCommandSnippetConfig, QuickCommandsUserConfig } from '@shared/contracts/quickCommands'
 import type { McpConfigFile, McpResourceReadContent, McpResourceReadResult, McpServerUserConfig, McpToolCallContent, McpToolCallResult, McpToolStatesUserConfig } from '@shared/contracts/mcp'
 import type { SettingsPreferencesSnapshot, ShortcutUserConfig, UserRuleConfig } from '@shared/contracts/settingsPreferences'
+import type { SkillUserConfig } from '@shared/contracts/skills'
 import type {
   AiAgentSessionEvent,
   AiAgentSessionEventName,

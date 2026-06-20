@@ -130,13 +130,6 @@ import type {
   KnowledgeBaseUserConfig,
   ModelSettingsUserConfig,
   SecurityUserConfig,
-  SkillDeleteResult,
-  SkillEnabledResult,
-  SkillExportResult,
-  SkillImportResult,
-  SkillMetadataConfig,
-  SkillUserConfig,
-  SkillWriteResult,
   SshAgentKeyConfig,
   SshProxyConfig,
   UserConfig,
@@ -144,6 +137,15 @@ import type {
 } from '@shared/preload'
 import type { McpConfigFile, McpResourceReadInput, McpServerUserConfig, McpToolCallInput, McpToolStatesUserConfig } from '@shared/contracts/mcp'
 import type { ShortcutUserConfig, UserRuleConfig } from '@shared/contracts/settingsPreferences'
+import type {
+  SkillDeleteResult,
+  SkillEnabledResult,
+  SkillExportResult,
+  SkillImportResult,
+  SkillMetadataConfig,
+  SkillUserConfig,
+  SkillWriteResult
+} from '@shared/contracts/skills'
 
 if (process.env.NODE_ENV === 'test') {
   app.disableHardwareAcceleration()

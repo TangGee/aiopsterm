@@ -3,7 +3,7 @@ import type { IpcMain } from 'electron'
 import { mkdir, mkdtemp, readFile, rm } from 'fs/promises'
 import { tmpdir } from 'os'
 import { dirname, join } from 'path'
-import type { SkillMetadataConfig, SkillUserConfig } from '../src/shared/preload'
+import type { SkillMetadataConfig, SkillUserConfig } from '../src/shared/contracts/skills'
 
 type IpcHandler = (event: unknown, ...args: any[]) => unknown
 

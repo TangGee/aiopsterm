@@ -7,7 +7,7 @@ import type {
   SkillImportResult,
   SkillUserConfig,
   SkillWriteResult
-} from '@shared/preload'
+} from '@shared/contracts/skills'
 
 export const malformedSkillsBackendResultMessage = 'Skills 服务返回数据无效'
 

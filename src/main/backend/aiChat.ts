@@ -15,10 +15,10 @@ import type {
   AiChatResponseResult,
   AiChatSkillInput,
   ModelProviderCheckKey,
-  SkillUserConfig,
   UserConfig
 } from '@shared/preload'
 import type { McpResourceReadInput, McpResourceReadResult, McpToolCallInput, McpToolCallResult } from '@shared/contracts/mcp'
+import type { SkillUserConfig } from '@shared/contracts/skills'
 import { shouldUseAiChatBackendDouble } from '@shared/runtimeSwitches'
 import { createProviderTextRequest, fetchProviderText, resolveModelProvider, type AiProviderTextMessage } from './modelProviderText'
 import { recordAiTodoCancelResult, recordAiTodoExchangeRequest, recordAiTodoResponseResult } from './aiTodos'

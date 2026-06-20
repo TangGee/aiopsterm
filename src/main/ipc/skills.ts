@@ -9,7 +9,7 @@ import type {
   SkillMetadataConfig,
   SkillUserConfig,
   SkillWriteResult
-} from '@shared/preload'
+} from '@shared/contracts/skills'
 
 type SaveDialogResult = { canceled?: boolean; filePath?: string }
 

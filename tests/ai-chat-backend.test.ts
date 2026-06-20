@@ -2,7 +2,8 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import { mkdtemp, rm } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import type { SkillUserConfig, UserConfig } from '../src/shared/preload'
+import type { UserConfig } from '../src/shared/preload'
+import type { SkillUserConfig } from '../src/shared/contracts/skills'
 import type { McpToolCallInput, McpToolCallResult } from '../src/shared/contracts/mcp'
 
 let generateAiChatResponse: (input: Record<string, unknown>) => Promise<any>
