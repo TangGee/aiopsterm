@@ -26,6 +26,7 @@ import {
 } from '@/services/extensionBackendGuards'
 import { applyKeywordHighlight } from '@/services/keywordHighlightRuntime'
 import { managedAiClient } from '@/services/managedAiClient'
+import { mcpClient } from '@/services/mcpClient'
 import {
   isFileSessionCatalogData,
   isFileSessionFolderDeleteData,
@@ -84,6 +85,7 @@ import {
   snapshotContainsSkill
 } from '@/services/skillsBackendGuards'
 import { shortcutRuntime, type ShortcutActionHandler } from '@/services/shortcutRuntime'
+import { skillsClient } from '@/services/skillsClient'
 import { addSystemThemeListener, applyThemeToDocument, isThemeId, type ThemeId } from '@/services/themeRuntime'
 import { isAiopstermDeepLinkPayload } from '@shared/deepLink'
 import { isLegacyLocalModelName } from '@shared/modelConfigBoundary'
@@ -5975,8 +5977,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const installSkillsUpdateListener = () => {
-    if (removeSkillsUpdateListener || !window.aiops?.onSkillsUpdate) return
-    removeSkillsUpdateListener = window.aiops.onSkillsUpdate((skills) => {
+    const onSkillsUpdate = skillsClient.onSkillsUpdate()
+    if (removeSkillsUpdateListener || !onSkillsUpdate) return
+    removeSkillsUpdateListener = onSkillsUpdate((skills) => {
       if (!isSkillsSnapshotData(skills)) {
         setSettingsNotice(malformedSkillsBackendResultMessage)
         return
@@ -5986,12 +5989,14 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const readSkillsSnapshotFromBridge = async () => {
-    if (!window.aiops?.getSkills) return false
+    const getSkills = skillsClient.getSkills()
+    if (!getSkills) return false
     try {
       installSkillsUpdateListener()
+      const getSkillsUserPath = skillsClient.getSkillsUserPath()
       const [path, skills] = await Promise.all([
-        window.aiops.getSkillsUserPath ? window.aiops.getSkillsUserPath() : Promise.resolve(skillsUserPath.value),
-        window.aiops.getSkills()
+        getSkillsUserPath ? getSkillsUserPath() : Promise.resolve(skillsUserPath.value),
+        getSkills()
       ])
       if (typeof path !== 'string' || !isSkillsSnapshotData(skills)) {
         setSettingsNotice(malformedSkillsBackendResultMessage)
@@ -6023,12 +6028,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const refreshSkillsFromBridge = () => loadSkillsFromBridge()
 
   const reloadSkills = async () => {
-    if (!window.aiops?.reloadSkills) {
+    const reloadSkillsBridge = skillsClient.reloadSkills()
+    if (!reloadSkillsBridge) {
       setSettingsNotice('Skills 重新加载服务不可用')
       return false
     }
     try {
-      const skills = await window.aiops.reloadSkills()
+      const skills = await reloadSkillsBridge()
       if (!isSkillsSnapshotData(skills)) {
         setSettingsNotice(malformedSkillsBackendResultMessage)
         return false
@@ -6043,12 +6049,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const openSkillsFolder = async () => {
-    if (!window.aiops?.openSkillsFolder) {
+    const openSkillsFolderBridge = skillsClient.openSkillsFolder()
+    if (!openSkillsFolderBridge) {
       setSettingsNotice('Skills 文件夹打开服务不可用')
       return false
     }
     try {
-      const result = await window.aiops.openSkillsFolder()
+      const result = await openSkillsFolderBridge()
       if (!result || typeof result.path !== 'string' || !result.path.trim()) {
         setSettingsNotice('Skills 文件夹打开失败')
         return false
@@ -6095,12 +6102,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const readMcpServersSnapshotFromBridge = async () => {
-    if (!window.aiops?.getMcpServers) {
+    const getMcpServers = mcpClient.getMcpServers()
+    if (!getMcpServers) {
       setSettingsNotice('MCP 列表加载服务不可用')
       return null
     }
     try {
-      const servers = await window.aiops.getMcpServers()
+      const servers = await getMcpServers()
       if (!Array.isArray(servers)) {
         setSettingsNotice('MCP 配置服务返回数据无效')
         return null
@@ -6209,8 +6217,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const installMcpConfigFileListener = () => {
-    if (removeMcpConfigFileListener || !window.aiops?.onMcpConfigFileChanged) return
-    removeMcpConfigFileListener = window.aiops.onMcpConfigFileChanged((content) => {
+    const onMcpConfigFileChanged = mcpClient.onMcpConfigFileChanged()
+    if (removeMcpConfigFileListener || !onMcpConfigFileChanged) return
+    removeMcpConfigFileListener = onMcpConfigFileChanged((content) => {
       void (async () => {
         const snapshot = await readMcpServersSnapshotFromBridge()
         if (!snapshot) {
@@ -9140,14 +9149,15 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     mcpConfigEditorError.value = ''
     mcpConfigEditorLastSaved.value = false
     installMcpConfigFileListener()
-    if (!window.aiops) return
-    if (!window.aiops.getMcpConfigPath || !window.aiops.readMcpConfig) {
+    const getMcpConfigPath = mcpClient.getMcpConfigPath()
+    const readMcpConfig = mcpClient.readMcpConfig()
+    if (!getMcpConfigPath || !readMcpConfig) {
       mcpConfigEditorError.value = 'Failed to read MCP config: MCP 配置读取服务不可用'
       setSettingsNotice('MCP 配置读取服务不可用')
       return
     }
     try {
-      const [bridgeSnapshot, path, content] = await Promise.all([readMcpServersSnapshotFromBridge(), window.aiops.getMcpConfigPath(), window.aiops.readMcpConfig()])
+      const [bridgeSnapshot, path, content] = await Promise.all([readMcpServersSnapshotFromBridge(), getMcpConfigPath(), readMcpConfig()])
       if (requestId !== mcpConfigLoadRequest) return
       mcpConfigPath.value = path
       applyMcpConfigFileContent(content, false, bridgeSnapshot)
@@ -9204,14 +9214,15 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       return false
     }
     const content = format ? JSON.stringify(normalized, null, 2) : mcpConfigEditorContent.value
-    if (!window.aiops?.writeMcpConfig) {
+    const writeMcpConfig = mcpClient.writeMcpConfig()
+    if (!writeMcpConfig) {
       mcpConfigEditorError.value = 'Save failed: MCP 配置保存服务不可用'
       mcpConfigEditorLastSaved.value = false
       setSettingsNotice('MCP 配置保存服务不可用')
       return false
     }
     try {
-      const result = await window.aiops.writeMcpConfig(content)
+      const result = await writeMcpConfig(content)
       if (!applySavedMcpConfig(result, normalized)) return false
       setSettingsNotice('MCP 配置已保存')
       return true
@@ -9236,14 +9247,15 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const toggleMcpServerDisabled = async (name: string) => {
     const server = mcpServers.value.find((item) => item.name === name)
     if (!server) return false
-    if (!window.aiops?.toggleMcpServer) {
+    const toggleMcpServer = mcpClient.toggleMcpServer()
+    if (!toggleMcpServer) {
       setSettingsNotice('MCP 状态服务不可用')
       return false
     }
     const nextDisabled = !server.disabled
     const previousSnapshot = getMcpSnapshot()
     try {
-      const result = await window.aiops.toggleMcpServer(name, nextDisabled)
+      const result = await toggleMcpServer(name, nextDisabled)
       if (
         !applyMcpMutationSnapshotForRequest(result, previousSnapshot, 'MCP 状态更新失败', `MCP ${name} 状态更新结果不匹配`, () =>
           mcpServerDisabledMatches(name, nextDisabled)
@@ -9268,13 +9280,14 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const deleteMcpServer = async (name: string) => {
-    if (!window.aiops?.deleteMcpServer) {
+    const deleteMcpServerBridge = mcpClient.deleteMcpServer()
+    if (!deleteMcpServerBridge) {
       setSettingsNotice('MCP 删除服务不可用')
       return false
     }
     const previousSnapshot = getMcpSnapshot()
     try {
-      const result = await window.aiops.deleteMcpServer(name)
+      const result = await deleteMcpServerBridge(name)
       if (
         !applyMcpMutationSnapshotForRequest(result, previousSnapshot, 'MCP 删除失败', `${name} 删除结果不匹配`, () => mcpServerDeletedMatches(name))
       ) {
@@ -9299,14 +9312,15 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const toggleMcpTool = async (serverName: string, toolName: string) => {
     const tool = mcpServers.value.find((server) => server.name === serverName)?.tools.find((item) => item.name === toolName)
     if (!tool) return false
-    if (!window.aiops?.setMcpToolState) {
+    const setMcpToolState = mcpClient.setMcpToolState()
+    if (!setMcpToolState) {
       setSettingsNotice('MCP Tool 状态服务不可用')
       return false
     }
     const nextEnabled = !tool.enabled
     const previousSnapshot = getMcpSnapshot()
     try {
-      const result = await window.aiops.setMcpToolState(serverName, toolName, nextEnabled)
+      const result = await setMcpToolState(serverName, toolName, nextEnabled)
       if (
         !applyMcpMutationSnapshotForRequest(result, previousSnapshot, 'MCP Tool 状态更新失败', `${toolName} 状态更新结果不匹配`, () =>
           mcpToolEnabledMatches(serverName, toolName, nextEnabled)
@@ -9333,14 +9347,15 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const toggleMcpToolAutoApprove = async (serverName: string, toolName: string) => {
     const tool = mcpServers.value.find((server) => server.name === serverName)?.tools.find((item) => item.name === toolName)
     if (!tool) return false
-    if (!window.aiops?.setMcpToolAutoApprove) {
+    const setMcpToolAutoApprove = mcpClient.setMcpToolAutoApprove()
+    if (!setMcpToolAutoApprove) {
       setSettingsNotice('MCP Auto Approve 服务不可用')
       return false
     }
     const nextAutoApprove = !tool.autoApprove
     const previousSnapshot = getMcpSnapshot()
     try {
-      const result = await window.aiops.setMcpToolAutoApprove(serverName, toolName, nextAutoApprove)
+      const result = await setMcpToolAutoApprove(serverName, toolName, nextAutoApprove)
       if (
         !applyMcpMutationSnapshotForRequest(result, previousSnapshot, 'Auto Approve failed', 'MCP Auto Approve 更新结果不匹配', () =>
           mcpToolAutoApproveMatches(serverName, toolName, nextAutoApprove)
@@ -9424,7 +9439,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       setSettingsNotice(message)
       return false
     }
-    if (!window.aiops?.callMcpTool) {
+    const callMcpTool = mcpClient.callMcpTool()
+    if (!callMcpTool) {
       const message = 'MCP Tool 调用服务不可用'
       setSettingsNotice(message)
       return false
@@ -9437,7 +9453,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const previousRecord = mcpOperationResults.value[key] ? { ...mcpOperationResults.value[key] } : undefined
     setMcpOperationResult(key, { status: 'running', output: '', error: '' })
     try {
-      const result = await window.aiops.callMcpTool(serverName, toolName, parsed.arguments)
+      const result = await callMcpTool(serverName, toolName, parsed.arguments)
       if (!result?.ok) {
         const message = result?.errorMessage || `${toolName} 调用失败`
         restoreMcpOperationResult(key, previousRecord)
@@ -9476,7 +9492,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       setSettingsNotice(message)
       return false
     }
-    if (!window.aiops?.readMcpResource) {
+    const readMcpResourceBridge = mcpClient.readMcpResource()
+    if (!readMcpResourceBridge) {
       const message = 'MCP Resource 读取服务不可用'
       setSettingsNotice(message)
       return false
@@ -9484,7 +9501,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const previousRecord = mcpOperationResults.value[key] ? { ...mcpOperationResults.value[key] } : undefined
     setMcpOperationResult(key, { status: 'running', output: '', error: '' })
     try {
-      const result = await window.aiops.readMcpResource(serverName, uri)
+      const result = await readMcpResourceBridge(serverName, uri)
       if (!result?.ok) {
         const message = result?.errorMessage || `${resource.name} 读取失败`
         restoreMcpOperationResult(key, previousRecord)
@@ -9520,12 +9537,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         setSettingsNotice('只能编辑用户创建的 Skill')
         return
       }
-      if (!window.aiops?.readSkillContent) {
+      const readSkillContent = skillsClient.readSkillContent()
+      if (!readSkillContent) {
         setSettingsNotice('Skill 内容读取服务不可用')
         return
       }
       try {
-        const result = await window.aiops.readSkillContent(skill.name)
+        const result = await readSkillContent(skill.name)
         if (!isSkillContentResultData(result, skill.name)) {
           setSettingsNotice(malformedSkillsBackendResultMessage)
           return
@@ -9563,12 +9581,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         setSettingsNotice('只能编辑用户创建的 Skill')
         return false
       }
-      if (!window.aiops?.updateSkill) {
+      const updateSkill = skillsClient.updateSkill()
+      if (!updateSkill) {
         setSettingsNotice('Skill 保存服务不可用')
         return false
       }
       try {
-        const result = await window.aiops.updateSkill(name, { name, description }, content)
+        const result = await updateSkill(name, { name, description }, content)
         if (!isSkillWriteResultForRequest(result, { name, description, content })) {
           setSettingsNotice(malformedSkillsBackendResultMessage)
           return false
@@ -9591,12 +9610,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       setSettingsNotice('Skill 已存在')
       return false
     }
-    if (!window.aiops?.createSkill) {
+    const createSkill = skillsClient.createSkill()
+    if (!createSkill) {
       setSettingsNotice('Skill 创建服务不可用')
       return false
     }
     try {
-      const created = await window.aiops.createSkill({ name, description }, content)
+      const created = await createSkill({ name, description }, content)
       if (!isSkillWriteResultForRequest(created, { name, description, content, enabled: true })) {
         setSettingsNotice(malformedSkillsBackendResultMessage)
         return false
@@ -9615,14 +9635,15 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const toggleSkillEnabled = async (name: string) => {
     const skill = settingsSkills.value.find((item) => item.name === name)
     if (!skill) return
-    if (!window.aiops?.setSkillEnabled) {
+    const setSkillEnabled = skillsClient.setSkillEnabled()
+    if (!setSkillEnabled) {
       setSettingsNotice('Skill 状态服务不可用')
       return
     }
     const previous = skill.enabled
     const nextEnabled = !skill.enabled
     try {
-      const result = await window.aiops.setSkillEnabled(name, nextEnabled)
+      const result = await setSkillEnabled(name, nextEnabled)
       if (!isSkillEnabledResultForRequest(result, { name, enabled: nextEnabled })) {
         skill.enabled = previous
         setSettingsNotice(malformedSkillsBackendResultMessage)
@@ -9647,12 +9668,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       setSettingsNotice('只能删除用户创建的 Skill')
       return
     }
-    if (!window.aiops?.deleteSkill) {
+    const deleteSkillBridge = skillsClient.deleteSkill()
+    if (!deleteSkillBridge) {
       setSettingsNotice('Skill 删除服务不可用')
       return
     }
     try {
-      const result = await window.aiops.deleteSkill(name)
+      const result = await deleteSkillBridge(name)
       if (!isSkillDeleteResultForRequest(result, name)) {
         setSettingsNotice(malformedSkillsBackendResultMessage)
         return
@@ -9676,8 +9698,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const importSkillZip = async () => {
-    const importSkillZipBridge = window.aiops?.importSkillZip
-    if (typeof importSkillZipBridge !== 'function') {
+    const importSkillZipBridge = skillsClient.importSkillZip()
+    if (!importSkillZipBridge) {
       setSettingsNotice('Skill ZIP 导入服务不可用')
       return false
     }
@@ -9741,8 +9763,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const exportSkillZip = async (name: string) => {
-    const exportSkillZipBridge = window.aiops?.exportSkillZip
-    if (typeof exportSkillZipBridge !== 'function') {
+    const exportSkillZipBridge = skillsClient.exportSkillZip()
+    if (!exportSkillZipBridge) {
       setSettingsNotice(`${name} ZIP 导出服务不可用`)
       return false
     }
@@ -14961,12 +14983,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       enabled: true,
       editable: true
     }
-    if (!window.aiops?.createSkill) {
+    const createSkillBridge = skillsClient.createSkill()
+    if (!createSkillBridge) {
       setSettingsNotice('Skill 创建服务不可用')
       return null
     }
     try {
-      const created = await window.aiops.createSkill({ name: skill.name, description: skill.description }, skill.content)
+      const created = await createSkillBridge({ name: skill.name, description: skill.description }, skill.content)
       if (!isSkillWriteResultForRequest(created, { name: skill.name, description: skill.description, content: skill.content, enabled: true })) {
         setSettingsNotice(malformedSkillsBackendResultMessage)
         return null
