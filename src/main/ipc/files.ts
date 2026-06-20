@@ -27,7 +27,7 @@ import type {
   FileSessionTerminalContext,
   FileTransferOperation,
   FileTransferTaskCancelInput
-} from '@shared/preload'
+} from '@shared/contracts/files'
 
 export const registerFilesIpc = (ipcMain: IpcMain) => {
   ipcMain.handle('files:sessions:catalog', () => listFileSessionCatalog())

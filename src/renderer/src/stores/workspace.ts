@@ -142,13 +142,6 @@ import type {
   ExtensionPluginOperation,
   ExtensionPluginRuntimeConfig,
   ExtensionUserConfig,
-  FileSessionCatalog,
-  FileSessionFolderRecord,
-  FileSessionFolderSaveInput,
-  FileSessionInfo,
-  FileSessionPatch,
-  FileSessionTerminalContext,
-  FileTransferTask,
   KeywordHighlightRuleConfig,
   KeywordHighlightUserConfig,
   KnowledgeBaseEntry,
@@ -209,6 +202,7 @@ import type {
   UserRuleConfig,
   WorkspaceUserConfig
 } from '@shared/preload'
+import type { FileSessionCatalog, FileSessionFolderRecord, FileSessionFolderSaveInput, FileSessionInfo, FileSessionPatch, FileSessionTerminalContext, FileTransferTask } from '@shared/contracts/files'
 import type {
   AiAgentSessionEvent,
   AiAgentSessionEventName,

@@ -1,7 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type {
   AiopsPreloadApi,
-  FileListEntry,
   KeywordHighlightConfigWriteResult,
   KnowledgeBaseTransferProgress,
   KnowledgeBaseSearchResult,
@@ -11,6 +10,7 @@ import type {
   UserConfig,
   SkillUserConfig
 } from '@shared/preload'
+import type { FileListEntry } from '@shared/contracts/files'
 import type {
   TerminalCreateOptions,
   TerminalDataEvent,

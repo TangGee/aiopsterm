@@ -61,6 +61,18 @@ import type {
   ZmodemStreamOpenResult as ZmodemStreamOpenResultPreload,
   ZmodemUploadPickResult as ZmodemUploadPickResultPreload
 } from '../src/shared/preload'
+import type {
+  FileListEntry as FileListEntryContract,
+  FileSessionCatalogResult as FileSessionCatalogResultContract,
+  FileSessionInfo as FileSessionInfoContract,
+  FileTransferOperationResult as FileTransferOperationResultContract
+} from '../src/shared/contracts/files'
+import type {
+  FileListEntry as FileListEntryPreload,
+  FileSessionCatalogResult as FileSessionCatalogResultPreload,
+  FileSessionInfo as FileSessionInfoPreload,
+  FileTransferOperationResult as FileTransferOperationResultPreload
+} from '../src/shared/preload'
 
 type AssertAssignable<From, To extends From> = true
 
@@ -111,6 +123,14 @@ type ZmodemUploadPickPreloadMatchesContract = AssertAssignable<ZmodemUploadPickR
 type ZmodemUploadPickContractMatchesPreload = AssertAssignable<ZmodemUploadPickResultPreload, ZmodemUploadPickResultContract>
 type ZmodemStreamOpenPreloadMatchesContract = AssertAssignable<ZmodemStreamOpenResultContract, ZmodemStreamOpenResultPreload>
 type ZmodemStreamOpenContractMatchesPreload = AssertAssignable<ZmodemStreamOpenResultPreload, ZmodemStreamOpenResultContract>
+type FileSessionInfoPreloadMatchesContract = AssertAssignable<FileSessionInfoContract, FileSessionInfoPreload>
+type FileSessionInfoContractMatchesPreload = AssertAssignable<FileSessionInfoPreload, FileSessionInfoContract>
+type FileSessionCatalogPreloadMatchesContract = AssertAssignable<FileSessionCatalogResultContract, FileSessionCatalogResultPreload>
+type FileSessionCatalogContractMatchesPreload = AssertAssignable<FileSessionCatalogResultPreload, FileSessionCatalogResultContract>
+type FileListEntryPreloadMatchesContract = AssertAssignable<FileListEntryContract, FileListEntryPreload>
+type FileListEntryContractMatchesPreload = AssertAssignable<FileListEntryPreload, FileListEntryContract>
+type FileTransferOperationPreloadMatchesContract = AssertAssignable<FileTransferOperationResultContract, FileTransferOperationResultPreload>
+type FileTransferOperationContractMatchesPreload = AssertAssignable<FileTransferOperationResultPreload, FileTransferOperationResultContract>
 
 describe('shared contract compatibility exports', () => {
   it('keeps Codex session contracts compatible through the preload export', () => {
@@ -184,5 +204,20 @@ describe('shared contract compatibility exports', () => {
     ] = [true, true, true, true]
 
     expect(checks).toEqual([true, true, true, true])
+  })
+
+  it('keeps Files contracts compatible through the preload export', () => {
+    const checks: [
+      FileSessionInfoPreloadMatchesContract,
+      FileSessionInfoContractMatchesPreload,
+      FileSessionCatalogPreloadMatchesContract,
+      FileSessionCatalogContractMatchesPreload,
+      FileListEntryPreloadMatchesContract,
+      FileListEntryContractMatchesPreload,
+      FileTransferOperationPreloadMatchesContract,
+      FileTransferOperationContractMatchesPreload
+    ] = [true, true, true, true, true, true, true, true]
+
+    expect(checks).toEqual([true, true, true, true, true, true, true, true])
   })
 })

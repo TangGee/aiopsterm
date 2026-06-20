@@ -226,7 +226,7 @@ import {
   malformedFilesBackendResultMessage
 } from '@/services/filesBackendGuards'
 import { useWorkspaceStore } from '@/stores/workspace'
-import type { FileContentOptions, FileTransferTask } from '@shared/preload'
+import type { FileContentOptions, FileTransferTask } from '@shared/contracts/files'
 
 const workspace = useWorkspaceStore()
 const expandedDefault = ref(['local'])

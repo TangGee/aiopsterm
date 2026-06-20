@@ -346,7 +346,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { Check, ChevronDown, ChevronRight, Folder, FolderInput, FolderMinus, MessageSquare, Pencil, RefreshCw, Search, Star, Trash2, X } from 'lucide-vue-next'
 import { useWorkspaceStore } from '@/stores/workspace'
-import type { FileSessionFolderRecord, FileSessionInfo } from '@shared/preload'
+import type { FileSessionFolderRecord, FileSessionInfo } from '@shared/contracts/files'
 
 type CustomFolder = FileSessionFolderRecord
 

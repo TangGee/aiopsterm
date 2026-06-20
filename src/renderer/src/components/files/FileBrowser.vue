@@ -520,7 +520,7 @@ import {
   isFileTransferTaskData,
   malformedFilesBackendResultMessage
 } from '@/services/filesBackendGuards'
-import type { FileEntryMutation, FileEntryMutationResult, FileListEntry, FileListOptions, FileSessionInfo, FileTransferOperationResult, FileTransferTask } from '@shared/preload'
+import type { FileEntryMutation, FileEntryMutationResult, FileListEntry, FileListOptions, FileSessionInfo, FileTransferOperationResult, FileTransferTask } from '@shared/contracts/files'
 
 type FileBrowserEntry = Omit<FileListEntry, 'mode' | 'modifiedAt'> & {
   mode: string

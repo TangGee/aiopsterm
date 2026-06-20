@@ -13,7 +13,7 @@ import type {
   FileTransferTask,
   FileTransferTaskCancelResult,
   FileWriteContentResult
-} from '@shared/preload'
+} from '@shared/contracts/files'
 
 export const malformedFilesBackendResultMessage = '文件服务返回数据无效'
 
