@@ -127,6 +127,24 @@ import type {
   AliasCommandMutationResult as AliasCommandMutationResultPreload,
   AliasCommandSaveInput as AliasCommandSaveInputPreload
 } from '../src/shared/preload'
+import type {
+  McpConfigFile as McpConfigFileContract,
+  McpConfigWriteResult as McpConfigWriteResultContract,
+  McpResourceReadInput as McpResourceReadInputContract,
+  McpResourceReadResult as McpResourceReadResultContract,
+  McpServerUserConfig as McpServerUserConfigContract,
+  McpToolCallInput as McpToolCallInputContract,
+  McpToolCallResult as McpToolCallResultContract
+} from '../src/shared/contracts/mcp'
+import type {
+  McpConfigFile as McpConfigFilePreload,
+  McpConfigWriteResult as McpConfigWriteResultPreload,
+  McpResourceReadInput as McpResourceReadInputPreload,
+  McpResourceReadResult as McpResourceReadResultPreload,
+  McpServerUserConfig as McpServerUserConfigPreload,
+  McpToolCallInput as McpToolCallInputPreload,
+  McpToolCallResult as McpToolCallResultPreload
+} from '../src/shared/preload'
 
 type AssertAssignable<From, To extends From> = true
 
@@ -223,6 +241,20 @@ type AliasDeleteInputPreloadMatchesContract = AssertAssignable<AliasCommandDelet
 type AliasDeleteInputContractMatchesPreload = AssertAssignable<AliasCommandDeleteInputPreload, AliasCommandDeleteInputContract>
 type AliasDeleteResultPreloadMatchesContract = AssertAssignable<AliasCommandDeleteResultContract, AliasCommandDeleteResultPreload>
 type AliasDeleteResultContractMatchesPreload = AssertAssignable<AliasCommandDeleteResultPreload, AliasCommandDeleteResultContract>
+type McpConfigFilePreloadMatchesContract = AssertAssignable<McpConfigFileContract, McpConfigFilePreload>
+type McpConfigFileContractMatchesPreload = AssertAssignable<McpConfigFilePreload, McpConfigFileContract>
+type McpServerPreloadMatchesContract = AssertAssignable<McpServerUserConfigContract, McpServerUserConfigPreload>
+type McpServerContractMatchesPreload = AssertAssignable<McpServerUserConfigPreload, McpServerUserConfigContract>
+type McpConfigWritePreloadMatchesContract = AssertAssignable<McpConfigWriteResultContract, McpConfigWriteResultPreload>
+type McpConfigWriteContractMatchesPreload = AssertAssignable<McpConfigWriteResultPreload, McpConfigWriteResultContract>
+type McpToolCallInputPreloadMatchesContract = AssertAssignable<McpToolCallInputContract, McpToolCallInputPreload>
+type McpToolCallInputContractMatchesPreload = AssertAssignable<McpToolCallInputPreload, McpToolCallInputContract>
+type McpToolCallResultPreloadMatchesContract = AssertAssignable<McpToolCallResultContract, McpToolCallResultPreload>
+type McpToolCallResultContractMatchesPreload = AssertAssignable<McpToolCallResultPreload, McpToolCallResultContract>
+type McpResourceReadInputPreloadMatchesContract = AssertAssignable<McpResourceReadInputContract, McpResourceReadInputPreload>
+type McpResourceReadInputContractMatchesPreload = AssertAssignable<McpResourceReadInputPreload, McpResourceReadInputContract>
+type McpResourceReadResultPreloadMatchesContract = AssertAssignable<McpResourceReadResultContract, McpResourceReadResultPreload>
+type McpResourceReadResultContractMatchesPreload = AssertAssignable<McpResourceReadResultPreload, McpResourceReadResultContract>
 
 describe('shared contract compatibility exports', () => {
   it('keeps Codex session contracts compatible through the preload export', () => {
@@ -377,5 +409,26 @@ describe('shared contract compatibility exports', () => {
     ] = [true, true, true, true, true, true, true, true, true, true, true, true]
 
     expect(checks).toEqual([true, true, true, true, true, true, true, true, true, true, true, true])
+  })
+
+  it('keeps MCP contracts compatible through the preload export', () => {
+    const checks: [
+      McpConfigFilePreloadMatchesContract,
+      McpConfigFileContractMatchesPreload,
+      McpServerPreloadMatchesContract,
+      McpServerContractMatchesPreload,
+      McpConfigWritePreloadMatchesContract,
+      McpConfigWriteContractMatchesPreload,
+      McpToolCallInputPreloadMatchesContract,
+      McpToolCallInputContractMatchesPreload,
+      McpToolCallResultPreloadMatchesContract,
+      McpToolCallResultContractMatchesPreload,
+      McpResourceReadInputPreloadMatchesContract,
+      McpResourceReadInputContractMatchesPreload,
+      McpResourceReadResultPreloadMatchesContract,
+      McpResourceReadResultContractMatchesPreload
+    ] = [true, true, true, true, true, true, true, true, true, true, true, true, true, true]
+
+    expect(checks).toEqual([true, true, true, true, true, true, true, true, true, true, true, true, true, true])
   })
 })

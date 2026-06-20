@@ -1,4 +1,4 @@
-import type { McpServerUserConfig, McpToolStatesUserConfig } from './preload'
+import type { McpServerUserConfig, McpToolStatesUserConfig } from './contracts/mcp'
 import { shouldUseMcpSeedData as runtimeShouldUseMcpSeedData } from './runtimeSwitches'
 
 export const shouldUseMcpSeedData = runtimeShouldUseMcpSeedData

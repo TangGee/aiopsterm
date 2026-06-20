@@ -9,13 +9,15 @@ import type {
   AiMcpResourceAccessActionResult,
   AiMcpToolCallActionInput,
   AiMcpToolCallActionResult,
-  AiopsMutationResult,
+  AiopsMutationResult
+} from '@shared/preload'
+import type {
   McpConfigWriteResult,
   McpResourceReadInput,
   McpResourceReadResult,
   McpToolCallInput,
   McpToolCallResult
-} from '@shared/preload'
+} from '@shared/contracts/mcp'
 
 type SaveDialogOptions = {
   defaultPath: string

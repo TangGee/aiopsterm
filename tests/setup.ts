@@ -26,9 +26,9 @@ import type {
   AiTodoSnapshotResult,
   AiAgentSessionEvent,
   ManagedAiSessionEvent,
-  McpServerUserConfig,
   SshAgentKeychainOption
 } from '@shared/preload'
+import type { McpServerUserConfig } from '@shared/contracts/mcp'
 import type {
   TerminalKeyboardInteractiveRequest,
   TerminalKeyboardInteractiveResult

@@ -5,11 +5,11 @@ import type {
   KnowledgeBaseTransferProgress,
   KnowledgeBaseSearchResult,
   KnowledgeBaseSearchStatus,
-  McpConfigWriteResult,
   SecurityConfigWriteResult,
   UserConfig,
   SkillUserConfig
 } from '@shared/preload'
+import type { McpConfigWriteResult } from '@shared/contracts/mcp'
 import type { FileListEntry } from '@shared/contracts/files'
 import type {
   TerminalCreateOptions,

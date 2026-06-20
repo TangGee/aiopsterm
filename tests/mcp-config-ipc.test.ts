@@ -3,7 +3,8 @@ import type { IpcMain } from 'electron'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import type { KeywordHighlightUserConfig, McpConfigFile, SecurityUserConfig, UserConfig } from '../src/shared/preload'
+import type { KeywordHighlightUserConfig, SecurityUserConfig, UserConfig } from '../src/shared/preload'
+import type { McpConfigFile } from '../src/shared/contracts/mcp'
 
 type IpcHandler = (event: unknown, ...args: any[]) => unknown
 

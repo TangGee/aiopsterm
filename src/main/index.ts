@@ -128,11 +128,6 @@ import type {
   KnowledgeBaseSearchStatus,
   KnowledgeBaseWriteResult,
   KnowledgeBaseUserConfig,
-  McpConfigFile,
-  McpResourceReadInput,
-  McpServerUserConfig,
-  McpToolCallInput,
-  McpToolStatesUserConfig,
   ModelSettingsUserConfig,
   SecurityUserConfig,
   ShortcutUserConfig,
@@ -149,6 +144,7 @@ import type {
   WorkspaceUserConfig,
   UserRuleConfig
 } from '@shared/preload'
+import type { McpConfigFile, McpResourceReadInput, McpServerUserConfig, McpToolCallInput, McpToolStatesUserConfig } from '@shared/contracts/mcp'
 
 if (process.env.NODE_ENV === 'test') {
   app.disableHardwareAcceleration()

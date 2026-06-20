@@ -151,13 +151,6 @@ import type {
   KubernetesResourceKind,
   KubernetesTerminalRecord,
   KubernetesTerminalStatus,
-  McpResourceReadContent,
-  McpResourceReadResult,
-  McpServerUserConfig,
-  McpToolCallContent,
-  McpToolCallResult,
-  McpToolStatesUserConfig,
-  McpConfigFile,
   ModelProviderCheckKey,
   ModelOptionUserConfig,
   ModelSettingsUserConfig,
@@ -186,6 +179,7 @@ import type { FileSessionCatalog, FileSessionFolderRecord, FileSessionFolderSave
 import type { AiopsTrustedDevice, AiopsTrustedDeviceRevokeResult, AiopsUserAccountSnapshot, AiopsUserAvatarPrepareResult, AiopsUserCodeResult, AiopsUserExternalAction, AiopsUserExternalActionResult, AiopsUserMutationResult, AiopsUserProfile } from '@shared/contracts/userAccount'
 import type { ExtensionInstallProgress as BackendExtensionInstallProgress, ExtensionInstallStage, ExtensionPluginOperation, ExtensionPluginRuntimeConfig, ExtensionUserConfig } from '@shared/contracts/extensions'
 import type { QuickCommandGroupConfig, QuickCommandScriptPlan, QuickCommandScriptSegment, QuickCommandSnippetConfig, QuickCommandsUserConfig } from '@shared/contracts/quickCommands'
+import type { McpConfigFile, McpResourceReadContent, McpResourceReadResult, McpServerUserConfig, McpToolCallContent, McpToolCallResult, McpToolStatesUserConfig } from '@shared/contracts/mcp'
 import type {
   AiAgentSessionEvent,
   AiAgentSessionEventName,

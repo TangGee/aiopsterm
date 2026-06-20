@@ -1,6 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'child_process'
+import type { AiopsMutationResult } from '@shared/contracts/common'
 import type {
-  AiopsMutationResult,
   McpConfigFile,
   McpConfigFileServer,
   McpResourceConfig,
@@ -13,7 +13,7 @@ import type {
   McpToolCallResult,
   McpToolConfig,
   McpToolStatesUserConfig
-} from '@shared/preload'
+} from '@shared/contracts/mcp'
 
 type JsonRpcMessage = {
   jsonrpc?: string

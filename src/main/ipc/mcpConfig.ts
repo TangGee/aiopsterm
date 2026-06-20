@@ -3,17 +3,19 @@ import { readFile, writeFile } from 'fs/promises'
 import type {
   KeywordHighlightConfigWriteResult,
   KeywordHighlightUserConfig,
+  SecurityConfigWriteResult,
+  SecurityUserConfig,
+  UserConfig
+} from '@shared/preload'
+import type {
   McpConfigFile,
   McpConfigWriteResult,
   McpResourceReadInput,
   McpResourceReadResult,
   McpServerUserConfig,
   McpToolCallInput,
-  McpToolCallResult,
-  SecurityConfigWriteResult,
-  SecurityUserConfig,
-  UserConfig
-} from '@shared/preload'
+  McpToolCallResult
+} from '@shared/contracts/mcp'
 
 type McpConfigSnapshot = NonNullable<McpConfigWriteResult['data']>
 
