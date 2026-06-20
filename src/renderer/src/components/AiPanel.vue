@@ -1611,8 +1611,6 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, type Component, type ComponentPublicInstance } from 'vue'
 import { Terminal as XtermTerminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
-import { marked } from 'marked'
-import hljs from 'highlight.js'
 import 'highlight.js/styles/atom-one-dark.css'
 import '@xterm/xterm/css/xterm.css'
 import {
@@ -1673,11 +1671,30 @@ import {
   hasSendableAiContent,
   isLocalhostAiContext,
   mergeAdjacentTextContentParts,
-  plainTextForAiContentPart,
   selectedVisibleHostAiContexts,
   splitAiContentInputParts,
   toggleHostAiContextInList
 } from '@/services/aiPanelInputRuntime'
+import {
+  aiPanelChatExportMessage as chatExportMessage,
+  aiPanelMessagePlainText as messagePlainText,
+  applyCommandTextToMessage,
+  canEditCommandMessage,
+  commandHostForMessage,
+  commandHostTooltipForMessage,
+  commandLineCountForMessage,
+  commandLineCountForText,
+  commandOutputLineCount,
+  commandTextForMessage,
+  formatAiPanelLineCount as formatLineCount,
+  isAiPanelCommandSuggestionMessage as isCommandSuggestionMessage,
+  isCommandTerminalActionDisabled,
+  isReadOnlyCommandMessage,
+  normalizedCommandOutputText,
+  renderAiPanelMarkdownParts as renderedMarkdownParts,
+  setAiPanelCommandExecutionState as setCommandExecutionState,
+  type AiPanelCommandSuggestionMessage as CommandSuggestionMessage
+} from '@/services/aiPanelMessageRuntime'
 import { aiChatClient } from '@/services/aiChatClient'
 import { copyTextToClipboard } from '@/services/clipboardRuntime'
 import { codexSessionClient } from '@/services/codexSessionClient'
@@ -1703,11 +1720,10 @@ import type {
   AiImageContentPart,
   AiSkillChipContentPart,
   AiSupportedImageType,
-  ChatMessage,
   ConversationItem,
   TerminalPanel
 } from '@/stores/workspace'
-import type { AiChatExportMessage, AiChatHistoryHostContext, AiCommandCatalogOption, AiContextKind, AiContextOption } from '@shared/contracts/aiChat'
+import type { AiCommandCatalogOption, AiContextKind, AiContextOption } from '@shared/contracts/aiChat'
 import type { VoiceTranscriptionInput } from '@shared/contracts/voice'
 import type { CodexSessionTargetContext } from '@shared/contracts/codexSessions'
 
@@ -2624,231 +2640,6 @@ const chatSearchMatches: ChatSearchMatch[] = []
 const getCurrentConversationTitle = () =>
   workspace.conversations.find((conversation) => conversation.id === workspace.selectedConversationId)?.title || 'Chat Export'
 
-const plainTextForPart = plainTextForAiContentPart
-
-const messagePlainText = (message: { text: string; contentParts?: AiContentPart[] }) =>
-  message.contentParts?.length ? message.contentParts.map((part) => plainTextForPart(part)).join('') : message.text
-
-type RenderedMarkdownPart =
-  | {
-      type: 'html'
-      html: string
-    }
-  | {
-      type: 'code'
-      language: string
-      code: string
-      html: string
-      lineCount: number
-    }
-
-const markdownFencePattern = /```([^\n`]*)\n([\s\S]*?)```/g
-const removedMarkdownTags = new Set(['script', 'style', 'iframe', 'object', 'embed', 'link', 'meta', 'svg', 'math', 'img', 'form', 'input'])
-const allowedMarkdownTags = new Set([
-  'a',
-  'blockquote',
-  'br',
-  'code',
-  'del',
-  'em',
-  'h1',
-  'h2',
-  'h3',
-  'h4',
-  'h5',
-  'h6',
-  'hr',
-  'li',
-  'ol',
-  'p',
-  'pre',
-  's',
-  'span',
-  'strong',
-  'sub',
-  'sup',
-  'table',
-  'tbody',
-  'td',
-  'th',
-  'thead',
-  'tr',
-  'ul'
-])
-const markdownTagAttributes: Record<string, Set<string>> = {
-  a: new Set(['href', 'title']),
-  code: new Set(['class']),
-  span: new Set(['class', 'style']),
-  td: new Set(['style']),
-  th: new Set(['style'])
-}
-const allowedTableAlignments = new Set(['left', 'right', 'center'])
-const markdownClassPattern = /^(hljs|hljs-[a-z0-9_-]+|language-[a-z0-9_-]+)$/i
-const renderedMarkdownCache = new Map<string, RenderedMarkdownPart[]>()
-const renderedMarkdownCacheLimit = 80
-
-const escapeHtml = (value: string) =>
-  value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;')
-
-const normalizeCodeLanguage = (value: string) => {
-  const raw = value.trim().replace(/^\{?\.?/, '').replace(/\}?$/, '')
-  const language = raw.split(/\s+/)[0]?.toLowerCase() || ''
-  if (language === 'sh' || language === 'shell' || language === 'zsh') return 'bash'
-  if (language === 'plaintext' || language === 'plain') return 'text'
-  return language
-}
-
-const countLines = (value: string) => (value ? value.replace(/\r\n/g, '\n').split('\n').length : 0)
-
-const formatLineCount = (count: number) => `${Math.max(1, count)} line${Math.max(1, count) === 1 ? '' : 's'}`
-
-const isSafeMarkdownHref = (value: string) => /^(https?:|mailto:|#)/i.test(value.trim())
-
-const sanitizeStyle = (value: string) => {
-  const declarations = value
-    .split(';')
-    .map((entry) => entry.trim())
-    .filter(Boolean)
-  const safeDeclarations = declarations.filter((entry) => {
-    const [property, rawValue] = entry.split(':').map((part) => part.trim().toLowerCase())
-    return property === 'text-align' && allowedTableAlignments.has(rawValue)
-  })
-  return safeDeclarations.join('; ')
-}
-
-const sanitizeClassValue = (value: string) =>
-  value
-    .split(/\s+/)
-    .map((entry) => entry.trim())
-    .filter((entry) => markdownClassPattern.test(entry))
-    .join(' ')
-
-const sanitizeMarkdownElement = (element: Element) => {
-  const tag = element.tagName.toLowerCase()
-  if (removedMarkdownTags.has(tag)) {
-    element.remove()
-    return
-  }
-  if (!allowedMarkdownTags.has(tag)) {
-    element.replaceWith(...Array.from(element.childNodes))
-    return
-  }
-
-  const allowedAttrs = markdownTagAttributes[tag] || new Set<string>()
-  for (const attr of Array.from(element.attributes)) {
-    const name = attr.name.toLowerCase()
-    const value = attr.value
-    if (name.startsWith('on') || !allowedAttrs.has(name)) {
-      element.removeAttribute(attr.name)
-      continue
-    }
-    if (name === 'href') {
-      if (!isSafeMarkdownHref(value)) {
-        element.removeAttribute(attr.name)
-      }
-    } else if (name === 'style') {
-      const cleanStyle = sanitizeStyle(value)
-      if (cleanStyle) element.setAttribute('style', cleanStyle)
-      else element.removeAttribute(attr.name)
-    } else if (name === 'class') {
-      const cleanClass = sanitizeClassValue(value)
-      if (cleanClass) element.setAttribute('class', cleanClass)
-      else element.removeAttribute(attr.name)
-    }
-  }
-
-  if (tag === 'a') {
-    const href = element.getAttribute('href')
-    if (href && isSafeMarkdownHref(href)) {
-      element.setAttribute('target', '_blank')
-      element.setAttribute('rel', 'noreferrer')
-    }
-  }
-}
-
-const sanitizeMarkdownHtml = (html: string) => {
-  const parser = new DOMParser()
-  const doc = parser.parseFromString(html, 'text/html')
-  for (const element of Array.from(doc.body.querySelectorAll('*'))) {
-    sanitizeMarkdownElement(element)
-  }
-  return doc.body.innerHTML
-}
-
-const renderMarkdownHtml = (text: string) => {
-  if (!text.trim()) return ''
-  const html = marked.parse(text, { async: false, gfm: true, breaks: false }) as string
-  return sanitizeMarkdownHtml(html)
-}
-
-const highlightCodeHtml = (code: string, language: string) => {
-  const normalizedLanguage = normalizeCodeLanguage(language)
-  if (!code) return ''
-  try {
-    if (normalizedLanguage && normalizedLanguage !== 'text' && hljs.getLanguage(normalizedLanguage)) {
-      return sanitizeMarkdownHtml(hljs.highlight(code, { language: normalizedLanguage, ignoreIllegals: true }).value)
-    }
-    if (!normalizedLanguage) {
-      return sanitizeMarkdownHtml(hljs.highlightAuto(code).value)
-    }
-  } catch {
-    return escapeHtml(code)
-  }
-  return escapeHtml(code)
-}
-
-const setRenderedMarkdownCache = (key: string, parts: RenderedMarkdownPart[]) => {
-  if (renderedMarkdownCache.size >= renderedMarkdownCacheLimit) {
-    const firstKey = renderedMarkdownCache.keys().next().value
-    if (firstKey) renderedMarkdownCache.delete(firstKey)
-  }
-  renderedMarkdownCache.set(key, parts)
-}
-
-const renderedMarkdownParts = (text: string): RenderedMarkdownPart[] => {
-  const cached = renderedMarkdownCache.get(text)
-  if (cached) return cached
-  const parts: RenderedMarkdownPart[] = []
-  let lastIndex = 0
-  markdownFencePattern.lastIndex = 0
-  for (const match of text.matchAll(markdownFencePattern)) {
-    const matchIndex = match.index ?? 0
-    const markdownText = text.slice(lastIndex, matchIndex)
-    const html = renderMarkdownHtml(markdownText)
-    if (html) parts.push({ type: 'html', html })
-    const language = normalizeCodeLanguage(match[1] || '')
-    const code = (match[2] || '').replace(/\n$/, '')
-    parts.push({
-      type: 'code',
-      language,
-      code,
-      html: highlightCodeHtml(code, language),
-      lineCount: countLines(code)
-    })
-    lastIndex = matchIndex + match[0].length
-  }
-
-  const tailHtml = renderMarkdownHtml(text.slice(lastIndex))
-  if (tailHtml) parts.push({ type: 'html', html: tailHtml })
-  if (!parts.length && text) parts.push({ type: 'html', html: sanitizeMarkdownHtml(`<p>${escapeHtml(text)}</p>`) })
-  setRenderedMarkdownCache(text, parts)
-  return parts
-}
-
-const normalizedCommandOutputText = (text: string) => {
-  const trimmed = text.trim()
-  const fenced = trimmed.match(/^```[^\n`]*\n([\s\S]*?)\n?```$/)
-  if (fenced) return fenced[1].replace(/\n$/, '')
-  return text
-}
-
-const commandOutputLineCount = (text: string) => countLines(normalizedCommandOutputText(text))
-
 const copyRenderedTextToClipboard = async (text: string, label: string) => {
   if (!text) {
     showChatExportNotice(`${label}为空，无法复制。`)
@@ -2857,41 +2648,6 @@ const copyRenderedTextToClipboard = async (text: string, label: string) => {
   const copied = await copyTextToClipboard(text)
   showChatExportNotice(copied ? `${label}已复制。` : '复制失败。')
 }
-
-const chatExportHosts = (message: Pick<ChatMessage, 'hosts'>): AiChatHistoryHostContext[] | undefined => {
-  const hosts = message.hosts
-    ?.filter((host) => host.kind === 'hosts' && host.label.trim())
-    .map((host) => ({
-      id: host.id,
-      kind: 'hosts' as const,
-      label: host.label,
-      detail: host.detail
-    }))
-  return hosts?.length ? hosts : undefined
-}
-
-const chatExportMessage = (message: ChatMessage): AiChatExportMessage => ({
-  id: message.id,
-  role: message.role,
-  text: message.text,
-  contentParts: message.contentParts,
-  hosts: chatExportHosts(message),
-  state: message.state,
-  favorite: message.favorite,
-  feedback: message.feedback,
-  executedCommand: message.executedCommand,
-  commandExecutionStatus: message.commandExecutionStatus,
-  commandExecutionMessage: message.commandExecutionMessage,
-  ask: message.ask,
-  say: message.say,
-  action: message.action,
-  commandExecution: message.commandExecution,
-  mcpToolCall: message.mcpToolCall,
-  mcpResourceAccess: message.mcpResourceAccess,
-  followupOptions: message.followupOptions ? [...message.followupOptions] : undefined,
-  selectedOption: message.selectedOption,
-  partial: message.partial
-})
 
 const showChatExportNotice = (message: string) => {
   chatExportNotice.value = message
@@ -2912,67 +2668,13 @@ const copyMessageToClipboard = async (message: { text: string; contentParts?: Ai
   showChatExportNotice(copied ? '消息已复制。' : '复制失败。')
 }
 
-type CommandSuggestionMessage = {
-  id: string
-  role: string
-  contentParts?: AiContentPart[]
-  text: string
-  state?: string
-  ask?: string
-  action?: ChatMessage['action']
-  commandExecution?: {
-    ip?: string
-    command: string
-    requiresApproval?: boolean
-    interactive?: boolean
-  }
-  executedCommand?: string
-  commandExecutionStatus?: ChatMessage['commandExecutionStatus']
-  commandExecutionMessage?: string
-}
-
-const isCommandSuggestionMessage = (message: CommandSuggestionMessage) => {
-  if (message.role !== 'assistant' || message.state === 'streaming') return false
-  if (message.ask === 'command' && message.commandExecution?.command.trim()) return true
-  return Boolean(message.contentParts?.some((part) => part.type === 'chip' && part.chipType === 'command') || message.text.trim().startsWith('/'))
-}
-
 const activeCommandAuditMessage = computed(() => {
   if (!commandAuditDialog.value.open || !commandAuditDialog.value.messageId) return null
   const message = workspace.chatMessages.find((item) => item.id === commandAuditDialog.value.messageId)
   return message && isCommandSuggestionMessage(message) ? (message as CommandSuggestionMessage) : null
 })
 
-const commandChipTextForMessage = (message: { contentParts?: AiContentPart[] }) => {
-  const commandPart = message.contentParts?.find((part): part is AiCommandChipContentPart => part.type === 'chip' && part.chipType === 'command')
-  return commandPart?.ref.command.trim() || ''
-}
-
-const commandTextForMessage = (message: { text: string; contentParts?: AiContentPart[]; commandExecution?: { command: string } }) =>
-  message.commandExecution?.command.trim() || commandChipTextForMessage(message) || messagePlainText(message).trim()
-
-const commandLineCountForText = (text: string) => text.split(/\r?\n/).filter((line) => line.trim()).length || 1
-
-const commandLineCountForMessage = (message: CommandSuggestionMessage) => commandLineCountForText(commandTextForMessage(message))
-
-const isReadOnlyCommandMessage = (message: CommandSuggestionMessage) => message.commandExecution?.requiresApproval === false && message.commandExecution.interactive !== true
-
-const isCommandTerminalActionDisabled = (message: CommandSuggestionMessage) =>
-  message.commandExecutionStatus === 'running' || message.commandExecutionStatus === 'succeeded' || message.action === 'rejected'
-
-const canEditCommandMessage = (message: CommandSuggestionMessage | null) => Boolean(message && message.commandExecutionStatus !== 'running')
-
 const canEditActiveCommandAudit = computed(() => canEditCommandMessage(activeCommandAuditMessage.value))
-
-const commandHostForMessage = (message: { commandExecution?: { ip?: string } }) => {
-  const ip = message.commandExecution?.ip?.trim()
-  return ip ? `Host ${ip}` : ''
-}
-
-const commandHostTooltipForMessage = (message: { commandExecution?: { ip?: string } }) => {
-  const ip = message.commandExecution?.ip?.trim()
-  return ip ? `目标主机：${ip}` : ''
-}
 
 const scrollChatToBottom = () => {
   const root = chatScrollRef.value
@@ -3016,48 +2718,6 @@ const openCommandAuditDialog = async (message: CommandSuggestionMessage) => {
   commandAuditTextareaRef.value?.select()
 }
 
-const updateCommandChipParts = (parts: AiContentPart[] | undefined, command: string) => {
-  let updated = false
-  const nextParts = parts?.map((part) => {
-    if (part.type === 'chip' && part.chipType === 'command') {
-      updated = true
-      return {
-        ...part,
-        ref: {
-          ...part.ref,
-          command,
-          label: part.ref.label === part.ref.command ? command : part.ref.label
-        }
-      }
-    }
-    return part
-  })
-  return updated ? nextParts : parts
-}
-
-const applyCommandTextToMessage = (message: CommandSuggestionMessage, command: string) => {
-  const trimmed = command.trim()
-  if (!trimmed) return false
-  if (message.commandExecution) {
-    message.commandExecution.command = trimmed
-  } else if (message.contentParts?.some((part) => part.type === 'chip' && part.chipType === 'command')) {
-    message.contentParts = updateCommandChipParts(message.contentParts, trimmed)
-    message.text = trimmed
-  } else {
-    message.text = trimmed
-  }
-  const wasRejected = message.action === 'rejected'
-  if (wasRejected) {
-    message.action = undefined
-  }
-  if ((message.commandExecutionStatus && message.commandExecutionStatus !== 'running') || wasRejected) {
-    message.commandExecutionStatus = undefined
-    message.commandExecutionMessage = undefined
-    message.executedCommand = undefined
-  }
-  return true
-}
-
 const saveCommandAuditDraft = (options: { silent?: boolean } = {}) => {
   const message = activeCommandAuditMessage.value
   if (!message) return false
@@ -3088,17 +2748,6 @@ const runCommandAuditDraft = async () => {
   if (!saveCommandAuditDraft({ silent: true })) return
   closeCommandAuditDialog()
   await runMessageCommand(message)
-}
-
-const setCommandExecutionState = (
-  message: CommandSuggestionMessage,
-  status: NonNullable<ChatMessage['commandExecutionStatus']>,
-  text: string,
-  executedCommand?: string
-) => {
-  message.commandExecutionStatus = status
-  message.commandExecutionMessage = text
-  if (executedCommand) message.executedCommand = executedCommand
 }
 
 const persistCommandExecutionState = () => {
@@ -3197,7 +2846,7 @@ const runMessageCommand = async (message: CommandSuggestionMessage, options: { a
   showChatExportNotice(loopResult.reason)
 }
 
-const formatMcpToolArguments = (message: Pick<ChatMessage, 'mcpToolCall'>) => {
+const formatMcpToolArguments = (message: { mcpToolCall?: { arguments?: Record<string, unknown> } }) => {
   try {
     return JSON.stringify(message.mcpToolCall?.arguments || {}, null, 2)
   } catch {
