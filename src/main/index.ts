@@ -1,12 +1,10 @@
 import { app, BrowserWindow, Notification, dialog, ipcMain, net, protocol, shell, type IpcMainEvent } from 'electron'
-import { basename, dirname, extname, isAbsolute, join, posix, relative, resolve, sep } from 'path'
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'path'
 import { pathToFileURL } from 'url'
 import { randomUUID } from 'crypto'
-import { existsSync, watch } from 'fs'
-import type { FSWatcher } from 'fs'
-import { access, cp, mkdir, readFile, readdir, rename, rm, stat, unlink, writeFile } from 'fs/promises'
+import { existsSync } from 'fs'
+import { stat } from 'fs/promises'
 import Store from 'electron-store'
-import AdmZip from 'adm-zip'
 import { getAsset, getAssetSecret, getKeychainSecret, refreshOrganizationAssets, saveAsset } from './backend/assets'
 import { formatMcpResourceReadContent } from './backend/aiChat'
 import {
@@ -42,9 +40,11 @@ import {
   shouldUseE2eDialogFixtures,
 } from '@shared/runtimeSwitches'
 import { normalizeExternalHttpUrl } from '@shared/externalUrl'
-import { callMcpTool, clearMcpRuntimeClientCache, discoverMcpServerSnapshot, readMcpResource } from './backend/mcpRuntime'
 import { normalizeConfigModelName, normalizeConfigModelProvider } from './backend/configBoundary'
+import { createKnowledgeBaseRuntime } from './backend/knowledgeBaseRuntime'
 import { createLocalTerminalSession, type LocalTerminalSession } from './backend/localTerminal'
+import { createSettingsConfigRuntime } from './backend/settingsConfigRuntime'
+import { createSkillsRuntime } from './backend/skillsRuntime'
 import {
   closeControlSocketServer,
   ensureControlSocketServer,
@@ -97,15 +97,11 @@ import {
   type AiopstermDeepLinkPayload
 } from '@shared/deepLink'
 import {
-  DEFAULT_KNOWLEDGE_INTERFACE_IMAGE_REL_PATH,
-  defaultKnowledgeBaseConfig,
-  defaultKnowledgeSeedTree,
-  getDefaultKnowledgeSeedFile,
-  shouldUseKnowledgeSeedData
+  defaultKnowledgeBaseConfig
 } from '@shared/knowledgeBaseSeed'
 import { defaultModelSettingsConfig } from '@shared/modelSettingsSeed'
 import { defaultSettingsRulesConfig } from '@shared/settingsPreferencesSeed'
-import { defaultSkillSeedData, defaultSkillsConfig, shouldUseSkillSeedData } from '@shared/skillsSeed'
+import { defaultSkillsConfig } from '@shared/skillsSeed'
 import { defaultWorkspacePreferencesConfig } from '@shared/workspacePreferencesSeed'
 import type { CodexSessionCreateOptions, CodexSessionLifecycleEvent } from '@shared/contracts/codexSessions'
 import type {
@@ -128,29 +124,13 @@ import type {
   WorkspaceUserConfig
 } from '@shared/contracts/appRuntime'
 import type { UserConfig } from '@shared/contracts/userConfig'
-import type { McpConfigFile, McpResourceReadInput, McpServerUserConfig, McpToolCallInput, McpToolStatesUserConfig } from '@shared/contracts/mcp'
+import type { McpConfigFile, McpServerUserConfig, McpToolStatesUserConfig } from '@shared/contracts/mcp'
 import type { ShortcutUserConfig, UserRuleConfig } from '@shared/contracts/settingsPreferences'
 import type {
-  KnowledgeBaseCreateResult,
-  KnowledgeBaseDeleteResult,
-  KnowledgeBaseEntry,
-  KnowledgeBaseImportResult,
   KnowledgeBaseNodeConfig,
-  KnowledgeBaseSearchResult,
-  KnowledgeBaseSearchStatus,
-  KnowledgeBaseTransferProgress,
-  KnowledgeBaseUserConfig,
-  KnowledgeBaseWriteResult
+  KnowledgeBaseUserConfig
 } from '@shared/contracts/knowledgeBase'
-import type {
-  SkillDeleteResult,
-  SkillEnabledResult,
-  SkillExportResult,
-  SkillImportResult,
-  SkillMetadataConfig,
-  SkillUserConfig,
-  SkillWriteResult
-} from '@shared/contracts/skills'
+import type { SkillUserConfig } from '@shared/contracts/skills'
 
 if (process.env.NODE_ENV === 'test') {
   app.disableHardwareAcceleration()
@@ -371,11 +351,6 @@ const store = new Store<{ config: UserConfig }>({
 const sessions = new Map<string, TerminalSession>()
 let mainWindow: BrowserWindow | null = null
 const pendingDeepLinks: AiopstermDeepLinkPayload[] = []
-let securityConfigWatcher: FSWatcher | null = null
-let keywordHighlightConfigWatcher: FSWatcher | null = null
-let mcpConfigWatcher: FSWatcher | null = null
-let skillsWatchers: FSWatcher[] = []
-let skillsWatcherDebounce: NodeJS.Timeout | null = null
 
 const sendTerminalExit = (owner: BrowserWindow, lifecycle: TerminalLifecycleEvent, code = lifecycle.code ?? null) => {
   sendWindowEvent(owner, 'terminal:exit', {
@@ -616,71 +591,6 @@ const cloneRules = (rules?: UserRuleConfig[]): UserRuleConfig[] | undefined =>
 
 const cloneSkills = (skills?: SkillUserConfig[]): SkillUserConfig[] | undefined =>
   skills?.map((skill) => ({ ...skill }))
-
-const isEditableSkill = (skill: SkillUserConfig) => {
-  if (!skill.path) return skill.editable
-  const userRoot = resolve(getSkillsUserPath())
-  const skillPath = resolve(skill.path)
-  return skillPath === userRoot || skillPath.startsWith(`${userRoot}${sep}`)
-}
-
-const normalizeSkillNameForDirectory = (name: string) =>
-  name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-|-$/g, '') || 'skill'
-
-const parseSkillYamlValue = (value: string): string => {
-  const trimmed = value.trim()
-  if ((trimmed.startsWith('"') && trimmed.endsWith('"')) || (trimmed.startsWith("'") && trimmed.endsWith("'"))) {
-    return trimmed.slice(1, -1)
-  }
-  return trimmed
-}
-
-const parseSkillFrontmatter = (content: string): { metadata: Partial<SkillMetadataConfig>; body: string } => {
-  const normalized = content.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
-  const match = normalized.match(/^---[ \t]*\n([\s\S]*?)\n---[ \t]*\n?([\s\S]*)$/)
-  if (!match) {
-    const heading = normalized.match(/^#\s+(.+)$/m)
-    const paragraph = normalized.match(/^#.+\n+([^#\n][^\n]+)/m)
-    return {
-      metadata: {
-        ...(heading ? { name: heading[1].trim() } : {}),
-        ...(paragraph ? { description: paragraph[1].trim() } : {})
-      },
-      body: normalized.trim()
-    }
-  }
-  const metadata: Partial<SkillMetadataConfig> = {}
-  match[1].split('\n').forEach((line) => {
-    const colonIndex = line.indexOf(':')
-    if (colonIndex === -1) return
-    const key = line.slice(0, colonIndex).trim()
-    const value = parseSkillYamlValue(line.slice(colonIndex + 1))
-    if (key === 'name' || key === 'description') {
-      metadata[key] = value
-    }
-  })
-  return {
-    metadata,
-    body: match[2].trim()
-  }
-}
-
-const validateSkillMetadata = (metadata: Partial<SkillMetadataConfig>) => {
-  const name = typeof metadata.name === 'string' ? metadata.name.trim() : ''
-  const description = typeof metadata.description === 'string' ? metadata.description.trim() : ''
-  if (!name || !description) {
-    throw new Error('Skill metadata requires name and description')
-  }
-  return { name, description }
-}
-
-const buildSkillFile = (metadata: SkillMetadataConfig, content: string) => {
-  const safeDescription = metadata.description.replace(/\r?\n/g, ' ')
-  return `---\nname: ${metadata.name}\ndescription: ${safeDescription}\n---\n\n${content.trim()}\n`
-}
 
 const cloneMcpServers = (servers?: McpServerUserConfig[]): McpServerUserConfig[] | undefined =>
   servers?.map((server) => ({
@@ -1173,6 +1083,37 @@ const mergeConfig = (base: UserConfig, patch: Partial<UserConfig> = {}): UserCon
 
 const getConfig = (): UserConfig => mergeConfig(defaultConfig, store.get('config'))
 
+const skillsRuntime = createSkillsRuntime({
+  userDataPath: () => app.getPath('userData'),
+  getSkillsSnapshot: () => getConfig().skills || [],
+  saveSkillsSnapshot: (skills) => store.set('config', mergeConfig(getConfig(), { skills })),
+  broadcastWindows: () => BrowserWindow.getAllWindows()
+})
+
+const knowledgeBaseRuntime = createKnowledgeBaseRuntime({
+  userDataPath: () => app.getPath('userData'),
+  getConfig,
+  defaultKnowledgeBase: defaultKnowledgeBaseUserConfig,
+  saveKnowledgeBase: (knowledgeBase) => store.set('config', mergeConfig(getConfig(), { knowledgeBase }))
+})
+
+const settingsConfigRuntime = createSettingsConfigRuntime({
+  userDataPath: () => app.getPath('userData'),
+  getConfig,
+  saveConfig: (config) => store.set('config', config),
+  mergeConfig,
+  normalizeSecurityConfig,
+  normalizeKeywordHighlightConfig,
+  normalizeMcpConfigFile,
+  mcpConfigFromUserConfig,
+  cloneMcpServers,
+  cloneMcpToolStates,
+  defaultSecurityConfig,
+  defaultKeywordHighlightConfig,
+  appVersion: () => app.getVersion(),
+  getWindows: () => BrowserWindow.getAllWindows()
+})
+
 const terminalTypeOptions = new Set(['xterm', 'xterm-256color', 'vt100', 'vt102', 'vt220', 'vt320', 'linux', 'scoansi', 'ansi'])
 
 const normalizeTerminalType = (value: unknown, fallback: string) => {
@@ -1180,14 +1121,6 @@ const normalizeTerminalType = (value: unknown, fallback: string) => {
   return terminalTypeOptions.has(terminalType) ? terminalType : fallback
 }
 
-const getSecurityConfigPath = () => join(app.getPath('userData'), 'security-config.json')
-const getKeywordHighlightConfigPath = () => join(app.getPath('userData'), 'keyword-highlight.json')
-const getMcpConfigPath = () => join(app.getPath('userData'), 'setting', 'mcp_settings.json')
-const getSkillsUserPath = () => join(app.getPath('userData'), 'skills')
-const getSkillsInitMarkerPath = () => join(getSkillsUserPath(), '.aiopsterm-skills-initialized')
-const getSkillFilePath = (skillDirName: string) => join(getSkillsUserPath(), skillDirName, 'SKILL.md')
-const getKnowledgeBasePath = () => join(app.getPath('userData'), 'knowledgebase')
-const getKnowledgeBaseInitMarkerPath = () => join(getKnowledgeBasePath(), '.aiopsterm-knowledge-initialized')
 const getChatAttachmentsPath = () => join(app.getPath('userData'), 'chat-attachments')
 const getCustomBackgroundsPath = () => join(app.getPath('userData'), 'backgrounds')
 const getLogDirPath = () => join(app.getPath('userData'), 'logs')
@@ -1203,898 +1136,15 @@ const settingsExternalActionRuntime = () => ({
   skipOpen: shouldUseE2eDialogFixtures()
 })
 
-const blockedKnowledgeImportExtensions = new Set([
-  '.exe',
-  '.msi',
-  '.bat',
-  '.cmd',
-  '.ps1',
-  '.sh',
-  '.app',
-  '.dmg',
-  '.pkg',
-  '.deb',
-  '.rpm',
-  '.zip',
-  '.rar',
-  '.7z',
-  '.tar',
-  '.gz',
-  '.tgz',
-  '.bz2',
-  '.xz',
-  '.iso',
-  '.bin',
-  '.dll',
-  '.so',
-  '.dylib',
-  '.jar',
-  '.class',
-  '.pyc',
-  '.o',
-  '.a',
-  '.lib',
-  '.db',
-  '.sqlite',
-  '.sqlite3'
-])
-
-const knowledgeImageExtensions = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg'])
-const knowledgeSearchExtensions = new Set([
-  '.md',
-  '.markdown',
-  '.txt',
-  '.log',
-  '.json',
-  '.jsonc',
-  '.yaml',
-  '.yml',
-  '.toml',
-  '.ini',
-  '.conf',
-  '.cfg',
-  '.csv',
-  '.tsv',
-  '.sql',
-  '.sh',
-  '.bash',
-  '.zsh',
-  '.py',
-  '.js',
-  '.ts',
-  '.go',
-  '.rs',
-  '.java',
-  '.c',
-  '.cpp',
-  '.h',
-  '.html',
-  '.css',
-  '.xml'
-])
-const maxKnowledgeImportBytes = 10 * 1024 * 1024
-const maxKnowledgeSearchFileBytes = 2 * 1024 * 1024
-const maxKnowledgeSearchQueryLength = 512
-
-const normalizeKnowledgeRelPath = (relPath: string) => relPath.replace(/\\/g, '/').replace(/^\/+/, '')
-
-type KnowledgeSearchChunk = {
-  id: string
-  path: string
-  startLine: number
-  endLine: number
-  text: string
-  normalizedText: string
-  tokens: string[]
-}
-
-type KnowledgeSearchIndex = {
-  chunks: KnowledgeSearchChunk[]
-  status: KnowledgeBaseSearchStatus
-}
-
-let knowledgeSearchIndex: KnowledgeSearchIndex | null = null
-
-const invalidateKnowledgeSearchIndex = () => {
-  knowledgeSearchIndex = null
-}
-
-const isSafeKnowledgeBasename = (name: string) => {
-  if (!name || name === '.' || name === '..') return false
-  return !name.includes('/') && !name.includes('\\')
-}
-
-const resolveKnowledgePath = (relPath: string) => {
-  const normalized = normalizeKnowledgeRelPath(relPath || '')
-  if (isAbsolute(relPath) || /^[a-zA-Z]:/.test(relPath)) {
-    throw new Error('Absolute path not allowed')
-  }
-  const rootAbs = resolve(getKnowledgeBasePath())
-  const absPath = resolve(rootAbs, normalized)
-  if (absPath !== rootAbs && !absPath.startsWith(`${rootAbs}${sep}`)) {
-    throw new Error('Path escapes knowledgebase root')
-  }
-  return { rootAbs, absPath, relPath: normalized }
-}
-
-const pathExists = async (absPath: string) => {
-  try {
-    await access(absPath)
-    return true
-  } catch {
-    return false
-  }
-}
-
-const splitNameExt = (fileName: string) => {
-  const ext = extname(fileName)
-  return { base: ext ? fileName.slice(0, -ext.length) : fileName, ext }
-}
-
-const ensureUniqueKnowledgeName = async (dirAbs: string, desiredName: string) => {
-  const { base, ext } = splitNameExt(desiredName)
-  let candidate = desiredName
-  let index = 1
-  while (await pathExists(join(dirAbs, candidate))) {
-    candidate = `${base} (${index})${ext}`
-    index += 1
-  }
-  return candidate
-}
-
-const knowledgeMutationEntry = async (relPath: string, absPath: string): Promise<KnowledgeBaseCreateResult> => {
-  const metadata = await stat(absPath)
-  if (metadata.isDirectory()) {
-    return {
-      relPath,
-      type: 'dir',
-      mtimeMs: metadata.mtimeMs
-    }
-  }
-  if (!metadata.isFile()) throw new Error('Knowledge target is not a file or directory')
-  return {
-    relPath,
-    type: 'file',
-    size: metadata.size,
-    mtimeMs: metadata.mtimeMs
-  }
-}
-
-const knowledgeWriteResult = async (relPath: string, absPath: string, expectedBytes: number): Promise<KnowledgeBaseWriteResult> => {
-  const entry = await knowledgeMutationEntry(relPath, absPath)
-  if (entry.type !== 'file') throw new Error('Knowledge write target is not a file')
-  if (entry.size !== expectedBytes) throw new Error('Knowledge write size does not match content byte count')
-  return {
-    relPath: entry.relPath,
-    type: 'file',
-    size: entry.size,
-    bytes: expectedBytes,
-    mtimeMs: entry.mtimeMs
-  }
-}
-
-const knowledgeDeletedResult = async (relPath: string, type: 'file' | 'dir', absPath: string): Promise<KnowledgeBaseDeleteResult> => {
-  if (await pathExists(absPath)) throw new Error('Knowledge delete target still exists')
-  return {
-    success: true,
-    relPath,
-    type,
-    deleted: true
-  }
-}
-
-const getKnowledgeMimeType = (relPath: string) => {
-  const ext = extname(relPath).toLowerCase()
-  const mimeTypes: Record<string, string> = {
-    '.png': 'image/png',
-    '.jpg': 'image/jpeg',
-    '.jpeg': 'image/jpeg',
-    '.gif': 'image/gif',
-    '.webp': 'image/webp',
-    '.bmp': 'image/bmp',
-    '.svg': 'image/svg+xml'
-  }
-  return mimeTypes[ext] || 'application/octet-stream'
-}
-
-const isKnowledgeSearchableFile = (relPath: string, size: number) => {
-  const ext = extname(relPath).toLowerCase()
-  return size <= maxKnowledgeSearchFileBytes && knowledgeSearchExtensions.has(ext)
-}
-
-const normalizeKnowledgeSearchText = (value: string) => value.toLowerCase().normalize('NFKC')
-
-const tokenizeKnowledgeSearch = (value: string) =>
-  Array.from(new Set(normalizeKnowledgeSearchText(value).match(/[\p{L}\p{N}_-]+/gu) || [])).filter((token) => token.length > 1)
-
-const createKnowledgeSearchSnippet = (text: string, queryTokens: string[]) => {
-  const compact = text
-    .replace(/\r\n/g, '\n')
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .join('\n')
-  if (!compact) return ''
-  const normalized = normalizeKnowledgeSearchText(compact)
-  const firstMatch = queryTokens.reduce((best, token) => {
-    const index = normalized.indexOf(token)
-    return index === -1 ? best : Math.min(best, index)
-  }, Number.POSITIVE_INFINITY)
-  if (!Number.isFinite(firstMatch)) return compact.slice(0, 260)
-  const start = Math.max(0, firstMatch - 80)
-  const end = Math.min(compact.length, firstMatch + 180)
-  return `${start > 0 ? '...' : ''}${compact.slice(start, end)}${end < compact.length ? '...' : ''}`
-}
-
-const chunkKnowledgeSearchText = (relPath: string, content: string): KnowledgeSearchChunk[] => {
-  const lines = content.replace(/\r\n/g, '\n').split('\n')
-  const chunks: KnowledgeSearchChunk[] = []
-  const maxLines = 36
-  const overlapLines = 6
-  for (let start = 0; start < lines.length; start += maxLines - overlapLines) {
-    const slice = lines.slice(start, start + maxLines)
-    const text = slice.join('\n').trim()
-    if (!text) continue
-    chunks.push({
-      id: `${relPath}:${start + 1}`,
-      path: relPath,
-      startLine: start + 1,
-      endLine: Math.min(lines.length, start + slice.length),
-      text,
-      normalizedText: normalizeKnowledgeSearchText(text),
-      tokens: tokenizeKnowledgeSearch(text)
-    })
-    if (start + maxLines >= lines.length) break
-  }
-  return chunks
-}
-
-const walkKnowledgeSearchFiles = async (relDir = ''): Promise<Array<{ relPath: string; size: number }>> => {
-  const files: Array<{ relPath: string; size: number }> = []
-  const entries = await listKnowledgeDir(relDir)
-  for (const entry of entries) {
-    if (entry.type === 'dir') {
-      files.push(...(await walkKnowledgeSearchFiles(entry.relPath)))
-    } else if (isKnowledgeSearchableFile(entry.relPath, entry.size || 0)) {
-      files.push({ relPath: entry.relPath, size: entry.size || 0 })
-    }
-  }
-  return files
-}
-
-const buildKnowledgeSearchIndex = async (): Promise<KnowledgeSearchIndex> => {
-  await ensureKnowledgeBaseDirectory()
-  const files = await walkKnowledgeSearchFiles('')
-  const chunks: KnowledgeSearchChunk[] = []
-  for (const file of files) {
-    const { absPath } = resolveKnowledgePath(file.relPath)
-    try {
-      const content = await readFile(absPath, 'utf-8')
-      chunks.push(...chunkKnowledgeSearchText(file.relPath, content))
-    } catch {
-      // Ignore unreadable/binary-like text files; the tree and editor read paths still surface file errors.
-    }
-  }
-  return {
-    chunks,
-    status: {
-      totalFiles: files.length,
-      totalChunks: chunks.length,
-      provider: 'aiopsterm-local',
-      model: 'lexical',
-      updatedAt: Date.now()
-    }
-  }
-}
-
-const getKnowledgeSearchIndex = async () => {
-  if (!knowledgeSearchIndex) {
-    knowledgeSearchIndex = await buildKnowledgeSearchIndex()
-  }
-  return knowledgeSearchIndex
-}
-
-const scoreKnowledgeChunk = (chunk: KnowledgeSearchChunk, query: string, queryTokens: string[]) => {
-  const normalizedQuery = normalizeKnowledgeSearchText(query)
-  let matchCount = 0
-  let score = 0
-  if (chunk.normalizedText.includes(normalizedQuery)) {
-    matchCount += 1
-    score += 1.5
-  }
-  for (const token of queryTokens) {
-    const occurrences = chunk.normalizedText.split(token).length - 1
-    if (occurrences <= 0) continue
-    matchCount += occurrences
-    score += Math.min(occurrences, 4) * (chunk.tokens.includes(token) ? 0.55 : 0.3)
-  }
-  const fileName = normalizeKnowledgeSearchText(basename(chunk.path))
-  if (queryTokens.some((token) => fileName.includes(token))) {
-    score += 0.35
-  }
-  return { score, matchCount }
-}
-
-const searchKnowledgeIndex = async (query: string, options?: { maxResults?: number; minScore?: number }): Promise<KnowledgeBaseSearchResult[]> => {
-  const normalizedQuery = typeof query === 'string' ? query.trim() : ''
-  if (!normalizedQuery || normalizedQuery.length > maxKnowledgeSearchQueryLength) return []
-  const queryTokens = tokenizeKnowledgeSearch(normalizedQuery)
-  if (!queryTokens.length) return []
-  const maxResults = Math.min(Math.max(Math.floor(options?.maxResults || 20), 1), 50)
-  const minScore = Math.max(options?.minScore ?? 0.15, 0)
-  const index = await getKnowledgeSearchIndex()
-  return index.chunks
-    .map((chunk) => {
-      const scored = scoreKnowledgeChunk(chunk, normalizedQuery, queryTokens)
-      return {
-        path: chunk.path,
-        startLine: chunk.startLine,
-        endLine: chunk.endLine,
-        score: Number(scored.score.toFixed(4)),
-        snippet: createKnowledgeSearchSnippet(chunk.text, queryTokens),
-        matchCount: scored.matchCount
-      }
-    })
-    .filter((result) => result.score >= minScore && result.matchCount > 0)
-    .sort((a, b) => b.score - a.score || a.path.localeCompare(b.path) || a.startLine - b.startLine)
-    .slice(0, maxResults)
-}
-
-const ensureKnowledgeSeedNode = async (node: KnowledgeBaseNodeConfig, parentRelDir = '') => {
-  const relPath = node.relPath || posix.join(parentRelDir, node.title)
-  const { absPath } = resolveKnowledgePath(relPath)
-  if (node.type === 'dir') {
-    await mkdir(absPath, { recursive: true })
-    for (const child of node.children || []) {
-      await ensureKnowledgeSeedNode(child, relPath)
-    }
-    return
-  }
-  if (!(await pathExists(absPath))) {
-    await mkdir(dirname(absPath), { recursive: true })
-    const seedFile = getDefaultKnowledgeSeedFile(relPath)
-    if (seedFile?.kind === 'base64') {
-      await writeFile(absPath, Buffer.from(seedFile.base64, 'base64'))
-    } else {
-      await writeFile(absPath, seedFile?.content || '', 'utf-8')
-    }
-  }
-}
-
-const migrateKnowledgeSeedPlaceholders = async () => {
-  const seedFile = getDefaultKnowledgeSeedFile(DEFAULT_KNOWLEDGE_INTERFACE_IMAGE_REL_PATH)
-  if (seedFile?.kind !== 'base64') return
-  try {
-    const { absPath } = resolveKnowledgePath(DEFAULT_KNOWLEDGE_INTERFACE_IMAGE_REL_PATH)
-    const current = await readFile(absPath)
-    if (current.toString('utf-8') === 'aiopsterm knowledge image placeholder\n') {
-      await writeFile(absPath, Buffer.from(seedFile.base64, 'base64'))
-    }
-  } catch {
-    // Missing user-edited default images are left untouched after initial seeding.
-  }
-}
-
-const ensureKnowledgeBaseDirectory = async () => {
-  const knowledgePath = getKnowledgeBasePath()
-  await mkdir(knowledgePath, { recursive: true })
-  try {
-    await access(getKnowledgeBaseInitMarkerPath())
-  } catch {
-    if (shouldUseKnowledgeSeedData()) {
-      for (const node of defaultKnowledgeSeedTree()) {
-        await ensureKnowledgeSeedNode(node)
-      }
-    }
-    await writeFile(getKnowledgeBaseInitMarkerPath(), 'initialized\n', 'utf-8')
-  }
-  await migrateKnowledgeSeedPlaceholders()
-  return knowledgePath
-}
-
-const listKnowledgeDir = async (relDir: string): Promise<KnowledgeBaseEntry[]> => {
-  await ensureKnowledgeBaseDirectory()
-  const { absPath: dirAbs, relPath: normalizedRelDir } = resolveKnowledgePath(relDir)
-  if (!(await pathExists(dirAbs))) return []
-  const entries = await readdir(dirAbs, { withFileTypes: true })
-  const result: KnowledgeBaseEntry[] = []
-  for (const entry of entries) {
-    if (entry.name.startsWith('.')) continue
-    const childAbs = join(dirAbs, entry.name)
-    const metadata = await stat(childAbs)
-    const childRel = posix.join(normalizedRelDir, entry.name)
-    result.push({
-      name: entry.name,
-      relPath: childRel,
-      type: entry.isDirectory() ? 'dir' : 'file',
-      ...(entry.isDirectory() ? {} : { size: metadata.size }),
-      mtimeMs: metadata.mtimeMs
-    })
-  }
-  return result.sort((a, b) => {
-    if (a.type !== b.type) return a.type === 'dir' ? -1 : 1
-    return a.name.localeCompare(b.name)
-  })
-}
-
-const getKnowledgeNodeId = (relPath: string) => `kb-${relPath.replace(/[^a-zA-Z0-9_-]/g, '-') || 'root'}`
-
-const buildKnowledgeTreeFromDisk = async (relDir = ''): Promise<KnowledgeBaseNodeConfig[]> => {
-  const entries = await listKnowledgeDir(relDir)
-  const nodes: KnowledgeBaseNodeConfig[] = []
-  for (const entry of entries) {
-    const node: KnowledgeBaseNodeConfig = {
-      id: getKnowledgeNodeId(entry.relPath),
-      key: entry.relPath,
-      title: entry.name,
-      type: entry.type,
-      relPath: entry.relPath,
-      ...(entry.type === 'file' ? { size: entry.size || 0 } : {})
-    }
-    if (entry.type === 'dir') {
-      node.children = await buildKnowledgeTreeFromDisk(entry.relPath)
-    }
-    nodes.push(node)
-  }
-  return nodes
-}
-
-const sumKnowledgeTreeSize = (nodes: KnowledgeBaseNodeConfig[]): number =>
-  nodes.reduce((total, node) => total + (node.size || 0) + (node.children ? sumKnowledgeTreeSize(node.children) : 0), 0)
-
-const syncKnowledgeBaseConfigFromDisk = async () => {
-  const tree = await buildKnowledgeTreeFromDisk()
-  const config = getConfig()
-  const nextKnowledgeBase: KnowledgeBaseUserConfig = {
-    tree,
-    usedBytes: sumKnowledgeTreeSize(tree),
-    totalBytes: config.knowledgeBase?.totalBytes || defaultKnowledgeBaseUserConfig.totalBytes
-  }
-  store.set('config', mergeConfig(config, { knowledgeBase: nextKnowledgeBase }))
-  invalidateKnowledgeSearchIndex()
-  return nextKnowledgeBase
-}
-
-const isKnowledgeFileAllowedForImport = (fileName: string, fileSize: number) => {
-  const ext = extname(fileName).toLowerCase()
-  if (ext && blockedKnowledgeImportExtensions.has(ext)) return false
-  return fileSize <= maxKnowledgeImportBytes
-}
-
-const collectKnowledgeImportTasks = async (srcDir: string, destDir: string): Promise<Array<{ srcPath: string; destPath: string }>> => {
-  const tasks: Array<{ srcPath: string; destPath: string }> = []
-  const entries = await readdir(srcDir, { withFileTypes: true })
-  for (const entry of entries) {
-    if (entry.name.startsWith('.')) continue
-    const srcPath = join(srcDir, entry.name)
-    const destPath = join(destDir, entry.name)
-    if (entry.isDirectory()) {
-      tasks.push(...(await collectKnowledgeImportTasks(srcPath, destPath)))
-      continue
-    }
-    if (!entry.isFile()) continue
-    const metadata = await stat(srcPath)
-    if (isKnowledgeFileAllowedForImport(entry.name, metadata.size)) {
-      tasks.push({ srcPath, destPath })
-    }
-  }
-  return tasks
-}
-
-const sendKnowledgeProgress = (window: BrowserWindow | null, payload: KnowledgeBaseTransferProgress) => {
-  sendWindowEvent(window, 'kb:transfer-progress', payload)
-}
-
-const parseSkillFile = async (filePath: string): Promise<SkillUserConfig | null> => {
-  const content = await readFile(filePath, 'utf-8')
-  const parsed = parseSkillFrontmatter(content)
-  try {
-    const metadata = validateSkillMetadata(parsed.metadata)
-    return {
-      name: metadata.name,
-      description: metadata.description,
-      enabled: true,
-      editable: isEditableSkill({ name: metadata.name, description: metadata.description, enabled: true, editable: true, content: parsed.body, path: filePath }),
-      content: parsed.body,
-      path: filePath
-    }
-  } catch {
-    return null
-  }
-}
-
-const hasAnySkillFile = async (dirPath: string) => {
-  try {
-    const entries = await readdir(dirPath, { withFileTypes: true })
-    for (const entry of entries) {
-      if (entry.isFile() && entry.name === 'SKILL.md') return true
-      if (entry.isDirectory()) {
-        try {
-          await access(join(dirPath, entry.name, 'SKILL.md'))
-          return true
-        } catch {
-          // Ignore directories that are not skill folders.
-        }
-      }
-    }
-  } catch {
-    return false
-  }
-  return false
-}
-
-const seedSkillsFromConfig = async (skills: SkillUserConfig[]) => {
-  for (const skill of skills) {
-    const name = skill.name?.trim()
-    const description = skill.description?.trim()
-    const content = skill.content?.trim()
-    if (!name || !description || !content) continue
-    const skillFilePath = getSkillFilePath(normalizeSkillNameForDirectory(name))
-    try {
-      await access(skillFilePath)
-      continue
-    } catch {
-      await mkdir(dirname(skillFilePath), { recursive: true })
-      await writeFile(skillFilePath, buildSkillFile({ name, description }, content), 'utf-8')
-    }
-  }
-}
-
-const ensureSkillsDirectory = async () => {
-  const skillsPath = getSkillsUserPath()
-  await mkdir(skillsPath, { recursive: true })
-  try {
-    await access(getSkillsInitMarkerPath())
-  } catch {
-    if (shouldUseSkillSeedData() && !(await hasAnySkillFile(skillsPath))) {
-      await seedSkillsFromConfig(defaultSkillSeedData())
-    }
-    await writeFile(getSkillsInitMarkerPath(), 'initialized\n', 'utf-8')
-  }
-  return skillsPath
-}
-
-const loadSkillsFromDisk = async (): Promise<SkillUserConfig[]> => {
-  const skillsPath = await ensureSkillsDirectory()
-  const savedStates = new Map((getConfig().skills || []).map((skill) => [skill.name, skill.enabled]))
-  const entries = await readdir(skillsPath, { withFileTypes: true })
-  const skillsByName = new Map<string, SkillUserConfig>()
-
-  for (const entry of entries) {
-    const filePath = entry.isDirectory() ? join(skillsPath, entry.name, 'SKILL.md') : entry.isFile() && entry.name === 'SKILL.md' ? join(skillsPath, entry.name) : ''
-    if (!filePath) continue
-    try {
-      const skill = await parseSkillFile(filePath)
-      if (!skill || skillsByName.has(skill.name)) continue
-      skill.enabled = savedStates.has(skill.name) ? Boolean(savedStates.get(skill.name)) : true
-      skillsByName.set(skill.name, skill)
-    } catch {
-      // Invalid or temporarily unavailable SKILL.md files are skipped until the next reload.
-    }
-  }
-
-  return Array.from(skillsByName.values()).sort((a, b) => a.name.localeCompare(b.name))
-}
-
-const broadcastSkillsUpdate = (skills: SkillUserConfig[]) => {
-  broadcastWindowEvent(BrowserWindow.getAllWindows(), 'skills:update', skills)
-}
-
-const syncSkillsConfigFromDisk = async () => {
-  const skills = await loadSkillsFromDisk()
-  store.set('config', mergeConfig(getConfig(), { skills }))
-  broadcastSkillsUpdate(skills)
-  return skills
-}
-
-const createSkillWriteResult = async (skill: SkillUserConfig, filePath = skill.path): Promise<SkillWriteResult> => {
-  if (!filePath) {
-    throw new Error(`Skill file path missing: ${skill.name}`)
-  }
-  const [metadata, content] = await Promise.all([stat(filePath), readFile(filePath)])
-  return {
-    skill,
-    filePath,
-    bytes: Buffer.byteLength(content),
-    size: metadata.size,
-    mtimeMs: metadata.mtimeMs
-  }
-}
-
-const closeSkillsWatchers = () => {
-  skillsWatchers.forEach((watcher) => watcher.close())
-  skillsWatchers = []
-}
-
-const scheduleSkillsReload = () => {
-  if (skillsWatcherDebounce) {
-    clearTimeout(skillsWatcherDebounce)
-  }
-  skillsWatcherDebounce = setTimeout(() => {
-    skillsWatcherDebounce = null
-    syncSkillsConfigFromDisk()
-      .then(() => startSkillsWatcher())
-      .catch(() => {
-        // External edits can briefly remove files or folders; the next event or manual reload will recover.
-      })
-  }, 100)
-}
-
-const startSkillsWatcher = async () => {
-  const skillsPath = await ensureSkillsDirectory()
-  closeSkillsWatchers()
-  skillsWatchers.push(watch(skillsPath, scheduleSkillsReload))
-  const entries = await readdir(skillsPath, { withFileTypes: true })
-  entries
-    .filter((entry) => entry.isDirectory())
-    .forEach((entry) => {
-      try {
-        skillsWatchers.push(
-          watch(join(skillsPath, entry.name), (_eventType, filename) => {
-            if (!filename || filename.toString() === 'SKILL.md') {
-              scheduleSkillsReload()
-            }
-          })
-        )
-      } catch {
-        // A skill directory can be removed between readdir and watch.
-      }
-    })
-  await syncSkillsConfigFromDisk()
-}
-
-const findSkillByName = async (skillName: string) => {
-  const skills = await loadSkillsFromDisk()
-  return skills.find((skill) => skill.name === skillName) || null
-}
-
-const ignoredSkillExportEntries = new Set(['.DS_Store', 'Thumbs.db', '.git', '.gitignore', 'node_modules', '__pycache__', '.vscode', '.idea'])
-
-const normalizeZipEntryName = (entryName: string) => entryName.replace(/\\/g, '/')
-
-const isUnsafeZipEntryName = (entryName: string) => {
-  const normalized = normalizeZipEntryName(entryName)
-  return normalized.startsWith('/') || /^[a-zA-Z]:/.test(normalized) || normalized.split('/').includes('..')
-}
-
-const importSkillZip = async (zipPath: string, overwrite = false): Promise<SkillImportResult> => {
-  let zip: AdmZip
-  try {
-    zip = new AdmZip(zipPath)
-  } catch {
-    return { success: false, error: 'Invalid or corrupted ZIP file', errorCode: 'INVALID_ZIP' }
-  }
-
-  const entries = zip.getEntries()
-  if (!entries.length) {
-    return { success: false, error: 'ZIP file is empty', errorCode: 'INVALID_ZIP' }
-  }
-
-  let skillMdEntry: AdmZip.IZipEntry | null = null
-  let skillMdBasePath = ''
-
-  for (const entry of entries) {
-    const entryName = normalizeZipEntryName(entry.entryName)
-    if (isUnsafeZipEntryName(entryName)) {
-      return { success: false, error: 'ZIP file contains invalid paths', errorCode: 'INVALID_ZIP' }
-    }
-    if (entryName === 'SKILL.md') {
-      skillMdEntry = entry
-      skillMdBasePath = ''
-      break
-    }
-    if (entryName.endsWith('/SKILL.md')) {
-      const parts = entryName.split('/')
-      if (parts.length === 2) {
-        skillMdEntry = entry
-        skillMdBasePath = `${parts[0]}/`
-        break
-      }
-    }
-  }
-
-  if (!skillMdEntry) {
-    return { success: false, error: 'No SKILL.md file found in ZIP', errorCode: 'NO_SKILL_MD' }
-  }
-
-  let metadata: SkillMetadataConfig
-  try {
-    metadata = validateSkillMetadata(parseSkillFrontmatter(skillMdEntry.getData().toString('utf-8')).metadata)
-  } catch {
-    return { success: false, error: 'Invalid SKILL.md metadata', errorCode: 'INVALID_METADATA' }
-  }
-
-  const userSkillsPath = await ensureSkillsDirectory()
-  const skillDirName = normalizeSkillNameForDirectory(metadata.name)
-  const targetDir = join(userSkillsPath, skillDirName)
-  if (await pathExists(targetDir)) {
-    if (!overwrite) {
-      return {
-        success: false,
-        skillName: metadata.name,
-        error: `Skill "${metadata.name}" already exists`,
-        errorCode: 'DIR_EXISTS'
-      }
-    }
-    await rm(targetDir, { recursive: true, force: true })
-    if (await pathExists(targetDir)) {
-      return { success: false, skillName: metadata.name, error: 'Failed to replace existing skill directory', errorCode: 'EXTRACT_FAILED' }
-    }
-  }
-
-  try {
-    await mkdir(targetDir, { recursive: true })
-    let writtenFiles = 0
-    let writtenBytes = 0
-    for (const entry of entries) {
-      const entryName = normalizeZipEntryName(entry.entryName)
-      if (isUnsafeZipEntryName(entryName)) {
-        throw new Error(`Invalid ZIP entry path: ${entryName}`)
-      }
-      if (skillMdBasePath && !entryName.startsWith(skillMdBasePath)) {
-        continue
-      }
-      if (entry.isDirectory) {
-        continue
-      }
-      const relativePath = skillMdBasePath ? entryName.slice(skillMdBasePath.length) : entryName
-      if (!relativePath) {
-        continue
-      }
-      const targetPath = resolve(targetDir, relativePath)
-      const targetRoot = `${resolve(targetDir)}${sep}`
-      if (!targetPath.startsWith(targetRoot)) {
-        throw new Error(`Invalid ZIP entry path: ${entryName}`)
-      }
-      await mkdir(dirname(targetPath), { recursive: true })
-      const data = entry.getData()
-      await writeFile(targetPath, data)
-      writtenFiles += 1
-      writtenBytes += data.byteLength
-    }
-    await startSkillsWatcher()
-    const imported = await findSkillByName(metadata.name)
-    if (!imported?.path) throw new Error(`Imported skill not found: ${metadata.name}`)
-    return {
-      success: true,
-      skillName: metadata.name,
-      skill: imported,
-      importedPath: imported.path,
-      bytes: writtenBytes,
-      files: writtenFiles,
-      importedAt: new Date().toISOString()
-    }
-  } catch {
-    await rm(targetDir, { recursive: true, force: true })
-    return { success: false, skillName: metadata.name, error: 'Failed to extract skill files', errorCode: 'EXTRACT_FAILED' }
-  }
-}
-
-const addSkillDirectoryToZip = async (zip: AdmZip, rootDir: string, currentDir: string) => {
-  const entries = await readdir(currentDir, { withFileTypes: true })
-  for (const entry of entries) {
-    if (ignoredSkillExportEntries.has(entry.name)) {
-      continue
-    }
-    const fullPath = join(currentDir, entry.name)
-    const relativePath = relative(rootDir, fullPath).replace(/\\/g, '/')
-    if (entry.isDirectory()) {
-      await addSkillDirectoryToZip(zip, rootDir, fullPath)
-      continue
-    }
-    zip.addFile(relativePath, await readFile(fullPath))
-  }
-}
-
-const exportSkillZipBuffer = async (skillName: string) => {
-  const skill = await findSkillByName(skillName)
-  if (!skill?.path) {
-    throw new Error(`Skill not found: ${skillName}`)
-  }
-  const skillDir = dirname(skill.path)
-  const metadata = await stat(skillDir)
-  if (!metadata.isDirectory()) {
-    throw new Error(`Skill directory not found: ${skillDir}`)
-  }
-  const zip = new AdmZip()
-  await addSkillDirectoryToZip(zip, skillDir, skillDir)
-  return { skill, zipBuffer: zip.toBuffer() }
-}
-
-const removeJsonComments = (content: string) =>
-  content
-    .replace(/\/\/.*$/gm, '')
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .replace(/^\s*[\r\n]/gm, '')
-    .trim()
-
-const defaultSecurityConfigContent = () => `// aiopsterm AI security configuration
-// Edit this file to control command approval, block lists, allow lists, and command length limits.
-
-${JSON.stringify(defaultSecurityConfig, null, 2)}
-`
-
-const ensureSecurityConfigFile = async () => {
-  const configPath = getSecurityConfigPath()
-  await mkdir(dirname(configPath), { recursive: true })
-  try {
-    await access(configPath)
-  } catch {
-    await writeFile(configPath, defaultSecurityConfigContent(), 'utf-8')
-  }
-  return configPath
-}
-
-const defaultKeywordHighlightConfigContent = () => JSON.stringify(defaultKeywordHighlightConfig, null, 2)
-
-const ensureKeywordHighlightConfigFile = async () => {
-  const configPath = getKeywordHighlightConfigPath()
-  await mkdir(dirname(configPath), { recursive: true })
-  try {
-    await access(configPath)
-  } catch {
-    await writeFile(configPath, defaultKeywordHighlightConfigContent(), 'utf-8')
-  }
-  return configPath
-}
-
-const ensureMcpConfigFile = async () => {
-  const configPath = getMcpConfigPath()
-  await mkdir(dirname(configPath), { recursive: true })
-  try {
-    await access(configPath)
-  } catch {
-    await writeFile(configPath, JSON.stringify(mcpConfigFromUserConfig(getConfig()), null, 2), 'utf-8')
-  }
-  return configPath
-}
-
-const applyMcpConfigFileSnapshot = async (parsed: McpConfigFile) => {
-  await clearMcpRuntimeClientCache()
-  const current = getConfig()
-  const snapshot = await discoverMcpServerSnapshot(parsed, {
-    existingServers: current.mcpServers || [],
-    toolStates: current.mcpToolStates || {},
-    clientName: 'aiopsterm',
-    clientVersion: app.getVersion(),
-    runDiscovery: shouldRunMcpDiscovery()
-  })
-  const next = mergeConfig(current, { mcpServers: snapshot.mcpServers, mcpToolStates: snapshot.mcpToolStates })
-  store.set('config', next)
-  return {
-    mcpConfig: parsed,
-    mcpServers: cloneMcpServers(next.mcpServers) || [],
-    mcpToolStates: cloneMcpToolStates(next.mcpToolStates) || {}
-  }
-}
-
-const mcpConfigWriteSuccess = (data: Awaited<ReturnType<typeof applyMcpConfigFileSnapshot>>) => ({ ok: true, data })
-
-const mcpConfigWriteError = (error: unknown, fallbackCode: string, fallbackMessage: string) => ({
-  ok: false,
-  errorCode: fallbackCode,
-  errorMessage: error instanceof Error ? error.message : fallbackMessage
-})
-
-const syncMcpConfigFromContent = async (content: string) => {
-  if (!content.trim()) return
-  return applyMcpConfigFileSnapshot(normalizeMcpConfigFile(JSON.parse(content)))
-}
-
-const loadCurrentMcpConfigFile = async () => {
-  const configPath = await ensureMcpConfigFile()
-  return normalizeMcpConfigFile(JSON.parse(await readFile(configPath, 'utf-8')))
-}
-
 const runtimeConfiguration = configureMainBackendRuntimes({
   getConfig,
   getDefaultShell,
   getLogDirPath,
   focusWindow,
-  loadCurrentMcpConfigFile,
-  listKnowledgeDir,
-  buildKnowledgeTreeFromDisk: () => buildKnowledgeTreeFromDisk(),
-  loadSkillsFromDisk,
+  loadCurrentMcpConfigFile: settingsConfigRuntime.loadCurrentMcpConfigFile,
+  listKnowledgeDir: knowledgeBaseRuntime.listKnowledgeDir,
+  buildKnowledgeTreeFromDisk: () => knowledgeBaseRuntime.buildKnowledgeTreeFromDisk(),
+  loadSkillsFromDisk: skillsRuntime.loadSkillsFromDisk,
   rememberTerminalPassword,
   refreshOrganizationAssets,
   writeTerminalBySessionId,
@@ -2102,175 +1152,6 @@ const runtimeConfiguration = configureMainBackendRuntimes({
   broadcastManagedAiSessionFocusRequest,
   broadcastManagedAiSessionEvent
 })
-
-const setMcpToolState = async (serverName: string, toolName: string, enabled: boolean) => {
-  const normalizedServerName = serverName.trim()
-  const normalizedToolName = toolName.trim()
-  if (!normalizedServerName || !normalizedToolName) {
-    throw new Error('MCP server and tool names are required')
-  }
-  const current = getConfig()
-  const servers = cloneMcpServers(current.mcpServers) || []
-  const server = servers.find((item) => item.name === normalizedServerName)
-  if (!server) {
-    throw new Error(`MCP server not found: ${normalizedServerName}`)
-  }
-  const tool = server.tools.find((item) => item.name === normalizedToolName)
-  if (!tool) {
-    throw new Error(`MCP tool not found: ${normalizedServerName}:${normalizedToolName}`)
-  }
-  tool.enabled = enabled
-  store.set(
-    'config',
-    mergeConfig(current, {
-      mcpServers: servers,
-      mcpToolStates: {
-        ...(current.mcpToolStates || {}),
-        [`${normalizedServerName}:${normalizedToolName}`]: enabled
-      }
-    })
-  )
-  const configPath = await ensureMcpConfigFile()
-  const parsed = normalizeMcpConfigFile(JSON.parse(await readFile(configPath, 'utf-8')))
-  const snapshot = await applyMcpConfigFileSnapshot(parsed)
-  return mcpConfigWriteSuccess(snapshot)
-}
-
-const setMcpToolAutoApprove = async (serverName: string, toolName: string, autoApprove: boolean) => {
-  const normalizedServerName = serverName.trim()
-  const normalizedToolName = toolName.trim()
-  if (!normalizedServerName || !normalizedToolName) {
-    throw new Error('MCP server and tool names are required')
-  }
-  const current = getConfig()
-  const existingServer = current.mcpServers?.find((server) => server.name === normalizedServerName)
-  if (!existingServer) {
-    throw new Error(`MCP server not found: ${normalizedServerName}`)
-  }
-  if (!existingServer.tools.some((tool) => tool.name === normalizedToolName)) {
-    throw new Error(`MCP tool not found: ${normalizedServerName}:${normalizedToolName}`)
-  }
-
-  const configPath = await ensureMcpConfigFile()
-  const parsed = normalizeMcpConfigFile(JSON.parse(await readFile(configPath, 'utf-8')))
-  const server = parsed.mcpServers[normalizedServerName]
-  if (!server) {
-    throw new Error(`MCP server config not found: ${normalizedServerName}`)
-  }
-
-  const approved = new Set((server.autoApprove || []).filter(Boolean))
-  if (autoApprove) {
-    approved.add(normalizedToolName)
-  } else {
-    approved.delete(normalizedToolName)
-  }
-  const nextAutoApprove = [...approved]
-  if (nextAutoApprove.length) {
-    server.autoApprove = nextAutoApprove
-  } else {
-    delete server.autoApprove
-  }
-
-  const nextContent = JSON.stringify(parsed, null, 2)
-  await writeFile(configPath, nextContent, 'utf-8')
-  const snapshot = await applyMcpConfigFileSnapshot(parsed)
-  broadcastMcpConfigChanged(nextContent)
-  return mcpConfigWriteSuccess(snapshot)
-}
-
-const callCurrentMcpTool = async (input: McpToolCallInput) => {
-  const current = getConfig()
-  return callMcpTool(await loadCurrentMcpConfigFile(), input, {
-    servers: current.mcpServers || [],
-    toolStates: current.mcpToolStates || {},
-    clientName: 'aiopsterm',
-    clientVersion: app.getVersion()
-  })
-}
-
-const readCurrentMcpResource = async (input: McpResourceReadInput) => {
-  const current = getConfig()
-  return readMcpResource(await loadCurrentMcpConfigFile(), input, {
-    servers: current.mcpServers || [],
-    clientName: 'aiopsterm',
-    clientVersion: app.getVersion()
-  })
-}
-
-const broadcastMcpConfigChanged = (content: string) => {
-  broadcastWindowEvent(BrowserWindow.getAllWindows(), 'mcp-config:changed', content)
-}
-
-const syncKeywordHighlightConfigFromContent = (content: string) => {
-  if (!content.trim()) return
-  const parsed = JSON.parse(content) as Partial<UserConfig>
-  if (!parsed.keywordHighlight && !('keyword-highlight' in parsed)) return
-  const nextKeywordHighlight = normalizeKeywordHighlightConfig(parsed.keywordHighlight || parsed)
-  const next = mergeConfig(getConfig(), { keywordHighlight: nextKeywordHighlight })
-  store.set('config', next)
-  return next.keywordHighlight
-}
-
-const broadcastKeywordHighlightConfigChanged = (content: string) => {
-  broadcastWindowEvent(BrowserWindow.getAllWindows(), 'keyword-highlight-config:changed', content)
-}
-
-const syncSecurityConfigFromContent = (content: string) => {
-  const cleaned = removeJsonComments(content)
-  if (!cleaned) return
-  const parsed = JSON.parse(cleaned) as Partial<UserConfig>
-  if (!parsed.securityConfig && !('security' in parsed)) return
-  const nextSecurityConfig = normalizeSecurityConfig(parsed.securityConfig || parsed)
-  const next = mergeConfig(getConfig(), { securityConfig: nextSecurityConfig })
-  store.set('config', next)
-  return next.securityConfig
-}
-
-const broadcastSecurityConfigChanged = (content: string) => {
-  broadcastWindowEvent(BrowserWindow.getAllWindows(), 'security-config:changed', content)
-}
-
-const startSecurityConfigWatcher = async () => {
-  const configPath = await ensureSecurityConfigFile()
-  securityConfigWatcher?.close()
-  securityConfigWatcher = watch(configPath, async () => {
-    try {
-      const content = await readFile(configPath, 'utf-8')
-      syncSecurityConfigFromContent(content)
-      broadcastSecurityConfigChanged(content)
-    } catch {
-      // External editors can briefly replace the file; the next watch event or read call will recover.
-    }
-  })
-}
-
-const startKeywordHighlightConfigWatcher = async () => {
-  const configPath = await ensureKeywordHighlightConfigFile()
-  keywordHighlightConfigWatcher?.close()
-  keywordHighlightConfigWatcher = watch(configPath, async () => {
-    try {
-      const content = await readFile(configPath, 'utf-8')
-      syncKeywordHighlightConfigFromContent(content)
-      broadcastKeywordHighlightConfigChanged(content)
-    } catch {
-      // External editors can briefly replace the file; the next watch event or read call will recover.
-    }
-  })
-}
-
-const startMcpConfigWatcher = async () => {
-  const configPath = await ensureMcpConfigFile()
-  mcpConfigWatcher?.close()
-  mcpConfigWatcher = watch(configPath, async () => {
-    try {
-      const content = await readFile(configPath, 'utf-8')
-      await syncMcpConfigFromContent(content)
-      broadcastMcpConfigChanged(content)
-    } catch {
-      // External editors can briefly replace the file; the next watch event or read call will recover.
-    }
-  })
-}
 
 const createSshTerminal = (owner: BrowserWindow, id: string, options: TerminalCreateOptions) => {
   return createSshTerminalSession(id, options, {
@@ -2432,10 +1313,10 @@ const registerIpc = () => {
     }
   })
   registerMcpConfigIpc(ipcMain, {
-    ensureSecurityConfigFile,
-    ensureKeywordHighlightConfigFile,
-    ensureMcpConfigFile,
-    removeJsonComments,
+    ensureSecurityConfigFile: settingsConfigRuntime.ensureSecurityConfigFile,
+    ensureKeywordHighlightConfigFile: settingsConfigRuntime.ensureKeywordHighlightConfigFile,
+    ensureMcpConfigFile: settingsConfigRuntime.ensureMcpConfigFile,
+    removeJsonComments: settingsConfigRuntime.removeJsonComments,
     normalizeSecurityConfig,
     normalizeKeywordHighlightConfig,
     normalizeMcpConfigFile,
@@ -2444,23 +1325,23 @@ const registerIpc = () => {
       store.set('config', next)
       return next
     },
-    getMcpServers: () => cloneMcpServers(getConfig().mcpServers) || [],
-    applyMcpConfigFileSnapshot,
-    syncMcpConfigFromContent,
-    setMcpToolState,
-    setMcpToolAutoApprove,
-    callMcpTool: callCurrentMcpTool,
-    readMcpResource: readCurrentMcpResource,
-    broadcastSecurityConfigChanged,
-    broadcastKeywordHighlightConfigChanged,
-    broadcastMcpConfigChanged
+    getMcpServers: settingsConfigRuntime.getMcpServers,
+    applyMcpConfigFileSnapshot: settingsConfigRuntime.applyMcpConfigFileSnapshot,
+    syncMcpConfigFromContent: settingsConfigRuntime.syncMcpConfigFromContent,
+    setMcpToolState: settingsConfigRuntime.setMcpToolState,
+    setMcpToolAutoApprove: settingsConfigRuntime.setMcpToolAutoApprove,
+    callMcpTool: settingsConfigRuntime.callCurrentMcpTool,
+    readMcpResource: settingsConfigRuntime.readCurrentMcpResource,
+    broadcastSecurityConfigChanged: settingsConfigRuntime.broadcastSecurityConfigChanged,
+    broadcastKeywordHighlightConfigChanged: settingsConfigRuntime.broadcastKeywordHighlightConfigChanged,
+    broadcastMcpConfigChanged: settingsConfigRuntime.broadcastMcpConfigChanged
   })
   registerAiChatActionsIpc(ipcMain, {
     getChatConversationMessages,
     replaceChatConversationMessages,
-    setMcpToolAutoApprove,
-    callMcpTool: callCurrentMcpTool,
-    readMcpResource: readCurrentMcpResource,
+    setMcpToolAutoApprove: settingsConfigRuntime.setMcpToolAutoApprove,
+    callMcpTool: settingsConfigRuntime.callCurrentMcpTool,
+    readMcpResource: settingsConfigRuntime.readCurrentMcpResource,
     formatMcpResourceReadContent,
     showChatExportSaveDialog: (event, options) => {
       const owner = BrowserWindow.fromWebContents(event.sender)
@@ -2474,51 +1355,49 @@ const registerIpc = () => {
     }
   })
   registerSkillsIpc(ipcMain, {
-    syncSkillsConfigFromDisk,
-    loadSkillsFromDisk,
-    saveSkillsSnapshot: (skills) => store.set('config', mergeConfig(getConfig(), { skills })),
-    broadcastSkillsUpdate,
-    ensureSkillsDirectory,
-    validateSkillMetadata,
-    normalizeSkillNameForDirectory,
-    buildSkillFile,
-    startSkillsWatcher,
-    findSkillByName,
-    createSkillWriteResult,
-    isEditableSkill,
-    pathExists,
+    syncSkillsConfigFromDisk: skillsRuntime.syncSkillsConfigFromDisk,
+    loadSkillsFromDisk: skillsRuntime.loadSkillsFromDisk,
+    saveSkillsSnapshot: skillsRuntime.saveSkillsSnapshot,
+    broadcastSkillsUpdate: skillsRuntime.broadcastSkillsUpdate,
+    ensureSkillsDirectory: skillsRuntime.ensureSkillsDirectory,
+    validateSkillMetadata: skillsRuntime.validateSkillMetadata,
+    normalizeSkillNameForDirectory: skillsRuntime.normalizeSkillNameForDirectory,
+    buildSkillFile: skillsRuntime.buildSkillFile,
+    startSkillsWatcher: skillsRuntime.startSkillsWatcher,
+    findSkillByName: skillsRuntime.findSkillByName,
+    createSkillWriteResult: skillsRuntime.createSkillWriteResult,
+    isEditableSkill: skillsRuntime.isEditableSkill,
+    pathExists: skillsRuntime.pathExists,
     openPath: (targetPath) => shell.openPath(targetPath),
-    importSkillZip,
-    exportSkillZipBuffer,
+    importSkillZip: skillsRuntime.importSkillZip,
+    exportSkillZipBuffer: skillsRuntime.exportSkillZipBuffer,
     showSaveDialog: (event, options) => {
       const owner = BrowserWindow.fromWebContents(event.sender)
       return owner ? dialog.showSaveDialog(owner, options) : dialog.showSaveDialog(options)
     }
   })
   registerKnowledgeBaseIpc(ipcMain, {
-    ensureKnowledgeBaseDirectory,
-    syncKnowledgeBaseConfigFromDisk,
-    listKnowledgeDir,
-    resolveKnowledgePath,
-    getKnowledgeMimeType,
-    isKnowledgeImage: (relPath) => knowledgeImageExtensions.has(extname(relPath).toLowerCase()),
-    knowledgeWriteResult,
-    knowledgeMutationEntry,
-    knowledgeDeletedResult,
-    isSafeKnowledgeBasename,
-    ensureUniqueKnowledgeName,
-    pathExists,
-    isKnowledgeFileAllowedForImport,
-    maxKnowledgeImportBytes,
-    collectKnowledgeImportTasks,
+    ensureKnowledgeBaseDirectory: knowledgeBaseRuntime.ensureKnowledgeBaseDirectory,
+    syncKnowledgeBaseConfigFromDisk: knowledgeBaseRuntime.syncKnowledgeBaseConfigFromDisk,
+    listKnowledgeDir: knowledgeBaseRuntime.listKnowledgeDir,
+    resolveKnowledgePath: knowledgeBaseRuntime.resolveKnowledgePath,
+    getKnowledgeMimeType: knowledgeBaseRuntime.getKnowledgeMimeType,
+    isKnowledgeImage: knowledgeBaseRuntime.isKnowledgeImage,
+    knowledgeWriteResult: knowledgeBaseRuntime.knowledgeWriteResult,
+    knowledgeMutationEntry: knowledgeBaseRuntime.knowledgeMutationEntry,
+    knowledgeDeletedResult: knowledgeBaseRuntime.knowledgeDeletedResult,
+    isSafeKnowledgeBasename: knowledgeBaseRuntime.isSafeKnowledgeBasename,
+    ensureUniqueKnowledgeName: knowledgeBaseRuntime.ensureUniqueKnowledgeName,
+    pathExists: knowledgeBaseRuntime.pathExists,
+    isKnowledgeFileAllowedForImport: knowledgeBaseRuntime.isKnowledgeFileAllowedForImport,
+    maxKnowledgeImportBytes: knowledgeBaseRuntime.maxKnowledgeImportBytes,
+    collectKnowledgeImportTasks: knowledgeBaseRuntime.collectKnowledgeImportTasks,
     getOwnerWindow: (event) => BrowserWindow.fromWebContents(event.sender),
-    sendKnowledgeProgress,
-    searchKnowledgeIndex,
-    getKnowledgeSearchIndex,
-    buildKnowledgeSearchIndex,
-    setKnowledgeSearchIndex: (index) => {
-      knowledgeSearchIndex = index
-    }
+    sendKnowledgeProgress: knowledgeBaseRuntime.sendKnowledgeProgress,
+    searchKnowledgeIndex: knowledgeBaseRuntime.searchKnowledgeIndex,
+    getKnowledgeSearchIndex: knowledgeBaseRuntime.getKnowledgeSearchIndex,
+    buildKnowledgeSearchIndex: knowledgeBaseRuntime.buildKnowledgeSearchIndex,
+    setKnowledgeSearchIndex: knowledgeBaseRuntime.setKnowledgeSearchIndex
   })
   registerTerminalSessionsIpc(ipcMain, {
     sessions,
@@ -2598,7 +1477,12 @@ app.whenReady().then(async () => {
     userDataPath: app.getPath('userData'),
     emit: broadcastAiAgentSessionEvent
   })
-  await Promise.all([startSecurityConfigWatcher(), startKeywordHighlightConfigWatcher(), startMcpConfigWatcher(), startSkillsWatcher()])
+  await Promise.all([
+    settingsConfigRuntime.startSecurityConfigWatcher(),
+    settingsConfigRuntime.startKeywordHighlightConfigWatcher(),
+    settingsConfigRuntime.startMcpConfigWatcher(),
+    skillsRuntime.startSkillsWatcher()
+  ])
   createWindow()
   const deepLinkArg = findDeepLinkArg(process.argv)
   if (deepLinkArg) handleDeepLinkUrl(deepLinkArg)
@@ -2632,16 +1516,6 @@ app.on('before-quit', () => {
   closeControlSocketServer()
   closeCodexTerminalBridgeServer()
   closeExternalCodexMcpBridgeServer()
-  securityConfigWatcher?.close()
-  securityConfigWatcher = null
-  keywordHighlightConfigWatcher?.close()
-  keywordHighlightConfigWatcher = null
-  mcpConfigWatcher?.close()
-  mcpConfigWatcher = null
-  void clearMcpRuntimeClientCache()
-  closeSkillsWatchers()
-  if (skillsWatcherDebounce) {
-    clearTimeout(skillsWatcherDebounce)
-    skillsWatcherDebounce = null
-  }
+  settingsConfigRuntime.stopConfigWatchers()
+  skillsRuntime.stopSkillsWatcher()
 })
