@@ -1,0 +1,226 @@
+
+.top-bar {
+  position: relative;
+  z-index: 2;
+  -webkit-app-region: drag;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  padding: 0 8px;
+  user-select: none;
+}
+
+.app-shell.has-app-background .top-bar {
+  background: color-mix(in srgb, var(--surface) 54%, transparent);
+  backdrop-filter: blur(14px);
+}
+
+.top-left,
+.top-actions,
+.toolbar-group,
+.editor-toolbar,
+.context-strip,
+.asset-groups {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.top-actions {
+  height: 100%;
+  gap: 4px;
+}
+
+.brand-mark {
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  border-radius: 5px;
+  background: var(--accent);
+  color: #071113;
+  font-weight: 800;
+  font-size: 11px;
+}
+
+.brand-name,
+.window-title {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.window-title {
+  margin: 0 8px;
+  white-space: nowrap;
+}
+
+.top-update-badge,
+.model-provider-badge {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 8px;
+  background: var(--surface-2);
+}
+
+.top-update-badge {
+  -webkit-app-region: no-drag;
+  min-height: 22px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.top-update-badge:hover {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.top-update-badge.state-available {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+
+.top-update-badge.state-checking svg {
+  animation: spin 0.9s linear infinite;
+}
+
+.ai-attention-button {
+  position: relative;
+  color: var(--muted);
+}
+
+.ai-attention-button.unread {
+  color: var(--text);
+}
+
+.ai-attention-button.unread:hover {
+  color: var(--accent);
+}
+
+.ai-attention-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+  border: 1px solid color-mix(in srgb, var(--bg) 70%, transparent);
+  background: var(--accent);
+  color: #071113;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+  pointer-events: none;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
+.top-notice {
+  max-width: 260px;
+  color: var(--accent-2);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.icon-button,
+.rail-button,
+.new-tab-button,
+.compact-button,
+.toolbar-group button,
+.editor-toolbar button,
+.chat-input button,
+.agents-sidebar header button {
+  -webkit-app-region: no-drag;
+  border: 1px solid transparent;
+  background: transparent;
+  min-width: 28px;
+  height: 26px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+svg {
+  width: 16px;
+  height: 16px;
+  stroke-width: 1.8;
+}
+
+.icon-button:hover,
+.rail-button:hover,
+.toolbar-group button:hover,
+.editor-toolbar button:hover,
+.chat-input button:hover:not(:disabled) {
+  background: var(--surface-3);
+  border-color: var(--border);
+}
+
+.chat-input button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
+.mode-button-terminal {
+  color: #5f8dff;
+}
+
+.mode-button-agents {
+  color: var(--accent-2);
+}
+
+.layout-toggle.collapsed {
+  color: var(--muted);
+}
+
+.layout-toggle:disabled {
+  cursor: not-allowed;
+  opacity: 0.35;
+}
+
+.layout-toggle:disabled:hover {
+  background: transparent;
+  border-color: transparent;
+}
+
+.window-controls {
+  -webkit-app-region: no-drag;
+  height: 100%;
+  display: flex;
+  align-items: stretch;
+  margin-left: 4px;
+}
+
+.window-control-button {
+  border: 0;
+  background: transparent;
+  width: 42px;
+  height: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--muted);
+}
+
+.window-control-button:hover {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.window-control-button.close:hover {
+  background: var(--danger);
+  color: #fff;
+}

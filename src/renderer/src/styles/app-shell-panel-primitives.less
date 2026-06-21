@@ -1,0 +1,281 @@
+
+.module-panel,
+.agents-sidebar,
+.ai-panel,
+.database-sidebar {
+  background: var(--glass-surface);
+  border-right: 1px solid var(--border);
+  min-height: 0;
+  overflow: hidden;
+}
+
+.app-shell.has-app-background .module-panel,
+.app-shell.has-app-background .agents-sidebar,
+.app-shell.has-app-background .ai-panel,
+.app-shell.has-app-background .database-sidebar {
+  backdrop-filter: blur(16px);
+}
+
+.app-shell.has-app-background .layout-pane-right > .layout-resizer-right {
+  background: color-mix(in srgb, var(--surface) 14%, transparent);
+}
+
+.module-panel {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  padding: 14px;
+}
+
+.layout-pane {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.layout-pane-left {
+  border-right: 1px solid var(--border);
+}
+
+.layout-pane-left .module-panel,
+.layout-pane-left .agents-sidebar {
+  border-right: 0;
+}
+
+.layout-pane-right {
+  position: relative;
+  border-left: 1px solid var(--border);
+}
+
+.mode-terminal .layout-pane-right {
+  grid-column: -2;
+}
+
+.layout-resizer {
+  position: relative;
+  z-index: 2;
+  width: 6px;
+  min-width: 6px;
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  background: transparent;
+  cursor: col-resize;
+}
+
+.layout-resizer::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--border);
+}
+
+.layout-resizer-left::before {
+  left: 0;
+}
+
+.layout-resizer-right::before {
+  right: 6px;
+}
+
+.layout-pane-right > .layout-resizer-right {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -10px;
+  width: 14px;
+  z-index: 12;
+  background: color-mix(in srgb, var(--surface) 24%, transparent);
+}
+
+.layout-resizer:hover,
+.layout-resizer.dragging {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+.layout-resizing {
+  cursor: col-resize;
+  user-select: none;
+}
+
+.module-panel-native {
+  display: block;
+  padding: 0;
+}
+
+.panel-header,
+.ai-header,
+.agents-sidebar header,
+.database-sidebar header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.eyebrow {
+  margin: 0 0 3px;
+  color: var(--accent);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0;
+}
+
+h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.panel-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--border);
+  background: var(--glass-surface-2);
+  border-radius: 7px;
+  padding: 0 8px;
+  height: 32px;
+  margin: 14px 0;
+}
+
+.panel-search input,
+.path-bar input,
+.command-line input,
+.settings-form input,
+.settings-form select,
+.chat-input textarea,
+.sql-editor textarea,
+.terminal-tab input {
+  border: 0;
+  outline: 0;
+  min-width: 0;
+  width: 100%;
+  color: var(--text);
+  background: transparent;
+}
+
+.panel-stack {
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-right: 2px;
+}
+
+.summary-card,
+.capacity-card,
+.transfer-card,
+.config-card,
+.profile-card,
+.snippet-card,
+.plugin-card,
+.asset-card,
+.list-row,
+.conversation-card,
+.database-card {
+  border: 1px solid var(--border);
+  background: var(--glass-surface-2);
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.summary-card {
+  display: grid;
+  gap: 8px;
+}
+
+.summary-card button,
+.compact-button,
+.path-bar button,
+.chip {
+  border: 1px solid var(--border);
+  background: var(--glass-surface-3);
+  color: var(--text);
+  border-radius: 6px;
+  height: 28px;
+  cursor: pointer;
+}
+
+.metric {
+  font-size: 26px;
+  font-weight: 750;
+  color: var(--accent-2);
+}
+
+.list-row,
+.asset-card,
+.plugin-card,
+.snippet-card,
+.database-card,
+.conversation-card {
+  width: 100%;
+  color: var(--text);
+  text-align: left;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  cursor: pointer;
+}
+
+.list-row:hover,
+.asset-card:hover,
+.plugin-card:hover,
+.snippet-card:hover,
+.database-card:hover,
+.conversation-card:hover {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+
+strong {
+  display: block;
+  font-size: 13px;
+}
+
+small,
+em {
+  color: var(--muted);
+  font-size: 12px;
+  font-style: normal;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--muted);
+}
+
+.status-dot.online {
+  background: var(--accent-2);
+}
+
+.status-dot.idle {
+  background: var(--warn);
+}
+
+.status-dot.offline {
+  background: var(--danger);
+}
+
+.asset-main {
+  min-width: 0;
+  flex: 1;
+}
+
+.asset-tags {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+@import './assets.less';
+
+@import './settings.less';
+
+@import './asset-management.less';

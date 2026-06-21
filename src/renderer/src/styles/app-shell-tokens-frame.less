@@ -1,0 +1,140 @@
+:root {
+  color-scheme: dark;
+  --bg: #0f1117;
+  --surface: #151922;
+  --surface-2: #1b202b;
+  --surface-3: #232938;
+  --border: #2b3242;
+  --text: #e6eaf2;
+  --muted: #8993a8;
+  --accent: #56b6c2;
+  --accent-2: #8ccf7e;
+  --success: #8ccf7e;
+  --warn: #e6b450;
+  --danger: #e06c75;
+  --shadow: 0 18px 48px rgb(0 0 0 / 0.28);
+  --editor-font-family: "Cascadia Mono", "Cascadia Code", Consolas, "Courier New", monospace;
+  --editor-font-size: 14px;
+  --editor-line-height: 20px;
+  --editor-tab-size: 4;
+  --app-bg-image: none;
+  --app-bg-opacity: 0;
+  --app-bg-brightness: 1;
+  --workspace-bg: var(--bg);
+  --glass-surface: var(--surface);
+  --glass-surface-2: var(--surface-2);
+  --glass-surface-3: var(--surface-3);
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+  --bg: #eef1f6;
+  --surface: #ffffff;
+  --surface-2: #f6f8fb;
+  --surface-3: #e8edf4;
+  --border: #d7deea;
+  --text: #1d2430;
+  --muted: #697386;
+  --shadow: 0 18px 42px rgb(36 47 70 / 0.14);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+button {
+  color: inherit;
+}
+
+.app-shell {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: grid;
+  grid-template-rows: 30px minmax(0, 1fr);
+  background:
+    linear-gradient(90deg, rgb(86 182 194 / 0.08), transparent 24%),
+    var(--bg);
+  background-size:
+    auto,
+    auto;
+  background-position:
+    0 0,
+    0 0;
+  overflow: hidden;
+}
+
+.app-shell.has-app-background {
+  background:
+    linear-gradient(0deg, color-mix(in srgb, var(--bg) 22%, transparent), color-mix(in srgb, var(--bg) 22%, transparent)),
+    linear-gradient(90deg, rgb(86 182 194 / 0.08), transparent 24%),
+    var(--bg);
+  background-size:
+    auto,
+    auto,
+    auto;
+  background-position:
+    0 0,
+    0 0,
+    0 0;
+}
+
+.app-shell::before {
+  content: "";
+  position: absolute;
+  inset: 30px 0 0;
+  z-index: 0;
+  background: var(--app-bg-image);
+  background-size: cover;
+  background-position: center;
+  opacity: var(--app-bg-opacity);
+  filter: brightness(var(--app-bg-brightness));
+  pointer-events: none;
+}
+
+.app-shell::after {
+  content: "aiopsterm";
+  position: absolute;
+  right: 24px;
+  bottom: 18px;
+  z-index: 1;
+  pointer-events: none;
+  color: color-mix(in srgb, var(--muted) 22%, transparent);
+  font-size: 44px;
+  font-weight: 700;
+  letter-spacing: 0;
+  opacity: 0;
+}
+
+.app-shell.watermark-enabled::after {
+  opacity: 0.2;
+}
+
+.app-shell.has-app-background {
+  --workspace-bg: color-mix(in srgb, var(--bg) 6%, transparent);
+  --glass-surface: color-mix(in srgb, var(--surface) 36%, transparent);
+  --glass-surface-2: color-mix(in srgb, var(--surface-2) 32%, transparent);
+  --glass-surface-3: color-mix(in srgb, var(--surface-3) 30%, transparent);
+  --readable-surface: color-mix(in srgb, var(--surface-2) 82%, transparent);
+  --readable-surface-strong: color-mix(in srgb, var(--surface) 86%, transparent);
+}

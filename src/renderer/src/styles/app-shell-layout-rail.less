@@ -1,0 +1,63 @@
+
+.app-body {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  min-height: 0;
+  height: 100%;
+}
+
+.mode-terminal {
+  grid-template-columns: 48px minmax(0, 1fr);
+}
+
+.mode-terminal.has-left-pane {
+  grid-template-columns: 48px auto 6px minmax(0, 1fr);
+}
+
+.mode-terminal.has-right-pane {
+  grid-template-columns: 48px minmax(0, 1fr) 6px auto;
+}
+
+.mode-terminal.has-left-pane.has-right-pane {
+  grid-template-columns: 48px auto 6px minmax(0, 1fr) 6px auto;
+}
+
+.mode-agents {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.mode-agents.has-left-pane {
+  grid-template-columns: auto 6px minmax(0, 1fr);
+}
+
+.side-rail {
+  width: 48px;
+  border-right: 1px solid var(--border);
+  background: var(--glass-surface);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 8px 6px;
+}
+
+.rail-main,
+.rail-bottom {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.rail-button {
+  width: 34px;
+  height: 34px;
+  color: var(--muted);
+}
+
+.rail-button.active {
+  background: color-mix(in srgb, var(--accent) 20%, var(--glass-surface-2));
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+}
+
+@import './user-entry.less';

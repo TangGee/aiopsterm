@@ -1,0 +1,63 @@
+
+.extension_drag_placeholder {
+  position: relative;
+  min-height: 56px;
+  margin: 10px;
+  border: 1px dashed var(--border);
+  border-radius: 7px;
+  color: var(--muted);
+  display: grid;
+  place-items: center;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.extension_panel.drag-active .extension_drag_placeholder {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.extension_drag_placeholder svg:first-child {
+  width: 20px;
+  height: 20px;
+}
+
+.extension_drag_placeholder svg:first-child:is(.lucide-loader-circle) {
+  animation: spin 0.9s linear infinite;
+}
+
+.extension_notice {
+  flex: 0 0 auto;
+  margin: 0 12px 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--text);
+  padding: 8px 10px;
+  font-size: 12px;
+}
+
+.icon-jumpserver {
+  color: #2dd4bf;
+}
+
+.icon-alias {
+  color: #3b82f6;
+}
+
+.icon-runbook {
+  color: #8ccf7e;
+}
+
+.icon-cloud {
+  color: #60a5fa;
+}
+
+.icon-private {
+  color: #e6b450;
+}
+
+.icon-local {
+  color: #c084fc;
+}

@@ -1,0 +1,68 @@
+
+.feature_list {
+  padding: 14px 0;
+  display: grid;
+  gap: 10px;
+}
+
+.feature_item {
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-2);
+  padding: 12px;
+}
+
+.feature_item p {
+  margin: 5px 0 0;
+  color: var(--muted);
+}
+
+.empty_readme {
+  color: var(--muted);
+  padding: 20px 0;
+}
+
+.sidebar {
+  padding-top: 20px;
+}
+
+.sidebar_block {
+  margin-bottom: 28px;
+}
+
+.sidebar_title {
+  margin: 0 0 12px;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.metadata_descriptions {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr);
+  gap: 9px 10px;
+  margin: 0;
+  font-size: 12px;
+}
+
+.metadata_descriptions dt {
+  color: var(--muted);
+}
+
+.metadata_descriptions dd {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.metadata_descriptions dd:hover {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.categories_tags {
+  flex-wrap: wrap;
+}
