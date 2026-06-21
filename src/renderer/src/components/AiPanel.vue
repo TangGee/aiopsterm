@@ -1608,7 +1608,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, type Component, type ComponentPublicInstance } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, toRef, watch, type Component, type ComponentPublicInstance } from 'vue'
 import 'highlight.js/styles/atom-one-dark.css'
 import '@xterm/xterm/css/xterm.css'
 import {
@@ -1724,26 +1724,18 @@ import {
   type AiPanelCommandSuggestionMessage as CommandSuggestionMessage
 } from '@/services/aiPanelMessageRuntime'
 import {
-  activateAiChatSearchMatch,
   aiConversationTabTooltip,
   aiHistoryDateLabel,
-  clearAiChatSearchHighlights,
-  closeAiConversationTab,
   displayAiConversationTitle,
-  ensureAiConversationTabId,
   filterAiHistoryConversations,
   formatAiHistoryTime,
   groupAiHistoryConversations,
   hasMoreAiHistoryConversations,
-  nextAiChatSearchPosition,
-  nextAiHistoryPageAfterDelete,
-  previousAiChatSearchPosition,
-  pruneAiConversationTabIds,
-  runAiChatSearchHighlights,
   visibleAiConversationTabs,
-  visibleAiHistoryConversations,
-  type AiPanelChatSearchMatch
+  visibleAiHistoryConversations
 } from '@/services/aiPanelConversationRuntime'
+import { createAiPanelChatSearchRuntime, createEmptyAiPanelChatSearchRuntimeState } from '@/services/aiPanelChatSearchRuntime'
+import { createAiPanelHistoryRuntime, createEmptyAiPanelHistoryRuntimeState } from '@/services/aiPanelHistoryRuntime'
 import {
   aiPanelDropEffect,
   canAcceptAiPanelDrop as canAcceptAiPanelRuntimeDrop,
@@ -1785,10 +1777,7 @@ import {
   type AiPanelCodexTerminalConversation
 } from '@/services/aiPanelCodexTerminalRuntime'
 import { writeRendererRuntimeLog as writeAiRuntimeLog } from '@/services/runtimeLogClient'
-import {
-  isAiChatExportData,
-  malformedAiBackendResultMessage
-} from '@/services/aiBackendGuards'
+import { malformedAiBackendResultMessage } from '@/services/aiBackendGuards'
 import { useI18n } from '@/i18n'
 import type {
   AiChipContentPart,
@@ -1857,21 +1846,23 @@ const modelQuery = ref('')
 const dropActive = ref(false)
 const syncingFromEditable = ref(false)
 const inputPlaceholderNotice = ref('')
-const chatSearchOpen = ref(false)
-const chatSearchTerm = ref('')
-const chatSearchMatchCount = ref(0)
-const chatSearchCurrentIndex = ref(0)
+const historyRuntimeState = reactive(createEmptyAiPanelHistoryRuntimeState())
+const chatSearchRuntimeState = reactive(createEmptyAiPanelChatSearchRuntimeState())
+const chatSearchOpen = toRef(historyRuntimeState, 'chatSearchOpen')
+const chatSearchTerm = toRef(chatSearchRuntimeState, 'term')
+const chatSearchMatchCount = toRef(chatSearchRuntimeState, 'matchCount')
+const chatSearchCurrentIndex = toRef(chatSearchRuntimeState, 'currentIndex')
 const panelModeMenuOpen = ref(false)
-const moreActionsMenuOpen = ref(false)
-const historyMenuOpen = ref(false)
-const historySearchTerm = ref('')
-const historyFavoritesOnly = ref(false)
-const historyCurrentPage = ref(1)
-const historyLoadingMore = ref(false)
-const editingHistoryId = ref<string | null>(null)
-const editingHistoryTitle = ref('')
-const chatExportNotice = ref('')
-const openConversationTabIds = ref<string[]>([])
+const moreActionsMenuOpen = toRef(historyRuntimeState, 'moreActionsMenuOpen')
+const historyMenuOpen = toRef(historyRuntimeState, 'historyMenuOpen')
+const historySearchTerm = toRef(historyRuntimeState, 'historySearchTerm')
+const historyFavoritesOnly = toRef(historyRuntimeState, 'historyFavoritesOnly')
+const historyCurrentPage = toRef(historyRuntimeState, 'historyCurrentPage')
+const historyLoadingMore = toRef(historyRuntimeState, 'historyLoadingMore')
+const editingHistoryId = toRef(historyRuntimeState, 'editingHistoryId')
+const editingHistoryTitle = toRef(historyRuntimeState, 'editingHistoryTitle')
+const chatExportNotice = toRef(historyRuntimeState, 'chatExportNotice')
+const openConversationTabIds = toRef(historyRuntimeState, 'openConversationTabIds')
 const commandAuditTextareaRef = ref<HTMLTextAreaElement | null>(null)
 const commandAuditDialog = ref({
   open: false,
@@ -1887,8 +1878,6 @@ const codexConversations = ref<CodexConversation[]>([])
 const activeCodexConversationId = ref('')
 let classicChatDataLoaded = false
 let inputPlaceholderNoticeTimer: number | undefined
-let chatSearchTimer: number | undefined
-let chatExportNoticeTimer: number | undefined
 let chatScrollFrame: number | undefined
 const historyPageSize = 20
 const historyFavoriteLabel = computed(() => t('ai.historyFavoriteGroup'))
@@ -1978,13 +1967,8 @@ const filteredCodexHostTargets = computed(() => {
     .filter((host) => !keyword || `${host.label} ${host.detail || ''} ${host.host || ''} ${host.assetName || ''}`.toLowerCase().includes(keyword))
     .slice(0, 20)
 })
-const ensureConversationTab = (id: string) => {
-  openConversationTabIds.value = ensureAiConversationTabId(openConversationTabIds.value, workspace.conversations, id)
-}
-
-const pruneConversationTabs = () => {
-  openConversationTabIds.value = pruneAiConversationTabIds(openConversationTabIds.value, workspace.conversations)
-}
+const ensureConversationTab = (id: string) => aiPanelHistoryRuntime.ensureConversationTab(id)
+const pruneConversationTabs = () => aiPanelHistoryRuntime.pruneConversationTabs()
 const historyLabels = computed(() => ({
   today: t('ai.historyToday'),
   yesterday: t('ai.historyYesterday'),
@@ -2005,6 +1989,59 @@ const groupedVisibleHistory = computed(() => {
   return groupAiHistoryConversations(visibleHistoryConversations.value, (conversation) =>
     historyFavoritesOnly.value ? labels.favoriteGroup : aiHistoryDateLabel(conversation.ts, new Date(), locale.value, labels)
   )
+})
+
+const aiPanelHistoryRuntime = createAiPanelHistoryRuntime<ConversationItem>({
+  state: historyRuntimeState,
+  conversations: () => workspace.conversations,
+  selectedConversationId: () => workspace.selectedConversationId,
+  visibleTabs: () => visibleConversationTabs.value,
+  visibleHistoryCount: () => visibleHistoryConversations.value.length,
+  chatMessageCount: () => workspace.chatMessages.length,
+  currentConversationTitle: () => getCurrentConversationTitle(),
+  exportMessages: () => workspace.chatMessages.map(chatExportMessage),
+  createConversation: () => workspace.createConversation(),
+  restoreConversation: (id) => workspace.restoreConversation(id),
+  renameConversation: (id, title) => workspace.renameConversation(id, title),
+  deleteConversation: (id) => workspace.deleteConversation(id),
+  toggleConversationFavorite: (id) => workspace.toggleConversationFavorite(id),
+  loadConversations: () => workspace.loadChatConversationsFromBackend({ restoreIfEmpty: false }),
+  exportChat: () => aiChatClient.exportChat(),
+  closeContextPopup: () => closeContextPopup(),
+  closeCommandPopup: () => closeCommandPopup(),
+  closeModelMenu: () => {
+    modeMenuOpen.value = false
+    closeModelMenu()
+  },
+  focusHistorySearchInput: () => nextTick(() => historySearchInputRef.value?.focus()),
+  focusHistoryTitleInput: () =>
+    nextTick(() => {
+      const input = historySearchInputRef.value?.closest('.ai-history-dropdown')?.querySelector<HTMLInputElement>('.ai-history-title-input')
+      input?.focus()
+      input?.select()
+    }),
+  setNoticeTimer: (callback, delay) => window.setTimeout(callback, delay),
+  clearNoticeTimer: (timer) => window.clearTimeout(timer as number),
+  labels: {
+    chatCreated: () => t('ai.chatCreated'),
+    chatCreateFailed: () => t('ai.chatCreateFailed'),
+    chatRestored: () => t('ai.chatRestored'),
+    chatRestoreFailed: () => t('ai.chatRestoreFailed'),
+    keepOneTab: () => t('ai.keepOneTab'),
+    tabClosed: () => t('ai.tabClosed'),
+    historyTitleUpdated: () => t('ai.historyTitleUpdated'),
+    historyTitleUpdateFailed: () => t('ai.historyTitleUpdateFailed'),
+    chatDeleted: () => t('ai.chatDeleted'),
+    chatDeleteFailed: () => t('ai.chatDeleteFailed'),
+    historyFavorited: () => t('ai.historyFavorited'),
+    historyUnfavorited: () => t('ai.historyUnfavorited'),
+    historyFavoriteUpdateFailed: () => t('ai.historyFavoriteUpdateFailed'),
+    exportEmpty: () => '当前会话为空，无法导出。',
+    exportUnavailable: () => '聊天导出服务不可用。',
+    exportFailed: (message) => `导出失败：${message}`,
+    exportMalformed: () => `导出失败：${malformedAiBackendResultMessage}`,
+    exportSuccess: () => '聊天已导出。'
+  }
 })
 
 const loadClassicChatData = async () => {
@@ -2231,9 +2268,6 @@ const closeModelMenu = () => {
   modelQuery.value = ''
 }
 
-const chatSearchMarks: HTMLElement[] = []
-const chatSearchMatches: AiPanelChatSearchMatch[] = []
-
 const formatHistoryTime = (timestamp: number) => formatAiHistoryTime(timestamp, new Date(), locale.value, historyLabels.value)
 
 const getCurrentConversationTitle = () =>
@@ -2249,12 +2283,7 @@ const copyRenderedTextToClipboard = async (text: string, label: string) => {
 }
 
 const showChatExportNotice = (message: string) => {
-  chatExportNotice.value = message
-  if (chatExportNoticeTimer) window.clearTimeout(chatExportNoticeTimer)
-  chatExportNoticeTimer = window.setTimeout(() => {
-    chatExportNotice.value = ''
-    chatExportNoticeTimer = undefined
-  }, 2400)
+  aiPanelHistoryRuntime.showNotice(message)
 }
 
 const copyMessageToClipboard = async (message: { text: string; contentParts?: AiContentPart[] }) => {
@@ -2290,6 +2319,28 @@ const scheduleChatScrollToBottom = () => {
     })
   })
 }
+
+const aiPanelChatSearchRuntime = createAiPanelChatSearchRuntime({
+  state: chatSearchRuntimeState,
+  isOpen: () => chatSearchOpen.value,
+  setOpen: (open) => {
+    chatSearchOpen.value = open
+    if (open) moreActionsMenuOpen.value = false
+  },
+  root: () => chatScrollRef.value,
+  closePopups: () => closePopups(),
+  focusSearchInput: () => chatSearchInputRef.value?.focus(),
+  afterDomUpdate: () => nextTick(),
+  scheduleScrollToBottom: scheduleChatScrollToBottom,
+  setSearchTimer: (callback, delay) => window.setTimeout(callback, delay),
+  clearSearchTimer: (timer) => window.clearTimeout(timer as number)
+})
+
+const openChatSearch = () => aiPanelChatSearchRuntime.openSearch()
+const closeChatSearch = () => aiPanelChatSearchRuntime.closeSearch()
+const clearChatSearch = () => aiPanelChatSearchRuntime.clearSearch()
+const findNextChatMatch = () => aiPanelChatSearchRuntime.findNextMatch()
+const findPreviousChatMatch = () => aiPanelChatSearchRuntime.findPreviousMatch()
 
 const copyCommandToClipboard = async (message: CommandSuggestionMessage) => {
   const command = commandTextForMessage(message).trim()
@@ -2503,244 +2554,24 @@ const summarizeMessageToSkill = async (id: string) => {
   showChatExportNotice(result ? `已创建技能：${result.name}` : '沉淀到技能失败。')
 }
 
-const exportCurrentChat = async () => {
-  moreActionsMenuOpen.value = false
-  if (workspace.chatMessages.length === 0) {
-    showChatExportNotice('当前会话为空，无法导出。')
-    return
-  }
-  const exportChat = aiChatClient.exportChat()
-  if (typeof exportChat !== 'function') {
-    showChatExportNotice('聊天导出服务不可用。')
-    return
-  }
-  try {
-    const result = await exportChat({
-      title: getCurrentConversationTitle(),
-      messages: workspace.chatMessages.map(chatExportMessage)
-    })
-    if (!result?.ok) {
-      showChatExportNotice(`导出失败：${result?.errorMessage || '聊天导出失败。'}`)
-      return
-    }
-    if (!isAiChatExportData(result.data)) {
-      showChatExportNotice(`导出失败：${malformedAiBackendResultMessage}`)
-      return
-    }
-    if (result.data.canceled) return
-    showChatExportNotice('聊天已导出。')
-  } catch (error) {
-    showChatExportNotice(`导出失败：${error instanceof Error ? error.message : String(error)}`)
-  }
-}
-
-const openHistoryMenu = async () => {
-  chatSearchOpen.value = false
-  moreActionsMenuOpen.value = false
-  closeContextPopup()
-  closeCommandPopup()
-  modeMenuOpen.value = false
-  closeModelMenu()
-  await workspace.loadChatConversationsFromBackend({ restoreIfEmpty: false })
-  historyMenuOpen.value = true
-  await nextTick()
-  historySearchInputRef.value?.focus()
-}
-
-const closeHistoryMenu = () => {
-  historyMenuOpen.value = false
-  editingHistoryId.value = null
-  editingHistoryTitle.value = ''
-}
-
-const toggleHistoryMenu = () => {
-  if (historyMenuOpen.value) {
-    closeHistoryMenu()
-    return
-  }
-  void openHistoryMenu()
-}
-
-const toggleMoreActionsMenu = () => {
-  if (moreActionsMenuOpen.value) {
-    moreActionsMenuOpen.value = false
-    return
-  }
-  closeHistoryMenu()
-  moreActionsMenuOpen.value = true
-}
-
-const clearHistorySearch = () => {
-  historySearchTerm.value = ''
-  void nextTick(() => historySearchInputRef.value?.focus())
-}
-
-const createNewAiConversation = async () => {
-  const created = await workspace.createConversation()
-  historySearchTerm.value = ''
-  historyCurrentPage.value = 1
-  if (created) {
-    closeHistoryMenu()
-    showChatExportNotice(t('ai.chatCreated'))
-  } else {
-    showChatExportNotice(t('ai.chatCreateFailed'))
-  }
-}
-
-const restoreConversationById = async (id: string, successMessage = t('ai.chatRestored'), failureMessage = t('ai.chatRestoreFailed')) => {
-  if (editingHistoryId.value) return false
-  const restored = await workspace.restoreConversation(id)
-  if (restored) ensureConversationTab(id)
-  showChatExportNotice(restored ? successMessage : failureMessage)
-  return restored
-}
-
-const restoreConversationFromTab = async (id: string) => {
-  if (workspace.selectedConversationId === id) return
-  closeHistoryMenu()
-  await restoreConversationById(id)
-}
-
-const closeConversationTab = async (id: string) => {
-  closeHistoryMenu()
-  const result = closeAiConversationTab(openConversationTabIds.value, visibleConversationTabs.value, workspace.selectedConversationId, id)
-  if (result.status === 'keep-one') {
-    showChatExportNotice(t('ai.keepOneTab'))
-    return
-  }
-  openConversationTabIds.value = result.openIds
-  if (result.status === 'closed-inactive' || result.status === 'closed') {
-    showChatExportNotice(t('ai.tabClosed'))
-    return
-  }
-  await restoreConversationById(result.nextConversationId, t('ai.tabClosed'), t('ai.chatRestoreFailed'))
-}
-
-const restoreHistoryConversation = async (id: string) => {
-  const restored = await restoreConversationById(id)
-  if (restored) {
-    closeHistoryMenu()
-  }
-}
-
-const editHistoryTitle = async (id: string) => {
-  const conversation = workspace.conversations.find((item) => item.id === id)
-  if (!conversation) return
-  editingHistoryId.value = id
-  editingHistoryTitle.value = conversation.title
-  await nextTick()
-  const input = historySearchInputRef.value?.closest('.ai-history-dropdown')?.querySelector<HTMLInputElement>('.ai-history-title-input')
-  input?.focus()
-  input?.select()
-}
-
-const cancelHistoryTitleEdit = () => {
-  editingHistoryId.value = null
-  editingHistoryTitle.value = ''
-}
-
-const saveHistoryTitle = async (id: string) => {
-  if (!editingHistoryId.value) return
-  const saved = await workspace.renameConversation(id, editingHistoryTitle.value)
-  cancelHistoryTitleEdit()
-  showChatExportNotice(saved ? t('ai.historyTitleUpdated') : t('ai.historyTitleUpdateFailed'))
-}
-
-const deleteHistoryConversation = async (id: string) => {
-  const deleted = await workspace.deleteConversation(id)
-  historyCurrentPage.value = nextAiHistoryPageAfterDelete(visibleHistoryConversations.value.length, historyCurrentPage.value)
-  showChatExportNotice(deleted ? t('ai.chatDeleted') : t('ai.chatDeleteFailed'))
-}
-
-const toggleHistoryFavorite = async (id: string) => {
-  const toggled = await workspace.toggleConversationFavorite(id)
-  const conversation = workspace.conversations.find((item) => item.id === id)
-  showChatExportNotice(toggled ? (conversation?.favorite ? t('ai.historyFavorited') : t('ai.historyUnfavorited')) : t('ai.historyFavoriteUpdateFailed'))
-}
-
-const loadMoreHistoryConversations = async () => {
-  if (historyLoadingMore.value || !hasMoreHistoryConversations.value) return
-  historyLoadingMore.value = true
-  try {
-    const refreshed = await workspace.loadChatConversationsFromBackend({ restoreIfEmpty: false })
-    if (!refreshed) return
-    historyCurrentPage.value += 1
-  } finally {
-    historyLoadingMore.value = false
-  }
-}
-
-const clearChatHighlights = () => {
-  clearAiChatSearchHighlights(chatSearchMarks)
-  chatSearchMatches.splice(0)
-  chatSearchMatchCount.value = 0
-  chatSearchCurrentIndex.value = 0
-}
-
-const setActiveChatSearchMatch = (index: number) => {
-  activateAiChatSearchMatch(chatSearchMatches, index)
-}
-
-const runChatSearch = () => {
-  const root = chatScrollRef.value
-  clearChatHighlights()
-  const term = chatSearchTerm.value.trim()
-  if (!root || !term) return
-
-  const result = runAiChatSearchHighlights(root, term)
-  chatSearchMarks.push(...result.marks)
-  chatSearchMatches.push(...result.matches)
-  chatSearchMatchCount.value = result.matchCount
-  chatSearchCurrentIndex.value = result.currentIndex
-}
-
-const scheduleChatSearch = () => {
-  if (chatSearchTimer) window.clearTimeout(chatSearchTimer)
-  chatSearchTimer = window.setTimeout(() => {
-    runChatSearch()
-    chatSearchTimer = undefined
-  }, 200)
-}
-
-const openChatSearch = async () => {
-  chatSearchOpen.value = true
-  moreActionsMenuOpen.value = false
-  closePopups()
-  await nextTick()
-  chatSearchInputRef.value?.focus()
-  if (chatSearchTerm.value.trim()) runChatSearch()
-}
-
-const closeChatSearch = () => {
-  chatSearchOpen.value = false
-  chatSearchTerm.value = ''
-  if (chatSearchTimer) {
-    window.clearTimeout(chatSearchTimer)
-    chatSearchTimer = undefined
-  }
-  clearChatHighlights()
-}
-
-const clearChatSearch = async () => {
-  chatSearchTerm.value = ''
-  clearChatHighlights()
-  await nextTick()
-  chatSearchInputRef.value?.focus()
-}
-
-const findNextChatMatch = () => {
-  const next = nextAiChatSearchPosition(chatSearchCurrentIndex.value, chatSearchMatches.length)
-  if (!next) return
-  chatSearchCurrentIndex.value = next.currentIndex
-  setActiveChatSearchMatch(next.activeIndex)
-}
-
-const findPreviousChatMatch = () => {
-  const previous = previousAiChatSearchPosition(chatSearchCurrentIndex.value, chatSearchMatches.length)
-  if (!previous) return
-  chatSearchCurrentIndex.value = previous.currentIndex
-  setActiveChatSearchMatch(previous.activeIndex)
-}
+const exportCurrentChat = () => aiPanelHistoryRuntime.exportCurrentChat()
+const openHistoryMenu = () => aiPanelHistoryRuntime.openHistoryMenu()
+const closeHistoryMenu = () => aiPanelHistoryRuntime.closeHistoryMenu()
+const toggleHistoryMenu = () => aiPanelHistoryRuntime.toggleHistoryMenu()
+const toggleMoreActionsMenu = () => aiPanelHistoryRuntime.toggleMoreActionsMenu()
+const clearHistorySearch = () => void aiPanelHistoryRuntime.clearHistorySearch()
+const createNewAiConversation = () => aiPanelHistoryRuntime.createNewConversation()
+const restoreConversationById = (id: string, successMessage = t('ai.chatRestored'), failureMessage = t('ai.chatRestoreFailed')) =>
+  aiPanelHistoryRuntime.restoreConversationById(id, successMessage, failureMessage)
+const restoreConversationFromTab = (id: string) => aiPanelHistoryRuntime.restoreConversationFromTab(id)
+const closeConversationTab = (id: string) => aiPanelHistoryRuntime.closeConversationTab(id)
+const restoreHistoryConversation = (id: string) => aiPanelHistoryRuntime.restoreHistoryConversation(id)
+const editHistoryTitle = (id: string) => aiPanelHistoryRuntime.editHistoryTitle(id)
+const cancelHistoryTitleEdit = () => aiPanelHistoryRuntime.cancelHistoryTitleEdit()
+const saveHistoryTitle = (id: string) => aiPanelHistoryRuntime.saveHistoryTitle(id)
+const deleteHistoryConversation = (id: string) => aiPanelHistoryRuntime.deleteHistoryConversation(id)
+const toggleHistoryFavorite = (id: string) => aiPanelHistoryRuntime.toggleHistoryFavorite(id)
+const loadMoreHistoryConversations = () => aiPanelHistoryRuntime.loadMoreHistoryConversations(hasMoreHistoryConversations.value)
 
 type AiCommandOption = AiCommandCatalogOption
 
@@ -3925,14 +3756,11 @@ watch(contextQuery, () => {
 })
 
 watch(chatSearchTerm, () => {
-  if (!chatSearchOpen.value) return
-  scheduleChatSearch()
+  aiPanelChatSearchRuntime.handleSearchTermChanged()
 })
 
 watch([historySearchTerm, historyFavoritesOnly], () => {
-  historyCurrentPage.value = 1
-  editingHistoryId.value = null
-  editingHistoryTitle.value = ''
+  aiPanelHistoryRuntime.resetHistoryFilters()
 })
 
 watch(
@@ -3963,12 +3791,7 @@ watch(
       )
       .join('|'),
   async () => {
-    if (!chatSearchOpen.value || !chatSearchTerm.value.trim()) {
-      scheduleChatScrollToBottom()
-      return
-    }
-    await nextTick()
-    runChatSearch()
+    await aiPanelChatSearchRuntime.syncSearchForMessages()
   },
   { immediate: true }
 )
@@ -4072,11 +3895,10 @@ onBeforeUnmount(() => {
   })
   disposeCodexSubscriptions()
   if (chatScrollFrame !== undefined) window.cancelAnimationFrame(chatScrollFrame)
-  if (chatSearchTimer) window.clearTimeout(chatSearchTimer)
-  if (chatExportNoticeTimer) window.clearTimeout(chatExportNoticeTimer)
+  aiPanelChatSearchRuntime.dispose()
+  aiPanelHistoryRuntime.clearNoticeTimer()
   if (inputPlaceholderNoticeTimer) window.clearTimeout(inputPlaceholderNoticeTimer)
   aiPanelVoiceRuntime.dispose()
-  clearChatHighlights()
 })
 
 </script>
