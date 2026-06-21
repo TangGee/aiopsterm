@@ -1,0 +1,207 @@
+
+.asset-form-panel {
+  width: 260px;
+  border-left: 1px solid var(--border);
+  background: var(--surface);
+  padding: 12px;
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  transition: width 0.2s ease;
+  overflow: auto;
+}
+
+.asset-host-form-modal {
+  width: min(560px, calc(100vw - 40px));
+  max-height: min(760px, calc(100vh - 40px));
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+}
+
+.assets-panel-workspace-mode .asset-form-panel {
+  width: 340px;
+}
+
+.assets-panel-workspace-mode .asset-host-form-modal {
+  width: min(620px, calc(100vw - 40px));
+}
+
+.asset-proxy-form-modal {
+  width: min(520px, calc(100vw - 40px));
+  max-height: min(640px, calc(100vh - 40px));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-content: start;
+}
+
+.asset-proxy-port-field input {
+  max-width: 112px;
+}
+
+.asset-form-wide {
+  grid-column: 1 / -1;
+}
+
+.asset-import-help-modal {
+  width: min(520px, calc(100vw - 40px));
+}
+
+.asset-import-help-content {
+  display: grid;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.asset-import-help-content p {
+  margin: 0;
+}
+
+.asset-form-panel.collapsed {
+  width: 0;
+  padding: 0;
+  border-left: 0;
+  overflow: hidden;
+}
+
+.asset-form-panel header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.asset-form-panel header button {
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.asset-form-panel label {
+  display: grid;
+  gap: 5px;
+}
+
+.asset-form-panel label span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.asset-field-heading,
+.workspace-field-heading {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.asset-field-heading button,
+.workspace-field-heading button {
+  height: 22px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--accent);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 0 6px;
+}
+
+.asset-field-heading button:hover,
+.workspace-field-heading button:hover {
+  background: var(--surface-3);
+}
+
+.asset-form-panel input,
+.asset-form-panel select,
+.asset-form-panel textarea {
+  height: 30px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--text);
+  padding: 0 8px;
+}
+
+.asset-form-panel textarea {
+  height: 96px;
+  resize: vertical;
+  padding: 8px;
+  line-height: 1.4;
+  font-family: inherit;
+}
+
+.asset-proxy-empty {
+  min-height: 72px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 8px;
+  padding: 10px;
+  text-align: center;
+}
+
+.asset-proxy-empty small {
+  color: var(--muted);
+}
+
+.asset-proxy-empty button {
+  height: 26px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+  padding: 0 8px;
+}
+
+.asset-proxy-empty button:hover {
+  background: var(--surface-3);
+}
+
+.asset-proxy-management-page {
+  min-height: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.asset-management-title {
+  flex: 1;
+  min-width: 180px;
+  display: grid;
+  gap: 2px;
+}
+
+.asset-management-title small {
+  color: var(--muted);
+}
+
+.asset-proxy-list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 10px;
+}
+
+.asset-inline-check {
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+}
+
+.asset-inline-check input {
+  width: 16px;
+  height: 16px;
+}
+
+.workspace-host-inline-empty {
+  min-height: 56px;
+}
