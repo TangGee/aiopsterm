@@ -1,8 +1,8 @@
 import { createServer, type Server, type Socket } from 'net'
 import { randomBytes, randomUUID } from 'crypto'
 import { appendFileSync, existsSync, rmSync } from 'fs'
-import { basename, dirname, join } from 'path'
-import { mkdir, readdir, readFile, readlink, writeFile } from 'fs/promises'
+import { dirname, join } from 'path'
+import { mkdir, readdir, readFile, writeFile } from 'fs/promises'
 import { freemem, loadavg, totalmem, uptime } from 'os'
 import type { BrowserWindow, IpcMain } from 'electron'
 import { sendWindowEvent } from '@shared/windowEvents'
@@ -27,6 +27,26 @@ import {
   replyManagedAiSession
 } from './agentSessions'
 import { installAgentHook, listAgentHookInstallers, uninstallAgentHook } from './agentHookInstaller'
+import {
+  agentVaultPathFor,
+  configureAgentVaultRuntime,
+  handleAgentVaultControlRequest,
+  loadAgentVaultStore,
+  prepareAgentVaultTeamLaunchParams,
+  resetAgentVaultRuntimeState,
+  sortedAgentVaultEntries
+} from './controlSocketAgentVault'
+import {
+  configureControlSocketTerminalTools,
+  handleTerminalBufferControlRequest,
+  handleTmuxCompatControlRequest,
+  listTerminalBuffers,
+  listTmuxCompatHooks,
+  resetControlSocketTerminalTools,
+  sendTerminalKey,
+  sendTerminalText,
+  terminalPanelId
+} from './controlSocketTerminalTools'
 
 type ControlSocketRequest = {
   id?: string
@@ -126,77 +146,6 @@ type SidebarLogEntry = {
   createdAt: number
 }
 
-type TerminalBufferEntry = {
-  name: string
-  text: string
-  size: number
-  createdAt: number
-  updatedAt: number
-}
-
-type TmuxCompatHookEntry = {
-  event: string
-  command: string
-  createdAt: number
-  updatedAt: number
-}
-
-type AgentVaultEntry = {
-  id: string
-  name: string
-  builtIn?: boolean
-  description?: string
-  executable?: string
-  detect?: AgentVaultDetectRule
-  sessionIdSource?: AgentVaultSessionIdSource
-  launchCommand?: string
-  resumeCommand?: string
-  forkCommand?: string
-  sessionDirectory?: string
-  cwd?: 'preserve' | 'ignore'
-  icon?: string
-  createdAt: number
-  updatedAt: number
-}
-
-type AgentVaultDetectRule = {
-  processName?: string
-  argvContains?: string[]
-  executableContains?: string
-  commandContains?: string[]
-}
-
-type AgentVaultSessionIdSource =
-  | { type: 'provided' }
-  | { type: 'argvOption'; argvOption: string }
-  | { type: 'env'; envVar: string }
-  | { type: 'fixed'; value: string }
-  | { type: 'piSessionFile' }
-
-type AgentVaultProcessSnapshot = {
-  pid?: number
-  ppid?: number
-  pgid?: number
-  processName?: string
-  executable?: string
-  argv: string[]
-  commandLine?: string
-  cwd?: string
-  env?: Record<string, string>
-  sessionId?: string
-  sessionPath?: string
-}
-
-type AgentVaultScanTarget = {
-  panelId: string
-  sessionId?: string
-  title: string
-  cwd?: string
-  processId: number
-  processGroupId?: number
-  shell?: string
-}
-
 type SessionSnapshotStore = {
   version: 1
   snapshots: ControlSessionSnapshot[]
@@ -208,11 +157,7 @@ const maxNotifications = 500
 const eventReplayLimit = 4096
 const eventHeartbeatIntervalMs = 15000
 const eventProtocol = 'aiopsterm-events' as const
-const maxAgentVaultEntries = 200
-const maxAgentVaultCommandLength = 2000
 const maxSessionSnapshots = 20
-const maxAgentVaultScanTerminals = 20
-const maxAgentVaultScanProcessesPerTerminal = 512
 const maxWaitForNameLength = 128
 const maxWaitForSignals = 512
 const maxWaitForWaiters = 256
@@ -220,10 +165,6 @@ const defaultWaitForTimeoutMs = 30000
 const maxWaitForTimeoutMs = 300000
 const maxSidebarStatusEntries = 200
 const maxSidebarLogEntries = 500
-const maxTerminalBuffers = 100
-const maxTerminalBufferBytes = 1024 * 1024
-const maxTmuxCompatHooks = 100
-const maxTmuxCompatHookCommandLength = 2000
 const controlSocketCapabilities = [
   'ping',
   'system.ping',
@@ -309,10 +250,6 @@ let eventLogStorePath = ''
 let eventLogLoadedPath = ''
 const eventSubscriptions = new Map<string, ControlEventSubscription>()
 let mobileEventSubscriptions = new Map<string, MobileEventSubscription>()
-let agentVaultStorePath = ''
-let agentVaultLoadedPath = ''
-let agentVaultEntries = new Map<string, AgentVaultEntry>()
-let agentVaultWriteQueue: Promise<void> = Promise.resolve()
 let sessionSnapshotStorePath = ''
 let sessionSnapshotLoadedPath = ''
 let sessionSnapshots: ControlSessionSnapshot[] = []
@@ -322,9 +259,6 @@ let waitForWaiters = new Map<string, Set<ControlWaitForWaiter>>()
 let sidebarStatusEntries = new Map<string, SidebarStatusEntry>()
 let sidebarProgressEntries = new Map<string, SidebarProgressEntry>()
 let sidebarLogEntries: SidebarLogEntry[] = []
-let terminalBuffers = new Map<string, TerminalBufferEntry>()
-let tmuxCompatHooks = new Map<string, TmuxCompatHookEntry>()
-
 const cleanText = (value: unknown) => (typeof value === 'string' ? value.trim() : '')
 
 const normalizeTimeoutMs = (value: unknown) => {
@@ -399,31 +333,6 @@ const cleanSidebarLevel = (value: unknown): SidebarLogEntry['level'] => {
   return 'info'
 }
 
-const cleanTerminalBufferName = (value: unknown) => {
-  const text = cleanText(value) || 'default'
-  if (text.length > 80) return ''
-  return /^[A-Za-z0-9._:-]+$/.test(text) ? text : ''
-}
-
-const cleanTmuxCompatHookEvent = (value: unknown) => {
-  const text = cleanText(value)
-  if (!text || text.length > 120) return ''
-  return /^[A-Za-z0-9._:-]+$/.test(text) ? text : ''
-}
-
-const cleanTmuxCompatHookCommand = (value: unknown) => {
-  const text = typeof value === 'string' ? value.trim() : ''
-  if (!text || Buffer.byteLength(text, 'utf8') > maxTmuxCompatHookCommandLength) return ''
-  return text
-}
-
-const terminalBufferText = (params: Record<string, unknown>) => {
-  const value = typeof params.text === 'string' ? params.text : typeof params.data === 'string' ? params.data : typeof params.value === 'string' ? params.value : ''
-  const bytes = Buffer.byteLength(value, 'utf8')
-  if (!value || bytes > maxTerminalBufferBytes) return { text: '', bytes }
-  return { text: value, bytes }
-}
-
 const ok = (data: Record<string, unknown> = {}): ControlResponse => ({ ok: true, data })
 
 const fail = (errorCode: string, errorMessage: string, data?: Record<string, unknown>): ControlResponse => ({
@@ -485,7 +394,6 @@ const systemIdentify = (params: Record<string, unknown> = {}) =>
     capabilities: controlSocketCapabilities
   })
 
-const agentVaultPathFor = (userDataPath: string) => join(userDataPath, 'control', 'agent-vault.json')
 const eventLogPathFor = (userDataPath: string) => join(userDataPath, 'control', 'events.jsonl')
 const sessionSnapshotPathFor = (userDataPath: string) => join(userDataPath, 'control', 'session-snapshots.json')
 
@@ -710,85 +618,6 @@ const notificationEventPayload = (notification: ControlNotificationRecord) => ({
   ...(notification.panelId ? { panel_id: notification.panelId, panelId: notification.panelId } : {}),
   ...(notification.sessionId ? { session_id: notification.sessionId, sessionId: notification.sessionId } : {}),
   ...(notification.source ? { source: notification.source } : {})
-})
-
-const normalizeAgentVaultId = (value: unknown) => cleanText(value).toLowerCase()
-
-const isValidAgentVaultId = (value: string) => /^[a-z0-9][a-z0-9._-]{0,63}$/.test(value)
-
-const cleanAgentVaultCommand = (value: unknown) => {
-  const text = cleanText(value)
-  return text && text.length <= maxAgentVaultCommandLength ? text : ''
-}
-
-const cleanAgentVaultTextList = (value: unknown): string[] => {
-  if (Array.isArray(value)) return value.map(cleanText).filter(Boolean).slice(0, 20)
-  const text = cleanText(value)
-  if (!text) return []
-  return text
-    .split(',')
-    .map((item) => item.trim())
-    .filter(Boolean)
-    .slice(0, 20)
-}
-
-const nestedRecord = (value: unknown) => (value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null)
-
-const normalizeAgentVaultDetectRule = (value: unknown, existing?: AgentVaultDetectRule): AgentVaultDetectRule | undefined => {
-  const record = nestedRecord(value)
-  const processName = cleanText(record?.processName || record?.process_name || record?.name || existing?.processName)
-  const executableContains = cleanText(record?.executableContains || record?.executable_contains || existing?.executableContains)
-  const argvContains = cleanAgentVaultTextList(record?.argvContains || record?.argv_contains)
-  const commandContains = cleanAgentVaultTextList(record?.commandContains || record?.command_contains)
-  const mergedArgvContains = argvContains.length ? argvContains : existing?.argvContains || []
-  const mergedCommandContains = commandContains.length ? commandContains : existing?.commandContains || []
-  const rule: AgentVaultDetectRule = {
-    ...(processName ? { processName } : {}),
-    ...(mergedArgvContains.length ? { argvContains: mergedArgvContains } : {}),
-    ...(executableContains ? { executableContains } : {}),
-    ...(mergedCommandContains.length ? { commandContains: mergedCommandContains } : {})
-  }
-  return Object.keys(rule).length ? rule : undefined
-}
-
-const normalizeAgentVaultSessionIdSource = (value: unknown, existing?: AgentVaultSessionIdSource): AgentVaultSessionIdSource | undefined => {
-  const record = nestedRecord(value)
-  const rawType = cleanText(record?.type || value || existing?.type)
-    .toLowerCase()
-    .replace(/[\s_-]+/g, '')
-  if (!rawType) return existing
-  if (rawType === 'provided') return { type: 'provided' }
-  if (rawType === 'argvoption' || rawType === 'argv') {
-    const argvOption = cleanText(record?.argvOption || record?.argv_option || record?.option || (existing?.type === 'argvOption' ? existing.argvOption : ''))
-    return argvOption ? { type: 'argvOption', argvOption } : existing
-  }
-  if (rawType === 'env' || rawType === 'environment') {
-    const envVar = cleanText(record?.envVar || record?.env_var || record?.name || (existing?.type === 'env' ? existing.envVar : ''))
-    return envVar ? { type: 'env', envVar } : existing
-  }
-  if (rawType === 'fixed' || rawType === 'constant') {
-    const fixed = cleanText(record?.value || record?.sessionId || record?.session_id || (existing?.type === 'fixed' ? existing.value : ''))
-    return fixed ? { type: 'fixed', value: fixed } : existing
-  }
-  if (rawType === 'pisessionfile') return { type: 'piSessionFile' }
-  return existing
-}
-
-const normalizeAgentVaultCwdMode = (value: unknown, existing?: AgentVaultEntry['cwd']) => {
-  const text = cleanText(value).toLowerCase()
-  if (text === 'preserve' || text === 'keep') return 'preserve'
-  if (text === 'ignore' || text === 'none') return 'ignore'
-  return existing
-}
-
-const cloneAgentVaultEntry = (entry: AgentVaultEntry): AgentVaultEntry => JSON.parse(JSON.stringify(entry)) as AgentVaultEntry
-
-const sortedAgentVaultEntries = () => [...agentVaultEntries.values()].sort((left, right) => left.id.localeCompare(right.id)).map(cloneAgentVaultEntry)
-
-const agentVaultPayload = (agent?: AgentVaultEntry | null) => ({
-  agents: sortedAgentVaultEntries(),
-  count: agentVaultEntries.size,
-  ...(agent ? { agent: cloneAgentVaultEntry(agent) } : {})
 })
 
 const cloneSessionSnapshot = (snapshot: ControlSessionSnapshot): ControlSessionSnapshot => JSON.parse(JSON.stringify(snapshot)) as ControlSessionSnapshot
@@ -1822,129 +1651,6 @@ const projectFileControlMethods = new Set([
 
 const isProjectFileControlMethod = (method: string) => projectFileControlMethods.has(method)
 
-const normalizeAgentVaultEntry = (value: unknown, existing?: AgentVaultEntry): AgentVaultEntry | null => {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
-  const record = value as Record<string, unknown>
-  const id = normalizeAgentVaultId(record.id || existing?.id)
-  if (!id || !isValidAgentVaultId(id)) return null
-  const name = cleanText(record.name) || existing?.name || id
-  const launchCommand = cleanAgentVaultCommand(record.launchCommand || record.launch_command || record.launch || record.command) || existing?.launchCommand
-  const resumeCommand = cleanAgentVaultCommand(record.resumeCommand || record.resume_command || record.resume) || existing?.resumeCommand
-  const forkCommand = cleanAgentVaultCommand(record.forkCommand || record.fork_command || record.fork) || existing?.forkCommand
-  const flatDetect = {
-    processName: record.processName || record.process_name,
-    argvContains: record.argvContains || record.argv_contains,
-    executableContains: record.executableContains || record.executable_contains,
-    commandContains: record.commandContains || record.command_contains
-  }
-  const detect = normalizeAgentVaultDetectRule(record.detect || flatDetect, existing?.detect)
-  const flatSessionSource = record.sessionIdSource || record.session_id_source
-    ? record.sessionIdSource || record.session_id_source
-    : record.argvOption || record.argv_option
-      ? { type: 'argvOption', argvOption: record.argvOption || record.argv_option }
-      : record.envVar || record.env_var
-        ? { type: 'env', envVar: record.envVar || record.env_var }
-        : undefined
-  const sessionIdSource = normalizeAgentVaultSessionIdSource(flatSessionSource, existing?.sessionIdSource)
-  const cwd = normalizeAgentVaultCwdMode(record.cwd || record.cwdMode || record.cwd_mode, existing?.cwd)
-  if (!launchCommand && !resumeCommand && !forkCommand) return null
-  const now = Date.now()
-  return {
-    id,
-    name,
-    ...(cleanText(record.description) || existing?.description ? { description: cleanText(record.description) || existing?.description } : {}),
-    ...(cleanText(record.executable) || existing?.executable ? { executable: cleanText(record.executable) || existing?.executable } : {}),
-    ...(detect ? { detect } : {}),
-    ...(sessionIdSource ? { sessionIdSource } : {}),
-    ...(launchCommand ? { launchCommand } : {}),
-    ...(resumeCommand ? { resumeCommand } : {}),
-    ...(forkCommand ? { forkCommand } : {}),
-    ...(cleanText(record.sessionDirectory || record.session_directory || record.sessionDir) || existing?.sessionDirectory
-      ? { sessionDirectory: cleanText(record.sessionDirectory || record.session_directory || record.sessionDir) || existing?.sessionDirectory }
-      : {}),
-    ...(cwd ? { cwd } : {}),
-    ...(cleanText(record.icon || record.iconAssetName) || existing?.icon ? { icon: cleanText(record.icon || record.iconAssetName) || existing?.icon } : {}),
-    createdAt: existing?.createdAt || now,
-    updatedAt: now
-  }
-}
-
-const defaultAgentVaultEntries = (): AgentVaultEntry[] => {
-  const now = Date.now()
-  return [
-    {
-      id: 'omp',
-      name: 'OMP',
-      builtIn: true,
-      executable: 'omp',
-      detect: { processName: 'omp' },
-      sessionIdSource: { type: 'piSessionFile' },
-      resumeCommand: '{{executable}} --session {{sessionId}}',
-      forkCommand: '{{executable}} --session {{sessionId}} --fork',
-      sessionDirectory: '~/.omp/agent/sessions',
-      cwd: 'preserve',
-      createdAt: now,
-      updatedAt: now
-    },
-    {
-      id: 'pi',
-      name: 'Pi',
-      builtIn: true,
-      executable: 'pi',
-      detect: { processName: 'pi', argvContains: ['pi'] },
-      sessionIdSource: { type: 'piSessionFile' },
-      resumeCommand: '{{executable}} --session {{sessionId}}',
-      forkCommand: '{{executable}} --session {{sessionId}} --fork',
-      sessionDirectory: '~/.pi/agent/sessions',
-      cwd: 'preserve',
-      createdAt: now,
-      updatedAt: now
-    }
-  ]
-}
-
-const seedDefaultAgentVaultEntries = () => {
-  for (const entry of defaultAgentVaultEntries()) {
-    if (!agentVaultEntries.has(entry.id)) agentVaultEntries.set(entry.id, entry)
-  }
-}
-
-const loadAgentVaultStore = async (userDataPath?: string) => {
-  if (userDataPath) agentVaultStorePath = agentVaultPathFor(userDataPath)
-  if (!agentVaultStorePath || agentVaultLoadedPath === agentVaultStorePath) return
-  agentVaultEntries = new Map()
-  seedDefaultAgentVaultEntries()
-  agentVaultLoadedPath = agentVaultStorePath
-  if (!existsSync(agentVaultStorePath)) return
-  try {
-    const raw = await readFile(agentVaultStorePath, 'utf-8')
-    const parsed = JSON.parse(raw) as unknown
-    const items = Array.isArray(parsed) ? parsed : parsed && typeof parsed === 'object' && Array.isArray((parsed as Record<string, unknown>).agents) ? ((parsed as Record<string, unknown>).agents as unknown[]) : []
-    for (const item of items.slice(0, maxAgentVaultEntries)) {
-      const entry = normalizeAgentVaultEntry(item)
-      if (entry) agentVaultEntries.set(entry.id, entry)
-    }
-  } catch {
-    agentVaultEntries = new Map()
-    seedDefaultAgentVaultEntries()
-  }
-}
-
-const persistAgentVaultStore = async () => {
-  if (!agentVaultStorePath) return
-  const payload = {
-    version: 1,
-    agents: sortedAgentVaultEntries().filter((entry) => entry.builtIn !== true)
-  }
-  agentVaultWriteQueue = agentVaultWriteQueue
-    .catch(() => undefined)
-    .then(async () => {
-      await mkdir(dirname(agentVaultStorePath), { recursive: true })
-      await writeFile(agentVaultStorePath, `${JSON.stringify(payload, null, 2)}\n`, 'utf-8')
-    })
-  await agentVaultWriteQueue
-}
-
 const loadSessionSnapshotStore = async (userDataPath?: string) => {
   if (userDataPath) sessionSnapshotStorePath = sessionSnapshotPathFor(userDataPath)
   if (!sessionSnapshotStorePath || sessionSnapshotLoadedPath === sessionSnapshotStorePath) return
@@ -1979,450 +1685,11 @@ const persistSessionSnapshotStore = async () => {
   await sessionSnapshotWriteQueue
 }
 
-const agentVaultEntryFor = (value: unknown) => {
-  const id = normalizeAgentVaultId(value)
-  return id ? agentVaultEntries.get(id) || null : null
-}
-
-const renderAgentVaultTemplate = (entry: AgentVaultEntry, template: string, params: Record<string, unknown>, options: { preserveDynamic?: boolean } = {}) => {
-  const dynamic = new Set(['index', 'count', 'cwd', 'prompt', 'role', 'model'])
-  const values: Record<string, string> = {
-    agentId: entry.id,
-    agentName: entry.name,
-    executable: cleanText(params.executable) || entry.executable || entry.id,
-    cwd: cleanText(params.cwd),
-    prompt: cleanText(params.prompt || params.message || params.instruction),
-    role: cleanText(params.role || params.agentRole),
-    model: cleanText(params.model),
-    index: cleanText(params.index) || '1',
-    count: cleanText(params.count) || cleanText(params.n) || '1',
-    sessionId: cleanText(params.sessionId || params.session_id),
-    sessionPath: cleanText(params.sessionPath || params.session_path),
-    sessionDir: cleanText(params.sessionDir || params.sessionDirectory || params.session_directory) || entry.sessionDirectory || ''
-  }
-  return template.replace(/\{\{([a-zA-Z][a-zA-Z0-9_]*)\}\}/g, (match, key: string) => {
-    if (options.preserveDynamic && dynamic.has(key)) return match
-    return Object.prototype.hasOwnProperty.call(values, key) ? values[key] : match
-  })
-}
-
 const cleanPositiveInteger = (value: unknown) => {
   const numberValue = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN
   if (!Number.isFinite(numberValue)) return undefined
   const normalized = Math.floor(numberValue)
   return normalized > 0 ? normalized : undefined
-}
-
-const splitCommandLine = (value: string) => {
-  const tokens: string[] = []
-  let current = ''
-  let quote: '"' | "'" | '' = ''
-  let escaped = false
-  for (const char of value.trim()) {
-    if (escaped) {
-      current += char
-      escaped = false
-      continue
-    }
-    if (char === '\\' && quote !== "'") {
-      escaped = true
-      continue
-    }
-    if ((char === '"' || char === "'") && (!quote || quote === char)) {
-      quote = quote ? '' : char
-      continue
-    }
-    if (!quote && /\s/.test(char)) {
-      if (current) tokens.push(current)
-      current = ''
-      continue
-    }
-    current += char
-  }
-  if (current) tokens.push(current)
-  return tokens
-}
-
-const normalizeAgentVaultProcessSnapshot = (value: unknown): AgentVaultProcessSnapshot | null => {
-  const record = nestedRecord(value)
-  if (!record) return null
-  const commandLine = cleanText(record.commandLine || record.command_line || record.command)
-  const argv = Array.isArray(record.argv)
-    ? record.argv.map(cleanText).filter(Boolean).slice(0, 200)
-    : Array.isArray(record.args)
-      ? record.args.map(cleanText).filter(Boolean).slice(0, 200)
-      : commandLine
-        ? splitCommandLine(commandLine).slice(0, 200)
-        : []
-  const envRecord = nestedRecord(record.env || record.environment)
-  const env = envRecord
-    ? Object.fromEntries(
-        Object.entries(envRecord)
-          .map(([key, val]) => [cleanText(key), cleanText(val)] as const)
-          .filter(([key, val]) => key && val)
-          .slice(0, 200)
-      )
-    : undefined
-  const executable = cleanText(record.executable || record.exe || record.path || argv[0])
-  const processName = cleanText(record.processName || record.process_name || record.name || (executable ? basename(executable) : ''))
-  return {
-    ...(cleanPositiveInteger(record.pid || record.processId || record.process_id) ? { pid: cleanPositiveInteger(record.pid || record.processId || record.process_id) } : {}),
-    ...(cleanPositiveInteger(record.ppid || record.parentProcessId || record.parent_process_id) ? { ppid: cleanPositiveInteger(record.ppid || record.parentProcessId || record.parent_process_id) } : {}),
-    ...(cleanPositiveInteger(record.pgid || record.processGroupId || record.process_group_id) ? { pgid: cleanPositiveInteger(record.pgid || record.processGroupId || record.process_group_id) } : {}),
-    ...(processName ? { processName } : {}),
-    ...(executable ? { executable } : {}),
-    argv,
-    ...(commandLine ? { commandLine } : argv.length ? { commandLine: argv.join(' ') } : {}),
-    ...(cleanText(record.cwd || record.workingDirectory || record.working_directory) ? { cwd: cleanText(record.cwd || record.workingDirectory || record.working_directory) } : {}),
-    ...(env ? { env } : {}),
-    ...(cleanText(record.sessionId || record.session_id) ? { sessionId: cleanText(record.sessionId || record.session_id) } : {}),
-    ...(cleanText(record.sessionPath || record.session_path) ? { sessionPath: cleanText(record.sessionPath || record.session_path) } : {})
-  }
-}
-
-const normalizedProcessName = (value?: string) => basename(cleanText(value)).toLowerCase()
-
-const agentVaultProcessNameMatches = (candidate: string, expected: string) => {
-  const left = normalizedProcessName(candidate)
-  const right = normalizedProcessName(expected)
-  return Boolean(left && right && (left === right || left.replace(/\.(exe|cmd|bat)$/i, '') === right.replace(/\.(exe|cmd|bat)$/i, '')))
-}
-
-const agentVaultEntryMatchesProcess = (entry: AgentVaultEntry, process: AgentVaultProcessSnapshot) => {
-  const detect = entry.detect
-  const argvText = process.argv.join('\n').toLowerCase()
-  const commandText = cleanText(process.commandLine || process.argv.join(' ')).toLowerCase()
-  const executableText = cleanText(process.executable).toLowerCase()
-  if (detect) {
-    if (detect.processName && !agentVaultProcessNameMatches(process.processName || process.executable || process.argv[0] || '', detect.processName)) return false
-    if (detect.executableContains && !executableText.includes(detect.executableContains.toLowerCase())) return false
-    if (detect.argvContains?.some((needle) => !argvText.includes(needle.toLowerCase()))) return false
-    if (detect.commandContains?.some((needle) => !commandText.includes(needle.toLowerCase()))) return false
-    return true
-  }
-  const fallbackNames = [entry.executable, entry.id].map(cleanText).filter(Boolean)
-  return fallbackNames.some((name) => agentVaultProcessNameMatches(process.processName || process.executable || process.argv[0] || '', name))
-}
-
-const sessionIdFromArgvOption = (argv: string[], option: string) => {
-  const optionText = cleanText(option)
-  if (!optionText) return undefined
-  const prefix = `${optionText}=`
-  for (let index = 0; index < argv.length; index += 1) {
-    const arg = argv[index]
-    if (arg === optionText) return cleanText(argv[index + 1])
-    if (arg.startsWith(prefix)) return cleanText(arg.slice(prefix.length))
-  }
-  return undefined
-}
-
-const agentVaultSessionIdFromProcess = (entry: AgentVaultEntry, process: AgentVaultProcessSnapshot, params: Record<string, unknown>) => {
-  const explicit = cleanText(params.sessionId || params.session_id || process.sessionId)
-  const source = entry.sessionIdSource || (explicit ? { type: 'provided' as const } : undefined)
-  if (!source) return explicit
-  if (source.type === 'provided') return explicit
-  if (source.type === 'fixed') return source.value
-  if (source.type === 'env') return cleanText(process.env?.[source.envVar])
-  if (source.type === 'argvOption') return sessionIdFromArgvOption(process.argv, source.argvOption)
-  if (source.type === 'piSessionFile') return explicit || cleanText(process.sessionPath)
-  return explicit
-}
-
-const agentVaultMatchForProcess = (entry: AgentVaultEntry, process: AgentVaultProcessSnapshot, params: Record<string, unknown> = {}, terminal?: AgentVaultScanTarget) => {
-  const sessionId = agentVaultSessionIdFromProcess(entry, process, params)
-  const sessionPath = cleanText(params.sessionPath || params.session_path || process.sessionPath || sessionId)
-  const cwd = entry.cwd === 'ignore' ? '' : cleanText(params.cwd || process.cwd || terminal?.cwd)
-  const renderParams = {
-    ...params,
-    executable: process.executable || entry.executable,
-    cwd,
-    sessionId,
-    session_id: sessionId,
-    sessionPath,
-    session_path: sessionPath,
-    sessionDir: params.sessionDir || params.sessionDirectory || params.session_directory || entry.sessionDirectory
-  }
-  return {
-    agent: cloneAgentVaultEntry(entry),
-    matched: true,
-    sessionId: sessionId || '',
-    ...(sessionPath ? { sessionPath } : {}),
-    ...(cwd ? { cwd } : {}),
-    ...(terminal
-      ? {
-          panelId: terminal.panelId,
-          ...(terminal.sessionId ? { terminalSessionId: terminal.sessionId } : {}),
-          terminalTitle: terminal.title,
-          terminalProcessId: terminal.processId
-        }
-      : {}),
-    process: {
-      ...(process.pid ? { pid: process.pid } : {}),
-      ...(process.ppid ? { ppid: process.ppid } : {}),
-      ...(process.pgid ? { pgid: process.pgid } : {}),
-      ...(process.processName ? { processName: process.processName } : {}),
-      ...(process.executable ? { executable: process.executable } : {}),
-      argv: process.argv
-    },
-    canResume: Boolean(entry.resumeCommand && sessionId),
-    canFork: Boolean(entry.forkCommand && sessionId),
-    ...(entry.resumeCommand && sessionId ? { resumeCommand: renderAgentVaultTemplate(entry, entry.resumeCommand, renderParams) } : {}),
-    ...(entry.forkCommand && sessionId ? { forkCommand: renderAgentVaultTemplate(entry, entry.forkCommand, renderParams) } : {})
-  }
-}
-
-const agentVaultIdentify = async (params: Record<string, unknown>) => {
-  await loadAgentVaultStore(runtime.userDataPath)
-  const process = normalizeAgentVaultProcessSnapshot(params.process || params)
-  if (!process) return fail('AGENT_VAULT_PROCESS_INVALID', 'Agent vault identify requires a process snapshot.')
-  const source = normalizeAgentVaultId(params.id || params.agent || params.source)
-  const candidates = (source ? [agentVaultEntryFor(source)].filter(Boolean) : sortedAgentVaultEntries()) as AgentVaultEntry[]
-  const matches = candidates
-    .filter((entry) => agentVaultEntryMatchesProcess(entry, process))
-    .map((entry) => agentVaultMatchForProcess(entry, process, params))
-  return ok({
-    matches,
-    count: matches.length,
-    matched: matches.length > 0,
-    process
-  })
-}
-
-const normalizeAgentVaultScanTarget = (value: unknown): AgentVaultScanTarget | null => {
-  const record = nestedRecord(value)
-  if (!record) return null
-  const kind = cleanText(record.kind).toLowerCase()
-  const panelId = cleanText(record.panelId || record.panel_id || record.surfaceId || record.surface_id)
-  const processId = cleanPositiveInteger(record.processId || record.process_id || record.pid)
-  if (!panelId || !processId || (kind && kind !== 'local')) return null
-  return {
-    panelId,
-    ...(cleanText(record.sessionId || record.session_id) ? { sessionId: cleanText(record.sessionId || record.session_id) } : {}),
-    title: cleanText(record.title) || panelId,
-    ...(cleanText(record.cwd) ? { cwd: cleanText(record.cwd) } : {}),
-    processId,
-    ...(cleanPositiveInteger(record.processGroupId || record.process_group_id || record.pgid) ? { processGroupId: cleanPositiveInteger(record.processGroupId || record.process_group_id || record.pgid) } : {}),
-    ...(cleanText(record.shell) ? { shell: cleanText(record.shell) } : {})
-  }
-}
-
-const extractProcStatFields = (stat: string) => {
-  const end = stat.lastIndexOf(')')
-  if (end < 0) return null
-  const processName = stat.slice(stat.indexOf('(') + 1, end)
-  const fields = stat.slice(end + 2).trim().split(/\s+/)
-  const ppid = cleanPositiveInteger(fields[1])
-  const pgid = cleanPositiveInteger(fields[2])
-  return {
-    processName,
-    ...(ppid ? { ppid } : {}),
-    ...(pgid ? { pgid } : {})
-  }
-}
-
-const procText = async (path: string) => {
-  try {
-    return await readFile(path, 'utf-8')
-  } catch {
-    return ''
-  }
-}
-
-const procLink = async (path: string) => {
-  try {
-    return await readlink(path)
-  } catch {
-    return ''
-  }
-}
-
-const expandHomePath = (value: string) => {
-  const text = cleanText(value)
-  if (!text.startsWith('~/')) return text
-  const home = cleanText(process.env.HOME)
-  return home ? join(home, text.slice(2)) : text
-}
-
-const agentVaultSessionPathFromOpenFiles = async (pid: number, entry: AgentVaultEntry) => {
-  const sessionDir = expandHomePath(entry.sessionDirectory || '')
-  if (!sessionDir) return ''
-  let names: string[] = []
-  try {
-    names = await readdir(`/proc/${pid}/fd`)
-  } catch {
-    return ''
-  }
-  for (const name of names.slice(0, 256)) {
-    const target = await procLink(`/proc/${pid}/fd/${name}`)
-    if (target && target.startsWith(sessionDir)) return target
-  }
-  return ''
-}
-
-const agentVaultSnapshotFromProc = async (pid: number, entries: AgentVaultEntry[]): Promise<AgentVaultProcessSnapshot | null> => {
-  const statText = await procText(`/proc/${pid}/stat`)
-  const stat = extractProcStatFields(statText)
-  if (!stat) return null
-  const rawCmdline = await procText(`/proc/${pid}/cmdline`)
-  const argv = rawCmdline
-    .split('\u0000')
-    .map(cleanText)
-    .filter(Boolean)
-    .slice(0, 200)
-  const executable = await procLink(`/proc/${pid}/exe`)
-  const cwd = await procLink(`/proc/${pid}/cwd`)
-  const commandLine = argv.length ? argv.join(' ') : stat.processName
-  const snapshot: AgentVaultProcessSnapshot = {
-    pid,
-    ...(stat.ppid ? { ppid: stat.ppid } : {}),
-    ...(stat.pgid ? { pgid: stat.pgid } : {}),
-    processName: stat.processName,
-    ...(executable ? { executable } : argv[0] ? { executable: argv[0] } : {}),
-    argv,
-    ...(commandLine ? { commandLine } : {}),
-    ...(cwd ? { cwd } : {})
-  }
-  for (const entry of entries) {
-    if (entry.sessionIdSource?.type !== 'piSessionFile' || !agentVaultEntryMatchesProcess(entry, snapshot)) continue
-    const sessionPath = await agentVaultSessionPathFromOpenFiles(pid, entry)
-    if (sessionPath) return { ...snapshot, sessionPath }
-  }
-  return snapshot
-}
-
-const scanDescendantProcesses = async (rootPid: number) => {
-  const children = new Map<number, number[]>()
-  const pids: number[] = []
-  let procEntries: string[] = []
-  try {
-    procEntries = await readdir('/proc')
-  } catch {
-    return []
-  }
-  await Promise.all(
-    procEntries
-      .filter((name) => /^\d+$/.test(name))
-      .map(async (name) => {
-        const pid = Number(name)
-        const stat = extractProcStatFields(await procText(`/proc/${pid}/stat`))
-        if (!stat?.ppid) return
-        pids.push(pid)
-        children.set(stat.ppid, [...(children.get(stat.ppid) || []), pid])
-      })
-  )
-  const descendants: number[] = []
-  const queue = [...(children.get(rootPid) || [])]
-  const seen = new Set<number>([rootPid])
-  while (queue.length && descendants.length < maxAgentVaultScanProcessesPerTerminal) {
-    const pid = queue.shift()
-    if (!pid || seen.has(pid)) continue
-    seen.add(pid)
-    descendants.push(pid)
-    queue.push(...(children.get(pid) || []))
-  }
-  return descendants.filter((pid) => pids.includes(pid))
-}
-
-const agentVaultScanProcesses = async (params: Record<string, unknown>) => {
-  if (process.platform !== 'linux') {
-    return ok({
-      matches: [],
-      count: 0,
-      matched: false,
-      terminals: [],
-      scannedProcessCount: 0,
-      unsupported: true,
-      platform: process.platform,
-      message: 'Agent Vault process scanning is currently implemented for Linux /proc only.'
-    })
-  }
-  const snapshotResponse = await dispatchRendererControlRequest('terminal.list', params)
-  if (!snapshotResponse.ok) return snapshotResponse
-  const terminals = Array.isArray(snapshotResponse.data?.terminals)
-    ? (snapshotResponse.data.terminals as unknown[])
-        .map(normalizeAgentVaultScanTarget)
-        .filter((item): item is AgentVaultScanTarget => Boolean(item))
-        .slice(0, maxAgentVaultScanTerminals)
-    : []
-  const requestedPanelId = cleanText(params.panelId || params.panel_id || params.surfaceId || params.surface_id || params.panel)
-  const requestedSessionId = cleanText(params.sessionId || params.session_id || params.terminalSessionId || params.terminal_session_id || params.session)
-  const selectedTerminals = terminals.filter((terminal) => {
-    if (requestedPanelId && terminal.panelId !== requestedPanelId) return false
-    if (requestedSessionId && terminal.sessionId !== requestedSessionId) return false
-    return true
-  })
-  const source = normalizeAgentVaultId(params.id || params.agent || params.source)
-  const candidates = (source ? [agentVaultEntryFor(source)].filter(Boolean) : sortedAgentVaultEntries()) as AgentVaultEntry[]
-  const matches: ReturnType<typeof agentVaultMatchForProcess>[] = []
-  const scannedProcesses: AgentVaultProcessSnapshot[] = []
-  for (const terminal of selectedTerminals) {
-    const pids = await scanDescendantProcesses(terminal.processId)
-    for (const pid of pids) {
-      const processSnapshot = await agentVaultSnapshotFromProc(pid, candidates)
-      if (!processSnapshot) continue
-      scannedProcesses.push(processSnapshot)
-      for (const entry of candidates) {
-        if (!agentVaultEntryMatchesProcess(entry, processSnapshot)) continue
-        matches.push(agentVaultMatchForProcess(entry, processSnapshot, params, terminal))
-      }
-    }
-  }
-  const uniqueMatches = [...new Map(matches.map((match) => [`${match.agent.id}:${match.process.pid || ''}:${match.sessionId}:${match.panelId || ''}`, match])).values()]
-  return ok({
-    matches: uniqueMatches,
-    count: uniqueMatches.length,
-    matched: uniqueMatches.length > 0,
-    terminals: selectedTerminals,
-    scannedProcessCount: scannedProcesses.length,
-    scannedProcesses,
-    platform: process.platform
-  })
-}
-
-const handleAgentVaultControlRequest = async (method: string, params: Record<string, unknown>) => {
-  await loadAgentVaultStore(runtime.userDataPath)
-  const action = method.startsWith('agent-vault.') ? method.slice('agent-vault.'.length) : method.slice('agent.vault.'.length)
-  if (action === 'list') return ok(agentVaultPayload())
-  if (action === 'register' || action === 'set') {
-    if (agentVaultEntries.size >= maxAgentVaultEntries && !agentVaultEntryFor(params.id)) {
-      return fail('AGENT_VAULT_LIMIT_REACHED', `Agent vault supports at most ${maxAgentVaultEntries} entries.`)
-    }
-    const existing = agentVaultEntryFor(params.id)
-    const entry = normalizeAgentVaultEntry(params, existing || undefined)
-    if (!entry) return fail('AGENT_VAULT_ENTRY_INVALID', 'Agent vault entry needs a valid id and at least one launch/resume/fork command template.')
-    agentVaultEntries.set(entry.id, entry)
-    await persistAgentVaultStore()
-    publishControlEvent({
-      name: existing ? 'agent_vault.updated' : 'agent_vault.registered',
-      category: 'agent',
-      payload: { agent_id: entry.id, agent_name: entry.name, has_launch: Boolean(entry.launchCommand), has_resume: Boolean(entry.resumeCommand), has_fork: Boolean(entry.forkCommand) }
-    })
-    return ok(agentVaultPayload(entry))
-  }
-  if (action === 'get') {
-    const entry = agentVaultEntryFor(params.id || params.agent || params.source)
-    if (!entry) return fail('AGENT_VAULT_ENTRY_NOT_FOUND', 'Agent vault entry was not found.')
-    return ok(agentVaultPayload(entry))
-  }
-  if (action === 'remove' || action === 'delete' || action === 'unset') {
-    const entry = agentVaultEntryFor(params.id || params.agent || params.source)
-    if (!entry) return fail('AGENT_VAULT_ENTRY_NOT_FOUND', 'Agent vault entry was not found.')
-    agentVaultEntries.delete(entry.id)
-    await persistAgentVaultStore()
-    publishControlEvent({ name: 'agent_vault.removed', category: 'agent', payload: { agent_id: entry.id, agent_name: entry.name } })
-    return ok({ removed: true, removedId: entry.id, ...agentVaultPayload() })
-  }
-  if (action === 'render') {
-    const entry = agentVaultEntryFor(params.id || params.agent || params.source)
-    if (!entry) return fail('AGENT_VAULT_ENTRY_NOT_FOUND', 'Agent vault entry was not found.')
-    const kind = cleanText(params.kind || params.commandKind || params.command_kind || 'launch') || 'launch'
-    const template = kind === 'resume' ? entry.resumeCommand : kind === 'fork' ? entry.forkCommand : entry.launchCommand
-    if (!template) return fail('AGENT_VAULT_TEMPLATE_NOT_FOUND', `Agent vault entry has no ${kind} command template.`)
-    return ok({ agent: cloneAgentVaultEntry(entry), kind, command: renderAgentVaultTemplate(entry, template, params) })
-  }
-  if (action === 'identify' || action === 'detect') return agentVaultIdentify(params)
-  if (action === 'scan' || action === 'scan-processes') return agentVaultScanProcesses(params)
-  return fail('UNKNOWN_CONTROL_METHOD', `Unknown aiopsterm agent vault method: ${method}`)
 }
 
 const managedAiTimelineSummary = (session: ManagedAiSessionRecord, eventLimit: number) =>
@@ -3248,25 +2515,6 @@ const handleFeedControlRequest = async (method: string, params: Record<string, u
   return fail('UNKNOWN_CONTROL_METHOD', `Unknown aiopsterm feed method: ${method}`)
 }
 
-const prepareAgentTeamLaunchParams = async (params: Record<string, unknown>): Promise<Record<string, unknown> | ControlResponse> => {
-  await loadAgentVaultStore(runtime.userDataPath)
-  const source = normalizeAgentVaultId(params.source || params.agent)
-  const explicitCommand = cleanAgentVaultCommand(params.command || params.shell || params.commandText)
-  if (!source || explicitCommand || source === 'codex' || source === 'claude' || source === 'claude-code' || source === 'claude_code' || source === 'custom') return params
-  const entry = agentVaultEntryFor(source)
-  if (!entry) return params
-  if (!entry.launchCommand) return fail('AGENT_VAULT_LAUNCH_UNAVAILABLE', `Agent vault entry ${entry.id} has no launch command template.`)
-  return {
-    ...params,
-    source: 'custom',
-    agentVaultId: entry.id,
-    agentVaultName: entry.name,
-    command: renderAgentVaultTemplate(entry, entry.launchCommand, params, { preserveDynamic: true }),
-    name: cleanText(params.name || params.groupName || params.title) || `${entry.name} Team`,
-    groupName: cleanText(params.groupName || params.name || params.title) || `${entry.name} Team`
-  }
-}
-
 const sessionSnapshotFor = (value: unknown) => {
   const id = cleanText(value)
   if (!id || id === 'latest') return sortedSessionSnapshots()[0] || null
@@ -3687,16 +2935,6 @@ const syncNotificationsToRenderer = () => {
   void dispatchRendererControlRequest('notification.sync', notificationPayload())
 }
 
-const terminalSessionId = (params: Record<string, unknown>) => cleanText(params.sessionId || params.terminalSessionId)
-
-const terminalWriteData = (params: Record<string, unknown>) => {
-  if (typeof params.text === 'string') return params.text
-  if (typeof params.data === 'string') return params.data
-  return ''
-}
-
-const terminalPanelId = (params: Record<string, unknown>) => cleanText(params.panelId || params.panel_id || params.surfaceId || params.surface_id || params.panel || params.surface)
-
 const isMobileTerminalMethod = (method: string) =>
   [
     'mobile.workspace.list',
@@ -3765,323 +3003,6 @@ const handleMobileTerminalControlRequest = async (method: string, params: Record
   const response = await dispatchRendererControlRequest(rendererMethod, params, { focus: method.includes('.input') || method.includes('.paste') })
   if (rendererMethod === 'surface.create') publishRendererMutationEvent('surface.create', params, response)
   return response
-}
-
-const keyDataForTerminal = (value: unknown) => {
-  const raw = cleanText(value)
-  if (!raw) return null
-  const normalized = raw.toLowerCase().replace(/[\s_-]+/g, '')
-  const namedKeys: Record<string, string> = {
-    enter: '\r',
-    return: '\r',
-    cr: '\r',
-    tab: '\t',
-    space: ' ',
-    escape: '\x1b',
-    esc: '\x1b',
-    backspace: '\x7f',
-    bs: '\x7f',
-    delete: '\x1b[3~',
-    del: '\x1b[3~',
-    insert: '\x1b[2~',
-    ins: '\x1b[2~',
-    up: '\x1b[A',
-    arrowup: '\x1b[A',
-    down: '\x1b[B',
-    arrowdown: '\x1b[B',
-    right: '\x1b[C',
-    arrowright: '\x1b[C',
-    left: '\x1b[D',
-    arrowleft: '\x1b[D',
-    home: '\x1b[H',
-    end: '\x1b[F',
-    pageup: '\x1b[5~',
-    pgup: '\x1b[5~',
-    pagedown: '\x1b[6~',
-    pgdn: '\x1b[6~',
-    f1: '\x1bOP',
-    f2: '\x1bOQ',
-    f3: '\x1bOR',
-    f4: '\x1bOS',
-    f5: '\x1b[15~',
-    f6: '\x1b[17~',
-    f7: '\x1b[18~',
-    f8: '\x1b[19~',
-    f9: '\x1b[20~',
-    f10: '\x1b[21~',
-    f11: '\x1b[23~',
-    f12: '\x1b[24~'
-  }
-  if (namedKeys[normalized]) return { key: raw, data: namedKeys[normalized] }
-  const ctrlMatch = raw.match(/^(?:c|ctrl|control)[+-](.)$/i) || raw.match(/^\^(.)$/)
-  if (ctrlMatch?.[1]) {
-    const char = ctrlMatch[1].toUpperCase()
-    if (char === '?') return { key: raw, data: '\x7f' }
-    const code = char.charCodeAt(0)
-    if (code >= 64 && code <= 95) return { key: raw, data: String.fromCharCode(code - 64) }
-    if (code >= 65 && code <= 90) return { key: raw, data: String.fromCharCode(code - 64) }
-  }
-  if (raw.length === 1) return { key: raw, data: raw }
-  return null
-}
-
-const resolveTerminalSessionForInput = async (params: Record<string, unknown>) => {
-  const sessionId = terminalSessionId(params)
-  if (sessionId) return { sessionId }
-  const panelId = terminalPanelId(params)
-  if (!panelId) return { error: fail('TERMINAL_SESSION_REQUIRED', 'sessionId is required.') }
-  const response = await dispatchRendererControlRequest('terminal.focus', { ...params, panelId, surfaceId: panelId }, { focus: true })
-  if (!response.ok) return { error: response }
-  const terminal = response.data?.terminal && typeof response.data.terminal === 'object' ? (response.data.terminal as Record<string, unknown>) : null
-  const resolvedSessionId = cleanText(terminal?.sessionId || terminal?.terminalSessionId)
-  if (!resolvedSessionId) return { error: fail('TERMINAL_SESSION_NOT_FOUND', 'Selected terminal has no connected session id.', { panelId }) }
-  return { sessionId: resolvedSessionId, panelId: cleanText(terminal?.panelId || panelId) }
-}
-
-const sendTerminalText = async (params: Record<string, unknown>) => {
-  const text = terminalWriteData(params)
-  if (!text) return fail('TERMINAL_TEXT_REQUIRED', 'text is required.')
-  const resolved = await resolveTerminalSessionForInput(params)
-  if (resolved.error) return resolved.error
-  const sessionId = resolved.sessionId!
-  if (!runtime.writeTerminal) return fail('TERMINAL_WRITE_UNAVAILABLE', 'Terminal write runtime is not available.')
-  const response = await runtime.writeTerminal(sessionId, text)
-  if (response.ok) {
-    publishControlEvent({
-      name: 'terminal.text_sent',
-      category: 'terminal',
-      payload: {
-        session_id: sessionId,
-        sessionId,
-        text_length: text.length,
-        bytes: Buffer.byteLength(text, 'utf8')
-      }
-    })
-  }
-  return response
-}
-
-const sendTerminalKey = async (params: Record<string, unknown>) => {
-  const key = keyDataForTerminal(params.key || params.name || params.text || params.data)
-  if (!key) return fail('TERMINAL_KEY_UNKNOWN', 'Unknown terminal key. Use names like enter, tab, esc, up, ctrl+c, or a single character.')
-  const resolved = await resolveTerminalSessionForInput(params)
-  if (resolved.error) return resolved.error
-  const sessionId = resolved.sessionId!
-  if (!runtime.writeTerminal) return fail('TERMINAL_WRITE_UNAVAILABLE', 'Terminal write runtime is not available.')
-  const response = await runtime.writeTerminal(sessionId, key.data)
-  if (response.ok) {
-    publishControlEvent({
-      name: 'terminal.key_sent',
-      category: 'terminal',
-      payload: {
-        session_id: sessionId,
-        sessionId,
-        ...(resolved.panelId ? { panel_id: resolved.panelId, panelId: resolved.panelId } : {}),
-        key: key.key,
-        bytes: Buffer.byteLength(key.data, 'utf8')
-      }
-    })
-    response.data = { ...(response.data || {}), key: key.key }
-  }
-  return response
-}
-
-const terminalBufferSummary = (entry: TerminalBufferEntry) => ({
-  name: entry.name,
-  size: entry.size,
-  createdAt: entry.createdAt,
-  created_at: entry.createdAt,
-  updatedAt: entry.updatedAt,
-  updated_at: entry.updatedAt
-})
-
-const terminalBufferPayload = (buffer?: TerminalBufferEntry | null) => {
-  const buffers = [...terminalBuffers.values()].sort((left, right) => left.name.localeCompare(right.name)).map(terminalBufferSummary)
-  return {
-    buffers,
-    count: buffers.length,
-    ...(buffer ? { buffer: terminalBufferSummary(buffer) } : {})
-  }
-}
-
-const terminalBufferReadPayload = (entry: TerminalBufferEntry) => ({
-  buffer: terminalBufferSummary(entry),
-  name: entry.name,
-  text: entry.text,
-  size: entry.size
-})
-
-const handleTerminalBufferControlRequest = async (method: string, params: Record<string, unknown>) => {
-  const action = method.startsWith('terminal.buffer.')
-    ? method.slice('terminal.buffer.'.length)
-    : method.startsWith('buffer.')
-      ? method.slice('buffer.'.length)
-      : method
-  if (action === 'list' || action === 'list-buffers') return ok(terminalBufferPayload())
-  if (action === 'set' || action === 'set-buffer') {
-    const name = cleanTerminalBufferName(params.name || params.buffer || params.bufferName || params.buffer_name)
-    if (!name) return fail('TERMINAL_BUFFER_NAME_INVALID', 'Buffer name must use letters, numbers, dot, underscore, colon, or dash.')
-    const { text, bytes } = terminalBufferText(params)
-    if (!text) {
-      return fail(
-        bytes > maxTerminalBufferBytes ? 'TERMINAL_BUFFER_TOO_LARGE' : 'TERMINAL_BUFFER_TEXT_REQUIRED',
-        bytes > maxTerminalBufferBytes ? `Buffer text exceeds ${maxTerminalBufferBytes} bytes.` : 'set-buffer requires text.'
-      )
-    }
-    const now = Date.now()
-    const existing = terminalBuffers.get(name)
-    const entry: TerminalBufferEntry = {
-      name,
-      text,
-      size: bytes,
-      createdAt: existing?.createdAt || now,
-      updatedAt: now
-    }
-    terminalBuffers.set(name, entry)
-    if (terminalBuffers.size > maxTerminalBuffers) {
-      const oldest = [...terminalBuffers.values()].sort((left, right) => left.updatedAt - right.updatedAt)[0]
-      if (oldest) terminalBuffers.delete(oldest.name)
-    }
-    publishControlEvent({
-      name: 'terminal.buffer.set',
-      category: 'terminal',
-      source: 'control.socket',
-      payload: { buffer_name: name, size: bytes }
-    })
-    return ok(terminalBufferPayload(entry))
-  }
-  if (action === 'show' || action === 'show-buffer' || action === 'showb' || action === 'save' || action === 'save-buffer' || action === 'saveb') {
-    const name = cleanTerminalBufferName(params.name || params.buffer || params.bufferName || params.buffer_name)
-    if (!name) return fail('TERMINAL_BUFFER_NAME_INVALID', 'Buffer name must use letters, numbers, dot, underscore, colon, or dash.')
-    const entry = terminalBuffers.get(name)
-    if (!entry) return fail('TERMINAL_BUFFER_NOT_FOUND', `Buffer not found: ${name}`)
-    return ok({
-      ...terminalBufferReadPayload(entry),
-      action,
-      ...(action === 'save' || action === 'save-buffer' || action === 'saveb' ? { path: cleanText(params.path || params.output || params.file) } : {})
-    })
-  }
-  if (action === 'paste' || action === 'paste-buffer') {
-    const name = cleanTerminalBufferName(params.name || params.buffer || params.bufferName || params.buffer_name)
-    if (!name) return fail('TERMINAL_BUFFER_NAME_INVALID', 'Buffer name must use letters, numbers, dot, underscore, colon, or dash.')
-    const entry = terminalBuffers.get(name)
-    if (!entry) return fail('TERMINAL_BUFFER_NOT_FOUND', `Buffer not found: ${name}`)
-    const response = await sendTerminalText({ ...params, text: entry.text })
-    if (response.ok) {
-      response.data = { ...(response.data || {}), buffer: terminalBufferSummary(entry), bufferName: name, buffer_name: name }
-      publishControlEvent({
-        name: 'terminal.buffer.pasted',
-        category: 'terminal',
-        source: 'control.socket',
-        surfaceId: terminalPanelId(params),
-        payload: {
-          buffer_name: name,
-          size: entry.size,
-          session_id: cleanText(response.data.id || response.data.sessionId || params.sessionId || params.terminalSessionId),
-          panel_id: terminalPanelId(params)
-        }
-      })
-    }
-    return response
-  }
-  return fail('UNKNOWN_CONTROL_METHOD', `Unknown aiopsterm terminal buffer method: ${method}`)
-}
-
-const tmuxCompatHookSummary = (entry: TmuxCompatHookEntry) => ({
-  event: entry.event,
-  command: entry.command,
-  createdAt: entry.createdAt,
-  created_at: entry.createdAt,
-  updatedAt: entry.updatedAt,
-  updated_at: entry.updatedAt
-})
-
-const tmuxCompatHooksPayload = (hook?: TmuxCompatHookEntry | null) => {
-  const hooks = [...tmuxCompatHooks.values()].sort((left, right) => left.event.localeCompare(right.event)).map(tmuxCompatHookSummary)
-  return {
-    hooks,
-    count: hooks.length,
-    ...(hook ? { hook: tmuxCompatHookSummary(hook) } : {})
-  }
-}
-
-const tmuxCompatOptionPayload = (name: string, value: string) => ({
-  option: { name, value },
-  name,
-  value,
-  text: `${name} ${value}`
-})
-
-const handleTmuxCompatControlRequest = (method: string, params: Record<string, unknown>) => {
-  const action = method.startsWith('tmux.') ? method.slice('tmux.'.length) : method
-  if (action === 'hook.list' || action === 'hooks.list' || action === 'show-hooks') return ok(tmuxCompatHooksPayload())
-  if (action === 'hook.unset' || action === 'set-hook.unset') {
-    const event = cleanTmuxCompatHookEvent(params.event || params.name || params.hook)
-    if (!event) return fail('TMUX_HOOK_EVENT_INVALID', 'set-hook --unset requires a valid event name.')
-    const existing = tmuxCompatHooks.get(event) || null
-    tmuxCompatHooks.delete(event)
-    publishControlEvent({
-      name: 'tmux.hook.unset',
-      category: 'tmux',
-      source: 'control.socket',
-      payload: { event, removed: Boolean(existing) }
-    })
-    return ok({ ...tmuxCompatHooksPayload(), event, removed: Boolean(existing) })
-  }
-  if (action === 'hook.set' || action === 'set-hook' || action === 'set_hook') {
-    const list = Boolean(params.list || params.show || params.ls)
-    if (list) return ok(tmuxCompatHooksPayload())
-    const unset = Boolean(params.unset || params.remove || params.delete)
-    if (unset) return handleTmuxCompatControlRequest('tmux.hook.unset', params)
-    const event = cleanTmuxCompatHookEvent(params.event || params.name || params.hook)
-    if (!event) return fail('TMUX_HOOK_EVENT_INVALID', 'set-hook requires a valid event name.')
-    const command = cleanTmuxCompatHookCommand(params.command || params.text || params.value)
-    if (!command) return fail('TMUX_HOOK_COMMAND_REQUIRED', `set-hook requires a command no larger than ${maxTmuxCompatHookCommandLength} bytes.`)
-    const now = Date.now()
-    const existing = tmuxCompatHooks.get(event)
-    const entry: TmuxCompatHookEntry = {
-      event,
-      command,
-      createdAt: existing?.createdAt || now,
-      updatedAt: now
-    }
-    tmuxCompatHooks.set(event, entry)
-    if (tmuxCompatHooks.size > maxTmuxCompatHooks) {
-      const oldest = [...tmuxCompatHooks.values()].sort((left, right) => left.updatedAt - right.updatedAt)[0]
-      if (oldest) tmuxCompatHooks.delete(oldest.event)
-    }
-    publishControlEvent({
-      name: 'tmux.hook.set',
-      category: 'tmux',
-      source: 'control.socket',
-      payload: { event }
-    })
-    return ok(tmuxCompatHooksPayload(entry))
-  }
-  if (action === 'option.show' || action === 'show-options' || action === 'show-option' || action === 'show') {
-    const optionName = cleanText(params.option || params.name || params.optionName || params.option_name) || 'extended-keys'
-    if (optionName !== 'extended-keys') return fail('TMUX_OPTION_UNSUPPORTED', `Unsupported tmux compatibility option: ${optionName}`, { option: optionName, unsupported: true })
-    return ok({
-      ...tmuxCompatOptionPayload(optionName, 'on'),
-      valueOnly: Boolean(params.valueOnly || params.value_only || params.v)
-    })
-  }
-  if (['set-option', 'set', 'set-window-option', 'setw', 'source-file', 'refresh-client', 'attach-session', 'detach-client'].includes(action)) {
-    return ok({
-      command: action,
-      accepted: true,
-      noop: true,
-      reason: 'Accepted as a tmux compatibility no-op.'
-    })
-  }
-  if (['popup', 'bind-key', 'unbind-key', 'copy-mode'].includes(action)) {
-    return fail('TMUX_COMPAT_UNSUPPORTED', `${action} is not supported yet in aiopsterm tmux compatibility mode.`, {
-      command: action,
-      unsupported: true,
-      unsupportedReason: `${action} is a recognized tmux compatibility placeholder but is not supported yet.`
-    })
-  }
-  return fail('UNKNOWN_CONTROL_METHOD', `Unknown aiopsterm tmux compatibility method: ${method}`)
 }
 
 const notificationPayload = (items = notifications, params: Record<string, unknown> = {}) => {
@@ -4652,7 +3573,7 @@ const handleControlRequest = async (request: ControlSocketRequest): Promise<Cont
     method === 'tree' ||
     method === 'top'
   ) {
-    const rendererParamsOrResponse = method === 'agent.team.launch' ? await prepareAgentTeamLaunchParams(params) : params
+    const rendererParamsOrResponse = method === 'agent.team.launch' ? await prepareAgentVaultTeamLaunchParams(params) : params
     if ('ok' in rendererParamsOrResponse && rendererParamsOrResponse.ok === false) return rendererParamsOrResponse as ControlResponse
     const rendererParams = rendererParamsOrResponse as Record<string, unknown>
     const response = await dispatchRendererControlRequest(method, rendererParams)
@@ -4926,9 +3847,17 @@ const writeSocketResponse = (socket: Socket, id: string | undefined, response: C
 
 export const configureControlSocketRuntime = (config: ControlSocketRuntime = {}) => {
   runtime = { ...runtime, ...config }
+  configureAgentVaultRuntime({
+    ...(runtime.userDataPath ? { userDataPath: runtime.userDataPath } : {}),
+    dispatchRendererControlRequest,
+    publishControlEvent
+  })
+  configureControlSocketTerminalTools({
+    writeTerminal: runtime.writeTerminal,
+    dispatchRendererControlRequest,
+    publishControlEvent
+  })
   if (config.userDataPath) {
-    agentVaultStorePath = agentVaultPathFor(config.userDataPath)
-    if (agentVaultLoadedPath && agentVaultLoadedPath !== agentVaultStorePath) agentVaultLoadedPath = ''
     eventLogStorePath = eventLogPathFor(config.userDataPath)
     if (eventLogLoadedPath && eventLogLoadedPath !== eventLogStorePath) eventLogLoadedPath = ''
     sessionSnapshotStorePath = sessionSnapshotPathFor(config.userDataPath)
@@ -4954,6 +3883,8 @@ export const ensureControlSocketServer = async (userDataPath: string) => {
   if (server && socketPath) return socketPath
   socketPath = socketPathFor(userDataPath)
   runtime = { ...runtime, userDataPath }
+  configureAgentVaultRuntime({ userDataPath, dispatchRendererControlRequest, publishControlEvent })
+  configureControlSocketTerminalTools({ writeTerminal: runtime.writeTerminal, dispatchRendererControlRequest, publishControlEvent })
   await loadDurableEventLog(userDataPath)
   await loadAgentVaultStore(userDataPath)
   await loadSessionSnapshotStore(userDataPath)
@@ -5031,16 +3962,13 @@ export const closeControlSocketServer = () => {
   sidebarStatusEntries.clear()
   sidebarProgressEntries.clear()
   sidebarLogEntries = []
-  terminalBuffers.clear()
-  tmuxCompatHooks.clear()
+  resetControlSocketTerminalTools()
   notifications = []
   eventLog = []
   nextEventSeq = 1
   eventLogLoadedPath = ''
   eventLogStorePath = ''
-  agentVaultEntries = new Map()
-  agentVaultLoadedPath = ''
-  agentVaultStorePath = ''
+  resetAgentVaultRuntimeState()
   sessionSnapshots = []
   sessionSnapshotLoadedPath = ''
   sessionSnapshotStorePath = ''
@@ -5061,8 +3989,8 @@ export const __testing = {
   listAgentVaultEntries: () => sortedAgentVaultEntries(),
   agentVaultPathFor,
   listNotifications: () => notifications,
-  listTerminalBuffers: () => [...terminalBuffers.values()].sort((left, right) => left.name.localeCompare(right.name)),
-  listTmuxCompatHooks: () => [...tmuxCompatHooks.values()].sort((left, right) => left.event.localeCompare(right.event)),
+  listTerminalBuffers,
+  listTmuxCompatHooks,
   pendingRendererRequestCount: () => pendingRendererRequests.size,
   eventSubscriptionCount: () => eventSubscriptions.size,
   mobileEventSubscriptionCount: () => mobileEventSubscriptions.size,
