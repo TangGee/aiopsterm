@@ -1710,8 +1710,6 @@ import {
 } from '@/services/aiPanelModelRuntime'
 import {
   aiPanelChatExportMessage as chatExportMessage,
-  applyCommandTextToMessage,
-  canEditCommandMessage,
   commandHostForMessage,
   commandHostTooltipForMessage,
   commandLineCountForMessage,
@@ -1724,10 +1722,13 @@ import {
   isReadOnlyCommandMessage,
   normalizedCommandOutputText,
   renderAiPanelMarkdownParts as renderedMarkdownParts,
-  setAiPanelCommandExecutionState as setCommandExecutionState,
   type AiPanelCommandSuggestionMessage as CommandSuggestionMessage
 } from '@/services/aiPanelMessageRuntime'
 import { createAiPanelMessageActionRuntime } from '@/services/aiPanelMessageActionRuntime'
+import {
+  createAiPanelCommandActionRuntime,
+  createEmptyAiPanelCommandActionRuntimeState
+} from '@/services/aiPanelCommandActionRuntime'
 import {
   aiConversationTabTooltip,
   aiHistoryDateLabel,
@@ -1854,6 +1855,7 @@ const syncingFromEditable = ref(false)
 const inputPlaceholderNotice = ref('')
 const historyRuntimeState = reactive(createEmptyAiPanelHistoryRuntimeState())
 const chatSearchRuntimeState = reactive(createEmptyAiPanelChatSearchRuntimeState())
+const commandActionRuntimeState = reactive(createEmptyAiPanelCommandActionRuntimeState())
 const chatSearchOpen = toRef(historyRuntimeState, 'chatSearchOpen')
 const chatSearchTerm = toRef(chatSearchRuntimeState, 'term')
 const chatSearchMatchCount = toRef(chatSearchRuntimeState, 'matchCount')
@@ -1870,11 +1872,7 @@ const editingHistoryTitle = toRef(historyRuntimeState, 'editingHistoryTitle')
 const chatExportNotice = toRef(historyRuntimeState, 'chatExportNotice')
 const openConversationTabIds = toRef(historyRuntimeState, 'openConversationTabIds')
 const commandAuditTextareaRef = ref<HTMLTextAreaElement | null>(null)
-const commandAuditDialog = ref({
-  open: false,
-  messageId: '',
-  draft: ''
-})
+const commandAuditDialog = toRef(commandActionRuntimeState, 'commandAuditDialog')
 const codexTargetPickerOpen = ref(false)
 const codexTargetQuery = ref('')
 type CodexConversation = AiPanelCodexConversationRuntimeState & AiPanelCodexTerminalConversation & {
@@ -2299,14 +2297,6 @@ const aiPanelMessageActionRuntime = createAiPanelMessageActionRuntime({
 const copyRenderedTextToClipboard = aiPanelMessageActionRuntime.copyRenderedTextToClipboard
 const copyMessageToClipboard = aiPanelMessageActionRuntime.copyMessageToClipboard
 
-const activeCommandAuditMessage = computed(() => {
-  if (!commandAuditDialog.value.open || !commandAuditDialog.value.messageId) return null
-  const message = workspace.chatMessages.find((item) => item.id === commandAuditDialog.value.messageId)
-  return message && isCommandSuggestionMessage(message) ? (message as CommandSuggestionMessage) : null
-})
-
-const canEditActiveCommandAudit = computed(() => canEditCommandMessage(activeCommandAuditMessage.value))
-
 const scrollChatToBottom = () => {
   const root = chatScrollRef.value
   if (!root) return
@@ -2345,159 +2335,38 @@ const clearChatSearch = () => aiPanelChatSearchRuntime.clearSearch()
 const findNextChatMatch = () => aiPanelChatSearchRuntime.findNextMatch()
 const findPreviousChatMatch = () => aiPanelChatSearchRuntime.findPreviousMatch()
 
-const copyCommandToClipboard = async (message: CommandSuggestionMessage) => {
-  const command = commandTextForMessage(message).trim()
-  if (!command) {
-    showChatExportNotice('没有可复制的命令。')
-    return
-  }
-  const copied = await copyTextToClipboard(command)
-  showChatExportNotice(copied ? '命令已复制。' : '复制失败。')
-}
+const aiPanelCommandActionRuntime = createAiPanelCommandActionRuntime({
+  state: commandActionRuntimeState,
+  messages: () => workspace.chatMessages,
+  activePanel: () => workspace.activePanel,
+  panels: () => workspace.panels,
+  chatMode: () => chatMode.value,
+  copyText: copyTextToClipboard,
+  notify: showChatExportNotice,
+  runActiveTerminalCommand: (command, source) => workspace.runActiveTerminalCommand(command, source),
+  continueAgentCommandLoop: (input) => workspace.continueAgentCommandLoop(input),
+  enableAgentReadOnlyAutoRunForCurrentConversation: () => workspace.enableAgentReadOnlyAutoRunForCurrentConversation(),
+  syncCurrentConversationSnapshot: (options) => workspace.syncCurrentConversationSnapshot(options)
+})
 
-const closeCommandAuditDialog = () => {
-  commandAuditDialog.value = { open: false, messageId: '', draft: '' }
-}
+const activeCommandAuditMessage = computed(() => aiPanelCommandActionRuntime.activeCommandAuditMessage())
+const canEditActiveCommandAudit = computed(() => aiPanelCommandActionRuntime.canEditActiveCommandAudit())
+const copyCommandToClipboard = aiPanelCommandActionRuntime.copyCommandToClipboard
+const closeCommandAuditDialog = aiPanelCommandActionRuntime.closeCommandAuditDialog
+const saveCommandAuditDraft = aiPanelCommandActionRuntime.saveCommandAuditDraft
+const copyCommandAuditDraft = aiPanelCommandActionRuntime.copyCommandAuditDraft
+const rejectMessageCommand = aiPanelCommandActionRuntime.rejectMessageCommand
+const runMessageCommand = aiPanelCommandActionRuntime.runMessageCommand
 
 const openCommandAuditDialog = async (message: CommandSuggestionMessage) => {
-  commandAuditDialog.value = {
-    open: true,
-    messageId: message.id,
-    draft: commandTextForMessage(message)
-  }
+  aiPanelCommandActionRuntime.openCommandAuditDialog(message)
   closePopups()
   await nextTick()
   commandAuditTextareaRef.value?.focus()
   commandAuditTextareaRef.value?.select()
 }
 
-const saveCommandAuditDraft = (options: { silent?: boolean } = {}) => {
-  const message = activeCommandAuditMessage.value
-  if (!message) return false
-  const saved = applyCommandTextToMessage(message, commandAuditDialog.value.draft)
-  if (!saved) {
-    showChatExportNotice('没有可运行的命令。')
-    return false
-  }
-  commandAuditDialog.value.draft = commandTextForMessage(message)
-  persistCommandExecutionState()
-  if (!options.silent) showChatExportNotice('命令已更新。')
-  return true
-}
-
-const copyCommandAuditDraft = async () => {
-  const command = commandAuditDialog.value.draft.trim()
-  if (!command) {
-    showChatExportNotice('没有可复制的命令。')
-    return
-  }
-  const copied = await copyTextToClipboard(command)
-  showChatExportNotice(copied ? '命令已复制。' : '复制失败。')
-}
-
-const runCommandAuditDraft = async () => {
-  const message = activeCommandAuditMessage.value
-  if (!message) return
-  if (!saveCommandAuditDraft({ silent: true })) return
-  closeCommandAuditDialog()
-  await runMessageCommand(message)
-}
-
-const persistCommandExecutionState = () => {
-  void workspace.syncCurrentConversationSnapshot({ notifyFailure: true, notifyUnavailable: true })
-}
-
-const rejectMessageCommand = (message: CommandSuggestionMessage) => {
-  if (message.commandExecutionStatus === 'running') return
-  message.action = 'rejected'
-  message.commandExecutionMessage = '已拒绝执行。'
-  persistCommandExecutionState()
-  showChatExportNotice('命令已拒绝。')
-}
-
-const enableSessionReadOnlyAutoRun = (message: CommandSuggestionMessage, options: { autoReadOnly?: boolean }) => {
-  if (!options.autoReadOnly || chatMode.value !== 'agent' || !isReadOnlyCommandMessage(message)) return false
-  return workspace.enableAgentReadOnlyAutoRunForCurrentConversation()
-}
-
-const runMessageCommand = async (message: CommandSuggestionMessage, options: { autoReadOnly?: boolean } = {}) => {
-  if (message.action === 'rejected') {
-    showChatExportNotice('命令已拒绝，无法执行。')
-    return
-  }
-  const command = commandTextForMessage(message)
-  if (!command) {
-    setCommandExecutionState(message, 'failed', '没有可运行的命令。')
-    persistCommandExecutionState()
-    showChatExportNotice('没有可运行的命令。')
-    return
-  }
-  const terminalPanel = workspace.activePanel.kind === 'knowledge' ? workspace.panels.find((panel) => panel.kind !== 'knowledge') : workspace.activePanel
-  const outputStartLength = terminalPanel?.output.length ?? 0
-  const terminalPanelId = terminalPanel?.id || ''
-  const sessionAutoRunEnabled = enableSessionReadOnlyAutoRun(message, options)
-  setCommandExecutionState(message, 'running', options.autoReadOnly ? '查询类命令正在发送到当前终端...' : '正在发送到当前终端...')
-  const decision = await workspace.runActiveTerminalCommand(command, 'agent')
-  if (!decision) {
-    setCommandExecutionState(message, 'failed', '终端会话不可用，请先打开本地 shell 或连接 SSH。')
-    persistCommandExecutionState()
-    showChatExportNotice('终端会话不可用，请先打开本地 shell 或连接 SSH。')
-    return
-  }
-  if (decision?.status === 'needs-approval') {
-    setCommandExecutionState(message, 'pending', '命令已送入终端安全确认。')
-    persistCommandExecutionState()
-    showChatExportNotice('命令已送入终端安全确认。')
-    return
-  }
-  if (decision?.status === 'blocked') {
-    setCommandExecutionState(message, 'failed', '命令被安全策略拦截。')
-    persistCommandExecutionState()
-    showChatExportNotice('命令被安全策略拦截。')
-    return
-  }
-  if (decision?.status === 'unavailable') {
-    setCommandExecutionState(message, 'failed', decision.reason)
-    persistCommandExecutionState()
-    showChatExportNotice(decision.reason)
-    return
-  }
-  setCommandExecutionState(message, 'succeeded', options.autoReadOnly ? `查询类命令已发送到终端：${command}` : `已发送到终端：${command}`, command)
-  persistCommandExecutionState()
-  if (chatMode.value !== 'agent' || message.ask !== 'command') {
-    showChatExportNotice(options.autoReadOnly ? '查询类命令已写入终端输入区。' : '命令已写入终端输入区。')
-    return
-  }
-  if (!terminalPanelId) {
-    setCommandExecutionState(message, 'failed', '终端会话不可用，请先打开本地 shell 或连接 SSH。')
-    persistCommandExecutionState()
-    showChatExportNotice('终端会话不可用，请先打开本地 shell 或连接 SSH。')
-    return
-  }
-  setCommandExecutionState(message, 'running', '命令已发送，正在等待终端输出...')
-  persistCommandExecutionState()
-  const loopResult = await workspace.continueAgentCommandLoop({
-    commandMessageId: message.id,
-    command,
-    commandExecution: message.commandExecution
-      ? {
-          ip: message.commandExecution.ip || commandHostForMessage(message).replace(/^Host\s+/, '') || '127.0.0.1',
-          command,
-          requiresApproval: message.commandExecution.requiresApproval === true,
-          interactive: message.commandExecution.interactive === true
-        }
-      : undefined,
-    terminalPanelId,
-    outputStartLength
-  })
-  if (loopResult.status === 'continued') {
-    setCommandExecutionState(message, 'succeeded', `命令输出已回传 Agent：${command}`, command)
-    persistCommandExecutionState()
-    showChatExportNotice(sessionAutoRunEnabled ? '已开启本会话查询类自动执行，并继续分析。' : '命令输出已回传 Agent，正在继续分析。')
-    return
-  }
-  showChatExportNotice(loopResult.reason)
-}
+const runCommandAuditDraft = aiPanelCommandActionRuntime.runCommandAuditDraft
 
 const formatMcpToolArguments = aiPanelMessageActionRuntime.formatMcpToolArguments
 const approveMcpToolCall = aiPanelMessageActionRuntime.approveMcpToolCall
