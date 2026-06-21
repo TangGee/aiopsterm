@@ -5,6 +5,7 @@ import {
   toggleHostAiContextInList
 } from '@/services/aiPanelInputRuntime'
 import type { AiCommandCatalogOption, AiContextCategoryInfo, AiContextKind, AiContextOption } from '@shared/contracts/aiChat'
+export { modelMatchesAiPanelQuery } from '@/services/aiPanelModelRuntime'
 
 export type AiPanelPopupTarget = 'main' | 'edit'
 
@@ -135,16 +136,6 @@ export const selectedAiPanelCommandRef = (
     }
   }
   return null
-}
-
-export const modelMatchesAiPanelQuery = (
-  model: { id: string; label: string; detail?: string; tier?: string; displayName?: string },
-  query: string,
-  displayName: (model: { id?: string; label?: string; displayName?: string } | string) => string
-) => {
-  const keyword = query.trim().toLowerCase()
-  if (!keyword) return true
-  return `${model.id} ${model.label} ${displayName(model)} ${model.detail || ''} ${model.tier || ''}`.toLowerCase().includes(keyword)
 }
 
 export const resetAiPanelDocsNavigation = (): AiPanelDocsNavigationState => ({

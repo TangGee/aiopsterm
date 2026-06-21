@@ -1689,7 +1689,6 @@ import {
   filteredAiPanelContextOptions,
   filteredAiPanelOpenedHosts,
   mainContextKeyboardSelection,
-  modelMatchesAiPanelQuery,
   nextAiPanelPopupKeyboardIndex,
   planAiPanelCommandApply,
   planAiPanelContextApply,
@@ -1703,6 +1702,12 @@ import {
   visibleAiPanelHostContextOptions,
   type AiPanelContextCategoryView
 } from '@/services/aiPanelPopupRuntime'
+import {
+  createAiPanelModelRuntime,
+  createEmptyAiPanelModelRuntimeState,
+  displayAiPanelModelName,
+  isThinkingAiPanelModelName
+} from '@/services/aiPanelModelRuntime'
 import {
   aiPanelChatExportMessage as chatExportMessage,
   aiPanelMessagePlainText as messagePlainText,
@@ -1839,10 +1844,11 @@ const contextKeyboardIndex = ref(-1)
 const commandKeyboardIndex = ref(-1)
 const docsCurrentRelDir = ref('')
 const docsDirStack = ref<string[]>([])
-const chatMode = ref<AiChatMode>('agent')
-const modeMenuOpen = ref(false)
-const modelMenuOpen = ref(false)
-const modelQuery = ref('')
+const modelRuntimeState = reactive(createEmptyAiPanelModelRuntimeState())
+const chatMode = toRef(modelRuntimeState, 'chatMode')
+const modeMenuOpen = toRef(modelRuntimeState, 'modeMenuOpen')
+const modelMenuOpen = toRef(modelRuntimeState, 'modelMenuOpen')
+const modelQuery = toRef(modelRuntimeState, 'modelQuery')
 const dropActive = ref(false)
 const syncingFromEditable = ref(false)
 const inputPlaceholderNotice = ref('')
@@ -1897,7 +1903,6 @@ const codexStatusLabel = computed(() => {
 const codexBoundTargetLabel = computed(() => codexRuntimeBoundTargetLabel(activeCodexBoundTarget.value, t('ai.codexTargetUnbound')))
 const codexBoundTargetDetail = computed(() => codexRuntimeBoundTargetDetail(activeCodexBoundTarget.value, t('ai.codexTargetDropHint')))
 const currentAiPanelModeLabel = computed(() => (aiPanelMode.value === 'codex' ? t('ai.codexCliMode') : t('ai.classicChatMode')))
-const currentChatMode = computed(() => aiChatModeOptions.find((option) => option.id === chatMode.value) || aiChatModeOptions[0])
 const visibleConversationTabs = computed(() => visibleAiConversationTabs(openConversationTabIds.value, workspace.conversations))
 const displayConversationTitle = (conversation: Pick<ConversationItem, 'title'>) =>
   displayAiConversationTitle(conversation, t('ai.untitledChat'))
@@ -2010,8 +2015,8 @@ const aiPanelHistoryRuntime = createAiPanelHistoryRuntime<ConversationItem>({
   closeContextPopup: () => closeContextPopup(),
   closeCommandPopup: () => closeCommandPopup(),
   closeModelMenu: () => {
-    modeMenuOpen.value = false
-    closeModelMenu()
+    aiPanelModelRuntime.closeModeMenu()
+    aiPanelModelRuntime.closeModelMenu()
   },
   focusHistorySearchInput: () => nextTick(() => historySearchInputRef.value?.focus()),
   focusHistoryTitleInput: () =>
@@ -2264,8 +2269,7 @@ const toggleAiPanelModeMenu = () => {
 }
 
 const closeModelMenu = () => {
-  modelMenuOpen.value = false
-  modelQuery.value = ''
+  aiPanelModelRuntime.closeModelMenu()
 }
 
 const formatHistoryTime = (timestamp: number) => formatAiHistoryTime(timestamp, new Date(), locale.value, historyLabels.value)
@@ -2607,30 +2611,6 @@ const hostContextsForPopup = computed(() =>
 const allVisibleHostContextsSelected = computed(() => allVisibleAiPanelHostsSelected(visibleHostContextOptions.value, hostContextsForPopup.value))
 const filteredCommands = computed(() => filteredAiPanelCommands(commandOptions.value, commandQuery.value))
 const selectedCommand = computed(() => selectedAiPanelCommand(commandOptions.value, workspace.selectedCommandId))
-const SELECT_CHROME_PX = 48
-const THINKING_ICON_SELECT_EXTRA_PX = 22
-const DROPDOWN_ROW_CHROME_PX = 52
-const LOCK_ROW_ICON_EXTRA_PX = 22
-const VIP_TAG_ROW_EXTRA_PX = 36
-
-const stripThinkingSuffix = (modelName: string) => modelName.replace(/-Thinking$/, '')
-const displayModelName = (model: { id?: string; label?: string; displayName?: string } | string) =>
-  typeof model === 'string' ? stripThinkingSuffix(model) : model.displayName || stripThinkingSuffix(model.label || model.id || '')
-const isThinkingModelName = (modelName: string) => modelName.endsWith('-Thinking')
-const lockedModelTooltip = (tier: string) => `模型已锁定，升级 ${tier} 后可用`
-const selectedModelLabel = computed(() => {
-  const model = workspace.aiModelOptions.find((option) => option.id === workspace.config.modelName)
-  return model ? displayModelName(model) : displayModelName(workspace.config.modelName)
-})
-const matchesModelQuery = (model: { id: string; label: string; detail?: string; tier?: string; displayName?: string }) =>
-  modelMatchesAiPanelQuery(model, modelQuery.value, displayModelName)
-const filteredModelOptions = computed(() => workspace.aiModelOptions.filter(matchesModelQuery))
-const filteredLockedModelOptions = computed(() => workspace.lockedAiModelOptions.filter(matchesModelQuery))
-const hasAvailableModels = computed(() => workspace.aiModelOptions.some((model) => !model.locked))
-const modelCatalogReady = computed(() =>
-  workspace.aiModelOptions.length > 0 || workspace.lockedAiModelOptions.length > 0 || workspace.settingModelOptions.length > 0
-)
-const showNoAvailableModelPrompt = computed(() => modelCatalogReady.value && !hasAvailableModels.value)
 const composerIsEmpty = computed(() =>
   isAiPanelComposerEmpty({
     draft: draft.value,
@@ -2651,27 +2631,40 @@ const measureUiTextWidthPx = (text: string) => {
   return context.measureText(text).width
 }
 
-const modeDropdownWidthPx = computed(() => {
-  const maxWidth = aiChatModeOptions.reduce((max, option) => {
-    const width = Math.ceil(measureUiTextWidthPx(option.label)) + DROPDOWN_ROW_CHROME_PX
-    return Math.max(max, width)
-  }, 0)
-  return Math.min(Math.max(maxWidth, 96), 400)
+const aiPanelModelRuntime = createAiPanelModelRuntime({
+  state: modelRuntimeState,
+  chatModeOptions: () => aiChatModeOptions,
+  availableModels: () => workspace.aiModelOptions,
+  lockedModels: () => workspace.lockedAiModelOptions,
+  settingsModelCount: () => workspace.settingModelOptions.length,
+  selectedModelName: () => workspace.config.modelName,
+  selectModel: (modelId) => workspace.selectAiModel(modelId),
+  closeContextPopup: () => closeContextPopup(),
+  closeCommandPopup: () => closeCommandPopup(),
+  closePopups: () => closePopups(),
+  openModelSettings: () => {
+    workspace.setActiveModule('settings')
+    workspace.setActiveSettingsSection('models')
+  },
+  openModelLogin: async () => {
+    await workspace.openUserLogin()
+  },
+  focusModelSearchInput: () => modelSearchInputRef.value?.focus(),
+  afterDomUpdate: () => nextTick(),
+  measureText: measureUiTextWidthPx,
+  lockedModelTooltip: (tier) => `模型已锁定，升级 ${tier} 后可用`
 })
 
-const modelDropdownWidthPx = computed(() => {
-  const availableMaxWidth = workspace.aiModelOptions.reduce((max, model) => {
-    const thinkingExtra = isThinkingModelName(model.id) ? THINKING_ICON_SELECT_EXTRA_PX : 0
-    const width = Math.ceil(measureUiTextWidthPx(displayModelName(model))) + DROPDOWN_ROW_CHROME_PX + thinkingExtra
-    return Math.max(max, width)
-  }, 0)
-  const lockedMaxWidth = workspace.lockedAiModelOptions.reduce((max, model) => {
-    const width = Math.ceil(measureUiTextWidthPx(model.label)) + DROPDOWN_ROW_CHROME_PX + LOCK_ROW_ICON_EXTRA_PX + VIP_TAG_ROW_EXTRA_PX
-    return Math.max(max, width)
-  }, 0)
-  const maxWidth = Math.max(availableMaxWidth, lockedMaxWidth)
-  return Math.min(Math.max(maxWidth, 120), 720)
-})
+const currentChatMode = computed(() => aiPanelModelRuntime.currentChatMode())
+const selectedModelLabel = computed(() => aiPanelModelRuntime.selectedModelLabel())
+const filteredModelOptions = computed(() => aiPanelModelRuntime.filteredModelOptions())
+const filteredLockedModelOptions = computed(() => aiPanelModelRuntime.filteredLockedModelOptions())
+const showNoAvailableModelPrompt = computed(() => aiPanelModelRuntime.showNoAvailableModelPrompt())
+const modeDropdownWidthPx = computed(() => aiPanelModelRuntime.modeDropdownWidthPx())
+const modelDropdownWidthPx = computed(() => aiPanelModelRuntime.modelDropdownWidthPx())
+const displayModelName = displayAiPanelModelName
+const isThinkingModelName = isThinkingAiPanelModelName
+const lockedModelTooltip = aiPanelModelRuntime.lockedModelTooltip
 const selectedCommandRef = computed(() => {
   return selectedAiPanelCommandRef(selectedCommand.value, workspace.selectedCommandId, workspace.selectedCommandRef)
 })
@@ -2903,7 +2896,7 @@ const openCommandPopupForTarget = async (target: 'main' | 'edit') => {
   commandTarget.value = target
   commandPopupOpen.value = true
   closeContextPopup()
-  modeMenuOpen.value = false
+  aiPanelModelRuntime.closeModeMenu()
   closeModelMenu()
   commandQuery.value = ''
   commandKeyboardIndex.value = -1
@@ -2920,7 +2913,7 @@ function openContextPopupForTarget(target: 'main' | 'edit', level: 'main' | AiCo
   contextTarget.value = target
   contextPopupOpen.value = true
   closeCommandPopup()
-  modeMenuOpen.value = false
+  aiPanelModelRuntime.closeModeMenu()
   closeModelMenu()
   contextLevel.value = level
   contextQuery.value = ''
@@ -3301,9 +3294,9 @@ const closePopups = (options: { restoreCommandFocus?: boolean; restoreContextFoc
   closeCommandPopup({ restoreFocus: options.restoreCommandFocus })
   closeCodexTargetPicker()
   moreActionsMenuOpen.value = false
-  modeMenuOpen.value = false
+  aiPanelModelRuntime.closeModeMenu()
   panelModeMenuOpen.value = false
-  closeModelMenu()
+  aiPanelModelRuntime.closeModelMenu()
   closeHistoryMenu()
 }
 
@@ -3316,58 +3309,20 @@ const toggleContextPopup = () => {
 }
 
 const toggleModeMenu = () => {
-  modeMenuOpen.value = !modeMenuOpen.value
-  closeModelMenu()
-  closeContextPopup()
-  closeCommandPopup()
+  aiPanelModelRuntime.toggleModeMenu()
 }
 
-const toggleModelMenu = () => {
-  if (modelMenuOpen.value) {
-    closeModelMenu()
-    return
-  }
-  modelQuery.value = ''
-  modelMenuOpen.value = true
-  modeMenuOpen.value = false
-  closeContextPopup()
-  closeCommandPopup()
-  void nextTick(() => modelSearchInputRef.value?.focus())
-}
+const toggleModelMenu = () => void aiPanelModelRuntime.toggleModelMenu()
 
-const selectChatMode = (mode: AiChatMode) => {
-  chatMode.value = mode
-  modeMenuOpen.value = false
-}
+const selectChatMode = (mode: AiChatMode) => aiPanelModelRuntime.selectChatMode(mode)
 
-const selectModel = async (modelId: string) => {
-  const saved = await workspace.selectAiModel(modelId)
-  if (saved) closeModelMenu()
-}
+const selectModel = (modelId: string) => aiPanelModelRuntime.selectModel(modelId)
 
-const openModelSettings = () => {
-  closePopups()
-  workspace.setActiveModule('settings')
-  workspace.setActiveSettingsSection('models')
-}
+const openModelSettings = () => aiPanelModelRuntime.openModelSettings()
 
-const openModelLogin = () => {
-  closePopups()
-  void workspace.openUserLogin()
-}
+const openModelLogin = () => void aiPanelModelRuntime.openModelLogin()
 
-const handleModelKeydown = async (event: KeyboardEvent) => {
-  if (event.key === 'Escape') {
-    event.preventDefault()
-    event.stopPropagation()
-    closeModelMenu()
-    return
-  }
-  if (event.key !== 'Enter') return
-  event.preventDefault()
-  const model = filteredModelOptions.value[0]
-  if (model) await selectModel(model.id)
-}
+const handleModelKeydown = (event: KeyboardEvent) => void aiPanelModelRuntime.handleModelKeydown(event)
 
 const resetDocsContextNavigation = () => {
   const next = resetAiPanelDocsNavigation()
@@ -3830,21 +3785,11 @@ watch(
     const onboardingRequest = workspace.onboardingAiRequest
     if (sequence === 0 && onboardingRequest.action === 'none') return
     if (onboardingRequest.action === 'open-mode') {
-      chatMode.value = 'cmd'
-      modeMenuOpen.value = true
-      closeModelMenu()
-      closeContextPopup()
-      closeCommandPopup()
+      aiPanelModelRuntime.openModeOnboarding()
       return
     }
     if (onboardingRequest.action === 'open-model') {
-      modelQuery.value = ''
-      modelMenuOpen.value = true
-      modeMenuOpen.value = false
-      closeContextPopup()
-      closeCommandPopup()
-      await nextTick()
-      modelSearchInputRef.value?.focus()
+      await aiPanelModelRuntime.openModelOnboarding()
       return
     }
     if (onboardingRequest.action === 'open-context-main') {
@@ -3856,7 +3801,7 @@ watch(
       return
     }
     if (onboardingRequest.action === 'prepare-send') {
-      chatMode.value = 'agent'
+      aiPanelModelRuntime.prepareSendOnboarding()
       closePopups()
       if (!draft.value.trim()) {
         setDraft('查看本地主机状态')
