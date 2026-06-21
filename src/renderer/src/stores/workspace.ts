@@ -74,74 +74,15 @@ import {
   malformedMcpToolResultMessage
 } from '@/services/mcpBackendGuards'
 import {
-  isFileSessionCatalogData,
-  isFileSessionFolderDeleteData,
-  isFileSessionFolderMutationData,
-  isFileSessionInfoData,
-  isFileSessionMutationData,
-  isFileTransferTaskCancelData,
-  isFileTransferTaskData,
-  malformedFilesBackendResultMessage
-} from '@/services/filesBackendGuards'
-import { filesClient } from '@/services/filesClient'
-import {
-  affectedFileTransferTaskIds as affectedFileTransferTaskIdsRuntime,
-  cloneFileSessionCatalog,
-  defaultFileOpenSide,
-  defaultFileSessionSide,
-  fileTransferOverallPercent,
-  fileTransferTaskRemovalDelay,
-  fileSessionTerminalContextForPanel,
-  findFileSessionForSftpPayload,
-  findFileSession,
-  groupFileTransferTasks,
-  hasRunningFileTransferTasks as hasRunningFileTransferTasksRuntime,
-  markFileTransferTasksCancelled as markFileTransferTasksCancelledRuntime,
-  mergeFileTransferTaskSnapshot as mergeFileTransferTaskSnapshotRuntime,
-  nextSelectedFileSessionIds,
-  normalizeFileSessionFolderSaveInput,
-  normalizeFileTransferTask,
-  normalizeFileTransferTaskSnapshot,
-  openFileSessionSelection,
-  upsertFileTransferTask
-} from '@/services/filesRuntime'
-import {
-  expectedKnowledgeRelPath,
-  isKnowledgeDeleteResultData,
-  isKnowledgeEnsureRootResultData,
-  isKnowledgeEntryListData,
-  isKnowledgeImportResultForRequest,
-  isKnowledgeMutationEntryData,
-  isKnowledgeReadResultData,
-  isKnowledgeReindexResultData,
   isKnowledgeRelPathInParentWithRequestedName,
-  isKnowledgeRelPathResultData,
-  isKnowledgeSearchResultListData,
-  isKnowledgeSearchStatusData,
-  isKnowledgeTransferProgressData,
   isKnowledgeWriteResultData,
   malformedKnowledgeBackendResultMessage
 } from '@/services/knowledgeBackendGuards'
 import { knowledgeClient } from '@/services/knowledgeClient'
 import {
-  addCompletedKnowledgeImportJob,
   cloneKnowledgeNodes,
-  filterKnowledgeTree,
-  findKnowledgeNode as findKnowledgeNodeInTree,
   getKnowledgeParent,
   isKnowledgeImagePath,
-  knowledgeCapacityPercent,
-  knowledgeContentSearchVisible,
-  knowledgeEntryToNode,
-  knowledgeRelPathParentMatches,
-  mediaTypeFromKnowledgePath,
-  missingKnowledgeRelPaths,
-  pruneKnowledgeUiState,
-  removeKnowledgeImportJob,
-  resolveKnowledgePasteTarget,
-  selectKnowledgeNodeKeys,
-  uniqueKnowledgeFileName as uniqueKnowledgeFileNameInTree,
-  upsertKnowledgeImportJob,
   type KbClipboard,
   type KnowledgeImportJob
 } from '@/services/knowledgeRuntime'
@@ -167,17 +108,12 @@ import {
   type K8sAgentRunRecord,
   type K8sTerminalTab
 } from '@/services/kubernetesRuntime'
+import { createWorkspaceFilesController, type FilesUiMode } from '@/services/workspaceFilesController'
+import { createWorkspaceKnowledgeController } from '@/services/workspaceKnowledgeController'
 import { createWorkspaceKubernetesController } from '@/services/workspaceKubernetesController'
+import { createWorkspaceQuickCommandsController } from '@/services/workspaceQuickCommandsController'
 import {
-  isQuickCommandGroupDeleteData,
-  isQuickCommandGroupSaveData,
-  isQuickCommandMacroSaveData,
-  isQuickCommandReorderData,
   isQuickCommandsSnapshotData,
-  isQuickCommandScriptPlanData,
-  isQuickCommandScriptPlanForRequest,
-  isQuickCommandSnippetDeleteData,
-  isQuickCommandSnippetSaveData,
   malformedQuickCommandsBackendResultMessage
 } from '@/services/quickCommandsBackendGuards'
 import { quickCommandsClient } from '@/services/quickCommandsClient'
@@ -243,31 +179,13 @@ import {
   terminalCommandModelOptions as terminalCommandModelOptionsRuntime
 } from '@/services/terminalCommandRuntime'
 import {
-  addMacroCommandEntry as addMacroCommandEntryRuntime,
-  cloneMacroRecordingState,
   cloneQuickCommandsSnapshot,
-  commitMacroCurrentLine as commitMacroCurrentLineRuntime,
   createEmptyMacroRecordingState,
-  currentSnippetGroupName as resolveCurrentSnippetGroupName,
-  filteredQuickCommands as filterQuickCommands,
-  macroSaveDraft,
-  recordMacroCommandText,
-  recordedMacroCommands,
-  recordMacroTerminalInputState,
-  reorderQuickCommandPlan,
-  resetMacroRecordingState as resetMacroRecordingStateRuntime,
-  selectedGroupAfterDelete,
-  startMacroRecordingState,
   type MacroRecordingState,
   type QuickCommandSnippet,
   type SnippetGroup
 } from '@/services/quickCommandsRuntime'
-import {
-  MACRO_DEFAULT_SLEEP_THRESHOLD_MS,
-  MACRO_MAX_RECORDING_DURATION_MS,
-  normalizeMacroSleepThreshold,
-  type MacroCommandEntry
-} from '@/services/terminalMacroRuntime'
+import { MACRO_DEFAULT_SLEEP_THRESHOLD_MS } from '@/services/terminalMacroRuntime'
 import {
   applyLocalTerminalSessionToPanel,
   applySshTerminalSessionToPanel,
@@ -552,7 +470,6 @@ export type {
 } from '@/services/workspaceConfigRuntime'
 
 type CloseMode = 'current' | 'others' | 'all'
-type FilesUiMode = 'transfer' | 'default'
 type AliasCommand = AliasCommandConfig & { edit?: boolean }
 type TopUpdateState = 'idle' | 'checking' | 'local' | 'available' | 'install-requested'
 export type AiAttentionKind = 'approval' | 'question' | 'plan' | 'error' | 'done'
@@ -945,22 +862,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const selectedLeftFileSessionId = ref<string | null>(null)
   const selectedRightFileSessionId = ref<string | null>('local')
   const fileTransferTasks = ref<FileTransferTask[]>([])
-  const fileTransferTaskRemovalTimers = new Map<string, number>()
-  let fileTransferTaskObserverCount = 0
-  let fileTransferTaskPoller: number | null = null
   const snippetGroups = ref<SnippetGroup[]>([])
   const quickCommands = ref<QuickCommandSnippet[]>([])
   const selectedSnippetGroupUuid = ref<string | null>(null)
   const snippetSearchQuery = ref('')
   const macroRecording = ref<MacroRecordingState>(createEmptyMacroRecordingState())
-  const isMacroRecording = computed(() => macroRecording.value.isRecording)
-  const recordedCommands = computed(() => recordedMacroCommands(macroRecording.value))
-  const macroCurrentLineBuffer = computed(() => macroRecording.value.currentLineBuffer)
-  const macroTerminalId = computed(() => macroRecording.value.terminalId)
   const macroRecordControlKeys = ref(true)
   const macroSleepThresholdMs = ref(MACRO_DEFAULT_SLEEP_THRESHOLD_MS)
-  const macroLimitReason = computed(() => macroRecording.value.limitReason)
-  let macroAutoStopTimer: ReturnType<typeof globalThis.setTimeout> | null = null
   const knowledgeTree = ref<KnowledgeNode[]>([])
   const kbExpandedKeys = ref<string[]>(['commands', 'images'])
   const kbSelectedKeys = ref<string[]>([])
@@ -1165,11 +1073,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   let mcpConfigSaveTimer: number | null = null
   let removeMcpConfigFileListener: (() => void) | null = null
   let mcpConfigLoadRequest = 0
-  let kbSearchRequest = 0
   let extensionPackageInstallRequestSequence = 0
   const nextExtensionPackageInstallRequestId = () => `extension-package-install-${(extensionPackageInstallRequestSequence += 1)}`
   let removeSkillsUpdateListener: (() => void) | null = null
-  let removeKnowledgeProgressListener: (() => void) | null = null
   let removeExtensionInstallProgressListener: (() => void) | null = null
   let aiModelCatalogLoadPromise: Promise<AiModelCatalog> | null = null
   let pendingSkillImportOverwritePath = ''
@@ -1576,12 +1482,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const syncCurrentConversationSnapshot = (options: { notifyUnavailable?: boolean; notifyFailure?: boolean } = {}) =>
     updateCurrentConversationSnapshot(undefined, options)
 
-  const selectedLeftFileSession = computed(() => findFileSession(fileSessions.value, selectedLeftFileSessionId.value))
-  const selectedRightFileSession = computed(() => findFileSession(fileSessions.value, selectedRightFileSessionId.value))
-  const transferTaskGroups = computed(() => groupFileTransferTasks(fileTransferTasks.value))
-  const transferTaskCount = computed(() => fileTransferTasks.value.length)
-  const transferOverallPercent = computed(() => fileTransferOverallPercent(fileTransferTasks.value))
-  const hasRunningFileTransferTasks = computed(() => hasRunningFileTransferTasksRuntime(fileTransferTasks.value))
   const terminalCommandModelOptions = computed(() => terminalCommandModelOptionsRuntime(settingModelOptions.value))
   const applyAiModelCatalog = (catalog: AiModelCatalog, options: { replaceSettingsOptions?: boolean } = {}) => {
     aiModelOptions.value = catalog.chatModels.map((model) => ({ ...model }))
@@ -1621,11 +1521,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       return null
     }
   }
-  const filteredQuickCommands = computed(() => filterQuickCommands(quickCommands.value, snippetSearchQuery.value, selectedSnippetGroupUuid.value))
-  const currentSnippetGroupName = computed(() => resolveCurrentSnippetGroupName(snippetGroups.value, selectedSnippetGroupUuid.value))
-  const filteredKnowledgeTree = computed(() => filterKnowledgeTree(knowledgeTree.value, kbSearchQuery.value))
-  const kbContentSearchVisible = computed(() => knowledgeContentSearchVisible(kbSearchQuery.value))
-  const kbCapacityPercent = computed(() => knowledgeCapacityPercent(kbUsedBytes.value, kbTotalBytes.value))
   const visibleExtensionPlugins = computed(() =>
     extensionPlugins.value
       .filter((plugin) => plugin.show && (plugin.pluginId !== 'Alias' || extensionSettings.value.aliasStatus))
@@ -1971,97 +1866,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     applyCurrentEditorSettings()
     refreshShortcutRuntime()
     setupThemeBridge()
-  }
-
-  const applyQuickCommandsSnapshot = (snapshot: unknown) => {
-    if (!isQuickCommandsSnapshotData(snapshot)) {
-      setTopNotice(malformedQuickCommandsBackendResultMessage)
-      return false
-    }
-    const quickCommandsSnapshot = cloneQuickCommandsSnapshot(snapshot)
-    snippetGroups.value = quickCommandsSnapshot.groups
-    quickCommands.value = quickCommandsSnapshot.snippets
-    config.value = mergeUserConfig(config.value, { quickCommands: quickCommandsSnapshot })
-    return true
-  }
-
-  const refreshQuickCommands = async () => {
-    const getQuickCommands = quickCommandsClient.getQuickCommands()
-    if (!getQuickCommands) {
-      setTopNotice('快捷命令加载服务不可用')
-      return false
-    }
-    try {
-      const snapshot = await getQuickCommands()
-      return applyQuickCommandsSnapshot(snapshot)
-    } catch {
-      setTopNotice('快捷命令加载失败')
-      return false
-    }
-  }
-
-  const loadKnowledgeTreeFromBridge = async (relDir = ''): Promise<KnowledgeNode[]> => {
-    const kbListDir = knowledgeClient.kbListDir()
-    if (!kbListDir) throw new Error('KNOWLEDGE_BRIDGE_UNAVAILABLE')
-    const entries = await kbListDir(relDir)
-    if (!isKnowledgeEntryListData(entries)) throw new Error(malformedKnowledgeBackendResultMessage)
-    const nodes: KnowledgeNode[] = []
-    for (const entry of entries) {
-      const node = knowledgeEntryToNode(entry)
-      if (entry.type === 'dir') {
-        node.children = await loadKnowledgeTreeFromBridge(entry.relPath)
-      }
-      nodes.push(node)
-    }
-    return nodes
-  }
-
-  const refreshKnowledgeTree = async (options: { persist?: boolean } = {}) => {
-    void options
-    const kbEnsureRoot = knowledgeClient.kbEnsureRoot()
-    if (!kbEnsureRoot || !knowledgeClient.kbListDir()) {
-      setTopNotice('知识库加载服务不可用')
-      return false
-    }
-    try {
-      const rootResult = await kbEnsureRoot()
-      if (!isKnowledgeEnsureRootResultData(rootResult)) {
-        setTopNotice(malformedKnowledgeBackendResultMessage)
-        return false
-      }
-      const nextTree = await loadKnowledgeTreeFromBridge('')
-      const nextSnapshot: KnowledgeBaseUserConfig = {
-        tree: cloneKnowledgeNodes(nextTree),
-        usedBytes: knowledgeTreeSize(nextTree),
-        totalBytes: kbTotalBytes.value
-      }
-      knowledgeTree.value = nextTree
-      kbUsedBytes.value = nextSnapshot.usedBytes
-      return true
-    } catch (error) {
-      setTopNotice(error instanceof Error && error.message === malformedKnowledgeBackendResultMessage ? malformedKnowledgeBackendResultMessage : '知识库加载失败')
-      return false
-    }
-  }
-
-  const handleKnowledgeTransferProgress = (event: KnowledgeBaseTransferProgress) => {
-    if (!isKnowledgeTransferProgressData(event)) {
-      setTopNotice(malformedKnowledgeBackendResultMessage)
-      return
-    }
-    const { jobs, percent } = upsertKnowledgeImportJob(kbImportJobs.value, event)
-    kbImportJobs.value = jobs
-    if (percent >= 100) {
-      window.setTimeout(() => {
-        kbImportJobs.value = removeKnowledgeImportJob(kbImportJobs.value, event.jobId)
-      }, 500)
-    }
-  }
-
-  const setupKnowledgeBridgeListeners = () => {
-    const onKbTransferProgress = knowledgeClient.onKbTransferProgress()
-    if (removeKnowledgeProgressListener || !onKbTransferProgress) return
-    removeKnowledgeProgressListener = onKbTransferProgress(handleKnowledgeTransferProgress)
   }
 
   const getAliasCommandsSnapshot = (): AliasCommandConfig[] =>
@@ -6704,1188 +6508,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return true
   }
 
-  const setFilesUiMode = (mode: FilesUiMode) => {
-    filesUiMode.value = mode
-  }
-
-  const clearFileTransferTaskRemovalTimer = (id: string) => {
-    const timer = fileTransferTaskRemovalTimers.get(id)
-    if (timer === undefined) return
-    window.clearTimeout(timer)
-    fileTransferTaskRemovalTimers.delete(id)
-  }
-
-  const normalizedFileTransferTaskSnapshot = (tasks: unknown[]) => {
-    if (!tasks.every(isFileTransferTaskData)) {
-      setTopNotice(malformedFilesBackendResultMessage)
-      return null
-    }
-    return normalizeFileTransferTaskSnapshot(tasks)
-  }
-
-  const mergeFileTransferTaskSnapshot = (snapshot: FileTransferTask[], options: { replaceCompleted?: boolean } = {}) => {
-    fileTransferTasks.value = mergeFileTransferTaskSnapshotRuntime(fileTransferTasks.value, snapshot, options)
-    snapshot.forEach((task) => clearFileTransferTaskRemovalTimer(task.id))
-    return true
-  }
-
-  const refreshFileTransferTasks = async (options: { replaceCompleted?: boolean } = {}) => {
-    const listFileTransferTasksBridge = filesClient.listFileTransferTasks()
-    if (!listFileTransferTasksBridge) {
-      setTopNotice('文件传输任务加载服务不可用')
-      return false
-    }
-    try {
-      const tasks = await listFileTransferTasksBridge()
-      if (!Array.isArray(tasks)) {
-        setTopNotice(malformedFilesBackendResultMessage)
-        return false
-      }
-      const snapshot = normalizedFileTransferTaskSnapshot(tasks)
-      if (!snapshot) return false
-      mergeFileTransferTaskSnapshot(snapshot, options)
-      return true
-    } catch {
-      setTopNotice('文件传输任务加载失败')
-      return false
-    }
-  }
-
-  const applyFileSessionCatalog = (catalog: FileSessionCatalog) => {
-    if (!isFileSessionCatalogData(catalog)) {
-      setTopNotice(malformedFilesBackendResultMessage)
-      return null
-    }
-    const nextCatalog = cloneFileSessionCatalog(catalog)
-    fileSessions.value = nextCatalog.sessions
-    fileSessionFolders.value = nextCatalog.folders
-    const selection = nextSelectedFileSessionIds(fileSessions.value, selectedLeftFileSessionId.value, selectedRightFileSessionId.value)
-    selectedLeftFileSessionId.value = selection.left
-    selectedRightFileSessionId.value = selection.right
-    return catalog
-  }
-
-  const refreshFileSessionCatalog = async () => {
-    const listFileSessionCatalogBridge = filesClient.listFileSessionCatalog()
-    if (!listFileSessionCatalogBridge) {
-      setTopNotice('文件会话加载服务不可用')
-      return null
-    }
-    try {
-      const result = await listFileSessionCatalogBridge()
-      if (!result?.ok || !result.data) {
-        setTopNotice(result?.errorMessage || '文件会话加载失败')
-        return null
-      }
-      return applyFileSessionCatalog(result.data)
-    } catch {
-      setTopNotice('文件会话加载失败')
-      return null
-    }
-  }
-
-  const applyFileSessionRecordMutationResult = (
-    result: Awaited<ReturnType<NonNullable<AiopsPreloadApi['saveFileSession']>>> | undefined,
-    fallbackNotice = '文件会话写入失败'
-  ) => {
-    if (!result?.ok || !result.data) {
-      setTopNotice(result?.errorMessage || fallbackNotice)
-      return null
-    }
-    if (!isFileSessionMutationData(result.data)) {
-      setTopNotice(malformedFilesBackendResultMessage)
-      return null
-    }
-    return applyFileSessionCatalog(result.data)
-  }
-
-  const applyFileSessionFolderMutationResult = (
-    result: Awaited<ReturnType<NonNullable<AiopsPreloadApi['saveFileSessionFolder']>>> | undefined,
-    fallbackNotice = '文件会话文件夹写入失败'
-  ) => {
-    if (!result?.ok || !result.data) {
-      setTopNotice(result?.errorMessage || fallbackNotice)
-      return null
-    }
-    if (!isFileSessionFolderMutationData(result.data)) {
-      setTopNotice(malformedFilesBackendResultMessage)
-      return null
-    }
-    return applyFileSessionCatalog(result.data)
-  }
-
-  const applyFileSessionFolderDeleteResult = (
-    result: Awaited<ReturnType<NonNullable<AiopsPreloadApi['deleteFileSessionFolder']>>> | undefined,
-    uuid: string,
-    fallbackNotice = '文件会话文件夹删除失败'
-  ) => {
-    if (!result?.ok || !result.data) {
-      setTopNotice(result?.errorMessage || fallbackNotice)
-      return null
-    }
-    if (!isFileSessionFolderDeleteData(result.data, uuid)) {
-      setTopNotice(malformedFilesBackendResultMessage)
-      return null
-    }
-    return applyFileSessionCatalog(result.data)
-  }
-
-  const persistFileSession = async (session: FileSessionInfo) => {
-    const saveFileSessionBridge = filesClient.saveFileSession()
-    if (!saveFileSessionBridge) {
-      setTopNotice('文件会话写入服务不可用')
-      return null
-    }
-    try {
-      return applyFileSessionRecordMutationResult(await saveFileSessionBridge({ ...session }))
-    } catch {
-      setTopNotice('文件会话写入失败')
-      return null
-    }
-  }
-
-  const updateFileSession = async (id: string, patch: FileSessionPatch) => {
-    const session = fileSessions.value.find((item) => item.id === id)
-    if (!session) return null
-    const updateFileSessionBridge = filesClient.updateFileSession()
-    if (!updateFileSessionBridge) {
-      setTopNotice('文件会话写入服务不可用')
-      return null
-    }
-    const previous = { ...session }
-    Object.assign(session, patch)
-    try {
-      const result = await updateFileSessionBridge(id, patch)
-      const applied = applyFileSessionRecordMutationResult(result)
-      if (!applied) Object.assign(session, previous)
-      return applied && result?.data && isFileSessionInfoData(result.data.session) ? result.data.session : null
-    } catch {
-      Object.assign(session, previous)
-      setTopNotice('文件会话写入失败')
-      return null
-    }
-  }
-
-  const saveFileSessionFolder = async (folder: FileSessionFolderSaveInput) => {
-    const normalized = normalizeFileSessionFolderSaveInput(folder)
-    if (!normalized) return null
-    const saveFileSessionFolderBridge = filesClient.saveFileSessionFolder()
-    if (!saveFileSessionFolderBridge) {
-      setTopNotice('文件会话文件夹写入服务不可用')
-      return null
-    }
-    try {
-      const result = await saveFileSessionFolderBridge(normalized)
-      const applied = applyFileSessionFolderMutationResult(result, '文件会话文件夹写入失败')
-      return applied && result?.data ? result.data.folder : null
-    } catch {
-      setTopNotice('文件会话文件夹写入失败')
-      return null
-    }
-  }
-
-  const deleteFileSessionFolder = async (uuid: string) => {
-    const deleteFileSessionFolderBridge = filesClient.deleteFileSessionFolder()
-    if (!deleteFileSessionFolderBridge) {
-      setTopNotice('文件会话文件夹删除服务不可用')
-      return false
-    }
-    try {
-      const result = await deleteFileSessionFolderBridge(uuid)
-      return Boolean(applyFileSessionFolderDeleteResult(result, uuid, '文件会话文件夹删除失败'))
-    } catch {
-      setTopNotice('文件会话文件夹删除失败')
-      return false
-    }
-  }
-
-  const scheduleFileTransferTaskRemoval = (id: string, delay = 800) => {
-    clearFileTransferTaskRemovalTimer(id)
-    const timer = window.setTimeout(() => {
-      fileTransferTasks.value = fileTransferTasks.value.filter((item) => item.id !== id)
-      fileTransferTaskRemovalTimers.delete(id)
-    }, delay)
-    fileTransferTaskRemovalTimers.set(id, timer)
-  }
-
-  const startFileTransferTaskPolling = () => {
-    if (fileTransferTaskPoller !== null) return
-    fileTransferTaskPoller = window.setInterval(() => {
-      void refreshFileTransferTasks()
-    }, 250)
-  }
-
-  const stopFileTransferTaskPollingIfIdle = () => {
-    if (fileTransferTaskObserverCount > 0 || hasRunningFileTransferTasks.value || fileTransferTaskPoller === null) return
-    window.clearInterval(fileTransferTaskPoller)
-    fileTransferTaskPoller = null
-  }
-
-  const observeFileTransferTasks = () => {
-    fileTransferTaskObserverCount += 1
-    startFileTransferTaskPolling()
-    void refreshFileTransferTasks()
-    let stopped = false
-    return () => {
-      if (stopped) return
-      stopped = true
-      fileTransferTaskObserverCount = Math.max(0, fileTransferTaskObserverCount - 1)
-      void refreshFileTransferTasks().finally(stopFileTransferTaskPollingIfIdle)
-    }
-  }
-
-  const selectFileSession = (side: 'left' | 'right', id: string | null) => {
-    if (side === 'left') {
-      selectedLeftFileSessionId.value = id
-      return
-    }
-    selectedRightFileSessionId.value = id
-  }
-
-  const openFileSession = (sessionId: string, side: 'left' | 'right' = defaultFileOpenSide(selectedLeftFileSessionId.value)) => {
-    const selection = openFileSessionSelection(fileSessions.value, sessionId, side, selectedLeftFileSessionId.value, selectedRightFileSessionId.value)
-    if (!selection.session) return
-    selectedLeftFileSessionId.value = selection.left
-    selectedRightFileSessionId.value = selection.right
-  }
-
-  const fileSideForTerminalPanel = () => defaultFileSessionSide(selectedLeftFileSessionId.value, selectedRightFileSessionId.value)
-
-  const ensureFileSessionForTerminalPanel = async (panelId = activePanelId.value, side: 'left' | 'right' = fileSideForTerminalPanel()) => {
-    const panel = panels.value.find((item) => item.id === panelId || item.sessionId === panelId)
-    if (!panel || panel.kind === 'knowledge') return null
-    const saveFileSessionFromTerminalContextBridge = filesClient.saveFileSessionFromTerminalContext()
-    if (!saveFileSessionFromTerminalContextBridge) {
-      setTopNotice('文件会话写入服务不可用')
-      return null
-    }
-    let result
-    try {
-      result = await saveFileSessionFromTerminalContextBridge(fileSessionTerminalContextForPanel(panel))
-    } catch {
-      setTopNotice('文件会话创建失败')
-      return null
-    }
-    if (!result?.ok || !result.data) {
-      setTopNotice(result?.errorMessage || '文件会话创建失败')
-      return null
-    }
-    if (!isFileSessionMutationData(result.data)) {
-      setTopNotice(malformedFilesBackendResultMessage)
-      return null
-    }
-
-    if (!applyFileSessionCatalog(result.data)) return null
-    const session = result.data.session
-    setFilesUiMode('transfer')
-    openFileSession(session.id, side)
-    setActiveModule('files')
-    return session
-  }
-
-  const closeFileSession = (side: 'left' | 'right') => {
-    selectFileSession(side, null)
-  }
-
-  const addRemoteFileSession = async (assetId: string, side: 'left' | 'right' = 'left') => {
-    const known = fileSessions.value.find((item) => item.id === assetId)
-    if (known) {
-      openFileSession(assetId, side)
-      return known
-    }
-    const saveFileSessionFromTerminalContextBridge = filesClient.saveFileSessionFromTerminalContext()
-    if (!saveFileSessionFromTerminalContextBridge) {
-      setTopNotice('文件会话写入服务不可用')
-      return null
-    }
-    let result
-    try {
-      result = await saveFileSessionFromTerminalContextBridge({
-        kind: 'ssh',
-        panelTitle: assetId,
-        panelStatus: 'running',
-        ssh: {
-          assetId
-        }
-      })
-    } catch {
-      setTopNotice('文件会话创建失败')
-      return null
-    }
-    if (!result?.ok || !result.data) {
-      setTopNotice(result?.errorMessage || '文件会话创建失败')
-      return null
-    }
-    if (!isFileSessionMutationData(result.data)) {
-      setTopNotice(malformedFilesBackendResultMessage)
-      return null
-    }
-    if (!applyFileSessionCatalog(result.data)) return null
-    const session = result.data.session
-    openFileSession(session.id, side)
-    return session
-  }
-
-  const addRemoteFileSessionFromSftpPayload = async (payload: Record<string, unknown>, side: 'left' | 'right' = 'left') => {
-    const known = findFileSessionForSftpPayload(fileSessions.value, payload)
-    if (known) {
-      openFileSession(known.id, side)
-      return known
-    }
-    const saveFileSessionFromSftpPayloadBridge = filesClient.saveFileSessionFromSftpPayload()
-    if (!saveFileSessionFromSftpPayloadBridge) {
-      setTopNotice('文件会话写入服务不可用')
-      return null
-    }
-    let result
-    try {
-      result = await saveFileSessionFromSftpPayloadBridge({ ...payload })
-    } catch {
-      setTopNotice('文件会话创建失败')
-      return null
-    }
-    if (!result?.ok || !result.data) {
-      setTopNotice(result?.errorMessage || '文件会话创建失败')
-      return null
-    }
-    if (!isFileSessionMutationData(result.data)) {
-      setTopNotice(malformedFilesBackendResultMessage)
-      return null
-    }
-    if (!applyFileSessionCatalog(result.data)) return null
-    const session = result.data.session
-    openFileSession(session.id, side)
-    return session
-  }
-
-  const pushFileTransferTask = (task: FileTransferTask) => {
-    if (!isFileTransferTaskData(task)) return null
-    const normalized = normalizeFileTransferTask(task)
-    if (!normalized) return null
-    clearFileTransferTaskRemovalTimer(normalized.id)
-    fileTransferTasks.value = upsertFileTransferTask(fileTransferTasks.value, normalized)
-    const removalDelay = fileTransferTaskRemovalDelay(normalized)
-    if (removalDelay !== null) scheduleFileTransferTaskRemoval(normalized.id, removalDelay)
-    return normalized
-  }
-
-  const affectedFileTransferTaskIds = (id: string) => affectedFileTransferTaskIdsRuntime(fileTransferTasks.value, id)
-
-  const markFileTransferTasksCancelled = (ids: Iterable<string>) => {
-    const taskIds = new Set(ids)
-    fileTransferTasks.value = markFileTransferTasksCancelledRuntime(fileTransferTasks.value, taskIds)
-    fileTransferTasks.value.filter((task) => taskIds.has(task.id)).forEach((task) => scheduleFileTransferTaskRemoval(task.id, 800))
-  }
-
-  const cancelFileTransferTask = async (id: string) => {
-    const cancelFileTransferTaskBridge = filesClient.cancelFileTransferTask()
-    if (!cancelFileTransferTaskBridge) {
-      setTopNotice('取消传输任务服务不可用')
-      return false
-    }
-    let result
-    try {
-      result = await cancelFileTransferTaskBridge({ id })
-    } catch {
-      setTopNotice('取消传输任务失败')
-      return false
-    }
-    if (!result?.ok || !result.data) {
-      setTopNotice(result?.errorMessage || '取消传输任务失败')
-      return false
-    }
-    if (!isFileTransferTaskCancelData(result.data) || result.data.id !== id) {
-      setTopNotice(malformedFilesBackendResultMessage)
-      return false
-    }
-    if (result.data.status !== 'aborted') {
-      setTopNotice('传输任务已结束或不存在')
-      return false
-    }
-    markFileTransferTasksCancelled(result.data.taskIds.length ? result.data.taskIds : affectedFileTransferTaskIds(id))
-    void refreshFileTransferTasks().finally(stopFileTransferTaskPollingIfIdle)
-    return true
-  }
-
-  const createSnippetGroup = async (groupName: string) => {
-    const name = groupName.trim()
-    if (!name) return null
-    const saveQuickCommandGroup = quickCommandsClient.saveQuickCommandGroup()
-    if (!saveQuickCommandGroup) {
-      setTopNotice('快捷命令分组写入服务不可用')
-      return null
-    }
-    let result
-    try {
-      result = await saveQuickCommandGroup({ group_name: name })
-    } catch {
-      setTopNotice('快捷命令分组写入失败')
-      return null
-    }
-    if (!result.ok || !result.data) {
-      setTopNotice(result.errorMessage || '快捷命令分组写入失败')
-      return null
-    }
-    if (!isQuickCommandGroupSaveData(result.data, { groupName: name })) {
-      setTopNotice(malformedQuickCommandsBackendResultMessage)
-      return null
-    }
-    applyQuickCommandsSnapshot(result.data)
-    return result.data.group
-  }
-
-  const renameSnippetGroup = async (uuid: string, groupName: string) => {
-    const name = groupName.trim()
-    if (!name) return false
-    const saveQuickCommandGroup = quickCommandsClient.saveQuickCommandGroup()
-    if (!saveQuickCommandGroup) {
-      setTopNotice('快捷命令分组写入服务不可用')
-      return false
-    }
-    let result
-    try {
-      result = await saveQuickCommandGroup({ uuid, group_name: name })
-    } catch {
-      setTopNotice('快捷命令分组写入失败')
-      return false
-    }
-    if (!result.ok || !result.data) {
-      setTopNotice(result.errorMessage || '快捷命令分组写入失败')
-      return false
-    }
-    if (!isQuickCommandGroupSaveData(result.data, { uuid, groupName: name })) {
-      setTopNotice(malformedQuickCommandsBackendResultMessage)
-      return false
-    }
-    applyQuickCommandsSnapshot(result.data)
-    return true
-  }
-
-  const deleteSnippetGroup = async (uuid: string) => {
-    const deleteQuickCommandGroup = quickCommandsClient.deleteQuickCommandGroup()
-    if (!deleteQuickCommandGroup) {
-      setTopNotice('快捷命令分组删除服务不可用')
-      return false
-    }
-    let result
-    try {
-      result = await deleteQuickCommandGroup(uuid)
-    } catch {
-      setTopNotice('快捷命令分组删除失败')
-      return false
-    }
-    if (!result.ok || !result.data) {
-      setTopNotice(result.errorMessage || '快捷命令分组删除失败')
-      return false
-    }
-    if (!isQuickCommandGroupDeleteData(result.data, uuid)) {
-      setTopNotice(malformedQuickCommandsBackendResultMessage)
-      return false
-    }
-    applyQuickCommandsSnapshot(result.data)
-    selectedSnippetGroupUuid.value = selectedGroupAfterDelete(selectedSnippetGroupUuid.value, uuid)
-    return true
-  }
-
-  const createQuickCommand = async (payload: Pick<QuickCommandSnippet, 'snippet_name' | 'snippet_content'> & { group_uuid?: string | null }) => {
-    const snippetName = payload.snippet_name.trim()
-    if (!snippetName || !payload.snippet_content) return null
-    const saveQuickCommandSnippet = quickCommandsClient.saveQuickCommandSnippet()
-    if (!saveQuickCommandSnippet) {
-      setTopNotice('快捷命令写入服务不可用')
-      return null
-    }
-    const result = await saveQuickCommandSnippet({
-      snippet_name: snippetName,
-      snippet_content: payload.snippet_content,
-      group_uuid: payload.group_uuid ?? null
-    }).catch(() => null)
-    if (!result) {
-      setTopNotice('快捷命令写入失败')
-      return null
-    }
-    if (!result.ok || !result.data) {
-      setTopNotice(result.errorMessage || '快捷命令写入失败')
-      return null
-    }
-    if (!isQuickCommandSnippetSaveData(result.data, { snippetName, snippetContent: payload.snippet_content, groupUuid: payload.group_uuid ?? null })) {
-      setTopNotice(malformedQuickCommandsBackendResultMessage)
-      return null
-    }
-    applyQuickCommandsSnapshot(result.data)
-    setTopNotice('快捷命令已保存。')
-    return result.data.snippet
-  }
-
-  const updateQuickCommand = async (id: number, payload: Pick<QuickCommandSnippet, 'snippet_name' | 'snippet_content'> & { group_uuid?: string | null }) => {
-    const snippetName = payload.snippet_name.trim()
-    if (!snippetName || !payload.snippet_content) return false
-    const saveQuickCommandSnippet = quickCommandsClient.saveQuickCommandSnippet()
-    if (!saveQuickCommandSnippet) {
-      setTopNotice('快捷命令写入服务不可用')
-      return false
-    }
-    const result = await saveQuickCommandSnippet({
-        id,
-        snippet_name: snippetName,
-        snippet_content: payload.snippet_content,
-        group_uuid: payload.group_uuid ?? null
-      })
-      .catch(() => null)
-    if (!result) {
-      setTopNotice('快捷命令写入失败')
-      return false
-    }
-    if (!result.ok || !result.data) {
-      setTopNotice(result.errorMessage || '快捷命令写入失败')
-      return false
-    }
-    if (!isQuickCommandSnippetSaveData(result.data, { id, snippetName, snippetContent: payload.snippet_content, groupUuid: payload.group_uuid ?? null })) {
-      setTopNotice(malformedQuickCommandsBackendResultMessage)
-      return false
-    }
-    applyQuickCommandsSnapshot(result.data)
-    setTopNotice('快捷命令已保存。')
-    return true
-  }
-
-  const deleteQuickCommand = async (id: number) => {
-    const deleteQuickCommandSnippet = quickCommandsClient.deleteQuickCommandSnippet()
-    if (!deleteQuickCommandSnippet) {
-      setTopNotice('快捷命令删除服务不可用')
-      return false
-    }
-    const result = await deleteQuickCommandSnippet(id).catch(() => null)
-    if (!result) {
-      setTopNotice('快捷命令删除失败')
-      return false
-    }
-    if (!result.ok || !result.data) {
-      setTopNotice(result.errorMessage || '快捷命令删除失败')
-      return false
-    }
-    if (!isQuickCommandSnippetDeleteData(result.data, id)) {
-      setTopNotice(malformedQuickCommandsBackendResultMessage)
-      return false
-    }
-    applyQuickCommandsSnapshot(result.data)
-    return true
-  }
-
-  const reorderQuickCommand = async (sourceId: number, targetId: number) => {
-    const reorderQuickCommands = quickCommandsClient.reorderQuickCommands()
-    if (!reorderQuickCommands) {
-      setTopNotice('快捷命令排序服务不可用')
-      return false
-    }
-    const plan = reorderQuickCommandPlan(filteredQuickCommands.value, sourceId, targetId, selectedSnippetGroupUuid.value || null)
-    if (!plan) return false
-    const { orderedIds, groupUuid } = plan
-    const result = await reorderQuickCommands({ orderedIds, groupUuid }).catch(() => null)
-    if (!result) {
-      setTopNotice('快捷命令排序失败')
-      return false
-    }
-    if (!result.ok || !result.data) {
-      setTopNotice(result.errorMessage || '快捷命令排序失败')
-      return false
-    }
-    if (!isQuickCommandReorderData(result.data, orderedIds, groupUuid)) {
-      setTopNotice(malformedQuickCommandsBackendResultMessage)
-      return false
-    }
-    applyQuickCommandsSnapshot(result.data)
-    return true
-  }
-
-  const reportQuickCommandPlanUnavailable = (command: string, panelIds: string[], reason = '快捷命令执行计划服务不可用') => {
-    setTopNotice(reason)
-    terminalSecurityPrompt.value = null
-    return quickCommandPlanUnavailable(command, panelIds, reason)
-  }
-
-  const resolveQuickCommandScriptPlan = async (command: QuickCommandSnippet, autoExecute: boolean): Promise<QuickCommandScriptPlanResolution> => {
-    const planQuickCommandScriptBridge = quickCommandsClient.planQuickCommandScript()
-    if (!planQuickCommandScriptBridge) return { ok: false, reason: '快捷命令执行计划服务不可用' }
-    try {
-      const result = await planQuickCommandScriptBridge({ snippetId: command.id, autoExecute })
-      if (!result) return { ok: false, reason: '快捷命令执行计划生成失败' }
-      if (!result.ok) return { ok: false, reason: result.errorMessage || '快捷命令执行计划生成失败' }
-      if (!isQuickCommandScriptPlanForRequest(result.data, { snippetId: command.id, snippetName: command.snippet_name, autoExecute })) {
-        return { ok: false, reason: malformedQuickCommandsBackendResultMessage }
-      }
-      return { ok: true, plan: result.data }
-    } catch {
-      return { ok: false, reason: '快捷命令执行计划生成失败' }
-    }
-  }
-
-  const runQuickCommand = async (id: number, autoExecute = true, allTabs = false) => {
-    const command = quickCommands.value.find((item) => item.id === id)
-    if (!command) return
-    const targetPanelIds = resolveQuickCommandPanelIds(panels.value, activePanel.value, allTabs)
-    const planResolution = await resolveQuickCommandScriptPlan(command, autoExecute)
-    if (!planResolution.ok) {
-      return reportQuickCommandPlanUnavailable(command.snippet_name, targetPanelIds, planResolution.reason)
-    }
-    const plan = planResolution.plan
-    if (!plan.segments.length) {
-      return reportQuickCommandPlanUnavailable(command.snippet_name, targetPanelIds, '快捷命令内容为空')
-    }
-    const decision = prepareTerminalSecurityExecution({
-      command: plan.securityCommand || command.snippet_name,
-      securityCommands: plan.commands,
-      panelIds: targetPanelIds,
-      inputText: plan.shellText,
-      shellText: plan.shellText,
-      writeToShell: true,
-      source: 'snippet',
-      snippetSegments: plan.segments
-    })
-    if (decision.status !== 'allow' || !decision.execution?.writeToShell) return decision
-    return writeTerminalExecution(decision.execution)
-  }
-
-  const clearMacroAutoStopTimer = () => {
-    if (macroAutoStopTimer !== null) {
-      clearTimeout(macroAutoStopTimer)
-      macroAutoStopTimer = null
-    }
-  }
-
-  const applyMacroRecordingState = (state: MacroRecordingState) => {
-    macroRecording.value = cloneMacroRecordingState(state)
-  }
-
-  const commitMacroCurrentLine = (timestamp = Date.now()) => {
-    const result = commitMacroCurrentLineRuntime(macroRecording.value, timestamp)
-    applyMacroRecordingState(result.state)
-    if (result.limitReached) void autoStopMacroRecording('count')
-    return result.added
-  }
-
-  function addMacroCommandEntry(command: string, timestamp = Date.now()) {
-    const result = addMacroCommandEntryRuntime(macroRecording.value, command, timestamp)
-    applyMacroRecordingState(result.state)
-    if (result.limitReached) void autoStopMacroRecording('count')
-    return result.added
-  }
-
-  const saveMacroSnippet = async (
-    entries: MacroCommandEntry[],
-    snippetName: string,
-    groupUuid: string | null,
-    sleepThresholdMs = macroSleepThresholdMs.value
-  ) => {
-    if (!entries.length) return null
-    const saveQuickCommandMacro = quickCommandsClient.saveQuickCommandMacro()
-    if (!saveQuickCommandMacro) {
-      setTopNotice('宏录制保存服务不可用')
-      return null
-    }
-    let result
-    try {
-      result = await saveQuickCommandMacro({
-        snippet_name: snippetName,
-        group_uuid: groupUuid,
-        entries: entries.map((entry) => ({ command: entry.command, timestamp: entry.timestamp })),
-        sleepThresholdMs
-      })
-    } catch {
-      setTopNotice('宏录制保存失败')
-      return null
-    }
-    if (!result.ok || !result.data) {
-      setTopNotice(result.errorMessage || '宏录制保存失败')
-      return null
-    }
-    if (!isQuickCommandMacroSaveData(result.data, { snippetName, groupUuid })) {
-      setTopNotice(malformedQuickCommandsBackendResultMessage)
-      return null
-    }
-    applyQuickCommandsSnapshot(result.data)
-    setTopNotice('宏录制已保存为快捷命令。')
-    return result.data.snippet
-  }
-
-  const resetMacroRecordingState = () => {
-    clearMacroAutoStopTimer()
-    applyMacroRecordingState(resetMacroRecordingStateRuntime(macroRecording.value.limitReason))
-  }
-
-  async function autoStopMacroRecording(reason: 'time' | 'count') {
-    if (!isMacroRecording.value) return null
-    applyMacroRecordingState({ ...macroRecording.value, limitReason: reason })
-    commitMacroCurrentLine()
-    const draft = macroSaveDraft(macroRecording.value, macroSleepThresholdMs.value)
-    resetMacroRecordingState()
-    const saved = await saveMacroSnippet(draft.entries, draft.snippetName, draft.groupUuid, draft.sleepThresholdMs)
-    if (saved) setTopNotice(reason === 'count' ? '宏录制达到命令上限，已保存为快捷命令。' : '宏录制达到时间上限，已保存为快捷命令。')
-    return saved
-  }
-
-  const startMacroRecording = (terminalId?: string | null) => {
-    if (isMacroRecording.value) return
-    applyMacroRecordingState(
-      startMacroRecordingState({
-        terminalId: terminalId || (activePanel.value.kind === 'knowledge' ? panels.value.find((panel) => panel.kind !== 'knowledge')?.id || null : activePanel.value.id),
-        selectedGroupUuid: selectedSnippetGroupUuid.value
-      })
-    )
-    clearMacroAutoStopTimer()
-    macroAutoStopTimer = setTimeout(() => {
-      void autoStopMacroRecording('time')
-    }, MACRO_MAX_RECORDING_DURATION_MS)
-  }
-
-  const recordMacroCommand = (command: string, timestamp = Date.now()) => {
-    const result = recordMacroCommandText(macroRecording.value, command, timestamp)
-    applyMacroRecordingState(result.state)
-    if (result.limitReached) void autoStopMacroRecording('count')
-  }
-
-  const setMacroRecordControlKeys = (enabled: boolean) => {
-    macroRecordControlKeys.value = enabled
-  }
-
-  const setMacroSleepThreshold = (milliseconds: number) => {
-    macroSleepThresholdMs.value = normalizeMacroSleepThreshold(milliseconds)
-  }
-
-  const recordMacroTerminalInput = (panelId: string, data: string, timestamp = Date.now()) => {
-    const result = recordMacroTerminalInputState(macroRecording.value, {
-      panelId,
-      data,
-      recordControlKeys: macroRecordControlKeys.value,
-      timestamp
-    })
-    applyMacroRecordingState(result.state)
-    if (result.shouldAutoStop) void autoStopMacroRecording(result.shouldAutoStop)
-  }
-
-  const stopMacroRecording = async () => {
-    if (!isMacroRecording.value) return
-    commitMacroCurrentLine()
-    const draft = macroSaveDraft(macroRecording.value, macroSleepThresholdMs.value)
-    if (!draft.entries.length) {
-      resetMacroRecordingState()
-      setTopNotice('没有录制到命令。')
-      return null
-    }
-    const saved = await saveMacroSnippet(draft.entries, draft.snippetName, draft.groupUuid, draft.sleepThresholdMs)
-    if (saved) resetMacroRecordingState()
-    return saved
-  }
-
-  const cancelMacroRecording = () => {
-    if (!isMacroRecording.value) return
-    resetMacroRecordingState()
-  }
-
-  const findKnowledgeNode = (relPath: string, nodes = knowledgeTree.value): KnowledgeNode | null => findKnowledgeNodeInTree(nodes, relPath)
-
-  const selectKnowledgeNode = (relPath: string, multi = false) => {
-    kbSelectedKeys.value = selectKnowledgeNodeKeys(kbSelectedKeys.value, relPath, multi)
-  }
-
-  const refreshKnowledgeSearchStatus = async () => {
-    const kbSearchStatusBridge = knowledgeClient.kbSearchStatus()
-    if (!kbSearchStatusBridge) return false
-    try {
-      const status = await kbSearchStatusBridge()
-      if (!isKnowledgeSearchStatusData(status)) {
-        setTopNotice(malformedKnowledgeBackendResultMessage)
-        return false
-      }
-      kbSearchStatus.value = status
-      return true
-    } catch {
-      return false
-    }
-  }
-
-  const searchKnowledgeContent = async (query = kbSearchQuery.value) => {
-    const normalizedQuery = query.trim()
-    const request = ++kbSearchRequest
-    if (normalizedQuery.length <= 1) {
-      kbContentSearchResults.value = []
-      kbSearchLoading.value = false
-      kbSearchError.value = ''
-      return []
-    }
-    const kbSearch = knowledgeClient.kbSearch()
-    if (!kbSearch) {
-      kbSearchLoading.value = false
-      kbSearchError.value = '知识库搜索服务不可用'
-      return kbContentSearchResults.value
-    }
-    kbSearchLoading.value = true
-    kbSearchError.value = ''
-    try {
-      const results = await kbSearch(normalizedQuery, { maxResults: 12, minScore: 0.15 })
-      if (request !== kbSearchRequest) return kbContentSearchResults.value
-      if (!isKnowledgeSearchResultListData(results)) {
-        kbSearchError.value = malformedKnowledgeBackendResultMessage
-        setTopNotice(malformedKnowledgeBackendResultMessage)
-        return kbContentSearchResults.value
-      }
-      kbContentSearchResults.value = results
-      await refreshKnowledgeSearchStatus()
-      return results
-    } catch (searchError) {
-      if (request !== kbSearchRequest) return kbContentSearchResults.value
-      kbSearchError.value = searchError instanceof Error ? searchError.message : String(searchError)
-      return kbContentSearchResults.value
-    } finally {
-      if (request === kbSearchRequest) kbSearchLoading.value = false
-    }
-  }
-
-  const knowledgeSearchResultToAiContext = (result: KnowledgeBaseSearchResult): AiContextOption | null => {
-    const relPath = result.path.trim()
-    if (!relPath) return null
-    const label = relPath.split('/').filter(Boolean).pop() || relPath
-    return {
-      id: `kb-doc:${relPath}`,
-      kind: 'docs',
-      label,
-      relPath,
-      detail: `Auto search match lines ${result.startLine}-${result.endLine}, score ${result.score.toFixed(2)}: ${result.snippet.trim()}`
-    }
-  }
-
-  const resolveAiKnowledgeSearchContexts = async (query: string, existingContexts: AiContextOption[]) => {
-    const normalizedQuery = query.trim()
-    const kbSearch = knowledgeClient.kbSearch()
-    if (!aiPreferences.value.kbSearchEnabled || normalizedQuery.length <= 1 || !kbSearch) return []
-    try {
-      const results = await kbSearch(normalizedQuery, { maxResults: 3, minScore: 0.25 })
-      if (!isKnowledgeSearchResultListData(results)) return []
-      const existingIds = new Set(existingContexts.map((context) => context.id))
-      return results
-        .map(knowledgeSearchResultToAiContext)
-        .filter((context): context is AiContextOption => Boolean(context && !existingIds.has(context.id)))
-    } catch {
-      return []
-    }
-  }
-
-  const reindexKnowledgeContent = async () => {
-    const kbReindex = knowledgeClient.kbReindex()
-    if (!kbReindex) {
-      setTopNotice('知识库索引服务不可用')
-      return null
-    }
-    try {
-      const result = await kbReindex()
-      if (!isKnowledgeReindexResultData(result)) {
-        setTopNotice(malformedKnowledgeBackendResultMessage)
-        return null
-      }
-      await refreshKnowledgeSearchStatus()
-      if (kbSearchQuery.value.trim().length > 1) void searchKnowledgeContent()
-      return result
-    } catch (indexError) {
-      const message = indexError instanceof Error ? indexError.message : String(indexError)
-      setTopNotice(message ? `知识库索引服务不可用：${message}` : '知识库索引服务不可用')
-      return null
-    }
-  }
-
-  const backendRelPathOrNotice = (result: unknown, notice: string) => {
-    if (!isKnowledgeRelPathResultData(result)) {
-      setTopNotice(notice)
-      return ''
-    }
-    return result.relPath.trim()
-  }
-
-  const backendKnowledgeEntryOrNotice = (result: unknown, notice: string) => {
-    if (!isKnowledgeMutationEntryData(result)) {
-      setTopNotice(notice)
-      return null
-    }
-    return result
-  }
-
-  const pruneMissingKnowledgeUiState = (candidateRelPaths: string[]) => {
-    const missingRelPaths = missingKnowledgeRelPaths(knowledgeTree.value, candidateRelPaths)
-    if (!missingRelPaths.length) return
-    const pruned = pruneKnowledgeUiState(kbSelectedKeys.value, kbExpandedKeys.value, missingRelPaths)
-    kbSelectedKeys.value = pruned.selectedKeys
-    kbExpandedKeys.value = pruned.expandedKeys
-    closeKnowledgePanelsForRemoved(missingRelPaths)
-  }
-
-  const refreshKnowledgeTreeAfterMutationFailure = async (notice: string, candidateRemovedRelPaths: string[] = []) => {
-    const refreshed = await refreshKnowledgeTree()
-    if (!refreshed) return false
-    pruneMissingKnowledgeUiState(candidateRemovedRelPaths)
-    setTopNotice(notice)
-    return true
-  }
-
-  const createKnowledgeNode = async (kind: KnowledgeNodeType, parentRelDir: string, title: string) => {
-    const name = title.trim()
-    if (!name) return null
-    const kbCreateFile = knowledgeClient.kbCreateFile()
-    const kbMkdir = knowledgeClient.kbMkdir()
-    if (!kbCreateFile || !kbMkdir) {
-      setTopNotice('知识库写入服务不可用')
-      return null
-    }
-    const result =
-      kind === 'dir'
-        ? await kbMkdir(parentRelDir, name)
-        : await kbCreateFile(parentRelDir, name, '')
-    const entry = backendKnowledgeEntryOrNotice(result, malformedKnowledgeBackendResultMessage)
-    if (!entry) return null
-    const relPath = entry.relPath.trim()
-    const pathMatchesRequest =
-      kind === 'dir'
-        ? relPath === expectedKnowledgeRelPath(parentRelDir, name)
-        : isKnowledgeRelPathInParentWithRequestedName(relPath, parentRelDir, name)
-    if (!pathMatchesRequest) {
-      setTopNotice(malformedKnowledgeBackendResultMessage)
-      return null
-    }
-    if (entry.type !== kind) {
-      setTopNotice(malformedKnowledgeBackendResultMessage)
-      return null
-    }
-    const refreshed = await refreshKnowledgeTree()
-    if (!refreshed) return null
-    const created = findKnowledgeNode(relPath)
-    if (!created || created.type !== kind) {
-      setTopNotice(malformedKnowledgeBackendResultMessage)
-      return null
-    }
-    kbSelectedKeys.value = [relPath]
-    if (kind === 'dir' && !kbExpandedKeys.value.includes(relPath)) {
-      kbExpandedKeys.value.push(relPath)
-    }
-    if (kind === 'file') {
-      openKnowledgeFile(relPath)
-    }
-    return created
-  }
-
-  const renameKnowledgeNode = async (relPath: string, title: string) => {
-    const node = findKnowledgeNode(relPath)
-    const name = title.trim()
-    if (!node || !name) return
-    const kbRename = knowledgeClient.kbRename()
-    if (!kbRename) {
-      setTopNotice('知识库重命名服务不可用')
-      return
-    }
-    const result = await kbRename(relPath, name)
-    const entry = backendKnowledgeEntryOrNotice(result, malformedKnowledgeBackendResultMessage)
-    if (!entry) return
-    const nextRelPath = entry.relPath.trim()
-    if (nextRelPath !== expectedKnowledgeRelPath(getKnowledgeParent(relPath), name)) {
-      setTopNotice(malformedKnowledgeBackendResultMessage)
-      return
-    }
-    if (entry.type !== node.type) {
-      setTopNotice(malformedKnowledgeBackendResultMessage)
-      return
-    }
-    const refreshed = await refreshKnowledgeTree()
-    if (!refreshed) return
-    if (!findKnowledgeNode(nextRelPath)) {
-      setTopNotice(malformedKnowledgeBackendResultMessage)
-      return
-    }
-    kbSelectedKeys.value = [nextRelPath]
-    kbExpandedKeys.value = kbExpandedKeys.value.map((key) => (key === relPath || key.startsWith(`${relPath}/`) ? key.replace(relPath, nextRelPath) : key))
-    syncKnowledgePanelsAfterRename(relPath, nextRelPath)
-  }
-
-  const deleteKnowledgeNodes = async (relPaths: string[]) => {
-    const kbDelete = knowledgeClient.kbDelete()
-    if (!kbDelete) {
-      setTopNotice('知识库删除服务不可用')
-      return
-    }
-    const candidateRemovedRelPaths: string[] = []
-    for (const relPath of relPaths) {
-      const node = findKnowledgeNode(relPath)
-      if (!node) continue
-      let result: unknown
-      try {
-        result = await kbDelete(relPath, node.type === 'dir')
-      } catch {
-        await refreshKnowledgeTreeAfterMutationFailure('知识库删除服务不可用', [...candidateRemovedRelPaths, relPath])
-        return
-      }
-      if (!isKnowledgeDeleteResultData(result)) {
-        await refreshKnowledgeTreeAfterMutationFailure(malformedKnowledgeBackendResultMessage, [...candidateRemovedRelPaths, relPath])
-        return
-      }
-      if (result.relPath.trim() !== relPath || result.type !== node.type || result.deleted !== true) {
-        await refreshKnowledgeTreeAfterMutationFailure(malformedKnowledgeBackendResultMessage, [...candidateRemovedRelPaths, relPath])
-        return
-      }
-      candidateRemovedRelPaths.push(relPath)
-    }
-    const refreshed = await refreshKnowledgeTree()
-    if (!refreshed) return
-    if (relPaths.some((relPath) => findKnowledgeNode(relPath))) {
-      pruneMissingKnowledgeUiState(relPaths)
-      setTopNotice(malformedKnowledgeBackendResultMessage)
-      return
-    }
-    pruneMissingKnowledgeUiState(relPaths)
-  }
-
-  const copyKnowledgeNodes = (relPaths: string[], mode: 'copy' | 'cut') => {
-    if (!relPaths.length) return
-    kbClipboard.value = { mode, sources: relPaths }
-  }
-
-  const pasteKnowledgeNodes = async (targetRelDir: string) => {
-    if (!kbClipboard.value) return
-    const destination = findKnowledgeNode(targetRelDir)
-    const dstRelDir = resolveKnowledgePasteTarget(targetRelDir, destination)
-    const kbCopy = knowledgeClient.kbCopy()
-    const kbMove = knowledgeClient.kbMove()
-    if (!kbCopy || !kbMove) {
-      setTopNotice('知识库复制移动服务不可用')
-      return
-    }
-    const sources = [...kbClipboard.value.sources]
-    const mode = kbClipboard.value.mode
-    const resultRelPaths: string[] = []
-    const candidateRemovedSources: string[] = []
-    for (const source of sources) {
-      const sourceNode = findKnowledgeNode(source)
-      if (!sourceNode) continue
-      let result: unknown
-      try {
-        if (mode === 'copy') {
-          result = await kbCopy(source, dstRelDir)
-        } else {
-          result = await kbMove(source, dstRelDir)
-        }
-      } catch {
-        await refreshKnowledgeTreeAfterMutationFailure('知识库复制移动服务不可用', mode === 'cut' ? [...candidateRemovedSources, source] : [])
-        return
-      }
-      const entry = backendKnowledgeEntryOrNotice(result, malformedKnowledgeBackendResultMessage)
-      if (!entry) {
-        await refreshKnowledgeTreeAfterMutationFailure(malformedKnowledgeBackendResultMessage, mode === 'cut' ? [...candidateRemovedSources, source] : [])
-        return
-      }
-      const resultRelPath = entry.relPath.trim()
-      if (!knowledgeRelPathParentMatches(resultRelPath, dstRelDir) || entry.type !== sourceNode.type) {
-        await refreshKnowledgeTreeAfterMutationFailure(malformedKnowledgeBackendResultMessage, mode === 'cut' ? [...candidateRemovedSources, source] : [])
-        return
-      }
-      resultRelPaths.push(resultRelPath)
-      if (mode === 'cut') candidateRemovedSources.push(source)
-    }
-    const refreshed = await refreshKnowledgeTree()
-    if (!refreshed) return
-    if (resultRelPaths.some((relPath) => !findKnowledgeNode(relPath))) {
-      if (mode === 'cut') pruneMissingKnowledgeUiState(sources)
-      setTopNotice(malformedKnowledgeBackendResultMessage)
-      return
-    }
-    if (mode === 'cut' && sources.some((source) => findKnowledgeNode(source))) {
-      pruneMissingKnowledgeUiState(sources)
-      setTopNotice(malformedKnowledgeBackendResultMessage)
-      return
-    }
-    if (mode === 'cut') kbClipboard.value = null
-    if (mode === 'cut') pruneMissingKnowledgeUiState(sources)
-  }
-
-  const addKnowledgeImportJob = async (destRelPath: string, srcAbsPath?: string, sourceType: 'file' | 'folder' = 'file') => {
-    if (!srcAbsPath) {
-      setTopNotice('知识库导入需要真实本地路径')
-      return false
-    }
-    const kbImportFile = knowledgeClient.kbImportFile()
-    const kbImportFolder = knowledgeClient.kbImportFolder()
-    if (!kbImportFile || !kbImportFolder) {
-      setTopNotice('知识库导入服务不可用')
-      return false
-    }
-    const dstRelDir = getKnowledgeParent(destRelPath)
-    const result = sourceType === 'folder' ? await kbImportFolder(srcAbsPath, dstRelDir) : await kbImportFile(srcAbsPath, dstRelDir)
-    if (!isKnowledgeImportResultForRequest(result, dstRelDir, sourceType)) {
-      setTopNotice(malformedKnowledgeBackendResultMessage)
-      return false
-    }
-    if (!kbImportJobs.value.some((job) => job.id === result.jobId)) {
-      kbImportJobs.value = addCompletedKnowledgeImportJob(kbImportJobs.value, result.jobId, result.relPath)
-      window.setTimeout(() => {
-        kbImportJobs.value = removeKnowledgeImportJob(kbImportJobs.value, result.jobId)
-      }, 500)
-    }
-    const refreshed = await refreshKnowledgeTree()
-    if (!refreshed) return false
-    const imported = findKnowledgeNode(result.relPath)
-    if (!imported || imported.type !== sourceType) {
-      setTopNotice(malformedKnowledgeBackendResultMessage)
-      return false
-    }
-    return true
-  }
-
-  const addKnowledgeFilesToChat = async (relPaths: string[]) => {
-    const filePaths = relPaths.filter((relPath) => findKnowledgeNode(relPath)?.type === 'file')
-    for (const relPath of filePaths) {
-      const node = findKnowledgeNode(relPath)
-      const label = node?.title || relPath.split('/').pop() || relPath
-      if (isKnowledgeImagePath(relPath)) {
-        const kbReadFile = knowledgeClient.kbReadFile()
-        let imageContext: AiContextOption = {
-          id: `kb-image:${relPath}`,
-          kind: 'images',
-          label,
-          detail: relPath,
-          relPath,
-          mediaType: mediaTypeFromKnowledgePath(relPath)
-        }
-        if (kbReadFile) {
-          try {
-            const result = await kbReadFile(relPath, 'base64')
-            if (isKnowledgeReadResultData(result, 'base64')) {
-              imageContext = {
-                ...imageContext,
-                mediaType: result.mimeType || imageContext.mediaType,
-                data: result.content
-              }
-            } else {
-              setTopNotice(malformedKnowledgeBackendResultMessage)
-              continue
-            }
-          } catch {
-            setTopNotice('知识库文件读取失败')
-            continue
-          }
-        }
-        selectedContexts.value = selectedContexts.value.some((context) => context.id === imageContext.id)
-          ? selectedContexts.value
-          : [...selectedContexts.value, imageContext]
-      } else {
-        const docContext: AiContextOption = {
-          id: `kb-doc:${relPath}`,
-          kind: 'docs',
-          label,
-          detail: relPath,
-          relPath
-        }
-        selectedContexts.value = selectedContexts.value.some((context) => context.id === docContext.id)
-          ? selectedContexts.value
-          : [...selectedContexts.value, docContext]
-      }
-    }
-    rightPanelOpen.value = true
-  }
-
   const selectExtension = (pluginId: string) => {
     if (!visibleExtensionPlugins.value.some((plugin) => plugin.pluginId === pluginId)) return
     selectedExtensionId.value = pluginId
@@ -9788,7 +8410,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const content = messageSummaryContent(message)
     const summaryDir = await ensureLocalKnowledgeDir('summary')
     if (!summaryDir) return null
-    const fileName = uniqueKnowledgeFileNameInTree(knowledgeTree.value, 'summary', knowledgeFileNameForMessage(message))
+    const fileName = uniqueKnowledgeFileName('summary', knowledgeFileNameForMessage(message))
     const kbCreateFile = knowledgeClient.kbCreateFile()
     const kbWriteFile = knowledgeClient.kbWriteFile()
     if (!kbCreateFile || !kbWriteFile) {
@@ -9878,6 +8500,142 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       return null
     }
   }
+
+  const {
+    selectedLeftFileSession,
+    selectedRightFileSession,
+    transferTaskGroups,
+    transferTaskCount,
+    transferOverallPercent,
+    hasRunningFileTransferTasks,
+    refreshFileSessionCatalog,
+    refreshFileTransferTasks,
+    setFilesUiMode,
+    selectFileSession,
+    openFileSession,
+    ensureFileSessionForTerminalPanel,
+    closeFileSession,
+    addRemoteFileSession,
+    addRemoteFileSessionFromSftpPayload,
+    persistFileSession,
+    updateFileSession,
+    saveFileSessionFolder,
+    deleteFileSessionFolder,
+    pushFileTransferTask,
+    observeFileTransferTasks,
+    cancelFileTransferTask
+  } = createWorkspaceFilesController(
+    {
+      filesUiMode,
+      fileSessions,
+      fileSessionFolders,
+      selectedLeftFileSessionId,
+      selectedRightFileSessionId,
+      fileTransferTasks,
+      activePanelId,
+      panels
+    },
+    {
+      setTopNotice,
+      setActiveModule
+    }
+  )
+
+  const {
+    filteredQuickCommands,
+    currentSnippetGroupName,
+    isMacroRecording: quickCommandsIsMacroRecording,
+    recordedCommands: quickCommandsRecordedCommands,
+    macroCurrentLineBuffer: quickCommandsMacroCurrentLineBuffer,
+    macroTerminalId: quickCommandsMacroTerminalId,
+    macroLimitReason: quickCommandsMacroLimitReason,
+    applyQuickCommandsSnapshot,
+    refreshQuickCommands,
+    createSnippetGroup,
+    renameSnippetGroup,
+    deleteSnippetGroup,
+    createQuickCommand,
+    updateQuickCommand,
+    deleteQuickCommand,
+    reorderQuickCommand,
+    runQuickCommand,
+    startMacroRecording,
+    recordMacroCommand,
+    recordMacroTerminalInput,
+    setMacroRecordControlKeys,
+    setMacroSleepThreshold,
+    stopMacroRecording,
+    cancelMacroRecording
+  } = createWorkspaceQuickCommandsController(
+    {
+      config,
+      snippetGroups,
+      quickCommands,
+      selectedSnippetGroupUuid,
+      snippetSearchQuery,
+      macroRecording,
+      macroRecordControlKeys,
+      macroSleepThresholdMs,
+      panels,
+      activePanel
+    },
+    {
+      setTopNotice,
+      clearTerminalSecurityPrompt: () => {
+        terminalSecurityPrompt.value = null
+      },
+      prepareTerminalSecurityExecution,
+      writeTerminalExecution
+    }
+  )
+
+  const {
+    filteredKnowledgeTree,
+    kbContentSearchVisible,
+    kbCapacityPercent,
+    setupKnowledgeBridgeListeners,
+    refreshKnowledgeTree,
+    searchKnowledgeContent,
+    reindexKnowledgeContent,
+    refreshKnowledgeSearchStatus,
+    resolveAiKnowledgeSearchContexts,
+    findKnowledgeNode,
+    selectKnowledgeNode,
+    createKnowledgeNode,
+    renameKnowledgeNode,
+    deleteKnowledgeNodes,
+    copyKnowledgeNodes,
+    pasteKnowledgeNodes,
+    addKnowledgeImportJob,
+    addKnowledgeFilesToChat,
+    backendKnowledgeEntryOrNotice,
+    uniqueKnowledgeFileName
+  } = createWorkspaceKnowledgeController(
+    {
+      config,
+      knowledgeTree,
+      kbExpandedKeys,
+      kbSelectedKeys,
+      kbSearchQuery,
+      kbContentSearchResults,
+      kbSearchStatus,
+      kbSearchLoading,
+      kbSearchError,
+      kbClipboard,
+      kbImportJobs,
+      kbUsedBytes,
+      kbTotalBytes,
+      selectedContexts,
+      rightPanelOpen,
+      aiPreferences
+    },
+    {
+      setTopNotice,
+      openKnowledgeFile,
+      syncKnowledgePanelsAfterRename,
+      closeKnowledgePanelsForRemoved
+    }
+  )
 
   return {
     mode,
@@ -9978,13 +8736,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     snippetSearchQuery,
     filteredQuickCommands,
     currentSnippetGroupName,
-    isMacroRecording,
-    recordedCommands,
-    macroCurrentLineBuffer,
-    macroTerminalId,
+    isMacroRecording: quickCommandsIsMacroRecording,
+    recordedCommands: quickCommandsRecordedCommands,
+    macroCurrentLineBuffer: quickCommandsMacroCurrentLineBuffer,
+    macroTerminalId: quickCommandsMacroTerminalId,
     macroRecordControlKeys,
     macroSleepThresholdMs,
-    macroLimitReason,
+    macroLimitReason: quickCommandsMacroLimitReason,
     knowledgeTree,
     kbExpandedKeys,
     kbSelectedKeys,
