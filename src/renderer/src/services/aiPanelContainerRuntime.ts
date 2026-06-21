@@ -190,6 +190,7 @@ export type AiPanelContainerRuntimeProps = { agentMode?: boolean }
 export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) => {
   const workspace = useWorkspaceStore()
   const { locale, t } = useI18n()
+  const agentMode = computed(() => Boolean(props.agentMode))
   type AiChatMode = 'agent' | 'cmd'
   type AiContextCategoryView = AiPanelContextCategoryView<Component>
 
@@ -1828,6 +1829,7 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     activeCodexConversation,
     activeCodexConversationId,
     activeCommandAuditMessage,
+    agentMode,
     aiChatModeOptions,
     aiPanelComposerRuntime,
     aiPanelMode,
