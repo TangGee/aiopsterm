@@ -2009,291 +2009,31 @@
       </form>
     </div>
 
-    <div
-      v-if="createDatabaseModal.open"
-      class="db-modal-overlay"
-    >
-      <form
-        class="db-create-modal"
-        @submit.prevent="createDatabase"
-      >
-        <header>
-          <h2>Create Database</h2>
-          <button
-            type="button"
-            title="Close"
-            @click="closeCreateDatabaseModal"
-          >
-            <X />
-          </button>
-        </header>
-        <label>
-          Name:
-          <input
-            v-model="createDatabaseModal.name"
-            :class="{ error: createDatabaseNameError }"
-            required
-            @input="updateCreateDatabaseName"
-          />
-        </label>
-        <p
-          v-if="createDatabaseNameError"
-          class="db-modal-feedback error"
-        >
-          Use a valid identifier: start with a letter or underscore, then letters, numbers, or underscores.
-        </p>
-        <strong>Preview</strong>
-        <textarea
-          v-model="createDatabaseSql"
-          spellcheck="false"
-        />
-        <p
-          v-if="createDatabaseModal.feedback"
-          class="db-modal-feedback"
-          :class="{ error: createDatabaseModal.feedbackKind === 'error' }"
-        >
-          {{ createDatabaseModal.feedback }}
-        </p>
-        <footer>
-          <button
-            type="button"
-            @click="closeCreateDatabaseModal"
-          >
-            Cancel
-          </button>
-          <button
-            type="submit"
-            :disabled="!createDatabaseCanSubmit"
-          >
-            Create
-          </button>
-        </footer>
-      </form>
-    </div>
-
-    <div
-      v-if="chartModal.open"
-      class="db-modal-overlay"
-    >
-      <section class="db-chart-modal">
-        <header>
-          <div>
-            <h2>{{ chartModal.summary?.title || 'Chart' }}</h2>
-            <span>{{ chartModal.summary?.scopeLabel }}</span>
-          </div>
-          <button
-            type="button"
-            title="Close"
-            @click="closeChartModal"
-          >
-            <X />
-          </button>
-        </header>
-        <div
-          v-if="chartModal.summary"
-          class="db-chart-body"
-        >
-          <div class="db-chart-metrics">
-            <span><strong>{{ chartModal.summary.rowCount }}</strong> Rows</span>
-            <span><strong>{{ chartModal.summary.valueColumn }}</strong> Value</span>
-            <span><strong>{{ chartModal.summary.categoryColumn }}</strong> Category</span>
-          </div>
-          <div class="db-chart-bars">
-            <div
-              v-for="bar in chartModal.summary.bars"
-              :key="bar.label"
-              class="db-chart-bar-row"
-            >
-              <span :title="bar.label">{{ bar.label }}</span>
-              <div class="db-chart-track">
-                <i :style="{ width: `${bar.width}%` }" />
-              </div>
-              <strong>{{ formatChartNumber(bar.value) }}</strong>
-            </div>
-          </div>
-          <p class="db-chart-footnote">
-            Numeric columns: {{ chartModal.summary.numericColumns.join(', ') }}
-          </p>
-        </div>
-        <p
-          v-else
-          class="db-chart-empty"
-        >
-          {{ chartModal.error || 'Current page does not contain a numeric column to chart.' }}
-        </p>
-      </section>
-    </div>
-
-    <div
-      v-if="commentModal.open"
-      class="db-modal-overlay"
-    >
-      <section class="db-comment-modal">
-        <header>
-          <div>
-            <h2>{{ commentModal.title }}</h2>
-            <span>{{ commentModal.scopeLabel }}</span>
-          </div>
-          <button
-            type="button"
-            title="Close"
-            @click="closeCommentModal"
-          >
-            <X />
-          </button>
-        </header>
-        <p
-          v-if="commentModal.error"
-          class="db-comment-error"
-        >
-          {{ commentModal.error }}
-        </p>
-        <textarea
-          v-model="commentModal.draft"
-          :disabled="commentModal.loading || commentModal.saving"
-          maxlength="5000"
-          spellcheck="false"
-        />
-        <footer>
-          <span>{{ commentModal.updatedAt ? `Saved ${formatCommentTime(commentModal.updatedAt)}` : 'Not saved' }}</span>
-          <div>
-            <button
-              type="button"
-              :disabled="commentModal.loading || commentModal.saving"
-              @click="closeCommentModal"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              :disabled="commentModal.loading || commentModal.saving"
-              @click="saveActiveComment"
-            >
-              {{ commentModal.saving ? 'Saving' : 'Save' }}
-            </button>
-          </div>
-        </footer>
-      </section>
-    </div>
-
-    <div
-      v-if="ddlModal.open"
-      class="db-modal-overlay"
-    >
-      <section class="db-ddl-modal">
-        <header>
-          <h2>DDL - {{ ddlModal.tableName }}</h2>
-          <button
-            type="button"
-            title="Close"
-            @click="ddlModal.open = false"
-          >
-            <X />
-          </button>
-        </header>
-        <div class="db-ddl-toolbar">
-          <button
-            type="button"
-            :disabled="!ddlModal.ddl || ddlModal.loading"
-            @click="copyDdl"
-          >
-            Copy
-          </button>
-        </div>
-        <p
-          v-if="ddlModal.error"
-          class="db-ddl-error"
-        >
-          {{ ddlModal.error }}
-        </p>
-        <textarea
-          v-else
-          :value="ddlModal.loading ? 'Loading DDL...' : ddlModal.ddl"
-          readonly
-          spellcheck="false"
-        />
-      </section>
-    </div>
-
-    <div
-      v-if="dangerConfirm.open"
-      class="db-modal-overlay"
-    >
-      <section class="db-danger-confirm">
-        <header>
-          <h2>{{ dangerConfirm.action === 'drop' ? 'Drop Table' : 'Truncate Table' }}</h2>
-          <button
-            type="button"
-            title="Close"
-            @click="cancelDangerousTableAction"
-          >
-            <X />
-          </button>
-        </header>
-        <p>
-          {{ dangerConfirm.action === 'drop' ? 'This will remove the table in a real database.' : 'This will delete all table rows in a real database.' }}
-        </p>
-        <code>{{ dangerConfirm.sql }}</code>
-        <label>
-          Type table name to confirm
-          <input
-            v-model="dangerConfirm.confirmText"
-            autocomplete="off"
-          />
-        </label>
-        <footer>
-          <button
-            type="button"
-            @click="cancelDangerousTableAction"
-          >
-            Cancel
-          </button>
-          <button
-            class="danger"
-            type="button"
-            :disabled="dangerConfirm.confirmText !== dangerConfirm.tableName"
-            @click="confirmDangerousTableAction"
-          >
-            Confirm
-          </button>
-        </footer>
-      </section>
-    </div>
-
-    <div
-      v-if="operationConfirm.open"
-      class="db-modal-overlay"
-    >
-      <section class="db-operation-confirm">
-        <header>
-          <h2>{{ operationConfirm.title }}</h2>
-          <button
-            type="button"
-            title="Close"
-            @click="cancelOperationConfirm"
-          >
-            <X />
-          </button>
-        </header>
-        <p>{{ operationConfirm.message }}</p>
-        <code v-if="operationConfirm.detail">{{ operationConfirm.detail }}</code>
-        <footer>
-          <button
-            type="button"
-            @click="cancelOperationConfirm"
-          >
-            Cancel
-          </button>
-          <button
-            class="danger"
-            type="button"
-            @click="confirmOperation"
-          >
-            {{ operationConfirm.confirmLabel }}
-          </button>
-        </footer>
-      </section>
-    </div>
+    <DatabaseWorkspaceModals
+      v-model:create-database-sql="createDatabaseSql"
+      :create-database-modal="createDatabaseModal"
+      :create-database-name-error="createDatabaseNameError"
+      :create-database-can-submit="createDatabaseCanSubmit"
+      :chart-modal="chartModal"
+      :comment-modal="commentModal"
+      :ddl-modal="ddlModal"
+      :danger-confirm="dangerConfirm"
+      :operation-confirm="operationConfirm"
+      @create-database="createDatabase"
+      @close-create-database="closeCreateDatabaseModal"
+      @update-create-database-name="updateCreateDatabaseName"
+      @close-chart="closeChartModal"
+      @close-comment="closeCommentModal"
+      @update-comment-draft="commentModal.draft = $event"
+      @save-comment="saveActiveComment"
+      @close-ddl="ddlModal.open = false"
+      @copy-ddl="copyDdl"
+      @cancel-danger="cancelDangerousTableAction"
+      @update-danger-confirm-text="dangerConfirm.confirmText = $event"
+      @confirm-danger="confirmDangerousTableAction"
+      @cancel-operation="cancelOperationConfirm"
+      @confirm-operation="confirmOperation"
+    />
 
     <div
       v-if="notice"
@@ -2344,6 +2084,7 @@ import { localFilesClient } from '@/services/localFilesClient'
 import DataGridToolbar from '@/components/database/DataGridToolbar.vue'
 import DataStatusBar from '@/components/database/DataStatusBar.vue'
 import DatabaseSqlEditor, { type DatabaseSqlEditorMetrics } from '@/components/database/DatabaseSqlEditor.vue'
+import DatabaseWorkspaceModals from '@/components/database/DatabaseWorkspaceModals.vue'
 import ResultGrid from '@/components/database/ResultGrid.vue'
 import {
   applyFilters,
@@ -2385,43 +2126,88 @@ import {
   sqlCursorPosition,
   type TextRange
 } from '@/services/databaseSqlEditorRuntime'
+import {
+  isConnectableDatabaseEngineInfo,
+  isDatabaseConnectionDeleteDataForRequest,
+  isDatabaseConnectionMutationDataForRequest,
+  isDatabaseConnectionSaveDataForRequest,
+  isDatabaseConnectionTestData,
+  isDatabaseCreateDatabaseDataForRequest,
+  isDatabaseExportData,
+  isDatabaseGroupDeleteDataForRequest,
+  isDatabaseGroupMutationDataForRequest,
+  isDatabasePageCommentGetData,
+  isDatabasePageCommentSaveData,
+  isDatabaseSqlExecuteData,
+  isDatabaseSqlExecutionRecord,
+  isDatabaseTableMutationData,
+  isDatabaseTableMutationPlanData,
+  isDatabaseTableQueryData,
+  isDatabaseWorkspaceCatalog,
+  isDbAiDrawerRequestRecord,
+  isDbAiDrawerResponseData,
+  isDbAiPaneLifecycleData,
+  isDbAiPaneRequestData,
+  isDbAiPaneResponseData,
+  isDbAiPaneStateSnapshot,
+  isLocalFileWriteData,
+  type DbAiAction,
+  type DbAiBackendContext,
+  type DbAiPaneContext,
+  type DbAiPaneMessage,
+  type DbAiPaneMessageStatus,
+  type DbAiRequest,
+  type DbAiStatus,
+  type DbAiTargetDialect
+} from '@/services/databaseBackendGuards'
+import {
+  buildChartSummary,
+  buildConnectionUrl,
+  buildQualifiedTableReference,
+  collectDescendantGroupIds,
+  columnNodeId,
+  connectionText,
+  databasePageCommentKeyId,
+  DB_AI_PANE_DEFAULT_WIDTH,
+  DB_AI_PANE_MAX_WIDTH,
+  DB_AI_PANE_MIN_WIDTH,
+  DB_IDENT_RE,
+  DEFAULT_GROUP_ID,
+  defaultSchemaForSqlConnection,
+  flattenVisibleGroups,
+  formatDdlError,
+  groupPathLabel,
+  isMysqlCompatibleDbType,
+  isPostgresCompatibleDbType,
+  normalizeTableDdlResult,
+  parseCreateDatabaseName,
+  quoteIdentForDialect,
+  quoteIdentifier,
+  renderCreateDatabaseTemplate,
+  schemaObjectFolderKey,
+  schemaObjectFolders,
+  schemaRoutineNodeId,
+  sqlConnectionRequiresSchema,
+  toggleId,
+  type DatabaseChartSource,
+  type DatabaseChartSummary,
+  type SchemaObjectFolder,
+  type SchemaObjectKind,
+  type TableDdlResult,
+  type VisibleGroupNode
+} from '@/services/databaseWorkspaceRuntime'
 import { useWorkspaceStore } from '@/stores/workspace'
 import type {
-  DatabaseAiDrawerLifecycleResult, DatabaseAiDrawerRequestRecord, DatabaseAiDrawerRequestResult, DatabaseAiDrawerResponseInput, DatabaseAiDrawerResponseResult,
-  DatabaseAiPaneLifecycleResult, DatabaseAiPaneMessageRecord, DatabaseAiPaneRequestResult, DatabaseAiPaneResponseResult, DatabaseAiPaneStateSnapshot,
+  DatabaseAiDrawerLifecycleResult, DatabaseAiDrawerRequestResult, DatabaseAiDrawerResponseInput, DatabaseAiDrawerResponseResult,
+  DatabaseAiPaneLifecycleResult, DatabaseAiPaneRequestResult, DatabaseAiPaneResponseResult, DatabaseAiPaneStateSnapshot,
   DatabaseCatalogInfo, DatabaseColumnInfo, DatabaseConnectionDeleteResult, DatabaseConnectionInfo, DatabaseConnectionMoveInput, DatabaseConnectionMutationResult,
   DatabaseConnectionSaveInput, DatabaseConnectionSaveResult, DatabaseConnectionTestInput, DatabaseConnectionTestResult, DatabaseCreateDatabaseResult,
   DatabaseEngineCode, DatabaseEngineInfo, DatabaseExportInput, DatabaseExportResult, DatabaseGroupCreateInput, DatabaseGroupDeleteResult, DatabaseGroupInfo,
-  DatabaseGroupMutationResult, DatabaseGroupUpdateInput, DatabasePageCommentKey, DatabasePageCommentRecord, DatabaseSqlExecutionRecord, DatabaseSqlExecuteResult,
-  DatabaseTableDdlResult, DatabaseTableInfo, DatabaseTableMutationInput, DatabaseTableMutationPlanResult, DatabaseTableMutationResult,
+  DatabaseGroupMutationResult, DatabaseGroupUpdateInput, DatabasePageCommentKey, DatabaseSqlExecutionRecord, DatabaseSqlExecuteResult,
+  DatabaseTableInfo, DatabaseTableMutationInput, DatabaseTableMutationPlanResult, DatabaseTableMutationResult,
   DatabaseTableQueryResult, DatabaseWorkspaceCatalog
 } from '@shared/contracts/database'
-import type { LocalFileWriteResult } from '@shared/contracts/localFiles'
 
-type DbAiStatus = 'queued' | 'streaming' | 'done' | 'error' | 'cancelled'
-type DatabaseChartSource = {
-  title: string
-  scopeLabel: string
-  columns: string[]
-  rows: Array<Record<string, unknown>>
-}
-type DatabaseChartBar = {
-  label: string
-  value: number
-  width: number
-}
-type DatabaseChartSummary = {
-  title: string
-  scopeLabel: string
-  categoryColumn: string
-  valueColumn: string
-  rowCount: number
-  bars: DatabaseChartBar[]
-  numericColumns: string[]
-}
-type DbAiAction = 'explain' | 'nl2sql' | 'optimize' | 'convert' | 'complete' | 'diagnose' | 'drop' | 'truncate'
-type DbAiTargetDialect = DatabaseEngineCode | 'mssql'
-type DbAiBackendContext = DatabaseAiDrawerResponseInput['context']
 type DatabaseSqlEditorApi = {
   getText(): string
   getSelectedText(): string
@@ -2439,52 +2225,6 @@ type DatabaseSqlEditorApi = {
 }
 type TableReloadOptions = { withTotal?: boolean; preserveDirty?: boolean; notice?: string }
 type ContextSubmenu = 'groupConnection' | 'groupMove' | 'connectionMove' | 'tableCopy' | null
-type SchemaObjectKind = 'tables' | 'views' | 'functions' | 'procedures'
-type SchemaObjectFolder = { kind: SchemaObjectKind; count: number; tables: DatabaseTableInfo[]; routines: string[] }
-type TableDdlResult = { ok: true; ddl: string } | { ok: false; errorCode: string; errorMessage: string }
-
-const DB_IDENT_RE = /^[A-Za-z_][A-Za-z0-9_]*$/
-const DEFAULT_GROUP_ID = 'group-default'
-const DB_AI_PANE_DEFAULT_WIDTH = 360
-const DB_AI_PANE_MIN_WIDTH = 280
-const DB_AI_PANE_MAX_WIDTH = 720
-const DB_AI_ACTIONS: DbAiAction[] = ['explain', 'nl2sql', 'optimize', 'convert', 'complete', 'diagnose', 'drop', 'truncate']
-const DB_AI_TARGET_DIALECTS: DbAiTargetDialect[] = ['mysql', 'postgresql', 'sqlite', 'oracle', 'mssql', 'clickhouse', 'presto']
-const DB_ENGINE_CODES: DatabaseEngineCode[] = ['mysql', 'mariadb', 'oceanbase', 'postgresql', 'kingbase', 'sqlite', 'oracle', 'sqlserver', 'clickhouse', 'presto']
-const DB_ENGINE_OPTION_CODES = [
-  'mysql',
-  'h2',
-  'oracle',
-  'postgresql',
-  'sqlserver',
-  'sqlite',
-  'mariadb',
-  'clickhouse',
-  'dm',
-  'presto',
-  'db2',
-  'oceanbase',
-  'hive',
-  'kingbase',
-  'mongodb',
-  'timeplus'
-] as const
-const isMysqlCompatibleDbType = (dbType: DatabaseEngineCode | DbAiTargetDialect | '') => dbType === 'mysql' || dbType === 'mariadb' || dbType === 'oceanbase'
-const isPostgresCompatibleDbType = (dbType: DatabaseEngineCode | DbAiTargetDialect | '') => dbType === 'postgresql' || dbType === 'kingbase'
-const connectionSchemeForDbType = (dbType: DatabaseEngineCode) =>
-  dbType === 'postgresql'
-    ? 'jdbc:postgresql'
-    : dbType === 'kingbase'
-      ? 'jdbc:kingbase8'
-      : dbType === 'sqlserver'
-        ? 'jdbc:sqlserver'
-        : dbType === 'clickhouse' || dbType === 'presto'
-          ? 'http'
-          : dbType === 'mariadb'
-            ? 'jdbc:mariadb'
-            : dbType === 'oceanbase'
-              ? 'jdbc:oceanbase'
-              : 'jdbc:mysql'
 const DATABASE_CATALOG_MALFORMED_MESSAGE = 'Database catalog backend returned malformed result data.'
 const DATABASE_CONNECTION_TEST_MALFORMED_MESSAGE = 'Database connection test backend returned malformed result data.'
 const DATABASE_CONNECTION_SAVE_MALFORMED_MESSAGE = 'Database connection save backend returned malformed result data.'
@@ -2524,15 +2264,6 @@ type SqlResultViewState = {
   sort: DbSort
 }
 
-type DbAiRequest = DatabaseAiDrawerRequestRecord
-type DbAiPaneContext = {
-  connectionId: string
-  catalogName: string
-  schemaName: string
-  dbType: DatabaseEngineCode | ''
-}
-type DbAiPaneMessageStatus = DatabaseAiPaneMessageRecord['status']
-type DbAiPaneMessage = DatabaseAiPaneMessageRecord
 type DbAiPaneQuickPrompt = 'explainActive' | 'schemaSummary' | 'selectSample'
 
 type SqlHistory = {
@@ -2622,7 +2353,6 @@ type ContextMenu =
     }
 
 type ContextMenuPayload = Omit<Extract<ContextMenu, { type: 'group' }>, 'x' | 'y'> | Omit<Extract<ContextMenu, { type: 'connection' }>, 'x' | 'y'> | Omit<Extract<ContextMenu, { type: 'table' }>, 'x' | 'y'>
-type VisibleGroupNode = DatabaseGroupInfo & { depth: number }
 type SqlConsoleContext = { connectionId: string; catalogName: string; schemaName: string }
 type DatabaseOperationConfirmAction = 'deleteGroup' | 'removeConnection'
 
@@ -2862,7 +2592,7 @@ const connectionMoveTargets = computed(() => {
   return groups.value
     .filter((group) => group.id !== connection.groupId)
     .filter((group) => group.id !== DEFAULT_GROUP_ID)
-    .map((group) => ({ id: group.id, name: groupPathLabel(group.id) }))
+    .map((group) => ({ id: group.id, name: groupPathLabel(group.id, groups.value, groupParentById) }))
 })
 const connectionRootMoveDisabled = computed(() => contextConnection.value?.groupId === DEFAULT_GROUP_ID)
 
@@ -3009,7 +2739,7 @@ const visibleGroups = computed(() => {
   })
 })
 
-const visibleGroupNodes = computed<VisibleGroupNode[]>(() => flattenVisibleGroups(visibleGroups.value))
+const visibleGroupNodes = computed<VisibleGroupNode[]>(() => flattenVisibleGroups(visibleGroups.value, groupParentById))
 
 const contextGroup = computed(() => {
   const menu = contextMenu.value
@@ -3021,10 +2751,10 @@ const groupRootMoveDisabled = computed(() => !contextGroup.value || groupParentB
 const groupMoveTargets = computed(() => {
   const group = contextGroup.value
   if (!group) return []
-  const descendants = collectDescendantGroupIds(group.id)
+  const descendants = collectDescendantGroupIds(group.id, groups.value, groupParentById)
   return groups.value
     .filter((target) => target.id !== DEFAULT_GROUP_ID && target.id !== group.id && !descendants.has(target.id))
-    .map((target) => ({ id: target.id, name: groupPathLabel(target.id) }))
+    .map((target) => ({ id: target.id, name: groupPathLabel(target.id, groups.value, groupParentById) }))
 })
 
 const filteredDataRows = computed(() => {
@@ -3060,24 +2790,13 @@ const pagedSqlRows = computed(() => {
 const connectionUrl = computed({
   get() {
     if (connectionUrlDirty.value && connectionDraft.url.trim()) return connectionDraft.url
-    return buildConnectionUrl()
+    return buildConnectionUrl(connectionDraft)
   },
   set(value: string) {
     connectionUrlDirty.value = true
     connectionDraft.url = value
   }
 })
-
-function buildConnectionUrl() {
-  if (connectionDraft.dbType === 'sqlite') return connectionDraft.filePath ? `sqlite://${connectionDraft.filePath}` : 'sqlite://'
-  const host = connectionDraft.host || ''
-  const port = connectionDraft.port ? `:${connectionDraft.port}` : ''
-  const database = connectionDraft.database ? `/${connectionDraft.database}` : ''
-  if (connectionDraft.dbType === 'oracle') return `${host}${port}${database}`
-  const scheme = connectionSchemeForDbType(connectionDraft.dbType)
-  if (connectionDraft.dbType === 'clickhouse' || connectionDraft.dbType === 'presto') return `${scheme}://${host}${port}`
-  return `${scheme}://${host}${port}${database}`
-}
 
 function markConnectionUrlAuto() {
   if (!connectionUrlDirty.value) connectionDraft.url = ''
@@ -3087,16 +2806,6 @@ function markConnectionUrlAuto() {
 function clearConnectionFeedback() {
   connectionFeedback.value = ''
   connectionFeedbackKind.value = 'info'
-}
-
-function sqlConnectionRequiresSchema(connection: DatabaseConnectionInfo) {
-  return isPostgresCompatibleDbType(connection.dbType) || connection.dbType === 'oracle' || connection.dbType === 'sqlserver' || connection.dbType === 'presto'
-}
-
-function defaultSchemaForSqlConnection(connection: DatabaseConnectionInfo | undefined, catalog: DatabaseCatalogInfo | undefined) {
-  if (!connection || !catalog || !sqlConnectionRequiresSchema(connection)) return ''
-  if (!catalog.schemas?.length) return ''
-  return catalog.schemas.find((schema) => schema.name === 'public')?.name ?? catalog.schemas[0]?.name ?? ''
 }
 
 function repairSqlTabContext(tab: Extract<WorkspaceTab, { kind: 'sql' }>) {
@@ -3222,14 +2931,6 @@ function updateSqlTabSchema(event: Event) {
   tab.tableName = undefined
 }
 
-function renderCreateDatabaseTemplate(
-  name: string,
-  dbType: Extract<DatabaseEngineCode, 'mysql' | 'mariadb' | 'oceanbase' | 'postgresql' | 'kingbase' | 'sqlserver' | 'clickhouse'>
-) {
-  const trimmed = name.trim()
-  return trimmed ? `CREATE DATABASE ${quoteIdentForDialect(trimmed, dbType)};` : ''
-}
-
 function syncCreateDatabaseTemplate() {
   if (createDatabaseModal.userEditedSql) return
   const next = renderCreateDatabaseTemplate(createDatabaseModal.name, createDatabaseModal.dbType)
@@ -3297,59 +2998,6 @@ function connectionsByGroup(groupId: string) {
   return list.filter((connection) => connectionText(connection).includes(needle))
 }
 
-function flattenVisibleGroups(sourceGroups: DatabaseGroupInfo[]): VisibleGroupNode[] {
-  const sourceIds = new Set(sourceGroups.map((group) => group.id))
-  const byParent = new Map<string | null, DatabaseGroupInfo[]>()
-  sourceGroups.forEach((group) => {
-    const parentId = groupParentById[group.id] ?? null
-    const visibleParent = parentId && sourceIds.has(parentId) ? parentId : null
-    const list = byParent.get(visibleParent) ?? []
-    list.push(group)
-    byParent.set(visibleParent, list)
-  })
-  const out: VisibleGroupNode[] = []
-  const visit = (parentId: string | null, depth: number) => {
-    ;(byParent.get(parentId) ?? []).forEach((group) => {
-      out.push({ ...group, depth })
-      visit(group.id, depth + 1)
-    })
-  }
-  visit(null, 0)
-  return out
-}
-
-function groupPathLabel(groupId: string) {
-  const seen = new Set<string>()
-  const names: string[] = []
-  let currentId: string | null = groupId
-  while (currentId && !seen.has(currentId)) {
-    seen.add(currentId)
-    const group = groups.value.find((item) => item.id === currentId)
-    if (!group) break
-    names.unshift(group.name)
-    currentId = groupParentById[currentId] ?? null
-  }
-  return names.join(' / ') || 'Root Group'
-}
-
-function collectDescendantGroupIds(groupId: string) {
-  const out = new Set<string>()
-  const visit = (parentId: string) => {
-    groups.value.forEach((group) => {
-      if ((groupParentById[group.id] ?? null) === parentId) {
-        out.add(group.id)
-        visit(group.id)
-      }
-    })
-  }
-  visit(groupId)
-  return out
-}
-
-function connectionText(connection: DatabaseConnectionInfo) {
-  return [connection.name, connection.dbType, connection.host, connection.database, ...connection.catalogs.map((catalog) => catalog.name)].join(' ').toLowerCase()
-}
-
 function selectNode(id: string) {
   selectedNodeId.value = id
 }
@@ -3394,10 +3042,6 @@ function isTableExpanded(tableId: string) {
   return expandedTables.value.includes(tableId)
 }
 
-function toggleId(list: string[], id: string) {
-  return list.includes(id) ? list.filter((item) => item !== id) : [...list, id]
-}
-
 function registerWorkspaceTabRef(tabId: string, el: Element | ComponentPublicInstance | null) {
   if (el instanceof HTMLElement) workspaceTabRefs.set(tabId, el)
   else workspaceTabRefs.delete(tabId)
@@ -3410,27 +3054,6 @@ function scrollActiveWorkspaceTabIntoView(tabId: string) {
       tabEl.scrollIntoView({ block: 'nearest', inline: 'nearest' })
     }
   })
-}
-
-function columnNodeId(tableId: string, columnName: string) {
-  return `${tableId}:column:${columnName}`
-}
-
-function schemaObjectFolderKey(connectionId: string, catalogName: string, schemaName: string, kind: SchemaObjectKind) {
-  return `${connectionId}:${catalogName}:${schemaName}:${kind}`
-}
-
-function schemaRoutineNodeId(connectionId: string, catalogName: string, schemaName: string, kind: SchemaObjectKind, routine: string) {
-  return `${schemaObjectFolderKey(connectionId, catalogName, schemaName, kind)}:${routine}`
-}
-
-function schemaObjectFolders(schema: { tables: DatabaseTableInfo[]; views?: DatabaseTableInfo[]; functions?: string[]; procedures?: string[] }): SchemaObjectFolder[] {
-  return [
-    { kind: 'tables', count: schema.tables.length, tables: schema.tables, routines: [] },
-    { kind: 'views', count: schema.views?.length ?? 0, tables: schema.views ?? [], routines: [] },
-    { kind: 'functions', count: schema.functions?.length ?? 0, tables: [], routines: schema.functions ?? [] },
-    { kind: 'procedures', count: schema.procedures?.length ?? 0, tables: [], routines: schema.procedures ?? [] }
-  ]
 }
 
 function selectColumnNode(table: DatabaseTableInfo, column: DatabaseColumnInfo) {
@@ -3450,530 +3073,6 @@ function replaceRecord<T>(target: Record<string, T>, next: Record<string, T>) {
 
 function cloneDatabaseCatalog<T>(value: T): T {
   return structuredClone(value)
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function isStringArray(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every((item) => typeof item === 'string')
-}
-
-function isDatabaseRows(value: unknown): value is Array<Record<string, unknown>> {
-  return Array.isArray(value) && value.every(isRecord)
-}
-
-function isNonNegativeNumber(value: unknown): value is number {
-  return typeof value === 'number' && Number.isFinite(value) && value >= 0
-}
-
-function utf8ByteLength(value: string) {
-  return new TextEncoder().encode(value).byteLength
-}
-
-function isLocalFileWriteData(value: unknown, expectedPath: string, expectedContent: string): value is NonNullable<LocalFileWriteResult['data']> {
-  const expectedBytes = utf8ByteLength(expectedContent)
-  return (
-    isRecord(value) &&
-    value.filePath === expectedPath &&
-    typeof value.bytes === 'number' &&
-    Number.isInteger(value.bytes) &&
-    value.bytes === expectedBytes &&
-    typeof value.size === 'number' &&
-    Number.isInteger(value.size) &&
-    value.size === expectedBytes &&
-    typeof value.mtimeMs === 'number' &&
-    Number.isFinite(value.mtimeMs) &&
-    value.mtimeMs > 0
-  )
-}
-
-function isDbAiStatus(value: unknown): value is DbAiStatus {
-  return value === 'queued' || value === 'streaming' || value === 'done' || value === 'error' || value === 'cancelled'
-}
-
-function isDbAiAction(value: unknown): value is DbAiAction {
-  return typeof value === 'string' && DB_AI_ACTIONS.includes(value as DbAiAction)
-}
-
-function isDbAiTargetDialect(value: unknown): value is DbAiTargetDialect {
-  return typeof value === 'string' && DB_AI_TARGET_DIALECTS.includes(value as DbAiTargetDialect)
-}
-
-function isDatabaseEngineCode(value: unknown): value is DatabaseEngineCode {
-  return typeof value === 'string' && DB_ENGINE_CODES.includes(value as DatabaseEngineCode)
-}
-
-function isDatabaseEngineOptionCode(value: unknown): value is DatabaseEngineInfo['code'] {
-  return typeof value === 'string' && (DB_ENGINE_OPTION_CODES as readonly string[]).includes(value)
-}
-
-function isDatabaseEngineInfo(value: unknown): value is DatabaseEngineInfo {
-  return (
-    isRecord(value) &&
-    isDatabaseEngineOptionCode(value.code) &&
-    (value.connectionCode === undefined || isDatabaseEngineCode(value.connectionCode)) &&
-    typeof value.name === 'string' &&
-    typeof value.enabled === 'boolean' &&
-    typeof value.accent === 'string'
-  )
-}
-
-function isConnectableDatabaseEngineInfo(value: DatabaseEngineInfo): value is DatabaseEngineInfo & { connectionCode: DatabaseEngineCode } {
-  return value.enabled && isDatabaseEngineCode(value.connectionCode)
-}
-
-function isDatabaseColumnInfo(value: unknown): value is DatabaseColumnInfo {
-  return (
-    isRecord(value) &&
-    typeof value.name === 'string' &&
-    typeof value.type === 'string' &&
-    typeof value.nullable === 'boolean' &&
-    (value.key === undefined || value.key === 'PK' || value.key === 'FK')
-  )
-}
-
-function isDatabaseTableInfo(value: unknown): value is DatabaseTableInfo {
-  return (
-    isRecord(value) &&
-    typeof value.id === 'string' &&
-    typeof value.name === 'string' &&
-    Array.isArray(value.columns) &&
-    value.columns.every(isDatabaseColumnInfo) &&
-    isStringArray(value.primaryKey)
-  )
-}
-
-function isDatabaseSchemaInfo(value: unknown): value is { name: string; tables: DatabaseTableInfo[]; views?: DatabaseTableInfo[]; functions?: string[]; procedures?: string[] } {
-  return (
-    isRecord(value) &&
-    typeof value.name === 'string' &&
-    Array.isArray(value.tables) &&
-    value.tables.every(isDatabaseTableInfo) &&
-    (value.views === undefined || (Array.isArray(value.views) && value.views.every(isDatabaseTableInfo))) &&
-    (value.functions === undefined || isStringArray(value.functions)) &&
-    (value.procedures === undefined || isStringArray(value.procedures))
-  )
-}
-
-function isDatabaseCatalogInfo(value: unknown): value is DatabaseCatalogInfo {
-  return (
-    isRecord(value) &&
-    typeof value.name === 'string' &&
-    (value.schemas === undefined || (Array.isArray(value.schemas) && value.schemas.every(isDatabaseSchemaInfo))) &&
-    (value.tables === undefined || (Array.isArray(value.tables) && value.tables.every(isDatabaseTableInfo)))
-  )
-}
-
-function isDatabaseConnectionEnv(value: unknown): value is DatabaseConnectionInfo['env'] {
-  return value === 'Development' || value === 'TEST' || value === 'Staging' || value === 'Production'
-}
-
-function isDatabaseConnectionStatus(value: unknown): value is DatabaseConnectionInfo['status'] {
-  return value === 'idle' || value === 'testing' || value === 'connected' || value === 'failed'
-}
-
-function isDatabaseConnectionInfo(value: unknown): value is DatabaseConnectionInfo {
-  return (
-    isRecord(value) &&
-    typeof value.id === 'string' &&
-    typeof value.name === 'string' &&
-    isDatabaseEngineCode(value.dbType) &&
-    isDatabaseConnectionEnv(value.env) &&
-    typeof value.groupId === 'string' &&
-    typeof value.host === 'string' &&
-    (value.port === null || (typeof value.port === 'number' && Number.isFinite(value.port))) &&
-    value.authentication === 'UserAndPassword' &&
-    typeof value.user === 'string' &&
-    (value.hasPassword === undefined || typeof value.hasPassword === 'boolean') &&
-    typeof value.database === 'string' &&
-    (value.filePath === undefined || typeof value.filePath === 'string') &&
-    (value.readonly === undefined || typeof value.readonly === 'boolean') &&
-    (value.sslMode === undefined ||
-      value.sslMode === '' ||
-      value.sslMode === 'disable' ||
-      value.sslMode === 'require' ||
-      value.sslMode === 'verify-ca' ||
-      value.sslMode === 'verify-full') &&
-    (value.needProxy === undefined || typeof value.needProxy === 'boolean') &&
-    (value.proxyName === undefined || typeof value.proxyName === 'string') &&
-    (value.url === undefined || typeof value.url === 'string') &&
-    isDatabaseConnectionStatus(value.status) &&
-    Array.isArray(value.catalogs) &&
-    value.catalogs.every(isDatabaseCatalogInfo)
-  )
-}
-
-function isDatabaseGroupInfo(value: unknown): value is DatabaseGroupInfo {
-  return isRecord(value) && typeof value.id === 'string' && typeof value.name === 'string'
-}
-
-function isStringNullRecord(value: unknown): value is Record<string, string | null> {
-  return isRecord(value) && Object.values(value).every((item) => item === null || typeof item === 'string')
-}
-
-function isDatabaseCatalogDefaults(value: unknown): value is DatabaseWorkspaceCatalog['defaults'] {
-  return (
-    isRecord(value) &&
-    (value.selectedNodeId === null || typeof value.selectedNodeId === 'string') &&
-    isStringArray(value.expandedGroupIds) &&
-    isStringArray(value.expandedConnectionIds) &&
-    isStringArray(value.expandedCatalogIds) &&
-    isStringArray(value.expandedSchemaIds) &&
-    isStringArray(value.expandedSchemaObjectFolderIds)
-  )
-}
-
-function isDatabaseWorkspaceCatalog(value: unknown): value is DatabaseWorkspaceCatalog {
-  return (
-    isRecord(value) &&
-    Array.isArray(value.engines) &&
-    value.engines.every(isDatabaseEngineInfo) &&
-    Array.isArray(value.groups) &&
-    value.groups.every(isDatabaseGroupInfo) &&
-    isStringNullRecord(value.groupParents) &&
-    Array.isArray(value.connections) &&
-    value.connections.every(isDatabaseConnectionInfo) &&
-    isDatabaseCatalogDefaults(value.defaults)
-  )
-}
-
-function isDatabaseConnectionTestData(value: unknown): value is NonNullable<DatabaseConnectionTestResult['data']> {
-  return (
-    isRecord(value) &&
-    isDatabaseEngineCode(value.dbType) &&
-    typeof value.serverVersion === 'string' &&
-    typeof value.endpoint === 'string' &&
-    isNonNegativeNumber(value.durationMs)
-  )
-}
-
-function isDatabaseConnectionSaveData(value: unknown): value is NonNullable<DatabaseConnectionSaveResult['data']> {
-  if (!isRecord(value) || !isDatabaseWorkspaceCatalog(value)) return false
-  const record: Record<string, unknown> = value
-  return isDatabaseConnectionInfo(record.connection) && typeof record.message === 'string'
-}
-
-const databaseRequestText = (value: unknown) => String(value ?? '').trim()
-
-function isDatabaseConnectionSaveDataForRequest(value: unknown, input: DatabaseConnectionSaveInput): value is NonNullable<DatabaseConnectionSaveResult['data']> {
-  if (!isDatabaseConnectionSaveData(value)) return false
-  const saved = value.connection
-  if (input.mode === 'edit' && input.id && saved.id !== input.id) return false
-  const expected = input.connection
-  const expectedProxyName = expected.dbType !== 'sqlite' && expected.needProxy ? databaseRequestText(expected.proxyName) : ''
-  return (
-    saved.name === databaseRequestText(expected.name) &&
-    saved.dbType === expected.dbType &&
-    saved.env === (expected.env || 'Development') &&
-    saved.groupId === expected.groupId &&
-    saved.authentication === (expected.authentication || 'UserAndPassword') &&
-    (expected.dbType === 'sqlite' || saved.user === databaseRequestText(expected.user)) &&
-    (expected.dbType !== 'sqlite' || (saved.filePath || '') === databaseRequestText(expected.filePath)) &&
-    Boolean(saved.readonly) === Boolean(expected.readonly) &&
-    (saved.sslMode || '') === (expected.sslMode || '') &&
-    Boolean(saved.needProxy) === Boolean(expectedProxyName) &&
-    (saved.proxyName || '') === expectedProxyName &&
-    value.connections.some((connection) => connection.id === saved.id)
-  )
-}
-
-function isDatabaseGroupMutationData(value: unknown): value is NonNullable<DatabaseGroupMutationResult['data']> {
-  if (!isRecord(value) || !isDatabaseWorkspaceCatalog(value)) return false
-  const record: Record<string, unknown> = value
-  return isDatabaseGroupInfo(record.group) && typeof record.message === 'string'
-}
-
-function isDatabaseGroupMutationDataForRequest(
-  value: unknown,
-  options: { id?: string; parentId?: string | null; name?: string }
-): value is NonNullable<DatabaseGroupMutationResult['data']> {
-  if (!isDatabaseGroupMutationData(value)) return false
-  if (options.id && value.group.id !== options.id) return false
-  if (options.name !== undefined && value.group.name !== options.name) return false
-  if (options.parentId !== undefined && (value.groupParents[value.group.id] ?? null) !== options.parentId) return false
-  return value.groups.some((group) => group.id === value.group.id)
-}
-
-function isDatabaseGroupDeleteData(value: unknown): value is NonNullable<DatabaseGroupDeleteResult['data']> {
-  if (!isRecord(value) || !isDatabaseWorkspaceCatalog(value)) return false
-  const record: Record<string, unknown> = value
-  return typeof record.deletedGroupId === 'string' && typeof record.message === 'string'
-}
-
-function isDatabaseGroupDeleteDataForRequest(value: unknown, deletedGroupId: string): value is NonNullable<DatabaseGroupDeleteResult['data']> {
-  return isDatabaseGroupDeleteData(value) && value.deletedGroupId === deletedGroupId && !value.groups.some((group) => group.id === deletedGroupId)
-}
-
-function isDatabaseConnectionMutationData(value: unknown): value is NonNullable<DatabaseConnectionMutationResult['data']> {
-  if (!isRecord(value) || !isDatabaseWorkspaceCatalog(value)) return false
-  const record: Record<string, unknown> = value
-  return isDatabaseConnectionInfo(record.connection) && typeof record.message === 'string'
-}
-
-function isDatabaseConnectionMutationDataForRequest(
-  value: unknown,
-  options: { connectionId: string; groupId?: string; status?: DatabaseConnectionInfo['status'] }
-): value is NonNullable<DatabaseConnectionMutationResult['data']> {
-  if (!isDatabaseConnectionMutationData(value)) return false
-  if (value.connection.id !== options.connectionId) return false
-  if (options.groupId !== undefined && value.connection.groupId !== options.groupId) return false
-  if (options.status !== undefined && value.connection.status !== options.status) return false
-  return value.connections.some((connection) => connection.id === options.connectionId)
-}
-
-function isDatabaseConnectionDeleteData(value: unknown): value is NonNullable<DatabaseConnectionDeleteResult['data']> {
-  if (!isRecord(value) || !isDatabaseWorkspaceCatalog(value)) return false
-  const record: Record<string, unknown> = value
-  return typeof record.connectionId === 'string' && typeof record.message === 'string'
-}
-
-function isDatabaseConnectionDeleteDataForRequest(value: unknown, connectionId: string): value is NonNullable<DatabaseConnectionDeleteResult['data']> {
-  return isDatabaseConnectionDeleteData(value) && value.connectionId === connectionId && !value.connections.some((connection) => connection.id === connectionId)
-}
-
-function isDatabaseCreateDatabaseData(value: unknown): value is NonNullable<DatabaseCreateDatabaseResult['data']> {
-  if (!isRecord(value) || !isDatabaseWorkspaceCatalog(value)) return false
-  const record: Record<string, unknown> = value
-  return isDatabaseConnectionInfo(record.connection) && isDatabaseCatalogInfo(record.catalog) && typeof record.message === 'string'
-}
-
-function isDatabaseCreateDatabaseDataForRequest(
-  value: unknown,
-  connectionId: string,
-  requestedName: string
-): value is NonNullable<DatabaseCreateDatabaseResult['data']> {
-  return (
-    isDatabaseCreateDatabaseData(value) &&
-    value.connection.id === connectionId &&
-    value.catalog.name.toLowerCase() === requestedName.toLowerCase() &&
-    value.connections.some((connection) => connection.id === connectionId && connection.catalogs.some((catalog) => catalog.name.toLowerCase() === requestedName.toLowerCase()))
-  )
-}
-
-function isDatabaseTableMutationData(value: unknown, options: { requireCatalog?: boolean } = {}): value is NonNullable<DatabaseTableMutationResult['data']> {
-  return (
-    isRecord(value) &&
-    isNonNegativeNumber(value.affected) &&
-    isNonNegativeNumber(value.durationMs) &&
-    (value.catalog === undefined ? !options.requireCatalog : isDatabaseWorkspaceCatalog(value.catalog))
-  )
-}
-
-function isDatabaseTableMutationPlanStatement(value: unknown): value is NonNullable<DatabaseTableMutationPlanResult['data']>['statements'][number] {
-  return (
-    isRecord(value) &&
-    (value.kind === 'delete' || value.kind === 'update' || value.kind === 'insert' || value.kind === 'truncate' || value.kind === 'drop') &&
-    typeof value.sql === 'string' &&
-    Array.isArray(value.params) &&
-    typeof value.preview === 'string'
-  )
-}
-
-function isDatabaseTableMutationPlanData(value: unknown): value is NonNullable<DatabaseTableMutationPlanResult['data']> {
-  return (
-    isRecord(value) &&
-    Array.isArray(value.statements) &&
-    value.statements.every(isDatabaseTableMutationPlanStatement) &&
-    isNonNegativeNumber(value.statementCount) &&
-    typeof value.preview === 'string' &&
-    typeof value.warning === 'string'
-  )
-}
-
-function isDbAiBackendContext(value: unknown): value is DbAiBackendContext {
-  if (!isRecord(value)) return false
-  if (value.connectionId !== undefined && typeof value.connectionId !== 'string') return false
-  if (value.dbType !== undefined && value.dbType !== '' && !isDatabaseEngineCode(value.dbType)) return false
-  if (value.databaseName !== undefined && typeof value.databaseName !== 'string') return false
-  if (value.schemaName !== undefined && typeof value.schemaName !== 'string') return false
-  if (value.tableName !== undefined && typeof value.tableName !== 'string') return false
-  if (value.contextSummary !== undefined && typeof value.contextSummary !== 'string') return false
-  return true
-}
-
-function isDbAiPaneMessageRecord(value: unknown, expected?: { role?: 'user' | 'assistant'; requestId?: string; id?: string }): value is DbAiPaneMessage {
-  if (!isRecord(value)) return false
-  if (typeof value.id !== 'string' || !value.id.trim()) return false
-  if (typeof value.requestId !== 'string' || !value.requestId.trim()) return false
-  if (value.role !== 'user' && value.role !== 'assistant') return false
-  if (!isDbAiStatus(value.status)) return false
-  if (typeof value.content !== 'string' || typeof value.contextSummary !== 'string') return false
-  if (!isNonNegativeNumber(value.createdAt) || !isNonNegativeNumber(value.updatedAt)) return false
-  if (expected?.role && value.role !== expected.role) return false
-  if (expected?.requestId && value.requestId !== expected.requestId) return false
-  if (expected?.id && value.id !== expected.id) return false
-  return true
-}
-
-function isDbAiPaneStateContext(value: unknown): value is DbAiPaneContext {
-  return (
-    isRecord(value) &&
-    typeof value.connectionId === 'string' &&
-    typeof value.catalogName === 'string' &&
-    typeof value.schemaName === 'string' &&
-    (value.dbType === '' || isDatabaseEngineCode(value.dbType))
-  )
-}
-
-function isDbAiPaneStateSnapshot(value: unknown): value is DatabaseAiPaneStateSnapshot {
-  return (
-    isRecord(value) &&
-    typeof value.open === 'boolean' &&
-    isNonNegativeNumber(value.width) &&
-    isDbAiPaneStateContext(value.context) &&
-    typeof value.draft === 'string' &&
-    Array.isArray(value.messages) &&
-    value.messages.every((message) => isDbAiPaneMessageRecord(message))
-  )
-}
-
-function isDbAiPaneRequestData(value: unknown): value is { requestId: string; userMessage: DbAiPaneMessage; assistantMessage: DbAiPaneMessage } {
-  if (!isRecord(value) || typeof value.requestId !== 'string' || !value.requestId.trim()) return false
-  return (
-    isDbAiPaneMessageRecord(value.userMessage, { role: 'user', requestId: value.requestId }) &&
-    isDbAiPaneMessageRecord(value.assistantMessage, { role: 'assistant', requestId: value.requestId })
-  )
-}
-
-function isDbAiPaneLifecycleData(value: unknown, expected: { requestId: string; assistantMessageId?: string }): value is { assistantMessage: DbAiPaneMessage } {
-  return isRecord(value) && isDbAiPaneMessageRecord(value.assistantMessage, { role: 'assistant', requestId: expected.requestId, id: expected.assistantMessageId })
-}
-
-function isDbAiPaneResponseData(
-  value: unknown,
-  expected: { requestId: string; assistantMessageId: string }
-): value is NonNullable<DatabaseAiPaneResponseResult['data']> {
-  return (
-    isRecord(value) &&
-    value.requestId === expected.requestId &&
-    isDbAiPaneMessageRecord(value.assistantMessage, { role: 'assistant', requestId: expected.requestId, id: expected.assistantMessageId }) &&
-    typeof value.text === 'string' &&
-    typeof value.provider === 'string' &&
-    isNonNegativeNumber(value.durationMs)
-  )
-}
-
-function isDbAiDrawerRequestRecord(value: unknown, expectedId?: string): value is DbAiRequest {
-  if (!isRecord(value)) return false
-  if (typeof value.id !== 'string' || !value.id.trim()) return false
-  if (expectedId && value.id !== expectedId) return false
-  return (
-    isDbAiAction(value.action) &&
-    typeof value.label === 'string' &&
-    isDbAiStatus(value.status) &&
-    typeof value.contextSummary === 'string' &&
-    typeof value.sourceSql === 'string' &&
-    typeof value.text === 'string' &&
-    isDbAiTargetDialect(value.targetDialect) &&
-    isDbAiBackendContext(value.backendContext) &&
-    isNonNegativeNumber(value.createdAt) &&
-    isNonNegativeNumber(value.updatedAt)
-  )
-}
-
-function isDbAiDrawerResponseData(value: unknown, expectedId: string): value is NonNullable<DatabaseAiDrawerResponseResult['data']> {
-  return (
-    isRecord(value) &&
-    isDbAiDrawerRequestRecord(value.request, expectedId) &&
-    typeof value.text === 'string' &&
-    typeof value.reasoning === 'string' &&
-    typeof value.sql === 'string' &&
-    typeof value.provider === 'string' &&
-    isNonNegativeNumber(value.durationMs)
-  )
-}
-
-function isDatabaseSqlExecutionRecord(value: unknown): value is DatabaseSqlExecutionRecord {
-  return (
-    isRecord(value) &&
-    typeof value.id === 'string' &&
-    value.id.trim() !== '' &&
-    (value.status === 'ok' || value.status === 'error') &&
-    typeof value.message === 'string' &&
-    value.message.trim() !== '' &&
-    isNonNegativeNumber(value.durationMs) &&
-    isNonNegativeNumber(value.rowCount) &&
-    typeof value.createdAt === 'string' &&
-    value.createdAt.trim() !== ''
-  )
-}
-
-function isDatabaseSqlExecuteData(value: unknown): value is NonNullable<DatabaseSqlExecuteResult['data']> {
-  return (
-    isRecord(value) &&
-    isStringArray(value.columns) &&
-    isDatabaseRows(value.rows) &&
-    isNonNegativeNumber(value.rowCount) &&
-    isNonNegativeNumber(value.durationMs) &&
-    isDatabaseSqlExecutionRecord(value.execution) &&
-    value.execution.status === 'ok'
-  )
-}
-
-function isDatabaseTableQueryData(value: unknown): value is NonNullable<DatabaseTableQueryResult['data']> {
-  return (
-    isRecord(value) &&
-    isStringArray(value.columns) &&
-    isDatabaseRows(value.rows) &&
-    isNonNegativeNumber(value.rowCount) &&
-    isNonNegativeNumber(value.durationMs) &&
-    (value.total === null || isNonNegativeNumber(value.total)) &&
-    isStringArray(value.knownColumns)
-  )
-}
-
-function isDatabaseExportData(value: unknown): value is NonNullable<DatabaseExportResult['data']> {
-  if (!isRecord(value)) return false
-  if (!isNonNegativeNumber(value.exported)) return false
-  if (typeof value.fileName !== 'string' || !value.fileName.trim().endsWith('.csv')) return false
-  if (value.canceled !== undefined && typeof value.canceled !== 'boolean') return false
-  if (value.csv !== undefined && typeof value.csv !== 'string') return false
-  if (value.canceled) return value.exported === 0 && value.filePath === undefined && value.bytes === undefined
-  return (
-    typeof value.filePath === 'string' &&
-    value.filePath.trim().length > 0 &&
-    typeof value.bytes === 'number' &&
-    Number.isInteger(value.bytes) &&
-    value.bytes >= 0 &&
-    (typeof value.csv !== 'string' || value.bytes === utf8ByteLength(value.csv))
-  )
-}
-
-function isDatabasePageCommentKey(value: unknown, expected?: DatabasePageCommentKey | null): value is DatabasePageCommentKey {
-  if (!isRecord(value)) return false
-  if (value.scope !== 'sql-result' && value.scope !== 'table-page') return false
-  if (typeof value.connectionId !== 'string' || typeof value.databaseName !== 'string') return false
-  if (value.schemaName !== undefined && typeof value.schemaName !== 'string') return false
-  if (value.tableName !== undefined && typeof value.tableName !== 'string') return false
-  if (value.resultId !== undefined && typeof value.resultId !== 'string') return false
-  if (value.sql !== undefined && typeof value.sql !== 'string') return false
-  const key: DatabasePageCommentKey = {
-    scope: value.scope,
-    connectionId: value.connectionId,
-    databaseName: value.databaseName,
-    ...(value.schemaName ? { schemaName: value.schemaName } : {}),
-    ...(value.tableName ? { tableName: value.tableName } : {}),
-    ...(value.resultId ? { resultId: value.resultId } : {}),
-    ...(value.sql ? { sql: value.sql } : {})
-  }
-  if (!expected) return true
-  return databasePageCommentKeyId(key) === databasePageCommentKeyId(expected)
-}
-
-function isDatabasePageCommentRecord(value: unknown, expected?: DatabasePageCommentKey | null): value is DatabasePageCommentRecord {
-  if (!isRecord(value) || !isDatabasePageCommentKey(value, expected)) return false
-  const record = value as Record<string, unknown>
-  return typeof record.comment === 'string' && isNonNegativeNumber(record.updatedAt)
-}
-
-function isDatabasePageCommentGetData(value: unknown, expected: DatabasePageCommentKey): value is { record: DatabasePageCommentRecord } {
-  return isRecord(value) && isDatabasePageCommentRecord(value.record, expected)
-}
-
-function isDatabasePageCommentSaveData(value: unknown, expected: DatabasePageCommentKey): value is { record: DatabasePageCommentRecord; message: string } {
-  return isRecord(value) && isDatabasePageCommentRecord(value.record, expected) && typeof value.message === 'string'
 }
 
 function tableNodeExists(tableId: string) {
@@ -4738,29 +3837,6 @@ function renderDefaultSql(connection: DatabaseConnectionInfo | undefined, catalo
   if (connection?.dbType === 'oracle') return `SELECT *\nFROM ${qualified}\nFETCH FIRST 100 ROWS ONLY;`
   if (connection?.dbType === 'sqlserver') return `SELECT TOP (100) *\nFROM ${qualified};`
   return `SELECT *\nFROM ${qualified}\nLIMIT 100;`
-}
-
-function buildQualifiedTableReference(dbType: DatabaseEngineCode, catalogName: string, schemaName: string | undefined, tableName: string) {
-  const quotedTable = quoteSqlIdentifierForDialect(tableName, dbType)
-  if (dbType === 'presto' && catalogName && schemaName) {
-    return `${quoteSqlIdentifierForDialect(catalogName, dbType)}.${quoteSqlIdentifierForDialect(schemaName, dbType)}.${quotedTable}`
-  }
-  if (dbType === 'clickhouse' && catalogName) {
-    return `${quoteSqlIdentifierForDialect(catalogName, dbType)}.${quotedTable}`
-  }
-  if ((isPostgresCompatibleDbType(dbType) || dbType === 'oracle' || dbType === 'sqlserver') && schemaName) {
-    return `${quoteSqlIdentifierForDialect(schemaName, dbType)}.${quotedTable}`
-  }
-  if (dbType === 'sqlite' && catalogName) {
-    return `${quoteSqlIdentifierForDialect(catalogName, dbType)}.${quotedTable}`
-  }
-  return quotedTable
-}
-
-function quoteSqlIdentifierForDialect(value: string, dbType: DatabaseEngineCode) {
-  if (isMysqlCompatibleDbType(dbType) || dbType === 'clickhouse') return `\`${String(value).replace(/`/g, '``')}\``
-  if (dbType === 'sqlserver') return `[${String(value).replace(/]/g, ']]')}]`
-  return `"${String(value).replace(/"/g, '""')}"`
 }
 
 function runSql(mode: 'all' | 'current' | 'explain') {
@@ -5606,18 +4682,6 @@ function exportActiveDataPage() {
   })
 }
 
-function databasePageCommentKeyId(key: DatabasePageCommentKey) {
-  return [
-    key.scope,
-    key.connectionId,
-    key.databaseName,
-    key.schemaName || '',
-    key.tableName || '',
-    key.resultId || '',
-    key.sql || ''
-  ].join('\u001f')
-}
-
 function sqlResultCommentKey(tab: Extract<WorkspaceTab, { kind: 'sql' }>, result: SqlResult): DatabasePageCommentKey {
   return {
     scope: 'sql-result',
@@ -5636,45 +4700,6 @@ function dataPageCommentKey(tab: Extract<WorkspaceTab, { kind: 'data' }>): Datab
     databaseName: tab.catalogName,
     ...(tab.schemaName ? { schemaName: tab.schemaName } : {}),
     tableName: tab.tableName
-  }
-}
-
-function labelForChartValue(value: unknown, fallback: string) {
-  if (value === null || value === undefined || value === '') return fallback
-  if (typeof value === 'object') return JSON.stringify(value)
-  return String(value)
-}
-
-function numberForChartValue(value: unknown) {
-  if (typeof value === 'number' && Number.isFinite(value)) return value
-  if (typeof value === 'string' && value.trim() && Number.isFinite(Number(value))) return Number(value)
-  return null
-}
-
-function buildChartSummary(source: DatabaseChartSource): DatabaseChartSummary | null {
-  const rows = source.rows.filter((row) => row && typeof row === 'object')
-  const numericColumns = source.columns.filter((column) => rows.some((row) => numberForChartValue(row[column]) !== null))
-  const valueColumn = numericColumns[0]
-  if (!valueColumn) return null
-  const categoryColumn = source.columns.find((column) => column !== valueColumn && rows.some((row) => row[column] !== null && row[column] !== undefined && row[column] !== '')) || valueColumn
-  const grouped = new Map<string, number>()
-  rows.forEach((row, index) => {
-    const numeric = numberForChartValue(row[valueColumn])
-    if (numeric === null) return
-    const label = labelForChartValue(row[categoryColumn], `Row ${index + 1}`)
-    grouped.set(label, (grouped.get(label) || 0) + numeric)
-  })
-  const sorted = [...grouped.entries()].sort((first, second) => Math.abs(second[1]) - Math.abs(first[1])).slice(0, 12)
-  if (!sorted.length) return null
-  const max = Math.max(...sorted.map(([, value]) => Math.abs(value)), 1)
-  return {
-    title: source.title,
-    scopeLabel: source.scopeLabel,
-    categoryColumn,
-    valueColumn,
-    rowCount: rows.length,
-    bars: sorted.map(([label, value]) => ({ label, value, width: Math.max(4, Math.round((Math.abs(value) / max) * 100)) })),
-    numericColumns
   }
 }
 
@@ -5825,15 +4850,6 @@ async function saveActiveComment() {
 function closeCommentModal() {
   if (commentModal.saving) return
   commentModal.open = false
-}
-
-function formatChartNumber(value: number) {
-  return Number.isInteger(value) ? String(value) : value.toLocaleString(undefined, { maximumFractionDigits: 2 })
-}
-
-function formatCommentTime(value: number) {
-  if (!value) return ''
-  return new Date(value).toLocaleString()
 }
 
 function discardDataChanges() {
@@ -6154,7 +5170,7 @@ async function moveGroupTo(groupId: string, parentId: string | null) {
     closeMenus()
     return
   }
-  if (parentId === groupId || (parentId && collectDescendantGroupIds(groupId).has(parentId))) return
+  if (parentId === groupId || (parentId && collectDescendantGroupIds(groupId, groups.value, groupParentById).has(parentId))) return
   const result = await moveDatabaseGroupViaBackend({ id: groupId, parentId })
   if (
     !applyDatabaseCatalogMutationResult(
@@ -6167,7 +5183,7 @@ async function moveGroupTo(groupId: string, parentId: string | null) {
     return
   }
   if (parentId) expandedGroups.value = Array.from(new Set([...expandedGroups.value, parentId]))
-  showNotice(parentId ? `Group moved to ${groupPathLabel(parentId)}` : 'Group moved to root')
+  showNotice(parentId ? `Group moved to ${groupPathLabel(parentId, groups.value, groupParentById)}` : 'Group moved to root')
   closeMenus()
 }
 
@@ -6220,7 +5236,7 @@ async function moveConnectionToGroup(connectionId: string, groupId: string) {
     return
   }
   expandedGroups.value = Array.from(new Set([...expandedGroups.value, groupId]))
-  showNotice(groupId === DEFAULT_GROUP_ID ? 'Connection moved to root group' : `Connection moved to ${groupPathLabel(groupId)}`)
+  showNotice(groupId === DEFAULT_GROUP_ID ? 'Connection moved to root group' : `Connection moved to ${groupPathLabel(groupId, groups.value, groupParentById)}`)
   closeMenus()
 }
 
@@ -6300,7 +5316,7 @@ function editConnection(connectionId: string) {
   connectionErrors.value = []
   connectionFeedback.value = ''
   connectionFeedbackKind.value = 'info'
-  connectionUrlDirty.value = !!(connection.url && connection.url !== buildConnectionUrl())
+  connectionUrlDirty.value = !!(connection.url && connection.url !== buildConnectionUrl(connectionDraft))
   passwordVisible.value = false
   connectionTesting.value = false
   connectionSaving.value = false
@@ -6426,20 +5442,6 @@ function fetchTableDdl(ctx: {
   })
     .then(normalizeTableDdlResult)
     .catch((error) => ({ ok: false, errorCode: 'other', errorMessage: errorToMessage(error) }))
-}
-
-function normalizeTableDdlResult(result: DatabaseTableDdlResult): TableDdlResult {
-  if (result.ok) {
-    const ddl = typeof result.data?.ddl === 'string' ? result.data.ddl : ''
-    if (!ddl.trim()) return { ok: false, errorCode: 'other', errorMessage: 'Database DDL backend returned malformed result data.' }
-    return { ok: true, ddl }
-  }
-  return { ok: false, errorCode: result.errorCode || 'other', errorMessage: result.errorMessage || 'DDL fetch failed.' }
-}
-
-function formatDdlError(result: Extract<TableDdlResult, { ok: false }>) {
-  if (result.errorCode === 'permission') return `DDL permission denied: ${result.errorMessage}`
-  return `DDL fetch failed: ${result.errorMessage}`
 }
 
 async function copySelectSql() {
@@ -7020,15 +6022,6 @@ async function createDatabaseViaBackend(connectionId: string, sql: string, reque
   return createDatabaseCatalog({ connectionId, sql, requestedName })
 }
 
-function parseCreateDatabaseName(sql: string) {
-  const match = sql.match(/\bcreate\s+database\s+(?:if\s+not\s+exists\s+)?(`(?:``|[^`])+`|"(?:""|[^"])+"|[A-Za-z_][A-Za-z0-9_]*)/i)
-  if (!match) return ''
-  const token = match[1]
-  if (token.startsWith('`') && token.endsWith('`')) return token.slice(1, -1).replace(/``/g, '`')
-  if (token.startsWith('"') && token.endsWith('"')) return token.slice(1, -1).replace(/""/g, '"')
-  return token
-}
-
 async function copyDdl() {
   if (!ddlModal.ddl.trim()) {
     showNotice('DDL is empty')
@@ -7432,16 +6425,6 @@ function engineAccent(code: DatabaseEngineCode) {
 
 function engineName(code: DatabaseEngineCode) {
   return databaseEngines.value.find((engine) => engine.connectionCode === code)?.name ?? code
-}
-
-function quoteIdentifier(value: string) {
-  return value.replace(/[^A-Za-z0-9_]/g, '_')
-}
-
-function quoteIdentForDialect(value: string, dbType: DatabaseEngineCode) {
-  if (isMysqlCompatibleDbType(dbType) || dbType === 'clickhouse') return `\`${String(value).replace(/`/g, '``')}\``
-  if (dbType === 'sqlserver') return `[${String(value).replace(/]/g, ']]')}]`
-  return `"${String(value).replace(/"/g, '""')}"`
 }
 
 function closeMenus() {
