@@ -2305,7 +2305,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, defineComponent, h, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch, type ComponentPublicInstance, type PropType } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch, type ComponentPublicInstance } from 'vue'
 import {
   AlignLeft,
   BrainCircuit,
@@ -2341,7 +2341,50 @@ import { copyTextToClipboard } from '@/services/clipboardRuntime'
 import { databaseClient } from '@/services/databaseClient'
 import { editorLineHeightPx } from '@/services/editorRuntime'
 import { localFilesClient } from '@/services/localFilesClient'
+import DataGridToolbar from '@/components/database/DataGridToolbar.vue'
+import DataStatusBar from '@/components/database/DataStatusBar.vue'
 import DatabaseSqlEditor, { type DatabaseSqlEditorMetrics } from '@/components/database/DatabaseSqlEditor.vue'
+import ResultGrid from '@/components/database/ResultGrid.vue'
+import {
+  applyFilters,
+  applyOrderBySort,
+  applySort,
+  addDataRowState,
+  buildDataEditSummary,
+  buildDataMutationPayload,
+  clampPage,
+  deleteSelectedDataRowState,
+  isDirtyStateDirty,
+  makeDataMutationPlanState,
+  makeDirtyState,
+  makeOriginalRows,
+  nextSort,
+  parseOrderByRaw,
+  parseWhereRaw,
+  replaceFilter,
+  undoDataChangesState,
+  updateDataCellState,
+  updateNewDataRowCellState,
+  type DataMutationPlanState,
+  type DbFilter,
+  type DbOrderBy,
+  type DbSort,
+  type DirtyState,
+  type EditOp,
+  type ResultStatus
+} from '@/services/databaseGridRuntime'
+import {
+  currentSqlStatement,
+  currentSqlStatementRange,
+  extractSql,
+  findSqlTextMatches,
+  firstSqlFindMatchAtOrAfter,
+  firstStatement,
+  formatSqlText,
+  isReadOnlySql,
+  sqlCursorPosition,
+  type TextRange
+} from '@/services/databaseSqlEditorRuntime'
 import { useWorkspaceStore } from '@/stores/workspace'
 import type {
   DatabaseAiDrawerLifecycleResult, DatabaseAiDrawerRequestRecord, DatabaseAiDrawerRequestResult, DatabaseAiDrawerResponseInput, DatabaseAiDrawerResponseResult,
@@ -2350,49 +2393,12 @@ import type {
   DatabaseConnectionSaveInput, DatabaseConnectionSaveResult, DatabaseConnectionTestInput, DatabaseConnectionTestResult, DatabaseCreateDatabaseResult,
   DatabaseEngineCode, DatabaseEngineInfo, DatabaseExportInput, DatabaseExportResult, DatabaseGroupCreateInput, DatabaseGroupDeleteResult, DatabaseGroupInfo,
   DatabaseGroupMutationResult, DatabaseGroupUpdateInput, DatabasePageCommentKey, DatabasePageCommentRecord, DatabaseSqlExecutionRecord, DatabaseSqlExecuteResult,
-  DatabaseTableDdlResult, DatabaseTableInfo, DatabaseTableMutation, DatabaseTableMutationInput, DatabaseTableMutationPlanResult, DatabaseTableMutationResult,
+  DatabaseTableDdlResult, DatabaseTableInfo, DatabaseTableMutationInput, DatabaseTableMutationPlanResult, DatabaseTableMutationResult,
   DatabaseTableQueryResult, DatabaseWorkspaceCatalog
 } from '@shared/contracts/database'
 import type { LocalFileWriteResult } from '@shared/contracts/localFiles'
 
-type DbFilter =
-  | { column: string; operator: 'like' | 'eq' | 'neq'; value: string }
-  | { column: string; operator: 'in'; values: string[] }
-  | { column: string; operator: 'isnull' | 'notnull' }
-type DbSort = { column: string; direction: 'asc' | 'desc' } | null
-type DbOrderBy = Array<{ column: string; direction: 'asc' | 'desc' }>
-type ResultStatus = 'running' | 'ok' | 'error'
-type DbFilterValueEntry = { value: string; label: string; count: number }
 type DbAiStatus = 'queued' | 'streaming' | 'done' | 'error' | 'cancelled'
-type DirtyState = {
-  newRows: Array<{ tmpId: string; values: Record<string, unknown> }>
-  deletedRowKeys: Set<string>
-  updatedCells: Map<string, Record<string, unknown>>
-  originalRows: Map<string, Record<string, unknown>>
-}
-type EditOp =
-  | { kind: 'add'; tmpId: string }
-  | { kind: 'delete'; rowKey: string; snapshot: Record<string, unknown> }
-  | { kind: 'update'; rowKey: string; column: string; oldValue: unknown; newValue: unknown }
-type DataEditSummary = {
-  isDirty: boolean
-  newRows: number
-  updatedRows: number
-  deletedRows: number
-  undoDepth: number
-  statementCount: number
-  preview: string
-  warning: string
-  error: string
-}
-type DataMutationPlanState = {
-  key: string
-  loading: boolean
-  statementCount: number
-  preview: string
-  warning: string
-  error: string
-}
 type DatabaseChartSource = {
   title: string
   scopeLabel: string
@@ -2416,7 +2422,6 @@ type DatabaseChartSummary = {
 type DbAiAction = 'explain' | 'nl2sql' | 'optimize' | 'convert' | 'complete' | 'diagnose' | 'drop' | 'truncate'
 type DbAiTargetDialect = DatabaseEngineCode | 'mssql'
 type DbAiBackendContext = DatabaseAiDrawerResponseInput['context']
-type TextRange = { start: number; end: number }
 type DatabaseSqlEditorApi = {
   getText(): string
   getSelectedText(): string
@@ -2438,7 +2443,6 @@ type SchemaObjectKind = 'tables' | 'views' | 'functions' | 'procedures'
 type SchemaObjectFolder = { kind: SchemaObjectKind; count: number; tables: DatabaseTableInfo[]; routines: string[] }
 type TableDdlResult = { ok: true; ddl: string } | { ok: false; errorCode: string; errorMessage: string }
 
-const DB_FILTER_NULL = '__AIOPSTERM_DB_NULL__'
 const DB_IDENT_RE = /^[A-Za-z_][A-Za-z0-9_]*$/
 const DEFAULT_GROUP_ID = 'group-default'
 const DB_AI_PANE_DEFAULT_WIDTH = 360
@@ -2621,518 +2625,6 @@ type ContextMenuPayload = Omit<Extract<ContextMenu, { type: 'group' }>, 'x' | 'y
 type VisibleGroupNode = DatabaseGroupInfo & { depth: number }
 type SqlConsoleContext = { connectionId: string; catalogName: string; schemaName: string }
 type DatabaseOperationConfirmAction = 'deleteGroup' | 'removeConnection'
-
-const DataGridToolbar = defineComponent({
-  props: {
-    page: { type: Number, required: true },
-    pageSize: { type: Number, required: true },
-    total: { type: Number as PropType<number | null>, default: null },
-    canEdit: { type: Boolean, default: false },
-    hasSelection: { type: Boolean, default: false },
-    canUndo: { type: Boolean, default: false },
-    isDirty: { type: Boolean, default: false },
-    editDisabledReason: { type: String, default: '' },
-    hideRefresh: { type: Boolean, default: false },
-    canExport: { type: Boolean, default: false },
-    exportTitle: { type: String, default: 'Export CSV' },
-    canChart: { type: Boolean, default: false },
-    chartTitle: { type: String, default: 'Chart' },
-    canComment: { type: Boolean, default: false },
-    commentTitle: { type: String, default: 'Comment' }
-  },
-  emits: ['gotoPage', 'gotoLastPage', 'changePageSize', 'refreshTotal', 'refresh', 'add-row', 'delete-row', 'undo', 'save', 'export', 'chart', 'comment'],
-  setup(props, { emit }) {
-    const pageSizes = [10, 50, 100, 500, 1000, 5000, 10000]
-    const pageCount = computed(() =>
-      props.total === null || props.total === undefined ? null : Math.max(1, Math.ceil(Math.max(0, props.total) / Math.max(1, props.pageSize)))
-    )
-    const atFirstPage = computed(() => props.page <= 1)
-    const atLastPage = computed(() => pageCount.value !== null && props.page >= pageCount.value)
-    const gotoPage = (page: number) => emit('gotoPage', Number.isFinite(page) && page > 0 ? Math.floor(page) : 1)
-    const changePageSize = (size: number) => emit('changePageSize', Number.isFinite(size) && size > 0 ? Math.floor(size) : 100)
-    const addRowTitle = computed(() => (props.canEdit ? 'Add row' : props.editDisabledReason || 'Editing is disabled for this result'))
-    const deleteRowTitle = computed(() => {
-      if (!props.canEdit) return props.editDisabledReason || 'Editing is disabled for this result'
-      if (!props.hasSelection) return 'Select a row before deleting'
-      return 'Delete row'
-    })
-    const undoTitle = computed(() => (props.canUndo ? 'Undo' : 'Nothing to undo'))
-    const saveTitle = computed(() => {
-      if (!props.canEdit) return props.editDisabledReason || 'Editing is disabled for this result'
-      if (!props.isDirty) return 'No changes to save'
-      return 'Save changes'
-    })
-    return () =>
-      h('div', { class: 'db-toolbar' }, [
-        h('div', { class: 'db-toolbar-group' }, [
-          h('button', { type: 'button', class: 'db-toolbar-btn db-toolbar-btn-first', disabled: atFirstPage.value, title: 'First page', onClick: () => gotoPage(1) }, '⏮'),
-          h('button', { type: 'button', class: 'db-toolbar-btn db-toolbar-btn-prev', disabled: atFirstPage.value, title: 'Previous page', onClick: () => gotoPage(props.page - 1) }, '⏴'),
-          h('input', {
-            value: props.page,
-            type: 'number',
-            min: '1',
-            onInput: (event: Event) => gotoPage(Number((event.target as HTMLInputElement).value) || 1)
-          }),
-          h('button', { type: 'button', class: 'db-toolbar-btn db-toolbar-btn-next', title: 'Next page', onClick: () => gotoPage(props.page + 1) }, '⏵'),
-          h(
-            'button',
-            { type: 'button', class: 'db-toolbar-btn db-toolbar-btn-last', disabled: pageCount.value === null || atLastPage.value, title: 'Last page', onClick: () => emit('gotoLastPage') },
-            '⏭'
-          ),
-          h(
-            'select',
-            {
-              value: props.pageSize,
-              onChange: (event: Event) => changePageSize(Number((event.target as HTMLSelectElement).value))
-            },
-            pageSizes.map((size) => h('option', { value: size }, String(size)))
-          ),
-          h(
-            'span',
-            {
-              class: 'db-toolbar-total',
-              title: 'Refresh total',
-              onClick: () => emit('refreshTotal')
-            },
-            ['Total: ', props.total === null || props.total === undefined ? h('span', { class: 'db-toolbar-total-unknown' }, '?') : String(props.total)]
-          )
-        ]),
-        h('div', { class: 'db-toolbar-group' }, [
-          !props.hideRefresh && h('button', { type: 'button', class: 'db-toolbar-btn db-toolbar-btn-refresh', title: 'Refresh', onClick: () => emit('refresh') }, '↻'),
-          h('button', { type: 'button', class: 'db-toolbar-btn db-toolbar-btn-add-row', disabled: !props.canEdit, title: addRowTitle.value, onClick: () => emit('add-row') }, '+'),
-          h('button', { type: 'button', class: 'db-toolbar-btn db-toolbar-btn-delete-row', disabled: !props.canEdit || !props.hasSelection, title: deleteRowTitle.value, onClick: () => emit('delete-row') }, '-'),
-          h('button', { type: 'button', class: 'db-toolbar-btn db-toolbar-btn-undo', disabled: !props.canUndo, title: undoTitle.value, onClick: () => emit('undo') }, '↶'),
-          h('button', { type: 'button', class: 'db-toolbar-btn db-toolbar-btn-save', disabled: !props.canEdit || !props.isDirty, title: saveTitle.value, onClick: () => emit('save') }, '💾'),
-          h('button', { type: 'button', class: 'db-toolbar-btn db-toolbar-btn-chart', disabled: !props.canChart, title: props.canChart ? props.chartTitle : 'No rows to chart', onClick: () => emit('chart') }, '📊'),
-          h('button', { type: 'button', class: 'db-toolbar-btn db-toolbar-btn-comment', disabled: !props.canComment, title: props.canComment ? props.commentTitle : 'No page context for comment', onClick: () => emit('comment') }, '💬')
-        ]),
-        h('span', { class: 'db-toolbar-spacer' }),
-        h(
-          'button',
-          {
-            type: 'button',
-            disabled: !props.canExport,
-            class: 'db-toolbar-btn db-toolbar-export',
-            title: props.canExport ? props.exportTitle : 'No rows to export',
-            onClick: () => emit('export')
-          },
-          'Export ▾'
-        )
-      ])
-  }
-})
-
-const DataStatusBar = defineComponent({
-  props: {
-    status: { type: String as PropType<ResultStatus>, default: 'ok' },
-    error: { type: String, default: '' },
-    message: { type: String, default: 'Execution OK' },
-    durationMs: { type: Number, default: 0 },
-    rowCount: { type: Number, default: 0 }
-  },
-  setup(props) {
-    const hasError = computed(() => props.status === 'error' || !!props.error)
-    return () =>
-      h('div', { class: ['db-status-bar', { error: hasError.value, running: props.status === 'running' }] }, [
-        hasError.value
-          ? h('span', [h('b', '【Result】'), props.error])
-          : props.status === 'running'
-            ? [
-                h('span', [h('b', '【Result】'), 'Running']),
-                h('span', [h('b', '【Time】'), `${props.durationMs}ms`]),
-                h('span', [h('b', '【Rows】'), `${props.rowCount} row`])
-              ]
-          : [
-              h('span', [h('b', '【Result】'), props.message]),
-              h('span', [h('b', '【Time】'), `${props.durationMs}ms`]),
-              h('span', [h('b', '【Rows】'), `${props.rowCount} row`])
-            ]
-      ])
-  }
-})
-
-const ResultGrid = defineComponent({
-  props: {
-    columns: { type: Array as PropType<string[]>, required: true },
-    rows: { type: Array as PropType<Array<Record<string, unknown>>>, required: true },
-    sourceRows: { type: Array as PropType<Array<Record<string, unknown>>>, default: () => [] },
-    filters: { type: Array as PropType<DbFilter[]>, default: () => [] },
-    sort: { type: Object as PropType<DbSort>, default: null },
-    startRowIndex: { type: Number, default: 1 },
-    selectedKey: { type: String, default: null },
-    primaryKey: { type: Array as PropType<string[]>, default: () => [] },
-    newRows: { type: Array as PropType<DirtyState['newRows']>, default: () => [] },
-    deletedRowKeys: { type: Object as PropType<Set<string>>, default: () => new Set<string>() },
-    updatedCells: { type: Object as PropType<Map<string, Record<string, unknown>>>, default: () => new Map<string, Record<string, unknown>>() },
-    editable: { type: Boolean, default: false }
-  },
-  emits: ['sort', 'filter', 'select-row', 'cell-edit', 'new-row-cell-edit'],
-  setup(props, { emit }) {
-    const rootRef = ref<HTMLElement | null>(null)
-    const editing = ref<{ origin: 'row' | 'new'; rowKey: string; column: string; value: string } | null>(null)
-    const openFilterColumn = ref<string | null>(null)
-    const filterPopoverRef = ref<HTMLElement | null>(null)
-    const filterInputRef = ref<HTMLInputElement | null>(null)
-    const filterAnchor = ref({ left: 8, top: 8 })
-    const filterSearch = ref('')
-    const filterSelection = ref<Set<string>>(new Set())
-    const filterLoading = ref(false)
-    const editInputRef = ref<HTMLInputElement | null>(null)
-    const rowKey = (row: Record<string, unknown>, index: number) => {
-      if (props.primaryKey.length) return JSON.stringify(props.primaryKey.map((key) => row[key]))
-      return `row-${Math.max(0, props.startRowIndex - 1) + index}`
-    }
-    const displayCellValue = (row: Record<string, unknown>, key: string, column: string) => {
-      const patch = props.updatedCells.get(key)
-      if (patch && Object.prototype.hasOwnProperty.call(patch, column)) return patch[column]
-      return row[column]
-    }
-    const formatCellValue = (value: unknown) => {
-      try {
-        if (value === null || value === undefined) return ''
-        if (typeof value === 'string') return value
-        if (typeof value === 'number' || typeof value === 'boolean') return String(value)
-        if (typeof value === 'bigint') return value.toString()
-        if (value instanceof Date) return Number.isFinite(value.getTime()) ? value.toISOString() : ''
-        if (value instanceof Uint8Array) return new TextDecoder().decode(value)
-        if (Array.isArray(value) || typeof value === 'object') return JSON.stringify(value)
-        return String(value)
-      } catch {
-        return '<unrenderable>'
-      }
-    }
-    const renderCellValue = (value: unknown) =>
-      value === null || value === undefined ? h('span', { class: 'db-null' }, '<null>') : formatCellValue(value)
-    const activeFilter = (column: string) => props.filters.find((filter) => filter.column === column) ?? null
-    const filterValues = computed(() => {
-      const column = openFilterColumn.value
-      if (!column) return []
-      return distinctFilterValues((props.sourceRows.length ? props.sourceRows : props.rows).map((row) => row[column]))
-    })
-    const visibleFilterValues = computed(() => {
-      const needle = filterSearch.value.trim().toLowerCase()
-      if (!needle) return filterValues.value
-      return filterValues.value.filter((entry) => entry.label.toLowerCase().includes(needle))
-    })
-    const allVisibleSelected = computed(
-      () => visibleFilterValues.value.length > 0 && visibleFilterValues.value.every((entry) => filterSelection.value.has(entry.value))
-    )
-    const someVisibleSelected = computed(() => visibleFilterValues.value.some((entry) => filterSelection.value.has(entry.value)))
-    const filterPopoverStyle = computed(() => {
-      const width = 260
-      const maxHeight = 360
-      const viewportWidth = window.innerWidth || 1024
-      const viewportHeight = window.innerHeight || 768
-      const left = Math.max(8, Math.min(filterAnchor.value.left, viewportWidth - width - 8))
-      const top = Math.max(8, Math.min(filterAnchor.value.top, viewportHeight - maxHeight - 8))
-      return {
-        left: `${left}px`,
-        top: `${top}px`,
-        width: `${width}px`
-      }
-    })
-    const seedFilterSelection = (column: string) => {
-      const filter = activeFilter(column)
-      const next = new Set<string>()
-      if (filter?.operator === 'in') filter.values.forEach((value) => next.add(value))
-      if (filter?.operator === 'eq' && filter.value !== undefined) next.add(filter.value)
-      if (filter?.operator === 'isnull') next.add(DB_FILTER_NULL)
-      filterSelection.value = next
-    }
-    const openFilter = (column: string, event: MouseEvent) => {
-      event.stopPropagation()
-      const trigger = event.currentTarget as HTMLElement | null
-      if (trigger) {
-        const rect = trigger.getBoundingClientRect()
-        filterAnchor.value = { left: rect.left, top: rect.bottom + 2 }
-      }
-      if (openFilterColumn.value === column) {
-        closeFilter()
-        return
-      }
-      openFilterColumn.value = column
-      filterLoading.value = true
-      filterSearch.value = ''
-      seedFilterSelection(column)
-      nextTick(() => {
-        if (openFilterColumn.value !== column) return
-        filterInputRef.value?.focus()
-        filterLoading.value = false
-      })
-    }
-    const closeFilter = () => {
-      openFilterColumn.value = null
-      filterSearch.value = ''
-      filterLoading.value = false
-    }
-    const onDocumentMouseDown = (event: MouseEvent) => {
-      if (!openFilterColumn.value) return
-      const target = event.target as Node | null
-      if (!target) return
-      if (filterPopoverRef.value?.contains(target)) return
-      if (rootRef.value?.contains(target)) return
-      closeFilter()
-    }
-    const toggleFilterValue = (value: string, checked: boolean) => {
-      const next = new Set(filterSelection.value)
-      if (checked) next.add(value)
-      else next.delete(value)
-      filterSelection.value = next
-    }
-    const toggleAllVisible = (checked: boolean) => {
-      const next = new Set(filterSelection.value)
-      visibleFilterValues.value.forEach((entry) => {
-        if (checked) next.add(entry.value)
-        else next.delete(entry.value)
-      })
-      filterSelection.value = next
-    }
-    const clearFilter = () => {
-      if (openFilterColumn.value) emit('filter', openFilterColumn.value, null)
-      closeFilter()
-    }
-    const applyFilter = () => {
-      const column = openFilterColumn.value
-      if (!column) return
-      const selected = Array.from(filterSelection.value)
-      if (selected.length === 0 || selected.length === filterValues.value.length) {
-        emit('filter', column, null)
-        closeFilter()
-        return
-      }
-      const hasNull = selected.includes(DB_FILTER_NULL)
-      const values = selected.filter((value) => value !== DB_FILTER_NULL)
-      const nextFilter: DbFilter =
-        hasNull && values.length === 0
-          ? { column, operator: 'isnull' }
-          : values.length === 1 && !hasNull
-            ? { column, operator: 'eq', value: values[0] }
-            : { column, operator: 'in', values }
-      emit('filter', column, nextFilter)
-      closeFilter()
-    }
-    const filterSummary = (column: string) => {
-      const filter = activeFilter(column)
-      if (!filter) return 'No filter'
-      if (filter.operator === 'in') return `IN (${filter.values.length})`
-      if (filter.operator === 'isnull') return 'IS NULL'
-      if (filter.operator === 'notnull') return 'IS NOT NULL'
-      if (filter.operator === 'eq' || filter.operator === 'neq' || filter.operator === 'like') return `${filter.operator.toUpperCase()} ${filter.value}`
-      return 'No filter'
-    }
-    const startEdit = (origin: 'row' | 'new', rowKey: string, column: string, value: unknown) => {
-      if (!props.editable) return
-      if (origin === 'row' && props.deletedRowKeys.has(rowKey)) return
-      editing.value = { origin, rowKey, column, value: formatCellValue(value) }
-      nextTick(() => {
-        editInputRef.value?.focus()
-        editInputRef.value?.select()
-      })
-    }
-    const commit = () => {
-      if (!editing.value) return
-      if (editing.value.origin === 'new') emit('new-row-cell-edit', editing.value.rowKey, editing.value.column, editing.value.value)
-      else emit('cell-edit', editing.value.rowKey, editing.value.column, editing.value.value)
-      editing.value = null
-    }
-    onMounted(() => {
-      document.addEventListener('mousedown', onDocumentMouseDown, true)
-    })
-    onBeforeUnmount(() => {
-      document.removeEventListener('mousedown', onDocumentMouseDown, true)
-    })
-    return () =>
-      h('div', { ref: rootRef, class: 'db-result', onClick: closeFilter }, [
-        props.columns.length === 0
-          ? h('div', { class: 'db-result-empty' }, 'No Results')
-          : h('div', { class: 'db-result-table-wrap' }, [
-              h('table', { class: 'db-result-table' }, [
-                h('thead', [
-                  h('tr', [
-                    h('th', { class: 'index' }, '#'),
-                    ...props.columns.map((column) =>
-                      h('th', [
-                        h('span', { class: 'db-th-label', onClick: () => emit('sort', column) }, column),
-	                        h('span', { class: 'db-th-controls' }, [
-                          activeFilter(column) &&
-                            h(
-                              'span',
-                              {
-                                class: 'db-filter-chip',
-                                title: filterSummary(column)
-                              },
-                              filterSummary(column)
-                            ),
-                          h(
-                            'button',
-                            {
-                              type: 'button',
-                              class: { active: props.sort?.column === column },
-                              title: 'Sort',
-                              onClick: () => emit('sort', column)
-                            },
-                            props.sort?.column === column ? (props.sort.direction === 'asc' ? '▲' : '▼') : '⇅'
-                          ),
-                          h(
-                            'button',
-                            {
-                              type: 'button',
-                              class: { active: props.filters.some((filter) => filter.column === column) },
-                              title: 'Filter',
-                              onClick: (event: MouseEvent) => openFilter(column, event)
-                            },
-                            '▾'
-                          )
-                        ])
-                      ])
-                    )
-                  ])
-                ]),
-                h(
-                  'tbody',
-                  [
-                    ...props.rows.map((row, index) => {
-                    const key = rowKey(row, index)
-                    const deleted = props.deletedRowKeys.has(key)
-                    const rowPatch = props.updatedCells.get(key)
-                    return h(
-                      'tr',
-                      {
-                        class: { selected: props.selectedKey === key, deleted, updated: !!rowPatch && Object.keys(rowPatch).length > 0 },
-                        onClick: () => emit('select-row', key)
-                      },
-                      [
-                        h('td', { class: 'index' }, String(props.startRowIndex + index)),
-                        ...props.columns.map((column) => {
-                          const active = editing.value?.rowKey === key && editing.value.column === column
-                          if (active) {
-                            return h('td', [
-                              h('input', {
-                                ref: editInputRef,
-                                value: editing.value?.value ?? '',
-                                autofocus: true,
-                                onInput: (event: Event) => {
-                                  if (editing.value) editing.value.value = (event.target as HTMLInputElement).value
-                                },
-                                onBlur: commit,
-                                onKeydown: (event: KeyboardEvent) => {
-                                  if (event.key === 'Enter') commit()
-                                  if (event.key === 'Escape') editing.value = null
-                                }
-                              })
-                            ])
-                          }
-                          const value = displayCellValue(row, key, column)
-                          return h(
-                            'td',
-                            {
-                              class: { updated: !!rowPatch && Object.prototype.hasOwnProperty.call(rowPatch, column) },
-                              onDblclick: () => startEdit('row', key, column, value)
-                            },
-                            renderCellValue(value)
-                          )
-                        })
-                      ]
-                    )
-                  }),
-                    ...props.newRows.map((newRow) =>
-                      h(
-                        'tr',
-                        {
-                          class: { new: true, selected: props.selectedKey === newRow.tmpId },
-                          onClick: () => emit('select-row', newRow.tmpId)
-                        },
-                        [
-                          h('td', { class: 'index' }, '*'),
-                          ...props.columns.map((column) => {
-                            const active = editing.value?.rowKey === newRow.tmpId && editing.value.column === column
-                            if (active) {
-                              return h('td', [
-                                h('input', {
-                                  ref: editInputRef,
-                                  value: editing.value?.value ?? '',
-                                  autofocus: true,
-                                  onInput: (event: Event) => {
-                                    if (editing.value) editing.value.value = (event.target as HTMLInputElement).value
-                                  },
-                                  onBlur: commit,
-                                  onKeydown: (event: KeyboardEvent) => {
-                                    if (event.key === 'Enter') commit()
-                                    if (event.key === 'Escape') editing.value = null
-                                  }
-                                })
-                              ])
-                            }
-                            const value = newRow.values[column]
-                            return h(
-                              'td',
-                              {
-                                onDblclick: () => startEdit('new', newRow.tmpId, column, value)
-                              },
-                              renderCellValue(value)
-                            )
-                          })
-                        ]
-                      )
-                    )
-                  ]
-                )
-              ])
-            ]),
-        openFilterColumn.value &&
-          h('div', { ref: filterPopoverRef, class: 'db-filter-popover', style: filterPopoverStyle.value, onClick: (event: MouseEvent) => event.stopPropagation() }, [
-            h('div', { class: 'db-filter-search' }, [
-              h('span', '⌕'),
-              h('input', {
-                ref: filterInputRef,
-                value: filterSearch.value,
-                placeholder: `Search ${openFilterColumn.value}`,
-                onInput: (event: Event) => {
-                  filterSearch.value = (event.target as HTMLInputElement).value
-                },
-                onKeydown: (event: KeyboardEvent) => {
-                  if (event.key === 'Enter') applyFilter()
-                  if (event.key === 'Escape') closeFilter()
-                }
-	              })
-            ]),
-            h('label', { class: 'db-filter-row all' }, [
-              h('input', {
-                type: 'checkbox',
-                checked: allVisibleSelected.value,
-                indeterminate: someVisibleSelected.value && !allVisibleSelected.value,
-                onChange: (event: Event) => toggleAllVisible((event.target as HTMLInputElement).checked)
-              }),
-              h('span', 'All'),
-              h('button', { type: 'button', onClick: clearFilter }, 'Clear')
-            ]),
-            h(
-              'div',
-              { class: ['db-filter-list', { loading: filterLoading.value }] },
-              filterLoading.value
-                ? h('div', { class: 'db-filter-empty loading' }, 'Loading...')
-                : visibleFilterValues.value.length
-                ? visibleFilterValues.value.map((entry) =>
-                    h('label', { key: entry.value, class: 'db-filter-row' }, [
-                      h('input', {
-                        type: 'checkbox',
-                        checked: filterSelection.value.has(entry.value),
-                        onChange: (event: Event) => toggleFilterValue(entry.value, (event.target as HTMLInputElement).checked)
-                      }),
-                      h('span', { title: entry.label }, entry.label),
-                      h('small', `(${entry.count})`)
-                    ])
-                  )
-                : h('div', { class: 'db-filter-empty' }, 'No Results')
-            ),
-            h('footer', { class: 'db-filter-footer' }, [
-              h('button', { type: 'button', onClick: closeFilter }, 'Cancel'),
-              h('button', { type: 'button', class: 'primary', onClick: applyFilter }, 'Apply')
-            ])
-          ])
-      ])
-  }
-})
 
 const databaseEngines = ref<DatabaseEngineInfo[]>([])
 const groups = ref<DatabaseGroupInfo[]>([])
@@ -5499,24 +4991,9 @@ async function saveActiveSql(forceSaveAs: boolean) {
   }
 }
 
-function firstStatement(sql: string) {
-  return sql
-    .split(';')
-    .map((item) => item.trim())
-    .find(Boolean) || ''
-}
-
 function getSelectedSqlText() {
   const editor = sqlEditorRef.value
   return editor?.getSelectedText() ?? ''
-}
-
-function sqlCursorPosition(text: string, offset: number) {
-  const clamped = Math.max(0, Math.min(offset, text.length))
-  const before = text.slice(0, clamped)
-  const line = before ? before.split('\n').length : 1
-  const lastBreak = before.lastIndexOf('\n')
-  return { line, column: clamped - lastBreak }
 }
 
 function syncSqlEditorState(metrics?: DatabaseSqlEditorMetrics) {
@@ -5577,21 +5054,6 @@ function handleSqlFindKeydown(event: KeyboardEvent, field: 'query' | 'replace') 
   goToSqlFindMatch(event.shiftKey ? -1 : 1)
 }
 
-function findSqlTextMatches(text: string, query: string, caseSensitive: boolean): TextRange[] {
-  if (!query) return []
-  const haystack = caseSensitive ? text : text.toLowerCase()
-  const needle = caseSensitive ? query : query.toLowerCase()
-  const matches: TextRange[] = []
-  let cursor = 0
-  while (cursor <= haystack.length) {
-    const index = haystack.indexOf(needle, cursor)
-    if (index === -1) break
-    matches.push({ start: index, end: index + query.length })
-    cursor = index + Math.max(1, query.length)
-  }
-  return matches
-}
-
 function alignSqlFindIndexToSelection() {
   const editor = sqlEditorRef.value
   const matches = sqlFindMatches.value
@@ -5602,11 +5064,6 @@ function alignSqlFindIndexToSelection() {
   const start = editor.getSelectionRange().start
   const exact = matches.findIndex((match) => match.start === start)
   sqlFindActiveIndex.value = exact
-}
-
-function firstSqlFindMatchAtOrAfter(offset: number, matches = sqlFindMatches.value) {
-  const index = matches.findIndex((match) => match.start >= offset)
-  return index >= 0 ? index : 0
 }
 
 function selectSqlFindMatch(index: number) {
@@ -5742,28 +5199,6 @@ function getSqlSelectionRange(): TextRange {
   const length = activeSqlTab.value?.sql.length ?? 0
   if (!editor) return { start: length, end: length }
   return editor.getSelectionRange()
-}
-
-function currentSqlStatement(sql: string, cursorOffset: number) {
-  const range = currentSqlStatementRange(sql, cursorOffset)
-  return sql.slice(range.start, range.end).trim()
-}
-
-function currentSqlStatementRange(sql: string, cursorOffset: number): TextRange {
-  const offset = Math.max(0, Math.min(cursorOffset, sql.length))
-  let start = 0
-  let end = sql.length
-  for (let index = 0; index < sql.length; index += 1) {
-    if (sql[index] !== ';') continue
-    if (index < offset) start = index + 1
-    else {
-      end = index
-      break
-    }
-  }
-  while (start < end && /\s/.test(sql[start])) start += 1
-  while (end > start && /\s/.test(sql[end - 1])) end -= 1
-  return { start, end }
 }
 
 function stripExplainPrefix(sql: string) {
@@ -5902,41 +5337,8 @@ function dataEditDisabledReason(tab: Extract<WorkspaceTab, { kind: 'data' }>) {
   return ''
 }
 
-function makeDataMutationPlanState(overrides: Partial<DataMutationPlanState> = {}): DataMutationPlanState {
-  return {
-    key: '',
-    loading: false,
-    statementCount: 0,
-    preview: '',
-    warning: '',
-    error: '',
-    ...overrides
-  }
-}
-
-function buildDataMutationPayload(tab: Extract<WorkspaceTab, { kind: 'data' }>): DatabaseTableMutation[] {
-  return [
-    ...Array.from(tab.dirtyState.deletedRowKeys).map((rowKey) => {
-      const snapshot = tab.dirtyState.originalRows.get(rowKey)
-      return {
-        kind: 'delete' as const,
-        rowKey,
-        primaryKey: tab.primaryKey.slice(),
-        ...(snapshot ? { originalRow: { ...snapshot } } : {})
-      }
-    }),
-    ...Array.from(tab.dirtyState.updatedCells.entries()).map(([rowKey, patch]) => {
-      const snapshot = tab.dirtyState.originalRows.get(rowKey)
-      return {
-        kind: 'update' as const,
-        rowKey,
-        primaryKey: tab.primaryKey.slice(),
-        patch: { ...patch },
-        ...(snapshot ? { originalRow: { ...snapshot } } : {})
-      }
-    }),
-    ...tab.dirtyState.newRows.map((row) => ({ kind: 'insert' as const, values: { ...row.values } }))
-  ]
+function isDataTabDirty(tab: Extract<WorkspaceTab, { kind: 'data' }>) {
+  return isDirtyStateDirty(tab.dirtyState)
 }
 
 function buildDataMutationPlanInput(tab: Extract<WorkspaceTab, { kind: 'data' }>) {
@@ -6011,31 +5413,15 @@ async function refreshDataMutationPlan(tab: Extract<WorkspaceTab, { kind: 'data'
 function updateDataCell(rowKey: string, column: string, value: string) {
   const tab = activeDataTab.value
   if (!tab || !canEditDataTab(tab) || tab.saving) return
-  tab.saveError = null
-  const dirtyState = cloneDirtyState(tab.dirtyState)
-  const snapshot = dirtyState.originalRows.get(rowKey)
-  if (!snapshot) return
-  const currentPatch = dirtyState.updatedCells.get(rowKey) ?? {}
-  const oldValue = Object.prototype.hasOwnProperty.call(currentPatch, column) ? currentPatch[column] : snapshot[column]
-  if (oldValue === value) return
-  const nextPatch = { ...currentPatch, [column]: value }
-  if (value === snapshot[column]) delete nextPatch[column]
-  if (Object.keys(nextPatch).length) dirtyState.updatedCells.set(rowKey, nextPatch)
-  else dirtyState.updatedCells.delete(rowKey)
-  tab.dirtyState = dirtyState
-  tab.undoStack = [...tab.undoStack, { kind: 'update', rowKey, column, oldValue, newValue: value }]
-  void refreshDataMutationPlan(tab)
+  const result = updateDataCellState(tab, rowKey, column, value)
+  if (result.changed) void refreshDataMutationPlan(tab)
 }
 
 function updateNewDataRowCell(tmpId: string, column: string, value: string) {
   const tab = activeDataTab.value
   if (!tab || !canEditDataTab(tab) || tab.saving) return
-  tab.saveError = null
-  const dirtyState = cloneDirtyState(tab.dirtyState)
-  const newRows = dirtyState.newRows.map((row) => (row.tmpId === tmpId ? { ...row, values: { ...row.values, [column]: value } } : row))
-  if (!newRows.some((row) => row.tmpId === tmpId)) return
-  tab.dirtyState = { ...dirtyState, newRows }
-  void refreshDataMutationPlan(tab)
+  const result = updateNewDataRowCellState(tab, tmpId, column, value)
+  if (result.changed) void refreshDataMutationPlan(tab)
 }
 
 function setActiveDataSelectedRow(key: string) {
@@ -6052,18 +5438,10 @@ function addDataRow() {
     showNotice(reason)
     return
   }
-  tab.saveError = null
-  const dirtyState = cloneDirtyState(tab.dirtyState)
-  const values: Record<string, unknown> = {}
-  tab.columns.forEach((column) => {
-    values[column] = null
-  })
   const tmpId = `tmp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
-  tab.dirtyState = { ...dirtyState, newRows: [...dirtyState.newRows, { tmpId, values }] }
-  tab.undoStack = [...tab.undoStack, { kind: 'add', tmpId }]
-  tab.selectedRowKey = tmpId
-  void refreshDataMutationPlan(tab)
-  showNotice('New row added locally')
+  const result = addDataRowState(tab, tmpId)
+  if (result.changed) void refreshDataMutationPlan(tab)
+  if (result.notice) showNotice(result.notice)
 }
 
 function deleteSelectedDataRow() {
@@ -6074,58 +5452,17 @@ function deleteSelectedDataRow() {
     showNotice(reason)
     return
   }
-  tab.saveError = null
-  const key = tab.selectedRowKey
-  const dirtyState = cloneDirtyState(tab.dirtyState)
-  const newRowIndex = dirtyState.newRows.findIndex((row) => row.tmpId === key)
-  if (newRowIndex >= 0) {
-    dirtyState.newRows.splice(newRowIndex, 1)
-    const addOpIndex = tab.undoStack.findIndex((op) => op.kind === 'add' && op.tmpId === key)
-    const undoStack = tab.undoStack.filter((_, index) => index !== addOpIndex)
-    tab.dirtyState = dirtyState
-    tab.undoStack = addOpIndex >= 0 ? undoStack : [...tab.undoStack]
-    tab.selectedRowKey = null
-    void refreshDataMutationPlan(tab)
-    showNotice('New row removed')
-    return
-  }
-  if (dirtyState.deletedRowKeys.has(key)) return
-  const snapshot = dirtyState.originalRows.get(key)
-  if (!snapshot) return
-  dirtyState.deletedRowKeys.add(key)
-  dirtyState.updatedCells.delete(key)
-  tab.dirtyState = dirtyState
-  tab.undoStack = [...tab.undoStack, { kind: 'delete', rowKey: key, snapshot: { ...snapshot } }]
-  tab.selectedRowKey = null
-  void refreshDataMutationPlan(tab)
-  showNotice('Row marked for deletion')
+  const result = deleteSelectedDataRowState(tab)
+  if (result.changed) void refreshDataMutationPlan(tab)
+  if (result.notice) showNotice(result.notice)
 }
 
 function undoDataChanges() {
   const tab = activeDataTab.value
   if (!tab || tab.saving) return
-  tab.saveError = null
-  const undoStack = [...tab.undoStack]
-  const op = undoStack.pop()
-  if (!op) return
-  const dirtyState = cloneDirtyState(tab.dirtyState)
-  if (op.kind === 'add') {
-    dirtyState.newRows = dirtyState.newRows.filter((row) => row.tmpId !== op.tmpId)
-  } else if (op.kind === 'delete') {
-    dirtyState.deletedRowKeys.delete(op.rowKey)
-  } else {
-    const snapshot = dirtyState.originalRows.get(op.rowKey)
-    if (!snapshot) return
-    const patch = { ...(dirtyState.updatedCells.get(op.rowKey) ?? {}) }
-    if (op.oldValue === snapshot[op.column]) delete patch[op.column]
-    else patch[op.column] = op.oldValue
-    if (Object.keys(patch).length) dirtyState.updatedCells.set(op.rowKey, patch)
-    else dirtyState.updatedCells.delete(op.rowKey)
-  }
-  tab.dirtyState = dirtyState
-  tab.undoStack = undoStack
-  void refreshDataMutationPlan(tab)
-  showNotice('Last data edit reverted')
+  const result = undoDataChangesState(tab)
+  if (result.changed) void refreshDataMutationPlan(tab)
+  if (result.notice) showNotice(result.notice)
 }
 
 async function saveDataChanges() {
@@ -6603,101 +5940,6 @@ async function queryDataTabThroughBackend(tab: Extract<WorkspaceTab, { kind: 'da
   }
 }
 
-function parseWhereRaw(whereRaw: string): DbFilter[] {
-  const raw = whereRaw.trim()
-  if (!raw) return []
-  const match = raw.match(/(\w+)\s*(=|<>|!=|like)\s*['"]?([^'"]+)['"]?/i)
-  if (!match) return []
-  return [
-    {
-      column: match[1],
-      operator: match[2].toLowerCase() === 'like' ? 'like' : match[2] === '=' ? 'eq' : 'neq',
-      value: match[3]
-    }
-  ]
-}
-
-function parseOrderByRaw(orderByRaw: string, knownColumns: string[]): DbOrderBy {
-  const raw = orderByRaw.trim().replace(/^order\s+by\s+/i, '')
-  if (!raw) return []
-  const knownColumnMap = new Map(knownColumns.map((column) => [column.toLowerCase(), column]))
-  return raw
-    .split(',')
-    .map((item) => item.trim())
-    .map((item) => {
-      const match = item.match(
-        /^((?:`[^`]+`|"(?:""|[^"])+"|\[[^\]]+\]|[A-Za-z_][\w$]*)(?:\.(?:`[^`]+`|"(?:""|[^"])+"|\[[^\]]+\]|[A-Za-z_][\w$]*))*)(?:\s+(asc|desc))?(?:\s+nulls\s+(?:first|last))?$/i
-      )
-      if (!match) return null
-      const column = normalizeOrderByIdentifier(match[1])
-      const knownColumn = knownColumnMap.get(column.toLowerCase())
-      if (!knownColumn) return null
-      return {
-        column: knownColumn,
-        direction: (match[2]?.toLowerCase() === 'desc' ? 'desc' : 'asc') as 'asc' | 'desc'
-      }
-    })
-    .filter((item): item is DbOrderBy[number] => item !== null)
-}
-
-function normalizeOrderByIdentifier(value: string) {
-  const segments = value.match(/`[^`]+`|"(?:""|[^"])+"|\[[^\]]+\]|[A-Za-z_][\w$]*/g)
-  const segment = segments?.length ? segments[segments.length - 1] : value
-  if (segment.startsWith('`') && segment.endsWith('`')) return segment.slice(1, -1).replace(/``/g, '`')
-  if (segment.startsWith('"') && segment.endsWith('"')) return segment.slice(1, -1).replace(/""/g, '"')
-  if (segment.startsWith('[') && segment.endsWith(']')) return segment.slice(1, -1).replace(/]]/g, ']')
-  return segment
-}
-
-function makeDirtyState(rows: Array<Record<string, unknown>>, primaryKey: string[]): DirtyState {
-  return {
-    newRows: [],
-    deletedRowKeys: new Set<string>(),
-    updatedCells: new Map<string, Record<string, unknown>>(),
-    originalRows: makeOriginalRows(rows, primaryKey)
-  }
-}
-
-function makeOriginalRows(rows: Array<Record<string, unknown>>, primaryKey: string[]) {
-  const originalRows = new Map<string, Record<string, unknown>>()
-  rows.forEach((row, index) => {
-    originalRows.set(buildRowKey(row, primaryKey, index), { ...row })
-  })
-  return originalRows
-}
-
-function isDataTabDirty(tab: Extract<WorkspaceTab, { kind: 'data' }>) {
-  return tab.dirtyState.newRows.length > 0 || tab.dirtyState.deletedRowKeys.size > 0 || tab.dirtyState.updatedCells.size > 0
-}
-
-function cloneDirtyState(dirtyState: DirtyState): DirtyState {
-  return {
-    newRows: dirtyState.newRows.map((row) => ({ tmpId: row.tmpId, values: { ...row.values } })),
-    deletedRowKeys: new Set(dirtyState.deletedRowKeys),
-    updatedCells: new Map(Array.from(dirtyState.updatedCells.entries()).map(([key, patch]) => [key, { ...patch }])),
-    originalRows: new Map(Array.from(dirtyState.originalRows.entries()).map(([key, row]) => [key, { ...row }]))
-  }
-}
-
-function buildDataEditSummary(tab: Extract<WorkspaceTab, { kind: 'data' }>): DataEditSummary {
-  const newRows = tab.dirtyState.newRows.length
-  const updatedRows = tab.dirtyState.updatedCells.size
-  const deletedRows = tab.dirtyState.deletedRowKeys.size
-  const isDirty = newRows > 0 || updatedRows > 0 || deletedRows > 0
-  const plan = isDirty ? tab.mutationPlan : makeDataMutationPlanState()
-  return {
-    isDirty,
-    newRows,
-    updatedRows,
-    deletedRows,
-    undoDepth: tab.undoStack.length,
-    statementCount: plan.statementCount,
-    preview: plan.preview,
-    warning: plan.warning,
-    error: plan.error
-  }
-}
-
 function isViewTable(tab: Extract<WorkspaceTab, { kind: 'data' }>) {
   const catalog = findConnection(tab.connectionId)?.catalogs.find((item) => item.name === tab.catalogName)
   if (!catalog) return false
@@ -6706,106 +5948,6 @@ function isViewTable(tab: Extract<WorkspaceTab, { kind: 'data' }>) {
     return !!schema?.views?.some((table) => table.id === tab.tableId)
   }
   return false
-}
-
-function applyFilters(rows: Array<Record<string, unknown>>, filters: DbFilter[]) {
-  if (!filters.length) return rows
-  return rows.filter((row) => filters.every((filter) => matchesFilter(row[filter.column], filter)))
-}
-
-function matchesFilter(value: unknown, filter: DbFilter) {
-  const normalized = normalizeFilterValue(value)
-  if (filter.operator === 'isnull') return normalized === null
-  if (filter.operator === 'notnull') return normalized !== null
-  if (normalized === null) return false
-  if (filter.operator === 'like') return normalized.toLowerCase().includes(filter.value.toLowerCase())
-  if (filter.operator === 'eq') return normalized === filter.value
-  if (filter.operator === 'neq') return normalized !== filter.value
-  if (filter.operator === 'in') return filter.values.includes(normalized)
-  return true
-}
-
-function applySort(rows: Array<Record<string, unknown>>, sort: DbSort) {
-  if (!sort) return rows
-  return [...rows].sort((a, b) => {
-    const av = a[sort.column]
-    const bv = b[sort.column]
-    const factor = sort.direction === 'asc' ? 1 : -1
-    if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * factor
-    return String(av ?? '').localeCompare(String(bv ?? '')) * factor
-  })
-}
-
-function applyOrderBySort(rows: Array<Record<string, unknown>>, orderBy: DbOrderBy) {
-  if (!orderBy.length) return rows
-  return rows
-    .map((row, index) => ({ row, index }))
-    .sort((a, b) => {
-      for (const item of orderBy) {
-        const result = compareDataValue(a.row[item.column], b.row[item.column])
-        if (result !== 0) return item.direction === 'asc' ? result : -result
-      }
-      return a.index - b.index
-    })
-    .map((item) => item.row)
-}
-
-function compareDataValue(a: unknown, b: unknown) {
-  if (a === null || a === undefined) return b === null || b === undefined ? 0 : -1
-  if (b === null || b === undefined) return 1
-  if (typeof a === 'number' && typeof b === 'number') return a - b
-  if (typeof a === 'bigint' && typeof b === 'bigint') return a < b ? -1 : a > b ? 1 : 0
-  if (typeof a === 'boolean' && typeof b === 'boolean') return Number(a) - Number(b)
-  const aTime = typeof a === 'string' ? Date.parse(a) : Number.NaN
-  const bTime = typeof b === 'string' ? Date.parse(b) : Number.NaN
-  if (Number.isFinite(aTime) && Number.isFinite(bTime)) return aTime - bTime
-  return String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: 'base' })
-}
-
-function nextSort(current: DbSort, column: string): DbSort {
-  if (!current || current.column !== column) return { column, direction: 'asc' }
-  if (current.direction === 'asc') return { column, direction: 'desc' }
-  return null
-}
-
-function replaceFilter(filters: DbFilter[], column: string, filter: DbFilter | null) {
-  const next = filters.filter((item) => item.column !== column)
-  return filter ? [...next, filter] : next
-}
-
-function distinctFilterValues(values: unknown[]): DbFilterValueEntry[] {
-  const map = new Map<string, DbFilterValueEntry>()
-  values.forEach((value) => {
-    const normalized = normalizeFilterValue(value)
-    const key = normalized ?? DB_FILTER_NULL
-    const label = normalized === null ? '<null>' : normalized === '' ? '<empty>' : normalized
-    const existing = map.get(key)
-    if (existing) existing.count += 1
-    else map.set(key, { value: key, label, count: 1 })
-  })
-  return Array.from(map.values()).sort((a, b) => {
-    if (a.value === DB_FILTER_NULL) return -1
-    if (b.value === DB_FILTER_NULL) return 1
-    return a.label.localeCompare(b.label)
-  })
-}
-
-function normalizeFilterValue(value: unknown) {
-  if (value === null || value === undefined) return null
-  if (value instanceof Date) return Number.isFinite(value.getTime()) ? value.toISOString() : ''
-  if (typeof value === 'bigint') return value.toString()
-  if (typeof value === 'object') return JSON.stringify(value)
-  return String(value)
-}
-
-function clampPage(page: number, total: number, pageSize: number) {
-  const max = Math.max(1, Math.ceil(total / pageSize))
-  return Math.min(Math.max(1, Math.floor(page)), max)
-}
-
-function buildRowKey(row: Record<string, unknown>, primaryKey: string[], index: number) {
-  if (!primaryKey.length) return `row-${index}`
-  return JSON.stringify(primaryKey.map((key) => row[key]))
 }
 
 function formatSql() {
@@ -6826,48 +5968,6 @@ function formatSql() {
     setEditorSql(formatted, formatted.length)
   }
   showNotice('SQL formatted')
-}
-
-function formatSqlText(sql: string) {
-  const normalized = sql
-    .replace(/\s+/g, ' ')
-    .replace(/\s*;\s*/g, ';\n\n')
-    .trim()
-  const clauses = [
-    'select',
-    'from',
-    'where',
-    'group by',
-    'having',
-    'order by',
-    'limit',
-    'offset',
-    'values',
-    'set',
-    'returning'
-  ]
-  let formatted = normalized
-  clauses.forEach((clause) => {
-    const keyword = clause.toUpperCase()
-    const pattern = new RegExp(`\\b${clause.replace(' ', '\\s+')}\\b`, 'gi')
-    formatted = formatted.replace(pattern, `\n${keyword}`)
-  })
-  formatted = formatted
-    .replace(/^\n/, '')
-    .replace(/\s*,\s*/g, ',\n  ')
-    .replace(/\(\s*/g, '(')
-    .replace(/\s*\)/g, ')')
-    .replace(/\nSELECT\s+/g, '\nSELECT\n  ')
-    .replace(/^SELECT\s+/, 'SELECT\n  ')
-    .replace(/\nFROM\s+/g, '\nFROM\n  ')
-    .replace(/\nWHERE\s+/g, '\nWHERE\n  ')
-    .replace(/\nGROUP BY\s+/g, '\nGROUP BY\n  ')
-    .replace(/\nORDER BY\s+/g, '\nORDER BY\n  ')
-    .replace(/\nLIMIT\s+/g, '\nLIMIT ')
-    .replace(/\nOFFSET\s+/g, '\nOFFSET ')
-    .replace(/\n\n+/g, '\n\n')
-    .trim()
-  return formatted.endsWith(';') ? formatted : `${formatted};`
 }
 
 async function toggleConnectionStatus(id: string) {
@@ -8305,24 +7405,6 @@ function dbAiDialectLabel(dialect: DbAiTargetDialect) {
   return dbAiDialectOptions.find((option) => option.value === dialect)?.label ?? dialect
 }
 
-function isReadOnlySql(sql: string) {
-  const cleaned = stripLeadingSqlComments(sql).trim()
-  if (!/^(select|with|explain)\b/i.test(cleaned)) return false
-  return !/\b(insert|update|delete|drop|truncate|alter|create|grant|revoke|merge|call|execute)\b/i.test(cleaned)
-}
-
-function stripLeadingSqlComments(sql: string) {
-  let next = sql.trim()
-  let changed = true
-  while (changed) {
-    changed = false
-    const before = next
-    next = next.replace(/^--[^\n]*(?:\n|$)/, '').replace(/^\/\*[\s\S]*?\*\//, '').trimStart()
-    changed = next !== before
-  }
-  return next
-}
-
 function getSqlTextUntilCursor() {
   const tab = activeSqlTab.value
   if (!tab) return ''
@@ -8342,11 +7424,6 @@ function setEditorSql(nextSql: string, selectionStart: number, selectionEnd = se
     editor.setSelectionRange(start, end)
     syncSqlEditorState()
   })
-}
-
-function extractSql(text: string) {
-  const match = text.match(/```(?:sql|mysql|postgresql|pgsql|sqlite|oracle|tsql|clickhouse|presto)?\s*\n([\s\S]*?)```/i)
-  return match?.[1].trim() ?? text
 }
 
 function engineAccent(code: DatabaseEngineCode) {
