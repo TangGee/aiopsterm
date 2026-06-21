@@ -7,362 +7,42 @@
     }"
     :style="databaseWorkspaceStyle"
   >
-    <aside
-      class="db-sidebar"
-      :class="{ collapsed: sidebarCollapsed }"
-    >
-      <template v-if="!sidebarCollapsed">
-        <header class="db-sidebar-header">
-          <strong>Database</strong>
-          <div class="db-sidebar-actions">
-            <button
-              type="button"
-              title="Refresh connected"
-              @click="refreshConnected"
-            >
-              <RefreshCw />
-            </button>
-            <button
-              ref="addButtonRef"
-              type="button"
-              title="Add"
-              @click.stop="toggleAddMenu"
-            >
-              <Plus />
-            </button>
-            <button
-              type="button"
-              title="Collapse"
-              @click="sidebarCollapsed = true"
-            >
-              <PanelLeftClose />
-            </button>
-          </div>
-        </header>
-
-        <div class="db-search">
-          <Search />
-          <input
-            ref="searchInputRef"
-            v-model="keyword"
-            placeholder="Search"
-            @keydown.esc.prevent="clearDatabaseSearch"
-          />
-          <button
-            v-if="keyword"
-            class="db-search-clear"
-            type="button"
-            title="Clear search"
-            @click="clearDatabaseSearch"
-          >
-            <X />
-          </button>
-        </div>
-
-        <nav class="db-tree">
-          <ul>
-            <li
-              v-for="group in visibleGroupNodes"
-              :key="group.id"
-            >
-              <div
-                class="db-tree-row group"
-                :class="{ selected: selectedNodeId === group.id }"
-                :style="{ paddingLeft: `${6 + group.depth * 14}px` }"
-                @click="selectNode(group.id)"
-                @contextmenu.prevent="openContextMenu($event, { type: 'group', groupId: group.id, label: group.name })"
-              >
-                <button
-                  type="button"
-                  @click.stop="toggleGroup(group.id)"
-                >
-                  <ChevronDown v-if="expandedGroups.includes(group.id)" />
-                  <ChevronRight v-else />
-                </button>
-                <FolderOpen v-if="expandedGroups.includes(group.id)" />
-                <Folder v-else />
-                <input
-                  v-if="editingGroupId === group.id"
-                  v-model="editingGroupName"
-                  class="db-tree-edit"
-                  @click.stop
-                  @keydown.enter.prevent="commitGroupRename"
-                  @keydown.esc.prevent="cancelGroupRename"
-                  @blur="commitGroupRename"
-                />
-                <span v-else>{{ group.name }}</span>
-              </div>
-
-              <ul
-                v-if="expandedGroups.includes(group.id)"
-                class="db-tree-children"
-                :style="{ paddingLeft: `${12 + group.depth * 14}px` }"
-              >
-                <li
-                  v-for="connection in connectionsByGroup(group.id)"
-                  :key="connection.id"
-                >
-                  <div
-                    class="db-tree-row connection"
-                    :class="{ selected: selectedNodeId === connection.id }"
-                    @click="selectNode(connection.id)"
-                    @contextmenu.prevent="openContextMenu($event, { type: 'connection', connectionId: connection.id, label: connection.name })"
-                  >
-                    <button
-                      type="button"
-                      @click.stop="toggleConnection(connection.id)"
-                    >
-                      <ChevronDown v-if="expandedConnections.includes(connection.id)" />
-                      <ChevronRight v-else />
-                    </button>
-                    <span
-                      class="db-engine-dot"
-                      :style="{ background: engineAccent(connection.dbType) }"
-                    />
-                    <span>{{ connection.name }}</span>
-                    <span
-                      class="db-status-dot"
-                      :class="connection.status"
-                    />
-                    <button
-                      class="db-tree-connect"
-                      type="button"
-                      :title="connection.status === 'connected' ? 'Disconnect' : 'Connect'"
-                      @click.stop="toggleConnectionStatus(connection.id)"
-                    >
-                      <Unplug v-if="connection.status === 'connected'" />
-                      <Zap v-else />
-                    </button>
-                  </div>
-
-                  <ul
-                    v-if="expandedConnections.includes(connection.id)"
-                    class="db-tree-children deep"
-                  >
-                    <li
-                      v-for="catalog in connection.catalogs"
-                      :key="`${connection.id}:${catalog.name}`"
-                    >
-                      <div
-                        class="db-tree-row database"
-                        :class="{ selected: selectedNodeId === `${connection.id}:${catalog.name}` }"
-                        @click="selectNode(`${connection.id}:${catalog.name}`)"
-                      >
-                        <button
-                          type="button"
-                          @click.stop="toggleCatalog(connection.id, catalog.name)"
-                        >
-                          <ChevronDown v-if="isCatalogExpanded(connection.id, catalog.name)" />
-                          <ChevronRight v-else />
-                        </button>
-                        <Database />
-                        <span>{{ catalog.name }}</span>
-                      </div>
-
-                      <ul
-                        v-if="isCatalogExpanded(connection.id, catalog.name)"
-                        class="db-tree-children deep"
-                      >
-                        <template v-if="catalog.schemas">
-                          <li
-                            v-for="schema in catalog.schemas"
-                            :key="`${connection.id}:${catalog.name}:${schema.name}`"
-                          >
-                            <div
-                              class="db-tree-row schema"
-                              :class="{ selected: selectedNodeId === `${connection.id}:${catalog.name}:${schema.name}` }"
-                              @click="selectNode(`${connection.id}:${catalog.name}:${schema.name}`)"
-                            >
-                              <button
-                                type="button"
-                                @click.stop="toggleSchema(connection.id, catalog.name, schema.name)"
-                              >
-                                <ChevronDown v-if="isSchemaExpanded(connection.id, catalog.name, schema.name)" />
-                                <ChevronRight v-else />
-                              </button>
-                              <Network />
-                              <span>{{ schema.name }}</span>
-                            </div>
-
-                            <ul
-                              v-if="isSchemaExpanded(connection.id, catalog.name, schema.name)"
-                              class="db-tree-children deep"
-                            >
-                              <li
-                                v-for="folder in schemaObjectFolders(schema)"
-                                :key="schemaObjectFolderKey(connection.id, catalog.name, schema.name, folder.kind)"
-                              >
-                                <div
-                                  class="db-tree-row folder"
-                                  :class="{ selected: selectedNodeId === schemaObjectFolderKey(connection.id, catalog.name, schema.name, folder.kind) }"
-                                  @click="selectNode(schemaObjectFolderKey(connection.id, catalog.name, schema.name, folder.kind))"
-                                >
-                                  <button
-                                    type="button"
-                                    @click.stop="toggleSchemaObjectFolder(connection.id, catalog.name, schema.name, folder.kind)"
-                                  >
-                                    <ChevronDown v-if="isSchemaObjectFolderExpanded(connection.id, catalog.name, schema.name, folder.kind)" />
-                                    <ChevronRight v-else />
-                                  </button>
-                                  <FolderOpen v-if="isSchemaObjectFolderExpanded(connection.id, catalog.name, schema.name, folder.kind)" />
-                                  <Folder v-else />
-                                  <span>{{ folder.kind }}</span>
-                                  <small>{{ folder.count }}</small>
-                                </div>
-                                <ul
-                                  v-if="isSchemaObjectFolderExpanded(connection.id, catalog.name, schema.name, folder.kind)"
-                                  class="db-tree-children deep"
-                                >
-                                  <li
-                                    v-for="table in folder.tables"
-                                    :key="table.id"
-                                  >
-                                    <div
-                                      class="db-tree-row table"
-                                      :class="{ selected: selectedNodeId === table.id }"
-                                      @click="selectNode(table.id)"
-                                      @dblclick="openTable(connection.id, catalog.name, table, schema.name)"
-                                      @contextmenu.prevent="
-                                        openContextMenu($event, {
-                                          type: 'table',
-                                          connectionId: connection.id,
-                                          catalogName: catalog.name,
-                                          schemaName: schema.name,
-                                          tableId: table.id,
-                                          label: table.name
-                                        })
-                                      "
-                                    >
-                                      <button
-                                        type="button"
-                                        @click.stop="toggleTable(table.id)"
-                                      >
-                                        <ChevronDown v-if="isTableExpanded(table.id)" />
-                                        <ChevronRight v-else />
-                                      </button>
-                                      <Table2 />
-                                      <span>{{ table.name }}</span>
-                                    </div>
-                                    <ul
-                                      v-if="isTableExpanded(table.id)"
-                                      class="db-tree-children deep"
-                                    >
-                                      <li
-                                        v-for="column in table.columns"
-                                        :key="`${table.id}:${column.name}`"
-                                      >
-                                        <div
-                                          class="db-tree-row column"
-                                          :class="{ selected: selectedNodeId === columnNodeId(table.id, column.name) }"
-                                          @click="selectColumnNode(table, column)"
-                                        >
-                                          <span class="db-tree-spacer" />
-                                          <Columns3 />
-                                          <span>{{ column.name }}</span>
-                                          <small v-if="column.key">{{ column.key }}</small>
-                                        </div>
-                                      </li>
-                                    </ul>
-                                  </li>
-                                  <li
-                                    v-for="routine in folder.routines"
-                                    :key="`${schemaObjectFolderKey(connection.id, catalog.name, schema.name, folder.kind)}:${routine}`"
-                                  >
-                                    <div
-                                      class="db-tree-row column"
-                                      :class="{ selected: selectedNodeId === schemaRoutineNodeId(connection.id, catalog.name, schema.name, folder.kind, routine) }"
-                                      @click="selectNode(schemaRoutineNodeId(connection.id, catalog.name, schema.name, folder.kind, routine))"
-                                    >
-                                      <span class="db-tree-spacer" />
-                                      <Columns3 />
-                                      <span>{{ routine }}</span>
-                                    </div>
-                                  </li>
-                                </ul>
-                              </li>
-                            </ul>
-                          </li>
-                        </template>
-
-                        <li v-if="catalog.tables">
-                          <div class="db-tree-row folder">
-                            <span class="db-tree-spacer" />
-                            <FolderOpen />
-                            <span>tables</span>
-                          </div>
-                          <ul class="db-tree-children deep">
-                            <li
-                              v-for="table in catalog.tables"
-                              :key="table.id"
-                            >
-                              <div
-                                class="db-tree-row table"
-                                :class="{ selected: selectedNodeId === table.id }"
-                                @click="selectNode(table.id)"
-                                @dblclick="openTable(connection.id, catalog.name, table)"
-                                @contextmenu.prevent="
-                                  openContextMenu($event, {
-                                    type: 'table',
-                                    connectionId: connection.id,
-                                    catalogName: catalog.name,
-                                    tableId: table.id,
-                                    label: table.name
-                                  })
-                                "
-                              >
-                                <button
-                                  type="button"
-                                  @click.stop="toggleTable(table.id)"
-                                >
-                                  <ChevronDown v-if="isTableExpanded(table.id)" />
-                                  <ChevronRight v-else />
-                                </button>
-                                <Table2 />
-                                <span>{{ table.name }}</span>
-                              </div>
-                              <ul
-                                v-if="isTableExpanded(table.id)"
-                                class="db-tree-children deep"
-                              >
-                                <li
-                                  v-for="column in table.columns"
-                                  :key="`${table.id}:${column.name}`"
-                                >
-                                  <div
-                                    class="db-tree-row column"
-                                    :class="{ selected: selectedNodeId === columnNodeId(table.id, column.name) }"
-                                    @click="selectColumnNode(table, column)"
-                                  >
-                                    <span class="db-tree-spacer" />
-                                    <Columns3 />
-                                    <span>{{ column.name }}</span>
-                                    <small v-if="column.key">{{ column.key }}</small>
-                                  </div>
-                                </li>
-                              </ul>
-                            </li>
-                          </ul>
-                        </li>
-                      </ul>
-                    </li>
-                  </ul>
-                </li>
-              </ul>
-            </li>
-          </ul>
-        </nav>
-      </template>
-
-      <button
-        v-else
-        class="db-sidebar-expand"
-        type="button"
-        title="Expand"
-        @click="sidebarCollapsed = false"
-      >
-        <PanelLeftOpen />
-      </button>
-    </aside>
+    <DatabaseSidebarTree
+      ref="databaseSidebarTreeRef"
+      :sidebar-collapsed="sidebarCollapsed"
+      :keyword="keyword"
+      :visible-group-nodes="visibleGroupNodes"
+      :selected-node-id="selectedNodeId"
+      :editing-group-id="editingGroupId"
+      :editing-group-name="editingGroupName"
+      :expanded-groups="expandedGroups"
+      :expanded-connections="expandedConnections"
+      :expanded-catalogs="expandedCatalogs"
+      :expanded-schemas="expandedSchemas"
+      :expanded-schema-object-folders="expandedSchemaObjectFolders"
+      :expanded-tables="expandedTables"
+      :connections-by-group="connectionsByGroup"
+      :engine-accent="engineAccent"
+      @update-sidebar-collapsed="sidebarCollapsed = $event"
+      @update-keyword="keyword = $event"
+      @clear-search="clearDatabaseSearch"
+      @refresh-connected="refreshConnected"
+      @toggle-add-menu="toggleAddMenu"
+      @select-node="selectNode"
+      @open-context-menu="openContextMenu"
+      @toggle-group="toggleGroup"
+      @update-editing-group-name="editingGroupName = $event"
+      @commit-group-rename="commitGroupRename"
+      @cancel-group-rename="cancelGroupRename"
+      @toggle-connection="toggleConnection"
+      @toggle-connection-status="toggleConnectionStatus"
+      @toggle-catalog="toggleCatalog"
+      @toggle-schema="toggleSchema"
+      @toggle-schema-object-folder="toggleSchemaObjectFolder"
+      @open-table="openTable"
+      @toggle-table="toggleTable"
+      @select-column-node="selectColumnNode"
+    />
 
     <main class="db-main">
       <div class="db-workspace-tabs">
@@ -1112,671 +792,104 @@
       </section>
     </main>
 
-    <aside
-      v-if="dbAiPaneOpen"
-      class="db-ai-pane"
-    >
-      <div
-        class="db-ai-pane-resizer"
-        role="separator"
-        aria-orientation="vertical"
-        :aria-valuemin="DB_AI_PANE_MIN_WIDTH"
-        :aria-valuemax="DB_AI_PANE_MAX_WIDTH"
-        :aria-valuenow="dbAiPaneWidth"
-        title="Resize DB AI pane"
-        @pointerdown="startDbAiPaneResize"
-        @dblclick="resetDbAiPaneWidth"
-      />
-      <div class="db-ai-pane-shell">
-        <header class="db-ai-pane-header">
-          <div class="db-ai-pane-title">
-            <BrainCircuit />
-            <div>
-              <strong>DB AI</strong>
-              <span>Database workspace</span>
-            </div>
-          </div>
-          <button
-            type="button"
-            title="Close DB AI Pane"
-            @click="closeDbAiPane"
-          >
-            <X />
-          </button>
-        </header>
+    <DatabaseAiPanels
+      ref="databaseAiPanelsRef"
+      v-model:db-ai-pane-draft="dbAiPaneDraft"
+      :db-ai-pane-open="dbAiPaneOpen"
+      :db-ai-pane-width="dbAiPaneWidth"
+      :db-ai-pane-min-width="DB_AI_PANE_MIN_WIDTH"
+      :db-ai-pane-max-width="DB_AI_PANE_MAX_WIDTH"
+      :db-ai-pane-context-summary="dbAiPaneContextSummary"
+      :db-ai-pane-context-title="dbAiPaneContextTitle"
+      :db-ai-pane-context="dbAiPaneContext"
+      :connections="connections"
+      :db-ai-pane-connection="dbAiPaneConnection"
+      :db-ai-pane-catalog-options="dbAiPaneCatalogOptions"
+      :db-ai-pane-schema-options="dbAiPaneSchemaOptions"
+      :db-ai-pane-requires-schema="dbAiPaneRequiresSchema"
+      :db-ai-pane-connection-needs-connect="dbAiPaneConnectionNeedsConnect"
+      :db-ai-pane-messages="dbAiPaneMessages"
+      :db-ai-pane-is-streaming="dbAiPaneIsStreaming"
+      :db-ai-pane-can-send="dbAiPaneCanSend"
+      :active-sql-available="Boolean(activeSqlTab)"
+      :db-ai-open="dbAiOpen"
+      :db-ai-active-req-id="dbAiActiveReqId"
+      :db-ai-action-label="dbAiActionLabel"
+      :db-ai-request-list="dbAiRequestList"
+      :db-ai-status="dbAiStatus"
+      :db-ai-status-label="dbAiStatusLabel"
+      :db-ai-context-summary="dbAiContextSummary"
+      :db-ai-is-convert-action="dbAiIsConvertAction"
+      :db-ai-target-dialect="dbAiTargetDialect"
+      :db-ai-dialect-options="dbAiDialectOptions"
+      :db-ai-is-executable-dialect="dbAiIsExecutableDialect"
+      :db-ai-reasoning-text="dbAiReasoningText"
+      :db-ai-content-text="dbAiContentText"
+      :db-ai-empty-state="dbAiEmptyState"
+      :db-ai-sql="dbAiSql"
+      :db-ai-can-run-read-only="dbAiCanRunReadOnly"
+      :db-ai-can-cancel="dbAiCanCancel"
+      :format-db-ai-request-time="formatDbAiRequestTime"
+      :db-ai-pane-status-label="dbAiPaneStatusLabel"
+      @start-db-ai-pane-resize="startDbAiPaneResize"
+      @reset-db-ai-pane-width="resetDbAiPaneWidth"
+      @close-db-ai-pane="closeDbAiPane"
+      @use-active-db-ai-pane-context="useActiveDbAiPaneContext"
+      @update-db-ai-pane-connection="updateDbAiPaneConnection"
+      @update-db-ai-pane-catalog="updateDbAiPaneCatalog"
+      @update-db-ai-pane-schema="updateDbAiPaneSchema"
+      @connect-db-ai-pane-connection="connectDbAiPaneConnection"
+      @handle-db-ai-pane-draft-keydown="handleDbAiPaneDraftKeydown"
+      @send-db-ai-pane-quick-prompt="sendDbAiPaneQuickPrompt"
+      @reset-db-ai-pane-conversation="resetDbAiPaneConversation"
+      @cancel-db-ai-pane-response="cancelDbAiPaneResponse"
+      @send-db-ai-pane-message="() => sendDbAiPaneMessage()"
+      @close-db-ai-drawer="dbAiOpen = false"
+      @set-active-db-ai-request="setActiveDbAiRequest"
+      @update-db-ai-target-dialect="dbAiTargetDialect = $event"
+      @copy-db-ai-sql="copyDbAiSql"
+      @replace-db-ai-sql-selection="replaceDbAiSqlSelection"
+      @insert-db-ai-sql="insertDbAiSql"
+      @run-db-ai-readonly="runDbAiReadonly"
+      @cancel-db-ai-request="cancelDbAiRequest"
+      @clear-db-ai-request="clearDbAiRequest"
+    />
 
-        <section class="db-ai-pane-context-card">
-          <div class="db-ai-pane-context-head">
-            <span>{{ dbAiPaneContextSummary }}</span>
-            <button
-              type="button"
-              title="Use active tab context"
-              @click="useActiveDbAiPaneContext"
-            >
-              <RefreshCw />
-              <span>Use Active</span>
-            </button>
-          </div>
-          <div class="db-ai-pane-pickers">
-            <label>
-              Connection
-              <select
-                class="db-ai-pane-connection"
-                :value="dbAiPaneContext.connectionId"
-                @change="updateDbAiPaneConnection"
-              >
-                <option
-                  value=""
-                  disabled
-                >
-                  Connection
-                </option>
-                <option
-                  v-for="connection in connections"
-                  :key="connection.id"
-                  :value="connection.id"
-                >
-                  {{ connection.name }}{{ connection.status === 'testing' ? ' [connecting...]' : '' }}
-                </option>
-              </select>
-            </label>
-            <label>
-              Database
-              <select
-                class="db-ai-pane-database"
-                :value="dbAiPaneContext.catalogName"
-                :disabled="dbAiPaneCatalogOptions.length === 0"
-                @change="updateDbAiPaneCatalog"
-              >
-                <option
-                  value=""
-                  disabled
-                >
-                  Database
-                </option>
-                <option
-                  v-for="catalog in dbAiPaneCatalogOptions"
-                  :key="catalog.name"
-                  :value="catalog.name"
-                >
-                  {{ catalog.name }}
-                </option>
-              </select>
-            </label>
-            <label v-if="dbAiPaneRequiresSchema">
-              Schema
-              <select
-                class="db-ai-pane-schema"
-                :value="dbAiPaneContext.schemaName"
-                :disabled="dbAiPaneSchemaOptions.length === 0"
-                @change="updateDbAiPaneSchema"
-              >
-                <option
-                  value=""
-                  disabled
-                >
-                  Schema
-                </option>
-                <option
-                  v-for="schema in dbAiPaneSchemaOptions"
-                  :key="schema.name"
-                  :value="schema.name"
-                >
-                  {{ schema.name }}
-                </option>
-              </select>
-            </label>
-          </div>
-          <div
-            v-if="dbAiPaneConnectionNeedsConnect"
-            class="db-ai-pane-connect-row"
-          >
-            <span>{{ dbAiPaneConnection?.name }} is not connected.</span>
-            <button
-              type="button"
-              @click="connectDbAiPaneConnection"
-            >
-              <Zap />
-              <span>Connect</span>
-            </button>
-          </div>
-        </section>
-
-        <section
-          ref="dbAiPaneMessageListRef"
-          class="db-ai-pane-messages"
-        >
-          <div
-            v-if="dbAiPaneMessages.length === 0"
-            class="db-ai-pane-empty"
-          >
-            <strong>{{ dbAiPaneContextTitle }}</strong>
-            <span>Ask about schema, SQL, optimization, or generated read-only queries.</span>
-          </div>
-          <article
-            v-for="message in dbAiPaneMessages"
-            :key="message.id"
-            class="db-ai-pane-message"
-            :class="[message.role, message.status]"
-            :data-message-id="message.id"
-            :data-request-id="message.requestId"
-          >
-            <header>
-              <strong>{{ message.role === 'user' ? 'You' : 'DB AI' }}</strong>
-              <small>{{ formatDbAiRequestTime(message.createdAt) }}</small>
-              <span
-                v-if="message.role === 'assistant'"
-                class="db-ai-pane-message-status"
-              >
-                {{ dbAiPaneStatusLabel(message.status) }}
-              </span>
-            </header>
-            <p
-              v-if="message.contextSummary"
-              class="db-ai-pane-message-context"
-            >
-              {{ message.contextSummary }}
-            </p>
-            <pre>{{ message.content }}</pre>
-          </article>
-        </section>
-
-        <footer class="db-ai-pane-composer">
-          <div class="db-ai-pane-quick-actions">
-            <button
-              type="button"
-              :disabled="!activeSqlTab"
-              @click="sendDbAiPaneQuickPrompt('explainActive')"
-            >
-              Explain SQL
-            </button>
-            <button
-              type="button"
-              @click="sendDbAiPaneQuickPrompt('schemaSummary')"
-            >
-              Schema Summary
-            </button>
-            <button
-              type="button"
-              @click="sendDbAiPaneQuickPrompt('selectSample')"
-            >
-              Generate SELECT
-            </button>
-          </div>
-          <textarea
-            v-model="dbAiPaneDraft"
-            rows="3"
-            placeholder="Ask DB AI"
-            @keydown="handleDbAiPaneDraftKeydown"
-          />
-          <div class="db-ai-pane-composer-actions">
-            <button
-              type="button"
-              title="Reset conversation"
-              @click="resetDbAiPaneConversation"
-            >
-              <RefreshCw />
-            </button>
-            <button
-              v-if="dbAiPaneIsStreaming"
-              type="button"
-              title="Stop response"
-              @click="cancelDbAiPaneResponse"
-            >
-              <X />
-              <span>Stop</span>
-            </button>
-            <button
-              type="button"
-              class="primary"
-              :disabled="!dbAiPaneCanSend"
-              @click="() => sendDbAiPaneMessage()"
-            >
-              <Play />
-              <span>Send</span>
-            </button>
-          </div>
-        </footer>
-      </div>
-    </aside>
-
-    <aside
-      v-if="dbAiOpen"
-      class="db-ai-drawer"
-      :data-request-id="dbAiActiveReqId || undefined"
-    >
-      <header>
-        <div>
-          <strong>DB AI</strong>
-          <span>{{ dbAiActionLabel }}</span>
-        </div>
-        <button
-          type="button"
-          title="Close"
-          @click="dbAiOpen = false"
-        >
-          <X />
-        </button>
-      </header>
-      <nav
-        v-if="dbAiRequestList.length > 1"
-        class="db-ai-request-list"
-      >
-        <button
-          v-for="request in dbAiRequestList"
-          :key="request.id"
-          type="button"
-          :data-request-id="request.id"
-          :class="{ active: request.id === dbAiActiveReqId }"
-          @click="setActiveDbAiRequest(request.id)"
-        >
-          <span :class="request.status"></span>
-          <strong>{{ request.label }}</strong>
-          <small>{{ formatDbAiRequestTime(request.updatedAt) }}</small>
-        </button>
-      </nav>
-      <section>
-        <p class="db-ai-status">
-          <span :class="dbAiStatus"></span>
-          {{ dbAiStatusLabel }}
-        </p>
-        <div
-          v-if="dbAiContextSummary"
-          class="db-ai-context"
-        >
-          {{ dbAiContextSummary }}
-        </div>
-        <div
-          v-if="dbAiIsConvertAction"
-          class="db-ai-dialect-row"
-        >
-          <label>
-            Target Dialect
-            <select v-model="dbAiTargetDialect">
-              <option
-                v-for="dialect in dbAiDialectOptions"
-                :key="dialect.value"
-                :value="dialect.value"
-              >
-                {{ dialect.label }}
-              </option>
-            </select>
-          </label>
-          <span
-            v-if="!dbAiIsExecutableDialect"
-            class="db-ai-hint"
-          >
-            Text-only conversion: target dialect does not match the active connection.
-          </span>
-        </div>
-        <div
-          v-if="dbAiReasoningText"
-          class="db-ai-section"
-        >
-          <header>Reasoning</header>
-          <pre>{{ dbAiReasoningText }}</pre>
-        </div>
-        <div
-          v-if="dbAiContentText"
-          class="db-ai-section"
-        >
-          <header>Response</header>
-          <pre>{{ dbAiContentText }}</pre>
-        </div>
-        <div
-          v-if="dbAiEmptyState"
-          class="db-ai-empty"
-        >
-          No DB AI response is active.
-        </div>
-      </section>
-      <section
-        v-if="dbAiSql"
-        class="db-ai-sql-actions"
-      >
-        <header>
-          <span>Generated SQL</span>
-          <button
-            type="button"
-            @click="copyDbAiSql"
-          >
-            Copy
-          </button>
-          <button
-            type="button"
-            :disabled="!activeSqlTab"
-            @click="replaceDbAiSqlSelection"
-          >
-            Replace Selection
-          </button>
-          <button
-            type="button"
-            :disabled="!activeSqlTab"
-            @click="insertDbAiSql"
-          >
-            Insert Into Editor
-          </button>
-          <button
-            type="button"
-            :disabled="!dbAiCanRunReadOnly"
-            @click="runDbAiReadonly"
-          >
-            Run ReadOnly
-          </button>
-        </header>
-        <pre>{{ dbAiSql }}</pre>
-      </section>
-      <footer>
-        <button
-          v-if="dbAiCanCancel"
-          type="button"
-          @click="cancelDbAiRequest"
-        >
-          Cancel
-        </button>
-        <button
-          type="button"
-          @click="clearDbAiRequest"
-        >
-          Clear
-        </button>
-      </footer>
-    </aside>
-
-    <div
-      v-if="addMenuOpen"
-      class="db-popup-menu db-add-menu"
-      :style="{ top: `${addMenuPosition.y}px`, left: `${addMenuPosition.x}px` }"
-      @click.stop
-    >
-      <button
-        type="button"
-        @click="addGroup()"
-      >
-        New Group
-      </button>
-      <div class="db-popup-subtitle">New Connection</div>
-      <button
-        v-for="engine in databaseEngines"
-        :key="engine.name"
-        type="button"
-        :title="`New ${engine.name} connection`"
-        @click="openConnectionModalFromEngine(engine)"
-      >
-        <span
-          class="db-engine-dot"
-          :style="{ background: engine.accent }"
-        />
-        {{ engine.name }}
-      </button>
-    </div>
-
-    <div
-      v-if="contextMenu"
-      class="db-popup-menu db-context-menu"
-      :style="{ top: `${contextMenu.y}px`, left: `${contextMenu.x}px` }"
-      @click.stop
-    >
-      <template v-if="contextMenu.type === 'group'">
-        <div
-          class="db-popup-submenu-wrap"
-          @mouseenter="contextSubmenu = 'groupConnection'"
-        >
-          <button type="button">
-            <span>New Connection</span>
-            <span class="db-popup-arrow">›</span>
-          </button>
-          <div
-            v-if="contextSubmenu === 'groupConnection'"
-            class="db-popup-menu db-popup-submenu"
-          >
-            <button
-              v-for="engine in databaseEngines"
-              :key="`ctx-${engine.name}`"
-              type="button"
-              :title="`New ${engine.name} connection`"
-              @click="openConnectionModalFromEngine(engine, contextMenu.groupId)"
-            >
-              <span
-                class="db-engine-dot"
-                :style="{ background: engine.accent }"
-              />
-              {{ engine.name }}
-            </button>
-          </div>
-        </div>
-        <button
-          type="button"
-          @mouseenter="closeContextSubmenuSoon"
-          @click="addGroup(contextMenu.groupId)"
-        >
-          New Group
-        </button>
-        <button
-          type="button"
-          @mouseenter="closeContextSubmenuSoon"
-          @click="startGroupRename(contextMenu.groupId)"
-        >
-          Rename
-        </button>
-        <button
-          type="button"
-          @mouseenter="closeContextSubmenuSoon"
-          @click="copyContextName"
-        >
-          Copy Name
-        </button>
-        <div
-          class="db-popup-submenu-wrap"
-          @mouseenter="contextSubmenu = 'groupMove'"
-        >
-          <button type="button">
-            <span>Move To</span>
-            <span class="db-popup-arrow">›</span>
-          </button>
-          <div
-            v-if="contextSubmenu === 'groupMove'"
-            class="db-popup-menu db-popup-submenu"
-          >
-            <button
-              type="button"
-              :disabled="groupRootMoveDisabled"
-              @click="moveGroupTo(contextMenu.groupId, null)"
-            >
-              Root Group
-            </button>
-            <button
-              v-for="target in groupMoveTargets"
-              :key="target.id"
-              type="button"
-              @click="moveGroupTo(contextMenu.groupId, target.id)"
-            >
-              {{ target.name }}
-            </button>
-            <button
-              v-if="groupMoveTargets.length === 0 && groupRootMoveDisabled"
-              type="button"
-              disabled
-            >
-              Current Group
-            </button>
-          </div>
-        </div>
-        <div class="db-popup-divider" />
-        <button
-          type="button"
-          @mouseenter="closeContextSubmenuSoon"
-          @click="requestDeleteGroup(contextMenu.groupId)"
-        >
-          Delete Group
-        </button>
-      </template>
-      <template v-else-if="contextMenu.type === 'connection'">
-        <button
-          type="button"
-          @mouseenter="closeContextSubmenuSoon"
-          @click="connectFromMenu(contextMenu.connectionId)"
-        >
-          {{ contextConnectionConnected ? 'Close Connection' : 'Open Connection' }}
-        </button>
-        <div class="db-popup-divider" />
-        <button
-          type="button"
-          :disabled="!contextConnectionConnected"
-          @mouseenter="closeContextSubmenuSoon"
-          @click="contextConnectionConnected && openSqlConsole(contextMenu.connectionId)"
-        >
-          Query Console
-        </button>
-        <button
-          type="button"
-          :disabled="!contextConnectionCanCreateDatabase"
-          @mouseenter="closeContextSubmenuSoon"
-          @click="contextConnectionCanCreateDatabase && openCreateDatabaseModal(contextMenu.connectionId)"
-        >
-          Create Database
-        </button>
-        <div class="db-popup-divider" />
-        <button
-          type="button"
-          @mouseenter="closeContextSubmenuSoon"
-          @click="editConnection(contextMenu.connectionId)"
-        >
-          Editor Source
-        </button>
-        <button
-          type="button"
-          @mouseenter="closeContextSubmenuSoon"
-          @click="copyContextName"
-        >
-          Copy Name
-        </button>
-        <div class="db-popup-divider" />
-        <div
-          class="db-popup-submenu-wrap"
-          @mouseenter="contextSubmenu = 'connectionMove'"
-        >
-          <button type="button">
-            <span>Move To</span>
-            <span class="db-popup-arrow">›</span>
-          </button>
-          <div
-            v-if="contextSubmenu === 'connectionMove'"
-            class="db-popup-menu db-popup-submenu"
-          >
-            <button
-              type="button"
-              :disabled="connectionRootMoveDisabled"
-              @click="moveConnectionToGroup(contextMenu.connectionId, DEFAULT_GROUP_ID)"
-            >
-              Root Group
-            </button>
-            <button
-              v-for="target in connectionMoveTargets"
-              :key="target.id"
-              type="button"
-              @click="moveConnectionToGroup(contextMenu.connectionId, target.id)"
-            >
-              {{ target.name }}
-            </button>
-            <button
-              v-if="connectionMoveTargets.length === 0 && connectionRootMoveDisabled"
-              type="button"
-              disabled
-            >
-              Current Group
-            </button>
-          </div>
-        </div>
-        <button
-          type="button"
-          @mouseenter="closeContextSubmenuSoon"
-          @click="refreshConnectionFromMenu(contextMenu.connectionId)"
-        >
-          Refresh
-        </button>
-        <div class="db-popup-divider" />
-        <button
-          type="button"
-          @mouseenter="closeContextSubmenuSoon"
-          @click="requestRemoveConnection(contextMenu.connectionId)"
-        >
-          Remove
-        </button>
-      </template>
-      <template v-else>
-        <button
-          type="button"
-          @mouseenter="closeContextSubmenuSoon"
-          @click="openContextTable"
-        >
-          Open Table
-        </button>
-        <button
-          type="button"
-          @mouseenter="closeContextSubmenuSoon"
-          @click="openContextSql"
-        >
-          Query Console
-        </button>
-        <div class="db-popup-divider" />
-        <button
-          type="button"
-          @mouseenter="closeContextSubmenuSoon"
-          @click="openDdlModalFromContext"
-        >
-          View DDL
-        </button>
-        <div
-          class="db-popup-submenu-wrap"
-          @mouseenter="contextSubmenu = 'tableCopy'"
-        >
-          <button type="button">
-            <span>Copy Table</span>
-            <span class="db-popup-arrow">›</span>
-          </button>
-          <div
-            v-if="contextSubmenu === 'tableCopy'"
-            class="db-popup-menu db-popup-submenu"
-          >
-            <button
-              type="button"
-              @click="copyContextName"
-            >
-              Copy Table Name
-            </button>
-            <button
-              type="button"
-              @click="copySelectSql"
-            >
-              Copy Table SELECT
-            </button>
-            <button
-              type="button"
-              @click="copyTableDdlFromContext"
-            >
-              Copy Table DDL
-            </button>
-          </div>
-        </div>
-        <div class="db-popup-divider" />
-        <button
-          type="button"
-          @mouseenter="closeContextSubmenuSoon"
-          @click="requestDangerousTableAction('truncate')"
-        >
-          Truncate
-        </button>
-        <button
-          class="danger"
-          type="button"
-          @mouseenter="closeContextSubmenuSoon"
-          @click="requestDangerousTableAction('drop')"
-        >
-          Drop
-        </button>
-      </template>
-    </div>
+    <DatabaseWorkspaceMenus
+      :add-menu-open="addMenuOpen"
+      :add-menu-position="addMenuPosition"
+      :context-menu="contextMenu"
+      :context-submenu="contextSubmenu"
+      :database-engines="databaseEngines"
+      :group-root-move-disabled="groupRootMoveDisabled"
+      :group-move-targets="groupMoveTargets"
+      :context-connection-connected="contextConnectionConnected"
+      :context-connection-can-create-database="contextConnectionCanCreateDatabase"
+      :connection-root-move-disabled="connectionRootMoveDisabled"
+      :connection-move-targets="connectionMoveTargets"
+      :default-group-id="DEFAULT_GROUP_ID"
+      @add-group="addGroup"
+      @open-connection-modal-from-engine="openConnectionModalFromEngine"
+      @update-context-submenu="contextSubmenu = $event"
+      @close-context-submenu-soon="closeContextSubmenuSoon"
+      @start-group-rename="startGroupRename"
+      @copy-context-name="copyContextName"
+      @move-group-to="moveGroupTo"
+      @request-delete-group="requestDeleteGroup"
+      @connect-from-menu="connectFromMenu"
+      @open-sql-console="openSqlConsole"
+      @open-create-database-modal="openCreateDatabaseModal"
+      @edit-connection="editConnection"
+      @move-connection-to-group="moveConnectionToGroup"
+      @refresh-connection-from-menu="refreshConnectionFromMenu"
+      @request-remove-connection="requestRemoveConnection"
+      @open-context-table="openContextTable"
+      @open-context-sql="openContextSql"
+      @open-ddl-modal-from-context="openDdlModalFromContext"
+      @copy-select-sql="copySelectSql"
+      @copy-table-ddl-from-context="copyTableDdlFromContext"
+      @request-dangerous-table-action="requestDangerousTableAction"
+    />
 
     <div
       v-if="connectionModalOpen"
@@ -2049,33 +1162,22 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch, t
 import {
   AlignLeft,
   BrainCircuit,
-  ChevronDown,
-  ChevronRight,
-  Columns3,
   CornerDownRight,
-  Database,
   FileSearch,
-  Folder,
-  FolderOpen,
   Languages,
   LayoutDashboard,
   Lightbulb,
   MoreHorizontal,
-  Network,
-  PanelLeftClose,
-  PanelLeftOpen,
   Play,
   Plus,
-  RefreshCw,
   Save,
   SaveAll,
   Search,
   SquareTerminal,
   Table2,
   TextCursorInput,
-  Unplug,
   WandSparkles,
-  X, Zap
+  X
 } from 'lucide-vue-next'
 import { copyTextToClipboard } from '@/services/clipboardRuntime'
 import { databaseClient } from '@/services/databaseClient'
@@ -2083,7 +1185,10 @@ import { editorLineHeightPx } from '@/services/editorRuntime'
 import { localFilesClient } from '@/services/localFilesClient'
 import DataGridToolbar from '@/components/database/DataGridToolbar.vue'
 import DataStatusBar from '@/components/database/DataStatusBar.vue'
+import DatabaseAiPanels from '@/components/database/DatabaseAiPanels.vue'
+import DatabaseSidebarTree from '@/components/database/DatabaseSidebarTree.vue'
 import DatabaseSqlEditor, { type DatabaseSqlEditorMetrics } from '@/components/database/DatabaseSqlEditor.vue'
+import DatabaseWorkspaceMenus from '@/components/database/DatabaseWorkspaceMenus.vue'
 import DatabaseWorkspaceModals from '@/components/database/DatabaseWorkspaceModals.vue'
 import ResultGrid from '@/components/database/ResultGrid.vue'
 import {
@@ -2109,10 +1214,6 @@ import {
   type DataMutationPlanState,
   type DbFilter,
   type DbOrderBy,
-  type DbSort,
-  type DirtyState,
-  type EditOp,
-  type ResultStatus
 } from '@/services/databaseGridRuntime'
 import {
   currentSqlStatement,
@@ -2185,17 +1286,29 @@ import {
   quoteIdentifier,
   renderCreateDatabaseTemplate,
   schemaObjectFolderKey,
-  schemaObjectFolders,
   schemaRoutineNodeId,
   sqlConnectionRequiresSchema,
   toggleId,
   type DatabaseChartSource,
   type DatabaseChartSummary,
-  type SchemaObjectFolder,
   type SchemaObjectKind,
   type TableDdlResult,
   type VisibleGroupNode
 } from '@/services/databaseWorkspaceRuntime'
+import type {
+  ContextMenu,
+  ContextMenuPayload,
+  ContextSubmenu,
+  DatabaseOperationConfirmAction,
+  DbAiPaneQuickPrompt,
+  SqlConsoleContext,
+  SqlExecutionOutcome,
+  SqlExecutionPayload,
+  SqlHistory,
+  SqlResult,
+  SqlResultViewState,
+  WorkspaceTab
+} from '@/services/databaseWorkspaceTypes'
 import { useWorkspaceStore } from '@/stores/workspace'
 import type {
   DatabaseAiDrawerLifecycleResult, DatabaseAiDrawerRequestResult, DatabaseAiDrawerResponseInput, DatabaseAiDrawerResponseResult,
@@ -2224,7 +1337,6 @@ type DatabaseSqlEditorApi = {
   focus(): void
 }
 type TableReloadOptions = { withTotal?: boolean; preserveDirty?: boolean; notice?: string }
-type ContextSubmenu = 'groupConnection' | 'groupMove' | 'connectionMove' | 'tableCopy' | null
 const DATABASE_CATALOG_MALFORMED_MESSAGE = 'Database catalog backend returned malformed result data.'
 const DATABASE_CONNECTION_TEST_MALFORMED_MESSAGE = 'Database connection test backend returned malformed result data.'
 const DATABASE_CONNECTION_SAVE_MALFORMED_MESSAGE = 'Database connection save backend returned malformed result data.'
@@ -2239,129 +1351,13 @@ const DATABASE_TABLE_MUTATION_PLAN_UNAVAILABLE_MESSAGE = 'Database table mutatio
 const DATABASE_TABLE_MUTATION_UNAVAILABLE_MESSAGE = 'Database table mutation service unavailable'
 const workspaceStore = useWorkspaceStore()
 
-type SqlResult = {
-  id: string
-  title: string
-  sql: string
-  status: ResultStatus
-  columns: string[]
-  rows: Array<Record<string, unknown>>
-  rowCount: number
-  durationMs: number
-  error: string | null
-  message: string
-}
-type SqlExecutionPayload = Omit<SqlResult, 'id' | 'title' | 'sql'>
-type SqlExecutionOutcome = {
-  payload: SqlExecutionPayload
-  execution: DatabaseSqlExecutionRecord | null
-}
-
-type SqlResultViewState = {
-  page: number
-  pageSize: number
-  filters: DbFilter[]
-  sort: DbSort
-}
-
-type DbAiPaneQuickPrompt = 'explainActive' | 'schemaSummary' | 'selectSample'
-
-type SqlHistory = {
-  id: string
-  resultTabId: string | null
-  title: string
-  sql: string
-  message: string
-  status: Exclude<ResultStatus, 'running'>
-  durationMs: number
-  rowCount: number
-  createdAt: string
-}
-
-type WorkspaceTab =
-  | {
-      id: string
-      kind: 'overview'
-      title: string
-    }
-  | {
-      id: string
-      kind: 'sql'
-      title: string
-      connectionId: string
-      catalogName: string
-      schemaName: string
-      tableId?: string
-      tableName?: string
-      readOnly?: boolean
-      sql: string
-      filePath?: string
-      savedSql: string
-      saving: boolean
-      saveError: string | null
-      resultTabs: SqlResult[]
-      activeResultTabId: string
-      history: SqlHistory[]
-    }
-  | {
-      id: string
-      kind: 'data'
-      title: string
-      connectionId: string
-      catalogName: string
-      schemaName?: string
-      tableId: string
-      tableName: string
-      columns: string[]
-      sourceRows: Array<Record<string, unknown>>
-      rows: Array<Record<string, unknown>>
-      primaryKey: string[]
-      whereRaw: string
-      whereDraft: string
-      orderByRaw: string
-      orderByDraft: string
-      page: number
-      pageSize: number
-      filters: DbFilter[]
-      sort: DbSort
-      selectedRowKey: string | null
-      loading: boolean
-      error: string | null
-      total: number | null
-      rowCount: number
-      knownColumns: string[]
-      durationMs: number
-      dirtyState: DirtyState
-      undoStack: EditOp[]
-      mutationPlan: DataMutationPlanState
-      saving: boolean
-      saveError: string | null
-    }
-
-type ContextMenu =
-  | { type: 'group'; groupId: string; label: string; x: number; y: number }
-  | { type: 'connection'; connectionId: string; label: string; x: number; y: number }
-  | {
-      type: 'table'
-      connectionId: string
-      catalogName: string
-      schemaName?: string
-      tableId: string
-      label: string
-      x: number
-      y: number
-    }
-
-type ContextMenuPayload = Omit<Extract<ContextMenu, { type: 'group' }>, 'x' | 'y'> | Omit<Extract<ContextMenu, { type: 'connection' }>, 'x' | 'y'> | Omit<Extract<ContextMenu, { type: 'table' }>, 'x' | 'y'>
-type SqlConsoleContext = { connectionId: string; catalogName: string; schemaName: string }
-type DatabaseOperationConfirmAction = 'deleteGroup' | 'removeConnection'
-
 const databaseEngines = ref<DatabaseEngineInfo[]>([])
 const groups = ref<DatabaseGroupInfo[]>([])
 const groupParentById = reactive<Record<string, string | null>>({})
 const connections = ref<DatabaseConnectionInfo[]>([])
 const keyword = ref('')
 const sidebarCollapsed = ref(false)
+const databaseSidebarTreeRef = ref<{ focusSearch: () => void; addButtonRect: () => DOMRect | null } | null>(null)
 const expandedGroups = ref<string[]>([])
 const expandedConnections = ref<string[]>([])
 const expandedCatalogs = ref<string[]>([])
@@ -2371,8 +1367,6 @@ const expandedTables = ref<string[]>([])
 const selectedNodeId = ref<string | null>(null)
 const overflowOpen = ref(false)
 const addMenuOpen = ref(false)
-const addButtonRef = ref<HTMLButtonElement | null>(null)
-const searchInputRef = ref<HTMLInputElement | null>(null)
 const addMenuPosition = ref({ x: 0, y: 0 })
 const contextMenu = ref<ContextMenu | null>(null)
 const contextSubmenu = ref<ContextSubmenu>(null)
@@ -2485,7 +1479,7 @@ const dbAiPaneContext = reactive<DbAiPaneContext>({
 })
 const dbAiPaneDraft = ref('')
 const dbAiPaneMessages = ref<DbAiPaneMessage[]>([])
-const dbAiPaneMessageListRef = ref<HTMLElement | null>(null)
+const databaseAiPanelsRef = ref<{ scrollPaneMessagesToBottom: () => void } | null>(null)
 let dbAiPaneResizeStartX = 0
 let dbAiPaneResizeStartWidth = DB_AI_PANE_DEFAULT_WIDTH
 let dbAiPaneContextTouched = false
@@ -3024,22 +2018,6 @@ function toggleSchemaObjectFolder(connectionId: string, catalogName: string, sch
 
 function toggleTable(tableId: string) {
   expandedTables.value = toggleId(expandedTables.value, tableId)
-}
-
-function isCatalogExpanded(connectionId: string, catalogName: string) {
-  return expandedCatalogs.value.includes(`${connectionId}:${catalogName}`)
-}
-
-function isSchemaExpanded(connectionId: string, catalogName: string, schemaName: string) {
-  return expandedSchemas.value.includes(`${connectionId}:${catalogName}:${schemaName}`)
-}
-
-function isSchemaObjectFolderExpanded(connectionId: string, catalogName: string, schemaName: string, kind: SchemaObjectKind) {
-  return expandedSchemaObjectFolders.value.includes(schemaObjectFolderKey(connectionId, catalogName, schemaName, kind))
-}
-
-function isTableExpanded(tableId: string) {
-  return expandedTables.value.includes(tableId)
 }
 
 function registerWorkspaceTabRef(tabId: string, el: Element | ComponentPublicInstance | null) {
@@ -3690,8 +2668,7 @@ function dbAiPaneStatusLabel(status: DbAiPaneMessageStatus) {
 
 function scrollDbAiPaneMessagesToBottom() {
   void nextTick(() => {
-    const el = dbAiPaneMessageListRef.value
-    if (el) el.scrollTop = el.scrollHeight
+    databaseAiPanelsRef.value?.scrollPaneMessagesToBottom()
   })
 }
 
@@ -5047,7 +4024,7 @@ function toggleAddMenu() {
     addMenuOpen.value = false
     return
   }
-  const rect = addButtonRef.value?.getBoundingClientRect()
+  const rect = databaseSidebarTreeRef.value?.addButtonRect()
   addMenuPosition.value = {
     x: rect ? rect.right - 160 : 80,
     y: rect ? rect.bottom + 6 : 44
@@ -5059,12 +4036,12 @@ function toggleAddMenu() {
 function focusDatabaseSearch() {
   sidebarCollapsed.value = false
   keyword.value = ''
-  nextTick(() => searchInputRef.value?.focus())
+  nextTick(() => databaseSidebarTreeRef.value?.focusSearch())
 }
 
 function clearDatabaseSearch() {
   keyword.value = ''
-  nextTick(() => searchInputRef.value?.focus())
+  nextTick(() => databaseSidebarTreeRef.value?.focusSearch())
 }
 
 function openOverviewEngine(engine: DatabaseEngineInfo) {

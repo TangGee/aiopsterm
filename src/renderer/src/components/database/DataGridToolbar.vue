@@ -140,15 +140,12 @@ function changePageSize(size: number) {
         class="db-toolbar-total"
         title="Refresh total"
         @click="emit('refreshTotal')"
-      >
-        Total:
+      >Total:
         <span
           v-if="total === null || total === undefined"
           class="db-toolbar-total-unknown"
-        >
-          ?
-        </span>
-        <template v-else>{{ total }}</template>
+        >?</span>
+        <template v-else> {{ total }}</template>
       </span>
     </div>
     <div class="db-toolbar-group">

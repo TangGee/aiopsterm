@@ -54,7 +54,7 @@ const filterAnchor = ref({ left: 8, top: 8 })
 const filterSearch = ref('')
 const filterSelection = ref<Set<string>>(new Set())
 const filterLoading = ref(false)
-const editInputRef = ref<HTMLInputElement | null>(null)
+const editInputRef = ref<HTMLInputElement | HTMLInputElement[] | null>(null)
 
 const filterValues = computed(() => {
   const column = openFilterColumn.value
@@ -219,8 +219,9 @@ function startEdit(origin: 'row' | 'new', key: string, column: string, value: un
   if (origin === 'row' && props.deletedRowKeys.has(key)) return
   editing.value = { origin, rowKey: key, column, value: formatCellValue(value) }
   nextTick(() => {
-    editInputRef.value?.focus()
-    editInputRef.value?.select()
+    const input = Array.isArray(editInputRef.value) ? editInputRef.value.find((item) => item instanceof HTMLInputElement) : editInputRef.value
+    if (typeof input?.focus === 'function') input.focus()
+    if (typeof input?.select === 'function') input.select()
   })
 }
 
