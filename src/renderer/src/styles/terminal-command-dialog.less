@@ -1,0 +1,187 @@
+
+.terminal-command-dialog {
+  position: absolute;
+  z-index: 12;
+  max-width: calc(100% - 36px);
+  outline: 0;
+  animation: terminal-command-dialog-in 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.command-dialog-card {
+  position: relative;
+  min-width: 280px;
+  max-width: 600px;
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface) 96%, transparent);
+  color: var(--text);
+  box-shadow: 0 12px 36px rgb(0 0 0 / 0.32);
+  backdrop-filter: blur(16px);
+  overflow: hidden;
+}
+
+.command-dialog-card:focus-within {
+  border-color: color-mix(in srgb, var(--accent) 72%, var(--border));
+  box-shadow:
+    0 12px 36px rgb(0 0 0 / 0.32),
+    0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.command-dialog-card textarea {
+  width: 100%;
+  min-height: 30px;
+  max-height: 130px;
+  border: 0;
+  outline: 0;
+  resize: none;
+  padding: 8px 38px 6px 14px;
+  background: transparent;
+  color: var(--text);
+  font: 13px/1.5 Inter, ui-sans-serif, system-ui, sans-serif;
+  overflow: hidden;
+}
+
+.command-dialog-card textarea::placeholder {
+  color: var(--muted);
+}
+
+.command-dialog-card footer {
+  min-height: 30px;
+  padding: 0 12px 7px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.command-dialog-card footer > span {
+  min-width: 72px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 11px;
+  opacity: 0;
+}
+
+.command-dialog-card footer > span.visible {
+  opacity: 1;
+}
+
+.command-dialog-card footer > span svg {
+  width: 13px;
+  height: 13px;
+  color: var(--accent);
+  animation: terminal-command-spin 0.9s linear infinite;
+}
+
+.command-dialog-card footer > div {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.command-dialog-card select {
+  max-width: 160px;
+  height: 24px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 11px;
+}
+
+.command-dialog-card small {
+  color: var(--muted);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.command-dialog-card kbd {
+  min-width: 18px;
+  min-height: 18px;
+  padding: 1px 5px;
+  border: 1px solid color-mix(in srgb, var(--muted) 45%, transparent);
+  border-radius: 4px;
+  background: rgb(255 255 255 / 0.08);
+  color: var(--muted);
+  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 10px;
+}
+
+.command-dialog-close {
+  position: absolute;
+  top: 7px;
+  right: 8px;
+  z-index: 1;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 5px;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.command-dialog-close:hover {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.command-dialog-card p {
+  margin: 0 12px 8px;
+  color: var(--danger);
+  font-size: 11px;
+}
+
+.generated-command-row {
+  margin: 0 12px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  background: var(--surface-2);
+}
+
+.generated-command-row code {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 7px 8px;
+  color: var(--accent-2);
+  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 12px;
+}
+
+.generated-command-row button {
+  height: 28px;
+  margin-right: 3px;
+  border: 0;
+  border-radius: 5px;
+  background: var(--surface-3);
+  color: var(--text);
+  padding: 0 10px;
+}
+
+@keyframes terminal-command-dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes terminal-command-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
