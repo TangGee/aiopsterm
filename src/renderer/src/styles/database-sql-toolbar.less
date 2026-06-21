@@ -1,0 +1,87 @@
+.db-sql-workspace,
+.db-data-workspace {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.db-sql-toolbar {
+  flex: 0 0 36px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.db-sql-toolbar button:first-child {
+  color: #22c55e;
+}
+
+.db-ai-toolbar {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.db-ai-toolbar button {
+  color: color-mix(in srgb, var(--accent) 72%, var(--text));
+}
+
+.db-ai-toolbar button:nth-child(2) {
+  color: #eab308;
+}
+
+.db-ai-toolbar button:nth-child(3) {
+  color: #38bdf8;
+}
+
+.db-ai-toolbar button:nth-child(4),
+.db-ai-toolbar button:nth-child(5) {
+  color: #a78bfa;
+}
+
+.db-sql-toolbar-run {
+  color: var(--success);
+}
+
+.db-sql-toolbar-run-current,
+.db-sql-toolbar-explain {
+  color: color-mix(in srgb, var(--accent) 78%, var(--text));
+}
+
+.db-sql-toolbar-format {
+  color: var(--text);
+}
+
+.db-sql-toolbar button:disabled,
+.db-toolbar button:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+
+.db-sql-toolbar select {
+  height: 24px;
+  border-radius: 5px;
+  padding: 0 7px;
+}
+
+.db-picker--connection {
+  min-width: 140px;
+}
+
+.db-picker--database,
+.db-picker--schema {
+  min-width: 120px;
+}
+
+.db-toolbar-divider {
+  width: 1px;
+  height: 18px;
+  margin: 0 4px;
+  background: var(--border);
+}
+
+.db-toolbar-spacer {
+  flex: 1;
+}

@@ -1,0 +1,160 @@
+.chat-input {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
+  padding: 8px;
+  position: relative;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  min-width: 0;
+  overflow: visible;
+}
+
+.chat-input.drop-active {
+  border-color: color-mix(in srgb, var(--accent) 62%, var(--border));
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+}
+
+.chat-input.drop-active::after {
+  content: "添加知识库上下文";
+  position: absolute;
+  inset: 6px;
+  border: 1px dashed color-mix(in srgb, var(--accent) 62%, transparent);
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--surface) 72%, transparent);
+  pointer-events: none;
+  font-size: 12px;
+}
+
+.chat-input textarea,
+.chat-editable {
+  min-width: 0;
+  width: 100%;
+  min-height: 78px;
+  max-height: 160px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  outline: 0;
+  background: var(--surface-2);
+  color: var(--text);
+  padding: 8px 9px;
+  resize: none;
+}
+
+.app-shell.has-app-background .chat-input {
+  background: color-mix(in srgb, var(--surface-2) 30%, transparent);
+  backdrop-filter: blur(14px);
+}
+
+.app-shell.has-app-background .chat-input textarea,
+.app-shell.has-app-background .chat-editable,
+.app-shell.has-app-background .ai-control-select,
+.app-shell.has-app-background .select-popup,
+.app-shell.has-app-background .select-popup input,
+.app-shell.has-app-background .context-trigger-tag,
+.app-shell.has-app-background .context-tag,
+.app-shell.has-app-background .mention-chip {
+  background: var(--readable-surface);
+}
+
+.app-shell.has-app-background .select-popup {
+  backdrop-filter: blur(16px);
+}
+
+.app-shell.has-app-background .select-list button:hover,
+.app-shell.has-app-background .select-list button.keyboard-selected,
+.app-shell.has-app-background .ai-control-select:hover,
+.app-shell.has-app-background .context-tag button:hover,
+.app-shell.has-app-background .mention-chip button:hover,
+.app-shell.has-app-background .host-batch-footer .batch-action-btn:hover {
+  background: var(--glass-surface-3);
+}
+
+.chat-editable {
+  display: block;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.45;
+}
+
+.chat-editable.is-empty::before {
+  content: attr(data-placeholder);
+  color: var(--muted);
+  pointer-events: none;
+  position: absolute;
+}
+
+.chat-editable:focus {
+  border-color: color-mix(in srgb, var(--accent) 54%, var(--border));
+}
+
+.file-placeholder-button,
+.file-upload-button,
+.voice-placeholder-button,
+.voice-input-button {
+  color: var(--muted);
+  opacity: 0.58;
+}
+
+.file-placeholder-button:hover:not(:disabled),
+.file-upload-button:hover:not(:disabled),
+.voice-placeholder-button:hover:not(:disabled),
+.voice-input-button:hover:not(:disabled) {
+  color: var(--text);
+  opacity: 0.86;
+}
+
+.file-placeholder-button:disabled,
+.file-upload-button:disabled,
+.voice-placeholder-button:disabled,
+.voice-input-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
+.voice-input-button.recording {
+  color: #ffffff;
+  background: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 70%, var(--border));
+  opacity: 1;
+}
+
+.voice-input-button.transcribing svg {
+  animation: spin 0.9s linear infinite;
+}
+
+.voice-recording-animation {
+  position: relative;
+  width: 18px;
+  height: 18px;
+  display: inline-block;
+}
+
+.voice-recording-pulse {
+  position: absolute;
+  inset: 5px;
+  border-radius: 999px;
+  background: #ffffff;
+  animation: voicePulse 1.5s infinite;
+}
+
+@keyframes voicePulse {
+  0% {
+    transform: scale(1);
+    opacity: 1;
+  }
+
+  50% {
+    transform: scale(1.65);
+    opacity: 0.68;
+  }
+
+  100% {
+    transform: scale(2.2);
+    opacity: 0;
+  }
+}

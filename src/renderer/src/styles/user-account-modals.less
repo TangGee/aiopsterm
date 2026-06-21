@@ -1,0 +1,81 @@
+
+.user-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: grid;
+  place-items: center;
+  background: rgb(0 0 0 / 0.48);
+}
+
+.user-modal-card {
+  width: min(420px, calc(100vw - 32px));
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  padding: 14px;
+  display: grid;
+  gap: 12px;
+}
+
+.user-modal-card header,
+.user-modal-card footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.user-modal-card h3 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.user-modal-card header button {
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+}
+
+.user-modal-card label {
+  display: grid;
+  gap: 7px;
+}
+
+.user-modal-card label span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.user-modal-error {
+  margin: -4px 0 0;
+  color: var(--danger);
+  font-size: 12px;
+}
+
+.user-code-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.password-strength {
+  margin: 0;
+  font-size: 12px;
+}
+
+.password-strength.weak {
+  color: var(--danger);
+}
+
+.password-strength.medium {
+  color: var(--warn);
+}
+
+.password-strength.strong {
+  color: var(--accent-2);
+}

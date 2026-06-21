@@ -1,0 +1,169 @@
+
+.select-popup {
+  position: absolute;
+  left: 7px;
+  bottom: calc(100% + 8px);
+  z-index: 40;
+  width: min(300px, calc(100% - 14px));
+  max-height: 300px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.select-popup header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border-bottom: 1px solid var(--border);
+  padding: 8px;
+}
+
+.select-popup header button {
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.select-popup input {
+  min-width: 0;
+  width: 100%;
+  height: 26px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  outline: 0;
+  background: var(--surface-2);
+  color: var(--text);
+  padding: 0 8px;
+}
+
+.select-list {
+  max-height: 232px;
+  overflow: auto;
+  padding: 4px;
+}
+
+.select-list button {
+  width: 100%;
+  min-height: 30px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 7px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.select-list button:hover,
+.select-list button.keyboard-selected {
+  background: var(--surface-3);
+}
+
+.select-list button.selected {
+  color: var(--accent);
+}
+
+.select-list button span,
+.select-list button em {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.select-list i {
+  display: block;
+  height: 1px;
+  margin: 4px;
+  background: var(--border);
+}
+
+.select-list small {
+  display: block;
+  padding: 14px 8px;
+  text-align: center;
+}
+
+.select-list.has-footer {
+  max-height: 196px;
+}
+
+.host-batch-footer {
+  min-height: 36px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+}
+
+.host-batch-footer .batch-action-btn {
+  min-width: 0;
+  height: 24px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.host-batch-footer .batch-action-btn:hover {
+  color: var(--accent);
+  background: var(--surface-3);
+}
+
+.host-batch-footer .batch-action-btn svg {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
+}
+
+.command-select-popup {
+  width: min(300px, calc(100% - 14px));
+  max-height: 280px;
+  border-radius: 6px;
+  box-shadow: 0 -2px 12px rgba(0, 0, 0, 0.15);
+}
+
+.command-select-popup .select-list {
+  max-height: 220px;
+  padding: 4px 0;
+  scrollbar-width: thin;
+}
+
+.command-select-popup .select-list button {
+  min-height: 30px;
+  margin: 2px 4px;
+  padding: 6px 12px;
+  border-radius: 4px;
+  font-size: 12px;
+  line-height: 18px;
+  grid-template-columns: 12px minmax(0, 1fr);
+  transition: all 0.15s;
+}
+
+.command-select-popup .select-list button svg {
+  width: 12px;
+  height: 12px;
+  color: var(--muted);
+}
+
+.command-select-popup .select-list button.keyboard-selected {
+  outline: 2px solid rgba(24, 144, 255, 0.4);
+  outline-offset: -2px;
+}

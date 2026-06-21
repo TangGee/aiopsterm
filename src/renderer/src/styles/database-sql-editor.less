@@ -1,0 +1,152 @@
+
+.db-sql-panes {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-rows:
+    minmax(120px, var(--db-sql-editor-ratio, 45fr))
+    8px
+    minmax(120px, var(--db-sql-result-ratio, 55fr));
+}
+
+.db-sql-panes.resizing {
+  cursor: row-resize;
+  user-select: none;
+}
+
+.db-sql-editor-shell {
+  position: relative;
+  min-height: 0;
+  border-bottom: 1px solid var(--border);
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) 24px;
+  overflow: hidden;
+  background: var(--surface-2);
+  cursor: text;
+}
+
+.db-sql-splitter {
+  min-height: 8px;
+  height: 8px;
+  padding: 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface);
+  cursor: row-resize;
+}
+
+.db-sql-splitter:hover,
+.db-sql-panes.resizing .db-sql-splitter {
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+}
+
+.db-sql-splitter span {
+  width: 34px;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--border);
+}
+
+.db-sql-splitter:hover span,
+.db-sql-panes.resizing .db-sql-splitter span {
+  background: var(--accent);
+}
+
+.db-sql-editor-gutter {
+  grid-column: 1;
+  grid-row: 1;
+  padding: 12px 8px 12px 0;
+  border-right: 1px solid var(--border);
+  color: var(--muted);
+  background: var(--surface);
+  font-family: var(--editor-font-family);
+  font-size: var(--db-sql-editor-font-size, var(--editor-font-size));
+  line-height: var(--db-sql-editor-line-height, var(--editor-line-height));
+  text-align: right;
+  pointer-events: none;
+  will-change: transform;
+}
+
+.db-sql-editor-gutter span {
+  display: block;
+  height: var(--db-sql-editor-line-height, var(--editor-line-height));
+  padding-right: 8px;
+}
+
+.db-sql-editor-gutter span.active {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.db-sql-editor-surface {
+  position: relative;
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background:
+    linear-gradient(to bottom, color-mix(in srgb, var(--border) 55%, transparent) 1px, transparent 1px) 0 11px / 100% var(--db-sql-editor-line-height, var(--editor-line-height)),
+    var(--surface-2);
+}
+
+.db-sql-monaco-editor,
+.db-sql-monaco-surface {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
+.db-sql-editor-active-line {
+  position: absolute;
+  top: 12px;
+  left: 0;
+  right: 0;
+  height: var(--db-sql-editor-line-height, var(--editor-line-height));
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+  pointer-events: none;
+  will-change: transform;
+}
+
+.db-sql-editor {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  resize: none;
+  border: 0;
+  padding: 12px;
+  font-family: var(--editor-font-family);
+  font-size: var(--db-sql-editor-font-size, var(--editor-font-size));
+  line-height: var(--db-sql-editor-line-height, var(--editor-line-height));
+  color: var(--text);
+  background: transparent;
+  caret-color: var(--accent);
+  white-space: pre;
+  overflow: auto;
+  tab-size: var(--db-sql-editor-tab-size, var(--editor-tab-size));
+}
+
+:root[data-editor-word-wrap='on'] .db-sql-editor {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.db-sql-monaco-editor.monaco-ready .db-sql-editor-fallback {
+  position: absolute;
+  inset: 0;
+  width: 1px;
+  height: 1px;
+  min-height: 0;
+  padding: 0;
+  opacity: 0;
+  pointer-events: none;
+}

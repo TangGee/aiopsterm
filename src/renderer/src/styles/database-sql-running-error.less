@@ -1,0 +1,92 @@
+
+.db-result-running {
+  flex: 1;
+  min-height: 0;
+  padding: 18px;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  color: var(--muted);
+}
+
+.db-result-running strong {
+  display: block;
+  margin-bottom: 3px;
+  color: var(--text);
+}
+
+.db-result-running small {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.db-result-running p {
+  margin: 0;
+  max-width: 760px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 12px;
+}
+
+.db-result-error {
+  padding: 12px 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--danger);
+}
+
+.db-result-error-text {
+  flex: 1;
+  min-width: 0;
+  word-break: break-word;
+}
+
+.db-result-diagnose-success {
+  flex-shrink: 0;
+  color: var(--success);
+  font-size: 11px;
+}
+
+.db-result-diagnose-error {
+  flex-shrink: 0;
+  color: var(--danger);
+  font-size: 11px;
+}
+
+.db-result-error button,
+.db-result-diagnose-btn {
+  border: 1px solid color-mix(in srgb, #a78bfa 70%, var(--border));
+  border-radius: 5px;
+  padding: 4px 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: #a78bfa;
+}
+
+.db-result-diagnose-btn.loading,
+.db-result-diagnose-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.db-result-diagnose-spinner {
+  width: 11px;
+  height: 11px;
+  border: 1.5px solid rgba(167, 139, 250, 0.3);
+  border-top-color: #a78bfa;
+  border-radius: 50%;
+  animation: sql-diagnose-spin 0.7s linear infinite;
+}
+
+@keyframes sql-diagnose-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

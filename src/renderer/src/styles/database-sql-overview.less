@@ -1,0 +1,97 @@
+
+.db-sql-overview {
+  flex: 1;
+  padding: 14px;
+  overflow: auto;
+}
+
+.db-sql-overview table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.db-sql-overview th:nth-child(1),
+.db-sql-overview td:nth-child(1) {
+  width: 70%;
+}
+
+.db-sql-overview th:nth-child(2),
+.db-sql-overview td:nth-child(2) {
+  width: 18%;
+}
+
+.db-sql-overview th:nth-child(3),
+.db-sql-overview td:nth-child(3) {
+  width: 12%;
+}
+
+.db-sql-overview th,
+.db-sql-overview td {
+  border-bottom: 1px solid var(--border);
+  padding: 7px 9px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.db-sql-overview th {
+  position: sticky;
+  top: 0;
+  background: var(--surface);
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.db-sql-overview tr {
+  cursor: pointer;
+}
+
+.db-sql-overview tbody tr:hover {
+  background: var(--surface-3);
+}
+
+.db-sql-overview tr.closed {
+  cursor: default;
+  opacity: 0.58;
+}
+
+.db-sql-overview tr.closed:hover {
+  background: transparent;
+}
+
+.db-sql-overview td:first-child {
+  max-width: none;
+  white-space: nowrap;
+}
+
+.db-sql-overview td:first-child .db-result-dot {
+  display: inline-block;
+  margin-right: 7px;
+  vertical-align: middle;
+}
+
+.db-sql-overview code {
+  max-width: calc(100% - 18px);
+  display: inline-block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+  color: var(--text);
+  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+}
+
+.db-sql-overview strong {
+  display: block;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.db-sql-overview strong.ok {
+  color: var(--accent-2);
+}
+
+.db-sql-overview strong.error {
+  color: var(--danger);
+}
