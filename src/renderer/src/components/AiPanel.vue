@@ -1680,19 +1680,14 @@ import {
 } from '@/services/aiPanelEditableRuntime'
 import {
   allVisibleAiPanelHostsSelected,
-  backAiPanelDocsDir,
   clearAiPanelHostContexts,
   cloneAiPanelCommandOptions,
   cloneAiPanelContextCategories,
-  enterAiPanelDocsDir,
   filteredAiPanelCommands,
   filteredAiPanelContextOptions,
   filteredAiPanelOpenedHosts,
-  mainContextKeyboardSelection,
-  nextAiPanelPopupKeyboardIndex,
   planAiPanelCommandApply,
   planAiPanelContextApply,
-  resetAiPanelDocsNavigation,
   selectedAiPanelCommand,
   selectedAiPanelCommandRef,
   selectedAiPanelContextCategory,
@@ -1702,6 +1697,10 @@ import {
   visibleAiPanelHostContextOptions,
   type AiPanelContextCategoryView
 } from '@/services/aiPanelPopupRuntime'
+import {
+  createAiPanelPopupInteractionRuntime,
+  createEmptyAiPanelPopupInteractionState
+} from '@/services/aiPanelPopupInteractionRuntime'
 import {
   createAiPanelModelRuntime,
   createEmptyAiPanelModelRuntimeState,
@@ -1834,17 +1833,18 @@ const contextSearchInputRef = ref<HTMLInputElement | null>(null)
 const commandSearchInputRef = ref<HTMLInputElement | null>(null)
 const savedRange = ref<Range | null>(null)
 const editSavedRange = ref<Range | null>(null)
-const contextPopupOpen = ref(false)
-const commandPopupOpen = ref(false)
-const contextTarget = ref<'main' | 'edit'>('main')
-const commandTarget = ref<'main' | 'edit'>('main')
-const contextLevel = ref<'main' | AiContextKind>('main')
-const contextQuery = ref('')
-const commandQuery = ref('')
-const contextKeyboardIndex = ref(-1)
-const commandKeyboardIndex = ref(-1)
-const docsCurrentRelDir = ref('')
-const docsDirStack = ref<string[]>([])
+const popupInteractionState = reactive(createEmptyAiPanelPopupInteractionState())
+const contextPopupOpen = toRef(popupInteractionState, 'contextPopupOpen')
+const commandPopupOpen = toRef(popupInteractionState, 'commandPopupOpen')
+const contextTarget = toRef(popupInteractionState, 'contextTarget')
+const commandTarget = toRef(popupInteractionState, 'commandTarget')
+const contextLevel = toRef(popupInteractionState, 'contextLevel')
+const contextQuery = toRef(popupInteractionState, 'contextQuery')
+const commandQuery = toRef(popupInteractionState, 'commandQuery')
+const contextKeyboardIndex = toRef(popupInteractionState, 'contextKeyboardIndex')
+const commandKeyboardIndex = toRef(popupInteractionState, 'commandKeyboardIndex')
+const docsCurrentRelDir = toRef(popupInteractionState, 'docsCurrentRelDir')
+const docsDirStack = toRef(popupInteractionState, 'docsDirStack')
 const modelRuntimeState = reactive(createEmptyAiPanelModelRuntimeState())
 const chatMode = toRef(modelRuntimeState, 'chatMode')
 const modeMenuOpen = toRef(modelRuntimeState, 'modeMenuOpen')
@@ -2707,41 +2707,10 @@ const shouldTriggerCommandPopupFromEditableText = () => {
   return /(?:^|\s)\/$/.test(text)
 }
 
-const openCommandPopupForTarget = async (target: 'main' | 'edit') => {
-  if (target === 'edit') {
-    saveEditSelection()
-  } else {
-    saveEditableSelection()
-  }
-  await workspace.refreshAiCommandCatalog()
-  commandTarget.value = target
-  commandPopupOpen.value = true
-  closeContextPopup()
-  aiPanelModelRuntime.closeModeMenu()
-  closeModelMenu()
-  commandQuery.value = ''
-  commandKeyboardIndex.value = -1
-  await nextTick()
-  commandSearchInputRef.value?.focus()
-}
+const openCommandPopupForTarget = (target: 'main' | 'edit') => aiPanelPopupInteractionRuntime.openCommandPopupForTarget(target)
 
 function openContextPopupForTarget(target: 'main' | 'edit', level: 'main' | AiContextKind = 'main') {
-  if (target === 'edit') {
-    saveEditSelection()
-  } else {
-    saveEditableSelection()
-  }
-  contextTarget.value = target
-  contextPopupOpen.value = true
-  closeCommandPopup()
-  aiPanelModelRuntime.closeModeMenu()
-  closeModelMenu()
-  contextLevel.value = level
-  contextQuery.value = ''
-  contextKeyboardIndex.value = -1
-  if (level === 'docs') resetDocsContextNavigation()
-  void workspace.refreshAiContextCatalog({ hydrateSelection: false })
-  void nextTick(() => contextSearchInputRef.value?.focus())
+  aiPanelPopupInteractionRuntime.openContextPopupForTarget(target, level)
 }
 
 const renderPartsIntoEditable = (editable: HTMLElement, parts: AiContentPart[]) =>
@@ -2884,65 +2853,7 @@ const confirmMessageEdit = async () => {
 }
 
 const handleEditEditableKeydown = (event: KeyboardEvent) => {
-  if (event.key === '@' && !event.isComposing) {
-    window.setTimeout(() => {
-      openContextPopupForTarget('edit')
-    }, 0)
-    return
-  }
-
-  if (event.key === '/' && !event.isComposing) {
-    const shouldOpenAfterKey = shouldTriggerCommandPopupForPendingSlash(editEditableRef.value, editSavedRange.value)
-    window.setTimeout(() => {
-      saveEditSelection()
-      if (!shouldOpenAfterKey && getCharBeforeCaret(editEditableRef.value, editSavedRange.value) !== '/') return
-      if (!shouldOpenAfterKey && !shouldTriggerCommandPopupForSlash(editEditableRef.value, editSavedRange.value)) return
-      void openCommandPopupForTarget('edit')
-    }, 0)
-    return
-  }
-
-  if (event.key === 'Escape') {
-    event.preventDefault()
-    if (contextPopupOpen.value && contextTarget.value === 'edit') {
-      if (contextLevel.value !== 'main') {
-        goBackContextPopup()
-      } else {
-        closeContextPopup({ restoreFocus: true })
-      }
-      return
-    }
-    if (commandPopupOpen.value && commandTarget.value === 'edit') {
-      closeCommandPopup({ restoreFocus: true })
-      return
-    }
-    cancelMessageEdit()
-    return
-  }
-
-  if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
-    event.preventDefault()
-    if (contextPopupOpen.value && contextTarget.value === 'edit') {
-      if (contextLevel.value === 'main') {
-        if (contextKeyboardIndex.value >= 0 && contextKeyboardIndex.value < displayedOpenedHosts.value.length) {
-          applyContext(displayedOpenedHosts.value[contextKeyboardIndex.value])
-        } else if (contextKeyboardIndex.value >= displayedOpenedHosts.value.length) {
-          const category = visibleContextCategories.value[contextKeyboardIndex.value - displayedOpenedHosts.value.length]
-          if (category) openContextCategory(category.id)
-        }
-      } else {
-        const option = filteredContextOptions.value[contextKeyboardIndex.value]
-        if (option) applyContext(option)
-      }
-      return
-    }
-    if (commandPopupOpen.value && commandTarget.value === 'edit') {
-      const preset = filteredCommands.value[commandKeyboardIndex.value]
-      if (preset) applyCommand(preset)
-      return
-    }
-    confirmMessageEdit()
-  }
+  aiPanelPopupInteractionRuntime.handleEditEditableKeydown(event, popupEditableKeydownInput())
 }
 
 const saveEditableSelection = () => {
@@ -3111,23 +3022,10 @@ const handleDrop = async (event: DragEvent) => {
 }
 
 const closePopups = (options: { restoreCommandFocus?: boolean; restoreContextFocus?: boolean } = {}) => {
-  closeContextPopup({ restoreFocus: options.restoreContextFocus })
-  closeCommandPopup({ restoreFocus: options.restoreCommandFocus })
-  closeCodexTargetPicker()
-  moreActionsMenuOpen.value = false
-  aiPanelModelRuntime.closeModeMenu()
-  panelModeMenuOpen.value = false
-  aiPanelModelRuntime.closeModelMenu()
-  closeHistoryMenu()
+  aiPanelPopupInteractionRuntime.closePopups(options)
 }
 
-const toggleContextPopup = () => {
-  if (contextPopupOpen.value) {
-    closeContextPopup({ restoreFocus: true })
-    return
-  }
-  openContextPopupForTarget('main')
-}
+const toggleContextPopup = () => aiPanelPopupInteractionRuntime.toggleContextPopup()
 
 const toggleModeMenu = () => {
   aiPanelModelRuntime.toggleModeMenu()
@@ -3145,64 +3043,11 @@ const openModelLogin = () => void aiPanelModelRuntime.openModelLogin()
 
 const handleModelKeydown = (event: KeyboardEvent) => void aiPanelModelRuntime.handleModelKeydown(event)
 
-const resetDocsContextNavigation = () => {
-  const next = resetAiPanelDocsNavigation()
-  docsCurrentRelDir.value = next.currentRelDir
-  docsDirStack.value = next.dirStack
-  contextQuery.value = next.query
-  contextKeyboardIndex.value = next.keyboardIndex
-}
-
-const focusContextSearchInput = () => {
-  void nextTick(() => {
-    if (contextPopupOpen.value) contextSearchInputRef.value?.focus()
-  })
-}
-
-const enterDocsDir = (context: AiContextOption) => {
-  const next = enterAiPanelDocsDir({ currentRelDir: docsCurrentRelDir.value, dirStack: docsDirStack.value }, context)
-  if (!next) return
-  docsCurrentRelDir.value = next.currentRelDir
-  docsDirStack.value = next.dirStack
-  contextQuery.value = next.query
-  contextKeyboardIndex.value = next.keyboardIndex
-  focusContextSearchInput()
-}
-
-const goBackDocsDir = () => {
-  const next = backAiPanelDocsDir({ dirStack: docsDirStack.value })
-  if (!next) return false
-  docsCurrentRelDir.value = next.currentRelDir
-  docsDirStack.value = next.dirStack
-  contextQuery.value = next.query
-  contextKeyboardIndex.value = next.keyboardIndex
-  focusContextSearchInput()
-  return true
-}
-
-const returnContextPopupToMain = () => {
-  contextLevel.value = 'main'
-  contextQuery.value = ''
-  contextKeyboardIndex.value = -1
-  resetDocsContextNavigation()
-  focusContextSearchInput()
-}
-
-const goBackContextPopup = () => {
-  if (contextLevel.value === 'docs' && goBackDocsDir()) return
-  returnContextPopupToMain()
-}
-
-const closeContextPopup = (options: { restoreFocus?: boolean } = {}) => {
-  const previousTarget = contextTarget.value
-  const wasOpen = contextPopupOpen.value
-  contextPopupOpen.value = false
-  contextTarget.value = 'main'
-  returnContextPopupToMain()
-  if (wasOpen && options.restoreFocus) {
-    focusInputForTarget(previousTarget)
-  }
-}
+const resetDocsContextNavigation = () => aiPanelPopupInteractionRuntime.resetDocsContextNavigation()
+const enterDocsDir = (context: AiContextOption) => aiPanelPopupInteractionRuntime.enterDocsDir(context)
+const goBackContextPopup = () => aiPanelPopupInteractionRuntime.goBackContextPopup()
+const returnContextPopupToMain = () => aiPanelPopupInteractionRuntime.returnContextPopupToMain()
+const closeContextPopup = (options: { restoreFocus?: boolean } = {}) => aiPanelPopupInteractionRuntime.closeContextPopup(options)
 
 const moveEditCaretToEnd = () => {
   const editable = editEditableRef.value
@@ -3255,27 +3100,38 @@ function focusInputForTarget(target: 'main' | 'edit') {
   })
 }
 
-const closeCommandPopup = (options: { restoreFocus?: boolean } = {}) => {
-  const previousTarget = commandTarget.value
-  const wasOpen = commandPopupOpen.value
-  commandPopupOpen.value = false
-  commandTarget.value = 'main'
-  commandQuery.value = ''
-  commandKeyboardIndex.value = -1
-  if (wasOpen && options.restoreFocus) {
-    focusInputForTarget(previousTarget)
-  }
-}
+const aiPanelPopupInteractionRuntime = createAiPanelPopupInteractionRuntime({
+  state: popupInteractionState,
+  saveSelection: (target) => {
+    if (target === 'edit') {
+      saveEditSelection()
+      return
+    }
+    saveEditableSelection()
+  },
+  focusInputForTarget,
+  focusContextSearchInput: () => contextSearchInputRef.value?.focus(),
+  focusCommandSearchInput: () => commandSearchInputRef.value?.focus(),
+  refreshAiContextCatalog: () => workspace.refreshAiContextCatalog({ hydrateSelection: false }),
+  refreshAiCommandCatalog: () => workspace.refreshAiCommandCatalog(),
+  afterDomUpdate: () => nextTick(),
+  defer: (callback) => window.setTimeout(callback, 0),
+  closeModeMenu: () => aiPanelModelRuntime.closeModeMenu(),
+  closeModelMenu: () => aiPanelModelRuntime.closeModelMenu(),
+  closeCodexTargetPicker,
+  closeMoreActionsMenu: () => {
+    moreActionsMenuOpen.value = false
+  },
+  closePanelModeMenu: () => {
+    panelModeMenuOpen.value = false
+  },
+  closeHistoryMenu,
+  openChatSearch,
+  closeChatSearch
+})
 
-const openContextCategory = async (category: AiContextKind) => {
-  contextLevel.value = category
-  contextQuery.value = ''
-  contextKeyboardIndex.value = -1
-  if (category === 'docs') resetDocsContextNavigation()
-  focusContextSearchInput()
-  await workspace.refreshAiContextCatalog({ hydrateSelection: false })
-  focusContextSearchInput()
-}
+const closeCommandPopup = (options: { restoreFocus?: boolean } = {}) => aiPanelPopupInteractionRuntime.closeCommandPopup(options)
+const openContextCategory = (category: AiContextKind) => aiPanelPopupInteractionRuntime.openContextCategory(category)
 
 const isContextSelected = (context: AiContextOption) => workspace.selectedContexts.some((item) => item.id === context.id)
 
@@ -3394,141 +3250,50 @@ const applyCommand = (preset: AiCommandOption) => {
   requestAnimationFrame(moveEditableCaretToEnd)
 }
 
+const popupEditableKeydownInput = () => ({
+  displayedOpenedHosts: displayedOpenedHosts.value,
+  visibleContextCategories: visibleContextCategories.value,
+  filteredContextOptions: filteredContextOptions.value,
+  filteredCommands: filteredCommands.value,
+  applyContext,
+  applyCommand,
+  handleSend,
+  confirmMessageEdit,
+  cancelMessageEdit,
+  shouldTriggerCommandPopupForPendingSlash: (target: 'main' | 'edit') =>
+    target === 'edit'
+      ? shouldTriggerCommandPopupForPendingSlash(editEditableRef.value, editSavedRange.value)
+      : shouldTriggerCommandPopupForPendingSlash(editableRef.value, savedRange.value),
+  shouldTriggerCommandPopupForSlash: (target: 'main' | 'edit') =>
+    target === 'edit'
+      ? shouldTriggerCommandPopupForSlash(editEditableRef.value, editSavedRange.value)
+      : shouldTriggerCommandPopupForSlash(editableRef.value, savedRange.value),
+  getCharBeforeCaret: (target: 'main' | 'edit') =>
+    target === 'edit' ? getCharBeforeCaret(editEditableRef.value, editSavedRange.value) : getCharBeforeCaret(editableRef.value, savedRange.value),
+  shouldTriggerCommandPopupFromEditableText
+})
+
 const handleEditableKeydown = (event: KeyboardEvent) => {
-  if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
-    event.preventDefault()
-    handleSend()
-    return
-  }
-
-  if (event.key === '@' && !event.isComposing) {
-    window.setTimeout(() => {
-      openContextPopupForTarget('main')
-    }, 0)
-  } else if (event.key === '/' && !event.isComposing) {
-    const shouldOpenAfterKey = shouldTriggerCommandPopupForPendingSlash(editableRef.value, savedRange.value)
-    window.setTimeout(() => {
-      saveEditableSelection()
-      const hasInsertedSlashToken = shouldTriggerCommandPopupFromEditableText()
-      if (!shouldOpenAfterKey && getCharBeforeCaret(editableRef.value, savedRange.value) !== '/' && !hasInsertedSlashToken) return
-      if (!shouldOpenAfterKey && !shouldTriggerCommandPopupForSlash(editableRef.value, savedRange.value) && !hasInsertedSlashToken) return
-      void openCommandPopupForTarget('main')
-    }, 0)
-  } else if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
-    event.preventDefault()
-    handleSend()
-  } else if (event.key === 'Escape' && contextPopupOpen.value && contextTarget.value === 'main') {
-    event.preventDefault()
-    event.stopPropagation()
-    if (contextLevel.value !== 'main') {
-      goBackContextPopup()
-    } else {
-      closeContextPopup({ restoreFocus: true })
-    }
-  } else if (event.key === 'Escape' && commandPopupOpen.value && commandTarget.value === 'main') {
-    event.preventDefault()
-    event.stopPropagation()
-    closeCommandPopup({ restoreFocus: true })
-  }
+  aiPanelPopupInteractionRuntime.handleMainEditableKeydown(event, popupEditableKeydownInput())
 }
 
-const handleContextKeydown = (event: KeyboardEvent) => {
-  const listLength =
-    contextLevel.value === 'main' ? displayedOpenedHosts.value.length + visibleContextCategories.value.length : filteredContextOptions.value.length
-  if (event.key === 'ArrowDown') {
-    event.preventDefault()
-    contextKeyboardIndex.value = nextAiPanelPopupKeyboardIndex(contextKeyboardIndex.value, listLength, 'down', {
-      mainLevel: contextLevel.value === 'main'
-    })
-  } else if (event.key === 'ArrowUp') {
-    event.preventDefault()
-    contextKeyboardIndex.value = nextAiPanelPopupKeyboardIndex(contextKeyboardIndex.value, listLength, 'up', {
-      mainLevel: contextLevel.value === 'main'
-    })
-  } else if (event.key === 'Enter') {
-    event.preventDefault()
-    if (contextLevel.value === 'main') {
-      const selection = mainContextKeyboardSelection(contextKeyboardIndex.value, displayedOpenedHosts.value, visibleContextCategories.value)
-      if (selection.kind === 'host') applyContext(selection.context)
-      if (selection.kind === 'category') void openContextCategory(selection.category.id)
-    } else {
-      const option = filteredContextOptions.value[contextKeyboardIndex.value]
-      if (option) applyContext(option)
-    }
-  } else if (event.key === 'Escape') {
-    event.preventDefault()
-    event.stopPropagation()
-    if (contextLevel.value !== 'main') {
-      goBackContextPopup()
-      return
-    }
-    closeContextPopup({ restoreFocus: true })
-  } else if (event.key === 'Backspace' && contextQuery.value === '' && contextLevel.value !== 'main') {
-    event.preventDefault()
-    goBackContextPopup()
-  }
-}
+const handleContextKeydown = (event: KeyboardEvent) => aiPanelPopupInteractionRuntime.handleContextKeydown(event, popupEditableKeydownInput())
 
 const handlePanelKeydown = (event: KeyboardEvent) => {
-  if (aiPanelMode.value === 'codex') {
-    if (event.key === 'Escape') closePopups()
-    return
-  }
-  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'f') {
-    event.preventDefault()
-    event.stopPropagation()
-    void openChatSearch()
-    return
-  }
-  if (event.key !== 'Escape') return
-  if (chatSearchOpen.value) {
-    event.preventDefault()
-    event.stopPropagation()
-    closeChatSearch()
-    return
-  }
-  if (contextPopupOpen.value) {
-    event.preventDefault()
-    event.stopPropagation()
-    if (contextLevel.value !== 'main') {
-      goBackContextPopup()
-    } else {
-      closeContextPopup({ restoreFocus: true })
-    }
-    return
-  }
-  if (commandPopupOpen.value) {
-    event.preventDefault()
-    event.stopPropagation()
-    closeCommandPopup({ restoreFocus: true })
-  }
+  aiPanelPopupInteractionRuntime.handlePanelKeydown(event, {
+    aiPanelMode: aiPanelMode.value,
+    chatSearchOpen: chatSearchOpen.value
+  })
 }
 
-const handleCommandKeydown = (event: KeyboardEvent) => {
-  const list = filteredCommands.value
-  if (event.key === 'ArrowDown') {
-    event.preventDefault()
-    commandKeyboardIndex.value = nextAiPanelPopupKeyboardIndex(commandKeyboardIndex.value, list.length, 'down')
-  } else if (event.key === 'ArrowUp') {
-    event.preventDefault()
-    commandKeyboardIndex.value = nextAiPanelPopupKeyboardIndex(commandKeyboardIndex.value, list.length, 'up')
-  } else if (event.key === 'Enter') {
-    event.preventDefault()
-    const preset = list[commandKeyboardIndex.value]
-    if (preset) applyCommand(preset)
-  } else if (event.key === 'Escape') {
-    event.preventDefault()
-    event.stopPropagation()
-    closeCommandPopup({ restoreFocus: true })
-  }
-}
+const handleCommandKeydown = (event: KeyboardEvent) => aiPanelPopupInteractionRuntime.handleCommandKeydown(event, popupEditableKeydownInput())
 
 const openContextPopup = (level: 'main' | AiContextKind = 'main') => {
   openContextPopupForTarget('main', level)
 }
 
 watch(contextQuery, () => {
-  contextKeyboardIndex.value = -1
+  aiPanelPopupInteractionRuntime.handleContextQueryChanged()
 })
 
 watch(chatSearchTerm, () => {
