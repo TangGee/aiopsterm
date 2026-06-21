@@ -1,0 +1,256 @@
+
+.file-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  background: rgb(0 0 0 / 0.45);
+}
+
+.file-modal-card {
+  width: 520px;
+  max-width: calc(100vw - 32px);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  padding: 14px;
+  display: grid;
+  gap: 12px;
+}
+
+.file-modal-card.small {
+  width: 430px;
+}
+
+.file-modal-card.permission-modal {
+  width: min(520px, calc(100vw - 32px));
+  padding: 0;
+  overflow: hidden;
+}
+
+.file-delete-confirm p {
+  margin: 0;
+  color: var(--text);
+  line-height: 1.5;
+}
+
+.file-delete-confirm p strong {
+  color: var(--danger);
+  word-break: break-all;
+}
+
+.file-modal-card.add-conn {
+  width: 720px;
+}
+
+.file-modal-card header,
+.file-modal-card footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.file-modal-card footer {
+  justify-content: flex-end;
+}
+
+.file-modal-card footer button {
+  min-width: 68px;
+  height: 30px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.file-modal-card footer button.primary,
+.file-modal-card footer button.danger {
+  background: #1677ff;
+  border-color: #1677ff;
+  color: #fff;
+}
+
+.file-modal-card footer button.danger {
+  background: var(--danger);
+  border-color: var(--danger);
+}
+
+.modal-field,
+.permission-code {
+  display: grid;
+  gap: 5px;
+}
+
+.modal-field span,
+.permission-code span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.breadcrumb-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.breadcrumb-row button {
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface-2);
+  color: var(--text);
+  min-height: 26px;
+  cursor: pointer;
+}
+
+.move-target-path {
+  min-height: 32px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 8px;
+}
+
+.move-target-input {
+  width: 100%;
+}
+
+.move-breadcrumb-row {
+  min-height: 32px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  padding: 4px 6px;
+}
+
+.move-breadcrumb-item {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.move-breadcrumb-part,
+.move-breadcrumb-menu-trigger,
+.move-path-edit-trigger {
+  min-height: 24px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text);
+}
+
+.move-breadcrumb-part:hover,
+.move-breadcrumb-menu-trigger:hover,
+.move-path-edit-trigger:hover {
+  background: var(--surface-3);
+}
+
+.move-breadcrumb-menu-trigger {
+  width: 22px;
+  padding: 0;
+  color: var(--muted);
+}
+
+.move-breadcrumb-menu-trigger svg {
+  width: 14px;
+  height: 14px;
+}
+
+.move-path-edit-trigger {
+  height: 32px;
+  color: #1677ff;
+  white-space: nowrap;
+}
+
+.move-dir-menu {
+  position: absolute;
+  z-index: 95;
+  left: 0;
+  top: calc(100% + 4px);
+  width: 190px;
+  max-height: 220px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  padding: 4px;
+}
+
+.move-dir-menu button,
+.move-dir-menu span {
+  width: 100%;
+  min-height: 30px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text);
+  padding: 0 8px;
+  text-align: left;
+}
+
+.move-dir-menu button:hover {
+  background: var(--surface-3);
+}
+
+.move-dir-menu svg {
+  width: 15px;
+  height: 15px;
+  color: #1677ff;
+}
+
+.move-dir-menu span {
+  color: var(--muted);
+  cursor: default;
+}
+
+.permission-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.permission-grid > label {
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 10px;
+  display: grid;
+  gap: 7px;
+  background: var(--surface-2);
+}
+
+.permission-grid span {
+  font-weight: 700;
+}
+
+.permission-check,
+.permission-recursive {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.file-browser-notice {
+  position: absolute;
+  right: 18px;
+  bottom: 18px;
+  z-index: 20;
+  max-width: min(320px, calc(100% - 36px));
+  border: 1px solid color-mix(in srgb, #1677ff 48%, var(--border));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--surface) 88%, #1677ff 12%);
+  color: var(--text);
+  box-shadow: var(--shadow);
+  padding: 9px 11px;
+  font-size: 12px;
+  font-weight: 700;
+}

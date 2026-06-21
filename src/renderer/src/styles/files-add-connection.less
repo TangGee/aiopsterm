@@ -1,0 +1,56 @@
+
+.add-conn-search {
+  margin: 0;
+}
+
+.add-conn-list {
+  max-height: 320px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 4px;
+}
+
+.add-conn-list button {
+  width: 100%;
+  min-height: 34px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto 18px;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.add-conn-list button:hover,
+.add-conn-list button.keyboard-selected {
+  background: var(--surface-3);
+}
+
+.add-conn-list button.keyboard-selected {
+  outline: 2px solid #1677ff;
+  outline-offset: -2px;
+}
+
+.add-conn-list button.disabled {
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
+.add-conn-list span,
+.add-conn-list small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.add-conn-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}

@@ -1,0 +1,207 @@
+
+.files-workspace {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  background: var(--workspace-bg);
+  position: relative;
+  overflow: hidden;
+}
+
+.files-workspace-tabs {
+  display: flex;
+  align-items: end;
+  gap: 4px;
+  border-bottom: 1px solid var(--border);
+  padding: 4px 10px 0;
+}
+
+.files-workspace-tabs button {
+  height: 32px;
+  min-width: 114px;
+  border: 1px solid var(--border);
+  border-bottom: 0;
+  border-radius: 7px 7px 0 0;
+  background: var(--surface);
+  color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  cursor: pointer;
+}
+
+.files-workspace-tabs button.active {
+  color: var(--text);
+  background: var(--surface-2);
+}
+
+.files-mode-switch {
+  padding: 12px 12px 6px;
+}
+
+.files-mode-switch button {
+  height: 30px;
+  min-width: 92px;
+}
+
+.files-transfer-layout {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) 1px minmax(260px, 1fr);
+  gap: 0;
+  padding: 8px 12px 12px;
+  overflow: hidden;
+}
+
+.files-transfer-divider {
+  background: var(--border);
+}
+
+.files-transfer-side {
+  min-width: 0;
+  min-height: 0;
+  padding: 8px 10px;
+  display: grid;
+}
+
+.files-transfer-side.active {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  outline: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  outline-offset: -4px;
+}
+
+.files-session-card {
+  min-width: 0;
+  min-height: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface) 84%, transparent);
+  display: grid;
+  grid-template-rows: 40px minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.files-session-header {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) repeat(2, 30px);
+  align-items: center;
+  gap: 6px;
+  border-bottom: 1px solid var(--border);
+  padding: 5px 8px;
+}
+
+.files-session-header button,
+.file-icon-button,
+.file-row-actions button,
+.file-more-menu button,
+.file-modal-card header button,
+.transfer-progress-panel button,
+.file-rename-row button {
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.files-session-header button,
+.file-icon-button {
+  width: 30px;
+  height: 30px;
+  color: #1677ff;
+  border-color: color-mix(in srgb, #1677ff 52%, var(--border));
+}
+
+.files-session-header button:hover,
+.file-icon-button:hover,
+.file-row-actions button:hover,
+.file-rename-row button:hover,
+.transfer-progress-panel button:hover {
+  background: var(--surface-3);
+}
+
+.files-session-header select {
+  height: 30px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  padding: 0 8px;
+}
+
+.rotated {
+  transform: rotate(-90deg);
+}
+
+.files-empty-drop {
+  place-self: center;
+  width: min(420px, calc(100% - 32px));
+  min-height: 360px;
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  background: rgb(0 0 0 / 0.08);
+  color: var(--muted);
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 12px;
+  cursor: pointer;
+  transition: border-color 0.12s ease, background-color 0.12s ease, color 0.12s ease;
+}
+
+.files-empty-drop > svg {
+  width: 54px;
+  height: 54px;
+  color: var(--text);
+}
+
+.files-empty-drop strong {
+  color: var(--text);
+  font-size: 16px;
+}
+
+.files-empty-drop.active {
+  border-color: #1677ff;
+  color: var(--accent);
+  background: color-mix(in srgb, #1677ff 16%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, #1677ff 42%, transparent);
+}
+
+.files-default-layout {
+  min-height: 0;
+  overflow: auto;
+  padding: 8px 12px 18px;
+  display: grid;
+  align-content: start;
+  gap: 10px;
+}
+
+.files-default-session {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.files-default-title {
+  width: 100%;
+  height: 38px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  cursor: pointer;
+}
+
+.files-default-title span {
+  color: var(--danger);
+  font-size: 12px;
+}

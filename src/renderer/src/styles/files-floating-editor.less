@@ -1,0 +1,139 @@
+
+.files-floating-editor {
+  position: fixed;
+  z-index: 90;
+  display: grid;
+  grid-template-rows: 40px minmax(0, 1fr) 28px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.files-floating-editor.fullscreen {
+  left: 24px;
+  top: 36px;
+  width: calc(100vw - 48px);
+  height: calc(100vh - 72px);
+  transform: none;
+}
+
+.files-floating-editor.active {
+  z-index: 110;
+}
+
+.files-editor-toolbar {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+  padding: 0 10px;
+  cursor: grab;
+}
+
+.files-editor-toolbar span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  text-align: center;
+}
+
+.files-editor-toolbar > div {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.files-editor-toolbar button {
+  min-width: 30px;
+  height: 28px;
+  border-radius: 5px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.files-editor-toolbar button.primary {
+  min-width: 76px;
+  gap: 6px;
+  background: #1677ff;
+  color: #fff;
+}
+
+.files-monaco-editor,
+.files-monaco-surface {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
+.files-monaco-editor {
+  overflow: hidden;
+  background: color-mix(in srgb, var(--surface) 92%, #000 8%);
+}
+
+.files-floating-editor textarea,
+.files-editor-body {
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
+  height: 100%;
+  resize: none;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+  font-family: var(--editor-font-family);
+  font-size: var(--editor-font-size);
+  line-height: var(--editor-line-height);
+  padding: 12px;
+  outline: none;
+  tab-size: var(--editor-tab-size);
+  white-space: pre;
+}
+
+:root[data-editor-word-wrap='on'] .files-floating-editor textarea,
+:root[data-editor-word-wrap='on'] .files-editor-body {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.files-monaco-editor.monaco-ready .files-editor-fallback {
+  position: absolute;
+  inset: 0;
+  width: 1px;
+  height: 1px;
+  min-height: 0;
+  padding: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.files-floating-editor footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  background: var(--surface-2);
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.files-editor-resize-handle {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 18px;
+  height: 18px;
+  border: 0;
+  background: linear-gradient(135deg, transparent 0 45%, color-mix(in srgb, var(--muted) 70%, transparent) 46% 55%, transparent 56%),
+    linear-gradient(135deg, transparent 0 68%, color-mix(in srgb, var(--muted) 70%, transparent) 69% 78%, transparent 79%);
+  cursor: nwse-resize;
+}

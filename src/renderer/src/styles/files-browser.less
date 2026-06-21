@@ -1,0 +1,298 @@
+
+.file-browser {
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  overflow: hidden;
+  padding: 10px;
+}
+
+.file-browser.transfer-mode {
+  padding: 8px;
+}
+
+.file-browser-header {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) repeat(4, 30px);
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+}
+
+.file-browser.transfer-mode .file-browser-header {
+  grid-template-columns: 30px minmax(0, 1fr) repeat(3, 30px);
+}
+
+.file-path-input {
+  height: 30px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  padding: 0 8px;
+}
+
+.file-icon-button.primary {
+  background: color-mix(in srgb, #1677ff 12%, transparent);
+}
+
+.file-error {
+  margin: 8px 0 0;
+  color: var(--danger);
+  font-weight: 700;
+}
+
+.file-drop-zone {
+  min-height: 0;
+  overflow: auto;
+  margin-top: 10px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  position: relative;
+}
+
+.file-drop-zone.active {
+  border-color: #1677ff;
+  background: color-mix(in srgb, #1677ff 8%, transparent);
+}
+
+.file-drop-zone.forbidden {
+  border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+}
+
+.file-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.file-table th,
+.file-table td {
+  height: 34px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: middle;
+  overflow: visible;
+}
+
+.file-table th {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  color: var(--text);
+  background: var(--surface);
+  font-weight: 600;
+}
+
+.file-table th:first-child {
+  width: 44%;
+}
+
+.file-table tr:hover {
+  background: color-mix(in srgb, var(--surface-3) 72%, transparent);
+}
+
+.file-table tr.selected {
+  background: color-mix(in srgb, #1677ff 11%, transparent);
+}
+
+.file-sort-button {
+  width: 100%;
+  height: 22px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+  padding: 0;
+  font: inherit;
+  font-weight: 600;
+}
+
+.file-sort-button.active {
+  color: #1677ff;
+}
+
+.file-sort-indicator {
+  width: 12px;
+  height: 16px;
+  display: inline-grid;
+  grid-template-rows: 8px 8px;
+  color: var(--muted);
+}
+
+.file-sort-indicator svg {
+  width: 12px;
+  height: 12px;
+  margin-top: -2px;
+  color: currentColor;
+}
+
+.file-sort-indicator svg.active {
+  color: #1677ff;
+}
+
+.file-browser.transfer-mode .file-table tr:not(.editing) {
+  cursor: grab;
+}
+
+.file-browser.transfer-mode .file-table tr.file-row-drag-target {
+  background: color-mix(in srgb, #1677ff 16%, transparent);
+  outline: 1px solid color-mix(in srgb, #1677ff 75%, transparent);
+  outline-offset: -1px;
+}
+
+.file-table td:first-child {
+  position: static;
+  cursor: default;
+}
+
+.file-name-action-wrap {
+  position: static;
+  min-width: 0;
+  width: 100%;
+  display: block;
+  align-items: center;
+}
+
+.file-name-cell {
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+  height: 24px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0;
+  cursor: default;
+}
+
+.file-table tr.directory .file-name-cell {
+  cursor: pointer;
+}
+
+.file-table tr.link .file-name-cell {
+  cursor: pointer;
+}
+
+.file-browser.transfer-mode .file-table tr.directory {
+  outline-offset: -2px;
+}
+
+.file-browser.transfer-mode .file-table tr.directory.file-row-drag-target {
+  outline: 1px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.file-name-cell span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-link-target {
+  min-width: 0;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-name-cell svg,
+.file-rename-row svg {
+  color: #1677ff;
+  flex: 0 0 auto;
+}
+
+.file-row-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+  opacity: 0;
+  pointer-events: none;
+  background: transparent;
+  border-radius: 6px;
+  padding: 1px;
+  box-shadow: none;
+}
+
+.file-table tr:hover .file-row-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.file-actions-heading,
+.file-actions-cell {
+  width: 116px;
+  min-width: 116px;
+  text-align: right;
+}
+
+.file-actions-cell {
+  position: relative;
+}
+
+.file-row-actions button,
+.file-rename-row button {
+  width: 24px;
+  height: 24px;
+  color: var(--muted);
+}
+
+.file-more-menu {
+  position: absolute;
+  z-index: 35;
+  right: 8px;
+  top: calc(100% - 2px);
+  width: 150px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  padding: 4px;
+}
+
+.file-more-menu button {
+  width: 100%;
+  height: 30px;
+  justify-content: flex-start;
+  gap: 7px;
+  padding: 0 8px;
+}
+
+.file-more-menu button:hover {
+  background: var(--surface-3);
+}
+
+.file-rename-row {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) 24px 24px;
+  align-items: center;
+  gap: 6px;
+}
+
+.file-rename-row input,
+.file-modal-card input {
+  height: 28px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  padding: 0 8px;
+}
+
+.file-loading,
+.file-empty {
+  padding: 20px;
+  color: var(--muted);
+  text-align: center;
+}

@@ -1,0 +1,367 @@
+.files-side-panel {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.files-side-header {
+  padding: 20px 16px 12px;
+}
+
+.files-source-tabs,
+.files-mode-switch,
+.add-conn-tabs {
+  display: flex;
+  gap: 0;
+  padding: 0 8px 10px;
+}
+
+.files-source-tabs button,
+.files-mode-switch button,
+.add-conn-tabs button {
+  height: 34px;
+  min-width: 98px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface-2) 82%, transparent);
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.files-source-tabs button:first-child,
+.files-mode-switch button:first-child,
+.add-conn-tabs button:first-child {
+  border-radius: 7px 0 0 7px;
+}
+
+.files-source-tabs button:last-child,
+.files-mode-switch button:last-child,
+.add-conn-tabs button:last-child {
+  border-radius: 0 7px 7px 0;
+}
+
+.files-source-tabs button.active,
+.files-mode-switch button.active,
+.add-conn-tabs button.active {
+  background: #1677ff;
+  border-color: #1677ff;
+  color: #fff;
+}
+
+.files-tree-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 34px;
+  gap: 6px;
+  padding: 0 8px 10px;
+}
+
+.files-search,
+.add-conn-search {
+  min-width: 0;
+  height: 34px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-2);
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+}
+
+.files-search input,
+.add-conn-search input,
+.file-path-input,
+.file-rename-row input,
+.file-modal-card input,
+.files-session-header select {
+  min-width: 0;
+  width: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text);
+}
+
+.files-tree-list {
+  min-height: 0;
+  overflow: auto;
+  padding: 0 8px 12px;
+}
+
+.files-tree-group-row,
+.files-tree-session {
+  width: 100%;
+  min-height: 30px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 8px;
+  cursor: pointer;
+  text-align: left;
+  margin-bottom: 2px;
+}
+
+.files-tree-group-row:hover,
+.files-tree-session:hover,
+.files-tree-session.selected {
+  background: var(--surface-3);
+}
+
+.files-tree-group-row span,
+.files-tree-session span {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.files-tree-session .files-comment-edit {
+  flex: 0 1 150px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  overflow: visible;
+}
+
+.files-comment-edit input {
+  min-width: 0;
+  width: 96px;
+  height: 22px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text);
+  padding: 0 6px;
+  font: inherit;
+}
+
+.files-comment-edit button {
+  width: 20px;
+  height: 20px;
+  border: 0;
+  border-radius: 4px;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  color: var(--muted);
+}
+
+.files-comment-edit button:hover {
+  background: var(--surface-4);
+  color: var(--text);
+}
+
+.files-comment-edit svg {
+  width: 13px;
+  height: 13px;
+}
+
+.files-folder-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  background: rgb(0 0 0 / 0.42);
+}
+
+.files-folder-modal {
+  width: min(360px, calc(100vw - 32px));
+  max-height: min(430px, calc(100vh - 48px));
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.files-folder-modal header {
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.files-folder-modal h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.files-folder-modal header button {
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 5px;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  color: var(--muted);
+}
+
+.files-folder-modal header button:hover {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.files-folder-modal header svg {
+  width: 15px;
+  height: 15px;
+}
+
+.files-folder-empty,
+.files-folder-list,
+.files-folder-form,
+.files-folder-confirm-body {
+  min-height: 0;
+  padding: 14px;
+}
+
+.files-folder-empty {
+  display: grid;
+  place-items: center;
+  gap: 12px;
+  color: var(--muted);
+}
+
+.files-folder-empty p,
+.files-folder-list p {
+  margin: 0;
+}
+
+.files-folder-empty button,
+.files-folder-option {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.files-folder-empty button {
+  height: 30px;
+  padding: 0 12px;
+}
+
+.files-folder-list {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  overflow: auto;
+}
+
+.files-folder-option {
+  min-height: 48px;
+  padding: 8px 10px;
+  display: grid;
+  gap: 3px;
+  text-align: left;
+}
+
+.files-folder-option:hover {
+  background: var(--surface-3);
+}
+
+.files-folder-option strong {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.files-folder-option small {
+  color: var(--muted);
+}
+
+.files-folder-form {
+  display: grid;
+  gap: 12px;
+}
+
+.files-folder-form label {
+  display: grid;
+  gap: 6px;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.files-folder-form label span {
+  color: var(--muted);
+}
+
+.files-folder-form input,
+.files-folder-form textarea {
+  min-width: 0;
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--text);
+  outline: 0;
+  padding: 7px 8px;
+  resize: vertical;
+}
+
+.files-folder-form input:focus,
+.files-folder-form textarea:focus {
+  border-color: #1677ff;
+}
+
+.files-folder-error {
+  margin: 0;
+  color: var(--danger);
+  font-size: 12px;
+}
+
+.files-folder-form footer,
+.files-folder-confirm footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+.files-folder-confirm footer {
+  padding: 0 14px 14px;
+}
+
+.files-folder-form footer button,
+.files-folder-confirm footer button {
+  min-width: 64px;
+  height: 30px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.files-folder-form footer button.primary {
+  border-color: #1677ff;
+  background: #1677ff;
+  color: #fff;
+}
+
+.files-folder-confirm footer button.danger {
+  border-color: var(--danger);
+  background: var(--danger);
+  color: #fff;
+}
+
+.files-folder-confirm-body p {
+  margin: 0;
+  color: var(--text);
+  line-height: 1.55;
+}
+
+.files-tree-children {
+  padding-left: 17px;
+}
