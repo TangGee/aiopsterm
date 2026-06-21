@@ -78,6 +78,10 @@ import {
   type WorkspaceSettingsSkill,
   type WorkspaceSkillModalState
 } from '@/services/workspaceSettingsController'
+import {
+  createWorkspaceShellController,
+  type AssetManagementOpenRequest
+} from '@/services/workspaceShellController'
 import { type ShortcutActionHandler } from '@/services/shortcutRuntime'
 import {
   createEmptyMacroRecordingState,
@@ -101,7 +105,6 @@ import {
   type WorkspaceTrustedDeviceModal,
   type WorkspaceUserLoginTab
 } from '@/services/workspaceUserController'
-import { isAiopstermDeepLinkPayload } from '@shared/deepLink'
 import { createDefaultOnboardingCompleted, onboardingTourSteps } from '@/config/onboarding'
 import type { ModuleKey } from '@/config/navigation'
 import type { OnboardingModuleId } from '@/config/onboarding'
@@ -232,9 +235,6 @@ export type {
   WorkspaceUserLoginTab as UserLoginTab
 } from '@/services/workspaceUserController'
 
-type AssetManagementViewRequest = 'assetConfig' | 'assetManagement' | 'keyManagement' | 'proxyManagement'
-type AssetManagementOpenAction = 'none' | 'create-key' | 'create-proxy'
-
 type AiContextUsage = AiChatContextUsageSnapshot
 
 type RendererLocalIdPrefix = 'panel' | 'terminal-security' | 'aichat-agent-loop'
@@ -285,11 +285,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const activePanelId = ref('panel-main')
   const panels = ref<TerminalPanel[]>(createInitialWorkspaceTerminalPanels())
 
+  let shellShortcutAction: ((actionId: string, digit?: number) => boolean) | null = null
   const shortcutHandlers: Record<string, ShortcutActionHandler> = {
-    newTerminal: () => triggerShortcutAction('newTerminal'),
-    toggleAi: () => triggerShortcutAction('toggleAi'),
-    switchToSpecificTab: (payload) => triggerShortcutAction('switchToSpecificTab', payload?.digit),
-    quickCommand: () => triggerShortcutAction('quickCommand')
+    newTerminal: () => shellShortcutAction?.('newTerminal') ?? false,
+    toggleAi: () => shellShortcutAction?.('toggleAi') ?? false,
+    switchToSpecificTab: (payload) => shellShortcutAction?.('switchToSpecificTab', payload?.digit) ?? false,
+    quickCommand: () => shellShortcutAction?.('quickCommand') ?? false
   }
 
   const selectedConversationId = ref('')
@@ -339,12 +340,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const extensionInstallProgressMap = ref<Record<string, WorkspaceExtensionInstallProgress>>({})
   const extensionDragActive = ref(false)
   const extensionInstallingPackageName = ref('')
-  const assetManagementOpenRequest = ref<{
-    sequence: number
-    organizationId?: string
-    view?: AssetManagementViewRequest
-    action?: AssetManagementOpenAction
-  }>({ sequence: 0, action: 'none' })
+  const assetManagementOpenRequest = ref<AssetManagementOpenRequest>({ sequence: 0, action: 'none' })
   const aliasCommands = ref<WorkspaceAliasCommand[]>([])
   const aliasSearchQuery = ref('')
   const k8sContexts = ref<K8sContextInfo[]>([])
@@ -687,102 +683,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
   )
 
-  const switchToTerminalPanelIndex = (digit: number) => {
-    const index = Math.max(1, Math.min(9, Math.floor(digit))) - 1
-    const terminalPanels = panels.value.filter((panel) => panel.kind !== 'knowledge')
-    const target = terminalPanels[index]
-    if (!target) return false
-    mode.value = 'terminal'
-    activeModule.value = 'workspace'
-    activePanelId.value = target.id
-    return true
-  }
-
-  const triggerShortcutAction = (actionId: string, digit?: number) => {
-    if (actionId === 'newTerminal') {
-      mode.value = 'terminal'
-      activeModule.value = 'workspace'
-      createPanel()
-      setTopNotice('已通过快捷键新建终端')
-      return true
-    }
-    if (actionId === 'toggleAi') {
-      mode.value = 'terminal'
-      if (activeModule.value === 'database' || activeModule.value === 'user') activeModule.value = 'workspace'
-      void toggleRight()
-      return true
-    }
-    if (actionId === 'switchToSpecificTab' && digit) {
-      return switchToTerminalPanelIndex(digit)
-    }
-    if (actionId === 'quickCommand') {
-      mode.value = 'terminal'
-      activeModule.value = 'snippets'
-      leftPanelOpen.value = true
-      setTopNotice('已打开快捷命令')
-      return true
-    }
-    return false
-  }
-
-  const setActiveModule = (key: ModuleKey) => {
-    activeModule.value = key
-    if (key !== 'settings') onboardingGuideOpen.value = false
-    if (key === 'database') {
-      rightPanelOpen.value = false
-    }
-  }
-
-  const openAssetManagement = (
-    organizationId?: string,
-    view: AssetManagementViewRequest = organizationId ? 'assetManagement' : 'assetConfig',
-    action: AssetManagementOpenAction = 'none'
-  ) => {
-    mode.value = 'terminal'
-    activeModule.value = 'assets'
-    leftPanelOpen.value = true
-    rightPanelOpen.value = config.value.rightPanelOpen
-    onboardingGuideOpen.value = false
-    assetManagementOpenRequest.value = {
-      sequence: assetManagementOpenRequest.value.sequence + 1,
-      view,
-      action,
-      ...(organizationId ? { organizationId } : {})
-    }
-    setTopNotice(organizationId ? '已打开组织资产管理' : '已打开资产管理')
-  }
-
-  const handleDeepLink = (payload: unknown) => {
-    if (!isAiopstermDeepLinkPayload(payload)) {
-      setTopNotice('aiopsterm deep link 后端返回数据异常')
-      return false
-    }
-
-    if (payload.target === 'agents') {
-      mode.value = 'agents'
-      agentsLeftOpen.value = true
-      setTopNotice('已通过 aiopsterm:// 打开 Agents')
-      return true
-    }
-
-    const targetModule = payload.module || payload.target
-    mode.value = 'terminal'
-    activeModule.value = targetModule
-    if (targetModule === 'settings') {
-      rightPanelOpen.value = false
-      setActiveSettingsSection(payload.settingsSection || 'general')
-    } else if (targetModule === 'database' || targetModule === 'user') {
-      rightPanelOpen.value = false
-      onboardingGuideOpen.value = false
-    } else {
-      leftPanelOpen.value = true
-      rightPanelOpen.value = config.value.rightPanelOpen
-      onboardingGuideOpen.value = false
-    }
-    setTopNotice(`已通过 aiopsterm:// 打开${targetModule === 'workspace' ? '工作区' : targetModule}`)
-    return true
-  }
-
   const {
     createPanel,
     activateTerminalPanel,
@@ -1090,7 +990,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     },
     {
       setTopNotice,
-      setActiveModule
+      setActiveModule: (...args) => setActiveModule(...args)
     }
   )
 
@@ -1474,6 +1374,34 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       openAccountCenter
     }
   )
+
+  const {
+    switchToTerminalPanelIndex,
+    triggerShortcutAction,
+    setActiveModule,
+    openAssetManagement,
+    handleDeepLink
+  } = createWorkspaceShellController(
+    {
+      mode,
+      activeModule,
+      leftPanelOpen,
+      rightPanelOpen,
+      agentsLeftOpen,
+      activePanelId,
+      panels,
+      config,
+      onboardingGuideOpen,
+      assetManagementOpenRequest
+    },
+    {
+      setTopNotice,
+      createPanel,
+      toggleRight,
+      setActiveSettingsSection
+    }
+  )
+  shellShortcutAction = triggerShortcutAction
 
   return {
     mode,
