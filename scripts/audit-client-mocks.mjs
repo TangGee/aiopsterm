@@ -14,7 +14,7 @@ const repoRootFromArg = () => {
 const scriptPath = fileURLToPath(import.meta.url)
 
 const skippedDirs = new Set(['.git', 'node_modules', 'out', 'dist', 'test-results', 'playwright-report', 'coverage', 'external-reference'])
-const sourceExtensions = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.vue', '.json'])
+const sourceExtensions = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.vue', '.json', '.less', '.css'])
 const largeFileThresholds = [
   { root: ['src', 'main'], extensions: new Set(['.ts']), maxLines: 1800 },
   { root: ['src', 'preload'], extensions: new Set(['.ts']), maxLines: 800 },
@@ -25,7 +25,6 @@ const largeFileThresholds = [
 ]
 const largeFileBaselines = new Map(
   Object.entries({
-    'src/renderer/src/styles/ai-panel.less': 2855,
     'src/renderer/src/styles/database.less': 2834,
     'src/renderer/src/stores/workspace.ts': 15723,
     'src/renderer/src/components/DatabaseWorkspace.vue': 8463,

@@ -1,0 +1,130 @@
+.ai-mcp-tool-call {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--surface-2) 88%, var(--accent) 12%);
+  padding: 9px;
+}
+
+.ai-mcp-tool-call-grid {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 5px 10px;
+  align-items: center;
+  font-size: 12px;
+}
+
+.ai-mcp-tool-call-grid span {
+  color: var(--muted);
+}
+
+.ai-mcp-tool-call-grid strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+  font-weight: 600;
+}
+
+.ai-mcp-tool-call pre {
+  max-height: 160px;
+  overflow: auto;
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  padding: 8px;
+  color: var(--text);
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.ai-mcp-approval-actions {
+  margin-top: 0;
+  flex-wrap: wrap;
+}
+
+.ai-mcp-tool-call-status {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  gap: 6px;
+  border-radius: 6px;
+  padding: 4px 7px;
+  font-size: 12px;
+}
+
+.ai-mcp-tool-call-status svg {
+  width: 13px;
+  height: 13px;
+}
+
+.ai-mcp-tool-call-status.approved {
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 10%, transparent);
+}
+
+.ai-mcp-tool-call-status.rejected {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+}
+
+.message-executed-command {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  margin-top: 8px;
+  border: 1px solid color-mix(in srgb, var(--success) 45%, var(--border));
+  border-radius: 6px;
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 10%, transparent);
+  padding: 5px 7px;
+  font-size: 11px;
+}
+
+.message-executed-command svg {
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+}
+
+.message-executed-command span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-operation-notice {
+  border: 1px solid color-mix(in srgb, var(--accent-2) 45%, var(--border));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--accent-2) 10%, transparent);
+  color: var(--accent-2);
+  font-size: 12px;
+  padding: 6px 8px;
+}
+
+.model-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+  padding: 8px 10px;
+  font-size: 12px;
+}
+
+.model-strip em {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+

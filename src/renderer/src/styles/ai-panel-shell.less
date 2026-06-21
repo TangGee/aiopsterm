@@ -1,0 +1,414 @@
+.ai-panel {
+  width: 100%;
+  height: 100%;
+  border-left: 0;
+  border-right: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  padding: 14px;
+  gap: 10px;
+}
+
+.ai-panel.agent-mode {
+  width: auto;
+}
+
+.app-shell.has-app-background .ai-panel {
+  background: color-mix(in srgb, var(--surface) 18%, transparent);
+}
+
+.context-strip,
+.command-strip {
+  overflow-x: auto;
+  padding: 10px 0 0;
+}
+
+.context-button,
+.command-chip {
+  height: 29px;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--muted);
+  border-radius: 999px;
+  padding: 0 9px;
+}
+
+.app-shell.has-app-background .context-button,
+.app-shell.has-app-background .command-chip {
+  background: var(--glass-surface-2);
+}
+
+.context-button.active,
+.command-chip.active {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface-2));
+}
+
+.command-strip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 10px;
+}
+
+.command-chip {
+  cursor: pointer;
+}
+
+.ai-panel-top {
+  min-width: 0;
+  display: grid;
+  gap: 0;
+}
+
+.chat-scroll {
+  min-height: 0;
+  position: relative;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ai-empty-chat {
+  min-height: 100%;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+.ai-empty-chat svg {
+  width: 24px;
+  height: 24px;
+  color: var(--accent);
+}
+
+.ai-empty-chat span {
+  max-width: min(220px, 70%);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-empty-chat.no-model {
+  gap: 10px;
+  padding: 18px;
+  color: var(--text);
+}
+
+.ai-empty-chat.no-model svg {
+  width: 30px;
+  height: 30px;
+}
+
+.ai-empty-chat.no-model strong {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.ai-empty-chat.no-model p {
+  max-width: min(260px, 82%);
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.ai-empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.ai-empty-actions button {
+  height: 28px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--accent);
+  padding: 0 12px;
+  font-size: 12px;
+}
+
+.ai-empty-actions button:hover {
+  background: color-mix(in srgb, var(--accent) 24%, transparent);
+}
+
+.ai-empty-actions button.primary {
+  background: var(--accent);
+  color: white;
+}
+
+.ai-header-actions,
+.ai-chat-search-bar,
+.ai-chat-search-input-wrap,
+.ai-chat-search-controls {
+  display: flex;
+  align-items: center;
+}
+
+.ai-header {
+  justify-content: flex-start;
+  gap: 4px;
+  min-width: 0;
+}
+
+.ai-header-actions {
+  gap: 4px;
+  width: auto;
+  min-width: 24px;
+  flex: 0 0 auto;
+  justify-content: flex-end;
+}
+
+.ai-panel-mode-menu {
+  position: relative;
+  flex: 0 0 112px;
+  min-width: 88px;
+}
+
+.ai-panel-mode-trigger {
+  width: 100%;
+  height: 24px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: var(--glass-surface-2);
+  color: var(--muted);
+  padding: 0 6px;
+  cursor: pointer;
+}
+
+.ai-panel-mode-trigger:hover {
+  color: var(--text);
+  background: var(--glass-surface-3);
+}
+
+.ai-panel-mode-trigger svg {
+  width: 12px;
+  height: 12px;
+  flex: 0 0 auto;
+}
+
+.ai-panel-mode-trigger span {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+}
+
+.ai-panel-mode-dropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 35;
+  width: 150px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--glass-surface);
+  box-shadow: var(--shadow);
+  padding: 4px;
+  backdrop-filter: blur(16px);
+}
+
+.ai-panel-mode-dropdown button {
+  width: 100%;
+  height: 28px;
+  border: 0;
+  border-radius: 5px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  background: transparent;
+  color: var(--muted);
+  padding: 0 8px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ai-panel-mode-dropdown button:hover,
+.ai-panel-mode-dropdown button.active {
+  color: var(--text);
+  background: var(--glass-surface-3);
+}
+
+.ai-panel-mode-dropdown button svg {
+  width: 13px;
+  height: 13px;
+  flex: 0 0 auto;
+}
+
+.ai-panel-mode-dropdown button span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.app-shell.has-app-background .ai-panel-mode-trigger,
+.app-shell.has-app-background .ai-header-icon-button,
+.app-shell.has-app-background .ai-conversation-tab,
+.app-shell.has-app-background .ai-codex-target-actions button,
+.app-shell.has-app-background .ai-codex-bind-button,
+.app-shell.has-app-background .ai-codex-target-list button {
+  background: color-mix(in srgb, var(--surface-2) 26%, transparent);
+}
+
+.app-shell.has-app-background .ai-panel-mode-dropdown,
+.app-shell.has-app-background .ai-codex-target-picker {
+  background: color-mix(in srgb, var(--surface) 48%, transparent);
+}
+
+.app-shell.has-app-background .ai-panel-mode-trigger:hover,
+.app-shell.has-app-background .ai-header-icon-button:hover,
+.app-shell.has-app-background .ai-conversation-tab:hover,
+.app-shell.has-app-background .ai-conversation-tab:focus-visible,
+.app-shell.has-app-background .ai-panel-mode-dropdown button:hover,
+.app-shell.has-app-background .ai-panel-mode-dropdown button.active,
+.app-shell.has-app-background .ai-codex-target-actions button:hover,
+.app-shell.has-app-background .ai-codex-bind-button:hover,
+.app-shell.has-app-background .ai-codex-target-list button:hover {
+  background: color-mix(in srgb, var(--surface-3) 40%, transparent);
+}
+
+.ai-header-title {
+  flex: 0 0 48px;
+  min-width: 0;
+}
+
+.ai-header-title h2 {
+  max-width: 48px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-header-icon-button {
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--muted);
+  background: var(--glass-surface-2);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ai-header-icon-button svg {
+  width: 13px;
+  height: 13px;
+}
+
+.ai-header-icon-button:hover {
+  color: var(--text);
+  background: var(--glass-surface-3);
+}
+
+.ai-conversation-tabs {
+  flex: 1 1 0;
+  width: 0;
+  min-width: 0;
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0 1px;
+  scrollbar-width: thin;
+  scrollbar-gutter: stable;
+}
+
+.ai-conversation-tab {
+  min-width: 42px;
+  max-width: 128px;
+  flex: 1 1 86px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--muted);
+  background: color-mix(in srgb, var(--surface-2) 58%, transparent);
+  cursor: pointer;
+  padding: 0 3px 0 7px;
+}
+
+.ai-conversation-tab:hover,
+.ai-conversation-tab:focus-visible {
+  color: var(--text);
+  background: var(--glass-surface-3);
+  outline: 0;
+}
+
+.ai-conversation-tab.active {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--accent) 46%, var(--border));
+  background: color-mix(in srgb, var(--accent) 12%, var(--glass-surface-2));
+}
+
+.ai-conversation-tab-title {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+}
+
+.ai-conversation-tab-favorite {
+  width: 11px;
+  height: 11px;
+  flex: 0 0 11px;
+  color: var(--warn);
+}
+
+.ai-conversation-tab-close {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 5px;
+  color: var(--muted);
+  background: transparent;
+  cursor: pointer;
+  padding: 0;
+  opacity: 0;
+}
+
+.ai-conversation-tab:hover .ai-conversation-tab-close,
+.ai-conversation-tab.active .ai-conversation-tab-close,
+.ai-conversation-tab:focus-within .ai-conversation-tab-close {
+  opacity: 1;
+}
+
+.ai-conversation-tab-close:hover {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+
+.ai-conversation-tab-close svg {
+  width: 11px;
+  height: 11px;
+}
+
