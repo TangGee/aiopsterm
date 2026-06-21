@@ -2,29 +2,14 @@ import { type Ref } from 'vue'
 import { assetsClient } from '@/services/assetsClient'
 import { copyTextToClipboard } from '@/services/clipboardRuntime'
 import { applyEditorSettingsToDocument } from '@/services/editorRuntime'
-import { applyKeywordHighlight } from '@/services/keywordHighlightRuntime'
 import { localFilesClient } from '@/services/localFilesClient'
-import { settingsConfigClient } from '@/services/settingsConfigClient'
 import { addSystemThemeListener, applyThemeToDocument, isThemeId, type ThemeId } from '@/services/themeRuntime'
-import {
-  appRuntimeClient,
-  appUpdateStatusMessage,
-  hasAvailableAppUpdate,
-  isAppUpdateCheckResult,
-  isAppUpdateDownloadData,
-  isAppUpdateInstallData,
-  isAppUpdateProgressEvent,
-  isOpenPathResult,
-  isSettingsDocumentationResult,
-  resolveUpdateVersion
-} from '@/services/appRuntimeClient'
-import {
-  isModelProviderCheckDataForRequest,
-  listAiModelCatalog,
-  malformedModelProviderResultMessage,
-  modelProviderClient
-} from '@/services/modelProviderClient'
+import { appRuntimeClient, isOpenPathResult } from '@/services/appRuntimeClient'
 import { readStoredAiPanelMode } from '@/services/aiPanelModeRuntime'
+import { createWorkspaceAppUpdateController } from '@/services/workspaceAppUpdateController'
+import { createWorkspaceModelSettingsController } from '@/services/workspaceModelSettingsController'
+import { createWorkspaceSettingsConfigEditorsController } from '@/services/workspaceSettingsConfigEditorsController'
+import { createWorkspaceSettingsGuideController } from '@/services/workspaceSettingsGuideController'
 import {
   cloneQuickCommandsSnapshot,
   type QuickCommandSnippet,
@@ -37,7 +22,6 @@ import {
   malformedQuickCommandsBackendResultMessage
 } from '@/services/quickCommandsBackendGuards'
 import { applyDocumentLocale, resolveLocale } from '@/i18n/runtime'
-import { onboardingTourSteps, createDefaultOnboardingCompleted } from '@/config/onboarding'
 import type { OnboardingModuleId } from '@/config/onboarding'
 import type { ModuleKey } from '@/config/navigation'
 import type { SettingSectionKey } from '@/config/settings'
@@ -49,11 +33,8 @@ import {
   defaultConfig,
   defaultEditorSettings,
   defaultExtensionSettings,
-  defaultKeywordHighlightSettings,
-  defaultModelProviders,
   defaultNotificationSettings,
   defaultPrivacySettings,
-  defaultSecuritySettings,
   defaultTerminalSettings,
   defaultWorkspacePreferences,
   generalBaseSettingsPatchMatches,
@@ -66,20 +47,14 @@ import {
   isLayoutPreferencesSnapshot,
   isPrivacyRuntimeSnapshotForRequest,
   isTerminalSettingsSnapshot,
-  isVisibleModelSettingsOption,
   isWorkspacePreferencesSnapshot,
-  keywordHighlightEditorContentFromFile,
-  keywordHighlightSettingsSnapshotsMatch,
   layoutPreferencesPatchMatches,
   layoutWidthFromConfig,
   layoutWidthLimits,
   mergeGenericSavedConfig,
   mergeUserConfig,
-  modelOptionProviderForSavedProvider,
-  modelSettingsSnapshotsMatch,
   normalizeAiPreferencesConfig,
   normalizeBackgroundConfig,
-  normalizeCatalogModelProvider,
   normalizeEditorSettingsConfig,
   normalizeExtensionSettingsConfig,
   normalizeGeneralBaseSettingsPatch,
@@ -87,7 +62,6 @@ import {
   normalizeKnowledgeBaseConfig,
   normalizeLayoutPreferencesPatch,
   normalizeMcpServersConfig,
-  normalizeModelProviderConfig,
   normalizeModelSettingsConfig,
   normalizeNotificationConfig,
   normalizeOnboardingConfig,
@@ -97,15 +71,9 @@ import {
   normalizeSshAgentKeys,
   normalizeSshProxyConfigs,
   normalizeTerminalConfig,
-  normalizeUserModelName,
-  normalizeUserModelProvider,
   normalizeWorkspacePreferences,
-  parseKeywordHighlightEditorContent,
-  parseSecurityEditorContent,
   privacyRuntimeSettingsFromSnapshot,
   readSshAgentKeychainOptionsSnapshot,
-  securityEditorContentFromFile,
-  securitySettingsSnapshotsMatch,
   sshAgentKeySnapshotsMatch,
   sshProxyConfigSnapshotsMatch,
   sshProxyTypes,
@@ -129,18 +97,13 @@ import {
 import type { AiopsPreloadApi } from '@shared/contracts/preloadApi'
 import type { UserConfig } from '@shared/contracts/userConfig'
 import type {
-  AiModelCatalog,
   AiModelCatalogOption,
   AiPreferencesUserConfig,
-  AppUpdateProgressEvent,
   EditorUserConfig,
   KnowledgeSearchRuntimeSnapshot,
-  ModelSettingsUserConfig,
   NotificationUserConfig,
-  OpenSettingsDocumentationInput,
   PrivacyRuntimeSnapshot,
   PrivacyUserConfig,
-  SettingsDocumentationPage,
   SshAgentKeyConfig,
   SshAgentKeychainOption,
   SshProxyConfig,
@@ -366,15 +329,6 @@ export const createWorkspaceAppSettingsController = (state: WorkspaceAppSettings
     settingsNotice
   } = state
 
-  let keywordHighlightSaveTimer: number | null = null
-  let removeKeywordHighlightConfigFileListener: (() => void) | null = null
-  let keywordHighlightLoadRequest = 0
-  let securityConfigSaveTimer: number | null = null
-  let removeSecurityConfigFileListener: (() => void) | null = null
-  let securityConfigLoadRequest = 0
-  let removeAppUpdateProgressListener: (() => void) | null = null
-  let aiModelCatalogLoadPromise: Promise<AiModelCatalog> | null = null
-
   const currentLocale = () => resolveLocale(config.value.language, typeof navigator === 'undefined' ? [] : navigator.languages || [navigator.language])
 
   const applyCurrentTheme = () => {
@@ -435,45 +389,84 @@ export const createWorkspaceAppSettingsController = (state: WorkspaceAppSettings
     }
   }
 
-  const applyAiModelCatalog = (catalog: AiModelCatalog, options: { replaceSettingsOptions?: boolean } = {}) => {
-    aiModelOptions.value = catalog.chatModels.map((model) => ({ ...model }))
-    lockedAiModelOptions.value = catalog.lockedChatModels.map((model) => ({ ...model, locked: true }))
-    if (options.replaceSettingsOptions) {
-      settingModelOptions.value = catalog.settingsModels
-        .filter(isVisibleModelSettingsOption)
-        .map((model) => ({
-          name: model.name,
-          displayName: model.displayName,
-          locked: model.locked,
-          checked: model.checked,
-          type: model.type,
-          apiProvider: model.apiProvider
-        }))
+  const {
+    applyModelSettingsSnapshot,
+    refreshAiModelCatalog,
+    selectAiModel,
+    updateModelOption,
+    removeModelOption,
+    renameModelOption,
+    toggleAddModelSwitch,
+    updateModelProviderConfig,
+    checkModelProvider,
+    saveModelProvider
+  } = createWorkspaceModelSettingsController(
+    {
+      config,
+      aiModelOptions,
+      lockedAiModelOptions,
+      settingModelOptions,
+      addModelSwitch,
+      modelProviders,
+      modelCheckState,
+      modelCheckRequestSeq
+    },
+    {
+      setSettingsNotice,
+      setTopNotice
     }
-    return catalog
-  }
+  )
 
-  const refreshAiModelCatalog = async (options: { replaceSettingsOptions?: boolean } = {}) => {
-    const replaceSettingsOptions = options.replaceSettingsOptions ?? settingModelOptions.value.length === 0
-    if (!modelProviderClient.listAiModels()) {
-      setSettingsNotice('模型列表加载服务不可用')
-      return null
+  const {
+    checkAboutUpdate,
+    checkTopUpdate,
+    handleTopUpdateClick
+  } = createWorkspaceAppUpdateController(
+    {
+      topUpdateState,
+      aboutSettings,
+      settingsNotice
+    },
+    {
+      setSettingsNotice,
+      setTopNotice
     }
-    aiModelCatalogLoadPromise ||= listAiModelCatalog({ modelSettings: normalizeModelSettingsConfig(config.value.modelSettings).normalized })
-      .then((catalog) => catalog || Promise.reject(new Error('模型列表加载服务不可用')))
-      .finally(() => {
-        aiModelCatalogLoadPromise = null
-      })
-    try {
-      const catalog = await aiModelCatalogLoadPromise
-      return applyAiModelCatalog(catalog, {
-        replaceSettingsOptions
-      })
-    } catch (error) {
-      setSettingsNotice(`模型列表加载失败：${error instanceof Error ? error.message : String(error)}`)
-      return null
+  )
+
+  const {
+    closeSettingsConfigEditors,
+    openKeywordHighlightEditor,
+    closeKeywordHighlightEditor,
+    updateKeywordHighlightEditorContent,
+    saveKeywordHighlightEditor,
+    resetKeywordHighlightEditor,
+    openSecurityConfigEditor,
+    closeSecurityConfigEditor,
+    updateSecurityConfigEditorContent,
+    saveSecurityConfigEditor,
+    resetSecurityConfigEditor
+  } = createWorkspaceSettingsConfigEditorsController(
+    {
+      config,
+      keywordHighlightSettings,
+      keywordHighlightEditorOpen,
+      keywordHighlightEditorContent,
+      keywordHighlightEditorError,
+      keywordHighlightEditorLastSaved,
+      keywordHighlightConfigPath,
+      securitySettings,
+      securityConfigEditorOpen,
+      securityConfigEditorContent,
+      securityConfigEditorError,
+      securityConfigEditorLastSaved,
+      securityConfigPath,
+      mcpConfigEditorOpen
+    },
+    {
+      setSettingsNotice,
+      closeMcpConfigEditor: deps.closeMcpConfigEditor
     }
-  }
+  )
 
   const hydrateConfig = async () => {
     const getConfigBridge = appRuntimeClient.getConfig()
@@ -700,6 +693,49 @@ export const createWorkspaceAppSettingsController = (state: WorkspaceAppSettings
     deps.refreshShortcutRuntime()
     setupThemeBridge()
   }
+
+  const {
+    setActiveSettingsSection,
+    openSettingsPageDocumentation,
+    openSettingsDocumentationLink,
+    openSettingsDocumentationFile,
+    closeSettingsDocumentation,
+    openOnboardingGuide,
+    startOnboardingTour,
+    stopOnboardingTour,
+    nextOnboardingStep,
+    previousOnboardingStep,
+    jumpOnboardingStep,
+    resetOnboarding
+  } = createWorkspaceSettingsGuideController(
+    {
+      mode,
+      activeModule,
+      leftPanelOpen,
+      rightPanelOpen,
+      config,
+      activeSettingsSection,
+      settingsDocumentationOpen,
+      settingsDocumentationTitle,
+      settingsDocumentationPath,
+      settingsDocumentationContent,
+      onboardingCompleted,
+      onboardingActiveTour,
+      onboardingActiveStepIndex,
+      onboardingGuideOpen,
+      onboardingAiRequest,
+      onboardingAssetRequest
+    },
+    {
+      onboardingVersion: ONBOARDING_VERSION,
+      currentLocale,
+      saveConfig,
+      setSettingsNotice,
+      closeSettingsConfigEditors,
+      loadSkillsFromBridge: deps.loadSkillsFromBridge,
+      refreshMcpServersFromBridge: deps.refreshMcpServersFromBridge
+    }
+  )
 
   const getExtensionSettingsSnapshot = () => ({ ...extensionSettings.value })
 
@@ -940,380 +976,10 @@ export const createWorkspaceAppSettingsController = (state: WorkspaceAppSettings
     }
   }
 
-  const getModelSettingsSnapshot = (): ModelSettingsUserConfig => ({
-    addModelSwitch: addModelSwitch.value,
-    providers: {
-      litellm: { ...modelProviders.value.litellm },
-      openai: { ...modelProviders.value.openai },
-      bedrock: { ...modelProviders.value.bedrock },
-      deepseek: { ...modelProviders.value.deepseek },
-      anthropic: { ...modelProviders.value.anthropic },
-      ollama: { ...modelProviders.value.ollama },
-      lmstudio: { ...modelProviders.value.lmstudio }
-    },
-    options: settingModelOptions.value.filter(isVisibleModelSettingsOption).map((option) => ({
-      name: option.name,
-      displayName: option.displayName,
-      locked: Boolean(option.locked),
-      checked: Boolean(option.checked),
-      type: option.type || (option.locked ? 'standard' : 'custom'),
-      apiProvider: option.apiProvider || (option.locked ? 'default' : 'openai')
-    }))
-  })
-
-  const getPersistedModelSettingsSnapshot = (): ModelSettingsUserConfig => normalizeModelSettingsConfig(config.value.modelSettings).normalized
-
-  const getModelSettingsSnapshotWithProviderModel = (provider: ModelProviderKey, providerSettings: ModelProviderSettings): ModelSettingsUserConfig => {
-    const modelName = providerSettings.modelId.trim()
-    const nextSettings = getModelSettingsSnapshot()
-    nextSettings.providers = {
-      ...nextSettings.providers,
-      [provider]: { ...providerSettings }
-    }
-    if (!modelName) return normalizeModelSettingsConfig(nextSettings).normalized
-    const existingIndex = nextSettings.options.findIndex((option) => option.name === modelName)
-    const apiProvider = modelOptionProviderForSavedProvider(provider)
-    if (existingIndex >= 0) {
-      nextSettings.options = nextSettings.options.map((option, index) =>
-        index === existingIndex && !option.locked
-          ? {
-              ...option,
-              checked: true,
-              type: 'custom',
-              displayName: option.displayName,
-              apiProvider
-            }
-          : option
-      )
-    } else {
-      nextSettings.options = [
-        ...nextSettings.options,
-        {
-          name: modelName,
-          displayName: undefined,
-          locked: false,
-          checked: true,
-          type: 'custom',
-          apiProvider
-        }
-      ]
-    }
-    return normalizeModelSettingsConfig(nextSettings).normalized
-  }
-
-  const applyModelOptionSettingsSnapshot = (settings: ModelSettingsUserConfig) => {
-    addModelSwitch.value = settings.addModelSwitch
-    settingModelOptions.value = settings.options.filter(isVisibleModelSettingsOption).map((option) => ({
-      name: option.name,
-      displayName: option.displayName,
-      locked: option.locked,
-      checked: option.checked,
-      type: option.type,
-      apiProvider: option.apiProvider
-    }))
-  }
-
-  const applyModelSettingsSnapshot = (source: unknown) => {
-    const { normalized } = normalizeModelSettingsConfig(source)
-    modelProviders.value = {
-      litellm: { ...normalized.providers.litellm },
-      openai: { ...normalized.providers.openai },
-      bedrock: { ...normalized.providers.bedrock },
-      deepseek: { ...normalized.providers.deepseek },
-      anthropic: { ...normalized.providers.anthropic },
-      ollama: { ...normalized.providers.ollama },
-      lmstudio: { ...normalized.providers.lmstudio }
-    }
-    applyModelOptionSettingsSnapshot(normalized)
-    return normalized
-  }
-
-  const persistModelSettings = async (
-    nextSettings: ModelSettingsUserConfig,
-    unavailableMessage = '模型设置保存服务不可用',
-    failureMessage = '模型设置保存失败'
-  ) => {
-    const saveConfigBridge = appRuntimeClient.saveConfig()
-    if (typeof saveConfigBridge !== 'function') {
-      setSettingsNotice(unavailableMessage)
-      return false
-    }
-    try {
-      const savedConfig = await saveConfigBridge({ modelSettings: nextSettings })
-      if (!isRecord(savedConfig) || !isRecord(savedConfig.modelSettings)) {
-        setSettingsNotice(failureMessage)
-        return false
-      }
-      const savedModelSettings = normalizeModelSettingsConfig(savedConfig.modelSettings).normalized
-      if (!modelSettingsSnapshotsMatch(savedModelSettings, nextSettings)) {
-        setSettingsNotice(failureMessage)
-        return false
-      }
-      applyModelOptionSettingsSnapshot(savedModelSettings)
-      config.value = mergeGenericSavedConfig(config.value, savedConfig, {
-        modelSettings: savedModelSettings
-      })
-      await refreshAiModelCatalog({ replaceSettingsOptions: false })
-      return true
-    } catch (error) {
-      setSettingsNotice(error instanceof Error ? error.message : failureMessage)
-      return false
-    }
-  }
-
-  const persistOnboardingState = async () => {
-    await saveConfig({
-      onboarding: {
-        version: ONBOARDING_VERSION,
-        guideTabAutoOpened: Boolean(config.value.onboarding?.guideTabAutoOpened),
-        completedModules: { ...onboardingCompleted.value }
-      }
-    })
-  }
-
   const copySettingsText = async (text: string, label = '内容') => {
     const copied = await copyTextToClipboard(text)
     setSettingsNotice(copied ? `${label}已复制` : `${label}复制失败`)
     return copied
-  }
-
-  const closeSettingsInlineEditors = () => {
-    if (keywordHighlightEditorOpen.value) {
-      closeKeywordHighlightEditor()
-    }
-    if (securityConfigEditorOpen.value) {
-      closeSecurityConfigEditor()
-    }
-    if (mcpConfigEditorOpen.value) {
-      deps.closeMcpConfigEditor()
-    }
-    settingsDocumentationOpen.value = false
-    onboardingGuideOpen.value = false
-  }
-
-  const readSettingsDocumentation = async (input?: OpenSettingsDocumentationInput) => {
-    const openSettingsDocumentationBridge = appRuntimeClient.openSettingsDocumentation()
-    if (!openSettingsDocumentationBridge) {
-      setSettingsNotice('文档入口服务不可用')
-      return false
-    }
-    const result = await openSettingsDocumentationBridge(input)
-    if (!isSettingsDocumentationResult(result)) {
-      setSettingsNotice('文档入口打开失败')
-      return false
-    }
-    settingsDocumentationPath.value = result.path
-    settingsDocumentationTitle.value = result.title
-    settingsDocumentationContent.value = result.content
-    settingsDocumentationOpen.value = true
-    setSettingsNotice('已打开文档')
-    return true
-  }
-
-  const openSettingsDocumentation = async (page?: SettingsDocumentationPage) => {
-    if (keywordHighlightEditorOpen.value) closeKeywordHighlightEditor()
-    if (securityConfigEditorOpen.value) closeSecurityConfigEditor()
-    if (mcpConfigEditorOpen.value) deps.closeMcpConfigEditor()
-    onboardingGuideOpen.value = false
-    if (!page) activeSettingsSection.value = 'general'
-    try {
-      return await readSettingsDocumentation(page ? { page, locale: currentLocale() } : undefined)
-    } catch {
-      setSettingsNotice('文档入口打开失败')
-      return false
-    }
-  }
-
-  const openSettingsPageDocumentation = (page: SettingsDocumentationPage) => openSettingsDocumentation(page)
-
-  const openSettingsDocumentationLink = async (documentPath: string) => {
-    const normalizedPath = documentPath.trim()
-    if (!normalizedPath) return false
-    try {
-      return await readSettingsDocumentation({ documentPath: normalizedPath, basePath: settingsDocumentationPath.value })
-    } catch {
-      setSettingsNotice('文档入口打开失败')
-      return false
-    }
-  }
-
-  const openSettingsDocumentationFile = async (documentPath: string) => {
-    const normalizedPath = documentPath.trim()
-    if (!normalizedPath) return false
-    try {
-      return await readSettingsDocumentation({ documentPath: normalizedPath })
-    } catch {
-      setSettingsNotice('文档入口打开失败')
-      return false
-    }
-  }
-
-  const closeSettingsDocumentation = () => {
-    settingsDocumentationOpen.value = false
-  }
-
-  const setActiveSettingsSection = (key: SettingSectionKey) => {
-    if (key === 'docs') {
-      void openSettingsDocumentation()
-      return
-    }
-    closeSettingsInlineEditors()
-    activeSettingsSection.value = key
-    if (key === 'skills') {
-      void deps.loadSkillsFromBridge()
-    } else if (key === 'mcp') {
-      void deps.refreshMcpServersFromBridge()
-    }
-  }
-
-  const prepareOnboardingStep = (moduleId: OnboardingModuleId, stepId: string) => {
-    if (mode.value !== 'terminal') mode.value = 'terminal'
-    onboardingAiRequest.value = {
-      action: 'none',
-      stepId,
-      sequence: onboardingAiRequest.value.sequence + 1
-    }
-    onboardingAssetRequest.value = {
-      action: 'none',
-      stepId,
-      sequence: onboardingAssetRequest.value.sequence + 1
-    }
-
-    if (moduleId === 'interfaceGuide') {
-      activeModule.value = 'workspace'
-      leftPanelOpen.value = true
-      if (stepId === 'ai-sidebar') rightPanelOpen.value = true
-      return
-    }
-
-    if (moduleId === 'systemSettings') {
-      activeModule.value = 'settings'
-      rightPanelOpen.value = false
-      if (stepId === 'terminal-tab' || stepId === 'terminal-options') {
-        activeSettingsSection.value = 'terminal'
-      } else if (stepId === 'ai-preferences-tab' || stepId === 'ai-preferences-content' || stepId === 'ai-auto-approval') {
-        activeSettingsSection.value = 'ai'
-      } else {
-        activeSettingsSection.value = 'general'
-      }
-      return
-    }
-
-    if (moduleId === 'addAndConnectHost') {
-      activeModule.value = 'assets'
-      leftPanelOpen.value = true
-      rightPanelOpen.value = true
-      const assetRequestMap: Record<string, WorkspaceOnboardingAssetRequest> = {
-        'host-management': 'open-host-management',
-        'new-host': 'open-host-management',
-        'form-fields': 'open-create-form',
-        'form-submit': 'open-create-form'
-      }
-      onboardingAssetRequest.value = {
-        action: assetRequestMap[stepId] || 'none',
-        stepId,
-        sequence: onboardingAssetRequest.value.sequence + 1
-      }
-      if (stepId === 'new-host') setSettingsNotice('点击新建主机继续引导')
-      return
-    }
-
-    if (moduleId === 'aiChat') {
-      activeModule.value = 'workspace'
-      leftPanelOpen.value = true
-      rightPanelOpen.value = true
-      const requestMap: Record<string, WorkspaceOnboardingAiRequest> = {
-        'ai-mode-agent': 'open-mode',
-        'ai-model-open': 'none',
-        'ai-model-option': 'open-model',
-        'ai-context-open': 'none',
-        'ai-context-hosts': 'open-context-main',
-        'ai-localhost-option': 'open-context-hosts',
-        'ai-send': 'prepare-send'
-      }
-      onboardingAiRequest.value = {
-        action: requestMap[stepId] || 'none',
-        stepId,
-        sequence: onboardingAiRequest.value.sequence + 1
-      }
-    }
-  }
-
-  const openOnboardingGuide = () => {
-    activeModule.value = 'settings'
-    activeSettingsSection.value = 'general'
-    rightPanelOpen.value = false
-    onboardingGuideOpen.value = true
-    onboardingActiveTour.value = null
-    onboardingActiveStepIndex.value = 0
-    config.value = {
-      ...config.value,
-      onboarding: {
-        version: ONBOARDING_VERSION,
-        guideTabAutoOpened: true,
-        completedModules: { ...onboardingCompleted.value }
-      }
-    }
-    persistOnboardingState()
-    setSettingsNotice('已打开入门引导')
-  }
-
-  const startOnboardingTour = (moduleId: OnboardingModuleId) => {
-    onboardingActiveTour.value = moduleId
-    onboardingActiveStepIndex.value = 0
-    onboardingGuideOpen.value = false
-    prepareOnboardingStep(moduleId, onboardingTourSteps[moduleId][0]?.id || '')
-  }
-
-  const stopOnboardingTour = () => {
-    onboardingActiveTour.value = null
-    onboardingActiveStepIndex.value = 0
-  }
-
-  const nextOnboardingStep = () => {
-    const moduleId = onboardingActiveTour.value
-    if (!moduleId) return
-    const nextIndex = onboardingActiveStepIndex.value + 1
-    if (nextIndex >= onboardingTourSteps[moduleId].length) {
-      onboardingCompleted.value = { ...onboardingCompleted.value, [moduleId]: true }
-      persistOnboardingState()
-      stopOnboardingTour()
-      setSettingsNotice(`${moduleId === 'interfaceGuide' ? '界面导览' : moduleId === 'systemSettings' ? '系统设置' : moduleId === 'addAndConnectHost' ? '添加并连接主机' : 'AI 会话'} 引导已完成`)
-      return
-    }
-    onboardingActiveStepIndex.value = nextIndex
-    prepareOnboardingStep(moduleId, onboardingTourSteps[moduleId][nextIndex]?.id || '')
-  }
-
-  const previousOnboardingStep = () => {
-    const moduleId = onboardingActiveTour.value
-    if (!moduleId) return
-    onboardingActiveStepIndex.value = Math.max(0, onboardingActiveStepIndex.value - 1)
-    prepareOnboardingStep(moduleId, onboardingTourSteps[moduleId][onboardingActiveStepIndex.value]?.id || '')
-  }
-
-  const jumpOnboardingStep = (stepId: string) => {
-    const moduleId = onboardingActiveTour.value
-    if (!moduleId) return
-    const nextIndex = onboardingTourSteps[moduleId].findIndex((step) => step.id === stepId)
-    if (nextIndex < 0) return
-    onboardingActiveStepIndex.value = nextIndex
-    prepareOnboardingStep(moduleId, stepId)
-  }
-
-  const resetOnboarding = () => {
-    onboardingCompleted.value = createDefaultOnboardingCompleted()
-    stopOnboardingTour()
-    config.value = {
-      ...config.value,
-      onboarding: {
-        version: ONBOARDING_VERSION,
-        guideTabAutoOpened: false,
-        completedModules: { ...onboardingCompleted.value }
-      }
-    }
-    persistOnboardingState()
-    setSettingsNotice('入门引导进度已重置')
   }
 
   const selectTheme = async (theme: string) => {
@@ -1875,194 +1541,6 @@ export const createWorkspaceAppSettingsController = (state: WorkspaceAppSettings
     }
   }
 
-  const selectAiModel = async (modelId: string) => {
-    const nextModelName = normalizeUserModelName(modelId)
-    if (!nextModelName) return false
-    const modelOption = aiModelOptions.value.find((option) => normalizeUserModelName(option.id) === nextModelName)
-    if (!modelOption && lockedAiModelOptions.value.some((option) => normalizeUserModelName(option.id) === nextModelName)) {
-      setTopNotice('AI 模型不可用')
-      return false
-    }
-    const nextModelProvider = normalizeCatalogModelProvider(modelOption?.apiProvider || config.value.modelProvider)
-    if (nextModelName === config.value.modelName && nextModelProvider === config.value.modelProvider) return true
-    const saveConfigBridge = appRuntimeClient.saveConfig()
-    if (typeof saveConfigBridge !== 'function') {
-      setTopNotice('AI 模型保存服务不可用')
-      return false
-    }
-    try {
-      const savedConfig = await saveConfigBridge({ modelName: nextModelName, modelProvider: nextModelProvider })
-      if (
-        !isRecord(savedConfig) ||
-        normalizeUserModelName(savedConfig.modelName) !== nextModelName ||
-        normalizeUserModelProvider(savedConfig.modelProvider) !== nextModelProvider
-      ) {
-        setTopNotice('AI 模型保存失败')
-        return false
-      }
-      config.value = mergeGenericSavedConfig(config.value, savedConfig, {
-        modelName: nextModelName,
-        modelProvider: nextModelProvider
-      })
-      return true
-    } catch (error) {
-      setTopNotice(error instanceof Error ? error.message : 'AI 模型保存失败')
-      return false
-    }
-  }
-
-  const updateModelOption = async (name: string, checked: boolean) => {
-    const model = settingModelOptions.value.find((item) => item.name === name)
-    if (!model || model.locked) return false
-    const nextSettings = getPersistedModelSettingsSnapshot()
-    nextSettings.options = getModelSettingsSnapshot().options.map((item) => (item.name === name ? { ...item, checked } : item))
-    return persistModelSettings(nextSettings)
-  }
-
-  const removeModelOption = async (name: string) => {
-    const model = settingModelOptions.value.find((item) => item.name === name)
-    if (!model || model.locked || model.type !== 'custom') return false
-    const nextSettings = getPersistedModelSettingsSnapshot()
-    nextSettings.options = getModelSettingsSnapshot().options.filter((item) => item.name !== name || item.locked)
-    return persistModelSettings(nextSettings)
-  }
-
-  const renameModelOption = async (name: string, displayName: string) => {
-    const model = settingModelOptions.value.find((item) => item.name === name)
-    if (!model || model.locked || model.type !== 'custom') return false
-    const nextDisplayName = displayName.trim()
-    const nextSettings = getPersistedModelSettingsSnapshot()
-    nextSettings.options = getModelSettingsSnapshot().options.map((item) =>
-      item.name === name
-        ? {
-            ...item,
-            displayName: nextDisplayName && nextDisplayName !== name ? nextDisplayName : undefined
-          }
-        : item
-    )
-    return persistModelSettings(nextSettings)
-  }
-
-  const toggleAddModelSwitch = async (checked: boolean) => {
-    const nextSettings = {
-      ...getPersistedModelSettingsSnapshot(),
-      addModelSwitch: checked
-    }
-    return persistModelSettings(nextSettings)
-  }
-
-  const updateModelProviderConfig = (provider: ModelProviderKey, patch: Partial<ModelProviderSettings>) => {
-    modelProviders.value[provider] = { ...modelProviders.value[provider], ...patch }
-  }
-
-  const checkModelProvider = async (provider: ModelProviderKey) => {
-    const requestSeq = (modelCheckRequestSeq.value[provider] || 0) + 1
-    modelCheckRequestSeq.value = { ...modelCheckRequestSeq.value, [provider]: requestSeq }
-    modelCheckState.value = { ...modelCheckState.value, [provider]: 'checking' }
-    const providerConfig = { ...modelProviders.value[provider] }
-    const checkProviderBridge = modelProviderClient.checkModelProvider()
-    if (typeof checkProviderBridge !== 'function') {
-      if (modelCheckRequestSeq.value[provider] !== requestSeq) return
-      modelCheckState.value = { ...modelCheckState.value, [provider]: 'error' }
-      setSettingsNotice('模型 Provider 检查服务不可用')
-      return
-    }
-    try {
-      const result = await checkProviderBridge({ provider, config: providerConfig })
-      if (modelCheckRequestSeq.value[provider] !== requestSeq) return
-      if (result.ok) {
-        if (!isModelProviderCheckDataForRequest(result.data, provider, providerConfig)) {
-          modelCheckState.value = { ...modelCheckState.value, [provider]: 'error' }
-          setSettingsNotice(malformedModelProviderResultMessage)
-          return
-        }
-        modelCheckState.value = { ...modelCheckState.value, [provider]: 'success' }
-        setSettingsNotice(result.data.message)
-      } else {
-        modelCheckState.value = { ...modelCheckState.value, [provider]: 'error' }
-        setSettingsNotice(result.errorMessage || `${provider} Check 失败`)
-      }
-    } catch (error) {
-      if (modelCheckRequestSeq.value[provider] !== requestSeq) return
-      modelCheckState.value = { ...modelCheckState.value, [provider]: 'error' }
-      setSettingsNotice(`模型 Provider 检查失败：${error instanceof Error ? error.message : String(error)}`)
-    }
-  }
-
-  const saveModelProvider = async (provider: ModelProviderKey) => {
-    const saveConfigBridge = appRuntimeClient.saveConfig()
-    if (typeof saveConfigBridge !== 'function') {
-      setSettingsNotice('模型 Provider 保存服务不可用')
-      return false
-    }
-    const configPatch = modelProviders.value[provider]
-    const providerName: Record<ModelProviderKey, UserConfig['modelProvider']> = {
-      litellm: 'litellm',
-      openai: 'openai-compatible',
-      bedrock: 'bedrock',
-      deepseek: 'deepseek',
-      anthropic: 'anthropic',
-      ollama: 'ollama',
-      lmstudio: 'lmstudio'
-    }
-    const providerLabel: Record<ModelProviderKey, string> = {
-      litellm: 'LiteLLM',
-      openai: 'OpenAI Compatible',
-      bedrock: 'Amazon Bedrock',
-      deepseek: 'DeepSeek',
-      anthropic: 'Anthropic',
-      ollama: 'Ollama',
-      lmstudio: 'LM Studio'
-    }
-    const nextModelSettings = getModelSettingsSnapshotWithProviderModel(provider, configPatch)
-    try {
-      const savedConfig = await saveConfigBridge({
-        modelProvider: providerName[provider],
-        modelEndpoint: configPatch.baseUrl,
-        modelName: configPatch.modelId,
-        modelSettings: nextModelSettings
-      })
-      if (!isRecord(savedConfig) || !isRecord(savedConfig.modelSettings) || !isRecord(savedConfig.modelSettings.providers) || !Array.isArray(savedConfig.modelSettings.options)) {
-        setSettingsNotice('模型 Provider 保存失败')
-        return false
-      }
-      const savedModelSettings = normalizeModelSettingsConfig(savedConfig.modelSettings).normalized
-      if (!modelSettingsSnapshotsMatch(savedModelSettings, nextModelSettings)) {
-        setSettingsNotice('模型 Provider 保存失败')
-        return false
-      }
-      const savedProviderSettings = normalizeModelProviderConfig(savedConfig.modelSettings.providers[provider], defaultModelProviders[provider])
-      if (savedProviderSettings.baseUrl !== configPatch.baseUrl || savedProviderSettings.modelId !== configPatch.modelId) {
-        setSettingsNotice('模型 Provider 保存失败')
-        return false
-      }
-      const savedProvider = normalizeUserModelProvider(savedConfig.modelProvider)
-      const savedModelName = normalizeUserModelName(savedConfig.modelName)
-      if (typeof savedConfig.modelEndpoint !== 'string') {
-        setSettingsNotice('模型 Provider 保存失败')
-        return false
-      }
-      const savedEndpoint = savedConfig.modelEndpoint
-      if (savedProvider !== providerName[provider] || savedModelName !== configPatch.modelId || savedEndpoint !== configPatch.baseUrl) {
-        setSettingsNotice('模型 Provider 保存失败')
-        return false
-      }
-      applyModelSettingsSnapshot(savedModelSettings)
-      config.value = mergeGenericSavedConfig(config.value, savedConfig, {
-        modelProvider: savedProvider,
-        modelEndpoint: savedEndpoint,
-        modelName: savedModelName,
-        modelSettings: savedModelSettings
-      })
-      await refreshAiModelCatalog({ replaceSettingsOptions: false })
-      setSettingsNotice(`${providerLabel[provider]} Save 成功`)
-      return true
-    } catch (error) {
-      setSettingsNotice(error instanceof Error ? error.message : '模型 Provider 保存失败')
-      return false
-    }
-  }
-
   const updateAiPreferences = async (patch: WorkspaceAiPreferencePatch) => {
     const previousPreferences = getAiPreferencesSnapshot()
     const nextPreferences = normalizeAiPreferencesConfig({
@@ -2122,364 +1600,6 @@ export const createWorkspaceAppSettingsController = (state: WorkspaceAppSettings
     return true
   }
 
-  const applyKeywordHighlightSettingsSnapshot = (settings: KeywordHighlightSettings) => {
-    const normalized = normalizeKeywordHighlightConfig(settings).normalized
-    keywordHighlightSettings.value = normalized
-    config.value = mergeUserConfig(config.value, { keywordHighlight: normalized })
-    return normalized
-  }
-
-  const applySavedKeywordHighlightConfig = (
-    result: Awaited<ReturnType<NonNullable<AiopsPreloadApi['writeKeywordHighlightConfig']>>>,
-    expected: KeywordHighlightSettings,
-    prefix: 'Save' | 'Reset'
-  ) => {
-    if (!result?.ok || !result.data || !isRecord(result.data.keywordHighlight)) {
-      keywordHighlightEditorError.value = `${prefix} failed: ${result?.errorMessage || 'keyword highlight config write did not return saved settings'}`
-      keywordHighlightEditorLastSaved.value = false
-      return false
-    }
-    const saved = normalizeKeywordHighlightConfig(result.data.keywordHighlight).normalized
-    if (!keywordHighlightSettingsSnapshotsMatch(saved, expected)) {
-      keywordHighlightEditorError.value = `${prefix} failed: keyword highlight config write returned different settings`
-      keywordHighlightEditorLastSaved.value = false
-      return false
-    }
-    applyKeywordHighlightSettingsSnapshot(saved)
-    keywordHighlightEditorContent.value = JSON.stringify(saved, null, 2)
-    keywordHighlightEditorError.value = ''
-    keywordHighlightEditorLastSaved.value = true
-    return true
-  }
-
-  const applyKeywordHighlightConfigFileContent = (content: string, markSaved = true) => {
-    const editorContent = keywordHighlightEditorContentFromFile(content)
-    keywordHighlightEditorContent.value = editorContent
-    try {
-      const parsed = parseKeywordHighlightEditorContent(editorContent)
-      const { normalized } = normalizeKeywordHighlightConfig(parsed)
-      applyKeywordHighlightSettingsSnapshot(normalized)
-      keywordHighlightEditorError.value = ''
-      keywordHighlightEditorLastSaved.value = markSaved
-      return true
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      keywordHighlightEditorError.value = `Invalid JSON: ${message}`
-      keywordHighlightEditorLastSaved.value = false
-      return false
-    }
-  }
-
-  const installKeywordHighlightConfigFileListener = () => {
-    const onKeywordHighlightConfigFileChanged = settingsConfigClient.onKeywordHighlightConfigFileChanged()
-    if (removeKeywordHighlightConfigFileListener || !onKeywordHighlightConfigFileChanged) return
-    removeKeywordHighlightConfigFileListener = onKeywordHighlightConfigFileChanged((content) => {
-      applyKeywordHighlightConfigFileContent(content, true)
-    })
-  }
-
-  const openKeywordHighlightEditor = async () => {
-    if (securityConfigEditorOpen.value) {
-      closeSecurityConfigEditor()
-    }
-    if (mcpConfigEditorOpen.value) {
-      deps.closeMcpConfigEditor()
-    }
-    const requestId = ++keywordHighlightLoadRequest
-    keywordHighlightEditorOpen.value = true
-    keywordHighlightEditorContent.value = JSON.stringify(keywordHighlightSettings.value, null, 2)
-    keywordHighlightEditorError.value = ''
-    keywordHighlightEditorLastSaved.value = false
-    installKeywordHighlightConfigFileListener()
-    const getKeywordHighlightConfigPath = settingsConfigClient.getKeywordHighlightConfigPath()
-    const readKeywordHighlightConfig = settingsConfigClient.readKeywordHighlightConfig()
-    if (!getKeywordHighlightConfigPath || !readKeywordHighlightConfig) {
-      keywordHighlightEditorError.value = 'Failed to read keyword highlight config: keyword highlight config service unavailable'
-      return
-    }
-    try {
-      const [path, content] = await Promise.all([getKeywordHighlightConfigPath(), readKeywordHighlightConfig()])
-      if (requestId !== keywordHighlightLoadRequest) return
-      keywordHighlightConfigPath.value = path
-      applyKeywordHighlightConfigFileContent(content, false)
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      keywordHighlightEditorError.value = `Failed to read keyword highlight config: ${message}`
-    }
-  }
-
-  const closeKeywordHighlightEditor = () => {
-    keywordHighlightLoadRequest += 1
-    if (keywordHighlightSaveTimer) {
-      window.clearTimeout(keywordHighlightSaveTimer)
-      keywordHighlightSaveTimer = null
-    }
-    if (removeKeywordHighlightConfigFileListener) {
-      removeKeywordHighlightConfigFileListener()
-      removeKeywordHighlightConfigFileListener = null
-    }
-    keywordHighlightEditorOpen.value = false
-  }
-
-  const updateKeywordHighlightEditorContent = (content: string) => {
-    keywordHighlightEditorContent.value = content
-    keywordHighlightEditorLastSaved.value = false
-    if (keywordHighlightSaveTimer) {
-      window.clearTimeout(keywordHighlightSaveTimer)
-      keywordHighlightSaveTimer = null
-    }
-    try {
-      parseKeywordHighlightEditorContent(content)
-      keywordHighlightEditorError.value = ''
-      keywordHighlightSaveTimer = window.setTimeout(() => {
-        void saveKeywordHighlightEditor()
-        keywordHighlightSaveTimer = null
-      }, 1000)
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      keywordHighlightEditorError.value = `Invalid JSON: ${message}`
-    }
-  }
-
-  const saveKeywordHighlightEditor = async () => {
-    if (keywordHighlightSaveTimer) {
-      window.clearTimeout(keywordHighlightSaveTimer)
-      keywordHighlightSaveTimer = null
-    }
-    let parsed: unknown
-    try {
-      parsed = parseKeywordHighlightEditorContent(keywordHighlightEditorContent.value)
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      keywordHighlightEditorError.value = `Invalid JSON: ${message}`
-      return false
-    }
-    const { normalized } = normalizeKeywordHighlightConfig(parsed)
-    const normalizedContent = JSON.stringify(normalized, null, 2)
-    const writeKeywordHighlightConfig = settingsConfigClient.writeKeywordHighlightConfig()
-    if (!writeKeywordHighlightConfig) {
-      keywordHighlightEditorError.value = 'Save failed: keyword highlight config service unavailable'
-      keywordHighlightEditorLastSaved.value = false
-      return false
-    }
-    try {
-      const result = await writeKeywordHighlightConfig(normalizedContent)
-      if (!applySavedKeywordHighlightConfig(result, normalized, 'Save')) return false
-      setSettingsNotice('关键词高亮配置已保存')
-      return true
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      keywordHighlightEditorError.value = `Save failed: ${message}`
-      keywordHighlightEditorLastSaved.value = false
-      return false
-    }
-  }
-
-  const resetKeywordHighlightEditor = async () => {
-    if (keywordHighlightSaveTimer) {
-      window.clearTimeout(keywordHighlightSaveTimer)
-      keywordHighlightSaveTimer = null
-    }
-    const normalized = normalizeKeywordHighlightConfig(defaultKeywordHighlightSettings).normalized
-    const normalizedContent = JSON.stringify(normalized, null, 2)
-    const writeKeywordHighlightConfig = settingsConfigClient.writeKeywordHighlightConfig()
-    if (!writeKeywordHighlightConfig) {
-      keywordHighlightEditorError.value = 'Reset failed: keyword highlight config service unavailable'
-      keywordHighlightEditorLastSaved.value = false
-      return false
-    }
-    try {
-      const result = await writeKeywordHighlightConfig(normalizedContent)
-      if (!applySavedKeywordHighlightConfig(result, normalized, 'Reset')) return false
-      setSettingsNotice('关键词高亮配置已重置')
-      return true
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      keywordHighlightEditorError.value = `Reset failed: ${message}`
-      keywordHighlightEditorLastSaved.value = false
-      return false
-    }
-  }
-
-  const applySecuritySettingsSnapshot = (settings: SecuritySettings) => {
-    const normalized = normalizeSecurityConfig(settings).normalized
-    securitySettings.value = normalized
-    config.value = mergeUserConfig(config.value, { securityConfig: normalized })
-    return normalized
-  }
-
-  const applySavedSecurityConfig = (
-    result: Awaited<ReturnType<NonNullable<AiopsPreloadApi['writeSecurityConfig']>>>,
-    expected: SecuritySettings,
-    prefix: 'Save' | 'Reset'
-  ) => {
-    if (!result?.ok || !result.data || !isRecord(result.data.securityConfig)) {
-      securityConfigEditorError.value = `${prefix} failed: ${result?.errorMessage || 'security config write did not return saved settings'}`
-      securityConfigEditorLastSaved.value = false
-      return false
-    }
-    const saved = normalizeSecurityConfig(result.data.securityConfig).normalized
-    if (!securitySettingsSnapshotsMatch(saved, expected)) {
-      securityConfigEditorError.value = `${prefix} failed: security config write returned different settings`
-      securityConfigEditorLastSaved.value = false
-      return false
-    }
-    applySecuritySettingsSnapshot(saved)
-    securityConfigEditorContent.value = JSON.stringify(saved, null, 2)
-    securityConfigEditorError.value = ''
-    securityConfigEditorLastSaved.value = true
-    return true
-  }
-
-  const applySecurityConfigFileContent = (content: string, markSaved = true) => {
-    const editorContent = securityEditorContentFromFile(content)
-    securityConfigEditorContent.value = editorContent
-    try {
-      const parsed = parseSecurityEditorContent(editorContent)
-      const { normalized } = normalizeSecurityConfig(parsed)
-      applySecuritySettingsSnapshot(normalized)
-      securityConfigEditorError.value = ''
-      securityConfigEditorLastSaved.value = markSaved
-      return true
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      securityConfigEditorError.value = `Invalid JSON: ${message}`
-      securityConfigEditorLastSaved.value = false
-      return false
-    }
-  }
-
-  const installSecurityConfigFileListener = () => {
-    const onSecurityConfigFileChanged = settingsConfigClient.onSecurityConfigFileChanged()
-    if (removeSecurityConfigFileListener || !onSecurityConfigFileChanged) return
-    removeSecurityConfigFileListener = onSecurityConfigFileChanged((content) => {
-      applySecurityConfigFileContent(content, true)
-    })
-  }
-
-  const openSecurityConfigEditor = async () => {
-    if (keywordHighlightEditorOpen.value) {
-      closeKeywordHighlightEditor()
-    }
-    if (mcpConfigEditorOpen.value) {
-      deps.closeMcpConfigEditor()
-    }
-    const requestId = ++securityConfigLoadRequest
-    securityConfigEditorOpen.value = true
-    securityConfigEditorContent.value = JSON.stringify(securitySettings.value, null, 2)
-    securityConfigEditorError.value = ''
-    securityConfigEditorLastSaved.value = false
-    installSecurityConfigFileListener()
-    const getSecurityConfigPath = settingsConfigClient.getSecurityConfigPath()
-    const readSecurityConfig = settingsConfigClient.readSecurityConfig()
-    if (!getSecurityConfigPath || !readSecurityConfig) {
-      securityConfigEditorError.value = 'Failed to read security config: security config service unavailable'
-      return
-    }
-    try {
-      const [path, content] = await Promise.all([getSecurityConfigPath(), readSecurityConfig()])
-      if (requestId !== securityConfigLoadRequest) return
-      securityConfigPath.value = path
-      applySecurityConfigFileContent(content, false)
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      securityConfigEditorError.value = `Failed to read security config: ${message}`
-    }
-  }
-
-  const closeSecurityConfigEditor = () => {
-    securityConfigLoadRequest += 1
-    if (securityConfigSaveTimer) {
-      window.clearTimeout(securityConfigSaveTimer)
-      securityConfigSaveTimer = null
-    }
-    if (removeSecurityConfigFileListener) {
-      removeSecurityConfigFileListener()
-      removeSecurityConfigFileListener = null
-    }
-    securityConfigEditorOpen.value = false
-  }
-
-  const updateSecurityConfigEditorContent = (content: string) => {
-    securityConfigEditorContent.value = content
-    securityConfigEditorLastSaved.value = false
-    if (securityConfigSaveTimer) {
-      window.clearTimeout(securityConfigSaveTimer)
-      securityConfigSaveTimer = null
-    }
-    try {
-      parseSecurityEditorContent(content)
-      securityConfigEditorError.value = ''
-      securityConfigSaveTimer = window.setTimeout(() => {
-        void saveSecurityConfigEditor()
-        securityConfigSaveTimer = null
-      }, 1000)
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      securityConfigEditorError.value = `Invalid JSON: ${message}`
-    }
-  }
-
-  const saveSecurityConfigEditor = async () => {
-    if (securityConfigSaveTimer) {
-      window.clearTimeout(securityConfigSaveTimer)
-      securityConfigSaveTimer = null
-    }
-    let parsed: unknown
-    try {
-      parsed = parseSecurityEditorContent(securityConfigEditorContent.value)
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      securityConfigEditorError.value = `Invalid JSON: ${message}`
-      return false
-    }
-    const { normalized } = normalizeSecurityConfig(parsed)
-    const normalizedContent = JSON.stringify(normalized, null, 2)
-    const writeSecurityConfig = settingsConfigClient.writeSecurityConfig()
-    if (!writeSecurityConfig) {
-      securityConfigEditorError.value = 'Save failed: security config service unavailable'
-      securityConfigEditorLastSaved.value = false
-      return false
-    }
-    try {
-      const result = await writeSecurityConfig(normalizedContent)
-      if (!applySavedSecurityConfig(result, normalized, 'Save')) return false
-      setSettingsNotice('安全配置已保存')
-      return true
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      securityConfigEditorError.value = `Save failed: ${message}`
-      securityConfigEditorLastSaved.value = false
-      return false
-    }
-  }
-
-  const resetSecurityConfigEditor = async () => {
-    if (securityConfigSaveTimer) {
-      window.clearTimeout(securityConfigSaveTimer)
-      securityConfigSaveTimer = null
-    }
-    const normalized = normalizeSecurityConfig(defaultSecuritySettings).normalized
-    const normalizedContent = JSON.stringify(normalized, null, 2)
-    const writeSecurityConfig = settingsConfigClient.writeSecurityConfig()
-    if (!writeSecurityConfig) {
-      securityConfigEditorError.value = 'Reset failed: security config service unavailable'
-      securityConfigEditorLastSaved.value = false
-      return false
-    }
-    try {
-      const result = await writeSecurityConfig(normalizedContent)
-      if (!applySavedSecurityConfig(result, normalized, 'Reset')) return false
-      setSettingsNotice('安全配置已重置')
-      return true
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      securityConfigEditorError.value = `Reset failed: ${message}`
-      securityConfigEditorLastSaved.value = false
-      return false
-    }
-  }
-
   const updatePrivacySettings = async (patch: Partial<PrivacySettings>) => {
     const hasPersistentPatch = 'telemetry' in patch || 'secretRedaction' in patch || 'dataSync' in patch
     const localPatch = {
@@ -2502,235 +1622,6 @@ export const createWorkspaceAppSettingsController = (state: WorkspaceAppSettings
     if (!saved) return false
     setSettingsNotice('隐私设置已保存')
     return true
-  }
-
-  const handleAppUpdateProgress = (event: AppUpdateProgressEvent) => {
-    if (!isAppUpdateProgressEvent(event)) {
-      aboutSettings.value = {
-        ...aboutSettings.value,
-        updateStatus: 'error',
-        progress: 0
-      }
-      setSettingsNotice(appUpdateStatusMessage)
-      return
-    }
-    aboutSettings.value = {
-      ...aboutSettings.value,
-      updateStatus: event.status === 'downloaded' ? 'downloaded' : event.status,
-      newVersion: event.version || aboutSettings.value.newVersion,
-      progress: Math.max(0, Math.min(100, Math.round(event.percent)))
-    }
-    if (event.status === 'downloaded') setSettingsNotice('更新已下载，可执行安装')
-    if (event.status === 'error') setSettingsNotice(event.message || '更新下载失败')
-  }
-
-  const installAppUpdateProgressListener = () => {
-    const onAppUpdateProgress = appRuntimeClient.onAppUpdateProgress()
-    if (removeAppUpdateProgressListener || !onAppUpdateProgress) return
-    removeAppUpdateProgressListener = onAppUpdateProgress(handleAppUpdateProgress)
-  }
-
-  const applyRequestedAppUpdateInstall = (version: string) => {
-    aboutSettings.value = {
-      ...aboutSettings.value,
-      updateStatus: 'install-requested',
-      newVersion: version,
-      progress: 100
-    }
-  }
-
-  const startAboutDownload = async () => {
-    const version = aboutSettings.value.newVersion || aboutSettings.value.version
-    const downloadAppUpdateBridge = appRuntimeClient.downloadAppUpdate()
-    if (typeof downloadAppUpdateBridge !== 'function') {
-      aboutSettings.value = { ...aboutSettings.value, updateStatus: 'error', progress: 0 }
-      setSettingsNotice('更新下载服务不可用')
-      return false
-    }
-    installAppUpdateProgressListener()
-    aboutSettings.value.updateStatus = 'downloading'
-    aboutSettings.value.progress = 0
-    setSettingsNotice('正在下载更新')
-    try {
-      const result = await downloadAppUpdateBridge(version)
-      if (!result?.ok || !result.data) {
-        aboutSettings.value = { ...aboutSettings.value, updateStatus: 'error', progress: 0 }
-        setSettingsNotice(result?.errorMessage || '更新下载失败')
-        return false
-      }
-      if (!isAppUpdateDownloadData(result.data, version)) {
-        aboutSettings.value = { ...aboutSettings.value, updateStatus: 'error', progress: 0 }
-        setSettingsNotice(appUpdateStatusMessage)
-        return false
-      }
-      aboutSettings.value = {
-        ...aboutSettings.value,
-        updateStatus: 'downloaded',
-        newVersion: result.data.version,
-        progress: result.data.percent
-      }
-      setSettingsNotice('更新已下载，可执行安装')
-      return true
-    } catch (error) {
-      aboutSettings.value = { ...aboutSettings.value, updateStatus: 'error', progress: 0 }
-      setSettingsNotice(error instanceof Error ? error.message : '更新下载失败')
-      return false
-    }
-  }
-
-  const requestAppUpdateInstall = async (version: string, setNotice: (message: string) => void) => {
-    const installAppUpdateBridge = appRuntimeClient.installAppUpdate()
-    if (typeof installAppUpdateBridge !== 'function') {
-      setNotice('更新安装服务不可用')
-      return false
-    }
-    try {
-      const result = await installAppUpdateBridge(version)
-      if (!result?.ok || !result.data) {
-        setNotice(result?.errorMessage || '更新安装失败')
-        return false
-      }
-      if (!isAppUpdateInstallData(result.data, version)) {
-        setNotice(appUpdateStatusMessage)
-        return false
-      }
-      applyRequestedAppUpdateInstall(result.data.version)
-      setNotice('更新安装请求已提交')
-      return true
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : '更新安装失败')
-      return false
-    }
-  }
-
-  const checkAboutUpdate = async () => {
-    if (aboutSettings.value.updateStatus === 'available') {
-      return startAboutDownload()
-    }
-    if (aboutSettings.value.updateStatus === 'downloaded') {
-      const installed = await requestAppUpdateInstall(aboutSettings.value.newVersion || aboutSettings.value.version, setSettingsNotice)
-      if (!installed) aboutSettings.value.updateStatus = 'error'
-      return installed
-    }
-    const checkUpdateBridge = appRuntimeClient.checkUpdate()
-    if (typeof checkUpdateBridge !== 'function') {
-      aboutSettings.value = {
-        ...aboutSettings.value,
-        updateStatus: 'error',
-        progress: 0
-      }
-      setSettingsNotice('更新检查服务不可用')
-      return false
-    }
-    aboutSettings.value = {
-      ...aboutSettings.value,
-      updateStatus: 'checking',
-      progress: 0
-    }
-    setSettingsNotice('正在检查更新')
-    try {
-      const result = await checkUpdateBridge()
-      if (!isAppUpdateCheckResult(result)) {
-        aboutSettings.value = {
-          ...aboutSettings.value,
-          updateStatus: 'error',
-          progress: 0
-        }
-        setSettingsNotice(appUpdateStatusMessage)
-        return false
-      }
-      const detectedVersion = resolveUpdateVersion(result)
-      if (hasAvailableAppUpdate(result)) {
-        if (!detectedVersion) {
-          aboutSettings.value = {
-            ...aboutSettings.value,
-            updateStatus: 'error',
-            progress: 0
-          }
-          setSettingsNotice(appUpdateStatusMessage)
-          return false
-        }
-        aboutSettings.value = {
-          ...aboutSettings.value,
-          updateStatus: 'available',
-          newVersion: detectedVersion
-        }
-        setSettingsNotice(`检测到可用更新 ${aboutSettings.value.newVersion}`)
-        return true
-      }
-      aboutSettings.value = {
-        ...aboutSettings.value,
-        updateStatus: 'latest',
-        newVersion: detectedVersion || aboutSettings.value.version,
-        progress: 0
-      }
-      setSettingsNotice('当前已是最新版本')
-      return true
-    } catch {
-      aboutSettings.value = {
-        ...aboutSettings.value,
-        updateStatus: 'error',
-        progress: 0
-      }
-      setSettingsNotice('更新检查失败')
-      return false
-    }
-  }
-
-  const checkTopUpdate = async () => {
-    const checkUpdateBridge = appRuntimeClient.checkUpdate()
-    if (typeof checkUpdateBridge !== 'function') {
-      topUpdateState.value = 'local'
-      setTopNotice('更新检查服务不可用')
-      return false
-    }
-    topUpdateState.value = 'checking'
-    try {
-      const result = await checkUpdateBridge()
-      if (!isAppUpdateCheckResult(result)) {
-        topUpdateState.value = 'local'
-        setTopNotice(appUpdateStatusMessage)
-        return false
-      }
-      const available = hasAvailableAppUpdate(result)
-      const detectedVersion = resolveUpdateVersion(result)
-      if (available && !detectedVersion) {
-        topUpdateState.value = 'local'
-        setTopNotice(appUpdateStatusMessage)
-        return false
-      }
-      topUpdateState.value = available ? 'available' : 'local'
-      if (available) {
-        aboutSettings.value.newVersion = detectedVersion
-        setTopNotice(detectedVersion ? `检测到可用更新 ${detectedVersion}` : '检测到可用更新')
-      }
-      return true
-    } catch {
-      topUpdateState.value = 'local'
-      setTopNotice('更新检查不可用')
-      return false
-    }
-  }
-
-  const handleTopUpdateClick = async () => {
-    if (topUpdateState.value === 'available') {
-      const version = aboutSettings.value.newVersion || aboutSettings.value.version
-      topUpdateState.value = 'checking'
-      const downloaded = await startAboutDownload()
-      if (!downloaded || aboutSettings.value.updateStatus !== 'downloaded') {
-        topUpdateState.value = 'available'
-        setTopNotice(settingsNotice.value || '更新下载失败')
-        return
-      }
-      const installed = await requestAppUpdateInstall(version, setTopNotice)
-      if (!installed) {
-        topUpdateState.value = 'available'
-        return
-      }
-      topUpdateState.value = 'install-requested'
-      return
-    }
-    await checkTopUpdate()
   }
 
   const openSettingsExternalAction = async (label: '日志目录' | '反馈页面' | '账户中心' | string) => {
