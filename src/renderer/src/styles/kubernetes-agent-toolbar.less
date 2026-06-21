@@ -1,0 +1,179 @@
+
+.k8s-agent-bar {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(210px, 1fr) 160px auto auto minmax(280px, 1.5fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+}
+
+.k8s-agent-current {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+}
+
+.k8s-agent-current span,
+.k8s-agent-current small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.k8s-agent-current small {
+  color: var(--muted);
+}
+
+.k8s-agent-current em {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  padding: 2px 7px;
+  background: color-mix(in srgb, var(--muted) 18%, transparent);
+  color: var(--muted);
+  font-style: normal;
+}
+
+.k8s-agent-current em.ready {
+  background: color-mix(in srgb, var(--success) 18%, transparent);
+  color: var(--success);
+}
+
+.k8s-agent-current em.running {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--accent);
+}
+
+.k8s-agent-current em.error {
+  background: color-mix(in srgb, var(--danger) 18%, transparent);
+  color: var(--danger);
+}
+
+.k8s-agent-bar select,
+.k8s-agent-bar input,
+.k8s-agent-bar button,
+.k8s-agent-history button {
+  height: 28px;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+}
+
+.k8s-agent-bar button,
+.k8s-agent-history button {
+  padding: 0 9px;
+  cursor: pointer;
+}
+
+.k8s-agent-bar button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.k8s-agent-command {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+}
+
+.k8s-agent-history {
+  min-width: 0;
+  display: flex;
+  gap: 6px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.k8s-agent-history button {
+  max-width: 230px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.k8s-resource-toolbar {
+  min-width: 0;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+
+.k8s-resource-filter {
+  min-width: 190px;
+  min-height: 30px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-2);
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px;
+}
+
+.k8s-resource-filter span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.k8s-resource-filter select {
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text);
+}
+
+.k8s-resource-kind-tabs {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.k8s-resource-kind-tabs button {
+  min-height: 30px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 9px;
+  cursor: pointer;
+}
+
+.k8s-resource-kind-tabs button.active {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+}
+
+.k8s-resource-kind-tabs button span {
+  min-width: 18px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  color: var(--text);
+  font-size: 11px;
+  line-height: 18px;
+  text-align: center;
+}
+
+.k8s-resource-search {
+  flex: 1;
+  min-width: 180px;
+  max-width: 320px;
+  margin-left: auto;
+}

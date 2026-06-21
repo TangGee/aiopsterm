@@ -1,0 +1,183 @@
+
+.k8s-resource-layout {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) minmax(280px, 0.85fr);
+}
+
+.k8s-resource-table-wrap {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}
+
+.k8s-resource-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.k8s-resource-table th,
+.k8s-resource-table td {
+  border-bottom: 1px solid var(--border);
+  padding: 9px 10px;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.k8s-resource-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface);
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.k8s-resource-table td:first-child {
+  min-width: 220px;
+}
+
+.k8s-resource-table td strong,
+.k8s-resource-table td small {
+  min-width: 0;
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.k8s-resource-table td small {
+  max-width: 360px;
+  color: var(--muted);
+  margin-top: 3px;
+}
+
+.k8s-resource-status {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 7px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.k8s-resource-status.running,
+.k8s-resource-status.ready,
+.k8s-resource-status.available,
+.k8s-resource-status.clusterip,
+.k8s-resource-status.loadbalancer {
+  border-color: color-mix(in srgb, var(--accent-2) 42%, var(--border));
+  color: var(--accent-2);
+}
+
+.k8s-resource-status.crashloopbackoff,
+.k8s-resource-status.error {
+  border-color: color-mix(in srgb, var(--danger) 42%, var(--border));
+  color: var(--danger);
+}
+
+.k8s-resource-status.pending,
+.k8s-resource-status.progressing {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
+  color: var(--accent);
+}
+
+.k8s-resource-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.k8s-resource-actions button {
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+
+.k8s-resource-actions button:hover:not(:disabled) {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.k8s-resource-empty {
+  height: 96px;
+  color: var(--muted);
+  text-align: center !important;
+}
+
+.k8s-resource-output {
+  min-width: 0;
+  min-height: 0;
+  border-left: 1px solid var(--border);
+  background: #090b10;
+  display: grid;
+  grid-template-rows: 38px minmax(0, 1fr);
+}
+
+.k8s-resource-output header {
+  min-width: 0;
+  justify-content: space-between;
+  padding: 0 10px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, #090b10);
+  color: #d7dae3;
+}
+
+.k8s-resource-output header strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.k8s-resource-output header span {
+  min-width: 0;
+  max-width: 42%;
+  color: #8f95a3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+}
+
+.k8s-resource-output-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex: 0 0 auto;
+}
+
+.k8s-resource-output-actions button {
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: #8f95a3;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+
+.k8s-resource-output-actions button:hover {
+  background: color-mix(in srgb, #fff 8%, transparent);
+  color: #d7dae3;
+}
+
+.k8s-resource-output pre {
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  overflow: auto;
+  padding: 10px;
+  color: #d7dae3;
+  white-space: pre-wrap;
+  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.55;
+}

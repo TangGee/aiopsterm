@@ -1,0 +1,254 @@
+.k8s-sidebar-container {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.k8s-manage,
+.k8s-search-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px;
+}
+
+.k8s-search,
+.k8s-command-line {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-2);
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 8px;
+}
+
+.k8s-search {
+  flex: 1;
+  height: 30px;
+}
+
+.k8s-search-clear {
+  width: 20px;
+  height: 20px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+
+.k8s-search-clear:hover {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.k8s-search input,
+.k8s-command-line input,
+.k8s-detail-form input,
+.k8s-modal-form input,
+.k8s-modal-form textarea,
+.k8s-modal-form select {
+  min-width: 0;
+  width: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text);
+}
+
+.k8s-workspace-button,
+.k8s-action-button,
+.k8s-cluster-actions button,
+.k8s-group-header button,
+.k8s-form-actions button,
+.k8s-test-connection button,
+.k8s-modal-tabs button {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--text);
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.k8s-workspace-button {
+  min-width: 30px;
+  height: 30px;
+  padding: 0 8px;
+}
+
+.k8s-cluster-list,
+.k8s-config-list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 8px;
+}
+
+.k8s-cluster-item,
+.k8s-config-cluster-item {
+  width: 100%;
+  min-height: 50px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.k8s-cluster-item:hover,
+.k8s-cluster-item.active,
+.k8s-config-cluster-item:hover,
+.k8s-config-cluster-item.active,
+.k8s-group-header:hover {
+  background: var(--surface-3);
+}
+
+.k8s-cluster-icon {
+  position: relative;
+  color: var(--muted);
+  display: grid;
+  place-items: center;
+}
+
+.k8s-cluster-icon i,
+.k8s-cluster-info strong i {
+  display: block;
+  border-radius: 50%;
+  background: var(--muted);
+}
+
+.k8s-cluster-icon i {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: 7px;
+  height: 7px;
+  border: 1px solid var(--surface);
+}
+
+.k8s-cluster-icon i.connected,
+.k8s-cluster-info strong i {
+  background: var(--accent-2);
+}
+
+.k8s-cluster-icon i.connecting {
+  background: var(--accent);
+}
+
+.k8s-cluster-icon i.error {
+  background: var(--danger);
+}
+
+.k8s-cluster-info,
+.k8s-config-cluster-item span {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.k8s-cluster-info strong,
+.k8s-cluster-info small,
+.k8s-config-cluster-item strong,
+.k8s-config-cluster-item small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.k8s-cluster-info strong {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.k8s-cluster-info strong i {
+  width: 6px;
+  height: 6px;
+}
+
+.k8s-cluster-actions {
+  position: relative;
+  display: flex;
+  gap: 3px;
+  opacity: 0;
+}
+
+.k8s-cluster-item:hover .k8s-cluster-actions {
+  opacity: 1;
+}
+
+.k8s-cluster-actions button {
+  width: 26px;
+  height: 26px;
+}
+
+.k8s-cluster-actions > button svg.lucide-loader-circle,
+.k8s-group-header button svg.lucide-loader-circle {
+  animation: spin 0.9s linear infinite;
+}
+
+.k8s-cluster-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 20;
+  min-width: 124px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  padding: 4px;
+  display: grid;
+  gap: 2px;
+}
+
+.k8s-cluster-menu button {
+  width: 100%;
+  height: 28px;
+  border-radius: 5px;
+  display: flex;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 0 8px;
+}
+
+.k8s-cluster-menu button:disabled,
+.k8s-group-header button:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.k8s-cluster-actions button.danger,
+.k8s-danger-zone button {
+  color: var(--danger);
+}
+
+.k8s-notice {
+  flex: 0 0 auto;
+  margin: 0 10px 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  padding: 8px 10px;
+  font-size: 12px;
+}
