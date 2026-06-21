@@ -1,8 +1,39 @@
-import { createHash, randomUUID } from 'crypto'
+import { randomUUID } from 'crypto'
 import { createServer, type Server, type Socket } from 'net'
 import { existsSync, rmSync } from 'fs'
 import { dirname, join } from 'path'
 import { appendFile, mkdir, readFile, writeFile } from 'fs/promises'
+import {
+  createAgentSessionEventStreamRuntime,
+  type AgentSessionEventStreamListResult
+} from './agentSessionEventStreamRuntime'
+import {
+  autoTitleFor,
+  cleanOptionalText,
+  cleanPositiveInteger,
+  cleanText,
+  compactAutoTitle,
+  compactRawValue,
+  compactString,
+  decisionKinds,
+  defaultAgentHibernationConfig,
+  firstText,
+  isRecord,
+  managedAiNotificationId,
+  managedAiSessionStateForEvent,
+  nestedRecord,
+  normalizeAgentHibernationConfig,
+  normalizeAiAgentSessionEventInput,
+  normalizeAutoNamingPositiveInteger,
+  normalizeSource,
+  normalizeStoredSession,
+  normalizeWaitTimeoutMs,
+  pendingDecisionKey,
+  resumeCommandFor,
+  sessionKey,
+  sourceLabel,
+  normalizeRecordEvent
+} from './agentSessionNormalization'
 import type {
   AiAgentSessionEvent,
   AiAgentSessionEventInput,
@@ -19,7 +50,6 @@ import type {
   ManagedAiSessionDecisionKind,
   ManagedAiSessionHibernateInput,
   ManagedAiSessionHibernateResult,
-  ManagedAiSessionLifecycle,
   ManagedAiSessionListResult,
   ManagedAiSessionMutationResult,
   ManagedAiNotificationClearResult,
@@ -37,9 +67,12 @@ import type {
   ManagedAiSessionRenameInput,
   ManagedAiSessionReplyInput,
   ManagedAiSessionSnapshot,
-  ManagedAiSessionState,
-  ManagedAiSessionTimelineEvent
+  ManagedAiSessionState
 } from '@shared/contracts/managedAiSessions'
+
+export { normalizeAiAgentSessionEventInput } from './agentSessionNormalization'
+
+export type { AgentSessionEventStreamCategory, AgentSessionEventStreamFrame, AgentSessionEventStreamListResult } from './agentSessionEventStreamRuntime'
 
 export type AgentSessionEventSink = (event: AiAgentSessionEvent) => void
 export type ManagedAiSessionEventSink = (event: ManagedAiSessionEvent) => void
@@ -47,56 +80,6 @@ export type ManagedAiSessionEventSink = (event: ManagedAiSessionEvent) => void
 type AgentSessionSocketResponse = AiAgentSessionEventResult & {
   status?: 'acknowledged' | 'pending' | 'resolved' | 'timeout'
   agentOutput?: Record<string, unknown>
-}
-
-export type AgentSessionEventStreamCategory = 'agent' | 'managed-ai'
-
-export type AgentSessionEventStreamFrame = {
-  type: 'event'
-  protocol: 'aiopsterm-agent-events'
-  version: 1
-  boot_id: string
-  seq: number
-  id: string
-  name: string
-  category: AgentSessionEventStreamCategory
-  source: string
-  occurred_at: string
-  workspace_id?: string
-  surface_id?: string
-  terminal_session_id?: string
-  payload: Record<string, unknown>
-}
-
-export type AgentSessionEventStreamListResult = {
-  ok: boolean
-  data?: {
-    protocol: 'aiopsterm-agent-events'
-    version: 1
-    bootId: string
-    afterSeq: number
-    oldestSeq: number
-    latestSeq: number
-    nextSeq: number
-    gap: boolean
-    events: AgentSessionEventStreamFrame[]
-    count: number
-  }
-  errorCode?: string
-  errorMessage?: string
-}
-
-type AgentSessionEventStreamFilters = {
-  names: Set<string>
-  categories: Set<AgentSessionEventStreamCategory>
-  includeHeartbeats: boolean
-}
-
-type AgentSessionEventStreamSubscriber = {
-  id: string
-  socket: Socket
-  filters: AgentSessionEventStreamFilters
-  heartbeat: NodeJS.Timeout | null
 }
 
 type PendingAgentDecision = {
@@ -179,52 +162,9 @@ const storeVersion = 1
 const maxSessions = 200
 const maxEventsPerSession = 200
 const maxDecisionsPerSession = 40
-const maxRawKeys = 80
-const maxStreamEvents = 2000
-const streamHeartbeatIntervalMs = 15_000
-const defaultDecisionWaitTimeoutMs = 120_000
-const maxDecisionWaitTimeoutMs = 125_000
-const maxLaunchCommandLength = 600
 const defaultAutoTitleMinEventGrowth = 4
 const defaultAutoTitleMinIntervalMs = 180_000
 const defaultAutoTitleMaxContextMessages = 8
-const defaultAgentHibernationConfig: AgentHibernationConfig = {
-  enabled: false,
-  idleSeconds: 300,
-  maxLiveTerminals: 12,
-  confirmationSeconds: 60
-}
-const supportedSources = new Set<AiAgentSessionSource>([
-  'codex',
-  'claude-code',
-  'cursor',
-  'gemini',
-  'copilot',
-  'grok',
-  'opencode',
-  'codebuddy',
-  'factory',
-  'qoder',
-  'antigravity',
-  'kiro',
-  'hermes-agent',
-  'rovodev',
-  'amp',
-  'pi',
-  'omp'
-])
-const supportedEvents = new Set<AiAgentSessionEventName>([
-  'session_start',
-  'prompt_submit',
-  'pre_tool_use',
-  'permission_request',
-  'question',
-  'notification',
-  'lifecycle',
-  'stop',
-  'session_end'
-])
-const decisionKinds = new Set<ManagedAiSessionDecisionKind>(['allow', 'always', 'bypass', 'deny', 'reply', 'handled'])
 
 let server: Server | null = null
 let socketPath = ''
@@ -237,485 +177,12 @@ let pendingDecisions = new Map<string, PendingAgentDecision>()
 let loadedStore = false
 let writeQueue: Promise<void> = Promise.resolve()
 let auditQueue: Promise<void> = Promise.resolve()
-let streamSeq = 0
-const streamBootId = randomUUID()
-let streamEvents: AgentSessionEventStreamFrame[] = []
-let streamSubscribers = new Map<string, AgentSessionEventStreamSubscriber>()
 let autoNamingRuntime: Required<Pick<ManagedAiSessionAutoNamingRuntime, 'enabled' | 'minEventGrowth' | 'minIntervalMs' | 'maxContextMessages'>> &
   Pick<ManagedAiSessionAutoNamingRuntime, 'emit' | 'generateTitle'> = {
   enabled: false,
   minEventGrowth: defaultAutoTitleMinEventGrowth,
   minIntervalMs: defaultAutoTitleMinIntervalMs,
   maxContextMessages: defaultAutoTitleMaxContextMessages
-}
-
-const cleanText = (value: unknown) => (typeof value === 'string' ? value.trim() : '')
-
-const cleanOptionalText = (value: unknown) => {
-  const text = cleanText(value)
-  return text || undefined
-}
-
-const shellQuote = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`
-
-const shellToken = (value: string) => (/^[A-Za-z0-9_./:=@+-]+$/.test(value) ? value : shellQuote(value))
-
-const sessionKey = (source: AiAgentSessionSource, id: string) => `${source}:${id}`
-
-const managedAiNotificationId = (source: AiAgentSessionSource, sessionId: string) => `managed-ai:${source}:${sessionId}`
-
-const pendingDecisionKey = (source: AiAgentSessionSource, sessionId: string, requestId: string) => `${source}:${sessionId}:${requestId}`
-
-const normalizeSource = (value: unknown): AiAgentSessionSource | null => {
-  const source = cleanText(value).toLowerCase().replace(/_/g, '-')
-  if (!source) return null
-  const aliases: Record<string, AiAgentSessionSource> = {
-    claude: 'claude-code',
-    claude_code: 'claude-code',
-    claude_code_cli: 'claude-code',
-    'claude-code-cli': 'claude-code',
-    cursoragent: 'cursor',
-    cursor_agent: 'cursor',
-    'cursor-agent': 'cursor',
-    gemini_cli: 'gemini',
-    'gemini-cli': 'gemini',
-    github_copilot: 'copilot',
-    'github-copilot': 'copilot',
-    agy: 'antigravity',
-    rovo: 'rovodev',
-    rovo_dev: 'rovodev',
-    'rovo-dev': 'rovodev',
-    hermes: 'hermes-agent',
-    hermes_agent: 'hermes-agent'
-  }
-  const normalized = aliases[source] || (source as AiAgentSessionSource)
-  return supportedSources.has(normalized) ? normalized : null
-}
-
-const normalizeBoolean = (value: unknown) => {
-  if (typeof value === 'boolean') return value
-  if (typeof value === 'string') {
-    const normalized = value.trim().toLowerCase()
-    if (normalized === 'true' || normalized === '1' || normalized === 'yes') return true
-    if (normalized === 'false' || normalized === '0' || normalized === 'no') return false
-  }
-  return undefined
-}
-
-const normalizeRequestKind = (value: unknown): ManagedAiRequestKind | undefined => {
-  const normalized = cleanText(value).toLowerCase().replace(/[\s_-]+/g, '')
-  if (!normalized) return undefined
-  if (normalized === 'permission' || normalized === 'approval' || normalized === 'permissionrequest') return 'permission'
-  if (normalized === 'question' || normalized === 'askuserquestion' || normalized === 'askuser') return 'question'
-  if (normalized === 'plan' || normalized === 'exitplan' || normalized === 'exitplanmode') return 'plan'
-  if (normalized === 'notification' || normalized === 'notify') return 'notification'
-  if (normalized === 'telemetry' || normalized === 'info' || normalized === 'event') return 'telemetry'
-  return undefined
-}
-
-const normalizeDecisionMode = (value: unknown): ManagedAiDecisionMode | undefined => {
-  const normalized = cleanText(value).toLowerCase().replace(/[\s_-]+/g, '')
-  if (!normalized) return undefined
-  if (normalized === 'blocking' || normalized === 'wait' || normalized === 'waitdecision' || normalized === 'waitfordecision') return 'blocking'
-  if (normalized === 'telemetry' || normalized === 'readonly' || normalized === 'nonblocking') return 'telemetry'
-  if (normalized === 'local' || normalized === 'handled' || normalized === 'advisory') return 'local'
-  return undefined
-}
-
-const normalizeWaitTimeoutMs = (value: unknown) => {
-  const number = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN
-  if (!Number.isFinite(number) || number <= 0) return defaultDecisionWaitTimeoutMs
-  return Math.max(1000, Math.min(maxDecisionWaitTimeoutMs, Math.round(number)))
-}
-
-const normalizeEventName = (value: unknown): AiAgentSessionEventName | null => {
-  const raw = cleanText(value)
-  if (!raw) return null
-  const normalized = raw
-    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
-    .replace(/[-\s]+/g, '_')
-    .toLowerCase()
-  const aliases: Record<string, AiAgentSessionEventName> = {
-    afteragent: 'stop',
-    after_agent: 'stop',
-    afteragentresponse: 'stop',
-    after_agent_response: 'stop',
-    beforeagent: 'prompt_submit',
-    before_agent: 'prompt_submit',
-    beforeshellexecution: 'pre_tool_use',
-    before_shell_execution: 'pre_tool_use',
-    beforesubmitprompt: 'prompt_submit',
-    before_submit_prompt: 'prompt_submit',
-    on_complete: 'stop',
-    on_error: 'stop',
-    on_session_end: 'session_end',
-    on_session_finalize: 'session_end',
-    on_session_reset: 'session_start',
-    on_session_start: 'session_start',
-    on_tool_permission: 'permission_request',
-    post_llm_call: 'stop',
-    post_approval_response: 'notification',
-    pre_approval_request: 'permission_request',
-    pre_llm_call: 'prompt_submit',
-    preinvocation: 'prompt_submit',
-    pre_invocation: 'prompt_submit',
-    pretooluse: 'pre_tool_use',
-    pre_tool_use: 'pre_tool_use',
-    promptsubmit: 'prompt_submit',
-    prompt_submit: 'prompt_submit',
-    permissionrequest: 'permission_request',
-    permission_request: 'permission_request',
-    sessionend: 'session_end',
-    session_end: 'session_end',
-    sessionstart: 'session_start',
-    session_start: 'session_start',
-    shell_exec: 'prompt_submit',
-    stop: 'stop',
-    turn_completion: 'stop',
-    userpromptsubmit: 'prompt_submit',
-    user_prompt_submit: 'prompt_submit',
-    askuserquestion: 'question',
-    ask_user_question: 'question',
-    lifecycle: 'lifecycle',
-    status: 'lifecycle',
-    tab_status: 'lifecycle',
-    tabstatus: 'lifecycle',
-    agent_lifecycle: 'lifecycle',
-    agentlifecycle: 'lifecycle',
-    question: 'question',
-    notification: 'notification',
-    notify: 'notification'
-  }
-  return aliases[normalized] || (supportedEvents.has(normalized as AiAgentSessionEventName) ? (normalized as AiAgentSessionEventName) : null)
-}
-
-const firstText = (record: Record<string, unknown>, keys: string[]) => {
-  for (const key of keys) {
-    const text = cleanOptionalText(record[key])
-    if (text) return text
-  }
-  return undefined
-}
-
-const cleanPositiveInteger = (value: unknown) => {
-  if (typeof value === 'string' && value.trim() && Number.isFinite(Number(value))) {
-    const normalized = Math.floor(Number(value))
-    return normalized > 0 ? normalized : undefined
-  }
-  if (typeof value !== 'number' || !Number.isFinite(value)) return undefined
-  const normalized = Math.floor(value)
-  return normalized > 0 ? normalized : undefined
-}
-
-const normalizeAgentLifecycle = (value: unknown): ManagedAiSessionLifecycle | undefined => {
-  const normalized = cleanText(value).toLowerCase().replace(/[\s_-]+/g, '')
-  if (!normalized) return undefined
-  if (normalized === 'idle' || normalized === 'done' || normalized === 'ready' || normalized === 'completed') return 'idle'
-  if (normalized === 'running' || normalized === 'working' || normalized === 'thinking' || normalized === 'reading' || normalized === 'busy') return 'running'
-  if (normalized === 'needsinput' || normalized === 'waiting' || normalized === 'blocked' || normalized === 'approval' || normalized === 'question') return 'needsInput'
-  if (normalized === 'ended' || normalized === 'closed' || normalized === 'exited' || normalized === 'stopped') return 'ended'
-  if (normalized === 'unknown') return 'unknown'
-  return undefined
-}
-
-const stateForAgentLifecycle = (lifecycle?: ManagedAiSessionLifecycle): ManagedAiSessionState | undefined => {
-  if (lifecycle === 'running') return 'working'
-  if (lifecycle === 'idle') return 'idle'
-  if (lifecycle === 'needsInput') return 'needsInput'
-  if (lifecycle === 'ended') return 'ended'
-  if (lifecycle === 'unknown') return 'unknown'
-  return undefined
-}
-
-const commandTokens = (command: string) => {
-  const tokens: string[] = []
-  let current = ''
-  let quote: '"' | "'" | '' = ''
-  let escaped = false
-  for (const char of command.trim()) {
-    if (escaped) {
-      current += char
-      escaped = false
-      continue
-    }
-    if (char === '\\' && quote !== "'") {
-      escaped = true
-      continue
-    }
-    if (quote) {
-      if (char === quote) quote = ''
-      else current += char
-      continue
-    }
-    if (char === '"' || char === "'") {
-      quote = char
-      continue
-    }
-    if (/\s/.test(char)) {
-      if (current) {
-        tokens.push(current)
-        current = ''
-      }
-      continue
-    }
-    current += char
-  }
-  if (current) tokens.push(current)
-  return tokens
-}
-
-const safeLaunchFlags = new Set([
-  '-m',
-  '--model',
-  '--model-id',
-  '--sandbox',
-  '--approval',
-  '--approval-policy',
-  '--permission-mode',
-  '--config',
-  '--settings',
-  '--profile',
-  '--cwd',
-  '-C',
-  '--cd'
-])
-
-const blockedLaunchFlags = new Set([
-  '-p',
-  '--prompt',
-  '--api-key',
-  '--token',
-  '--auth-token',
-  '--resume',
-  '-r',
-  '--session',
-  '--session-id',
-  '--conversation',
-  '--execute',
-  'exec',
-  'review'
-])
-
-const sanitizeLaunchCommand = (value: unknown) => {
-  const text = cleanText(value)
-  if (!text) return undefined
-  const tokens = commandTokens(text).slice(0, 80)
-  if (!tokens.length) return undefined
-  const executable = tokens[0]
-  const base = executable.split(/[\\/]/).pop() || executable
-  const preserved = [base]
-  for (let index = 1; index < tokens.length; index += 1) {
-    const token = tokens[index]
-    const [flagName] = token.split('=', 1)
-    if (blockedLaunchFlags.has(token) || blockedLaunchFlags.has(flagName)) {
-      if (!token.includes('=') && index + 1 < tokens.length) index += 1
-      continue
-    }
-    if (safeLaunchFlags.has(token)) {
-      if (index + 1 < tokens.length) {
-        preserved.push(token, tokens[index + 1])
-        index += 1
-      }
-      continue
-    }
-    if ([...safeLaunchFlags].some((flag) => token.startsWith(`${flag}=`))) {
-      preserved.push(token)
-    }
-  }
-  return preserved.map(shellToken).join(' ').slice(0, maxLaunchCommandLength)
-}
-
-const resumeCommandFor = (source: AiAgentSessionSource, sessionId: string, cwd?: string, provided?: unknown) => {
-  const explicit = sanitizeLaunchCommand(provided)
-  if (explicit && /\b(resume|--resume|-r|--session|--session-id)\b/.test(explicit)) return cwd ? `cd ${shellQuote(cwd)} && ${explicit}` : explicit
-  const id = shellQuote(sessionId)
-  const command =
-    source === 'codex'
-      ? `codex resume ${id}`
-      : source === 'claude-code'
-        ? `claude --resume ${id}`
-        : source === 'grok'
-          ? `grok -r ${id}`
-          : source === 'opencode'
-            ? `opencode --session ${id}`
-            : source === 'cursor'
-              ? `cursor-agent --resume ${id}`
-              : source === 'gemini'
-                ? `gemini --resume ${id}`
-                : source === 'kiro'
-                  ? `kiro-cli chat --resume-id ${id}`
-                  : source === 'copilot'
-                    ? `copilot --resume ${id}`
-                    : source === 'codebuddy'
-                      ? `codebuddy --resume ${id}`
-                      : source === 'factory'
-                        ? `droid --resume ${id}`
-                        : source === 'qoder'
-                          ? `qodercli --resume ${id}`
-                          : ''
-  if (!command) return undefined
-  return cwd ? `cd ${shellQuote(cwd)} && ${command}` : command
-}
-
-const nestedRecord = (record: Record<string, unknown>, key: string) => {
-  const value = record[key]
-  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
-}
-
-const firstNestedRecord = (record: Record<string, unknown>, keys: string[]) => {
-  for (const key of keys) {
-    const nested = nestedRecord(record, key)
-    if (Object.keys(nested).length) return nested
-  }
-  return {}
-}
-
-const baseNameFromPath = (value: unknown) => {
-  const text = cleanText(value).replace(/[\\/]+$/, '')
-  if (!text) return ''
-  return text.split(/[\\/]/).filter(Boolean).pop() || text
-}
-
-const sourceLabel = (source: AiAgentSessionSource) => {
-  const labels: Record<AiAgentSessionSource, string> = {
-    'claude-code': 'Claude Code',
-    antigravity: 'Antigravity',
-    amp: 'Amp',
-    codebuddy: 'CodeBuddy',
-    codex: 'Codex',
-    copilot: 'Copilot',
-    cursor: 'Cursor',
-    factory: 'Factory',
-    gemini: 'Gemini',
-    grok: 'Grok',
-    'hermes-agent': 'Hermes Agent',
-    kiro: 'Kiro',
-    omp: 'OMP',
-    opencode: 'OpenCode',
-    pi: 'Pi',
-    qoder: 'Qoder',
-    rovodev: 'Rovo Dev'
-  }
-  return labels[source] || source
-}
-
-const eventTitle = (source: AiAgentSessionSource, event: AiAgentSessionEventName, input: Record<string, unknown>, cwd?: string) =>
-  firstText(input, ['title', 'projectTitle', 'project_title', 'workspaceTitle', 'workspace_title']) ||
-  (() => {
-    const projectName = firstText(input, ['projectName', 'project_name', 'workspaceName', 'workspace_name']) || baseNameFromPath(cwd)
-    return projectName ? `${sourceLabel(source)} · ${projectName}` : ''
-  })() ||
-  (event === 'permission_request'
-    ? `${sourceLabel(source)} needs approval`
-    : event === 'question'
-      ? `${sourceLabel(source)} needs input`
-      : event === 'notification'
-        ? `${sourceLabel(source)} notification`
-        : sourceLabel(source))
-
-const questionSummary = (input: Record<string, unknown>) => {
-  const toolInput = nestedRecord(input, 'tool_input')
-  const questions = Array.isArray(toolInput.questions) ? toolInput.questions : []
-  const question = questions.find((item) => item && typeof item === 'object' && !Array.isArray(item)) as Record<string, unknown> | undefined
-  return question ? firstText(question, ['question', 'header', 'prompt']) : undefined
-}
-
-const toolNameFor = (input: Record<string, unknown>) =>
-  firstText(input, ['toolName', 'tool_name', 'tool', 'name']) || firstText(firstNestedRecord(input, ['tool', 'tool_input', 'toolInput']), ['name', 'toolName', 'tool_name'])
-
-const isExitPlanTool = (toolName?: string) => cleanText(toolName).toLowerCase().replace(/[\s_-]+/g, '') === 'exitplanmode'
-
-const isAskUserQuestionTool = (toolName?: string) => cleanText(toolName).toLowerCase().replace(/[\s_-]+/g, '') === 'askuserquestion'
-
-const requestKindFor = (source: AiAgentSessionSource, event: AiAgentSessionEventName, input: Record<string, unknown>, toolName?: string): ManagedAiRequestKind => {
-  const explicit = normalizeRequestKind(input.requestKind || input.request_kind || input.feedKind || input.feed_kind)
-  if (explicit) return explicit
-  if (event === 'question' || isAskUserQuestionTool(toolName)) return 'question'
-  if (isExitPlanTool(toolName)) return 'plan'
-  if (event === 'permission_request') return 'permission'
-  if (event === 'notification') return 'notification'
-  return 'telemetry'
-}
-
-const decisionModeFor = (source: AiAgentSessionSource, event: AiAgentSessionEventName, input: Record<string, unknown>, requestKind: ManagedAiRequestKind): ManagedAiDecisionMode => {
-  const explicit = normalizeDecisionMode(input.decisionMode || input.decision_mode)
-  if (explicit) return explicit
-  const waitForDecision = normalizeBoolean(input.actionable ?? input.waitForDecision ?? input.wait_for_decision)
-  if (source === 'claude-code' && waitForDecision === true && (requestKind === 'permission' || requestKind === 'question' || requestKind === 'plan')) return 'blocking'
-  if (requestKind === 'permission' || requestKind === 'question' || requestKind === 'plan' || requestKind === 'notification') return 'local'
-  return 'telemetry'
-}
-
-const actionableFor = (source: AiAgentSessionSource, event: AiAgentSessionEventName, input: Record<string, unknown>, requestKind: ManagedAiRequestKind, decisionMode: ManagedAiDecisionMode) => {
-  const explicit = normalizeBoolean(input.actionable ?? input.waitForDecision ?? input.wait_for_decision)
-  if (source === 'codex' && event === 'permission_request') return false
-  if (typeof explicit === 'boolean') return explicit
-  if (decisionMode === 'blocking') return true
-  return requestKind === 'permission' || requestKind === 'question' || requestKind === 'plan'
-}
-
-const managedAiSessionNeedsInputForEvent = (event: Pick<AiAgentSessionEvent, 'source' | 'event' | 'requestKind' | 'decisionMode' | 'actionable'>) => {
-  if (event.source === 'codex' && event.event === 'permission_request') return false
-  if (event.requestKind === 'telemetry') return false
-  if (event.decisionMode === 'blocking') return true
-  if (event.requestKind === 'notification') return true
-  return event.actionable === true
-}
-
-const eventSummary = (event: AiAgentSessionEventName, input: Record<string, unknown>) =>
-  firstText(input, ['summary', 'message', 'body', 'text', 'prompt', 'lastAssistantMessage', 'last_assistant_message']) ||
-  questionSummary(input) ||
-  (event === 'lifecycle' ? cleanText(input.status || input.lifecycle || input.agentLifecycle || input.agent_lifecycle) : '') ||
-  (event === 'stop' ? 'Turn complete' : '')
-
-const managedAiSessionStateForEvent = (
-  event: AiAgentSessionEventName,
-  previous: ManagedAiSessionState = 'unknown',
-  lifecycle?: ManagedAiSessionLifecycle,
-  aiEvent?: Pick<AiAgentSessionEvent, 'source' | 'event' | 'requestKind' | 'decisionMode' | 'actionable'>
-): ManagedAiSessionState => {
-  const lifecycleState = stateForAgentLifecycle(lifecycle)
-  if (lifecycleState) return lifecycleState
-  if (event === 'session_start') return 'idle'
-  if (event === 'prompt_submit' || event === 'pre_tool_use') return 'working'
-  if (event === 'permission_request' || event === 'question' || event === 'notification') return aiEvent && managedAiSessionNeedsInputForEvent(aiEvent) ? 'needsInput' : 'working'
-  if (event === 'stop') return 'idle'
-  if (event === 'session_end') return 'ended'
-  return previous
-}
-
-const compactString = (value: unknown, maxLength = 240) => {
-  const text = cleanText(value)
-  if (!text) return undefined
-  return text.length > maxLength ? `${text.slice(0, maxLength - 1)}…` : text
-}
-
-const compactAutoTitle = (value: unknown, currentTitle?: string) => {
-  const raw = cleanText(value)
-  if (!raw) return undefined
-  const firstLine = raw
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .find(Boolean)
-  if (!firstLine) return undefined
-  let title = firstLine.replace(/^[`"'\u201c\u201d]+|[`"'\u201c\u201d.。!?！？:：]+$/g, '').trim()
-  title = title
-    .replace(/\s+/g, ' ')
-    .replace(/^title\s*[:：]\s*/i, '')
-    .trim()
-  if (!title || title === currentTitle) return undefined
-  if (title.length > 50) {
-    const prefix = title.slice(0, 50)
-    const lastSpace = prefix.lastIndexOf(' ')
-    title = (lastSpace > 8 ? prefix.slice(0, lastSpace) : prefix).trim()
-  }
-  return title || undefined
-}
-
-const normalizeAutoNamingPositiveInteger = (value: unknown, fallback: number, min: number, max: number) => {
-  const number = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN
-  if (!Number.isFinite(number)) return fallback
-  return Math.max(min, Math.min(max, Math.round(number)))
 }
 
 export const configureManagedAiSessionAutoNamingRuntime = (config: ManagedAiSessionAutoNamingRuntime = {}) => {
@@ -864,272 +331,18 @@ const maybeRunAutoNaming = (session: ManagedAiSessionRecord, event: AiAgentSessi
     })
 }
 
-const compactRawValue = (value: unknown, depth = 0): unknown => {
-  if (value == null || typeof value === 'number' || typeof value === 'boolean') return value
-  if (typeof value === 'string') return compactString(value, 600)
-  if (Array.isArray(value)) return value.slice(0, 12).map((item) => compactRawValue(item, depth + 1))
-  if (typeof value === 'object' && depth < 3) {
-    const out: Record<string, unknown> = {}
-    Object.entries(value as Record<string, unknown>)
-      .slice(0, maxRawKeys)
-      .forEach(([key, item]) => {
-        out[key] = compactRawValue(item, depth + 1)
-      })
-    return out
-  }
-  return undefined
-}
+const agentSessionEventStreamRuntime = createAgentSessionEventStreamRuntime({
+  compactRawValue,
+  cleanText,
+  cleanOptionalText,
+  emitManagedAiSessionEvent: (event) => autoNamingRuntime.emit?.(event)
+})
 
-const compactRawRecord = (record: Record<string, unknown>) => compactRawValue(record) as Record<string, unknown>
+const publishAgentEventStreamFrame = agentSessionEventStreamRuntime.publishAgentEventStreamFrame
+const publishManagedAiStreamFrame = agentSessionEventStreamRuntime.publishManagedAiStreamFrame
 
-const socketWriteJsonLine = (socket: Socket, value: unknown) => {
-  socket.write(`${JSON.stringify(value)}\n`)
-}
-
-const normalizeStreamName = (event: AiAgentSessionEventName) =>
-  event
-    .split('_')
-    .map((part) => (part ? `${part[0].toUpperCase()}${part.slice(1)}` : part))
-    .join('')
-
-const compactStreamPayload = (value: Record<string, unknown>) => compactRawValue(value, 0) as Record<string, unknown>
-
-const eventStreamFrame = (
-  input: Omit<AgentSessionEventStreamFrame, 'type' | 'protocol' | 'version' | 'boot_id' | 'seq' | 'id' | 'occurred_at'>
-): AgentSessionEventStreamFrame => {
-  streamSeq += 1
-  return {
-    type: 'event',
-    protocol: 'aiopsterm-agent-events',
-    version: 1,
-    boot_id: streamBootId,
-    seq: streamSeq,
-    id: `${streamBootId}-${streamSeq}`,
-    occurred_at: new Date().toISOString(),
-    ...input,
-    payload: compactStreamPayload(input.payload)
-  }
-}
-
-const streamMatches = (frame: AgentSessionEventStreamFrame, filters: AgentSessionEventStreamFilters) =>
-  (!filters.names.size || filters.names.has(frame.name)) && (!filters.categories.size || filters.categories.has(frame.category))
-
-const publishStreamFrame = (frame: AgentSessionEventStreamFrame) => {
-  streamEvents.push(frame)
-  if (streamEvents.length > maxStreamEvents) streamEvents = streamEvents.slice(-maxStreamEvents)
-  streamSubscribers.forEach((subscriber) => {
-    if (!streamMatches(frame, subscriber.filters)) return
-    socketWriteJsonLine(subscriber.socket, frame)
-  })
-}
-
-const publishAgentEventStreamFrame = (event: AiAgentSessionEvent, session: ManagedAiSessionRecord) => {
-  publishStreamFrame(
-    eventStreamFrame({
-      name: `agent.hook.${normalizeStreamName(event.event)}`,
-      category: 'agent',
-      source: event.source,
-      workspace_id: event.workspaceId,
-      surface_id: event.panelId,
-      terminal_session_id: event.terminalSessionId,
-      payload: {
-        source: event.source,
-        event: event.event,
-        sessionId: event.sessionId,
-        title: session.title,
-        summary: event.summary,
-        state: session.state,
-        requestId: event.requestId,
-        requestKind: event.requestKind,
-        decisionMode: event.decisionMode,
-        waitTimeoutMs: event.waitTimeoutMs,
-        toolName: event.toolName,
-        actionable: event.actionable,
-        cwd: event.cwd,
-        transcriptPath: event.transcriptPath,
-        processId: event.processId,
-        agentLifecycle: event.agentLifecycle
-      }
-    })
-  )
-}
-
-const publishManagedAiStreamFrame = (name: string, session: ManagedAiSessionRecord | null, payload: Record<string, unknown>) => {
-  const frame = eventStreamFrame({
-    name,
-    category: 'managed-ai',
-    source: session?.source || 'aiopsterm',
-    workspace_id: session?.workspaceId,
-    surface_id: session?.panelId,
-    terminal_session_id: session?.terminalSessionId,
-    payload: {
-      ...(session
-        ? {
-            source: session.source,
-            sessionId: session.id,
-            title: session.title,
-            state: session.state,
-            lastEvent: session.lastEvent,
-            requestKind: session.requestKind,
-            decisionMode: session.decisionMode,
-            waitTimeoutMs: session.waitTimeoutMs,
-            toolName: session.toolName
-          }
-        : {}),
-      ...payload
-    }
-  })
-  publishStreamFrame(frame)
-  autoNamingRuntime.emit?.({
-    name: frame.name,
-    category: 'managed-ai',
-    source: frame.source,
-    sessionId: cleanOptionalText(frame.payload.sessionId),
-    title: cleanOptionalText(frame.payload.title),
-    state:
-      frame.payload.state === 'idle' || frame.payload.state === 'working' || frame.payload.state === 'needsInput' || frame.payload.state === 'ended' || frame.payload.state === 'unknown'
-        ? frame.payload.state
-        : undefined,
-    payload: frame.payload,
-    seq: frame.seq
-  })
-}
-
-const cleanStringSet = (value: unknown) => {
-  const values = Array.isArray(value) ? value : typeof value === 'string' ? [value] : []
-  return new Set(values.map(cleanText).filter(Boolean))
-}
-
-const normalizeStreamLimit = (value: unknown) => {
-  const number = Number(value)
-  if (!Number.isFinite(number)) return 100
-  return Math.max(1, Math.min(500, Math.floor(number)))
-}
-
-const normalizeStreamCategories = (value: unknown) => {
-  const raw = cleanStringSet(value)
-  const categories = new Set<AgentSessionEventStreamCategory>()
-  raw.forEach((item) => {
-    if (item === 'agent' || item === 'managed-ai') categories.add(item)
-  })
-  return categories
-}
-
-const streamParamsFrom = (record: Record<string, unknown>) => {
-  const params = isRecord(record.params) ? record.params : record
-  const after =
-    typeof params.after_seq === 'number'
-      ? params.after_seq
-      : typeof params.afterSeq === 'number'
-        ? params.afterSeq
-        : typeof params.after === 'number'
-          ? params.after
-          : 0
-  return {
-    afterSeq: Number.isFinite(after) ? Math.max(0, Math.floor(after)) : 0,
-    filters: {
-      names: cleanStringSet(params.names || params.name),
-      categories: normalizeStreamCategories(params.categories || params.category),
-      includeHeartbeats: params.include_heartbeats === false || params.includeHeartbeats === false ? false : true
-    } satisfies AgentSessionEventStreamFilters
-  }
-}
-
-const closeStreamSubscriber = (id: string) => {
-  const subscriber = streamSubscribers.get(id)
-  if (!subscriber) return
-  if (subscriber.heartbeat) clearInterval(subscriber.heartbeat)
-  streamSubscribers.delete(id)
-}
-
-const startEventStream = (socket: Socket, request: Record<string, unknown>) => {
-  const { afterSeq, filters } = streamParamsFrom(request)
-  const subscriberId = randomUUID()
-  const oldestSeq = streamEvents[0]?.seq || streamSeq + 1
-  const replay = streamEvents.filter((frame) => frame.seq > afterSeq && streamMatches(frame, filters))
-  const subscriber: AgentSessionEventStreamSubscriber = {
-    id: subscriberId,
-    socket,
-    filters,
-    heartbeat: null
-  }
-  streamSubscribers.set(subscriberId, subscriber)
-  socketWriteJsonLine(socket, {
-    type: 'ack',
-    protocol: 'aiopsterm-agent-events',
-    version: 1,
-    boot_id: streamBootId,
-    subscription_id: subscriberId,
-    heartbeat_interval_seconds: streamHeartbeatIntervalMs / 1000,
-    replay_count: replay.length,
-    resume: {
-      after_seq: afterSeq,
-      requested_after_seq: afterSeq,
-      oldest_seq: oldestSeq,
-      latest_seq: streamSeq,
-      next_seq: streamSeq + 1,
-      gap: afterSeq > 0 && afterSeq < oldestSeq
-    },
-    filters: {
-      names: [...filters.names],
-      categories: [...filters.categories]
-    }
-  })
-  replay.forEach((frame) => socketWriteJsonLine(socket, frame))
-  if (filters.includeHeartbeats) {
-    subscriber.heartbeat = setInterval(() => {
-      if (socket.destroyed) {
-        closeStreamSubscriber(subscriberId)
-        return
-      }
-      socketWriteJsonLine(socket, {
-        type: 'heartbeat',
-        protocol: 'aiopsterm-agent-events',
-        version: 1,
-        boot_id: streamBootId,
-        subscription_id: subscriberId,
-        latest_seq: streamSeq,
-        occurred_at: new Date().toISOString()
-      })
-    }, streamHeartbeatIntervalMs)
-    subscriber.heartbeat.unref()
-  }
-  socket.on('close', () => closeStreamSubscriber(subscriberId))
-  socket.on('error', () => closeStreamSubscriber(subscriberId))
-}
-
-export const listManagedAiSessionEvents = (input: Record<string, unknown> = {}): AgentSessionEventStreamListResult => {
-  const { afterSeq, filters } = streamParamsFrom(input)
-  const limit = normalizeStreamLimit(input.limit)
-  const sourceFilter = cleanStringSet(input.sources || input.source)
-  const sessionFilter = cleanStringSet(input.sessionIds || input.session_ids || input.sessionId || input.session_id)
-  const oldestSeq = streamEvents[0]?.seq || streamSeq + 1
-  const events = streamEvents
-    .filter((frame) => {
-      if (frame.seq <= afterSeq || !streamMatches(frame, filters)) return false
-      const source = cleanText(frame.payload.source || frame.source)
-      const sessionId = cleanText(frame.payload.sessionId || frame.payload.session_id)
-      if (sourceFilter.size && !sourceFilter.has(source)) return false
-      if (sessionFilter.size && !sessionFilter.has(sessionId)) return false
-      return true
-    })
-    .slice(0, limit)
-  return {
-    ok: true,
-    data: {
-      protocol: 'aiopsterm-agent-events',
-      version: 1,
-      bootId: streamBootId,
-      afterSeq,
-      oldestSeq,
-      latestSeq: streamSeq,
-      nextSeq: streamSeq + 1,
-      gap: afterSeq > 0 && afterSeq < oldestSeq,
-      events,
-      count: events.length
-    }
-  }
-}
+export const listManagedAiSessionEvents = (input: Record<string, unknown> = {}): AgentSessionEventStreamListResult =>
+  agentSessionEventStreamRuntime.listManagedAiSessionEvents(input)
 
 const auditPathFor = (userDataPath: string) => join(userDataPath, 'agent-sessions', 'managed-ai-sessions.audit.jsonl')
 
@@ -1210,174 +423,6 @@ const auditDecisionCreated = (session: ManagedAiSessionRecord, decision: Managed
   })
 }
 
-const wordsForAutoTitle = (text: string) =>
-  text
-    .replace(/[^\p{L}\p{N}\s._/-]+/gu, ' ')
-    .split(/\s+/)
-    .map((word) => word.trim())
-    .filter((word) => word.length >= 2)
-    .slice(0, 5)
-
-const isGenericAutoTitleCandidate = (text: string) => {
-  const normalized = text.trim().toLowerCase().replace(/\s+/g, ' ')
-  return (
-    normalized === 'turn complete' ||
-    normalized === 'done' ||
-    normalized === 'complete' ||
-    normalized === 'session complete' ||
-    normalized === 'session ended' ||
-    /^[a-z0-9_-]+:\s+/.test(normalized) ||
-    normalized.endsWith(' turn complete')
-  )
-}
-
-const autoTitleFor = (event: AiAgentSessionEvent, existing?: ManagedAiSessionRecord) => {
-  if (existing?.userTitle) return existing.title
-  const candidates = [
-    event.summary,
-    event.title.includes('·') ? event.title.split('·').pop() : event.title,
-    event.cwd ? baseNameFromPath(event.cwd) : '',
-    existing?.cwd ? baseNameFromPath(existing.cwd) : ''
-  ]
-  for (const candidate of candidates) {
-    const text = cleanText(candidate)
-    if (!text || isGenericAutoTitleCandidate(text)) continue
-    const words = wordsForAutoTitle(text)
-    if (words.length >= 2) return words.slice(0, 5).join(' ')
-    if (!existing && words.length === 1 && text === baseNameFromPath(text)) return `${sourceLabel(event.source)} · ${words[0]}`
-  }
-  return existing?.autoTitle || existing?.title || event.title || sourceLabel(event.source)
-}
-
-const normalizeRecordEvent = (event: AiAgentSessionEvent, raw: Record<string, unknown>): ManagedAiSessionTimelineEvent => ({
-  ...event,
-  requestKind: event.requestKind || 'telemetry',
-  decisionMode: event.decisionMode || 'telemetry',
-  id: createEventId(event),
-  raw: compactRawRecord(raw)
-})
-
-const createEventId = (event: AiAgentSessionEvent) => {
-  const hash = createHash('sha1')
-    .update([event.source, event.sessionId, event.event, event.receivedAt, event.summary].join('\0'))
-    .digest('hex')
-    .slice(0, 12)
-  return `${event.receivedAt}-${hash}`
-}
-
-const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === 'object' && !Array.isArray(value))
-
-const normalizeStoredSession = (value: unknown): ManagedAiSessionRecord | null => {
-  if (!isRecord(value)) return null
-  const source = normalizeSource(value.source)
-  const id = cleanOptionalText(value.id)
-  const lastEvent = normalizeEventName(value.lastEvent)
-  if (!source || !id || !lastEvent) return null
-  const now = Date.now()
-  const events = Array.isArray(value.events)
-    ? value.events.filter(isRecord).map((item) => normalizeStoredTimelineEvent(item, source, id)).filter(Boolean)
-    : []
-  const decisions = Array.isArray(value.decisions)
-    ? value.decisions.filter(isRecord).map(normalizeStoredDecision).filter(Boolean)
-    : []
-  const latestEvent = events.at(-1) as ManagedAiSessionTimelineEvent | undefined
-  const storedToolName = cleanOptionalText(value.toolName || value.tool_name)
-  const requestKind = normalizeRequestKind(value.requestKind || value.request_kind) || latestEvent?.requestKind || requestKindFor(source, lastEvent, value, storedToolName)
-  const decisionMode = normalizeDecisionMode(value.decisionMode || value.decision_mode) || latestEvent?.decisionMode || decisionModeFor(source, lastEvent, value, requestKind)
-  return {
-    id,
-    source,
-    title: cleanOptionalText(value.title) || sourceLabel(source),
-    summary: cleanOptionalText(value.summary) || '',
-    state: value.state === 'idle' || value.state === 'working' || value.state === 'needsInput' || value.state === 'ended' || value.state === 'unknown' ? value.state : 'unknown',
-    lastEvent,
-    lastActivityAt: typeof value.lastActivityAt === 'number' ? value.lastActivityAt : now,
-    createdAt: typeof value.createdAt === 'number' ? value.createdAt : now,
-    updatedAt: typeof value.updatedAt === 'number' ? value.updatedAt : now,
-    ...(typeof value.handledAt === 'number' ? { handledAt: value.handledAt } : {}),
-    ...(cleanOptionalText(value.autoTitle) ? { autoTitle: cleanOptionalText(value.autoTitle) } : {}),
-    ...(cleanOptionalText(value.userTitle) ? { userTitle: cleanOptionalText(value.userTitle) } : {}),
-    ...(typeof value.autoTitleEventCount === 'number' && Number.isFinite(value.autoTitleEventCount)
-      ? { autoTitleEventCount: Math.max(0, Math.floor(value.autoTitleEventCount)) }
-      : {}),
-    ...(typeof value.autoTitleAttemptedAt === 'number' && Number.isFinite(value.autoTitleAttemptedAt) ? { autoTitleAttemptedAt: value.autoTitleAttemptedAt } : {}),
-    ...(typeof value.autoTitleGeneratedAt === 'number' && Number.isFinite(value.autoTitleGeneratedAt) ? { autoTitleGeneratedAt: value.autoTitleGeneratedAt } : {}),
-    ...(cleanOptionalText(value.panelId) ? { panelId: cleanOptionalText(value.panelId) } : {}),
-    ...(cleanOptionalText(value.terminalSessionId) ? { terminalSessionId: cleanOptionalText(value.terminalSessionId) } : {}),
-    ...(cleanOptionalText(value.workspaceId) ? { workspaceId: cleanOptionalText(value.workspaceId) } : {}),
-    ...(cleanOptionalText(value.cwd) ? { cwd: cleanOptionalText(value.cwd) } : {}),
-    ...(cleanOptionalText(value.transcriptPath) ? { transcriptPath: cleanOptionalText(value.transcriptPath) } : {}),
-    ...(cleanOptionalText(value.pendingRequestId) ? { pendingRequestId: cleanOptionalText(value.pendingRequestId) } : {}),
-    requestKind,
-    decisionMode,
-    ...(cleanPositiveInteger(value.waitTimeoutMs || value.wait_timeout_ms) ? { waitTimeoutMs: cleanPositiveInteger(value.waitTimeoutMs || value.wait_timeout_ms) } : latestEvent?.waitTimeoutMs ? { waitTimeoutMs: latestEvent.waitTimeoutMs } : {}),
-    ...(storedToolName ? { toolName: storedToolName } : latestEvent?.toolName ? { toolName: latestEvent.toolName } : {}),
-    ...(typeof value.actionable === 'boolean' ? { actionable: value.actionable } : {}),
-    ...(cleanOptionalText(value.launchCommand) ? { launchCommand: cleanOptionalText(value.launchCommand) } : {}),
-    ...(cleanOptionalText(value.resumeCommand) ? { resumeCommand: cleanOptionalText(value.resumeCommand) } : {}),
-    ...(cleanPositiveInteger(value.processId) ? { processId: cleanPositiveInteger(value.processId) } : {}),
-    ...(cleanPositiveInteger(value.parentProcessId) ? { parentProcessId: cleanPositiveInteger(value.parentProcessId) } : {}),
-    ...(cleanPositiveInteger(value.processGroupId) ? { processGroupId: cleanPositiveInteger(value.processGroupId) } : {}),
-    ...(normalizeAgentLifecycle(value.agentLifecycle) ? { agentLifecycle: normalizeAgentLifecycle(value.agentLifecycle) } : {}),
-    ...(cleanPositiveInteger(value.terminalProcessId) ? { terminalProcessId: cleanPositiveInteger(value.terminalProcessId) } : {}),
-    ...(typeof value.terminalActivityAt === 'number' ? { terminalActivityAt: value.terminalActivityAt } : {}),
-    ...(value.hibernated === true ? { hibernated: true } : {}),
-    ...(typeof value.hibernatedAt === 'number' && Number.isFinite(value.hibernatedAt) ? { hibernatedAt: value.hibernatedAt } : {}),
-    ...(cleanOptionalText(value.hibernationReason) ? { hibernationReason: cleanOptionalText(value.hibernationReason) } : {}),
-    ...(cleanOptionalText(value.hibernatedTerminalSessionId) ? { hibernatedTerminalSessionId: cleanOptionalText(value.hibernatedTerminalSessionId) } : {}),
-    events: events.slice(-maxEventsPerSession) as ManagedAiSessionTimelineEvent[],
-    decisions: decisions.slice(-maxDecisionsPerSession) as ManagedAiSessionDecision[]
-  }
-}
-
-const normalizeStoredTimelineEvent = (value: Record<string, unknown>, fallbackSource: AiAgentSessionSource, fallbackSessionId: string) => {
-  const source = normalizeSource(value.source) || fallbackSource
-  const event = normalizeEventName(value.event)
-  if (!event) return null
-  const receivedAt = typeof value.receivedAt === 'number' ? value.receivedAt : Date.now()
-  const toolName = cleanOptionalText(value.toolName || value.tool_name)
-  const requestKind = normalizeRequestKind(value.requestKind || value.request_kind) || requestKindFor(source, event, value, toolName)
-  const decisionMode = normalizeDecisionMode(value.decisionMode || value.decision_mode) || decisionModeFor(source, event, value, requestKind)
-  return {
-    source,
-    event,
-    sessionId: cleanOptionalText(value.sessionId) || fallbackSessionId,
-    title: cleanOptionalText(value.title) || sourceLabel(source),
-    summary: cleanOptionalText(value.summary) || '',
-    receivedAt,
-    id: cleanOptionalText(value.id) || `${receivedAt}-${randomUUID()}`,
-    requestKind,
-    decisionMode,
-    ...(cleanOptionalText(value.panelId) ? { panelId: cleanOptionalText(value.panelId) } : {}),
-    ...(cleanOptionalText(value.terminalSessionId) ? { terminalSessionId: cleanOptionalText(value.terminalSessionId) } : {}),
-    ...(cleanOptionalText(value.workspaceId) ? { workspaceId: cleanOptionalText(value.workspaceId) } : {}),
-    ...(cleanOptionalText(value.cwd) ? { cwd: cleanOptionalText(value.cwd) } : {}),
-    ...(cleanOptionalText(value.transcriptPath) ? { transcriptPath: cleanOptionalText(value.transcriptPath) } : {}),
-    ...(cleanOptionalText(value.requestId) ? { requestId: cleanOptionalText(value.requestId) } : {}),
-    ...(cleanPositiveInteger(value.waitTimeoutMs || value.wait_timeout_ms) ? { waitTimeoutMs: cleanPositiveInteger(value.waitTimeoutMs || value.wait_timeout_ms) } : {}),
-    ...(toolName ? { toolName } : {}),
-    ...(typeof value.actionable === 'boolean' ? { actionable: value.actionable } : {}),
-    ...(cleanOptionalText(value.launchCommand) ? { launchCommand: cleanOptionalText(value.launchCommand) } : {}),
-    ...(cleanOptionalText(value.resumeCommand) ? { resumeCommand: cleanOptionalText(value.resumeCommand) } : {}),
-    ...(cleanPositiveInteger(value.processId) ? { processId: cleanPositiveInteger(value.processId) } : {}),
-    ...(cleanPositiveInteger(value.parentProcessId) ? { parentProcessId: cleanPositiveInteger(value.parentProcessId) } : {}),
-    ...(cleanPositiveInteger(value.processGroupId) ? { processGroupId: cleanPositiveInteger(value.processGroupId) } : {}),
-    ...(normalizeAgentLifecycle(value.agentLifecycle) ? { agentLifecycle: normalizeAgentLifecycle(value.agentLifecycle) } : {}),
-    ...(isRecord(value.raw) ? { raw: compactRawRecord(value.raw) } : {})
-  } satisfies ManagedAiSessionTimelineEvent
-}
-
-const normalizeStoredDecision = (value: Record<string, unknown>) => {
-  const kind = cleanText(value.kind) as ManagedAiSessionDecisionKind
-  if (!decisionKinds.has(kind)) return null
-  return {
-    id: cleanOptionalText(value.id) || randomUUID(),
-    kind,
-    ...(cleanOptionalText(value.message) ? { message: cleanOptionalText(value.message) } : {}),
-    createdAt: typeof value.createdAt === 'number' ? value.createdAt : Date.now()
-  } satisfies ManagedAiSessionDecision
-}
-
 const snapshot = (): ManagedAiSessionSnapshot => ({
   sessions: [...sessions.values()]
     .sort((first, second) => second.lastActivityAt - first.lastActivityAt)
@@ -1387,22 +432,6 @@ const snapshot = (): ManagedAiSessionSnapshot => ({
       decisions: [...session.decisions]
     }))
 })
-
-const normalizeHibernationNumber = (value: unknown, fallback: number, min: number, max: number) => {
-  const numberValue = Number(value)
-  if (!Number.isFinite(numberValue)) return fallback
-  return Math.max(min, Math.min(max, Math.round(numberValue)))
-}
-
-const normalizeAgentHibernationConfig = (value: unknown, fallback: AgentHibernationConfig = agentHibernationConfig): AgentHibernationConfig => {
-  const record = value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
-  return {
-    enabled: typeof record.enabled === 'boolean' ? record.enabled : fallback.enabled,
-    idleSeconds: normalizeHibernationNumber(record.idleSeconds, fallback.idleSeconds, 5, 604800),
-    maxLiveTerminals: normalizeHibernationNumber(record.maxLiveTerminals, fallback.maxLiveTerminals, 1, 256),
-    confirmationSeconds: normalizeHibernationNumber(record.confirmationSeconds, fallback.confirmationSeconds, 0, 3600)
-  }
-}
 
 const persistSnapshot = () => {
   if (!storePath) return
@@ -1452,69 +481,6 @@ export const configureAiAgentSessionStore = async (userDataPath: string) => {
   }
   await mkdir(join(userDataPath, 'agent-sessions'), { recursive: true })
   await loadStoreIfNeeded()
-}
-
-export const normalizeAiAgentSessionEventInput = (input: unknown, now = Date.now()): AiAgentSessionEventResult => {
-  if (!input || typeof input !== 'object') {
-    return { ok: false, errorCode: 'AI_AGENT_EVENT_INVALID', errorMessage: 'AI agent event must be a JSON object.' }
-  }
-  const record = input as Record<string, unknown>
-  const source = normalizeSource(record.source || record.agent || record.agentName || record.agent_name)
-  if (!source) {
-    return { ok: false, errorCode: 'AI_AGENT_EVENT_SOURCE_INVALID', errorMessage: 'AI agent event source is not supported.' }
-  }
-  const sessionId = firstText(record, ['sessionId', 'session_id', 'conversationId', 'conversation_id', 'id'])
-  if (!sessionId) {
-    return { ok: false, errorCode: 'AI_AGENT_EVENT_SESSION_REQUIRED', errorMessage: 'AI agent event sessionId is required.' }
-  }
-  const event = normalizeEventName(record.event || record.hookEventName || record.hook_event_name || record.type || record.kind)
-  if (!event) {
-    return { ok: false, errorCode: 'AI_AGENT_EVENT_NAME_INVALID', errorMessage: 'AI agent event name is not supported.' }
-  }
-  const panelId = cleanOptionalText(record.panelId || record.panel_id || record.surfaceId || record.surface_id)
-  const terminalSessionId = cleanOptionalText(record.terminalSessionId || record.terminal_session_id || record.terminalId || record.terminal_id)
-  const workspaceId = cleanOptionalText(record.workspaceId || record.workspace_id)
-  const cwd = cleanOptionalText(record.cwd || record.workingDirectory || record.working_directory || record.project_dir || record.projectDir || record.project_path || record.projectPath)
-  const transcriptPath = cleanOptionalText(record.transcriptPath || record.transcript_path)
-  const requestId = cleanOptionalText(record.requestId || record.request_id || record.tool_use_id)
-  const toolName = toolNameFor(record)
-  const requestKind = requestKindFor(source, event, record, toolName)
-  const decisionMode = decisionModeFor(source, event, record, requestKind)
-  const waitTimeoutInput = record.waitTimeoutMs ?? record.wait_timeout_ms
-  const waitTimeoutMs = decisionMode === 'blocking' || waitTimeoutInput !== undefined ? normalizeWaitTimeoutMs(waitTimeoutInput) : undefined
-  const actionable = actionableFor(source, event, record, requestKind, decisionMode)
-  const launchCommand = sanitizeLaunchCommand(record.launchCommand || record.launch_command)
-  const resumeCommand = resumeCommandFor(source, sessionId, cwd, record.resumeCommand || record.resume_command || record.launchCommand || record.launch_command)
-  const processId = cleanPositiveInteger(record.processId || record.process_id || record.pid || process.env.AIOPSTERM_AGENT_PID)
-  const parentProcessId = cleanPositiveInteger(record.parentProcessId || record.parent_process_id || record.ppid || process.env.PPID)
-  const processGroupId = cleanPositiveInteger(record.processGroupId || record.process_group_id || record.pgid)
-  const agentLifecycle = normalizeAgentLifecycle(record.agentLifecycle || record.agent_lifecycle || record.lifecycle || record.status)
-  const normalized: AiAgentSessionEvent = {
-    source,
-    event,
-    sessionId,
-    title: eventTitle(source, event, record, cwd),
-    summary: eventSummary(event, record),
-    receivedAt: typeof record.receivedAt === 'number' && Number.isFinite(record.receivedAt) ? record.receivedAt : now,
-    ...(panelId ? { panelId } : {}),
-    ...(terminalSessionId ? { terminalSessionId } : {}),
-    ...(workspaceId ? { workspaceId } : {}),
-    ...(cwd ? { cwd } : {}),
-    ...(transcriptPath ? { transcriptPath } : {}),
-    ...(requestId ? { requestId } : {}),
-    requestKind,
-    decisionMode,
-    ...(waitTimeoutMs ? { waitTimeoutMs } : {}),
-    ...(toolName ? { toolName } : {}),
-    ...(typeof actionable === 'boolean' ? { actionable } : {}),
-    ...(launchCommand ? { launchCommand } : {}),
-    ...(resumeCommand ? { resumeCommand } : {}),
-    ...(processId ? { processId } : {}),
-    ...(parentProcessId ? { parentProcessId } : {}),
-    ...(processGroupId ? { processGroupId } : {}),
-    ...(agentLifecycle ? { agentLifecycle } : {})
-  }
-  return { ok: true, data: normalized }
 }
 
 const upsertSessionForEvent = (event: AiAgentSessionEvent, raw: Record<string, unknown>) => {
@@ -1784,7 +750,7 @@ export const getAgentHibernationConfig = async (): Promise<AgentHibernationConfi
 
 export const setAgentHibernationConfig = async (input: Partial<AgentHibernationConfig> = {}): Promise<AgentHibernationConfigResult> => {
   await loadStoreIfNeeded()
-  agentHibernationConfig = normalizeAgentHibernationConfig(input)
+  agentHibernationConfig = normalizeAgentHibernationConfig(input, agentHibernationConfig)
   persistSnapshot()
   return { ok: true, data: { config: { ...agentHibernationConfig } } }
 }
@@ -2307,7 +1273,7 @@ export const jumpToUnreadManagedAiNotification = async (): Promise<ManagedAiNoti
 }
 
 const writeSocketResponse = (socket: Socket, response: AgentSessionSocketResponse) => {
-  socketWriteJsonLine(socket, response)
+  socket.write(`${JSON.stringify(response)}\n`)
 }
 
 const isEventStreamRequest = (record: unknown) => {
@@ -2320,7 +1286,7 @@ const handleSocketLine = async (socket: Socket, line: string, emit: AgentSession
   try {
     const parsed = JSON.parse(line) as Record<string, unknown>
     if (isEventStreamRequest(parsed)) {
-      startEventStream(socket, parsed)
+      agentSessionEventStreamRuntime.startEventStream(socket, parsed)
       return
     }
     writeSocketResponse(socket, await publishAiAgentSessionSocketEvent(parsed as AiAgentSessionEventInput, emit))
@@ -2405,11 +1371,7 @@ export const closeAiAgentSessionServer = () => {
     pending.resolve({ ok: true, status: 'timeout', agentOutput: {} })
   })
   pendingDecisions = new Map()
-  streamSubscribers.forEach((subscriber) => {
-    if (subscriber.heartbeat) clearInterval(subscriber.heartbeat)
-    subscriber.socket.destroy()
-  })
-  streamSubscribers = new Map()
+  agentSessionEventStreamRuntime.closeEventStreams()
 }
 
 export const __testing = {
@@ -2418,9 +1380,9 @@ export const __testing = {
   auditPathFor,
   managedAiSessionStateForEvent,
   autoTitleFor,
-  streamBootId,
-  streamEventCount: () => streamEvents.length,
-  streamLatestSeq: () => streamSeq,
+  streamBootId: agentSessionEventStreamRuntime.streamBootId,
+  streamEventCount: agentSessionEventStreamRuntime.streamEventCount,
+  streamLatestSeq: agentSessionEventStreamRuntime.streamLatestSeq,
   flushManagedAiSessionWrites: async () => {
     await writeQueue
     await auditQueue
