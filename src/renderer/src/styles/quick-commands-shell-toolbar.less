@@ -1,0 +1,199 @@
+.snippets-panel-native {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.snippets-title {
+  padding: 16px 16px 8px;
+  flex: 0 0 auto;
+}
+
+.recording-status-bar {
+  flex: 0 0 auto;
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 12px;
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--danger) 35%, var(--border));
+}
+
+.recording-status-bar > div {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.recording-buffer {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+}
+
+.recording-actions {
+  flex: 0 0 auto;
+}
+
+.recording-indicator {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--danger);
+  animation: blink 1s ease-in-out infinite;
+}
+
+@keyframes blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.3;
+  }
+}
+
+.recording-status-bar button {
+  border: 0;
+  background: transparent;
+  color: var(--danger);
+  cursor: pointer;
+}
+
+.snippets-toolbar {
+  flex: 0 0 auto;
+  min-height: 42px;
+  padding: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.snippets-toolbar-left,
+.snippets-toolbar-right {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.snippets-toolbar-left strong {
+  min-width: 0;
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+}
+
+.snippets-toolbar button,
+.snippet-actions button,
+.edit-actions button,
+.snippet-context-menu button,
+.snippet-edit-panel footer button,
+.script-help .help-header {
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.snippets-toolbar .text-button {
+  min-height: 28px;
+  padding: 0 6px;
+  color: var(--muted);
+}
+
+.snippets-toolbar .icon-only,
+.snippet-actions button,
+.edit-actions button {
+  width: 28px;
+  height: 28px;
+  color: var(--muted);
+}
+
+.snippets-toolbar button:hover,
+.snippet-actions button:hover,
+.edit-actions button:hover,
+.snippet-context-menu button:hover,
+.script-help .help-header:hover {
+  color: var(--accent);
+  background: var(--surface-3);
+}
+
+.macro-btn.recording {
+  color: var(--danger);
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.snippet-search {
+  width: 100%;
+  height: 32px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-2);
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 8px;
+}
+
+.snippet-search input,
+.snippet-edit-panel input,
+.snippet-edit-panel select,
+.snippet-edit-panel textarea,
+.snippet-item input {
+  min-width: 0;
+  width: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text);
+}
+
+.snippet-search button {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.snippet-search button:hover {
+  color: var(--accent);
+  background: var(--surface-3);
+}

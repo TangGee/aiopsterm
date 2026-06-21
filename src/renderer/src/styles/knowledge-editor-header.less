@@ -1,0 +1,87 @@
+.kb-editor-root {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: 42px minmax(0, 1fr);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.kb-editor-header {
+  min-width: 0;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 12px;
+}
+
+.kb-editor-header > div:first-child {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.kb-editor-header strong,
+.kb-editor-header span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kb-editor-header strong {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.kb-editor-header span,
+.kb-editor-actions em {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.kb-editor-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.kb-editor-mode {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  padding: 2px;
+}
+
+.kb-editor-actions button {
+  height: 26px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--text);
+  padding: 0 10px;
+  cursor: pointer;
+}
+
+.kb-editor-mode button {
+  height: 22px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  padding: 0 7px;
+}
+
+.kb-editor-mode button.active {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.kb-editor-actions button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}

@@ -1,0 +1,65 @@
+
+.message-parts {
+  display: block;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.5;
+  font-size: 13px;
+}
+
+.message-text-part {
+  white-space: pre-wrap;
+}
+
+.message-image-part {
+  display: inline-flex;
+  vertical-align: middle;
+  margin: 2px 4px;
+}
+
+.message-image-part img {
+  max-width: 180px;
+  max-height: 120px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  object-fit: cover;
+}
+
+.message-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+
+.message-actions button {
+  width: 26px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  color: var(--muted);
+  background: transparent;
+  cursor: pointer;
+}
+
+.message-actions button:hover,
+.message-actions button.active {
+  color: var(--accent);
+  border-color: var(--border);
+  background: var(--surface-3);
+}
+
+.app-shell.has-app-background .message-actions button:hover,
+.app-shell.has-app-background .message-actions button.active,
+.app-shell.has-app-background .message-command-help:hover,
+.app-shell.has-app-background .message-command-icon-button:hover {
+  background: var(--glass-surface-3);
+}
+
+.user-message-actions {
+  justify-content: flex-end;
+}

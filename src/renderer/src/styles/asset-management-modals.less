@@ -1,0 +1,135 @@
+
+.export-assets-modal,
+.asset-confirm-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  background: rgb(0 0 0 / 0.35);
+}
+
+.export-assets-modal > div,
+.asset-confirm-modal > div {
+  width: 520px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 64px);
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  padding: 14px;
+  display: grid;
+  gap: 10px;
+}
+
+.import-assets-modal > div {
+  width: 640px;
+}
+
+.asset-confirm-modal > div {
+  width: 420px;
+}
+
+.export-assets-modal header,
+.export-assets-modal footer,
+.asset-confirm-modal header,
+.asset-confirm-modal footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.export-assets-modal label,
+.asset-confirm-modal label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 7px;
+}
+
+.export-search {
+  width: 100%;
+}
+
+.export-tree {
+  max-height: 320px;
+  overflow: auto;
+  display: grid;
+  gap: 8px;
+}
+
+.export-tree-group {
+  display: grid;
+  gap: 4px;
+}
+
+.export-group-row {
+  background: var(--surface-2);
+}
+
+.export-leaf-row {
+  margin-left: 18px;
+}
+
+.export-leaf-row span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.export-modal-empty {
+  min-height: 120px;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+}
+
+.import-preview-table {
+  max-height: 320px;
+}
+
+.import-preview-table tr.duplicate td {
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 8%, transparent);
+}
+
+.asset-confirm-modal label {
+  display: grid;
+}
+
+.asset-confirm-modal input {
+  height: 30px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--text);
+  padding: 0 8px;
+}
+
+.export-assets-modal button,
+.asset-confirm-modal button {
+  min-height: 28px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.export-assets-modal button:disabled,
+.asset-confirm-modal button:disabled,
+.asset-action-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.asset-confirm-modal button.danger {
+  color: #ff6b6b;
+  border-color: rgba(255, 107, 107, 0.45);
+}

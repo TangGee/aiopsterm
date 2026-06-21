@@ -1,0 +1,215 @@
+
+.message-command-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 7px;
+  margin-top: 10px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.message-command-actions button {
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  background: var(--surface-3);
+  padding: 0 8px;
+  cursor: pointer;
+  font-size: 12px;
+  justify-content: center;
+  min-width: 58px;
+  max-width: 100%;
+  flex: 1 1 76px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.app-shell.has-app-background .message-command-actions button,
+.app-shell.has-app-background .message-command-host,
+.app-shell.has-app-background .message-command-badge,
+.app-shell.has-app-background .message-command-status {
+  background: var(--glass-surface-3);
+}
+
+.message-command-actions button svg {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
+}
+
+.message-command-actions button span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.message-command-actions button.primary {
+  flex-grow: 0.85;
+  color: var(--surface);
+  border-color: color-mix(in srgb, var(--accent) 78%, var(--border));
+  background: var(--accent);
+}
+
+.message-command-actions button.secondary.success {
+  flex: 1.4 1 128px;
+}
+
+.message-command-actions button.secondary:hover {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface-3));
+}
+
+.message-command-actions button.secondary.danger:hover {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 48%, var(--border));
+  background: color-mix(in srgb, var(--danger) 10%, var(--surface-3));
+}
+
+.message-command-actions button.secondary.success {
+  color: var(--success);
+  border-color: color-mix(in srgb, var(--success) 38%, var(--border));
+  background: color-mix(in srgb, var(--success) 8%, var(--surface-3));
+}
+
+.message-command-actions button.secondary.success:hover {
+  border-color: color-mix(in srgb, var(--success) 62%, var(--border));
+  background: color-mix(in srgb, var(--success) 14%, var(--surface-3));
+}
+
+.message-command-actions button:disabled {
+  opacity: 0.68;
+  cursor: wait;
+}
+
+.message-command-card {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+  min-width: 0;
+  max-width: 100%;
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--border));
+  border-radius: 8px;
+  background: var(--surface-2);
+  padding: 10px;
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.message-command-card-header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  flex-wrap: nowrap;
+}
+
+.message-command-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.message-command-title svg,
+.message-command-status svg,
+.message-command-icon-button svg,
+.message-command-help svg,
+.message-command-host svg,
+.message-command-badge svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+.message-command-help,
+.message-command-icon-button {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  color: var(--muted);
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+}
+
+.message-command-icon-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.message-command-help:hover,
+.message-command-icon-button:hover {
+  color: var(--accent);
+  border-color: var(--border);
+  background: var(--surface-3);
+}
+
+.message-command-card-spacer {
+  flex: 1 1 auto;
+  min-width: 8px;
+}
+
+.message-command-line-count {
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.message-command-host,
+.message-command-badge {
+  flex: 0 0 28px;
+  width: 28px;
+  min-width: 28px;
+  height: 24px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+  background: var(--surface-3);
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.message-command-badge.warning {
+  color: var(--warn);
+  border-color: color-mix(in srgb, var(--warn) 48%, var(--border));
+  background: color-mix(in srgb, var(--warn) 10%, transparent);
+}
+
+.message-command-code-shell {
+  min-width: 0;
+}
+
+.message-command-code {
+  min-width: 0;
+  max-width: 100%;
+  max-height: 180px;
+  overflow-x: auto;
+  overflow-y: auto;
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  padding: 8px;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre;
+  word-break: normal;
+}
+
+.message-command-code code {
+  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+}

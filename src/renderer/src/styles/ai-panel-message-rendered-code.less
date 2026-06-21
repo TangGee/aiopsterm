@@ -1,0 +1,107 @@
+
+.ai-rendered-code-block,
+.ai-command-output-renderer {
+  display: grid;
+  gap: 0;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border));
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+
+.ai-command-output-renderer {
+  margin-top: 8px;
+  border-color: color-mix(in srgb, var(--success) 28%, var(--border));
+}
+
+.ai-rendered-block-header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface-3) 82%, transparent);
+  padding: 7px 8px;
+}
+
+.ai-rendered-block-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.ai-rendered-block-title strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 650;
+}
+
+.ai-rendered-block-title svg,
+.ai-rendered-copy-button svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+.ai-rendered-block-spacer {
+  flex: 1 1 auto;
+  min-width: 8px;
+}
+
+.ai-rendered-block-lines {
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.ai-rendered-copy-button {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  color: var(--muted);
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+}
+
+.ai-rendered-copy-button:hover {
+  color: var(--accent);
+  border-color: var(--border);
+  background: var(--surface-3);
+}
+
+.ai-rendered-code-body,
+.ai-command-output-body {
+  min-width: 0;
+  max-width: 100%;
+  max-height: 220px;
+  overflow: auto;
+  margin: 0;
+  background: var(--surface);
+  padding: 9px;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.48;
+  white-space: pre;
+  word-break: normal;
+}
+
+.ai-rendered-code-body code,
+.ai-command-output-body code {
+  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+}
+
+.ai-command-output-body {
+  color: color-mix(in srgb, var(--text) 92%, var(--success));
+}
