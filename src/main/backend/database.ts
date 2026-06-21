@@ -4,7 +4,7 @@ import {
   type DatabaseAiProviderTextInput,
   type DatabaseAiProviderTextResult,
   type DatabaseRuntimeConfig
-} from '@shared/database'
+} from '@shared/databaseRuntime'
 import type { DatabaseConnectionTestInput } from '@shared/contracts/database'
 import type { UserConfig } from '@shared/contracts/userConfig'
 import { createProviderTextRequest, fetchProviderText, resolveModelProvider, type AiProviderTextMessage } from './modelProviderText'
@@ -172,4 +172,4 @@ export {
   startDatabaseAiDrawerResponse,
   startDatabaseAiPaneResponse,
   testDatabaseConnection
-} from '@shared/database'
+} from '@shared/databaseRuntime'
