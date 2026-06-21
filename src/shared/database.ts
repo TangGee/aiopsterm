@@ -1,9 +1,6 @@
-import { createCipheriv, createDecipheriv, randomBytes, randomUUID } from 'crypto'
-import { dirname, isAbsolute, join, resolve } from 'path'
+import { dirname } from 'path'
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs'
 import type {
-  DatabaseColumnFilter,
-  DatabaseColumnSort,
   DatabaseCatalogInfo,
   DatabaseCatalogResult,
   DatabaseCatalogDefaults,
@@ -18,9 +15,7 @@ import type {
   DatabaseConnectionSaveResult,
   DatabaseConnectionTestInput,
   DatabaseConnectionTestResult,
-  DatabaseAiPaneStateSnapshot,
   DatabaseEngineCode,
-  DatabaseEngineInfo,
   DatabaseGroupCreateInput,
   DatabaseGroupDeleteResult,
   DatabaseGroupInfo,
@@ -28,7 +23,6 @@ import type {
   DatabaseGroupUpdateInput,
   DatabaseSchemaInfo,
   DatabaseWorkspaceCatalog,
-  DatabaseSqlExecutionRecord,
   DatabaseSqlExecuteInput,
   DatabaseSqlExecuteResult,
   DatabaseTableDdlInput,
@@ -44,10 +38,13 @@ import type {
 import {
   configureDatabaseAiBackendContext,
   getDatabaseAiPaneStateSnapshot,
-  normalizeDatabaseAiPaneState,
   replaceDatabaseAiPaneState,
   resetDatabaseAiBackendState
 } from './databaseAi'
+import {
+  configureDatabaseCredentialStorage,
+  encryptDatabaseCredentialForStorage
+} from './databaseCredentialStorage'
 import {
   clickHouseBaseUrlFrom,
   clickHouseCatalogsForConnection,
@@ -78,12 +75,15 @@ import {
   prestoTableDdl
 } from './databaseHttpEngines'
 import {
-  buildDatabaseMutationStatement,
   databaseMutationPlanData,
   databaseMutationPlanErrorCode,
   databaseMutationPlanErrorMessage,
   inputKnownColumns,
 } from './databaseMutationPlanner'
+import {
+  normalizePersistedState,
+  type DatabasePersistedState
+} from './databasePersistenceRuntime'
 import {
   configureDatabaseRelationalEngines,
   isMysqlCompatibleDbType,
@@ -108,244 +108,59 @@ import {
   type RelationalDatabaseType,
   type SqlServerDriver
 } from './databaseRelationalEngines'
+import {
+  DEFAULT_DATABASE_GROUP_ID,
+  databaseConnectionSeed,
+  databaseConnectionSeedIds,
+  databaseEngineVersions,
+  databaseEngines,
+  databaseGroupParentSeed,
+  databaseGroupSeed,
+  databaseSeedQueryRows,
+  databaseSeedTableDdl,
+  supportedDatabaseEngines,
+  type DatabaseSeedTableDdlEntry
+} from './databaseSeedData'
+import {
+  normalizeSql,
+  withDatabaseSqlExecutionRecord
+} from './databaseSqlExecution'
+import {
+  configureDatabaseSqliteRuntime,
+  isRealSqliteConnection,
+  isSqliteFileExtension,
+  openSqliteDatabase,
+  resetDatabaseSqliteRuntime,
+  sqliteCatalogsForConnection,
+  sqliteErrorCode,
+  sqliteErrorMessage,
+  sqliteExecute,
+  sqliteFilePathFromConnection,
+  sqliteFilePathFromTestInput,
+  sqliteMutationPlan,
+  sqliteMutateTable,
+  sqlitePathFromUrl,
+  sqliteQueryTable,
+  sqliteTableDdl,
+  type SqliteDatabase
+} from './databaseSqliteRuntime'
+import {
+  applySeedTableMutation,
+  cloneDdlEntries,
+  cloneRows,
+  columnsByTableRows,
+  columnsForRows,
+  filterRows,
+  hasOwn,
+  parseOrderByRaw,
+  parseWhereRaw,
+  sortRows,
+  trim
+} from './databaseTableRuntime'
 import { shouldUseDatabaseSeedData as runtimeShouldUseDatabaseSeedData } from './runtimeSwitches'
 
-const supportedEngines = new Set(['mysql', 'mariadb', 'oceanbase', 'postgresql', 'kingbase', 'sqlite', 'oracle', 'sqlserver', 'clickhouse', 'presto'])
-const DEFAULT_DATABASE_GROUP_ID = 'group-default'
 const databaseEnvValues = new Set<DatabaseConnectionInfo['env']>(['Development', 'TEST', 'Staging', 'Production'])
-const databaseStatusValues = new Set<DatabaseConnectionInfo['status']>(['idle', 'testing', 'connected', 'failed'])
 const postgresSslModeValues = new Set(['', 'disable', 'require', 'verify-ca', 'verify-full'])
-type DatabaseSqlExecuteRawData = Omit<NonNullable<DatabaseSqlExecuteResult['data']>, 'execution'>
-type DatabaseSqlExecuteRawResult = {
-  ok: boolean
-  data?: DatabaseSqlExecuteRawData
-  errorCode?: string
-  errorMessage?: string
-}
-
-const engineVersions: Record<DatabaseConnectionTestInput['dbType'], string> = {
-  mysql: 'MySQL 8 local backend validation',
-  mariadb: 'MariaDB local backend validation',
-  oceanbase: 'OceanBase MySQL-compatible local backend validation',
-  postgresql: 'PostgreSQL 16 local backend validation',
-  kingbase: 'KingBase PostgreSQL-compatible local backend validation',
-  sqlite: 'SQLite local backend validation',
-  oracle: 'Oracle local backend validation',
-  sqlserver: 'SQL Server local backend validation',
-  clickhouse: 'ClickHouse local backend validation',
-  presto: 'Presto local backend validation'
-}
-
-const databaseEngines: DatabaseEngineInfo[] = [
-  { code: 'mysql', connectionCode: 'mysql', name: 'MySQL', enabled: true, accent: '#00758f' },
-  { code: 'oracle', connectionCode: 'oracle', name: 'Oracle', enabled: true, accent: '#c74634' },
-  { code: 'postgresql', connectionCode: 'postgresql', name: 'PostgreSQL', enabled: true, accent: '#336791' },
-  { code: 'sqlserver', connectionCode: 'sqlserver', name: 'SQLServer', enabled: true, accent: '#a91d22' },
-  { code: 'sqlite', connectionCode: 'sqlite', name: 'SQLite', enabled: true, accent: '#00a1e0' },
-  { code: 'mariadb', connectionCode: 'mariadb', name: 'MariaDB', enabled: true, accent: '#c0765c' },
-  { code: 'clickhouse', connectionCode: 'clickhouse', name: 'ClickHouse', enabled: true, accent: '#fdd835' },
-  { code: 'presto', connectionCode: 'presto', name: 'Presto', enabled: true, accent: '#7c2d12' },
-  { code: 'oceanbase', connectionCode: 'oceanbase', name: 'OceanBase', enabled: true, accent: '#0ea5e9' },
-  { code: 'kingbase', connectionCode: 'kingbase', name: 'KingBase', enabled: true, accent: '#dc2626' }
-]
-
-const databaseGroupSeed: DatabaseGroupInfo[] = [
-  { id: 'group-default', name: 'Default Group' },
-  { id: 'group-prod', name: 'Production' },
-  { id: 'group-local', name: 'Local Lab' }
-]
-
-const databaseGroupParentSeed: Record<string, string | null> = {
-  'group-default': null,
-  'group-prod': null,
-  'group-local': null
-}
-
-const ordersColumns: DatabaseColumnInfo[] = [
-  { name: 'id', type: 'bigint', nullable: false, key: 'PK' },
-  { name: 'service', type: 'varchar(80)', nullable: false },
-  { name: 'status', type: 'varchar(32)', nullable: false },
-  { name: 'owner', type: 'varchar(64)', nullable: true },
-  { name: 'updated_at', type: 'timestamp', nullable: false }
-]
-
-const incidentsColumns: DatabaseColumnInfo[] = [
-  { name: 'id', type: 'bigint', nullable: false, key: 'PK' },
-  { name: 'service', type: 'varchar(80)', nullable: false },
-  { name: 'severity', type: 'varchar(16)', nullable: false },
-  { name: 'status', type: 'varchar(32)', nullable: false },
-  { name: 'updated_at', type: 'datetime', nullable: false }
-]
-
-const serviceHealthColumns: DatabaseColumnInfo[] = [
-  { name: 'id', type: 'int', nullable: false, key: 'PK' },
-  { name: 'service', type: 'varchar(80)', nullable: false },
-  { name: 'region', type: 'varchar(32)', nullable: false },
-  { name: 'latency_ms', type: 'int', nullable: false },
-  { name: 'healthy', type: 'tinyint', nullable: false }
-]
-
-const metricEventsColumns: DatabaseColumnInfo[] = [
-  { name: 'service', type: 'varchar(80)', nullable: false },
-  { name: 'event_type', type: 'varchar(32)', nullable: false },
-  { name: 'severity', type: 'varchar(16)', nullable: false },
-  { name: 'created_at', type: 'datetime', nullable: false }
-]
-
-const cacheColumns: DatabaseColumnInfo[] = [
-  { name: 'key', type: 'text', nullable: false, key: 'PK' },
-  { name: 'value', type: 'text', nullable: true },
-  { name: 'ttl_seconds', type: 'integer', nullable: true },
-  { name: 'updated_at', type: 'text', nullable: false }
-]
-
-const oracleAuditColumns: DatabaseColumnInfo[] = [
-  { name: 'event_id', type: 'NUMBER', nullable: false },
-  { name: 'actor', type: 'VARCHAR2(64)', nullable: false },
-  { name: 'action', type: 'VARCHAR2(64)', nullable: false },
-  { name: 'created_at', type: 'TIMESTAMP', nullable: false }
-]
-
-const databaseConnectionSeed: DatabaseConnectionInfo[] = [
-  {
-    id: 'conn-prod-pg',
-    name: 'orders-postgres',
-    dbType: 'postgresql',
-    env: 'Production',
-    groupId: 'group-prod',
-    host: '10.32.6.9',
-    port: 5432,
-    authentication: 'UserAndPassword',
-    user: 'readonly',
-    hasPassword: true,
-    database: 'orders',
-    sslMode: 'require',
-    url: 'jdbc:postgresql://10.32.6.9:5432/orders',
-    status: 'connected',
-    catalogs: [
-      {
-        name: 'orders',
-        schemas: [
-          {
-            name: 'public',
-            tables: [{ id: 'tbl-orders', name: 'orders', columns: ordersColumns, primaryKey: ['id'] }],
-            views: [{ id: 'view-public-open-orders', name: 'open_orders_v', columns: ordersColumns, primaryKey: ['id'] }],
-            functions: ['notify_order_owner(order_id bigint)', 'calculate_order_age(order_id bigint)'],
-            procedures: ['archive_closed_orders(cutoff timestamp)']
-          },
-          {
-            name: 'ops',
-            tables: [{ id: 'tbl-pg-incidents', name: 'ops_incidents', columns: incidentsColumns, primaryKey: ['id'] }],
-            views: [{ id: 'view-ops-active-incidents', name: 'active_incidents_v', columns: incidentsColumns, primaryKey: ['id'] }],
-            functions: ['incident_priority(severity text)'],
-            procedures: ['rotate_incident_partitions()']
-          }
-        ]
-      }
-    ]
-  },
-  {
-    id: 'conn-metrics-mysql',
-    name: 'metrics-mysql',
-    dbType: 'mysql',
-    env: 'Staging',
-    groupId: 'group-default',
-    host: '10.32.6.18',
-    port: 3306,
-    authentication: 'UserAndPassword',
-    user: 'ops',
-    hasPassword: true,
-    database: 'metrics',
-    url: 'jdbc:mysql://10.32.6.18:3306/metrics',
-    status: 'idle',
-    catalogs: [
-      {
-        name: 'metrics',
-        tables: [
-          { id: 'tbl-service-health', name: 'service_health', columns: serviceHealthColumns, primaryKey: ['id'] },
-          { id: 'tbl-mysql-incidents', name: 'ops_incidents', columns: incidentsColumns, primaryKey: ['id'] },
-          { id: 'tbl-metric-events', name: 'metric_events', columns: metricEventsColumns, primaryKey: [] }
-        ]
-      }
-    ]
-  },
-  {
-    id: 'conn-oracle-audit',
-    name: 'audit-oracle',
-    dbType: 'oracle',
-    env: 'TEST',
-    groupId: 'group-default',
-    host: '10.32.6.28',
-    port: 1521,
-    authentication: 'UserAndPassword',
-    user: 'audit',
-    hasPassword: true,
-    database: 'ORCLPDB1',
-    url: '10.32.6.28:1521/ORCLPDB1',
-    status: 'connected',
-    catalogs: [
-      {
-        name: 'ORCLPDB1',
-        schemas: [
-          {
-            name: 'OPS',
-            tables: [{ id: 'tbl-oracle-audit-log', name: 'AUDIT_LOG', columns: oracleAuditColumns, primaryKey: [] }]
-          }
-        ]
-      }
-    ]
-  },
-  {
-    id: 'conn-local-cache',
-    name: 'local-cache',
-    dbType: 'sqlite',
-    env: 'Development',
-    groupId: 'group-local',
-    host: 'local',
-    port: null,
-    authentication: 'UserAndPassword',
-    user: '',
-    database: 'cache.db',
-    filePath: '/tmp/aiopsterm/cache.db',
-    readonly: true,
-    url: 'sqlite:///tmp/aiopsterm/cache.db',
-    status: 'idle',
-    catalogs: [
-      {
-        name: 'cache.db',
-        tables: [{ id: 'tbl-cache-entries', name: 'cache_entries', columns: cacheColumns, primaryKey: ['key'] }]
-      }
-    ]
-  }
-]
-const databaseConnectionSeedIds = new Set(databaseConnectionSeed.map((connection) => connection.id))
-
-const trim = (value: unknown) => (typeof value === 'string' ? value.trim() : '')
-
-const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === 'object' && !Array.isArray(value))
-
-const sqlitePathFromUrl = (url: string) => {
-  const trimmed = trim(url)
-  if (!trimmed.toLowerCase().startsWith('sqlite://')) return ''
-  return trimmed.replace(/^sqlite:\/\//i, '')
-}
-
-type SqliteRunResult = { changes?: number }
-type SqliteColumnDefinition = { name?: string }
-type SqliteStatement = {
-  reader: boolean
-  all: (...params: unknown[]) => Array<Record<string, unknown>>
-  run: (...params: unknown[]) => SqliteRunResult
-  columns: () => SqliteColumnDefinition[]
-}
-type SqliteDatabase = {
-  prepare: (source: string) => SqliteStatement
-  close: () => unknown
-}
-type SqliteDatabaseConstructor = new (
-  filePath: string,
-  options?: { readonly?: boolean; fileMustExist?: boolean; timeout?: number }
-) => SqliteDatabase
 type DatabaseFetch = typeof fetch
 export type DatabaseRuntimeConfig = {
   useSeedData?: boolean
@@ -361,12 +176,7 @@ export type DatabaseRuntimeConfig = {
   stateFilePath?: string
   credentialKeyPath?: string
 }
-type SqliteSchemaTableRow = { name?: string; type?: string }
-type SqliteTableColumnRow = { cid?: number; name?: string; type?: string; notnull?: number; pk?: number; hidden?: number }
 
-const SQLITE_MAIN_SCHEMA = 'main'
-const SQLITE_TIMEOUT_MS = 5000
-let sqliteRuntime: SqliteDatabaseConstructor | null | undefined
 let databaseRuntimeConfig: DatabaseRuntimeConfig = {}
 const databaseConnectionSecrets = new Map<string, string>()
 const databaseVerifiedConnections = new Set<string>()
@@ -374,401 +184,16 @@ const databaseVerifiedConnections = new Set<string>()
 export function configureDatabaseRuntime(config?: DatabaseRuntimeConfig) {
   databaseRuntimeConfig = config ? { ...config } : {}
   databaseLoadedStateFilePath = ''
-  cachedDatabaseCredentialKeyPath = ''
-  cachedDatabaseCredentialKey = null
+  configureDatabaseCredentialStorage({
+    stateFilePath: databaseRuntimeConfig.stateFilePath,
+    credentialKeyPath: databaseRuntimeConfig.credentialKeyPath
+  })
   resetDatabaseRelationalRuntime()
-}
-
-const loadSqliteRuntime = () => {
-  if (sqliteRuntime !== undefined) return sqliteRuntime
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const loaded = require('better-sqlite3') as SqliteDatabaseConstructor | { default?: SqliteDatabaseConstructor }
-    sqliteRuntime = typeof loaded === 'function' ? loaded : loaded.default && typeof loaded.default === 'function' ? loaded.default : null
-  } catch {
-    sqliteRuntime = null
-  }
-  return sqliteRuntime
+  resetDatabaseSqliteRuntime()
 }
 
 const shouldUseDatabaseSeedData = () => databaseRuntimeConfig.useSeedData ?? runtimeShouldUseDatabaseSeedData()
 
-type SafeStorageLike = {
-  isEncryptionAvailable: () => boolean
-  encryptString: (plain: string) => Buffer
-  decryptString: (cipher: Buffer) => string
-}
-
-const databaseSafeStorageCredentialPrefix = 'ds1:'
-const databaseLocalKeyCredentialPrefix = 'dk1:'
-let cachedDatabaseCredentialKeyPath = ''
-let cachedDatabaseCredentialKey: Buffer | null = null
-
-const resolveDatabaseSafeStorage = (): SafeStorageLike | null => {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const electron = require('electron') as { safeStorage?: SafeStorageLike }
-    return electron.safeStorage || null
-  } catch {
-    return null
-  }
-}
-
-const defaultDatabaseCredentialKeyPath = () => {
-  const envPath = trim(typeof process !== 'undefined' ? process.env?.AIOPSTERM_DATABASE_CREDENTIAL_KEY_FILE : '')
-  if (envPath) return isAbsolute(envPath) ? envPath : resolve(envPath)
-  const statePath = databaseStateFilePath()
-  if (statePath) return join(dirname(statePath), 'database-credential.key')
-  return join(typeof process !== 'undefined' ? process.cwd() : '.', '.aiopsterm-database-credential.key')
-}
-
-const databaseCredentialKeyPath = () => {
-  const configured = trim(databaseRuntimeConfig.credentialKeyPath)
-  return configured ? (isAbsolute(configured) ? configured : resolve(configured)) : defaultDatabaseCredentialKeyPath()
-}
-
-const readOrCreateDatabaseCredentialKey = () => {
-  const keyPath = databaseCredentialKeyPath()
-  if (cachedDatabaseCredentialKey && cachedDatabaseCredentialKeyPath === keyPath) return cachedDatabaseCredentialKey
-  cachedDatabaseCredentialKeyPath = keyPath
-  cachedDatabaseCredentialKey = null
-  if (existsSync(keyPath)) {
-    const current = readFileSync(keyPath)
-    if (current.length === 32) {
-      cachedDatabaseCredentialKey = current
-      return cachedDatabaseCredentialKey
-    }
-  }
-  mkdirSync(dirname(keyPath), { recursive: true })
-  cachedDatabaseCredentialKey = randomBytes(32)
-  writeFileSync(keyPath, cachedDatabaseCredentialKey, { mode: 0o600 })
-  return cachedDatabaseCredentialKey
-}
-
-const isDatabaseCredentialCiphertext = (value: unknown) =>
-  typeof value === 'string' && (value.startsWith(databaseSafeStorageCredentialPrefix) || value.startsWith(databaseLocalKeyCredentialPrefix))
-
-const databaseSafeStorageAvailable = (safeStorage = resolveDatabaseSafeStorage()) => {
-  try {
-    return Boolean(safeStorage?.isEncryptionAvailable?.())
-  } catch {
-    return false
-  }
-}
-
-const encryptDatabaseCredentialWithLocalKey = (plain: string) => {
-  const key = readOrCreateDatabaseCredentialKey()
-  const iv = randomBytes(12)
-  const cipher = createCipheriv('aes-256-gcm', key, iv)
-  const encrypted = Buffer.concat([cipher.update(plain, 'utf-8'), cipher.final()])
-  const tag = cipher.getAuthTag()
-  return `${databaseLocalKeyCredentialPrefix}${iv.toString('base64')}.${encrypted.toString('base64')}.${tag.toString('base64')}`
-}
-
-const decryptDatabaseCredentialWithLocalKey = (cipherText: string) => {
-  const body = cipherText.slice(databaseLocalKeyCredentialPrefix.length)
-  const [ivB64, encryptedB64, tagB64] = body.split('.')
-  if (!ivB64 || !encryptedB64 || !tagB64) throw new Error('Malformed local database credential ciphertext')
-  const decipher = createDecipheriv('aes-256-gcm', readOrCreateDatabaseCredentialKey(), Buffer.from(ivB64, 'base64'))
-  decipher.setAuthTag(Buffer.from(tagB64, 'base64'))
-  return Buffer.concat([decipher.update(Buffer.from(encryptedB64, 'base64')), decipher.final()]).toString('utf-8')
-}
-
-const encryptDatabaseCredentialForStorage = (value: unknown) => {
-  if (typeof value !== 'string') return ''
-  if (!value) return ''
-  if (isDatabaseCredentialCiphertext(value)) return value
-  const safeStorage = resolveDatabaseSafeStorage()
-  if (databaseSafeStorageAvailable(safeStorage)) {
-    return `${databaseSafeStorageCredentialPrefix}${safeStorage!.encryptString(value).toString('base64')}`
-  }
-  return encryptDatabaseCredentialWithLocalKey(value)
-}
-
-const decryptDatabaseCredentialFromStorage = (value: unknown) => {
-  if (typeof value !== 'string') return ''
-  if (!value) return ''
-  if (value.startsWith(databaseSafeStorageCredentialPrefix)) {
-    try {
-      return resolveDatabaseSafeStorage()?.decryptString(Buffer.from(value.slice(databaseSafeStorageCredentialPrefix.length), 'base64')) || ''
-    } catch {
-      return ''
-    }
-  }
-  if (value.startsWith(databaseLocalKeyCredentialPrefix)) {
-    try {
-      return decryptDatabaseCredentialWithLocalKey(value)
-    } catch {
-      return ''
-    }
-  }
-  return value
-}
-
-const sqliteFilePathFromConnection = (connection: Pick<DatabaseConnectionInfo, 'filePath' | 'url'>) =>
-  trim(connection.filePath) || sqlitePathFromUrl(trim(connection.url))
-
-const sqliteFilePathFromTestInput = (input: Pick<DatabaseConnectionTestInput, 'filePath' | 'url'>) =>
-  trim(input.filePath) || sqlitePathFromUrl(trim(input.url))
-
-const isSqliteFileExtension = (filePath: string) => /\.(db|sqlite|sqlite3)$/i.test(filePath)
-
-const openSqliteDatabase = (filePath: string, readonly: boolean) => {
-  const Database = loadSqliteRuntime()
-  if (!Database) {
-    throw Object.assign(new Error('SQLite runtime is unavailable. Rebuild better-sqlite3 for the Electron runtime.'), {
-      code: 'DB_SQLITE_DRIVER_UNAVAILABLE'
-    })
-  }
-  return new Database(filePath, { readonly, fileMustExist: true, timeout: SQLITE_TIMEOUT_MS })
-}
-
-const sqliteErrorCode = (error: unknown, fallback: string) => {
-  const code = error && typeof error === 'object' && 'code' in error ? String((error as { code?: unknown }).code || '') : ''
-  return code.startsWith('DB_') ? code : fallback
-}
-
-const sqliteErrorMessage = (error: unknown, fallback: string) => (error instanceof Error ? error.message : String(error || fallback))
-
-const isRealSqliteConnection = (connection: DatabaseConnectionInfo | null | undefined) => {
-  if (!connection || connection.dbType !== 'sqlite') return false
-  const filePath = sqliteFilePathFromConnection(connection)
-  return !!filePath && existsSync(filePath)
-}
-
-const sqliteSchemaNameFor = (connection: DatabaseConnectionInfo, databaseName?: string) => {
-  const requested = trim(databaseName)
-  if (!requested || requested === connection.database) return SQLITE_MAIN_SCHEMA
-  return requested
-}
-
-const sqliteIdentifier = (value: string) => `"${String(value || '').replace(/"/g, '""')}"`
-
-const sqliteTableReference = (connection: DatabaseConnectionInfo, databaseName: string | undefined, tableName: string) =>
-  `${sqliteIdentifier(sqliteSchemaNameFor(connection, databaseName))}.${sqliteIdentifier(tableName)}`
-
-const sqliteCall = (stmt: SqliteStatement, params: unknown[], mode: 'all' | 'run') => (params.length ? stmt[mode](...params) : stmt[mode]())
-
-const sqliteColumnNamesFromStatement = (stmt: SqliteStatement, rows: Array<Record<string, unknown>>) => {
-  const columns = stmt
-    .columns()
-    .map((column) => trim(column.name))
-    .filter(Boolean)
-  return columns.length ? columns : columnsForRows(rows)
-}
-
-const sqliteColumnsForTable = (db: SqliteDatabase, schemaName: string, tableName: string): DatabaseColumnInfo[] => {
-  const rows = db.prepare(`PRAGMA ${sqliteIdentifier(schemaName)}.table_xinfo(${sqliteIdentifier(tableName)})`).all() as SqliteTableColumnRow[]
-  return rows
-    .filter((row) => trim(row.name) && Number(row.hidden ?? 0) !== 1)
-    .sort((first, second) => Number(first.cid ?? 0) - Number(second.cid ?? 0))
-    .map((row) => {
-      const primaryKeyRank = Number(row.pk ?? 0)
-      return {
-        name: trim(row.name),
-        type: trim(row.type).toUpperCase() || 'TEXT',
-        nullable: primaryKeyRank <= 0 && Number(row.notnull ?? 0) === 0,
-        ...(primaryKeyRank > 0 ? { key: 'PK' as const } : {})
-      }
-    })
-}
-
-const sqlitePrimaryKeyForColumns = (columns: DatabaseColumnInfo[]) =>
-  columns.filter((column) => column.key === 'PK').map((column) => column.name)
-
-const sqliteCatalogsForConnection = (connection: DatabaseConnectionInfo): DatabaseCatalogInfo[] | null => {
-  if (!isRealSqliteConnection(connection)) return null
-  const filePath = sqliteFilePathFromConnection(connection)
-  let db: SqliteDatabase | null = null
-  try {
-    db = openSqliteDatabase(filePath, true)
-    const rows = db
-      .prepare(
-        `SELECT name, type FROM ${sqliteIdentifier(SQLITE_MAIN_SCHEMA)}.sqlite_schema WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%' ORDER BY name`
-      )
-      .all() as SqliteSchemaTableRow[]
-    const tables = rows
-      .filter((row) => row.type === 'table' && trim(row.name))
-      .map((row) => {
-        const name = trim(row.name)
-        const columns = sqliteColumnsForTable(db!, SQLITE_MAIN_SCHEMA, name)
-        return {
-          id: `tbl-${connection.id}-${name.replace(/[^A-Za-z0-9_-]+/g, '-')}`,
-          name,
-          columns,
-          primaryKey: sqlitePrimaryKeyForColumns(columns)
-        }
-      })
-    return [{ name: SQLITE_MAIN_SCHEMA, tables }]
-  } catch {
-    return null
-  } finally {
-    db?.close()
-  }
-}
-
-const sqliteExecute = (connection: DatabaseConnectionInfo, sql: string, startedAt: number): DatabaseSqlExecuteRawResult => {
-  let db: SqliteDatabase | null = null
-  try {
-    db = openSqliteDatabase(sqliteFilePathFromConnection(connection), !!connection.readonly)
-    const stmt = db.prepare(sql)
-    if (stmt.reader) {
-      const rows = sqliteCall(stmt, [], 'all') as Array<Record<string, unknown>>
-      return {
-        ok: true,
-        data: {
-          columns: sqliteColumnNamesFromStatement(stmt, rows),
-          rows,
-          rowCount: rows.length,
-          durationMs: Math.max(1, Date.now() - startedAt)
-        }
-      }
-    }
-    const result = sqliteCall(stmt, [], 'run') as SqliteRunResult
-    return {
-      ok: true,
-      data: {
-        columns: [],
-        rows: [],
-        rowCount: Number(result.changes ?? 0),
-        durationMs: Math.max(1, Date.now() - startedAt)
-      }
-    }
-  } catch (error) {
-    return {
-      ok: false,
-      errorCode: sqliteErrorCode(error, 'DB_SQLITE_QUERY_FAILED'),
-      errorMessage: sqliteErrorMessage(error, 'SQLite query failed.')
-    }
-  } finally {
-    db?.close()
-  }
-}
-
-const sqliteWhereForFilters = (filters: DatabaseColumnFilter[], knownColumns: string[]) => {
-  const known = new Map(knownColumns.map((column) => [column.toLowerCase(), column]))
-  const clauses: string[] = []
-  const params: unknown[] = []
-  filters.forEach((filter) => {
-    const column = known.get(trim(filter.column).toLowerCase())
-    if (!column) return
-    const quoted = sqliteIdentifier(column)
-    if (filter.operator === 'isnull') {
-      clauses.push(`${quoted} IS NULL`)
-      return
-    }
-    if (filter.operator === 'notnull') {
-      clauses.push(`${quoted} IS NOT NULL`)
-      return
-    }
-    if (filter.operator === 'like') {
-      clauses.push(`${quoted} LIKE ?`)
-      params.push(`%${String(filter.value ?? '')}%`)
-      return
-    }
-    if (filter.operator === 'eq') {
-      clauses.push(`${quoted} = ?`)
-      params.push(String(filter.value ?? ''))
-      return
-    }
-    if (filter.operator === 'neq') {
-      clauses.push(`${quoted} <> ?`)
-      params.push(String(filter.value ?? ''))
-      return
-    }
-    const values = (filter.values ?? []).map(String)
-    if (!values.length) {
-      clauses.push('0 = 1')
-      return
-    }
-    clauses.push(`${quoted} IN (${values.map(() => '?').join(', ')})`)
-    params.push(...values)
-  })
-  return {
-    sql: clauses.length ? ` WHERE ${clauses.join(' AND ')}` : '',
-    params
-  }
-}
-
-const sqliteOrderByFor = (sort: DatabaseColumnSort | null | undefined, knownColumns: string[]) => {
-  if (!sort) return ''
-  const known = new Map(knownColumns.map((column) => [column.toLowerCase(), column]))
-  const column = known.get(trim(sort.column).toLowerCase())
-  if (!column) return ''
-  return ` ORDER BY ${sqliteIdentifier(column)} ${sort.direction === 'desc' ? 'DESC' : 'ASC'}`
-}
-
-const sqliteQueryTable = (connection: DatabaseConnectionInfo, input: DatabaseTableQueryInput, startedAt: number): DatabaseTableQueryResult => {
-  let db: SqliteDatabase | null = null
-  try {
-    db = openSqliteDatabase(sqliteFilePathFromConnection(connection), true)
-    const schemaName = sqliteSchemaNameFor(connection, input.databaseName)
-    const tableName = trim(input.tableName)
-    const columns = sqliteColumnsForTable(db, schemaName, tableName)
-    if (!columns.length) {
-      return { ok: false, errorCode: 'DB_TABLE_NOT_FOUND', errorMessage: `Table not found: ${input.tableName}` }
-    }
-    const knownColumns = columns.map((column) => column.name)
-    const filters = [...parseWhereRaw(input.whereRaw), ...(input.filters ?? [])]
-    const where = sqliteWhereForFilters(filters, knownColumns)
-    const sort = input.sort ?? parseOrderByRaw(input.orderByRaw, knownColumns)
-    const orderBy = sqliteOrderByFor(sort, knownColumns)
-    const pageSize = Math.max(1, Math.min(1000, Math.floor(Number(input.pageSize) || 100)))
-    const page = Math.max(1, Math.floor(Number(input.page) || 1))
-    const offset = (page - 1) * pageSize
-    const tableRef = sqliteTableReference(connection, input.databaseName, tableName)
-    const rows = db.prepare(`SELECT * FROM ${tableRef}${where.sql}${orderBy} LIMIT ? OFFSET ?`).all(...where.params, pageSize, offset)
-    const total = input.withTotal
-      ? Number((db.prepare(`SELECT COUNT(*) AS total FROM ${tableRef}${where.sql}`).all(...where.params)[0]?.total as number | undefined) ?? 0)
-      : null
-    return {
-      ok: true,
-      data: {
-        columns: knownColumns,
-        rows,
-        rowCount: rows.length,
-        durationMs: Math.max(1, Date.now() - startedAt),
-        total,
-        knownColumns
-      }
-    }
-  } catch (error) {
-    return {
-      ok: false,
-      errorCode: sqliteErrorCode(error, 'DB_SQLITE_QUERY_FAILED'),
-      errorMessage: sqliteErrorMessage(error, 'SQLite table query failed.')
-    }
-  } finally {
-    db?.close()
-  }
-}
-
-const sqliteTableDdl = (connection: DatabaseConnectionInfo, input: DatabaseTableDdlInput): DatabaseTableDdlResult => {
-  let db: SqliteDatabase | null = null
-  try {
-    db = openSqliteDatabase(sqliteFilePathFromConnection(connection), true)
-    const schemaName = sqliteSchemaNameFor(connection, input.databaseName)
-    const rows = db
-      .prepare(
-        `SELECT sql FROM ${sqliteIdentifier(schemaName)}.sqlite_schema WHERE type IN ('table', 'view') AND name = ? ORDER BY type LIMIT 1`
-      )
-      .all(trim(input.tableName))
-    const ddl = typeof rows[0]?.sql === 'string' ? rows[0].sql : ''
-    if (!ddl) return { ok: false, errorCode: 'DB_TABLE_NOT_FOUND', errorMessage: `Table not found: ${input.tableName}` }
-    return { ok: true, data: { ddl } }
-  } catch (error) {
-    return {
-      ok: false,
-      errorCode: sqliteErrorCode(error, 'DB_SQLITE_DDL_FAILED'),
-      errorMessage: sqliteErrorMessage(error, 'SQLite DDL lookup failed.')
-    }
-  } finally {
-    db?.close()
-  }
-}
-
-const sqliteKnownColumnsForTable = (db: SqliteDatabase, schemaName: string, tableName: string) =>
-  sqliteColumnsForTable(db, schemaName, tableName).map((column) => column.name)
 const jdbcSchemeForDbType = (dbType: DatabaseEngineCode) =>
   dbType === 'postgresql'
     ? 'jdbc:postgresql'
@@ -783,67 +208,6 @@ const jdbcSchemeForDbType = (dbType: DatabaseEngineCode) =>
             : dbType === 'oceanbase'
               ? 'jdbc:oceanbase'
               : 'jdbc:mysql'
-
-const sqliteApplyMutation = (db: SqliteDatabase, tableRef: string, knownColumns: string[], mutation: DatabaseTableMutationInput['mutations'][number]) => {
-  if (mutation.kind === 'drop') {
-    db.prepare(`DROP TABLE ${tableRef}`).run()
-    return 0
-  }
-  const statement = buildDatabaseMutationStatement('sqlite', tableRef, knownColumns, mutation)
-  if (!statement) return 0
-  const result = db.prepare(statement.sql).run(...statement.params)
-  return Number(result.changes ?? 0)
-}
-
-const sqliteMutateTable = (connection: DatabaseConnectionInfo, input: DatabaseTableMutationInput, startedAt: number): DatabaseTableMutationResult => {
-  if (connection.readonly) {
-    return { ok: false, errorCode: 'DB_SQLITE_READONLY', errorMessage: 'SQLite connection is read-only.' }
-  }
-
-  let db: SqliteDatabase | null = null
-  try {
-    db = openSqliteDatabase(sqliteFilePathFromConnection(connection), false)
-    const schemaName = sqliteSchemaNameFor(connection, input.databaseName)
-    const tableName = trim(input.tableName)
-    const knownColumns = sqliteKnownColumnsForTable(db, schemaName, tableName)
-    if (!knownColumns.length) {
-      return { ok: false, errorCode: 'DB_TABLE_NOT_FOUND', errorMessage: `Table not found: ${input.tableName}` }
-    }
-    const tableRef = sqliteTableReference(connection, input.databaseName, tableName)
-    let affected = 0
-    db.prepare('BEGIN').run()
-    try {
-      input.mutations.forEach((mutation) => {
-        affected += sqliteApplyMutation(db!, tableRef, knownColumns, mutation)
-      })
-      db.prepare('COMMIT').run()
-    } catch (error) {
-      db.prepare('ROLLBACK').run()
-      throw error
-    }
-    const catalogs = sqliteCatalogsForConnection(connection)
-    if (catalogs) {
-      const index = databaseConnections.findIndex((item) => item.id === connection.id)
-      if (index >= 0) databaseConnections[index] = { ...databaseConnections[index], catalogs }
-    }
-    return {
-      ok: true,
-      data: {
-        affected,
-        durationMs: Math.max(1, Date.now() - startedAt),
-        catalog: databaseWorkspaceCatalogFor(input.connectionId)
-      }
-    }
-  } catch (error) {
-    return {
-      ok: false,
-      errorCode: sqliteErrorCode(error, 'DB_SQLITE_MUTATION_FAILED'),
-      errorMessage: sqliteErrorMessage(error, 'SQLite table mutation failed.')
-    }
-  } finally {
-    db?.close()
-  }
-}
 
 const databaseProxyRequested = (input: Pick<DatabaseConnectionTestInput, 'needProxy' | 'proxyName'>) => !!input.needProxy || !!trim(input.proxyName)
 
@@ -903,95 +267,9 @@ const endpointFor = (input: DatabaseConnectionTestInput) => {
   return port ? `${host}:${port}` : host
 }
 
-const queryRows: Record<string, Array<Record<string, unknown>>> = {
-  'conn-prod-pg:orders:public:orders': [
-    { id: 1001, service: 'payment-api', status: 'investigating', owner: 'alice', updated_at: '2026-06-03 10:12:00' },
-    { id: 1002, service: 'orders-worker', status: 'mitigated', owner: 'bob', updated_at: '2026-06-03 09:44:00' },
-    { id: 1003, service: 'k8s-ingress', status: 'watching', owner: null, updated_at: '2026-06-02 22:01:00' },
-    { id: 1004, service: 'billing-sync', status: 'closed', owner: 'carol', updated_at: '2026-06-02 18:22:00' }
-  ],
-  'conn-prod-pg:orders:public:open_orders_v': [
-    { id: 1001, service: 'payment-api', status: 'investigating', owner: 'alice', updated_at: '2026-06-03 10:12:00' }
-  ],
-  'conn-prod-pg:orders:ops:ops_incidents': [
-    { id: 9001, service: 'checkout', severity: 'P1', status: 'open', updated_at: '2026-06-03 11:18:00' },
-    { id: 9002, service: 'search', severity: 'P2', status: 'triaged', updated_at: '2026-06-03 08:04:00' }
-  ],
-  'conn-prod-pg:orders:ops:active_incidents_v': [{ id: 9001, service: 'checkout', severity: 'P1', status: 'open', updated_at: '2026-06-03 11:18:00' }],
-  'conn-metrics-mysql:metrics::service_health': [
-    { id: 1, service: 'api-gateway', region: 'shanghai', latency_ms: 28, healthy: true },
-    { id: 2, service: 'worker', region: 'hangzhou', latency_ms: 73, healthy: true },
-    { id: 3, service: 'queue', region: 'shenzhen', latency_ms: 211, healthy: false }
-  ],
-  'conn-metrics-mysql:metrics::ops_incidents': [
-    { id: 7001, service: 'metrics-api', severity: 'P2', status: 'watching', updated_at: '2026-06-03 07:52:00' },
-    { id: 7002, service: 'prometheus', severity: 'P3', status: 'closed', updated_at: '2026-06-02 16:31:00' }
-  ],
-  'conn-metrics-mysql:metrics::metric_events': [
-    { service: 'api-gateway', event_type: 'deploy', severity: 'info', created_at: '2026-06-03 10:42:00' },
-    { service: 'queue', event_type: 'lag', severity: 'warning', created_at: '2026-06-03 10:58:00' }
-  ],
-  'conn-oracle-audit:ORCLPDB1:OPS:AUDIT_LOG': [
-    { event_id: 501, actor: 'deploy-bot', action: 'RELEASE_START', created_at: '2026-06-03 08:10:00' },
-    { event_id: 502, actor: 'ops-user', action: 'MANUAL_APPROVE', created_at: '2026-06-03 08:16:00' }
-  ],
-  'conn-local-cache:cache.db::cache_entries': [
-    { key: 'session:1001', value: 'payment-api', ttl_seconds: 3600, updated_at: '2026-06-03 09:00:00' },
-    { key: 'feature:rollout', value: 'enabled', ttl_seconds: null, updated_at: '2026-06-02 23:20:00' }
-  ]
-}
-
-const tableDdl: Record<string, { ddl: string; error?: { code: 'permission' | 'other'; message: string } }> = {
-  'conn-prod-pg:orders:public:orders': {
-    ddl:
-      'CREATE TABLE public.orders (\n  id BIGINT PRIMARY KEY,\n  service VARCHAR(80) NOT NULL,\n  status VARCHAR(32) NOT NULL,\n  owner VARCHAR(64),\n  updated_at TIMESTAMP NOT NULL\n);'
-  },
-  'conn-prod-pg:orders:public:open_orders_v': {
-    ddl:
-      'CREATE VIEW public.open_orders_v AS\nSELECT id, service, status, owner, updated_at\nFROM public.orders\nWHERE status <> \'closed\';',
-    error: { code: 'permission', message: 'DDL requires elevated catalog permission.' }
-  },
-  'conn-prod-pg:orders:ops:ops_incidents': {
-    ddl:
-      'CREATE TABLE ops.ops_incidents (\n  id BIGINT PRIMARY KEY,\n  service VARCHAR(80) NOT NULL,\n  severity VARCHAR(16) NOT NULL,\n  status VARCHAR(32) NOT NULL,\n  updated_at TIMESTAMP NOT NULL\n);'
-  },
-  'conn-prod-pg:orders:ops:active_incidents_v': {
-    ddl:
-      'CREATE VIEW ops.active_incidents_v AS\nSELECT id, service, severity, status, updated_at\nFROM ops.ops_incidents\nWHERE status <> \'closed\';'
-  },
-  'conn-metrics-mysql:metrics::service_health': {
-    ddl:
-      'CREATE TABLE `service_health` (\n  `id` INT NOT NULL,\n  `service` VARCHAR(80) NOT NULL,\n  `region` VARCHAR(32) NOT NULL,\n  `latency_ms` INT NOT NULL,\n  `healthy` TINYINT NOT NULL,\n  PRIMARY KEY (`id`)\n);'
-  },
-  'conn-metrics-mysql:metrics::ops_incidents': {
-    ddl:
-      'CREATE TABLE `ops_incidents` (\n  `id` BIGINT NOT NULL,\n  `service` VARCHAR(80) NOT NULL,\n  `severity` VARCHAR(16) NOT NULL,\n  `status` VARCHAR(32) NOT NULL,\n  `updated_at` DATETIME NOT NULL,\n  PRIMARY KEY (`id`)\n);'
-  },
-  'conn-metrics-mysql:metrics::metric_events': {
-    ddl:
-      'CREATE TABLE `metric_events` (\n  `service` VARCHAR(80) NOT NULL,\n  `event_type` VARCHAR(32) NOT NULL,\n  `severity` VARCHAR(16) NOT NULL,\n  `created_at` DATETIME NOT NULL\n);'
-  },
-  'conn-oracle-audit:ORCLPDB1:OPS:AUDIT_LOG': {
-    ddl:
-      'CREATE TABLE OPS.AUDIT_LOG (\n  event_id NUMBER NOT NULL,\n  actor VARCHAR2(64) NOT NULL,\n  action VARCHAR2(64) NOT NULL,\n  created_at TIMESTAMP NOT NULL\n);'
-  },
-  'conn-local-cache:cache.db::cache_entries': {
-    ddl:
-      'CREATE TABLE cache_entries (\n  key TEXT PRIMARY KEY,\n  value TEXT,\n  ttl_seconds INTEGER,\n  updated_at TEXT NOT NULL\n);'
-  }
-}
-
-const cloneRows = (rows: Record<string, Array<Record<string, unknown>>>) =>
-  Object.fromEntries(Object.entries(rows).map(([key, value]) => [key, value.map((row) => ({ ...row }))]))
-
-const columnsForRows = (rows: Array<Record<string, unknown>>) => Object.keys(rows[0] ?? {})
-
-const cloneColumns = (columns: Record<string, string[]>) =>
-  Object.fromEntries(Object.entries(columns).map(([key, value]) => [key, value.slice()]))
-
-const tableRows = cloneRows(queryRows)
-const tableColumns = cloneColumns(Object.fromEntries(Object.entries(queryRows).map(([key, rows]) => [key, columnsForRows(rows)])))
-const tableDdlEntries = Object.fromEntries(Object.entries(tableDdl).map(([key, value]) => [key, { ddl: value.ddl, error: value.error ? { ...value.error } : undefined }]))
+const tableRows = cloneRows(databaseSeedQueryRows)
+const tableColumns = columnsByTableRows(databaseSeedQueryRows)
+const tableDdlEntries: Record<string, DatabaseSeedTableDdlEntry> = cloneDdlEntries(databaseSeedTableDdl)
 
 configureDatabaseAiBackendContext({
   ensureStateLoaded: () => ensureDatabaseStateLoaded(),
@@ -1059,7 +337,13 @@ configureDatabaseRelationalEngines({
   workspaceCatalogFor: (selectedConnectionId) => databaseWorkspaceCatalogFor(selectedConnectionId)
 })
 
-const hasOwn = (obj: object, key: string) => Object.prototype.hasOwnProperty.call(obj, key)
+configureDatabaseSqliteRuntime({
+  refreshConnectionCatalog: (connectionId, catalogs) => {
+    const index = databaseConnections.findIndex((item) => item.id === connectionId)
+    if (index >= 0) databaseConnections[index] = { ...databaseConnections[index], catalogs }
+  },
+  workspaceCatalogFor: (selectedConnectionId) => databaseWorkspaceCatalogFor(selectedConnectionId)
+})
 
 const tableExistsInBackend = (input: { connectionId: string; databaseName: string; schemaName?: string; tableName: string }) => {
   const key = `${input.connectionId}:${input.databaseName}:${input.schemaName || ''}:${input.tableName}`
@@ -1135,173 +419,6 @@ let databaseGroups: DatabaseGroupInfo[] = databaseGroupSeed.map((group) => ({ ..
 let databaseGroupParents: Record<string, string | null> = { ...databaseGroupParentSeed }
 let databaseConnections: DatabaseConnectionInfo[] = databaseConnectionSeed.map(cloneDatabaseConnection)
 let databaseLoadedStateFilePath = ''
-
-type DatabasePersistedState = {
-  version: 1
-  groups: DatabaseGroupInfo[]
-  groupParents: Record<string, string | null>
-  connections: DatabaseConnectionInfo[]
-  secrets: Record<string, { password?: string }>
-  aiPaneState?: DatabaseAiPaneStateSnapshot
-  needsSecretMigration?: boolean
-}
-
-const normalizePersistedString = (value: unknown, fallback = '') => {
-  const text = trim(value)
-  return text || fallback
-}
-
-const normalizePersistedColumn = (value: unknown): DatabaseColumnInfo | null => {
-  if (!isRecord(value)) return null
-  const name = normalizePersistedString(value.name)
-  if (!name) return null
-  const key = value.key === 'PK' || value.key === 'FK' ? value.key : undefined
-  return {
-    name,
-    type: normalizePersistedString(value.type, 'unknown'),
-    nullable: value.nullable !== false,
-    ...(key ? { key } : {})
-  }
-}
-
-const normalizePersistedTable = (value: unknown): DatabaseTableInfo | null => {
-  if (!isRecord(value)) return null
-  const name = normalizePersistedString(value.name)
-  if (!name) return null
-  const columns = Array.isArray(value.columns)
-    ? value.columns.map(normalizePersistedColumn).filter((column): column is DatabaseColumnInfo => Boolean(column))
-    : []
-  return {
-    id: normalizePersistedString(value.id, `tbl-persisted-${name.replace(/[^A-Za-z0-9_-]+/g, '-')}`),
-    name,
-    columns,
-    primaryKey: Array.isArray(value.primaryKey) ? value.primaryKey.map(trim).filter(Boolean) : sqlitePrimaryKeyForColumns(columns)
-  }
-}
-
-const normalizePersistedSchema = (value: unknown): DatabaseSchemaInfo | null => {
-  if (!isRecord(value)) return null
-  const name = normalizePersistedString(value.name)
-  if (!name) return null
-  const tables = Array.isArray(value.tables)
-    ? value.tables.map(normalizePersistedTable).filter((table): table is DatabaseTableInfo => Boolean(table))
-    : []
-  const views = Array.isArray(value.views)
-    ? value.views.map(normalizePersistedTable).filter((table): table is DatabaseTableInfo => Boolean(table))
-    : []
-  return {
-    name,
-    tables,
-    views,
-    functions: Array.isArray(value.functions) ? value.functions.map(trim).filter(Boolean) : [],
-    procedures: Array.isArray(value.procedures) ? value.procedures.map(trim).filter(Boolean) : []
-  }
-}
-
-const normalizePersistedCatalog = (value: unknown): DatabaseCatalogInfo | null => {
-  if (!isRecord(value)) return null
-  const name = normalizePersistedString(value.name)
-  if (!name) return null
-  const tables = Array.isArray(value.tables)
-    ? value.tables.map(normalizePersistedTable).filter((table): table is DatabaseTableInfo => Boolean(table))
-    : undefined
-  const schemas = Array.isArray(value.schemas)
-    ? value.schemas.map(normalizePersistedSchema).filter((schema): schema is DatabaseSchemaInfo => Boolean(schema))
-    : undefined
-  return {
-    name,
-    ...(schemas ? { schemas } : {}),
-    ...(tables ? { tables } : {})
-  }
-}
-
-const normalizePersistedGroup = (value: unknown): DatabaseGroupInfo | null => {
-  if (!isRecord(value)) return null
-  const id = normalizePersistedString(value.id)
-  const name = normalizePersistedString(value.name)
-  if (!id || !name) return null
-  return { id, name }
-}
-
-const normalizePersistedConnection = (value: unknown, knownGroupIds: Set<string>): DatabaseConnectionInfo | null => {
-  if (!isRecord(value)) return null
-  const id = normalizePersistedString(value.id)
-  const name = normalizePersistedString(value.name)
-  const dbType = typeof value.dbType === 'string' && supportedEngines.has(value.dbType) ? (value.dbType as DatabaseEngineCode) : null
-  if (!id || !name || !dbType) return null
-  const port = normalizedDatabasePort(typeof value.port === 'number' ? value.port : Number(value.port))
-  const sslMode = postgresSslModeValues.has(String(value.sslMode ?? '')) ? (String(value.sslMode ?? '') as DatabaseConnectionInfo['sslMode']) : ''
-  const proxyName = dbType !== 'sqlite' && value.needProxy === true ? normalizePersistedString(value.proxyName) : ''
-  return {
-    id,
-    name,
-    dbType,
-    env: typeof value.env === 'string' && databaseEnvValues.has(value.env as DatabaseConnectionInfo['env']) ? (value.env as DatabaseConnectionInfo['env']) : 'Development',
-    groupId: knownGroupIds.has(trim(value.groupId)) ? trim(value.groupId) : DEFAULT_DATABASE_GROUP_ID,
-    host: normalizePersistedString(value.host, dbType === 'sqlite' ? 'local' : ''),
-    port: dbType === 'sqlite' ? null : port,
-    authentication: 'UserAndPassword',
-    user: dbType === 'sqlite' ? '' : normalizePersistedString(value.user),
-    hasPassword: value.hasPassword === true,
-    database: normalizePersistedString(value.database),
-    filePath: dbType === 'sqlite' ? normalizePersistedString(value.filePath) || undefined : undefined,
-    readonly: dbType === 'sqlite' ? value.readonly !== false : undefined,
-    sslMode: isPostgresCompatibleDbType(dbType) || dbType === 'sqlserver' ? sslMode : '',
-    needProxy: proxyName ? true : undefined,
-    proxyName: proxyName || undefined,
-    url: normalizePersistedString(value.url) || undefined,
-    status:
-      typeof value.status === 'string' && databaseStatusValues.has(value.status as DatabaseConnectionInfo['status'])
-        ? (value.status as DatabaseConnectionInfo['status'])
-        : 'idle',
-    catalogs: Array.isArray(value.catalogs)
-      ? value.catalogs.map(normalizePersistedCatalog).filter((catalog): catalog is DatabaseCatalogInfo => Boolean(catalog))
-      : []
-  }
-}
-
-const normalizePersistedState = (value: unknown): DatabasePersistedState | null => {
-  if (!isRecord(value)) return null
-  const groups = Array.isArray(value.groups)
-    ? value.groups.map(normalizePersistedGroup).filter((group): group is DatabaseGroupInfo => Boolean(group))
-    : []
-  if (!groups.some((group) => group.id === DEFAULT_DATABASE_GROUP_ID)) {
-    groups.unshift({ id: DEFAULT_DATABASE_GROUP_ID, name: 'Default Group' })
-  }
-  const knownGroupIds = new Set(groups.map((group) => group.id))
-  const groupParents: Record<string, string | null> = {}
-  const rawParents = isRecord(value.groupParents) ? value.groupParents : {}
-  groups.forEach((group) => {
-    const parentId = trim(rawParents[group.id])
-    groupParents[group.id] = parentId && parentId !== group.id && knownGroupIds.has(parentId) ? parentId : null
-  })
-  const connections = Array.isArray(value.connections)
-    ? value.connections.map((connection) => normalizePersistedConnection(connection, knownGroupIds)).filter((connection): connection is DatabaseConnectionInfo => Boolean(connection))
-    : []
-  const secrets: DatabasePersistedState['secrets'] = {}
-  const rawSecrets = isRecord(value.secrets) ? value.secrets : {}
-  let needsSecretMigration = false
-  connections.forEach((connection) => {
-    const secret = rawSecrets[connection.id]
-    if (isRecord(secret) && typeof secret.password === 'string' && secret.password) {
-      const password = decryptDatabaseCredentialFromStorage(secret.password)
-      if (password) {
-        secrets[connection.id] = { password }
-        connection.hasPassword = true
-        if (!isDatabaseCredentialCiphertext(secret.password)) needsSecretMigration = true
-      }
-    }
-  })
-  return {
-    version: 1,
-    groups,
-    groupParents,
-    connections,
-    secrets,
-    aiPaneState: isRecord(value.aiPaneState) ? normalizeDatabaseAiPaneState(value.aiPaneState) : undefined,
-    needsSecretMigration
-  }
-}
 
 const databaseStateFilePath = () => trim(databaseRuntimeConfig.stateFilePath)
 
@@ -1602,12 +719,12 @@ export function resetDatabaseBackendSeed() {
   Object.keys(tableColumns).forEach((key) => {
     delete tableColumns[key]
   })
-  Object.assign(tableRows, cloneRows(queryRows))
-  Object.assign(tableColumns, cloneColumns(Object.fromEntries(Object.entries(queryRows).map(([key, rows]) => [key, columnsForRows(rows)]))))
+  Object.assign(tableRows, cloneRows(databaseSeedQueryRows))
+  Object.assign(tableColumns, columnsByTableRows(databaseSeedQueryRows))
   Object.keys(tableDdlEntries).forEach((key) => {
     delete tableDdlEntries[key]
   })
-  Object.assign(tableDdlEntries, Object.fromEntries(Object.entries(tableDdl).map(([key, value]) => [key, { ddl: value.ddl, error: value.error ? { ...value.error } : undefined }])))
+  Object.assign(tableDdlEntries, cloneDdlEntries(databaseSeedTableDdl))
   databaseGroups = databaseGroupSeed.map((group) => ({ ...group }))
   databaseGroupParents = { ...databaseGroupParentSeed }
   databaseConnections = databaseConnectionSeed.map(cloneDatabaseConnection)
@@ -1940,8 +1057,6 @@ export async function refreshDatabaseConnection(connectionId: string): Promise<D
   })
 }
 
-const normalizeSql = (sql: string) => sql.trim().replace(/\s+/g, ' ')
-
 const unquoteIdentifier = (value: string) => value.replace(/^[`"\[]|[`"\]]$/g, '').replace(/""/g, '"').replace(/``/g, '`').replace(/]]/g, ']')
 
 const tableNameFromSql = (sql: string) => {
@@ -2030,140 +1145,10 @@ const resolveSeedSqlRows = (input: DatabaseSqlExecuteInput, sql: string) => {
   }
 }
 
-const sqlExecutionTimestamp = () => new Date().toISOString()
-
-const createDatabaseSqlExecutionRecord = (input: {
-  status: DatabaseSqlExecutionRecord['status']
-  message: string
-  durationMs: number
-  rowCount: number
-}): DatabaseSqlExecutionRecord => ({
-  id: `sql-exec-${randomUUID()}`,
-  status: input.status,
-  message: input.message,
-  durationMs: Math.max(0, Math.round(Number(input.durationMs) || 0)),
-  rowCount: Math.max(0, Math.round(Number(input.rowCount) || 0)),
-  createdAt: sqlExecutionTimestamp()
-})
-
-const databaseSqlExecutionMessage = (rowCount: number) => `Execution OK (${rowCount} row${rowCount === 1 ? '' : 's'})`
-
-const withDatabaseSqlExecutionRecord = (result: DatabaseSqlExecuteRawResult, startedAt: number): DatabaseSqlExecuteResult => {
-  if (result.ok && result.data) {
-    const durationMs = Math.max(1, Math.round(Number(result.data.durationMs) || Date.now() - startedAt))
-    const rowCount = Math.max(0, Math.round(Number(result.data.rowCount) || 0))
-    const execution = createDatabaseSqlExecutionRecord({
-      status: 'ok',
-      message: databaseSqlExecutionMessage(rowCount),
-      durationMs,
-      rowCount
-    })
-    return {
-      ...result,
-      data: {
-        ...result.data,
-        durationMs,
-        rowCount,
-        execution
-      }
-    }
-  }
-
-  const durationMs = Math.max(1, Date.now() - startedAt)
-  const execution = createDatabaseSqlExecutionRecord({
-      status: 'error',
-      message: result.errorMessage || result.errorCode || 'Database SQL execution failed.',
-      durationMs,
-      rowCount: 0
-  })
-  return {
-    ok: false,
-    errorCode: result.errorCode,
-    errorMessage: result.errorMessage,
-    execution
-  }
-}
-
-const normalizeFilterValue = (value: unknown) => {
-  if (value === null || value === undefined) return null
-  return String(value)
-}
-
-const matchesFilter = (value: unknown, filter: DatabaseColumnFilter) => {
-  const normalized = normalizeFilterValue(value)
-  if (filter.operator === 'isnull') return normalized === null
-  if (filter.operator === 'notnull') return normalized !== null
-  if (normalized === null) return false
-  if (filter.operator === 'like') return normalized.toLowerCase().includes(String(filter.value ?? '').toLowerCase())
-  if (filter.operator === 'eq') return normalized === String(filter.value ?? '')
-  if (filter.operator === 'neq') return normalized !== String(filter.value ?? '')
-  if (filter.operator === 'in') return (filter.values ?? []).map(String).includes(normalized)
-  return true
-}
-
-function parseWhereRaw(whereRaw: string | null | undefined): DatabaseColumnFilter[] {
-  const raw = trim(whereRaw)
-  if (!raw) return []
-  const match = raw.match(/(\w+)\s*(=|<>|!=|like)\s*['"]?([^'"]+)['"]?/i)
-  if (!match) return []
-  return [
-    {
-      column: match[1],
-      operator: match[2].toLowerCase() === 'like' ? 'like' : match[2] === '=' ? 'eq' : 'neq',
-      value: match[3]
-    }
-  ]
-}
-
-const filterRows = (rows: Array<Record<string, unknown>>, filters: DatabaseColumnFilter[]) => {
-  if (!filters.length) return rows
-  return rows.filter((row) => filters.every((filter) => matchesFilter(row[filter.column], filter)))
-}
-
-const sortRows = (rows: Array<Record<string, unknown>>, sort: DatabaseColumnSort | null | undefined) => {
-  if (!sort) return rows
-  return [...rows].sort((a, b) => {
-    const av = a[sort.column]
-    const bv = b[sort.column]
-    const factor = sort.direction === 'asc' ? 1 : -1
-    if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * factor
-    return String(av ?? '').localeCompare(String(bv ?? '')) * factor
-  })
-}
-
-const normalizeOrderByIdentifier = (value: string) => {
-  const segments = value.match(/`[^`]+`|"(?:""|[^"])+"|\[[^\]]+\]|[A-Za-z_][\w$]*/g)
-  const segment = segments?.length ? segments[segments.length - 1] : value
-  if (segment.startsWith('`') && segment.endsWith('`')) return segment.slice(1, -1).replace(/``/g, '`')
-  if (segment.startsWith('"') && segment.endsWith('"')) return segment.slice(1, -1).replace(/""/g, '"')
-  if (segment.startsWith('[') && segment.endsWith(']')) return segment.slice(1, -1).replace(/]]/g, ']')
-  return segment
-}
-
-function parseOrderByRaw(orderByRaw: string | null | undefined, knownColumns: string[]): DatabaseColumnSort | null {
-  const raw = trim(orderByRaw).replace(/^order\s+by\s+/i, '')
-  if (!raw) return null
-  const knownColumnMap = new Map(knownColumns.map((column) => [column.toLowerCase(), column]))
-  const first = raw.split(',')[0]?.trim() || ''
-  const match = first.match(
-    /^((?:`[^`]+`|"(?:""|[^"])+"|\[[^\]]+\]|[A-Za-z_][\w$]*)(?:\.(?:`[^`]+`|"(?:""|[^"])+"|\[[^\]]+\]|[A-Za-z_][\w$]*))*)(?:\s+(asc|desc))?/i
-  )
-  if (!match) return null
-  const column = normalizeOrderByIdentifier(match[1])
-  const knownColumn = knownColumnMap.get(column.toLowerCase())
-  if (!knownColumn) return null
-  return { column: knownColumn, direction: match[2]?.toLowerCase() === 'desc' ? 'desc' : 'asc' }
-}
-
-const rowKeyFor = (row: Record<string, unknown>, primaryKey: string[], index: number) => {
-  if (!primaryKey.length) return `row-${index}`
-  return JSON.stringify(primaryKey.map((column) => row[column] ?? null))
-}
-
 export async function testDatabaseConnection(input: DatabaseConnectionTestInput): Promise<DatabaseConnectionTestResult> {
   ensureDatabaseStateLoaded()
   const startedAt = Date.now()
-  if (!supportedEngines.has(input.dbType)) {
+  if (!supportedDatabaseEngines.has(input.dbType)) {
     return { ok: false, errorCode: 'DB_UNSUPPORTED_ENGINE', errorMessage: `Unsupported database engine: ${input.dbType}` }
   }
 
@@ -2191,7 +1176,7 @@ export async function testDatabaseConnection(input: DatabaseConnectionTestInput)
         ok: true,
         data: {
           dbType: input.dbType,
-          serverVersion: version ? `SQLite ${version}` : engineVersions.sqlite,
+          serverVersion: version ? `SQLite ${version}` : databaseEngineVersions.sqlite,
           endpoint: endpointFor(input),
           durationMs: Math.max(1, Date.now() - startedAt)
         }
@@ -2283,7 +1268,7 @@ export async function testDatabaseConnection(input: DatabaseConnectionTestInput)
     ok: true,
     data: {
       dbType: input.dbType,
-      serverVersion: engineVersions[input.dbType],
+      serverVersion: databaseEngineVersions[input.dbType],
       endpoint: endpointFor(input),
       durationMs: Math.max(1, Date.now() - startedAt)
     }
@@ -2629,23 +1614,14 @@ export async function planDatabaseTableMutation(input: DatabaseTableMutationPlan
 
   const connection = databaseConnections.find((item) => item.id === trim(input.connectionId))
   if (connection?.dbType === 'sqlite' && isRealSqliteConnection(connection)) {
-    let db: SqliteDatabase | null = null
     try {
-      db = openSqliteDatabase(sqliteFilePathFromConnection(connection), true)
-      const schemaName = sqliteSchemaNameFor(connection, input.databaseName)
-      const knownColumns = sqliteKnownColumnsForTable(db, schemaName, trim(input.tableName))
-      if (!knownColumns.length && input.mutations.every((mutation) => mutation.kind !== 'drop')) {
-        return { ok: false, errorCode: 'DB_TABLE_NOT_FOUND', errorMessage: `Table not found: ${input.tableName}` }
-      }
-      return { ok: true, data: databaseMutationPlanData(connection, input, knownColumns.length ? knownColumns : inputKnownColumns(input)) }
+      return { ok: true, data: sqliteMutationPlan(connection, input) }
     } catch (error) {
       return {
         ok: false,
         errorCode: databaseMutationPlanErrorCode(error, 'DB_SQLITE_MUTATION_PLAN_FAILED'),
         errorMessage: databaseMutationPlanErrorMessage(error, 'SQLite table mutation planning failed.')
       }
-    } finally {
-      db?.close()
     }
   }
   if (!connection) {
@@ -2726,40 +1702,7 @@ export async function mutateDatabaseTable(input: DatabaseTableMutationInput): Pr
   if (!key) {
     return { ok: false, errorCode: 'DB_TABLE_NOT_FOUND', errorMessage: `Table not found: ${input.tableName}` }
   }
-  const rows = tableRows[key]
-  let affected = 0
-
-  input.mutations.forEach((mutation) => {
-    if (mutation.kind === 'drop') {
-      affected += rows.length
-      delete tableRows[key]
-      delete tableColumns[key]
-      delete tableDdlEntries[key]
-      return
-    }
-    if (mutation.kind === 'truncate') {
-      affected += rows.length
-      rows.splice(0, rows.length)
-      return
-    }
-    if (mutation.kind === 'insert') {
-      rows.push({ ...mutation.values })
-      affected += 1
-      return
-    }
-
-    const index = rows.findIndex((row, rowIndex) => rowKeyFor(row, mutation.primaryKey, rowIndex) === mutation.rowKey)
-    if (index < 0) return
-
-    if (mutation.kind === 'delete') {
-      rows.splice(index, 1)
-      affected += 1
-      return
-    }
-
-    rows[index] = { ...rows[index], ...mutation.patch }
-    affected += 1
-  })
+  const affected = applySeedTableMutation(tableRows, tableColumns, tableDdlEntries, key, input.mutations)
   persistDatabaseState()
 
   return {
