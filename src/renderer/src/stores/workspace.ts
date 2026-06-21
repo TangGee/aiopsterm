@@ -1,49 +1,6 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
-import {
-  isAiCommandCatalogData,
-  isAiContextCatalogData,
-  isAiTodoSnapshotData,
-  malformedAiBackendResultMessage
-} from '@/services/aiBackendGuards'
-import { aiCatalogClient } from '@/services/aiCatalogClient'
-import {
-  aiBridgeErrorMessage,
-  aiChatRequestIdFromAssistantMessageId,
-  isAiChatCancelDataForRequest,
-  isAiChatConversationDeleteData,
-  isAiChatConversationMutationData,
-  isAiChatConversationRestoreData,
-  isAiChatExchangeRequestDataForRequest,
-  isAiChatHistoryMessage,
-  isAiChatHistorySnapshotData,
-  isAiChatMessageMetadataData,
-  isAiChatResponseDataForRequest,
-  isAiContextUsageForRequest,
-  isAiMcpResourceAccessActionData,
-  isAiMcpToolCallActionData,
-  type AiChatHistorySnapshotData,
-  type AiMcpResourceAccessActionData,
-  type AiMcpToolCallActionData
-} from '@/services/aiChatBackendGuards'
-import { aiChatClient } from '@/services/aiChatClient'
-import {
-  hasStructuredAiContentParts,
-  plainTextFromAiContentParts,
-  sendableAiContentParts
-} from '@/services/aiPanelInputRuntime'
-import { chatHistoryClient } from '@/services/chatHistoryClient'
-import {
-  isKnowledgeRelPathInParentWithRequestedName,
-  isKnowledgeWriteResultData,
-  malformedKnowledgeBackendResultMessage
-} from '@/services/knowledgeBackendGuards'
-import { knowledgeClient } from '@/services/knowledgeClient'
-import {
-  cloneKnowledgeNodes,
-  type KbClipboard,
-  type KnowledgeImportJob
-} from '@/services/knowledgeRuntime'
+import { type KbClipboard, type KnowledgeImportJob } from '@/services/knowledgeRuntime'
 import {
   type K8sBastionGroup,
   type K8sCluster,
@@ -67,6 +24,12 @@ import {
   type K8sTerminalTab
 } from '@/services/kubernetesRuntime'
 import { createWorkspaceFilesController, type FilesUiMode } from '@/services/workspaceFilesController'
+import {
+  createWorkspaceAiChatController,
+  type ChatMessage,
+  type ConversationItem,
+  type TodoItem
+} from '@/services/workspaceAiChatController'
 import {
   createWorkspaceExtensionsController,
   type WorkspaceAliasCommand,
@@ -96,16 +59,18 @@ import {
   createWorkspaceTerminalPanelsController
 } from '@/services/workspaceTerminalPanelsController'
 import {
+  createWorkspaceTerminalExecutionController,
+  type TerminalCommandSource,
+  type TerminalSecurityDecision,
+  type TerminalSecurityExecution,
+  type TerminalSecurityPrompt
+} from '@/services/workspaceTerminalExecutionController'
+import {
   createWorkspaceMcpController,
   type WorkspaceMcpOperationRecord,
   type WorkspaceMcpServer
 } from '@/services/workspaceMcpController'
 import { createWorkspaceQuickCommandsController } from '@/services/workspaceQuickCommandsController'
-import {
-  isQuickCommandsSnapshotData,
-  malformedQuickCommandsBackendResultMessage
-} from '@/services/quickCommandsBackendGuards'
-import { quickCommandsClient } from '@/services/quickCommandsClient'
 import {
   createWorkspaceSettingsController,
   type WorkspaceSettingsRule,
@@ -114,42 +79,7 @@ import {
   type WorkspaceSkillModalState
 } from '@/services/workspaceSettingsController'
 import { type ShortcutActionHandler } from '@/services/shortcutRuntime'
-import { terminalClient } from '@/services/terminalClient'
 import {
-  isTerminalCommandGenerationRecord,
-  terminalWriteExceptionReason,
-  validateTerminalWriteResult
-} from '@/services/terminalBackendGuards'
-import {
-  buildAgentCommandOutputMessagesForRequest,
-  buildAgentCommandOutputPrompt,
-  createAgentCommandOutputMessages,
-  waitForTerminalOutputAfter as waitForTerminalOutputAfterRuntime
-} from '@/services/terminalAgentLoopRuntime'
-import {
-  commandSecurityNotice,
-  createGlobalTerminalSecurityExecution,
-  createTerminalSecurityExecution,
-  prepareTerminalSecurityExecution as prepareTerminalSecurityExecutionRuntime,
-  quickCommandPlanUnavailable,
-  resolveQuickCommandPanelIds,
-  terminalExecutionUnavailable,
-  terminalSecurityExecutionShouldWrite,
-  terminalSecurityPromptCancellationNotice,
-  type TerminalCommandExecutionOptions,
-  type TerminalCommandSource,
-  type TerminalSecurityDecision,
-  type TerminalSecurityExecution,
-  type TerminalSecurityPrompt
-} from '@/services/terminalExecutionRuntime'
-import {
-  addTerminalCommandGenerationRecord,
-  prepareTerminalCommandGeneration,
-  terminalCommandGenerationRecordMatchesRequest,
-  terminalCommandModelOptions as terminalCommandModelOptionsRuntime
-} from '@/services/terminalCommandRuntime'
-import {
-  cloneQuickCommandsSnapshot,
   createEmptyMacroRecordingState,
   type MacroRecordingState,
   type QuickCommandSnippet,
@@ -157,17 +87,6 @@ import {
 } from '@/services/quickCommandsRuntime'
 import { MACRO_DEFAULT_SLEEP_THRESHOLD_MS } from '@/services/terminalMacroRuntime'
 import {
-  applyTerminalInputExecutionToPanels,
-  appendGeneratedTerminalCommandToPanel,
-  canWriteTerminalPanels,
-  collectTerminalInputExecutionRecords,
-  ensureTerminalPanelOutputSegments,
-  findTerminalPanelByIdOrSession,
-  liveTerminalPanelIds,
-  resolveActiveWritableTerminalPanel as resolveActiveWritableTerminalPanelFromCollection,
-  resolveTerminalPanelSessionWrite,
-  resolveTerminalPanelSessionWrites,
-  terminalPanelIds,
   type PanelDirection,
   type TerminalOutputScope,
   type TerminalPanel,
@@ -203,7 +122,6 @@ import {
   knowledgeTreeSize,
   layoutWidthLimits,
   mergeUserConfig,
-  normalizeMcpServersConfig,
   normalizeKeywordHighlightConfig,
   normalizeModelSettingsConfig,
   normalizeSecurityConfig,
@@ -218,25 +136,17 @@ import {
   type SettingsModelOption,
   type TerminalSettings
 } from '@/services/workspaceConfigRuntime'
-import type { AiopsPreloadApi } from '@shared/contracts/preloadApi'
 import { resolveLocale, translateWithLocale } from '@/i18n/runtime'
 import type { I18nKey } from '@/i18n/messages'
 import type { UserConfig } from '@shared/contracts/userConfig'
 import type { TerminalCommandGenerationRecord } from '@shared/contracts/terminalTools'
 import type {
   AiChatContextUsageSnapshot,
-  AiChatConversationRecord,
-  AiChatExchangeRequestInput,
-  AiChatHistoryMessage,
-  AiChatMessageInput,
-  AiChatMessageState,
-  AiChatResponseInput,
   AiCommandCatalogOption,
   AiCommandChipRef,
   AiContentPart,
   AiContextCatalog,
-  AiContextOption,
-  AiTodoItem
+  AiContextOption
 } from '@shared/contracts/aiChat'
 import type {
   AiModelCatalog,
@@ -250,7 +160,6 @@ import type {
 } from '@shared/contracts/appRuntime'
 import type { FileSessionCatalog, FileSessionFolderRecord, FileSessionFolderSaveInput, FileSessionInfo, FileSessionPatch, FileTransferTask } from '@shared/contracts/files'
 import type { AiopsUserProfile } from '@shared/contracts/userAccount'
-import type { QuickCommandScriptPlan } from '@shared/contracts/quickCommands'
 import type {
   KnowledgeBaseSearchResult,
   KnowledgeBaseSearchStatus,
@@ -279,6 +188,17 @@ export type {
   TerminalPanel,
   TerminalSshSession
 } from '@/services/terminalPanelRuntime'
+export type {
+  ChatMessage,
+  ConversationItem,
+  TodoItem
+} from '@/services/workspaceAiChatController'
+export type {
+  TerminalCommandSource,
+  TerminalSecurityDecision,
+  TerminalSecurityExecution,
+  TerminalSecurityPrompt
+} from '@/services/workspaceTerminalExecutionController'
 export type {
   AiChatChipContentPart,
   AiChatChipRef,
@@ -312,114 +232,13 @@ export type {
   WorkspaceUserLoginTab as UserLoginTab
 } from '@/services/workspaceUserController'
 
-type AiChatHistoryHost = NonNullable<AiChatHistoryMessage['hosts']>[number]
 type AssetManagementViewRequest = 'assetConfig' | 'assetManagement' | 'keyManagement' | 'proxyManagement'
 type AssetManagementOpenAction = 'none' | 'create-key' | 'create-proxy'
 
-type SendChatOptions = {
-  mode?: NonNullable<AiChatResponseInput['mode']>
-  skipKnowledgeSearch?: boolean
-}
-
 type AiContextUsage = AiChatContextUsageSnapshot
-
-export type { TerminalCommandSource, TerminalSecurityDecision, TerminalSecurityExecution, TerminalSecurityPrompt }
-
-type QuickCommandScriptPlanResolution =
-  | { ok: true; plan: QuickCommandScriptPlan }
-  | { ok: false; reason: string }
-
-export type ChatMessage = {
-  id: string
-  role: 'user' | 'assistant' | 'system'
-  text: string
-  contentParts?: AiContentPart[]
-  hosts?: AiContextOption[]
-  state?: AiChatMessageState
-  favorite?: boolean
-  feedback?: 'up' | 'down'
-  executedCommand?: string
-  commandExecutionStatus?: 'pending' | 'running' | 'succeeded' | 'failed'
-  commandExecutionMessage?: string
-  ask?: 'command' | 'mcp_tool_call' | 'mcp_resource_access' | 'followup'
-  say?: 'command' | 'command_output' | 'search_result' | 'context_truncated'
-  action?: 'approved' | 'rejected'
-  commandExecution?: {
-    ip: string
-    command: string
-    requiresApproval: boolean
-    interactive: boolean
-  }
-  mcpToolCall?: {
-    serverName: string
-    toolName: string
-    arguments?: Record<string, unknown>
-  }
-  mcpResourceAccess?: {
-    serverName: string
-    uri: string
-  }
-  followupOptions?: string[]
-  selectedOption?: string
-  partial?: boolean
-}
-
-export type TodoItem = AiTodoItem
-
-export type ConversationItem = {
-  id: string
-  title: string
-  summary: string
-  updatedAt: string
-  ts: number
-  ipAddress?: string
-  favorite?: boolean
-}
 
 type RendererLocalIdPrefix = 'panel' | 'terminal-security' | 'aichat-agent-loop'
 const createRendererLocalId = (prefix: RendererLocalIdPrefix) => `${prefix}-${Math.random().toString(36).slice(2, 9)}`
-const autoNamedConversationTitles = new Set([
-  '新会话',
-  '新建会话',
-  '未命名会话',
-  '新建對話',
-  '未命名對話',
-  'New chat',
-  'Untitled chat',
-  'New Chat',
-  'Untitled Chat',
-  '新しいチャット',
-  '無題のチャット',
-  '새 채팅',
-  '제목 없는 채팅',
-  'Neuer Chat',
-  'Unbenannter Chat',
-  'Nouveau chat',
-  'Chat sans titre',
-  'Nuova chat',
-  'Chat senza titolo',
-  'Nova conversa',
-  'Conversa sem título',
-  'Новый чат',
-  'Чат без названия',
-  'محادثة جديدة',
-  'محادثة بلا عنوان'
-])
-const isAutoNamedConversationTitle = (title: string) => autoNamedConversationTitles.has(title.trim())
-const conversationTitleFromPrompt = (prompt: string) => {
-  const normalized = prompt.replace(/\s+/g, ' ').trim()
-  if (!normalized) return ''
-  return normalized.length > 28 ? `${normalized.slice(0, 28)}...` : normalized
-}
-const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value)
-
-const numberInRange = (value: unknown, fallback: number, min: number, max?: number) =>
-  typeof value === 'number' && Number.isFinite(value) && value >= min && (max === undefined || value <= max) ? value : fallback
-
-const integerInRange = (value: unknown, fallback: number, min: number) =>
-  typeof value === 'number' && Number.isInteger(value) && value >= min ? value : fallback
-
-const cloneStructuredValue = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T
 
 export const useWorkspaceStore = defineStore('workspace', () => {
   const mode = ref<'terminal' | 'agents'>('terminal')
@@ -699,323 +518,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const activePanel = computed(() => panels.value.find((panel) => panel.id === activePanelId.value) || panels.value[0])
   const isLeftVisible = computed(() => mode.value === 'terminal' && leftPanelOpen.value)
   const isRightVisible = computed(() => mode.value === 'terminal' && rightPanelOpen.value)
-  const sortedConversations = computed(() => [...conversations.value].sort((a, b) => b.ts - a.ts))
-  const todoProgress = computed(() => {
-    const total = todoItems.value.length
-    const completed = todoItems.value.filter((todo) => todo.status === 'completed').length
-    const inProgress = todoItems.value.filter((todo) => todo.status === 'in_progress').length
-    return {
-      total,
-      completed,
-      inProgress,
-      pending: total - completed - inProgress,
-      percent: total === 0 ? 0 : Math.round((completed / total) * 100)
-    }
-  })
-
-  const clearAiContextUsage = () => {
-    aiContextUsage.value = null
-  }
-
-  const applyAiContextUsage = (usage: AiContextUsage) => {
-    aiContextUsage.value = cloneStructuredValue(usage)
-  }
-
-  const cloneConversationRecord = (conversation: AiChatConversationRecord): ConversationItem => ({
-    id: conversation.id,
-    title: conversation.title,
-    summary: conversation.summary,
-    updatedAt: conversation.updatedAt,
-    ts: conversation.ts,
-    ipAddress: conversation.ipAddress,
-    favorite: conversation.favorite
-  })
-
-  const applyChatHistorySnapshot = (snapshot: { conversations: AiChatConversationRecord[]; selectedConversationId: string }) => {
-    conversations.value = snapshot.conversations.map(cloneConversationRecord)
-    selectedConversationId.value = conversations.value.some((conversation) => conversation.id === snapshot.selectedConversationId)
-      ? snapshot.selectedConversationId
-      : conversations.value[0]?.id || ''
-  }
-
-  const historyHostToContext = (host: AiChatHistoryHost): AiContextOption => ({
-    id: host.id,
-    kind: 'hosts',
-    label: host.label,
-    detail: host.detail
-  })
-
-  const chatHistoryMessageToChatMessage = (message: AiChatHistoryMessage): ChatMessage => ({
-    id: message.id,
-    role: message.role,
-    text: message.text,
-    contentParts: message.contentParts ? cloneStructuredValue(message.contentParts) : undefined,
-    hosts: message.hosts?.map(historyHostToContext),
-    state: message.state,
-    favorite: message.favorite,
-    feedback: message.feedback,
-    executedCommand: message.executedCommand,
-    commandExecutionStatus: message.commandExecutionStatus,
-    commandExecutionMessage: message.commandExecutionMessage,
-    ask: message.ask,
-    say: message.say,
-    action: message.action,
-    commandExecution: message.commandExecution ? cloneStructuredValue(message.commandExecution) : undefined,
-    mcpToolCall: message.mcpToolCall ? cloneStructuredValue(message.mcpToolCall) : undefined,
-    mcpResourceAccess: message.mcpResourceAccess ? cloneStructuredValue(message.mcpResourceAccess) : undefined,
-    followupOptions: message.followupOptions ? [...message.followupOptions] : undefined,
-    selectedOption: message.selectedOption,
-    partial: message.partial
-  })
-
-  const chatMessageToHistoryMessage = (message: ChatMessage): AiChatHistoryMessage | null => {
-    const text = message.text.trim()
-    if (!text) return null
-    const hosts = message.hosts
-      ?.filter((host) => host.kind === 'hosts' && host.label.trim())
-      .map((host): AiChatHistoryHost => ({
-        id: host.id,
-        kind: 'hosts',
-        label: host.label,
-        detail: host.detail
-      }))
-    return {
-      id: message.id,
-      role: message.role,
-      text,
-      hosts: hosts?.length ? hosts : undefined,
-      state: message.state,
-      favorite: message.favorite,
-      feedback: message.feedback,
-      contentParts: message.contentParts ? cloneStructuredValue(message.contentParts) : undefined,
-      executedCommand: message.executedCommand,
-      commandExecutionStatus: message.commandExecutionStatus,
-      commandExecutionMessage: message.commandExecutionMessage,
-      ask: message.ask,
-      say: message.say,
-      action: message.action,
-      commandExecution: message.commandExecution ? cloneStructuredValue(message.commandExecution) : undefined,
-      mcpToolCall: message.mcpToolCall ? cloneStructuredValue(message.mcpToolCall) : undefined,
-      mcpResourceAccess: message.mcpResourceAccess ? cloneStructuredValue(message.mcpResourceAccess) : undefined,
-      followupOptions: message.followupOptions ? [...message.followupOptions] : undefined,
-      selectedOption: message.selectedOption,
-      partial: message.partial
-    }
-  }
-
-  const currentChatHistoryMessages = () => chatMessages.value.map(chatMessageToHistoryMessage).filter(Boolean) as AiChatHistoryMessage[]
-
-  const restoreChatMessagesFromBackend = async (id: string) => {
-    const restoreChatConversation = chatHistoryClient.restoreChatConversation()
-    if (!restoreChatConversation) {
-      setTopNotice('会话历史加载服务不可用')
-      return false
-    }
-    let result
-    try {
-      result = await restoreChatConversation(id)
-    } catch {
-      setTopNotice('会话历史加载失败')
-      return false
-    }
-    if (!result?.ok) {
-      setTopNotice(result?.errorMessage || '会话历史加载失败')
-      return false
-    }
-    if (!isAiChatConversationRestoreData(result.data)) {
-      setTopNotice(malformedAiBackendResultMessage)
-      return false
-    }
-    const data = result.data
-    const existing = conversations.value.find((conversation) => conversation.id === data.conversation.id)
-    const nextConversation = cloneConversationRecord(data.conversation)
-    conversations.value = existing
-      ? conversations.value.map((conversation) => (conversation.id === nextConversation.id ? nextConversation : conversation))
-      : [nextConversation, ...conversations.value]
-    selectedConversationId.value = nextConversation.id
-    chatMessages.value = data.messages.map(chatHistoryMessageToChatMessage)
-    if (data.truncated) {
-      setTopNotice(i18nText('ai.historyRestoreTruncated', { count: data.returnedMessages ?? data.messages.length }))
-    }
-    clearAiContextUsage()
-    return true
-  }
-
-  const loadChatConversationsFromBackend = async (options: { restoreIfEmpty?: boolean } = {}) => {
-    const listChatConversations = chatHistoryClient.listChatConversations()
-    if (!listChatConversations) {
-      setTopNotice('会话历史加载服务不可用')
-      return false
-    }
-    let result
-    try {
-      result = await listChatConversations()
-    } catch {
-      setTopNotice('会话历史加载失败')
-      return false
-    }
-    if (!result?.ok) {
-      setTopNotice(result?.errorMessage || '会话历史加载失败')
-      return false
-    }
-    if (!isAiChatHistorySnapshotData(result.data)) {
-      setTopNotice(malformedAiBackendResultMessage)
-      return false
-    }
-    applyChatHistorySnapshot(result.data)
-    if (options.restoreIfEmpty !== false && chatMessages.value.length === 0 && selectedConversationId.value) {
-      await restoreChatMessagesFromBackend(selectedConversationId.value)
-    }
-    return true
-  }
-
-  const refreshAiContextCatalog = async (options: { hydrateSelection?: boolean } = { hydrateSelection: false }) => {
-    const listAiContextCatalog = aiCatalogClient.listAiContextCatalog()
-    if (!listAiContextCatalog) {
-      setTopNotice('AI 上下文加载服务不可用')
-      return false
-    }
-    let result
-    try {
-      result = await listAiContextCatalog()
-    } catch {
-      setTopNotice('AI 上下文加载失败')
-      return false
-    }
-    if (!result?.ok) {
-      setTopNotice(result?.errorMessage || 'AI 上下文加载失败')
-      return false
-    }
-    if (!isAiContextCatalogData(result.data)) {
-      setTopNotice(malformedAiBackendResultMessage)
-      return false
-    }
-    aiContextCatalog.value = {
-      categories: result.data.categories.map((category) => ({
-        ...category,
-        options: category.options.map((option) => ({ ...option }))
-      })),
-      openedHosts: result.data.openedHosts.map((host) => ({ ...host })),
-      selectedDefaults: result.data.selectedDefaults.map((context) => ({ ...context }))
-    }
-    if (options.hydrateSelection === true && selectedContexts.value.length === 0) {
-      selectedContexts.value = aiContextCatalog.value.selectedDefaults.map((context) => ({ ...context }))
-    }
-    return true
-  }
-
-  const refreshAiCommandCatalog = async () => {
-    const listAiCommandCatalog = aiCatalogClient.listAiCommandCatalog()
-    if (!listAiCommandCatalog) {
-      setTopNotice('AI 命令加载服务不可用')
-      return false
-    }
-    let result
-    try {
-      result = await listAiCommandCatalog()
-    } catch {
-      setTopNotice('AI 命令加载失败')
-      return false
-    }
-    if (!result?.ok) {
-      setTopNotice(result?.errorMessage || 'AI 命令加载失败')
-      return false
-    }
-    if (!isAiCommandCatalogData(result.data)) {
-      setTopNotice(malformedAiBackendResultMessage)
-      return false
-    }
-    aiCommandOptions.value = result.data.commands.map((command) => ({ ...command }))
-    return true
-  }
-
-  const aiSkillContextOptions = computed<AiContextOption[]>(
-    () => aiContextCatalog.value.categories.find((category) => category.id === 'skills')?.options.map((option) => ({ ...option })) || []
-  )
-
-  const refreshAiTodoSnapshot = async () => {
-    const listAiTodoSnapshot = aiCatalogClient.listAiTodoSnapshot()
-    if (!listAiTodoSnapshot) return false
-    let result
-    try {
-      result = await listAiTodoSnapshot()
-    } catch {
-      return false
-    }
-    if (!result?.ok) return false
-    if (!isAiTodoSnapshotData(result.data)) return false
-    todoItems.value = result.data.todos.map((todo) => ({
-      ...todo,
-      subtasks: todo.subtasks?.map((subtask) => ({ ...subtask }))
-    }))
-    return true
-  }
-
-  let classicChatHydrationPromise: Promise<boolean> | null = null
-  const hydrateClassicChatData = async (options: { restoreIfEmpty?: boolean } = {}) => {
-    if (classicChatHydrationPromise) return classicChatHydrationPromise
-    classicChatHydrationPromise = Promise.all([
-      loadChatConversationsFromBackend({ restoreIfEmpty: options.restoreIfEmpty !== false }),
-      refreshAiTodoSnapshot(),
-      refreshAiContextCatalog({ hydrateSelection: false }),
-      refreshAiCommandCatalog()
-    ])
-      .then((results) => results.every(Boolean))
-      .finally(() => {
-        classicChatHydrationPromise = null
-      })
-    return classicChatHydrationPromise
-  }
-
-  const updateCurrentConversationSnapshot = async (summary?: string, options: { notifyUnavailable?: boolean; notifyFailure?: boolean } = {}) => {
-    const updateChatConversation = chatHistoryClient.updateChatConversation()
-    if (!updateChatConversation) {
-      if (options.notifyUnavailable) setTopNotice('会话历史写入服务不可用')
-      return false
-    }
-    let id = selectedConversationId.value
-    if (!id || !conversations.value.some((conversation) => conversation.id === id)) {
-      const createChatConversation = chatHistoryClient.createChatConversation()
-      if (!createChatConversation) {
-        if (options.notifyUnavailable) setTopNotice('会话历史写入服务不可用')
-        return false
-      }
-      const created = await createChatConversation()
-      if (!created?.ok || !isAiChatConversationMutationData(created.data)) {
-        if (options.notifyFailure) setTopNotice(created?.errorMessage || '会话历史写入失败')
-        return false
-      }
-      applyChatHistorySnapshot({
-        conversations: created.data.conversations,
-        selectedConversationId: created.data.selectedConversationId
-      })
-      id = created.data.conversation.id
-    }
-    const conversation = conversations.value.find((item) => item.id === id)
-    if (!conversation) return false
-    const nextTitle = summary && isAutoNamedConversationTitle(conversation.title) ? conversationTitleFromPrompt(summary) || conversation.title : conversation.title
-    const result = await updateChatConversation({
-      id,
-      title: nextTitle,
-      summary: summary || conversation.summary,
-      favorite: conversation.favorite,
-      messages: currentChatHistoryMessages()
-    })
-    if (!result?.ok || !isAiChatConversationMutationData(result.data)) {
-      if (options.notifyFailure) setTopNotice(result?.errorMessage || '会话历史写入失败')
-      return false
-    }
-    applyChatHistorySnapshot({
-      conversations: result.data.conversations,
-      selectedConversationId: result.data.selectedConversationId
-    })
-    return true
-  }
-
-  const syncCurrentConversationSnapshot = (options: { notifyUnavailable?: boolean; notifyFailure?: boolean } = {}) =>
-    updateCurrentConversationSnapshot(undefined, options)
-
-  const terminalCommandModelOptions = computed(() => terminalCommandModelOptionsRuntime(settingModelOptions.value))
   const k8sHasContexts = computed(() => k8sContexts.value.length > 0)
   const k8sActiveContext = computed(() => k8sContexts.value.find((context) => context.isActive) || null)
   const k8sSelectedCluster = computed(() => k8sClusters.value.find((cluster) => cluster.id === k8sSelectedClusterId.value) || null)
@@ -1331,547 +833,38 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
   )
 
-  const applyTerminalExecution = (execution: TerminalSecurityExecution) => {
-    applyTerminalInputExecutionToPanels(panels.value, execution).forEach(({ panel, text }) => recordMacroTerminalInput(panel.id, text))
-  }
-
-  const recordTerminalExecutionInput = (execution: TerminalSecurityExecution) => {
-    collectTerminalInputExecutionRecords(panels.value, execution).forEach(({ panel, text }) => recordMacroTerminalInput(panel.id, text))
-  }
-
-  const reportTerminalExecutionUnavailable = (command: string, panelIds: string[] = [], reason = '终端会话不可用，请先打开本地 shell 或连接 SSH') => {
-    setTopNotice(reason)
-    terminalSecurityPrompt.value = null
-    return terminalExecutionUnavailable(command, panelIds, reason)
-  }
-
-  const writeTerminalSegment = async (sessionId: string, data: string) => {
-    const writeTerminal = terminalClient.writeTerminal()
-    if (!writeTerminal) return { ok: false, reason: '终端写入服务不可用' }
-    try {
-      const result = await writeTerminal(sessionId, data)
-      return validateTerminalWriteResult(result, sessionId, data)
-    } catch (error) {
-      return { ok: false, reason: terminalWriteExceptionReason(error) }
+  const {
+    terminalCommandModelOptions,
+    prepareTerminalSecurityExecution,
+    writeTerminalExecution,
+    executeTerminalCommand,
+    runTerminalCommand,
+    executeGlobalTerminalCommand,
+    runGlobalTerminalCommand,
+    approveTerminalSecurityPrompt,
+    cancelTerminalSecurityPrompt,
+    resolveActiveWritableTerminalPanel,
+    waitForTerminalOutputAfter,
+    stageActiveTerminalCommand,
+    runActiveTerminalCommand,
+    appendActiveTerminalInput,
+    generateTerminalCommand,
+    injectGeneratedTerminalCommand
+  } = createWorkspaceTerminalExecutionController(
+    {
+      panels,
+      activePanel,
+      securitySettings,
+      settingModelOptions,
+      terminalSecurityPrompt,
+      terminalCommandGenerationRecords
+    },
+    {
+      setTopNotice,
+      createRendererLocalId,
+      recordMacroTerminalInput: (...args) => recordMacroTerminalInput(...args)
     }
-  }
-
-  const waitForSnippetDelay = (delayMs: number) => new Promise<void>((resolve) => window.setTimeout(resolve, Math.max(0, delayMs)))
-
-  const canWriteTerminalExecution = (execution: Pick<TerminalSecurityExecution, 'panelIds' | 'writeToShell'>) => {
-    if (!execution.writeToShell) return true
-    if (!terminalClient.writeTerminal()) return false
-    return canWriteTerminalPanels(panels.value, execution)
-  }
-
-  const prepareTerminalSecurityExecution = (execution: TerminalSecurityExecution): TerminalSecurityDecision => {
-    const decision = prepareTerminalSecurityExecutionRuntime(execution, {
-      securitySettings: securitySettings.value,
-      promptId: createRendererLocalId('terminal-security')
-    })
-    if (decision.status === 'needs-approval') {
-      terminalSecurityPrompt.value = decision.prompt
-      return decision
-    }
-    if (decision.status === 'blocked') {
-      setTopNotice(commandSecurityNotice(decision.result, decision.command))
-      terminalSecurityPrompt.value = null
-      return decision
-    }
-    terminalSecurityPrompt.value = null
-    if (!execution.writeToShell) applyTerminalExecution(execution)
-    return decision
-  }
-
-  const writeTerminalExecution = async (execution: TerminalSecurityExecution): Promise<TerminalSecurityDecision> => {
-    if (!execution.writeToShell) {
-      applyTerminalExecution(execution)
-      return { status: 'allow', execution }
-    }
-    if (!canWriteTerminalExecution(execution)) {
-      return reportTerminalExecutionUnavailable(execution.command, execution.panelIds)
-    }
-    if (execution.source === 'snippet' && execution.snippetSegments?.length) {
-      for (const segment of execution.snippetSegments) {
-        if (segment.delayBeforeMs > 0) await waitForSnippetDelay(segment.delayBeforeMs)
-        for (const panelId of execution.panelIds) {
-          const write = resolveTerminalPanelSessionWrite(panels.value, panelId)
-          if (!write) return reportTerminalExecutionUnavailable(execution.command, execution.panelIds)
-          const writeResult = await writeTerminalSegment(write.sessionId, segment.text)
-          if (!writeResult.ok) return reportTerminalExecutionUnavailable(execution.command, execution.panelIds, writeResult.reason)
-        }
-      }
-      return { status: 'allow', execution }
-    }
-    for (const panelId of execution.panelIds) {
-      const write = resolveTerminalPanelSessionWrite(panels.value, panelId)
-      if (!write) return reportTerminalExecutionUnavailable(execution.command, execution.panelIds)
-      const writeData = execution.shellText || execution.inputText
-      const writeResult = await writeTerminalSegment(write.sessionId, writeData)
-      if (!writeResult.ok) return reportTerminalExecutionUnavailable(execution.command, execution.panelIds, writeResult.reason)
-    }
-    recordTerminalExecutionInput(execution)
-    return { status: 'allow', execution }
-  }
-
-  const executeTerminalCommand = (panelId: string, command: string, options: TerminalCommandExecutionOptions = {}) => {
-    const decision = createTerminalSecurityExecution(panelId, command, options)
-    if (decision.status !== 'allow' || !decision.execution) return decision
-    return prepareTerminalSecurityExecution(decision.execution)
-  }
-
-  const runTerminalCommand = async (
-    panelId: string,
-    command: string,
-    options: TerminalCommandExecutionOptions = {}
-  ) => {
-    const decision = executeTerminalCommand(panelId, command, options)
-    if (!terminalSecurityExecutionShouldWrite(decision)) return decision
-    return writeTerminalExecution(decision.execution)
-  }
-
-  const executeGlobalTerminalCommand = (command: string) => {
-    const decision = createGlobalTerminalSecurityExecution(command, liveTerminalPanelIds(panels.value), terminalPanelIds(panels.value), Boolean(terminalClient.writeTerminal()))
-    if (decision.status === 'unavailable') {
-      setTopNotice(decision.reason)
-      terminalSecurityPrompt.value = null
-      return decision
-    }
-    if (decision.status !== 'allow' || !decision.execution) return decision
-    return prepareTerminalSecurityExecution(decision.execution)
-  }
-
-  const runGlobalTerminalCommand = async (command: string) => {
-    const decision = executeGlobalTerminalCommand(command)
-    if (!terminalSecurityExecutionShouldWrite(decision)) return decision
-    return writeTerminalExecution(decision.execution)
-  }
-
-  const approveTerminalSecurityPrompt = () => {
-    const prompt = terminalSecurityPrompt.value
-    if (!prompt) return null
-    if (!canWriteTerminalExecution(prompt.execution)) {
-      reportTerminalExecutionUnavailable(prompt.command, prompt.panelIds)
-      return null
-    }
-    terminalSecurityPrompt.value = null
-    if (!prompt.execution.writeToShell) applyTerminalExecution(prompt.execution)
-    return prompt.execution
-  }
-
-  const cancelTerminalSecurityPrompt = () => {
-    const prompt = terminalSecurityPrompt.value
-    if (!prompt) return null
-    setTopNotice(terminalSecurityPromptCancellationNotice(prompt.command))
-    terminalSecurityPrompt.value = null
-    return prompt.execution
-  }
-
-  const resolveActiveWritableTerminalPanel = () =>
-    resolveActiveWritableTerminalPanelFromCollection(panels.value, activePanel.value)
-
-  const waitForTerminalOutputAfter = (panelId: string, startLength: number, timeoutMs = 2_500) =>
-    waitForTerminalOutputAfterRuntime(() => panels.value.find((item) => item.id === panelId || item.sessionId === panelId), startLength, timeoutMs)
-
-  const stageActiveTerminalCommand = (command: string) => {
-    const panel = resolveActiveWritableTerminalPanel()
-    const text = command.trim()
-    if (!panel || !text) return null
-    return executeTerminalCommand(panel.id, text, { source: 'agent', writeToShell: true })
-  }
-
-  const runActiveTerminalCommand = async (command: string, source: TerminalCommandSource = 'agent') => {
-    const panel = resolveActiveWritableTerminalPanel()
-    const text = command.trim()
-    if (!panel || !text) return null
-    return runTerminalCommand(panel.id, text, { source, writeToShell: true })
-  }
-
-  const continueAgentCommandLoop = async (input: {
-    commandMessageId: string
-    command: string
-    commandExecution?: ChatMessage['commandExecution']
-    terminalPanelId: string
-    outputStartLength: number
-    outputTimeoutMs?: number
-    output?: string
-  }) => {
-    const command = input.command.trim()
-    const commandMessage = chatMessages.value.find((message) => message.id === input.commandMessageId)
-    if (!command || !commandMessage) return { status: 'unavailable' as const, reason: '命令卡片不可用，无法继续 Agent 循环。' }
-    const outputTimeoutMs = input.outputTimeoutMs ?? Math.max(1000, Math.round(aiPreferences.value.shellIntegrationTimeout * 1000))
-    const output = (input.output ?? (await waitForTerminalOutputAfter(input.terminalPanelId, input.outputStartLength, outputTimeoutMs))).trimEnd()
-    if (!output.trim()) {
-      commandMessage.commandExecutionStatus = 'failed'
-      commandMessage.commandExecutionMessage = '命令已发送，但未捕获到终端输出，未继续 Agent 循环。'
-      await updateCurrentConversationSnapshot(undefined, { notifyFailure: true, notifyUnavailable: true })
-      return { status: 'no-output' as const, reason: commandMessage.commandExecutionMessage }
-    }
-    const requestId = createRendererLocalId('aichat-agent-loop')
-    const { commandOutputMessage, assistantMessage } = createAgentCommandOutputMessages({
-      requestId,
-      command,
-      output,
-      commandExecution: input.commandExecution
-    })
-    chatMessages.value.push(commandOutputMessage, assistantMessage)
-    const filterOptions = { enabled: aiPreferences.value.commandOutputFilteringEnabled }
-    const prompt = buildAgentCommandOutputPrompt(command, output, filterOptions)
-    const messages: AiChatMessageInput[] = buildAgentCommandOutputMessagesForRequest(chatMessages.value.slice(-16), commandOutputMessage.id, filterOptions)
-    void refreshAiTodoSnapshot()
-    void generateAiResponseForMessage(assistantMessage.id, {
-      requestId,
-      assistantMessageId: assistantMessage.id,
-      prompt,
-      messages,
-      model: config.value.modelName,
-      mode: 'agent'
-    })
-    await updateCurrentConversationSnapshot(undefined, { notifyFailure: true, notifyUnavailable: true })
-    return { status: 'continued' as const, output, assistantMessageId: assistantMessage.id, requestId }
-  }
-
-  const appendActiveTerminalInput = (command: string) => {
-    const panel = resolveActiveWritableTerminalPanel()
-    if (!panel) return null
-    return executeTerminalCommand(panel.id, command, { writeToShell: false, source: 'agent' })
-  }
-
-  const generateTerminalCommand = async (panelId: string, instruction: string, modelName?: string) => {
-    const plan = prepareTerminalCommandGeneration(panels.value, {
-      panelId,
-      instruction,
-      modelName,
-      modelOptions: terminalCommandModelOptions.value
-    })
-    if (!plan.ok) {
-      if (plan.reason === 'missing-model') {
-        setTopNotice('请先配置可用模型')
-      }
-      return null
-    }
-    const { request } = plan
-    if (!request.modelName) {
-      setTopNotice('请先配置可用模型')
-      return null
-    }
-    const generateTerminalCommandBridge = terminalClient.generateTerminalCommand()
-    if (!generateTerminalCommandBridge) {
-      setTopNotice('终端命令生成服务不可用')
-      return null
-    }
-
-    let result: Awaited<ReturnType<AiopsPreloadApi['generateTerminalCommand']>>
-    try {
-      result = await generateTerminalCommandBridge(request)
-    } catch (error) {
-      setTopNotice(aiBridgeErrorMessage(error, '终端命令生成失败'))
-      return null
-    }
-    if (!result.ok) {
-      setTopNotice(result.errorMessage || '终端命令生成失败')
-      return null
-    }
-    if (!isTerminalCommandGenerationRecord(result.data) || !terminalCommandGenerationRecordMatchesRequest(result.data, request)) {
-      setTopNotice('终端命令生成结果无效')
-      return null
-    }
-    const record = result.data
-    terminalCommandGenerationRecords.value = addTerminalCommandGenerationRecord(terminalCommandGenerationRecords.value, record)
-    return record
-  }
-
-  const injectGeneratedTerminalCommand = (panelId: string, command: string) => {
-    const applied = appendGeneratedTerminalCommandToPanel(panels.value, panelId, command)
-    if (!applied) return null
-    recordMacroTerminalInput(applied.panel.id, applied.text)
-    return { status: 'allow' } as TerminalSecurityDecision
-  }
-
-  const buildPlainTextFromAiParts = (parts: AiContentPart[]) => plainTextFromAiContentParts(parts, { mode: 'exchange' })
-
-  const agentAutoRunCommandMessageIds = new Set<string>()
-  const agentReadOnlyAutoRunConversationIds = new Set<string>()
-  let agentReadOnlyAutoRunPendingWithoutConversation = false
-
-  const isAgentReadOnlyCommandMessage = (message: ChatMessage) =>
-    message.role === 'assistant' &&
-    message.ask === 'command' &&
-    message.state === 'done' &&
-    message.action !== 'rejected' &&
-    !message.commandExecutionStatus &&
-    Boolean(message.commandExecution?.command.trim()) &&
-    message.commandExecution?.requiresApproval === false &&
-    message.commandExecution.interactive !== true
-
-  const autoRunAgentReadOnlyCommand = async (messageId: string) => {
-    const message = chatMessages.value.find((item) => item.id === messageId)
-    if (!message || !isAgentReadOnlyCommandMessage(message)) return
-    if (agentAutoRunCommandMessageIds.has(message.id)) return
-    agentAutoRunCommandMessageIds.add(message.id)
-    const command = message.commandExecution!.command.trim()
-    const terminalPanel = resolveActiveWritableTerminalPanel()
-    const outputStartLength = terminalPanel?.output.length ?? 0
-    const terminalPanelId = terminalPanel?.id || ''
-    message.commandExecutionStatus = 'running'
-    message.commandExecutionMessage = '查询类命令自动执行中...'
-    void updateCurrentConversationSnapshot(undefined, { notifyFailure: true, notifyUnavailable: true })
-    const decision = await runActiveTerminalCommand(command, 'agent')
-    if (!decision) {
-      message.commandExecutionStatus = 'failed'
-      message.commandExecutionMessage = '终端会话不可用，请先打开本地 shell 或连接 SSH。'
-      await updateCurrentConversationSnapshot(undefined, { notifyFailure: true, notifyUnavailable: true })
-      return
-    }
-    if (decision.status === 'needs-approval') {
-      message.commandExecutionStatus = 'pending'
-      message.commandExecutionMessage = '命令已送入终端安全确认。'
-      await updateCurrentConversationSnapshot(undefined, { notifyFailure: true, notifyUnavailable: true })
-      return
-    }
-    if (decision.status === 'blocked') {
-      message.commandExecutionStatus = 'failed'
-      message.commandExecutionMessage = '命令被安全策略拦截。'
-      await updateCurrentConversationSnapshot(undefined, { notifyFailure: true, notifyUnavailable: true })
-      return
-    }
-    if (decision.status === 'unavailable') {
-      message.commandExecutionStatus = 'failed'
-      message.commandExecutionMessage = decision.reason
-      await updateCurrentConversationSnapshot(undefined, { notifyFailure: true, notifyUnavailable: true })
-      return
-    }
-    if (!terminalPanelId) {
-      message.commandExecutionStatus = 'failed'
-      message.commandExecutionMessage = '终端会话不可用，请先打开本地 shell 或连接 SSH。'
-      await updateCurrentConversationSnapshot(undefined, { notifyFailure: true, notifyUnavailable: true })
-      return
-    }
-    message.executedCommand = command
-    message.commandExecutionStatus = 'running'
-    message.commandExecutionMessage = '查询类命令已发送，正在等待终端输出...'
-    await updateCurrentConversationSnapshot(undefined, { notifyFailure: true, notifyUnavailable: true })
-    const loopResult = await continueAgentCommandLoop({
-      commandMessageId: message.id,
-      command,
-      commandExecution: {
-        ...message.commandExecution!,
-        command
-      },
-      terminalPanelId,
-      outputStartLength
-    })
-    if (loopResult.status === 'continued') {
-      message.commandExecutionStatus = 'succeeded'
-      message.commandExecutionMessage = `命令输出已回传 Agent：${command}`
-      message.executedCommand = command
-    } else {
-      message.commandExecutionStatus = 'failed'
-      message.commandExecutionMessage = loopResult.reason
-    }
-    await updateCurrentConversationSnapshot(undefined, { notifyFailure: true, notifyUnavailable: true })
-  }
-
-  const scheduleAgentReadOnlyAutoRun = (message: ChatMessage, input: AiChatResponseInput) => {
-    const conversationId = selectedConversationId.value.trim()
-    if (conversationId && agentReadOnlyAutoRunPendingWithoutConversation) {
-      agentReadOnlyAutoRunConversationIds.add(conversationId)
-      agentReadOnlyAutoRunPendingWithoutConversation = false
-    }
-    const sessionAutoRunEnabled = conversationId ? agentReadOnlyAutoRunConversationIds.has(conversationId) : agentReadOnlyAutoRunPendingWithoutConversation
-    if (input.mode !== 'agent' || (!aiPreferences.value.autoExecuteReadOnlyCommands && !sessionAutoRunEnabled) || !isAgentReadOnlyCommandMessage(message)) return
-    void autoRunAgentReadOnlyCommand(message.id)
-  }
-
-  const enableAgentReadOnlyAutoRunForCurrentConversation = () => {
-    const conversationId = selectedConversationId.value.trim()
-    if (!conversationId) {
-      agentReadOnlyAutoRunPendingWithoutConversation = true
-      return true
-    }
-    agentReadOnlyAutoRunConversationIds.add(conversationId)
-    agentReadOnlyAutoRunPendingWithoutConversation = false
-    return true
-  }
-
-  const generateAiResponseForMessage = async (assistantId: string, input: AiChatResponseInput) => {
-    const responseBridge = aiChatClient.generateAiChatResponse()
-    const failGeneration = (messageText: string) => {
-      const message = chatMessages.value.find((item) => item.id === assistantId)
-      if (message && message.state === 'streaming') {
-        message.state = 'error'
-        message.text = messageText
-        void updateCurrentConversationSnapshot()
-      }
-      void refreshAiTodoSnapshot()
-    }
-    if (typeof responseBridge !== 'function') {
-      failGeneration('AI 响应生成服务不可用')
-      return
-    }
-    let result: Awaited<ReturnType<AiopsPreloadApi['generateAiChatResponse']>> | undefined
-    try {
-      result = await responseBridge(input)
-    } catch (error) {
-      failGeneration(aiBridgeErrorMessage(error, 'AI 响应生成失败'))
-      return
-    }
-    const message = chatMessages.value.find((item) => item.id === assistantId)
-    if (!message || message.state !== 'streaming') {
-      void refreshAiTodoSnapshot()
-      return
-    }
-    const requestId = input.requestId?.trim() || aiChatRequestIdFromAssistantMessageId(assistantId)
-    const assistantMessageId = input.assistantMessageId?.trim() || assistantId
-    const data = result?.data
-    if (!result?.ok) {
-      message.state = 'error'
-      message.text = result?.errorMessage || 'AI 响应生成失败'
-    } else if (!requestId || !isAiChatResponseDataForRequest(data, requestId, assistantMessageId)) {
-      message.state = 'error'
-      message.text = 'AI 响应生成结果无效'
-    } else if (data.status === 'cancelled') {
-      message.state = 'cancelled'
-      message.text = data.text
-    } else if (data.message) {
-      Object.assign(message, chatHistoryMessageToChatMessage(data.message))
-    } else {
-      message.state = 'done'
-      message.text = data.text
-    }
-    if (requestId && isAiContextUsageForRequest(data?.contextUsage, requestId, assistantMessageId)) {
-      applyAiContextUsage(data.contextUsage)
-    }
-    scheduleAgentReadOnlyAutoRun(message, input)
-    void refreshAiTodoSnapshot()
-    void updateCurrentConversationSnapshot()
-  }
-
-  const cancelStreamingAiChatResponse = async () => {
-    const message = [...chatMessages.value].reverse().find((item) => item.role === 'assistant' && item.state === 'streaming')
-    if (!message) return false
-    const cancelBridge = aiChatClient.cancelAiChatResponse()
-    if (typeof cancelBridge !== 'function') {
-      setTopNotice('AI 生成取消服务不可用')
-      return false
-    }
-    const requestId = aiChatRequestIdFromAssistantMessageId(message.id)
-    if (!requestId) {
-      setTopNotice('AI 生成取消失败')
-      return false
-    }
-    const result = await cancelBridge({
-      assistantMessageId: message.id,
-      requestId
-    }).catch((error) => {
-      setTopNotice(aiBridgeErrorMessage(error, 'AI 生成取消失败'))
-      return null
-    })
-    if (!result) return false
-    if (!result?.ok || !isAiChatCancelDataForRequest(result.data, requestId, message.id)) {
-      setTopNotice(result?.errorMessage || 'AI 生成取消失败')
-      return false
-    }
-    if (message.state !== 'streaming') return true
-    message.state = 'cancelled'
-    message.text = result.data.text
-    if (isAiContextUsageForRequest(result.data.contextUsage, requestId, message.id)) {
-      applyAiContextUsage(result.data.contextUsage)
-    }
-    void refreshAiTodoSnapshot()
-    void updateCurrentConversationSnapshot()
-    return true
-  }
-
-  const hostContextForExchangeRequest = (context: AiContextOption): NonNullable<AiChatExchangeRequestInput['hosts']>[number] | null => {
-    if (context.kind !== 'hosts' || !context.label.trim()) return null
-    return {
-      id: context.id,
-      kind: 'hosts',
-      label: context.label,
-      detail: context.detail
-    }
-  }
-
-  const appendChatExchange = async (
-    text: string,
-    contentParts?: AiContentPart[],
-    overrideHosts?: AiContextOption[],
-    options: SendChatOptions = {}
-  ) => {
-    const safeContentParts = sendableAiContentParts(contentParts)
-    const hasStructuredParts = hasStructuredAiContentParts(safeContentParts)
-    const prompt = text.trim() || buildPlainTextFromAiParts(safeContentParts).trim()
-    if (!prompt && !hasStructuredParts) return false
-    const baseMessageContexts = overrideHosts ? [...overrideHosts, ...selectedContexts.value.filter((item) => item.kind !== 'hosts')] : [...selectedContexts.value]
-    const autoKnowledgeContexts = options.skipKnowledgeSearch ? [] : await resolveAiKnowledgeSearchContexts(prompt, baseMessageContexts)
-    const messageContexts = [...baseMessageContexts, ...autoKnowledgeContexts]
-    const commandDisplay = selectedCommandRef.value?.label || selectedCommandRef.value?.command || selectedCommandId.value
-    const historyForBackend: AiChatMessageInput[] = chatMessages.value.slice(-12).map((message) => ({ role: message.role, text: message.text }))
-    const hostContexts = overrideHosts ?? selectedContexts.value.filter((item) => item.kind === 'hosts')
-    const responseMode = options.mode || (mode.value === 'agents' ? 'agent' : 'command')
-    const exchangeBridge = aiChatClient.createAiChatExchangeRequest()
-    if (typeof exchangeBridge !== 'function') {
-      setTopNotice('AI 请求创建服务不可用')
-      return false
-    }
-    let request: Awaited<ReturnType<AiopsPreloadApi['createAiChatExchangeRequest']>> | undefined
-    try {
-      request = await exchangeBridge({
-        text: prompt,
-        hosts: hostContexts.map(hostContextForExchangeRequest).filter(Boolean) as AiChatExchangeRequestInput['hosts'],
-        messages: historyForBackend,
-        contexts: messageContexts.map((item) => ({
-          id: item.id,
-          kind: item.kind,
-          label: item.label,
-          detail: item.detail,
-          relPath: item.relPath,
-          mediaType: item.mediaType
-        })),
-        command: selectedCommandRef.value
-          ? {
-              id: selectedCommandId.value || undefined,
-              label: selectedCommandRef.value.label,
-              command: selectedCommandRef.value.command,
-              path: selectedCommandRef.value.path
-            }
-          : commandDisplay
-            ? { id: selectedCommandId.value || undefined, label: commandDisplay }
-            : null,
-        model: config.value.modelName,
-        mode: responseMode
-      })
-    } catch (error) {
-      setTopNotice(aiBridgeErrorMessage(error, 'AI 请求创建失败'))
-      return false
-    }
-    if (!request?.ok || !isAiChatExchangeRequestDataForRequest(request.data)) {
-      setTopNotice(request?.errorMessage || 'AI 请求创建失败')
-      return false
-    }
-    if (isAiContextUsageForRequest(request.data.contextUsage, request.data.requestId, request.data.assistantMessage.id)) {
-      applyAiContextUsage(request.data.contextUsage)
-    }
-    const userMessage = chatHistoryMessageToChatMessage(request.data.userMessage)
-    userMessage.contentParts = safeContentParts.length || hasStructuredParts ? safeContentParts : undefined
-    userMessage.hosts = hostContexts
-    const assistantMessage = chatHistoryMessageToChatMessage(request.data.assistantMessage)
-    chatMessages.value.push(userMessage)
-    chatMessages.value.push(assistantMessage)
-    void refreshAiTodoSnapshot()
-    void generateAiResponseForMessage(assistantMessage.id, {
-      ...request.data.responseInput,
-      requestId: request.data.responseInput.requestId || request.data.requestId,
-      assistantMessageId: request.data.responseInput.assistantMessageId || assistantMessage.id
-    })
-    await updateCurrentConversationSnapshot(prompt, { notifyFailure: true, notifyUnavailable: true })
-    return true
-  }
-
-  const sendChat = (text: string, contentParts?: AiContentPart[], overrideHosts?: AiContextOption[], options?: SendChatOptions) => {
-    return appendChatExchange(text, contentParts, overrideHosts, options)
-  }
+  )
 
   const k8sController = createWorkspaceKubernetesController(
     {
@@ -1920,7 +913,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       k8sAgentCluster,
       k8sResourceCluster
     },
-    { sendChat }
+    { sendChat: (...args) => sendChat(...args) }
   )
 
   const {
@@ -1973,404 +966,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     syncK8sBastion,
     toggleK8sBastionCollapsed
   } = k8sController
-
-  const resendUserMessageFromParts = async (messageId: string, contentParts: AiContentPart[], overrideHosts?: AiContextOption[]) => {
-    const index = chatMessages.value.findIndex((message) => message.id === messageId && message.role === 'user')
-    if (index === -1) return false
-    const originalHosts = chatMessages.value[index].hosts
-    const prompt = buildPlainTextFromAiParts(contentParts).trim()
-    const hasStructuredParts = hasStructuredAiContentParts(contentParts)
-    if (!prompt && !hasStructuredParts) return false
-    chatMessages.value.splice(index)
-    clearAiContextUsage()
-    return appendChatExchange(prompt, contentParts, overrideHosts ?? originalHosts)
-  }
-
-  const createConversation = async () => {
-    const createChatConversation = chatHistoryClient.createChatConversation()
-    if (!createChatConversation) return null
-    const result = await createChatConversation()
-    if (!result?.ok || !isAiChatConversationMutationData(result.data)) return null
-    applyChatHistorySnapshot({
-      conversations: result.data.conversations,
-      selectedConversationId: result.data.selectedConversationId
-    })
-    await restoreChatMessagesFromBackend(result.data.conversation.id)
-    return conversations.value.find((conversation) => conversation.id === result.data!.conversation.id) || cloneConversationRecord(result.data.conversation)
-  }
-
-  const deleteConversation = async (id: string) => {
-    const deleteChatConversation = chatHistoryClient.deleteChatConversation()
-    if (!deleteChatConversation) return false
-    const result = await deleteChatConversation(id)
-    if (!result?.ok || !isAiChatConversationDeleteData(result.data)) return false
-    applyChatHistorySnapshot({
-      conversations: result.data.conversations,
-      selectedConversationId: result.data.selectedConversationId
-    })
-    if (selectedConversationId.value) {
-      await restoreChatMessagesFromBackend(selectedConversationId.value)
-    } else {
-      chatMessages.value = []
-      clearAiContextUsage()
-    }
-    return true
-  }
-
-  const selectConversation = (id: string) => {
-    selectedConversationId.value = id
-    clearAiContextUsage()
-  }
-
-  const renameConversation = async (id: string, title: string) => {
-    const nextTitle = title.trim()
-    const conversation = conversations.value.find((item) => item.id === id)
-    if (!conversation || !nextTitle) return false
-    const updateChatConversation = chatHistoryClient.updateChatConversation()
-    if (!updateChatConversation) {
-      setTopNotice('会话历史写入服务不可用')
-      return false
-    }
-    const result = await updateChatConversation({
-      id,
-      title: nextTitle,
-      summary: conversation.summary,
-      favorite: conversation.favorite,
-      messages: id === selectedConversationId.value ? currentChatHistoryMessages() : undefined
-    })
-    if (!result?.ok || !isAiChatConversationMutationData(result.data)) return false
-    applyChatHistorySnapshot({
-      conversations: result.data.conversations,
-      selectedConversationId: result.data.selectedConversationId
-    })
-    return true
-  }
-
-  const toggleConversationFavorite = async (id: string) => {
-    const conversation = conversations.value.find((item) => item.id === id)
-    if (!conversation) return false
-    const nextFavorite = !conversation.favorite
-    const updateChatConversation = chatHistoryClient.updateChatConversation()
-    if (!updateChatConversation) {
-      setTopNotice('会话历史写入服务不可用')
-      return false
-    }
-    const result = await updateChatConversation({
-      id,
-      title: conversation.title,
-      summary: conversation.summary,
-      favorite: nextFavorite,
-      messages: id === selectedConversationId.value ? currentChatHistoryMessages() : undefined
-    })
-    if (!result?.ok || !isAiChatConversationMutationData(result.data)) return false
-    applyChatHistorySnapshot({
-      conversations: result.data.conversations,
-      selectedConversationId: result.data.selectedConversationId
-    })
-    return true
-  }
-
-  const restoreConversation = async (id: string) => {
-    const restored = await restoreChatMessagesFromBackend(id)
-    if (restored) return true
-    if (await loadChatConversationsFromBackend({ restoreIfEmpty: false })) {
-      return restoreChatMessagesFromBackend(id)
-    }
-    return false
-  }
-
-  const toggleContext = (context: AiContextOption) => {
-    selectedContexts.value = selectedContexts.value.some((item) => item.id === context.id)
-      ? selectedContexts.value.filter((item) => item.id !== context.id)
-      : [...selectedContexts.value, context]
-  }
-
-  const removeContext = (id: string) => {
-    selectedContexts.value = selectedContexts.value.filter((item) => item.id !== id)
-  }
-
-  const applyCommandPreset = (id: string, prompt: string) => {
-    selectedCommandId.value = id
-    selectedCommandRef.value = null
-    void sendChat(prompt)
-  }
-
-  const selectCommandPreset = (id: string | null, commandRef?: AiCommandChipRef | null) => {
-    selectedCommandId.value = id
-    selectedCommandRef.value = id && commandRef ? { ...commandRef } : null
-  }
-
-  const applyMessageMetadataSnapshot = (messageId: string, messages: AiChatHistoryMessage[]) => {
-    const snapshot = messages.find((message) => message.id === messageId)
-    const message = chatMessages.value.find((item) => item.id === messageId)
-    if (!snapshot || !message) return false
-    message.favorite = snapshot.favorite
-    message.feedback = snapshot.feedback
-    return true
-  }
-
-  const applyChatMessageSnapshot = (messages: AiChatHistoryMessage[]) => {
-    chatMessages.value = messages.map(chatHistoryMessageToChatMessage)
-    clearAiContextUsage()
-  }
-
-  const applyAiMcpToolCallResult = (data: AiMcpToolCallActionData) => {
-    const existing = conversations.value.find((conversation) => conversation.id === data.conversation.id)
-    const nextConversation = cloneConversationRecord(data.conversation)
-    conversations.value = existing
-      ? conversations.value.map((conversation) => (conversation.id === nextConversation.id ? nextConversation : conversation))
-      : [nextConversation, ...conversations.value]
-    selectedConversationId.value = nextConversation.id
-    applyChatMessageSnapshot(data.messages)
-    if (data.mcpConfig) {
-      applyMcpServersSnapshot(normalizeMcpServersConfig(data.mcpConfig.mcpServers, data.mcpConfig.mcpToolStates))
-      mcpConfigEditorContent.value = JSON.stringify(data.mcpConfig.mcpConfig, null, 2)
-    }
-  }
-
-  const applyAiMcpResourceAccessResult = (data: AiMcpResourceAccessActionData) => {
-    const existing = conversations.value.find((conversation) => conversation.id === data.conversation.id)
-    const nextConversation = cloneConversationRecord(data.conversation)
-    conversations.value = existing
-      ? conversations.value.map((conversation) => (conversation.id === nextConversation.id ? nextConversation : conversation))
-      : [nextConversation, ...conversations.value]
-    selectedConversationId.value = nextConversation.id
-    applyChatMessageSnapshot(data.messages)
-  }
-
-  const runAiMcpToolCallAction = async (messageId: string, action: 'approve' | 'reject', options: { autoApprove?: boolean } = {}) => {
-    const message = chatMessages.value.find((item) => item.id === messageId)
-    if (!message?.mcpToolCall || message.ask !== 'mcp_tool_call') return false
-    if (!selectedConversationId.value) {
-      setTopNotice('会话历史写入服务不可用')
-      return false
-    }
-    const bridge = action === 'approve' ? aiChatClient.approveAiMcpToolCall() : aiChatClient.rejectAiMcpToolCall()
-    if (typeof bridge !== 'function') {
-      setTopNotice('AI MCP 工具审批服务不可用')
-      return false
-    }
-    const synced = await updateCurrentConversationSnapshot(undefined, { notifyUnavailable: true, notifyFailure: true })
-    if (!synced) return false
-    const result = await bridge({
-      conversationId: selectedConversationId.value,
-      messageId,
-      autoApprove: options.autoApprove
-    })
-    if (!result?.ok || !isAiMcpToolCallActionData(result.data)) {
-      setTopNotice(result?.errorMessage || 'AI MCP 工具审批失败')
-      return false
-    }
-    applyAiMcpToolCallResult(result.data)
-    return result.data.status
-  }
-
-  const approveAiMcpToolCall = (messageId: string, options: { autoApprove?: boolean } = {}) => runAiMcpToolCallAction(messageId, 'approve', options)
-
-  const rejectAiMcpToolCall = (messageId: string) => runAiMcpToolCallAction(messageId, 'reject')
-
-  const runAiMcpResourceAccessAction = async (messageId: string, action: 'approve' | 'reject') => {
-    const message = chatMessages.value.find((item) => item.id === messageId)
-    if (!message?.mcpResourceAccess || message.ask !== 'mcp_resource_access') return false
-    if (!selectedConversationId.value) {
-      setTopNotice('会话历史写入服务不可用')
-      return false
-    }
-    const bridge = action === 'approve' ? aiChatClient.approveAiMcpResourceAccess() : aiChatClient.rejectAiMcpResourceAccess()
-    if (typeof bridge !== 'function') {
-      setTopNotice('AI MCP 资源审批服务不可用')
-      return false
-    }
-    const synced = await updateCurrentConversationSnapshot(undefined, { notifyUnavailable: true, notifyFailure: true })
-    if (!synced) return false
-    const result = await bridge({
-      conversationId: selectedConversationId.value,
-      messageId
-    })
-    if (!result?.ok || !isAiMcpResourceAccessActionData(result.data)) {
-      setTopNotice(result?.errorMessage || 'AI MCP 资源审批失败')
-      return false
-    }
-    applyAiMcpResourceAccessResult(result.data)
-    return result.data.status
-  }
-
-  const approveAiMcpResourceAccess = (messageId: string) => runAiMcpResourceAccessAction(messageId, 'approve')
-
-  const rejectAiMcpResourceAccess = (messageId: string) => runAiMcpResourceAccessAction(messageId, 'reject')
-
-  const setMessageFeedback = async (id: string, feedback: 'up' | 'down') => {
-    const message = chatMessages.value.find((item) => item.id === id)
-    if (!message || !selectedConversationId.value) return false
-    const saveChatMessageMetadata = chatHistoryClient.saveChatMessageMetadata()
-    if (!saveChatMessageMetadata) {
-      setTopNotice('AI 消息写入服务不可用')
-      return false
-    }
-    const nextFeedback = message.feedback === feedback ? null : feedback
-    const result = await saveChatMessageMetadata({
-      conversationId: selectedConversationId.value,
-      messageId: id,
-      feedback: nextFeedback
-    })
-    if (!result?.ok || !isAiChatMessageMetadataData(result.data)) return false
-    return applyMessageMetadataSnapshot(id, result.data.messages)
-  }
-
-  const toggleMessageFavorite = async (id: string) => {
-    const message = chatMessages.value.find((item) => item.id === id)
-    if (!message || !selectedConversationId.value) return false
-    const saveChatMessageMetadata = chatHistoryClient.saveChatMessageMetadata()
-    if (!saveChatMessageMetadata) {
-      setTopNotice('AI 消息写入服务不可用')
-      return false
-    }
-    const result = await saveChatMessageMetadata({
-      conversationId: selectedConversationId.value,
-      messageId: id,
-      favorite: !message.favorite
-    })
-    if (!result?.ok || !isAiChatMessageMetadataData(result.data)) return false
-    return applyMessageMetadataSnapshot(id, result.data.messages)
-  }
-
-  const retryAssistantMessage = (messageId?: string) => {
-    const assistantIndex = messageId
-      ? chatMessages.value.findIndex((message) => message.id === messageId && message.role === 'assistant')
-      : -1
-    const history = assistantIndex >= 0 ? chatMessages.value.slice(0, assistantIndex) : chatMessages.value
-    const lastUserMessage = [...history].reverse().find((message) => message.role === 'user')
-    if (lastUserMessage) {
-      void sendChat(lastUserMessage.text, lastUserMessage.contentParts, lastUserMessage.hosts)
-      return true
-    }
-    return false
-  }
-
-  const retryLastAssistantMessage = () => {
-    return retryAssistantMessage()
-  }
-
-  const messagePlainText = (message: ChatMessage) =>
-    message.contentParts?.length ? buildPlainTextFromAiParts(message.contentParts).trim() : message.text.trim()
-
-  const messageSummaryContent = (message: ChatMessage) => {
-    const body = messagePlainText(message)
-    const hosts = message.hosts?.length ? `\n\nHosts: ${message.hosts.map((host) => host.label).join(', ')}` : ''
-    return `# AI Message Summary\n\nRole: ${message.role}\nMessage ID: ${message.id}\n\n${body}${hosts}\n`
-  }
-
-  const knowledgeFileNameForMessage = (message: ChatMessage) => {
-    const safeId = message.id.replace(/[^a-zA-Z0-9_-]/g, '-').replace(/^-+|-+$/g, '') || 'message'
-    return `ai-message-${safeId}.md`
-  }
-
-  const ensureLocalKnowledgeDir = async (title: string) => {
-    const relPath = title
-    const existing = findKnowledgeNode(relPath)
-    if (existing?.type === 'dir') return existing
-    const kbMkdir = knowledgeClient.kbMkdir()
-    if (!kbMkdir) {
-      setTopNotice('知识库写入服务不可用')
-      return null
-    }
-    const result = await kbMkdir('', title)
-    const entry = backendKnowledgeEntryOrNotice(result, malformedKnowledgeBackendResultMessage)
-    if (!entry) return null
-    const createdRelPath = entry.relPath.trim()
-    if (createdRelPath !== relPath) {
-      setTopNotice(malformedKnowledgeBackendResultMessage)
-      return null
-    }
-    if (entry.type !== 'dir') {
-      setTopNotice(malformedKnowledgeBackendResultMessage)
-      return null
-    }
-    const refreshed = await refreshKnowledgeTree()
-    if (!refreshed) return null
-    const created = findKnowledgeNode(relPath)
-    return created?.type === 'dir' ? created : null
-  }
-
-  const summarizeMessageToKnowledge = async (messageId: string) => {
-    const message = chatMessages.value.find((item) => item.id === messageId)
-    if (!message) return null
-    const content = messageSummaryContent(message)
-    const summaryDir = await ensureLocalKnowledgeDir('summary')
-    if (!summaryDir) return null
-    const fileName = uniqueKnowledgeFileName('summary', knowledgeFileNameForMessage(message))
-    const kbCreateFile = knowledgeClient.kbCreateFile()
-    const kbWriteFile = knowledgeClient.kbWriteFile()
-    if (!kbCreateFile || !kbWriteFile) {
-      setTopNotice('知识库写入服务不可用')
-      return null
-    }
-    const result = await kbCreateFile('summary', fileName, content)
-    const entry = backendKnowledgeEntryOrNotice(result, malformedKnowledgeBackendResultMessage)
-    if (!entry) return null
-    const relPath = entry.relPath.trim()
-    if (!isKnowledgeRelPathInParentWithRequestedName(relPath, 'summary', fileName) || entry.type !== 'file') {
-      setTopNotice(malformedKnowledgeBackendResultMessage)
-      return null
-    }
-    const writeResult = await kbWriteFile(relPath, content)
-    if (!isKnowledgeWriteResultData(writeResult) || writeResult.relPath.trim() !== relPath) {
-      setTopNotice(malformedKnowledgeBackendResultMessage)
-      return null
-    }
-    const refreshed = await refreshKnowledgeTree()
-    if (!refreshed) return null
-    const created = findKnowledgeNode(relPath)
-    if (!created || created.type !== 'file') {
-      setTopNotice(malformedKnowledgeBackendResultMessage)
-      return null
-    }
-
-    kbSelectedKeys.value = [relPath]
-    openKnowledgeFile(relPath)
-    return { relPath, content }
-  }
-
-  const alphaSuffix = (index: number) => {
-    let value = index
-    let suffix = ''
-    do {
-      suffix = String.fromCharCode(97 + (value % 26)) + suffix
-      value = Math.floor(value / 26) - 1
-    } while (value >= 0)
-    return suffix
-  }
-
-  const skillNameForMessage = (message: ChatMessage) => {
-    const words = messagePlainText(message)
-      .toLowerCase()
-      .match(/[a-z]+/g)
-      ?.filter((word) => word.length > 2)
-      .slice(0, 3)
-    const rawBase = words?.length ? `${words.join('-')}-skill` : 'ai-message-skill'
-    let candidate = rawBase.replace(/[^a-z-]/g, '-').replace(/-+/g, '-').replace(/^-+|-+$/g, '') || 'ai-message-skill'
-    let index = 0
-    while (settingsSkills.value.some((skill) => skill.name === candidate)) {
-      candidate = `${rawBase}-${alphaSuffix(index)}`
-      index += 1
-    }
-    return candidate
-  }
-
-  const summarizeMessageToSkill = async (messageId: string) => {
-    const message = chatMessages.value.find((item) => item.id === messageId)
-    if (!message) return null
-    const name = skillNameForMessage(message)
-    const plainText = messagePlainText(message)
-    const skill = {
-      name,
-      description: `Summarized from AI message ${message.id}`,
-      content: `Use this runbook when a similar operations context appears.\n\nSource message:\n${plainText}`,
-      enabled: true,
-      editable: true
-    }
-    return createSkill(skill, { successNotice: false })
-  }
 
   const {
     readMcpServersSnapshotFromBridge,
@@ -2592,6 +1187,78 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       openKnowledgeFile,
       syncKnowledgePanelsAfterRename,
       closeKnowledgePanelsForRemoved
+    }
+  )
+
+  const {
+    sortedConversations,
+    todoProgress,
+    aiSkillContextOptions,
+    hydrateClassicChatData,
+    loadChatConversationsFromBackend,
+    syncCurrentConversationSnapshot,
+    refreshAiTodoSnapshot,
+    refreshAiContextCatalog,
+    refreshAiCommandCatalog,
+    continueAgentCommandLoop,
+    enableAgentReadOnlyAutoRunForCurrentConversation,
+    sendChat,
+    cancelStreamingAiChatResponse,
+    resendUserMessageFromParts,
+    createConversation,
+    deleteConversation,
+    selectConversation,
+    renameConversation,
+    toggleConversationFavorite,
+    restoreConversation,
+    toggleContext,
+    removeContext,
+    applyCommandPreset,
+    selectCommandPreset,
+    approveAiMcpToolCall,
+    rejectAiMcpToolCall,
+    approveAiMcpResourceAccess,
+    rejectAiMcpResourceAccess,
+    setMessageFeedback,
+    toggleMessageFavorite,
+    retryAssistantMessage,
+    retryLastAssistantMessage,
+    summarizeMessageToKnowledge,
+    summarizeMessageToSkill
+  } = createWorkspaceAiChatController(
+    {
+      mode,
+      config,
+      aiPreferences,
+      conversations,
+      selectedConversationId,
+      aiContextCatalog,
+      aiCommandOptions,
+      selectedContexts,
+      selectedCommandId,
+      selectedCommandRef,
+      todoItems,
+      chatMessages,
+      aiContextUsage,
+      mcpConfigEditorContent,
+      kbSelectedKeys,
+      settingsSkills
+    },
+    {
+      setTopNotice,
+      i18nText,
+      createRendererLocalId,
+      resolveAiKnowledgeSearchContexts: (...args) => resolveAiKnowledgeSearchContexts(...args),
+      applyMcpServersSnapshot: (...args) => applyMcpServersSnapshot(...args),
+      resolveActiveWritableTerminalPanel,
+      runActiveTerminalCommand,
+      waitForTerminalOutputAfter,
+      findKnowledgeNode: (relPath) => findKnowledgeNode(relPath),
+      backendKnowledgeEntryOrNotice: (...args) => backendKnowledgeEntryOrNotice(...args),
+      uniqueKnowledgeFileName: (...args) => uniqueKnowledgeFileName(...args),
+      refreshKnowledgeTree: () => refreshKnowledgeTree(),
+      openKnowledgeFile,
+      createSkill: (...args) => createSkill(...args)
     }
   )
 
