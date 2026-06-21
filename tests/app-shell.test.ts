@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { readFileSync } from 'fs'
+import { dirname, join } from 'path'
 
 type MockSelectionPosition = { start: { x: number; y: number }; end: { x: number; y: number } }
 type MockXtermInstance = {
@@ -298,13 +299,15 @@ const createTestDataTransfer = () => {
   }
 }
 
-const appStyles = () =>
-  [
-    'src/renderer/src/styles/base.less',
-    'src/renderer/src/styles/database.less'
-  ]
-    .map((stylePath) => readFileSync(stylePath, 'utf-8'))
-    .join('\n')
+const inlineStyleImports = (stylePath: string, seen = new Set<string>()): string => {
+  if (seen.has(stylePath)) return ''
+  seen.add(stylePath)
+  return readFileSync(stylePath, 'utf-8').replace(/@import\s+['"](\.[^'"]+)['"];\s*/g, (_match, importPath: string) =>
+    inlineStyleImports(join(dirname(stylePath), importPath), seen)
+  )
+}
+
+const appStyles = () => inlineStyleImports('src/renderer/src/styles/base.less')
 
 const findMenuButton = (wrapper: VueWrapper<any>, menuSelector: string, label: string) => {
   const button = wrapper.find(menuSelector).findAll('button').find((item) => item.text().includes(label))

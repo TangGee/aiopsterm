@@ -25,7 +25,8 @@ const largeFileThresholds = [
 ]
 const largeFileBaselines = new Map(
   Object.entries({
-    'src/renderer/src/styles/base.less': 14321,
+    'src/renderer/src/styles/base.less': 11467,
+    'src/renderer/src/styles/ai-panel.less': 2855,
     'src/renderer/src/styles/database.less': 2834,
     'src/renderer/src/stores/workspace.ts': 15723,
     'src/renderer/src/components/DatabaseWorkspace.vue': 8463,
