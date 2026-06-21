@@ -33,24 +33,10 @@ import {
   sendableAiContentParts
 } from '@/services/aiPanelInputRuntime'
 import { agentHookClient } from '@/services/agentHookClient'
-import { aliasClient } from '@/services/aliasClient'
 import { assetsClient } from '@/services/assetsClient'
 import { chatHistoryClient } from '@/services/chatHistoryClient'
 import { controlClient } from '@/services/controlClient'
 import { applyEditorSettingsToDocument } from '@/services/editorRuntime'
-import {
-  isAliasCommandDeleteData,
-  isAliasCommandListData,
-  isAliasCommandMutationData,
-  isExtensionInstallProgressData,
-  isExtensionPluginCancelData,
-  isExtensionPluginListData,
-  isExtensionPluginOperationData,
-  isExtensionSubscriptionData,
-  malformedAliasBackendResultMessage,
-  malformedExtensionBackendResultMessage
-} from '@/services/extensionBackendGuards'
-import { extensionsClient } from '@/services/extensionsClient'
 import { applyKeywordHighlight } from '@/services/keywordHighlightRuntime'
 import { localFilesClient } from '@/services/localFilesClient'
 import { managedAiClient } from '@/services/managedAiClient'
@@ -109,6 +95,12 @@ import {
   type K8sTerminalTab
 } from '@/services/kubernetesRuntime'
 import { createWorkspaceFilesController, type FilesUiMode } from '@/services/workspaceFilesController'
+import {
+  createWorkspaceExtensionsController,
+  type WorkspaceAliasCommand,
+  type WorkspaceExtensionInstallProgress,
+  type WorkspaceExtensionPlugin
+} from '@/services/workspaceExtensionsController'
 import { createWorkspaceKnowledgeController } from '@/services/workspaceKnowledgeController'
 import { createWorkspaceKubernetesController } from '@/services/workspaceKubernetesController'
 import { createWorkspaceQuickCommandsController } from '@/services/workspaceQuickCommandsController'
@@ -117,28 +109,16 @@ import {
   malformedQuickCommandsBackendResultMessage
 } from '@/services/quickCommandsBackendGuards'
 import { quickCommandsClient } from '@/services/quickCommandsClient'
-import {
-  isSettingsPreferencesMutationData,
-  isSettingsPreferencesSnapshot,
-  isSettingsRuleDeleteData,
-  malformedSettingsBackendResultMessage
-} from '@/services/settingsBackendGuards'
 import { copyTextToClipboard } from '@/services/clipboardRuntime'
 import {
-  isSkillContentResultData,
-  isSkillDeleteResultForRequest,
-  isSkillEnabledResultForRequest,
-  isSkillExportResultData,
-  isSkillImportResultData,
-  isSkillsSnapshotData,
-  isSkillWriteResultForRequest,
-  malformedSkillsBackendResultMessage,
-  snapshotContainsSkill
-} from '@/services/skillsBackendGuards'
-import { shortcutRuntime, type ShortcutActionHandler } from '@/services/shortcutRuntime'
-import { skillsClient } from '@/services/skillsClient'
+  createWorkspaceSettingsController,
+  type WorkspaceSettingsRule,
+  type WorkspaceSettingsShortcut,
+  type WorkspaceSettingsSkill,
+  type WorkspaceSkillModalState
+} from '@/services/workspaceSettingsController'
+import { type ShortcutActionHandler } from '@/services/shortcutRuntime'
 import { settingsConfigClient } from '@/services/settingsConfigClient'
-import { settingsPreferencesClient } from '@/services/settingsPreferencesClient'
 import { addSystemThemeListener, applyThemeToDocument, isThemeId, type ThemeId } from '@/services/themeRuntime'
 import { terminalClient } from '@/services/terminalClient'
 import {
@@ -271,7 +251,6 @@ import {
   isLayoutPreferencesSnapshot,
   isPrivacyRuntimeSnapshotForRequest,
   isTerminalSettingsSnapshot,
-  isValidShortcutForAction,
   isVisibleModelSettingsOption,
   isWorkspacePreferencesSnapshot,
   keywordHighlightEditorContentFromFile,
@@ -285,7 +264,6 @@ import {
   mergeUserConfig,
   modelOptionProviderForSavedProvider,
   modelSettingsSnapshotsMatch,
-  normalizeAliasCommandsConfig,
   normalizeAiPreferencesConfig,
   normalizeBackgroundConfig,
   normalizeCatalogModelProvider,
@@ -303,10 +281,7 @@ import {
   normalizeOnboardingConfig,
   normalizePrivacyConfig,
   normalizeQuickCommandsConfig,
-  normalizeRulesConfig,
   normalizeSecurityConfig,
-  normalizeShortcutsConfig,
-  normalizeSkillsConfig,
   normalizeSshAgentKeys,
   normalizeSshProxyConfigs,
   normalizeTerminalConfig,
@@ -397,14 +372,10 @@ import type {
   TerminalUserConfig,
   WorkspaceUserConfig
 } from '@shared/contracts/appRuntime'
-import type { AliasCommandConfig, AliasCommandSaveInput } from '@shared/contracts/aliases'
 import type { FileSessionCatalog, FileSessionFolderRecord, FileSessionFolderSaveInput, FileSessionInfo, FileSessionPatch, FileTransferTask } from '@shared/contracts/files'
 import type { AiopsTrustedDevice, AiopsUserAccountSnapshot, AiopsUserExternalAction, AiopsUserExternalActionResult, AiopsUserMutationResult, AiopsUserProfile } from '@shared/contracts/userAccount'
-import type { ExtensionInstallProgress as BackendExtensionInstallProgress, ExtensionInstallStage, ExtensionPluginOperation, ExtensionPluginRuntimeConfig, ExtensionUserConfig } from '@shared/contracts/extensions'
 import type { QuickCommandScriptPlan } from '@shared/contracts/quickCommands'
 import type { McpConfigFile, McpServerUserConfig, McpToolStatesUserConfig } from '@shared/contracts/mcp'
-import type { SettingsPreferencesSnapshot, ShortcutUserConfig, UserRuleConfig } from '@shared/contracts/settingsPreferences'
-import type { SkillUserConfig } from '@shared/contracts/skills'
 import type {
   KnowledgeBaseSearchResult,
   KnowledgeBaseSearchStatus,
@@ -470,7 +441,6 @@ export type {
 } from '@/services/workspaceConfigRuntime'
 
 type CloseMode = 'current' | 'others' | 'all'
-type AliasCommand = AliasCommandConfig & { edit?: boolean }
 type TopUpdateState = 'idle' | 'checking' | 'local' | 'available' | 'install-requested'
 export type AiAttentionKind = 'approval' | 'question' | 'plan' | 'error' | 'done'
 export type AiAttentionSource = AiAgentSessionSource | 'classic-chat' | 'control-notification'
@@ -524,14 +494,7 @@ type SendChatOptions = {
   skipKnowledgeSearch?: boolean
 }
 
-type ExtensionInstallProgress = {
-  pluginId: string
-  stage: ExtensionInstallStage
-  percent: number
-}
-
 type AiContextUsage = AiChatContextUsageSnapshot
-type ExtensionPlugin = ExtensionPluginRuntimeConfig
 
 export type { TerminalCommandSource, TerminalSecurityDecision, TerminalSecurityExecution, TerminalSecurityPrompt }
 
@@ -593,26 +556,6 @@ type AiPreferencePatch = Partial<Omit<AiPreferenceSettings, 'proxy'>> & {
   proxy?: Partial<AiPreferenceSettings['proxy']>
 }
 
-const cloneShortcutConfig = (shortcuts: SettingsShortcut[]): ShortcutUserConfig[] =>
-  shortcuts.map((shortcut) => ({
-    id: shortcut.id,
-    action: shortcut.action,
-    shortcut: shortcut.shortcut,
-    ...(shortcut.suffix ? { suffix: shortcut.suffix } : {})
-  }))
-
-const cloneRuleConfig = (rules: SettingsRule[]): UserRuleConfig[] =>
-  rules
-    .filter((rule) => !rule.isDraft && rule.content.trim())
-    .map((rule) => ({
-      id: rule.id,
-      content: rule.content.trim(),
-      enabled: rule.enabled !== undefined ? rule.enabled : true
-    }))
-
-type SettingsShortcut = ShortcutUserConfig
-type SettingsRule = UserRuleConfig & { isEditing?: boolean; isDraft?: boolean }
-type SettingsSkill = SkillUserConfig
 type SettingsMcpServer = McpServerUserConfig
 type McpConfigMutationResult = Awaited<ReturnType<NonNullable<AiopsPreloadApi['writeMcpConfig']>>>
 type McpOperationStatus = 'idle' | 'running' | 'success' | 'error'
@@ -623,18 +566,6 @@ type McpOperationRecord = {
   durationMs?: number
   isError?: boolean
 }
-
-const cloneSkillConfig = (skills: SettingsSkill[]): SkillUserConfig[] =>
-  skills
-    .filter((skill) => skill.name.trim() && skill.description.trim() && skill.content.trim())
-    .map((skill) => ({
-      name: skill.name.trim(),
-      description: skill.description.trim(),
-      enabled: skill.enabled !== undefined ? skill.enabled : true,
-      editable: skill.editable !== undefined ? skill.editable : true,
-      content: skill.content.trim(),
-      ...(skill.path ? { path: skill.path } : {})
-    }))
 
 const cloneMcpServerConfig = (servers: SettingsMcpServer[]): McpServerUserConfig[] =>
   servers.map((server) => ({
@@ -808,10 +739,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     quickCommand: () => triggerShortcutAction('quickCommand')
   }
 
-  const refreshShortcutRuntime = () => {
-    shortcutRuntime.update(getShortcutsSnapshot(), shortcutHandlers)
-  }
-
   const setupThemeBridge = () => {
     if (themeListenerCleanup.value) return
     themeListenerCleanup.value = addSystemThemeListener(() => {
@@ -882,16 +809,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const kbUsedBytes = ref(0)
   const kbTotalBytes = ref(1024 * 1024 * 1024)
   const extensionSearchQuery = ref('')
-  const extensionPlugins = ref<ExtensionPlugin[]>([])
+  const extensionPlugins = ref<WorkspaceExtensionPlugin[]>([])
   const selectedExtensionId = ref<string>('jumpserverSupport')
-  let extensionPluginsRefreshPromise: Promise<boolean> | null = null
   const extensionDetailTab = ref<'details' | 'features'>('details')
   const extensionNotice = ref('')
   const extensionInstallLoadingMap = ref<Record<string, boolean>>({})
   const extensionUpdateLoadingMap = ref<Record<string, boolean>>({})
-  const extensionInstallProgressMap = ref<Record<string, ExtensionInstallProgress>>({})
-  const extensionActiveOperations = ref<Record<string, ExtensionPluginOperation>>({})
-  const extensionPendingPackageRequestId = ref('')
+  const extensionInstallProgressMap = ref<Record<string, WorkspaceExtensionInstallProgress>>({})
   const extensionDragActive = ref(false)
   const extensionInstallingPackageName = ref('')
   const assetManagementOpenRequest = ref<{
@@ -900,8 +824,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     view?: AssetManagementViewRequest
     action?: AssetManagementOpenAction
   }>({ sequence: 0, action: 'none' })
-  const aliasCommands = ref<AliasCommand[]>([])
-  const aliasEditSnapshot = ref<AliasCommand | null>(null)
+  const aliasCommands = ref<WorkspaceAliasCommand[]>([])
   const aliasSearchQuery = ref('')
   const k8sContexts = ref<K8sContextInfo[]>([])
   const k8sClusters = ref<K8sCluster[]>([])
@@ -1035,7 +958,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const activeMcpServerTab = ref<Record<string, 'tools' | 'resources'>>({})
   const mcpToolArgumentDrafts = ref<Record<string, string>>({})
   const mcpOperationResults = ref<Record<string, McpOperationRecord>>({})
-  const settingsSkills = ref<SettingsSkill[]>([])
+  const settingsSkills = ref<WorkspaceSettingsSkill[]>([])
   const skillsUserPath = ref('~/.config/aiopsterm/skills')
   const skillModal = ref<{ mode: 'create' | 'edit' | null; name: string; description: string; content: string }>({
     mode: null,
@@ -1043,8 +966,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     description: '',
     content: ''
   })
-  const settingsRules = ref<SettingsRule[]>([])
-  const settingsShortcuts = ref<SettingsShortcut[]>([])
+  const settingsRules = ref<WorkspaceSettingsRule[]>([])
+  const settingsShortcuts = ref<WorkspaceSettingsShortcut[]>([])
   const shortcutRecording = ref<{ actionId: string | null; tempShortcut: string }>({ actionId: null, tempShortcut: '' })
   const trustedDevices = ref<AiopsTrustedDevice[]>([])
   const trustedDeviceModal = ref<{ open: boolean; id: number | null }>({ open: false, id: null })
@@ -1073,12 +996,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   let mcpConfigSaveTimer: number | null = null
   let removeMcpConfigFileListener: (() => void) | null = null
   let mcpConfigLoadRequest = 0
-  let extensionPackageInstallRequestSequence = 0
-  const nextExtensionPackageInstallRequestId = () => `extension-package-install-${(extensionPackageInstallRequestSequence += 1)}`
-  let removeSkillsUpdateListener: (() => void) | null = null
-  let removeExtensionInstallProgressListener: (() => void) | null = null
   let aiModelCatalogLoadPromise: Promise<AiModelCatalog> | null = null
-  let pendingSkillImportOverwritePath = ''
 
   const activePanel = computed(() => panels.value.find((panel) => panel.id === activePanelId.value) || panels.value[0])
   const isLeftVisible = computed(() => mode.value === 'terminal' && leftPanelOpen.value)
@@ -1521,39 +1439,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       return null
     }
   }
-  const visibleExtensionPlugins = computed(() =>
-    extensionPlugins.value
-      .filter((plugin) => plugin.show && (plugin.pluginId !== 'Alias' || extensionSettings.value.aliasStatus))
-      .sort((a, b) => {
-        const rank = (plugin: ExtensionPlugin) => {
-          if (!plugin.isPlugin) return 0
-          if (plugin.installed) return 1
-          if (plugin.hasUpdate) return 2
-          return 3
-        }
-        const aRank = rank(a)
-        const bRank = rank(b)
-        if (aRank !== bRank) return aRank - bRank
-        return a.name.localeCompare(b.name)
-      })
-  )
-  const filteredExtensionPlugins = computed(() => {
-    const query = extensionSearchQuery.value.trim().toLowerCase()
-    const visible = visibleExtensionPlugins.value
-    if (!query) return visible
-    return visible.filter((plugin) =>
-      [plugin.name, plugin.description, plugin.pluginId, plugin.source || '', ...(plugin.categories || [])].some((value) => value.toLowerCase().includes(query))
-    )
-  })
-  const selectedExtension = computed(() => visibleExtensionPlugins.value.find((plugin) => plugin.pluginId === selectedExtensionId.value) || null)
-  const selectedExtensionInstallProgress = computed(() =>
-    selectedExtension.value ? extensionInstallProgressMap.value[selectedExtension.value.pluginId] || null : null
-  )
-  const filteredAliasCommands = computed(() => {
-    const query = aliasSearchQuery.value.trim().toLowerCase()
-    if (!query) return aliasCommands.value
-    return aliasCommands.value.filter((item) => item.alias.toLowerCase().includes(query) || item.command.toLowerCase().includes(query))
-  })
   const k8sHasContexts = computed(() => k8sContexts.value.length > 0)
   const k8sActiveContext = computed(() => k8sContexts.value.find((context) => context.isActive) || null)
   const k8sSelectedCluster = computed(() => k8sClusters.value.find((cluster) => cluster.id === k8sSelectedClusterId.value) || null)
@@ -1698,46 +1583,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     knowledgeTree.value = cloneKnowledgeNodes(normalizedKnowledgeBase.tree)
     kbUsedBytes.value = normalizedKnowledgeBase.usedBytes
     kbTotalBytes.value = normalizedKnowledgeBase.totalBytes
-    let normalizedAliasCommands = normalizeAliasCommandsConfig().normalized
-    let aliasCommandsLoadedFromBridge = false
-    try {
-      const bridgeAliasCommands = await loadAliasCommandsFromBackend()
-      const snapshot = normalizeAliasCommandsConfig(bridgeAliasCommands)
-      normalizedAliasCommands = snapshot.normalized
-      aliasCommandsLoadedFromBridge = true
-    } catch (error) {
-      setExtensionNotice(error instanceof Error ? error.message : hasAliasListBridge() ? 'Alias 加载失败' : 'Alias 服务不可用')
-    }
-    aliasCommands.value = normalizedAliasCommands.map((alias) => ({ ...alias, edit: false }))
-    let bridgeSettingsPreferences: SettingsPreferencesSnapshot = {
-      shortcuts: normalizeShortcutsConfig(savedConfig.shortcuts).normalized,
-      rules: normalizeRulesConfig(savedConfig.rules, savedConfig.customInstructions).normalized
-    }
-    try {
-      const getSettingsPreferences = settingsPreferencesClient.getSettingsPreferences()
-      const result = await getSettingsPreferences?.()
-      if (result?.ok && isSettingsPreferencesSnapshot(result.data)) {
-        bridgeSettingsPreferences = result.data
-      } else if (result?.ok) {
-        setSettingsNotice(malformedSettingsBackendResultMessage)
-      } else if (result && !result.ok) {
-        setSettingsNotice(result.errorMessage || '设置偏好加载失败')
-      }
-    } catch {
-      setSettingsNotice('设置偏好加载失败')
-    }
-    const { normalized: normalizedShortcuts } = normalizeShortcutsConfig(bridgeSettingsPreferences.shortcuts)
-    settingsShortcuts.value = normalizedShortcuts.map((shortcut) => ({ ...shortcut }))
-    const { normalized: normalizedRules } = normalizeRulesConfig(bridgeSettingsPreferences.rules)
-    settingsRules.value = normalizedRules.map((rule) => ({ ...rule, isEditing: false }))
-    const savedSkillsSnapshot = normalizeSkillsConfig(savedConfig.skills)
-    const bridgeSkills = await readSkillsSnapshotFromBridge()
-    const {
-      normalized: normalizedSkills,
-      changed: rawSkillsChanged
-    } = normalizeSkillsConfig(bridgeSkills || savedConfig.skills)
-    const skillsChanged = bridgeSkills ? savedSkillsSnapshot.changed : rawSkillsChanged
-    settingsSkills.value = normalizedSkills.map((skill) => ({ ...skill }))
+    const { normalizedAliasCommands, aliasCommandsLoadedFromBridge } = await hydrateAliasCommands()
+    const { normalizedShortcuts, normalizedRules } = await hydrateSettingsPreferences(savedConfig)
+    const { normalizedSkills, skillsChanged } = await hydrateSkills(savedConfig.skills)
     const savedMcpSnapshot = normalizeMcpServersConfig(savedConfig.mcpServers, savedConfig.mcpToolStates)
     const bridgeMcpSnapshot = await readMcpServersSnapshotFromBridge()
     const normalizedMcpSnapshot = bridgeMcpSnapshot || savedMcpSnapshot
@@ -1868,50 +1716,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     setupThemeBridge()
   }
 
-  const getAliasCommandsSnapshot = (): AliasCommandConfig[] =>
-    aliasCommands.value
-      .filter((alias) => alias.id !== 'new' && alias.alias.trim() && alias.command.trim())
-      .map((alias) => ({
-        id: alias.id,
-        alias: alias.alias.trim(),
-        command: alias.command.trim(),
-        createdAt: alias.createdAt
-      }))
-
-  const hasAliasListBridge = () => Boolean(aliasClient.listAliasCommands())
-
-  const applyAliasCommandsFromBackend = (commands: AliasCommandConfig[]) => {
-    const { normalized } = normalizeAliasCommandsConfig(commands)
-    aliasCommands.value = normalized.map((alias) => ({ ...alias, edit: false }))
-    config.value = mergeUserConfig(config.value, { aliasCommands: normalized })
-    return normalized
-  }
-
-  const loadAliasCommandsFromBackend = async () => {
-    const listAliasCommands = aliasClient.listAliasCommands()
-    if (!listAliasCommands) throw new Error('Alias 服务不可用')
-    const result = await listAliasCommands()
-    if (!result?.ok) throw new Error(result?.errorMessage || 'Alias 加载失败')
-    if (!isAliasCommandListData(result.data)) throw new Error(malformedAliasBackendResultMessage)
-    return result.data
-  }
-
-  const refreshAliasCommands = async () => {
-    try {
-      const commands = await loadAliasCommandsFromBackend()
-      applyAliasCommandsFromBackend(commands)
-      return true
-    } catch (error) {
-      setExtensionNotice(error instanceof Error ? error.message : 'Alias 加载失败')
-      return false
-    }
-  }
-
-  const syncAliasConfigFromBackend = (commands: AliasCommandConfig[]) => {
-    applyAliasCommandsFromBackend(commands)
-  }
-
-  const getExtensionSettingsSnapshot = (): ExtensionUserConfig => ({ ...extensionSettings.value })
+  const getExtensionSettingsSnapshot = () => ({ ...extensionSettings.value })
 
   const persistExtensionSettings = async (nextSettings: ExtensionSettings) => {
     const saveConfigBridge = appRuntimeClient.saveConfig()
@@ -2271,127 +2076,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
   }
 
-  const getShortcutsSnapshot = (): ShortcutUserConfig[] => cloneShortcutConfig(settingsShortcuts.value)
-
-  const getRulesSnapshot = (): UserRuleConfig[] => cloneRuleConfig(settingsRules.value)
-
-  const applySettingsPreferencesSnapshot = (snapshot: SettingsPreferencesSnapshot) => {
-    const { normalized: normalizedShortcuts } = normalizeShortcutsConfig(snapshot.shortcuts)
-    const { normalized: normalizedRules } = normalizeRulesConfig(snapshot.rules)
-    settingsShortcuts.value = normalizedShortcuts.map((shortcut) => ({ ...shortcut }))
-    settingsRules.value = normalizedRules.map((rule) => ({ ...rule, isEditing: false }))
-    config.value = mergeUserConfig(config.value, {
-      shortcuts: normalizedShortcuts,
-      rules: normalizedRules,
-      customInstructions: ''
-    })
-    refreshShortcutRuntime()
-    return {
-      shortcuts: normalizedShortcuts,
-      rules: normalizedRules
-    }
-  }
-
-  const getSkillsSnapshot = (): SkillUserConfig[] => cloneSkillConfig(settingsSkills.value)
-
-  const applySkillsList = (skills: SkillUserConfig[]) => {
-    const { normalized } = normalizeSkillsConfig(skills)
-    settingsSkills.value = normalized.map((skill) => ({ ...skill }))
-    config.value = mergeUserConfig(config.value, { skills: normalized })
-  }
-
-  const installSkillsUpdateListener = () => {
-    const onSkillsUpdate = skillsClient.onSkillsUpdate()
-    if (removeSkillsUpdateListener || !onSkillsUpdate) return
-    removeSkillsUpdateListener = onSkillsUpdate((skills) => {
-      if (!isSkillsSnapshotData(skills)) {
-        setSettingsNotice(malformedSkillsBackendResultMessage)
-        return
-      }
-      applySkillsList(skills)
-    })
-  }
-
-  const readSkillsSnapshotFromBridge = async () => {
-    const getSkills = skillsClient.getSkills()
-    if (!getSkills) return false
-    try {
-      installSkillsUpdateListener()
-      const getSkillsUserPath = skillsClient.getSkillsUserPath()
-      const [path, skills] = await Promise.all([
-        getSkillsUserPath ? getSkillsUserPath() : Promise.resolve(skillsUserPath.value),
-        getSkills()
-      ])
-      if (typeof path !== 'string' || !isSkillsSnapshotData(skills)) {
-        setSettingsNotice(malformedSkillsBackendResultMessage)
-        return null
-      }
-      skillsUserPath.value = path
-      return skills
-    } catch {
-      setSettingsNotice('Skills 加载失败')
-      return null
-    }
-  }
-
-  const loadSkillsFromBridge = async (options: { expect?: (skills: SkillUserConfig[]) => boolean; malformedMessage?: string } = {}) => {
-    const skills = await readSkillsSnapshotFromBridge()
-    if (!skills) return false
-    if (options.expect && !options.expect(skills)) {
-      setSettingsNotice(options.malformedMessage || malformedSkillsBackendResultMessage)
-      return false
-    }
-    applySkillsList(skills)
-    return true
-  }
-
-  const refreshSkillsAfterMutation = async (expect: (skills: SkillUserConfig[]) => boolean) => {
-    return loadSkillsFromBridge({ expect, malformedMessage: malformedSkillsBackendResultMessage })
-  }
-
-  const refreshSkillsFromBridge = () => loadSkillsFromBridge()
-
-  const reloadSkills = async () => {
-    const reloadSkillsBridge = skillsClient.reloadSkills()
-    if (!reloadSkillsBridge) {
-      setSettingsNotice('Skills 重新加载服务不可用')
-      return false
-    }
-    try {
-      const skills = await reloadSkillsBridge()
-      if (!isSkillsSnapshotData(skills)) {
-        setSettingsNotice(malformedSkillsBackendResultMessage)
-        return false
-      }
-      applySkillsList(skills)
-      setSettingsNotice('Skills 已重新加载')
-      return true
-    } catch {
-      setSettingsNotice('Skills 重新加载失败')
-      return false
-    }
-  }
-
-  const openSkillsFolder = async () => {
-    const openSkillsFolderBridge = skillsClient.openSkillsFolder()
-    if (!openSkillsFolderBridge) {
-      setSettingsNotice('Skills 文件夹打开服务不可用')
-      return false
-    }
-    try {
-      const result = await openSkillsFolderBridge()
-      if (!result || typeof result.path !== 'string' || !result.path.trim()) {
-        setSettingsNotice('Skills 文件夹打开失败')
-        return false
-      }
-      setSettingsNotice('Skills 文件夹已打开')
-      return true
-    } catch {
-      setSettingsNotice('Skills 文件夹打开失败')
-      return false
-    }
-  }
-
   const getMcpSnapshot = () => {
     const servers = cloneMcpServerConfig(mcpServers.value)
     const toolStates: McpToolStatesUserConfig = {}
@@ -2554,12 +2238,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         applyMcpConfigFileContent(content, true, snapshot)
       })()
     })
-  }
-
-  const ensureSelectedExtensionVisible = () => {
-    if (visibleExtensionPlugins.value.some((plugin) => plugin.pluginId === selectedExtensionId.value)) return
-    selectedExtensionId.value = visibleExtensionPlugins.value[0]?.pluginId || ''
-    extensionDetailTab.value = 'details'
   }
 
   const persistOnboardingState = async () => {
@@ -5867,490 +5545,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
   }
 
-  const openSkillModal = async (mode: 'create' | 'edit', skillName?: string) => {
-    if (mode === 'edit') {
-      const skill = settingsSkills.value.find((item) => item.name === skillName)
-      if (!skill) return
-      if (!skill.editable) {
-        setSettingsNotice('只能编辑用户创建的 Skill')
-        return
-      }
-      const readSkillContent = skillsClient.readSkillContent()
-      if (!readSkillContent) {
-        setSettingsNotice('Skill 内容读取服务不可用')
-        return
-      }
-      try {
-        const result = await readSkillContent(skill.name)
-        if (!isSkillContentResultData(result, skill.name)) {
-          setSettingsNotice(malformedSkillsBackendResultMessage)
-          return
-        }
-        skillModal.value = {
-          mode,
-          name: skill.name,
-          description: typeof result.metadata.description === 'string' ? result.metadata.description : skill.description,
-          content: result.content || skill.content
-        }
-      } catch {
-        setSettingsNotice(`${skill.name} 读取失败`)
-      }
-      return
-    }
-    skillModal.value = { mode, name: '', description: '', content: '' }
-  }
-
-  const closeSkillModal = () => {
-    skillModal.value = { mode: null, name: '', description: '', content: '' }
-  }
-
-  const saveSkillModal = async () => {
-    const name = skillModal.value.name.trim()
-    const description = skillModal.value.description.trim()
-    const content = skillModal.value.content.trim()
-    if (!name || !description || !content) {
-      setSettingsNotice('Skill 名称、描述和内容不能为空')
-      return false
-    }
-    if (skillModal.value.mode === 'edit') {
-      const skill = settingsSkills.value.find((item) => item.name === name)
-      if (!skill) return false
-      if (!skill.editable) {
-        setSettingsNotice('只能编辑用户创建的 Skill')
-        return false
-      }
-      const updateSkill = skillsClient.updateSkill()
-      if (!updateSkill) {
-        setSettingsNotice('Skill 保存服务不可用')
-        return false
-      }
-      try {
-        const result = await updateSkill(name, { name, description }, content)
-        if (!isSkillWriteResultForRequest(result, { name, description, content })) {
-          setSettingsNotice(malformedSkillsBackendResultMessage)
-          return false
-        }
-        const refreshed = await refreshSkillsAfterMutation((skills) => snapshotContainsSkill(skills, { name, description, content }))
-        if (!refreshed) return false
-        setSettingsNotice(`${name} 已保存`)
-        closeSkillModal()
-        return true
-      } catch {
-        setSettingsNotice(`${name} 保存失败`)
-        return false
-      }
-    }
-    if (!/^[a-z-]+$/.test(name)) {
-      setSettingsNotice('Skill 名称只能包含小写字母和连字符')
-      return false
-    }
-    if (settingsSkills.value.some((item) => item.name === name)) {
-      setSettingsNotice('Skill 已存在')
-      return false
-    }
-    const createSkill = skillsClient.createSkill()
-    if (!createSkill) {
-      setSettingsNotice('Skill 创建服务不可用')
-      return false
-    }
-    try {
-      const created = await createSkill({ name, description }, content)
-      if (!isSkillWriteResultForRequest(created, { name, description, content, enabled: true })) {
-        setSettingsNotice(malformedSkillsBackendResultMessage)
-        return false
-      }
-      const refreshed = await refreshSkillsAfterMutation((skills) => snapshotContainsSkill(skills, { name, description, content }))
-      if (!refreshed) return false
-      setSettingsNotice(`${name} 已创建`)
-      closeSkillModal()
-      return true
-    } catch {
-      setSettingsNotice(`${name} 创建失败`)
-      return false
-    }
-  }
-
-  const toggleSkillEnabled = async (name: string) => {
-    const skill = settingsSkills.value.find((item) => item.name === name)
-    if (!skill) return
-    const setSkillEnabled = skillsClient.setSkillEnabled()
-    if (!setSkillEnabled) {
-      setSettingsNotice('Skill 状态服务不可用')
-      return
-    }
-    const previous = skill.enabled
-    const nextEnabled = !skill.enabled
-    try {
-      const result = await setSkillEnabled(name, nextEnabled)
-      if (!isSkillEnabledResultForRequest(result, { name, enabled: nextEnabled })) {
-        skill.enabled = previous
-        setSettingsNotice(malformedSkillsBackendResultMessage)
-        return
-      }
-      const refreshed = await refreshSkillsAfterMutation((skills) => snapshotContainsSkill(skills, { name, enabled: nextEnabled }))
-      if (!refreshed) {
-        skill.enabled = previous
-        return
-      }
-      setSettingsNotice(`${name} ${nextEnabled ? '已启用' : '已禁用'}`)
-    } catch {
-      skill.enabled = previous
-      setSettingsNotice(`${name} 状态更新失败`)
-    }
-  }
-
-  const deleteSkill = async (name: string) => {
-    const skill = settingsSkills.value.find((item) => item.name === name)
-    if (!skill) return
-    if (!skill.editable) {
-      setSettingsNotice('只能删除用户创建的 Skill')
-      return
-    }
-    const deleteSkillBridge = skillsClient.deleteSkill()
-    if (!deleteSkillBridge) {
-      setSettingsNotice('Skill 删除服务不可用')
-      return
-    }
-    try {
-      const result = await deleteSkillBridge(name)
-      if (!isSkillDeleteResultForRequest(result, name)) {
-        setSettingsNotice(malformedSkillsBackendResultMessage)
-        return
-      }
-      const refreshed = await refreshSkillsAfterMutation((skills) => !skills.some((item) => item.name === name))
-      if (!refreshed) return
-      setSettingsNotice(`${name} 已删除`)
-    } catch {
-      setSettingsNotice(`${name} 删除失败`)
-    }
-  }
-
-  const showSkillImportError = (errorCode?: string) => {
-    const errorMap: Record<string, string> = {
-      INVALID_ZIP: 'Skill ZIP 无效',
-      NO_SKILL_MD: 'ZIP 中未找到 SKILL.md',
-      INVALID_METADATA: 'SKILL.md 元数据无效',
-      EXTRACT_FAILED: 'Skill ZIP 解压失败'
-    }
-    setSettingsNotice(errorMap[errorCode || ''] || 'Skill ZIP 导入失败')
-  }
-
-  const importSkillZip = async () => {
-    const importSkillZipBridge = skillsClient.importSkillZip()
-    if (!importSkillZipBridge) {
-      setSettingsNotice('Skill ZIP 导入服务不可用')
-      return false
-    }
-    try {
-      if (pendingSkillImportOverwritePath) {
-        const overwritePath = pendingSkillImportOverwritePath
-        const overwriteResult = await importSkillZipBridge(overwritePath, true)
-        if (!isSkillImportResultData(overwriteResult)) {
-          pendingSkillImportOverwritePath = ''
-          setSettingsNotice(malformedSkillsBackendResultMessage)
-          return false
-        }
-        if (overwriteResult.success) {
-          pendingSkillImportOverwritePath = ''
-          const refreshed = await refreshSkillsAfterMutation((skills) => snapshotContainsSkill(skills, { name: overwriteResult.skillName! }))
-          if (!refreshed) return false
-          setSettingsNotice(`${overwriteResult.skillName || 'Skill'} 已覆盖导入`)
-          return true
-        }
-        if (overwriteResult.errorCode === 'DIR_EXISTS') {
-          setSettingsNotice('Skill 已存在，再次点击 Import 覆盖')
-          return false
-        }
-        pendingSkillImportOverwritePath = ''
-        showSkillImportError(overwriteResult.errorCode)
-        return false
-      }
-      const showOpenDialog = localFilesClient.showOpenDialog()
-      if (!showOpenDialog) {
-        setSettingsNotice('Skill ZIP 选择服务不可用')
-        return false
-      }
-      const result = await showOpenDialog({
-        properties: ['openFile'],
-        filters: [{ name: 'ZIP Files', extensions: ['zip'] }]
-      })
-      if (!result || result.canceled || !result.filePaths.length) return false
-      const importResult = await importSkillZipBridge(result.filePaths[0])
-      if (!isSkillImportResultData(importResult)) {
-        setSettingsNotice(malformedSkillsBackendResultMessage)
-        return false
-      }
-      if (importResult.success) {
-        const refreshed = await refreshSkillsAfterMutation((skills) => snapshotContainsSkill(skills, { name: importResult.skillName! }))
-        if (!refreshed) return false
-        setSettingsNotice(`${importResult.skillName || 'Skill'} 已导入`)
-        return true
-      }
-      if (importResult.errorCode === 'DIR_EXISTS') {
-        pendingSkillImportOverwritePath = result.filePaths[0]
-        setSettingsNotice('Skill 已存在，再次点击 Import 覆盖')
-        return false
-      }
-      showSkillImportError(importResult.errorCode)
-      return false
-    } catch {
-      pendingSkillImportOverwritePath = ''
-      setSettingsNotice('Skill ZIP 导入失败')
-      return false
-    }
-  }
-
-  const exportSkillZip = async (name: string) => {
-    const exportSkillZipBridge = skillsClient.exportSkillZip()
-    if (!exportSkillZipBridge) {
-      setSettingsNotice(`${name} ZIP 导出服务不可用`)
-      return false
-    }
-    try {
-      const result = await exportSkillZipBridge(name)
-      if (!isSkillExportResultData(result) || (result.success && result.skillName !== name)) {
-        setSettingsNotice(malformedSkillsBackendResultMessage)
-        return false
-      }
-      if (result.success) {
-        setSettingsNotice(`${name} 已导出为 ZIP`)
-        return true
-      } else if (result.error !== 'cancelled') {
-        setSettingsNotice(`${name} ZIP 导出失败`)
-      }
-      return false
-    } catch {
-      setSettingsNotice(`${name} ZIP 导出失败`)
-      return false
-    }
-  }
-
-  const addSettingsRule = () => {
-    if (settingsRules.value.some((rule) => rule.isEditing)) return
-    settingsRules.value.unshift({ id: 'rule-draft-new', content: '', enabled: true, isEditing: true, isDraft: true })
-  }
-
-  const editSettingsRule = (id: string) => {
-    settingsRules.value.forEach((rule) => {
-      rule.isEditing = rule.id === id
-    })
-  }
-
-  const updateSettingsRuleDraft = (id: string, content: string) => {
-    const rule = settingsRules.value.find((item) => item.id === id)
-    if (rule) rule.content = content
-  }
-
-  const saveSettingsRule = async (id: string) => {
-    const rule = settingsRules.value.find((item) => item.id === id)
-    if (!rule) return false
-    if (!rule.content.trim()) {
-      if (rule.isDraft) {
-        settingsRules.value = settingsRules.value.filter((item) => item.id !== id)
-        return false
-      }
-      return deleteSettingsRule(id)
-    }
-    const saveSettingsRuleBridge = settingsPreferencesClient.saveSettingsRule()
-    if (!saveSettingsRuleBridge) {
-      setSettingsNotice('规则保存服务不可用')
-      return false
-    }
-    try {
-      const result = await saveSettingsRuleBridge({
-        ...(rule.isDraft ? {} : { id }),
-        content: rule.content,
-        enabled: rule.enabled
-      })
-      if (!result?.ok || !result.data) {
-        setSettingsNotice(result?.errorMessage || '规则保存失败')
-        return false
-      }
-      if (!isSettingsPreferencesMutationData(result.data)) {
-        setSettingsNotice(malformedSettingsBackendResultMessage)
-        return false
-      }
-      applySettingsPreferencesSnapshot(result.data)
-      setSettingsNotice(result.data.message || '规则已保存')
-      return true
-    } catch {
-      setSettingsNotice('规则保存失败')
-      return false
-    }
-  }
-
-  const cancelSettingsRuleEdit = (id: string) => {
-    const rule = settingsRules.value.find((item) => item.id === id)
-    if (!rule) return
-    if (!rule.content.trim()) {
-      settingsRules.value = settingsRules.value.filter((item) => item.id !== id)
-      return
-    }
-    const savedRule = config.value.rules?.find((item) => item.id === id)
-    if (savedRule) {
-      rule.content = savedRule.content
-      rule.enabled = savedRule.enabled
-      rule.isDraft = false
-    }
-    rule.isEditing = false
-  }
-
-  const toggleSettingsRule = async (id: string) => {
-    const rule = settingsRules.value.find((item) => item.id === id)
-    if (!rule) return false
-    const nextEnabled = !rule.enabled
-    const saveSettingsRuleBridge = settingsPreferencesClient.saveSettingsRule()
-    if (!saveSettingsRuleBridge) {
-      setSettingsNotice('规则更新服务不可用')
-      return false
-    }
-    try {
-      const result = await saveSettingsRuleBridge({
-        id,
-        content: rule.content,
-        enabled: nextEnabled
-      })
-      if (!result?.ok || !result.data) {
-        setSettingsNotice(result?.errorMessage || '规则更新失败')
-        return false
-      }
-      if (!isSettingsPreferencesMutationData(result.data)) {
-        setSettingsNotice(malformedSettingsBackendResultMessage)
-        return false
-      }
-      applySettingsPreferencesSnapshot(result.data)
-      setSettingsNotice(`规则${nextEnabled ? '已启用' : '已禁用'}`)
-      return true
-    } catch {
-      setSettingsNotice('规则更新失败')
-      return false
-    }
-  }
-
-  const deleteSettingsRule = async (id: string) => {
-    const existing = settingsRules.value.find((item) => item.id === id)
-    if (!existing) return false
-    if (!existing.content.trim() && existing.isDraft) {
-      settingsRules.value = settingsRules.value.filter((item) => item.id !== id)
-      return true
-    }
-    const deleteSettingsRuleBridge = settingsPreferencesClient.deleteSettingsRule()
-    if (!deleteSettingsRuleBridge) {
-      setSettingsNotice('规则删除服务不可用')
-      return false
-    }
-    try {
-      const result = await deleteSettingsRuleBridge(id)
-      if (!result?.ok || !result.data) {
-        setSettingsNotice(result?.errorMessage || '规则删除失败')
-        return false
-      }
-      if (!isSettingsRuleDeleteData(result.data)) {
-        setSettingsNotice(malformedSettingsBackendResultMessage)
-        return false
-      }
-      applySettingsPreferencesSnapshot(result.data)
-      setSettingsNotice('规则已删除')
-      return true
-    } catch {
-      setSettingsNotice('规则删除失败')
-      return false
-    }
-  }
-
-  const startShortcutRecording = (actionId: string) => {
-    shortcutRecording.value = { actionId, tempShortcut: '' }
-    shortcutRuntime.setRecording(true)
-  }
-
-  const updateShortcutRecording = (shortcut: string) => {
-    shortcutRecording.value.tempShortcut = shortcut
-  }
-
-  const saveShortcutRecording = async () => {
-    const { actionId, tempShortcut } = shortcutRecording.value
-    const nextShortcut = tempShortcut.trim()
-    if (!actionId || !nextShortcut) return false
-    const shortcut = settingsShortcuts.value.find((item) => item.id === actionId)
-    if (!shortcut) return false
-    if (!isValidShortcutForAction(actionId, nextShortcut)) {
-      setSettingsNotice('快捷键格式无效')
-      return false
-    }
-    const conflicted = settingsShortcuts.value.some((item) => item.id !== actionId && item.shortcut === nextShortcut)
-    if (conflicted) {
-      setSettingsNotice('快捷键已被占用')
-      return false
-    }
-    const saveSettingsShortcutBridge = settingsPreferencesClient.saveSettingsShortcut()
-    if (!saveSettingsShortcutBridge) {
-      setSettingsNotice('快捷键保存服务不可用')
-      return false
-    }
-    try {
-      const result = await saveSettingsShortcutBridge({
-        id: actionId,
-        shortcut: nextShortcut
-      })
-      if (!result?.ok || !result.data) {
-        setSettingsNotice(result?.errorMessage || '快捷键保存失败')
-        return false
-      }
-      if (!isSettingsPreferencesMutationData(result.data)) {
-        setSettingsNotice(malformedSettingsBackendResultMessage)
-        return false
-      }
-      applySettingsPreferencesSnapshot(result.data)
-      shortcutRecording.value = { actionId: null, tempShortcut: '' }
-      shortcutRuntime.setRecording(false)
-      setSettingsNotice(result.data.message || '快捷键已保存')
-      return true
-    } catch {
-      setSettingsNotice('快捷键保存失败')
-      return false
-    }
-  }
-
-  const cancelShortcutRecording = () => {
-    shortcutRecording.value = { actionId: null, tempShortcut: '' }
-    shortcutRuntime.setRecording(false)
-  }
-
-  const resetAllShortcuts = async () => {
-    const resetSettingsShortcutsBridge = settingsPreferencesClient.resetSettingsShortcuts()
-    if (!resetSettingsShortcutsBridge) {
-      setSettingsNotice('快捷键重置服务不可用')
-      return false
-    }
-    try {
-      const result = await resetSettingsShortcutsBridge()
-      if (!result?.ok || !result.data) {
-        setSettingsNotice(result?.errorMessage || '快捷键重置失败')
-        return false
-      }
-      if (!isSettingsPreferencesMutationData(result.data)) {
-        setSettingsNotice(malformedSettingsBackendResultMessage)
-        return false
-      }
-      applySettingsPreferencesSnapshot(result.data)
-      shortcutRecording.value = { actionId: null, tempShortcut: '' }
-      shortcutRuntime.setRecording(false)
-      setSettingsNotice(result.data.message || '快捷键已全部重置')
-      return true
-    } catch {
-      setSettingsNotice('快捷键重置失败')
-      return false
-    }
-  }
-
-  const installShortcutRuntime = () => {
-    shortcutRuntime.install(getShortcutsSnapshot(), shortcutHandlers)
-  }
-
-  const uninstallShortcutRuntime = () => {
-    shortcutRuntime.destroy()
-  }
-
   const switchToTerminalPanelIndex = (digit: number) => {
     const index = Math.max(1, Math.min(9, Math.floor(digit))) - 1
     const terminalPanels = panels.value.filter((panel) => panel.kind !== 'knowledge')
@@ -6506,545 +5700,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
     setTopNotice(`已通过 aiopsterm:// 打开${targetModule === 'workspace' ? '工作区' : targetModule}`)
     return true
-  }
-
-  const selectExtension = (pluginId: string) => {
-    if (!visibleExtensionPlugins.value.some((plugin) => plugin.pluginId === pluginId)) return
-    selectedExtensionId.value = pluginId
-    extensionDetailTab.value = 'details'
-  }
-
-  const setExtensionNotice = (text: string) => {
-    extensionNotice.value = text
-    if (!text) return
-    window.setTimeout(() => {
-      if (extensionNotice.value === text) extensionNotice.value = ''
-    }, 2400)
-  }
-
-  const setExtensionDragActive = (active: boolean) => {
-    extensionDragActive.value = active
-  }
-
-  const setExtensionInstallLoading = (pluginId: string, loading: boolean) => {
-    const next = { ...extensionInstallLoadingMap.value }
-    if (loading) next[pluginId] = true
-    else delete next[pluginId]
-    extensionInstallLoadingMap.value = next
-  }
-
-  const setExtensionUpdateLoading = (pluginId: string, loading: boolean) => {
-    const next = { ...extensionUpdateLoadingMap.value }
-    if (loading) next[pluginId] = true
-    else delete next[pluginId]
-    extensionUpdateLoadingMap.value = next
-  }
-
-  const setExtensionInstallProgress = (pluginId: string, stage: ExtensionInstallStage, percent = 0) => {
-    const next = { ...extensionInstallProgressMap.value }
-    if (!stage || ['done', 'error', 'cancelled'].includes(stage)) {
-      if (stage) next[pluginId] = { pluginId, stage, percent: Math.max(0, Math.min(100, Math.round(percent))) }
-      else delete next[pluginId]
-    } else {
-      next[pluginId] = {
-        pluginId,
-        stage,
-        percent: Math.max(0, Math.min(100, Math.round(percent)))
-      }
-    }
-    extensionInstallProgressMap.value = next
-  }
-
-  const setExtensionActiveOperation = (pluginId: string, operation: ExtensionPluginOperation | null) => {
-    if (!pluginId) return
-    const next = { ...extensionActiveOperations.value }
-    if (operation) next[pluginId] = operation
-    else delete next[pluginId]
-    extensionActiveOperations.value = next
-  }
-
-  const clearExtensionActiveOperation = (pluginId: string) => {
-    setExtensionActiveOperation(pluginId, null)
-  }
-
-  const extensionHasActiveOperation = (pluginId: string) =>
-    Boolean(extensionInstallLoadingMap.value[pluginId] || extensionUpdateLoadingMap.value[pluginId] || extensionActiveOperations.value[pluginId])
-
-  const isExpectedExtensionProgress = (event: BackendExtensionInstallProgress) => {
-    if (event.operation === 'package') {
-      const expectedRequestId = extensionPendingPackageRequestId.value
-      if (expectedRequestId) {
-        if (event.requestId !== expectedRequestId) return false
-        setExtensionActiveOperation(event.pluginId, 'package')
-        return true
-      }
-    }
-    const expectedOperation = extensionActiveOperations.value[event.pluginId]
-    if (expectedOperation) return expectedOperation === event.operation
-    if (!extensionInstallLoadingMap.value[event.pluginId] && !extensionUpdateLoadingMap.value[event.pluginId]) return false
-    return event.operation === 'update' ? Boolean(extensionUpdateLoadingMap.value[event.pluginId]) : Boolean(extensionInstallLoadingMap.value[event.pluginId])
-  }
-
-  const handleExtensionInstallProgress = (event: BackendExtensionInstallProgress) => {
-    if (!isExtensionInstallProgressData(event)) {
-      setExtensionNotice(malformedExtensionBackendResultMessage)
-      return
-    }
-    if (!isExpectedExtensionProgress(event)) {
-      setExtensionNotice(malformedExtensionBackendResultMessage)
-      return
-    }
-    if (event.operation === 'update') {
-      setExtensionUpdateLoading(event.pluginId, !['done', 'error', 'cancelled'].includes(event.stage))
-    } else {
-      setExtensionInstallLoading(event.pluginId, !['done', 'error', 'cancelled'].includes(event.stage))
-    }
-    setExtensionInstallProgress(event.pluginId, event.stage, event.percent)
-    if (['done', 'error', 'cancelled'].includes(event.stage)) clearExtensionActiveOperation(event.pluginId)
-  }
-
-  const installExtensionInstallProgressListener = () => {
-    const onExtensionInstallProgress = extensionsClient.onExtensionInstallProgress()
-    if (removeExtensionInstallProgressListener || !onExtensionInstallProgress) return
-    removeExtensionInstallProgressListener = onExtensionInstallProgress(handleExtensionInstallProgress)
-  }
-
-  const clearExtensionInstallProgressLater = (pluginId: string) => {
-    window.setTimeout(() => {
-      const current = extensionInstallProgressMap.value[pluginId]
-      if (!current || !['done', 'error', 'cancelled'].includes(current.stage)) return
-      const next = { ...extensionInstallProgressMap.value }
-      delete next[pluginId]
-      extensionInstallProgressMap.value = next
-    }, 900)
-  }
-
-  const cloneExtensionPluginForBackend = (plugin: ExtensionPlugin): ExtensionPluginRuntimeConfig => ({
-    ...plugin,
-    categories: plugin.categories ? [...plugin.categories] : undefined,
-    functions: plugin.functions ? plugin.functions.map((item) => ({ ...item })) : undefined,
-    guideSteps: plugin.guideSteps ? [...plugin.guideSteps] : undefined,
-    connectionLog: plugin.connectionLog ? plugin.connectionLog.map((item) => ({ ...item })) : undefined,
-    packageUrl: plugin.packageUrl || undefined,
-    packageSha256: plugin.packageSha256 || undefined
-  })
-
-  const applyExtensionPluginFromBackend = (plugin: ExtensionPluginRuntimeConfig) => {
-    const nextPlugin: ExtensionPlugin = {
-      ...plugin,
-      iconKey: plugin.iconKey || 'local',
-      categories: plugin.categories ? [...plugin.categories] : undefined,
-      functions: plugin.functions ? plugin.functions.map((item) => ({ ...item })) : undefined,
-      guideSteps: plugin.guideSteps ? [...plugin.guideSteps] : undefined,
-      connectionLog: plugin.connectionLog ? plugin.connectionLog.map((item) => ({ ...item })) : undefined,
-      packageUrl: plugin.packageUrl || undefined,
-      packageSha256: plugin.packageSha256 || undefined
-    }
-    const index = extensionPlugins.value.findIndex((item) => item.pluginId === nextPlugin.pluginId)
-    if (nextPlugin.show === false && nextPlugin.source === 'local') {
-      if (index >= 0) extensionPlugins.value = extensionPlugins.value.filter((item) => item.pluginId !== nextPlugin.pluginId)
-      ensureSelectedExtensionVisible()
-      return
-    }
-    if (index >= 0) {
-      extensionPlugins.value[index] = { ...extensionPlugins.value[index], ...nextPlugin }
-    } else {
-      extensionPlugins.value.push(nextPlugin)
-    }
-  }
-
-  const refreshExtensionPlugins = async () => {
-    const listExtensionPluginsBridge = extensionsClient.listExtensionPlugins()
-    if (!listExtensionPluginsBridge) {
-      setExtensionNotice('插件列表加载服务不可用')
-      ensureSelectedExtensionVisible()
-      return false
-    }
-    if (extensionPluginsRefreshPromise) return extensionPluginsRefreshPromise
-    extensionPluginsRefreshPromise = (async () => {
-    try {
-      const result = await listExtensionPluginsBridge()
-      if (!result?.ok) {
-        setExtensionNotice(result?.errorMessage || '插件列表加载失败')
-        return false
-      }
-      if (!isExtensionPluginListData(result.data)) {
-        setExtensionNotice(malformedExtensionBackendResultMessage)
-        return false
-      }
-      extensionPlugins.value = result.data.map((plugin) => ({
-        ...plugin,
-        iconKey: plugin.iconKey || 'local',
-        categories: plugin.categories ? [...plugin.categories] : undefined,
-        functions: plugin.functions ? plugin.functions.map((item) => ({ ...item })) : undefined,
-        guideSteps: plugin.guideSteps ? [...plugin.guideSteps] : undefined,
-        connectionLog: plugin.connectionLog ? plugin.connectionLog.map((item) => ({ ...item })) : undefined,
-        packageUrl: plugin.packageUrl || undefined,
-        packageSha256: plugin.packageSha256 || undefined
-      }))
-      ensureSelectedExtensionVisible()
-      return true
-    } catch (error) {
-      setExtensionNotice(error instanceof Error ? error.message : '插件列表加载失败')
-      ensureSelectedExtensionVisible()
-      return false
-    }
-    })().finally(() => {
-      extensionPluginsRefreshPromise = null
-    })
-    return extensionPluginsRefreshPromise
-  }
-
-  const installExtensionPlugin = async (pluginId: string) => {
-    const plugin = extensionPlugins.value.find((item) => item.pluginId === pluginId)
-    if (!plugin || !plugin.isPlugin) return
-    if (plugin.installable === false) {
-      setExtensionNotice('该插件需要订阅后安装')
-      return
-    }
-    const installExtensionPluginBridge = extensionsClient.installExtensionPlugin()
-    if (!installExtensionPluginBridge) {
-      setExtensionNotice(`${plugin.name} 安装服务不可用`)
-      return
-    }
-    installExtensionInstallProgressListener()
-    setExtensionActiveOperation(pluginId, 'install')
-    setExtensionInstallLoading(pluginId, true)
-    setExtensionNotice(`正在安装 ${plugin.name}`)
-    try {
-      const result = await installExtensionPluginBridge({ plugin: cloneExtensionPluginForBackend(plugin) })
-      if (!result?.ok) {
-        const cancelled = result?.errorCode === 'EXTENSION_PLUGIN_OPERATION_CANCELLED'
-        setExtensionInstallProgress(pluginId, cancelled ? 'cancelled' : 'error', 0)
-        setExtensionNotice(cancelled ? `${plugin.name} 安装已取消` : result?.errorMessage || `${plugin.name} 安装失败`)
-        clearExtensionInstallProgressLater(pluginId)
-        return
-      }
-      if (!isExtensionPluginOperationData(result.data, 'install') || result.data.plugin.pluginId !== pluginId) {
-        setExtensionInstallProgress(pluginId, 'error', 0)
-        setExtensionNotice(malformedExtensionBackendResultMessage)
-        clearExtensionInstallProgressLater(pluginId)
-        return
-      }
-      applyExtensionPluginFromBackend(result.data.plugin)
-      setExtensionInstallProgress(pluginId, 'done', 100)
-      setExtensionNotice(`${result.data.plugin.name} 安装成功`)
-      clearExtensionInstallProgressLater(pluginId)
-    } catch (error) {
-      setExtensionInstallProgress(pluginId, 'error', 0)
-      setExtensionNotice(error instanceof Error ? error.message : `${plugin.name} 安装失败`)
-      clearExtensionInstallProgressLater(pluginId)
-    } finally {
-      setExtensionInstallLoading(pluginId, false)
-      clearExtensionActiveOperation(pluginId)
-    }
-  }
-
-  const updateExtensionPlugin = async (pluginId: string) => {
-    const plugin = extensionPlugins.value.find((item) => item.pluginId === pluginId)
-    if (!plugin || !plugin.isPlugin || !plugin.installed || !plugin.hasUpdate) return
-    const updateExtensionPluginBridge = extensionsClient.updateExtensionPlugin()
-    if (!updateExtensionPluginBridge) {
-      setExtensionNotice(`${plugin.name} 更新服务不可用`)
-      return
-    }
-    installExtensionInstallProgressListener()
-    setExtensionActiveOperation(pluginId, 'update')
-    setExtensionUpdateLoading(pluginId, true)
-    setExtensionNotice(`正在更新 ${plugin.name}`)
-    try {
-      const result = await updateExtensionPluginBridge({ plugin: cloneExtensionPluginForBackend(plugin) })
-      if (!result?.ok) {
-        const cancelled = result?.errorCode === 'EXTENSION_PLUGIN_OPERATION_CANCELLED'
-        setExtensionInstallProgress(pluginId, cancelled ? 'cancelled' : 'error', 0)
-        setExtensionNotice(cancelled ? `${plugin.name} 安装已取消` : result?.errorMessage || `${plugin.name} 更新失败`)
-        clearExtensionInstallProgressLater(pluginId)
-        return
-      }
-      if (!isExtensionPluginOperationData(result.data, 'update') || result.data.plugin.pluginId !== pluginId) {
-        setExtensionInstallProgress(pluginId, 'error', 0)
-        setExtensionNotice(malformedExtensionBackendResultMessage)
-        clearExtensionInstallProgressLater(pluginId)
-        return
-      }
-      applyExtensionPluginFromBackend(result.data.plugin)
-      setExtensionInstallProgress(pluginId, 'done', 100)
-      setExtensionNotice(`${result.data.plugin.name} 已更新`)
-      clearExtensionInstallProgressLater(pluginId)
-    } catch (error) {
-      setExtensionInstallProgress(pluginId, 'error', 0)
-      setExtensionNotice(error instanceof Error ? error.message : `${plugin.name} 更新失败`)
-      clearExtensionInstallProgressLater(pluginId)
-    } finally {
-      setExtensionUpdateLoading(pluginId, false)
-      clearExtensionActiveOperation(pluginId)
-    }
-  }
-
-  const uninstallExtensionPlugin = async (pluginId: string) => {
-    const plugin = extensionPlugins.value.find((item) => item.pluginId === pluginId)
-    if (!plugin || !plugin.isPlugin || plugin.required) return
-    const uninstallExtensionPluginBridge = extensionsClient.uninstallExtensionPlugin()
-    if (!uninstallExtensionPluginBridge) {
-      setExtensionNotice(`${plugin.name} 卸载服务不可用`)
-      return
-    }
-    try {
-      const result = await uninstallExtensionPluginBridge({ plugin: cloneExtensionPluginForBackend(plugin) })
-      if (!result?.ok) {
-        setExtensionNotice(result?.errorMessage || `${plugin.name} 卸载失败`)
-        return
-      }
-      if (!isExtensionPluginOperationData(result.data, 'uninstall') || result.data.plugin.pluginId !== pluginId) {
-        setExtensionNotice(malformedExtensionBackendResultMessage)
-        return
-      }
-      applyExtensionPluginFromBackend(result.data.plugin)
-      setExtensionNotice(`${result.data.plugin.name} 已卸载`)
-    } catch (error) {
-      setExtensionNotice(error instanceof Error ? error.message : `${plugin.name} 卸载失败`)
-    }
-  }
-
-  const subscribeExtensionPlugin = async (pluginId: string) => {
-    const plugin = extensionPlugins.value.find((item) => item.pluginId === pluginId)
-    if (!plugin || !plugin.isPlugin) return
-    const openExtensionSubscriptionBridge = extensionsClient.openExtensionSubscription()
-    if (!openExtensionSubscriptionBridge) {
-      setExtensionNotice(`${plugin.name} 订阅服务不可用`)
-      return
-    }
-    try {
-      const result = await openExtensionSubscriptionBridge({ plugin: cloneExtensionPluginForBackend(plugin) })
-      if (!result?.ok) {
-        setExtensionNotice(result?.errorMessage || `${plugin.name} 订阅入口打开失败`)
-        return
-      }
-      if (!isExtensionSubscriptionData(result.data) || result.data.pluginId !== pluginId) {
-        setExtensionNotice(malformedExtensionBackendResultMessage)
-        return
-      }
-      setExtensionNotice(`${plugin.name} 已打开订阅入口`)
-    } catch (error) {
-      setExtensionNotice(error instanceof Error ? error.message : `${plugin.name} 订阅入口打开失败`)
-    }
-  }
-
-  const cancelExtensionInstall = async (pluginId: string) => {
-    if (!extensionHasActiveOperation(pluginId)) return
-    const plugin = extensionPlugins.value.find((item) => item.pluginId === pluginId)
-    const cancelExtensionInstallBridge = extensionsClient.cancelExtensionInstall()
-    if (!cancelExtensionInstallBridge) {
-      setExtensionNotice(`${plugin?.name || '插件'} 取消服务不可用`)
-      return
-    }
-    try {
-      const result = await cancelExtensionInstallBridge(pluginId)
-      if (!result?.ok) {
-        setExtensionNotice(result?.errorMessage || `${plugin?.name || '插件'} 取消失败`)
-        return
-      }
-      if (!isExtensionPluginCancelData(result.data) || result.data.pluginId !== pluginId) {
-        setExtensionNotice(malformedExtensionBackendResultMessage)
-        return
-      }
-      setExtensionInstallLoading(pluginId, false)
-      setExtensionUpdateLoading(pluginId, false)
-      setExtensionInstallProgress(pluginId, 'cancelled', 0)
-      clearExtensionActiveOperation(pluginId)
-      setExtensionNotice(`${plugin?.name || '插件'} 安装已取消`)
-      clearExtensionInstallProgressLater(pluginId)
-    } catch (error) {
-      setExtensionNotice(error instanceof Error ? error.message : `${plugin?.name || '插件'} 取消失败`)
-    }
-  }
-
-  const dropExtensionPackage = async (file: string | { name?: string; path?: string; size?: number }) => {
-    extensionDragActive.value = false
-    const rawPath = typeof file === 'string' ? file : file?.path || ''
-    const pathLooksLocal = rawPath.includes('/') || rawPath.includes('\\')
-    const filePath = typeof file === 'string' ? (pathLooksLocal ? rawPath : '') : rawPath
-    const pathFileName = rawPath.split(/[\\/]/).pop() || ''
-    const fileName = typeof file === 'string' ? pathFileName || file : file?.name || pathFileName
-    const size = typeof file === 'string' ? undefined : file?.size
-    if (!fileName.endsWith('.external-reference')) {
-      setExtensionNotice('插件包格式错误，请拖入 .external-reference 文件')
-      return false
-    }
-    const packageName = fileName.replace(/\.external-reference$/i, '').replace(/[-_]+/g, ' ').trim() || 'Local Plugin'
-    if (!filePath) {
-      setExtensionNotice(`${packageName} 安装需要真实本地路径，请从桌面客户端拖入 .external-reference 文件`)
-      return false
-    }
-    const installExtensionPackageBridge = extensionsClient.installExtensionPackage()
-    if (!installExtensionPackageBridge) {
-      setExtensionNotice(`${packageName} 安装服务不可用`)
-      return false
-    }
-    installExtensionInstallProgressListener()
-    const requestId = nextExtensionPackageInstallRequestId()
-    extensionPendingPackageRequestId.value = requestId
-    extensionInstallingPackageName.value = packageName
-    setExtensionNotice(`正在安装 ${packageName}`)
-    let pendingPluginId = ''
-    try {
-      const result = await installExtensionPackageBridge({
-        fileName,
-        filePath,
-        size,
-        existingPluginIds: extensionPlugins.value.map((plugin) => plugin.pluginId),
-        requestId
-      })
-      if (!result?.ok) {
-        setExtensionNotice(result?.errorCode === 'EXTENSION_PLUGIN_OPERATION_CANCELLED' ? `${packageName} 安装已取消` : result?.errorMessage || `${packageName} 安装失败`)
-        return false
-      }
-      if (!isExtensionPluginOperationData(result.data, 'package')) {
-        setExtensionNotice(malformedExtensionBackendResultMessage)
-        return false
-      }
-      pendingPluginId = result.data.plugin.pluginId
-      setExtensionActiveOperation(pendingPluginId, 'package')
-      applyExtensionPluginFromBackend(result.data.plugin)
-      selectedExtensionId.value = result.data.plugin.pluginId
-      setExtensionInstallProgress(result.data.plugin.pluginId, 'done', 100)
-      setExtensionNotice(`${result.data.plugin.name} 安装成功`)
-      clearExtensionInstallProgressLater(result.data.plugin.pluginId)
-      return true
-    } catch (error) {
-      setExtensionNotice(error instanceof Error ? error.message : `${packageName} 安装失败`)
-      return false
-    } finally {
-      if (pendingPluginId) setExtensionInstallLoading(pendingPluginId, false)
-      if (pendingPluginId) clearExtensionActiveOperation(pendingPluginId)
-      if (extensionPendingPackageRequestId.value === requestId) extensionPendingPackageRequestId.value = ''
-      extensionInstallingPackageName.value = ''
-    }
-  }
-
-  const createAliasCommand = () => {
-    if (aliasCommands.value.some((item) => item.id === 'new')) return
-    aliasSearchQuery.value = ''
-    if (aliasEditSnapshot.value && aliasEditSnapshot.value.id !== 'new') {
-      aliasCommands.value = aliasCommands.value.map((item) =>
-        item.id === aliasEditSnapshot.value?.id ? { ...aliasEditSnapshot.value, edit: false } : { ...item, edit: false }
-      )
-    } else {
-      aliasCommands.value = aliasCommands.value.map((item) => ({ ...item, edit: false }))
-    }
-    aliasEditSnapshot.value = { id: 'new', alias: '', command: '', edit: true }
-    aliasCommands.value = [{ id: 'new', alias: '', command: '', edit: true }, ...aliasCommands.value]
-  }
-
-  const startAliasEdit = (id: string) => {
-    const target = aliasCommands.value.find((item) => item.id === id)
-    if (!target) return
-    if (aliasCommands.value.some((item) => item.id === 'new')) {
-      aliasCommands.value = aliasCommands.value.filter((item) => item.id !== 'new')
-    }
-    if (aliasEditSnapshot.value && aliasEditSnapshot.value.id !== 'new') {
-      aliasCommands.value = aliasCommands.value.map((item) =>
-        item.id === aliasEditSnapshot.value?.id ? { ...aliasEditSnapshot.value, edit: false } : item
-      )
-    }
-    aliasEditSnapshot.value = { ...target }
-    aliasCommands.value = aliasCommands.value.map((item) => ({ ...item, edit: item.id === id }))
-  }
-
-  const updateAliasDraft = (id: string, patch: Partial<Pick<AliasCommand, 'alias' | 'command'>>) => {
-    const target = aliasCommands.value.find((item) => item.id === id)
-    if (!target) return
-    Object.assign(target, patch)
-  }
-
-  const saveAliasCommand = async (id: string) => {
-    const target = aliasCommands.value.find((item) => item.id === id)
-    if (!target) return { ok: false, reason: 'not-found' as const }
-    const alias = target.alias.trim()
-    const command = target.command.trim()
-    if (!alias || !command) {
-      setExtensionNotice('Alias 和 Command 不能为空')
-      return { ok: false, reason: 'missing' as const }
-    }
-    const payload: AliasCommandSaveInput = {
-      id: target.id === 'new' ? undefined : target.id,
-      previousAlias: target.id === 'new' ? undefined : aliasEditSnapshot.value?.alias || target.alias,
-      alias,
-      command,
-      createdAt: target.createdAt
-    }
-    const saveAliasCommandBridge = aliasClient.saveAliasCommand()
-    if (!saveAliasCommandBridge) {
-      setExtensionNotice('Alias 保存服务不可用')
-      return { ok: false, reason: 'backend' as const }
-    }
-    try {
-      const result = await saveAliasCommandBridge(payload)
-      if (!result?.ok) {
-        if (result?.errorCode === 'ALIAS_DUPLICATE') {
-          setExtensionNotice('Alias 已存在')
-          return { ok: false, reason: 'duplicate' as const }
-        }
-        setExtensionNotice(result?.errorMessage || 'Alias 保存失败')
-        return { ok: false, reason: 'backend' as const }
-      }
-      if (!isAliasCommandMutationData(result.data)) {
-        setExtensionNotice(malformedAliasBackendResultMessage)
-        return { ok: false, reason: 'backend' as const }
-      }
-      await syncAliasConfigFromBackend(result.data.commands)
-      aliasEditSnapshot.value = null
-      setExtensionNotice('Alias 已保存')
-      return { ok: true, reason: 'saved' as const }
-    } catch (error) {
-      setExtensionNotice(error instanceof Error ? error.message : 'Alias 保存失败')
-      return { ok: false, reason: 'backend' as const }
-    }
-  }
-
-  const cancelAliasEdit = (id: string) => {
-    if (id === 'new') {
-      aliasCommands.value = aliasCommands.value.filter((item) => item.id !== 'new')
-      aliasEditSnapshot.value = null
-      return
-    }
-    const target = aliasCommands.value.find((item) => item.id === id)
-    if (target && aliasEditSnapshot.value?.id === id) {
-      target.alias = aliasEditSnapshot.value.alias
-      target.command = aliasEditSnapshot.value.command
-      target.edit = false
-    } else if (target) {
-      target.edit = false
-    }
-    aliasEditSnapshot.value = null
-  }
-
-  const deleteAliasCommand = async (id: string) => {
-    const target = aliasCommands.value.find((item) => item.id === id)
-    if (!target) return { ok: false, reason: 'not-found' as const }
-    const deleteAliasCommandBridge = aliasClient.deleteAliasCommand()
-    if (!deleteAliasCommandBridge) {
-      setExtensionNotice('Alias 删除服务不可用')
-      return { ok: false, reason: 'backend' as const }
-    }
-    try {
-      const result = await deleteAliasCommandBridge({ id: target.id, alias: target.alias })
-      if (!result?.ok) {
-        setExtensionNotice(result?.errorMessage || 'Alias 删除失败')
-        return { ok: false, reason: 'backend' as const }
-      }
-      if (!isAliasCommandDeleteData(result.data)) {
-        setExtensionNotice(malformedAliasBackendResultMessage)
-        return { ok: false, reason: 'backend' as const }
-      }
-      await syncAliasConfigFromBackend(result.data.commands)
-      if (aliasEditSnapshot.value?.id === id) aliasEditSnapshot.value = null
-      setExtensionNotice('Alias 已删除')
-      return { ok: true, reason: 'deleted' as const }
-    } catch (error) {
-      setExtensionNotice(error instanceof Error ? error.message : 'Alias 删除失败')
-      return { ok: false, reason: 'backend' as const }
-    }
   }
 
   const toggleLeft = async () => {
@@ -8481,25 +7136,54 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       enabled: true,
       editable: true
     }
-    const createSkillBridge = skillsClient.createSkill()
-    if (!createSkillBridge) {
-      setSettingsNotice('Skill 创建服务不可用')
-      return null
-    }
-    try {
-      const created = await createSkillBridge({ name: skill.name, description: skill.description }, skill.content)
-      if (!isSkillWriteResultForRequest(created, { name: skill.name, description: skill.description, content: skill.content, enabled: true })) {
-        setSettingsNotice(malformedSkillsBackendResultMessage)
-        return null
-      }
-      const refreshed = await refreshSkillsAfterMutation((skills) => snapshotContainsSkill(skills, { name: skill.name, description: skill.description, content: skill.content }))
-      if (!refreshed) return null
-      return created.skill
-    } catch {
-      setSettingsNotice(`${name} 创建失败`)
-      return null
-    }
+    return createSkill(skill, { successNotice: false })
   }
+
+  const {
+    refreshShortcutRuntime,
+    hydrateSettingsPreferences,
+    hydrateSkills,
+    loadSkillsFromBridge,
+    refreshSkillsFromBridge,
+    reloadSkills,
+    openSkillsFolder,
+    openSkillModal,
+    closeSkillModal,
+    saveSkillModal,
+    createSkill,
+    toggleSkillEnabled,
+    deleteSkill,
+    importSkillZip,
+    exportSkillZip,
+    addSettingsRule,
+    editSettingsRule,
+    updateSettingsRuleDraft,
+    saveSettingsRule,
+    cancelSettingsRuleEdit,
+    toggleSettingsRule,
+    deleteSettingsRule,
+    startShortcutRecording,
+    updateShortcutRecording,
+    saveShortcutRecording,
+    cancelShortcutRecording,
+    resetAllShortcuts,
+    installShortcutRuntime,
+    uninstallShortcutRuntime
+  } = createWorkspaceSettingsController(
+    {
+      config,
+      settingsSkills,
+      skillsUserPath,
+      skillModal,
+      settingsRules,
+      settingsShortcuts,
+      shortcutRecording
+    },
+    {
+      setSettingsNotice,
+      shortcutHandlers
+    }
+  )
 
   const {
     selectedLeftFileSession,
@@ -8636,6 +7320,48 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       closeKnowledgePanelsForRemoved
     }
   )
+
+  const {
+    filteredExtensionPlugins,
+    selectedExtension,
+    selectedExtensionInstallProgress,
+    filteredAliasCommands,
+    ensureSelectedExtensionVisible,
+    selectExtension,
+    setExtensionNotice,
+    setExtensionDragActive,
+    refreshExtensionPlugins,
+    installExtensionPlugin,
+    updateExtensionPlugin,
+    uninstallExtensionPlugin,
+    subscribeExtensionPlugin,
+    cancelExtensionInstall,
+    dropExtensionPackage,
+    getAliasCommandsSnapshot,
+    refreshAliasCommands,
+    hydrateAliasCommands,
+    createAliasCommand,
+    startAliasEdit,
+    updateAliasDraft,
+    saveAliasCommand,
+    cancelAliasEdit,
+    deleteAliasCommand
+  } = createWorkspaceExtensionsController({
+    config,
+    extensionSettings,
+    extensionSearchQuery,
+    extensionPlugins,
+    selectedExtensionId,
+    extensionDetailTab,
+    extensionNotice,
+    extensionInstallLoadingMap,
+    extensionUpdateLoadingMap,
+    extensionInstallProgressMap,
+    extensionDragActive,
+    extensionInstallingPackageName,
+    aliasCommands,
+    aliasSearchQuery
+  })
 
   return {
     mode,
