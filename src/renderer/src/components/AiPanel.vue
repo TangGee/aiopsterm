@@ -1710,7 +1710,6 @@ import {
 } from '@/services/aiPanelModelRuntime'
 import {
   aiPanelChatExportMessage as chatExportMessage,
-  aiPanelMessagePlainText as messagePlainText,
   applyCommandTextToMessage,
   canEditCommandMessage,
   commandHostForMessage,
@@ -1728,6 +1727,7 @@ import {
   setAiPanelCommandExecutionState as setCommandExecutionState,
   type AiPanelCommandSuggestionMessage as CommandSuggestionMessage
 } from '@/services/aiPanelMessageRuntime'
+import { createAiPanelMessageActionRuntime } from '@/services/aiPanelMessageActionRuntime'
 import {
   aiConversationTabTooltip,
   aiHistoryDateLabel,
@@ -2277,28 +2277,27 @@ const formatHistoryTime = (timestamp: number) => formatAiHistoryTime(timestamp, 
 const getCurrentConversationTitle = () =>
   workspace.conversations.find((conversation) => conversation.id === workspace.selectedConversationId)?.title || 'Chat Export'
 
-const copyRenderedTextToClipboard = async (text: string, label: string) => {
-  if (!text) {
-    showChatExportNotice(`${label}为空，无法复制。`)
-    return
-  }
-  const copied = await copyTextToClipboard(text)
-  showChatExportNotice(copied ? `${label}已复制。` : '复制失败。')
-}
-
 const showChatExportNotice = (message: string) => {
   aiPanelHistoryRuntime.showNotice(message)
 }
 
-const copyMessageToClipboard = async (message: { text: string; contentParts?: AiContentPart[] }) => {
-  const text = messagePlainText(message).trim()
-  if (!text) {
-    showChatExportNotice('消息为空，无法复制。')
-    return
-  }
-  const copied = await copyTextToClipboard(text)
-  showChatExportNotice(copied ? '消息已复制。' : '复制失败。')
-}
+const aiPanelMessageActionRuntime = createAiPanelMessageActionRuntime({
+  messages: () => workspace.chatMessages,
+  copyText: copyTextToClipboard,
+  notify: showChatExportNotice,
+  approveMcpToolCall: (id, options) => workspace.approveAiMcpToolCall(id, options),
+  rejectMcpToolCall: (id) => workspace.rejectAiMcpToolCall(id),
+  approveMcpResourceAccess: (id) => workspace.approveAiMcpResourceAccess(id),
+  rejectMcpResourceAccess: (id) => workspace.rejectAiMcpResourceAccess(id),
+  toggleMessageFavorite: (id) => workspace.toggleMessageFavorite(id),
+  setMessageFeedback: (id, feedback) => workspace.setMessageFeedback(id, feedback),
+  retryAssistantMessage: (id) => workspace.retryAssistantMessage(id),
+  summarizeMessageToKnowledge: (id) => workspace.summarizeMessageToKnowledge(id),
+  summarizeMessageToSkill: (id) => workspace.summarizeMessageToSkill(id)
+})
+
+const copyRenderedTextToClipboard = aiPanelMessageActionRuntime.copyRenderedTextToClipboard
+const copyMessageToClipboard = aiPanelMessageActionRuntime.copyMessageToClipboard
 
 const activeCommandAuditMessage = computed(() => {
   if (!commandAuditDialog.value.open || !commandAuditDialog.value.messageId) return null
@@ -2500,63 +2499,16 @@ const runMessageCommand = async (message: CommandSuggestionMessage, options: { a
   showChatExportNotice(loopResult.reason)
 }
 
-const formatMcpToolArguments = (message: { mcpToolCall?: { arguments?: Record<string, unknown> } }) => {
-  try {
-    return JSON.stringify(message.mcpToolCall?.arguments || {}, null, 2)
-  } catch {
-    return String(message.mcpToolCall?.arguments || '')
-  }
-}
-
-const approveMcpToolCall = async (id: string, autoApprove = false) => {
-  const result = await workspace.approveAiMcpToolCall(id, { autoApprove })
-  showChatExportNotice(result === 'approved' ? 'MCP 工具已执行。' : 'MCP 工具审批失败。')
-}
-
-const rejectMcpToolCall = async (id: string) => {
-  const result = await workspace.rejectAiMcpToolCall(id)
-  showChatExportNotice(result === 'rejected' ? 'MCP 工具调用已拒绝。' : 'MCP 工具拒绝失败。')
-}
-
-const approveMcpResourceAccess = async (id: string) => {
-  const result = await workspace.approveAiMcpResourceAccess(id)
-  showChatExportNotice(result === 'approved' ? 'MCP 资源已读取。' : 'MCP 资源审批失败。')
-}
-
-const rejectMcpResourceAccess = async (id: string) => {
-  const result = await workspace.rejectAiMcpResourceAccess(id)
-  showChatExportNotice(result === 'rejected' ? 'MCP 资源访问已拒绝。' : 'MCP 资源拒绝失败。')
-}
-
-const toggleMessageFavorite = async (id: string) => {
-  const saved = await workspace.toggleMessageFavorite(id)
-  if (!saved) return
-  const message = workspace.chatMessages.find((item) => item.id === id)
-  showChatExportNotice(message?.favorite ? '已收藏消息。' : '已取消收藏。')
-}
-
-const setMessageFeedback = async (id: string, feedback: 'up' | 'down') => {
-  const saved = await workspace.setMessageFeedback(id, feedback)
-  if (!saved) return
-  const message = workspace.chatMessages.find((item) => item.id === id)
-  const current = message?.feedback
-  showChatExportNotice(current ? (current === 'up' ? '已标记有帮助。' : '已标记无帮助。') : '已取消反馈。')
-}
-
-const retryAssistantMessage = (id: string) => {
-  const retried = workspace.retryAssistantMessage(id)
-  showChatExportNotice(retried ? '已重新发送上一条用户消息。' : '没有可重试的用户消息。')
-}
-
-const summarizeMessageToKnowledge = async (id: string) => {
-  const result = await workspace.summarizeMessageToKnowledge(id)
-  showChatExportNotice(result ? `已沉淀到知识：${result.relPath}` : '沉淀到知识失败。')
-}
-
-const summarizeMessageToSkill = async (id: string) => {
-  const result = await workspace.summarizeMessageToSkill(id)
-  showChatExportNotice(result ? `已创建技能：${result.name}` : '沉淀到技能失败。')
-}
+const formatMcpToolArguments = aiPanelMessageActionRuntime.formatMcpToolArguments
+const approveMcpToolCall = aiPanelMessageActionRuntime.approveMcpToolCall
+const rejectMcpToolCall = aiPanelMessageActionRuntime.rejectMcpToolCall
+const approveMcpResourceAccess = aiPanelMessageActionRuntime.approveMcpResourceAccess
+const rejectMcpResourceAccess = aiPanelMessageActionRuntime.rejectMcpResourceAccess
+const toggleMessageFavorite = aiPanelMessageActionRuntime.toggleMessageFavorite
+const setMessageFeedback = aiPanelMessageActionRuntime.setMessageFeedback
+const retryAssistantMessage = aiPanelMessageActionRuntime.retryAssistantMessage
+const summarizeMessageToKnowledge = aiPanelMessageActionRuntime.summarizeMessageToKnowledge
+const summarizeMessageToSkill = aiPanelMessageActionRuntime.summarizeMessageToSkill
 
 const exportCurrentChat = () => aiPanelHistoryRuntime.exportCurrentChat()
 const openHistoryMenu = () => aiPanelHistoryRuntime.openHistoryMenu()
