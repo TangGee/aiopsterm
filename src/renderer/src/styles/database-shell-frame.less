@@ -1,0 +1,143 @@
+.database-workspace {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr) var(--db-ai-pane-width, 0px) auto;
+  background: var(--workspace-bg);
+  color: var(--text);
+  overflow: hidden;
+}
+
+.database-workspace.db-ai-pane-resizing,
+.database-workspace.db-ai-pane-resizing * {
+  cursor: col-resize;
+  user-select: none;
+}
+
+.db-sidebar {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.db-sidebar.collapsed {
+  width: 42px;
+  align-items: center;
+  padding-top: 8px;
+}
+
+.db-sidebar-header {
+  height: 40px;
+  padding: 0 10px 0 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.db-sidebar-actions,
+.db-toolbar-group,
+.db-th-controls,
+.db-result-tabs,
+.db-sql-toolbar,
+.db-ddl-toolbar {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.db-sidebar-actions button,
+.db-sidebar-expand,
+.db-tree-row button,
+.db-workspace-tab,
+.db-workspace-add-tab,
+.db-tab-overflow > button,
+.db-ai-pane button,
+.db-sql-toolbar button,
+.db-result-tabs button,
+.db-toolbar button,
+.db-where-bar button,
+.db-popup-menu button,
+.db-modal-overlay button,
+.db-ai-drawer button,
+.db-th-controls button {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.db-sidebar-actions button,
+.db-sidebar-expand,
+.db-tree-row button,
+.db-workspace-add-tab,
+.db-tab-overflow > button,
+.db-ai-pane button,
+.db-sql-toolbar button,
+.db-toolbar button,
+.db-where-bar button,
+.db-th-controls button {
+  min-width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.db-sidebar-actions button:hover,
+.db-sidebar-expand:hover,
+.db-tree-row:hover,
+.db-workspace-tab:hover,
+.db-workspace-add-tab:hover,
+.db-tab-overflow > button:hover,
+.db-ai-pane button:hover:not(:disabled),
+.db-sql-toolbar button:hover:not(:disabled),
+.db-toolbar button:hover:not(:disabled),
+.db-where-bar button:hover,
+.db-th-controls button:hover {
+  background: var(--surface-3);
+}
+
+.app-shell.has-app-background .db-sidebar,
+.app-shell.has-app-background .db-sql-toolbar,
+.app-shell.has-app-background .db-toolbar,
+.app-shell.has-app-background .db-where-bar,
+.app-shell.has-app-background .db-result-tabs,
+.app-shell.has-app-background .db-status-bar,
+.app-shell.has-app-background .db-tab-menu,
+.app-shell.has-app-background .db-popup-menu,
+.app-shell.has-app-background .db-filter-popover {
+  background: var(--glass-surface);
+  backdrop-filter: blur(14px);
+}
+
+.app-shell.has-app-background .db-search,
+.app-shell.has-app-background .db-sql-toolbar select,
+.app-shell.has-app-background .db-toolbar input,
+.app-shell.has-app-background .db-toolbar select,
+.app-shell.has-app-background .db-filter-search,
+.app-shell.has-app-background .db-filter-list {
+  background: var(--readable-surface);
+}
+
+.app-shell.has-app-background .db-sidebar-actions button:hover,
+.app-shell.has-app-background .db-sidebar-expand:hover,
+.app-shell.has-app-background .db-tree-row:hover,
+.app-shell.has-app-background .db-workspace-tab:hover,
+.app-shell.has-app-background .db-workspace-add-tab:hover,
+.app-shell.has-app-background .db-tab-overflow > button:hover,
+.app-shell.has-app-background .db-ai-pane button:hover:not(:disabled),
+.app-shell.has-app-background .db-sql-toolbar button:hover:not(:disabled),
+.app-shell.has-app-background .db-toolbar button:hover:not(:disabled),
+.app-shell.has-app-background .db-where-bar button:hover,
+.app-shell.has-app-background .db-th-controls button:hover,
+.app-shell.has-app-background .db-popup-menu button:hover:not(:disabled),
+.app-shell.has-app-background .db-filter-row:hover,
+.app-shell.has-app-background .db-filter-row button:hover,
+.app-shell.has-app-background .db-filter-footer button:hover {
+  background: var(--glass-surface-3);
+}

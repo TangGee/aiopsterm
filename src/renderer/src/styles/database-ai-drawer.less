@@ -1,0 +1,249 @@
+.db-ai-drawer {
+  width: 520px;
+  min-height: 0;
+  border-left: 1px solid var(--border);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  background: var(--surface);
+}
+
+.db-ai-drawer header,
+.db-ai-drawer footer {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.db-ai-drawer footer {
+  border-top: 1px solid var(--border);
+  border-bottom: 0;
+  justify-content: flex-start;
+}
+
+.db-ai-drawer section {
+  min-height: 0;
+  overflow: auto;
+  padding: 12px;
+}
+
+.db-ai-drawer pre {
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  padding: 10px;
+  white-space: pre-wrap;
+  color: var(--text);
+  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.db-ai-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+}
+
+.db-ai-status span {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #22c55e;
+}
+
+.db-ai-status span.streaming {
+  background: var(--accent);
+  animation: pulse 1.3s ease-in-out infinite;
+}
+
+.db-ai-status span.queued {
+  background: var(--warning);
+}
+
+.db-ai-status span.cancelled {
+  background: var(--danger);
+}
+
+.db-ai-status span.error {
+  background: var(--danger);
+}
+
+.db-ai-context {
+  margin: 0 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--muted);
+  padding: 6px 8px;
+  font-size: 12px;
+}
+
+.db-ai-dialect-row {
+  margin: 0 0 10px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.db-ai-dialect-row label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.db-ai-dialect-row select {
+  height: 26px;
+  min-width: 150px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface);
+  color: var(--text);
+  padding: 0 8px;
+}
+
+.db-ai-hint {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.db-ai-section {
+  margin: 0 0 10px;
+  display: grid;
+  gap: 6px;
+}
+
+.db-ai-section header {
+  padding: 0;
+  min-height: auto;
+  border: 0;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.db-ai-empty {
+  min-height: 96px;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  background: var(--surface-2);
+  font-size: 12px;
+}
+
+.db-ai-request-list {
+  max-height: 132px;
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+  display: grid;
+  gap: 6px;
+  overflow: auto;
+  background: var(--surface-2);
+}
+
+.db-ai-request-list button {
+  min-height: 34px;
+  padding: 5px 7px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  background: var(--surface);
+  color: var(--text);
+  text-align: left;
+}
+
+.db-ai-request-list button.active {
+  border-color: color-mix(in srgb, var(--accent) 56%, var(--border));
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+}
+
+.db-ai-request-list span {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+
+.db-ai-request-list span.queued {
+  background: var(--warning);
+}
+
+.db-ai-request-list span.streaming {
+  background: var(--accent);
+  animation: pulse 1.3s ease-in-out infinite;
+}
+
+.db-ai-request-list span.done {
+  background: var(--success);
+}
+
+.db-ai-request-list span.error,
+.db-ai-request-list span.cancelled {
+  background: var(--danger);
+}
+
+.db-ai-request-list strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.db-ai-request-list small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.db-ai-sql-actions {
+  border-top: 1px solid var(--border);
+  background: var(--surface-2);
+}
+
+.db-ai-sql-actions header {
+  min-height: auto;
+  border: 0;
+  padding: 0 0 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.db-ai-sql-actions header span {
+  flex: 1 1 110px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.db-ai-sql-actions button {
+  min-height: 26px;
+  padding: 0 8px;
+}
+
+.db-ai-drawer footer button {
+  min-height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+}

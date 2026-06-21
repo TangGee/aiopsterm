@@ -1,0 +1,52 @@
+.db-ai-pane-composer {
+  padding: 10px 12px 12px;
+  border-top: 1px solid var(--border);
+  display: grid;
+  gap: 8px;
+  background: var(--surface);
+}
+
+.db-ai-pane-quick-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.db-ai-pane-quick-actions button {
+  width: auto;
+  min-height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  font-size: 11px;
+}
+
+.db-ai-pane-composer textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 68px;
+  max-height: 150px;
+  padding: 8px;
+  line-height: 1.45;
+}
+
+.db-ai-pane-composer-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.db-ai-pane-composer-actions .primary {
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, var(--border));
+  background: color-mix(in srgb, var(--accent) 16%, var(--surface));
+  color: var(--text);
+}
+
+.db-ai-pane-composer-actions button:disabled,
+.db-ai-pane-quick-actions button:disabled {
+  cursor: not-allowed;
+  color: var(--muted);
+  opacity: 0.55;
+}

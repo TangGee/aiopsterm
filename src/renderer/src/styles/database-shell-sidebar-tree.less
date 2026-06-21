@@ -1,0 +1,184 @@
+
+.db-search {
+  height: 34px;
+  margin: 6px 10px 8px;
+  padding: 0 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-2);
+}
+
+.db-search input,
+.db-sql-toolbar select,
+.db-toolbar input,
+.db-toolbar select,
+.db-where-bar input,
+.db-connection-modal input,
+.db-connection-modal select,
+.db-create-modal input,
+.db-create-modal textarea,
+.db-ddl-modal textarea,
+.db-sql-editor,
+.db-result-table input {
+  min-width: 0;
+  border: 1px solid var(--border);
+  outline: 0;
+  color: var(--text);
+  background: var(--surface-2);
+}
+
+.db-search input {
+  width: 100%;
+  border: 0;
+  background: transparent;
+}
+
+.db-search-clear {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  border-radius: 4px;
+  color: var(--muted);
+}
+
+.db-search-clear svg {
+  width: 12px;
+  height: 12px;
+}
+
+.db-search-clear:hover {
+  color: var(--text);
+}
+
+.db-tree {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 0 0 10px;
+}
+
+.db-tree ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.db-tree-children {
+  padding-left: 12px;
+}
+
+.db-tree-children.deep {
+  padding-left: 14px;
+}
+
+.db-tree-row {
+  height: 24px;
+  margin: 0 6px;
+  padding: 0 6px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.db-tree-row.selected {
+  background: color-mix(in srgb, var(--accent) 20%, var(--surface-2));
+}
+
+.db-tree-row > span:not(.db-engine-dot, .db-status-dot, .db-tree-spacer) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.db-tree-row.group svg,
+.db-tree-row.folder svg,
+.db-tree-row.database svg {
+  color: #e6b450;
+}
+
+.db-tree-row.schema svg {
+  color: #7aa2f7;
+}
+
+.db-tree-row.table svg {
+  color: #8ccf7e;
+}
+
+.db-tree-row.column svg {
+  color: #a78bfa;
+}
+
+.db-tree-row small {
+  margin-left: auto;
+  padding: 0 5px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 16px;
+}
+
+.db-tree-row button {
+  flex: 0 0 16px;
+  min-width: 16px;
+  height: 18px;
+  padding: 0;
+}
+
+.db-tree-spacer {
+  width: 16px;
+  flex: 0 0 16px;
+}
+
+.db-tree-edit {
+  width: 100%;
+  height: 20px;
+  border-radius: 4px;
+  padding: 0 6px;
+}
+
+.db-engine-dot,
+.db-status-dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.db-engine-dot {
+  width: 13px;
+  height: 13px;
+}
+
+.db-status-dot {
+  margin-left: auto;
+  background: var(--muted);
+}
+
+.db-status-dot.connected {
+  background: #22c55e;
+}
+
+.db-status-dot.testing {
+  background: #eab308;
+}
+
+.db-status-dot.failed {
+  background: #ef4444;
+}
+
+.db-tree-connect {
+  opacity: 0;
+}
+
+.db-tree-row:hover .db-tree-connect {
+  opacity: 1;
+}

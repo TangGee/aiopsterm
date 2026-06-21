@@ -1,0 +1,89 @@
+.db-ai-pane-messages {
+  min-height: 0;
+  overflow: auto;
+  padding: 12px;
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  background: var(--workspace-bg);
+}
+
+.db-ai-pane-empty {
+  min-height: 150px;
+  border: 1px dashed var(--border);
+  border-radius: 7px;
+  padding: 16px;
+  display: grid;
+  place-content: center;
+  gap: 5px;
+  text-align: center;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.db-ai-pane-empty strong {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.db-ai-pane-message {
+  max-width: 100%;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  display: grid;
+  gap: 6px;
+  background: var(--surface);
+}
+
+.db-ai-pane-message.user {
+  margin-left: 28px;
+  border-color: color-mix(in srgb, var(--accent) 38%, var(--border));
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+}
+
+.db-ai-pane-message.assistant {
+  margin-right: 18px;
+}
+
+.db-ai-pane-message.cancelled {
+  border-color: color-mix(in srgb, var(--danger) 38%, var(--border));
+}
+
+.db-ai-pane-message header {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.db-ai-pane-message header strong {
+  font-size: 12px;
+}
+
+.db-ai-pane-message header small,
+.db-ai-pane-message-status {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.db-ai-pane-message-status {
+  margin-left: auto;
+}
+
+.db-ai-pane-message-context {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.db-ai-pane-message pre {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--text);
+  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.55;
+}

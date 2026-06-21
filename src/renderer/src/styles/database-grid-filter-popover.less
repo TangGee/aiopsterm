@@ -1,0 +1,118 @@
+.db-filter-popover {
+  position: fixed;
+  z-index: 110;
+  max-height: 360px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  color: var(--text);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.db-filter-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--muted);
+}
+
+.db-filter-search input {
+  flex: 1;
+  min-width: 0;
+  height: 24px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.db-filter-list {
+  max-height: 210px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.db-filter-list.loading {
+  min-height: 64px;
+}
+
+.db-filter-row {
+  min-height: 28px;
+  padding: 0 8px;
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.db-filter-row:hover {
+  background: var(--surface-3);
+}
+
+.db-filter-row.all {
+  border: 0;
+  padding: 0 2px;
+}
+
+.db-filter-row input {
+  width: 14px;
+  height: 14px;
+}
+
+.db-filter-row span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.db-filter-row small {
+  color: var(--muted);
+}
+
+.db-filter-row button,
+.db-filter-footer button {
+  min-height: 24px;
+  padding: 0 8px;
+  border-radius: 5px;
+  font-size: 12px;
+}
+
+.db-filter-row button:hover,
+.db-filter-footer button:hover {
+  background: var(--surface-3);
+}
+
+.db-filter-empty {
+  padding: 14px;
+  color: var(--muted);
+  text-align: center;
+  font-size: 12px;
+}
+
+.db-filter-empty.loading {
+  min-height: 62px;
+  display: grid;
+  place-items: center;
+}
+
+.db-filter-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.db-filter-footer .primary {
+  color: #fff;
+  background: var(--accent);
+}

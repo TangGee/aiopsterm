@@ -1,0 +1,109 @@
+.db-main {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: 32px minmax(0, 1fr);
+}
+
+.db-workspace-tabs {
+  min-width: 0;
+  height: 32px;
+  display: flex;
+  align-items: stretch;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.db-workspace-tab-scroll {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: stretch;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+.db-workspace-tab-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.db-workspace-tab {
+  max-width: 220px;
+  min-width: 96px;
+  padding: 0 9px;
+  border-right: 1px solid var(--border);
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.db-workspace-tab.active {
+  color: var(--text);
+  background: var(--bg);
+}
+
+.db-workspace-tab > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.db-workspace-tab > button {
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.db-workspace-add-tab {
+  margin: 4px;
+}
+
+.db-tab-overflow {
+  position: relative;
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding: 4px 6px;
+  background: var(--surface);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.db-ai-pane-toggle.active {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface-2));
+}
+
+.db-ai-pane-toggle:disabled {
+  cursor: not-allowed;
+  color: var(--muted);
+  opacity: 0.55;
+}
+
+.db-tab-menu {
+  position: absolute;
+  top: 30px;
+  right: 6px;
+  z-index: 30;
+  width: 180px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.db-tab-menu button {
+  width: 100%;
+  height: 28px;
+  padding: 0 8px;
+  text-align: left;
+  border-radius: 5px;
+}

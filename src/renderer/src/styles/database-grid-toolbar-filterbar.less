@@ -1,0 +1,92 @@
+.db-toolbar {
+  flex: 0 0 32px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+}
+
+.db-toolbar input,
+.db-toolbar select {
+  height: 22px;
+  border-radius: 5px;
+  padding: 0 6px;
+}
+
+.db-toolbar input {
+  width: 44px;
+}
+
+.db-toolbar-total,
+.db-toolbar-export {
+  padding: 0 8px;
+}
+
+.db-toolbar-total {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  cursor: pointer;
+}
+
+.db-toolbar-total-unknown {
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.db-toolbar-btn-save:not(:disabled) {
+  color: var(--accent);
+}
+
+.db-where-bar {
+  flex: 0 0 32px;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--surface);
+  min-width: 0;
+}
+
+.db-where-table {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 180px;
+  min-width: 72px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.db-where-bar i {
+  width: 1px;
+  height: 16px;
+  background: var(--border);
+}
+
+.db-where-bar input {
+  flex: 1;
+  height: 22px;
+  border: 0;
+  background: transparent;
+  font-size: 12px;
+  font-style: italic;
+}
+
+.db-where-bar input.pending {
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+}
+
+.db-where-bar button.pending {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 11%, transparent);
+}

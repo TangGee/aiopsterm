@@ -1,0 +1,116 @@
+.db-create-modal,
+.db-ddl-modal,
+.db-operation-confirm,
+.db-chart-modal,
+.db-comment-modal,
+.db-danger-confirm {
+  padding: 16px;
+}
+
+.db-operation-confirm,
+.db-danger-confirm {
+  width: min(520px, calc(100vw - 40px));
+  display: grid;
+  gap: 12px;
+}
+
+.db-operation-confirm p,
+.db-danger-confirm p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.db-operation-confirm code,
+.db-danger-confirm code {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--danger);
+  padding: 8px;
+  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  white-space: pre-wrap;
+}
+
+.db-danger-confirm label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.db-danger-confirm input {
+  height: 30px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--text);
+  padding: 0 8px;
+}
+
+.db-operation-confirm footer,
+.db-danger-confirm footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.db-operation-confirm footer button,
+.db-danger-confirm footer button {
+  min-height: 30px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--text);
+  padding: 0 12px;
+}
+
+.db-operation-confirm .danger,
+.db-danger-confirm .danger {
+  border-color: color-mix(in srgb, var(--danger) 55%, var(--border));
+  color: var(--danger);
+}
+
+.db-operation-confirm .danger:disabled,
+.db-danger-confirm .danger:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.db-create-modal label {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.db-create-modal label input {
+  flex: 1;
+}
+
+.db-create-modal textarea,
+.db-ddl-modal textarea {
+  width: 100%;
+  min-height: 220px;
+  margin: 8px 0 12px;
+  border-radius: 6px;
+  padding: 10px;
+  resize: vertical;
+  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  line-height: 1.55;
+}
+
+.db-ddl-modal textarea {
+  min-height: 420px;
+}
+
+.db-ddl-error {
+  min-height: 220px;
+  margin: 8px 0 12px;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--danger) 45%, var(--border));
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--surface) 88%, var(--danger));
+  color: var(--danger);
+  font-size: 12px;
+  line-height: 1.5;
+}

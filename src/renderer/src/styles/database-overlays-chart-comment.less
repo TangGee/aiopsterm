@@ -1,0 +1,159 @@
+.db-chart-modal,
+.db-comment-modal {
+  display: grid;
+  gap: 14px;
+}
+
+.db-chart-modal {
+  width: min(820px, calc(100vw - 40px));
+}
+
+.db-comment-modal {
+  width: min(640px, calc(100vw - 40px));
+}
+
+.db-chart-modal header h2,
+.db-comment-modal header h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.db-chart-modal header span,
+.db-comment-modal header span {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.db-chart-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.db-chart-metrics span {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  padding: 8px 10px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.db-chart-metrics strong {
+  display: block;
+  overflow: hidden;
+  color: var(--text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.db-chart-bars {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.db-chart-bar-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 190px) minmax(160px, 1fr) 84px;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+}
+
+.db-chart-bar-row > span {
+  overflow: hidden;
+  color: var(--text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.db-chart-track {
+  height: 18px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface-2);
+}
+
+.db-chart-track i {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: linear-gradient(90deg, #1677ff, #10b981);
+}
+
+.db-chart-bar-row strong {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.db-chart-footnote,
+.db-chart-empty,
+.db-comment-error {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.db-chart-empty,
+.db-comment-error {
+  color: var(--danger);
+}
+
+.db-comment-modal textarea {
+  width: 100%;
+  min-height: 220px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--text);
+  padding: 10px;
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.db-comment-modal footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.db-comment-modal footer span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.db-comment-modal footer div {
+  display: flex;
+  gap: 8px;
+}
+
+.db-chart-modal button,
+.db-comment-modal button {
+  min-height: 30px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--text);
+  padding: 0 12px;
+}
+
+.db-comment-modal footer button:last-child {
+  border-color: #1677ff;
+  background: #1677ff;
+  color: #fff;
+}
+
+.db-comment-modal button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.db-ddl-toolbar {
+  justify-content: flex-end;
+}
