@@ -1,0 +1,121 @@
+
+.about-settings-page {
+  justify-items: center;
+}
+
+.about-card {
+  width: min(400px, 100%);
+  text-align: center;
+}
+
+.about-card p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.about-logo-self {
+  width: 62px;
+  height: 62px;
+  border-radius: 14px;
+  background: #1677ff;
+  color: #fff;
+  display: grid;
+  place-items: center;
+  margin: 0 auto 10px;
+  font-weight: 800;
+  font-size: 26px;
+}
+
+.about-download-progress {
+  width: min(260px, 100%);
+  margin: 22px auto 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.about-progress-track {
+  height: 10px;
+  border-radius: 2px;
+  overflow: hidden;
+  background: var(--surface-3);
+  border: 1px solid var(--border);
+}
+
+.about-progress-track span {
+  display: block;
+  height: 100%;
+  background: #1677ff;
+  transition: width 0.16s ease;
+}
+
+.about-copyright {
+  display: block;
+  margin-top: 26px;
+  color: var(--muted);
+}
+
+.diagnostics-card {
+  width: min(600px, 100%);
+}
+
+.diagnostics-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.diagnostics-icon {
+  width: 17px;
+  height: 17px;
+  color: var(--accent);
+  flex: 0 0 17px;
+}
+
+.settings-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  background: rgb(0 0 0 / 0.45);
+}
+
+.settings-modal-card {
+  width: 600px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 64px);
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  padding: 14px;
+  display: grid;
+  gap: 12px;
+}
+
+.settings-modal-card.small {
+  width: 360px;
+}
+
+.settings-modal-card header,
+.settings-modal-card footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.settings-modal-card header button {
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.settings-modal-card label {
+  display: grid;
+  gap: 6px;
+}

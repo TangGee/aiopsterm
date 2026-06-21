@@ -1,0 +1,109 @@
+
+.skill-main,
+.trusted-device-info {
+  min-width: 0;
+}
+
+.skill-main strong,
+.skill-main small,
+.trusted-device-info strong,
+.trusted-device-info small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rule-edit textarea,
+.settings-modal-card textarea {
+  width: 100%;
+  min-height: 72px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-2);
+  color: var(--text);
+  padding: 8px;
+  outline: 0;
+}
+
+.rule-content {
+  flex: 1;
+  line-height: 1.5;
+}
+
+.shortcuts-table {
+  display: grid;
+  gap: 0;
+}
+
+.shortcuts-header,
+.shortcuts-row {
+  display: grid;
+  grid-template-columns: minmax(220px, 320px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: center;
+  min-height: 42px;
+  border-bottom: 1px solid var(--border);
+}
+
+.shortcuts-header {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.shortcut-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.shortcut-display {
+  min-height: 30px;
+  min-width: 120px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  padding: 3px 6px;
+}
+
+.shortcut-display.recording {
+  border-color: #1677ff;
+  color: #1677ff;
+}
+
+.shortcut-display.is-empty {
+  color: var(--muted);
+}
+
+kbd {
+  min-width: 24px;
+  min-height: 22px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface-3);
+  color: var(--text);
+  padding: 0 6px;
+  font-family: inherit;
+  font-size: 12px;
+}
+
+.key-chip-range {
+  color: var(--accent);
+}
+
+.shortcuts-footer {
+  margin-top: 14px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.trusted-count {
+  text-align: right;
+  color: var(--muted);
+}
