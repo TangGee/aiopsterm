@@ -298,7 +298,13 @@ const createTestDataTransfer = () => {
   }
 }
 
-const baseStyles = () => readFileSync('src/renderer/src/styles/base.less', 'utf-8')
+const appStyles = () =>
+  [
+    'src/renderer/src/styles/base.less',
+    'src/renderer/src/styles/database.less'
+  ]
+    .map((stylePath) => readFileSync(stylePath, 'utf-8'))
+    .join('\n')
 
 const findMenuButton = (wrapper: VueWrapper<any>, menuSelector: string, label: string) => {
   const button = wrapper.find(menuSelector).findAll('button').find((item) => item.text().includes(label))
@@ -1060,7 +1066,7 @@ describe('AppShell', () => {
     expect(shell.attributes('style')).toContain('--app-bg-image: url(\"file:///tmp/aiopsterm/backgrounds/settings-bg.png\")')
     expect(shell.attributes('style')).toContain('--app-bg-opacity: 0.4')
     expect(shell.attributes('style')).toContain('--app-bg-brightness: 0.7')
-    const styles = baseStyles()
+    const styles = appStyles()
     expect(styles).toContain('--workspace-bg: color-mix(in srgb, var(--bg) 6%, transparent);')
     expect(styles).toContain('--glass-surface: color-mix(in srgb, var(--surface) 36%, transparent);')
     expect(styles).toContain('--readable-surface: color-mix(in srgb, var(--surface-2) 82%, transparent);')
@@ -1085,7 +1091,7 @@ describe('AppShell', () => {
   })
 
   it('keeps the general settings background picker from forcing horizontal scrolling', () => {
-    const styles = baseStyles()
+    const styles = appStyles()
     expect(styles).toContain('.settings-content-scroll {\n  min-width: 0;\n  min-height: 0;\n  overflow-x: hidden;\n  overflow-y: auto;\n}')
     expect(styles).toContain('grid-template-columns: repeat(auto-fit, minmax(150px, 180px));')
     expect(styles).toContain('.settings-bg-tile {\n  width: 100%;\n  min-width: 0;\n  max-width: 180px;')
@@ -2036,7 +2042,7 @@ describe('AppShell', () => {
     const leftResizer = () => wrapper.find('[data-layout-resizer="terminal-left"]')
     const rightResizer = () => wrapper.find('[data-layout-resizer="terminal-right"]')
     const agentsResizer = () => wrapper.find('[data-layout-resizer="agents-left"]')
-    const styles = baseStyles()
+    const styles = appStyles()
     expect(styles).toContain('.layout-pane-right > .layout-resizer-right')
     expect(styles).toContain('left: -10px;')
     expect(styles).toContain('width: 14px;')
@@ -5137,7 +5143,7 @@ describe('AppShell', () => {
     expect(wrapper.find('[data-testid="ai-conversation-tab"][data-conversation-id="history-1"]').attributes('aria-selected')).toBe('true')
     expect(wrapper.find('[data-testid="ai-conversation-tab"][data-conversation-id="history-2"]').exists()).toBe(false)
 
-    const styles = baseStyles()
+    const styles = appStyles()
     expect(styles).toContain('.ai-header {\n  justify-content: flex-start;\n  gap: 4px;\n  min-width: 0;\n}')
     expect(styles).toContain('.ai-header-actions {\n  gap: 4px;\n  width: auto;')
     expect(styles).toContain('.ai-panel-mode-menu {\n  position: relative;\n  flex: 0 0 112px;')
@@ -5282,8 +5288,8 @@ describe('AppShell', () => {
     await new Promise((resolve) => window.setTimeout(resolve, 210))
     await wrapper.vm.$nextTick()
     expect(wrapper.find('[data-testid="ai-chat-search-count"]').text()).toBe('无匹配')
-    expect(baseStyles()).toContain('.input-controls-row {\n  display: flex;\n  flex-wrap: nowrap;')
-    expect(baseStyles()).toContain('.input-action-buttons-container button {\n  flex: 0 0 24px;')
+    expect(appStyles()).toContain('.input-controls-row {\n  display: flex;\n  flex-wrap: nowrap;')
+    expect(appStyles()).toContain('.input-action-buttons-container button {\n  flex: 0 0 24px;')
     await wrapper.find('[data-testid="ai-chat-search-input"]').trigger('keydown', { key: 'Escape' })
     expect(wrapper.find('.ai-chat-search-bar').exists()).toBe(false)
     expect(wrapper.find('.ai-chat-search-highlight').exists()).toBe(false)
@@ -5493,13 +5499,13 @@ describe('AppShell', () => {
     expect(commandMessage!.find('[data-testid="ai-message-command-auto-run"]').exists()).toBe(false)
     expect(commandMessage!.find('[data-testid="ai-message-command-review-large"]').exists()).toBe(false)
     expect(commandMessage!.find('[data-testid="ai-message-command-review"]').attributes('title')).toContain('审计并编辑命令')
-    expect(baseStyles()).toContain('.message-command-actions {\n  display: flex;')
-    expect(baseStyles()).toContain('flex-wrap: wrap;')
-    expect(baseStyles()).toContain('.message-command-actions button span {\n  min-width: 0;')
-    expect(baseStyles()).toContain('text-overflow: ellipsis;')
-    expect(baseStyles()).toContain('.ai-command-audit-dialog {\n  width: min(1120px, calc(100vw - 36px));')
-    expect(baseStyles()).toContain('grid-template-rows: auto auto minmax(0, 1fr) auto;')
-    expect(baseStyles()).toContain('.ai-command-audit-dialog textarea {\n  width: 100%;\n  min-height: 0;\n  height: 100%;')
+    expect(appStyles()).toContain('.message-command-actions {\n  display: flex;')
+    expect(appStyles()).toContain('flex-wrap: wrap;')
+    expect(appStyles()).toContain('.message-command-actions button span {\n  min-width: 0;')
+    expect(appStyles()).toContain('text-overflow: ellipsis;')
+    expect(appStyles()).toContain('.ai-command-audit-dialog {\n  width: min(1120px, calc(100vw - 36px));')
+    expect(appStyles()).toContain('grid-template-rows: auto auto minmax(0, 1fr) auto;')
+    expect(appStyles()).toContain('.ai-command-audit-dialog textarea {\n  width: 100%;\n  min-height: 0;\n  height: 100%;')
     await commandMessage!.find('[data-testid="ai-message-command-copy"]').trigger('click')
     expect(navigator.clipboard.writeText).toHaveBeenLastCalledWith('uptime')
     expect(wrapper.find('[data-testid="ai-chat-export-notice"]').text()).toContain('命令已复制')
@@ -6716,7 +6722,7 @@ describe('AppShell', () => {
     expect(wrapper.find('[data-onboarding-id="ai-mode-select"]').attributes('style')).toBeUndefined()
     expect(wrapper.find('.chat-input > .chat-editable + .input-controls-row').exists()).toBe(true)
     expect(wrapper.find('.input-action-buttons-container button[type="submit"]').exists()).toBe(true)
-    const styles = baseStyles()
+    const styles = appStyles()
     expect(styles).toContain('.input-controls-row {\n  display: flex;\n  flex-wrap: nowrap;')
     expect(styles).toContain('.input-controls-row > .ai-control-menu-wrap:first-child {\n  flex-basis: 70px;\n  max-width: 70px;')
     expect(styles).toContain('.model-control-wrap {\n  flex: 1 1 84px;')
@@ -9388,7 +9394,7 @@ describe('AppShell', () => {
     store.activePanel.sessionId = undefined
 
     const firstHost = wrapper.find('.xterm-host')
-    const styles = baseStyles()
+    const styles = appStyles()
     expect(styles).toContain('.xterm-host {\n  min-height: 0;\n  min-width: 0;\n  overflow: hidden;\n  display: grid;\n  box-sizing: border-box;\n}')
     expect(styles).toContain('padding: 10px 10px 16px;')
     Object.defineProperty(firstHost.element, 'clientHeight', { configurable: true, value: 360 })
