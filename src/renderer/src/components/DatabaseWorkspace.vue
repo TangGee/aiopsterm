@@ -44,757 +44,125 @@
       @select-column-node="selectColumnNode"
     />
 
-    <main class="db-main">
-      <div class="db-workspace-tabs">
-        <div class="db-workspace-tab-scroll">
-          <button
-            v-for="tab in tabs"
-            :key="tab.id"
-            :ref="(el) => registerWorkspaceTabRef(tab.id, el)"
-            class="db-workspace-tab"
-            :class="{ active: activeTabId === tab.id }"
-            type="button"
-            @click="activeTabId = tab.id"
-          >
-            <LayoutDashboard v-if="tab.kind === 'overview'" />
-            <Table2 v-else-if="tab.kind === 'data'" />
-            <SquareTerminal v-else />
-            <span>{{ tab.title }}</span>
-            <button
-              v-if="tab.kind !== 'overview'"
-              type="button"
-              title="Close"
-              @click.stop="closeTab(tab.id)"
-            >
-              <X />
-            </button>
-          </button>
-          <button
-            class="db-workspace-add-tab"
-            type="button"
-            title="New SQL"
-            @click="openSqlConsole()"
-          >
-            <Plus />
-          </button>
-        </div>
-        <div class="db-tab-overflow">
-          <button
-            type="button"
-            class="db-ai-pane-toggle"
-            :class="{ active: dbAiPaneOpen }"
-            title="Toggle DB AI Pane"
-            :disabled="!canToggleDbAiPane"
-            @click="toggleDbAiPane"
-          >
-            <BrainCircuit />
-          </button>
-          <button
-            type="button"
-            title="Tabs"
-            @click="overflowOpen = !overflowOpen"
-          >
-            <MoreHorizontal />
-          </button>
-          <div
-            v-if="overflowOpen"
-            class="db-tab-menu"
-          >
-            <button
-              v-for="tab in tabs"
-              :key="tab.id"
-              type="button"
-              @click="selectOverflowTab(tab.id)"
-            >
-              {{ tab.title }}
-            </button>
-          </div>
-        </div>
-      </div>
+    <DatabaseMainWorkspace
+      ref="sqlEditorRef"
+      v-model:active-tab-id="activeTabId"
+      v-model:overflow-open="overflowOpen"
+      v-model:sql-find-query="sqlFindQuery"
+      v-model:sql-find-replace="sqlFindReplace"
+      v-model:sql-find-case-sensitive="sqlFindCaseSensitive"
+      :tabs="tabs"
+      :active-tab="activeTab"
+      :db-ai-pane-open="dbAiPaneOpen"
+      :can-toggle-db-ai-pane="canToggleDbAiPane"
+      :database-engines="databaseEngines"
+      :active-sql-tab="activeSqlTab"
+      :active-sql-can-run="activeSqlCanRun"
+      :active-sql-saving="activeSqlSaving"
+      :active-sql-save-title="activeSqlSaveTitle"
+      :active-sql-has-text="activeSqlHasText"
+      :connections="connections"
+      :current-sql-catalogs="currentSqlCatalogs"
+      :current-sql-schemas="currentSqlSchemas"
+      :active-sql-requires-schema="activeSqlRequiresSchema"
+      :sql-pane-resizing="sqlPaneResizing"
+      :sql-pane-style="sqlPaneStyle"
+      :sql-editor-scroll-top="sqlEditorScrollTop"
+      :active-sql-editor-lines="activeSqlEditorLines"
+      :sql-editor-active-line="sqlEditorActiveLine"
+      :sql-editor-active-line-top="sqlEditorActiveLineTop"
+      :sql-find-open="sqlFindOpen"
+      :sql-find-summary="sqlFindSummary"
+      :sql-find-matches="sqlFindMatches"
+      :sql-find-replace-open="sqlFindReplaceOpen"
+      :active-sql-is-dirty="activeSqlIsDirty"
+      :active-sql-save-state-text="activeSqlSaveStateText"
+      :active-sql-editor-line-count="activeSqlEditorLineCount"
+      :sql-editor-active-column="sqlEditorActiveColumn"
+      :sql-editor-selection-size="sqlEditorSelectionSize"
+      :sql-pane-min-percent="SQL_PANE_MIN_PERCENT"
+      :sql-pane-max-percent="SQL_PANE_MAX_PERCENT"
+      :sql-pane-editor-percent="sqlPaneEditorPercent"
+      :active-sql-result="activeSqlResult"
+      :active-sql-result-view-state="activeSqlResultViewState"
+      :filtered-sql-rows="filteredSqlRows"
+      :paged-sql-rows="pagedSqlRows"
+      :sql-diagnose="sqlDiagnose"
+      :active-data-tab="activeDataTab"
+      :active-data-edit-summary="activeDataEditSummary"
+      :active-data-where-pending="activeDataWherePending"
+      :paged-data-rows="pagedDataRows"
+      :can-edit-data-tab="canEditDataTab"
+      :is-data-tab-dirty="isDataTabDirty"
+      :data-edit-disabled-reason="dataEditDisabledReason"
+      :is-sql-history-closed="isSqlHistoryClosed"
+      @close-tab="closeTab"
+      @open-sql-console="openSqlConsole"
+      @toggle-db-ai-pane="toggleDbAiPane"
+      @toggle-add-menu="toggleAddMenu"
+      @focus-database-search="focusDatabaseSearch"
+      @open-overview-engine="openOverviewEngine"
+      @run-sql="runSql"
+      @save-active-sql="saveActiveSql"
+      @format-sql="formatSql"
+      @open-db-ai-from-toolbar="openDbAiFromToolbar"
+      @update-sql-tab-connection="updateSqlTabConnection"
+      @update-sql-tab-catalog="updateSqlTabCatalog"
+      @update-sql-tab-schema="updateSqlTabSchema"
+      @update-active-sql="updateActiveSql"
+      @sync-sql-editor-state="syncSqlEditorState"
+      @run-sql-from-shortcut="runSqlFromShortcut"
+      @open-sql-find="openSqlFind"
+      @handle-sql-find-keydown="handleSqlFindKeydown"
+      @go-to-sql-find-match="goToSqlFindMatch"
+      @toggle-sql-find-replace="toggleSqlFindReplace"
+      @close-sql-find="closeSqlFind"
+      @replace-current-sql-find-match="replaceCurrentSqlFindMatch"
+      @replace-all-sql-find-matches="replaceAllSqlFindMatches"
+      @start-sql-pane-resize="startSqlPaneResize"
+      @reset-sql-pane-split="resetSqlPaneSplit"
+      @update-sql-result-active-tab="updateSqlResultActiveTab"
+      @close-result-tab="closeResultTab"
+      @open-sql-history-result="openSqlHistoryResult"
+      @diagnose-sql-error="diagnoseSqlError"
+      @update-sql-result-page="updateSqlResultPage"
+      @goto-last-sql-result-page="gotoLastSqlResultPage"
+      @update-sql-result-page-size="updateSqlResultPageSize"
+      @export-active-sql-result-page="exportActiveSqlResultPage"
+      @open-active-sql-result-chart="openActiveSqlResultChart"
+      @open-active-sql-result-comment="openActiveSqlResultComment"
+      @cycle-sql-sort="cycleSqlSort"
+      @apply-sql-filter="applySqlFilter"
+      @update-data-page="updateDataPage"
+      @goto-last-data-page="gotoLastDataPage"
+      @update-data-page-size="updateDataPageSize"
+      @refresh-data-total="refreshDataTotal"
+      @refresh-data-tab="refreshDataTab"
+      @add-data-row="addDataRow"
+      @delete-selected-data-row="deleteSelectedDataRow"
+      @undo-data-changes="undoDataChanges"
+      @save-data-changes="saveDataChanges"
+      @export-active-data-page="exportActiveDataPage"
+      @open-active-data-chart="openActiveDataChart"
+      @open-active-data-comment="openActiveDataComment"
+      @update-active-data-where-draft="updateActiveDataWhereDraft"
+      @apply-where="applyWhere"
+      @copy-data-mutation-preview="copyDataMutationPreview"
+      @discard-data-changes="discardDataChanges"
+      @cycle-data-sort="cycleDataSort"
+      @apply-data-filter="applyDataFilter"
+      @set-active-data-selected-row="setActiveDataSelectedRow"
+      @update-data-cell="updateDataCell"
+      @update-new-data-row-cell="updateNewDataRowCell"
+    />
 
-      <section
-        v-if="activeTab?.kind === 'overview'"
-        class="db-overview"
-      >
-        <div class="db-overview-hero">
-          <div class="db-overview-header">
-            <span class="db-overview-eyebrow">Overview</span>
-            <h2>Overview</h2>
-            <p>Manage connections, browse schema trees, open table data, and run SQL consoles from the Database workspace.</p>
-          </div>
-          <div class="db-overview-tips">
-            <button
-              type="button"
-              @click="toggleAddMenu"
-            >
-              <strong>+</strong>
-              <span>Create connection</span>
-            </button>
-            <button
-              type="button"
-              @click="focusDatabaseSearch"
-            >
-              <strong>/</strong>
-              <span>Explore schemas</span>
-            </button>
-            <button
-              type="button"
-              @click="openSqlConsole()"
-            >
-              <strong>SQL</strong>
-              <span>Query console</span>
-            </button>
-          </div>
-        </div>
-        <div class="db-overview-panel">
-          <header>
-            <div>
-              <strong>New Connection</strong>
-              <p>Choose a database engine to start a connection profile.</p>
-            </div>
-            <em title="Database engines">{{ databaseEngines.length }}</em>
-          </header>
-          <div class="db-engine-grid">
-            <button
-              v-for="engine in databaseEngines"
-              :key="`${engine.name}-${engine.code}`"
-              type="button"
-              :title="`New ${engine.name} connection`"
-              @click="openOverviewEngine(engine)"
-            >
-              <span
-                class="db-engine-dot"
-                :style="{ background: engine.accent }"
-              />
-              <span class="db-engine-name">{{ engine.name }}</span>
-            </button>
-          </div>
-        </div>
-      </section>
-
-      <section
-        v-else-if="activeTab?.kind === 'sql'"
-        class="db-sql-workspace"
-      >
-        <div class="db-sql-toolbar">
-          <button
-            type="button"
-            class="db-sql-toolbar-btn db-sql-toolbar-run"
-            title="Run all"
-            :disabled="!activeSqlCanRun"
-            @click="runSql('all')"
-          >
-            <Play />
-          </button>
-          <button
-            type="button"
-            class="db-sql-toolbar-btn db-sql-toolbar-run-current"
-            title="Run current statement"
-            :disabled="!activeSqlCanRun"
-            @click="runSql('current')"
-          >
-            <CornerDownRight />
-          </button>
-          <button
-            type="button"
-            class="db-sql-toolbar-btn db-sql-toolbar-explain"
-            title="Explain"
-            :disabled="!activeSqlCanRun"
-            @click="runSql('explain')"
-          >
-            <Lightbulb />
-          </button>
-          <span class="db-toolbar-divider" />
-          <button
-            type="button"
-            class="db-sql-toolbar-btn db-sql-toolbar-save"
-            :disabled="!activeSqlTab || activeSqlSaving"
-            :title="activeSqlSaveTitle"
-            @click="saveActiveSql(false)"
-          >
-            <Save />
-          </button>
-          <button
-            type="button"
-            class="db-sql-toolbar-btn db-sql-toolbar-save-as"
-            :disabled="!activeSqlTab || activeSqlSaving"
-            title="Save As"
-            @click="saveActiveSql(true)"
-          >
-            <SaveAll />
-          </button>
-          <button
-            type="button"
-            class="db-sql-toolbar-btn db-sql-toolbar-format"
-            :disabled="!activeTab.connectionId"
-            title="Format"
-            @click="formatSql"
-          >
-            <AlignLeft />
-          </button>
-          <span class="db-toolbar-divider" />
-          <span class="db-ai-toolbar">
-            <button
-              type="button"
-              title="AI Explain SQL"
-              :disabled="!activeSqlHasText"
-              @click="openDbAiFromToolbar('explain')"
-            >
-              <BrainCircuit />
-            </button>
-            <button
-              type="button"
-              title="AI Optimize SQL"
-              :disabled="!activeSqlHasText"
-              @click="openDbAiFromToolbar('optimize')"
-            >
-              <WandSparkles />
-            </button>
-            <button
-              type="button"
-              title="AI Convert SQL"
-              :disabled="!activeSqlHasText"
-              @click="openDbAiFromToolbar('convert')"
-            >
-              <Languages />
-            </button>
-            <button
-              type="button"
-              title="AI Complete SQL"
-              :disabled="!activeSqlTab"
-              @click="openDbAiFromToolbar('complete')"
-            >
-              <TextCursorInput />
-            </button>
-            <button
-              type="button"
-              title="AI NL2SQL"
-              :disabled="!activeSqlTab"
-              @click="openDbAiFromToolbar('nl2sql')"
-            >
-              <FileSearch />
-            </button>
-          </span>
-          <span class="db-toolbar-spacer" />
-          <select
-            class="db-picker db-picker--connection"
-            :value="activeTab.connectionId"
-            :disabled="connections.length === 0"
-            @change="updateSqlTabConnection"
-          >
-            <option
-              value=""
-              disabled
-            >
-              Connection
-            </option>
-            <option
-              v-for="connection in connections"
-              :key="connection.id"
-              :value="connection.id"
-            >
-              {{ connection.name }}{{ connection.status === 'testing' ? ' [connecting...]' : '' }}
-            </option>
-          </select>
-          <select
-            class="db-picker db-picker--database"
-            :value="activeTab.catalogName"
-            :disabled="currentSqlCatalogs.length === 0"
-            @change="updateSqlTabCatalog"
-          >
-            <option
-              value=""
-              disabled
-            >
-              Database
-            </option>
-            <option
-              v-for="catalog in currentSqlCatalogs"
-              :key="catalog.name"
-              :value="catalog.name"
-            >
-              {{ catalog.name }}
-            </option>
-          </select>
-          <select
-            v-if="activeSqlRequiresSchema"
-            class="db-picker db-picker--schema"
-            :value="activeTab.schemaName"
-            :disabled="currentSqlSchemas.length === 0"
-            @change="updateSqlTabSchema"
-          >
-            <option
-              value=""
-              disabled
-            >
-              Schema
-            </option>
-            <option
-              v-for="schema in currentSqlSchemas"
-              :key="schema.name"
-              :value="schema.name"
-            >
-              {{ schema.name }}
-            </option>
-          </select>
-        </div>
-        <div
-          class="db-sql-panes"
-          :class="{ resizing: sqlPaneResizing }"
-          :style="sqlPaneStyle"
-        >
-          <div
-            class="db-sql-editor-shell"
-            @click="focusSqlEditor"
-          >
-            <div
-              class="db-sql-editor-gutter"
-              :style="{ transform: `translateY(-${sqlEditorScrollTop}px)` }"
-              aria-hidden="true"
-            >
-              <span
-                v-for="line in activeSqlEditorLines"
-                :key="line"
-                :class="{ active: line === sqlEditorActiveLine }"
-              >
-                {{ line }}
-              </span>
-            </div>
-            <div class="db-sql-editor-surface">
-              <div
-                class="db-sql-editor-active-line"
-                :style="{ transform: `translateY(${sqlEditorActiveLineTop}px)` }"
-                aria-hidden="true"
-              />
-              <DatabaseSqlEditor
-                ref="sqlEditorRef"
-                v-model="activeTab.sql"
-                @metrics="syncSqlEditorState"
-                @run="runSqlFromShortcut"
-                @open-find="openSqlFind"
-              />
-            </div>
-            <div
-              v-if="sqlFindOpen"
-              class="db-sql-find-panel"
-              @click.stop
-            >
-              <div class="db-sql-find-row">
-                <Search />
-                <input
-                  ref="sqlFindInputRef"
-                  v-model="sqlFindQuery"
-                  aria-label="Find in SQL"
-                  placeholder="Find"
-                  @keydown="(event) => handleSqlFindKeydown(event, 'query')"
-                />
-                <span class="db-sql-find-count">{{ sqlFindSummary }}</span>
-                <button
-                  type="button"
-                  title="Previous match"
-                  :disabled="sqlFindMatches.length === 0"
-                  @click="goToSqlFindMatch(-1)"
-                >
-                  ↑
-                </button>
-                <button
-                  type="button"
-                  title="Next match"
-                  :disabled="sqlFindMatches.length === 0"
-                  @click="goToSqlFindMatch(1)"
-                >
-                  ↓
-                </button>
-                <button
-                  type="button"
-                  title="Toggle replace"
-                  :class="{ active: sqlFindReplaceOpen }"
-                  @click="toggleSqlFindReplace"
-                >
-                  Replace
-                </button>
-                <button
-                  type="button"
-                  title="Match case"
-                  :class="{ active: sqlFindCaseSensitive }"
-                  @click="sqlFindCaseSensitive = !sqlFindCaseSensitive"
-                >
-                  Aa
-                </button>
-                <button
-                  type="button"
-                  title="Close find"
-                  @click="closeSqlFind(true)"
-                >
-                  <X />
-                </button>
-              </div>
-              <div
-                v-if="sqlFindReplaceOpen"
-                class="db-sql-find-row replace"
-              >
-                <span />
-                <input
-                  ref="sqlReplaceInputRef"
-                  v-model="sqlFindReplace"
-                  aria-label="Replace in SQL"
-                  placeholder="Replace"
-                  @keydown="(event) => handleSqlFindKeydown(event, 'replace')"
-                />
-                <button
-                  type="button"
-                  title="Replace current"
-                  :disabled="sqlFindMatches.length === 0"
-                  @click="replaceCurrentSqlFindMatch"
-                >
-                  Replace
-                </button>
-                <button
-                  type="button"
-                  title="Replace all"
-                  :disabled="sqlFindMatches.length === 0"
-                  @click="replaceAllSqlFindMatches"
-                >
-                  All
-                </button>
-              </div>
-            </div>
-            <footer class="db-sql-editor-footer">
-              <span
-                v-if="activeSqlTab"
-                class="db-sql-save-state"
-                :class="{ dirty: activeSqlIsDirty, saving: activeSqlSaving, error: Boolean(activeSqlTab.saveError) }"
-                :title="activeSqlTab.filePath || activeSqlTab.saveError || undefined"
-              >
-                {{ activeSqlSaveStateText }}
-              </span>
-              <span>{{ activeSqlEditorLineCount }} lines</span>
-              <span>Ln {{ sqlEditorActiveLine }}, Col {{ sqlEditorActiveColumn }}</span>
-              <span v-if="sqlEditorSelectionSize">{{ sqlEditorSelectionSize }} selected</span>
-            </footer>
-          </div>
-          <button
-            type="button"
-            class="db-sql-splitter"
-            title="Resize SQL editor and results"
-            role="separator"
-            aria-orientation="horizontal"
-            :aria-valuemin="SQL_PANE_MIN_PERCENT"
-            :aria-valuemax="SQL_PANE_MAX_PERCENT"
-            :aria-valuenow="Math.round(sqlPaneEditorPercent)"
-            @pointerdown="startSqlPaneResize"
-            @dblclick="resetSqlPaneSplit"
-          >
-            <span aria-hidden="true" />
-          </button>
-          <div class="db-sql-results">
-            <div
-              class="db-result-tabs"
-              role="tablist"
-            >
-              <div
-                role="tab"
-                tabindex="0"
-                :aria-selected="activeTab.activeResultTabId === 'overview'"
-                :class="{ active: activeTab.activeResultTabId === 'overview' }"
-                @click="activeTab.activeResultTabId = 'overview'"
-                @keydown.enter.prevent="activeTab.activeResultTabId = 'overview'"
-                @keydown.space.prevent="activeTab.activeResultTabId = 'overview'"
-              >
-                Overview
-              </div>
-              <div
-                v-for="result in activeTab.resultTabs"
-                :key="result.id"
-                role="tab"
-                tabindex="0"
-                :aria-selected="activeTab.activeResultTabId === result.id"
-                :title="result.title"
-                :class="{ active: activeTab.activeResultTabId === result.id }"
-                @click="activeTab.activeResultTabId = result.id"
-                @keydown.enter.prevent="activeTab.activeResultTabId = result.id"
-                @keydown.space.prevent="activeTab.activeResultTabId = result.id"
-              >
-                <span
-                  class="db-result-dot"
-                  :class="result.status"
-                />
-                <span
-                  class="db-result-tab-title"
-                >
-                  {{ result.title }}
-                </span>
-                <button
-                  type="button"
-                  class="db-result-tab-close"
-                  aria-label="Close result tab"
-                  @click.stop="closeResultTab(result.id)"
-                >
-                  <X />
-                </button>
-              </div>
-            </div>
-
-            <div
-              v-if="activeTab.activeResultTabId === 'overview'"
-              class="db-sql-overview"
-            >
-              <p v-if="!activeTab.history.length">Run SQL to create a result tab.</p>
-              <table v-else>
-                <thead>
-                  <tr>
-                    <th>SQL</th>
-                    <th>Message</th>
-                    <th>Time</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr
-                    v-for="history in activeTab.history"
-                    :key="history.id"
-                    :class="{ closed: isSqlHistoryClosed(history), error: history.status === 'error' }"
-                    :data-execution-id="history.id"
-                    :title="history.createdAt"
-                    @click="openSqlHistoryResult(history)"
-                  >
-                    <td>
-                      <span
-                        class="db-result-dot"
-                        :class="history.status"
-                      />
-                      <code>{{ history.sql }}</code>
-                    </td>
-                    <td>
-                      <strong :class="history.status">{{ history.message }}</strong>
-                    </td>
-                    <td>{{ history.durationMs }}ms</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-
-            <template v-else-if="activeSqlResult">
-              <div
-                v-if="activeSqlResult.status === 'running'"
-                class="db-result-running"
-              >
-                <span
-                  class="db-result-dot running"
-                  aria-hidden="true"
-                />
-                <div>
-                  <strong>Running query</strong>
-                  <small>{{ activeSqlResult.title }}</small>
-                  <p>{{ activeSqlResult.sql }}</p>
-                </div>
-              </div>
-              <div
-                v-else-if="activeSqlResult.status === 'error'"
-                class="db-result-error"
-              >
-                <span class="db-result-error-text">{{ activeSqlResult.error }}</span>
-                <span
-                  v-if="sqlDiagnose.success && sqlDiagnose.resultId === activeSqlResult.id"
-                  class="db-result-diagnose-success"
-                >
-                  Diagnosed and replaced editor SQL
-                </span>
-                <span
-                  v-if="sqlDiagnose.error && sqlDiagnose.resultId === activeSqlResult.id"
-                  class="db-result-diagnose-error"
-                >
-                  {{ sqlDiagnose.error }}
-                </span>
-                <button
-                  type="button"
-                  class="db-result-diagnose-btn"
-                  :class="{ loading: sqlDiagnose.running && sqlDiagnose.resultId === activeSqlResult.id }"
-                  :disabled="sqlDiagnose.running && sqlDiagnose.resultId === activeSqlResult.id"
-                  @click="diagnoseSqlError(activeSqlResult)"
-                >
-                  <span
-                    v-if="sqlDiagnose.running && sqlDiagnose.resultId === activeSqlResult.id"
-                    class="db-result-diagnose-spinner"
-                    aria-hidden="true"
-                  />
-                  <span v-else>Diagnose</span>
-                </button>
-              </div>
-              <template v-else>
-                <DataGridToolbar
-                  :page="activeSqlResultViewState.page"
-                  :page-size="activeSqlResultViewState.pageSize"
-                  :total="filteredSqlRows.length"
-                  :hide-refresh="true"
-                  :can-export="activeSqlResult.status === 'ok' && pagedSqlRows.length > 0"
-                  export-title="Export current SQL result page"
-                  :can-chart="activeSqlResult.status === 'ok' && pagedSqlRows.length > 0"
-                  chart-title="Chart current SQL result page"
-                  :can-comment="activeSqlResult.status === 'ok'"
-                  comment-title="Comment current SQL result"
-                  @goto-page="(page) => updateSqlResultPage(page)"
-                  @goto-last-page="gotoLastSqlResultPage"
-                  @change-page-size="(size) => updateSqlResultPageSize(size)"
-                  @export="exportActiveSqlResultPage"
-                  @chart="openActiveSqlResultChart"
-                  @comment="openActiveSqlResultComment"
-                />
-                <ResultGrid
-                  class="db-sql-result-grid"
-                  :columns="activeSqlResult.columns"
-                  :rows="pagedSqlRows"
-                  :source-rows="activeSqlResult.rows"
-                  :sort="activeSqlResultViewState.sort"
-                  :filters="activeSqlResultViewState.filters"
-                  :start-row-index="(activeSqlResultViewState.page - 1) * activeSqlResultViewState.pageSize + 1"
-                  @sort="(column) => cycleSqlSort(column)"
-                  @filter="(column, filter) => applySqlFilter(column, filter)"
-                />
-              </template>
-              <DataStatusBar
-                :status="activeSqlResult.status"
-                :error="activeSqlResult.error || undefined"
-                :message="activeSqlResult.message"
-                :duration-ms="activeSqlResult.durationMs"
-                :row-count="activeSqlResult.rowCount"
-              />
-            </template>
-          </div>
-        </div>
-      </section>
-
-      <section
-        v-else-if="activeDataTab"
-        class="db-data-workspace"
-      >
-        <DataGridToolbar
-          :page="activeDataTab.page"
-          :page-size="activeDataTab.pageSize"
-          :total="activeDataTab.total"
-          :can-edit="canEditDataTab(activeDataTab)"
-          :has-selection="!!activeDataTab.selectedRowKey"
-          :can-undo="activeDataTab.undoStack.length > 0"
-          :is-dirty="isDataTabDirty(activeDataTab)"
-          :edit-disabled-reason="dataEditDisabledReason(activeDataTab)"
-          :can-export="!activeDataTab.loading && !activeDataTab.error && pagedDataRows.length > 0"
-          export-title="Export current table page"
-          :can-chart="!activeDataTab.loading && !activeDataTab.error && pagedDataRows.length > 0"
-          chart-title="Chart current table page"
-          :can-comment="!activeDataTab.loading && !activeDataTab.error"
-          comment-title="Comment current table page"
-          @goto-page="(page) => updateDataPage(page)"
-          @goto-last-page="gotoLastDataPage"
-          @change-page-size="(size) => updateDataPageSize(size)"
-          @refresh-total="refreshDataTotal"
-          @refresh="refreshDataTab"
-          @add-row="addDataRow"
-          @delete-row="deleteSelectedDataRow"
-          @undo="undoDataChanges"
-          @save="saveDataChanges"
-          @export="exportActiveDataPage"
-          @chart="openActiveDataChart"
-          @comment="openActiveDataComment"
-        />
-        <div class="db-where-bar">
-          <span class="db-where-table"><Table2 /> {{ activeDataTab.tableName }}</span>
-          <i />
-          <input
-            v-model="activeDataTab.whereDraft"
-            aria-label="WHERE condition"
-            :class="{ pending: activeDataWherePending }"
-            placeholder="Input WHERE condition"
-            @keydown.enter.prevent="applyWhere"
-          />
-          <button
-            type="button"
-            title="Apply filter"
-            :class="{ pending: activeDataWherePending }"
-            @click="applyWhere"
-          >
-            <Play />
-          </button>
-        </div>
-        <section
-          v-if="activeDataEditSummary?.isDirty"
-          class="db-edit-summary"
-          :class="{ error: !!activeDataEditSummary.error, warning: !!activeDataEditSummary.warning && !activeDataEditSummary.error }"
-        >
-          <div class="db-edit-summary-counts">
-            <span><strong>{{ activeDataEditSummary.newRows }}</strong> New</span>
-            <span><strong>{{ activeDataEditSummary.updatedRows }}</strong> Updated</span>
-            <span><strong>{{ activeDataEditSummary.deletedRows }}</strong> Deleted</span>
-            <span><strong>{{ activeDataEditSummary.undoDepth }}</strong> Undo</span>
-            <span><strong>{{ activeDataEditSummary.statementCount }}</strong> SQL</span>
-          </div>
-          <p
-            v-if="activeDataEditSummary.error || activeDataEditSummary.warning || activeDataTab.saveError"
-            class="db-edit-summary-message"
-          >
-            {{ activeDataTab.saveError || activeDataEditSummary.error || activeDataEditSummary.warning }}
-          </p>
-          <pre>{{ activeDataEditSummary.preview || 'No SQL statement will be generated until a new row contains at least one value.' }}</pre>
-          <div class="db-edit-summary-actions">
-            <button
-              type="button"
-              :disabled="!activeDataEditSummary.preview || activeDataTab.saving"
-              @click="copyDataMutationPreview"
-            >
-              Copy Preview
-            </button>
-            <button
-              type="button"
-              :disabled="activeDataTab.saving"
-              @click="discardDataChanges"
-            >
-              Discard All
-            </button>
-          </div>
-        </section>
-        <div class="db-data-grid-shell">
-          <div
-            v-if="activeDataTab.loading"
-            class="db-data-loading"
-          >
-            Loading table data
-          </div>
-          <div
-            v-else-if="activeDataTab.error"
-            class="db-result-error"
-          >
-            <span>{{ activeDataTab.error }}</span>
-          </div>
-          <ResultGrid
-            v-else
-            :columns="activeDataTab.columns"
-            :rows="pagedDataRows"
-            :source-rows="activeDataTab.sourceRows"
-            :sort="activeDataTab.sort"
-            :filters="activeDataTab.filters"
-            :start-row-index="(activeDataTab.page - 1) * activeDataTab.pageSize + 1"
-            :selected-key="activeDataTab.selectedRowKey || undefined"
-            :primary-key="activeDataTab.primaryKey"
-            :new-rows="activeDataTab.dirtyState.newRows"
-            :deleted-row-keys="activeDataTab.dirtyState.deletedRowKeys"
-            :updated-cells="activeDataTab.dirtyState.updatedCells"
-            :editable="canEditDataTab(activeDataTab)"
-            @sort="(column) => cycleDataSort(column)"
-            @filter="(column, filter) => applyDataFilter(column, filter)"
-            @select-row="setActiveDataSelectedRow"
-            @cell-edit="updateDataCell"
-            @new-row-cell-edit="updateNewDataRowCell"
-          />
-        </div>
-        <DataStatusBar
-          :error="activeDataTab.error || undefined"
-          :duration-ms="activeDataTab.durationMs"
-          :row-count="activeDataTab.rowCount"
-        />
-      </section>
-    </main>
-
-    <DatabaseAiPanels
+    <DatabaseWorkspaceOverlays
       ref="databaseAiPanelsRef"
       v-model:db-ai-pane-draft="dbAiPaneDraft"
+      v-model:connection-url="connectionUrl"
+      v-model:password-visible="passwordVisible"
+      v-model:create-database-sql="createDatabaseSql"
+      v-model:context-submenu="contextSubmenu"
       :db-ai-pane-open="dbAiPaneOpen"
       :db-ai-pane-width="dbAiPaneWidth"
       :db-ai-pane-min-width="DB_AI_PANE_MIN_WIDTH"
@@ -831,6 +199,40 @@
       :db-ai-can-cancel="dbAiCanCancel"
       :format-db-ai-request-time="formatDbAiRequestTime"
       :db-ai-pane-status-label="dbAiPaneStatusLabel"
+      :add-menu-open="addMenuOpen"
+      :add-menu-position="addMenuPosition"
+      :context-menu="contextMenu"
+      :database-engines="databaseEngines"
+      :group-root-move-disabled="groupRootMoveDisabled"
+      :group-move-targets="groupMoveTargets"
+      :context-connection-connected="contextConnectionConnected"
+      :context-connection-can-create-database="contextConnectionCanCreateDatabase"
+      :connection-root-move-disabled="connectionRootMoveDisabled"
+      :connection-move-targets="connectionMoveTargets"
+      :default-group-id="DEFAULT_GROUP_ID"
+      :connection-modal-open="connectionModalOpen"
+      :connection-modal-mode="connectionModalMode"
+      :connection-draft="connectionDraft"
+      :connection-errors="connectionErrors"
+      :groups="groups"
+      :connection-feedback="connectionFeedback"
+      :connection-feedback-kind="connectionFeedbackKind"
+      :connection-testing="connectionTesting"
+      :connection-saving="connectionSaving"
+      :database-proxy-available="databaseProxyAvailable"
+      :database-ssh-proxy-options="databaseSshProxyOptions"
+      :postgres-ssl-mode-options="postgresSslModeOptions"
+      :engine-accent="engineAccent"
+      :engine-name="engineName"
+      :create-database-modal="createDatabaseModal"
+      :create-database-name-error="createDatabaseNameError"
+      :create-database-can-submit="createDatabaseCanSubmit"
+      :chart-modal="chartModal"
+      :comment-modal="commentModal"
+      :ddl-modal="ddlModal"
+      :danger-confirm="dangerConfirm"
+      :operation-confirm="operationConfirm"
+      :notice="notice"
       @start-db-ai-pane-resize="startDbAiPaneResize"
       @reset-db-ai-pane-width="resetDbAiPaneWidth"
       @close-db-ai-pane="closeDbAiPane"
@@ -853,24 +255,8 @@
       @run-db-ai-readonly="runDbAiReadonly"
       @cancel-db-ai-request="cancelDbAiRequest"
       @clear-db-ai-request="clearDbAiRequest"
-    />
-
-    <DatabaseWorkspaceMenus
-      :add-menu-open="addMenuOpen"
-      :add-menu-position="addMenuPosition"
-      :context-menu="contextMenu"
-      :context-submenu="contextSubmenu"
-      :database-engines="databaseEngines"
-      :group-root-move-disabled="groupRootMoveDisabled"
-      :group-move-targets="groupMoveTargets"
-      :context-connection-connected="contextConnectionConnected"
-      :context-connection-can-create-database="contextConnectionCanCreateDatabase"
-      :connection-root-move-disabled="connectionRootMoveDisabled"
-      :connection-move-targets="connectionMoveTargets"
-      :default-group-id="DEFAULT_GROUP_ID"
       @add-group="addGroup"
       @open-connection-modal-from-engine="openConnectionModalFromEngine"
-      @update-context-submenu="contextSubmenu = $event"
       @close-context-submenu-soon="closeContextSubmenuSoon"
       @start-group-rename="startGroupRename"
       @copy-context-name="copyContextName"
@@ -889,308 +275,40 @@
       @copy-select-sql="copySelectSql"
       @copy-table-ddl-from-context="copyTableDdlFromContext"
       @request-dangerous-table-action="requestDangerousTableAction"
-    />
-
-    <div
-      v-if="connectionModalOpen"
-      class="db-modal-overlay"
-    >
-      <form
-        class="db-connection-modal"
-        @submit.prevent="saveConnectionDraft"
-      >
-        <button
-          type="button"
-          title="Close"
-          @click="closeConnectionModal"
-        >
-          <X />
-        </button>
-        <header>
-          <span
-            class="db-engine-large"
-            :style="{ background: engineAccent(connectionDraft.dbType) }"
-          />
-          <h2>{{ connectionModalMode === 'edit' ? 'Edit Connection' : engineName(connectionDraft.dbType) }}</h2>
-        </header>
-        <label>
-          Name
-          <input
-            v-model="connectionDraft.name"
-            :class="{ error: connectionErrors.includes('name') }"
-            required
-          />
-        </label>
-        <label>
-          Env
-          <select v-model="connectionDraft.env">
-            <option>Development</option>
-            <option>TEST</option>
-            <option>Staging</option>
-            <option>Production</option>
-          </select>
-        </label>
-        <label>
-          Group
-          <select v-model="connectionDraft.groupId">
-            <option
-              v-for="group in groups"
-              :key="group.id"
-              :value="group.id"
-            >
-              {{ group.name }}
-            </option>
-          </select>
-        </label>
-        <label v-if="connectionDraft.dbType === 'sqlite'">
-          File Path
-          <div class="db-connection-file">
-            <input
-              v-model="connectionDraft.filePath"
-              :class="{ error: connectionErrors.includes('filePath') }"
-              required
-              @input="markConnectionUrlAuto"
-            />
-            <button
-              type="button"
-              @click="pickSqliteFile"
-            >
-              Select
-            </button>
-          </div>
-        </label>
-        <label v-if="connectionDraft.dbType === 'sqlite'">
-          Readonly
-          <span class="db-connection-check">
-            <input
-              v-model="connectionDraft.readonly"
-              type="checkbox"
-            />
-            <span>Open database in readonly mode</span>
-          </span>
-        </label>
-        <template v-else>
-          <label>
-            Host
-            <input
-              v-model="connectionDraft.host"
-              :class="{ error: connectionErrors.includes('host') }"
-              :required="connectionDraft.dbType !== 'oracle' || !connectionDraft.url.trim()"
-              @input="markConnectionUrlAuto"
-            />
-          </label>
-          <label>
-            Port
-            <input
-              v-model.number="connectionDraft.port"
-              :class="{ error: connectionErrors.includes('port') }"
-              min="1"
-              max="65535"
-              type="number"
-              :required="connectionDraft.dbType !== 'oracle' || !connectionDraft.url.trim()"
-              @input="markConnectionUrlAuto"
-            />
-          </label>
-          <label>
-            Authentication
-            <select v-model="connectionDraft.authentication">
-              <option>UserAndPassword</option>
-            </select>
-          </label>
-          <label>
-            User
-            <input
-              v-model="connectionDraft.user"
-              :class="{ error: connectionErrors.includes('user') }"
-              required
-            />
-          </label>
-          <label>
-            Password
-            <div class="db-connection-password">
-              <input
-                v-model="connectionDraft.password"
-                :type="passwordVisible ? 'text' : 'password'"
-                :placeholder="connectionModalMode === 'edit' ? 'Leave empty to keep saved password' : ''"
-                autocomplete="new-password"
-              />
-              <button
-                type="button"
-                :title="passwordVisible ? 'Hide password' : 'Show password'"
-                @click="passwordVisible = !passwordVisible"
-              >
-                {{ passwordVisible ? 'Hide' : 'Show' }}
-              </button>
-            </div>
-          </label>
-          <label>
-            {{ connectionDraft.dbType === 'oracle' ? 'Service' : 'Database' }}
-            <input
-              v-model="connectionDraft.database"
-              @input="markConnectionUrlAuto"
-            />
-          </label>
-          <label>
-            SSH Proxy
-            <span class="db-connection-check">
-              <input
-                v-model="connectionDraft.needProxy"
-                type="checkbox"
-              />
-              <span>Route database traffic through a configured proxy</span>
-            </span>
-          </label>
-          <label v-if="connectionDraft.needProxy && databaseProxyAvailable">
-            Proxy
-            <select
-              v-model="connectionDraft.proxyName"
-              :class="{ error: connectionErrors.includes('proxyName') }"
-            >
-              <option value="">Select proxy</option>
-              <option
-                v-for="proxy in databaseSshProxyOptions"
-                :key="proxy.name"
-                :value="proxy.name"
-              >
-                {{ proxy.name }} · {{ proxy.type }} {{ proxy.host }}:{{ proxy.port }}
-              </option>
-            </select>
-          </label>
-          <p
-            v-else-if="connectionDraft.needProxy"
-            class="db-modal-hint"
-          >
-            No SSH proxy config is available.
-            <button
-              type="button"
-              @click="workspaceStore.openSshProxyConfig(); workspaceStore.openAddSshProxyConfig()"
-            >
-              Add Proxy
-            </button>
-          </p>
-          <label v-if="isPostgresCompatibleDbType(connectionDraft.dbType)">
-            SSL Mode
-            <select v-model="connectionDraft.sslMode">
-              <option value="">-</option>
-              <option
-                v-for="mode in postgresSslModeOptions"
-                :key="mode"
-                :value="mode"
-              >
-                {{ mode }}
-              </option>
-            </select>
-          </label>
-        </template>
-        <label>
-          {{ connectionDraft.dbType === 'oracle' ? 'Connect String' : 'URL' }}
-          <input
-            v-model="connectionUrl"
-            :class="{ error: connectionErrors.includes('url') }"
-          />
-        </label>
-        <p
-          v-if="connectionFeedback"
-          class="db-modal-feedback"
-          :class="{ error: connectionFeedbackKind === 'error' }"
-        >
-          {{ connectionFeedback }}
-        </p>
-        <footer>
-          <button
-            type="button"
-            :disabled="connectionTesting || connectionSaving"
-            @click="testConnectionDraft"
-          >
-            {{ connectionTesting ? 'Testing...' : 'Test Connection' }}
-          </button>
-          <span />
-          <button
-            type="button"
-            :disabled="connectionTesting || connectionSaving"
-            @click="closeConnectionModal"
-          >
-            Cancel
-          </button>
-          <button
-            type="submit"
-            :disabled="connectionTesting || connectionSaving"
-          >
-            {{ connectionSaving ? 'Saving...' : 'Save' }}
-          </button>
-        </footer>
-      </form>
-    </div>
-
-    <DatabaseWorkspaceModals
-      v-model:create-database-sql="createDatabaseSql"
-      :create-database-modal="createDatabaseModal"
-      :create-database-name-error="createDatabaseNameError"
-      :create-database-can-submit="createDatabaseCanSubmit"
-      :chart-modal="chartModal"
-      :comment-modal="commentModal"
-      :ddl-modal="ddlModal"
-      :danger-confirm="dangerConfirm"
-      :operation-confirm="operationConfirm"
+      @close-connection-modal="closeConnectionModal"
+      @save-connection-draft="saveConnectionDraft"
+      @test-connection-draft="testConnectionDraft"
+      @pick-sqlite-file="pickSqliteFile"
+      @mark-connection-url-auto="markConnectionUrlAuto"
+      @open-ssh-proxy-config-from-connection-modal="openSshProxyConfigFromConnectionModal"
       @create-database="createDatabase"
       @close-create-database="closeCreateDatabaseModal"
       @update-create-database-name="updateCreateDatabaseName"
       @close-chart="closeChartModal"
       @close-comment="closeCommentModal"
-      @update-comment-draft="commentModal.draft = $event"
+      @update-comment-draft="updateCommentDraft"
       @save-comment="saveActiveComment"
-      @close-ddl="ddlModal.open = false"
+      @close-ddl="closeDdlModal"
       @copy-ddl="copyDdl"
       @cancel-danger="cancelDangerousTableAction"
-      @update-danger-confirm-text="dangerConfirm.confirmText = $event"
+      @update-danger-confirm-text="updateDangerConfirmText"
       @confirm-danger="confirmDangerousTableAction"
       @cancel-operation="cancelOperationConfirm"
       @confirm-operation="confirmOperation"
     />
-
-    <div
-      v-if="notice"
-      class="db-toast"
-    >
-      {{ notice }}
-    </div>
   </section>
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch, type ComponentPublicInstance } from 'vue'
-import {
-  AlignLeft,
-  BrainCircuit,
-  CornerDownRight,
-  FileSearch,
-  Languages,
-  LayoutDashboard,
-  Lightbulb,
-  MoreHorizontal,
-  Play,
-  Plus,
-  Save,
-  SaveAll,
-  Search,
-  SquareTerminal,
-  Table2,
-  TextCursorInput,
-  WandSparkles,
-  X
-} from 'lucide-vue-next'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { copyTextToClipboard } from '@/services/clipboardRuntime'
 import { databaseClient } from '@/services/databaseClient'
 import { editorLineHeightPx } from '@/services/editorRuntime'
 import { localFilesClient } from '@/services/localFilesClient'
-import DataGridToolbar from '@/components/database/DataGridToolbar.vue'
-import DataStatusBar from '@/components/database/DataStatusBar.vue'
-import DatabaseAiPanels from '@/components/database/DatabaseAiPanels.vue'
+import DatabaseMainWorkspace, { type DatabaseMainWorkspaceApi } from '@/components/database/DatabaseMainWorkspace.vue'
 import DatabaseSidebarTree from '@/components/database/DatabaseSidebarTree.vue'
-import DatabaseSqlEditor, { type DatabaseSqlEditorMetrics } from '@/components/database/DatabaseSqlEditor.vue'
-import DatabaseWorkspaceMenus from '@/components/database/DatabaseWorkspaceMenus.vue'
-import DatabaseWorkspaceModals from '@/components/database/DatabaseWorkspaceModals.vue'
-import ResultGrid from '@/components/database/ResultGrid.vue'
+import type { DatabaseSqlEditorMetrics } from '@/components/database/DatabaseSqlEditor.vue'
+import DatabaseWorkspaceOverlays from '@/components/database/DatabaseWorkspaceOverlays.vue'
 import {
   applyFilters,
   applyOrderBySort,
@@ -1321,21 +439,6 @@ import type {
   DatabaseTableQueryResult, DatabaseWorkspaceCatalog
 } from '@shared/contracts/database'
 
-type DatabaseSqlEditorApi = {
-  getText(): string
-  getSelectedText(): string
-  getTextUntilCursor(): string
-  getCurrentStatement(): string
-  getCurrentStatementRange(): TextRange
-  getCursorOffset(): number
-  getSelectionRange(): TextRange
-  setSelectionRange(start: number, end?: number): void
-  replaceAll(next: string): void
-  replaceSelection(next: string): void
-  replaceRange(next: string, range: TextRange): void
-  insertAtCursor(next: string): void
-  focus(): void
-}
 type TableReloadOptions = { withTotal?: boolean; preserveDirty?: boolean; notice?: string }
 const DATABASE_CATALOG_MALFORMED_MESSAGE = 'Database catalog backend returned malformed result data.'
 const DATABASE_CONNECTION_TEST_MALFORMED_MESSAGE = 'Database connection test backend returned malformed result data.'
@@ -1378,9 +481,7 @@ const editingGroupName = ref('')
 const tabs = ref<WorkspaceTab[]>([{ id: 'tab-overview', kind: 'overview', title: 'Overview' }])
 const activeTabId = ref('tab-overview')
 const resultSeq = ref(1)
-const sqlEditorRef = ref<DatabaseSqlEditorApi | null>(null)
-const sqlFindInputRef = ref<HTMLInputElement | null>(null)
-const sqlReplaceInputRef = ref<HTMLInputElement | null>(null)
+const sqlEditorRef = ref<DatabaseMainWorkspaceApi | null>(null)
 const SQL_PANE_DEFAULT_PERCENT = 45
 const SQL_PANE_MIN_PERCENT = 20
 const SQL_PANE_MAX_PERCENT = 80
@@ -1396,7 +497,6 @@ const sqlFindQuery = ref('')
 const sqlFindReplace = ref('')
 const sqlFindCaseSensitive = ref(false)
 const sqlFindActiveIndex = ref(-1)
-const workspaceTabRefs = new Map<string, HTMLElement>()
 
 const connectionModalOpen = ref(false)
 const connectionModalMode = ref<'create' | 'edit'>('create')
@@ -1981,7 +1081,6 @@ watch(
 )
 
 watch(activeTabId, (tabId) => {
-  scrollActiveWorkspaceTabIntoView(tabId)
   if (dbAiPaneOpen.value && !dbAiPaneContextTouched) applyDbAiPaneContext(resolveDbAiPaneContextFromWorkspace(), false)
 })
 
@@ -2018,20 +1117,6 @@ function toggleSchemaObjectFolder(connectionId: string, catalogName: string, sch
 
 function toggleTable(tableId: string) {
   expandedTables.value = toggleId(expandedTables.value, tableId)
-}
-
-function registerWorkspaceTabRef(tabId: string, el: Element | ComponentPublicInstance | null) {
-  if (el instanceof HTMLElement) workspaceTabRefs.set(tabId, el)
-  else workspaceTabRefs.delete(tabId)
-}
-
-function scrollActiveWorkspaceTabIntoView(tabId: string) {
-  void nextTick(() => {
-    const tabEl = workspaceTabRefs.get(tabId)
-    if (typeof tabEl?.scrollIntoView === 'function') {
-      tabEl.scrollIntoView({ block: 'nearest', inline: 'nearest' })
-    }
-  })
 }
 
 function selectColumnNode(table: DatabaseTableInfo, column: DatabaseColumnInfo) {
@@ -2264,10 +1349,10 @@ function closeTab(tabId: string) {
   if (activeTabId.value === tabId) activeTabId.value = tabs.value[Math.max(0, index - 1)]?.id ?? 'tab-overview'
 }
 
-function selectOverflowTab(tabId: string) {
-  activeTabId.value = tabId
-  scrollActiveWorkspaceTabIntoView(tabId)
-  overflowOpen.value = false
+function updateActiveSql(value: string) {
+  const tab = activeSqlTab.value
+  if (!tab) return
+  tab.sql = value
 }
 
 function nextQueryTitle() {
@@ -3072,11 +2157,7 @@ function openSqlFind(replace: boolean) {
   sqlFindOpen.value = true
   sqlFindReplaceOpen.value = replace || sqlFindReplaceOpen.value
   alignSqlFindIndexToSelection()
-  void nextTick(() => {
-    const target = replace && sqlFindQuery.value ? sqlReplaceInputRef.value : sqlFindInputRef.value
-    target?.focus()
-    target?.select()
-  })
+  sqlEditorRef.value?.focusSqlFindInput(replace && sqlFindQuery.value ? 'replace' : 'query')
 }
 
 function closeSqlFind(refocusEditor = false) {
@@ -3087,9 +2168,7 @@ function closeSqlFind(refocusEditor = false) {
 
 function toggleSqlFindReplace() {
   sqlFindReplaceOpen.value = !sqlFindReplaceOpen.value
-  void nextTick(() => {
-    ;(sqlFindReplaceOpen.value ? sqlReplaceInputRef.value : sqlFindInputRef.value)?.focus()
-  })
+  sqlEditorRef.value?.focusSqlFindInput(sqlFindReplaceOpen.value ? 'replace' : 'query')
 }
 
 function handleSqlFindKeydown(event: KeyboardEvent, field: 'query' | 'replace') {
@@ -3190,12 +2269,6 @@ function setSqlEditorSelection(selectionStart: number, selectionEnd = selectionS
   })
 }
 
-function focusSqlEditor(event?: MouseEvent) {
-  if (event?.target instanceof HTMLTextAreaElement || event?.target instanceof HTMLInputElement || event?.target instanceof HTMLButtonElement) return
-  sqlEditorRef.value?.focus()
-  syncSqlEditorState()
-}
-
 function clampSqlPanePercent(value: number) {
   if (!Number.isFinite(value)) return SQL_PANE_DEFAULT_PERCENT
   return Math.min(SQL_PANE_MAX_PERCENT, Math.max(SQL_PANE_MIN_PERCENT, value))
@@ -3287,6 +2360,12 @@ function isSqlHistoryClosed(history: SqlHistory) {
   return !tab.resultTabs.some((result) => result.id === history.resultTabId)
 }
 
+function updateSqlResultActiveTab(resultTabId: string) {
+  const tab = activeSqlTab.value
+  if (!tab) return
+  tab.activeResultTabId = resultTabId
+}
+
 function updateSqlResultPage(page: number) {
   const result = activeSqlResult.value
   if (!result) return
@@ -3338,6 +2417,12 @@ function updateDataPageSize(size: number) {
   tab.pageSize = size
   tab.page = 1
   void reloadDataTab(tab)
+}
+
+function updateActiveDataWhereDraft(value: string) {
+  const tab = activeDataTab.value
+  if (!tab) return
+  tab.whereDraft = value
 }
 
 function gotoLastDataPage() {
@@ -3689,6 +2774,10 @@ function openChartModal(source: DatabaseChartSource) {
 
 function closeChartModal() {
   chartModal.open = false
+}
+
+function updateCommentDraft(value: string) {
+  commentModal.draft = value
 }
 
 function openActiveSqlResultChart() {
@@ -4472,6 +3561,10 @@ function cancelDangerousTableAction() {
   dangerConfirm.confirmText = ''
 }
 
+function updateDangerConfirmText(value: string) {
+  dangerConfirm.confirmText = value
+}
+
 async function confirmDangerousTableAction() {
   if (!dangerConfirm.open || dangerConfirm.confirmText !== dangerConfirm.tableName) return
   const connection = findConnection(dangerConfirm.connectionId)
@@ -4681,6 +3774,11 @@ function closeConnectionModal() {
   passwordVisible.value = false
   connectionTesting.value = false
   connectionSaving.value = false
+}
+
+function openSshProxyConfigFromConnectionModal() {
+  workspaceStore.openSshProxyConfig()
+  workspaceStore.openAddSshProxyConfig()
 }
 
 async function pickSqliteFile() {
@@ -5005,6 +4103,10 @@ async function copyDdl() {
     return
   }
   if (await copyText(ddlModal.ddl)) showNotice('DDL copied')
+}
+
+function closeDdlModal() {
+  ddlModal.open = false
 }
 
 function openDbAiFromToolbar(action: Extract<DbAiAction, 'explain' | 'nl2sql' | 'optimize' | 'convert' | 'complete'>) {
