@@ -77,14 +77,9 @@ import {
   isCommandTerminalActionDisabled,
   isReadOnlyCommandMessage,
   normalizedCommandOutputText,
-  renderAiPanelMarkdownParts as renderedMarkdownParts,
-  type AiPanelCommandSuggestionMessage as CommandSuggestionMessage
+  renderAiPanelMarkdownParts as renderedMarkdownParts
 } from '@/services/aiPanelMessageRuntime'
-import { createAiPanelMessageActionRuntime } from '@/services/aiPanelMessageActionRuntime'
-import {
-  createAiPanelCommandActionRuntime,
-  createEmptyAiPanelCommandActionRuntimeState
-} from '@/services/aiPanelCommandActionRuntime'
+import { createAiPanelActionOrchestrationRuntime } from '@/services/aiPanelActionOrchestrationRuntime'
 import {
   createAiPanelConversationViewRuntime
 } from '@/services/aiPanelConversationRuntime'
@@ -167,7 +162,6 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
   const dropActive = ref(false)
   const inputPlaceholderNotice = ref('')
   const historyRuntimeState = reactive(createEmptyAiPanelHistoryRuntimeState())
-  const commandActionRuntimeState = reactive(createEmptyAiPanelCommandActionRuntimeState())
   const moreActionsMenuOpen = toRef(historyRuntimeState, 'moreActionsMenuOpen')
   const historyMenuOpen = toRef(historyRuntimeState, 'historyMenuOpen')
   const historySearchTerm = toRef(historyRuntimeState, 'historySearchTerm')
@@ -178,8 +172,6 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
   const editingHistoryTitle = toRef(historyRuntimeState, 'editingHistoryTitle')
   const chatExportNotice = toRef(historyRuntimeState, 'chatExportNotice')
   const openConversationTabIds = toRef(historyRuntimeState, 'openConversationTabIds')
-  const commandAuditTextareaRef = ref<HTMLTextAreaElement | null>(null)
-  const commandAuditDialog = toRef(commandActionRuntimeState, 'commandAuditDialog')
   let classicChatDataLoaded = false
   const historyPageSize = 20
   const maxHostContexts = 5
@@ -346,8 +338,11 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
   const getCurrentConversationTitle = () =>
     workspace.conversations.find((conversation) => conversation.id === workspace.selectedConversationId)?.title || 'Chat Export'
 
-  const aiPanelMessageActionRuntime = createAiPanelMessageActionRuntime({
+  const aiPanelActionOrchestrationRuntime = createAiPanelActionOrchestrationRuntime({
     messages: () => workspace.chatMessages,
+    activePanel: () => workspace.activePanel,
+    panels: () => workspace.panels,
+    chatMode: () => chatMode.value,
     copyText: copyTextToClipboard,
     notify: showChatExportNotice,
     approveMcpToolCall: (id, options) => workspace.approveAiMcpToolCall(id, options),
@@ -358,11 +353,40 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     setMessageFeedback: (id, feedback) => workspace.setMessageFeedback(id, feedback),
     retryAssistantMessage: (id) => workspace.retryAssistantMessage(id),
     summarizeMessageToKnowledge: (id) => workspace.summarizeMessageToKnowledge(id),
-    summarizeMessageToSkill: (id) => workspace.summarizeMessageToSkill(id)
+    summarizeMessageToSkill: (id) => workspace.summarizeMessageToSkill(id),
+    runActiveTerminalCommand: (command, source) => workspace.runActiveTerminalCommand(command, source),
+    continueAgentCommandLoop: (input) => workspace.continueAgentCommandLoop(input),
+    enableAgentReadOnlyAutoRunForCurrentConversation: () => workspace.enableAgentReadOnlyAutoRunForCurrentConversation(),
+    syncCurrentConversationSnapshot: (options) => workspace.syncCurrentConversationSnapshot(options),
+    closePopups: () => closePopups(),
+    afterDomUpdate: () => nextTick()
   })
-
-  const copyRenderedTextToClipboard = aiPanelMessageActionRuntime.copyRenderedTextToClipboard
-  const copyMessageToClipboard = aiPanelMessageActionRuntime.copyMessageToClipboard
+  const {
+    activeCommandAuditMessage,
+    approveMcpResourceAccess,
+    approveMcpToolCall,
+    canEditActiveCommandAudit,
+    closeCommandAuditDialog,
+    commandAuditDialog,
+    commandAuditTextareaRef,
+    copyCommandAuditDraft,
+    copyCommandToClipboard,
+    copyMessageToClipboard,
+    copyRenderedTextToClipboard,
+    formatMcpToolArguments,
+    openCommandAuditDialog,
+    rejectMcpResourceAccess,
+    rejectMcpToolCall,
+    rejectMessageCommand,
+    retryAssistantMessage,
+    runCommandAuditDraft,
+    runMessageCommand,
+    saveCommandAuditDraft,
+    setMessageFeedback,
+    summarizeMessageToKnowledge,
+    summarizeMessageToSkill,
+    toggleMessageFavorite
+  } = aiPanelActionOrchestrationRuntime
 
   const aiPanelChatViewportRuntime = createAiPanelChatViewportRuntime({
     historyState: historyRuntimeState,
@@ -390,50 +414,6 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     findPreviousChatMatch,
     openChatSearch
   } = aiPanelChatViewportRuntime
-
-  const aiPanelCommandActionRuntime = createAiPanelCommandActionRuntime({
-    state: commandActionRuntimeState,
-    messages: () => workspace.chatMessages,
-    activePanel: () => workspace.activePanel,
-    panels: () => workspace.panels,
-    chatMode: () => chatMode.value,
-    copyText: copyTextToClipboard,
-    notify: showChatExportNotice,
-    runActiveTerminalCommand: (command, source) => workspace.runActiveTerminalCommand(command, source),
-    continueAgentCommandLoop: (input) => workspace.continueAgentCommandLoop(input),
-    enableAgentReadOnlyAutoRunForCurrentConversation: () => workspace.enableAgentReadOnlyAutoRunForCurrentConversation(),
-    syncCurrentConversationSnapshot: (options) => workspace.syncCurrentConversationSnapshot(options)
-  })
-
-  const activeCommandAuditMessage = computed(() => aiPanelCommandActionRuntime.activeCommandAuditMessage())
-  const canEditActiveCommandAudit = computed(() => aiPanelCommandActionRuntime.canEditActiveCommandAudit())
-  const copyCommandToClipboard = aiPanelCommandActionRuntime.copyCommandToClipboard
-  const closeCommandAuditDialog = aiPanelCommandActionRuntime.closeCommandAuditDialog
-  const saveCommandAuditDraft = aiPanelCommandActionRuntime.saveCommandAuditDraft
-  const copyCommandAuditDraft = aiPanelCommandActionRuntime.copyCommandAuditDraft
-  const rejectMessageCommand = aiPanelCommandActionRuntime.rejectMessageCommand
-  const runMessageCommand = aiPanelCommandActionRuntime.runMessageCommand
-
-  const openCommandAuditDialog = async (message: CommandSuggestionMessage) => {
-    aiPanelCommandActionRuntime.openCommandAuditDialog(message)
-    closePopups()
-    await nextTick()
-    commandAuditTextareaRef.value?.focus()
-    commandAuditTextareaRef.value?.select()
-  }
-
-  const runCommandAuditDraft = aiPanelCommandActionRuntime.runCommandAuditDraft
-
-  const formatMcpToolArguments = aiPanelMessageActionRuntime.formatMcpToolArguments
-  const approveMcpToolCall = aiPanelMessageActionRuntime.approveMcpToolCall
-  const rejectMcpToolCall = aiPanelMessageActionRuntime.rejectMcpToolCall
-  const approveMcpResourceAccess = aiPanelMessageActionRuntime.approveMcpResourceAccess
-  const rejectMcpResourceAccess = aiPanelMessageActionRuntime.rejectMcpResourceAccess
-  const toggleMessageFavorite = aiPanelMessageActionRuntime.toggleMessageFavorite
-  const setMessageFeedback = aiPanelMessageActionRuntime.setMessageFeedback
-  const retryAssistantMessage = aiPanelMessageActionRuntime.retryAssistantMessage
-  const summarizeMessageToKnowledge = aiPanelMessageActionRuntime.summarizeMessageToKnowledge
-  const summarizeMessageToSkill = aiPanelMessageActionRuntime.summarizeMessageToSkill
 
   const exportCurrentChat = () => aiPanelHistoryRuntime.exportCurrentChat()
   const openHistoryMenu = () => aiPanelHistoryRuntime.openHistoryMenu()
