@@ -1,19 +1,17 @@
 import { nextTick, type ComputedRef, type Ref } from 'vue'
 import { createDatabaseCatalogConnectionBackend } from '@/services/databaseCatalogConnectionBackend'
+import { createDatabaseCatalogTableActionRuntime } from '@/services/databaseCatalogTableActionRuntime'
 import { createDatabaseConnectionFormRuntime } from '@/services/databaseConnectionFormRuntime'
 import {
   isConnectableDatabaseEngineInfo,
   isDatabaseConnectionDeleteDataForRequest,
   isDatabaseConnectionMutationDataForRequest,
   isDatabaseGroupDeleteDataForRequest,
-  isDatabaseGroupMutationDataForRequest,
-  isDatabaseTableMutationData
+  isDatabaseGroupMutationDataForRequest
 } from '@/services/databaseBackendGuards'
 import {
-  buildQualifiedTableReference,
   collectDescendantGroupIds,
   DEFAULT_GROUP_ID,
-  formatDdlError,
   groupPathLabel,
   type TableDdlResult
 } from '@/services/databaseWorkspaceRuntime'
@@ -46,7 +44,6 @@ import type {
 
 const DATABASE_GROUP_MUTATION_MALFORMED_MESSAGE = 'Database group backend returned malformed result data.'
 const DATABASE_CONNECTION_MUTATION_MALFORMED_MESSAGE = 'Database connection backend returned malformed result data.'
-const DATABASE_TABLE_MUTATION_MALFORMED_MESSAGE = 'Backend table mutation returned malformed result data.'
 
 type DatabaseCatalogConnectionState = {
   databaseEngines: Ref<DatabaseEngineInfo[]>
@@ -565,67 +562,6 @@ export const createDatabaseCatalogConnectionWorkspaceController = (
     closeMenus()
   }
 
-  function openContextTable() {
-    const menu = contextMenu.value
-    if (!menu || menu.type !== 'table') return
-    const table = findTable(menu.connectionId, menu.catalogName, menu.tableId, menu.schemaName)
-    if (table) hooks.openTable(menu.connectionId, menu.catalogName, table, menu.schemaName)
-    closeMenus()
-  }
-
-  function openContextSql() {
-    const menu = contextMenu.value
-    if (!menu || menu.type !== 'table') return
-    const connection = findConnection(menu.connectionId)
-    openSqlConsole(menu.connectionId)
-    const tab = activeSqlTab.value
-    if (tab) {
-      tab.catalogName = menu.catalogName
-      tab.schemaName = menu.schemaName ?? ''
-      tab.tableId = menu.tableId
-      tab.tableName = menu.label
-      const qualified = buildQualifiedTableReference(connection?.dbType ?? 'mysql', menu.catalogName, menu.schemaName, menu.label)
-      tab.sql =
-        connection?.dbType === 'oracle'
-          ? `SELECT *\nFROM ${qualified}\nFETCH FIRST 100 ROWS ONLY;`
-          : connection?.dbType === 'sqlserver'
-            ? `SELECT TOP (100) *\nFROM ${qualified};`
-            : `SELECT *\nFROM ${qualified}\nLIMIT 100;`
-    }
-    closeMenus()
-  }
-
-  async function openDdlModalFromContext() {
-    const menu = contextMenu.value
-    if (!menu || menu.type !== 'table') return
-    ddlModal.open = true
-    ddlModal.tableName = menu.label
-    ddlModal.ddl = ''
-    ddlModal.connectionId = menu.connectionId
-    ddlModal.catalogName = menu.catalogName
-    ddlModal.schemaName = menu.schemaName ?? ''
-    ddlModal.tableId = menu.tableId
-    ddlModal.loading = true
-    ddlModal.error = ''
-    ddlModal.errorCode = ''
-    closeMenus()
-    const result = await fetchTableDdl({
-      connectionId: menu.connectionId,
-      catalogName: menu.catalogName,
-      schemaName: menu.schemaName,
-      tableId: menu.tableId,
-      tableName: menu.label
-    })
-    ddlModal.loading = false
-    if (result.ok) {
-      ddlModal.ddl = result.ddl
-      return
-    }
-    ddlModal.errorCode = result.errorCode === 'permission' ? 'permission' : 'other'
-    ddlModal.error = formatDdlError(result)
-    showNotice(ddlModal.error)
-  }
-
   function fetchTableDdl(ctx: {
     connectionId: string
     catalogName: string
@@ -643,160 +579,42 @@ export const createDatabaseCatalogConnectionWorkspaceController = (
     })
   }
 
-  async function copySelectSql() {
-    const menu = contextMenu.value
-    if (!menu || menu.type !== 'table') return
-    const connection = findConnection(menu.connectionId)
-    const qualified = buildQualifiedTableReference(connection?.dbType ?? 'mysql', menu.catalogName, menu.schemaName, menu.label)
-    if (await copyText(`SELECT * FROM ${qualified}`)) showNotice('SELECT copied')
-    closeMenus()
-  }
-
-  async function copyTableDdlFromContext() {
-    const menu = contextMenu.value
-    if (!menu || menu.type !== 'table') return
-    const result = await fetchTableDdl({
-      connectionId: menu.connectionId,
-      catalogName: menu.catalogName,
-      schemaName: menu.schemaName,
-      tableId: menu.tableId,
-      tableName: menu.label
-    })
-    if (!result.ok) {
-      showNotice(formatDdlError(result))
-      closeMenus()
-      return
-    }
-    if (await copyText(result.ddl)) showNotice('DDL copied')
-    closeMenus()
-  }
-
-  function requestDangerousTableAction(action: 'drop' | 'truncate') {
-    const menu = contextMenu.value
-    if (!menu || menu.type !== 'table') return
-    const qualified = `${menu.schemaName ? `${menu.schemaName}.` : ''}${menu.label}`
-    Object.assign(dangerConfirm, {
-      open: true,
-      action,
-      connectionId: menu.connectionId,
-      catalogName: menu.catalogName,
-      schemaName: menu.schemaName ?? '',
-      tableId: menu.tableId,
-      tableName: menu.label,
-      sql: action === 'drop' ? `DROP TABLE ${qualified};` : `TRUNCATE TABLE ${qualified};`,
-      confirmText: ''
-    })
-    closeMenus()
-  }
-
-  function cancelDangerousTableAction() {
-    dangerConfirm.open = false
-    dangerConfirm.confirmText = ''
-  }
-
-  function updateDangerConfirmText(value: string) {
-    dangerConfirm.confirmText = value
-  }
-
-  async function confirmDangerousTableAction() {
-    if (!dangerConfirm.open || dangerConfirm.confirmText !== dangerConfirm.tableName) return
-    const connection = findConnection(dangerConfirm.connectionId)
-    const context = [connection?.name, dangerConfirm.catalogName, dangerConfirm.schemaName, dangerConfirm.tableName].filter(Boolean).join(' · ')
-    hooks.openDbAi(dangerConfirm.action, dangerConfirm.sql, context, {
-      connectionId: dangerConfirm.connectionId,
-      dbType: connection?.dbType ?? '',
-      databaseName: dangerConfirm.catalogName,
-      schemaName: dangerConfirm.schemaName || undefined,
-      tableName: dangerConfirm.tableName,
-      contextSummary: context
-    })
-    const ok = dangerConfirm.action === 'truncate' ? await applyBackendTableTruncate() : await applyBackendTableDrop()
-    if (ok) {
-      dangerConfirm.open = false
-      dangerConfirm.confirmText = ''
-    }
-  }
-
-  async function applyBackendTableTruncate() {
-    const table = findTable(dangerConfirm.connectionId, dangerConfirm.catalogName, dangerConfirm.tableId, dangerConfirm.schemaName || undefined)
-    if (!table) return false
-    const result = await hooks.mutateDatabaseTableThroughBackend({
-      connectionId: dangerConfirm.connectionId,
-      databaseName: dangerConfirm.catalogName,
-      schemaName: dangerConfirm.schemaName || undefined,
-      tableName: dangerConfirm.tableName,
-      mutations: [{ kind: 'truncate' }]
-    })
-    if (!result.ok) {
-      showNotice(result.errorMessage || 'Backend table truncate failed')
-      return false
-    }
-    if (!isDatabaseTableMutationData(result.data)) {
-      showNotice(DATABASE_TABLE_MUTATION_MALFORMED_MESSAGE)
-      return false
-    }
-    hooks.dataTabsMatching({
-      connectionId: dangerConfirm.connectionId,
-      catalogName: dangerConfirm.catalogName,
-      schemaName: dangerConfirm.schemaName,
-      tableId: dangerConfirm.tableId,
-      tableName: dangerConfirm.tableName
-    }).forEach((tab) => {
-      void hooks.reloadDataTab(tab, { withTotal: tab.total !== null, preserveDirty: false, notice: 'Table truncated through backend table store' })
-    })
-    showNotice('Table truncated through backend table store')
-    return true
-  }
-
-  async function applyBackendTableDrop() {
-    const table = findTable(dangerConfirm.connectionId, dangerConfirm.catalogName, dangerConfirm.tableId, dangerConfirm.schemaName || undefined)
-    if (!table) return false
-    const droppedContext = {
-      connectionId: dangerConfirm.connectionId,
-      catalogName: dangerConfirm.catalogName,
-      schemaName: dangerConfirm.schemaName,
-      tableId: dangerConfirm.tableId,
-      tableName: dangerConfirm.tableName
-    }
-    const removedTabIds = hooks.tabIdsMatching(droppedContext)
-    const shouldCloseDdlModal =
-      ddlModal.open &&
-      ddlModal.connectionId === droppedContext.connectionId &&
-      ddlModal.catalogName === droppedContext.catalogName &&
-      (ddlModal.schemaName || '') === (droppedContext.schemaName || '') &&
-      (ddlModal.tableId === droppedContext.tableId || ddlModal.tableName === droppedContext.tableName)
-    const result = await hooks.mutateDatabaseTableThroughBackend({
-      connectionId: dangerConfirm.connectionId,
-      databaseName: dangerConfirm.catalogName,
-      schemaName: dangerConfirm.schemaName || undefined,
-      tableName: dangerConfirm.tableName,
-      mutations: [{ kind: 'drop' }]
-    })
-    if (!result.ok) {
-      showNotice(result.errorMessage || 'Backend table drop failed')
-      return false
-    }
-    if (!isDatabaseTableMutationData(result.data, { requireCatalog: true })) {
-      showNotice(DATABASE_TABLE_MUTATION_MALFORMED_MESSAGE)
-      return false
-    }
-    if (!result.data.catalog) {
-      showNotice(DATABASE_TABLE_MUTATION_MALFORMED_MESSAGE)
-      return false
-    }
-    applyDatabaseCatalog(result.data.catalog)
-    hooks.cleanupDroppedTableUi(droppedContext, removedTabIds, {
-      ddlOpen: shouldCloseDdlModal,
-      setDdlOpen: (open: boolean) => {
-        ddlModal.open = open
-      },
+  const tableActionRuntime = createDatabaseCatalogTableActionRuntime(
+    {
+      contextMenu,
+      activeSqlTab,
+      ddlModal,
+      dangerConfirm,
       expandedTables,
-      selectedNodeId,
-      databaseNodeExists
-    })
-    showNotice('Table dropped through backend table store')
-    return true
-  }
+      selectedNodeId
+    },
+    {
+      showNotice,
+      copyText,
+      closeMenus,
+      findConnection,
+      findTable,
+      openSqlConsole,
+      applyDatabaseCatalog,
+      databaseNodeExists,
+      fetchTableDdl
+    },
+    hooks
+  )
+
+  const {
+    openContextTable,
+    openContextSql,
+    openDdlModalFromContext,
+    copySelectSql,
+    copyTableDdlFromContext,
+    requestDangerousTableAction,
+    cancelDangerousTableAction,
+    updateDangerConfirmText,
+    confirmDangerousTableAction,
+    copyDdl,
+    closeDdlModal
+  } = tableActionRuntime
 
   function cancelOperationConfirm() {
     operationConfirm.open = false
@@ -847,18 +665,6 @@ export const createDatabaseCatalogConnectionWorkspaceController = (
 
   async function refreshDatabaseConnectionViaBackend(connectionId: string): Promise<DatabaseConnectionMutationResult> {
     return backend.refreshConnection(connectionId)
-  }
-
-  async function copyDdl() {
-    if (!ddlModal.ddl.trim()) {
-      showNotice('DDL is empty')
-      return
-    }
-    if (await copyText(ddlModal.ddl)) showNotice('DDL copied')
-  }
-
-  function closeDdlModal() {
-    ddlModal.open = false
   }
 
   async function saveConnectionDraft() {
