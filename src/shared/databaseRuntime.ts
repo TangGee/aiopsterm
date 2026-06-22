@@ -42,6 +42,10 @@ import {
   resetDatabaseAiBackendState
 } from './databaseAi'
 import {
+  connectionUsesDatabaseProxy,
+  testDatabaseConnectionRuntime
+} from './databaseConnectionTestRuntime'
+import {
   configureDatabaseCredentialStorage,
   encryptDatabaseCredentialForStorage
 } from './databaseCredentialStorage'
@@ -49,14 +53,12 @@ import {
   clickHouseBaseUrlFrom,
   clickHouseCatalogsForConnection,
   clickHouseColumnsForTable,
-  clickHouseEndpointFor,
   clickHouseErrorCode,
   clickHouseErrorMessage,
   clickHouseExecute,
   clickHouseIdentifier,
   clickHouseMutateTable,
   clickHouseMutationPlanData,
-  clickHouseQueryJson,
   clickHouseQueryTable,
   clickHouseQueryText,
   clickHouseTableDdl,
@@ -65,12 +67,10 @@ import {
   isPrestoConnection,
   prestoBaseUrlFrom,
   prestoCatalogsForConnection,
-  prestoEndpointFor,
   prestoErrorCode,
   prestoErrorMessage,
   prestoExecute,
   prestoMutationUnsupported,
-  prestoQuery,
   prestoQueryTable,
   prestoTableDdl
 } from './databaseHttpEngines'
@@ -100,7 +100,6 @@ import {
   relationalQueryTable,
   relationalTableDdl,
   resetDatabaseRelationalRuntime,
-  testRelationalDatabaseConnection,
   type DatabaseProxySocketResult,
   type MySqlDriver,
   type OracleDriver,
@@ -112,49 +111,41 @@ import {
   DEFAULT_DATABASE_GROUP_ID,
   databaseConnectionSeed,
   databaseConnectionSeedIds,
-  databaseEngineVersions,
   databaseEngines,
   databaseGroupParentSeed,
   databaseGroupSeed,
-  databaseSeedQueryRows,
-  databaseSeedTableDdl,
-  supportedDatabaseEngines,
-  type DatabaseSeedTableDdlEntry
 } from './databaseSeedData'
 import {
   normalizeSql,
   withDatabaseSqlExecutionRecord
 } from './databaseSqlExecution'
 import {
+  databaseSeedColumnsForTableKey,
+  databaseSeedTableExistsInBackend,
+  databaseSeedTableKeyForContext,
+  databaseSeedTableKeysForContext,
+  getDatabaseSeedTableDdl,
+  mutateDatabaseSeedTable,
+  planDatabaseSeedTableMutation,
+  queryDatabaseSeedTable,
+  resetDatabaseSeedTableRuntime,
+  resolveDatabaseSeedSqlRows
+} from './databaseSeedTableRuntime'
+import {
   configureDatabaseSqliteRuntime,
   isRealSqliteConnection,
-  isSqliteFileExtension,
-  openSqliteDatabase,
   resetDatabaseSqliteRuntime,
   sqliteCatalogsForConnection,
-  sqliteErrorCode,
-  sqliteErrorMessage,
   sqliteExecute,
   sqliteFilePathFromConnection,
-  sqliteFilePathFromTestInput,
   sqliteMutationPlan,
   sqliteMutateTable,
   sqlitePathFromUrl,
   sqliteQueryTable,
-  sqliteTableDdl,
-  type SqliteDatabase
+  sqliteTableDdl
 } from './databaseSqliteRuntime'
 import {
-  applySeedTableMutation,
-  cloneDdlEntries,
-  cloneRows,
-  columnsByTableRows,
   columnsForRows,
-  filterRows,
-  hasOwn,
-  parseOrderByRaw,
-  parseWhereRaw,
-  sortRows,
   trim
 } from './databaseTableRuntime'
 import { shouldUseDatabaseSeedData as runtimeShouldUseDatabaseSeedData } from './runtimeSwitches'
@@ -209,30 +200,6 @@ const jdbcSchemeForDbType = (dbType: DatabaseEngineCode) =>
               ? 'jdbc:oceanbase'
               : 'jdbc:mysql'
 
-const databaseProxyRequested = (input: Pick<DatabaseConnectionTestInput, 'needProxy' | 'proxyName'>) => !!input.needProxy || !!trim(input.proxyName)
-
-const databaseProxyUnsupportedFor = (dbType: DatabaseConnectionTestInput['dbType']) => {
-  if (dbType === 'oracle') {
-    return {
-      errorCode: 'DB_PROXY_ORACLE_UNSUPPORTED',
-      errorMessage: 'Database SSH proxy is not supported for Oracle connect strings in this version.'
-    }
-  }
-  if (dbType === 'clickhouse') {
-    return {
-      errorCode: 'DB_PROXY_CLICKHOUSE_UNSUPPORTED',
-      errorMessage: 'Database SSH proxy is not supported for ClickHouse HTTP connections in this version.'
-    }
-  }
-  if (dbType === 'presto') {
-    return {
-      errorCode: 'DB_PROXY_PRESTO_UNSUPPORTED',
-      errorMessage: 'Database SSH proxy is not supported for Presto HTTP connections in this version.'
-    }
-  }
-  return null
-}
-
 const connectionTestInputFromSaved = (connection: DatabaseConnectionInfo): DatabaseConnectionTestInput => ({
   dbType: connection.dbType,
   name: connection.name,
@@ -249,41 +216,12 @@ const connectionTestInputFromSaved = (connection: DatabaseConnectionInfo): Datab
   url: connection.url
 })
 
-const rowValue = (row: Record<string, unknown>, ...names: string[]) => {
-  for (const name of names) {
-    if (Object.prototype.hasOwnProperty.call(row, name)) return row[name]
-    const found = Object.keys(row).find((key) => key.toLowerCase() === name.toLowerCase())
-    if (found) return row[found]
-  }
-  return undefined
-}
-
-const endpointFor = (input: DatabaseConnectionTestInput) => {
-  if (input.dbType === 'sqlite') return trim(input.filePath) || sqlitePathFromUrl(trim(input.url))
-  if (input.dbType === 'oracle' && trim(input.url)) return trim(input.url)
-  if (input.dbType === 'presto') return prestoEndpointFor(input)
-  const host = trim(input.host)
-  const port = typeof input.port === 'number' && Number.isFinite(input.port) ? input.port : null
-  return port ? `${host}:${port}` : host
-}
-
-const tableRows = cloneRows(databaseSeedQueryRows)
-const tableColumns = columnsByTableRows(databaseSeedQueryRows)
-const tableDdlEntries: Record<string, DatabaseSeedTableDdlEntry> = cloneDdlEntries(databaseSeedTableDdl)
-
 configureDatabaseAiBackendContext({
   ensureStateLoaded: () => ensureDatabaseStateLoaded(),
   persistState: () => persistDatabaseState(),
-  tableKeysForContext: (input) =>
-    Object.keys(tableRows).filter((key) => {
-      const parts = tableKeyParts(key)
-      if (parts.connectionId !== input.connectionId) return false
-      if (input.databaseName && parts.databaseName !== input.databaseName) return false
-      if (input.schemaName && parts.schemaName !== input.schemaName) return false
-      return true
-    }),
-  tableKeyForContext: (input) => tableKeyForContext(input),
-  columnsForTableKey: (key) => tableColumns[key]?.slice() ?? columnsForRows(tableRows[key] ?? [])
+  tableKeysForContext: (input) => databaseSeedTableKeysForContext(input),
+  tableKeyForContext: (input) => databaseSeedTableKeyForContext(input),
+  columnsForTableKey: (key) => databaseSeedColumnsForTableKey(key)
 })
 
 configureDatabaseHttpEngines({
@@ -345,11 +283,6 @@ configureDatabaseSqliteRuntime({
   workspaceCatalogFor: (selectedConnectionId) => databaseWorkspaceCatalogFor(selectedConnectionId)
 })
 
-const tableExistsInBackend = (input: { connectionId: string; databaseName: string; schemaName?: string; tableName: string }) => {
-  const key = `${input.connectionId}:${input.databaseName}:${input.schemaName || ''}:${input.tableName}`
-  return hasOwn(tableRows, key) || hasOwn(tableDdlEntries, key)
-}
-
 const cloneDatabaseColumn = (column: DatabaseColumnInfo): DatabaseColumnInfo => ({ ...column })
 
 const cloneDatabaseTable = (table: DatabaseTableInfo): DatabaseTableInfo => ({
@@ -379,7 +312,7 @@ const cloneDatabaseCatalog = (connectionId: string, catalog: DatabaseCatalogInfo
   ...(catalog.tables
     ? {
         tables: catalog.tables
-          .filter((table) => tableExistsInBackend({ connectionId, databaseName: catalog.name, tableName: table.name }))
+          .filter((table) => databaseSeedTableExistsInBackend({ connectionId, databaseName: catalog.name, tableName: table.name }))
           .map(cloneDatabaseTable)
       }
     : {}),
@@ -388,10 +321,10 @@ const cloneDatabaseCatalog = (connectionId: string, catalog: DatabaseCatalogInfo
         schemas: catalog.schemas.map((schema) => ({
           name: schema.name,
           tables: schema.tables
-            .filter((table) => tableExistsInBackend({ connectionId, databaseName: catalog.name, schemaName: schema.name, tableName: table.name }))
+            .filter((table) => databaseSeedTableExistsInBackend({ connectionId, databaseName: catalog.name, schemaName: schema.name, tableName: table.name }))
             .map(cloneDatabaseTable),
           views: (schema.views ?? [])
-            .filter((table) => tableExistsInBackend({ connectionId, databaseName: catalog.name, schemaName: schema.name, tableName: table.name }))
+            .filter((table) => databaseSeedTableExistsInBackend({ connectionId, databaseName: catalog.name, schemaName: schema.name, tableName: table.name }))
             .map(cloneDatabaseTable),
           functions: schema.functions?.slice(),
           procedures: schema.procedures?.slice()
@@ -685,7 +618,7 @@ const normalizeDatabaseConnectionSaveDraft = (
   const port = isSqlite || hasOracleConnectString ? null : normalizedDatabasePort(input.port)
   const sslMode: DatabaseConnectionInfo['sslMode'] =
     isPostgresCompatibleDbType(input.dbType) && postgresSslModeValues.has(input.sslMode ?? '') ? ((input.sslMode || '') as DatabaseConnectionInfo['sslMode']) : ''
-  const proxyName = !isSqlite && databaseProxyRequested(input) ? trim(input.proxyName) : ''
+  const proxyName = !isSqlite && connectionUsesDatabaseProxy(input) ? trim(input.proxyName) : ''
   const normalized = {
     name: trim(input.name),
     dbType: input.dbType,
@@ -713,18 +646,7 @@ export function resetDatabaseBackendSeed() {
   databaseLoadedStateFilePath = ''
   databaseConnectionSecrets.clear()
   databaseVerifiedConnections.clear()
-  Object.keys(tableRows).forEach((key) => {
-    delete tableRows[key]
-  })
-  Object.keys(tableColumns).forEach((key) => {
-    delete tableColumns[key]
-  })
-  Object.assign(tableRows, cloneRows(databaseSeedQueryRows))
-  Object.assign(tableColumns, columnsByTableRows(databaseSeedQueryRows))
-  Object.keys(tableDdlEntries).forEach((key) => {
-    delete tableDdlEntries[key]
-  })
-  Object.assign(tableDdlEntries, cloneDdlEntries(databaseSeedTableDdl))
+  resetDatabaseSeedTableRuntime()
   databaseGroups = databaseGroupSeed.map((group) => ({ ...group }))
   databaseGroupParents = { ...databaseGroupParentSeed }
   databaseConnections = databaseConnectionSeed.map(cloneDatabaseConnection)
@@ -1057,222 +979,9 @@ export async function refreshDatabaseConnection(connectionId: string): Promise<D
   })
 }
 
-const unquoteIdentifier = (value: string) => value.replace(/^[`"\[]|[`"\]]$/g, '').replace(/""/g, '"').replace(/``/g, '`').replace(/]]/g, ']')
-
-const tableNameFromSql = (sql: string) => {
-  const match = sql.match(/\bfrom\s+([`"\[]?[\w.-]+[`"\]]?(?:\s*\.\s*[`"\[]?[\w.-]+[`"\]]?)?)/i)
-  if (!match) return ''
-  const parts = match[1]
-    .split('.')
-    .map((part) => unquoteIdentifier(part.trim()))
-    .filter(Boolean)
-  return parts.at(-1) || ''
-}
-
-const schemaNameFromSql = (sql: string) => {
-  const match = sql.match(/\bfrom\s+([`"\[]?[\w.-]+[`"\]]?)\s*\.\s*([`"\[]?[\w.-]+[`"\]]?)/i)
-  return match ? unquoteIdentifier(match[1].trim()) : ''
-}
-
-const tableKeyParts = (key: string) => {
-  const [connectionId, databaseName, schemaName, tableName] = key.split(':')
-  return { connectionId, databaseName, schemaName, tableName }
-}
-
-const tableRowsForContext = (input: { connectionId: string; databaseName?: string; schemaName?: string; tableName?: string }) => {
-  const tableName = trim(input.tableName)
-  const candidates = [
-    `${input.connectionId}:${input.databaseName || ''}:${input.schemaName || ''}:${tableName}`,
-    `${input.connectionId}:${input.databaseName || ''}::${tableName}`
-  ]
-  const found = candidates.map((key) => tableRows[key]).find(Boolean)
-  return found?.map((row) => ({ ...row })) ?? null
-}
-
-const tableKeyForContext = (input: { connectionId: string; databaseName?: string; schemaName?: string; tableName?: string }) => {
-  const tableName = trim(input.tableName)
-  const candidates = [
-    `${input.connectionId}:${input.databaseName || ''}:${input.schemaName || ''}:${tableName}`,
-    `${input.connectionId}:${input.databaseName || ''}::${tableName}`
-  ]
-  return candidates.find((key) => tableRows[key]) || ''
-}
-
-const findRowsForSql = (input: DatabaseSqlExecuteInput, sql: string) => {
-  const tableName = tableNameFromSql(sql)
-  const explicitSchema = schemaNameFromSql(sql)
-  return tableRowsForContext({
-    connectionId: input.connectionId,
-    databaseName: input.databaseName,
-    schemaName: explicitSchema || input.schemaName || '',
-    tableName
-  })
-}
-
-const constantRowsForSql = (sql: string) => {
-  const normalized = normalizeSql(sql).replace(/;$/, '')
-  const match = normalized.match(/^select\s+1(?:\s+as\s+([A-Za-z_][\w$]*))?$/i)
-  if (!match) return null
-  return [{ [match[1] || 'result']: 1 }]
-}
-
-const resolveSeedSqlRows = (input: DatabaseSqlExecuteInput, sql: string) => {
-  const explained = /^explain\b/i.test(sql)
-  const tableName = tableNameFromSql(sql)
-  const tableRows = tableName ? findRowsForSql(input, sql) : null
-  if (explained) {
-    if (tableName && !tableRows) {
-      return { ok: false as const, errorCode: 'DB_TABLE_NOT_FOUND', errorMessage: `Table not found: ${tableName}` }
-    }
-    return {
-      ok: true as const,
-      rows: [
-        { step: 1, operation: tableName ? 'Seq Scan' : 'Result', relation: tableName || 'derived', cost: '0.00..12.40', rows: tableRows?.length ?? 1 },
-        { step: 2, operation: 'Limit', relation: 'result', cost: '0.00..1.00', rows: 1 }
-      ]
-    }
-  }
-  if (tableRows) return { ok: true as const, rows: tableRows }
-  const constantRows = constantRowsForSql(sql)
-  if (constantRows) return { ok: true as const, rows: constantRows }
-  if (/\bfrom\b/i.test(sql)) {
-    return { ok: false as const, errorCode: 'DB_TABLE_NOT_FOUND', errorMessage: `Table not found: ${tableName || 'unknown'}` }
-  }
-  return {
-    ok: false as const,
-    errorCode: 'DB_SQL_UNSUPPORTED',
-    errorMessage: 'Seed database SQL execution supports backend-known tables or SELECT 1 only.'
-  }
-}
-
 export async function testDatabaseConnection(input: DatabaseConnectionTestInput): Promise<DatabaseConnectionTestResult> {
   ensureDatabaseStateLoaded()
-  const startedAt = Date.now()
-  if (!supportedDatabaseEngines.has(input.dbType)) {
-    return { ok: false, errorCode: 'DB_UNSUPPORTED_ENGINE', errorMessage: `Unsupported database engine: ${input.dbType}` }
-  }
-
-  if (!trim(input.name)) {
-    return { ok: false, errorCode: 'DB_CONNECTION_NAME_REQUIRED', errorMessage: 'Connection name is required.' }
-  }
-
-  if (input.dbType === 'sqlite') {
-    const filePath = sqliteFilePathFromTestInput(input)
-    if (!filePath) {
-      return { ok: false, errorCode: 'DB_SQLITE_FILE_REQUIRED', errorMessage: 'SQLite file path is required.' }
-    }
-    if (!isSqliteFileExtension(filePath)) {
-      return { ok: false, errorCode: 'DB_SQLITE_EXTENSION', errorMessage: 'SQLite file should end with .db, .sqlite, or .sqlite3.' }
-    }
-    if (!existsSync(filePath)) {
-      return { ok: false, errorCode: 'DB_SQLITE_FILE_NOT_FOUND', errorMessage: 'SQLite file does not exist.' }
-    }
-    let db: SqliteDatabase | null = null
-    try {
-      db = openSqliteDatabase(filePath, input.readonly !== false)
-      const rows = db.prepare('SELECT sqlite_version() AS version').all()
-      const version = String(rows[0]?.version ?? '').trim()
-      return {
-        ok: true,
-        data: {
-          dbType: input.dbType,
-          serverVersion: version ? `SQLite ${version}` : databaseEngineVersions.sqlite,
-          endpoint: endpointFor(input),
-          durationMs: Math.max(1, Date.now() - startedAt)
-        }
-      }
-    } catch (error) {
-      return {
-        ok: false,
-        errorCode: sqliteErrorCode(error, 'DB_SQLITE_OPEN_FAILED'),
-        errorMessage: sqliteErrorMessage(error, 'SQLite connection test failed.')
-      }
-    } finally {
-      db?.close()
-    }
-  } else {
-    const hasOracleConnectString = input.dbType === 'oracle' && !!trim(input.url)
-    if (hasOracleConnectString && !/(jdbc:oracle|:\/\/|:)/i.test(trim(input.url))) {
-      return { ok: false, errorCode: 'DB_ORACLE_CONNECT_STRING', errorMessage: 'Oracle connect string is not valid enough for backend validation.' }
-    }
-    if (!hasOracleConnectString) {
-      if (!trim(input.host)) {
-        return { ok: false, errorCode: 'DB_HOST_REQUIRED', errorMessage: 'Database host is required.' }
-      }
-      if (typeof input.port !== 'number' || !Number.isFinite(input.port) || input.port <= 0) {
-        return { ok: false, errorCode: 'DB_PORT_REQUIRED', errorMessage: 'Database port is required.' }
-      }
-    }
-    if (!trim(input.user)) {
-      return { ok: false, errorCode: 'DB_USER_REQUIRED', errorMessage: 'Database user is required.' }
-    }
-    if (databaseProxyRequested(input) && !trim(input.proxyName)) {
-      return { ok: false, errorCode: 'DB_PROXY_REQUIRED', errorMessage: 'Database SSH proxy name is required.' }
-    }
-    if (databaseProxyRequested(input)) {
-      const unsupported = databaseProxyUnsupportedFor(input.dbType)
-      if (unsupported) return { ok: false, ...unsupported }
-    }
-  }
-
-  if (!shouldUseDatabaseSeedData()) {
-    if (input.dbType === 'clickhouse') {
-      try {
-        const result = await clickHouseQueryJson<{ version?: string }>(input, 'SELECT version() AS version', trim(input.database))
-        const version = trim(rowValue(result.rows[0] ?? {}, 'version', 'VERSION'))
-        return {
-          ok: true,
-          data: {
-            dbType: 'clickhouse',
-            serverVersion: version ? `ClickHouse ${version}` : 'ClickHouse',
-            endpoint: clickHouseEndpointFor(input),
-            durationMs: Math.max(1, Date.now() - startedAt)
-          }
-        }
-      } catch (error) {
-        return {
-          ok: false,
-          errorCode: clickHouseErrorCode(error, 'DB_CLICKHOUSE_CONNECTION_FAILED'),
-          errorMessage: clickHouseErrorMessage(error, 'ClickHouse connection failed.')
-        }
-      }
-    }
-    if (input.dbType === 'presto') {
-      try {
-        const result = await prestoQuery<{ version?: string }>(input, 'SELECT node_version AS version FROM system.runtime.nodes LIMIT 1', {
-          databaseName: trim(input.database),
-          schemaName: ''
-        })
-        const version = trim(rowValue(result.rows[0] ?? {}, 'version', 'VERSION'))
-        return {
-          ok: true,
-          data: {
-            dbType: 'presto',
-            serverVersion: version ? `Presto ${version}` : 'Presto',
-            endpoint: prestoEndpointFor(input),
-            durationMs: Math.max(1, Date.now() - startedAt)
-          }
-        }
-      } catch (error) {
-        return {
-          ok: false,
-          errorCode: prestoErrorCode(error, 'DB_PRESTO_CONNECTION_FAILED'),
-          errorMessage: prestoErrorMessage(error, 'Presto connection failed.')
-        }
-      }
-    }
-    return testRelationalDatabaseConnection(input, startedAt)
-  }
-
-  return {
-    ok: true,
-    data: {
-      dbType: input.dbType,
-      serverVersion: databaseEngineVersions[input.dbType],
-      endpoint: endpointFor(input),
-      durationMs: Math.max(1, Date.now() - startedAt)
-    }
-  }
+  return testDatabaseConnectionRuntime(input, { shouldUseSeedData: shouldUseDatabaseSeedData })
 }
 
 export async function saveDatabaseConnection(input: DatabaseConnectionSaveInput): Promise<DatabaseConnectionSaveResult> {
@@ -1474,7 +1183,7 @@ export async function executeDatabaseSql(input: DatabaseSqlExecuteInput): Promis
     )
   }
 
-  const resolved = resolveSeedSqlRows(input, sql)
+  const resolved = resolveDatabaseSeedSqlRows(input, sql)
   if (!resolved.ok) {
     return withDatabaseSqlExecutionRecord(
       {
@@ -1527,18 +1236,7 @@ export async function getDatabaseTableDdl(input: DatabaseTableDdlInput): Promise
     return { ok: false, errorCode: 'DB_ENGINE_RUNTIME_UNAVAILABLE', errorMessage: 'This database engine DDL lookup is not wired in this aiopsterm backend yet.' }
   }
 
-  const key = tableKeyForContext(input)
-  if (!key) {
-    return { ok: false, errorCode: 'DB_TABLE_NOT_FOUND', errorMessage: `Table not found: ${input.tableName}` }
-  }
-  const entry = tableDdlEntries[key]
-  if (!entry?.ddl.trim()) {
-    return { ok: false, errorCode: 'other', errorMessage: 'DDL is empty.' }
-  }
-  if (entry.error) {
-    return { ok: false, errorCode: entry.error.code, errorMessage: entry.error.message }
-  }
-  return { ok: true, data: { ddl: entry.ddl } }
+  return getDatabaseSeedTableDdl(input)
 }
 
 export async function queryDatabaseTable(input: DatabaseTableQueryInput): Promise<DatabaseTableQueryResult> {
@@ -1568,33 +1266,7 @@ export async function queryDatabaseTable(input: DatabaseTableQueryInput): Promis
     return { ok: false, errorCode: 'DB_ENGINE_RUNTIME_UNAVAILABLE', errorMessage: 'This database engine table query is not wired in this aiopsterm backend yet.' }
   }
 
-  const tableKey = tableKeyForContext(input)
-  if (!tableKey) {
-    return { ok: false, errorCode: 'DB_TABLE_NOT_FOUND', errorMessage: `Table not found: ${input.tableName}` }
-  }
-  const sourceRows = tableRows[tableKey].map((row) => ({ ...row }))
-
-  const knownColumns = tableColumns[tableKey]?.slice() ?? columnsForRows(sourceRows)
-  const filters = [...parseWhereRaw(input.whereRaw), ...(input.filters ?? [])]
-  const filteredRows = filterRows(sourceRows, filters)
-  const sort = input.sort ?? parseOrderByRaw(input.orderByRaw, knownColumns)
-  const rows = sortRows(filteredRows, sort)
-  const pageSize = Math.max(1, Math.min(1000, Math.floor(Number(input.pageSize) || 100)))
-  const page = Math.max(1, Math.floor(Number(input.page) || 1))
-  const start = (page - 1) * pageSize
-  const pageRows = rows.slice(start, start + pageSize).map((row) => ({ ...row }))
-
-  return {
-    ok: true,
-    data: {
-      columns: knownColumns,
-      rows: pageRows,
-      rowCount: pageRows.length,
-      durationMs: Math.max(1, Date.now() - startedAt),
-      total: input.withTotal ? rows.length : null,
-      knownColumns
-    }
-  }
+  return queryDatabaseSeedTable(input, startedAt)
 }
 
 export async function planDatabaseTableMutation(input: DatabaseTableMutationPlanInput): Promise<DatabaseTableMutationPlanResult> {
@@ -1665,20 +1337,7 @@ export async function planDatabaseTableMutation(input: DatabaseTableMutationPlan
     return { ok: false, errorCode: 'DB_ENGINE_RUNTIME_UNAVAILABLE', errorMessage: 'This database engine table mutation planning is not wired in this aiopsterm backend yet.' }
   }
 
-  const key = tableKeyForContext(input)
-  if (!key) {
-    return { ok: false, errorCode: 'DB_TABLE_NOT_FOUND', errorMessage: `Table not found: ${input.tableName}` }
-  }
-  const knownColumns = tableColumns[key]?.slice() ?? inputKnownColumns(input) ?? columnsForRows(tableRows[key])
-  try {
-    return { ok: true, data: databaseMutationPlanData(connection, input, knownColumns) }
-  } catch (error) {
-    return {
-      ok: false,
-      errorCode: databaseMutationPlanErrorCode(error, 'DB_MUTATION_PLAN_FAILED'),
-      errorMessage: databaseMutationPlanErrorMessage(error, 'Database table mutation planning failed.')
-    }
-  }
+  return planDatabaseSeedTableMutation(connection, input)
 }
 
 export async function mutateDatabaseTable(input: DatabaseTableMutationInput): Promise<DatabaseTableMutationResult> {
@@ -1698,17 +1357,16 @@ export async function mutateDatabaseTable(input: DatabaseTableMutationInput): Pr
     return { ok: false, errorCode: 'DB_ENGINE_RUNTIME_UNAVAILABLE', errorMessage: 'This database engine table mutations are not wired in this aiopsterm backend yet.' }
   }
 
-  const key = tableKeyForContext(input)
-  if (!key) {
-    return { ok: false, errorCode: 'DB_TABLE_NOT_FOUND', errorMessage: `Table not found: ${input.tableName}` }
+  const mutation = mutateDatabaseSeedTable(input)
+  if (!mutation.ok) {
+    return { ok: false, errorCode: mutation.errorCode, errorMessage: mutation.errorMessage }
   }
-  const affected = applySeedTableMutation(tableRows, tableColumns, tableDdlEntries, key, input.mutations)
   persistDatabaseState()
 
   return {
     ok: true,
     data: {
-      affected,
+      affected: mutation.affected,
       durationMs: Math.max(1, Date.now() - startedAt),
       catalog: databaseWorkspaceCatalogFor(input.connectionId)
     }
