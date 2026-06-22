@@ -20,6 +20,7 @@ import {
   handleSessionControlRequest,
   publishControlEvent
 } from './controlSocketStateRuntime'
+import { controlSocketNotificationSummary } from './controlSocketNotificationRuntime'
 import {
   configureControlSocketRendererMutationRuntime,
   publishRendererMutationEvent
@@ -205,7 +206,8 @@ export const systemIdentify = (params: Record<string, unknown> = {}) =>
     runtime: {
       userDataPath: runtime.userDataPath || '',
       windowCount: runtime.getWindows ? runtime.getWindows().filter((window) => !window.isDestroyed()).length : 0,
-      ...controlSocketStateSummary()
+      ...controlSocketStateSummary(),
+      ...controlSocketNotificationSummary()
     },
     capabilities: controlSocketCapabilities
   })

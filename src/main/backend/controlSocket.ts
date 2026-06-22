@@ -46,15 +46,10 @@ import {
   terminalPanelId
 } from './controlSocketTerminalTools'
 import {
-  clearNotifications,
   closeControlSocketStateRuntime,
   configureControlSocketStateRuntime,
   controlSocketEventLogPathFor as eventLogPathFor,
   controlSocketSessionSnapshotPathFor as sessionSnapshotPathFor,
-  createCallerNotification,
-  createNotification,
-  createTargetedNotification,
-  dismissNotification,
   eventSubscriptionCountForTesting,
   handleMobileEventsControlRequest,
   handleSessionControlRequest,
@@ -64,21 +59,30 @@ import {
   isControlMobileEventsMethod as isMobileEventsMethod,
   isControlSessionMethod as isSessionMethod,
   isControlWaitForMethod as isWaitForMethod,
-  jumpToUnreadNotification,
   listEvents,
   listEventsForTesting,
   listMobileEventSubscriptionsForTesting,
-  listNotifications,
-  listNotificationsForTesting,
   listSessionSnapshotsForTesting,
   loadControlSessionSnapshotStore as loadSessionSnapshotStore,
   loadControlSocketDurableEventLog as loadDurableEventLog,
-  markNotificationRead,
   mobileEventSubscriptionCountForTesting,
-  openNotification,
   publishControlEvent,
   startEventStream
 } from './controlSocketStateRuntime'
+import {
+  clearNotifications,
+  configureControlSocketNotificationRuntime,
+  createCallerNotification,
+  createNotification,
+  createTargetedNotification,
+  dismissNotification,
+  jumpToUnreadNotification,
+  listNotifications,
+  listNotificationsForTesting,
+  markNotificationRead,
+  openNotification,
+  resetControlSocketNotificationRuntime
+} from './controlSocketNotificationRuntime'
 import {
   configureControlSocketSidebarMetadataRuntime,
   handleSidebarMetadataControlRequest,
@@ -530,8 +534,12 @@ export const configureControlSocketRuntime = (config: ControlSocketRuntime = {})
   configureControlSocketRendererRuntime({ ...runtime, socketPath })
   configureControlSocketStateRuntime({
     ...(runtime.userDataPath ? { userDataPath: runtime.userDataPath } : {}),
+    dispatchRendererControlRequest
+  })
+  configureControlSocketNotificationRuntime({
     dispatchRendererControlRequest,
-    showNotification: runtime.showNotification
+    showNotification: runtime.showNotification,
+    publishControlEvent
   })
   configureAgentVaultRuntime({
     ...(runtime.userDataPath ? { userDataPath: runtime.userDataPath } : {}),
@@ -567,7 +575,8 @@ export const ensureControlSocketServer = async (userDataPath: string) => {
   socketPath = socketPathFor(userDataPath)
   runtime = { ...runtime, userDataPath }
   configureControlSocketRendererRuntime({ ...runtime, socketPath })
-  configureControlSocketStateRuntime({ userDataPath, dispatchRendererControlRequest, showNotification: runtime.showNotification })
+  configureControlSocketStateRuntime({ userDataPath, dispatchRendererControlRequest })
+  configureControlSocketNotificationRuntime({ dispatchRendererControlRequest, showNotification: runtime.showNotification, publishControlEvent })
   configureAgentVaultRuntime({ userDataPath, dispatchRendererControlRequest, publishControlEvent })
   configureControlSocketAgentRuntime({ userDataPath, writeTerminal: runtime.writeTerminal, handleMobileTerminalControlRequest, publishControlEvent })
   configureControlSocketCompatibilityRuntime({ userDataPath })
@@ -630,6 +639,7 @@ export const ensureControlSocketServer = async (userDataPath: string) => {
 export const closeControlSocketServer = () => {
   closePendingRendererControlRequests()
   closeControlSocketStateRuntime()
+  resetControlSocketNotificationRuntime()
   resetControlSocketSidebarMetadataRuntime()
   resetControlSocketTerminalTools()
   resetAgentVaultRuntimeState()
