@@ -2,38 +2,13 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } 
 import { copyTextToClipboard } from '@/services/clipboardRuntime'
 import { databaseClient } from '@/services/databaseClient'
 import { createDatabaseAiWorkspaceController } from '@/services/databaseAiWorkspaceController'
+import { createDatabaseSqlDataWorkspaceController } from '@/services/databaseSqlDataWorkspaceController'
 import { createDatabaseSqlEditorWorkspaceController } from '@/services/databaseSqlEditorWorkspaceController'
 import { localFilesClient } from '@/services/localFilesClient'
 import type { DatabaseMainWorkspaceApi } from '@/components/database/DatabaseMainWorkspace.vue'
 import {
-  applyFilters,
-  applyOrderBySort,
-  applySort,
-  addDataRowState,
-  buildDataEditSummary,
-  buildDataMutationPayload,
-  clampPage,
-  deleteSelectedDataRowState,
-  isDirtyStateDirty,
-  makeDataMutationPlanState,
   makeDirtyState,
-  makeOriginalRows,
-  nextSort,
-  parseOrderByRaw,
-  parseWhereRaw,
-  replaceFilter,
-  undoDataChangesState,
-  updateDataCellState,
-  updateNewDataRowCellState,
-  type DataMutationPlanState,
-  type DbFilter,
-  type DbOrderBy,
 } from '@/services/databaseGridRuntime'
-import {
-  currentSqlStatement,
-  firstStatement,
-  formatSqlText
-} from '@/services/databaseSqlEditorRuntime'
 import {
   isConnectableDatabaseEngineInfo,
   isDatabaseConnectionDeleteDataForRequest,
@@ -41,27 +16,17 @@ import {
   isDatabaseConnectionSaveDataForRequest,
   isDatabaseConnectionTestData,
   isDatabaseCreateDatabaseDataForRequest,
-  isDatabaseExportData,
   isDatabaseGroupDeleteDataForRequest,
   isDatabaseGroupMutationDataForRequest,
-  isDatabasePageCommentGetData,
-  isDatabasePageCommentSaveData,
-  isDatabaseSqlExecuteData,
-  isDatabaseSqlExecutionRecord,
   isDatabaseTableMutationData,
-  isDatabaseTableMutationPlanData,
-  isDatabaseTableQueryData,
   isDatabaseWorkspaceCatalog,
-  isLocalFileWriteData,
 } from '@/services/databaseBackendGuards'
 import {
-  buildChartSummary,
   buildConnectionUrl,
   buildQualifiedTableReference,
   collectDescendantGroupIds,
   columnNodeId,
   connectionText,
-  databasePageCommentKeyId,
   DB_AI_PANE_MAX_WIDTH,
   DB_AI_PANE_MIN_WIDTH,
   DB_IDENT_RE,
@@ -81,8 +46,6 @@ import {
   schemaRoutineNodeId,
   sqlConnectionRequiresSchema,
   toggleId,
-  type DatabaseChartSource,
-  type DatabaseChartSummary,
   type SchemaObjectKind,
   type TableDdlResult,
   type VisibleGroupNode
@@ -93,26 +56,20 @@ import type {
   ContextSubmenu,
   DatabaseOperationConfirmAction,
   SqlConsoleContext,
-  SqlExecutionOutcome,
-  SqlExecutionPayload,
-  SqlHistory,
-  SqlResult,
-  SqlResultViewState,
   WorkspaceTab
 } from '@/services/databaseWorkspaceTypes'
 import { useWorkspaceStore } from '@/stores/workspace'
 import type {
   DatabaseCatalogInfo, DatabaseColumnInfo, DatabaseConnectionDeleteResult, DatabaseConnectionInfo, DatabaseConnectionMoveInput, DatabaseConnectionMutationResult,
   DatabaseConnectionSaveInput, DatabaseConnectionSaveResult, DatabaseConnectionTestInput, DatabaseConnectionTestResult, DatabaseCreateDatabaseResult,
-  DatabaseEngineCode, DatabaseEngineInfo, DatabaseExportInput, DatabaseExportResult, DatabaseGroupCreateInput, DatabaseGroupDeleteResult, DatabaseGroupInfo,
-  DatabaseGroupMutationResult, DatabaseGroupUpdateInput, DatabasePageCommentKey, DatabaseSqlExecutionRecord, DatabaseSqlExecuteResult,
-  DatabaseTableInfo, DatabaseTableMutationInput, DatabaseTableMutationPlanResult, DatabaseTableMutationResult,
-  DatabaseTableQueryResult, DatabaseWorkspaceCatalog
+  DatabaseEngineCode, DatabaseEngineInfo, DatabaseGroupCreateInput, DatabaseGroupDeleteResult, DatabaseGroupInfo,
+  DatabaseGroupMutationResult, DatabaseGroupUpdateInput,
+  DatabaseTableInfo,
+  DatabaseWorkspaceCatalog
 } from '@shared/contracts/database'
 
 export const useDatabaseWorkspaceRuntime = () => {
 
-  type TableReloadOptions = { withTotal?: boolean; preserveDirty?: boolean; notice?: string }
   const DATABASE_CATALOG_MALFORMED_MESSAGE = 'Database catalog backend returned malformed result data.'
   const DATABASE_CONNECTION_TEST_MALFORMED_MESSAGE = 'Database connection test backend returned malformed result data.'
   const DATABASE_CONNECTION_SAVE_MALFORMED_MESSAGE = 'Database connection save backend returned malformed result data.'
@@ -120,11 +77,6 @@ export const useDatabaseWorkspaceRuntime = () => {
   const DATABASE_CONNECTION_MUTATION_MALFORMED_MESSAGE = 'Database connection backend returned malformed result data.'
   const DATABASE_CREATE_DATABASE_MALFORMED_MESSAGE = 'Create database backend returned malformed result data.'
   const DATABASE_TABLE_MUTATION_MALFORMED_MESSAGE = 'Backend table mutation returned malformed result data.'
-  const SQL_FILE_WRITE_MALFORMED_MESSAGE = 'SQL file writer returned malformed result data.'
-  const DATABASE_SQL_EXECUTOR_UNAVAILABLE_MESSAGE = 'Database SQL executor service unavailable'
-  const DATABASE_TABLE_QUERY_UNAVAILABLE_MESSAGE = 'Database table query service unavailable'
-  const DATABASE_TABLE_MUTATION_PLAN_UNAVAILABLE_MESSAGE = 'Database table mutation planner service unavailable'
-  const DATABASE_TABLE_MUTATION_UNAVAILABLE_MESSAGE = 'Database table mutation service unavailable'
   const workspaceStore = useWorkspaceStore()
 
   const databaseEngines = ref<DatabaseEngineInfo[]>([])
@@ -153,7 +105,6 @@ export const useDatabaseWorkspaceRuntime = () => {
 
   const tabs = ref<WorkspaceTab[]>([{ id: 'tab-overview', kind: 'overview', title: 'Overview' }])
   const activeTabId = ref('tab-overview')
-  const resultSeq = ref(1)
   const sqlEditorRef = ref<DatabaseMainWorkspaceApi | null>(null)
 
   const connectionModalOpen = ref(false)
@@ -210,22 +161,6 @@ export const useDatabaseWorkspaceRuntime = () => {
     error: '',
     errorCode: '' as '' | 'permission' | 'other'
   })
-  const chartModal = reactive({
-    open: false,
-    summary: null as DatabaseChartSummary | null,
-    error: ''
-  })
-  const commentModal = reactive({
-    open: false,
-    title: '',
-    scopeLabel: '',
-    key: null as DatabasePageCommentKey | null,
-    draft: '',
-    updatedAt: 0,
-    loading: false,
-    saving: false,
-    error: ''
-  })
   const databaseAiPanelsRef = ref<{ scrollPaneMessagesToBottom: () => void } | null>(null)
   const dangerConfirm = reactive({
     open: false,
@@ -251,9 +186,6 @@ export const useDatabaseWorkspaceRuntime = () => {
   const activeTab = computed(() => tabs.value.find((tab) => tab.id === activeTabId.value))
   const activeSqlTab = computed(() => (activeTab.value?.kind === 'sql' ? activeTab.value : null))
   const activeDataTab = computed(() => (activeTab.value?.kind === 'data' ? activeTab.value : null))
-  const activeDataEditSummary = computed(() => (activeDataTab.value ? buildDataEditSummary(activeDataTab.value) : null))
-  const sqlResultViewStateById = reactive<Record<string, SqlResultViewState>>({})
-  const emptySqlResultViewState: SqlResultViewState = Object.freeze({ page: 1, pageSize: 100, filters: [], sort: null }) as SqlResultViewState
 
   const activeSqlCanRun = computed(() => {
     const tab = activeSqlTab.value
@@ -309,17 +241,6 @@ export const useDatabaseWorkspaceRuntime = () => {
       .map((group) => ({ id: group.id, name: groupPathLabel(group.id, groups.value, groupParentById) }))
   })
   const connectionRootMoveDisabled = computed(() => contextConnection.value?.groupId === DEFAULT_GROUP_ID)
-
-  const activeSqlResult = computed(() => {
-    const tab = activeSqlTab.value
-    if (!tab || tab.activeResultTabId === 'overview') return null
-    return tab.resultTabs.find((result) => result.id === tab.activeResultTabId) ?? null
-  })
-
-  const activeSqlResultViewState = computed(() => {
-    const result = activeSqlResult.value
-    return result ? getOrCreateSqlResultViewState(result.id) : emptySqlResultViewState
-  })
 
   const activeSqlHasText = computed(() => Boolean(activeSqlTab.value?.sql.trim()))
   const activeSqlSaving = computed(() => Boolean(activeSqlTab.value?.saving))
@@ -386,6 +307,92 @@ export const useDatabaseWorkspaceRuntime = () => {
     },
     {
       showNotice
+    }
+  )
+  const {
+    chartModal,
+    commentModal,
+    activeDataEditSummary,
+    activeSqlResult,
+    activeSqlResultViewState,
+    activeDataWherePending,
+    pagedDataRows,
+    filteredSqlRows,
+    pagedSqlRows,
+    openTable,
+    updateActiveSql,
+    runSql,
+    appendSqlExecution,
+    runSqlFromShortcut,
+    saveActiveSql,
+    closeResultTab,
+    openSqlHistoryResult,
+    isSqlHistoryClosed,
+    updateSqlResultActiveTab,
+    updateSqlResultPage,
+    updateSqlResultPageSize,
+    gotoLastSqlResultPage,
+    cycleSqlSort,
+    applySqlFilter,
+    updateDataPage,
+    updateDataPageSize,
+    updateActiveDataWhereDraft,
+    gotoLastDataPage,
+    cycleDataSort,
+    applyDataFilter,
+    applyWhere,
+    canEditDataTab,
+    dataEditDisabledReason,
+    isDataTabDirty,
+    resetDataMutationPlan,
+    refreshDataMutationPlan,
+    updateDataCell,
+    updateNewDataRowCell,
+    setActiveDataSelectedRow,
+    addDataRow,
+    deleteSelectedDataRow,
+    undoDataChanges,
+    saveDataChanges,
+    mutateDatabaseTableThroughBackend,
+    exportActiveSqlResultPage,
+    exportActiveDataPage,
+    closeChartModal,
+    updateCommentDraft,
+    openActiveSqlResultChart,
+    openActiveDataChart,
+    openActiveSqlResultComment,
+    openActiveDataComment,
+    saveActiveComment,
+    closeCommentModal,
+    discardDataChanges,
+    copyDataMutationPreview,
+    refreshDataTab,
+    refreshDataTotal,
+    reloadDataTab,
+    formatSql,
+    cleanupDroppedTableUi,
+    dataTabsMatching,
+    tabIdsMatching
+  } = createDatabaseSqlDataWorkspaceController(
+    {
+      tabs,
+      activeTabId,
+      activeSqlTab,
+      activeDataTab,
+      activeSqlCanRun
+    },
+    {
+      showNotice,
+      copyText,
+      bridgeErrorMessage,
+      errorToMessage,
+      findConnection,
+      findTable,
+      tableContextMatches,
+      getSelectedSqlText,
+      getSqlCursorOffset,
+      getSqlSelectionRange,
+      setEditorSql
     }
   )
   const databaseWorkspaceStyle = computed(() => ({
@@ -514,36 +521,6 @@ export const useDatabaseWorkspaceRuntime = () => {
     return groups.value
       .filter((target) => target.id !== DEFAULT_GROUP_ID && target.id !== group.id && !descendants.has(target.id))
       .map((target) => ({ id: target.id, name: groupPathLabel(target.id, groups.value, groupParentById) }))
-  })
-
-  const filteredDataRows = computed(() => {
-    const tab = activeDataTab.value
-    if (!tab) return []
-    return tab.rows
-  })
-  const activeDataWherePending = computed(() => {
-    const tab = activeDataTab.value
-    return !!tab && tab.whereDraft.trim() !== tab.whereRaw
-  })
-  const pagedDataRows = computed(() => {
-    const tab = activeDataTab.value
-    if (!tab) return []
-    return tab.rows
-  })
-
-  const filteredSqlRows = computed(() => {
-    const result = activeSqlResult.value
-    if (!result || result.status === 'error') return []
-    const state = activeSqlResultViewState.value
-    return applySort(applyFilters(result.rows, state.filters), state.sort)
-  })
-
-  const pagedSqlRows = computed(() => {
-    const result = activeSqlResult.value
-    if (!result || result.status === 'error') return []
-    const state = activeSqlResultViewState.value
-    const start = (state.page - 1) * state.pageSize
-    return filteredSqlRows.value.slice(start, start + state.pageSize)
   })
 
   const connectionUrl = computed({
@@ -945,73 +922,11 @@ export const useDatabaseWorkspaceRuntime = () => {
     return tab.tableId === ctx.tableId || tab.tableName === ctx.tableName
   }
 
-  function getOrCreateSqlResultViewState(resultId: string): SqlResultViewState {
-    let state = sqlResultViewStateById[resultId]
-    if (!state) {
-      state = { page: 1, pageSize: 100, filters: [], sort: null }
-      sqlResultViewStateById[resultId] = state
-    }
-    return state
-  }
-
-  async function openTable(connectionId: string, catalogName: string, table: DatabaseTableInfo, schemaName?: string) {
-    const existing = tabs.value.find((tab) => tab.kind === 'data' && tab.tableId === table.id && tab.connectionId === connectionId) as WorkspaceTab | undefined
-    if (existing) {
-      activeTabId.value = existing.id
-      return
-    }
-    const tab: WorkspaceTab = {
-      id: `tab-data-${table.id}-${Date.now()}`,
-      kind: 'data',
-      title: table.name,
-      connectionId,
-      catalogName,
-      schemaName,
-      tableId: table.id,
-      tableName: table.name,
-      columns: table.columns.map((column) => column.name),
-      sourceRows: [],
-      rows: [],
-      primaryKey: table.primaryKey,
-      whereRaw: '',
-      whereDraft: '',
-      orderByRaw: '',
-      orderByDraft: '',
-      page: 1,
-      pageSize: 100,
-      filters: [],
-      sort: null,
-      selectedRowKey: null,
-      loading: true,
-      error: null,
-      total: null,
-      rowCount: 0,
-      knownColumns: table.columns.map((column) => column.name),
-      durationMs: 0,
-      dirtyState: makeDirtyState([], table.primaryKey),
-      undoStack: [],
-      mutationPlan: makeDataMutationPlanState(),
-      saving: false,
-      saveError: null
-    }
-    tabs.value.push(tab)
-    activeTabId.value = tab.id
-    await nextTick()
-    const reactiveTab = tabs.value.find((item) => item.id === tab.id && item.kind === 'data') as Extract<WorkspaceTab, { kind: 'data' }> | undefined
-    if (reactiveTab) await reloadDataTab(reactiveTab, { preserveDirty: false })
-  }
-
   function closeTab(tabId: string) {
     const index = tabs.value.findIndex((tab) => tab.id === tabId)
     if (index <= 0) return
     tabs.value.splice(index, 1)
     if (activeTabId.value === tabId) activeTabId.value = tabs.value[Math.max(0, index - 1)]?.id ?? 'tab-overview'
-  }
-
-  function updateActiveSql(value: string) {
-    const tab = activeSqlTab.value
-    if (!tab) return
-    tab.sql = value
   }
 
   function nextQueryTitle() {
@@ -1149,138 +1064,6 @@ export const useDatabaseWorkspaceRuntime = () => {
     return `SELECT *\nFROM ${qualified}\nLIMIT 100;`
   }
 
-  function runSql(mode: 'all' | 'current' | 'explain') {
-    const tab = activeSqlTab.value
-    if (!tab || !activeSqlCanRun.value) return
-    const sql = resolveSqlForRun(tab, mode)
-    if (!sql.trim()) {
-      showNotice('SQL is empty')
-      return
-    }
-    void appendSqlExecution(tab, sql)
-  }
-
-  async function appendSqlExecution(tab: Extract<WorkspaceTab, { kind: 'sql' }>, sql: string) {
-    const result = createRunningSqlResult(tab, sql)
-    tab.resultTabs.push(result)
-    tab.activeResultTabId = result.id
-
-    const response = await executeSqlThroughBackend(tab, sql)
-    const outcome = sqlOutcomeFromBackendResult(response)
-
-    patchSqlResult(tab, result.id, outcome.payload)
-    if (outcome.execution) {
-      const resultTabId = tab.resultTabs.some((item) => item.id === result.id) ? result.id : null
-      tab.history.push({
-        id: outcome.execution.id,
-        resultTabId,
-        title: result.title,
-        sql,
-        message: outcome.execution.message,
-        status: outcome.execution.status,
-        durationMs: outcome.execution.durationMs,
-        rowCount: outcome.execution.rowCount,
-        createdAt: outcome.execution.createdAt
-      })
-    }
-  }
-
-  function runSqlFromShortcut() {
-    const selected = getSelectedSqlText()
-    runSql(selected.trim() ? 'current' : 'all')
-  }
-
-  function resolveSqlForRun(tab: Extract<WorkspaceTab, { kind: 'sql' }>, mode: 'all' | 'current' | 'explain') {
-    if (mode === 'all') return tab.sql.trim()
-    if (mode === 'current') return getSelectedSqlText().trim() || currentSqlStatement(tab.sql, getSqlCursorOffset()).trim()
-    const statement = currentSqlStatement(tab.sql, getSqlCursorOffset()).trim() || firstStatement(tab.sql)
-    return statement ? `EXPLAIN ${stripExplainPrefix(statement)}` : ''
-  }
-
-  function createRunningSqlResult(tab: Extract<WorkspaceTab, { kind: 'sql' }>, sql: string): SqlResult {
-    const seq = resultSeq.value++
-    const idx = tab.resultTabs.length + 1
-    const preview = sql.replace(/\s+/g, ' ').trim().slice(0, 40) || 'SQL'
-    return {
-      id: `result-${seq}`,
-      title: `#${seq}-${idx} ${preview}`,
-      sql,
-      status: 'running',
-      columns: [],
-      rows: [],
-      rowCount: 0,
-      durationMs: 0,
-      error: null,
-      message: 'Running'
-    }
-  }
-
-  async function executeSqlThroughBackend(tab: Extract<WorkspaceTab, { kind: 'sql' }>, sql: string): Promise<DatabaseSqlExecuteResult> {
-    const executeDatabaseSql = databaseClient.executeDatabaseSql()
-    if (!executeDatabaseSql) {
-      return { ok: false, errorCode: 'DB_PRELOAD_UNAVAILABLE', errorMessage: DATABASE_SQL_EXECUTOR_UNAVAILABLE_MESSAGE }
-    }
-    const connection = findConnection(tab.connectionId)
-    try {
-      return await executeDatabaseSql({
-        connectionId: tab.connectionId,
-        dbType: connection?.dbType,
-        sql,
-        databaseName: tab.catalogName,
-        schemaName: tab.schemaName
-      })
-    } catch (error) {
-      return { ok: false, errorCode: 'DB_SQL_EXECUTOR_FAILED', errorMessage: bridgeErrorMessage(error, 'Backend SQL executor failed.') }
-    }
-  }
-
-  function sqlOutcomeFromBackendResult(result: DatabaseSqlExecuteResult | undefined): SqlExecutionOutcome {
-    if (!result || typeof result !== 'object') {
-      return { payload: createSqlErrorPayload('Backend SQL executor returned an empty response.'), execution: null }
-    }
-    if (!result.ok) {
-      const execution = isDatabaseSqlExecutionRecord(result.execution) && result.execution.status === 'error' ? result.execution : null
-      return {
-        payload: createSqlErrorPayload(execution?.message || result.errorMessage || 'Backend SQL executor failed.', execution?.durationMs ?? 0),
-        execution
-      }
-    }
-    if (!isDatabaseSqlExecuteData(result.data)) {
-      return { payload: createSqlErrorPayload('Backend SQL executor returned malformed result data.'), execution: null }
-    }
-    const data = result.data
-    return {
-      payload: {
-        status: 'ok',
-        columns: data.columns,
-        rows: data.rows,
-        rowCount: data.rowCount,
-        durationMs: data.durationMs,
-        error: null,
-        message: data.execution.message
-      },
-      execution: data.execution
-    }
-  }
-
-  function createSqlErrorPayload(message: string, durationMs = 0): SqlExecutionPayload {
-    return {
-      status: 'error',
-      columns: [],
-      rows: [],
-      rowCount: 0,
-      durationMs,
-      error: message,
-      message
-    }
-  }
-
-  function patchSqlResult(tab: Extract<WorkspaceTab, { kind: 'sql' }>, resultId: string, payload: SqlExecutionPayload) {
-    const index = tab.resultTabs.findIndex((item) => item.id === resultId)
-    if (index === -1) return
-    tab.resultTabs[index] = { ...tab.resultTabs[index], ...payload }
-  }
-
   function errorToMessage(error: unknown) {
     if (error instanceof Error) return error.message
     if (typeof error === 'string') return error
@@ -1293,813 +1076,8 @@ export const useDatabaseWorkspaceRuntime = () => {
     return fallback
   }
 
-  function defaultSqlFileName(tab: Extract<WorkspaceTab, { kind: 'sql' }>) {
-    const connection = findConnection(tab.connectionId)
-    const parts = [tab.title, connection?.name, tab.catalogName, tab.schemaName].filter(Boolean)
-    const base = parts.join('-') || 'query'
-    const safe = base
-      .trim()
-      .replace(/\s+/g, '-')
-      .replace(/[^A-Za-z0-9._-]/g, '-')
-      .replace(/-+/g, '-')
-      .replace(/^-|-$/g, '')
-    return `${safe || 'query'}.sql`
-  }
-
   function fileNameFromPath(filePath: string) {
     return String(filePath || '').split(/[\\/]/).filter(Boolean).pop() || filePath
-  }
-
-  async function pickSqlSavePath(tab: Extract<WorkspaceTab, { kind: 'sql' }>) {
-    const showSaveDialog = localFilesClient.showSaveDialog()
-    if (!showSaveDialog) {
-      return { ok: false as const, error: 'SQL save dialog service unavailable' }
-    }
-    try {
-      const result = await showSaveDialog({
-        defaultPath: tab.filePath || defaultSqlFileName(tab),
-        filters: [{ name: 'SQL Files', extensions: ['sql'] }]
-      })
-      if (!result || result.canceled || !result.filePath) return { ok: true as const, canceled: true as const }
-      return { ok: true as const, canceled: false as const, filePath: result.filePath }
-    } catch (error) {
-      return { ok: false as const, error: bridgeErrorMessage(error, 'SQL save dialog failed') }
-    }
-  }
-
-  async function saveActiveSql(forceSaveAs: boolean) {
-    const tab = activeSqlTab.value
-    if (!tab || tab.saving) return
-    const writeLocalFile = localFilesClient.writeLocalFile()
-    if (!writeLocalFile) {
-      tab.saveError = 'SQL file writer service unavailable'
-      showNotice(tab.saveError)
-      return
-    }
-
-    tab.saving = true
-    tab.saveError = null
-    try {
-      let targetPath = forceSaveAs ? '' : tab.filePath || ''
-      if (!targetPath) {
-        const picked = await pickSqlSavePath(tab)
-        if (!picked.ok) {
-          tab.saveError = picked.error
-          showNotice(tab.saveError)
-          return
-        }
-        if (picked.canceled) {
-          showNotice('SQL save cancelled')
-          return
-        }
-        targetPath = picked.filePath
-      }
-      const result = await writeLocalFile(targetPath, tab.sql)
-      if (result?.ok !== true) {
-        tab.saveError = result?.errorMessage || 'SQL file save failed'
-        showNotice(tab.saveError)
-        return
-      }
-      if (!isLocalFileWriteData(result.data, targetPath, tab.sql)) {
-        tab.saveError = SQL_FILE_WRITE_MALFORMED_MESSAGE
-        showNotice(tab.saveError)
-        return
-      }
-      tab.filePath = targetPath
-      tab.savedSql = tab.sql
-      tab.saveError = null
-      showNotice(`SQL saved to ${fileNameFromPath(targetPath)}`)
-    } catch (error) {
-      tab.saveError = bridgeErrorMessage(error, 'SQL file save failed')
-      showNotice(tab.saveError)
-    } finally {
-      tab.saving = false
-    }
-  }
-
-  function stripExplainPrefix(sql: string) {
-    return sql.replace(/^\s*explain\s+/i, '').trim()
-  }
-
-  function closeResultTab(resultId: string) {
-    const tab = activeSqlTab.value
-    if (!tab || resultId === 'overview') return
-    const closedIndex = tab.resultTabs.findIndex((result) => result.id === resultId)
-    if (closedIndex === -1) return
-    tab.resultTabs.splice(closedIndex, 1)
-    delete sqlResultViewStateById[resultId]
-    tab.history.forEach((item) => {
-      if (item.resultTabId === resultId) item.resultTabId = null
-    })
-    if (tab.activeResultTabId === resultId) {
-      const fallback = tab.resultTabs[closedIndex - 1] ?? tab.resultTabs[closedIndex] ?? null
-      tab.activeResultTabId = fallback?.id ?? 'overview'
-    }
-  }
-
-  function openSqlHistoryResult(history: SqlHistory) {
-    const tab = activeSqlTab.value
-    if (!tab || !history.resultTabId) return
-    if (!tab.resultTabs.some((result) => result.id === history.resultTabId)) return
-    tab.activeResultTabId = history.resultTabId
-  }
-
-  function isSqlHistoryClosed(history: SqlHistory) {
-    const tab = activeSqlTab.value
-    if (!tab || !history.resultTabId) return true
-    return !tab.resultTabs.some((result) => result.id === history.resultTabId)
-  }
-
-  function updateSqlResultActiveTab(resultTabId: string) {
-    const tab = activeSqlTab.value
-    if (!tab) return
-    tab.activeResultTabId = resultTabId
-  }
-
-  function updateSqlResultPage(page: number) {
-    const result = activeSqlResult.value
-    if (!result) return
-    const state = getOrCreateSqlResultViewState(result.id)
-    state.page = clampPage(page, filteredSqlRows.value.length, state.pageSize)
-  }
-
-  function updateSqlResultPageSize(size: number) {
-    const result = activeSqlResult.value
-    if (!result) return
-    const state = getOrCreateSqlResultViewState(result.id)
-    state.pageSize = size
-    state.page = clampPage(state.page, filteredSqlRows.value.length, state.pageSize)
-  }
-
-  function gotoLastSqlResultPage() {
-    const result = activeSqlResult.value
-    if (!result) return
-    const state = getOrCreateSqlResultViewState(result.id)
-    state.page = Math.max(1, Math.ceil(filteredSqlRows.value.length / state.pageSize))
-  }
-
-  function cycleSqlSort(column: string) {
-    const result = activeSqlResult.value
-    if (!result) return
-    const state = getOrCreateSqlResultViewState(result.id)
-    state.sort = nextSort(state.sort, column)
-    state.page = 1
-  }
-
-  function applySqlFilter(column: string, filter: DbFilter | null) {
-    const result = activeSqlResult.value
-    if (!result) return
-    const state = getOrCreateSqlResultViewState(result.id)
-    state.filters = replaceFilter(state.filters, column, filter)
-    state.page = 1
-  }
-
-  function updateDataPage(page: number) {
-    const tab = activeDataTab.value
-    if (!tab) return
-    tab.page = tab.total === null ? Math.max(1, Math.floor(page)) : clampPage(page, tab.total, tab.pageSize)
-    void reloadDataTab(tab)
-  }
-
-  function updateDataPageSize(size: number) {
-    const tab = activeDataTab.value
-    if (!tab) return
-    tab.pageSize = size
-    tab.page = 1
-    void reloadDataTab(tab)
-  }
-
-  function updateActiveDataWhereDraft(value: string) {
-    const tab = activeDataTab.value
-    if (!tab) return
-    tab.whereDraft = value
-  }
-
-  function gotoLastDataPage() {
-    const tab = activeDataTab.value
-    if (!tab) return
-    void (async () => {
-      if (tab.total === null) await refreshDataTotal()
-      const total = tab.total ?? tab.rowCount
-      tab.page = Math.max(1, Math.ceil(total / tab.pageSize))
-      await reloadDataTab(tab)
-    })()
-  }
-
-  function cycleDataSort(column: string) {
-    const tab = activeDataTab.value
-    if (!tab) return
-    tab.sort = nextSort(tab.sort, column)
-    tab.page = 1
-    void reloadDataTab(tab)
-  }
-
-  function applyDataFilter(column: string, filter: DbFilter | null) {
-    const tab = activeDataTab.value
-    if (!tab) return
-    tab.filters = replaceFilter(tab.filters, column, filter)
-    tab.page = 1
-    void reloadDataTab(tab)
-  }
-
-  function applyWhere() {
-    const tab = activeDataTab.value
-    if (!tab) return
-    tab.whereRaw = tab.whereDraft.trim()
-    tab.whereDraft = tab.whereRaw
-    tab.page = 1
-    void reloadDataTab(tab)
-  }
-
-  function canEditDataTab(tab: Extract<WorkspaceTab, { kind: 'data' }>) {
-    return dataEditDisabledReason(tab) === ''
-  }
-
-  function dataEditDisabledReason(tab: Extract<WorkspaceTab, { kind: 'data' }>) {
-    const connection = findConnection(tab.connectionId)
-    const table = findTable(tab.connectionId, tab.catalogName, tab.tableId, tab.schemaName)
-    if (!connection) return 'Connection is unavailable'
-    if (connection.readonly) return 'Connection is readonly'
-    if (isViewTable(tab)) return 'View editing is disabled in this version'
-    if (!table) return 'Table is unavailable'
-    return ''
-  }
-
-  function isDataTabDirty(tab: Extract<WorkspaceTab, { kind: 'data' }>) {
-    return isDirtyStateDirty(tab.dirtyState)
-  }
-
-  function buildDataMutationPlanInput(tab: Extract<WorkspaceTab, { kind: 'data' }>) {
-    const connection = findConnection(tab.connectionId)
-    return {
-      connectionId: tab.connectionId,
-      dbType: connection?.dbType,
-      databaseName: tab.catalogName,
-      schemaName: tab.schemaName,
-      tableName: tab.tableName,
-      columns: tab.columns.slice(),
-      knownColumns: tab.knownColumns.slice(),
-      mutations: buildDataMutationPayload(tab)
-    }
-  }
-
-  function resetDataMutationPlan(tab: Extract<WorkspaceTab, { kind: 'data' }>) {
-    tab.mutationPlan = makeDataMutationPlanState()
-  }
-
-  async function refreshDataMutationPlan(tab: Extract<WorkspaceTab, { kind: 'data' }>, force = false): Promise<DataMutationPlanState> {
-    if (!isDataTabDirty(tab)) {
-      resetDataMutationPlan(tab)
-      return tab.mutationPlan
-    }
-    const input = buildDataMutationPlanInput(tab)
-    const key = JSON.stringify(input)
-    if (!force && tab.mutationPlan.key === key && !tab.mutationPlan.loading) return tab.mutationPlan
-    tab.mutationPlan = makeDataMutationPlanState({ key, loading: true })
-    const planDatabaseTableMutation = databaseClient.planDatabaseTableMutation()
-    if (!planDatabaseTableMutation) {
-      tab.mutationPlan = makeDataMutationPlanState({
-        key,
-        error: DATABASE_TABLE_MUTATION_PLAN_UNAVAILABLE_MESSAGE
-      })
-      return tab.mutationPlan
-    }
-    try {
-      const result = await planDatabaseTableMutation(input)
-      if (tab.mutationPlan.key !== key) return tab.mutationPlan
-      if (!result.ok) {
-        tab.mutationPlan = makeDataMutationPlanState({
-          key,
-          error: result.errorMessage || 'Backend table mutation planning failed.'
-        })
-        return tab.mutationPlan
-      }
-      if (!isDatabaseTableMutationPlanData(result.data)) {
-        tab.mutationPlan = makeDataMutationPlanState({
-          key,
-          error: DATABASE_TABLE_MUTATION_MALFORMED_MESSAGE
-        })
-        return tab.mutationPlan
-      }
-      tab.mutationPlan = makeDataMutationPlanState({
-        key,
-        statementCount: result.data.statementCount,
-        preview: result.data.preview,
-        warning: result.data.warning
-      })
-    } catch (error) {
-      if (tab.mutationPlan.key === key) {
-        tab.mutationPlan = makeDataMutationPlanState({
-          key,
-          error: errorToMessage(error)
-        })
-      }
-    }
-    return tab.mutationPlan
-  }
-
-  function updateDataCell(rowKey: string, column: string, value: string) {
-    const tab = activeDataTab.value
-    if (!tab || !canEditDataTab(tab) || tab.saving) return
-    const result = updateDataCellState(tab, rowKey, column, value)
-    if (result.changed) void refreshDataMutationPlan(tab)
-  }
-
-  function updateNewDataRowCell(tmpId: string, column: string, value: string) {
-    const tab = activeDataTab.value
-    if (!tab || !canEditDataTab(tab) || tab.saving) return
-    const result = updateNewDataRowCellState(tab, tmpId, column, value)
-    if (result.changed) void refreshDataMutationPlan(tab)
-  }
-
-  function setActiveDataSelectedRow(key: string) {
-    const tab = activeDataTab.value
-    if (!tab) return
-    tab.selectedRowKey = key
-  }
-
-  function addDataRow() {
-    const tab = activeDataTab.value
-    if (!tab || tab.saving) return
-    const reason = dataEditDisabledReason(tab)
-    if (reason) {
-      showNotice(reason)
-      return
-    }
-    const tmpId = `tmp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
-    const result = addDataRowState(tab, tmpId)
-    if (result.changed) void refreshDataMutationPlan(tab)
-    if (result.notice) showNotice(result.notice)
-  }
-
-  function deleteSelectedDataRow() {
-    const tab = activeDataTab.value
-    if (!tab || !tab.selectedRowKey || tab.saving) return
-    const reason = dataEditDisabledReason(tab)
-    if (reason) {
-      showNotice(reason)
-      return
-    }
-    const result = deleteSelectedDataRowState(tab)
-    if (result.changed) void refreshDataMutationPlan(tab)
-    if (result.notice) showNotice(result.notice)
-  }
-
-  function undoDataChanges() {
-    const tab = activeDataTab.value
-    if (!tab || tab.saving) return
-    const result = undoDataChangesState(tab)
-    if (result.changed) void refreshDataMutationPlan(tab)
-    if (result.notice) showNotice(result.notice)
-  }
-
-  async function saveDataChanges() {
-    const tab = activeDataTab.value
-    if (!tab || tab.saving) return
-    const reason = dataEditDisabledReason(tab)
-    if (reason) {
-      tab.saveError = reason
-      showNotice(reason)
-      return
-    }
-    const plan = await refreshDataMutationPlan(tab, true)
-    if (plan.error) {
-      tab.saveError = plan.error
-      showNotice(plan.error)
-      return
-    }
-    if (plan.statementCount === 0) {
-      tab.saveError = 'No SQL statement will be generated until a new row contains at least one value.'
-      showNotice(tab.saveError)
-      return
-    }
-    tab.saving = true
-    tab.saveError = null
-    await nextTick()
-    try {
-      const backendResult = await mutateDataTabThroughBackend(tab)
-      if (!backendResult.ok) {
-        tab.saveError = backendResult.errorMessage || 'Backend table mutation failed.'
-        showNotice(tab.saveError)
-        return
-      }
-      if (!isDatabaseTableMutationData(backendResult.data)) {
-        tab.saveError = DATABASE_TABLE_MUTATION_MALFORMED_MESSAGE
-        showNotice(tab.saveError)
-        return
-      }
-      await reloadDataTab(tab, { withTotal: tab.total !== null, preserveDirty: false })
-      showNotice(`Changes saved through backend table store (${plan.statementCount} statement${plan.statementCount > 1 ? 's' : ''})`)
-    } finally {
-      tab.saving = false
-    }
-  }
-
-  async function mutateDataTabThroughBackend(tab: Extract<WorkspaceTab, { kind: 'data' }>): Promise<DatabaseTableMutationResult> {
-    return mutateDatabaseTableThroughBackend({
-      connectionId: tab.connectionId,
-      databaseName: tab.catalogName,
-      schemaName: tab.schemaName,
-      tableName: tab.tableName,
-      mutations: buildDataMutationPayload(tab)
-    })
-  }
-
-  async function mutateDatabaseTableThroughBackend(input: DatabaseTableMutationInput): Promise<DatabaseTableMutationResult> {
-    const mutateDatabaseTable = databaseClient.mutateDatabaseTable()
-    if (!mutateDatabaseTable) {
-      return { ok: false, errorCode: 'DB_PRELOAD_UNAVAILABLE', errorMessage: DATABASE_TABLE_MUTATION_UNAVAILABLE_MESSAGE }
-    }
-    try {
-      return await mutateDatabaseTable(input)
-    } catch (error) {
-      return { ok: false, errorCode: 'DB_TABLE_MUTATION_FAILED', errorMessage: bridgeErrorMessage(error, 'Backend table mutation failed.') }
-    }
-  }
-
-  async function exportDatabaseRowsThroughBackend(input: DatabaseExportInput) {
-    const exportDatabaseRows = databaseClient.exportDatabaseRows()
-    if (!exportDatabaseRows) {
-      showNotice('Database export service unavailable')
-      return null
-    }
-    try {
-      const result = await exportDatabaseRows(input)
-      if (!result.ok) {
-        showNotice(result.errorMessage || 'Database export failed')
-        return null
-      }
-      if (!isDatabaseExportData(result.data)) {
-        showNotice('Database export backend returned malformed result data.')
-        return null
-      }
-      if (result.data.canceled) {
-        showNotice('Database export cancelled')
-        return result.data
-      }
-      showNotice(`Exported ${result.data.exported} row${result.data.exported === 1 ? '' : 's'} to ${result.data.fileName}`)
-      return result.data
-    } catch (error) {
-      showNotice(errorToMessage(error))
-      return null
-    }
-  }
-
-  function exportActiveSqlResultPage() {
-    const tab = activeSqlTab.value
-    const result = activeSqlResult.value
-    if (!tab || !result || result.status !== 'ok' || !pagedSqlRows.value.length) {
-      showNotice('No SQL result rows to export')
-      return null
-    }
-    const connection = findConnection(tab.connectionId)
-    return exportDatabaseRowsThroughBackend({
-      title: `${tab.title}-${result.title}`,
-      kind: 'sql-result',
-      columns: result.columns,
-      rows: pagedSqlRows.value,
-      metadata: {
-        connectionName: connection?.name,
-        databaseName: tab.catalogName,
-        schemaName: tab.schemaName,
-        sql: result.sql,
-        page: activeSqlResultViewState.value.page,
-        pageSize: activeSqlResultViewState.value.pageSize,
-        total: filteredSqlRows.value.length
-      }
-    })
-  }
-
-  function exportActiveDataPage() {
-    const tab = activeDataTab.value
-    if (!tab || tab.loading || tab.error || !pagedDataRows.value.length) {
-      showNotice('No table rows to export')
-      return null
-    }
-    const connection = findConnection(tab.connectionId)
-    return exportDatabaseRowsThroughBackend({
-      title: `${tab.title}-page-${tab.page}`,
-      kind: 'table-page',
-      columns: tab.columns,
-      rows: pagedDataRows.value,
-      metadata: {
-        connectionName: connection?.name,
-        databaseName: tab.catalogName,
-        schemaName: tab.schemaName,
-        tableName: tab.tableName,
-        page: tab.page,
-        pageSize: tab.pageSize,
-        total: tab.total
-      }
-    })
-  }
-
-  function sqlResultCommentKey(tab: Extract<WorkspaceTab, { kind: 'sql' }>, result: SqlResult): DatabasePageCommentKey {
-    return {
-      scope: 'sql-result',
-      connectionId: tab.connectionId,
-      databaseName: tab.catalogName,
-      ...(tab.schemaName ? { schemaName: tab.schemaName } : {}),
-      resultId: result.id,
-      sql: result.sql
-    }
-  }
-
-  function dataPageCommentKey(tab: Extract<WorkspaceTab, { kind: 'data' }>): DatabasePageCommentKey {
-    return {
-      scope: 'table-page',
-      connectionId: tab.connectionId,
-      databaseName: tab.catalogName,
-      ...(tab.schemaName ? { schemaName: tab.schemaName } : {}),
-      tableName: tab.tableName
-    }
-  }
-
-  function openChartModal(source: DatabaseChartSource) {
-    chartModal.summary = buildChartSummary(source)
-    chartModal.error = chartModal.summary ? '' : 'Current page does not contain a numeric column to chart.'
-    chartModal.open = true
-    if (!chartModal.summary) showNotice(chartModal.error)
-  }
-
-  function closeChartModal() {
-    chartModal.open = false
-  }
-
-  function updateCommentDraft(value: string) {
-    commentModal.draft = value
-  }
-
-  function openActiveSqlResultChart() {
-    const tab = activeSqlTab.value
-    const result = activeSqlResult.value
-    if (!tab || !result || result.status !== 'ok' || !pagedSqlRows.value.length) {
-      showNotice('No SQL result rows to chart')
-      return
-    }
-    openChartModal({
-      title: `${tab.title} - ${result.title}`,
-      scopeLabel: `SQL page ${activeSqlResultViewState.value.page}`,
-      columns: result.columns,
-      rows: pagedSqlRows.value
-    })
-  }
-
-  function openActiveDataChart() {
-    const tab = activeDataTab.value
-    if (!tab || tab.loading || tab.error || !pagedDataRows.value.length) {
-      showNotice('No table rows to chart')
-      return
-    }
-    openChartModal({
-      title: `${tab.title} - page ${tab.page}`,
-      scopeLabel: [tab.catalogName, tab.schemaName, tab.tableName].filter(Boolean).join(' / '),
-      columns: tab.columns,
-      rows: pagedDataRows.value
-    })
-  }
-
-  async function openCommentModal(input: { title: string; scopeLabel: string; key: DatabasePageCommentKey }) {
-    commentModal.open = true
-    commentModal.title = input.title
-    commentModal.scopeLabel = input.scopeLabel
-    commentModal.key = input.key
-    commentModal.draft = ''
-    commentModal.updatedAt = 0
-    commentModal.loading = true
-    commentModal.saving = false
-    commentModal.error = ''
-    const getDatabasePageComment = databaseClient.getDatabasePageComment()
-    if (!getDatabasePageComment) {
-      commentModal.loading = false
-      commentModal.error = 'Database comment service unavailable'
-      showNotice(commentModal.error)
-      return
-    }
-    try {
-      const result = await getDatabasePageComment(input.key)
-      if (!commentModal.key || databasePageCommentKeyId(commentModal.key) !== databasePageCommentKeyId(input.key)) return
-      commentModal.loading = false
-      if (!result.ok) {
-        commentModal.error = result.errorMessage || 'Database comment load failed'
-        showNotice(commentModal.error)
-        return
-      }
-      if (!isDatabasePageCommentGetData(result.data, input.key)) {
-        commentModal.error = 'Database comment backend returned malformed result data.'
-        showNotice(commentModal.error)
-        return
-      }
-      commentModal.draft = result.data.record.comment
-      commentModal.updatedAt = result.data.record.updatedAt
-    } catch (error) {
-      if (!commentModal.key || databasePageCommentKeyId(commentModal.key) !== databasePageCommentKeyId(input.key)) return
-      commentModal.loading = false
-      commentModal.error = bridgeErrorMessage(error, 'Database comment load failed')
-      showNotice(commentModal.error)
-    }
-  }
-
-  function openActiveSqlResultComment() {
-    const tab = activeSqlTab.value
-    const result = activeSqlResult.value
-    if (!tab || !result || result.status !== 'ok') {
-      showNotice('No SQL result context to comment')
-      return
-    }
-    void openCommentModal({
-      title: `${tab.title} - ${result.title}`,
-      scopeLabel: `SQL result / ${tab.catalogName}${tab.schemaName ? ` / ${tab.schemaName}` : ''}`,
-      key: sqlResultCommentKey(tab, result)
-    })
-  }
-
-  function openActiveDataComment() {
-    const tab = activeDataTab.value
-    if (!tab || tab.loading || tab.error) {
-      showNotice('No table page context to comment')
-      return
-    }
-    void openCommentModal({
-      title: `${tab.title} - page ${tab.page}`,
-      scopeLabel: [tab.catalogName, tab.schemaName, tab.tableName].filter(Boolean).join(' / '),
-      key: dataPageCommentKey(tab)
-    })
-  }
-
-  async function saveActiveComment() {
-    const key = commentModal.key
-    if (!key || commentModal.loading || commentModal.saving) return
-    const saveDatabasePageComment = databaseClient.saveDatabasePageComment()
-    if (!saveDatabasePageComment) {
-      commentModal.error = 'Database comment service unavailable'
-      showNotice(commentModal.error)
-      return
-    }
-    commentModal.saving = true
-    commentModal.error = ''
-    try {
-      const result = await saveDatabasePageComment({ key, comment: commentModal.draft })
-      if (!commentModal.key || databasePageCommentKeyId(commentModal.key) !== databasePageCommentKeyId(key)) return
-      commentModal.saving = false
-      if (!result.ok) {
-        commentModal.error = result.errorMessage || 'Database comment save failed'
-        showNotice(commentModal.error)
-        return
-      }
-      if (!isDatabasePageCommentSaveData(result.data, key)) {
-        commentModal.error = 'Database comment backend returned malformed result data.'
-        showNotice(commentModal.error)
-        return
-      }
-      commentModal.draft = result.data.record.comment
-      commentModal.updatedAt = result.data.record.updatedAt
-      showNotice(result.data.message || 'Comment saved')
-    } catch (error) {
-      if (!commentModal.key || databasePageCommentKeyId(commentModal.key) !== databasePageCommentKeyId(key)) return
-      commentModal.saving = false
-      commentModal.error = bridgeErrorMessage(error, 'Database comment save failed')
-      showNotice(commentModal.error)
-    }
-  }
-
-  function closeCommentModal() {
-    if (commentModal.saving) return
-    commentModal.open = false
-  }
-
-  function discardDataChanges() {
-    const tab = activeDataTab.value
-    if (!tab || tab.saving) return
-    tab.dirtyState = makeDirtyState(tab.rows, tab.primaryKey)
-    tab.undoStack = []
-    tab.selectedRowKey = null
-    tab.saveError = null
-    resetDataMutationPlan(tab)
-    showNotice('Local data edits discarded')
-  }
-
-  async function copyDataMutationPreview() {
-    const summary = activeDataEditSummary.value
-    if (!summary?.preview) return
-    if (await copyText(summary.preview)) showNotice('Mutation preview copied')
-  }
-
-  function refreshDataTab() {
-    const tab = activeDataTab.value
-    if (!tab) return
-    void reloadDataTab(tab, { notice: 'Table data refreshed' })
-  }
-
-  async function refreshDataTotal() {
-    const tab = activeDataTab.value
-    if (!tab) return
-    await reloadDataTab(tab, { withTotal: true, preserveDirty: true, notice: 'Table total refreshed' })
-  }
-
-  async function reloadDataTab(tab: Extract<WorkspaceTab, { kind: 'data' }>, options: TableReloadOptions = {}) {
-    const preserveDirty = options.preserveDirty ?? true
-    tab.loading = true
-    tab.error = null
-    try {
-      const result = await queryDataTabThroughBackend(tab, options.withTotal ?? false)
-      if (!result.ok) {
-        tab.error = result.errorMessage || 'Backend table query failed.'
-        return
-      }
-      if (!isDatabaseTableQueryData(result.data)) {
-        tab.error = 'Backend table query returned malformed result data.'
-        return
-      }
-      const data = result.data
-      const total = data.total
-      if (typeof total === 'number') {
-        const maxPage = Math.max(1, Math.ceil(total / tab.pageSize))
-        if (tab.page > maxPage) {
-          tab.page = maxPage
-          return reloadDataTab(tab, options)
-        }
-        tab.total = total
-      }
-      const rows = data.rows
-      tab.rows = rows
-      tab.sourceRows = rows.map((row) => ({ ...row }))
-      tab.rowCount = data.rowCount
-      tab.durationMs = data.durationMs
-      tab.knownColumns = data.knownColumns
-      tab.columns = data.columns
-      if (!preserveDirty) {
-        tab.dirtyState = makeDirtyState(tab.rows, tab.primaryKey)
-        tab.undoStack = []
-        tab.selectedRowKey = null
-        tab.saveError = null
-        resetDataMutationPlan(tab)
-      } else {
-        tab.dirtyState = { ...tab.dirtyState, originalRows: makeOriginalRows(tab.rows, tab.primaryKey) }
-        void refreshDataMutationPlan(tab)
-      }
-      if (options.notice) showNotice(options.notice)
-    } catch (error) {
-      tab.error = errorToMessage(error)
-    } finally {
-      tab.loading = false
-    }
-  }
-
-  async function queryDataTabThroughBackend(tab: Extract<WorkspaceTab, { kind: 'data' }>, withTotal: boolean): Promise<DatabaseTableQueryResult> {
-    const queryDatabaseTable = databaseClient.queryDatabaseTable()
-    if (!queryDatabaseTable) {
-      return { ok: false, errorCode: 'DB_PRELOAD_UNAVAILABLE', errorMessage: DATABASE_TABLE_QUERY_UNAVAILABLE_MESSAGE }
-    }
-    const connection = findConnection(tab.connectionId)
-    try {
-      return await queryDatabaseTable({
-        connectionId: tab.connectionId,
-        dbType: connection?.dbType,
-        databaseName: tab.catalogName,
-        schemaName: tab.schemaName,
-        tableName: tab.tableName,
-        filters: tab.filters.map((filter) => ({ ...filter })),
-        sort: tab.sort ? { ...tab.sort } : null,
-        whereRaw: tab.whereRaw || null,
-        orderByRaw: tab.orderByRaw || null,
-        page: tab.page,
-        pageSize: tab.pageSize,
-        withTotal
-      })
-    } catch (error) {
-      return { ok: false, errorCode: 'DB_TABLE_QUERY_FAILED', errorMessage: bridgeErrorMessage(error, 'Backend table query failed.') }
-    }
-  }
-
-  function isViewTable(tab: Extract<WorkspaceTab, { kind: 'data' }>) {
-    const catalog = findConnection(tab.connectionId)?.catalogs.find((item) => item.name === tab.catalogName)
-    if (!catalog) return false
-    if (tab.schemaName) {
-      const schema = catalog.schemas?.find((item) => item.name === tab.schemaName)
-      return !!schema?.views?.some((table) => table.id === tab.tableId)
-    }
-    return false
-  }
-
-  function formatSql() {
-    const tab = activeSqlTab.value
-    if (!tab) return
-    const range = getSqlSelectionRange()
-    const hasSelection = range.start !== range.end
-    const source = hasSelection ? tab.sql.slice(range.start, range.end) : tab.sql
-    if (!source.trim()) {
-      showNotice('SQL is empty')
-      return
-    }
-    const formatted = formatSqlText(source)
-    if (hasSelection) {
-      const nextSql = `${tab.sql.slice(0, range.start)}${formatted}${tab.sql.slice(range.end)}`
-      setEditorSql(nextSql, range.start, range.start + formatted.length)
-    } else {
-      setEditorSql(formatted, formatted.length)
-    }
-    showNotice('SQL formatted')
   }
 
   async function toggleConnectionStatus(id: string) {
@@ -2652,19 +1630,14 @@ export const useDatabaseWorkspaceRuntime = () => {
       showNotice(DATABASE_TABLE_MUTATION_MALFORMED_MESSAGE)
       return false
     }
-    tabs.value.forEach((tab) => {
-      if (
-        tab.kind === 'data' &&
-        tableContextMatches(tab, {
-          connectionId: dangerConfirm.connectionId,
-          catalogName: dangerConfirm.catalogName,
-          schemaName: dangerConfirm.schemaName,
-          tableId: dangerConfirm.tableId,
-          tableName: dangerConfirm.tableName
-        })
-      ) {
-        void reloadDataTab(tab, { withTotal: tab.total !== null, preserveDirty: false, notice: 'Table truncated through backend table store' })
-      }
+    dataTabsMatching({
+      connectionId: dangerConfirm.connectionId,
+      catalogName: dangerConfirm.catalogName,
+      schemaName: dangerConfirm.schemaName,
+      tableId: dangerConfirm.tableId,
+      tableName: dangerConfirm.tableName
+    }).forEach((tab) => {
+      void reloadDataTab(tab, { withTotal: tab.total !== null, preserveDirty: false, notice: 'Table truncated through backend table store' })
     })
     showNotice('Table truncated through backend table store')
     return true
@@ -2680,12 +1653,8 @@ export const useDatabaseWorkspaceRuntime = () => {
       tableId: dangerConfirm.tableId,
       tableName: dangerConfirm.tableName
     }
-    const removedTabIds = new Set(
-      tabs.value
-        .filter((tab) => tab.kind !== 'overview' && tableContextMatches(tab, droppedContext))
-        .map((tab) => tab.id)
-    )
-    const closeDdlModal =
+    const removedTabIds = tabIdsMatching(droppedContext)
+    const shouldCloseDdlModal =
       ddlModal.open &&
       ddlModal.connectionId === droppedContext.connectionId &&
       ddlModal.catalogName === droppedContext.catalogName &&
@@ -2711,29 +1680,17 @@ export const useDatabaseWorkspaceRuntime = () => {
       return false
     }
     applyDatabaseCatalog(result.data.catalog)
-    cleanupDroppedTableUi(droppedContext, removedTabIds, closeDdlModal)
+    cleanupDroppedTableUi(droppedContext, removedTabIds, {
+      ddlOpen: shouldCloseDdlModal,
+      setDdlOpen: (open) => {
+        ddlModal.open = open
+      },
+      expandedTables,
+      selectedNodeId,
+      databaseNodeExists
+    })
     showNotice('Table dropped through backend table store')
     return true
-  }
-
-  function cleanupDroppedTableUi(
-    droppedContext: { connectionId: string; catalogName: string; schemaName?: string; tableId: string; tableName: string },
-    removedTabIds: Set<string>,
-    closeDdlModal: boolean
-  ) {
-    tabs.value = tabs.value.filter((tab) => !removedTabIds.has(tab.id))
-    if (removedTabIds.has(activeTabId.value)) activeTabId.value = tabs.value[0]?.id ?? 'tab-overview'
-    expandedTables.value = expandedTables.value.filter((id) => id !== droppedContext.tableId)
-    if (closeDdlModal) ddlModal.open = false
-    const parentNodeId = droppedContext.schemaName
-      ? `${droppedContext.connectionId}:${droppedContext.catalogName}:${droppedContext.schemaName}`
-      : `${droppedContext.connectionId}:${droppedContext.catalogName}`
-    if (
-      databaseNodeExists(parentNodeId) &&
-      (selectedNodeId.value === droppedContext.tableId || selectedNodeId.value?.startsWith(`${droppedContext.tableId}:column:`))
-    ) {
-      selectedNodeId.value = parentNodeId
-    }
   }
 
   function cancelOperationConfirm() {
