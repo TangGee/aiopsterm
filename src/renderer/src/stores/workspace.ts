@@ -1,35 +1,5 @@
-import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
-import { type KbClipboard, type KnowledgeImportJob } from '@/services/knowledgeRuntime'
-import {
-  type K8sBastionGroup,
-  type K8sCluster,
-  type K8sContextInfo,
-  type K8sImportContextInfo,
-  type K8sNamespaceInfo,
-  type K8sProxyConfig,
-  type K8sResource,
-  type K8sResourceKind
-} from '@/services/kubernetesBackendGuards'
-import {
-  cloneK8sProxyConfig,
-  defaultK8sProxyConfig,
-  filteredK8sBastions as filteredK8sBastionsRuntime,
-  filteredK8sClusters as filteredK8sClustersRuntime,
-  filteredK8sResources as filteredK8sResourcesRuntime,
-  k8sActiveContext as k8sActiveContextRuntime,
-  k8sActiveTerminal as k8sActiveTerminalRuntime,
-  k8sAgentCluster as k8sAgentClusterRuntime,
-  k8sAgentCurrentCluster as k8sAgentCurrentClusterRuntime,
-  k8sActiveNamespaces as k8sActiveNamespacesRuntime,
-  k8sClusterById,
-  k8sHasContexts as k8sHasContextsRuntime,
-  localK8sClusters as localK8sClustersRuntime,
-  k8sResourceCluster as k8sResourceClusterRuntime,
-  k8sResourceSummary as k8sResourceSummaryRuntime,
-  type K8sAgentRunRecord,
-  type K8sTerminalTab
-} from '@/services/kubernetesRuntime'
+import { createWorkspaceStoreState } from '@/stores/workspaceState'
 import { createWorkspaceFilesController, type FilesUiMode } from '@/services/workspaceFilesController'
 import {
   createWorkspaceAiChatController,
@@ -47,24 +17,17 @@ import {
   createDefaultWorkspaceAboutSettings,
   createWorkspaceAppSettingsController,
   type WorkspaceAboutSettings,
-  type WorkspaceGeneralBaseSettingsPatch,
-  type WorkspaceOnboardingAiRequest,
-  type WorkspaceOnboardingAssetRequest,
   type WorkspaceTopUpdateState
 } from '@/services/workspaceAppSettingsController'
 import { createWorkspaceKnowledgeController } from '@/services/workspaceKnowledgeController'
 import { createWorkspaceKubernetesController } from '@/services/workspaceKubernetesController'
 import {
   createWorkspaceManagedAiController,
-  defaultAgentHibernationConfig,
   type AiAttentionFocusRequest,
   type AiAttentionItem,
   type ManagedAiSession
 } from '@/services/workspaceManagedAiController'
-import {
-  createInitialWorkspaceTerminalPanels,
-  createWorkspaceTerminalPanelsController
-} from '@/services/workspaceTerminalPanelsController'
+import { createWorkspaceTerminalPanelsController } from '@/services/workspaceTerminalPanelsController'
 import {
   createWorkspaceTerminalExecutionController,
   type TerminalCommandSource,
@@ -89,14 +52,11 @@ import {
   createWorkspaceShellController,
   type AssetManagementOpenRequest
 } from '@/services/workspaceShellController'
-import { type ShortcutActionHandler } from '@/services/shortcutRuntime'
 import {
-  createEmptyMacroRecordingState,
   type MacroRecordingState,
   type QuickCommandSnippet,
   type SnippetGroup
 } from '@/services/quickCommandsRuntime'
-import { MACRO_DEFAULT_SLEEP_THRESHOLD_MS } from '@/services/terminalMacroRuntime'
 import {
   type PanelDirection,
   type TerminalOutputScope,
@@ -112,29 +72,11 @@ import {
   type WorkspaceTrustedDeviceModal,
   type WorkspaceUserLoginTab
 } from '@/services/workspaceUserController'
-import { createDefaultOnboardingCompleted, onboardingTourSteps } from '@/config/onboarding'
-import type { ModuleKey } from '@/config/navigation'
-import type { OnboardingModuleId } from '@/config/onboarding'
-import { type SettingSectionKey } from '@/config/settings'
 import {
-  defaultAiPreferences,
-  defaultConfig,
-  defaultEditorSettings,
-  defaultExtensionSettings,
-  defaultKeywordHighlightSettings,
-  defaultMcpConfigFile,
-  defaultModelProviders,
-  defaultNotificationSettings,
-  defaultPrivacySettings,
-  defaultSecuritySettings,
-  defaultTerminalSettings,
-  defaultWorkspacePreferences,
   knowledgeTreeSize,
   layoutWidthLimits,
   mergeUserConfig,
-  normalizeKeywordHighlightConfig,
   normalizeModelSettingsConfig,
-  normalizeSecurityConfig,
   type AiPreferenceSettings,
   type EditorSettings,
   type ExtensionSettings,
@@ -146,41 +88,20 @@ import {
   type SettingsModelOption,
   type TerminalSettings
 } from '@/services/workspaceConfigRuntime'
-import { resolveLocale, translateWithLocale } from '@/i18n/runtime'
-import type { I18nKey } from '@/i18n/messages'
-import type { UserConfig } from '@shared/contracts/userConfig'
-import type { TerminalCommandGenerationRecord } from '@shared/contracts/terminalTools'
 import type {
   AiChatContextUsageSnapshot,
-  AiCommandCatalogOption,
-  AiCommandChipRef,
   AiContentPart,
-  AiContextCatalog,
-  AiContextOption
 } from '@shared/contracts/aiChat'
 import type {
   AiModelCatalog,
-  AiModelCatalogOption,
   ModelOptionUserConfig,
-  NotificationUserConfig,
-  SshAgentKeyConfig,
-  SshAgentKeychainOption,
-  SshProxyConfig,
-  WorkspaceUserConfig
 } from '@shared/contracts/appRuntime'
-import type { FileSessionCatalog, FileSessionFolderRecord, FileSessionFolderSaveInput, FileSessionInfo, FileSessionPatch, FileTransferTask } from '@shared/contracts/files'
-import type { AiopsUserProfile } from '@shared/contracts/userAccount'
+import type { FileSessionCatalog, FileSessionFolderSaveInput, FileSessionPatch } from '@shared/contracts/files'
 import type {
-  KnowledgeBaseSearchResult,
-  KnowledgeBaseSearchStatus,
   KnowledgeBaseTransferProgress,
   KnowledgeBaseUserConfig,
-  KnowledgeNode,
   KnowledgeNodeType
 } from '@shared/contracts/knowledgeBase'
-import type { AgentHibernationConfig } from '@shared/contracts/managedAiSessions'
-import type { ControlNotificationRecord } from '@shared/contracts/control'
-import type { AgentHookInstallerStatus, AgentHookInstallerSource } from '@shared/contracts/agentHooks'
 
 export type {
   AiAttentionFocusRequest,
@@ -242,332 +163,232 @@ export type {
   WorkspaceUserLoginTab as UserLoginTab
 } from '@/services/workspaceUserController'
 
-type AiContextUsage = AiChatContextUsageSnapshot
-
-type RendererLocalIdPrefix = 'panel' | 'terminal-security' | 'aichat-agent-loop'
-const createRendererLocalId = (prefix: RendererLocalIdPrefix) => `${prefix}-${Math.random().toString(36).slice(2, 9)}`
-
 export const useWorkspaceStore = defineStore('workspace', () => {
-  const mode = ref<'terminal' | 'agents'>('terminal')
-  const activeModule = ref<ModuleKey>('workspace')
-  const leftPanelOpen = ref(true)
-  const rightPanelOpen = ref(true)
-  const agentsLeftOpen = ref(true)
-  const leftPanelWidth = ref(layoutWidthLimits.defaults.leftPanelWidth)
-  const rightPanelWidth = ref(layoutWidthLimits.defaults.rightPanelWidth)
-  const agentsLeftWidth = ref(layoutWidthLimits.defaults.agentsLeftWidth)
-  const topUpdateState = ref<WorkspaceTopUpdateState>('idle')
-  const topNotice = ref('')
-  const aiAttentionItems = ref<AiAttentionItem[]>([])
-  const controlNotifications = ref<ControlNotificationRecord[]>([])
-  const aiAttentionFocusRequest = ref<AiAttentionFocusRequest>({ sequence: 0, item: null })
-  const managedAiSessions = ref<ManagedAiSession[]>([])
-  const agentHibernationConfig = ref<AgentHibernationConfig>({ ...defaultAgentHibernationConfig })
-  const managedAiSessionsLoading = ref(false)
-  const managedAiSessionsError = ref('')
-  const managedAiSessionFocusRequest = ref<{ sequence: number; session: ManagedAiSession | null }>({ sequence: 0, session: null })
-  const selectedManagedAiSessionKey = ref('')
-  const onboardingCompleted = ref<Record<OnboardingModuleId, boolean>>(createDefaultOnboardingCompleted())
-  const onboardingActiveTour = ref<OnboardingModuleId | null>(null)
-  const onboardingActiveStepIndex = ref(0)
-  const onboardingGuideOpen = ref(false)
-  const onboardingAiRequest = ref<{ action: WorkspaceOnboardingAiRequest; stepId: string; sequence: number }>({
-    action: 'none',
-    stepId: '',
-    sequence: 0
-  })
-  const onboardingAssetRequest = ref<{ action: WorkspaceOnboardingAssetRequest; stepId: string; sequence: number }>({
-    action: 'none',
-    stepId: '',
-    sequence: 0
-  })
-  const onboardingAutoApprovalEvent = ref(0)
-  const config = ref<UserConfig>(defaultConfig)
-  const savedGeneralBaseSettingsSnapshot = ref<WorkspaceGeneralBaseSettingsPatch>({})
-  const themeListenerCleanup = ref<(() => void) | null>(null)
-  const workspacePreferences = ref<WorkspaceUserConfig>({
-    ...defaultWorkspacePreferences,
-    expandedGroups: [...defaultWorkspacePreferences.expandedGroups]
-  })
-  const activePanelId = ref('panel-main')
-  const panels = ref<TerminalPanel[]>(createInitialWorkspaceTerminalPanels())
-
-  let shellShortcutAction: ((actionId: string, digit?: number) => boolean) | null = null
-  const shortcutHandlers: Record<string, ShortcutActionHandler> = {
-    newTerminal: () => shellShortcutAction?.('newTerminal') ?? false,
-    toggleAi: () => shellShortcutAction?.('toggleAi') ?? false,
-    switchToSpecificTab: (payload) => shellShortcutAction?.('switchToSpecificTab', payload?.digit) ?? false,
-    quickCommand: () => shellShortcutAction?.('quickCommand') ?? false
-  }
-
-  const selectedConversationId = ref('')
-  const conversations = ref<ConversationItem[]>([])
-  const aiContextCatalog = ref<AiContextCatalog>({
-    categories: [],
-    openedHosts: [],
-    selectedDefaults: []
-  })
-  const aiCommandOptions = ref<AiCommandCatalogOption[]>([])
-  const selectedContexts = ref<AiContextOption[]>([])
-
-  const selectedCommandId = ref<string | null>(null)
-  const selectedCommandRef = ref<AiCommandChipRef | null>(null)
-  const filesUiMode = ref<FilesUiMode>('transfer')
-  const fileSessions = ref<FileSessionInfo[]>([])
-  const fileSessionFolders = ref<FileSessionFolderRecord[]>([])
-  const selectedLeftFileSessionId = ref<string | null>(null)
-  const selectedRightFileSessionId = ref<string | null>('local')
-  const fileTransferTasks = ref<FileTransferTask[]>([])
-  const snippetGroups = ref<SnippetGroup[]>([])
-  const quickCommands = ref<QuickCommandSnippet[]>([])
-  const selectedSnippetGroupUuid = ref<string | null>(null)
-  const snippetSearchQuery = ref('')
-  const macroRecording = ref<MacroRecordingState>(createEmptyMacroRecordingState())
-  const macroRecordControlKeys = ref(true)
-  const macroSleepThresholdMs = ref(MACRO_DEFAULT_SLEEP_THRESHOLD_MS)
-  const knowledgeTree = ref<KnowledgeNode[]>([])
-  const kbExpandedKeys = ref<string[]>(['commands', 'images'])
-  const kbSelectedKeys = ref<string[]>([])
-  const kbSearchQuery = ref('')
-  const kbContentSearchResults = ref<KnowledgeBaseSearchResult[]>([])
-  const kbSearchStatus = ref<KnowledgeBaseSearchStatus | null>(null)
-  const kbSearchLoading = ref(false)
-  const kbSearchError = ref('')
-  const kbClipboard = ref<KbClipboard>(null)
-  const kbImportJobs = ref<KnowledgeImportJob[]>([])
-  const kbUsedBytes = ref(0)
-  const kbTotalBytes = ref(1024 * 1024 * 1024)
-  const extensionSearchQuery = ref('')
-  const extensionPlugins = ref<WorkspaceExtensionPlugin[]>([])
-  const selectedExtensionId = ref<string>('jumpserverSupport')
-  const extensionDetailTab = ref<'details' | 'features'>('details')
-  const extensionNotice = ref('')
-  const extensionInstallLoadingMap = ref<Record<string, boolean>>({})
-  const extensionUpdateLoadingMap = ref<Record<string, boolean>>({})
-  const extensionInstallProgressMap = ref<Record<string, WorkspaceExtensionInstallProgress>>({})
-  const extensionDragActive = ref(false)
-  const extensionInstallingPackageName = ref('')
-  const assetManagementOpenRequest = ref<AssetManagementOpenRequest>({ sequence: 0, action: 'none' })
-  const aliasCommands = ref<WorkspaceAliasCommand[]>([])
-  const aliasSearchQuery = ref('')
-  const k8sContexts = ref<K8sContextInfo[]>([])
-  const k8sClusters = ref<K8sCluster[]>([])
-  const k8sBastions = ref<K8sBastionGroup[]>([])
-  const k8sNamespaces = ref<K8sNamespaceInfo[]>([])
-  const k8sResources = ref<K8sResource[]>([])
-  const k8sConnectingClusterIds = ref<string[]>([])
-  const k8sSyncingBastionIds = ref<string[]>([])
-  const k8sDeleteConfirmClusterId = ref<string | null>(null)
-  const k8sClusterActionMenuId = ref<string | null>(null)
-  const k8sImportContexts = ref<K8sImportContextInfo[]>([])
-  const k8sActiveClusterId = ref<string | null>(null)
-  const k8sSearchQuery = ref('')
-  const k8sConfigTab = ref<'local' | 'jumpserver'>('local')
-  const k8sSelectedClusterId = ref<string | null>(null)
-  const k8sClusterNotice = ref('')
-  const k8sTerminalTabs = ref<K8sTerminalTab[]>([])
-  const k8sActiveTerminalId = ref<string | null>(null)
-  const k8sAddModalOpen = ref(false)
-  const k8sEditModalOpen = ref(false)
-  const k8sEditingClusterId = ref<string | null>(null)
-  const k8sAddMode = ref<'import' | 'manual'>('import')
-  const k8sTestResult = ref<boolean | null>(null)
-  const k8sCollapsedBastionIds = ref<string[]>([])
-  const k8sResourceKind = ref<K8sResourceKind>('pods')
-  const k8sResourceNamespace = ref('all')
-  const k8sResourceQuery = ref('')
-  const k8sResourceOutput = ref('选择 Kubernetes 资源后，可在这里查看 Describe、Logs 或 kubectl 执行结果。')
-  const k8sResourceOutputTitle = ref('资源输出')
-  const k8sResourceLoading = ref(false)
-  const k8sCopiedCommand = ref('')
-  const k8sAgentClusterId = ref<string | null>(null)
-  const k8sAgentContextName = ref('')
-  const k8sAgentStatus = ref<'idle' | 'ready' | 'running' | 'error'>('idle')
-  const k8sAgentCommandDraft = ref('kubectl get pods -A')
-  const k8sAgentCommandHistory = ref<string[]>(['kubectl get pods -A', 'kubectl get namespaces', 'kubectl version --request-timeout=10s'])
-  const k8sAgentRuns = ref<K8sAgentRunRecord[]>([])
-  const k8sAgentLastResult = ref<K8sAgentRunRecord | null>(null)
-  const k8sAgentTesting = ref(false)
-  const savedK8sProxyConfig = ref<K8sProxyConfig>(cloneK8sProxyConfig(defaultK8sProxyConfig))
-  const k8sProxyConfig = ref<K8sProxyConfig>(cloneK8sProxyConfig(defaultK8sProxyConfig))
-  const k8sProxyConfigOpen = ref(false)
-  const activeSettingsSection = ref<SettingSectionKey>('general')
-  const editorSettings = ref<EditorSettings>({ ...defaultEditorSettings })
-  const terminalSettings = ref<TerminalSettings>({ ...defaultTerminalSettings })
-  const sshProxyConfigs = ref<SshProxyConfig[]>([])
-  const sshProxyConfigModalOpen = ref(false)
-  const sshProxyAddModalOpen = ref(false)
-  const sshProxyForm = ref<SshProxyConfig>({
-    name: '',
-    type: 'SOCKS5',
-    host: '127.0.0.1',
-    port: 22,
-    enableProxyIdentity: false,
-    username: '',
-    password: ''
-  })
-  const sshAgentKeys = ref<SshAgentKeyConfig[]>([])
-  const sshAgentConfigModalOpen = ref(false)
-  const sshAgentSelectedKey = ref('')
-  const sshAgentKeyChainOptions = ref<SshAgentKeychainOption[]>([])
-  const aiModelOptions = ref<AiModelCatalogOption[]>([])
-  const lockedAiModelOptions = ref<AiModelCatalogOption[]>([])
-  const settingModelOptions = ref<SettingsModelOption[]>([])
-  const addModelSwitch = ref(true)
-  const modelProviders = ref<Record<ModelProviderKey, ModelProviderSettings>>({
-    litellm: { ...defaultModelProviders.litellm },
-    openai: { ...defaultModelProviders.openai },
-    bedrock: { ...defaultModelProviders.bedrock },
-    deepseek: { ...defaultModelProviders.deepseek },
-    anthropic: { ...defaultModelProviders.anthropic },
-    ollama: { ...defaultModelProviders.ollama },
-    lmstudio: { ...defaultModelProviders.lmstudio }
-  })
-  const modelCheckState = ref<Record<ModelProviderKey, 'idle' | 'checking' | 'success' | 'error'>>({
-    litellm: 'idle',
-    openai: 'idle',
-    bedrock: 'idle',
-    deepseek: 'idle',
-    anthropic: 'idle',
-    ollama: 'idle',
-    lmstudio: 'idle'
-  })
-  const modelCheckRequestSeq = ref<Record<ModelProviderKey, number>>({
-    litellm: 0,
-    openai: 0,
-    bedrock: 0,
-    deepseek: 0,
-    anthropic: 0,
-    ollama: 0,
-    lmstudio: 0
-  })
-  const aiPreferences = ref<AiPreferenceSettings>({
-    ...defaultAiPreferences,
-    proxy: { ...defaultAiPreferences.proxy }
-  })
-  const notificationSettings = ref<NotificationUserConfig>({ ...defaultNotificationSettings })
-  const extensionSettings = ref<ExtensionSettings>({ ...defaultExtensionSettings })
-  const keywordHighlightSettings = ref<KeywordHighlightSettings>(normalizeKeywordHighlightConfig(defaultKeywordHighlightSettings).normalized)
-  const keywordHighlightEditorOpen = ref(false)
-  const keywordHighlightEditorContent = ref(JSON.stringify(defaultKeywordHighlightSettings, null, 2))
-  const keywordHighlightEditorError = ref('')
-  const keywordHighlightEditorLastSaved = ref(false)
-  const keywordHighlightConfigPath = ref('~/.config/aiopsterm/keyword-highlight.json')
-  const securitySettings = ref<SecuritySettings>(normalizeSecurityConfig(defaultSecuritySettings).normalized)
-  const securityConfigEditorOpen = ref(false)
-  const securityConfigEditorContent = ref(JSON.stringify(defaultSecuritySettings, null, 2))
-  const securityConfigEditorError = ref('')
-  const securityConfigEditorLastSaved = ref(false)
-  const securityConfigPath = ref('~/.config/aiopsterm/security-config.json')
-  const settingsDocumentationOpen = ref(false)
-  const settingsDocumentationTitle = ref('')
-  const settingsDocumentationPath = ref('')
-  const settingsDocumentationContent = ref('')
-  const agentHookInstallers = ref<AgentHookInstallerStatus[]>([])
-  const agentHookInstallersLoading = ref(false)
-  const agentHookInstallerBusySource = ref<AgentHookInstallerSource | ''>('')
-  const agentHookInstallerError = ref('')
-  const mcpConfigEditorOpen = ref(false)
-  const mcpConfigEditorContent = ref(JSON.stringify(defaultMcpConfigFile(), null, 2))
-  const mcpConfigEditorError = ref('')
-  const mcpConfigEditorLastSaved = ref(false)
-  const mcpConfigPath = ref('~/.config/aiopsterm/setting/mcp_settings.json')
-  const privacySettings = ref<PrivacySettings>({ ...defaultPrivacySettings })
-  const billingSettings = ref<WorkspaceBillingSettings>(createDefaultWorkspaceBillingSettings())
-  const aboutSettings = ref<WorkspaceAboutSettings>(createDefaultWorkspaceAboutSettings())
-  const userProfile = ref<AiopsUserProfile>(createEmptyWorkspaceUserProfile())
-  const userNotice = ref('')
-  const mcpServers = ref<WorkspaceMcpServer[]>([])
-  const expandedMcpServerNames = ref<string[]>([])
-  const activeMcpServerTab = ref<Record<string, 'tools' | 'resources'>>({})
-  const mcpToolArgumentDrafts = ref<Record<string, string>>({})
-  const mcpOperationResults = ref<Record<string, WorkspaceMcpOperationRecord>>({})
-  const settingsSkills = ref<WorkspaceSettingsSkill[]>([])
-  const skillsUserPath = ref('~/.config/aiopsterm/skills')
-  const skillModal = ref<{ mode: 'create' | 'edit' | null; name: string; description: string; content: string }>({
-    mode: null,
-    name: '',
-    description: '',
-    content: ''
-  })
-  const settingsRules = ref<WorkspaceSettingsRule[]>([])
-  const settingsShortcuts = ref<WorkspaceSettingsShortcut[]>([])
-  const shortcutRecording = ref<{ actionId: string | null; tempShortcut: string }>({ actionId: null, tempShortcut: '' })
-  const trustedDevices = ref<WorkspaceTrustedDevice[]>([])
-  const trustedDeviceModal = ref<WorkspaceTrustedDeviceModal>({ open: false, id: null })
-  const settingsNotice = ref('')
-  const currentLocale = () => resolveLocale(config.value.language, typeof navigator === 'undefined' ? [] : navigator.languages || [navigator.language])
-  const i18nText = (key: I18nKey, params: Record<string, string | number> = {}) =>
-    Object.entries(params).reduce((text, [name, value]) => text.replace(`{${name}}`, String(value)), translateWithLocale(currentLocale(), key))
-  const todoItems = ref<TodoItem[]>([])
-  const chatMessages = ref<ChatMessage[]>([])
-  const aiContextUsage = ref<AiContextUsage | null>(null)
-  const terminalSecurityPrompt = ref<TerminalSecurityPrompt>(null)
-  const terminalCommandGenerationRecords = ref<TerminalCommandGenerationRecord[]>([])
-  const setSettingsNotice = (text: string) => {
-    settingsNotice.value = text
-    if (!text) return
-    window.setTimeout(() => {
-      if (settingsNotice.value === text) settingsNotice.value = ''
-    }, 2400)
-  }
-  const setTopNotice = (message: string) => {
-    topNotice.value = message
-    if (!message) return
-    window.setTimeout(() => {
-      if (topNotice.value === message) topNotice.value = ''
-    }, 2400)
-  }
-  const activePanel = computed(() => panels.value.find((panel) => panel.id === activePanelId.value) || panels.value[0])
-  const isLeftVisible = computed(() => mode.value === 'terminal' && leftPanelOpen.value)
-  const isRightVisible = computed(() => mode.value === 'terminal' && rightPanelOpen.value)
-  const k8sHasContexts = computed(() => k8sHasContextsRuntime(k8sContexts.value))
-  const k8sActiveContext = computed(() => k8sActiveContextRuntime(k8sContexts.value))
-  const k8sSelectedCluster = computed(() => k8sClusterById(k8sClusters.value, k8sSelectedClusterId.value))
-  const k8sActiveCluster = computed(() => k8sClusterById(k8sClusters.value, k8sActiveClusterId.value))
-  const k8sDeleteConfirmCluster = computed(() => k8sClusterById(k8sClusters.value, k8sDeleteConfirmClusterId.value))
-  const filteredK8sClusters = computed(() => filteredK8sClustersRuntime(k8sClusters.value, k8sSearchQuery.value))
-  const localK8sClusters = computed(() => localK8sClustersRuntime(filteredK8sClusters.value))
-  const filteredK8sBastions = computed(() => filteredK8sBastionsRuntime(k8sBastions.value, k8sClusters.value, k8sSearchQuery.value))
-  const k8sActiveTerminal = computed(() => k8sActiveTerminalRuntime(k8sTerminalTabs.value, k8sActiveTerminalId.value))
-  const k8sAgentCluster = computed(() => k8sAgentClusterRuntime(k8sClusters.value, k8sAgentClusterId.value))
-  const k8sAgentCurrentCluster = computed(() => k8sAgentCurrentClusterRuntime(k8sAgentCluster.value, k8sAgentContextName.value))
-  const k8sResourceCluster = computed(() => k8sResourceClusterRuntime(k8sClusters.value, k8sActiveClusterId.value, k8sSelectedClusterId.value))
-  const k8sActiveNamespaces = computed(() => k8sActiveNamespacesRuntime(k8sNamespaces.value, k8sResources.value, k8sResourceCluster.value?.id || null))
-  const filteredK8sResources = computed(() =>
-    filteredK8sResourcesRuntime(k8sResources.value, {
-      clusterId: k8sResourceCluster.value?.id || null,
-      kind: k8sResourceKind.value,
-      namespace: k8sResourceNamespace.value,
-      query: k8sResourceQuery.value
-    })
-  )
-  const k8sResourceSummary = computed<Record<K8sResourceKind, number>>(() =>
-    k8sResourceSummaryRuntime(k8sResources.value, k8sResourceCluster.value?.id || null, k8sResourceNamespace.value)
-  )
-  const onboardingCompletedCount = computed(() => Object.values(onboardingCompleted.value).filter(Boolean).length)
-  const onboardingActiveSteps = computed(() => (onboardingActiveTour.value ? onboardingTourSteps[onboardingActiveTour.value] : []))
-  const onboardingActiveStep = computed(() => onboardingActiveSteps.value[onboardingActiveStepIndex.value] || null)
-
-  const userAccountCenterOpen = ref(false)
-  const userContactCodeCountdown = ref<Record<'email' | 'mobile', number>>({
-    email: 0,
-    mobile: 0
-  })
-  const userContactCodeSending = ref<Record<'email' | 'mobile', boolean>>({
-    email: false,
-    mobile: false
-  })
-  const userLoginTab = ref<WorkspaceUserLoginTab>('account')
-  const userLoginLoading = ref(false)
-  const userLoginCodeCountdown = ref<Record<'email' | 'mobile', number>>({
-    email: 0,
-    mobile: 0
-  })
-  const userLoginCodeSending = ref<Record<'email' | 'mobile', boolean>>({
-    email: false,
-    mobile: false
-  })
+  const {
+    mode,
+    activeModule,
+    leftPanelOpen,
+    rightPanelOpen,
+    agentsLeftOpen,
+    leftPanelWidth,
+    rightPanelWidth,
+    agentsLeftWidth,
+    topUpdateState,
+    topNotice,
+    aiAttentionItems,
+    controlNotifications,
+    aiAttentionFocusRequest,
+    managedAiSessions,
+    agentHibernationConfig,
+    managedAiSessionsLoading,
+    managedAiSessionsError,
+    managedAiSessionFocusRequest,
+    selectedManagedAiSessionKey,
+    onboardingCompleted,
+    onboardingActiveTour,
+    onboardingActiveStepIndex,
+    onboardingGuideOpen,
+    onboardingAiRequest,
+    onboardingAssetRequest,
+    onboardingAutoApprovalEvent,
+    config,
+    savedGeneralBaseSettingsSnapshot,
+    themeListenerCleanup,
+    workspacePreferences,
+    activePanelId,
+    panels,
+    shortcutHandlers,
+    setShellShortcutAction,
+    selectedConversationId,
+    conversations,
+    aiContextCatalog,
+    aiCommandOptions,
+    selectedContexts,
+    selectedCommandId,
+    selectedCommandRef,
+    filesUiMode,
+    fileSessions,
+    fileSessionFolders,
+    selectedLeftFileSessionId,
+    selectedRightFileSessionId,
+    fileTransferTasks,
+    snippetGroups,
+    quickCommands,
+    selectedSnippetGroupUuid,
+    snippetSearchQuery,
+    macroRecording,
+    macroRecordControlKeys,
+    macroSleepThresholdMs,
+    knowledgeTree,
+    kbExpandedKeys,
+    kbSelectedKeys,
+    kbSearchQuery,
+    kbContentSearchResults,
+    kbSearchStatus,
+    kbSearchLoading,
+    kbSearchError,
+    kbClipboard,
+    kbImportJobs,
+    kbUsedBytes,
+    kbTotalBytes,
+    extensionSearchQuery,
+    extensionPlugins,
+    selectedExtensionId,
+    extensionDetailTab,
+    extensionNotice,
+    extensionInstallLoadingMap,
+    extensionUpdateLoadingMap,
+    extensionInstallProgressMap,
+    extensionDragActive,
+    extensionInstallingPackageName,
+    assetManagementOpenRequest,
+    aliasCommands,
+    aliasSearchQuery,
+    k8sContexts,
+    k8sClusters,
+    k8sBastions,
+    k8sNamespaces,
+    k8sResources,
+    k8sConnectingClusterIds,
+    k8sSyncingBastionIds,
+    k8sDeleteConfirmClusterId,
+    k8sClusterActionMenuId,
+    k8sImportContexts,
+    k8sActiveClusterId,
+    k8sSearchQuery,
+    k8sConfigTab,
+    k8sSelectedClusterId,
+    k8sClusterNotice,
+    k8sTerminalTabs,
+    k8sActiveTerminalId,
+    k8sAddModalOpen,
+    k8sEditModalOpen,
+    k8sEditingClusterId,
+    k8sAddMode,
+    k8sTestResult,
+    k8sCollapsedBastionIds,
+    k8sResourceKind,
+    k8sResourceNamespace,
+    k8sResourceQuery,
+    k8sResourceOutput,
+    k8sResourceOutputTitle,
+    k8sResourceLoading,
+    k8sCopiedCommand,
+    k8sAgentClusterId,
+    k8sAgentContextName,
+    k8sAgentStatus,
+    k8sAgentCommandDraft,
+    k8sAgentCommandHistory,
+    k8sAgentRuns,
+    k8sAgentLastResult,
+    k8sAgentTesting,
+    savedK8sProxyConfig,
+    k8sProxyConfig,
+    k8sProxyConfigOpen,
+    activeSettingsSection,
+    editorSettings,
+    terminalSettings,
+    sshProxyConfigs,
+    sshProxyConfigModalOpen,
+    sshProxyAddModalOpen,
+    sshProxyForm,
+    sshAgentKeys,
+    sshAgentConfigModalOpen,
+    sshAgentSelectedKey,
+    sshAgentKeyChainOptions,
+    aiModelOptions,
+    lockedAiModelOptions,
+    settingModelOptions,
+    addModelSwitch,
+    modelProviders,
+    modelCheckState,
+    modelCheckRequestSeq,
+    aiPreferences,
+    notificationSettings,
+    extensionSettings,
+    keywordHighlightSettings,
+    keywordHighlightEditorOpen,
+    keywordHighlightEditorContent,
+    keywordHighlightEditorError,
+    keywordHighlightEditorLastSaved,
+    keywordHighlightConfigPath,
+    securitySettings,
+    securityConfigEditorOpen,
+    securityConfigEditorContent,
+    securityConfigEditorError,
+    securityConfigEditorLastSaved,
+    securityConfigPath,
+    settingsDocumentationOpen,
+    settingsDocumentationTitle,
+    settingsDocumentationPath,
+    settingsDocumentationContent,
+    agentHookInstallers,
+    agentHookInstallersLoading,
+    agentHookInstallerBusySource,
+    agentHookInstallerError,
+    mcpConfigEditorOpen,
+    mcpConfigEditorContent,
+    mcpConfigEditorError,
+    mcpConfigEditorLastSaved,
+    mcpConfigPath,
+    privacySettings,
+    billingSettings,
+    aboutSettings,
+    userProfile,
+    userNotice,
+    mcpServers,
+    expandedMcpServerNames,
+    activeMcpServerTab,
+    mcpToolArgumentDrafts,
+    mcpOperationResults,
+    settingsSkills,
+    skillsUserPath,
+    skillModal,
+    settingsRules,
+    settingsShortcuts,
+    shortcutRecording,
+    trustedDevices,
+    trustedDeviceModal,
+    settingsNotice,
+    todoItems,
+    chatMessages,
+    aiContextUsage,
+    terminalSecurityPrompt,
+    terminalCommandGenerationRecords,
+    currentLocale,
+    i18nText,
+    createRendererLocalId,
+    setSettingsNotice,
+    setTopNotice,
+    activePanel,
+    isLeftVisible,
+    isRightVisible,
+    k8sHasContexts,
+    k8sActiveContext,
+    k8sSelectedCluster,
+    k8sActiveCluster,
+    k8sDeleteConfirmCluster,
+    filteredK8sClusters,
+    localK8sClusters,
+    filteredK8sBastions,
+    k8sActiveTerminal,
+    k8sAgentCluster,
+    k8sAgentCurrentCluster,
+    k8sResourceCluster,
+    k8sActiveNamespaces,
+    filteredK8sResources,
+    k8sResourceSummary,
+    onboardingCompletedCount,
+    onboardingActiveSteps,
+    onboardingActiveStep,
+    userAccountCenterOpen,
+    userContactCodeCountdown,
+    userContactCodeSending,
+    userLoginTab,
+    userLoginLoading,
+    userLoginCodeCountdown,
+    userLoginCodeSending
+  } = createWorkspaceStoreState()
 
   const {
     isUserSubscriptionActive,
@@ -1405,7 +1226,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       setActiveSettingsSection
     }
   )
-  shellShortcutAction = triggerShortcutAction
+  setShellShortcutAction(triggerShortcutAction)
 
   return {
     mode,
