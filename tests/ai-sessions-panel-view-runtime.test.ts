@@ -1,0 +1,314 @@
+import { describe, expect, it } from 'vitest'
+import {
+  buildManagedAiActiveScopeLabel,
+  buildManagedAiCockpitCards,
+  filteredManagedAiTimelineEvents,
+  formatManagedAiRelativeTime,
+  managedAiAttentionQueue,
+  managedAiProjectKey,
+  managedAiProjectOptions,
+  managedAiSessionKey,
+  managedAiSourceOptions,
+  managedAiTimelineEventCopyPayload,
+  managedAiTimelineEventState,
+  managedAiVisibleSessionSummaryPayload,
+  selectedVisibleManagedAiSession,
+  visibleManagedAiSessions,
+  type ManagedAiPanelTranslate,
+  type ManagedAiTimelineEvent
+} from '@/services/aiSessionsPanelViewRuntime'
+import type { ManagedAiSession } from '@/services/workspaceManagedAiTypes'
+import type {
+  AiAgentSessionEventName,
+  AiAgentSessionSource,
+  ManagedAiDecisionMode,
+  ManagedAiRequestKind,
+  ManagedAiSessionState
+} from '@shared/contracts/managedAiSessions'
+
+const labels: Record<string, string> = {
+  'aiSessions.cockpit.total': 'Total',
+  'aiSessions.filter.needsInput': 'Needs input',
+  'aiSessions.filter.working': 'Working',
+  'aiSessions.filter.idle': 'Idle',
+  'aiSessions.filter.ended': 'Ended',
+  'aiSessions.filter.hibernated': 'Hibernated',
+  'aiSessions.scopeAll': 'All scope',
+  'aiSessions.scopeSearch': 'Search: {query}',
+  'aiSessions.queueHeader': 'AI session queue: {scope}',
+  'aiSessions.queueCounts': 'Current: {current}, pending: {pending}',
+  'aiSessions.request.permission': 'Permission',
+  'aiSessions.request.question': 'Question',
+  'aiSessions.request.notification': 'Notification',
+  'aiSessions.request.telemetry': 'Telemetry',
+  'aiSessions.decision.blocking': 'Blocking',
+  'aiSessions.decision.local': 'Local',
+  'aiSessions.decision.telemetry': 'Telemetry only',
+  'aiSessions.copy.agent': 'Agent',
+  'aiSessions.copy.status': 'Status',
+  'aiSessions.copy.session': 'Session',
+  'aiSessions.copy.path': 'Path',
+  'aiSessions.copy.summary': 'Summary',
+  'aiSessions.copy.resume': 'Resume',
+  'aiSessions.relative.secondsAgo': '{count}s ago',
+  'aiSessions.relative.minutesAgo': '{count}m ago',
+  'aiSessions.relative.hoursAgo': '{count}h ago',
+  'aiSessions.relative.daysAgo': '{count}d ago'
+}
+
+const t: ManagedAiPanelTranslate = (key, params) => {
+  const template = labels[key] || key
+  if (!params) return template
+  return Object.entries(params).reduce((text, [name, value]) => text.split(`{${name}}`).join(String(value)), template)
+}
+
+const makeEvent = (input: {
+  id: string
+  source?: AiAgentSessionSource
+  event?: AiAgentSessionEventName
+  sessionId?: string
+  title?: string
+  summary?: string
+  receivedAt?: number
+  requestKind?: ManagedAiRequestKind
+  decisionMode?: ManagedAiDecisionMode
+  actionable?: boolean
+  requestId?: string
+  raw?: Record<string, unknown>
+}): ManagedAiTimelineEvent => ({
+  source: input.source || 'claude-code',
+  event: input.event || 'permission_request',
+  sessionId: input.sessionId || 'session-1',
+  title: input.title || 'Event',
+  summary: input.summary || 'Event summary',
+  receivedAt: input.receivedAt || 100,
+  id: input.id,
+  requestKind: input.requestKind || 'permission',
+  decisionMode: input.decisionMode || 'blocking',
+  ...(typeof input.actionable === 'boolean' ? { actionable: input.actionable } : {}),
+  ...(input.requestId ? { requestId: input.requestId } : {}),
+  ...(input.raw ? { raw: input.raw } : {})
+})
+
+const makeSession = (input: {
+  id: string
+  source: AiAgentSessionSource
+  title: string
+  summary?: string
+  state: ManagedAiSessionState
+  lastEvent?: AiAgentSessionEventName
+  lastActivityAt: number
+  cwd?: string
+  requestKind?: ManagedAiRequestKind
+  decisionMode?: ManagedAiDecisionMode
+  hibernated?: boolean
+  resumeCommand?: string
+  events?: ManagedAiTimelineEvent[]
+}): ManagedAiSession => ({
+  id: input.id,
+  source: input.source,
+  title: input.title,
+  summary: input.summary || '',
+  state: input.state,
+  lastEvent: input.lastEvent || 'permission_request',
+  lastActivityAt: input.lastActivityAt,
+  createdAt: input.lastActivityAt - 10,
+  updatedAt: input.lastActivityAt,
+  ...(input.cwd ? { cwd: input.cwd } : {}),
+  requestKind: input.requestKind || 'permission',
+  decisionMode: input.decisionMode || 'blocking',
+  ...(input.hibernated ? { hibernated: input.hibernated } : {}),
+  ...(input.resumeCommand ? { resumeCommand: input.resumeCommand } : {}),
+  events: input.events || [],
+  decisions: []
+})
+
+const sessions: ManagedAiSession[] = [
+  makeSession({
+    id: 'claude-api',
+    source: 'claude-code',
+    title: 'Deploy approval',
+    summary: 'Approve release',
+    state: 'needsInput',
+    lastActivityAt: 300,
+    cwd: '/work/api',
+    requestKind: 'permission',
+    decisionMode: 'blocking',
+    resumeCommand: 'claude --resume claude-api'
+  }),
+  makeSession({
+    id: 'gemini-api',
+    source: 'gemini',
+    title: 'API refactor',
+    summary: 'Reading files',
+    state: 'working',
+    lastEvent: 'pre_tool_use',
+    lastActivityAt: 250,
+    cwd: '/work/api',
+    requestKind: 'telemetry',
+    decisionMode: 'telemetry'
+  }),
+  makeSession({
+    id: 'codex-docs',
+    source: 'codex',
+    title: 'Docs cleanup',
+    summary: 'Round finished',
+    state: 'idle',
+    lastEvent: 'stop',
+    lastActivityAt: 200,
+    cwd: '/work/docs',
+    requestKind: 'telemetry',
+    decisionMode: 'telemetry'
+  }),
+  makeSession({
+    id: 'cursor-unknown',
+    source: 'cursor',
+    title: 'Unknown project',
+    state: 'ended',
+    lastEvent: 'session_end',
+    lastActivityAt: 400,
+    hibernated: true,
+    requestKind: 'notification',
+    decisionMode: 'local'
+  })
+]
+
+describe('aiSessionsPanelViewRuntime', () => {
+  it('projects source and project options with stable labels, counts, and recency ordering', () => {
+    expect(managedAiSessionKey(sessions[0])).toBe('claude-code:claude-api')
+    expect(managedAiProjectKey(undefined)).toBe('__unknown__')
+    expect(managedAiSourceOptions(sessions)).toEqual(['claude-code', 'codex', 'cursor', 'gemini'])
+
+    expect(managedAiProjectOptions(sessions, 'Unknown path')).toEqual([
+      { key: '__unknown__', label: 'Unknown path (1)', count: 1, latest: 400 },
+      { key: '/work/api', label: 'api (2)', count: 2, latest: 300 },
+      { key: '/work/docs', label: 'docs (1)', count: 1, latest: 200 }
+    ])
+  })
+
+  it('builds cockpit counts, attention ordering, and active scope labels without component state', () => {
+    const cockpit = buildManagedAiCockpitCards({
+      sessions,
+      filter: 'needsInput',
+      hibernatedOnly: false,
+      translate: t
+    })
+
+    expect(cockpit.map((card) => [card.key, card.value, card.active])).toEqual([
+      ['all', 4, false],
+      ['needsInput', 1, true],
+      ['working', 1, false],
+      ['idle', 1, false],
+      ['ended', 1, false],
+      ['hibernated', 1, false]
+    ])
+    expect(managedAiAttentionQueue(sessions).map((session) => session.id)).toEqual(['claude-api'])
+
+    expect(
+      buildManagedAiActiveScopeLabel({
+        filter: 'needsInput',
+        hibernatedOnly: true,
+        sourceFilter: 'claude-code',
+        projectFilter: '/work/api',
+        projectOptions: managedAiProjectOptions(sessions, 'Unknown path'),
+        query: 'deploy',
+        translate: t
+      })
+    ).toBe('Needs input / Hibernated / Claude Code / api (2) / Search: deploy')
+  })
+
+  it('filters visible sessions by state, source, project, query, and hibernation state', () => {
+    expect(
+      visibleManagedAiSessions({
+        sessions,
+        query: 'release',
+        filter: 'needsInput',
+        sourceFilter: 'claude-code',
+        projectFilter: '/work/api',
+        hibernatedOnly: false
+      }).map((session) => session.id)
+    ).toEqual(['claude-api'])
+
+    expect(
+      visibleManagedAiSessions({
+        sessions,
+        query: '',
+        filter: 'all',
+        sourceFilter: 'all',
+        projectFilter: '__unknown__',
+        hibernatedOnly: true
+      }).map((session) => session.id)
+    ).toEqual(['cursor-unknown'])
+  })
+
+  it('falls back to the first visible session and filters timeline events newest first', () => {
+    const visible = sessions.slice(1, 3)
+    expect(selectedVisibleManagedAiSession({ selectedSession: sessions[0], visibleSessions: visible })?.id).toBe('gemini-api')
+    expect(selectedVisibleManagedAiSession({ selectedSession: sessions[1], visibleSessions: visible })?.id).toBe('gemini-api')
+
+    const timelineSession = makeSession({
+      id: 'timeline',
+      source: 'claude-code',
+      title: 'Timeline',
+      state: 'needsInput',
+      lastActivityAt: 500,
+      events: [
+        makeEvent({ id: 'permission-1', requestKind: 'permission', receivedAt: 100 }),
+        makeEvent({ id: 'question-1', event: 'question', requestKind: 'question', receivedAt: 200 })
+      ]
+    })
+
+    expect(filteredManagedAiTimelineEvents(timelineSession, 'all').map((event) => event.id)).toEqual(['question-1', 'permission-1'])
+    expect(filteredManagedAiTimelineEvents(timelineSession, 'question').map((event) => event.id)).toEqual(['question-1'])
+  })
+
+  it('classifies timeline event state including the Codex permission telemetry rule', () => {
+    expect(managedAiTimelineEventState(makeEvent({ id: 'claude-permission', source: 'claude-code', event: 'permission_request', decisionMode: 'blocking' }))).toBe(
+      'needsInput'
+    )
+    expect(managedAiTimelineEventState(makeEvent({ id: 'codex-permission', source: 'codex', event: 'permission_request', decisionMode: 'blocking' }))).toBe('working')
+    expect(managedAiTimelineEventState(makeEvent({ id: 'notification', event: 'notification', requestKind: 'notification', decisionMode: 'local' }))).toBe(
+      'needsInput'
+    )
+    expect(managedAiTimelineEventState(makeEvent({ id: 'end', event: 'session_end', requestKind: 'telemetry', decisionMode: 'telemetry' }))).toBe('ended')
+  })
+
+  it('builds copy payloads without raw event data and formats queue summaries', () => {
+    const eventPayload = managedAiTimelineEventCopyPayload(
+      makeEvent({
+        id: 'question-1',
+        event: 'question',
+        requestKind: 'question',
+        requestId: 'request-1',
+        raw: { secret: 'not copied' }
+      })
+    )
+
+    expect(eventPayload).toContain('"requestKind": "question"')
+    expect(eventPayload).toContain('"requestId": "request-1"')
+    expect(eventPayload).not.toContain('raw')
+    expect(eventPayload).not.toContain('not copied')
+
+    const queuePayload = managedAiVisibleSessionSummaryPayload({
+      activeScopeLabel: 'api (2)',
+      visibleSessions: sessions.slice(0, 2),
+      visiblePendingCount: 1,
+      translate: t
+    })
+
+    expect(queuePayload).toContain('AI session queue: api (2)')
+    expect(queuePayload).toContain('Current: 2, pending: 1')
+    expect(queuePayload).toContain('1. Deploy approval')
+    expect(queuePayload).toContain('Agent: Claude Code (claude-code)')
+    expect(queuePayload).toContain('Status: Needs input / Permission / Blocking')
+    expect(queuePayload).toContain('Resume: claude --resume claude-api')
+    expect(queuePayload).toContain('2. API refactor')
+  })
+
+  it('formats relative time through injected clock and translation', () => {
+    expect(formatManagedAiRelativeTime(1_000, 45_000, t)).toBe('44s ago')
+    expect(formatManagedAiRelativeTime(1_000, 121_000, t)).toBe('2m ago')
+    expect(formatManagedAiRelativeTime(1_000, 7_201_000, t)).toBe('2h ago')
+    expect(formatManagedAiRelativeTime(1_000, 172_801_000, t)).toBe('2d ago')
+  })
+})
