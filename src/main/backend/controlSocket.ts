@@ -101,14 +101,17 @@ import {
   isControlMobileTerminalMethod,
   isControlProjectFileMethod,
   isControlSystemCompatibilityMethod,
-  mobileHostStatus,
   pendingRendererRequestCount,
   resolvePendingRendererControlResponse,
-  systemCapabilities,
-  systemIdentify,
   workspaceContextPayload,
   type ControlSocketRuntime
 } from './controlSocketRendererRuntime'
+import {
+  configureControlSocketSystemRuntime,
+  mobileHostStatus,
+  systemCapabilities,
+  systemIdentify
+} from './controlSocketSystemRuntime'
 import { publishRendererMutationEvent } from './controlSocketRendererMutationRuntime'
 
 type ControlSocketRequest = {
@@ -532,6 +535,12 @@ const writeSocketResponse = (socket: Socket, id: string | undefined, response: C
 export const configureControlSocketRuntime = (config: ControlSocketRuntime = {}) => {
   runtime = { ...runtime, ...config }
   configureControlSocketRendererRuntime({ ...runtime, socketPath })
+  configureControlSocketSystemRuntime({
+    ...(runtime.userDataPath ? { userDataPath: runtime.userDataPath } : {}),
+    socketPath,
+    getWindows: runtime.getWindows,
+    dispatchRendererControlRequest
+  })
   configureControlSocketStateRuntime({
     ...(runtime.userDataPath ? { userDataPath: runtime.userDataPath } : {}),
     dispatchRendererControlRequest
@@ -575,6 +584,7 @@ export const ensureControlSocketServer = async (userDataPath: string) => {
   socketPath = socketPathFor(userDataPath)
   runtime = { ...runtime, userDataPath }
   configureControlSocketRendererRuntime({ ...runtime, socketPath })
+  configureControlSocketSystemRuntime({ userDataPath, socketPath, getWindows: runtime.getWindows, dispatchRendererControlRequest })
   configureControlSocketStateRuntime({ userDataPath, dispatchRendererControlRequest })
   configureControlSocketNotificationRuntime({ dispatchRendererControlRequest, showNotification: runtime.showNotification, publishControlEvent })
   configureAgentVaultRuntime({ userDataPath, dispatchRendererControlRequest, publishControlEvent })
@@ -648,6 +658,7 @@ export const closeControlSocketServer = () => {
   if (socketPath && process.platform !== 'win32' && existsSync(socketPath)) rmSync(socketPath, { force: true })
   socketPath = ''
   configureControlSocketRendererRuntime({ socketPath })
+  configureControlSocketSystemRuntime({ socketPath })
 }
 
 export const invokeControlSocketMethod = (method: string, params?: Record<string, unknown>) => handleControlRequest({ method, params })
