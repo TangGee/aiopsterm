@@ -14,218 +14,14 @@
       <AiPanelHeader />
     </div>
 
-    <div
-      v-show="aiPanelMode === 'codex'"
-      class="ai-codex-shell"
-      :class="{ 'drop-active': dropActive }"
-      data-testid="ai-codex-shell"
-      @click.stop="focusCodexTerminal"
-    >
-      <div
-        class="ai-codex-target-bar"
-        :class="{ bound: Boolean(activeCodexBoundTarget), missing: !activeCodexBoundTarget }"
-        data-testid="ai-codex-target-bar"
-        @click.stop
-      >
-        <template v-if="activeCodexBoundTarget">
-          <div class="ai-codex-target-main">
-            <Server />
-            <div>
-              <strong>{{ codexBoundTargetLabel }}</strong>
-              <span>{{ codexBoundTargetDetail }}</span>
-            </div>
-          </div>
-          <div class="ai-codex-target-actions">
-            <button
-              type="button"
-              :title="t('ai.codexTargetLocate')"
-              data-testid="ai-codex-target-locate"
-              @click.stop="locateCodexBoundTarget"
-            >
-              <Focus />
-            </button>
-            <button
-              type="button"
-              :title="t('ai.codexTargetChange')"
-              data-testid="ai-codex-target-change"
-              @click.stop="toggleCodexTargetPicker"
-            >
-              <Search />
-            </button>
-            <button
-              type="button"
-              :title="t('ai.codexTargetUnbind')"
-              data-testid="ai-codex-target-unbind"
-              @click.stop="unbindCodexTarget"
-            >
-              <X />
-            </button>
-          </div>
-        </template>
-        <template v-else>
-          <div class="ai-codex-target-main">
-            <Server />
-            <div>
-              <strong>{{ t('ai.codexTargetUnbound') }}</strong>
-              <span>{{ t('ai.codexTargetDropHint') }}</span>
-            </div>
-          </div>
-          <button
-            type="button"
-            class="ai-codex-bind-button"
-            data-testid="ai-codex-bind-open"
-            @click.stop="toggleCodexTargetPicker"
-          >
-            <Link2 />
-            <span>{{ t('ai.codexTargetBind') }}</span>
-          </button>
-        </template>
-        <div
-          v-if="codexTargetPickerOpen"
-          class="ai-codex-target-picker"
-          data-testid="ai-codex-target-picker"
-          @click.stop
-        >
-          <label>
-            <Search />
-            <input
-              v-model="codexTargetQuery"
-              type="search"
-              :placeholder="t('ai.codexTargetSearch')"
-              data-testid="ai-codex-target-search"
-              @keydown.esc.prevent="closeCodexTargetPicker"
-            />
-          </label>
-          <div class="ai-codex-target-list">
-            <button
-              v-if="currentPanelTarget"
-              type="button"
-              data-testid="ai-codex-bind-current"
-              @click.stop="bindCodexTarget(currentPanelTarget, { reason: 'bind-current' })"
-            >
-              <Monitor />
-              <span>{{ t('ai.codexTargetUseCurrent') }}</span>
-              <em>{{ currentPanelTarget.label }}</em>
-            </button>
-            <button
-              v-for="host in filteredCodexHostTargets"
-              :key="host.id"
-              type="button"
-              data-testid="ai-codex-bind-host"
-              @click.stop="bindHostContextToCodex(host)"
-            >
-              <Server />
-              <span>{{ host.assetName || host.detail || host.label }}</span>
-              <em>{{ host.host || host.label }}</em>
-            </button>
-            <div
-              v-if="!currentPanelTarget && !filteredCodexHostTargets.length"
-              class="ai-codex-target-empty"
-            >
-              {{ t('ai.noMatchingContext') }}
-            </div>
-          </div>
-        </div>
-      </div>
-      <div class="ai-codex-status">
-        <span
-          class="ai-codex-status-dot"
-          :class="activeCodexConversation?.status || 'idle'"
-        ></span>
-        <span>{{ codexStatusLabel }}</span>
-      </div>
-      <div class="ai-codex-xterm-stack">
-        <div
-          v-for="conversation in codexConversations"
-          :key="conversation.id"
-          :ref="(element) => setCodexTerminalHostRef(conversation.id, element)"
-          v-show="activeCodexConversationId === conversation.id"
-          class="xterm-host ai-codex-xterm"
-          :class="{ 'is-idle': conversation.status === 'idle' && !conversation.sessionId }"
-          data-testid="ai-codex-xterm"
-          @contextmenu.prevent.stop="copyCodexSelectionFromContextMenu"
-        ></div>
-      </div>
-      <div
-        v-if="activeCodexConversation?.error"
-        class="ai-codex-error"
-        data-testid="ai-codex-error"
-      >
-        {{ activeCodexConversation.error }}
-      </div>
-    </div>
+    <AiPanelCodexShell />
 
     <div
       v-show="aiPanelMode === 'classic'"
       ref="chatScrollRef"
       class="chat-scroll"
     >
-      <div
-        v-if="chatSearchOpen"
-        class="ai-chat-search-bar"
-        @click.stop
-      >
-        <div class="ai-chat-search-input-wrap">
-          <Search />
-          <input
-            ref="chatSearchInputRef"
-            v-model="chatSearchTerm"
-            type="search"
-            :placeholder="t('ai.searchChat')"
-            data-testid="ai-chat-search-input"
-            @keydown.enter.exact.prevent="findNextChatMatch"
-            @keydown.shift.enter.prevent="findPreviousChatMatch"
-            @keydown.esc.prevent="closeChatSearch"
-          />
-          <span
-            v-if="chatSearchTerm && chatSearchMatchCount > 0"
-            class="ai-chat-search-count"
-            data-testid="ai-chat-search-count"
-          >
-            {{ chatSearchCurrentIndex }}/{{ chatSearchMatchCount }}
-          </span>
-          <span
-            v-else-if="chatSearchTerm"
-            class="ai-chat-search-count no-results"
-            data-testid="ai-chat-search-count"
-          >
-            {{ t('ai.noMatches') }}
-          </span>
-          <button
-            v-if="chatSearchTerm"
-            type="button"
-            :title="t('ai.clear')"
-            @click="clearChatSearch"
-          >
-            <X />
-          </button>
-        </div>
-        <div class="ai-chat-search-controls">
-          <button
-            type="button"
-            :title="t('ai.previous')"
-            :disabled="chatSearchMatchCount === 0"
-            @click="findPreviousChatMatch"
-          >
-            <ChevronLeft />
-          </button>
-          <button
-            type="button"
-            :title="t('ai.next')"
-            :disabled="chatSearchMatchCount === 0"
-            @click="findNextChatMatch"
-          >
-            <ChevronRight />
-          </button>
-          <button
-            type="button"
-            :title="t('common.close')"
-            @click="closeChatSearch"
-          >
-            <X />
-          </button>
-        </div>
-      </div>
+      <AiPanelChatSearchBar />
       <article
         v-for="message in workspace.chatMessages"
         :key="message.id"
@@ -1184,83 +980,14 @@
       </span>
     </form>
 
-    <div
-      v-if="commandAuditDialog.open && activeCommandAuditMessage"
-      class="ai-command-audit-backdrop"
-      data-testid="ai-command-audit-dialog"
-      @keydown.esc.prevent="closeCommandAuditDialog"
-    >
-      <section
-        class="ai-command-audit-dialog"
-        role="dialog"
-        aria-modal="true"
-        :aria-label="t('ai.commandReviewTitle')"
-        @click.stop
-      >
-        <header>
-          <div>
-            <span>{{ t('ai.commandReview') }}</span>
-            <strong>{{ t('ai.commandReviewTitle') }}</strong>
-          </div>
-          <button
-            type="button"
-            :title="t('common.close')"
-            data-testid="ai-command-audit-close"
-            @click="closeCommandAuditDialog"
-          >
-            <X />
-          </button>
-        </header>
-        <p>{{ t('ai.commandReviewDescription') }}</p>
-        <label>
-          <span>Command</span>
-          <textarea
-            ref="commandAuditTextareaRef"
-            v-model="commandAuditDialog.draft"
-            data-testid="ai-command-audit-input"
-            spellcheck="false"
-            :readonly="!canEditActiveCommandAudit"
-            @keydown.stop
-          ></textarea>
-        </label>
-        <footer>
-          <span data-testid="ai-command-audit-line-count">
-            {{ commandLineCountForText(commandAuditDialog.draft) }} line{{ commandLineCountForText(commandAuditDialog.draft) === 1 ? '' : 's' }}
-          </span>
-          <button
-            type="button"
-            data-testid="ai-command-audit-copy"
-            @click="copyCommandAuditDraft"
-          >
-            <Copy />
-            <span>{{ t('ai.commandReviewCopy') }}</span>
-          </button>
-          <button
-            type="button"
-            data-testid="ai-command-audit-save"
-            :disabled="!canEditActiveCommandAudit || !commandAuditDialog.draft.trim()"
-            @click="saveCommandAuditDraft()"
-          >
-            <Check />
-            <span>{{ t('ai.commandReviewSave') }}</span>
-          </button>
-          <button
-            type="button"
-            class="primary"
-            data-testid="ai-command-audit-run"
-            :disabled="!canEditActiveCommandAudit || !commandAuditDialog.draft.trim()"
-            @click="void runCommandAuditDraft()"
-          >
-            <Play />
-            <span>{{ t('ai.commandReviewRun') }}</span>
-          </button>
-        </footer>
-      </section>
-    </div>
+    <AiPanelCommandAuditDialog />
   </aside>
 </template>
 
 <script setup lang="ts">
+import AiPanelChatSearchBar from '@/components/ai/AiPanelChatSearchBar.vue'
+import AiPanelCodexShell from '@/components/ai/AiPanelCodexShell.vue'
+import AiPanelCommandAuditDialog from '@/components/ai/AiPanelCommandAuditDialog.vue'
 import AiPanelHeader from '@/components/ai/AiPanelHeader.vue'
 import {
   BookOpen,
@@ -1276,16 +1003,13 @@ import {
   Code2,
   Copy,
   FileText,
-  Focus,
   FolderGit2,
   Image,
-  Link2,
   LoaderCircle,
   LockKeyhole,
   Maximize2,
   Mic,
   MinusSquare,
-  Monitor,
   Play,
   RefreshCw,
   Search,
@@ -1303,10 +1027,6 @@ import {
 import { useAiPanelRuntimeContext } from '@/services/aiPanelContext'
 
 const {
-  activeCodexBoundTarget,
-  activeCodexConversation,
-  activeCodexConversationId,
-  activeCommandAuditMessage,
   agentMode,
   aiChatModeOptions,
   aiPanelComposerRuntime,
@@ -1320,39 +1040,21 @@ const {
   bindHostContextToCodex,
   cancelHistoryTitleEdit,
   cancelMessageEdit,
-  canEditActiveCommandAudit,
   chatExportNotice,
   chatMode,
   chatScrollRef,
-  chatSearchCurrentIndex,
-  chatSearchInputRef,
-  chatSearchMatchCount,
-  chatSearchOpen,
-  chatSearchTerm,
-  clearChatSearch,
   clearHistorySearch,
   clearHostContexts,
-  closeChatSearch,
   closeCodexConversation,
-  closeCodexTargetPicker,
-  closeCommandAuditDialog,
   closeConversationTab,
   closeHistoryMenu,
   closePopups,
-  codexBoundTargetDetail,
-  codexBoundTargetLabel,
   codexConversations,
   codexConversationTitle,
-  codexStatusLabel,
-  codexTargetPickerOpen,
-  codexTargetQuery,
-  commandAuditDialog,
-  commandAuditTextareaRef,
   commandHostForMessage,
   commandHostTooltipForMessage,
   commandKeyboardIndex,
   commandLineCountForMessage,
-  commandLineCountForText,
   commandOutputLineCount,
   commandPopupOpen,
   commandQuery,
@@ -1371,8 +1073,6 @@ const {
   contextUsageTooltip,
   contextUsageTrackColor,
   conversationTabTooltip,
-  copyCodexSelectionFromContextMenu,
-  copyCommandAuditDraft,
   copyCommandToClipboard,
   copyMessageToClipboard,
   copyRenderedTextToClipboard,
@@ -1380,7 +1080,6 @@ const {
   createNewCodexConversation,
   currentAiPanelModeLabel,
   currentChatMode,
-  currentPanelTarget,
   deleteHistoryConversation,
   displayConversationTitle,
   displayedOpenedHosts,
@@ -1396,14 +1095,10 @@ const {
   editingHistoryTitle,
   editingMessageId,
   exportCurrentChat,
-  filteredCodexHostTargets,
   filteredCommands,
   filteredContextOptions,
   filteredLockedModelOptions,
   filteredModelOptions,
-  findNextChatMatch,
-  findPreviousChatMatch,
-  focusCodexTerminal,
   formatHistoryTime,
   formatLineCount,
   formatMcpToolArguments,
@@ -1440,7 +1135,6 @@ const {
   isReadOnlyCommandMessage,
   isThinkingModelName,
   loadMoreHistoryConversations,
-  locateCodexBoundTarget,
   lockedModelTooltip,
   modelDropdownWidthPx,
   modelMenuOpen,
@@ -1468,9 +1162,7 @@ const {
   restoreHistoryConversation,
   retryAssistantMessage,
   returnContextPopupToMain,
-  runCommandAuditDraft,
   runMessageCommand,
-  saveCommandAuditDraft,
   saveEditableSelection,
   saveHistoryTitle,
   selectAiPanelMode,
@@ -1480,7 +1172,6 @@ const {
   selectedCommandRef,
   selectedModelLabel,
   selectModel,
-  setCodexTerminalHostRef,
   setEditEditableRef,
   setMessageFeedback,
   showNoAvailableModelPrompt,
@@ -1489,7 +1180,6 @@ const {
   summarizeMessageToSkill,
   t,
   toggleAiPanelModeMenu,
-  toggleCodexTargetPicker,
   toggleContextPopup,
   toggleHistoryFavorite,
   toggleHistoryMenu,
@@ -1498,7 +1188,6 @@ const {
   toggleModeMenu,
   toggleMoreActionsMenu,
   toggleVoiceInput,
-  unbindCodexTarget,
   visibleContextCategories,
   visibleConversationTabs,
   voiceButtonTitle,
