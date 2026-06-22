@@ -1,18 +1,23 @@
 import { randomUUID } from 'crypto'
 import { createServer, type Server, type Socket } from 'net'
 import { existsSync, rmSync } from 'fs'
-import { dirname, join } from 'path'
-import { appendFile, mkdir, readFile, writeFile } from 'fs/promises'
+import { join } from 'path'
+import { mkdir } from 'fs/promises'
 import {
   createAgentSessionEventStreamRuntime,
   type AgentSessionEventStreamListResult
 } from './agentSessionEventStreamRuntime'
+import { createAgentSessionAuditRuntime, type ManagedAiSessionAuditKind } from './agentSessionAuditRuntime'
+import {
+  createAgentSessionAutoNamingRuntime,
+  type ManagedAiSessionAutoNamingRuntime
+} from './agentSessionAutoNamingRuntime'
+import { createAgentSessionStoreRuntime } from './agentSessionStoreRuntime'
 import {
   autoTitleFor,
   cleanOptionalText,
   cleanPositiveInteger,
   cleanText,
-  compactAutoTitle,
   compactRawValue,
   compactString,
   decisionKinds,
@@ -24,9 +29,7 @@ import {
   nestedRecord,
   normalizeAgentHibernationConfig,
   normalizeAiAgentSessionEventInput,
-  normalizeAutoNamingPositiveInteger,
   normalizeSource,
-  normalizeStoredSession,
   normalizeWaitTimeoutMs,
   pendingDecisionKey,
   resumeCommandFor,
@@ -37,7 +40,6 @@ import {
 import type {
   AiAgentSessionEvent,
   AiAgentSessionEventInput,
-  AiAgentSessionEventName,
   AiAgentSessionEventResult,
   AiAgentSessionSource,
   AgentHibernationConfig,
@@ -61,21 +63,18 @@ import type {
   ManagedAiNotificationOpenInput,
   ManagedAiNotificationRecord,
   ManagedAiNotificationSelectorInput,
-  ManagedAiDecisionMode,
-  ManagedAiRequestKind,
   ManagedAiSessionRecord,
   ManagedAiSessionRenameInput,
   ManagedAiSessionReplyInput,
-  ManagedAiSessionSnapshot,
-  ManagedAiSessionState
+  ManagedAiSessionSnapshot
 } from '@shared/contracts/managedAiSessions'
 
 export { normalizeAiAgentSessionEventInput } from './agentSessionNormalization'
+export type { ManagedAiSessionAutoNamingInput, ManagedAiSessionAutoNamingRuntime } from './agentSessionAutoNamingRuntime'
 
 export type { AgentSessionEventStreamCategory, AgentSessionEventStreamFrame, AgentSessionEventStreamListResult } from './agentSessionEventStreamRuntime'
 
 export type AgentSessionEventSink = (event: AiAgentSessionEvent) => void
-export type ManagedAiSessionEventSink = (event: ManagedAiSessionEvent) => void
 
 type AgentSessionSocketResponse = AiAgentSessionEventResult & {
   status?: 'acknowledged' | 'pending' | 'resolved' | 'timeout'
@@ -92,277 +91,63 @@ type PendingAgentDecision = {
   resolve: (response: AgentSessionSocketResponse) => void
 }
 
-export type ManagedAiSessionAutoNamingInput = {
-  session: ManagedAiSessionRecord
-  prompt: string
-}
-
-export type ManagedAiSessionAutoNamingRuntime = {
-  enabled?: boolean
-  minEventGrowth?: number
-  minIntervalMs?: number
-  maxContextMessages?: number
-  emit?: ManagedAiSessionEventSink
-  generateTitle?: (input: ManagedAiSessionAutoNamingInput) => Promise<string | null | undefined>
-}
-
 type AgentSessionSocketRuntime = {
   userDataPath: string
   emit: AgentSessionEventSink
-}
-
-type PersistedManagedAiSessionSnapshot = ManagedAiSessionSnapshot & {
-  version?: number
-  agentHibernation?: AgentHibernationConfig
-}
-
-type ManagedAiSessionAuditKind =
-  | 'event.received'
-  | 'event.socket.completed'
-  | 'decision.created'
-  | 'decision.resolved'
-  | 'decision.timeout'
-  | 'session.renamed'
-  | 'session.auto_named'
-  | 'session.auto_name_skipped'
-  | 'session.cleared'
-  | 'session.hibernated'
-  | 'session.woke'
-  | 'sessions.bulk'
-  | 'notification.dismissed'
-  | 'notification.opened'
-  | 'notification.mark_read'
-
-type ManagedAiSessionAuditEntry = {
-  at: number
-  kind: ManagedAiSessionAuditKind
-  source?: AiAgentSessionSource
-  sessionId?: string
-  notificationId?: string
-  event?: AiAgentSessionEventName
-  state?: ManagedAiSessionState
-  title?: string
-  summary?: string
-  requestId?: string
-  requestKind?: ManagedAiRequestKind
-  decisionMode?: ManagedAiDecisionMode
-  waitTimeoutMs?: number
-  toolName?: string
-  actionable?: boolean
-  decisionKind?: ManagedAiSessionDecisionKind
-  decisionId?: string
-  status?: AgentSessionSocketResponse['status']
-  operation?: ManagedAiSessionBulkInput['operation']
-  changed?: number
-  errorCode?: string
-  reason?: string
 }
 
 const storeVersion = 1
 const maxSessions = 200
 const maxEventsPerSession = 200
 const maxDecisionsPerSession = 40
-const defaultAutoTitleMinEventGrowth = 4
-const defaultAutoTitleMinIntervalMs = 180_000
-const defaultAutoTitleMaxContextMessages = 8
 
 let server: Server | null = null
 let socketPath = ''
 let eventSink: AgentSessionEventSink | null = null
-let storePath = ''
-let auditPath = ''
 let sessions = new Map<string, ManagedAiSessionRecord>()
 let agentHibernationConfig: AgentHibernationConfig = { ...defaultAgentHibernationConfig }
 let pendingDecisions = new Map<string, PendingAgentDecision>()
-let loadedStore = false
-let writeQueue: Promise<void> = Promise.resolve()
-let auditQueue: Promise<void> = Promise.resolve()
-let autoNamingRuntime: Required<Pick<ManagedAiSessionAutoNamingRuntime, 'enabled' | 'minEventGrowth' | 'minIntervalMs' | 'maxContextMessages'>> &
-  Pick<ManagedAiSessionAutoNamingRuntime, 'emit' | 'generateTitle'> = {
-  enabled: false,
-  minEventGrowth: defaultAutoTitleMinEventGrowth,
-  minIntervalMs: defaultAutoTitleMinIntervalMs,
-  maxContextMessages: defaultAutoTitleMaxContextMessages
-}
-
-export const configureManagedAiSessionAutoNamingRuntime = (config: ManagedAiSessionAutoNamingRuntime = {}) => {
-  autoNamingRuntime = {
-    enabled: config.enabled === true,
-    minEventGrowth: normalizeAutoNamingPositiveInteger(config.minEventGrowth, defaultAutoTitleMinEventGrowth, 1, 100),
-    minIntervalMs: normalizeAutoNamingPositiveInteger(config.minIntervalMs, defaultAutoTitleMinIntervalMs, 30_000, 3_600_000),
-    maxContextMessages: normalizeAutoNamingPositiveInteger(config.maxContextMessages, defaultAutoTitleMaxContextMessages, 3, 40),
-    emit: config.emit,
-    generateTitle: config.generateTitle
-  }
-}
-
-const recentAutoNamingEvents = (session: ManagedAiSessionRecord) => {
-  const useful = session.events.filter((event) => {
-    if (!event.summary && !event.title && !event.cwd) return false
-    if (event.event === 'lifecycle') return false
-    return true
-  })
-  return useful.slice(-autoNamingRuntime.maxContextMessages)
-}
-
-const buildAutoNamingPrompt = (session: ManagedAiSessionRecord) => {
-  const lines: string[] = [
-    'You name AI coding-agent sessions in a terminal workspace.',
-    'Return only a short title, 2-5 words, in the same language as the session content.',
-    'No quotes, punctuation, markdown, prefixes, or explanation.',
-    ''
-  ]
-  if (session.autoTitle) {
-    lines.push(`Current auto title: ${session.autoTitle}`)
-    lines.push('If it is still accurate, return it exactly.')
-    lines.push('')
-  }
-  if (session.cwd) lines.push(`Project path: ${session.cwd}`)
-  lines.push(`Agent: ${sourceLabel(session.source)}`)
-  lines.push('Recent session events:')
-  recentAutoNamingEvents(session).forEach((event) => {
-    const eventText = [
-      event.event,
-      event.summary ? compactString(event.summary, 240) : '',
-      event.title && event.title !== event.summary ? compactString(event.title, 120) : '',
-      event.cwd && event.cwd !== session.cwd ? `cwd=${event.cwd}` : ''
-    ]
-      .filter(Boolean)
-      .join(' | ')
-    if (eventText) lines.push(`- ${eventText}`)
-  })
-  return lines.join('\n')
-}
-
-const autoNamingSkipAudit = (session: ManagedAiSessionRecord, reason: string, at = Date.now()) => {
-  appendManagedAiSessionAudit({
-    at,
-    kind: 'session.auto_name_skipped',
-    source: session.source,
-    sessionId: session.id,
-    event: session.lastEvent,
-    state: session.state,
-    title: session.title,
-    summary: session.summary,
-    reason
-  })
-}
-
-const updateAutoNamingAttempt = (session: ManagedAiSessionRecord, attemptedAt: number, eventCount: number) => {
-  const key = sessionKey(session.source, session.id)
-  const current = sessions.get(key)
-  if (!current || current.userTitle) return null
-  const next = {
-    ...current,
-    autoTitleAttemptedAt: attemptedAt,
-    autoTitleEventCount: eventCount,
-    updatedAt: attemptedAt
-  }
-  sessions.set(key, next)
-  persistSnapshot()
-  return next
-}
-
-const applyAutoNamingTitle = (session: ManagedAiSessionRecord, title: string, generatedAt: number, eventCount: number) => {
-  const key = sessionKey(session.source, session.id)
-  const current = sessions.get(key)
-  if (!current || current.userTitle) return null
-  const next = {
-    ...current,
-    title,
-    autoTitle: title,
-    autoTitleGeneratedAt: generatedAt,
-    autoTitleAttemptedAt: generatedAt,
-    autoTitleEventCount: eventCount,
-    updatedAt: generatedAt
-  }
-  sessions.set(key, next)
-  persistSnapshot()
-  appendManagedAiSessionAudit({
-    at: generatedAt,
-    kind: 'session.auto_named',
-    source: next.source,
-    sessionId: next.id,
-    event: next.lastEvent,
-    state: next.state,
-    title: next.title,
-    summary: next.summary
-  })
-  publishManagedAiStreamFrame('managed_ai.session.renamed', next, { title: next.title, auto: true })
-  return next
-}
-
-const shouldRunAutoNaming = (session: ManagedAiSessionRecord, event: AiAgentSessionEvent) => {
-  if (!autoNamingRuntime.enabled) return 'disabled'
-  if (event.event !== 'stop') return 'not-stop'
-  if (session.userTitle) return 'manual-title'
-  if (typeof autoNamingRuntime.generateTitle !== 'function') return 'missing-generator'
-  if (session.events.length < 2) return 'too-short'
-  if (!recentAutoNamingEvents(session).length) return 'no-context'
-  const now = Date.now()
-  if (session.autoTitleAttemptedAt && now - session.autoTitleAttemptedAt < autoNamingRuntime.minIntervalMs) return 'too-soon'
-  if (session.autoTitleEventCount && session.events.length - session.autoTitleEventCount < autoNamingRuntime.minEventGrowth) return 'insufficient-growth'
-  return ''
-}
-
-const maybeRunAutoNaming = (session: ManagedAiSessionRecord, event: AiAgentSessionEvent) => {
-  const skipReason = shouldRunAutoNaming(session, event)
-  if (skipReason) {
-    if (skipReason !== 'disabled' && skipReason !== 'not-stop') autoNamingSkipAudit(session, skipReason)
-    return
-  }
-  const eventCount = session.events.length
-  const attemptedAt = Date.now()
-  const attempting = updateAutoNamingAttempt(session, attemptedAt, eventCount)
-  if (!attempting) return
-  const prompt = buildAutoNamingPrompt(attempting)
-  void autoNamingRuntime
-    .generateTitle!({ session: attempting, prompt })
-    .then((rawTitle) => {
-      const title = compactAutoTitle(rawTitle, attempting.autoTitle || attempting.title)
-      if (!title) {
-        autoNamingSkipAudit(attempting, 'empty-title')
-        return
-      }
-      applyAutoNamingTitle(attempting, title, Date.now(), eventCount)
-    })
-    .catch(() => {
-      autoNamingSkipAudit(attempting, 'generator-error')
-    })
-}
+let emitManagedAiSessionEvent: (event: ManagedAiSessionEvent) => void = () => undefined
 
 const agentSessionEventStreamRuntime = createAgentSessionEventStreamRuntime({
   compactRawValue,
   cleanText,
   cleanOptionalText,
-  emitManagedAiSessionEvent: (event) => autoNamingRuntime.emit?.(event)
+  emitManagedAiSessionEvent: (event) => emitManagedAiSessionEvent(event)
 })
 
 const publishAgentEventStreamFrame = agentSessionEventStreamRuntime.publishAgentEventStreamFrame
 const publishManagedAiStreamFrame = agentSessionEventStreamRuntime.publishManagedAiStreamFrame
+const auditRuntime = createAgentSessionAuditRuntime({ compactString })
+const appendManagedAiSessionAudit = auditRuntime.appendManagedAiSessionAudit
+const storeRuntime = createAgentSessionStoreRuntime({
+  storeVersion,
+  getSnapshot: () => snapshot(),
+  getAgentHibernationConfig: () => agentHibernationConfig,
+  applyLoadedStore: (loaded) => {
+    sessions = loaded.sessions
+    agentHibernationConfig = loaded.agentHibernationConfig
+  }
+})
+const autoNamingRuntime = createAgentSessionAutoNamingRuntime({
+  getSession: (key) => sessions.get(key),
+  setSession: (key, session) => {
+    sessions.set(key, session)
+  },
+  persistSnapshot: () => storeRuntime.persistSnapshot(),
+  appendManagedAiSessionAudit,
+  publishManagedAiStreamFrame
+})
+emitManagedAiSessionEvent = autoNamingRuntime.emitManagedAiSessionEvent
+
+export const configureManagedAiSessionAutoNamingRuntime = (config?: ManagedAiSessionAutoNamingRuntime) => {
+  autoNamingRuntime.configure(config)
+}
 
 export const listManagedAiSessionEvents = (input: Record<string, unknown> = {}): AgentSessionEventStreamListResult =>
   agentSessionEventStreamRuntime.listManagedAiSessionEvents(input)
 
 const auditPathFor = (userDataPath: string) => join(userDataPath, 'agent-sessions', 'managed-ai-sessions.audit.jsonl')
-
-const appendManagedAiSessionAudit = (entry: ManagedAiSessionAuditEntry) => {
-  if (!auditPath) return
-  const targetAuditPath = auditPath
-  const line = {
-    ...entry,
-    at: entry.at || Date.now(),
-    title: compactString(entry.title, 120),
-    summary: compactString(entry.summary, 240)
-  }
-  auditQueue = auditQueue
-    .catch(() => undefined)
-    .then(async () => {
-      await mkdir(dirname(targetAuditPath), { recursive: true })
-      await appendFile(targetAuditPath, `${JSON.stringify(line)}\n`, 'utf-8')
-    })
-    .catch(() => undefined)
-}
 
 const auditEventReceived = (event: AiAgentSessionEvent, session: ManagedAiSessionRecord) => {
   appendManagedAiSessionAudit({
@@ -433,54 +218,13 @@ const snapshot = (): ManagedAiSessionSnapshot => ({
     }))
 })
 
-const persistSnapshot = () => {
-  if (!storePath) return
-  const targetStorePath = storePath
-  const payload: PersistedManagedAiSessionSnapshot = {
-    version: storeVersion,
-    agentHibernation: agentHibernationConfig,
-    ...snapshot()
-  }
-  writeQueue = writeQueue
-    .catch(() => undefined)
-    .then(async () => {
-      await mkdir(dirname(targetStorePath), { recursive: true })
-      await writeFile(targetStorePath, `${JSON.stringify(payload, null, 2)}\n`, 'utf-8')
-    })
-}
-
-const loadStoreIfNeeded = async () => {
-  if (loadedStore || !storePath) return
-  loadedStore = true
-  if (!existsSync(storePath)) return
-  try {
-    const raw = String(await readFile(storePath, 'utf-8'))
-    const parsed = JSON.parse(raw) as PersistedManagedAiSessionSnapshot
-    agentHibernationConfig = normalizeAgentHibernationConfig(parsed.agentHibernation, defaultAgentHibernationConfig)
-    const loaded = Array.isArray(parsed.sessions) ? parsed.sessions.map(normalizeStoredSession).filter(Boolean) : []
-    sessions = new Map((loaded as ManagedAiSessionRecord[]).map((session) => [sessionKey(session.source, session.id), session]))
-  } catch {
-    sessions = new Map()
-    agentHibernationConfig = { ...defaultAgentHibernationConfig }
-  }
-}
-
-const storePathFor = (userDataPath: string) => join(userDataPath, 'agent-sessions', 'managed-ai-sessions.json')
+const persistSnapshot = storeRuntime.persistSnapshot
+const loadStoreIfNeeded = storeRuntime.loadStoreIfNeeded
+const storePathFor = storeRuntime.storePathFor
 
 export const configureAiAgentSessionStore = async (userDataPath: string) => {
-  const nextStorePath = storePathFor(userDataPath)
-  const nextAuditPath = auditPathFor(userDataPath)
-  if (storePath !== nextStorePath) {
-    storePath = nextStorePath
-    auditPath = nextAuditPath
-    loadedStore = false
-    sessions = new Map()
-    agentHibernationConfig = { ...defaultAgentHibernationConfig }
-  } else {
-    auditPath = nextAuditPath
-  }
-  await mkdir(join(userDataPath, 'agent-sessions'), { recursive: true })
-  await loadStoreIfNeeded()
+  auditRuntime.configure(auditPathFor(userDataPath))
+  await storeRuntime.configure(userDataPath)
 }
 
 const upsertSessionForEvent = (event: AiAgentSessionEvent, raw: Record<string, unknown>) => {
@@ -549,7 +293,7 @@ const upsertSessionForEvent = (event: AiAgentSessionEvent, raw: Record<string, u
   persistSnapshot()
   auditEventReceived(event, record)
   publishAgentEventStreamFrame(event, record)
-  maybeRunAutoNaming(record, event)
+  autoNamingRuntime.maybeRunAutoNaming(record, event)
   return record
 }
 
@@ -1384,7 +1128,7 @@ export const __testing = {
   streamEventCount: agentSessionEventStreamRuntime.streamEventCount,
   streamLatestSeq: agentSessionEventStreamRuntime.streamLatestSeq,
   flushManagedAiSessionWrites: async () => {
-    await writeQueue
-    await auditQueue
+    await storeRuntime.flush()
+    await auditRuntime.flush()
   }
 }
