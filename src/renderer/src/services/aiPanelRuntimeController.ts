@@ -68,6 +68,14 @@ import {
   type AiPanelEditableRenderOptions
 } from '@/services/aiPanelEditableRuntime'
 import {
+  aiPanelCharBeforeCaret,
+  moveAiPanelEditableCaretToEnd,
+  restoreAiPanelEditableSelection,
+  saveAiPanelEditableSelection,
+  shouldTriggerAiPanelCommandPopupForPendingSlash,
+  shouldTriggerAiPanelCommandPopupForSlash
+} from '@/services/aiPanelEditableSelectionRuntime'
+import {
   allVisibleAiPanelHostsSelected,
   clearAiPanelHostContexts,
   cloneAiPanelCommandOptions,
@@ -742,92 +750,11 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     insertAiPanelChipIntoEditableCursor(editable, part, editableRenderOptions.value, onInserted, triggerToken)
 
   const saveEditSelection = () => {
-    const selection = window.getSelection()
-    if (!selection || selection.rangeCount === 0 || !editEditableRef.value) return
-    const range = selection.getRangeAt(0)
-    if (!editEditableRef.value.contains(range.startContainer)) return
-    editSavedRange.value = range.cloneRange()
+    editSavedRange.value = saveAiPanelEditableSelection(editEditableRef.value) || editSavedRange.value
   }
 
   const restoreEditSelection = () => {
-    const selection = window.getSelection()
-    if (!selection || !editSavedRange.value) return
-    selection.removeAllRanges()
-    selection.addRange(editSavedRange.value)
-  }
-
-  const getActiveEditableRange = (editable: HTMLElement | null, fallbackRange?: Range | null): Range | null => {
-    const selection = window.getSelection()
-    if (!editable) return null
-    if (selection?.rangeCount) {
-      const range = selection.getRangeAt(0)
-      if (editable.contains(range.startContainer)) return range
-    }
-    if (fallbackRange && editable.contains(fallbackRange.startContainer)) return fallbackRange
-    return null
-  }
-
-  const getCharBeforeCaret = (editable: HTMLElement | null, fallbackRange?: Range | null): string | null => {
-    const range = getActiveEditableRange(editable, fallbackRange)
-    if (!range) return null
-    const container = range.startContainer
-    const offset = range.startOffset
-    if (container.nodeType === Node.TEXT_NODE) {
-      const text = (container as Text).data
-      if (offset <= 0 || offset > text.length) return null
-      return text[offset - 1] ?? null
-    }
-    if (container.nodeType === Node.ELEMENT_NODE) {
-      const previousNode = (container as Element).childNodes[offset - 1]
-      if (!previousNode) return null
-      if (previousNode.nodeType === Node.TEXT_NODE) {
-        const text = (previousNode as Text).data
-        return text.length > 0 ? text[text.length - 1] : null
-      }
-      const text = (previousNode as HTMLElement).textContent || ''
-      return text.length > 0 ? text[text.length - 1] : null
-    }
-    return null
-  }
-
-  const shouldTriggerCommandPopupForSlash = (editable: HTMLElement | null, fallbackRange?: Range | null) => {
-    const range = getActiveEditableRange(editable, fallbackRange)
-    if (!range || range.startContainer.nodeType !== Node.TEXT_NODE) return false
-    const textNode = range.startContainer as Text
-    const text = textNode.data
-    const offset = range.startOffset
-    if (offset <= 0 || offset > text.length || text[offset - 1] !== '/') return false
-    const beforeChar = offset - 2 >= 0 ? text[offset - 2] : null
-    const afterChar = offset < text.length ? text[offset] : null
-    const isBoundaryOrWhitespace = (char: string | null) => char === null || /\s/.test(char)
-    return isBoundaryOrWhitespace(beforeChar) && isBoundaryOrWhitespace(afterChar)
-  }
-
-  const shouldTriggerCommandPopupForPendingSlash = (editable: HTMLElement | null, fallbackRange?: Range | null) => {
-    const range = getActiveEditableRange(editable, fallbackRange)
-    if (!range) return false
-    const isBoundaryOrWhitespace = (char: string | null) => char === null || /\s/.test(char)
-
-    if (range.startContainer.nodeType === Node.TEXT_NODE) {
-      const text = (range.startContainer as Text).data
-      const offset = range.startOffset
-      const beforeChar = offset - 1 >= 0 ? text[offset - 1] : null
-      const afterChar = offset < text.length ? text[offset] : null
-      return isBoundaryOrWhitespace(beforeChar) && isBoundaryOrWhitespace(afterChar)
-    }
-
-    if (range.startContainer.nodeType === Node.ELEMENT_NODE) {
-      const element = range.startContainer as Element
-      const previousNode = element.childNodes[range.startOffset - 1]
-      const nextNode = element.childNodes[range.startOffset]
-      const previousText = previousNode?.textContent || ''
-      const nextText = nextNode?.textContent || ''
-      const beforeChar = previousText ? previousText[previousText.length - 1] : null
-      const afterChar = nextText ? nextText[0] : null
-      return isBoundaryOrWhitespace(beforeChar) && isBoundaryOrWhitespace(afterChar)
-    }
-
-    return false
+    restoreAiPanelEditableSelection(editEditableRef.value, editSavedRange.value)
   }
 
   const shouldTriggerCommandPopupFromEditableText = () => {
@@ -985,24 +912,11 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
   }
 
   const saveEditableSelection = () => {
-    const selection = window.getSelection()
-    if (!selection || selection.rangeCount === 0 || !editableRef.value) return
-    const range = selection.getRangeAt(0)
-    if (!editableRef.value.contains(range.startContainer)) return
-    savedRange.value = range.cloneRange()
+    savedRange.value = saveAiPanelEditableSelection(editableRef.value) || savedRange.value
   }
 
   const moveEditableCaretToEnd = () => {
-    const editable = editableRef.value
-    if (!editable) return
-    editable.focus()
-    const range = document.createRange()
-    range.selectNodeContents(editable)
-    range.collapse(false)
-    const selection = window.getSelection()
-    selection?.removeAllRanges()
-    selection?.addRange(range)
-    saveEditableSelection()
+    savedRange.value = moveAiPanelEditableCaretToEnd(editableRef.value) || savedRange.value
   }
 
   const showInputPlaceholderNotice = (message: string) => {
@@ -1178,42 +1092,19 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
   const closeContextPopup = (options: { restoreFocus?: boolean } = {}) => aiPanelPopupInteractionRuntime.closeContextPopup(options)
 
   const moveEditCaretToEnd = () => {
-    const editable = editEditableRef.value
-    if (!editable) return
-    editable.focus()
-    const range = document.createRange()
-    range.selectNodeContents(editable)
-    range.collapse(false)
-    const selection = window.getSelection()
-    selection?.removeAllRanges()
-    selection?.addRange(range)
-    saveEditSelection()
+    editSavedRange.value = moveAiPanelEditableCaretToEnd(editEditableRef.value) || editSavedRange.value
   }
 
   const restoreEditableSelection = () => {
-    const editable = editableRef.value
-    const selection = window.getSelection()
-    if (!editable || !selection) return false
-    editable.focus()
-    if (savedRange.value && editable.contains(savedRange.value.startContainer)) {
-      selection.removeAllRanges()
-      selection.addRange(savedRange.value.cloneRange())
-      return true
-    }
+    if (restoreAiPanelEditableSelection(editableRef.value, savedRange.value)) return true
+    if (!editableRef.value || !window.getSelection()) return false
     moveEditableCaretToEnd()
     return true
   }
 
   const restoreEditInputSelection = () => {
-    const editable = editEditableRef.value
-    const selection = window.getSelection()
-    if (!editable || !selection) return false
-    editable.focus()
-    if (editSavedRange.value && editable.contains(editSavedRange.value.startContainer)) {
-      selection.removeAllRanges()
-      selection.addRange(editSavedRange.value.cloneRange())
-      return true
-    }
+    if (restoreAiPanelEditableSelection(editEditableRef.value, editSavedRange.value)) return true
+    if (!editEditableRef.value || !window.getSelection()) return false
     moveEditCaretToEnd()
     return true
   }
@@ -1390,14 +1281,14 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     cancelMessageEdit,
     shouldTriggerCommandPopupForPendingSlash: (target: 'main' | 'edit') =>
       target === 'edit'
-        ? shouldTriggerCommandPopupForPendingSlash(editEditableRef.value, editSavedRange.value)
-        : shouldTriggerCommandPopupForPendingSlash(editableRef.value, savedRange.value),
+        ? shouldTriggerAiPanelCommandPopupForPendingSlash(editEditableRef.value, editSavedRange.value)
+        : shouldTriggerAiPanelCommandPopupForPendingSlash(editableRef.value, savedRange.value),
     shouldTriggerCommandPopupForSlash: (target: 'main' | 'edit') =>
       target === 'edit'
-        ? shouldTriggerCommandPopupForSlash(editEditableRef.value, editSavedRange.value)
-        : shouldTriggerCommandPopupForSlash(editableRef.value, savedRange.value),
+        ? shouldTriggerAiPanelCommandPopupForSlash(editEditableRef.value, editSavedRange.value)
+        : shouldTriggerAiPanelCommandPopupForSlash(editableRef.value, savedRange.value),
     getCharBeforeCaret: (target: 'main' | 'edit') =>
-      target === 'edit' ? getCharBeforeCaret(editEditableRef.value, editSavedRange.value) : getCharBeforeCaret(editableRef.value, savedRange.value),
+      target === 'edit' ? aiPanelCharBeforeCaret(editEditableRef.value, editSavedRange.value) : aiPanelCharBeforeCaret(editableRef.value, savedRange.value),
     shouldTriggerCommandPopupFromEditableText
   })
 
