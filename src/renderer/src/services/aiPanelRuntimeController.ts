@@ -88,8 +88,8 @@ import {
 import {
   createAiPanelConversationViewRuntime
 } from '@/services/aiPanelConversationRuntime'
-import { createAiPanelChatSearchRuntime, createEmptyAiPanelChatSearchRuntimeState } from '@/services/aiPanelChatSearchRuntime'
 import { createAiPanelHistoryRuntime, createEmptyAiPanelHistoryRuntimeState } from '@/services/aiPanelHistoryRuntime'
+import { createAiPanelChatViewportRuntime } from '@/services/aiPanelChatViewportRuntime'
 import { clipboardHasImageItems } from '@/services/aiPanelMediaRuntime'
 import {
   aiPanelContextUsageColor,
@@ -143,8 +143,6 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     skills: Bot,
     chats: Search
   }
-  const chatScrollRef = ref<HTMLElement | null>(null)
-  const chatSearchInputRef = ref<HTMLInputElement | null>(null)
   const historySearchInputRef = ref<HTMLInputElement | null>(null)
   const modelSearchInputRef = ref<HTMLInputElement | null>(null)
   const contextSearchInputRef = ref<HTMLInputElement | null>(null)
@@ -169,12 +167,7 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
   const dropActive = ref(false)
   const inputPlaceholderNotice = ref('')
   const historyRuntimeState = reactive(createEmptyAiPanelHistoryRuntimeState())
-  const chatSearchRuntimeState = reactive(createEmptyAiPanelChatSearchRuntimeState())
   const commandActionRuntimeState = reactive(createEmptyAiPanelCommandActionRuntimeState())
-  const chatSearchOpen = toRef(historyRuntimeState, 'chatSearchOpen')
-  const chatSearchTerm = toRef(chatSearchRuntimeState, 'term')
-  const chatSearchMatchCount = toRef(chatSearchRuntimeState, 'matchCount')
-  const chatSearchCurrentIndex = toRef(chatSearchRuntimeState, 'currentIndex')
   const moreActionsMenuOpen = toRef(historyRuntimeState, 'moreActionsMenuOpen')
   const historyMenuOpen = toRef(historyRuntimeState, 'historyMenuOpen')
   const historySearchTerm = toRef(historyRuntimeState, 'historySearchTerm')
@@ -188,7 +181,6 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
   const commandAuditTextareaRef = ref<HTMLTextAreaElement | null>(null)
   const commandAuditDialog = toRef(commandActionRuntimeState, 'commandAuditDialog')
   let classicChatDataLoaded = false
-  let chatScrollFrame: number | undefined
   const historyPageSize = 20
   const maxHostContexts = 5
   const streaming = computed(() => workspace.chatMessages.some((message) => message.state === 'streaming'))
@@ -372,43 +364,32 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
   const copyRenderedTextToClipboard = aiPanelMessageActionRuntime.copyRenderedTextToClipboard
   const copyMessageToClipboard = aiPanelMessageActionRuntime.copyMessageToClipboard
 
-  const scrollChatToBottom = () => {
-    const root = chatScrollRef.value
-    if (!root) return
-    root.scrollTop = root.scrollHeight
-  }
-
-  const scheduleChatScrollToBottom = () => {
-    void nextTick(() => {
-      if (chatScrollFrame !== undefined) window.cancelAnimationFrame(chatScrollFrame)
-      chatScrollFrame = window.requestAnimationFrame(() => {
-        chatScrollFrame = undefined
-        scrollChatToBottom()
-      })
-    })
-  }
-
-  const aiPanelChatSearchRuntime = createAiPanelChatSearchRuntime({
-    state: chatSearchRuntimeState,
-    isOpen: () => chatSearchOpen.value,
-    setOpen: (open) => {
-      chatSearchOpen.value = open
-      if (open) moreActionsMenuOpen.value = false
-    },
-    root: () => chatScrollRef.value,
+  const aiPanelChatViewportRuntime = createAiPanelChatViewportRuntime({
+    historyState: historyRuntimeState,
     closePopups: () => closePopups(),
-    focusSearchInput: () => chatSearchInputRef.value?.focus(),
-    afterDomUpdate: () => nextTick(),
-    scheduleScrollToBottom: scheduleChatScrollToBottom,
+    closeMoreActionsMenu: () => {
+      moreActionsMenuOpen.value = false
+    },
+    afterDomUpdate: (callback) => (callback ? nextTick(callback) : nextTick()),
+    requestFrame: (callback) => window.requestAnimationFrame(callback),
+    cancelFrame: (frame) => window.cancelAnimationFrame(frame),
     setSearchTimer: (callback, delay) => window.setTimeout(callback, delay),
     clearSearchTimer: (timer) => window.clearTimeout(timer as number)
   })
-
-  const openChatSearch = () => aiPanelChatSearchRuntime.openSearch()
-  const closeChatSearch = () => aiPanelChatSearchRuntime.closeSearch()
-  const clearChatSearch = () => aiPanelChatSearchRuntime.clearSearch()
-  const findNextChatMatch = () => aiPanelChatSearchRuntime.findNextMatch()
-  const findPreviousChatMatch = () => aiPanelChatSearchRuntime.findPreviousMatch()
+  const {
+    chatScrollRef,
+    chatSearchCurrentIndex,
+    chatSearchInputRef,
+    chatSearchMatchCount,
+    chatSearchOpen,
+    chatSearchTerm,
+    cancelChatScrollFrame,
+    clearChatSearch,
+    closeChatSearch,
+    findNextChatMatch,
+    findPreviousChatMatch,
+    openChatSearch
+  } = aiPanelChatViewportRuntime
 
   const aiPanelCommandActionRuntime = createAiPanelCommandActionRuntime({
     state: commandActionRuntimeState,
@@ -914,7 +895,7 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
   })
 
   watch(chatSearchTerm, () => {
-    aiPanelChatSearchRuntime.handleSearchTermChanged()
+    aiPanelChatViewportRuntime.handleSearchTermChanged()
   })
 
   watch([historySearchTerm, historyFavoritesOnly], () => {
@@ -931,7 +912,7 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     pruneConversationTabs,
     ensureConversationTab,
     chatMessagesSignature: () => aiPanelChatMessagesSignature(workspace.chatMessages),
-    syncSearchForMessages: () => aiPanelChatSearchRuntime.syncSearchForMessages(),
+    syncSearchForMessages: () => aiPanelChatViewportRuntime.syncSearchForMessages(),
     activeCodexTargetSignature: () => activeCodexTargetSignature.value,
     syncActiveCodexTargetContext,
     terminalSettingsSignature,
@@ -958,11 +939,9 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     syncingFromEditable: () => syncingFromEditable.value,
     renderEditableFromState,
     startInitialMode,
-    cancelChatScrollFrame: () => {
-      if (chatScrollFrame !== undefined) window.cancelAnimationFrame(chatScrollFrame)
-    },
+    cancelChatScrollFrame,
     disposeCodexRuntime: () => aiPanelCodexRuntime.dispose(),
-    disposeChatSearchRuntime: () => aiPanelChatSearchRuntime.dispose(),
+    disposeChatSearchRuntime: () => aiPanelChatViewportRuntime.dispose(),
     clearHistoryNoticeTimer: () => aiPanelHistoryRuntime.clearNoticeTimer(),
     disposeSurfaceRuntime: () => aiPanelSurfaceRuntime.dispose(),
     disposeVoiceRuntime: () => aiPanelVoiceRuntime.dispose()
