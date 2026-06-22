@@ -27,17 +27,11 @@ import {
   type K8sAgentRunRecord,
   type K8sTerminalTab
 } from '@/services/kubernetesRuntime'
-import type { AiContentPart, AiContextOption } from '@shared/contracts/aiChat'
+import type { K8sSendChat } from '@/services/workspaceKubernetesChatBoundary'
+import type { AiContextOption } from '@shared/contracts/aiChat'
 import type { KubernetesCatalog } from '@shared/contracts/kubernetes'
 
 type K8sAgentStatus = 'idle' | 'ready' | 'running' | 'error'
-
-export type K8sSendChat = (
-  text: string,
-  contentParts?: AiContentPart[],
-  overrideHosts?: AiContextOption[],
-  options?: { skipKnowledgeSearch?: boolean }
-) => Promise<boolean> | boolean
 
 type WorkspaceKubernetesResourceAgentState = {
   k8sClusters: Ref<K8sCluster[]>
