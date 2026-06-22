@@ -58,13 +58,11 @@ import {
   eventSubscriptionCountForTesting,
   handleMobileEventsControlRequest,
   handleSessionControlRequest,
-  handleSidebarMetadataControlRequest,
   handleWaitForControlRequest,
   isControlEventListMethod as isEventListMethod,
   isControlEventStreamMethod as isEventStreamMethod,
   isControlMobileEventsMethod as isMobileEventsMethod,
   isControlSessionMethod as isSessionMethod,
-  isControlSidebarMetadataMethod as isSidebarMetadataMethod,
   isControlWaitForMethod as isWaitForMethod,
   jumpToUnreadNotification,
   listEvents,
@@ -81,6 +79,12 @@ import {
   publishControlEvent,
   startEventStream
 } from './controlSocketStateRuntime'
+import {
+  configureControlSocketSidebarMetadataRuntime,
+  handleSidebarMetadataControlRequest,
+  isControlSidebarMetadataMethod as isSidebarMetadataMethod,
+  resetControlSocketSidebarMetadataRuntime
+} from './controlSocketSidebarMetadataRuntime'
 import {
   closePendingRendererControlRequests,
   configureControlSocketRendererRuntime,
@@ -543,6 +547,7 @@ export const configureControlSocketRuntime = (config: ControlSocketRuntime = {})
   configureControlSocketCompatibilityRuntime({
     ...(runtime.userDataPath ? { userDataPath: runtime.userDataPath } : {})
   })
+  configureControlSocketSidebarMetadataRuntime({ publishControlEvent })
   configureControlSocketTerminalTools({
     writeTerminal: runtime.writeTerminal,
     dispatchRendererControlRequest,
@@ -566,6 +571,7 @@ export const ensureControlSocketServer = async (userDataPath: string) => {
   configureAgentVaultRuntime({ userDataPath, dispatchRendererControlRequest, publishControlEvent })
   configureControlSocketAgentRuntime({ userDataPath, writeTerminal: runtime.writeTerminal, handleMobileTerminalControlRequest, publishControlEvent })
   configureControlSocketCompatibilityRuntime({ userDataPath })
+  configureControlSocketSidebarMetadataRuntime({ publishControlEvent })
   configureControlSocketTerminalTools({ writeTerminal: runtime.writeTerminal, dispatchRendererControlRequest, publishControlEvent })
   await loadDurableEventLog(userDataPath)
   await loadAgentVaultStore(userDataPath)
@@ -624,6 +630,7 @@ export const ensureControlSocketServer = async (userDataPath: string) => {
 export const closeControlSocketServer = () => {
   closePendingRendererControlRequests()
   closeControlSocketStateRuntime()
+  resetControlSocketSidebarMetadataRuntime()
   resetControlSocketTerminalTools()
   resetAgentVaultRuntimeState()
   server?.close()
