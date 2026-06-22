@@ -5,22 +5,16 @@ import { createDatabaseAiWorkspaceController } from '@/services/databaseAiWorksp
 import { createDatabaseSqlDataWorkspaceController } from '@/services/databaseSqlDataWorkspaceController'
 import { createDatabaseSqlEditorWorkspaceController } from '@/services/databaseSqlEditorWorkspaceController'
 import { createDatabaseWorkspaceCatalogRuntime } from '@/services/databaseWorkspaceCatalogRuntime'
+import { createDatabaseWorkspaceSqlTabRuntime } from '@/services/databaseWorkspaceSqlTabRuntime'
 import type { DatabaseMainWorkspaceApi } from '@/components/database/databaseMainWorkspaceTypes'
 import { makeDirtyState } from '@/services/databaseGridRuntime'
-import {
-  isDatabaseConnectionMutationDataForRequest,
-  isDatabaseTableMutationData,
-} from '@/services/databaseBackendGuards'
 import {
   canCreateDatabaseForConnection,
   collectDescendantGroupIds,
   DB_AI_PANE_MAX_WIDTH,
   DB_AI_PANE_MIN_WIDTH,
   DEFAULT_GROUP_ID,
-  formatDdlError,
-  groupPathLabel,
-  quoteIdentForDialect,
-  quoteIdentifier
+  groupPathLabel
 } from '@/services/databaseWorkspaceRuntime'
 import type {
   ContextMenu,
@@ -30,14 +24,12 @@ import type {
 } from '@/services/databaseWorkspaceTypes'
 import { useWorkspaceStore } from '@/stores/workspace'
 import type {
-  DatabaseConnectionMutationResult,
   DatabaseConnectionInfo,
   DatabaseEngineCode
 } from '@shared/contracts/database'
 
 export const useDatabaseWorkspaceRuntime = () => {
 
-  const DATABASE_CONNECTION_MUTATION_MALFORMED_MESSAGE = 'Database connection backend returned malformed result data.'
   const workspaceStore = useWorkspaceStore()
 
   const overflowOpen = ref(false)
@@ -221,26 +213,33 @@ export const useDatabaseWorkspaceRuntime = () => {
   })
   const connectionRootMoveDisabled = computed(() => contextConnection.value?.groupId === DEFAULT_GROUP_ID)
 
-  const activeSqlHasText = computed(() => Boolean(activeSqlTab.value?.sql.trim()))
-  const activeSqlSaving = computed(() => Boolean(activeSqlTab.value?.saving))
-  const activeSqlIsDirty = computed(() => {
-    const tab = activeSqlTab.value
-    return !!tab && tab.sql !== tab.savedSql
-  })
-  const activeSqlSaveTitle = computed(() => {
-    const tab = activeSqlTab.value
-    if (!tab) return 'Save'
-    if (tab.saving) return 'Saving'
-    return 'Save'
-  })
-  const activeSqlSaveStateText = computed(() => {
-    const tab = activeSqlTab.value
-    if (!tab) return ''
-    if (tab.saving) return 'Saving...'
-    if (tab.saveError) return tab.saveError
-    if (activeSqlIsDirty.value) return tab.filePath ? 'Unsaved changes' : 'Not saved'
-    return tab.filePath ? `Saved: ${fileNameFromPath(tab.filePath)}` : 'Not saved'
-  })
+  const {
+    activeSqlHasText,
+    activeSqlSaving,
+    activeSqlIsDirty,
+    activeSqlSaveTitle,
+    activeSqlSaveStateText,
+    closeTab,
+    openSqlConsole,
+    updateSqlTabConnection
+  } = createDatabaseWorkspaceSqlTabRuntime(
+    {
+      tabs,
+      activeTabId,
+      activeSqlTab,
+      expandedConnections
+    },
+    {
+      showNotice,
+      closeMenus: () => closeMenus(),
+      findConnection,
+      resolveSqlConsoleContext,
+      applyDatabaseCatalogMutationResult,
+      applySqlTabConnectionContext,
+      connectConnection: (connectionId: string) => connectDatabaseConnectionViaBackend(connectionId)
+    }
+  )
+
   const {
     SQL_PANE_MIN_PERCENT,
     SQL_PANE_MAX_PERCENT,
@@ -491,83 +490,9 @@ export const useDatabaseWorkspaceRuntime = () => {
       .map((target) => ({ id: target.id, name: groupPathLabel(target.id, groups.value, groupParentById) }))
   })
 
-  async function updateSqlTabConnection(event: Event) {
-    const tab = activeSqlTab.value
-    if (!tab) return
-    const connectionId = (event.target as HTMLSelectElement).value
-    let connection = findConnection(connectionId)
-    if (!connection) {
-      tab.connectionId = ''
-      tab.catalogName = ''
-      tab.schemaName = ''
-      return
-    }
-    if (connection.status !== 'connected' && connection.status !== 'testing') {
-      const requestedConnectionId = connection.id
-      const result = await connectDatabaseConnectionViaBackend(requestedConnectionId)
-      if (
-        !applyDatabaseCatalogMutationResult(
-          result,
-          'Database connection failed.',
-          (value): value is NonNullable<DatabaseConnectionMutationResult['data']> =>
-            isDatabaseConnectionMutationDataForRequest(value, { connectionId: requestedConnectionId, status: 'connected' }),
-          DATABASE_CONNECTION_MUTATION_MALFORMED_MESSAGE
-        )
-      ) {
-        return
-      }
-      connection = findConnection(connectionId)
-      if (!connection) return
-      expandedConnections.value = Array.from(new Set([...expandedConnections.value, connection.id]))
-      showNotice('Connection auto-connected for SQL context')
-    }
-    applySqlTabConnectionContext(tab, connection)
-  }
-
   watch(activeTabId, () => {
     syncDbAiPaneContextAfterActiveTabChange()
   })
-
-  function closeTab(tabId: string) {
-    const index = tabs.value.findIndex((tab) => tab.id === tabId)
-    if (index <= 0) return
-    tabs.value.splice(index, 1)
-    if (activeTabId.value === tabId) activeTabId.value = tabs.value[Math.max(0, index - 1)]?.id ?? 'tab-overview'
-  }
-
-  function nextQueryTitle() {
-    const indexes = tabs.value
-      .filter((tab) => tab.kind === 'sql')
-      .map((tab) => /^Query (\d+)$/.exec(tab.title)?.[1])
-      .filter((value): value is string => typeof value === 'string')
-      .map((value) => Number.parseInt(value, 10))
-      .filter((value) => Number.isFinite(value))
-    return `Query ${indexes.length ? Math.max(...indexes) + 1 : 1}`
-  }
-
-  function openSqlConsole(connectionId?: string) {
-    const context = resolveSqlConsoleContext(connectionId)
-    const connection = findConnection(context.connectionId)
-    const catalog = connection?.catalogs.find((item) => item.name === context.catalogName) ?? connection?.catalogs[0]
-    const tab: WorkspaceTab = {
-      id: `tab-sql-${Date.now()}`,
-      kind: 'sql',
-      title: nextQueryTitle(),
-      connectionId: context.connectionId,
-      catalogName: catalog?.name ?? context.catalogName,
-      schemaName: context.schemaName,
-      sql: '',
-      savedSql: '',
-      saving: false,
-      saveError: null,
-      resultTabs: [],
-      activeResultTabId: 'overview',
-      history: []
-    }
-    tabs.value.push(tab)
-    activeTabId.value = tab.id
-    closeMenus()
-  }
 
   function errorToMessage(error: unknown) {
     if (error instanceof Error) return error.message
@@ -579,10 +504,6 @@ export const useDatabaseWorkspaceRuntime = () => {
     if (error instanceof Error && error.message.trim()) return error.message
     if (typeof error === 'string' && error.trim()) return error.trim()
     return fallback
-  }
-
-  function fileNameFromPath(filePath: string) {
-    return String(filePath || '').split(/[\\/]/).filter(Boolean).pop() || filePath
   }
 
   const databaseCatalogConnectionHooks = {
