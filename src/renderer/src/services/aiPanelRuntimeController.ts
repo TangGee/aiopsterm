@@ -46,10 +46,6 @@ import {
   Zap
 } from 'lucide-vue-next'
 import { useWorkspaceStore } from '@/stores/workspace'
-import {
-  aiPanelChipLabel,
-  type AiPanelEditableRenderOptions
-} from '@/services/aiPanelEditableRuntime'
 import { createAiPanelContextCommandShellRuntime } from '@/services/aiPanelContextCommandShellRuntime'
 import { createAiPanelModelPopupShellRuntime } from '@/services/aiPanelModelPopupShellRuntime'
 import {
@@ -68,10 +64,10 @@ import {
 } from '@/services/aiPanelMessageRuntime'
 import { createAiPanelActionOrchestrationRuntime } from '@/services/aiPanelActionOrchestrationRuntime'
 import { createAiPanelChatNavigationRuntime } from '@/services/aiPanelChatNavigationRuntime'
-import { clipboardHasImageItems } from '@/services/aiPanelMediaRuntime'
 import { createAiPanelInputMediaShellRuntime } from '@/services/aiPanelInputMediaShellRuntime'
 import { createAiPanelMessageEditRuntime } from '@/services/aiPanelMessageEditRuntime'
 import { createAiPanelComposerDomRuntime } from '@/services/aiPanelComposerDomRuntime'
+import { createAiPanelPresentationRuntime } from '@/services/aiPanelPresentationRuntime'
 import { aiChatClient } from '@/services/aiChatClient'
 import { copyTextToClipboard } from '@/services/clipboardRuntime'
 import { codexTargetContextFromPanel } from '@/services/aiPanelCodexRuntime'
@@ -83,9 +79,6 @@ import {
   type AiPanelOnboardingRequest
 } from '@/services/aiPanelLifecycleRuntime'
 import { useI18n } from '@/i18n'
-import type {
-  AiChipContentPart
-} from '@/stores/workspace'
 import type { AiContextKind, AiContextOption } from '@shared/contracts/aiChat'
 
 export type AiPanelContainerRuntimeProps = { agentMode?: boolean }
@@ -94,34 +87,32 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
   const workspace = useWorkspaceStore()
   const { locale, t } = useI18n()
   const agentMode = computed(() => Boolean(props.agentMode))
-  type AiChatMode = 'agent' | 'cmd'
-
-  const aiChatModeOptions: Array<{ id: AiChatMode; label: string; detail: string }> = [
-    { id: 'agent', label: 'Agent', detail: '上下文辅助与工具调用' },
-    { id: 'cmd', label: 'Command', detail: '生成命令与解释' }
-  ]
-
-  const aiContextCategoryIcons: Record<AiContextKind, Component> = {
-    hosts: Server,
-    docs: FileText,
-    images: Image,
-    skills: Bot,
-    chats: Search
-  }
   let classicChatDataLoaded = false
   let getEditHostContextsForPopup = (): AiContextOption[] => []
   const maxHostContexts = 5
   const streaming = computed(() => workspace.chatMessages.some((message) => message.state === 'streaming'))
 
-  const measureUiTextWidthPx = (text: string) => {
-    if (!text) return 0
-    if (typeof document === 'undefined') return text.length * 7
-    const canvas = document.createElement('canvas')
-    const context = canvas.getContext('2d')
-    if (!context) return text.length * 7
-    context.font = '12px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif'
-    return context.measureText(text).width
-  }
+  const aiPanelPresentationRuntime = createAiPanelPresentationRuntime<Component>({
+    icons: {
+      hosts: Server,
+      docs: FileText,
+      images: Image,
+      skills: Bot,
+      chats: Search,
+      fallback: Search
+    },
+    selectedContexts: () => workspace.selectedContexts
+  })
+  const {
+    aiChatModeOptions,
+    clipboardHasImage,
+    contextById,
+    editableRenderOptions,
+    getChipLabel,
+    iconForKind,
+    iconMarkupByChipType,
+    measureText
+  } = aiPanelPresentationRuntime
 
   const aiPanelModelPopupShellRuntime = createAiPanelModelPopupShellRuntime<Component>({
     chatModeOptions: () => aiChatModeOptions,
@@ -141,7 +132,7 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
       await workspace.openUserLogin()
     },
     afterDomUpdate: () => nextTick(),
-    measureText: measureUiTextWidthPx,
+    measureText,
     lockedModelTooltip: (tier) => `模型已锁定，升级 ${tier} 后可用`,
     categories: () => workspace.aiContextCatalog.categories,
     commandOptions: () => workspace.aiCommandOptions,
@@ -151,7 +142,7 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     skillOptions: () => workspace.aiSkillContextOptions,
     selectedCommandId: () => workspace.selectedCommandId,
     selectedCommandRef: () => workspace.selectedCommandRef,
-    iconForKind: (kind) => aiContextCategoryIcons[kind] || Search
+    iconForKind
   })
   const {
     aiContextCategories,
@@ -408,40 +399,11 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     toggleMessageFavorite
   } = aiPanelActionOrchestrationRuntime
 
-  const commandIconMarkup =
-    '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m16 18 6-6-6-6"></path><path d="m8 6-6 6 6 6"></path></svg>'
-
-  const iconMarkupByContextKind: Record<AiContextKind, string> = {
-    hosts: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="14" rx="2"></rect><path d="M8 20h8"></path><path d="M12 18v2"></path></svg>',
-    docs: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><path d="M14 2v6h6"></path><path d="M8 13h8"></path><path d="M8 17h5"></path></svg>',
-    images: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"></rect><circle cx="9" cy="9" r="2"></circle><path d="m21 15-3.5-3.5a2 2 0 0 0-3 0L6 20"></path></svg>',
-    skills: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l1.7 5.2L19 10l-5.3 1.8L12 17l-1.7-5.2L5 10l5.3-1.8z"></path><path d="M19 15l.7 2.1L22 18l-2.3.9L19 21l-.7-2.1L16 18l2.3-.9z"></path></svg>',
-    chats: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"></path></svg>'
-  }
-
-  const iconMarkupByChipType: Record<AiChipContentPart['chipType'], string> = {
-    doc: iconMarkupByContextKind.docs,
-    chat: iconMarkupByContextKind.chats,
-    command: commandIconMarkup,
-    skill: iconMarkupByContextKind.skills
-  }
-
-  const editableRenderOptions = computed<AiPanelEditableRenderOptions>(() => ({
-    iconMarkupByContextKind,
-    commandIconMarkup
-  }))
-
-  const getChipLabel = aiPanelChipLabel
-
-  const clipboardHasImage = (event: ClipboardEvent) => clipboardHasImageItems(event.clipboardData?.items)
-
   let openCommandPopupForTargetHandler: (target: 'main' | 'edit') => void | Promise<void> = () => undefined
   let openContextPopupForTargetHandler: (target: 'main' | 'edit', level?: 'main' | AiContextKind) => void = () => undefined
   const openCommandPopupForTarget = (target: 'main' | 'edit') => openCommandPopupForTargetHandler(target)
   const openContextPopupForTarget = (target: 'main' | 'edit', level: 'main' | AiContextKind = 'main') =>
     openContextPopupForTargetHandler(target, level)
-
-  const contextById = (id: string) => workspace.selectedContexts.find((item) => item.id === id) || null
 
   let insertPastedImageHandler: (() => void | Promise<void>) | undefined
   const aiPanelComposerDomRuntime = createAiPanelComposerDomRuntime({
