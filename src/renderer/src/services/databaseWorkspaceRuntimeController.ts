@@ -12,22 +12,15 @@ import {
   isDatabaseTableMutationData,
 } from '@/services/databaseBackendGuards'
 import {
-  buildConnectionUrl,
+  canCreateDatabaseForConnection,
   collectDescendantGroupIds,
   DB_AI_PANE_MAX_WIDTH,
   DB_AI_PANE_MIN_WIDTH,
-  DB_IDENT_RE,
   DEFAULT_GROUP_ID,
   formatDdlError,
   groupPathLabel,
-  isMysqlCompatibleDbType,
-  isPostgresCompatibleDbType,
-  normalizeTableDdlResult,
-  parseCreateDatabaseName,
   quoteIdentForDialect,
-  quoteIdentifier,
-  renderCreateDatabaseTemplate,
-  type TableDdlResult
+  quoteIdentifier
 } from '@/services/databaseWorkspaceRuntime'
 import type {
   ContextMenu,
@@ -210,7 +203,6 @@ export const useDatabaseWorkspaceRuntime = () => {
 
   const databaseSshProxyOptions = computed(() => workspaceStore.sshProxyConfigs.map((config) => ({ ...config })).sort((first, second) => first.name.localeCompare(second.name)))
   const databaseSshProxyNames = computed(() => new Set(databaseSshProxyOptions.value.map((config) => config.name)))
-  const databaseProxyAvailable = computed(() => connectionDraft.dbType !== 'sqlite' && databaseSshProxyOptions.value.length > 0)
 
   const contextConnection = computed(() => {
     const menu = contextMenu.value
@@ -218,17 +210,7 @@ export const useDatabaseWorkspaceRuntime = () => {
   })
 
   const contextConnectionConnected = computed(() => contextConnection.value?.status === 'connected')
-  const contextConnectionCanCreateDatabase = computed(() => {
-    const connection = contextConnection.value
-    return (
-      !!connection &&
-      connection.status === 'connected' &&
-      (isMysqlCompatibleDbType(connection.dbType) ||
-        isPostgresCompatibleDbType(connection.dbType) ||
-        connection.dbType === 'sqlserver' ||
-        connection.dbType === 'clickhouse')
-    )
-  })
+  const contextConnectionCanCreateDatabase = computed(() => canCreateDatabaseForConnection(contextConnection.value))
   const connectionMoveTargets = computed(() => {
     const connection = contextConnection.value
     if (!connection) return []
@@ -509,27 +491,6 @@ export const useDatabaseWorkspaceRuntime = () => {
       .map((target) => ({ id: target.id, name: groupPathLabel(target.id, groups.value, groupParentById) }))
   })
 
-  const connectionUrl = computed({
-    get() {
-      if (connectionUrlDirty.value && connectionDraft.url.trim()) return connectionDraft.url
-      return buildConnectionUrl(connectionDraft)
-    },
-    set(value: string) {
-      connectionUrlDirty.value = true
-      connectionDraft.url = value
-    }
-  })
-
-  function markConnectionUrlAuto() {
-    if (!connectionUrlDirty.value) connectionDraft.url = ''
-    clearConnectionFeedback()
-  }
-
-  function clearConnectionFeedback() {
-    connectionFeedback.value = ''
-    connectionFeedbackKind.value = 'info'
-  }
-
   async function updateSqlTabConnection(event: Event) {
     const tab = activeSqlTab.value
     if (!tab) return
@@ -562,53 +523,6 @@ export const useDatabaseWorkspaceRuntime = () => {
     }
     applySqlTabConnectionContext(tab, connection)
   }
-
-  function syncCreateDatabaseTemplate() {
-    if (createDatabaseModal.userEditedSql) return
-    const next = renderCreateDatabaseTemplate(createDatabaseModal.name, createDatabaseModal.dbType)
-    createDatabaseModal.lastAppliedTemplate = next
-    createDatabaseModal.sql = next
-  }
-
-  function updateCreateDatabaseName(event: Event) {
-    createDatabaseModal.name = (event.target as HTMLInputElement).value
-    createDatabaseModal.feedback = ''
-    syncCreateDatabaseTemplate()
-  }
-
-  const createDatabaseSql = computed({
-    get() {
-      return createDatabaseModal.sql
-    },
-    set(value: string) {
-      if (value !== createDatabaseModal.lastAppliedTemplate) createDatabaseModal.userEditedSql = true
-      createDatabaseModal.sql = value
-    }
-  })
-
-  const createDatabaseNameError = computed(() => {
-    const name = createDatabaseModal.name.trim()
-    return createDatabaseModal.open && name.length > 0 && !DB_IDENT_RE.test(name)
-  })
-
-  const createDatabaseCanSubmit = computed(() => {
-    if (!createDatabaseModal.open || createDatabaseModal.submitting) return false
-    return DB_IDENT_RE.test(createDatabaseModal.name.trim()) && createDatabaseModal.sql.trim().length > 0
-  })
-
-  watch(
-    [() => connectionDraft.dbType, databaseSshProxyNames],
-    () => {
-      if (connectionDraft.dbType === 'sqlite') {
-        connectionDraft.needProxy = false
-        connectionDraft.proxyName = ''
-        return
-      }
-      if (connectionDraft.proxyName && !databaseSshProxyNames.value.has(connectionDraft.proxyName)) {
-        connectionDraft.proxyName = ''
-      }
-    }
-  )
 
   watch(activeTabId, () => {
     syncDbAiPaneContextAfterActiveTabChange()
@@ -713,6 +627,13 @@ export const useDatabaseWorkspaceRuntime = () => {
     cancelOperationConfirm,
     confirmOperation,
     copyContextName,
+    databaseProxyAvailable,
+    connectionUrl,
+    createDatabaseSql,
+    createDatabaseNameError,
+    createDatabaseCanSubmit,
+    markConnectionUrlAuto,
+    updateCreateDatabaseName,
     closeConnectionModal,
     openSshProxyConfigFromConnectionModal,
     pickSqliteFile,
@@ -771,8 +692,7 @@ export const useDatabaseWorkspaceRuntime = () => {
       ddlModal,
       dangerConfirm,
       operationConfirm,
-      connectionUrl,
-      createDatabaseCanSubmit,
+      databaseSshProxyOptions,
       databaseSshProxyNames
     },
     {
@@ -780,7 +700,6 @@ export const useDatabaseWorkspaceRuntime = () => {
       showNotice,
       copyText,
       errorToMessage,
-      bridgeErrorMessage,
       findConnection,
       applyDatabaseCatalog,
       applyDatabaseCatalogMutationResult,

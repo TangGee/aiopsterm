@@ -75,6 +75,11 @@ export const DB_ENGINE_OPTION_CODES = [
 
 export const isMysqlCompatibleDbType = (dbType: DatabaseEngineCode | DatabaseAiTargetDialect | '') => dbType === 'mysql' || dbType === 'mariadb' || dbType === 'oceanbase'
 export const isPostgresCompatibleDbType = (dbType: DatabaseEngineCode | DatabaseAiTargetDialect | '') => dbType === 'postgresql' || dbType === 'kingbase'
+export const isCreateDatabaseSupportedDbType = (dbType: DatabaseEngineCode | '') =>
+  isMysqlCompatibleDbType(dbType) || isPostgresCompatibleDbType(dbType) || dbType === 'sqlserver' || dbType === 'clickhouse'
+
+export const canCreateDatabaseForConnection = (connection: Pick<DatabaseConnectionInfo, 'dbType' | 'status'> | null | undefined) =>
+  !!connection && connection.status === 'connected' && isCreateDatabaseSupportedDbType(connection.dbType)
 
 export const connectionSchemeForDbType = (dbType: DatabaseEngineCode) =>
   dbType === 'postgresql'
