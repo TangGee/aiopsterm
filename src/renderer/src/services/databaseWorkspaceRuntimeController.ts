@@ -5,7 +5,7 @@ import { createDatabaseAiWorkspaceController } from '@/services/databaseAiWorksp
 import { createDatabaseSqlDataWorkspaceController } from '@/services/databaseSqlDataWorkspaceController'
 import { createDatabaseSqlEditorWorkspaceController } from '@/services/databaseSqlEditorWorkspaceController'
 import { createDatabaseWorkspaceCatalogRuntime } from '@/services/databaseWorkspaceCatalogRuntime'
-import type { DatabaseMainWorkspaceApi } from '@/components/database/DatabaseMainWorkspace.vue'
+import type { DatabaseMainWorkspaceApi } from '@/components/database/databaseMainWorkspaceTypes'
 import { makeDirtyState } from '@/services/databaseGridRuntime'
 import {
   isDatabaseConnectionMutationDataForRequest,
