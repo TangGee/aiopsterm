@@ -1,304 +1,61 @@
 <template>
   <section class="db-sql-workspace">
-    <div class="db-sql-toolbar">
-      <button
-        type="button"
-        class="db-sql-toolbar-btn db-sql-toolbar-run"
-        title="Run all"
-        :disabled="!activeSqlCanRun"
-        @click="emit('runSql', 'all')"
-      >
-        <Play />
-      </button>
-      <button
-        type="button"
-        class="db-sql-toolbar-btn db-sql-toolbar-run-current"
-        title="Run current statement"
-        :disabled="!activeSqlCanRun"
-        @click="emit('runSql', 'current')"
-      >
-        <CornerDownRight />
-      </button>
-      <button
-        type="button"
-        class="db-sql-toolbar-btn db-sql-toolbar-explain"
-        title="Explain"
-        :disabled="!activeSqlCanRun"
-        @click="emit('runSql', 'explain')"
-      >
-        <Lightbulb />
-      </button>
-      <span class="db-toolbar-divider" />
-      <button
-        type="button"
-        class="db-sql-toolbar-btn db-sql-toolbar-save"
-        :disabled="!activeSqlTab || activeSqlSaving"
-        :title="activeSqlSaveTitle"
-        @click="emit('saveActiveSql', false)"
-      >
-        <Save />
-      </button>
-      <button
-        type="button"
-        class="db-sql-toolbar-btn db-sql-toolbar-save-as"
-        :disabled="!activeSqlTab || activeSqlSaving"
-        title="Save As"
-        @click="emit('saveActiveSql', true)"
-      >
-        <SaveAll />
-      </button>
-      <button
-        type="button"
-        class="db-sql-toolbar-btn db-sql-toolbar-format"
-        :disabled="!activeSqlTab.connectionId"
-        title="Format"
-        @click="emit('formatSql')"
-      >
-        <AlignLeft />
-      </button>
-      <span class="db-toolbar-divider" />
-      <span class="db-ai-toolbar">
-        <button
-          type="button"
-          title="AI Explain SQL"
-          :disabled="!activeSqlHasText"
-          @click="emit('openDbAiFromToolbar', 'explain')"
-        >
-          <BrainCircuit />
-        </button>
-        <button
-          type="button"
-          title="AI Optimize SQL"
-          :disabled="!activeSqlHasText"
-          @click="emit('openDbAiFromToolbar', 'optimize')"
-        >
-          <WandSparkles />
-        </button>
-        <button
-          type="button"
-          title="AI Convert SQL"
-          :disabled="!activeSqlHasText"
-          @click="emit('openDbAiFromToolbar', 'convert')"
-        >
-          <Languages />
-        </button>
-        <button
-          type="button"
-          title="AI Complete SQL"
-          :disabled="!activeSqlTab"
-          @click="emit('openDbAiFromToolbar', 'complete')"
-        >
-          <TextCursorInput />
-        </button>
-        <button
-          type="button"
-          title="AI NL2SQL"
-          :disabled="!activeSqlTab"
-          @click="emit('openDbAiFromToolbar', 'nl2sql')"
-        >
-          <FileSearch />
-        </button>
-      </span>
-      <span class="db-toolbar-spacer" />
-      <select
-        class="db-picker db-picker--connection"
-        :value="activeSqlTab.connectionId"
-        :disabled="connections.length === 0"
-        @change="emit('updateSqlTabConnection', $event)"
-      >
-        <option
-          value=""
-          disabled
-        >
-          Connection
-        </option>
-        <option
-          v-for="connection in connections"
-          :key="connection.id"
-          :value="connection.id"
-        >
-          {{ connection.name }}{{ connection.status === 'testing' ? ' [connecting...]' : '' }}
-        </option>
-      </select>
-      <select
-        class="db-picker db-picker--database"
-        :value="activeSqlTab.catalogName"
-        :disabled="currentSqlCatalogs.length === 0"
-        @change="emit('updateSqlTabCatalog', $event)"
-      >
-        <option
-          value=""
-          disabled
-        >
-          Database
-        </option>
-        <option
-          v-for="catalog in currentSqlCatalogs"
-          :key="catalog.name"
-          :value="catalog.name"
-        >
-          {{ catalog.name }}
-        </option>
-      </select>
-      <select
-        v-if="activeSqlRequiresSchema"
-        class="db-picker db-picker--schema"
-        :value="activeSqlTab.schemaName"
-        :disabled="currentSqlSchemas.length === 0"
-        @change="emit('updateSqlTabSchema', $event)"
-      >
-        <option
-          value=""
-          disabled
-        >
-          Schema
-        </option>
-        <option
-          v-for="schema in currentSqlSchemas"
-          :key="schema.name"
-          :value="schema.name"
-        >
-          {{ schema.name }}
-        </option>
-      </select>
-    </div>
+    <DatabaseSqlToolbar
+      :active-sql-tab="activeSqlTab"
+      :active-sql-can-run="activeSqlCanRun"
+      :active-sql-saving="activeSqlSaving"
+      :active-sql-save-title="activeSqlSaveTitle"
+      :active-sql-has-text="activeSqlHasText"
+      :connections="connections"
+      :current-sql-catalogs="currentSqlCatalogs"
+      :current-sql-schemas="currentSqlSchemas"
+      :active-sql-requires-schema="activeSqlRequiresSchema"
+      @run-sql="emit('runSql', $event)"
+      @save-active-sql="emit('saveActiveSql', $event)"
+      @format-sql="emit('formatSql')"
+      @open-db-ai-from-toolbar="emit('openDbAiFromToolbar', $event)"
+      @update-sql-tab-connection="emit('updateSqlTabConnection', $event)"
+      @update-sql-tab-catalog="emit('updateSqlTabCatalog', $event)"
+      @update-sql-tab-schema="emit('updateSqlTabSchema', $event)"
+    />
+
     <div
       class="db-sql-panes"
       :class="{ resizing: sqlPaneResizing }"
       :style="sqlPaneStyle"
     >
-      <div
-        class="db-sql-editor-shell"
-        @click="focusSqlEditor"
-      >
-        <div
-          class="db-sql-editor-gutter"
-          :style="{ transform: `translateY(-${sqlEditorScrollTop}px)` }"
-          aria-hidden="true"
-        >
-          <span
-            v-for="line in activeSqlEditorLines"
-            :key="line"
-            :class="{ active: line === sqlEditorActiveLine }"
-          >
-            {{ line }}
-          </span>
-        </div>
-        <div class="db-sql-editor-surface">
-          <div
-            class="db-sql-editor-active-line"
-            :style="{ transform: `translateY(${sqlEditorActiveLineTop}px)` }"
-            aria-hidden="true"
-          />
-          <DatabaseSqlEditor
-            ref="sqlEditorRef"
-            v-model="activeSqlText"
-            @metrics="emit('syncSqlEditorState', $event)"
-            @run="emit('runSqlFromShortcut')"
-            @open-find="emit('openSqlFind', $event)"
-          />
-        </div>
-        <div
-          v-if="sqlFindOpen"
-          class="db-sql-find-panel"
-          @click.stop
-        >
-          <div class="db-sql-find-row">
-            <Search />
-            <input
-              ref="sqlFindInputRef"
-              :value="sqlFindQuery"
-              aria-label="Find in SQL"
-              placeholder="Find"
-              @input="emit('update:sqlFindQuery', ($event.target as HTMLInputElement).value)"
-              @keydown="(event) => emit('handleSqlFindKeydown', event, 'query')"
-            />
-            <span class="db-sql-find-count">{{ sqlFindSummary }}</span>
-            <button
-              type="button"
-              title="Previous match"
-              :disabled="sqlFindMatches.length === 0"
-              @click="emit('goToSqlFindMatch', -1)"
-            >
-              ↑
-            </button>
-            <button
-              type="button"
-              title="Next match"
-              :disabled="sqlFindMatches.length === 0"
-              @click="emit('goToSqlFindMatch', 1)"
-            >
-              ↓
-            </button>
-            <button
-              type="button"
-              title="Toggle replace"
-              :class="{ active: sqlFindReplaceOpen }"
-              @click="emit('toggleSqlFindReplace')"
-            >
-              Replace
-            </button>
-            <button
-              type="button"
-              title="Match case"
-              :class="{ active: sqlFindCaseSensitive }"
-              @click="emit('update:sqlFindCaseSensitive', !sqlFindCaseSensitive)"
-            >
-              Aa
-            </button>
-            <button
-              type="button"
-              title="Close find"
-              @click="emit('closeSqlFind', true)"
-            >
-              <X />
-            </button>
-          </div>
-          <div
-            v-if="sqlFindReplaceOpen"
-            class="db-sql-find-row replace"
-          >
-            <span />
-            <input
-              ref="sqlReplaceInputRef"
-              :value="sqlFindReplace"
-              aria-label="Replace in SQL"
-              placeholder="Replace"
-              @input="emit('update:sqlFindReplace', ($event.target as HTMLInputElement).value)"
-              @keydown="(event) => emit('handleSqlFindKeydown', event, 'replace')"
-            />
-            <button
-              type="button"
-              title="Replace current"
-              :disabled="sqlFindMatches.length === 0"
-              @click="emit('replaceCurrentSqlFindMatch')"
-            >
-              Replace
-            </button>
-            <button
-              type="button"
-              title="Replace all"
-              :disabled="sqlFindMatches.length === 0"
-              @click="emit('replaceAllSqlFindMatches')"
-            >
-              All
-            </button>
-          </div>
-        </div>
-        <footer class="db-sql-editor-footer">
-          <span
-            v-if="activeSqlTab"
-            class="db-sql-save-state"
-            :class="{ dirty: activeSqlIsDirty, saving: activeSqlSaving, error: Boolean(activeSqlTab.saveError) }"
-            :title="activeSqlTab.filePath || activeSqlTab.saveError || undefined"
-          >
-            {{ activeSqlSaveStateText }}
-          </span>
-          <span>{{ activeSqlEditorLineCount }} lines</span>
-          <span>Ln {{ sqlEditorActiveLine }}, Col {{ sqlEditorActiveColumn }}</span>
-          <span v-if="sqlEditorSelectionSize">{{ sqlEditorSelectionSize }} selected</span>
-        </footer>
-      </div>
+      <DatabaseSqlEditorPane
+        ref="sqlEditorPaneRef"
+        v-model:sql-find-query="sqlFindQueryProxy"
+        v-model:sql-find-replace="sqlFindReplaceProxy"
+        v-model:sql-find-case-sensitive="sqlFindCaseSensitiveProxy"
+        :active-sql-tab="activeSqlTab"
+        :active-sql-saving="activeSqlSaving"
+        :sql-editor-scroll-top="sqlEditorScrollTop"
+        :active-sql-editor-lines="activeSqlEditorLines"
+        :sql-editor-active-line="sqlEditorActiveLine"
+        :sql-editor-active-line-top="sqlEditorActiveLineTop"
+        :sql-find-open="sqlFindOpen"
+        :sql-find-summary="sqlFindSummary"
+        :sql-find-matches="sqlFindMatches"
+        :sql-find-replace-open="sqlFindReplaceOpen"
+        :active-sql-is-dirty="activeSqlIsDirty"
+        :active-sql-save-state-text="activeSqlSaveStateText"
+        :active-sql-editor-line-count="activeSqlEditorLineCount"
+        :sql-editor-active-column="sqlEditorActiveColumn"
+        :sql-editor-selection-size="sqlEditorSelectionSize"
+        @update-active-sql="emit('updateActiveSql', $event)"
+        @sync-sql-editor-state="emit('syncSqlEditorState', $event)"
+        @run-sql-from-shortcut="emit('runSqlFromShortcut')"
+        @open-sql-find="emit('openSqlFind', $event)"
+        @handle-sql-find-keydown="(event, field) => emit('handleSqlFindKeydown', event, field)"
+        @go-to-sql-find-match="emit('goToSqlFindMatch', $event)"
+        @toggle-sql-find-replace="emit('toggleSqlFindReplace')"
+        @close-sql-find="emit('closeSqlFind', $event)"
+        @replace-current-sql-find-match="emit('replaceCurrentSqlFindMatch')"
+        @replace-all-sql-find-matches="emit('replaceAllSqlFindMatches')"
+      />
+
       <button
         type="button"
         class="db-sql-splitter"
@@ -313,202 +70,38 @@
       >
         <span aria-hidden="true" />
       </button>
-      <div class="db-sql-results">
-        <div
-          class="db-result-tabs"
-          role="tablist"
-        >
-          <div
-            role="tab"
-            tabindex="0"
-            :aria-selected="activeSqlTab.activeResultTabId === 'overview'"
-            :class="{ active: activeSqlTab.activeResultTabId === 'overview' }"
-            @click="emit('updateSqlResultActiveTab', 'overview')"
-            @keydown.enter.prevent="emit('updateSqlResultActiveTab', 'overview')"
-            @keydown.space.prevent="emit('updateSqlResultActiveTab', 'overview')"
-          >
-            Overview
-          </div>
-          <div
-            v-for="result in activeSqlTab.resultTabs"
-            :key="result.id"
-            role="tab"
-            tabindex="0"
-            :aria-selected="activeSqlTab.activeResultTabId === result.id"
-            :title="result.title"
-            :class="{ active: activeSqlTab.activeResultTabId === result.id }"
-            @click="emit('updateSqlResultActiveTab', result.id)"
-            @keydown.enter.prevent="emit('updateSqlResultActiveTab', result.id)"
-            @keydown.space.prevent="emit('updateSqlResultActiveTab', result.id)"
-          >
-            <span
-              class="db-result-dot"
-              :class="result.status"
-            />
-            <span class="db-result-tab-title">
-              {{ result.title }}
-            </span>
-            <button
-              type="button"
-              class="db-result-tab-close"
-              aria-label="Close result tab"
-              @click.stop="emit('closeResultTab', result.id)"
-            >
-              <X />
-            </button>
-          </div>
-        </div>
 
-        <div
-          v-if="activeSqlTab.activeResultTabId === 'overview'"
-          class="db-sql-overview"
-        >
-          <p v-if="!activeSqlTab.history.length">Run SQL to create a result tab.</p>
-          <table v-else>
-            <thead>
-              <tr>
-                <th>SQL</th>
-                <th>Message</th>
-                <th>Time</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr
-                v-for="history in activeSqlTab.history"
-                :key="history.id"
-                :class="{ closed: isSqlHistoryClosed(history), error: history.status === 'error' }"
-                :data-execution-id="history.id"
-                :title="history.createdAt"
-                @click="emit('openSqlHistoryResult', history)"
-              >
-                <td>
-                  <span
-                    class="db-result-dot"
-                    :class="history.status"
-                  />
-                  <code>{{ history.sql }}</code>
-                </td>
-                <td>
-                  <strong :class="history.status">{{ history.message }}</strong>
-                </td>
-                <td>{{ history.durationMs }}ms</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        <template v-else-if="activeSqlResult">
-          <div
-            v-if="activeSqlResult.status === 'running'"
-            class="db-result-running"
-          >
-            <span
-              class="db-result-dot running"
-              aria-hidden="true"
-            />
-            <div>
-              <strong>Running query</strong>
-              <small>{{ activeSqlResult.title }}</small>
-              <p>{{ activeSqlResult.sql }}</p>
-            </div>
-          </div>
-          <div
-            v-else-if="activeSqlResult.status === 'error'"
-            class="db-result-error"
-          >
-            <span class="db-result-error-text">{{ activeSqlResult.error }}</span>
-            <span
-              v-if="sqlDiagnose.success && sqlDiagnose.resultId === activeSqlResult.id"
-              class="db-result-diagnose-success"
-            >
-              Diagnosed and replaced editor SQL
-            </span>
-            <span
-              v-if="sqlDiagnose.error && sqlDiagnose.resultId === activeSqlResult.id"
-              class="db-result-diagnose-error"
-            >
-              {{ sqlDiagnose.error }}
-            </span>
-            <button
-              type="button"
-              class="db-result-diagnose-btn"
-              :class="{ loading: sqlDiagnose.running && sqlDiagnose.resultId === activeSqlResult.id }"
-              :disabled="sqlDiagnose.running && sqlDiagnose.resultId === activeSqlResult.id"
-              @click="emit('diagnoseSqlError', activeSqlResult)"
-            >
-              <span
-                v-if="sqlDiagnose.running && sqlDiagnose.resultId === activeSqlResult.id"
-                class="db-result-diagnose-spinner"
-                aria-hidden="true"
-              />
-              <span v-else>Diagnose</span>
-            </button>
-          </div>
-          <template v-else>
-            <DataGridToolbar
-              :page="activeSqlResultViewState.page"
-              :page-size="activeSqlResultViewState.pageSize"
-              :total="filteredSqlRows.length"
-              :hide-refresh="true"
-              :can-export="activeSqlResult.status === 'ok' && pagedSqlRows.length > 0"
-              export-title="Export current SQL result page"
-              :can-chart="activeSqlResult.status === 'ok' && pagedSqlRows.length > 0"
-              chart-title="Chart current SQL result page"
-              :can-comment="activeSqlResult.status === 'ok'"
-              comment-title="Comment current SQL result"
-              @goto-page="emit('updateSqlResultPage', $event)"
-              @goto-last-page="emit('gotoLastSqlResultPage')"
-              @change-page-size="emit('updateSqlResultPageSize', $event)"
-              @export="emit('exportActiveSqlResultPage')"
-              @chart="emit('openActiveSqlResultChart')"
-              @comment="emit('openActiveSqlResultComment')"
-            />
-            <ResultGrid
-              class="db-sql-result-grid"
-              :columns="activeSqlResult.columns"
-              :rows="pagedSqlRows"
-              :source-rows="activeSqlResult.rows"
-              :sort="activeSqlResultViewState.sort"
-              :filters="activeSqlResultViewState.filters"
-              :start-row-index="(activeSqlResultViewState.page - 1) * activeSqlResultViewState.pageSize + 1"
-              @sort="emit('cycleSqlSort', $event)"
-              @filter="(column, filter) => emit('applySqlFilter', column, filter)"
-            />
-          </template>
-          <DataStatusBar
-            :status="activeSqlResult.status"
-            :error="activeSqlResult.error || undefined"
-            :message="activeSqlResult.message"
-            :duration-ms="activeSqlResult.durationMs"
-            :row-count="activeSqlResult.rowCount"
-          />
-        </template>
-      </div>
+      <DatabaseSqlResultsPane
+        :active-sql-tab="activeSqlTab"
+        :active-sql-result="activeSqlResult"
+        :active-sql-result-view-state="activeSqlResultViewState"
+        :filtered-sql-rows="filteredSqlRows"
+        :paged-sql-rows="pagedSqlRows"
+        :sql-diagnose="sqlDiagnose"
+        :is-sql-history-closed="isSqlHistoryClosed"
+        @update-sql-result-active-tab="emit('updateSqlResultActiveTab', $event)"
+        @close-result-tab="emit('closeResultTab', $event)"
+        @open-sql-history-result="emit('openSqlHistoryResult', $event)"
+        @diagnose-sql-error="emit('diagnoseSqlError', $event)"
+        @update-sql-result-page="emit('updateSqlResultPage', $event)"
+        @goto-last-sql-result-page="emit('gotoLastSqlResultPage')"
+        @update-sql-result-page-size="emit('updateSqlResultPageSize', $event)"
+        @export-active-sql-result-page="emit('exportActiveSqlResultPage')"
+        @open-active-sql-result-chart="emit('openActiveSqlResultChart')"
+        @open-active-sql-result-comment="emit('openActiveSqlResultComment')"
+        @cycle-sql-sort="emit('cycleSqlSort', $event)"
+        @apply-sql-filter="(column, filter) => emit('applySqlFilter', column, filter)"
+      />
     </div>
   </section>
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, ref, type StyleValue } from 'vue'
-import {
-  AlignLeft,
-  BrainCircuit,
-  CornerDownRight,
-  FileSearch,
-  Languages,
-  Lightbulb,
-  Play,
-  Save,
-  SaveAll,
-  Search,
-  TextCursorInput,
-  WandSparkles,
-  X
-} from 'lucide-vue-next'
-import DataGridToolbar from '@/components/database/DataGridToolbar.vue'
-import DataStatusBar from '@/components/database/DataStatusBar.vue'
-import DatabaseSqlEditor, { type DatabaseSqlEditorMetrics } from '@/components/database/DatabaseSqlEditor.vue'
-import ResultGrid from '@/components/database/ResultGrid.vue'
+import { computed, ref, type StyleValue } from 'vue'
+import DatabaseSqlEditorPane from '@/components/database/DatabaseSqlEditorPane.vue'
+import DatabaseSqlResultsPane from '@/components/database/DatabaseSqlResultsPane.vue'
+import DatabaseSqlToolbar from '@/components/database/DatabaseSqlToolbar.vue'
+import type { DatabaseSqlEditorMetrics } from '@/components/database/DatabaseSqlEditor.vue'
 import type {
   DatabaseSqlHistoryRules,
   DatabaseSqlWorkspaceApi,
@@ -602,31 +195,22 @@ const emit = defineEmits<{
   applySqlFilter: [column: string, filter: DbFilter | null]
 }>()
 
-const sqlEditorRef = ref<DatabaseSqlWorkspaceApi | null>(null)
-const sqlFindInputRef = ref<HTMLInputElement | null>(null)
-const sqlReplaceInputRef = ref<HTMLInputElement | null>(null)
+const sqlEditorPaneRef = ref<DatabaseSqlWorkspaceApi | null>(null)
 
-const activeSqlText = computed({
-  get() {
-    return props.activeSqlTab.sql
-  },
-  set(value: string) {
-    emit('updateActiveSql', value)
-  }
+const sqlFindQueryProxy = computed({
+  get: () => props.sqlFindQuery,
+  set: (value: string) => emit('update:sqlFindQuery', value)
 })
 
-function focusSqlEditor(event?: MouseEvent) {
-  if (event?.target instanceof HTMLTextAreaElement || event?.target instanceof HTMLInputElement || event?.target instanceof HTMLButtonElement) return
-  sqlEditorRef.value?.focus()
-}
+const sqlFindReplaceProxy = computed({
+  get: () => props.sqlFindReplace,
+  set: (value: string) => emit('update:sqlFindReplace', value)
+})
 
-function focusSqlFindInput(target: 'query' | 'replace') {
-  void nextTick(() => {
-    const input = target === 'replace' ? sqlReplaceInputRef.value : sqlFindInputRef.value
-    input?.focus()
-    input?.select()
-  })
-}
+const sqlFindCaseSensitiveProxy = computed({
+  get: () => props.sqlFindCaseSensitive,
+  set: (value: boolean) => emit('update:sqlFindCaseSensitive', value)
+})
 
 function fallbackRange(): TextRange {
   const length = props.activeSqlTab.sql.length
@@ -634,55 +218,59 @@ function fallbackRange(): TextRange {
 }
 
 function getText() {
-  return sqlEditorRef.value?.getText() ?? props.activeSqlTab.sql
+  return sqlEditorPaneRef.value?.getText() ?? props.activeSqlTab.sql
 }
 
 function getSelectedText() {
-  return sqlEditorRef.value?.getSelectedText() ?? ''
+  return sqlEditorPaneRef.value?.getSelectedText() ?? ''
 }
 
 function getTextUntilCursor() {
-  return sqlEditorRef.value?.getTextUntilCursor() ?? getText().slice(0, getCursorOffset())
+  return sqlEditorPaneRef.value?.getTextUntilCursor() ?? getText().slice(0, getCursorOffset())
 }
 
 function getCurrentStatement() {
-  return sqlEditorRef.value?.getCurrentStatement() ?? ''
+  return sqlEditorPaneRef.value?.getCurrentStatement() ?? ''
 }
 
 function getCurrentStatementRange() {
-  return sqlEditorRef.value?.getCurrentStatementRange() ?? fallbackRange()
+  return sqlEditorPaneRef.value?.getCurrentStatementRange() ?? fallbackRange()
 }
 
 function getCursorOffset() {
-  return sqlEditorRef.value?.getCursorOffset() ?? props.activeSqlTab.sql.length
+  return sqlEditorPaneRef.value?.getCursorOffset() ?? props.activeSqlTab.sql.length
 }
 
 function getSelectionRange() {
-  return sqlEditorRef.value?.getSelectionRange() ?? fallbackRange()
+  return sqlEditorPaneRef.value?.getSelectionRange() ?? fallbackRange()
 }
 
 function setSelectionRange(start: number, end?: number) {
-  sqlEditorRef.value?.setSelectionRange(start, end)
+  sqlEditorPaneRef.value?.setSelectionRange(start, end)
 }
 
 function replaceAll(next: string) {
-  sqlEditorRef.value?.replaceAll(next)
+  sqlEditorPaneRef.value?.replaceAll(next)
 }
 
 function replaceSelection(next: string) {
-  sqlEditorRef.value?.replaceSelection(next)
+  sqlEditorPaneRef.value?.replaceSelection(next)
 }
 
 function replaceRange(next: string, range: TextRange) {
-  sqlEditorRef.value?.replaceRange(next, range)
+  sqlEditorPaneRef.value?.replaceRange(next, range)
 }
 
 function insertAtCursor(next: string) {
-  sqlEditorRef.value?.insertAtCursor(next)
+  sqlEditorPaneRef.value?.insertAtCursor(next)
 }
 
 function focus() {
-  sqlEditorRef.value?.focus()
+  sqlEditorPaneRef.value?.focus()
+}
+
+function focusSqlFindInput(target: 'query' | 'replace') {
+  sqlEditorPaneRef.value?.focusSqlFindInput(target)
 }
 
 defineExpose<DatabaseSqlWorkspaceApi>({
