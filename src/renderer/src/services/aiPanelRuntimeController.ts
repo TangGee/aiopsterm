@@ -77,23 +77,20 @@ import {
 } from '@/services/aiPanelEditableSelectionRuntime'
 import {
   allVisibleAiPanelHostsSelected,
-  clearAiPanelHostContexts,
   cloneAiPanelCommandOptions,
   cloneAiPanelContextCategories,
   filteredAiPanelCommands,
   filteredAiPanelContextOptions,
   filteredAiPanelOpenedHosts,
-  planAiPanelCommandApply,
-  planAiPanelContextApply,
   selectedAiPanelCommand,
   selectedAiPanelCommandRef,
   selectedAiPanelContextCategory,
-  selectedAiPanelVisibleHostContexts,
   sortedAiPanelDocsContextOptions,
   visibleAiPanelContextCategories,
   visibleAiPanelHostContextOptions,
   type AiPanelContextCategoryView
 } from '@/services/aiPanelPopupRuntime'
+import { createAiPanelContextCommandRuntime } from '@/services/aiPanelContextCommandRuntime'
 import {
   createAiPanelPopupInteractionRuntime,
   createEmptyAiPanelPopupInteractionState
@@ -1100,122 +1097,44 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
   const closeCommandPopup = (options: { restoreFocus?: boolean } = {}) => aiPanelPopupInteractionRuntime.closeCommandPopup(options)
   const openContextCategory = (category: AiContextKind) => aiPanelPopupInteractionRuntime.openContextCategory(category)
 
-  const isContextSelected = (context: AiContextOption) => workspace.selectedContexts.some((item) => item.id === context.id)
+  const aiPanelContextCommandRuntime = createAiPanelContextCommandRuntime({
+    maxHostContexts,
+    contextTarget: () => contextTarget.value,
+    commandTarget: () => commandTarget.value,
+    editingMessageId: () => editingMessageId.value,
+    draft: () => draft.value,
+    mainContexts: () => workspace.selectedContexts,
+    editHostContexts: () => editHostContexts.value,
+    visibleHostContexts: () => visibleHostContextOptions.value,
+    editCommandTarget: () => editEditableRef.value || (document.querySelector('.user-message-edit-container .message-editable') as HTMLElement | null),
+    setMainContexts: (contexts) => {
+      workspace.selectedContexts = contexts
+    },
+    setEditHostContexts: (contexts) => {
+      editHostContexts.value = contexts
+    },
+    enterDocsDir,
+    closeContextPopup,
+    closeCommandPopup,
+    removeMainTriggerToken: (token) => removeTokenFromEditableCursor(editableRef.value, savedRange, token, handleEditableInput),
+    removeEditTriggerToken: (token) => removeTokenFromEditableCursor(editEditableRef.value, editSavedRange, token, handleEditEditableInput),
+    insertContextAtEditCursor,
+    insertCommandAtEditCursor: (target, part) => insertChipIntoEditableCursor(target, part, handleEditEditableInput),
+    restoreEditSelection,
+    selectCommandPreset: (id, commandRef) => workspace.selectCommandPreset(id, commandRef),
+    setDraft,
+    renderEditableFromState,
+    moveMainCaretToEnd: moveEditableCaretToEnd,
+    requestFrame: (callback) => window.requestAnimationFrame(callback)
+  })
 
-  const buildSelectedHostContextsFromVisible = (currentHosts: AiContextOption[]) =>
-    selectedAiPanelVisibleHostContexts(currentHosts, visibleHostContextOptions.value, maxHostContexts)
-
-  const selectAllVisibleHostContexts = () => {
-    const nextHosts = buildSelectedHostContextsFromVisible(hostContextsForPopup.value)
-    if (contextTarget.value === 'edit') {
-      editHostContexts.value = nextHosts
-      return
-    }
-    workspace.selectedContexts = [...workspace.selectedContexts.filter((context) => context.kind !== 'hosts'), ...nextHosts]
-    renderEditableFromState()
-    requestAnimationFrame(moveEditableCaretToEnd)
-  }
-
-  const clearHostContexts = () => {
-    if (contextTarget.value === 'edit') {
-      editHostContexts.value = []
-      return
-    }
-    workspace.selectedContexts = clearAiPanelHostContexts(workspace.selectedContexts)
-    renderEditableFromState()
-    requestAnimationFrame(moveEditableCaretToEnd)
-  }
-
-  const isEditHostContextSelected = (context: AiContextOption) =>
-    context.kind === 'hosts' && editHostContexts.value.some((item) => item.id === context.id)
-
-  const isContextSelectedForPopup = (context: AiContextOption) =>
-    contextTarget.value === 'edit' ? isEditHostContextSelected(context) : isContextSelected(context)
-
-  const applyHostContextToEdit = (context: AiContextOption) => {
-    removeTokenFromEditableCursor(editEditableRef.value, editSavedRange, '@', handleEditEditableInput)
-    const plan = planAiPanelContextApply({
-      target: 'edit',
-      context,
-      mainContexts: workspace.selectedContexts,
-      editHostContexts: editHostContexts.value,
-      maxHostContexts
-    })
-    if (plan.kind === 'edit-host') editHostContexts.value = plan.nextHosts
-    closeContextPopup({ restoreFocus: true })
-  }
-
-  const applyContext = (context: AiContextOption) => {
-    const plan = planAiPanelContextApply({
-      target: contextTarget.value,
-      context,
-      mainContexts: workspace.selectedContexts,
-      editHostContexts: editHostContexts.value,
-      maxHostContexts
-    })
-    if (plan.kind === 'enter-docs-dir') {
-      enterDocsDir(context)
-      return
-    }
-
-    if (plan.kind === 'edit-host') {
-      removeTokenFromEditableCursor(editEditableRef.value, editSavedRange, '@', handleEditEditableInput)
-      editHostContexts.value = plan.nextHosts
-      closeContextPopup({ restoreFocus: true })
-      return
-    }
-    if (plan.kind === 'edit-insert') {
-      insertContextAtEditCursor(plan.context)
-      closeContextPopup({ restoreFocus: true })
-      return
-    }
-
-    if (plan.kind === 'main-host') {
-      removeTokenFromEditableCursor(editableRef.value, savedRange, '@', handleEditableInput)
-      workspace.selectedContexts = plan.nextContexts
-      renderEditableFromState()
-    } else if (plan.kind === 'main-insert') {
-      removeTokenFromEditableCursor(editableRef.value, savedRange, '@', handleEditableInput)
-      workspace.selectedContexts = plan.nextContexts
-      closeContextPopup({ restoreFocus: true })
-      renderEditableFromState()
-    }
-    requestAnimationFrame(moveEditableCaretToEnd)
-  }
-
-  const applyCommand = (preset: AiCommandOption) => {
-    const editCommandTarget = editEditableRef.value || (document.querySelector('.user-message-edit-container .message-editable') as HTMLElement | null)
-    const plan = planAiPanelCommandApply({
-      target: commandTarget.value,
-      editingMessageId: editingMessageId.value,
-      hasEditTarget: Boolean(editCommandTarget),
-      command: preset,
-      draft: draft.value
-    })
-    if (plan.kind === 'edit-command') {
-      restoreEditSelection()
-      insertChipIntoEditableCursor(
-        editCommandTarget,
-        {
-          type: 'chip',
-          chipType: 'command',
-          ref: {
-            command: plan.command.command,
-            label: plan.command.label,
-            path: plan.command.path
-          }
-        },
-        handleEditEditableInput
-      )
-      closeCommandPopup({ restoreFocus: true })
-      return
-    }
-
-    workspace.selectCommandPreset(plan.id, plan.commandRef)
-    closeCommandPopup()
-    setDraft(plan.nextDraft)
-    requestAnimationFrame(moveEditableCaretToEnd)
-  }
+  const selectAllVisibleHostContexts = aiPanelContextCommandRuntime.selectAllVisibleHostContexts
+  const clearHostContexts = aiPanelContextCommandRuntime.clearHostContexts
+  const isEditHostContextSelected = aiPanelContextCommandRuntime.isEditHostContextSelected
+  const isContextSelectedForPopup = aiPanelContextCommandRuntime.isContextSelectedForPopup
+  const applyHostContextToEdit = aiPanelContextCommandRuntime.applyHostContextToEdit
+  const applyContext = aiPanelContextCommandRuntime.applyContext
+  const applyCommand = aiPanelContextCommandRuntime.applyCommand
 
   const popupEditableKeydownInput = () => ({
     displayedOpenedHosts: displayedOpenedHosts.value,
