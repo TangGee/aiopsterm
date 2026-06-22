@@ -138,12 +138,14 @@ import {
 } from '@/services/aiPanelConversationRuntime'
 import { createAiPanelChatSearchRuntime, createEmptyAiPanelChatSearchRuntimeState } from '@/services/aiPanelChatSearchRuntime'
 import { createAiPanelHistoryRuntime, createEmptyAiPanelHistoryRuntimeState } from '@/services/aiPanelHistoryRuntime'
+import { clipboardHasImageItems } from '@/services/aiPanelMediaRuntime'
 import {
-  aiPanelDropEffect,
-  canAcceptAiPanelDrop as canAcceptAiPanelRuntimeDrop,
-  clipboardHasImageItems,
-  planAiPanelDrop
-} from '@/services/aiPanelMediaRuntime'
+  aiPanelContextUsageColor,
+  aiPanelContextUsageDisplay,
+  aiPanelContextUsageTooltip,
+  aiPanelContextUsageTrackColor,
+  createAiPanelSurfaceRuntime
+} from '@/services/aiPanelSurfaceRuntime'
 import { createAiPanelAttachmentRuntime } from '@/services/aiPanelAttachmentRuntime'
 import {
   cancelAiPanelMessageEdit,
@@ -249,7 +251,6 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
   const commandAuditTextareaRef = ref<HTMLTextAreaElement | null>(null)
   const commandAuditDialog = toRef(commandActionRuntimeState, 'commandAuditDialog')
   let classicChatDataLoaded = false
-  let inputPlaceholderNoticeTimer: number | undefined
   let chatScrollFrame: number | undefined
   const historyPageSize = 20
   const historyFavoriteLabel = computed(() => t('ai.historyFavoriteGroup'))
@@ -626,27 +627,10 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     return selectedAiPanelCommandRef(selectedCommand.value, workspace.selectedCommandId, workspace.selectedCommandRef)
   })
 
-  const contextUsage = computed(() => {
-    return workspace.aiContextUsage || { used: 0, contextWindow: 0, percent: 0 }
-  })
-
-  const contextUsageColor = computed(() => {
-    const percent = contextUsage.value.percent
-    if (percent >= 90) return '#ef4444'
-    if (percent >= 70) return '#f59e0b'
-    return '#3b82f6'
-  })
-
-  const contextUsageTrackColor = computed(() => 'rgba(128, 128, 128, 0.2)')
-
-  const contextUsageTooltip = computed(() => {
-    const { used, contextWindow, percent } = contextUsage.value
-    const formatK = (value: number) => {
-      if (value >= 1000) return `${(value / 1000).toFixed(1)}K`
-      return `${value}`
-    }
-    return `${percent}% - ${formatK(used)} / ${formatK(contextWindow)} context used`
-  })
+  const contextUsage = computed(() => aiPanelContextUsageDisplay(workspace.aiContextUsage))
+  const contextUsageColor = computed(() => aiPanelContextUsageColor(contextUsage.value))
+  const contextUsageTrackColor = computed(() => aiPanelContextUsageTrackColor())
+  const contextUsageTooltip = computed(() => aiPanelContextUsageTooltip(contextUsage.value))
 
   const commandIconMarkup =
     '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m16 18 6-6-6-6"></path><path d="m8 6-6 6 6 6"></path></svg>'
@@ -919,20 +903,29 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     savedRange.value = moveAiPanelEditableCaretToEnd(editableRef.value) || savedRange.value
   }
 
-  const showInputPlaceholderNotice = (message: string) => {
-    inputPlaceholderNotice.value = message
-    if (inputPlaceholderNoticeTimer) window.clearTimeout(inputPlaceholderNoticeTimer)
-    inputPlaceholderNoticeTimer = window.setTimeout(() => {
-      inputPlaceholderNotice.value = ''
-      inputPlaceholderNoticeTimer = undefined
-    }, 2400)
-  }
+  const aiPanelSurfaceRuntime = createAiPanelSurfaceRuntime({
+    state: {
+      dropActive,
+      inputPlaceholderNotice
+    },
+    mode: () => aiPanelMode.value,
+    selectedConversationId: () => workspace.selectedConversationId,
+    panels: () => workspace.panels,
+    createConversation: () => workspace.createConversation(),
+    addKnowledgeFilesToChat: (relPaths) => workspace.addKnowledgeFilesToChat(relPaths),
+    bindTerminalPanelToCodex,
+    bindHostContextToCodex,
+    draftText: () => draft.value,
+    setDraft,
+    closePopups: () => closePopups(),
+    moveCaretToEnd: moveEditableCaretToEnd,
+    requestFrame: (callback) => window.requestAnimationFrame(callback),
+    setNoticeTimer: (callback, delay) => window.setTimeout(callback, delay),
+    clearNoticeTimer: (timer) => window.clearTimeout(timer)
+  })
 
-  const ensureAttachmentConversationId = async () => {
-    if (workspace.selectedConversationId.trim()) return workspace.selectedConversationId.trim()
-    const created = await workspace.createConversation()
-    return created?.id || ''
-  }
+  const showInputPlaceholderNotice = aiPanelSurfaceRuntime.showInputPlaceholderNotice
+  const ensureAttachmentConversationId = aiPanelSurfaceRuntime.ensureAttachmentConversationId
 
   const aiPanelAttachmentRuntime = createAiPanelAttachmentRuntime({
     streaming: () => streaming.value,
@@ -1013,55 +1006,10 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
 
   const { voiceRecording, voiceTranscribing, voiceButtonTitle, toggleVoiceInput } = aiPanelVoiceRuntime
 
-  const canAcceptAiPanelDrop = (event: DragEvent) => canAcceptAiPanelRuntimeDrop(aiPanelMode.value, event.dataTransfer)
-
-  const handleDragEnter = (event: DragEvent) => {
-    if (canAcceptAiPanelDrop(event)) {
-      dropActive.value = true
-    }
-  }
-
-  const handleDragOver = (event: DragEvent) => {
-    if (!canAcceptAiPanelDrop(event)) return
-    dropActive.value = true
-    if (event.dataTransfer) event.dataTransfer.dropEffect = aiPanelDropEffect(aiPanelMode.value)
-  }
-
-  const handleClassicDrop = async (event: DragEvent) => {
-    const plan = planAiPanelDrop('classic', event.dataTransfer)
-    if (plan.kind !== 'classic-knowledge') return
-    await workspace.addKnowledgeFilesToChat([plan.relPath])
-    if (!draft.value.trim()) setDraft(plan.draftText)
-    requestAnimationFrame(moveEditableCaretToEnd)
-    closePopups()
-  }
-
-  const handleCodexDrop = async (event: DragEvent) => {
-    const plan = planAiPanelDrop('codex', event.dataTransfer)
-    if (plan.kind === 'codex-terminal') {
-      const panel = workspace.panels.find((item) => item.id === plan.panelId)
-      if (panel?.sessionId) await bindTerminalPanelToCodex(panel, 'drop-terminal-tab')
-      return
-    }
-    if (plan.kind === 'codex-host') await bindHostContextToCodex(plan.context)
-  }
-
-  const handleDragLeave = (event: DragEvent) => {
-    const target = event.currentTarget as HTMLElement | null
-    const related = event.relatedTarget as Node | null
-    if (!target || !related || !target.contains(related)) {
-      dropActive.value = false
-    }
-  }
-
-  const handleDrop = async (event: DragEvent) => {
-    dropActive.value = false
-    if (aiPanelMode.value === 'codex') {
-      await handleCodexDrop(event)
-      return
-    }
-    await handleClassicDrop(event)
-  }
+  const handleDragEnter = aiPanelSurfaceRuntime.handleDragEnter
+  const handleDragOver = aiPanelSurfaceRuntime.handleDragOver
+  const handleDragLeave = aiPanelSurfaceRuntime.handleDragLeave
+  const handleDrop = aiPanelSurfaceRuntime.handleDrop
 
   const closePopups = (options: { restoreCommandFocus?: boolean; restoreContextFocus?: boolean } = {}) => {
     aiPanelPopupInteractionRuntime.closePopups(options)
@@ -1432,7 +1380,7 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     if (chatScrollFrame !== undefined) window.cancelAnimationFrame(chatScrollFrame)
     aiPanelChatSearchRuntime.dispose()
     aiPanelHistoryRuntime.clearNoticeTimer()
-    if (inputPlaceholderNoticeTimer) window.clearTimeout(inputPlaceholderNoticeTimer)
+    aiPanelSurfaceRuntime.dispose()
     aiPanelVoiceRuntime.dispose()
   })
 
