@@ -1,4 +1,4 @@
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, type Component } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, watch, type Component } from 'vue'
 import 'highlight.js/styles/atom-one-dark.css'
 import '@xterm/xterm/css/xterm.css'
 import {
@@ -69,17 +69,9 @@ import {
 import { createAiPanelActionOrchestrationRuntime } from '@/services/aiPanelActionOrchestrationRuntime'
 import { createAiPanelChatNavigationRuntime } from '@/services/aiPanelChatNavigationRuntime'
 import { clipboardHasImageItems } from '@/services/aiPanelMediaRuntime'
-import {
-  aiPanelContextUsageColor,
-  aiPanelContextUsageDisplay,
-  aiPanelContextUsageTooltip,
-  aiPanelContextUsageTrackColor,
-  createAiPanelSurfaceRuntime
-} from '@/services/aiPanelSurfaceRuntime'
-import { createAiPanelAttachmentRuntime } from '@/services/aiPanelAttachmentRuntime'
+import { createAiPanelInputMediaShellRuntime } from '@/services/aiPanelInputMediaShellRuntime'
 import { createAiPanelMessageEditRuntime } from '@/services/aiPanelMessageEditRuntime'
 import { createAiPanelComposerDomRuntime } from '@/services/aiPanelComposerDomRuntime'
-import { createAiPanelVoiceRuntime } from '@/services/aiPanelVoiceRuntime'
 import { aiChatClient } from '@/services/aiChatClient'
 import { copyTextToClipboard } from '@/services/clipboardRuntime'
 import { codexTargetContextFromPanel } from '@/services/aiPanelCodexRuntime'
@@ -92,10 +84,7 @@ import {
 } from '@/services/aiPanelLifecycleRuntime'
 import { useI18n } from '@/i18n'
 import type {
-  AiChipContentPart,
-  AiDocChipContentPart,
-  AiImageContentPart,
-  TerminalPanel
+  AiChipContentPart
 } from '@/stores/workspace'
 import type { AiContextKind, AiContextOption } from '@shared/contracts/aiChat'
 
@@ -119,8 +108,6 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     skills: Bot,
     chats: Search
   }
-  const dropActive = ref(false)
-  const inputPlaceholderNotice = ref('')
   let classicChatDataLoaded = false
   let getEditHostContextsForPopup = (): AiContextOption[] => []
   const maxHostContexts = 5
@@ -421,11 +408,6 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     toggleMessageFavorite
   } = aiPanelActionOrchestrationRuntime
 
-  const contextUsage = computed(() => aiPanelContextUsageDisplay(workspace.aiContextUsage))
-  const contextUsageColor = computed(() => aiPanelContextUsageColor(contextUsage.value))
-  const contextUsageTrackColor = computed(() => aiPanelContextUsageTrackColor())
-  const contextUsageTooltip = computed(() => aiPanelContextUsageTooltip(contextUsage.value))
-
   const commandIconMarkup =
     '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m16 18 6-6-6-6"></path><path d="m8 6-6 6 6 6"></path></svg>'
 
@@ -562,12 +544,9 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
   } = aiPanelMessageEditRuntime
   getEditHostContextsForPopup = () => editHostContexts.value
 
-  const aiPanelSurfaceRuntime = createAiPanelSurfaceRuntime({
-    state: {
-      dropActive,
-      inputPlaceholderNotice
-    },
+  const aiPanelInputMediaShellRuntime = createAiPanelInputMediaShellRuntime({
     mode: () => aiPanelMode.value,
+    contextUsageSnapshot: () => workspace.aiContextUsage,
     selectedConversationId: () => workspace.selectedConversationId,
     panels: () => workspace.panels,
     createConversation: () => workspace.createConversation(),
@@ -578,52 +557,45 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     setDraft,
     closePopups: () => closePopups(),
     moveCaretToEnd: moveEditableCaretToEnd,
+    streaming: () => streaming.value,
+    editingMessageId: () => editingMessageId.value,
+    insertImageAtMainCursor: insertImageAtEditableCursor,
+    insertImageAtEditCursor,
+    insertFileChipAtMainCursor,
+    insertFileChipAtEditCursor,
+    restoreMainSelection: () => restoreEditableSelection(),
+    insertVoiceTranscription: appendVoiceTranscriptionToInput,
+    afterVoiceInsert: () => nextTick(),
+    sendAfterVoiceTranscription: () => handleSend(),
     requestFrame: (callback) => window.requestAnimationFrame(callback),
     setNoticeTimer: (callback, delay) => window.setTimeout(callback, delay),
     clearNoticeTimer: (timer) => window.clearTimeout(timer)
   })
 
-  const showInputPlaceholderNotice = aiPanelSurfaceRuntime.showInputPlaceholderNotice
-  const ensureAttachmentConversationId = aiPanelSurfaceRuntime.ensureAttachmentConversationId
-
-  const aiPanelAttachmentRuntime = createAiPanelAttachmentRuntime({
-    streaming: () => streaming.value,
-    editingMessageId: () => editingMessageId.value,
-    ensureConversationId: ensureAttachmentConversationId,
-    insertImageAtMainCursor: insertImageAtEditableCursor,
-    insertImageAtEditCursor,
-    insertFileChipAtMainCursor,
-    insertFileChipAtEditCursor,
-    notify: showInputPlaceholderNotice
-  })
-
   const {
+    contextUsage,
+    contextUsageColor,
+    contextUsageTooltip,
+    contextUsageTrackColor,
+    dropActive,
+    inputPlaceholderNotice,
+    showInputPlaceholderNotice,
     insertImageFilePaths,
     insertPastedImage,
     insertPastedImageIntoEdit,
     openImagePicker,
-    handleFileUpload
-  } = aiPanelAttachmentRuntime
+    handleFileUpload,
+    voiceRecording,
+    voiceTranscribing,
+    voiceButtonTitle,
+    toggleVoiceInput,
+    handleDragEnter,
+    handleDragOver,
+    handleDragLeave,
+    handleDrop
+  } = aiPanelInputMediaShellRuntime
   insertPastedImageHandler = insertPastedImage
   insertPastedImageIntoEditHandler = insertPastedImageIntoEdit
-
-  const aiPanelVoiceRuntime = createAiPanelVoiceRuntime({
-    streaming: () => streaming.value,
-    draft: () => draft.value,
-    closePopups: () => closePopups(),
-    restoreSelection: () => restoreEditableSelection(),
-    insertTranscription: appendVoiceTranscriptionToInput,
-    afterInsert: () => nextTick(),
-    sendAfterTranscription: () => handleSend(),
-    notify: showInputPlaceholderNotice
-  })
-
-  const { voiceRecording, voiceTranscribing, voiceButtonTitle, toggleVoiceInput } = aiPanelVoiceRuntime
-
-  const handleDragEnter = aiPanelSurfaceRuntime.handleDragEnter
-  const handleDragOver = aiPanelSurfaceRuntime.handleDragOver
-  const handleDragLeave = aiPanelSurfaceRuntime.handleDragLeave
-  const handleDrop = aiPanelSurfaceRuntime.handleDrop
 
   function focusInputForTarget(target: 'main' | 'edit') {
     requestAnimationFrame(() => {
@@ -787,8 +759,8 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     disposeCodexRuntime: () => aiPanelCodexRuntime.dispose(),
     disposeChatSearchRuntime,
     clearHistoryNoticeTimer,
-    disposeSurfaceRuntime: () => aiPanelSurfaceRuntime.dispose(),
-    disposeVoiceRuntime: () => aiPanelVoiceRuntime.dispose()
+    disposeSurfaceRuntime: () => aiPanelInputMediaShellRuntime.disposeSurfaceRuntime(),
+    disposeVoiceRuntime: () => aiPanelInputMediaShellRuntime.disposeVoiceRuntime()
   }).start()
 
   return {
