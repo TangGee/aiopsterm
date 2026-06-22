@@ -1,4 +1,4 @@
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, toRef, watch, type Component } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, type Component } from 'vue'
 import 'highlight.js/styles/atom-one-dark.css'
 import '@xterm/xterm/css/xterm.css'
 import {
@@ -50,20 +50,10 @@ import {
   aiPanelChipLabel,
   type AiPanelEditableRenderOptions
 } from '@/services/aiPanelEditableRuntime'
-import {
-  createAiPanelPopupViewRuntime
-} from '@/services/aiPanelPopupRuntime'
 import { createAiPanelContextCommandRuntime } from '@/services/aiPanelContextCommandRuntime'
-import {
-  createAiPanelPopupInteractionRuntime,
-  createEmptyAiPanelPopupInteractionState
-} from '@/services/aiPanelPopupInteractionRuntime'
-import {
-  createAiPanelModelRuntime,
-  createEmptyAiPanelModelRuntimeState,
-  displayAiPanelModelName,
-  isThinkingAiPanelModelName
-} from '@/services/aiPanelModelRuntime'
+import { createAiPanelPopupInteractionRuntime } from '@/services/aiPanelPopupInteractionRuntime'
+import { createAiPanelPopupKeyboardRuntime } from '@/services/aiPanelPopupKeyboardRuntime'
+import { createAiPanelModelPopupShellRuntime } from '@/services/aiPanelModelPopupShellRuntime'
 import {
   commandHostForMessage,
   commandHostTooltipForMessage,
@@ -131,31 +121,109 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     skills: Bot,
     chats: Search
   }
-  const modelSearchInputRef = ref<HTMLInputElement | null>(null)
   const contextSearchInputRef = ref<HTMLInputElement | null>(null)
   const commandSearchInputRef = ref<HTMLInputElement | null>(null)
-  const popupInteractionState = reactive(createEmptyAiPanelPopupInteractionState())
-  const contextPopupOpen = toRef(popupInteractionState, 'contextPopupOpen')
-  const commandPopupOpen = toRef(popupInteractionState, 'commandPopupOpen')
-  const contextTarget = toRef(popupInteractionState, 'contextTarget')
-  const commandTarget = toRef(popupInteractionState, 'commandTarget')
-  const contextLevel = toRef(popupInteractionState, 'contextLevel')
-  const contextQuery = toRef(popupInteractionState, 'contextQuery')
-  const commandQuery = toRef(popupInteractionState, 'commandQuery')
-  const contextKeyboardIndex = toRef(popupInteractionState, 'contextKeyboardIndex')
-  const commandKeyboardIndex = toRef(popupInteractionState, 'commandKeyboardIndex')
-  const docsCurrentRelDir = toRef(popupInteractionState, 'docsCurrentRelDir')
-  const docsDirStack = toRef(popupInteractionState, 'docsDirStack')
-  const modelRuntimeState = reactive(createEmptyAiPanelModelRuntimeState())
-  const chatMode = toRef(modelRuntimeState, 'chatMode')
-  const modeMenuOpen = toRef(modelRuntimeState, 'modeMenuOpen')
-  const modelMenuOpen = toRef(modelRuntimeState, 'modelMenuOpen')
-  const modelQuery = toRef(modelRuntimeState, 'modelQuery')
   const dropActive = ref(false)
   const inputPlaceholderNotice = ref('')
   let classicChatDataLoaded = false
+  let getEditHostContextsForPopup = (): AiContextOption[] => []
   const maxHostContexts = 5
   const streaming = computed(() => workspace.chatMessages.some((message) => message.state === 'streaming'))
+
+  const measureUiTextWidthPx = (text: string) => {
+    if (!text) return 0
+    if (typeof document === 'undefined') return text.length * 7
+    const canvas = document.createElement('canvas')
+    const context = canvas.getContext('2d')
+    if (!context) return text.length * 7
+    context.font = '12px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif'
+    return context.measureText(text).width
+  }
+
+  const aiPanelModelPopupShellRuntime = createAiPanelModelPopupShellRuntime<Component>({
+    chatModeOptions: () => aiChatModeOptions,
+    availableModels: () => workspace.aiModelOptions,
+    lockedModels: () => workspace.lockedAiModelOptions,
+    settingsModelCount: () => workspace.settingModelOptions.length,
+    selectedModelName: () => workspace.config.modelName,
+    selectModel: (modelId) => workspace.selectAiModel(modelId),
+    closeContextPopup: () => closeContextPopup(),
+    closeCommandPopup: () => closeCommandPopup(),
+    closePopups: () => closePopups(),
+    openModelSettings: () => {
+      workspace.setActiveModule('settings')
+      workspace.setActiveSettingsSection('models')
+    },
+    openModelLogin: async () => {
+      await workspace.openUserLogin()
+    },
+    afterDomUpdate: () => nextTick(),
+    measureText: measureUiTextWidthPx,
+    lockedModelTooltip: (tier) => `模型已锁定，升级 ${tier} 后可用`,
+    categories: () => workspace.aiContextCatalog.categories,
+    commandOptions: () => workspace.aiCommandOptions,
+    openedHosts: () => workspace.aiContextCatalog.openedHosts,
+    selectedContexts: () => workspace.selectedContexts,
+    editHostContexts: () => getEditHostContextsForPopup(),
+    skillOptions: () => workspace.aiSkillContextOptions,
+    selectedCommandId: () => workspace.selectedCommandId,
+    selectedCommandRef: () => workspace.selectedCommandRef,
+    iconForKind: (kind) => aiContextCategoryIcons[kind] || Search
+  })
+  const {
+    aiContextCategories,
+    allVisibleHostContextsSelected,
+    chatMode,
+    closeModeMenu,
+    closeModelMenu,
+    commandKeyboardIndex,
+    commandOptions,
+    commandPopupOpen,
+    commandQuery,
+    commandTarget,
+    contextKeyboardIndex,
+    contextLevel,
+    contextPopupOpen,
+    contextQuery,
+    contextTarget,
+    currentChatMode,
+    displayedOpenedHosts,
+    displayModelName,
+    docsContextOptions,
+    docsCurrentRelDir,
+    docsDirStack,
+    filteredCommands,
+    filteredContextOptions,
+    filteredLockedModelOptions,
+    filteredModelOptions,
+    handleModelKeydown,
+    hostContextsForPopup,
+    isThinkingModelName,
+    lockedModelTooltip,
+    modeDropdownWidthPx,
+    modeMenuOpen,
+    modelDropdownWidthPx,
+    modelMenuOpen,
+    modelQuery,
+    modelSearchInputRef,
+    openModeOnboarding,
+    openModelLogin,
+    openModelOnboarding,
+    openModelSettings,
+    popupInteractionState,
+    prepareSendOnboarding,
+    selectChatMode,
+    selectedCommand,
+    selectedCommandRef,
+    selectedContextCategory,
+    selectedModelLabel,
+    selectModel,
+    showNoAvailableModelPrompt,
+    toggleModelMenu,
+    toggleModeMenu,
+    visibleContextCategories,
+    visibleHostContextOptions
+  } = aiPanelModelPopupShellRuntime
 
   const aiPanelChatNavigationRuntime = createAiPanelChatNavigationRuntime({
     conversations: () => workspace.conversations,
@@ -174,8 +242,8 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     closeContextPopup: () => closeContextPopup(),
     closeCommandPopup: () => closeCommandPopup(),
     closeModelMenu: () => {
-      aiPanelModelRuntime.closeModeMenu()
-      aiPanelModelRuntime.closeModelMenu()
+      closeModeMenu()
+      closeModelMenu()
     },
     closePopups: () => closePopups(),
     afterDomUpdate: (callback) => (callback ? nextTick(callback) : nextTick()),
@@ -357,83 +425,6 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     toggleMessageFavorite
   } = aiPanelActionOrchestrationRuntime
 
-  const measureUiTextWidthPx = (text: string) => {
-    if (!text) return 0
-    if (typeof document === 'undefined') return text.length * 7
-    const canvas = document.createElement('canvas')
-    const context = canvas.getContext('2d')
-    if (!context) return text.length * 7
-    context.font = '12px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif'
-    return context.measureText(text).width
-  }
-
-  const aiPanelModelRuntime = createAiPanelModelRuntime({
-    state: modelRuntimeState,
-    chatModeOptions: () => aiChatModeOptions,
-    availableModels: () => workspace.aiModelOptions,
-    lockedModels: () => workspace.lockedAiModelOptions,
-    settingsModelCount: () => workspace.settingModelOptions.length,
-    selectedModelName: () => workspace.config.modelName,
-    selectModel: (modelId) => workspace.selectAiModel(modelId),
-    closeContextPopup: () => closeContextPopup(),
-    closeCommandPopup: () => closeCommandPopup(),
-    closePopups: () => closePopups(),
-    openModelSettings: () => {
-      workspace.setActiveModule('settings')
-      workspace.setActiveSettingsSection('models')
-    },
-    openModelLogin: async () => {
-      await workspace.openUserLogin()
-    },
-    focusModelSearchInput: () => modelSearchInputRef.value?.focus(),
-    afterDomUpdate: () => nextTick(),
-    measureText: measureUiTextWidthPx,
-    lockedModelTooltip: (tier) => `模型已锁定，升级 ${tier} 后可用`
-  })
-
-  const currentChatMode = computed(() => aiPanelModelRuntime.currentChatMode())
-  const selectedModelLabel = computed(() => aiPanelModelRuntime.selectedModelLabel())
-  const filteredModelOptions = computed(() => aiPanelModelRuntime.filteredModelOptions())
-  const filteredLockedModelOptions = computed(() => aiPanelModelRuntime.filteredLockedModelOptions())
-  const showNoAvailableModelPrompt = computed(() => aiPanelModelRuntime.showNoAvailableModelPrompt())
-  const modeDropdownWidthPx = computed(() => aiPanelModelRuntime.modeDropdownWidthPx())
-  const modelDropdownWidthPx = computed(() => aiPanelModelRuntime.modelDropdownWidthPx())
-  const displayModelName = displayAiPanelModelName
-  const isThinkingModelName = isThinkingAiPanelModelName
-  const lockedModelTooltip = aiPanelModelRuntime.lockedModelTooltip
-  const aiPanelPopupViewRuntime = createAiPanelPopupViewRuntime<Component>({
-    categories: () => workspace.aiContextCatalog.categories,
-    commandOptions: () => workspace.aiCommandOptions,
-    openedHosts: () => workspace.aiContextCatalog.openedHosts,
-    selectedContexts: () => workspace.selectedContexts,
-    editHostContexts: () => editHostContexts.value,
-    skillOptions: () => workspace.aiSkillContextOptions,
-    selectedCommandId: () => workspace.selectedCommandId,
-    selectedCommandRef: () => workspace.selectedCommandRef,
-    contextTarget: () => contextTarget.value,
-    contextLevel: () => contextLevel.value,
-    contextQuery: () => contextQuery.value,
-    commandQuery: () => commandQuery.value,
-    docsCurrentRelDir: () => docsCurrentRelDir.value,
-    chatMode: () => chatMode.value,
-    iconForKind: (kind) => aiContextCategoryIcons[kind] || Search
-  })
-  const {
-    aiContextCategories,
-    allVisibleHostContextsSelected,
-    commandOptions,
-    displayedOpenedHosts,
-    docsContextOptions,
-    filteredCommands,
-    filteredContextOptions,
-    hostContextsForPopup,
-    selectedCommand,
-    selectedCommandRef,
-    selectedContextCategory,
-    visibleContextCategories,
-    visibleHostContextOptions
-  } = aiPanelPopupViewRuntime
-
   const contextUsage = computed(() => aiPanelContextUsageDisplay(workspace.aiContextUsage))
   const contextUsageColor = computed(() => aiPanelContextUsageColor(contextUsage.value))
   const contextUsageTrackColor = computed(() => aiPanelContextUsageTrackColor())
@@ -573,6 +564,7 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     startMessageEdit,
     charBeforeCaret: editCharBeforeCaret
   } = aiPanelMessageEditRuntime
+  getEditHostContextsForPopup = () => editHostContexts.value
 
   const aiPanelSurfaceRuntime = createAiPanelSurfaceRuntime({
     state: {
@@ -643,22 +635,6 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
 
   const toggleContextPopup = () => aiPanelPopupInteractionRuntime.toggleContextPopup()
 
-  const toggleModeMenu = () => {
-    aiPanelModelRuntime.toggleModeMenu()
-  }
-
-  const toggleModelMenu = () => void aiPanelModelRuntime.toggleModelMenu()
-
-  const selectChatMode = (mode: AiChatMode) => aiPanelModelRuntime.selectChatMode(mode)
-
-  const selectModel = (modelId: string) => aiPanelModelRuntime.selectModel(modelId)
-
-  const openModelSettings = () => aiPanelModelRuntime.openModelSettings()
-
-  const openModelLogin = () => void aiPanelModelRuntime.openModelLogin()
-
-  const handleModelKeydown = (event: KeyboardEvent) => void aiPanelModelRuntime.handleModelKeydown(event)
-
   const resetDocsContextNavigation = () => aiPanelPopupInteractionRuntime.resetDocsContextNavigation()
   const enterDocsDir = (context: AiContextOption) => aiPanelPopupInteractionRuntime.enterDocsDir(context)
   const goBackContextPopup = () => aiPanelPopupInteractionRuntime.goBackContextPopup()
@@ -691,8 +667,8 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     refreshAiCommandCatalog: () => workspace.refreshAiCommandCatalog(),
     afterDomUpdate: () => nextTick(),
     defer: (callback) => window.setTimeout(callback, 0),
-    closeModeMenu: () => aiPanelModelRuntime.closeModeMenu(),
-    closeModelMenu: () => aiPanelModelRuntime.closeModelMenu(),
+    closeModeMenu,
+    closeModelMenu,
     closeCodexTargetPicker,
     closeMoreActionsMenu: () => {
       moreActionsMenuOpen.value = false
@@ -747,54 +723,42 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
   const applyContext = aiPanelContextCommandRuntime.applyContext
   const applyCommand = aiPanelContextCommandRuntime.applyCommand
 
-  const popupEditableKeydownInput = () => ({
-    displayedOpenedHosts: displayedOpenedHosts.value,
-    visibleContextCategories: visibleContextCategories.value,
-    filteredContextOptions: filteredContextOptions.value,
-    filteredCommands: filteredCommands.value,
+  const aiPanelPopupKeyboardRuntime = createAiPanelPopupKeyboardRuntime<Component>({
+    popupInteractionRuntime: aiPanelPopupInteractionRuntime,
+    displayedOpenedHosts: () => displayedOpenedHosts.value,
+    visibleContextCategories: () => visibleContextCategories.value,
+    filteredContextOptions: () => filteredContextOptions.value,
+    filteredCommands: () => filteredCommands.value,
     applyContext,
     applyCommand,
     handleSend,
     confirmMessageEdit,
     cancelMessageEdit,
-    shouldTriggerCommandPopupForPendingSlash: (target: 'main' | 'edit') =>
-      target === 'edit'
-        ? shouldTriggerEditCommandPopupForPendingSlash()
-        : shouldTriggerMainCommandPopupForPendingSlash(),
-    shouldTriggerCommandPopupForSlash: (target: 'main' | 'edit') =>
-      target === 'edit'
-        ? shouldTriggerEditCommandPopupForSlash()
-        : shouldTriggerMainCommandPopupForSlash(),
-    getCharBeforeCaret: (target: 'main' | 'edit') =>
-      target === 'edit' ? editCharBeforeCaret() : mainCharBeforeCaret(),
-    shouldTriggerCommandPopupFromEditableText
+    shouldTriggerMainCommandPopupForPendingSlash,
+    shouldTriggerEditCommandPopupForPendingSlash,
+    shouldTriggerMainCommandPopupForSlash,
+    shouldTriggerEditCommandPopupForSlash,
+    mainCharBeforeCaret,
+    editCharBeforeCaret,
+    shouldTriggerCommandPopupFromEditableText,
+    aiPanelMode: () => aiPanelMode.value,
+    chatSearchOpen: () => chatSearchOpen.value
   })
-
-  const handleEditableKeydown = (event: KeyboardEvent) => {
-    aiPanelPopupInteractionRuntime.handleMainEditableKeydown(event, popupEditableKeydownInput())
-  }
-
-  const handleEditEditableKeydown = (event: KeyboardEvent) => {
-    aiPanelPopupInteractionRuntime.handleEditEditableKeydown(event, popupEditableKeydownInput())
-  }
-
-  const handleContextKeydown = (event: KeyboardEvent) => aiPanelPopupInteractionRuntime.handleContextKeydown(event, popupEditableKeydownInput())
-
-  const handlePanelKeydown = (event: KeyboardEvent) => {
-    aiPanelPopupInteractionRuntime.handlePanelKeydown(event, {
-      aiPanelMode: aiPanelMode.value,
-      chatSearchOpen: chatSearchOpen.value
-    })
-  }
-
-  const handleCommandKeydown = (event: KeyboardEvent) => aiPanelPopupInteractionRuntime.handleCommandKeydown(event, popupEditableKeydownInput())
+  const {
+    handleCommandKeydown,
+    handleContextKeydown,
+    handleContextQueryChanged,
+    handleEditableKeydown,
+    handleEditEditableKeydown,
+    handlePanelKeydown
+  } = aiPanelPopupKeyboardRuntime
 
   const openContextPopup = (level: 'main' | AiContextKind = 'main') => {
     openContextPopupForTarget('main', level)
   }
 
   watch(contextQuery, () => {
-    aiPanelPopupInteractionRuntime.handleContextQueryChanged()
+    handleContextQueryChanged()
   })
 
   watch(chatSearchTerm, () => {
@@ -825,10 +789,10 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     focusAiAttentionItem,
     onboardingRequestSequence: () => workspace.onboardingAiRequest.sequence,
     onboardingRequest: () => workspace.onboardingAiRequest as AiPanelOnboardingRequest,
-    openModeOnboarding: () => aiPanelModelRuntime.openModeOnboarding(),
-    openModelOnboarding: () => aiPanelModelRuntime.openModelOnboarding(),
+    openModeOnboarding,
+    openModelOnboarding,
     openContextPopup,
-    prepareSendOnboarding: () => aiPanelModelRuntime.prepareSendOnboarding(),
+    prepareSendOnboarding,
     closePopups,
     draftText: () => draft.value,
     setDraft,
