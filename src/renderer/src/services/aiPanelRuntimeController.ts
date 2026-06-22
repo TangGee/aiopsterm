@@ -1,13 +1,6 @@
-import { computed, nextTick, onBeforeUnmount, onMounted, watch, type Component } from 'vue'
+import { computed, onBeforeUnmount, onMounted, watch } from 'vue'
 import 'highlight.js/styles/atom-one-dark.css'
 import '@xterm/xterm/css/xterm.css'
-import {
-  Bot,
-  FileText,
-  Image,
-  Search,
-  Server
-} from 'lucide-vue-next'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { createAiPanelContextCommandShellRuntime } from '@/services/aiPanelContextCommandShellRuntime'
 import { createAiPanelModelPopupShellRuntime } from '@/services/aiPanelModelPopupShellRuntime'
@@ -31,6 +24,7 @@ import { createAiPanelInputMediaShellRuntime } from '@/services/aiPanelInputMedi
 import { createAiPanelMessageEditRuntime } from '@/services/aiPanelMessageEditRuntime'
 import { createAiPanelComposerDomRuntime } from '@/services/aiPanelComposerDomRuntime'
 import { createAiPanelPresentationRuntime } from '@/services/aiPanelPresentationRuntime'
+import { createAiPanelShellAdapterRuntime } from '@/services/aiPanelShellAdapterRuntime'
 import { aiChatClient } from '@/services/aiChatClient'
 import { copyTextToClipboard } from '@/services/clipboardRuntime'
 import { codexTargetContextFromPanel } from '@/services/aiPanelCodexRuntime'
@@ -50,20 +44,16 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
   const workspace = useWorkspaceStore()
   const { locale, t } = useI18n()
   const agentMode = computed(() => Boolean(props.agentMode))
-  let classicChatDataLoaded = false
   let getEditHostContextsForPopup = (): AiContextOption[] => []
-  const maxHostContexts = 5
   const streaming = computed(() => workspace.chatMessages.some((message) => message.state === 'streaming'))
 
-  const aiPanelPresentationRuntime = createAiPanelPresentationRuntime<Component>({
-    icons: {
-      hosts: Server,
-      docs: FileText,
-      images: Image,
-      skills: Bot,
-      chats: Search,
-      fallback: Search
-    },
+  const shellAdapter = createAiPanelShellAdapterRuntime({
+    refreshClassicCatalog: () => workspace.refreshAiModelCatalog({ replaceSettingsOptions: false }),
+    hydrateClassicChatData: () => workspace.hydrateClassicChatData()
+  })
+
+  const aiPanelPresentationRuntime = createAiPanelPresentationRuntime({
+    icons: shellAdapter.presentationIcons,
     selectedContexts: () => workspace.selectedContexts
   })
   const {
@@ -77,7 +67,7 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     measureText
   } = aiPanelPresentationRuntime
 
-  const aiPanelModelPopupShellRuntime = createAiPanelModelPopupShellRuntime<Component>({
+  const aiPanelModelPopupShellRuntime = createAiPanelModelPopupShellRuntime({
     chatModeOptions: () => aiChatModeOptions,
     availableModels: () => workspace.aiModelOptions,
     lockedModels: () => workspace.lockedAiModelOptions,
@@ -94,7 +84,7 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     openModelLogin: async () => {
       await workspace.openUserLogin()
     },
-    afterDomUpdate: () => nextTick(),
+    afterDomUpdate: shellAdapter.afterDomUpdate,
     measureText,
     lockedModelTooltip: (tier) => `模型已锁定，升级 ${tier} 后可用`,
     categories: () => workspace.aiContextCatalog.categories,
@@ -183,11 +173,11 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
       closeModelMenu()
     },
     closePopups: () => closePopups(),
-    afterDomUpdate: (callback) => (callback ? nextTick(callback) : nextTick()),
-    requestFrame: (callback) => window.requestAnimationFrame(callback),
-    cancelFrame: (frame) => window.cancelAnimationFrame(frame),
-    setTimer: (callback, delay) => window.setTimeout(callback, delay),
-    clearTimer: (timer) => window.clearTimeout(timer as number)
+    afterDomUpdate: shellAdapter.afterDomUpdate,
+    requestFrame: shellAdapter.requestFrame,
+    cancelFrame: shellAdapter.cancelFrame,
+    setTimer: shellAdapter.setTimer,
+    clearTimer: shellAdapter.clearAnyTimer
   })
   const {
     cancelChatScrollFrame,
@@ -246,19 +236,13 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     visibleConversationTabs
   } = aiPanelChatNavigationRuntime
 
-  const loadClassicChatData = async () => {
-    if (classicChatDataLoaded) return
-    classicChatDataLoaded = true
-    await Promise.all([workspace.refreshAiModelCatalog({ replaceSettingsOptions: false }), workspace.hydrateClassicChatData()])
-  }
-
   const aiPanelCodexRuntime = createAiPanelCodexConversationRuntime({
     agentMode: () => Boolean(props.agentMode),
     activePanel: () => workspace.activePanel,
     panels: () => workspace.panels,
     terminalSettings: () => workspace.terminalSettings,
     aiContextCatalog: () => workspace.aiContextCatalog,
-    loadClassicChatData,
+    loadClassicChatData: shellAdapter.loadClassicChatData,
     closePopups: () => closePopups(),
     showNotice: showChatExportNotice,
     setTopNotice: (message) => workspace.setTopNotice(message),
@@ -268,7 +252,7 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     upsertAiAttentionItem: (input) => workspace.upsertAiAttentionItem(input),
     removeAiAttentionItem: (id) => workspace.removeAiAttentionItem(id),
     markAiAttentionHandled: (id) => workspace.markAiAttentionHandled(id),
-    afterDomUpdate: () => nextTick(),
+    afterDomUpdate: shellAdapter.afterDomUpdate,
     t
   })
 
@@ -333,7 +317,7 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     enableAgentReadOnlyAutoRunForCurrentConversation: () => workspace.enableAgentReadOnlyAutoRunForCurrentConversation(),
     syncCurrentConversationSnapshot: (options) => workspace.syncCurrentConversationSnapshot(options),
     closePopups: () => closePopups(),
-    afterDomUpdate: () => nextTick()
+    afterDomUpdate: shellAdapter.afterDomUpdate
   })
   const {
     activeCommandAuditMessage,
@@ -386,9 +370,9 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     insertPastedImage: () => insertPastedImageHandler?.(),
     closePopups: () => closePopups(),
     notify: (message) => showInputPlaceholderNotice(message),
-    afterDomUpdate: () => nextTick(),
-    afterInputSync: () => nextTick(),
-    requestFrame: (callback) => window.requestAnimationFrame(callback),
+    afterDomUpdate: shellAdapter.afterDomUpdate,
+    afterInputSync: shellAdapter.afterDomUpdate,
+    requestFrame: shellAdapter.requestFrame,
     shouldMoveCaretAfterRender: () => !contextPopupOpen.value && !commandPopupOpen.value && !modelMenuOpen.value
   })
 
@@ -429,9 +413,9 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     clipboardHasImage,
     closePopups: () => closePopups(),
     openContextPopupForTarget: (target) => openContextPopupForTarget(target),
-    afterDomUpdate: () => nextTick(),
-    requestFrame: (callback) => window.requestAnimationFrame(callback),
-    fallbackEditTarget: () => document.querySelector('.user-message-edit-container .message-editable') as HTMLElement | null,
+    afterDomUpdate: shellAdapter.afterDomUpdate,
+    requestFrame: shellAdapter.requestFrame,
+    fallbackEditTarget: shellAdapter.queryEditTarget,
     insertPastedImageIntoEdit: () => insertPastedImageIntoEditHandler?.(),
     resendUserMessageFromParts: (messageId, contentParts, hostContexts) =>
       workspace.resendUserMessageFromParts(messageId, contentParts, hostContexts)
@@ -490,11 +474,11 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     insertFileChipAtEditCursor,
     restoreMainSelection: () => restoreEditableSelection(),
     insertVoiceTranscription: appendVoiceTranscriptionToInput,
-    afterVoiceInsert: () => nextTick(),
+    afterVoiceInsert: shellAdapter.afterDomUpdate,
     sendAfterVoiceTranscription: () => handleSend(),
-    requestFrame: (callback) => window.requestAnimationFrame(callback),
-    setNoticeTimer: (callback, delay) => window.setTimeout(callback, delay),
-    clearNoticeTimer: (timer) => window.clearTimeout(timer)
+    requestFrame: shellAdapter.requestFrame,
+    setNoticeTimer: shellAdapter.setTimer,
+    clearNoticeTimer: shellAdapter.clearTimer
   })
 
   const {
@@ -522,19 +506,15 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
   insertPastedImageHandler = insertPastedImage
   insertPastedImageIntoEditHandler = insertPastedImageIntoEdit
 
-  function focusInputForTarget(target: 'main' | 'edit') {
-    requestAnimationFrame(() => {
-      if (target === 'edit') {
-        restoreEditInputSelection()
-        return
-      }
-      restoreEditableSelection()
+  const focusInputForTarget = (target: 'main' | 'edit') =>
+    shellAdapter.focusInputForTarget(target, {
+      restoreEditInputSelection,
+      restoreEditableSelection
     })
-  }
 
-  const aiPanelContextCommandShellRuntime = createAiPanelContextCommandShellRuntime<Component>({
+  const aiPanelContextCommandShellRuntime = createAiPanelContextCommandShellRuntime({
     state: popupInteractionState,
-    maxHostContexts,
+    maxHostContexts: shellAdapter.maxHostContexts,
     saveSelection: (target) => {
       if (target === 'edit') {
         saveEditSelection()
@@ -545,8 +525,8 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     focusInputForTarget,
     refreshAiContextCatalog: () => workspace.refreshAiContextCatalog({ hydrateSelection: false }),
     refreshAiCommandCatalog: () => workspace.refreshAiCommandCatalog(),
-    afterDomUpdate: () => nextTick(),
-    defer: (callback) => window.setTimeout(callback, 0),
+    afterDomUpdate: shellAdapter.afterDomUpdate,
+    defer: shellAdapter.defer,
     closeModeMenu,
     closeModelMenu,
     closeCodexTargetPicker,
@@ -580,7 +560,7 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     setDraft,
     renderEditableFromState,
     moveMainCaretToEnd: moveEditableCaretToEnd,
-    requestFrame: (callback) => window.requestAnimationFrame(callback),
+    requestFrame: shellAdapter.requestFrame,
     displayedOpenedHosts: () => displayedOpenedHosts.value,
     visibleContextCategories: () => visibleContextCategories.value,
     filteredContextOptions: () => filteredContextOptions.value,
@@ -647,7 +627,7 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     watch: watch as never,
     onMounted,
     onBeforeUnmount,
-    afterDomUpdate: (callback) => nextTick(callback),
+    afterDomUpdate: shellAdapter.afterDomUpdate,
     selectedConversationId: () => workspace.selectedConversationId,
     conversationIdsSignature: () => workspace.conversations.map((conversation) => conversation.id).join('|'),
     pruneConversationTabs,
