@@ -48,22 +48,8 @@ import {
 import { useWorkspaceStore } from '@/stores/workspace'
 import {
   aiPanelChipLabel,
-  aiPanelEditablePlainText,
-  extractAiPanelContentPartsFromEditable,
-  insertAiPanelChipIntoEditableCursor,
-  insertAiPanelImageIntoEditableCursor,
-  removeAiPanelTokenFromEditableCursor,
-  renderAiPanelMainEditableFromState,
   type AiPanelEditableRenderOptions
 } from '@/services/aiPanelEditableRuntime'
-import {
-  aiPanelCharBeforeCaret,
-  moveAiPanelEditableCaretToEnd,
-  restoreAiPanelEditableSelection,
-  saveAiPanelEditableSelection,
-  shouldTriggerAiPanelCommandPopupForPendingSlash,
-  shouldTriggerAiPanelCommandPopupForSlash
-} from '@/services/aiPanelEditableSelectionRuntime'
 import {
   allVisibleAiPanelHostsSelected,
   cloneAiPanelCommandOptions,
@@ -134,7 +120,7 @@ import {
 } from '@/services/aiPanelSurfaceRuntime'
 import { createAiPanelAttachmentRuntime } from '@/services/aiPanelAttachmentRuntime'
 import { createAiPanelMessageEditRuntime } from '@/services/aiPanelMessageEditRuntime'
-import { createAiPanelComposerRuntime, isAiPanelComposerEmpty } from '@/services/aiPanelComposerRuntime'
+import { createAiPanelComposerDomRuntime } from '@/services/aiPanelComposerDomRuntime'
 import { createAiPanelVoiceRuntime } from '@/services/aiPanelVoiceRuntime'
 import { aiChatClient } from '@/services/aiChatClient'
 import { copyTextToClipboard } from '@/services/clipboardRuntime'
@@ -178,17 +164,12 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     skills: Bot,
     chats: Search
   }
-  const draft = ref('')
-  const imageInputParts = ref<AiImageContentPart[]>([])
-  const fileInputParts = ref<AiDocChipContentPart[]>([])
   const chatScrollRef = ref<HTMLElement | null>(null)
-  const editableRef = ref<HTMLElement | null>(null)
   const chatSearchInputRef = ref<HTMLInputElement | null>(null)
   const historySearchInputRef = ref<HTMLInputElement | null>(null)
   const modelSearchInputRef = ref<HTMLInputElement | null>(null)
   const contextSearchInputRef = ref<HTMLInputElement | null>(null)
   const commandSearchInputRef = ref<HTMLInputElement | null>(null)
-  const savedRange = ref<Range | null>(null)
   const popupInteractionState = reactive(createEmptyAiPanelPopupInteractionState())
   const contextPopupOpen = toRef(popupInteractionState, 'contextPopupOpen')
   const commandPopupOpen = toRef(popupInteractionState, 'commandPopupOpen')
@@ -207,7 +188,6 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
   const modelMenuOpen = toRef(modelRuntimeState, 'modelMenuOpen')
   const modelQuery = toRef(modelRuntimeState, 'modelQuery')
   const dropActive = ref(false)
-  const syncingFromEditable = ref(false)
   const inputPlaceholderNotice = ref('')
   const historyRuntimeState = reactive(createEmptyAiPanelHistoryRuntimeState())
   const chatSearchRuntimeState = reactive(createEmptyAiPanelChatSearchRuntimeState())
@@ -543,15 +523,6 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
   const allVisibleHostContextsSelected = computed(() => allVisibleAiPanelHostsSelected(visibleHostContextOptions.value, hostContextsForPopup.value))
   const filteredCommands = computed(() => filteredAiPanelCommands(commandOptions.value, commandQuery.value))
   const selectedCommand = computed(() => selectedAiPanelCommand(commandOptions.value, workspace.selectedCommandId))
-  const composerIsEmpty = computed(() =>
-    isAiPanelComposerEmpty({
-      draft: draft.value,
-      selectedContextCount: workspace.selectedContexts.length,
-      images: imageInputParts.value,
-      files: fileInputParts.value,
-      selectedCommand: selectedCommand.value
-    })
-  )
 
   const measureUiTextWidthPx = (text: string) => {
     if (!text) return 0
@@ -631,35 +602,7 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
 
   const getChipLabel = aiPanelChipLabel
 
-  const insertImageIntoEditableCursor = (editable: HTMLElement | null, part: AiImageContentPart, onInserted: () => void) =>
-    insertAiPanelImageIntoEditableCursor(editable, part, onInserted)
-
-  const insertImageAtEditableCursor = (part: AiImageContentPart) => {
-    return insertImageIntoEditableCursor(editableRef.value, part, () => {
-      imageInputParts.value = [...imageInputParts.value, part]
-      handleEditableInput()
-    })
-  }
-
-  const insertFileChipAtMainCursor = (part: AiDocChipContentPart) => {
-    restoreEditableSelection()
-    return insertChipIntoEditableCursor(editableRef.value, part, () => {
-      fileInputParts.value = [...fileInputParts.value, part]
-      handleEditableInput()
-    }, '@')
-  }
-
   const clipboardHasImage = (event: ClipboardEvent) => clipboardHasImageItems(event.clipboardData?.items)
-
-  const removeTokenFromEditableCursor = removeAiPanelTokenFromEditableCursor
-
-  const insertChipIntoEditableCursor = (editable: HTMLElement | null, part: AiChipContentPart, onInserted: () => void, triggerToken = '/') =>
-    insertAiPanelChipIntoEditableCursor(editable, part, editableRenderOptions.value, onInserted, triggerToken)
-
-  const shouldTriggerCommandPopupFromEditableText = () => {
-    const text = editablePlainText()
-    return /(?:^|\s)\/$/.test(text)
-  }
 
   const openCommandPopupForTarget = (target: 'main' | 'edit') => aiPanelPopupInteractionRuntime.openCommandPopupForTarget(target)
 
@@ -667,53 +610,61 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     aiPanelPopupInteractionRuntime.openContextPopupForTarget(target, level)
   }
 
-  const renderEditableFromState = () => {
-    const editable = editableRef.value
-    if (!editable) return
-    syncingFromEditable.value = true
-    const active = document.activeElement === editable
-    renderAiPanelMainEditableFromState(
-      editable,
-      {
-        draft: draft.value,
-        images: imageInputParts.value,
-        files: fileInputParts.value,
-        command: selectedCommandRef.value
-      },
-      editableRenderOptions.value
-    )
-    if (active && !contextPopupOpen.value && !commandPopupOpen.value && !modelMenuOpen.value) {
-      moveEditableCaretToEnd()
-    }
-    void nextTick(() => {
-      syncingFromEditable.value = false
-    })
-  }
-
-  const setDraft = (value: string) => {
-    draft.value = value
-    void nextTick(() => {
-      renderEditableFromState()
-    })
-  }
-
-  const editablePlainText = () => {
-    return aiPanelEditablePlainText(editableRef.value)
-  }
-
   const contextById = (id: string) => workspace.selectedContexts.find((item) => item.id === id) || null
 
-  const extractEditableContentParts = () => {
-    return extractAiPanelContentPartsFromEditable(editableRef.value, { contextById })
-  }
+  let insertPastedImageHandler: (() => void | Promise<void>) | undefined
+  const aiPanelComposerDomRuntime = createAiPanelComposerDomRuntime({
+    renderOptions: () => editableRenderOptions.value,
+    selectedCommandId: () => workspace.selectedCommandId,
+    selectedCommandRef: () => selectedCommandRef.value,
+    contextById,
+    streaming: () => streaming.value,
+    noModelPrompt: () => showNoAvailableModelPrompt.value,
+    chatMode: () => chatMode.value,
+    agentMode: () => props.agentMode,
+    clipboardHasImage,
+    cancelStreaming: () => workspace.cancelStreamingAiChatResponse(),
+    sendChat: (text, contentParts, mode) => workspace.sendChat(text, contentParts, undefined, { mode }),
+    clearSelectedCommand: () => workspace.selectCommandPreset(null),
+    removeContext: (id) => workspace.removeContext(id),
+    insertPastedImage: () => insertPastedImageHandler?.(),
+    closePopups: () => closePopups(),
+    notify: (message) => showInputPlaceholderNotice(message),
+    afterDomUpdate: () => nextTick(),
+    afterInputSync: () => nextTick(),
+    requestFrame: (callback) => window.requestAnimationFrame(callback),
+    shouldMoveCaretAfterRender: () => !contextPopupOpen.value && !commandPopupOpen.value && !modelMenuOpen.value
+  })
 
-  const saveEditableSelection = () => {
-    savedRange.value = saveAiPanelEditableSelection(editableRef.value) || savedRange.value
-  }
-
-  const moveEditableCaretToEnd = () => {
-    savedRange.value = moveAiPanelEditableCaretToEnd(editableRef.value) || savedRange.value
-  }
+  const {
+    aiPanelComposerRuntime,
+    appendVoiceTranscriptionToInput,
+    charBeforeCaret: mainCharBeforeCaret,
+    draft,
+    editableRef,
+    fileInputParts,
+    handleEditableInput,
+    handleSend,
+    imageInputParts,
+    insertFileChipAtCursor: insertFileChipAtMainCursor,
+    insertImageAtCursor: insertImageAtEditableCursor,
+    moveEditableCaretToEnd,
+    removeTriggerToken: removeMainTriggerToken,
+    renderEditableFromState,
+    restoreEditableSelection,
+    saveEditableSelection,
+    setDraft,
+    shouldTriggerCommandPopupForPendingSlash: shouldTriggerMainCommandPopupForPendingSlash,
+    shouldTriggerCommandPopupForSlash: shouldTriggerMainCommandPopupForSlash,
+    shouldTriggerCommandPopupFromEditableText,
+    syncingFromEditable
+  } = aiPanelComposerDomRuntime
+  const composerIsEmpty = computed(() =>
+    aiPanelComposerDomRuntime.isEmpty({
+      selectedContextCount: workspace.selectedContexts.length,
+      selectedCommand: selectedCommand.value
+    })
+  )
 
   let insertPastedImageIntoEditHandler: (() => void | Promise<void>) | undefined
   const aiPanelMessageEditRuntime = createAiPanelMessageEditRuntime({
@@ -803,54 +754,8 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     openImagePicker,
     handleFileUpload
   } = aiPanelAttachmentRuntime
+  insertPastedImageHandler = insertPastedImage
   insertPastedImageIntoEditHandler = insertPastedImageIntoEdit
-
-  const aiPanelComposerRuntime = createAiPanelComposerRuntime({
-    editable: () => editableRef.value,
-    draft: () => draft.value,
-    selectedCommandId: () => workspace.selectedCommandId,
-    streaming: () => streaming.value,
-    noModelPrompt: () => showNoAvailableModelPrompt.value,
-    chatMode: () => chatMode.value,
-    agentMode: () => props.agentMode,
-    clipboardHasImage,
-    extractContentParts: extractEditableContentParts,
-    cancelStreaming: () => workspace.cancelStreamingAiChatResponse(),
-    sendChat: (text, contentParts, mode) => workspace.sendChat(text, contentParts, undefined, { mode }),
-    clearSelectedCommand: () => workspace.selectCommandPreset(null),
-    removeContext: (id) => workspace.removeContext(id),
-    setDraftFromEditable: (value) => {
-      draft.value = value
-    },
-    resetDraft: setDraft,
-    setImageInputParts: (parts) => {
-      imageInputParts.value = parts
-    },
-    setFileInputParts: (parts) => {
-      fileInputParts.value = parts
-    },
-    saveSelection: saveEditableSelection,
-    setSyncingFromEditable: (value) => {
-      syncingFromEditable.value = value
-    },
-    afterInputSync: () => nextTick(),
-    insertPastedImage,
-    scheduleCaretToEnd: () => requestAnimationFrame(moveEditableCaretToEnd),
-    closePopups: () => closePopups(),
-    notify: showInputPlaceholderNotice
-  })
-
-  const handleEditableInput = () => aiPanelComposerRuntime.handleInput()
-  const insertPlainTextAtEditableCursor = (text: string) => aiPanelComposerRuntime.insertPlainTextAtCursor(text)
-  const handleSend = async () => {
-    await aiPanelComposerRuntime.send()
-  }
-
-  const appendVoiceTranscriptionToInput = (text: string) => {
-    restoreEditableSelection()
-    insertPlainTextAtEditableCursor(text)
-    requestAnimationFrame(moveEditableCaretToEnd)
-  }
 
   const aiPanelVoiceRuntime = createAiPanelVoiceRuntime({
     streaming: () => streaming.value,
@@ -897,13 +802,6 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
   const goBackContextPopup = () => aiPanelPopupInteractionRuntime.goBackContextPopup()
   const returnContextPopupToMain = () => aiPanelPopupInteractionRuntime.returnContextPopupToMain()
   const closeContextPopup = (options: { restoreFocus?: boolean } = {}) => aiPanelPopupInteractionRuntime.closeContextPopup(options)
-
-  const restoreEditableSelection = () => {
-    if (restoreAiPanelEditableSelection(editableRef.value, savedRange.value)) return true
-    if (!editableRef.value || !window.getSelection()) return false
-    moveEditableCaretToEnd()
-    return true
-  }
 
   function focusInputForTarget(target: 'main' | 'edit') {
     requestAnimationFrame(() => {
@@ -967,7 +865,7 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     enterDocsDir,
     closeContextPopup,
     closeCommandPopup,
-    removeMainTriggerToken: (token) => removeTokenFromEditableCursor(editableRef.value, savedRange, token, handleEditableInput),
+    removeMainTriggerToken,
     removeEditTriggerToken,
     insertContextAtEditCursor,
     insertCommandAtEditCursor,
@@ -1000,13 +898,13 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     shouldTriggerCommandPopupForPendingSlash: (target: 'main' | 'edit') =>
       target === 'edit'
         ? shouldTriggerEditCommandPopupForPendingSlash()
-        : shouldTriggerAiPanelCommandPopupForPendingSlash(editableRef.value, savedRange.value),
+        : shouldTriggerMainCommandPopupForPendingSlash(),
     shouldTriggerCommandPopupForSlash: (target: 'main' | 'edit') =>
       target === 'edit'
         ? shouldTriggerEditCommandPopupForSlash()
-        : shouldTriggerAiPanelCommandPopupForSlash(editableRef.value, savedRange.value),
+        : shouldTriggerMainCommandPopupForSlash(),
     getCharBeforeCaret: (target: 'main' | 'edit') =>
-      target === 'edit' ? editCharBeforeCaret() : aiPanelCharBeforeCaret(editableRef.value, savedRange.value),
+      target === 'edit' ? editCharBeforeCaret() : mainCharBeforeCaret(),
     shouldTriggerCommandPopupFromEditableText
   })
 
