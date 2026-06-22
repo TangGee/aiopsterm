@@ -1,4 +1,4 @@
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, toRef, watch, type Component, type ComponentPublicInstance } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, toRef, watch, type Component } from 'vue'
 import 'highlight.js/styles/atom-one-dark.css'
 import '@xterm/xterm/css/xterm.css'
 import {
@@ -47,24 +47,13 @@ import {
 } from 'lucide-vue-next'
 import { useWorkspaceStore } from '@/stores/workspace'
 import {
-  aiChipPartFromContext,
-  aiImagePartFromContext
-} from '@/services/aiPanelInputRuntime'
-import {
   aiPanelChipLabel,
   aiPanelEditablePlainText,
-  createAiPanelChipElement,
-  createAiPanelCommandChipElement,
-  createAiPanelContextChipElement,
-  createAiPanelImageElement,
   extractAiPanelContentPartsFromEditable,
   insertAiPanelChipIntoEditableCursor,
   insertAiPanelImageIntoEditableCursor,
-  insertAiPanelPlainTextIntoEditableCursor,
-  removeAiPanelTokenBeforeRange,
   removeAiPanelTokenFromEditableCursor,
   renderAiPanelMainEditableFromState,
-  renderAiPanelPartsIntoEditable,
   type AiPanelEditableRenderOptions
 } from '@/services/aiPanelEditableRuntime'
 import {
@@ -144,13 +133,7 @@ import {
   createAiPanelSurfaceRuntime
 } from '@/services/aiPanelSurfaceRuntime'
 import { createAiPanelAttachmentRuntime } from '@/services/aiPanelAttachmentRuntime'
-import {
-  cancelAiPanelMessageEdit,
-  prepareAiPanelMessageEditConfirmation,
-  removeAiPanelEditPartFromClickTarget,
-  startAiPanelMessageEdit,
-  syncAiPanelEditStateFromParts
-} from '@/services/aiPanelEditRuntime'
+import { createAiPanelMessageEditRuntime } from '@/services/aiPanelMessageEditRuntime'
 import { createAiPanelComposerRuntime, isAiPanelComposerEmpty } from '@/services/aiPanelComposerRuntime'
 import { createAiPanelVoiceRuntime } from '@/services/aiPanelVoiceRuntime'
 import { aiChatClient } from '@/services/aiChatClient'
@@ -167,7 +150,6 @@ import { malformedAiBackendResultMessage } from '@/services/aiBackendGuards'
 import { useI18n } from '@/i18n'
 import type {
   AiChipContentPart,
-  AiContentPart,
   AiDocChipContentPart,
   AiImageContentPart,
   ConversationItem,
@@ -201,19 +183,12 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
   const fileInputParts = ref<AiDocChipContentPart[]>([])
   const chatScrollRef = ref<HTMLElement | null>(null)
   const editableRef = ref<HTMLElement | null>(null)
-  const editEditableRef = ref<HTMLElement | null>(null)
   const chatSearchInputRef = ref<HTMLInputElement | null>(null)
   const historySearchInputRef = ref<HTMLInputElement | null>(null)
-  const editingMessageId = ref<string | null>(null)
-  const editDraft = ref('')
-  const editImageInputParts = ref<AiImageContentPart[]>([])
-  const editFileInputParts = ref<AiDocChipContentPart[]>([])
-  const editHostContexts = ref<AiContextOption[]>([])
   const modelSearchInputRef = ref<HTMLInputElement | null>(null)
   const contextSearchInputRef = ref<HTMLInputElement | null>(null)
   const commandSearchInputRef = ref<HTMLInputElement | null>(null)
   const savedRange = ref<Range | null>(null)
-  const editSavedRange = ref<Range | null>(null)
   const popupInteractionState = reactive(createEmptyAiPanelPopupInteractionState())
   const contextPopupOpen = toRef(popupInteractionState, 'contextPopupOpen')
   const commandPopupOpen = toRef(popupInteractionState, 'commandPopupOpen')
@@ -540,10 +515,6 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
 
   type AiCommandOption = AiCommandCatalogOption
 
-  const setEditEditableRef = (el: Element | ComponentPublicInstance | null) => {
-    editEditableRef.value = el instanceof HTMLElement ? el : null
-  }
-
   const aiContextCategories = computed<AiContextCategoryView[]>(() =>
     cloneAiPanelContextCategories(workspace.aiContextCatalog.categories, (kind) => aiContextCategoryIcons[kind] || Search)
   )
@@ -653,28 +624,12 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     skill: iconMarkupByContextKind.skills
   }
 
-  const imagePartFromContext = aiImagePartFromContext
-  const chipPartFromContext = aiChipPartFromContext
-
-  const removeEditHostContext = (id: string) => {
-    editHostContexts.value = editHostContexts.value.filter((context) => context.id !== id)
-  }
-
-  const openEditContextPopup = () => {
-    openContextPopupForTarget('edit')
-  }
-
   const editableRenderOptions = computed<AiPanelEditableRenderOptions>(() => ({
     iconMarkupByContextKind,
     commandIconMarkup
   }))
 
   const getChipLabel = aiPanelChipLabel
-
-  const createChipElement = (
-    part: AiChipContentPart,
-    options: { removableContextId?: string; removableCommand?: boolean; removablePart?: boolean } = {}
-  ) => createAiPanelChipElement(part, editableRenderOptions.value, options)
 
   const insertImageIntoEditableCursor = (editable: HTMLElement | null, part: AiImageContentPart, onInserted: () => void) =>
     insertAiPanelImageIntoEditableCursor(editable, part, onInserted)
@@ -686,26 +641,6 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     })
   }
 
-  const insertImageAtEditCursor = (part: AiImageContentPart) => {
-    return insertImageIntoEditableCursor(editEditableRef.value, part, () => {
-      editImageInputParts.value = [...editImageInputParts.value, part]
-      handleEditEditableInput()
-    })
-  }
-
-  const insertContextAtEditCursor = (context: AiContextOption) => {
-    const imagePart = imagePartFromContext(context)
-    if (imagePart) {
-      return insertImageAtEditCursor(imagePart)
-    }
-
-    const chipPart = chipPartFromContext(context)
-    if (!chipPart) return false
-    restoreEditSelection()
-    const editTarget = editEditableRef.value || (document.querySelector('.user-message-edit-container .message-editable') as HTMLElement | null)
-    return insertChipIntoEditableCursor(editTarget, chipPart, handleEditEditableInput, '@')
-  }
-
   const insertFileChipAtMainCursor = (part: AiDocChipContentPart) => {
     restoreEditableSelection()
     return insertChipIntoEditableCursor(editableRef.value, part, () => {
@@ -714,35 +649,12 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     }, '@')
   }
 
-  const insertFileChipAtEditCursor = (part: AiDocChipContentPart) => {
-    restoreEditSelection()
-    const editTarget = editEditableRef.value || (document.querySelector('.user-message-edit-container .message-editable') as HTMLElement | null)
-    return insertChipIntoEditableCursor(editTarget, part, handleEditEditableInput, '@')
-  }
-
   const clipboardHasImage = (event: ClipboardEvent) => clipboardHasImageItems(event.clipboardData?.items)
-
-  const insertPlainTextIntoEditableCursor = (editable: HTMLElement | null, text: string, onInserted: () => void) =>
-    insertAiPanelPlainTextIntoEditableCursor(editable, text, onInserted)
-
-  const insertPlainTextAtEditCursor = (text: string) => {
-    insertPlainTextIntoEditableCursor(editEditableRef.value, text, handleEditEditableInput)
-  }
-
-  const removeTokenBeforeRange = removeAiPanelTokenBeforeRange
 
   const removeTokenFromEditableCursor = removeAiPanelTokenFromEditableCursor
 
   const insertChipIntoEditableCursor = (editable: HTMLElement | null, part: AiChipContentPart, onInserted: () => void, triggerToken = '/') =>
     insertAiPanelChipIntoEditableCursor(editable, part, editableRenderOptions.value, onInserted, triggerToken)
-
-  const saveEditSelection = () => {
-    editSavedRange.value = saveAiPanelEditableSelection(editEditableRef.value) || editSavedRange.value
-  }
-
-  const restoreEditSelection = () => {
-    restoreAiPanelEditableSelection(editEditableRef.value, editSavedRange.value)
-  }
 
   const shouldTriggerCommandPopupFromEditableText = () => {
     const text = editablePlainText()
@@ -754,9 +666,6 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
   function openContextPopupForTarget(target: 'main' | 'edit', level: 'main' | AiContextKind = 'main') {
     aiPanelPopupInteractionRuntime.openContextPopupForTarget(target, level)
   }
-
-  const renderPartsIntoEditable = (editable: HTMLElement, parts: AiContentPart[]) =>
-    renderAiPanelPartsIntoEditable(editable, parts, editableRenderOptions.value)
 
   const renderEditableFromState = () => {
     const editable = editableRef.value
@@ -798,106 +707,6 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     return extractAiPanelContentPartsFromEditable(editableRef.value, { contextById })
   }
 
-  const extractContentPartsFromEditable = (editable: HTMLElement | null) => {
-    return extractAiPanelContentPartsFromEditable(editable, { contextById })
-  }
-
-  const editableTextFromElement = (editable: HTMLElement | null) => {
-    return aiPanelEditablePlainText(editable)
-  }
-
-  const renderEditEditableFromParts = (parts: AiContentPart[]) => {
-    const editable = editEditableRef.value
-    if (!editable) return
-    renderPartsIntoEditable(editable, parts)
-    const nextState = syncAiPanelEditStateFromParts(parts, editableTextFromElement(editable))
-    editDraft.value = nextState.editDraft
-    editImageInputParts.value = nextState.editImageInputParts
-    editFileInputParts.value = nextState.editFileInputParts
-    requestAnimationFrame(() => {
-      const range = document.createRange()
-      range.selectNodeContents(editable)
-      range.collapse(false)
-      const selection = window.getSelection()
-      selection?.removeAllRanges()
-      selection?.addRange(range)
-      editable.focus()
-    })
-  }
-
-  const startMessageEdit = async (message: { id: string; role: string; text: string; contentParts?: AiContentPart[]; hosts?: AiContextOption[] }) => {
-    const edit = startAiPanelMessageEdit(message)
-    if (!edit) return
-    editingMessageId.value = edit.state.editingMessageId
-    editDraft.value = edit.state.editDraft
-    editImageInputParts.value = edit.state.editImageInputParts
-    editFileInputParts.value = edit.state.editFileInputParts
-    editHostContexts.value = edit.state.editHostContexts
-    closePopups()
-    await nextTick()
-    renderEditEditableFromParts(edit.parts)
-  }
-
-  const cancelMessageEdit = () => {
-    const nextState = cancelAiPanelMessageEdit()
-    editingMessageId.value = nextState.editingMessageId
-    editDraft.value = nextState.editDraft
-    editImageInputParts.value = nextState.editImageInputParts
-    editFileInputParts.value = nextState.editFileInputParts
-    editHostContexts.value = nextState.editHostContexts
-    editSavedRange.value = null
-  }
-
-  const handleEditEditableInput = () => {
-    const nextState = syncAiPanelEditStateFromParts(
-      extractContentPartsFromEditable(editEditableRef.value),
-      editableTextFromElement(editEditableRef.value)
-    )
-    editDraft.value = nextState.editDraft
-    editImageInputParts.value = nextState.editImageInputParts
-    editFileInputParts.value = nextState.editFileInputParts
-    saveEditSelection()
-  }
-
-  const handleEditEditableClick = (event: MouseEvent) => {
-    const removed = removeAiPanelEditPartFromClickTarget(event.target as HTMLElement)
-    if (removed) {
-      handleEditEditableInput()
-      return
-    }
-    saveEditSelection()
-  }
-
-  const handleEditEditablePaste = (event: ClipboardEvent) => {
-    if (clipboardHasImage(event)) {
-      event.preventDefault()
-      void insertPastedImageIntoEdit()
-      return
-    }
-
-    event.preventDefault()
-    const text = event.clipboardData?.getData('text/plain') || ''
-    insertPlainTextAtEditCursor(text)
-  }
-
-  const confirmMessageEdit = async () => {
-    const contentParts = extractContentPartsFromEditable(editEditableRef.value)
-    const confirmation = prepareAiPanelMessageEditConfirmation(
-      {
-        editingMessageId: editingMessageId.value,
-        editHostContexts: editHostContexts.value
-      },
-      contentParts
-    )
-    if (!confirmation) return
-    const sent = await workspace.resendUserMessageFromParts(confirmation.messageId, confirmation.contentParts, confirmation.hostContexts)
-    if (sent) cancelMessageEdit()
-  }
-
-  const handleEditEditableKeydown = (event: KeyboardEvent) => {
-    aiPanelPopupInteractionRuntime.handleEditEditableKeydown(event, popupEditableKeydownInput())
-  }
-
   const saveEditableSelection = () => {
     savedRange.value = saveAiPanelEditableSelection(editableRef.value) || savedRange.value
   }
@@ -905,6 +714,52 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
   const moveEditableCaretToEnd = () => {
     savedRange.value = moveAiPanelEditableCaretToEnd(editableRef.value) || savedRange.value
   }
+
+  let insertPastedImageIntoEditHandler: (() => void | Promise<void>) | undefined
+  const aiPanelMessageEditRuntime = createAiPanelMessageEditRuntime({
+    renderOptions: () => editableRenderOptions.value,
+    contextById,
+    clipboardHasImage,
+    closePopups: () => closePopups(),
+    openContextPopupForTarget: (target) => openContextPopupForTarget(target),
+    afterDomUpdate: () => nextTick(),
+    requestFrame: (callback) => window.requestAnimationFrame(callback),
+    fallbackEditTarget: () => document.querySelector('.user-message-edit-container .message-editable') as HTMLElement | null,
+    insertPastedImageIntoEdit: () => insertPastedImageIntoEditHandler?.(),
+    resendUserMessageFromParts: (messageId, contentParts, hostContexts) =>
+      workspace.resendUserMessageFromParts(messageId, contentParts, hostContexts)
+  })
+
+  const {
+    editEditableRef,
+    editingMessageId,
+    editDraft,
+    editImageInputParts,
+    editFileInputParts,
+    editHostContexts,
+    cancelMessageEdit,
+    confirmMessageEdit,
+    editCommandTarget,
+    handleEditEditableClick,
+    handleEditEditableInput,
+    handleEditEditablePaste,
+    insertCommandAtEditCursor,
+    insertContextAtEditCursor,
+    insertFileChipAtEditCursor,
+    insertImageAtEditCursor,
+    openEditContextPopup,
+    removeEditHostContext,
+    removeEditTriggerToken,
+    restoreEditInputSelection,
+    restoreEditSelection,
+    saveEditSelection,
+    setEditEditableRef,
+    setEditHostContexts,
+    shouldTriggerCommandPopupForPendingSlash: shouldTriggerEditCommandPopupForPendingSlash,
+    shouldTriggerCommandPopupForSlash: shouldTriggerEditCommandPopupForSlash,
+    startMessageEdit,
+    charBeforeCaret: editCharBeforeCaret
+  } = aiPanelMessageEditRuntime
 
   const aiPanelSurfaceRuntime = createAiPanelSurfaceRuntime({
     state: {
@@ -948,6 +803,7 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     openImagePicker,
     handleFileUpload
   } = aiPanelAttachmentRuntime
+  insertPastedImageIntoEditHandler = insertPastedImageIntoEdit
 
   const aiPanelComposerRuntime = createAiPanelComposerRuntime({
     editable: () => editableRef.value,
@@ -1042,21 +898,10 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
   const returnContextPopupToMain = () => aiPanelPopupInteractionRuntime.returnContextPopupToMain()
   const closeContextPopup = (options: { restoreFocus?: boolean } = {}) => aiPanelPopupInteractionRuntime.closeContextPopup(options)
 
-  const moveEditCaretToEnd = () => {
-    editSavedRange.value = moveAiPanelEditableCaretToEnd(editEditableRef.value) || editSavedRange.value
-  }
-
   const restoreEditableSelection = () => {
     if (restoreAiPanelEditableSelection(editableRef.value, savedRange.value)) return true
     if (!editableRef.value || !window.getSelection()) return false
     moveEditableCaretToEnd()
-    return true
-  }
-
-  const restoreEditInputSelection = () => {
-    if (restoreAiPanelEditableSelection(editEditableRef.value, editSavedRange.value)) return true
-    if (!editEditableRef.value || !window.getSelection()) return false
-    moveEditCaretToEnd()
     return true
   }
 
@@ -1112,7 +957,7 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     mainContexts: () => workspace.selectedContexts,
     editHostContexts: () => editHostContexts.value,
     visibleHostContexts: () => visibleHostContextOptions.value,
-    editCommandTarget: () => editEditableRef.value || (document.querySelector('.user-message-edit-container .message-editable') as HTMLElement | null),
+    editCommandTarget,
     setMainContexts: (contexts) => {
       workspace.selectedContexts = contexts
     },
@@ -1123,9 +968,9 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     closeContextPopup,
     closeCommandPopup,
     removeMainTriggerToken: (token) => removeTokenFromEditableCursor(editableRef.value, savedRange, token, handleEditableInput),
-    removeEditTriggerToken: (token) => removeTokenFromEditableCursor(editEditableRef.value, editSavedRange, token, handleEditEditableInput),
+    removeEditTriggerToken,
     insertContextAtEditCursor,
-    insertCommandAtEditCursor: (target, part) => insertChipIntoEditableCursor(target, part, handleEditEditableInput),
+    insertCommandAtEditCursor,
     restoreEditSelection,
     selectCommandPreset: (id, commandRef) => workspace.selectCommandPreset(id, commandRef),
     setDraft,
@@ -1154,19 +999,23 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     cancelMessageEdit,
     shouldTriggerCommandPopupForPendingSlash: (target: 'main' | 'edit') =>
       target === 'edit'
-        ? shouldTriggerAiPanelCommandPopupForPendingSlash(editEditableRef.value, editSavedRange.value)
+        ? shouldTriggerEditCommandPopupForPendingSlash()
         : shouldTriggerAiPanelCommandPopupForPendingSlash(editableRef.value, savedRange.value),
     shouldTriggerCommandPopupForSlash: (target: 'main' | 'edit') =>
       target === 'edit'
-        ? shouldTriggerAiPanelCommandPopupForSlash(editEditableRef.value, editSavedRange.value)
+        ? shouldTriggerEditCommandPopupForSlash()
         : shouldTriggerAiPanelCommandPopupForSlash(editableRef.value, savedRange.value),
     getCharBeforeCaret: (target: 'main' | 'edit') =>
-      target === 'edit' ? aiPanelCharBeforeCaret(editEditableRef.value, editSavedRange.value) : aiPanelCharBeforeCaret(editableRef.value, savedRange.value),
+      target === 'edit' ? editCharBeforeCaret() : aiPanelCharBeforeCaret(editableRef.value, savedRange.value),
     shouldTriggerCommandPopupFromEditableText
   })
 
   const handleEditableKeydown = (event: KeyboardEvent) => {
     aiPanelPopupInteractionRuntime.handleMainEditableKeydown(event, popupEditableKeydownInput())
+  }
+
+  const handleEditEditableKeydown = (event: KeyboardEvent) => {
+    aiPanelPopupInteractionRuntime.handleEditEditableKeydown(event, popupEditableKeydownInput())
   }
 
   const handleContextKeydown = (event: KeyboardEvent) => aiPanelPopupInteractionRuntime.handleContextKeydown(event, popupEditableKeydownInput())
