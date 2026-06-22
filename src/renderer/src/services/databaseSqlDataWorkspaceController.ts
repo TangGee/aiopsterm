@@ -1,5 +1,5 @@
 import { computed, nextTick, reactive, type ComputedRef, type Ref } from 'vue'
-import { databaseClient } from '@/services/databaseClient'
+import { createDatabaseSqlDataBackend } from '@/services/databaseSqlDataBackend'
 import {
   addDataRowState,
   applyFilters,
@@ -21,7 +21,6 @@ import {
   type DbFilter
 } from '@/services/databaseGridRuntime'
 import { currentSqlStatement, firstStatement, formatSqlText } from '@/services/databaseSqlEditorRuntime'
-import { localFilesClient } from '@/services/localFilesClient'
 import {
   isDatabaseExportData,
   isDatabasePageCommentGetData,
@@ -54,6 +53,7 @@ import type {
   DatabasePageCommentKey,
   DatabaseSqlExecuteResult,
   DatabaseTableInfo,
+  DatabaseTableMutationPlanInput,
   DatabaseTableMutationInput,
   DatabaseTableMutationResult,
   DatabaseTableQueryResult
@@ -105,12 +105,9 @@ export const createDatabaseSqlDataWorkspaceController = (
     setEditorSql
   } = deps
 
-  const DATABASE_SQL_EXECUTOR_UNAVAILABLE_MESSAGE = 'Database SQL executor service unavailable'
-  const DATABASE_TABLE_QUERY_UNAVAILABLE_MESSAGE = 'Database table query service unavailable'
-  const DATABASE_TABLE_MUTATION_PLAN_UNAVAILABLE_MESSAGE = 'Database table mutation planner service unavailable'
-  const DATABASE_TABLE_MUTATION_UNAVAILABLE_MESSAGE = 'Database table mutation service unavailable'
   const DATABASE_TABLE_MUTATION_MALFORMED_MESSAGE = 'Backend table mutation returned malformed result data.'
   const SQL_FILE_WRITE_MALFORMED_MESSAGE = 'SQL file writer returned malformed result data.'
+  const backend = createDatabaseSqlDataBackend({ bridgeErrorMessage, errorToMessage })
 
   const resultSeq = { value: 1 }
   const sqlResultViewStateById = reactive<Record<string, SqlResultViewState>>({})
@@ -294,22 +291,14 @@ export const createDatabaseSqlDataWorkspaceController = (
   }
 
   const executeSqlThroughBackend = async (tab: SqlTab, sql: string): Promise<DatabaseSqlExecuteResult> => {
-    const executeDatabaseSql = databaseClient.executeDatabaseSql()
-    if (!executeDatabaseSql) {
-      return { ok: false, errorCode: 'DB_PRELOAD_UNAVAILABLE', errorMessage: DATABASE_SQL_EXECUTOR_UNAVAILABLE_MESSAGE }
-    }
     const connection = findConnection(tab.connectionId)
-    try {
-      return await executeDatabaseSql({
-        connectionId: tab.connectionId,
-        dbType: connection?.dbType,
-        sql,
-        databaseName: tab.catalogName,
-        schemaName: tab.schemaName
-      })
-    } catch (error) {
-      return { ok: false, errorCode: 'DB_SQL_EXECUTOR_FAILED', errorMessage: bridgeErrorMessage(error, 'Backend SQL executor failed.') }
-    }
+    return backend.executeSql({
+      connectionId: tab.connectionId,
+      dbType: connection?.dbType,
+      sql,
+      databaseName: tab.catalogName,
+      schemaName: tab.schemaName
+    })
   }
 
   const sqlOutcomeFromBackendResult = (result: DatabaseSqlExecuteResult | undefined): SqlExecutionOutcome => {
@@ -373,32 +362,18 @@ export const createDatabaseSqlDataWorkspaceController = (
   const fileNameFromPath = (filePath: string) => String(filePath || '').split(/[\\/]/).filter(Boolean).pop() || filePath
 
   const pickSqlSavePath = async (tab: SqlTab) => {
-    const showSaveDialog = localFilesClient.showSaveDialog()
-    if (!showSaveDialog) {
-      return { ok: false as const, error: 'SQL save dialog service unavailable' }
-    }
-    try {
-      const result = await showSaveDialog({
-        defaultPath: tab.filePath || defaultSqlFileName(tab),
-        filters: [{ name: 'SQL Files', extensions: ['sql'] }]
-      })
-      if (!result || result.canceled || !result.filePath) return { ok: true as const, canceled: true as const }
-      return { ok: true as const, canceled: false as const, filePath: result.filePath }
-    } catch (error) {
-      return { ok: false as const, error: bridgeErrorMessage(error, 'SQL save dialog failed') }
-    }
+    return backend.pickSqlSavePath(tab.filePath || defaultSqlFileName(tab))
   }
 
   const saveActiveSql = async (forceSaveAs: boolean) => {
     const tab = activeSqlTab.value
     if (!tab || tab.saving) return
-    const writeLocalFile = localFilesClient.writeLocalFile()
-    if (!writeLocalFile) {
-      tab.saveError = 'SQL file writer service unavailable'
+    const writerUnavailable = backend.sqlFileWriterUnavailableError()
+    if (writerUnavailable) {
+      tab.saveError = writerUnavailable
       showNotice(tab.saveError)
       return
     }
-
     tab.saving = true
     tab.saveError = null
     try {
@@ -416,13 +391,18 @@ export const createDatabaseSqlDataWorkspaceController = (
         }
         targetPath = picked.filePath
       }
-      const result = await writeLocalFile(targetPath, tab.sql)
-      if (result?.ok !== true) {
-        tab.saveError = result?.errorMessage || 'SQL file save failed'
+      const write = await backend.saveSqlFile(targetPath, tab.sql)
+      if (!write.ok) {
+        tab.saveError = write.error
         showNotice(tab.saveError)
         return
       }
-      if (!isLocalFileWriteData(result.data, targetPath, tab.sql)) {
+      if (write.result?.ok !== true) {
+        tab.saveError = write.result?.errorMessage || 'SQL file save failed'
+        showNotice(tab.saveError)
+        return
+      }
+      if (!isLocalFileWriteData(write.result.data, targetPath, tab.sql)) {
         tab.saveError = SQL_FILE_WRITE_MALFORMED_MESSAGE
         showNotice(tab.saveError)
         return
@@ -431,9 +411,6 @@ export const createDatabaseSqlDataWorkspaceController = (
       tab.savedSql = tab.sql
       tab.saveError = null
       showNotice(`SQL saved to ${fileNameFromPath(targetPath)}`)
-    } catch (error) {
-      tab.saveError = bridgeErrorMessage(error, 'SQL file save failed')
-      showNotice(tab.saveError)
     } finally {
       tab.saving = false
     }
@@ -585,7 +562,7 @@ export const createDatabaseSqlDataWorkspaceController = (
 
   const isDataTabDirty = (tab: DataTab) => isDirtyStateDirty(tab.dirtyState)
 
-  const buildDataMutationPlanInput = (tab: DataTab) => {
+  const buildDataMutationPlanInput = (tab: DataTab): DatabaseTableMutationPlanInput => {
     const connection = findConnection(tab.connectionId)
     return {
       connectionId: tab.connectionId,
@@ -612,45 +589,28 @@ export const createDatabaseSqlDataWorkspaceController = (
     const key = JSON.stringify(input)
     if (!force && tab.mutationPlan.key === key && !tab.mutationPlan.loading) return tab.mutationPlan
     tab.mutationPlan = makeDataMutationPlanState({ key, loading: true })
-    const planDatabaseTableMutation = databaseClient.planDatabaseTableMutation()
-    if (!planDatabaseTableMutation) {
+    const result = await backend.planTableMutation(input)
+    if (tab.mutationPlan.key !== key) return tab.mutationPlan
+    if (!result.ok) {
       tab.mutationPlan = makeDataMutationPlanState({
         key,
-        error: DATABASE_TABLE_MUTATION_PLAN_UNAVAILABLE_MESSAGE
+        error: result.errorMessage || 'Backend table mutation planning failed.'
       })
       return tab.mutationPlan
     }
-    try {
-      const result = await planDatabaseTableMutation(input)
-      if (tab.mutationPlan.key !== key) return tab.mutationPlan
-      if (!result.ok) {
-        tab.mutationPlan = makeDataMutationPlanState({
-          key,
-          error: result.errorMessage || 'Backend table mutation planning failed.'
-        })
-        return tab.mutationPlan
-      }
-      if (!isDatabaseTableMutationPlanData(result.data)) {
-        tab.mutationPlan = makeDataMutationPlanState({
-          key,
-          error: DATABASE_TABLE_MUTATION_MALFORMED_MESSAGE
-        })
-        return tab.mutationPlan
-      }
+    if (!isDatabaseTableMutationPlanData(result.data)) {
       tab.mutationPlan = makeDataMutationPlanState({
         key,
-        statementCount: result.data.statementCount,
-        preview: result.data.preview,
-        warning: result.data.warning
+        error: DATABASE_TABLE_MUTATION_MALFORMED_MESSAGE
       })
-    } catch (error) {
-      if (tab.mutationPlan.key === key) {
-        tab.mutationPlan = makeDataMutationPlanState({
-          key,
-          error: errorToMessage(error)
-        })
-      }
+      return tab.mutationPlan
     }
+    tab.mutationPlan = makeDataMutationPlanState({
+      key,
+      statementCount: result.data.statementCount,
+      preview: result.data.preview,
+      warning: result.data.warning
+    })
     return tab.mutationPlan
   }
 
@@ -760,44 +720,24 @@ export const createDatabaseSqlDataWorkspaceController = (
       mutations: buildDataMutationPayload(tab)
     })
 
-  const mutateDatabaseTableThroughBackend = async (input: DatabaseTableMutationInput): Promise<DatabaseTableMutationResult> => {
-    const mutateDatabaseTable = databaseClient.mutateDatabaseTable()
-    if (!mutateDatabaseTable) {
-      return { ok: false, errorCode: 'DB_PRELOAD_UNAVAILABLE', errorMessage: DATABASE_TABLE_MUTATION_UNAVAILABLE_MESSAGE }
-    }
-    try {
-      return await mutateDatabaseTable(input)
-    } catch (error) {
-      return { ok: false, errorCode: 'DB_TABLE_MUTATION_FAILED', errorMessage: bridgeErrorMessage(error, 'Backend table mutation failed.') }
-    }
-  }
+  const mutateDatabaseTableThroughBackend = async (input: DatabaseTableMutationInput): Promise<DatabaseTableMutationResult> => backend.mutateTable(input)
 
   const exportDatabaseRowsThroughBackend = async (input: DatabaseExportInput) => {
-    const exportDatabaseRows = databaseClient.exportDatabaseRows()
-    if (!exportDatabaseRows) {
-      showNotice('Database export service unavailable')
+    const result = await backend.exportRows(input)
+    if (!result.ok) {
+      showNotice(result.errorMessage || 'Database export failed')
       return null
     }
-    try {
-      const result = await exportDatabaseRows(input)
-      if (!result.ok) {
-        showNotice(result.errorMessage || 'Database export failed')
-        return null
-      }
-      if (!isDatabaseExportData(result.data)) {
-        showNotice('Database export backend returned malformed result data.')
-        return null
-      }
-      if (result.data.canceled) {
-        showNotice('Database export cancelled')
-        return result.data
-      }
-      showNotice(`Exported ${result.data.exported} row${result.data.exported === 1 ? '' : 's'} to ${result.data.fileName}`)
+    if (!isDatabaseExportData(result.data)) {
+      showNotice('Database export backend returned malformed result data.')
+      return null
+    }
+    if (result.data.canceled) {
+      showNotice('Database export cancelled')
       return result.data
-    } catch (error) {
-      showNotice(errorToMessage(error))
-      return null
     }
+    showNotice(`Exported ${result.data.exported} row${result.data.exported === 1 ? '' : 's'} to ${result.data.fileName}`)
+    return result.data
   }
 
   const exportActiveSqlResultPage = () => {
@@ -920,35 +860,21 @@ export const createDatabaseSqlDataWorkspaceController = (
     commentModal.loading = true
     commentModal.saving = false
     commentModal.error = ''
-    const getDatabasePageComment = databaseClient.getDatabasePageComment()
-    if (!getDatabasePageComment) {
-      commentModal.loading = false
-      commentModal.error = 'Database comment service unavailable'
+    const result = await backend.getPageComment(input.key)
+    if (!commentModal.key || databasePageCommentKeyId(commentModal.key) !== databasePageCommentKeyId(input.key)) return
+    commentModal.loading = false
+    if (!result.ok) {
+      commentModal.error = result.errorMessage || 'Database comment load failed'
       showNotice(commentModal.error)
       return
     }
-    try {
-      const result = await getDatabasePageComment(input.key)
-      if (!commentModal.key || databasePageCommentKeyId(commentModal.key) !== databasePageCommentKeyId(input.key)) return
-      commentModal.loading = false
-      if (!result.ok) {
-        commentModal.error = result.errorMessage || 'Database comment load failed'
-        showNotice(commentModal.error)
-        return
-      }
-      if (!isDatabasePageCommentGetData(result.data, input.key)) {
-        commentModal.error = 'Database comment backend returned malformed result data.'
-        showNotice(commentModal.error)
-        return
-      }
-      commentModal.draft = result.data.record.comment
-      commentModal.updatedAt = result.data.record.updatedAt
-    } catch (error) {
-      if (!commentModal.key || databasePageCommentKeyId(commentModal.key) !== databasePageCommentKeyId(input.key)) return
-      commentModal.loading = false
-      commentModal.error = bridgeErrorMessage(error, 'Database comment load failed')
+    if (!isDatabasePageCommentGetData(result.data, input.key)) {
+      commentModal.error = 'Database comment backend returned malformed result data.'
       showNotice(commentModal.error)
+      return
     }
+    commentModal.draft = result.data.record.comment
+    commentModal.updatedAt = result.data.record.updatedAt
   }
 
   const openActiveSqlResultComment = () => {
@@ -981,37 +907,24 @@ export const createDatabaseSqlDataWorkspaceController = (
   const saveActiveComment = async () => {
     const key = commentModal.key
     if (!key || commentModal.loading || commentModal.saving) return
-    const saveDatabasePageComment = databaseClient.saveDatabasePageComment()
-    if (!saveDatabasePageComment) {
-      commentModal.error = 'Database comment service unavailable'
+    commentModal.saving = true
+    commentModal.error = ''
+    const result = await backend.savePageComment(key, commentModal.draft)
+    if (!commentModal.key || databasePageCommentKeyId(commentModal.key) !== databasePageCommentKeyId(key)) return
+    commentModal.saving = false
+    if (!result.ok) {
+      commentModal.error = result.errorMessage || 'Database comment save failed'
       showNotice(commentModal.error)
       return
     }
-    commentModal.saving = true
-    commentModal.error = ''
-    try {
-      const result = await saveDatabasePageComment({ key, comment: commentModal.draft })
-      if (!commentModal.key || databasePageCommentKeyId(commentModal.key) !== databasePageCommentKeyId(key)) return
-      commentModal.saving = false
-      if (!result.ok) {
-        commentModal.error = result.errorMessage || 'Database comment save failed'
-        showNotice(commentModal.error)
-        return
-      }
-      if (!isDatabasePageCommentSaveData(result.data, key)) {
-        commentModal.error = 'Database comment backend returned malformed result data.'
-        showNotice(commentModal.error)
-        return
-      }
-      commentModal.draft = result.data.record.comment
-      commentModal.updatedAt = result.data.record.updatedAt
-      showNotice(result.data.message || 'Comment saved')
-    } catch (error) {
-      if (!commentModal.key || databasePageCommentKeyId(commentModal.key) !== databasePageCommentKeyId(key)) return
-      commentModal.saving = false
-      commentModal.error = bridgeErrorMessage(error, 'Database comment save failed')
+    if (!isDatabasePageCommentSaveData(result.data, key)) {
+      commentModal.error = 'Database comment backend returned malformed result data.'
       showNotice(commentModal.error)
+      return
     }
+    commentModal.draft = result.data.record.comment
+    commentModal.updatedAt = result.data.record.updatedAt
+    showNotice(result.data.message || 'Comment saved')
   }
 
   const closeCommentModal = () => {
@@ -1090,37 +1003,27 @@ export const createDatabaseSqlDataWorkspaceController = (
         void refreshDataMutationPlan(tab)
       }
       if (options.notice) showNotice(options.notice)
-    } catch (error) {
-      tab.error = errorToMessage(error)
     } finally {
       tab.loading = false
     }
   }
 
-  const queryDataTabThroughBackend = async (tab: DataTab, withTotal: boolean): Promise<DatabaseTableQueryResult> => {
-    const queryDatabaseTable = databaseClient.queryDatabaseTable()
-    if (!queryDatabaseTable) {
-      return { ok: false, errorCode: 'DB_PRELOAD_UNAVAILABLE', errorMessage: DATABASE_TABLE_QUERY_UNAVAILABLE_MESSAGE }
-    }
+  const queryDataTabThroughBackend = (tab: DataTab, withTotal: boolean): Promise<DatabaseTableQueryResult> => {
     const connection = findConnection(tab.connectionId)
-    try {
-      return await queryDatabaseTable({
-        connectionId: tab.connectionId,
-        dbType: connection?.dbType,
-        databaseName: tab.catalogName,
-        schemaName: tab.schemaName,
-        tableName: tab.tableName,
-        filters: tab.filters.map((filter) => ({ ...filter })),
-        sort: tab.sort ? { ...tab.sort } : null,
-        whereRaw: tab.whereRaw || null,
-        orderByRaw: tab.orderByRaw || null,
-        page: tab.page,
-        pageSize: tab.pageSize,
-        withTotal
-      })
-    } catch (error) {
-      return { ok: false, errorCode: 'DB_TABLE_QUERY_FAILED', errorMessage: bridgeErrorMessage(error, 'Backend table query failed.') }
-    }
+    return backend.queryTable({
+      connectionId: tab.connectionId,
+      dbType: connection?.dbType,
+      databaseName: tab.catalogName,
+      schemaName: tab.schemaName,
+      tableName: tab.tableName,
+      filters: tab.filters.map((filter) => ({ ...filter })),
+      sort: tab.sort ? { ...tab.sort } : null,
+      whereRaw: tab.whereRaw || null,
+      orderByRaw: tab.orderByRaw || null,
+      page: tab.page,
+      pageSize: tab.pageSize,
+      withTotal
+    })
   }
 
   const isViewTable = (tab: DataTab) => {

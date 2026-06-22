@@ -186,6 +186,14 @@ const socketStreamFrames = (socketPath: string, request: Record<string, unknown>
 
 const nextTick = () => new Promise<void>((resolve) => setTimeout(resolve, 0))
 
+const waitForEventSubscriptionsToDrain = async (backend: ControlSocketBackend, attempts = 20) => {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    if (backend.__testing.eventSubscriptionCount() === 0) return
+    await nextTick()
+  }
+  expect(backend.__testing.eventSubscriptionCount()).toBe(0)
+}
+
 const waitForAgentVaultScanMatch = async (backend: ControlSocketBackend, sessionId: string, attempts = 20) => {
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     const response = await backend.__testing.handleControlRequest({ method: 'agent.vault.scan', params: { id: 'scan-agent' } })
@@ -2100,8 +2108,7 @@ describe('control socket backend', () => {
       )
       expect(liveFrames[0]).toEqual(expect.objectContaining({ type: 'ack', replay_count: 0 }))
       expect(liveFrames[1]).toEqual(expect.objectContaining({ type: 'event', name: 'notification.created', category: 'notification' }))
-      await nextTick()
-      expect(backend.__testing.eventSubscriptionCount()).toBe(0)
+      await waitForEventSubscriptionsToDrain(backend)
     } finally {
       backend.closeControlSocketServer()
       await rm(root, { recursive: true, force: true })
