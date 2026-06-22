@@ -3,8 +3,6 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from '
 import type {
   DatabaseCatalogInfo,
   DatabaseCatalogResult,
-  DatabaseCatalogDefaults,
-  DatabaseColumnInfo,
   DatabaseConnectionInfo,
   DatabaseConnectionDeleteResult,
   DatabaseConnectionMoveInput,
@@ -15,19 +13,16 @@ import type {
   DatabaseConnectionSaveResult,
   DatabaseConnectionTestInput,
   DatabaseConnectionTestResult,
-  DatabaseEngineCode,
   DatabaseGroupCreateInput,
   DatabaseGroupDeleteResult,
   DatabaseGroupInfo,
   DatabaseGroupMutationResult,
   DatabaseGroupUpdateInput,
-  DatabaseSchemaInfo,
   DatabaseWorkspaceCatalog,
   DatabaseSqlExecuteInput,
   DatabaseSqlExecuteResult,
   DatabaseTableDdlInput,
   DatabaseTableDdlResult,
-  DatabaseTableInfo,
   DatabaseTableMutationInput,
   DatabaseTableMutationPlanInput,
   DatabaseTableMutationPlanResult,
@@ -42,7 +37,22 @@ import {
   resetDatabaseAiBackendState
 } from './databaseAi'
 import {
-  connectionUsesDatabaseProxy,
+  cloneDatabaseCatalog,
+  cloneDatabaseCatalogRaw,
+  cloneDatabaseConnectionForRuntime,
+  createDatabaseCatalogForConnection,
+  databaseCatalogDefaultsForRuntime,
+  databaseGroupDescendantIds,
+  databaseNameFromCreateSql,
+  defaultCatalogsForSavedConnection,
+  nextDatabaseConnectionId,
+  nextDatabaseGroupId,
+  normalizeDatabaseConnectionSaveDraft,
+  normalizedDatabaseGroupId,
+  normalizedDatabaseGroupParentId,
+  visibleDatabaseConnectionsForRuntime
+} from './databaseCatalogRuntime'
+import {
   testDatabaseConnectionRuntime
 } from './databaseConnectionTestRuntime'
 import {
@@ -50,7 +60,6 @@ import {
   encryptDatabaseCredentialForStorage
 } from './databaseCredentialStorage'
 import {
-  clickHouseBaseUrlFrom,
   clickHouseCatalogsForConnection,
   clickHouseColumnsForTable,
   clickHouseErrorCode,
@@ -65,7 +74,6 @@ import {
   configureDatabaseHttpEngines,
   isClickHouseConnection,
   isPrestoConnection,
-  prestoBaseUrlFrom,
   prestoCatalogsForConnection,
   prestoErrorCode,
   prestoErrorMessage,
@@ -140,7 +148,6 @@ import {
   sqliteFilePathFromConnection,
   sqliteMutationPlan,
   sqliteMutateTable,
-  sqlitePathFromUrl,
   sqliteQueryTable,
   sqliteTableDdl
 } from './databaseSqliteRuntime'
@@ -150,8 +157,6 @@ import {
 } from './databaseTableRuntime'
 import { shouldUseDatabaseSeedData as runtimeShouldUseDatabaseSeedData } from './runtimeSwitches'
 
-const databaseEnvValues = new Set<DatabaseConnectionInfo['env']>(['Development', 'TEST', 'Staging', 'Production'])
-const postgresSslModeValues = new Set(['', 'disable', 'require', 'verify-ca', 'verify-full'])
 type DatabaseFetch = typeof fetch
 export type DatabaseRuntimeConfig = {
   useSeedData?: boolean
@@ -184,21 +189,6 @@ export function configureDatabaseRuntime(config?: DatabaseRuntimeConfig) {
 }
 
 const shouldUseDatabaseSeedData = () => databaseRuntimeConfig.useSeedData ?? runtimeShouldUseDatabaseSeedData()
-
-const jdbcSchemeForDbType = (dbType: DatabaseEngineCode) =>
-  dbType === 'postgresql'
-    ? 'jdbc:postgresql'
-    : dbType === 'kingbase'
-      ? 'jdbc:kingbase8'
-      : dbType === 'sqlserver'
-        ? 'jdbc:sqlserver'
-        : dbType === 'clickhouse' || dbType === 'presto'
-          ? 'http'
-          : dbType === 'mariadb'
-            ? 'jdbc:mariadb'
-            : dbType === 'oceanbase'
-              ? 'jdbc:oceanbase'
-              : 'jdbc:mysql'
 
 const connectionTestInputFromSaved = (connection: DatabaseConnectionInfo): DatabaseConnectionTestInput => ({
   dbType: connection.dbType,
@@ -283,77 +273,21 @@ configureDatabaseSqliteRuntime({
   workspaceCatalogFor: (selectedConnectionId) => databaseWorkspaceCatalogFor(selectedConnectionId)
 })
 
-const cloneDatabaseColumn = (column: DatabaseColumnInfo): DatabaseColumnInfo => ({ ...column })
-
-const cloneDatabaseTable = (table: DatabaseTableInfo): DatabaseTableInfo => ({
-  ...table,
-  columns: table.columns.map(cloneDatabaseColumn),
-  primaryKey: table.primaryKey.slice()
-})
-
-const cloneDatabaseCatalogRaw = (catalog: DatabaseCatalogInfo): DatabaseCatalogInfo => ({
-  name: catalog.name,
-  ...(catalog.tables ? { tables: catalog.tables.map(cloneDatabaseTable) } : {}),
-  ...(catalog.schemas
-    ? {
-        schemas: catalog.schemas.map((schema) => ({
-          name: schema.name,
-          tables: schema.tables.map(cloneDatabaseTable),
-          views: schema.views?.map(cloneDatabaseTable),
-          functions: schema.functions?.slice(),
-          procedures: schema.procedures?.slice()
-        }))
-      }
-    : {})
-})
-
-const cloneDatabaseCatalog = (connectionId: string, catalog: DatabaseCatalogInfo): DatabaseCatalogInfo => ({
-  name: catalog.name,
-  ...(catalog.tables
-    ? {
-        tables: catalog.tables
-          .filter((table) => databaseSeedTableExistsInBackend({ connectionId, databaseName: catalog.name, tableName: table.name }))
-          .map(cloneDatabaseTable)
-      }
-    : {}),
-  ...(catalog.schemas
-    ? {
-        schemas: catalog.schemas.map((schema) => ({
-          name: schema.name,
-          tables: schema.tables
-            .filter((table) => databaseSeedTableExistsInBackend({ connectionId, databaseName: catalog.name, schemaName: schema.name, tableName: table.name }))
-            .map(cloneDatabaseTable),
-          views: (schema.views ?? [])
-            .filter((table) => databaseSeedTableExistsInBackend({ connectionId, databaseName: catalog.name, schemaName: schema.name, tableName: table.name }))
-            .map(cloneDatabaseTable),
-          functions: schema.functions?.slice(),
-          procedures: schema.procedures?.slice()
-        }))
-      }
-    : {})
-})
-
-const cloneDatabaseConnection = (connection: DatabaseConnectionInfo): DatabaseConnectionInfo => ({
-  ...connection,
-  status:
-	    !shouldUseDatabaseSeedData() &&
-	    (isRelationalConnection(connection) || isClickHouseConnection(connection) || isPrestoConnection(connection)) &&
-	    connection.status === 'connected' &&
-	    !databaseVerifiedConnections.has(connection.id)
-      ? 'idle'
-      : connection.status,
-  catalogs:
-    (connection.dbType === 'sqlite' && isRealSqliteConnection(connection)) || !shouldUseDatabaseSeedData()
-      ? connection.catalogs.map(cloneDatabaseCatalogRaw)
-      : connection.catalogs.map((catalog) => cloneDatabaseCatalog(connection.id, catalog))
-})
-
 let databaseGroups: DatabaseGroupInfo[] = databaseGroupSeed.map((group) => ({ ...group }))
 let databaseGroupParents: Record<string, string | null> = { ...databaseGroupParentSeed }
-let databaseConnections: DatabaseConnectionInfo[] = databaseConnectionSeed.map(cloneDatabaseConnection)
+let databaseConnections: DatabaseConnectionInfo[] = []
 let databaseLoadedStateFilePath = ''
 
 const databaseStateFilePath = () => trim(databaseRuntimeConfig.stateFilePath)
+
+const cloneDatabaseConnection = (connection: DatabaseConnectionInfo): DatabaseConnectionInfo =>
+  cloneDatabaseConnectionForRuntime(connection, {
+    shouldUseSeedData: shouldUseDatabaseSeedData,
+    isVerifiedConnection: (connectionId) => databaseVerifiedConnections.has(connectionId),
+    seedTableExists: databaseSeedTableExistsInBackend
+  })
+
+databaseConnections = databaseConnectionSeed.map(cloneDatabaseConnection)
 
 const applyPersistedDatabaseState = (state: DatabasePersistedState) => {
   databaseGroups = state.groups.map((group) => ({ ...group }))
@@ -408,238 +342,26 @@ const persistDatabaseState = () => {
 }
 
 const visibleDatabaseConnections = () =>
-  shouldUseDatabaseSeedData()
-    ? databaseConnections
-    : databaseConnections.filter((connection) => !databaseConnectionSeedIds.has(connection.id) || databaseVerifiedConnections.has(connection.id) || databaseConnectionSecrets.has(connection.id))
-
-const defaultDatabaseCatalogDefaults = (): DatabaseCatalogDefaults => ({
-  selectedNodeId: 'conn-prod-pg',
-  expandedGroupIds: ['group-default', 'group-prod', 'group-local'],
-  expandedConnectionIds: ['conn-prod-pg'],
-  expandedCatalogIds: ['conn-prod-pg:orders'],
-  expandedSchemaIds: ['conn-prod-pg:orders:public', 'conn-prod-pg:orders:ops'],
-  expandedSchemaObjectFolderIds: ['conn-prod-pg:orders:public:tables', 'conn-prod-pg:orders:ops:tables']
-})
-
-const schemaHasObjects = (schema: DatabaseSchemaInfo) =>
-  schema.tables.length > 0 || (schema.views?.length ?? 0) > 0 || (schema.functions?.length ?? 0) > 0 || (schema.procedures?.length ?? 0) > 0
-
-const databaseCatalogDefaultsFor = (selectedConnectionId = 'conn-prod-pg'): DatabaseCatalogDefaults => {
-  const baseDefaults = defaultDatabaseCatalogDefaults()
-  const visibleConnections = visibleDatabaseConnections()
-  const selectedConnection = visibleConnections.find((connection) => connection.id === selectedConnectionId)
-  const selectedGroup = databaseGroups.find((group) => group.id === selectedConnectionId)
-  const expandedGroupIds = databaseGroups.map((group) => group.id)
-  if (!selectedConnection || selectedConnectionId === 'conn-prod-pg') {
-    if (!shouldUseDatabaseSeedData() && !selectedConnection) {
-      const firstConnection = visibleConnections[0]
-      return {
-        selectedNodeId: selectedGroup?.id ?? firstConnection?.id ?? null,
-        expandedGroupIds,
-        expandedConnectionIds: firstConnection ? [firstConnection.id] : [],
-        expandedCatalogIds: [],
-        expandedSchemaIds: [],
-        expandedSchemaObjectFolderIds: []
-      }
-    }
-    return {
-      ...baseDefaults,
-      selectedNodeId: selectedGroup?.id ?? baseDefaults.selectedNodeId,
-      expandedGroupIds
-    }
-  }
-
-  const expandedCatalogIds = selectedConnection.catalogs.map((catalog) => `${selectedConnection.id}:${catalog.name}`)
-  const expandedSchemaIds = selectedConnection.catalogs.flatMap((catalog) =>
-    (catalog.schemas ?? []).filter(schemaHasObjects).map((schema) => `${selectedConnection.id}:${catalog.name}:${schema.name}`)
-  )
-  const expandedSchemaObjectFolderIds = selectedConnection.catalogs.flatMap((catalog) =>
-    (catalog.schemas ?? []).flatMap((schema) => {
-      const folderIds: string[] = []
-      if (schema.tables.length) folderIds.push(`${selectedConnection.id}:${catalog.name}:${schema.name}:tables`)
-      if (schema.views?.length) folderIds.push(`${selectedConnection.id}:${catalog.name}:${schema.name}:views`)
-      if (schema.functions?.length) folderIds.push(`${selectedConnection.id}:${catalog.name}:${schema.name}:functions`)
-      if (schema.procedures?.length) folderIds.push(`${selectedConnection.id}:${catalog.name}:${schema.name}:procedures`)
-      return folderIds
-    })
-  )
-
-  return {
-    selectedNodeId: selectedConnection.id,
-    expandedGroupIds,
-    expandedConnectionIds: Array.from(new Set([...baseDefaults.expandedConnectionIds, selectedConnection.id])),
-    expandedCatalogIds: Array.from(new Set([...baseDefaults.expandedCatalogIds, ...expandedCatalogIds])),
-    expandedSchemaIds: Array.from(new Set([...baseDefaults.expandedSchemaIds, ...expandedSchemaIds])),
-    expandedSchemaObjectFolderIds: Array.from(new Set([...baseDefaults.expandedSchemaObjectFolderIds, ...expandedSchemaObjectFolderIds]))
-  }
-}
+  visibleDatabaseConnectionsForRuntime({
+    connections: databaseConnections,
+    shouldUseSeedData: shouldUseDatabaseSeedData(),
+    seedConnectionIds: databaseConnectionSeedIds,
+    isVerifiedConnection: (connectionId) => databaseVerifiedConnections.has(connectionId),
+    hasConnectionSecret: (connectionId) => databaseConnectionSecrets.has(connectionId)
+  })
 
 const databaseWorkspaceCatalogFor = (selectedConnectionId = 'conn-prod-pg'): DatabaseWorkspaceCatalog => ({
   engines: databaseEngines.map((engine) => ({ ...engine })),
   groups: databaseGroups.map((group) => ({ ...group })),
   groupParents: { ...databaseGroupParents },
   connections: visibleDatabaseConnections().map(cloneDatabaseConnection),
-  defaults: databaseCatalogDefaultsFor(selectedConnectionId)
+  defaults: databaseCatalogDefaultsForRuntime({
+    selectedConnectionId,
+    visibleConnections: visibleDatabaseConnections(),
+    groups: databaseGroups,
+    shouldUseSeedData: shouldUseDatabaseSeedData()
+  })
 })
-
-const basenameFromPath = (value: string) => {
-  const normalized = value.replace(/\\/g, '/')
-  return normalized.split('/').filter(Boolean).pop() || 'main'
-}
-
-const slugForConnectionId = (value: string) =>
-  trim(value)
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 48) || 'database'
-
-const slugForGroupId = (value: string) =>
-  trim(value)
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 48) || 'group'
-
-const nextDatabaseConnectionId = (name: string) => {
-  const base = `conn-${slugForConnectionId(name)}`
-  let candidate = base
-  let suffix = 2
-  while (databaseConnections.some((connection) => connection.id === candidate)) {
-    candidate = `${base}-${suffix}`
-    suffix += 1
-  }
-  return candidate
-}
-
-const nextDatabaseGroupId = (name: string) => {
-  const base = `group-${slugForGroupId(name)}`
-  let candidate = base
-  let suffix = 2
-  while (databaseGroups.some((group) => group.id === candidate)) {
-    candidate = `${base}-${suffix}`
-    suffix += 1
-  }
-  return candidate
-}
-
-const databaseGroupExists = (groupId: string | null | undefined) => !!groupId && databaseGroups.some((group) => group.id === groupId)
-
-const normalizedDatabaseGroupId = (groupId: string | null | undefined) => {
-  const id = trim(groupId)
-  return databaseGroupExists(id) ? id : DEFAULT_DATABASE_GROUP_ID
-}
-
-const normalizedDatabaseGroupParentId = (groupId: string | null | undefined) => {
-  const id = trim(groupId)
-  return databaseGroupExists(id) ? id : null
-}
-
-const databaseGroupDescendantIds = (groupId: string) => {
-  const out = new Set<string>()
-  const visit = (parentId: string) => {
-    for (const group of databaseGroups) {
-      if ((databaseGroupParents[group.id] ?? null) === parentId) {
-        out.add(group.id)
-        visit(group.id)
-      }
-    }
-  }
-  visit(groupId)
-  return out
-}
-
-const normalizedDatabasePort = (value: number | null | undefined) => (typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null)
-
-const buildSavedConnectionUrl = (
-  input: DatabaseConnectionTestInput,
-  normalized: Pick<DatabaseConnectionInfo, 'dbType' | 'host' | 'port' | 'database' | 'filePath'>
-) => {
-  const rawUrl = trim(input.url)
-  if (rawUrl) return rawUrl
-  if (normalized.dbType === 'sqlite') return `sqlite://${normalized.filePath || ''}`
-  if (normalized.dbType === 'clickhouse') return clickHouseBaseUrlFrom(normalized)
-  if (normalized.dbType === 'presto') return prestoBaseUrlFrom(normalized)
-  const port = normalized.port ? `:${normalized.port}` : ''
-  const database = normalized.database ? `/${normalized.database}` : ''
-  if (normalized.dbType === 'oracle') return `${normalized.host}${port}${database}`
-  const scheme = jdbcSchemeForDbType(normalized.dbType)
-  return `${scheme}://${normalized.host}${port}${database}`
-}
-
-const defaultCatalogsForSavedConnection = (connection: Omit<DatabaseConnectionInfo, 'catalogs'>): DatabaseCatalogInfo[] => {
-  const catalogName = trim(connection.database)
-  if (!catalogName) return []
-  if (connection.dbType === 'sqlite') {
-    const sqliteCatalogs = sqliteCatalogsForConnection({ ...connection, catalogs: [] })
-    return sqliteCatalogs ?? [{ name: catalogName, tables: [] }]
-  }
-  if (isPostgresCompatibleDbType(connection.dbType)) {
-    return [{ name: catalogName, schemas: [{ name: 'public', tables: [], views: [], functions: [], procedures: [] }] }]
-  }
-  if (connection.dbType === 'oracle') {
-    return [{ name: catalogName, schemas: [{ name: 'OPS', tables: [], views: [], functions: [], procedures: [] }] }]
-  }
-  if (connection.dbType === 'sqlserver') {
-    return [{ name: catalogName, schemas: [{ name: 'dbo', tables: [], views: [], functions: [], procedures: [] }] }]
-  }
-  if (connection.dbType === 'presto') {
-    return [{ name: catalogName, schemas: [] }]
-  }
-  return [{ name: catalogName, tables: [] }]
-}
-
-const createDatabaseCatalogForConnection = (connection: DatabaseConnectionInfo, name: string): DatabaseCatalogInfo =>
-  isPostgresCompatibleDbType(connection.dbType) || connection.dbType === 'sqlserver'
-    ? { name, schemas: [{ name: isPostgresCompatibleDbType(connection.dbType) ? 'public' : 'dbo', tables: [], views: [], functions: [], procedures: [] }] }
-    : { name, tables: [] }
-
-const unquoteDatabaseIdentifier = (value: string) => {
-  const token = trim(value)
-  if (token.startsWith('`') && token.endsWith('`')) return token.slice(1, -1).replace(/``/g, '`')
-  if (token.startsWith('"') && token.endsWith('"')) return token.slice(1, -1).replace(/""/g, '"')
-  if (token.startsWith('[') && token.endsWith(']')) return token.slice(1, -1).replace(/]]/g, ']')
-  return token
-}
-
-const databaseNameFromCreateSql = (sql: string) => {
-  const match = trim(sql).match(/^create\s+database\s+(?:if\s+not\s+exists\s+)?(`(?:``|[^`])+`|"(?:""|[^"])+"|\[(?:]]|[^\]])+\]|[A-Za-z_][A-Za-z0-9_]*)\s*;?$/i)
-  return match ? unquoteDatabaseIdentifier(match[1]) : ''
-}
-
-const normalizeDatabaseConnectionSaveDraft = (
-  input: DatabaseConnectionSaveInput['connection']
-): Omit<DatabaseConnectionInfo, 'id' | 'status' | 'catalogs' | 'hasPassword'> => {
-  const isSqlite = input.dbType === 'sqlite'
-  const hasOracleConnectString = input.dbType === 'oracle' && !!trim(input.url)
-  const filePath = isSqlite ? trim(input.filePath) || sqlitePathFromUrl(trim(input.url)) : ''
-  const database = isSqlite ? basenameFromPath(filePath) : trim(input.database)
-  const host = isSqlite ? 'local' : hasOracleConnectString ? 'connect-string' : trim(input.host)
-  const port = isSqlite || hasOracleConnectString ? null : normalizedDatabasePort(input.port)
-  const sslMode: DatabaseConnectionInfo['sslMode'] =
-    isPostgresCompatibleDbType(input.dbType) && postgresSslModeValues.has(input.sslMode ?? '') ? ((input.sslMode || '') as DatabaseConnectionInfo['sslMode']) : ''
-  const proxyName = !isSqlite && connectionUsesDatabaseProxy(input) ? trim(input.proxyName) : ''
-  const normalized = {
-    name: trim(input.name),
-    dbType: input.dbType,
-    env: input.env && databaseEnvValues.has(input.env) ? input.env : 'Development',
-    groupId: normalizedDatabaseGroupId(input.groupId),
-    host,
-    port,
-    authentication: input.authentication === 'UserAndPassword' ? input.authentication : 'UserAndPassword',
-    user: isSqlite ? '' : trim(input.user),
-    database,
-    filePath: isSqlite ? filePath : undefined,
-    readonly: isSqlite ? !!input.readonly : undefined,
-    sslMode,
-    needProxy: !isSqlite && !!proxyName ? true : undefined,
-    proxyName: !isSqlite && proxyName ? proxyName : undefined
-  }
-  return {
-    ...normalized,
-    url: buildSavedConnectionUrl(input, normalized)
-  }
-}
 
 export function resetDatabaseBackendSeed() {
   databaseRuntimeConfig = {}
@@ -664,9 +386,9 @@ export async function listDatabaseCatalog(): Promise<DatabaseCatalogResult> {
 export async function createDatabaseGroup(input: DatabaseGroupCreateInput): Promise<DatabaseGroupMutationResult> {
   ensureDatabaseStateLoaded()
   const name = trim(input.name) || 'New Group'
-  const parentId = normalizedDatabaseGroupParentId(input.parentId)
+  const parentId = normalizedDatabaseGroupParentId(input.parentId, databaseGroups)
   const group: DatabaseGroupInfo = {
-    id: nextDatabaseGroupId(name),
+    id: nextDatabaseGroupId(name, databaseGroups),
     name
   }
   databaseGroups.push(group)
@@ -717,8 +439,8 @@ export async function moveDatabaseGroup(input: DatabaseGroupUpdateInput): Promis
     return { ok: false, errorCode: 'DB_GROUP_DEFAULT_LOCKED', errorMessage: 'Default Group cannot be moved.' }
   }
 
-  const parentId = input.parentId === undefined ? (databaseGroupParents[groupId] ?? null) : normalizedDatabaseGroupParentId(input.parentId)
-  if (parentId === groupId || (parentId && databaseGroupDescendantIds(groupId).has(parentId))) {
+  const parentId = input.parentId === undefined ? (databaseGroupParents[groupId] ?? null) : normalizedDatabaseGroupParentId(input.parentId, databaseGroups)
+  if (parentId === groupId || (parentId && databaseGroupDescendantIds(groupId, databaseGroups, databaseGroupParents).has(parentId))) {
     return { ok: false, errorCode: 'DB_GROUP_PARENT_INVALID', errorMessage: 'Group cannot be moved into itself or one of its children.' }
   }
 
@@ -791,7 +513,7 @@ const databaseConnectionMutation = (
 
 export async function moveDatabaseConnection(input: DatabaseConnectionMoveInput): Promise<DatabaseConnectionMutationResult> {
   ensureDatabaseStateLoaded()
-  const groupId = normalizedDatabaseGroupId(input.groupId)
+  const groupId = normalizedDatabaseGroupId(input.groupId, databaseGroups)
   return databaseConnectionMutation(input.connectionId, groupId === DEFAULT_DATABASE_GROUP_ID ? 'Connection moved to root group' : 'Connection moved', (connection) => ({
     ...connection,
     groupId
@@ -1009,7 +731,7 @@ export async function saveDatabaseConnection(input: DatabaseConnectionSaveInput)
     }
   }
 
-  const normalized = normalizeDatabaseConnectionSaveDraft(input.connection)
+  const normalized = normalizeDatabaseConnectionSaveDraft(input.connection, databaseGroups)
 
   if (input.mode === 'edit') {
     const existing = databaseConnections[existingIndex]
@@ -1028,7 +750,7 @@ export async function saveDatabaseConnection(input: DatabaseConnectionSaveInput)
           : 'idle',
       catalogs:
         existing.dbType === normalized.dbType && existing.database === normalized.database && shouldUseDatabaseSeedData()
-          ? existing.catalogs.map((catalog) => cloneDatabaseCatalog(existing.id, catalog))
+          ? existing.catalogs.map((catalog) => cloneDatabaseCatalog(existing.id, catalog, databaseSeedTableExistsInBackend))
           : defaultCatalogsForSavedConnection({
               id: existing.id,
               ...normalized,
@@ -1052,7 +774,7 @@ export async function saveDatabaseConnection(input: DatabaseConnectionSaveInput)
   }
 
   const saved: DatabaseConnectionInfo = {
-    id: nextDatabaseConnectionId(normalized.name),
+    id: nextDatabaseConnectionId(normalized.name, databaseConnections),
     ...normalized,
     hasPassword: !!connectionSecret,
     status: 'idle',
@@ -1135,7 +857,7 @@ export async function createDatabaseCatalog(input: DatabaseCreateDatabaseInput):
   const catalog = createDatabaseCatalogForConnection(connection, name)
   const saved: DatabaseConnectionInfo = {
     ...connection,
-    catalogs: [...connection.catalogs.map((item) => (shouldUseDatabaseSeedData() ? cloneDatabaseCatalog(connection.id, item) : cloneDatabaseCatalogRaw(item))), catalog]
+    catalogs: [...connection.catalogs.map((item) => (shouldUseDatabaseSeedData() ? cloneDatabaseCatalog(connection.id, item, databaseSeedTableExistsInBackend) : cloneDatabaseCatalogRaw(item))), catalog]
   }
   databaseConnections[connectionIndex] = saved
   persistDatabaseState()
@@ -1145,7 +867,7 @@ export async function createDatabaseCatalog(input: DatabaseCreateDatabaseInput):
     data: {
       ...databaseWorkspaceCatalogFor(saved.id),
       connection: cloneDatabaseConnection(saved),
-      catalog: cloneDatabaseCatalog(saved.id, catalog),
+      catalog: cloneDatabaseCatalog(saved.id, catalog, databaseSeedTableExistsInBackend),
       message: 'Database created in workspace catalog'
     }
   }
