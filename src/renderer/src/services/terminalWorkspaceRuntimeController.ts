@@ -3,22 +3,19 @@ import { useTerminalControlSurface, type TerminalControlSurfaceView } from '@/co
 import { useWorkspaceStore, type TerminalPanel } from '@/stores/workspace'
 import { copyTextToClipboard, readTextFromClipboard } from '@/services/clipboardRuntime'
 import { controlClient } from '@/services/controlClient'
-import { writeRendererRuntimeLog as writeRuntimeLog } from '@/services/runtimeLogClient'
 import { terminalClient } from '@/services/terminalClient'
 import { createTerminalWorkspaceCommandRuntime, createTerminalWorkspaceCommandState } from '@/services/terminalWorkspaceCommandRuntime'
 import { createTerminalWorkspaceContextRuntime } from '@/services/terminalWorkspaceContextRuntime'
 import { createTerminalWorkspaceLayoutRuntime } from '@/services/terminalWorkspaceLayoutRuntime'
+import { createTerminalWorkspaceSessionRuntime } from '@/services/terminalWorkspaceSessionRuntime'
 import { createTerminalWorkspaceViewRuntime } from '@/services/terminalWorkspaceViewRuntime'
-import { createTerminalZmodemRuntime, type TerminalZmodemProgress } from '@/services/zmodemRuntime'
+import { createTerminalWorkspaceZmodemShellRuntime } from '@/services/terminalWorkspaceZmodemShellRuntime'
 import { useI18n } from '@/i18n'
-import type { TerminalDataEvent, TerminalKillResult } from '@shared/contracts/terminalSessions'
+import type { TerminalDataEvent } from '@shared/contracts/terminalSessions'
 
 export const useTerminalWorkspaceContainerRuntime = () => {
   const workspace = useWorkspaceStore()
   const { t } = useI18n()
-  const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value)
-  const isTerminalKillSuccess = (result: TerminalKillResult | null | undefined, sessionId: string) =>
-    result?.ok === true && isRecord(result.data) && result.data.id === sessionId
   const renamingId = ref('')
   const renameText = ref('')
   const menu = reactive({ visible: false, x: 0, y: 0, panelId: '' })
@@ -53,7 +50,6 @@ export const useTerminalWorkspaceContainerRuntime = () => {
   let offLifecycle: (() => void) | null = null
   let offExit: (() => void) | null = null
   let offControlRequest: (() => void) | null = null
-  let zmodemProgressHideTimer: number | null = null
   const closeTerminalMenusFromDocument = () => {
     menu.visible = false
     termMenu.visible = false
@@ -151,107 +147,21 @@ export const useTerminalWorkspaceContainerRuntime = () => {
     const copied = await copyTextToClipboard(context.text)
     workspace.setTopNotice(copied ? t('terminal.context.copied') : t('terminal.context.copyFailed'))
   }
-  const emptyZmodemProgress = (): TerminalZmodemProgress => ({
-    visible: false,
-    type: 'download',
-    fileName: '',
-    transferred: 0,
-    total: 0,
-    status: 'running',
-    message: ''
-  })
 
-  const zmodemSessionId = ref('')
-  const zmodemProgress = reactive<TerminalZmodemProgress>(emptyZmodemProgress())
-  const zmodemPercent = computed(() =>
-    zmodemProgress.total > 0 ? Math.max(0, Math.min(100, Math.round((zmodemProgress.transferred / zmodemProgress.total) * 100))) : 0
-  )
-
-  const formatZmodemBytes = (bytes: number) => {
-    const value = Math.max(0, Number(bytes) || 0)
-    if (value >= 1024 * 1024) return `${(value / 1024 / 1024).toFixed(1)} MB`
-    if (value >= 1024) return `${(value / 1024).toFixed(1)} KB`
-    return `${value} B`
-  }
-
-  const terminalZmodemRuntime = createTerminalZmodemRuntime({
+  const terminalZmodemShellRuntime = createTerminalWorkspaceZmodemShellRuntime({
     getApi: () => window.aiops,
     appendData: (sessionId, data) => workspace.appendTerminalOutput(sessionId, data),
-    onProgress: (sessionId, progress) => {
-      if (zmodemProgressHideTimer !== null) {
-        window.clearTimeout(zmodemProgressHideTimer)
-        zmodemProgressHideTimer = null
-      }
-      zmodemSessionId.value = sessionId
-      Object.assign(zmodemProgress, progress)
-      if (progress.status !== 'running') {
-        zmodemProgressHideTimer = window.setTimeout(() => {
-          Object.assign(zmodemProgress, emptyZmodemProgress())
-          zmodemSessionId.value = ''
-          zmodemProgressHideTimer = null
-        }, 1800)
-      }
-    },
     onNotice: (message) => workspace.setTopNotice(message)
   })
+  const {
+    cancelZmodemTransfer,
+    formatZmodemBytes,
+    handleTerminalData: handleTerminalZmodemData,
+    zmodemPercent,
+    zmodemProgress
+  } = terminalZmodemShellRuntime
 
-  const writeXtermInput = async (panelId: string, data: string) => {
-    const panel = workspace.panels.find((item) => item.id === panelId || item.sessionId === panelId)
-    const sessionId = panel?.sessionId
-    const bytes = new TextEncoder().encode(data).length
-    if (!panel || !sessionId) {
-      workspace.setTopNotice('终端会话不可用，请先打开本地 shell 或连接 SSH')
-      writeRuntimeLog('warn', 'renderer.terminal-input.missing-session', {
-        panelId,
-        bytes
-      })
-      return
-    }
-    const writeTerminal = terminalClient.writeTerminal()
-    if (!writeTerminal) {
-      workspace.setTopNotice('终端写入服务不可用')
-      writeRuntimeLog('warn', 'renderer.terminal-input.missing-bridge', {
-        panelId,
-        sessionId,
-        bytes
-      })
-      return
-    }
-    try {
-      writeRuntimeLog('debug', 'renderer.terminal-input.write-request', {
-        panelId,
-        sessionId,
-        bytes
-      })
-      const result = await writeTerminal(sessionId, data)
-      if (!result?.ok || !isRecord(result.data) || result.data.id !== sessionId || result.data.bytes !== bytes) {
-        workspace.setTopNotice(result?.errorMessage || '终端写入服务返回数据无效')
-        writeRuntimeLog('warn', 'renderer.terminal-input.write-rejected', {
-          panelId,
-          sessionId,
-          bytes,
-          ok: result?.ok,
-          errorCode: result?.errorCode,
-          errorMessage: result?.errorMessage
-        })
-        return
-      }
-      writeRuntimeLog('debug', 'renderer.terminal-input.write-accepted', {
-        panelId,
-        sessionId,
-        bytes
-      })
-    } catch (error) {
-      const message = error instanceof Error && error.message.trim() ? error.message.trim() : '终端写入失败，请重新打开本地 shell 或连接 SSH'
-      workspace.setTopNotice(message)
-      writeRuntimeLog('error', 'renderer.terminal-input.write-error', {
-        panelId,
-        sessionId,
-        bytes,
-        message
-      })
-    }
-  }
+  let writeXtermInput: (panelId: string, data: string) => void | Promise<void> = () => undefined
 
   const {
     activeView,
@@ -283,8 +193,21 @@ export const useTerminalWorkspaceContainerRuntime = () => {
     suggestionPosition,
     suggestionItems,
     aiSuggestLoading,
-    writeXtermInput
+    writeXtermInput: (panelId, data) => writeXtermInput(panelId, data)
   })
+
+  const terminalSessionRuntime = createTerminalWorkspaceSessionRuntime({
+    workspace,
+    terminalViewSize,
+    afterDomUpdate: () => nextTick()
+  })
+  const {
+    disconnectTerminalPanel,
+    reconnectTerminalPanel,
+    startLocalTerminalForPanel,
+    startSshTerminalForPanel
+  } = terminalSessionRuntime
+  writeXtermInput = terminalSessionRuntime.writeXtermInput
 
   const {
     applyGeneratedCommand,
@@ -469,80 +392,6 @@ export const useTerminalWorkspaceContainerRuntime = () => {
     menu.visible = false
   }
 
-  const startLocalTerminalForPanel = async (panel: TerminalPanel) => {
-    const createTerminal = terminalClient.createTerminal()
-    if (!createTerminal) {
-      workspace.setTopNotice('本地终端启动服务不可用')
-      return false
-    }
-    await nextTick()
-    const size = terminalViewSize(panel.id)
-    try {
-      const session = await createTerminal({
-        kind: 'local',
-        panelId: panel.id,
-        workspaceId: 'workspace',
-        cols: size.cols,
-        rows: size.rows,
-        terminalType: workspace.terminalSettings.terminalType
-      })
-      const connected = Boolean(workspace.applyLocalTerminalSession(panel.id, session))
-      if (!connected) workspace.setTopNotice('本地终端启动失败')
-      return connected
-    } catch (error) {
-      workspace.setTopNotice(error instanceof Error ? error.message : '本地终端启动失败')
-      return false
-    }
-  }
-
-  const startSshTerminalForPanel = async (panel: TerminalPanel) => {
-    const ssh = panel.sshSession
-    if (!ssh) return false
-    const createTerminal = terminalClient.createTerminal()
-    if (!createTerminal) {
-      workspace.setTopNotice('SSH 终端启动服务不可用')
-      return false
-    }
-    await nextTick()
-    const size = terminalViewSize(panel.id)
-    try {
-      const session = await createTerminal({
-        kind: 'ssh',
-        assetId: ssh.assetId,
-        title: panel.title,
-        cols: size.cols,
-        rows: size.rows,
-        terminalType: workspace.terminalSettings.terminalType,
-        ssh: {
-          host: ssh.host,
-          port: ssh.port,
-          username: ssh.username,
-          needProxy: Boolean(ssh.needProxy),
-          proxyName: ssh.proxyName || '',
-          ...(ssh.forkFromConnectionId ? { forkFromConnectionId: ssh.forkFromConnectionId } : {})
-        }
-      })
-      const connected = Boolean(workspace.applySshTerminalSession(panel.id, session, {
-        id: ssh.assetId,
-        name: ssh.assetName,
-        title: ssh.assetName,
-        host: ssh.host,
-        port: ssh.port,
-        username: ssh.username,
-        group_name: ssh.organizationId,
-        asset_type: ssh.assetType,
-        auth_type: ssh.authType,
-        needProxy: ssh.needProxy,
-        proxyName: ssh.proxyName
-      }))
-      if (!connected) workspace.setTopNotice('SSH 终端启动失败')
-      return connected
-    } catch (error) {
-      workspace.setTopNotice(error instanceof Error ? error.message : 'SSH 终端启动失败')
-      return false
-    }
-  }
-
   const connectSplitPanelFromSource = async (panel: TerminalPanel, sourcePanel?: TerminalPanel | null) => {
     if (!sourcePanel?.sessionId || sourcePanel.status === 'closed' || sourcePanel.status === 'error') return false
     return panel.sshSession ? startSshTerminalForPanel(panel) : startLocalTerminalForPanel(panel)
@@ -669,39 +518,6 @@ export const useTerminalWorkspaceContainerRuntime = () => {
     if (event.deltaY > 0) decreaseFont(panelId)
   }
 
-  const reconnectTerminalPanel = async (panel: TerminalPanel) => {
-    return panel.sshSession ? startSshTerminalForPanel(panel) : startLocalTerminalForPanel(panel)
-  }
-
-  const disconnectTerminalPanel = async (panel: TerminalPanel) => {
-    if (!panel.sessionId) {
-      workspace.setTopNotice('终端会话不可用，请先打开本地 shell 或连接 SSH')
-      return false
-    }
-    const killTerminal = terminalClient.killTerminal()
-    if (!killTerminal) {
-      workspace.setTopNotice('终端断开服务不可用')
-      return false
-    }
-    const sessionId = panel.sessionId
-    let result: TerminalKillResult
-    try {
-      result = await killTerminal(sessionId)
-    } catch (error) {
-      workspace.setTopNotice(error instanceof Error ? error.message : '终端断开失败')
-      return false
-    }
-    if (!result?.ok || !isTerminalKillSuccess(result, sessionId)) {
-      workspace.setTopNotice(result?.ok ? '终端断开失败' : result?.errorMessage || '终端断开失败')
-      return false
-    }
-    if (panel.sessionId === sessionId) {
-      panel.sessionId = undefined
-      panel.status = 'closed'
-    }
-    return true
-  }
-
   const terminalControlSurface = useTerminalControlSurface({
     workspace,
     terminalViews: terminalViews as unknown as Map<string, TerminalControlSurfaceView>,
@@ -763,14 +579,9 @@ export const useTerminalWorkspaceContainerRuntime = () => {
   }
 
   const handleTerminalData = (event: TerminalDataEvent) => {
-    if (!terminalZmodemRuntime.handleTerminalData(event)) {
+    if (!handleTerminalZmodemData(event)) {
       workspace.appendTerminalOutput(event.id, event.data)
     }
-  }
-
-  const cancelZmodemTransfer = () => {
-    if (!zmodemSessionId.value || zmodemProgress.status !== 'running') return
-    void terminalZmodemRuntime.cancel(zmodemSessionId.value)
   }
 
   const handleTerminalMouseUp = (panelId: string, event: MouseEvent) => {
@@ -808,11 +619,7 @@ export const useTerminalWorkspaceContainerRuntime = () => {
     offExit?.()
     offControlRequest?.()
     terminalControlSurface.dispose()
-    terminalZmodemRuntime.dispose()
-    if (zmodemProgressHideTimer !== null) {
-      window.clearTimeout(zmodemProgressHideTimer)
-      zmodemProgressHideTimer = null
-    }
+    terminalZmodemShellRuntime.dispose()
     disposeTerminalViews()
     document.removeEventListener('click', closeTerminalMenusFromDocument)
     window.removeEventListener('keydown', handleShortcut)
