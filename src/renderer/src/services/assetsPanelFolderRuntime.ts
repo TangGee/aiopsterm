@@ -1,15 +1,9 @@
 import { reactive, ref, type ComputedRef, type Ref } from 'vue'
 
 import type {
-  AiopsAssetGroupRecord,
   AiopsCustomFolderRecord,
   AiopsCustomFolderSaveInput
 } from '@shared/contracts/assets'
-import { assetsClient } from '@/services/assetsClient'
-import {
-  isAiopsSavedCustomFolderRecord,
-  malformedAssetBackendResultMessage
-} from '@/services/assetBackendGuards'
 import {
   directGroupKey,
   flattenAssetGroups,
@@ -23,8 +17,7 @@ type AssetsPanelFolderRuntimeInput = {
   expandedManagedGroupKeys: Ref<string[]>
   assetGroupByKey: (key: string, scope?: 'direct' | 'bastion') => AssetsPanelGroup | null
   assetFolderByGroup: (group: AssetsPanelGroup | null, scope?: 'direct' | 'bastion') => AiopsCustomFolderRecord | null
-  loadHostManagementRefresh: () => Promise<{ snapshot: unknown; groups: AiopsAssetGroupRecord[] }>
-  applyHostManagementState: (snapshot: unknown, groups: AiopsAssetGroupRecord[]) => unknown
+  saveAssetFolderRecord: (folder: AiopsCustomFolderSaveInput) => Promise<AiopsCustomFolderRecord>
   closeAssetContextMenus: () => void
   importNotice: Ref<string>
 }
@@ -36,25 +29,13 @@ export const createAssetsPanelFolderRuntime = ({
   expandedManagedGroupKeys,
   assetGroupByKey,
   assetFolderByGroup,
-  loadHostManagementRefresh,
-  applyHostManagementState,
+  saveAssetFolderRecord,
   closeAssetContextMenus,
   importNotice
 }: AssetsPanelFolderRuntimeInput) => {
   const assetFolderModal = reactive<{ visible: boolean; parentKey: string; scope: 'direct' | 'bastion' }>({ visible: false, parentKey: '', scope: 'direct' })
   const assetFolderForm = reactive({ name: '', description: '' })
   const assetFolderFormError = ref('')
-
-  const saveAssetFolderRecord = async (folder: AiopsCustomFolderSaveInput) => {
-    const saveAssetFolder = assetsClient.saveAssetFolder()
-    if (!saveAssetFolder) throw new Error('目录保存服务不可用。')
-    const result = await saveAssetFolder(folder)
-    if (!result?.ok) throw new Error(result?.errorMessage || '目录保存失败')
-    if (!isAiopsSavedCustomFolderRecord(result.data, folder)) throw new Error(malformedAssetBackendResultMessage)
-    const { snapshot, groups } = await loadHostManagementRefresh()
-    applyHostManagementState(snapshot, groups)
-    return result.data
-  }
 
   const ensureAssetFolderForGroup = async (group: AssetsPanelGroup, scope: 'direct' | 'bastion' = 'direct') => {
     const existing = assetFolderByGroup(group, scope)

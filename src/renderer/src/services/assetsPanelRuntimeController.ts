@@ -1,6 +1,5 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { assetManagementEntries } from '@/config/assets'
-import { assetsClient } from '@/services/assetsClient'
 import type {
   AiopsAssetGroupRecord,
   AiopsAssetInput,
@@ -8,13 +7,9 @@ import type {
 } from '@shared/contracts/assets'
 import { useWorkspaceStore } from '@/stores/workspace'
 import {
-  isAiopsAssetGroupListData,
-  isAiopsAssetSnapshot,
-  isAiopsDeletedAssetData,
-  isAiopsJumpserverOrganizationAssetRefreshData,
-  isAiopsSavedAssetRecord,
-  malformedAssetBackendResultMessage
-} from '@/services/assetBackendGuards'
+  assetsPanelAssetToInput,
+  createAssetsPanelBackendRuntime
+} from '@/services/assetsPanelBackendRuntime'
 import { createAssetsPanelFolderRuntime } from '@/services/assetsPanelFolderRuntime'
 import { createAssetsPanelHostFormRuntime } from '@/services/assetsPanelHostFormRuntime'
 import { createAssetsPanelImportExportRuntime } from '@/services/assetsPanelImportExportRuntime'
@@ -82,129 +77,27 @@ export const useAssetsPanelRuntime = (props: AssetsPanelRuntimeProps) => {
     return assetManagementEntries.filter((entry) => `${entry.name} ${entry.description}`.toLowerCase().includes(keyword))
   })
 
-  const loadAssetGroupOptions = async () => {
-    const listAssetGroups = assetsClient.listAssetGroups()
-    if (!listAssetGroups) throw new Error('资产分组服务不可用。')
-    const groups = await listAssetGroups({
-      assetTypes: ['person', 'switch']
-    })
-    if (!isAiopsAssetGroupListData(groups)) throw new Error(malformedAssetBackendResultMessage)
-    return groups.map((group) => ({ ...group }))
-  }
-
-  const loadAssetSnapshot = async () => {
-    const listAssets = assetsClient.listAssets()
-    if (!listAssets) throw new Error('资产列表服务不可用。')
-    const snapshot = await listAssets()
-    if (!isAiopsAssetSnapshot(snapshot)) throw new Error(malformedAssetBackendResultMessage)
-    return snapshot
-  }
-
-  const applyAssetGroups = (groups: AiopsAssetGroupRecord[]) => {
-    assetGroupOptions.value = groups
-    assetGroupOptionsReady.value = true
-  }
-
-  const invalidateAssetGroups = () => {
-    assetGroupOptions.value = []
-    assetGroupOptionsReady.value = false
-  }
-
-  const applyAssetSnapshot = (snapshot: unknown) => {
-    if (!isAiopsAssetSnapshot(snapshot)) return false
-    assets.value = snapshot.assets.filter((asset) => !asset.isLocalShell).map((asset) => ({ ...asset, tags: [...asset.tags] }))
-    customFolders.value = snapshot.folders.map((folder) => ({ ...folder }))
-    return true
-  }
-
-  const applyHostManagementState = (snapshot: unknown, groups: AiopsAssetGroupRecord[]) => {
-    if (!isAiopsAssetSnapshot(snapshot)) throw new Error(malformedAssetBackendResultMessage)
-    if (!isAiopsAssetGroupListData(groups)) throw new Error(malformedAssetBackendResultMessage)
-    applyAssetSnapshot(snapshot)
-    applyAssetGroups(groups)
-    return snapshot
-  }
-
-  const refreshAssets = async () => {
-    const snapshot = await loadAssetSnapshot()
-    applyAssetSnapshot(snapshot)
-    return snapshot
-  }
-
-  const loadHostManagementRefresh = async () => {
-    const snapshot = await loadAssetSnapshot()
-    const groups = await loadAssetGroupOptions()
-    return { snapshot, groups }
-  }
-
-  const refreshAssetGroupOptions = async () => {
-    applyAssetGroups(await loadAssetGroupOptions())
-  }
-
-  const refreshHostManagement = async () => {
-    const { snapshot, groups } = await loadHostManagementRefresh()
-    applyAssetSnapshot(snapshot)
-    applyAssetGroups(groups)
-    return snapshot
-  }
-
-  const toAssetInput = (asset: AssetRecord, patch: Partial<AiopsAssetInput> = {}): AiopsAssetInput => ({
-    id: asset.id,
-    name: asset.name,
-    title: asset.title,
-    host: asset.host,
-    ip: asset.ip,
-    group: asset.group,
-    group_name: asset.group_name,
-    status: asset.status,
-    username: asset.username,
-    port: asset.port,
-    asset_type: asset.asset_type,
-    auth_type: asset.auth_type,
-    comment: asset.comment,
-    data_source: asset.data_source,
-    tags: [...asset.tags],
-    favorite: asset.favorite,
-    folderUuid: asset.folderUuid,
-    organizationId: asset.organizationId,
-    tunnelState: asset.tunnelState,
-    needProxy: asset.needProxy,
-    proxyName: asset.proxyName,
-    keychainId: asset.keychainId,
-    ...patch
+  const backendRuntime = createAssetsPanelBackendRuntime({
+    assets,
+    customFolders,
+    assetGroupOptions,
+    assetGroupOptionsReady
   })
+  const {
+    loadAssetGroupOptions,
+    applyAssetSnapshot,
+    applyHostManagementState,
+    invalidateAssetGroups,
+    refreshAssets,
+    refreshAssetGroupOptions,
+    refreshHostManagement,
+    saveAssetRecord,
+    deleteAssetRecords,
+    saveAssetFolderRecord,
+    refreshOrganizationAssets
+  } = backendRuntime
 
-  const saveAssetRecord = async (input: AiopsAssetInput, options: { requireGroups?: boolean } = {}) => {
-    const saveAsset = assetsClient.saveAsset()
-    if (!saveAsset) throw new Error('资产保存服务不可用。')
-    const result = await saveAsset(input)
-    if (!result?.ok) throw new Error(result?.errorMessage || '资产保存失败')
-    const saved = result.data
-    if (!isAiopsSavedAssetRecord(saved, input)) throw new Error(malformedAssetBackendResultMessage)
-    const refresh = options.requireGroups === false ? { snapshot: await loadAssetSnapshot(), groups: null } : await loadHostManagementRefresh()
-    const snapshot = refresh.snapshot
-    if (!isAiopsAssetSnapshot(snapshot)) throw new Error(malformedAssetBackendResultMessage)
-    if (!snapshot.assets.some((asset) => asset.id === saved.id)) throw new Error(malformedAssetBackendResultMessage)
-    applyAssetSnapshot(snapshot)
-    if (refresh.groups) applyAssetGroups(refresh.groups)
-    return saved
-  }
-
-  const deleteAssetRecords = async (assetIds: string[], options: { requireGroups?: boolean } = {}) => {
-    const deleteAsset = assetsClient.deleteAsset()
-    if (!deleteAsset) throw new Error('资产删除服务不可用。')
-    for (const id of assetIds) {
-      const result = await deleteAsset(id)
-      if (!result?.ok) throw new Error(result?.errorMessage || '资产删除失败')
-      if (!isAiopsDeletedAssetData(result.data, id)) throw new Error(malformedAssetBackendResultMessage)
-    }
-    const refresh = options.requireGroups === false ? { snapshot: await loadAssetSnapshot(), groups: null } : await loadHostManagementRefresh()
-    const snapshot = refresh.snapshot
-    if (!isAiopsAssetSnapshot(snapshot)) throw new Error(malformedAssetBackendResultMessage)
-    if (assetIds.some((id) => snapshot.assets.some((asset) => asset.id === id))) throw new Error(malformedAssetBackendResultMessage)
-    applyAssetSnapshot(snapshot)
-    if (refresh.groups) applyAssetGroups(refresh.groups)
-  }
+  const toAssetInput = (asset: AssetRecord, patch: Partial<AiopsAssetInput> = {}) => assetsPanelAssetToInput(asset, patch)
 
   const closeAssetContextMenus = () => {
     assetContextMenuId.value = null
@@ -271,7 +164,7 @@ export const useAssetsPanelRuntime = (props: AssetsPanelRuntimeProps) => {
     activeAssetView,
     toAssetInput,
     saveAssetRecord,
-    applyAssetSnapshot,
+    refreshOrganizationAssets,
     closeAssetContextMenus,
     importNotice,
     managedFormError
@@ -296,8 +189,7 @@ export const useAssetsPanelRuntime = (props: AssetsPanelRuntimeProps) => {
     expandedManagedGroupKeys: managedRuntime.expandedManagedGroupKeys,
     assetGroupByKey,
     assetFolderByGroup,
-    loadHostManagementRefresh,
-    applyHostManagementState,
+    saveAssetFolderRecord,
     closeAssetContextMenus,
     importNotice
   })
@@ -445,15 +337,11 @@ export const useAssetsPanelRuntime = (props: AssetsPanelRuntimeProps) => {
 
   const refreshOrganizationAsset = async () => {
     if (contextAsset.value) {
+      const title = contextAsset.value.title
       try {
         const expectedOrganizationId = contextAsset.value.id
-        const refreshOrganizationAssets = assetsClient.refreshOrganizationAssets()
-        if (!refreshOrganizationAssets) throw new Error('组织资产刷新服务不可用。')
-        const result = await refreshOrganizationAssets({ organizationId: expectedOrganizationId })
-        if (!result?.ok) throw new Error(result?.errorMessage || '刷新堡垒机资源失败。')
-        if (!isAiopsJumpserverOrganizationAssetRefreshData(result.data, expectedOrganizationId)) throw new Error(malformedAssetBackendResultMessage)
-        applyAssetSnapshot(result.data)
-        importNotice.value = `已刷新堡垒机资源 ${contextAsset.value.title}。`
+        await refreshOrganizationAssets(expectedOrganizationId, '刷新堡垒机资源失败。')
+        importNotice.value = `已刷新堡垒机资源 ${title}。`
       } catch (error) {
         importNotice.value = error instanceof Error ? error.message : '刷新堡垒机资源失败。'
       }

@@ -1,11 +1,6 @@
 import { computed, reactive, ref, watch, type ComputedRef, type Ref } from 'vue'
 
 import type { AiopsAssetInput, AiopsCustomFolderRecord } from '@shared/contracts/assets'
-import { assetsClient } from '@/services/assetsClient'
-import {
-  isAiopsJumpserverOrganizationAssetRefreshData,
-  malformedAssetBackendResultMessage
-} from '@/services/assetBackendGuards'
 import {
   buildManagedGroups,
   collectManagedRows,
@@ -25,7 +20,7 @@ type AssetsPanelManagedRuntimeInput = {
   activeAssetView: Ref<string>
   toAssetInput: (asset: AssetsPanelAsset, patch?: Partial<AiopsAssetInput>) => AiopsAssetInput
   saveAssetRecord: (input: AiopsAssetInput, options?: { requireGroups?: boolean }) => Promise<AssetsPanelAsset>
-  applyAssetSnapshot: (snapshot: unknown) => boolean
+  refreshOrganizationAssets: (expectedOrganizationId?: string, fallbackErrorMessage?: string) => Promise<{ assets: AssetsPanelAsset[] }>
   closeAssetContextMenus: () => void
   importNotice: Ref<string>
   managedFormError: Ref<string>
@@ -37,7 +32,7 @@ export const createAssetsPanelManagedRuntime = ({
   activeAssetView,
   toAssetInput,
   saveAssetRecord,
-  applyAssetSnapshot,
+  refreshOrganizationAssets,
   closeAssetContextMenus,
   importNotice,
   managedFormError
@@ -172,13 +167,7 @@ export const createAssetsPanelManagedRuntime = ({
   const refreshManagedAssets = async () => {
     try {
       const expectedOrganizationId = managedOrganization.value?.id
-      const refreshOrganizationAssets = assetsClient.refreshOrganizationAssets()
-      if (!refreshOrganizationAssets) throw new Error('组织资产刷新服务不可用。')
-      const result = await refreshOrganizationAssets(expectedOrganizationId ? { organizationId: expectedOrganizationId } : undefined)
-      if (!result?.ok) throw new Error(result?.errorMessage || '刷新资产表失败。')
-      if (!isAiopsJumpserverOrganizationAssetRefreshData(result.data, expectedOrganizationId)) throw new Error(malformedAssetBackendResultMessage)
-      const data = result.data
-      applyAssetSnapshot(data)
+      const data = await refreshOrganizationAssets(expectedOrganizationId, '刷新资产表失败。')
       selectedRows.value = selectedRows.value.filter((id) => data.assets.some((asset) => asset.id === id))
       importNotice.value = `已刷新资产表，共 ${data.assets.filter((asset) => asset.asset_type !== 'organization').length} 条。`
     } catch (error) {
