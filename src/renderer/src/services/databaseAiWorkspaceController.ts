@@ -1,6 +1,38 @@
 import { computed, nextTick, reactive, ref, watch, type ComputedRef, type Ref } from 'vue'
 import { databaseClient } from '@/services/databaseClient'
-import { currentSqlStatement, currentSqlStatementRange, extractSql, isReadOnlySql } from '@/services/databaseSqlEditorRuntime'
+import { currentSqlStatement, currentSqlStatementRange } from '@/services/databaseSqlEditorRuntime'
+import {
+  applyDbAiPaneStateSnapshot as applyRuntimeDbAiPaneStateSnapshot,
+  canRunDbAiReadOnly,
+  clampDbAiPaneWidth,
+  currentDbAiPaneStateSnapshot as currentRuntimeDbAiPaneStateSnapshot,
+  dbAiBackendContext,
+  dbAiCanCancel as runtimeDbAiCanCancel,
+  dbAiContentText as runtimeDbAiContentText,
+  dbAiContextParts,
+  dbAiDialectOptions,
+  dbAiDrawerCreateInput,
+  dbAiPaneCanSend as runtimeDbAiPaneCanSend,
+  dbAiPaneContextSummary as runtimeDbAiPaneContextSummary,
+  dbAiPaneIsStreaming as runtimeDbAiPaneIsStreaming,
+  dbAiPaneRequestInput,
+  dbAiPaneStatusLabel,
+  dbAiQuickPromptText,
+  dbAiReasoningText as runtimeDbAiReasoningText,
+  dbAiRequestList as runtimeDbAiRequestList,
+  dbAiSql as runtimeDbAiSql,
+  dbAiStatusLabel as runtimeDbAiStatusLabel,
+  dbAiBackendContextForIpc,
+  formatDbAiRequestTime,
+  isDbAiExecutableDialect as runtimeIsDbAiExecutableDialect,
+  normalizeDbAiPaneContext as normalizeRuntimeDbAiPaneContext,
+  normalizeDbAiTargetDialect,
+  patchDbAiRequestRecord,
+  planDbAiInsertSql,
+  planDbAiReplaceSql,
+  removeDbAiRequestRecord,
+  type SqlTab
+} from '@/services/databaseAiRuntime'
 import {
   isDbAiDrawerRequestRecord,
   isDbAiDrawerResponseData,
@@ -21,9 +53,6 @@ import {
   DB_AI_PANE_DEFAULT_WIDTH,
   DB_AI_PANE_MAX_WIDTH,
   DB_AI_PANE_MIN_WIDTH,
-  defaultSchemaForSqlConnection,
-  isMysqlCompatibleDbType,
-  isPostgresCompatibleDbType,
   sqlConnectionRequiresSchema
 } from '@/services/databaseWorkspaceRuntime'
 import type { DbAiPaneQuickPrompt, SqlConsoleContext, SqlResult, WorkspaceTab } from '@/services/databaseWorkspaceTypes'
@@ -39,8 +68,6 @@ import type {
   DatabaseCatalogInfo,
   DatabaseConnectionInfo
 } from '@shared/contracts/database'
-
-type SqlTab = Extract<WorkspaceTab, { kind: 'sql' }>
 
 type DatabaseAiWorkspaceControllerState = {
   connections: Ref<DatabaseConnectionInfo[]>
@@ -129,16 +156,6 @@ export const createDatabaseAiWorkspaceController = (
   let sqlDiagnoseSuccessTimer: number | null = null
   let sqlDiagnoseRequestSequence = 1
 
-  const dbAiDialectOptions: Array<{ value: DbAiTargetDialect; label: string }> = [
-    { value: 'postgresql', label: 'PostgreSQL' },
-    { value: 'mysql', label: 'MySQL' },
-    { value: 'sqlite', label: 'SQLite' },
-    { value: 'oracle', label: 'Oracle' },
-    { value: 'mssql', label: 'SQL Server' },
-    { value: 'clickhouse', label: 'ClickHouse' },
-    { value: 'presto', label: 'Presto' }
-  ]
-
   const canToggleDbAiPane = computed(() => connections.value.length > 0)
   const dbAiPaneConnection = computed(() => findConnection(dbAiPaneContext.connectionId) ?? null)
   const dbAiPaneCatalogOptions = computed(() => dbAiPaneConnection.value?.catalogs ?? [])
@@ -150,16 +167,10 @@ export const createDatabaseAiWorkspaceController = (
     return !!connection && connection.status !== 'connected' && connection.status !== 'testing'
   })
   const dbAiPaneContextTitle = computed(() => dbAiPaneContextSummary.value || 'No database context selected')
-  const dbAiPaneContextSummary = computed(() => {
-    const connection = dbAiPaneConnection.value
-    if (!connection) return 'No database context selected'
-    return [connection.name, connection.dbType, dbAiPaneContext.catalogName, dbAiPaneContext.schemaName].filter(Boolean).join(' · ')
-  })
-  const dbAiPaneIsStreaming = computed(() =>
-    dbAiPaneMessages.value.some((message) => message.role === 'assistant' && (message.status === 'queued' || message.status === 'streaming'))
-  )
-  const dbAiPaneCanSend = computed(() => Boolean(dbAiPaneDraft.value.trim() && dbAiPaneContext.connectionId && dbAiPaneContext.catalogName && !dbAiPaneIsStreaming.value))
-  const dbAiRequestList = computed(() => Object.values(dbAiRequests.value).sort((a, b) => b.createdAt - a.createdAt))
+  const dbAiPaneContextSummary = computed(() => runtimeDbAiPaneContextSummary(dbAiPaneConnection.value, dbAiPaneContext))
+  const dbAiPaneIsStreaming = computed(() => runtimeDbAiPaneIsStreaming(dbAiPaneMessages.value))
+  const dbAiPaneCanSend = computed(() => runtimeDbAiPaneCanSend(dbAiPaneDraft.value, dbAiPaneContext, dbAiPaneIsStreaming.value))
+  const dbAiRequestList = computed(() => runtimeDbAiRequestList(dbAiRequests.value))
   const activeDbAiRequest = computed(() => {
     const id = dbAiActiveReqId.value
     return id ? (dbAiRequests.value[id] ?? null) : null
@@ -184,50 +195,26 @@ export const createDatabaseAiWorkspaceController = (
   const dbAiText = computed(() => activeDbAiRequest.value?.text ?? '')
   const dbAiStatus = computed<DbAiStatus | 'idle'>(() => activeDbAiRequest.value?.status ?? 'idle')
   const dbAiContextSummary = computed(() => activeDbAiRequest.value?.contextSummary ?? '')
-  const dbAiSql = computed(() => (dbAiStatus.value === 'done' ? extractSql(dbAiText.value) : ''))
+  const dbAiSql = computed(() => runtimeDbAiSql(activeDbAiRequest.value))
   const dbAiIsConvertAction = computed(() => dbAiAction.value === 'convert')
-  const dbAiReasoningText = computed(() => {
-    const fenceIndex = dbAiText.value.search(/```(?:sql|mysql|postgresql|pgsql|sqlite|oracle|tsql|clickhouse|presto)?\s*\n/i)
-    const text = fenceIndex >= 0 ? dbAiText.value.slice(0, fenceIndex).trim() : dbAiText.value.trim()
-    return text.replace(/^Reasoning\s*\n?/i, '').trim()
-  })
-  const dbAiContentText = computed(() => {
-    const sql = dbAiSql.value
-    if (!sql || !dbAiText.value.trim()) return ''
-    if (dbAiAction.value === 'convert') return `Generated ${dbAiDialectLabel(dbAiTargetDialect.value)} SQL preview.`
-    if (dbAiAction.value === 'diagnose') return 'Generated a conservative read-only SQL diagnosis candidate.'
-    if (dbAiAction.value === 'optimize') return 'Generated an optimized read-only SQL candidate.'
-    if (dbAiAction.value === 'complete') return 'Generated a completed SQL candidate for the active editor context.'
-    if (dbAiAction.value === 'nl2sql') return 'Generated SQL from the natural-language request and current database context.'
-    return 'Generated SQL is ready for copy, replacement, insertion, or read-only execution when allowed.'
-  })
-  const dbAiStatusLabel = computed(() => {
-    if (dbAiStatus.value === 'queued') return 'Queued'
-    if (dbAiStatus.value === 'streaming') return 'Streaming'
-    if (dbAiStatus.value === 'cancelled') return 'Cancelled'
-    if (dbAiStatus.value === 'error') return 'Error'
-    if (dbAiStatus.value === 'done') return 'Done'
-    return 'Idle'
-  })
-  const dbAiIsExecutableDialect = computed(() => isDbAiExecutableDialect(dbAiAction.value, dbAiTargetDialect.value))
-  const dbAiCanRunReadOnly = computed(() => Boolean(activeSqlCanRun.value && dbAiIsExecutableDialect.value && isReadOnlySql(dbAiSql.value)))
-  const dbAiCanCancel = computed(() => dbAiStatus.value === 'queued' || dbAiStatus.value === 'streaming')
+  const dbAiReasoningText = computed(() => runtimeDbAiReasoningText(dbAiText.value))
+  const dbAiContentText = computed(() => runtimeDbAiContentText({ action: dbAiAction.value, text: dbAiText.value, sql: dbAiSql.value, targetDialect: dbAiTargetDialect.value }))
+  const dbAiStatusLabel = computed(() => runtimeDbAiStatusLabel(dbAiStatus.value))
+  const dbAiIsExecutableDialect = computed(() => runtimeIsDbAiExecutableDialect(dbAiAction.value, dbAiTargetDialect.value, activeSqlTab.value ? findConnection(activeSqlTab.value.connectionId) : undefined))
+  const dbAiCanRunReadOnly = computed(() =>
+    canRunDbAiReadOnly({
+      activeSqlCanRun: activeSqlCanRun.value,
+      action: dbAiAction.value,
+      targetDialect: dbAiTargetDialect.value,
+      connection: activeSqlTab.value ? findConnection(activeSqlTab.value.connectionId) : undefined,
+      sql: dbAiSql.value
+    })
+  )
+  const dbAiCanCancel = computed(() => runtimeDbAiCanCancel(dbAiStatus.value))
   const dbAiEmptyState = computed(() => dbAiOpen.value && !activeDbAiRequest.value)
 
   const normalizeDbAiPaneContext = (input: Partial<DbAiPaneContext> | SqlConsoleContext): DbAiPaneContext => {
-    const connection = input.connectionId ? (findConnection(input.connectionId) ?? connections.value[0]) : connections.value[0]
-    if (!connection) return { connectionId: '', catalogName: '', schemaName: '', dbType: '' }
-    const catalog = connection.catalogs.find((item) => item.name === input.catalogName) ?? connection.catalogs[0]
-    const schemaName = sqlConnectionRequiresSchema(connection) ? defaultSchemaForSqlConnection(connection, catalog) : ''
-    const requestedSchema = sqlConnectionRequiresSchema(connection)
-      ? catalog?.schemas?.find((schema) => schema.name === input.schemaName)?.name
-      : ''
-    return {
-      connectionId: connection.id,
-      catalogName: catalog?.name ?? '',
-      schemaName: requestedSchema || schemaName,
-      dbType: connection.dbType
-    }
+    return normalizeRuntimeDbAiPaneContext(input, connections.value)
   }
 
   const applyDbAiPaneContext = (input: Partial<DbAiPaneContext> | SqlConsoleContext, touched = true) => {
@@ -323,14 +310,10 @@ export const createDatabaseAiWorkspaceController = (
       const tab = activeSqlTab.value
       if (!tab) return
       const sql = currentSqlStatement(tab.sql, getSqlCursorOffset()).trim() || tab.sql.trim()
-      sendDbAiPaneMessage(`Explain this SQL and point out execution risks:\n${sql}`)
+      sendDbAiPaneMessage(dbAiQuickPromptText(kind, sql))
       return
     }
-    if (kind === 'schemaSummary') {
-      sendDbAiPaneMessage('Summarize the current database schema and list useful query entry points.')
-      return
-    }
-    sendDbAiPaneMessage('Generate a read-only SELECT query for the most useful table in the current context.')
+    sendDbAiPaneMessage(dbAiQuickPromptText(kind))
   }
 
   const sendDbAiPaneMessage = async (promptOverride = '') => {
@@ -346,18 +329,13 @@ export const createDatabaseAiWorkspaceController = (
       if (dbAiPaneConnectionNeedsConnect.value) return
     }
     const contextSummary = dbAiPaneContextSummary.value
-    const requestInput = {
+    const requestInput = dbAiPaneRequestInput({
       prompt,
-      context: {
-        connectionId: dbAiPaneContext.connectionId,
-        dbType: dbAiPaneContext.dbType || undefined,
-        databaseName: dbAiPaneContext.catalogName,
-        schemaName: dbAiPaneContext.schemaName,
-        contextSummary
-      },
+      context: dbAiPaneContext,
+      contextSummary,
       activeSql: activeSqlTab.value?.sql ?? '',
-      messages: dbAiPaneMessages.value.slice(-12).map((message) => ({ role: message.role, content: message.content }))
-    }
+      messages: dbAiPaneMessages.value
+    })
     const createBridge = databaseClient.createDatabaseAiPaneRequest()
     if (!createBridge) {
       showNotice('DB AI pane request service unavailable')
@@ -414,18 +392,15 @@ export const createDatabaseAiWorkspaceController = (
     }
     try {
       const result = await generateBridge({
+        ...dbAiPaneRequestInput({
+          prompt,
+          context,
+          contextSummary,
+          activeSql: activeSqlTab.value?.sql ?? '',
+          messages: dbAiPaneMessages.value
+        }),
         requestId,
-        assistantMessageId: messageId,
-        prompt,
-        context: {
-          connectionId: context.connectionId,
-          dbType: context.dbType || undefined,
-          databaseName: context.catalogName,
-          schemaName: context.schemaName,
-          contextSummary
-        },
-        activeSql: activeSqlTab.value?.sql ?? '',
-        messages: dbAiPaneMessages.value.slice(-12).map((message) => ({ role: message.role, content: message.content }))
+        assistantMessageId: messageId
       })
       finishDbAiPaneMessage(messageId, result, requestId)
     } catch (error) {
@@ -495,23 +470,10 @@ export const createDatabaseAiWorkspaceController = (
     showNotice('DB AI pane conversation reset')
   }
 
-  const dbAiPaneStatusLabel = (status: DbAiPaneMessageStatus) => {
-    if (status === 'queued') return 'Queued'
-    if (status === 'streaming') return 'Streaming'
-    if (status === 'cancelled') return 'Cancelled'
-    if (status === 'error') return 'Error'
-    return 'Done'
-  }
-
   const scrollDbAiPaneMessagesToBottom = () => {
     void nextTick(() => {
       databaseAiPanelsRef.value?.scrollPaneMessagesToBottom()
     })
-  }
-
-  const clampDbAiPaneWidth = (value: number) => {
-    if (!Number.isFinite(value)) return DB_AI_PANE_DEFAULT_WIDTH
-    return Math.min(DB_AI_PANE_MAX_WIDTH, Math.max(DB_AI_PANE_MIN_WIDTH, Math.round(value)))
   }
 
   const startDbAiPaneResize = (event: PointerEvent) => {
@@ -544,21 +506,23 @@ export const createDatabaseAiWorkspaceController = (
   }
 
   const applyDbAiPaneStateSnapshot = (snapshot: DatabaseAiPaneStateSnapshot) => {
-    dbAiPaneOpen.value = snapshot.open === true
-    dbAiPaneWidth.value = clampDbAiPaneWidth(snapshot.width)
-    if (snapshot.context?.connectionId) applyDbAiPaneContext(snapshot.context, true)
+    const next = applyRuntimeDbAiPaneStateSnapshot(snapshot, normalizeDbAiPaneContext)
+    dbAiPaneOpen.value = next.open
+    dbAiPaneWidth.value = next.width
+    if (next.context) applyDbAiPaneContext(next.context, true)
     else ensureDbAiPaneContextInitialized(true)
-    dbAiPaneDraft.value = snapshot.draft || ''
-    dbAiPaneMessages.value = snapshot.messages.map((message) => ({ ...message }))
+    dbAiPaneDraft.value = next.draft
+    dbAiPaneMessages.value = next.messages
   }
 
-  const currentDbAiPaneStateSnapshot = (): DatabaseAiPaneStateSnapshot => ({
-    open: dbAiPaneOpen.value,
-    width: dbAiPaneWidth.value,
-    context: { ...dbAiPaneContext },
-    draft: dbAiPaneDraft.value,
-    messages: dbAiPaneMessages.value.slice(-24).map((message) => ({ ...message }))
-  })
+  const currentDbAiPaneStateSnapshot = (): DatabaseAiPaneStateSnapshot =>
+    currentRuntimeDbAiPaneStateSnapshot({
+      open: dbAiPaneOpen.value,
+      width: dbAiPaneWidth.value,
+      context: dbAiPaneContext,
+      draft: dbAiPaneDraft.value,
+      messages: dbAiPaneMessages.value
+    })
 
   const loadDbAiPaneState = async () => {
     dbAiPaneStateHydrating = true
@@ -643,43 +607,19 @@ export const createDatabaseAiWorkspaceController = (
 
   const buildDbAiContextParts = (tab: SqlTab) => {
     const connection = findConnection(tab.connectionId)
-    return [connection?.name, connection?.dbType, tab.catalogName, tab.schemaName].filter(Boolean)
+    return dbAiContextParts(tab, connection)
   }
 
   const buildDbAiBackendContext = (contextSummary = '', override: DbAiBackendContext = {}): DbAiBackendContext => {
     const tab = activeSqlTab.value
     const connection = override.connectionId ? findConnection(override.connectionId) : tab ? findConnection(tab.connectionId) : undefined
-    return {
-      connectionId: override.connectionId ?? tab?.connectionId ?? '',
-      dbType: override.dbType ?? connection?.dbType ?? '',
-      databaseName: override.databaseName ?? tab?.catalogName ?? '',
-      schemaName: override.schemaName !== undefined ? override.schemaName : tab?.schemaName || undefined,
-      tableName: override.tableName !== undefined ? override.tableName : tab?.tableName || undefined,
-      contextSummary: override.contextSummary ?? contextSummary
-    }
+    return dbAiBackendContext({ tab, connection, contextSummary, override })
   }
-
-  const dbAiBackendContextForIpc = (context: DbAiBackendContext): DatabaseAiDrawerResponseInput['context'] => ({
-    connectionId: String(context.connectionId || ''),
-    dbType: context.dbType || '',
-    databaseName: String(context.databaseName || ''),
-    schemaName: context.schemaName ? String(context.schemaName) : undefined,
-    tableName: context.tableName ? String(context.tableName) : undefined,
-    contextSummary: context.contextSummary ? String(context.contextSummary) : undefined
-  })
 
   const openDbAi = async (action: DbAiAction, sql: string, context = '', backendContextOverride: DbAiBackendContext = {}) => {
     const backendContext = buildDbAiBackendContext(context, backendContextOverride)
     const activeDialect = backendContext.dbType || (activeSqlTab.value ? findConnection(activeSqlTab.value.connectionId)?.dbType : undefined)
-    const normalizedDialect: DbAiTargetDialect =
-      activeDialect === 'sqlserver'
-        ? 'mssql'
-        : activeDialect && isMysqlCompatibleDbType(activeDialect)
-          ? 'mysql'
-          : activeDialect && isPostgresCompatibleDbType(activeDialect)
-            ? 'postgresql'
-            : activeDialect || 'postgresql'
-    const targetDialect: DbAiTargetDialect = action === 'convert' ? normalizedDialect : normalizedDialect
+    const targetDialect = normalizeDbAiTargetDialect(activeDialect)
     const createBridge = databaseClient.createDatabaseAiDrawerRequest()
     if (!createBridge) {
       showNotice('DB AI drawer request service unavailable')
@@ -687,12 +627,12 @@ export const createDatabaseAiWorkspaceController = (
     }
     let result: DatabaseAiDrawerRequestResult
     try {
-      result = await createBridge({
+      result = await createBridge(dbAiDrawerCreateInput({
         action,
         sourceSql: sql,
         targetDialect,
-        context: dbAiBackendContextForIpc({ ...backendContext, contextSummary: backendContext.contextSummary || context })
-      })
+        context: { ...backendContext, contextSummary: backendContext.contextSummary || context }
+      }))
     } catch (error) {
       showNotice(bridgeErrorMessage(error, 'DB AI request failed'))
       return
@@ -714,12 +654,7 @@ export const createDatabaseAiWorkspaceController = (
   }
 
   const patchDbAiRequest = (reqId: string, patch: Partial<DbAiRequest>) => {
-    const existing = dbAiRequests.value[reqId]
-    if (!existing) return
-    dbAiRequests.value = {
-      ...dbAiRequests.value,
-      [reqId]: { ...existing, ...patch }
-    }
+    dbAiRequests.value = patchDbAiRequestRecord(dbAiRequests.value, reqId, patch)
   }
 
   const requestDbAiDrawerResponse = async (reqId: string) => {
@@ -801,14 +736,9 @@ export const createDatabaseAiWorkspaceController = (
     const tab = activeSqlTab.value
     if (!tab) return
     const range = getSqlSelectionRange()
-    const before = tab.sql.slice(0, range.start)
-    const after = tab.sql.slice(range.end)
-    const replacingSelection = range.start !== range.end
-    const prefix = !replacingSelection && before && !/\s$/.test(before) ? '\n' : ''
-    const suffix = !replacingSelection && after && !/^\s/.test(after) ? '\n' : ''
-    const nextSql = `${before}${prefix}${dbAiSql.value}${suffix}${after}`
-    setEditorSql(nextSql, range.start + prefix.length + dbAiSql.value.length)
-    showNotice(replacingSelection ? 'Editor selection replaced' : 'Generated SQL inserted')
+    const plan = planDbAiInsertSql(tab.sql, range, dbAiSql.value)
+    setEditorSql(plan.nextSql, plan.selectionStart)
+    showNotice(plan.notice)
   }
 
   const replaceDbAiSqlSelection = () => {
@@ -816,9 +746,9 @@ export const createDatabaseAiWorkspaceController = (
     if (!tab) return
     const selection = getSqlSelectionRange()
     const range = selection.start !== selection.end ? selection : currentSqlStatementRange(tab.sql, getSqlCursorOffset())
-    const nextSql = `${tab.sql.slice(0, range.start)}${dbAiSql.value}${tab.sql.slice(range.end)}`
-    setEditorSql(nextSql, range.start, range.start + dbAiSql.value.length)
-    showNotice(selection.start !== selection.end ? 'Editor selection replaced' : 'Current statement replaced')
+    const plan = planDbAiReplaceSql(tab.sql, range, dbAiSql.value, selection.start !== selection.end)
+    setEditorSql(plan.nextSql, plan.selectionStart, plan.selectionEnd)
+    showNotice(plan.notice)
   }
 
   const runDbAiReadonly = () => {
@@ -950,30 +880,12 @@ export const createDatabaseAiWorkspaceController = (
   const clearDbAiRequest = () => {
     const request = activeDbAiRequest.value
     if (request) {
-      const { [request.id]: _removed, ...rest } = dbAiRequests.value
-      dbAiRequests.value = rest
-      const fallback = Object.values(rest).sort((a, b) => b.createdAt - a.createdAt)[0]
-      dbAiActiveReqId.value = fallback?.id ?? null
+      const next = removeDbAiRequestRecord(dbAiRequests.value, request.id)
+      dbAiRequests.value = next.requests
+      dbAiActiveReqId.value = next.activeReqId
+      dbAiOpen.value = next.open
     }
-    dbAiOpen.value = Boolean(dbAiActiveReqId.value)
   }
-
-  const formatDbAiRequestTime = (time: number) => {
-    const date = new Date(time)
-    return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}:${String(date.getSeconds()).padStart(2, '0')}`
-  }
-
-  const isDbAiExecutableDialect = (action: DbAiAction, target: DbAiTargetDialect) => {
-    if (action !== 'convert') return true
-    const tab = activeSqlTab.value
-    const connection = tab ? findConnection(tab.connectionId) : undefined
-    if (target === 'mssql') return connection?.dbType === 'sqlserver'
-    if (target === 'mysql') return !!connection && isMysqlCompatibleDbType(connection.dbType)
-    if (target === 'postgresql') return !!connection && isPostgresCompatibleDbType(connection.dbType)
-    return connection?.dbType === target
-  }
-
-  const dbAiDialectLabel = (dialect: DbAiTargetDialect) => dbAiDialectOptions.find((option) => option.value === dialect)?.label ?? dialect
 
   watch(
     [
