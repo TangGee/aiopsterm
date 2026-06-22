@@ -99,13 +99,13 @@ import {
   isControlSystemCompatibilityMethod,
   mobileHostStatus,
   pendingRendererRequestCount,
-  publishRendererMutationEvent,
   resolvePendingRendererControlResponse,
   systemCapabilities,
   systemIdentify,
   workspaceContextPayload,
   type ControlSocketRuntime
 } from './controlSocketRendererRuntime'
+import { publishRendererMutationEvent } from './controlSocketRendererMutationRuntime'
 
 type ControlSocketRequest = {
   id?: string
