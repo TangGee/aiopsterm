@@ -50,9 +50,7 @@ import {
   aiPanelChipLabel,
   type AiPanelEditableRenderOptions
 } from '@/services/aiPanelEditableRuntime'
-import { createAiPanelContextCommandRuntime } from '@/services/aiPanelContextCommandRuntime'
-import { createAiPanelPopupInteractionRuntime } from '@/services/aiPanelPopupInteractionRuntime'
-import { createAiPanelPopupKeyboardRuntime } from '@/services/aiPanelPopupKeyboardRuntime'
+import { createAiPanelContextCommandShellRuntime } from '@/services/aiPanelContextCommandShellRuntime'
 import { createAiPanelModelPopupShellRuntime } from '@/services/aiPanelModelPopupShellRuntime'
 import {
   commandHostForMessage,
@@ -121,8 +119,6 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     skills: Bot,
     chats: Search
   }
-  const contextSearchInputRef = ref<HTMLInputElement | null>(null)
-  const commandSearchInputRef = ref<HTMLInputElement | null>(null)
   const dropActive = ref(false)
   const inputPlaceholderNotice = ref('')
   let classicChatDataLoaded = false
@@ -457,11 +453,11 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
 
   const clipboardHasImage = (event: ClipboardEvent) => clipboardHasImageItems(event.clipboardData?.items)
 
-  const openCommandPopupForTarget = (target: 'main' | 'edit') => aiPanelPopupInteractionRuntime.openCommandPopupForTarget(target)
-
-  function openContextPopupForTarget(target: 'main' | 'edit', level: 'main' | AiContextKind = 'main') {
-    aiPanelPopupInteractionRuntime.openContextPopupForTarget(target, level)
-  }
+  let openCommandPopupForTargetHandler: (target: 'main' | 'edit') => void | Promise<void> = () => undefined
+  let openContextPopupForTargetHandler: (target: 'main' | 'edit', level?: 'main' | AiContextKind) => void = () => undefined
+  const openCommandPopupForTarget = (target: 'main' | 'edit') => openCommandPopupForTargetHandler(target)
+  const openContextPopupForTarget = (target: 'main' | 'edit', level: 'main' | AiContextKind = 'main') =>
+    openContextPopupForTargetHandler(target, level)
 
   const contextById = (id: string) => workspace.selectedContexts.find((item) => item.id === id) || null
 
@@ -629,18 +625,6 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
   const handleDragLeave = aiPanelSurfaceRuntime.handleDragLeave
   const handleDrop = aiPanelSurfaceRuntime.handleDrop
 
-  const closePopups = (options: { restoreCommandFocus?: boolean; restoreContextFocus?: boolean } = {}) => {
-    aiPanelPopupInteractionRuntime.closePopups(options)
-  }
-
-  const toggleContextPopup = () => aiPanelPopupInteractionRuntime.toggleContextPopup()
-
-  const resetDocsContextNavigation = () => aiPanelPopupInteractionRuntime.resetDocsContextNavigation()
-  const enterDocsDir = (context: AiContextOption) => aiPanelPopupInteractionRuntime.enterDocsDir(context)
-  const goBackContextPopup = () => aiPanelPopupInteractionRuntime.goBackContextPopup()
-  const returnContextPopupToMain = () => aiPanelPopupInteractionRuntime.returnContextPopupToMain()
-  const closeContextPopup = (options: { restoreFocus?: boolean } = {}) => aiPanelPopupInteractionRuntime.closeContextPopup(options)
-
   function focusInputForTarget(target: 'main' | 'edit') {
     requestAnimationFrame(() => {
       if (target === 'edit') {
@@ -651,8 +635,9 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     })
   }
 
-  const aiPanelPopupInteractionRuntime = createAiPanelPopupInteractionRuntime({
+  const aiPanelContextCommandShellRuntime = createAiPanelContextCommandShellRuntime<Component>({
     state: popupInteractionState,
+    maxHostContexts,
     saveSelection: (target) => {
       if (target === 'edit') {
         saveEditSelection()
@@ -661,8 +646,6 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
       saveEditableSelection()
     },
     focusInputForTarget,
-    focusContextSearchInput: () => contextSearchInputRef.value?.focus(),
-    focusCommandSearchInput: () => commandSearchInputRef.value?.focus(),
     refreshAiContextCatalog: () => workspace.refreshAiContextCatalog({ hydrateSelection: false }),
     refreshAiCommandCatalog: () => workspace.refreshAiCommandCatalog(),
     afterDomUpdate: () => nextTick(),
@@ -678,16 +661,7 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     },
     closeHistoryMenu,
     openChatSearch,
-    closeChatSearch
-  })
-
-  const closeCommandPopup = (options: { restoreFocus?: boolean } = {}) => aiPanelPopupInteractionRuntime.closeCommandPopup(options)
-  const openContextCategory = (category: AiContextKind) => aiPanelPopupInteractionRuntime.openContextCategory(category)
-
-  const aiPanelContextCommandRuntime = createAiPanelContextCommandRuntime({
-    maxHostContexts,
-    contextTarget: () => contextTarget.value,
-    commandTarget: () => commandTarget.value,
+    closeChatSearch,
     editingMessageId: () => editingMessageId.value,
     draft: () => draft.value,
     mainContexts: () => workspace.selectedContexts,
@@ -700,9 +674,6 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     setEditHostContexts: (contexts) => {
       editHostContexts.value = contexts
     },
-    enterDocsDir,
-    closeContextPopup,
-    closeCommandPopup,
     removeMainTriggerToken,
     removeEditTriggerToken,
     insertContextAtEditCursor,
@@ -712,25 +683,11 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     setDraft,
     renderEditableFromState,
     moveMainCaretToEnd: moveEditableCaretToEnd,
-    requestFrame: (callback) => window.requestAnimationFrame(callback)
-  })
-
-  const selectAllVisibleHostContexts = aiPanelContextCommandRuntime.selectAllVisibleHostContexts
-  const clearHostContexts = aiPanelContextCommandRuntime.clearHostContexts
-  const isEditHostContextSelected = aiPanelContextCommandRuntime.isEditHostContextSelected
-  const isContextSelectedForPopup = aiPanelContextCommandRuntime.isContextSelectedForPopup
-  const applyHostContextToEdit = aiPanelContextCommandRuntime.applyHostContextToEdit
-  const applyContext = aiPanelContextCommandRuntime.applyContext
-  const applyCommand = aiPanelContextCommandRuntime.applyCommand
-
-  const aiPanelPopupKeyboardRuntime = createAiPanelPopupKeyboardRuntime<Component>({
-    popupInteractionRuntime: aiPanelPopupInteractionRuntime,
+    requestFrame: (callback) => window.requestAnimationFrame(callback),
     displayedOpenedHosts: () => displayedOpenedHosts.value,
     visibleContextCategories: () => visibleContextCategories.value,
     filteredContextOptions: () => filteredContextOptions.value,
     filteredCommands: () => filteredCommands.value,
-    applyContext,
-    applyCommand,
     handleSend,
     confirmMessageEdit,
     cancelMessageEdit,
@@ -744,18 +701,38 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     aiPanelMode: () => aiPanelMode.value,
     chatSearchOpen: () => chatSearchOpen.value
   })
+
   const {
+    applyCommand,
+    applyContext,
+    applyHostContextToEdit,
+    clearHostContexts,
+    closeCommandPopup,
+    closeContextPopup,
+    closePopups,
+    commandSearchInputRef,
+    contextSearchInputRef,
+    enterDocsDir,
+    goBackContextPopup,
     handleCommandKeydown,
     handleContextKeydown,
     handleContextQueryChanged,
     handleEditableKeydown,
     handleEditEditableKeydown,
-    handlePanelKeydown
-  } = aiPanelPopupKeyboardRuntime
-
-  const openContextPopup = (level: 'main' | AiContextKind = 'main') => {
-    openContextPopupForTarget('main', level)
-  }
+    handlePanelKeydown,
+    isContextSelectedForPopup,
+    isEditHostContextSelected,
+    openCommandPopupForTarget: shellOpenCommandPopupForTarget,
+    openContextCategory,
+    openContextPopup,
+    openContextPopupForTarget: shellOpenContextPopupForTarget,
+    resetDocsContextNavigation,
+    returnContextPopupToMain,
+    selectAllVisibleHostContexts,
+    toggleContextPopup
+  } = aiPanelContextCommandShellRuntime
+  openCommandPopupForTargetHandler = shellOpenCommandPopupForTarget
+  openContextPopupForTargetHandler = shellOpenContextPopupForTarget
 
   watch(contextQuery, () => {
     handleContextQueryChanged()
