@@ -201,6 +201,25 @@ export const updateK8sProxyDraft = (current: K8sProxyConfig, patch: Partial<K8sP
 
 export const k8sProxyConfigValid = (config: K8sProxyConfig) => !config.enabled || (Boolean(config.host.trim()) && Boolean(config.port))
 
+export const k8sHasContexts = (contexts: K8sContextInfo[]) => contexts.length > 0
+
+export const k8sActiveContext = (contexts: K8sContextInfo[]) => contexts.find((context) => context.isActive) || null
+
+export const k8sClusterById = (clusters: K8sCluster[], clusterId: string | null) =>
+  clusterId ? clusters.find((cluster) => cluster.id === clusterId) || null : null
+
+export const localK8sClusters = (clusters: K8sCluster[]) => clusters.filter((cluster) => cluster.source_type === 'local')
+
+export const k8sActiveTerminal = (tabs: K8sTerminalTab[], activeTerminalId: string | null) =>
+  activeTerminalId ? tabs.find((tab) => tab.id === activeTerminalId) || null : null
+
+export const k8sAgentCluster = (clusters: K8sCluster[], clusterId: string | null) => k8sClusterById(clusters, clusterId)
+
+export const k8sAgentCurrentCluster = (cluster: K8sCluster | null, fallbackContextName: string) => ({
+  clusterId: cluster?.id || null,
+  contextName: cluster?.context_name || fallbackContextName || null
+})
+
 export const selectK8sAgentClusterState = (clusters: K8sCluster[], clusterId: string | null) => {
   const cluster = clusterId ? clusters.find((item) => item.id === clusterId) || null : null
   return {

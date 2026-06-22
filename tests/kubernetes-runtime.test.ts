@@ -15,11 +15,18 @@ import {
   filteredK8sBastions,
   filteredK8sClusters,
   filteredK8sResources,
+  k8sActiveContext,
   k8sActiveNamespaces,
+  k8sActiveTerminal,
+  k8sAgentCluster,
+  k8sAgentCurrentCluster,
+  k8sClusterById,
+  k8sHasContexts,
   k8sProxyConfigValid,
   k8sResourceCluster,
   k8sResourceSummary,
   k8sTerminalTabFromRecord,
+  localK8sClusters,
   markK8sClusterTerminalTabsEnded,
   selectK8sAgentClusterState,
   setK8sResourceKindState,
@@ -187,6 +194,12 @@ describe('kubernetesRuntime', () => {
     })
     expect(k8sProxyConfigValid({ ...proxyConfig, enabled: true, host: '' })).toBe(false)
     expect(k8sProxyConfigValid({ ...proxyConfig, enabled: true, host: 'proxy.local' })).toBe(true)
+    expect(k8sHasContexts(catalog.contexts)).toBe(true)
+    expect(k8sHasContexts([])).toBe(false)
+    expect(k8sActiveContext(catalog.contexts)).toEqual(catalog.contexts[0])
+    expect(k8sActiveContext([{ ...catalog.contexts[0], isActive: false }])).toBeNull()
+    expect(k8sClusterById(catalog.clusters, 'prod')).toBe(prodCluster)
+    expect(k8sClusterById(catalog.clusters, 'missing')).toBeNull()
     expect(selectK8sAgentClusterState(catalog.clusters, 'stage')).toMatchObject({
       cluster: stageCluster,
       agentClusterId: 'stage',
@@ -195,6 +208,7 @@ describe('kubernetesRuntime', () => {
     })
     expect(selectK8sAgentClusterState(catalog.clusters, 'missing')).toMatchObject({ cluster: null, agentClusterId: null, agentStatus: 'idle' })
     expect(filteredK8sClusters(catalog.clusters, 'prod')).toEqual([prodCluster])
+    expect(localK8sClusters(catalog.clusters)).toEqual([prodCluster])
     expect(filteredK8sBastions(catalog.bastions, catalog.clusters, 'stage')).toEqual(catalog.bastions)
     expect(k8sResourceCluster(catalog.clusters, null, 'stage')).toBe(stageCluster)
     expect(k8sActiveNamespaces(catalog.namespaces, catalog.resources, 'prod')).toEqual(['default', 'ops'])
@@ -209,6 +223,8 @@ describe('kubernetesRuntime', () => {
   it('updates terminal tab state from backend records and terminal events', () => {
     const initial = tab({ id: 'terminal-prod', sessionId: 'session-prod', output: 'first' })
     expect(activatedK8sTerminalTabs([initial, tab({ id: 'other' })], 'other').map((item) => item.isActive)).toEqual([false, true])
+    expect(k8sActiveTerminal([initial, tab({ id: 'other' })], 'terminal-prod')).toBe(initial)
+    expect(k8sActiveTerminal([initial], 'missing')).toBeNull()
     expect(appendK8sTerminalOutput(initial, 'second').output).toBe('first\nsecond')
     expect(appendK8sTerminalOutput({ ...initial, output: 'first\n' }, 'second').output).toBe('first\nsecond')
     expect(
@@ -263,6 +279,11 @@ describe('kubernetesRuntime', () => {
   it('creates agent run records and extracts resource-output commands', () => {
     expect(currentK8sOutputCommand('title\nkubectl get pods -n ops\noutput')).toBe('kubectl get pods -n ops')
     expect(currentK8sOutputCommand('no command')).toBe('')
+    expect(k8sAgentCluster(catalog.clusters, 'stage')).toBe(stageCluster)
+    expect(k8sAgentCluster(catalog.clusters, null)).toBeNull()
+    expect(k8sAgentCurrentCluster(stageCluster, 'fallback/context')).toEqual({ clusterId: 'stage', contextName: 'stage/dev' })
+    expect(k8sAgentCurrentCluster(null, 'fallback/context')).toEqual({ clusterId: null, contextName: 'fallback/context' })
+    expect(k8sAgentCurrentCluster(null, '')).toEqual({ clusterId: null, contextName: null })
     const record = createK8sAgentRunRecord(
       {
         runId: 'run-1',

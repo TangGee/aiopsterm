@@ -17,7 +17,14 @@ import {
   filteredK8sBastions as filteredK8sBastionsRuntime,
   filteredK8sClusters as filteredK8sClustersRuntime,
   filteredK8sResources as filteredK8sResourcesRuntime,
+  k8sActiveContext as k8sActiveContextRuntime,
+  k8sActiveTerminal as k8sActiveTerminalRuntime,
+  k8sAgentCluster as k8sAgentClusterRuntime,
+  k8sAgentCurrentCluster as k8sAgentCurrentClusterRuntime,
   k8sActiveNamespaces as k8sActiveNamespacesRuntime,
+  k8sClusterById,
+  k8sHasContexts as k8sHasContextsRuntime,
+  localK8sClusters as localK8sClustersRuntime,
   k8sResourceCluster as k8sResourceClusterRuntime,
   k8sResourceSummary as k8sResourceSummaryRuntime,
   type K8sAgentRunRecord,
@@ -514,20 +521,17 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const activePanel = computed(() => panels.value.find((panel) => panel.id === activePanelId.value) || panels.value[0])
   const isLeftVisible = computed(() => mode.value === 'terminal' && leftPanelOpen.value)
   const isRightVisible = computed(() => mode.value === 'terminal' && rightPanelOpen.value)
-  const k8sHasContexts = computed(() => k8sContexts.value.length > 0)
-  const k8sActiveContext = computed(() => k8sContexts.value.find((context) => context.isActive) || null)
-  const k8sSelectedCluster = computed(() => k8sClusters.value.find((cluster) => cluster.id === k8sSelectedClusterId.value) || null)
-  const k8sActiveCluster = computed(() => k8sClusters.value.find((cluster) => cluster.id === k8sActiveClusterId.value) || null)
-  const k8sDeleteConfirmCluster = computed(() => k8sClusters.value.find((cluster) => cluster.id === k8sDeleteConfirmClusterId.value) || null)
+  const k8sHasContexts = computed(() => k8sHasContextsRuntime(k8sContexts.value))
+  const k8sActiveContext = computed(() => k8sActiveContextRuntime(k8sContexts.value))
+  const k8sSelectedCluster = computed(() => k8sClusterById(k8sClusters.value, k8sSelectedClusterId.value))
+  const k8sActiveCluster = computed(() => k8sClusterById(k8sClusters.value, k8sActiveClusterId.value))
+  const k8sDeleteConfirmCluster = computed(() => k8sClusterById(k8sClusters.value, k8sDeleteConfirmClusterId.value))
   const filteredK8sClusters = computed(() => filteredK8sClustersRuntime(k8sClusters.value, k8sSearchQuery.value))
-  const localK8sClusters = computed(() => filteredK8sClusters.value.filter((cluster) => cluster.source_type === 'local'))
+  const localK8sClusters = computed(() => localK8sClustersRuntime(filteredK8sClusters.value))
   const filteredK8sBastions = computed(() => filteredK8sBastionsRuntime(k8sBastions.value, k8sClusters.value, k8sSearchQuery.value))
-  const k8sActiveTerminal = computed(() => k8sTerminalTabs.value.find((tab) => tab.id === k8sActiveTerminalId.value) || null)
-  const k8sAgentCluster = computed(() => (k8sAgentClusterId.value ? k8sClusters.value.find((cluster) => cluster.id === k8sAgentClusterId.value) || null : null))
-  const k8sAgentCurrentCluster = computed(() => ({
-    clusterId: k8sAgentCluster.value?.id || null,
-    contextName: k8sAgentCluster.value?.context_name || k8sAgentContextName.value || null
-  }))
+  const k8sActiveTerminal = computed(() => k8sActiveTerminalRuntime(k8sTerminalTabs.value, k8sActiveTerminalId.value))
+  const k8sAgentCluster = computed(() => k8sAgentClusterRuntime(k8sClusters.value, k8sAgentClusterId.value))
+  const k8sAgentCurrentCluster = computed(() => k8sAgentCurrentClusterRuntime(k8sAgentCluster.value, k8sAgentContextName.value))
   const k8sResourceCluster = computed(() => k8sResourceClusterRuntime(k8sClusters.value, k8sActiveClusterId.value, k8sSelectedClusterId.value))
   const k8sActiveNamespaces = computed(() => k8sActiveNamespacesRuntime(k8sNamespaces.value, k8sResources.value, k8sResourceCluster.value?.id || null))
   const filteredK8sResources = computed(() =>
