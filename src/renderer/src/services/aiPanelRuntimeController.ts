@@ -51,19 +51,7 @@ import {
   type AiPanelEditableRenderOptions
 } from '@/services/aiPanelEditableRuntime'
 import {
-  allVisibleAiPanelHostsSelected,
-  cloneAiPanelCommandOptions,
-  cloneAiPanelContextCategories,
-  filteredAiPanelCommands,
-  filteredAiPanelContextOptions,
-  filteredAiPanelOpenedHosts,
-  selectedAiPanelCommand,
-  selectedAiPanelCommandRef,
-  selectedAiPanelContextCategory,
-  sortedAiPanelDocsContextOptions,
-  visibleAiPanelContextCategories,
-  visibleAiPanelHostContextOptions,
-  type AiPanelContextCategoryView
+  createAiPanelPopupViewRuntime
 } from '@/services/aiPanelPopupRuntime'
 import { createAiPanelContextCommandRuntime } from '@/services/aiPanelContextCommandRuntime'
 import {
@@ -98,15 +86,7 @@ import {
   createEmptyAiPanelCommandActionRuntimeState
 } from '@/services/aiPanelCommandActionRuntime'
 import {
-  aiConversationTabTooltip,
-  aiHistoryDateLabel,
-  displayAiConversationTitle,
-  filterAiHistoryConversations,
-  formatAiHistoryTime,
-  groupAiHistoryConversations,
-  hasMoreAiHistoryConversations,
-  visibleAiConversationTabs,
-  visibleAiHistoryConversations
+  createAiPanelConversationViewRuntime
 } from '@/services/aiPanelConversationRuntime'
 import { createAiPanelChatSearchRuntime, createEmptyAiPanelChatSearchRuntimeState } from '@/services/aiPanelChatSearchRuntime'
 import { createAiPanelHistoryRuntime, createEmptyAiPanelHistoryRuntimeState } from '@/services/aiPanelHistoryRuntime'
@@ -141,7 +121,7 @@ import type {
   ConversationItem,
   TerminalPanel
 } from '@/stores/workspace'
-import type { AiCommandCatalogOption, AiContextKind, AiContextOption } from '@shared/contracts/aiChat'
+import type { AiContextKind, AiContextOption } from '@shared/contracts/aiChat'
 
 export type AiPanelContainerRuntimeProps = { agentMode?: boolean }
 
@@ -150,7 +130,6 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
   const { locale, t } = useI18n()
   const agentMode = computed(() => Boolean(props.agentMode))
   type AiChatMode = 'agent' | 'cmd'
-  type AiContextCategoryView = AiPanelContextCategoryView<Component>
 
   const aiChatModeOptions: Array<{ id: AiChatMode; label: string; detail: string }> = [
     { id: 'agent', label: 'Agent', detail: '上下文辅助与工具调用' },
@@ -211,13 +190,8 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
   let classicChatDataLoaded = false
   let chatScrollFrame: number | undefined
   const historyPageSize = 20
-  const historyFavoriteLabel = computed(() => t('ai.historyFavoriteGroup'))
   const maxHostContexts = 5
   const streaming = computed(() => workspace.chatMessages.some((message) => message.state === 'streaming'))
-  const visibleConversationTabs = computed(() => visibleAiConversationTabs(openConversationTabIds.value, workspace.conversations))
-  const displayConversationTitle = (conversation: Pick<ConversationItem, 'title'>) =>
-    displayAiConversationTitle(conversation, t('ai.untitledChat'))
-  const conversationTabTooltip = (conversation: ConversationItem) => aiConversationTabTooltip(conversation, t('ai.untitledChat'))
   const ensureConversationTab = (id: string) => aiPanelHistoryRuntime.ensureConversationTab(id)
   const pruneConversationTabs = () => aiPanelHistoryRuntime.pruneConversationTabs()
   const historyLabels = computed(() => ({
@@ -226,21 +200,29 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     daysAgo: (count: number) => t('ai.historyDaysAgo').replace('{count}', String(count)),
     favoriteGroup: t('ai.historyFavoriteGroup')
   }))
-  const filteredHistoryConversations = computed(() =>
-    filterAiHistoryConversations(workspace.sortedConversations, historySearchTerm.value, historyFavoritesOnly.value)
-  )
-  const visibleHistoryConversations = computed(() =>
-    visibleAiHistoryConversations(filteredHistoryConversations.value, historyCurrentPage.value, historyPageSize)
-  )
-  const hasMoreHistoryConversations = computed(() =>
-    hasMoreAiHistoryConversations(filteredHistoryConversations.value.length, visibleHistoryConversations.value.length)
-  )
-  const groupedVisibleHistory = computed(() => {
-    const labels = historyLabels.value
-    return groupAiHistoryConversations(visibleHistoryConversations.value, (conversation) =>
-      historyFavoritesOnly.value ? labels.favoriteGroup : aiHistoryDateLabel(conversation.ts, new Date(), locale.value, labels)
-    )
+  const aiPanelConversationViewRuntime = createAiPanelConversationViewRuntime<ConversationItem>({
+    openIds: () => openConversationTabIds.value,
+    conversations: () => workspace.conversations,
+    sortedConversations: () => workspace.sortedConversations,
+    historySearchTerm: () => historySearchTerm.value,
+    historyFavoritesOnly: () => historyFavoritesOnly.value,
+    historyCurrentPage: () => historyCurrentPage.value,
+    historyPageSize,
+    locale: () => locale.value,
+    labels: () => historyLabels.value,
+    untitledLabel: () => t('ai.untitledChat')
   })
+  const {
+    conversationTabTooltip,
+    displayConversationTitle,
+    filteredHistoryConversations,
+    formatHistoryTime,
+    groupedVisibleHistory,
+    hasMoreHistoryConversations,
+    historyFavoriteLabel,
+    visibleConversationTabs,
+    visibleHistoryConversations
+  } = aiPanelConversationViewRuntime
 
   const aiPanelHistoryRuntime = createAiPanelHistoryRuntime<ConversationItem>({
     state: historyRuntimeState,
@@ -369,8 +351,6 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     aiPanelModelRuntime.closeModelMenu()
   }
 
-  const formatHistoryTime = (timestamp: number) => formatAiHistoryTime(timestamp, new Date(), locale.value, historyLabels.value)
-
   const getCurrentConversationTitle = () =>
     workspace.conversations.find((conversation) => conversation.id === workspace.selectedConversationId)?.title || 'Chat Export'
 
@@ -493,37 +473,6 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
   const toggleHistoryFavorite = (id: string) => aiPanelHistoryRuntime.toggleHistoryFavorite(id)
   const loadMoreHistoryConversations = () => aiPanelHistoryRuntime.loadMoreHistoryConversations(hasMoreHistoryConversations.value)
 
-  type AiCommandOption = AiCommandCatalogOption
-
-  const aiContextCategories = computed<AiContextCategoryView[]>(() =>
-    cloneAiPanelContextCategories(workspace.aiContextCatalog.categories, (kind) => aiContextCategoryIcons[kind] || Search)
-  )
-  const selectedContextCategory = computed(() => selectedAiPanelContextCategory(aiContextCategories.value, contextLevel.value))
-  const docsContextOptions = computed<AiContextOption[]>(() =>
-    sortedAiPanelDocsContextOptions(selectedContextCategory.value?.options || [], docsCurrentRelDir.value)
-  )
-  const commandOptions = computed<AiCommandOption[]>(() => cloneAiPanelCommandOptions(workspace.aiCommandOptions))
-  const displayedOpenedHosts = computed(() =>
-    filteredAiPanelOpenedHosts(workspace.aiContextCatalog.openedHosts, contextQuery.value, chatMode.value)
-  )
-  const visibleContextCategories = computed(() => visibleAiPanelContextCategories(aiContextCategories.value, chatMode.value))
-  const filteredContextOptions = computed(() =>
-    filteredAiPanelContextOptions({
-      level: contextLevel.value,
-      selectedCategoryOptions: selectedContextCategory.value?.options,
-      docsOptions: docsContextOptions.value,
-      skillOptions: workspace.aiSkillContextOptions,
-      query: contextQuery.value
-    })
-  )
-  const visibleHostContextOptions = computed(() => visibleAiPanelHostContextOptions(filteredContextOptions.value))
-  const hostContextsForPopup = computed(() =>
-    contextTarget.value === 'edit' ? editHostContexts.value : workspace.selectedContexts.filter((context) => context.kind === 'hosts')
-  )
-  const allVisibleHostContextsSelected = computed(() => allVisibleAiPanelHostsSelected(visibleHostContextOptions.value, hostContextsForPopup.value))
-  const filteredCommands = computed(() => filteredAiPanelCommands(commandOptions.value, commandQuery.value))
-  const selectedCommand = computed(() => selectedAiPanelCommand(commandOptions.value, workspace.selectedCommandId))
-
   const measureUiTextWidthPx = (text: string) => {
     if (!text) return 0
     if (typeof document === 'undefined') return text.length * 7
@@ -568,9 +517,38 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
   const displayModelName = displayAiPanelModelName
   const isThinkingModelName = isThinkingAiPanelModelName
   const lockedModelTooltip = aiPanelModelRuntime.lockedModelTooltip
-  const selectedCommandRef = computed(() => {
-    return selectedAiPanelCommandRef(selectedCommand.value, workspace.selectedCommandId, workspace.selectedCommandRef)
+  const aiPanelPopupViewRuntime = createAiPanelPopupViewRuntime<Component>({
+    categories: () => workspace.aiContextCatalog.categories,
+    commandOptions: () => workspace.aiCommandOptions,
+    openedHosts: () => workspace.aiContextCatalog.openedHosts,
+    selectedContexts: () => workspace.selectedContexts,
+    editHostContexts: () => editHostContexts.value,
+    skillOptions: () => workspace.aiSkillContextOptions,
+    selectedCommandId: () => workspace.selectedCommandId,
+    selectedCommandRef: () => workspace.selectedCommandRef,
+    contextTarget: () => contextTarget.value,
+    contextLevel: () => contextLevel.value,
+    contextQuery: () => contextQuery.value,
+    commandQuery: () => commandQuery.value,
+    docsCurrentRelDir: () => docsCurrentRelDir.value,
+    chatMode: () => chatMode.value,
+    iconForKind: (kind) => aiContextCategoryIcons[kind] || Search
   })
+  const {
+    aiContextCategories,
+    allVisibleHostContextsSelected,
+    commandOptions,
+    displayedOpenedHosts,
+    docsContextOptions,
+    filteredCommands,
+    filteredContextOptions,
+    hostContextsForPopup,
+    selectedCommand,
+    selectedCommandRef,
+    selectedContextCategory,
+    visibleContextCategories,
+    visibleHostContextOptions
+  } = aiPanelPopupViewRuntime
 
   const contextUsage = computed(() => aiPanelContextUsageDisplay(workspace.aiContextUsage))
   const contextUsageColor = computed(() => aiPanelContextUsageColor(contextUsage.value))

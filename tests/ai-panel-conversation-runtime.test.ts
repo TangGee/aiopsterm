@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest'
+import { ref } from 'vue'
 import {
   aiConversationTabTooltip,
   aiHistoryDateLabel,
   clearAiChatSearchHighlights,
   closeAiConversationTab,
+  createAiPanelConversationViewRuntime,
   displayAiConversationTitle,
   ensureAiConversationTabId,
   filterAiHistoryConversations,
@@ -27,6 +29,56 @@ const conversations: AiPanelConversationLike[] = [
 ]
 
 describe('aiPanelConversationRuntime', () => {
+  it('projects conversation tabs and history view state through one runtime boundary', () => {
+    const now = new Date('2026-06-20T10:00:00+08:00')
+    const viewConversations: AiPanelConversationLike[] = [
+      { ...conversations[0], ts: new Date('2026-06-20T09:00:00+08:00').getTime() },
+      { ...conversations[1], ts: new Date('2026-06-20T08:00:00+08:00').getTime() },
+      { ...conversations[2], ts: new Date('2026-06-19T20:00:00+08:00').getTime() }
+    ]
+    const openIds = ref(['conv-1', 'missing', 'conv-2'])
+    const query = ref('')
+    const favoritesOnly = ref(false)
+    const page = ref(1)
+    const labels = {
+      today: '今天',
+      yesterday: '昨天',
+      favoriteGroup: '收藏',
+      daysAgo: (count: number) => `${count}天前`
+    }
+    const runtime = createAiPanelConversationViewRuntime({
+      openIds: () => openIds.value,
+      conversations: () => viewConversations,
+      sortedConversations: () => viewConversations,
+      historySearchTerm: () => query.value,
+      historyFavoritesOnly: () => favoritesOnly.value,
+      historyCurrentPage: () => page.value,
+      historyPageSize: 2,
+      locale: () => 'zh-CN',
+      labels: () => labels,
+      untitledLabel: () => '新会话',
+      now: () => now
+    })
+
+    expect(runtime.visibleConversationTabs.value.map((conversation) => conversation.id)).toEqual(['conv-1', 'conv-2'])
+    expect(runtime.displayConversationTitle({ title: '  ' })).toBe('新会话')
+    expect(runtime.conversationTabTooltip({ title: 'Title', summary: 'Summary' })).toBe('Title\nSummary')
+    expect(runtime.visibleHistoryConversations.value.map((conversation) => conversation.id)).toEqual(['conv-1', 'conv-2'])
+    expect(runtime.hasMoreHistoryConversations.value).toBe(true)
+    expect(runtime.groupedVisibleHistory.value).toEqual([{ label: '今天', items: [viewConversations[0], viewConversations[1]] }])
+
+    query.value = '数据库'
+    favoritesOnly.value = true
+    page.value = 2
+    openIds.value = ['conv-3']
+
+    expect(runtime.visibleConversationTabs.value.map((conversation) => conversation.id)).toEqual(['conv-3'])
+    expect(runtime.filteredHistoryConversations.value.map((conversation) => conversation.id)).toEqual(['conv-3'])
+    expect(runtime.historyFavoriteLabel.value).toBe('收藏')
+    expect(runtime.groupedVisibleHistory.value).toEqual([{ label: '收藏', items: [viewConversations[2]] }])
+    expect(runtime.formatHistoryTime(new Date('2026-06-20T09:30:00+08:00').getTime())).toContain('09:30')
+  })
+
   it('manages visible conversation tab ids without deleting backend history', () => {
     expect(visibleAiConversationTabs(['conv-1', 'missing', 'conv-2'], conversations).map((conversation) => conversation.id)).toEqual([
       'conv-1',

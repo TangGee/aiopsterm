@@ -1,3 +1,5 @@
+import { computed } from 'vue'
+
 export type AiPanelConversationLike = {
   id: string
   title: string
@@ -239,5 +241,54 @@ export const previousAiChatSearchPosition = (currentIndex: number, matchCount: n
   return {
     activeIndex,
     currentIndex: activeIndex + 1
+  }
+}
+
+export type AiPanelConversationViewRuntimeOptions<T extends AiPanelConversationLike> = {
+  openIds: () => string[]
+  conversations: () => T[]
+  sortedConversations: () => T[]
+  historySearchTerm: () => string
+  historyFavoritesOnly: () => boolean
+  historyCurrentPage: () => number
+  historyPageSize: number
+  locale: () => string
+  labels: () => AiPanelHistoryLabels
+  untitledLabel: () => string
+  now?: () => Date
+}
+
+export const createAiPanelConversationViewRuntime = <T extends AiPanelConversationLike>(
+  options: AiPanelConversationViewRuntimeOptions<T>
+) => {
+  const visibleConversationTabs = computed(() => visibleAiConversationTabs(options.openIds(), options.conversations()))
+  const historyFavoriteLabel = computed(() => options.labels().favoriteGroup)
+  const filteredHistoryConversations = computed(() =>
+    filterAiHistoryConversations(options.sortedConversations(), options.historySearchTerm(), options.historyFavoritesOnly())
+  )
+  const visibleHistoryConversations = computed(() =>
+    visibleAiHistoryConversations(filteredHistoryConversations.value, options.historyCurrentPage(), options.historyPageSize)
+  )
+  const hasMoreHistoryConversations = computed(() =>
+    hasMoreAiHistoryConversations(filteredHistoryConversations.value.length, visibleHistoryConversations.value.length)
+  )
+  const groupedVisibleHistory = computed(() => {
+    const labels = options.labels()
+    const now = options.now?.() ?? new Date()
+    return groupAiHistoryConversations(visibleHistoryConversations.value, (conversation) =>
+      options.historyFavoritesOnly() ? labels.favoriteGroup : aiHistoryDateLabel(conversation.ts, now, options.locale(), labels)
+    )
+  })
+
+  return {
+    visibleConversationTabs,
+    historyFavoriteLabel,
+    filteredHistoryConversations,
+    visibleHistoryConversations,
+    hasMoreHistoryConversations,
+    groupedVisibleHistory,
+    displayConversationTitle: (conversation: Pick<T, 'title'>) => displayAiConversationTitle(conversation, options.untitledLabel()),
+    conversationTabTooltip: (conversation: Pick<T, 'title' | 'summary'>) => aiConversationTabTooltip(conversation, options.untitledLabel()),
+    formatHistoryTime: (timestamp: number) => formatAiHistoryTime(timestamp, options.now?.() ?? new Date(), options.locale(), options.labels())
   }
 }

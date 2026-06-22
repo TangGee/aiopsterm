@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest'
+import { ref } from 'vue'
 import {
   allVisibleAiPanelHostsSelected,
   backAiPanelDocsDir,
   clearAiPanelHostContexts,
   cloneAiPanelCommandOptions,
   cloneAiPanelContextCategories,
+  createAiPanelPopupViewRuntime,
   enterAiPanelDocsDir,
   filteredAiPanelCommands,
   filteredAiPanelContextOptions,
@@ -43,6 +45,72 @@ const command = (input: Partial<AiCommandCatalogOption> & Pick<AiCommandCatalogO
 })
 
 describe('aiPanelPopupRuntime', () => {
+  it('projects context and command popup view state through one runtime boundary', () => {
+    const level = ref<'main' | 'hosts' | 'docs' | 'images' | 'skills' | 'chats'>('docs')
+    const query = ref('')
+    const commandQuery = ref('')
+    const chatMode = ref<'agent' | 'cmd'>('agent')
+    const contextTarget = ref<'main' | 'edit'>('main')
+    const selectedCommandId = ref<string | null>('rollback')
+    const categories: AiContextCategoryInfo[] = [
+      { id: 'hosts', label: 'Hosts', options: [host({ id: 'prod', label: '10.0.0.8', detail: 'prod' })] },
+      {
+        id: 'docs',
+        label: 'Docs',
+        options: [
+          doc({ id: 'file-root', label: 'Runbook.md', relPath: 'Runbook.md', parentRelPath: '' }),
+          doc({ id: 'dir', label: 'commands', contextType: 'dir', relPath: 'commands', parentRelPath: '' })
+        ]
+      }
+    ]
+    const commands = [command({ id: 'rollback', name: 'rollback-plan', command: '/rollback' }), command({ id: 'summary', name: 'Summary to Doc', command: '/summary' })]
+    const runtime = createAiPanelPopupViewRuntime({
+      categories: () => categories,
+      commandOptions: () => commands,
+      openedHosts: () => [host({ id: 'prod', label: '10.0.0.8', detail: 'prod' })],
+      selectedContexts: () => [host({ id: 'prod', label: '10.0.0.8', detail: 'prod' })],
+      editHostContexts: () => [],
+      skillOptions: () => [doc({ id: 'skill-doc', label: 'Skill.md' })],
+      selectedCommandId: () => selectedCommandId.value,
+      selectedCommandRef: () => null,
+      contextTarget: () => contextTarget.value,
+      contextLevel: () => level.value,
+      contextQuery: () => query.value,
+      commandQuery: () => commandQuery.value,
+      docsCurrentRelDir: () => '',
+      chatMode: () => chatMode.value,
+      iconForKind: (kind) => `icon:${kind}`
+    })
+
+    expect(runtime.aiContextCategories.value[0]).toMatchObject({ id: 'hosts', icon: 'icon:hosts' })
+    expect(runtime.selectedContextCategory.value?.id).toBe('docs')
+    expect(runtime.docsContextOptions.value.map((option) => option.label)).toEqual(['commands', 'Runbook.md'])
+    expect(runtime.visibleContextCategories.value.map((category) => category.id)).toEqual(['hosts', 'docs'])
+    expect(runtime.filteredContextOptions.value.map((option) => option.label)).toEqual(['commands', 'Runbook.md'])
+    expect(runtime.displayedOpenedHosts.value.map((option) => option.id)).toEqual(['prod'])
+    expect(runtime.visibleHostContextOptions.value).toEqual([])
+    expect(runtime.hostContextsForPopup.value.map((context) => context.id)).toEqual(['prod'])
+    expect(runtime.allVisibleHostContextsSelected.value).toBe(false)
+    expect(runtime.filteredCommands.value.map((preset) => preset.id)).toEqual(['rollback', 'summary'])
+    expect(runtime.selectedCommand.value?.id).toBe('rollback')
+    expect(runtime.selectedCommandRef.value).toEqual({ command: '/rollback', label: 'rollback-plan', path: 'rollback.md' })
+
+    level.value = 'hosts'
+    query.value = 'prod'
+    commandQuery.value = 'sum'
+    chatMode.value = 'cmd'
+    contextTarget.value = 'edit'
+    selectedCommandId.value = 'missing-command'
+
+    expect(runtime.visibleContextCategories.value.map((category) => category.id)).toEqual(['docs'])
+    expect(runtime.filteredContextOptions.value.map((option) => option.id)).toEqual(['prod'])
+    expect(runtime.visibleHostContextOptions.value.map((option) => option.id)).toEqual(['prod'])
+    expect(runtime.hostContextsForPopup.value).toEqual([])
+    expect(runtime.filteredCommands.value.map((preset) => preset.id)).toEqual(['summary'])
+    expect(runtime.selectedCommand.value).toBeNull()
+    expect(runtime.selectedCommandRef.value).toEqual({ command: 'missing-command', label: 'missing-command' })
+  })
+
   it('filters context categories, opened hosts, docs options, commands, and models', () => {
     const categories: AiContextCategoryInfo[] = [
       { id: 'hosts', label: 'Hosts', options: [host({ id: 'prod', label: '10.0.0.8', detail: 'prod' })] },

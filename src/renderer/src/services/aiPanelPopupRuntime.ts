@@ -1,3 +1,4 @@
+import { computed } from 'vue'
 import {
   cloneAiContextOption,
   isLocalhostAiContext,
@@ -232,5 +233,71 @@ export const planAiPanelCommandApply = (input: {
       path: input.command.path
     },
     nextDraft: input.draft.replace(/\/$/, '')
+  }
+}
+
+export type AiPanelPopupViewRuntimeOptions<TIcon = unknown> = {
+  categories: () => AiContextCategoryInfo[]
+  commandOptions: () => AiCommandCatalogOption[]
+  openedHosts: () => AiContextOption[]
+  selectedContexts: () => AiContextOption[]
+  editHostContexts: () => AiContextOption[]
+  skillOptions: () => AiContextOption[]
+  selectedCommandId: () => string | null | undefined
+  selectedCommandRef: () => { command: string; label?: string; path?: string } | null | undefined
+  contextTarget: () => AiPanelPopupTarget
+  contextLevel: () => 'main' | AiContextKind
+  contextQuery: () => string
+  commandQuery: () => string
+  docsCurrentRelDir: () => string
+  chatMode: () => 'agent' | 'cmd'
+  iconForKind: (kind: AiContextKind) => TIcon
+}
+
+export const createAiPanelPopupViewRuntime = <TIcon = unknown>(options: AiPanelPopupViewRuntimeOptions<TIcon>) => {
+  const aiContextCategories = computed<Array<AiPanelContextCategoryView<TIcon>>>(() =>
+    cloneAiPanelContextCategories(options.categories(), options.iconForKind)
+  )
+  const selectedContextCategory = computed(() => selectedAiPanelContextCategory(aiContextCategories.value, options.contextLevel()))
+  const docsContextOptions = computed<AiContextOption[]>(() =>
+    sortedAiPanelDocsContextOptions(selectedContextCategory.value?.options || [], options.docsCurrentRelDir())
+  )
+  const commandOptions = computed(() => cloneAiPanelCommandOptions(options.commandOptions()))
+  const displayedOpenedHosts = computed(() => filteredAiPanelOpenedHosts(options.openedHosts(), options.contextQuery(), options.chatMode()))
+  const visibleContextCategories = computed(() => visibleAiPanelContextCategories(aiContextCategories.value, options.chatMode()))
+  const filteredContextOptions = computed(() =>
+    filteredAiPanelContextOptions({
+      level: options.contextLevel(),
+      selectedCategoryOptions: selectedContextCategory.value?.options,
+      docsOptions: docsContextOptions.value,
+      skillOptions: options.skillOptions(),
+      query: options.contextQuery()
+    })
+  )
+  const visibleHostContextOptions = computed(() => visibleAiPanelHostContextOptions(filteredContextOptions.value))
+  const hostContextsForPopup = computed(() =>
+    options.contextTarget() === 'edit' ? options.editHostContexts() : options.selectedContexts().filter((context) => context.kind === 'hosts')
+  )
+  const allVisibleHostContextsSelected = computed(() =>
+    allVisibleAiPanelHostsSelected(visibleHostContextOptions.value, hostContextsForPopup.value)
+  )
+  const filteredCommands = computed(() => filteredAiPanelCommands(commandOptions.value, options.commandQuery()))
+  const selectedCommand = computed(() => selectedAiPanelCommand(commandOptions.value, options.selectedCommandId()))
+  const selectedCommandRef = computed(() => selectedAiPanelCommandRef(selectedCommand.value, options.selectedCommandId(), options.selectedCommandRef()))
+
+  return {
+    aiContextCategories,
+    allVisibleHostContextsSelected,
+    commandOptions,
+    displayedOpenedHosts,
+    docsContextOptions,
+    filteredCommands,
+    filteredContextOptions,
+    hostContextsForPopup,
+    selectedCommand,
+    selectedCommandRef,
+    selectedContextCategory,
+    visibleContextCategories,
+    visibleHostContextOptions
   }
 }
