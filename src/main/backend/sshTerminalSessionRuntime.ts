@@ -3,9 +3,6 @@ import type { SshProxyConfig } from '@shared/contracts/appRuntime'
 import type {
   TerminalCreateOptions,
   TerminalDisconnectReason,
-  TerminalKeyboardInteractiveRequest,
-  TerminalKeyboardInteractiveResponse,
-  TerminalKeyboardInteractiveResult,
   TerminalLifecycleEvent
 } from '@shared/contracts/terminalSessions'
 import { applyConfiguredSshAgentAuth } from './sshAgent'
@@ -27,13 +24,8 @@ import {
   targetPoolKey
 } from './sshTerminalConnectionPool'
 import { createBackendDoubleSession } from './sshTerminalBackendDouble'
-import {
-  createPasswordPrompt,
-  keyboardInteractiveTimeoutMs,
-  maxKeyboardInteractiveAttempts,
-  normalizeKeyboardInteractivePrompts,
-  terminalAuthLabel
-} from './sshTerminalAuthRuntime'
+import { terminalAuthLabel } from './sshTerminalAuthRuntime'
+import { createSshTerminalSessionAuthRuntime } from './sshTerminalSessionAuthRuntime'
 import {
   cleanText,
   createLifecycleBase,
@@ -65,7 +57,6 @@ import {
   shouldBootstrapRelayShell
 } from './sshTerminalRelayShell'
 import type {
-  SshAuthScope,
   SshTerminalChannel,
   SshTerminalClient,
   SshTerminalCreateResult,
@@ -113,8 +104,6 @@ export const createSshTerminalSession = (
   let rows = options.rows || 30
   const terminalType = getTerminalType(options)
   const pendingWrites: Array<string | Buffer> = []
-  const keyboardInteractiveStates = new Map<string, { attempts: number; activeRequestId: string }>()
-  const pendingRememberPasswords = new Map<string, { assetId: string; password: string }>()
   let hasConfiguredAgentAuth = false
   let targetPasswordRetryUsed = false
   let jumpClient: SshTerminalClient | null = null
@@ -265,182 +254,17 @@ export const createSshTerminalSession = (
     }
   }
 
-  const keyboardState = (scope: string) => {
-    const existing = keyboardInteractiveStates.get(scope)
-    if (existing) return existing
-    const created = { attempts: 0, activeRequestId: '' }
-    keyboardInteractiveStates.set(scope, created)
-    return created
-  }
-
-  const keyboardRequestId = (scope: string, attempt: number) => (scope === 'target' ? `${id}-keyboard-${attempt}` : `${id}-${scope}-keyboard-${attempt}`)
-
-  const sendActiveKeyboardResult = (scope: SshAuthScope, result: Omit<TerminalKeyboardInteractiveResult, 'id' | 'attempts' | 'authScope'>) => {
-    const state = keyboardState(scope)
-    if (!state.activeRequestId) return
-    sink.keyboardInteractiveResult?.({
-      id: state.activeRequestId,
-      authScope: scope,
-      attempts: state.attempts,
-      ...result
-    })
-    state.activeRequestId = ''
-  }
-
-  const normalizeKeyboardResponse = (value: string[] | TerminalKeyboardInteractiveResponse): TerminalKeyboardInteractiveResponse => {
-    if (Array.isArray(value)) {
-      return { responses: value.map((item) => String(item || '')).slice(0, 8) }
-    }
-    if (typeof value === 'object' && value) {
-      return {
-        responses: Array.isArray(value.responses) ? value.responses.map((item) => String(item || '')).slice(0, 8) : [],
-        ...(value.rememberPassword === true ? { rememberPassword: true } : {})
-      }
-    }
-    return { responses: [] }
-  }
-
-  const rememberableAssetId = (authTarget: SshTerminalTarget) => cleanText(authTarget.asset?.id)
-
-  const rememberPasswordWhenReady = (scope: SshAuthScope, authTarget: SshTerminalTarget, password: string, rememberPassword?: boolean) => {
-    const assetId = rememberableAssetId(authTarget)
-    if (rememberPassword && assetId && password) {
-      pendingRememberPasswords.set(scope, { assetId, password })
-      return
-    }
-    pendingRememberPasswords.delete(scope)
-  }
-
-  const commitRememberedPassword = (scope: SshAuthScope) => {
-    const pending = pendingRememberPasswords.get(scope)
-    if (!pending) return
-    pendingRememberPasswords.delete(scope)
-    void runtimeConfig.rememberAssetPassword?.(pending.assetId, pending.password)
-  }
-
-  const attachKeyboardInteractive = (authClient: SshTerminalClient, authTarget: SshTerminalTarget, scope: SshAuthScope) => {
-    authClient.on('keyboard-interactive', (name, instructions, _instructionsLang, prompts, finishKeyboardInteractive) => {
-      const state = keyboardState(scope)
-      const requestId = keyboardRequestId(scope, state.attempts + 1)
-      const maxAttempts = maxKeyboardInteractiveAttempts()
-      if (state.attempts >= maxAttempts) {
-        sink.keyboardInteractiveResult?.({
-          id: requestId,
-          authScope: scope,
-          status: 'failed',
-          attempts: state.attempts,
-          final: true,
-          errorMessage: 'Maximum two-factor authentication attempts reached.'
-        })
-        finishKeyboardInteractive([])
-        return
-      }
-      state.attempts += 1
-      state.activeRequestId = requestId
-      const request: TerminalKeyboardInteractiveRequest = {
-        id: requestId,
-        connectionId: `ssh-${id}`,
-        host: authTarget.host,
-        port: authTarget.port,
-        username: authTarget.username,
-        purpose: 'keyboard-interactive',
-        authScope: scope,
-        ...(authTarget.title ? { title: authTarget.title } : {}),
-        ...(cleanText(name) ? { name: cleanText(name) } : {}),
-        ...(cleanText(instructions) ? { instructions: cleanText(instructions) } : {}),
-        prompts: normalizeKeyboardInteractivePrompts(prompts),
-        attempts: state.attempts,
-        maxAttempts,
-        timeoutMs: keyboardInteractiveTimeoutMs()
-      }
-      lifecycle = sendLifecycle(id, sink, {
-        ...lifecycleBase,
-        stage: 'connecting',
-        authScope: scope,
-        authPurpose: 'keyboard-interactive',
-        message: `Two-factor authentication required for ${terminalAuthLabel(authTarget)}`
-      })
-      void (async () => {
-        try {
-          if (!sink.keyboardInteractive) throw new Error('Two-factor authentication prompt service is unavailable.')
-          const response = normalizeKeyboardResponse(await sink.keyboardInteractive(request))
-          finishKeyboardInteractive(response.responses)
-        } catch (error) {
-          const isTimeout = error instanceof Error && /timed out|timeout/i.test(error.message)
-          const isCancel = error instanceof Error && /cancel/i.test(error.message)
-          state.activeRequestId = ''
-          sink.keyboardInteractiveResult?.({
-            id: requestId,
-            authScope: scope,
-            status: isTimeout ? 'timeout' : isCancel ? 'canceled' : 'failed',
-            attempts: state.attempts,
-            final: true,
-            errorMessage: error instanceof Error ? error.message : 'Two-factor authentication failed.'
-          })
-          finishKeyboardInteractive([])
-        }
-      })()
-    })
-  }
-
-  const passwordRequestId = (scope: string, attempt: number) => {
-    const suffix = attempt <= 1 ? 'password' : 'password-retry'
-    return scope === 'target' ? `${id}-${suffix}` : `${id}-${scope}-${suffix}`
-  }
-
-  const requestPassword = async (authTarget: SshTerminalTarget, scope: SshAuthScope, input: { attempt?: number; rejected?: boolean } = {}) => {
-    const attempt = Math.max(1, Math.trunc(Number(input.attempt || 1)))
-    const requestId = passwordRequestId(scope, attempt)
-    if (!sink.keyboardInteractive) {
-      throw new Error(`SSH password is required for ${terminalAuthLabel(authTarget)}.`)
-    }
-    lifecycle = sendLifecycle(id, sink, {
-      ...lifecycleBase,
-      stage: 'connecting',
-      authScope: scope,
-      authPurpose: 'password',
-      message: `SSH password required for ${terminalAuthLabel(authTarget)}`
-    })
-    const request: TerminalKeyboardInteractiveRequest = {
-      id: requestId,
-      connectionId: `ssh-${id}`,
-      host: authTarget.host,
-      port: authTarget.port,
-      username: authTarget.username,
-      purpose: 'password',
-      authScope: scope,
-      ...(rememberableAssetId(authTarget) ? { assetId: rememberableAssetId(authTarget), canRememberPassword: true } : {}),
-      ...(authTarget.title ? { title: authTarget.title } : {}),
-      name: 'SSH password',
-      instructions: input.rejected
-        ? 'The saved SSH password was rejected. Enter a new password to retry this connection.'
-        : 'Enter the SSH password to continue this connection.',
-      prompts: createPasswordPrompt(authTarget),
-      attempts: attempt,
-      maxAttempts: input.rejected ? 2 : 1,
-      timeoutMs: keyboardInteractiveTimeoutMs()
-    }
-    try {
-      const response = normalizeKeyboardResponse(await sink.keyboardInteractive(request))
-      const password = String(response.responses[0] || '')
-      if (!password) throw new Error(`SSH password is required for ${terminalAuthLabel(authTarget)}.`)
-      authTarget.password = password
-      rememberPasswordWhenReady(scope, authTarget, password, response.rememberPassword)
-      sink.keyboardInteractiveResult?.({ id: requestId, authScope: scope, status: 'success', attempts: attempt, final: true })
-    } catch (error) {
-      const isTimeout = error instanceof Error && /timed out|timeout/i.test(error.message)
-      const isCancel = error instanceof Error && /cancel/i.test(error.message)
-      sink.keyboardInteractiveResult?.({
-        id: requestId,
-        authScope: scope,
-        status: isTimeout ? 'timeout' : isCancel ? 'canceled' : 'failed',
-        attempts: attempt,
-        final: true,
-        errorMessage: error instanceof Error ? error.message : 'SSH password prompt failed.'
-      })
-      throw error
-    }
-  }
+  const authRuntime = createSshTerminalSessionAuthRuntime({
+    id,
+    target,
+    sink,
+    lifecycleBase,
+    sendLifecycle: (event) => {
+      lifecycle = sendLifecycle(id, sink, event)
+      return lifecycle
+    },
+    rememberPassword: runtimeConfig.rememberAssetPassword
+  })
 
   const authMethodsLabel = (connectConfig: ConnectConfig, hasAgentAuth: boolean) => {
     const methods = [
@@ -454,8 +278,8 @@ export const createSshTerminalSession = (
 
   const openShellOnClient = (authClient: SshTerminalClient) => {
     if (closed) return
-    sendActiveKeyboardResult('target', { status: 'success' })
-    commitRememberedPassword('target')
+    authRuntime.sendActiveKeyboardResult('target', { status: 'success' })
+    authRuntime.commitRememberedPassword('target')
     if (targetClientPoolable) {
       const disposeProxySocket = targetConnectionTransport === 'proxy' && proxySocket ? proxySocket : null
       rememberPooledClientAliases(
@@ -601,7 +425,7 @@ export const createSshTerminalSession = (
     }
 
     const jump = new ssh2.Client()
-    attachKeyboardInteractive(jump, jumpTarget, 'jump')
+    authRuntime.attachKeyboardInteractive(jump, jumpTarget, 'jump')
     const { connectConfig, hasAgentAuth } = createConnectConfig(jumpTarget)
     const jumpProxy = await getProxySocketForAsset()(jumpTarget.asset, getRuntimeConfig().sshProxyConfigs, jumpTarget.host, jumpTarget.port)
     if (jumpProxy) {
@@ -642,7 +466,7 @@ export const createSshTerminalSession = (
       const rejectOnce = (error: Error) => {
         if (settled) return
         settled = true
-        sendActiveKeyboardResult('jump', {
+        authRuntime.sendActiveKeyboardResult('jump', {
           status: 'failed',
           final: true,
           errorMessage: error.message
@@ -658,8 +482,8 @@ export const createSshTerminalSession = (
             rejectOnce(new Error('SSH session closed before jump host was ready.'))
             return
           }
-          sendActiveKeyboardResult('jump', { status: 'success' })
-          commitRememberedPassword('jump')
+          authRuntime.sendActiveKeyboardResult('jump', { status: 'success' })
+          authRuntime.commitRememberedPassword('jump')
           if (typeof jump.forwardOut !== 'function') {
             jumpForwardUnsupportedKeys.add(poolKey)
             rejectOnce(new SshJumpForwardError('SSH jump host runtime does not support forwardOut.'))
@@ -1061,7 +885,7 @@ export const createSshTerminalSession = (
     })
     cleanupTransports()
     try {
-      await requestPassword(target, 'target', {
+      await authRuntime.requestPassword(target, 'target', {
         attempt: canRetryRejectedPassword ? 2 : 1,
         rejected: canRetryRejectedPassword
       })
@@ -1080,7 +904,7 @@ export const createSshTerminalSession = (
   }
 
   const attachTargetClient = (authClient: SshTerminalClient) => {
-    attachKeyboardInteractive(authClient, target, 'target')
+    authRuntime.attachKeyboardInteractive(authClient, target, 'target')
 
     authClient
       .on('ready', () => {
@@ -1090,7 +914,7 @@ export const createSshTerminalSession = (
         if (targetClientPoolable) removePooledClientAliases(pooledTargetClients, authClient)
         if (targetClientIsPooled && authClient === client && stream) return
         const diagnosticEvent = sshConnectionErrorEvent(error)
-        sendActiveKeyboardResult('target', {
+        authRuntime.sendActiveKeyboardResult('target', {
           status: 'failed',
           final: true,
           errorMessage: diagnosticEvent.errorMessage || (error instanceof Error ? error.message : 'SSH authentication failed.')
