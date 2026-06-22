@@ -157,6 +157,12 @@ import { aiChatClient } from '@/services/aiChatClient'
 import { copyTextToClipboard } from '@/services/clipboardRuntime'
 import { codexTargetContextFromPanel } from '@/services/aiPanelCodexRuntime'
 import { createAiPanelCodexConversationRuntime } from '@/services/aiPanelCodexConversationRuntime'
+import {
+  aiPanelChatMessagesSignature,
+  aiPanelEditableStateSignature,
+  createAiPanelLifecycleRuntime,
+  type AiPanelOnboardingRequest
+} from '@/services/aiPanelLifecycleRuntime'
 import { malformedAiBackendResultMessage } from '@/services/aiBackendGuards'
 import { useI18n } from '@/i18n'
 import type {
@@ -1190,118 +1196,52 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     aiPanelHistoryRuntime.resetHistoryFilters()
   })
 
-  watch(
-    [() => workspace.selectedConversationId, () => workspace.conversations.map((conversation) => conversation.id).join('|')],
-    ([selectedConversationId]) => {
-      pruneConversationTabs()
-      ensureConversationTab(selectedConversationId)
-    },
-    { immediate: true }
-  )
-
-  watch(
-    () =>
-      workspace.chatMessages
-        .map((message) =>
-          [
-            message.id,
-            message.text,
-            message.state || '',
-            message.ask || '',
-            message.say || '',
-            message.action || '',
-            message.executedCommand || '',
-            message.commandExecutionStatus || '',
-            message.commandExecutionMessage || '',
-            message.contentParts?.length || 0
-          ].join(':')
-        )
-        .join('|'),
-    async () => {
-      await aiPanelChatSearchRuntime.syncSearchForMessages()
-    },
-    { immediate: true }
-  )
-
-  watch(
-    activeCodexTargetSignature,
-    () => syncActiveCodexTargetContext()
-  )
-
-  watch(
+  createAiPanelLifecycleRuntime({
+    watch: watch as never,
+    onMounted,
+    onBeforeUnmount,
+    afterDomUpdate: (callback) => nextTick(callback),
+    selectedConversationId: () => workspace.selectedConversationId,
+    conversationIdsSignature: () => workspace.conversations.map((conversation) => conversation.id).join('|'),
+    pruneConversationTabs,
+    ensureConversationTab,
+    chatMessagesSignature: () => aiPanelChatMessagesSignature(workspace.chatMessages),
+    syncSearchForMessages: () => aiPanelChatSearchRuntime.syncSearchForMessages(),
+    activeCodexTargetSignature: () => activeCodexTargetSignature.value,
+    syncActiveCodexTargetContext,
     terminalSettingsSignature,
-    () => applyCodexTerminalSettingsToAll()
-  )
-
-  watch(
-    () => workspace.aiAttentionFocusRequest.sequence,
-    () => {
-      const item = workspace.aiAttentionFocusRequest.item
-      if (!item) return
-      void focusAiAttentionItem(item)
-    }
-  )
-
-  watch(
-    () => workspace.onboardingAiRequest.sequence,
-    async (sequence) => {
-      const onboardingRequest = workspace.onboardingAiRequest
-      if (sequence === 0 && onboardingRequest.action === 'none') return
-      if (onboardingRequest.action === 'open-mode') {
-        aiPanelModelRuntime.openModeOnboarding()
-        return
-      }
-      if (onboardingRequest.action === 'open-model') {
-        await aiPanelModelRuntime.openModelOnboarding()
-        return
-      }
-      if (onboardingRequest.action === 'open-context-main') {
-        openContextPopup('main')
-        return
-      }
-      if (onboardingRequest.action === 'open-context-hosts') {
-        openContextPopup('hosts')
-        return
-      }
-      if (onboardingRequest.action === 'prepare-send') {
-        aiPanelModelRuntime.prepareSendOnboarding()
-        closePopups()
-        if (!draft.value.trim()) {
-          setDraft('查看本地主机状态')
-        }
-        return
-      }
-      closePopups()
+    applyCodexTerminalSettingsToAll,
+    aiAttentionFocusSequence: () => workspace.aiAttentionFocusRequest.sequence,
+    aiAttentionFocusItem: () => workspace.aiAttentionFocusRequest.item,
+    focusAiAttentionItem,
+    onboardingRequestSequence: () => workspace.onboardingAiRequest.sequence,
+    onboardingRequest: () => workspace.onboardingAiRequest as AiPanelOnboardingRequest,
+    openModeOnboarding: () => aiPanelModelRuntime.openModeOnboarding(),
+    openModelOnboarding: () => aiPanelModelRuntime.openModelOnboarding(),
+    openContextPopup,
+    prepareSendOnboarding: () => aiPanelModelRuntime.prepareSendOnboarding(),
+    closePopups,
+    draftText: () => draft.value,
+    setDraft,
+    editableStateSignature: () =>
+      aiPanelEditableStateSignature({
+        selectedContexts: workspace.selectedContexts,
+        selectedCommandId: workspace.selectedCommandId,
+        selectedCommandRef: workspace.selectedCommandRef,
+        fileInputParts: fileInputParts.value
+      }),
+    syncingFromEditable: () => syncingFromEditable.value,
+    renderEditableFromState,
+    startInitialMode,
+    cancelChatScrollFrame: () => {
+      if (chatScrollFrame !== undefined) window.cancelAnimationFrame(chatScrollFrame)
     },
-    { immediate: true }
-  )
-
-  watch(
-    [
-      () => workspace.selectedContexts.map((context) => `${context.id}:${context.label}:${context.data || ''}`).join('|'),
-      () => workspace.selectedCommandId,
-      () => `${workspace.selectedCommandRef?.command || ''}:${workspace.selectedCommandRef?.label || ''}:${workspace.selectedCommandRef?.path || ''}`,
-      () => fileInputParts.value.map((part) => `${part.ref.absPath}:${part.ref.name || ''}`).join('|')
-    ],
-    () => {
-      if (syncingFromEditable.value) return
-      void nextTick(renderEditableFromState)
-    },
-    { immediate: true }
-  )
-
-  onMounted(() => {
-    startInitialMode()
-  })
-
-  onBeforeUnmount(() => {
-    aiPanelCodexRuntime.dispose()
-    if (chatScrollFrame !== undefined) window.cancelAnimationFrame(chatScrollFrame)
-    aiPanelChatSearchRuntime.dispose()
-    aiPanelHistoryRuntime.clearNoticeTimer()
-    aiPanelSurfaceRuntime.dispose()
-    aiPanelVoiceRuntime.dispose()
-  })
+    disposeCodexRuntime: () => aiPanelCodexRuntime.dispose(),
+    disposeChatSearchRuntime: () => aiPanelChatSearchRuntime.dispose(),
+    clearHistoryNoticeTimer: () => aiPanelHistoryRuntime.clearNoticeTimer(),
+    disposeSurfaceRuntime: () => aiPanelSurfaceRuntime.dispose(),
+    disposeVoiceRuntime: () => aiPanelVoiceRuntime.dispose()
+  }).start()
 
   return {
     activeCodexBoundTarget,
