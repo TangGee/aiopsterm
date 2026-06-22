@@ -65,7 +65,6 @@ import {
   isThinkingAiPanelModelName
 } from '@/services/aiPanelModelRuntime'
 import {
-  aiPanelChatExportMessage as chatExportMessage,
   commandHostForMessage,
   commandHostTooltipForMessage,
   commandLineCountForMessage,
@@ -80,11 +79,7 @@ import {
   renderAiPanelMarkdownParts as renderedMarkdownParts
 } from '@/services/aiPanelMessageRuntime'
 import { createAiPanelActionOrchestrationRuntime } from '@/services/aiPanelActionOrchestrationRuntime'
-import {
-  createAiPanelConversationViewRuntime
-} from '@/services/aiPanelConversationRuntime'
-import { createAiPanelHistoryRuntime, createEmptyAiPanelHistoryRuntimeState } from '@/services/aiPanelHistoryRuntime'
-import { createAiPanelChatViewportRuntime } from '@/services/aiPanelChatViewportRuntime'
+import { createAiPanelChatNavigationRuntime } from '@/services/aiPanelChatNavigationRuntime'
 import { clipboardHasImageItems } from '@/services/aiPanelMediaRuntime'
 import {
   aiPanelContextUsageColor,
@@ -107,13 +102,11 @@ import {
   createAiPanelLifecycleRuntime,
   type AiPanelOnboardingRequest
 } from '@/services/aiPanelLifecycleRuntime'
-import { malformedAiBackendResultMessage } from '@/services/aiBackendGuards'
 import { useI18n } from '@/i18n'
 import type {
   AiChipContentPart,
   AiDocChipContentPart,
   AiImageContentPart,
-  ConversationItem,
   TerminalPanel
 } from '@/stores/workspace'
 import type { AiContextKind, AiContextOption } from '@shared/contracts/aiChat'
@@ -138,7 +131,6 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     skills: Bot,
     chats: Search
   }
-  const historySearchInputRef = ref<HTMLInputElement | null>(null)
   const modelSearchInputRef = ref<HTMLInputElement | null>(null)
   const contextSearchInputRef = ref<HTMLInputElement | null>(null)
   const commandSearchInputRef = ref<HTMLInputElement | null>(null)
@@ -161,62 +153,17 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
   const modelQuery = toRef(modelRuntimeState, 'modelQuery')
   const dropActive = ref(false)
   const inputPlaceholderNotice = ref('')
-  const historyRuntimeState = reactive(createEmptyAiPanelHistoryRuntimeState())
-  const moreActionsMenuOpen = toRef(historyRuntimeState, 'moreActionsMenuOpen')
-  const historyMenuOpen = toRef(historyRuntimeState, 'historyMenuOpen')
-  const historySearchTerm = toRef(historyRuntimeState, 'historySearchTerm')
-  const historyFavoritesOnly = toRef(historyRuntimeState, 'historyFavoritesOnly')
-  const historyCurrentPage = toRef(historyRuntimeState, 'historyCurrentPage')
-  const historyLoadingMore = toRef(historyRuntimeState, 'historyLoadingMore')
-  const editingHistoryId = toRef(historyRuntimeState, 'editingHistoryId')
-  const editingHistoryTitle = toRef(historyRuntimeState, 'editingHistoryTitle')
-  const chatExportNotice = toRef(historyRuntimeState, 'chatExportNotice')
-  const openConversationTabIds = toRef(historyRuntimeState, 'openConversationTabIds')
   let classicChatDataLoaded = false
-  const historyPageSize = 20
   const maxHostContexts = 5
   const streaming = computed(() => workspace.chatMessages.some((message) => message.state === 'streaming'))
-  const ensureConversationTab = (id: string) => aiPanelHistoryRuntime.ensureConversationTab(id)
-  const pruneConversationTabs = () => aiPanelHistoryRuntime.pruneConversationTabs()
-  const historyLabels = computed(() => ({
-    today: t('ai.historyToday'),
-    yesterday: t('ai.historyYesterday'),
-    daysAgo: (count: number) => t('ai.historyDaysAgo').replace('{count}', String(count)),
-    favoriteGroup: t('ai.historyFavoriteGroup')
-  }))
-  const aiPanelConversationViewRuntime = createAiPanelConversationViewRuntime<ConversationItem>({
-    openIds: () => openConversationTabIds.value,
+
+  const aiPanelChatNavigationRuntime = createAiPanelChatNavigationRuntime({
     conversations: () => workspace.conversations,
     sortedConversations: () => workspace.sortedConversations,
-    historySearchTerm: () => historySearchTerm.value,
-    historyFavoritesOnly: () => historyFavoritesOnly.value,
-    historyCurrentPage: () => historyCurrentPage.value,
-    historyPageSize,
-    locale: () => locale.value,
-    labels: () => historyLabels.value,
-    untitledLabel: () => t('ai.untitledChat')
-  })
-  const {
-    conversationTabTooltip,
-    displayConversationTitle,
-    filteredHistoryConversations,
-    formatHistoryTime,
-    groupedVisibleHistory,
-    hasMoreHistoryConversations,
-    historyFavoriteLabel,
-    visibleConversationTabs,
-    visibleHistoryConversations
-  } = aiPanelConversationViewRuntime
-
-  const aiPanelHistoryRuntime = createAiPanelHistoryRuntime<ConversationItem>({
-    state: historyRuntimeState,
-    conversations: () => workspace.conversations,
     selectedConversationId: () => workspace.selectedConversationId,
-    visibleTabs: () => visibleConversationTabs.value,
-    visibleHistoryCount: () => visibleHistoryConversations.value.length,
-    chatMessageCount: () => workspace.chatMessages.length,
-    currentConversationTitle: () => getCurrentConversationTitle(),
-    exportMessages: () => workspace.chatMessages.map(chatExportMessage),
+    messages: () => workspace.chatMessages,
+    locale: () => locale.value,
+    t,
     createConversation: () => workspace.createConversation(),
     restoreConversation: (id) => workspace.restoreConversation(id),
     renameConversation: (id, title) => workspace.renameConversation(id, title),
@@ -230,45 +177,74 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
       aiPanelModelRuntime.closeModeMenu()
       aiPanelModelRuntime.closeModelMenu()
     },
-    focusHistorySearchInput: () => nextTick(() => historySearchInputRef.value?.focus()),
-    focusHistoryTitleInput: () =>
-      nextTick(() => {
-        const input = historySearchInputRef.value?.closest('.ai-history-dropdown')?.querySelector<HTMLInputElement>('.ai-history-title-input')
-        input?.focus()
-        input?.select()
-      }),
-    setNoticeTimer: (callback, delay) => window.setTimeout(callback, delay),
-    clearNoticeTimer: (timer) => window.clearTimeout(timer as number),
-    labels: {
-      chatCreated: () => t('ai.chatCreated'),
-      chatCreateFailed: () => t('ai.chatCreateFailed'),
-      chatRestored: () => t('ai.chatRestored'),
-      chatRestoreFailed: () => t('ai.chatRestoreFailed'),
-      keepOneTab: () => t('ai.keepOneTab'),
-      tabClosed: () => t('ai.tabClosed'),
-      historyTitleUpdated: () => t('ai.historyTitleUpdated'),
-      historyTitleUpdateFailed: () => t('ai.historyTitleUpdateFailed'),
-      chatDeleted: () => t('ai.chatDeleted'),
-      chatDeleteFailed: () => t('ai.chatDeleteFailed'),
-      historyFavorited: () => t('ai.historyFavorited'),
-      historyUnfavorited: () => t('ai.historyUnfavorited'),
-      historyFavoriteUpdateFailed: () => t('ai.historyFavoriteUpdateFailed'),
-      exportEmpty: () => '当前会话为空，无法导出。',
-      exportUnavailable: () => '聊天导出服务不可用。',
-      exportFailed: (message) => `导出失败：${message}`,
-      exportMalformed: () => `导出失败：${malformedAiBackendResultMessage}`,
-      exportSuccess: () => '聊天已导出。'
-    }
+    closePopups: () => closePopups(),
+    afterDomUpdate: (callback) => (callback ? nextTick(callback) : nextTick()),
+    requestFrame: (callback) => window.requestAnimationFrame(callback),
+    cancelFrame: (frame) => window.cancelAnimationFrame(frame),
+    setTimer: (callback, delay) => window.setTimeout(callback, delay),
+    clearTimer: (timer) => window.clearTimeout(timer as number)
   })
+  const {
+    cancelChatScrollFrame,
+    cancelHistoryTitleEdit,
+    chatExportNotice,
+    chatScrollRef,
+    chatSearchCurrentIndex,
+    chatSearchInputRef,
+    chatSearchMatchCount,
+    chatSearchOpen,
+    chatSearchTerm,
+    clearChatSearch,
+    clearHistoryNoticeTimer,
+    clearHistorySearch,
+    closeChatSearch,
+    closeConversationTab,
+    closeHistoryMenu,
+    conversationTabTooltip,
+    createNewAiConversation,
+    deleteHistoryConversation,
+    displayConversationTitle,
+    disposeChatSearchRuntime,
+    editHistoryTitle,
+    editingHistoryId,
+    editingHistoryTitle,
+    ensureConversationTab,
+    exportCurrentChat,
+    filteredHistoryConversations,
+    findNextChatMatch,
+    findPreviousChatMatch,
+    formatHistoryTime,
+    groupedVisibleHistory,
+    handleChatSearchTermChanged,
+    hasMoreHistoryConversations,
+    historyFavoriteLabel,
+    historyFavoritesOnly,
+    historyLoadingMore,
+    historyMenuOpen,
+    historySearchInputRef,
+    historySearchTerm,
+    loadMoreHistoryConversations,
+    moreActionsMenuOpen,
+    openChatSearch,
+    openHistoryMenu,
+    pruneConversationTabs,
+    resetHistoryFilters,
+    restoreConversationById,
+    restoreConversationFromTab,
+    restoreHistoryConversation,
+    saveHistoryTitle,
+    showNotice: showChatExportNotice,
+    syncSearchForMessages,
+    toggleHistoryFavorite,
+    toggleHistoryMenu,
+    toggleMoreActionsMenu,
+    visibleConversationTabs
+  } = aiPanelChatNavigationRuntime
 
   const loadClassicChatData = async () => {
     if (classicChatDataLoaded) return
     classicChatDataLoaded = true
     await Promise.all([workspace.refreshAiModelCatalog({ replaceSettingsOptions: false }), workspace.hydrateClassicChatData()])
-  }
-
-  const showChatExportNotice = (message: string) => {
-    aiPanelHistoryRuntime.showNotice(message)
   }
 
   const aiPanelCodexRuntime = createAiPanelCodexConversationRuntime({
@@ -331,13 +307,6 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     unbindCodexTarget
   } = aiPanelCodexRuntime
 
-  const closeModelMenu = () => {
-    aiPanelModelRuntime.closeModelMenu()
-  }
-
-  const getCurrentConversationTitle = () =>
-    workspace.conversations.find((conversation) => conversation.id === workspace.selectedConversationId)?.title || 'Chat Export'
-
   const aiPanelActionOrchestrationRuntime = createAiPanelActionOrchestrationRuntime({
     messages: () => workspace.chatMessages,
     activePanel: () => workspace.activePanel,
@@ -387,52 +356,6 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     summarizeMessageToSkill,
     toggleMessageFavorite
   } = aiPanelActionOrchestrationRuntime
-
-  const aiPanelChatViewportRuntime = createAiPanelChatViewportRuntime({
-    historyState: historyRuntimeState,
-    closePopups: () => closePopups(),
-    closeMoreActionsMenu: () => {
-      moreActionsMenuOpen.value = false
-    },
-    afterDomUpdate: (callback) => (callback ? nextTick(callback) : nextTick()),
-    requestFrame: (callback) => window.requestAnimationFrame(callback),
-    cancelFrame: (frame) => window.cancelAnimationFrame(frame),
-    setSearchTimer: (callback, delay) => window.setTimeout(callback, delay),
-    clearSearchTimer: (timer) => window.clearTimeout(timer as number)
-  })
-  const {
-    chatScrollRef,
-    chatSearchCurrentIndex,
-    chatSearchInputRef,
-    chatSearchMatchCount,
-    chatSearchOpen,
-    chatSearchTerm,
-    cancelChatScrollFrame,
-    clearChatSearch,
-    closeChatSearch,
-    findNextChatMatch,
-    findPreviousChatMatch,
-    openChatSearch
-  } = aiPanelChatViewportRuntime
-
-  const exportCurrentChat = () => aiPanelHistoryRuntime.exportCurrentChat()
-  const openHistoryMenu = () => aiPanelHistoryRuntime.openHistoryMenu()
-  const closeHistoryMenu = () => aiPanelHistoryRuntime.closeHistoryMenu()
-  const toggleHistoryMenu = () => aiPanelHistoryRuntime.toggleHistoryMenu()
-  const toggleMoreActionsMenu = () => aiPanelHistoryRuntime.toggleMoreActionsMenu()
-  const clearHistorySearch = () => void aiPanelHistoryRuntime.clearHistorySearch()
-  const createNewAiConversation = () => aiPanelHistoryRuntime.createNewConversation()
-  const restoreConversationById = (id: string, successMessage = t('ai.chatRestored'), failureMessage = t('ai.chatRestoreFailed')) =>
-    aiPanelHistoryRuntime.restoreConversationById(id, successMessage, failureMessage)
-  const restoreConversationFromTab = (id: string) => aiPanelHistoryRuntime.restoreConversationFromTab(id)
-  const closeConversationTab = (id: string) => aiPanelHistoryRuntime.closeConversationTab(id)
-  const restoreHistoryConversation = (id: string) => aiPanelHistoryRuntime.restoreHistoryConversation(id)
-  const editHistoryTitle = (id: string) => aiPanelHistoryRuntime.editHistoryTitle(id)
-  const cancelHistoryTitleEdit = () => aiPanelHistoryRuntime.cancelHistoryTitleEdit()
-  const saveHistoryTitle = (id: string) => aiPanelHistoryRuntime.saveHistoryTitle(id)
-  const deleteHistoryConversation = (id: string) => aiPanelHistoryRuntime.deleteHistoryConversation(id)
-  const toggleHistoryFavorite = (id: string) => aiPanelHistoryRuntime.toggleHistoryFavorite(id)
-  const loadMoreHistoryConversations = () => aiPanelHistoryRuntime.loadMoreHistoryConversations(hasMoreHistoryConversations.value)
 
   const measureUiTextWidthPx = (text: string) => {
     if (!text) return 0
@@ -875,11 +798,11 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
   })
 
   watch(chatSearchTerm, () => {
-    aiPanelChatViewportRuntime.handleSearchTermChanged()
+    handleChatSearchTermChanged()
   })
 
   watch([historySearchTerm, historyFavoritesOnly], () => {
-    aiPanelHistoryRuntime.resetHistoryFilters()
+    resetHistoryFilters()
   })
 
   createAiPanelLifecycleRuntime({
@@ -892,7 +815,7 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     pruneConversationTabs,
     ensureConversationTab,
     chatMessagesSignature: () => aiPanelChatMessagesSignature(workspace.chatMessages),
-    syncSearchForMessages: () => aiPanelChatViewportRuntime.syncSearchForMessages(),
+    syncSearchForMessages,
     activeCodexTargetSignature: () => activeCodexTargetSignature.value,
     syncActiveCodexTargetContext,
     terminalSettingsSignature,
@@ -921,8 +844,8 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     startInitialMode,
     cancelChatScrollFrame,
     disposeCodexRuntime: () => aiPanelCodexRuntime.dispose(),
-    disposeChatSearchRuntime: () => aiPanelChatViewportRuntime.dispose(),
-    clearHistoryNoticeTimer: () => aiPanelHistoryRuntime.clearNoticeTimer(),
+    disposeChatSearchRuntime,
+    clearHistoryNoticeTimer,
     disposeSurfaceRuntime: () => aiPanelSurfaceRuntime.dispose(),
     disposeVoiceRuntime: () => aiPanelVoiceRuntime.dispose()
   }).start()
