@@ -1,14 +1,14 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { windowControlsClient } from '@/services/app/windowControlsClient'
 import { createFileBrowserBackendRuntime, cleanFileBrowserErrorMessage } from '@/services/files/fileBrowserBackendRuntime'
 import { createFileBrowserEntryActionRuntime } from '@/services/files/fileBrowserEntryActionRuntime'
 import { createFileBrowserTransferRuntime } from '@/services/files/fileBrowserTransferRuntime'
 import {
-  fileBrowserDirname,
-  fileBrowserTargetBreadcrumb,
+  createFileBrowserPathRuntime,
+  fileBrowserPathStyleForSession,
   filePermissionCode,
   formatFileSize,
   nextFileBrowserSortState,
-  normalizeFileBrowserPath,
   visibleFileBrowserEntries,
   type FileBrowserEntry,
   type FilePermissionSelection,
@@ -64,6 +64,7 @@ export const useFileBrowserRuntime = (props: FileBrowserRuntimeProps, emit: File
   const conflictDialog = reactive<FileBrowserConflictDialogState>({ visible: false, newName: '' })
   const targetSubDirs = reactive<Record<number, FileBrowserEntry[]>>({})
   const movePathContainer = ref<HTMLElement | null>(null)
+  const platform = ref('')
   const sortState = reactive<FileBrowserSortState>({
     key: 'name',
     direction: 'asc'
@@ -79,9 +80,18 @@ export const useFileBrowserRuntime = (props: FileBrowserRuntimeProps, emit: File
   const permissionOptions = ['读', '写', '执行']
   const permissionCode = computed(() => filePermissionCode(permissions))
   const visibleEntries = computed(() => visibleFileBrowserEntries(entries.value, showHidden.value, sortState))
-  const targetBreadcrumb = computed(() => fileBrowserTargetBreadcrumb(moveDialog.targetPath))
-  const dirname = fileBrowserDirname
+  const pathRuntime = computed(() => createFileBrowserPathRuntime(fileBrowserPathStyleForSession(props.session, platform.value)))
+  const targetBreadcrumb = computed(() => pathRuntime.value.targetBreadcrumb(moveDialog.targetPath))
+  const dirname = (path: string) => pathRuntime.value.dirname(path)
   const formatSize = formatFileSize
+
+  const refreshPlatform = async () => {
+    if (props.session.kind !== 'local') {
+      platform.value = ''
+      return
+    }
+    platform.value = (await windowControlsClient.platform()?.()) || ''
+  }
 
   const setFileNotice = (message: string) => {
     fileNotice.value = message
@@ -96,7 +106,8 @@ export const useFileBrowserRuntime = (props: FileBrowserRuntimeProps, emit: File
   const backend = createFileBrowserBackendRuntime({
     props,
     workspace,
-    setFileNotice
+    setFileNotice,
+    pathRuntime
   })
 
   const toggleSort = (key: typeof sortState.key) => {
@@ -106,7 +117,7 @@ export const useFileBrowserRuntime = (props: FileBrowserRuntimeProps, emit: File
   }
 
   const loadEntries = async (path = currentPath.value, options: { preserveOnFailure?: boolean } = {}) => {
-    const normalizedPath = normalizeFileBrowserPath(path)
+    const normalizedPath = pathRuntime.value.normalize(path)
     loading.value = true
     error.value = ''
     try {
@@ -152,6 +163,7 @@ export const useFileBrowserRuntime = (props: FileBrowserRuntimeProps, emit: File
     props,
     workspace,
     backend,
+    pathRuntime,
     currentPath,
     entries,
     loading,
@@ -168,6 +180,7 @@ export const useFileBrowserRuntime = (props: FileBrowserRuntimeProps, emit: File
     props,
     emit,
     backend,
+    pathRuntime,
     pathInput,
     currentPath,
     entries,
@@ -194,7 +207,8 @@ export const useFileBrowserRuntime = (props: FileBrowserRuntimeProps, emit: File
   watch(
     () => props.session.id,
     async () => {
-      currentPath.value = normalizeFileBrowserPath(props.session.rootPath)
+      await refreshPlatform()
+      currentPath.value = pathRuntime.value.normalize(props.session.rootPath)
       pathInput.value = currentPath.value
       entries.value = []
       await loadEntries(currentPath.value, { preserveOnFailure: false })
@@ -202,7 +216,10 @@ export const useFileBrowserRuntime = (props: FileBrowserRuntimeProps, emit: File
   )
 
   onMounted(() => {
-    void loadEntries()
+    void (async () => {
+      await refreshPlatform()
+      await loadEntries()
+    })()
     document.addEventListener('click', entryActionRuntime.onGlobalClick)
   })
 

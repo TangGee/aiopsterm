@@ -30,6 +30,17 @@ export type FileSessionSelectionSnapshot = FileSessionSelection & {
   leftSession: FileSessionInfo | null
   rightSession: FileSessionInfo | null
 }
+export type FileBrowserPathStyle = 'posix' | 'windows'
+export type FileBrowserPathRuntime = {
+  style: FileBrowserPathStyle
+  normalize: (path: string) => string
+  join: (...parts: string[]) => string
+  dirname: (path: string) => string
+  targetBreadcrumb: (targetPath: string) => string[]
+  targetPathForBreadcrumbIndex: (targetPath: string, index: number) => string
+  renamePath: (entryPath: string, nextName: string) => string
+}
+export type FileBrowserPathRuntimeRef = { readonly value: FileBrowserPathRuntime }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 
@@ -226,25 +237,103 @@ export const nextFileBrowserSortState = (sortState: FileBrowserSortState, key: F
   }
 }
 
-export const normalizeFileBrowserPath = (path: string) => {
+const normalizePosixFileBrowserPath = (path: string) => {
   const next = path.trim().replace(/\/+/g, '/')
   return next === '' ? '/' : next
 }
 
-export const joinFileBrowserPath = (...parts: string[]) => normalizeFileBrowserPath(parts.join('/'))
+const normalizeWindowsFileBrowserPath = (path: string) => {
+  const raw = path.trim().replace(/\//g, '\\')
+  if (!raw) return '\\'
+  if (raw.startsWith('\\\\')) {
+    const body = raw.slice(2).replace(/\\+/g, '\\')
+    return body ? `\\\\${body}` : '\\\\'
+  }
+  const next = raw.replace(/\\+/g, '\\')
+  return /^[A-Za-z]:$/.test(next) ? `${next}\\` : next
+}
 
-export const fileBrowserDirname = (path: string) => {
+export const normalizeFileBrowserPath = (path: string, style: FileBrowserPathStyle = 'posix') =>
+  style === 'windows' ? normalizeWindowsFileBrowserPath(path) : normalizePosixFileBrowserPath(path)
+
+export const joinFileBrowserPathForStyle = (style: FileBrowserPathStyle, ...parts: string[]) =>
+  normalizeFileBrowserPath(parts.join(style === 'windows' ? '\\' : '/'), style)
+
+export const joinFileBrowserPath = (...parts: string[]) => joinFileBrowserPathForStyle('posix', ...parts)
+
+const isWindowsDriveRoot = (path: string) => /^[A-Za-z]:\\$/.test(path)
+
+const isWindowsUncRoot = (path: string) => /^\\\\[^\\]+\\[^\\]+\\?$/.test(path)
+
+const trimWindowsPathTail = (path: string) => {
+  if (isWindowsDriveRoot(path) || isWindowsUncRoot(path) || path === '\\') return path
+  return path.replace(/\\+$/g, '')
+}
+
+const windowsFileBrowserDirname = (path: string) => {
+  const normalized = trimWindowsPathTail(normalizeWindowsFileBrowserPath(path))
+  if (isWindowsDriveRoot(normalized) || isWindowsUncRoot(normalized) || normalized === '\\') return normalized
+  if (normalized.startsWith('\\\\')) {
+    const parts = normalized.slice(2).split('\\').filter(Boolean)
+    if (parts.length <= 2) return `\\\\${parts.join('\\')}`
+    return `\\\\${parts.slice(0, -1).join('\\')}`
+  }
+  const index = normalized.lastIndexOf('\\')
+  if (index < 0) return '\\'
+  if (/^[A-Za-z]:/.test(normalized) && index <= 2) return `${normalized.slice(0, 2)}\\`
+  if (index === 0) return '\\'
+  return normalized.slice(0, index)
+}
+
+export const fileBrowserDirnameForStyle = (path: string, style: FileBrowserPathStyle = 'posix') => {
+  if (style === 'windows') return windowsFileBrowserDirname(path)
   const index = path.lastIndexOf('/')
   if (index <= 0) return '/'
   return path.slice(0, index)
 }
 
-export const fileBrowserTargetBreadcrumb = (targetPath: string) => ['/', ...targetPath.split('/').filter(Boolean)]
+export const fileBrowserDirname = (path: string) => fileBrowserDirnameForStyle(path, 'posix')
 
-export const fileBrowserTargetPathForBreadcrumbIndex = (targetPath: string, index: number) => {
-  const parts = fileBrowserTargetBreadcrumb(targetPath).slice(0, index + 1)
+export const fileBrowserTargetBreadcrumbForStyle = (targetPath: string, style: FileBrowserPathStyle = 'posix') => {
+  if (style !== 'windows') return ['/', ...targetPath.split('/').filter(Boolean)]
+  const normalized = normalizeWindowsFileBrowserPath(targetPath)
+  const driveRoot = normalized.match(/^[A-Za-z]:\\/)
+  if (driveRoot) return [driveRoot[0], ...normalized.slice(driveRoot[0].length).split('\\').filter(Boolean)]
+  if (normalized.startsWith('\\\\')) {
+    const parts = normalized.slice(2).split('\\').filter(Boolean)
+    if (parts.length >= 2) return [`\\\\${parts[0]}\\${parts[1]}`, ...parts.slice(2)]
+  }
+  return ['\\', ...normalized.split('\\').filter(Boolean)]
+}
+
+export const fileBrowserTargetBreadcrumb = (targetPath: string) => fileBrowserTargetBreadcrumbForStyle(targetPath, 'posix')
+
+export const fileBrowserTargetPathForBreadcrumbIndexForStyle = (targetPath: string, index: number, style: FileBrowserPathStyle = 'posix') => {
+  const parts = fileBrowserTargetBreadcrumbForStyle(targetPath, style).slice(0, index + 1)
+  if (style === 'windows') {
+    const [root, ...rest] = parts
+    return normalizeWindowsFileBrowserPath(rest.length ? `${root}\\${rest.join('\\')}` : root || '\\')
+  }
   return normalizeFileBrowserPath(parts[0] === '/' ? `/${parts.slice(1).join('/')}` : parts.join('/'))
 }
+
+export const fileBrowserTargetPathForBreadcrumbIndex = (targetPath: string, index: number) =>
+  fileBrowserTargetPathForBreadcrumbIndexForStyle(targetPath, index, 'posix')
+
+export const fileBrowserPathStyleForPlatform = (platform = ''): FileBrowserPathStyle => (platform === 'win32' ? 'windows' : 'posix')
+
+export const fileBrowserPathStyleForSession = (session: Pick<FileSessionInfo, 'kind'>, platform = ''): FileBrowserPathStyle =>
+  session.kind === 'local' ? fileBrowserPathStyleForPlatform(platform) : 'posix'
+
+export const createFileBrowserPathRuntime = (style: FileBrowserPathStyle = 'posix'): FileBrowserPathRuntime => ({
+  style,
+  normalize: (path) => normalizeFileBrowserPath(path, style),
+  join: (...parts) => joinFileBrowserPathForStyle(style, ...parts),
+  dirname: (path) => fileBrowserDirnameForStyle(path, style),
+  targetBreadcrumb: (targetPath) => fileBrowserTargetBreadcrumbForStyle(targetPath, style),
+  targetPathForBreadcrumbIndex: (targetPath, index) => fileBrowserTargetPathForBreadcrumbIndexForStyle(targetPath, index, style),
+  renamePath: (entryPath, nextName) => joinFileBrowserPathForStyle(style, fileBrowserDirnameForStyle(entryPath, style), nextName)
+})
 
 export const formatFileSize = (size: number) => {
   if (size < 1024) return `${size} B`
@@ -275,22 +364,23 @@ export const mapFileBrowserEntry = (entry: FileListEntry): FileBrowserEntry => (
   linkTarget: entry.linkTarget
 })
 
-export const resolveListedDirectoryPath = (requestedPath: string, rows: FileBrowserEntry[]) => {
+export const resolveListedDirectoryPath = (requestedPath: string, rows: FileBrowserEntry[], style: FileBrowserPathStyle = 'posix') => {
   const firstChild = rows.find((entry) => entry.name !== '..')
   if (!firstChild) return requestedPath
-  const parentPath = fileBrowserDirname(firstChild.path)
+  const parentPath = fileBrowserDirnameForStyle(firstChild.path, style)
   return parentPath || requestedPath
 }
 
-export const fileBrowserRowsForDirectory = (requestedPath: string, entries: FileListEntry[]) => {
+export const fileBrowserRowsForDirectory = (requestedPath: string, entries: FileListEntry[], style: FileBrowserPathStyle = 'posix') => {
   const rows = entries.map(mapFileBrowserEntry)
-  const listedDirectoryPath = resolveListedDirectoryPath(requestedPath, rows)
-  if (rows.some((entry) => entry.name === '..') || listedDirectoryPath === '/') {
+  const listedDirectoryPath = resolveListedDirectoryPath(requestedPath, rows, style)
+  const rootPath = style === 'windows' ? fileBrowserDirnameForStyle(listedDirectoryPath, style) === listedDirectoryPath : listedDirectoryPath === '/'
+  if (rows.some((entry) => entry.name === '..') || rootPath) {
     return { rows, path: listedDirectoryPath }
   }
   return {
     rows: [
-      { name: '..', path: fileBrowserDirname(listedDirectoryPath), type: 'directory' as const, mode: 'drwxr-xr-x', size: 0, modifiedAt: '', modifiedAtMs: 0 },
+      { name: '..', path: fileBrowserDirnameForStyle(listedDirectoryPath, style), type: 'directory' as const, mode: 'drwxr-xr-x', size: 0, modifiedAt: '', modifiedAtMs: 0 },
       ...rows
     ],
     path: listedDirectoryPath
@@ -308,7 +398,7 @@ export const fileBrowserEntryDropDirectory = (entry: FileBrowserEntry | null | u
   return currentPath
 }
 
-export const fileBrowserRenamePath = (entryPath: string, nextName: string) => joinFileBrowserPath(fileBrowserDirname(entryPath), nextName)
+export const fileBrowserRenamePath = (entryPath: string, nextName: string) => createFileBrowserPathRuntime('posix').renamePath(entryPath, nextName)
 
 export const uniqueConflictFileName = (existingNames: Iterable<string>, name: string) => {
   const names = new Set(existingNames)

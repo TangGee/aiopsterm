@@ -1,11 +1,10 @@
 import type { Ref } from 'vue'
 import {
-  fileBrowserDirname,
   fileBrowserEntryDropDirectory,
   isDraggableFileBrowserEntry,
-  joinFileBrowserPath,
   localPathName,
-  type FileBrowserEntry
+  type FileBrowserEntry,
+  type FileBrowserPathRuntimeRef
 } from '@/services/files/filesRuntime'
 import type { FileBrowserBackendRuntime } from '@/services/files/fileBrowserBackendRuntime'
 import type { FileBrowserRuntimeProps } from '@/services/files/fileBrowserRuntimeTypes'
@@ -30,6 +29,7 @@ export const createFileBrowserTransferRuntime = (input: {
   props: FileBrowserRuntimeProps
   workspace: WorkspaceStore
   backend: FileBrowserBackendRuntime
+  pathRuntime: FileBrowserPathRuntimeRef
   currentPath: Ref<string>
   entries: Ref<FileBrowserEntry[]>
   loading: Ref<boolean>
@@ -45,6 +45,7 @@ export const createFileBrowserTransferRuntime = (input: {
     props,
     workspace,
     backend,
+    pathRuntime,
     currentPath,
     entries,
     loading,
@@ -166,7 +167,7 @@ export const createFileBrowserTransferRuntime = (input: {
       return
     }
     if (props.session.kind === 'local') {
-      const loaded = await loadEntries(fileBrowserDirname(localPath))
+      const loaded = await loadEntries(pathRuntime.value.dirname(localPath))
       if (loaded) setFileNotice(`已打开 ${currentPath.value}`)
       return
     }
@@ -189,7 +190,7 @@ export const createFileBrowserTransferRuntime = (input: {
     const sourceSession = workspace.fileSessions.find((session) => session.id === payload.fromUuid)
     const sourceIsLocal = sourceSession?.kind === 'local'
     const targetIsLocal = getTargetType() === 'local'
-    const targetPath = payload.isDir ? targetDir : joinFileBrowserPath(targetDir, payload.name)
+    const targetPath = payload.isDir ? targetDir : pathRuntime.value.join(targetDir, payload.name)
     loading.value = true
     try {
       const operation = sourceIsLocal

@@ -8,6 +8,7 @@ import {
   malformedFilesBackendResultMessage
 } from '@/services/files/filesBackendGuards'
 import { fileBrowserRowsForDirectory, normalizeFileBrowserPath } from '@/services/files/filesRuntime'
+import type { FileBrowserPathRuntimeRef } from '@/services/files/filesRuntime'
 import type { FileBrowserRuntimeProps } from '@/services/files/fileBrowserRuntimeTypes'
 import type { useWorkspaceStore } from '@/stores/workspace'
 import type {
@@ -36,8 +37,10 @@ export const createFileBrowserBackendRuntime = (input: {
   props: FileBrowserRuntimeProps
   workspace: WorkspaceStore
   setFileNotice: (message: string) => void
+  pathRuntime?: FileBrowserPathRuntimeRef
 }) => {
   const { props, workspace, setFileNotice } = input
+  const normalizePath = (path: string) => input.pathRuntime?.value.normalize(path) || normalizeFileBrowserPath(path)
 
   const getListOptions = (overrides: Partial<FileListOptions> = {}): FileListOptions => ({
     sessionId: props.session.id,
@@ -93,11 +96,11 @@ export const createFileBrowserBackendRuntime = (input: {
     if (!listFiles) throw new Error('文件列表服务不可用')
     const list = await listFiles(path, getListOptions())
     if (!Array.isArray(list) || !list.every(isFileListEntryData)) throw new Error(malformedFilesBackendResultMessage)
-    return fileBrowserRowsForDirectory(path, list)
+    return fileBrowserRowsForDirectory(path, list, input.pathRuntime?.value.style)
   }
 
   const listDirectoryEntries = async (path: string) => {
-    const normalized = normalizeFileBrowserPath(path)
+    const normalized = normalizePath(path)
     return (await loadDirectoryEntries(normalized)).rows
   }
 

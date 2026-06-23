@@ -8,8 +8,10 @@ import {
   fileTransferTaskRemovalDelay,
   fileSessionPanelStatus,
   fileSessionTerminalContextForPanel,
+  createFileBrowserPathRuntime,
   fileBrowserDirname,
   fileBrowserEntryDropDirectory,
+  fileBrowserPathStyleForSession,
   fileBrowserRenamePath,
   fileBrowserRowsForDirectory,
   fileBrowserTargetBreadcrumb,
@@ -324,6 +326,41 @@ describe('filesRuntime', () => {
     expect(isDraggableFileBrowserEntry({ ...listed.rows[1], type: 'link' }, 'transfer', 'left')).toBe(false)
     expect(isDraggableFileBrowserEntry(listed.rows[1], 'default', 'left')).toBe(false)
     expect(uniqueConflictFileName(['report.txt', 'report_1.txt'], 'report.txt')).toBe('report_2.txt')
+  })
+
+  it('keeps file browser path rules thin across Windows local paths and remote POSIX paths', () => {
+    const windowsPath = createFileBrowserPathRuntime('windows')
+
+    expect(fileBrowserPathStyleForSession({ kind: 'local' }, 'win32')).toBe('windows')
+    expect(fileBrowserPathStyleForSession({ kind: 'remote' }, 'win32')).toBe('posix')
+    expect(fileBrowserPathStyleForSession({ kind: 'local' }, 'darwin')).toBe('posix')
+    expect(windowsPath.normalize(' C:/Users//ops/project/ ')).toBe('C:\\Users\\ops\\project\\')
+    expect(windowsPath.join('C:\\Users\\ops\\', 'project', 'build.tgz')).toBe('C:\\Users\\ops\\project\\build.tgz')
+    expect(windowsPath.dirname('C:\\Users\\ops\\project\\build.tgz')).toBe('C:\\Users\\ops\\project')
+    expect(windowsPath.dirname('C:\\Users')).toBe('C:\\')
+    expect(windowsPath.renamePath('C:\\Users\\ops\\old.txt', 'new.txt')).toBe('C:\\Users\\ops\\new.txt')
+    expect(windowsPath.targetBreadcrumb('C:\\Users\\ops\\project')).toEqual(['C:\\', 'Users', 'ops', 'project'])
+    expect(windowsPath.targetPathForBreadcrumbIndex('C:\\Users\\ops\\project', 0)).toBe('C:\\')
+    expect(windowsPath.targetPathForBreadcrumbIndex('C:\\Users\\ops\\project', 2)).toBe('C:\\Users\\ops')
+    expect(windowsPath.targetBreadcrumb('\\\\server\\share\\ops\\project')).toEqual(['\\\\server\\share', 'ops', 'project'])
+    expect(windowsPath.targetPathForBreadcrumbIndex('\\\\server\\share\\ops\\project', 0)).toBe('\\\\server\\share')
+    expect(windowsPath.dirname('\\\\server\\share\\ops\\project')).toBe('\\\\server\\share\\ops')
+
+    const windowsListed = fileBrowserRowsForDirectory(
+      'C:\\requested',
+      [
+        { name: 'app.log', path: 'C:\\var\\log\\app.log', type: 'file', size: 128, modifiedAt: 1717200000000 },
+        { name: 'app', path: 'C:\\var\\log\\app', type: 'directory', mode: 'drwx------', size: 0, modifiedAt: 1717200001000 }
+      ],
+      'windows'
+    )
+    expect(windowsListed.path).toBe('C:\\var\\log')
+    expect(windowsListed.rows[0]).toEqual({ name: '..', path: 'C:\\var', type: 'directory', mode: 'drwxr-xr-x', size: 0, modifiedAt: '', modifiedAtMs: 0 })
+
+    const remotePath = createFileBrowserPathRuntime(fileBrowserPathStyleForSession({ kind: 'remote' }, 'win32'))
+    expect(remotePath.normalize('/home//deploy/')).toBe('/home/deploy/')
+    expect(remotePath.join('/home/deploy', 'release.tar')).toBe('/home/deploy/release.tar')
+    expect(remotePath.dirname('/home/deploy/release.tar')).toBe('/home/deploy')
   })
 
   it('groups transfer tasks and derives aggregate progress and running state', () => {

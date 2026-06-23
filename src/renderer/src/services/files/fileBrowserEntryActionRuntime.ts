@@ -1,14 +1,10 @@
 import type { Ref } from 'vue'
 import { copyTextToClipboard } from '@/services/app/clipboardRuntime'
 import {
-  fileBrowserDirname,
-  fileBrowserRenamePath,
-  fileBrowserTargetPathForBreadcrumbIndex,
-  joinFileBrowserPath,
-  normalizeFileBrowserPath,
   parseFilePermissionMode,
   uniqueConflictFileName,
   type FileBrowserEntry,
+  type FileBrowserPathRuntimeRef,
   type FilePermissionSelection
 } from '@/services/files/filesRuntime'
 import type { FileBrowserBackendRuntime } from '@/services/files/fileBrowserBackendRuntime'
@@ -24,6 +20,7 @@ export const createFileBrowserEntryActionRuntime = (input: {
   props: FileBrowserRuntimeProps
   emit: FileBrowserRuntimeEmit
   backend: FileBrowserBackendRuntime
+  pathRuntime: FileBrowserPathRuntimeRef
   pathInput: Ref<string>
   currentPath: Ref<string>
   entries: Ref<FileBrowserEntry[]>
@@ -50,6 +47,7 @@ export const createFileBrowserEntryActionRuntime = (input: {
     props,
     emit,
     backend,
+    pathRuntime,
     pathInput,
     currentPath,
     entries,
@@ -113,7 +111,7 @@ export const createFileBrowserEntryActionRuntime = (input: {
   }
 
   const goBack = async () => {
-    await loadEntries(fileBrowserDirname(currentPath.value))
+    await loadEntries(pathRuntime.value.dirname(currentPath.value))
   }
 
   const startRename = (entry: FileBrowserEntry) => {
@@ -128,7 +126,7 @@ export const createFileBrowserEntryActionRuntime = (input: {
       setFileNotice('请输入新文件名')
       return
     }
-    const newPath = fileBrowserRenamePath(entry.path, name)
+    const newPath = pathRuntime.value.renamePath(entry.path, name)
     if (newPath === entry.path) {
       cancelRename()
       return
@@ -211,7 +209,7 @@ export const createFileBrowserEntryActionRuntime = (input: {
     moveDialog.visible = true
     moveDialog.type = type
     moveDialog.entry = entry
-    moveDialog.targetPath = fileBrowserDirname(entry.path)
+    moveDialog.targetPath = pathRuntime.value.dirname(entry.path)
     moveDialog.editingPath = false
     moveDialog.activeMenuIndex = null
     conflictDialog.visible = false
@@ -230,7 +228,7 @@ export const createFileBrowserEntryActionRuntime = (input: {
     clearTargetSubDirs()
   }
 
-  const getTargetPathForIndex = (index: number) => fileBrowserTargetPathForBreadcrumbIndex(moveDialog.targetPath, index)
+  const getTargetPathForIndex = (index: number) => pathRuntime.value.targetPathForBreadcrumbIndex(moveDialog.targetPath, index)
 
   const startTargetPathEdit = () => {
     moveDialog.editingPath = true
@@ -238,7 +236,7 @@ export const createFileBrowserEntryActionRuntime = (input: {
   }
 
   const stopTargetPathEdit = () => {
-    moveDialog.targetPath = normalizeFileBrowserPath(moveDialog.targetPath)
+    moveDialog.targetPath = pathRuntime.value.normalize(moveDialog.targetPath)
     moveDialog.editingPath = false
   }
 
@@ -261,14 +259,14 @@ export const createFileBrowserEntryActionRuntime = (input: {
 
   const enterTargetSubDir = (index: number, name: string) => {
     const basePath = getTargetPathForIndex(index)
-    moveDialog.targetPath = joinFileBrowserPath(basePath, name)
+    moveDialog.targetPath = pathRuntime.value.join(basePath, name)
     moveDialog.editingPath = false
     moveDialog.activeMenuIndex = null
     clearTargetSubDirs()
   }
 
   const getTargetDirectoryNames = async (targetPath: string) => {
-    if (normalizeFileBrowserPath(targetPath) === normalizeFileBrowserPath(currentPath.value)) {
+    if (pathRuntime.value.normalize(targetPath) === pathRuntime.value.normalize(currentPath.value)) {
       return entries.value.map((entry) => entry.name).filter((name) => name !== '..')
     }
     const list = await backend.listDirectoryEntries(targetPath)
@@ -285,7 +283,7 @@ export const createFileBrowserEntryActionRuntime = (input: {
 
   const confirmMove = async () => {
     if (!moveDialog.entry) return
-    moveDialog.targetPath = normalizeFileBrowserPath(moveDialog.targetPath)
+    moveDialog.targetPath = pathRuntime.value.normalize(moveDialog.targetPath)
     moveDialog.editingPath = false
     moveDialog.activeMenuIndex = null
     const targetName = moveDialog.entry.name
@@ -306,14 +304,14 @@ export const createFileBrowserEntryActionRuntime = (input: {
   const queueMoveTarget = async (name: string, overwrite = false) => {
     if (!moveDialog.entry) return
     const entry = moveDialog.entry
-    const targetPath = joinFileBrowserPath(moveDialog.targetPath, name)
+    const targetPath = pathRuntime.value.join(moveDialog.targetPath, name)
     loading.value = true
     try {
       await backend.mutateEntry(
         { kind: moveDialog.type, srcPath: entry.path, targetPath, overwrite },
         moveDialog.type === 'copy' ? '复制失败' : '移动失败'
       )
-      if (fileBrowserDirname(targetPath) === currentPath.value || moveDialog.type === 'move') await requireEntriesReload()
+      if (pathRuntime.value.dirname(targetPath) === currentPath.value || moveDialog.type === 'move') await requireEntriesReload()
       setFileNotice(moveDialog.type === 'copy' ? '复制成功' : '移动成功')
       closeMoveDialog()
     } catch (moveError) {
