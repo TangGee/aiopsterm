@@ -349,7 +349,7 @@ export const mergeUserConfig = (base: UserConfig, patch: Partial<UserConfig> = {
     knowledgeBase: patch.knowledgeBase || base.knowledgeBase ? normalizeKnowledgeBaseConfig(patch.knowledgeBase || base.knowledgeBase).normalized : undefined,
     aliasCommands: patch.aliasCommands || base.aliasCommands ? normalizeAliasCommandsConfig(patch.aliasCommands || base.aliasCommands).normalized : undefined,
     shortcuts: normalizeShortcutsConfig(patch.shortcuts || base.shortcuts).normalized,
-    rules: normalizeRulesConfig(patch.rules || base.rules, patch.customInstructions || base.customInstructions).normalized,
+    rules: normalizeRulesConfig(patch.rules || base.rules, patch.customInstructions !== undefined ? patch.customInstructions : base.customInstructions).normalized,
     skills: normalizeSkillsConfig(patch.skills || base.skills).normalized,
     customInstructions: patch.customInstructions !== undefined ? patch.customInstructions : base.customInstructions,
     mcpServers: normalizedMcp.normalized,

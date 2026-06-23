@@ -1,13 +1,6 @@
 import { ref, type Ref } from 'vue'
 import { localFilesClient } from '@/services/localFilesClient'
-import {
-  isSettingsPreferencesMutationData,
-  isSettingsPreferencesSnapshot,
-  isSettingsRuleDeleteData,
-  malformedSettingsBackendResultMessage
-} from '@/services/settingsBackendGuards'
-import { settingsPreferencesClient } from '@/services/settingsPreferencesClient'
-import { shortcutRuntime, type ShortcutActionHandler } from '@/services/shortcutRuntime'
+import { type ShortcutActionHandler } from '@/services/shortcutRuntime'
 import {
   isSkillContentResultData,
   isSkillDeleteResultForRequest,
@@ -21,19 +14,19 @@ import {
 } from '@/services/skillsBackendGuards'
 import { skillsClient } from '@/services/skillsClient'
 import {
-  isValidShortcutForAction,
+  createWorkspaceSettingsPreferencesController,
+  type WorkspaceSettingsRule,
+  type WorkspaceSettingsShortcut
+} from '@/services/workspaceSettingsPreferencesController'
+import {
   mergeUserConfig,
-  normalizeRulesConfig,
-  normalizeShortcutsConfig,
   normalizeSkillsConfig
 } from '@/services/workspaceConfigRuntime'
-import type { SettingsPreferencesSnapshot, ShortcutUserConfig, UserRuleConfig } from '@shared/contracts/settingsPreferences'
 import type { SkillUserConfig } from '@shared/contracts/skills'
 import type { UserConfig } from '@shared/contracts/userConfig'
 
-export type WorkspaceSettingsRule = UserRuleConfig & { isEditing?: boolean; isDraft?: boolean }
 export type WorkspaceSettingsSkill = SkillUserConfig
-export type WorkspaceSettingsShortcut = ShortcutUserConfig
+export type { WorkspaceSettingsRule, WorkspaceSettingsShortcut } from '@/services/workspaceSettingsPreferencesController'
 export type WorkspaceSkillModalState = {
   mode: 'create' | 'edit' | null
   name: string
@@ -55,23 +48,6 @@ type WorkspaceSettingsControllerDeps = {
   setSettingsNotice: (message: string) => void
   shortcutHandlers: Record<string, ShortcutActionHandler>
 }
-
-const cloneShortcutConfig = (shortcuts: WorkspaceSettingsShortcut[]): ShortcutUserConfig[] =>
-  shortcuts.map((shortcut) => ({
-    id: shortcut.id,
-    action: shortcut.action,
-    shortcut: shortcut.shortcut,
-    ...(shortcut.suffix ? { suffix: shortcut.suffix } : {})
-  }))
-
-const cloneRuleConfig = (rules: WorkspaceSettingsRule[]): UserRuleConfig[] =>
-  rules
-    .filter((rule) => !rule.isDraft && rule.content.trim())
-    .map((rule) => ({
-      id: rule.id,
-      content: rule.content.trim(),
-      enabled: rule.enabled !== undefined ? rule.enabled : true
-    }))
 
 const cloneSkillConfig = (skills: WorkspaceSettingsSkill[]): SkillUserConfig[] =>
   skills
@@ -100,60 +76,20 @@ export const createWorkspaceSettingsController = (state: WorkspaceSettingsContro
   const pendingSkillImportOverwritePath = ref('')
   let removeSkillsUpdateListener: (() => void) | null = null
 
-  const getShortcutsSnapshot = (): ShortcutUserConfig[] => cloneShortcutConfig(settingsShortcuts.value)
-
-  const getRulesSnapshot = (): UserRuleConfig[] => cloneRuleConfig(settingsRules.value)
-
   const getSkillsSnapshot = (): SkillUserConfig[] => cloneSkillConfig(settingsSkills.value)
 
-  const refreshShortcutRuntime = () => {
-    shortcutRuntime.update(getShortcutsSnapshot(), shortcutHandlers)
-  }
-
-  const applySettingsPreferencesSnapshot = (snapshot: SettingsPreferencesSnapshot) => {
-    const { normalized: normalizedShortcuts } = normalizeShortcutsConfig(snapshot.shortcuts)
-    const { normalized: normalizedRules } = normalizeRulesConfig(snapshot.rules)
-    settingsShortcuts.value = normalizedShortcuts.map((shortcut) => ({ ...shortcut }))
-    settingsRules.value = normalizedRules.map((rule) => ({ ...rule, isEditing: false }))
-    config.value = mergeUserConfig(config.value, {
-      shortcuts: normalizedShortcuts,
-      rules: normalizedRules,
-      customInstructions: ''
-    })
-    refreshShortcutRuntime()
-    return {
-      shortcuts: normalizedShortcuts,
-      rules: normalizedRules
+  const preferencesController = createWorkspaceSettingsPreferencesController(
+    {
+      config,
+      settingsRules,
+      settingsShortcuts,
+      shortcutRecording
+    },
+    {
+      setSettingsNotice,
+      shortcutHandlers
     }
-  }
-
-  const hydrateSettingsPreferences = async (savedConfig: UserConfig) => {
-    let bridgeSettingsPreferences: SettingsPreferencesSnapshot = {
-      shortcuts: normalizeShortcutsConfig(savedConfig.shortcuts).normalized,
-      rules: normalizeRulesConfig(savedConfig.rules, savedConfig.customInstructions).normalized
-    }
-    try {
-      const getSettingsPreferences = settingsPreferencesClient.getSettingsPreferences()
-      const result = await getSettingsPreferences?.()
-      if (result?.ok && isSettingsPreferencesSnapshot(result.data)) {
-        bridgeSettingsPreferences = result.data
-      } else if (result?.ok) {
-        setSettingsNotice(malformedSettingsBackendResultMessage)
-      } else if (result && !result.ok) {
-        setSettingsNotice(result.errorMessage || '设置偏好加载失败')
-      }
-    } catch {
-      setSettingsNotice('设置偏好加载失败')
-    }
-    const { normalized: normalizedShortcuts } = normalizeShortcutsConfig(bridgeSettingsPreferences.shortcuts)
-    settingsShortcuts.value = normalizedShortcuts.map((shortcut) => ({ ...shortcut }))
-    const { normalized: normalizedRules } = normalizeRulesConfig(bridgeSettingsPreferences.rules)
-    settingsRules.value = normalizedRules.map((rule) => ({ ...rule, isEditing: false }))
-    return {
-      normalizedShortcuts,
-      normalizedRules
-    }
-  }
+  )
 
   const applySkillsList = (skills: SkillUserConfig[]) => {
     const { normalized } = normalizeSkillsConfig(skills)
@@ -538,239 +474,13 @@ export const createWorkspaceSettingsController = (state: WorkspaceSettingsContro
     }
   }
 
-  const addSettingsRule = () => {
-    if (settingsRules.value.some((rule) => rule.isEditing)) return
-    settingsRules.value.unshift({ id: 'rule-draft-new', content: '', enabled: true, isEditing: true, isDraft: true })
-  }
-
-  const editSettingsRule = (id: string) => {
-    settingsRules.value.forEach((rule) => {
-      rule.isEditing = rule.id === id
-    })
-  }
-
-  const updateSettingsRuleDraft = (id: string, content: string) => {
-    const rule = settingsRules.value.find((item) => item.id === id)
-    if (rule) rule.content = content
-  }
-
-  const saveSettingsRule = async (id: string) => {
-    const rule = settingsRules.value.find((item) => item.id === id)
-    if (!rule) return false
-    if (!rule.content.trim()) {
-      if (rule.isDraft) {
-        settingsRules.value = settingsRules.value.filter((item) => item.id !== id)
-        return false
-      }
-      return deleteSettingsRule(id)
-    }
-    const saveSettingsRuleBridge = settingsPreferencesClient.saveSettingsRule()
-    if (!saveSettingsRuleBridge) {
-      setSettingsNotice('规则保存服务不可用')
-      return false
-    }
-    try {
-      const result = await saveSettingsRuleBridge({
-        ...(rule.isDraft ? {} : { id }),
-        content: rule.content,
-        enabled: rule.enabled
-      })
-      if (!result?.ok || !result.data) {
-        setSettingsNotice(result?.errorMessage || '规则保存失败')
-        return false
-      }
-      if (!isSettingsPreferencesMutationData(result.data)) {
-        setSettingsNotice(malformedSettingsBackendResultMessage)
-        return false
-      }
-      applySettingsPreferencesSnapshot(result.data)
-      setSettingsNotice(result.data.message || '规则已保存')
-      return true
-    } catch {
-      setSettingsNotice('规则保存失败')
-      return false
-    }
-  }
-
-  const cancelSettingsRuleEdit = (id: string) => {
-    const rule = settingsRules.value.find((item) => item.id === id)
-    if (!rule) return
-    if (!rule.content.trim()) {
-      settingsRules.value = settingsRules.value.filter((item) => item.id !== id)
-      return
-    }
-    const savedRule = config.value.rules?.find((item) => item.id === id)
-    if (savedRule) {
-      rule.content = savedRule.content
-      rule.enabled = savedRule.enabled
-      rule.isDraft = false
-    }
-    rule.isEditing = false
-  }
-
-  const toggleSettingsRule = async (id: string) => {
-    const rule = settingsRules.value.find((item) => item.id === id)
-    if (!rule) return false
-    const nextEnabled = !rule.enabled
-    const saveSettingsRuleBridge = settingsPreferencesClient.saveSettingsRule()
-    if (!saveSettingsRuleBridge) {
-      setSettingsNotice('规则更新服务不可用')
-      return false
-    }
-    try {
-      const result = await saveSettingsRuleBridge({
-        id,
-        content: rule.content,
-        enabled: nextEnabled
-      })
-      if (!result?.ok || !result.data) {
-        setSettingsNotice(result?.errorMessage || '规则更新失败')
-        return false
-      }
-      if (!isSettingsPreferencesMutationData(result.data)) {
-        setSettingsNotice(malformedSettingsBackendResultMessage)
-        return false
-      }
-      applySettingsPreferencesSnapshot(result.data)
-      setSettingsNotice(`规则${nextEnabled ? '已启用' : '已禁用'}`)
-      return true
-    } catch {
-      setSettingsNotice('规则更新失败')
-      return false
-    }
-  }
-
-  const deleteSettingsRule = async (id: string) => {
-    const existing = settingsRules.value.find((item) => item.id === id)
-    if (!existing) return false
-    if (!existing.content.trim() && existing.isDraft) {
-      settingsRules.value = settingsRules.value.filter((item) => item.id !== id)
-      return true
-    }
-    const deleteSettingsRuleBridge = settingsPreferencesClient.deleteSettingsRule()
-    if (!deleteSettingsRuleBridge) {
-      setSettingsNotice('规则删除服务不可用')
-      return false
-    }
-    try {
-      const result = await deleteSettingsRuleBridge(id)
-      if (!result?.ok || !result.data) {
-        setSettingsNotice(result?.errorMessage || '规则删除失败')
-        return false
-      }
-      if (!isSettingsRuleDeleteData(result.data)) {
-        setSettingsNotice(malformedSettingsBackendResultMessage)
-        return false
-      }
-      applySettingsPreferencesSnapshot(result.data)
-      setSettingsNotice('规则已删除')
-      return true
-    } catch {
-      setSettingsNotice('规则删除失败')
-      return false
-    }
-  }
-
-  const startShortcutRecording = (actionId: string) => {
-    shortcutRecording.value = { actionId, tempShortcut: '' }
-    shortcutRuntime.setRecording(true)
-  }
-
-  const updateShortcutRecording = (shortcut: string) => {
-    shortcutRecording.value.tempShortcut = shortcut
-  }
-
-  const saveShortcutRecording = async () => {
-    const { actionId, tempShortcut } = shortcutRecording.value
-    const nextShortcut = tempShortcut.trim()
-    if (!actionId || !nextShortcut) return false
-    const shortcut = settingsShortcuts.value.find((item) => item.id === actionId)
-    if (!shortcut) return false
-    if (!isValidShortcutForAction(actionId, nextShortcut)) {
-      setSettingsNotice('快捷键格式无效')
-      return false
-    }
-    const conflicted = settingsShortcuts.value.some((item) => item.id !== actionId && item.shortcut === nextShortcut)
-    if (conflicted) {
-      setSettingsNotice('快捷键已被占用')
-      return false
-    }
-    const saveSettingsShortcutBridge = settingsPreferencesClient.saveSettingsShortcut()
-    if (!saveSettingsShortcutBridge) {
-      setSettingsNotice('快捷键保存服务不可用')
-      return false
-    }
-    try {
-      const result = await saveSettingsShortcutBridge({
-        id: actionId,
-        shortcut: nextShortcut
-      })
-      if (!result?.ok || !result.data) {
-        setSettingsNotice(result?.errorMessage || '快捷键保存失败')
-        return false
-      }
-      if (!isSettingsPreferencesMutationData(result.data)) {
-        setSettingsNotice(malformedSettingsBackendResultMessage)
-        return false
-      }
-      applySettingsPreferencesSnapshot(result.data)
-      shortcutRecording.value = { actionId: null, tempShortcut: '' }
-      shortcutRuntime.setRecording(false)
-      setSettingsNotice(result.data.message || '快捷键已保存')
-      return true
-    } catch {
-      setSettingsNotice('快捷键保存失败')
-      return false
-    }
-  }
-
-  const cancelShortcutRecording = () => {
-    shortcutRecording.value = { actionId: null, tempShortcut: '' }
-    shortcutRuntime.setRecording(false)
-  }
-
-  const resetAllShortcuts = async () => {
-    const resetSettingsShortcutsBridge = settingsPreferencesClient.resetSettingsShortcuts()
-    if (!resetSettingsShortcutsBridge) {
-      setSettingsNotice('快捷键重置服务不可用')
-      return false
-    }
-    try {
-      const result = await resetSettingsShortcutsBridge()
-      if (!result?.ok || !result.data) {
-        setSettingsNotice(result?.errorMessage || '快捷键重置失败')
-        return false
-      }
-      if (!isSettingsPreferencesMutationData(result.data)) {
-        setSettingsNotice(malformedSettingsBackendResultMessage)
-        return false
-      }
-      applySettingsPreferencesSnapshot(result.data)
-      shortcutRecording.value = { actionId: null, tempShortcut: '' }
-      shortcutRuntime.setRecording(false)
-      setSettingsNotice(result.data.message || '快捷键已全部重置')
-      return true
-    } catch {
-      setSettingsNotice('快捷键重置失败')
-      return false
-    }
-  }
-
-  const installShortcutRuntime = () => {
-    shortcutRuntime.install(getShortcutsSnapshot(), shortcutHandlers)
-  }
-
-  const uninstallShortcutRuntime = () => {
-    shortcutRuntime.destroy()
-  }
-
   return {
-    getShortcutsSnapshot,
-    getRulesSnapshot,
+    getShortcutsSnapshot: preferencesController.getShortcutsSnapshot,
+    getRulesSnapshot: preferencesController.getRulesSnapshot,
     getSkillsSnapshot,
-    refreshShortcutRuntime,
-    applySettingsPreferencesSnapshot,
-    hydrateSettingsPreferences,
+    refreshShortcutRuntime: preferencesController.refreshShortcutRuntime,
+    applySettingsPreferencesSnapshot: preferencesController.applySettingsPreferencesSnapshot,
+    hydrateSettingsPreferences: preferencesController.hydrateSettingsPreferences,
     applySkillsList,
     readSkillsSnapshotFromBridge,
     hydrateSkills,
@@ -787,19 +497,19 @@ export const createWorkspaceSettingsController = (state: WorkspaceSettingsContro
     deleteSkill,
     importSkillZip,
     exportSkillZip,
-    addSettingsRule,
-    editSettingsRule,
-    updateSettingsRuleDraft,
-    saveSettingsRule,
-    cancelSettingsRuleEdit,
-    toggleSettingsRule,
-    deleteSettingsRule,
-    startShortcutRecording,
-    updateShortcutRecording,
-    saveShortcutRecording,
-    cancelShortcutRecording,
-    resetAllShortcuts,
-    installShortcutRuntime,
-    uninstallShortcutRuntime
+    addSettingsRule: preferencesController.addSettingsRule,
+    editSettingsRule: preferencesController.editSettingsRule,
+    updateSettingsRuleDraft: preferencesController.updateSettingsRuleDraft,
+    saveSettingsRule: preferencesController.saveSettingsRule,
+    cancelSettingsRuleEdit: preferencesController.cancelSettingsRuleEdit,
+    toggleSettingsRule: preferencesController.toggleSettingsRule,
+    deleteSettingsRule: preferencesController.deleteSettingsRule,
+    startShortcutRecording: preferencesController.startShortcutRecording,
+    updateShortcutRecording: preferencesController.updateShortcutRecording,
+    saveShortcutRecording: preferencesController.saveShortcutRecording,
+    cancelShortcutRecording: preferencesController.cancelShortcutRecording,
+    resetAllShortcuts: preferencesController.resetAllShortcuts,
+    installShortcutRuntime: preferencesController.installShortcutRuntime,
+    uninstallShortcutRuntime: preferencesController.uninstallShortcutRuntime
   }
 }
