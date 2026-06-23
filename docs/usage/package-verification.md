@@ -39,6 +39,8 @@ npm run package:verify -- windows
 
 On Linux, the Codex musl package build requires the native release toolchain used by Codex: `ca-certificates curl musl-tools pkg-config libcap-dev g++ clang libc++-dev libc++abi-dev lld xz-utils`. CI jobs may provide prebuilt helper binaries through `AIOPSTERM_CODEX_BWRAP_BIN` and `AIOPSTERM_CODEX_RG_BIN`, but the package entrypoint must still come from this repository's local modified `codex/` source unless `AIOPSTERM_CODEX_PACKAGE_DIR` is intentionally supplied. The Codex package builder downloads Codex-built V8 artifacts from OpenAI Codex releases by default; offline or restricted runners should preconfigure `RUSTY_V8_ARCHIVE` and `RUSTY_V8_SRC_BINDING_PATH`.
 
+On macOS, `build:codex` runs the same POSIX package builder on the native macOS runner. It writes the generated package under `codex/codex-rs/target/x86_64-apple-darwin/aiopsterm-codex-package` on Intel runners or `codex/codex-rs/target/aarch64-apple-darwin/aiopsterm-codex-package` on Apple Silicon runners. Build and verify each architecture on its matching macOS runner unless a separate universal-binary release plan is introduced.
+
 On Windows, `build:codex` does not run the shell builder. It validates an existing complete Codex package instead. Set `AIOPSTERM_CODEX_PACKAGE_DIR` to a package directory that contains `codex-package.json`, `bin/codex.exe`, and `codex-path/rg.exe`, or set `AIOPSTERM_CODEX_BIN` to the package entrypoint under `<package>/bin/codex.exe`.
 
 After building the full Linux package set with `npm run build:linux`, run the package-level checks:
