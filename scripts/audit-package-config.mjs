@@ -83,6 +83,7 @@ const codexDevBuildScript = readFileSync(resolve('scripts/build-codex-dev-packag
 const buildAndStartScript = readFileSync(resolve('scripts/build-and-start.sh'), 'utf8')
 const afterPackScript = readFileSync(resolve('scripts/prune-packaged-native-modules.mjs'), 'utf8')
 const packageTargetsScript = readFileSync(resolve('scripts/package-targets.mjs'), 'utf8')
+const packagedAppAuditScript = readFileSync(resolve('scripts/audit-packaged-app.mjs'), 'utf8')
 const packagedE2eSpec = readFileSync(resolve('tests/packaged-e2e/packaged-app.spec.ts'), 'utf8')
 const codexPackagingRequirements = [
   { label: 'build-codex node entrypoint', source: packageScripts['build:codex'], text: 'node scripts/build-codex-cli.mjs' },
@@ -94,7 +95,13 @@ const codexPackagingRequirements = [
   { label: 'package build target entrypoint', source: packageScripts['package:build'], text: 'node scripts/build-package-target.mjs' },
   { label: 'package build matrix entrypoint', source: packageScripts['package:build:matrix'], text: 'node scripts/build-package-matrix.mjs' },
   { label: 'package verify target entrypoint', source: packageScripts['package:verify'], text: 'node scripts/verify-package-target.mjs' },
-  { label: 'build-codex Windows package gate', source: codexBuildEntrypoint, text: "process.platform === 'win32'" },
+  { label: 'build-codex Windows source build gate', source: codexBuildEntrypoint, text: "process.platform === 'win32'" },
+  { label: 'build-codex Windows package builder', source: codexBuildEntrypoint, text: 'build_codex_package.py' },
+  { label: 'build-codex Windows command runner', source: codexBuildEntrypoint, text: 'codex-command-runner' },
+  { label: 'build-codex Windows sandbox setup', source: codexBuildEntrypoint, text: 'codex-windows-sandbox-setup' },
+  { label: 'build-codex Windows command runner override', source: codexBuildEntrypoint, text: 'AIOPSTERM_CODEX_COMMAND_RUNNER_BIN' },
+  { label: 'build-codex Windows sandbox setup override', source: codexBuildEntrypoint, text: 'AIOPSTERM_CODEX_WINDOWS_SANDBOX_SETUP_BIN' },
+  { label: 'build-codex Windows msvc target', source: readFileSync(resolve('scripts/codex-runtime-paths.mjs'), 'utf8'), text: 'x86_64-pc-windows-msvc' },
   { label: 'build-codex Windows audit', source: codexBuildEntrypoint, text: 'audit-codex-runtime.mjs' },
   { label: 'build-codex POSIX shell delegation', source: codexBuildEntrypoint, text: 'build-codex-cli.sh' },
   { label: 'package target linux appimage', source: packageTargetsScript, text: "'linux-appimage'" },
@@ -112,6 +119,10 @@ const codexPackagingRequirements = [
   { label: 'build-codex bwrap override', source: codexBuildScript, text: 'AIOPSTERM_CODEX_BWRAP_BIN' },
   { label: 'build-codex rg override', source: codexBuildScript, text: 'AIOPSTERM_CODEX_RG_BIN' },
   { label: 'build-codex package output path', source: codexBuildScript, text: 'codexPackageDir' },
+  { label: 'codex runtime Windows command runner audit', source: readFileSync(resolve('scripts/audit-codex-runtime.mjs'), 'utf8'), text: 'codex-command-runner.exe' },
+  { label: 'codex runtime Windows sandbox setup audit', source: readFileSync(resolve('scripts/audit-codex-runtime.mjs'), 'utf8'), text: 'codex-windows-sandbox-setup.exe' },
+  { label: 'packaged app Windows command runner audit', source: packagedAppAuditScript, text: 'codex-command-runner.exe' },
+  { label: 'packaged app Windows sandbox setup audit', source: packagedAppAuditScript, text: 'codex-windows-sandbox-setup.exe' },
   { label: 'afterPack codex package copy', source: afterPackScript, text: 'copyCodexCliPackage' },
   { label: 'afterPack codex package path', source: afterPackScript, text: 'packagedCodexPackageDir' },
   { label: 'afterPack codex env override', source: afterPackScript, text: 'AIOPSTERM_CODEX_BIN' },

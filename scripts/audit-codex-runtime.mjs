@@ -30,6 +30,12 @@ const requiredPackageFiles = [
 if (process.platform === 'linux') {
   requiredPackageFiles.push(join(detectedPackageDir, 'codex-resources', 'bwrap'))
 }
+if (process.platform === 'win32') {
+  requiredPackageFiles.push(
+    join(detectedPackageDir, 'codex-resources', 'codex-command-runner.exe'),
+    join(detectedPackageDir, 'codex-resources', 'codex-windows-sandbox-setup.exe')
+  )
+}
 const missingPackageFiles = requiredPackageFiles.filter((file) => !existsSync(file))
 if (missingPackageFiles.length) {
   throw new Error(`Codex runtime package is incomplete:\n${missingPackageFiles.join('\n')}`)

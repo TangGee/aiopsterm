@@ -46,6 +46,12 @@ const requiredFiles = [
   ...nativeModuleFilesForPlatform(resourcesDir)
 ]
 if (platform === 'linux') requiredFiles.push(join(codexPackage, 'codex-resources', 'bwrap'))
+if (platform === 'win32') {
+  requiredFiles.push(
+    join(codexPackage, 'codex-resources', 'codex-command-runner.exe'),
+    join(codexPackage, 'codex-resources', 'codex-windows-sandbox-setup.exe')
+  )
+}
 
 const missing = requiredFiles.filter((file) => !existsSync(file))
 if (missing.length) {

@@ -135,7 +135,7 @@ npm run build:win:dir
 
 `build:mac` uses the same self-owned build output and electron-builder config, with `dmg` and `zip` targets matching the External reference-style desktop package split. Run it on macOS because macOS targets require the platform signing and packaging toolchain; Linux development machines should use `audit:package-config` to verify the macOS target configuration without attempting to produce a macOS package.
 
-`build:win` uses the same self-owned build output and electron-builder config, with the NSIS installer target. Run it on Windows. The Windows Codex build step validates a complete package supplied through `AIOPSTERM_CODEX_PACKAGE_DIR` or `AIOPSTERM_CODEX_BIN`; it does not run the POSIX shell builder.
+`build:win` uses the same self-owned build output and electron-builder config, with the NSIS installer target. Run it on Windows. The Windows Codex build step does not run the POSIX shell builder; the Node `build:codex` dispatcher invokes Codex's Python package builder against `x86_64-pc-windows-msvc` or `aarch64-pc-windows-msvc`, using the Rust toolchain declared by `codex/codex-rs/rust-toolchain.toml`. The Windows runner needs Python 3, rustup, and the MSVC C++ build tools/Windows SDK. The generated Codex package includes `bin/codex.exe`, `codex-path/rg.exe`, `codex-resources/codex-command-runner.exe`, and `codex-resources/codex-windows-sandbox-setup.exe`. CI may still supply a complete cached package with `AIOPSTERM_CODEX_PACKAGE_DIR` / `AIOPSTERM_CODEX_BIN`, or individual helper overrides with `AIOPSTERM_CODEX_RG_BIN`, `AIOPSTERM_CODEX_COMMAND_RUNNER_BIN`, and `AIOPSTERM_CODEX_WINDOWS_SANDBOX_SETUP_BIN`.
 
 Target-level commands wrap those platform scripts and fail fast on the wrong host:
 
