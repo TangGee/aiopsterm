@@ -1,11 +1,11 @@
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { copyTextToClipboard } from '@/services/clipboardRuntime'
+import { computed, ref, watch } from 'vue'
 import { createDatabaseCatalogConnectionWorkspaceController } from '@/services/databaseCatalogConnectionWorkspaceController'
 import { createDatabaseAiWorkspaceController } from '@/services/databaseAiWorkspaceController'
 import { createDatabaseSqlDataWorkspaceController } from '@/services/databaseSqlDataWorkspaceController'
 import { createDatabaseSqlEditorWorkspaceController } from '@/services/databaseSqlEditorWorkspaceController'
 import { createDatabaseWorkspaceCatalogRuntime } from '@/services/databaseWorkspaceCatalogRuntime'
 import { createDatabaseWorkspaceConnectionStateRuntime } from '@/services/databaseWorkspaceConnectionStateRuntime'
+import { createDatabaseWorkspaceShellRuntime } from '@/services/databaseWorkspaceShellRuntime'
 import { createDatabaseWorkspaceSqlTabRuntime } from '@/services/databaseWorkspaceSqlTabRuntime'
 import type { DatabaseMainWorkspaceApi } from '@/components/database/databaseMainWorkspaceTypes'
 import { makeDirtyState } from '@/services/databaseGridRuntime'
@@ -30,8 +30,6 @@ export const useDatabaseWorkspaceRuntime = () => {
   const addMenuPosition = ref({ x: 0, y: 0 })
   const contextMenu = ref<ContextMenu | null>(null)
   const contextSubmenu = ref<ContextSubmenu>(null)
-  const notice = ref('')
-  const noticeTimer = ref<number | null>(null)
   const editingGroupId = ref<string | null>(null)
   const editingGroupName = ref('')
 
@@ -44,6 +42,20 @@ export const useDatabaseWorkspaceRuntime = () => {
   const activeTab = computed(() => tabs.value.find((tab) => tab.id === activeTabId.value))
   const activeSqlTab = computed(() => (activeTab.value?.kind === 'sql' ? activeTab.value : null))
   const activeDataTab = computed(() => (activeTab.value?.kind === 'data' ? activeTab.value : null))
+
+  const shellRuntime = createDatabaseWorkspaceShellRuntime(
+    {
+      editingGroupId,
+      editorSettings: computed(() => workspaceStore.editorSettings)
+    }
+  )
+  const {
+    notice,
+    showNotice,
+    copyText,
+    createWorkspaceStyle,
+    registerLifecycle
+  } = shellRuntime
 
   const markDataTabMissing = (tab: Extract<WorkspaceTab, { kind: 'data' }>, message: string) => {
     tab.error = message
@@ -305,12 +317,6 @@ export const useDatabaseWorkspaceRuntime = () => {
       setEditorSql
     }
   )
-  const databaseWorkspaceStyle = computed(() => ({
-    '--db-ai-pane-width': dbAiPaneOpen.value ? `${dbAiPaneWidth.value}px` : '0px',
-    '--db-sql-editor-line-height': `${sqlEditorLineHeight.value}px`,
-    '--db-sql-editor-font-size': `${workspaceStore.editorSettings.fontSize}px`,
-    '--db-sql-editor-tab-size': `${workspaceStore.editorSettings.tabSize}`
-  }))
   const {
     dbAiPaneOpen,
     dbAiPaneWidth,
@@ -549,48 +555,22 @@ export const useDatabaseWorkspaceRuntime = () => {
     },
     databaseCatalogConnectionHooks
   )
-  function showNotice(text: string) {
-    notice.value = text
-    if (noticeTimer.value) window.clearTimeout(noticeTimer.value)
-    noticeTimer.value = window.setTimeout(() => {
-      notice.value = ''
-      noticeTimer.value = null
-    }, 1800)
-  }
 
-  async function copyText(value: string) {
-    const text = String(value ?? '')
-    const copied = await copyTextToClipboard(text)
-    if (!copied) showNotice('Copy failed')
-    return copied
-  }
-
-  function handleWindowClick() {
-    closeMenus()
-  }
-
-  onMounted(() => {
-    void loadDatabaseCatalog().finally(() => loadDbAiPaneState())
-    window.addEventListener('click', handleWindowClick)
+  const databaseWorkspaceStyle = createWorkspaceStyle({
+    dbAiPaneOpen,
+    dbAiPaneWidth,
+    sqlEditorLineHeight
   })
 
-  onBeforeUnmount(() => {
-    stopSqlPaneResize()
-    stopDbAiPaneResize()
-    clearSqlDiagnoseTimers()
-    window.removeEventListener('click', handleWindowClick)
-    if (noticeTimer.value) window.clearTimeout(noticeTimer.value)
-    persistDbAiPaneState()
+  registerLifecycle({
+    loadDatabaseCatalog,
+    loadDbAiPaneState,
+    closeMenus,
+    stopSqlPaneResize,
+    stopDbAiPaneResize,
+    clearSqlDiagnoseTimers,
+    persistDbAiPaneState
   })
-
-  watch(editingGroupId, async (id) => {
-    if (!id) return
-    await nextTick()
-    const input = document.querySelector<HTMLInputElement>('.db-tree-edit')
-    input?.focus()
-    input?.select()
-  })
-
 
   return {
     DB_AI_PANE_MIN_WIDTH,
