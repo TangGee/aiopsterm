@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   createAiPanelChatSearchRuntime,
   createEmptyAiPanelChatSearchRuntimeState
-} from '@/services/aiPanelChatSearchRuntime'
+} from '@/services/ai/aiPanelChatSearchRuntime'
 
 const createHarness = () => {
   const state = createEmptyAiPanelChatSearchRuntimeState()

@@ -14,18 +14,18 @@ const backendMocks = vi.hoisted(() => ({
   writeLocalTextFile: vi.fn()
 }))
 
-vi.mock('../src/main/backend/chatAttachments', () => ({
+vi.mock('../src/main/backend/chat/chatAttachments', () => ({
   stageChatAttachment: backendMocks.stageChatAttachment
 }))
 
-vi.mock('../src/main/backend/chatImageAttachment', () => ({
+vi.mock('../src/main/backend/chat/chatImageAttachment', () => ({
   prepareChatImageAttachment: backendMocks.prepareChatImageAttachment,
   prepareChatImageAttachmentFromClipboard: backendMocks.prepareChatImageAttachmentFromClipboard,
   prepareChatImageAttachmentFromFile: backendMocks.prepareChatImageAttachmentFromFile,
   validateChatImageAttachment: backendMocks.validateChatImageAttachment
 }))
 
-vi.mock('../src/main/backend/localFileWrites', () => ({
+vi.mock('../src/main/backend/files/localFileWrites', () => ({
   saveCustomBackgroundFile: backendMocks.saveCustomBackgroundFile,
   writeLocalTextFile: backendMocks.writeLocalTextFile
 }))

@@ -220,7 +220,7 @@ import {
   Search,
   X
 } from 'lucide-vue-next'
-import { useAssetsPanelRuntimeContext } from '@/services/assetsPanelContext'
+import { useAssetsPanelRuntimeContext } from '@/services/assets/assetsPanelContext'
 
 const {
   managedFormError,

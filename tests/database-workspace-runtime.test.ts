@@ -19,7 +19,7 @@ import {
   schemaRoutineNodeId,
   sqlConnectionRequiresSchema,
   toggleId
-} from '@/services/databaseWorkspaceRuntime'
+} from '@/services/database/databaseWorkspaceRuntime'
 import type { DatabaseConnectionInfo, DatabaseGroupInfo } from '@shared/contracts/database'
 
 const groups: DatabaseGroupInfo[] = [

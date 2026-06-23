@@ -4,8 +4,8 @@ import {
   createWorkspaceSettingsPreferencesController,
   type WorkspaceSettingsRule,
   type WorkspaceSettingsShortcut
-} from '@/services/workspaceSettingsPreferencesController'
-import { malformedSettingsBackendResultMessage } from '@/services/settingsBackendGuards'
+} from '@/services/settings/workspaceSettingsPreferencesController'
+import { malformedSettingsBackendResultMessage } from '@/services/settings/settingsBackendGuards'
 import type { UserConfig } from '@shared/contracts/userConfig'
 
 const originalAiops = window.aiops

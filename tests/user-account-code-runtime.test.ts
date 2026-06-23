@@ -24,7 +24,7 @@ afterEach(() => {
 
 describe('userAccountCodeRuntime', () => {
   it('normalizes code input and keeps debug codes behind seed or explicit backend-double mode', async () => {
-    const modulePath = '../src/main/backend/userAccountCodeRuntime'
+    const modulePath = '../src/main/backend/user/userAccountCodeRuntime'
     const runtimeModule = (await import(modulePath)) as UserAccountCodeRuntimeModule
 
     expect(runtimeModule.normalizeUserAccountCode(' 12 34 56 ')).toBe('123456')
@@ -45,7 +45,7 @@ describe('userAccountCodeRuntime', () => {
   })
 
   it('reuses active cooldowns, verifies once, expires, and locks repeated failures', async () => {
-    const modulePath = '../src/main/backend/userAccountCodeRuntime'
+    const modulePath = '../src/main/backend/user/userAccountCodeRuntime'
     const { createUserAccountCodeRuntime } = (await import(modulePath)) as UserAccountCodeRuntimeModule
     process.env.AIOPSTERM_USER_ACCOUNT_CODE_BACKEND_DOUBLE = '1'
     vi.useFakeTimers()

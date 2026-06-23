@@ -3,7 +3,7 @@ import { basename, dirname, extname, join, posix, sep } from 'path'
 import { Buffer } from 'buffer'
 import { cp, mkdir, readFile, rename, rm, stat, unlink, writeFile } from 'fs/promises'
 import { randomUUID } from 'crypto'
-import { writeKnowledgePastedImageFromClipboard } from '../backend/knowledgeBaseImage'
+import { writeKnowledgePastedImageFromClipboard } from '../backend/knowledge/knowledgeBaseImage'
 import type {
   KnowledgeBaseCreateResult,
   KnowledgeBaseDeleteResult,

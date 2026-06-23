@@ -37,7 +37,7 @@ const originalUserAccountSeedEnv = process.env.AIOPSTERM_USER_ACCOUNT_ENABLE_SEE
 const originalUserAccountCodeBackendDoubleEnv = process.env.AIOPSTERM_USER_ACCOUNT_CODE_BACKEND_DOUBLE
 
 beforeAll(async () => {
-  const modulePath = '../src/main/backend/userAccount'
+  const modulePath = '../src/main/backend/user/userAccount'
   backend = (await import(modulePath)) as UserBackend
 })
 

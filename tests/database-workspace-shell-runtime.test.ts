@@ -1,7 +1,7 @@
 import { computed, ref, nextTick } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
-import { createDatabaseWorkspaceShellRuntime } from '@/services/databaseWorkspaceShellRuntime'
-import { defaultEditorSettings } from '@/services/workspaceConfigRuntime'
+import { createDatabaseWorkspaceShellRuntime } from '@/services/database/databaseWorkspaceShellRuntime'
+import { defaultEditorSettings } from '@/services/settings/workspaceConfigRuntime'
 
 const requireCallback = (callback: (() => void) | null) => {
   if (!callback) throw new Error('Expected callback to be registered')

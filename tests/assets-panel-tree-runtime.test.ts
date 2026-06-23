@@ -11,7 +11,7 @@ import {
   flattenAssetGroups,
   normalizeDirectAssetGroupName,
   type AssetsPanelAsset
-} from '@/services/assetsPanelTreeRuntime'
+} from '@/services/assets/assetsPanelTreeRuntime'
 import type { AiopsAssetGroupRecord, AiopsCustomFolderRecord } from '@shared/contracts/assets'
 
 const asset = (overrides: Partial<AssetsPanelAsset>): AssetsPanelAsset => ({

@@ -18,7 +18,7 @@ type TestAssetImportExportRuntime = {
 }
 
 const loadRuntime = async () => {
-  const modulePath = '../src/main/backend/assetsImportExportRuntime'
+  const modulePath = '../src/main/backend/assets/assetsImportExportRuntime'
   return import(modulePath) as Promise<AssetsImportExportRuntimeModule>
 }
 

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createFilesWorkspaceConnectionRuntime } from '@/services/filesWorkspaceConnectionRuntime'
+import { createFilesWorkspaceConnectionRuntime } from '@/services/files/filesWorkspaceConnectionRuntime'
 import type { FileSessionInfo } from '@shared/contracts/files'
 
 const session = (input: Partial<FileSessionInfo> & Pick<FileSessionInfo, 'id' | 'label' | 'host'>): FileSessionInfo => ({

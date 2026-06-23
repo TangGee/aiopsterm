@@ -1,7 +1,7 @@
 import { computed, ref } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
-import { createFilesPanelSessionRuntime, filesPanelSftpDragPayload } from '@/services/filesPanelSessionRuntime'
-import type { FilesPanelContextMenuState } from '@/services/filesPanelContextRuntime'
+import { createFilesPanelSessionRuntime, filesPanelSftpDragPayload } from '@/services/files/filesPanelSessionRuntime'
+import type { FilesPanelContextMenuState } from '@/services/files/filesPanelContextRuntime'
 import type { FileSessionInfo, FileSessionPatch } from '@shared/contracts/files'
 
 const session = (input: Partial<FileSessionInfo> & Pick<FileSessionInfo, 'id' | 'label'>): FileSessionInfo => ({

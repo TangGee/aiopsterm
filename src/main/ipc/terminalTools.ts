@@ -1,5 +1,5 @@
 import type { IpcMain } from 'electron'
-import { generateTerminalCommand, getTerminalCommandSuggestions } from '../backend/terminalSuggestions'
+import { generateTerminalCommand, getTerminalCommandSuggestions } from '../backend/terminal/terminalSuggestions'
 import type { TerminalCommandGenerationInput, TerminalCommandSuggestionContext } from '@shared/contracts/terminalTools'
 
 export const registerTerminalToolsIpc = (ipcMain: IpcMain) => {

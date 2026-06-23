@@ -23,7 +23,7 @@ type CreateAgentSessionAuditRuntime = (options: {
 }) => AgentSessionAuditRuntime
 
 const loadRuntime = async () => {
-  const modulePath = '../src/main/backend/agentSessionAuditRuntime'
+  const modulePath = '../src/main/backend/agent/agentSessionAuditRuntime'
   return (await import(modulePath)) as { createAgentSessionAuditRuntime: CreateAgentSessionAuditRuntime }
 }
 

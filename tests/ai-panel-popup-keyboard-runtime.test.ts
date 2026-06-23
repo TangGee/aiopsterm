@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createAiPanelPopupKeyboardRuntime } from '@/services/aiPanelPopupKeyboardRuntime'
+import { createAiPanelPopupKeyboardRuntime } from '@/services/ai/aiPanelPopupKeyboardRuntime'
 import type { AiCommandCatalogOption, AiContextOption } from '@shared/contracts/aiChat'
 
 const host = (input: Partial<AiContextOption> & Pick<AiContextOption, 'id' | 'label'>): AiContextOption => ({

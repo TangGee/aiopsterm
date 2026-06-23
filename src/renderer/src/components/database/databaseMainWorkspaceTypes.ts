@@ -1,7 +1,7 @@
-import type { DataEditSummary, DbFilter } from '@/services/databaseGridRuntime'
-import type { DbAiAction } from '@/services/databaseBackendGuards'
-import type { SqlHistory, SqlResult, WorkspaceTab } from '@/services/databaseWorkspaceTypes'
-import type { TextRange } from '@/services/databaseSqlEditorRuntime'
+import type { DataEditSummary, DbFilter } from '@/services/database/databaseGridRuntime'
+import type { DbAiAction } from '@/services/database/databaseBackendGuards'
+import type { SqlHistory, SqlResult, WorkspaceTab } from '@/services/database/databaseWorkspaceTypes'
+import type { TextRange } from '@/services/database/databaseSqlEditorRuntime'
 
 export type SqlTab = Extract<WorkspaceTab, { kind: 'sql' }>
 export type DataTab = Extract<WorkspaceTab, { kind: 'data' }>

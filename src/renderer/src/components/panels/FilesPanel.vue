@@ -344,7 +344,7 @@
 
 <script setup lang="ts">
 import { Check, ChevronDown, ChevronRight, Folder, FolderInput, FolderMinus, MessageSquare, Pencil, RefreshCw, Search, Star, Trash2, X } from 'lucide-vue-next'
-import { useFilesPanelRuntime } from '@/services/filesPanelRuntime'
+import { useFilesPanelRuntime } from '@/services/files/filesPanelRuntime'
 
 const {
   activeTab,

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { TerminalZmodemProgress } from '@/services/zmodemRuntime'
+import type { TerminalZmodemProgress } from '@/services/terminal/zmodemRuntime'
 
 const zmodemRuntimeState = vi.hoisted(() => ({
   cancel: vi.fn(),
@@ -12,7 +12,7 @@ const zmodemRuntimeState = vi.hoisted(() => ({
   }
 }))
 
-vi.mock('@/services/zmodemRuntime', () => ({
+vi.mock('@/services/terminal/zmodemRuntime', () => ({
   createTerminalZmodemRuntime: vi.fn((options) => {
     zmodemRuntimeState.lastOptions = options
     return {
@@ -46,7 +46,7 @@ describe('terminalWorkspaceZmodemShellRuntime', () => {
     const {
       createTerminalWorkspaceZmodemShellRuntime,
       formatTerminalWorkspaceZmodemBytes
-    } = await import('@/services/terminalWorkspaceZmodemShellRuntime')
+    } = await import('@/services/terminal/terminalWorkspaceZmodemShellRuntime')
     const timers = new Map<number, () => void>()
     let timerId = 0
     const cleared: number[] = []
@@ -94,7 +94,7 @@ describe('terminalWorkspaceZmodemShellRuntime', () => {
   })
 
   it('delegates terminal data and cancellation to the protocol runtime', async () => {
-    const { createTerminalWorkspaceZmodemShellRuntime } = await import('@/services/terminalWorkspaceZmodemShellRuntime')
+    const { createTerminalWorkspaceZmodemShellRuntime } = await import('@/services/terminal/terminalWorkspaceZmodemShellRuntime')
     zmodemRuntimeState.handleTerminalData.mockReturnValueOnce(true)
     const runtime = createTerminalWorkspaceZmodemShellRuntime({
       getApi: () => undefined,

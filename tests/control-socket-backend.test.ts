@@ -71,17 +71,17 @@ type MockWindow = {
 }
 
 const loadBackend = async () => {
-  const modulePath = '../src/main/backend/controlSocket'
+  const modulePath = '../src/main/backend/control/controlSocket'
   return (await import(modulePath)) as unknown as ControlSocketBackend
 }
 
 const loadAgentSessionsBackend = async () => {
-  const modulePath = '../src/main/backend/agentSessions'
+  const modulePath = '../src/main/backend/agent/agentSessions'
   return (await import(modulePath)) as AgentSessionsBackend
 }
 
 const loadAgentHookInstallerBackend = async () => {
-  const modulePath = '../src/main/backend/agentHookInstaller'
+  const modulePath = '../src/main/backend/agent/agentHookInstaller'
   return (await import(modulePath)) as AgentHookInstallerBackend
 }
 

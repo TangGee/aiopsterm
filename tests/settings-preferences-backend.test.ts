@@ -47,7 +47,7 @@ vi.mock('electron-store', () => {
 
 const loadBackend = async () => {
   vi.resetModules()
-  const modulePath = '../src/main/backend/settingsPreferences'
+  const modulePath = '../src/main/backend/settings/settingsPreferences'
   return import(modulePath)
 }
 

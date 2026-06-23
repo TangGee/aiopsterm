@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createAiPanelContextCommandShellRuntime } from '@/services/aiPanelContextCommandShellRuntime'
-import { createEmptyAiPanelPopupInteractionState } from '@/services/aiPanelPopupInteractionRuntime'
+import { createAiPanelContextCommandShellRuntime } from '@/services/ai/aiPanelContextCommandShellRuntime'
+import { createEmptyAiPanelPopupInteractionState } from '@/services/ai/aiPanelPopupInteractionRuntime'
 import type { AiChipContentPart } from '@/stores/workspace'
 import type { AiCommandCatalogOption, AiContextOption } from '@shared/contracts/aiChat'
 

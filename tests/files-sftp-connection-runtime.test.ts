@@ -1,20 +1,20 @@
 import { describe, expect, it, vi } from 'vitest'
 
-vi.mock('../src/main/backend/assets', () => ({
+vi.mock('../src/main/backend/assets/assets', () => ({
   getAsset: () => null,
   getAssetSecret: () => ({}),
   getKeychainSecret: () => ({})
 }))
 
-vi.mock('../src/main/backend/sshAgent', () => ({
+vi.mock('../src/main/backend/ssh/sshAgent', () => ({
   createConfiguredSshAgentAuth: () => null
 }))
 
-vi.mock('../src/main/backend/sshProxy', () => ({
+vi.mock('../src/main/backend/ssh/sshProxy', () => ({
   createSshProxySocketForAsset: () => null
 }))
 
-vi.mock('../src/main/backend/ssh2Runtime', () => ({
+vi.mock('../src/main/backend/ssh/ssh2Runtime', () => ({
   loadSsh2: () => null
 }))
 
@@ -28,7 +28,7 @@ type ConnectionRuntime = {
 }
 
 const loadRuntime = async () => {
-  const modulePath = '../src/main/backend/filesSftpConnectionRuntime'
+  const modulePath = '../src/main/backend/files/filesSftpConnectionRuntime'
   return (await import(modulePath)) as ConnectionRuntime
 }
 

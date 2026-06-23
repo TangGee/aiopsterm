@@ -36,7 +36,7 @@
 
 <script setup lang="ts">
 import { Pencil, PlayCircle, Trash2 } from 'lucide-vue-next'
-import type { SnippetsCommandMenu, SnippetsGroupMenu } from '@/services/snippetsPanelTypes'
+import type { SnippetsCommandMenu, SnippetsGroupMenu } from '@/services/quick-commands/snippetsPanelTypes'
 
 defineProps<{
   commandMenu: SnippetsCommandMenu

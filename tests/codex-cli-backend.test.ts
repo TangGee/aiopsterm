@@ -95,12 +95,12 @@ const createSink = (events: ReturnType<typeof createRecorder>) => ({
 })
 
 const loadBackend = async () => {
-  const modulePath = '../src/main/backend/codexCli'
+  const modulePath = '../src/main/backend/codex/codexCli'
   return import(modulePath)
 }
 
 const loadConfigBackend = async () => {
-  const modulePath = '../src/main/backend/codexConfig'
+  const modulePath = '../src/main/backend/codex/codexConfig'
   return import(modulePath)
 }
 

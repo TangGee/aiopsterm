@@ -37,7 +37,7 @@ const readSocketData = (socket: net.Socket) =>
   })
 
 beforeAll(async () => {
-  const modulePath = '../src/main/backend/sshProxy'
+  const modulePath = '../src/main/backend/ssh/sshProxy'
   const backend = await import(modulePath)
   createSshProxySocket = backend.createSshProxySocket
   createSshProxySocketForAsset = backend.createSshProxySocketForAsset

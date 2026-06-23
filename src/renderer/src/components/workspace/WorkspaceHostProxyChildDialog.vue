@@ -104,7 +104,7 @@
 
 <script setup lang="ts">
 import { X } from 'lucide-vue-next'
-import { useWorkspacePanelRuntimeContext } from '@/services/workspacePanelContext'
+import { useWorkspacePanelRuntimeContext } from '@/services/workspace/workspacePanelContext'
 
 const {
   workspace,

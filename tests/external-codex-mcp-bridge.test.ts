@@ -233,10 +233,10 @@ const loadBackends = async () => {
   vi.resetModules()
   const storeModule = (await import('electron-store')) as unknown as { __resetMockStores?: () => void }
   storeModule.__resetMockStores?.()
-  const assetsModulePath = '../src/main/backend/assets'
-  const sshTerminalModulePath = '../src/main/backend/sshTerminal'
-  const bridgeModulePath = '../src/main/backend/externalCodexMcpBridge'
-  const agentSessionsModulePath = '../src/main/backend/agentSessions'
+  const assetsModulePath = '../src/main/backend/assets/assets'
+  const sshTerminalModulePath = '../src/main/backend/ssh/sshTerminal'
+  const bridgeModulePath = '../src/main/backend/codex/externalCodexMcpBridge'
+  const agentSessionsModulePath = '../src/main/backend/agent/agentSessions'
   const assets = await import(assetsModulePath)
   const sshTerminal = await import(sshTerminalModulePath)
   const bridge = await import(bridgeModulePath)

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createAiPanelVoiceRuntime } from '@/services/aiPanelVoiceRuntime'
+import { createAiPanelVoiceRuntime } from '@/services/ai/aiPanelVoiceRuntime'
 import type { VoiceTranscriptionInput, VoiceTranscriptionResult } from '@shared/contracts/voice'
 
 type MockRecorderInstance = {

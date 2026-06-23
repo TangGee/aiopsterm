@@ -386,8 +386,8 @@ import type {
   DbAiRequest,
   DbAiStatus,
   DbAiTargetDialect
-} from '@/services/databaseBackendGuards'
-import type { DbAiPaneQuickPrompt } from '@/services/databaseWorkspaceTypes'
+} from '@/services/database/databaseBackendGuards'
+import type { DbAiPaneQuickPrompt } from '@/services/database/databaseWorkspaceTypes'
 
 defineProps<{
   dbAiPaneOpen: boolean

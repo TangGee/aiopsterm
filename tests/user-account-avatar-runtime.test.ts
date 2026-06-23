@@ -19,7 +19,7 @@ afterEach(async () => {
 
 describe('userAccountAvatarRuntime', () => {
   it('prepares image assets behind a backend-owned avatar URL', async () => {
-    const modulePath = '../src/main/backend/userAccountAvatarRuntime'
+    const modulePath = '../src/main/backend/user/userAccountAvatarRuntime'
     const { createUserAccountAvatarRuntime } = (await import(modulePath)) as UserAccountAvatarRuntimeModule
     const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-avatar-runtime-'))
     tempDirs.push(dir)
@@ -45,7 +45,7 @@ describe('userAccountAvatarRuntime', () => {
   })
 
   it('rejects non-images and unsafe avatar asset urls', async () => {
-    const modulePath = '../src/main/backend/userAccountAvatarRuntime'
+    const modulePath = '../src/main/backend/user/userAccountAvatarRuntime'
     const { createUserAccountAvatarRuntime } = (await import(modulePath)) as UserAccountAvatarRuntimeModule
     const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-avatar-runtime-invalid-'))
     tempDirs.push(dir)

@@ -12,11 +12,11 @@ import type {
 import {
   createWorkspacePanelBackendRuntime,
   workspacePanelAssetToInput
-} from '@/services/workspacePanelBackendRuntime'
+} from '@/services/workspace/workspacePanelBackendRuntime'
 import type {
   WorkspacePanelAsset,
   WorkspacePanelFolder
-} from '@/services/workspaceAssetTreeRuntime'
+} from '@/services/assets/workspaceAssetTreeRuntime'
 
 const originalAiops = window.aiops
 const malformedMessage = '资产服务返回数据无效'

@@ -38,7 +38,7 @@ type CreateAgentSessionAutoNamingRuntime = (options: {
 }) => AgentSessionAutoNamingRuntime
 
 const loadRuntime = async () => {
-  const modulePath = '../src/main/backend/agentSessionAutoNamingRuntime'
+  const modulePath = '../src/main/backend/agent/agentSessionAutoNamingRuntime'
   return (await import(modulePath)) as { createAgentSessionAutoNamingRuntime: CreateAgentSessionAutoNamingRuntime }
 }
 

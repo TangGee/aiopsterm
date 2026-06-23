@@ -24,7 +24,7 @@ const originalChatHistorySeedEnv = process.env.AIOPSTERM_CHAT_HISTORY_ENABLE_SEE
 const loadBackend = async () => {
   delete process.env.AIOPSTERM_CHAT_HISTORY_ENABLE_SEED
   vi.resetModules()
-  const modulePath = '../src/main/backend/chatHistory'
+  const modulePath = '../src/main/backend/chat/chatHistory'
   backend = (await import(modulePath)) as ChatHistoryBackend
 }
 

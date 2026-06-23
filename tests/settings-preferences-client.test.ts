@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { settingsPreferencesClient } from '@/services/settingsPreferencesClient'
+import { settingsPreferencesClient } from '@/services/settings/settingsPreferencesClient'
 
 const originalAiops = window.aiops
 

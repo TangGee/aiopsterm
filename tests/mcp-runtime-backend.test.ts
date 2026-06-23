@@ -69,7 +69,7 @@ let backend: {
 }
 
 const loadBackend = async () => {
-  const modulePath = '../src/main/backend/mcpRuntime'
+  const modulePath = '../src/main/backend/mcp/mcpRuntime'
   backend = await import(modulePath)
 }
 

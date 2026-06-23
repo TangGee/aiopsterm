@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { managedAiClient } from '@/services/managedAiClient'
+import { managedAiClient } from '@/services/ai/managedAiClient'
 
 const originalAiops = window.aiops
 

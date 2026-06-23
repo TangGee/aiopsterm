@@ -20,7 +20,7 @@ import {
   visibleAiConversationTabs,
   visibleAiHistoryConversations,
   type AiPanelConversationLike
-} from '@/services/aiPanelConversationRuntime'
+} from '@/services/ai/aiPanelConversationRuntime'
 
 const conversations: AiPanelConversationLike[] = [
   { id: 'conv-1', title: '生产巡检', summary: 'CPU and disk', ts: 3000, favorite: true },

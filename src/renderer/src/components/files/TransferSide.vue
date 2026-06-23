@@ -71,7 +71,7 @@
 import { computed, ref } from 'vue'
 import { ChevronDown, Plus, X } from 'lucide-vue-next'
 import FileBrowser from '@/components/files/FileBrowser.vue'
-import { isSelectedFileSessionSftpPayload, selectedFileSessionSnapshot } from '@/services/filesRuntime'
+import { isSelectedFileSessionSftpPayload, selectedFileSessionSnapshot } from '@/services/files/filesRuntime'
 import { useWorkspaceStore } from '@/stores/workspace'
 import type { FileSessionInfo } from '@shared/contracts/files'
 

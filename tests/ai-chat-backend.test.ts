@@ -27,14 +27,14 @@ const tempDirs: string[] = []
 const originalAiChatBackendDouble = process.env.AIOPSTERM_AI_CHAT_BACKEND_DOUBLE
 
 beforeAll(async () => {
-  const modulePath = '../src/main/backend/aiChat'
+  const modulePath = '../src/main/backend/ai/aiChat'
   const backend = await import(modulePath)
   createAiChatExchangeRequest = backend.createAiChatExchangeRequest
   generateAiChatResponse = backend.generateAiChatResponse
   cancelAiChatResponse = backend.cancelAiChatResponse
   configureAiChatRuntime = backend.configureAiChatRuntime
   localAiChatResponseMinDelayMs = backend.LOCAL_AI_CHAT_RESPONSE_MIN_DELAY_MS
-  const aiTodoModulePath = '../src/main/backend/aiTodos'
+  const aiTodoModulePath = '../src/main/backend/ai/aiTodos'
   const aiTodos = await import(aiTodoModulePath)
   configureAiTodoBackendRuntime = aiTodos.configureAiTodoBackendRuntime
   resetAiTodosForTests = aiTodos.resetAiTodosForTests

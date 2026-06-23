@@ -6,7 +6,7 @@ import {
   restoreChatConversation,
   saveChatMessageMetadata,
   updateChatConversation
-} from '../backend/chatHistory'
+} from '../backend/chat/chatHistory'
 import type { AiChatConversationUpdateInput, AiChatMessageMetadataInput } from '@shared/contracts/aiChat'
 
 export const registerChatHistoryIpc = (ipcMain: IpcMain) => {

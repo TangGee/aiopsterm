@@ -1,5 +1,5 @@
 import type { IpcMain } from 'electron'
-import { checkModelProvider, listAiModels } from '../backend/modelProviders'
+import { checkModelProvider, listAiModels } from '../backend/ai/modelProviders'
 import type { UserConfig } from '@shared/contracts/userConfig'
 import type { AiModelCatalogInput, ModelProviderCheckInput } from '@shared/contracts/appRuntime'
 

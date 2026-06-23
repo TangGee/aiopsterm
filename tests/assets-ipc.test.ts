@@ -25,7 +25,7 @@ const backendMocks = vi.hoisted(() => ({
   testAssetConnection: vi.fn()
 }))
 
-vi.mock('../src/main/backend/assets', () => ({
+vi.mock('../src/main/backend/assets/assets', () => ({
   confirmAssetImport: backendMocks.confirmAssetImport,
   deleteAsset: backendMocks.deleteAsset,
   deleteAssetGroup: backendMocks.deleteAssetGroup,
@@ -47,7 +47,7 @@ vi.mock('../src/main/backend/assets', () => ({
   testAssetConnection: backendMocks.testAssetConnection
 }))
 
-vi.mock('../src/main/backend/sshTunnels', () => ({
+vi.mock('../src/main/backend/ssh/sshTunnels', () => ({
   startSshTunnel: backendMocks.startSshTunnel,
   stopSshTunnel: backendMocks.stopSshTunnel
 }))

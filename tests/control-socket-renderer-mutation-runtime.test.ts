@@ -6,7 +6,7 @@ type RendererMutationRuntime = {
 }
 
 const loadRuntime = async () => {
-  const modulePath = '../src/main/backend/controlSocketRendererMutationRuntime'
+  const modulePath = '../src/main/backend/control/controlSocketRendererMutationRuntime'
   return (await import(modulePath)) as RendererMutationRuntime
 }
 

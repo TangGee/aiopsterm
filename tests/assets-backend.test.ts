@@ -52,7 +52,7 @@ const loadBackend = async (options: { useDefaultRuntime?: boolean } = {}) => {
   vi.resetModules()
   const storeModule = (await import('electron-store')) as unknown as { __resetMockStores?: () => void }
   storeModule.__resetMockStores?.()
-  const modulePath = '../src/main/backend/assets'
+  const modulePath = '../src/main/backend/assets/assets'
   const backend = await import(modulePath)
   if (!options.useDefaultRuntime) {
     backend.configureAssetBackendRuntime({ useSeedData: true, forceFallbackStore: true })

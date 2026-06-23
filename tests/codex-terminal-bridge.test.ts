@@ -122,7 +122,7 @@ const startMcpScript = (socketPath: string) => {
 }
 
 const loadBridge = async () => {
-  const modulePath = '../src/main/backend/codexTerminalBridge'
+  const modulePath = '../src/main/backend/codex/codexTerminalBridge'
   return import(modulePath)
 }
 

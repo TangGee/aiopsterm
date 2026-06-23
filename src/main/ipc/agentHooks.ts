@@ -1,5 +1,5 @@
 import type { IpcMain } from 'electron'
-import { installAgentHook, listAgentHookInstallers, uninstallAgentHook } from '../backend/agentHookInstaller'
+import { installAgentHook, listAgentHookInstallers, uninstallAgentHook } from '../backend/agent/agentHookInstaller'
 
 export const registerAgentHooksIpc = (ipcMain: IpcMain) => {
   ipcMain.handle('agent-hooks:list', async () => ({ ok: true, data: await listAgentHookInstallers() }))

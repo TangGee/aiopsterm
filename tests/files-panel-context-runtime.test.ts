@@ -1,7 +1,7 @@
 import { computed, ref } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
-import { createFilesPanelContextRuntime } from '@/services/filesPanelContextRuntime'
-import type { FilesPanelGroup } from '@/services/filesPanelTreeRuntime'
+import { createFilesPanelContextRuntime } from '@/services/files/filesPanelContextRuntime'
+import type { FilesPanelGroup } from '@/services/files/filesPanelTreeRuntime'
 import type { FileSessionFolderRecord, FileSessionInfo } from '@shared/contracts/files'
 
 const session = (input: Partial<FileSessionInfo> & Pick<FileSessionInfo, 'id' | 'label'>): FileSessionInfo => ({

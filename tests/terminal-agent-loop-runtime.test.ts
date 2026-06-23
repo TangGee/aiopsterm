@@ -6,7 +6,7 @@ import {
   createAgentCommandOutputMessages,
   filterAgentCommandOutputForPrompt,
   waitForTerminalOutputAfter
-} from '@/services/terminalAgentLoopRuntime'
+} from '@/services/terminal/terminalAgentLoopRuntime'
 
 describe('terminalAgentLoopRuntime', () => {
   it('waits for terminal output after a captured start length', async () => {

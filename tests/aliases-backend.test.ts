@@ -46,7 +46,7 @@ const originalAliasesSeedEnv = process.env.AIOPSTERM_ALIASES_ENABLE_SEED
 const loadBackend = async () => {
   delete process.env.AIOPSTERM_ALIASES_ENABLE_SEED
   vi.resetModules()
-  const modulePath = '../src/main/backend/aliases'
+  const modulePath = '../src/main/backend/quick-commands/aliases'
   backend = (await import(modulePath)) as AliasBackend
 }
 

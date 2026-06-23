@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { isModelProviderCheckDataForRequest, listAiModelCatalog, modelProviderClient, normalizeAiModelCatalog } from '@/services/modelProviderClient'
+import { isModelProviderCheckDataForRequest, listAiModelCatalog, modelProviderClient, normalizeAiModelCatalog } from '@/services/ai/modelProviderClient'
 
 const originalAiops = window.aiops
 

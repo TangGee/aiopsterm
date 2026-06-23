@@ -30,7 +30,7 @@
 
 <script setup lang="ts">
 import { Search } from 'lucide-vue-next'
-import { useAssetsPanelRuntimeContext } from '@/services/assetsPanelContext'
+import { useAssetsPanelRuntimeContext } from '@/services/assets/assetsPanelContext'
 
 const {
   managementQuery,

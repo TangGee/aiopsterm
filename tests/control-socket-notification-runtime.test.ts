@@ -21,7 +21,7 @@ type NotificationRuntime = {
 }
 
 const loadRuntime = async () => {
-  const modulePath = '../src/main/backend/controlSocketNotificationRuntime'
+  const modulePath = '../src/main/backend/control/controlSocketNotificationRuntime'
   return (await import(modulePath)) as unknown as NotificationRuntime
 }
 

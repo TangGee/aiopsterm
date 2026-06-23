@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { databaseClient } from '@/services/databaseClient'
+import { databaseClient } from '@/services/database/databaseClient'
 import type { DatabaseWorkspaceCatalog } from '@shared/contracts/database'
 
 const originalAiops = window.aiops

@@ -4,7 +4,7 @@ import {
   createAiPanelCommandChipElement,
   createAiPanelImageElement,
   type AiPanelEditableRenderOptions
-} from '@/services/aiPanelEditableRuntime'
+} from '@/services/ai/aiPanelEditableRuntime'
 import {
   AI_PANEL_COMPOSER_NO_MODEL_NOTICE,
   createAiPanelComposerRuntime,
@@ -12,7 +12,7 @@ import {
   planAiPanelComposerSend,
   removeAiPanelComposerPartFromClickTarget,
   syncAiPanelComposerStateFromEditable
-} from '@/services/aiPanelComposerRuntime'
+} from '@/services/ai/aiPanelComposerRuntime'
 import type { AiContentPart, AiDocChipContentPart, AiImageContentPart } from '@shared/contracts/aiChat'
 
 const renderOptions: AiPanelEditableRenderOptions = {

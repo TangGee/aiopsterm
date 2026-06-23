@@ -1,30 +1,30 @@
 import { BrowserWindow, app, dialog, ipcMain, shell } from 'electron'
 import { basename, join } from 'path'
 import { randomUUID } from 'crypto'
-import { formatMcpResourceReadContent } from './backend/aiChat'
+import { formatMcpResourceReadContent } from './backend/ai/aiChat'
 import {
   createCodexSession,
   killCodexSession,
   resizeCodexSession,
   setCodexSessionPendingContext,
   writeCodexSession
-} from './backend/codexCli'
+} from './backend/codex/codexCli'
 import {
   ensureCodexTerminalBridgeServer,
   updateCodexTerminalBridgeSessionTarget
-} from './backend/codexTerminalBridge'
+} from './backend/codex/codexTerminalBridge'
 import {
   getChatConversationMessages,
   replaceChatConversationMessages,
-} from './backend/chatHistory'
-import { logRuntimeEvent } from './backend/runtimeLog'
-import { recordTerminalCommandHistory } from './backend/terminalSuggestions'
+} from './backend/chat/chatHistory'
+import { logRuntimeEvent } from './backend/app/runtimeLog'
+import { recordTerminalCommandHistory } from './backend/terminal/terminalSuggestions'
 import {
   createSshTerminalConnectionInfo,
   createTerminalBinaryWriteResult,
   createTerminalKillResult,
   createTerminalWriteResult
-} from './backend/terminal'
+} from './backend/terminal/terminal'
 import { registerAiCatalogIpc } from './ipc/aiCatalog'
 import { registerAiChatIpc } from './ipc/aiChat'
 import { registerAiChatActionsIpc } from './ipc/aiChatActions'
@@ -35,7 +35,7 @@ import { registerAppUpdateIpc } from './ipc/appUpdate'
 import { registerAssetsIpc } from './ipc/assets'
 import { registerChatHistoryIpc } from './ipc/chatHistory'
 import { registerCodexSessionsIpc } from './ipc/codexSessions'
-import { registerControlSocketIpc } from './backend/controlSocket'
+import { registerControlSocketIpc } from './backend/control/controlSocket'
 import { registerDatabaseIpc } from './ipc/database'
 import { registerExtensionsIpc } from './ipc/extensions'
 import { registerFilesIpc } from './ipc/files'
@@ -63,9 +63,9 @@ import type { UserConfig } from '@shared/contracts/userConfig'
 import type { defaultConfig, mergeConfig, normalizeTerminalType } from './appConfigRuntime'
 import type { createMainTerminalRuntime } from './terminalRuntime'
 import type { createAppBootstrapRuntime } from './appBootstrapRuntime'
-import type { createKnowledgeBaseRuntime } from './backend/knowledgeBaseRuntime'
-import type { createSettingsConfigRuntime } from './backend/settingsConfigRuntime'
-import type { createSkillsRuntime } from './backend/skillsRuntime'
+import type { createKnowledgeBaseRuntime } from './backend/knowledge/knowledgeBaseRuntime'
+import type { createSettingsConfigRuntime } from './backend/settings/settingsConfigRuntime'
+import type { createSkillsRuntime } from './backend/settings/skillsRuntime'
 
 type StoreAdapter = {
   set: (key: 'config', value: UserConfig) => void

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { aiChatClient } from '@/services/aiChatClient'
+import { aiChatClient } from '@/services/ai/aiChatClient'
 
 const originalAiops = window.aiops
 

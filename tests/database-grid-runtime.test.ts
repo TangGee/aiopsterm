@@ -17,7 +17,7 @@ import {
   undoDataChangesState,
   updateDataCellState,
   updateNewDataRowCellState
-} from '@/services/databaseGridRuntime'
+} from '@/services/database/databaseGridRuntime'
 
 describe('databaseGridRuntime', () => {
   it('filters, sorts, and parses simple data-grid query controls', () => {

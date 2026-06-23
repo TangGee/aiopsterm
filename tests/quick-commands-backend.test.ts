@@ -67,7 +67,7 @@ const originalQuickCommandsSeedEnv = process.env.AIOPSTERM_QUICK_COMMANDS_ENABLE
 const loadBackend = async () => {
   delete process.env.AIOPSTERM_QUICK_COMMANDS_ENABLE_SEED
   vi.resetModules()
-  const modulePath = '../src/main/backend/quickCommands'
+  const modulePath = '../src/main/backend/quick-commands/quickCommands'
   backend = (await import(modulePath)) as QuickCommandsBackend
 }
 

@@ -99,7 +99,7 @@ import SnippetsContextMenus from '@/components/snippets/SnippetsContextMenus.vue
 import SnippetsList from '@/components/snippets/SnippetsList.vue'
 import SnippetsRecordingStatus from '@/components/snippets/SnippetsRecordingStatus.vue'
 import SnippetsToolbar from '@/components/snippets/SnippetsToolbar.vue'
-import { useSnippetsPanelRuntime } from '@/services/snippetsPanelRuntime'
+import { useSnippetsPanelRuntime } from '@/services/quick-commands/snippetsPanelRuntime'
 
 const toolbarRef = ref<InstanceType<typeof SnippetsToolbar> | null>(null)
 const commandEditorRef = ref<InstanceType<typeof SnippetCommandEditor> | null>(null)

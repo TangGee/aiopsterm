@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   createAiPanelContextCommandRuntime,
   type AiPanelContextCommandRuntimeOptions
-} from '@/services/aiPanelContextCommandRuntime'
+} from '@/services/ai/aiPanelContextCommandRuntime'
 import type { AiChipContentPart } from '@/stores/workspace'
 import type { AiCommandCatalogOption, AiContextOption } from '@shared/contracts/aiChat'
 

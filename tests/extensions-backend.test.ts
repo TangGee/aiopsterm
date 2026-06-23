@@ -221,7 +221,7 @@ const createLocalPackage = async (
 }
 
 beforeAll(async () => {
-  const modulePath = '../src/main/backend/extensions'
+  const modulePath = '../src/main/backend/extensions/extensions'
   const backend = await import(modulePath)
   installExtensionPlugin = backend.installExtensionPlugin as typeof installExtensionPlugin
   updateExtensionPlugin = backend.updateExtensionPlugin as typeof updateExtensionPlugin

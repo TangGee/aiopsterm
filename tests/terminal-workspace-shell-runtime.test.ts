@@ -3,9 +3,9 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   createTerminalWorkspaceShellRuntime,
   createTerminalWorkspaceShellState
-} from '@/services/terminalWorkspaceShellRuntime'
-import type { ClipboardTextReadResult } from '@/services/clipboardRuntime'
-import type { TerminalView } from '@/services/terminalWorkspaceViewRuntime'
+} from '@/services/terminal/terminalWorkspaceShellRuntime'
+import type { ClipboardTextReadResult } from '@/services/app/clipboardRuntime'
+import type { TerminalView } from '@/services/terminal/terminalWorkspaceViewRuntime'
 import type { TerminalPanel, useWorkspaceStore } from '@/stores/workspace'
 
 type WorkspaceStore = ReturnType<typeof useWorkspaceStore>

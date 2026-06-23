@@ -1,6 +1,6 @@
 import type { IpcMain } from 'electron'
 import { join } from 'path'
-import { checkAppUpdate, downloadAppUpdate, installAppUpdate } from '../backend/appUpdate'
+import { checkAppUpdate, downloadAppUpdate, installAppUpdate } from '../backend/app/appUpdate'
 import { sendWebContentsEvent } from '@shared/windowEvents'
 import type { AppUpdateProgressEvent } from '@shared/contracts/appRuntime'
 

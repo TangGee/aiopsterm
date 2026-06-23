@@ -34,7 +34,7 @@ type FakeAbortControl = {
 }
 
 const loadRuntime = async () => {
-  const modulePath = '../src/main/backend/filesSftpOperationsRuntime'
+  const modulePath = '../src/main/backend/files/filesSftpOperationsRuntime'
   return (await import(modulePath)) as SftpRuntime
 }
 

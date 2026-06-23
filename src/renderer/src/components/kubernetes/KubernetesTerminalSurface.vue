@@ -92,7 +92,7 @@
 </template>
 
 <script setup lang="ts">
-import { useKubernetesWorkspaceRuntimeContext } from '@/services/kubernetesWorkspaceContext'
+import { useKubernetesWorkspaceRuntimeContext } from '@/services/kubernetes/kubernetesWorkspaceContext'
 
 const { workspace, command, createTerminalTab, syncActiveTerminalSize, sendAiCommand, sendCommand, Plus, X } = useKubernetesWorkspaceRuntimeContext()
 </script>

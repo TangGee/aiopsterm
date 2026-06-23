@@ -10,19 +10,19 @@ const backendMocks = vi.hoisted(() => ({
   writeRuntimeLog: vi.fn()
 }))
 
-vi.mock('../src/main/backend/knowledgeSearchRuntime', () => ({
+vi.mock('../src/main/backend/knowledge/knowledgeSearchRuntime', () => ({
   applyKnowledgeSearchRuntimeSetting: backendMocks.applyKnowledgeSearchRuntimeSetting
 }))
 
-vi.mock('../src/main/backend/privacyRuntime', () => ({
+vi.mock('../src/main/backend/app/privacyRuntime', () => ({
   applyPrivacyRuntimeSettings: backendMocks.applyPrivacyRuntimeSettings
 }))
 
-vi.mock('../src/main/backend/runtimeLog', () => ({
+vi.mock('../src/main/backend/app/runtimeLog', () => ({
   writeRuntimeLog: backendMocks.writeRuntimeLog
 }))
 
-vi.mock('../src/main/backend/settingsExternalActions', () => ({
+vi.mock('../src/main/backend/settings/settingsExternalActions', () => ({
   openSettingsDocumentation: backendMocks.openSettingsDocumentation,
   submitSettingsFeedbackReport: backendMocks.submitSettingsFeedbackReport
 }))

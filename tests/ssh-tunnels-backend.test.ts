@@ -229,7 +229,7 @@ vi.mock('better-sqlite3', () => {
   throw new Error('force electron-store tunnel backend in tests')
 })
 
-vi.mock('../src/main/backend/sshProxy', () => ({
+vi.mock('../src/main/backend/ssh/sshProxy', () => ({
   createSshProxySocketForAsset: sshProxyMock.createSshProxySocketForAsset
 }))
 
@@ -237,8 +237,8 @@ const loadBackends = async (config: Record<string, unknown> = {}) => {
   vi.resetModules()
   const storeModule = (await import('electron-store')) as unknown as { __resetMockStores?: () => void }
   storeModule.__resetMockStores?.()
-  const assetsModulePath = '../src/main/backend/assets'
-  const tunnelsModulePath = '../src/main/backend/sshTunnels'
+  const assetsModulePath = '../src/main/backend/assets/assets'
+  const tunnelsModulePath = '../src/main/backend/ssh/sshTunnels'
   const assets = await import(assetsModulePath)
   const tunnels = await import(tunnelsModulePath)
   assets.configureAssetBackendRuntime({ useSeedData: true, forceFallbackStore: true })

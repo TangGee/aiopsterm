@@ -117,7 +117,7 @@
 
 <script setup lang="ts">
 import { Eye, EyeOff, X } from 'lucide-vue-next'
-import { useWorkspacePanelRuntimeContext } from '@/services/workspacePanelContext'
+import { useWorkspacePanelRuntimeContext } from '@/services/workspace/workspacePanelContext'
 
 const {
   keychainOptions,

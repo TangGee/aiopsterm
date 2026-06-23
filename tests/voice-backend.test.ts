@@ -44,7 +44,7 @@ const openAiVoiceConfig = (provider: 'openai-compatible' | 'litellm' = 'openai-c
   }) as UserConfig
 
 beforeAll(async () => {
-  const modulePath = '../src/main/backend/voice'
+  const modulePath = '../src/main/backend/ai/voice'
   const backend = await import(modulePath)
   transcribeVoiceInput = backend.transcribeVoiceInput
   configureVoiceBackendRuntime = backend.configureVoiceBackendRuntime

@@ -33,7 +33,7 @@
 
 <script setup lang="ts">
 import { X } from 'lucide-vue-next'
-import type { FileBrowserEntry } from '@/services/filesRuntime'
+import type { FileBrowserEntry } from '@/services/files/filesRuntime'
 
 defineProps<{
   visible: boolean

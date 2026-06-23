@@ -218,7 +218,7 @@ import FileBrowser from '@/components/files/FileBrowser.vue'
 import FilesMonacoEditor from '@/components/files/FilesMonacoEditor.vue'
 import TransferProgress from '@/components/files/TransferProgress.vue'
 import TransferSide from '@/components/files/TransferSide.vue'
-import { useFilesWorkspaceRuntime } from '@/services/filesWorkspaceRuntime'
+import { useFilesWorkspaceRuntime } from '@/services/files/filesWorkspaceRuntime'
 
 const {
   workspace,

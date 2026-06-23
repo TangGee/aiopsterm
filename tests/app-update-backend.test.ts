@@ -131,7 +131,7 @@ const createSignedUpdateFixture = async (input: { version?: string; packageConte
 }
 
 beforeAll(async () => {
-  const modulePath = '../src/main/backend/appUpdate'
+  const modulePath = '../src/main/backend/app/appUpdate'
   const backend = await import(modulePath)
   checkAppUpdate = backend.checkAppUpdate as typeof checkAppUpdate
   configureAppUpdateRuntime = backend.configureAppUpdateRuntime as typeof configureAppUpdateRuntime

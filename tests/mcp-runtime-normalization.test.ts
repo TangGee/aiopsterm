@@ -39,7 +39,7 @@ type McpRuntimeNormalization = {
 }
 
 const loadNormalization = async () => {
-  const modulePath = '../src/main/backend/mcpRuntimeNormalization'
+  const modulePath = '../src/main/backend/mcp/mcpRuntimeNormalization'
   return (await import(modulePath)) as unknown as McpRuntimeNormalization
 }
 

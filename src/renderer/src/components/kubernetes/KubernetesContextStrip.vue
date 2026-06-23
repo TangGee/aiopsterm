@@ -40,7 +40,7 @@
 </template>
 
 <script setup lang="ts">
-import { useKubernetesWorkspaceRuntimeContext } from '@/services/kubernetesWorkspaceContext'
+import { useKubernetesWorkspaceRuntimeContext } from '@/services/kubernetes/kubernetesWorkspaceContext'
 
 const { workspace, RefreshCw } = useKubernetesWorkspaceRuntimeContext()
 </script>

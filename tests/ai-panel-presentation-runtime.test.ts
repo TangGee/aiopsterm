@@ -6,7 +6,7 @@ import {
   createAiPanelPresentationRuntime,
   defaultAiPanelChatModeOptions,
   measureAiPanelUiTextWidthPx
-} from '@/services/aiPanelPresentationRuntime'
+} from '@/services/ai/aiPanelPresentationRuntime'
 import type { AiContextOption } from '@shared/contracts/aiChat'
 
 const hostContext: AiContextOption = {

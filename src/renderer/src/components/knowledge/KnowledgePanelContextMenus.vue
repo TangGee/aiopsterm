@@ -76,7 +76,7 @@
 
 <script setup lang="ts">
 import { UploadCloud } from 'lucide-vue-next'
-import type { KnowledgePanelBlankMenu, KnowledgePanelNodeMenu } from '@/services/knowledgePanelTypes'
+import type { KnowledgePanelBlankMenu, KnowledgePanelNodeMenu } from '@/services/knowledge/knowledgePanelTypes'
 
 defineProps<{
   nodeMenu: KnowledgePanelNodeMenu

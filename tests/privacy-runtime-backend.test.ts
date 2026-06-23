@@ -14,7 +14,7 @@ let backend: PrivacyRuntimeBackend
 let stateFilePath = ''
 
 beforeEach(async () => {
-  const modulePath = '../src/main/backend/privacyRuntime'
+  const modulePath = '../src/main/backend/app/privacyRuntime'
   backend = (await import(modulePath)) as PrivacyRuntimeBackend
   const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-privacy-runtime-'))
   stateFilePath = join(dir, 'data-sync-runtime.json')

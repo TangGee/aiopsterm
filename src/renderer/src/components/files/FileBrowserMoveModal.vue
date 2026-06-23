@@ -134,7 +134,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { ChevronDown, Folder as FolderFilled, X } from 'lucide-vue-next'
-import type { FileBrowserEntry } from '@/services/filesRuntime'
+import type { FileBrowserEntry } from '@/services/files/filesRuntime'
 
 type FileBrowserMoveDialog = {
   visible: boolean

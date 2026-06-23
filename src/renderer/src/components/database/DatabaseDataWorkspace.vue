@@ -132,7 +132,7 @@ import DataGridToolbar from '@/components/database/DataGridToolbar.vue'
 import DataStatusBar from '@/components/database/DataStatusBar.vue'
 import ResultGrid from '@/components/database/ResultGrid.vue'
 import type { DataTab, DatabaseTablePresenterRules } from '@/components/database/databaseMainWorkspaceTypes'
-import type { DataEditSummary, DbFilter } from '@/services/databaseGridRuntime'
+import type { DataEditSummary, DbFilter } from '@/services/database/databaseGridRuntime'
 
 defineProps<{
   activeDataTab: DataTab

@@ -297,7 +297,7 @@
 
 <script setup lang="ts">
 import type { DatabaseEngineInfo } from '@shared/contracts/database'
-import type { ContextMenu, ContextSubmenu } from '@/services/databaseWorkspaceTypes'
+import type { ContextMenu, ContextSubmenu } from '@/services/database/databaseWorkspaceTypes'
 
 defineProps<{
   addMenuOpen: boolean

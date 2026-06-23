@@ -3,8 +3,8 @@ import { watch } from 'vue'
 import {
   createAiPanelChatNavigationRuntime,
   type AiPanelChatNavigationMessage
-} from '@/services/aiPanelChatNavigationRuntime'
-import type { AiPanelConversationLike } from '@/services/aiPanelConversationRuntime'
+} from '@/services/ai/aiPanelChatNavigationRuntime'
+import type { AiPanelConversationLike } from '@/services/ai/aiPanelConversationRuntime'
 import type { AiChatExportInput, AiChatExportResult } from '@shared/contracts/aiChat'
 
 const translations: Record<string, string> = {

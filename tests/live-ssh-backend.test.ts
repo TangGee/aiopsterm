@@ -89,9 +89,9 @@ const backendRuntimeConfig = () => ({
 
 const loadBackends = async () => {
   vi.resetModules()
-  const assetsModulePath = '../src/main/backend/assets'
-  const filesModulePath = '../src/main/backend/files'
-  const sshTerminalModulePath = '../src/main/backend/sshTerminal'
+  const assetsModulePath = '../src/main/backend/assets/assets'
+  const filesModulePath = '../src/main/backend/files/files'
+  const sshTerminalModulePath = '../src/main/backend/ssh/sshTerminal'
   const assets = await import(assetsModulePath)
   const files = await import(filesModulePath)
   const sshTerminal = await import(sshTerminalModulePath)

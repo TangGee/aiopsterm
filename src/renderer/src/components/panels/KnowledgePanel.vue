@@ -85,7 +85,7 @@ import KnowledgePanelContextMenus from '@/components/knowledge/KnowledgePanelCon
 import KnowledgePanelToolbar from '@/components/knowledge/KnowledgePanelToolbar.vue'
 import KnowledgePanelTransfers from '@/components/knowledge/KnowledgePanelTransfers.vue'
 import KnowledgePanelTreeView from '@/components/knowledge/KnowledgePanelTreeView.vue'
-import { useKnowledgePanelRuntime } from '@/services/knowledgePanelRuntime'
+import { useKnowledgePanelRuntime } from '@/services/knowledge/knowledgePanelRuntime'
 
 const props = defineProps<{ query?: string }>()
 

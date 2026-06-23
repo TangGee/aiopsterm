@@ -29,9 +29,9 @@ import {
   startDatabaseAiDrawerResponse,
   startDatabaseAiPaneResponse,
   testDatabaseConnection
-} from '../backend/database'
-import { getDatabasePageComment, saveDatabasePageComment } from '../backend/databaseComments'
-import { exportDatabaseRows } from '../backend/databaseExport'
+} from '../backend/database/database'
+import { getDatabasePageComment, saveDatabasePageComment } from '../backend/database/databaseComments'
+import { exportDatabaseRows } from '../backend/database/databaseExport'
 import type {
   DatabaseAiDrawerLifecycleInput,
   DatabaseAiDrawerRequestInput,

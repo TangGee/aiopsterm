@@ -182,7 +182,7 @@ const createRecorder = (): RecordedEvents => ({
 })
 
 const loadSshTerminalBackend = async () => {
-  const modulePath = '../src/main/backend/sshTerminal'
+  const modulePath = '../src/main/backend/ssh/sshTerminal'
   return import(modulePath)
 }
 

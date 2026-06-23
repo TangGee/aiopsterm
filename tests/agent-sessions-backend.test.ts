@@ -35,7 +35,7 @@ type AgentSessionsBackend = {
 }
 
 const loadBackend = async () => {
-  const modulePath = '../src/main/backend/agentSessions'
+  const modulePath = '../src/main/backend/agent/agentSessions'
   return (await import(modulePath)) as AgentSessionsBackend
 }
 

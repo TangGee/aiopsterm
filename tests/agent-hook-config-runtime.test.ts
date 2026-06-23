@@ -28,7 +28,7 @@ type AgentHookConfigRuntimeModule = {
 }
 
 const loadRuntime = async () => {
-  const modulePath = '../src/main/backend/agentHookConfigRuntime'
+  const modulePath = '../src/main/backend/agent/agentHookConfigRuntime'
   return import(modulePath) as Promise<AgentHookConfigRuntimeModule>
 }
 

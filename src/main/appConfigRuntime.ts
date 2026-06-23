@@ -4,7 +4,7 @@ import { defaultModelSettingsConfig } from '@shared/modelSettingsSeed'
 import { defaultSettingsRulesConfig } from '@shared/settingsPreferencesSeed'
 import { defaultSkillsConfig } from '@shared/skillsSeed'
 import { defaultWorkspacePreferencesConfig } from '@shared/workspacePreferencesSeed'
-import { normalizeConfigModelName, normalizeConfigModelProvider } from './backend/configBoundary'
+import { normalizeConfigModelName, normalizeConfigModelProvider } from './backend/app/configBoundary'
 import type { AliasCommandConfig } from '@shared/contracts/aliases'
 import type {
   EditorUserConfig,

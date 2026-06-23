@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { windowControlsClient } from '@/services/windowControlsClient'
+import { windowControlsClient } from '@/services/app/windowControlsClient'
 
 const originalAiops = window.aiops
 

@@ -12,7 +12,7 @@ import {
   filesPanelGroupSessionCount,
   filterFilesPanelGroups,
   findFilesPanelGroup
-} from '@/services/filesPanelTreeRuntime'
+} from '@/services/files/filesPanelTreeRuntime'
 import type { FileSessionFolderRecord, FileSessionInfo } from '@shared/contracts/files'
 
 const folders: FileSessionFolderRecord[] = [

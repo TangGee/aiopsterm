@@ -83,7 +83,7 @@
 
 <script setup lang="ts">
 import { Upload, X } from 'lucide-vue-next'
-import { useWorkspacePanelRuntimeContext } from '@/services/workspacePanelContext'
+import { useWorkspacePanelRuntimeContext } from '@/services/workspace/workspacePanelContext'
 
 const {
   hostChildModal,

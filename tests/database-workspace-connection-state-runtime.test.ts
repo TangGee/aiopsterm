@@ -1,7 +1,7 @@
 import { ref } from 'vue'
 import { describe, expect, it } from 'vitest'
-import { createDatabaseWorkspaceConnectionStateRuntime } from '@/services/databaseWorkspaceConnectionStateRuntime'
-import type { ContextMenu } from '@/services/databaseWorkspaceTypes'
+import { createDatabaseWorkspaceConnectionStateRuntime } from '@/services/database/databaseWorkspaceConnectionStateRuntime'
+import type { ContextMenu } from '@/services/database/databaseWorkspaceTypes'
 import type { SshProxyConfig } from '@shared/contracts/appRuntime'
 import type { DatabaseConnectionInfo, DatabaseGroupInfo } from '@shared/contracts/database'
 

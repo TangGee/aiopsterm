@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { computed, ref } from 'vue'
-import { createWorkspaceKubernetesTerminalController } from '@/services/workspaceKubernetesTerminalController'
-import type { K8sCluster } from '@/services/kubernetesBackendGuards'
-import type { K8sTerminalTab } from '@/services/kubernetesRuntime'
+import { createWorkspaceKubernetesTerminalController } from '@/services/kubernetes/workspaceKubernetesTerminalController'
+import type { K8sCluster } from '@/services/kubernetes/kubernetesBackendGuards'
+import type { K8sTerminalTab } from '@/services/kubernetes/kubernetesRuntime'
 import type { KubernetesTerminalDataEvent, KubernetesTerminalExitEvent, KubernetesTerminalRecord } from '@shared/contracts/kubernetes'
 
 const originalAiops = window.aiops

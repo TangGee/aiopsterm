@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { aliasClient } from '@/services/aliasClient'
+import { aliasClient } from '@/services/extensions/aliasClient'
 
 const originalAiops = window.aiops
 

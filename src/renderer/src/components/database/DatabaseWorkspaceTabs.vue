@@ -79,7 +79,7 @@ import {
   X
 } from 'lucide-vue-next'
 import type { DatabaseWorkspaceTabsApi } from '@/components/database/databaseMainWorkspaceTypes'
-import type { WorkspaceTab } from '@/services/databaseWorkspaceTypes'
+import type { WorkspaceTab } from '@/services/database/databaseWorkspaceTypes'
 
 defineProps<{
   tabs: WorkspaceTab[]

@@ -1,5 +1,5 @@
 import type { IpcMain } from 'electron'
-import { cancelAiChatResponse, createAiChatExchangeRequest, generateAiChatResponse } from '../backend/aiChat'
+import { cancelAiChatResponse, createAiChatExchangeRequest, generateAiChatResponse } from '../backend/ai/aiChat'
 import type { AiChatCancelInput, AiChatExchangeRequestInput, AiChatResponseInput } from '@shared/contracts/aiChat'
 
 export const registerAiChatIpc = (ipcMain: IpcMain) => {

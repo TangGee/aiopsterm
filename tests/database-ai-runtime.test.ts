@@ -28,8 +28,8 @@ import {
   planDbAiInsertSql,
   planDbAiReplaceSql,
   removeDbAiRequestRecord
-} from '@/services/databaseAiRuntime'
-import type { DbAiPaneMessage, DbAiRequest } from '@/services/databaseBackendGuards'
+} from '@/services/database/databaseAiRuntime'
+import type { DbAiPaneMessage, DbAiRequest } from '@/services/database/databaseBackendGuards'
 import type { DatabaseConnectionInfo } from '@shared/contracts/database'
 
 const postgresConnection: DatabaseConnectionInfo = {

@@ -3,8 +3,8 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   createWorkspaceAliasController,
   type WorkspaceAliasCommand
-} from '@/services/workspaceAliasController'
-import { defaultConfig } from '@/services/workspaceConfigRuntime'
+} from '@/services/extensions/workspaceAliasController'
+import { defaultConfig } from '@/services/settings/workspaceConfigRuntime'
 import type { AliasCommandConfig, AliasCommandDeleteInput, AliasCommandSaveInput } from '@shared/contracts/aliases'
 import type { UserConfig } from '@shared/contracts/userConfig'
 

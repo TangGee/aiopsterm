@@ -41,9 +41,9 @@ import {
   visibleFileBrowserEntries,
   upsertFileTransferTask,
   type FileBrowserEntry
-} from '@/services/filesRuntime'
+} from '@/services/files/filesRuntime'
 import type { FileSessionCatalog, FileTransferTask } from '@shared/contracts/files'
-import type { TerminalPanel } from '@/services/terminalPanelRuntime'
+import type { TerminalPanel } from '@/services/terminal/terminalPanelRuntime'
 
 const catalog: FileSessionCatalog = {
   folders: [

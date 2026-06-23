@@ -83,7 +83,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { ChevronDown, ChevronRight, Laptop, Network, Pencil, PlugZap, Trash2 } from 'lucide-vue-next'
-import { assetGroupAssetCount, type AssetsPanelGroup } from '@/services/assetsPanelTreeRuntime'
+import { assetGroupAssetCount, type AssetsPanelGroup } from '@/services/assets/assetsPanelTreeRuntime'
 
 const props = withDefaults(
   defineProps<{

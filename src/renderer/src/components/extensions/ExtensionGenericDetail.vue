@@ -99,7 +99,7 @@ import ExtensionDetailTabs from '@/components/extensions/ExtensionDetailTabs.vue
 import ExtensionFeatureList from '@/components/extensions/ExtensionFeatureList.vue'
 import ExtensionPluginHeader from '@/components/extensions/ExtensionPluginHeader.vue'
 import ExtensionPluginSidebar from '@/components/extensions/ExtensionPluginSidebar.vue'
-import type { WorkspaceExtensionInstallProgress } from '@/services/workspaceExtensionsController'
+import type { WorkspaceExtensionInstallProgress } from '@/services/extensions/workspaceExtensionsController'
 import type { ExtensionPluginRuntimeConfig } from '@shared/contracts/extensions'
 
 defineProps<{

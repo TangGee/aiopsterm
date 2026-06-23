@@ -1,8 +1,8 @@
 import { computed, ref } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 
-import { createWorkspacePanelAssetInteractionRuntime } from '@/services/workspacePanelAssetInteractionRuntime'
-import type { WorkspacePanelAsset } from '@/services/workspaceAssetTreeRuntime'
+import { createWorkspacePanelAssetInteractionRuntime } from '@/services/workspace/workspacePanelAssetInteractionRuntime'
+import type { WorkspacePanelAsset } from '@/services/assets/workspaceAssetTreeRuntime'
 import type { AiopsAssetInput } from '@shared/contracts/assets'
 
 const asset = (patch: Partial<WorkspacePanelAsset> & Pick<WorkspacePanelAsset, 'id' | 'name'>): WorkspacePanelAsset => ({

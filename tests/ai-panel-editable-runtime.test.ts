@@ -14,7 +14,7 @@ import {
   renderAiPanelPartsIntoEditable,
   syncAiPanelMainInputPartsFromEditable,
   type AiPanelEditableRenderOptions
-} from '@/services/aiPanelEditableRuntime'
+} from '@/services/ai/aiPanelEditableRuntime'
 import type {
   AiChipContentPart,
   AiCommandChipContentPart,

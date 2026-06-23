@@ -17,7 +17,7 @@
 </template>
 
 <script setup lang="ts">
-import type { KnowledgeImportJob } from '@/services/knowledgeRuntime'
+import type { KnowledgeImportJob } from '@/services/knowledge/knowledgeRuntime'
 
 defineProps<{
   jobs: KnowledgeImportJob[]

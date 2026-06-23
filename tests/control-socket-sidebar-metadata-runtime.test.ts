@@ -8,7 +8,7 @@ type SidebarMetadataRuntime = {
 }
 
 const loadRuntime = async () => {
-  const modulePath = '../src/main/backend/controlSocketSidebarMetadataRuntime'
+  const modulePath = '../src/main/backend/control/controlSocketSidebarMetadataRuntime'
   return (await import(modulePath)) as SidebarMetadataRuntime
 }
 

@@ -10,7 +10,7 @@ import {
   isReadOnlySql,
   sqlCursorPosition,
   stripLeadingSqlComments
-} from '@/services/databaseSqlEditorRuntime'
+} from '@/services/database/databaseSqlEditorRuntime'
 
 describe('databaseSqlEditorRuntime', () => {
   it('finds SQL matches with cursor wrapping helpers', () => {

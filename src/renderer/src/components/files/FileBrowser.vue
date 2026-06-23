@@ -111,7 +111,7 @@ import FileBrowserHeader from '@/components/files/FileBrowserHeader.vue'
 import FileBrowserMoveModal from '@/components/files/FileBrowserMoveModal.vue'
 import FileBrowserPermissionsModal from '@/components/files/FileBrowserPermissionsModal.vue'
 import FileBrowserTable from '@/components/files/FileBrowserTable.vue'
-import { useFileBrowserRuntime, type FileBrowserOpenFilePayload, type FileBrowserRuntimeProps } from '@/services/fileBrowserRuntime'
+import { useFileBrowserRuntime, type FileBrowserOpenFilePayload, type FileBrowserRuntimeProps } from '@/services/files/fileBrowserRuntime'
 
 type PermissionKey = 'owner' | 'group' | 'public'
 

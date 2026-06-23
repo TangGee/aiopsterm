@@ -58,7 +58,7 @@ const signWithAgent = (agent: BaseAgent<ParsedKey>, key: ParsedKey, data: Buffer
 
 describe('configured SSH Agent backend runtime', () => {
   beforeAll(async () => {
-    const modulePath = '../src/main/backend/sshAgent'
+    const modulePath = '../src/main/backend/ssh/sshAgent'
     const backend = await import(modulePath)
     createConfiguredSshAgentAuth = backend.createConfiguredSshAgentAuth
     applyConfiguredSshAgentAuth = backend.applyConfiguredSshAgentAuth

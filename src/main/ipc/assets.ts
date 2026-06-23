@@ -19,8 +19,8 @@ import {
   saveAssetFolder,
   saveKeychain,
   testAssetConnection
-} from '../backend/assets'
-import { startSshTunnel, stopSshTunnel } from '../backend/sshTunnels'
+} from '../backend/assets/assets'
+import { startSshTunnel, stopSshTunnel } from '../backend/ssh/sshTunnels'
 import type {
   AiopsAssetExportInput,
   AiopsAssetGroupDeleteInput,

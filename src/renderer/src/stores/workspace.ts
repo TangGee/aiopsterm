@@ -1,68 +1,68 @@
 import { defineStore } from 'pinia'
 import { createWorkspaceStoreState } from '@/stores/workspaceState'
-import { createWorkspaceFilesController, type FilesUiMode } from '@/services/workspaceFilesController'
+import { createWorkspaceFilesController, type FilesUiMode } from '@/services/files/workspaceFilesController'
 import {
   createWorkspaceAiChatController,
   type ChatMessage,
   type ConversationItem,
   type TodoItem
-} from '@/services/workspaceAiChatController'
+} from '@/services/ai/workspaceAiChatController'
 import {
   createWorkspaceExtensionsController,
   type WorkspaceAliasCommand,
   type WorkspaceExtensionInstallProgress,
   type WorkspaceExtensionPlugin
-} from '@/services/workspaceExtensionsController'
+} from '@/services/extensions/workspaceExtensionsController'
 import {
   createDefaultWorkspaceAboutSettings,
   createWorkspaceAppSettingsController,
   type WorkspaceAboutSettings,
   type WorkspaceTopUpdateState
-} from '@/services/workspaceAppSettingsController'
-import { createWorkspaceKnowledgeController } from '@/services/workspaceKnowledgeController'
-import { createWorkspaceKubernetesController } from '@/services/workspaceKubernetesController'
+} from '@/services/settings/workspaceAppSettingsController'
+import { createWorkspaceKnowledgeController } from '@/services/knowledge/workspaceKnowledgeController'
+import { createWorkspaceKubernetesController } from '@/services/kubernetes/workspaceKubernetesController'
 import {
   createWorkspaceManagedAiController,
   type AiAttentionFocusRequest,
   type AiAttentionItem,
   type ManagedAiSession
-} from '@/services/workspaceManagedAiController'
-import { createWorkspaceTerminalPanelsController } from '@/services/workspaceTerminalPanelsController'
+} from '@/services/ai/workspaceManagedAiController'
+import { createWorkspaceTerminalPanelsController } from '@/services/terminal/workspaceTerminalPanelsController'
 import {
   createWorkspaceTerminalExecutionController,
   type TerminalCommandSource,
   type TerminalSecurityDecision,
   type TerminalSecurityExecution,
   type TerminalSecurityPrompt
-} from '@/services/workspaceTerminalExecutionController'
+} from '@/services/terminal/workspaceTerminalExecutionController'
 import {
   createWorkspaceMcpController,
   type WorkspaceMcpOperationRecord,
   type WorkspaceMcpServer
-} from '@/services/workspaceMcpController'
-import { createWorkspaceQuickCommandsController } from '@/services/workspaceQuickCommandsController'
+} from '@/services/settings/workspaceMcpController'
+import { createWorkspaceQuickCommandsController } from '@/services/quick-commands/workspaceQuickCommandsController'
 import {
   createWorkspaceSettingsController,
   type WorkspaceSettingsRule,
   type WorkspaceSettingsShortcut,
   type WorkspaceSettingsSkill,
   type WorkspaceSkillModalState
-} from '@/services/workspaceSettingsController'
+} from '@/services/settings/workspaceSettingsController'
 import {
   createWorkspaceShellController,
   type AssetManagementOpenRequest
-} from '@/services/workspaceShellController'
+} from '@/services/workspace/workspaceShellController'
 import {
   type MacroRecordingState,
   type QuickCommandSnippet,
   type SnippetGroup
-} from '@/services/quickCommandsRuntime'
+} from '@/services/quick-commands/quickCommandsRuntime'
 import {
   type PanelDirection,
   type TerminalOutputScope,
   type TerminalPanel,
   type TerminalSshSession
-} from '@/services/terminalPanelRuntime'
+} from '@/services/terminal/terminalPanelRuntime'
 import {
   createDefaultWorkspaceBillingSettings,
   createEmptyWorkspaceUserProfile,
@@ -71,7 +71,7 @@ import {
   type WorkspaceTrustedDevice,
   type WorkspaceTrustedDeviceModal,
   type WorkspaceUserLoginTab
-} from '@/services/workspaceUserController'
+} from '@/services/user/workspaceUserController'
 import {
   knowledgeTreeSize,
   layoutWidthLimits,
@@ -87,7 +87,7 @@ import {
   type SecuritySettings,
   type SettingsModelOption,
   type TerminalSettings
-} from '@/services/workspaceConfigRuntime'
+} from '@/services/settings/workspaceConfigRuntime'
 import type {
   AiChatContextUsageSnapshot,
   AiContentPart,
@@ -111,25 +111,25 @@ export type {
   AiAttentionSource,
   ManagedAiSession,
   ManagedAiSessionState
-} from '@/services/workspaceManagedAiController'
+} from '@/services/ai/workspaceManagedAiController'
 export type {
   PanelDirection,
   TerminalOutputScope,
   TerminalOutputSegment,
   TerminalPanel,
   TerminalSshSession
-} from '@/services/terminalPanelRuntime'
+} from '@/services/terminal/terminalPanelRuntime'
 export type {
   ChatMessage,
   ConversationItem,
   TodoItem
-} from '@/services/workspaceAiChatController'
+} from '@/services/ai/workspaceAiChatController'
 export type {
   TerminalCommandSource,
   TerminalSecurityDecision,
   TerminalSecurityExecution,
   TerminalSecurityPrompt
-} from '@/services/workspaceTerminalExecutionController'
+} from '@/services/terminal/workspaceTerminalExecutionController'
 export type {
   AiChatChipContentPart,
   AiChatChipRef,
@@ -147,7 +147,7 @@ export type {
   AiTextContentPart
 } from '@shared/contracts/aiChat'
 
-export { layoutWidthLimits } from '@/services/workspaceConfigRuntime'
+export { layoutWidthLimits } from '@/services/settings/workspaceConfigRuntime'
 export type {
   AiPreferenceSettings,
   EditorSettings,
@@ -157,11 +157,11 @@ export type {
   PrivacySettings,
   SecuritySettings,
   TerminalSettings
-} from '@/services/workspaceConfigRuntime'
+} from '@/services/settings/workspaceConfigRuntime'
 export type {
   WorkspaceBillingSettings as BillingSettings,
   WorkspaceUserLoginTab as UserLoginTab
-} from '@/services/workspaceUserController'
+} from '@/services/user/workspaceUserController'
 
 export const useWorkspaceStore = defineStore('workspace', () => {
   const {

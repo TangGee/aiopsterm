@@ -38,10 +38,10 @@ let aiRuntime: AiRuntime
 let commandGenerationRuntime: CommandGenerationRuntime
 
 beforeAll(async () => {
-  const commonPath = '../src/main/backend/terminalSuggestionCommon'
-  const historyPath = '../src/main/backend/terminalSuggestionHistoryRuntime'
-  const aiPath = '../src/main/backend/terminalSuggestionAiRuntime'
-  const commandGenerationPath = '../src/main/backend/terminalCommandGenerationRuntime'
+  const commonPath = '../src/main/backend/terminal/terminalSuggestionCommon'
+  const historyPath = '../src/main/backend/terminal/terminalSuggestionHistoryRuntime'
+  const aiPath = '../src/main/backend/terminal/terminalSuggestionAiRuntime'
+  const commandGenerationPath = '../src/main/backend/terminal/terminalCommandGenerationRuntime'
   common = (await import(commonPath)) as CommonRuntime
   historyRuntime = (await import(historyPath)) as HistoryRuntime
   aiRuntime = (await import(aiPath)) as AiRuntime

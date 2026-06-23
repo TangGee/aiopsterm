@@ -15,7 +15,7 @@ vi.mock('electron', () => ({
 
 const loadBackend = async () => {
   vi.resetModules()
-  const modulePath = '../src/main/backend/files'
+  const modulePath = '../src/main/backend/files/files'
   return import(modulePath)
 }
 
@@ -29,7 +29,7 @@ const withFileSessionDatabase = async <T>(run: (databasePath: string, assetDatab
 }
 
 const configureIsolatedAssetBackend = async (databasePath: string) => {
-  const modulePath = '../src/main/backend/assets'
+  const modulePath = '../src/main/backend/assets/assets'
   const backend = await import(modulePath)
   backend.configureAssetBackendRuntime({ databasePath, useSeedData: false, sqliteFactory: Database })
 }

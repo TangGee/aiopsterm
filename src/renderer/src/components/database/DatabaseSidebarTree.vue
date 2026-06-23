@@ -386,14 +386,14 @@ import {
   schemaRoutineNodeId,
   type SchemaObjectKind,
   type VisibleGroupNode
-} from '@/services/databaseWorkspaceRuntime'
+} from '@/services/database/databaseWorkspaceRuntime'
 import type {
   DatabaseColumnInfo,
   DatabaseConnectionInfo,
   DatabaseEngineCode,
   DatabaseTableInfo
 } from '@shared/contracts/database'
-import type { ContextMenuPayload } from '@/services/databaseWorkspaceTypes'
+import type { ContextMenuPayload } from '@/services/database/databaseWorkspaceTypes'
 
 const props = defineProps<{
   sidebarCollapsed: boolean

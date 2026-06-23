@@ -526,7 +526,7 @@ import '@xterm/xterm/css/xterm.css'
 import { ChevronDown, ChevronUp, Clock, ListTree, LoaderCircle, RadioTower, Search, Sparkles, Terminal, X } from 'lucide-vue-next'
 import TransferProgress from '@/components/files/TransferProgress.vue'
 import KnowledgeCenterEditor from '@/components/KnowledgeCenterEditor.vue'
-import { useTerminalWorkspaceContainerRuntime } from '@/services/terminalWorkspaceContainerRuntime'
+import { useTerminalWorkspaceContainerRuntime } from '@/services/terminal/terminalWorkspaceContainerRuntime'
 
 const {
   activeSuggestion,

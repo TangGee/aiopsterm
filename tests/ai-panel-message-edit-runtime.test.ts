@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createAiPanelChipElement, type AiPanelEditableRenderOptions } from '@/services/aiPanelEditableRuntime'
-import { createAiPanelMessageEditRuntime } from '@/services/aiPanelMessageEditRuntime'
+import { createAiPanelChipElement, type AiPanelEditableRenderOptions } from '@/services/ai/aiPanelEditableRuntime'
+import { createAiPanelMessageEditRuntime } from '@/services/ai/aiPanelMessageEditRuntime'
 import type { AiContentPart, AiContextOption, AiDocChipContentPart, AiImageContentPart } from '@shared/contracts/aiChat'
 
 const renderOptions: AiPanelEditableRenderOptions = {

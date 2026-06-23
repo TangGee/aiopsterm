@@ -29,7 +29,7 @@ type CreateAgentSessionStoreRuntime = (options: {
 }) => AgentSessionStoreRuntime
 
 const loadRuntime = async () => {
-  const modulePath = '../src/main/backend/agentSessionStoreRuntime'
+  const modulePath = '../src/main/backend/agent/agentSessionStoreRuntime'
   return (await import(modulePath)) as { createAgentSessionStoreRuntime: CreateAgentSessionStoreRuntime }
 }
 

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { extensionsClient } from '@/services/extensionsClient'
+import { extensionsClient } from '@/services/extensions/extensionsClient'
 import type {
   ExtensionInstallProgress,
   ExtensionPackageDownloadResult,

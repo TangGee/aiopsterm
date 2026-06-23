@@ -38,7 +38,7 @@ import AiPanelClassicConversation from '@/components/ai/AiPanelClassicConversati
 import AiPanelCodexShell from '@/components/ai/AiPanelCodexShell.vue'
 import AiPanelCommandAuditDialog from '@/components/ai/AiPanelCommandAuditDialog.vue'
 import AiPanelHeader from '@/components/ai/AiPanelHeader.vue'
-import { useAiPanelRuntimeContext } from '@/services/aiPanelContext'
+import { useAiPanelRuntimeContext } from '@/services/ai/aiPanelContext'
 
 const {
   agentMode,

@@ -4,8 +4,8 @@
 
 <script setup lang="ts">
 import AiPanelPresentation from '@/components/ai/AiPanelPresentation.vue'
-import { provideAiPanelRuntime } from '@/services/aiPanelContext'
-import { useAiPanelContainerRuntime } from '@/services/aiPanelContainerRuntime'
+import { provideAiPanelRuntime } from '@/services/ai/aiPanelContext'
+import { useAiPanelContainerRuntime } from '@/services/ai/aiPanelContainerRuntime'
 
 const props = defineProps<{ agentMode?: boolean }>()
 

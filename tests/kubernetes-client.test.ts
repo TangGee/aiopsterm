@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { kubernetesClient } from '@/services/kubernetesClient'
+import { kubernetesClient } from '@/services/kubernetes/kubernetesClient'
 
 const originalAiops = window.aiops
 

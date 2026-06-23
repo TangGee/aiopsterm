@@ -843,13 +843,13 @@ const originalDbAiBackendDouble = process.env.AIOPSTERM_DB_AI_BACKEND_DOUBLE
 const originalDatabaseSeed = process.env.AIOPSTERM_DATABASE_ENABLE_SEED
 
 beforeAll(async () => {
-  const modulePath = '../src/main/backend/database'
+  const modulePath = '../src/main/backend/database/database'
   const backend = await import(modulePath)
   configureDatabaseBackendRuntime = backend.configureDatabaseBackendRuntime
-  const exportModulePath = '../src/main/backend/databaseExport'
+  const exportModulePath = '../src/main/backend/database/databaseExport'
   const exportBackend = (await import(exportModulePath)) as { exportDatabaseRows: typeof exportDatabaseRowsBackend }
   exportDatabaseRowsBackend = exportBackend.exportDatabaseRows
-  const commentsModulePath = '../src/main/backend/databaseComments'
+  const commentsModulePath = '../src/main/backend/database/databaseComments'
   const commentsBackend = (await import(commentsModulePath)) as {
     configureDatabaseCommentsRuntime: typeof configureDatabaseCommentsRuntimeBackend
     getDatabasePageComment: typeof getDatabasePageCommentBackend

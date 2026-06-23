@@ -26,7 +26,7 @@ const makeRuntime = (root: string, opened: string[] = []) => ({
 
 describe('settings external action backend boundary', () => {
   beforeAll(async () => {
-    const modulePath = '../src/main/backend/settingsExternalActions'
+    const modulePath = '../src/main/backend/settings/settingsExternalActions'
     backend = (await import(modulePath)) as SettingsExternalActionsBackend
   })
 

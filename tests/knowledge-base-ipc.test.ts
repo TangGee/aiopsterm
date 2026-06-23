@@ -14,7 +14,7 @@ const backendMocks = vi.hoisted(() => ({
   writeKnowledgePastedImageFromClipboard: vi.fn()
 }))
 
-vi.mock('../src/main/backend/knowledgeBaseImage', () => ({
+vi.mock('../src/main/backend/knowledge/knowledgeBaseImage', () => ({
   writeKnowledgePastedImageFromClipboard: backendMocks.writeKnowledgePastedImageFromClipboard
 }))
 

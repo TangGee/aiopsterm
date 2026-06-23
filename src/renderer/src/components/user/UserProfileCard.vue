@@ -176,9 +176,9 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { Camera, Check, Gauge, LogOut, Pencil, X } from 'lucide-vue-next'
-import type { WorkspaceUserContactKind } from '@/services/workspaceUserController'
+import type { WorkspaceUserContactKind } from '@/services/user/workspaceUserController'
 import type { AiopsUserProfile } from '@shared/contracts/userAccount'
-import type { UserProfileDraft } from '@/services/userPanelTypes'
+import type { UserProfileDraft } from '@/services/user/userPanelTypes'
 
 const props = defineProps<{
   profile: AiopsUserProfile

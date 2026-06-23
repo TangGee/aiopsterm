@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { controlClient } from '@/services/controlClient'
+import { controlClient } from '@/services/app/controlClient'
 import type { ControlRequest } from '@shared/contracts/control'
 
 const originalAiops = window.aiops

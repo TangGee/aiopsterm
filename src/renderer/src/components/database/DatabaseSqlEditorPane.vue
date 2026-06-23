@@ -138,7 +138,7 @@ import { computed, nextTick, ref } from 'vue'
 import { Search, X } from 'lucide-vue-next'
 import DatabaseSqlEditor, { type DatabaseSqlEditorMetrics } from '@/components/database/DatabaseSqlEditor.vue'
 import type { DatabaseSqlWorkspaceApi, SqlTab } from '@/components/database/databaseMainWorkspaceTypes'
-import type { TextRange } from '@/services/databaseSqlEditorRuntime'
+import type { TextRange } from '@/services/database/databaseSqlEditorRuntime'
 
 const props = defineProps<{
   activeSqlTab: SqlTab

@@ -1,8 +1,8 @@
 import { computed, ref } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
-import { createFilesPanelFolderRuntime } from '@/services/filesPanelFolderRuntime'
-import type { FilesPanelContextMenuState } from '@/services/filesPanelContextRuntime'
-import type { FilesPanelGroup } from '@/services/filesPanelTreeRuntime'
+import { createFilesPanelFolderRuntime } from '@/services/files/filesPanelFolderRuntime'
+import type { FilesPanelContextMenuState } from '@/services/files/filesPanelContextRuntime'
+import type { FilesPanelGroup } from '@/services/files/filesPanelTreeRuntime'
 import type { FileSessionFolderRecord, FileSessionFolderSaveInput, FileSessionInfo, FileSessionPatch } from '@shared/contracts/files'
 
 const folder = (input: Partial<FileSessionFolderRecord> & Pick<FileSessionFolderRecord, 'uuid' | 'name'>): FileSessionFolderRecord => ({

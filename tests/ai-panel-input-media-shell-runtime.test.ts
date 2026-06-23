@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
 import { ref } from 'vue'
-import { aiPanelTerminalTabDragType } from '@/services/aiPanelMediaRuntime'
-import { createAiPanelInputMediaShellRuntime } from '@/services/aiPanelInputMediaShellRuntime'
-import type { AiPanelMode } from '@/services/aiPanelModeRuntime'
+import { aiPanelTerminalTabDragType } from '@/services/ai/aiPanelMediaRuntime'
+import { createAiPanelInputMediaShellRuntime } from '@/services/ai/aiPanelInputMediaShellRuntime'
+import type { AiPanelMode } from '@/services/ai/aiPanelModeRuntime'
 import type { AiDocChipContentPart, AiImageContentPart } from '@shared/contracts/aiChat'
 import type { ChatAttachmentStageResult, ChatImageAttachmentPrepareResult } from '@shared/contracts/localFiles'
 

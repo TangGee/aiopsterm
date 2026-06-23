@@ -19,7 +19,7 @@ const originalAiTodoSeedEnv = process.env.AIOPSTERM_AI_TODO_ENABLE_SEED
 const loadBackend = async () => {
   delete process.env.AIOPSTERM_AI_TODO_ENABLE_SEED
   vi.resetModules()
-  const modulePath = '../src/main/backend/aiTodos'
+  const modulePath = '../src/main/backend/ai/aiTodos'
   backend = (await import(modulePath)) as AiTodosBackend
 }
 

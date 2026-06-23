@@ -1,8 +1,8 @@
 import { ref } from 'vue'
 import { describe, expect, it } from 'vitest'
 
-import { createAssetsPanelContextRuntime } from '@/services/assetsPanelContextRuntime'
-import type { AssetsPanelAsset } from '@/services/assetsPanelTreeRuntime'
+import { createAssetsPanelContextRuntime } from '@/services/assets/assetsPanelContextRuntime'
+import type { AssetsPanelAsset } from '@/services/assets/assetsPanelTreeRuntime'
 
 const asset = (patch: Partial<AssetsPanelAsset> & Pick<AssetsPanelAsset, 'id' | 'title'>): AssetsPanelAsset => ({
   uuid: patch.id,

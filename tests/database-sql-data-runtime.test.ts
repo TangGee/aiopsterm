@@ -40,8 +40,8 @@ import {
   updateDataWhereDraft,
   type DataTab,
   type SqlTab
-} from '@/services/databaseSqlDataRuntime'
-import { updateDataCellState } from '@/services/databaseGridRuntime'
+} from '@/services/database/databaseSqlDataRuntime'
+import { updateDataCellState } from '@/services/database/databaseGridRuntime'
 import type { DatabaseConnectionInfo, DatabaseSqlExecuteResult, DatabaseTableInfo } from '@shared/contracts/database'
 
 const table: DatabaseTableInfo = {

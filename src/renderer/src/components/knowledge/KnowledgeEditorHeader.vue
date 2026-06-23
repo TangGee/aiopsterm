@@ -31,7 +31,7 @@
 
 <script setup lang="ts">
 import { Eye, Pencil } from 'lucide-vue-next'
-import type { KnowledgeEditorMode } from '@/services/knowledgeEditorTypes'
+import type { KnowledgeEditorMode } from '@/services/knowledge/knowledgeEditorTypes'
 
 defineProps<{
   title: string

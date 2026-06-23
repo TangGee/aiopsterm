@@ -6,7 +6,7 @@ import {
   type DbFilter,
   type DbSort,
   type DirtyState
-} from '@/services/databaseGridRuntime'
+} from '@/services/database/databaseGridRuntime'
 
 const props = withDefaults(
   defineProps<{

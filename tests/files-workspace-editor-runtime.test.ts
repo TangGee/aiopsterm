@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createFilesWorkspaceEditorRuntime, filesWorkspaceEditorLanguage } from '@/services/filesWorkspaceEditorRuntime'
+import { createFilesWorkspaceEditorRuntime, filesWorkspaceEditorLanguage } from '@/services/files/filesWorkspaceEditorRuntime'
 import type { FileSessionInfo, FileTransferTask } from '@shared/contracts/files'
 
 const transferTask = (input: Partial<FileTransferTask> & Pick<FileTransferTask, 'id'>): FileTransferTask => ({

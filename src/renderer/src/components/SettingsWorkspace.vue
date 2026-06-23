@@ -163,7 +163,7 @@
 </template>
 
 <script setup lang="ts">
-import { useSettingsWorkspaceContainerRuntime } from '@/services/settingsWorkspaceContainerRuntime'
+import { useSettingsWorkspaceContainerRuntime } from '@/services/settings/settingsWorkspaceContainerRuntime'
 
 const {
   AboutSettingsPage,

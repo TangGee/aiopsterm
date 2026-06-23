@@ -24,7 +24,7 @@ import {
   sortedAiPanelDocsContextOptions,
   visibleAiPanelContextCategories,
   visibleAiPanelHostContextOptions
-} from '@/services/aiPanelPopupRuntime'
+} from '@/services/ai/aiPanelPopupRuntime'
 import type { AiCommandCatalogOption, AiContextCategoryInfo, AiContextOption } from '@shared/contracts/aiChat'
 
 const host = (input: Partial<AiContextOption> & Pick<AiContextOption, 'id' | 'label'>): AiContextOption => ({

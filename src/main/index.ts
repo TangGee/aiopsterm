@@ -1,26 +1,26 @@
 import { app, BrowserWindow, Notification, shell } from 'electron'
 import { join } from 'path'
 import Store from 'electron-store'
-import { refreshOrganizationAssets } from './backend/assets'
+import { refreshOrganizationAssets } from './backend/assets/assets'
 import {
   closeCodexTerminalBridgeServer
-} from './backend/codexTerminalBridge'
-import { closeExternalCodexMcpBridgeServer } from './backend/externalCodexMcpBridge'
+} from './backend/codex/codexTerminalBridge'
+import { closeExternalCodexMcpBridgeServer } from './backend/codex/externalCodexMcpBridge'
 import {
   closeAiAgentSessionServer,
   ensureAiAgentSessionServer,
-} from './backend/agentSessions'
-import { logRuntimeEvent } from './backend/runtimeLog'
+} from './backend/agent/agentSessions'
+import { logRuntimeEvent } from './backend/app/runtimeLog'
 import {
   closeControlSocketServer,
   ensureControlSocketServer,
   invokeControlSocketMethod
-} from './backend/controlSocket'
-import { createKnowledgeBaseRuntime } from './backend/knowledgeBaseRuntime'
-import { createSettingsConfigRuntime } from './backend/settingsConfigRuntime'
-import { createSkillsRuntime } from './backend/skillsRuntime'
-import { resolveUserAvatarAssetPath } from './backend/userAccount'
-import { configureMainBackendRuntimes } from './backend/runtimeConfiguration'
+} from './backend/control/controlSocket'
+import { createKnowledgeBaseRuntime } from './backend/knowledge/knowledgeBaseRuntime'
+import { createSettingsConfigRuntime } from './backend/settings/settingsConfigRuntime'
+import { createSkillsRuntime } from './backend/settings/skillsRuntime'
+import { resolveUserAvatarAssetPath } from './backend/user/userAccount'
+import { configureMainBackendRuntimes } from './backend/app/runtimeConfiguration'
 import {
   cloneMcpServers,
   cloneMcpToolStates,

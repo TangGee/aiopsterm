@@ -93,7 +93,7 @@ Deferred toolset work:
 
 ## Terminal Bridge
 
-`resources/codex-aiopsterm-mcp.js` is packaged as an extra resource and started by Codex as a stdio MCP server. It does not execute commands locally. It forwards `tools/call` requests to the Electron main-process Unix/pipe socket exposed by `src/main/backend/codexTerminalBridge.ts`.
+`resources/codex-aiopsterm-mcp.js` is packaged as an extra resource and started by Codex as a stdio MCP server. It does not execute commands locally. It forwards `tools/call` requests to the Electron main-process Unix/pipe socket exposed by `src/main/backend/codex/codexTerminalBridge.ts`.
 
 The bridge keeps a registry of active aiopsterm terminal sessions. `list_terminals` snapshots that registry without creating, focusing, closing, or writing to terminals. `run_command` resolves the requested or currently selected terminal, writes:
 

@@ -7,7 +7,7 @@ let backend: any
 let tempRoot = ''
 
 beforeEach(async () => {
-  const modulePath = '../src/main/backend/zmodem'
+  const modulePath = '../src/main/backend/terminal/zmodem'
   backend = await import(modulePath)
   backend.resetZmodemRuntimeForTests()
   tempRoot = await mkdtemp(join(tmpdir(), 'aiopsterm-zmodem-'))

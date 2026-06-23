@@ -56,8 +56,8 @@ import KnowledgeEditorHeader from '@/components/knowledge/KnowledgeEditorHeader.
 import KnowledgeImageViewer from '@/components/knowledge/KnowledgeImageViewer.vue'
 import KnowledgeMarkdownPreview from '@/components/knowledge/KnowledgeMarkdownPreview.vue'
 import KnowledgeMonacoEditor from '@/components/knowledge/KnowledgeMonacoEditor.vue'
-import { useKnowledgeEditorRuntime } from '@/services/knowledgeEditorRuntime'
-import type { KnowledgeImageViewerApi, KnowledgeMarkdownPreviewApi, KnowledgeTextEditorApi } from '@/services/knowledgeEditorTypes'
+import { useKnowledgeEditorRuntime } from '@/services/knowledge/knowledgeEditorRuntime'
+import type { KnowledgeImageViewerApi, KnowledgeMarkdownPreviewApi, KnowledgeTextEditorApi } from '@/services/knowledge/knowledgeEditorTypes'
 
 const props = defineProps<{
   relPath: string

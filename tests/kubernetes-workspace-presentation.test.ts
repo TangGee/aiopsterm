@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { defineComponent, h, ref } from 'vue'
 import KubernetesWorkspacePresentation from '@/components/kubernetes/KubernetesWorkspacePresentation.vue'
-import { provideKubernetesWorkspaceRuntime } from '@/services/kubernetesWorkspaceContext'
+import { provideKubernetesWorkspaceRuntime } from '@/services/kubernetes/kubernetesWorkspaceContext'
 
 const runtime = () => ({
   workspace: {

@@ -21,9 +21,9 @@ import {
   prepareCodexTargetSync,
   resetCodexConversationForRestart,
   terminalSettingsSignature
-} from '@/services/aiPanelCodexRuntime'
-import type { TerminalPanel } from '@/services/terminalPanelRuntime'
-import type { TerminalSettings } from '@/services/workspaceConfigRuntime'
+} from '@/services/ai/aiPanelCodexRuntime'
+import type { TerminalPanel } from '@/services/terminal/terminalPanelRuntime'
+import type { TerminalSettings } from '@/services/settings/workspaceConfigRuntime'
 import type { CodexSessionTargetContext } from '@shared/contracts/codexSessions'
 
 const localPanel: TerminalPanel = {

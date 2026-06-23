@@ -57,7 +57,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { X } from 'lucide-vue-next'
-import type { WorkspaceUserContactKind } from '@/services/workspaceUserController'
+import type { WorkspaceUserContactKind } from '@/services/user/workspaceUserController'
 
 const props = defineProps<{
   kind: WorkspaceUserContactKind

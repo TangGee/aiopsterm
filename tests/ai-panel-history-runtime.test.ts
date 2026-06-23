@@ -3,8 +3,8 @@ import {
   createAiPanelHistoryRuntime,
   createEmptyAiPanelHistoryRuntimeState,
   type AiPanelHistoryRuntimeLabels
-} from '@/services/aiPanelHistoryRuntime'
-import type { AiPanelConversationLike } from '@/services/aiPanelConversationRuntime'
+} from '@/services/ai/aiPanelHistoryRuntime'
+import type { AiPanelConversationLike } from '@/services/ai/aiPanelConversationRuntime'
 import type { AiChatExportInput, AiChatExportResult } from '@shared/contracts/aiChat'
 
 const labels: AiPanelHistoryRuntimeLabels = {

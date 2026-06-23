@@ -16,8 +16,8 @@ import {
   visibleManagedAiSessions,
   type ManagedAiPanelTranslate,
   type ManagedAiTimelineEvent
-} from '@/services/aiSessionsPanelViewRuntime'
-import type { ManagedAiSession } from '@/services/workspaceManagedAiTypes'
+} from '@/services/ai/aiSessionsPanelViewRuntime'
+import type { ManagedAiSession } from '@/services/ai/workspaceManagedAiTypes'
 import type {
   AiAgentSessionEventName,
   AiAgentSessionSource,

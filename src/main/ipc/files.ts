@@ -15,7 +15,7 @@ import {
   transferFileEntry,
   updateFileSession,
   writeFileContent
-} from '../backend/files'
+} from '../backend/files/files'
 import type {
   FileContentOptions,
   FileEntryMutation,

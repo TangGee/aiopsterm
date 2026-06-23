@@ -5,7 +5,7 @@ import {
   createAiPanelLifecycleRuntime,
   type AiPanelLifecycleRuntimeOptions,
   type AiPanelOnboardingRequest
-} from '@/services/aiPanelLifecycleRuntime'
+} from '@/services/ai/aiPanelLifecycleRuntime'
 import type { AiContextOption } from '@shared/contracts/aiChat'
 
 const host = (input: Partial<AiContextOption> & Pick<AiContextOption, 'id' | 'label'>): AiContextOption => ({

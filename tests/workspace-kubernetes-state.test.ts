@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { createWorkspaceKubernetesState } from '@/stores/workspaceKubernetesState'
-import type { K8sCluster, K8sContextInfo, K8sResource } from '@/services/kubernetesBackendGuards'
-import type { K8sTerminalTab } from '@/services/kubernetesRuntime'
+import type { K8sCluster, K8sContextInfo, K8sResource } from '@/services/kubernetes/kubernetesBackendGuards'
+import type { K8sTerminalTab } from '@/services/kubernetes/kubernetesRuntime'
 
 const cluster = (input: Partial<K8sCluster> & Pick<K8sCluster, 'id' | 'name'>): K8sCluster => ({
   kubeconfig_path: null,

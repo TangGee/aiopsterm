@@ -37,7 +37,7 @@ import {
   updateK8sTerminalTabCommandResult,
   updateK8sTerminalTabFromRecord,
   type K8sTerminalTab
-} from '@/services/kubernetesRuntime'
+} from '@/services/kubernetes/kubernetesRuntime'
 import type { KubernetesCatalog, KubernetesClusterRecord, KubernetesResource, KubernetesTerminalRecord } from '@shared/contracts/kubernetes'
 
 const proxyConfig = {

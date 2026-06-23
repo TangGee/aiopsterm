@@ -124,7 +124,7 @@ import UserLoginCard from '@/components/user/UserLoginCard.vue'
 import UserPasswordModal from '@/components/user/UserPasswordModal.vue'
 import UserProfileCard from '@/components/user/UserProfileCard.vue'
 import UserTrustedDeviceRevokeModal from '@/components/user/UserTrustedDeviceRevokeModal.vue'
-import { useUserPanelRuntime } from '@/services/userPanelRuntime'
+import { useUserPanelRuntime } from '@/services/user/userPanelRuntime'
 
 const {
   workspace,

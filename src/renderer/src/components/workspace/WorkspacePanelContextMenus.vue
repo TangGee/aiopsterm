@@ -177,7 +177,7 @@ import {
   Star,
   Trash2
 } from 'lucide-vue-next'
-import { useWorkspacePanelRuntimeContext } from '@/services/workspacePanelContext'
+import { useWorkspacePanelRuntimeContext } from '@/services/workspace/workspacePanelContext'
 
 const {
   contextMenuAssetId,

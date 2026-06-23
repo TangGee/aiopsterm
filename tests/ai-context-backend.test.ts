@@ -29,7 +29,7 @@ vi.mock('electron-store', () => {
 
 const loadBackend = async () => {
   vi.resetModules()
-  const modulePath = '../src/main/backend/aiContext'
+  const modulePath = '../src/main/backend/ai/aiContext'
   return import(modulePath)
 }
 

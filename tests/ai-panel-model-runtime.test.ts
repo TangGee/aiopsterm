@@ -12,7 +12,7 @@ import {
   modelMatchesAiPanelQuery,
   stripAiPanelThinkingSuffix,
   type AiPanelChatModeOption
-} from '@/services/aiPanelModelRuntime'
+} from '@/services/ai/aiPanelModelRuntime'
 import type { AiModelCatalogOption } from '@shared/contracts/appRuntime'
 
 const modeOptions: AiPanelChatModeOption[] = [

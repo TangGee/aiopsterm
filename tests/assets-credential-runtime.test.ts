@@ -25,7 +25,7 @@ type AssetCredentialRuntimeModule = {
 }
 
 const loadRuntime = async () => {
-  const modulePath = '../src/main/backend/assetsCredentialRuntime'
+  const modulePath = '../src/main/backend/assets/assetsCredentialRuntime'
   return import(modulePath) as Promise<AssetCredentialRuntimeModule>
 }
 

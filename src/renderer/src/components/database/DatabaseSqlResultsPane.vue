@@ -178,8 +178,8 @@ import DataGridToolbar from '@/components/database/DataGridToolbar.vue'
 import DataStatusBar from '@/components/database/DataStatusBar.vue'
 import ResultGrid from '@/components/database/ResultGrid.vue'
 import type { DatabaseSqlHistoryRules, SqlTab } from '@/components/database/databaseMainWorkspaceTypes'
-import type { DbFilter } from '@/services/databaseGridRuntime'
-import type { SqlHistory, SqlResult, SqlResultViewState } from '@/services/databaseWorkspaceTypes'
+import type { DbFilter } from '@/services/database/databaseGridRuntime'
+import type { SqlHistory, SqlResult, SqlResultViewState } from '@/services/database/databaseWorkspaceTypes'
 
 defineProps<{
   activeSqlTab: SqlTab

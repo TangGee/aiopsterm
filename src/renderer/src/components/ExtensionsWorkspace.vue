@@ -47,14 +47,14 @@ import { computed, onMounted, watch } from 'vue'
 import ExtensionAliasConfig from '@/components/extensions/ExtensionAliasConfig.vue'
 import ExtensionGenericDetail from '@/components/extensions/ExtensionGenericDetail.vue'
 import ExtensionJumpserverDetail from '@/components/extensions/ExtensionJumpserverDetail.vue'
-import { createExtensionsJumpserverAssetRuntime } from '@/services/extensionsJumpserverAssetRuntime'
+import { createExtensionsJumpserverAssetRuntime } from '@/services/extensions/extensionsJumpserverAssetRuntime'
 import {
   extensionInstallStageText,
   extensionPluginSourceText,
   extensionPluginTags,
   extensionPluginVersion,
   formatExtensionPluginSize
-} from '@/services/extensionsWorkspaceDisplayRuntime'
+} from '@/services/extensions/extensionsWorkspaceDisplayRuntime'
 import { useWorkspaceStore } from '@/stores/workspace'
 
 const workspace = useWorkspaceStore()

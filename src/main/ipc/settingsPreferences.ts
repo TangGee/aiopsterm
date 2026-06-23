@@ -5,7 +5,7 @@ import {
   resetSettingsShortcuts,
   saveSettingsRule,
   saveSettingsShortcut
-} from '../backend/settingsPreferences'
+} from '../backend/settings/settingsPreferences'
 import type { UserConfig } from '@shared/contracts/userConfig'
 import type { SettingsRuleSaveInput, SettingsShortcutSaveInput } from '@shared/contracts/settingsPreferences'
 

@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ref } from 'vue'
-import { createWorkspaceKubernetesClusterController } from '@/services/workspaceKubernetesClusterController'
-import { applyKubernetesCatalogState, cloneK8sProxyConfig, defaultK8sProxyConfig, type K8sTerminalTab } from '@/services/kubernetesRuntime'
-import type { K8sBastionGroup, K8sCluster, K8sContextInfo, K8sImportContextInfo, K8sNamespaceInfo, K8sProxyConfig, K8sResource } from '@/services/kubernetesBackendGuards'
+import { createWorkspaceKubernetesClusterController } from '@/services/kubernetes/workspaceKubernetesClusterController'
+import { applyKubernetesCatalogState, cloneK8sProxyConfig, defaultK8sProxyConfig, type K8sTerminalTab } from '@/services/kubernetes/kubernetesRuntime'
+import type { K8sBastionGroup, K8sCluster, K8sContextInfo, K8sImportContextInfo, K8sNamespaceInfo, K8sProxyConfig, K8sResource } from '@/services/kubernetes/kubernetesBackendGuards'
 import type { KubernetesCatalog } from '@shared/contracts/kubernetes'
 
 const originalAiops = window.aiops

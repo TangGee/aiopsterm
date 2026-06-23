@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { codexSessionClient } from '@/services/codexSessionClient'
+import { codexSessionClient } from '@/services/ai/codexSessionClient'
 import type {
   CodexSessionDataEvent,
   CodexSessionExitEvent,

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { defineComponent, nextTick, reactive } from 'vue'
 import { mount } from '@vue/test-utils'
-import { useKubernetesWorkspaceInteractionRuntime } from '@/services/kubernetesWorkspaceInteractionRuntime'
+import { useKubernetesWorkspaceInteractionRuntime } from '@/services/kubernetes/kubernetesWorkspaceInteractionRuntime'
 import type { useWorkspaceStore } from '@/stores/workspace'
 import type { KubernetesClusterRecord } from '@shared/contracts/kubernetes'
 

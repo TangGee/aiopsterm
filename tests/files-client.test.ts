@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { filesClient } from '@/services/filesClient'
+import { filesClient } from '@/services/files/filesClient'
 import type {
   FileEntryMutationResult,
   FileListEntry,

@@ -102,7 +102,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { Check, Copy, FileTerminal, Folder, PlayCircle, X } from 'lucide-vue-next'
-import type { QuickCommandSnippet, SnippetGroup } from '@/services/quickCommandsRuntime'
+import type { QuickCommandSnippet, SnippetGroup } from '@/services/quick-commands/quickCommandsRuntime'
 
 defineProps<{
   groups: SnippetGroup[]

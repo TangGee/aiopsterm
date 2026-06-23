@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { ResultStatus } from '@/services/databaseGridRuntime'
+import type { ResultStatus } from '@/services/database/databaseGridRuntime'
 
 const props = withDefaults(
   defineProps<{

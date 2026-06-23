@@ -10,9 +10,9 @@ import {
   terminalSecurityExecutionShouldWrite,
   terminalSecurityPromptCancellationNotice,
   type TerminalSecurityExecution
-} from '@/services/terminalExecutionRuntime'
-import { defaultSecuritySettings } from '@/services/workspaceConfigRuntime'
-import { createEmptyTerminalPanel, type TerminalPanel } from '@/services/terminalPanelRuntime'
+} from '@/services/terminal/terminalExecutionRuntime'
+import { defaultSecuritySettings } from '@/services/settings/workspaceConfigRuntime'
+import { createEmptyTerminalPanel, type TerminalPanel } from '@/services/terminal/terminalPanelRuntime'
 import type { SecurityUserConfig } from '@shared/contracts/appRuntime'
 
 const securityConfig = (

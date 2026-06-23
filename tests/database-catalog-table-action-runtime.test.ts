@@ -1,14 +1,14 @@
 import { computed, reactive, ref } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
-import { createDatabaseCatalogTableActionRuntime } from '@/services/databaseCatalogTableActionRuntime'
-import { makeDataMutationPlanState, makeDirtyState } from '@/services/databaseGridRuntime'
-import type { TableDdlResult } from '@/services/databaseWorkspaceRuntime'
+import { createDatabaseCatalogTableActionRuntime } from '@/services/database/databaseCatalogTableActionRuntime'
+import { makeDataMutationPlanState, makeDirtyState } from '@/services/database/databaseGridRuntime'
+import type { TableDdlResult } from '@/services/database/databaseWorkspaceRuntime'
 import type {
   ContextMenu,
   DatabaseDangerConfirmState,
   DatabaseDdlModalState,
   WorkspaceTab
-} from '@/services/databaseWorkspaceTypes'
+} from '@/services/database/databaseWorkspaceTypes'
 import type {
   DatabaseConnectionInfo,
   DatabaseEngineCode,

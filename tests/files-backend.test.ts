@@ -461,7 +461,7 @@ vi.mock('better-sqlite3', () => {
   throw new Error('force electron-store files backend in tests')
 })
 
-vi.mock('../src/main/backend/ssh2Runtime', () => ({
+vi.mock('../src/main/backend/ssh/ssh2Runtime', () => ({
   loadSsh2: () => ({ Client: ssh2Mock.Client })
 }))
 
@@ -500,7 +500,7 @@ const sshProxyMock = vi.hoisted(() => {
   }
 })
 
-vi.mock('../src/main/backend/sshProxy', () => ({
+vi.mock('../src/main/backend/ssh/sshProxy', () => ({
   createSshProxySocketForAsset: sshProxyMock.createSshProxySocketForAsset
 }))
 
@@ -546,7 +546,7 @@ const restoreFilesSeedEnv = () => {
 beforeAll(async () => {
   const storeModule = (await import('electron-store')) as unknown as { __resetMockStores?: () => void }
   resetMockStores = storeModule.__resetMockStores
-  const modulePath = '../src/main/backend/files'
+  const modulePath = '../src/main/backend/files/files'
   const backend = await import(modulePath)
   filesBackendExports = backend as Record<string, unknown>
   readFileContent = backend.readFileContent
@@ -568,7 +568,7 @@ beforeAll(async () => {
   dropFileSessionCatalogCache = backend.__dropFileSessionCatalogCacheForTests
   getRemoteSftpPoolSnapshotForTests = backend.__getRemoteSftpPoolSnapshotForTests
   configureFilesBackendRuntime = backend.configureFilesBackendRuntime
-  const assetsModulePath = '../src/main/backend/assets'
+  const assetsModulePath = '../src/main/backend/assets/assets'
   const assetsBackend = await import(assetsModulePath)
   configureAssetBackendRuntime = assetsBackend.configureAssetBackendRuntime
   saveAsset = assetsBackend.saveAsset

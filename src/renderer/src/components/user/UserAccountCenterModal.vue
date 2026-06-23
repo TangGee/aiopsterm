@@ -85,7 +85,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { Trash2, X } from 'lucide-vue-next'
-import type { WorkspaceBillingSettings, WorkspaceTrustedDevice } from '@/services/workspaceUserController'
+import type { WorkspaceBillingSettings, WorkspaceTrustedDevice } from '@/services/user/workspaceUserController'
 import type { AiopsUserProfile } from '@shared/contracts/userAccount'
 
 const props = defineProps<{

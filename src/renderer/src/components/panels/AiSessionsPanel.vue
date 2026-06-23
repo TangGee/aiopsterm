@@ -417,7 +417,7 @@
 
 <script setup lang="ts">
 import { ArchiveX, Ban, Check, CheckCheck, Copy, LocateFixed, RefreshCw, RotateCcw, Search, Send, Settings, ShieldCheck, Trash2 } from 'lucide-vue-next'
-import { useAiSessionsPanelRuntime } from '@/services/aiSessionsPanelRuntime'
+import { useAiSessionsPanelRuntime } from '@/services/ai/aiSessionsPanelRuntime'
 
 const {
   workspace,

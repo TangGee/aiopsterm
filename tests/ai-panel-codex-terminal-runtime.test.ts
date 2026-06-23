@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createCodexConversationRecord } from '@/services/aiPanelCodexRuntime'
+import { createCodexConversationRecord } from '@/services/ai/aiPanelCodexRuntime'
 import {
   codexTerminalCopyShortcut,
   createAiPanelCodexTerminalRuntime,
@@ -7,7 +7,7 @@ import {
   type AiPanelCodexTerminalLike,
   type AiPanelCodexResizeObserverLike,
   type AiPanelCodexSessionClient
-} from '@/services/aiPanelCodexTerminalRuntime'
+} from '@/services/ai/aiPanelCodexTerminalRuntime'
 import type { CodexSessionDataEvent, CodexSessionExitEvent, CodexSessionLifecycleEvent, CodexSessionTargetContext } from '@shared/contracts/codexSessions'
 
 type TestConversation = AiPanelCodexTerminalConversation<FakeTerminal, FakeFit>

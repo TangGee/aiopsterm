@@ -108,9 +108,9 @@ import type {
   DbAiToolbarAction,
   SqlTab
 } from '@/components/database/databaseMainWorkspaceTypes'
-import type { DbFilter } from '@/services/databaseGridRuntime'
-import type { SqlHistory, SqlResult, SqlResultViewState } from '@/services/databaseWorkspaceTypes'
-import type { TextRange } from '@/services/databaseSqlEditorRuntime'
+import type { DbFilter } from '@/services/database/databaseGridRuntime'
+import type { SqlHistory, SqlResult, SqlResultViewState } from '@/services/database/databaseWorkspaceTypes'
+import type { TextRange } from '@/services/database/databaseSqlEditorRuntime'
 import type { DatabaseCatalogInfo, DatabaseConnectionInfo } from '@shared/contracts/database'
 
 const props = defineProps<{

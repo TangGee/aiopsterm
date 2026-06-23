@@ -82,7 +82,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { ChevronDown, ChevronRight, File, Folder } from 'lucide-vue-next'
-import { getKnowledgeParent } from '@/services/knowledgeRuntime'
+import { getKnowledgeParent } from '@/services/knowledge/knowledgeRuntime'
 import type { KnowledgeNode } from '@shared/contracts/knowledgeBase'
 
 const props = defineProps<{

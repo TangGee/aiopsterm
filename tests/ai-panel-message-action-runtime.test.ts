@@ -3,7 +3,7 @@ import {
   createAiPanelMessageActionRuntime,
   formatAiPanelMcpToolArguments,
   type AiPanelMessageActionMessage
-} from '@/services/aiPanelMessageActionRuntime'
+} from '@/services/ai/aiPanelMessageActionRuntime'
 
 const createHarness = () => {
   let messages: AiPanelMessageActionMessage[] = [

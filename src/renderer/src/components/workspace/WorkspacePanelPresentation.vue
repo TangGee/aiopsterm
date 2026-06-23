@@ -21,7 +21,7 @@ import WorkspacePanelFolderDialogs from '@/components/workspace/WorkspacePanelFo
 import WorkspacePanelHostDialogs from '@/components/workspace/WorkspacePanelHostDialogs.vue'
 import WorkspacePanelOperationDialogs from '@/components/workspace/WorkspacePanelOperationDialogs.vue'
 import WorkspacePanelTreeView from '@/components/workspace/WorkspacePanelTreeView.vue'
-import { useWorkspacePanelRuntimeContext } from '@/services/workspacePanelContext'
+import { useWorkspacePanelRuntimeContext } from '@/services/workspace/workspacePanelContext'
 
 const { notice } = useWorkspacePanelRuntimeContext()
 </script>

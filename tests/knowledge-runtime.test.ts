@@ -21,7 +21,7 @@ import {
   uniqueKnowledgeFileName,
   upsertKnowledgeImportJob,
   type KnowledgeImportJob
-} from '@/services/knowledgeRuntime'
+} from '@/services/knowledge/knowledgeRuntime'
 import type { KnowledgeNode } from '@shared/contracts/knowledgeBase'
 
 const tree: KnowledgeNode[] = [

@@ -17,8 +17,8 @@ import {
   startMacroRecordingState,
   type QuickCommandSnippet,
   type SnippetGroup
-} from '@/services/quickCommandsRuntime'
-import { MACRO_MAX_COMMAND_COUNT, MACRO_MAX_RECORDING_DURATION_MS } from '@/services/terminalMacroRuntime'
+} from '@/services/quick-commands/quickCommandsRuntime'
+import { MACRO_MAX_COMMAND_COUNT, MACRO_MAX_RECORDING_DURATION_MS } from '@/services/terminal/terminalMacroRuntime'
 
 const groups: SnippetGroup[] = [
   { id: 1, uuid: 'group-a', group_name: 'Group A' },

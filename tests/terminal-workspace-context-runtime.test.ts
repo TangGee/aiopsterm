@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { computed, reactive, ref } from 'vue'
-import { createTerminalWorkspaceContextRuntime } from '@/services/terminalWorkspaceContextRuntime'
-import { createEmptyTerminalPanel, type TerminalPanel } from '@/services/terminalPanelRuntime'
+import { createTerminalWorkspaceContextRuntime } from '@/services/terminal/terminalWorkspaceContextRuntime'
+import { createEmptyTerminalPanel, type TerminalPanel } from '@/services/terminal/terminalPanelRuntime'
 import type { useWorkspaceStore } from '@/stores/workspace'
 
 type WorkspaceStore = ReturnType<typeof useWorkspaceStore>

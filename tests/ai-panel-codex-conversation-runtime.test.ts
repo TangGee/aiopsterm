@@ -1,13 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { nextTick } from 'vue'
-import { aiPanelModeStorageKey } from '@/services/aiPanelModeRuntime'
+import { aiPanelModeStorageKey } from '@/services/ai/aiPanelModeRuntime'
 import {
   createAiPanelCodexConversationRuntime,
   type AiPanelCodexConversation
-} from '@/services/aiPanelCodexConversationRuntime'
-import type { AiPanelCodexTerminalRuntimeOptions } from '@/services/aiPanelCodexTerminalRuntime'
-import type { TerminalPanel } from '@/services/terminalPanelRuntime'
-import type { TerminalSettings } from '@/services/workspaceConfigRuntime'
+} from '@/services/ai/aiPanelCodexConversationRuntime'
+import type { AiPanelCodexTerminalRuntimeOptions } from '@/services/ai/aiPanelCodexTerminalRuntime'
+import type { TerminalPanel } from '@/services/terminal/terminalPanelRuntime'
+import type { TerminalSettings } from '@/services/settings/workspaceConfigRuntime'
 import type { AiAttentionInput, AiAttentionItem } from '@/stores/workspace'
 import type { AiContextCatalog, AiContextOption } from '@shared/contracts/aiChat'
 import type { CodexSessionTargetContext } from '@shared/contracts/codexSessions'

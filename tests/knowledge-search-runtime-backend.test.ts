@@ -9,7 +9,7 @@ type KnowledgeSearchRuntimeBackend = {
 let backend: KnowledgeSearchRuntimeBackend
 
 beforeEach(async () => {
-  const modulePath = '../src/main/backend/knowledgeSearchRuntime'
+  const modulePath = '../src/main/backend/knowledge/knowledgeSearchRuntime'
   backend = (await import(modulePath)) as KnowledgeSearchRuntimeBackend
   backend.resetKnowledgeSearchRuntimeForTests()
 })

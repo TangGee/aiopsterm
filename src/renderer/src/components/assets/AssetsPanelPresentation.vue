@@ -42,7 +42,7 @@ import AssetsPanelManagedAssets from '@/components/assets/AssetsPanelManagedAsse
 import AssetsPanelManagementMenu from '@/components/assets/AssetsPanelManagementMenu.vue'
 import AssetsPanelProxyManagement from '@/components/assets/AssetsPanelProxyManagement.vue'
 import AssetsPanelSharedDialogs from '@/components/assets/AssetsPanelSharedDialogs.vue'
-import { useAssetsPanelRuntimeContext } from '@/services/assetsPanelContext'
+import { useAssetsPanelRuntimeContext } from '@/services/assets/assetsPanelContext'
 
 const {
   assetManagementEntries,

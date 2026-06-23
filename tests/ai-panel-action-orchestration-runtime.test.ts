@@ -2,8 +2,8 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   createAiPanelActionOrchestrationRuntime,
   type AiPanelActionOrchestrationMessage
-} from '@/services/aiPanelActionOrchestrationRuntime'
-import type { TerminalSecurityDecision } from '@/services/terminalExecutionRuntime'
+} from '@/services/ai/aiPanelActionOrchestrationRuntime'
+import type { TerminalSecurityDecision } from '@/services/terminal/terminalExecutionRuntime'
 
 const createHarness = (input: { chatMode?: string; terminalDecision?: TerminalSecurityDecision | null } = {}) => {
   let messages: AiPanelActionOrchestrationMessage[] = [

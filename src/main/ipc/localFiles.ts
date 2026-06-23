@@ -1,14 +1,14 @@
 import type { IpcMain, IpcMainInvokeEvent, OpenDialogOptions as ElectronOpenDialogOptions, SaveDialogOptions as ElectronSaveDialogOptions } from 'electron'
 import { basename, isAbsolute, join } from 'path'
 import { readFile, stat, writeFile } from 'fs/promises'
-import { stageChatAttachment } from '../backend/chatAttachments'
+import { stageChatAttachment } from '../backend/chat/chatAttachments'
 import {
   prepareChatImageAttachment,
   prepareChatImageAttachmentFromClipboard,
   prepareChatImageAttachmentFromFile,
   validateChatImageAttachment
-} from '../backend/chatImageAttachment'
-import { saveCustomBackgroundFile, writeLocalTextFile } from '../backend/localFileWrites'
+} from '../backend/chat/chatImageAttachment'
+import { saveCustomBackgroundFile, writeLocalTextFile } from '../backend/files/localFileWrites'
 import type {
   ChatImageAttachmentClipboardInput,
   ChatImageAttachmentFileInput,

@@ -8,7 +8,7 @@ import {
   terminalWriteByteLength,
   terminalWriteExceptionReason,
   validateTerminalWriteResult
-} from '@/services/terminalBackendGuards'
+} from '@/services/terminal/terminalBackendGuards'
 import type { TerminalLifecycleEvent, TerminalSessionInfo } from '@shared/contracts/terminalSessions'
 import type { TerminalCommandGenerationRecord } from '@shared/contracts/terminalTools'
 

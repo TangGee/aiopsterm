@@ -12,7 +12,7 @@ import {
   sendableAiContentParts,
   splitAiContentInputParts,
   toggleHostAiContextInList
-} from '@/services/aiPanelInputRuntime'
+} from '@/services/ai/aiPanelInputRuntime'
 import type { AiContentPart, AiContextOption } from '@shared/contracts/aiChat'
 
 const host = (input: Partial<AiContextOption> & Pick<AiContextOption, 'id' | 'label'>): AiContextOption => ({

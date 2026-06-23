@@ -21,7 +21,7 @@ import {
   testKubernetesClusterConnection,
   updateKubernetesCluster,
   writeKubernetesTerminal
-} from '../backend/kubernetes'
+} from '../backend/kubernetes/kubernetes'
 import type {
   KubernetesAgentProxyConfigInput,
   KubernetesClusterInput,

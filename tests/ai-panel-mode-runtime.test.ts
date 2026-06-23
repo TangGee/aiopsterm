@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { aiPanelModeStorageKey, normalizeAiPanelMode, readStoredAiPanelMode, storeAiPanelMode } from '@/services/aiPanelModeRuntime'
+import { aiPanelModeStorageKey, normalizeAiPanelMode, readStoredAiPanelMode, storeAiPanelMode } from '@/services/ai/aiPanelModeRuntime'
 
 describe('AI panel mode runtime', () => {
   beforeEach(() => {

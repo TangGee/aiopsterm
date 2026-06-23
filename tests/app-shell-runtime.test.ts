@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { nextTick, ref } from 'vue'
-import { createAppShellRuntime, type AppShellRuntimeOptions } from '@/services/appShellRuntime'
+import { createAppShellRuntime, type AppShellRuntimeOptions } from '@/services/app/appShellRuntime'
 import type { I18nKey, SupportedLocale } from '@/i18n'
 import type {
   AiAgentSessionEvent,

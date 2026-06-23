@@ -9,7 +9,7 @@ import {
   isOpenPathResult,
   isSettingsDocumentationResult,
   resolveUpdateVersion
-} from '@/services/appRuntimeClient'
+} from '@/services/app/appRuntimeClient'
 import type { UserConfig } from '@shared/contracts/userConfig'
 
 const originalAiops = window.aiops

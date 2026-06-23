@@ -82,7 +82,7 @@
 
 <script setup lang="ts">
 import { Camera, X } from 'lucide-vue-next'
-import type { UserAvatarOffset } from '@/services/userPanelTypes'
+import type { UserAvatarOffset } from '@/services/user/userPanelTypes'
 
 defineProps<{
   avatarPreview: string

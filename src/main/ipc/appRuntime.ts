@@ -2,10 +2,10 @@ import type { IpcMain } from 'electron'
 import { mkdir } from 'fs/promises'
 import { aiopstermProtocolPrefix, type AiopstermDeepLinkPayload } from '@shared/deepLink'
 import { normalizeExternalHttpUrl } from '@shared/externalUrl'
-import { applyKnowledgeSearchRuntimeSetting } from '../backend/knowledgeSearchRuntime'
-import { applyPrivacyRuntimeSettings } from '../backend/privacyRuntime'
-import { writeRuntimeLog } from '../backend/runtimeLog'
-import { openSettingsDocumentation, submitSettingsFeedbackReport } from '../backend/settingsExternalActions'
+import { applyKnowledgeSearchRuntimeSetting } from '../backend/knowledge/knowledgeSearchRuntime'
+import { applyPrivacyRuntimeSettings } from '../backend/app/privacyRuntime'
+import { writeRuntimeLog } from '../backend/app/runtimeLog'
+import { openSettingsDocumentation, submitSettingsFeedbackReport } from '../backend/settings/settingsExternalActions'
 import type {
   KnowledgeSearchRuntimeApplyInput,
   OpenSettingsDocumentationInput,

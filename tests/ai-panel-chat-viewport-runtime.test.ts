@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { watch } from 'vue'
-import { createAiPanelChatViewportRuntime } from '@/services/aiPanelChatViewportRuntime'
-import { createEmptyAiPanelHistoryRuntimeState } from '@/services/aiPanelHistoryRuntime'
+import { createAiPanelChatViewportRuntime } from '@/services/ai/aiPanelChatViewportRuntime'
+import { createEmptyAiPanelHistoryRuntimeState } from '@/services/ai/aiPanelHistoryRuntime'
 
 const createHarness = () => {
   const historyState = createEmptyAiPanelHistoryRuntimeState()

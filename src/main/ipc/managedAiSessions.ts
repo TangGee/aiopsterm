@@ -16,7 +16,7 @@ import {
   replyManagedAiSession,
   setAgentHibernationConfig,
   wakeManagedAiSession
-} from '../backend/agentSessions'
+} from '../backend/agent/agentSessions'
 import type { AiAgentSessionEventInput, ManagedAiSessionFocusRequest } from '@shared/contracts/managedAiSessions'
 
 type RegisterManagedAiSessionsIpcInput = {

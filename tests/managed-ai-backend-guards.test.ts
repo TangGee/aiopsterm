@@ -7,7 +7,7 @@ import {
   isManagedAiSessionHibernateData,
   isManagedAiSessionMutationData,
   isManagedAiSessionSnapshot
-} from '@/services/managedAiBackendGuards'
+} from '@/services/ai/managedAiBackendGuards'
 import type { AgentHookInstallerSnapshot } from '@shared/contracts/agentHooks'
 import type { AgentHibernationConfig, ManagedAiSessionRecord } from '@shared/contracts/managedAiSessions'
 

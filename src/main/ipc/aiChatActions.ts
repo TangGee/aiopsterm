@@ -1,5 +1,5 @@
 import type { IpcMain, IpcMainInvokeEvent } from 'electron'
-import { exportChat } from '../backend/chatExport'
+import { exportChat } from '../backend/chat/chatExport'
 import type {
   AiChatConversationRecord,
   AiChatExportInput,

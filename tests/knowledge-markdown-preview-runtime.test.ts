@@ -3,7 +3,7 @@ import {
   renderKnowledgeMarkdownPreview,
   resolveKnowledgeMarkdownResource,
   sanitizeKnowledgeMarkdownHtml
-} from '@/services/knowledgeMarkdownPreviewRuntime'
+} from '@/services/knowledge/knowledgeMarkdownPreviewRuntime'
 
 describe('knowledgeMarkdownPreviewRuntime', () => {
   it('sanitizes unsafe markdown html while preserving safe markdown presentation attributes', () => {

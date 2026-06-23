@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   aiPanelShellPresentationIcons,
   createAiPanelShellAdapterRuntime
-} from '@/services/aiPanelShellAdapterRuntime'
+} from '@/services/ai/aiPanelShellAdapterRuntime'
 
 const createBrowserAdapter = () => {
   const callbacks: FrameRequestCallback[] = []

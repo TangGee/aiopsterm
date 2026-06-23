@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createMacroSnippetName, normalizeMacroSleepThreshold, parseMacroTerminalInput } from '@/services/terminalMacroRuntime'
+import { createMacroSnippetName, normalizeMacroSleepThreshold, parseMacroTerminalInput } from '@/services/terminal/terminalMacroRuntime'
 
 describe('terminalMacroRuntime', () => {
   it('creates stable macro snippet names and normalizes sleep thresholds', () => {

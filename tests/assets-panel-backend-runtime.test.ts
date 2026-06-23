@@ -11,8 +11,8 @@ import type {
 import {
   assetsPanelAssetToInput,
   createAssetsPanelBackendRuntime
-} from '@/services/assetsPanelBackendRuntime'
-import type { AssetsPanelAsset } from '@/services/assetsPanelTreeRuntime'
+} from '@/services/assets/assetsPanelBackendRuntime'
+import type { AssetsPanelAsset } from '@/services/assets/assetsPanelTreeRuntime'
 
 const originalAiops = window.aiops
 const malformedMessage = '资产服务返回数据无效'

@@ -161,8 +161,8 @@
 
 <script setup lang="ts">
 import { User } from 'lucide-vue-next'
-import type { WorkspaceUserContactKind, WorkspaceUserLoginTab } from '@/services/workspaceUserController'
-import type { UserLoginDraft } from '@/services/userPanelTypes'
+import type { WorkspaceUserContactKind, WorkspaceUserLoginTab } from '@/services/user/workspaceUserController'
+import type { UserLoginDraft } from '@/services/user/userPanelTypes'
 
 const props = defineProps<{
   loginTab: WorkspaceUserLoginTab

@@ -5,10 +5,10 @@ import {
   terminalCommandContextFromPanel,
   terminalCommandGenerationRecordMatchesRequest,
   terminalCommandModelOptions
-} from '@/services/terminalCommandRuntime'
+} from '@/services/terminal/terminalCommandRuntime'
 import type { TerminalCommandGenerationRecord } from '@shared/contracts/terminalTools'
-import type { SettingsModelOption } from '@/services/workspaceConfigRuntime'
-import type { TerminalPanel } from '@/services/terminalPanelRuntime'
+import type { SettingsModelOption } from '@/services/settings/workspaceConfigRuntime'
+import type { TerminalPanel } from '@/services/terminal/terminalPanelRuntime'
 
 const panel = (input: Partial<TerminalPanel> = {}): TerminalPanel => ({
   id: 'panel-1',

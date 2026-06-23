@@ -1,8 +1,8 @@
 import { computed, ref } from 'vue'
 import { describe, expect, it } from 'vitest'
 
-import { createWorkspacePanelContextRuntime } from '@/services/workspacePanelContextRuntime'
-import type { WorkspacePanelAsset, WorkspacePanelGroup } from '@/services/workspaceAssetTreeRuntime'
+import { createWorkspacePanelContextRuntime } from '@/services/workspace/workspacePanelContextRuntime'
+import type { WorkspacePanelAsset, WorkspacePanelGroup } from '@/services/assets/workspaceAssetTreeRuntime'
 
 const asset = (patch: Partial<WorkspacePanelAsset> & Pick<WorkspacePanelAsset, 'id' | 'name'>): WorkspacePanelAsset => ({
   uuid: patch.id,

@@ -16,7 +16,7 @@ let isLegacyLocalModelProvider: (value: unknown) => boolean
 let isLegacyLocalModelName: (value: unknown) => boolean
 
 beforeAll(async () => {
-  const modulePath = '../src/main/backend/configBoundary'
+  const modulePath = '../src/main/backend/app/configBoundary'
   const backend = await import(modulePath)
   normalizeConfigModelProvider = backend.normalizeConfigModelProvider as typeof normalizeConfigModelProvider
   normalizeConfigModelName = backend.normalizeConfigModelName as typeof normalizeConfigModelName

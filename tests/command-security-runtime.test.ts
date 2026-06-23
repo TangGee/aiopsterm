@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { validateCommandSecurity } from '@/services/commandSecurityRuntime'
+import { validateCommandSecurity } from '@/services/terminal/commandSecurityRuntime'
 import type { SecurityUserConfig } from '@shared/contracts/appRuntime'
 
 const config = (patch: Partial<SecurityUserConfig['security']> = {}): SecurityUserConfig => {

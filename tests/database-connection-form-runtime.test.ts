@@ -1,7 +1,7 @@
 import { computed, reactive, ref } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
-import { createDatabaseConnectionFormRuntime } from '@/services/databaseConnectionFormRuntime'
-import type { DatabaseConnectionDraft, DatabaseCreateDatabaseModalState } from '@/services/databaseWorkspaceTypes'
+import { createDatabaseConnectionFormRuntime } from '@/services/database/databaseConnectionFormRuntime'
+import type { DatabaseConnectionDraft, DatabaseCreateDatabaseModalState } from '@/services/database/databaseWorkspaceTypes'
 import type {
   DatabaseConnectionInfo,
   DatabaseEngineInfo,

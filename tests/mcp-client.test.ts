@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { mcpClient } from '@/services/mcpClient'
+import { mcpClient } from '@/services/settings/mcpClient'
 
 const originalAiops = window.aiops
 

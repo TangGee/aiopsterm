@@ -236,8 +236,8 @@
 import { X } from 'lucide-vue-next'
 import type { SshProxyConfig } from '@shared/contracts/appRuntime'
 import type { DatabaseEngineCode, DatabaseGroupInfo } from '@shared/contracts/database'
-import { isPostgresCompatibleDbType } from '@/services/databaseWorkspaceRuntime'
-import type { DatabaseConnectionDraft } from '@/services/databaseWorkspaceTypes'
+import { isPostgresCompatibleDbType } from '@/services/database/databaseWorkspaceRuntime'
+import type { DatabaseConnectionDraft } from '@/services/database/databaseWorkspaceTypes'
 
 defineProps<{
   open: boolean

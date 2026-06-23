@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createAiPanelClassicInputShellRuntime } from '@/services/aiPanelClassicInputShellRuntime'
-import { createEmptyAiPanelPopupInteractionState } from '@/services/aiPanelPopupInteractionRuntime'
-import type { AiPanelEditableRenderOptions } from '@/services/aiPanelEditableRuntime'
-import type { AiPanelMode } from '@/services/aiPanelModeRuntime'
+import { createAiPanelClassicInputShellRuntime } from '@/services/ai/aiPanelClassicInputShellRuntime'
+import { createEmptyAiPanelPopupInteractionState } from '@/services/ai/aiPanelPopupInteractionRuntime'
+import type { AiPanelEditableRenderOptions } from '@/services/ai/aiPanelEditableRuntime'
+import type { AiPanelMode } from '@/services/ai/aiPanelModeRuntime'
 import type { AiCommandCatalogOption, AiContentPart, AiContextOption } from '@shared/contracts/aiChat'
 import type { ChatAttachmentStageResult } from '@shared/contracts/localFiles'
 

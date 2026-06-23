@@ -14,7 +14,7 @@ import {
   isAiContextUsageForRequest,
   isAiMcpResourceAccessActionData,
   isAiMcpToolCallActionData
-} from '@/services/aiChatBackendGuards'
+} from '@/services/ai/aiChatBackendGuards'
 import type { AiChatConversationRecord, AiChatHistoryMessage } from '@shared/contracts/aiChat'
 
 const conversation: AiChatConversationRecord = {

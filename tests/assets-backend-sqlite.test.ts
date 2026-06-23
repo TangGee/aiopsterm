@@ -15,7 +15,7 @@ vi.mock('electron', () => ({
 
 const loadBackend = async () => {
   vi.resetModules()
-  const modulePath = '../src/main/backend/assets'
+  const modulePath = '../src/main/backend/assets/assets'
   return import(modulePath)
 }
 

@@ -7,9 +7,9 @@ import {
   aiPanelContextUsageTrackColor,
   aiPanelDragLeaveKeepsDropActive,
   createAiPanelSurfaceRuntime
-} from '@/services/aiPanelSurfaceRuntime'
-import { aiPanelTerminalTabDragType } from '@/services/aiPanelMediaRuntime'
-import type { AiPanelMode } from '@/services/aiPanelModeRuntime'
+} from '@/services/ai/aiPanelSurfaceRuntime'
+import { aiPanelTerminalTabDragType } from '@/services/ai/aiPanelMediaRuntime'
+import type { AiPanelMode } from '@/services/ai/aiPanelModeRuntime'
 
 const transferFrom = (data: Record<string, string>) => ({
   dropEffect: 'none',

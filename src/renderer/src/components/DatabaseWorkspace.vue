@@ -303,7 +303,7 @@
 import DatabaseMainWorkspace from '@/components/database/DatabaseMainWorkspace.vue'
 import DatabaseSidebarTree from '@/components/database/DatabaseSidebarTree.vue'
 import DatabaseWorkspaceOverlays from '@/components/database/DatabaseWorkspaceOverlays.vue'
-import { useDatabaseWorkspaceRuntime } from '@/services/databaseWorkspaceContainerRuntime'
+import { useDatabaseWorkspaceRuntime } from '@/services/database/databaseWorkspaceContainerRuntime'
 
 const {
   DB_AI_PANE_MIN_WIDTH,

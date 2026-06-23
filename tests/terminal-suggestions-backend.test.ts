@@ -27,7 +27,7 @@ type TerminalSuggestionsBackend = {
 let backend: TerminalSuggestionsBackend
 
 beforeAll(async () => {
-  const modulePath = '../src/main/backend/terminalSuggestions'
+  const modulePath = '../src/main/backend/terminal/terminalSuggestions'
   backend = (await import(modulePath)) as TerminalSuggestionsBackend
 })
 

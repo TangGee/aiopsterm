@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { knowledgeClient } from '@/services/knowledgeClient'
+import { knowledgeClient } from '@/services/knowledge/knowledgeClient'
 import type {
   KnowledgeBaseCreateResult,
   KnowledgeBaseEntry,

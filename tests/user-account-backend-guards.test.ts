@@ -7,7 +7,7 @@ import {
   isUserCodeDataForRequest,
   isUserExternalActionData,
   isUserMutationData
-} from '@/services/userAccountBackendGuards'
+} from '@/services/user/userAccountBackendGuards'
 import type { AiopsTrustedDevice, AiopsUserProfile } from '@shared/contracts/userAccount'
 
 const profile: AiopsUserProfile = {

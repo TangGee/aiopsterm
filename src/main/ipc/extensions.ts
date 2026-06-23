@@ -9,7 +9,7 @@ import {
   openExtensionSubscription,
   uninstallExtensionPlugin,
   updateExtensionPlugin
-} from '../backend/extensions'
+} from '../backend/extensions/extensions'
 import { sendWebContentsEvent } from '@shared/windowEvents'
 import type {
   ExtensionInstallProgress,

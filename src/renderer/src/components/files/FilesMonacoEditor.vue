@@ -26,8 +26,8 @@ import * as monaco from 'monaco-editor/esm/vs/editor/editor.api'
 import 'monaco-editor/esm/vs/editor/contrib/folding/browser/folding'
 import 'monaco-editor/esm/vs/editor/contrib/find/browser/findController'
 import 'monaco-editor/esm/vs/basic-languages/monaco.contribution'
-import { editorLineHeightPx, resolveEditorFontFamily } from '@/services/editorRuntime'
-import { ensureMonacoEnvironment } from '@/services/monacoRuntime'
+import { editorLineHeightPx, resolveEditorFontFamily } from '@/services/common/editorRuntime'
+import { ensureMonacoEnvironment } from '@/services/common/monacoRuntime'
 import { useWorkspaceStore } from '@/stores/workspace'
 
 ensureMonacoEnvironment()

@@ -3,7 +3,7 @@ import type { KnowledgeBaseEntry } from '../src/shared/contracts/knowledgeBase'
 
 const loadBackend = async () => {
   vi.resetModules()
-  const modulePath = '../src/main/backend/aiCommands'
+  const modulePath = '../src/main/backend/ai/aiCommands'
   return import(modulePath)
 }
 

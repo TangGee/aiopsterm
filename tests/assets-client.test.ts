@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { assetsClient } from '@/services/assetsClient'
+import { assetsClient } from '@/services/assets/assetsClient'
 import type {
   AiopsAssetGroupRecord,
   AiopsAssetRecord,

@@ -6,7 +6,7 @@
 </template>
 
 <script setup lang="ts">
-import { useKubernetesWorkspaceRuntimeContext } from '@/services/kubernetesWorkspaceContext'
+import { useKubernetesWorkspaceRuntimeContext } from '@/services/kubernetes/kubernetesWorkspaceContext'
 
 const { workspace, editingCluster, K8sAddClusterModal, K8sEditClusterModal, K8sProxyConfigModal, K8sDeleteConfirmModal } = useKubernetesWorkspaceRuntimeContext()
 </script>

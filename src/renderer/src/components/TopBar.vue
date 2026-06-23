@@ -126,7 +126,7 @@ import {
 } from 'lucide-vue-next'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useI18n } from '@/i18n'
-import { windowControlsClient } from '@/services/windowControlsClient'
+import { windowControlsClient } from '@/services/app/windowControlsClient'
 
 const workspace = useWorkspaceStore()
 const { t } = useI18n()

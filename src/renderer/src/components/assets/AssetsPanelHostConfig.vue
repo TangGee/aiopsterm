@@ -387,7 +387,7 @@ import {
   X
 } from 'lucide-vue-next'
 import AssetTreeGroupNode from '@/components/assets/AssetTreeGroupNode.vue'
-import { useAssetsPanelRuntimeContext } from '@/services/assetsPanelContext'
+import { useAssetsPanelRuntimeContext } from '@/services/assets/assetsPanelContext'
 
 const {
   assetQuery,

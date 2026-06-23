@@ -1,7 +1,7 @@
 import { computed, ref } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
-import { createDatabaseWorkspaceSqlTabRuntime } from '@/services/databaseWorkspaceSqlTabRuntime'
-import type { WorkspaceTab } from '@/services/databaseWorkspaceTypes'
+import { createDatabaseWorkspaceSqlTabRuntime } from '@/services/database/databaseWorkspaceSqlTabRuntime'
+import type { WorkspaceTab } from '@/services/database/databaseWorkspaceTypes'
 import type {
   DatabaseConnectionInfo,
   DatabaseConnectionMutationResult,

@@ -136,7 +136,7 @@ const createSink = (events: RecordedEvents) => ({
 })
 
 const loadBackend = async () => {
-  const modulePath = '../src/main/backend/localTerminal'
+  const modulePath = '../src/main/backend/terminal/localTerminal'
   return (await import(modulePath)) as LocalTerminalBackend
 }
 

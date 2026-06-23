@@ -5,7 +5,7 @@ import {
   pickZmodemSavePath,
   pickZmodemUploadFiles,
   writeZmodemChunk
-} from '../backend/zmodem'
+} from '../backend/terminal/zmodem'
 
 type RegisterZmodemIpcInput = {
   showOpenDialog: (options: Pick<OpenDialogOptions, 'properties'>) => Promise<{ canceled?: boolean; filePaths?: string[] }>

@@ -119,8 +119,8 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { ChevronDown } from 'lucide-vue-next'
-import type { SnippetsCommandForm } from '@/services/snippetsPanelTypes'
-import type { SnippetGroup } from '@/services/quickCommandsRuntime'
+import type { SnippetsCommandForm } from '@/services/quick-commands/snippetsPanelTypes'
+import type { SnippetGroup } from '@/services/quick-commands/quickCommandsRuntime'
 
 defineProps<{
   isEditMode: boolean

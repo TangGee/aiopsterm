@@ -33,7 +33,7 @@ const commandExists = (command: string) =>
   })
 
 const loadInstaller = async () => {
-  const modulePath = '../src/main/backend/agentHookInstaller'
+  const modulePath = '../src/main/backend/agent/agentHookInstaller'
   return (await import(modulePath)) as AgentHookInstallerBackend
 }
 

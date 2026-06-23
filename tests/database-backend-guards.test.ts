@@ -23,7 +23,7 @@ import {
   isDbAiPaneResponseData,
   isDbAiPaneStateSnapshot,
   isLocalFileWriteData
-} from '@/services/databaseBackendGuards'
+} from '@/services/database/databaseBackendGuards'
 import type {
   DatabaseAiDrawerRequestRecord,
   DatabaseAiPaneMessageRecord,

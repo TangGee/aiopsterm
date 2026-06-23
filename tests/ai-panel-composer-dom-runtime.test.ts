@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createAiPanelComposerDomRuntime } from '@/services/aiPanelComposerDomRuntime'
-import type { AiPanelEditableRenderOptions } from '@/services/aiPanelEditableRuntime'
+import { createAiPanelComposerDomRuntime } from '@/services/ai/aiPanelComposerDomRuntime'
+import type { AiPanelEditableRenderOptions } from '@/services/ai/aiPanelEditableRuntime'
 import type { AiContentPart, AiContextOption, AiDocChipContentPart, AiImageContentPart } from '@shared/contracts/aiChat'
 
 const renderOptions: AiPanelEditableRenderOptions = {

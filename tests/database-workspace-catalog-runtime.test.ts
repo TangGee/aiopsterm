@@ -1,9 +1,9 @@
 import { computed, ref } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
-import { createDatabaseWorkspaceCatalogRuntime } from '@/services/databaseWorkspaceCatalogRuntime'
-import { makeDataMutationPlanState, makeDirtyState } from '@/services/databaseGridRuntime'
-import { columnNodeId, schemaObjectFolderKey } from '@/services/databaseWorkspaceRuntime'
-import type { WorkspaceTab } from '@/services/databaseWorkspaceTypes'
+import { createDatabaseWorkspaceCatalogRuntime } from '@/services/database/databaseWorkspaceCatalogRuntime'
+import { makeDataMutationPlanState, makeDirtyState } from '@/services/database/databaseGridRuntime'
+import { columnNodeId, schemaObjectFolderKey } from '@/services/database/databaseWorkspaceRuntime'
+import type { WorkspaceTab } from '@/services/database/databaseWorkspaceTypes'
 import type { DatabaseConnectionInfo, DatabaseWorkspaceCatalog } from '@shared/contracts/database'
 
 const connection: DatabaseConnectionInfo = {

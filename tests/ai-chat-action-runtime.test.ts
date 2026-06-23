@@ -38,7 +38,7 @@ type AiChatActionRuntime = {
 }
 
 const loadRuntime = async () => {
-  const modulePath = '../src/main/backend/aiChatActionRuntime'
+  const modulePath = '../src/main/backend/ai/aiChatActionRuntime'
   return (await import(modulePath)) as AiChatActionRuntime
 }
 

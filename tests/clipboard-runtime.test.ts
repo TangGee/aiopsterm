@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { copyTextToClipboard, mirrorTextToClipboardQuietly, readTextFromClipboard } from '@/services/clipboardRuntime'
+import { copyTextToClipboard, mirrorTextToClipboardQuietly, readTextFromClipboard } from '@/services/app/clipboardRuntime'
 
 const withMockExecCommand = async <T>(handler: () => boolean, callback: (execCommandSpy: ReturnType<typeof vi.fn>) => Promise<T>) => {
   const originalExecCommand = document.execCommand

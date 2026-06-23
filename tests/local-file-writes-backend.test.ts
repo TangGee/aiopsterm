@@ -29,7 +29,7 @@ const tempDirs: string[] = []
 
 const loadBackend = async () => {
   vi.resetModules()
-  const modulePath = '../src/main/backend/localFileWrites'
+  const modulePath = '../src/main/backend/files/localFileWrites'
   return (await import(modulePath)) as LocalFileWritesBackend
 }
 

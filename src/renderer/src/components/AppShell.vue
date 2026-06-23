@@ -188,7 +188,7 @@ import AgentsSidebar from '@/components/AgentsSidebar.vue'
 import DatabaseWorkspace from '@/components/DatabaseWorkspace.vue'
 import UserPanel from '@/components/panels/UserPanel.vue'
 import OnboardingSpotlight from '@/components/onboarding/OnboardingSpotlight.vue'
-import { useAppShellRuntime } from '@/services/appShellRuntime'
+import { useAppShellRuntime } from '@/services/app/appShellRuntime'
 
 const {
   appBackgroundStyle,

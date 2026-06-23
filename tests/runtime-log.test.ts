@@ -12,7 +12,7 @@ type RuntimeLogBackend = {
 }
 
 const loadRuntimeLogBackend = async () => {
-  const modulePath = '../src/main/backend/runtimeLog'
+  const modulePath = '../src/main/backend/app/runtimeLog'
   return (await import(modulePath)) as RuntimeLogBackend
 }
 

@@ -28,7 +28,7 @@ type SshSessionAuthRuntime = {
 }
 
 const loadRuntime = async () => {
-  const modulePath = '../src/main/backend/sshTerminalSessionAuthRuntime'
+  const modulePath = '../src/main/backend/ssh/sshTerminalSessionAuthRuntime'
   return (await import(modulePath)) as {
     createSshTerminalSessionAuthRuntime: (input: {
       id: string

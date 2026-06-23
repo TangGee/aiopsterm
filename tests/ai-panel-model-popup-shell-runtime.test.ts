@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { ref } from 'vue'
-import { createAiPanelModelPopupShellRuntime } from '@/services/aiPanelModelPopupShellRuntime'
+import { createAiPanelModelPopupShellRuntime } from '@/services/ai/aiPanelModelPopupShellRuntime'
 import type { AiModelCatalogOption } from '@shared/contracts/appRuntime'
 import type { AiCommandCatalogOption, AiContextCategoryInfo, AiContextOption } from '@shared/contracts/aiChat'
 

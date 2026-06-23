@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { agentHookClient } from '@/services/agentHookClient'
+import { agentHookClient } from '@/services/settings/agentHookClient'
 
 const originalAiops = window.aiops
 

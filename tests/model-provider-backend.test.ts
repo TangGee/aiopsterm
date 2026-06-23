@@ -16,7 +16,7 @@ type RequestRecord = {
 }
 
 beforeAll(async () => {
-  const modulePath = '../src/main/backend/modelProviders'
+  const modulePath = '../src/main/backend/ai/modelProviders'
   const backend = await import(modulePath)
   checkModelProvider = backend.checkModelProvider as typeof checkModelProvider
   listAiModels = backend.listAiModels as typeof listAiModels

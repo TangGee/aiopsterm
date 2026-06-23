@@ -48,7 +48,7 @@ const createRuntime = (root: string) => ({
 })
 
 const loadBackend = async () => {
-  const modulePath = '../src/main/backend/knowledgeBaseImage'
+  const modulePath = '../src/main/backend/knowledge/knowledgeBaseImage'
   return import(modulePath)
 }
 

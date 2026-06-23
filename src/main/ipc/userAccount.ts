@@ -14,7 +14,7 @@ import {
   sendUserLoginCode,
   skipUserLogin,
   updateUserProfile
-} from '../backend/userAccount'
+} from '../backend/user/userAccount'
 import type {
   AiopsUserAvatarPrepareInput,
   AiopsUserCodeInput,

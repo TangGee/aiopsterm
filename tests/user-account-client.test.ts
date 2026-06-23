@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { userAccountClient } from '@/services/userAccountClient'
+import { userAccountClient } from '@/services/user/userAccountClient'
 import type {
   AiopsTrustedDevice,
   AiopsUserAccountSnapshot,

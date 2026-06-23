@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { quickCommandsClient } from '@/services/quickCommandsClient'
+import { quickCommandsClient } from '@/services/quick-commands/quickCommandsClient'
 import type {
   QuickCommandMacroEntryInput,
   QuickCommandScriptPlan,

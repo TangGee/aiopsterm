@@ -10,7 +10,7 @@ let createTerminalWriteResult: (id: string, data: string, exists: boolean) => an
 let diagnoseSshConnectionError: (error: unknown, context?: any) => any
 
 beforeAll(async () => {
-  const modulePath = '../src/main/backend/terminal'
+  const modulePath = '../src/main/backend/terminal/terminal'
   const backend = await import(modulePath)
   createSshTerminalConnectionInfo = backend.createSshTerminalConnectionInfo
   createTerminalBinaryWriteResult = backend.createTerminalBinaryWriteResult

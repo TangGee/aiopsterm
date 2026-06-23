@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createDatabaseCatalogConnectionBackend } from '@/services/databaseCatalogConnectionBackend'
+import { createDatabaseCatalogConnectionBackend } from '@/services/database/databaseCatalogConnectionBackend'
 
 const originalAiops = window.aiops
 

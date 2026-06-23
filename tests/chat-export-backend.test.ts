@@ -30,7 +30,7 @@ const tempDirs: string[] = []
 
 const loadBackend = async () => {
   vi.resetModules()
-  const modulePath = '../src/main/backend/chatExport'
+  const modulePath = '../src/main/backend/chat/chatExport'
   return (await import(modulePath)) as ChatExportBackend
 }
 

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createExtensionsJumpserverAssetRuntime } from '@/services/extensionsJumpserverAssetRuntime'
+import { createExtensionsJumpserverAssetRuntime } from '@/services/extensions/extensionsJumpserverAssetRuntime'
 import type { AiopsAssetRecord, AiopsAssetSnapshot, AiopsCustomFolderRecord } from '@shared/contracts/assets'
 
 const originalAiops = window.aiops

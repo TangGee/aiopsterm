@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createAiPanelAttachmentRuntime } from '@/services/aiPanelAttachmentRuntime'
+import { createAiPanelAttachmentRuntime } from '@/services/ai/aiPanelAttachmentRuntime'
 import type { AiDocChipContentPart, AiImageContentPart } from '@shared/contracts/aiChat'
 import type { ChatAttachmentStageResult, ChatImageAttachmentPrepareResult } from '@shared/contracts/localFiles'
 

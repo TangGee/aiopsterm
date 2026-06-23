@@ -12,7 +12,7 @@ import {
   ungroupedGroupName,
   type WorkspacePanelAsset,
   type WorkspacePanelFolder
-} from '@/services/workspaceAssetTreeRuntime'
+} from '@/services/assets/workspaceAssetTreeRuntime'
 
 const asset = (overrides: Partial<WorkspacePanelAsset>): WorkspacePanelAsset => ({
   id: 'asset-1',

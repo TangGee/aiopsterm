@@ -3,18 +3,18 @@ import {
   appendCodexTerminalBridgeData,
   registerCodexTerminalBridgeSession,
   unregisterCodexTerminalBridgeSession
-} from './backend/codexTerminalBridge'
-import { logRuntimeEvent } from './backend/runtimeLog'
-import { createLocalTerminalSession, type LocalTerminalSession } from './backend/localTerminal'
-import { createSshTerminalSession, type SshTerminalSession } from './backend/sshTerminal'
-import { getAsset, saveAsset } from './backend/assets'
-import { recordTerminalCommandHistory } from './backend/terminalSuggestions'
+} from './backend/codex/codexTerminalBridge'
+import { logRuntimeEvent } from './backend/app/runtimeLog'
+import { createLocalTerminalSession, type LocalTerminalSession } from './backend/terminal/localTerminal'
+import { createSshTerminalSession, type SshTerminalSession } from './backend/ssh/sshTerminal'
+import { getAsset, saveAsset } from './backend/assets/assets'
+import { recordTerminalCommandHistory } from './backend/terminal/terminalSuggestions'
 import { sendWindowEvent } from '@shared/windowEvents'
 import {
   createTerminalDataEvent,
   createTerminalKillResult,
   createTerminalWriteResult
-} from './backend/terminal'
+} from './backend/terminal/terminal'
 import { terminalHistoryLinesFromWrite, type TerminalSession } from './ipc/terminalSessions'
 import type { CodexSessionCreateOptions, CodexSessionLifecycleEvent } from '@shared/contracts/codexSessions'
 import type {

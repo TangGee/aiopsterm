@@ -2,8 +2,8 @@
 
 aiopsterm exposes two Codex-facing MCP boundaries:
 
-- Embedded Codex MCP: `resources/codex-aiopsterm-mcp.js` talks to `src/main/backend/codexTerminalBridge.ts`. It is bound to the selected visible terminal tab.
-- External Codex MCP: `resources/aiopsterm-external-codex-mcp.js` talks to `src/main/backend/externalCodexMcpBridge.ts`. It is a headless host gateway for an external Codex process and is not bound to any visible terminal tab.
+- Embedded Codex MCP: `resources/codex-aiopsterm-mcp.js` talks to `src/main/backend/codex/codexTerminalBridge.ts`. It is bound to the selected visible terminal tab.
+- External Codex MCP: `resources/aiopsterm-external-codex-mcp.js` talks to `src/main/backend/codex/externalCodexMcpBridge.ts`. It is a headless host gateway for an external Codex process and is not bound to any visible terminal tab.
 
 The two systems are intentionally separate. External Codex connections are stored in an independent connection pool with ids prefixed by `mcp-`, `owner: "external_codex"`, and `visible: false`.
 

@@ -210,7 +210,7 @@ import {
   Trash2,
   X
 } from 'lucide-vue-next'
-import type { FileBrowserEntry, FileBrowserSortState } from '@/services/filesRuntime'
+import type { FileBrowserEntry, FileBrowserSortState } from '@/services/files/filesRuntime'
 
 defineProps<{
   uiMode: 'transfer' | 'default'

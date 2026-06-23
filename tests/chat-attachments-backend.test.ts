@@ -18,7 +18,7 @@ type ChatAttachmentsBackend = {
 let backend: ChatAttachmentsBackend
 
 beforeAll(async () => {
-  const modulePath = '../src/main/backend/chatAttachments'
+  const modulePath = '../src/main/backend/chat/chatAttachments'
   backend = (await import(modulePath)) as ChatAttachmentsBackend
 })
 

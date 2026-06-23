@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { codexTargetSignature, formatCodexTargetEvent } from '@/services/codexTargetRuntime'
+import { codexTargetSignature, formatCodexTargetEvent } from '@/services/ai/codexTargetRuntime'
 import type { CodexSessionTargetContext } from '@shared/contracts/codexSessions'
 
 const target: CodexSessionTargetContext = {

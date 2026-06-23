@@ -1,11 +1,11 @@
 import { ref } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
-import { createDatabaseCatalogTreeRuntime } from '@/services/databaseCatalogTreeRuntime'
+import { createDatabaseCatalogTreeRuntime } from '@/services/database/databaseCatalogTreeRuntime'
 import type {
   ContextMenu,
   DatabaseOperationConfirmState,
   WorkspaceTab
-} from '@/services/databaseWorkspaceTypes'
+} from '@/services/database/databaseWorkspaceTypes'
 import type {
   DatabaseConnectionInfo,
   DatabaseEngineInfo,

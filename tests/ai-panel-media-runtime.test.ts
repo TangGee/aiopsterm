@@ -17,7 +17,7 @@ import {
   stagedAttachmentMatchesRequest,
   voiceRecordingStartFailureMessage,
   voiceTextFromTranscriptionResult
-} from '@/services/aiPanelMediaRuntime'
+} from '@/services/ai/aiPanelMediaRuntime'
 
 const transferFrom = (data: Record<string, string>) => ({
   getData: (type: string) => data[type] || ''

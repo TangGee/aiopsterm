@@ -64,7 +64,7 @@ import {
   sshAgentKeySnapshotsMatch,
   sshProxyConfigSnapshotsMatch,
   type SecuritySettings
-} from '@/services/workspaceConfigRuntime'
+} from '@/services/settings/workspaceConfigRuntime'
 import type { PrivacyRuntimeSnapshot } from '@shared/contracts/appRuntime'
 
 describe('workspaceConfigRuntime', () => {

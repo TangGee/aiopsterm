@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { reactive } from 'vue'
-import { createTerminalWorkspaceSessionRuntime, isTerminalWorkspaceKillSuccess } from '@/services/terminalWorkspaceSessionRuntime'
-import { createEmptyTerminalPanel, type TerminalPanel } from '@/services/terminalPanelRuntime'
+import { createTerminalWorkspaceSessionRuntime, isTerminalWorkspaceKillSuccess } from '@/services/terminal/terminalWorkspaceSessionRuntime'
+import { createEmptyTerminalPanel, type TerminalPanel } from '@/services/terminal/terminalPanelRuntime'
 import type { useWorkspaceStore } from '@/stores/workspace'
 import type { TerminalCreateOptions, TerminalSessionInfo } from '@shared/contracts/terminalSessions'
 

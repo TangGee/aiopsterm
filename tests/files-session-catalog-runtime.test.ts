@@ -28,7 +28,7 @@ vi.mock('electron-store', () => {
 })
 
 const loadRuntime = async () => {
-  const modulePath = '../src/main/backend/filesSessionCatalogRuntime'
+  const modulePath = '../src/main/backend/files/filesSessionCatalogRuntime'
   return import(modulePath)
 }
 

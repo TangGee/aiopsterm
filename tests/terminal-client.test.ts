@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { terminalClient } from '@/services/terminalClient'
+import { terminalClient } from '@/services/terminal/terminalClient'
 
 const originalAiops = window.aiops
 

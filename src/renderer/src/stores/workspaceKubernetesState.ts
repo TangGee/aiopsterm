@@ -8,7 +8,7 @@ import {
   type K8sProxyConfig,
   type K8sResource,
   type K8sResourceKind
-} from '@/services/kubernetesBackendGuards'
+} from '@/services/kubernetes/kubernetesBackendGuards'
 import {
   cloneK8sProxyConfig,
   defaultK8sProxyConfig,
@@ -27,7 +27,7 @@ import {
   localK8sClusters as localK8sClustersRuntime,
   type K8sAgentRunRecord,
   type K8sTerminalTab
-} from '@/services/kubernetesRuntime'
+} from '@/services/kubernetes/kubernetesRuntime'
 
 export const createWorkspaceKubernetesState = () => {
   const k8sContexts = ref<K8sContextInfo[]>([])

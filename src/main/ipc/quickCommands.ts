@@ -8,7 +8,7 @@ import {
   saveQuickCommandGroup,
   saveQuickCommandMacro,
   saveQuickCommandSnippet
-} from '../backend/quickCommands'
+} from '../backend/quick-commands/quickCommands'
 import type {
   QuickCommandGroupSaveInput,
   QuickCommandMacroSaveInput,

@@ -21,7 +21,7 @@ import {
   isK8sTerminalWriteDataForRequest,
   k8sCommandDisplayOutput,
   normalizeK8sCommandText
-} from '@/services/kubernetesBackendGuards'
+} from '@/services/kubernetes/kubernetesBackendGuards'
 import type { KubernetesCatalog, KubernetesClusterRecord, KubernetesResource, KubernetesTerminalRecord } from '@shared/contracts/kubernetes'
 
 const proxyConfig = {

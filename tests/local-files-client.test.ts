@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { localFilesClient } from '@/services/localFilesClient'
+import { localFilesClient } from '@/services/app/localFilesClient'
 
 const originalAiops = window.aiops
 

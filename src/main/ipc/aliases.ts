@@ -1,5 +1,5 @@
 import type { IpcMain } from 'electron'
-import { deleteAliasCommand, listAliasCommands, saveAliasCommand } from '../backend/aliases'
+import { deleteAliasCommand, listAliasCommands, saveAliasCommand } from '../backend/quick-commands/aliases'
 import type { AliasCommandDeleteInput, AliasCommandSaveInput } from '@shared/contracts/aliases'
 
 export const registerAliasesIpc = (ipcMain: IpcMain) => {

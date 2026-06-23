@@ -23,7 +23,7 @@ const agentSessionsMock = vi.hoisted(() => ({
   jumpToUnreadManagedAiNotification: vi.fn()
 }))
 
-vi.mock('../src/main/backend/agentSessions', () => agentSessionsMock)
+vi.mock('../src/main/backend/agent/agentSessions', () => agentSessionsMock)
 
 type ManagedAiRuntime = {
   handleExternalCodexMcpManagedAiRequest: (
@@ -34,7 +34,7 @@ type ManagedAiRuntime = {
 }
 
 const loadRuntime = async () => {
-  const modulePath = '../src/main/backend/externalCodexMcpManagedAiRuntime'
+  const modulePath = '../src/main/backend/codex/externalCodexMcpManagedAiRuntime'
   return (await import(modulePath)) as ManagedAiRuntime
 }
 

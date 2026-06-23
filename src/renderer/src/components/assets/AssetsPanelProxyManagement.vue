@@ -63,7 +63,7 @@
 
 <script setup lang="ts">
 import { Network } from 'lucide-vue-next'
-import { useAssetsPanelRuntimeContext } from '@/services/assetsPanelContext'
+import { useAssetsPanelRuntimeContext } from '@/services/assets/assetsPanelContext'
 
 const {
   workspace,

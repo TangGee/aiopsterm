@@ -1,13 +1,13 @@
 import { computed, ref } from 'vue'
-import { type KbClipboard, type KnowledgeImportJob } from '@/services/knowledgeRuntime'
+import { type KbClipboard, type KnowledgeImportJob } from '@/services/knowledge/knowledgeRuntime'
 import { createWorkspaceKubernetesState } from '@/stores/workspaceKubernetesState'
-import { type FilesUiMode } from '@/services/workspaceFilesController'
-import { type ChatMessage, type ConversationItem, type TodoItem } from '@/services/workspaceAiChatController'
+import { type FilesUiMode } from '@/services/files/workspaceFilesController'
+import { type ChatMessage, type ConversationItem, type TodoItem } from '@/services/ai/workspaceAiChatController'
 import {
   type WorkspaceAliasCommand,
   type WorkspaceExtensionInstallProgress,
   type WorkspaceExtensionPlugin
-} from '@/services/workspaceExtensionsController'
+} from '@/services/extensions/workspaceExtensionsController'
 import {
   createDefaultWorkspaceAboutSettings,
   type WorkspaceAboutSettings,
@@ -15,32 +15,32 @@ import {
   type WorkspaceOnboardingAiRequest,
   type WorkspaceOnboardingAssetRequest,
   type WorkspaceTopUpdateState
-} from '@/services/workspaceAppSettingsController'
+} from '@/services/settings/workspaceAppSettingsController'
 import {
   defaultAgentHibernationConfig,
   type AiAttentionFocusRequest,
   type AiAttentionItem,
   type ManagedAiSession
-} from '@/services/workspaceManagedAiController'
-import { createInitialWorkspaceTerminalPanels } from '@/services/workspaceTerminalPanelsController'
+} from '@/services/ai/workspaceManagedAiController'
+import { createInitialWorkspaceTerminalPanels } from '@/services/terminal/workspaceTerminalPanelsController'
 import { type TerminalCommandGenerationRecord } from '@shared/contracts/terminalTools'
-import { type TerminalSecurityPrompt } from '@/services/workspaceTerminalExecutionController'
-import { type WorkspaceMcpOperationRecord, type WorkspaceMcpServer } from '@/services/workspaceMcpController'
+import { type TerminalSecurityPrompt } from '@/services/terminal/workspaceTerminalExecutionController'
+import { type WorkspaceMcpOperationRecord, type WorkspaceMcpServer } from '@/services/settings/workspaceMcpController'
 import {
   type WorkspaceSettingsRule,
   type WorkspaceSettingsShortcut,
   type WorkspaceSettingsSkill
-} from '@/services/workspaceSettingsController'
-import { type AssetManagementOpenRequest } from '@/services/workspaceShellController'
-import { type ShortcutActionHandler } from '@/services/shortcutRuntime'
+} from '@/services/settings/workspaceSettingsController'
+import { type AssetManagementOpenRequest } from '@/services/workspace/workspaceShellController'
+import { type ShortcutActionHandler } from '@/services/common/shortcutRuntime'
 import {
   createEmptyMacroRecordingState,
   type MacroRecordingState,
   type QuickCommandSnippet,
   type SnippetGroup
-} from '@/services/quickCommandsRuntime'
-import { MACRO_DEFAULT_SLEEP_THRESHOLD_MS } from '@/services/terminalMacroRuntime'
-import { type TerminalPanel } from '@/services/terminalPanelRuntime'
+} from '@/services/quick-commands/quickCommandsRuntime'
+import { MACRO_DEFAULT_SLEEP_THRESHOLD_MS } from '@/services/terminal/terminalMacroRuntime'
+import { type TerminalPanel } from '@/services/terminal/terminalPanelRuntime'
 import {
   createDefaultWorkspaceBillingSettings,
   createEmptyWorkspaceUserProfile,
@@ -48,7 +48,7 @@ import {
   type WorkspaceTrustedDevice,
   type WorkspaceTrustedDeviceModal,
   type WorkspaceUserLoginTab
-} from '@/services/workspaceUserController'
+} from '@/services/user/workspaceUserController'
 import { createDefaultOnboardingCompleted, onboardingTourSteps, type OnboardingModuleId } from '@/config/onboarding'
 import type { ModuleKey } from '@/config/navigation'
 import { type SettingSectionKey } from '@/config/settings'
@@ -78,7 +78,7 @@ import {
   type SecuritySettings,
   type SettingsModelOption,
   type TerminalSettings
-} from '@/services/workspaceConfigRuntime'
+} from '@/services/settings/workspaceConfigRuntime'
 import { resolveLocale, translateWithLocale } from '@/i18n/runtime'
 import type { I18nKey } from '@/i18n/messages'
 import type { UserConfig } from '@shared/contracts/userConfig'

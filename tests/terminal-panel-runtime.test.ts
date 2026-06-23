@@ -43,7 +43,7 @@ import {
   terminalLifecycleMatchesPanel,
   terminalPanelIds,
   type TerminalPanel
-} from '@/services/terminalPanelRuntime'
+} from '@/services/terminal/terminalPanelRuntime'
 
 const sshSourcePanel = (): TerminalPanel => ({
   ...createEmptyTerminalPanel('panel-source', 'Prod shell'),

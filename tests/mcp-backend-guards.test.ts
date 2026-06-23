@@ -8,7 +8,7 @@ import {
   isMcpToolCallResultData,
   malformedMcpResourceResultMessage,
   malformedMcpToolResultMessage
-} from '@/services/mcpBackendGuards'
+} from '@/services/settings/mcpBackendGuards'
 
 describe('mcpBackendGuards', () => {
   it('validates MCP tool call content and request-bound result data', () => {

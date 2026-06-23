@@ -291,7 +291,7 @@
 
 <script setup lang="ts">
 import { X } from 'lucide-vue-next'
-import { formatChartNumber, formatCommentTime, type DatabaseChartSummary } from '@/services/databaseWorkspaceRuntime'
+import { formatChartNumber, formatCommentTime, type DatabaseChartSummary } from '@/services/database/databaseWorkspaceRuntime'
 
 type CreateDatabaseModalState = {
   open: boolean

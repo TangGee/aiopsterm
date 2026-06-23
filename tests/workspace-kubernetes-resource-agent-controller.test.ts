@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { computed, ref } from 'vue'
-import { createWorkspaceKubernetesResourceAgentController } from '@/services/workspaceKubernetesResourceAgentController'
-import { applyKubernetesCatalogState, cloneK8sProxyConfig, defaultK8sProxyConfig, type K8sAgentRunRecord, type K8sTerminalTab } from '@/services/kubernetesRuntime'
-import type { K8sCluster, K8sResource, K8sResourceKind } from '@/services/kubernetesBackendGuards'
+import { createWorkspaceKubernetesResourceAgentController } from '@/services/kubernetes/workspaceKubernetesResourceAgentController'
+import { applyKubernetesCatalogState, cloneK8sProxyConfig, defaultK8sProxyConfig, type K8sAgentRunRecord, type K8sTerminalTab } from '@/services/kubernetes/kubernetesRuntime'
+import type { K8sCluster, K8sResource, K8sResourceKind } from '@/services/kubernetes/kubernetesBackendGuards'
 import type {
   KubernetesCatalog,
   KubernetesCommandResult,

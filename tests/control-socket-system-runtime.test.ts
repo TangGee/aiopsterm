@@ -16,7 +16,7 @@ type SystemRuntime = {
 }
 
 const loadRuntime = async () => {
-  const modulePath = '../src/main/backend/controlSocketSystemRuntime'
+  const modulePath = '../src/main/backend/control/controlSocketSystemRuntime'
   return (await import(modulePath)) as unknown as SystemRuntime
 }
 

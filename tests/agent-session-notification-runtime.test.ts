@@ -9,7 +9,7 @@ import type {
 } from '../src/shared/contracts/managedAiSessions'
 
 const loadRuntime = async () => {
-  const modulePath = '../src/main/backend/agentSessionNotificationRuntime'
+  const modulePath = '../src/main/backend/agent/agentSessionNotificationRuntime'
   return import(modulePath)
 }
 

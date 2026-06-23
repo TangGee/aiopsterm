@@ -366,7 +366,7 @@ import {
   Trash2,
   X
 } from 'lucide-vue-next'
-import { useAiPanelRuntimeContext } from '@/services/aiPanelContext'
+import { useAiPanelRuntimeContext } from '@/services/ai/aiPanelContext'
 
 const {
   activeCodexConversationId,

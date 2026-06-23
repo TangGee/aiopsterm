@@ -7,7 +7,7 @@ import {
   saveAiPanelEditableSelection,
   shouldTriggerAiPanelCommandPopupForPendingSlash,
   shouldTriggerAiPanelCommandPopupForSlash
-} from '@/services/aiPanelEditableSelectionRuntime'
+} from '@/services/ai/aiPanelEditableSelectionRuntime'
 
 const createEditable = (text = 'run /') => {
   const editable = document.createElement('div')

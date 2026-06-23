@@ -6,7 +6,7 @@ import {
   removeAiPanelEditPartFromClickTarget,
   startAiPanelMessageEdit,
   syncAiPanelEditStateFromParts
-} from '@/services/aiPanelEditRuntime'
+} from '@/services/ai/aiPanelEditRuntime'
 import type { AiContentPart, AiContextOption } from '@shared/contracts/aiChat'
 
 const hostContext: AiContextOption = {

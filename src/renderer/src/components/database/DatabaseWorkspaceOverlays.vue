@@ -170,7 +170,7 @@ import type {
   DbAiRequest,
   DbAiStatus,
   DbAiTargetDialect
-} from '@/services/databaseBackendGuards'
+} from '@/services/database/databaseBackendGuards'
 import type {
   ContextMenu,
   ContextSubmenu,
@@ -182,7 +182,7 @@ import type {
   DatabaseDdlModalState,
   DatabaseOperationConfirmState,
   DbAiPaneQuickPrompt
-} from '@/services/databaseWorkspaceTypes'
+} from '@/services/database/databaseWorkspaceTypes'
 import type { SshProxyConfig } from '@shared/contracts/appRuntime'
 import type { DatabaseCatalogInfo, DatabaseConnectionInfo, DatabaseEngineCode, DatabaseEngineInfo, DatabaseGroupInfo } from '@shared/contracts/database'
 

@@ -4,9 +4,9 @@ import {
   createEmptyAiPanelCommandActionRuntimeState,
   resolveAiPanelCommandActionTerminalPanel,
   type AiPanelCommandActionTerminalPanel
-} from '@/services/aiPanelCommandActionRuntime'
-import type { AiPanelCommandSuggestionMessage } from '@/services/aiPanelMessageRuntime'
-import type { TerminalSecurityDecision } from '@/services/terminalExecutionRuntime'
+} from '@/services/ai/aiPanelCommandActionRuntime'
+import type { AiPanelCommandSuggestionMessage } from '@/services/ai/aiPanelMessageRuntime'
+import type { TerminalSecurityDecision } from '@/services/terminal/terminalExecutionRuntime'
 
 const createHarness = (input: {
   chatMode?: string

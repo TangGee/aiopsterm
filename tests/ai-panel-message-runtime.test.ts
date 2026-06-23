@@ -15,7 +15,7 @@ import {
   normalizedCommandOutputText,
   renderAiPanelMarkdownParts,
   setAiPanelCommandExecutionState
-} from '@/services/aiPanelMessageRuntime'
+} from '@/services/ai/aiPanelMessageRuntime'
 import type { AiChatHistoryMessage } from '@shared/contracts/aiChat'
 
 describe('aiPanelMessageRuntime', () => {
