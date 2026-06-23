@@ -1,16 +1,39 @@
 import { _electron as electron } from '@playwright/test'
+import { spawnSync } from 'node:child_process'
+import { existsSync } from 'node:fs'
 import { mkdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
-const executablePath = resolve(process.argv[2] || 'dist/linux-unpacked/aiopsterm')
+const defaultExecutablePath = () => {
+  if (process.platform === 'win32') return 'dist/win-unpacked/aiopsterm.exe'
+  if (process.platform === 'darwin') return 'dist/mac/aiopsterm.app/Contents/MacOS/aiopsterm'
+  return 'dist/linux-unpacked/aiopsterm'
+}
+
+if (process.platform === 'linux' && !process.env.DISPLAY && !process.env.AIOPSTERM_PACKAGED_SMOKE_UNDER_XVFB) {
+  const probe = spawnSync('xvfb-run', ['--help'], { stdio: 'ignore' })
+  if (probe.error?.code !== 'ENOENT') {
+    const child = spawnSync('xvfb-run', ['-a', process.execPath, ...process.argv.slice(1)], {
+      stdio: 'inherit',
+      env: { ...process.env, AIOPSTERM_PACKAGED_SMOKE_UNDER_XVFB: '1' }
+    })
+    process.exit(child.status ?? 1)
+  }
+}
+
+const executablePath = resolve(process.argv[2] || defaultExecutablePath())
 const userDataDir = join(tmpdir(), `aiopsterm-packaged-smoke-${Date.now()}`)
+
+if (!existsSync(executablePath)) {
+  throw new Error(`Packaged app executable is missing: ${executablePath}`)
+}
 
 await mkdir(userDataDir, { recursive: true })
 
 const app = await electron.launch({
   executablePath,
-  args: ['--no-sandbox'],
+  args: process.platform === 'linux' ? ['--no-sandbox'] : [],
   env: {
     ...process.env,
     NODE_ENV: 'test',

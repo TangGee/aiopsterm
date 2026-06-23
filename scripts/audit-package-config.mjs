@@ -5,7 +5,18 @@ const packageJson = JSON.parse(readFileSync(resolve('package.json'), 'utf8'))
 const builderConfig = readFileSync(resolve('electron-builder.yml'), 'utf8')
 
 const packageScripts = packageJson.scripts || {}
-const requiredScripts = ['build:codex', 'audit:codex-runtime', 'build:mac', 'build:mac:dir', 'build:deb', 'build:linux']
+const requiredScripts = [
+  'build:codex',
+  'audit:codex-runtime',
+  'audit:packaged-app',
+  'smoke:packaged',
+  'build:mac',
+  'build:mac:dir',
+  'build:deb',
+  'build:linux',
+  'build:win',
+  'build:win:dir'
+]
 const missingScripts = requiredScripts.filter((script) => typeof packageJson.scripts?.[script] !== 'string')
 if (missingScripts.length) {
   throw new Error(`Missing package scripts: ${missingScripts.join(', ')}`)
@@ -15,7 +26,9 @@ const packageScriptRequirements = {
   'build:linux': ['npm run build:codex', 'electron-builder --linux'],
   'build:deb': ['npm run build:codex', 'electron-builder --linux deb'],
   'build:mac': ['npm run build:codex', 'electron-builder --mac'],
-  'build:mac:dir': ['npm run build:codex', 'electron-builder --mac --dir']
+  'build:mac:dir': ['npm run build:codex', 'electron-builder --mac --dir'],
+  'build:win': ['npm run build:codex', 'electron-builder --win'],
+  'build:win:dir': ['npm run build:codex', 'electron-builder --win --dir']
 }
 const missingScriptRequirements = Object.entries(packageScriptRequirements).flatMap(([script, snippets]) =>
   snippets.filter((snippet) => !packageScripts[script].includes(snippet)).map((snippet) => `${script}: ${snippet}`)
@@ -32,8 +45,11 @@ const mustContain = [
   'mac:',
   '- dmg',
   '- zip',
+  'win:',
+  '- nsis',
   'artifactName: ${name}-${version}-linux-${arch}.${ext}',
   'artifactName: ${name}-${version}-macos-${arch}.${ext}',
+  'artifactName: ${name}-${version}-setup-${arch}.${ext}',
   'extraResources:',
   'from: resources/icons',
   'to: icons',
@@ -53,11 +69,18 @@ if (missingConfig.length) {
   throw new Error(`electron-builder.yml is missing required packaging settings:\n${missingConfig.join('\n')}`)
 }
 
+const codexBuildEntrypoint = readFileSync(resolve('scripts/build-codex-cli.mjs'), 'utf8')
 const codexBuildScript = readFileSync(resolve('scripts/build-codex-cli.sh'), 'utf8')
 const codexDevBuildScript = readFileSync(resolve('scripts/build-codex-dev-package.sh'), 'utf8')
 const buildAndStartScript = readFileSync(resolve('scripts/build-and-start.sh'), 'utf8')
 const afterPackScript = readFileSync(resolve('scripts/prune-packaged-native-modules.mjs'), 'utf8')
 const codexPackagingRequirements = [
+  { label: 'build-codex node entrypoint', source: packageScripts['build:codex'], text: 'node scripts/build-codex-cli.mjs' },
+  { label: 'packaged app audit entrypoint', source: packageScripts['audit:packaged-app'], text: 'node scripts/audit-packaged-app.mjs' },
+  { label: 'packaged smoke node entrypoint', source: packageScripts['smoke:packaged'], text: 'node scripts/smoke-packaged-app.mjs' },
+  { label: 'build-codex Windows package gate', source: codexBuildEntrypoint, text: "process.platform === 'win32'" },
+  { label: 'build-codex Windows audit', source: codexBuildEntrypoint, text: 'audit-codex-runtime.mjs' },
+  { label: 'build-codex POSIX shell delegation', source: codexBuildEntrypoint, text: 'build-codex-cli.sh' },
   { label: 'build-codex target triple', source: codexBuildScript, text: 'codexTargetTriple' },
   { label: 'build-codex package builder', source: codexBuildScript, text: 'build_codex_package.py' },
   { label: 'build-codex package output', source: codexBuildScript, text: '--package-dir "${package_dir}"' },

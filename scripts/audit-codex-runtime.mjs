@@ -36,7 +36,7 @@ if (missingPackageFiles.length) {
 }
 
 const mode = statSync(binary).mode
-if ((mode & 0o111) === 0) {
+if (process.platform !== 'win32' && (mode & 0o111) === 0) {
   throw new Error(`Codex runtime binary is not executable: ${binary}`)
 }
 
