@@ -9,7 +9,14 @@ const requiredScripts = [
   'build:codex',
   'audit:codex-runtime',
   'audit:packaged-app',
+  'audit:linux-appimage',
+  'audit:linux-deb',
   'smoke:packaged',
+  'test:e2e:packaged',
+  'package:build',
+  'package:build:matrix',
+  'package:verify',
+  'build:linux:appimage',
   'build:mac',
   'build:mac:dir',
   'build:deb',
@@ -23,6 +30,7 @@ if (missingScripts.length) {
 }
 
 const packageScriptRequirements = {
+  'build:linux:appimage': ['npm run build:codex', 'electron-builder --linux AppImage'],
   'build:linux': ['npm run build:codex', 'electron-builder --linux'],
   'build:deb': ['npm run build:codex', 'electron-builder --linux deb'],
   'build:mac': ['npm run build:codex', 'electron-builder --mac'],
@@ -74,13 +82,27 @@ const codexBuildScript = readFileSync(resolve('scripts/build-codex-cli.sh'), 'ut
 const codexDevBuildScript = readFileSync(resolve('scripts/build-codex-dev-package.sh'), 'utf8')
 const buildAndStartScript = readFileSync(resolve('scripts/build-and-start.sh'), 'utf8')
 const afterPackScript = readFileSync(resolve('scripts/prune-packaged-native-modules.mjs'), 'utf8')
+const packageTargetsScript = readFileSync(resolve('scripts/package-targets.mjs'), 'utf8')
+const packagedE2eSpec = readFileSync(resolve('tests/packaged-e2e/packaged-app.spec.ts'), 'utf8')
 const codexPackagingRequirements = [
   { label: 'build-codex node entrypoint', source: packageScripts['build:codex'], text: 'node scripts/build-codex-cli.mjs' },
   { label: 'packaged app audit entrypoint', source: packageScripts['audit:packaged-app'], text: 'node scripts/audit-packaged-app.mjs' },
+  { label: 'linux appimage audit entrypoint', source: packageScripts['audit:linux-appimage'], text: 'node scripts/audit-linux-appimage-package.mjs' },
+  { label: 'linux deb audit entrypoint', source: packageScripts['audit:linux-deb'], text: 'node scripts/audit-linux-deb-package.mjs' },
   { label: 'packaged smoke node entrypoint', source: packageScripts['smoke:packaged'], text: 'node scripts/smoke-packaged-app.mjs' },
+  { label: 'packaged e2e entrypoint', source: packageScripts['test:e2e:packaged'], text: 'playwright test -c playwright.packaged.config.ts' },
+  { label: 'package build target entrypoint', source: packageScripts['package:build'], text: 'node scripts/build-package-target.mjs' },
+  { label: 'package build matrix entrypoint', source: packageScripts['package:build:matrix'], text: 'node scripts/build-package-matrix.mjs' },
+  { label: 'package verify target entrypoint', source: packageScripts['package:verify'], text: 'node scripts/verify-package-target.mjs' },
   { label: 'build-codex Windows package gate', source: codexBuildEntrypoint, text: "process.platform === 'win32'" },
   { label: 'build-codex Windows audit', source: codexBuildEntrypoint, text: 'audit-codex-runtime.mjs' },
   { label: 'build-codex POSIX shell delegation', source: codexBuildEntrypoint, text: 'build-codex-cli.sh' },
+  { label: 'package target linux appimage', source: packageTargetsScript, text: "'linux-appimage'" },
+  { label: 'package target linux deb', source: packageTargetsScript, text: "'linux-deb'" },
+  { label: 'package target macos', source: packageTargetsScript, text: 'macos' },
+  { label: 'package target windows', source: packageTargetsScript, text: 'windows' },
+  { label: 'packaged e2e control notification', source: packagedE2eSpec, text: 'notification.create' },
+  { label: 'packaged e2e windows named pipe', source: packagedE2eSpec, text: '\\\\\\\\.\\\\pipe\\\\aiopsterm-control-' },
   { label: 'build-codex target triple', source: codexBuildScript, text: 'codexTargetTriple' },
   { label: 'build-codex package builder', source: codexBuildScript, text: 'build_codex_package.py' },
   { label: 'build-codex package output', source: codexBuildScript, text: '--package-dir "${package_dir}"' },
