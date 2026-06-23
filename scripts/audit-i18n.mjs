@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 
 const trackedFiles = execFileSync('git', ['ls-files', 'src/renderer/src'], { encoding: 'utf8' })
   .split('\n')
@@ -7,27 +8,26 @@ const trackedFiles = execFileSync('git', ['ls-files', 'src/renderer/src'], { enc
   .filter((file) => /\.(vue|ts)$/.test(file))
   .filter((file) => !file.includes('/i18n/locales/'))
   .filter((file) => !file.endsWith('/i18n/messages.ts'))
+  .filter((file) => !file.endsWith('/i18n/staticText.ts'))
   .filter((file) => !file.includes('/styles/'))
 
 const staticTextSource = readFileSync('src/renderer/src/i18n/staticText.ts', 'utf8')
 const exactStaticText = new Set([...staticTextSource.matchAll(/^\s*'([^']+)':/gm)].map((match) => match[1]))
-const coveredChineseTerms = new Set([...staticTextSource.matchAll(/\[\/([^/]+?)\/g,\s*'[^']*'\]/g)].map((match) => match[1].replace(/\\\//g, '/')))
 const staticPatternSources = [...staticTextSource.matchAll(/\[\/\^([^/]+?)\/,\s*'[^']*'\]/g)].map((match) => match[1])
 const staticPatterns = staticPatternSources.map((source) => new RegExp(`^${source.replace(/\\\//g, '/')}`))
+const legacyStaticTextBaseline = JSON.parse(readFileSync('scripts/i18n-legacy-static-text-baseline.json', 'utf8'))
+const registeredLegacyStaticTextHashes = new Set(Array.isArray(legacyStaticTextBaseline.hashes) ? legacyStaticTextBaseline.hashes : [])
 
 const stripTemplateExpressions = (value) => value.replace(/\{\{[^}]+?\}\}/g, ' ').replace(/\$\{[^}]+?\}/g, ' ')
 const normalize = (value) => stripTemplateExpressions(value).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+const legacyTextHash = (value) => createHash('sha256').update(value).digest('hex').slice(0, 24)
 
 const hasStaticTranslation = (value) => {
   const text = normalize(value)
   if (!text || !/[\u3400-\u9fff]/.test(text)) return true
   if (exactStaticText.has(text)) return true
   if (staticPatterns.some((pattern) => pattern.test(text))) return true
-  const uncovered = text
-    .replace(/[\sA-Za-z0-9_.:/@#()[\],+\-=*'"`·<>|?]+/g, '')
-    .split('')
-    .filter((char) => /[\u3400-\u9fff]/.test(char))
-  return uncovered.every((char) => [...coveredChineseTerms].some((term) => term.includes(char)))
+  return registeredLegacyStaticTextHashes.has(legacyTextHash(text))
 }
 
 const isNonUiLine = (line) =>
@@ -75,7 +75,6 @@ const findings = []
 let currentFile = ''
 
 for (const file of trackedFiles) {
-  if (file === 'src/renderer/src/i18n/staticText.ts') continue
   const lines = readFileSync(file, 'utf8').split('\n')
   currentFile = file
   lines.forEach((line, index) => {
@@ -92,7 +91,7 @@ for (const file of trackedFiles) {
 }
 
 if (findings.length) {
-  console.error('Renderer i18n audit found CJK UI text that is not covered by explicit i18n keys or the static text catalog:')
+  console.error('Renderer i18n audit found CJK UI text that is not covered by explicit i18n keys, exact static text entries, registered legacy static text, or static text patterns:')
   console.error([...new Set(findings)].slice(0, 200).join('\n'))
   if (findings.length > 200) console.error(`... ${findings.length - 200} more`)
   process.exit(1)

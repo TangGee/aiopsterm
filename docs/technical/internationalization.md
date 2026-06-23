@@ -15,6 +15,8 @@ Some older renderer components still contain static template text, titles, place
 
 New user-facing text should prefer explicit `t('...')` keys. Add static catalog coverage only when migrating an older component incrementally.
 
+The audit keeps a hash baseline for the current legacy renderer text in `scripts/i18n-legacy-static-text-baseline.json`. This baseline prevents newly added CJK UI literals from passing only because the generic static-text word replacement can remove every Chinese character. When adding or changing renderer UI text, prefer an explicit i18n key. If an incremental migration needs a static fallback, add an exact entry or an intentional static pattern instead of expanding the legacy baseline.
+
 ## Tests
 
 Text-dependent E2E tests should either use stable selectors or run with a fixed locale. The current Electron E2E fixtures use fresh user data and the default `zh-CN` language, so existing Chinese text assertions remain deterministic. When adding non-Chinese locale coverage, avoid reusing Chinese `getByText()`, `getByTitle()`, or `hasText` locators without a locale setup step.
