@@ -2,7 +2,7 @@ import { computed, onBeforeUnmount, onMounted, watch } from 'vue'
 import 'highlight.js/styles/atom-one-dark.css'
 import '@xterm/xterm/css/xterm.css'
 import { useWorkspaceStore } from '@/stores/workspace'
-import { createAiPanelContextCommandShellRuntime } from '@/services/aiPanelContextCommandShellRuntime'
+import { createAiPanelClassicInputShellRuntime } from '@/services/aiPanelClassicInputShellRuntime'
 import { createAiPanelModelPopupShellRuntime } from '@/services/aiPanelModelPopupShellRuntime'
 import {
   commandHostForMessage,
@@ -20,9 +20,6 @@ import {
 } from '@/services/aiPanelMessageRuntime'
 import { createAiPanelActionOrchestrationRuntime } from '@/services/aiPanelActionOrchestrationRuntime'
 import { createAiPanelChatNavigationRuntime } from '@/services/aiPanelChatNavigationRuntime'
-import { createAiPanelInputMediaShellRuntime } from '@/services/aiPanelInputMediaShellRuntime'
-import { createAiPanelMessageEditRuntime } from '@/services/aiPanelMessageEditRuntime'
-import { createAiPanelComposerDomRuntime } from '@/services/aiPanelComposerDomRuntime'
 import { createAiPanelPresentationRuntime } from '@/services/aiPanelPresentationRuntime'
 import { createAiPanelShellAdapterRuntime } from '@/services/aiPanelShellAdapterRuntime'
 import { aiChatClient } from '@/services/aiChatClient'
@@ -36,7 +33,7 @@ import {
   type AiPanelOnboardingRequest
 } from '@/services/aiPanelLifecycleRuntime'
 import { useI18n } from '@/i18n'
-import type { AiContextKind, AiContextOption } from '@shared/contracts/aiChat'
+import type { AiContextOption } from '@shared/contracts/aiChat'
 
 export type AiPanelContainerRuntimeProps = { agentMode?: boolean }
 
@@ -346,18 +343,19 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     toggleMessageFavorite
   } = aiPanelActionOrchestrationRuntime
 
-  let openCommandPopupForTargetHandler: (target: 'main' | 'edit') => void | Promise<void> = () => undefined
-  let openContextPopupForTargetHandler: (target: 'main' | 'edit', level?: 'main' | AiContextKind) => void = () => undefined
-  const openCommandPopupForTarget = (target: 'main' | 'edit') => openCommandPopupForTargetHandler(target)
-  const openContextPopupForTarget = (target: 'main' | 'edit', level: 'main' | AiContextKind = 'main') =>
-    openContextPopupForTargetHandler(target, level)
-
-  let insertPastedImageHandler: (() => void | Promise<void>) | undefined
-  const aiPanelComposerDomRuntime = createAiPanelComposerDomRuntime({
+  const aiPanelClassicInputShellRuntime = createAiPanelClassicInputShellRuntime({
     renderOptions: () => editableRenderOptions.value,
     selectedCommandId: () => workspace.selectedCommandId,
     selectedCommandRef: () => selectedCommandRef.value,
+    selectedCommand: () => selectedCommand.value,
     contextById,
+    selectedContexts: () => workspace.selectedContexts,
+    setSelectedContexts: (contexts) => {
+      workspace.selectedContexts = contexts
+    },
+    removeContext: (id) => workspace.removeContext(id),
+    clearSelectedCommand: () => workspace.selectCommandPreset(null),
+    selectCommandPreset: (id, commandRef) => workspace.selectCommandPreset(id, commandRef),
     streaming: () => streaming.value,
     noModelPrompt: () => showNoAvailableModelPrompt.value,
     chatMode: () => chatMode.value,
@@ -365,96 +363,9 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     clipboardHasImage,
     cancelStreaming: () => workspace.cancelStreamingAiChatResponse(),
     sendChat: (text, contentParts, mode) => workspace.sendChat(text, contentParts, undefined, { mode }),
-    clearSelectedCommand: () => workspace.selectCommandPreset(null),
-    removeContext: (id) => workspace.removeContext(id),
-    insertPastedImage: () => insertPastedImageHandler?.(),
-    closePopups: () => closePopups(),
-    notify: (message) => showInputPlaceholderNotice(message),
-    afterDomUpdate: shellAdapter.afterDomUpdate,
-    afterInputSync: shellAdapter.afterDomUpdate,
-    requestFrame: shellAdapter.requestFrame,
-    shouldMoveCaretAfterRender: () => !contextPopupOpen.value && !commandPopupOpen.value && !modelMenuOpen.value
-  })
-
-  const {
-    aiPanelComposerRuntime,
-    appendVoiceTranscriptionToInput,
-    charBeforeCaret: mainCharBeforeCaret,
-    draft,
-    editableRef,
-    fileInputParts,
-    handleEditableInput,
-    handleSend,
-    imageInputParts,
-    insertFileChipAtCursor: insertFileChipAtMainCursor,
-    insertImageAtCursor: insertImageAtEditableCursor,
-    moveEditableCaretToEnd,
-    removeTriggerToken: removeMainTriggerToken,
-    renderEditableFromState,
-    restoreEditableSelection,
-    saveEditableSelection,
-    setDraft,
-    shouldTriggerCommandPopupForPendingSlash: shouldTriggerMainCommandPopupForPendingSlash,
-    shouldTriggerCommandPopupForSlash: shouldTriggerMainCommandPopupForSlash,
-    shouldTriggerCommandPopupFromEditableText,
-    syncingFromEditable
-  } = aiPanelComposerDomRuntime
-  const composerIsEmpty = computed(() =>
-    aiPanelComposerDomRuntime.isEmpty({
-      selectedContextCount: workspace.selectedContexts.length,
-      selectedCommand: selectedCommand.value
-    })
-  )
-
-  let insertPastedImageIntoEditHandler: (() => void | Promise<void>) | undefined
-  const aiPanelMessageEditRuntime = createAiPanelMessageEditRuntime({
-    renderOptions: () => editableRenderOptions.value,
-    contextById,
-    clipboardHasImage,
-    closePopups: () => closePopups(),
-    openContextPopupForTarget: (target) => openContextPopupForTarget(target),
-    afterDomUpdate: shellAdapter.afterDomUpdate,
-    requestFrame: shellAdapter.requestFrame,
-    fallbackEditTarget: shellAdapter.queryEditTarget,
-    insertPastedImageIntoEdit: () => insertPastedImageIntoEditHandler?.(),
     resendUserMessageFromParts: (messageId, contentParts, hostContexts) =>
-      workspace.resendUserMessageFromParts(messageId, contentParts, hostContexts)
-  })
-
-  const {
-    editEditableRef,
-    editingMessageId,
-    editDraft,
-    editImageInputParts,
-    editFileInputParts,
-    editHostContexts,
-    cancelMessageEdit,
-    confirmMessageEdit,
-    editCommandTarget,
-    handleEditEditableClick,
-    handleEditEditableInput,
-    handleEditEditablePaste,
-    insertCommandAtEditCursor,
-    insertContextAtEditCursor,
-    insertFileChipAtEditCursor,
-    insertImageAtEditCursor,
-    openEditContextPopup,
-    removeEditHostContext,
-    removeEditTriggerToken,
-    restoreEditInputSelection,
-    restoreEditSelection,
-    saveEditSelection,
-    setEditEditableRef,
-    setEditHostContexts,
-    shouldTriggerCommandPopupForPendingSlash: shouldTriggerEditCommandPopupForPendingSlash,
-    shouldTriggerCommandPopupForSlash: shouldTriggerEditCommandPopupForSlash,
-    startMessageEdit,
-    charBeforeCaret: editCharBeforeCaret
-  } = aiPanelMessageEditRuntime
-  getEditHostContextsForPopup = () => editHostContexts.value
-
-  const aiPanelInputMediaShellRuntime = createAiPanelInputMediaShellRuntime({
-    mode: () => aiPanelMode.value,
+      workspace.resendUserMessageFromParts(messageId, contentParts, hostContexts),
+    aiPanelMode: () => aiPanelMode.value,
     contextUsageSnapshot: () => workspace.aiContextUsage,
     selectedConversationId: () => workspace.selectedConversationId,
     panels: () => workspace.panels,
@@ -462,71 +373,9 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     addKnowledgeFilesToChat: (relPaths) => workspace.addKnowledgeFilesToChat(relPaths),
     bindTerminalPanelToCodex,
     bindHostContextToCodex,
-    draftText: () => draft.value,
-    setDraft,
-    closePopups: () => closePopups(),
-    moveCaretToEnd: moveEditableCaretToEnd,
-    streaming: () => streaming.value,
-    editingMessageId: () => editingMessageId.value,
-    insertImageAtMainCursor: insertImageAtEditableCursor,
-    insertImageAtEditCursor,
-    insertFileChipAtMainCursor,
-    insertFileChipAtEditCursor,
-    restoreMainSelection: () => restoreEditableSelection(),
-    insertVoiceTranscription: appendVoiceTranscriptionToInput,
-    afterVoiceInsert: shellAdapter.afterDomUpdate,
-    sendAfterVoiceTranscription: () => handleSend(),
-    requestFrame: shellAdapter.requestFrame,
-    setNoticeTimer: shellAdapter.setTimer,
-    clearNoticeTimer: shellAdapter.clearTimer
-  })
-
-  const {
-    contextUsage,
-    contextUsageColor,
-    contextUsageTooltip,
-    contextUsageTrackColor,
-    dropActive,
-    inputPlaceholderNotice,
-    showInputPlaceholderNotice,
-    insertImageFilePaths,
-    insertPastedImage,
-    insertPastedImageIntoEdit,
-    openImagePicker,
-    handleFileUpload,
-    voiceRecording,
-    voiceTranscribing,
-    voiceButtonTitle,
-    toggleVoiceInput,
-    handleDragEnter,
-    handleDragOver,
-    handleDragLeave,
-    handleDrop
-  } = aiPanelInputMediaShellRuntime
-  insertPastedImageHandler = insertPastedImage
-  insertPastedImageIntoEditHandler = insertPastedImageIntoEdit
-
-  const focusInputForTarget = (target: 'main' | 'edit') =>
-    shellAdapter.focusInputForTarget(target, {
-      restoreEditInputSelection,
-      restoreEditableSelection
-    })
-
-  const aiPanelContextCommandShellRuntime = createAiPanelContextCommandShellRuntime({
-    state: popupInteractionState,
+    popupState: popupInteractionState,
     maxHostContexts: shellAdapter.maxHostContexts,
-    saveSelection: (target) => {
-      if (target === 'edit') {
-        saveEditSelection()
-        return
-      }
-      saveEditableSelection()
-    },
-    focusInputForTarget,
-    refreshAiContextCatalog: () => workspace.refreshAiContextCatalog({ hydrateSelection: false }),
-    refreshAiCommandCatalog: () => workspace.refreshAiCommandCatalog(),
-    afterDomUpdate: shellAdapter.afterDomUpdate,
-    defer: shellAdapter.defer,
+    modelMenuOpen: () => modelMenuOpen.value,
     closeModeMenu,
     closeModelMenu,
     closeCodexTargetPicker,
@@ -539,77 +388,94 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     closeHistoryMenu,
     openChatSearch,
     closeChatSearch,
-    editingMessageId: () => editingMessageId.value,
-    draft: () => draft.value,
-    mainContexts: () => workspace.selectedContexts,
-    editHostContexts: () => editHostContexts.value,
+    chatSearchOpen: () => chatSearchOpen.value,
+    refreshAiContextCatalog: () => workspace.refreshAiContextCatalog({ hydrateSelection: false }),
+    refreshAiCommandCatalog: () => workspace.refreshAiCommandCatalog(),
     visibleHostContexts: () => visibleHostContextOptions.value,
-    editCommandTarget,
-    setMainContexts: (contexts) => {
-      workspace.selectedContexts = contexts
-    },
-    setEditHostContexts: (contexts) => {
-      editHostContexts.value = contexts
-    },
-    removeMainTriggerToken,
-    removeEditTriggerToken,
-    insertContextAtEditCursor,
-    insertCommandAtEditCursor,
-    restoreEditSelection,
-    selectCommandPreset: (id, commandRef) => workspace.selectCommandPreset(id, commandRef),
-    setDraft,
-    renderEditableFromState,
-    moveMainCaretToEnd: moveEditableCaretToEnd,
-    requestFrame: shellAdapter.requestFrame,
     displayedOpenedHosts: () => displayedOpenedHosts.value,
     visibleContextCategories: () => visibleContextCategories.value,
     filteredContextOptions: () => filteredContextOptions.value,
     filteredCommands: () => filteredCommands.value,
-    handleSend,
-    confirmMessageEdit,
-    cancelMessageEdit,
-    shouldTriggerMainCommandPopupForPendingSlash,
-    shouldTriggerEditCommandPopupForPendingSlash,
-    shouldTriggerMainCommandPopupForSlash,
-    shouldTriggerEditCommandPopupForSlash,
-    mainCharBeforeCaret,
-    editCharBeforeCaret,
-    shouldTriggerCommandPopupFromEditableText,
-    aiPanelMode: () => aiPanelMode.value,
-    chatSearchOpen: () => chatSearchOpen.value
+    afterDomUpdate: shellAdapter.afterDomUpdate,
+    defer: shellAdapter.defer,
+    requestFrame: shellAdapter.requestFrame,
+    setNoticeTimer: shellAdapter.setTimer,
+    clearNoticeTimer: shellAdapter.clearTimer,
+    fallbackEditTarget: shellAdapter.queryEditTarget,
+    focusInputForTarget: (target, restorers) => shellAdapter.focusInputForTarget(target, restorers)
   })
 
   const {
+    aiPanelComposerRuntime,
     applyCommand,
     applyContext,
     applyHostContextToEdit,
+    cancelMessageEdit,
     clearHostContexts,
     closeCommandPopup,
     closeContextPopup,
     closePopups,
     commandSearchInputRef,
+    composerIsEmpty,
+    confirmMessageEdit,
     contextSearchInputRef,
+    contextUsage,
+    contextUsageColor,
+    contextUsageTooltip,
+    contextUsageTrackColor,
+    draft,
+    dropActive,
+    editableRef,
+    editDraft,
+    editFileInputParts,
+    editHostContexts,
+    editImageInputParts,
+    editingMessageId,
     enterDocsDir,
+    fileInputParts,
     goBackContextPopup,
     handleCommandKeydown,
     handleContextKeydown,
     handleContextQueryChanged,
+    handleDragEnter,
+    handleDragOver,
+    handleDragLeave,
+    handleDrop,
+    handleEditableInput,
     handleEditableKeydown,
+    handleEditEditableClick,
+    handleEditEditableInput,
     handleEditEditableKeydown,
+    handleEditEditablePaste,
+    handleFileUpload,
     handlePanelKeydown,
+    handleSend,
+    imageInputParts,
+    inputPlaceholderNotice,
     isContextSelectedForPopup,
     isEditHostContextSelected,
-    openCommandPopupForTarget: shellOpenCommandPopupForTarget,
+    openImagePicker,
     openContextCategory,
     openContextPopup,
-    openContextPopupForTarget: shellOpenContextPopupForTarget,
+    openEditContextPopup,
+    removeEditHostContext,
+    renderEditableFromState,
     resetDocsContextNavigation,
     returnContextPopupToMain,
+    saveEditableSelection,
     selectAllVisibleHostContexts,
-    toggleContextPopup
-  } = aiPanelContextCommandShellRuntime
-  openCommandPopupForTargetHandler = shellOpenCommandPopupForTarget
-  openContextPopupForTargetHandler = shellOpenContextPopupForTarget
+    setDraft,
+    setEditEditableRef,
+    setEditHostContexts,
+    startMessageEdit,
+    syncingFromEditable,
+    toggleContextPopup,
+    toggleVoiceInput,
+    voiceButtonTitle,
+    voiceRecording,
+    voiceTranscribing
+  } = aiPanelClassicInputShellRuntime
+  getEditHostContextsForPopup = () => editHostContexts.value
 
   watch(contextQuery, () => {
     handleContextQueryChanged()
@@ -664,8 +530,8 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     disposeCodexRuntime: () => aiPanelCodexRuntime.dispose(),
     disposeChatSearchRuntime,
     clearHistoryNoticeTimer,
-    disposeSurfaceRuntime: () => aiPanelInputMediaShellRuntime.disposeSurfaceRuntime(),
-    disposeVoiceRuntime: () => aiPanelInputMediaShellRuntime.disposeVoiceRuntime()
+    disposeSurfaceRuntime: () => aiPanelClassicInputShellRuntime.disposeSurfaceRuntime(),
+    disposeVoiceRuntime: () => aiPanelClassicInputShellRuntime.disposeVoiceRuntime()
   }).start()
 
   return {
