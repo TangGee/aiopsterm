@@ -173,7 +173,6 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { X } from 'lucide-vue-next'
 import TopBar from '@/components/TopBar.vue'
 import SideRail from '@/components/SideRail.vue'
@@ -189,314 +188,31 @@ import AgentsSidebar from '@/components/AgentsSidebar.vue'
 import DatabaseWorkspace from '@/components/DatabaseWorkspace.vue'
 import UserPanel from '@/components/panels/UserPanel.vue'
 import OnboardingSpotlight from '@/components/onboarding/OnboardingSpotlight.vue'
-import { layoutWidthLimits, useWorkspaceStore } from '@/stores/workspace'
-import { backgroundStyleVars } from '@/services/backgroundRuntime'
-import { appRuntimeClient } from '@/services/appRuntimeClient'
-import { managedAiClient } from '@/services/managedAiClient'
-import { terminalClient } from '@/services/terminalClient'
-import { applyDocumentLocale, useI18n, type I18nKey } from '@/i18n'
-import { isAiopstermDeepLinkPayload } from '@shared/deepLink'
-import type { TerminalKeyboardInteractiveRequest, TerminalKeyboardInteractiveResult } from '@shared/contracts/terminalSessions'
+import { useAppShellRuntime } from '@/services/appShellRuntime'
 
-const workspace = useWorkspaceStore()
-const { locale, t } = useI18n()
-type ResizeSide = 'left' | 'right' | 'agents-left'
-type TerminalMfaPrompt = TerminalKeyboardInteractiveRequest['prompts'][number]
-type TerminalMfaDialogState = {
-  open: boolean
-  request: TerminalKeyboardInteractiveRequest | null
-  responses: string[]
-  rememberPassword: boolean
-  submitting: boolean
-  error: string
-}
-
-const draggingSide = ref<ResizeSide | null>(null)
-const draftLeftPanelWidth = ref<number | null>(null)
-const draftRightPanelWidth = ref<number | null>(null)
-const draftAgentsLeftWidth = ref<number | null>(null)
-let resizeStartX = 0
-let resizeStartWidth = 0
-let resizeQuickClosed = false
-let stopDeepLink: (() => void) | undefined
-let stopKeyboardInteractiveRequest: (() => void) | undefined
-let stopKeyboardInteractiveResult: (() => void) | undefined
-let stopAiAgentSessionEvent: (() => void) | undefined
-let stopManagedAiSessionEvent: (() => void) | undefined
-let stopManagedAiSessionFocusRequest: (() => void) | undefined
-const terminalMfaInputRefs = ref<HTMLInputElement[]>([])
-const terminalMfaDialog = ref<TerminalMfaDialogState>({
-  open: false,
-  request: null,
-  responses: [],
-  rememberPassword: false,
-  submitting: false,
-  error: ''
-})
-
-const showAgentsLeftPane = computed(() => workspace.mode === 'agents' && workspace.agentsLeftOpen)
-const showTerminalLeftPane = computed(
-  () => workspace.mode === 'terminal' && workspace.isLeftVisible && !['assets', 'settings', 'database', 'user'].includes(workspace.activeModule)
-)
-const showTerminalRightPane = computed(
-  () => workspace.mode === 'terminal' && workspace.isRightVisible && !['assets', 'database', 'user'].includes(workspace.activeModule)
-)
-const hasLeftPane = computed(() => showAgentsLeftPane.value || showTerminalLeftPane.value)
-const hasRightPane = computed(() => showTerminalRightPane.value)
-const displayLeftPanelWidth = computed(() => draftLeftPanelWidth.value ?? workspace.leftPanelWidth)
-const displayRightPanelWidth = computed(() => draftRightPanelWidth.value ?? workspace.rightPanelWidth)
-const displayAgentsLeftWidth = computed(() => draftAgentsLeftWidth.value ?? workspace.agentsLeftWidth)
-const appBackgroundStyle = computed(() => backgroundStyleVars(workspace.config.background))
-const terminalMfaTarget = computed(() => {
-  const request = terminalMfaDialog.value.request
-  return request ? `${request.username}@${request.host}:${request.port}` : ''
-})
-const terminalMfaPrompts = computed<TerminalMfaPrompt[]>(() => {
-  const prompts = terminalMfaDialog.value.request?.prompts || []
-  return prompts.length ? prompts : [{ prompt: terminalAuthPromptFallback.value, echo: false }]
-})
-const isTerminalPasswordPrompt = computed(() => terminalMfaDialog.value.request?.purpose === 'password')
-const showTerminalPasswordRemember = computed(
-  () => isTerminalPasswordPrompt.value && terminalMfaDialog.value.request?.canRememberPassword === true
-)
-const isTerminalPasswordRetry = computed(() => isTerminalPasswordPrompt.value && Number(terminalMfaDialog.value.request?.attempts || 1) > 1)
-const terminalAuthTitle = computed(() => t(isTerminalPasswordPrompt.value ? 'terminal.passwordTitle' : 'terminal.mfaTitle'))
-const terminalAuthRequired = computed(() => t(isTerminalPasswordPrompt.value ? 'terminal.passwordRequired' : 'terminal.mfaRequired'))
-const terminalAuthPromptFallback = computed(() => t(isTerminalPasswordPrompt.value ? 'terminal.passwordPromptFallback' : 'terminal.mfaPromptFallback'))
-const terminalAuthDescription = computed(() => {
-  const key = isTerminalPasswordPrompt.value
-    ? isTerminalPasswordRetry.value
-      ? 'terminal.passwordRejectedDescription'
-      : 'terminal.passwordDescription'
-    : 'terminal.mfaDescription'
-  return tf(key, { target: terminalMfaTarget.value })
-})
-
-const tf = (key: I18nKey, values: Record<string, string | number>) => {
-  let text = t(key)
-  Object.entries(values).forEach(([name, value]) => {
-    text = text.replaceAll(`{${name}}`, String(value))
-  })
-  return text
-}
-
-const clampLayoutWidth = (width: number) => Math.min(layoutWidthLimits.max, Math.max(layoutWidthLimits.min, Math.round(width)))
-
-const setDraftWidth = (side: ResizeSide, width: number | null) => {
-  if (side === 'left') draftLeftPanelWidth.value = width
-  if (side === 'right') draftRightPanelWidth.value = width
-  if (side === 'agents-left') draftAgentsLeftWidth.value = width
-}
-
-const setTerminalMfaInputRef = (element: unknown, index: number) => {
-  if (element instanceof HTMLInputElement) terminalMfaInputRefs.value[index] = element
-}
-
-const resetTerminalMfaDialog = () => {
-  terminalMfaInputRefs.value = []
-  terminalMfaDialog.value = {
-    open: false,
-    request: null,
-    responses: [],
-    rememberPassword: false,
-    submitting: false,
-    error: ''
-  }
-}
-
-const handleTerminalMfaRequest = (request: TerminalKeyboardInteractiveRequest) => {
-  const promptCount = request.prompts.length || 1
-  terminalMfaInputRefs.value = []
-  terminalMfaDialog.value = {
-    open: true,
-    request,
-    responses: Array.from({ length: promptCount }, () => ''),
-    rememberPassword: false,
-    submitting: false,
-    error: ''
-  }
-  void nextTick(() => terminalMfaInputRefs.value[0]?.focus())
-}
-
-const submitTerminalMfa = () => {
-  const request = terminalMfaDialog.value.request
-  if (!request || terminalMfaDialog.value.submitting) return
-  const responses = terminalMfaPrompts.value.map((_prompt, index) => terminalMfaDialog.value.responses[index] || '')
-  if (responses.some((value) => !value.trim())) {
-    terminalMfaDialog.value.error = t('terminal.mfaEmpty')
-    return
-  }
-  terminalMfaDialog.value.submitting = true
-  terminalMfaDialog.value.error = ''
-  terminalClient.respondTerminalKeyboardInteractive()?.(
-    request.id,
-    isTerminalPasswordPrompt.value
-      ? {
-          responses,
-          rememberPassword: terminalMfaDialog.value.rememberPassword
-        }
-      : responses
-  )
-}
-
-const cancelTerminalMfa = () => {
-  const request = terminalMfaDialog.value.request
-  if (request) {
-    terminalClient.cancelTerminalKeyboardInteractive()?.(request.id)
-  }
-  resetTerminalMfaDialog()
-}
-
-const handleTerminalMfaResult = (result: TerminalKeyboardInteractiveResult) => {
-  const request = terminalMfaDialog.value.request
-  if (!request || result.id !== request.id) return
-  if (result.status === 'success') {
-    resetTerminalMfaDialog()
-    return
-  }
-  if (result.status === 'failed' && !result.final) {
-    terminalMfaDialog.value.submitting = false
-    terminalMfaDialog.value.error = result.errorMessage || t('terminal.mfaFailed')
-    terminalMfaInputRefs.value[0]?.focus()
-    return
-  }
-  resetTerminalMfaDialog()
-}
-
-const getCurrentWidth = (side: ResizeSide) => {
-  if (side === 'left') return workspace.leftPanelWidth
-  if (side === 'right') return workspace.rightPanelWidth
-  return workspace.agentsLeftWidth
-}
-
-const persistResize = async (side: ResizeSide, width: number) => {
-  if (side === 'right') return workspace.resizeRightPanel(width)
-  return workspace.resizeLeftPanel(width)
-}
-
-const quickClose = async (side: ResizeSide) => {
-  if (side === 'right') return workspace.quickCloseRightPanel()
-  return workspace.quickCloseLeftPanel()
-}
-
-const applyDeepLinkPayload = (payload: unknown) => {
-  if (!isAiopstermDeepLinkPayload(payload)) {
-    workspace.handleDeepLink(payload)
-    return false
-  }
-  return workspace.handleDeepLink(payload)
-}
-
-const consumePendingDeepLinks = async () => {
-  const consumeDeepLinks = appRuntimeClient.consumeDeepLinks()
-  if (typeof consumeDeepLinks !== 'function') return
-  try {
-    const payloads = await consumeDeepLinks()
-    if (!Array.isArray(payloads)) {
-      applyDeepLinkPayload(payloads)
-      return
-    }
-    payloads.forEach((payload) => applyDeepLinkPayload(payload))
-  } catch {
-    applyDeepLinkPayload(null)
-  }
-}
-
-const endResize = async () => {
-  const side = draggingSide.value
-  if (!side) return
-  window.removeEventListener('mousemove', handleResizeMove)
-  window.removeEventListener('mouseup', endResize)
-  draggingSide.value = null
-  document.body.classList.remove('layout-resizing')
-  const width = side === 'left' ? draftLeftPanelWidth.value : side === 'right' ? draftRightPanelWidth.value : draftAgentsLeftWidth.value
-  setDraftWidth(side, null)
-  if (resizeQuickClosed) {
-    resizeQuickClosed = false
-    return
-  }
-  if (typeof width === 'number') {
-    void persistResize(side, width)
-  }
-}
-
-const handleResizeMove = (event: MouseEvent) => {
-  const side = draggingSide.value
-  if (!side) return
-  if (side === 'right') {
-    const distanceFromRight = window.innerWidth - event.clientX
-    if (distanceFromRight < layoutWidthLimits.quickCloseThreshold) {
-      resizeQuickClosed = true
-      setDraftWidth(side, null)
-      void quickClose(side)
-      void endResize()
-      return
-    }
-    setDraftWidth(side, clampLayoutWidth(resizeStartWidth - (event.clientX - resizeStartX)))
-    return
-  }
-  if (event.clientX < layoutWidthLimits.quickCloseThreshold) {
-    resizeQuickClosed = true
-    setDraftWidth(side, null)
-    void quickClose(side)
-    void endResize()
-    return
-  }
-  setDraftWidth(side, clampLayoutWidth(resizeStartWidth + (event.clientX - resizeStartX)))
-}
-
-const startResize = (side: ResizeSide, event: MouseEvent) => {
-  event.preventDefault()
-  event.stopPropagation()
-  draggingSide.value = side
-  resizeStartX = event.clientX
-  resizeStartWidth = getCurrentWidth(side)
-  resizeQuickClosed = false
-  setDraftWidth(side, resizeStartWidth)
-  document.body.classList.add('layout-resizing')
-  window.addEventListener('mousemove', handleResizeMove)
-  window.addEventListener('mouseup', endResize)
-}
-
-onMounted(() => {
-  workspace.installShortcutRuntime()
-  workspace.hydrateConfig()
-  void workspace.refreshManagedAiSessions({ silent: true })
-  stopDeepLink = appRuntimeClient.onDeepLink()?.((payload) => {
-    applyDeepLinkPayload(payload)
-  })
-  stopKeyboardInteractiveRequest = terminalClient.onTerminalKeyboardInteractiveRequest()?.(handleTerminalMfaRequest)
-  stopKeyboardInteractiveResult = terminalClient.onTerminalKeyboardInteractiveResult()?.(handleTerminalMfaResult)
-  stopAiAgentSessionEvent = managedAiClient.onAiAgentSessionEvent()?.((event) => {
-    workspace.upsertManagedAiSession(event)
-  })
-  stopManagedAiSessionEvent = managedAiClient.onManagedAiSessionEvent()?.(() => {
-    workspace.refreshManagedAiSessionsDebounced()
-  })
-  stopManagedAiSessionFocusRequest = managedAiClient.onManagedAiSessionFocusRequest()?.((request) => {
-    void workspace.focusManagedAiSessionRequest(request)
-  })
-  void consumePendingDeepLinks()
-})
-
-onUnmounted(() => {
-  stopDeepLink?.()
-  stopKeyboardInteractiveRequest?.()
-  stopKeyboardInteractiveResult?.()
-  stopAiAgentSessionEvent?.()
-  stopManagedAiSessionEvent?.()
-  stopManagedAiSessionFocusRequest?.()
-  window.removeEventListener('mousemove', handleResizeMove)
-  window.removeEventListener('mouseup', endResize)
-  document.body.classList.remove('layout-resizing')
-  workspace.uninstallShortcutRuntime()
-})
-
-watch(
-  locale,
-  (value) => {
-    applyDocumentLocale(value)
-  },
-  { immediate: true }
-)
+const {
+  appBackgroundStyle,
+  cancelTerminalMfa,
+  displayAgentsLeftWidth,
+  displayLeftPanelWidth,
+  displayRightPanelWidth,
+  draggingSide,
+  hasLeftPane,
+  hasRightPane,
+  setTerminalMfaInputRef,
+  showAgentsLeftPane,
+  showTerminalLeftPane,
+  showTerminalPasswordRemember,
+  showTerminalRightPane,
+  startResize,
+  submitTerminalMfa,
+  terminalAuthDescription,
+  terminalAuthPromptFallback,
+  terminalAuthRequired,
+  terminalAuthTitle,
+  terminalMfaDialog,
+  terminalMfaPrompts,
+  t,
+  workspace
+} = useAppShellRuntime()
 </script>

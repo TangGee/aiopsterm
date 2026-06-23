@@ -587,6 +587,28 @@ test('quick architecture migration baseline @quick', async () => {
     await expect(page.locator('.ai-panel')).toBeVisible()
     await expect(page.locator('.message.assistant').filter({ hasText: '欢迎' })).toHaveCount(0)
 
+    const leftPaneBeforeResize = await page.locator('[data-layout-pane="terminal-left"]').boundingBox()
+    expect(leftPaneBeforeResize?.width).toBeGreaterThan(250)
+    const initialLeftPanelWidth = Math.round(leftPaneBeforeResize!.width)
+    const leftResizer = page.locator('[data-layout-resizer="terminal-left"]')
+    const leftResizerBox = await leftResizer.boundingBox()
+    expect(leftResizerBox).not.toBeNull()
+    await page.mouse.move(leftResizerBox!.x + leftResizerBox!.width / 2, leftResizerBox!.y + leftResizerBox!.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(leftResizerBox!.x + leftResizerBox!.width / 2 + 54, leftResizerBox!.y + leftResizerBox!.height / 2)
+    await page.mouse.up()
+    await expect
+      .poll(
+        () =>
+          page.evaluate(async () => {
+            const config = await (window as unknown as { aiops: { getConfig: () => Promise<JsonObject> } }).aiops.getConfig()
+            const paneWidth = document.querySelector<HTMLElement>('[data-layout-pane="terminal-left"]')?.getBoundingClientRect().width || 0
+            return { paneWidth: Math.round(paneWidth), leftPanelWidth: config.leftPanelWidth }
+          }),
+        { timeout: 10_000 }
+      )
+      .toEqual(expect.objectContaining({ paneWidth: initialLeftPanelWidth + 54, leftPanelWidth: initialLeftPanelWidth + 54 }))
+
     await page.locator('.workspace-search input').fill('127.0.0.1')
     const localRow = page.locator('.workspace-host-row').filter({ hasText: '127.0.0.1' }).first()
     await expect(localRow).toBeVisible()
