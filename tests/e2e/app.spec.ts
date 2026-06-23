@@ -2017,6 +2017,10 @@ test('terminal tab operations and visual baseline', async () => {
 
     await page.locator('.terminal-tab').last().click({ button: 'right' })
     await expect(page.locator('.tab-menu')).toBeVisible()
+    await page.locator('.terminal-grid').click()
+    await expect(page.locator('.tab-menu')).not.toBeVisible()
+    await page.locator('.terminal-tab').last().click({ button: 'right' })
+    await expect(page.locator('.tab-menu')).toBeVisible()
     await page.locator('.tab-menu button').filter({ hasText: '向右拆分' }).click()
     await expect(page.locator('.terminal-tab')).toHaveCount(2)
     await expect(page.locator('.terminal-grid')).toHaveClass(/split-right/)
@@ -2025,6 +2029,10 @@ test('terminal tab operations and visual baseline', async () => {
     expect(Math.abs(rightSplitBoxes[0].y - rightSplitBoxes[1].y)).toBeLessThan(4)
     expect(rightSplitBoxes[1].x).toBeGreaterThan(rightSplitBoxes[0].x)
 
+    await page.locator('.terminal-pane').last().click({ button: 'right' })
+    await expect(page.locator('.terminal-context-menu')).toBeVisible()
+    await page.locator('.terminal-tabs').click()
+    await expect(page.locator('.terminal-context-menu')).not.toBeVisible()
     await page.locator('.terminal-pane').last().click({ button: 'right' })
     await expect(page.locator('.terminal-context-menu')).toBeVisible()
     await page.locator('.terminal-context-menu button').filter({ hasText: '向下拆分' }).click()
