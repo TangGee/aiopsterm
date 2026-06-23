@@ -19,13 +19,19 @@ const loadBackend = async () => {
   return import(modulePath)
 }
 
-const withFileSessionDatabase = async <T>(run: (databasePath: string) => Promise<T>) => {
+const withFileSessionDatabase = async <T>(run: (databasePath: string, assetDatabasePath: string) => Promise<T>) => {
   const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-files-sqlite-'))
   try {
-    return await run(join(dir, 'files.db'))
+    return await run(join(dir, 'files.db'), join(dir, 'assets.db'))
   } finally {
     await rm(dir, { recursive: true, force: true })
   }
+}
+
+const configureIsolatedAssetBackend = async (databasePath: string) => {
+  const modulePath = '../src/main/backend/assets'
+  const backend = await import(modulePath)
+  backend.configureAssetBackendRuntime({ databasePath, useSeedData: false, sqliteFactory: Database })
 }
 
 describe('files sqlite session catalog seed boundary', () => {
@@ -34,8 +40,9 @@ describe('files sqlite session catalog seed boundary', () => {
   })
 
   it('starts non-seed SQLite file session catalog with only the local session', async () => {
-    await withFileSessionDatabase(async (databasePath) => {
+    await withFileSessionDatabase(async (databasePath, assetDatabasePath) => {
       const backend = await loadBackend()
+      await configureIsolatedAssetBackend(assetDatabasePath)
       backend.configureFilesBackendRuntime({ databasePath, useSeedData: false, sqliteFactory: Database })
       backend.__resetFileSessionCatalogForTests()
 
@@ -48,8 +55,9 @@ describe('files sqlite session catalog seed boundary', () => {
   })
 
   it('strips unchanged legacy SQLite file session seeds in non-seed runtime while preserving custom user sessions', async () => {
-    await withFileSessionDatabase(async (databasePath) => {
+    await withFileSessionDatabase(async (databasePath, assetDatabasePath) => {
       const backend = await loadBackend()
+      await configureIsolatedAssetBackend(assetDatabasePath)
       backend.configureFilesBackendRuntime({ databasePath, useSeedData: true, sqliteFactory: Database })
       backend.__resetFileSessionCatalogForTests()
       const edited = await backend.saveFileSession({

@@ -19,12 +19,13 @@ import type {
   AiopsUserProfileUpdateInput
 } from '@shared/contracts/userAccount'
 import { normalizeExternalHttpUrl } from '@shared/externalUrl'
-import { shouldUseUserAccountCodeBackendDouble, shouldUseUserAccountSeedData } from '@shared/runtimeSwitches'
-import { createHash, randomBytes, randomInt, scryptSync, timingSafeEqual } from 'crypto'
-import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'fs'
-import { copyFile, readFile, stat } from 'fs/promises'
+import { shouldUseUserAccountSeedData } from '@shared/runtimeSwitches'
+import { randomBytes, scryptSync, timingSafeEqual } from 'crypto'
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs'
 import { hostname, networkInterfaces, userInfo } from 'os'
-import { basename, dirname, extname, isAbsolute, join, resolve } from 'path'
+import { dirname, isAbsolute, resolve } from 'path'
+import { createUserAccountAvatarRuntime } from './userAccountAvatarRuntime'
+import { createUserAccountCodeRuntime, normalizeUserAccountCode, type UserCodeCooldownScope, type UserCodeKind } from './userAccountCodeRuntime'
 
 const defaultUserProfile: AiopsUserProfile = {
   uid: 2001007,
@@ -255,18 +256,14 @@ let credentialStore: UserAccountCredential[] = createInitialCredentials()
 let userAccountStateLoaded = false
 let userAccountLoadedStateFilePath = ''
 
-type UserCodeCooldownScope = 'login' | 'contact'
-type UserCodeKind = AiopsUserCodeInput['kind']
-type UserCodeCooldown = {
-  challengeId: string
-  expiresAt: number
-  codeHash: string
-  attempts: number
-  debugCode?: string
-}
+const codeRuntime = createUserAccountCodeRuntime(() => ({
+  stateFilePath: runtimeConfig.stateFilePath,
+  useSeedData: runtimeConfig.useSeedData
+}))
 
-const userCodeCooldownMs = 300_000
-const userCodeCooldowns = new Map<string, UserCodeCooldown>()
+const avatarRuntime = createUserAccountAvatarRuntime(() => ({
+  stateFilePath: runtimeConfig.stateFilePath
+}))
 
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === 'object' && !Array.isArray(value))
 
@@ -325,7 +322,7 @@ const normalizeRegistrationType = (value: unknown, fallback: AiopsUserProfile['r
 const normalizePersistedAvatarImageUrl = (value: unknown, fallback: string) => {
   const avatarImageUrl = persistedRawString(value, fallback)
   if (!avatarImageUrl) return ''
-  return avatarAssetExists(avatarImageUrl) ? avatarImageUrl : fallback
+  return avatarRuntime.assetExists(avatarImageUrl) ? avatarImageUrl : fallback
 }
 
 const normalizePersistedProfile = (value: unknown): AiopsUserProfile => {
@@ -552,35 +549,6 @@ const isValidEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
 
 const isValidMobile = (value: string) => /^1[3-9]\d{9}$/.test(value)
 
-const maxAvatarBytes = 2 * 1024 * 1024
-const avatarAssetScheme = 'aiopsterm-user-avatar'
-const avatarAssetUrlPrefix = `${avatarAssetScheme}://`
-
-const userCodeCooldownKey = (scope: UserCodeCooldownScope, kind: UserCodeKind, target: string) =>
-  [scope, kind, kind === 'email' ? target.toLowerCase() : target].join(':')
-
-const userCodeChallengeId = () => randomBytes(12).toString('hex')
-
-const remainingCodeCooldownSeconds = (expiresAt: number, now = Date.now()) => Math.max(0, Math.ceil((expiresAt - now) / 1000))
-
-const normalizeUserCode = (value: unknown) => trimText(value).replace(/\s+/g, '')
-
-const userCodeBackendDoubleEnabled = shouldUseUserAccountCodeBackendDouble
-
-const generateUserCode = (scope: UserCodeCooldownScope, kind: UserCodeKind) => {
-  if (userCodeBackendDoubleEnabled()) {
-    if (scope === 'login' && kind === 'email') return '246810'
-    if (scope === 'login' && kind === 'mobile') return '135790'
-    return '123456'
-  }
-  return randomInt(0, 1_000_000).toString().padStart(6, '0')
-}
-
-const userCodeHash = (scope: UserCodeCooldownScope, kind: UserCodeKind, target: string, code: string) =>
-  createHash('sha256')
-    .update([runtimeConfig.stateFilePath, scope, kind, kind === 'email' ? target.toLowerCase() : target, code].join('\0'))
-    .digest('hex')
-
 const secureHashEqual = (left: string, right: string) => {
   const leftBuffer = Buffer.from(left, 'hex')
   const rightBuffer = Buffer.from(right, 'hex')
@@ -625,135 +593,11 @@ const renameCurrentUserCredential = (previousUsername: string, nextUsername: str
     .map((credential) => (userCredentialKey(credential.username) === previousKey ? { ...credential, username: credentialText(nextUsername) } : credential))
 }
 
-const clearUserCodeCooldown = (scope: UserCodeCooldownScope, kind: UserCodeKind, target: string) => {
-  userCodeCooldowns.delete(userCodeCooldownKey(scope, kind, target))
-}
-
-const issueUserCodeCooldown = (scope: UserCodeCooldownScope, kind: UserCodeKind, target: string, message: string): AiopsUserCodeResult => {
-  const now = Date.now()
-  const key = userCodeCooldownKey(scope, kind, target)
-  const active = userCodeCooldowns.get(key)
-  const activeRemainingSeconds = active ? remainingCodeCooldownSeconds(active.expiresAt, now) : 0
-  const expiresAt = activeRemainingSeconds > 0 ? active!.expiresAt : now + userCodeCooldownMs
-  const remainingSeconds = activeRemainingSeconds > 0 ? activeRemainingSeconds : remainingCodeCooldownSeconds(expiresAt, now)
-
-  const issued = activeRemainingSeconds > 0 ? active! : null
-  const challenge =
-    issued ||
-    (() => {
-      const code = generateUserCode(scope, kind)
-      return {
-        challengeId: userCodeChallengeId(),
-        expiresAt,
-        codeHash: userCodeHash(scope, kind, target, code),
-        attempts: 0,
-        debugCode: runtimeConfig.useSeedData || userCodeBackendDoubleEnabled() ? code : undefined
-      }
-    })()
-
-  if (!issued) {
-    userCodeCooldowns.set(key, challenge)
-  }
-
-  return {
-    ok: true,
-    data: {
-      challengeId: challenge.challengeId,
-      kind,
-      target,
-      countdownSeconds: remainingSeconds,
-      remainingSeconds,
-      expiresAt,
-      message: activeRemainingSeconds > 0 ? `验证码已发送，请 ${remainingSeconds} 秒后重试` : message
-    }
-  }
-}
-
-const verifyUserCode = (scope: UserCodeCooldownScope, kind: UserCodeKind, target: string, code: string): AiopsUserMutationResult | null => {
-  const key = userCodeCooldownKey(scope, kind, target)
-  const active = userCodeCooldowns.get(key)
-  if (!active) return errorResult('USER_CODE_NOT_SENT', '请先获取验证码')
-  if (remainingCodeCooldownSeconds(active.expiresAt) <= 0) {
-    userCodeCooldowns.delete(key)
-    return errorResult('USER_CODE_EXPIRED', '验证码已过期，请重新获取')
-  }
-  const codeHash = userCodeHash(scope, kind, target, code)
-  if (!secureHashEqual(active.codeHash, codeHash)) {
-    const attempts = active.attempts + 1
-    if (attempts >= 5) {
-      userCodeCooldowns.delete(key)
-      return errorResult('USER_CODE_LOCKED', '验证码错误次数过多，请重新获取')
-    }
-    userCodeCooldowns.set(key, { ...active, attempts })
-    return errorResult('USER_CODE_INVALID', '验证码错误')
-  }
-  return null
-}
-
 export const peekUserCodeForTests = (scope: UserCodeCooldownScope, kind: UserCodeKind, target: string) =>
-  userCodeCooldowns.get(userCodeCooldownKey(scope, kind, trimText(target)))?.debugCode || ''
-
-const avatarMimeByExtension: Record<string, string> = {
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.gif': 'image/gif',
-  '.webp': 'image/webp',
-  '.bmp': 'image/bmp',
-  '.svg': 'image/svg+xml'
-}
-
-const avatarExtensionByMime: Record<string, string> = {
-  'image/png': '.png',
-  'image/jpeg': '.jpg',
-  'image/gif': '.gif',
-  'image/webp': '.webp',
-  'image/bmp': '.bmp',
-  'image/svg+xml': '.svg'
-}
-
-const safeAvatarAssetName = (value: string) => /^[a-f0-9]{64}\.(png|jpg|gif|webp|bmp|svg)$/i.test(value)
-
-const avatarAssetDirectory = () => resolve(dirname(runtimeConfig.stateFilePath), 'avatars')
-
-const avatarAssetUrl = (fileName: string) => `${avatarAssetUrlPrefix}${fileName}`
-
-const avatarAssetNameFromUrl = (value: string) => {
-  const trimmed = trimText(value)
-  if (!trimmed.startsWith(avatarAssetUrlPrefix)) return ''
-  const fileName = trimmed.slice(avatarAssetUrlPrefix.length).replace(/^\/+|\/+$/g, '')
-  return safeAvatarAssetName(fileName) ? fileName : ''
-}
+  codeRuntime.peekForTests(scope, kind, target)
 
 export const resolveUserAvatarAssetPath = (avatarImageUrl: string) => {
-  const fileName = avatarAssetNameFromUrl(avatarImageUrl)
-  if (!fileName) return ''
-  return resolve(avatarAssetDirectory(), fileName)
-}
-
-const avatarAssetExists = (avatarImageUrl: string) => {
-  const assetPath = resolveUserAvatarAssetPath(avatarImageUrl)
-  if (!assetPath) return false
-  try {
-    return statSync(assetPath).isFile()
-  } catch {
-    return false
-  }
-}
-
-const avatarMimeFromHeader = (buffer: Buffer, filePath: string) => {
-  if (buffer.length >= 8 && buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return 'image/png'
-  if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return 'image/jpeg'
-  const gifHeader = buffer.subarray(0, 6).toString('ascii')
-  if (gifHeader === 'GIF87a' || gifHeader === 'GIF89a') return 'image/gif'
-  if (buffer.length >= 12 && buffer.subarray(0, 4).toString('ascii') === 'RIFF' && buffer.subarray(8, 12).toString('ascii') === 'WEBP') return 'image/webp'
-  if (buffer.length >= 2 && buffer.subarray(0, 2).toString('ascii') === 'BM') return 'image/bmp'
-  const extensionMime = avatarMimeByExtension[extname(filePath).toLowerCase()] || ''
-  if (extensionMime === 'image/svg+xml') {
-    const prefix = buffer.subarray(0, Math.min(buffer.length, 512)).toString('utf-8').trimStart().toLowerCase()
-    if (prefix.startsWith('<svg') || (prefix.startsWith('<?xml') && prefix.includes('<svg'))) return extensionMime
-  }
-  return ''
+  return avatarRuntime.resolveAssetPath(avatarImageUrl)
 }
 
 const passwordScore = (password: string) => {
@@ -845,7 +689,7 @@ export const configureUserAccountBackendRuntime = (config: UserAccountBackendRun
     accountCenterUrl: String(config.accountCenterUrl ?? process.env.AIOPSTERM_USER_ACCOUNT_CENTER_URL ?? '').trim(),
     openExternal: config.openExternal
   }
-  userCodeCooldowns.clear()
+  codeRuntime.reset()
   userAccountStateLoaded = false
   userAccountLoadedStateFilePath = ''
   applyInitialUserAccountState()
@@ -853,7 +697,7 @@ export const configureUserAccountBackendRuntime = (config: UserAccountBackendRun
 
 export const resetUserAccountForTests = () => {
   applyInitialUserAccountState()
-  userCodeCooldowns.clear()
+  codeRuntime.reset()
   userAccountStateLoaded = true
   userAccountLoadedStateFilePath = runtimeConfig.stateFilePath
 }
@@ -909,10 +753,10 @@ export const loginUserAccount = (input: AiopsUserLoginInput): AiopsUserMutationR
 
   if (input.method === 'email') {
     const email = trimText(input.email)
-    const code = normalizeUserCode(input.code)
+    const code = normalizeUserAccountCode(input.code)
     if (!email || !code) return errorResult('USER_EMAIL_LOGIN_REQUIRED', '请输入邮箱和验证码')
     if (!isValidEmail(email)) return errorResult('USER_EMAIL_INVALID', '邮箱格式不正确')
-    const verificationError = verifyUserCode('login', 'email', email, code)
+    const verificationError = codeRuntime.verify('login', 'email', email, code)
     if (verificationError) return verificationError
     loginProfile({
       email,
@@ -921,15 +765,15 @@ export const loginUserAccount = (input: AiopsUserLoginInput): AiopsUserMutationR
       registrationCode: 2,
       lastLoginMethod: 'email'
     })
-    clearUserCodeCooldown('login', 'email', email)
+    codeRuntime.clear('login', 'email', email)
     return successMutation('邮箱登录成功，本地数据库初始化完成')
   }
 
   const mobile = trimText(input.mobile)
-  const code = normalizeUserCode(input.code)
+  const code = normalizeUserAccountCode(input.code)
   if (!mobile || !code) return errorResult('USER_MOBILE_LOGIN_REQUIRED', '请输入手机号和验证码')
   if (!isValidMobile(mobile)) return errorResult('USER_MOBILE_INVALID', '手机号格式不正确')
-  const verificationError = verifyUserCode('login', 'mobile', mobile, code)
+  const verificationError = codeRuntime.verify('login', 'mobile', mobile, code)
   if (verificationError) return verificationError
   loginProfile({
     mobile,
@@ -937,7 +781,7 @@ export const loginUserAccount = (input: AiopsUserLoginInput): AiopsUserMutationR
     registrationCode: 7,
     lastLoginMethod: 'mobile'
   })
-  clearUserCodeCooldown('login', 'mobile', mobile)
+  codeRuntime.clear('login', 'mobile', mobile)
   return successMutation('手机号登录成功，本地数据库初始化完成')
 }
 
@@ -980,43 +824,10 @@ export const sendUserLoginCode = (input: AiopsUserCodeInput): AiopsUserCodeResul
   const value = trimText(input.value)
   if (input.kind === 'email' && !isValidEmail(value)) return errorResult('USER_EMAIL_INVALID', '邮箱格式不正确')
   if (input.kind === 'mobile' && !isValidMobile(value)) return errorResult('USER_MOBILE_INVALID', '手机号格式不正确')
-  return issueUserCodeCooldown('login', input.kind, value, `${input.kind === 'email' ? '邮箱' : '手机'}登录验证码已发送`)
+  return codeRuntime.issue('login', input.kind, value, `${input.kind === 'email' ? '邮箱' : '手机'}登录验证码已发送`)
 }
 
-export const prepareUserAvatarImage = async (input: AiopsUserAvatarPrepareInput): Promise<AiopsUserAvatarPrepareResult> => {
-  const filePath = trimText(input?.filePath)
-  if (!filePath) return errorResult('USER_AVATAR_PATH_REQUIRED', '请选择头像图片')
-  try {
-    const info = await stat(filePath)
-    if (!info.isFile()) return errorResult('USER_AVATAR_NOT_FILE', '请选择图片文件')
-    if (info.size <= 0) return errorResult('USER_AVATAR_EMPTY', '头像图片不能为空')
-    if (info.size > maxAvatarBytes) return errorResult('USER_AVATAR_TOO_LARGE', '头像图片不能超过 2MB')
-    const content = await readFile(filePath)
-    const mimeType = avatarMimeFromHeader(content, filePath)
-    if (!mimeType) return errorResult('USER_AVATAR_INVALID_IMAGE', '请选择图片文件')
-    const digest = createHash('sha256').update(content).digest('hex')
-    const assetFileName = `${digest}${avatarExtensionByMime[mimeType] || extname(filePath).toLowerCase()}`
-    if (!safeAvatarAssetName(assetFileName)) return errorResult('USER_AVATAR_INVALID_IMAGE', '请选择图片文件')
-    const assetPath = join(avatarAssetDirectory(), assetFileName)
-    mkdirSync(dirname(assetPath), { recursive: true })
-    if (resolve(filePath) !== assetPath) await copyFile(filePath, assetPath)
-    return {
-      ok: true,
-      data: {
-        filePath,
-        name: basename(filePath),
-        mimeType,
-        size: content.byteLength,
-        dataUrl: `data:${mimeType};base64,${content.toString('base64')}`,
-        avatarImageUrl: avatarAssetUrl(assetFileName),
-        assetFileName,
-        message: '头像图片已读取'
-      }
-    }
-  } catch (error) {
-    return errorResult('USER_AVATAR_READ_FAILED', error instanceof Error ? error.message : '图片读取失败')
-  }
-}
+export const prepareUserAvatarImage = (input: AiopsUserAvatarPrepareInput): Promise<AiopsUserAvatarPrepareResult> => avatarRuntime.prepare(input)
 
 const validateProfileUpdate = (input: AiopsUserProfileUpdateInput) => {
   ensureUserAccountStateLoaded()
@@ -1036,7 +847,7 @@ export const updateUserProfile = (input: AiopsUserProfileUpdateInput): AiopsUser
   const previousUsername = profileStore.username
   const nextUsername = input.username !== undefined ? trimText(input.username) : profileStore.username
   const nextAvatarImageUrl = input.avatarImageUrl !== undefined ? trimText(input.avatarImageUrl) : profileStore.avatarImageUrl
-  if (input.avatarImageUrl !== undefined && nextAvatarImageUrl && !avatarAssetExists(nextAvatarImageUrl)) {
+  if (input.avatarImageUrl !== undefined && nextAvatarImageUrl && !avatarRuntime.assetExists(nextAvatarImageUrl)) {
     return errorResult('USER_AVATAR_ASSET_INVALID', '头像图片必须来自后端头像上传结果')
   }
   if (!profileStore.skippedLogin) renameCurrentUserCredential(previousUsername, nextUsername)
@@ -1070,19 +881,19 @@ export const sendUserContactCode = (input: AiopsUserCodeInput): AiopsUserCodeRes
   const value = trimText(input.value)
   const validation = validateContact(input.kind, value)
   if (validation) return errorResult(input.kind === 'email' ? 'USER_EMAIL_INVALID' : 'USER_MOBILE_INVALID', validation)
-  return issueUserCodeCooldown('contact', input.kind, value, `${input.kind === 'email' ? '邮箱' : '手机'}验证码已发送`)
+  return codeRuntime.issue('contact', input.kind, value, `${input.kind === 'email' ? '邮箱' : '手机'}验证码已发送`)
 }
 
 export const bindUserContact = (input: AiopsUserContactBindInput): AiopsUserMutationResult => {
   const value = trimText(input.value)
-  const code = normalizeUserCode(input.code)
+  const code = normalizeUserAccountCode(input.code)
   const validation = validateContact(input.kind, value)
   if (validation) return errorResult(input.kind === 'email' ? 'USER_EMAIL_INVALID' : 'USER_MOBILE_INVALID', validation)
   if (!code) return errorResult('USER_CONTACT_CODE_REQUIRED', `请输入${input.kind === 'email' ? '邮箱' : '手机'}验证码`)
-  const verificationError = verifyUserCode('contact', input.kind, value, code)
+  const verificationError = codeRuntime.verify('contact', input.kind, value, code)
   if (verificationError) return verificationError
   applyProfile({ [input.kind]: value })
-  clearUserCodeCooldown('contact', input.kind, value)
+  codeRuntime.clear('contact', input.kind, value)
   return successMutation(input.kind === 'email' ? '邮箱绑定成功' : '手机号绑定成功')
 }
 
