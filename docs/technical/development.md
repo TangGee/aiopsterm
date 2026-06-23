@@ -83,3 +83,33 @@ npm run test:e2e
 ```
 
 Package and release work should also use the package audits documented in the usage package verification guide.
+
+## Platform Iteration
+
+Cross-platform work should stay iterative: make one narrow platform change, add focused tests or audits for that boundary, then commit locally. Do not push from the implementation loop unless a separate release or collaboration step asks for it.
+
+Keep compatibility layers thin and prefer Electron or Node runtime facilities over app-wide branching. Current platform seams are:
+
+- `src/main/backend/app/platformRuntime.ts` for local shell defaults, executable suffix lookup, and transient socket/named-pipe paths.
+- `src/renderer/src/services/files/filesRuntime.ts` for file-browser path style. Local Windows sessions use Windows paths; remote and SFTP sessions keep POSIX paths.
+- Existing Electron preload IPC for platform discovery, such as `window.aiops.platform()`, instead of renderer-side OS probing.
+
+Package scripts are platform entry points, not proof of support:
+
+```bash
+npm run build:linux
+npm run build:deb
+npm run build:mac
+npm run build:mac:dir
+npm run build:win
+npm run build:win:dir
+```
+
+`build:codex` is a Node dispatcher. Linux and macOS continue through the shell-based Codex package builder. Windows requires a complete Codex package from `AIOPSTERM_CODEX_PACKAGE_DIR` or a package entrypoint from `AIOPSTERM_CODEX_BIN` before app packaging.
+
+For package-facing changes, run at least:
+
+```bash
+npm run audit:package-config
+npm run typecheck
+```
