@@ -123,35 +123,6 @@
       {{ workspace.k8sClusterNotice }}
     </div>
 
-    <div
-      v-if="workspace.k8sDeleteConfirmCluster"
-      class="file-modal"
-    >
-      <div class="file-modal-card small k8s-delete-confirm">
-        <header>
-          <strong>删除集群</strong>
-          <button
-            title="关闭"
-            @click="workspace.cancelDeleteK8sCluster"
-          >
-            ×
-          </button>
-        </header>
-        <p>
-          确定删除集群 <strong>{{ workspace.k8sDeleteConfirmCluster.name }}</strong> 吗？
-        </p>
-        <p>关联的 Kubernetes 终端标签和本地 context 记录会一并移除。</p>
-        <footer>
-          <button @click="workspace.cancelDeleteK8sCluster">取消</button>
-          <button
-            class="danger"
-            @click="workspace.confirmDeleteK8sCluster"
-          >
-            删除
-          </button>
-        </footer>
-      </div>
-    </div>
   </section>
 </template>
 

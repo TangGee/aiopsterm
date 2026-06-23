@@ -12218,6 +12218,13 @@ describe('AppShell', () => {
       expect(workspace.text()).toContain('prod/admin')
       expect(workspace.text()).toContain('本地集群')
       expect(workspace.text()).toContain('堡垒机资源')
+      store.requestDeleteK8sCluster('k8s-1')
+      await workspace.vm.$nextTick()
+      await panel.vm.$nextTick()
+      expect(panel.findAll('.k8s-delete-confirm')).toHaveLength(0)
+      expect(workspace.findAll('.k8s-delete-confirm')).toHaveLength(1)
+      store.cancelDeleteK8sCluster()
+      await workspace.vm.$nextTick()
 
       await workspace.findAll('.k8s-context-item').find((item) => item.text().includes('prod/admin'))!.trigger('click')
       expect(store.k8sContexts.find((context) => context.name === 'prod/admin')?.isActive).toBe(true)

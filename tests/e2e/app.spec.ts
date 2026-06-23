@@ -1533,6 +1533,13 @@ test('aiopsterm primary desktop flows', async () => {
     await expect(page.getByText('连接成功')).toBeVisible()
     await page.locator('.k8s-add-cluster-modal footer button').filter({ hasText: '保存' }).click()
     await expect(page.locator('.k8s-config-cluster-item').filter({ hasText: 'manual-cluster' })).toBeVisible()
+    await page.locator('.k8s-cluster-detail input').first().fill('manual-cluster-renamed')
+    await page.locator('.k8s-cluster-detail').getByRole('button', { name: '保存' }).click()
+    await expect(page.locator('.k8s-config-cluster-item').filter({ hasText: 'manual-cluster-renamed' })).toBeVisible()
+    await page.locator('.k8s-cluster-detail').getByTitle('删除').click()
+    await expect(page.locator('.k8s-delete-confirm')).toContainText('manual-cluster-renamed')
+    await page.locator('.k8s-delete-confirm footer button.danger').click()
+    await expect(page.locator('.k8s-config-cluster-item').filter({ hasText: 'manual-cluster-renamed' })).toHaveCount(0)
 
     await page.getByTitle('数据库').click()
     await expect(page.locator('.db-sidebar-header').filter({ hasText: 'Database' })).toBeVisible()
