@@ -1,4 +1,4 @@
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { assetManagementEntries } from '@/config/assets'
 import type {
   AiopsAssetGroupRecord,
@@ -15,7 +15,8 @@ import { createAssetsPanelHostFormRuntime } from '@/services/assetsPanelHostForm
 import { createAssetsPanelImportExportRuntime } from '@/services/assetsPanelImportExportRuntime'
 import { createAssetsPanelKeychainRuntime } from '@/services/assetsPanelKeychainRuntime'
 import { createAssetsPanelManagedRuntime } from '@/services/assetsPanelManagedRuntime'
-import { openSshTerminalLaunch } from '@/services/terminalLaunchRuntime'
+import { createAssetsPanelContextRuntime } from '@/services/assetsPanelContextRuntime'
+import { createAssetsPanelAssetInteractionRuntime } from '@/services/assetsPanelAssetInteractionRuntime'
 import {
   assetGroupAssetCount,
   buildDirectAssetGroups,
@@ -43,10 +44,6 @@ export const useAssetsPanelRuntime = (props: AssetsPanelRuntimeProps) => {
   const managementQuery = ref('')
   const assetQuery = ref('')
   const selectedAssetId = ref<string | null>(null)
-  const assetContextMenuId = ref<string | null>(null)
-  const assetBlankContextMenuOpen = ref(false)
-  const assetGroupContextMenuKey = ref('')
-  const contextPosition = reactive({ x: 0, y: 0 })
   const importNotice = ref('')
   const importHelpOpen = ref(false)
   const managedFormError = ref('')
@@ -56,20 +53,6 @@ export const useAssetsPanelRuntime = (props: AssetsPanelRuntimeProps) => {
   const assetGroupOptionsReady = ref(false)
   const expandedAssetGroupKeys = ref<string[]>([])
   const pendingHostDraftReturn = ref(false)
-  const confirmInput = ref('')
-  const confirmState = reactive<{
-    open: boolean
-    title: string
-    message: string
-    expectedText: string
-    action: null | (() => void | Promise<void>)
-  }>({
-    open: false,
-    title: '',
-    message: '',
-    expectedText: '',
-    action: null
-  })
 
   const filteredManagementEntries = computed(() => {
     const keyword = managementQuery.value.trim().toLowerCase()
@@ -99,11 +82,18 @@ export const useAssetsPanelRuntime = (props: AssetsPanelRuntimeProps) => {
 
   const toAssetInput = (asset: AssetRecord, patch: Partial<AiopsAssetInput> = {}) => assetsPanelAssetToInput(asset, patch)
 
-  const closeAssetContextMenus = () => {
-    assetContextMenuId.value = null
-    assetBlankContextMenuOpen.value = false
-    assetGroupContextMenuKey.value = ''
-  }
+  const contextRuntime = createAssetsPanelContextRuntime({ assets })
+  const {
+    assetContextMenuId,
+    assetBlankContextMenuOpen,
+    assetGroupContextMenuKey,
+    contextPosition,
+    contextAsset,
+    closeAssetContextMenus,
+    openAssetContextMenu,
+    openAssetBlankContextMenu,
+    openAssetGroupContextMenu
+  } = contextRuntime
 
   const directAssetFolders = computed(() => customFolders.value.filter((folder) => folder.scope === 'direct'))
   const bastionAssetFolders = computed(() => customFolders.value.filter((folder) => folder.scope !== 'direct'))
@@ -117,7 +107,6 @@ export const useAssetsPanelRuntime = (props: AssetsPanelRuntimeProps) => {
   )
   const filteredAssetGroups = computed(() => filterAssetGroups(assetGroups.value, assetQuery.value))
   const flatFilteredAssets = computed(() => flattenAssetGroups(filteredAssetGroups.value).flatMap((group) => group.children))
-  const contextAsset = computed(() => assets.value.find((asset) => asset.id === assetContextMenuId.value))
   const sshProxyOptions = computed(() =>
     workspace.sshProxyConfigs
       .map((config) => ({
@@ -137,15 +126,6 @@ export const useAssetsPanelRuntime = (props: AssetsPanelRuntimeProps) => {
     saveAssetRecord,
     closeAssetContextMenus,
     importNotice
-  })
-
-  const keychainRuntime = createAssetsPanelKeychainRuntime({
-    activeAssetView,
-    editorOpen: hostFormRuntime.editorOpen,
-    pendingHostDraftReturn,
-    form: hostFormRuntime.form,
-    confirmInput,
-    confirmState
   })
 
   const exportableAssets = computed(() => assets.value.filter((asset) => asset.asset_type !== 'organization'))
@@ -168,6 +148,44 @@ export const useAssetsPanelRuntime = (props: AssetsPanelRuntimeProps) => {
     closeAssetContextMenus,
     importNotice,
     managedFormError
+  })
+
+  const assetInteractionRuntime = createAssetsPanelAssetInteractionRuntime({
+    workspace,
+    assets,
+    activeAssetView,
+    selectedAssetId,
+    contextAsset,
+    selectedManagedRows: managedRuntime.selectedRows,
+    editorOpen: hostFormRuntime.editorOpen,
+    editMode: hostFormRuntime.editMode,
+    deleteAssetRecords,
+    pruneDeletedRows: managedRuntime.pruneDeletedRows,
+    removeExportIds: importExportRuntime.removeExportIds,
+    refreshOrganizationAssets,
+    openAssetManagement: managedRuntime.openAssetManagement,
+    closeAssetContextMenus,
+    importNotice
+  })
+  const {
+    confirmInput,
+    confirmState,
+    removeAsset,
+    confirmBulkDelete,
+    connectAsset,
+    refreshOrganizationAsset,
+    openOrganizationManagement,
+    closeConfirm,
+    runConfirmAction
+  } = assetInteractionRuntime
+
+  const keychainRuntime = createAssetsPanelKeychainRuntime({
+    activeAssetView,
+    editorOpen: hostFormRuntime.editorOpen,
+    pendingHostDraftReturn,
+    form: hostFormRuntime.form,
+    confirmInput,
+    confirmState
   })
 
   const assetGroupByKey = (key: string, scope: 'direct' | 'bastion' = 'direct') =>
@@ -221,148 +239,6 @@ export const useAssetsPanelRuntime = (props: AssetsPanelRuntimeProps) => {
       return
     }
     activeAssetView.value = entryKey
-  }
-
-  const removeAsset = (assetId: string | null) => {
-    if (!assetId) return
-    const asset = assets.value.find((item) => item.id === assetId)
-    if (!asset) return
-    closeAssetContextMenus()
-    confirmState.open = true
-    confirmState.title = '删除主机'
-    confirmState.message = `确定删除 ${asset.title}？此操作会更新本地资产库。`
-    confirmState.expectedText = asset.title
-    confirmState.action = () => deleteAssets([assetId])
-    confirmInput.value = ''
-  }
-
-  const deleteAssets = async (assetIds: string[]) => {
-    try {
-      await deleteAssetRecords(assetIds, { requireGroups: activeAssetView.value === 'assetConfig' })
-      const idSet = new Set(assetIds)
-      managedRuntime.pruneDeletedRows(assetIds)
-      selectedAssetId.value = selectedAssetId.value && idSet.has(selectedAssetId.value) ? null : selectedAssetId.value
-      importExportRuntime.removeExportIds(assetIds)
-      importNotice.value = `已删除 ${assetIds.length} 个主机。`
-    } catch (error) {
-      importNotice.value = error instanceof Error ? error.message : '删除主机失败。'
-    }
-  }
-
-  const confirmBulkDelete = () => {
-    if (!managedRuntime.selectedRows.value.length) return
-    confirmState.open = true
-    confirmState.title = '批量删除主机'
-    confirmState.message = `确定删除选中的 ${managedRuntime.selectedRows.value.length} 个主机？`
-    confirmState.expectedText = ''
-    confirmState.action = () => deleteAssets([...managedRuntime.selectedRows.value])
-    confirmInput.value = ''
-  }
-
-  const connectAsset = async (assetId: string | null) => {
-    if (!assetId) return
-    const asset = assets.value.find((item) => item.id === assetId)
-    if (!asset) {
-      closeAssetContextMenus()
-      return
-    }
-    selectedAssetId.value = asset.id
-    const previousActivePanelId = workspace.activePanelId
-    workspace.createPanel()
-    workspace.renamePanel(workspace.activePanelId, asset.name || asset.title)
-    workspace.replaceTerminalOutput(workspace.activePanelId, '')
-    const panelId = workspace.activePanelId
-    const discardPendingPanel = () => workspace.discardPendingTerminalPanel(panelId, previousActivePanelId)
-    const connected = await openSshTerminalLaunch(
-      {
-        panelId,
-        terminalType: workspace.terminalSettings.terminalType,
-        discardPendingPanel,
-        setNotice: (message) => {
-          importNotice.value = message
-          closeAssetContextMenus()
-        },
-        applyLocalTerminalSession: workspace.applyLocalTerminalSession,
-        applySshTerminalSession: workspace.applySshTerminalSession,
-        registerSshSession: workspace.registerSshSession
-      },
-      asset,
-      { title: asset.name || asset.title }
-    )
-    if (!connected) return
-    workspace.selectedContexts = [
-      ...workspace.selectedContexts.filter((item) => item.id !== asset.id),
-      { id: asset.id, kind: 'hosts', label: asset.host, detail: asset.name || asset.title }
-    ]
-    hostFormRuntime.editorOpen.value = false
-    hostFormRuntime.editMode.value = false
-    if (workspace.onboardingActiveTour === 'addAndConnectHost') {
-      workspace.nextOnboardingStep()
-    }
-    workspace.setActiveModule('workspace')
-    closeAssetContextMenus()
-  }
-
-  const openAssetContextMenu = (event: MouseEvent, assetId: string) => {
-    assetContextMenuId.value = assetId
-    assetBlankContextMenuOpen.value = false
-    assetGroupContextMenuKey.value = ''
-    const menuWidth = 150
-    const menuHeight = 220
-    const padding = 10
-    contextPosition.x = Math.max(padding, Math.min(event.clientX, window.innerWidth - menuWidth - padding))
-    contextPosition.y = Math.max(padding, Math.min(event.clientY, window.innerHeight - menuHeight - padding))
-  }
-
-  const positionAssetContextMenu = (event: MouseEvent, menuWidth = 150, menuHeight = 90) => {
-    const padding = 10
-    contextPosition.x = Math.max(padding, Math.min(event.clientX, window.innerWidth - menuWidth - padding))
-    contextPosition.y = Math.max(padding, Math.min(event.clientY, window.innerHeight - menuHeight - padding))
-  }
-
-  const openAssetBlankContextMenu = (event: MouseEvent) => {
-    if ((event.target as HTMLElement | null)?.closest('.asset-tree-group-row, .asset-tree-host-row, .asset-context-menu')) return
-    assetContextMenuId.value = null
-    assetGroupContextMenuKey.value = ''
-    assetBlankContextMenuOpen.value = true
-    positionAssetContextMenu(event)
-  }
-
-  const openAssetGroupContextMenu = (event: MouseEvent, groupKey: string) => {
-    assetContextMenuId.value = null
-    assetBlankContextMenuOpen.value = false
-    assetGroupContextMenuKey.value = groupKey
-    positionAssetContextMenu(event)
-  }
-
-  const refreshOrganizationAsset = async () => {
-    if (contextAsset.value) {
-      const title = contextAsset.value.title
-      try {
-        const expectedOrganizationId = contextAsset.value.id
-        await refreshOrganizationAssets(expectedOrganizationId, '刷新堡垒机资源失败。')
-        importNotice.value = `已刷新堡垒机资源 ${title}。`
-      } catch (error) {
-        importNotice.value = error instanceof Error ? error.message : '刷新堡垒机资源失败。'
-      }
-    }
-    closeAssetContextMenus()
-  }
-
-  const openOrganizationManagement = () => {
-    managedRuntime.openAssetManagement(contextAsset.value?.asset_type === 'organization' ? contextAsset.value.id : null)
-  }
-
-  const closeConfirm = () => {
-    confirmState.open = false
-    confirmState.action = null
-    confirmInput.value = ''
-  }
-
-  const runConfirmAction = async () => {
-    if (confirmState.expectedText && confirmInput.value !== confirmState.expectedText) return
-    await confirmState.action?.()
-    closeConfirm()
   }
 
   const onDocumentPointerDown = (event: MouseEvent) => {
