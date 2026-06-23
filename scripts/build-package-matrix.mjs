@@ -1,4 +1,6 @@
-import { packageTargetNames, packageTargets, runNpmScript } from './package-targets.mjs'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+import { cleanPackageTargetOutput, packageTargetNames, packageTargets, runNpmScript } from './package-targets.mjs'
 
 const requestedTargets = process.argv.slice(2).filter(Boolean)
 const targets = requestedTargets.length ? requestedTargets : packageTargetNames.filter((name) => packageTargets[name].platform === process.platform)
@@ -10,12 +12,15 @@ if (unknown.length) {
   process.exit(2)
 }
 
+const packageJson = JSON.parse(readFileSync(resolve('package.json'), 'utf8'))
+
 for (const targetName of targets) {
   const target = packageTargets[targetName]
   if (target.platform !== process.platform) {
     console.error(`[aiopsterm] ${targetName} must be built on ${target.platform}; current platform is ${process.platform}.`)
     process.exit(1)
   }
+  cleanPackageTargetOutput(targetName, packageJson.version)
   const result = runNpmScript(target.buildScript)
   if ((result.status ?? 1) !== 0) process.exit(result.status ?? 1)
 }

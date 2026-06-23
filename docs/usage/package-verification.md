@@ -6,7 +6,34 @@ Before packaging changes are merged, run the package configuration audit:
 npm run audit:package-config
 ```
 
-`audit:package-config` verifies that the package scripts expose `build:codex`, `audit:codex-runtime`, `audit:packaged-app`, `smoke:packaged`, `build:linux`, `build:deb`, `build:mac`, `build:mac:dir`, `build:win`, and `build:win:dir`; that Linux/macOS/Windows package scripts build the bundled Codex package before electron-builder; that the Codex build keeps the local shell builder for Linux/macOS and uses a Node entrypoint for Windows package validation; that electron-builder keeps the External reference reference tree excluded; that Linux targets include AppImage and deb; that macOS targets include dmg and zip; that Windows targets include NSIS; that artifact names are explicit; that `resources/icons`, `resources/codex-aiopsterm-mcp.js`, `resources/aiopsterm-external-codex-mcp.js`, and `resources/aiopsterm-agent-hook.js` are copied into packaged resources; that the afterPack hook copies the complete generated Codex package into packaged resources; that the GPT-generated source PNG exists; that the required Linux PNG icon sizes are valid; and that the `aiopsterm://` protocol remains registered.
+`audit:package-config` verifies that the package scripts expose `build:codex`, `audit:codex-runtime`, `audit:packaged-app`, `audit:linux-appimage`, `audit:linux-deb`, `smoke:packaged`, `test:e2e:packaged`, `package:build`, `package:build:matrix`, `package:verify`, `build:linux:appimage`, `build:linux`, `build:deb`, `build:mac`, `build:mac:dir`, `build:win`, and `build:win:dir`; that Linux/macOS/Windows package scripts build the bundled Codex package before electron-builder; that the Codex build keeps the local shell builder for Linux/macOS and uses a Node entrypoint for Windows package validation; that electron-builder keeps the External reference reference tree excluded; that Linux targets include AppImage and deb; that macOS targets include dmg and zip; that Windows targets include NSIS; that artifact names are explicit; that `resources/icons`, `resources/codex-aiopsterm-mcp.js`, `resources/aiopsterm-external-codex-mcp.js`, and `resources/aiopsterm-agent-hook.js` are copied into packaged resources; that the afterPack hook copies the complete generated Codex package into packaged resources; that the GPT-generated source PNG exists; that the required Linux PNG icon sizes are valid; and that the `aiopsterm://` protocol remains registered.
+
+The target-level package commands split the release surface into four installable package targets:
+
+| Target | Host runner | Build command | Main expected artifact |
+| --- | --- | --- | --- |
+| `linux-appimage` | Linux | `npm run package:build -- linux-appimage` | `dist/aiopsterm-<version>-linux-<arch>.AppImage` |
+| `linux-deb` | Linux | `npm run package:build -- linux-deb` | `dist/aiopsterm-<version>-linux-amd64.deb` on x64 |
+| `macos` | macOS | `npm run package:build -- macos` | `dist/aiopsterm-<version>-macos-<arch>.dmg` and `.zip` |
+| `windows` | Windows | `npm run package:build -- windows` | `dist/aiopsterm-<version>-setup-<arch>.exe` |
+
+`package:build` refuses to build a target on the wrong host platform and removes that target's previous artifact/unpacked output before invoking the platform package script. `package:build:matrix` builds every target supported by the current host when no targets are passed, or the named targets when arguments are provided:
+
+```bash
+npm run package:build:matrix
+npm run package:build:matrix -- linux-appimage linux-deb
+```
+
+After building a target on its native runner, run:
+
+```bash
+npm run package:verify -- linux-appimage
+npm run package:verify -- linux-deb
+npm run package:verify -- macos
+npm run package:verify -- windows
+```
+
+`package:verify` refuses to verify a target on the wrong host platform. On the target host it runs `audit:package-config`, `audit:packaged-app`, and `smoke:packaged`, then runs the split Linux installer audit for `linux-appimage` or `linux-deb`, and finally checks that the expected artifact exists.
 
 `audit:codex-runtime` checks the generated Codex package before app packaging. It requires `codex-package.json`, the platform entrypoint (`bin/codex` or `bin/codex.exe`), bundled `rg` or `rg.exe`, and Linux `bwrap`; on Linux it also rejects unresolved dynamic dependencies and OpenSSL 1.1 dynamic links such as `libssl.so.1.1` / `libcrypto.so.1.1`.
 
@@ -31,6 +58,14 @@ npm run audit:linux-package
 
 On Linux without `DISPLAY`, the script attempts to re-run itself under `xvfb-run` when that command is available. You can pass an explicit executable path as the first argument.
 
+The packaged Playwright check exercises the packaged executable more deeply:
+
+```bash
+npm run test:e2e:packaged
+```
+
+It launches the current platform's unpacked packaged app through Playwright Electron with an isolated `AIOPSTERM_USER_DATA_DIR`, waits for the main window, verifies that the local terminal and Files module are reachable, and calls `notification.create` plus `notification.list` through the packaged control socket or Windows named pipe. Override the executable with `AIOPSTERM_PACKAGED_APP=/path/to/app`; override the control endpoint with `AIOPSTERM_PACKAGED_CONTROL_SOCKET=...` when debugging a custom package layout.
+
 After a directory or full package build on any platform, run the unpacked resource audit:
 
 ```bash
@@ -52,6 +87,18 @@ npm run audit:packaged-app
 These checks assume Linux tooling is available, including `xvfb-run` for the packaged smoke test and `dpkg-deb` for deb metadata extraction.
 
 After a deb-only build with `npm run build:deb`, verify that `dist/aiopsterm-<version>-linux-amd64.deb` exists. The full `audit:linux-package` check expects both AppImage and deb outputs, so run it after `build:linux` when validating the complete Linux package set.
+
+After an AppImage-only build with `npm run build:linux:appimage`, run:
+
+```bash
+npm run audit:linux-appimage
+```
+
+After a deb-only build with `npm run build:deb`, run:
+
+```bash
+npm run audit:linux-deb
+```
 
 macOS packaging is configured with:
 

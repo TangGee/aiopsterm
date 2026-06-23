@@ -6,6 +6,7 @@
         :key="item.key"
         class="rail-button"
         :class="{ active: workspace.activeModule === item.key }"
+        :data-module-key="item.key"
         :data-onboarding-id="
           item.key === 'assets'
             ? 'assets-entry'
@@ -28,6 +29,7 @@
           v-if="item.key === 'user'"
           class="rail-button user-rail-trigger"
           :class="{ active: workspace.activeModule === item.key, 'has-avatar': !workspace.userProfile.skippedLogin }"
+          :data-module-key="item.key"
           :title="t(item.labelKey)"
           @click.stop="userMenuOpen = !userMenuOpen"
         >
@@ -47,6 +49,7 @@
           v-else
           class="rail-button"
           :class="{ active: workspace.activeModule === item.key }"
+          :data-module-key="item.key"
           :data-onboarding-id="item.key === 'settings' ? 'setting-entry' : undefined"
           :title="t(item.labelKey)"
           @click="openModule(item.key)"

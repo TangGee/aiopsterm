@@ -45,7 +45,8 @@ const app = await electron.launch({
 try {
   const page = await app.firstWindow({ timeout: 15_000 })
   await page.waitForLoadState('domcontentloaded')
-  await page.locator('.terminal-tab').filter({ hasText: 'local shell' }).waitFor({ timeout: 15_000 })
+  await page.getByText('127.0.0.1', { exact: true }).dblclick({ timeout: 15_000 })
+  await page.locator('.terminal-tab').first().waitFor({ timeout: 15_000 })
   await page.locator('.terminal-output-mirror').first().waitFor({ timeout: 15_000 })
   console.log(`packaged-smoke-ok ${executablePath}`)
 } finally {

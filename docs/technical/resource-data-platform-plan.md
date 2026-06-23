@@ -32,9 +32,9 @@ Current status:
 
 | Platform | Status | Evidence today | Not yet proven |
 | --- | --- | --- | --- |
-| Linux | Baseline supported path | `build:linux`, `build:deb`, `smoke:packaged`, and `audit:linux-package` exist. Linux packaging has package artifact checks for Codex, `node-pty`, icons, deb desktop protocol registration, and artifact shape. | Continue running the full smoke/audit gates for release candidates. |
-| macOS | Configured but not supported yet | `electron-builder.yml` has `mac` targets and `package.json` exposes `build:mac` / `build:mac:dir`. Codex target path helpers know Darwin triples. `smoke:packaged` and `audit:packaged-app` now infer the macOS unpacked app layout. | A macOS runner must prove build, app launch, packaged resource resolution, native module loading, local terminal, SQLite-backed catalogs, deep links, and signing/notarization policy. |
-| Windows | Configured but not supported yet | `electron-builder.yml` has a `win` target, `package.json` exposes `build:win` / `build:win:dir`, Codex package checks handle `codex.exe` and `rg.exe`, renderer local file browsing uses native Windows paths, and transient IPC paths use named pipes. | A Windows runner must prove package build, app launch, packaged resource resolution, native module loading, local terminal, SQLite-backed catalogs, named pipes, protocol URL arguments, and installer behavior. |
+| Linux | Baseline supported path | `build:linux`, `build:linux:appimage`, `build:deb`, `package:build -- linux-appimage`, `package:build -- linux-deb`, `package:verify`, `smoke:packaged`, `test:e2e:packaged`, `audit:linux-appimage`, `audit:linux-deb`, and `audit:linux-package` exist. Linux packaging has package artifact checks for Codex, `node-pty`, icons, deb desktop protocol registration, and artifact shape. | Continue running the full smoke/audit gates for release candidates. |
+| macOS | Configured but not supported yet | `electron-builder.yml` has `mac` targets and `package.json` exposes `build:mac`, `build:mac:dir`, and `package:build -- macos`. Codex target path helpers know Darwin triples. `smoke:packaged`, `audit:packaged-app`, and `test:e2e:packaged` infer the macOS unpacked app layout. AI notifications route through Electron native notifications. | A macOS runner must prove build, app launch, packaged resource resolution, native module loading, local terminal, SQLite-backed catalogs, deep links, and signing/notarization policy. |
+| Windows | Configured but not supported yet | `electron-builder.yml` has a `win` target, `package.json` exposes `build:win`, `build:win:dir`, and `package:build -- windows`, Codex package checks handle `codex.exe` and `rg.exe`, renderer local file browsing uses native Windows paths, transient IPC paths use named pipes, and packaged E2E calls the control notification API through the Windows pipe path. AI notifications route through Electron native notifications. | A Windows runner must prove package build, app launch, packaged resource resolution, native module loading, local terminal, SQLite-backed catalogs, named pipes, protocol URL arguments, and installer behavior. |
 
 Do not describe macOS or Windows as supported until the evidence above exists in the repository and has been run on the corresponding platform.
 
@@ -99,6 +99,9 @@ The exact `electron-store` filename can vary by Electron Store behavior, but the
 - The Codex runtime has target triples for Linux, macOS, and Windows. The npm `build:codex` entrypoint is a Node dispatcher: Linux/macOS continue through the existing shell build path, while Windows requires a complete generated Codex package or explicit `AIOPSTERM_CODEX_PACKAGE_DIR` / `AIOPSTERM_CODEX_BIN`.
 - Linux package auditing checks Codex binary presence, node-pty pruning, desktop protocol registration, and artifact shape.
 - `audit:packaged-app` provides a cross-platform unpacked-app resource audit for Linux, macOS, and Windows; `audit:linux-package` remains the deeper Linux installer/artifact audit.
+- `package:build`, `package:build:matrix`, and `package:verify` split the installable package targets into `linux-appimage`, `linux-deb`, `macos`, and `windows`, and reject attempts to build or verify a target on the wrong host platform.
+- `test:e2e:packaged` launches the unpacked packaged app, checks the main window/local terminal/Files module entry points, and verifies packaged control notifications through the platform control socket or Windows named pipe.
+- Managed AI and control notifications use Electron's native `Notification` API through a small main-process adapter instead of renderer-side platform branches.
 
 ## Gaps Before macOS and Windows
 
@@ -118,10 +121,11 @@ Each desktop platform needs the same completion gates:
 
 ### Packaging Scripts
 
-`electron-builder.yml` has Linux, macOS, and Windows sections. `package.json` exposes `build:linux`, `build:deb`, `build:mac`, `build:mac:dir`, `build:win`, and `build:win:dir`. `scripts/audit-package-config.mjs` requires those entries and verifies that each platform package command builds the bundled Codex package before invoking electron-builder.
+`electron-builder.yml` has Linux, macOS, and Windows sections. `package.json` exposes `build:linux:appimage`, `build:linux`, `build:deb`, `build:mac`, `build:mac:dir`, `build:win`, and `build:win:dir`. Target wrappers expose the four installable package outputs through `package:build -- linux-appimage`, `package:build -- linux-deb`, `package:build -- macos`, and `package:build -- windows`. `scripts/audit-package-config.mjs` requires those entries and verifies that each platform package command builds the bundled Codex package before invoking electron-builder.
 
 Remaining direction:
 
+- run `package:build -- linux-appimage`, `package:build -- linux-deb`, and matching `package:verify` gates on Linux for release candidates;
 - run `build:win` / `build:win:dir` on Windows and record the result;
 - run `build:mac` / `build:mac:dir` on macOS and record the result;
 - extend platform-specific audits if installer metadata needs checks beyond the cross-platform unpacked-app audit.
@@ -206,6 +210,7 @@ This is not a critical data bug, but for macOS/Windows polish the target should 
 - Run Windows build scripts and package-config audit checks on Windows.
 - Run `audit:packaged-app` on Windows and add installer-specific checks if the NSIS artifact needs metadata validation.
 - Run packaged smoke tests with `AIOPSTERM_USER_DATA_DIR` in a temp directory on each platform.
+- Run `test:e2e:packaged` on each native runner after the package build.
 - Keep Linux audit as the baseline reference, but do not make Linux assumptions global.
 
 ### Phase 2: Runtime Verification

@@ -95,6 +95,12 @@ Build Linux packages:
 npm run build:linux
 ```
 
+Build only the Linux AppImage package:
+
+```bash
+npm run build:linux:appimage
+```
+
 Build only the Debian package:
 
 ```bash
@@ -113,14 +119,40 @@ For a macOS unpacked directory build during package debugging:
 npm run build:mac:dir
 ```
 
-`build:linux` and `build:deb` first regenerate the self-owned app icon PNGs from `resources/app-icon-source.png`, then build and audit the bundled Codex package with `build:codex`, run `rebuild:native` with an explicit Electron headers URL, then run electron-builder with automatic rebuild disabled. Linux `build:codex` runs the locally modified `codex/` tree's package builder for the musl target (`x86_64-unknown-linux-musl` on x64), uses the Rust toolchain declared by Codex, and rejects runtimes that still depend on OpenSSL 1.1 dynamic libraries. The Linux build host needs `ca-certificates curl musl-tools pkg-config libcap-dev g++ clang libc++-dev libc++abi-dev lld xz-utils`; CI can also supply `AIOPSTERM_CODEX_BWRAP_BIN` / `AIOPSTERM_CODEX_RG_BIN` for prebuilt helper resources, and `RUSTY_V8_ARCHIVE` plus `RUSTY_V8_SRC_BINDING_PATH` when V8 artifacts are pre-cached. Linux packaging uses the self-owned PNG icon set under `resources/icons`, copies those PNGs into packaged resources for runtime window icons, copies the complete generated Codex package into `resources/codex`, registers the `aiopsterm://` desktop protocol, and trims packaged native-module build-only files through the `afterPack` hook. If the environment cannot download Electron headers or Codex release artifacts, packaging fails before app packaging starts. In that case, rerun the same command after network access is restored or provide the corresponding local caches.
+Build Windows packages on a Windows runner:
+
+```bash
+npm run build:win
+```
+
+For a Windows unpacked directory build during package debugging:
+
+```bash
+npm run build:win:dir
+```
+
+`build:linux`, `build:linux:appimage`, and `build:deb` first regenerate the self-owned app icon PNGs from `resources/app-icon-source.png`, then build and audit the bundled Codex package with `build:codex`, run `rebuild:native` with an explicit Electron headers URL, then run electron-builder with automatic rebuild disabled. Linux `build:codex` runs the locally modified `codex/` tree's package builder for the musl target (`x86_64-unknown-linux-musl` on x64), uses the Rust toolchain declared by Codex, and rejects runtimes that still depend on OpenSSL 1.1 dynamic libraries. The Linux build host needs `ca-certificates curl musl-tools pkg-config libcap-dev g++ clang libc++-dev libc++abi-dev lld xz-utils`; CI can also supply `AIOPSTERM_CODEX_BWRAP_BIN` / `AIOPSTERM_CODEX_RG_BIN` for prebuilt helper resources, and `RUSTY_V8_ARCHIVE` plus `RUSTY_V8_SRC_BINDING_PATH` when V8 artifacts are pre-cached. Linux packaging uses the self-owned PNG icon set under `resources/icons`, copies those PNGs into packaged resources for runtime window icons, copies the complete generated Codex package into `resources/codex`, registers the `aiopsterm://` desktop protocol, and trims packaged native-module build-only files through the `afterPack` hook. If the environment cannot download Electron headers or Codex release artifacts, packaging fails before app packaging starts. In that case, rerun the same command after network access is restored or provide the corresponding local caches.
 
 `build:mac` uses the same self-owned build output and electron-builder config, with `dmg` and `zip` targets matching the External reference-style desktop package split. Run it on macOS because macOS targets require the platform signing and packaging toolchain; Linux development machines should use `audit:package-config` to verify the macOS target configuration without attempting to produce a macOS package.
+
+`build:win` uses the same self-owned build output and electron-builder config, with the NSIS installer target. Run it on Windows. The Windows Codex build step validates a complete package supplied through `AIOPSTERM_CODEX_PACKAGE_DIR` or `AIOPSTERM_CODEX_BIN`; it does not run the POSIX shell builder.
+
+Target-level commands wrap those platform scripts and fail fast on the wrong host:
+
+```bash
+npm run package:build -- linux-appimage
+npm run package:build -- linux-deb
+npm run package:build -- macos
+npm run package:build -- windows
+npm run package:build:matrix
+```
 
 Successful Linux packaging produces:
 
 - `dist/aiopsterm-0.1.0-linux-x86_64.AppImage`
 - `dist/aiopsterm-0.1.0-linux-amd64.deb`
+
+Successful macOS packaging produces `dist/aiopsterm-0.1.0-macos-<arch>.dmg` and `dist/aiopsterm-0.1.0-macos-<arch>.zip` on a macOS runner. Successful Windows packaging produces `dist/aiopsterm-0.1.0-setup-<arch>.exe` on a Windows runner.
 
 Run package-level smoke and audit checks after Linux packaging, and run the cross-platform package config audit before packaging changes are merged:
 
@@ -128,6 +160,21 @@ Run package-level smoke and audit checks after Linux packaging, and run the cros
 npm run audit:package-config
 npm run smoke:packaged
 npm run audit:linux-package
+```
+
+For target-specific package verification, run the target verifier after the target build on the same host:
+
+```bash
+npm run package:verify -- linux-appimage
+npm run package:verify -- linux-deb
+npm run package:verify -- macos
+npm run package:verify -- windows
+```
+
+The packaged E2E test launches the unpacked packaged app, checks the main window/local terminal/Files module, and verifies packaged control notifications through the platform control socket or Windows named pipe:
+
+```bash
+npm run test:e2e:packaged
 ```
 
 See [Package Verification](package-verification.md) for the exact package checks.

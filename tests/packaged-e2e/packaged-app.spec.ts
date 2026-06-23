@@ -73,11 +73,13 @@ test('packaged app starts, opens local terminal, browses local files, and accept
     const page = await app.firstWindow({ timeout: 30_000 })
     await page.waitForLoadState('domcontentloaded')
     await expect(page.getByText('aiopsterm', { exact: true })).toBeVisible()
-    await expect(page.locator('.terminal-tab').filter({ hasText: /local shell|本地/i })).toBeVisible({ timeout: 30_000 })
+    await page.getByText('127.0.0.1', { exact: true }).dblclick()
+    await expect(page.locator('.terminal-tab').first()).toBeVisible({ timeout: 30_000 })
     await expect(page.locator('.terminal-output-mirror').first()).toBeVisible()
 
-    await page.locator('.module-button').filter({ hasText: '文件' }).click()
-    await expect(page.locator('.files-panel')).toBeVisible()
+    await page.locator('button[data-module-key="files"]').click()
+    await expect(page.locator('.files-workspace')).toBeVisible()
+    await expect(page.locator('.file-browser').first()).toBeVisible()
 
     const socketPath = process.env.AIOPSTERM_PACKAGED_CONTROL_SOCKET || (await controlSocketPath(userDataDir, app.process().pid || 0))
     const created = await socketJsonRequest(socketPath, {

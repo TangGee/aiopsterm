@@ -91,12 +91,14 @@ Cross-platform work should stay iterative: make one narrow platform change, add 
 Keep compatibility layers thin and prefer Electron or Node runtime facilities over app-wide branching. Current platform seams are:
 
 - `src/main/backend/app/platformRuntime.ts` for local shell defaults, executable suffix lookup, and transient socket/named-pipe paths.
+- `src/main/backend/app/nativeNotificationRuntime.ts` for Electron native desktop notifications behind a testable adapter.
 - `src/renderer/src/services/files/filesRuntime.ts` for file-browser path style. Local Windows sessions use Windows paths; remote and SFTP sessions keep POSIX paths.
 - Existing Electron preload IPC for platform discovery, such as `window.aiops.platform()`, instead of renderer-side OS probing.
 
 Package scripts are platform entry points, not proof of support:
 
 ```bash
+npm run build:linux:appimage
 npm run build:linux
 npm run build:deb
 npm run build:mac
@@ -104,6 +106,21 @@ npm run build:mac:dir
 npm run build:win
 npm run build:win:dir
 ```
+
+Use the target wrappers when validating the four installable package outputs independently:
+
+```bash
+npm run package:build -- linux-appimage
+npm run package:build -- linux-deb
+npm run package:build -- macos
+npm run package:build -- windows
+npm run package:verify -- linux-appimage
+npm run package:verify -- linux-deb
+npm run package:verify -- macos
+npm run package:verify -- windows
+```
+
+`package:build:matrix` builds the targets that belong to the current host platform by default. Each wrapper refuses to run a target on the wrong OS and clears that target's previous artifact/unpacked output before building, so Linux development can prove the Linux AppImage/deb scripts but cannot be used as evidence for macOS or Windows packages.
 
 `build:codex` is a Node dispatcher. Linux and macOS continue through the shell-based Codex package builder. Windows requires a complete Codex package from `AIOPSTERM_CODEX_PACKAGE_DIR` or a package entrypoint from `AIOPSTERM_CODEX_BIN` before app packaging.
 
@@ -113,3 +130,11 @@ For package-facing changes, run at least:
 npm run audit:package-config
 npm run typecheck
 ```
+
+After a package build on the target platform, run:
+
+```bash
+npm run test:e2e:packaged
+```
+
+The packaged E2E launches the unpacked packaged app with an isolated user-data directory, checks the main window, local terminal surface, Files module entry point, and verifies packaged control notifications through the platform control socket or Windows named pipe.
