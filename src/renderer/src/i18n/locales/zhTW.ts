@@ -1,8 +1,7 @@
-import type { LocaleMessages } from '../messages'
+import { completeLocaleMessages } from './complete'
 import { zhCN } from './zhCN'
 
-export const zhTW: LocaleMessages = {
-  ...zhCN,
+export const zhTW = completeLocaleMessages({
   'module.workspace': '工作區',
   'module.aiSessions': 'AI 會話',
   'module.assets': '資產',
@@ -82,4 +81,4 @@ export const zhTW: LocaleMessages = {
   'ai.addContext': '@ 加入上下文',
   'ai.inputPlaceholder': '描述你的運維目標',
   'ai.processing': '處理中'
-}
+}, zhCN)

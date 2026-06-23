@@ -5,6 +5,7 @@ import { managedAiClient } from '@/services/ai/managedAiClient'
 import { terminalClient } from '@/services/terminal/terminalClient'
 import { layoutWidthLimits, useWorkspaceStore } from '@/stores/workspace'
 import { applyDocumentLocale, useI18n, type I18nKey, type SupportedLocale } from '@/i18n'
+import { installStaticTextI18n } from '@/i18n/staticText'
 import { isAiopstermDeepLinkPayload } from '@shared/deepLink'
 import type { AiAgentSessionEvent, ManagedAiSessionFocusRequest } from '@shared/contracts/managedAiSessions'
 import type { TerminalKeyboardInteractiveRequest, TerminalKeyboardInteractiveResult } from '@shared/contracts/terminalSessions'
@@ -383,6 +384,10 @@ export const createAppShellRuntime = (options: AppShellRuntimeOptions) => {
 export const useAppShellRuntime = () => {
   const workspace = useWorkspaceStore()
   const { locale, t } = useI18n()
+  const staticTextI18n = installStaticTextI18n({
+    root: document.body,
+    locale: () => locale.value
+  })
   const runtime = createAppShellRuntime({
     workspace,
     t,
@@ -397,9 +402,22 @@ export const useAppShellRuntime = () => {
     bodyClassList: document.body.classList
   })
 
-  onMounted(runtime.mount)
-  onUnmounted(runtime.dispose)
-  watch(locale, runtime.applyCurrentLocale, { immediate: true })
+  onMounted(() => {
+    runtime.mount()
+    staticTextI18n.start()
+  })
+  onUnmounted(() => {
+    staticTextI18n.dispose()
+    runtime.dispose()
+  })
+  watch(
+    locale,
+    (nextLocale) => {
+      runtime.applyCurrentLocale(nextLocale)
+      staticTextI18n.refresh()
+    },
+    { immediate: true }
+  )
 
   return {
     ...runtime,

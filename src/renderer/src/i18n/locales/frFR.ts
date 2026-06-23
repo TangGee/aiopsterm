@@ -1,8 +1,5 @@
-import type { LocaleMessages } from '../messages'
-import { enUS } from './enUS'
-
-export const frFR: LocaleMessages = {
-  ...enUS,
+import { completeLocaleMessages } from './complete'
+export const frFR = completeLocaleMessages({
   'module.workspace': 'Espace de travail',
   'module.assets': 'Ressources',
   'module.files': 'Fichiers',
@@ -62,4 +59,4 @@ export const frFR: LocaleMessages = {
   'ai.configureModel': 'Configurer le modèle',
   'ai.addContext': '@ Ajouter un contexte',
   'ai.inputPlaceholder': 'Décrivez votre objectif opérationnel'
-}
+})

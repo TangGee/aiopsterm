@@ -1,8 +1,5 @@
-import type { LocaleMessages } from '../messages'
-import { enUS } from './enUS'
-
-export const arAR: LocaleMessages = {
-  ...enUS,
+import { completeLocaleMessages } from './complete'
+export const arAR = completeLocaleMessages({
   'common.settings': 'الإعدادات',
   'common.search': 'بحث',
   'common.save': 'حفظ',
@@ -66,4 +63,4 @@ export const arAR: LocaleMessages = {
   'ai.configureModel': 'إعداد النموذج',
   'ai.addContext': '@ إضافة سياق',
   'ai.inputPlaceholder': 'صف هدف التشغيل لديك'
-}
+})

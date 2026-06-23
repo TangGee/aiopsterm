@@ -1,8 +1,5 @@
-import type { LocaleMessages } from '../messages'
-import { enUS } from './enUS'
-
-export const ruRU: LocaleMessages = {
-  ...enUS,
+import { completeLocaleMessages } from './complete'
+export const ruRU = completeLocaleMessages({
   'module.workspace': 'Рабочая область',
   'module.assets': 'Ресурсы',
   'module.files': 'Файлы',
@@ -62,4 +59,4 @@ export const ruRU: LocaleMessages = {
   'ai.configureModel': 'Настроить модель',
   'ai.addContext': '@ Добавить контекст',
   'ai.inputPlaceholder': 'Опишите вашу операционную цель'
-}
+})

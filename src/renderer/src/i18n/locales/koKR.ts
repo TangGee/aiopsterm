@@ -1,8 +1,5 @@
-import type { LocaleMessages } from '../messages'
-import { enUS } from './enUS'
-
-export const koKR: LocaleMessages = {
-  ...enUS,
+import { completeLocaleMessages } from './complete'
+export const koKR = completeLocaleMessages({
   'module.workspace': '작업 영역',
   'module.assets': '자산',
   'module.files': '파일',
@@ -62,4 +59,4 @@ export const koKR: LocaleMessages = {
   'ai.configureModel': '모델 설정',
   'ai.addContext': '@ 컨텍스트 추가',
   'ai.inputPlaceholder': '운영 목표를 설명하세요'
-}
+})

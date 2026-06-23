@@ -76,6 +76,14 @@ For structural TypeScript or import-path changes, run:
 npm run typecheck
 ```
 
+For renderer UI text changes, run:
+
+```bash
+npm run audit:i18n
+```
+
+This checks that tracked renderer UI text is covered by explicit i18n keys or the static legacy text catalog.
+
 For runtime or user-visible behavior changes, add focused tests at the changed boundary and run the relevant test command. Full end-to-end verification remains the release-level regression gate:
 
 ```bash

@@ -1711,6 +1711,7 @@ describe('AppShell', () => {
     expect(wrapper.find('.ai-header h2').text()).toBe('AI')
     expect(wrapper.find('[data-testid="ai-new-chat"]').attributes('title')).toBe('New chat')
     expect(wrapper.find('[data-onboarding-id="ai-input-editable"]').attributes('data-placeholder')).toBe('Describe your operations goal')
+    expect(wrapper.text()).toContain('chat with AI')
 
     vi.mocked(window.aiops.saveConfig).mockResolvedValueOnce({
       ...store.config,

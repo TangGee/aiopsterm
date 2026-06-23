@@ -1,8 +1,5 @@
-import type { LocaleMessages } from '../messages'
-import { enUS } from './enUS'
-
-export const ptPT: LocaleMessages = {
-  ...enUS,
+import { completeLocaleMessages } from './complete'
+export const ptPT = completeLocaleMessages({
   'module.workspace': 'Área de trabalho',
   'module.assets': 'Ativos',
   'module.files': 'Ficheiros',
@@ -62,4 +59,4 @@ export const ptPT: LocaleMessages = {
   'ai.configureModel': 'Configurar modelo',
   'ai.addContext': '@ Adicionar contexto',
   'ai.inputPlaceholder': 'Descreva o seu objetivo operacional'
-}
+})

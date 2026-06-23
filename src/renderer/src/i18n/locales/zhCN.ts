@@ -1,6 +1,4 @@
-import type { LocaleMessages } from '../messages'
-
-export const zhCN: LocaleMessages = {
+export const zhCN = {
   'common.ai': 'AI',
   'common.agents': 'Agents',
   'common.add': '添加',
@@ -483,4 +481,4 @@ export const zhCN: LocaleMessages = {
   'terminal.mfaCanceled': '已取消二次认证。',
   'terminal.mfaTimeout': '二次认证超时，请重新连接。',
   'terminal.mfaSuccess': '二次认证通过。'
-}
+} as const

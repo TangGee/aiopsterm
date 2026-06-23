@@ -5,6 +5,7 @@
 - [Codex CLI AI Panel](codex-cli-ai-panel.md)
 - [Control Socket](control-socket.md)
 - [External Codex MCP Host Gateway](external-codex-mcp.md)
+- [Internationalization](internationalization.md)
 - [Managed AI Sessions](managed-ai-sessions.md)
 - [Architecture Design Principles](architecture-principles.md)
 - [Resource, Data, and Platform Plan](resource-data-platform-plan.md)

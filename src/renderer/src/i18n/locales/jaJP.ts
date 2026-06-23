@@ -1,8 +1,5 @@
-import type { LocaleMessages } from '../messages'
-import { enUS } from './enUS'
-
-export const jaJP: LocaleMessages = {
-  ...enUS,
+import { completeLocaleMessages } from './complete'
+export const jaJP = completeLocaleMessages({
   'module.workspace': 'ワークスペース',
   'module.assets': 'アセット',
   'module.files': 'ファイル',
@@ -62,4 +59,4 @@ export const jaJP: LocaleMessages = {
   'ai.configureModel': 'モデルを設定',
   'ai.addContext': '@ コンテキストを追加',
   'ai.inputPlaceholder': '運用目標を入力してください'
-}
+})
