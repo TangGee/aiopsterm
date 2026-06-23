@@ -24,6 +24,20 @@ The current direction is mostly sound. The main process is the authority for per
 
 The main process also supports `AIOPSTERM_USER_DATA_DIR`, which is useful for tests, smoke runs, and portable diagnostics. In production, runtime data should continue to resolve from `app.getPath('userData')`.
 
+## Platform Support Status
+
+Platform support is not considered complete just because an `electron-builder` target or package script exists. A platform is considered supported only after the platform-specific package is built on the correct runner, installed or launched from the packaged artifact, and passes the runtime and packaging checks listed below.
+
+Current status:
+
+| Platform | Status | Evidence today | Not yet proven |
+| --- | --- | --- | --- |
+| Linux | Baseline supported path | `build:linux`, `build:deb`, `smoke:packaged`, and `audit:linux-package` exist. Linux packaging has package artifact checks for Codex, `node-pty`, icons, deb desktop protocol registration, and artifact shape. | Continue running the full smoke/audit gates for release candidates. |
+| macOS | Configured but not supported yet | `electron-builder.yml` has `mac` targets and `package.json` exposes `build:mac` / `build:mac:dir`. Codex target path helpers know Darwin triples. | A macOS runner must prove build, app launch, packaged resource resolution, native module loading, local terminal, SQLite-backed catalogs, deep links, and signing/notarization policy. |
+| Windows | Planned, not supported yet | `electron-builder.yml` has a `win` target and runtime code already contains some Windows branches for named pipes and default shells. | There is no committed `build:win` package script, no Windows package audit, no Windows packaged app smoke, and no proof for PTY/native modules, named pipes, protocol URL arguments, or Windows path display. |
+
+Do not describe macOS or Windows as supported until the evidence above exists in the repository and has been run on the corresponding platform.
+
 ## Resource Taxonomy
 
 | Class | Examples | Current owner | Target policy |
@@ -84,6 +98,20 @@ The exact `electron-store` filename can vary by Electron Store behavior, but the
 - Linux package auditing checks Codex binary presence, node-pty pruning, desktop protocol registration, and artifact shape.
 
 ## Gaps Before macOS and Windows
+
+The first platform-governance task is to keep support status explicit. Implementation changes should improve the evidence in the table above rather than merely adding more entry points. Build scripts are useful guardrails, but they do not by themselves prove support.
+
+### Support Completion Definition
+
+Each desktop platform needs the same completion gates:
+
+- Package build command exists and is documented.
+- Packaged artifact audit exists and checks the platform's expected unpacked resources, installer/archive artifact names, bundled Codex package, helper resources, and native module shape.
+- Packaged smoke launch runs with an isolated `AIOPSTERM_USER_DATA_DIR`.
+- Core runtime smoke proves local terminal startup, SQLite catalog open, settings load/save, runtime logging, custom protocol handling, and packaged resource resolution.
+- Platform-specific IPC is verified: Unix socket paths on Linux/macOS and named pipes on Windows.
+- Native-sensitive dependencies are verified on the platform: `node-pty`, `better-sqlite3`, and `ssh2`.
+- Release hardening status is documented: macOS signing/notarization or Windows signing/installer policy.
 
 ### Packaging Scripts
 
@@ -163,10 +191,17 @@ This is not a critical data bug, but for macOS/Windows polish the target should 
 
 ## Platform Roadmap
 
+### Phase 0: Governance
+
+- Keep the support status table current.
+- Do not claim platform support from target configuration alone.
+- Define the acceptance evidence before adding new package scripts or release claims.
+
 ### Phase 1: Guardrails
 
+- Add macOS package artifact audit before claiming macOS support.
 - Add Windows build scripts and package-config audit checks.
-- Add macOS and Windows package artifact audits.
+- Add Windows package artifact audit matching the current Linux artifact audit intent.
 - Add smoke tests that run packaged app with `AIOPSTERM_USER_DATA_DIR` in a temp directory.
 - Keep Linux audit as the baseline reference, but do not make Linux assumptions global.
 
