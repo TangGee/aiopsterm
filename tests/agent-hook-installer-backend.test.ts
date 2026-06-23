@@ -18,6 +18,7 @@ type AgentHookInstallerBackend = {
   configureAgentHookInstallerRuntime: (config?: {
     getHomeDir?: () => string
     getEnv?: () => NodeJS.ProcessEnv
+    getPlatform?: () => NodeJS.Platform
     getAgentHookScriptPath?: () => string
   }) => void
   installAgentHook: (input: { source: AgentHookInstallerSource }) => Promise<{ ok: boolean; errorMessage?: string }>
@@ -212,6 +213,28 @@ describe('agent hook installer backend', () => {
 
       await expect(backend.uninstallAgentHook({ source: 'opencode' })).resolves.toEqual(expect.objectContaining({ ok: true }))
       expect(JSON.parse(await readFile(configPath, 'utf-8'))).toEqual({})
+    } finally {
+      backend.configureAgentHookInstallerRuntime()
+    }
+  })
+
+  it('detects Windows command shims through PATHEXT when reporting installer status', async () => {
+    const backend = await loadBackend()
+    const home = await mkdtemp(join(tmpdir(), 'aiopsterm-win-hooks-'))
+    cleanupDirs.push(home)
+    const binDir = join(home, 'bin')
+    await import('node:fs/promises').then(({ mkdir, writeFile }) =>
+      mkdir(binDir, { recursive: true }).then(() => writeFile(join(binDir, 'codex.cmd'), '@echo off\r\n', 'utf-8'))
+    )
+    backend.configureAgentHookInstallerRuntime({
+      getHomeDir: () => home,
+      getEnv: () => ({ USERPROFILE: home, HOME: home, PATH: binDir, PATHEXT: '.EXE;.CMD;.BAT' }),
+      getPlatform: () => 'win32',
+      getAgentHookScriptPath: () => 'C:\\Program Files\\aiopsterm\\aiopsterm-agent-hook.js'
+    })
+    try {
+      const snapshot = await backend.installAgentHook({ source: 'codex' })
+      expect(snapshot).toEqual(expect.objectContaining({ ok: true }))
     } finally {
       backend.configureAgentHookInstallerRuntime()
     }

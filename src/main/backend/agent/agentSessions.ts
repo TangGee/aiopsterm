@@ -3,6 +3,7 @@ import { createServer, type Server, type Socket } from 'net'
 import { existsSync, rmSync } from 'fs'
 import { join } from 'path'
 import { mkdir } from 'fs/promises'
+import { platformSocketPath } from '../app/platformRuntime'
 import {
   createAgentSessionEventStreamRuntime,
   type AgentSessionEventStreamListResult
@@ -762,8 +763,7 @@ const handleSocketLine = async (socket: Socket, line: string, emit: AgentSession
 }
 
 export const agentSessionSocketPathFor = (userDataPath: string) => {
-  if (process.platform === 'win32') return `\\\\.\\pipe\\aiopsterm-agent-sessions-${process.pid}`
-  return join(userDataPath, 'agent-sessions', `aiopsterm-agent-sessions-${process.pid}.sock`)
+  return platformSocketPath(userDataPath, 'aiopsterm-agent-sessions', { directory: 'agent-sessions' })
 }
 
 export const agentHookScriptPathFor = (appPath: string, resourcesPath: string) => {

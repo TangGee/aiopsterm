@@ -37,12 +37,14 @@ import {
   uninstallCodexHooksFeature,
   uninstallRovoDevYaml
 } from './agentHookConfigRuntime'
+import { executableCandidateNames, type PlatformRuntime } from '../app/platformRuntime'
 
 export { codexHookHash, installCodexHooksFeature, mergeAgentHookJson, uninstallCodexHooksFeature } from './agentHookConfigRuntime'
 
 type AgentHookInstallerRuntimeConfig = {
   getEnv?: () => NodeJS.ProcessEnv
   getHomeDir?: () => string
+  getPlatform?: () => PlatformRuntime
   getAgentHookScriptPath?: () => string
   readFile?: typeof readFile
   writeFile?: typeof writeFile
@@ -57,6 +59,7 @@ const runtimeConfig: AgentHookInstallerRuntimeConfig = {}
 export const configureAgentHookInstallerRuntime = (config: AgentHookInstallerRuntimeConfig = {}) => {
   runtimeConfig.getEnv = config.getEnv
   runtimeConfig.getHomeDir = config.getHomeDir
+  runtimeConfig.getPlatform = config.getPlatform
   runtimeConfig.getAgentHookScriptPath = config.getAgentHookScriptPath
   runtimeConfig.readFile = config.readFile
   runtimeConfig.writeFile = config.writeFile
@@ -68,6 +71,7 @@ export const configureAgentHookInstallerRuntime = (config: AgentHookInstallerRun
 
 const getEnv = () => runtimeConfig.getEnv?.() || process.env
 const getHomeDir = () => runtimeConfig.getHomeDir?.() || getEnv().HOME || process.env.HOME || process.cwd()
+const getPlatform = () => runtimeConfig.getPlatform?.() || process.platform
 const getReadFile = () => runtimeConfig.readFile || readFile
 const getWriteFile = () => runtimeConfig.writeFile || writeFile
 const getRm = () => runtimeConfig.rm || rm
@@ -102,16 +106,19 @@ const pathExists = async (path: string) => {
 const findBinary = async (binaryName: string, env: NodeJS.ProcessEnv = getEnv()) => {
   const pathValue = cleanText(env.PATH)
   if (!pathValue) return ''
+  const names = executableCandidateNames(binaryName, env, getPlatform())
   for (const entry of pathValue.split(delimiter)) {
     const dir = cleanText(entry)
     if (!dir) continue
-    const candidate = join(dir, binaryName)
-    try {
-      await getAccess()(candidate)
-      const metadata = await getStat()(candidate)
-      if (metadata.isFile()) return candidate
-    } catch {
-      // Continue searching PATH.
+    for (const name of names) {
+      const candidate = join(dir, name)
+      try {
+        await getAccess()(candidate)
+        const metadata = await getStat()(candidate)
+        if (metadata.isFile()) return candidate
+      } catch {
+        // Continue searching PATH.
+      }
     }
   }
   return ''
@@ -119,7 +126,8 @@ const findBinary = async (binaryName: string, env: NodeJS.ProcessEnv = getEnv())
 
 const hookScriptPath = () => cleanText(runtimeConfig.getAgentHookScriptPath?.())
 
-export const agentHookCommandFor = (source: AgentHookInstallerSource, hookEvent: string, scriptPath = hookScriptPath()) => renderAgentHookCommandFor(source, hookEvent, scriptPath)
+export const agentHookCommandFor = (source: AgentHookInstallerSource, hookEvent: string, scriptPath = hookScriptPath()) =>
+  renderAgentHookCommandFor(source, hookEvent, scriptPath, getPlatform())
 
 const openCodeConfigPathFor = (definition: AgentHookDefinition, env: NodeJS.ProcessEnv = getEnv()) => join(configDirFor(definition, env), 'opencode.json')
 
@@ -243,7 +251,7 @@ const installDefinition = async (definition: AgentHookDefinition): Promise<Agent
   }
   const existingRaw = (await pathExists(configPath)) ? String(await getReadFile()(configPath, 'utf-8')) : ''
   const existing = parseConfigJson(existingRaw, configPath)
-  const merged = mergeAgentHookJson(existing, definition, scriptPath, true)
+  const merged = mergeAgentHookJson(existing, definition, scriptPath, true, getPlatform())
   await getWriteFile()(configPath, prettyJson(merged.config), 'utf-8')
 
   if (definition.configToml) {
@@ -276,7 +284,7 @@ const uninstallDefinition = async (definition: AgentHookDefinition): Promise<Age
   if (await pathExists(configPath)) {
     const existingRaw = String(await getReadFile()(configPath, 'utf-8'))
     const existing = parseConfigJson(existingRaw, configPath)
-    const merged = mergeAgentHookJson(existing, definition, hookScriptPath() || 'aiopsterm-agent-hook', false)
+    const merged = mergeAgentHookJson(existing, definition, hookScriptPath() || 'aiopsterm-agent-hook', false, getPlatform())
     await getWriteFile()(configPath, prettyJson(merged.config), 'utf-8')
   }
 

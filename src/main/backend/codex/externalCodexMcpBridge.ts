@@ -13,6 +13,7 @@ import type { AiopsAssetRecord } from '@shared/contracts/assets'
 import type { TerminalLifecycleEvent } from '@shared/contracts/terminalSessions'
 import { createSshTerminalSession, resolveSshTerminalTarget, type SshTerminalSession } from '../ssh/sshTerminal'
 import { listAssets } from '../assets/assets'
+import { platformSocketPath } from '../app/platformRuntime'
 import { handleExternalCodexMcpManagedAiRequest } from './externalCodexMcpManagedAiRuntime'
 
 type ExternalCodexMcpRequest = {
@@ -101,9 +102,8 @@ const configuredToken = () => cleanText(runtimeConfig.token) || cleanText(proces
 const isEnabled = () => runtimeConfig.enabled === true || process.env.AIOPSTERM_EXTERNAL_CODEX_MCP_ENABLE === '1'
 
 const defaultSocketPath = () => {
-  if (process.platform === 'win32') return `\\\\.\\pipe\\aiopsterm-external-codex-${process.pid}`
   const base = cleanText(runtimeConfig.userDataPath) || process.cwd()
-  return join(base, 'external-codex-mcp', `aiopsterm-external-codex-${process.pid}.sock`)
+  return platformSocketPath(base, 'aiopsterm-external-codex', { directory: 'external-codex-mcp' })
 }
 
 const bridgeSocketPath = () => cleanText(runtimeConfig.socketPath) || cleanText(process.env.AIOPSTERM_EXTERNAL_CODEX_MCP_SOCKET) || defaultSocketPath()

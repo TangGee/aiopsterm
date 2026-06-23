@@ -1,9 +1,10 @@
 import { createServer, type Server, type Socket } from 'net'
 import { existsSync, rmSync } from 'fs'
-import { dirname, join } from 'path'
 import { mkdir } from 'fs/promises'
+import { dirname } from 'path'
 import type { IpcMain } from 'electron'
 import type { ControlResponse } from '@shared/contracts/control'
+import { platformSocketPath } from '../app/platformRuntime'
 import { configureAiAgentSessionStore } from '../agent/agentSessions'
 import {
   configureControlSocketAgentRuntime,
@@ -135,8 +136,7 @@ const fail = (errorCode: string, errorMessage: string, data?: Record<string, unk
 })
 
 const socketPathFor = (userDataPath: string) => {
-  if (process.platform === 'win32') return `\\\\.\\pipe\\aiopsterm-control-${process.pid}`
-  return join(userDataPath, 'control', `aiopsterm-control-${process.pid}.sock`)
+  return platformSocketPath(userDataPath, 'aiopsterm-control', { directory: 'control' })
 }
 
 const isAgentVaultMethod = (method: string) => method.startsWith('agent.vault.') || method.startsWith('agent-vault.')

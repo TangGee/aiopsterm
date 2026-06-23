@@ -7,7 +7,7 @@ type AgentHookDefinition = {
 }
 
 type AgentHookConfigRuntimeModule = {
-  agentHookCommandFor(source: AgentHookInstallerSource, hookEvent: string, scriptPath: string): string
+  agentHookCommandFor(source: AgentHookInstallerSource, hookEvent: string, scriptPath: string, platform?: NodeJS.Platform): string
   codexHookHash(eventName: string, command: string, timeout: number, matcher?: string): string
   fileHookMarker: string
   hookDefinitions: AgentHookDefinition[]
@@ -46,6 +46,14 @@ describe('agentHookConfigRuntime', () => {
     expect(runtime.normalizeSource('unknown-agent')).toBeNull()
     expect(runtime.agentHookCommandFor('claude-code', 'PermissionRequest', '/opt/aiopsterm/agent hook.js')).toBe(
       "command -v node >/dev/null 2>&1 && AIOPSTERM_AGENT_HOOK_MARKER=aiopsterm-agent-hook-v1 node '/opt/aiopsterm/agent hook.js' --source 'claude-code' --event 'PermissionRequest' --wait-decision --wait-timeout-ms 120000 || echo '{}'"
+    )
+  })
+
+  it('renders Windows fail-open hook commands without requiring POSIX shell builtins', async () => {
+    const runtime = await loadRuntime()
+
+    expect(runtime.agentHookCommandFor('claude-code', 'AskUserQuestion', 'C:\\Program Files\\aiopsterm\\aiopsterm-agent-hook.js', 'win32')).toBe(
+      'where node >NUL 2>NUL && set AIOPSTERM_AGENT_HOOK_MARKER=aiopsterm-agent-hook-v1&& node "C:\\Program Files\\aiopsterm\\aiopsterm-agent-hook.js" --source "claude-code" --event "AskUserQuestion" --wait-decision --wait-timeout-ms 120000 || echo {}'
     )
   })
 

@@ -1,5 +1,6 @@
 import { createHash } from 'crypto'
 import type { AgentHookInstallerSource } from '@shared/contracts/agentHooks'
+import { isWindowsPlatform, type PlatformRuntime } from '../app/platformRuntime'
 
 export type HookCommandEvent = {
   agentEvent: string
@@ -258,6 +259,7 @@ export const cleanText = (value: unknown) => (typeof value === 'string' ? value.
 const cleanOptionalString = (value: unknown) => cleanText(value) || undefined
 
 const shellSingleQuote = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`
+const windowsCommandDoubleQuote = (value: string) => `"${value.replace(/"/g, '\\"')}"`
 
 export const normalizeSource = (value: unknown): AgentHookInstallerSource | null => {
   const raw = cleanText(value).toLowerCase().replace(/_/g, '-')
@@ -279,11 +281,23 @@ export const normalizeSource = (value: unknown): AgentHookInstallerSource | null
   return null
 }
 
-export const agentHookCommandFor = (source: AgentHookInstallerSource, hookEvent: string, scriptPath: string) => {
+export const agentHookCommandFor = (source: AgentHookInstallerSource, hookEvent: string, scriptPath: string, platform: PlatformRuntime = process.platform) => {
   const script = cleanText(scriptPath)
   if (!script) throw new AgentHookInstallerError('AGENT_HOOK_SCRIPT_MISSING', 'Agent hook helper path is unavailable.')
   const normalizedSource = normalizeSource(source) || source
   const waitDecision = normalizedSource === 'claude-code' && (hookEvent === 'PermissionRequest' || hookEvent === 'AskUserQuestion')
+  if (isWindowsPlatform(platform)) {
+    const dispatch = [
+      'node',
+      windowsCommandDoubleQuote(script),
+      '--source',
+      windowsCommandDoubleQuote(normalizedSource),
+      '--event',
+      windowsCommandDoubleQuote(hookEvent),
+      ...(waitDecision ? ['--wait-decision', '--wait-timeout-ms', '120000'] : [])
+    ].join(' ')
+    return `where node >NUL 2>NUL && set AIOPSTERM_AGENT_HOOK_MARKER=${ownedMarker}&& ${dispatch} || echo {}`
+  }
   const dispatch = [
     `AIOPSTERM_AGENT_HOOK_MARKER=${ownedMarker}`,
     'node',
@@ -380,24 +394,24 @@ export default function aiopstermExtension(agent: { on?: (event: string, handler
   throw new AgentHookInstallerError('AGENT_HOOK_TEMPLATE_UNSUPPORTED', `Agent hook template for ${definition.source} is not supported.`)
 }
 
-const hookEntry = (definition: AgentHookDefinition, event: HookCommandEvent, scriptPath: string) => ({
+const hookEntry = (definition: AgentHookDefinition, event: HookCommandEvent, scriptPath: string, platform: PlatformRuntime = process.platform) => ({
   type: 'command',
-  command: agentHookCommandFor(definition.source, event.hookEvent, scriptPath),
+  command: agentHookCommandFor(definition.source, event.hookEvent, scriptPath, platform),
   timeout: event.timeout
 })
 
-const groupedHookEntry = (definition: AgentHookDefinition, event: HookCommandEvent, scriptPath: string) => ({
+const groupedHookEntry = (definition: AgentHookDefinition, event: HookCommandEvent, scriptPath: string, platform: PlatformRuntime = process.platform) => ({
   ...(definition.source === 'codex' ? {} : { matcher: '' }),
-  hooks: [hookEntry(definition, event, scriptPath)]
+  hooks: [hookEntry(definition, event, scriptPath, platform)]
 })
 
-const flatHookEntry = (definition: AgentHookDefinition, event: HookCommandEvent, scriptPath: string) => ({
-  command: agentHookCommandFor(definition.source, event.hookEvent, scriptPath),
+const flatHookEntry = (definition: AgentHookDefinition, event: HookCommandEvent, scriptPath: string, platform: PlatformRuntime = process.platform) => ({
+  command: agentHookCommandFor(definition.source, event.hookEvent, scriptPath, platform),
   timeout: event.timeout
 })
 
-const kiroHookEntry = (definition: AgentHookDefinition, event: HookCommandEvent, scriptPath: string) => ({
-  command: agentHookCommandFor(definition.source, event.hookEvent, scriptPath),
+const kiroHookEntry = (definition: AgentHookDefinition, event: HookCommandEvent, scriptPath: string, platform: PlatformRuntime = process.platform) => ({
+  command: agentHookCommandFor(definition.source, event.hookEvent, scriptPath, platform),
   timeout_ms: Math.max(1, event.timeout * 1000)
 })
 
@@ -445,7 +459,8 @@ export const mergeAgentHookJson = (
   existing: Record<string, unknown>,
   definition: AgentHookDefinition,
   scriptPath: string,
-  install: boolean
+  install: boolean,
+  platform: PlatformRuntime = process.platform
 ): { config: Record<string, unknown>; removed: number } => {
   const next: Record<string, unknown> = { ...existing }
   const rawHooks = isPlainObject(next.hooks) ? next.hooks : {}
@@ -467,7 +482,11 @@ export const mergeAgentHookJson = (
       const existingGroups = Array.isArray(hooks[event.agentEvent]) ? (hooks[event.agentEvent] as unknown[]) : []
       hooks[event.agentEvent] = [
         ...existingGroups,
-        definition.kiroAgentJson ? kiroHookEntry(definition, event, scriptPath) : definition.flatHooks ? flatHookEntry(definition, event, scriptPath) : groupedHookEntry(definition, event, scriptPath)
+        definition.kiroAgentJson
+          ? kiroHookEntry(definition, event, scriptPath, platform)
+          : definition.flatHooks
+            ? flatHookEntry(definition, event, scriptPath, platform)
+            : groupedHookEntry(definition, event, scriptPath, platform)
       ]
     }
   }

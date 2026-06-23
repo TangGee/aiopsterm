@@ -1,6 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'child_process'
-import { basename } from 'path'
 import type { TerminalCreateOptions, TerminalDisconnectReason, TerminalLifecycleEvent } from '@shared/contracts/terminalSessions'
+import { defaultShellForPlatform, localShellArgsForPlatform } from '../app/platformRuntime'
 import { createTerminalErrorLifecycleEvent, createTerminalLifecycleEvent } from './terminal'
 
 export type LocalPtyProcess = {
@@ -55,8 +55,7 @@ export type LocalTerminalCreateResult = {
 const runtimeConfig: LocalTerminalRuntimeConfig = {}
 
 const defaultShell = () => {
-  if (process.platform === 'win32') return process.env.COMSPEC || 'powershell.exe'
-  return process.env.SHELL || '/bin/bash'
+  return defaultShellForPlatform(process.env, getPlatform())
 }
 
 const defaultCwd = () => process.env.HOME || process.cwd()
@@ -122,12 +121,8 @@ const getPtyRuntime = () => (runtimeConfig.loadPty || defaultLoadPty)()
 
 const getProcessRuntime = () => runtimeConfig.processRuntime || { spawn }
 
-const loginShellNames = new Set(['zsh', 'bash', 'fish', 'sh'])
-
 const localShellArgs = (shell: string) => {
-  if (getPlatform() === 'win32') return []
-  const shellName = basename(shell).toLowerCase()
-  return loginShellNames.has(shellName) ? ['--login'] : []
+  return localShellArgsForPlatform(shell, getPlatform())
 }
 
 const sendLifecycle = (id: string, sink: LocalTerminalEventSink, event: Omit<TerminalLifecycleEvent, 'id' | 'at'> & { at?: number }) => {

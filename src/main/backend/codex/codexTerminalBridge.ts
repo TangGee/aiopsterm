@@ -4,6 +4,7 @@ import { dirname, join } from 'path'
 import { mkdir } from 'fs/promises'
 import type { BrowserWindow } from 'electron'
 import type { CodexSessionTargetContext } from '@shared/contracts/codexSessions'
+import { platformSocketPath } from '../app/platformRuntime'
 
 export type CodexTerminalBridgeSession = {
   id: string
@@ -71,8 +72,7 @@ const normalizeTimeoutMs = (value: unknown) => {
 }
 
 const bridgeSocketPathFor = (userDataPath: string) => {
-  if (process.platform === 'win32') return `\\\\.\\pipe\\aiopsterm-codex-${process.pid}`
-  return join(userDataPath, 'codex-agent', `aiopsterm-codex-${process.pid}.sock`)
+  return platformSocketPath(userDataPath, 'aiopsterm-codex', { directory: 'codex-agent' })
 }
 
 export const getCodexTerminalBridgeSocketPath = () => socketPath
