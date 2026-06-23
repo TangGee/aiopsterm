@@ -182,6 +182,7 @@ describe('SSH proxy backend boundary', () => {
   it('opens raw TCP proxy sockets without HTTP or SOCKS handshakes', async () => {
     const observed: Buffer[] = []
     const server = net.createServer((socket) => {
+      socket.on('error', () => undefined)
       socket.on('data', (chunk) => {
         observed.push(Buffer.from(chunk))
         socket.write('tcp-proxy-echo')
