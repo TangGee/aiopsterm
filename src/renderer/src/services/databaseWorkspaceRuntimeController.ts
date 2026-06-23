@@ -1,32 +1,25 @@
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { copyTextToClipboard } from '@/services/clipboardRuntime'
 import { createDatabaseCatalogConnectionWorkspaceController } from '@/services/databaseCatalogConnectionWorkspaceController'
 import { createDatabaseAiWorkspaceController } from '@/services/databaseAiWorkspaceController'
 import { createDatabaseSqlDataWorkspaceController } from '@/services/databaseSqlDataWorkspaceController'
 import { createDatabaseSqlEditorWorkspaceController } from '@/services/databaseSqlEditorWorkspaceController'
 import { createDatabaseWorkspaceCatalogRuntime } from '@/services/databaseWorkspaceCatalogRuntime'
+import { createDatabaseWorkspaceConnectionStateRuntime } from '@/services/databaseWorkspaceConnectionStateRuntime'
 import { createDatabaseWorkspaceSqlTabRuntime } from '@/services/databaseWorkspaceSqlTabRuntime'
 import type { DatabaseMainWorkspaceApi } from '@/components/database/databaseMainWorkspaceTypes'
 import { makeDirtyState } from '@/services/databaseGridRuntime'
 import {
-  canCreateDatabaseForConnection,
-  collectDescendantGroupIds,
   DB_AI_PANE_MAX_WIDTH,
   DB_AI_PANE_MIN_WIDTH,
-  DEFAULT_GROUP_ID,
-  groupPathLabel
+  DEFAULT_GROUP_ID
 } from '@/services/databaseWorkspaceRuntime'
 import type {
   ContextMenu,
   ContextSubmenu,
-  DatabaseOperationConfirmAction,
   WorkspaceTab
 } from '@/services/databaseWorkspaceTypes'
 import { useWorkspaceStore } from '@/stores/workspace'
-import type {
-  DatabaseConnectionInfo,
-  DatabaseEngineCode
-} from '@shared/contracts/database'
 
 export const useDatabaseWorkspaceRuntime = () => {
 
@@ -46,81 +39,7 @@ export const useDatabaseWorkspaceRuntime = () => {
   const activeTabId = ref('tab-overview')
   const sqlEditorRef = ref<DatabaseMainWorkspaceApi | null>(null)
 
-  const connectionModalOpen = ref(false)
-  const connectionModalMode = ref<'create' | 'edit'>('create')
-  const connectionFeedback = ref('')
-  const connectionFeedbackKind = ref<'info' | 'error'>('info')
-  const connectionErrors = ref<string[]>([])
-  const connectionUrlDirty = ref(false)
-  const passwordVisible = ref(false)
-  const connectionTesting = ref(false)
-  const connectionSaving = ref(false)
-  const postgresSslModeOptions = ['disable', 'require', 'verify-ca', 'verify-full'] as const
-  const connectionDraft = reactive({
-    id: '',
-    dbType: 'mysql' as DatabaseEngineCode,
-    name: '',
-    env: 'Development' as DatabaseConnectionInfo['env'],
-    groupId: 'group-default',
-    host: '127.0.0.1',
-    port: 3306 as number | null,
-    authentication: 'UserAndPassword' as DatabaseConnectionInfo['authentication'],
-    user: 'root',
-    password: '',
-    database: '',
-    filePath: '',
-    readonly: false,
-    sslMode: '' as NonNullable<DatabaseConnectionInfo['sslMode']>,
-    needProxy: false,
-    proxyName: '',
-    url: ''
-  })
-
-  const createDatabaseModal = reactive({
-    open: false,
-    connectionId: '',
-    dbType: 'mysql' as Extract<DatabaseEngineCode, 'mysql' | 'mariadb' | 'oceanbase' | 'postgresql' | 'kingbase' | 'sqlserver' | 'clickhouse'>,
-    name: '',
-    sql: '',
-    userEditedSql: false,
-    lastAppliedTemplate: '',
-    submitting: false,
-    feedback: '',
-    feedbackKind: 'info' as 'info' | 'error'
-  })
-  const ddlModal = reactive({
-    open: false,
-    tableName: '',
-    ddl: '',
-    connectionId: '',
-    catalogName: '',
-    schemaName: '',
-    tableId: '',
-    loading: false,
-    error: '',
-    errorCode: '' as '' | 'permission' | 'other'
-  })
   const databaseAiPanelsRef = ref<{ scrollPaneMessagesToBottom: () => void } | null>(null)
-  const dangerConfirm = reactive({
-    open: false,
-    action: 'drop' as 'drop' | 'truncate',
-    connectionId: '',
-    catalogName: '',
-    schemaName: '',
-    tableId: '',
-    tableName: '',
-    sql: '',
-    confirmText: ''
-  })
-  const operationConfirm = reactive({
-    open: false,
-    action: '' as DatabaseOperationConfirmAction | '',
-    targetId: '',
-    title: '',
-    message: '',
-    detail: '',
-    confirmLabel: 'Delete'
-  })
 
   const activeTab = computed(() => tabs.value.find((tab) => tab.id === activeTabId.value))
   const activeSqlTab = computed(() => (activeTab.value?.kind === 'sql' ? activeTab.value : null))
@@ -193,25 +112,38 @@ export const useDatabaseWorkspaceRuntime = () => {
     renderDefaultSql
   } = catalogRuntime
 
-  const databaseSshProxyOptions = computed(() => workspaceStore.sshProxyConfigs.map((config) => ({ ...config })).sort((first, second) => first.name.localeCompare(second.name)))
-  const databaseSshProxyNames = computed(() => new Set(databaseSshProxyOptions.value.map((config) => config.name)))
-
-  const contextConnection = computed(() => {
-    const menu = contextMenu.value
-    return menu?.type === 'connection' ? (findConnection(menu.connectionId) ?? null) : null
+  const connectionStateRuntime = createDatabaseWorkspaceConnectionStateRuntime({
+    connections,
+    groups,
+    groupParentById,
+    contextMenu,
+    sshProxyConfigs: computed(() => workspaceStore.sshProxyConfigs)
   })
-
-  const contextConnectionConnected = computed(() => contextConnection.value?.status === 'connected')
-  const contextConnectionCanCreateDatabase = computed(() => canCreateDatabaseForConnection(contextConnection.value))
-  const connectionMoveTargets = computed(() => {
-    const connection = contextConnection.value
-    if (!connection) return []
-    return groups.value
-      .filter((group) => group.id !== connection.groupId)
-      .filter((group) => group.id !== DEFAULT_GROUP_ID)
-      .map((group) => ({ id: group.id, name: groupPathLabel(group.id, groups.value, groupParentById) }))
-  })
-  const connectionRootMoveDisabled = computed(() => contextConnection.value?.groupId === DEFAULT_GROUP_ID)
+  const {
+    connectionModalOpen,
+    connectionModalMode,
+    connectionFeedback,
+    connectionFeedbackKind,
+    connectionErrors,
+    connectionUrlDirty,
+    passwordVisible,
+    connectionTesting,
+    connectionSaving,
+    postgresSslModeOptions,
+    connectionDraft,
+    createDatabaseModal,
+    ddlModal,
+    dangerConfirm,
+    operationConfirm,
+    databaseSshProxyOptions,
+    databaseSshProxyNames,
+    contextConnectionConnected,
+    contextConnectionCanCreateDatabase,
+    connectionMoveTargets,
+    connectionRootMoveDisabled,
+    groupRootMoveDisabled,
+    groupMoveTargets
+  } = connectionStateRuntime
 
   const {
     activeSqlHasText,
@@ -473,22 +405,6 @@ export const useDatabaseWorkspaceRuntime = () => {
       appendSqlExecution
     }
   )
-
-  const contextGroup = computed(() => {
-    const menu = contextMenu.value
-    return menu?.type === 'group' ? (groups.value.find((group) => group.id === menu.groupId) ?? null) : null
-  })
-
-  const groupRootMoveDisabled = computed(() => !contextGroup.value || groupParentById[contextGroup.value.id] === null)
-
-  const groupMoveTargets = computed(() => {
-    const group = contextGroup.value
-    if (!group) return []
-    const descendants = collectDescendantGroupIds(group.id, groups.value, groupParentById)
-    return groups.value
-      .filter((target) => target.id !== DEFAULT_GROUP_ID && target.id !== group.id && !descendants.has(target.id))
-      .map((target) => ({ id: target.id, name: groupPathLabel(target.id, groups.value, groupParentById) }))
-  })
 
   watch(activeTabId, () => {
     syncDbAiPaneContextAfterActiveTabChange()
