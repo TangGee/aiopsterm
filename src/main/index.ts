@@ -21,6 +21,7 @@ import { createSettingsConfigRuntime } from './backend/settings/settingsConfigRu
 import { createSkillsRuntime } from './backend/settings/skillsRuntime'
 import { resolveUserAvatarAssetPath } from './backend/user/userAccount'
 import { configureMainBackendRuntimes } from './backend/app/runtimeConfiguration'
+import { showNativeNotification, type NativeNotificationRuntime } from './backend/app/nativeNotificationRuntime'
 import {
   cloneMcpServers,
   cloneMcpToolStates,
@@ -121,6 +122,11 @@ const knowledgeBaseRuntime = createKnowledgeBaseRuntime({
   saveKnowledgeBase: (knowledgeBase) => store.set('config', mergeConfig(getConfig(), { knowledgeBase }))
 })
 
+const nativeNotificationRuntime: NativeNotificationRuntime = {
+  isSupported: () => Notification.isSupported(),
+  create: (input) => new Notification(input)
+}
+
 const settingsConfigRuntime = createSettingsConfigRuntime({
   userDataPath: () => app.getPath('userData'),
   getConfig,
@@ -156,18 +162,16 @@ const broadcastAiAgentSessionEvent = (event: AiAgentSessionEvent) => {
   })
   broadcastWindowEvent(BrowserWindow.getAllWindows(), 'ai-agent:session-event', event)
   if (!aiAgentEventNeedsAttention(event)) return
-  if (!Notification.isSupported()) return
-  const notification = new Notification({
+  showNativeNotification(nativeNotificationRuntime, {
     title: event.title || 'AI session needs attention',
     body: event.summary || `${event.source} needs attention`,
-    silent: false
-  })
-  notification.on('click', () => {
-    const target = BrowserWindow.getFocusedWindow() || mainWindow || BrowserWindow.getAllWindows()[0]
-    appBootstrapRuntime.focusWindow(target)
-    broadcastWindowEvent(BrowserWindow.getAllWindows(), 'ai-agent:session-event', event)
-  })
-  notification.show()
+    silent: false,
+    onClick: () => {
+      const target = BrowserWindow.getFocusedWindow() || mainWindow || BrowserWindow.getAllWindows()[0]
+      appBootstrapRuntime.focusWindow(target)
+      broadcastWindowEvent(BrowserWindow.getAllWindows(), 'ai-agent:session-event', event)
+    }
+  }, getConfig().notifications?.desktopNotifications !== false)
 }
 
 const broadcastManagedAiSessionFocusRequest = (request: ManagedAiSessionFocusRequest) => {
@@ -193,19 +197,16 @@ const broadcastManagedAiSessionEvent = (event: ManagedAiSessionEvent) => {
 }
 
 const showControlNotification = (notification: ControlNotificationRecord) => {
-  if (!getConfig().notifications?.desktopNotifications) return
-  if (!Notification.isSupported()) return
-  const desktop = new Notification({
+  showNativeNotification(nativeNotificationRuntime, {
     title: notification.source ? `${notification.source}: ${notification.title}` : notification.title,
     body: [notification.level && notification.level !== 'info' ? `[${notification.level}]` : '', notification.group, notification.subtitle, notification.body].filter(Boolean).join('\n') || notification.title,
-    silent: false
-  })
-  desktop.on('click', () => {
-    const target = BrowserWindow.getFocusedWindow() || mainWindow || BrowserWindow.getAllWindows()[0]
-    appBootstrapRuntime.focusWindow(target)
-    void invokeControlSocketMethod('notification.open', { id: notification.id })
-  })
-  desktop.show()
+    silent: false,
+    onClick: () => {
+      const target = BrowserWindow.getFocusedWindow() || mainWindow || BrowserWindow.getAllWindows()[0]
+      appBootstrapRuntime.focusWindow(target)
+      void invokeControlSocketMethod('notification.open', { id: notification.id })
+    }
+  }, getConfig().notifications?.desktopNotifications !== false)
 }
 
 const runtimeConfiguration = configureMainBackendRuntimes({
