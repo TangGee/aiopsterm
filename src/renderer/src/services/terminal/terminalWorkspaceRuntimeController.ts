@@ -3,6 +3,7 @@ import { useTerminalControlSurface, type TerminalControlSurfaceView } from '@/co
 import { useWorkspaceStore, type TerminalPanel } from '@/stores/workspace'
 import { copyTextToClipboard } from '@/services/app/clipboardRuntime'
 import { controlClient } from '@/services/app/controlClient'
+import { writeRendererRuntimeLog } from '@/services/app/runtimeLogClient'
 import { terminalClient } from '@/services/terminal/terminalClient'
 import { createTerminalWorkspaceCommandRuntime, createTerminalWorkspaceCommandState } from '@/services/terminal/terminalWorkspaceCommandRuntime'
 import { createTerminalWorkspaceContextRuntime } from '@/services/terminal/terminalWorkspaceContextRuntime'
@@ -13,6 +14,26 @@ import { createTerminalWorkspaceViewRuntime } from '@/services/terminal/terminal
 import { createTerminalWorkspaceZmodemShellRuntime } from '@/services/terminal/terminalWorkspaceZmodemShellRuntime'
 import { useI18n } from '@/i18n'
 import type { TerminalDataEvent } from '@shared/contracts/terminalSessions'
+
+type TerminalDataPerfSummary = {
+  chunks: number
+  bytes: number
+  firstAt: number
+  lastAt: number
+  appendMs: number
+  zmodemMs: number
+  maxAppendMs: number
+  maxZmodemMs: number
+  maxChunkBytes: number
+  zmodemChunks: number
+}
+
+const terminalDataSummaryIntervalMs = 1000
+const terminalDataSummaryChunkThreshold = 50
+const terminalDataSlowThresholdMs = 16
+
+const nowMs = () => globalThis.performance?.now?.() ?? Date.now()
+const textByteLength = (value: string) => new TextEncoder().encode(value).length
 
 export const useTerminalWorkspaceContainerRuntime = () => {
   const workspace = useWorkspaceStore()
@@ -54,6 +75,74 @@ export const useTerminalWorkspaceContainerRuntime = () => {
   let offLifecycle: (() => void) | null = null
   let offExit: (() => void) | null = null
   let offControlRequest: (() => void) | null = null
+  const terminalDataPerf = new Map<string, TerminalDataPerfSummary>()
+
+  const logTerminalDataSummary = (sessionId: string, summary: TerminalDataPerfSummary, reason: string) => {
+    writeRendererRuntimeLog('debug', 'renderer.terminal-data.summary', {
+      sessionId,
+      reason,
+      chunks: summary.chunks,
+      bytes: summary.bytes,
+      durationMs: Math.max(0, Math.round(summary.lastAt - summary.firstAt)),
+      appendMs: Math.round(summary.appendMs * 10) / 10,
+      zmodemMs: Math.round(summary.zmodemMs * 10) / 10,
+      maxAppendMs: Math.round(summary.maxAppendMs * 10) / 10,
+      maxZmodemMs: Math.round(summary.maxZmodemMs * 10) / 10,
+      maxChunkBytes: summary.maxChunkBytes,
+      zmodemChunks: summary.zmodemChunks
+    })
+  }
+
+  const flushTerminalDataPerf = (sessionId: string, reason: string) => {
+    const summary = terminalDataPerf.get(sessionId)
+    if (!summary) return
+    logTerminalDataSummary(sessionId, summary, reason)
+    terminalDataPerf.delete(sessionId)
+  }
+
+  const recordTerminalDataPerf = (
+    sessionId: string,
+    metrics: { bytes: number; appendMs: number; zmodemMs: number; handledByZmodem: boolean }
+  ) => {
+    const now = nowMs()
+    const existing = terminalDataPerf.get(sessionId)
+    const summary =
+      existing ||
+      {
+        chunks: 0,
+        bytes: 0,
+        firstAt: now,
+        lastAt: now,
+        appendMs: 0,
+        zmodemMs: 0,
+        maxAppendMs: 0,
+        maxZmodemMs: 0,
+        maxChunkBytes: 0,
+        zmodemChunks: 0
+      }
+    summary.chunks += 1
+    summary.bytes += metrics.bytes
+    summary.lastAt = now
+    summary.appendMs += metrics.appendMs
+    summary.zmodemMs += metrics.zmodemMs
+    summary.maxAppendMs = Math.max(summary.maxAppendMs, metrics.appendMs)
+    summary.maxZmodemMs = Math.max(summary.maxZmodemMs, metrics.zmodemMs)
+    summary.maxChunkBytes = Math.max(summary.maxChunkBytes, metrics.bytes)
+    if (metrics.handledByZmodem) summary.zmodemChunks += 1
+    terminalDataPerf.set(sessionId, summary)
+    if (metrics.appendMs >= terminalDataSlowThresholdMs || metrics.zmodemMs >= terminalDataSlowThresholdMs) {
+      writeRendererRuntimeLog('warn', 'renderer.terminal-data.slow-handle', {
+        sessionId,
+        bytes: metrics.bytes,
+        appendMs: Math.round(metrics.appendMs * 10) / 10,
+        zmodemMs: Math.round(metrics.zmodemMs * 10) / 10,
+        handledByZmodem: metrics.handledByZmodem
+      })
+    }
+    if (summary.lastAt - summary.firstAt >= terminalDataSummaryIntervalMs || summary.chunks >= terminalDataSummaryChunkThreshold) {
+      flushTerminalDataPerf(sessionId, summary.chunks >= terminalDataSummaryChunkThreshold ? 'chunk-threshold' : 'interval')
+    }
+  }
   const isWelcomePlaceholderPanel = (panel?: TerminalPanel | null) =>
     Boolean(
       panel &&
@@ -139,7 +228,11 @@ export const useTerminalWorkspaceContainerRuntime = () => {
 
   const terminalZmodemShellRuntime = createTerminalWorkspaceZmodemShellRuntime({
     getApi: () => window.aiops,
-    appendData: (sessionId, data) => workspace.appendTerminalOutput(sessionId, data),
+    appendData: (sessionId, data) => {
+      workspace.appendTerminalOutput(sessionId, data)
+      const panel = workspace.panels.find((item) => item.id === sessionId || item.sessionId === sessionId)
+      if (panel) syncTerminalView(panel)
+    },
     onNotice: (message) => workspace.setTopNotice(message)
   })
   const {
@@ -326,9 +419,23 @@ export const useTerminalWorkspaceContainerRuntime = () => {
   const handleControlRequest = terminalControlSurface.handleControlRequest
 
   const handleTerminalData = (event: TerminalDataEvent) => {
-    if (!handleTerminalZmodemData(event)) {
+    const zmodemStartedAt = nowMs()
+    const handledByZmodem = handleTerminalZmodemData(event)
+    const zmodemMs = nowMs() - zmodemStartedAt
+    let appendMs = 0
+    if (!handledByZmodem) {
+      const appendStartedAt = nowMs()
       workspace.appendTerminalOutput(event.id, event.data)
+      appendMs = nowMs() - appendStartedAt
+      const panel = workspace.panels.find((item) => item.id === event.id || item.sessionId === event.id)
+      if (panel) syncTerminalView(panel)
     }
+    recordTerminalDataPerf(event.id, {
+      bytes: textByteLength(event.data || ''),
+      appendMs,
+      zmodemMs,
+      handledByZmodem
+    })
   }
 
   onMounted(() => {
@@ -345,6 +452,7 @@ export const useTerminalWorkspaceContainerRuntime = () => {
     offLifecycle?.()
     offExit?.()
     offControlRequest?.()
+    terminalDataPerf.forEach((_summary, sessionId) => flushTerminalDataPerf(sessionId, 'runtime-unmounted'))
     terminalControlSurface.dispose()
     terminalZmodemShellRuntime.dispose()
     disposeTerminalViews()
@@ -356,7 +464,7 @@ export const useTerminalWorkspaceContainerRuntime = () => {
     () =>
       workspace.panels
         .filter((panel) => panel.kind !== 'knowledge')
-        .map((panel) => `${panel.id}:${panel.output.length}:${panel.outputSegments?.length || 0}:${panel.title}`)
+        .map((panel) => `${panel.id}:${panel.title}`)
         .join('|') + `${workspace.extensionSettings.highlightStatus}|${JSON.stringify(workspace.keywordHighlightSettings)}`,
     () => {
       nextTick(() => workspace.panels.filter((panel) => panel.kind !== 'knowledge').forEach((panel) => syncTerminalView(panel)))

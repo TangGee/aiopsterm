@@ -3,6 +3,7 @@ import type {
   ControlNotificationRecord,
   ControlResponse
 } from '@shared/contracts/control'
+import { logRuntimeEvent } from '../app/runtimeLog'
 
 type ControlSocketNotificationEventInput = {
   name: string
@@ -127,7 +128,23 @@ const notificationPayload = (items = notifications, params: Record<string, unkno
 }
 
 const syncNotificationsToRenderer = () => {
-  void dispatchRendererControlRequest('notification.sync', notificationPayload())
+  const startedAt = Date.now()
+  void Promise.resolve(dispatchRendererControlRequest('notification.sync', notificationPayload()))
+    .then((response) => {
+      logRuntimeEvent(response.ok ? 'debug' : 'warn', response.ok ? 'control.notification.sync' : 'control.notification.sync.failed', {
+        durationMs: Date.now() - startedAt,
+        count: notifications.length,
+        unreadCount: notifications.filter((notification) => !notification.read).length,
+        errorCode: response.errorCode,
+        errorMessage: response.errorMessage
+      })
+    })
+    .catch((error) => {
+      logRuntimeEvent('warn', 'control.notification.sync.error', {
+        durationMs: Date.now() - startedAt,
+        error
+      })
+    })
 }
 
 const resolveNotification = (params: Record<string, unknown>) => {
@@ -180,6 +197,17 @@ export const createNotification = (params: Record<string, unknown>) => {
     ...(source ? { source } : {})
   }
   notifications = [notification, ...notifications.filter((item) => item.id !== notification.id)].slice(0, maxNotifications)
+  logRuntimeEvent(existing ? 'debug' : 'info', existing ? 'control.notification.updated' : 'control.notification.created', {
+    notificationId: notification.id,
+    source: notification.source,
+    level: notification.level,
+    group: notification.group,
+    panelId: notification.panelId,
+    sessionId: notification.sessionId,
+    terminalSessionId: notification.terminalSessionId,
+    total: notifications.length,
+    unreadCount: notifications.filter((item) => !item.read).length
+  })
   syncNotificationsToRenderer()
   runtime.showNotification?.(notification)
   publishNotificationEvent({
@@ -312,6 +340,7 @@ export const clearNotifications = () => {
 }
 
 export const openNotification = async (params: Record<string, unknown>) => {
+  const startedAt = Date.now()
   const target = resolveNotification(params)
   if (!target) return fail('NOTIFICATION_NOT_FOUND', 'Notification was not found.')
   const now = Date.now()
@@ -326,6 +355,15 @@ export const openNotification = async (params: Record<string, unknown>) => {
   }
   const focusResponse = await dispatchRendererControlRequest('notification.open', focusRequest as unknown as Record<string, unknown>, { focus: true })
   if (!focusResponse.ok) return focusResponse
+  logRuntimeEvent('info', 'control.notification.opened', {
+    notificationId: notification.id,
+    source: notification.source,
+    level: notification.level,
+    panelId: notification.panelId,
+    sessionId: notification.sessionId,
+    terminalSessionId: notification.terminalSessionId,
+    durationMs: Date.now() - startedAt
+  })
   publishNotificationEvent({
     name: 'notification.opened',
     category: 'notification',

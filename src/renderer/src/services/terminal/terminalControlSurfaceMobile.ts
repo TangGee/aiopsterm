@@ -156,7 +156,8 @@ export const createTerminalControlSurfaceMobileHandlers = ({
     const view = terminalViews.get(panel.id)
     if (!view) return controlFail('TERMINAL_VIEW_NOT_READY', 'Terminal view is not ready.', { panelId: panel.id, sessionId: panel.sessionId })
     workspace.replaceTerminalOutput(panel.id, '')
-    view.terminal.clear()
+    view.clearPendingOutput?.()
+    if (!view.clearPendingOutput) view.terminal.clear()
     view.lastOutput = ''
     await nextTick()
     return controlOk({ terminal: terminalSummaryForControl(panel), cleared: true })

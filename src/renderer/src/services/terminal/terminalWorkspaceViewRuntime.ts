@@ -11,16 +11,67 @@ import type { TerminalCommandSuggestion } from '@shared/contracts/terminalTools'
 type WorkspaceStore = ReturnType<typeof useWorkspaceStore>
 type XtermRuntimeOptions = XtermTerminal['options'] & { termName?: string }
 type TerminalSuggestion = TerminalCommandSuggestion
+type XtermLike = XtermTerminal
+type AddonLike = {
+  activate: (terminal: XtermTerminal) => void
+  dispose: () => void
+}
+type FitLike = Pick<FitAddon, 'fit'> & AddonLike
+type SearchLike = Pick<SearchAddon, 'findNext' | 'findPrevious' | 'clearDecorations'> & AddonLike
 
 export type TerminalView = {
-  terminal: XtermTerminal
-  fit: FitAddon
-  search: SearchAddon
+  terminal: XtermLike
+  fit: FitLike
+  search: SearchLike
   lastOutput: string
+  outputQueue?: TerminalOutputWriteQueue
+  outputPerf?: TerminalOutputPerfSummary
+  clearPendingOutput?: () => void
   suppressInputReplyDepth?: number
   lastFitCols?: number
   lastFitRows?: number
   resizeObserver?: ResizeObserver
+}
+
+type TerminalOutputPerfSummary = {
+  chunks: number
+  writes: number
+  bytes: number
+  firstAt: number
+  lastAt: number
+  writeMs: number
+  queueMs: number
+  highlightMs: number
+  maxWriteMs: number
+  maxQueueMs: number
+  maxHighlightMs: number
+  maxChunkBytes: number
+  maxBatchBytes: number
+  maxPendingBytes: number
+  maxPendingChunks: number
+  resets: number
+}
+
+type TerminalQueuedOutput = {
+  chunks: number
+  data: string
+  bytes: number
+  queuedAt: number
+  highlightMs: number
+  maxChunkBytes: number
+  reset: boolean
+  suppressInputReplies: boolean
+}
+
+type TerminalOutputWriteQueue = {
+  pending: TerminalQueuedOutput[]
+  pendingBytes: number
+  pendingChunks: number
+  scheduledFlush: unknown | null
+  inFlight: boolean
+  clearAfterInFlight: boolean
+  scrollToBottomAfterFlush: boolean
+  disposed: boolean
 }
 
 type TerminalWorkspaceViewRuntimeInput = {
@@ -33,6 +84,9 @@ type TerminalWorkspaceViewRuntimeInput = {
   suggestionItems: Ref<TerminalSuggestion[]>
   aiSuggestLoading: Ref<boolean>
   writeXtermInput: (panelId: string, data: string) => void | Promise<void>
+  terminalConstructor?: new (options: ConstructorParameters<typeof XtermTerminal>[0]) => XtermLike
+  fitConstructor?: new () => FitLike
+  searchConstructor?: new () => SearchLike
 }
 
 const terminalContentPaddingTop = 10
@@ -40,6 +94,13 @@ const terminalContentPaddingBottom = 16
 const terminalAiButtonHeight = 32
 const terminalFloatingGap = 8
 const terminalBottomSafePx = 16
+const terminalOutputSummaryIntervalMs = 1000
+const terminalOutputSummaryChunkThreshold = 50
+const terminalOutputSlowThresholdMs = 16
+
+const nowMs = () => globalThis.performance?.now?.() ?? Date.now()
+
+const textByteLength = (value: string) => new TextEncoder().encode(value).length
 
 export const createTerminalWorkspaceViewRuntime = ({
   workspace,
@@ -50,13 +111,126 @@ export const createTerminalWorkspaceViewRuntime = ({
   suggestionPosition,
   suggestionItems,
   aiSuggestLoading,
-  writeXtermInput
+  writeXtermInput,
+  terminalConstructor,
+  fitConstructor,
+  searchConstructor
 }: TerminalWorkspaceViewRuntimeInput) => {
+  const TerminalConstructor = terminalConstructor || XtermTerminal
+  const FitConstructor = fitConstructor || FitAddon
+  const SearchConstructor = searchConstructor || SearchAddon
   const paneFontSizes = reactive<Record<string, number>>({})
   const terminalElements = new Map<string, HTMLElement>()
   const terminalViews = new Map<string, TerminalView>()
 
-  const setXtermTermName = (terminal: XtermTerminal, terminalType: string) => {
+  const requestOutputFlush = (callback: () => void) =>
+    typeof window !== 'undefined' && typeof window.setTimeout === 'function' ? window.setTimeout(callback, 0) : setTimeout(callback, 0)
+
+  const cancelOutputFlush = (flush: unknown) => {
+    if (typeof window !== 'undefined' && typeof window.clearTimeout === 'function') window.clearTimeout(flush as number)
+    else clearTimeout(flush as ReturnType<typeof setTimeout>)
+  }
+
+  const logTerminalOutputSummary = (panelId: string, summary: TerminalOutputPerfSummary, reason: string) => {
+    writeRuntimeLog('debug', 'renderer.terminal-output.summary', {
+      panelId,
+      reason,
+      chunks: summary.chunks,
+      writes: summary.writes,
+      bytes: summary.bytes,
+      durationMs: Math.max(0, Math.round(summary.lastAt - summary.firstAt)),
+      writeMs: Math.round(summary.writeMs * 10) / 10,
+      queueMs: Math.round(summary.queueMs * 10) / 10,
+      highlightMs: Math.round(summary.highlightMs * 10) / 10,
+      maxWriteMs: Math.round(summary.maxWriteMs * 10) / 10,
+      maxQueueMs: Math.round(summary.maxQueueMs * 10) / 10,
+      maxHighlightMs: Math.round(summary.maxHighlightMs * 10) / 10,
+      maxChunkBytes: summary.maxChunkBytes,
+      maxBatchBytes: summary.maxBatchBytes,
+      maxPendingBytes: summary.maxPendingBytes,
+      maxPendingChunks: summary.maxPendingChunks,
+      resets: summary.resets
+    })
+  }
+
+  const flushTerminalOutputPerf = (panelId: string, view: TerminalView | undefined, reason: string) => {
+    if (!view?.outputPerf) return
+    logTerminalOutputSummary(panelId, view.outputPerf, reason)
+    view.outputPerf = undefined
+  }
+
+  const recordTerminalOutputPerf = (
+    panelId: string,
+    view: TerminalView,
+    metrics: {
+      chunks: number
+      bytes: number
+      writeMs: number
+      queueMs: number
+      highlightMs: number
+      maxChunkBytes: number
+      pendingBytes: number
+      pendingChunks: number
+      reset?: boolean
+    }
+  ) => {
+    const now = nowMs()
+    const existing = view.outputPerf
+    const summary =
+      existing ||
+      {
+        chunks: 0,
+        writes: 0,
+        bytes: 0,
+        firstAt: now,
+        lastAt: now,
+        writeMs: 0,
+        queueMs: 0,
+        highlightMs: 0,
+        maxWriteMs: 0,
+        maxQueueMs: 0,
+        maxHighlightMs: 0,
+        maxChunkBytes: 0,
+        maxBatchBytes: 0,
+        maxPendingBytes: 0,
+        maxPendingChunks: 0,
+        resets: 0
+      }
+    summary.chunks += metrics.chunks
+    summary.writes += 1
+    summary.bytes += metrics.bytes
+    summary.lastAt = now
+    summary.writeMs += metrics.writeMs
+    summary.queueMs += metrics.queueMs
+    summary.highlightMs += metrics.highlightMs
+    summary.maxWriteMs = Math.max(summary.maxWriteMs, metrics.writeMs)
+    summary.maxQueueMs = Math.max(summary.maxQueueMs, metrics.queueMs)
+    summary.maxHighlightMs = Math.max(summary.maxHighlightMs, metrics.highlightMs)
+    summary.maxChunkBytes = Math.max(summary.maxChunkBytes, metrics.maxChunkBytes)
+    summary.maxBatchBytes = Math.max(summary.maxBatchBytes, metrics.bytes)
+    summary.maxPendingBytes = Math.max(summary.maxPendingBytes, metrics.pendingBytes)
+    summary.maxPendingChunks = Math.max(summary.maxPendingChunks, metrics.pendingChunks)
+    if (metrics.reset) summary.resets += 1
+    view.outputPerf = summary
+    if (metrics.writeMs >= terminalOutputSlowThresholdMs || metrics.highlightMs >= terminalOutputSlowThresholdMs) {
+      writeRuntimeLog('warn', 'renderer.terminal-output.slow-write', {
+        panelId,
+        chunks: metrics.chunks,
+        bytes: metrics.bytes,
+        writeMs: Math.round(metrics.writeMs * 10) / 10,
+        queueMs: Math.round(metrics.queueMs * 10) / 10,
+        highlightMs: Math.round(metrics.highlightMs * 10) / 10,
+        pendingBytes: metrics.pendingBytes,
+        pendingChunks: metrics.pendingChunks,
+        reset: Boolean(metrics.reset)
+      })
+    }
+    if (summary.lastAt - summary.firstAt >= terminalOutputSummaryIntervalMs || summary.chunks >= terminalOutputSummaryChunkThreshold) {
+      flushTerminalOutputPerf(panelId, view, summary.chunks >= terminalOutputSummaryChunkThreshold ? 'chunk-threshold' : 'interval')
+    }
+  }
+
+  const setXtermTermName = (terminal: XtermLike, terminalType: string) => {
     ;(terminal.options as XtermRuntimeOptions).termName = terminalType || 'xterm-256color'
   }
 
@@ -77,22 +251,154 @@ export const createTerminalWorkspaceViewRuntime = ({
 
   const activeView = () => terminalViews.get(workspace.activePanelId)
 
-  const writeTerminalDisplayOutput = (view: TerminalView, data: string, options: { suppressInputReplies?: boolean } = {}) => {
-    if (!data) return
-    if (!options.suppressInputReplies) {
-      view.terminal.write(data)
+  const terminalOutputQueueFor = (view: TerminalView): TerminalOutputWriteQueue => {
+    if (view.outputQueue) return view.outputQueue
+    view.outputQueue = {
+      pending: [],
+      pendingBytes: 0,
+      pendingChunks: 0,
+      scheduledFlush: null,
+      inFlight: false,
+      clearAfterInFlight: false,
+      scrollToBottomAfterFlush: false,
+      disposed: false
+    }
+    return view.outputQueue
+  }
+
+  const runTerminalOutputFollowup = (panelId: string, view: TerminalView) => {
+    const queue = terminalOutputQueueFor(view)
+    const shouldScroll = queue.scrollToBottomAfterFlush
+    queue.scrollToBottomAfterFlush = false
+    if (queue.disposed) return
+    if (shouldScroll) view.terminal.scrollToBottom()
+    updateSelectionButtonPosition(panelId)
+    updateSuggestionsPosition(panelId)
+  }
+
+  const flushQueuedTerminalOutput = (panelId: string, view: TerminalView) => {
+    const queue = terminalOutputQueueFor(view)
+    queue.scheduledFlush = null
+    if (queue.disposed || queue.inFlight) return
+    if (!queue.pending.length) {
+      if (queue.clearAfterInFlight) {
+        queue.clearAfterInFlight = false
+        view.terminal.clear()
+      }
       return
     }
-    view.suppressInputReplyDepth = (view.suppressInputReplyDepth || 0) + 1
+
+    const queued = queue.pending.splice(0, queue.pending.length)
+    const pendingBytesAtFlush = queue.pendingBytes
+    const pendingChunksAtFlush = queue.pendingChunks
+    queue.pendingBytes = 0
+    queue.pendingChunks = 0
+    queue.inFlight = true
+
+    const data = queued.map((item) => item.data).join('')
+    const bytes = queued.reduce((total, item) => total + item.bytes, 0)
+    const chunks = queued.reduce((total, item) => total + item.chunks, 0)
+    const highlightMs = queued.reduce((total, item) => total + item.highlightMs, 0)
+    const maxChunkBytes = queued.reduce((max, item) => Math.max(max, item.maxChunkBytes), 0)
+    const queuedAt = queued.reduce((earliest, item) => Math.min(earliest, item.queuedAt), queued[0]?.queuedAt ?? nowMs())
+    const shouldReset = queued.some((item) => item.reset)
+    const suppressInputReplies = queued.some((item) => item.suppressInputReplies)
+    const queueMs = Math.max(0, nowMs() - queuedAt)
+    const startedAt = nowMs()
+
+    if (shouldReset || queue.clearAfterInFlight) {
+      queue.clearAfterInFlight = false
+      view.terminal.clear()
+    }
+    if (suppressInputReplies) view.suppressInputReplyDepth = (view.suppressInputReplyDepth || 0) + 1
     const restoreInputReplies = () => {
+      if (!suppressInputReplies) return
       view.suppressInputReplyDepth = Math.max(0, (view.suppressInputReplyDepth || 1) - 1)
     }
-    if (view.terminal.write.length >= 2) {
-      view.terminal.write(data, restoreInputReplies)
-    } else {
-      view.terminal.write(data)
+    const completeWrite = () => {
       restoreInputReplies()
+      queue.inFlight = false
+      recordTerminalOutputPerf(panelId, view, {
+        chunks,
+        bytes,
+        writeMs: nowMs() - startedAt,
+        queueMs,
+        highlightMs,
+        maxChunkBytes,
+        pendingBytes: pendingBytesAtFlush,
+        pendingChunks: pendingChunksAtFlush,
+        reset: shouldReset
+      })
+      if (queue.clearAfterInFlight) {
+        queue.clearAfterInFlight = false
+        if (!queue.disposed) view.terminal.clear()
+      }
+      runTerminalOutputFollowup(panelId, view)
+      if (queue.pending.length && !queue.disposed) scheduleTerminalOutputFlush(panelId, view)
     }
+    if (view.terminal.write.length >= 2) view.terminal.write(data, completeWrite)
+    else {
+      view.terminal.write(data)
+      completeWrite()
+    }
+  }
+
+  const scheduleTerminalOutputFlush = (panelId: string, view: TerminalView) => {
+    const queue = terminalOutputQueueFor(view)
+    if (queue.disposed || queue.inFlight || queue.scheduledFlush !== null) return
+    queue.scheduledFlush = requestOutputFlush(() => flushQueuedTerminalOutput(panelId, view))
+  }
+
+  const clearQueuedTerminalOutput = (view: TerminalView, options: { dispose?: boolean } = {}) => {
+    const queue = terminalOutputQueueFor(view)
+    if (queue.scheduledFlush !== null) {
+      cancelOutputFlush(queue.scheduledFlush)
+      queue.scheduledFlush = null
+    }
+    queue.pending = []
+    queue.pendingBytes = 0
+    queue.pendingChunks = 0
+    queue.scrollToBottomAfterFlush = false
+    if (options.dispose) {
+      queue.disposed = true
+      return
+    }
+    if (queue.inFlight) queue.clearAfterInFlight = true
+    else view.terminal.clear()
+  }
+
+  const writeTerminalDisplayOutput = (
+    panelId: string,
+    view: TerminalView,
+    data: string,
+    options: { suppressInputReplies?: boolean; highlightMs?: number; reset?: boolean; scrollToBottom?: boolean } = {}
+  ) => {
+    if (!data) return
+    const queue = terminalOutputQueueFor(view)
+    if (options.reset) {
+      queue.pending = []
+      queue.pendingBytes = 0
+      queue.pendingChunks = 0
+      if (queue.scheduledFlush !== null) {
+        cancelOutputFlush(queue.scheduledFlush)
+        queue.scheduledFlush = null
+      }
+    }
+    const bytes = textByteLength(data)
+    queue.pending.push({
+      chunks: 1,
+      data,
+      bytes,
+      queuedAt: nowMs(),
+      highlightMs: options.highlightMs || 0,
+      maxChunkBytes: bytes,
+      reset: Boolean(options.reset),
+      suppressInputReplies: Boolean(options.suppressInputReplies)
+    })
+    queue.pendingBytes += bytes
+    queue.pendingChunks += 1
+    queue.scrollToBottomAfterFlush = queue.scrollToBottomAfterFlush || Boolean(options.scrollToBottom)
+    scheduleTerminalOutputFlush(panelId, view)
   }
 
   const notifyBackendResize = (panelId: string, view: TerminalView) => {
@@ -132,7 +438,7 @@ export const createTerminalWorkspaceViewRuntime = ({
     })
   }
 
-  const estimateTerminalCellSize = (view: { terminal: XtermTerminal }, panelId: string) => {
+  const estimateTerminalCellSize = (view: { terminal: XtermLike }, panelId: string) => {
     const terminalElement = terminalElements.get(panelId)
     const rect = terminalElement?.getBoundingClientRect()
     const hostWidth = terminalElement?.clientWidth || rect?.width || view.terminal.cols * 9
@@ -145,7 +451,7 @@ export const createTerminalWorkspaceViewRuntime = ({
     }
   }
 
-  const getSelectionVisibleRow = (view: { terminal: XtermTerminal }, panelId: string) => {
+  const getSelectionVisibleRow = (view: { terminal: XtermLike }, panelId: string) => {
     const selectionPosition = view.terminal.getSelectionPosition()
     const selectedText = view.terminal.getSelection().trim()
     if (!selectionPosition || !selectedText) return null
@@ -265,30 +571,44 @@ export const createTerminalWorkspaceViewRuntime = ({
     terminalViews.forEach((view, panelId) => applyTerminalSettingsToView(panelId, view))
   }
 
-  const syncTerminalView = (panel: TerminalPanel, options: { suppressInputReplies?: boolean } = {}) => {
+  const syncTerminalView = (panel: TerminalPanel, options: { suppressInputReplies?: boolean; refit?: boolean } = {}) => {
     if (panel.kind === 'knowledge') return
     const view = terminalViews.get(panel.id)
     if (!view) return
+    const highlightedAt = nowMs()
     const displayOutput = workspace.getHighlightedTerminalOutput(panel.id)
+    const highlightMs = nowMs() - highlightedAt
+    let wroteOutput = false
     if (displayOutput !== view.lastOutput) {
       if (displayOutput.startsWith(view.lastOutput)) {
         const chunk = displayOutput.slice(view.lastOutput.length)
-        writeTerminalDisplayOutput(view, chunk, { suppressInputReplies: options.suppressInputReplies })
+        writeTerminalDisplayOutput(panel.id, view, chunk, { suppressInputReplies: options.suppressInputReplies, highlightMs, scrollToBottom: true })
       } else {
-        view.terminal.clear()
-        writeTerminalDisplayOutput(view, displayOutput, { suppressInputReplies: true })
+        writeTerminalDisplayOutput(panel.id, view, displayOutput, { suppressInputReplies: true, highlightMs, reset: true, scrollToBottom: true })
       }
       view.lastOutput = displayOutput
+      wroteOutput = true
+    } else if (highlightMs >= terminalOutputSlowThresholdMs) {
+      writeRuntimeLog('warn', 'renderer.terminal-output.slow-highlight', {
+        panelId: panel.id,
+        highlightMs: Math.round(highlightMs * 10) / 10,
+        outputBytes: textByteLength(displayOutput)
+      })
     }
-    scheduleTerminalFit(panel.id, { scrollToBottom: true })
-    updateSelectionButtonPosition(panel.id)
-    updateSuggestionsPosition(panel.id)
+    if (options.refit) {
+      scheduleTerminalFit(panel.id, { scrollToBottom: true })
+    } else {
+      if (!wroteOutput) {
+        updateSelectionButtonPosition(panel.id)
+        updateSuggestionsPosition(panel.id)
+      }
+    }
   }
 
   const createTerminalView = (panel: TerminalPanel, element: HTMLElement) => {
     if (panel.kind === 'knowledge') return
     if (terminalViews.has(panel.id)) return
-    const terminal = new XtermTerminal({
+    const terminal = new TerminalConstructor({
       cursorBlink: workspace.terminalSettings.cursorBlink,
       convertEol: true,
       cursorStyle: workspace.terminalSettings.cursorStyle,
@@ -303,12 +623,13 @@ export const createTerminalWorkspaceViewRuntime = ({
         selectionBackground: '#2d4059'
       }
     })
-    const fit = new FitAddon()
-    const searchAddon = new SearchAddon()
+    const fit = new FitConstructor()
+    const searchAddon = new SearchConstructor()
     terminal.loadAddon(fit)
     terminal.loadAddon(searchAddon)
     terminal.open(element)
     const view: TerminalView = { terminal, fit, search: searchAddon, lastOutput: '' }
+    view.clearPendingOutput = () => clearQueuedTerminalOutput(view)
     applyTerminalSettingsToView(panel.id, view, workspace.terminalSettings, { refit: false })
     if (typeof ResizeObserver !== 'undefined') {
       view.resizeObserver = new ResizeObserver(() => {
@@ -321,7 +642,7 @@ export const createTerminalWorkspaceViewRuntime = ({
       panelId: panel.id,
       hasSession: Boolean(panel.sessionId)
     })
-    syncTerminalView(panel, { suppressInputReplies: Boolean(panel.output) })
+    syncTerminalView(panel, { suppressInputReplies: Boolean(panel.output), refit: true })
     terminal.onData((data) => {
       if (view.suppressInputReplyDepth) {
         writeRuntimeLog('debug', 'renderer.terminal-input.suppressed-replay-reply', {
@@ -366,6 +687,8 @@ export const createTerminalWorkspaceViewRuntime = ({
       terminalElements.delete(panelId)
       const view = terminalViews.get(panelId)
       if (view) {
+        clearQueuedTerminalOutput(view, { dispose: true })
+        flushTerminalOutputPerf(panelId, view, 'view-disposed')
         view.resizeObserver?.disconnect()
         view.terminal.dispose()
         terminalViews.delete(panelId)
@@ -387,8 +710,11 @@ export const createTerminalWorkspaceViewRuntime = ({
       })
       for (const panelId of terminalViews.keys()) {
         if (!workspace.panels.some((panel) => panel.id === panelId)) {
-          terminalViews.get(panelId)?.terminal.dispose()
-          terminalViews.get(panelId)?.resizeObserver?.disconnect()
+          const view = terminalViews.get(panelId)
+          if (view) clearQueuedTerminalOutput(view, { dispose: true })
+          flushTerminalOutputPerf(panelId, view, 'panel-removed')
+          view?.terminal.dispose()
+          view?.resizeObserver?.disconnect()
           terminalViews.delete(panelId)
           terminalElements.delete(panelId)
           delete paneFontSizes[panelId]
@@ -426,7 +752,9 @@ export const createTerminalWorkspaceViewRuntime = ({
   }
 
   const dispose = () => {
-    terminalViews.forEach((view) => {
+    terminalViews.forEach((view, panelId) => {
+      clearQueuedTerminalOutput(view, { dispose: true })
+      flushTerminalOutputPerf(panelId, view, 'runtime-disposed')
       view.resizeObserver?.disconnect()
       view.terminal.dispose()
     })

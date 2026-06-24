@@ -18,6 +18,18 @@ The terminal diagnostics include local/SSH terminal create, lifecycle, write, re
 
 When reporting a terminal input problem, include the recent `terminal.*` and `renderer.terminal-*` entries from this file.
 
+For lag while running an interactive program such as `codex` inside a normal local terminal tab, reproduce the slowdown and collect the nearby log entries below. These are for the regular terminal path, not the right-side embedded Codex panel:
+
+- `terminal.data.summary`: main-process terminal output throughput. Check `chunks`, `bytes`, `durationMs`, and `maxChunkBytes`.
+- `terminal.data.coalesced`: main-process local/SSH terminal output coalescing before IPC delivery. Check `chunks`, `bytes`, `durationMs`, and `maxChunkBytes`.
+- `renderer.terminal-data.summary` / `renderer.terminal-data.slow-handle`: renderer-side IPC data handling and append cost before xterm rendering.
+- `renderer.terminal-output.summary` / `renderer.terminal-output.slow-write`: xterm display write cost, queue wait, pending backlog, and keyword-highlight cost. Check `chunks`, `writes`, `bytes`, `writeMs`, `queueMs`, `highlightMs`, `maxBatchBytes`, `maxPendingBytes`, and `maxPendingChunks`.
+- `control.notification.*` and `native-notification.*`: notification creation, renderer sync, and desktop notification attempts.
+
+The normal terminal path coalesces output in two places. The main process batches local and SSH data before sending `terminal:data` IPC events, using a short delay capped near one visual frame so the UI is not held behind a 50ms bulk timer. The renderer then batches pending terminal output with a low-latency timer and keeps only one `xterm.write()` in flight at a time; if xterm has not completed the previous write callback, later chunks wait and are merged into the next write. This is backpressure, not data dropping: aiopsterm intentionally reduces IPC/write frequency while preserving terminal bytes, subject to the existing terminal scrollback/history limits.
+
+If `terminal.data.summary` is high but renderer timings are low, the terminal program is simply producing a large stream. If `terminal.data.coalesced` regularly combines many chunks, the backend is reducing IPC pressure as expected. If `renderer.terminal-output.slow-write` shows high `writeMs`, `queueMs`, or `maxPendingBytes` around the freeze, the bottleneck is xterm rendering throughput. If `renderer.terminal-data.slow-handle` appears instead, inspect renderer state append and ZMODEM handling. If the timestamps line up with `control.notification.*` or `native-notification.*`, test again with desktop notifications disabled in Settings > AI > Notifications to isolate the notification path.
+
 ## SSH Jump Host Diagnostics
 
 SSH and jump-host lifecycle logs include structured routing and authentication metadata. These fields are safe to share for debugging because they do not include passwords, private keys, passphrases, OTP values, command text, or terminal output:

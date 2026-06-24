@@ -7,7 +7,9 @@ import {
   unregisterCodexTerminalBridgeSession
 } from './backend/codex/codexTerminalBridge'
 import { logRuntimeEvent } from './backend/app/runtimeLog'
+import { createTerminalDataCoalescer, type TerminalDataCoalescerFlush } from './backend/terminal/terminalDataCoalescer'
 import { createLocalTerminalSession, type LocalTerminalSession } from './backend/terminal/localTerminal'
+import { createTerminalDataLogSummary, type TerminalDataLogSummary } from './backend/terminal/terminalDataLogSummary'
 import { createSshTerminalSession, type SshTerminalSession } from './backend/ssh/sshTerminal'
 import { getAsset, saveAsset } from './backend/assets/assets'
 import { recordTerminalCommandHistory } from './backend/terminal/terminalSuggestions'
@@ -33,6 +35,33 @@ type TerminalRuntimeInput = {
 
 export const createMainTerminalRuntime = (input: TerminalRuntimeInput) => {
   const sessions = new Map<string, TerminalSession>()
+  const terminalDataSummary = createTerminalDataLogSummary()
+  const terminalDataCoalescer = createTerminalDataCoalescer({
+    onFlush: (flush) => flushTerminalData(flush)
+  })
+
+  const chunkBytes = (chunk: string | Buffer) => (Buffer.isBuffer(chunk) ? chunk.byteLength : Buffer.byteLength(String(chunk || ''), 'utf8'))
+
+  const logDataSummary = (event: string, id: string, summary: TerminalDataLogSummary, reason: string) => {
+    logRuntimeEvent('debug', event, {
+      id,
+      reason,
+      chunks: summary.chunks,
+      bytes: summary.bytes,
+      durationMs: Math.max(0, summary.lastAt - summary.firstAt),
+      maxChunkBytes: summary.maxChunkBytes
+    })
+  }
+
+  const recordDataSummary = (id: string, bytes: number) => {
+    const flushed = terminalDataSummary.record(id, bytes)
+    if (flushed) logDataSummary('terminal.data.summary', flushed.id, flushed.summary, flushed.reason)
+  }
+
+  const flushDataSummary = (id: string, reason: string) => {
+    const flushed = terminalDataSummary.flush(id, reason)
+    if (flushed) logDataSummary('terminal.data.summary', flushed.id, flushed.summary, flushed.reason)
+  }
 
   const registerTerminalForCodexBridge = (session: TerminalSession, target?: CodexSessionCreateOptions['target']) => {
     registerCodexTerminalBridgeSession({
@@ -101,16 +130,39 @@ export const createMainTerminalRuntime = (input: TerminalRuntimeInput) => {
     return createTerminalDataEvent(id, chunk)
   }
 
+  const flushTerminalData = (flush: TerminalDataCoalescerFlush) => {
+    const session = sessions.get(flush.id)
+    if (!session) return
+    appendCodexTerminalBridgeDisplayData(flush.id, flush.chunk)
+    sendWindowEvent(session.window, 'terminal:data', terminalDataPayload(flush.id, flush.chunk))
+    if (flush.chunks > 1) {
+      logRuntimeEvent('debug', 'terminal.data.coalesced', {
+        id: flush.id,
+        kind: session.kind,
+        chunks: flush.chunks,
+        bytes: flush.bytes,
+        durationMs: flush.durationMs,
+        maxChunkBytes: flush.maxChunkBytes
+      })
+    }
+  }
+
+  const flushTerminalDataForSession = (id: string, reason: string) => {
+    terminalDataCoalescer.flush(id, reason)
+  }
+
   const sendTerminalData = (owner: BrowserWindow, id: string, chunk: string | Buffer) => {
-    logRuntimeEvent('debug', 'terminal.data', {
-      id,
-      bytes: Buffer.isBuffer(chunk) ? chunk.byteLength : Buffer.byteLength(String(chunk || ''), 'utf8')
-    })
+    recordDataSummary(id, chunkBytes(chunk))
     const displayChunk = filterCodexTerminalBridgeDisplayData(id, chunk)
     appendCodexTerminalBridgeData(id, chunk)
     if (Buffer.isBuffer(displayChunk) ? displayChunk.byteLength > 0 : displayChunk.length > 0) {
-      appendCodexTerminalBridgeDisplayData(id, displayChunk)
-      sendWindowEvent(owner, 'terminal:data', terminalDataPayload(id, displayChunk))
+      const session = sessions.get(id)
+      if (session?.window !== owner) {
+        appendCodexTerminalBridgeDisplayData(id, displayChunk)
+        sendWindowEvent(owner, 'terminal:data', terminalDataPayload(id, displayChunk))
+        return
+      }
+      terminalDataCoalescer.push(id, displayChunk)
     }
   }
 
@@ -283,6 +335,7 @@ export const createMainTerminalRuntime = (input: TerminalRuntimeInput) => {
         sendWindowEvent(owner, 'terminal:lifecycle', event)
       },
       exit: (event, code) => {
+        flushTerminalDataForSession(event.id, 'terminal-exit')
         logRuntimeEvent('info', 'terminal.exit', {
           id: event.id,
           kind: event.kind,
@@ -297,6 +350,8 @@ export const createMainTerminalRuntime = (input: TerminalRuntimeInput) => {
       keyboardInteractive: (request) => requestTerminalKeyboardInteractive(owner, request),
       keyboardInteractiveResult: (result) => sendTerminalKeyboardInteractiveResult(owner, result),
       closed: () => {
+        flushTerminalDataForSession(id, 'session-closed')
+        flushDataSummary(id, 'session-closed')
         unregisterCodexTerminalBridgeSession(id)
         sessions.delete(id)
         logRuntimeEvent('info', 'terminal.session-removed', { id, kind: 'ssh' })
@@ -320,6 +375,7 @@ export const createMainTerminalRuntime = (input: TerminalRuntimeInput) => {
         sendWindowEvent(owner, 'terminal:lifecycle', event)
       },
       exit: (event, code) => {
+        flushTerminalDataForSession(event.id, 'terminal-exit')
         logRuntimeEvent('info', 'terminal.exit', {
           id: event.id,
           kind: event.kind,
@@ -332,6 +388,8 @@ export const createMainTerminalRuntime = (input: TerminalRuntimeInput) => {
       },
       data: (chunk) => sendTerminalData(owner, id, chunk),
       closed: () => {
+        flushTerminalDataForSession(id, 'session-closed')
+        flushDataSummary(id, 'session-closed')
         unregisterCodexTerminalBridgeSession(id)
         sessions.delete(id)
         logRuntimeEvent('info', 'terminal.session-removed', { id, kind: 'local' })
@@ -340,6 +398,8 @@ export const createMainTerminalRuntime = (input: TerminalRuntimeInput) => {
 
   const killAllSessions = () => {
     sessions.forEach((session) => {
+      flushTerminalDataForSession(session.id, 'kill-all')
+      flushDataSummary(session.id, 'kill-all')
       if (session.kind === 'ssh') {
         ;(session.process as SshTerminalSession).kill()
       } else {

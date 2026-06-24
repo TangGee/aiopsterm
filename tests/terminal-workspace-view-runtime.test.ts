@@ -1,0 +1,313 @@
+import { computed, ref } from 'vue'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { createTerminalWorkspaceViewRuntime } from '@/services/terminal/terminalWorkspaceViewRuntime'
+import { createEmptyTerminalPanel, type TerminalPanel } from '@/services/terminal/terminalPanelRuntime'
+import type { useWorkspaceStore } from '@/stores/workspace'
+
+type WorkspaceStore = ReturnType<typeof useWorkspaceStore>
+
+const logs: Array<{ level: string; event: string; fields?: Record<string, unknown> }> = []
+
+vi.mock('@/services/app/runtimeLogClient', () => ({
+  writeRendererRuntimeLog: (level: string, event: string, fields?: Record<string, unknown>) => {
+    logs.push({ level, event, fields })
+  }
+}))
+
+class FakeFit {
+  fit = vi.fn()
+  activate = vi.fn()
+  dispose = vi.fn()
+}
+
+class FakeSearch {
+  findNext = vi.fn(() => false)
+  findPrevious = vi.fn(() => false)
+  clearDecorations = vi.fn()
+  activate = vi.fn()
+  dispose = vi.fn()
+}
+
+class FakeTerminal {
+  static instances: FakeTerminal[] = []
+  cols = 120
+  rows = 40
+  buffer = { active: { viewportY: 0, cursorX: 0, cursorY: 0 } }
+  options: Record<string, unknown> = {}
+  loadAddon = vi.fn()
+  open = vi.fn()
+  focus = vi.fn()
+  clear = vi.fn()
+  dispose = vi.fn()
+  clearSelection = vi.fn()
+  scrollToBottom = vi.fn()
+  refresh = vi.fn()
+  write = vi.fn((data: string, callback?: () => void) => {
+    this.output += data
+    callback?.()
+  })
+  output = ''
+  dataHandler: ((data: string) => void) | null = null
+  resizeHandler: ((size: { cols: number; rows: number }) => void) | null = null
+  selectionHandler: (() => void) | null = null
+  constructor(options: Record<string, unknown> = {}) {
+    this.options = { ...options }
+    FakeTerminal.instances.push(this)
+  }
+  hasSelection() {
+    return false
+  }
+  getSelection() {
+    return ''
+  }
+  getSelectionPosition() {
+    return null
+  }
+  onData(handler: (data: string) => void) {
+    this.dataHandler = handler
+    return { dispose: vi.fn() }
+  }
+  onResize(handler: (size: { cols: number; rows: number }) => void) {
+    this.resizeHandler = handler
+    return { dispose: vi.fn() }
+  }
+  onSelectionChange(handler: () => void) {
+    this.selectionHandler = handler
+    return { dispose: vi.fn() }
+  }
+}
+
+const flushFrames = async (count = 1) => {
+  for (let index = 0; index < count; index += 1) {
+    await new Promise((resolve) => window.requestAnimationFrame(resolve))
+    await Promise.resolve()
+  }
+}
+
+const flushOutput = async () => {
+  await new Promise((resolve) => window.setTimeout(resolve, 0))
+  await Promise.resolve()
+}
+
+const createWorkspace = (panel: TerminalPanel) =>
+  ({
+    activePanelId: panel.id,
+    panels: [panel],
+    terminalSettings: {
+      terminalType: 'xterm-256color',
+      fontFamily: 'JetBrains Mono',
+      fontSize: 13,
+      lineHeight: 1.1,
+      cursorBlink: true,
+      cursorStyle: 'bar',
+      scrollBack: 2000
+    },
+    extensionSettings: { highlightStatus: false },
+    keywordHighlightSettings: {},
+    getHighlightedTerminalOutput: (panelId: string) => (panelId === panel.id ? panel.output : '')
+  }) as unknown as WorkspaceStore
+
+const createRuntime = (panel = createEmptyTerminalPanel('panel-1', 'Local')) => {
+  const workspace = createWorkspace(panel)
+  const runtime = createTerminalWorkspaceViewRuntime({
+    workspace,
+    visibleTerminalPanels: computed(() => workspace.panels),
+    aiButtonPanelId: ref(''),
+    aiButtonPosition: { top: 0, right: 0 },
+    suggestionPanel: { panelId: '' },
+    suggestionPosition: { left: 0, top: 0 },
+    suggestionItems: ref([]),
+    aiSuggestLoading: ref(false),
+    writeXtermInput: vi.fn(),
+    terminalConstructor: FakeTerminal as any,
+    fitConstructor: FakeFit as any,
+    searchConstructor: FakeSearch as any
+  })
+  return { runtime, workspace, panel }
+}
+
+afterEach(() => {
+  document.body.replaceChildren()
+  FakeTerminal.instances = []
+  logs.length = 0
+  vi.restoreAllMocks()
+})
+
+describe('terminalWorkspaceViewRuntime', () => {
+  it('writes incremental terminal output without refitting the view on the hot path', async () => {
+    const panel = createEmptyTerminalPanel('panel-1', 'Local')
+    panel.sessionId = 'terminal-1'
+    const { runtime } = createRuntime(panel)
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    runtime.setTerminalElement(panel.id, host)
+    await flushFrames(3)
+    const view = runtime.terminalViews.get(panel.id)
+    if (!view) throw new Error('terminal view was not created')
+    const terminal = view.terminal as unknown as FakeTerminal
+    const fit = view.fit as unknown as FakeFit
+    fit.fit.mockClear()
+    terminal.scrollToBottom.mockClear()
+
+    panel.output = 'codex output\n'
+    runtime.syncTerminalView(panel)
+    await flushOutput()
+
+    expect(terminal.write).toHaveBeenCalledWith('codex output\n', expect.any(Function))
+    expect(terminal.scrollToBottom).toHaveBeenCalledTimes(1)
+    expect(fit.fit).not.toHaveBeenCalled()
+    expect(logs.some((entry) => entry.event === 'renderer.terminal-output.summary')).toBe(false)
+  })
+
+  it('coalesces multiple terminal output syncs into one xterm write per frame', async () => {
+    const panel = createEmptyTerminalPanel('panel-1', 'Local')
+    const { runtime } = createRuntime(panel)
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    runtime.setTerminalElement(panel.id, host)
+    await flushFrames(3)
+    const view = runtime.terminalViews.get(panel.id)
+    if (!view) throw new Error('terminal view was not created')
+    const terminal = view.terminal as unknown as FakeTerminal
+    terminal.write.mockClear()
+    terminal.scrollToBottom.mockClear()
+
+    panel.output = 'one'
+    runtime.syncTerminalView(panel)
+    panel.output = 'onetwo'
+    runtime.syncTerminalView(panel)
+    panel.output = 'onetwothree'
+    runtime.syncTerminalView(panel)
+    await flushOutput()
+
+    expect(terminal.write).toHaveBeenCalledTimes(1)
+    expect(terminal.write).toHaveBeenCalledWith('onetwothree', expect.any(Function))
+    expect(terminal.output).toBe('onetwothree')
+    expect(terminal.scrollToBottom).toHaveBeenCalledTimes(1)
+  })
+
+  it('waits for the current xterm write callback before flushing queued output again', async () => {
+    const panel = createEmptyTerminalPanel('panel-1', 'Local')
+    const { runtime } = createRuntime(panel)
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    runtime.setTerminalElement(panel.id, host)
+    await flushFrames(3)
+    const view = runtime.terminalViews.get(panel.id)
+    if (!view) throw new Error('terminal view was not created')
+    const terminal = view.terminal as unknown as FakeTerminal
+    const callbacks: Array<() => void> = []
+    terminal.write.mockImplementation((data: string, callback?: () => void) => {
+      terminal.output += data
+      if (callback) callbacks.push(callback)
+    })
+    terminal.write.mockClear()
+
+    panel.output = 'one'
+    runtime.syncTerminalView(panel)
+    await flushOutput()
+
+    expect(terminal.write).toHaveBeenCalledTimes(1)
+    expect(terminal.output).toBe('one')
+    expect(callbacks).toHaveLength(1)
+
+    panel.output = 'onetwo'
+    runtime.syncTerminalView(panel)
+    panel.output = 'onetwothree'
+    runtime.syncTerminalView(panel)
+    await flushOutput()
+    await flushOutput()
+
+    expect(terminal.write).toHaveBeenCalledTimes(1)
+    callbacks.shift()?.()
+    await flushOutput()
+
+    expect(terminal.write).toHaveBeenCalledTimes(2)
+    expect(terminal.write).toHaveBeenLastCalledWith('twothree', expect.any(Function))
+    expect(terminal.output).toBe('onetwothree')
+  })
+
+  it('drops pending incremental writes when a reset rewrite is queued before the frame flush', async () => {
+    const panel = createEmptyTerminalPanel('panel-1', 'Local')
+    const { runtime } = createRuntime(panel)
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    runtime.setTerminalElement(panel.id, host)
+    const view = runtime.terminalViews.get(panel.id)
+    if (!view) throw new Error('terminal view was not created')
+    const terminal = view.terminal as unknown as FakeTerminal
+    terminal.write.mockClear()
+    terminal.clear.mockClear()
+
+    panel.output = 'stale'
+    runtime.syncTerminalView(panel)
+    panel.output = 'fresh'
+    runtime.syncTerminalView(panel)
+    await flushOutput()
+
+    expect(terminal.clear).toHaveBeenCalledTimes(1)
+    expect(terminal.write).toHaveBeenCalledTimes(1)
+    expect(terminal.write).toHaveBeenCalledWith('fresh', expect.any(Function))
+    expect(terminal.output).toBe('fresh')
+  })
+
+  it('flushes terminal output performance summaries when the view is disposed', async () => {
+    const panel = createEmptyTerminalPanel('panel-1', 'Local')
+    const { runtime } = createRuntime(panel)
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    runtime.setTerminalElement(panel.id, host)
+    panel.output = 'first chunk\n'
+    runtime.syncTerminalView(panel)
+    await flushOutput()
+    runtime.setTerminalElement(panel.id, null)
+
+    expect(logs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          level: 'debug',
+          event: 'renderer.terminal-output.summary',
+          fields: expect.objectContaining({
+            panelId: panel.id,
+            reason: 'view-disposed',
+            chunks: 1,
+            writes: 1,
+            bytes: 12
+          })
+        })
+      ])
+    )
+  })
+
+  it('flushes terminal output even when requestAnimationFrame is not pumping', async () => {
+    const panel = createEmptyTerminalPanel('panel-1', 'Local')
+    const { runtime } = createRuntime(panel)
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const originalRequestAnimationFrame = window.requestAnimationFrame
+    const stalledFrame = vi.fn(() => 123)
+    window.requestAnimationFrame = stalledFrame as any
+
+    try {
+      runtime.setTerminalElement(panel.id, host)
+      const view = runtime.terminalViews.get(panel.id)
+      if (!view) throw new Error('terminal view was not created')
+      const terminal = view.terminal as unknown as FakeTerminal
+      terminal.write.mockClear()
+
+      panel.output = 'interactive echo'
+      runtime.syncTerminalView(panel)
+      await flushOutput()
+
+      expect(terminal.write).toHaveBeenCalledTimes(1)
+      expect(terminal.output).toBe('interactive echo')
+    } finally {
+      window.requestAnimationFrame = originalRequestAnimationFrame
+    }
+  })
+})

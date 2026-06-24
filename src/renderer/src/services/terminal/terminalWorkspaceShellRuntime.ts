@@ -366,7 +366,8 @@ export const createTerminalWorkspaceShellRuntime = (
     if (!panel || panel.kind === 'knowledge') return
     workspace.replaceTerminalOutput(panel.id, '')
     const view = terminalViews.get(panelId)
-    view?.terminal.clear()
+    view?.clearPendingOutput?.()
+    if (!view?.clearPendingOutput) view?.terminal.clear()
     if (view) view.lastOutput = ''
     menu.visible = false
     termMenu.visible = false

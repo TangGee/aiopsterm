@@ -162,7 +162,8 @@ export const createAppBootstrapRuntime = (input: AppBootstrapRuntimeInput) => {
         preload: input.preloadPath,
         contextIsolation: true,
         nodeIntegration: false,
-        sandbox: false
+        sandbox: false,
+        backgroundThrottling: false
       }
     })
     input.setMainWindow(mainWindow)

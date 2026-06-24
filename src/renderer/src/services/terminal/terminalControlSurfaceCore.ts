@@ -22,6 +22,7 @@ export type TerminalControlSurfaceView = {
     focus(): void
   }
   lastOutput: string
+  clearPendingOutput?: () => void
 }
 
 export type TerminalFitOptions = { scrollToBottom?: boolean; frames?: number; forceGeometry?: boolean }

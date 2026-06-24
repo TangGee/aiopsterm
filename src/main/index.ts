@@ -162,7 +162,19 @@ const broadcastAiAgentSessionEvent = (event: AiAgentSessionEvent) => {
   })
   broadcastWindowEvent(BrowserWindow.getAllWindows(), 'ai-agent:session-event', event)
   if (!aiAgentEventNeedsAttention(event)) return
-  showNativeNotification(nativeNotificationRuntime, {
+  const desktopNotificationsEnabled = getConfig().notifications?.desktopNotifications !== false
+  const notificationSupported = nativeNotificationRuntime.isSupported()
+  logRuntimeEvent('info', 'native-notification.request', {
+    source: 'ai-agent',
+    agentSource: event.source,
+    event: event.event,
+    sessionId: event.sessionId,
+    panelId: event.panelId,
+    terminalSessionId: event.terminalSessionId,
+    enabled: desktopNotificationsEnabled,
+    supported: notificationSupported
+  })
+  const shown = showNativeNotification(nativeNotificationRuntime, {
     title: event.title || 'AI session needs attention',
     body: event.summary || `${event.source} needs attention`,
     silent: false,
@@ -171,7 +183,16 @@ const broadcastAiAgentSessionEvent = (event: AiAgentSessionEvent) => {
       appBootstrapRuntime.focusWindow(target)
       broadcastWindowEvent(BrowserWindow.getAllWindows(), 'ai-agent:session-event', event)
     }
-  }, getConfig().notifications?.desktopNotifications !== false)
+  }, desktopNotificationsEnabled)
+  logRuntimeEvent('debug', 'native-notification.result', {
+    source: 'ai-agent',
+    agentSource: event.source,
+    event: event.event,
+    sessionId: event.sessionId,
+    shown,
+    enabled: desktopNotificationsEnabled,
+    supported: notificationSupported
+  })
 }
 
 const broadcastManagedAiSessionFocusRequest = (request: ManagedAiSessionFocusRequest) => {
@@ -197,7 +218,20 @@ const broadcastManagedAiSessionEvent = (event: ManagedAiSessionEvent) => {
 }
 
 const showControlNotification = (notification: ControlNotificationRecord) => {
-  showNativeNotification(nativeNotificationRuntime, {
+  const desktopNotificationsEnabled = getConfig().notifications?.desktopNotifications !== false
+  const notificationSupported = nativeNotificationRuntime.isSupported()
+  logRuntimeEvent('info', 'native-notification.request', {
+    source: 'control-notification',
+    notificationId: notification.id,
+    level: notification.level,
+    group: notification.group,
+    surfaceId: notification.panelId,
+    sessionId: notification.sessionId,
+    terminalSessionId: notification.terminalSessionId,
+    enabled: desktopNotificationsEnabled,
+    supported: notificationSupported
+  })
+  const shown = showNativeNotification(nativeNotificationRuntime, {
     title: notification.source ? `${notification.source}: ${notification.title}` : notification.title,
     body: [notification.level && notification.level !== 'info' ? `[${notification.level}]` : '', notification.group, notification.subtitle, notification.body].filter(Boolean).join('\n') || notification.title,
     silent: false,
@@ -206,7 +240,15 @@ const showControlNotification = (notification: ControlNotificationRecord) => {
       appBootstrapRuntime.focusWindow(target)
       void invokeControlSocketMethod('notification.open', { id: notification.id })
     }
-  }, getConfig().notifications?.desktopNotifications !== false)
+  }, desktopNotificationsEnabled)
+  logRuntimeEvent('debug', 'native-notification.result', {
+    source: 'control-notification',
+    notificationId: notification.id,
+    level: notification.level,
+    shown,
+    enabled: desktopNotificationsEnabled,
+    supported: notificationSupported
+  })
 }
 
 const runtimeConfiguration = configureMainBackendRuntimes({
