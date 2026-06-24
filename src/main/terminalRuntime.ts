@@ -1,6 +1,8 @@
 import { BrowserWindow, ipcMain, type IpcMainEvent } from 'electron'
 import {
   appendCodexTerminalBridgeData,
+  appendCodexTerminalBridgeDisplayData,
+  filterCodexTerminalBridgeDisplayData,
   registerCodexTerminalBridgeSession,
   unregisterCodexTerminalBridgeSession
 } from './backend/codex/codexTerminalBridge'
@@ -46,6 +48,15 @@ export const createMainTerminalRuntime = (input: TerminalRuntimeInput) => {
         } else {
           ;(session.process as LocalTerminalSession).write(data)
         }
+      },
+      runBackgroundCommand: (options) => {
+        if (session.kind === 'ssh') {
+          return (session.process as SshTerminalSession).runBackgroundCommand?.(options) ?? Promise.reject(new Error('SSH terminal does not support background execution.'))
+        }
+        return (
+          (session.process as LocalTerminalSession).runBackgroundCommand?.(options) ??
+          Promise.reject(new Error('Local terminal does not support background execution.'))
+        )
       }
     })
   }
@@ -95,8 +106,12 @@ export const createMainTerminalRuntime = (input: TerminalRuntimeInput) => {
       id,
       bytes: Buffer.isBuffer(chunk) ? chunk.byteLength : Buffer.byteLength(String(chunk || ''), 'utf8')
     })
+    const displayChunk = filterCodexTerminalBridgeDisplayData(id, chunk)
     appendCodexTerminalBridgeData(id, chunk)
-    sendWindowEvent(owner, 'terminal:data', terminalDataPayload(id, chunk))
+    if (Buffer.isBuffer(displayChunk) ? displayChunk.byteLength > 0 : displayChunk.length > 0) {
+      appendCodexTerminalBridgeDisplayData(id, displayChunk)
+      sendWindowEvent(owner, 'terminal:data', terminalDataPayload(id, displayChunk))
+    }
   }
 
   const sendCodexExit = (owner: BrowserWindow, lifecycle: CodexSessionLifecycleEvent, code = lifecycle.code ?? null) => {

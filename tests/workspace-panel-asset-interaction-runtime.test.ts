@@ -25,6 +25,61 @@ const asset = (patch: Partial<WorkspacePanelAsset> & Pick<WorkspacePanelAsset, '
 })
 
 describe('workspacePanelAssetInteractionRuntime', () => {
+  it('does not show a success notice after opening the local shell from the asset tree', async () => {
+    const assets = [
+      asset({
+        id: 'opened-local',
+        uuid: 'opened-local',
+        name: '127.0.0.1',
+        host: '127.0.0.1',
+        isLocalShell: true
+      })
+    ]
+    const selectedAssetId = ref<string | null>(null)
+    const contextMenuAssetId = ref<string | null>(null)
+    const notice = ref('ready')
+    const workspace = {
+      activePanelId: 'panel-1',
+      terminalSettings: { terminalType: 'xterm' },
+      selectedContexts: [] as Array<{ id: string; kind: string; label: string; detail: string }>,
+      createPanel: vi.fn(function (this: any) {
+        this.activePanelId = 'panel-2'
+      }),
+      renamePanel: vi.fn(),
+      replaceTerminalOutput: vi.fn(),
+      discardPendingTerminalPanel: vi.fn(),
+      applyLocalTerminalSession: vi.fn(),
+      applySshTerminalSession: vi.fn(),
+      registerSshSession: vi.fn(),
+      updateWorkspacePreferences: vi.fn(async () => true)
+    } as any
+    const openLocalTerminalLaunch = vi.fn(async () => ({ id: 'panel-2' }))
+    const runtime = createWorkspacePanelAssetInteractionRuntime({
+      workspace,
+      selectedAssetId,
+      contextMenuAssetId,
+      contextAsset: computed(() => null),
+      allAssets: computed(() => assets),
+      recentAssetIds: computed(() => []),
+      organizationAssets: computed(() => []),
+      findEditableAsset: (assetId) => assets.find((item) => item.id === assetId) || null,
+      toAssetInput: (nextAsset, patch = {}) => ({ ...nextAsset, ...patch }) as AiopsAssetInput,
+      saveAssetRecord: vi.fn(async (input) => input as WorkspacePanelAsset),
+      refreshOrganizationAssets: vi.fn(async () => true),
+      expandGroup: vi.fn(async () => true),
+      closeContextMenu: vi.fn(),
+      notice,
+      openLocalTerminalLaunch
+    })
+
+    await runtime.connectAsset('opened-local')
+
+    expect(openLocalTerminalLaunch).toHaveBeenCalled()
+    expect(notice.value).toBe('ready')
+    expect(workspace.selectedContexts).toEqual([{ id: 'opened-local', kind: 'hosts', label: '127.0.0.1', detail: '127.0.0.1' }])
+    expect(workspace.updateWorkspacePreferences).not.toHaveBeenCalled()
+  })
+
   it('owns Workspace panel asset connect, favorite, comment, and organization refresh interactions', async () => {
     const assets = [
       asset({ id: 'prod', uuid: 'prod', name: 'prod-bastion', favorite: false, comment: 'old' }),

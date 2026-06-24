@@ -70,6 +70,18 @@ const runCommandSchema = {
       type: 'number',
       description: 'Optional timeout in milliseconds. Defaults to 30000 and is capped by aiopsterm.'
     },
+    mode: {
+      type: 'string',
+      enum: ['wait', 'return_immediately'],
+      description:
+        'Defaults to wait. wait captures output until the command exits. return_immediately writes the command into the visible terminal and returns after the write, for long-running foreground commands or commands that manage their own backgrounding.'
+    },
+    execution: {
+      type: 'string',
+      enum: ['terminal', 'background'],
+      description:
+        'Defaults to terminal. terminal writes into the visible aiopsterm terminal. background uses an independent execution channel and does not write to the visible terminal; use it only for parallel work or when the visible terminal is occupied by a foreground program. background currently supports mode wait only.'
+    },
     sessionId: {
       type: 'string',
       description:
@@ -94,6 +106,25 @@ const targetContextSchema = {
 const listTerminalsSchema = {
   type: 'object',
   properties: {},
+  additionalProperties: false
+}
+
+const readTerminalOutputSchema = {
+  type: 'object',
+  properties: {
+    offset: {
+      type: 'number',
+      description: 'Zero-based absolute terminal-output line offset. Defaults to 0.'
+    },
+    limit: {
+      type: 'number',
+      description: 'Maximum number of visible terminal output lines to return. Defaults to 200 and is capped by aiopsterm.'
+    },
+    sessionId: {
+      type: 'string',
+      description: 'Optional aiopsterm terminal session id. Omit to read the current selected terminal.'
+    }
+  },
   additionalProperties: false
 }
 
@@ -216,13 +247,26 @@ const tools = [
     name: 'run_command',
     title: 'Run command in aiopsterm terminal',
     description:
-      'Run a bounded, non-interactive command in the selected real aiopsterm terminal session on the managed host. Use target_context first when the target is ambiguous. This is the only command tool that targets the managed host instead of the local Codex client process.',
+      'Run a command in the selected real aiopsterm terminal session on the managed host. Default execution terminal writes to the visible terminal. execution background uses an independent channel only for parallel work or when the visible terminal is occupied. Default mode wait is bounded, marker-captured, and returns output plus exit code. mode return_immediately writes the command and returns after the write for long-running foreground tasks or shell-managed background tasks. Use target_context first when the target is ambiguous. This is the only command tool that targets the managed host instead of the local Codex client process.',
     inputSchema: runCommandSchema,
     annotations: {
       readOnlyHint: false,
       destructiveHint: true,
       idempotentHint: false,
       openWorldHint: true
+    }
+  },
+  {
+    name: 'read_terminal_output',
+    title: 'Read aiopsterm terminal output',
+    description:
+      'Read a bounded line range from the recent visible output of the selected aiopsterm terminal. This includes user-entered command output and model-entered command output after aiopsterm display filtering, and supports offset pagination. It does not write to the terminal.',
+    inputSchema: readTerminalOutputSchema,
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false
     }
   },
   {

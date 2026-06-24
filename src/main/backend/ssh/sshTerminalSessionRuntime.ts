@@ -54,6 +54,7 @@ import {
   relayControlPath,
   relayShellCommand,
   relayShellSshArgs,
+  shellSingleQuote,
   shouldBootstrapRelayShell
 } from './sshTerminalRelayShell'
 import type {
@@ -67,6 +68,252 @@ import type {
   SshTerminalWritable
 } from './sshTerminalTypes'
 import { SshJumpForwardError } from './sshTerminalTypes'
+import type { TerminalBackgroundCommandOptions, TerminalBackgroundCommandResult } from '../terminal/terminal'
+
+const backgroundOutputMaxBytes = 1024 * 1024
+
+const boundedAppend = (value: string, chunk: string | Buffer, maxBytes = backgroundOutputMaxBytes) => {
+  const currentBytes = Buffer.byteLength(value, 'utf8')
+  if (currentBytes >= maxBytes) return { value, truncated: true }
+  const text = Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk || '')
+  const next = Buffer.from(text, 'utf8')
+  const remaining = maxBytes - currentBytes
+  if (next.byteLength <= remaining) return { value: `${value}${text}`, truncated: false }
+  return { value: `${value}${next.subarray(0, remaining).toString('utf8')}`, truncated: true }
+}
+
+const stripControlForBackground = (value: string) =>
+  value
+    .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, '')
+    .replace(/\u001b\][^\u0007]*(?:\u0007|\u001b\\)/g, '')
+    .replace(/\r/g, '')
+
+const buildMarkedBackgroundCommand = (command: string, commandId: string) => {
+  const markerStart = `__AIOPSTERM_BACKGROUND_START_${commandId}__`
+  const markerEnd = `__AIOPSTERM_BACKGROUND_END_${commandId}__`
+  const markerEndPrefix = `${markerEnd}:`
+  return {
+    markerStart,
+    markerEndPrefix,
+    input: ['echo ', shellSingleQuote(markerStart), '; ', command, '; __aiopsterm_status=$?; echo ', shellSingleQuote(markerEnd), ':$__aiopsterm_status', '\n'].join('')
+  }
+}
+
+const extractBackgroundMarkedOutput = (value: string, markerStart: string, markerEndPrefix: string) => {
+  const cleaned = stripControlForBackground(value)
+  const lines = cleaned.split('\n')
+  let endLineIndex = -1
+  let exitCode: number | null = null
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index].trim()
+    if (!line.startsWith(markerEndPrefix)) continue
+    const rawCode = line.slice(markerEndPrefix.length).trim()
+    if (!/^-?\d+$/.test(rawCode)) continue
+    endLineIndex = index
+    exitCode = Number(rawCode)
+    break
+  }
+  if (endLineIndex < 0) return null
+  const beforeEnd = lines.slice(0, endLineIndex).join('\n')
+  const startLines = beforeEnd.split('\n')
+  let startLineIndex = -1
+  for (let index = 0; index < startLines.length; index += 1) {
+    if (startLines[index].trim() === markerStart) startLineIndex = index
+  }
+  const output = startLineIndex >= 0 ? startLines.slice(startLineIndex + 1).join('\n') : beforeEnd
+  return { output: output.trim(), exitCode }
+}
+
+const commandWithCwd = (command: string, cwd?: string) => {
+  const cleanCwd = cleanText(cwd)
+  return cleanCwd ? `cd ${shellSingleQuote(cleanCwd)} && ${command}` : command
+}
+
+const runSshExecBackgroundCommand = (
+  authClient: SshTerminalClient,
+  commandOptions: TerminalBackgroundCommandOptions
+): Promise<TerminalBackgroundCommandResult> => {
+  if (typeof authClient.exec !== 'function') {
+    return Promise.reject(new Error('The active SSH runtime does not support exec channels.'))
+  }
+  const exec = authClient.exec.bind(authClient)
+  const startedAt = Date.now()
+  const maxOutputBytes = Math.max(1024, Math.min(commandOptions.maxOutputBytes || backgroundOutputMaxBytes, 4 * backgroundOutputMaxBytes))
+  return new Promise<TerminalBackgroundCommandResult>((resolve, reject) => {
+    let output = ''
+    let outputTruncated = false
+    let settled = false
+    let timedOut = false
+    let activeChannel: SshTerminalChannel | null = null
+    const settle = (callback: () => void) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      callback()
+    }
+    const append = (chunk: string | Buffer) => {
+      const next = boundedAppend(output, chunk, maxOutputBytes)
+      output = next.value
+      outputTruncated = outputTruncated || next.truncated
+    }
+    const timer = setTimeout(() => {
+      timedOut = true
+      try {
+        activeChannel?.close?.()
+      } catch {}
+      settle(() =>
+        resolve({
+          output,
+          exitCode: null,
+          durationMs: Date.now() - startedAt,
+          timedOut,
+          ...(outputTruncated ? { outputTruncated } : {})
+        })
+      )
+    }, commandOptions.timeoutMs)
+    try {
+      exec(commandWithCwd(commandOptions.command, commandOptions.cwd), (error, channel) => {
+        if (error) {
+          settle(() => reject(error))
+          return
+        }
+        activeChannel = channel
+        channel.on('data', append)
+        channel.stderr.on('data', append)
+        channel.on('close', (code?: number | null) =>
+          settle(() =>
+            resolve({
+              output,
+              exitCode: timedOut ? null : Number.isFinite(code) ? Number(code) : null,
+              durationMs: Date.now() - startedAt,
+              timedOut,
+              ...(outputTruncated ? { outputTruncated } : {})
+            })
+          )
+        )
+      })
+    } catch (error) {
+      settle(() => reject(error instanceof Error ? error : new Error(String(error))))
+    }
+  })
+}
+
+const runRelayShellBackgroundCommand = (
+  target: SshTerminalTarget,
+  jumpTarget: SshTerminalTarget,
+  terminalType: string,
+  cols: number,
+  rows: number,
+  commandOptions: TerminalBackgroundCommandOptions
+): Promise<TerminalBackgroundCommandResult> => {
+  const ptyRuntime = getPtyRuntime()
+  if (!ptyRuntime) return Promise.reject(new Error('Relay-shell background execution requires a PTY runtime.'))
+  const startedAt = Date.now()
+  const maxOutputBytes = Math.max(1024, Math.min(commandOptions.maxOutputBytes || backgroundOutputMaxBytes, 4 * backgroundOutputMaxBytes))
+  const relayProcess = ptyRuntime.spawn('ssh', relayShellSshArgs(jumpTarget), {
+    name: terminalType,
+    cols,
+    rows,
+    cwd: getLocalSshSpawnCwd(),
+    env: {
+      ...getEnv(),
+      TERM: terminalType,
+      AIOPSTERM_TRANSPORT: 'relay-shell-background',
+      AIOPSTERM_RELAY_HOST: jumpTarget.host,
+      AIOPSTERM_TARGET_HOST: target.host
+    }
+  })
+
+  return new Promise<TerminalBackgroundCommandResult>((resolve, reject) => {
+    let settled = false
+    let timedOut = false
+    let output = ''
+    let outputTruncated = false
+    let probeBuffer = ''
+    let commandBuffer = ''
+    let nestedSent = false
+    let commandSent = false
+    const commandId = `bg_${Date.now()}_${Math.random().toString(16).slice(2)}`.replace(/[^a-zA-Z0-9_-]/g, '_')
+    const marked = buildMarkedBackgroundCommand(commandWithCwd(commandOptions.command, commandOptions.cwd), commandId)
+    const nestedInput = `${relayShellCommand(target)}\n`
+    const settle = (callback: () => void) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      try {
+        relayProcess.kill()
+      } catch {}
+      callback()
+    }
+    const appendCommandOutput = (chunk: string | Buffer) => {
+      const next = boundedAppend(commandBuffer, chunk, maxOutputBytes)
+      commandBuffer = next.value
+      outputTruncated = outputTruncated || next.truncated
+      const completed = extractBackgroundMarkedOutput(commandBuffer, marked.markerStart, marked.markerEndPrefix)
+      if (!completed) return
+      output = completed.output
+      settle(() =>
+        resolve({
+          output,
+          exitCode: completed.exitCode,
+          durationMs: Date.now() - startedAt,
+          timedOut: false,
+          ...(outputTruncated ? { outputTruncated } : {})
+        })
+      )
+    }
+    const timer = setTimeout(() => {
+      timedOut = true
+      settle(() =>
+        resolve({
+          output: commandSent ? stripControlForBackground(commandBuffer).trim() : stripControlForBackground(probeBuffer).trim(),
+          exitCode: null,
+          durationMs: Date.now() - startedAt,
+          timedOut,
+          ...(outputTruncated ? { outputTruncated } : {})
+        })
+      )
+    }, commandOptions.timeoutMs)
+
+    relayProcess.onData((chunk) => {
+      if (settled) return
+      if (commandSent) {
+        appendCommandOutput(chunk)
+        return
+      }
+      probeBuffer = `${probeBuffer}${chunk}`.slice(-8192)
+      if (!nestedSent) {
+        if (!shouldBootstrapRelayShell(probeBuffer)) return
+        nestedSent = true
+        relayProcess.write(nestedInput)
+        probeBuffer = ''
+        return
+      }
+      const endpoint = inferRelayTargetReady(probeBuffer, jumpTarget, target)
+      if (!endpoint) return
+      commandSent = true
+      commandBuffer = ''
+      relayProcess.write(marked.input)
+    })
+    relayProcess.onExit((event) => {
+      if (settled) return
+      const exitCode = Number.isFinite(event.exitCode) ? Number(event.exitCode) : null
+      settle(() => {
+        if (commandSent) {
+          resolve({
+            output: stripControlForBackground(commandBuffer).trim(),
+            exitCode,
+            durationMs: Date.now() - startedAt,
+            timedOut: false,
+            ...(outputTruncated ? { outputTruncated } : {})
+          })
+          return
+        }
+        reject(new Error('Relay-shell background execution exited before the target shell became ready.'))
+      })
+    })
+  })
+}
 
 export const createSshTerminalSession = (
   id: string,
@@ -116,6 +363,7 @@ export const createSshTerminalSession = (
   let targetConnectionReuse: TerminalLifecycleEvent['connectionReuse'] = 'created'
   let targetConnectionTransport: TerminalLifecycleEvent['sshTransport'] = 'direct'
   let targetConnectionJump: SshTerminalTarget | null = null
+  let relayShellJumpTarget: SshTerminalTarget | null = null
   const staleTargetClients = new Set<SshTerminalClient>()
 
   let lifecycle = sendLifecycle(id, sink, {
@@ -235,6 +483,14 @@ export const createSshTerminalSession = (
       } else {
         pendingWrites.push(data)
       }
+    },
+    runBackgroundCommand(commandOptions) {
+      if (closed) return Promise.reject(new Error('SSH terminal session is closed.'))
+      if (relayShellJumpTarget) {
+        return runRelayShellBackgroundCommand(target, relayShellJumpTarget, terminalType, cols, rows, commandOptions)
+      }
+      if (!client) return Promise.reject(new Error('SSH target connection is not ready for background execution.'))
+      return runSshExecBackgroundCommand(client, commandOptions)
     },
     resize(nextCols: number, nextRows: number) {
       cols = nextCols
@@ -545,6 +801,7 @@ export const createSshTerminalSession = (
 
   const openRelayShellFallback = (jumpTarget: SshTerminalTarget, fallbackReason: unknown) => {
     if (closed) return
+    relayShellJumpTarget = jumpTarget
     const ptyRuntime = getPtyRuntime()
     const fallbackMessage = fallbackReason instanceof Error ? fallbackReason.message : String(fallbackReason || 'SSH jump host forward failed.')
     if (!ptyRuntime) {

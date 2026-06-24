@@ -1,6 +1,6 @@
 import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from 'child_process'
 import { existsSync } from 'fs'
-import { mkdir, writeFile } from 'fs/promises'
+import { mkdir, readFile, writeFile } from 'fs/promises'
 import { basename, dirname, join, resolve } from 'path'
 import type {
   CodexSessionCreateOptions,
@@ -11,7 +11,7 @@ import type {
   CodexSessionKillResult
 } from '@shared/contracts/codexSessions'
 import type { UserConfig } from '@shared/contracts/userConfig'
-import { buildAiopstermCodexConfigToml, codexBridgeScriptPath, resolveAiopstermCodexProviderConfig } from './codexConfig'
+import { codexBridgeScriptPath, mergeAiopstermCodexConfigToml, resolveAiopstermCodexProviderConfig } from './codexConfig'
 
 export type CodexPtyProcess = {
   write(data: string): void
@@ -36,6 +36,7 @@ type CodexRuntimeConfig = {
   loadPty?: () => CodexPtyRuntime | null
   processRuntime?: CodexProcessRuntime
   mkdir?: typeof mkdir
+  readFile?: typeof readFile
   writeFile?: typeof writeFile
   existsSync?: typeof existsSync
   binaryPath?: string
@@ -83,6 +84,7 @@ const defaultResourcesPath = () => process.resourcesPath || process.cwd()
 const defaultEnv = () => process.env
 const getExistsSync = () => runtimeConfig.existsSync || existsSync
 const getMkdir = () => runtimeConfig.mkdir || mkdir
+const getReadFile = () => runtimeConfig.readFile || readFile
 const getWriteFile = () => runtimeConfig.writeFile || writeFile
 const getPtyRuntime = () => (runtimeConfig.loadPty || defaultLoadPty)()
 const getProcessRuntime = () => runtimeConfig.processRuntime || { spawn }
@@ -96,6 +98,7 @@ export const configureCodexCliRuntime = (config: CodexRuntimeConfig = {}) => {
   runtimeConfig.loadPty = config.loadPty
   runtimeConfig.processRuntime = config.processRuntime
   runtimeConfig.mkdir = config.mkdir
+  runtimeConfig.readFile = config.readFile
   runtimeConfig.writeFile = config.writeFile
   runtimeConfig.existsSync = config.existsSync
   runtimeConfig.binaryPath = config.binaryPath
@@ -232,16 +235,35 @@ const errorCode = (error: unknown) => {
 
 const resolveCodexProviderConfig = () => resolveAiopstermCodexProviderConfig(runtimeConfig.getConfig?.())
 
+const readExistingCodexConfig = async (configPath: string) => {
+  try {
+    return String(await getReadFile()(configPath, 'utf-8'))
+  } catch (error) {
+    const code = typeof error === 'object' && error ? String((error as { code?: unknown }).code || '') : ''
+    if (code === 'ENOENT') return ''
+    throw error
+  }
+}
+
 const writeCodexConfig = async (codexHome: string, options: CodexSessionCreateOptions, provider = resolveCodexProviderConfig()) => {
   const appPath = runtimeConfig.getAppPath?.() || defaultAppPath()
   const resourcesPath = runtimeConfig.getResourcesPath?.() || defaultResourcesPath()
-  const config = buildAiopstermCodexConfigToml({
+  const configPath = join(codexHome, 'config.toml')
+  const existing = await readExistingCodexConfig(configPath)
+  const config = mergeAiopstermCodexConfigToml(existing, {
     bridgeScriptPath: codexBridgeScriptPath(appPath, resourcesPath),
     bridgeSocketPath: runtimeConfig.getBridgeSocketPath?.() || '',
     target: options.target,
     provider
   })
-  await getWriteFile()(join(codexHome, 'config.toml'), `${config}\n`, 'utf-8')
+  await getWriteFile()(configPath, config, 'utf-8')
+}
+
+export const refreshCodexConfig = async (options: CodexSessionCreateOptions = {}) => {
+  const codexHome = codexHomePath()
+  await getMkdir()(codexHome, { recursive: true })
+  await writeCodexConfig(codexHome, options)
+  return { codexHome, configPath: join(codexHome, 'config.toml') }
 }
 
 export const createCodexSession = async (

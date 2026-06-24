@@ -8,7 +8,7 @@
   >
     <div
       class="ai-codex-target-bar"
-      :class="{ bound: Boolean(activeCodexBoundTarget), missing: !activeCodexBoundTarget }"
+      :class="{ bound: Boolean(activeCodexBoundTarget), missing: !activeCodexBoundTarget, 'picker-open': codexTargetPickerOpen }"
       data-testid="ai-codex-target-bar"
       @click.stop
     >

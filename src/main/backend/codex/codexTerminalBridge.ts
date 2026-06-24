@@ -5,6 +5,7 @@ import { mkdir } from 'fs/promises'
 import type { BrowserWindow } from 'electron'
 import type { CodexSessionTargetContext } from '@shared/contracts/codexSessions'
 import { platformSocketPath } from '../app/platformRuntime'
+import type { TerminalBackgroundCommandOptions, TerminalBackgroundCommandResult } from '../terminal/terminal'
 
 export type CodexTerminalBridgeSession = {
   id: string
@@ -13,18 +14,33 @@ export type CodexTerminalBridgeSession = {
   cwd?: string
   window: BrowserWindow
   write(data: string | Buffer): void
+  runBackgroundCommand?(options: TerminalBackgroundCommandOptions): Promise<TerminalBackgroundCommandResult>
   target?: CodexSessionTargetContext
 }
 
 type PendingCommand = {
   id: string
   sessionId: string
+  command: string
   startedAt: number
   markerStart: string
+  markerEnd: string
   markerEndPrefix: string
   output: string
+  displayPhase: 'suppress-until-start' | 'forward-until-end' | 'done'
+  displayBuffer: string
+  displayCommandShown: boolean
+  displayPromptPrefix: string
   resolve: (value: CodexBridgeResponse) => void
   timer: NodeJS.Timeout
+}
+
+type TerminalOutputHistory = {
+  lines: string[]
+  pending: string
+  startOffset: number
+  totalLines: number
+  updatedAt: number
 }
 
 type CodexBridgeResponse = {
@@ -49,11 +65,14 @@ type CodexTerminalBridgeRequest = {
 
 const sessions = new Map<string, CodexTerminalBridgeSession>()
 const pendingCommands = new Map<string, PendingCommand>()
+const terminalOutputHistories = new Map<string, TerminalOutputHistory>()
 
 let server: Server | null = null
 let socketPath = ''
 let preferredSessionId = ''
 let preferredSessionStrict = false
+
+const terminalOutputHistoryMaxLines = 10000
 
 const cleanText = (value: unknown) => (typeof value === 'string' ? value.trim() : '')
 
@@ -115,6 +134,7 @@ export const updateCodexTerminalBridgeSessionTarget = (target?: CodexSessionTarg
 
 export const unregisterCodexTerminalBridgeSession = (id: string) => {
   sessions.delete(id)
+  terminalOutputHistories.delete(id)
   for (const [commandId, pending] of pendingCommands.entries()) {
     if (pending.sessionId !== id) continue
     clearTimeout(pending.timer)
@@ -125,6 +145,62 @@ export const unregisterCodexTerminalBridgeSession = (id: string) => {
       errorMessage: 'The selected aiopsterm terminal session closed before command output completed.'
     })
   }
+}
+
+const newTerminalOutputHistory = (): TerminalOutputHistory => ({
+  lines: [],
+  pending: '',
+  startOffset: 0,
+  totalLines: 0,
+  updatedAt: Date.now()
+})
+
+const terminalOutputHistoryForSession = (sessionId: string) => {
+  const existing = terminalOutputHistories.get(sessionId)
+  if (existing) return existing
+  const history = newTerminalOutputHistory()
+  terminalOutputHistories.set(sessionId, history)
+  return history
+}
+
+const trimTerminalOutputHistory = (history: TerminalOutputHistory) => {
+  const overflow = history.lines.length - terminalOutputHistoryMaxLines
+  if (overflow <= 0) return
+  history.lines.splice(0, overflow)
+  history.startOffset += overflow
+}
+
+const terminalClearSequencePattern = /\u001bc|\u001b\[(?:2|3)J/g
+
+const resetTerminalOutputHistory = (history: TerminalOutputHistory) => {
+  history.lines = []
+  history.pending = ''
+  history.startOffset = history.totalLines
+}
+
+const appendTerminalOutputHistoryLine = (history: TerminalOutputHistory, line: string) => {
+  history.lines.push(line)
+  history.totalLines += 1
+  trimTerminalOutputHistory(history)
+}
+
+export const appendCodexTerminalBridgeDisplayData = (sessionId: string, chunk: string | Buffer) => {
+  const rawText = Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk || '')
+  if (!rawText) return
+  const history = terminalOutputHistoryForSession(sessionId)
+  if (terminalClearSequencePattern.test(rawText)) {
+    resetTerminalOutputHistory(history)
+    terminalClearSequencePattern.lastIndex = 0
+  }
+  const text = stripTerminalControl(rawText)
+  if (!text) return
+  const parts = text.split('\n')
+  for (let index = 0; index < parts.length - 1; index += 1) {
+    appendTerminalOutputHistoryLine(history, `${history.pending}${parts[index]}`)
+    history.pending = ''
+  }
+  history.pending += parts[parts.length - 1] || ''
+  history.updatedAt = Date.now()
 }
 
 export const appendCodexTerminalBridgeData = (sessionId: string, chunk: string | Buffer) => {
@@ -148,6 +224,115 @@ export const appendCodexTerminalBridgeData = (sessionId: string, chunk: string |
       }
     })
   }
+}
+
+const firstPendingCommandForSession = (sessionId: string) =>
+  [...pendingCommands.values()]
+    .filter((pending) => pending.sessionId === sessionId && pending.displayPhase !== 'done')
+    .sort((left, right) => left.startedAt - right.startedAt)[0] || null
+
+const splitNextTerminalLine = (value: string): { line: string; rest: string } | null => {
+  const newlineIndex = value.indexOf('\n')
+  if (newlineIndex < 0) return null
+  return {
+    line: value.slice(0, newlineIndex + 1),
+    rest: value.slice(newlineIndex + 1)
+  }
+}
+
+const lineText = (line: string) => stripTerminalControl(line).trim()
+
+const terminalLineText = (line: string) => stripTerminalControl(line).replace(/\n$/g, '')
+
+const isMarkerEndLine = (line: string, markerEndPrefix: string) => {
+  const text = lineText(line)
+  if (!text.startsWith(markerEndPrefix)) return false
+  return /^-?\d+$/.test(text.slice(markerEndPrefix.length).trim())
+}
+
+const commandEchoFragments = (command: string) =>
+  command
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+
+const hasShellPrompt = (line: string) => /(?:^|\s)[^\s@]+@[^:\s]+:.*(?:[$#])\s+/.test(line) || /^>\s*/.test(line)
+
+const isCodexBridgeWrapperLine = (line: string, pending: PendingCommand) => {
+  const text = lineText(line)
+  return Boolean(text && (text.includes(pending.markerStart) || text.includes(pending.markerEnd) || text.includes('__aiopsterm_status')))
+}
+
+const codexBridgeInputEchoPromptPrefix = (line: string, pending: PendingCommand) => {
+  const text = terminalLineText(line).trimEnd()
+  if (!text || !hasShellPrompt(text)) return null
+  const markerIndex = text.indexOf(pending.markerStart)
+  if (markerIndex >= 0) {
+    const echoIndex = text.lastIndexOf('echo ', markerIndex)
+    return echoIndex >= 0 ? text.slice(0, echoIndex) : ''
+  }
+  for (const fragment of commandEchoFragments(pending.command)) {
+    const fragmentIndex = text.indexOf(fragment)
+    if (fragmentIndex >= 0) return text.slice(0, fragmentIndex)
+  }
+  return null
+}
+
+const commandDisplayLines = (command: string) => {
+  const lines = command.replace(/\r\n/g, '\n').split('\n')
+  if (lines.length > 1 && lines[lines.length - 1] === '') return lines.slice(0, -1)
+  return lines
+}
+
+const visibleCommandEcho = (command: string, promptPrefix: string) => {
+  const lines = commandDisplayLines(command)
+  return lines.map((line, index) => `${index === 0 ? promptPrefix : '> '}${line}`).join('\r\n') + '\r\n'
+}
+
+const showPendingCommandEcho = (pending: PendingCommand, promptPrefix?: string | null) => {
+  if (pending.displayCommandShown) return ''
+  if (promptPrefix !== undefined && promptPrefix !== null) pending.displayPromptPrefix = promptPrefix
+  pending.displayCommandShown = true
+  return visibleCommandEcho(pending.command, pending.displayPromptPrefix)
+}
+
+export const filterCodexTerminalBridgeDisplayData = (sessionId: string, chunk: string | Buffer): string | Buffer => {
+  const pending = firstPendingCommandForSession(sessionId)
+  if (!pending) return chunk
+  pending.displayBuffer += Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk || '')
+  let visible = ''
+  for (;;) {
+    const next = splitNextTerminalLine(pending.displayBuffer)
+    if (!next) break
+    pending.displayBuffer = next.rest
+    if (pending.displayPhase === 'suppress-until-start') {
+      const promptPrefix = codexBridgeInputEchoPromptPrefix(next.line, pending)
+      if (promptPrefix !== null) pending.displayPromptPrefix = promptPrefix
+      if (lineText(next.line) === pending.markerStart) {
+        pending.displayPhase = 'forward-until-end'
+        if (pending.displayPromptPrefix) visible += showPendingCommandEcho(pending)
+      }
+      continue
+    }
+    if (pending.displayPhase === 'forward-until-end') {
+      if (isMarkerEndLine(next.line, pending.markerEndPrefix)) {
+        pending.displayPhase = 'done'
+        visible += showPendingCommandEcho(pending)
+        visible += pending.displayBuffer
+        pending.displayBuffer = ''
+        break
+      }
+      const promptPrefix = codexBridgeInputEchoPromptPrefix(next.line, pending)
+      if (promptPrefix !== null) {
+        visible += showPendingCommandEcho(pending, promptPrefix)
+        continue
+      }
+      if (isCodexBridgeWrapperLine(next.line, pending)) continue
+      visible += showPendingCommandEcho(pending)
+      visible += next.line
+    }
+  }
+  return visible
 }
 
 const stripTerminalControl = (value: string) =>
@@ -270,6 +455,108 @@ const buildWrappedCommand = (command: string, markerStart: string, markerEnd: st
   ].join('')
 }
 
+const commandMode = (value: unknown): 'wait' | 'return_immediately' | null => {
+  const mode = cleanText(value) || 'wait'
+  if (mode === 'wait' || mode === 'return_immediately') return mode
+  return null
+}
+
+const commandExecution = (value: unknown): 'terminal' | 'background' | null => {
+  const execution = cleanText(value) || 'terminal'
+  if (execution === 'terminal' || execution === 'background') return execution
+  return null
+}
+
+const runTerminalCommandImmediately = (session: CodexTerminalBridgeSession, command: string, commandId: string, startedAt: number): CodexBridgeResponse => {
+  const input = command.endsWith('\n') ? command : `${command}\n`
+  session.write(input)
+  return {
+    ok: true,
+    target: targetContextForSession(session),
+    data: {
+      commandId,
+      command,
+      mode: 'return_immediately',
+      bytes: Buffer.byteLength(input, 'utf8'),
+      exitCode: null,
+      output: '',
+      durationMs: Date.now() - startedAt
+    }
+  }
+}
+
+const runTerminalCommandInBackground = async (
+  session: CodexTerminalBridgeSession,
+  command: string,
+  commandId: string,
+  timeoutMs: number,
+  startedAt: number
+): Promise<CodexBridgeResponse> => {
+  if (!session.runBackgroundCommand) {
+    return {
+      ok: false,
+      errorCode: 'BACKGROUND_EXEC_UNSUPPORTED',
+      errorMessage: 'The selected aiopsterm terminal session does not support background command execution.',
+      target: targetContextForSession(session),
+      data: {
+        commandId,
+        command,
+        mode: 'wait',
+        execution: 'background',
+        output: '',
+        exitCode: null,
+        durationMs: Date.now() - startedAt
+      }
+    }
+  }
+  try {
+    const result = await session.runBackgroundCommand({
+      command,
+      cwd: session.cwd,
+      timeoutMs,
+      maxOutputBytes: 1024 * 1024
+    })
+    const ok = !result.timedOut
+    return {
+      ok,
+      ...(ok
+        ? {}
+        : {
+            errorCode: 'COMMAND_TIMEOUT',
+            errorMessage: `Background command timed out after ${timeoutMs}ms.`
+          }),
+      target: targetContextForSession(session),
+      data: {
+        commandId,
+        command,
+        mode: 'wait',
+        execution: 'background',
+        output: result.output.trim(),
+        exitCode: result.exitCode,
+        durationMs: Math.max(result.durationMs, Date.now() - startedAt),
+        timedOut: result.timedOut,
+        ...(result.outputTruncated ? { outputTruncated: true } : {})
+      }
+    }
+  } catch (error) {
+    return {
+      ok: false,
+      errorCode: 'BACKGROUND_EXEC_FAILED',
+      errorMessage: error instanceof Error ? error.message : String(error),
+      target: targetContextForSession(session),
+      data: {
+        commandId,
+        command,
+        mode: 'wait',
+        execution: 'background',
+        output: '',
+        exitCode: null,
+        durationMs: Date.now() - startedAt
+      }
+    }
+  }
+}
+
 const runTerminalCommand = async (params: Record<string, unknown>): Promise<CodexBridgeResponse> => {
   const session = resolveTargetSession(params)
   if (!session) {
@@ -283,12 +570,69 @@ const runTerminalCommand = async (params: Record<string, unknown>): Promise<Code
   if (!command) {
     return { ok: false, errorCode: 'EMPTY_COMMAND', errorMessage: 'Command must not be empty.' }
   }
+  const mode = commandMode(params.mode)
+  if (!mode) {
+    return {
+      ok: false,
+      errorCode: 'INVALID_COMMAND_MODE',
+      errorMessage: 'Command mode must be "wait" or "return_immediately".'
+    }
+  }
+  const execution = commandExecution(params.execution)
+  if (!execution) {
+    return {
+      ok: false,
+      errorCode: 'INVALID_COMMAND_EXECUTION',
+      errorMessage: 'Command execution must be "terminal" or "background".'
+    }
+  }
   const commandId = (cleanText(params.commandId) || `aiopsterm-${Date.now()}-${Math.random().toString(16).slice(2)}`).replace(/[^a-zA-Z0-9_-]/g, '_')
   const markerStart = `__AIOPSTERM_CODEX_START_${commandId}__`
+  const markerEnd = `__AIOPSTERM_CODEX_END_${commandId}__`
   const markerEndPrefix = `__AIOPSTERM_CODEX_END_${commandId}__:`
   const timeoutMs = normalizeTimeoutMs(params.timeoutMs)
   const startedAt = Date.now()
-  const wrapped = buildWrappedCommand(command, markerStart, `__AIOPSTERM_CODEX_END_${commandId}__`)
+  if (execution === 'background') {
+    if (mode !== 'wait') {
+      return {
+        ok: false,
+        errorCode: 'INVALID_COMMAND_EXECUTION_MODE',
+        errorMessage: 'Background execution currently supports only mode "wait".',
+        target: targetContextForSession(session),
+        data: {
+          commandId,
+          command,
+          mode,
+          execution,
+          output: '',
+          exitCode: null,
+          durationMs: Date.now() - startedAt
+        }
+      }
+    }
+    return runTerminalCommandInBackground(session, command, commandId, timeoutMs, startedAt)
+  }
+  if (mode === 'return_immediately') {
+    try {
+      return runTerminalCommandImmediately(session, command, commandId, startedAt)
+    } catch (error) {
+      return {
+        ok: false,
+        errorCode: 'COMMAND_WRITE_FAILED',
+        errorMessage: error instanceof Error ? error.message : String(error),
+        target: targetContextForSession(session),
+        data: {
+          commandId,
+          command,
+          mode,
+          output: '',
+          exitCode: null,
+          durationMs: Date.now() - startedAt
+        }
+      }
+    }
+  }
+  const wrapped = buildWrappedCommand(command, markerStart, markerEnd)
 
   return new Promise<CodexBridgeResponse>((resolve, reject) => {
     const timer = setTimeout(() => {
@@ -302,6 +646,7 @@ const runTerminalCommand = async (params: Record<string, unknown>): Promise<Code
         data: {
           commandId,
           command,
+          mode,
           output: stripTerminalControl(pending?.output || '').trim(),
           exitCode: null,
           durationMs: Date.now() - startedAt
@@ -311,10 +656,16 @@ const runTerminalCommand = async (params: Record<string, unknown>): Promise<Code
     pendingCommands.set(commandId, {
       id: commandId,
       sessionId: session.id,
+      command,
       startedAt,
       markerStart,
+      markerEnd,
       markerEndPrefix,
       output: '',
+      displayPhase: 'suppress-until-start',
+      displayBuffer: '',
+      displayCommandShown: false,
+      displayPromptPrefix: '',
       resolve,
       timer
     })
@@ -328,7 +679,7 @@ const runTerminalCommand = async (params: Record<string, unknown>): Promise<Code
   }).then((response) => ({
     ...response,
     target: response.target || targetContextForSession(session),
-    data: response.data ? { ...response.data, commandId, command } : response.data
+    data: response.data ? { ...response.data, commandId, command, mode } : response.data
   }))
 }
 
@@ -488,10 +839,53 @@ const listTerminals = (): CodexBridgeResponse => {
   }
 }
 
+const readTerminalOutput = (params: Record<string, unknown>): CodexBridgeResponse => {
+  const session = resolveTargetSession(params)
+  if (!session) {
+    return {
+      ok: false,
+      errorCode: 'NO_TERMINAL_SESSION',
+      errorMessage: 'No connected aiopsterm terminal session is available.'
+    }
+  }
+  const history = terminalOutputHistories.get(session.id) || newTerminalOutputHistory()
+  const offset = normalizeInteger(params.offset, 0, 0, Number.MAX_SAFE_INTEGER)
+  const limit = normalizeInteger(params.limit, 200, 1, 1000)
+  const lines = history.pending ? [...history.lines, history.pending] : [...history.lines]
+  const availableStartOffset = history.startOffset
+  const availableEndOffset = availableStartOffset + lines.length
+  const totalLines = history.totalLines + (history.pending ? 1 : 0)
+  const startOffset = Math.max(offset, availableStartOffset)
+  const startIndex = Math.max(0, startOffset - availableStartOffset)
+  const selected = startOffset >= availableEndOffset ? [] : lines.slice(startIndex, startIndex + limit)
+  const nextOffset = startOffset + selected.length
+  return {
+    ok: true,
+    target: targetContextForSession(session),
+    data: {
+      sessionId: session.id,
+      offset,
+      startOffset,
+      nextOffset,
+      limit,
+      lines: selected,
+      content: selected.join('\n'),
+      lineCount: selected.length,
+      totalLines,
+      availableStartOffset,
+      availableEndOffset,
+      maxCachedLines: terminalOutputHistoryMaxLines,
+      truncated: availableStartOffset > 0 || offset < availableStartOffset,
+      updatedAt: history.updatedAt
+    }
+  }
+}
+
 const handleBridgeRequest = async (request: CodexTerminalBridgeRequest): Promise<CodexBridgeResponse> => {
   const params = request.params || {}
   if (request.method === 'list_terminals') return listTerminals()
   if (request.method === 'run_command') return runTerminalCommand(params)
+  if (request.method === 'read_terminal_output') return readTerminalOutput(params)
   if (request.method === 'read_file') return readRemoteFile(params)
   if (request.method === 'glob_search') return globRemoteFiles(params)
   if (request.method === 'grep_search') return grepRemoteFiles(params)
@@ -566,6 +960,7 @@ export const ensureCodexTerminalBridgeServer = async (userDataPath: string) => {
 export const closeCodexTerminalBridgeServer = () => {
   for (const pending of pendingCommands.values()) clearTimeout(pending.timer)
   pendingCommands.clear()
+  terminalOutputHistories.clear()
   sessions.clear()
   preferredSessionId = ''
   preferredSessionStrict = false

@@ -1183,6 +1183,8 @@ describe('AppShell', () => {
     await wrapper.find('[data-testid="ai-codex-bind-open"]').trigger('click')
     await flushPromises()
     await wrapper.vm.$nextTick()
+    expect(wrapper.find('[data-testid="ai-codex-target-bar"]').classes()).toContain('picker-open')
+    expect(wrapper.find('[data-testid="ai-codex-target-picker"]').exists()).toBe(true)
     await wrapper.find('[data-testid="ai-codex-bind-current"]').trigger('click')
     await flushPromises()
     await wrapper.vm.$nextTick()
@@ -4384,7 +4386,7 @@ describe('AppShell', () => {
       expect(store.activePanel.status).toBe('running')
       expect(store.activePanel.sshSession).toBeUndefined()
       expect(store.activePanel.output).not.toContain('[aiopsterm] open local shell from Workspace')
-      expect(wrapper.text()).toContain('已打开本地 shell 127.0.0.1')
+      expect(wrapper.text()).not.toContain('已打开本地 shell 127.0.0.1')
 
       await wrapper.find('.workspace-tree').trigger('contextmenu', { clientX: 220, clientY: 260 })
       await wrapper.find('.workspace-node-menu').findAll('button').find((button) => button.text().includes('新建主机'))!.trigger('click')

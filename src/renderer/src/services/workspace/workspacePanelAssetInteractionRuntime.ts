@@ -62,7 +62,6 @@ export const createWorkspacePanelAssetInteractionRuntime = (deps: WorkspacePanel
     if (asset.isLocalShell) {
       const panel = await (deps.openLocalTerminalLaunch || openLocalTerminalLaunch)(launchContext, { title: asset.name })
       if (!panel) return
-      deps.notice.value = `已打开本地 shell ${asset.host}`
     } else {
       const panel = await (deps.openSshTerminalLaunch || openSshTerminalLaunch)(launchContext, asset, { title: asset.name })
       if (!panel) return

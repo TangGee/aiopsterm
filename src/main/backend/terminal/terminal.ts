@@ -38,6 +38,21 @@ export type SshConnectionErrorDiagnosis = {
   isNetworkDisconnect: boolean
 }
 
+export type TerminalBackgroundCommandOptions = {
+  command: string
+  cwd?: string
+  timeoutMs: number
+  maxOutputBytes?: number
+}
+
+export type TerminalBackgroundCommandResult = {
+  output: string
+  exitCode: number | null
+  durationMs: number
+  timedOut: boolean
+  outputTruncated?: boolean
+}
+
 const cleanOptional = (value: unknown): string | undefined => {
   const text = typeof value === 'string' ? value.trim() : ''
   return text || undefined

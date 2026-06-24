@@ -46,6 +46,7 @@ type LocalTerminalBackend = {
     session: {
       write: (data: string | Buffer) => void
       writeBinary: (data: Buffer) => boolean
+      runBackgroundCommand: (options: { command: string; cwd?: string; timeoutMs: number }) => Promise<{ output: string; exitCode: number | null; timedOut: boolean }>
       resize: (cols: number, rows: number) => void
       kill: () => void
     }
@@ -292,6 +293,62 @@ describe('local terminal backend runtime', () => {
     expect(events.data.map((chunk) => chunk.toString()).join('')).not.toContain('[aiopsterm]')
     expect(events.exit).toEqual([expect.objectContaining({ code: 7 })])
     expect(events.closed).toEqual(['local-process-1'])
+  })
+
+  it('runs background commands in a separate local shell without writing to the visible terminal process', async () => {
+    const backend = await loadBackend()
+    const events = createRecorder()
+    const visibleChild = new MockChildProcess()
+    const backgroundChild = new MockChildProcess()
+    const spawnCalls: Array<Record<string, unknown>> = []
+    backend.configureLocalTerminalBackendRuntime({
+      getDefaultShell: () => '/bin/bash',
+      getDefaultCwd: () => '/home/ops',
+      getEnv: () => ({ PATH: '/usr/bin' }),
+      getPlatform: () => 'linux',
+      loadPty: () => null,
+      processRuntime: {
+        spawn: (shell, args, options) => {
+          spawnCalls.push({ shell, args, options })
+          return (spawnCalls.length === 1 ? visibleChild : backgroundChild) as never
+        }
+      }
+    })
+
+    const result = backend.createLocalTerminalSession('local-background-1', { kind: 'local', panelId: 'panel-bg' }, createSink(events))
+    const backgroundPromise = result.session.runBackgroundCommand({ command: 'pwd && hostname', cwd: '/srv/app', timeoutMs: 5000 })
+    backgroundChild.stdout.write('/srv/app\n')
+    backgroundChild.stderr.write('host-a\n')
+    backgroundChild.emit('exit', 0)
+    const background = await backgroundPromise
+
+    expect(visibleChild.writes).toEqual([])
+    expect(spawnCalls).toEqual([
+      expect.objectContaining({
+        shell: '/bin/bash',
+        args: ['--login'],
+        options: expect.objectContaining({ cwd: '/home/ops' })
+      }),
+      expect.objectContaining({
+        shell: '/bin/bash',
+        args: ['-lc', 'pwd && hostname'],
+        options: expect.objectContaining({
+          cwd: '/srv/app',
+          shell: false,
+          env: expect.objectContaining({
+            AIOPSTERM_TERMINAL_SESSION_ID: 'local-background-1-background',
+            AIOPSTERM_PANEL_ID: 'panel-bg'
+          })
+        })
+      })
+    ])
+    expect(background).toEqual(
+      expect.objectContaining({
+        output: '/srv/app\nhost-a\n',
+        exitCode: 0,
+        timedOut: false
+      })
+    )
   })
 
   it('reports subprocess startup errors through lifecycle without fabricating terminal output', async () => {

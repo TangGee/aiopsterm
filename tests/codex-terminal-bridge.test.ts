@@ -170,6 +170,23 @@ describe('Codex terminal bridge runtime', () => {
       expect(writes[0]).toContain("echo '__AIOPSTERM_CODEX_START_cmd-1__'")
       expect(writes[0]).toContain('pwd')
       expect(writes[0]).toContain("echo '__AIOPSTERM_CODEX_END_cmd-1__':$__aiopsterm_status")
+      expect(
+        bridge.filterCodexTerminalBridgeDisplayData(
+          'terminal-1',
+          [
+            `root@prod-web:~# ${writes[0].trimEnd()}`,
+            '> hidden heredoc content',
+            '__AIOPSTERM_CODEX_START_cmd-1__'
+          ].join('\r\n') + '\r\n'
+        )
+      ).toBe('root@prod-web:~# pwd\r\n')
+      expect(bridge.filterCodexTerminalBridgeDisplayData('terminal-1', '/root\r\n')).toBe('/root\r\n')
+      expect(
+        bridge.filterCodexTerminalBridgeDisplayData(
+          'terminal-1',
+          "__AIOPSTERM_CODEX_END_cmd-1__:0\r\nroot@prod-web:~# "
+        )
+      ).toBe('root@prod-web:~# ')
 
       bridge.appendCodexTerminalBridgeData(
         'terminal-1',
@@ -196,6 +213,345 @@ describe('Codex terminal bridge runtime', () => {
             command: 'pwd',
             output: '/root',
             exitCode: 0
+          })
+        })
+      )
+    } finally {
+      bridge.closeCodexTerminalBridgeServer()
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('filters wrapped command echoes that arrive after the start marker from display output', async () => {
+    const bridge = await loadBridge()
+    const root = await mkdtemp(join(tmpdir(), 'aiopsterm-codex-bridge-'))
+    const writes: string[] = []
+    try {
+      bridge.registerCodexTerminalBridgeSession({
+        id: 'terminal-echo',
+        kind: 'local',
+        host: '127.0.0.1',
+        cwd: '/home/tlinux',
+        window: {} as never,
+        target: {
+          kind: 'local',
+          sessionId: 'terminal-echo',
+          label: '127.0.0.1',
+          host: '127.0.0.1',
+          cwd: '/home/tlinux'
+        },
+        write: (data: string | Buffer) => writes.push(String(data))
+      })
+      bridge.setCodexTerminalBridgePreferredSession('terminal-echo')
+      const socketPath = await bridge.ensureCodexTerminalBridgeServer(root)
+
+      const responsePromise = socketRequest(socketPath, {
+        id: 'request-echo',
+        method: 'run_command',
+        params: {
+          command: 'echo "created:"; cat /home/tlinux/loop1111.sh',
+          commandId: 'cmd-echo',
+          timeoutMs: 5000
+        }
+      })
+      await waitFor(() => writes.length === 1)
+      expect(bridge.filterCodexTerminalBridgeDisplayData('terminal-echo', '__AIOPSTERM_CODEX_START_cmd-echo__\r\n')).toBe('')
+      expect(
+        bridge.filterCodexTerminalBridgeDisplayData(
+          'terminal-echo',
+          'tlinux@tlinux:~$ echo "created:"; cat /home/tlinux/loop1111.sh; __aiopsterm_status=$?; echo \'__AIOPSTERM_CODEX_END_cmd-echo__\':$__aiopsterm_status\r\n'
+        )
+      ).toBe('tlinux@tlinux:~$ echo "created:"; cat /home/tlinux/loop1111.sh\r\n')
+      expect(bridge.filterCodexTerminalBridgeDisplayData('terminal-echo', 'created:\r\n#!/bin/bash\r\n')).toBe('created:\r\n#!/bin/bash\r\n')
+      expect(
+        bridge.filterCodexTerminalBridgeDisplayData(
+          'terminal-echo',
+          "__AIOPSTERM_CODEX_END_cmd-echo__:0\r\ntlinux@tlinux:~$ "
+        )
+      ).toBe('tlinux@tlinux:~$ ')
+
+      bridge.appendCodexTerminalBridgeData(
+        'terminal-echo',
+        [
+          '__AIOPSTERM_CODEX_START_cmd-echo__',
+          'created:',
+          '#!/bin/bash',
+          '__AIOPSTERM_CODEX_END_cmd-echo__:0'
+        ].join('\r\n') + '\r\n'
+      )
+      const response = await responsePromise
+
+      expect(response).toEqual(
+        expect.objectContaining({
+          ok: true,
+          data: expect.objectContaining({
+            output: 'created:\n#!/bin/bash',
+            exitCode: 0
+          })
+        })
+      )
+    } finally {
+      bridge.closeCodexTerminalBridgeServer()
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('can write a command and return immediately without marker wrapping', async () => {
+    const bridge = await loadBridge()
+    const root = await mkdtemp(join(tmpdir(), 'aiopsterm-codex-bridge-'))
+    const writes: string[] = []
+    try {
+      bridge.registerCodexTerminalBridgeSession({
+        id: 'terminal-immediate',
+        kind: 'local',
+        host: '127.0.0.1',
+        cwd: '/home/tlinux',
+        window: {} as never,
+        target: {
+          kind: 'local',
+          sessionId: 'terminal-immediate',
+          label: '127.0.0.1',
+          host: '127.0.0.1',
+          cwd: '/home/tlinux'
+        },
+        write: (data: string | Buffer) => writes.push(String(data))
+      })
+      bridge.setCodexTerminalBridgePreferredSession('terminal-immediate')
+      const socketPath = await bridge.ensureCodexTerminalBridgeServer(root)
+
+      const response = await socketRequest(socketPath, {
+        id: 'request-immediate',
+        method: 'run_command',
+        params: {
+          command: '/home/tlinux/loop1111.sh',
+          commandId: 'cmd-immediate',
+          mode: 'return_immediately',
+          timeoutMs: 5000
+        }
+      })
+
+      expect(writes).toEqual(['/home/tlinux/loop1111.sh\n'])
+      expect(writes[0]).not.toContain('__AIOPSTERM_CODEX_START')
+      expect(writes[0]).not.toContain('__aiopsterm_status')
+      expect(response).toEqual(
+        expect.objectContaining({
+          id: 'request-immediate',
+          ok: true,
+          target: expect.objectContaining({
+            sessionId: 'terminal-immediate'
+          }),
+          data: expect.objectContaining({
+            commandId: 'cmd-immediate',
+            command: '/home/tlinux/loop1111.sh',
+            mode: 'return_immediately',
+            output: '',
+            exitCode: null,
+            bytes: 25
+          })
+        })
+      )
+    } finally {
+      bridge.closeCodexTerminalBridgeServer()
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('runs commands through the background executor without writing to the visible terminal', async () => {
+    const bridge = await loadBridge()
+    const root = await mkdtemp(join(tmpdir(), 'aiopsterm-codex-bridge-'))
+    const writes: string[] = []
+    const backgroundCalls: Array<Record<string, unknown>> = []
+    try {
+      bridge.registerCodexTerminalBridgeSession({
+        id: 'terminal-background',
+        kind: 'local',
+        host: '127.0.0.1',
+        cwd: '/home/tlinux/project',
+        window: {} as never,
+        target: {
+          kind: 'local',
+          sessionId: 'terminal-background',
+          label: 'Local terminal',
+          cwd: '/home/tlinux/project'
+        },
+        write: (data: string | Buffer) => writes.push(String(data)),
+        runBackgroundCommand: async (options: Record<string, unknown>) => {
+          backgroundCalls.push(options)
+          return {
+            output: 'background output\n',
+            exitCode: 0,
+            durationMs: 12,
+            timedOut: false
+          }
+        }
+      })
+      bridge.setCodexTerminalBridgePreferredSession('terminal-background')
+      const socketPath = await bridge.ensureCodexTerminalBridgeServer(root)
+
+      const response = await socketRequest(socketPath, {
+        id: 'request-background',
+        method: 'run_command',
+        params: {
+          command: 'pwd',
+          commandId: 'cmd-background',
+          execution: 'background',
+          timeoutMs: 5000
+        }
+      })
+
+      expect(writes).toEqual([])
+      expect(backgroundCalls).toEqual([
+        expect.objectContaining({
+          command: 'pwd',
+          cwd: '/home/tlinux/project',
+          timeoutMs: 5000
+        })
+      ])
+      expect(response).toEqual(
+        expect.objectContaining({
+          id: 'request-background',
+          ok: true,
+          data: expect.objectContaining({
+            commandId: 'cmd-background',
+            command: 'pwd',
+            mode: 'wait',
+            execution: 'background',
+            output: 'background output',
+            exitCode: 0,
+            timedOut: false
+          })
+        })
+      )
+    } finally {
+      bridge.closeCodexTerminalBridgeServer()
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects return_immediately background commands because no visible lifecycle owns them', async () => {
+    const bridge = await loadBridge()
+    const root = await mkdtemp(join(tmpdir(), 'aiopsterm-codex-bridge-'))
+    const writes: string[] = []
+    try {
+      bridge.registerCodexTerminalBridgeSession({
+        id: 'terminal-background-invalid',
+        kind: 'local',
+        cwd: '/home/tlinux',
+        window: {} as never,
+        target: {
+          kind: 'local',
+          sessionId: 'terminal-background-invalid',
+          label: 'Local terminal',
+          cwd: '/home/tlinux'
+        },
+        write: (data: string | Buffer) => writes.push(String(data)),
+        runBackgroundCommand: async () => {
+          throw new Error('should not run')
+        }
+      })
+      bridge.setCodexTerminalBridgePreferredSession('terminal-background-invalid')
+      const socketPath = await bridge.ensureCodexTerminalBridgeServer(root)
+
+      const response = await socketRequest(socketPath, {
+        id: 'request-background-invalid',
+        method: 'run_command',
+        params: {
+          command: 'sleep 60',
+          mode: 'return_immediately',
+          execution: 'background',
+          timeoutMs: 5000
+        }
+      })
+
+      expect(writes).toEqual([])
+      expect(response).toEqual(
+        expect.objectContaining({
+          id: 'request-background-invalid',
+          ok: false,
+          errorCode: 'INVALID_COMMAND_EXECUTION_MODE'
+        })
+      )
+    } finally {
+      bridge.closeCodexTerminalBridgeServer()
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('reads recent visible terminal output with offset pagination', async () => {
+    const bridge = await loadBridge()
+    const root = await mkdtemp(join(tmpdir(), 'aiopsterm-codex-bridge-'))
+    try {
+      bridge.registerCodexTerminalBridgeSession({
+        id: 'terminal-output',
+        kind: 'ssh',
+        host: 'logs.internal',
+        cwd: '/srv/app',
+        window: {} as never,
+        target: {
+          kind: 'ssh',
+          sessionId: 'terminal-output',
+          label: 'logs.internal',
+          host: 'logs.internal',
+          username: 'deploy',
+          cwd: '/srv/app'
+        },
+        write: () => undefined
+      })
+      bridge.setCodexTerminalBridgePreferredSession('terminal-output')
+      const socketPath = await bridge.ensureCodexTerminalBridgeServer(root)
+
+      bridge.appendCodexTerminalBridgeDisplayData('terminal-output', 'deploy@logs:/srv/app$ ls\r\napp.log\r\nworker.log\r\npartial')
+      let response = await socketRequest(socketPath, {
+        id: 'request-output-1',
+        method: 'read_terminal_output',
+        params: {
+          offset: 1,
+          limit: 2
+        }
+      })
+      expect(response).toEqual(
+        expect.objectContaining({
+          id: 'request-output-1',
+          ok: true,
+          data: expect.objectContaining({
+            sessionId: 'terminal-output',
+            offset: 1,
+            startOffset: 1,
+            nextOffset: 3,
+            limit: 2,
+            lines: ['app.log', 'worker.log'],
+            content: 'app.log\nworker.log',
+            lineCount: 2,
+            totalLines: 4,
+            availableStartOffset: 0,
+            availableEndOffset: 4,
+            maxCachedLines: 10000,
+            truncated: false
+          })
+        })
+      )
+
+      bridge.appendCodexTerminalBridgeDisplayData('terminal-output', ' done\r\nnext line\r\n')
+      response = await socketRequest(socketPath, {
+        id: 'request-output-2',
+        method: 'read_terminal_output',
+        params: {
+          offset: 3,
+          limit: 5
+        }
+      })
+      expect(response).toEqual(
+        expect.objectContaining({
+          id: 'request-output-2',
+          ok: true,
+          data: expect.objectContaining({
+            startOffset: 3,
+            nextOffset: 5,
+            lines: ['partial done', 'next line'],
+            content: 'partial done\nnext line',
+            lineCount: 2,
+            totalLines: 5,
+            availableEndOffset: 5
           })
         })
       )
@@ -678,9 +1034,18 @@ describe('Codex terminal bridge runtime', () => {
       mcp = startMcpScript(socketPath)
 
       const listResponse = await mcp.request({ jsonrpc: '2.0', id: 0, method: 'tools/list' })
-      expect(listResponse.result?.tools?.map((tool) => tool.name)).toEqual(['list_terminals', 'run_command', 'read_file', 'glob_search', 'grep_search', 'target_context'])
+      expect(listResponse.result?.tools?.map((tool) => tool.name)).toEqual([
+        'list_terminals',
+        'run_command',
+        'read_terminal_output',
+        'read_file',
+        'glob_search',
+        'grep_search',
+        'target_context'
+      ])
       const listTerminalsTool = listResponse.result?.tools?.find((tool) => tool.name === 'list_terminals')
       const runCommandTool = listResponse.result?.tools?.find((tool) => tool.name === 'run_command')
+      const readTerminalOutputTool = listResponse.result?.tools?.find((tool) => tool.name === 'read_terminal_output')
       const readFileTool = listResponse.result?.tools?.find((tool) => tool.name === 'read_file')
       const globSearchTool = listResponse.result?.tools?.find((tool) => tool.name === 'glob_search')
       const grepSearchTool = listResponse.result?.tools?.find((tool) => tool.name === 'grep_search')
@@ -710,6 +1075,14 @@ describe('Codex terminal bridge runtime', () => {
               command: expect.objectContaining({
                 description: expect.stringContaining('never runs in the local Codex client process')
               }),
+              mode: expect.objectContaining({
+                enum: ['wait', 'return_immediately'],
+                description: expect.stringContaining('return_immediately')
+              }),
+              execution: expect.objectContaining({
+                enum: ['terminal', 'background'],
+                description: expect.stringContaining('visible terminal is occupied')
+              }),
               sessionId: expect.objectContaining({
                 description: expect.stringContaining('fails if the selected terminal is not connected')
               })
@@ -724,6 +1097,27 @@ describe('Codex terminal bridge runtime', () => {
             destructiveHint: false,
             idempotentHint: true,
             openWorldHint: false
+          })
+        })
+      )
+      expect(readTerminalOutputTool).toEqual(
+        expect.objectContaining({
+          description: expect.stringContaining('visible output'),
+          annotations: expect.objectContaining({
+            readOnlyHint: true,
+            destructiveHint: false,
+            idempotentHint: true,
+            openWorldHint: false
+          }),
+          inputSchema: expect.objectContaining({
+            properties: expect.objectContaining({
+              offset: expect.objectContaining({
+                description: expect.stringContaining('Zero-based')
+              }),
+              limit: expect.objectContaining({
+                description: expect.stringContaining('Maximum number')
+              })
+            })
           })
         })
       )

@@ -109,6 +109,8 @@ const createSshRuntime = (
   const clients: MockSshClient[] = []
   const connectConfigs: Array<Record<string, unknown>> = []
   const channels: MockSshChannel[] = []
+  const execChannels: MockSshChannel[] = []
+  const execCommands: string[] = []
   const forwardChannels: MockSshChannel[] = []
   const forwardOutCalls: Array<{ srcIP: string; srcPort: number; dstIP: string; dstPort: number }> = []
   const shellOptions: Array<Record<string, unknown>> = []
@@ -132,6 +134,15 @@ const createSshRuntime = (
       channels.push(channel)
       queueMicrotask(() => {
         callback(options.failShell, channel)
+      })
+    }
+
+    exec(command: string, callback: (error: Error | undefined, stream: MockSshChannel) => void) {
+      execCommands.push(command)
+      const channel = new MockSshChannel()
+      execChannels.push(channel)
+      queueMicrotask(() => {
+        callback(undefined, channel)
       })
     }
 
@@ -162,6 +173,8 @@ const createSshRuntime = (
     clients,
     connectConfigs,
     channels,
+    execChannels,
+    execCommands,
     forwardChannels,
     forwardOutCalls,
     shellOptions
@@ -351,6 +364,43 @@ describe('ssh terminal backend runtime', () => {
     first.session?.kill()
     await waitForMicrotasks(1)
     expect(ssh.clients[0].endCalls).toBe(0)
+  })
+
+  it('runs background commands through an independent ssh exec channel without visible shell writes', async () => {
+    const backend = await loadSshTerminalBackend()
+    const ssh = createSshRuntime()
+    const events = createRecorder()
+    backend.configureSshTerminalBackendRuntime({
+      ssh2Runtime: asRuntime(ssh.runtime),
+      getAsset: () => null,
+      getAssetSecret: () => ({}),
+      getKeychainSecret: () => ({}),
+      getConfig: () => runtimeConfig(),
+      getEnv: () => ({ SSH_AUTH_SOCK: '' })
+    })
+
+    const result = backend.createSshTerminalSession(
+      'ssh-background-exec-1',
+      { kind: 'ssh', ssh: { host: '10.71.0.8', username: 'deploy', port: 2222, password: 'secret' } },
+      createSink(events)
+    )
+    await waitForMicrotasks(4)
+    const backgroundPromise = result.session!.runBackgroundCommand!({ command: 'pwd && hostname', cwd: '/srv/app', timeoutMs: 5000 })
+    await waitForMicrotasks(1)
+    ssh.execChannels[0].emit('data', Buffer.from('/srv/app\n'))
+    ssh.execChannels[0].stderr.emit('data', Buffer.from('host-a\n'))
+    ssh.execChannels[0].emit('close', 0)
+    const background = await backgroundPromise
+
+    expect(ssh.channels[0].writes).toEqual([])
+    expect(ssh.execCommands).toEqual(["cd '/srv/app' && pwd && hostname"])
+    expect(background).toEqual(
+      expect.objectContaining({
+        output: '/srv/app\nhost-a\n',
+        exitCode: 0,
+        timedOut: false
+      })
+    )
   })
 
   it('resolves asset secrets, keychain secrets, and proxy sockets before connecting', async () => {
@@ -1143,6 +1193,90 @@ describe('ssh terminal backend runtime', () => {
     expect(events.lifecycle.at(-1)).toEqual(expect.objectContaining({ stage: 'closed', sshTransport: 'relay-shell', remoteHop: 'target' }))
     expect(events.closed).toEqual(['ssh-relay-shell-1'])
     expect(result.session).toBeTruthy()
+  })
+
+  it('runs relay-shell background commands in a hidden relay pty instead of the visible terminal pty', async () => {
+    const backend = await loadSshTerminalBackend()
+    const ssh = createSshRuntime({
+      manualReady: true,
+      failForwardOut: new Error('(SSH) Channel open failure: open failed')
+    })
+    const pty = createPtyRuntime()
+    const events = createRecorder()
+    backend.configureSshTerminalBackendRuntime({
+      ssh2Runtime: asRuntime(ssh.runtime),
+      loadPty: () => pty.runtime,
+      getEnv: () => ({ PATH: '/usr/bin', HOME: '/tmp' }),
+      getSshControlDir: () => '/tmp/aiopsterm-ssh-control-vitest-background',
+      getAsset: (assetId: string) => {
+        if (assetId === 'asset-relay-target') {
+          return {
+            id: 'asset-relay-target',
+            name: 'target-relay-a',
+            title: 'target-relay-a',
+            host: 'target.internal',
+            username: 'root',
+            port: 22,
+            asset_type: 'person',
+            auth_type: 'keyBased',
+            jumpHostId: 'asset-relay'
+          } as never
+        }
+        if (assetId === 'asset-relay') {
+          return {
+            id: 'asset-relay',
+            name: 'relay-b',
+            title: 'relay-b',
+            host: 'relay.example',
+            username: 'ops',
+            port: 2222,
+            asset_type: 'person',
+            auth_type: 'password'
+          } as never
+        }
+        return null
+      },
+      getAssetSecret: (assetId: string) => (assetId === 'asset-relay' ? { password: 'relay-password' } : {}),
+      getKeychainSecret: () => ({}),
+      getConfig: () => runtimeConfig()
+    })
+
+    const result = backend.createSshTerminalSession(
+      'ssh-relay-background-1',
+      { kind: 'ssh', assetId: 'asset-relay-target', cols: 100, rows: 30 },
+      createSink(events)
+    )
+    await waitForMicrotasks(2)
+    ssh.clients[0].emit('ready')
+    await waitForMicrotasks(4)
+    pty.processes[0].emitData('ops@relay:~$ ')
+    pty.processes[0].emitData('target login banner\n[root@target.internal ~]# ')
+    expect(pty.processes[0].writes).toEqual(["ssh -tt -p 22 -- 'root@target.internal'\n"])
+
+    const backgroundPromise = result.session!.runBackgroundCommand!({ command: 'pwd && hostname', cwd: '/root', timeoutMs: 5000 })
+    expect(pty.spawnCalls).toHaveLength(2)
+    const hidden = pty.processes[1]
+    expect(hidden).not.toBe(pty.processes[0])
+    hidden.emitData('ops@relay:~$ ')
+    expect(hidden.writes).toEqual(["ssh -tt -p 22 -- 'root@target.internal'\n"])
+    hidden.emitData('target login banner\n[root@target.internal ~]# ')
+    expect(hidden.writes).toHaveLength(2)
+    const command = hidden.writes[1]
+    expect(command).toContain("echo '__AIOPSTERM_BACKGROUND_START_")
+    expect(command).toContain("cd '/root' && pwd && hostname")
+    expect(command).toContain('__aiopsterm_status')
+    const commandId = command.match(/__AIOPSTERM_BACKGROUND_START_([a-zA-Z0-9_-]+)__/)?.[1] || ''
+    hidden.emitData(`__AIOPSTERM_BACKGROUND_START_${commandId}__\n/root\ntarget.internal\n__AIOPSTERM_BACKGROUND_END_${commandId}__:0\n[root@target.internal ~]# `)
+    const background = await backgroundPromise
+
+    expect(pty.processes[0].writes).toEqual(["ssh -tt -p 22 -- 'root@target.internal'\n"])
+    expect(background).toEqual(
+      expect.objectContaining({
+        output: '/root\ntarget.internal',
+        exitCode: 0,
+        timedOut: false
+      })
+    )
   })
 
   it('fails closed when ssh2 runtime is unavailable or target fields are invalid', async () => {

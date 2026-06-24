@@ -11,7 +11,7 @@ import { configureAgentHookInstallerRuntime } from '../agent/agentHookInstaller'
 import { agentHookScriptPathFor, configureManagedAiSessionAutoNamingRuntime, getAiAgentSessionSocketPath } from '../agent/agentSessions'
 import { configureAppUpdateRuntime } from './appUpdate'
 import { configureChatHistoryBackendRuntime } from '../chat/chatHistory'
-import { configureCodexCliRuntime } from '../codex/codexCli'
+import { configureCodexCliRuntime, refreshCodexConfig } from '../codex/codexCli'
 import { getCodexTerminalBridgeSocketPath } from '../codex/codexTerminalBridge'
 import { configureControlSocketRuntime, getControlSocketPath } from '../control/controlSocket'
 import { configureDatabaseBackendRuntime } from '../database/database'
@@ -133,6 +133,15 @@ export const configureMainBackendRuntimes = (input: ConfigureMainRuntimeInput) =
     getEnv: () => process.env,
     getBridgeSocketPath: () => getCodexTerminalBridgeSocketPath()
   })
+  void refreshCodexConfig()
+    .then((result) => {
+      logRuntimeEvent('info', 'codex.config.refreshed', result)
+    })
+    .catch((error) => {
+      logRuntimeEvent('error', 'codex.config.refresh-failed', {
+        errorMessage: error instanceof Error ? error.message : String(error)
+      })
+    })
   configureSshTerminalBackendRuntime({
     getConfig: input.getConfig,
     getAsset,

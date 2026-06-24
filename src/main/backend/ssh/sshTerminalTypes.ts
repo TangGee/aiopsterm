@@ -12,6 +12,7 @@ import type {
 } from '@shared/contracts/terminalSessions'
 import type { createSshProxySocketForAsset } from './sshProxy'
 import type { SshTerminalConnectionTarget } from '../terminal/terminal'
+import type { TerminalBackgroundCommandOptions, TerminalBackgroundCommandResult } from '../terminal/terminal'
 
 export type AssetSecret = {
   password?: string
@@ -48,6 +49,7 @@ export type SshTerminalTarget = SshTerminalConnectionTarget & {
 
 export type SshTerminalSession = {
   write(data: string | Buffer): void
+  runBackgroundCommand?(options: TerminalBackgroundCommandOptions): Promise<TerminalBackgroundCommandResult>
   resize(cols: number, rows: number): void
   kill(reason?: TerminalDisconnectReason): void
 }
@@ -69,6 +71,7 @@ export type SshTerminalClient = {
     ) => void
   ): SshTerminalClient
   connect(config: ConnectConfig): unknown
+  exec?(command: string, callback: (error: Error | undefined, stream: SshTerminalChannel) => void): unknown
   shell(options: Record<string, unknown>, callback: (error: Error | undefined, stream: SshTerminalChannel) => void): unknown
   forwardOut?(
     srcIP: string,

@@ -1,7 +1,9 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'child_process'
+import { basename } from 'path'
 import type { TerminalCreateOptions, TerminalDisconnectReason, TerminalLifecycleEvent } from '@shared/contracts/terminalSessions'
 import { defaultShellForPlatform, localShellArgsForPlatform } from '../app/platformRuntime'
 import { createTerminalErrorLifecycleEvent, createTerminalLifecycleEvent } from './terminal'
+import type { TerminalBackgroundCommandOptions, TerminalBackgroundCommandResult } from './terminal'
 
 export type LocalPtyProcess = {
   pid?: number
@@ -21,6 +23,7 @@ export type LocalProcessRuntime = Pick<typeof import('child_process'), 'spawn'>
 export type LocalTerminalSession = {
   write(data: string | Buffer): void
   writeBinary(data: Buffer): boolean
+  runBackgroundCommand?(options: TerminalBackgroundCommandOptions): Promise<TerminalBackgroundCommandResult>
   resize(cols: number, rows: number): void
   kill(reason?: TerminalDisconnectReason): void
 }
@@ -125,6 +128,91 @@ const localShellArgs = (shell: string) => {
   return localShellArgsForPlatform(shell, getPlatform())
 }
 
+const localBackgroundShellArgs = (shell: string, command: string) => {
+  if (getPlatform() === 'win32') {
+    const shellName = basename(shell).toLowerCase()
+    if (shellName.includes('powershell') || shellName.includes('pwsh')) return ['-NoLogo', '-NoProfile', '-Command', command]
+    return ['/d', '/s', '/c', command]
+  }
+  return ['-lc', command]
+}
+
+const truncateOutput = (output: string, chunk: string | Buffer, maxBytes: number) => {
+  const currentBytes = Buffer.byteLength(output, 'utf8')
+  if (currentBytes >= maxBytes) return { output, truncated: true }
+  const text = Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk || '')
+  const remaining = maxBytes - currentBytes
+  const chunkBuffer = Buffer.from(text, 'utf8')
+  if (chunkBuffer.byteLength <= remaining) return { output: `${output}${text}`, truncated: false }
+  return { output: `${output}${chunkBuffer.subarray(0, remaining).toString('utf8')}`, truncated: true }
+}
+
+const runLocalBackgroundCommand = (
+  id: string,
+  command: string,
+  options: TerminalCreateOptions,
+  terminalShell: string,
+  terminalType: string,
+  cwd: string,
+  commandOptions: TerminalBackgroundCommandOptions
+): Promise<TerminalBackgroundCommandResult> => {
+  const startedAt = Date.now()
+  const maxOutputBytes = Math.max(1024, Math.min(commandOptions.maxOutputBytes || 1024 * 1024, 4 * 1024 * 1024))
+  const child = getProcessRuntime().spawn(terminalShell, localBackgroundShellArgs(terminalShell, command), {
+    cwd: commandOptions.cwd || cwd,
+    env: { ...managedLocalTerminalEnvironment(`${id}-background`, options), TERM: terminalType },
+    shell: false
+  }) as ChildProcessWithoutNullStreams
+
+  return new Promise<TerminalBackgroundCommandResult>((resolve, reject) => {
+    let output = ''
+    let outputTruncated = false
+    let settled = false
+    let timedOut = false
+    const settle = (callback: () => void) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      callback()
+    }
+    const append = (chunk: string | Buffer) => {
+      if (settled) return
+      const next = truncateOutput(output, chunk, maxOutputBytes)
+      output = next.output
+      outputTruncated = outputTruncated || next.truncated
+    }
+    const timer = setTimeout(() => {
+      timedOut = true
+      try {
+        child.kill()
+      } catch {}
+      settle(() =>
+        resolve({
+          output,
+          exitCode: null,
+          durationMs: Date.now() - startedAt,
+          timedOut,
+          ...(outputTruncated ? { outputTruncated } : {})
+        })
+      )
+    }, commandOptions.timeoutMs)
+    child.stdout.on('data', append)
+    child.stderr.on('data', append)
+    child.on('error', (error) => settle(() => reject(error)))
+    child.on('exit', (code) =>
+      settle(() =>
+        resolve({
+          output,
+          exitCode: timedOut ? null : Number.isFinite(code) ? Number(code) : null,
+          durationMs: Date.now() - startedAt,
+          timedOut,
+          ...(outputTruncated ? { outputTruncated } : {})
+        })
+      )
+    )
+  })
+}
+
 const sendLifecycle = (id: string, sink: LocalTerminalEventSink, event: Omit<TerminalLifecycleEvent, 'id' | 'at'> & { at?: number }) => {
   const payload = createTerminalLifecycleEvent(id, event)
   sink.lifecycle(payload)
@@ -206,6 +294,9 @@ export const createLocalTerminalSession = (id: string, options: TerminalCreateOp
       writeBinary() {
         return false
       },
+      runBackgroundCommand(commandOptions) {
+        return runLocalBackgroundCommand(id, commandOptions.command, options, terminalShell, terminalType, cwd, commandOptions)
+      },
       resize(cols: number, rows: number) {
         ptyProcess.resize(cols, rows)
       },
@@ -243,6 +334,9 @@ export const createLocalTerminalSession = (id: string, options: TerminalCreateOp
     writeBinary(data: Buffer) {
       child.stdin.write(data)
       return true
+    },
+    runBackgroundCommand(commandOptions) {
+      return runLocalBackgroundCommand(id, commandOptions.command, options, terminalShell, terminalType, cwd, commandOptions)
     },
     resize() {
       /* Subprocess fallback has no terminal window to resize. */

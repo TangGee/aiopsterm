@@ -13,6 +13,7 @@
 
 .ai-codex-target-bar {
   position: relative;
+  z-index: 1;
   min-width: 0;
   min-height: 42px;
   display: flex;
@@ -23,6 +24,11 @@
   background: color-mix(in srgb, var(--surface-2) 54%, transparent);
   padding: 7px;
   backdrop-filter: blur(12px);
+}
+
+.ai-codex-target-bar.picker-open {
+  z-index: 70;
+  overflow: visible;
 }
 
 .ai-codex-target-bar.missing {
@@ -136,13 +142,17 @@
   left: 0;
   right: 0;
   top: calc(100% + 6px);
-  z-index: 32;
+  z-index: 75;
   border: 1px solid var(--border);
   border-radius: 7px;
-  background: var(--glass-surface);
+  background: var(--surface);
   box-shadow: var(--shadow);
   padding: 8px;
-  backdrop-filter: blur(16px);
+  pointer-events: auto;
+}
+
+.app-shell.has-app-background .ai-codex-target-picker {
+  background: var(--surface);
 }
 
 .ai-codex-target-picker label {
@@ -301,4 +311,3 @@
   font-size: 12px;
   line-height: 1.4;
 }
-
