@@ -1,5 +1,12 @@
-import { computed, ref, type ComponentPublicInstance } from 'vue'
-import { readStoredAiPanelMode, storeAiPanelMode, type AiPanelMode } from '@/services/ai/aiPanelModeRuntime'
+import { computed, ref, watch, type ComponentPublicInstance } from 'vue'
+import {
+  readStoredAiPanelMode,
+  readStoredAiPanelWorkspaceLinkMode,
+  storeAiPanelMode,
+  storeAiPanelWorkspaceLinkMode,
+  type AiPanelMode,
+  type AiPanelWorkspaceLinkMode
+} from '@/services/ai/aiPanelModeRuntime'
 import {
   applyCodexTargetBinding,
   applyCodexTargetUnbinding,
@@ -35,6 +42,7 @@ export type AiPanelCodexConversation = AiPanelCodexConversationRuntimeState & Ai
 
 type AiPanelCodexConversationRuntimeInput = {
   agentMode: () => boolean
+  activePanelId: () => string
   activePanel: () => TerminalPanel | undefined | null
   panels: () => TerminalPanel[]
   terminalSettings: () => TerminalSettings
@@ -61,11 +69,14 @@ export const createAiPanelCodexConversationRuntime = (options: AiPanelCodexConve
   const t = options.t
   const log = options.log || writeRendererRuntimeLog
   const aiPanelMode = ref<AiPanelMode>(readStoredAiPanelMode())
+  const aiPanelWorkspaceLinkMode = ref<AiPanelWorkspaceLinkMode>(readStoredAiPanelWorkspaceLinkMode())
   const panelModeMenuOpen = ref(false)
   const codexTargetPickerOpen = ref(false)
   const codexTargetQuery = ref('')
   const codexConversations = ref<AiPanelCodexConversation[]>([])
   const activeCodexConversationId = ref('')
+  const codexWorkspaceLinkNotice = ref('')
+  let workspaceLinkSyncSource: 'workspace' | 'ai' | null = null
   let codexConversationSequence = 0
 
   const activeCodexConversation = computed(() => codexConversations.value.find((conversation) => conversation.id === activeCodexConversationId.value) || null)
@@ -149,6 +160,59 @@ export const createAiPanelCodexConversationRuntime = (options: AiPanelCodexConve
 
   const currentBoundCodexTarget = (conversation = activeCodexConversation.value) => currentBoundCodexRuntimeTarget(conversation, options.panels())
 
+  const codexConversationMatchesPanel = (conversation: AiPanelCodexConversation, panel: TerminalPanel | undefined | null) => {
+    const target = currentBoundCodexTarget(conversation) || conversation.boundTarget
+    if (!target?.sessionId || !panel?.sessionId) return false
+    return target.panelId === panel.id || target.sessionId === panel.sessionId
+  }
+
+  const matchingCodexConversationForPanel = (panel: TerminalPanel | undefined | null) => {
+    const active = activeCodexConversation.value
+    if (active && codexConversationMatchesPanel(active, panel)) return active
+    return [...codexConversations.value].reverse().find((conversation) => codexConversationMatchesPanel(conversation, panel)) || null
+  }
+
+  const setWorkspaceLinkNotice = (message: string) => {
+    codexWorkspaceLinkNotice.value = message
+  }
+
+  const clearWorkspaceLinkNotice = () => {
+    if (codexWorkspaceLinkNotice.value) codexWorkspaceLinkNotice.value = ''
+  }
+
+  const selectCodexConversationForWorkspacePanel = async (panel: TerminalPanel | undefined | null) => {
+    if (aiPanelMode.value !== 'codex' || aiPanelWorkspaceLinkMode.value !== 'follow-workspace') return false
+    if (!panel?.sessionId || panel.kind !== 'terminal') return false
+    const conversation = matchingCodexConversationForPanel(panel)
+    if (!conversation) {
+      setWorkspaceLinkNotice(t('ai.codexWorkspaceLinkNoConversation'))
+      return false
+    }
+    clearWorkspaceLinkNotice()
+    if (conversation.id === activeCodexConversationId.value) return true
+    workspaceLinkSyncSource = 'workspace'
+    try {
+      await selectCodexConversation(conversation.id, { syncWorkspace: false })
+    } finally {
+      workspaceLinkSyncSource = null
+    }
+    return true
+  }
+
+  const activateWorkspacePanelForCodexConversation = (conversation: AiPanelCodexConversation | null | undefined) => {
+    if (aiPanelWorkspaceLinkMode.value !== 'follow-workspace') return false
+    const target = conversation ? currentBoundCodexTarget(conversation) || conversation.boundTarget : null
+    if (!target?.sessionId) return false
+    const panel = options.activateTerminalPanel(target.panelId || target.sessionId)
+    if (!panel) {
+      if (conversation) conversation.error = t('ai.codexTargetClosed')
+      return false
+    }
+    if (conversation) conversation.error = ''
+    clearWorkspaceLinkNotice()
+    return true
+  }
+
   const createTerminalRuntime = options.terminalRuntimeFactory || createAiPanelCodexTerminalRuntime
   const aiPanelCodexTerminalRuntime = createTerminalRuntime({
     conversations: () => codexConversations.value,
@@ -156,6 +220,7 @@ export const createAiPanelCodexConversationRuntime = (options: AiPanelCodexConve
     activeConversationId: () => activeCodexConversationId.value,
     terminalSettings: options.terminalSettings,
     currentBoundTarget: (conversation) => currentBoundCodexTarget(conversation),
+    isConversationVisible: (conversation) => aiPanelMode.value === 'codex' && activeCodexConversationId.value === conversation.id,
     syncAttentionState: syncCodexAttentionState,
     labels: {
       error: () => t('ai.codexError'),
@@ -209,6 +274,7 @@ export const createAiPanelCodexConversationRuntime = (options: AiPanelCodexConve
     } else if (bindOptions.start !== false && aiPanelMode.value === 'codex') {
       await startCodexSession(conversation)
     }
+    clearWorkspaceLinkNotice()
     return true
   }
 
@@ -258,7 +324,7 @@ export const createAiPanelCodexConversationRuntime = (options: AiPanelCodexConve
     await aiPanelCodexTerminalRuntime.stopSession(conversation)
     resetCodexConversationForRestart(conversation)
     syncCodexAttentionState(conversation)
-    conversation.terminal?.clear()
+    aiPanelCodexTerminalRuntime.clearConversationOutput(conversation)
     await startCodexSession(conversation)
   }
 
@@ -272,16 +338,26 @@ export const createAiPanelCodexConversationRuntime = (options: AiPanelCodexConve
     if (conversation.boundTarget && aiPanelMode.value === 'codex') await startCodexSession(conversation)
   }
 
-  const selectCodexConversation = async (id: string) => {
-    if (activeCodexConversationId.value === id) return
+  const selectCodexConversation = async (id: string, selectOptions: { syncWorkspace?: boolean } = {}) => {
     const conversation = codexConversations.value.find((item) => item.id === id)
     if (!conversation) return
+    const alreadyActive = activeCodexConversationId.value === id
     activeCodexConversationId.value = id
     closeCodexTargetPicker()
+    if (selectOptions.syncWorkspace !== false && workspaceLinkSyncSource !== 'workspace') {
+      workspaceLinkSyncSource = 'ai'
+      try {
+        activateWorkspacePanelForCodexConversation(conversation)
+      } finally {
+        workspaceLinkSyncSource = null
+      }
+    }
+    if (alreadyActive) return
     await options.afterDomUpdate()
     aiPanelCodexTerminalRuntime.ensureTerminal(conversation)
     await aiPanelCodexTerminalRuntime.syncActiveBridgeTarget()
     aiPanelCodexTerminalRuntime.fitTerminal({ force: true, conversation })
+    aiPanelCodexTerminalRuntime.syncConversationOutput(conversation)
     aiPanelCodexTerminalRuntime.focusActiveTerminal()
   }
 
@@ -322,6 +398,7 @@ export const createAiPanelCodexConversationRuntime = (options: AiPanelCodexConve
       aiPanelCodexTerminalRuntime.ensureTerminal(nextConversation)
       await aiPanelCodexTerminalRuntime.syncActiveBridgeTarget()
       aiPanelCodexTerminalRuntime.fitTerminal({ force: true, conversation: nextConversation })
+      aiPanelCodexTerminalRuntime.syncConversationOutput(nextConversation)
     }
     options.showNotice(t('ai.tabClosed'))
   }
@@ -341,10 +418,22 @@ export const createAiPanelCodexConversationRuntime = (options: AiPanelCodexConve
     }
     ensureActiveCodexConversation()
     void startCodexSession()
+    void selectCodexConversationForWorkspacePanel(options.activePanel())
   }
 
   const toggleAiPanelModeMenu = () => {
     panelModeMenuOpen.value = !panelModeMenuOpen.value
+  }
+
+  const toggleAiPanelWorkspaceLinkMode = async () => {
+    aiPanelWorkspaceLinkMode.value = aiPanelWorkspaceLinkMode.value === 'follow-workspace' ? 'manual' : 'follow-workspace'
+    storeAiPanelWorkspaceLinkMode(aiPanelWorkspaceLinkMode.value)
+    if (aiPanelWorkspaceLinkMode.value === 'follow-workspace') {
+      await selectCodexConversationForWorkspacePanel(options.activePanel())
+      activateWorkspacePanelForCodexConversation(activeCodexConversation.value)
+    } else {
+      clearWorkspaceLinkNotice()
+    }
   }
 
   const activeCodexTargetSignature = computed(() => {
@@ -374,13 +463,34 @@ export const createAiPanelCodexConversationRuntime = (options: AiPanelCodexConve
       aiPanelCodexTerminalRuntime.disposeConversation(conversation)
     })
     aiPanelCodexTerminalRuntime.disposeSubscriptions()
+    stopWorkspaceLinkWatcher()
   }
+
+  const stopWorkspaceLinkWatcher = watch(
+    () => [
+      aiPanelMode.value,
+      aiPanelWorkspaceLinkMode.value,
+      options.activePanelId(),
+      options.panels()
+        .map((panel) => `${panel.id}:${panel.sessionId || ''}:${panel.status || ''}:${panel.kind || ''}`)
+        .join('|'),
+      codexConversations.value
+        .map((conversation) => `${conversation.id}:${conversation.boundTarget?.panelId || ''}:${conversation.boundTarget?.sessionId || ''}`)
+        .join('|')
+    ],
+    () => {
+      if (workspaceLinkSyncSource === 'ai') return
+      void selectCodexConversationForWorkspacePanel(options.activePanel())
+    },
+    { flush: 'post' }
+  )
 
   return {
     activeCodexBoundTarget,
     activeCodexConversation,
     activeCodexConversationId,
     activeCodexTargetSignature,
+    aiPanelWorkspaceLinkMode,
     aiPanelMode,
     applyCodexTerminalSettingsToAll,
     bindCodexTarget,
@@ -395,6 +505,7 @@ export const createAiPanelCodexConversationRuntime = (options: AiPanelCodexConve
     codexStatusLabel,
     codexTargetPickerOpen,
     codexTargetQuery,
+    codexWorkspaceLinkNotice,
     copyCodexSelectionFromContextMenu: aiPanelCodexTerminalRuntime.copySelectionFromContextMenu,
     createNewCodexConversation,
     currentAiPanelModeLabel,
@@ -413,6 +524,7 @@ export const createAiPanelCodexConversationRuntime = (options: AiPanelCodexConve
     syncActiveCodexTargetContext,
     terminalSettingsSignature,
     toggleAiPanelModeMenu,
+    toggleAiPanelWorkspaceLinkMode,
     toggleCodexTargetPicker,
     unbindCodexTarget
   }

@@ -39,6 +39,7 @@ type RegisterCodexSessionsIpcInput = {
   sendCodexLifecycle: (owner: BrowserWindow, lifecycle: CodexSessionLifecycleEvent) => void
   sendCodexExit: (owner: BrowserWindow, lifecycle: CodexSessionLifecycleEvent, code?: number | null) => void
   sendCodexData: (owner: BrowserWindow, id: string, chunk: string | Buffer) => void
+  closeCodexDataSession?: (id: string, reason?: string) => void
 }
 
 const normalizeCodexTargetContext = (target: CodexSessionTargetContext | null | undefined) => {
@@ -108,6 +109,7 @@ export const registerCodexSessionsIpc = (ipcMain: IpcMain, input: RegisterCodexS
         },
         data: (sessionId, chunk) => input.sendCodexData(owner, sessionId, chunk),
         closed: (sessionId) => {
+          input.closeCodexDataSession?.(sessionId, 'codex-session-closed')
           input.logRuntimeEvent('info', 'codex.session-removed', { id: sessionId })
         }
       })

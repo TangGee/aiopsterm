@@ -34,7 +34,7 @@ export type AiPanelCodexTerminalLike = {
   focus: () => void
   clear: () => void
   dispose: () => void
-  write: (data: string) => void
+  write: (data: string, callback?: () => void) => void
   getSelection: () => string
   attachCustomKeyEventHandler: (handler: (event: KeyboardEvent) => boolean) => void
   onData: (handler: (data: string) => void) => unknown
@@ -77,6 +77,7 @@ export type AiPanelCodexTerminalRuntimeOptions<TConversation extends AiPanelCode
   activeConversationId: () => string
   terminalSettings: () => AiPanelCodexTerminalSettings
   currentBoundTarget: (conversation: TConversation) => CodexSessionTargetContext | null
+  isConversationVisible?: (conversation: TConversation) => boolean
   syncAttentionState: (conversation: TConversation) => void
   labels: AiPanelCodexTerminalRuntimeLabels
   notify: (message: string) => void
@@ -88,6 +89,46 @@ export type AiPanelCodexTerminalRuntimeOptions<TConversation extends AiPanelCode
   terminalConstructor?: new (options: ConstructorParameters<typeof XtermTerminal>[0]) => AiPanelCodexTerminalLike
   fitConstructor?: new () => AiPanelCodexFitLike
   resizeObserverFactory?: (callback: ResizeObserverCallback) => AiPanelCodexResizeObserverLike
+}
+
+type CodexTerminalOutputPerfSummary = {
+  chunks: number
+  writes: number
+  bytes: number
+  firstAt: number
+  lastAt: number
+  writeMs: number
+  queueMs: number
+  maxWriteMs: number
+  maxQueueMs: number
+  maxChunkBytes: number
+  maxBatchBytes: number
+  maxPendingBytes: number
+  maxPendingChunks: number
+  clears: number
+}
+
+type CodexQueuedOutput = {
+  chunks: number
+  data: string
+  bytes: number
+  queuedAt: number
+  maxChunkBytes: number
+}
+
+type CodexTerminalOutputWriteQueue = {
+  pending: CodexQueuedOutput[]
+  pendingBytes: number
+  pendingChunks: number
+  scheduledFlush: unknown | null
+  inFlight: boolean
+  clearAfterInFlight: boolean
+  disposed: boolean
+}
+
+type CodexTerminalOutputState = {
+  queue: CodexTerminalOutputWriteQueue
+  perf?: CodexTerminalOutputPerfSummary
 }
 
 export const codexTerminalCopyShortcut = (event: Pick<KeyboardEvent, 'key' | 'shiftKey' | 'ctrlKey' | 'metaKey' | 'altKey'>) => {
@@ -112,6 +153,16 @@ const defaultResizeObserverFactory = (callback: ResizeObserverCallback) => {
   return new ResizeObserver(callback)
 }
 
+const codexOutputSummaryIntervalMs = 1000
+const codexOutputSummaryChunkThreshold = 50
+const codexOutputSlowThresholdMs = 16
+const codexOutputMaxWriteBytes = 8 * 1024
+const codexOutputMaxWriteChunks = 32
+const codexOutputCompactPendingChunks = 128
+
+const nowMs = () => globalThis.performance?.now?.() ?? Date.now()
+const textByteLength = (value: string) => new TextEncoder().encode(value).length
+
 export const createAiPanelCodexTerminalRuntime = <TConversation extends AiPanelCodexTerminalConversation>(
   options: AiPanelCodexTerminalRuntimeOptions<TConversation>
 ) => {
@@ -126,6 +177,268 @@ export const createAiPanelCodexTerminalRuntime = <TConversation extends AiPanelC
   let offData: (() => void) | null = null
   let offLifecycle: (() => void) | null = null
   let offExit: (() => void) | null = null
+  const outputStates = new Map<string, CodexTerminalOutputState>()
+
+  const requestOutputFlush = (callback: () => void) =>
+    typeof window !== 'undefined' && typeof window.setTimeout === 'function' ? window.setTimeout(callback, 0) : setTimeout(callback, 0)
+
+  const cancelOutputFlush = (flush: unknown) => {
+    if (typeof window !== 'undefined' && typeof window.clearTimeout === 'function') window.clearTimeout(flush as number)
+    else clearTimeout(flush as ReturnType<typeof setTimeout>)
+  }
+
+  const isConversationVisible = (conversation: TConversation) =>
+    options.isConversationVisible ? options.isConversationVisible(conversation) : options.activeConversationId() === conversation.id
+
+  const outputStateFor = (conversation: TConversation): CodexTerminalOutputState => {
+    const existing = outputStates.get(conversation.id)
+    if (existing) return existing
+    const state: CodexTerminalOutputState = {
+      queue: {
+        pending: [],
+        pendingBytes: 0,
+        pendingChunks: 0,
+        scheduledFlush: null,
+        inFlight: false,
+        clearAfterInFlight: false,
+        disposed: false
+      }
+    }
+    outputStates.set(conversation.id, state)
+    return state
+  }
+
+  const logCodexOutputSummary = (conversation: TConversation, summary: CodexTerminalOutputPerfSummary, reason: string) => {
+    log('debug', 'renderer.codex-output.summary', {
+      localId: conversation.id,
+      sessionId: conversation.sessionId,
+      reason,
+      chunks: summary.chunks,
+      writes: summary.writes,
+      bytes: summary.bytes,
+      durationMs: Math.max(0, Math.round(summary.lastAt - summary.firstAt)),
+      writeMs: Math.round(summary.writeMs * 10) / 10,
+      queueMs: Math.round(summary.queueMs * 10) / 10,
+      maxWriteMs: Math.round(summary.maxWriteMs * 10) / 10,
+      maxQueueMs: Math.round(summary.maxQueueMs * 10) / 10,
+      maxChunkBytes: summary.maxChunkBytes,
+      maxBatchBytes: summary.maxBatchBytes,
+      maxPendingBytes: summary.maxPendingBytes,
+      maxPendingChunks: summary.maxPendingChunks,
+      clears: summary.clears
+    })
+  }
+
+  const flushCodexOutputPerf = (conversation: TConversation, reason: string) => {
+    const state = outputStates.get(conversation.id)
+    if (!state?.perf) return
+    logCodexOutputSummary(conversation, state.perf, reason)
+    state.perf = undefined
+  }
+
+  const recordCodexOutputPerf = (
+    conversation: TConversation,
+    metrics: {
+      chunks: number
+      bytes: number
+      writeMs: number
+      queueMs: number
+      maxChunkBytes: number
+      pendingBytes: number
+      pendingChunks: number
+      cleared?: boolean
+    }
+  ) => {
+    const state = outputStateFor(conversation)
+    const now = nowMs()
+    const existing = state.perf
+    const summary =
+      existing ||
+      {
+        chunks: 0,
+        writes: 0,
+        bytes: 0,
+        firstAt: now,
+        lastAt: now,
+        writeMs: 0,
+        queueMs: 0,
+        maxWriteMs: 0,
+        maxQueueMs: 0,
+        maxChunkBytes: 0,
+        maxBatchBytes: 0,
+        maxPendingBytes: 0,
+        maxPendingChunks: 0,
+        clears: 0
+      }
+    summary.chunks += metrics.chunks
+    summary.writes += 1
+    summary.bytes += metrics.bytes
+    summary.lastAt = now
+    summary.writeMs += metrics.writeMs
+    summary.queueMs += metrics.queueMs
+    summary.maxWriteMs = Math.max(summary.maxWriteMs, metrics.writeMs)
+    summary.maxQueueMs = Math.max(summary.maxQueueMs, metrics.queueMs)
+    summary.maxChunkBytes = Math.max(summary.maxChunkBytes, metrics.maxChunkBytes)
+    summary.maxBatchBytes = Math.max(summary.maxBatchBytes, metrics.bytes)
+    summary.maxPendingBytes = Math.max(summary.maxPendingBytes, metrics.pendingBytes)
+    summary.maxPendingChunks = Math.max(summary.maxPendingChunks, metrics.pendingChunks)
+    if (metrics.cleared) summary.clears += 1
+    state.perf = summary
+    if (metrics.writeMs >= codexOutputSlowThresholdMs) {
+      log('warn', 'renderer.codex-output.slow-write', {
+        localId: conversation.id,
+        sessionId: conversation.sessionId,
+        chunks: metrics.chunks,
+        bytes: metrics.bytes,
+        writeMs: Math.round(metrics.writeMs * 10) / 10,
+        queueMs: Math.round(metrics.queueMs * 10) / 10,
+        pendingBytes: metrics.pendingBytes,
+        pendingChunks: metrics.pendingChunks
+      })
+    }
+    if (summary.lastAt - summary.firstAt >= codexOutputSummaryIntervalMs || summary.chunks >= codexOutputSummaryChunkThreshold) {
+      flushCodexOutputPerf(conversation, summary.chunks >= codexOutputSummaryChunkThreshold ? 'chunk-threshold' : 'interval')
+    }
+  }
+
+  const takeQueuedCodexOutputBatch = (queue: CodexTerminalOutputWriteQueue) => {
+    const queued: CodexQueuedOutput[] = []
+    let bytes = 0
+    let chunks = 0
+    while (queue.pending.length) {
+      const next = queue.pending[0]
+      const wouldExceedBytes = bytes > 0 && bytes + next.bytes > codexOutputMaxWriteBytes
+      const wouldExceedChunks = chunks > 0 && chunks + next.chunks > codexOutputMaxWriteChunks
+      if (wouldExceedBytes || wouldExceedChunks) break
+      queued.push(next)
+      bytes += next.bytes
+      chunks += next.chunks
+      queue.pending.shift()
+      queue.pendingBytes = Math.max(0, queue.pendingBytes - next.bytes)
+      queue.pendingChunks = Math.max(0, queue.pendingChunks - next.chunks)
+      if (bytes >= codexOutputMaxWriteBytes || chunks >= codexOutputMaxWriteChunks) break
+    }
+    return queued
+  }
+
+  const scheduleCodexOutputFlush = (conversation: TConversation) => {
+    const state = outputStateFor(conversation)
+    const queue = state.queue
+    if (queue.disposed || queue.inFlight || queue.scheduledFlush !== null) return
+    if (!conversation.terminal || !conversation.host?.isConnected || !isConversationVisible(conversation)) return
+    queue.scheduledFlush = requestOutputFlush(() => flushQueuedCodexOutput(conversation))
+  }
+
+  const flushQueuedCodexOutput = (conversation: TConversation) => {
+    const state = outputStateFor(conversation)
+    const queue = state.queue
+    queue.scheduledFlush = null
+    if (queue.disposed || queue.inFlight) return
+    if (!conversation.terminal || !conversation.host?.isConnected || !isConversationVisible(conversation)) return
+    if (!queue.pending.length) {
+      if (queue.clearAfterInFlight) {
+        queue.clearAfterInFlight = false
+        conversation.terminal.clear()
+      }
+      return
+    }
+
+    const pendingBytesAtFlush = queue.pendingBytes
+    const pendingChunksAtFlush = queue.pendingChunks
+    const queued = takeQueuedCodexOutputBatch(queue)
+    queue.inFlight = true
+
+    const data = queued.map((item) => item.data).join('')
+    const bytes = queued.reduce((total, item) => total + item.bytes, 0)
+    const chunks = queued.reduce((total, item) => total + item.chunks, 0)
+    const maxChunkBytes = queued.reduce((max, item) => Math.max(max, item.maxChunkBytes), 0)
+    const queuedAt = queued.reduce((earliest, item) => Math.min(earliest, item.queuedAt), queued[0]?.queuedAt ?? nowMs())
+    const queueMs = Math.max(0, nowMs() - queuedAt)
+    const startedAt = nowMs()
+
+    const completeWrite = () => {
+      queue.inFlight = false
+      if (queue.disposed) return
+      const cleared = queue.clearAfterInFlight
+      recordCodexOutputPerf(conversation, {
+        chunks,
+        bytes,
+        writeMs: nowMs() - startedAt,
+        queueMs,
+        maxChunkBytes,
+        pendingBytes: pendingBytesAtFlush,
+        pendingChunks: pendingChunksAtFlush,
+        cleared
+      })
+      if (queue.clearAfterInFlight) {
+        queue.clearAfterInFlight = false
+        if (!queue.disposed && conversation.terminal) conversation.terminal.clear()
+      }
+      if (queue.pending.length && !queue.disposed) scheduleCodexOutputFlush(conversation)
+    }
+
+    if (conversation.terminal.write.length >= 2) conversation.terminal.write(data, completeWrite)
+    else {
+      conversation.terminal.write(data)
+      completeWrite()
+    }
+  }
+
+  const writeCodexDisplayOutput = (conversation: TConversation, data: string) => {
+    if (!data) return
+    const state = outputStateFor(conversation)
+    const queue = state.queue
+    if (queue.disposed) queue.disposed = false
+    const bytes = textByteLength(data)
+    queue.pending.push({
+      chunks: 1,
+      data,
+      bytes,
+      queuedAt: nowMs(),
+      maxChunkBytes: bytes
+    })
+    queue.pendingBytes += bytes
+    queue.pendingChunks += 1
+    if (queue.pending.length >= codexOutputCompactPendingChunks) {
+      const compacted = queue.pending.map((item) => item.data).join('')
+      const compactedBytes = queue.pending.reduce((total, item) => total + item.bytes, 0)
+      const compactedChunks = queue.pending.reduce((total, item) => total + item.chunks, 0)
+      const queuedAt = queue.pending.reduce((earliest, item) => Math.min(earliest, item.queuedAt), queue.pending[0]?.queuedAt ?? nowMs())
+      const maxChunkBytes = queue.pending.reduce((max, item) => Math.max(max, item.maxChunkBytes), 0)
+      queue.pending = [
+        {
+          chunks: compactedChunks,
+          data: compacted,
+          bytes: compactedBytes,
+          queuedAt,
+          maxChunkBytes
+        }
+      ]
+      queue.pendingBytes = compactedBytes
+      queue.pendingChunks = compactedChunks
+    }
+    scheduleCodexOutputFlush(conversation)
+  }
+
+  const clearCodexDisplayOutput = (conversation: TConversation, clearOptions: { dispose?: boolean } = {}) => {
+    const state = outputStateFor(conversation)
+    const queue = state.queue
+    if (queue.scheduledFlush !== null) {
+      cancelOutputFlush(queue.scheduledFlush)
+      queue.scheduledFlush = null
+    }
+    queue.pending = []
+    queue.pendingBytes = 0
+    queue.pendingChunks = 0
+    if (clearOptions.dispose) {
+      queue.disposed = true
+      flushCodexOutputPerf(conversation, 'conversation-disposed')
+      outputStates.delete(conversation.id)
+      return
+    }
+    if (queue.inFlight) queue.clearAfterInFlight = true
+    else conversation.terminal?.clear()
+  }
 
   const fitTerminal = (fitOptions: { force?: boolean; conversation?: TConversation | null } = {}) => {
     const conversation = fitOptions.conversation || options.activeConversation()
@@ -192,7 +505,7 @@ export const createAiPanelCodexTerminalRuntime = <TConversation extends AiPanelC
     if (!onCodexSessionData && !onCodexSessionLifecycle && !onCodexSessionExit) return
     offData = onCodexSessionData?.((event) => {
       const conversation = options.conversations().find((item) => item.sessionId === event.id)
-      conversation?.terminal?.write(event.data)
+      if (conversation) writeCodexDisplayOutput(conversation, event.data)
     }) || null
     offLifecycle = onCodexSessionLifecycle?.((event) => {
       const conversation = options.conversations().find((item) => item.sessionId === event.id)
@@ -354,6 +667,7 @@ export const createAiPanelCodexTerminalRuntime = <TConversation extends AiPanelC
       return
     }
     ensureTerminal(conversation)
+    scheduleCodexOutputFlush(conversation)
   }
 
   const startSession = async (conversation: TConversation) => {
@@ -427,9 +741,20 @@ export const createAiPanelCodexTerminalRuntime = <TConversation extends AiPanelC
   const disposeConversation = (conversation: TConversation) => {
     conversation.resizeObserver?.disconnect()
     conversation.resizeObserver = null
+    clearCodexDisplayOutput(conversation, { dispose: true })
     conversation.terminal?.dispose()
     conversation.terminal = null
     conversation.fit = null
+  }
+
+  const syncConversationOutput = (conversation: TConversation | null = options.activeConversation()) => {
+    if (!conversation) return
+    scheduleCodexOutputFlush(conversation)
+  }
+
+  const clearConversationOutput = (conversation: TConversation | null = options.activeConversation()) => {
+    if (!conversation) return
+    clearCodexDisplayOutput(conversation)
   }
 
   return {
@@ -437,6 +762,7 @@ export const createAiPanelCodexTerminalRuntime = <TConversation extends AiPanelC
     clearSessionTarget,
     copySelection,
     copySelectionFromContextMenu,
+    clearConversationOutput,
     disposeConversation,
     disposeSubscriptions,
     ensureTerminal,
@@ -448,6 +774,7 @@ export const createAiPanelCodexTerminalRuntime = <TConversation extends AiPanelC
     startSession,
     stopSession,
     subscribeBridge,
+    syncConversationOutput,
     syncActiveBridgeTarget,
     syncTargetContext
   }

@@ -97,6 +97,9 @@ const terminalBottomSafePx = 16
 const terminalOutputSummaryIntervalMs = 1000
 const terminalOutputSummaryChunkThreshold = 50
 const terminalOutputSlowThresholdMs = 16
+const terminalOutputMaxWriteBytes = 8 * 1024
+const terminalOutputMaxWriteChunks = 32
+const terminalOutputCompactPendingChunks = 128
 
 const nowMs = () => globalThis.performance?.now?.() ?? Date.now()
 
@@ -250,6 +253,11 @@ export const createTerminalWorkspaceViewRuntime = ({
   }
 
   const activeView = () => terminalViews.get(workspace.activePanelId)
+  const visibleTerminalPanelIds = () => new Set(visibleTerminalPanels.value.map((panel) => panel.id))
+  const isTerminalPanelRenderable = (panelId: string) => {
+    const element = terminalElements.get(panelId)
+    return Boolean(element?.isConnected && visibleTerminalPanelIds().has(panelId))
+  }
 
   const terminalOutputQueueFor = (view: TerminalView): TerminalOutputWriteQueue => {
     if (view.outputQueue) return view.outputQueue
@@ -276,10 +284,31 @@ export const createTerminalWorkspaceViewRuntime = ({
     updateSuggestionsPosition(panelId)
   }
 
+  const takeQueuedTerminalOutputBatch = (queue: TerminalOutputWriteQueue) => {
+    const queued: TerminalQueuedOutput[] = []
+    let bytes = 0
+    let chunks = 0
+    while (queue.pending.length) {
+      const next = queue.pending[0]
+      const wouldExceedBytes = bytes > 0 && bytes + next.bytes > terminalOutputMaxWriteBytes
+      const wouldExceedChunks = chunks > 0 && chunks + next.chunks > terminalOutputMaxWriteChunks
+      if (wouldExceedBytes || wouldExceedChunks) break
+      queued.push(next)
+      bytes += next.bytes
+      chunks += next.chunks
+      queue.pending.shift()
+      queue.pendingBytes = Math.max(0, queue.pendingBytes - next.bytes)
+      queue.pendingChunks = Math.max(0, queue.pendingChunks - next.chunks)
+      if (bytes >= terminalOutputMaxWriteBytes || chunks >= terminalOutputMaxWriteChunks) break
+    }
+    return queued
+  }
+
   const flushQueuedTerminalOutput = (panelId: string, view: TerminalView) => {
     const queue = terminalOutputQueueFor(view)
     queue.scheduledFlush = null
     if (queue.disposed || queue.inFlight) return
+    if (!isTerminalPanelRenderable(panelId)) return
     if (!queue.pending.length) {
       if (queue.clearAfterInFlight) {
         queue.clearAfterInFlight = false
@@ -288,11 +317,9 @@ export const createTerminalWorkspaceViewRuntime = ({
       return
     }
 
-    const queued = queue.pending.splice(0, queue.pending.length)
     const pendingBytesAtFlush = queue.pendingBytes
     const pendingChunksAtFlush = queue.pendingChunks
-    queue.pendingBytes = 0
-    queue.pendingChunks = 0
+    const queued = takeQueuedTerminalOutputBatch(queue)
     queue.inFlight = true
 
     const data = queued.map((item) => item.data).join('')
@@ -346,6 +373,7 @@ export const createTerminalWorkspaceViewRuntime = ({
   const scheduleTerminalOutputFlush = (panelId: string, view: TerminalView) => {
     const queue = terminalOutputQueueFor(view)
     if (queue.disposed || queue.inFlight || queue.scheduledFlush !== null) return
+    if (!isTerminalPanelRenderable(panelId)) return
     queue.scheduledFlush = requestOutputFlush(() => flushQueuedTerminalOutput(panelId, view))
   }
 
@@ -397,6 +425,30 @@ export const createTerminalWorkspaceViewRuntime = ({
     })
     queue.pendingBytes += bytes
     queue.pendingChunks += 1
+    if (queue.pending.length >= terminalOutputCompactPendingChunks) {
+      const compacted = queue.pending.map((item) => item.data).join('')
+      const compactedBytes = queue.pending.reduce((total, item) => total + item.bytes, 0)
+      const compactedChunks = queue.pending.reduce((total, item) => total + item.chunks, 0)
+      const queuedAt = queue.pending.reduce((earliest, item) => Math.min(earliest, item.queuedAt), queue.pending[0]?.queuedAt ?? nowMs())
+      const highlightMs = queue.pending.reduce((total, item) => total + item.highlightMs, 0)
+      const maxChunkBytes = queue.pending.reduce((max, item) => Math.max(max, item.maxChunkBytes), 0)
+      const reset = queue.pending.some((item) => item.reset)
+      const suppressInputReplies = queue.pending.some((item) => item.suppressInputReplies)
+      queue.pending = [
+        {
+          chunks: compactedChunks,
+          data: compacted,
+          bytes: compactedBytes,
+          queuedAt,
+          highlightMs,
+          maxChunkBytes,
+          reset,
+          suppressInputReplies
+        }
+      ]
+      queue.pendingBytes = compactedBytes
+      queue.pendingChunks = compactedChunks
+    }
     queue.scrollToBottomAfterFlush = queue.scrollToBottomAfterFlush || Boolean(options.scrollToBottom)
     scheduleTerminalOutputFlush(panelId, view)
   }
@@ -525,6 +577,7 @@ export const createTerminalWorkspaceViewRuntime = ({
         const view = terminalViews.get(panelId)
         const element = terminalElements.get(panelId)
         if (!view || !element?.isConnected) return
+        if (!isTerminalPanelRenderable(panelId)) return
         if (options.forceGeometry) resetTerminalHostGeometry(element)
         view.fit.fit()
         notifyBackendResize(panelId, view)
@@ -572,9 +625,10 @@ export const createTerminalWorkspaceViewRuntime = ({
   }
 
   const syncTerminalView = (panel: TerminalPanel, options: { suppressInputReplies?: boolean; refit?: boolean } = {}) => {
-    if (panel.kind === 'knowledge') return
+    if (panel.kind === 'knowledge') return false
     const view = terminalViews.get(panel.id)
-    if (!view) return
+    if (!view) return false
+    if (!isTerminalPanelRenderable(panel.id)) return false
     const highlightedAt = nowMs()
     const displayOutput = workspace.getHighlightedTerminalOutput(panel.id)
     const highlightMs = nowMs() - highlightedAt
@@ -599,10 +653,30 @@ export const createTerminalWorkspaceViewRuntime = ({
       scheduleTerminalFit(panel.id, { scrollToBottom: true })
     } else {
       if (!wroteOutput) {
+        const queue = terminalOutputQueueFor(view)
+        if (queue.pending.length) scheduleTerminalOutputFlush(panel.id, view)
         updateSelectionButtonPosition(panel.id)
         updateSuggestionsPosition(panel.id)
       }
     }
+    return true
+  }
+
+  const scheduleTerminalViewSync = (
+    panel: TerminalPanel,
+    options: { suppressInputReplies?: boolean; refit?: boolean } = {},
+    attempts = 4
+  ) => {
+    const run = (remaining: number) => {
+      nextTick(() => {
+        const currentPanel = workspace.panels.find((item) => item.id === panel.id)
+        if (!currentPanel || currentPanel.kind === 'knowledge') return
+        if (syncTerminalView(currentPanel, options)) return
+        if (remaining <= 0) return
+        requestOutputFlush(() => run(remaining - 1))
+      })
+    }
+    run(Math.max(0, attempts))
   }
 
   const createTerminalView = (panel: TerminalPanel, element: HTMLElement) => {
@@ -642,7 +716,7 @@ export const createTerminalWorkspaceViewRuntime = ({
       panelId: panel.id,
       hasSession: Boolean(panel.sessionId)
     })
-    syncTerminalView(panel, { suppressInputReplies: Boolean(panel.output), refit: true })
+    scheduleTerminalViewSync(panel, { suppressInputReplies: Boolean(panel.output), refit: true })
     terminal.onData((data) => {
       if (view.suppressInputReplyDepth) {
         writeRuntimeLog('debug', 'renderer.terminal-input.suppressed-replay-reply', {
@@ -706,7 +780,7 @@ export const createTerminalWorkspaceViewRuntime = ({
     nextTick(() => {
       workspace.panels.filter((panel) => panel.kind !== 'knowledge').forEach((panel) => {
         const element = terminalElements.get(panel.id)
-        if (element) createTerminalView(panel, element)
+        if (element && visibleTerminalPanelIds().has(panel.id)) createTerminalView(panel, element)
       })
       for (const panelId of terminalViews.keys()) {
         if (!workspace.panels.some((panel) => panel.id === panelId)) {

@@ -324,6 +324,7 @@ export const registerMainIpcRuntime = (input: MainIpcRuntimeInput) => {
     killCodexSession,
     sendCodexLifecycle: (owner, lifecycle) => sendWindowEvent(owner, 'codex:lifecycle', lifecycle),
     sendCodexExit: input.terminalRuntime.sendCodexExit,
-    sendCodexData: input.terminalRuntime.sendCodexData
+    sendCodexData: input.terminalRuntime.sendCodexData,
+    closeCodexDataSession: input.terminalRuntime.closeCodexDataSession
   })
 }

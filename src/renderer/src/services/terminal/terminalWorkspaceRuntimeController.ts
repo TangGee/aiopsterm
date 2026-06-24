@@ -496,6 +496,7 @@ export const useTerminalWorkspaceContainerRuntime = () => {
         terminalControlSurface.recordLastActiveControlPanel(previousPanelId)
       }
       hideCommandDialogForActivePanel(panelId)
+      nextTick(() => visibleTerminalPanels.value.filter((panel) => panel.kind !== 'knowledge').forEach((panel) => syncTerminalView(panel)))
     }
   )
 

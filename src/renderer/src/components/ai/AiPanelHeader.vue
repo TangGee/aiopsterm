@@ -127,6 +127,18 @@
             v-if="aiPanelMode === 'codex'"
             type="button"
             class="ai-header-icon-button"
+            :class="{ active: aiPanelWorkspaceLinkMode === 'follow-workspace' }"
+            :title="aiPanelWorkspaceLinkMode === 'follow-workspace' ? t('ai.codexWorkspaceLinkOn') : t('ai.codexWorkspaceLinkOff')"
+            data-testid="ai-codex-workspace-link"
+            @click.stop="toggleAiPanelWorkspaceLinkMode"
+          >
+            <Link v-if="aiPanelWorkspaceLinkMode === 'follow-workspace'" />
+            <Unlink v-else />
+          </button>
+          <button
+            v-if="aiPanelMode === 'codex'"
+            type="button"
+            class="ai-header-icon-button"
             :title="t('ai.newChat')"
             data-testid="ai-codex-new"
             @click.stop="createNewCodexConversation"
@@ -358,12 +370,14 @@ import {
   Download,
   Ellipsis,
   History,
+  Link,
   Pencil,
   Plus,
   RefreshCw,
   Search,
   Star,
   Trash2,
+  Unlink,
   X
 } from 'lucide-vue-next'
 import { useAiPanelRuntimeContext } from '@/services/ai/aiPanelContext'
@@ -371,6 +385,7 @@ import { useAiPanelRuntimeContext } from '@/services/ai/aiPanelContext'
 const {
   activeCodexConversationId,
   agentMode,
+  aiPanelWorkspaceLinkMode,
   aiPanelMode,
   cancelHistoryTitleEdit,
   clearHistorySearch,
@@ -410,6 +425,7 @@ const {
   selectCodexConversation,
   t,
   toggleAiPanelModeMenu,
+  toggleAiPanelWorkspaceLinkMode,
   toggleHistoryFavorite,
   toggleHistoryMenu,
   toggleMoreActionsMenu,

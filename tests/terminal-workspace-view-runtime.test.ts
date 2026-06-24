@@ -107,11 +107,11 @@ const createWorkspace = (panel: TerminalPanel) =>
     getHighlightedTerminalOutput: (panelId: string) => (panelId === panel.id ? panel.output : '')
   }) as unknown as WorkspaceStore
 
-const createRuntime = (panel = createEmptyTerminalPanel('panel-1', 'Local')) => {
+const createRuntime = (panel = createEmptyTerminalPanel('panel-1', 'Local'), visiblePanels?: { value: TerminalPanel[] }) => {
   const workspace = createWorkspace(panel)
   const runtime = createTerminalWorkspaceViewRuntime({
     workspace,
-    visibleTerminalPanels: computed(() => workspace.panels),
+    visibleTerminalPanels: computed(() => visiblePanels?.value || workspace.panels),
     aiButtonPanelId: ref(''),
     aiButtonPosition: { top: 0, right: 0 },
     suggestionPanel: { panelId: '' },
@@ -160,7 +160,7 @@ describe('terminalWorkspaceViewRuntime', () => {
     expect(logs.some((entry) => entry.event === 'renderer.terminal-output.summary')).toBe(false)
   })
 
-  it('coalesces multiple terminal output syncs into one xterm write per frame', async () => {
+  it('coalesces multiple terminal output syncs into one xterm write per flush', async () => {
     const panel = createEmptyTerminalPanel('panel-1', 'Local')
     const { runtime } = createRuntime(panel)
     const host = document.createElement('div')
@@ -186,6 +186,35 @@ describe('terminalWorkspaceViewRuntime', () => {
     expect(terminal.write).toHaveBeenCalledWith('onetwothree', expect.any(Function))
     expect(terminal.output).toBe('onetwothree')
     expect(terminal.scrollToBottom).toHaveBeenCalledTimes(1)
+  })
+
+  it('splits large queued terminal output into bounded xterm write batches', async () => {
+    const panel = createEmptyTerminalPanel('panel-1', 'Local')
+    const { runtime } = createRuntime(panel)
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    runtime.setTerminalElement(panel.id, host)
+    await flushFrames(3)
+    const view = runtime.terminalViews.get(panel.id)
+    if (!view) throw new Error('terminal view was not created')
+    const terminal = view.terminal as unknown as FakeTerminal
+    terminal.write.mockClear()
+
+    for (let index = 0; index < 40; index += 1) {
+      panel.output += `line-${String(index).padStart(2, '0')}:${'x'.repeat(260)}\n`
+      runtime.syncTerminalView(panel)
+    }
+    await flushOutput()
+
+    expect(terminal.write).toHaveBeenCalledTimes(1)
+    expect(terminal.write.mock.calls[0][0].length).toBeLessThanOrEqual(8 * 1024)
+    expect(terminal.output.length).toBeLessThan(panel.output.length)
+
+    await flushOutput()
+
+    expect(terminal.write).toHaveBeenCalledTimes(2)
+    expect(terminal.output).toBe(panel.output)
   })
 
   it('waits for the current xterm write callback before flushing queued output again', async () => {
@@ -309,5 +338,60 @@ describe('terminalWorkspaceViewRuntime', () => {
     } finally {
       window.requestAnimationFrame = originalRequestAnimationFrame
     }
+  })
+
+  it('does not write hidden terminal panels until they are visible again', async () => {
+    const panel = createEmptyTerminalPanel('panel-1', 'Local')
+    const visiblePanels = ref<TerminalPanel[]>([panel])
+    const { runtime } = createRuntime(panel, visiblePanels)
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    runtime.setTerminalElement(panel.id, host)
+    await flushFrames(3)
+    const view = runtime.terminalViews.get(panel.id)
+    if (!view) throw new Error('terminal view was not created')
+    const terminal = view.terminal as unknown as FakeTerminal
+    terminal.write.mockClear()
+
+    visiblePanels.value = []
+    panel.output = 'background output'
+    runtime.syncTerminalView(panel)
+    await flushOutput()
+
+    expect(terminal.write).not.toHaveBeenCalled()
+    expect(view.lastOutput).toBe('')
+
+    visiblePanels.value = [panel]
+    runtime.syncTerminalView(panel)
+    await flushOutput()
+
+    expect(terminal.write).toHaveBeenCalledWith('background output', expect.any(Function))
+    expect(terminal.output).toBe('background output')
+  })
+
+  it('retries the initial terminal sync when a switched-in panel becomes renderable after mount', async () => {
+    const panel = createEmptyTerminalPanel('panel-1', 'Local')
+    panel.output = 'restored output'
+    const visiblePanels = ref<TerminalPanel[]>([])
+    const { runtime } = createRuntime(panel, visiblePanels)
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    runtime.setTerminalElement(panel.id, host)
+    const view = runtime.terminalViews.get(panel.id)
+    if (!view) throw new Error('terminal view was not created')
+    const terminal = view.terminal as unknown as FakeTerminal
+    terminal.write.mockClear()
+
+    await flushOutput()
+    expect(terminal.write).not.toHaveBeenCalled()
+
+    visiblePanels.value = [panel]
+    await flushOutput()
+    await flushOutput()
+
+    expect(terminal.write).toHaveBeenCalledWith('restored output', expect.any(Function))
+    expect(terminal.output).toBe('restored output')
   })
 })

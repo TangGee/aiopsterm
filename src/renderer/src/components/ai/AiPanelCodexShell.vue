@@ -112,6 +112,13 @@
         </div>
       </div>
     </div>
+    <div
+      v-if="codexWorkspaceLinkNotice"
+      class="ai-codex-link-notice"
+      data-testid="ai-codex-link-notice"
+    >
+      {{ codexWorkspaceLinkNotice }}
+    </div>
     <div class="ai-codex-status">
       <span
         class="ai-codex-status-dot"
@@ -166,6 +173,7 @@ const {
   codexStatusLabel,
   codexTargetPickerOpen,
   codexTargetQuery,
+  codexWorkspaceLinkNotice,
   copyCodexSelectionFromContextMenu,
   currentPanelTarget,
   dropActive,

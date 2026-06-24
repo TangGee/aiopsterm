@@ -235,6 +235,7 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
 
   const aiPanelCodexRuntime = createAiPanelCodexConversationRuntime({
     agentMode: () => Boolean(props.agentMode),
+    activePanelId: () => workspace.activePanelId,
     activePanel: () => workspace.activePanel,
     panels: () => workspace.panels,
     terminalSettings: () => workspace.terminalSettings,
@@ -258,6 +259,7 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     activeCodexConversation,
     activeCodexConversationId,
     activeCodexTargetSignature,
+    aiPanelWorkspaceLinkMode,
     aiPanelMode,
     applyCodexTerminalSettingsToAll,
     bindCodexTarget,
@@ -272,6 +274,7 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     codexStatusLabel,
     codexTargetPickerOpen,
     codexTargetQuery,
+    codexWorkspaceLinkNotice,
     copyCodexSelectionFromContextMenu,
     createNewCodexConversation,
     currentAiPanelModeLabel,
@@ -289,6 +292,7 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     syncActiveCodexTargetContext,
     terminalSettingsSignature,
     toggleAiPanelModeMenu,
+    toggleAiPanelWorkspaceLinkMode,
     toggleCodexTargetPicker,
     unbindCodexTarget
   } = aiPanelCodexRuntime
@@ -542,6 +546,7 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     agentMode,
     aiChatModeOptions,
     aiPanelComposerRuntime,
+    aiPanelWorkspaceLinkMode,
     aiPanelMode,
     allVisibleHostContextsSelected,
     applyCommand,
@@ -578,6 +583,7 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     codexStatusLabel,
     codexTargetPickerOpen,
     codexTargetQuery,
+    codexWorkspaceLinkNotice,
     commandAuditDialog,
     commandAuditTextareaRef,
     commandHostForMessage,
@@ -721,6 +727,7 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     summarizeMessageToSkill,
     t,
     toggleAiPanelModeMenu,
+    toggleAiPanelWorkspaceLinkMode,
     toggleCodexTargetPicker,
     toggleContextPopup,
     toggleHistoryFavorite,

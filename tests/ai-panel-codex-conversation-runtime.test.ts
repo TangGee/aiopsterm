@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { nextTick } from 'vue'
-import { aiPanelModeStorageKey } from '@/services/ai/aiPanelModeRuntime'
+import { nextTick, ref } from 'vue'
+import { aiPanelModeStorageKey, aiPanelWorkspaceLinkModeStorageKey } from '@/services/ai/aiPanelModeRuntime'
 import {
   createAiPanelCodexConversationRuntime,
   type AiPanelCodexConversation
@@ -26,6 +26,7 @@ const t = (key: string) =>
     'ai.codexTargetMissing': 'Missing target',
     'ai.codexTargetOpenFailed': 'Open target failed',
     'ai.codexTargetClosed': 'Target closed',
+    'ai.codexWorkspaceLinkNoConversation': 'No linked conversation',
     'ai.keepOneTab': 'Keep one tab',
     'ai.tabClosed': 'Tab closed'
   })[key] || key
@@ -83,6 +84,7 @@ const hostContext: AiContextOption = {
 
 const createTerminalRuntime = () => {
   const calls = {
+    clearConversationOutput: vi.fn(),
     clearSessionTarget: vi.fn(async () => undefined),
     copySelectionFromContextMenu: vi.fn(),
     disposeConversation: vi.fn(),
@@ -97,6 +99,7 @@ const createTerminalRuntime = () => {
       conversation.status = 'ready'
     }),
     stopSession: vi.fn(async () => undefined),
+    syncConversationOutput: vi.fn(),
     syncActiveBridgeTarget: vi.fn(async () => undefined),
     syncTargetContext: vi.fn(async () => undefined),
     syncAttentionState: vi.fn(),
@@ -108,6 +111,7 @@ const createTerminalRuntime = () => {
       calls.syncAttentionState.mockImplementation((conversation: AiPanelCodexConversation) => options.syncAttentionState(conversation))
       return {
       applyTerminalSettings: calls.applyTerminalSettings,
+      clearConversationOutput: calls.clearConversationOutput,
       clearSessionTarget: calls.clearSessionTarget,
       copySelection: vi.fn(async () => true),
       copySelectionFromContextMenu: calls.copySelectionFromContextMenu,
@@ -122,6 +126,7 @@ const createTerminalRuntime = () => {
       startSession: calls.startSession,
       stopSession: calls.stopSession,
       subscribeBridge: vi.fn(),
+      syncConversationOutput: calls.syncConversationOutput,
       syncActiveBridgeTarget: calls.syncActiveBridgeTarget,
       syncTargetContext: calls.syncTargetContext
       }
@@ -132,7 +137,7 @@ const createTerminalRuntime = () => {
 const createHarness = (settings: { mode?: 'codex' | 'classic'; agentMode?: boolean } = {}) => {
   if (settings.mode) window.localStorage.setItem(aiPanelModeStorageKey, settings.mode)
   const panels = [localPanel(), sshPanel()]
-  let activePanel: TerminalPanel | null = panels[0]
+  const activePanel = ref<TerminalPanel | null>(panels[0])
   const catalog: AiContextCatalog = {
     categories: [{ id: 'hosts', label: 'Hosts', options: [hostContext] }],
     openedHosts: [{ ...hostContext, id: 'host-open', label: 'Opened host' }],
@@ -149,11 +154,16 @@ const createHarness = (settings: { mode?: 'codex' | 'classic'; agentMode?: boole
   const closePopups = vi.fn()
   const refreshAiContextCatalog = vi.fn(async () => undefined)
   const openTerminalForAiHostContext = vi.fn(async () => panels[1])
-  const activateTerminalPanel = vi.fn((id: string) => panels.find((panel) => panel.id === id || panel.sessionId === id) || null)
+  const activateTerminalPanel = vi.fn((id: string) => {
+    const panel = panels.find((item) => item.id === id || item.sessionId === id) || null
+    if (panel) activePanel.value = panel
+    return panel
+  })
 
   const runtime = createAiPanelCodexConversationRuntime({
     agentMode: () => Boolean(settings.agentMode),
-    activePanel: () => activePanel,
+    activePanelId: () => activePanel.value?.id || '',
+    activePanel: () => activePanel.value,
     panels: () => panels,
     terminalSettings: () => terminalSettings,
     aiContextCatalog: () => catalog,
@@ -179,8 +189,10 @@ const createHarness = (settings: { mode?: 'codex' | 'classic'; agentMode?: boole
 
   return {
     activePanel: (panel: TerminalPanel | null) => {
-      activePanel = panel
+      activePanel.value = panel
     },
+    activePanelRef: activePanel,
+    activateTerminalPanel,
     attention,
     closePopups,
     loadClassicChatData,
@@ -199,6 +211,7 @@ const createHarness = (settings: { mode?: 'codex' | 'classic'; agentMode?: boole
 
 beforeEach(() => {
   window.localStorage.removeItem(aiPanelModeStorageKey)
+  window.localStorage.removeItem(aiPanelWorkspaceLinkModeStorageKey)
 })
 
 describe('aiPanelCodexConversationRuntime', () => {
@@ -333,5 +346,79 @@ describe('aiPanelCodexConversationRuntime', () => {
     expect(terminalRuntime.calls.disposeSubscriptions).toHaveBeenCalled()
     expect(removedAttention).toContain(`codex:${first.id}`)
     expect(attention.some((item) => item.surfaceId === 'agents-ai-panel')).toBe(true)
+  })
+
+  it('links workspace terminal tab changes to already-bound Codex conversations', async () => {
+    const { activePanel, activePanelRef, panels, runtime } = createHarness()
+
+    await runtime.bindTerminalPanelToCodex(panels[0], 'local')
+    const localConversation = runtime.activeCodexConversation.value
+    activePanel(panels[1])
+    await runtime.createNewCodexConversation()
+    const sshConversation = runtime.activeCodexConversation.value
+    if (!localConversation || !sshConversation) throw new Error('expected linked conversations')
+
+    activePanel(panels[0])
+    await nextTick()
+    await nextTick()
+
+    expect(runtime.aiPanelWorkspaceLinkMode.value).toBe('follow-workspace')
+    expect(runtime.activeCodexConversationId.value).toBe(localConversation.id)
+    expect(activePanelRef.value?.id).toBe('panel-local')
+    expect(runtime.codexWorkspaceLinkNotice.value).toBe('')
+
+    activePanel(panels[1])
+    await nextTick()
+    await nextTick()
+
+    expect(runtime.activeCodexConversationId.value).toBe(sshConversation.id)
+  })
+
+  it('links Codex conversation tab changes back to the bound workspace terminal', async () => {
+    const { activePanel, activePanelRef, activateTerminalPanel, panels, runtime } = createHarness()
+
+    await runtime.bindTerminalPanelToCodex(panels[0], 'local')
+    const localConversation = runtime.activeCodexConversation.value
+    activePanel(panels[1])
+    await runtime.createNewCodexConversation()
+    const sshConversation = runtime.activeCodexConversation.value
+    if (!localConversation || !sshConversation) throw new Error('expected linked conversations')
+
+    activePanel(panels[0])
+    await runtime.selectCodexConversation(sshConversation.id)
+
+    expect(activateTerminalPanel).toHaveBeenCalledWith('panel-ssh')
+    expect(activePanelRef.value?.id).toBe('panel-ssh')
+
+    activePanel(panels[1])
+    await runtime.selectCodexConversation(localConversation.id)
+
+    expect(activateTerminalPanel).toHaveBeenCalledWith('panel-local')
+    expect(activePanelRef.value?.id).toBe('panel-local')
+  })
+
+  it('keeps manual workspace link mode from auto-switching Codex conversations', async () => {
+    const { activePanel, activePanelRef, activateTerminalPanel, panels, runtime } = createHarness()
+
+    await runtime.bindTerminalPanelToCodex(panels[0], 'local')
+    const localConversation = runtime.activeCodexConversation.value
+    activePanel(panels[1])
+    await runtime.createNewCodexConversation()
+    const sshConversation = runtime.activeCodexConversation.value
+    if (!localConversation || !sshConversation) throw new Error('expected linked conversations')
+
+    await runtime.toggleAiPanelWorkspaceLinkMode()
+    expect(runtime.aiPanelWorkspaceLinkMode.value).toBe('manual')
+    expect(window.localStorage.getItem(aiPanelWorkspaceLinkModeStorageKey)).toBe('manual')
+
+    activePanel(panels[0])
+    await nextTick()
+    await nextTick()
+
+    expect(runtime.activeCodexConversationId.value).toBe(sshConversation.id)
+
+    await runtime.selectCodexConversation(localConversation.id)
+    expect(activateTerminalPanel).not.toHaveBeenCalledWith('panel-local')
+    expect(activePanelRef.value?.id).toBe('panel-local')
   })
 })

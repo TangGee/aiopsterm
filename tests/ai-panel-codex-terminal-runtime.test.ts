@@ -53,7 +53,11 @@ class FakeTerminal implements AiPanelCodexTerminalLike {
   focus = vi.fn()
   clear = vi.fn()
   dispose = vi.fn()
-  write = vi.fn()
+  output = ''
+  write = vi.fn((data: string, callback?: () => void) => {
+    this.output += data
+    callback?.()
+  })
   getSelection = vi.fn(() => '')
   attachCustomKeyEventHandler = vi.fn((handler: (event: KeyboardEvent) => boolean) => {
     this.keyHandler = handler
@@ -155,15 +159,17 @@ const createClient = () => {
 
 const createRuntime = (conversation = createConversation(), clientBundle = createClient()) => {
   const conversations = [conversation]
+  let activeConversationId = conversation.id
   const logs: Array<{ level: string; event: string; fields?: Record<string, unknown> }> = []
   const notices: string[] = []
   const attention = vi.fn()
   const runtime = createAiPanelCodexTerminalRuntime<TestConversation>({
     conversations: () => conversations,
-    activeConversation: () => conversation,
-    activeConversationId: () => conversation.id,
+    activeConversation: () => conversations.find((item) => item.id === activeConversationId) || null,
+    activeConversationId: () => activeConversationId,
     terminalSettings: () => terminalSettings,
     currentBoundTarget: (item) => item.boundTarget,
+    isConversationVisible: (item) => item.id === activeConversationId,
     syncAttentionState: attention,
     labels: {
       error: () => 'Codex error',
@@ -183,7 +189,18 @@ const createRuntime = (conversation = createConversation(), clientBundle = creat
     fitConstructor: FakeFit,
     resizeObserverFactory: (callback) => new FakeResizeObserver(callback)
   })
-  return { runtime, conversation, clientBundle, logs, notices, attention }
+  return {
+    runtime,
+    conversation,
+    conversations,
+    clientBundle,
+    logs,
+    notices,
+    attention,
+    setActiveConversationId: (id: string) => {
+      activeConversationId = id
+    }
+  }
 }
 
 const flushAsyncHandlers = () => new Promise((resolve) => window.setTimeout(resolve, 0))
@@ -270,7 +287,8 @@ describe('aiPanelCodexTerminalRuntime', () => {
     expect(conversation.terminal?.focus).toHaveBeenCalled()
 
     clientBundle.emitData({ id: 'codex-session-1', data: 'hello' })
-    expect(conversation.terminal?.write).toHaveBeenCalledWith('hello')
+    await flushAsyncHandlers()
+    expect(conversation.terminal?.write).toHaveBeenCalledWith('hello', expect.any(Function))
 
     clientBundle.emitLifecycle({ id: 'codex-session-1', stage: 'error', at: 2, errorMessage: 'failed' })
     expect(conversation).toMatchObject({ status: 'error', error: 'failed' })
@@ -298,5 +316,69 @@ describe('aiPanelCodexTerminalRuntime', () => {
     expect(FakeResizeObserver.instances[0].disconnect).toHaveBeenCalled()
     expect(conversation.terminal).toBeNull()
     expect(conversation.fit).toBeNull()
+  })
+
+  it('coalesces Codex session output and waits for xterm write callbacks', async () => {
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const { runtime, conversation, clientBundle } = createRuntime()
+    runtime.setHostElement(conversation, host)
+    await runtime.startSession(conversation)
+    const terminal = conversation.terminal
+    if (!terminal) throw new Error('terminal was not created')
+    const callbacks: Array<() => void> = []
+    terminal.write.mockImplementation((data: string, callback?: () => void) => {
+      terminal.output += data
+      if (callback) callbacks.push(callback)
+    })
+    terminal.write.mockClear()
+
+    clientBundle.emitData({ id: 'codex-session-1', data: 'one' })
+    clientBundle.emitData({ id: 'codex-session-1', data: 'two' })
+    await flushAsyncHandlers()
+
+    expect(terminal.write).toHaveBeenCalledTimes(1)
+    expect(terminal.write).toHaveBeenCalledWith('onetwo', expect.any(Function))
+    expect(callbacks).toHaveLength(1)
+
+    clientBundle.emitData({ id: 'codex-session-1', data: 'three' })
+    await flushAsyncHandlers()
+    expect(terminal.write).toHaveBeenCalledTimes(1)
+
+    callbacks.shift()?.()
+    await flushAsyncHandlers()
+
+    expect(terminal.write).toHaveBeenCalledTimes(2)
+    expect(terminal.write).toHaveBeenLastCalledWith('three', expect.any(Function))
+  })
+
+  it('defers hidden Codex conversation output until the conversation is visible again', async () => {
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const first = createConversation()
+    const second = createConversation({ ...target, sessionId: 'terminal-2', panelId: 'panel-2', label: 'Second terminal' })
+    second.id = 'codex-2'
+    const clientBundle = createClient()
+    const harness = createRuntime(first, clientBundle)
+    harness.conversations.push(second)
+    harness.runtime.setHostElement(first, host)
+    await harness.runtime.startSession(first)
+    first.sessionId = 'codex-session-1'
+    second.sessionId = 'codex-session-2'
+    const terminal = first.terminal
+    if (!terminal) throw new Error('terminal was not created')
+    terminal.write.mockClear()
+
+    harness.setActiveConversationId(second.id)
+    clientBundle.emitData({ id: 'codex-session-1', data: 'hidden output' })
+    await flushAsyncHandlers()
+
+    expect(terminal.write).not.toHaveBeenCalled()
+
+    harness.setActiveConversationId(first.id)
+    harness.runtime.syncConversationOutput(first)
+    await flushAsyncHandlers()
+
+    expect(terminal.write).toHaveBeenCalledWith('hidden output', expect.any(Function))
   })
 })

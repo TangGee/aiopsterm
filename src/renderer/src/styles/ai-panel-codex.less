@@ -2,7 +2,7 @@
   min-height: 0;
   min-width: 0;
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
   gap: 8px;
 }
 
@@ -230,6 +230,17 @@
   color: var(--muted);
   font-size: 12px;
   text-align: center;
+}
+
+.ai-codex-link-notice {
+  min-width: 0;
+  border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--border));
+  border-radius: 6px;
+  color: var(--muted);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  padding: 6px 8px;
+  font-size: 11px;
+  line-height: 1.35;
 }
 
 .ai-codex-status {

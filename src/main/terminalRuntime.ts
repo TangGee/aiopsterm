@@ -36,8 +36,13 @@ type TerminalRuntimeInput = {
 export const createMainTerminalRuntime = (input: TerminalRuntimeInput) => {
   const sessions = new Map<string, TerminalSession>()
   const terminalDataSummary = createTerminalDataLogSummary()
+  const codexDataSummary = createTerminalDataLogSummary()
   const terminalDataCoalescer = createTerminalDataCoalescer({
     onFlush: (flush) => flushTerminalData(flush)
+  })
+  const codexDataOwners = new Map<string, BrowserWindow>()
+  const codexDataCoalescer = createTerminalDataCoalescer({
+    onFlush: (flush) => flushCodexData(flush)
   })
 
   const chunkBytes = (chunk: string | Buffer) => (Buffer.isBuffer(chunk) ? chunk.byteLength : Buffer.byteLength(String(chunk || ''), 'utf8'))
@@ -61,6 +66,16 @@ export const createMainTerminalRuntime = (input: TerminalRuntimeInput) => {
   const flushDataSummary = (id: string, reason: string) => {
     const flushed = terminalDataSummary.flush(id, reason)
     if (flushed) logDataSummary('terminal.data.summary', flushed.id, flushed.summary, flushed.reason)
+  }
+
+  const recordCodexDataSummary = (id: string, bytes: number) => {
+    const flushed = codexDataSummary.record(id, bytes)
+    if (flushed) logDataSummary('codex.data.summary', flushed.id, flushed.summary, flushed.reason)
+  }
+
+  const flushCodexDataSummary = (id: string, reason: string) => {
+    const flushed = codexDataSummary.flush(id, reason)
+    if (flushed) logDataSummary('codex.data.summary', flushed.id, flushed.summary, flushed.reason)
   }
 
   const registerTerminalForCodexBridge = (session: TerminalSession, target?: CodexSessionCreateOptions['target']) => {
@@ -151,6 +166,10 @@ export const createMainTerminalRuntime = (input: TerminalRuntimeInput) => {
     terminalDataCoalescer.flush(id, reason)
   }
 
+  const flushCodexDataForSession = (id: string, reason: string) => {
+    codexDataCoalescer.flush(id, reason)
+  }
+
   const sendTerminalData = (owner: BrowserWindow, id: string, chunk: string | Buffer) => {
     recordDataSummary(id, chunkBytes(chunk))
     const displayChunk = filterCodexTerminalBridgeDisplayData(id, chunk)
@@ -167,20 +186,42 @@ export const createMainTerminalRuntime = (input: TerminalRuntimeInput) => {
   }
 
   const sendCodexExit = (owner: BrowserWindow, lifecycle: CodexSessionLifecycleEvent, code = lifecycle.code ?? null) => {
+    flushCodexDataForSession(lifecycle.id, 'codex-exit')
+    flushCodexDataSummary(lifecycle.id, 'codex-exit')
     sendWindowEvent(owner, 'codex:exit', {
       id: lifecycle.id,
       code,
       errorCode: lifecycle.errorCode,
       errorMessage: lifecycle.errorMessage
     })
+    codexDataOwners.delete(lifecycle.id)
+  }
+
+  const flushCodexData = (flush: TerminalDataCoalescerFlush) => {
+    const owner = codexDataOwners.get(flush.id)
+    if (!owner || owner.isDestroyed()) return
+    sendWindowEvent(owner, 'codex:data', createTerminalDataEvent(flush.id, flush.chunk))
+    if (flush.chunks > 1) {
+      logRuntimeEvent('debug', 'codex.data.coalesced', {
+        id: flush.id,
+        chunks: flush.chunks,
+        bytes: flush.bytes,
+        durationMs: flush.durationMs,
+        maxChunkBytes: flush.maxChunkBytes
+      })
+    }
   }
 
   const sendCodexData = (owner: BrowserWindow, id: string, chunk: string | Buffer) => {
-    logRuntimeEvent('debug', 'codex.data', {
-      id,
-      bytes: Buffer.isBuffer(chunk) ? chunk.byteLength : Buffer.byteLength(String(chunk || ''), 'utf8')
-    })
-    sendWindowEvent(owner, 'codex:data', createTerminalDataEvent(id, chunk))
+    recordCodexDataSummary(id, chunkBytes(chunk))
+    codexDataOwners.set(id, owner)
+    codexDataCoalescer.push(id, chunk)
+  }
+
+  const closeCodexDataSession = (id: string, reason = 'codex-session-closed') => {
+    flushCodexDataForSession(id, reason)
+    flushCodexDataSummary(id, reason)
+    codexDataOwners.delete(id)
   }
 
   const sanitizeKeyboardInteractiveResponses = (value: unknown): string[] => {
@@ -418,6 +459,7 @@ export const createMainTerminalRuntime = (input: TerminalRuntimeInput) => {
     createLocalTerminal,
     sendCodexExit,
     sendCodexData,
+    closeCodexDataSession,
     killAllSessions,
     createTerminalWriteResult,
     createTerminalKillResult,
