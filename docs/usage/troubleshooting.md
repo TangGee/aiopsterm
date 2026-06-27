@@ -32,6 +32,39 @@ The normal terminal and right-side embedded Codex paths both coalesce output bef
 
 Hidden terminal tabs and inactive embedded Codex conversations keep receiving output in app state, but they do not continuously write to hidden xterm instances. When a tab, split pane, or Codex conversation becomes visible again, aiopsterm syncs the preserved output to xterm once and resumes incremental rendering from there.
 
+### Threaded Terminal Renderer
+
+Set `AIOPSTERM_THREADED_TERMINAL=1` to opt into the worker-based terminal path. In this mode terminal parsing runs in a small `@xterm/headless` worker pool and visible panes paint through worker `OffscreenCanvas` 2D. If Worker or OffscreenCanvas support is missing, aiopsterm logs `renderer.threaded-terminal.unavailable` and falls back to the normal xterm renderer.
+
+Useful threaded renderer log events:
+
+- `renderer.threaded-terminal.core-pool-created`: core worker count selected from hardware concurrency.
+- `renderer.threaded-terminal.created`: panel/conversation assigned to a core worker and RenderGroup.
+- `renderer.threaded-terminal.core-perf`: parser throughput, pending bytes, snapshot cost, and dropped background paints.
+- `renderer.threaded-terminal.render-perf`: render worker frame timings.
+- `renderer.codex-terminal.created` with `threaded: true`: right-side Codex terminal is using the threaded path.
+
+The opt-in stress test is intentionally not part of normal CI. To run the requested 10 foreground / 40 background terminal stress profile:
+
+```bash
+AIOPSTERM_TERMINAL_STRESS=1 VITE_AIOPSTERM_TERMINAL_STRESS=1 VITE_AIOPSTERM_THREADED_TERMINAL=1 AIOPSTERM_TERMINAL_STRESS_PROFILE=mixed-switch AIOPSTERM_TERMINAL_STRESS_DURATION_MS=1200000 AIOPSTERM_TERMINAL_STRESS_SWITCH_INTERVAL_MS=5000 npm run test:e2e -- tests/e2e/terminal-stress.spec.ts --reporter=list
+```
+
+The default duration is 20 minutes. For local smoke runs, lower `AIOPSTERM_TERMINAL_STRESS_DURATION_MS`. `AIOPSTERM_TERMINAL_STRESS_PROFILE` can be `mixed-switch`, `frame-small-chunk`, `pty-burst`, or `mixed-background`; the release profile is `mixed-switch`.
+
+The stress output prints these key fields:
+
+- `profile` and `writes.foreground*` / `writes.background*`: confirms which traffic profile ran and that background terminals actually received output.
+- `p95FrameMs`, `p99FrameMs`, `maxFrameMs`: renderer RAF frame intervals. Sustained values above one visual frame indicate user-visible jank.
+- `paintLatency`: time from writing a marker to seeing a rendered worker frame.
+- `paintFrameMs`: render-worker paint duration. Low paint time with high frame time usually points at main-thread scheduling or queue backlog, not canvas drawing.
+- `realEchoLatency`: actual PTY write-to-echo latency.
+- `memory.postGcHeapDeltaMb`, `memory.beforeGcHeapMb`, `memory.afterGcHeapMb`, and `workingSetDeltaMb`: renderer memory diagnostics after the harness stops writing and runs renderer GC twice. These can include heap capacity and high-water behavior.
+- `queues.maxIngress*` and `queues.maxHistory*`: renderer-side backlog for incoming terminal data and low-frequency history mirrors.
+- `switches.count`, `switches.failed`, `switches.paintLatency`: foreground/background switch coverage. The test swaps background terminals into the visible split group while all terminal records continue receiving output.
+- `threaded.coreDebug` and `threaded.renderDebug`: worker pending bytes and error counts.
+- `heapArtifacts`: DevTools heap sampling and heap snapshot files under `test-results/terminal-stress/`, plus CDP baseline/final live heap used size, live heap delta, allocation hotspots, and post-GC object summaries. Retained-object pass/fail uses these CDP live heap and snapshot fields.
+
 If `terminal.data.summary` is high but renderer timings are low, the terminal program is simply producing a large stream. If `terminal.data.coalesced` regularly combines many chunks, the backend is reducing IPC pressure as expected. If `renderer.terminal-output.slow-write` shows high `writeMs`, `queueMs`, or `maxPendingBytes` around the freeze, the bottleneck is xterm rendering throughput. If `renderer.terminal-data.slow-handle` appears instead, inspect renderer state append and ZMODEM handling. If the timestamps line up with `control.notification.*` or `native-notification.*`, test again with desktop notifications disabled in Settings > AI > Notifications to isolate the notification path.
 
 ## SSH Jump Host Diagnostics

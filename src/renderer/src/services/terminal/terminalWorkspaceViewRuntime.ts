@@ -5,15 +5,53 @@ import { SearchAddon } from '@xterm/addon-search'
 import { mirrorTextToClipboardQuietly } from '@/services/app/clipboardRuntime'
 import { writeRendererRuntimeLog as writeRuntimeLog } from '@/services/app/runtimeLogClient'
 import { terminalClient } from '@/services/terminal/terminalClient'
+import {
+  ThreadedTerminalFitAddon,
+  ThreadedTerminalSearchAddon,
+  createThreadedTerminalHost,
+  isThreadedTerminalHost,
+  threadedTerminalCapability,
+  threadedTerminalPriorityFor
+} from '@/services/terminal/threadedTerminalRuntime'
 import type { TerminalPanel, TerminalSettings, useWorkspaceStore } from '@/stores/workspace'
 import type { TerminalCommandSuggestion } from '@shared/contracts/terminalTools'
+import { shouldUseThreadedTerminal } from '@shared/runtimeSwitches'
 
 type WorkspaceStore = ReturnType<typeof useWorkspaceStore>
 type XtermRuntimeOptions = XtermTerminal['options'] & { termName?: string }
 type TerminalSuggestion = TerminalCommandSuggestion
-type XtermLike = XtermTerminal
+type TerminalBufferLineLike = { translateToString: (trimRight?: boolean) => string }
+type XtermLike = {
+  cols: number
+  rows: number
+  options: XtermRuntimeOptions
+  buffer: {
+    active: {
+      viewportY: number
+      cursorX: number
+      cursorY: number
+      length?: number
+      getLine?: (index: number) => TerminalBufferLineLike | undefined
+    }
+  }
+  loadAddon: (addon: any) => void
+  open: (element: HTMLElement) => void
+  focus: () => void
+  clear: () => void
+  dispose: () => void
+  write: (data: string, callback?: () => void) => void
+  scrollToBottom: () => void
+  refresh: (start: number, end: number) => void
+  getSelection: () => string
+  getSelectionPosition: () => { start: { y: number }; end: { y: number } } | null | undefined
+  hasSelection: () => boolean
+  clearSelection?: () => void
+  onData: (handler: (data: string) => void) => unknown
+  onResize: (handler: (size: { cols: number; rows: number }) => unknown) => unknown
+  onSelectionChange: (handler: () => void) => unknown
+}
 type AddonLike = {
-  activate: (terminal: XtermTerminal) => void
+  activate: (terminal: any) => void
   dispose: () => void
 }
 type FitLike = Pick<FitAddon, 'fit'> & AddonLike
@@ -100,10 +138,25 @@ const terminalOutputSlowThresholdMs = 16
 const terminalOutputMaxWriteBytes = 8 * 1024
 const terminalOutputMaxWriteChunks = 32
 const terminalOutputCompactPendingChunks = 128
+const terminalThreadedLiveOutputTailBytes = 8 * 1024
 
 const nowMs = () => globalThis.performance?.now?.() ?? Date.now()
 
-const textByteLength = (value: string) => new TextEncoder().encode(value).length
+const terminalTextEncoder = new TextEncoder()
+const terminalTextDecoder = new TextDecoder()
+const textByteLength = (value: string) => terminalTextEncoder.encode(value).length
+const detachText = (value: string) => (value ? terminalTextDecoder.decode(terminalTextEncoder.encode(value)) : '')
+
+const tailTextByBytes = (value: string, maxBytes: number) => {
+  if (!value) return ''
+  if (textByteLength(value) <= maxBytes) return detachText(value)
+  let start = Math.max(0, value.length - maxBytes)
+  while (start < value.length && textByteLength(value.slice(start)) > maxBytes) {
+    start += Math.max(1, Math.floor((value.length - start) / 4))
+  }
+  const nextLine = value.indexOf('\n', start)
+  return detachText(value.slice(nextLine >= 0 && nextLine + 1 < value.length ? nextLine + 1 : start))
+}
 
 export const createTerminalWorkspaceViewRuntime = ({
   workspace,
@@ -122,6 +175,20 @@ export const createTerminalWorkspaceViewRuntime = ({
   const TerminalConstructor = terminalConstructor || XtermTerminal
   const FitConstructor = fitConstructor || FitAddon
   const SearchConstructor = searchConstructor || SearchAddon
+  let threadedTerminalAvailable: boolean | null = null
+  const canUseThreadedTerminal = () => {
+    if (terminalConstructor || fitConstructor || searchConstructor) return false
+    if (!shouldUseThreadedTerminal()) return false
+    if (threadedTerminalAvailable !== null) return threadedTerminalAvailable
+    const capability = threadedTerminalCapability()
+    if (!capability.supported) {
+      writeRuntimeLog('warn', 'renderer.threaded-terminal.unavailable', { reason: capability.reason })
+      threadedTerminalAvailable = false
+      return false
+    }
+    threadedTerminalAvailable = true
+    return true
+  }
   const paneFontSizes = reactive<Record<string, number>>({})
   const terminalElements = new Map<string, HTMLElement>()
   const terminalViews = new Map<string, TerminalView>()
@@ -257,6 +324,82 @@ export const createTerminalWorkspaceViewRuntime = ({
   const isTerminalPanelRenderable = (panelId: string) => {
     const element = terminalElements.get(panelId)
     return Boolean(element?.isConnected && visibleTerminalPanelIds().has(panelId))
+  }
+
+  const terminalPriorityForPanel = (panelId: string) => threadedTerminalPriorityFor(panelId, workspace.activePanelId, isTerminalPanelRenderable(panelId))
+
+  const syncThreadedTerminalPriorities = () => {
+    terminalViews.forEach((view, panelId) => {
+      if (!isThreadedTerminalHost(view.terminal)) return
+      const visible = isTerminalPanelRenderable(panelId)
+      view.terminal.setVisibility(visible, threadedTerminalPriorityFor(panelId, workspace.activePanelId, visible))
+    })
+  }
+
+  const bindTerminalViewEvents = (panel: TerminalPanel, view: TerminalView) => {
+    view.terminal.onData((data) => {
+      if (view.suppressInputReplyDepth) {
+        writeRuntimeLog('debug', 'renderer.terminal-input.suppressed-replay-reply', {
+          panelId: panel.id,
+          bytes: new TextEncoder().encode(data).length
+        })
+        return
+      }
+      void writeXtermInput(panel.id, data)
+    })
+    view.terminal.onSelectionChange(() => {
+      const selectedText = view.terminal.getSelection()
+      if (selectedText.trim()) void mirrorTextToClipboardQuietly(selectedText.trim())
+      updateSelectionButtonPosition(panel.id)
+    })
+    view.terminal.onResize(({ cols, rows }) => {
+      const resizeTerminal = terminalClient.resizeTerminal()
+      if (panel.sessionId && resizeTerminal) {
+        resizeTerminal(panel.sessionId, cols, rows)
+        writeRuntimeLog('debug', 'renderer.terminal.resize', {
+          panelId: panel.id,
+          sessionId: panel.sessionId,
+          cols,
+          rows
+        })
+      }
+      updateSelectionButtonPosition(panel.id)
+      updateSuggestionsPosition(panel.id)
+    })
+  }
+
+  const createThreadedViewForPanel = (panel: TerminalPanel) => {
+    const theme = {
+      background: '#090b10',
+      foreground: '#d7dae3',
+      cursor: '#8ccf7e',
+      selectionBackground: '#2d4059'
+    }
+    const initialOutput = tailTextByBytes(workspace.getHighlightedTerminalOutput(panel.id), terminalThreadedLiveOutputTailBytes)
+    const terminal = createThreadedTerminalHost({
+      terminalId: panel.id,
+      sessionId: panel.sessionId,
+      groupId: panel.splitGroupId || panel.id,
+      surface: 'workspace',
+      settings: {
+        ...workspace.terminalSettings,
+        fontSize: terminalFontSizeForPanel(panel.id)
+      },
+      theme,
+      initialData: initialOutput,
+      visible: isTerminalPanelRenderable(panel.id),
+      priority: terminalPriorityForPanel(panel.id),
+      logFields: { panelId: panel.id }
+    })
+    const fit = new ThreadedTerminalFitAddon()
+    const searchAddon = new ThreadedTerminalSearchAddon()
+    terminal.loadAddon(fit)
+    terminal.loadAddon(searchAddon)
+    const view: TerminalView = { terminal, fit, search: searchAddon, lastOutput: initialOutput }
+    view.clearPendingOutput = () => clearQueuedTerminalOutput(view)
+    bindTerminalViewEvents(panel, view)
+    terminalViews.set(panel.id, view)
+    return view
   }
 
   const terminalOutputQueueFor = (view: TerminalView): TerminalOutputWriteQueue => {
@@ -615,6 +758,20 @@ export const createTerminalWorkspaceViewRuntime = ({
     view.terminal.options.cursorBlink = settings.cursorBlink
     view.terminal.options.cursorStyle = settings.cursorStyle
     view.terminal.options.scrollback = settings.scrollBack
+    if (isThreadedTerminalHost(view.terminal)) {
+      view.terminal.updateSettings(
+        {
+          ...settings,
+          fontSize: Number(view.terminal.options.fontSize || settings.fontSize || defaultTerminalFontSize())
+        },
+        {
+          background: '#090b10',
+          foreground: '#d7dae3',
+          cursor: '#8ccf7e',
+          selectionBackground: '#2d4059'
+        }
+      )
+    }
     if (options.refit !== false) {
       scheduleTerminalFit(panelId, { scrollToBottom: true, frames: 3, forceGeometry: true })
     }
@@ -629,6 +786,9 @@ export const createTerminalWorkspaceViewRuntime = ({
     const view = terminalViews.get(panel.id)
     if (!view) return false
     if (!isTerminalPanelRenderable(panel.id)) return false
+    if (isThreadedTerminalHost(view.terminal)) {
+      view.terminal.setVisibility(true, terminalPriorityForPanel(panel.id))
+    }
     const highlightedAt = nowMs()
     const displayOutput = workspace.getHighlightedTerminalOutput(panel.id)
     const highlightMs = nowMs() - highlightedAt
@@ -662,6 +822,30 @@ export const createTerminalWorkspaceViewRuntime = ({
     return true
   }
 
+  const writeLiveTerminalData = (sessionOrPanelId: string, data: string) => {
+    if (!data) return false
+    const panel = workspace.panels.find((item) => item.id === sessionOrPanelId || item.sessionId === sessionOrPanelId)
+    if (!panel || panel.kind === 'knowledge') return false
+    if (workspace.extensionSettings.highlightStatus) return false
+    const view = terminalViews.get(panel.id)
+    if (!view || !isThreadedTerminalHost(view.terminal)) return false
+    const visible = isTerminalPanelRenderable(panel.id)
+    view.terminal.setVisibility(visible, terminalPriorityForPanel(panel.id))
+    view.terminal.write(data)
+    view.lastOutput = tailTextByBytes(`${view.lastOutput}${data}`, terminalThreadedLiveOutputTailBytes)
+    if (visible) {
+      updateSelectionButtonPosition(panel.id)
+      updateSuggestionsPosition(panel.id)
+    }
+    return true
+  }
+
+  const terminalOutputMirrorText = (panel: TerminalPanel) => {
+    const view = terminalViews.get(panel.id)
+    if (view && isThreadedTerminalHost(view.terminal)) return ''
+    return panel.output
+  }
+
   const scheduleTerminalViewSync = (
     panel: TerminalPanel,
     options: { suppressInputReplies?: boolean; refit?: boolean } = {},
@@ -681,8 +865,24 @@ export const createTerminalWorkspaceViewRuntime = ({
 
   const createTerminalView = (panel: TerminalPanel, element: HTMLElement) => {
     if (panel.kind === 'knowledge') return
-    if (terminalViews.has(panel.id)) return
-    const terminal = new TerminalConstructor({
+    const existing = terminalViews.get(panel.id)
+    if (existing) {
+      if (isThreadedTerminalHost(existing.terminal)) {
+        existing.terminal.open(element)
+        existing.terminal.setVisibility(isTerminalPanelRenderable(panel.id), terminalPriorityForPanel(panel.id))
+        applyTerminalSettingsToView(panel.id, existing, workspace.terminalSettings, { refit: false })
+        scheduleTerminalFit(panel.id, { scrollToBottom: true, frames: 2 })
+      }
+      return
+    }
+    const theme = {
+      background: '#090b10',
+      foreground: '#d7dae3',
+      cursor: '#8ccf7e',
+      selectionBackground: '#2d4059'
+    }
+    const useThreaded = canUseThreadedTerminal()
+    const terminal = useThreaded ? null : new TerminalConstructor({
       cursorBlink: workspace.terminalSettings.cursorBlink,
       convertEol: true,
       cursorStyle: workspace.terminalSettings.cursorStyle,
@@ -690,19 +890,18 @@ export const createTerminalWorkspaceViewRuntime = ({
       fontSize: terminalFontSizeForPanel(panel.id),
       lineHeight: workspace.terminalSettings.lineHeight || 1,
       scrollback: workspace.terminalSettings.scrollBack,
-      theme: {
-        background: '#090b10',
-        foreground: '#d7dae3',
-        cursor: '#8ccf7e',
-        selectionBackground: '#2d4059'
-      }
+      theme
     })
-    const fit = new FitConstructor()
-    const searchAddon = new SearchConstructor()
-    terminal.loadAddon(fit)
-    terminal.loadAddon(searchAddon)
-    terminal.open(element)
-    const view: TerminalView = { terminal, fit, search: searchAddon, lastOutput: '' }
+    const fit = useThreaded ? null : new FitConstructor()
+    const searchAddon = useThreaded ? null : new SearchConstructor()
+    if (terminal && fit && searchAddon) {
+      terminal.loadAddon(fit)
+      terminal.loadAddon(searchAddon)
+    }
+    const view: TerminalView = useThreaded
+      ? createThreadedViewForPanel(panel)
+      : { terminal: terminal!, fit: fit!, search: searchAddon!, lastOutput: '' }
+    view.terminal.open(element)
     view.clearPendingOutput = () => clearQueuedTerminalOutput(view)
     applyTerminalSettingsToView(panel.id, view, workspace.terminalSettings, { refit: false })
     if (typeof ResizeObserver !== 'undefined') {
@@ -711,42 +910,19 @@ export const createTerminalWorkspaceViewRuntime = ({
       })
       view.resizeObserver.observe(element)
     }
-    terminalViews.set(panel.id, view)
+    if (!useThreaded) terminalViews.set(panel.id, view)
     writeRuntimeLog('debug', 'renderer.terminal-view.created', {
       panelId: panel.id,
-      hasSession: Boolean(panel.sessionId)
+      hasSession: Boolean(panel.sessionId),
+      threaded: useThreaded
     })
-    scheduleTerminalViewSync(panel, { suppressInputReplies: Boolean(panel.output), refit: true })
-    terminal.onData((data) => {
-      if (view.suppressInputReplyDepth) {
-        writeRuntimeLog('debug', 'renderer.terminal-input.suppressed-replay-reply', {
-          panelId: panel.id,
-          bytes: new TextEncoder().encode(data).length
-        })
-        return
-      }
-      void writeXtermInput(panel.id, data)
-    })
-    terminal.onSelectionChange(() => {
-      const selectedText = terminal.getSelection()
-      if (selectedText.trim()) void mirrorTextToClipboardQuietly(selectedText.trim())
-      updateSelectionButtonPosition(panel.id)
-    })
-    terminal.onResize(({ cols, rows }) => {
-      const resizeTerminal = terminalClient.resizeTerminal()
-      if (panel.sessionId && resizeTerminal) {
-        resizeTerminal(panel.sessionId, cols, rows)
-        writeRuntimeLog('debug', 'renderer.terminal.resize', {
-          panelId: panel.id,
-          sessionId: panel.sessionId,
-          cols,
-          rows
-        })
-      }
-      updateSelectionButtonPosition(panel.id)
-      updateSuggestionsPosition(panel.id)
-    })
-    element.querySelector('.xterm-viewport')?.addEventListener(
+    if (!useThreaded) {
+      scheduleTerminalViewSync(panel, { suppressInputReplies: Boolean(panel.output), refit: true })
+    } else {
+      scheduleTerminalFit(panel.id, { scrollToBottom: true, frames: 2 })
+    }
+    if (!useThreaded) bindTerminalViewEvents(panel, view)
+    if (!useThreaded) element.querySelector('.xterm-viewport')?.addEventListener(
       'scroll',
       () => {
         updateSelectionButtonPosition(panel.id)
@@ -761,6 +937,12 @@ export const createTerminalWorkspaceViewRuntime = ({
       terminalElements.delete(panelId)
       const view = terminalViews.get(panelId)
       if (view) {
+        if (isThreadedTerminalHost(view.terminal)) {
+          view.resizeObserver?.disconnect()
+          view.resizeObserver = undefined
+          view.terminal.detachSurface()
+          return
+        }
         clearQueuedTerminalOutput(view, { dispose: true })
         flushTerminalOutputPerf(panelId, view, 'view-disposed')
         view.resizeObserver?.disconnect()
@@ -781,6 +963,16 @@ export const createTerminalWorkspaceViewRuntime = ({
       workspace.panels.filter((panel) => panel.kind !== 'knowledge').forEach((panel) => {
         const element = terminalElements.get(panel.id)
         if (element && visibleTerminalPanelIds().has(panel.id)) createTerminalView(panel, element)
+        else if (canUseThreadedTerminal() && !terminalViews.has(panel.id)) {
+          const view = createThreadedViewForPanel(panel)
+          if (isThreadedTerminalHost(view.terminal)) view.terminal.startCoreOnly()
+          writeRuntimeLog('debug', 'renderer.terminal-view.created', {
+            panelId: panel.id,
+            hasSession: Boolean(panel.sessionId),
+            threaded: true,
+            coreOnly: true
+          })
+        }
       })
       for (const panelId of terminalViews.keys()) {
         if (!workspace.panels.some((panel) => panel.id === panelId)) {
@@ -794,6 +986,7 @@ export const createTerminalWorkspaceViewRuntime = ({
           delete paneFontSizes[panelId]
         }
       }
+      syncThreadedTerminalPriorities()
     })
   }
 
@@ -812,6 +1005,20 @@ export const createTerminalWorkspaceViewRuntime = ({
     const normalized = Math.min(24, Math.max(9, nextSize))
     paneFontSizes[panelId] = normalized
     view.terminal.options.fontSize = normalized
+    if (isThreadedTerminalHost(view.terminal)) {
+      view.terminal.updateSettings(
+        {
+          ...workspace.terminalSettings,
+          fontSize: normalized
+        },
+        {
+          background: '#090b10',
+          foreground: '#d7dae3',
+          cursor: '#8ccf7e',
+          selectionBackground: '#2d4059'
+        }
+      )
+    }
     scheduleTerminalFit(panelId, { scrollToBottom: true, frames: 4, forceGeometry: true })
   }
 
@@ -854,7 +1061,9 @@ export const createTerminalWorkspaceViewRuntime = ({
     terminalViewSize,
     terminalViews,
     terminalFontSizeForPanel,
+    terminalOutputMirrorText,
     updateFontSize,
+    writeLiveTerminalData,
     updateSelectionButtonPosition,
     updateSuggestionsPosition
   }

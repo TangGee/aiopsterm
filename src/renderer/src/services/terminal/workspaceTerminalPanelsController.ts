@@ -34,6 +34,7 @@ import {
   replaceTerminalOutputInPanelCollection,
   resetTerminalPanelCollectionToDefault,
   setTerminalPanelAutoTitleInCollection,
+  trimTerminalPanelOutputHistory,
   type PanelDirection,
   type TerminalLaunchAsset,
   type TerminalOutputScope,
@@ -382,6 +383,7 @@ export const createWorkspaceTerminalPanelsController = (
   const appendTerminalOutput = (id: string, data: string) => {
     const panel = appendTerminalOutputToPanelInCollection(panels.value, id, data)
     if (!panel) return
+    trimTerminalPanelOutputHistory(panel, Math.max(200, (terminalSettings.value.scrollBack || 1000) + 200))
     touchManagedAiTerminalActivity(panel)
   }
 

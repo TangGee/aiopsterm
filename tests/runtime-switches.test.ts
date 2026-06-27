@@ -19,6 +19,7 @@ import {
   shouldUseSettingsPreferencesSeedData,
   shouldUseSkillsSeedData,
   shouldUseSshTerminalBackendDouble,
+  shouldUseThreadedTerminal,
   shouldUseUserAccountCodeBackendDouble,
   shouldUseUserAccountSeedData,
   shouldUseUserExternalOpenBackendDouble,
@@ -26,6 +27,7 @@ import {
 } from '../src/shared/runtimeSwitches'
 
 const originalNodeEnv = process.env.NODE_ENV
+const originalRuntimeEnv = (globalThis as { __AIOPSTERM_RUNTIME_ENV__?: Record<string, string | undefined> }).__AIOPSTERM_RUNTIME_ENV__
 const runtimeSwitches = [
   ['AIOPSTERM_AI_CHAT_BACKEND_DOUBLE', shouldUseAiChatBackendDouble],
   ['AIOPSTERM_ALIASES_ENABLE_SEED', shouldUseAliasesSeedData],
@@ -45,6 +47,7 @@ const runtimeSwitches = [
   ['AIOPSTERM_SETTINGS_PREFERENCES_ENABLE_SEED', shouldUseSettingsPreferencesSeedData],
   ['AIOPSTERM_SKILLS_ENABLE_SEED', shouldUseSkillsSeedData],
   ['AIOPSTERM_SSH_TERMINAL_BACKEND_DOUBLE', shouldUseSshTerminalBackendDouble],
+  ['AIOPSTERM_THREADED_TERMINAL', shouldUseThreadedTerminal],
   ['AIOPSTERM_USER_ACCOUNT_CODE_BACKEND_DOUBLE', shouldUseUserAccountCodeBackendDouble],
   ['AIOPSTERM_USER_ACCOUNT_ENABLE_SEED', shouldUseUserAccountSeedData],
   ['AIOPSTERM_USER_EXTERNAL_OPEN_BACKEND_DOUBLE', shouldUseUserExternalOpenBackendDouble],
@@ -59,6 +62,11 @@ describe('runtime switch boundaries', () => {
       delete process.env.NODE_ENV
     } else {
       process.env.NODE_ENV = originalNodeEnv
+    }
+    if (originalRuntimeEnv === undefined) {
+      delete (globalThis as { __AIOPSTERM_RUNTIME_ENV__?: Record<string, string | undefined> }).__AIOPSTERM_RUNTIME_ENV__
+    } else {
+      ;(globalThis as { __AIOPSTERM_RUNTIME_ENV__?: Record<string, string | undefined> }).__AIOPSTERM_RUNTIME_ENV__ = originalRuntimeEnv
     }
     runtimeSwitches.forEach(([name]) => {
       const value = originalSwitchValues[name]
@@ -82,6 +90,21 @@ describe('runtime switch boundaries', () => {
       expect(read(), name).toBe(false)
 
       process.env[name] = ' 1 '
+      expect(read(), name).toBe(true)
+    })
+  })
+
+  it('accepts explicit renderer runtime env injected outside process.env', () => {
+    runtimeSwitches.forEach(([name, read]) => {
+      delete process.env[name]
+      ;(globalThis as { __AIOPSTERM_RUNTIME_ENV__?: Record<string, string | undefined> }).__AIOPSTERM_RUNTIME_ENV__ = {
+        [name]: 'true'
+      }
+      expect(read(), name).toBe(false)
+
+      ;(globalThis as { __AIOPSTERM_RUNTIME_ENV__?: Record<string, string | undefined> }).__AIOPSTERM_RUNTIME_ENV__ = {
+        [name]: '1'
+      }
       expect(read(), name).toBe(true)
     })
   })

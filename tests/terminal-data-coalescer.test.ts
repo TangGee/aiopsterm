@@ -102,10 +102,28 @@ describe('terminalDataCoalescer', () => {
     expect(flushes).toEqual([expect.objectContaining({ chunk: '12345', chunks: 1, bytes: 5 })])
   })
 
-  it('caps scheduled flush delays so terminal output stays frame-friendly', async () => {
+  it('uses the bulk merge window by default for large terminal chunks', async () => {
     const { createTerminalDataCoalescer } = await loadRuntime()
     const timers: Array<{ callback: () => void; delayMs: number }> = []
     const coalescer = createTerminalDataCoalescer({
+      setTimer: (callback, delayMs) => {
+        timers.push({ callback, delayMs })
+        return callback
+      },
+      clearTimer: () => undefined,
+      onFlush: () => undefined
+    })
+
+    coalescer.push('terminal-1', 'x'.repeat(2048))
+
+    expect(timers).toEqual([{ callback: expect.any(Function), delayMs: 50 }])
+  })
+
+  it('honors an explicit max delay cap for interactive data', async () => {
+    const { createTerminalDataCoalescer } = await loadRuntime()
+    const timers: Array<{ callback: () => void; delayMs: number }> = []
+    const coalescer = createTerminalDataCoalescer({
+      maxDelayMs: 16,
       setTimer: (callback, delayMs) => {
         timers.push({ callback, delayMs })
         return callback

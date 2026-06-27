@@ -93,6 +93,9 @@ export type TerminalPanelSessionWrite = {
 }
 
 export const defaultTerminalPanelTitle = '欢迎'
+const terminalTextEncoder = new TextEncoder()
+const terminalTextDecoder = new TextDecoder()
+const detachTerminalText = (value: string) => (value ? terminalTextDecoder.decode(terminalTextEncoder.encode(value)) : '')
 
 export const isNonEmptyText = (value: unknown): value is string => typeof value === 'string' && value.trim() !== ''
 
@@ -110,9 +113,47 @@ export const appendTerminalSegment = (panel: TerminalPanel, text: string, scope:
   panel.outputSegments.push({ text, scope })
 }
 
+export const trimTerminalPanelOutputHistory = (panel: TerminalPanel, maxLines: number, minBytes = maxLines * 512) => {
+  const normalizedMaxLines = Math.max(1, Math.floor(maxLines))
+  if (panel.output.length <= Math.max(0, minBytes)) return false
+  let lineCount = 0
+  let cutIndex = 0
+  for (let index = panel.output.length - 1; index >= 0; index -= 1) {
+    if (panel.output.charCodeAt(index) !== 10) continue
+    lineCount += 1
+    if (lineCount <= normalizedMaxLines) continue
+    cutIndex = index + 1
+    break
+  }
+  if (!cutIndex) return false
+  panel.output = detachTerminalText(panel.output.slice(cutIndex))
+  if (!panel.outputSegments?.length) {
+    panel.outputSegments = createTerminalSegments(panel.output)
+    return true
+  }
+  let remainingCut = cutIndex
+  const nextSegments: TerminalOutputSegment[] = []
+  panel.outputSegments.forEach((segment) => {
+    if (!segment.text) return
+    if (remainingCut >= segment.text.length) {
+      remainingCut -= segment.text.length
+      return
+    }
+    if (remainingCut > 0) {
+      nextSegments.push({ ...segment, text: detachTerminalText(segment.text.slice(remainingCut)) })
+      remainingCut = 0
+      return
+    }
+    nextSegments.push(segment)
+  })
+  panel.outputSegments = nextSegments
+  return true
+}
+
 export const setTerminalOutput = (panel: TerminalPanel, text: string, scope: TerminalOutputScope = 'output') => {
-  panel.output = text
-  panel.outputSegments = createTerminalSegments(text, scope)
+  const output = detachTerminalText(text)
+  panel.output = output
+  panel.outputSegments = createTerminalSegments(output, scope)
 }
 
 export const createEmptyTerminalPanel = (

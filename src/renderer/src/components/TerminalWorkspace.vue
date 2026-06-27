@@ -438,7 +438,7 @@
           :data-testid="`terminal-output-${panel.id}`"
           class="terminal-output-mirror"
           aria-hidden="true"
-        >{{ panel.output }}</pre>
+        >{{ terminalOutputMirrorText(panel) }}</pre>
         <button
           v-if="aiButtonPanelId === panel.id"
           class="terminal-chat-ai-button"
@@ -640,6 +640,7 @@ const {
   termMenu,
   terminalGrid,
   terminalGridClasses,
+  terminalOutputMirrorText,
   terminalStatusLabel,
   terminalTabKindBadge,
   terminalTabMeta,

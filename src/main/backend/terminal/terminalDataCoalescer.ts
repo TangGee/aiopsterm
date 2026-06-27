@@ -49,7 +49,7 @@ export const createTerminalDataCoalescer = (options: TerminalDataCoalescerOption
   const smallDelayMs = options.smallDelayMs ?? 10
   const mediumDelayMs = options.mediumDelayMs ?? 30
   const bulkDelayMs = options.bulkDelayMs ?? 50
-  const maxDelayMs = options.maxDelayMs ?? 16
+  const maxDelayMs = options.maxDelayMs ?? Math.max(smallDelayMs, mediumDelayMs, bulkDelayMs)
   const byteLength = options.byteLength || defaultByteLength
   const now = options.now || Date.now
   const setTimer = options.setTimer || ((callback: () => void, delayMs: number) => setTimeout(callback, delayMs))

@@ -42,6 +42,7 @@ import {
   setTerminalPanelAutoTitleInCollection,
   terminalLifecycleMatchesPanel,
   terminalPanelIds,
+  trimTerminalPanelOutputHistory,
   type TerminalPanel
 } from '@/services/terminal/terminalPanelRuntime'
 
@@ -87,6 +88,19 @@ describe('terminalPanelRuntime', () => {
     setTerminalOutput(panel, 'fresh output', 'input')
     expect(panel.output).toBe('fresh output')
     expect(panel.outputSegments).toEqual([{ text: 'fresh output', scope: 'input' }])
+  })
+
+  it('trims terminal output history by lines while preserving segment scopes', () => {
+    const panel = createEmptyTerminalPanel('panel-1', 'Terminal 1')
+    appendTerminalSegment(panel, 'input-1\ninput-2\n', 'input')
+    appendTerminalSegment(panel, 'output-1\noutput-2\noutput-3\n', 'output')
+
+    expect(trimTerminalPanelOutputHistory(panel, 3, 0)).toBe(true)
+    expect(panel.output).toBe('output-1\noutput-2\noutput-3\n')
+    expect(panel.outputSegments).toEqual([{ text: 'output-1\noutput-2\noutput-3\n', scope: 'output' }])
+
+    expect(trimTerminalPanelOutputHistory(panel, 10, 0)).toBe(false)
+    expect(panel.output).toBe('output-1\noutput-2\noutput-3\n')
   })
 
   it('creates split terminal panels by copying safe source state', () => {

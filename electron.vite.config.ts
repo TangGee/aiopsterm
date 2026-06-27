@@ -35,6 +35,9 @@ export default defineConfig({
         '@': resolve(__dirname, 'src/renderer/src')
       }
     },
-    plugins: [vue()]
+    plugins: [vue()],
+    worker: {
+      format: 'es'
+    }
   }
 })

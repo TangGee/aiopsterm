@@ -3,7 +3,9 @@ import { createPinia } from 'pinia'
 import App from './App.vue'
 import router from './router'
 import './styles/base.less'
+import { installRendererRuntimeEnv } from './services/app/rendererRuntimeEnv'
 
+installRendererRuntimeEnv()
 const app = createApp(App)
 
 app.use(createPinia())

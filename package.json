@@ -52,6 +52,7 @@
     "@withfig/autocomplete": "^2.692.3",
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/addon-search": "^0.15.0",
+    "@xterm/headless": "^5.5.0",
     "@xterm/xterm": "^5.5.0",
     "adm-zip": "^0.5.17",
     "better-sqlite3": "^12.10.0",

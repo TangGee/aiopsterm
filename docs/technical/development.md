@@ -92,6 +92,23 @@ npm run test:e2e
 
 Package and release work should also use the package audits documented in the usage package verification guide.
 
+## Terminal Performance Verification
+
+Terminal renderer throughput changes must be validated with the threaded stress harness before claiming performance success. Use the short gates while iterating:
+
+```bash
+AIOPSTERM_TERMINAL_STRESS=1 VITE_AIOPSTERM_TERMINAL_STRESS=1 VITE_AIOPSTERM_THREADED_TERMINAL=1 AIOPSTERM_TERMINAL_STRESS_PROFILE=mixed-switch AIOPSTERM_TERMINAL_STRESS_DURATION_MS=10000 AIOPSTERM_TERMINAL_STRESS_SWITCH_INTERVAL_MS=5000 npm run test:e2e -- tests/e2e/terminal-stress.spec.ts --reporter=list
+AIOPSTERM_TERMINAL_STRESS=1 VITE_AIOPSTERM_TERMINAL_STRESS=1 VITE_AIOPSTERM_THREADED_TERMINAL=1 AIOPSTERM_TERMINAL_STRESS_PROFILE=mixed-switch AIOPSTERM_TERMINAL_STRESS_DURATION_MS=60000 AIOPSTERM_TERMINAL_STRESS_SWITCH_INTERVAL_MS=5000 npm run test:e2e -- tests/e2e/terminal-stress.spec.ts --reporter=list
+```
+
+The release-level stress profile is 20 minutes:
+
+```bash
+AIOPSTERM_TERMINAL_STRESS=1 VITE_AIOPSTERM_TERMINAL_STRESS=1 VITE_AIOPSTERM_THREADED_TERMINAL=1 AIOPSTERM_TERMINAL_STRESS_PROFILE=mixed-switch AIOPSTERM_TERMINAL_STRESS_DURATION_MS=1200000 AIOPSTERM_TERMINAL_STRESS_SWITCH_INTERVAL_MS=5000 npm run test:e2e -- tests/e2e/terminal-stress.spec.ts --reporter=list
+```
+
+Check frame percentiles, paint latency, foreground/background switch latency, foreground/background write counters, real PTY echo latency, CDP live heap delta, canvas count, queue backlog, and worker error counts in the `[terminal-stress]` JSON line. Heap sampling and heap snapshot artifacts are written to `test-results/terminal-stress/`; the JSON also includes allocation hotspots and a post-GC object summary for retained-object inspection. `performance.memory` fields are useful diagnostics, while retained-object assertions use CDP `Runtime.getHeapUsage` and heap snapshot object sizes. Do not treat a 10-second smoke pass as evidence for the 20-minute target.
+
 ## Platform Iteration
 
 Cross-platform work should stay iterative: make one narrow platform change, add focused tests or audits for that boundary, then commit locally. Do not push from the implementation loop unless a separate release or collaboration step asks for it.

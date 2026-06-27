@@ -13,10 +13,18 @@ import {
 import { codexSessionClient } from '@/services/ai/codexSessionClient'
 import { copyTextToClipboard } from '@/services/app/clipboardRuntime'
 import { writeRendererRuntimeLog } from '@/services/app/runtimeLogClient'
+import {
+  ThreadedTerminalFitAddon,
+  createThreadedTerminalHost,
+  isThreadedTerminalHost,
+  threadedTerminalCapability,
+  type ThreadedTerminalHost
+} from '@/services/terminal/threadedTerminalRuntime'
 import type { CodexTargetEventKind } from '@/services/ai/codexTargetRuntime'
 import type { TerminalSettings } from '@/services/settings/workspaceConfigRuntime'
 import type { RuntimeLogLevel } from '@shared/contracts/appRuntime'
 import type { CodexSessionTargetContext } from '@shared/contracts/codexSessions'
+import { shouldUseThreadedTerminal } from '@shared/runtimeSwitches'
 
 type XtermRuntimeOptions = XtermTerminal['options'] & { termName?: string }
 
@@ -173,6 +181,16 @@ export const createAiPanelCodexTerminalRuntime = <TConversation extends AiPanelC
   const TerminalConstructor = options.terminalConstructor || XtermTerminal
   const FitConstructor = options.fitConstructor || FitAddon
   const resizeObserverFactory = options.resizeObserverFactory || defaultResizeObserverFactory
+  const canUseThreadedTerminal = () => {
+    if (options.terminalConstructor || options.fitConstructor) return false
+    if (!shouldUseThreadedTerminal()) return false
+    const capability = threadedTerminalCapability()
+    if (!capability.supported) {
+      log('warn', 'renderer.codex-threaded-terminal.unavailable', { reason: capability.reason })
+      return false
+    }
+    return true
+  }
 
   let offData: (() => void) | null = null
   let offLifecycle: (() => void) | null = null
@@ -189,6 +207,7 @@ export const createAiPanelCodexTerminalRuntime = <TConversation extends AiPanelC
 
   const isConversationVisible = (conversation: TConversation) =>
     options.isConversationVisible ? options.isConversationVisible(conversation) : options.activeConversationId() === conversation.id
+  const isThreadedConversationTerminal = (conversation: TConversation) => Boolean(conversation.terminal && isThreadedTerminalHost(conversation.terminal))
 
   const outputStateFor = (conversation: TConversation): CodexTerminalOutputState => {
     const existing = outputStates.get(conversation.id)
@@ -325,7 +344,8 @@ export const createAiPanelCodexTerminalRuntime = <TConversation extends AiPanelC
     const state = outputStateFor(conversation)
     const queue = state.queue
     if (queue.disposed || queue.inFlight || queue.scheduledFlush !== null) return
-    if (!conversation.terminal || !conversation.host?.isConnected || !isConversationVisible(conversation)) return
+    if (!conversation.terminal || !conversation.host?.isConnected) return
+    if (!isThreadedConversationTerminal(conversation) && !isConversationVisible(conversation)) return
     queue.scheduledFlush = requestOutputFlush(() => flushQueuedCodexOutput(conversation))
   }
 
@@ -334,7 +354,8 @@ export const createAiPanelCodexTerminalRuntime = <TConversation extends AiPanelC
     const queue = state.queue
     queue.scheduledFlush = null
     if (queue.disposed || queue.inFlight) return
-    if (!conversation.terminal || !conversation.host?.isConnected || !isConversationVisible(conversation)) return
+    if (!conversation.terminal || !conversation.host?.isConnected) return
+    if (!isThreadedConversationTerminal(conversation) && !isConversationVisible(conversation)) return
     if (!queue.pending.length) {
       if (queue.clearAfterInFlight) {
         queue.clearAfterInFlight = false
@@ -598,6 +619,14 @@ export const createAiPanelCodexTerminalRuntime = <TConversation extends AiPanelC
     terminal.options.cursorBlink = settings.cursorBlink
     terminal.options.cursorStyle = settings.cursorStyle
     terminal.options.scrollback = settings.scrollBack
+    if (isThreadedTerminalHost(terminal)) {
+      terminal.updateSettings(settings, {
+        background: 'rgba(9, 11, 16, 0)',
+        foreground: '#d7dae3',
+        cursor: '#8ccf7e',
+        selectionBackground: '#2d4059'
+      })
+    }
     if (applyOptions.refit !== false) fitTerminal({ force: true, conversation })
   }
 
@@ -605,23 +634,37 @@ export const createAiPanelCodexTerminalRuntime = <TConversation extends AiPanelC
     const element = conversation.host
     if (!element || conversation.terminal) return
     const settings = options.terminalSettings()
-    const terminal = new TerminalConstructor({
-      allowTransparency: true,
-      cursorBlink: settings.cursorBlink,
-      convertEol: true,
-      cursorStyle: settings.cursorStyle,
-      fontFamily: settings.fontFamily || '"JetBrains Mono", "SFMono-Regular", Consolas, monospace',
-      fontSize: settings.fontSize || 12,
-      lineHeight: settings.lineHeight || 1,
-      scrollback: settings.scrollBack,
-      theme: {
-        background: 'rgba(9, 11, 16, 0)',
-        foreground: '#d7dae3',
-        cursor: '#8ccf7e',
-        selectionBackground: '#2d4059'
-      }
-    }) as AiPanelCodexTerminalLike
-    const fit = new FitConstructor()
+    const theme = {
+      background: 'rgba(9, 11, 16, 0)',
+      foreground: '#d7dae3',
+      cursor: '#8ccf7e',
+      selectionBackground: '#2d4059'
+    }
+    const useThreaded = canUseThreadedTerminal()
+    const terminal = (useThreaded
+      ? createThreadedTerminalHost({
+          terminalId: conversation.id,
+          sessionId: conversation.sessionId,
+          groupId: `codex:${conversation.id}`,
+          surface: 'codex',
+          settings,
+          theme,
+          visible: isConversationVisible(conversation),
+          priority: isConversationVisible(conversation) ? 'active' : 'background',
+          logFields: { localId: conversation.id }
+        })
+      : new TerminalConstructor({
+          allowTransparency: true,
+          cursorBlink: settings.cursorBlink,
+          convertEol: true,
+          cursorStyle: settings.cursorStyle,
+          fontFamily: settings.fontFamily || '"JetBrains Mono", "SFMono-Regular", Consolas, monospace',
+          fontSize: settings.fontSize || 12,
+          lineHeight: settings.lineHeight || 1,
+          scrollback: settings.scrollBack,
+          theme
+        })) as AiPanelCodexTerminalLike
+    const fit = useThreaded ? new ThreadedTerminalFitAddon() : new FitConstructor()
     terminal.loadAddon(fit)
     terminal.open(element)
     conversation.terminal = terminal as TConversation['terminal']
@@ -656,7 +699,7 @@ export const createAiPanelCodexTerminalRuntime = <TConversation extends AiPanelC
       observer.observe(element)
     }
     fitTerminal({ force: true, conversation })
-    log('debug', 'renderer.codex-terminal.created', { localId: conversation.id })
+    log('debug', 'renderer.codex-terminal.created', { localId: conversation.id, threaded: useThreaded })
   }
 
   const setHostElement = (conversation: TConversation, element: HTMLElement | null) => {
@@ -667,6 +710,10 @@ export const createAiPanelCodexTerminalRuntime = <TConversation extends AiPanelC
       return
     }
     ensureTerminal(conversation)
+    if (conversation.terminal && isThreadedTerminalHost(conversation.terminal)) {
+      const visible = isConversationVisible(conversation)
+      conversation.terminal.setVisibility(visible, visible ? 'active' : 'background')
+    }
     scheduleCodexOutputFlush(conversation)
   }
 

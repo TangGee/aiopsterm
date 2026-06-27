@@ -1,5 +1,9 @@
 const envFlagEnabled = (name: string) => {
   try {
+    const runtimeEnv = (globalThis as {
+      __AIOPSTERM_RUNTIME_ENV__?: Record<string, string | undefined>
+    }).__AIOPSTERM_RUNTIME_ENV__
+    if (String(runtimeEnv?.[name] || '').trim() === '1') return true
     return typeof process !== 'undefined' && String(process.env?.[name] || '').trim() === '1'
   } catch {
     return false
@@ -43,6 +47,8 @@ export const shouldUseSettingsPreferencesSeedData = () => envFlagEnabled('AIOPST
 export const shouldUseSkillsSeedData = () => envFlagEnabled('AIOPSTERM_SKILLS_ENABLE_SEED')
 
 export const shouldUseSshTerminalBackendDouble = () => envFlagEnabled('AIOPSTERM_SSH_TERMINAL_BACKEND_DOUBLE')
+
+export const shouldUseThreadedTerminal = () => envFlagEnabled('AIOPSTERM_THREADED_TERMINAL')
 
 export const shouldUseUserAccountCodeBackendDouble = () => envFlagEnabled('AIOPSTERM_USER_ACCOUNT_CODE_BACKEND_DOUBLE')
 
