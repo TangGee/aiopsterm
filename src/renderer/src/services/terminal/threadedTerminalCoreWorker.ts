@@ -51,6 +51,7 @@ type CoreTerminalRecord = {
   pendingFullSnapshot: boolean
   pendingFullSnapshotReason?: ThreadedTerminalFullReason
   dirtyRows: Set<number>
+  lastVisibleLineSignatures: string[]
   snapshotScheduled: boolean
   snapshotTimer: ReturnType<typeof setTimeout> | null
   snapshotDueAt: number
@@ -192,8 +193,15 @@ const normalizedPaletteIndex = (value: number, bold: boolean) => {
   return value + 8
 }
 
+type HeadlessCellLike = NonNullable<ReturnType<NonNullable<ReturnType<HeadlessTerminalLike['buffer']['active']['getLine']>>['getCell']>> & {
+  extended?: {
+    underlineStyle?: unknown
+    underlineColor?: unknown
+  }
+}
+
 const cellColor = (
-  cell: NonNullable<ReturnType<NonNullable<ReturnType<HeadlessTerminalLike['buffer']['active']['getLine']>>['getCell']>>,
+  cell: HeadlessCellLike,
   kind: 'fg' | 'bg',
   theme: ThreadedTerminalTheme
 ) => {
@@ -206,7 +214,52 @@ const cellColor = (
   return fallback
 }
 
+const cellFlag = (cell: HeadlessCellLike, key: 'isDim' | 'isBlink' | 'isInvisible' | 'isStrikethrough' | 'isOverline') => Boolean(cell[key]?.())
+
+const cellSignatureParts = (cell: HeadlessCellLike) => [
+  cell.getChars() || ' ',
+  cell.getWidth(),
+  cell.getCode(),
+  cell.getFgColorMode(),
+  cell.getFgColor(),
+  cell.getBgColorMode(),
+  cell.getBgColor(),
+  cell.isBold(),
+  cell.isDim(),
+  cell.isItalic(),
+  cell.isUnderline(),
+  cell.isBlink(),
+  cell.isInverse(),
+  cell.isInvisible(),
+  cell.isStrikethrough(),
+  cell.isOverline(),
+  String(cell.extended?.underlineStyle ?? ''),
+  String(cell.extended?.underlineColor ?? '')
+]
+
 const absoluteCursorRow = (buffer: HeadlessTerminalLike['buffer']['active']) => buffer.baseY + buffer.cursorY
+
+const createCellRun = (options: Omit<ThreadedTerminalCellRun, 'text' | 'chars' | 'widths' | 'columns'> & { char: string; width: number }): ThreadedTerminalCellRun => {
+  const { char, width, ...style } = options
+  return {
+    ...style,
+    text: char,
+    chars: [char],
+    widths: [width],
+    columns: width
+  }
+}
+
+const appendCellToRun = (run: ThreadedTerminalCellRun, char: string, width: number) => {
+  const chars = run.chars || Array.from(run.text || '')
+  const widths = run.widths || chars.map(() => 1)
+  chars.push(char)
+  widths.push(width)
+  run.chars = chars
+  run.widths = widths
+  run.text = chars.join('')
+  run.columns = widths.reduce((total, item) => total + Math.max(1, item || 1), 0)
+}
 
 const isAtScrollBottom = (record: CoreTerminalRecord) => {
   const buffer = record.terminal.buffer.active
@@ -232,38 +285,55 @@ const extractLineRuns = (record: CoreTerminalRecord, lineIndex: number) => {
     const nextCell = line.getCell(x, cell)
     if (!nextCell || nextCell.getWidth() === 0) continue
     const chars = nextCell.getChars() || ' '
+    const width = Math.max(1, nextCell.getWidth() || 1)
     const inverse = Boolean(nextCell.isInverse())
+    const hidden = cellFlag(nextCell, 'isInvisible')
     const fg = inverse ? cellColor(nextCell, 'bg', record.theme) : cellColor(nextCell, 'fg', record.theme)
     const bg = inverse ? cellColor(nextCell, 'fg', record.theme) : cellColor(nextCell, 'bg', record.theme)
     const hasCustomStyle =
       fg !== record.theme.foreground ||
       bg !== record.theme.background ||
       Boolean(nextCell.isBold()) ||
+      cellFlag(nextCell, 'isDim') ||
       Boolean(nextCell.isItalic()) ||
       Boolean(nextCell.isUnderline()) ||
+      cellFlag(nextCell, 'isStrikethrough') ||
+      cellFlag(nextCell, 'isOverline') ||
+      hidden ||
+      cellFlag(nextCell, 'isBlink') ||
       inverse
     const style = {
-      fg: fg === record.theme.foreground ? undefined : fg,
+      fg: hidden || fg === record.theme.foreground ? undefined : fg,
       bg: bg === record.theme.background ? undefined : bg,
       bold: Boolean(nextCell.isBold()) || undefined,
+      dim: cellFlag(nextCell, 'isDim') || undefined,
       italic: Boolean(nextCell.isItalic()) || undefined,
       underline: Boolean(nextCell.isUnderline()) || undefined,
+      strikethrough: cellFlag(nextCell, 'isStrikethrough') || undefined,
+      overline: cellFlag(nextCell, 'isOverline') || undefined,
+      hidden: hidden || undefined,
+      blink: cellFlag(nextCell, 'isBlink') || undefined,
       inverse: inverse || undefined
     }
     if (
       hasCustomStyle &&
       current &&
-      current.x + current.text.length === x &&
+      current.x + (current.columns || Array.from(current.text).length) === x &&
       current.fg === style.fg &&
       current.bg === style.bg &&
       current.bold === style.bold &&
+      current.dim === style.dim &&
       current.italic === style.italic &&
       current.underline === style.underline &&
+      current.strikethrough === style.strikethrough &&
+      current.overline === style.overline &&
+      current.hidden === style.hidden &&
+      current.blink === style.blink &&
       current.inverse === style.inverse
     ) {
-      current.text += chars
+      appendCellToRun(current, chars, width)
     } else if (hasCustomStyle) {
-      current = { x, text: chars, ...style }
+      current = createCellRun({ x, char: chars, width, ...style })
       runs.push(current)
     } else {
       current = null
@@ -272,8 +342,79 @@ const extractLineRuns = (record: CoreTerminalRecord, lineIndex: number) => {
   return runs
 }
 
-const extractKeywordHighlightRuns = (record: CoreTerminalRecord, text: string) =>
-  findThreadedKeywordHighlightRuns(text, record.keywordHighlightRules)
+const textColumnsBeforeCharIndex = (runs: ThreadedTerminalCellRun[], charIndex: number) => {
+  let remaining = Math.max(0, charIndex)
+  let columns = 0
+  for (const run of runs) {
+    const chars = run.chars || Array.from(run.text || '')
+    const widths = chars.map((_char, index) => Math.max(1, run.widths?.[index] || 1))
+    for (let index = 0; index < chars.length; index += 1) {
+      if (remaining <= 0) return columns
+      columns += widths[index]
+      remaining -= 1
+    }
+  }
+  return columns
+}
+
+const sliceRunsByCharRange = (runs: ThreadedTerminalCellRun[], start: number, length: number) => {
+  let remainingStart = Math.max(0, start)
+  let remainingLength = Math.max(0, length)
+  const chars: string[] = []
+  const widths: number[] = []
+  for (const run of runs) {
+    const runChars = run.chars || Array.from(run.text || '')
+    const runWidths = runChars.map((_char, index) => Math.max(1, run.widths?.[index] || 1))
+    for (let index = 0; index < runChars.length; index += 1) {
+      if (remainingStart > 0) {
+        remainingStart -= 1
+        continue
+      }
+      if (remainingLength <= 0) return { chars, widths }
+      chars.push(runChars[index])
+      widths.push(runWidths[index])
+      remainingLength -= 1
+    }
+  }
+  return { chars, widths }
+}
+
+const extractKeywordHighlightRuns = (record: CoreTerminalRecord, text: string, plainRuns: ThreadedTerminalCellRun[]) =>
+  findThreadedKeywordHighlightRuns(text, record.keywordHighlightRules).map((run) => {
+    const startChar = Math.max(0, run.x)
+    const highlightChars = Array.from(run.text || '')
+    const mapped = sliceRunsByCharRange(plainRuns, startChar, highlightChars.length)
+    const x = textColumnsBeforeCharIndex(plainRuns, startChar)
+    const columns = mapped.widths.reduce((total, width) => total + width, 0)
+    return {
+      ...run,
+      x,
+      chars: mapped.chars.length ? mapped.chars : highlightChars,
+      widths: mapped.widths.length ? mapped.widths : highlightChars.map(() => 1),
+      columns: columns || highlightChars.length || 1
+    }
+  })
+
+const extractPlainLineRuns = (record: CoreTerminalRecord, lineIndex: number) => {
+  const line = record.terminal.buffer.active.getLine(lineIndex)
+  if (!line) return []
+  const cell = record.terminal.buffer.active.getNullCell()
+  const runs: ThreadedTerminalCellRun[] = []
+  let current: ThreadedTerminalCellRun | null = null
+  for (let x = 0; x < record.terminal.cols; x += 1) {
+    const nextCell = line.getCell(x, cell)
+    if (!nextCell || nextCell.getWidth() === 0) continue
+    const chars = nextCell.getChars() || ' '
+    const width = Math.max(1, nextCell.getWidth() || 1)
+    if (current && current.x + (current.columns || Array.from(current.text).length) === x) {
+      appendCellToRun(current, chars, width)
+    } else {
+      current = createCellRun({ x, char: chars, width })
+      runs.push(current)
+    }
+  }
+  return runs
+}
 
 const visibleLineIndexes = (record: CoreTerminalRecord) => {
   const buffer = record.terminal.buffer.active
@@ -285,10 +426,42 @@ const visibleLineIndexes = (record: CoreTerminalRecord) => {
   return indexes
 }
 
+const lineSignature = (record: CoreTerminalRecord, lineIndex: number) => {
+  const line = record.terminal.buffer.active.getLine(lineIndex)
+  if (!line) return ''
+  const cell = record.terminal.buffer.active.getNullCell()
+  const parts: string[] = [line.isWrapped ? 'w1' : 'w0']
+  for (let x = 0; x < record.terminal.cols; x += 1) {
+    const nextCell = line.getCell(x, cell) as HeadlessCellLike | undefined
+    if (!nextCell) {
+      parts.push(`${x}:missing`)
+      continue
+    }
+    const width = nextCell.getWidth()
+    if (width === 0) {
+      parts.push(`${x}:cont`)
+      continue
+    }
+    parts.push([x, ...cellSignatureParts(nextCell)].join(':'))
+  }
+  return parts.join('|')
+}
+
+const markChangedVisibleRows = (record: CoreTerminalRecord, beforeSignatures?: string[]) => {
+  const visibleIndexes = visibleLineIndexes(record)
+  const nextSignatures = visibleIndexes.map((lineIndex) => lineSignature(record, lineIndex))
+  const previous = beforeSignatures || record.lastVisibleLineSignatures
+  nextSignatures.forEach((signature, row) => {
+    if (signature !== previous[row]) record.dirtyRows.add(row)
+  })
+  record.lastVisibleLineSignatures = nextSignatures
+}
+
 const buildSnapshot = (record: CoreTerminalRecord, forceFull = false, fullReason?: ThreadedTerminalFullReason): ThreadedTerminalScreenSnapshot => {
   const startedAt = nowMs()
   const buffer = record.terminal.buffer.active
   const visibleIndexes = visibleLineIndexes(record)
+  const visibleSignatures = visibleIndexes.map((lineIndex) => lineSignature(record, lineIndex))
   const allRows = visibleIndexes.map((_lineIndex, row) => row)
   const viewportDelta = record.lastSnapshotAt ? buffer.viewportY - record.lastSnapshotViewportY : 0
   const cursorAbsoluteY = absoluteCursorRow(buffer)
@@ -307,15 +480,18 @@ const buildSnapshot = (record: CoreTerminalRecord, forceFull = false, fullReason
     const lineIndex = buffer.viewportY + row
     const line = buffer.getLine(lineIndex)
     const text = line?.translateToString(false, 0, record.terminal.cols) || ''
+    const runs = extractPlainLineRuns(record, lineIndex)
     return {
       y: row,
       text,
+      runs,
       cells: extractLineRuns(record, lineIndex),
-      highlights: extractKeywordHighlightRuns(record, text),
+      highlights: extractKeywordHighlightRuns(record, text, runs),
       wrapped: Boolean(line?.isWrapped)
     }
   })
   record.dirtyRows.clear()
+  record.lastVisibleLineSignatures = visibleSignatures
   record.pendingFullSnapshot = false
   record.pendingFullSnapshotReason = undefined
   record.lastSnapshotViewportY = buffer.viewportY
@@ -461,6 +637,7 @@ const createRecord = (options: ThreadedTerminalCreateOptions): CoreTerminalRecor
     pendingFullSnapshot: true,
     pendingFullSnapshotReason: 'create',
     dirtyRows: new Set(),
+    lastVisibleLineSignatures: [],
     snapshotScheduled: false,
     snapshotTimer: null,
     snapshotDueAt: 0,
@@ -539,6 +716,7 @@ const flushRecord = (record: CoreTerminalRecord) => {
   const beforeCursorAbsoluteY = absoluteCursorRow(beforeBuffer)
   const beforeViewportY = beforeBuffer.viewportY
   const beforeBaseY = beforeBuffer.baseY
+  const beforeVisibleLineSignatures = visibleLineIndexes(record).map((lineIndex) => lineSignature(record, lineIndex))
   const shouldFollowOutput = record.followOutput || isAtScrollBottom(record)
   if (shouldFollowOutput) record.followOutput = true
   record.perf.chunks += 1
@@ -558,6 +736,7 @@ const flushRecord = (record: CoreTerminalRecord) => {
       const buffer = record.terminal.buffer.active
       const viewportChanged = buffer.viewportY !== beforeViewportY
       const baseChanged = buffer.baseY !== beforeBaseY
+      markChangedVisibleRows(record, beforeVisibleLineSignatures)
       record.dirtyRows.add(beforeCursorAbsoluteY - buffer.viewportY)
       record.dirtyRows.add(absoluteCursorRow(buffer) - buffer.viewportY)
       if (viewportChanged || (shouldFollowOutput && baseChanged)) {

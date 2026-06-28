@@ -152,4 +152,57 @@ describe('threadedTerminalCoreWorker', () => {
     })
     expect(afterInput.viewportY).toBe(afterInput.baseY)
   })
+
+  it('exports xterm cell widths for wide glyph rendering', async () => {
+    await createTerminal()
+    send({ type: 'data', terminalId: createOptions().terminalId, data: 'a你b\n' })
+
+    const snapshot = await waitFor(() => {
+      const next = latestScreen(messages)
+      return next?.lines.some((line) => line.text.includes('a你b')) ? next : undefined
+    })
+    const line = snapshot.lines.find((item) => item.text.includes('a你b'))
+    expect(line?.runs?.[0]).toMatchObject({
+      x: 0,
+      text: expect.stringContaining('a你b'),
+      chars: expect.arrayContaining(['a', '你', 'b'])
+    })
+    expect(line?.runs?.[0].widths?.slice(0, 3)).toEqual([1, 2, 1])
+    expect(line?.runs?.[0].columns).toBeGreaterThanOrEqual(4)
+  })
+
+  it('emits a dirty row when only ANSI style changes on a cursor-addressed TUI row', async () => {
+    await createTerminal()
+    send({ type: 'data', terminalId: createOptions().terminalId, data: 'top\nstatus\nprompt\n' })
+    const initial = await waitFor(() => {
+      const next = latestScreen(messages)
+      return next && visibleText(next).includes('prompt') ? next : undefined
+    })
+
+    send({
+      type: 'data',
+      terminalId: createOptions().terminalId,
+      data: '\x1b[2;1H\x1b[38;2;10;20;30mWorking\x1b[39m\x1b[4;1H'
+    })
+    const firstFrame = await waitFor(() => {
+      const next = latestScreen(messages)
+      return next && next.seq > initial.seq && next.lines.some((line) => line.text.includes('Working')) ? next : undefined
+    })
+    const firstWorkingLine = firstFrame.lines.find((line) => line.text.includes('Working'))
+    expect(firstWorkingLine?.cells?.[0]).toMatchObject({ x: 0, fg: '#0a141e', bold: undefined })
+
+    send({
+      type: 'data',
+      terminalId: createOptions().terminalId,
+      data: '\x1b[2;1H\x1b[1;38;2;200;100;50mWorking\x1b[0m\x1b[4;1H'
+    })
+    const secondFrame = await waitFor(() => {
+      const next = latestScreen(messages)
+      return next && next.seq > firstFrame.seq && next.lines.some((line) => line.text.includes('Working')) ? next : undefined
+    })
+    const secondWorkingLine = secondFrame.lines.find((line) => line.text.includes('Working'))
+
+    expect(secondFrame.dirtyRows).toContain(firstWorkingLine?.y)
+    expect(secondWorkingLine?.cells?.[0]).toMatchObject({ x: 0, fg: '#c86432', bold: true })
+  })
 })

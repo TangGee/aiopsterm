@@ -18,7 +18,8 @@ import type {
 
 const rendererRuntimeEnvNames = [
   'AIOPSTERM_THREADED_TERMINAL',
-  'AIOPSTERM_TERMINAL_STRESS'
+  'AIOPSTERM_TERMINAL_STRESS',
+  'AIOPSTERM_TERMINAL_DEBUG_LOGS'
 ]
 
 const rendererRuntimeEnv = () =>

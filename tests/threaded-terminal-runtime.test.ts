@@ -14,9 +14,12 @@ vi.mock('@/services/app/runtimeLogClient', () => ({
   }
 }))
 
-vi.mock('@/services/app/clipboardRuntime', () => ({
-  copyTextToClipboard: vi.fn(async () => true)
+const clipboardRuntime = vi.hoisted(() => ({
+  copyTextToClipboard: vi.fn(async () => true),
+  readTextFromClipboard: vi.fn(async () => ({ ok: true, text: 'pasted-text' }))
 }))
+
+vi.mock('@/services/app/clipboardRuntime', () => clipboardRuntime)
 
 vi.mock('@/services/terminal/threadedTerminalCoreWorker?worker', () => ({
   default: class FakeCoreWorker {
@@ -141,6 +144,7 @@ afterEach(() => {
   document.body.replaceChildren()
   delete (HTMLCanvasElement.prototype as any).transferControlToOffscreen
   delete (globalThis as any).Worker
+  delete (globalThis as { __AIOPSTERM_RUNTIME_ENV__?: Record<string, string | undefined> }).__AIOPSTERM_RUNTIME_ENV__
   logs.length = 0
   vi.restoreAllMocks()
 })
@@ -184,6 +188,7 @@ describe('threadedTerminalRuntime', () => {
     expect(hostElement.querySelector('.threaded-terminal-canvas')).toBeTruthy()
     expect(hostElement.querySelector('.threaded-terminal-selection-layer')).toBeTruthy()
     expect(hostElement.querySelector('.threaded-terminal-scrollbar')).toBeTruthy()
+    expect(hostElement.querySelector('.threaded-terminal-input')).toBeInstanceOf(HTMLTextAreaElement)
     host.write('chunk\n')
     host.setVisibility(false, 'background')
     host.dispose()
@@ -205,6 +210,138 @@ describe('threadedTerminalRuntime', () => {
         expect.objectContaining({ type: 'dispose', terminalId: 'panel-1' })
       ])
     )
+  })
+
+  it('focuses the hidden input host for keyboard and IME events', () => {
+    installOffscreenCanvasSupport()
+    const host = createHost()
+    const element = createHostElement()
+    host.open(element)
+
+    const input = element.querySelector<HTMLTextAreaElement>('.threaded-terminal-input')
+    expect(input).toBeTruthy()
+    host.focus()
+
+    expect(document.activeElement).toBe(input)
+    host.dispose()
+  })
+
+  it('keeps terminal copy and interrupt shortcuts separate', async () => {
+    installOffscreenCanvasSupport()
+    const host = createHost()
+    const element = createHostElement()
+    Object.defineProperty(element, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({ left: 0, top: 0, width: 800, height: 400, right: 800, bottom: 400, x: 0, y: 0, toJSON: () => ({}) })
+    })
+    host.open(element)
+    host.applySnapshot({
+      terminalId: 'panel-1',
+      seq: 1,
+      cols: 80,
+      rows: 10,
+      cursorX: 0,
+      cursorY: 9,
+      cursorAbsoluteY: 9,
+      viewportY: 0,
+      baseY: 0,
+      lines: [{ y: 0, text: 'copy me', cells: [] }],
+      dirtyRows: [0],
+      full: true,
+      visible: true,
+      priority: 'active'
+    })
+    element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0, clientX: 0, clientY: 0 }))
+    element.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, button: 0, clientX: 64, clientY: 0 }))
+    window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0, clientX: 64, clientY: 0 }))
+
+    const beforeCopy = await workerMessages()
+    element.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'C', ctrlKey: true, shiftKey: true }))
+    await Promise.resolve()
+    const afterCopy = await workerMessages()
+    const copyInputs = afterCopy.core.slice(beforeCopy.core.length).filter((message: any) => message.type === 'input')
+    expect(copyInputs).toEqual([])
+    expect(clipboardRuntime.copyTextToClipboard).toHaveBeenCalledWith('copy me')
+
+    element.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'c', ctrlKey: true }))
+    const afterInterrupt = await workerMessages()
+    expect(afterInterrupt.core).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'input', terminalId: 'panel-1', data: '\x03' })
+    ]))
+    host.dispose()
+  })
+
+  it('routes focused textarea terminal shortcuts like VTE copy and interrupt shortcuts', async () => {
+    installOffscreenCanvasSupport()
+    const host = createHost()
+    const element = createHostElement()
+    host.open(element)
+    const input = element.querySelector<HTMLTextAreaElement>('.threaded-terminal-input')!
+    host.focus()
+
+    const beforeCopy = await workerMessages()
+    input.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'C', ctrlKey: true, shiftKey: true }))
+    await Promise.resolve()
+    const afterCopy = await workerMessages()
+    expect(afterCopy.core.slice(beforeCopy.core.length).filter((message: any) => message.type === 'input')).toEqual([])
+
+    input.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'c', ctrlKey: true }))
+    const afterInterrupt = await workerMessages()
+    expect(afterInterrupt.core).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'input', terminalId: 'panel-1', data: '\x03' })
+    ]))
+    expect(input.value).toBe('')
+    host.dispose()
+  })
+
+  it('routes paste shortcuts through clipboard text without typing control characters', async () => {
+    installOffscreenCanvasSupport()
+    const host = createHost()
+    const element = createHostElement()
+    host.open(element)
+
+    const before = await workerMessages()
+    element.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'V', ctrlKey: true, shiftKey: true }))
+    await Promise.resolve()
+    const after = await workerMessages()
+
+    expect(clipboardRuntime.readTextFromClipboard).toHaveBeenCalled()
+    expect(after.core.slice(before.core.length)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'input', terminalId: 'panel-1', data: 'pasted-text' })
+    ]))
+    host.dispose()
+  })
+
+  it('sends committed textarea input and IME composition text once', async () => {
+    installOffscreenCanvasSupport()
+    const host = createHost()
+    const element = createHostElement()
+    host.open(element)
+    const input = element.querySelector<HTMLTextAreaElement>('.threaded-terminal-input')!
+
+    const beforePlain = await workerMessages()
+    input.value = 'hello'
+    input.dispatchEvent(new InputEvent('input', { bubbles: true, data: 'hello', inputType: 'insertText' }))
+    const afterPlain = await workerMessages()
+    expect(afterPlain.core.slice(beforePlain.core.length)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'input', terminalId: 'panel-1', data: 'hello' })
+    ]))
+    expect(input.value).toBe('')
+
+    const beforeComposition = await workerMessages()
+    input.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true, data: '' }))
+    input.value = 'zhong'
+    input.dispatchEvent(new InputEvent('input', { bubbles: true, data: 'zhong', inputType: 'insertCompositionText' }))
+    input.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: '中' }))
+    input.value = '中'
+    input.dispatchEvent(new InputEvent('input', { bubbles: true, data: '中', inputType: 'insertFromComposition' }))
+    const afterComposition = await workerMessages()
+    const compositionInputs = afterComposition.core.slice(beforeComposition.core.length).filter((message: any) => message.type === 'input')
+    expect(compositionInputs).toEqual([
+      expect.objectContaining({ type: 'input', terminalId: 'panel-1', data: '中' })
+    ])
+    expect(input.value).toBe('')
+    host.dispose()
   })
 
   it('passes keyword highlight config to the core worker and updates it independently of settings', async () => {
@@ -475,6 +612,48 @@ describe('threadedTerminalRuntime', () => {
     host.dispose()
   })
 
+  it('copies wide glyphs using terminal cell columns', () => {
+    installOffscreenCanvasSupport()
+    const host = createHost()
+    const element = createHostElement()
+    Object.defineProperty(element, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({ left: 0, top: 0, width: 800, height: 400, right: 800, bottom: 400, x: 0, y: 0, toJSON: () => ({}) })
+    })
+    host.open(element)
+    host.applySnapshot({
+      terminalId: 'panel-1',
+      seq: 1,
+      cols: 80,
+      rows: 10,
+      cursorX: 0,
+      cursorY: 9,
+      cursorAbsoluteY: 9,
+      viewportY: 0,
+      baseY: 0,
+      lines: [
+        {
+          y: 0,
+          text: 'a你b',
+          runs: [{ x: 0, text: 'a你b', chars: ['a', '你', 'b'], widths: [1, 2, 1], columns: 4 }],
+          cells: []
+        }
+      ],
+      dirtyRows: [0],
+      full: true,
+      visible: true,
+      priority: 'active'
+    })
+
+    element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0, clientX: 9, clientY: 0 }))
+    element.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, button: 0, clientX: 36, clientY: 0 }))
+    window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0, clientX: 36, clientY: 0 }))
+
+    expect(host.getSelection()).toBe('你b')
+    expect(host.getSelectionPosition()).toEqual({ start: { x: 1, y: 0 }, end: { x: 4, y: 0 } })
+    host.dispose()
+  })
+
   it('selects a word on double click and the wrapped logical line on triple click', () => {
     installOffscreenCanvasSupport()
     const host = createHost()
@@ -513,6 +692,49 @@ describe('threadedTerminalRuntime', () => {
     window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0, detail: 3, clientX: 9 * 4, clientY: 15 }))
     expect(host.getSelection()).toBe('first command-value tailwrapped-tail next')
     expect(host.getSelectionPosition()).toEqual({ start: { x: 0, y: 0 }, end: { x: 80, y: 1 } })
+    host.dispose()
+  })
+
+  it('selects wide-glyph words from terminal cell coordinates', () => {
+    installOffscreenCanvasSupport()
+    const host = createHost()
+    const element = createHostElement()
+    Object.defineProperty(element, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({ left: 0, top: 0, width: 800, height: 400, right: 800, bottom: 400, x: 0, y: 0, toJSON: () => ({}) })
+    })
+    host.open(element)
+    host.applySnapshot({
+      terminalId: 'panel-1',
+      seq: 1,
+      cols: 80,
+      rows: 10,
+      cursorX: 0,
+      cursorY: 9,
+      cursorAbsoluteY: 9,
+      viewportY: 0,
+      baseY: 0,
+      lines: [
+        {
+          y: 0,
+          text: 'go你好 tail',
+          runs: [
+            { x: 0, text: 'go你好 tail', chars: ['g', 'o', '你', '好', ' ', 't', 'a', 'i', 'l'], widths: [1, 1, 2, 2, 1, 1, 1, 1, 1], columns: 11 }
+          ],
+          cells: []
+        }
+      ],
+      dirtyRows: [0],
+      full: true,
+      visible: true,
+      priority: 'active'
+    })
+
+    element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0, detail: 2, clientX: 27, clientY: 0 }))
+    window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0, detail: 2, clientX: 27, clientY: 0 }))
+
+    expect(host.getSelection()).toBe('go你好')
+    expect(host.getSelectionPosition()).toEqual({ start: { x: 0, y: 0 }, end: { x: 6, y: 0 } })
     host.dispose()
   })
 
@@ -559,6 +781,133 @@ describe('threadedTerminalRuntime', () => {
       expect.objectContaining({ type: 'settings', terminalId: 'panel-1', settings: expect.objectContaining({ fontSize: 14 }) })
     ])
 
+    host.dispose()
+  })
+
+  it('gates threaded terminal perf logs behind the terminal debug switch', async () => {
+    installOffscreenCanvasSupport()
+    const host = createHost()
+    host.startCoreOnly()
+    const messages = await workerMessages()
+    const coreWorker = (await import('@/services/terminal/threadedTerminalCoreWorker?worker')).default as any
+    const renderWorker = (await import('@/services/terminal/threadedTerminalRenderWorker?worker')).default as any
+    const core = coreWorker.instances[0]
+    const render = renderWorker.instances[0]
+
+    core.onmessage?.({
+      data: {
+        type: 'perf',
+        sample: {
+          terminalId: 'panel-1',
+          priority: 'active',
+          visible: true,
+          chunks: 1,
+          bytes: 12,
+          parseMs: 1,
+          snapshotMs: 1,
+          flushMs: 1,
+          pendingBytes: 0,
+          pendingChunks: 0,
+          maxPendingBytes: 12,
+          droppedPaints: 0
+        }
+      }
+    } as MessageEvent)
+    render.onmessage?.({
+      data: {
+        type: 'perf',
+        terminalId: 'panel-1',
+        frames: 1,
+        avgFrameMs: 2,
+        maxFrameMs: 3,
+        skippedFrames: 0
+      }
+    } as MessageEvent)
+    expect(logs.filter((log) => log.event.includes('-perf'))).toEqual([])
+
+    ;(globalThis as { __AIOPSTERM_RUNTIME_ENV__?: Record<string, string | undefined> }).__AIOPSTERM_RUNTIME_ENV__ = {
+      AIOPSTERM_TERMINAL_DEBUG_LOGS: '1'
+    }
+    core.onmessage?.({
+      data: {
+        type: 'perf',
+        sample: {
+          terminalId: 'panel-1',
+          priority: 'active',
+          visible: true,
+          chunks: 1,
+          bytes: 24,
+          parseMs: 1,
+          snapshotMs: 1,
+          flushMs: 1,
+          pendingBytes: 0,
+          pendingChunks: 0,
+          maxPendingBytes: 24,
+          droppedPaints: 0
+        }
+      }
+    } as MessageEvent)
+    render.onmessage?.({
+      data: {
+        type: 'perf',
+        terminalId: 'panel-1',
+        frames: 2,
+        avgFrameMs: 2,
+        maxFrameMs: 4,
+        skippedFrames: 0
+      }
+    } as MessageEvent)
+
+    expect(messages.core.length).toBeGreaterThan(0)
+    expect(logs.filter((log) => log.event.includes('-perf')).map((log) => log.event)).toEqual([
+      'renderer.threaded-terminal.core-perf',
+      'renderer.threaded-terminal.render-perf'
+    ])
+    host.dispose()
+  })
+
+  it('returns cloned threaded terminal debug snapshots for stress probes', () => {
+    installOffscreenCanvasSupport()
+    const host = createHost()
+    host.open(createHostElement())
+    host.applySnapshot({
+      terminalId: 'panel-1',
+      seq: 7,
+      cols: 80,
+      rows: 10,
+      cursorX: 0,
+      cursorY: 9,
+      cursorAbsoluteY: 19,
+      viewportY: 10,
+      baseY: 10,
+      lines: [
+        {
+          y: 0,
+          text: 'styled',
+          runs: [{ x: 0, text: 'styled', fg: '#ff0000', chars: ['s'], widths: [1] }],
+          cells: [{ x: 0, text: 'styled', fg: '#00ff00', chars: ['s'], widths: [1] }],
+          highlights: [{ x: 0, text: 'sty', fg: '#ffff00', chars: ['s'], widths: [1] }]
+        }
+      ],
+      dirtyRows: [0],
+      full: true,
+      visible: true,
+      priority: 'active'
+    })
+
+    const snapshot = host.debugSnapshot()
+    snapshot.lines[0]!.runs![0]!.fg = '#000000'
+    snapshot.lines[0]!.runs![0]!.chars!.push('x')
+    snapshot.lines[0]!.cells![0]!.fg = '#000000'
+    snapshot.lines[0]!.highlights![0]!.fg = '#000000'
+
+    const nextSnapshot = host.debugSnapshot()
+    expect(nextSnapshot.text).toContain('styled')
+    expect(nextSnapshot.viewportY).toBe(10)
+    expect(nextSnapshot.baseY).toBe(10)
+    expect(nextSnapshot.lines[0]?.runs?.[0]).toEqual(expect.objectContaining({ fg: '#ff0000', chars: ['s'] }))
+    expect(nextSnapshot.lines[0]?.cells?.[0]).toEqual(expect.objectContaining({ fg: '#00ff00', chars: ['s'] }))
+    expect(nextSnapshot.lines[0]?.highlights?.[0]).toEqual(expect.objectContaining({ fg: '#ffff00', chars: ['s'] }))
     host.dispose()
   })
 })

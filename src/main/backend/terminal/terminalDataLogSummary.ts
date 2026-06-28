@@ -15,12 +15,14 @@ export type TerminalDataLogSummaryFlush = {
 export type TerminalDataLogSummaryOptions = {
   intervalMs?: number
   chunkThreshold?: number
+  byteThreshold?: number
   now?: () => number
 }
 
 export const createTerminalDataLogSummary = (options: TerminalDataLogSummaryOptions = {}) => {
-  const intervalMs = options.intervalMs ?? 1000
-  const chunkThreshold = options.chunkThreshold ?? 50
+  const intervalMs = options.intervalMs ?? 10_000
+  const chunkThreshold = options.chunkThreshold ?? 1000
+  const byteThreshold = options.byteThreshold ?? 8 * 1024 * 1024
   const now = options.now || Date.now
   const summaries = new Map<string, TerminalDataLogSummary>()
 
@@ -41,12 +43,12 @@ export const createTerminalDataLogSummary = (options: TerminalDataLogSummaryOpti
     existing.bytes += bytes
     existing.lastAt = at
     existing.maxChunkBytes = Math.max(existing.maxChunkBytes, bytes)
-    if (existing.lastAt - existing.firstAt >= intervalMs || existing.chunks >= chunkThreshold) {
+    if (existing.lastAt - existing.firstAt >= intervalMs || existing.chunks >= chunkThreshold || existing.bytes >= byteThreshold) {
       summaries.delete(id)
       return {
         id,
         summary: existing,
-        reason: existing.chunks >= chunkThreshold ? 'chunk-threshold' : 'interval'
+        reason: existing.bytes >= byteThreshold ? 'byte-threshold' : existing.chunks >= chunkThreshold ? 'chunk-threshold' : 'interval'
       }
     }
     return null

@@ -1,7 +1,8 @@
 import CoreWorker from '@/services/terminal/threadedTerminalCoreWorker?worker'
 import RenderWorker from '@/services/terminal/threadedTerminalRenderWorker?worker'
 import { writeRendererRuntimeLog } from '@/services/app/runtimeLogClient'
-import { copyTextToClipboard } from '@/services/app/clipboardRuntime'
+import { copyTextToClipboard, readTextFromClipboard } from '@/services/app/clipboardRuntime'
+import { shouldUseTerminalDebugLogs } from '@shared/runtimeSwitches'
 import type {
   ThreadedTerminalCoreRequest,
   ThreadedTerminalCoreResponse,
@@ -147,6 +148,16 @@ export type ThreadedTerminalDebugStats = {
   }>
 }
 
+export type ThreadedTerminalHostDebugSnapshot = {
+  text: string
+  cols: number
+  rows: number
+  viewportY: number
+  baseY: number
+  lines: ThreadedTerminalScreenLine[]
+  lastFrameSeq: number
+}
+
 export type ThreadedTerminalPaintMeasure = {
   terminalId: string
   latencyMs: number
@@ -242,6 +253,7 @@ const settingsSignatureFor = (settings: ThreadedTerminalSettings, theme: Threade
   ].join('\u001f')
 
 const logThreadedTerminal = (level: 'debug' | 'info' | 'warn' | 'error', event: string, fields?: Record<string, unknown>) => {
+  if (level === 'debug' && !shouldUseTerminalDebugLogs()) return
   writeRendererRuntimeLog(level, event, fields)
 }
 
@@ -249,6 +261,18 @@ const terminalScrollbarWidthPx = 10
 const terminalScrollbarThumbMinPx = 28
 
 const blankScreenLine = (y: number): ThreadedTerminalScreenLine => ({ y, text: '', cells: [] })
+
+const cloneCellRuns = (runs?: ThreadedTerminalScreenLine['cells']) => runs?.map((cell) => ({
+  ...cell,
+  chars: cell.chars ? [...cell.chars] : undefined,
+  widths: cell.widths ? [...cell.widths] : undefined
+}))
+
+const runChars = (run: { text: string; chars?: string[] }) => run.chars || Array.from(run.text || '')
+const runWidths = (run: { text: string; chars?: string[]; widths?: number[] }) => {
+  const chars = runChars(run)
+  return chars.map((_char, index) => Math.max(1, run.widths?.[index] || 1))
+}
 
 const postCore = (handle: ThreadedTerminalCoreHandle, message: ThreadedTerminalCoreRequest, transfer?: Transferable[]) => {
   handle.worker.postMessage(message, transfer || [])
@@ -402,9 +426,23 @@ const pickCoreWorker = (terminalId: string) => {
 
 const createDisposable = (dispose: () => void): DisposableLike => ({ dispose })
 
+const isCopyShortcut = (event: KeyboardEvent) => {
+  const key = event.key.toLowerCase()
+  if (key !== 'c') return false
+  if (event.shiftKey && (event.ctrlKey || event.metaKey) && !event.altKey) return true
+  return event.metaKey && !event.ctrlKey && !event.altKey
+}
+
+const isPasteShortcut = (event: KeyboardEvent) => {
+  const key = event.key.toLowerCase()
+  if (key !== 'v') return false
+  if (event.shiftKey && (event.ctrlKey || event.metaKey) && !event.altKey) return true
+  return event.metaKey && !event.ctrlKey && !event.altKey
+}
+
 const keyEventToInput = (event: KeyboardEvent) => {
   if (event.defaultPrevented) return ''
-  if (event.key.length === 1 && !event.ctrlKey && !event.metaKey) return event.key
+  if (event.isComposing || event.key === 'Process') return ''
   if (event.key === 'Enter') return '\r'
   if (event.key === 'Tab') return '\t'
   if (event.key === 'Backspace') return '\x7f'
@@ -413,7 +451,7 @@ const keyEventToInput = (event: KeyboardEvent) => {
   if (event.key === 'ArrowDown') return '\x1b[B'
   if (event.key === 'ArrowRight') return '\x1b[C'
   if (event.key === 'ArrowLeft') return '\x1b[D'
-  if ((event.ctrlKey || event.metaKey) && event.key.length === 1) {
+  if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.length === 1) {
     const code = event.key.toUpperCase().charCodeAt(0)
     if (code >= 64 && code <= 95) return String.fromCharCode(code - 64)
   }
@@ -456,6 +494,7 @@ export class ThreadedTerminalHost {
   buffer: { active: ThreadedTerminalBufferActive }
   private host: HTMLElement | null = null
   private canvas: HTMLCanvasElement | null = null
+  private inputElement: HTMLTextAreaElement | null = null
   private scrollbar: HTMLElement | null = null
   private scrollbarThumb: HTMLElement | null = null
   private selectionLayer: HTMLElement | null = null
@@ -487,6 +526,8 @@ export class ThreadedTerminalHost {
   private keywordHighlight?: ThreadedTerminalKeywordHighlightConfig
   private settingsSignature: string
   private scrollbarDrag: { startClientY: number; startViewportY: number; max: number; trackHeight: number; thumbHeight: number } | null = null
+  private composing = false
+  private skipNextInputText: string | null = null
   private readonly groupId: string
   private readonly surface: ThreadedTerminalSurface
   private readonly terminalId: string
@@ -594,11 +635,39 @@ export class ThreadedTerminalHost {
       transition: 'opacity 120ms ease, background-color 120ms ease'
     })
     scrollbar.appendChild(scrollbarThumb)
-    element.replaceChildren(canvas, selectionLayer, scrollbar)
+    const inputElement = document.createElement('textarea')
+    inputElement.className = 'threaded-terminal-input'
+    inputElement.setAttribute('aria-label', 'Terminal input')
+    inputElement.setAttribute('autocapitalize', 'off')
+    inputElement.setAttribute('autocomplete', 'off')
+    inputElement.setAttribute('autocorrect', 'off')
+    inputElement.setAttribute('spellcheck', 'false')
+    inputElement.wrap = 'off'
+    inputElement.tabIndex = 0
+    Object.assign(inputElement.style, {
+      position: 'absolute',
+      left: '0',
+      top: '0',
+      width: '1px',
+      height: `${Math.max(1, Number(this.options.fontSize || 12))}px`,
+      opacity: '0',
+      border: '0',
+      padding: '0',
+      margin: '0',
+      outline: 'none',
+      resize: 'none',
+      overflow: 'hidden',
+      background: 'transparent',
+      color: 'transparent',
+      caretColor: 'transparent',
+      pointerEvents: 'none'
+    })
+    element.replaceChildren(canvas, selectionLayer, scrollbar, inputElement)
     this.canvas = canvas
     this.selectionLayer = selectionLayer
     this.scrollbar = scrollbar
     this.scrollbarThumb = scrollbarThumb
+    this.inputElement = inputElement
     this.applyScrollbarTheme()
     try {
       if (!this.coreCreated) this.createCore(this.initialData)
@@ -626,7 +695,7 @@ export class ThreadedTerminalHost {
   }
 
   focus() {
-    this.host?.focus({ preventScroll: true })
+    this.focusInput()
   }
 
   clear() {
@@ -663,6 +732,7 @@ export class ThreadedTerminalHost {
     }
     this.host = null
     this.canvas = null
+    this.inputElement = null
     this.scrollbar = null
     this.scrollbarThumb = null
     this.selectionLayer = null
@@ -670,6 +740,8 @@ export class ThreadedTerminalHost {
     this.offscreenTransferred = false
     this.lastCanvasSize = null
     this.selection = null
+    this.composing = false
+    this.skipNextInputText = null
     if (!this.disposed) {
       this.visible = false
       this.priority = 'background'
@@ -790,6 +862,7 @@ export class ThreadedTerminalHost {
     this.buffer.active.viewportY = snapshot.viewportY
     this.buffer.active.baseY = snapshot.baseY
     this.buffer.active.length = Math.max(snapshot.baseY + snapshot.rows, snapshot.viewportY + snapshot.rows, snapshot.lines.length)
+    this.updateInputPosition()
     if (snapshot.full || !this.snapshotLines.length || Math.abs(snapshot.scrollDeltaRows || 0) >= snapshot.rows) {
       this.snapshotLines = Array.from({ length: snapshot.rows }, () => '')
       this.snapshotScreenLines = Array.from({ length: snapshot.rows }, (_item, row) => blankScreenLine(row))
@@ -814,8 +887,9 @@ export class ThreadedTerminalHost {
       this.snapshotLines[line.y] = line.text
       this.snapshotScreenLines[line.y] = {
         ...line,
-        cells: line.cells ? line.cells.map((cell) => ({ ...cell })) : undefined,
-        highlights: line.highlights ? line.highlights.map((highlight) => ({ ...highlight })) : undefined
+        runs: cloneCellRuns(line.runs),
+        cells: cloneCellRuns(line.cells),
+        highlights: line.highlights ? line.highlights.map((highlight) => ({ ...highlight, chars: highlight.chars ? [...highlight.chars] : undefined, widths: highlight.widths ? [...highlight.widths] : undefined })) : undefined
       }
     })
     this.snapshotScreenLines.forEach((line, row) => {
@@ -963,6 +1037,28 @@ export class ThreadedTerminalHost {
     }
   }
 
+  debugSnapshot(): ThreadedTerminalHostDebugSnapshot {
+    return {
+      text: this.snapshotLines.join('\n').replace(/\s+$/g, ''),
+      cols: this.cols,
+      rows: this.rows,
+      viewportY: this.buffer.active.viewportY,
+      baseY: this.buffer.active.baseY,
+      lines: this.snapshotScreenLines.map((line, row) => ({
+        ...line,
+        y: row,
+        runs: cloneCellRuns(line.runs) || [],
+        cells: cloneCellRuns(line.cells) || [],
+        highlights: line.highlights?.map((highlight) => ({
+          ...highlight,
+          chars: highlight.chars ? [...highlight.chars] : undefined,
+          widths: highlight.widths ? [...highlight.widths] : undefined
+        })) || []
+      })),
+      lastFrameSeq: this.lastRenderFrame?.seq || 0
+    }
+  }
+
   fit() {
     if (!this.host) return
     const rect = this.host.getBoundingClientRect()
@@ -978,8 +1074,84 @@ export class ThreadedTerminalHost {
     const rows = Math.max(1, Math.floor(height / cellHeight))
     this.resizeCanvas()
     this.resize(cols, rows)
+    this.updateInputPosition()
     this.updateScrollbar()
     this.renderSelection()
+  }
+
+  private focusInput() {
+    ;(this.inputElement || this.host)?.focus({ preventScroll: true })
+  }
+
+  private resetInputElement() {
+    if (this.inputElement) this.inputElement.value = ''
+  }
+
+  private updateInputPosition() {
+    if (!this.inputElement) return
+    const cursorAbsoluteY = this.lastSnapshot?.cursorAbsoluteY ?? this.buffer.active.viewportY + this.buffer.active.cursorY
+    const cursorViewportY = cursorAbsoluteY - this.buffer.active.viewportY
+    const left = Math.max(0, Math.min(this.cols - 1, this.buffer.active.cursorX)) * this.cellMetrics.width
+    const top = Math.max(0, Math.min(this.rows - 1, cursorViewportY)) * this.cellMetrics.height
+    this.inputElement.style.left = `${left}px`
+    this.inputElement.style.top = `${top}px`
+    this.inputElement.style.height = `${Math.max(1, this.cellMetrics.height)}px`
+    this.inputElement.style.font = `${this.options.fontSize}px ${this.options.fontFamily}`
+  }
+
+  private async copySelectionToClipboard(event?: ClipboardEvent | KeyboardEvent) {
+    const text = this.selectionText()
+    if (!text) return false
+    event?.preventDefault()
+    event?.stopPropagation()
+    if (event && 'clipboardData' in event) event.clipboardData?.setData('text/plain', text)
+    await copyTextToClipboard(text)
+    return true
+  }
+
+  private async pasteFromClipboard() {
+    const clipboardRead = await readTextFromClipboard()
+    if (clipboardRead.ok && clipboardRead.text) this.input(clipboardRead.text)
+  }
+
+  private handleKeyboardEvent(event: KeyboardEvent) {
+    if (this.customKeyHandler && this.customKeyHandler(event) === false) {
+      event.preventDefault()
+      event.stopPropagation()
+      return true
+    }
+    if (isCopyShortcut(event)) {
+      event.preventDefault()
+      event.stopPropagation()
+      void this.copySelectionToClipboard()
+      return true
+    }
+    if (isPasteShortcut(event)) {
+      event.preventDefault()
+      event.stopPropagation()
+      void this.pasteFromClipboard()
+      return true
+    }
+    const input = keyEventToInput(event)
+    if (!input) return false
+    event.preventDefault()
+    event.stopPropagation()
+    this.resetInputElement()
+    this.input(input)
+    return true
+  }
+
+  private handleInputElementValue() {
+    if (!this.inputElement || this.composing) return
+    const text = this.inputElement.value
+    if (!text) return
+    this.resetInputElement()
+    if (this.skipNextInputText && text === this.skipNextInputText) {
+      this.skipNextInputText = null
+      return
+    }
+    this.skipNextInputText = null
+    this.input(text)
   }
 
   private emitSelectionChange() {
@@ -1000,6 +1172,22 @@ export class ThreadedTerminalHost {
 
   private textForSelectionRow(row: number, startX: number, endX: number) {
     const visibleRow = row - this.buffer.active.viewportY
+    const screenLine = this.snapshotScreenLines[visibleRow]
+    if (screenLine?.runs?.length) {
+      let text = ''
+      for (const run of screenLine.runs) {
+        const chars = runChars(run)
+        const widths = runWidths(run)
+        let cellX = run.x
+        chars.forEach((char, index) => {
+          const width = widths[index]
+          const cellEnd = cellX + width
+          if (cellEnd > startX && cellX < endX) text += char
+          cellX = cellEnd
+        })
+      }
+      return text.replace(/\s+$/g, '')
+    }
     const line = this.snapshotLines[visibleRow] || ''
     const chars = Array.from(line.padEnd(Math.max(0, endX), ' '))
     return chars.slice(Math.max(0, startX), Math.max(0, endX)).join('').replace(/\s+$/g, '')
@@ -1011,6 +1199,40 @@ export class ThreadedTerminalHost {
 
   private lineTextForBufferRow(row: number) {
     return this.snapshotLines[row - this.buffer.active.viewportY] || ''
+  }
+
+  private lineCellEntriesForBufferRow(row: number) {
+    const screenLine = this.screenLineForBufferRow(row)
+    if (screenLine?.runs?.length) {
+      const entries: Array<{ char: string; start: number; end: number }> = []
+      for (const run of screenLine.runs) {
+        const chars = runChars(run)
+        const widths = runWidths(run)
+        let cellX = run.x
+        chars.forEach((char, index) => {
+          const width = widths[index]
+          entries.push({ char, start: cellX, end: cellX + width })
+          cellX += width
+        })
+      }
+      return entries
+    }
+    return Array.from(this.lineTextForBufferRow(row)).map((char, index) => ({ char, start: index, end: index + 1 }))
+  }
+
+  private charIndexAtCell(row: number, x: number) {
+    const entries = this.lineCellEntriesForBufferRow(row)
+    if (!entries.length) return 0
+    const index = entries.findIndex((entry) => entry.end > x)
+    return Math.max(0, index >= 0 ? index : entries.length - 1)
+  }
+
+  private cellXForCharIndex(row: number, charIndex: number) {
+    const entries = this.lineCellEntriesForBufferRow(row)
+    if (!entries.length) return Math.max(0, charIndex)
+    if (charIndex <= 0) return entries[0].start
+    if (charIndex >= entries.length) return entries[entries.length - 1].end
+    return entries[charIndex].start
   }
 
   private selectionText() {
@@ -1044,10 +1266,10 @@ export class ThreadedTerminalHost {
   }
 
   private wordSelectionAt(point: ThreadedTerminalSelectionPoint) {
-    const line = this.lineTextForBufferRow(point.y)
-    const chars = Array.from(line)
+    const entries = this.lineCellEntriesForBufferRow(point.y)
+    const chars = entries.map((entry) => entry.char)
     if (!chars.length) return null
-    const index = Math.max(0, Math.min(chars.length - 1, point.x))
+    const index = this.charIndexAtCell(point.y, point.x)
     const selectedChar = chars[index]
     if (selectedChar === undefined) return null
     if (selectedChar === ' ') {
@@ -1055,7 +1277,7 @@ export class ThreadedTerminalHost {
       let end = index + 1
       while (start > 0 && chars[start - 1] === ' ') start -= 1
       while (end < chars.length && chars[end] === ' ') end += 1
-      return { start: { x: start, y: point.y }, end: { x: end, y: point.y } }
+      return { start: { x: this.cellXForCharIndex(point.y, start), y: point.y }, end: { x: this.cellXForCharIndex(point.y, end), y: point.y } }
     }
     let start = index
     let end = index + 1
@@ -1064,21 +1286,23 @@ export class ThreadedTerminalHost {
     let startRow = point.y
     let endRow = point.y
     while (start === 0 && this.screenLineForBufferRow(startRow)?.wrapped) {
-      const previousLine = this.lineTextForBufferRow(startRow - 1)
-      const previousChars = Array.from(previousLine)
+      const previousChars = this.lineCellEntriesForBufferRow(startRow - 1).map((entry) => entry.char)
       if (!previousChars.length || this.isWordSeparator(previousChars[previousChars.length - 1] || '')) break
       startRow -= 1
       start = previousChars.length
       while (start > 0 && !this.isWordSeparator(previousChars[start - 1] || '')) start -= 1
     }
     while (end === chars.length && this.screenLineForBufferRow(endRow + 1)?.wrapped) {
-      const nextChars = Array.from(this.lineTextForBufferRow(endRow + 1))
+      const nextChars = this.lineCellEntriesForBufferRow(endRow + 1).map((entry) => entry.char)
       if (!nextChars.length || this.isWordSeparator(nextChars[0] || '')) break
       endRow += 1
       end = 0
       while (end < nextChars.length && !this.isWordSeparator(nextChars[end] || '')) end += 1
     }
-    return { start: { x: start, y: startRow }, end: { x: end, y: endRow } }
+    return {
+      start: { x: this.cellXForCharIndex(startRow, start), y: startRow },
+      end: { x: this.cellXForCharIndex(endRow, end), y: endRow }
+    }
   }
 
   private paragraphSelectionAt(point: ThreadedTerminalSelectionPoint) {
@@ -1270,67 +1494,80 @@ export class ThreadedTerminalHost {
   private bindDomEvents() {
     if (!this.host) return
     const host = this.host
-	    this.eventController?.abort()
-	    this.eventController = new AbortController()
-	    const signal = this.eventController.signal
-	    host.addEventListener('mousedown', (event) => {
-	      if (event.button !== 0) return
-	      if ((event.target as HTMLElement | null)?.closest?.('.threaded-terminal-scrollbar')) return
-	      event.preventDefault()
-	      host.focus({ preventScroll: true })
-	      const point = this.pointFromMouseEvent(event)
-	      const mode: ThreadedTerminalSelectionMode = event.detail >= 3 ? 'line' : event.detail === 2 ? 'word' : 'char'
-	      this.beginSelection(point, mode)
-	      this.renderSelection()
-	      this.emitSelectionChange()
-	    }, { signal })
-	    host.addEventListener('mousemove', (event) => {
-	      if (!this.selection?.selecting) return
-	      event.preventDefault()
-	      this.updateActiveSelectionFocus(this.pointFromMouseEvent(event))
-	      this.renderSelection()
-	      this.emitSelectionChange()
-	    }, { signal })
+    const inputElement = this.inputElement
+    this.eventController?.abort()
+    this.eventController = new AbortController()
+    const signal = this.eventController.signal
+    host.addEventListener('focus', () => this.focusInput(), { signal })
+    host.addEventListener('mousedown', (event) => {
+      if (event.button !== 0) return
+      if ((event.target as HTMLElement | null)?.closest?.('.threaded-terminal-scrollbar')) return
+      event.preventDefault()
+      this.focusInput()
+      const point = this.pointFromMouseEvent(event)
+      const mode: ThreadedTerminalSelectionMode = event.detail >= 3 ? 'line' : event.detail === 2 ? 'word' : 'char'
+      this.beginSelection(point, mode)
+      this.renderSelection()
+      this.emitSelectionChange()
+    }, { signal })
+    host.addEventListener('mousemove', (event) => {
+      if (!this.selection?.selecting) return
+      event.preventDefault()
+      this.updateActiveSelectionFocus(this.pointFromMouseEvent(event))
+      this.renderSelection()
+      this.emitSelectionChange()
+    }, { signal })
     window.addEventListener('mouseup', (event) => {
       if (this.scrollbarDrag) {
         this.scrollbarDrag = null
         if (this.scrollbarThumb) {
           delete this.scrollbarThumb.dataset.dragging
           this.applyScrollbarTheme()
-	        }
-	        return
-	      }
-	      if (!this.selection?.selecting) return
-	      this.updateActiveSelectionFocus(this.pointFromMouseEvent(event))
-	      this.selection.selecting = false
-	      this.renderSelection()
-	      this.emitSelectionChange()
-	    }, { signal })
+        }
+        return
+      }
+      if (!this.selection?.selecting) return
+      this.updateActiveSelectionFocus(this.pointFromMouseEvent(event))
+      this.selection.selecting = false
+      this.renderSelection()
+      this.emitSelectionChange()
+    }, { signal })
     host.addEventListener('copy', (event) => {
-      const text = this.selectionText()
-      if (!text) return
-      event.preventDefault()
-      event.clipboardData?.setData('text/plain', text)
-      void copyTextToClipboard(text)
+      void this.copySelectionToClipboard(event)
     }, { signal })
-    host.addEventListener('keydown', (event) => {
-      if (this.customKeyHandler && this.customKeyHandler(event) === false) return
-      const input = keyEventToInput(event)
-      if (!input) return
-      event.preventDefault()
-      this.input(input)
-    }, { signal })
+    const handleKeydown = (event: KeyboardEvent) => {
+      this.handleKeyboardEvent(event)
+    }
+    host.addEventListener('keydown', handleKeydown, { signal })
+    inputElement?.addEventListener('keydown', handleKeydown, { signal })
     host.addEventListener('paste', (event) => {
       const text = event.clipboardData?.getData('text/plain') || ''
       if (!text) return
       event.preventDefault()
+      this.resetInputElement()
       this.input(text)
+    }, { signal })
+    inputElement?.addEventListener('compositionstart', () => {
+      this.composing = true
+      this.skipNextInputText = null
+    }, { signal })
+    inputElement?.addEventListener('compositionend', (event) => {
+      this.composing = false
+      const text = event.data || inputElement.value
+      this.resetInputElement()
+      if (text) {
+        this.skipNextInputText = text
+        this.input(text)
+      }
+    }, { signal })
+    inputElement?.addEventListener('input', () => {
+      this.handleInputElementValue()
     }, { signal })
     this.scrollbar?.addEventListener('mousedown', (event) => {
       if (event.button !== 0) return
       event.preventDefault()
       event.stopPropagation()
-      this.host?.focus({ preventScroll: true })
+      this.focusInput()
       const max = Math.max(0, this.buffer.active.baseY)
       if (!max) return
       if ((event.target as HTMLElement | null)?.classList.contains('threaded-terminal-scrollbar-thumb')) {
@@ -1418,8 +1655,9 @@ export class ThreadedTerminalHost {
     const lines = Array.from({ length: rows }, (_item, row) => ({
       y: row,
       text: this.snapshotLines[row] || '',
-      cells: this.snapshotScreenLines[row]?.cells?.map((cell) => ({ ...cell })) || [],
-      highlights: this.snapshotScreenLines[row]?.highlights?.map((highlight) => ({ ...highlight })) || [],
+      runs: cloneCellRuns(this.snapshotScreenLines[row]?.runs) || [],
+      cells: cloneCellRuns(this.snapshotScreenLines[row]?.cells) || [],
+      highlights: this.snapshotScreenLines[row]?.highlights?.map((highlight) => ({ ...highlight, chars: highlight.chars ? [...highlight.chars] : undefined, widths: highlight.widths ? [...highlight.widths] : undefined })) || [],
       wrapped: this.snapshotScreenLines[row]?.wrapped
     }))
     return {

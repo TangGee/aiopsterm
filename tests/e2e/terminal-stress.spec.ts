@@ -78,6 +78,11 @@ type StressResult = {
   paintFullReasons: Record<string, number>
   paintRepaintReasons: Record<string, number>
   realEchoLatency: StressMetricSummary & { available: boolean; error?: string }
+  regressions: Record<string, {
+    ok: boolean
+    details?: Record<string, unknown>
+    error?: string
+  }>
   memory: {
     samples: Array<{
       at: number
@@ -300,6 +305,16 @@ const startHeapProfiler = async (app: ElectronApplication, page: Page): Promise<
 }
 
 const logStressResult = (result: StressResult) => {
+  const regressions = Object.fromEntries(
+    Object.entries(result.regressions || {}).map(([name, probe]) => [
+      name,
+      {
+        ok: probe.ok,
+        error: probe.error,
+        details: probe.details
+      }
+    ])
+  )
   console.log('[terminal-stress]', JSON.stringify({
     profile: result.profile,
     foreground: result.foreground,
@@ -338,6 +353,7 @@ const logStressResult = (result: StressResult) => {
     paintFullReasons: result.paintFullReasons,
     paintRepaintReasons: result.paintRepaintReasons,
     realEchoLatency: result.realEchoLatency,
+    regressions,
     memory: {
       samples: result.memory.samples.length,
       jsHeapDeltaMb: mb(result.memory.jsHeapUsedDeltaBytes),
@@ -400,7 +416,7 @@ test('threaded terminal renderer keeps foreground frames healthy under 10 foregr
     expect(result.paintLatency.samples).toBeGreaterThan(0)
     expect(result.paintLatency.p95).toBeLessThan(100)
     expect(result.paintFrameMs.p95).toBeLessThan(20)
-    const allowedFullReasons = new Set(['create', 'import', 'settings', 'resize', 'visibility', 'clear'])
+    const allowedFullReasons = new Set(['create', 'import', 'settings', 'resize', 'visibility', 'clear', 'jump'])
     const unexpectedFullReasons = Object.entries(result.paintFullReasons || {})
       .filter(([reason]) => !allowedFullReasons.has(reason))
       .reduce<Record<string, number>>((summary, [reason, count]) => {
@@ -409,6 +425,10 @@ test('threaded terminal renderer keeps foreground frames healthy under 10 foregr
       }, {})
     expect(unexpectedFullReasons, JSON.stringify(result.paintFullReasons)).toEqual({})
     expect(result.paintRows.p95).toBeLessThanOrEqual(6)
+    const failedRegressions = Object.entries(result.regressions || {})
+      .filter(([, probe]) => !probe.ok)
+      .map(([name, probe]) => `${name}: ${probe.error || JSON.stringify(probe.details || {})}`)
+    expect(failedRegressions).toEqual([])
     expect(result.switches.failed, result.errors.join('\n')).toBe(0)
     if (switchIntervalMs > 0) {
       expect(result.switches.count).toBeGreaterThan(0)

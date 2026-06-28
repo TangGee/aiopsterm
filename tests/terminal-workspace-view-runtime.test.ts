@@ -134,6 +134,22 @@ afterEach(() => {
 })
 
 describe('terminalWorkspaceViewRuntime', () => {
+  it('focuses the active terminal when its view is created or appears after a pending focus request', async () => {
+    const panel = createEmptyTerminalPanel('panel-1', 'Local')
+    const { runtime } = createRuntime(panel)
+
+    runtime.focusPanel(panel.id)
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    runtime.setTerminalElement(panel.id, host)
+    await flushFrames(2)
+
+    const view = runtime.terminalViews.get(panel.id)
+    if (!view) throw new Error('terminal view was not created')
+    const terminal = view.terminal as unknown as FakeTerminal
+    expect(terminal.focus).toHaveBeenCalled()
+  })
+
   it('writes incremental terminal output without refitting the view on the hot path', async () => {
     const panel = createEmptyTerminalPanel('panel-1', 'Local')
     panel.sessionId = 'terminal-1'

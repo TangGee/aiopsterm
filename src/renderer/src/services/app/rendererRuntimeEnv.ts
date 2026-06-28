@@ -1,6 +1,7 @@
 const viteRuntimeFlagNames = [
   'AIOPSTERM_THREADED_TERMINAL',
-  'AIOPSTERM_TERMINAL_STRESS'
+  'AIOPSTERM_TERMINAL_STRESS',
+  'AIOPSTERM_TERMINAL_DEBUG_LOGS'
 ]
 
 export const installRendererRuntimeEnv = () => {

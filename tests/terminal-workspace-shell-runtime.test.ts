@@ -263,4 +263,26 @@ describe('terminalWorkspaceShellRuntime', () => {
     expect(calls.closeCommandDialog).toHaveBeenCalledTimes(1)
     expect(calls.hideSuggestions).toHaveBeenCalled()
   })
+
+  it('focuses terminal panels after create, split, and reconnect actions', async () => {
+    const workspace = createWorkspace(createPanel({ sessionId: 'source-session', status: 'running' }))
+    const { calls, runtime, state } = createRuntime({ workspace })
+    state.termMenu.panelId = 'panel-1'
+    state.termMenu.visible = true
+
+    runtime.createTerminalFromMenu()
+    await Promise.resolve()
+    expect(calls.focusPanel).toHaveBeenCalledWith('panel-2')
+
+    state.termMenu.panelId = 'panel-1'
+    runtime.splitFromTermMenu('right')
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(calls.focusPanel).toHaveBeenCalledWith('panel-3')
+    expect(calls.startLocalTerminalForPanel).toHaveBeenCalledWith(expect.objectContaining({ id: 'panel-3' }))
+
+    await runtime.togglePanelConnection('panel-1')
+    expect(calls.focusPanel).toHaveBeenCalledWith('panel-1')
+    expect(calls.syncTerminalView).toHaveBeenCalledWith(workspace.panels[0])
+  })
 })

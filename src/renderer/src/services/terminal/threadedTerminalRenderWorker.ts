@@ -46,10 +46,57 @@ let frameTimer: ReturnType<typeof setTimeout> | null = null
 
 const post = (message: ThreadedTerminalRenderResponse) => workerScope.postMessage(message)
 
-const fontSpec = (settings: ThreadedTerminalRenderSettings, bold = false, italic = false) => {
-  const weight = bold ? '700' : '400'
-  const style = italic ? 'italic ' : ''
+const fontSpec = (settings: ThreadedTerminalRenderSettings, _bold = false, _italic = false) => {
+  const weight = '400'
+  const style = ''
   return `${style}${weight} ${Math.max(8, settings.fontSize)}px ${settings.fontFamily || '"JetBrains Mono", "SFMono-Regular", Consolas, monospace'}`
+}
+
+const runChars = (run: { text: string; chars?: string[] }) => run.chars || Array.from(run.text || '')
+const runWidths = (run: { text: string; chars?: string[]; widths?: number[] }) => {
+  const chars = runChars(run)
+  return chars.map((_char, index) => Math.max(1, run.widths?.[index] || 1))
+}
+const runColumns = (run: { text: string; chars?: string[]; widths?: number[]; columns?: number }) =>
+  Math.max(1, run.columns || runWidths(run).reduce((total, width) => total + width, 0) || Array.from(run.text || '').length || 1)
+
+const parseCssColor = (value: string) => {
+  const hex = value.trim().match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i)
+  if (hex) {
+    const raw = hex[1].length === 3 ? hex[1].split('').map((item) => `${item}${item}`).join('') : hex[1]
+    return {
+      r: Number.parseInt(raw.slice(0, 2), 16),
+      g: Number.parseInt(raw.slice(2, 4), 16),
+      b: Number.parseInt(raw.slice(4, 6), 16)
+    }
+  }
+  const rgb = value.trim().match(/^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})/i)
+  if (!rgb) return null
+  return {
+    r: Math.max(0, Math.min(255, Number.parseInt(rgb[1], 10))),
+    g: Math.max(0, Math.min(255, Number.parseInt(rgb[2], 10))),
+    b: Math.max(0, Math.min(255, Number.parseInt(rgb[3], 10)))
+  }
+}
+
+const blendColor = (from: string, to: string, amount: number) => {
+  const source = parseCssColor(from)
+  const target = parseCssColor(to)
+  if (!source || !target) return from
+  const clamped = Math.max(0, Math.min(1, amount))
+  const mix = (left: number, right: number) => Math.round(left + (right - left) * clamped)
+  return `rgb(${mix(source.r, target.r)}, ${mix(source.g, target.g)}, ${mix(source.b, target.b)})`
+}
+
+const textForeground = (
+  surface: RenderSurface,
+  options: { fg?: string; bold?: boolean; dim?: boolean; hidden?: boolean }
+) => {
+  if (options.hidden) return surface.settings.theme.background
+  let color = options.fg || surface.settings.theme.foreground
+  if (options.bold && !options.fg) color = surface.settings.theme.brightWhite || blendColor(color, '#ffffff', 0.3)
+  if (options.dim) color = blendColor(color, surface.settings.theme.background, 0.45)
+  return color
 }
 
 const configureMetrics = (surface: RenderSurface) => {
@@ -94,20 +141,45 @@ const drawTextCells = (
   text: string,
   x: number,
   row: number,
-  options: { fg?: string; bold?: boolean; italic?: boolean; underline?: boolean } = {}
+  options: {
+    fg?: string
+    bold?: boolean
+    dim?: boolean
+    italic?: boolean
+    underline?: boolean
+    strikethrough?: boolean
+    overline?: boolean
+    hidden?: boolean
+    chars?: string[]
+    widths?: number[]
+    columns?: number
+  } = {}
 ) => {
   if (!text) return
-  const chars = Array.from(text)
+  const chars = options.chars || Array.from(text)
+  const widths = chars.map((_char, index) => Math.max(1, options.widths?.[index] || 1))
   const context = surface.context
   context.font = fontSpec(surface.settings, options.bold, options.italic)
-  context.fillStyle = options.fg || surface.settings.theme.foreground
+  context.fillStyle = textForeground(surface, options)
   const top = row * surface.cellHeight
+  let cellOffset = 0
   chars.forEach((char, index) => {
-    if (char === ' ') return
-    context.fillText(char, (x + index) * surface.cellWidth, top + surface.baseline)
+    const drawX = x + cellOffset
+    if (!options.hidden && char !== ' ') context.fillText(char, drawX * surface.cellWidth, top + surface.baseline)
+    cellOffset += widths[index]
   })
+  const columns = Math.max(1, options.columns || widths.reduce((total, width) => total + width, 0) || chars.length)
+  if (options.underline || options.strikethrough || options.overline) {
+    context.fillStyle = textForeground(surface, options)
+  }
   if (options.underline) {
-    context.fillRect(x * surface.cellWidth, top + surface.cellHeight - 2, Math.max(surface.cellWidth, chars.length * surface.cellWidth), 1)
+    context.fillRect(x * surface.cellWidth, top + surface.cellHeight - 2, Math.max(surface.cellWidth, columns * surface.cellWidth), 1)
+  }
+  if (options.strikethrough) {
+    context.fillRect(x * surface.cellWidth, top + Math.floor(surface.cellHeight * 0.52), Math.max(surface.cellWidth, columns * surface.cellWidth), 1)
+  }
+  if (options.overline) {
+    context.fillRect(x * surface.cellWidth, top + 1, Math.max(surface.cellWidth, columns * surface.cellWidth), 1)
   }
 }
 
@@ -116,15 +188,22 @@ const drawStyledRuns = (surface: RenderSurface, line: ThreadedTerminalScreenLine
   for (const run of line.cells || []) {
     if (run.bg) {
       context.fillStyle = run.bg
-      context.fillRect(run.x * surface.cellWidth, line.y * surface.cellHeight, Math.max(surface.cellWidth, run.text.length * surface.cellWidth), surface.cellHeight)
+      context.fillRect(run.x * surface.cellWidth, line.y * surface.cellHeight, Math.max(surface.cellWidth, runColumns(run) * surface.cellWidth), surface.cellHeight)
     }
   }
   for (const run of line.cells || []) {
     drawTextCells(surface, run.text, run.x, line.y, {
       fg: run.fg,
       bold: run.bold,
+      dim: run.dim,
       italic: run.italic,
-      underline: run.underline
+      underline: run.underline,
+      strikethrough: run.strikethrough,
+      overline: run.overline,
+      hidden: run.hidden,
+      chars: runChars(run),
+      widths: runWidths(run),
+      columns: runColumns(run)
     })
   }
 }
@@ -133,7 +212,10 @@ const drawHighlightRuns = (surface: RenderSurface, line: ThreadedTerminalScreenL
   for (const run of line.highlights || []) {
     drawTextCells(surface, run.text, run.x, line.y, {
       fg: run.fg,
-      bold: run.bold
+      bold: run.bold,
+      chars: runChars(run),
+      widths: runWidths(run),
+      columns: runColumns(run)
     })
   }
 }
@@ -143,7 +225,40 @@ const drawPlainLineText = (surface: RenderSurface, line: ThreadedTerminalScreenL
   if (!text) return
   const styledCells = new Set<number>()
   for (const run of line.cells || []) {
-    for (let index = 0; index < Array.from(run.text).length; index += 1) styledCells.add(run.x + index)
+    for (let index = 0; index < runColumns(run); index += 1) styledCells.add(run.x + index)
+  }
+  const plainRuns = line.runs || []
+  if (plainRuns.length) {
+    for (const run of plainRuns) {
+      const chars = runChars(run)
+      const widths = runWidths(run)
+      const segments: Array<{ x: number; chars: string[]; widths: number[] }> = []
+      let current: { x: number; chars: string[]; widths: number[] } | null = null
+      let cellX = run.x
+      chars.forEach((char, index) => {
+        const width = widths[index]
+        const covered = Array.from({ length: width }, (_item, offset) => styledCells.has(cellX + offset)).some(Boolean)
+        if (covered) {
+          current = null
+        } else {
+          if (!current) {
+            current = { x: cellX, chars: [], widths: [] }
+            segments.push(current)
+          }
+          current.chars.push(char)
+          current.widths.push(width)
+        }
+        cellX += width
+      })
+      segments.forEach((segment) => {
+        drawTextCells(surface, segment.chars.join(''), segment.x, line.y, {
+          chars: segment.chars,
+          widths: segment.widths,
+          columns: segment.widths.reduce((total, width) => total + width, 0)
+        })
+      })
+    }
+    return
   }
   if (!styledCells.size) {
     drawTextCells(surface, text, 0, line.y)
@@ -189,6 +304,18 @@ const drawCursor = (surface: RenderSurface, snapshot: ThreadedTerminalScreenSnap
 
 const blankScreenLine = (y: number): ThreadedTerminalScreenLine => ({ y, text: '', cells: [] })
 
+const cloneCellRuns = (runs?: ThreadedTerminalScreenLine['cells']) => runs?.map((run) => ({
+  ...run,
+  chars: run.chars ? [...run.chars] : undefined,
+  widths: run.widths ? [...run.widths] : undefined
+}))
+
+const cloneHighlightRuns = (runs?: ThreadedTerminalScreenLine['highlights']) => runs?.map((run) => ({
+  ...run,
+  chars: run.chars ? [...run.chars] : undefined,
+  widths: run.widths ? [...run.widths] : undefined
+}))
+
 const normalizeScreenLineRows = (lines: ThreadedTerminalScreenLine[]) => {
   lines.forEach((line, index) => {
     line.y = index
@@ -199,8 +326,9 @@ const normalizeScreenLineRows = (lines: ThreadedTerminalScreenLine[]) => {
 const cloneScreenLine = (line: ThreadedTerminalScreenLine, y = line.y): ThreadedTerminalScreenLine => ({
   ...line,
   y,
-  cells: line.cells ? line.cells.map((cell) => ({ ...cell })) : undefined,
-  highlights: line.highlights ? line.highlights.map((highlight) => ({ ...highlight })) : undefined
+  runs: cloneCellRuns(line.runs),
+  cells: cloneCellRuns(line.cells),
+  highlights: cloneHighlightRuns(line.highlights)
 })
 
 const rememberPaintedSnapshot = (surface: RenderSurface, snapshot: ThreadedTerminalScreenSnapshot) => {

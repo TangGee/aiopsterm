@@ -16,7 +16,7 @@ import {
 } from '@/services/terminal/threadedTerminalRuntime'
 import type { TerminalPanel, TerminalSettings, useWorkspaceStore } from '@/stores/workspace'
 import type { TerminalCommandSuggestion } from '@shared/contracts/terminalTools'
-import { shouldUseThreadedTerminal } from '@shared/runtimeSwitches'
+import { shouldUseTerminalDebugLogs, shouldUseThreadedTerminal } from '@shared/runtimeSwitches'
 
 type WorkspaceStore = ReturnType<typeof useWorkspaceStore>
 type XtermRuntimeOptions = XtermTerminal['options'] & { termName?: string }
@@ -133,8 +133,12 @@ const terminalContentPaddingBottom = 16
 const terminalAiButtonHeight = 32
 const terminalFloatingGap = 8
 const terminalBottomSafePx = 16
-const terminalOutputSummaryIntervalMs = 1000
-const terminalOutputSummaryChunkThreshold = 50
+const terminalOutputSummaryDebugIntervalMs = 1000
+const terminalOutputSummaryFormalIntervalMs = 10_000
+const terminalOutputSummaryDebugChunkThreshold = 50
+const terminalOutputSummaryFormalChunkThreshold = 1000
+const terminalOutputSummaryDebugByteThreshold = 1024 * 1024
+const terminalOutputSummaryFormalByteThreshold = 8 * 1024 * 1024
 const terminalOutputSlowThresholdMs = 16
 const terminalOutputMaxWriteBytes = 8 * 1024
 const terminalOutputMaxWriteChunks = 32
@@ -185,6 +189,10 @@ export const createTerminalWorkspaceViewRuntime = ({
   const FitConstructor = fitConstructor || FitAddon
   const SearchConstructor = searchConstructor || SearchAddon
   let threadedTerminalAvailable: boolean | null = null
+  const terminalDebugLogs = shouldUseTerminalDebugLogs()
+  const terminalOutputSummaryIntervalMs = terminalDebugLogs ? terminalOutputSummaryDebugIntervalMs : terminalOutputSummaryFormalIntervalMs
+  const terminalOutputSummaryChunkThreshold = terminalDebugLogs ? terminalOutputSummaryDebugChunkThreshold : terminalOutputSummaryFormalChunkThreshold
+  const terminalOutputSummaryByteThreshold = terminalDebugLogs ? terminalOutputSummaryDebugByteThreshold : terminalOutputSummaryFormalByteThreshold
   const canUseThreadedTerminal = () => {
     if (terminalConstructor || fitConstructor || searchConstructor) return false
     if (!shouldUseThreadedTerminal()) return false
@@ -304,8 +312,20 @@ export const createTerminalWorkspaceViewRuntime = ({
         reset: Boolean(metrics.reset)
       })
     }
-    if (summary.lastAt - summary.firstAt >= terminalOutputSummaryIntervalMs || summary.chunks >= terminalOutputSummaryChunkThreshold) {
-      flushTerminalOutputPerf(panelId, view, summary.chunks >= terminalOutputSummaryChunkThreshold ? 'chunk-threshold' : 'interval')
+    if (
+      summary.lastAt - summary.firstAt >= terminalOutputSummaryIntervalMs ||
+      summary.chunks >= terminalOutputSummaryChunkThreshold ||
+      summary.bytes >= terminalOutputSummaryByteThreshold
+    ) {
+      flushTerminalOutputPerf(
+        panelId,
+        view,
+        summary.bytes >= terminalOutputSummaryByteThreshold
+          ? 'byte-threshold'
+          : summary.chunks >= terminalOutputSummaryChunkThreshold
+            ? 'chunk-threshold'
+            : 'interval'
+      )
     }
   }
 
@@ -756,6 +776,24 @@ export const createTerminalWorkspaceViewRuntime = ({
       .forEach((panel) => scheduleTerminalFit(panel.id, options))
   }
 
+  const scheduleTerminalFocus = (panelId: string, frames = 6) => {
+    const run = (remaining: number) => {
+      nextTick(() => {
+        const view = terminalViews.get(panelId)
+        const element = terminalElements.get(panelId)
+        if (view && element?.isConnected && isTerminalPanelRenderable(panelId)) {
+          view.terminal.focus()
+          return
+        }
+        if (remaining <= 1) return
+        const retry = () => run(remaining - 1)
+        if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') window.requestAnimationFrame(retry)
+        else requestOutputFlush(retry)
+      })
+    }
+    run(Math.max(1, frames))
+  }
+
   const refitAfterLayoutChange = () => {
     nextTick(() => scheduleVisibleTerminalFit({ scrollToBottom: true, frames: 6, forceGeometry: true }))
   }
@@ -849,11 +887,6 @@ export const createTerminalWorkspaceViewRuntime = ({
     const visible = isTerminalPanelRenderable(panel.id)
     view.terminal.setVisibility(visible, terminalPriorityForPanel(panel.id))
     view.terminal.write(data)
-    view.lastOutput = tailTextByBytes(`${view.lastOutput}${data}`, terminalThreadedLiveOutputTailBytes)
-    if (visible) {
-      updateSelectionButtonPosition(panel.id)
-      updateSuggestionsPosition(panel.id)
-    }
     return true
   }
 
@@ -890,6 +923,7 @@ export const createTerminalWorkspaceViewRuntime = ({
         applyTerminalSettingsToView(panel.id, existing, workspace.terminalSettings, { refit: false })
         scheduleTerminalFit(panel.id, { scrollToBottom: true, frames: 2 })
       }
+      if (panel.id === workspace.activePanelId) scheduleTerminalFocus(panel.id)
       return
     }
     const theme = terminalTheme()
@@ -954,6 +988,7 @@ export const createTerminalWorkspaceViewRuntime = ({
     } else {
       scheduleTerminalFit(panel.id, { scrollToBottom: true, frames: 2 })
     }
+    if (panel.id === workspace.activePanelId) scheduleTerminalFocus(panel.id)
     if (!openedThreaded) bindTerminalViewEvents(panel, view)
     if (!isThreadedTerminalHost(view.terminal)) element.querySelector('.xterm-viewport')?.addEventListener(
       'scroll',
@@ -1052,7 +1087,7 @@ export const createTerminalWorkspaceViewRuntime = ({
   }
 
   const focusPanel = (panelId: string) => {
-    nextTick(() => terminalViews.get(panelId)?.terminal.focus())
+    scheduleTerminalFocus(panelId)
   }
 
   const getTerminalElement = (panelId: string) => terminalElements.get(panelId) || null

@@ -114,6 +114,10 @@ export const createTerminalWorkspaceShellRuntime = (
   const isTerminalMenuPanel = computed(() => panelById(menu.panelId)?.kind === 'terminal')
   const isReconnectablePanel = (panel?: TerminalPanel | null) => !panel?.sessionId || panel.status === 'closed' || panel.status === 'error'
 
+  const focusPanelAfterDomUpdate = (panelId: string) => {
+    void Promise.resolve(afterDomUpdate()).then(() => focusPanel(panelId))
+  }
+
   const connectionActionLabel = (panel?: TerminalPanel | null) => {
     if (!panel?.sessionId) {
       if (panel?.sshSession) return panel.status === 'ready' ? '连接 SSH' : '重新连接'
@@ -255,9 +259,10 @@ export const createTerminalWorkspaceShellRuntime = (
     const source = workspace.panels.find((panel) => panel.id === menu.panelId)
     const sourcePanelId = source?.id
     workspace.createPanel()
+    const clonedPanelId = workspace.activePanelId
     if (source) {
-      workspace.renamePanel(workspace.activePanelId, `${source.title} copy`)
-      const panel = panelById(workspace.activePanelId)
+      workspace.renamePanel(clonedPanelId, `${source.title} copy`)
+      const panel = panelById(clonedPanelId)
       if (panel) {
         panel.cwd = source.cwd
         panel.sshSession = source.sshSession
@@ -270,6 +275,7 @@ export const createTerminalWorkspaceShellRuntime = (
       }
     }
     menu.visible = false
+    focusPanelAfterDomUpdate(clonedPanelId)
   }
 
   const connectSplitPanelFromSource = async (panel: TerminalPanel, sourcePanel?: TerminalPanel | null) => {
@@ -282,7 +288,8 @@ export const createTerminalWorkspaceShellRuntime = (
     workspace.activePanelId = sourcePanelId
     const panel = workspace.createPanel(direction)
     await afterDomUpdate()
-    void connectSplitPanelFromSource(panel, sourcePanel)
+    focusPanel(panel.id)
+    void connectSplitPanelFromSource(panel, sourcePanel).finally(() => focusPanel(panel.id))
     return panel
   }
 
@@ -309,6 +316,7 @@ export const createTerminalWorkspaceShellRuntime = (
       workspace.discardPendingTerminalPanel(forkPanel.id, sourcePanelId)
       return
     }
+    focusPanelAfterDomUpdate(forkPanel.id)
     const ssh = forkPanel.sshSession
     if (!ssh) return
     const contextId = pendingSsh?.assetId || ssh.assetId || ssh.connectionId || forkPanel.id
@@ -407,6 +415,7 @@ export const createTerminalWorkspaceShellRuntime = (
       if (disconnected) workspace.setTopNotice('终端已断开连接')
     }
     syncTerminalView(panel)
+    focusPanel(panelId)
     termMenu.visible = false
   }
 
@@ -416,8 +425,9 @@ export const createTerminalWorkspaceShellRuntime = (
   }
 
   const createTerminalFromMenu = () => {
-    workspace.createPanel()
+    const panel = workspace.createPanel()
     termMenu.visible = false
+    focusPanelAfterDomUpdate(panel.id)
   }
 
   const closeTerminalFromMenu = () => {

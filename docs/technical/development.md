@@ -109,6 +109,10 @@ AIOPSTERM_TERMINAL_STRESS=1 VITE_AIOPSTERM_TERMINAL_STRESS=1 VITE_AIOPSTERM_THRE
 
 Check frame percentiles, paint latency, foreground/background switch latency, foreground/background write counters, real PTY echo latency, CDP live heap delta, canvas count, queue backlog, and worker error counts in the `[terminal-stress]` JSON line. Heap sampling and heap snapshot artifacts are written to `test-results/terminal-stress/`; the JSON also includes allocation hotspots and a post-GC object summary for retained-object inspection. `performance.memory` fields are useful diagnostics, while retained-object assertions use CDP `Runtime.getHeapUsage` and heap snapshot object sizes. Do not treat a 10-second smoke pass as evidence for the 20-minute target.
 
+The same result includes `regressions` probes for content freshness, foreground/background switching, ANSI same-text repaint, scrollback/scrollbar behavior, soft-wrapped selection copying, and keyboard/IME focus. Any failed probe should be treated as a functional terminal regression even when frame metrics look healthy.
+
+Set `AIOPSTERM_TERMINAL_DEBUG_LOGS=1` only when collecting detailed terminal diagnostics. Formal mode keeps slow warnings and errors but throttles terminal data summaries and threaded worker perf logs so logging does not become the stress-test bottleneck.
+
 ## Platform Iteration
 
 Cross-platform work should stay iterative: make one narrow platform change, add focused tests or audits for that boundary, then commit locally. Do not push from the implementation loop unless a separate release or collaboration step asks for it.

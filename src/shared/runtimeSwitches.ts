@@ -48,6 +48,10 @@ export const shouldUseSkillsSeedData = () => envFlagEnabled('AIOPSTERM_SKILLS_EN
 
 export const shouldUseSshTerminalBackendDouble = () => envFlagEnabled('AIOPSTERM_SSH_TERMINAL_BACKEND_DOUBLE')
 
+export const shouldUseTerminalDebugLogs = () => envFlagEnabled('AIOPSTERM_TERMINAL_DEBUG_LOGS')
+
+export const shouldUseTerminalStressHarness = () => envFlagEnabled('AIOPSTERM_TERMINAL_STRESS')
+
 export const shouldUseThreadedTerminal = () => envFlagEnabled('AIOPSTERM_THREADED_TERMINAL')
 
 export const shouldUseUserAccountCodeBackendDouble = () => envFlagEnabled('AIOPSTERM_USER_ACCOUNT_CODE_BACKEND_DOUBLE')

@@ -43,6 +43,9 @@ export type ThreadedTerminalKeywordHighlightConfig = KeywordHighlightUserConfig 
 export type ThreadedTerminalHighlightRun = {
   x: number
   text: string
+  chars?: string[]
+  widths?: number[]
+  columns?: number
   fg?: string
   bold?: boolean
 }
@@ -73,6 +76,7 @@ export type ThreadedTerminalRenderSettings = {
 export type ThreadedTerminalScreenLine = {
   y: number
   text: string
+  runs?: ThreadedTerminalCellRun[]
   cells?: ThreadedTerminalCellRun[]
   highlights?: ThreadedTerminalHighlightRun[]
   wrapped?: boolean
@@ -81,11 +85,19 @@ export type ThreadedTerminalScreenLine = {
 export type ThreadedTerminalCellRun = {
   x: number
   text: string
+  chars?: string[]
+  widths?: number[]
+  columns?: number
   fg?: string
   bg?: string
   bold?: boolean
+  dim?: boolean
   italic?: boolean
   underline?: boolean
+  strikethrough?: boolean
+  overline?: boolean
+  hidden?: boolean
+  blink?: boolean
   inverse?: boolean
 }
 

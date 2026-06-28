@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 type TerminalDataLogSummaryRuntime = {
-  createTerminalDataLogSummary: (options?: { intervalMs?: number; chunkThreshold?: number; now?: () => number }) => {
+  createTerminalDataLogSummary: (options?: { intervalMs?: number; chunkThreshold?: number; byteThreshold?: number; now?: () => number }) => {
     record: (id: string, bytes: number) => unknown
     flush: (id: string, reason: string) => unknown
   }
@@ -52,6 +52,29 @@ describe('terminalDataLogSummary', () => {
         firstAt: 200,
         lastAt: 200,
         maxChunkBytes: 5
+      }
+    })
+  })
+
+  it('aggregates noisy chunks until the byte threshold is reached', async () => {
+    const { createTerminalDataLogSummary } = await loadRuntime()
+    let now = 100
+    const summary = createTerminalDataLogSummary({ chunkThreshold: 500, byteThreshold: 12, intervalMs: 1000, now: () => now })
+
+    expect(summary.record('terminal-1', 4)).toBeNull()
+    now += 10
+    expect(summary.record('terminal-1', 6)).toBeNull()
+    now += 10
+
+    expect(summary.record('terminal-1', 2)).toEqual({
+      id: 'terminal-1',
+      reason: 'byte-threshold',
+      summary: {
+        chunks: 3,
+        bytes: 12,
+        firstAt: 100,
+        lastAt: 120,
+        maxChunkBytes: 6
       }
     })
   })

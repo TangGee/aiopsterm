@@ -14,6 +14,7 @@ import { createSshTerminalSession, type SshTerminalSession } from './backend/ssh
 import { getAsset, saveAsset } from './backend/assets/assets'
 import { recordTerminalCommandHistory } from './backend/terminal/terminalSuggestions'
 import { sendWindowEvent } from '@shared/windowEvents'
+import { shouldUseTerminalDebugLogs } from '@shared/runtimeSwitches'
 import {
   createTerminalDataEvent,
   createTerminalKillResult,
@@ -35,8 +36,17 @@ type TerminalRuntimeInput = {
 
 export const createMainTerminalRuntime = (input: TerminalRuntimeInput) => {
   const sessions = new Map<string, TerminalSession>()
-  const terminalDataSummary = createTerminalDataLogSummary()
-  const codexDataSummary = createTerminalDataLogSummary()
+  const terminalDebugLogs = shouldUseTerminalDebugLogs()
+  const terminalDataSummary = createTerminalDataLogSummary(
+    terminalDebugLogs
+      ? { intervalMs: 1000, chunkThreshold: 50, byteThreshold: 1024 * 1024 }
+      : { intervalMs: 10_000, chunkThreshold: 1000, byteThreshold: 8 * 1024 * 1024 }
+  )
+  const codexDataSummary = createTerminalDataLogSummary(
+    terminalDebugLogs
+      ? { intervalMs: 1000, chunkThreshold: 50, byteThreshold: 1024 * 1024 }
+      : { intervalMs: 10_000, chunkThreshold: 1000, byteThreshold: 8 * 1024 * 1024 }
+  )
   const terminalDataCoalescer = createTerminalDataCoalescer({
     onFlush: (flush) => flushTerminalData(flush)
   })
@@ -46,6 +56,8 @@ export const createMainTerminalRuntime = (input: TerminalRuntimeInput) => {
   })
 
   const chunkBytes = (chunk: string | Buffer) => (Buffer.isBuffer(chunk) ? chunk.byteLength : Buffer.byteLength(String(chunk || ''), 'utf8'))
+  const shouldLogCoalescedTerminalData = (flush: TerminalDataCoalescerFlush) =>
+    terminalDebugLogs ? flush.chunks > 1 : flush.chunks >= 100 || flush.bytes >= 1024 * 1024
 
   const logDataSummary = (event: string, id: string, summary: TerminalDataLogSummary, reason: string) => {
     logRuntimeEvent('debug', event, {
@@ -150,7 +162,7 @@ export const createMainTerminalRuntime = (input: TerminalRuntimeInput) => {
     if (!session) return
     appendCodexTerminalBridgeDisplayData(flush.id, flush.chunk)
     sendWindowEvent(session.window, 'terminal:data', terminalDataPayload(flush.id, flush.chunk))
-    if (flush.chunks > 1) {
+    if (shouldLogCoalescedTerminalData(flush)) {
       logRuntimeEvent('debug', 'terminal.data.coalesced', {
         id: flush.id,
         kind: session.kind,
@@ -201,7 +213,7 @@ export const createMainTerminalRuntime = (input: TerminalRuntimeInput) => {
     const owner = codexDataOwners.get(flush.id)
     if (!owner || owner.isDestroyed()) return
     sendWindowEvent(owner, 'codex:data', createTerminalDataEvent(flush.id, flush.chunk))
-    if (flush.chunks > 1) {
+    if (shouldLogCoalescedTerminalData(flush)) {
       logRuntimeEvent('debug', 'codex.data.coalesced', {
         id: flush.id,
         chunks: flush.chunks,

@@ -17,9 +17,9 @@
         tabindex="0"
         :title="terminalTabTooltip(panel)"
         :draggable="panel.kind === 'terminal' || panel.kind === 'knowledge'"
-        @click="workspace.activePanelId = panel.id"
-        @keydown.enter.prevent="workspace.activePanelId = panel.id"
-        @keydown.space.prevent="workspace.activePanelId = panel.id"
+        @click="activatePanel(panel.id)"
+        @keydown.enter.prevent="activatePanel(panel.id)"
+        @keydown.space.prevent="activatePanel(panel.id)"
         @contextmenu.prevent="openMenu($event, panel.id)"
         @dragstart="handleTabDragStart($event, panel)"
         @dragenter.prevent.stop="handleTabDragEnter($event, panel)"
@@ -115,8 +115,8 @@
       :style="{ left: `${termMenu.x}px`, top: `${termMenu.y}px` }"
       @click.stop
     >
-      <button @click="copySelection(termMenu.panelId)"><span>复制</span><kbd>Ctrl+C</kbd></button>
-      <button @click="pasteClipboard(termMenu.panelId)"><span>粘贴</span><kbd>Ctrl+V</kbd></button>
+      <button @click="copySelection(termMenu.panelId)"><span>复制</span><kbd>Ctrl+Shift+C</kbd></button>
+      <button @click="pasteClipboard(termMenu.panelId)"><span>粘贴</span><kbd>Ctrl+Shift+V</kbd></button>
       <button @click="openSearchOverlay(termMenu.panelId)"><span>搜索</span><kbd>Ctrl+F</kbd></button>
       <i />
       <button @click="togglePanelConnection(termMenu.panelId)">{{ connectionActionLabel(panelById(termMenu.panelId)) }}<kbd>{{ connectionActionShortcut(panelById(termMenu.panelId)) }}</kbd></button>
