@@ -56,6 +56,8 @@ type CoreTerminalRecord = {
   snapshotDueAt: number
   lastSnapshotAt: number
   lastSnapshotViewportY: number
+  followOutput: boolean
+  programmaticScrollDepth: number
   perf: ThreadedTerminalPerfSample
   lastPerfAt: number
 }
@@ -205,6 +207,20 @@ const cellColor = (
 }
 
 const absoluteCursorRow = (buffer: HeadlessTerminalLike['buffer']['active']) => buffer.baseY + buffer.cursorY
+
+const isAtScrollBottom = (record: CoreTerminalRecord) => {
+  const buffer = record.terminal.buffer.active
+  return buffer.viewportY >= buffer.baseY
+}
+
+const runProgrammaticScroll = (record: CoreTerminalRecord, callback: () => void) => {
+  record.programmaticScrollDepth += 1
+  try {
+    callback()
+  } finally {
+    record.programmaticScrollDepth = Math.max(0, record.programmaticScrollDepth - 1)
+  }
+}
 
 const extractLineRuns = (record: CoreTerminalRecord, lineIndex: number) => {
   const line = record.terminal.buffer.active.getLine(lineIndex)
@@ -370,7 +386,7 @@ const scheduleSnapshot = (record: CoreTerminalRecord, forceFull = false, fullRea
   const delay = Math.max(0, targetDelay - elapsedSinceLastSnapshot)
   const dueAt = now + delay
   if (record.snapshotScheduled && record.snapshotTimer) {
-    if (!forceFull && dueAt >= record.snapshotDueAt) return
+    if (dueAt >= record.snapshotDueAt) return
     workerScope.clearTimeout(record.snapshotTimer)
   }
   record.snapshotScheduled = true
@@ -392,7 +408,14 @@ const installTerminalEvents = (record: CoreTerminalRecord) => {
     const buffer = record.terminal.buffer.active
     record.dirtyRows.add(absoluteCursorRow(buffer) - buffer.viewportY)
   })
-  record.terminal.onScroll(() => {})
+  record.terminal.onScroll(() => {
+    if (record.programmaticScrollDepth === 0) {
+      record.followOutput = isAtScrollBottom(record)
+    }
+    record.pendingFullSnapshot = true
+    record.pendingFullSnapshotReason = record.pendingFullSnapshotReason || 'jump'
+    scheduleSnapshot(record, true, 'jump')
+  })
   record.terminal.onResize(({ cols, rows }) => {
     record.pendingFullSnapshot = true
     record.pendingFullSnapshotReason = 'resize'
@@ -443,6 +466,8 @@ const createRecord = (options: ThreadedTerminalCreateOptions): CoreTerminalRecor
     snapshotDueAt: 0,
     lastSnapshotAt: 0,
     lastSnapshotViewportY: 0,
+    followOutput: true,
+    programmaticScrollDepth: 0,
     perf: newPerfSample({ terminalId: options.terminalId, priority: options.priority, visible: options.visible }),
     lastPerfAt: nowMs()
   }
@@ -510,21 +535,39 @@ const flushRecord = (record: CoreTerminalRecord) => {
   const flushStartedAt = nowMs()
   const data = takeBatch(record)
   const bytes = textByteLength(data)
-  const beforeCursorAbsoluteY = absoluteCursorRow(record.terminal.buffer.active)
-  const beforeViewportY = record.terminal.buffer.active.viewportY
+  const beforeBuffer = record.terminal.buffer.active
+  const beforeCursorAbsoluteY = absoluteCursorRow(beforeBuffer)
+  const beforeViewportY = beforeBuffer.viewportY
+  const beforeBaseY = beforeBuffer.baseY
+  const shouldFollowOutput = record.followOutput || isAtScrollBottom(record)
+  if (shouldFollowOutput) record.followOutput = true
   record.perf.chunks += 1
   record.perf.bytes += bytes
   record.perf.pendingBytes = record.pendingBytes
   record.perf.pendingChunks = record.pendingChunks.length
   record.perf.maxPendingBytes = Math.max(record.perf.maxPendingBytes, record.pendingBytes)
   const parseStartedAt = nowMs()
+  record.programmaticScrollDepth += 1
   record.terminal.write(data, () => {
-    record.perf.parseMs += nowMs() - parseStartedAt
-    record.perf.flushMs += nowMs() - flushStartedAt
-    const buffer = record.terminal.buffer.active
-    record.dirtyRows.add(beforeCursorAbsoluteY - buffer.viewportY)
-    record.dirtyRows.add(absoluteCursorRow(buffer) - buffer.viewportY)
-    scheduleSnapshot(record)
+    try {
+      record.perf.parseMs += nowMs() - parseStartedAt
+      record.perf.flushMs += nowMs() - flushStartedAt
+      if (shouldFollowOutput && !isAtScrollBottom(record)) {
+        record.terminal.scrollToBottom()
+      }
+      const buffer = record.terminal.buffer.active
+      const viewportChanged = buffer.viewportY !== beforeViewportY
+      const baseChanged = buffer.baseY !== beforeBaseY
+      record.dirtyRows.add(beforeCursorAbsoluteY - buffer.viewportY)
+      record.dirtyRows.add(absoluteCursorRow(buffer) - buffer.viewportY)
+      if (viewportChanged || (shouldFollowOutput && baseChanged)) {
+        scheduleSnapshot(record, true, 'jump')
+      } else {
+        scheduleSnapshot(record)
+      }
+    } finally {
+      record.programmaticScrollDepth = Math.max(0, record.programmaticScrollDepth - 1)
+    }
     if (record.pendingChunks.length) scheduleFlush(record)
   })
 }
@@ -623,7 +666,13 @@ const handleMessage = (message: ThreadedTerminalCoreRequest) => {
       return
     }
     if (message.type === 'input') {
-      record.terminal.input(message.data)
+      const beforeViewportY = record.terminal.buffer.active.viewportY
+      record.followOutput = true
+      runProgrammaticScroll(record, () => {
+        record.terminal.scrollToBottom()
+        record.terminal.input(message.data)
+      })
+      if (record.terminal.buffer.active.viewportY !== beforeViewportY) scheduleSnapshot(record, true, 'jump')
       return
     }
     if (message.type === 'resize') {
@@ -672,7 +721,8 @@ const handleMessage = (message: ThreadedTerminalCoreRequest) => {
     if (message.type === 'scroll-to-bottom') {
       const beforeViewportY = record.terminal.buffer.active.viewportY
       record.terminal.scrollToBottom()
-      if (record.terminal.buffer.active.viewportY !== beforeViewportY) scheduleSnapshot(record)
+      record.followOutput = true
+      if (record.terminal.buffer.active.viewportY !== beforeViewportY) scheduleSnapshot(record, true, 'jump')
       return
     }
     if (message.type === 'scroll-lines') {
@@ -680,14 +730,16 @@ const handleMessage = (message: ThreadedTerminalCoreRequest) => {
       if (!amount) return
       const beforeViewportY = record.terminal.buffer.active.viewportY
       record.terminal.scrollLines(amount)
-      if (record.terminal.buffer.active.viewportY !== beforeViewportY) scheduleSnapshot(record)
+      record.followOutput = isAtScrollBottom(record)
+      if (record.terminal.buffer.active.viewportY !== beforeViewportY) scheduleSnapshot(record, true, 'jump')
       return
     }
     if (message.type === 'scroll-to-line') {
       const line = Math.trunc(message.line)
       const beforeViewportY = record.terminal.buffer.active.viewportY
       record.terminal.scrollToLine(line)
-      if (record.terminal.buffer.active.viewportY !== beforeViewportY) scheduleSnapshot(record)
+      record.followOutput = isAtScrollBottom(record)
+      if (record.terminal.buffer.active.viewportY !== beforeViewportY) scheduleSnapshot(record, true, 'jump')
       return
     }
     if (message.type === 'read-screen') {

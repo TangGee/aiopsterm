@@ -78,10 +78,14 @@ type ThreadedTerminalSelectionPoint = {
   y: number
 }
 
+type ThreadedTerminalSelectionMode = 'char' | 'word' | 'line'
+
 type ThreadedTerminalSelection = {
   anchor: ThreadedTerminalSelectionPoint
   focus: ThreadedTerminalSelectionPoint
   selecting: boolean
+  mode: ThreadedTerminalSelectionMode
+  origin?: ThreadedTerminalSelectionPoint
 }
 
 type ThreadedTerminalBufferActive = {
@@ -97,6 +101,8 @@ type ThreadedTerminalOptions = ThreadedTerminalSettings & {
   termName?: string
   scrollback?: number
 }
+
+const defaultWordSeparators = new Set(Array.from(' ()[]{}\'"`'))
 
 export type ThreadedTerminalDebugStats = {
   supported: boolean
@@ -999,6 +1005,14 @@ export class ThreadedTerminalHost {
     return chars.slice(Math.max(0, startX), Math.max(0, endX)).join('').replace(/\s+$/g, '')
   }
 
+  private screenLineForBufferRow(row: number) {
+    return this.snapshotScreenLines[row - this.buffer.active.viewportY]
+  }
+
+  private lineTextForBufferRow(row: number) {
+    return this.snapshotLines[row - this.buffer.active.viewportY] || ''
+  }
+
   private selectionText() {
     const range = this.normalizedSelection()
     if (!range) return ''
@@ -1006,18 +1020,110 @@ export class ThreadedTerminalHost {
     for (let row = range.start.y; row <= range.end.y; row += 1) {
       const startX = row === range.start.y ? range.start.x : 0
       const endX = row === range.end.y ? range.end.x : this.cols
-      lines.push(this.textForSelectionRow(row, startX, endX))
+      const lineText = this.textForSelectionRow(row, startX, endX)
+      if (row > range.start.y && this.screenLineForBufferRow(row)?.wrapped) {
+        lines[lines.length - 1] = `${lines[lines.length - 1] || ''}${lineText}`
+      } else {
+        lines.push(lineText)
+      }
     }
     return lines.join('\n').replace(/\s+$/g, '')
   }
 
   private pointFromMouseEvent(event: MouseEvent): ThreadedTerminalSelectionPoint {
-    const rect = this.host?.getBoundingClientRect()
+    const rect = this.canvas?.getBoundingClientRect() || this.host?.getBoundingClientRect()
     const left = rect?.left || 0
     const top = rect?.top || 0
     const x = Math.max(0, Math.min(this.cols, Math.floor((event.clientX - left) / Math.max(1, this.cellMetrics.width))))
     const y = Math.max(0, Math.min(this.rows - 1, Math.floor((event.clientY - top) / Math.max(1, this.cellMetrics.height))))
     return { x, y: this.buffer.active.viewportY + y }
+  }
+
+  private isWordSeparator(char: string) {
+    return defaultWordSeparators.has(char)
+  }
+
+  private wordSelectionAt(point: ThreadedTerminalSelectionPoint) {
+    const line = this.lineTextForBufferRow(point.y)
+    const chars = Array.from(line)
+    if (!chars.length) return null
+    const index = Math.max(0, Math.min(chars.length - 1, point.x))
+    const selectedChar = chars[index]
+    if (selectedChar === undefined) return null
+    if (selectedChar === ' ') {
+      let start = index
+      let end = index + 1
+      while (start > 0 && chars[start - 1] === ' ') start -= 1
+      while (end < chars.length && chars[end] === ' ') end += 1
+      return { start: { x: start, y: point.y }, end: { x: end, y: point.y } }
+    }
+    let start = index
+    let end = index + 1
+    while (start > 0 && !this.isWordSeparator(chars[start - 1] || '')) start -= 1
+    while (end < chars.length && !this.isWordSeparator(chars[end] || '')) end += 1
+    let startRow = point.y
+    let endRow = point.y
+    while (start === 0 && this.screenLineForBufferRow(startRow)?.wrapped) {
+      const previousLine = this.lineTextForBufferRow(startRow - 1)
+      const previousChars = Array.from(previousLine)
+      if (!previousChars.length || this.isWordSeparator(previousChars[previousChars.length - 1] || '')) break
+      startRow -= 1
+      start = previousChars.length
+      while (start > 0 && !this.isWordSeparator(previousChars[start - 1] || '')) start -= 1
+    }
+    while (end === chars.length && this.screenLineForBufferRow(endRow + 1)?.wrapped) {
+      const nextChars = Array.from(this.lineTextForBufferRow(endRow + 1))
+      if (!nextChars.length || this.isWordSeparator(nextChars[0] || '')) break
+      endRow += 1
+      end = 0
+      while (end < nextChars.length && !this.isWordSeparator(nextChars[end] || '')) end += 1
+    }
+    return { start: { x: start, y: startRow }, end: { x: end, y: endRow } }
+  }
+
+  private paragraphSelectionAt(point: ThreadedTerminalSelectionPoint) {
+    let startRow = point.y
+    let endRow = point.y
+    while (startRow > this.buffer.active.viewportY && this.screenLineForBufferRow(startRow)?.wrapped) startRow -= 1
+    const viewportEnd = this.buffer.active.viewportY + this.rows - 1
+    while (endRow < viewportEnd && this.screenLineForBufferRow(endRow + 1)?.wrapped) endRow += 1
+    return { start: { x: 0, y: startRow }, end: { x: this.cols, y: endRow } }
+  }
+
+  private expandSelectionPoint(point: ThreadedTerminalSelectionPoint, mode: ThreadedTerminalSelectionMode) {
+    if (mode === 'word') return this.wordSelectionAt(point)
+    if (mode === 'line') return this.paragraphSelectionAt(point)
+    return { start: point, end: point }
+  }
+
+  private updateActiveSelectionFocus(point: ThreadedTerminalSelectionPoint) {
+    if (!this.selection) return
+    if (this.selection.mode === 'char') {
+      this.selection.focus = point
+      return
+    }
+    const origin = this.selection.origin || this.selection.anchor
+    const originRange = this.expandSelectionPoint(origin, this.selection.mode)
+    const focusRange = this.expandSelectionPoint(point, this.selection.mode)
+    if (!originRange || !focusRange) return
+    const focusBeforeOrigin = point.y < origin.y || (point.y === origin.y && point.x < origin.x)
+    this.selection.anchor = focusBeforeOrigin ? originRange.end : originRange.start
+    this.selection.focus = focusBeforeOrigin ? focusRange.start : focusRange.end
+  }
+
+  private beginSelection(point: ThreadedTerminalSelectionPoint, mode: ThreadedTerminalSelectionMode) {
+    const range = this.expandSelectionPoint(point, mode)
+    if (!range) {
+      this.selection = null
+      return
+    }
+    this.selection = {
+      anchor: range.start,
+      focus: range.end,
+      selecting: true,
+      mode,
+      origin: point
+    }
   }
 
   private renderSelection() {
@@ -1036,6 +1142,7 @@ export class ThreadedTerminalHost {
       if (endX <= startX) continue
       const rect = document.createElement('div')
       rect.className = 'threaded-terminal-selection-rect'
+      rect.style.position = 'absolute'
       rect.style.left = `${startX * this.cellMetrics.width}px`
       rect.style.top = `${(row - viewportY) * this.cellMetrics.height}px`
       rect.style.width = `${(endX - startX) * this.cellMetrics.width}px`
@@ -1163,41 +1270,42 @@ export class ThreadedTerminalHost {
   private bindDomEvents() {
     if (!this.host) return
     const host = this.host
-    this.eventController?.abort()
-    this.eventController = new AbortController()
-    const signal = this.eventController.signal
-    host.addEventListener('mousedown', (event) => {
-      if (event.button !== 0) return
-      if ((event.target as HTMLElement | null)?.closest?.('.threaded-terminal-scrollbar')) return
-      event.preventDefault()
-      host.focus({ preventScroll: true })
-      const point = this.pointFromMouseEvent(event)
-      this.selection = { anchor: point, focus: point, selecting: true }
-      this.renderSelection()
-      this.emitSelectionChange()
-    }, { signal })
-    host.addEventListener('mousemove', (event) => {
-      if (!this.selection?.selecting) return
-      event.preventDefault()
-      this.selection.focus = this.pointFromMouseEvent(event)
-      this.renderSelection()
-      this.emitSelectionChange()
-    }, { signal })
+	    this.eventController?.abort()
+	    this.eventController = new AbortController()
+	    const signal = this.eventController.signal
+	    host.addEventListener('mousedown', (event) => {
+	      if (event.button !== 0) return
+	      if ((event.target as HTMLElement | null)?.closest?.('.threaded-terminal-scrollbar')) return
+	      event.preventDefault()
+	      host.focus({ preventScroll: true })
+	      const point = this.pointFromMouseEvent(event)
+	      const mode: ThreadedTerminalSelectionMode = event.detail >= 3 ? 'line' : event.detail === 2 ? 'word' : 'char'
+	      this.beginSelection(point, mode)
+	      this.renderSelection()
+	      this.emitSelectionChange()
+	    }, { signal })
+	    host.addEventListener('mousemove', (event) => {
+	      if (!this.selection?.selecting) return
+	      event.preventDefault()
+	      this.updateActiveSelectionFocus(this.pointFromMouseEvent(event))
+	      this.renderSelection()
+	      this.emitSelectionChange()
+	    }, { signal })
     window.addEventListener('mouseup', (event) => {
       if (this.scrollbarDrag) {
         this.scrollbarDrag = null
         if (this.scrollbarThumb) {
           delete this.scrollbarThumb.dataset.dragging
           this.applyScrollbarTheme()
-        }
-        return
-      }
-      if (!this.selection?.selecting) return
-      this.selection.focus = this.pointFromMouseEvent(event)
-      this.selection.selecting = false
-      this.renderSelection()
-      this.emitSelectionChange()
-    }, { signal })
+	        }
+	        return
+	      }
+	      if (!this.selection?.selecting) return
+	      this.updateActiveSelectionFocus(this.pointFromMouseEvent(event))
+	      this.selection.selecting = false
+	      this.renderSelection()
+	      this.emitSelectionChange()
+	    }, { signal })
     host.addEventListener('copy', (event) => {
       const text = this.selectionText()
       if (!text) return

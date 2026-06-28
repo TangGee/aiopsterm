@@ -395,6 +395,127 @@ describe('threadedTerminalRuntime', () => {
     host.dispose()
   })
 
+  it('anchors selection rectangles on the clicked terminal row', () => {
+    installOffscreenCanvasSupport()
+    const host = createHost()
+    const element = createHostElement()
+    Object.defineProperty(element, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({ left: 100, top: 50, width: 800, height: 400, right: 900, bottom: 450, x: 100, y: 50, toJSON: () => ({}) })
+    })
+    host.open(element)
+    const canvas = element.querySelector<HTMLCanvasElement>('.threaded-terminal-canvas')
+    Object.defineProperty(canvas, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({ left: 100, top: 50, width: 790, height: 400, right: 890, bottom: 450, x: 100, y: 50, toJSON: () => ({}) })
+    })
+    host.applySnapshot({
+      terminalId: 'panel-1',
+      seq: 1,
+      cols: 80,
+      rows: 10,
+      cursorX: 0,
+      cursorY: 9,
+      cursorAbsoluteY: 109,
+      viewportY: 100,
+      baseY: 100,
+      lines: Array.from({ length: 10 }, (_item, row) => ({ y: row, text: `row-${row}-value`, cells: [] })),
+      dirtyRows: Array.from({ length: 10 }, (_item, row) => row),
+      full: true,
+      visible: true,
+      priority: 'active'
+    })
+
+    element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0, clientX: 100, clientY: 50 + 3 * 15 }))
+    element.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, button: 0, clientX: 100 + 55, clientY: 50 + 3 * 15 }))
+    window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0, clientX: 100 + 55, clientY: 50 + 3 * 15 }))
+
+    const rect = element.querySelector<HTMLElement>('.threaded-terminal-selection-rect')
+    expect(host.getSelection()).toBe('row-3-')
+    expect(host.getSelectionPosition()).toEqual({ start: { x: 0, y: 103 }, end: { x: 6, y: 103 } })
+    expect(rect?.style.position).toBe('absolute')
+    expect(rect?.style.top).toBe(`${3 * 15}px`)
+    host.dispose()
+  })
+
+  it('copies soft-wrapped selected rows as one logical line', () => {
+    installOffscreenCanvasSupport()
+    const host = createHost()
+    const element = createHostElement()
+    Object.defineProperty(element, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({ left: 0, top: 0, width: 800, height: 400, right: 800, bottom: 400, x: 0, y: 0, toJSON: () => ({}) })
+    })
+    host.open(element)
+    host.applySnapshot({
+      terminalId: 'panel-1',
+      seq: 1,
+      cols: 80,
+      rows: 10,
+      cursorX: 0,
+      cursorY: 9,
+      cursorAbsoluteY: 9,
+      viewportY: 0,
+      baseY: 0,
+      lines: [
+        { y: 0, text: './.claude/plugins/marketplaces/claude-plugins-official/plugins/security-gui', cells: [] },
+        { y: 1, text: 'dance/hooks/diffstate.py', cells: [], wrapped: true }
+      ],
+      dirtyRows: [0, 1],
+      full: true,
+      visible: true,
+      priority: 'active'
+    })
+
+    element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0, clientX: 0, clientY: 0 }))
+    element.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, button: 0, clientX: 9 * 24, clientY: 15 }))
+    window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0, clientX: 9 * 24, clientY: 15 }))
+
+    expect(host.getSelection()).toBe('./.claude/plugins/marketplaces/claude-plugins-official/plugins/security-guidance/hooks/diffstate.py')
+    host.dispose()
+  })
+
+  it('selects a word on double click and the wrapped logical line on triple click', () => {
+    installOffscreenCanvasSupport()
+    const host = createHost()
+    const element = createHostElement()
+    Object.defineProperty(element, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({ left: 0, top: 0, width: 800, height: 400, right: 800, bottom: 400, x: 0, y: 0, toJSON: () => ({}) })
+    })
+    host.open(element)
+    host.applySnapshot({
+      terminalId: 'panel-1',
+      seq: 1,
+      cols: 80,
+      rows: 10,
+      cursorX: 0,
+      cursorY: 9,
+      cursorAbsoluteY: 9,
+      viewportY: 0,
+      baseY: 0,
+      lines: [
+        { y: 0, text: 'first command-value tail', cells: [] },
+        { y: 1, text: 'wrapped-tail next', cells: [], wrapped: true },
+        { y: 2, text: 'separate row', cells: [] }
+      ],
+      dirtyRows: [0, 1, 2],
+      full: true,
+      visible: true,
+      priority: 'active'
+    })
+
+    element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0, detail: 2, clientX: 9 * 8, clientY: 0 }))
+    window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0, detail: 2, clientX: 9 * 8, clientY: 0 }))
+    expect(host.getSelection()).toBe('command-value')
+
+    element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0, detail: 3, clientX: 9 * 4, clientY: 15 }))
+    window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0, detail: 3, clientX: 9 * 4, clientY: 15 }))
+    expect(host.getSelection()).toBe('first command-value tailwrapped-tail next')
+    expect(host.getSelectionPosition()).toEqual({ start: { x: 0, y: 0 }, end: { x: 80, y: 1 } })
+    host.dispose()
+  })
+
   it('skips duplicate threaded settings but forwards real changes', async () => {
     installOffscreenCanvasSupport()
     const host = createHost()
