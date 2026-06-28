@@ -8,6 +8,7 @@
 - [Internationalization](internationalization.md)
 - [Managed AI Sessions](managed-ai-sessions.md)
 - [Threaded Terminal Renderer](terminal-renderer-architecture.md)
+- [xterm Fork](xterm-fork.md)
 - [Architecture Design Principles](architecture-principles.md)
 - [Resource, Data, and Platform Plan](resource-data-platform-plan.md)
 - [Architecture Modernization Plan](architecture-modernization.md)

@@ -13,6 +13,7 @@ import {
 import { codexSessionClient } from '@/services/ai/codexSessionClient'
 import { copyTextToClipboard } from '@/services/app/clipboardRuntime'
 import { writeRendererRuntimeLog } from '@/services/app/runtimeLogClient'
+import { terminalThemeForAppTheme } from '@/services/terminal/terminalThemeRuntime'
 import {
   ThreadedTerminalFitAddon,
   createThreadedTerminalHost,
@@ -84,6 +85,7 @@ export type AiPanelCodexTerminalRuntimeOptions<TConversation extends AiPanelCode
   activeConversation: () => TConversation | null
   activeConversationId: () => string
   terminalSettings: () => AiPanelCodexTerminalSettings
+  themeId?: () => string
   currentBoundTarget: (conversation: TConversation) => CodexSessionTargetContext | null
   isConversationVisible?: (conversation: TConversation) => boolean
   syncAttentionState: (conversation: TConversation) => void
@@ -208,6 +210,7 @@ export const createAiPanelCodexTerminalRuntime = <TConversation extends AiPanelC
   const isConversationVisible = (conversation: TConversation) =>
     options.isConversationVisible ? options.isConversationVisible(conversation) : options.activeConversationId() === conversation.id
   const isThreadedConversationTerminal = (conversation: TConversation) => Boolean(conversation.terminal && isThreadedTerminalHost(conversation.terminal))
+  const terminalTheme = () => terminalThemeForAppTheme(options.themeId?.() || 'dark', { transparentBackground: true })
 
   const outputStateFor = (conversation: TConversation): CodexTerminalOutputState => {
     const existing = outputStates.get(conversation.id)
@@ -620,12 +623,7 @@ export const createAiPanelCodexTerminalRuntime = <TConversation extends AiPanelC
     terminal.options.cursorStyle = settings.cursorStyle
     terminal.options.scrollback = settings.scrollBack
     if (isThreadedTerminalHost(terminal)) {
-      terminal.updateSettings(settings, {
-        background: 'rgba(9, 11, 16, 0)',
-        foreground: '#d7dae3',
-        cursor: '#8ccf7e',
-        selectionBackground: '#2d4059'
-      })
+      terminal.updateSettings(settings, terminalTheme())
     }
     if (applyOptions.refit !== false) fitTerminal({ force: true, conversation })
   }
@@ -634,12 +632,7 @@ export const createAiPanelCodexTerminalRuntime = <TConversation extends AiPanelC
     const element = conversation.host
     if (!element || conversation.terminal) return
     const settings = options.terminalSettings()
-    const theme = {
-      background: 'rgba(9, 11, 16, 0)',
-      foreground: '#d7dae3',
-      cursor: '#8ccf7e',
-      selectionBackground: '#2d4059'
-    }
+    const theme = terminalTheme()
     const useThreaded = canUseThreadedTerminal()
     const terminal = (useThreaded
       ? createThreadedTerminalHost({

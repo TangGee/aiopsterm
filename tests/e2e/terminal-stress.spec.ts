@@ -72,6 +72,11 @@ type StressResult = {
   }
   paintLatency: StressMetricSummary
   paintFrameMs: StressMetricSummary
+  paintRows: StressMetricSummary
+  paintScrollRows: StressMetricSummary
+  paintFullFrames: number
+  paintFullReasons: Record<string, number>
+  paintRepaintReasons: Record<string, number>
   realEchoLatency: StressMetricSummary & { available: boolean; error?: string }
   memory: {
     samples: Array<{
@@ -327,6 +332,11 @@ const logStressResult = (result: StressResult) => {
     },
     paintLatency: result.paintLatency,
     paintFrameMs: result.paintFrameMs,
+    paintRows: result.paintRows,
+    paintScrollRows: result.paintScrollRows,
+    paintFullFrames: result.paintFullFrames,
+    paintFullReasons: result.paintFullReasons,
+    paintRepaintReasons: result.paintRepaintReasons,
     realEchoLatency: result.realEchoLatency,
     memory: {
       samples: result.memory.samples.length,
@@ -390,6 +400,15 @@ test('threaded terminal renderer keeps foreground frames healthy under 10 foregr
     expect(result.paintLatency.samples).toBeGreaterThan(0)
     expect(result.paintLatency.p95).toBeLessThan(100)
     expect(result.paintFrameMs.p95).toBeLessThan(20)
+    const allowedFullReasons = new Set(['create', 'import', 'settings', 'resize', 'visibility', 'clear'])
+    const unexpectedFullReasons = Object.entries(result.paintFullReasons || {})
+      .filter(([reason]) => !allowedFullReasons.has(reason))
+      .reduce<Record<string, number>>((summary, [reason, count]) => {
+        summary[reason] = count
+        return summary
+      }, {})
+    expect(unexpectedFullReasons, JSON.stringify(result.paintFullReasons)).toEqual({})
+    expect(result.paintRows.p95).toBeLessThanOrEqual(6)
     expect(result.switches.failed, result.errors.join('\n')).toBe(0)
     if (switchIntervalMs > 0) {
       expect(result.switches.count).toBeGreaterThan(0)

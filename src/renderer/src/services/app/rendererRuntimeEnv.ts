@@ -11,7 +11,16 @@ export const installRendererRuntimeEnv = () => {
   const runtimeEnv = (globalThis as {
     __AIOPSTERM_RUNTIME_ENV__?: Record<string, string | undefined>
   }).__AIOPSTERM_RUNTIME_ENV__ || {}
+  const preloadEnv =
+    typeof window !== 'undefined' && typeof window.aiops?.runtimeEnv === 'function'
+      ? window.aiops.runtimeEnv()
+      : {}
   viteRuntimeFlagNames.forEach((name) => {
+    const preloadValue = preloadEnv[name]
+    if (preloadValue !== undefined) {
+      env[name] = String(preloadValue)
+      runtimeEnv[name] = String(preloadValue)
+    }
     const viteValue = import.meta.env[`VITE_${name}`]
     if (viteValue !== undefined) {
       env[name] = String(viteValue)

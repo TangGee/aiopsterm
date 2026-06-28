@@ -36,6 +36,11 @@ export default defineConfig({
       }
     },
     plugins: [vue()],
+    build: {
+      commonjsOptions: {
+        include: [/node_modules/, /vendor\/xterm/]
+      }
+    },
     worker: {
       format: 'es'
     }

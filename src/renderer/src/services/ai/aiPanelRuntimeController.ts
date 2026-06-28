@@ -239,6 +239,7 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     activePanel: () => workspace.activePanel,
     panels: () => workspace.panels,
     terminalSettings: () => workspace.terminalSettings,
+    themeId: () => workspace.config.theme,
     aiContextCatalog: () => workspace.aiContextCatalog,
     loadClassicChatData: shellAdapter.loadClassicChatData,
     closePopups: () => closePopups(),

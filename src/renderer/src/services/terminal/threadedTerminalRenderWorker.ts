@@ -32,6 +32,8 @@ type RenderSurface = {
   skippedFrames: number
   lastPerfAt: number
   pendingSnapshot: ThreadedTerminalScreenSnapshot | null
+  screenLines: ThreadedTerminalScreenLine[]
+  lastSnapshot: ThreadedTerminalScreenSnapshot | null
   lastPaintAt: number
 }
 
@@ -61,15 +63,20 @@ const configureMetrics = (surface: RenderSurface) => {
 }
 
 const resizeCanvas = (surface: RenderSurface, width: number, height: number, dpr: number) => {
-  surface.width = Math.max(1, Math.floor(width))
-  surface.height = Math.max(1, Math.floor(height))
-  surface.dpr = Math.max(1, dpr || 1)
+  const nextWidth = Math.max(1, Math.floor(width))
+  const nextHeight = Math.max(1, Math.floor(height))
+  const nextDpr = Math.max(1, dpr || 1)
+  const changed = surface.width !== nextWidth || surface.height !== nextHeight || surface.dpr !== nextDpr
+  surface.width = nextWidth
+  surface.height = nextHeight
+  surface.dpr = nextDpr
   const pixelWidth = Math.max(1, Math.floor(surface.width * surface.dpr))
   const pixelHeight = Math.max(1, Math.floor(surface.height * surface.dpr))
   if (surface.canvas.width !== pixelWidth) surface.canvas.width = pixelWidth
   if (surface.canvas.height !== pixelHeight) surface.canvas.height = pixelHeight
   surface.context.setTransform(surface.dpr, 0, 0, surface.dpr, 0, 0)
   configureMetrics(surface)
+  return changed
 }
 
 const fillBackground = (surface: RenderSurface, row?: number) => {
@@ -82,7 +89,7 @@ const fillBackground = (surface: RenderSurface, row?: number) => {
   }
 }
 
-const drawText = (
+const drawTextCells = (
   surface: RenderSurface,
   text: string,
   x: number,
@@ -90,14 +97,17 @@ const drawText = (
   options: { fg?: string; bold?: boolean; italic?: boolean; underline?: boolean } = {}
 ) => {
   if (!text) return
+  const chars = Array.from(text)
   const context = surface.context
   context.font = fontSpec(surface.settings, options.bold, options.italic)
   context.fillStyle = options.fg || surface.settings.theme.foreground
-  const left = x * surface.cellWidth
   const top = row * surface.cellHeight
-  context.fillText(text, left, top + surface.baseline)
+  chars.forEach((char, index) => {
+    if (char === ' ') return
+    context.fillText(char, (x + index) * surface.cellWidth, top + surface.baseline)
+  })
   if (options.underline) {
-    context.fillRect(left, top + surface.cellHeight - 2, Math.max(surface.cellWidth, context.measureText(text).width), 1)
+    context.fillRect(x * surface.cellWidth, top + surface.cellHeight - 2, Math.max(surface.cellWidth, chars.length * surface.cellWidth), 1)
   }
 }
 
@@ -108,13 +118,57 @@ const drawStyledRuns = (surface: RenderSurface, line: ThreadedTerminalScreenLine
       context.fillStyle = run.bg
       context.fillRect(run.x * surface.cellWidth, line.y * surface.cellHeight, Math.max(surface.cellWidth, run.text.length * surface.cellWidth), surface.cellHeight)
     }
-    drawText(surface, run.text, run.x, line.y, {
+  }
+  for (const run of line.cells || []) {
+    drawTextCells(surface, run.text, run.x, line.y, {
       fg: run.fg,
       bold: run.bold,
       italic: run.italic,
       underline: run.underline
     })
   }
+}
+
+const drawHighlightRuns = (surface: RenderSurface, line: ThreadedTerminalScreenLine) => {
+  for (const run of line.highlights || []) {
+    drawTextCells(surface, run.text, run.x, line.y, {
+      fg: run.fg,
+      bold: run.bold
+    })
+  }
+}
+
+const drawPlainLineText = (surface: RenderSurface, line: ThreadedTerminalScreenLine) => {
+  const text = line.text || ''
+  if (!text) return
+  const styledCells = new Set<number>()
+  for (const run of line.cells || []) {
+    for (let index = 0; index < Array.from(run.text).length; index += 1) styledCells.add(run.x + index)
+  }
+  if (!styledCells.size) {
+    drawTextCells(surface, text, 0, line.y)
+    return
+  }
+  let segment = ''
+  let segmentStart = 0
+  Array.from(text).forEach((char, index) => {
+    if (styledCells.has(index)) {
+      if (segment) {
+        drawTextCells(surface, segment, segmentStart, line.y)
+        segment = ''
+      }
+      return
+    }
+    if (!segment) segmentStart = index
+    segment += char
+  })
+  if (segment) drawTextCells(surface, segment, segmentStart, line.y)
+}
+
+const charAtCell = (line: ThreadedTerminalScreenLine | undefined, x: number) => {
+  if (!line) return ' '
+  const chars = Array.from(line.text || '')
+  return chars[x] || ' '
 }
 
 const drawCursor = (surface: RenderSurface, snapshot: ThreadedTerminalScreenSnapshot) => {
@@ -128,10 +182,74 @@ const drawCursor = (surface: RenderSurface, snapshot: ThreadedTerminalScreenSnap
   } else if (surface.settings.cursorStyle === 'underline') {
     context.fillRect(x, y + surface.cellHeight - 3, surface.cellWidth, 2)
   } else {
-    context.globalAlpha = 0.72
     context.fillRect(x, y + 1, surface.cellWidth, Math.max(2, surface.cellHeight - 2))
-    context.globalAlpha = 1
+    drawTextCells(surface, charAtCell(surface.screenLines[snapshot.cursorY], snapshot.cursorX), snapshot.cursorX, snapshot.cursorY, { fg: surface.settings.theme.background })
   }
+}
+
+const blankScreenLine = (y: number): ThreadedTerminalScreenLine => ({ y, text: '', cells: [] })
+
+const normalizeScreenLineRows = (lines: ThreadedTerminalScreenLine[]) => {
+  lines.forEach((line, index) => {
+    line.y = index
+  })
+  return lines
+}
+
+const cloneScreenLine = (line: ThreadedTerminalScreenLine, y = line.y): ThreadedTerminalScreenLine => ({
+  ...line,
+  y,
+  cells: line.cells ? line.cells.map((cell) => ({ ...cell })) : undefined,
+  highlights: line.highlights ? line.highlights.map((highlight) => ({ ...highlight })) : undefined
+})
+
+const rememberPaintedSnapshot = (surface: RenderSurface, snapshot: ThreadedTerminalScreenSnapshot) => {
+  const scrollDeltaRows = snapshot.scrollDeltaRows || 0
+  if (snapshot.full || !surface.lastSnapshot || Math.abs(scrollDeltaRows) >= snapshot.rows) {
+    surface.screenLines = Array.from({ length: snapshot.rows }, (_item, row) => blankScreenLine(row))
+  } else {
+    if (surface.screenLines.length < snapshot.rows) {
+      surface.screenLines.push(...Array.from({ length: snapshot.rows - surface.screenLines.length }, (_item, row) => blankScreenLine(surface.screenLines.length + row)))
+    } else if (surface.screenLines.length > snapshot.rows) {
+      surface.screenLines = surface.screenLines.slice(0, snapshot.rows)
+    }
+    if (scrollDeltaRows > 0) {
+      surface.screenLines = surface.screenLines.slice(scrollDeltaRows).concat(Array.from({ length: scrollDeltaRows }, (_item, row) => blankScreenLine(snapshot.rows - scrollDeltaRows + row)))
+    } else if (scrollDeltaRows < 0) {
+      const movedRows = Math.max(0, snapshot.rows + scrollDeltaRows)
+      surface.screenLines = Array.from({ length: Math.abs(scrollDeltaRows) }, (_item, row) => blankScreenLine(row)).concat(surface.screenLines.slice(0, movedRows))
+    }
+    normalizeScreenLineRows(surface.screenLines)
+  }
+  for (const line of snapshot.lines) {
+    if (line.y >= 0 && line.y < snapshot.rows) surface.screenLines[line.y] = cloneScreenLine(line)
+  }
+  normalizeScreenLineRows(surface.screenLines)
+  surface.lastSnapshot = {
+    ...snapshot,
+    full: true,
+    fullReason: snapshot.fullReason,
+    repaintReason: snapshot.repaintReason,
+    scrollDeltaRows: 0,
+    lines: surface.screenLines.map((line, row) => cloneScreenLine(line, row)),
+    dirtyRows: surface.screenLines.map((_line, row) => row)
+  }
+}
+
+const scrollSurface = (surface: RenderSurface, deltaRows: number) => {
+  if (!deltaRows || Math.abs(deltaRows) >= Math.max(1, Math.floor(surface.height / surface.cellHeight))) return false
+  const context = surface.context
+  const deltaY = Math.round(deltaRows * surface.cellHeight * surface.dpr) / surface.dpr
+  const pixelWidth = surface.canvas.width
+  const pixelDeltaY = Math.round(Math.abs(deltaY) * surface.dpr)
+  if (deltaRows > 0) {
+    const sourcePixelHeight = Math.max(0, surface.canvas.height - pixelDeltaY)
+    if (sourcePixelHeight > 0) context.drawImage(surface.canvas, 0, pixelDeltaY, pixelWidth, sourcePixelHeight, 0, 0, surface.width, sourcePixelHeight / surface.dpr)
+  } else {
+    const sourcePixelHeight = Math.max(0, surface.canvas.height - pixelDeltaY)
+    if (sourcePixelHeight > 0) context.drawImage(surface.canvas, 0, 0, pixelWidth, sourcePixelHeight, 0, pixelDeltaY / surface.dpr, surface.width, sourcePixelHeight / surface.dpr)
+  }
+  return true
 }
 
 const emitPerfIfDue = (surface: RenderSurface, force = false) => {
@@ -164,20 +282,90 @@ const paintSnapshot = (surface: RenderSurface, snapshot: ThreadedTerminalScreenS
   context.save()
   context.setTransform(surface.dpr, 0, 0, surface.dpr, 0, 0)
   if (snapshot.full) fillBackground(surface)
+  else if (snapshot.scrollDeltaRows) scrollSurface(surface, snapshot.scrollDeltaRows)
   for (const line of snapshot.lines) {
     fillBackground(surface, line.y)
     context.font = fontSpec(surface.settings)
-    drawText(surface, line.text, 0, line.y)
+    drawPlainLineText(surface, line)
     drawStyledRuns(surface, line)
+    drawHighlightRuns(surface, line)
   }
+  rememberPaintedSnapshot(surface, snapshot)
   drawCursor(surface, snapshot)
   context.restore()
   const frameMs = nowMs() - startedAt
   surface.frames += 1
   surface.totalFrameMs += frameMs
   surface.maxFrameMs = Math.max(surface.maxFrameMs, frameMs)
-  post({ type: 'frame', terminalId: surface.terminalId, seq: snapshot.seq, frameMs, paintedRows: snapshot.lines.length })
+  post({
+    type: 'frame',
+    terminalId: surface.terminalId,
+    seq: snapshot.seq,
+    frameMs,
+    paintedRows: snapshot.lines.length,
+    full: snapshot.full,
+    fullReason: snapshot.fullReason,
+    repaintReason: snapshot.repaintReason,
+    scrollDeltaRows: snapshot.scrollDeltaRows
+  })
   emitPerfIfDue(surface)
+}
+
+const repaintLastSnapshot = (surface: RenderSurface, reason: ThreadedTerminalScreenSnapshot['fullReason']) => {
+  if (!surface.lastSnapshot) {
+    fillBackground(surface)
+    return
+  }
+  paintSnapshot(surface, {
+    ...surface.lastSnapshot,
+    full: true,
+    fullReason: reason,
+    scrollDeltaRows: 0,
+    repaintReason: reason,
+    lines: surface.lastSnapshot.lines
+  })
+}
+
+const expandSnapshotForRepaint = (surface: RenderSurface, snapshot: ThreadedTerminalScreenSnapshot, reason: ThreadedTerminalScreenSnapshot['fullReason']): ThreadedTerminalScreenSnapshot => {
+  if (snapshot.full || !surface.lastSnapshot) return snapshot
+  const baseLines = surface.lastSnapshot.lines.map((line, row) => cloneScreenLine(line, row))
+  const scrollDeltaRows = snapshot.scrollDeltaRows || 0
+  let nextLines = baseLines
+  if (Math.abs(scrollDeltaRows) >= snapshot.rows) {
+    nextLines = Array.from({ length: snapshot.rows }, (_item, row) => blankScreenLine(row))
+  } else if (scrollDeltaRows > 0) {
+    nextLines = nextLines.slice(scrollDeltaRows).concat(Array.from({ length: scrollDeltaRows }, (_item, row) => blankScreenLine(snapshot.rows - scrollDeltaRows + row)))
+  } else if (scrollDeltaRows < 0) {
+    nextLines = Array.from({ length: Math.abs(scrollDeltaRows) }, (_item, row) => blankScreenLine(row)).concat(nextLines.slice(0, snapshot.rows + scrollDeltaRows))
+  }
+  if (nextLines.length < snapshot.rows) {
+    nextLines.push(...Array.from({ length: snapshot.rows - nextLines.length }, (_item, row) => blankScreenLine(nextLines.length + row)))
+  } else if (nextLines.length > snapshot.rows) {
+    nextLines = nextLines.slice(0, snapshot.rows)
+  }
+  normalizeScreenLineRows(nextLines)
+  for (const line of snapshot.lines) {
+    if (line.y >= 0 && line.y < snapshot.rows) nextLines[line.y] = cloneScreenLine(line)
+  }
+  normalizeScreenLineRows(nextLines)
+  return {
+    ...snapshot,
+    full: true,
+    fullReason: reason,
+    repaintReason: reason,
+    scrollDeltaRows: 0,
+    lines: nextLines,
+    dirtyRows: nextLines.map((_line, row) => row)
+  }
+}
+
+const flushPendingPaintAsRepaint = (surface: RenderSurface, reason: ThreadedTerminalScreenSnapshot['fullReason']) => {
+  if (!surface.pendingSnapshot) return false
+  const snapshot = expandSnapshotForRepaint(surface, surface.pendingSnapshot, reason)
+  surface.pendingSnapshot = null
+  surface.lastPaintAt = nowMs()
+  paintSnapshot(surface, snapshot)
+  return true
 }
 
 const flushPendingPaint = (surface: RenderSurface) => {
@@ -203,6 +391,29 @@ const scheduleFrame = () => {
 }
 
 const schedulePaintSnapshot = (surface: RenderSurface, snapshot: ThreadedTerminalScreenSnapshot) => {
+  if (surface.pendingSnapshot) {
+    const canMergeDirty =
+      !surface.pendingSnapshot.full &&
+      !snapshot.full &&
+      !surface.pendingSnapshot.scrollDeltaRows &&
+      !snapshot.scrollDeltaRows &&
+      surface.pendingSnapshot.viewportY === snapshot.viewportY &&
+      surface.pendingSnapshot.rows === snapshot.rows &&
+      surface.pendingSnapshot.cols === snapshot.cols
+    if (canMergeDirty) {
+      const lines = new Map<number, ThreadedTerminalScreenLine>()
+      surface.pendingSnapshot.lines.forEach((line) => lines.set(line.y, line))
+      snapshot.lines.forEach((line) => lines.set(line.y, line))
+      surface.pendingSnapshot = {
+        ...snapshot,
+        lines: Array.from(lines.values()).sort((left, right) => left.y - right.y),
+        dirtyRows: Array.from(new Set([...surface.pendingSnapshot.dirtyRows, ...snapshot.dirtyRows])).sort((left, right) => left - right)
+      }
+      scheduleFrame()
+      return
+    }
+    flushPendingPaint(surface)
+  }
   surface.pendingSnapshot = snapshot
   scheduleFrame()
 }
@@ -244,6 +455,8 @@ const handleMessage = (message: ThreadedTerminalRenderRequest) => {
         skippedFrames: 0,
         lastPerfAt: nowMs(),
         pendingSnapshot: null,
+        screenLines: [],
+        lastSnapshot: null,
         lastPaintAt: 0
       }
       surfaces.set(surface.terminalId, surface)
@@ -260,16 +473,17 @@ const handleMessage = (message: ThreadedTerminalRenderRequest) => {
       return
     }
     if (message.type === 'resize') {
-      if (surface.pendingSnapshot) flushPendingPaint(surface)
-      resizeCanvas(surface, message.width, message.height, message.devicePixelRatio)
-      fillBackground(surface)
+      const changed = resizeCanvas(surface, message.width, message.height, message.devicePixelRatio)
+      if (!changed) return
+      if (flushPendingPaintAsRepaint(surface, 'resize')) return
+      else repaintLastSnapshot(surface, 'resize')
       return
     }
     if (message.type === 'settings') {
-      if (surface.pendingSnapshot) flushPendingPaint(surface)
       surface.settings = message.settings
       configureMetrics(surface)
-      fillBackground(surface)
+      if (flushPendingPaintAsRepaint(surface, 'settings')) return
+      else repaintLastSnapshot(surface, 'settings')
       return
     }
     if (message.type === 'screen') {

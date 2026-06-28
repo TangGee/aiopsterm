@@ -377,6 +377,7 @@ import type {
 
 export type AiopsPreloadApi = {
   getPathForFile: (file: File) => string
+  runtimeEnv?: () => Record<string, string | undefined>
   platform: () => Promise<string>
   shell: () => Promise<string>
   checkUpdate: () => Promise<AppUpdateCheckResult>

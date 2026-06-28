@@ -1,8 +1,11 @@
 import type { TerminalSettings } from '@/stores/workspace'
+import type { KeywordHighlightUserConfig } from '@shared/contracts/appRuntime'
 
 export type ThreadedTerminalPriority = 'active' | 'visible' | 'background'
 
 export type ThreadedTerminalSurface = 'workspace' | 'codex'
+
+export type ThreadedTerminalFullReason = 'create' | 'import' | 'settings' | 'resize' | 'visibility' | 'clear' | 'jump' | 'unknown'
 
 export type ThreadedTerminalSettings = Pick<
   TerminalSettings,
@@ -14,6 +17,34 @@ export type ThreadedTerminalTheme = {
   foreground: string
   cursor: string
   selectionBackground?: string
+  black?: string
+  red?: string
+  green?: string
+  yellow?: string
+  blue?: string
+  magenta?: string
+  cyan?: string
+  white?: string
+  brightBlack?: string
+  brightRed?: string
+  brightGreen?: string
+  brightYellow?: string
+  brightBlue?: string
+  brightMagenta?: string
+  brightCyan?: string
+  brightWhite?: string
+  scrollbarTrack?: string
+  scrollbarThumb?: string
+  scrollbarThumbHover?: string
+}
+
+export type ThreadedTerminalKeywordHighlightConfig = KeywordHighlightUserConfig | null | undefined
+
+export type ThreadedTerminalHighlightRun = {
+  x: number
+  text: string
+  fg?: string
+  bold?: boolean
 }
 
 export type ThreadedTerminalCreateOptions = {
@@ -27,6 +58,7 @@ export type ThreadedTerminalCreateOptions = {
   priority: ThreadedTerminalPriority
   settings: ThreadedTerminalSettings
   theme: ThreadedTerminalTheme
+  keywordHighlight?: ThreadedTerminalKeywordHighlightConfig
 }
 
 export type ThreadedTerminalRenderSettings = {
@@ -42,6 +74,7 @@ export type ThreadedTerminalScreenLine = {
   y: number
   text: string
   cells?: ThreadedTerminalCellRun[]
+  highlights?: ThreadedTerminalHighlightRun[]
   wrapped?: boolean
 }
 
@@ -63,11 +96,15 @@ export type ThreadedTerminalScreenSnapshot = {
   rows: number
   cursorX: number
   cursorY: number
+  cursorAbsoluteY?: number
   viewportY: number
   baseY: number
   lines: ThreadedTerminalScreenLine[]
   dirtyRows: number[]
   full: boolean
+  fullReason?: ThreadedTerminalFullReason
+  repaintReason?: ThreadedTerminalFullReason
+  scrollDeltaRows?: number
   visible: boolean
   priority: ThreadedTerminalPriority
 }
@@ -99,6 +136,7 @@ export type ThreadedTerminalExportedState = {
   priority: ThreadedTerminalPriority
   settings: ThreadedTerminalSettings
   theme: ThreadedTerminalTheme
+  keywordHighlight?: ThreadedTerminalKeywordHighlightConfig
   scrollbackText: string
 }
 
@@ -108,10 +146,13 @@ export type ThreadedTerminalCoreRequest =
   | { type: 'input'; terminalId: string; data: string }
   | { type: 'resize'; terminalId: string; cols: number; rows: number }
   | { type: 'settings'; terminalId: string; settings: ThreadedTerminalSettings; theme: ThreadedTerminalTheme }
+  | { type: 'keyword-highlight'; terminalId: string; config?: ThreadedTerminalKeywordHighlightConfig }
   | { type: 'visibility'; terminalId: string; visible: boolean; priority: ThreadedTerminalPriority }
   | { type: 'priority'; terminalId: string; priority: ThreadedTerminalPriority }
   | { type: 'clear'; terminalId: string }
   | { type: 'scroll-to-bottom'; terminalId: string }
+  | { type: 'scroll-lines'; terminalId: string; amount: number }
+  | { type: 'scroll-to-line'; terminalId: string; line: number }
   | { type: 'read-screen'; terminalId: string; requestId: string; tailLines?: number }
   | { type: 'export'; terminalId: string; requestId: string }
   | { type: 'import'; requestId?: string; state: ThreadedTerminalExportedState }
@@ -153,7 +194,7 @@ export type ThreadedTerminalRenderRequest =
 export type ThreadedTerminalRenderResponse =
   | { type: 'ready' }
   | { type: 'attached'; terminalId: string }
-  | { type: 'frame'; terminalId: string; seq: number; frameMs: number; paintedRows: number }
+  | { type: 'frame'; terminalId: string; seq: number; frameMs: number; paintedRows: number; full?: boolean; fullReason?: ThreadedTerminalFullReason; repaintReason?: ThreadedTerminalFullReason; scrollDeltaRows?: number }
   | { type: 'perf'; terminalId: string; frames: number; avgFrameMs: number; maxFrameMs: number; skippedFrames: number }
   | { type: 'pong'; requestId: string }
   | { type: 'error'; terminalId?: string; requestId?: string; message: string }

@@ -27,6 +27,23 @@ The core pool is intentionally small instead of one worker per terminal:
 
 Terminals are assigned by session/panel hash with light load balancing. Active panes are `active`, visible inactive panes are `visible`, and hidden/background panes are `background`.
 
+## Painting And Scrolling
+
+The worker renderer follows VTE's correctness model before applying aggressive canvas reuse:
+
+- Terminal state lives in the core worker. The render worker is a paint target, not the source of truth.
+- Text is painted on a fixed terminal cell grid. The renderer does not draw a whole row with browser natural text layout because shell output such as `ls` relies on terminal cell columns and padded spaces.
+- Styled ANSI runs are painted once on top of row background. The unstyled row pass skips cells covered by styled runs so colored filenames do not get double-painted.
+- ANSI colors are resolved from `@xterm/headless` cell attributes, including default colors, app-theme-derived 16-color palette entries, 256-color indexes, true color, inverse video, and bold-as-bright foreground palette colors.
+- Every painted row is cleared before text is drawn. This prevents previous glyph pixels from surviving when shorter or differently styled text replaces an older row.
+- When the viewport changes, including wheel scrollback, the core worker emits the current visible rows and the render worker repaints them. This mirrors VTE's `queue_adjustment_value_changed()` path, which invalidates the ring view and queues a full visible repaint for user scroll changes.
+- Cursor rows are converted from absolute buffer position to visible viewport row before painting. When the user scrolls into history and the real cursor is outside the visible viewport, the renderer does not draw a fixed-position cursor.
+- The main renderer owns the lightweight terminal adjustment layer: a thin custom scrollbar maps to core-worker `scrollToLine()`, matching VTE's separation between terminal scroll state and the scrollbar widget while keeping visual styling inside aiopsterm's theme system.
+- Text selection is handled in the main renderer as grid coordinates over the canvas. Selection is rendered as an overlay and copied from the current visible snapshot, while the render worker remains a paint target only.
+- Normal content changes still use dirty-row snapshots when the viewport is stable. If output moves the viewport, aiopsterm prefers repainting the visible rows over copying old canvas pixels until a pixel-scroll path can prove it never leaves stale glyphs.
+
+VTE's row renderer first paints cell-background runs and then text runs. The threaded renderer keeps the same ordering in canvas form: row background first, custom background runs next, then text cells.
+
 ## Data Coalescing
 
 Terminal output is merged at several boundaries:
@@ -39,6 +56,10 @@ Terminal output is merged at several boundaries:
 
 The threaded live path writes output directly to the worker-backed terminal. `panel.output` is only a low-frequency tail mirror for search, AI context, tests, and lifecycle state. Threaded mirrors keep smaller foreground/background tails than legacy xterm panes, and cropped strings are detached from their original backing storage so old high-volume output is not retained by sliced strings. The hidden `terminal-output-mirror` DOM node does not bind large live text for threaded terminals, so Vue does not diff every terminal byte while the worker renderer is already painting the real surface.
 
+Keyword highlighting is also kept off the renderer hot path for threaded terminals. The main renderer sends the normalized keyword-highlight config to the core worker. The core worker compiles output/both-scope rules and adds highlight runs only for snapshot rows; the render worker paints those runs as a display overlay after ANSI text. This preserves raw PTY bytes and `@xterm/headless` buffer state, avoids injecting synthetic ANSI into the terminal stream, and prevents `highlightStatus=true` from falling back to main-thread `appendTerminalOutput()` and full `getHighlightedTerminalOutput()` scans. The legacy xterm path still uses the existing ANSI-injection highlighter.
+
+Worker messages must stay structured-clone safe. Renderer settings, theme values, and keyword-highlight config are normalized into plain data before `postMessage()` so Vue/Pinia proxies cannot make workspace terminals fail open and fall back to the legacy xterm renderer.
+
 ## RenderGroup Model
 
 The v1 implementation uses one `OffscreenCanvas` per mounted pane while all panes share one render worker. This keeps the existing Vue pane lifecycle intact while moving core parsing and painting off the main thread.
@@ -50,9 +71,10 @@ The protocol already carries `groupId` and `surface` so the next renderer step c
 The threaded path is enabled only when all of these are true:
 
 - `AIOPSTERM_THREADED_TERMINAL=1`.
-- `VITE_AIOPSTERM_THREADED_TERMINAL=1` for renderer-side test/dev launches that rely on Vite environment injection.
 - `Worker` is available.
 - `HTMLCanvasElement.transferControlToOffscreen` is available.
+
+Electron preview and packaged renderer builds read the runtime flag through the preload bridge, so `AIOPSTERM_THREADED_TERMINAL=1 scripts/build-and-start.sh --skip-build` is enough to enable the threaded path for an existing build. `VITE_AIOPSTERM_THREADED_TERMINAL=1` is only needed for renderer-only test harnesses that do not have the preload bridge available.
 
 If any requirement is missing, aiopsterm logs `renderer.threaded-terminal.unavailable` and creates the existing xterm renderer.
 
@@ -90,6 +112,6 @@ The result JSON includes `writes.foreground*` and `writes.background*` counters 
 
 ## Current Limits
 
-The v1 path is built for throughput validation. It keeps selection, rich xterm decorations, and WebGL rendering on the legacy path for now. Threaded rendering supports text output, ANSI foreground/background runs, cursor rendering, resize, direct PTY data, and background no-paint behavior.
+The v1 path is built for throughput validation. Threaded rendering supports text output, ANSI foreground/background runs, cursor rendering, resize, direct PTY data, wheel and scrollbar scrollback, visible-viewport text selection, and background no-paint behavior. Rich xterm decorations, full scrollback-range selection, link hover handling, mouse application protocols, and WebGL rendering remain on the legacy path for now.
 
 WebGL is intentionally deferred: the first threaded renderer uses worker 2D canvas because that covers modern Electron/Chromium machines and avoids GL context count pressure. A later WebGL renderer should keep one context per visible RenderGroup, not one context per terminal.

@@ -45,6 +45,11 @@ type TerminalStressHarnessResult = {
   threaded: ReturnType<typeof getThreadedTerminalDebugStats>
   paintLatency: TerminalStressMetricSummary
   paintFrameMs: TerminalStressMetricSummary
+  paintRows: TerminalStressMetricSummary
+  paintScrollRows: TerminalStressMetricSummary
+  paintFullFrames: number
+  paintFullReasons: Record<string, number>
+  paintRepaintReasons: Record<string, number>
   realEchoLatency: TerminalStressMetricSummary & { available: boolean; error?: string }
   memory: TerminalStressMemorySummary
   queues: TerminalStressQueueSummary
@@ -649,6 +654,7 @@ export const useTerminalWorkspaceContainerRuntime = () => {
     terminalViews,
     terminalFontSizeForPanel,
     terminalOutputMirrorText,
+    syncThreadedKeywordHighlight,
     updateFontSize,
     writeLiveTerminalData,
     updateSelectionButtonPosition,
@@ -929,14 +935,23 @@ export const useTerminalWorkspaceContainerRuntime = () => {
     }
   }
 
-  const measureStressPaintLatency = async (panels: TerminalPanel[], samples: number[], frameSamples: number[], errors: string[]) => {
+  const measureStressPaintLatency = async (
+    panels: TerminalPanel[],
+    samples: number[],
+    frameSamples: number[],
+    rowSamples: number[],
+    scrollRowSamples: number[],
+    fullReasons: string[],
+    repaintReasons: string[],
+    errors: string[]
+  ) => {
     const candidates = panels
       .map((panel) => ({ panel, view: terminalViews.get(panel.id) }))
       .filter((item) => item.view && isThreadedTerminalHost(item.view.terminal))
       .slice(0, Math.min(3, panels.length))
     await Promise.all(candidates.map(async ({ panel, view }, index) => {
       try {
-        const marker = `__AIOPSTERM_STRESS_PAINT_${Date.now()}_${index}__\n`
+        const marker = `p${index}\n`
         if (!view || !isThreadedTerminalHost(view.terminal)) return
         const terminal = view.terminal
         const result = await terminal.writeAndMeasurePaint(marker, 3000).catch(async (error) => {
@@ -947,6 +962,10 @@ export const useTerminalWorkspaceContainerRuntime = () => {
         if (!result) return
         samples.push(result.latencyMs)
         frameSamples.push(result.frameMs)
+        if (result.full) fullReasons.push(result.fullReason || 'unknown')
+        else if (result.repaintReason) repaintReasons.push(result.repaintReason)
+        else if (result.scrollDeltaRows) scrollRowSamples.push(result.paintedRows)
+        else rowSamples.push(result.paintedRows)
         const sessionOrPanelId = panel.sessionId || panel.id
         appendTerminalHistoryBatched(sessionOrPanelId, marker)
       } catch (error) {
@@ -1036,6 +1055,10 @@ export const useTerminalWorkspaceContainerRuntime = () => {
     const rafIntervals: number[] = []
     const paintLatencySamples: number[] = []
     const paintFrameSamples: number[] = []
+    const paintRowSamples: number[] = []
+    const paintScrollRowSamples: number[] = []
+    const paintFullReasons: string[] = []
+    const paintRepaintReasons: string[] = []
     const switchPaintLatencySamples: number[] = []
     const memorySamples: TerminalStressMemorySample[] = []
     const queueSamples: TerminalStressQueueSample[] = []
@@ -1144,7 +1167,7 @@ export const useTerminalWorkspaceContainerRuntime = () => {
         switchCount += 1
         const view = terminalViews.get(incoming.id)
         if (view && isThreadedTerminalHost(view.terminal)) {
-          const marker = `__AIOPSTERM_STRESS_SWITCH_${Date.now()}_${switchCount}__\n`
+          const marker = `s${switchCount}\n`
           const result = await view.terminal.writeAndMeasurePaint(marker, 3000)
           switchPaintLatencySamples.push(result.latencyMs)
           appendTerminalHistoryBatched(incoming.sessionId || incoming.id, marker)
@@ -1168,7 +1191,16 @@ export const useTerminalWorkspaceContainerRuntime = () => {
       }
       paintProbeActive = true
       try {
-        await measureStressPaintLatency(currentForegroundPanels(), paintLatencySamples, paintFrameSamples, errors)
+        await measureStressPaintLatency(
+          currentForegroundPanels(),
+          paintLatencySamples,
+          paintFrameSamples,
+          paintRowSamples,
+          paintScrollRowSamples,
+          paintFullReasons,
+          paintRepaintReasons,
+          errors
+        )
       } finally {
         paintProbeActive = false
         if (pendingSwitchProbe) {
@@ -1226,6 +1258,17 @@ export const useTerminalWorkspaceContainerRuntime = () => {
       threaded: getThreadedTerminalDebugStats(),
       paintLatency: terminalStressMetricSummary(paintLatencySamples),
       paintFrameMs: terminalStressMetricSummary(paintFrameSamples),
+      paintRows: terminalStressMetricSummary(paintRowSamples),
+      paintScrollRows: terminalStressMetricSummary(paintScrollRowSamples),
+      paintFullFrames: paintFullReasons.length,
+      paintFullReasons: paintFullReasons.reduce<Record<string, number>>((summary, reason) => {
+        summary[reason] = (summary[reason] || 0) + 1
+        return summary
+      }, {}),
+      paintRepaintReasons: paintRepaintReasons.reduce<Record<string, number>>((summary, reason) => {
+        summary[reason] = (summary[reason] || 0) + 1
+        return summary
+      }, {}),
       realEchoLatency: {
         ...realEchoSummary,
         available: realEcho.available,
@@ -1294,7 +1337,16 @@ export const useTerminalWorkspaceContainerRuntime = () => {
         .map((panel) => `${panel.id}:${panel.title}`)
         .join('|') + `${workspace.extensionSettings.highlightStatus}|${JSON.stringify(workspace.keywordHighlightSettings)}`,
     () => {
-      nextTick(() => workspace.panels.filter((panel) => panel.kind !== 'knowledge').forEach((panel) => syncTerminalView(panel)))
+      nextTick(() => {
+        syncThreadedKeywordHighlight()
+        workspace.panels
+          .filter((panel) => panel.kind !== 'knowledge')
+          .forEach((panel) => {
+            const view = terminalViews.get(panel.id)
+            if (view && isThreadedTerminalHost(view.terminal)) return
+            syncTerminalView(panel)
+          })
+      })
     }
   )
 

@@ -4,6 +4,8 @@ import type {
   ThreadedTerminalCoreResponse,
   ThreadedTerminalCreateOptions,
   ThreadedTerminalExportedState,
+  ThreadedTerminalFullReason,
+  ThreadedTerminalKeywordHighlightConfig,
   ThreadedTerminalPerfSample,
   ThreadedTerminalPriority,
   ThreadedTerminalScreenLine,
@@ -11,6 +13,10 @@ import type {
   ThreadedTerminalSettings,
   ThreadedTerminalTheme
 } from '@/services/terminal/threadedTerminalProtocol'
+import {
+  compileThreadedKeywordHighlightRules,
+  findThreadedKeywordHighlightRuns
+} from '@/services/terminal/threadedTerminalKeywordHighlight'
 
 type DedicatedWorkerScopeLike = {
   onmessage: ((event: MessageEvent<ThreadedTerminalCoreRequest>) => void) | null
@@ -33,6 +39,8 @@ type CoreTerminalRecord = {
   priority: ThreadedTerminalPriority
   settings: ThreadedTerminalSettings
   theme: ThreadedTerminalTheme
+  keywordHighlight?: ThreadedTerminalKeywordHighlightConfig
+  keywordHighlightRules: ReturnType<typeof compileThreadedKeywordHighlightRules>
   seq: number
   pendingChunks: string[]
   pendingBytes: number
@@ -41,11 +49,13 @@ type CoreTerminalRecord = {
   flushDueAt: number
   disposed: boolean
   pendingFullSnapshot: boolean
+  pendingFullSnapshotReason?: ThreadedTerminalFullReason
   dirtyRows: Set<number>
   snapshotScheduled: boolean
   snapshotTimer: ReturnType<typeof setTimeout> | null
   snapshotDueAt: number
   lastSnapshotAt: number
+  lastSnapshotViewportY: number
   perf: ThreadedTerminalPerfSample
   lastPerfAt: number
 }
@@ -137,27 +147,27 @@ const newPerfSample = (record: Pick<CoreTerminalRecord, 'terminalId' | 'priority
   droppedPaints: 0
 })
 
-const ansiPalette = [
-  '#151820',
-  '#f7768e',
-  '#9ece6a',
-  '#e0af68',
-  '#7aa2f7',
-  '#bb9af7',
-  '#7dcfff',
-  '#c0caf5',
-  '#414868',
-  '#ff9e64',
-  '#73daca',
-  '#e0af68',
-  '#7dcfff',
-  '#bb9af7',
-  '#2ac3de',
-  '#d7dae3'
+const ansiPaletteForTheme = (theme: ThreadedTerminalTheme) => [
+  theme.black || theme.background,
+  theme.red || '#e06c75',
+  theme.green || '#8ccf7e',
+  theme.yellow || '#e6b450',
+  theme.blue || '#56b6c2',
+  theme.magenta || '#8ccf7e',
+  theme.cyan || '#56b6c2',
+  theme.white || theme.foreground,
+  theme.brightBlack || '#8993a8',
+  theme.brightRed || theme.red || '#e06c75',
+  theme.brightGreen || theme.green || '#8ccf7e',
+  theme.brightYellow || theme.yellow || '#e6b450',
+  theme.brightBlue || theme.blue || '#56b6c2',
+  theme.brightMagenta || theme.magenta || '#8ccf7e',
+  theme.brightCyan || theme.cyan || '#56b6c2',
+  theme.brightWhite || theme.foreground
 ]
 
-const colorFromPalette = (value: number, fallback: string) => {
-  if (value < 16) return ansiPalette[value] || fallback
+const colorFromPalette = (value: number, fallback: string, theme: ThreadedTerminalTheme) => {
+  if (value < 16) return ansiPaletteForTheme(theme)[value] || fallback
   if (value >= 16 && value <= 231) {
     const index = value - 16
     const r = Math.floor(index / 36)
@@ -175,6 +185,11 @@ const colorFromPalette = (value: number, fallback: string) => {
 
 const rgbNumberToCss = (value: number) => `#${value.toString(16).padStart(6, '0').slice(-6)}`
 
+const normalizedPaletteIndex = (value: number, bold: boolean) => {
+  if (!bold || value < 0 || value > 7) return value
+  return value + 8
+}
+
 const cellColor = (
   cell: NonNullable<ReturnType<NonNullable<ReturnType<HeadlessTerminalLike['buffer']['active']['getLine']>>['getCell']>>,
   kind: 'fg' | 'bg',
@@ -185,9 +200,11 @@ const cellColor = (
   const isPalette = kind === 'fg' ? cell.isFgPalette() : cell.isBgPalette()
   const value = kind === 'fg' ? cell.getFgColor() : cell.getBgColor()
   if (isRgb) return rgbNumberToCss(value)
-  if (isPalette) return colorFromPalette(value, fallback)
+  if (isPalette) return colorFromPalette(kind === 'fg' ? normalizedPaletteIndex(value, Boolean(cell.isBold())) : value, fallback, theme)
   return fallback
 }
+
+const absoluteCursorRow = (buffer: HeadlessTerminalLike['buffer']['active']) => buffer.baseY + buffer.cursorY
 
 const extractLineRuns = (record: CoreTerminalRecord, lineIndex: number) => {
   const line = record.terminal.buffer.active.getLine(lineIndex)
@@ -239,6 +256,9 @@ const extractLineRuns = (record: CoreTerminalRecord, lineIndex: number) => {
   return runs
 }
 
+const extractKeywordHighlightRuns = (record: CoreTerminalRecord, text: string) =>
+  findThreadedKeywordHighlightRuns(text, record.keywordHighlightRules)
+
 const visibleLineIndexes = (record: CoreTerminalRecord) => {
   const buffer = record.terminal.buffer.active
   const rows = Math.max(1, record.terminal.rows)
@@ -249,29 +269,40 @@ const visibleLineIndexes = (record: CoreTerminalRecord) => {
   return indexes
 }
 
-const buildSnapshot = (record: CoreTerminalRecord, forceFull = false): ThreadedTerminalScreenSnapshot => {
+const buildSnapshot = (record: CoreTerminalRecord, forceFull = false, fullReason?: ThreadedTerminalFullReason): ThreadedTerminalScreenSnapshot => {
   const startedAt = nowMs()
   const buffer = record.terminal.buffer.active
   const visibleIndexes = visibleLineIndexes(record)
-  const dirtyRows = forceFull
-    ? visibleIndexes.map((_lineIndex, row) => row)
+  const allRows = visibleIndexes.map((_lineIndex, row) => row)
+  const viewportDelta = record.lastSnapshotAt ? buffer.viewportY - record.lastSnapshotViewportY : 0
+  const cursorAbsoluteY = absoluteCursorRow(buffer)
+  const cursorViewportY = cursorAbsoluteY - buffer.viewportY
+  const repaintVisibleRows = !forceFull && viewportDelta !== 0
+  const effectiveFull = forceFull
+  const effectiveFullReason = effectiveFull ? fullReason || 'unknown' : undefined
+  const dirtyRows = effectiveFull || repaintVisibleRows
+    ? allRows
     : Array.from(record.dirtyRows)
         .filter((row) => row >= 0 && row < record.terminal.rows)
         .sort((a, b) => a - b)
-  const rowsToRead = forceFull || !dirtyRows.length ? visibleIndexes.map((_lineIndex, row) => row) : dirtyRows
+  const rowsToRead = effectiveFull ? allRows : dirtyRows
   const limitedRows = rowsToRead.slice(-maxSnapshotRows)
   const lines: ThreadedTerminalScreenLine[] = limitedRows.map((row) => {
     const lineIndex = buffer.viewportY + row
     const line = buffer.getLine(lineIndex)
+    const text = line?.translateToString(false, 0, record.terminal.cols) || ''
     return {
       y: row,
-      text: line?.translateToString(false, 0, record.terminal.cols) || '',
+      text,
       cells: extractLineRuns(record, lineIndex),
+      highlights: extractKeywordHighlightRuns(record, text),
       wrapped: Boolean(line?.isWrapped)
     }
   })
   record.dirtyRows.clear()
   record.pendingFullSnapshot = false
+  record.pendingFullSnapshotReason = undefined
+  record.lastSnapshotViewportY = buffer.viewportY
   record.perf.snapshotMs += nowMs() - startedAt
   return {
     terminalId: record.terminalId,
@@ -279,12 +310,16 @@ const buildSnapshot = (record: CoreTerminalRecord, forceFull = false): ThreadedT
     cols: record.terminal.cols,
     rows: record.terminal.rows,
     cursorX: buffer.cursorX,
-    cursorY: buffer.cursorY,
+    cursorY: cursorViewportY,
+    cursorAbsoluteY,
     viewportY: buffer.viewportY,
     baseY: buffer.baseY,
     lines,
     dirtyRows: limitedRows,
-    full: forceFull || !dirtyRows.length,
+    full: effectiveFull,
+    fullReason: effectiveFullReason,
+    repaintReason: repaintVisibleRows ? 'jump' : undefined,
+    scrollDeltaRows: 0,
     visible: record.visible,
     priority: record.priority
   }
@@ -309,18 +344,22 @@ const emitSnapshotNow = (record: CoreTerminalRecord, forceFull = false) => {
     record.perf.droppedPaints += 1
     record.dirtyRows.clear()
     record.pendingFullSnapshot = true
+    record.pendingFullSnapshotReason = record.pendingFullSnapshotReason || 'visibility'
     emitPerfIfDue(record)
     return
   }
-  const snapshot = buildSnapshot(record, forceFull || record.pendingFullSnapshot)
+  const snapshot = buildSnapshot(record, forceFull || record.pendingFullSnapshot, record.pendingFullSnapshotReason)
   record.lastSnapshotAt = nowMs()
   post({ type: 'screen', snapshot })
   emitPerfIfDue(record)
 }
 
-const scheduleSnapshot = (record: CoreTerminalRecord, forceFull = false) => {
+const scheduleSnapshot = (record: CoreTerminalRecord, forceFull = false, fullReason?: ThreadedTerminalFullReason) => {
   if (record.disposed) return
-  if (forceFull) record.pendingFullSnapshot = true
+  if (forceFull) {
+    record.pendingFullSnapshot = true
+    record.pendingFullSnapshotReason = fullReason || record.pendingFullSnapshotReason || 'unknown'
+  }
   if (!record.visible) {
     emitSnapshotNow(record, forceFull)
     return
@@ -346,16 +385,17 @@ const scheduleSnapshot = (record: CoreTerminalRecord, forceFull = false) => {
 
 const installTerminalEvents = (record: CoreTerminalRecord) => {
   record.terminal.onCursorMove(() => {
-    record.dirtyRows.add(record.terminal.buffer.active.cursorY)
+    const buffer = record.terminal.buffer.active
+    record.dirtyRows.add(absoluteCursorRow(buffer) - buffer.viewportY)
   })
   record.terminal.onLineFeed(() => {
-    record.dirtyRows.add(record.terminal.buffer.active.cursorY)
+    const buffer = record.terminal.buffer.active
+    record.dirtyRows.add(absoluteCursorRow(buffer) - buffer.viewportY)
   })
-  record.terminal.onScroll(() => {
-    record.pendingFullSnapshot = true
-  })
+  record.terminal.onScroll(() => {})
   record.terminal.onResize(({ cols, rows }) => {
     record.pendingFullSnapshot = true
+    record.pendingFullSnapshotReason = 'resize'
     post({ type: 'resize', terminalId: record.terminalId, cols, rows })
   })
   record.terminal.onData((data) => {
@@ -386,6 +426,8 @@ const createRecord = (options: ThreadedTerminalCreateOptions): CoreTerminalRecor
     priority: options.priority,
     settings: options.settings,
     theme: options.theme,
+    keywordHighlight: options.keywordHighlight,
+    keywordHighlightRules: compileThreadedKeywordHighlightRules(options.keywordHighlight),
     seq: 0,
     pendingChunks: [],
     pendingBytes: 0,
@@ -394,11 +436,13 @@ const createRecord = (options: ThreadedTerminalCreateOptions): CoreTerminalRecor
     flushDueAt: 0,
     disposed: false,
     pendingFullSnapshot: true,
+    pendingFullSnapshotReason: 'create',
     dirtyRows: new Set(),
     snapshotScheduled: false,
     snapshotTimer: null,
     snapshotDueAt: 0,
     lastSnapshotAt: 0,
+    lastSnapshotViewportY: 0,
     perf: newPerfSample({ terminalId: options.terminalId, priority: options.priority, visible: options.visible }),
     lastPerfAt: nowMs()
   }
@@ -414,7 +458,16 @@ const applySettings = (record: CoreTerminalRecord, settings: ThreadedTerminalSet
   record.terminal.options.cursorStyle = settings.cursorStyle
   record.terminal.options.scrollback = settings.scrollBack
   record.pendingFullSnapshot = true
-  scheduleSnapshot(record, true)
+  record.pendingFullSnapshotReason = 'settings'
+  scheduleSnapshot(record, true, 'settings')
+}
+
+const applyKeywordHighlight = (record: CoreTerminalRecord, config: ThreadedTerminalKeywordHighlightConfig) => {
+  record.keywordHighlight = config
+  record.keywordHighlightRules = compileThreadedKeywordHighlightRules(config)
+  record.pendingFullSnapshot = true
+  record.pendingFullSnapshotReason = 'settings'
+  scheduleSnapshot(record, true, 'settings')
 }
 
 const takeBatch = (record: CoreTerminalRecord) => {
@@ -457,7 +510,7 @@ const flushRecord = (record: CoreTerminalRecord) => {
   const flushStartedAt = nowMs()
   const data = takeBatch(record)
   const bytes = textByteLength(data)
-  const beforeCursorY = record.terminal.buffer.active.cursorY
+  const beforeCursorAbsoluteY = absoluteCursorRow(record.terminal.buffer.active)
   const beforeViewportY = record.terminal.buffer.active.viewportY
   record.perf.chunks += 1
   record.perf.bytes += bytes
@@ -468,10 +521,9 @@ const flushRecord = (record: CoreTerminalRecord) => {
   record.terminal.write(data, () => {
     record.perf.parseMs += nowMs() - parseStartedAt
     record.perf.flushMs += nowMs() - flushStartedAt
-    if (!record.pendingFullSnapshot && beforeViewportY === record.terminal.buffer.active.viewportY) {
-      record.dirtyRows.add(beforeCursorY)
-      record.dirtyRows.add(record.terminal.buffer.active.cursorY)
-    }
+    const buffer = record.terminal.buffer.active
+    record.dirtyRows.add(beforeCursorAbsoluteY - buffer.viewportY)
+    record.dirtyRows.add(absoluteCursorRow(buffer) - buffer.viewportY)
     scheduleSnapshot(record)
     if (record.pendingChunks.length) scheduleFlush(record)
   })
@@ -498,6 +550,7 @@ const exportState = (record: CoreTerminalRecord): ThreadedTerminalExportedState 
   priority: record.priority,
   settings: record.settings,
   theme: record.theme,
+  keywordHighlight: record.keywordHighlight,
   scrollbackText: readScreenText(record, Math.max(record.terminal.rows, record.settings.scrollBack || 1000))
 })
 
@@ -512,15 +565,17 @@ const importState = (state: ThreadedTerminalExportedState) => {
     visible: state.visible,
     priority: state.priority,
     settings: state.settings,
-    theme: state.theme
+    theme: state.theme,
+    keywordHighlight: state.keywordHighlight
   })
   terminals.set(state.terminalId, record)
   if (state.scrollbackText) {
+    record.pendingFullSnapshotReason = 'import'
     record.pendingChunks.push(state.scrollbackText)
     record.pendingBytes += textByteLength(state.scrollbackText)
     flushRecord(record)
   } else {
-    scheduleSnapshot(record, true)
+    scheduleSnapshot(record, true, 'import')
   }
   return record
 }
@@ -545,7 +600,7 @@ const handleMessage = (message: ThreadedTerminalCoreRequest) => {
         record.pendingBytes += textByteLength(message.initialData)
         scheduleFlush(record)
       } else {
-        scheduleSnapshot(record, true)
+        scheduleSnapshot(record, true, 'create')
       }
       return
     }
@@ -578,11 +633,16 @@ const handleMessage = (message: ThreadedTerminalCoreRequest) => {
         record.terminal.resize(cols, rows)
       }
       record.pendingFullSnapshot = true
-      scheduleSnapshot(record, true)
+      record.pendingFullSnapshotReason = 'resize'
+      scheduleSnapshot(record, true, 'resize')
       return
     }
     if (message.type === 'settings') {
       applySettings(record, message.settings, message.theme)
+      return
+    }
+    if (message.type === 'keyword-highlight') {
+      applyKeywordHighlight(record, message.config)
       return
     }
     if (message.type === 'visibility') {
@@ -591,7 +651,7 @@ const handleMessage = (message: ThreadedTerminalCoreRequest) => {
       record.visible = message.visible
       record.priority = message.priority
       if (record.pendingChunks.length && priorityRank(record.priority, record.visible) > priorityRank(wasPriority, wasVisible)) scheduleFlush(record)
-      if (record.visible && (!wasVisible || wasPriority !== record.priority)) scheduleSnapshot(record, true)
+      if (record.visible && (!wasVisible || wasPriority !== record.priority)) scheduleSnapshot(record, true, 'visibility')
       return
     }
     if (message.type === 'priority') {
@@ -605,12 +665,29 @@ const handleMessage = (message: ThreadedTerminalCoreRequest) => {
       record.pendingBytes = 0
       record.terminal.clear()
       record.pendingFullSnapshot = true
-      scheduleSnapshot(record, true)
+      record.pendingFullSnapshotReason = 'clear'
+      scheduleSnapshot(record, true, 'clear')
       return
     }
     if (message.type === 'scroll-to-bottom') {
+      const beforeViewportY = record.terminal.buffer.active.viewportY
       record.terminal.scrollToBottom()
-      scheduleSnapshot(record, true)
+      if (record.terminal.buffer.active.viewportY !== beforeViewportY) scheduleSnapshot(record)
+      return
+    }
+    if (message.type === 'scroll-lines') {
+      const amount = Math.trunc(message.amount)
+      if (!amount) return
+      const beforeViewportY = record.terminal.buffer.active.viewportY
+      record.terminal.scrollLines(amount)
+      if (record.terminal.buffer.active.viewportY !== beforeViewportY) scheduleSnapshot(record)
+      return
+    }
+    if (message.type === 'scroll-to-line') {
+      const line = Math.trunc(message.line)
+      const beforeViewportY = record.terminal.buffer.active.viewportY
+      record.terminal.scrollToLine(line)
+      if (record.terminal.buffer.active.viewportY !== beforeViewportY) scheduleSnapshot(record)
       return
     }
     if (message.type === 'read-screen') {

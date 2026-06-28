@@ -1,15 +1,19 @@
 import CoreWorker from '@/services/terminal/threadedTerminalCoreWorker?worker'
 import RenderWorker from '@/services/terminal/threadedTerminalRenderWorker?worker'
 import { writeRendererRuntimeLog } from '@/services/app/runtimeLogClient'
+import { copyTextToClipboard } from '@/services/app/clipboardRuntime'
 import type {
   ThreadedTerminalCoreRequest,
   ThreadedTerminalCoreResponse,
   ThreadedTerminalCreateOptions,
+  ThreadedTerminalFullReason,
   ThreadedTerminalHostCapability,
+  ThreadedTerminalKeywordHighlightConfig,
   ThreadedTerminalPriority,
   ThreadedTerminalRenderRequest,
   ThreadedTerminalRenderResponse,
   ThreadedTerminalRenderSettings,
+  ThreadedTerminalScreenLine,
   ThreadedTerminalScreenSnapshot,
   ThreadedTerminalSettings,
   ThreadedTerminalSurface,
@@ -29,6 +33,7 @@ type ThreadedTerminalInitOptions = {
   surface: ThreadedTerminalSurface
   settings: ThreadedTerminalSettings
   theme: ThreadedTerminalTheme
+  keywordHighlight?: ThreadedTerminalKeywordHighlightConfig
   initialData?: string
   visible?: boolean
   priority?: ThreadedTerminalPriority
@@ -68,10 +73,22 @@ type ThreadedTerminalBufferLine = {
   translateToString: (trimRight?: boolean) => string
 }
 
+type ThreadedTerminalSelectionPoint = {
+  x: number
+  y: number
+}
+
+type ThreadedTerminalSelection = {
+  anchor: ThreadedTerminalSelectionPoint
+  focus: ThreadedTerminalSelectionPoint
+  selecting: boolean
+}
+
 type ThreadedTerminalBufferActive = {
   cursorX: number
   cursorY: number
   viewportY: number
+  baseY: number
   length: number
   getLine: (index: number) => ThreadedTerminalBufferLine | undefined
 }
@@ -129,6 +146,10 @@ export type ThreadedTerminalPaintMeasure = {
   latencyMs: number
   frameMs: number
   paintedRows: number
+  full: boolean
+  fullReason?: ThreadedTerminalFullReason
+  repaintReason?: ThreadedTerminalFullReason
+  scrollDeltaRows?: number
   seq: number
 }
 
@@ -176,18 +197,52 @@ const normalizeSettings = (settings: ThreadedTerminalSettings): ThreadedTerminal
   scrollBack: settings.scrollBack || 1000
 })
 
+const clonePlain = <T>(value: T): T => {
+  if (value === null || value === undefined) return value
+  try {
+    return JSON.parse(JSON.stringify(value)) as T
+  } catch {
+    return value
+  }
+}
+
+const cloneTheme = (theme: ThreadedTerminalTheme): ThreadedTerminalTheme => ({ ...clonePlain(theme) })
+
+const cloneKeywordHighlightConfig = (config: ThreadedTerminalKeywordHighlightConfig): ThreadedTerminalKeywordHighlightConfig =>
+  config ? clonePlain(config) : config
+
 const renderSettingsFor = (settings: ThreadedTerminalSettings, theme: ThreadedTerminalTheme): ThreadedTerminalRenderSettings => ({
   fontFamily: settings.fontFamily || '"JetBrains Mono", "SFMono-Regular", Consolas, monospace',
   fontSize: settings.fontSize || 12,
   lineHeight: settings.lineHeight || 1,
   cursorBlink: settings.cursorBlink,
   cursorStyle: settings.cursorStyle || 'block',
-  theme
+  theme: cloneTheme(theme)
 })
+
+const settingsSignatureFor = (settings: ThreadedTerminalSettings, theme: ThreadedTerminalTheme) =>
+  [
+    settings.terminalType || 'xterm-256color',
+    settings.fontFamily || '"JetBrains Mono", "SFMono-Regular", Consolas, monospace',
+    settings.fontSize || 12,
+    settings.lineHeight || 1,
+    settings.cursorBlink ? '1' : '0',
+    settings.cursorStyle || 'block',
+    settings.scrollBack || 1000,
+    theme.background,
+    theme.foreground,
+    theme.cursor,
+    theme.selectionBackground || ''
+  ].join('\u001f')
 
 const logThreadedTerminal = (level: 'debug' | 'info' | 'warn' | 'error', event: string, fields?: Record<string, unknown>) => {
   writeRendererRuntimeLog(level, event, fields)
 }
+
+const terminalScrollbarWidthPx = 10
+const terminalScrollbarThumbMinPx = 28
+
+const blankScreenLine = (y: number): ThreadedTerminalScreenLine => ({ y, text: '', cells: [] })
 
 const postCore = (handle: ThreadedTerminalCoreHandle, message: ThreadedTerminalCoreRequest, transfer?: Transferable[]) => {
   handle.worker.postMessage(message, transfer || [])
@@ -395,6 +450,10 @@ export class ThreadedTerminalHost {
   buffer: { active: ThreadedTerminalBufferActive }
   private host: HTMLElement | null = null
   private canvas: HTMLCanvasElement | null = null
+  private scrollbar: HTMLElement | null = null
+  private scrollbarThumb: HTMLElement | null = null
+  private selectionLayer: HTMLElement | null = null
+  private eventController: AbortController | null = null
   private offscreenTransferred = false
   private resizeObserver: ResizeObserver | null = null
   private dataHandlers = new Set<EventHandler<string>>()
@@ -402,8 +461,12 @@ export class ThreadedTerminalHost {
   private selectionHandlers = new Set<SelectionHandler>()
   private customKeyHandler: ((event: KeyboardEvent) => boolean) | null = null
   private snapshotLines: string[] = []
+  private snapshotScreenLines: ThreadedTerminalScreenLine[] = []
   private lastSnapshot: ThreadedTerminalScreenSnapshot | null = null
   private lastRenderFrame: RenderFrameAck | null = null
+  private lastCanvasSize: { width: number; height: number; dpr: number } | null = null
+  private selection: ThreadedTerminalSelection | null = null
+  private cellMetrics = { width: 8, height: 16 }
   private frameWaiters = new Set<{
     afterSeq: number
     resolve: (frame: RenderFrameAck) => void
@@ -414,7 +477,10 @@ export class ThreadedTerminalHost {
   private coreCreated = false
   private visible: boolean
   private priority: ThreadedTerminalPriority
-  private readonly theme: ThreadedTerminalTheme
+  private theme: ThreadedTerminalTheme
+  private keywordHighlight?: ThreadedTerminalKeywordHighlightConfig
+  private settingsSignature: string
+  private scrollbarDrag: { startClientY: number; startViewportY: number; max: number; trackHeight: number; thumbHeight: number } | null = null
   private readonly groupId: string
   private readonly surface: ThreadedTerminalSurface
   private readonly terminalId: string
@@ -430,8 +496,15 @@ export class ThreadedTerminalHost {
     this.surface = options.surface
     this.visible = options.visible ?? true
     this.priority = options.priority || (this.visible ? 'visible' : 'background')
-    this.options = { ...normalizeSettings(options.settings), scrollback: options.settings.scrollBack }
-    this.theme = options.theme
+    const normalizedSettings = normalizeSettings(options.settings)
+    this.options = {
+      ...normalizedSettings,
+      scrollback: normalizedSettings.scrollBack,
+      termName: normalizedSettings.terminalType
+    }
+    this.theme = cloneTheme(options.theme)
+    this.keywordHighlight = cloneKeywordHighlightConfig(options.keywordHighlight)
+    this.settingsSignature = settingsSignatureFor(normalizedSettings, this.theme)
     this.initialData = options.initialData
     this.resizeHandler = options.resizeHandler
     this.logFields = options.logFields
@@ -442,6 +515,7 @@ export class ThreadedTerminalHost {
         cursorX: 0,
         cursorY: 0,
         viewportY: 0,
+        baseY: 0,
         length: 0,
         getLine: (index: number) => {
           const text = this.snapshotLines[index]
@@ -467,12 +541,75 @@ export class ThreadedTerminalHost {
     const canvas = document.createElement('canvas')
     canvas.className = 'threaded-terminal-canvas'
     canvas.setAttribute('aria-hidden', 'true')
-    element.replaceChildren(canvas)
+    Object.assign(canvas.style, {
+      display: 'block',
+      width: `calc(100% - ${terminalScrollbarWidthPx}px)`,
+      height: '100%'
+    })
+    const selectionLayer = document.createElement('div')
+    selectionLayer.className = 'threaded-terminal-selection-layer'
+    selectionLayer.setAttribute('aria-hidden', 'true')
+    Object.assign(selectionLayer.style, {
+      position: 'absolute',
+      inset: `0 ${terminalScrollbarWidthPx}px 0 0`,
+      pointerEvents: 'none',
+      mixBlendMode: 'screen'
+    })
+    const scrollbar = document.createElement('div')
+    scrollbar.className = 'threaded-terminal-scrollbar'
+    scrollbar.setAttribute('role', 'scrollbar')
+    scrollbar.setAttribute('aria-label', 'Terminal scrollback')
+    scrollbar.setAttribute('aria-orientation', 'vertical')
+    scrollbar.setAttribute('aria-valuemin', '0')
+    scrollbar.setAttribute('aria-valuemax', '0')
+    scrollbar.setAttribute('aria-valuenow', '0')
+    Object.assign(scrollbar.style, {
+      position: 'absolute',
+      top: '0',
+      right: '0',
+      width: `${terminalScrollbarWidthPx}px`,
+      height: '100%',
+      margin: '0',
+      padding: '3px 3px',
+      boxSizing: 'border-box',
+      cursor: 'default',
+      userSelect: 'none'
+    })
+    const scrollbarThumb = document.createElement('div')
+    scrollbarThumb.className = 'threaded-terminal-scrollbar-thumb'
+    Object.assign(scrollbarThumb.style, {
+      position: 'absolute',
+      left: '3px',
+      right: '3px',
+      top: '3px',
+      minHeight: `${terminalScrollbarThumbMinPx}px`,
+      borderRadius: '999px',
+      opacity: '0',
+      transition: 'opacity 120ms ease, background-color 120ms ease'
+    })
+    scrollbar.appendChild(scrollbarThumb)
+    element.replaceChildren(canvas, selectionLayer, scrollbar)
     this.canvas = canvas
-    this.attachCanvas()
+    this.selectionLayer = selectionLayer
+    this.scrollbar = scrollbar
+    this.scrollbarThumb = scrollbarThumb
+    this.applyScrollbarTheme()
+    try {
+      if (!this.coreCreated) this.createCore(this.initialData)
+      this.attachCanvas()
+    } catch (error) {
+      logThreadedTerminal('error', 'renderer.threaded-terminal.open-failed', {
+        terminalId: this.terminalId,
+        sessionId: this.sessionId,
+        groupId: this.groupId,
+        surface: this.surface,
+        message: error instanceof Error ? error.message : String(error),
+        ...this.logFields
+      })
+      throw error
+    }
     this.bindDomEvents()
     this.fit()
-    if (!this.coreCreated) this.createCore(this.initialData)
   }
 
   startCoreOnly() {
@@ -488,8 +625,10 @@ export class ThreadedTerminalHost {
 
   clear() {
     this.snapshotLines = []
+    this.snapshotScreenLines = []
     this.buffer.active.length = 0
-    postCore(this.coreHandle, { type: 'clear', terminalId: this.terminalId })
+    this.clearSelection()
+    if (this.coreCreated) postCore(this.coreHandle, { type: 'clear', terminalId: this.terminalId })
     postRender({ type: 'clear', terminalId: this.terminalId })
   }
 
@@ -501,13 +640,15 @@ export class ThreadedTerminalHost {
     this.resizeHandlers.clear()
     this.selectionHandlers.clear()
     this.rejectFrameWaiters('Threaded terminal disposed.')
-    postCore(this.coreHandle, { type: 'dispose', terminalId: this.terminalId })
+    if (this.coreCreated) postCore(this.coreHandle, { type: 'dispose', terminalId: this.terminalId })
     this.coreHandle.terminals.delete(this.terminalId)
     hostMap.delete(this.terminalId)
   }
 
   detachSurface() {
     const hadSurface = this.offscreenTransferred
+    this.eventController?.abort()
+    this.eventController = null
     this.resizeObserver?.disconnect()
     this.resizeObserver = null
     if (this.host) {
@@ -516,7 +657,13 @@ export class ThreadedTerminalHost {
     }
     this.host = null
     this.canvas = null
+    this.scrollbar = null
+    this.scrollbarThumb = null
+    this.selectionLayer = null
+    this.eventController = null
     this.offscreenTransferred = false
+    this.lastCanvasSize = null
+    this.selection = null
     if (!this.disposed) {
       this.visible = false
       this.priority = 'background'
@@ -559,22 +706,45 @@ export class ThreadedTerminalHost {
   }
 
   scrollToBottom() {
+    if (!this.coreCreated) return
     postCore(this.coreHandle, { type: 'scroll-to-bottom', terminalId: this.terminalId })
   }
 
+  scrollLines(amount: number) {
+    const normalized = Math.trunc(amount)
+    if (!normalized || !this.coreCreated) return
+    postCore(this.coreHandle, { type: 'scroll-lines', terminalId: this.terminalId, amount: normalized })
+  }
+
+  scrollToLine(line: number) {
+    if (!this.coreCreated) return
+    const normalized = Math.max(0, Math.trunc(line))
+    postCore(this.coreHandle, { type: 'scroll-to-line', terminalId: this.terminalId, line: normalized })
+  }
+
   getSelection() {
-    return ''
+    return this.selectionText()
   }
 
   getSelectionPosition() {
-    return null
+    const range = this.normalizedSelection()
+    if (!range) return null
+    return {
+      start: { x: range.start.x, y: range.start.y },
+      end: { x: range.end.x, y: range.end.y }
+    }
   }
 
   hasSelection() {
-    return false
+    return Boolean(this.normalizedSelection())
   }
 
-  clearSelection() {}
+  clearSelection() {
+    if (!this.selection) return
+    this.selection = null
+    this.renderSelection()
+    this.emitSelectionChange()
+  }
 
   attachCustomKeyEventHandler(handler: (event: KeyboardEvent) => boolean) {
     this.customKeyHandler = handler
@@ -612,13 +782,41 @@ export class ThreadedTerminalHost {
     this.buffer.active.cursorX = snapshot.cursorX
     this.buffer.active.cursorY = snapshot.cursorY
     this.buffer.active.viewportY = snapshot.viewportY
-    if (snapshot.full || !this.snapshotLines.length) {
+    this.buffer.active.baseY = snapshot.baseY
+    this.buffer.active.length = Math.max(snapshot.baseY + snapshot.rows, snapshot.viewportY + snapshot.rows, snapshot.lines.length)
+    if (snapshot.full || !this.snapshotLines.length || Math.abs(snapshot.scrollDeltaRows || 0) >= snapshot.rows) {
       this.snapshotLines = Array.from({ length: snapshot.rows }, () => '')
+      this.snapshotScreenLines = Array.from({ length: snapshot.rows }, (_item, row) => blankScreenLine(row))
+    } else {
+      if (this.snapshotLines.length < snapshot.rows) {
+        this.snapshotLines.push(...Array.from({ length: snapshot.rows - this.snapshotLines.length }, () => ''))
+        this.snapshotScreenLines.push(...Array.from({ length: snapshot.rows - this.snapshotScreenLines.length }, (_item, row) => blankScreenLine(this.snapshotScreenLines.length + row)))
+      } else if (this.snapshotLines.length > snapshot.rows) {
+        this.snapshotLines = this.snapshotLines.slice(0, snapshot.rows)
+        this.snapshotScreenLines = this.snapshotScreenLines.slice(0, snapshot.rows)
+      }
+      const scrollDeltaRows = snapshot.scrollDeltaRows || 0
+      if (scrollDeltaRows > 0) {
+        this.snapshotLines = this.snapshotLines.slice(scrollDeltaRows).concat(Array.from({ length: scrollDeltaRows }, () => ''))
+        this.snapshotScreenLines = this.snapshotScreenLines.slice(scrollDeltaRows).concat(Array.from({ length: scrollDeltaRows }, (_item, row) => blankScreenLine(snapshot.rows - scrollDeltaRows + row)))
+      } else if (scrollDeltaRows < 0) {
+        this.snapshotLines = Array.from({ length: Math.abs(scrollDeltaRows) }, () => '').concat(this.snapshotLines.slice(0, snapshot.rows + scrollDeltaRows))
+        this.snapshotScreenLines = Array.from({ length: Math.abs(scrollDeltaRows) }, (_item, row) => blankScreenLine(row)).concat(this.snapshotScreenLines.slice(0, snapshot.rows + scrollDeltaRows))
+      }
     }
     snapshot.lines.forEach((line) => {
       this.snapshotLines[line.y] = line.text
+      this.snapshotScreenLines[line.y] = {
+        ...line,
+        cells: line.cells ? line.cells.map((cell) => ({ ...cell })) : undefined,
+        highlights: line.highlights ? line.highlights.map((highlight) => ({ ...highlight })) : undefined
+      }
     })
-    this.buffer.active.length = this.snapshotLines.length
+    this.snapshotScreenLines.forEach((line, row) => {
+      line.y = row
+    })
+    this.updateScrollbar()
+    this.renderSelection()
   }
 
   paintSnapshot(snapshot: ThreadedTerminalScreenSnapshot) {
@@ -636,18 +834,30 @@ export class ThreadedTerminalHost {
     if (this.visible === visible && this.priority === priority) return
     this.visible = visible
     this.priority = priority
-    postCore(this.coreHandle, { type: 'visibility', terminalId: this.terminalId, visible, priority })
+    if (this.coreCreated) postCore(this.coreHandle, { type: 'visibility', terminalId: this.terminalId, visible, priority })
     postRender({ type: 'visibility', terminalId: this.terminalId, visible })
   }
 
   setPriority(priority: ThreadedTerminalPriority) {
     if (this.priority === priority) return
     this.priority = priority
-    postCore(this.coreHandle, { type: 'priority', terminalId: this.terminalId, priority })
+    if (this.coreCreated) postCore(this.coreHandle, { type: 'priority', terminalId: this.terminalId, priority })
+  }
+
+  updateKeywordHighlight(config: ThreadedTerminalKeywordHighlightConfig) {
+    this.keywordHighlight = cloneKeywordHighlightConfig(config)
+    if (!this.coreCreated) return
+    postCore(this.coreHandle, { type: 'keyword-highlight', terminalId: this.terminalId, config: this.keywordHighlight })
   }
 
   updateSettings(settings: ThreadedTerminalSettings, theme: ThreadedTerminalTheme = this.theme) {
     const normalized = normalizeSettings(settings)
+    const nextTheme = cloneTheme(theme)
+    const nextSignature = settingsSignatureFor(normalized, nextTheme)
+    if (nextSignature === this.settingsSignature) return
+    this.settingsSignature = nextSignature
+    this.theme = nextTheme
+    this.applyScrollbarTheme()
     this.options.terminalType = normalized.terminalType
     this.options.fontFamily = normalized.fontFamily
     this.options.fontSize = normalized.fontSize
@@ -657,13 +867,19 @@ export class ThreadedTerminalHost {
     this.options.scrollBack = normalized.scrollBack
     this.options.scrollback = normalized.scrollBack
     this.options.termName = normalized.terminalType
-    postCore(this.coreHandle, { type: 'settings', terminalId: this.terminalId, settings: normalized, theme })
-    postRender({ type: 'settings', terminalId: this.terminalId, settings: renderSettingsFor(normalized, theme) })
+    if (!this.coreCreated) return
+    postCore(this.coreHandle, { type: 'settings', terminalId: this.terminalId, settings: normalized, theme: this.theme })
+    if (this.offscreenTransferred) {
+      postRender({ type: 'settings', terminalId: this.terminalId, settings: renderSettingsFor(normalized, this.theme) })
+    }
     this.resizeCanvas()
     this.fit()
   }
 
   readScreen(tailLines?: number) {
+    if (!this.coreCreated) {
+      return Promise.resolve({ text: this.snapshotLines.slice(-(tailLines || this.rows)).join('\n').replace(/\s+$/g, ''), cols: this.cols, rows: this.rows })
+    }
     const requestId = nextRequestId('screen')
     postCore(this.coreHandle, { type: 'read-screen', terminalId: this.terminalId, requestId, tailLines })
     return new Promise<{ text: string; cols: number; rows: number }>((resolve, reject) => {
@@ -692,11 +908,16 @@ export class ThreadedTerminalHost {
     })
   }
 
-  async writeAndMeasurePaint(data: string, timeoutMs = 2000): Promise<ThreadedTerminalPaintMeasure> {
+  async writeAndMeasurePaint(data: string, timeoutMs = 2000, options: { settlePendingFrame?: boolean } = {}): Promise<ThreadedTerminalPaintMeasure> {
     const previousPriority = this.priority
-    const afterSeq = this.lastRenderFrame?.seq || 0
+    let afterSeq = this.lastRenderFrame?.seq || 0
     const startedAt = nowMs()
     if (this.visible && this.priority !== 'active') this.setPriority('active')
+    if (options.settlePendingFrame) {
+      await this.waitForNextRenderFrame(afterSeq, 120).then((frame) => {
+        afterSeq = frame.seq
+      }).catch(() => undefined)
+    }
     const framePromise = this.waitForNextRenderFrame(afterSeq, timeoutMs)
     this.write(data)
     try {
@@ -706,6 +927,10 @@ export class ThreadedTerminalHost {
         latencyMs: Math.max(0, frame.at - startedAt),
         frameMs: frame.frameMs,
         paintedRows: frame.paintedRows,
+        full: Boolean(frame.full),
+        fullReason: frame.fullReason,
+        repaintReason: frame.repaintReason,
+        scrollDeltaRows: frame.scrollDeltaRows,
         seq: frame.seq
       }
     } finally {
@@ -741,10 +966,133 @@ export class ThreadedTerminalHost {
     const lineHeight = Number(this.options.lineHeight || 1)
     const cellHeight = Math.max(10, Math.ceil(fontSize * lineHeight))
     const cellWidth = Math.max(4, Math.ceil(fontSize * 0.62))
-    const cols = Math.max(2, Math.floor(width / cellWidth))
+    this.cellMetrics = { width: cellWidth, height: cellHeight }
+    const usableWidth = Math.max(1, width - terminalScrollbarWidthPx)
+    const cols = Math.max(2, Math.floor(usableWidth / cellWidth))
     const rows = Math.max(1, Math.floor(height / cellHeight))
     this.resizeCanvas()
     this.resize(cols, rows)
+    this.updateScrollbar()
+    this.renderSelection()
+  }
+
+  private emitSelectionChange() {
+    this.selectionHandlers.forEach((handler) => handler())
+  }
+
+  private normalizedSelection() {
+    if (!this.selection) return null
+    const anchor = this.selection.anchor
+    const focus = this.selection.focus
+    if (anchor.x === focus.x && anchor.y === focus.y) return null
+    const anchorBeforeFocus = anchor.y < focus.y || (anchor.y === focus.y && anchor.x <= focus.x)
+    const start = anchorBeforeFocus ? anchor : focus
+    const end = anchorBeforeFocus ? focus : anchor
+    if (start.x === end.x && start.y === end.y) return null
+    return { start, end }
+  }
+
+  private textForSelectionRow(row: number, startX: number, endX: number) {
+    const visibleRow = row - this.buffer.active.viewportY
+    const line = this.snapshotLines[visibleRow] || ''
+    const chars = Array.from(line.padEnd(Math.max(0, endX), ' '))
+    return chars.slice(Math.max(0, startX), Math.max(0, endX)).join('').replace(/\s+$/g, '')
+  }
+
+  private selectionText() {
+    const range = this.normalizedSelection()
+    if (!range) return ''
+    const lines: string[] = []
+    for (let row = range.start.y; row <= range.end.y; row += 1) {
+      const startX = row === range.start.y ? range.start.x : 0
+      const endX = row === range.end.y ? range.end.x : this.cols
+      lines.push(this.textForSelectionRow(row, startX, endX))
+    }
+    return lines.join('\n').replace(/\s+$/g, '')
+  }
+
+  private pointFromMouseEvent(event: MouseEvent): ThreadedTerminalSelectionPoint {
+    const rect = this.host?.getBoundingClientRect()
+    const left = rect?.left || 0
+    const top = rect?.top || 0
+    const x = Math.max(0, Math.min(this.cols, Math.floor((event.clientX - left) / Math.max(1, this.cellMetrics.width))))
+    const y = Math.max(0, Math.min(this.rows - 1, Math.floor((event.clientY - top) / Math.max(1, this.cellMetrics.height))))
+    return { x, y: this.buffer.active.viewportY + y }
+  }
+
+  private renderSelection() {
+    if (!this.selectionLayer) return
+    this.selectionLayer.replaceChildren()
+    const range = this.normalizedSelection()
+    if (!range) return
+    const viewportY = this.buffer.active.viewportY
+    const firstRow = Math.max(range.start.y, viewportY)
+    const lastRow = Math.min(range.end.y, viewportY + this.rows - 1)
+    if (lastRow < firstRow) return
+    const color = this.theme.selectionBackground || '#2d4059'
+    for (let row = firstRow; row <= lastRow; row += 1) {
+      const startX = row === range.start.y ? range.start.x : 0
+      const endX = row === range.end.y ? range.end.x : this.cols
+      if (endX <= startX) continue
+      const rect = document.createElement('div')
+      rect.className = 'threaded-terminal-selection-rect'
+      rect.style.left = `${startX * this.cellMetrics.width}px`
+      rect.style.top = `${(row - viewportY) * this.cellMetrics.height}px`
+      rect.style.width = `${(endX - startX) * this.cellMetrics.width}px`
+      rect.style.height = `${this.cellMetrics.height}px`
+      rect.style.background = color
+      this.selectionLayer.appendChild(rect)
+    }
+  }
+
+  private updateScrollbar() {
+    if (!this.scrollbar) return
+    const max = Math.max(0, this.buffer.active.baseY)
+    const value = Math.max(0, Math.min(max, this.buffer.active.viewportY))
+    this.scrollbar.setAttribute('aria-valuemax', String(max))
+    this.scrollbar.setAttribute('aria-valuenow', String(value))
+    this.scrollbar.dataset.max = String(max)
+    this.scrollbar.dataset.value = String(value)
+    this.applyScrollbarTheme()
+    if (!this.scrollbarThumb) return
+    const trackHeight = Math.max(1, this.scrollbar.clientHeight - 6)
+    const totalRows = Math.max(this.rows, max + this.rows)
+    const thumbHeight = max > 0 ? Math.max(terminalScrollbarThumbMinPx, Math.floor((this.rows / totalRows) * trackHeight)) : 0
+    const travel = Math.max(0, trackHeight - thumbHeight)
+    const top = max > 0 && travel > 0 ? Math.round((value / max) * travel) + 3 : 3
+    this.scrollbarThumb.style.height = `${thumbHeight}px`
+    this.scrollbarThumb.style.transform = `translateY(${top - 3}px)`
+    this.scrollbarThumb.style.opacity = max > 0 ? '1' : '0'
+  }
+
+  private applyScrollbarTheme() {
+    if (!this.scrollbar) return
+    this.scrollbar.style.background = this.theme.scrollbarTrack || 'rgb(43 50 66 / 0.4)'
+    if (this.scrollbarThumb) {
+      const hovering = this.scrollbarThumb.dataset.hover === '1' || this.scrollbarThumb.dataset.dragging === '1'
+      this.scrollbarThumb.style.background = hovering
+        ? this.theme.scrollbarThumbHover || this.theme.cursor
+        : this.theme.scrollbarThumb || 'rgb(137 147 168 / 0.68)'
+    }
+  }
+
+  private scrollLineFromTrackPosition(clientY: number) {
+    if (!this.scrollbar || !this.scrollbarThumb) return this.buffer.active.viewportY
+    const max = Math.max(0, this.buffer.active.baseY)
+    if (!max) return 0
+    const rect = this.scrollbar.getBoundingClientRect()
+    const trackHeight = Math.max(1, rect.height - 6)
+    const thumbHeight = Math.max(terminalScrollbarThumbMinPx, this.scrollbarThumb.offsetHeight || terminalScrollbarThumbMinPx)
+    const travel = Math.max(1, trackHeight - thumbHeight)
+    const y = Math.max(0, Math.min(travel, clientY - rect.top - 3 - thumbHeight / 2))
+    return Math.round((y / travel) * max)
+  }
+
+  private scrollLineFromDrag(event: MouseEvent) {
+    if (!this.scrollbarDrag) return this.buffer.active.viewportY
+    const travel = Math.max(1, this.scrollbarDrag.trackHeight - this.scrollbarDrag.thumbHeight)
+    const delta = event.clientY - this.scrollbarDrag.startClientY
+    return Math.round(this.scrollbarDrag.startViewportY + (delta / travel) * this.scrollbarDrag.max)
   }
 
   private createCore(initialData?: string) {
@@ -758,7 +1106,8 @@ export class ThreadedTerminalHost {
       visible: this.visible,
       priority: this.priority,
       settings: normalizeSettings(this.options),
-      theme: this.theme
+      theme: cloneTheme(this.theme),
+      keywordHighlight: cloneKeywordHighlightConfig(this.keywordHighlight)
     }
     postCore(this.coreHandle, { type: 'create', requestId: nextRequestId('create'), options, initialData })
     this.coreCreated = true
@@ -779,7 +1128,8 @@ export class ThreadedTerminalHost {
     const offscreen = this.canvas.transferControlToOffscreen()
     this.offscreenTransferred = true
     const rect = this.canvas.getBoundingClientRect()
-    const width = this.canvas.clientWidth || rect.width || this.host?.clientWidth || 1
+    const hostWidth = this.host?.clientWidth || 0
+    const width = this.canvas.clientWidth || rect.width || Math.max(1, hostWidth - terminalScrollbarWidthPx) || 1
     const height = this.canvas.clientHeight || rect.height || this.host?.clientHeight || 1
     const dpr = window.devicePixelRatio || 1
     postRender(
@@ -797,24 +1147,129 @@ export class ThreadedTerminalHost {
       },
       [offscreen]
     )
+    this.lastCanvasSize = {
+      width: Math.max(1, Math.floor(width)),
+      height: Math.max(1, Math.floor(height)),
+      dpr
+    }
+    if (this.lastSnapshot && this.visible) {
+      postRender({
+        type: 'screen',
+        snapshot: this.fullSnapshotFromCache('visibility')
+      })
+    }
   }
 
   private bindDomEvents() {
     if (!this.host) return
     const host = this.host
+    this.eventController?.abort()
+    this.eventController = new AbortController()
+    const signal = this.eventController.signal
+    host.addEventListener('mousedown', (event) => {
+      if (event.button !== 0) return
+      if ((event.target as HTMLElement | null)?.closest?.('.threaded-terminal-scrollbar')) return
+      event.preventDefault()
+      host.focus({ preventScroll: true })
+      const point = this.pointFromMouseEvent(event)
+      this.selection = { anchor: point, focus: point, selecting: true }
+      this.renderSelection()
+      this.emitSelectionChange()
+    }, { signal })
+    host.addEventListener('mousemove', (event) => {
+      if (!this.selection?.selecting) return
+      event.preventDefault()
+      this.selection.focus = this.pointFromMouseEvent(event)
+      this.renderSelection()
+      this.emitSelectionChange()
+    }, { signal })
+    window.addEventListener('mouseup', (event) => {
+      if (this.scrollbarDrag) {
+        this.scrollbarDrag = null
+        if (this.scrollbarThumb) {
+          delete this.scrollbarThumb.dataset.dragging
+          this.applyScrollbarTheme()
+        }
+        return
+      }
+      if (!this.selection?.selecting) return
+      this.selection.focus = this.pointFromMouseEvent(event)
+      this.selection.selecting = false
+      this.renderSelection()
+      this.emitSelectionChange()
+    }, { signal })
+    host.addEventListener('copy', (event) => {
+      const text = this.selectionText()
+      if (!text) return
+      event.preventDefault()
+      event.clipboardData?.setData('text/plain', text)
+      void copyTextToClipboard(text)
+    }, { signal })
     host.addEventListener('keydown', (event) => {
       if (this.customKeyHandler && this.customKeyHandler(event) === false) return
       const input = keyEventToInput(event)
       if (!input) return
       event.preventDefault()
       this.input(input)
-    })
+    }, { signal })
     host.addEventListener('paste', (event) => {
       const text = event.clipboardData?.getData('text/plain') || ''
       if (!text) return
       event.preventDefault()
       this.input(text)
-    })
+    }, { signal })
+    this.scrollbar?.addEventListener('mousedown', (event) => {
+      if (event.button !== 0) return
+      event.preventDefault()
+      event.stopPropagation()
+      this.host?.focus({ preventScroll: true })
+      const max = Math.max(0, this.buffer.active.baseY)
+      if (!max) return
+      if ((event.target as HTMLElement | null)?.classList.contains('threaded-terminal-scrollbar-thumb')) {
+        const trackHeight = Math.max(1, (this.scrollbar?.clientHeight || 1) - 6)
+        const thumbHeight = Math.max(terminalScrollbarThumbMinPx, this.scrollbarThumb?.offsetHeight || terminalScrollbarThumbMinPx)
+        this.scrollbarDrag = {
+          startClientY: event.clientY,
+          startViewportY: this.buffer.active.viewportY,
+          max,
+          trackHeight,
+          thumbHeight
+        }
+        if (this.scrollbarThumb) {
+          this.scrollbarThumb.dataset.dragging = '1'
+          this.applyScrollbarTheme()
+        }
+        return
+      }
+      this.scrollToLine(this.scrollLineFromTrackPosition(event.clientY))
+    }, { signal })
+    this.scrollbarThumb?.addEventListener('mouseenter', () => {
+      if (!this.scrollbarThumb) return
+      this.scrollbarThumb.dataset.hover = '1'
+      this.applyScrollbarTheme()
+    }, { signal })
+    this.scrollbarThumb?.addEventListener('mouseleave', () => {
+      if (!this.scrollbarThumb) return
+      delete this.scrollbarThumb.dataset.hover
+      this.applyScrollbarTheme()
+    }, { signal })
+    window.addEventListener('mousemove', (event) => {
+      if (!this.scrollbarDrag) return
+      event.preventDefault()
+      this.scrollToLine(Math.max(0, Math.min(this.scrollbarDrag.max, this.scrollLineFromDrag(event))))
+    }, { signal })
+    host.addEventListener('wheel', (event) => {
+      const lineHeight = Math.max(1, Number(this.options.fontSize || 12) * Number(this.options.lineHeight || 1))
+      const deltaRows = event.deltaMode === WheelEvent.DOM_DELTA_LINE
+        ? event.deltaY
+        : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
+          ? event.deltaY * Math.max(1, this.rows - 1)
+          : event.deltaY / lineHeight
+      const rows = Math.trunc(deltaRows)
+      if (!rows) return
+      event.preventDefault()
+      this.scrollLines(rows)
+    }, { passive: false, signal })
     if (typeof ResizeObserver !== 'undefined') {
       this.resizeObserver = new ResizeObserver(() => this.fit())
       this.resizeObserver.observe(host)
@@ -824,15 +1279,60 @@ export class ThreadedTerminalHost {
   private resizeCanvas() {
     if (!this.host || !this.canvas || !this.offscreenTransferred) return
     const rect = this.host.getBoundingClientRect()
-    const width = this.host.clientWidth || rect.width || 1
+    const width = Math.max(1, (this.host.clientWidth || rect.width || 1) - terminalScrollbarWidthPx)
     const height = this.host.clientHeight || rect.height || 1
+    const nextSize = {
+      width: Math.max(1, Math.floor(width)),
+      height: Math.max(1, Math.floor(height)),
+      dpr: window.devicePixelRatio || 1
+    }
+    if (
+      this.lastCanvasSize &&
+      this.lastCanvasSize.width === nextSize.width &&
+      this.lastCanvasSize.height === nextSize.height &&
+      this.lastCanvasSize.dpr === nextSize.dpr
+    ) {
+      return
+    }
+    this.lastCanvasSize = nextSize
     postRender({
       type: 'resize',
       terminalId: this.terminalId,
-      width,
-      height,
-      devicePixelRatio: window.devicePixelRatio || 1
+      width: nextSize.width,
+      height: nextSize.height,
+      devicePixelRatio: nextSize.dpr
     })
+  }
+
+  private fullSnapshotFromCache(reason: ThreadedTerminalFullReason): ThreadedTerminalScreenSnapshot {
+    const snapshot = this.lastSnapshot
+    const rows = snapshot?.rows || this.rows
+    const lines = Array.from({ length: rows }, (_item, row) => ({
+      y: row,
+      text: this.snapshotLines[row] || '',
+      cells: this.snapshotScreenLines[row]?.cells?.map((cell) => ({ ...cell })) || [],
+      highlights: this.snapshotScreenLines[row]?.highlights?.map((highlight) => ({ ...highlight })) || [],
+      wrapped: this.snapshotScreenLines[row]?.wrapped
+    }))
+    return {
+      terminalId: this.terminalId,
+      seq: snapshot?.seq || 0,
+      cols: snapshot?.cols || this.cols,
+      rows,
+      cursorX: snapshot?.cursorX || this.buffer.active.cursorX,
+      cursorY: snapshot?.cursorY || this.buffer.active.cursorY,
+      cursorAbsoluteY: snapshot?.cursorAbsoluteY,
+      viewportY: snapshot?.viewportY || this.buffer.active.viewportY,
+      baseY: snapshot?.baseY || this.buffer.active.viewportY,
+      lines,
+      dirtyRows: lines.map((line) => line.y),
+      full: true,
+      fullReason: reason,
+      repaintReason: reason,
+      scrollDeltaRows: 0,
+      visible: this.visible,
+      priority: this.priority
+    }
   }
 
   private resolveFrameWaiters(frame: RenderFrameAck) {

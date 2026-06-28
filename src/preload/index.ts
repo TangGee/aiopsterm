@@ -16,8 +16,21 @@ import type {
   TerminalSessionInfo
 } from '@shared/contracts/terminalSessions'
 
+const rendererRuntimeEnvNames = [
+  'AIOPSTERM_THREADED_TERMINAL',
+  'AIOPSTERM_TERMINAL_STRESS'
+]
+
+const rendererRuntimeEnv = () =>
+  rendererRuntimeEnvNames.reduce<Record<string, string | undefined>>((env, name) => {
+    const value = process.env[name]
+    if (value !== undefined) env[name] = value
+    return env
+  }, {})
+
 const api: AiopsPreloadApi = {
   getPathForFile: (file: File) => webUtils.getPathForFile(file),
+  runtimeEnv: rendererRuntimeEnv,
   platform: () => ipcRenderer.invoke('app:platform'),
   shell: () => ipcRenderer.invoke('app:shell'),
   checkUpdate: () => ipcRenderer.invoke('app:check-update'),

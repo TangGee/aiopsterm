@@ -46,6 +46,7 @@ type AiPanelCodexConversationRuntimeInput = {
   activePanel: () => TerminalPanel | undefined | null
   panels: () => TerminalPanel[]
   terminalSettings: () => TerminalSettings
+  themeId?: () => string
   aiContextCatalog: () => AiContextCatalog
   loadClassicChatData: () => Promise<void>
   closePopups: () => void
@@ -82,7 +83,7 @@ export const createAiPanelCodexConversationRuntime = (options: AiPanelCodexConve
   const activeCodexConversation = computed(() => codexConversations.value.find((conversation) => conversation.id === activeCodexConversationId.value) || null)
   const activeCodexBoundTarget = computed(() => activeCodexConversation.value?.boundTarget || null)
   const currentAiPanelModeLabel = computed(() => (aiPanelMode.value === 'codex' ? t('ai.codexCliMode') : t('ai.classicChatMode')))
-  const terminalSettingsSignature = () => codexTerminalSettingsSignature(options.terminalSettings())
+  const terminalSettingsSignature = () => `${options.themeId?.() || 'dark'}|${codexTerminalSettingsSignature(options.terminalSettings())}`
 
   const codexStatusLabel = computed(() => {
     const labelKey = codexStatusLabelKey(activeCodexConversation.value?.status || 'idle')
@@ -219,6 +220,7 @@ export const createAiPanelCodexConversationRuntime = (options: AiPanelCodexConve
     activeConversation: () => activeCodexConversation.value,
     activeConversationId: () => activeCodexConversationId.value,
     terminalSettings: options.terminalSettings,
+    themeId: options.themeId,
     currentBoundTarget: (conversation) => currentBoundCodexTarget(conversation),
     isConversationVisible: (conversation) => aiPanelMode.value === 'codex' && activeCodexConversationId.value === conversation.id,
     syncAttentionState: syncCodexAttentionState,
