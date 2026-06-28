@@ -66,6 +66,30 @@ const installOffscreenCanvasSupport = () => {
       }
     }
   })
+  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
+    font: '',
+    measureText: vi.fn(() => ({ width: 8 })),
+    fillRect: vi.fn(),
+    clearRect: vi.fn(),
+    getImageData: vi.fn(() => ({ data: [] })),
+    putImageData: vi.fn(),
+    createImageData: vi.fn(() => []),
+    setTransform: vi.fn(),
+    drawImage: vi.fn(),
+    save: vi.fn(),
+    fillText: vi.fn(),
+    restore: vi.fn(),
+    beginPath: vi.fn(),
+    moveTo: vi.fn(),
+    lineTo: vi.fn(),
+    closePath: vi.fn(),
+    stroke: vi.fn(),
+    translate: vi.fn(),
+    scale: vi.fn(),
+    rotate: vi.fn(),
+    arc: vi.fn(),
+    fill: vi.fn()
+  } as unknown as CanvasRenderingContext2D)
 }
 
 const createHost = () =>
@@ -121,12 +145,16 @@ const createHost = () =>
     priority: 'active'
   })
 
+const setHostElementSize = (hostElement: HTMLElement, width: number, height: number) => {
+  Object.defineProperties(hostElement, {
+    clientWidth: { configurable: true, value: width },
+    clientHeight: { configurable: true, value: height }
+  })
+}
+
 const createHostElement = () => {
   const hostElement = document.createElement('div')
-  Object.defineProperties(hostElement, {
-    clientWidth: { configurable: true, value: 800 },
-    clientHeight: { configurable: true, value: 400 }
-  })
+  setHostElementSize(hostElement, 800, 400)
   document.body.appendChild(hostElement)
   return hostElement
 }
@@ -210,6 +238,71 @@ describe('threadedTerminalRuntime', () => {
         expect.objectContaining({ type: 'dispose', terminalId: 'panel-1' })
       ])
     )
+  })
+
+  it('uses a single host-owned terminal geometry for core sizing and render attach', async () => {
+    installOffscreenCanvasSupport()
+    const hostElement = createHostElement()
+    setHostElementSize(hostElement, 180, 160)
+
+    const host = createHost()
+    host.open(hostElement)
+
+    const messages = await workerMessages()
+    const createMessage = messages.core.filter((message: any) => message.type === 'create').at(-1) as any
+    const attachMessage = messages.render.filter((message: any) => message.type === 'attach').at(-1) as any
+
+    expect(createMessage.options).toEqual(expect.objectContaining({
+      cols: 21,
+      rows: 10
+    }))
+    expect(attachMessage.options.geometry).toEqual(expect.objectContaining({
+      canvasWidth: 170,
+      canvasHeight: 160,
+      cols: 21,
+      rows: 10,
+      cellWidth: 8,
+      cellHeight: 15,
+      baseline: 11,
+      paddingLeft: 0,
+      paddingRight: 2,
+      paddingTop: 0,
+      paddingBottom: 10
+    }))
+    expect(attachMessage.options.geometry.cols).toBe(createMessage.options.cols)
+    expect(attachMessage.options.geometry.rows).toBe(createMessage.options.rows)
+    host.dispose()
+  })
+
+  it('defers split-pane intermediate zero and tiny sizes instead of resizing the core to 2x1', async () => {
+    installOffscreenCanvasSupport()
+    const hostElement = createHostElement()
+    setHostElementSize(hostElement, 180, 160)
+    const host = createHost()
+    host.open(hostElement)
+
+    const before = await workerMessages()
+    setHostElementSize(hostElement, 2, 1)
+    host.fit()
+
+    const afterTiny = await workerMessages()
+    const tinyCoreMessages = afterTiny.core.slice(before.core.length)
+    const tinyRenderMessages = afterTiny.render.slice(before.render.length)
+    expect(tinyCoreMessages).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'resize', terminalId: 'panel-1', cols: 2, rows: 1 })
+    ]))
+    expect(tinyRenderMessages.filter((message: any) => message.type === 'resize')).toEqual([])
+
+    setHostElementSize(hostElement, 260, 160)
+    host.fit()
+    const afterStable = await workerMessages()
+    expect(afterStable.core.slice(afterTiny.core.length)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'resize', terminalId: 'panel-1', cols: 31, rows: 10 })
+    ]))
+    expect(afterStable.render.slice(afterTiny.render.length)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'resize', terminalId: 'panel-1', geometry: expect.objectContaining({ canvasWidth: 250, cols: 31, rows: 10 }) })
+    ]))
+    host.dispose()
   })
 
   it('focuses the hidden input host for keyboard and IME events', () => {
@@ -522,8 +615,8 @@ describe('threadedTerminalRuntime', () => {
     })
 
     element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0, clientX: 0, clientY: 0 }))
-    element.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, button: 0, clientX: 48, clientY: 0 }))
-    window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0, clientX: 48, clientY: 0 }))
+    element.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, button: 0, clientX: 40, clientY: 0 }))
+    window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0, clientX: 40, clientY: 0 }))
 
     expect(host.hasSelection()).toBe(true)
     expect(host.getSelection()).toBe('alpha')

@@ -73,6 +73,27 @@ export type ThreadedTerminalRenderSettings = {
   theme: ThreadedTerminalTheme
 }
 
+export type ThreadedTerminalCellMetrics = {
+  width: number
+  height: number
+  baseline: number
+}
+
+export type ThreadedTerminalGeometry = {
+  seq: number
+  canvasWidth: number
+  canvasHeight: number
+  cols: number
+  rows: number
+  cellWidth: number
+  cellHeight: number
+  baseline: number
+  paddingLeft: number
+  paddingRight: number
+  paddingTop: number
+  paddingBottom: number
+}
+
 export type ThreadedTerminalScreenLine = {
   y: number
   text: string
@@ -187,16 +208,15 @@ export type ThreadedTerminalRenderAttachOptions = {
   terminalId: string
   groupId: string
   canvas: OffscreenCanvas
-  width: number
-  height: number
   devicePixelRatio: number
   settings: ThreadedTerminalRenderSettings
+  geometry: ThreadedTerminalGeometry
 }
 
 export type ThreadedTerminalRenderRequest =
   | { type: 'attach'; options: ThreadedTerminalRenderAttachOptions }
-  | { type: 'resize'; terminalId: string; width: number; height: number; devicePixelRatio: number }
-  | { type: 'settings'; terminalId: string; settings: ThreadedTerminalRenderSettings }
+  | { type: 'resize'; terminalId: string; devicePixelRatio: number; geometry: ThreadedTerminalGeometry }
+  | { type: 'settings'; terminalId: string; settings: ThreadedTerminalRenderSettings; geometry: ThreadedTerminalGeometry }
   | { type: 'screen'; snapshot: ThreadedTerminalScreenSnapshot }
   | { type: 'visibility'; terminalId: string; visible: boolean }
   | { type: 'clear'; terminalId: string }

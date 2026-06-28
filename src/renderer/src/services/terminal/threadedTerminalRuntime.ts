@@ -3,11 +3,18 @@ import RenderWorker from '@/services/terminal/threadedTerminalRenderWorker?worke
 import { writeRendererRuntimeLog } from '@/services/app/runtimeLogClient'
 import { copyTextToClipboard, readTextFromClipboard } from '@/services/app/clipboardRuntime'
 import { shouldUseTerminalDebugLogs } from '@shared/runtimeSwitches'
+import {
+  fallbackTerminalCellMetrics,
+  measureTerminalCellMetrics,
+  terminalFontSpec
+} from '@/services/terminal/threadedTerminalMetrics'
 import type {
+  ThreadedTerminalCellMetrics,
   ThreadedTerminalCoreRequest,
   ThreadedTerminalCoreResponse,
   ThreadedTerminalCreateOptions,
   ThreadedTerminalFullReason,
+  ThreadedTerminalGeometry,
   ThreadedTerminalHostCapability,
   ThreadedTerminalKeywordHighlightConfig,
   ThreadedTerminalPriority,
@@ -87,6 +94,11 @@ type ThreadedTerminalSelection = {
   selecting: boolean
   mode: ThreadedTerminalSelectionMode
   origin?: ThreadedTerminalSelectionPoint
+}
+
+type ThreadedTerminalFitOptions = {
+  allowUnstable?: boolean
+  forceMetrics?: boolean
 }
 
 type ThreadedTerminalBufferActive = {
@@ -228,7 +240,10 @@ const cloneTheme = (theme: ThreadedTerminalTheme): ThreadedTerminalTheme => ({ .
 const cloneKeywordHighlightConfig = (config: ThreadedTerminalKeywordHighlightConfig): ThreadedTerminalKeywordHighlightConfig =>
   config ? clonePlain(config) : config
 
-const renderSettingsFor = (settings: ThreadedTerminalSettings, theme: ThreadedTerminalTheme): ThreadedTerminalRenderSettings => ({
+const renderSettingsFor = (
+  settings: ThreadedTerminalSettings,
+  theme: ThreadedTerminalTheme,
+): ThreadedTerminalRenderSettings => ({
   fontFamily: settings.fontFamily || '"JetBrains Mono", "SFMono-Regular", Consolas, monospace',
   fontSize: settings.fontSize || 12,
   lineHeight: settings.lineHeight || 1,
@@ -257,8 +272,12 @@ const logThreadedTerminal = (level: 'debug' | 'info' | 'warn' | 'error', event: 
   writeRendererRuntimeLog(level, event, fields)
 }
 
+const useThreadedTerminalDiagnostics = () => shouldUseTerminalDebugLogs()
+
 const terminalScrollbarWidthPx = 10
 const terminalScrollbarThumbMinPx = 28
+const terminalMinimumStableHostWidthPx = 24
+const terminalMinimumStableHostHeightPx = 24
 
 const blankScreenLine = (y: number): ThreadedTerminalScreenLine => ({ y, text: '', cells: [] })
 
@@ -510,8 +529,19 @@ export class ThreadedTerminalHost {
   private lastSnapshot: ThreadedTerminalScreenSnapshot | null = null
   private lastRenderFrame: RenderFrameAck | null = null
   private lastCanvasSize: { width: number; height: number; dpr: number } | null = null
+  private geometrySeq = 0
+  private geometry: ThreadedTerminalGeometry | null = null
+  private pendingFitFrame: number | null = null
+  private lastStableFit: { width: number; height: number; cols: number; rows: number } | null = null
+  private cellMetricsSignature = ''
+  private lastSmallGeometryLogSignature = ''
+  private lastSmallLayoutLogSignature = ''
+  private pendingSmallLayoutFrame: number | null = null
   private selection: ThreadedTerminalSelection | null = null
-  private cellMetrics = { width: 8, height: 16 }
+  private cellMetrics: ThreadedTerminalCellMetrics = fallbackTerminalCellMetrics({
+    fontSize: 12,
+    lineHeight: 1
+  })
   private frameWaiters = new Set<{
     afterSeq: number
     resolve: (frame: RenderFrameAck) => void
@@ -552,6 +582,7 @@ export class ThreadedTerminalHost {
     this.theme = cloneTheme(options.theme)
     this.keywordHighlight = cloneKeywordHighlightConfig(options.keywordHighlight)
     this.settingsSignature = settingsSignatureFor(normalizedSettings, this.theme)
+    this.cellMetrics = fallbackTerminalCellMetrics(this.options)
     this.initialData = options.initialData
     this.resizeHandler = options.resizeHandler
     this.logFields = options.logFields
@@ -670,8 +701,8 @@ export class ThreadedTerminalHost {
     this.inputElement = inputElement
     this.applyScrollbarTheme()
     try {
-      if (!this.coreCreated) this.createCore(this.initialData)
-      this.attachCanvas()
+      if (this.fit({ allowUnstable: false })) this.ensureCoreAndSurface()
+      else this.scheduleFit()
     } catch (error) {
       logThreadedTerminal('error', 'renderer.threaded-terminal.open-failed', {
         terminalId: this.terminalId,
@@ -684,7 +715,6 @@ export class ThreadedTerminalHost {
       throw error
     }
     this.bindDomEvents()
-    this.fit()
   }
 
   startCoreOnly() {
@@ -726,6 +756,14 @@ export class ThreadedTerminalHost {
     this.eventController = null
     this.resizeObserver?.disconnect()
     this.resizeObserver = null
+    if (this.pendingFitFrame !== null) {
+      cancelAnimationFrame(this.pendingFitFrame)
+      this.pendingFitFrame = null
+    }
+    if (this.pendingSmallLayoutFrame !== null) {
+      cancelAnimationFrame(this.pendingSmallLayoutFrame)
+      this.pendingSmallLayoutFrame = null
+    }
     if (this.host) {
       this.host.classList.remove('threaded-terminal-host')
       this.host.replaceChildren()
@@ -739,6 +777,8 @@ export class ThreadedTerminalHost {
     this.eventController = null
     this.offscreenTransferred = false
     this.lastCanvasSize = null
+    this.geometry = null
+    this.lastStableFit = null
     this.selection = null
     this.composing = false
     this.skipNextInputText = null
@@ -947,13 +987,17 @@ export class ThreadedTerminalHost {
     this.options.scrollBack = normalized.scrollBack
     this.options.scrollback = normalized.scrollBack
     this.options.termName = normalized.terminalType
+    this.fit({ allowUnstable: true, forceMetrics: true })
     if (!this.coreCreated) return
     postCore(this.coreHandle, { type: 'settings', terminalId: this.terminalId, settings: normalized, theme: this.theme })
-    if (this.offscreenTransferred) {
-      postRender({ type: 'settings', terminalId: this.terminalId, settings: renderSettingsFor(normalized, this.theme) })
+    if (this.offscreenTransferred && this.geometry) {
+      postRender({
+        type: 'settings',
+        terminalId: this.terminalId,
+        settings: renderSettingsFor(normalized, this.theme),
+        geometry: this.geometry
+      })
     }
-    this.resizeCanvas()
-    this.fit()
   }
 
   readScreen(tailLines?: number) {
@@ -1059,24 +1103,234 @@ export class ThreadedTerminalHost {
     }
   }
 
-  fit() {
-    if (!this.host) return
+  fit(options: ThreadedTerminalFitOptions = {}) {
+    if (!this.host) return false
     const rect = this.host.getBoundingClientRect()
-    const width = this.host.clientWidth || rect.width || 1
-    const height = this.host.clientHeight || rect.height || 1
-    const fontSize = Number(this.options.fontSize || 12)
-    const lineHeight = Number(this.options.lineHeight || 1)
-    const cellHeight = Math.max(10, Math.ceil(fontSize * lineHeight))
-    const cellWidth = Math.max(4, Math.ceil(fontSize * 0.62))
-    this.cellMetrics = { width: cellWidth, height: cellHeight }
-    const usableWidth = Math.max(1, width - terminalScrollbarWidthPx)
-    const cols = Math.max(2, Math.floor(usableWidth / cellWidth))
-    const rows = Math.max(1, Math.floor(height / cellHeight))
-    this.resizeCanvas()
-    this.resize(cols, rows)
+    const width = Math.floor(this.host.clientWidth || rect.width || 0)
+    const height = Math.floor(this.host.clientHeight || rect.height || 0)
+    if (!options.allowUnstable && this.shouldDeferUnstableFit(width, height)) {
+      if (this.lastStableFit) this.scheduleFit()
+      return false
+    }
+    const geometry = this.computeGeometry(width, height, options)
+    this.geometry = geometry
+    this.lastStableFit = { width, height, cols: geometry.cols, rows: geometry.rows }
+    if (useThreadedTerminalDiagnostics()) this.logSmallGeometryDiagnostic(width, height, geometry)
+    this.resizeCanvas(geometry)
+    if (useThreadedTerminalDiagnostics()) this.logSmallLayoutDiagnostic('after-fit', geometry, width, height)
+    this.resize(geometry.cols, geometry.rows)
     this.updateInputPosition()
     this.updateScrollbar()
     this.renderSelection()
+    this.ensureCoreAndSurface()
+    if (useThreadedTerminalDiagnostics()) this.scheduleSmallLayoutDiagnostic(geometry, width, height)
+    return true
+  }
+
+  private metricsSignatureFor(settings: Pick<ThreadedTerminalOptions, 'fontFamily' | 'fontSize' | 'lineHeight'>) {
+    return [settings.fontFamily || '', settings.fontSize || '', settings.lineHeight || ''].join('\u001f')
+  }
+
+  private ensureCellMetrics(force = false) {
+    const signature = this.metricsSignatureFor(this.options)
+    if (!force && this.cellMetricsSignature === signature && this.cellMetrics.width > 0 && this.cellMetrics.height > 0) return
+    this.cellMetricsSignature = signature
+    let context: CanvasRenderingContext2D | null = null
+    try {
+      context = document.createElement('canvas').getContext('2d')
+    } catch {
+      context = null
+    }
+    this.cellMetrics = measureTerminalCellMetrics(context, this.options)
+  }
+
+  private computeGeometry(width: number, height: number, options: ThreadedTerminalFitOptions = {}): ThreadedTerminalGeometry {
+    this.ensureCellMetrics(options.forceMetrics)
+    const metrics = this.cellMetrics
+    const canvasWidth = Math.max(1, width - terminalScrollbarWidthPx)
+    const canvasHeight = Math.max(1, height)
+    const cols = Math.max(2, Math.floor(canvasWidth / metrics.width))
+    const rows = Math.max(1, Math.floor(canvasHeight / metrics.height))
+    const gridWidth = cols * metrics.width
+    const gridHeight = rows * metrics.height
+    return {
+      seq: ++this.geometrySeq,
+      canvasWidth,
+      canvasHeight,
+      cols,
+      rows,
+      cellWidth: metrics.width,
+      cellHeight: metrics.height,
+      baseline: metrics.baseline,
+      paddingLeft: 0,
+      paddingRight: Math.max(0, canvasWidth - gridWidth),
+      paddingTop: 0,
+      paddingBottom: Math.max(0, canvasHeight - gridHeight)
+    }
+  }
+
+  private logSmallGeometryDiagnostic(hostWidth: number, hostHeight: number, geometry: ThreadedTerminalGeometry) {
+    if (!useThreadedTerminalDiagnostics() || geometry.cols > 16) return
+    const canvasRect = this.canvas?.getBoundingClientRect()
+    const signature = [
+      geometry.cols,
+      geometry.rows,
+      geometry.canvasWidth,
+      geometry.canvasHeight,
+      geometry.cellWidth,
+      geometry.cellHeight,
+      geometry.paddingRight,
+      geometry.paddingBottom,
+      hostWidth,
+      hostHeight,
+      Math.round((window.devicePixelRatio || 1) * 100) / 100
+    ].join(':')
+    if (signature === this.lastSmallGeometryLogSignature) return
+    this.lastSmallGeometryLogSignature = signature
+    logThreadedTerminal('info', 'renderer.threaded-terminal.small-geometry', {
+      terminalId: this.terminalId,
+      sessionId: this.sessionId,
+      groupId: this.groupId,
+      surface: this.surface,
+      hostWidth,
+      hostHeight,
+      canvasClientWidth: this.canvas?.clientWidth || 0,
+      canvasClientHeight: this.canvas?.clientHeight || 0,
+      canvasRectWidth: canvasRect?.width || 0,
+      canvasRectHeight: canvasRect?.height || 0,
+      dpr: window.devicePixelRatio || 1,
+      cols: geometry.cols,
+      rows: geometry.rows,
+      canvasWidth: geometry.canvasWidth,
+      canvasHeight: geometry.canvasHeight,
+      cellWidth: geometry.cellWidth,
+      cellHeight: geometry.cellHeight,
+      baseline: geometry.baseline,
+      paddingLeft: geometry.paddingLeft,
+      paddingRight: geometry.paddingRight,
+      paddingTop: geometry.paddingTop,
+      paddingBottom: geometry.paddingBottom,
+      fontFamily: this.options.fontFamily,
+      fontSize: this.options.fontSize,
+      lineHeight: this.options.lineHeight,
+      ...this.logFields
+    })
+  }
+
+  private roundedRectFields(rect?: DOMRect | null) {
+    if (!rect) return null
+    return {
+      left: Math.round(rect.left * 100) / 100,
+      top: Math.round(rect.top * 100) / 100,
+      width: Math.round(rect.width * 100) / 100,
+      height: Math.round(rect.height * 100) / 100
+    }
+  }
+
+  private elementBoxFields(element?: HTMLElement | null) {
+    if (!element) return null
+    const style = window.getComputedStyle(element)
+    return {
+      rect: this.roundedRectFields(element.getBoundingClientRect()),
+      clientWidth: element.clientWidth,
+      clientHeight: element.clientHeight,
+      offsetWidth: element.offsetWidth,
+      offsetHeight: element.offsetHeight,
+      scrollWidth: element.scrollWidth,
+      scrollHeight: element.scrollHeight,
+      display: style.display,
+      position: style.position,
+      overflow: style.overflow,
+      boxSizing: style.boxSizing,
+      gridTemplateRows: style.gridTemplateRows,
+      gridTemplateColumns: style.gridTemplateColumns,
+      flex: style.flex
+    }
+  }
+
+  private logSmallLayoutDiagnostic(stage: 'after-fit' | 'next-frame', geometry: ThreadedTerminalGeometry, measuredHostWidth: number, measuredHostHeight: number) {
+    if (!useThreadedTerminalDiagnostics() || geometry.cols > 16 || !this.host) return
+    const canvas = this.canvas
+    const pane = this.host.closest('.terminal-pane') as HTMLElement | null
+    const grid = this.host.closest('.terminal-grid') as HTMLElement | null
+    const title = pane?.querySelector<HTMLElement>('.pane-title') || null
+    const canvasRect = canvas?.getBoundingClientRect() || null
+    const visibleCanvasWidth = canvasRect?.width || 0
+    const gridPixelWidth = geometry.cols * geometry.cellWidth
+    const clippedColumns = visibleCanvasWidth > 0
+      ? Math.max(0, gridPixelWidth - visibleCanvasWidth) / Math.max(1, geometry.cellWidth)
+      : null
+    const signature = [
+      stage,
+      geometry.seq,
+      geometry.cols,
+      measuredHostWidth,
+      measuredHostHeight,
+      Math.round((visibleCanvasWidth || 0) * 100) / 100,
+      this.host.clientWidth,
+      canvas?.clientWidth || 0,
+      pane?.clientWidth || 0
+    ].join(':')
+    if (signature === this.lastSmallLayoutLogSignature) return
+    this.lastSmallLayoutLogSignature = signature
+    logThreadedTerminal('info', 'renderer.threaded-terminal.small-layout', {
+      terminalId: this.terminalId,
+      sessionId: this.sessionId,
+      groupId: this.groupId,
+      surface: this.surface,
+      stage,
+      measuredHostWidth,
+      measuredHostHeight,
+      cols: geometry.cols,
+      rows: geometry.rows,
+      cellWidth: geometry.cellWidth,
+      cellHeight: geometry.cellHeight,
+      canvasWidth: geometry.canvasWidth,
+      canvasHeight: geometry.canvasHeight,
+      gridPixelWidth,
+      gridPixelHeight: geometry.rows * geometry.cellHeight,
+      paddingRight: geometry.paddingRight,
+      visibleCanvasWidth,
+      visibleCanvasHeight: canvasRect?.height || 0,
+      clippedColumns,
+      host: this.elementBoxFields(this.host),
+      canvas: this.elementBoxFields(canvas),
+      pane: this.elementBoxFields(pane),
+      grid: this.elementBoxFields(grid),
+      title: this.elementBoxFields(title),
+      scrollbar: this.elementBoxFields(this.scrollbar),
+      dpr: window.devicePixelRatio || 1,
+      ...this.logFields
+    })
+  }
+
+  private scheduleSmallLayoutDiagnostic(geometry: ThreadedTerminalGeometry, measuredHostWidth: number, measuredHostHeight: number) {
+    if (!useThreadedTerminalDiagnostics() || geometry.cols > 16 || this.pendingSmallLayoutFrame !== null || this.disposed) return
+    this.pendingSmallLayoutFrame = requestAnimationFrame(() => {
+      this.pendingSmallLayoutFrame = null
+      if (this.disposed || this.geometry?.seq !== geometry.seq) return
+      this.logSmallLayoutDiagnostic('next-frame', geometry, measuredHostWidth, measuredHostHeight)
+    })
+  }
+
+  private shouldDeferUnstableFit(width: number, height: number) {
+    if (width >= terminalMinimumStableHostWidthPx && height >= terminalMinimumStableHostHeightPx) return false
+    if (!this.lastStableFit) return true
+    return this.lastStableFit.cols > 2 || this.lastStableFit.rows > 1
+  }
+
+  private scheduleFit() {
+    if (this.pendingFitFrame !== null || this.disposed) return
+    this.pendingFitFrame = requestAnimationFrame(() => {
+      this.pendingFitFrame = null
+      this.fit()
+    })
+  }
+
+  private ensureCoreAndSurface() {
+    if (!this.geometry || this.disposed) return
+    if (!this.coreCreated) this.createCore(this.initialData)
+    if (!this.offscreenTransferred && this.canvas) this.attachCanvas()
   }
 
   private focusInput() {
@@ -1091,12 +1345,13 @@ export class ThreadedTerminalHost {
     if (!this.inputElement) return
     const cursorAbsoluteY = this.lastSnapshot?.cursorAbsoluteY ?? this.buffer.active.viewportY + this.buffer.active.cursorY
     const cursorViewportY = cursorAbsoluteY - this.buffer.active.viewportY
-    const left = Math.max(0, Math.min(this.cols - 1, this.buffer.active.cursorX)) * this.cellMetrics.width
-    const top = Math.max(0, Math.min(this.rows - 1, cursorViewportY)) * this.cellMetrics.height
+    const geometry = this.geometry
+    const left = (geometry?.paddingLeft || 0) + Math.max(0, Math.min(this.cols - 1, this.buffer.active.cursorX)) * this.cellMetrics.width
+    const top = (geometry?.paddingTop || 0) + Math.max(0, Math.min(this.rows - 1, cursorViewportY)) * this.cellMetrics.height
     this.inputElement.style.left = `${left}px`
     this.inputElement.style.top = `${top}px`
     this.inputElement.style.height = `${Math.max(1, this.cellMetrics.height)}px`
-    this.inputElement.style.font = `${this.options.fontSize}px ${this.options.fontFamily}`
+    this.inputElement.style.font = terminalFontSpec(this.options)
   }
 
   private async copySelectionToClipboard(event?: ClipboardEvent | KeyboardEvent) {
@@ -1254,8 +1509,8 @@ export class ThreadedTerminalHost {
 
   private pointFromMouseEvent(event: MouseEvent): ThreadedTerminalSelectionPoint {
     const rect = this.canvas?.getBoundingClientRect() || this.host?.getBoundingClientRect()
-    const left = rect?.left || 0
-    const top = rect?.top || 0
+    const left = (rect?.left || 0) + (this.geometry?.paddingLeft || 0)
+    const top = (rect?.top || 0) + (this.geometry?.paddingTop || 0)
     const x = Math.max(0, Math.min(this.cols, Math.floor((event.clientX - left) / Math.max(1, this.cellMetrics.width))))
     const y = Math.max(0, Math.min(this.rows - 1, Math.floor((event.clientY - top) / Math.max(1, this.cellMetrics.height))))
     return { x, y: this.buffer.active.viewportY + y }
@@ -1367,8 +1622,8 @@ export class ThreadedTerminalHost {
       const rect = document.createElement('div')
       rect.className = 'threaded-terminal-selection-rect'
       rect.style.position = 'absolute'
-      rect.style.left = `${startX * this.cellMetrics.width}px`
-      rect.style.top = `${(row - viewportY) * this.cellMetrics.height}px`
+      rect.style.left = `${(this.geometry?.paddingLeft || 0) + startX * this.cellMetrics.width}px`
+      rect.style.top = `${(this.geometry?.paddingTop || 0) + (row - viewportY) * this.cellMetrics.height}px`
       rect.style.width = `${(endX - startX) * this.cellMetrics.width}px`
       rect.style.height = `${this.cellMetrics.height}px`
       rect.style.background = color
@@ -1456,12 +1711,14 @@ export class ThreadedTerminalHost {
     if (!this.canvas || this.offscreenTransferred) return
     const capability = threadedTerminalCapability()
     if (!capability.supported) throw new Error(capability.reason || 'threaded terminal unsupported')
+    if (!this.geometry) {
+      if (!this.fit()) return
+      if (this.offscreenTransferred) return
+    }
+    const geometry = this.geometry
+    if (!geometry) return
     const offscreen = this.canvas.transferControlToOffscreen()
     this.offscreenTransferred = true
-    const rect = this.canvas.getBoundingClientRect()
-    const hostWidth = this.host?.clientWidth || 0
-    const width = this.canvas.clientWidth || rect.width || Math.max(1, hostWidth - terminalScrollbarWidthPx) || 1
-    const height = this.canvas.clientHeight || rect.height || this.host?.clientHeight || 1
     const dpr = window.devicePixelRatio || 1
     postRender(
       {
@@ -1470,17 +1727,16 @@ export class ThreadedTerminalHost {
           terminalId: this.terminalId,
           groupId: this.groupId,
           canvas: offscreen,
-          width,
-          height,
           devicePixelRatio: dpr,
-          settings: renderSettingsFor(normalizeSettings(this.options), this.theme)
+          settings: renderSettingsFor(normalizeSettings(this.options), this.theme),
+          geometry
         }
       },
       [offscreen]
     )
     this.lastCanvasSize = {
-      width: Math.max(1, Math.floor(width)),
-      height: Math.max(1, Math.floor(height)),
+      width: geometry.canvasWidth,
+      height: geometry.canvasHeight,
       dpr
     }
     if (this.lastSnapshot && this.visible) {
@@ -1616,19 +1872,17 @@ export class ThreadedTerminalHost {
       this.scrollLines(rows)
     }, { passive: false, signal })
     if (typeof ResizeObserver !== 'undefined') {
-      this.resizeObserver = new ResizeObserver(() => this.fit())
+      this.resizeObserver = new ResizeObserver(() => this.scheduleFit())
       this.resizeObserver.observe(host)
     }
   }
 
-  private resizeCanvas() {
+  private resizeCanvas(geometry = this.geometry) {
     if (!this.host || !this.canvas || !this.offscreenTransferred) return
-    const rect = this.host.getBoundingClientRect()
-    const width = Math.max(1, (this.host.clientWidth || rect.width || 1) - terminalScrollbarWidthPx)
-    const height = this.host.clientHeight || rect.height || 1
+    if (!geometry) return
     const nextSize = {
-      width: Math.max(1, Math.floor(width)),
-      height: Math.max(1, Math.floor(height)),
+      width: geometry.canvasWidth,
+      height: geometry.canvasHeight,
       dpr: window.devicePixelRatio || 1
     }
     if (
@@ -1643,9 +1897,8 @@ export class ThreadedTerminalHost {
     postRender({
       type: 'resize',
       terminalId: this.terminalId,
-      width: nextSize.width,
-      height: nextSize.height,
-      devicePixelRatio: nextSize.dpr
+      devicePixelRatio: nextSize.dpr,
+      geometry
     })
   }
 

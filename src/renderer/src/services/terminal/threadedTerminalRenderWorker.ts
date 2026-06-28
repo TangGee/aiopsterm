@@ -2,9 +2,11 @@ import type {
   ThreadedTerminalRenderRequest,
   ThreadedTerminalRenderResponse,
   ThreadedTerminalRenderSettings,
+  ThreadedTerminalGeometry,
   ThreadedTerminalScreenLine,
   ThreadedTerminalScreenSnapshot
 } from '@/services/terminal/threadedTerminalProtocol'
+import { terminalFontSpec } from '@/services/terminal/threadedTerminalMetrics'
 
 type DedicatedWorkerScopeLike = {
   onmessage: ((event: MessageEvent<ThreadedTerminalRenderRequest>) => void) | null
@@ -22,6 +24,7 @@ type RenderSurface = {
   height: number
   dpr: number
   settings: ThreadedTerminalRenderSettings
+  geometry: ThreadedTerminalGeometry
   cellWidth: number
   cellHeight: number
   baseline: number
@@ -46,11 +49,7 @@ let frameTimer: ReturnType<typeof setTimeout> | null = null
 
 const post = (message: ThreadedTerminalRenderResponse) => workerScope.postMessage(message)
 
-const fontSpec = (settings: ThreadedTerminalRenderSettings, _bold = false, _italic = false) => {
-  const weight = '400'
-  const style = ''
-  return `${style}${weight} ${Math.max(8, settings.fontSize)}px ${settings.fontFamily || '"JetBrains Mono", "SFMono-Regular", Consolas, monospace'}`
-}
+const fontSpec = terminalFontSpec
 
 const runChars = (run: { text: string; chars?: string[] }) => run.chars || Array.from(run.text || '')
 const runWidths = (run: { text: string; chars?: string[]; widths?: number[] }) => {
@@ -99,21 +98,25 @@ const textForeground = (
   return color
 }
 
-const configureMetrics = (surface: RenderSurface) => {
+const applyGeometry = (surface: RenderSurface, geometry: ThreadedTerminalGeometry) => {
   const context = surface.context
   context.font = fontSpec(surface.settings)
   context.textBaseline = 'alphabetic'
-  const metrics = context.measureText('W')
-  surface.cellWidth = Math.max(4, Math.ceil(metrics.width || surface.settings.fontSize * 0.62))
-  surface.cellHeight = Math.max(10, Math.ceil(surface.settings.fontSize * (surface.settings.lineHeight || 1)))
-  surface.baseline = Math.max(8, Math.floor(surface.cellHeight * 0.78))
+  surface.geometry = geometry
+  surface.cellWidth = Math.max(1, geometry.cellWidth)
+  surface.cellHeight = Math.max(1, geometry.cellHeight)
+  surface.baseline = Math.max(1, geometry.baseline)
 }
 
-const resizeCanvas = (surface: RenderSurface, width: number, height: number, dpr: number) => {
-  const nextWidth = Math.max(1, Math.floor(width))
-  const nextHeight = Math.max(1, Math.floor(height))
+const resizeCanvas = (surface: RenderSurface, geometry: ThreadedTerminalGeometry, dpr: number) => {
+  const nextWidth = Math.max(1, Math.floor(geometry.canvasWidth))
+  const nextHeight = Math.max(1, Math.floor(geometry.canvasHeight))
   const nextDpr = Math.max(1, dpr || 1)
-  const changed = surface.width !== nextWidth || surface.height !== nextHeight || surface.dpr !== nextDpr
+  const changed =
+    surface.width !== nextWidth ||
+    surface.height !== nextHeight ||
+    surface.dpr !== nextDpr ||
+    surface.geometry.seq !== geometry.seq
   surface.width = nextWidth
   surface.height = nextHeight
   surface.dpr = nextDpr
@@ -122,7 +125,7 @@ const resizeCanvas = (surface: RenderSurface, width: number, height: number, dpr
   if (surface.canvas.width !== pixelWidth) surface.canvas.width = pixelWidth
   if (surface.canvas.height !== pixelHeight) surface.canvas.height = pixelHeight
   surface.context.setTransform(surface.dpr, 0, 0, surface.dpr, 0, 0)
-  configureMetrics(surface)
+  applyGeometry(surface, geometry)
   return changed
 }
 
@@ -130,7 +133,7 @@ const fillBackground = (surface: RenderSurface, row?: number) => {
   const context = surface.context
   context.fillStyle = surface.settings.theme.background
   if (typeof row === 'number') {
-    context.fillRect(0, row * surface.cellHeight, surface.width, surface.cellHeight)
+    context.fillRect(0, surface.geometry.paddingTop + row * surface.cellHeight, surface.width, surface.cellHeight)
   } else {
     context.fillRect(0, 0, surface.width, surface.height)
   }
@@ -161,11 +164,12 @@ const drawTextCells = (
   const context = surface.context
   context.font = fontSpec(surface.settings, options.bold, options.italic)
   context.fillStyle = textForeground(surface, options)
-  const top = row * surface.cellHeight
+  const left = surface.geometry.paddingLeft
+  const top = surface.geometry.paddingTop + row * surface.cellHeight
   let cellOffset = 0
   chars.forEach((char, index) => {
     const drawX = x + cellOffset
-    if (!options.hidden && char !== ' ') context.fillText(char, drawX * surface.cellWidth, top + surface.baseline)
+    if (!options.hidden && char !== ' ') context.fillText(char, left + drawX * surface.cellWidth, top + surface.baseline)
     cellOffset += widths[index]
   })
   const columns = Math.max(1, options.columns || widths.reduce((total, width) => total + width, 0) || chars.length)
@@ -173,13 +177,13 @@ const drawTextCells = (
     context.fillStyle = textForeground(surface, options)
   }
   if (options.underline) {
-    context.fillRect(x * surface.cellWidth, top + surface.cellHeight - 2, Math.max(surface.cellWidth, columns * surface.cellWidth), 1)
+    context.fillRect(left + x * surface.cellWidth, top + surface.cellHeight - 2, Math.max(surface.cellWidth, columns * surface.cellWidth), 1)
   }
   if (options.strikethrough) {
-    context.fillRect(x * surface.cellWidth, top + Math.floor(surface.cellHeight * 0.52), Math.max(surface.cellWidth, columns * surface.cellWidth), 1)
+    context.fillRect(left + x * surface.cellWidth, top + Math.floor(surface.cellHeight * 0.52), Math.max(surface.cellWidth, columns * surface.cellWidth), 1)
   }
   if (options.overline) {
-    context.fillRect(x * surface.cellWidth, top + 1, Math.max(surface.cellWidth, columns * surface.cellWidth), 1)
+    context.fillRect(left + x * surface.cellWidth, top + 1, Math.max(surface.cellWidth, columns * surface.cellWidth), 1)
   }
 }
 
@@ -188,7 +192,12 @@ const drawStyledRuns = (surface: RenderSurface, line: ThreadedTerminalScreenLine
   for (const run of line.cells || []) {
     if (run.bg) {
       context.fillStyle = run.bg
-      context.fillRect(run.x * surface.cellWidth, line.y * surface.cellHeight, Math.max(surface.cellWidth, runColumns(run) * surface.cellWidth), surface.cellHeight)
+      context.fillRect(
+        surface.geometry.paddingLeft + run.x * surface.cellWidth,
+        surface.geometry.paddingTop + line.y * surface.cellHeight,
+        Math.max(surface.cellWidth, runColumns(run) * surface.cellWidth),
+        surface.cellHeight
+      )
     }
   }
   for (const run of line.cells || []) {
@@ -289,8 +298,8 @@ const charAtCell = (line: ThreadedTerminalScreenLine | undefined, x: number) => 
 const drawCursor = (surface: RenderSurface, snapshot: ThreadedTerminalScreenSnapshot) => {
   if (snapshot.cursorY < 0 || snapshot.cursorY >= snapshot.rows) return
   const context = surface.context
-  const x = snapshot.cursorX * surface.cellWidth
-  const y = snapshot.cursorY * surface.cellHeight
+  const x = surface.geometry.paddingLeft + snapshot.cursorX * surface.cellWidth
+  const y = surface.geometry.paddingTop + snapshot.cursorY * surface.cellHeight
   context.fillStyle = surface.settings.theme.cursor
   if (surface.settings.cursorStyle === 'bar') {
     context.fillRect(x, y + 2, 2, Math.max(2, surface.cellHeight - 4))
@@ -365,17 +374,45 @@ const rememberPaintedSnapshot = (surface: RenderSurface, snapshot: ThreadedTermi
 }
 
 const scrollSurface = (surface: RenderSurface, deltaRows: number) => {
-  if (!deltaRows || Math.abs(deltaRows) >= Math.max(1, Math.floor(surface.height / surface.cellHeight))) return false
+  const gridRows = Math.max(1, surface.geometry.rows)
+  if (!deltaRows || Math.abs(deltaRows) >= gridRows) return false
   const context = surface.context
   const deltaY = Math.round(deltaRows * surface.cellHeight * surface.dpr) / surface.dpr
-  const pixelWidth = surface.canvas.width
+  const sourceX = Math.round(surface.geometry.paddingLeft * surface.dpr)
+  const sourceY = Math.round(surface.geometry.paddingTop * surface.dpr)
+  const pixelWidth = Math.max(1, Math.round(surface.geometry.cols * surface.cellWidth * surface.dpr))
+  const gridPixelHeight = Math.max(1, Math.round(surface.geometry.rows * surface.cellHeight * surface.dpr))
   const pixelDeltaY = Math.round(Math.abs(deltaY) * surface.dpr)
   if (deltaRows > 0) {
-    const sourcePixelHeight = Math.max(0, surface.canvas.height - pixelDeltaY)
-    if (sourcePixelHeight > 0) context.drawImage(surface.canvas, 0, pixelDeltaY, pixelWidth, sourcePixelHeight, 0, 0, surface.width, sourcePixelHeight / surface.dpr)
+    const sourcePixelHeight = Math.max(0, gridPixelHeight - pixelDeltaY)
+    if (sourcePixelHeight > 0) {
+      context.drawImage(
+        surface.canvas,
+        sourceX,
+        sourceY + pixelDeltaY,
+        pixelWidth,
+        sourcePixelHeight,
+        surface.geometry.paddingLeft,
+        surface.geometry.paddingTop,
+        pixelWidth / surface.dpr,
+        sourcePixelHeight / surface.dpr
+      )
+    }
   } else {
-    const sourcePixelHeight = Math.max(0, surface.canvas.height - pixelDeltaY)
-    if (sourcePixelHeight > 0) context.drawImage(surface.canvas, 0, 0, pixelWidth, sourcePixelHeight, 0, pixelDeltaY / surface.dpr, surface.width, sourcePixelHeight / surface.dpr)
+    const sourcePixelHeight = Math.max(0, gridPixelHeight - pixelDeltaY)
+    if (sourcePixelHeight > 0) {
+      context.drawImage(
+        surface.canvas,
+        sourceX,
+        sourceY,
+        pixelWidth,
+        sourcePixelHeight,
+        surface.geometry.paddingLeft,
+        surface.geometry.paddingTop + pixelDeltaY / surface.dpr,
+        pixelWidth / surface.dpr,
+        sourcePixelHeight / surface.dpr
+      )
+    }
   }
   return true
 }
@@ -569,13 +606,14 @@ const handleMessage = (message: ThreadedTerminalRenderRequest) => {
         groupId: message.options.groupId,
         canvas: message.options.canvas,
         context,
-        width: message.options.width,
-        height: message.options.height,
+        width: message.options.geometry.canvasWidth,
+        height: message.options.geometry.canvasHeight,
         dpr: message.options.devicePixelRatio,
         settings: message.options.settings,
-        cellWidth: 8,
-        cellHeight: 16,
-        baseline: 12,
+        geometry: message.options.geometry,
+        cellWidth: message.options.geometry.cellWidth,
+        cellHeight: message.options.geometry.cellHeight,
+        baseline: message.options.geometry.baseline,
         visible: true,
         frames: 0,
         totalFrameMs: 0,
@@ -588,7 +626,7 @@ const handleMessage = (message: ThreadedTerminalRenderRequest) => {
         lastPaintAt: 0
       }
       surfaces.set(surface.terminalId, surface)
-      resizeCanvas(surface, message.options.width, message.options.height, message.options.devicePixelRatio)
+      resizeCanvas(surface, message.options.geometry, message.options.devicePixelRatio)
       fillBackground(surface)
       post({ type: 'attached', terminalId: surface.terminalId })
       return
@@ -601,7 +639,7 @@ const handleMessage = (message: ThreadedTerminalRenderRequest) => {
       return
     }
     if (message.type === 'resize') {
-      const changed = resizeCanvas(surface, message.width, message.height, message.devicePixelRatio)
+      const changed = resizeCanvas(surface, message.geometry, message.devicePixelRatio)
       if (!changed) return
       if (flushPendingPaintAsRepaint(surface, 'resize')) return
       else repaintLastSnapshot(surface, 'resize')
@@ -609,7 +647,7 @@ const handleMessage = (message: ThreadedTerminalRenderRequest) => {
     }
     if (message.type === 'settings') {
       surface.settings = message.settings
-      configureMetrics(surface)
+      resizeCanvas(surface, message.geometry, surface.dpr)
       if (flushPendingPaintAsRepaint(surface, 'settings')) return
       else repaintLastSnapshot(surface, 'settings')
       return

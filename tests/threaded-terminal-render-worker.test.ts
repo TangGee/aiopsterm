@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type {
+  ThreadedTerminalGeometry,
   ThreadedTerminalRenderRequest,
   ThreadedTerminalRenderResponse,
   ThreadedTerminalScreenSnapshot
@@ -21,7 +22,7 @@ class FakeCanvasContext {
   setTransform = vi.fn()
   save = vi.fn()
   restore = vi.fn()
-  measureText = vi.fn(() => ({ width: 8 }))
+  measureText = vi.fn(() => ({ width: 99 }))
   fillRect = vi.fn((x: number, y: number, width: number, height: number) => {
     this.operations.push({ type: 'fillRect', x, y, width, height, fillStyle: this.fillStyle })
   })
@@ -112,6 +113,48 @@ const workingSnapshot = (): ThreadedTerminalScreenSnapshot => ({
   priority: 'active'
 })
 
+const geometry = (overrides: Partial<ThreadedTerminalGeometry> = {}): ThreadedTerminalGeometry => ({
+  seq: 1,
+  canvasWidth: 80,
+  canvasHeight: 48,
+  cols: 10,
+  rows: 3,
+  cellWidth: 8,
+  cellHeight: 13,
+  baseline: 10,
+  paddingLeft: 0,
+  paddingRight: 0,
+  paddingTop: 0,
+  paddingBottom: 9,
+  ...overrides
+})
+
+const attachMessage = (
+  canvas: FakeOffscreenCanvas,
+  overrides: Partial<ThreadedTerminalGeometry> = {}
+): ThreadedTerminalRenderRequest => ({
+  type: 'attach',
+  options: {
+    terminalId: 'render-worker-terminal',
+    groupId: 'group-1',
+    canvas: canvas as unknown as OffscreenCanvas,
+    devicePixelRatio: 1,
+    settings: {
+      fontFamily: 'JetBrains Mono',
+      fontSize: 13,
+      lineHeight: 1,
+      cursorBlink: false,
+      cursorStyle: 'block',
+      theme: {
+        background: '#000000',
+        foreground: '#ffffff',
+        cursor: '#ff00ff'
+      }
+    },
+    geometry: geometry(overrides)
+  }
+})
+
 describe('threadedTerminalRenderWorker', () => {
   let originalSelfDescriptor: PropertyDescriptor | undefined
   let scope: TestWorkerScope
@@ -154,29 +197,7 @@ describe('threadedTerminalRenderWorker', () => {
   }
 
   it('paints wide glyphs at their xterm cell columns', async () => {
-    send({
-      type: 'attach',
-      options: {
-        terminalId: 'render-worker-terminal',
-        groupId: 'group-1',
-        canvas: canvas as unknown as OffscreenCanvas,
-        width: 80,
-        height: 48,
-        devicePixelRatio: 1,
-        settings: {
-          fontFamily: 'JetBrains Mono',
-          fontSize: 13,
-          lineHeight: 1,
-          cursorBlink: false,
-          cursorStyle: 'block',
-          theme: {
-            background: '#000000',
-            foreground: '#ffffff',
-            cursor: '#ff00ff'
-          }
-        }
-      }
-    })
+    send(attachMessage(canvas))
     send({ type: 'screen', snapshot: snapshot() })
 
     await vi.advanceTimersByTimeAsync(16)
@@ -192,33 +213,14 @@ describe('threadedTerminalRenderWorker', () => {
     expect(canvas.context.fillRect).toHaveBeenCalledWith(8, 0, 16, 13)
     expect(canvas.context.font).toContain('400')
     expect(canvas.context.font).not.toContain('italic')
+    expect(canvas.context.measureText).not.toHaveBeenCalled()
     expect(messages).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'frame', terminalId: 'render-worker-terminal', seq: 1 })]))
   })
 
   it('paints cursor-addressed ANSI style changes with the new RGB foreground', async () => {
-    send({
-      type: 'attach',
-      options: {
-        terminalId: 'render-worker-terminal',
-        groupId: 'group-1',
-        canvas: canvas as unknown as OffscreenCanvas,
-        width: 80,
-        height: 48,
-        devicePixelRatio: 1,
-        settings: {
-          fontFamily: 'JetBrains Mono',
-          fontSize: 13,
-          lineHeight: 1,
-          cursorBlink: false,
-          cursorStyle: 'bar',
-          theme: {
-            background: '#000000',
-            foreground: '#ffffff',
-            cursor: '#ff00ff'
-          }
-        }
-      }
-    })
+    const message = attachMessage(canvas)
+    if (message.type === 'attach') message.options.settings.cursorStyle = 'bar'
+    send(message)
     send({ type: 'screen', snapshot: workingSnapshot() })
 
     await vi.advanceTimersByTimeAsync(16)
@@ -229,5 +231,21 @@ describe('threadedTerminalRenderWorker', () => {
     expect(canvas.context.font).toContain('400')
     expect(canvas.context.font).not.toContain('700')
     expect(messages).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'frame', terminalId: 'render-worker-terminal', seq: 2, paintedRows: 1 })]))
+  })
+
+  it('uses host-provided geometry padding instead of remeasuring in the worker', async () => {
+    send(attachMessage(canvas, { paddingLeft: 4, paddingTop: 2, paddingRight: 12, paddingBottom: 7 }))
+    send({ type: 'screen', snapshot: snapshot() })
+
+    await vi.advanceTimersByTimeAsync(16)
+
+    const textOps = canvas.context.operations.filter((operation) => operation.type === 'fillText')
+    expect(textOps).toEqual(expect.arrayContaining([
+      expect.objectContaining({ text: 'a', x: 4, y: 12 }),
+      expect.objectContaining({ text: '你', x: 12, y: 12 }),
+      expect.objectContaining({ text: 'b', x: 28, y: 12 })
+    ]))
+    expect(canvas.context.fillRect).toHaveBeenCalledWith(12, 2, 16, 13)
+    expect(canvas.context.measureText).not.toHaveBeenCalled()
   })
 })

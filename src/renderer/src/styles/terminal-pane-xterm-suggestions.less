@@ -44,12 +44,32 @@
 
 .pane-title {
   height: 28px;
+  min-width: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
+  overflow: hidden;
   background: #111620;
   border-bottom: 1px solid #202637;
   padding: 0 9px;
+}
+
+.pane-title > span,
+.pane-title > small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pane-title > span {
+  flex: 0 1 auto;
+}
+
+.pane-title > small {
+  flex: 1 1 auto;
+  text-align: right;
 }
 
 .app-shell.has-app-background .terminal-pane {
@@ -92,6 +112,8 @@
 .xterm-host {
   min-height: 0;
   min-width: 0;
+  width: 100%;
+  height: 100%;
   overflow: hidden;
   display: grid;
   box-sizing: border-box;

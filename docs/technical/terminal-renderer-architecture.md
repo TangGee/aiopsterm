@@ -19,6 +19,14 @@ The threaded path uses a renderer-side core worker pool plus a render worker:
 - The render worker owns `OffscreenCanvas` 2D contexts and paints snapshots outside the main thread.
 - Background terminals keep parsing data but are marked `background`; they do not paint until visible again.
 
+## Geometry Ownership
+
+Threaded terminal geometry follows VTE's single-source model. The main renderer host owns font measurement and pane geometry because it is the component that can see the actual DOM box, scrollbar reservation, settings, and split-pane lifecycle. It measures printable ASCII glyphs on a 2D canvas, takes the widest cell width, applies line height, and computes one `TerminalGeometry` object containing canvas size, columns, rows, cell size, baseline, and residual padding.
+
+The core worker receives only `cols` and `rows` from that geometry. The render worker receives the full geometry and never remeasures text or infers cell size from its own canvas context. Drawing, cursor placement, selection overlay, hidden textarea placement, and resize messages all use the same host-owned metrics. Split-pane zero-size or tiny intermediate layouts are deferred instead of being sent to the core as temporary `2x1` resizes, matching VTE's approach of converting the widget allocation into grid size once and then applying that grid consistently to terminal state and drawing.
+
+Split-pane layout must not let terminal content feed back into pane allocation. `.terminal-pane` uses a single `minmax(0, 1fr)` content column, the title row truncates long panel titles and working directories, and `.xterm-host` fills the pane's assigned box with `width: 100%` and `height: 100%`. This keeps the DOM allocation as the single source of truth for host measurement. Small panes may legitimately wrap shell output because the PTY received fewer columns, but the canvas must not be wider than the pane and then hidden by the parent.
+
 The core pool is intentionally small instead of one worker per terminal:
 
 - 1 worker on low-core machines.
@@ -85,7 +93,7 @@ Worker messages must stay structured-clone safe. Renderer settings, theme values
 Terminal diagnostics have two modes:
 
 - Formal mode is the default. Slow-handle warnings and errors still log, but terminal data summaries, IPC coalescing summaries, and threaded worker perf samples are throttled so many active terminals do not spend frame time writing debug logs.
-- Debug mode is enabled with `AIOPSTERM_TERMINAL_DEBUG_LOGS=1`. It restores high-frequency terminal data summaries and threaded `core-perf` / `render-perf` logs for local diagnosis.
+- Debug mode is enabled with `AIOPSTERM_TERMINAL_DEBUG_LOGS=1`. It restores high-frequency terminal data summaries, threaded `core-perf` / `render-perf` logs, and small-pane geometry/layout diagnostics for local diagnosis.
 
 Renderer builds receive `AIOPSTERM_TERMINAL_DEBUG_LOGS` through the preload runtime env bridge. Use the debug switch only while investigating terminal behavior; performance validation should use formal mode unless the test is specifically about logging.
 

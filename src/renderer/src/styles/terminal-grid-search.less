@@ -64,7 +64,9 @@
 
 .terminal-pane {
   min-height: 0;
+  min-width: 0;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: 28px minmax(0, 1fr);
   border: 1px solid var(--border);
   background: #090b10;
