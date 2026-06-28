@@ -611,7 +611,16 @@ export class ThreadedTerminalHost {
   }
 
   open(element: HTMLElement) {
-    if (this.disposed || this.host) return
+    if (this.disposed) return
+    if (this.host) {
+      if (this.host !== element) {
+        this.detachSurface()
+      } else {
+        this.ensureSurfaceAttached()
+        this.bindDomEvents()
+        return
+      }
+    }
     this.host = element
     element.classList.add('threaded-terminal-host')
     element.tabIndex = element.tabIndex >= 0 ? element.tabIndex : 0
@@ -715,6 +724,17 @@ export class ThreadedTerminalHost {
       throw error
     }
     this.bindDomEvents()
+  }
+
+  ensureSurfaceAttached(options: { forceGeometry?: boolean } = {}) {
+    if (this.disposed || !this.host) return false
+    const fit = this.fit({ allowUnstable: Boolean(options.forceGeometry), forceMetrics: options.forceGeometry })
+    if (!fit) {
+      this.scheduleFit()
+      return false
+    }
+    this.ensureCoreAndSurface()
+    return this.offscreenTransferred
   }
 
   startCoreOnly() {
@@ -956,6 +976,12 @@ export class ThreadedTerminalHost {
     this.priority = priority
     if (this.coreCreated) postCore(this.coreHandle, { type: 'visibility', terminalId: this.terminalId, visible, priority })
     postRender({ type: 'visibility', terminalId: this.terminalId, visible })
+    if (visible && this.offscreenTransferred && this.lastSnapshot) {
+      postRender({
+        type: 'screen',
+        snapshot: this.fullSnapshotFromCache('visibility')
+      })
+    }
   }
 
   setPriority(priority: ThreadedTerminalPriority) {

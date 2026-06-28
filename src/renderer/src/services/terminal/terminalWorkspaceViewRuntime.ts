@@ -43,6 +43,7 @@ type XtermLike = {
   write: (data: string, callback?: () => void) => void
   scrollToBottom: () => void
   refresh: (start: number, end: number) => void
+  ensureSurfaceAttached?: (options?: { forceGeometry?: boolean }) => boolean
   getSelection: () => string
   getSelectionPosition: () => { start: { y: number }; end: { y: number } } | null | undefined
   hasSelection: () => boolean
@@ -209,6 +210,7 @@ export const createTerminalWorkspaceViewRuntime = ({
   const paneFontSizes = reactive<Record<string, number>>({})
   const terminalElements = new Map<string, HTMLElement>()
   const terminalViews = new Map<string, TerminalView>()
+  const terminalViewPanels = new Map<string, TerminalPanel>()
 
   const requestOutputFlush = (callback: () => void) =>
     typeof window !== 'undefined' && typeof window.setTimeout === 'function' ? window.setTimeout(callback, 0) : setTimeout(callback, 0)
@@ -436,6 +438,18 @@ export const createTerminalWorkspaceViewRuntime = ({
     view.clearPendingOutput = () => clearQueuedTerminalOutput(view)
     bindTerminalViewEvents(panel, view)
     return view
+  }
+
+  const disposeTerminalView = (panelId: string, reason: string) => {
+    const view = terminalViews.get(panelId)
+    if (!view) return
+    clearQueuedTerminalOutput(view, { dispose: true })
+    flushTerminalOutputPerf(panelId, view, reason)
+    view.resizeObserver?.disconnect()
+    view.terminal.dispose()
+    terminalViews.delete(panelId)
+    terminalViewPanels.delete(panelId)
+    delete paneFontSizes[panelId]
   }
 
   const terminalOutputQueueFor = (view: TerminalView): TerminalOutputWriteQueue => {
@@ -759,6 +773,7 @@ export const createTerminalWorkspaceViewRuntime = ({
         if (!isTerminalPanelRenderable(panelId)) return
         if (options.forceGeometry) resetTerminalHostGeometry(element)
         view.fit.fit()
+        view.terminal.ensureSurfaceAttached?.({ forceGeometry: options.forceGeometry })
         notifyBackendResize(panelId, view)
         if (options.forceGeometry) view.terminal.refresh(0, Math.max(0, view.terminal.rows - 1))
         if (options.scrollToBottom) view.terminal.scrollToBottom()
@@ -838,7 +853,8 @@ export const createTerminalWorkspaceViewRuntime = ({
     if (!isTerminalPanelRenderable(panel.id)) return false
     if (isThreadedTerminalHost(view.terminal)) {
       view.terminal.setVisibility(true, terminalPriorityForPanel(panel.id))
-      if (options.refit) scheduleTerminalFit(panel.id, { scrollToBottom: true })
+      view.terminal.ensureSurfaceAttached({ forceGeometry: options.refit })
+      if (options.refit) scheduleTerminalFit(panel.id, { scrollToBottom: true, frames: 3, forceGeometry: true })
       else {
         updateSelectionButtonPosition(panel.id)
         updateSuggestionsPosition(panel.id)
@@ -917,14 +933,20 @@ export const createTerminalWorkspaceViewRuntime = ({
     if (panel.kind === 'knowledge') return
     const existing = terminalViews.get(panel.id)
     if (existing) {
-      if (isThreadedTerminalHost(existing.terminal)) {
-        existing.terminal.open(element)
-        existing.terminal.setVisibility(isTerminalPanelRenderable(panel.id), terminalPriorityForPanel(panel.id))
-        applyTerminalSettingsToView(panel.id, existing, workspace.terminalSettings, { refit: false })
-        scheduleTerminalFit(panel.id, { scrollToBottom: true, frames: 2 })
+      if (terminalViewPanels.get(panel.id) !== panel) {
+        disposeTerminalView(panel.id, 'panel-replaced')
+      } else {
+        if (isThreadedTerminalHost(existing.terminal)) {
+          existing.terminal.setVisibility(isTerminalPanelRenderable(panel.id), terminalPriorityForPanel(panel.id))
+          existing.terminal.open(element)
+          existing.terminal.setVisibility(isTerminalPanelRenderable(panel.id), terminalPriorityForPanel(panel.id))
+          existing.terminal.ensureSurfaceAttached({ forceGeometry: true })
+          applyTerminalSettingsToView(panel.id, existing, workspace.terminalSettings, { refit: false })
+          scheduleTerminalFit(panel.id, { scrollToBottom: true, frames: 2 })
+        }
+        if (panel.id === workspace.activePanelId) scheduleTerminalFocus(panel.id)
+        return
       }
-      if (panel.id === workspace.activePanelId) scheduleTerminalFocus(panel.id)
-      return
     }
     const theme = terminalTheme()
     const useThreaded = canUseThreadedTerminal()
@@ -969,6 +991,7 @@ export const createTerminalWorkspaceViewRuntime = ({
       view.terminal.open(element)
     }
     terminalViews.set(panel.id, view)
+    terminalViewPanels.set(panel.id, panel)
     view.clearPendingOutput = () => clearQueuedTerminalOutput(view)
     applyTerminalSettingsToView(panel.id, view, workspace.terminalSettings, { refit: false })
     if (typeof ResizeObserver !== 'undefined') {
@@ -1016,6 +1039,7 @@ export const createTerminalWorkspaceViewRuntime = ({
         view.resizeObserver?.disconnect()
         view.terminal.dispose()
         terminalViews.delete(panelId)
+        terminalViewPanels.delete(panelId)
       }
       return
     }
@@ -1029,12 +1053,16 @@ export const createTerminalWorkspaceViewRuntime = ({
   const syncPanelViews = () => {
     nextTick(() => {
       workspace.panels.filter((panel) => panel.kind !== 'knowledge').forEach((panel) => {
+        if (terminalViews.has(panel.id) && terminalViewPanels.get(panel.id) !== panel) {
+          disposeTerminalView(panel.id, 'panel-replaced')
+        }
         const element = terminalElements.get(panel.id)
         if (element && visibleTerminalPanelIds().has(panel.id)) createTerminalView(panel, element)
         else if (canUseThreadedTerminal() && !terminalViews.has(panel.id)) {
           const view = createThreadedViewForPanel(panel)
           if (isThreadedTerminalHost(view.terminal)) view.terminal.startCoreOnly()
           terminalViews.set(panel.id, view)
+          terminalViewPanels.set(panel.id, panel)
           writeRuntimeLog('debug', 'renderer.terminal-view.created', {
             panelId: panel.id,
             hasSession: Boolean(panel.sessionId),
@@ -1045,14 +1073,8 @@ export const createTerminalWorkspaceViewRuntime = ({
       })
       for (const panelId of terminalViews.keys()) {
         if (!workspace.panels.some((panel) => panel.id === panelId)) {
-          const view = terminalViews.get(panelId)
-          if (view) clearQueuedTerminalOutput(view, { dispose: true })
-          flushTerminalOutputPerf(panelId, view, 'panel-removed')
-          view?.terminal.dispose()
-          view?.resizeObserver?.disconnect()
-          terminalViews.delete(panelId)
+          disposeTerminalView(panelId, 'panel-removed')
           terminalElements.delete(panelId)
-          delete paneFontSizes[panelId]
         }
       }
       syncThreadedTerminalPriorities()
@@ -1104,6 +1126,7 @@ export const createTerminalWorkspaceViewRuntime = ({
       view.terminal.dispose()
     })
     terminalViews.clear()
+    terminalViewPanels.clear()
     terminalElements.clear()
   }
 

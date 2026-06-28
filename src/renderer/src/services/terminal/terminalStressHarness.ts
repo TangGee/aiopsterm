@@ -89,6 +89,28 @@ type TerminalStressSwitchSummary = {
   paintLatency: TerminalStressMetricSummary
 }
 
+type TerminalStressTeardownSummary = {
+  enabled: boolean
+  closedPanels: number
+  baseline: TerminalStressMemorySample
+  beforeClose: TerminalStressMemorySample
+  afterClose: TerminalStressMemorySample
+  gcSupported: boolean
+  gcRuns: number
+  hostCountDelta: number
+  canvasCountDelta: number
+  jsHeapUsedDeltaBytes?: number
+  workingSetDeltaKb?: number
+  threaded: ReturnType<typeof getThreadedTerminalDebugStats>
+  remainingStressHosts: Array<{
+    terminalId: string
+    sessionId?: string
+    visible: boolean
+    surfaceAttached: boolean
+  }>
+  errors: string[]
+}
+
 type TerminalStressRegressionProbe = {
   ok: boolean
   details?: Record<string, unknown>
@@ -130,11 +152,18 @@ export type TerminalStressHarnessResult = {
   memory: TerminalStressMemorySummary
   queues: TerminalStressQueueSummary
   switches: TerminalStressSwitchSummary
+  teardown: TerminalStressTeardownSummary
   canvasCount: {
     before: number
     after: number
   }
   errors: string[]
+}
+
+type PaintableThreadedStressCandidate = {
+  panel: TerminalPanel
+  terminal: ThreadedTerminalHost
+  element: HTMLElement
 }
 
 export type TerminalStressHarnessInput = {
@@ -224,6 +253,15 @@ const metricSummary = (values: number[]): TerminalStressMetricSummary => {
 
 const terminalTextContains = (screenText: string, expected: string) =>
   screenText.includes(expected) || screenText.replace(/\r?\n/g, '').includes(expected)
+
+const nextStressAnimationFrame = () =>
+  new Promise<void>((resolve) => {
+    if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+      window.requestAnimationFrame(() => resolve())
+      return
+    }
+    window.setTimeout(resolve, 16)
+  })
 
 const findLastStressSample = (samples: TerminalStressMemorySample[], phase: string) => {
   for (let index = samples.length - 1; index >= 0; index -= 1) {
@@ -323,6 +361,9 @@ const summarizeMemory = (samples: TerminalStressMemorySample[]): TerminalStressM
   }
 }
 
+const memoryDelta = (before?: number, after?: number) =>
+  typeof before === 'number' && typeof after === 'number' ? after - before : undefined
+
 const ensureStressPanels = async (input: TerminalStressHarnessInput, foreground: number, background: number) => {
   const { workspace } = input
   const targetForeground = Math.max(1, foreground)
@@ -347,6 +388,75 @@ const ensureStressPanels = async (input: TerminalStressHarnessInput, foreground:
   await nextTick()
   input.syncPanelViews()
   await nextTick()
+}
+
+const runTerminalStressTeardown = async (
+  input: TerminalStressHarnessInput,
+  baseline: TerminalStressMemorySample,
+  errors: string[]
+): Promise<TerminalStressTeardownSummary> => {
+  const { workspace } = input
+  input.flushAllTerminalIngressBatches()
+  input.flushAllTerminalHistoryBatches()
+  const beforeClose = await sampleMemory('teardown-before-close')
+  const panelsBeforeClose = workspace.panels.filter((panel) => panel.kind !== 'knowledge')
+  const teardownErrors: string[] = []
+  try {
+    workspace.closePanels('all')
+    await nextTick()
+    input.syncPanelViews()
+    await nextTick()
+    await nextStressAnimationFrame()
+    input.syncPanelViews()
+    await nextTick()
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    teardownErrors.push(message)
+    errors.push(`terminal stress teardown failed: ${message}`)
+  }
+  const settleDeadline = nowMs() + 5000
+  let threaded = getThreadedTerminalDebugStats()
+  while (nowMs() < settleDeadline) {
+    input.syncPanelViews()
+    await nextTick()
+    await nextStressAnimationFrame()
+    threaded = getThreadedTerminalDebugStats()
+    const remainingStressHosts = threaded.hosts.filter((host) => host.sessionId?.startsWith('stress-'))
+    const canvasCount = document.querySelectorAll('canvas').length
+    if (!remainingStressHosts.length && threaded.hostCount <= baseline.threadedHostCount + 2 && canvasCount <= baseline.canvasCount + 2) break
+  }
+  const gcResult = await runStressGarbageCollection(2)
+  const afterClose = await sampleMemory('teardown-post-gc', gcResult.supported ? gcResult.runs : undefined)
+  threaded = getThreadedTerminalDebugStats()
+  const remainingStressHosts = threaded.hosts
+    .filter((host) => host.sessionId?.startsWith('stress-'))
+    .map((host) => ({
+      terminalId: host.terminalId,
+      sessionId: host.sessionId,
+      visible: host.visible,
+      surfaceAttached: host.surfaceAttached
+    }))
+  if (remainingStressHosts.length) {
+    const message = `Stress threaded hosts remained after teardown: ${JSON.stringify(remainingStressHosts.slice(0, 10))}`
+    teardownErrors.push(message)
+    errors.push(message)
+  }
+  return {
+    enabled: true,
+    closedPanels: panelsBeforeClose.length,
+    baseline,
+    beforeClose,
+    afterClose,
+    gcSupported: gcResult.supported,
+    gcRuns: gcResult.supported ? gcResult.runs : 0,
+    hostCountDelta: afterClose.threadedHostCount - baseline.threadedHostCount,
+    canvasCountDelta: afterClose.canvasCount - baseline.canvasCount,
+    jsHeapUsedDeltaBytes: memoryDelta(baseline.jsHeapUsedBytes, afterClose.jsHeapUsedBytes),
+    workingSetDeltaKb: memoryDelta(baseline.workingSetSizeKb, afterClose.workingSetSizeKb),
+    threaded,
+    remainingStressHosts,
+    errors: teardownErrors
+  }
 }
 
 const measurePaintLatency = async (
@@ -476,19 +586,57 @@ const runTerminalRegressionProbes = async (
     errors: string[]
   }
 ): Promise<TerminalStressRegressionSummary> => {
-  const threadedCandidateFrom = (panels: TerminalPanel[]) => {
+  const isPaintableThreadedCandidate = (candidate: { terminal: ThreadedTerminalHost; element: HTMLElement | null }) => {
+    const info = candidate.terminal.debugInfo()
+    return Boolean(candidate.element?.isConnected && info.visible && info.surfaceAttached)
+  }
+  const threadedCandidateFrom = (panels: TerminalPanel[], options: { requirePaintable?: boolean } = {}): PaintableThreadedStressCandidate | null => {
     for (const panel of panels) {
       const view = input.terminalViews.get(panel.id)
       if (view && isThreadedTerminalHost(view.terminal)) {
-        return { panel, terminal: view.terminal, element: input.getTerminalElement(panel.id) }
+        const element = input.getTerminalElement(panel.id)
+        const candidate = { panel, terminal: view.terminal, element }
+        if (options.requirePaintable && !isPaintableThreadedCandidate(candidate)) continue
+        if (!element) continue
+        return { panel, terminal: view.terminal, element }
       }
     }
     return null
   }
   const visibleThreadedCandidate = () =>
-    threadedCandidateFrom(context.currentForegroundPanels()) ||
-    threadedCandidateFrom(input.visibleTerminalPanels.value.filter((panel) => panel.kind !== 'knowledge')) ||
-    threadedCandidateFrom(context.terminalPanels)
+    threadedCandidateFrom(context.currentForegroundPanels(), { requirePaintable: true }) ||
+    threadedCandidateFrom(input.visibleTerminalPanels.value.filter((panel) => panel.kind !== 'knowledge'), { requirePaintable: true })
+  const waitForVisibleThreadedCandidate = async (timeoutMs = 5000, panels?: TerminalPanel[]) => {
+    const deadline = nowMs() + timeoutMs
+    let lastDebug: unknown[] = []
+    while (nowMs() < deadline) {
+      const candidate = threadedCandidateFrom(panels || context.currentForegroundPanels(), { requirePaintable: true }) || visibleThreadedCandidate()
+      if (candidate) return candidate
+      lastDebug = getThreadedTerminalDebugStats().hosts.slice(0, 8)
+      await nextTick()
+      await nextStressAnimationFrame()
+    }
+    throw new Error(`No paintable threaded terminal candidate is available. hosts=${JSON.stringify(lastDebug)}`)
+  }
+  let probeCandidate: PaintableThreadedStressCandidate | null = null
+  const dedicatedProbeCandidate = async () => {
+    if (probeCandidate && isPaintableThreadedCandidate(probeCandidate)) return probeCandidate
+    const panel = input.workspace.createPanel()
+    panel.title = 'Stress Probe'
+    panel.sessionId = panel.sessionId || `stress-probe-${panel.id}`
+    panel.status = 'running'
+    await nextTick()
+    input.syncPanelViews()
+    await nextTick()
+    input.scheduleVisibleTerminalFit({ scrollToBottom: true, frames: 2, forceGeometry: true })
+    probeCandidate = await waitForVisibleThreadedCandidate(5000, [panel])
+    return probeCandidate
+  }
+  const clearProbeCandidate = async (candidate: PaintableThreadedStressCandidate) => {
+    const beforeSeq = candidate.terminal.debugInfo().lastFrameSeq
+    candidate.terminal.clear()
+    await candidate.terminal.waitForNextRenderFrame(beforeSeq, 3000).catch(() => undefined)
+  }
   const waitForScreenText = async (terminal: ThreadedTerminalHost, text: string, timeoutMs = 3000) => {
     const deadline = nowMs() + timeoutMs
     let lastText = ''
@@ -515,8 +663,8 @@ const runTerminalRegressionProbes = async (
   }
 
   const contentFreshness = await runRegressionProbe(async () => {
-    const candidate = visibleThreadedCandidate()
-    if (!candidate) throw new Error('No threaded terminal candidate is available.')
+    const candidate = await dedicatedProbeCandidate()
+    await clearProbeCandidate(candidate)
     const marker = `__AIOPSTERM_STRESS_FRESH_${Date.now()}__`
     const frame = await writeQueuedDataAndWait(candidate.panel, `${marker}\n`)
     await waitForScreenText(candidate.terminal, marker)
@@ -533,10 +681,8 @@ const runTerminalRegressionProbes = async (
     const beforePanelId = input.workspace.activePanelId
     await context.switchVisibleBackgroundPanel({ force: true })
     await nextTick()
-    const candidate =
-      (input.workspace.activePanelId && threadedCandidateFrom(input.workspace.panels.filter((panel) => panel.id === input.workspace.activePanelId))) ||
-      visibleThreadedCandidate()
-    if (!candidate) throw new Error('No threaded terminal candidate is available after foreground/background switch.')
+    const activePanels = input.workspace.activePanelId ? input.workspace.panels.filter((panel) => panel.id === input.workspace.activePanelId) : []
+    const candidate = await waitForVisibleThreadedCandidate(5000, activePanels)
     const marker = `__AIOPSTERM_STRESS_SWITCH_${Date.now()}__`
     const frame = await writeQueuedDataAndWait(candidate.panel, `${marker}\n`)
     await waitForScreenText(candidate.terminal, marker)
@@ -550,8 +696,8 @@ const runTerminalRegressionProbes = async (
     }
   })
   const ansiStyleDirtyRepaint = await runRegressionProbe(async () => {
-    const candidate = visibleThreadedCandidate()
-    if (!candidate) throw new Error('No threaded terminal candidate is available.')
+    const candidate = await dedicatedProbeCandidate()
+    await clearProbeCandidate(candidate)
     const marker = `W${Date.now().toString(36).slice(-5)}`
     await candidate.terminal.writeAndMeasurePaint(`\r\n\x1b[31m${marker}\x1b[0m`, 3000, { settlePendingFrame: true })
     await waitForScreenText(candidate.terminal, marker)
@@ -574,8 +720,8 @@ const runTerminalRegressionProbes = async (
     }
   })
   const scrollbackAndScrollbar = await runRegressionProbe(async () => {
-    const candidate = visibleThreadedCandidate()
-    if (!candidate) throw new Error('No threaded terminal candidate is available.')
+    const candidate = await dedicatedProbeCandidate()
+    await clearProbeCandidate(candidate)
     const lastMarker = `__AIOPSTERM_SCROLL_LAST_${Date.now()}__`
     const lineCount = Math.max(candidate.terminal.rows + 12, 32)
     const lines = Array.from({ length: lineCount }, (_item, index) => `scroll-probe-${index}-${'x'.repeat(24)}`)
@@ -589,10 +735,16 @@ const runTerminalRegressionProbes = async (
     if (before.baseY <= 0 || ariaMax <= 0) throw new Error(`Scrollback did not become available. baseY=${before.baseY} ariaMax=${ariaMax}`)
     if (!thumb || thumb.style.opacity === '0') throw new Error('Threaded terminal scrollbar thumb is not visible after scrollback is available.')
     const beforeSeq = candidate.terminal.debugInfo().lastFrameSeq
-    candidate.terminal.scrollToLine(Math.max(0, before.viewportY - Math.min(3, before.baseY)))
-    const frame = await candidate.terminal.waitForNextRenderFrame(beforeSeq, 3000)
-    const after = candidate.terminal.debugSnapshot()
+    const framePromise = candidate.terminal.waitForNextRenderFrame(beforeSeq, 3000)
+    candidate.terminal.scrollLines(-Math.min(3, before.baseY))
+    const scrollDeadline = nowMs() + 3000
+    let after = candidate.terminal.debugSnapshot()
+    while (after.viewportY >= before.viewportY && nowMs() < scrollDeadline) {
+      await nextStressAnimationFrame()
+      after = candidate.terminal.debugSnapshot()
+    }
     if (after.viewportY >= before.viewportY) throw new Error(`Scrollback viewport did not move upward. before=${before.viewportY} after=${after.viewportY}`)
+    const frame = await framePromise
     candidate.terminal.scrollToBottom()
     await candidate.terminal.waitForNextRenderFrame(frame.seq, 3000).catch(() => undefined)
     await waitForScreenText(candidate.terminal, lastMarker, 3000)
@@ -607,8 +759,8 @@ const runTerminalRegressionProbes = async (
     }
   })
   const selectionSoftWrap = await runRegressionProbe(async () => {
-    const candidate = visibleThreadedCandidate()
-    if (!candidate || !candidate.element) throw new Error('No visible threaded terminal candidate is available.')
+    const candidate = await dedicatedProbeCandidate()
+    await clearProbeCandidate(candidate)
     const segmentCount = Math.max(6, Math.ceil((candidate.terminal.cols + 20) / 8))
     const path = `./stress/${Array.from({ length: segmentCount }, (_item, index) => `segment${index}`).join('/')}/review_api.py`
     await candidate.terminal.writeAndMeasurePaint(`\r\n${path}\n`, 5000, { settlePendingFrame: true })
@@ -621,26 +773,25 @@ const runTerminalRegressionProbes = async (
     if (endRow === startRow) throw new Error(`Selection probe did not soft-wrap. cols=${candidate.terminal.cols} pathLength=${path.length}`)
     const canvas = candidate.element.querySelector<HTMLCanvasElement>('.threaded-terminal-canvas')
     const rect = canvas?.getBoundingClientRect() || candidate.element.getBoundingClientRect()
-    const fontSize = Number(candidate.terminal.options.fontSize || 12)
-    const lineHeight = Number(candidate.terminal.options.lineHeight || 1)
-    const cellWidth = Math.max(4, Math.ceil(fontSize * 0.62))
-    const cellHeight = Math.max(10, Math.ceil(fontSize * lineHeight))
+    const cellWidth = Math.max(1, rect.width / Math.max(1, candidate.terminal.cols))
+    const cellHeight = Math.max(1, rect.height / Math.max(1, candidate.terminal.rows))
+    const endClientX = Math.min(rect.right - 1, rect.left + candidate.terminal.cols * cellWidth - 1)
     candidate.element.dispatchEvent(new MouseEvent('mousedown', {
       bubbles: true,
       button: 0,
-      clientX: rect.left,
+      clientX: rect.left + 1,
       clientY: rect.top + startRow * cellHeight + 1
     }))
     candidate.element.dispatchEvent(new MouseEvent('mousemove', {
       bubbles: true,
       button: 0,
-      clientX: rect.left + candidate.terminal.cols * cellWidth,
+      clientX: endClientX,
       clientY: rect.top + endRow * cellHeight + 1
     }))
     window.dispatchEvent(new MouseEvent('mouseup', {
       bubbles: true,
       button: 0,
-      clientX: rect.left + candidate.terminal.cols * cellWidth,
+      clientX: endClientX,
       clientY: rect.top + endRow * cellHeight + 1
     }))
     const selected = candidate.terminal.getSelection()
@@ -655,8 +806,7 @@ const runTerminalRegressionProbes = async (
     }
   })
   const keyboardInputFocus = await runRegressionProbe(async () => {
-    const candidate = visibleThreadedCandidate()
-    if (!candidate || !candidate.element) throw new Error('No visible threaded terminal candidate is available.')
+    const candidate = await waitForVisibleThreadedCandidate()
     const inputElement = candidate.element.querySelector<HTMLTextAreaElement>('.threaded-terminal-input')
     if (!inputElement) throw new Error('Threaded terminal hidden input is missing.')
     candidate.terminal.clearSelection()
@@ -717,6 +867,7 @@ const runTerminalStressHarness = async (
   const { name: profileName, profile } = terminalStressProfileFor(stressOptions.profile)
   const { workspace, visibleTerminalPanels, terminalViews } = input
   const errors: string[] = []
+  const teardownBaseline = await sampleMemory('teardown-baseline')
   await ensureStressPanels(input, foreground, background)
   await new Promise((resolve) => window.setTimeout(resolve, 500))
   const terminalPanels = workspace.panels.filter((panel) => panel.kind !== 'knowledge')
@@ -787,6 +938,30 @@ const runTerminalStressHarness = async (
       input.queueTerminalIngressData(panel.sessionId || panel.id, data, 0)
     }
   }
+  const waitForPaintableThreadedPanel = async (panelId: string, timeoutMs = 5000) => {
+    const deadline = nowMs() + timeoutMs
+    let lastDebug: ReturnType<ThreadedTerminalHost['debugInfo']> | null = null
+    while (nowMs() < deadline) {
+      input.syncPanelViews()
+      await nextTick()
+      await nextStressAnimationFrame()
+      input.scheduleVisibleTerminalFit({ scrollToBottom: true, frames: 1, forceGeometry: true })
+      await nextStressAnimationFrame()
+      const view = terminalViews.get(panelId)
+      if (view && isThreadedTerminalHost(view.terminal)) {
+        lastDebug = view.terminal.debugInfo()
+        const element = input.getTerminalElement(panelId)
+        if (element?.isConnected) {
+          const panel = workspace.panels.find((item) => item.id === panelId)
+          if (panel && panel.kind !== 'knowledge') input.syncTerminalView(panel, { refit: true })
+          view.terminal.ensureSurfaceAttached({ forceGeometry: true })
+          lastDebug = view.terminal.debugInfo()
+        }
+        if (element?.isConnected && lastDebug.visible && lastDebug.surfaceAttached) return view.terminal
+      }
+    }
+    throw new Error(`Timed out waiting for paintable threaded terminal ${panelId}. last=${JSON.stringify(lastDebug)}`)
+  }
   const foregroundTimer = window.setInterval(() => {
     currentForegroundPanels().forEach((panel, index) =>
       writePanel(panel, 'fg', index, {
@@ -834,12 +1009,13 @@ const runTerminalStressHarness = async (
       await nextTick()
       input.syncPanelViews()
       await nextTick()
+      input.syncTerminalView(incoming, { refit: true })
       input.scheduleVisibleTerminalFit({ scrollToBottom: true, frames: 2, forceGeometry: true })
       switchCount += 1
-      const view = terminalViews.get(incoming.id)
-      if (view && isThreadedTerminalHost(view.terminal)) {
+      const terminal = await waitForPaintableThreadedPanel(incoming.id)
+      if (terminal) {
         const marker = `s${switchCount}`
-        const result = await view.terminal.writeAndMeasurePaint(`\r${marker}`, 3000)
+        const result = await terminal.writeAndMeasurePaint(`\r${marker}`, 5000)
         switchPaintLatencySamples.push(result.latencyMs)
         input.appendTerminalHistoryBatched(incoming.sessionId || incoming.id, marker)
       }
@@ -917,14 +1093,16 @@ const runTerminalStressHarness = async (
   const gcResult = await runStressGarbageCollection(2)
   memorySamples.push(await sampleMemory('post-gc', gcResult.supported ? gcResult.runs : undefined))
   const realEcho = await measureRealEchoLatency(input, errors)
+  const threaded = getThreadedTerminalDebugStats()
+  const teardown = await runTerminalStressTeardown(input, teardownBaseline, errors)
   const sorted = rafIntervals.slice(5).sort((a, b) => a - b)
   const percentile = (value: number) => sorted[Math.min(sorted.length - 1, Math.max(0, Math.floor(sorted.length * value)))] || 0
   const memory = summarizeMemory(memorySamples)
   const realEchoSummary = metricSummary(realEcho.samples)
   return {
     profile: profileName,
-    foreground: foregroundPanels.length,
-    background: backgroundPanels.length,
+    foreground,
+    background,
     durationMs,
     writtenBytes,
     writes: writeStats,
@@ -934,7 +1112,7 @@ const runTerminalStressHarness = async (
     p99FrameMs: percentile(0.99),
     maxFrameMs: sorted[sorted.length - 1] || 0,
     panels: terminalPanels.length,
-    threaded: getThreadedTerminalDebugStats(),
+    threaded,
     paintLatency: metricSummary(paintLatencySamples),
     paintFrameMs: metricSummary(paintFrameSamples),
     paintRows: metricSummary(paintRowSamples),
@@ -963,6 +1141,7 @@ const runTerminalStressHarness = async (
       failed: switchFailed,
       paintLatency: metricSummary(switchPaintLatencySamples)
     },
+    teardown,
     canvasCount: {
       before: canvasCountBefore,
       after: memorySamples.at(-1)?.canvasCount || 0
