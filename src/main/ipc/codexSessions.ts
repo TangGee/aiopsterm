@@ -10,6 +10,7 @@ import type {
   CodexSessionWriteResult
 } from '@shared/contracts/codexSessions'
 import type { RuntimeLogLevel } from '@shared/contracts/appRuntime'
+import { shouldUseTerminalDebugLogs } from '@shared/runtimeSwitches'
 
 type CodexTerminalBridgeTargetUpdateResult = {
   sessionId?: string
@@ -64,6 +65,11 @@ const logTargetUpdate = (
 }
 
 export const registerCodexSessionsIpc = (ipcMain: IpcMain, input: RegisterCodexSessionsIpcInput) => {
+  const terminalDebugLogs = shouldUseTerminalDebugLogs()
+  const logCodexDebug = (event: string, details?: Record<string, unknown>) => {
+    if (terminalDebugLogs) input.logRuntimeEvent('debug', event, details)
+  }
+
   ipcMain.handle('codex:create', async (event, options: CodexSessionCreateOptions = {}) => {
     const owner = input.getOwnerWindow(event)
     if (!owner) {
@@ -139,32 +145,44 @@ export const registerCodexSessionsIpc = (ipcMain: IpcMain, input: RegisterCodexS
 
   ipcMain.handle('codex:set-pending-context', async (_event, id: string, text?: string) => {
     const result = await input.setCodexSessionPendingContext(String(id || ''), text)
-    input.logRuntimeEvent(result.ok ? 'debug' : 'warn', result.ok ? 'codex.pending-context.updated' : 'codex.pending-context.rejected', {
-      id,
-      bytes: result.data?.bytes,
-      cleared: result.data?.cleared,
-      errorCode: result.errorCode,
-      errorMessage: result.errorMessage
-    })
+    if (result.ok) {
+      logCodexDebug('codex.pending-context.updated', {
+        id,
+        bytes: result.data?.bytes,
+        cleared: result.data?.cleared
+      })
+    } else {
+      input.logRuntimeEvent('warn', 'codex.pending-context.rejected', {
+        id,
+        bytes: result.data?.bytes,
+        cleared: result.data?.cleared,
+        errorCode: result.errorCode,
+        errorMessage: result.errorMessage
+      })
+    }
     return result
   })
 
   ipcMain.handle('codex:write', (_event, id: string, data: string) => {
     const bytes = Buffer.byteLength(String(data || ''), 'utf8')
-    input.logRuntimeEvent('debug', 'codex.write.request', { id, bytes })
+    logCodexDebug('codex.write.request', { id, bytes })
     const result = input.writeCodexSession(id, data)
-    input.logRuntimeEvent(result.ok ? 'debug' : 'warn', result.ok ? 'codex.write.accepted' : 'codex.write.rejected', {
-      id,
-      bytes,
-      errorCode: result.errorCode,
-      errorMessage: result.errorMessage
-    })
+    if (result.ok) logCodexDebug('codex.write.accepted', { id, bytes })
+    else {
+      input.logRuntimeEvent('warn', 'codex.write.rejected', {
+        id,
+        bytes,
+        errorCode: result.errorCode,
+        errorMessage: result.errorMessage
+      })
+    }
     return result
   })
 
   ipcMain.handle('codex:resize', (_event, id: string, cols: number, rows: number) => {
     const resized = input.resizeCodexSession(id, cols, rows)
-    input.logRuntimeEvent(resized ? 'debug' : 'warn', resized ? 'codex.resize' : 'codex.resize.missing-session', { id, cols, rows })
+    if (resized) logCodexDebug('codex.resize', { id, cols, rows })
+    else input.logRuntimeEvent('warn', 'codex.resize.missing-session', { id, cols, rows })
   })
 
   ipcMain.handle('codex:kill', (_event, id: string) => {

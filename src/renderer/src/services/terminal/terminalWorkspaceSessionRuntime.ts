@@ -2,6 +2,7 @@ import { terminalClient } from '@/services/terminal/terminalClient'
 import { writeRendererRuntimeLog } from '@/services/app/runtimeLogClient'
 import type { TerminalPanel } from '@/services/terminal/terminalPanelRuntime'
 import type { useWorkspaceStore } from '@/stores/workspace'
+import { shouldUseTerminalDebugLogs } from '@shared/runtimeSwitches'
 import type {
   TerminalCreateOptions,
   TerminalKillResult,
@@ -35,6 +36,10 @@ export const createTerminalWorkspaceSessionRuntime = ({
   client = terminalClient,
   writeRuntimeLog = writeRendererRuntimeLog
 }: TerminalWorkspaceSessionRuntimeOptions) => {
+  const terminalDebugLogs = shouldUseTerminalDebugLogs()
+  const writeTerminalDebugLog = (event: string, details?: Record<string, unknown>) => {
+    if (terminalDebugLogs) writeRuntimeLog('debug', event, details)
+  }
   const panelById = (panelId: string) => workspace.panels.find((panel) => panel.id === panelId || panel.sessionId === panelId)
 
   const writeXtermInput = async (panelId: string, data: string) => {
@@ -60,7 +65,7 @@ export const createTerminalWorkspaceSessionRuntime = ({
       return
     }
     try {
-      writeRuntimeLog('debug', 'renderer.terminal-input.write-request', {
+      writeTerminalDebugLog('renderer.terminal-input.write-request', {
         panelId,
         sessionId,
         bytes
@@ -78,7 +83,7 @@ export const createTerminalWorkspaceSessionRuntime = ({
         })
         return
       }
-      writeRuntimeLog('debug', 'renderer.terminal-input.write-accepted', {
+      writeTerminalDebugLog('renderer.terminal-input.write-accepted', {
         panelId,
         sessionId,
         bytes

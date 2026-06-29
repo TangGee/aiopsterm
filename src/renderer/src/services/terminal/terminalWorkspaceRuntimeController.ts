@@ -141,6 +141,7 @@ export const useTerminalWorkspaceContainerRuntime = () => {
   const terminalDataSummaryByteThreshold = terminalDebugLogs ? terminalDataSummaryDebugByteThreshold : terminalDataSummaryFormalByteThreshold
 
   const logTerminalDataSummary = (sessionId: string, summary: TerminalDataPerfSummary, reason: string) => {
+    if (!terminalDebugLogs) return
     writeRendererRuntimeLog('debug', 'renderer.terminal-data.summary', {
       sessionId,
       reason,

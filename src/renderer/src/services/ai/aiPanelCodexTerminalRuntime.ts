@@ -178,6 +178,10 @@ export const createAiPanelCodexTerminalRuntime = <TConversation extends AiPanelC
 ) => {
   const client = options.client || codexSessionClient
   const log = options.log || writeRendererRuntimeLog
+  const terminalDebugLogs = shouldUseTerminalDebugLogs()
+  const logDebug = (event: string, fields?: Record<string, unknown>) => {
+    if (terminalDebugLogs) log('debug', event, fields)
+  }
   const copyText = options.copyText || copyTextToClipboard
   const requestFrame = options.requestFrame || defaultRequestFrame
   const resizeObserverFactory = options.resizeObserverFactory || defaultResizeObserverFactory
@@ -257,7 +261,7 @@ export const createAiPanelCodexTerminalRuntime = <TConversation extends AiPanelC
     pendingConversationBySessionId.set(sessionId, conversation)
     conversation.sessionId = sessionId
     syncThreadedConversationSurface(conversation, { forceGeometry: true })
-    log('debug', 'renderer.codex-session.pending-bound', { localId: conversation.id, sessionId })
+    logDebug('renderer.codex-session.pending-bound', { localId: conversation.id, sessionId })
     return conversation
   }
 
@@ -280,8 +284,7 @@ export const createAiPanelCodexTerminalRuntime = <TConversation extends AiPanelC
   }
 
   const logCodexOutputSummary = (conversation: TConversation, summary: CodexTerminalOutputPerfSummary, reason: string) => {
-    if (!shouldUseTerminalDebugLogs()) return
-    log('debug', 'renderer.codex-output.summary', {
+    logDebug('renderer.codex-output.summary', {
       localId: conversation.id,
       sessionId: conversation.sessionId,
       reason,
@@ -543,7 +546,7 @@ export const createAiPanelCodexTerminalRuntime = <TConversation extends AiPanelC
       conversation.lastFitCols = conversation.terminal.cols
       conversation.lastFitRows = conversation.terminal.rows
       void resizeCodexSession(conversation.sessionId, conversation.terminal.cols, conversation.terminal.rows)
-      log('debug', 'renderer.codex.fit-resize', {
+      logDebug('renderer.codex.fit-resize', {
         sessionId: conversation.sessionId,
         cols: conversation.terminal.cols,
         rows: conversation.terminal.rows
@@ -559,15 +562,22 @@ export const createAiPanelCodexTerminalRuntime = <TConversation extends AiPanelC
     const selectedText = options.activeConversation()?.terminal?.getSelection() || ''
     if (!selectedText) {
       options.notify(options.labels.copyEmpty())
-      log('debug', 'renderer.codex.copy.empty', { source })
+      logDebug('renderer.codex.copy.empty', { source })
       return false
     }
     const copied = await copyText(selectedText)
     options.notify(copied ? options.labels.copySuccess() : options.labels.copyFailure())
-    log(copied ? 'debug' : 'warn', copied ? 'renderer.codex.copy' : 'renderer.codex.copy.failed', {
-      source,
-      bytes: new TextEncoder().encode(selectedText).length
-    })
+    if (copied) {
+      logDebug('renderer.codex.copy', {
+        source,
+        bytes: new TextEncoder().encode(selectedText).length
+      })
+    } else {
+      log('warn', 'renderer.codex.copy.failed', {
+        source,
+        bytes: new TextEncoder().encode(selectedText).length
+      })
+    }
     return copied
   }
 
@@ -628,13 +638,15 @@ export const createAiPanelCodexTerminalRuntime = <TConversation extends AiPanelC
     if (!syncPlan) return
     try {
       const result = await setCodexSessionTarget(syncPlan.target)
-      log(result?.data?.registered ? 'debug' : 'warn', result?.data?.registered ? 'renderer.codex-target.updated' : 'renderer.codex-target.unavailable', {
+      const fields = {
         sessionId: conversation.sessionId,
         targetSessionId: syncPlan.target.sessionId,
         targetKind: syncPlan.target.kind,
         targetLabel: syncPlan.target.label,
         registered: Boolean(result?.data?.registered)
-      })
+      }
+      if (result?.data?.registered) logDebug('renderer.codex-target.updated', fields)
+      else log('warn', 'renderer.codex-target.unavailable', fields)
     } catch (error) {
       markCodexTargetSyncFailed(conversation)
       log('warn', 'renderer.codex-target.update-failed', {
@@ -753,13 +765,7 @@ export const createAiPanelCodexTerminalRuntime = <TConversation extends AiPanelC
         void writeCodexSession(conversation.sessionId, data)
       })
     })
-    terminal.onResize(({ cols, rows }) => {
-      const resizeCodexSession = client.resizeCodexSession()
-      if (!conversation.sessionId || !resizeCodexSession) return
-      conversation.lastFitCols = cols
-      conversation.lastFitRows = rows
-      void resizeCodexSession(conversation.sessionId, cols, rows)
-    })
+    terminal.onResize(() => undefined)
     const observer = resizeObserverFactory(() => fitTerminal({ conversation }))
     if (observer) {
       conversation.resizeObserver?.disconnect()
@@ -767,7 +773,7 @@ export const createAiPanelCodexTerminalRuntime = <TConversation extends AiPanelC
       observer.observe(element)
     }
     fitTerminal({ force: true, conversation })
-    log('debug', 'renderer.codex-terminal.created', { localId: conversation.id, threaded: !useInjected, injected: useInjected })
+    logDebug('renderer.codex-terminal.created', { localId: conversation.id, threaded: !useInjected, injected: useInjected })
     return true
   }
 

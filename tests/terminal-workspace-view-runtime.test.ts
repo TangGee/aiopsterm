@@ -8,6 +8,10 @@ type WorkspaceStore = ReturnType<typeof useWorkspaceStore>
 
 const logs: Array<{ level: string; event: string; fields?: Record<string, unknown> }> = []
 
+const terminalClientMocks = vi.hoisted(() => ({
+  resizeTerminal: vi.fn(async () => undefined)
+}))
+
 const threadedTerminalMocks = vi.hoisted(() => {
   class FakeThreadedTerminal {
     static instances: FakeThreadedTerminal[] = []
@@ -92,6 +96,12 @@ const threadedTerminalMocks = vi.hoisted(() => {
 vi.mock('@/services/app/runtimeLogClient', () => ({
   writeRendererRuntimeLog: (level: string, event: string, fields?: Record<string, unknown>) => {
     logs.push({ level, event, fields })
+  }
+}))
+
+vi.mock('@/services/terminal/terminalClient', () => ({
+  terminalClient: {
+    resizeTerminal: () => terminalClientMocks.resizeTerminal
   }
 }))
 
@@ -234,6 +244,7 @@ afterEach(() => {
   FakeTerminal.instances = []
   threadedTerminalMocks.threadedEnabled = false
   threadedTerminalMocks.FakeThreadedTerminal.instances = []
+  terminalClientMocks.resizeTerminal.mockClear()
   logs.length = 0
   vi.restoreAllMocks()
 })
@@ -437,7 +448,37 @@ describe('terminalWorkspaceViewRuntime', () => {
     expect(terminal.output).toBe('fresh')
   })
 
-  it('flushes terminal output performance summaries when the view is disposed', async () => {
+  it('resizes the backend only from scheduled fit notifications', async () => {
+    const panel = createEmptyTerminalPanel('panel-1', 'Local')
+    panel.sessionId = 'terminal-1'
+    const { runtime } = createRuntime(panel)
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    runtime.setTerminalElement(panel.id, host)
+    await flushFrames(3)
+    const view = runtime.terminalViews.get(panel.id)
+    if (!view) throw new Error('terminal view was not created')
+    const terminal = view.terminal as unknown as FakeTerminal
+    terminalClientMocks.resizeTerminal.mockClear()
+
+    terminal.cols = 100
+    terminal.rows = 30
+    terminal.resizeHandler?.({ cols: 100, rows: 30 })
+    expect(terminalClientMocks.resizeTerminal).not.toHaveBeenCalled()
+
+    runtime.scheduleTerminalFit(panel.id, { frames: 1 })
+    await flushFrames(1)
+    expect(terminalClientMocks.resizeTerminal).toHaveBeenCalledTimes(1)
+    expect(terminalClientMocks.resizeTerminal).toHaveBeenCalledWith('terminal-1', 100, 30)
+
+    terminal.resizeHandler?.({ cols: 100, rows: 30 })
+    runtime.scheduleTerminalFit(panel.id, { frames: 1 })
+    await flushFrames(1)
+    expect(terminalClientMocks.resizeTerminal).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not write terminal output performance summaries in formal mode', async () => {
     const panel = createEmptyTerminalPanel('panel-1', 'Local')
     const { runtime } = createRuntime(panel)
     const host = document.createElement('div')
@@ -449,21 +490,7 @@ describe('terminalWorkspaceViewRuntime', () => {
     await flushOutput()
     runtime.setTerminalElement(panel.id, null)
 
-    expect(logs).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          level: 'debug',
-          event: 'renderer.terminal-output.summary',
-          fields: expect.objectContaining({
-            panelId: panel.id,
-            reason: 'view-disposed',
-            chunks: 1,
-            writes: 1,
-            bytes: 12
-          })
-        })
-      ])
-    )
+    expect(logs.some((entry) => entry.event === 'renderer.terminal-output.summary')).toBe(false)
   })
 
   it('flushes terminal output even when requestAnimationFrame is not pumping', async () => {

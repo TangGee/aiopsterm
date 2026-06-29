@@ -12,6 +12,7 @@ import type {
   TerminalWriteResult
 } from '@shared/contracts/terminalSessions'
 import type { CodexSessionCreateOptions } from '@shared/contracts/codexSessions'
+import { shouldUseTerminalDebugLogs } from '@shared/runtimeSwitches'
 
 type TerminalRuntimeProcess = {
   write: (data: string | Buffer) => void
@@ -122,6 +123,11 @@ const normalizeTerminalCreateOptions = (inputOptions: TerminalCreateOptions, inp
 }
 
 export const registerTerminalSessionsIpc = (ipcMain: IpcMain, input: RegisterTerminalSessionsIpcInput) => {
+  const terminalDebugLogs = shouldUseTerminalDebugLogs()
+  const logTerminalDebug = (event: string, details?: Record<string, unknown>) => {
+    if (terminalDebugLogs) input.logRuntimeEvent('debug', event, details)
+  }
+
   ipcMain.handle('terminal:create', (event, inputOptions: TerminalCreateOptions = {}) => {
     const options = normalizeTerminalCreateOptions(inputOptions, input)
     const owner = input.getOwnerWindow(event)
@@ -224,10 +230,10 @@ export const registerTerminalSessionsIpc = (ipcMain: IpcMain, input: RegisterTer
       input.logRuntimeEvent('warn', 'terminal.write.missing-session', { id, bytes })
       return input.createTerminalWriteResult(id, data, false)
     }
-    input.logRuntimeEvent('debug', 'terminal.write.request', { id, kind: session.kind, bytes })
+    logTerminalDebug('terminal.write.request', { id, kind: session.kind, bytes })
     writeTerminal(session, data)
     terminalHistoryLinesFromWrite(data).forEach((command) => input.recordTerminalCommandHistory(command, { host: session.host }))
-    input.logRuntimeEvent('debug', 'terminal.write.accepted', { id, kind: session.kind, bytes })
+    logTerminalDebug('terminal.write.accepted', { id, kind: session.kind, bytes })
     return input.createTerminalWriteResult(id, data, true)
   })
 
@@ -258,7 +264,7 @@ export const registerTerminalSessionsIpc = (ipcMain: IpcMain, input: RegisterTer
       input.logRuntimeEvent('warn', 'terminal.resize.missing-session', { id, cols, rows })
       return
     }
-    input.logRuntimeEvent('debug', 'terminal.resize', { id, kind: session.kind, cols, rows })
+    logTerminalDebug('terminal.resize', { id, kind: session.kind, cols, rows })
     resizeTerminal(session, cols, rows)
   })
 

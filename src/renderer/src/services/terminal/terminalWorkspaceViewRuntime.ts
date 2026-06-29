@@ -195,6 +195,9 @@ export const createTerminalWorkspaceViewRuntime = ({
   const terminalOutputSummaryIntervalMs = terminalDebugLogs ? terminalOutputSummaryDebugIntervalMs : terminalOutputSummaryFormalIntervalMs
   const terminalOutputSummaryChunkThreshold = terminalDebugLogs ? terminalOutputSummaryDebugChunkThreshold : terminalOutputSummaryFormalChunkThreshold
   const terminalOutputSummaryByteThreshold = terminalDebugLogs ? terminalOutputSummaryDebugByteThreshold : terminalOutputSummaryFormalByteThreshold
+  const writeTerminalDebugLog = (event: string, fields?: Record<string, unknown>) => {
+    if (terminalDebugLogs) writeRuntimeLog('debug', event, fields)
+  }
   const canUseThreadedTerminal = () => {
     if (terminalConstructor || fitConstructor || searchConstructor) return false
     if (!shouldUseThreadedTerminal()) return false
@@ -222,7 +225,7 @@ export const createTerminalWorkspaceViewRuntime = ({
   }
 
   const logTerminalOutputSummary = (panelId: string, summary: TerminalOutputPerfSummary, reason: string) => {
-    writeRuntimeLog('debug', 'renderer.terminal-output.summary', {
+    writeTerminalDebugLog('renderer.terminal-output.summary', {
       panelId,
       reason,
       chunks: summary.chunks,
@@ -383,7 +386,7 @@ export const createTerminalWorkspaceViewRuntime = ({
   const bindTerminalViewEvents = (panel: TerminalPanel, view: TerminalView) => {
     view.terminal.onData((data) => {
       if (view.suppressInputReplyDepth) {
-        writeRuntimeLog('debug', 'renderer.terminal-input.suppressed-replay-reply', {
+        writeTerminalDebugLog('renderer.terminal-input.suppressed-replay-reply', {
           panelId: panel.id,
           bytes: new TextEncoder().encode(data).length
         })
@@ -397,16 +400,12 @@ export const createTerminalWorkspaceViewRuntime = ({
       updateSelectionButtonPosition(panel.id)
     })
     view.terminal.onResize(({ cols, rows }) => {
-      const resizeTerminal = terminalClient.resizeTerminal()
-      if (panel.sessionId && resizeTerminal) {
-        resizeTerminal(panel.sessionId, cols, rows)
-        writeRuntimeLog('debug', 'renderer.terminal.resize', {
-          panelId: panel.id,
-          sessionId: panel.sessionId,
-          cols,
-          rows
-        })
-      }
+      writeTerminalDebugLog('renderer.terminal.resize', {
+        panelId: panel.id,
+        sessionId: panel.sessionId,
+        cols,
+        rows
+      })
       updateSelectionButtonPosition(panel.id)
       updateSuggestionsPosition(panel.id)
     })
@@ -655,7 +654,7 @@ export const createTerminalWorkspaceViewRuntime = ({
     view.lastFitCols = view.terminal.cols
     view.lastFitRows = view.terminal.rows
     resizeTerminal(panel.sessionId, view.terminal.cols, view.terminal.rows)
-    writeRuntimeLog('debug', 'renderer.terminal.fit-resize', {
+    writeTerminalDebugLog('renderer.terminal.fit-resize', {
       panelId,
       sessionId: panel.sessionId,
       cols: view.terminal.cols,
@@ -947,7 +946,7 @@ export const createTerminalWorkspaceViewRuntime = ({
           if (panel.id === workspace.activePanelId) scheduleTerminalFocus(panel.id)
           return
         }
-        writeRuntimeLog('debug', 'renderer.terminal-view.threaded-attach-existing', {
+        writeTerminalDebugLog('renderer.terminal-view.threaded-attach-existing', {
           panelId: panel.id,
           hasSession: Boolean(panel.sessionId),
           visible,
@@ -1001,7 +1000,7 @@ export const createTerminalWorkspaceViewRuntime = ({
     let view: TerminalView = useThreaded ? createThreadedViewForPanel(panel) : createLegacyView()
     let openedThreaded = false
     try {
-      writeRuntimeLog('debug', 'renderer.terminal-view.open-start', {
+      writeTerminalDebugLog('renderer.terminal-view.open-start', {
         panelId: panel.id,
         hasSession: Boolean(panel.sessionId),
         threaded: useThreaded
@@ -1033,7 +1032,7 @@ export const createTerminalWorkspaceViewRuntime = ({
       })
       view.resizeObserver.observe(element)
     }
-    writeRuntimeLog('debug', 'renderer.terminal-view.created', {
+    writeTerminalDebugLog('renderer.terminal-view.created', {
       panelId: panel.id,
       hasSession: Boolean(panel.sessionId),
       threaded: isThreadedTerminalHost(view.terminal),
@@ -1100,7 +1099,7 @@ export const createTerminalWorkspaceViewRuntime = ({
           if (isThreadedTerminalHost(view.terminal)) view.terminal.startCoreOnly()
           terminalViews.set(panel.id, view)
           terminalViewPanels.set(panel.id, panel)
-          writeRuntimeLog('debug', 'renderer.terminal-view.created', {
+          writeTerminalDebugLog('renderer.terminal-view.created', {
             panelId: panel.id,
             hasSession: Boolean(panel.sessionId),
             threaded: true,

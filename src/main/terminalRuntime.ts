@@ -60,6 +60,7 @@ export const createMainTerminalRuntime = (input: TerminalRuntimeInput) => {
     terminalDebugLogs ? flush.chunks > 1 : flush.chunks >= 100 || flush.bytes >= 1024 * 1024
 
   const logDataSummary = (event: string, id: string, summary: TerminalDataLogSummary, reason: string) => {
+    if (!terminalDebugLogs) return
     logRuntimeEvent('debug', event, {
       id,
       reason,
@@ -128,7 +129,7 @@ export const createMainTerminalRuntime = (input: TerminalRuntimeInput) => {
         errorMessage: `Terminal session not found: ${id}`
       }
     }
-    logRuntimeEvent('debug', 'control.terminal-write.request', { id, kind: session.kind, bytes })
+    if (terminalDebugLogs) logRuntimeEvent('debug', 'control.terminal-write.request', { id, kind: session.kind, bytes })
     if (session.kind === 'ssh') {
       ;(session.process as SshTerminalSession).write(data)
     } else {
@@ -162,7 +163,7 @@ export const createMainTerminalRuntime = (input: TerminalRuntimeInput) => {
     if (!session) return
     appendCodexTerminalBridgeDisplayData(flush.id, flush.chunk)
     sendWindowEvent(session.window, 'terminal:data', terminalDataPayload(flush.id, flush.chunk))
-    if (shouldLogCoalescedTerminalData(flush)) {
+    if (terminalDebugLogs && shouldLogCoalescedTerminalData(flush)) {
       logRuntimeEvent('debug', 'terminal.data.coalesced', {
         id: flush.id,
         kind: session.kind,
@@ -213,7 +214,7 @@ export const createMainTerminalRuntime = (input: TerminalRuntimeInput) => {
     const owner = codexDataOwners.get(flush.id)
     if (!owner || owner.isDestroyed()) return
     sendWindowEvent(owner, 'codex:data', createTerminalDataEvent(flush.id, flush.chunk))
-    if (shouldLogCoalescedTerminalData(flush)) {
+    if (terminalDebugLogs && shouldLogCoalescedTerminalData(flush)) {
       logRuntimeEvent('debug', 'codex.data.coalesced', {
         id: flush.id,
         chunks: flush.chunks,

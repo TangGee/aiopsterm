@@ -246,7 +246,7 @@ describe('aiPanelCodexTerminalRuntime', () => {
     expect(codexTerminalCopyShortcut({ key: 'x', shiftKey: true, ctrlKey: true, metaKey: false, altKey: false })).toBe(false)
   })
 
-  it('creates a terminal, applies settings, copies selections, writes input, and resizes through injected bridges', async () => {
+  it('creates a terminal, applies settings, copies selections, writes input, and resizes through fit notifications', async () => {
     const host = document.createElement('div')
     document.body.appendChild(host)
     const { runtime, conversation, clientBundle, notices, logs } = createRuntime()
@@ -292,11 +292,21 @@ describe('aiPanelCodexTerminalRuntime', () => {
     expect(clientBundle.bridges.setCodexSessionTargetBridge).not.toHaveBeenCalled()
     expect(clientBundle.bridges.writeCodexSessionBridge).toHaveBeenCalledWith('codex-session-1', 'pwd\n')
 
+    clientBundle.bridges.resizeCodexSessionBridge.mockClear()
+    terminal.cols = 100
+    terminal.rows = 24
     terminal.resizeHandler?.({ cols: 100, rows: 24 })
+    expect(clientBundle.bridges.resizeCodexSessionBridge).not.toHaveBeenCalled()
+
+    FakeResizeObserver.instances[0].callback([], FakeResizeObserver.instances[0] as unknown as ResizeObserver)
     expect(conversation.lastFitCols).toBe(100)
     expect(conversation.lastFitRows).toBe(24)
     expect(clientBundle.bridges.resizeCodexSessionBridge).toHaveBeenCalledWith('codex-session-1', 100, 24)
-    expect(logs.some((entry) => entry.event === 'renderer.codex-terminal.created')).toBe(true)
+
+    terminal.resizeHandler?.({ cols: 100, rows: 24 })
+    FakeResizeObserver.instances[0].callback([], FakeResizeObserver.instances[0] as unknown as ResizeObserver)
+    expect(clientBundle.bridges.resizeCodexSessionBridge).toHaveBeenCalledTimes(1)
+    expect(logs.some((entry) => entry.event === 'renderer.codex-terminal.created')).toBe(false)
   })
 
   it('starts, subscribes, syncs, stops, and disposes Codex sessions through one runtime boundary', async () => {

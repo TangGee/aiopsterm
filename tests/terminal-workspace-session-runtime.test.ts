@@ -168,7 +168,7 @@ describe('terminalWorkspaceSessionRuntime', () => {
     await runtime.writeXtermInput('panel-local', 'pwd\n')
     expect(writeTerminal).toHaveBeenCalledWith('session-1', 'pwd\n')
     expect(notices).toEqual([])
-    expect(logs.map((entry) => entry.event)).toContain('renderer.terminal-input.write-accepted')
+    expect(logs.map((entry) => entry.event)).not.toContain('renderer.terminal-input.write-accepted')
 
     writeTerminal.mockResolvedValueOnce({ ok: true, data: { id: 'other-session', bytes: 4 } })
     await runtime.writeXtermInput('panel-local', 'date')

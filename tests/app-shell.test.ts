@@ -9949,24 +9949,9 @@ describe('AppShell', () => {
     expect(terminalAfterReconnect.clear.mock.calls).toHaveLength(clearCallsBeforeInput)
     expect(terminalAfterReconnect.write).not.toHaveBeenCalledWith(expect.stringContaining('root@tlinux:~# pWelcome'))
     expect(terminalAfterReconnect.scrollToBottom).toHaveBeenCalled()
-    expect(window.aiops.writeRuntimeLog).toHaveBeenCalledWith(
-      'debug',
-      'renderer.terminal-input.write-request',
-      expect.objectContaining({
-        panelId: store.activePanelId,
-        sessionId: 'test-session-local',
-        bytes: 4
-      })
-    )
-    expect(window.aiops.writeRuntimeLog).toHaveBeenCalledWith(
-      'debug',
-      'renderer.terminal-input.write-accepted',
-      expect.objectContaining({
-        panelId: store.activePanelId,
-        sessionId: 'test-session-local',
-        bytes: 4
-      })
-    )
+    expect(vi.mocked(window.aiops.writeRuntimeLog!).mock.calls.some(([level, event]) =>
+      level === 'debug' && ['renderer.terminal-input.write-request', 'renderer.terminal-input.write-accepted'].includes(String(event))
+    )).toBe(false)
     expect(store.activePanel.output).not.toContain('pwd')
 
     vi.mocked(window.aiops.writeTerminal).mockClear()
