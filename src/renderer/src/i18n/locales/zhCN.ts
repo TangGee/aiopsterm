@@ -225,6 +225,7 @@ export const zhCN = {
   'ai.codexClosed': 'Codex CLI 已退出',
   'ai.codexBridgeMissing': 'Codex CLI 桥接服务不可用',
   'ai.codexStartFailed': 'Codex CLI 启动失败',
+  'ai.codexThreadedUnavailable': '线程化终端渲染器初始化失败，Codex 终端未启动。请检查启动参数、GPU/沙箱配置或运行日志。',
   'ai.codexTargetUnbound': '未绑定终端',
   'ai.codexTargetDropHint': '拖拽主机或终端标签到这里，或搜索主机绑定',
   'ai.codexTargetBind': '绑定主机/终端',

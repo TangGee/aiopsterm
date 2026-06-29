@@ -227,6 +227,7 @@ export const enUS: LocaleMessages = {
   'ai.codexClosed': 'Codex CLI exited',
   'ai.codexBridgeMissing': 'Codex CLI bridge is unavailable',
   'ai.codexStartFailed': 'Failed to start Codex CLI',
+  'ai.codexThreadedUnavailable': 'Threaded terminal renderer initialization failed, so Codex terminal was not started. Check startup flags, GPU/sandbox settings, or runtime logs.',
   'ai.codexTargetUnbound': 'No terminal bound',
   'ai.codexTargetDropHint': 'Drop a host or terminal tab here, or search for a host to bind',
   'ai.codexTargetBind': 'Bind host/terminal',

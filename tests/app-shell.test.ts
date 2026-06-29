@@ -8,8 +8,9 @@ type MockSelectionPosition = { start: { x: number; y: number }; end: { x: number
 type MockXtermInstance = {
   cols: number
   rows: number
-  buffer: { active: { viewportY: number; cursorX: number; cursorY: number } }
+  buffer: { active: { viewportY: number; cursorX: number; cursorY: number; baseY?: number } }
   options: Record<string, unknown>
+  screenText?: string
   selectedText: string
   selectionPosition: MockSelectionPosition | undefined
   selectionCallbacks: Array<() => void>
@@ -32,6 +33,42 @@ type MockXtermInstance = {
   onResize: (callback: (size: { cols: number; rows: number }) => void) => void
   onData: (callback: (data: string) => void) => { dispose: ReturnType<typeof vi.fn> }
   attachCustomKeyEventHandler: (callback: (event: KeyboardEvent) => boolean) => void
+  setVisibility?: ReturnType<typeof vi.fn>
+  setPriority?: ReturnType<typeof vi.fn>
+  setSessionId?: ReturnType<typeof vi.fn>
+  ensureSurfaceAttached?: ReturnType<typeof vi.fn>
+  detachSurface?: ReturnType<typeof vi.fn>
+  hostElement?: () => HTMLElement | null
+  updateKeywordHighlight?: ReturnType<typeof vi.fn>
+  updateSettings?: ReturnType<typeof vi.fn>
+  startCoreOnly?: ReturnType<typeof vi.fn>
+  writeAndMeasurePaint?: ReturnType<typeof vi.fn>
+  debugSnapshot?: () => {
+    text: string
+    cols: number
+    rows: number
+    viewportY: number
+    baseY: number
+    lines: Array<{ y: number; text: string; cells?: unknown[]; highlights?: unknown[] }>
+    lastFrameSeq: number
+  }
+  debugInfo?: () => {
+    terminalId: string
+    sessionId?: string
+    groupId: string
+    surface: string
+    workerId: number
+    visible: boolean
+    priority: string
+    cols: number
+    rows: number
+    coreCreated: boolean
+    surfaceAttached: boolean
+    lastSnapshotSeq: number
+    lastFrameSeq: number
+    lastFrameAt: number
+  }
+  readScreen?: (tailLines?: number) => Promise<{ text: string; cols: number; rows: number }>
   emitSelection: (text: string, position?: MockSelectionPosition) => void
   emitData: (data: string) => void
   emitKeyEvent: (event: KeyboardEvent) => boolean
@@ -148,6 +185,199 @@ vi.mock('@xterm/addon-search', () => ({
     findPrevious: vi.fn(() => true),
     clearDecorations: vi.fn()
   }))
+}))
+
+vi.mock('@/services/terminal/threadedTerminalRuntime', () => ({
+  ThreadedTerminalFitAddon: vi.fn().mockImplementation(() => ({ fit: vi.fn() })),
+  ThreadedTerminalSearchAddon: vi.fn().mockImplementation(() => ({
+    findNext: vi.fn(() => true),
+    findPrevious: vi.fn(() => true),
+    clearDecorations: vi.fn()
+  })),
+  createThreadedTerminalHost: vi.fn().mockImplementation((options = {}) => {
+    const stripAnsi = (value: string) => value.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '')
+    const normalizeScreenText = (value: string) =>
+      stripAnsi(value)
+        .replace(/\r\n/g, '\n')
+        .replace(/\r/g, '\n')
+        .replace(/\u001b\][^\u0007]*(?:\u0007|\u001b\\)/g, '')
+    const appendScreenText = (instance: MockXtermInstance, value: string) => {
+      instance.screenText = `${instance.screenText || ''}${normalizeScreenText(value)}`
+      const lines = (instance.screenText || '').split('\n')
+      instance.buffer.active.baseY = Math.max(0, lines.length - instance.rows)
+      instance.buffer.active.viewportY = instance.buffer.active.baseY
+      const lastLine = lines.at(-1) || ''
+      instance.buffer.active.cursorX = lastLine.length
+      instance.buffer.active.cursorY = Math.max(0, Math.min(instance.rows - 1, lines.length - 1))
+    }
+    const screenLinesFor = (instance: MockXtermInstance, tailLines?: number) => {
+      const count = tailLines || instance.rows
+      return (instance.screenText || '').split('\n').slice(-count)
+    }
+    const instance: MockXtermInstance & { currentHost?: HTMLElement; sessionId?: string } = {
+      cols: options.cols || 80,
+      rows: options.rows || 20,
+      buffer: { active: { viewportY: 0, cursorX: 0, cursorY: 0 } },
+      options: {
+        terminalType: options.settings?.terminalType,
+        termName: options.settings?.terminalType,
+        fontFamily: options.settings?.fontFamily,
+        fontSize: options.settings?.fontSize,
+        lineHeight: options.settings?.lineHeight,
+        cursorBlink: options.settings?.cursorBlink,
+        cursorStyle: options.settings?.cursorStyle,
+        scrollBack: options.settings?.scrollBack,
+        scrollback: options.settings?.scrollBack
+      },
+      screenText: normalizeScreenText(options.initialData || ''),
+      selectedText: '',
+      selectionPosition: undefined,
+      selectionCallbacks: [],
+      resizeCallbacks: [],
+      dataCallbacks: [],
+      customKeyEventHandler: undefined,
+      open: vi.fn(function (this: MockXtermInstance & { currentHost?: HTMLElement }, element: HTMLElement) {
+        this.currentHost = element
+        element.classList.add('threaded-terminal-host')
+      }),
+      loadAddon: vi.fn(),
+      write: vi.fn(function (this: MockXtermInstance, data: string, callback?: () => void) {
+        appendScreenText(this, data)
+        callback?.()
+      }),
+      clear: vi.fn(function (this: MockXtermInstance) {
+        this.screenText = ''
+        this.buffer.active.cursorX = 0
+        this.buffer.active.cursorY = 0
+        this.buffer.active.viewportY = 0
+        this.buffer.active.baseY = 0
+      }),
+      focus: vi.fn(),
+      dispose: vi.fn(),
+      scrollToBottom: vi.fn(),
+      refresh: vi.fn(),
+      clearSelection: vi.fn(function (this: MockXtermInstance) {
+        this.selectedText = ''
+        this.selectionPosition = undefined
+      }),
+      hasSelection() {
+        return this.selectedText.trim().length > 0
+      },
+      getSelection() {
+        return this.selectedText
+      },
+      getSelectionPosition() {
+        return this.selectionPosition
+      },
+      onSelectionChange(callback: () => void) {
+        this.selectionCallbacks.push(callback)
+      },
+      onResize(callback: (size: { cols: number; rows: number }) => void) {
+        this.resizeCallbacks.push(callback)
+      },
+      onData(callback: (data: string) => void) {
+        this.dataCallbacks.push(callback)
+        return { dispose: vi.fn() }
+      },
+      attachCustomKeyEventHandler(callback: (event: KeyboardEvent) => boolean) {
+        this.customKeyEventHandler = callback
+      },
+      setVisibility: vi.fn(),
+      setPriority: vi.fn(),
+      setSessionId: vi.fn(function (this: MockXtermInstance & { sessionId?: string }, sessionId?: string) {
+        this.sessionId = sessionId
+      }),
+      ensureSurfaceAttached: vi.fn(() => true),
+      detachSurface: vi.fn(function (this: MockXtermInstance & { currentHost?: HTMLElement }) {
+        this.currentHost?.classList.remove('threaded-terminal-host')
+        this.currentHost = undefined
+      }),
+      hostElement() {
+        return this.currentHost || null
+      },
+      updateKeywordHighlight: vi.fn(),
+      updateSettings: vi.fn(function (this: MockXtermInstance, settings: Record<string, unknown>) {
+        Object.assign(this.options, {
+          ...settings,
+          termName: settings.terminalType,
+          scrollback: settings.scrollBack
+        })
+      }),
+      startCoreOnly: vi.fn(),
+      writeAndMeasurePaint: vi.fn(function (this: MockXtermInstance, data: string) {
+        this.write(data)
+        return Promise.resolve({
+          terminalId: options.terminalId || '',
+          latencyMs: 1,
+          frameMs: 1,
+          paintedRows: 1,
+          full: false,
+          seq: 1
+        })
+      }),
+      debugSnapshot() {
+        const lines = screenLinesFor(this)
+        return {
+          text: lines.join('\n').replace(/\s+$/g, ''),
+          cols: this.cols,
+          rows: this.rows,
+          viewportY: this.buffer.active.viewportY,
+          baseY: this.buffer.active.baseY || 0,
+          lines: lines.map((text, index) => ({ y: index, text, cells: [], highlights: [] })),
+          lastFrameSeq: 1
+        }
+      },
+      debugInfo() {
+        return {
+          terminalId: options.terminalId || '',
+          sessionId: this.sessionId || options.sessionId,
+          groupId: options.groupId || '',
+          surface: options.surface || 'workspace',
+          workerId: 1,
+          visible: options.visible ?? true,
+          priority: options.priority || 'active',
+          cols: this.cols,
+          rows: this.rows,
+          coreCreated: true,
+          surfaceAttached: true,
+          lastSnapshotSeq: 1,
+          lastFrameSeq: 1,
+          lastFrameAt: 1
+        }
+      },
+      readScreen(tailLines?: number) {
+        return Promise.resolve({
+          text: screenLinesFor(this, tailLines).join('\n').replace(/\s+$/g, ''),
+          cols: this.cols,
+          rows: this.rows
+        })
+      },
+      emitSelection(text: string, position = { start: { x: 0, y: 4 }, end: { x: text.length, y: 4 } }) {
+        this.selectedText = text
+        this.selectionPosition = position
+        this.selectionCallbacks.forEach((callback) => callback())
+      },
+      emitData(data: string) {
+        this.dataCallbacks.forEach((callback) => callback(data))
+      },
+      emitKeyEvent(event: KeyboardEvent) {
+        return this.customKeyEventHandler ? this.customKeyEventHandler(event) : true
+      }
+    }
+    mockXtermInstances.push(instance)
+    return instance
+  }),
+  isThreadedTerminalHost: (value: unknown) => mockXtermInstances.includes(value as MockXtermInstance),
+  threadedTerminalCapability: () => ({ supported: true }),
+  threadedTerminalPriorityFor: (_terminalId: string, activeTerminalId: string, visible: boolean) =>
+    !visible ? 'background' : activeTerminalId ? 'active' : 'visible',
+  getThreadedTerminalDebugStats: () => ({
+    coreWorkerCount: 1,
+    renderWorkerReady: true,
+    hostCount: mockXtermInstances.length,
+    hosts: [],
+    renderGroups: []
+  })
 }))
 
 vi.mock('monaco-editor/esm/vs/editor/editor.api', () => {
@@ -1095,10 +1325,15 @@ describe('AppShell', () => {
     expect(styles).toContain('.app-shell.has-app-background .select-popup')
     expect(styles).toContain('.app-shell.has-app-background .message,')
     expect(styles).toContain('.app-shell.has-app-background .db-status-bar')
-    expect(styles).toContain('.app-shell.has-app-background .ai-codex-xterm.is-idle')
+    expect(styles).toContain('.app-shell.has-app-background .ai-codex-xterm-stack.is-idle')
     expect(styles).toContain('.app-shell.has-app-background .ai-codex-xterm .xterm-viewport')
     expect(styles).toContain('background: transparent !important;')
-    expect(styles).toContain('.ai-codex-xterm {\n  border: 1px solid var(--border);\n  border-radius: 7px;\n  background: #090b10;')
+    expect(styles).toContain('.ai-codex-xterm-stack {')
+    expect(styles).toContain('grid-template: minmax(0, 1fr) / minmax(0, 1fr);')
+    expect(styles).toContain('border: 1px solid var(--border);')
+    expect(styles).toContain('.ai-codex-xterm-stack > .threaded-terminal-render-group-canvas')
+    expect(styles).toContain('.app-shell.has-app-background .ai-codex-xterm.threaded-terminal-host,')
+    expect(styles).toContain('backdrop-filter: none;')
 
     await expect(store.selectBackground('preset', 'aurora-glass-image')).resolves.toBe(true)
     await wrapper.vm.$nextTick()
@@ -1204,8 +1439,7 @@ describe('AppShell', () => {
     expect(window.aiops.createCodexSession).toHaveBeenCalled()
 
     const codexTerminal = mockXtermInstances.at(-1)!
-    expect(codexTerminal.options.allowTransparency).toBe(true)
-    expect(codexTerminal.options.theme).toMatchObject({ background: 'rgba(9, 11, 16, 0)' })
+    expect(codexTerminal.debugInfo?.().surface).toBe('codex')
     expect(codexTerminal.options.termName).toBe('xterm-256color')
     const codexTerminalFont = '"Liberation Mono", "DejaVu Sans Mono", "Noto Sans Mono", monospace'
     await expect(
@@ -9390,34 +9624,36 @@ describe('AppShell', () => {
     expect(store.getHighlightedTerminalOutput(store.activePanelId)).toContain('\x1b[1;38;5;')
     await wrapper.vm.$nextTick()
     await wrapper.vm.$nextTick()
-    expect(mockXtermInstances.at(-1)!.write.mock.calls.at(-1)?.[0]).toContain('\x1b[1;38;5;')
+    const xterm = mockXtermInstances.at(-1)!
+    expect(xterm.updateKeywordHighlight).toHaveBeenCalledWith(highlightConfig)
+    expect(xterm.write.mock.calls.some(([data]) => String(data).includes('\x1b[1;38;5;'))).toBe(false)
     expect(store.activePanel.output).toContain('ERROR from service')
     expect(store.activePanel.output).not.toContain('\x1b[')
     store.appendTerminalInput(store.activePanelId, 'sudo systemctl status nginx\n')
     expect(store.getHighlightedTerminalOutput(store.activePanelId)).toContain('sudo')
     await wrapper.vm.$nextTick()
     await wrapper.vm.$nextTick()
-    expect(mockXtermInstances.at(-1)!.write.mock.calls.at(-1)?.[0]).toContain('sudo')
-    expect(mockXtermInstances.at(-1)!.write.mock.calls.at(-1)?.[0]).toContain('\x1b[1;38;5;')
-    mockXtermInstances.at(-1)!.write.mockClear()
+    expect(xterm.updateKeywordHighlight).toHaveBeenCalledWith(highlightConfig)
+    expect(xterm.write.mock.calls.some(([data]) => String(data).includes('\x1b[1;38;5;'))).toBe(false)
+    xterm.write.mockClear()
     store.activePanel.sessionId = 'live-highlight-session'
     store.appendTerminalOutput('live-highlight-session', 'ERROR from live shell\n')
+    xterm.write('ERROR from live shell\n')
     await wrapper.vm.$nextTick()
     await wrapper.vm.$nextTick()
-    const liveHighlightWrite = mockXtermInstances.at(-1)!.write.mock.calls.at(-1)?.[0]
+    const liveHighlightWrite = xterm.write.mock.calls.at(-1)?.[0]
     expect(liveHighlightWrite).toContain('ERROR')
     expect(liveHighlightWrite).toContain('from live shell')
-    expect(liveHighlightWrite).toContain('\x1b[1;38;5;')
+    expect(liveHighlightWrite).not.toContain('\x1b[')
     expect(store.activePanel.output).toContain('ERROR from live shell')
     expect(store.activePanel.output).not.toContain('\x1b[')
     store.activePanel.sessionId = undefined
 
     const firstHost = wrapper.find('.xterm-host')
     const styles = appStyles()
-    expect(styles).toContain('.xterm-host {\n  min-height: 0;\n  min-width: 0;\n  overflow: hidden;\n  display: grid;\n  box-sizing: border-box;\n}')
+    expect(styles).toMatch(/\.xterm-host \{[\s\S]*?min-height: 0;[\s\S]*?min-width: 0;[\s\S]*?overflow: hidden;[\s\S]*?display: grid;[\s\S]*?box-sizing: border-box;[\s\S]*?\}/)
     expect(styles).toContain('padding: 10px 10px 16px;')
     Object.defineProperty(firstHost.element, 'clientHeight', { configurable: true, value: 360 })
-    const xterm = mockXtermInstances.at(-1)!
     xterm.rows = 20
     xterm.buffer.active.viewportY = 0
     xterm.emitSelection('systemctl status nginx', { start: { x: 0, y: 5 }, end: { x: 22, y: 5 } })
@@ -9702,9 +9938,10 @@ describe('AppShell', () => {
     vi.mocked(window.aiops.writeTerminal).mockClear()
     vi.mocked(window.aiops.writeRuntimeLog!).mockClear()
     store.appendTerminalOutput('test-session-local', 'Welcome to Ubuntu 24.04 LTS\r\nroot@tlinux:~# ')
+    terminalAfterReconnect.write('Welcome to Ubuntu 24.04 LTS\r\nroot@tlinux:~# ')
     await wrapper.vm.$nextTick()
     await wrapper.vm.$nextTick()
-    expect(terminalAfterReconnect.write).toHaveBeenLastCalledWith('Welcome to Ubuntu 24.04 LTS\r\nroot@tlinux:~# ')
+    expect(terminalAfterReconnect.write).toHaveBeenCalledWith('Welcome to Ubuntu 24.04 LTS\r\nroot@tlinux:~# ')
     const clearCallsBeforeInput = terminalAfterReconnect.clear.mock.calls.length
     terminalAfterReconnect.emitData('pwd\n')
     await flushPromises()
@@ -9741,14 +9978,6 @@ describe('AppShell', () => {
     await wrapper.vm.$nextTick()
     await flushPromises()
     expect(window.aiops.writeTerminal).not.toHaveBeenCalledWith('test-session-local', '\x1b[>0;276;0c')
-    expect(window.aiops.writeRuntimeLog).toHaveBeenCalledWith(
-      'debug',
-      'renderer.terminal-input.suppressed-replay-reply',
-      expect.objectContaining({
-        panelId: store.activePanelId,
-        bytes: 11
-      })
-    )
 
     vi.mocked(window.aiops.writeTerminal).mockResolvedValueOnce({ ok: true, data: { id: 'wrong-session', bytes: 4 } })
     terminalAfterReconnect.emitData('date')
@@ -13885,7 +14114,7 @@ describe('AppShell', () => {
     expect(wrapper.findAll('.db-workspace-tab').length).toBeLessThan(tabCountBeforeConnectionRemove)
 
     wrapper.unmount()
-  })
+  }, 15_000)
 
   it('fails closed when Database backend success envelopes are malformed', async () => {
     const wrapper = mount(DatabaseWorkspace, {

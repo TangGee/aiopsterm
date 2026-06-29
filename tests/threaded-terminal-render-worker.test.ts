@@ -347,6 +347,27 @@ describe('threadedTerminalRenderWorker', () => {
     expect(messages).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'frame', terminalId: 'render-worker-terminal', seq: 2, paintedRows: 1 })]))
   })
 
+  it('clears transparent background rows before painting new Codex TUI text', async () => {
+    send(attachGroupMessage(canvas))
+    const message = attachMessage()
+    if (message.type === 'attach') {
+      message.options.settings.theme.background = 'rgba(0, 0, 0, 0)'
+      message.options.settings.cursorStyle = 'bar'
+    }
+    send(message)
+    send({ type: 'screen', snapshot: workingSnapshot() })
+
+    await vi.advanceTimersByTimeAsync(16)
+
+    expect(canvas.context.clearRect).toHaveBeenCalledWith(0, 13, 80, 13)
+    const clearOrder = canvas.context.clearRect.mock.invocationCallOrder
+    const fillOrder = canvas.context.fillRect.mock.invocationCallOrder
+    expect(clearOrder[clearOrder.length - 1]).toBeLessThan(fillOrder[fillOrder.length - 1])
+    const rowFill = canvas.context.operations.find((operation) => operation.type === 'fillRect' && operation.y === 13)
+    expect(rowFill?.fillStyle).toBe('rgba(0, 0, 0, 0)')
+    expect(messages).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'frame', terminalId: 'render-worker-terminal', seq: 2 })]))
+  })
+
   it('uses host-provided geometry padding instead of remeasuring in the worker', async () => {
     send(attachGroupMessage(canvas))
     send(attachMessage({ paddingLeft: 4, paddingTop: 2, paddingRight: 12, paddingBottom: 7 }))
@@ -362,6 +383,28 @@ describe('threadedTerminalRenderWorker', () => {
     ]))
     expect(canvas.context.fillRect).toHaveBeenCalledWith(12, 2, 16, 13)
     expect(canvas.context.measureText).not.toHaveBeenCalled()
+  })
+
+  it('clears a hidden shared RenderGroup rect and repaints cached content when visible again', async () => {
+    send(attachGroupMessage(canvas))
+    const message = attachMessage()
+    if (message.type === 'attach') message.options.settings.cursorStyle = 'bar'
+    send(message)
+    send({ type: 'screen', snapshot: workingSnapshot() })
+    await vi.advanceTimersByTimeAsync(16)
+    canvas.context.clearRect.mockClear()
+
+    send({ type: 'visibility', terminalId: 'render-worker-terminal', visible: false })
+
+    expect(canvas.context.clearRect).toHaveBeenCalledWith(0, 0, 80, 48)
+    expect(messages.filter((item) => item.type === 'frame')).toHaveLength(1)
+
+    send({ type: 'visibility', terminalId: 'render-worker-terminal', visible: true })
+    await vi.advanceTimersByTimeAsync(16)
+
+    expect(messages).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'frame', terminalId: 'render-worker-terminal', seq: 2, full: true, fullReason: 'visibility' })
+    ]))
   })
 
   it('uses a WebGL2 render group when requested and available', async () => {

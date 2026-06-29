@@ -761,6 +761,7 @@ export class ThreadedTerminalHost {
   private surfaceAttachRetryBudget = 0
   private lastStableFit: { width: number; height: number; cols: number; rows: number } | null = null
   private cellMetricsSignature = ''
+  private lastAttachDiagnosticSignature = ''
   private lastSmallGeometryLogSignature = ''
   private lastSmallLayoutLogSignature = ''
   private pendingSmallLayoutFrame: number | null = null
@@ -788,7 +789,7 @@ export class ThreadedTerminalHost {
   private readonly groupId: string
   private readonly surface: ThreadedTerminalSurface
   private readonly terminalId: string
-  private readonly sessionId?: string
+  private sessionId?: string
   private readonly initialData?: string
   private readonly resizeHandler?: (cols: number, rows: number) => void
   private readonly logFields?: Record<string, unknown>
@@ -954,13 +955,18 @@ export class ThreadedTerminalHost {
   }
 
   ensureSurfaceAttached(options: { forceGeometry?: boolean } = {}) {
-    if (this.disposed || !this.host) return false
+    if (this.disposed || !this.host) {
+      this.logAttachBlocked('missing-host')
+      return false
+    }
     const fit = this.fit({ allowUnstable: Boolean(options.forceGeometry), forceMetrics: options.forceGeometry })
     if (!fit) {
+      this.logAttachBlocked('fit-deferred')
       this.scheduleFit()
       return false
     }
     this.ensureCoreAndSurface()
+    if (!this.surfaceAttached) this.logAttachBlocked('attach-deferred')
     return this.surfaceAttached
   }
 
@@ -1044,6 +1050,10 @@ export class ThreadedTerminalHost {
       this.priority = 'background'
       if (this.coreCreated) postCore(this.coreHandle, { type: 'visibility', terminalId: this.terminalId, visible: false, priority: 'background' })
     }
+  }
+
+  hostElement() {
+    return this.host
   }
 
   markSurfaceDetachedByRenderGroup(renderGroupId: string) {
@@ -1154,6 +1164,22 @@ export class ThreadedTerminalHost {
     this.cols = cols
     this.rows = rows
     this.resizeHandlers.forEach((handler) => handler({ cols, rows }))
+  }
+
+  setSessionId(sessionId?: string) {
+    const nextSessionId = sessionId || undefined
+    if (this.sessionId === nextSessionId) return
+    this.sessionId = nextSessionId
+    if (this.coreCreated) postCore(this.coreHandle, { type: 'session', terminalId: this.terminalId, sessionId: nextSessionId })
+    if (this.visible && this.surfaceAttached && this.lastSnapshot) {
+      postRender({
+        type: 'screen',
+        snapshot: this.fullSnapshotFromCache('visibility')
+      })
+    }
+    if (this.visible && !this.surfaceAttached && this.host) {
+      this.scheduleSurfaceAttachRetry({ forceGeometry: true, attempts: 8 })
+    }
   }
 
   applySnapshot(snapshot: ThreadedTerminalScreenSnapshot) {
@@ -1638,6 +1664,56 @@ export class ThreadedTerminalHost {
     const resolved = resolveRenderGroupForHost(this.host, this.surface)
     if (!resolved) return false
     return isRenderableBox(this.host) && isRenderableBox(resolved.container)
+  }
+
+  private attachDiagnosticFields() {
+    const hostRect = this.host?.getBoundingClientRect()
+    const resolved = this.host ? resolveRenderGroupForHost(this.host, this.surface) : null
+    const containerRect = resolved?.container.getBoundingClientRect()
+    return {
+      terminalId: this.terminalId,
+      sessionId: this.sessionId,
+      groupId: this.groupId,
+      surface: this.surface,
+      visible: this.visible,
+      surfaceAttached: this.surfaceAttached,
+      hasHost: Boolean(this.host),
+      hostConnected: Boolean(this.host?.isConnected),
+      hostWidth: this.host ? Math.floor(this.host.clientWidth || hostRect?.width || 0) : 0,
+      hostHeight: this.host ? Math.floor(this.host.clientHeight || hostRect?.height || 0) : 0,
+      hasRenderGroupContainer: Boolean(resolved?.container),
+      containerConnected: Boolean(resolved?.container?.isConnected),
+      containerWidth: resolved?.container ? Math.floor(resolved.container.clientWidth || containerRect?.width || 0) : 0,
+      containerHeight: resolved?.container ? Math.floor(resolved.container.clientHeight || containerRect?.height || 0) : 0,
+      cols: this.cols,
+      rows: this.rows,
+      geometrySeq: this.geometry?.seq || 0,
+      ...this.logFields
+    }
+  }
+
+  private logAttachBlocked(reason: string) {
+    if (!useThreadedTerminalDiagnostics()) return
+    const fields = this.attachDiagnosticFields()
+    const signature = [
+      reason,
+      fields.visible,
+      fields.surfaceAttached,
+      fields.hasHost,
+      fields.hostConnected,
+      fields.hostWidth,
+      fields.hostHeight,
+      fields.hasRenderGroupContainer,
+      fields.containerWidth,
+      fields.containerHeight,
+      fields.geometrySeq
+    ].join(':')
+    if (signature === this.lastAttachDiagnosticSignature) return
+    this.lastAttachDiagnosticSignature = signature
+    logThreadedTerminal('debug', 'renderer.threaded-terminal.attach-blocked', {
+      reason,
+      ...fields
+    })
   }
 
   private focusInput() {

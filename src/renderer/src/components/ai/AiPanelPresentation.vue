@@ -1,7 +1,7 @@
 <template>
   <aside
     class="ai-panel"
-    :class="{ 'agent-mode': agentMode }"
+    :class="[{ 'agent-mode': agentMode }, `mode-${aiPanelMode}`]"
     tabindex="-1"
     @click="closePopups()"
     @dragenter.prevent="handleDragEnter"

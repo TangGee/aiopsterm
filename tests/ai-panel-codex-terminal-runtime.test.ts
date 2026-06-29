@@ -77,6 +77,29 @@ class FakeTerminal implements AiPanelCodexTerminalLike {
   }
 }
 
+class FakeThreadedTerminal extends FakeTerminal {
+  static threadedInstances: FakeThreadedTerminal[] = []
+  sessionId = ''
+  currentHost: HTMLElement | null = null
+  visibilityCalls: Array<{ visible: boolean; priority: string }> = []
+  ensureSurfaceAttached = vi.fn()
+  updateSettings = vi.fn()
+  open = vi.fn((element: HTMLElement) => {
+    this.currentHost = element
+  })
+  hostElement = vi.fn(() => this.currentHost)
+  setVisibility = vi.fn((visible: boolean, priority: string) => {
+    this.visibilityCalls.push({ visible, priority })
+  })
+  setSessionId = vi.fn((sessionId?: string) => {
+    this.sessionId = sessionId || ''
+  })
+  constructor(initialOptions: ConstructorParameters<typeof import('@xterm/xterm').Terminal>[0]) {
+    super(initialOptions)
+    FakeThreadedTerminal.threadedInstances.push(this)
+  }
+}
+
 const createConversation = (boundTarget: CodexSessionTargetContext | null = target): TestConversation =>
   createCodexConversationRecord<TestConversation>('codex-1', boundTarget, {
     host: null,
@@ -175,6 +198,7 @@ const createRuntime = (conversation = createConversation(), clientBundle = creat
       error: () => 'Codex error',
       bridgeMissing: () => 'Bridge missing',
       startFailed: () => 'Start failed',
+      threadedUnavailable: () => 'Threaded terminal unavailable',
       copyEmpty: () => 'Select content first',
       copySuccess: () => 'Copied',
       copyFailure: () => 'Copy failed'
@@ -208,6 +232,7 @@ const flushAsyncHandlers = () => new Promise((resolve) => window.setTimeout(reso
 afterEach(() => {
   document.body.replaceChildren()
   FakeTerminal.instances = []
+  FakeThreadedTerminal.threadedInstances = []
   FakeResizeObserver.instances = []
   vi.restoreAllMocks()
 })
@@ -260,6 +285,12 @@ describe('aiPanelCodexTerminalRuntime', () => {
     await flushAsyncHandlers()
     expect(clientBundle.bridges.setCodexSessionTargetBridge).toHaveBeenCalledWith(target)
     expect(clientBundle.bridges.writeCodexSessionBridge).toHaveBeenCalledWith('codex-session-1', 'ls\n')
+    clientBundle.bridges.setCodexSessionTargetBridge.mockClear()
+
+    terminal.dataHandler?.('pwd\n')
+    await flushAsyncHandlers()
+    expect(clientBundle.bridges.setCodexSessionTargetBridge).not.toHaveBeenCalled()
+    expect(clientBundle.bridges.writeCodexSessionBridge).toHaveBeenCalledWith('codex-session-1', 'pwd\n')
 
     terminal.resizeHandler?.({ cols: 100, rows: 24 })
     expect(conversation.lastFitCols).toBe(100)
@@ -359,6 +390,281 @@ describe('aiPanelCodexTerminalRuntime', () => {
       sessionId: 'codex-session-1',
       status: 'ready'
     })
+  })
+
+  it('syncs threaded Codex surface after pending session binding', async () => {
+    vi.resetModules()
+    vi.doMock('@shared/runtimeSwitches', () => ({
+      shouldUseTerminalDebugLogs: () => false,
+      shouldUseThreadedTerminal: () => true
+    }))
+    vi.doMock('@/services/terminal/threadedTerminalRuntime', () => ({
+      ThreadedTerminalFitAddon: FakeFit,
+      createThreadedTerminalHost: vi.fn((options) => {
+        const terminal = new FakeThreadedTerminal({})
+        terminal.sessionId = options.sessionId || ''
+        return terminal
+      }),
+      isThreadedTerminalHost: (value: unknown) => value instanceof FakeThreadedTerminal,
+      threadedTerminalCapability: () => ({ supported: true })
+    }))
+    const { createAiPanelCodexTerminalRuntime: createRuntimeWithThreaded } = await import('@/services/ai/aiPanelCodexTerminalRuntime')
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const conversation = createConversation()
+    const clientBundle = createClient()
+    let resolveCreateSession: (() => void) | undefined
+    clientBundle.bridges.createCodexSessionBridge.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveCreateSession = () =>
+            resolve({
+              id: 'codex-session-1',
+              cwd: '/repo',
+              codexHome: '/tmp/codex',
+              runtimeKind: 'pty' as const,
+              binaryPath: '/usr/bin/codex',
+              lifecycle: {
+                id: 'codex-session-1',
+                stage: 'ready' as const,
+                at: 1
+              }
+            })
+        })
+    )
+    const conversations = [conversation]
+    const runtime = createRuntimeWithThreaded<TestConversation>({
+      conversations: () => conversations,
+      activeConversation: () => conversation,
+      activeConversationId: () => conversation.id,
+      terminalSettings: () => terminalSettings,
+      currentBoundTarget: (item) => item.boundTarget,
+      isConversationVisible: (item) => item.id === conversation.id,
+      syncAttentionState: vi.fn(),
+      labels: {
+        error: () => 'Codex error',
+        bridgeMissing: () => 'Bridge missing',
+        startFailed: () => 'Start failed',
+        threadedUnavailable: () => 'Threaded terminal unavailable',
+        copyEmpty: () => 'Select content first',
+        copySuccess: () => 'Copied',
+        copyFailure: () => 'Copy failed'
+      },
+      notify: vi.fn(),
+      afterDomUpdate: () => Promise.resolve(),
+      copyText: vi.fn(async () => true),
+      log: vi.fn(),
+      client: clientBundle.client,
+      requestFrame: (callback) => callback(),
+      resizeObserverFactory: (callback) => new FakeResizeObserver(callback)
+    })
+
+    runtime.setHostElement(conversation, host)
+    const start = runtime.startSession(conversation)
+    await Promise.resolve()
+    clientBundle.emitData({ id: 'codex-session-1', data: 'early tui' })
+    await flushAsyncHandlers()
+    resolveCreateSession?.()
+    await start
+
+    const terminal = conversation.terminal as unknown as FakeThreadedTerminal
+    expect(terminal.setSessionId).toHaveBeenCalledWith('codex-session-1')
+    expect(terminal.sessionId).toBe('codex-session-1')
+    expect(terminal.setVisibility).toHaveBeenCalledWith(true, 'active')
+    expect(terminal.ensureSurfaceAttached).toHaveBeenCalledWith({ forceGeometry: true })
+
+    runtime.disposeConversation(conversation)
+    vi.doUnmock('@shared/runtimeSwitches')
+    vi.doUnmock('@/services/terminal/threadedTerminalRuntime')
+    vi.resetModules()
+  })
+
+  it('does not fall back to main-thread xterm when Codex threaded terminal is unavailable', async () => {
+    vi.resetModules()
+    vi.doMock('@shared/runtimeSwitches', () => ({
+      shouldUseTerminalDebugLogs: () => false,
+      shouldUseThreadedTerminal: () => false
+    }))
+    const createThreadedTerminalHost = vi.fn(() => new FakeThreadedTerminal({}))
+    vi.doMock('@/services/terminal/threadedTerminalRuntime', () => ({
+      ThreadedTerminalFitAddon: FakeFit,
+      createThreadedTerminalHost,
+      isThreadedTerminalHost: (value: unknown) => value instanceof FakeThreadedTerminal,
+      threadedTerminalCapability: () => ({ supported: true })
+    }))
+    const { createAiPanelCodexTerminalRuntime: createRuntimeWithoutFallback } = await import('@/services/ai/aiPanelCodexTerminalRuntime')
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const conversation = createConversation()
+    const clientBundle = createClient()
+    const logs: Array<{ level: string; event: string; fields?: Record<string, unknown> }> = []
+    const runtime = createRuntimeWithoutFallback<TestConversation>({
+      conversations: () => [conversation],
+      activeConversation: () => conversation,
+      activeConversationId: () => conversation.id,
+      terminalSettings: () => terminalSettings,
+      currentBoundTarget: (item) => item.boundTarget,
+      isConversationVisible: (item) => item.id === conversation.id,
+      syncAttentionState: vi.fn(),
+      labels: {
+        error: () => 'Codex error',
+        bridgeMissing: () => 'Bridge missing',
+        startFailed: () => 'Start failed',
+        threadedUnavailable: () => 'Threaded terminal unavailable',
+        copyEmpty: () => 'Select content first',
+        copySuccess: () => 'Copied',
+        copyFailure: () => 'Copy failed'
+      },
+      notify: vi.fn(),
+      afterDomUpdate: () => Promise.resolve(),
+      copyText: vi.fn(async () => true),
+      log: (level, event, fields) => logs.push({ level, event, fields }),
+      client: clientBundle.client,
+      requestFrame: (callback) => callback(),
+      resizeObserverFactory: (callback) => new FakeResizeObserver(callback)
+    })
+
+    runtime.setHostElement(conversation, host)
+
+    expect(conversation.terminal).toBeNull()
+    expect(conversation.status).toBe('error')
+    expect(conversation.error).toBe('Threaded terminal unavailable')
+    expect(createThreadedTerminalHost).not.toHaveBeenCalled()
+    expect(FakeTerminal.instances).toHaveLength(0)
+    expect(logs).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        level: 'error',
+        event: 'renderer.codex-threaded-terminal.required',
+        fields: expect.objectContaining({ reason: 'threaded terminal switch is disabled' })
+      })
+    ]))
+
+    vi.doUnmock('@shared/runtimeSwitches')
+    vi.doUnmock('@/services/terminal/threadedTerminalRuntime')
+    vi.resetModules()
+  })
+
+  it('reopens an existing threaded Codex terminal when Vue provides a new host element', async () => {
+    vi.resetModules()
+    vi.doMock('@shared/runtimeSwitches', () => ({
+      shouldUseTerminalDebugLogs: () => false,
+      shouldUseThreadedTerminal: () => true
+    }))
+    vi.doMock('@/services/terminal/threadedTerminalRuntime', () => ({
+      ThreadedTerminalFitAddon: FakeFit,
+      createThreadedTerminalHost: vi.fn(() => new FakeThreadedTerminal({})),
+      isThreadedTerminalHost: (value: unknown) => value instanceof FakeThreadedTerminal,
+      threadedTerminalCapability: () => ({ supported: true })
+    }))
+    const { createAiPanelCodexTerminalRuntime: createRuntimeWithThreaded } = await import('@/services/ai/aiPanelCodexTerminalRuntime')
+    const firstHost = document.createElement('div')
+    const nextHost = document.createElement('div')
+    document.body.append(firstHost, nextHost)
+    const conversation = createConversation()
+    const clientBundle = createClient()
+    const runtime = createRuntimeWithThreaded<TestConversation>({
+      conversations: () => [conversation],
+      activeConversation: () => conversation,
+      activeConversationId: () => conversation.id,
+      terminalSettings: () => terminalSettings,
+      currentBoundTarget: (item) => item.boundTarget,
+      isConversationVisible: (item) => item.id === conversation.id,
+      syncAttentionState: vi.fn(),
+      labels: {
+        error: () => 'Codex error',
+        bridgeMissing: () => 'Bridge missing',
+        startFailed: () => 'Start failed',
+        threadedUnavailable: () => 'Threaded terminal unavailable',
+        copyEmpty: () => 'Select content first',
+        copySuccess: () => 'Copied',
+        copyFailure: () => 'Copy failed'
+      },
+      notify: vi.fn(),
+      afterDomUpdate: () => Promise.resolve(),
+      copyText: vi.fn(async () => true),
+      log: vi.fn(),
+      client: clientBundle.client,
+      requestFrame: (callback) => callback(),
+      resizeObserverFactory: (callback) => new FakeResizeObserver(callback)
+    })
+
+    runtime.setHostElement(conversation, firstHost)
+    const terminal = conversation.terminal as unknown as FakeThreadedTerminal
+    terminal.open.mockClear()
+    terminal.ensureSurfaceAttached.mockClear()
+
+    runtime.setHostElement(conversation, nextHost)
+
+    expect(terminal.open).toHaveBeenCalledWith(nextHost)
+    expect(terminal.hostElement()).toBe(nextHost)
+    expect(terminal.ensureSurfaceAttached).toHaveBeenCalledWith({ forceGeometry: true })
+
+    runtime.disposeConversation(conversation)
+    vi.doUnmock('@shared/runtimeSwitches')
+    vi.doUnmock('@/services/terminal/threadedTerminalRuntime')
+    vi.resetModules()
+  })
+
+  it('writes Codex output directly to the threaded terminal host', async () => {
+    vi.resetModules()
+    vi.doMock('@shared/runtimeSwitches', () => ({
+      shouldUseTerminalDebugLogs: () => false,
+      shouldUseThreadedTerminal: () => true
+    }))
+    vi.doMock('@/services/terminal/threadedTerminalRuntime', () => ({
+      ThreadedTerminalFitAddon: FakeFit,
+      createThreadedTerminalHost: vi.fn(() => new FakeThreadedTerminal({})),
+      isThreadedTerminalHost: (value: unknown) => value instanceof FakeThreadedTerminal,
+      threadedTerminalCapability: () => ({ supported: true })
+    }))
+    const { createAiPanelCodexTerminalRuntime: createRuntimeWithThreaded } = await import('@/services/ai/aiPanelCodexTerminalRuntime')
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const conversation = createConversation()
+    const clientBundle = createClient()
+    const runtime = createRuntimeWithThreaded<TestConversation>({
+      conversations: () => [conversation],
+      activeConversation: () => conversation,
+      activeConversationId: () => conversation.id,
+      terminalSettings: () => terminalSettings,
+      currentBoundTarget: (item) => item.boundTarget,
+      isConversationVisible: (item) => item.id === conversation.id,
+      syncAttentionState: vi.fn(),
+      labels: {
+        error: () => 'Codex error',
+        bridgeMissing: () => 'Bridge missing',
+        startFailed: () => 'Start failed',
+        threadedUnavailable: () => 'Threaded terminal unavailable',
+        copyEmpty: () => 'Select content first',
+        copySuccess: () => 'Copied',
+        copyFailure: () => 'Copy failed'
+      },
+      notify: vi.fn(),
+      afterDomUpdate: () => Promise.resolve(),
+      copyText: vi.fn(async () => true),
+      log: vi.fn(),
+      client: clientBundle.client,
+      requestFrame: (callback) => callback(),
+      resizeObserverFactory: (callback) => new FakeResizeObserver(callback)
+    })
+
+    runtime.setHostElement(conversation, host)
+    await runtime.startSession(conversation)
+    const terminal = conversation.terminal as unknown as FakeThreadedTerminal
+    terminal.write.mockClear()
+
+    clientBundle.emitData({ id: 'codex-session-1', data: 'one' })
+    clientBundle.emitData({ id: 'codex-session-1', data: 'two' })
+    await flushAsyncHandlers()
+
+    expect(terminal.write).toHaveBeenCalledTimes(2)
+    expect(terminal.write).toHaveBeenNthCalledWith(1, 'one')
+    expect(terminal.write).toHaveBeenNthCalledWith(2, 'two')
+
+    runtime.disposeConversation(conversation)
+    vi.doUnmock('@shared/runtimeSwitches')
+    vi.doUnmock('@/services/terminal/threadedTerminalRuntime')
+    vi.resetModules()
   })
 
   it('coalesces Codex session output and waits for xterm write callbacks', async () => {

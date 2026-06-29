@@ -1,6 +1,7 @@
 .ai-codex-shell {
   min-height: 0;
   min-width: 0;
+  height: 100%;
   display: grid;
   grid-template-rows: auto auto auto minmax(0, 1fr) auto;
   gap: 8px;
@@ -12,6 +13,7 @@
 }
 
 .ai-codex-target-bar {
+  grid-row: 1;
   position: relative;
   z-index: 1;
   min-width: 0;
@@ -233,6 +235,7 @@
 }
 
 .ai-codex-link-notice {
+  grid-row: 2;
   min-width: 0;
   border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--border));
   border-radius: 6px;
@@ -244,6 +247,7 @@
 }
 
 .ai-codex-status {
+  grid-row: 3;
   min-width: 0;
   height: 24px;
   display: inline-flex;
@@ -277,29 +281,42 @@
 }
 
 .ai-codex-xterm-stack {
+  grid-row: 4;
+  height: 100%;
   min-height: 0;
   min-width: 0;
   display: grid;
+  grid-template: minmax(0, 1fr) / minmax(0, 1fr);
   position: relative;
-}
-
-.ai-codex-xterm-stack > .ai-codex-xterm {
-  grid-area: 1 / 1;
-  z-index: 1;
-}
-
-.ai-codex-xterm {
+  overflow: hidden;
   border: 1px solid var(--border);
   border-radius: 7px;
   background: #090b10;
 }
 
-.app-shell.has-app-background .ai-codex-xterm {
+.ai-codex-xterm-stack > .ai-codex-xterm {
+  grid-area: 1 / 1;
+  z-index: 1;
+  width: 100%;
+  min-height: 0;
+  height: 100%;
+}
+
+.ai-codex-xterm-stack > .threaded-terminal-render-group-canvas {
+  grid-area: 1 / 1;
+  z-index: 0;
+}
+
+.ai-codex-xterm {
+  background: transparent;
+}
+
+.app-shell.has-app-background .ai-codex-xterm-stack {
   background: color-mix(in srgb, #090b10 76%, transparent);
   backdrop-filter: blur(10px);
 }
 
-.app-shell.has-app-background .ai-codex-xterm.is-idle {
+.app-shell.has-app-background .ai-codex-xterm-stack.is-idle {
   background: color-mix(in srgb, #090b10 52%, transparent);
   backdrop-filter: blur(10px);
 }
@@ -315,10 +332,18 @@
 }
 
 .ai-codex-xterm.threaded-terminal-host {
+  border: 0;
+  border-radius: 0;
   background: transparent;
 }
 
+.app-shell.has-app-background .ai-codex-xterm.threaded-terminal-host,
+.app-shell.has-app-background .ai-codex-xterm.threaded-terminal-host.is-idle {
+  backdrop-filter: none;
+}
+
 .ai-codex-error {
+  grid-row: 5;
   min-height: 28px;
   border: 1px solid color-mix(in srgb, #ff4d4f 46%, var(--border));
   border-radius: 6px;

@@ -205,4 +205,45 @@ describe('threadedTerminalCoreWorker', () => {
     expect(secondFrame.dirtyRows).toContain(firstWorkingLine?.y)
     expect(secondWorkingLine?.cells?.[0]).toMatchObject({ x: 0, fg: '#c86432', bold: true })
   })
+
+  it('uses the shared dirty snapshot path for Codex and workspace terminal output', async () => {
+    send({
+      type: 'create',
+      requestId: 'create-codex-1',
+      options: {
+        ...createOptions(),
+        terminalId: 'core-worker-codex',
+        sessionId: 'codex-session-1',
+        surface: 'codex'
+      }
+    })
+    await waitFor(() => messages.some((message) => message.type === 'created' && message.terminalId === 'core-worker-codex'))
+    await waitFor(() => {
+      const snapshot = messages
+        .filter((message): message is Extract<ThreadedTerminalCoreResponse, { type: 'screen' }> => message.type === 'screen')
+        .find((message) => message.snapshot.terminalId === 'core-worker-codex' && message.snapshot.fullReason === 'create')
+      return snapshot?.snapshot
+    })
+
+    send({
+      type: 'data',
+      terminalId: 'core-worker-codex',
+      data: 'Codex\n\x1b[2;1HWorking\x1b[K\x1b[3;1H'
+    })
+    const codexFrame = await waitFor(() => {
+      const next = latestScreen(messages.filter((message) => message.type !== 'screen' || message.snapshot.terminalId === 'core-worker-codex'))
+      return next && visibleText(next).includes('Working') && next.fullReason !== 'create' ? next : undefined
+    })
+
+    expect(codexFrame.full).toBe(false)
+    expect(codexFrame.dirtyRows).toContain(1)
+
+    await createTerminal()
+    send({ type: 'data', terminalId: createOptions().terminalId, data: 'workspace\n' })
+    const workspaceFrame = await waitFor(() => {
+      const next = latestScreen(messages.filter((message) => message.type !== 'screen' || message.snapshot.terminalId === createOptions().terminalId))
+      return next && visibleText(next).includes('workspace') && next.fullReason !== 'create' ? next : undefined
+    })
+    expect(workspaceFrame.full).toBe(false)
+  })
 })

@@ -228,6 +228,7 @@ export const createAiPanelCodexConversationRuntime = (options: AiPanelCodexConve
       error: () => t('ai.codexError'),
       bridgeMissing: () => t('ai.codexBridgeMissing'),
       startFailed: () => t('ai.codexStartFailed'),
+      threadedUnavailable: () => t('ai.codexThreadedUnavailable'),
       copyEmpty: () => '请先选择 Codex 终端内容',
       copySuccess: () => 'Codex 终端内容已复制',
       copyFailure: () => 'Codex 终端复制失败'
@@ -337,6 +338,7 @@ export const createAiPanelCodexConversationRuntime = (options: AiPanelCodexConve
     closeCodexTargetPicker()
     await options.afterDomUpdate()
     aiPanelCodexTerminalRuntime.ensureTerminal(conversation)
+    aiPanelCodexTerminalRuntime.syncConversationSurfaces({ forceActiveGeometry: true })
     if (conversation.boundTarget && aiPanelMode.value === 'codex') await startCodexSession(conversation)
   }
 
@@ -357,6 +359,7 @@ export const createAiPanelCodexConversationRuntime = (options: AiPanelCodexConve
     if (alreadyActive) return
     await options.afterDomUpdate()
     aiPanelCodexTerminalRuntime.ensureTerminal(conversation)
+    aiPanelCodexTerminalRuntime.syncConversationSurfaces({ forceActiveGeometry: true })
     await aiPanelCodexTerminalRuntime.syncActiveBridgeTarget()
     aiPanelCodexTerminalRuntime.fitTerminal({ force: true, conversation })
     aiPanelCodexTerminalRuntime.syncConversationOutput(conversation)
@@ -398,6 +401,7 @@ export const createAiPanelCodexConversationRuntime = (options: AiPanelCodexConve
       activeCodexConversationId.value = closeResult.nextActiveId
       await options.afterDomUpdate()
       aiPanelCodexTerminalRuntime.ensureTerminal(nextConversation)
+      aiPanelCodexTerminalRuntime.syncConversationSurfaces({ forceActiveGeometry: true })
       await aiPanelCodexTerminalRuntime.syncActiveBridgeTarget()
       aiPanelCodexTerminalRuntime.fitTerminal({ force: true, conversation: nextConversation })
       aiPanelCodexTerminalRuntime.syncConversationOutput(nextConversation)
@@ -415,10 +419,12 @@ export const createAiPanelCodexConversationRuntime = (options: AiPanelCodexConve
     storeAiPanelMode(mode)
     options.closePopups()
     if (mode === 'classic') {
+      aiPanelCodexTerminalRuntime.syncConversationSurfaces()
       await options.loadClassicChatData()
       return
     }
     ensureActiveCodexConversation()
+    aiPanelCodexTerminalRuntime.syncConversationSurfaces({ forceActiveGeometry: true })
     void startCodexSession()
     void selectCodexConversationForWorkspacePanel(options.activePanel())
   }

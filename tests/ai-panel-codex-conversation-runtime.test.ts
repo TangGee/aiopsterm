@@ -99,6 +99,8 @@ const createTerminalRuntime = () => {
       conversation.status = 'ready'
     }),
     stopSession: vi.fn(async () => undefined),
+    surfaceVisibility: [] as Array<{ conversationId: string; visible: boolean }>,
+    syncConversationSurfaces: vi.fn(),
     syncConversationOutput: vi.fn(),
     syncActiveBridgeTarget: vi.fn(async () => undefined),
     syncTargetContext: vi.fn(async () => undefined),
@@ -109,6 +111,14 @@ const createTerminalRuntime = () => {
     calls,
     factory: (options: AiPanelCodexTerminalRuntimeOptions<AiPanelCodexConversation>) => {
       calls.syncAttentionState.mockImplementation((conversation: AiPanelCodexConversation) => options.syncAttentionState(conversation))
+      calls.syncConversationSurfaces.mockImplementation(() => {
+        options.conversations().forEach((conversation) => {
+          calls.surfaceVisibility.push({
+            conversationId: conversation.id,
+            visible: options.isConversationVisible ? options.isConversationVisible(conversation) : options.activeConversationId() === conversation.id
+          })
+        })
+      })
       return {
       applyTerminalSettings: calls.applyTerminalSettings,
       clearConversationOutput: calls.clearConversationOutput,
@@ -126,6 +136,7 @@ const createTerminalRuntime = () => {
       startSession: calls.startSession,
       stopSession: calls.stopSession,
       subscribeBridge: vi.fn(),
+      syncConversationSurfaces: calls.syncConversationSurfaces,
       syncConversationOutput: calls.syncConversationOutput,
       syncActiveBridgeTarget: calls.syncActiveBridgeTarget,
       syncTargetContext: calls.syncTargetContext
@@ -301,6 +312,17 @@ describe('aiPanelCodexConversationRuntime', () => {
     expect(terminalRuntime.calls.syncActiveBridgeTarget).toHaveBeenCalled()
     expect(terminalRuntime.calls.fitTerminal).toHaveBeenCalledWith({ force: true, conversation: first })
     expect(terminalRuntime.calls.focusActiveTerminal).toHaveBeenCalled()
+    expect(terminalRuntime.calls.surfaceVisibility.slice(-2)).toEqual([
+      { conversationId: first.id, visible: true },
+      { conversationId: second.id, visible: false }
+    ])
+
+    await runtime.selectCodexConversation(second.id)
+    expect(terminalRuntime.calls.surfaceVisibility.slice(-2)).toEqual([
+      { conversationId: first.id, visible: false },
+      { conversationId: second.id, visible: true }
+    ])
+    await runtime.selectCodexConversation(first.id)
 
     first.status = 'error'
     first.error = 'bridge failed'

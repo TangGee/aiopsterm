@@ -865,6 +865,10 @@ const handleMessage = (message: ThreadedTerminalCoreRequest) => {
       scheduleSnapshot(record, true, 'resize')
       return
     }
+    if (message.type === 'session') {
+      record.sessionId = message.sessionId || undefined
+      return
+    }
     if (message.type === 'settings') {
       applySettings(record, message.settings, message.theme)
       return

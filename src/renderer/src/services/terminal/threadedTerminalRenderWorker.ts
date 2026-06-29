@@ -414,8 +414,11 @@ const fillBackground = (surface: RenderSurface, row?: number) => {
   const context = surface.context
   context.fillStyle = surface.settings.theme.background
   if (typeof row === 'number') {
-    context.fillRect(0, surface.geometry.paddingTop + row * surface.cellHeight, surface.width, surface.cellHeight)
+    const y = surface.geometry.paddingTop + row * surface.cellHeight
+    context.clearRect(0, y, surface.width, surface.cellHeight)
+    context.fillRect(0, y, surface.width, surface.cellHeight)
   } else {
+    context.clearRect(0, 0, surface.width, surface.height)
     context.fillRect(0, 0, surface.width, surface.height)
   }
 }
@@ -759,7 +762,8 @@ const paintSnapshot = (surface: RenderSurface, snapshot: ThreadedTerminalScreenS
 
 const repaintLastSnapshot = (surface: RenderSurface, reason: ThreadedTerminalScreenSnapshot['fullReason']) => {
   if (!surface.lastSnapshot) {
-    fillBackground(surface)
+    withSurfaceClip(surface, () => fillBackground(surface))
+    markSurfaceDirty(surface)
     return
   }
   paintSnapshot(surface, {
@@ -839,6 +843,19 @@ const scheduleFrame = () => {
 
 const schedulePaintSnapshot = (surface: RenderSurface, snapshot: ThreadedTerminalScreenSnapshot) => {
   if (surface.pendingSnapshot) {
+    const canReplaceFull =
+      surface.pendingSnapshot.full &&
+      snapshot.full &&
+      !surface.pendingSnapshot.scrollDeltaRows &&
+      !snapshot.scrollDeltaRows &&
+      surface.pendingSnapshot.viewportY === snapshot.viewportY &&
+      surface.pendingSnapshot.rows === snapshot.rows &&
+      surface.pendingSnapshot.cols === snapshot.cols
+    if (canReplaceFull) {
+      surface.pendingSnapshot = snapshot
+      scheduleFrame()
+      return
+    }
     const canMergeDirty =
       !surface.pendingSnapshot.full &&
       !snapshot.full &&
@@ -986,7 +1003,7 @@ const handleMessage = (message: ThreadedTerminalRenderRequest) => {
         groupId: message.options.groupId,
         renderGroupId: message.options.renderGroupId,
         rect,
-        canvas: group.canvas,
+        canvas: group.paintCanvas,
         context: group.context,
         width: rect.width,
         height: rect.height,
@@ -1049,7 +1066,16 @@ const handleMessage = (message: ThreadedTerminalRenderRequest) => {
       return
     }
     if (message.type === 'visibility') {
+      if (surface.visible === message.visible) return
       surface.visible = message.visible
+      surface.pendingSnapshot = null
+      if (!message.visible) {
+        clearSurfaceRect(surface)
+        presentDirtyRenderGroups()
+        return
+      }
+      repaintLastSnapshot(surface, 'visibility')
+      presentDirtyRenderGroups()
       return
     }
     if (message.type === 'clear') {

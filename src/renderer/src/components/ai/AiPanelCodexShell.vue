@@ -126,7 +126,10 @@
       ></span>
       <span>{{ codexStatusLabel }}</span>
     </div>
-    <div class="ai-codex-xterm-stack">
+    <div
+      class="ai-codex-xterm-stack"
+      :class="{ 'is-idle': activeCodexConversation?.status === 'idle' && !activeCodexConversation?.sessionId }"
+    >
       <div
         v-for="conversation in codexConversations"
         :key="conversation.id"

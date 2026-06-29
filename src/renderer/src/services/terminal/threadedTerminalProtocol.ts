@@ -194,6 +194,7 @@ export type ThreadedTerminalCoreRequest =
   | { type: 'data'; terminalId: string; data: string }
   | { type: 'input'; terminalId: string; data: string }
   | { type: 'resize'; terminalId: string; cols: number; rows: number }
+  | { type: 'session'; terminalId: string; sessionId?: string }
   | { type: 'settings'; terminalId: string; settings: ThreadedTerminalSettings; theme: ThreadedTerminalTheme }
   | { type: 'keyword-highlight'; terminalId: string; config?: ThreadedTerminalKeywordHighlightConfig }
   | { type: 'visibility'; terminalId: string; visible: boolean; priority: ThreadedTerminalPriority }

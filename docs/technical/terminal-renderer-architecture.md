@@ -107,9 +107,15 @@ The threaded renderer uses RenderGroups so context count follows visible regions
 - Each mounted terminal host registers a viewport rect, geometry, settings, and snapshot stream inside its RenderGroup.
 - Hidden or background terminals keep core-worker/session state but do not allocate their own canvas or WebGL context.
 
+The Codex-side RenderGroup has an extra lifecycle constraint: the terminal host can be created before the real Codex PTY session id is known. The renderer must late-bind that session id into the threaded host and core worker when `codex:create` returns or when early `codex:data` claims a pending conversation. Session binding is metadata/state synchronization only; it must not force a new DOM fit loop. Surface attachment and geometry remain owned by the normal open, visibility, fit, and resize paths. Codex tabs share the same `codex-side` group, but only the active tab's surface stays visible; hidden tabs keep their core/session state and stop painting into the shared canvas. Codex output uses the same core worker, dirty-row snapshot path, and render-worker frame cadence as workspace terminals; the surface differs only in RenderGroup placement and visibility policy.
+
 The default backend for each RenderGroup is worker 2D `OffscreenCanvas` painting. WebGL2 is retained as an explicit acceleration experiment behind `AIOPSTERM_TERMINAL_RENDER_BACKEND=webgl2`. In WebGL2 mode, text and backgrounds are still rasterized into a 2D scratch `OffscreenCanvas`; the RenderGroup canvas owns one WebGL2 context and presents the scratch canvas as a texture. WebGL keeps the same ownership rule: one context per visible RenderGroup, not one context per terminal. On current product layout that means at most two foreground contexts: workspace and Codex side.
 
 Within the render worker, drawing is clipped and translated to the terminal viewport rect. Full clears, dirty-row clears, scroll `drawImage()`, cursor rendering, and dispose clears operate only inside that rect, so one pane cannot overwrite or copy pixels from another pane in the shared canvas. Selection overlays, custom scrollbars, hidden input, IME, and clipboard behavior stay in per-terminal DOM hosts above the group canvas.
+
+Transparent or translucent terminal backgrounds must still be real clears. The render worker clears the affected viewport or row before filling the configured background, so Codex's transparent AI-panel surface does not accumulate stale glyphs when the TUI redraws the same status row. When a shared RenderGroup surface becomes hidden, its viewport rect is cleared immediately; when it becomes visible again, the cached snapshot is repainted as a full visibility frame.
+
+For the right-side Codex panel, the stack element owns the terminal frame, overflow clip, and readable background. The threaded host itself stays transparent and does not own a border or backdrop filter. Avoid dynamic parent selectors that change the stack layout when `.threaded-terminal-host` appears, and avoid forcing `ensureSurfaceAttached({ forceGeometry: true })` from repeated Vue ref callbacks. Those patterns can feed layout changes back into `ResizeObserver`, fit, and RenderGroup resize scheduling.
 
 ## Fallback
 
@@ -121,9 +127,9 @@ The threaded path is enabled only when all of these are true:
 
 Electron preview and packaged renderer builds read runtime flags through the preload bridge. `AIOPSTERM_THREADED_TERMINAL=0 scripts/build-and-start.sh --skip-build` disables the threaded path for compatibility testing. `AIOPSTERM_TERMINAL_RENDER_BACKEND=webgl2 scripts/build-and-start.sh --skip-build` enables the experimental WebGL2 RenderGroup backend for an existing build. `VITE_AIOPSTERM_*` flags are only needed for renderer-only test harnesses that do not have the preload bridge available.
 
-If any requirement is missing, aiopsterm logs `renderer.threaded-terminal.unavailable` and creates the existing xterm renderer.
+If any requirement is missing for workspace terminals, aiopsterm logs `renderer.threaded-terminal.unavailable` and creates the existing xterm renderer.
 
-The fallback is the existing main-thread xterm path. It is kept for compatibility with older Chromium/Electron runtimes, unusual canvas environments, and platforms where worker OffscreenCanvas is not available.
+The fallback is the existing main-thread xterm path for the workspace terminal surface. It is kept only for compatibility testing and unusual canvas environments. The right-side Codex terminal does not use this fallback in product mode; it is a terminal surface on the same threaded core/render pipeline as workspace terminals. If the threaded renderer is disabled or cannot initialize, the Codex runtime fails fast with `renderer.codex-threaded-terminal.required` and shows a diagnostic error instead of starting a main-thread xterm instance.
 
 ## Stress Verification
 
