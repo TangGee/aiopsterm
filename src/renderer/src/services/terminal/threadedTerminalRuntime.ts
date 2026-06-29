@@ -2,7 +2,7 @@ import CoreWorker from '@/services/terminal/threadedTerminalCoreWorker?worker'
 import RenderWorker from '@/services/terminal/threadedTerminalRenderWorker?worker'
 import { writeRendererRuntimeLog } from '@/services/app/runtimeLogClient'
 import { copyTextToClipboard, readTextFromClipboard } from '@/services/app/clipboardRuntime'
-import { shouldUseTerminalDebugLogs } from '@shared/runtimeSwitches'
+import { shouldUseTerminalDebugLogs, terminalRenderBackend } from '@shared/runtimeSwitches'
 import {
   fallbackTerminalCellMetrics,
   measureTerminalCellMetrics,
@@ -15,12 +15,15 @@ import type {
   ThreadedTerminalCreateOptions,
   ThreadedTerminalFullReason,
   ThreadedTerminalGeometry,
+  ThreadedTerminalGpuInfo,
   ThreadedTerminalHostCapability,
   ThreadedTerminalKeywordHighlightConfig,
   ThreadedTerminalPriority,
+  ThreadedTerminalRenderBackend,
   ThreadedTerminalRenderRequest,
   ThreadedTerminalRenderResponse,
   ThreadedTerminalRenderSettings,
+  ThreadedTerminalRenderSurfaceRect,
   ThreadedTerminalScreenLine,
   ThreadedTerminalScreenSnapshot,
   ThreadedTerminalSettings,
@@ -115,7 +118,35 @@ type ThreadedTerminalOptions = ThreadedTerminalSettings & {
   scrollback?: number
 }
 
+type ThreadedTerminalRenderGroupHandle = {
+  renderGroupId: string
+  surface: ThreadedTerminalSurface
+  container: HTMLElement
+  canvas: HTMLCanvasElement
+  attached: boolean
+  requestedBackend: ThreadedTerminalRenderBackend
+  backend?: ThreadedTerminalRenderBackend
+  gpu?: ThreadedTerminalGpuInfo
+  width: number
+  height: number
+  dpr: number
+  hosts: Set<string>
+}
+
+type ThreadedTerminalRenderGroupResolution = {
+  renderGroupId: string
+  container: HTMLElement
+}
+
 const defaultWordSeparators = new Set(Array.from(' ()[]{}\'"`'))
+
+declare global {
+  interface Window {
+    __AIOPSTERM_THREADED_TERMINAL_DEBUG__?: {
+      stats: () => ThreadedTerminalDebugStats
+    }
+  }
+}
 
 export type ThreadedTerminalDebugStats = {
   supported: boolean
@@ -133,6 +164,18 @@ export type ThreadedTerminalDebugStats = {
     lastError?: string
   }>
   renderWorkerActive: boolean
+  renderGroups: Array<{
+    renderGroupId: string
+    surface: ThreadedTerminalSurface
+    hosts: number
+    attached: boolean
+    requestedBackend: ThreadedTerminalRenderBackend
+    backend?: ThreadedTerminalRenderBackend
+    gpu?: ThreadedTerminalGpuInfo
+    width: number
+    height: number
+    dpr: number
+  }>
   renderDebug: {
     ready: boolean
     attached: number
@@ -184,6 +227,7 @@ export type ThreadedTerminalPaintMeasure = {
 
 const requestMap = new Map<string, ReadScreenPending>()
 const hostMap = new Map<string, ThreadedTerminalHost>()
+const renderGroupMap = new Map<string, ThreadedTerminalRenderGroupHandle>()
 let corePool: ThreadedTerminalCoreHandle[] | null = null
 let renderWorker: Worker | null = null
 let requestSeq = 0
@@ -278,6 +322,9 @@ const terminalScrollbarWidthPx = 10
 const terminalScrollbarThumbMinPx = 28
 const terminalMinimumStableHostWidthPx = 24
 const terminalMinimumStableHostHeightPx = 24
+const workspaceRenderGroupId = 'workspace-main'
+const codexRenderGroupId = 'codex-side'
+const defaultRenderBackend = (): ThreadedTerminalRenderBackend => terminalRenderBackend()
 
 const blankScreenLine = (y: number): ThreadedTerminalScreenLine => ({ y, text: '', cells: [] })
 
@@ -300,6 +347,163 @@ const postCore = (handle: ThreadedTerminalCoreHandle, message: ThreadedTerminalC
 const postRender = (message: ThreadedTerminalRenderRequest, transfer?: Transferable[]) => {
   if (!renderWorker) ensureRenderWorker()
   renderWorker?.postMessage(message, transfer || [])
+}
+
+const renderGroupIdForSurface = (surface: ThreadedTerminalSurface) =>
+  surface === 'codex' ? codexRenderGroupId : workspaceRenderGroupId
+
+const resolveRenderGroupForHost = (host: HTMLElement, surface: ThreadedTerminalSurface): ThreadedTerminalRenderGroupResolution | null => {
+  if (!host.isConnected) return null
+  const renderGroupId = renderGroupIdForSurface(surface)
+  const container =
+    surface === 'codex'
+      ? (host.closest('.ai-codex-xterm-stack') as HTMLElement | null)
+      : (host.closest('.terminal-grid') as HTMLElement | null)
+  if (!container?.isConnected) return null
+  return { renderGroupId, container }
+}
+
+const ensureRenderGroupCanvas = (container: HTMLElement, surface: ThreadedTerminalSurface, renderGroupId: string) => {
+  const existing = container.querySelector<HTMLCanvasElement>(`:scope > .threaded-terminal-render-group-canvas[data-render-group-id="${renderGroupId}"]`)
+  if (existing) return existing
+  const style = window.getComputedStyle(container)
+  if (style.position === 'static') container.style.position = 'relative'
+  const canvas = document.createElement('canvas')
+  canvas.className = 'threaded-terminal-render-group-canvas'
+  canvas.dataset.renderGroupId = renderGroupId
+  canvas.dataset.surface = surface
+  canvas.setAttribute('aria-hidden', 'true')
+  Object.assign(canvas.style, {
+    position: 'absolute',
+    inset: '0',
+    width: '100%',
+    height: '100%',
+    pointerEvents: 'none',
+    zIndex: '0'
+  })
+  container.prepend(canvas)
+  return canvas
+}
+
+const groupSizeForContainer = (container: HTMLElement) => {
+  const rect = container.getBoundingClientRect()
+  return {
+    width: Math.max(1, Math.floor(container.clientWidth || rect.width || 1)),
+    height: Math.max(1, Math.floor(container.clientHeight || rect.height || 1)),
+    dpr: window.devicePixelRatio || 1
+  }
+}
+
+const isRenderableBox = (element: HTMLElement) => {
+  const rect = element.getBoundingClientRect()
+  const width = Math.floor(element.clientWidth || rect.width || 0)
+  const height = Math.floor(element.clientHeight || rect.height || 0)
+  return width >= terminalMinimumStableHostWidthPx && height >= terminalMinimumStableHostHeightPx
+}
+
+const ensureRenderGroup = (host: HTMLElement, surface: ThreadedTerminalSurface) => {
+  const resolved = resolveRenderGroupForHost(host, surface)
+  if (!resolved) return null
+  const { renderGroupId, container } = resolved
+  const previous = renderGroupMap.get(renderGroupId)
+  if (previous && previous.container !== container) {
+    postRender({ type: 'dispose-group', renderGroupId })
+    previous.canvas.remove()
+    previous.hosts.forEach((terminalId) => hostMap.get(terminalId)?.markSurfaceDetachedByRenderGroup(renderGroupId))
+    renderGroupMap.delete(renderGroupId)
+  }
+  const size = groupSizeForContainer(container)
+  let group = renderGroupMap.get(renderGroupId)
+  if (!group) {
+    const canvas = ensureRenderGroupCanvas(container, surface, renderGroupId)
+    group = {
+      renderGroupId,
+      surface,
+      container,
+      canvas,
+      attached: false,
+      requestedBackend: defaultRenderBackend(),
+      width: size.width,
+      height: size.height,
+      dpr: size.dpr,
+      hosts: new Set()
+    }
+    renderGroupMap.set(renderGroupId, group)
+  }
+  if (!group.attached) {
+    const offscreen = group.canvas.transferControlToOffscreen()
+    group.attached = true
+    group.width = size.width
+    group.height = size.height
+    group.dpr = size.dpr
+    logThreadedTerminal('debug', 'renderer.threaded-terminal.render-group-attach', {
+      renderGroupId,
+      surface,
+      width: size.width,
+      height: size.height,
+      dpr: size.dpr
+    })
+    postRender(
+      {
+        type: 'attach-group',
+        options: {
+          renderGroupId,
+          canvas: offscreen,
+          devicePixelRatio: size.dpr,
+          width: size.width,
+          height: size.height,
+          backend: group.requestedBackend
+        }
+      },
+      [offscreen]
+    )
+  } else if (group.width !== size.width || group.height !== size.height || group.dpr !== size.dpr) {
+    group.width = size.width
+    group.height = size.height
+    group.dpr = size.dpr
+    logThreadedTerminal('debug', 'renderer.threaded-terminal.render-group-resize', {
+      renderGroupId,
+      surface,
+      width: size.width,
+      height: size.height,
+      dpr: size.dpr
+    })
+    postRender({
+      type: 'resize-group',
+      renderGroupId,
+      devicePixelRatio: size.dpr,
+      width: size.width,
+      height: size.height
+    })
+  }
+  return group
+}
+
+const detachHostFromRenderGroups = (terminalId: string) => {
+  renderGroupMap.forEach((group, renderGroupId) => {
+    if (!group.hosts.delete(terminalId) || group.hosts.size) return
+    postRender({ type: 'dispose-group', renderGroupId })
+    group.canvas.remove()
+    renderGroupMap.delete(renderGroupId)
+  })
+}
+
+const removeHostFromOtherRenderGroups = (terminalId: string, keepRenderGroupId: string) => {
+  renderGroupMap.forEach((group, renderGroupId) => {
+    if (renderGroupId === keepRenderGroupId) return
+    group.hosts.delete(terminalId)
+  })
+}
+
+const rectForHostInGroup = (host: HTMLElement, group: ThreadedTerminalRenderGroupHandle): ThreadedTerminalRenderSurfaceRect => {
+  const hostRect = host.getBoundingClientRect()
+  const groupRect = group.container.getBoundingClientRect()
+  return {
+    x: hostRect.left - groupRect.left,
+    y: hostRect.top - groupRect.top,
+    width: Math.max(1, Math.floor(host.clientWidth || hostRect.width || 1) - terminalScrollbarWidthPx),
+    height: Math.max(1, Math.floor(host.clientHeight || hostRect.height || 1))
+  }
 }
 
 const handleCoreMessage = (handle: ThreadedTerminalCoreHandle, message: ThreadedTerminalCoreResponse) => {
@@ -369,6 +573,26 @@ const handleRenderMessage = (message: ThreadedTerminalRenderResponse) => {
   }
   if (message.type === 'attached') {
     renderDebug.attached += 1
+    return
+  }
+  if (message.type === 'group-attached') {
+    const group = renderGroupMap.get(message.renderGroupId)
+    if (group) {
+      group.backend = message.backend
+      group.gpu = message.gpu
+      group.canvas.dataset.backend = message.backend
+      if (message.gpu?.renderer) group.canvas.dataset.gpuRenderer = message.gpu.renderer
+      if (message.gpu?.vendor) group.canvas.dataset.gpuVendor = message.gpu.vendor
+      if (message.gpu?.unmaskedRenderer) group.canvas.dataset.gpuUnmaskedRenderer = message.gpu.unmaskedRenderer
+      if (message.gpu?.unmaskedVendor) group.canvas.dataset.gpuUnmaskedVendor = message.gpu.unmaskedVendor
+    }
+    logThreadedTerminal('debug', 'renderer.threaded-terminal.render-group-attached', {
+      renderGroupId: message.renderGroupId,
+      backend: message.backend,
+      gpu: message.gpu,
+      width: message.width,
+      height: message.height
+    })
     return
   }
   if (message.type === 'pong') return
@@ -512,13 +736,13 @@ export class ThreadedTerminalHost {
   rows: number
   buffer: { active: ThreadedTerminalBufferActive }
   private host: HTMLElement | null = null
-  private canvas: HTMLCanvasElement | null = null
+  private renderSurfaceElement: HTMLElement | null = null
   private inputElement: HTMLTextAreaElement | null = null
   private scrollbar: HTMLElement | null = null
   private scrollbarThumb: HTMLElement | null = null
   private selectionLayer: HTMLElement | null = null
   private eventController: AbortController | null = null
-  private offscreenTransferred = false
+  private surfaceAttached = false
   private resizeObserver: ResizeObserver | null = null
   private dataHandlers = new Set<EventHandler<string>>()
   private resizeHandlers = new Set<ResizeHandler>()
@@ -528,10 +752,13 @@ export class ThreadedTerminalHost {
   private snapshotScreenLines: ThreadedTerminalScreenLine[] = []
   private lastSnapshot: ThreadedTerminalScreenSnapshot | null = null
   private lastRenderFrame: RenderFrameAck | null = null
-  private lastCanvasSize: { width: number; height: number; dpr: number } | null = null
+  private renderGroup: ThreadedTerminalRenderGroupHandle | null = null
+  private lastSurfaceLayout: { renderGroupId: string; x: number; y: number; width: number; height: number; geometrySeq: number } | null = null
   private geometrySeq = 0
   private geometry: ThreadedTerminalGeometry | null = null
   private pendingFitFrame: number | null = null
+  private pendingSurfaceAttachFrame: number | null = null
+  private surfaceAttachRetryBudget = 0
   private lastStableFit: { width: number; height: number; cols: number; rows: number } | null = null
   private cellMetricsSignature = ''
   private lastSmallGeometryLogSignature = ''
@@ -625,13 +852,13 @@ export class ThreadedTerminalHost {
     element.classList.add('threaded-terminal-host')
     element.tabIndex = element.tabIndex >= 0 ? element.tabIndex : 0
     element.style.position = element.style.position || 'relative'
-    const canvas = document.createElement('canvas')
-    canvas.className = 'threaded-terminal-canvas'
-    canvas.setAttribute('aria-hidden', 'true')
-    Object.assign(canvas.style, {
-      display: 'block',
-      width: `calc(100% - ${terminalScrollbarWidthPx}px)`,
-      height: '100%'
+    const renderSurface = document.createElement('div')
+    renderSurface.className = 'threaded-terminal-surface'
+    renderSurface.setAttribute('aria-hidden', 'true')
+    Object.assign(renderSurface.style, {
+      position: 'absolute',
+      inset: `0 ${terminalScrollbarWidthPx}px 0 0`,
+      pointerEvents: 'none'
     })
     const selectionLayer = document.createElement('div')
     selectionLayer.className = 'threaded-terminal-selection-layer'
@@ -702,8 +929,8 @@ export class ThreadedTerminalHost {
       caretColor: 'transparent',
       pointerEvents: 'none'
     })
-    element.replaceChildren(canvas, selectionLayer, scrollbar, inputElement)
-    this.canvas = canvas
+    element.replaceChildren(renderSurface, selectionLayer, scrollbar, inputElement)
+    this.renderSurfaceElement = renderSurface
     this.selectionLayer = selectionLayer
     this.scrollbar = scrollbar
     this.scrollbarThumb = scrollbarThumb
@@ -734,7 +961,7 @@ export class ThreadedTerminalHost {
       return false
     }
     this.ensureCoreAndSurface()
-    return this.offscreenTransferred
+    return this.surfaceAttached
   }
 
   startCoreOnly() {
@@ -754,7 +981,7 @@ export class ThreadedTerminalHost {
     this.buffer.active.length = 0
     this.clearSelection()
     if (this.coreCreated) postCore(this.coreHandle, { type: 'clear', terminalId: this.terminalId })
-    postRender({ type: 'clear', terminalId: this.terminalId })
+    if (this.surfaceAttached) postRender({ type: 'clear', terminalId: this.terminalId })
   }
 
   dispose() {
@@ -771,7 +998,7 @@ export class ThreadedTerminalHost {
   }
 
   detachSurface() {
-    const hadSurface = this.offscreenTransferred
+    const hadSurface = this.surfaceAttached
     this.eventController?.abort()
     this.eventController = null
     this.resizeObserver?.disconnect()
@@ -780,6 +1007,11 @@ export class ThreadedTerminalHost {
       cancelAnimationFrame(this.pendingFitFrame)
       this.pendingFitFrame = null
     }
+    if (this.pendingSurfaceAttachFrame !== null) {
+      cancelAnimationFrame(this.pendingSurfaceAttachFrame)
+      this.pendingSurfaceAttachFrame = null
+    }
+    this.surfaceAttachRetryBudget = 0
     if (this.pendingSmallLayoutFrame !== null) {
       cancelAnimationFrame(this.pendingSmallLayoutFrame)
       this.pendingSmallLayoutFrame = null
@@ -789,25 +1021,36 @@ export class ThreadedTerminalHost {
       this.host.replaceChildren()
     }
     this.host = null
-    this.canvas = null
+    this.renderSurfaceElement = null
     this.inputElement = null
     this.scrollbar = null
     this.scrollbarThumb = null
     this.selectionLayer = null
     this.eventController = null
-    this.offscreenTransferred = false
-    this.lastCanvasSize = null
+    this.surfaceAttached = false
+    this.renderGroup = null
+    this.lastSurfaceLayout = null
     this.geometry = null
     this.lastStableFit = null
     this.selection = null
     this.composing = false
     this.skipNextInputText = null
+    if (hadSurface) {
+      postRender({ type: 'dispose', terminalId: this.terminalId })
+      detachHostFromRenderGroups(this.terminalId)
+    }
     if (!this.disposed) {
       this.visible = false
       this.priority = 'background'
       if (this.coreCreated) postCore(this.coreHandle, { type: 'visibility', terminalId: this.terminalId, visible: false, priority: 'background' })
     }
-    if (hadSurface) postRender({ type: 'dispose', terminalId: this.terminalId })
+  }
+
+  markSurfaceDetachedByRenderGroup(renderGroupId: string) {
+    if (this.lastSurfaceLayout?.renderGroupId !== renderGroupId && this.renderGroup?.renderGroupId !== renderGroupId) return
+    this.surfaceAttached = false
+    this.renderGroup = null
+    this.lastSurfaceLayout = null
   }
 
   write(data: string, callback?: () => void) {
@@ -960,7 +1203,7 @@ export class ThreadedTerminalHost {
   }
 
   paintSnapshot(snapshot: ThreadedTerminalScreenSnapshot) {
-    if (!this.offscreenTransferred || !snapshot.visible || !this.visible) return
+    if (!this.surfaceAttached || !snapshot.visible || !this.visible) return
     postRender({ type: 'screen', snapshot })
   }
 
@@ -971,12 +1214,15 @@ export class ThreadedTerminalHost {
   }
 
   setVisibility(visible: boolean, priority: ThreadedTerminalPriority) {
-    if (this.visible === visible && this.priority === priority) return
+    const unchanged = this.visible === visible && this.priority === priority
     this.visible = visible
     this.priority = priority
+    if (visible && !this.surfaceAttached && this.host) this.ensureSurfaceAttached({ forceGeometry: true })
+    if (visible && !this.surfaceAttached) this.scheduleSurfaceAttachRetry({ forceGeometry: true, attempts: 8 })
+    if (unchanged && (!visible || this.surfaceAttached || !this.host)) return
     if (this.coreCreated) postCore(this.coreHandle, { type: 'visibility', terminalId: this.terminalId, visible, priority })
-    postRender({ type: 'visibility', terminalId: this.terminalId, visible })
-    if (visible && this.offscreenTransferred && this.lastSnapshot) {
+    if (this.surfaceAttached) postRender({ type: 'visibility', terminalId: this.terminalId, visible })
+    if (visible && this.surfaceAttached && this.lastSnapshot) {
       postRender({
         type: 'screen',
         snapshot: this.fullSnapshotFromCache('visibility')
@@ -1014,9 +1260,10 @@ export class ThreadedTerminalHost {
     this.options.scrollback = normalized.scrollBack
     this.options.termName = normalized.terminalType
     this.fit({ allowUnstable: true, forceMetrics: true })
+    if (this.visible && !this.surfaceAttached && this.host) this.ensureSurfaceAttached({ forceGeometry: true })
     if (!this.coreCreated) return
     postCore(this.coreHandle, { type: 'settings', terminalId: this.terminalId, settings: normalized, theme: this.theme })
-    if (this.offscreenTransferred && this.geometry) {
+    if (this.surfaceAttached && this.geometry) {
       postRender({
         type: 'settings',
         terminalId: this.terminalId,
@@ -1100,7 +1347,7 @@ export class ThreadedTerminalHost {
       cols: this.cols,
       rows: this.rows,
       coreCreated: this.coreCreated,
-      surfaceAttached: this.offscreenTransferred,
+      surfaceAttached: this.surfaceAttached,
       lastSnapshotSeq: this.lastSnapshot?.seq || 0,
       lastFrameSeq: this.lastRenderFrame?.seq || 0,
       lastFrameAt: this.lastRenderFrame?.at || 0
@@ -1134,15 +1381,15 @@ export class ThreadedTerminalHost {
     const rect = this.host.getBoundingClientRect()
     const width = Math.floor(this.host.clientWidth || rect.width || 0)
     const height = Math.floor(this.host.clientHeight || rect.height || 0)
-    if (!options.allowUnstable && this.shouldDeferUnstableFit(width, height)) {
-      if (this.lastStableFit) this.scheduleFit()
+    if (this.shouldDeferUnstableFit(width, height)) {
+      if (this.lastStableFit || options.allowUnstable) this.scheduleFit()
       return false
     }
     const geometry = this.computeGeometry(width, height, options)
     this.geometry = geometry
     this.lastStableFit = { width, height, cols: geometry.cols, rows: geometry.rows }
     if (useThreadedTerminalDiagnostics()) this.logSmallGeometryDiagnostic(width, height, geometry)
-    this.resizeCanvas(geometry)
+    this.syncRenderSurfaceLayout(geometry)
     if (useThreadedTerminalDiagnostics()) this.logSmallLayoutDiagnostic('after-fit', geometry, width, height)
     this.resize(geometry.cols, geometry.rows)
     this.updateInputPosition()
@@ -1197,7 +1444,7 @@ export class ThreadedTerminalHost {
 
   private logSmallGeometryDiagnostic(hostWidth: number, hostHeight: number, geometry: ThreadedTerminalGeometry) {
     if (!useThreadedTerminalDiagnostics() || geometry.cols > 16) return
-    const canvasRect = this.canvas?.getBoundingClientRect()
+    const surfaceRect = this.renderSurfaceElement?.getBoundingClientRect()
     const signature = [
       geometry.cols,
       geometry.rows,
@@ -1220,10 +1467,10 @@ export class ThreadedTerminalHost {
       surface: this.surface,
       hostWidth,
       hostHeight,
-      canvasClientWidth: this.canvas?.clientWidth || 0,
-      canvasClientHeight: this.canvas?.clientHeight || 0,
-      canvasRectWidth: canvasRect?.width || 0,
-      canvasRectHeight: canvasRect?.height || 0,
+      canvasClientWidth: this.renderSurfaceElement?.clientWidth || 0,
+      canvasClientHeight: this.renderSurfaceElement?.clientHeight || 0,
+      canvasRectWidth: surfaceRect?.width || 0,
+      canvasRectHeight: surfaceRect?.height || 0,
       dpr: window.devicePixelRatio || 1,
       cols: geometry.cols,
       rows: geometry.rows,
@@ -1276,7 +1523,7 @@ export class ThreadedTerminalHost {
 
   private logSmallLayoutDiagnostic(stage: 'after-fit' | 'next-frame', geometry: ThreadedTerminalGeometry, measuredHostWidth: number, measuredHostHeight: number) {
     if (!useThreadedTerminalDiagnostics() || geometry.cols > 16 || !this.host) return
-    const canvas = this.canvas
+    const canvas = this.renderSurfaceElement
     const pane = this.host.closest('.terminal-pane') as HTMLElement | null
     const grid = this.host.closest('.terminal-grid') as HTMLElement | null
     const title = pane?.querySelector<HTMLElement>('.pane-title') || null
@@ -1325,6 +1572,16 @@ export class ThreadedTerminalHost {
       grid: this.elementBoxFields(grid),
       title: this.elementBoxFields(title),
       scrollbar: this.elementBoxFields(this.scrollbar),
+      renderGroup: this.renderGroup
+        ? {
+            renderGroupId: this.renderGroup.renderGroupId,
+            width: this.renderGroup.width,
+            height: this.renderGroup.height,
+            dpr: this.renderGroup.dpr,
+            hosts: this.renderGroup.hosts.size,
+            canvas: this.elementBoxFields(this.renderGroup.canvas)
+          }
+        : null,
       dpr: window.devicePixelRatio || 1,
       ...this.logFields
     })
@@ -1353,10 +1610,34 @@ export class ThreadedTerminalHost {
     })
   }
 
+  private scheduleSurfaceAttachRetry(options: { forceGeometry?: boolean; attempts?: number } = {}) {
+    if (this.disposed || !this.visible || this.surfaceAttached) return
+    this.surfaceAttachRetryBudget = Math.max(this.surfaceAttachRetryBudget, options.attempts ?? 6)
+    if (this.pendingSurfaceAttachFrame !== null) return
+    this.pendingSurfaceAttachFrame = requestAnimationFrame(() => {
+      this.pendingSurfaceAttachFrame = null
+      if (this.disposed || !this.visible || this.surfaceAttached) return
+      const attached = this.ensureSurfaceAttached({ forceGeometry: options.forceGeometry })
+      if (attached || !this.visible || this.disposed) {
+        this.surfaceAttachRetryBudget = 0
+        return
+      }
+      this.surfaceAttachRetryBudget -= 1
+      if (this.surfaceAttachRetryBudget > 0) this.scheduleSurfaceAttachRetry({ forceGeometry: options.forceGeometry, attempts: this.surfaceAttachRetryBudget })
+    })
+  }
+
   private ensureCoreAndSurface() {
     if (!this.geometry || this.disposed) return
     if (!this.coreCreated) this.createCore(this.initialData)
-    if (!this.offscreenTransferred && this.canvas) this.attachCanvas()
+    if (!this.surfaceAttached && this.host && this.visible) this.attachSurface()
+  }
+
+  private canAttachRenderSurface() {
+    if (!this.host || !this.visible) return false
+    const resolved = resolveRenderGroupForHost(this.host, this.surface)
+    if (!resolved) return false
+    return isRenderableBox(this.host) && isRenderableBox(resolved.container)
   }
 
   private focusInput() {
@@ -1534,7 +1815,7 @@ export class ThreadedTerminalHost {
   }
 
   private pointFromMouseEvent(event: MouseEvent): ThreadedTerminalSelectionPoint {
-    const rect = this.canvas?.getBoundingClientRect() || this.host?.getBoundingClientRect()
+    const rect = this.renderSurfaceElement?.getBoundingClientRect() || this.host?.getBoundingClientRect()
     const left = (rect?.left || 0) + (this.geometry?.paddingLeft || 0)
     const top = (rect?.top || 0) + (this.geometry?.paddingTop || 0)
     const x = Math.max(0, Math.min(this.cols, Math.floor((event.clientX - left) / Math.max(1, this.cellMetrics.width))))
@@ -1733,38 +2014,62 @@ export class ThreadedTerminalHost {
     })
   }
 
-  private attachCanvas() {
-    if (!this.canvas || this.offscreenTransferred) return
+  private attachSurface() {
+    if (!this.host || this.surfaceAttached) return
     const capability = threadedTerminalCapability()
     if (!capability.supported) throw new Error(capability.reason || 'threaded terminal unsupported')
+    if (!this.canAttachRenderSurface()) {
+      this.scheduleFit()
+      return
+    }
     if (!this.geometry) {
       if (!this.fit()) return
-      if (this.offscreenTransferred) return
+      if (this.surfaceAttached) return
     }
     const geometry = this.geometry
     if (!geometry) return
-    const offscreen = this.canvas.transferControlToOffscreen()
-    this.offscreenTransferred = true
-    const dpr = window.devicePixelRatio || 1
-    postRender(
-      {
-        type: 'attach',
-        options: {
-          terminalId: this.terminalId,
-          groupId: this.groupId,
-          canvas: offscreen,
-          devicePixelRatio: dpr,
-          settings: renderSettingsFor(normalizeSettings(this.options), this.theme),
-          geometry
-        }
-      },
-      [offscreen]
-    )
-    this.lastCanvasSize = {
-      width: geometry.canvasWidth,
-      height: geometry.canvasHeight,
-      dpr
+    const group = ensureRenderGroup(this.host, this.surface)
+    if (!group) {
+      this.scheduleFit()
+      return
     }
+    const rect = rectForHostInGroup(this.host, group)
+    this.renderGroup = group
+    group.hosts.add(this.terminalId)
+    removeHostFromOtherRenderGroups(this.terminalId, group.renderGroupId)
+    this.surfaceAttached = true
+    this.lastSurfaceLayout = {
+      renderGroupId: group.renderGroupId,
+      x: rect.x,
+      y: rect.y,
+      width: rect.width,
+      height: rect.height,
+      geometrySeq: geometry.seq
+    }
+    logThreadedTerminal('debug', 'renderer.threaded-terminal.surface-attach', {
+      terminalId: this.terminalId,
+      sessionId: this.sessionId,
+      groupId: this.groupId,
+      surface: this.surface,
+      renderGroupId: group.renderGroupId,
+      rect,
+      cols: geometry.cols,
+      rows: geometry.rows,
+      hasSnapshot: Boolean(this.lastSnapshot),
+      visible: this.visible,
+      ...this.logFields
+    })
+    postRender({
+      type: 'attach',
+      options: {
+        terminalId: this.terminalId,
+        groupId: this.groupId,
+        renderGroupId: group.renderGroupId,
+        rect,
+        settings: renderSettingsFor(normalizeSettings(this.options), this.theme),
+        geometry
+      }
+    })
     if (this.lastSnapshot && this.visible) {
       postRender({
         type: 'screen',
@@ -1903,27 +2208,48 @@ export class ThreadedTerminalHost {
     }
   }
 
-  private resizeCanvas(geometry = this.geometry) {
-    if (!this.host || !this.canvas || !this.offscreenTransferred) return
+  private syncRenderSurfaceLayout(geometry = this.geometry) {
+    if (!this.host || !this.surfaceAttached) return
     if (!geometry) return
-    const nextSize = {
-      width: geometry.canvasWidth,
-      height: geometry.canvasHeight,
-      dpr: window.devicePixelRatio || 1
+    if (!this.canAttachRenderSurface()) {
+      this.scheduleFit()
+      return
     }
+    const group = ensureRenderGroup(this.host, this.surface)
+    if (!group) {
+      this.markSurfaceDetachedByRenderGroup(this.lastSurfaceLayout?.renderGroupId || this.renderGroup?.renderGroupId || '')
+      this.scheduleFit()
+      return
+    }
+    if (!this.surfaceAttached) {
+      this.attachSurface()
+      return
+    }
+    const rect = rectForHostInGroup(this.host, group)
+    this.renderGroup = group
     if (
-      this.lastCanvasSize &&
-      this.lastCanvasSize.width === nextSize.width &&
-      this.lastCanvasSize.height === nextSize.height &&
-      this.lastCanvasSize.dpr === nextSize.dpr
+      this.lastSurfaceLayout &&
+      this.lastSurfaceLayout.renderGroupId === group.renderGroupId &&
+      this.lastSurfaceLayout.x === rect.x &&
+      this.lastSurfaceLayout.y === rect.y &&
+      this.lastSurfaceLayout.width === rect.width &&
+      this.lastSurfaceLayout.height === rect.height &&
+      this.lastSurfaceLayout.geometrySeq === geometry.seq
     ) {
       return
     }
-    this.lastCanvasSize = nextSize
+    this.lastSurfaceLayout = {
+      renderGroupId: group.renderGroupId,
+      x: rect.x,
+      y: rect.y,
+      width: rect.width,
+      height: rect.height,
+      geometrySeq: geometry.seq
+    }
     postRender({
       type: 'resize',
       terminalId: this.terminalId,
-      devicePixelRatio: nextSize.dpr,
+      rect,
       geometry
     })
   }
@@ -2005,8 +2331,26 @@ export const getThreadedTerminalDebugStats = (): ThreadedTerminalDebugStats => {
       lastError: handle.lastError
     })),
     renderWorkerActive: Boolean(renderWorker),
+    renderGroups: Array.from(renderGroupMap.values()).map((group) => ({
+      renderGroupId: group.renderGroupId,
+      surface: group.surface,
+      hosts: group.hosts.size,
+      attached: group.attached,
+      requestedBackend: group.requestedBackend,
+      backend: group.backend,
+      gpu: group.gpu,
+      width: group.width,
+      height: group.height,
+      dpr: group.dpr
+    })),
     renderDebug: { ...renderDebug },
     hostCount: hostMap.size,
     hosts: Array.from(hostMap.values()).map((host) => host.debugInfo())
+  }
+}
+
+if (typeof window !== 'undefined') {
+  window.__AIOPSTERM_THREADED_TERMINAL_DEBUG__ = {
+    stats: getThreadedTerminalDebugStats
   }
 }

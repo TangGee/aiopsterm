@@ -22,6 +22,11 @@ class FakeCanvasContext {
   setTransform = vi.fn()
   save = vi.fn()
   restore = vi.fn()
+  beginPath = vi.fn()
+  rect = vi.fn()
+  clip = vi.fn()
+  translate = vi.fn()
+  clearRect = vi.fn()
   measureText = vi.fn(() => ({ width: 99 }))
   fillRect = vi.fn((x: number, y: number, width: number, height: number) => {
     this.operations.push({ type: 'fillRect', x, y, width, height, fillStyle: this.fillStyle })
@@ -32,13 +37,93 @@ class FakeCanvasContext {
   drawImage = vi.fn()
 }
 
+class FakeWebgl2Context {
+  readonly VERTEX_SHADER = 35633
+  readonly FRAGMENT_SHADER = 35632
+  readonly COMPILE_STATUS = 35713
+  readonly LINK_STATUS = 35714
+  readonly ARRAY_BUFFER = 34962
+  readonly STATIC_DRAW = 35044
+  readonly TEXTURE_2D = 3553
+  readonly TEXTURE_MIN_FILTER = 10241
+  readonly TEXTURE_MAG_FILTER = 10240
+  readonly NEAREST = 9728
+  readonly TEXTURE_WRAP_S = 10242
+  readonly TEXTURE_WRAP_T = 10243
+  readonly CLAMP_TO_EDGE = 33071
+  readonly UNPACK_FLIP_Y_WEBGL = 37440
+  readonly RGBA = 6408
+  readonly UNSIGNED_BYTE = 5121
+  readonly COLOR_BUFFER_BIT = 16384
+  readonly FLOAT = 5126
+  readonly TEXTURE0 = 33984
+  readonly RENDERER = 7937
+  readonly VENDOR = 7936
+  shaderSource = vi.fn()
+  compileShader = vi.fn()
+  getShaderParameter = vi.fn(() => true)
+  getShaderInfoLog = vi.fn(() => '')
+  deleteShader = vi.fn()
+  attachShader = vi.fn()
+  linkProgram = vi.fn()
+  getProgramParameter = vi.fn(() => true)
+  getProgramInfoLog = vi.fn(() => '')
+  deleteProgram = vi.fn()
+  createShader = vi.fn((type: number) => ({ type }))
+  createProgram = vi.fn(() => ({}))
+  createBuffer = vi.fn(() => ({}))
+  createTexture = vi.fn(() => ({}))
+  bindBuffer = vi.fn()
+  bufferData = vi.fn()
+  bindTexture = vi.fn()
+  texParameteri = vi.fn()
+  pixelStorei = vi.fn()
+  getAttribLocation = vi.fn((_program: unknown, name: string) => (name === 'a_position' ? 0 : 1))
+  getUniformLocation = vi.fn(() => ({}))
+  getExtension = vi.fn((name: string) =>
+    name === 'WEBGL_debug_renderer_info'
+      ? { UNMASKED_RENDERER_WEBGL: 37446, UNMASKED_VENDOR_WEBGL: 37445 }
+      : null
+  )
+  getParameter = vi.fn((parameter: number) => {
+    if (parameter === this.RENDERER) return 'Fake WebGL2 Renderer'
+    if (parameter === this.VENDOR) return 'Fake WebGL2 Vendor'
+    if (parameter === 37446) return 'Fake Hardware Renderer'
+    if (parameter === 37445) return 'Fake Hardware Vendor'
+    return undefined
+  })
+  texImage2D = vi.fn()
+  viewport = vi.fn()
+  clearColor = vi.fn()
+  clear = vi.fn()
+  useProgram = vi.fn()
+  enableVertexAttribArray = vi.fn()
+  vertexAttribPointer = vi.fn()
+  activeTexture = vi.fn()
+  texSubImage2D = vi.fn()
+  uniform1i = vi.fn()
+  drawArrays = vi.fn()
+  flush = vi.fn()
+  deleteBuffer = vi.fn()
+  deleteTexture = vi.fn()
+}
+
 class FakeOffscreenCanvas {
   width = 0
   height = 0
   readonly context = new FakeCanvasContext()
+  readonly webgl2Context?: FakeWebgl2Context
+
+  constructor(width = 0, height = 0, options: { webgl2?: boolean } = {}) {
+    this.width = width
+    this.height = height
+    this.webgl2Context = options.webgl2 ? new FakeWebgl2Context() : undefined
+  }
 
   getContext(kind: string) {
-    return kind === '2d' ? this.context : null
+    if (kind === '2d') return this.context
+    if (kind === 'webgl2') return this.webgl2Context || null
+    return null
   }
 }
 
@@ -130,15 +215,19 @@ const geometry = (overrides: Partial<ThreadedTerminalGeometry> = {}): ThreadedTe
 })
 
 const attachMessage = (
-  canvas: FakeOffscreenCanvas,
   overrides: Partial<ThreadedTerminalGeometry> = {}
 ): ThreadedTerminalRenderRequest => ({
   type: 'attach',
   options: {
     terminalId: 'render-worker-terminal',
     groupId: 'group-1',
-    canvas: canvas as unknown as OffscreenCanvas,
-    devicePixelRatio: 1,
+    renderGroupId: 'render-group-1',
+    rect: {
+      x: 0,
+      y: 0,
+      width: geometry(overrides).canvasWidth,
+      height: geometry(overrides).canvasHeight
+    },
     settings: {
       fontFamily: 'JetBrains Mono',
       fontSize: 13,
@@ -155,8 +244,21 @@ const attachMessage = (
   }
 })
 
+const attachGroupMessage = (canvas: FakeOffscreenCanvas, backend: '2d' | 'webgl2' = '2d'): ThreadedTerminalRenderRequest => ({
+  type: 'attach-group',
+  options: {
+    renderGroupId: 'render-group-1',
+    canvas: canvas as unknown as OffscreenCanvas,
+    devicePixelRatio: 1,
+    width: 80,
+    height: 48,
+    backend
+  }
+})
+
 describe('threadedTerminalRenderWorker', () => {
   let originalSelfDescriptor: PropertyDescriptor | undefined
+  let originalOffscreenCanvasDescriptor: PropertyDescriptor | undefined
   let scope: TestWorkerScope
   let messages: ThreadedTerminalRenderResponse[]
   let canvas: FakeOffscreenCanvas
@@ -175,9 +277,14 @@ describe('threadedTerminalRenderWorker', () => {
       clearTimeout: globalThis.clearTimeout.bind(globalThis)
     }
     originalSelfDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'self')
+    originalOffscreenCanvasDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'OffscreenCanvas')
     Object.defineProperty(globalThis, 'self', {
       configurable: true,
       value: scope
+    })
+    Object.defineProperty(globalThis, 'OffscreenCanvas', {
+      configurable: true,
+      value: FakeOffscreenCanvas
     })
     await import('@/services/terminal/threadedTerminalRenderWorker')
     expect(messages).toContainEqual({ type: 'ready' })
@@ -190,6 +297,11 @@ describe('threadedTerminalRenderWorker', () => {
     } else {
       delete (globalThis as { self?: unknown }).self
     }
+    if (originalOffscreenCanvasDescriptor) {
+      Object.defineProperty(globalThis, 'OffscreenCanvas', originalOffscreenCanvasDescriptor)
+    } else {
+      delete (globalThis as { OffscreenCanvas?: unknown }).OffscreenCanvas
+    }
   })
 
   const send = (message: ThreadedTerminalRenderRequest) => {
@@ -197,7 +309,8 @@ describe('threadedTerminalRenderWorker', () => {
   }
 
   it('paints wide glyphs at their xterm cell columns', async () => {
-    send(attachMessage(canvas))
+    send(attachGroupMessage(canvas))
+    send(attachMessage())
     send({ type: 'screen', snapshot: snapshot() })
 
     await vi.advanceTimersByTimeAsync(16)
@@ -218,7 +331,8 @@ describe('threadedTerminalRenderWorker', () => {
   })
 
   it('paints cursor-addressed ANSI style changes with the new RGB foreground', async () => {
-    const message = attachMessage(canvas)
+    send(attachGroupMessage(canvas))
+    const message = attachMessage()
     if (message.type === 'attach') message.options.settings.cursorStyle = 'bar'
     send(message)
     send({ type: 'screen', snapshot: workingSnapshot() })
@@ -234,7 +348,8 @@ describe('threadedTerminalRenderWorker', () => {
   })
 
   it('uses host-provided geometry padding instead of remeasuring in the worker', async () => {
-    send(attachMessage(canvas, { paddingLeft: 4, paddingTop: 2, paddingRight: 12, paddingBottom: 7 }))
+    send(attachGroupMessage(canvas))
+    send(attachMessage({ paddingLeft: 4, paddingTop: 2, paddingRight: 12, paddingBottom: 7 }))
     send({ type: 'screen', snapshot: snapshot() })
 
     await vi.advanceTimersByTimeAsync(16)
@@ -247,5 +362,62 @@ describe('threadedTerminalRenderWorker', () => {
     ]))
     expect(canvas.context.fillRect).toHaveBeenCalledWith(12, 2, 16, 13)
     expect(canvas.context.measureText).not.toHaveBeenCalled()
+  })
+
+  it('uses a WebGL2 render group when requested and available', async () => {
+    canvas = new FakeOffscreenCanvas(0, 0, { webgl2: true })
+    send(attachGroupMessage(canvas, 'webgl2'))
+    send(attachMessage())
+    send({ type: 'screen', snapshot: snapshot() })
+
+    await vi.advanceTimersByTimeAsync(16)
+
+    expect(messages).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: 'group-attached',
+        renderGroupId: 'render-group-1',
+        backend: 'webgl2',
+        gpu: expect.objectContaining({ unmaskedRenderer: 'Fake Hardware Renderer' })
+      }),
+      expect.objectContaining({ type: 'frame', terminalId: 'render-worker-terminal', seq: 1 })
+    ]))
+    expect(canvas.webgl2Context?.texSubImage2D).toHaveBeenCalled()
+    expect(canvas.webgl2Context?.drawArrays).toHaveBeenCalled()
+    expect(canvas.context.fillText).not.toHaveBeenCalled()
+  })
+
+  it('falls back to 2d when WebGL2 is requested but unavailable', () => {
+    send(attachGroupMessage(canvas, 'webgl2'))
+
+    expect(messages).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'group-attached', renderGroupId: 'render-group-1', backend: '2d' })
+    ]))
+  })
+
+  it('ignores idempotent lifecycle messages for disposed render surfaces', () => {
+    send(attachGroupMessage(canvas))
+    const settings = {
+      fontFamily: 'JetBrains Mono',
+      fontSize: 13,
+      lineHeight: 1,
+      cursorBlink: false,
+      cursorStyle: 'block' as const,
+      theme: { background: '#000', foreground: '#fff', cursor: '#fff' }
+    }
+    send({
+      type: 'resize',
+      terminalId: 'missing-terminal',
+      rect: { x: 0, y: 0, width: 10, height: 10 },
+      geometry: geometry()
+    })
+    send({
+      type: 'settings',
+      terminalId: 'missing-terminal',
+      settings,
+      geometry: geometry()
+    })
+    send({ type: 'clear', terminalId: 'missing-terminal' })
+
+    expect(messages.filter((message) => message.type === 'error')).toEqual([])
   })
 })

@@ -64,6 +64,7 @@ export type TerminalView = {
   fit: FitLike
   search: SearchLike
   lastOutput: string
+  openedElement?: HTMLElement
   outputQueue?: TerminalOutputWriteQueue
   outputPerf?: TerminalOutputPerfSummary
   clearPendingOutput?: () => void
@@ -933,17 +934,47 @@ export const createTerminalWorkspaceViewRuntime = ({
     if (panel.kind === 'knowledge') return
     const existing = terminalViews.get(panel.id)
     if (existing) {
+      if (isThreadedTerminalHost(existing.terminal)) {
+        terminalViewPanels.set(panel.id, panel)
+        const visible = isTerminalPanelRenderable(panel.id)
+        existing.terminal.setVisibility(visible, terminalPriorityForPanel(panel.id))
+        if (existing.openedElement === element) {
+          const surfaceAttached = existing.terminal.debugInfo().surfaceAttached
+          if (visible && !surfaceAttached) {
+            existing.terminal.ensureSurfaceAttached({ forceGeometry: true })
+            scheduleTerminalFit(panel.id, { scrollToBottom: true, frames: 4, forceGeometry: true })
+          }
+          if (panel.id === workspace.activePanelId) scheduleTerminalFocus(panel.id)
+          return
+        }
+        writeRuntimeLog('debug', 'renderer.terminal-view.threaded-attach-existing', {
+          panelId: panel.id,
+          hasSession: Boolean(panel.sessionId),
+          visible,
+          surfaceAttached: existing.terminal.debugInfo().surfaceAttached,
+          movedHost: Boolean(existing.openedElement)
+        })
+        existing.terminal.open(element)
+        existing.openedElement = element
+        existing.terminal.setVisibility(visible, terminalPriorityForPanel(panel.id))
+        existing.terminal.ensureSurfaceAttached({ forceGeometry: true })
+        applyTerminalSettingsToView(panel.id, existing, workspace.terminalSettings, { refit: false })
+        existing.resizeObserver?.disconnect()
+        if (typeof ResizeObserver !== 'undefined') {
+          existing.resizeObserver = new ResizeObserver(() => {
+            scheduleTerminalFit(panel.id, { frames: 2 })
+          })
+          existing.resizeObserver.observe(element)
+        } else {
+          existing.resizeObserver = undefined
+        }
+        scheduleTerminalFit(panel.id, { scrollToBottom: true, frames: 2, forceGeometry: true })
+        if (panel.id === workspace.activePanelId) scheduleTerminalFocus(panel.id)
+        return
+      }
       if (terminalViewPanels.get(panel.id) !== panel) {
         disposeTerminalView(panel.id, 'panel-replaced')
       } else {
-        if (isThreadedTerminalHost(existing.terminal)) {
-          existing.terminal.setVisibility(isTerminalPanelRenderable(panel.id), terminalPriorityForPanel(panel.id))
-          existing.terminal.open(element)
-          existing.terminal.setVisibility(isTerminalPanelRenderable(panel.id), terminalPriorityForPanel(panel.id))
-          existing.terminal.ensureSurfaceAttached({ forceGeometry: true })
-          applyTerminalSettingsToView(panel.id, existing, workspace.terminalSettings, { refit: false })
-          scheduleTerminalFit(panel.id, { scrollToBottom: true, frames: 2 })
-        }
         if (panel.id === workspace.activePanelId) scheduleTerminalFocus(panel.id)
         return
       }
@@ -976,6 +1007,7 @@ export const createTerminalWorkspaceViewRuntime = ({
         threaded: useThreaded
       })
       view.terminal.open(element)
+      view.openedElement = element
       openedThreaded = useThreaded
     } catch (error) {
       if (!useThreaded) throw error
@@ -989,6 +1021,7 @@ export const createTerminalWorkspaceViewRuntime = ({
       element.replaceChildren()
       view = createLegacyView()
       view.terminal.open(element)
+      view.openedElement = element
     }
     terminalViews.set(panel.id, view)
     terminalViewPanels.set(panel.id, panel)
@@ -1031,6 +1064,7 @@ export const createTerminalWorkspaceViewRuntime = ({
         if (isThreadedTerminalHost(view.terminal)) {
           view.resizeObserver?.disconnect()
           view.resizeObserver = undefined
+          view.openedElement = undefined
           view.terminal.detachSurface()
           return
         }
@@ -1038,6 +1072,7 @@ export const createTerminalWorkspaceViewRuntime = ({
         flushTerminalOutputPerf(panelId, view, 'view-disposed')
         view.resizeObserver?.disconnect()
         view.terminal.dispose()
+        view.openedElement = undefined
         terminalViews.delete(panelId)
         terminalViewPanels.delete(panelId)
       }
@@ -1051,10 +1086,12 @@ export const createTerminalWorkspaceViewRuntime = ({
   }
 
   const syncPanelViews = () => {
-    nextTick(() => {
+    return nextTick(() => {
       workspace.panels.filter((panel) => panel.kind !== 'knowledge').forEach((panel) => {
-        if (terminalViews.has(panel.id) && terminalViewPanels.get(panel.id) !== panel) {
-          disposeTerminalView(panel.id, 'panel-replaced')
+        const existing = terminalViews.get(panel.id)
+        if (existing && terminalViewPanels.get(panel.id) !== panel) {
+          if (isThreadedTerminalHost(existing.terminal)) terminalViewPanels.set(panel.id, panel)
+          else disposeTerminalView(panel.id, 'panel-replaced')
         }
         const element = terminalElements.get(panel.id)
         if (element && visibleTerminalPanelIds().has(panel.id)) createTerminalView(panel, element)

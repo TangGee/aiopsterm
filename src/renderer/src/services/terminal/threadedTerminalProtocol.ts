@@ -79,6 +79,22 @@ export type ThreadedTerminalCellMetrics = {
   baseline: number
 }
 
+export type ThreadedTerminalRenderBackend = '2d' | 'webgl2'
+
+export type ThreadedTerminalGpuInfo = {
+  renderer?: string
+  vendor?: string
+  unmaskedRenderer?: string
+  unmaskedVendor?: string
+}
+
+export type ThreadedTerminalRenderSurfaceRect = {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
 export type ThreadedTerminalGeometry = {
   seq: number
   canvasWidth: number
@@ -204,18 +220,30 @@ export type ThreadedTerminalCoreResponse =
   | { type: 'pong'; requestId: string }
   | { type: 'error'; requestId?: string; terminalId?: string; message: string }
 
+export type ThreadedTerminalRenderGroupAttachOptions = {
+  renderGroupId: string
+  canvas: OffscreenCanvas
+  devicePixelRatio: number
+  width: number
+  height: number
+  backend?: ThreadedTerminalRenderBackend
+}
+
 export type ThreadedTerminalRenderAttachOptions = {
   terminalId: string
   groupId: string
-  canvas: OffscreenCanvas
-  devicePixelRatio: number
+  renderGroupId: string
+  rect: ThreadedTerminalRenderSurfaceRect
   settings: ThreadedTerminalRenderSettings
   geometry: ThreadedTerminalGeometry
 }
 
 export type ThreadedTerminalRenderRequest =
+  | { type: 'attach-group'; options: ThreadedTerminalRenderGroupAttachOptions }
+  | { type: 'resize-group'; renderGroupId: string; devicePixelRatio: number; width: number; height: number }
+  | { type: 'dispose-group'; renderGroupId: string }
   | { type: 'attach'; options: ThreadedTerminalRenderAttachOptions }
-  | { type: 'resize'; terminalId: string; devicePixelRatio: number; geometry: ThreadedTerminalGeometry }
+  | { type: 'resize'; terminalId: string; rect: ThreadedTerminalRenderSurfaceRect; geometry: ThreadedTerminalGeometry }
   | { type: 'settings'; terminalId: string; settings: ThreadedTerminalRenderSettings; geometry: ThreadedTerminalGeometry }
   | { type: 'screen'; snapshot: ThreadedTerminalScreenSnapshot }
   | { type: 'visibility'; terminalId: string; visible: boolean }
@@ -225,6 +253,7 @@ export type ThreadedTerminalRenderRequest =
 
 export type ThreadedTerminalRenderResponse =
   | { type: 'ready' }
+  | { type: 'group-attached'; renderGroupId: string; backend: ThreadedTerminalRenderBackend; width: number; height: number; gpu?: ThreadedTerminalGpuInfo }
   | { type: 'attached'; terminalId: string }
   | { type: 'frame'; terminalId: string; seq: number; frameMs: number; paintedRows: number; full?: boolean; fullReason?: ThreadedTerminalFullReason; repaintReason?: ThreadedTerminalFullReason; scrollDeltaRows?: number }
   | { type: 'perf'; terminalId: string; frames: number; avgFrameMs: number; maxFrameMs: number; skippedFrames: number }

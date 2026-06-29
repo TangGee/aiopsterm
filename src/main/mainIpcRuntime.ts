@@ -127,6 +127,7 @@ export const registerMainIpcRuntime = (input: MainIpcRuntimeInput) => {
   registerAppRuntimeIpc(ipcMain, {
     getPlatform: () => process.platform,
     getDefaultShell: input.getDefaultShell,
+    getGpuFeatureStatus: () => app.getGPUFeatureStatus(),
     handleProtocolUrl: (rawUrl) => input.appBootstrapRuntime.handleDeepLinkUrl(rawUrl),
     consumeDeepLinks: input.appBootstrapRuntime.consumeDeepLinks,
     openExternal: (url) => shell.openExternal(url),

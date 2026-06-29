@@ -8,10 +8,106 @@ type WorkspaceStore = ReturnType<typeof useWorkspaceStore>
 
 const logs: Array<{ level: string; event: string; fields?: Record<string, unknown> }> = []
 
+const threadedTerminalMocks = vi.hoisted(() => {
+  class FakeThreadedTerminal {
+    static instances: FakeThreadedTerminal[] = []
+    cols = 120
+    rows = 40
+    buffer = { active: { viewportY: 0, cursorX: 0, cursorY: 0 } }
+    options: Record<string, unknown> = {}
+    output = ''
+    surfaceAttached = false
+    loadAddon = vi.fn()
+    open = vi.fn(() => {
+      this.surfaceAttached = true
+    })
+    focus = vi.fn()
+    clear = vi.fn()
+    dispose = vi.fn()
+    detachSurface = vi.fn(() => {
+      this.surfaceAttached = false
+    })
+    startCoreOnly = vi.fn()
+    setVisibility = vi.fn()
+    ensureSurfaceAttached = vi.fn(() => {
+      this.surfaceAttached = true
+      return true
+    })
+    updateSettings = vi.fn()
+    clearSelection = vi.fn()
+    scrollToBottom = vi.fn()
+    refresh = vi.fn()
+    write = vi.fn((data: string, callback?: () => void) => {
+      this.output += data
+      callback?.()
+    })
+    constructor() {
+      FakeThreadedTerminal.instances.push(this)
+    }
+    debugInfo() {
+      return { surfaceAttached: this.surfaceAttached }
+    }
+    hasSelection() {
+      return false
+    }
+    getSelection() {
+      return ''
+    }
+    getSelectionPosition() {
+      return null
+    }
+    onData() {
+      return { dispose: vi.fn() }
+    }
+    onResize() {
+      return { dispose: vi.fn() }
+    }
+    onSelectionChange() {
+      return { dispose: vi.fn() }
+    }
+  }
+
+  class FakeThreadedFitAddon {
+    fit = vi.fn()
+    activate = vi.fn()
+    dispose = vi.fn()
+  }
+
+  class FakeThreadedSearchAddon {
+    findNext = vi.fn(() => false)
+    findPrevious = vi.fn(() => false)
+    clearDecorations = vi.fn()
+    activate = vi.fn()
+    dispose = vi.fn()
+  }
+
+  return {
+    threadedEnabled: false,
+    FakeThreadedTerminal,
+    FakeThreadedFitAddon,
+    FakeThreadedSearchAddon
+  }
+})
+
 vi.mock('@/services/app/runtimeLogClient', () => ({
   writeRendererRuntimeLog: (level: string, event: string, fields?: Record<string, unknown>) => {
     logs.push({ level, event, fields })
   }
+}))
+
+vi.mock('@shared/runtimeSwitches', () => ({
+  shouldUseTerminalDebugLogs: () => false,
+  shouldUseThreadedTerminal: () => threadedTerminalMocks.threadedEnabled
+}))
+
+vi.mock('@/services/terminal/threadedTerminalRuntime', () => ({
+  ThreadedTerminalFitAddon: threadedTerminalMocks.FakeThreadedFitAddon,
+  ThreadedTerminalSearchAddon: threadedTerminalMocks.FakeThreadedSearchAddon,
+  createThreadedTerminalHost: () => new threadedTerminalMocks.FakeThreadedTerminal(),
+  isThreadedTerminalHost: (value: unknown) => value instanceof threadedTerminalMocks.FakeThreadedTerminal,
+  threadedTerminalCapability: () => ({ supported: true }),
+  threadedTerminalPriorityFor: (terminalId: string, activeTerminalId: string, visible: boolean) =>
+    terminalId === activeTerminalId ? 'active' : visible ? 'visible' : 'background'
 }))
 
 class FakeFit {
@@ -107,9 +203,13 @@ const createWorkspace = (panel: TerminalPanel) =>
     getHighlightedTerminalOutput: (panelId: string) => (panelId === panel.id ? panel.output : '')
   }) as unknown as WorkspaceStore
 
-const createRuntime = (panel = createEmptyTerminalPanel('panel-1', 'Local'), visiblePanels?: { value: TerminalPanel[] }) => {
+const createRuntime = (
+  panel = createEmptyTerminalPanel('panel-1', 'Local'),
+  visiblePanels?: { value: TerminalPanel[] },
+  options: { threaded?: boolean } = {}
+) => {
   const workspace = createWorkspace(panel)
-  const runtime = createTerminalWorkspaceViewRuntime({
+  const input: Parameters<typeof createTerminalWorkspaceViewRuntime>[0] = {
     workspace,
     visibleTerminalPanels: computed(() => visiblePanels?.value || workspace.panels),
     aiButtonPanelId: ref(''),
@@ -118,17 +218,22 @@ const createRuntime = (panel = createEmptyTerminalPanel('panel-1', 'Local'), vis
     suggestionPosition: { left: 0, top: 0 },
     suggestionItems: ref([]),
     aiSuggestLoading: ref(false),
-    writeXtermInput: vi.fn(),
-    terminalConstructor: FakeTerminal as any,
-    fitConstructor: FakeFit as any,
-    searchConstructor: FakeSearch as any
-  })
+    writeXtermInput: vi.fn()
+  }
+  if (!options.threaded) {
+    input.terminalConstructor = FakeTerminal as any
+    input.fitConstructor = FakeFit as any
+    input.searchConstructor = FakeSearch as any
+  }
+  const runtime = createTerminalWorkspaceViewRuntime(input)
   return { runtime, workspace, panel }
 }
 
 afterEach(() => {
   document.body.replaceChildren()
   FakeTerminal.instances = []
+  threadedTerminalMocks.threadedEnabled = false
+  threadedTerminalMocks.FakeThreadedTerminal.instances = []
   logs.length = 0
   vi.restoreAllMocks()
 })
@@ -148,6 +253,38 @@ describe('terminalWorkspaceViewRuntime', () => {
     if (!view) throw new Error('terminal view was not created')
     const terminal = view.terminal as unknown as FakeTerminal
     expect(terminal.focus).toHaveBeenCalled()
+  })
+
+  it('keeps an existing threaded terminal attached in place without repeating hot-path open work', async () => {
+    threadedTerminalMocks.threadedEnabled = true
+    const panel = createEmptyTerminalPanel('panel-1', 'Local')
+    const { runtime, workspace } = createRuntime(panel, undefined, { threaded: true })
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    runtime.setTerminalElement(panel.id, host)
+    await flushFrames(4)
+
+    const view = runtime.terminalViews.get(panel.id)
+    if (!view) throw new Error('threaded terminal view was not created')
+    const terminal = view.terminal as InstanceType<typeof threadedTerminalMocks.FakeThreadedTerminal>
+    const fit = view.fit as InstanceType<typeof threadedTerminalMocks.FakeThreadedFitAddon>
+    terminal.open.mockClear()
+    terminal.ensureSurfaceAttached.mockClear()
+    terminal.updateSettings.mockClear()
+    fit.fit.mockClear()
+    logs.length = 0
+
+    workspace.panels = [{ ...panel, output: 'new object same terminal' }] as typeof workspace.panels
+    runtime.setTerminalElement(panel.id, host)
+    runtime.syncPanelViews()
+    await flushFrames(2)
+
+    expect(terminal.open).not.toHaveBeenCalled()
+    expect(terminal.ensureSurfaceAttached).not.toHaveBeenCalled()
+    expect(terminal.updateSettings).not.toHaveBeenCalled()
+    expect(fit.fit).not.toHaveBeenCalled()
+    expect(logs.some((entry) => entry.event === 'renderer.terminal-view.threaded-attach-existing')).toBe(false)
   })
 
   it('writes incremental terminal output without refitting the view on the hot path', async () => {

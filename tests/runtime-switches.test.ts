@@ -21,6 +21,7 @@ import {
   shouldUseSshTerminalBackendDouble,
   shouldUseTerminalDebugLogs,
   shouldUseTerminalStressHarness,
+  terminalRenderBackend,
   shouldUseThreadedTerminal,
   shouldUseUserAccountCodeBackendDouble,
   shouldUseUserAccountSeedData,
@@ -51,7 +52,6 @@ const runtimeSwitches = [
   ['AIOPSTERM_SSH_TERMINAL_BACKEND_DOUBLE', shouldUseSshTerminalBackendDouble],
   ['AIOPSTERM_TERMINAL_DEBUG_LOGS', shouldUseTerminalDebugLogs],
   ['AIOPSTERM_TERMINAL_STRESS', shouldUseTerminalStressHarness],
-  ['AIOPSTERM_THREADED_TERMINAL', shouldUseThreadedTerminal],
   ['AIOPSTERM_USER_ACCOUNT_CODE_BACKEND_DOUBLE', shouldUseUserAccountCodeBackendDouble],
   ['AIOPSTERM_USER_ACCOUNT_ENABLE_SEED', shouldUseUserAccountSeedData],
   ['AIOPSTERM_USER_EXTERNAL_OPEN_BACKEND_DOUBLE', shouldUseUserExternalOpenBackendDouble],
@@ -96,6 +96,28 @@ describe('runtime switch boundaries', () => {
       process.env[name] = ' 1 '
       expect(read(), name).toBe(true)
     })
+  })
+
+  it('enables threaded terminals by default and allows an explicit off switch', () => {
+    delete process.env.AIOPSTERM_THREADED_TERMINAL
+    expect(shouldUseThreadedTerminal()).toBe(true)
+
+    process.env.AIOPSTERM_THREADED_TERMINAL = '0'
+    expect(shouldUseThreadedTerminal()).toBe(false)
+
+    process.env.AIOPSTERM_THREADED_TERMINAL = '1'
+    expect(shouldUseThreadedTerminal()).toBe(true)
+  })
+
+  it('uses worker 2D terminal rendering by default and allows explicit WebGL2', () => {
+    delete process.env.AIOPSTERM_TERMINAL_RENDER_BACKEND
+    expect(terminalRenderBackend()).toBe('2d')
+
+    process.env.AIOPSTERM_TERMINAL_RENDER_BACKEND = 'webgl2'
+    expect(terminalRenderBackend()).toBe('webgl2')
+
+    process.env.AIOPSTERM_TERMINAL_RENDER_BACKEND = '2d'
+    expect(terminalRenderBackend()).toBe('2d')
   })
 
   it('accepts explicit renderer runtime env injected outside process.env', () => {

@@ -10,6 +10,20 @@ const envFlagEnabled = (name: string) => {
   }
 }
 
+const envValue = (name: string) => {
+  try {
+    const runtimeEnv = (globalThis as {
+      __AIOPSTERM_RUNTIME_ENV__?: Record<string, string | undefined>
+    }).__AIOPSTERM_RUNTIME_ENV__
+    const value = runtimeEnv?.[name] ?? (typeof process !== 'undefined' ? process.env?.[name] : undefined)
+    return value === undefined ? undefined : String(value).trim()
+  } catch {
+    return undefined
+  }
+}
+
+const envFlagDisabled = (name: string) => envValue(name) === '0'
+
 export const shouldUseAiChatBackendDouble = () => envFlagEnabled('AIOPSTERM_AI_CHAT_BACKEND_DOUBLE')
 
 export const shouldUseAliasesSeedData = () => envFlagEnabled('AIOPSTERM_ALIASES_ENABLE_SEED')
@@ -52,7 +66,9 @@ export const shouldUseTerminalDebugLogs = () => envFlagEnabled('AIOPSTERM_TERMIN
 
 export const shouldUseTerminalStressHarness = () => envFlagEnabled('AIOPSTERM_TERMINAL_STRESS')
 
-export const shouldUseThreadedTerminal = () => envFlagEnabled('AIOPSTERM_THREADED_TERMINAL')
+export const shouldUseThreadedTerminal = () => !envFlagDisabled('AIOPSTERM_THREADED_TERMINAL')
+
+export const terminalRenderBackend = () => envValue('AIOPSTERM_TERMINAL_RENDER_BACKEND') === 'webgl2' ? 'webgl2' : '2d'
 
 export const shouldUseUserAccountCodeBackendDouble = () => envFlagEnabled('AIOPSTERM_USER_ACCOUNT_CODE_BACKEND_DOUBLE')
 

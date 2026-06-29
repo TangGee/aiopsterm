@@ -19,7 +19,8 @@ import type {
 const rendererRuntimeEnvNames = [
   'AIOPSTERM_THREADED_TERMINAL',
   'AIOPSTERM_TERMINAL_STRESS',
-  'AIOPSTERM_TERMINAL_DEBUG_LOGS'
+  'AIOPSTERM_TERMINAL_DEBUG_LOGS',
+  'AIOPSTERM_TERMINAL_RENDER_BACKEND'
 ]
 
 const rendererRuntimeEnv = () =>
@@ -34,6 +35,7 @@ const api: AiopsPreloadApi = {
   runtimeEnv: rendererRuntimeEnv,
   platform: () => ipcRenderer.invoke('app:platform'),
   shell: () => ipcRenderer.invoke('app:shell'),
+  getGpuFeatureStatus: () => ipcRenderer.invoke('app:gpu-feature-status'),
   checkUpdate: () => ipcRenderer.invoke('app:check-update'),
   downloadAppUpdate: (version: string) => ipcRenderer.invoke('app:download-update', version),
   installAppUpdate: (version?: string) => ipcRenderer.invoke('app:install-update', version),

@@ -47,6 +47,24 @@ vi.mock('@/services/terminal/threadedTerminalRenderWorker?worker', () => ({
     }
     postMessage(message: unknown) {
       this.messages.push(message)
+      if ((message as { type?: string }).type === 'attach-group') {
+        const options = (message as { options?: { renderGroupId?: string; backend?: string; width?: number; height?: number } }).options
+        this.onmessage?.({
+          data: {
+            type: 'group-attached',
+            renderGroupId: options?.renderGroupId,
+            backend: options?.backend || '2d',
+            gpu: {
+              renderer: 'Fake Runtime Renderer',
+              vendor: 'Fake Runtime Vendor',
+              unmaskedRenderer: 'Fake Runtime Hardware Renderer',
+              unmaskedVendor: 'Fake Runtime Hardware Vendor'
+            },
+            width: options?.width || 0,
+            height: options?.height || 0
+          }
+        } as MessageEvent)
+      }
     }
   }
 }))
@@ -92,8 +110,9 @@ const installOffscreenCanvasSupport = () => {
   } as unknown as CanvasRenderingContext2D)
 }
 
-const createHost = () =>
-  new ThreadedTerminalHost({
+type HostOverrides = Partial<ConstructorParameters<typeof ThreadedTerminalHost>[0]>
+
+const createHostOptions = (overrides: HostOverrides = {}): ConstructorParameters<typeof ThreadedTerminalHost>[0] => ({
     terminalId: 'panel-1',
     sessionId: 'terminal-1',
     groupId: 'group-1',
@@ -142,8 +161,12 @@ const createHost = () =>
     },
     initialData: 'ready\n',
     visible: true,
-    priority: 'active'
+    priority: 'active',
+    ...overrides
   })
+
+const createHost = (overrides: HostOverrides = {}) =>
+  new ThreadedTerminalHost(createHostOptions(overrides))
 
 const setHostElementSize = (hostElement: HTMLElement, width: number, height: number) => {
   Object.defineProperties(hostElement, {
@@ -153,9 +176,14 @@ const setHostElementSize = (hostElement: HTMLElement, width: number, height: num
 }
 
 const createHostElement = () => {
+  const grid = document.createElement('div')
+  grid.className = 'terminal-grid'
+  setHostElementSize(grid, 900, 500)
   const hostElement = document.createElement('div')
+  hostElement.className = 'xterm-host'
   setHostElementSize(hostElement, 800, 400)
-  document.body.appendChild(hostElement)
+  grid.appendChild(hostElement)
+  document.body.appendChild(grid)
   return hostElement
 }
 
@@ -213,7 +241,8 @@ describe('threadedTerminalRuntime', () => {
 
     const host = createHost()
     host.open(hostElement)
-    expect(hostElement.querySelector('.threaded-terminal-canvas')).toBeTruthy()
+    expect(hostElement.querySelector('.threaded-terminal-surface')).toBeTruthy()
+    expect(document.querySelector('.threaded-terminal-render-group-canvas')).toBeTruthy()
     expect(hostElement.querySelector('.threaded-terminal-selection-layer')).toBeTruthy()
     expect(hostElement.querySelector('.threaded-terminal-scrollbar')).toBeTruthy()
     expect(hostElement.querySelector('.threaded-terminal-input')).toBeInstanceOf(HTMLTextAreaElement)
@@ -233,7 +262,8 @@ describe('threadedTerminalRuntime', () => {
     )
     expect(messages.render).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ type: 'attach', options: expect.objectContaining({ terminalId: 'panel-1', groupId: 'group-1' }) }),
+        expect.objectContaining({ type: 'attach-group', options: expect.objectContaining({ renderGroupId: 'workspace-main' }) }),
+        expect.objectContaining({ type: 'attach', options: expect.objectContaining({ terminalId: 'panel-1', groupId: 'group-1', renderGroupId: 'workspace-main' }) }),
         expect.objectContaining({ type: 'visibility', terminalId: 'panel-1', visible: false }),
         expect.objectContaining({ type: 'dispose', terminalId: 'panel-1' })
       ])
@@ -271,6 +301,160 @@ describe('threadedTerminalRuntime', () => {
     }))
     expect(attachMessage.options.geometry.cols).toBe(createMessage.options.cols)
     expect(attachMessage.options.geometry.rows).toBe(createMessage.options.rows)
+    host.dispose()
+  })
+
+  it('shares one workspace RenderGroup canvas across multiple threaded hosts', async () => {
+    installOffscreenCanvasSupport()
+    const firstElement = createHostElement()
+    const grid = firstElement.parentElement as HTMLElement
+    const secondElement = document.createElement('div')
+    secondElement.className = 'xterm-host'
+    setHostElementSize(secondElement, 600, 300)
+    grid.appendChild(secondElement)
+
+    const before = await workerMessages()
+    const firstHost = createHost()
+    const secondHost = createHost({
+      terminalId: 'panel-2',
+      sessionId: 'terminal-2',
+      priority: 'visible'
+    })
+
+    firstHost.open(firstElement)
+    secondHost.open(secondElement)
+
+    const messages = await workerMessages()
+    const renderMessages = messages.render.slice(before.render.length)
+    expect(document.querySelectorAll('.threaded-terminal-render-group-canvas')).toHaveLength(1)
+    expect(renderMessages.filter((message: any) => message.type === 'attach-group')).toHaveLength(1)
+    expect(renderMessages.filter((message: any) => message.type === 'attach')).toHaveLength(2)
+    expect(firstHost.debugInfo().surfaceAttached).toBe(true)
+    expect(secondHost.debugInfo().surfaceAttached).toBe(true)
+    expect((await import('@/services/terminal/threadedTerminalRuntime')).getThreadedTerminalDebugStats().renderGroups).toEqual([
+      expect.objectContaining({
+        renderGroupId: 'workspace-main',
+        hosts: 2,
+        requestedBackend: '2d',
+        backend: '2d'
+      })
+    ])
+
+    firstHost.dispose()
+    secondHost.dispose()
+  })
+
+  it('requests WebGL2 RenderGroup backend only when explicitly enabled', async () => {
+    installOffscreenCanvasSupport()
+    ;(globalThis as { __AIOPSTERM_RUNTIME_ENV__?: Record<string, string | undefined> }).__AIOPSTERM_RUNTIME_ENV__ = {
+      AIOPSTERM_TERMINAL_RENDER_BACKEND: 'webgl2'
+    }
+    const before = await workerMessages()
+    const host = createHost()
+    host.open(createHostElement())
+
+    const messages = await workerMessages()
+    const renderMessages = messages.render.slice(before.render.length)
+    const attachGroup = renderMessages.find((message: any) => message.type === 'attach-group') as any
+    expect(attachGroup.options.backend).toBe('webgl2')
+    expect((await import('@/services/terminal/threadedTerminalRuntime')).getThreadedTerminalDebugStats().renderGroups).toEqual([
+      expect.objectContaining({
+        requestedBackend: 'webgl2',
+        backend: 'webgl2',
+        gpu: expect.objectContaining({ unmaskedRenderer: 'Fake Runtime Hardware Renderer' })
+      })
+    ])
+
+    host.dispose()
+  })
+
+  it('attaches a core-only threaded terminal in place when it becomes visible', async () => {
+    installOffscreenCanvasSupport()
+    const beforeCreate = await workerMessages()
+    const host = createHost({ visible: false, priority: 'background' })
+    host.startCoreOnly()
+    host.applySnapshot({
+      terminalId: 'panel-1',
+      seq: 3,
+      cols: 80,
+      rows: 10,
+      cursorX: 6,
+      cursorY: 1,
+      cursorAbsoluteY: 1,
+      viewportY: 0,
+      baseY: 0,
+      lines: [{ y: 1, text: 'shell ready', cells: [] }],
+      dirtyRows: [1],
+      full: true,
+      visible: true,
+      priority: 'active'
+    })
+
+    const beforeOpen = await workerMessages()
+    expect(beforeOpen.render.slice(beforeCreate.render.length).filter((message: any) => message.type === 'attach')).toEqual([])
+
+    host.open(createHostElement())
+    host.setVisibility(true, 'active')
+
+    const afterOpen = await workerMessages()
+    const newRenderMessages = afterOpen.render.slice(beforeOpen.render.length)
+    expect(newRenderMessages).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'attach-group', options: expect.objectContaining({ renderGroupId: 'workspace-main' }) }),
+      expect.objectContaining({ type: 'attach', options: expect.objectContaining({ terminalId: 'panel-1', renderGroupId: 'workspace-main' }) }),
+      expect.objectContaining({
+        type: 'screen',
+        snapshot: expect.objectContaining({
+          terminalId: 'panel-1',
+          full: true,
+          fullReason: 'visibility',
+          lines: expect.arrayContaining([expect.objectContaining({ y: 1, text: 'shell ready' })])
+        })
+      })
+    ]))
+    expect(afterOpen.core.slice(beforeOpen.core.length)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'resize', terminalId: 'panel-1' }),
+      expect.objectContaining({ type: 'visibility', terminalId: 'panel-1', visible: true, priority: 'active' })
+    ]))
+    host.dispose()
+  })
+
+  it('does not attach a render surface or resize the core while the host is not in a render group container', async () => {
+    installOffscreenCanvasSupport()
+    const orphan = document.createElement('div')
+    orphan.className = 'xterm-host'
+    setHostElementSize(orphan, 0, 0)
+
+    const host = createHost({ visible: false, priority: 'background' })
+    host.startCoreOnly()
+    const beforeOpen = await workerMessages()
+
+    host.open(orphan)
+    host.setVisibility(true, 'active')
+    host.ensureSurfaceAttached({ forceGeometry: true })
+
+    const afterOrphanOpen = await workerMessages()
+    expect(host.debugInfo().surfaceAttached).toBe(false)
+    expect(afterOrphanOpen.render.slice(beforeOpen.render.length).filter((message: any) => message.type === 'attach' || message.type === 'attach-group')).toEqual([])
+    expect(afterOrphanOpen.core.slice(beforeOpen.core.length)).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'resize', terminalId: 'panel-1', cols: 2, rows: 1 })
+    ]))
+
+    const grid = document.createElement('div')
+    grid.className = 'terminal-grid'
+    setHostElementSize(grid, 900, 500)
+    setHostElementSize(orphan, 800, 400)
+    grid.appendChild(orphan)
+    document.body.appendChild(grid)
+
+    host.ensureSurfaceAttached({ forceGeometry: true })
+
+    const afterAttach = await workerMessages()
+    const attachMessages = afterAttach.render.slice(afterOrphanOpen.render.length)
+    expect(host.debugInfo().surfaceAttached).toBe(true)
+    expect(attachMessages).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'attach-group', options: expect.objectContaining({ renderGroupId: 'workspace-main' }) }),
+      expect.objectContaining({ type: 'attach', options: expect.objectContaining({ terminalId: 'panel-1', renderGroupId: 'workspace-main' }) })
+    ]))
     host.dispose()
   })
 
@@ -634,8 +818,9 @@ describe('threadedTerminalRuntime', () => {
       value: () => ({ left: 100, top: 50, width: 800, height: 400, right: 900, bottom: 450, x: 100, y: 50, toJSON: () => ({}) })
     })
     host.open(element)
-    const canvas = element.querySelector<HTMLCanvasElement>('.threaded-terminal-canvas')
-    Object.defineProperty(canvas, 'getBoundingClientRect', {
+    const surface = element.querySelector<HTMLElement>('.threaded-terminal-surface')
+    expect(surface).toBeTruthy()
+    Object.defineProperty(surface, 'getBoundingClientRect', {
       configurable: true,
       value: () => ({ left: 100, top: 50, width: 790, height: 400, right: 890, bottom: 450, x: 100, y: 50, toJSON: () => ({}) })
     })

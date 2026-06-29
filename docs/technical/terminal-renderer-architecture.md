@@ -1,6 +1,6 @@
 # Threaded Terminal Renderer
 
-aiopsterm has an opt-in threaded terminal path behind `AIOPSTERM_THREADED_TERMINAL=1`. The default xterm path remains available as a compatibility fallback.
+aiopsterm uses the threaded terminal path by default. The default release renderer is threaded core plus worker 2D RenderGroup painting. The legacy xterm path remains available as a compatibility fallback by setting `AIOPSTERM_THREADED_TERMINAL=0`.
 
 ## Thread Model
 
@@ -99,19 +99,27 @@ Renderer builds receive `AIOPSTERM_TERMINAL_DEBUG_LOGS` through the preload runt
 
 ## RenderGroup Model
 
-The v1 implementation uses one `OffscreenCanvas` per mounted pane while all panes share one render worker. This keeps the existing Vue pane lifecycle intact while moving core parsing and painting off the main thread.
+The threaded renderer uses RenderGroups so context count follows visible regions instead of terminal count.
 
-The protocol already carries `groupId` and `surface` so the next renderer step can merge all visible split panes in a workspace region into one large RenderGroup canvas. Codex terminals use a separate group id from workspace panes.
+- Workspace split panes share `workspace-main`, one large group canvas attached to the terminal grid.
+- Right-side embedded Codex terminals share `codex-side`, one large group canvas attached to the Codex terminal stack.
+- The existing terminal `groupId` remains a business/session/split identifier. It is not used as the rendering context boundary.
+- Each mounted terminal host registers a viewport rect, geometry, settings, and snapshot stream inside its RenderGroup.
+- Hidden or background terminals keep core-worker/session state but do not allocate their own canvas or WebGL context.
+
+The default backend for each RenderGroup is worker 2D `OffscreenCanvas` painting. WebGL2 is retained as an explicit acceleration experiment behind `AIOPSTERM_TERMINAL_RENDER_BACKEND=webgl2`. In WebGL2 mode, text and backgrounds are still rasterized into a 2D scratch `OffscreenCanvas`; the RenderGroup canvas owns one WebGL2 context and presents the scratch canvas as a texture. WebGL keeps the same ownership rule: one context per visible RenderGroup, not one context per terminal. On current product layout that means at most two foreground contexts: workspace and Codex side.
+
+Within the render worker, drawing is clipped and translated to the terminal viewport rect. Full clears, dirty-row clears, scroll `drawImage()`, cursor rendering, and dispose clears operate only inside that rect, so one pane cannot overwrite or copy pixels from another pane in the shared canvas. Selection overlays, custom scrollbars, hidden input, IME, and clipboard behavior stay in per-terminal DOM hosts above the group canvas.
 
 ## Fallback
 
 The threaded path is enabled only when all of these are true:
 
-- `AIOPSTERM_THREADED_TERMINAL=1`.
+- `AIOPSTERM_THREADED_TERMINAL` is not set to `0`.
 - `Worker` is available.
 - `HTMLCanvasElement.transferControlToOffscreen` is available.
 
-Electron preview and packaged renderer builds read the runtime flag through the preload bridge, so `AIOPSTERM_THREADED_TERMINAL=1 scripts/build-and-start.sh --skip-build` is enough to enable the threaded path for an existing build. `VITE_AIOPSTERM_THREADED_TERMINAL=1` is only needed for renderer-only test harnesses that do not have the preload bridge available.
+Electron preview and packaged renderer builds read runtime flags through the preload bridge. `AIOPSTERM_THREADED_TERMINAL=0 scripts/build-and-start.sh --skip-build` disables the threaded path for compatibility testing. `AIOPSTERM_TERMINAL_RENDER_BACKEND=webgl2 scripts/build-and-start.sh --skip-build` enables the experimental WebGL2 RenderGroup backend for an existing build. `VITE_AIOPSTERM_*` flags are only needed for renderer-only test harnesses that do not have the preload bridge available.
 
 If any requirement is missing, aiopsterm logs `renderer.threaded-terminal.unavailable` and creates the existing xterm renderer.
 
@@ -126,6 +134,8 @@ The focused stress profile is 10 visible foreground terminal panes plus 40 backg
 - Real PTY echo latency.
 - Renderer/main memory samples.
 - Canvas count.
+- RenderGroup count and RenderGroup canvas count.
+- RenderGroup requested/actual backend and worker-reported GPU renderer strings.
 - Core/render worker error counts.
 - Renderer ingress and history queue backlog.
 - Foreground/background switching while all terminal records continue receiving output.
@@ -140,7 +150,7 @@ The harness supports several output profiles:
 Run the 20-minute release profile with:
 
 ```bash
-AIOPSTERM_TERMINAL_STRESS=1 VITE_AIOPSTERM_TERMINAL_STRESS=1 VITE_AIOPSTERM_THREADED_TERMINAL=1 AIOPSTERM_TERMINAL_STRESS_PROFILE=mixed-switch AIOPSTERM_TERMINAL_STRESS_DURATION_MS=1200000 AIOPSTERM_TERMINAL_STRESS_SWITCH_INTERVAL_MS=5000 npm run test:e2e -- tests/e2e/terminal-stress.spec.ts --reporter=list
+AIOPSTERM_TERMINAL_STRESS=1 VITE_AIOPSTERM_TERMINAL_STRESS=1 AIOPSTERM_TERMINAL_STRESS_PROFILE=mixed-switch AIOPSTERM_TERMINAL_STRESS_DURATION_MS=1200000 AIOPSTERM_TERMINAL_STRESS_SWITCH_INTERVAL_MS=5000 npm run test:e2e -- tests/e2e/terminal-stress.spec.ts --reporter=list
 ```
 
 Shorter development gates use the same command with `AIOPSTERM_TERMINAL_STRESS_DURATION_MS=10000` or `60000`. A short run passing is not release evidence for the 20-minute target; it is only a smoke or stabilization gate.
@@ -148,6 +158,12 @@ Shorter development gates use the same command with `AIOPSTERM_TERMINAL_STRESS_D
 The result JSON includes `writes.foreground*` and `writes.background*` counters so the test proves background terminals were receiving data. Memory checks use two explicit renderer GC runs plus DevTools Protocol heap collection before and after the run. The hard retained-object gates use CDP live heap used-size delta, final live heap size, and the post-GC `.heapsnapshot` object summary. `performance.memory` samples remain in the JSON as a diagnostic signal for renderer heap capacity or high-water behavior, but retained-object pass/fail uses CDP live heap and snapshot categories. Heap sampling and snapshot artifacts are written under `test-results/terminal-stress/`.
 
 The harness is installed dynamically from `src/renderer/src/services/terminal/terminalStressHarness.ts` when `AIOPSTERM_TERMINAL_STRESS=1` or `VITE_AIOPSTERM_TERMINAL_STRESS=1` is set. The terminal workspace controller only passes existing runtime hooks into that module, so stress-only panel creation, frame sampling, GC sampling, and regression probes do not live in the normal business controller.
+
+GPU proof uses two paths:
+
+- Default Playwright stress tests prove the release renderer selected `backend: "2d"` and keep the threaded core/RenderGroup path within release latency and memory gates.
+- WebGL stress tests should set `AIOPSTERM_TERMINAL_RENDER_BACKEND=webgl2` and prove `backend: "webgl2"` plus stable paint/switch latency before promoting WebGL out of experimental status. Playwright/Electron can still run through SwiftShader, so a passing WebGL stress test alone does not prove hardware acceleration.
+- `npm run probe:terminal-gpu` launches the built app through normal Electron with remote debugging, explicitly enables `AIOPSTERM_TERMINAL_RENDER_BACKEND=webgl2`, enables the stress harness only in the temporary probe user-data directory, creates real workspace RenderGroups, and prints `hardwareLikely`. Hardware proof requires `terminalBackend: "webgl2"`, `gpuFeatureStatus.webgl/webgl2/gpu_compositing` enabled, and non-software `unmaskedRenderer` values in both the environment WebGL sample and `terminalRenderGroups[].gpu`.
 
 The stress result also includes `regressions` probes for the recent terminal failures:
 
@@ -160,6 +176,4 @@ The stress result also includes `regressions` probes for the recent terminal fai
 
 ## Current Limits
 
-The v1 path is built for throughput validation. Threaded rendering supports text output, ANSI foreground/background runs, cursor rendering, resize, direct PTY data, wheel and scrollbar scrollback, visible-viewport text selection, and background no-paint behavior. Rich xterm decorations, full scrollback-range selection, link hover handling, mouse application protocols, and WebGL rendering remain on the legacy path for now.
-
-WebGL is intentionally deferred: the first threaded renderer uses worker 2D canvas because that covers modern Electron/Chromium machines and avoids GL context count pressure. A later WebGL renderer should keep one context per visible RenderGroup, not one context per terminal.
+The v1 path is built for throughput validation. Threaded rendering supports text output, ANSI foreground/background runs, cursor rendering, resize, direct PTY data, wheel and scrollbar scrollback, visible-viewport text selection, WebGL2 RenderGroup presentation, and background no-paint behavior. Rich xterm decorations, full scrollback-range selection, link hover handling, and mouse application protocols remain on the legacy path for now.

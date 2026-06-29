@@ -50,12 +50,13 @@ If direct execution returns quickly but the app still reports `ETIMEDOUT`, colle
 
 ### Threaded Terminal Renderer
 
-Set `AIOPSTERM_THREADED_TERMINAL=1` to opt into the worker-based terminal path. In this mode terminal parsing runs in a small `@xterm/headless` worker pool and visible panes paint through worker `OffscreenCanvas` 2D. If Worker or OffscreenCanvas support is missing, aiopsterm logs `renderer.threaded-terminal.unavailable` and falls back to the normal xterm renderer.
+The worker-based terminal path is enabled by default. Terminal parsing runs in a small `@xterm/headless` worker pool and visible panes paint through shared worker `OffscreenCanvas` RenderGroups. Workspace split panes share one `workspace-main` canvas, right-side Codex terminals share one `codex-side` canvas, and hidden/background terminals keep core state without allocating their own canvas. The release default RenderGroup backend is worker 2D. Set `AIOPSTERM_TERMINAL_RENDER_BACKEND=webgl2` only when validating the experimental WebGL2 backend. If Worker or OffscreenCanvas support is missing, aiopsterm logs `renderer.threaded-terminal.unavailable` and falls back to the normal xterm renderer. Set `AIOPSTERM_THREADED_TERMINAL=0` to force the legacy xterm renderer for compatibility checks.
 
 Useful threaded renderer log events:
 
 - `renderer.threaded-terminal.core-pool-created`: core worker count selected from hardware concurrency.
 - `renderer.threaded-terminal.created`: panel/conversation assigned to a core worker and RenderGroup.
+- `renderer.threaded-terminal.render-group-attached`: actual RenderGroup backend and worker WebGL renderer strings.
 - `renderer.threaded-terminal.core-perf`: parser throughput, pending bytes, snapshot cost, and dropped background paints.
 - `renderer.threaded-terminal.render-perf`: render worker frame timings.
 - `renderer.codex-terminal.created` with `threaded: true`: right-side Codex terminal is using the threaded path.
@@ -63,10 +64,19 @@ Useful threaded renderer log events:
 The opt-in stress test is intentionally not part of normal CI. To run the requested 10 foreground / 40 background terminal stress profile:
 
 ```bash
-AIOPSTERM_TERMINAL_STRESS=1 VITE_AIOPSTERM_TERMINAL_STRESS=1 VITE_AIOPSTERM_THREADED_TERMINAL=1 AIOPSTERM_TERMINAL_STRESS_PROFILE=mixed-switch AIOPSTERM_TERMINAL_STRESS_DURATION_MS=1200000 AIOPSTERM_TERMINAL_STRESS_SWITCH_INTERVAL_MS=5000 npm run test:e2e -- tests/e2e/terminal-stress.spec.ts --reporter=list
+AIOPSTERM_TERMINAL_STRESS=1 VITE_AIOPSTERM_TERMINAL_STRESS=1 AIOPSTERM_TERMINAL_STRESS_PROFILE=mixed-switch AIOPSTERM_TERMINAL_STRESS_DURATION_MS=1200000 AIOPSTERM_TERMINAL_STRESS_SWITCH_INTERVAL_MS=5000 npm run test:e2e -- tests/e2e/terminal-stress.spec.ts --reporter=list
 ```
 
 The default duration is 20 minutes. For local smoke runs, lower `AIOPSTERM_TERMINAL_STRESS_DURATION_MS`. `AIOPSTERM_TERMINAL_STRESS_PROFILE` can be `mixed-switch`, `frame-small-chunk`, `pty-burst`, or `mixed-background`; the release profile is `mixed-switch`.
+
+To verify that WebGL2 is actually backed by hardware GPU rather than SwiftShader, build first and run:
+
+```bash
+npm run build
+npm run probe:terminal-gpu
+```
+
+The probe launches the built app in normal Electron, explicitly enables `AIOPSTERM_TERMINAL_RENDER_BACKEND=webgl2`, creates temporary stress terminals, and prints `terminalBackend`, `hardwareLikely`, `environment.gpuFeatureStatus`, and `terminalRenderGroups[].gpu`. `terminalBackend: "webgl2"` proves the experimental WebGL terminal RenderGroup path is active. `hardwareLikely: true` requires non-software renderer strings such as NVIDIA/AMD/Intel/Mesa hardware and enabled `gpu_compositing`, `webgl`, and `webgl2`. Playwright stress runs may report SwiftShader because the test launcher can disable hardware acceleration; use `probe:terminal-gpu` for hardware proof.
 
 The stress output prints these key fields:
 
@@ -77,6 +87,7 @@ The stress output prints these key fields:
 - `paintRows`, `paintScrollRows`, `paintFullFrames`, `paintFullReasons`, and `paintRepaintReasons`: paint coverage for marker writes. `paintRows` tracks dirty-row and visible-row repaints. `paintScrollRows` is reserved for diagnostics if a future pixel-scroll path is enabled; the current VTE-aligned path repaints visible rows for viewport movement instead of copying stale canvas pixels. `create`, `import`, `settings`, `resize`, `visibility`, and `clear` are management full-frame reasons. `paintRepaintReasons.jump` means a viewport catch-up repainted visible rows without clearing the whole canvas. Normal PTY/output marker writes should stay dirty-row or known-reason visible-row repaints instead of producing `unknown` full frames.
 - `realEchoLatency`: actual PTY write-to-echo latency.
 - `memory.postGcHeapDeltaMb`, `memory.beforeGcHeapMb`, `memory.afterGcHeapMb`, and `workingSetDeltaMb`: renderer memory diagnostics after the harness stops writing and runs renderer GC twice. These can include heap capacity and high-water behavior.
+- `gpu`, `threaded.renderGroups`, `memory.samples[].renderGroupCount`, and `memory.samples[].renderGroupCanvasCount`: verifies terminal rendering uses visible-region groups rather than one canvas/context per terminal, and records requested/actual backend plus WebGL renderer strings.
 - `queues.maxIngress*` and `queues.maxHistory*`: renderer-side backlog for incoming terminal data and low-frequency history mirrors.
 - `switches.count`, `switches.failed`, `switches.paintLatency`: foreground/background switch coverage. The test swaps background terminals into the visible split group while all terminal records continue receiving output.
 - `threaded.coreDebug` and `threaded.renderDebug`: worker pending bytes and error counts.

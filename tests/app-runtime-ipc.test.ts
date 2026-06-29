@@ -55,6 +55,7 @@ const createRegistrationInput = () => {
   return {
     getPlatform: vi.fn(() => 'linux'),
     getDefaultShell: vi.fn(() => '/bin/bash'),
+    getGpuFeatureStatus: vi.fn(() => ({ webgl: 'enabled', webgl2: 'enabled' })),
     handleProtocolUrl: vi.fn((rawUrl: string) => ({ success: true, url: rawUrl })),
     consumeDeepLinks: vi.fn(() => [{ url: 'aiopsterm://open/files', action: 'open' as const, target: 'files' as const, module: 'files' as const, acceptedAt: 1780490000000 }]),
     openExternal: vi.fn(async () => undefined),
@@ -91,6 +92,7 @@ describe('app runtime IPC registrar', () => {
     expect([...handlers.keys()]).toEqual([
       'app:platform',
       'app:shell',
+      'app:gpu-feature-status',
       'app:get-protocol-prefix',
       'app:handle-protocol-url',
       'app:consume-deep-links',
@@ -106,6 +108,7 @@ describe('app runtime IPC registrar', () => {
     ])
     expect(await handlers.get('app:platform')?.({})).toBe('linux')
     expect(await handlers.get('app:shell')?.({})).toBe('/bin/bash')
+    expect(await handlers.get('app:gpu-feature-status')?.({})).toEqual({ webgl: 'enabled', webgl2: 'enabled' })
     expect(await handlers.get('app:get-protocol-prefix')?.({})).toBe('aiopsterm://')
     expect(await handlers.get('app:handle-protocol-url')?.({}, 'aiopsterm://open/settings?section=mcp')).toEqual({
       success: true,

@@ -12,6 +12,7 @@ type AppRuntimeBridge = Pick<
   AiopsPreloadApi,
   | 'getConfig'
   | 'saveConfig'
+  | 'getGpuFeatureStatus'
   | 'applyPrivacyRuntimeSettings'
   | 'applyKnowledgeSearchRuntimeSetting'
   | 'checkUpdate'
@@ -40,6 +41,7 @@ const bridgeMethod = createBridgeMethod<AppRuntimeBridge>()
 export const appRuntimeClient = {
   getConfig: () => bridgeMethod('getConfig'),
   saveConfig: () => bridgeMethod('saveConfig'),
+  getGpuFeatureStatus: () => bridgeMethod('getGpuFeatureStatus'),
   applyPrivacyRuntimeSettings: () => bridgeMethod('applyPrivacyRuntimeSettings'),
   applyKnowledgeSearchRuntimeSetting: () => bridgeMethod('applyKnowledgeSearchRuntimeSetting'),
   checkUpdate: () => bridgeMethod('checkUpdate'),

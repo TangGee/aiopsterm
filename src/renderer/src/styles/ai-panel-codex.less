@@ -280,10 +280,12 @@
   min-height: 0;
   min-width: 0;
   display: grid;
+  position: relative;
 }
 
 .ai-codex-xterm-stack > .ai-codex-xterm {
   grid-area: 1 / 1;
+  z-index: 1;
 }
 
 .ai-codex-xterm {

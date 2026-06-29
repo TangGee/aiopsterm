@@ -380,6 +380,7 @@ export type AiopsPreloadApi = {
   runtimeEnv?: () => Record<string, string | undefined>
   platform: () => Promise<string>
   shell: () => Promise<string>
+  getGpuFeatureStatus?: () => Promise<Record<string, unknown>>
   checkUpdate: () => Promise<AppUpdateCheckResult>
   downloadAppUpdate: (version: string) => Promise<AppUpdateDownloadResult>
   installAppUpdate: (version?: string) => Promise<AppUpdateInstallResult>

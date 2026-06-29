@@ -67,8 +67,31 @@ type StressResult = {
       errors: number
       lastError?: string
     }
+    renderGroups: Array<{
+      renderGroupId: string
+      surface: string
+      hosts: number
+      attached: boolean
+      requestedBackend: string
+      backend?: string
+      width: number
+      height: number
+      dpr: number
+    }>
     hostCount: number
     hosts: unknown[]
+  }
+  gpu?: {
+    webgl: boolean
+    webgl2: boolean
+    hardwareLikely: boolean
+    softwareRenderer: boolean
+    renderer?: string
+    vendor?: string
+    unmaskedRenderer?: string
+    unmaskedVendor?: string
+    mainFeatureStatus?: Record<string, unknown>
+    renderGroups: StressResult['threaded']['renderGroups']
   }
   paintLatency: StressMetricSummary
   paintFrameMs: StressMetricSummary
@@ -386,10 +409,12 @@ const logStressResult = (result: StressResult) => {
       coreWorkers: result.threaded.coreWorkers,
       coreDebug: result.threaded.coreDebug,
       renderWorkerActive: result.threaded.renderWorkerActive,
+      renderGroups: result.threaded.renderGroups,
       renderDebug: result.threaded.renderDebug,
       hostCount: result.threaded.hostCount,
       visibleHosts: result.threaded.hosts.slice(0, 12)
     },
+    gpu: result.gpu,
     paintLatency: result.paintLatency,
     paintFrameMs: result.paintFrameMs,
     paintRows: result.paintRows,
@@ -478,6 +503,8 @@ test('threaded terminal renderer keeps foreground frames healthy under 10 foregr
     expect(result.threaded.supported, result.threaded.capabilityReason).toBe(true)
     expect(result.threaded.coreWorkers).toBeGreaterThan(0)
     expect(result.threaded.renderWorkerActive).toBe(true)
+    expect(result.threaded.renderGroups.some((group) => group.requestedBackend === '2d')).toBe(true)
+    expect(result.threaded.renderGroups.some((group) => group.backend === '2d')).toBe(true)
     expect(result.threaded.hostCount).toBeGreaterThanOrEqual(result.foreground + result.background)
     expect(result.paintLatency.samples).toBeGreaterThan(0)
     expect(result.paintLatency.p95).toBeLessThan(100)

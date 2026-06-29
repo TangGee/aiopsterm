@@ -19,6 +19,7 @@ type SettingsExternalActionRuntime = Parameters<typeof openSettingsDocumentation
 type RegisterAppRuntimeIpcInput = {
   getPlatform: () => string
   getDefaultShell: () => string
+  getGpuFeatureStatus?: () => unknown
   handleProtocolUrl: (rawUrl: string) => unknown
   consumeDeepLinks: () => AiopstermDeepLinkPayload[]
   openExternal: (url: string) => Promise<void> | void
@@ -61,6 +62,7 @@ const normalizeSettingsDocumentationInput = (source: unknown): OpenSettingsDocum
 export const registerAppRuntimeIpc = (ipcMain: IpcMain, input: RegisterAppRuntimeIpcInput) => {
   ipcMain.handle('app:platform', () => input.getPlatform())
   ipcMain.handle('app:shell', () => input.getDefaultShell())
+  ipcMain.handle('app:gpu-feature-status', () => input.getGpuFeatureStatus?.() || {})
   ipcMain.handle('app:get-protocol-prefix', () => aiopstermProtocolPrefix)
   ipcMain.handle('app:handle-protocol-url', async (_event, rawUrl: string) => input.handleProtocolUrl(rawUrl))
   ipcMain.handle('app:consume-deep-links', async () => input.consumeDeepLinks())

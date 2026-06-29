@@ -76,6 +76,14 @@
   z-index: 1;
 }
 
+.terminal-pane:has(.threaded-terminal-host) {
+  background: transparent;
+}
+
+.terminal-pane:has(.threaded-terminal-host) > .xterm-host {
+  z-index: 1;
+}
+
 .terminal-grid.split-tree .terminal-pane {
   position: absolute;
   min-width: 0;
