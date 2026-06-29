@@ -82,87 +82,89 @@
         </div>
       </div>
 
-      <div
-        v-if="assetBlankContextMenuOpen"
-        class="asset-context-menu"
-        :style="{ left: `${contextPosition.x}px`, top: `${contextPosition.y}px` }"
-      >
-        <button @click="openCreateAssetFolderFromContext()">
-          <Folder />
-          新建目录
-        </button>
-        <button @click="openNewPanelFromContext()">
-          <Laptop />
-          新建主机
-        </button>
-      </div>
+      <Teleport to="body">
+        <div
+          v-if="assetBlankContextMenuOpen"
+          class="asset-context-menu"
+          :style="{ left: `${contextPosition.x}px`, top: `${contextPosition.y}px` }"
+        >
+          <button @click="openCreateAssetFolderFromContext()">
+            <Folder />
+            新建目录
+          </button>
+          <button @click="openNewPanelFromContext()">
+            <Laptop />
+            新建主机
+          </button>
+        </div>
 
-      <div
-        v-if="assetGroupContextMenuKey"
-        class="asset-context-menu"
-        :style="{ left: `${contextPosition.x}px`, top: `${contextPosition.y}px` }"
-      >
-        <button @click="openCreateAssetFolderFromContext(assetGroupContextMenuKey)">
-          <Folder />
-          新建子目录
-        </button>
-        <button @click="openNewPanelFromContext(assetGroupContextMenuKey)">
-          <Laptop />
-          新建主机
-        </button>
-      </div>
+        <div
+          v-if="assetGroupContextMenuKey"
+          class="asset-context-menu"
+          :style="{ left: `${contextPosition.x}px`, top: `${contextPosition.y}px` }"
+        >
+          <button @click="openCreateAssetFolderFromContext(assetGroupContextMenuKey)">
+            <Folder />
+            新建子目录
+          </button>
+          <button @click="openNewPanelFromContext(assetGroupContextMenuKey)">
+            <Laptop />
+            新建主机
+          </button>
+        </div>
 
-      <div
-        v-if="assetContextMenuId"
-        class="asset-context-menu"
-        :style="{ left: `${contextPosition.x}px`, top: `${contextPosition.y}px` }"
-      >
-        <button @click="connectAsset(assetContextMenuId)">
-          <PlugZap />
-          连接
-        </button>
-        <button @click="editAsset(assetContextMenuId)">
-          <Pencil />
-          编辑
-        </button>
-        <button @click="cloneAsset(assetContextMenuId)">
-          <Copy />
-          克隆
-        </button>
-        <button
-          v-if="contextAsset?.asset_type === 'organization'"
-          @click="refreshOrganizationAsset"
+        <div
+          v-if="assetContextMenuId"
+          class="asset-context-menu"
+          :style="{ left: `${contextPosition.x}px`, top: `${contextPosition.y}px` }"
         >
-          <RefreshCw />
-          刷新资产
-        </button>
-        <button
-          v-if="contextAsset?.asset_type === 'organization'"
-          @click="openOrganizationManagement"
-        >
-          <Database />
-          管理资产
-        </button>
-        <button
-          class="delete"
-          @click="removeAsset(assetContextMenuId)"
-        >
-          <Trash2 />
-          删除
-        </button>
-      </div>
+          <button @click="connectAsset(assetContextMenuId)">
+            <PlugZap />
+            连接
+          </button>
+          <button @click="editAsset(assetContextMenuId)">
+            <Pencil />
+            编辑
+          </button>
+          <button @click="cloneAsset(assetContextMenuId)">
+            <Copy />
+            克隆
+          </button>
+          <button
+            v-if="contextAsset?.asset_type === 'organization'"
+            @click="refreshOrganizationAsset"
+          >
+            <RefreshCw />
+            刷新资产
+          </button>
+          <button
+            v-if="contextAsset?.asset_type === 'organization'"
+            @click="openOrganizationManagement"
+          >
+            <Database />
+            管理资产
+          </button>
+          <button
+            class="delete"
+            @click="removeAsset(assetContextMenuId)"
+          >
+            <Trash2 />
+            删除
+          </button>
+        </div>
+      </Teleport>
     </div>
   </div>
 
-  <div
-    v-if="editorOpen"
-    class="asset-host-modal file-modal"
-  >
-    <aside
-      class="asset-form-panel asset-host-form-modal"
-      :data-onboarding-id="editorOpen ? 'asset-form-fields' : undefined"
+  <Teleport to="body">
+    <div
+      v-if="editorOpen"
+      class="asset-host-modal file-modal"
     >
-      <template v-if="editorOpen">
+      <aside
+        class="asset-form-panel asset-host-form-modal"
+        :data-onboarding-id="editorOpen ? 'asset-form-fields' : undefined"
+      >
         <header>
           <strong>{{ editMode ? '编辑主机' : '新建主机' }}</strong>
           <button
@@ -363,9 +365,9 @@
         >
           {{ assetFormError }}
         </small>
-      </template>
-    </aside>
-  </div>
+      </aside>
+    </div>
+  </Teleport>
 </template>
 
 <script setup lang="ts">

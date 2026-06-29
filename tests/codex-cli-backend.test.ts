@@ -375,6 +375,57 @@ describe('Codex CLI backend runtime', () => {
     })
   })
 
+  it('checks the Codex binary with the default startup timeout', async () => {
+    const backend = await loadBackend()
+    const execCalls: Array<{ file: string; args: string[]; options: { timeout: number; env: NodeJS.ProcessEnv } }> = []
+
+    backend.configureCodexCliRuntime({
+      getAppPath: () => '/repo',
+      getResourcesPath: () => '/resources',
+      binaryPath: CODEX_PACKAGE_BINARY,
+      existsSync: codexPackageExists,
+      execFileSync: (file: string, args: string[], options: { stdio: 'pipe'; timeout: number; env: NodeJS.ProcessEnv }) => {
+        execCalls.push({ file, args, options })
+        return 'codex-cli 0.0.0'
+      }
+    })
+
+    expect(backend.resolveCodexBinaryPath()).toBe(CODEX_PACKAGE_BINARY)
+    expect(execCalls).toEqual([
+      {
+        file: CODEX_PACKAGE_BINARY,
+        args: ['--version'],
+        options: expect.objectContaining({
+          timeout: 30000,
+          env: expect.objectContaining({
+            CODEX_HOME: process.env.CODEX_HOME || ''
+          })
+        })
+      }
+    ])
+  })
+
+  it('reports Codex binary health check timeouts with the command and timeout', async () => {
+    const backend = await loadBackend()
+    const timeoutError = Object.assign(new Error(`spawnSync ${CODEX_PACKAGE_BINARY} ETIMEDOUT`), {
+      code: 'ETIMEDOUT'
+    })
+
+    backend.configureCodexCliRuntime({
+      getAppPath: () => '/repo',
+      getResourcesPath: () => '/resources',
+      binaryPath: CODEX_PACKAGE_BINARY,
+      existsSync: codexPackageExists,
+      execFileSync: () => {
+        throw timeoutError
+      }
+    })
+
+    expect(() => backend.resolveCodexBinaryPath()).toThrow(
+      `Codex binary failed health check: timed out after 30000ms running ${CODEX_PACKAGE_BINARY} --version`
+    )
+  })
+
   it('falls back to subprocess when node-pty is unavailable', async () => {
     const backend = await loadBackend()
     const events = createRecorder()

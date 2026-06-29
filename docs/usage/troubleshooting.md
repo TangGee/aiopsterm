@@ -32,6 +32,22 @@ The normal terminal and right-side embedded Codex paths both coalesce output bef
 
 Hidden terminal tabs and inactive embedded Codex conversations keep receiving output in app state, but they do not continuously write to hidden xterm instances. When a tab, split pane, or Codex conversation becomes visible again, aiopsterm syncs the preserved output to xterm once and resumes incremental rendering from there.
 
+### Embedded Codex Startup
+
+When the right-side Codex panel fails with `Codex binary failed health check` and an `ETIMEDOUT` message, aiopsterm failed while validating the bundled Codex CLI with `codex --version` before opening the PTY. The default health-check timeout is 30 seconds. For slow development filesystems or cold package caches, increase it for the app process:
+
+```bash
+AIOPSTERM_CODEX_HEALTH_CHECK_TIMEOUT_MS=60000 npm run dev
+```
+
+To verify the binary directly, run the path from the error message with `--version`. In a Linux development tree this usually looks like:
+
+```bash
+codex/codex-rs/target/x86_64-unknown-linux-gnu/aiopsterm-codex-dev-package/bin/codex --version
+```
+
+If direct execution returns quickly but the app still reports `ETIMEDOUT`, collect the surrounding `codex.create.*` and `codex.lifecycle` runtime log entries from `<userData>/logs/aiopsterm-runtime.log`.
+
 ### Threaded Terminal Renderer
 
 Set `AIOPSTERM_THREADED_TERMINAL=1` to opt into the worker-based terminal path. In this mode terminal parsing runs in a small `@xterm/headless` worker pool and visible panes paint through worker `OffscreenCanvas` 2D. If Worker or OffscreenCanvas support is missing, aiopsterm logs `renderer.threaded-terminal.unavailable` and falls back to the normal xterm renderer.

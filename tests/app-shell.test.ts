@@ -229,6 +229,19 @@ import type { FileSessionInfo } from '@shared/contracts/files'
 import type { TerminalCreateOptions, TerminalKeyboardInteractiveRequest, TerminalSessionInfo } from '@shared/contracts/terminalSessions'
 
 const prodKeychainSshAgentFingerprint = 'SHA256:KW/btgUSM+Gu9ht4gyd2CMSZB/1setTDE0+Uik88xGE'
+const teleportStub = { teleport: true }
+const withTeleportStub = (options: Record<string, any> = {}) => ({
+  ...options,
+  global: {
+    ...(options.global || {}),
+    stubs: {
+      ...((options.global || {}).stubs || {}),
+      ...teleportStub
+    }
+  }
+})
+const mountAssetsPanel = (options: Parameters<typeof mount>[1] = {}) => mount(AssetsPanel, withTeleportStub(options))
+const mountWorkspacePanel = (options: Parameters<typeof mount>[1] = {}) => mount(WorkspacePanel, withTeleportStub(options))
 
 const enableCatalogModelOptions = async (store: ReturnType<typeof useWorkspaceStore>) => {
   store.updateModelProviderConfig('ollama', { modelId: 'qwen2.5-coder' })
@@ -2210,7 +2223,7 @@ describe('AppShell', () => {
   it('follows External reference-style asset management navigation and filters knowledge documents', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
-    const assets = mount(AssetsPanel, {
+    const assets = mountAssetsPanel({
       props: { query: 'mysql' },
       global: { plugins: [pinia] }
     })
@@ -2378,7 +2391,7 @@ describe('AppShell', () => {
     expect(vi.mocked(window.aiops.saveAsset).mock.calls.at(-1)?.[0]).not.toHaveProperty('id')
     expect(store.onboardingActiveStep?.id).toBe('connect-asset')
 
-    const keys = mount(AssetsPanel, {
+    const keys = mountAssetsPanel({
       props: { query: '' },
       global: { plugins: [pinia] }
     })
@@ -2503,7 +2516,7 @@ describe('AppShell', () => {
     const mountKeysPanel = async () => {
       const pinia = createPinia()
       setActivePinia(pinia)
-      const wrapper = mount(AssetsPanel, {
+      const wrapper = mountAssetsPanel({
         props: { query: '' },
         global: { plugins: [pinia] }
       })
@@ -2567,7 +2580,7 @@ describe('AppShell', () => {
     const mountKeysPanel = async () => {
       const pinia = createPinia()
       setActivePinia(pinia)
-      const wrapper = mount(AssetsPanel, {
+      const wrapper = mountAssetsPanel({
         props: { query: '' },
         global: { plugins: [pinia] }
       })
@@ -2629,7 +2642,7 @@ describe('AppShell', () => {
     }
     const pinia = createPinia()
     setActivePinia(pinia)
-    const keys = mount(AssetsPanel, {
+    const keys = mountAssetsPanel({
       props: { query: '' },
       global: { plugins: [pinia] }
     })
@@ -2687,7 +2700,7 @@ describe('AppShell', () => {
     vi.mocked(window.aiops.showSaveDialog).mockClear()
     vi.mocked(window.aiops.writeLocalFile).mockClear()
 
-    const assets = mount(AssetsPanel, {
+    const assets = mountAssetsPanel({
       props: { query: '' },
       global: { plugins: [pinia] }
     })
@@ -2766,7 +2779,7 @@ describe('AppShell', () => {
       Object.defineProperty(globalThis, 'FileReader', { configurable: true, writable: true, value: originalGlobalFileReader })
     }
 
-    const managed = mount(AssetsPanel, {
+    const managed = mountAssetsPanel({
       props: { query: '' },
       global: { plugins: [pinia] }
     })
@@ -2828,7 +2841,7 @@ describe('AppShell', () => {
     await flushPromises()
     expect(managed.text()).not.toContain('managed-unit')
 
-    const organization = mount(AssetsPanel, {
+    const organization = mountAssetsPanel({
       props: { query: '' },
       global: { plugins: [pinia] }
     })
@@ -2880,7 +2893,7 @@ describe('AppShell', () => {
     const store = useWorkspaceStore()
     await store.hydrateConfig()
 
-    const assets = mount(AssetsPanel, {
+    const assets = mountAssetsPanel({
       props: { query: '' },
       global: { plugins: [pinia] }
     })
@@ -2919,7 +2932,7 @@ describe('AppShell', () => {
   it('loads saved host passwords for Assets edits and supports explicit reveal toggles', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
-    const assets = mount(AssetsPanel, {
+    const assets = mountAssetsPanel({
       props: { query: '' },
       global: { plugins: [pinia] }
     })
@@ -2932,7 +2945,7 @@ describe('AppShell', () => {
     expect((createSecretInput.element as HTMLInputElement).value).toBe('')
     expect((createSecretInput.element as HTMLInputElement).type).toBe('password')
     await assets.find('.asset-form-panel .asset-secret-toggle').trigger('click')
-    expect((createSecretInput.element as HTMLInputElement).type).toBe('text')
+    expect((assets.find('.asset-form-panel .asset-secret-field input').element as HTMLInputElement).type).toBe('text')
     await assets.find('.asset-form-panel header button[title="关闭"]').trigger('click')
     await flushPromises()
 
@@ -2949,13 +2962,13 @@ describe('AppShell', () => {
     expect((editSecretInput.element as HTMLInputElement).value).toBe('legacy-password')
     expect((editSecretInput.element as HTMLInputElement).type).toBe('password')
     await assets.find('.asset-form-panel .asset-secret-toggle').trigger('click')
-    expect((editSecretInput.element as HTMLInputElement).type).toBe('text')
+    expect((assets.find('.asset-form-panel .asset-secret-field input').element as HTMLInputElement).type).toBe('text')
   })
 
   it('clears saved host passwords from Assets edits when the password field is emptied', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
-    const assets = mount(AssetsPanel, {
+    const assets = mountAssetsPanel({
       props: { query: '' },
       global: { plugins: [pinia] }
     })
@@ -2983,7 +2996,7 @@ describe('AppShell', () => {
   it('copies saved passwords when cloning hosts from Assets', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
-    const assets = mount(AssetsPanel, {
+    const assets = mountAssetsPanel({
       props: { query: '' },
       global: { plugins: [pinia] }
     })
@@ -3093,7 +3106,7 @@ describe('AppShell', () => {
   it('opens Terminal proxy settings when the asset form has no SSH proxy configs', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
-    const assets = mount(AssetsPanel, {
+    const assets = mountAssetsPanel({
       props: { query: '' },
       global: { plugins: [pinia] }
     })
@@ -3117,7 +3130,7 @@ describe('AppShell', () => {
     })
     const pinia = createPinia()
     setActivePinia(pinia)
-    const wrapper = mount(WorkspacePanel, {
+    const wrapper = mountWorkspacePanel({
       global: { plugins: [pinia] }
     })
     await flushPromises()
@@ -3129,7 +3142,7 @@ describe('AppShell', () => {
   it('loads saved host passwords for Workspace edits and keeps them auditable before save', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
-    const wrapper = mount(WorkspacePanel, {
+    const wrapper = mountWorkspacePanel({
       global: { plugins: [pinia] }
     })
     await flushPromises()
@@ -3149,7 +3162,7 @@ describe('AppShell', () => {
     expect((secretInput.element as HTMLInputElement).value).toBe('legacy-password')
     expect((secretInput.element as HTMLInputElement).type).toBe('password')
     await wrapper.find('.workspace-host-form .asset-secret-toggle').trigger('click')
-    expect((secretInput.element as HTMLInputElement).type).toBe('text')
+    expect((wrapper.find('.workspace-host-form .asset-secret-field input').element as HTMLInputElement).type).toBe('text')
 
     vi.mocked(window.aiops.saveAsset).mockClear()
     await wrapper.find('.workspace-host-form').trigger('submit')
@@ -3160,7 +3173,7 @@ describe('AppShell', () => {
   it('clears saved host passwords from Workspace edits when the password field is emptied', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
-    const wrapper = mount(WorkspacePanel, {
+    const wrapper = mountWorkspacePanel({
       global: { plugins: [pinia] }
     })
     await flushPromises()
@@ -3188,7 +3201,7 @@ describe('AppShell', () => {
   it('copies saved passwords when cloning hosts from Workspace', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
-    const wrapper = mount(WorkspacePanel, {
+    const wrapper = mountWorkspacePanel({
       global: { plugins: [pinia] }
     })
     await flushPromises()
@@ -3223,7 +3236,7 @@ describe('AppShell', () => {
   it('does not fabricate Assets export success when the backend export bridge is unavailable, fails, or is canceled', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
-    const assets = mount(AssetsPanel, {
+    const assets = mountAssetsPanel({
       props: { query: '' },
       global: { plugins: [pinia] }
     })
@@ -3286,7 +3299,7 @@ describe('AppShell', () => {
     const malformedMessage = '资产服务返回数据无效'
     const pinia = createPinia()
     setActivePinia(pinia)
-    const assets = mount(AssetsPanel, {
+    const assets = mountAssetsPanel({
       props: { query: '' },
       global: { plugins: [pinia] }
     })
@@ -3386,7 +3399,7 @@ describe('AppShell', () => {
     const malformedMessage = '资产服务返回数据无效'
     const pinia = createPinia()
     setActivePinia(pinia)
-    const assets = mount(AssetsPanel, {
+    const assets = mountAssetsPanel({
       props: { query: '' },
       global: { plugins: [pinia] }
     })
@@ -3463,7 +3476,7 @@ describe('AppShell', () => {
     expect(assets.find('.import-assets-modal').exists()).toBe(true)
     expect(assets.text()).not.toContain('broken-import')
 
-    const managed = mount(AssetsPanel, {
+    const managed = mountAssetsPanel({
       props: { query: '' },
       global: { plugins: [pinia] }
     })
@@ -3482,7 +3495,7 @@ describe('AppShell', () => {
     expect(managed.text()).not.toContain('malformed-refresh')
     expect((managed.findAll('.asset-table-scroll tbody tr').find((row) => row.text().includes('prod-bastion'))!.find('input[type="checkbox"]').element as HTMLInputElement).checked).toBe(true)
 
-    const organization = mount(AssetsPanel, {
+    const organization = mountAssetsPanel({
       props: { query: '' },
       global: { plugins: [pinia] }
     })
@@ -3531,7 +3544,7 @@ describe('AppShell', () => {
     const mountHostManagement = async () => {
       const pinia = createPinia()
       setActivePinia(pinia)
-      const wrapper = mount(AssetsPanel, {
+      const wrapper = mountAssetsPanel({
         props: { query: '' },
         global: { plugins: [pinia] }
       })
@@ -3601,7 +3614,7 @@ describe('AppShell', () => {
     setActivePinia(pinia)
     const store = useWorkspaceStore()
     await store.hydrateConfig()
-    const wrapper = mount(WorkspacePanel, {
+    const wrapper = mountWorkspacePanel({
       global: { plugins: [pinia] }
     })
     await flushPromises()
@@ -3707,7 +3720,7 @@ describe('AppShell', () => {
   it('starts Workspace SSH tunnels with External reference-style typed parameters from the modal', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
-    const wrapper = mount(WorkspacePanel, {
+    const wrapper = mountWorkspacePanel({
       global: { plugins: [pinia] }
     })
     await flushPromises()
@@ -3771,7 +3784,7 @@ describe('AppShell', () => {
       enableProxyIdentity: false
     })
     await store.saveSshProxyForm()
-    const wrapper = mount(WorkspacePanel, {
+    const wrapper = mountWorkspacePanel({
       attachTo: document.body,
       global: { plugins: [pinia] }
     })
@@ -3916,7 +3929,7 @@ describe('AppShell', () => {
     const malformedMessage = '资产服务返回数据无效'
     const pinia = createPinia()
     setActivePinia(pinia)
-    const wrapper = mount(WorkspacePanel, {
+    const wrapper = mountWorkspacePanel({
       global: { plugins: [pinia] }
     })
     await flushPromises()
@@ -4046,7 +4059,7 @@ describe('AppShell', () => {
       setActivePinia(pinia)
       const store = useWorkspaceStore()
       await store.hydrateConfig()
-      const wrapper = mount(WorkspacePanel, {
+      const wrapper = mountWorkspacePanel({
         global: { plugins: [pinia] }
       })
       await flushPromises()
@@ -4203,7 +4216,7 @@ describe('AppShell', () => {
   it('does not visually commit Workspace and Files resource tree preferences before config saves return matching snapshots', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
-    const wrapper = mount(WorkspacePanel, {
+    const wrapper = mountWorkspacePanel({
       global: { plugins: [pinia] }
     })
     await flushPromises()
@@ -4281,7 +4294,7 @@ describe('AppShell', () => {
     setActivePinia(pinia)
     const store = useWorkspaceStore()
     await store.hydrateConfig()
-    const wrapper = mount(WorkspacePanel, {
+    const wrapper = mountWorkspacePanel({
       global: { plugins: [pinia] }
     })
     await flushPromises()
@@ -4331,7 +4344,7 @@ describe('AppShell', () => {
           })
         })
       )
-      const remounted = mount(WorkspacePanel, {
+      const remounted = mountWorkspacePanel({
         global: { plugins: [pinia] }
       })
       await flushPromises()

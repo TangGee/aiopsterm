@@ -197,6 +197,8 @@ export const createAiPanelCodexTerminalRuntime = <TConversation extends AiPanelC
   let offData: (() => void) | null = null
   let offLifecycle: (() => void) | null = null
   let offExit: (() => void) | null = null
+  const pendingSessionStartConversations: TConversation[] = []
+  const pendingConversationBySessionId = new Map<string, TConversation>()
   const outputStates = new Map<string, CodexTerminalOutputState>()
 
   const requestOutputFlush = (callback: () => void) =>
@@ -211,6 +213,38 @@ export const createAiPanelCodexTerminalRuntime = <TConversation extends AiPanelC
     options.isConversationVisible ? options.isConversationVisible(conversation) : options.activeConversationId() === conversation.id
   const isThreadedConversationTerminal = (conversation: TConversation) => Boolean(conversation.terminal && isThreadedTerminalHost(conversation.terminal))
   const terminalTheme = () => terminalThemeForAppTheme(options.themeId?.() || 'dark', { transparentBackground: true })
+
+  const activeConversations = () => new Set(options.conversations())
+
+  const removePendingStartConversation = (conversation: TConversation) => {
+    const index = pendingSessionStartConversations.indexOf(conversation)
+    if (index >= 0) pendingSessionStartConversations.splice(index, 1)
+    pendingConversationBySessionId.forEach((value, sessionId) => {
+      if (value === conversation) pendingConversationBySessionId.delete(sessionId)
+    })
+  }
+
+  const rememberPendingStartConversation = (conversation: TConversation) => {
+    removePendingStartConversation(conversation)
+    pendingSessionStartConversations.push(conversation)
+  }
+
+  const conversationForSessionId = (sessionId: string) => {
+    const conversations = options.conversations()
+    return conversations.find((item) => item.sessionId === sessionId) || pendingConversationBySessionId.get(sessionId) || null
+  }
+
+  const claimPendingSessionConversation = (sessionId: string) => {
+    const existing = conversationForSessionId(sessionId)
+    if (existing) return existing
+    const conversations = activeConversations()
+    const conversation = pendingSessionStartConversations.find((item) => conversations.has(item) && !item.sessionId)
+    if (!conversation) return null
+    pendingConversationBySessionId.set(sessionId, conversation)
+    conversation.sessionId = sessionId
+    log('debug', 'renderer.codex-session.pending-bound', { localId: conversation.id, sessionId })
+    return conversation
+  }
 
   const outputStateFor = (conversation: TConversation): CodexTerminalOutputState => {
     const existing = outputStates.get(conversation.id)
@@ -528,11 +562,11 @@ export const createAiPanelCodexTerminalRuntime = <TConversation extends AiPanelC
     const onCodexSessionExit = client.onCodexSessionExit()
     if (!onCodexSessionData && !onCodexSessionLifecycle && !onCodexSessionExit) return
     offData = onCodexSessionData?.((event) => {
-      const conversation = options.conversations().find((item) => item.sessionId === event.id)
+      const conversation = conversationForSessionId(event.id) || claimPendingSessionConversation(event.id)
       if (conversation) writeCodexDisplayOutput(conversation, event.data)
     }) || null
     offLifecycle = onCodexSessionLifecycle?.((event) => {
-      const conversation = options.conversations().find((item) => item.sessionId === event.id)
+      const conversation = conversationForSessionId(event.id) || claimPendingSessionConversation(event.id)
       if (!conversation) return
       applyCodexLifecycleEvent(conversation, event, options.labels.error())
       if (event.stage === 'ready') {
@@ -541,12 +575,14 @@ export const createAiPanelCodexTerminalRuntime = <TConversation extends AiPanelC
       }
       if (event.stage === 'error') options.syncAttentionState(conversation)
       if (event.stage === 'closed') options.syncAttentionState(conversation)
+      if (event.stage === 'error' || event.stage === 'closed') removePendingStartConversation(conversation)
     }) || null
     offExit = onCodexSessionExit?.((event) => {
-      const conversation = options.conversations().find((item) => item.sessionId === event.id)
+      const conversation = conversationForSessionId(event.id) || claimPendingSessionConversation(event.id)
       if (!conversation) return
       applyCodexExitEvent(conversation, event)
       options.syncAttentionState(conversation)
+      removePendingStartConversation(conversation)
     }) || null
   }
 
@@ -734,15 +770,19 @@ export const createAiPanelCodexTerminalRuntime = <TConversation extends AiPanelC
       }
       conversation.status = 'starting'
       conversation.error = ''
+      rememberPendingStartConversation(conversation)
+      subscribeBridge()
       fitTerminal({ force: true, conversation })
       const cols = conversation.terminal?.cols || 100
       const rows = conversation.terminal?.rows || 30
       try {
         const session = await createCodexSession({ cols, rows, target })
+        pendingConversationBySessionId.set(session.id, conversation)
         applyCodexSessionStarted(conversation, session, target)
-        subscribeBridge()
+        removePendingStartConversation(conversation)
         await syncTargetContext({ force: true, conversation })
         fitTerminal({ force: true, conversation })
+        scheduleCodexOutputFlush(conversation)
         focusActiveTerminal()
         log('info', 'renderer.codex-session.started', {
           sessionId: session.id,
@@ -753,6 +793,7 @@ export const createAiPanelCodexTerminalRuntime = <TConversation extends AiPanelC
           target
         })
       } catch (error) {
+        removePendingStartConversation(conversation)
         conversation.status = 'error'
         conversation.error = error instanceof Error && error.message.trim() ? error.message : options.labels.startFailed()
         options.syncAttentionState(conversation)

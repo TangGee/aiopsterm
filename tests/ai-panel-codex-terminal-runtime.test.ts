@@ -318,6 +318,49 @@ describe('aiPanelCodexTerminalRuntime', () => {
     expect(conversation.fit).toBeNull()
   })
 
+  it('keeps Codex output emitted before createCodexSession resolves', async () => {
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const conversation = createConversation()
+    const clientBundle = createClient()
+    let resolveCreateSession: (() => void) | undefined
+    clientBundle.bridges.createCodexSessionBridge.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveCreateSession = () =>
+            resolve({
+              id: 'codex-session-1',
+              cwd: '/repo',
+              codexHome: '/tmp/codex',
+              runtimeKind: 'pty' as const,
+              binaryPath: '/usr/bin/codex',
+              lifecycle: {
+                id: 'codex-session-1',
+                stage: 'ready' as const,
+                at: 1
+              }
+            })
+        })
+    )
+    const { runtime } = createRuntime(conversation, clientBundle)
+    runtime.setHostElement(conversation, host)
+    const start = runtime.startSession(conversation)
+    await Promise.resolve()
+    expect(clientBundle.client.onCodexSessionData).toHaveBeenCalledTimes(1)
+
+    clientBundle.emitData({ id: 'codex-session-1', data: 'early tui' })
+    await flushAsyncHandlers()
+    expect(conversation.sessionId).toBe('codex-session-1')
+    expect(conversation.terminal?.write).toHaveBeenCalledWith('early tui', expect.any(Function))
+
+    resolveCreateSession?.()
+    await start
+    expect(conversation).toMatchObject({
+      sessionId: 'codex-session-1',
+      status: 'ready'
+    })
+  })
+
   it('coalesces Codex session output and waits for xterm write callbacks', async () => {
     const host = document.createElement('div')
     document.body.appendChild(host)

@@ -26,6 +26,11 @@ export type CodexPtyRuntime = {
 }
 
 export type CodexProcessRuntime = Pick<typeof import('child_process'), 'spawn'>
+type CodexBinaryHealthCheckRunner = (
+  binaryPath: string,
+  args: string[],
+  options: { stdio: 'pipe'; timeout: number; env: NodeJS.ProcessEnv }
+) => Buffer | string
 
 type CodexRuntimeConfig = {
   getUserDataPath?: () => string
@@ -39,8 +44,10 @@ type CodexRuntimeConfig = {
   readFile?: typeof readFile
   writeFile?: typeof writeFile
   existsSync?: typeof existsSync
+  execFileSync?: CodexBinaryHealthCheckRunner
   binaryPath?: string
   binaryHealthCheck?: false | ((binaryPath: string) => void)
+  binaryHealthCheckTimeoutMs?: number
   getBridgeSocketPath?: () => string
 }
 
@@ -88,6 +95,7 @@ const getReadFile = () => runtimeConfig.readFile || readFile
 const getWriteFile = () => runtimeConfig.writeFile || writeFile
 const getPtyRuntime = () => (runtimeConfig.loadPty || defaultLoadPty)()
 const getProcessRuntime = () => runtimeConfig.processRuntime || { spawn }
+const getExecFileSync = (): CodexBinaryHealthCheckRunner => runtimeConfig.execFileSync || ((file, args, options) => execFileSync(file, args, options))
 
 export const configureCodexCliRuntime = (config: CodexRuntimeConfig = {}) => {
   runtimeConfig.getUserDataPath = config.getUserDataPath
@@ -101,8 +109,10 @@ export const configureCodexCliRuntime = (config: CodexRuntimeConfig = {}) => {
   runtimeConfig.readFile = config.readFile
   runtimeConfig.writeFile = config.writeFile
   runtimeConfig.existsSync = config.existsSync
+  runtimeConfig.execFileSync = config.execFileSync
   runtimeConfig.binaryPath = config.binaryPath
   runtimeConfig.binaryHealthCheck = config.binaryHealthCheck
+  runtimeConfig.binaryHealthCheckTimeoutMs = config.binaryHealthCheckTimeoutMs
   runtimeConfig.getBridgeSocketPath = config.getBridgeSocketPath
   sessions.clear()
 }
@@ -170,25 +180,38 @@ const codexPackageRootForBinary = (binaryPath: string) => {
   return getExistsSync()(join(packageRoot, 'codex-package.json')) ? packageRoot : ''
 }
 
+const normalizeCodexBinaryHealthCheckTimeoutMs = (value: unknown) => {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed) || parsed <= 0) return 30000
+  return Math.max(1000, Math.min(120000, Math.round(parsed)))
+}
+
+const codexBinaryHealthCheckTimeoutMs = () =>
+  normalizeCodexBinaryHealthCheckTimeoutMs(runtimeConfig.binaryHealthCheckTimeoutMs ?? process.env.AIOPSTERM_CODEX_HEALTH_CHECK_TIMEOUT_MS)
+
 const defaultCodexBinaryHealthCheck = (binaryPath: string) => {
+  const timeout = codexBinaryHealthCheckTimeoutMs()
   try {
-    execFileSync(binaryPath, ['--version'], {
+    getExecFileSync()(binaryPath, ['--version'], {
       stdio: 'pipe',
-      timeout: 5000,
+      timeout,
       env: {
         ...process.env,
         CODEX_HOME: process.env.CODEX_HOME || ''
       }
     })
   } catch (error) {
-    const record = error as { stdout?: Buffer | string; stderr?: Buffer | string; message?: string }
+    const record = error as { code?: string; stdout?: Buffer | string; stderr?: Buffer | string; message?: string }
     const details = [record.stderr, record.stdout, record.message]
       .map((value) => String(value || '').trim())
       .filter(Boolean)
       .join('\n')
-    throw Object.assign(new Error(`Codex binary failed health check: ${details || binaryPath}`), {
+    const timedOut = String(record.code || '').toUpperCase() === 'ETIMEDOUT' || /\bETIMEDOUT\b/i.test(String(record.message || ''))
+    const reason = timedOut ? `timed out after ${timeout}ms running ${binaryPath} --version` : details || binaryPath
+    throw Object.assign(new Error(`Codex binary failed health check: ${reason}${timedOut && details ? `\n${details}` : ''}`), {
       code: 'CODEX_BINARY_UNUSABLE',
-      binaryPath
+      binaryPath,
+      timeoutMs: timeout
     })
   }
 }
