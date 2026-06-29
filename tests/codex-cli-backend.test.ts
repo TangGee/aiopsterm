@@ -299,6 +299,49 @@ describe('Codex CLI backend runtime', () => {
     expect(backend.__getCodexSessionCountForTests()).toBe(0)
   })
 
+  it('starts embedded Codex with a color-capable terminal environment', async () => {
+    const backend = await loadBackend()
+    const pty = new MockPtyProcess()
+    const spawnCalls: Array<Record<string, unknown>> = []
+
+    backend.configureCodexCliRuntime({
+      getUserDataPath: () => '/tmp/aiopsterm-user-data',
+      getAppPath: () => '/repo',
+      getResourcesPath: () => '/resources',
+      getEnv: () => ({
+        PATH: '/usr/bin',
+        TERM: 'dumb',
+        COLORTERM: '',
+        NO_COLOR: '1'
+      }),
+      binaryPath: CODEX_PACKAGE_BINARY,
+      binaryHealthCheck: false,
+      existsSync: codexPackageExists,
+      mkdir: async () => undefined,
+      writeFile: async () => undefined,
+      loadPty: () => ({
+        spawn: (file: string, args: string[], options: Record<string, unknown>) => {
+          spawnCalls.push({ file, args, options })
+          return pty
+        }
+      })
+    })
+
+    await backend.createCodexSession('codex-color-env', {}, createSink(createRecorder()))
+
+    expect(spawnCalls[0].options).toEqual(
+      expect.objectContaining({
+        name: 'xterm-256color',
+        env: expect.objectContaining({
+          TERM: 'xterm-256color',
+          COLORTERM: 'truecolor',
+          CLICOLOR: '1'
+        })
+      })
+    )
+    expect((spawnCalls[0].options as { env: NodeJS.ProcessEnv }).env).not.toHaveProperty('NO_COLOR')
+  })
+
   it('stores pending Codex context per session and replaces prior content', async () => {
     const backend = await loadBackend()
     const pty = new MockPtyProcess()

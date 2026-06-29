@@ -97,6 +97,17 @@ const getPtyRuntime = () => (runtimeConfig.loadPty || defaultLoadPty)()
 const getProcessRuntime = () => runtimeConfig.processRuntime || { spawn }
 const getExecFileSync = (): CodexBinaryHealthCheckRunner => runtimeConfig.execFileSync || ((file, args, options) => execFileSync(file, args, options))
 
+const codexTerminalEnv = (baseEnv: NodeJS.ProcessEnv): NodeJS.ProcessEnv => {
+  const env: NodeJS.ProcessEnv = {
+    ...baseEnv,
+    TERM: 'xterm-256color',
+    COLORTERM: 'truecolor',
+    CLICOLOR: '1'
+  }
+  delete env.NO_COLOR
+  return env
+}
+
 export const configureCodexCliRuntime = (config: CodexRuntimeConfig = {}) => {
   runtimeConfig.getUserDataPath = config.getUserDataPath
   runtimeConfig.getAppPath = config.getAppPath
@@ -302,17 +313,15 @@ export const createCodexSession = async (
   const cols = Math.max(20, Math.min(400, Math.round(Number(options.cols) || 100)))
   const rows = Math.max(8, Math.min(120, Math.round(Number(options.rows) || 30)))
   const codexProvider = resolveCodexProviderConfig()
-  const env = {
+  const env = codexTerminalEnv({
     ...defaultEnv(),
     ...(runtimeConfig.getEnv?.() || {}),
     ...(codexProvider?.env || {}),
     AIOPSTERM_CODEX_FLAT_MCP_TOOLS: '1',
     AIOPSTERM_CODEX_PENDING_CONTEXT_FILE: pendingContextPath,
     ...(codexPackageRoot ? { CODEX_MANAGED_PACKAGE_ROOT: codexPackageRoot } : {}),
-    CODEX_HOME: codexHome,
-    TERM: 'xterm-256color',
-    COLORTERM: 'truecolor'
-  }
+    CODEX_HOME: codexHome
+  })
 
   await getMkdir()(codexHome, { recursive: true })
   await getMkdir()(dirname(pendingContextPath), { recursive: true })
