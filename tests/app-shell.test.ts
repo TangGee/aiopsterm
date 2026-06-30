@@ -966,7 +966,8 @@ describe('AppShell', () => {
 
     expect(window.aiops.onManagedAiSessionEvent).toHaveBeenCalled()
     expect(vi.mocked(window.aiops.listManagedAiSessions).mock.calls.length).toBeGreaterThanOrEqual(callsBeforeManagedEvent + 1)
-    expect(wrapper.find('.ai-sessions-panel').text()).toContain('发布脚本修复')
+    expect(wrapper.find('.ai-sessions-panel').text()).toContain('修复发布脚本失败重试')
+    expect(wrapper.find('.ai-session-row').attributes('title')).toContain('发布脚本修复')
     expect(store.managedAiSessions[0]?.autoTitle).toBe('发布脚本修复')
   })
 
@@ -1002,7 +1003,7 @@ describe('AppShell', () => {
     })
     await flushPromises()
 
-    expect(wrapper.find('.ai-session-row.active').text()).toContain('Deploy approval')
+    expect(wrapper.find('.ai-session-row.active').text()).toContain('Approve npm test')
     expect(store.aiAttentionUnreadCount).toBe(1)
     await wrapper.find('.ai-session-handle').trigger('click')
     await flushPromises()
@@ -1019,6 +1020,19 @@ describe('AppShell', () => {
     const dateNowSpy = vi.spyOn(Date, 'now').mockReturnValue(1717200600000)
     let wrapper: VueWrapper | null = null
     try {
+      store.applyLocalTerminalSession('panel-main', {
+        id: 'terminal-session-1',
+        kind: 'local',
+        shell: '/bin/bash',
+        cwd: '/work/docs'
+      })
+      const secondaryPanel = store.createPanel()
+      store.applyLocalTerminalSession(secondaryPanel.id, {
+        id: 'terminal-session-2',
+        kind: 'local',
+        shell: '/bin/bash',
+        cwd: '/work/secondary'
+      })
       store.upsertManagedAiSession({
         source: 'claude-code',
         event: 'permission_request',
@@ -1038,9 +1052,26 @@ describe('AppShell', () => {
         title: 'Docs cleanup',
         summary: 'Round finished',
         cwd: '/work/docs',
+        panelId: 'panel-main',
+        terminalSessionId: 'terminal-session-1',
         requestKind: 'telemetry',
         decisionMode: 'telemetry',
+        resumeCommand: "cd '/work/docs' && codex resume 'codex-idle-1'",
         receivedAt: 1717200400000
+      })
+      vi.mocked(window.aiops.replyManagedAiSession).mockResolvedValueOnce({ ok: false } as any)
+      store.markManagedAiSessionHandled('codex', 'codex-idle-1')
+      store.upsertManagedAiSession({
+        source: 'codex',
+        event: 'session_start',
+        sessionId: 'codex-restore-1',
+        title: 'Restore session',
+        summary: 'Terminal closed',
+        cwd: '/work/restore',
+        requestKind: 'telemetry',
+        decisionMode: 'telemetry',
+        resumeCommand: "cd '/work/restore' && codex resume 'codex-restore-1'",
+        receivedAt: 1717200450000
       })
       store.upsertManagedAiSession({
         source: 'gemini',
@@ -1063,14 +1094,24 @@ describe('AppShell', () => {
 
       const modeButtons = wrapper.findAll('.ai-sessions-mode-button')
       expect(modeButtons).toHaveLength(3)
-      expect(modeButtons.at(0)!.attributes('title')).toBe('等待你决策、验收或确认')
-      expect(modeButtons.at(1)!.attributes('title')).toBe('正在工作的 AI 会话')
-      expect(modeButtons.at(2)!.attributes('title')).toBe('搜索、恢复和查看历史')
+      expect(modeButtons.at(0)!.attributes('title')).toBeUndefined()
+      expect(modeButtons.at(1)!.attributes('title')).toBeUndefined()
+      expect(modeButtons.at(2)!.attributes('title')).toBeUndefined()
+      expect(wrapper.find('.ai-sessions-mode-tooltip').exists()).toBe(false)
+      await modeButtons.at(0)!.trigger('mouseenter')
+      await flushPromises()
+      expect(document.body.querySelector('.ai-sessions-mode-tooltip')?.textContent).toContain('等待你决策、验收或确认')
+      await modeButtons.at(0)!.trigger('mouseleave')
+      await flushPromises()
+      expect(document.body.querySelector('.ai-sessions-mode-tooltip')).toBeNull()
       expect(modeButtons.at(0)!.find('.ai-sessions-mode-count').text()).toBe('1')
       expect(modeButtons.at(1)!.find('.ai-sessions-mode-count').text()).toBe('1')
       expect(wrapper.find('.ai-sessions-section-header').text()).toContain('待处理')
       expect(wrapper.findAll('.ai-session-row')).toHaveLength(1)
-      expect(wrapper.text()).toContain('Deploy approval')
+      expect(wrapper.text()).toContain('Approve release')
+      expect(wrapper.find('.ai-session-row-detail').text()).toBe('Approve release')
+      expect(wrapper.find('.ai-session-row-top').exists()).toBe(false)
+      expect(wrapper.find('.ai-session-state').classes()).toContain('dot-needsInput')
 
       await modeButtons.at(1)!.trigger('click')
       await flushPromises()
@@ -1078,7 +1119,8 @@ describe('AppShell', () => {
       expect(wrapper.find('.ai-sessions-library-grouping').exists()).toBe(true)
       expect(wrapper.find('.ai-session-library-section-header').text()).toContain('api')
       expect(wrapper.findAll('.ai-session-row')).toHaveLength(1)
-      expect(wrapper.text()).toContain('API refactor')
+      expect(wrapper.text()).toContain('Reading files')
+      expect(wrapper.find('.ai-session-state').classes()).toContain('dot-working')
 
       await wrapper.find('.ai-session-row').trigger('click')
       await flushPromises()
@@ -1093,10 +1135,62 @@ describe('AppShell', () => {
       await modeButtons.at(2)!.trigger('click')
       await flushPromises()
       expect(wrapper.find('.ai-sessions-section-header').text()).toContain('会话库')
-      expect(wrapper.findAll('.ai-session-row')).toHaveLength(3)
-      expect(wrapper.text()).toContain('Deploy approval')
-      expect(wrapper.text()).toContain('API refactor')
-      expect(wrapper.text()).toContain('Docs cleanup')
+      expect(wrapper.findAll('.ai-session-row')).toHaveLength(4)
+      expect(wrapper.text()).toContain('Approve release')
+      expect(wrapper.text()).toContain('Reading files')
+      expect(wrapper.text()).toContain('Round finished')
+      expect(wrapper.text()).toContain('Terminal closed')
+      expect(wrapper.text()).not.toContain('Deploy approval')
+      expect(wrapper.text()).not.toContain('API refactor')
+      expect(wrapper.text()).not.toContain('Docs cleanup')
+      expect(wrapper.text()).not.toContain('Restore session')
+      expect(wrapper.text()).not.toContain('已结束')
+      expect(wrapper.text()).not.toContain('可恢复')
+      expect(wrapper.text()).not.toContain('历史')
+      expect(wrapper.text()).toContain('其他')
+      const rowFor = (text: string) => wrapper!.findAll('.ai-session-row').find((row) => row.text().includes(text))!
+      expect(rowFor('Reading files').find('.ai-session-state').classes()).toContain('dot-working')
+      expect(rowFor('Approve release').find('.ai-session-state').classes()).toContain('dot-needsInput')
+      expect(rowFor('Round finished').find('.ai-session-state').classes()).toContain('dot-linked')
+      expect(rowFor('Terminal closed').find('.ai-session-state').classes()).toContain('dot-other')
+      expect(wrapper.findAll('.ai-session-row-action')).toHaveLength(0)
+
+      store.activePanelId = secondaryPanel.id
+      await rowFor('Round finished').trigger('click')
+      await flushPromises()
+      expect(store.selectedManagedAiSessionKey).toBe('codex:codex-idle-1')
+      expect(store.activePanelId).toBe(secondaryPanel.id)
+      expect(wrapper.find('.ai-sessions-section-header').text()).toContain('会话库')
+
+      store.upsertManagedAiSession({
+        source: 'gemini',
+        event: 'pre_tool_use',
+        sessionId: 'gemini-background-work',
+        title: 'Background run',
+        summary: 'Running follow-up',
+        cwd: '/work/background',
+        requestKind: 'telemetry',
+        decisionMode: 'telemetry',
+        receivedAt: 1717200650000
+      })
+      await flushPromises()
+      expect(wrapper.find('.ai-sessions-section-header').text()).toContain('会话库')
+      expect(rowFor('Running follow-up').find('.ai-session-state').classes()).toContain('dot-working')
+
+      vi.mocked(window.aiops.createTerminal).mockClear()
+      vi.mocked(window.aiops.writeTerminal).mockClear()
+      await rowFor('Round finished').trigger('dblclick')
+      await flushPromises()
+      expect(store.activePanelId).toBe('panel-main')
+      expect(window.aiops.createTerminal).not.toHaveBeenCalled()
+      expect(window.aiops.writeTerminal).not.toHaveBeenCalled()
+
+      vi.mocked(window.aiops.createTerminal).mockClear()
+      vi.mocked(window.aiops.writeTerminal).mockClear()
+      await rowFor('Terminal closed').trigger('dblclick')
+      await flushPromises()
+      expect(window.aiops.createTerminal).toHaveBeenCalledWith(expect.objectContaining({ kind: 'local', cwd: '/work/restore', title: 'Restore session' }))
+      expect(window.aiops.writeTerminal).toHaveBeenCalledWith('test-session-local', "cd '/work/restore' && codex resume 'codex-restore-1'\n")
     } finally {
       wrapper?.unmount()
       dateNowSpy.mockRestore()
@@ -1154,9 +1248,9 @@ describe('AppShell', () => {
     expect(wrapper.find('.ai-sessions-summary').exists()).toBe(false)
     expect(wrapper.find('.ai-sessions-section-header').text()).toContain('待处理')
     expect(wrapper.findAll('.ai-session-row')).toHaveLength(2)
-    expect(wrapper.text()).toContain('API approval')
-    expect(wrapper.text()).toContain('Docs approval')
-    expect(wrapper.text()).not.toContain('API work')
+    expect(wrapper.text()).toContain('Approve deploy command')
+    expect(wrapper.text()).toContain('Approve docs cleanup')
+    expect(wrapper.text()).not.toContain('Inspecting routes')
 
     const modeButtons = wrapper.findAll('.ai-sessions-mode-button')
     await modeButtons.at(1)!.trigger('click')
@@ -1164,8 +1258,8 @@ describe('AppShell', () => {
 
     expect(wrapper.find('.ai-sessions-section-header').text()).toContain('运行中')
     expect(wrapper.findAll('.ai-session-row')).toHaveLength(1)
-    expect(wrapper.text()).toContain('API work')
-    expect(wrapper.text()).not.toContain('Docs approval')
+    expect(wrapper.text()).toContain('Inspecting routes')
+    expect(wrapper.text()).not.toContain('Approve docs cleanup')
 
     await modeButtons.at(2)!.trigger('click')
     await flushPromises()
@@ -2015,8 +2109,15 @@ describe('AppShell', () => {
     expect(sessions.find('input').attributes('placeholder')).toBe('Search pending items, sessions, or projects')
     expect(sessions.find('.ai-sessions-mode-nav').attributes('aria-label')).toBe('AI session views')
     expect(sessions.find('.ai-sessions-section-header').text()).toContain('Pending')
-    expect(sessions.find('.ai-sessions-mode-button.mode-pending').attributes('title')).toBe('Waiting for your decision, review, or confirmation')
-    expect(sessions.text()).toContain('Permission approval')
+    expect(sessions.find('.ai-sessions-mode-button.mode-pending').attributes('title')).toBeUndefined()
+    await sessions.find('.ai-sessions-mode-button.mode-pending').trigger('focus')
+    await flushPromises()
+    expect(document.body.querySelector('.ai-sessions-mode-tooltip')?.textContent).toContain('Waiting for your decision, review, or confirmation')
+    await sessions.find('.ai-sessions-mode-button.mode-pending').trigger('blur')
+    await flushPromises()
+    expect(document.body.querySelector('.ai-sessions-mode-tooltip')).toBeNull()
+    expect(sessions.find('.ai-session-row-detail').text()).toBe('Approve deployment command')
+    expect(sessions.find('.ai-session-row-status').text()).toBe('Pending')
 
     const terminal = mount(TerminalWorkspace, {
       attachTo: document.body,
@@ -8998,6 +9099,10 @@ describe('AppShell', () => {
         terminalActivityAt: 1717200005000,
         terminalProcessId: 4002
       })
+      vi.mocked(window.aiops.replyManagedAiSession).mockResolvedValue({ ok: false } as any)
+      store.markManagedAiSessionHandled('codex', 'visible-session')
+      store.markManagedAiSessionHandled('codex', 'old-session')
+      store.markManagedAiSessionHandled('claude-code', 'new-session')
       store.upsertManagedAiSession({
         source: 'codex',
         event: 'pre_tool_use',

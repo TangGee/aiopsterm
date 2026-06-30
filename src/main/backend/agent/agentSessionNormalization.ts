@@ -448,6 +448,7 @@ const requestKindFor = (source: AiAgentSessionSource, event: AiAgentSessionEvent
   if (isExitPlanTool(toolName)) return 'plan'
   if (event === 'permission_request') return 'permission'
   if (event === 'notification') return 'notification'
+  if (event === 'stop') return 'notification'
   return 'telemetry'
 }
 
@@ -488,13 +489,13 @@ export const managedAiSessionStateForEvent = (
   lifecycle?: ManagedAiSessionLifecycle,
   aiEvent?: Pick<AiAgentSessionEvent, 'source' | 'event' | 'requestKind' | 'decisionMode' | 'actionable'>
 ): ManagedAiSessionState => {
+  if (event === 'session_end') return 'ended'
+  if (event === 'stop') return 'needsInput'
   const lifecycleState = stateForAgentLifecycle(lifecycle)
   if (lifecycleState) return lifecycleState
   if (event === 'session_start') return 'idle'
   if (event === 'prompt_submit' || event === 'pre_tool_use') return 'working'
   if (event === 'permission_request' || event === 'question' || event === 'notification') return aiEvent && managedAiSessionNeedsInputForEvent(aiEvent) ? 'needsInput' : 'working'
-  if (event === 'stop') return 'idle'
-  if (event === 'session_end') return 'ended'
   return previous
 }
 

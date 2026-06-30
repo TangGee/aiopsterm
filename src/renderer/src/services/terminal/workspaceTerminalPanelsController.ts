@@ -66,6 +66,7 @@ type WorkspaceTerminalPanelsControllerDeps = {
   touchManagedAiTerminalActivity: (panel: Pick<TerminalPanel, 'id' | 'sessionId'>, at?: number) => void
   applyManagedAiTerminalLifecycle: (panel: Pick<TerminalPanel, 'id'>, event: TerminalLifecycleEvent) => void
   applyManagedAiTerminalExit: (panel: Pick<TerminalPanel, 'id'>, event: TerminalExitEvent) => void
+  applyManagedAiTerminalPanelClosed: (closedPanels: Array<Pick<TerminalPanel, 'id' | 'sessionId'>>) => void
 }
 
 export const createInitialWorkspaceTerminalPanels = () => [
@@ -93,7 +94,8 @@ export const createWorkspaceTerminalPanelsController = (
     recordMacroTerminalInput,
     touchManagedAiTerminalActivity,
     applyManagedAiTerminalLifecycle,
-    applyManagedAiTerminalExit
+    applyManagedAiTerminalExit,
+    applyManagedAiTerminalPanelClosed
   } = deps
 
   const createPanel = (split?: PanelDirection) => {
@@ -132,7 +134,9 @@ export const createWorkspaceTerminalPanelsController = (
   }
 
   const closePanel = (id = activePanelId.value) => {
+    const closing = panels.value.filter((panel) => panel.id === id || (panels.value.length === 1 && panel.kind !== 'knowledge'))
     activePanelId.value = closeTerminalPanelInCollection(panels.value, id, activePanelId.value)
+    applyManagedAiTerminalPanelClosed(closing)
   }
 
   const discardPendingTerminalPanel = (id: string, preferredActiveId?: string) => {
@@ -142,11 +146,15 @@ export const createWorkspaceTerminalPanelsController = (
   }
 
   const closeOthers = () => {
+    const closing = panels.value.filter((panel) => panel.id !== activePanelId.value)
     closeOtherTerminalPanelsInCollection(panels.value, activePanelId.value)
+    applyManagedAiTerminalPanelClosed(closing)
   }
 
   const closeAllPanels = () => {
+    const closing = [...panels.value]
     activePanelId.value = resetTerminalPanelCollectionToDefault(panels.value)
+    applyManagedAiTerminalPanelClosed(closing)
   }
 
   const closePanels = (closeMode: 'current' | 'others' | 'all', id = activePanelId.value) => {

@@ -47,6 +47,7 @@ export const useAiSessionsPanelRuntime = () => {
   const eventFilter = ref<ManagedAiRequestKindFilter>('all')
   const replyText = ref('')
   const renameTitle = ref('')
+  const locallySelectedSessionKey = ref('')
   const eventFilters = computed(() => aiSessionsEventFilterOptions.map((option) => ({ key: option.key, label: t(option.labelKey) })))
 
   const sourceLabel = (source: AiAgentSessionSource) => managedAiSourceLabel(source)
@@ -125,6 +126,33 @@ export const useAiSessionsPanelRuntime = () => {
   const sessionDisplayTitle = (session: Pick<ManagedAiSession, 'userTitle' | 'autoTitle' | 'title' | 'summary' | 'id'>) => managedAiSessionDisplayTitle(session)
   const sessionRowTooltip = (session: ManagedAiSession) =>
     [projectLabel(session), sessionDisplayTitle(session), session.cwd || '', session.summary || ''].filter(Boolean).join('\n')
+  const liveLinkedPanelForSession = (session: Pick<ManagedAiSession, 'panelId' | 'terminalSessionId'>) => {
+    const targetIds = [session.panelId, session.terminalSessionId].filter(Boolean)
+    if (!targetIds.length) return null
+    return (
+      workspace.panels.find(
+        (panel) =>
+          panel.kind !== 'knowledge' &&
+          panel.status !== 'closed' &&
+          panel.status !== 'error' &&
+          (targetIds.includes(panel.id) || (panel.sessionId ? targetIds.includes(panel.sessionId) : false))
+      ) || null
+    )
+  }
+  const sessionDotState = (session: Pick<ManagedAiSession, 'state' | 'panelId' | 'terminalSessionId'>) => {
+    if (session.state === 'working') return 'working'
+    if (session.state === 'needsInput') return 'needsInput'
+    if (liveLinkedPanelForSession(session)) return 'linked'
+    return 'other'
+  }
+  const sessionRowDetail = (session: ManagedAiSession) => session.summary.trim() || sessionDisplayTitle(session)
+  const sessionRowStatusLabel = (session: Pick<ManagedAiSession, 'state' | 'panelId' | 'terminalSessionId'>) => {
+    const dotState = sessionDotState(session)
+    if (dotState === 'working') return t('aiSessions.rowStatus.running')
+    if (dotState === 'needsInput') return t('aiSessions.rowStatus.pending')
+    if (dotState === 'linked') return t('aiSessions.rowStatus.linked')
+    return t('aiSessions.rowStatus.other')
+  }
   const selectLibraryGrouping = (nextGrouping: ManagedAiLibraryGrouping) => {
     libraryGrouping.value = nextGrouping
   }
@@ -150,9 +178,11 @@ export const useAiSessionsPanelRuntime = () => {
   )
 
   watch(
-    () => workspace.selectedManagedAiSession,
-    (session) => {
+    () => workspace.managedAiSessionFocusRequest.sequence,
+    () => {
+      const session = workspace.managedAiSessionFocusRequest.session
       if (!session) return
+      locallySelectedSessionKey.value = ''
       const nextMode = managedAiPanelModeForSession(session)
       if (nextMode === mode.value) return
       mode.value = nextMode
@@ -173,25 +203,40 @@ export const useAiSessionsPanelRuntime = () => {
     { immediate: true }
   )
 
-  const selectSession = (session: Pick<ManagedAiSession, 'source' | 'id' | 'panelId' | 'terminalSessionId'>) => {
-    workspace.focusManagedAiSession(session.panelId || session.terminalSessionId || session.id)
+  const focusLinkedPanel = (session: Pick<ManagedAiSession, 'source' | 'id' | 'panelId' | 'terminalSessionId'>) => {
+    const linkedPanel = liveLinkedPanelForSession(session)
+    if (!linkedPanel) return false
+    workspace.focusManagedAiSession(session.id)
+    workspace.activePanelId = linkedPanel.id
     workspace.selectedManagedAiSessionKey = sessionKey(session)
-    const selected = workspace.sortedManagedAiSessions.find((item) => sessionKey(item) === sessionKey(session))
-    if (selected) {
-      mode.value = managedAiPanelModeForSession(selected)
-      filter.value = managedAiPanelModeStateFilter(mode.value)
-    }
+    return true
   }
 
-  const focusSessionConversation = (session: Pick<ManagedAiSession, 'source' | 'id' | 'panelId' | 'terminalSessionId'>) => {
-    workspace.focusManagedAiSession(session.panelId || session.terminalSessionId || session.id)
+  const selectSession = (session: Pick<ManagedAiSession, 'source' | 'id' | 'panelId' | 'terminalSessionId'>) => {
+    const key = sessionKey(session)
+    locallySelectedSessionKey.value = workspace.selectedManagedAiSessionKey === key ? '' : key
+    workspace.selectedManagedAiSessionKey = key
+  }
+
+  const locateSessionTerminal = (session: Pick<ManagedAiSession, 'source' | 'id' | 'panelId' | 'terminalSessionId'>) => {
+    if (!focusLinkedPanel(session)) workspace.focusManagedAiSession(session.id)
     workspace.selectedManagedAiSessionKey = sessionKey(session)
   }
 
   const canResumeSession = (session: Pick<ManagedAiSession, 'state' | 'resumeCommand'>) =>
     session.state !== 'working' && session.state !== 'needsInput' && Boolean(session.resumeCommand?.trim())
 
+  const sessionRowMeta = (session: ManagedAiSession) =>
+    [sourceLabel(session.source), formatRelativeTime(session.lastActivityAt), session.cwd || projectLabel(session)].filter(Boolean).join(' · ')
+
+  const sessionRowActionHint = (session: ManagedAiSession) => {
+    if (liveLinkedPanelForSession(session)) return t('aiSessions.rowAction.locate')
+    if (canResumeSession(session)) return t('aiSessions.rowAction.open')
+    return ''
+  }
+
   const resumeOrFocusSession = (session: ManagedAiSession) => {
+    if (focusLinkedPanel(session)) return
     if (canResumeSession(session)) {
       void workspace.resumeManagedAiSession(session.source, session.id)
       return
@@ -265,16 +310,20 @@ export const useAiSessionsPanelRuntime = () => {
     selectedSession,
     filteredTimelineEvents,
     selectSession,
-    focusSessionConversation,
+    locateSessionTerminal,
     renameSelectedSession,
     submitReply,
     submitQuestionReply,
     copyTimelineEvent,
-    canResumeSession,
     resumeOrFocusSession,
     projectLabel,
     sessionDisplayTitle,
     sessionRowTooltip,
+    sessionRowDetail,
+    sessionRowStatusLabel,
+    sessionRowMeta,
+    sessionRowActionHint,
+    sessionDotState,
     formatTime,
     formatRelativeTime
   }

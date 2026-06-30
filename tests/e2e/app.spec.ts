@@ -730,9 +730,8 @@ test('managed AI session notifications flow through real local terminal hooks', 
     await expect(page.getByTestId('ai-attention-count')).toHaveCount(0)
     await page.locator('.side-rail .rail-button[title="AI 会话"]').click()
     await expect(page.locator('.ai-sessions-panel')).toBeVisible()
-    const codexRow = page.locator('.ai-session-row').filter({ hasText: `Codex · aiopsterm-codex-project-${runId}` })
+    const codexRow = page.locator('.ai-session-row').filter({ hasText: `Codex ·` }).filter({ hasText: `aiopsterm-codex-project-${runId}` })
     await expect(codexRow).toContainText('运行中')
-    await expect(codexRow).toContainText('权限审批')
     await expect(codexRow).toContainText(`shell: echo codex approval`)
     await expect(codexRow).toContainText(`/tmp/aiopsterm-codex-project-${runId}`)
     await codexRow.click()
@@ -747,7 +746,7 @@ test('managed AI session notifications flow through real local terminal hooks', 
       })
     )
     await expect(page.getByTestId('ai-attention-count')).toHaveCount(0)
-    await expect(codexRow).toContainText('空闲')
+    await expect(codexRow).toContainText('已关联终端')
     await sendTerminalCommand(
       page,
       runInstalledHookCommand(codexPermissionCommand, {
@@ -775,13 +774,13 @@ test('managed AI session notifications flow through real local terminal hooks', 
     )
     await expect(page.getByTestId('ai-attention-count')).toHaveText('1')
     await page.getByTestId('ai-attention-bell').click()
-    const questionRow = page.locator('.ai-session-row').filter({ hasText: `Claude Code · aiopsterm-claude-question-${runId}` })
+    const questionRow = page.locator('.ai-session-row').filter({ hasText: `Claude Code ·` }).filter({ hasText: `aiopsterm-claude-question-${runId}` })
     await expect(questionRow).toContainText('待处理')
     await expect(questionRow).toContainText('Pick an environment')
     await expect(questionRow).toContainText(`/tmp/aiopsterm-claude-question-${runId}`)
     await questionRow.locator('.ai-session-handle').click()
     await expect(page.getByTestId('ai-attention-count')).toHaveCount(0)
-    await expect(questionRow).toContainText('空闲')
+    await expect(questionRow).toContainText('其他')
 
     await sendTerminalCommand(
       page,
@@ -794,7 +793,7 @@ test('managed AI session notifications flow through real local terminal hooks', 
     )
     await expect(page.getByTestId('ai-attention-count')).toHaveText('1')
     await page.getByTestId('ai-attention-bell').click()
-    const notificationRow = page.locator('.ai-session-row').filter({ hasText: `Claude Code · aiopsterm-claude-notification-${runId}` })
+    const notificationRow = page.locator('.ai-session-row').filter({ hasText: `Claude Code ·` }).filter({ hasText: `aiopsterm-claude-notification-${runId}` })
     await expect(notificationRow).toContainText('待处理')
     await expect(notificationRow).toContainText('Claude Code needs attention')
     await expect(notificationRow).toContainText(`/tmp/aiopsterm-claude-notification-${runId}`)
@@ -808,7 +807,7 @@ test('managed AI session notifications flow through real local terminal hooks', 
       })
     )
     await expect(page.getByTestId('ai-attention-count')).toHaveCount(0)
-    await expect(notificationRow).toContainText('空闲')
+    await expect(notificationRow).toContainText('其他')
   } finally {
     await app.close()
     await rm(hookHome, { recursive: true, force: true })

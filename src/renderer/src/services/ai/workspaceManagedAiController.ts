@@ -175,6 +175,7 @@ export const createWorkspaceManagedAiController = (
     },
     touchManagedAiTerminalActivity: sessionRuntime.touchManagedAiTerminalActivity,
     applyManagedAiTerminalLifecycle: sessionRuntime.applyManagedAiTerminalLifecycle,
-    applyManagedAiTerminalExit: sessionRuntime.applyManagedAiTerminalExit
+    applyManagedAiTerminalExit: sessionRuntime.applyManagedAiTerminalExit,
+    applyManagedAiTerminalPanelClosed: sessionRuntime.applyManagedAiTerminalPanelClosed
   }
 }

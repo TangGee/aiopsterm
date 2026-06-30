@@ -2,7 +2,6 @@
   <section class="ai-sessions-panel">
     <header class="panel-header">
       <div>
-        <p class="eyebrow">{{ t('aiSessions.eyebrow') }}</p>
         <h2>{{ t('module.aiSessions') }}</h2>
       </div>
       <div class="ai-sessions-header-actions">
@@ -29,7 +28,11 @@
         :class="[`mode-${option.key}`, { active: option.active }]"
         :aria-label="option.label"
         :aria-pressed="option.active"
-        :title="option.tooltip"
+        :aria-current="option.active ? 'page' : undefined"
+        @mouseenter="showModeTooltip(option, $event)"
+        @mouseleave="hideModeTooltip"
+        @focus="showModeTooltip(option, $event)"
+        @blur="hideModeTooltip"
         @click="selectMode(option.key)"
       >
         <Inbox v-if="option.key === 'pending'" />
@@ -41,12 +44,19 @@
         >
           {{ option.count }}
         </span>
-        <span class="ai-sessions-mode-tooltip">
-          <strong>{{ option.label }}</strong>
-          {{ option.tooltip }}
-        </span>
       </button>
     </section>
+
+    <Teleport to="body">
+      <span
+        v-if="modeTooltip"
+        class="ai-sessions-mode-tooltip"
+        :style="{ left: `${modeTooltip.left}px`, top: `${modeTooltip.top}px` }"
+      >
+        <strong>{{ modeTooltip.label }}</strong>
+        {{ modeTooltip.tooltip }}
+      </span>
+    </Teleport>
 
     <div class="panel-search">
       <Search />
@@ -129,31 +139,34 @@
               <div
                 v-for="session in section.sessions"
                 :key="`${session.source}:${session.id}`"
-                class="ai-session-row library"
+                class="ai-session-row library has-row-action"
                 role="button"
                 tabindex="0"
                 :title="sessionRowTooltip(session)"
                 :class="{ active: sessionKey(session) === workspace.selectedManagedAiSessionKey, attention: session.state === 'needsInput' }"
-                @click="focusSessionConversation(session)"
-                @dblclick="focusSessionConversation(session)"
-                @keydown.enter.prevent="focusSessionConversation(session)"
-                @keydown.space.prevent="focusSessionConversation(session)"
+                @click="selectSession(session)"
+                @dblclick="resumeOrFocusSession(session)"
+                @keydown.enter.prevent="selectSession(session)"
+                @keydown.space.prevent="selectSession(session)"
               >
-                <span :class="`ai-session-state state-${session.state}`"></span>
+                <span :class="`ai-session-state dot-${sessionDotState(session)}`"></span>
                 <span class="ai-session-row-body">
-                  <span class="ai-session-row-top">
-                    <strong>{{ sessionDisplayTitle(session) }}</strong>
-                    <small>{{ sourceLabel(session.source) }} · {{ formatRelativeTime(session.lastActivityAt) }}</small>
+                  <span class="ai-session-row-detail">{{ sessionRowDetail(session) }}</span>
+                  <span class="ai-session-row-meta">
+                    <span :class="['ai-session-row-status', `status-${sessionDotState(session)}`]">
+                      {{ sessionRowStatusLabel(session) }}
+                    </span>
+                    <span class="ai-session-row-meta-main">{{ sessionRowMeta(session) }}</span>
+                    <span
+                      v-if="sessionRowActionHint(session)"
+                      class="ai-session-row-hint"
+                    >{{ sessionRowActionHint(session) }}</span>
                   </span>
-                  <small class="ai-session-summary">{{ session.summary || requestKindLabel(session.requestKind) }}</small>
-                  <small class="ai-session-foot">
-                    {{ stateLabel(session.state) }} · {{ requestKindLabel(session.requestKind) }}
-                  </small>
                 </span>
                 <button
                   class="ai-session-row-action"
                   :title="t('aiSessions.locateTerminal')"
-                  @click.stop="focusSessionConversation(session)"
+                  @click.stop="resumeOrFocusSession(session)"
                 >
                   <LocateFixed />
                 </button>
@@ -190,22 +203,25 @@
                 role="button"
                 tabindex="0"
                 :title="sessionRowTooltip(session)"
-                :class="{ active: sessionKey(session) === workspace.selectedManagedAiSessionKey, attention: session.state === 'needsInput' }"
+                :class="{ active: sessionKey(session) === workspace.selectedManagedAiSessionKey, attention: session.state === 'needsInput', 'has-row-action': session.state === 'needsInput' }"
                 @click="selectSession(session)"
                 @dblclick="resumeOrFocusSession(session)"
                 @keydown.enter.prevent="selectSession(session)"
                 @keydown.space.prevent="selectSession(session)"
               >
-                <span :class="`ai-session-state state-${session.state}`"></span>
+                <span :class="`ai-session-state dot-${sessionDotState(session)}`"></span>
                 <span class="ai-session-row-body">
-                  <span class="ai-session-row-top">
-                    <strong>{{ sessionDisplayTitle(session) }}</strong>
-                    <small>{{ sourceLabel(session.source) }} · {{ formatRelativeTime(session.lastActivityAt) }}</small>
+                  <span class="ai-session-row-detail">{{ sessionRowDetail(session) }}</span>
+                  <span class="ai-session-row-meta">
+                    <span :class="['ai-session-row-status', `status-${sessionDotState(session)}`]">
+                      {{ sessionRowStatusLabel(session) }}
+                    </span>
+                    <span class="ai-session-row-meta-main">{{ sessionRowMeta(session) }}</span>
+                    <span
+                      v-if="sessionRowActionHint(session)"
+                      class="ai-session-row-hint"
+                    >{{ sessionRowActionHint(session) }}</span>
                   </span>
-                  <small class="ai-session-summary">{{ session.summary || requestKindLabel(session.requestKind) }}</small>
-                  <small class="ai-session-foot">
-                    {{ stateLabel(session.state) }}{{ session.resumeCommand ? ` · ${t('aiSessions.restorable')}` : '' }}{{ session.hibernated ? ` · ${t('aiSessions.hibernated')}` : '' }}
-                  </small>
                 </span>
                 <button
                   v-if="session.state === 'needsInput'"
@@ -214,14 +230,6 @@
                   @click.stop="workspace.markManagedAiSessionHandled(session.source, session.id)"
                 >
                   <Check />
-                </button>
-                <button
-                  v-else-if="canResumeSession(session)"
-                  class="ai-session-row-action"
-                  :title="t('aiSessions.resume')"
-                  @click.stop="workspace.resumeManagedAiSession(session.source, session.id)"
-                >
-                  <RotateCcw />
                 </button>
               </div>
             </template>
@@ -235,22 +243,25 @@
             role="button"
             tabindex="0"
             :title="sessionRowTooltip(session)"
-            :class="{ active: sessionKey(session) === workspace.selectedManagedAiSessionKey, attention: session.state === 'needsInput' }"
+            :class="{ active: sessionKey(session) === workspace.selectedManagedAiSessionKey, attention: session.state === 'needsInput', 'has-row-action': session.state === 'needsInput' }"
             @click="selectSession(session)"
             @dblclick="resumeOrFocusSession(session)"
             @keydown.enter.prevent="selectSession(session)"
             @keydown.space.prevent="selectSession(session)"
           >
-            <span :class="`ai-session-state state-${session.state}`"></span>
+            <span :class="`ai-session-state dot-${sessionDotState(session)}`"></span>
             <span class="ai-session-row-body">
-              <span class="ai-session-row-top">
-                <strong>{{ projectLabel(session) }}</strong>
-                <small>{{ sourceLabel(session.source) }} · {{ formatRelativeTime(session.lastActivityAt) }}</small>
+              <span class="ai-session-row-detail">{{ sessionRowDetail(session) }}</span>
+              <span class="ai-session-row-meta">
+                <span :class="['ai-session-row-status', `status-${sessionDotState(session)}`]">
+                  {{ sessionRowStatusLabel(session) }}
+                </span>
+                <span class="ai-session-row-meta-main">{{ sessionRowMeta(session) }}</span>
+                <span
+                  v-if="sessionRowActionHint(session)"
+                  class="ai-session-row-hint"
+                >{{ sessionRowActionHint(session) }}</span>
               </span>
-              <small class="ai-session-summary">{{ sessionDisplayTitle(session) }}</small>
-              <small class="ai-session-foot">
-                {{ stateLabel(session.state) }} · {{ requestKindLabel(session.requestKind) }}{{ session.resumeCommand ? ` · ${t('aiSessions.restorable')}` : '' }}{{ session.hibernated ? ` · ${t('aiSessions.hibernated')}` : '' }}
-              </small>
             </span>
             <button
               v-if="session.state === 'needsInput'"
@@ -259,14 +270,6 @@
               @click.stop="workspace.markManagedAiSessionHandled(session.source, session.id)"
             >
               <Check />
-            </button>
-            <button
-              v-else-if="canResumeSession(session)"
-              class="ai-session-row-action"
-              :title="t('aiSessions.resume')"
-              @click.stop="workspace.resumeManagedAiSession(session.source, session.id)"
-            >
-              <RotateCcw />
             </button>
           </div>
         </template>
@@ -301,15 +304,8 @@
           </div>
           <div class="ai-session-detail-actions">
             <button
-              v-if="selectedSession.resumeCommand"
-              :title="t('aiSessions.resume')"
-              @click="workspace.resumeManagedAiSession(selectedSession.source, selectedSession.id)"
-            >
-              <RotateCcw />
-            </button>
-            <button
               :title="t('aiSessions.locateTerminal')"
-              @click="workspace.focusManagedAiSession(selectedSession.id)"
+              @click="locateSessionTerminal(selectedSession)"
             >
               <LocateFixed />
             </button>
@@ -456,7 +452,7 @@
             :key="event.id"
             class="ai-session-event"
           >
-            <span :class="`ai-session-state state-${eventState(event)}`"></span>
+            <span :class="`ai-session-event-state state-${eventState(event)}`"></span>
             <div>
               <strong>{{ eventLabel(event.event) }}</strong>
               <small>{{ formatTime(event.receivedAt) }} · {{ requestKindLabel(event.requestKind) }} · {{ decisionModeLabel(event.decisionMode) }}</small>
@@ -500,7 +496,9 @@
 </template>
 
 <script setup lang="ts">
-import { Activity, Archive, Ban, Bot, Check, CheckCheck, ChevronDown, Copy, FolderTree, Inbox, LocateFixed, RefreshCw, RotateCcw, Search, Send, ShieldCheck, Trash2 } from 'lucide-vue-next'
+import { ref } from 'vue'
+import { Activity, Archive, Ban, Bot, Check, CheckCheck, ChevronDown, Copy, FolderTree, Inbox, LocateFixed, RefreshCw, Search, Send, ShieldCheck, Trash2 } from 'lucide-vue-next'
+import type { ManagedAiPanelModeButton } from '@/services/ai/aiSessionsPanelViewRuntime'
 import { useAiSessionsPanelRuntime } from '@/services/ai/aiSessionsPanelRuntime'
 
 const {
@@ -536,17 +534,46 @@ const {
   selectedSession,
   filteredTimelineEvents,
   selectSession,
-  focusSessionConversation,
+  locateSessionTerminal,
   renameSelectedSession,
   submitReply,
   submitQuestionReply,
   copyTimelineEvent,
-  canResumeSession,
   resumeOrFocusSession,
-  projectLabel,
-  sessionDisplayTitle,
   sessionRowTooltip,
-  formatTime,
-  formatRelativeTime
+  sessionRowDetail,
+  sessionRowStatusLabel,
+  sessionRowMeta,
+  sessionRowActionHint,
+  sessionDotState,
+  formatTime
 } = useAiSessionsPanelRuntime()
+
+const modeTooltip = ref<{ label: string; tooltip: string; left: number; top: number } | null>(null)
+
+const showModeTooltip = (option: ManagedAiPanelModeButton, event: Event) => {
+  const target = event.currentTarget
+  if (!(target instanceof HTMLElement)) return
+  const rect = target.getBoundingClientRect()
+  const tooltipWidth = 190
+  const viewportPadding = 8
+  const left = Math.min(
+    Math.max(rect.right + 10, viewportPadding),
+    Math.max(viewportPadding, window.innerWidth - tooltipWidth - viewportPadding)
+  )
+  const top = Math.min(
+    Math.max(rect.top + rect.height / 2, viewportPadding),
+    Math.max(viewportPadding, window.innerHeight - 48)
+  )
+  modeTooltip.value = {
+    label: option.label,
+    tooltip: option.tooltip,
+    left,
+    top
+  }
+}
+
+const hideModeTooltip = () => {
+  modeTooltip.value = null
+}
 </script>

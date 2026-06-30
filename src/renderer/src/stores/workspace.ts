@@ -477,7 +477,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     bindManagedAiSessionLocalTerminalOpener,
     touchManagedAiTerminalActivity,
     applyManagedAiTerminalLifecycle,
-    applyManagedAiTerminalExit
+    applyManagedAiTerminalExit,
+    applyManagedAiTerminalPanelClosed
   } = createWorkspaceManagedAiController(
     {
       mode,
@@ -556,7 +557,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       recordMacroTerminalInput: (...args) => recordMacroTerminalInput(...args),
       touchManagedAiTerminalActivity,
       applyManagedAiTerminalLifecycle,
-      applyManagedAiTerminalExit
+      applyManagedAiTerminalExit,
+      applyManagedAiTerminalPanelClosed
     }
   )
 

@@ -375,6 +375,9 @@ describe('agent session backend', () => {
         sessions: [
           expect.objectContaining({
             id: 'codex-persist-1',
+            state: 'needsInput',
+            requestKind: 'notification',
+            decisionMode: 'local',
             launchCommand: 'codex -m gpt-5 --approval on-request',
             resumeCommand: "cd '/work/project' && codex resume 'codex-persist-1'",
             events: expect.arrayContaining([
@@ -515,6 +518,7 @@ describe('agent session backend', () => {
       hibernateManagedAiSession,
       listManagedAiSessions,
       publishAiAgentSessionEvent,
+      replyManagedAiSession,
       setAgentHibernationConfig,
       wakeManagedAiSession
     } = await loadBackend()
@@ -550,6 +554,10 @@ describe('agent session backend', () => {
         config: { enabled: true, idleSeconds: 10, maxLiveTerminals: 2, confirmationSeconds: 1 }
       }
     })
+    await expect(hibernateManagedAiSession({ source: 'codex', sessionId: 'codex-hibernate-1', terminalSessionId: 'terminal-session-1' })).resolves.toEqual(
+      expect.objectContaining({ ok: false, errorCode: 'AGENT_HIBERNATION_NEEDS_INPUT' })
+    )
+    await replyManagedAiSession({ source: 'codex', sessionId: 'codex-hibernate-1', kind: 'handled' })
     await expect(
       hibernateManagedAiSession({ source: 'codex', sessionId: 'codex-hibernate-1', terminalSessionId: 'terminal-session-1', reason: 'manual-test' })
     ).resolves.toEqual(
@@ -693,10 +701,12 @@ describe('agent session backend', () => {
       data: {
         sessions: [
           expect.objectContaining({
-          id: 'gemini-session-1',
-          source: 'gemini',
-          title: 'implement release health checks',
-            state: 'idle',
+            id: 'gemini-session-1',
+            source: 'gemini',
+            title: 'implement release health checks',
+            state: 'needsInput',
+            requestKind: 'notification',
+            decisionMode: 'local',
             events: expect.arrayContaining([expect.objectContaining({ event: 'session_start' }), expect.objectContaining({ event: 'stop' })])
           })
         ]
@@ -885,7 +895,7 @@ describe('agent session backend', () => {
         ok: true,
         data: expect.objectContaining({
           total: 2,
-          unreadCount: 1,
+          unreadCount: 2,
           notifications: [
             expect.objectContaining({
               id: 'managed-ai:claude-code:claude-notification-1',
@@ -901,8 +911,10 @@ describe('agent session backend', () => {
             }),
             expect.objectContaining({
               id: 'managed-ai:gemini:gemini-notification-1',
-              read: true,
-              needsInput: false
+              read: false,
+              needsInput: true,
+              requestKind: 'notification',
+              decisionMode: 'local'
             })
           ]
         })
@@ -912,8 +924,11 @@ describe('agent session backend', () => {
       expect.objectContaining({
         ok: true,
         data: expect.objectContaining({
-          count: 1,
-          notifications: [expect.objectContaining({ id: 'managed-ai:claude-code:claude-notification-1' })]
+          count: 2,
+          notifications: [
+            expect.objectContaining({ id: 'managed-ai:claude-code:claude-notification-1' }),
+            expect.objectContaining({ id: 'managed-ai:gemini:gemini-notification-1' })
+          ]
         })
       })
     )
@@ -963,9 +978,9 @@ describe('agent session backend', () => {
       expect.objectContaining({
         ok: true,
         data: expect.objectContaining({
-          changed: 2,
-          notifications: [],
-          snapshot: { sessions: [] }
+          changed: 1,
+          notifications: [expect.objectContaining({ id: 'managed-ai:gemini:gemini-notification-1', read: false })],
+          snapshot: { sessions: [expect.objectContaining({ id: 'gemini-notification-1', state: 'needsInput' })] }
         })
       })
     )
@@ -1001,7 +1016,7 @@ describe('agent session backend', () => {
     await expect(listManagedAiNotifications()).resolves.toEqual(
       expect.objectContaining({
         ok: true,
-        data: expect.objectContaining({ total: 2, unreadCount: 1 })
+        data: expect.objectContaining({ total: 2, unreadCount: 2 })
       })
     )
     await expect(clearManagedAiNotifications()).resolves.toEqual(

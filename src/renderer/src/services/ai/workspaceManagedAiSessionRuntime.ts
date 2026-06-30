@@ -38,6 +38,7 @@ const managedAiRequestKindForEvent = (event: AiAgentSessionEvent): ManagedAiSess
   if (event.event === 'permission_request') return 'permission'
   if (event.event === 'question') return 'question'
   if (event.event === 'notification') return 'notification'
+  if (event.event === 'stop') return 'notification'
   return 'telemetry'
 }
 
@@ -58,6 +59,8 @@ const managedAiSessionNeedsInputForEvent = (event: AiAgentSessionEvent) => {
 }
 
 const managedAiSessionStateForEvent = (event: AiAgentSessionEvent, previous: ManagedAiSessionState = 'unknown'): ManagedAiSessionState => {
+  if (event.event === 'session_end') return 'ended'
+  if (event.event === 'stop') return 'needsInput'
   const lifecycle = event.agentLifecycle
   if (lifecycle === 'running') return 'working'
   if (lifecycle === 'idle') return 'idle'
@@ -67,8 +70,6 @@ const managedAiSessionStateForEvent = (event: AiAgentSessionEvent, previous: Man
   if (event.event === 'session_start') return 'idle'
   if (event.event === 'prompt_submit' || event.event === 'pre_tool_use') return 'working'
   if (event.event === 'permission_request' || event.event === 'question' || event.event === 'notification') return managedAiSessionNeedsInputForEvent(event) ? 'needsInput' : 'working'
-  if (event.event === 'stop') return 'idle'
-  if (event.event === 'session_end') return 'ended'
   return previous
 }
 
@@ -149,6 +150,57 @@ export const createWorkspaceManagedAiSessionRuntime = (input: {
     })
   }
 
+  const managedAiLiveTerminalIds = () => {
+    const ids = new Set<string>()
+    panels.value.forEach((panel) => {
+      if (panel.kind === 'knowledge' || !panel.sessionId || panel.status === 'closed' || panel.status === 'error') return
+      ids.add(panel.id)
+      ids.add(panel.sessionId)
+    })
+    return ids
+  }
+
+  const endedManagedAiSessionFromTerminalClose = (session: ManagedAiSession, summary = 'Terminal closed'): ManagedAiSession => {
+    const now = Date.now()
+    const event: ManagedAiSessionTimelineEvent = {
+      source: session.source,
+      event: 'session_end',
+      sessionId: session.id,
+      title: session.title,
+      summary,
+      receivedAt: now,
+      ...(session.panelId ? { panelId: session.panelId } : {}),
+      ...(session.terminalSessionId ? { terminalSessionId: session.terminalSessionId } : {}),
+      requestKind: 'telemetry',
+      decisionMode: 'telemetry',
+      id: `${now}-terminal-close`
+    }
+    return {
+      ...session,
+      state: 'ended',
+      lastEvent: 'session_end',
+      summary,
+      updatedAt: now,
+      lastActivityAt: now,
+      agentLifecycle: 'ended',
+      pendingRequestId: undefined,
+      events: [...session.events, event].slice(-200)
+    }
+  }
+
+  const reconcileManagedAiSessionsWithLiveTerminals = () => {
+    const liveIds = managedAiLiveTerminalIds()
+    let changed = false
+    managedAiSessions.value = managedAiSessions.value.map((session) => {
+      if (session.state !== 'working' && session.state !== 'needsInput') return session
+      const boundIds = [session.panelId, session.terminalSessionId].filter((value): value is string => Boolean(value))
+      if (!boundIds.length || boundIds.some((id) => liveIds.has(id))) return session
+      changed = true
+      return endedManagedAiSessionFromTerminalClose(session)
+    })
+    if (changed) refreshManagedAiAttentionItems()
+  }
+
   const applyManagedAiSessionSnapshot = (snapshot: ManagedAiSessionSnapshot) => {
     managedAiSessions.value = snapshot.sessions.map((session) => ({
       ...session,
@@ -160,7 +212,9 @@ export const createWorkspaceManagedAiSessionRuntime = (input: {
             ? 'question'
             : session.lastEvent === 'notification'
               ? 'notification'
-              : 'telemetry'),
+              : session.lastEvent === 'stop'
+                ? 'notification'
+                : 'telemetry'),
       decisionMode: session.decisionMode || (session.actionable === true ? 'local' : 'telemetry'),
       events: session.events.map((event) => {
         const requestKind =
@@ -171,7 +225,9 @@ export const createWorkspaceManagedAiSessionRuntime = (input: {
               ? 'question'
               : event.event === 'notification'
                 ? 'notification'
-                : 'telemetry')
+                : event.event === 'stop'
+                  ? 'notification'
+                  : 'telemetry')
         return {
           ...event,
           requestKind,
@@ -181,6 +237,7 @@ export const createWorkspaceManagedAiSessionRuntime = (input: {
       }),
       decisions: session.decisions.map((decision) => ({ ...decision }))
     }))
+    reconcileManagedAiSessionsWithLiveTerminals()
     managedAiSessionsError.value = ''
     if (selectedManagedAiSessionKey.value && !managedAiSessions.value.some((session) => managedAiSessionKey(session) === selectedManagedAiSessionKey.value)) {
       selectedManagedAiSessionKey.value = ''
@@ -497,6 +554,24 @@ export const createWorkspaceManagedAiSessionRuntime = (input: {
       )
   }
 
+  const applyManagedAiTerminalPanelClosed = (closedPanels: Array<Pick<TerminalPanel, 'id' | 'sessionId'>>) => {
+    const closedIds = new Set<string>()
+    closedPanels.forEach((panel) => {
+      closedIds.add(panel.id)
+      if (panel.sessionId) closedIds.add(panel.sessionId)
+    })
+    if (!closedIds.size) return
+    let changed = false
+    managedAiSessions.value = managedAiSessions.value.map((session) => {
+      if (session.state === 'ended') return session
+      if (!session.panelId && !session.terminalSessionId) return session
+      if (!closedIds.has(session.panelId || '') && !closedIds.has(session.terminalSessionId || '')) return session
+      changed = true
+      return endedManagedAiSessionFromTerminalClose(session)
+    })
+    if (changed) refreshManagedAiAttentionItems()
+  }
+
   return {
     sortedManagedAiSessions,
     managedAiNeedsInputSessions,
@@ -515,6 +590,7 @@ export const createWorkspaceManagedAiSessionRuntime = (input: {
     focusManagedAiSessionRequest,
     touchManagedAiTerminalActivity,
     applyManagedAiTerminalLifecycle,
-    applyManagedAiTerminalExit
+    applyManagedAiTerminalExit,
+    applyManagedAiTerminalPanelClosed
   }
 }

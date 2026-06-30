@@ -465,7 +465,6 @@ export const managedAiVisibleSessionSummaryPayload = (input: {
     '',
     ...input.visibleSessions.map((session, index) => {
       const status = [
-        input.translate(managedAiSessionStateLabelKey(session.state)),
         input.translate(managedAiRequestKindLabelKey(session.requestKind)),
         input.translate(managedAiDecisionModeLabelKey(session.decisionMode))
       ].join(' / ')

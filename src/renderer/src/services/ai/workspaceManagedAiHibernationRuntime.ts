@@ -135,15 +135,18 @@ export const createWorkspaceManagedAiHibernationRuntime = (input: {
       setTopNotice(i18nText('aiSessions.notice.missing'))
       return false
     }
+    const focused = focusManagedAiSession(session.id)
+    const targetIds = [focused?.panelId, focused?.terminalSessionId, session.panelId, session.terminalSessionId].filter(Boolean)
+    let panel = targetIds.length ? panels.value.find((item) => targetIds.includes(item.id) || (item.sessionId ? targetIds.includes(item.sessionId) : false)) : null
+    if (panel?.sessionId && panel.kind !== 'knowledge' && panel.status !== 'closed' && panel.status !== 'error') {
+      return true
+    }
     const command = session.resumeCommand?.trim()
     if (!command) {
       setTopNotice(i18nText('aiSessions.notice.noResumeCommand'))
       return false
     }
-    const focused = focusManagedAiSession(session.id)
-    const targetId = focused?.panelId || focused?.terminalSessionId || session.panelId || session.terminalSessionId
-    let panel = targetId ? panels.value.find((item) => item.id === targetId || item.sessionId === targetId) : null
-    if (!panel?.sessionId && openLocalTerminalPanel) {
+    if (openLocalTerminalPanel) {
       const opened = await openLocalTerminalPanel({
         title: session.title,
         cwd: session.cwd

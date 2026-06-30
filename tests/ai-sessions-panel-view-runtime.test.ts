@@ -58,7 +58,7 @@ const labels: Record<string, string> = {
   'aiSessions.decision.local': 'Local',
   'aiSessions.decision.telemetry': 'Telemetry only',
   'aiSessions.copy.agent': 'Agent',
-  'aiSessions.copy.status': 'Status',
+  'aiSessions.copy.status': 'Request',
   'aiSessions.copy.session': 'Session',
   'aiSessions.copy.path': 'Path',
   'aiSessions.copy.summary': 'Summary',
@@ -383,7 +383,10 @@ describe('aiSessionsPanelViewRuntime', () => {
     expect(queuePayload).toContain('Current: 2, pending: 1')
     expect(queuePayload).toContain('1. Deploy approval')
     expect(queuePayload).toContain('Agent: Claude Code (claude-code)')
-    expect(queuePayload).toContain('Status: Needs input / Permission / Blocking')
+    expect(queuePayload).toContain('Request: Permission / Blocking')
+    expect(queuePayload).not.toContain('Status:')
+    expect(queuePayload).not.toContain('Needs input / Permission')
+    expect(queuePayload).not.toContain('Ended')
     expect(queuePayload).toContain('Resume: claude --resume claude-api')
     expect(queuePayload).toContain('2. API refactor')
   })
