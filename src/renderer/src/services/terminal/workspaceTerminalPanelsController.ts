@@ -297,6 +297,48 @@ export const createWorkspaceTerminalPanelsController = (
     }
   }
 
+  const openLocalTerminalPanel = async (options: { title?: string; cwd?: string } = {}) => {
+    const previousActivePanelId = activePanelId.value
+    const panel = createPanel()
+    const panelId = panel.id
+    const label = options.title?.trim() || 'Local terminal'
+    renamePanel(panelId, label)
+    replaceTerminalOutput(panelId, '')
+    const discardPendingPanel = () => discardPendingTerminalPanel(panelId, previousActivePanelId)
+    const createTerminal = terminalClient.createTerminal()
+    if (!createTerminal) {
+      discardPendingPanel()
+      setTopNotice('终端启动服务不可用')
+      return null
+    }
+    try {
+      const session = await createTerminal({
+        kind: 'local',
+        panelId,
+        workspaceId: 'workspace',
+        title: label,
+        ...(options.cwd?.trim() ? { cwd: options.cwd.trim() } : {}),
+        cols: 100,
+        rows: 30,
+        terminalType: terminalSettings.value.terminalType
+      })
+      const connected = applyLocalTerminalSession(panelId, session)
+      if (!connected) {
+        discardPendingPanel()
+        setTopNotice('本地终端启动失败')
+        return null
+      }
+      renamePanel(panelId, label, 'auto')
+      activeModule.value = 'workspace'
+      activePanelId.value = panelId
+      return connected
+    } catch (error) {
+      discardPendingPanel()
+      setTopNotice(error instanceof Error ? error.message : '本地终端启动失败')
+      return null
+    }
+  }
+
   const knowledgePanelId = (relPath: string) => `kb:${relPath}`
   let knowledgeJumpTokenSeed = 0
 
@@ -409,6 +451,7 @@ export const createWorkspaceTerminalPanelsController = (
     createPanel,
     activateTerminalPanel,
     openTerminalForAiHostContext,
+    openLocalTerminalPanel,
     hasSplitState,
     unsplitPanel,
     attachPanelToSplit,

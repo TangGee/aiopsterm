@@ -8,7 +8,12 @@ import { configureAiContextBackendRuntime } from '../ai/aiContext'
 import { configureAiTodoBackendRuntime } from '../ai/aiTodos'
 import { configureAliasBackendRuntime } from '../quick-commands/aliases'
 import { configureAgentHookInstallerRuntime } from '../agent/agentHookInstaller'
-import { agentHookScriptPathFor, configureManagedAiSessionAutoNamingRuntime, getAiAgentSessionSocketPath } from '../agent/agentSessions'
+import {
+  agentHookScriptPathFor,
+  configureManagedAiSessionAutoNamingRuntime,
+  configureManagedAiSessionImportRuntime,
+  getAiAgentSessionSocketPath
+} from '../agent/agentSessions'
 import { configureAppUpdateRuntime } from './appUpdate'
 import { configureChatHistoryBackendRuntime } from '../chat/chatHistory'
 import { configureCodexCliRuntime, refreshCodexConfig } from '../codex/codexCli'
@@ -77,6 +82,9 @@ type ConfigureMainRuntimeInput = {
   broadcastManagedAiSessionEvent: (event: ManagedAiSessionEvent) => void
 }
 
+const shellHomePath = () => String(process.env.HOME || '').trim() || app.getPath('home')
+const agentHookScriptPath = () => agentHookScriptPathFor(app.getAppPath(), process.resourcesPath || '', app.getPath('userData'))
+
 export const configureMainBackendRuntimes = (input: ConfigureMainRuntimeInput) => {
   configureTerminalSuggestionsRuntime({ getConfig: input.getConfig })
   configureAssetConnectionRuntime({ getConfig: input.getConfig })
@@ -106,10 +114,10 @@ export const configureMainBackendRuntimes = (input: ConfigureMainRuntimeInput) =
   configureSshTunnelBackendRuntime({ getConfig: input.getConfig })
   configureLocalTerminalBackendRuntime({
     getDefaultShell: input.getDefaultShell,
-    getDefaultCwd: () => app.getPath('home'),
+    getDefaultCwd: shellHomePath,
     getEnv: () => process.env,
     getAgentSocketPath: getAiAgentSessionSocketPath,
-    getAgentHookScriptPath: () => agentHookScriptPathFor(app.getAppPath(), process.resourcesPath || ''),
+    getAgentHookScriptPath: agentHookScriptPath,
     getControlSocketPath
   })
   configureControlSocketRuntime({
@@ -121,9 +129,14 @@ export const configureMainBackendRuntimes = (input: ConfigureMainRuntimeInput) =
     showNotification: input.showControlNotification
   })
   configureAgentHookInstallerRuntime({
-    getHomeDir: () => app.getPath('home'),
+    getHomeDir: shellHomePath,
     getEnv: () => process.env,
-    getAgentHookScriptPath: () => agentHookScriptPathFor(app.getAppPath(), process.resourcesPath || '')
+    getAgentHookScriptPath: agentHookScriptPath
+  })
+  configureManagedAiSessionImportRuntime({
+    getHomeDir: shellHomePath,
+    getEnv: () => process.env,
+    enabled: process.env.AIOPSTERM_AGENT_SESSION_IMPORT_DISABLED !== '1'
   })
   configureCodexCliRuntime({
     getUserDataPath: () => app.getPath('userData'),

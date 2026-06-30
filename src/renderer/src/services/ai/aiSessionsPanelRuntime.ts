@@ -4,31 +4,32 @@ import { copyTextToClipboard } from '@/services/app/clipboardRuntime'
 import { useI18n } from '@/i18n'
 import {
   aiSessionsEventFilterOptions,
-  aiSessionsStateFilterOptions,
   buildManagedAiActiveScopeLabel,
-  buildManagedAiCockpitCards,
+  buildManagedAiLibrarySections,
+  buildManagedAiPanelModeButtons,
   filteredManagedAiTimelineEvents,
   formatManagedAiRelativeTime,
   formatManagedAiTime,
-  managedAiAttentionQueue,
   managedAiDecisionLabelKey,
   managedAiDecisionModeLabelKey,
   managedAiEventLabelKey,
   managedAiLifecycleLabelKey,
-  managedAiProjectOptions,
+  managedAiPanelModeForSession,
+  managedAiPanelModeStateFilter,
+  managedAiProjectDisplayLabel,
+  managedAiProjectDisplayLabels,
   managedAiRequestKindLabelKey,
+  managedAiSessionDisplayTitle,
   managedAiSessionKey,
   managedAiSessionStateLabelKey,
   managedAiSourceLabel,
-  managedAiSourceOptions,
   managedAiTimelineEventCopyPayload,
   managedAiTimelineEventState,
-  managedAiVisibleSessionSummaryPayload,
   selectedVisibleManagedAiSession,
   visibleManagedAiSessions,
-  type ManagedAiCockpitFilterKey,
+  type ManagedAiLibraryGrouping,
+  type ManagedAiPanelMode,
   type ManagedAiRequestKindFilter,
-  type ManagedAiSourceFilter,
   type ManagedAiStateFilter,
   type ManagedAiTimelineEvent
 } from '@/services/ai/aiSessionsPanelViewRuntime'
@@ -39,14 +40,13 @@ export const useAiSessionsPanelRuntime = () => {
   const workspace = useWorkspaceStore()
   const { t } = useI18n()
   const query = ref('')
-  const filter = ref<ManagedAiStateFilter>('all')
+  const mode = ref<ManagedAiPanelMode>('pending')
+  const libraryGrouping = ref<ManagedAiLibraryGrouping>('project')
+  const collapsedLibrarySections = ref<Set<string>>(new Set())
+  const filter = ref<ManagedAiStateFilter>('needsInput')
   const eventFilter = ref<ManagedAiRequestKindFilter>('all')
-  const sourceFilter = ref<ManagedAiSourceFilter>('all')
-  const projectFilter = ref('all')
-  const hibernatedOnly = ref(false)
   const replyText = ref('')
   const renameTitle = ref('')
-  const filters = computed(() => aiSessionsStateFilterOptions.map((option) => ({ key: option.key, label: t(option.labelKey) })))
   const eventFilters = computed(() => aiSessionsEventFilterOptions.map((option) => ({ key: option.key, label: t(option.labelKey) })))
 
   const sourceLabel = (source: AiAgentSessionSource) => managedAiSourceLabel(source)
@@ -58,32 +58,25 @@ export const useAiSessionsPanelRuntime = () => {
   const eventState = (event: ManagedAiTimelineEvent) => managedAiTimelineEventState(event)
   const decisionLabel = (kind: string) => t(managedAiDecisionLabelKey(kind))
   const sessionKey = (session: Pick<ManagedAiSession, 'source' | 'id'>) => managedAiSessionKey(session)
-
-  const sourceOptions = computed(() => managedAiSourceOptions(workspace.sortedManagedAiSessions))
-  const projectOptions = computed(() => managedAiProjectOptions(workspace.sortedManagedAiSessions, t('aiSessions.unknownPath')))
-  const attentionQueue = computed(() => managedAiAttentionQueue(workspace.sortedManagedAiSessions))
-
-  const cockpitCards = computed(() =>
-    buildManagedAiCockpitCards({
+  const modeButtons = computed(() =>
+    buildManagedAiPanelModeButtons({
       sessions: workspace.managedAiSessions,
-      filter: filter.value,
-      hibernatedOnly: hibernatedOnly.value,
+      mode: mode.value,
       translate: t
     })
   )
 
-  const applyStateFilter = (key: ManagedAiStateFilter) => {
-    filter.value = key
-    hibernatedOnly.value = false
-  }
+  const activeModeLabel = computed(() => modeButtons.value.find((button) => button.active)?.label || t('aiSessions.mode.pending'))
 
-  const applyCockpitFilter = (key: ManagedAiCockpitFilterKey) => {
-    if (key === 'hibernated') {
-      filter.value = 'all'
-      hibernatedOnly.value = true
-      return
-    }
-    applyStateFilter(key)
+  const searchPlaceholder = computed(() => {
+    if (mode.value === 'pending') return t('aiSessions.searchPendingPlaceholder')
+    if (mode.value === 'running') return t('aiSessions.searchRunningPlaceholder')
+    return t('aiSessions.searchLibraryPlaceholder')
+  })
+
+  const selectMode = (nextMode: ManagedAiPanelMode) => {
+    mode.value = nextMode
+    filter.value = managedAiPanelModeStateFilter(nextMode)
   }
 
   const visibleSessions = computed(() =>
@@ -91,21 +84,19 @@ export const useAiSessionsPanelRuntime = () => {
       sessions: workspace.sortedManagedAiSessions,
       query: query.value,
       filter: filter.value,
-      sourceFilter: sourceFilter.value,
-      projectFilter: projectFilter.value,
-      hibernatedOnly: hibernatedOnly.value
+      sourceFilter: 'all',
+      projectFilter: 'all',
+      hibernatedOnly: false
     })
   )
-
-  const visiblePendingSessions = computed(() => visibleSessions.value.filter((session) => session.state === 'needsInput'))
 
   const activeScopeLabel = computed(() =>
     buildManagedAiActiveScopeLabel({
       filter: filter.value,
-      hibernatedOnly: hibernatedOnly.value,
-      sourceFilter: sourceFilter.value,
-      projectFilter: projectFilter.value,
-      projectOptions: projectOptions.value,
+      hibernatedOnly: false,
+      sourceFilter: 'all',
+      projectFilter: 'all',
+      projectOptions: [],
       query: query.value,
       translate: t
     })
@@ -114,6 +105,39 @@ export const useAiSessionsPanelRuntime = () => {
   const selectedSession = computed(() => selectedVisibleManagedAiSession({ selectedSession: workspace.selectedManagedAiSession, visibleSessions: visibleSessions.value }))
 
   const filteredTimelineEvents = computed(() => filteredManagedAiTimelineEvents(selectedSession.value, eventFilter.value))
+  const projectLabels = computed(() => managedAiProjectDisplayLabels(workspace.sortedManagedAiSessions, t('aiSessions.unknownProject')))
+  const librarySections = computed(() =>
+    buildManagedAiLibrarySections({
+      sessions: visibleSessions.value,
+      grouping: libraryGrouping.value,
+      unknownProjectLabel: t('aiSessions.unknownProject')
+    })
+  )
+  const runningSections = computed(() =>
+    buildManagedAiLibrarySections({
+      sessions: visibleSessions.value,
+      grouping: libraryGrouping.value,
+      unknownProjectLabel: t('aiSessions.unknownProject')
+    })
+  )
+
+  const projectLabel = (session: Pick<ManagedAiSession, 'cwd'>) => managedAiProjectDisplayLabel(session, projectLabels.value, t('aiSessions.unknownProject'))
+  const sessionDisplayTitle = (session: Pick<ManagedAiSession, 'userTitle' | 'autoTitle' | 'title' | 'summary' | 'id'>) => managedAiSessionDisplayTitle(session)
+  const sessionRowTooltip = (session: ManagedAiSession) =>
+    [projectLabel(session), sessionDisplayTitle(session), session.cwd || '', session.summary || ''].filter(Boolean).join('\n')
+  const selectLibraryGrouping = (nextGrouping: ManagedAiLibraryGrouping) => {
+    libraryGrouping.value = nextGrouping
+  }
+  const isLibrarySectionCollapsed = (key: string) => collapsedLibrarySections.value.has(key)
+  const toggleLibrarySection = (key: string) => {
+    const next = new Set(collapsedLibrarySections.value)
+    if (next.has(key)) {
+      next.delete(key)
+    } else {
+      next.add(key)
+    }
+    collapsedLibrarySections.value = next
+  }
 
   watch(
     selectedSession,
@@ -125,9 +149,54 @@ export const useAiSessionsPanelRuntime = () => {
     { immediate: true }
   )
 
+  watch(
+    () => workspace.selectedManagedAiSession,
+    (session) => {
+      if (!session) return
+      const nextMode = managedAiPanelModeForSession(session)
+      if (nextMode === mode.value) return
+      mode.value = nextMode
+      filter.value = managedAiPanelModeStateFilter(nextMode)
+    }
+  )
+
+  watch(
+    () => workspace.sortedManagedAiSessions.map((session) => `${session.source}:${session.id}:${session.state}`).join('|'),
+    () => {
+      if (mode.value !== 'pending' || visibleSessions.value.length > 0) return
+      if (workspace.sortedManagedAiSessions.some((session) => session.state === 'working')) {
+        selectMode('running')
+        return
+      }
+      if (workspace.sortedManagedAiSessions.length > 0) selectMode('library')
+    },
+    { immediate: true }
+  )
+
   const selectSession = (session: Pick<ManagedAiSession, 'source' | 'id' | 'panelId' | 'terminalSessionId'>) => {
     workspace.focusManagedAiSession(session.panelId || session.terminalSessionId || session.id)
     workspace.selectedManagedAiSessionKey = sessionKey(session)
+    const selected = workspace.sortedManagedAiSessions.find((item) => sessionKey(item) === sessionKey(session))
+    if (selected) {
+      mode.value = managedAiPanelModeForSession(selected)
+      filter.value = managedAiPanelModeStateFilter(mode.value)
+    }
+  }
+
+  const focusSessionConversation = (session: Pick<ManagedAiSession, 'source' | 'id' | 'panelId' | 'terminalSessionId'>) => {
+    workspace.focusManagedAiSession(session.panelId || session.terminalSessionId || session.id)
+    workspace.selectedManagedAiSessionKey = sessionKey(session)
+  }
+
+  const canResumeSession = (session: Pick<ManagedAiSession, 'state' | 'resumeCommand'>) =>
+    session.state !== 'working' && session.state !== 'needsInput' && Boolean(session.resumeCommand?.trim())
+
+  const resumeOrFocusSession = (session: ManagedAiSession) => {
+    if (canResumeSession(session)) {
+      void workspace.resumeManagedAiSession(session.source, session.id)
+      return
+    }
+    workspace.focusManagedAiSession(session.id)
   }
 
   const renameSelectedSession = () => {
@@ -158,42 +227,6 @@ export const useAiSessionsPanelRuntime = () => {
     workspace.setTopNotice(copied ? t('aiSessions.eventCopied') : t('aiSessions.eventCopyFailed'))
   }
 
-  const visibleSessionSummaryPayload = () =>
-    managedAiVisibleSessionSummaryPayload({
-      activeScopeLabel: activeScopeLabel.value,
-      visibleSessions: visibleSessions.value,
-      visiblePendingCount: visiblePendingSessions.value.length,
-      translate: t
-    })
-
-  const copyVisibleSessionQueue = async () => {
-    const copied = await copyTextToClipboard(visibleSessionSummaryPayload())
-    workspace.setTopNotice(copied ? t('aiSessions.queueCopied') : t('aiSessions.queueCopyFailed'))
-  }
-
-  const focusNextVisiblePending = () => {
-    const selectedKey = selectedSession.value ? sessionKey(selectedSession.value) : ''
-    const selectedIndex = visiblePendingSessions.value.findIndex((session) => sessionKey(session) === selectedKey)
-    const next = visiblePendingSessions.value[(selectedIndex + 1) % visiblePendingSessions.value.length]
-    if (!next) return
-    selectSession(next)
-  }
-
-  const markVisiblePendingHandled = async () => {
-    const pending = visiblePendingSessions.value
-    if (!pending.length) return
-    const groups = new Map<AiAgentSessionSource, string[]>()
-    pending.forEach((session) => groups.set(session.source, [...(groups.get(session.source) || []), session.id]))
-    for (const [source, sessionIds] of groups) {
-      await workspace.bulkManagedAiSessions({
-        operation: 'mark-handled',
-        sources: [source],
-        sessionIds
-      })
-    }
-    workspace.setTopNotice(t('aiSessions.visibleHandled', { count: pending.length }))
-  }
-
   const formatTime = (timestamp: number) => formatManagedAiTime(timestamp)
 
   const formatRelativeTime = (timestamp: number) => formatManagedAiRelativeTime(timestamp, Date.now(), t)
@@ -202,14 +235,15 @@ export const useAiSessionsPanelRuntime = () => {
     workspace,
     t,
     query,
-    filter,
+    mode,
+    libraryGrouping,
+    collapsedLibrarySections,
     eventFilter,
-    sourceFilter,
-    projectFilter,
-    hibernatedOnly,
     replyText,
     renameTitle,
-    filters,
+    modeButtons,
+    activeModeLabel,
+    searchPlaceholder,
     eventFilters,
     sourceLabel,
     stateLabel,
@@ -220,25 +254,27 @@ export const useAiSessionsPanelRuntime = () => {
     eventState,
     decisionLabel,
     sessionKey,
-    sourceOptions,
-    projectOptions,
-    attentionQueue,
-    cockpitCards,
-    applyStateFilter,
-    applyCockpitFilter,
+    selectMode,
+    selectLibraryGrouping,
+    isLibrarySectionCollapsed,
+    toggleLibrarySection,
     visibleSessions,
-    visiblePendingSessions,
+    librarySections,
+    runningSections,
     activeScopeLabel,
     selectedSession,
     filteredTimelineEvents,
     selectSession,
+    focusSessionConversation,
     renameSelectedSession,
     submitReply,
     submitQuestionReply,
     copyTimelineEvent,
-    copyVisibleSessionQueue,
-    focusNextVisiblePending,
-    markVisiblePendingHandled,
+    canResumeSession,
+    resumeOrFocusSession,
+    projectLabel,
+    sessionDisplayTitle,
+    sessionRowTooltip,
     formatTime,
     formatRelativeTime
   }

@@ -474,6 +474,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     focusManagedAiSession,
     focusManagedAiSessionRequest,
     resumeManagedAiSession,
+    bindManagedAiSessionLocalTerminalOpener,
     touchManagedAiTerminalActivity,
     applyManagedAiTerminalLifecycle,
     applyManagedAiTerminalExit
@@ -512,6 +513,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     createPanel,
     activateTerminalPanel,
     openTerminalForAiHostContext,
+    openLocalTerminalPanel,
     hasSplitState,
     unsplitPanel,
     attachPanelToSplit,
@@ -557,6 +559,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       applyManagedAiTerminalExit
     }
   )
+
+  bindManagedAiSessionLocalTerminalOpener(openLocalTerminalPanel)
 
   const {
     terminalCommandModelOptions,
@@ -1767,6 +1771,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     attachPanelToSplit,
     activateTerminalPanel,
     openTerminalForAiHostContext,
+    openLocalTerminalPanel,
     registerSshSession,
     applySshTerminalSession,
     applyLocalTerminalSession,

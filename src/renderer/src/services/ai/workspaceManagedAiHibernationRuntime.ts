@@ -5,6 +5,7 @@ import {
 } from '@/services/ai/managedAiBackendGuards'
 import { terminalClient } from '@/services/terminal/terminalClient'
 import type { I18nKey } from '@/i18n/messages'
+import type { TerminalPanel } from '@/services/terminal/terminalPanelRuntime'
 import type { TerminalCommandExecutionOptions, TerminalSecurityDecision } from '@/services/terminal/terminalExecutionRuntime'
 import type {
   AiAgentSessionSource,
@@ -24,13 +25,14 @@ export const createWorkspaceManagedAiHibernationRuntime = (input: {
   i18nText: (key: I18nKey, params?: Record<string, string | number>) => string
   applyManagedAiSessionSnapshot: (snapshot: ManagedAiSessionSnapshot) => void
   focusManagedAiSession: (sessionIdOrPanelId: string) => ManagedAiSession | null
+  openLocalTerminalPanel?: (options?: { title?: string; cwd?: string }) => Promise<TerminalPanel | null | undefined>
   runTerminalCommand: (
     panelId: string,
     command: string,
     options?: TerminalCommandExecutionOptions
   ) => Promise<TerminalSecurityDecision>
 }) => {
-  const { state, setTopNotice, i18nText, applyManagedAiSessionSnapshot, focusManagedAiSession, runTerminalCommand } = input
+  const { state, setTopNotice, i18nText, applyManagedAiSessionSnapshot, focusManagedAiSession, openLocalTerminalPanel, runTerminalCommand } = input
   const { agentHibernationConfig, managedAiSessions, panels } = state
 
   const refreshAgentHibernationConfig = async () => {
@@ -140,7 +142,21 @@ export const createWorkspaceManagedAiHibernationRuntime = (input: {
     }
     const focused = focusManagedAiSession(session.id)
     const targetId = focused?.panelId || focused?.terminalSessionId || session.panelId || session.terminalSessionId
-    const panel = targetId ? panels.value.find((item) => item.id === targetId || item.sessionId === targetId) : null
+    let panel = targetId ? panels.value.find((item) => item.id === targetId || item.sessionId === targetId) : null
+    if (!panel?.sessionId && openLocalTerminalPanel) {
+      const opened = await openLocalTerminalPanel({
+        title: session.title,
+        cwd: session.cwd
+      })
+      panel = opened ? panels.value.find((item) => item.id === opened.id || item.sessionId === opened.sessionId) || opened : null
+      if (panel?.sessionId) {
+        session.panelId = panel.id
+        session.terminalSessionId = panel.sessionId
+        session.terminalActivityAt = Date.now()
+        session.updatedAt = Date.now()
+        focusManagedAiSession(session.id)
+      }
+    }
     if (!panel?.sessionId) {
       setTopNotice(i18nText('aiSessions.notice.resumeNeedsTerminal'))
       return false

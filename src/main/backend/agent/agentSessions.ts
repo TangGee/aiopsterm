@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto'
 import { createServer, type Server, type Socket } from 'net'
-import { existsSync, rmSync } from 'fs'
-import { join } from 'path'
+import { copyFileSync, existsSync, mkdirSync, rmSync } from 'fs'
+import { dirname, join } from 'path'
 import { mkdir } from 'fs/promises'
 import { platformSocketPath } from '../app/platformRuntime'
 import {
@@ -13,6 +13,10 @@ import {
   createAgentSessionAutoNamingRuntime,
   type ManagedAiSessionAutoNamingRuntime
 } from './agentSessionAutoNamingRuntime'
+import {
+  createAgentSessionImportRuntime,
+  type ImportedAgentSession
+} from './agentSessionImportRuntime'
 import { createAgentSessionStoreRuntime } from './agentSessionStoreRuntime'
 import {
   autoTitleFor,
@@ -127,6 +131,7 @@ const storeRuntime = createAgentSessionStoreRuntime({
     agentHibernationConfig = loaded.agentHibernationConfig
   }
 })
+const importRuntime = createAgentSessionImportRuntime()
 const autoNamingRuntime = createAgentSessionAutoNamingRuntime({
   getSession: (key) => sessions.get(key),
   setSession: (key, session) => {
@@ -236,7 +241,14 @@ const storePathFor = storeRuntime.storePathFor
 
 export const configureAiAgentSessionStore = async (userDataPath: string) => {
   auditRuntime.configure(auditPathFor(userDataPath))
+  importRuntime.configure({
+    enabled: process.env.NODE_ENV !== 'test' && process.env.AIOPSTERM_AGENT_SESSION_IMPORT_DISABLED !== '1'
+  })
   await storeRuntime.configure(userDataPath)
+}
+
+export const configureManagedAiSessionImportRuntime = (config?: Parameters<typeof importRuntime.configure>[0]) => {
+  importRuntime.configure(config)
 }
 
 const upsertSessionForEvent = (event: AiAgentSessionEvent, raw: Record<string, unknown>) => {
@@ -307,6 +319,82 @@ const upsertSessionForEvent = (event: AiAgentSessionEvent, raw: Record<string, u
   publishAgentEventStreamFrame(event, record)
   autoNamingRuntime.maybeRunAutoNaming(record, event)
   return record
+}
+
+const mergeImportedSession = (imported: ImportedAgentSession) => {
+  const key = sessionKey(imported.source, imported.id)
+  const existing = sessions.get(key)
+  if (!existing) {
+    sessions.set(key, {
+      ...imported,
+      decisions: []
+    })
+    return true
+  }
+  const importedEvent = imported.events[0]
+  const hasImportedEvent = importedEvent
+    ? existing.events.some((event) => event.id === importedEvent.id)
+    : true
+  const shouldRefreshImportedFacts =
+    imported.lastActivityAt > existing.lastActivityAt ||
+    !existing.resumeCommand ||
+    (Boolean(imported.cwd) && Boolean(imported.resumeCommand) && existing.resumeCommand !== imported.resumeCommand && !existing.resumeCommand.includes('cd ')) ||
+    !existing.cwd ||
+    !existing.transcriptPath
+  if (!shouldRefreshImportedFacts && hasImportedEvent) return false
+  const preserveLiveState = existing.state === 'needsInput' || existing.state === 'working'
+  const next: ManagedAiSessionRecord = {
+    ...existing,
+    title: existing.userTitle || existing.title || imported.title,
+    summary: existing.summary || imported.summary,
+    state: preserveLiveState ? existing.state : existing.state === 'ended' ? existing.state : imported.state,
+    lastEvent: preserveLiveState || existing.lastActivityAt >= imported.lastActivityAt ? existing.lastEvent : imported.lastEvent,
+    lastActivityAt: Math.max(existing.lastActivityAt, imported.lastActivityAt),
+    createdAt: Math.min(existing.createdAt, imported.createdAt),
+    updatedAt: Date.now(),
+    ...(existing.cwd || imported.cwd ? { cwd: existing.cwd || imported.cwd } : {}),
+    ...(existing.transcriptPath || imported.transcriptPath ? { transcriptPath: existing.transcriptPath || imported.transcriptPath } : {}),
+    requestKind: existing.requestKind || imported.requestKind,
+    decisionMode: existing.decisionMode || imported.decisionMode,
+    ...(existing.launchCommand || imported.launchCommand ? { launchCommand: existing.launchCommand || imported.launchCommand } : {}),
+    ...(existing.resumeCommand || imported.resumeCommand
+      ? {
+          resumeCommand:
+            imported.resumeCommand && imported.cwd && existing.resumeCommand && !existing.resumeCommand.includes('cd ')
+              ? imported.resumeCommand
+              : existing.resumeCommand || imported.resumeCommand
+        }
+      : {}),
+    agentLifecycle: preserveLiveState ? existing.agentLifecycle : existing.agentLifecycle || imported.agentLifecycle,
+    events: hasImportedEvent ? existing.events : [...existing.events, importedEvent].filter(Boolean).slice(-maxEventsPerSession),
+    decisions: existing.decisions
+  }
+  sessions.set(key, next)
+  return true
+}
+
+const importExternalManagedAiSessions = async () => {
+  let imported: ImportedAgentSession[]
+  try {
+    imported = await importRuntime.importSessions()
+  } catch {
+    return 0
+  }
+  let changed = 0
+  for (const session of imported) {
+    if (mergeImportedSession(session)) changed += 1
+  }
+  if (!changed) return 0
+  const ordered = [...sessions.values()].sort((first, second) => second.lastActivityAt - first.lastActivityAt)
+  sessions = new Map(ordered.slice(0, maxSessions).map((session) => [sessionKey(session.source, session.id), session]))
+  persistSnapshot()
+  appendManagedAiSessionAudit({
+    at: Date.now(),
+    kind: 'sessions.imported',
+    changed
+  })
+  publishManagedAiStreamFrame('managed_ai.sessions.imported', null, { changed })
+  return changed
 }
 
 export const publishAiAgentSessionEvent = (input: AiAgentSessionEventInput, emit: AgentSessionEventSink | null = eventSink) => {
@@ -459,6 +547,7 @@ const publishAiAgentSessionSocketEvent = async (input: AiAgentSessionEventInput,
 
 export const listManagedAiSessions = async (): Promise<ManagedAiSessionListResult> => {
   await loadStoreIfNeeded()
+  await importExternalManagedAiSessions()
   return { ok: true, data: snapshot() }
 }
 
@@ -766,10 +855,24 @@ export const agentSessionSocketPathFor = (userDataPath: string) => {
   return platformSocketPath(userDataPath, 'aiopsterm-agent-sessions', { directory: 'agent-sessions' })
 }
 
-export const agentHookScriptPathFor = (appPath: string, resourcesPath: string) => {
+export const agentHookScriptResourcePathFor = (appPath: string, resourcesPath: string) => {
   const scriptName = 'aiopsterm-agent-hook.js'
   const candidates = [join(resourcesPath, scriptName), join(resourcesPath, 'resources', scriptName), join(appPath, 'resources', scriptName)]
   return candidates.find((candidate) => existsSync(candidate)) || candidates[0]
+}
+
+export const agentHookScriptPathFor = (appPath: string, resourcesPath: string, userDataPath?: string) => {
+  const source = agentHookScriptResourcePathFor(appPath, resourcesPath)
+  const userData = cleanText(userDataPath)
+  if (!userData) return source
+  const stablePath = join(userData, 'agent-hooks', 'aiopsterm-agent-hook.js')
+  try {
+    mkdirSync(dirname(stablePath), { recursive: true })
+    copyFileSync(source, stablePath)
+    return stablePath
+  } catch {
+    return source
+  }
 }
 
 export const getAiAgentSessionSocketPath = () => socketPath

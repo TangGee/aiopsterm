@@ -7,130 +7,53 @@
       </div>
       <div class="ai-sessions-header-actions">
         <button
-          class="ai-sessions-settings"
-          :title="t('aiSessions.openSettings')"
-          @click="workspace.openAiSessionSettings"
-        >
-          <Settings />
-        </button>
-        <button
-          class="ai-sessions-settings"
+          class="ai-sessions-icon-button"
           :title="t('aiSessions.refresh')"
           @click="workspace.refreshManagedAiSessions()"
         >
           <RefreshCw />
         </button>
-        <span class="ai-sessions-count">{{ workspace.managedAiNeedsInputSessions.length }}</span>
       </div>
     </header>
+
+    <section
+      v-if="workspace.managedAiSessions.length"
+      class="ai-sessions-mode-nav"
+      :aria-label="t('aiSessions.mode.navigation')"
+    >
+      <button
+        v-for="option in modeButtons"
+        :key="option.key"
+        type="button"
+        class="ai-sessions-mode-button"
+        :class="[`mode-${option.key}`, { active: option.active }]"
+        :aria-label="option.label"
+        :aria-pressed="option.active"
+        :title="option.tooltip"
+        @click="selectMode(option.key)"
+      >
+        <Inbox v-if="option.key === 'pending'" />
+        <Activity v-else-if="option.key === 'running'" />
+        <Archive v-else />
+        <span
+          v-if="option.count"
+          class="ai-sessions-mode-count"
+        >
+          {{ option.count }}
+        </span>
+        <span class="ai-sessions-mode-tooltip">
+          <strong>{{ option.label }}</strong>
+          {{ option.tooltip }}
+        </span>
+      </button>
+    </section>
 
     <div class="panel-search">
       <Search />
       <input
         v-model="query"
-        :placeholder="t('aiSessions.searchPlaceholder')"
+        :placeholder="searchPlaceholder"
       />
-    </div>
-
-    <section
-      v-if="workspace.managedAiSessions.length"
-      class="ai-sessions-cockpit"
-    >
-      <button
-        v-for="card in cockpitCards"
-        :key="card.key"
-        :class="{ active: card.active }"
-        @click="applyCockpitFilter(card.key)"
-      >
-        <strong>{{ card.value }}</strong>
-        <span>{{ card.label }}</span>
-      </button>
-    </section>
-
-    <section
-      v-if="workspace.managedAiSessions.length"
-      class="ai-sessions-context"
-    >
-      <label>
-        <span>{{ t('aiSessions.agent') }}</span>
-        <select v-model="sourceFilter">
-          <option value="all">{{ t('common.all') }}</option>
-          <option
-            v-for="source in sourceOptions"
-            :key="source"
-            :value="source"
-          >
-            {{ sourceLabel(source) }}
-          </option>
-        </select>
-      </label>
-      <label>
-        <span>{{ t('aiSessions.project') }}</span>
-        <select v-model="projectFilter">
-          <option value="all">{{ t('common.all') }}</option>
-          <option
-            v-for="project in projectOptions"
-            :key="project.key"
-            :value="project.key"
-          >
-            {{ project.label }}
-          </option>
-        </select>
-      </label>
-    </section>
-
-    <section
-      v-if="attentionQueue.length"
-      class="ai-sessions-attention-strip"
-    >
-      <button @click="selectSession(attentionQueue[0])">
-        <strong>{{ t('aiSessions.pendingCount', { count: attentionQueue.length }) }}</strong>
-        <span>{{ attentionQueue[0].title }} · {{ attentionQueue[0].summary || requestKindLabel(attentionQueue[0].requestKind) }}</span>
-      </button>
-    </section>
-
-    <section
-      v-if="workspace.managedAiSessions.length"
-      class="ai-sessions-queue-bar"
-    >
-      <div>
-        <strong>{{ t('aiSessions.currentCount', { count: visibleSessions.length }) }}</strong>
-        <span>{{ t('aiSessions.pendingScopedCount', { count: visiblePendingSessions.length, scope: activeScopeLabel }) }}</span>
-      </div>
-      <div class="ai-sessions-queue-actions">
-        <button
-          :title="t('aiSessions.nextPending')"
-          :disabled="visiblePendingSessions.length === 0"
-          @click="focusNextVisiblePending"
-        >
-          <LocateFixed />
-        </button>
-        <button
-          :title="t('aiSessions.copyQueueSummary')"
-          :disabled="visibleSessions.length === 0"
-          @click="copyVisibleSessionQueue"
-        >
-          <Copy />
-        </button>
-        <button
-          :title="t('aiSessions.handleFilteredPending')"
-          :disabled="visiblePendingSessions.length === 0"
-          @click="markVisiblePendingHandled"
-        >
-          <CheckCheck />
-        </button>
-      </div>
-    </section>
-
-    <div class="ai-sessions-filter">
-      <button
-        v-for="option in filters"
-        :key="option.key"
-        :class="{ active: filter === option.key && !hibernatedOnly }"
-        @click="applyStateFilter(option.key)"
-      >
-        {{ option.label }}
-      </button>
     </div>
 
     <div
@@ -140,52 +63,213 @@
       {{ workspace.managedAiSessionsError }}
     </div>
 
-    <div class="ai-sessions-bulk">
-      <button @click="workspace.bulkManagedAiSessions({ operation: 'mark-handled' })">
-        <CheckCheck />
-        {{ t('aiSessions.markAllHandled') }}
-      </button>
-      <button @click="workspace.bulkManagedAiSessions({ operation: 'clear-ended' })">
-        <ArchiveX />
-        {{ t('aiSessions.clearEnded') }}
-      </button>
-    </div>
-
     <div class="ai-sessions-content">
-      <div class="ai-sessions-list">
-        <div
-          v-for="session in visibleSessions"
-          :key="`${session.source}:${session.id}`"
-          class="ai-session-row"
-          role="button"
-          tabindex="0"
-          :class="{ active: sessionKey(session) === workspace.selectedManagedAiSessionKey, attention: session.state === 'needsInput' }"
-          @click="selectSession(session)"
-          @dblclick="workspace.focusManagedAiSession(session.id)"
-          @keydown.enter.prevent="selectSession(session)"
-          @keydown.space.prevent="selectSession(session)"
+      <div
+        v-if="workspace.managedAiSessions.length"
+        class="ai-sessions-section-header"
+      >
+        <span class="ai-sessions-section-title">
+          <Inbox v-if="mode === 'pending'" />
+          <Activity v-else-if="mode === 'running'" />
+          <Archive v-else />
+          <strong>{{ activeModeLabel }}</strong>
+        </span>
+        <span
+          v-if="mode === 'pending'"
+          class="ai-sessions-scope-label"
+        >{{ activeScopeLabel }}</span>
+        <span
+          v-else
+          class="ai-sessions-library-grouping"
+          :aria-label="t('aiSessions.grouping')"
         >
-          <span :class="`ai-session-state state-${session.state}`"></span>
-          <span>
-            <strong>{{ session.title }}</strong>
-            <small>{{ sourceLabel(session.source) }} · {{ stateLabel(session.state) }} · {{ requestKindLabel(session.requestKind) }}{{ session.summary ? ` · ${session.summary}` : '' }}</small>
-            <small
-              v-if="session.cwd"
-              class="ai-session-cwd"
-            >{{ session.cwd }}</small>
-            <small class="ai-session-foot">
-              {{ formatRelativeTime(session.lastActivityAt) }}{{ session.resumeCommand ? ` · ${t('aiSessions.restorable')}` : '' }}{{ session.hibernated ? ` · ${t('aiSessions.hibernated')}` : '' }}
-            </small>
-          </span>
           <button
-            v-if="session.state === 'needsInput'"
-            class="ai-session-handle"
-            :title="t('aiSessions.markHandled')"
-            @click.stop="workspace.markManagedAiSessionHandled(session.source, session.id)"
+            type="button"
+            :class="{ active: libraryGrouping === 'project' }"
+            :title="t('aiSessions.groupByProject')"
+            :aria-label="t('aiSessions.groupByProject')"
+            @click="selectLibraryGrouping('project')"
           >
-            <Check />
+            <FolderTree />
           </button>
-        </div>
+          <button
+            type="button"
+            :class="{ active: libraryGrouping === 'agent' }"
+            :title="t('aiSessions.groupByAgent')"
+            :aria-label="t('aiSessions.groupByAgent')"
+            @click="selectLibraryGrouping('agent')"
+          >
+            <Bot />
+          </button>
+        </span>
+      </div>
+      <div class="ai-sessions-list">
+        <template v-if="mode === 'running'">
+          <section
+            v-for="section in runningSections"
+            :key="section.key"
+            class="ai-session-library-section"
+            :class="{ collapsed: isLibrarySectionCollapsed(section.key) }"
+          >
+            <button
+              type="button"
+              class="ai-session-library-section-header"
+              :aria-expanded="!isLibrarySectionCollapsed(section.key)"
+              @click="toggleLibrarySection(section.key)"
+            >
+              <span>
+                <ChevronDown class="ai-session-library-chevron" />
+                <FolderTree v-if="libraryGrouping === 'project'" />
+                <Bot v-else />
+                <strong>{{ section.label }}</strong>
+              </span>
+              <small>{{ section.count }}</small>
+            </button>
+            <template v-if="!isLibrarySectionCollapsed(section.key)">
+              <div
+                v-for="session in section.sessions"
+                :key="`${session.source}:${session.id}`"
+                class="ai-session-row library"
+                role="button"
+                tabindex="0"
+                :title="sessionRowTooltip(session)"
+                :class="{ active: sessionKey(session) === workspace.selectedManagedAiSessionKey, attention: session.state === 'needsInput' }"
+                @click="focusSessionConversation(session)"
+                @dblclick="focusSessionConversation(session)"
+                @keydown.enter.prevent="focusSessionConversation(session)"
+                @keydown.space.prevent="focusSessionConversation(session)"
+              >
+                <span :class="`ai-session-state state-${session.state}`"></span>
+                <span class="ai-session-row-body">
+                  <span class="ai-session-row-top">
+                    <strong>{{ sessionDisplayTitle(session) }}</strong>
+                    <small>{{ sourceLabel(session.source) }} · {{ formatRelativeTime(session.lastActivityAt) }}</small>
+                  </span>
+                  <small class="ai-session-summary">{{ session.summary || requestKindLabel(session.requestKind) }}</small>
+                  <small class="ai-session-foot">
+                    {{ stateLabel(session.state) }} · {{ requestKindLabel(session.requestKind) }}
+                  </small>
+                </span>
+                <button
+                  class="ai-session-row-action"
+                  :title="t('aiSessions.locateTerminal')"
+                  @click.stop="focusSessionConversation(session)"
+                >
+                  <LocateFixed />
+                </button>
+              </div>
+            </template>
+          </section>
+        </template>
+        <template v-else-if="mode === 'library'">
+          <section
+            v-for="section in librarySections"
+            :key="section.key"
+            class="ai-session-library-section"
+            :class="{ collapsed: isLibrarySectionCollapsed(section.key) }"
+          >
+            <button
+              type="button"
+              class="ai-session-library-section-header"
+              :aria-expanded="!isLibrarySectionCollapsed(section.key)"
+              @click="toggleLibrarySection(section.key)"
+            >
+              <span>
+                <ChevronDown class="ai-session-library-chevron" />
+                <FolderTree v-if="libraryGrouping === 'project'" />
+                <Bot v-else />
+                <strong>{{ section.label }}</strong>
+              </span>
+              <small>{{ section.count }}</small>
+            </button>
+            <template v-if="!isLibrarySectionCollapsed(section.key)">
+              <div
+                v-for="session in section.sessions"
+                :key="`${session.source}:${session.id}`"
+                class="ai-session-row library"
+                role="button"
+                tabindex="0"
+                :title="sessionRowTooltip(session)"
+                :class="{ active: sessionKey(session) === workspace.selectedManagedAiSessionKey, attention: session.state === 'needsInput' }"
+                @click="selectSession(session)"
+                @dblclick="resumeOrFocusSession(session)"
+                @keydown.enter.prevent="selectSession(session)"
+                @keydown.space.prevent="selectSession(session)"
+              >
+                <span :class="`ai-session-state state-${session.state}`"></span>
+                <span class="ai-session-row-body">
+                  <span class="ai-session-row-top">
+                    <strong>{{ sessionDisplayTitle(session) }}</strong>
+                    <small>{{ sourceLabel(session.source) }} · {{ formatRelativeTime(session.lastActivityAt) }}</small>
+                  </span>
+                  <small class="ai-session-summary">{{ session.summary || requestKindLabel(session.requestKind) }}</small>
+                  <small class="ai-session-foot">
+                    {{ stateLabel(session.state) }}{{ session.resumeCommand ? ` · ${t('aiSessions.restorable')}` : '' }}{{ session.hibernated ? ` · ${t('aiSessions.hibernated')}` : '' }}
+                  </small>
+                </span>
+                <button
+                  v-if="session.state === 'needsInput'"
+                  class="ai-session-handle"
+                  :title="t('aiSessions.markHandled')"
+                  @click.stop="workspace.markManagedAiSessionHandled(session.source, session.id)"
+                >
+                  <Check />
+                </button>
+                <button
+                  v-else-if="canResumeSession(session)"
+                  class="ai-session-row-action"
+                  :title="t('aiSessions.resume')"
+                  @click.stop="workspace.resumeManagedAiSession(session.source, session.id)"
+                >
+                  <RotateCcw />
+                </button>
+              </div>
+            </template>
+          </section>
+        </template>
+        <template v-else>
+          <div
+            v-for="session in visibleSessions"
+            :key="`${session.source}:${session.id}`"
+            class="ai-session-row"
+            role="button"
+            tabindex="0"
+            :title="sessionRowTooltip(session)"
+            :class="{ active: sessionKey(session) === workspace.selectedManagedAiSessionKey, attention: session.state === 'needsInput' }"
+            @click="selectSession(session)"
+            @dblclick="resumeOrFocusSession(session)"
+            @keydown.enter.prevent="selectSession(session)"
+            @keydown.space.prevent="selectSession(session)"
+          >
+            <span :class="`ai-session-state state-${session.state}`"></span>
+            <span class="ai-session-row-body">
+              <span class="ai-session-row-top">
+                <strong>{{ projectLabel(session) }}</strong>
+                <small>{{ sourceLabel(session.source) }} · {{ formatRelativeTime(session.lastActivityAt) }}</small>
+              </span>
+              <small class="ai-session-summary">{{ sessionDisplayTitle(session) }}</small>
+              <small class="ai-session-foot">
+                {{ stateLabel(session.state) }} · {{ requestKindLabel(session.requestKind) }}{{ session.resumeCommand ? ` · ${t('aiSessions.restorable')}` : '' }}{{ session.hibernated ? ` · ${t('aiSessions.hibernated')}` : '' }}
+              </small>
+            </span>
+            <button
+              v-if="session.state === 'needsInput'"
+              class="ai-session-handle"
+              :title="t('aiSessions.markHandled')"
+              @click.stop="workspace.markManagedAiSessionHandled(session.source, session.id)"
+            >
+              <Check />
+            </button>
+            <button
+              v-else-if="canResumeSession(session)"
+              class="ai-session-row-action"
+              :title="t('aiSessions.resume')"
+              @click.stop="workspace.resumeManagedAiSession(session.source, session.id)"
+            >
+              <RotateCcw />
+            </button>
+          </div>
+        </template>
         <div
           v-if="visibleSessions.length === 0"
           class="ai-sessions-empty"
@@ -194,16 +278,16 @@
           <small>{{ t('aiSessions.emptyDescription') }}</small>
           <button
             class="ai-sessions-empty-action"
-            @click="workspace.openAiSessionSettings"
+            @click="workspace.refreshManagedAiSessions()"
           >
-            <Settings />
-            {{ t('aiSessions.openSettings') }}
+            <RefreshCw />
+            {{ t('aiSessions.refresh') }}
           </button>
         </div>
       </div>
 
       <aside
-        v-if="selectedSession"
+        v-if="selectedSession && mode !== 'running'"
         class="ai-session-detail"
       >
         <header>
@@ -416,21 +500,21 @@
 </template>
 
 <script setup lang="ts">
-import { ArchiveX, Ban, Check, CheckCheck, Copy, LocateFixed, RefreshCw, RotateCcw, Search, Send, Settings, ShieldCheck, Trash2 } from 'lucide-vue-next'
+import { Activity, Archive, Ban, Bot, Check, CheckCheck, ChevronDown, Copy, FolderTree, Inbox, LocateFixed, RefreshCw, RotateCcw, Search, Send, ShieldCheck, Trash2 } from 'lucide-vue-next'
 import { useAiSessionsPanelRuntime } from '@/services/ai/aiSessionsPanelRuntime'
 
 const {
   workspace,
   t,
   query,
-  filter,
+  mode,
+  libraryGrouping,
   eventFilter,
-  sourceFilter,
-  projectFilter,
-  hibernatedOnly,
   replyText,
   renameTitle,
-  filters,
+  modeButtons,
+  activeModeLabel,
+  searchPlaceholder,
   eventFilters,
   sourceLabel,
   stateLabel,
@@ -441,25 +525,27 @@ const {
   eventState,
   decisionLabel,
   sessionKey,
-  sourceOptions,
-  projectOptions,
-  attentionQueue,
-  cockpitCards,
-  applyStateFilter,
-  applyCockpitFilter,
+  selectMode,
+  selectLibraryGrouping,
+  isLibrarySectionCollapsed,
+  toggleLibrarySection,
   visibleSessions,
-  visiblePendingSessions,
+  librarySections,
+  runningSections,
   activeScopeLabel,
   selectedSession,
   filteredTimelineEvents,
   selectSession,
+  focusSessionConversation,
   renameSelectedSession,
   submitReply,
   submitQuestionReply,
   copyTimelineEvent,
-  copyVisibleSessionQueue,
-  focusNextVisiblePending,
-  markVisiblePendingHandled,
+  canResumeSession,
+  resumeOrFocusSession,
+  projectLabel,
+  sessionDisplayTitle,
+  sessionRowTooltip,
   formatTime,
   formatRelativeTime
 } = useAiSessionsPanelRuntime()

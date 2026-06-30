@@ -115,8 +115,8 @@
       :style="{ left: `${termMenu.x}px`, top: `${termMenu.y}px` }"
       @click.stop
     >
-      <button @click="copySelection(termMenu.panelId)"><span>复制</span><kbd>Ctrl+Shift+C</kbd></button>
-      <button @click="pasteClipboard(termMenu.panelId)"><span>粘贴</span><kbd>Ctrl+Shift+V</kbd></button>
+      <button @click="copySelection(termMenu.panelId)"><span>{{ t('terminal.context.copy') }}</span><kbd>Ctrl+Shift+C</kbd></button>
+      <button @click="pasteClipboard(termMenu.panelId)"><span>{{ t('terminal.context.paste') }}</span><kbd>Ctrl+Shift+V</kbd></button>
       <button @click="openSearchOverlay(termMenu.panelId)"><span>搜索</span><kbd>Ctrl+F</kbd></button>
       <i />
       <button @click="togglePanelConnection(termMenu.panelId)">{{ connectionActionLabel(panelById(termMenu.panelId)) }}<kbd>{{ connectionActionShortcut(panelById(termMenu.panelId)) }}</kbd></button>

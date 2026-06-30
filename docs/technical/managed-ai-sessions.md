@@ -1,8 +1,8 @@
 # Managed AI Sessions
 
-aiopsterm tracks coding-agent sessions that run inside aiopsterm-created local shell terminals.
+aiopsterm tracks coding-agent sessions from two sources: live hook events from aiopsterm-created local shell terminals, and a local history import from supported agent state stores.
 
-This is separate from the embedded right-side Codex panel. The implementation covers visible local shell terminals opened through aiopsterm's workspace/assets flows; external OS terminals and SSH remote shells are not tracked yet.
+This is separate from the embedded right-side Codex panel. Live event tracking covers visible local shell terminals opened through aiopsterm's workspace/assets flows; external OS terminals and SSH remote shells are not tracked live yet. Imported history can still appear for local agents that keep durable local state.
 
 ## Managed Terminal Context
 
@@ -36,6 +36,22 @@ aiopsterm normalizes hook activity into Feed-style request semantics before it s
 - `decisionMode`: `blocking`, `local`, or `telemetry`
 
 Claude Code requests launched with `--wait-decision` can be `blocking`, which lets the AI session panel answer the waiting hook. Codex stock hooks remain local visibility or telemetry; aiopsterm records and routes them but does not preempt Codex's native approval UI or mark the session as needing user input.
+
+## Local History Import
+
+`listManagedAiSessions()` also imports recent local agent sessions from durable state stores. Imported rows are idle, telemetry-only, and restorable; they do not create unread notifications and do not imply that the agent process is currently running.
+
+The first supported import sources are:
+
+- Codex: `CODEX_HOME/state_5.sqlite` when available, otherwise `CODEX_HOME/sessions/**/*.jsonl`; `CODEX_HOME` defaults to `$HOME/.codex`.
+- Claude Code: `CLAUDE_CONFIG_DIR/projects/**/*.jsonl` and `$HOME/.claude/projects/**/*.jsonl`.
+- OpenCode: `OPENCODE_CONFIG_DIR/opencode.db`, defaulting to `$HOME/.local/share/opencode/opencode.db`.
+
+The importer is fail-open. Missing databases, unsupported schemas, or unavailable SQLite native bindings leave the existing managed-session list intact. Imported sessions are merged into the same capped store as hook sessions. If a hook session with the same source/session id is already `working` or `needsInput`, aiopsterm preserves the live state and pending request while filling missing metadata such as `cwd`, `transcriptPath`, and `resumeCommand`.
+
+Set `AIOPSTERM_AGENT_SESSION_IMPORT_DISABLED=1` to disable local history import while debugging or testing startup behavior.
+
+Other vibe-coding agents already recognized by the hook/event model include Cursor, Gemini, Copilot, Grok, CodeBuddy, Factory, Qoder, Amp, Pi, OMP, Kiro, Rovo Dev, Antigravity, and Hermes Agent. Their hook events can appear live after installation, but offline history import is only enabled once aiopsterm has a stable local state-store reader for that agent.
 
 ## Hook Installer
 
@@ -118,9 +134,9 @@ The store is capped to 200 sessions, 200 timeline events per session, and 40 loc
 - agent process facts (`processId`, `parentProcessId`, `processGroupId`) and normalized lifecycle (`running`, `idle`, `needsInput`, `ended`, or `unknown`)
 - owning local terminal process and activity facts (`terminalProcessId`, `terminalActivityAt`) when the terminal backend reports them
 
-The renderer hydrates from this store on startup through `src/renderer/src/services/ai/managedAiClient.ts`, which owns `listManagedAiSessions()` bridge lookup and binding. Incoming hook events update the in-memory UI immediately and are persisted by the main process.
+The renderer hydrates from this store on startup through `src/renderer/src/services/ai/managedAiClient.ts`, which owns `listManagedAiSessions()` bridge lookup and binding. The list call refreshes the local history import before returning the snapshot. Incoming hook events update the in-memory UI immediately and are persisted by the main process.
 
-`managed-ai-sessions.audit.jsonl` is an append-only audit stream inspired by control_compat Feed's workstream log. It records compact entries for incoming hook events, socket completion status, local replies, decision resolution or timeout, renames, clears, and bulk operations. Entries include non-secret routing and state fields such as source, session id, event name, request kind, decision mode, state, request id, decision kind, status, title, and a bounded summary. The audit log does not store full raw hook payloads; detailed payload previews remain bounded inside the capped session timeline.
+`managed-ai-sessions.audit.jsonl` is an append-only audit stream inspired by control_compat Feed's workstream log. It records compact entries for incoming hook events, socket completion status, local replies, decision resolution or timeout, renames, clears, local history imports, and bulk operations. Entries include non-secret routing and state fields such as source, session id, event name, request kind, decision mode, state, request id, decision kind, status, title, and a bounded summary. The audit log does not store full raw hook payloads; detailed payload previews remain bounded inside the capped session timeline.
 
 The current implementation records lifecycle and process facts for visibility, restore, and later automation. It does not hibernate agents or kill agent process groups. Disconnecting or closing a terminal still uses the normal terminal lifecycle path and marks matching managed AI sessions ended.
 
@@ -182,7 +198,7 @@ Auto-naming emits `managed_ai.session.renamed` with `auto: true` when it changes
 - Selecting a row opens details inside the left AI session panel. The shared main work area remains the terminal workspace.
 - Details show metadata, a timeline of recent events, local decisions, manual title editing, reply notes, clear actions, and quick focus back to the owning terminal.
 - Details also show normalized agent lifecycle, agent PID/PPID/PGID, terminal PID, and latest terminal activity when those facts are available from hooks or the local terminal backend.
-- When a session has a `resumeCommand`, the detail header shows a resume action. Clicking it writes the resume command into the owning aiopsterm local-connection terminal. It does not create a new terminal, close an existing terminal, or touch SSH connections.
+- When a non-working, non-pending session has a `resumeCommand`, the row/detail resume action restores it through the terminal workspace. aiopsterm first reuses a live owning local terminal when one is still bound; if none is live, it opens a new local terminal using the session title and `cwd`, binds that terminal to the managed session, and writes the resume command there. Resume does not write into SSH connections, close existing terminals, or mark the session running before hook/lifecycle events report new activity.
 - Manual resume uses the same terminal command security pipeline as direct command execution. If the configured security policy requires approval, the normal terminal approval prompt appears before anything is written to the shell.
 - Only requests that genuinely need user attention create top-bar bell entries: blocking Claude Code permission/question/plan requests, actionable local questions/plans, and notification requests. Stock Codex `PermissionRequest` hooks stay as timeline rows and do not increment the bell.
 - The main process emits a desktop notification only for those same attention-worthy events when Electron notifications are supported and `notifications.desktopNotifications` is not disabled. The notification path goes through Electron's native `Notification` API behind `src/main/backend/app/nativeNotificationRuntime.ts`, so macOS, Windows, and Linux use the platform notification system without renderer-side OS branching.

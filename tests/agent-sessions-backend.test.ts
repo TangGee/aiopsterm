@@ -1,4 +1,4 @@
-import { mkdtemp, readFile } from 'fs/promises'
+import { mkdir, mkdtemp, readFile, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { createConnection } from 'net'
@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from 'vitest'
 type AgentSessionsBackend = {
   configureAiAgentSessionStore: (userDataPath: string) => Promise<void>
   listManagedAiSessions: () => Promise<unknown>
+  configureManagedAiSessionImportRuntime: (config?: Record<string, unknown> & { importSessions?: () => Promise<unknown[]> }) => void
   listManagedAiSessionEvents: (input?: Record<string, unknown>) => unknown
   listManagedAiNotifications: (input?: Record<string, unknown>) => Promise<unknown>
   markManagedAiNotificationRead: (input: Record<string, unknown>) => Promise<unknown>
@@ -17,6 +18,7 @@ type AgentSessionsBackend = {
   normalizeAiAgentSessionEventInput: (input: unknown, now?: number) => unknown
   publishAiAgentSessionEvent: (input: Record<string, unknown>, emit?: ((event: unknown) => void) | null) => unknown
   ensureAiAgentSessionServer: (input: { userDataPath: string; emit: (event: unknown) => void }) => Promise<string>
+  agentHookScriptPathFor: (appPath: string, resourcesPath: string, userDataPath?: string) => string
   closeAiAgentSessionServer: () => void
   renameManagedAiSession: (input: Record<string, unknown>) => Promise<unknown>
   replyManagedAiSession: (input: Record<string, unknown>) => Promise<unknown>
@@ -115,6 +117,21 @@ const streamSocket = (socketPath: string, request: Record<string, unknown>) => {
 }
 
 describe('agent session backend', () => {
+  it('stages the agent hook helper under userData for stable installed hook paths', async () => {
+    const { agentHookScriptPathFor } = await loadBackend()
+    const root = await mkdtemp(join(tmpdir(), 'aiopsterm-agent-hook-path-'))
+    const appPath = join(root, 'app')
+    const resourcesPath = join(root, 'tmp-mount')
+    const userDataPath = join(root, 'user-data')
+    await mkdir(join(resourcesPath, 'resources'), { recursive: true })
+    await writeFile(join(resourcesPath, 'resources', 'aiopsterm-agent-hook.js'), '#!/usr/bin/env node\n', 'utf-8')
+
+    const staged = agentHookScriptPathFor(appPath, resourcesPath, userDataPath)
+
+    expect(staged).toBe(join(userDataPath, 'agent-hooks', 'aiopsterm-agent-hook.js'))
+    expect(await readFile(staged, 'utf-8')).toBe('#!/usr/bin/env node\n')
+  })
+
   it('normalizes Codex hook payloads into managed AI session events', async () => {
     const { normalizeAiAgentSessionEventInput } = await loadBackend()
     expect(
@@ -371,6 +388,124 @@ describe('agent session backend', () => {
         ]
       }
     })
+  })
+
+  it('merges imported local agent history without overwriting live managed session state', async () => {
+    const {
+      configureAiAgentSessionStore,
+      configureManagedAiSessionImportRuntime,
+      listManagedAiSessions,
+      publishAiAgentSessionEvent
+    } = await loadBackend()
+    await configureAiAgentSessionStore(await mkdtemp(join(tmpdir(), 'aiopsterm-agent-import-merge-')))
+
+    publishAiAgentSessionEvent(
+      {
+        source: 'claude-code',
+        event: 'AskUserQuestion',
+        sessionId: 'claude-live-1',
+        requestId: 'question-1',
+        actionable: true,
+        waitForDecision: true,
+        title: 'Live Claude',
+        summary: 'Pick a release target',
+        receivedAt: 1781884900000
+      },
+      null
+    )
+
+    const imported = [
+      {
+        id: 'claude-live-1',
+        source: 'claude-code',
+        title: 'Imported Claude',
+        summary: 'imported history',
+        state: 'idle',
+        lastEvent: 'session_start',
+        lastActivityAt: 1781884800000,
+        createdAt: 1781884800000,
+        updatedAt: 1781885000000,
+        cwd: '/work/claude-live',
+        requestKind: 'telemetry',
+        decisionMode: 'telemetry',
+        resumeCommand: "cd '/work/claude-live' && claude --resume 'claude-live-1'",
+        agentLifecycle: 'idle',
+        events: [
+          {
+            id: 'imported-claude-live',
+            source: 'claude-code',
+            event: 'session_start',
+            sessionId: 'claude-live-1',
+            title: 'Imported Claude',
+            summary: 'imported history',
+            receivedAt: 1781884800000,
+            cwd: '/work/claude-live',
+            requestKind: 'telemetry',
+            decisionMode: 'telemetry',
+            resumeCommand: "cd '/work/claude-live' && claude --resume 'claude-live-1'"
+          }
+        ]
+      },
+      {
+        id: 'codex-imported-1',
+        source: 'codex',
+        title: 'Imported Codex',
+        summary: 'historical codex task',
+        state: 'idle',
+        lastEvent: 'session_start',
+        lastActivityAt: 1781884700000,
+        createdAt: 1781884700000,
+        updatedAt: 1781885000000,
+        cwd: '/work/codex-imported',
+        requestKind: 'telemetry',
+        decisionMode: 'telemetry',
+        resumeCommand: "cd '/work/codex-imported' && codex resume 'codex-imported-1'",
+        agentLifecycle: 'idle',
+        events: [
+          {
+            id: 'imported-codex',
+            source: 'codex',
+            event: 'session_start',
+            sessionId: 'codex-imported-1',
+            title: 'Imported Codex',
+            summary: 'historical codex task',
+            receivedAt: 1781884700000,
+            cwd: '/work/codex-imported',
+            requestKind: 'telemetry',
+            decisionMode: 'telemetry',
+            resumeCommand: "cd '/work/codex-imported' && codex resume 'codex-imported-1'"
+          }
+        ]
+      }
+    ]
+    configureManagedAiSessionImportRuntime({
+      importSessions: async () => imported
+    })
+
+    const response = (await listManagedAiSessions()) as { data?: { sessions?: Array<Record<string, unknown>> } }
+    const sessions = response.data?.sessions || []
+    const live = sessions.find((session) => session.id === 'claude-live-1')
+    const codex = sessions.find((session) => session.id === 'codex-imported-1')
+
+    expect(live).toEqual(
+      expect.objectContaining({
+        title: 'Live Claude',
+        state: 'needsInput',
+        pendingRequestId: 'question-1',
+        cwd: '/work/claude-live',
+        resumeCommand: "cd '/work/claude-live' && claude --resume 'claude-live-1'"
+      })
+    )
+    expect(codex).toEqual(
+      expect.objectContaining({
+        source: 'codex',
+        title: 'Imported Codex',
+        state: 'idle',
+        resumeCommand: "cd '/work/codex-imported' && codex resume 'codex-imported-1'"
+      })
+    )
+
+    configureManagedAiSessionImportRuntime()
   })
 
   it('tracks explicit agent hibernation state and config', async () => {

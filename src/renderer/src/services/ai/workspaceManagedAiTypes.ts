@@ -78,4 +78,5 @@ export type WorkspaceManagedAiControllerDeps = {
     command: string,
     options?: TerminalCommandExecutionOptions
   ) => Promise<TerminalSecurityDecision>
+  openLocalTerminalPanel?: (options?: { title?: string; cwd?: string }) => Promise<TerminalPanel | null | undefined>
 }

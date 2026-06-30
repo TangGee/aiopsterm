@@ -2,11 +2,18 @@ import { describe, expect, it } from 'vitest'
 import {
   buildManagedAiActiveScopeLabel,
   buildManagedAiCockpitCards,
+  buildManagedAiLibrarySections,
+  buildManagedAiPanelModeButtons,
   filteredManagedAiTimelineEvents,
   formatManagedAiRelativeTime,
   managedAiAttentionQueue,
+  managedAiPanelModeForSession,
+  managedAiPanelModeStateFilter,
+  managedAiProjectDisplayLabel,
+  managedAiProjectDisplayLabels,
   managedAiProjectKey,
   managedAiProjectOptions,
+  managedAiSessionDisplayTitle,
   managedAiSessionKey,
   managedAiSourceOptions,
   managedAiTimelineEventCopyPayload,
@@ -33,6 +40,12 @@ const labels: Record<string, string> = {
   'aiSessions.filter.idle': 'Idle',
   'aiSessions.filter.ended': 'Ended',
   'aiSessions.filter.hibernated': 'Hibernated',
+  'aiSessions.mode.pending': 'Pending',
+  'aiSessions.mode.pendingTooltip': 'Needs your action',
+  'aiSessions.mode.running': 'Running',
+  'aiSessions.mode.runningTooltip': 'Working sessions',
+  'aiSessions.mode.library': 'Library',
+  'aiSessions.mode.libraryTooltip': 'All sessions',
   'aiSessions.scopeAll': 'All scope',
   'aiSessions.scopeSearch': 'Search: {query}',
   'aiSessions.queueHeader': 'AI session queue: {scope}',
@@ -186,6 +199,55 @@ describe('aiSessionsPanelViewRuntime', () => {
     ])
   })
 
+  it('builds project-first row labels and library sections with path disambiguation', () => {
+    const duplicateProjectSessions = [
+      ...sessions,
+      makeSession({
+        id: 'codex-marketing-api',
+        source: 'codex',
+        title: '',
+        summary: 'Review campaign endpoint',
+        state: 'idle',
+        lastActivityAt: 450,
+        cwd: '/work/marketing/api',
+        requestKind: 'telemetry',
+        decisionMode: 'telemetry'
+      })
+    ]
+    const projectLabels = managedAiProjectDisplayLabels(duplicateProjectSessions, 'Unknown project')
+
+    expect(managedAiProjectDisplayLabel(duplicateProjectSessions[0], projectLabels, 'Unknown project')).toBe('work / api')
+    expect(managedAiProjectDisplayLabel(duplicateProjectSessions[4], projectLabels, 'Unknown project')).toBe('marketing / api')
+    expect(managedAiProjectDisplayLabel(sessions[3], projectLabels, 'Unknown project')).toBe('Unknown project')
+    expect(managedAiSessionDisplayTitle(duplicateProjectSessions[4])).toBe('Review campaign endpoint')
+
+    expect(
+      buildManagedAiLibrarySections({
+        sessions: duplicateProjectSessions,
+        grouping: 'project',
+        unknownProjectLabel: 'Unknown project'
+      }).map((section) => [section.label, section.count, section.sessions.map((session) => session.id)])
+    ).toEqual([
+      ['marketing / api', 1, ['codex-marketing-api']],
+      ['Unknown project', 1, ['cursor-unknown']],
+      ['work / api', 2, ['claude-api', 'gemini-api']],
+      ['docs', 1, ['codex-docs']]
+    ])
+
+    expect(
+      buildManagedAiLibrarySections({
+        sessions: duplicateProjectSessions,
+        grouping: 'agent',
+        unknownProjectLabel: 'Unknown project'
+      }).map((section) => [section.label, section.count])
+    ).toEqual([
+      ['Codex', 2],
+      ['Cursor', 1],
+      ['Claude Code', 1],
+      ['Gemini', 1]
+    ])
+  })
+
   it('builds cockpit counts, attention ordering, and active scope labels without component state', () => {
     const cockpit = buildManagedAiCockpitCards({
       sessions,
@@ -217,6 +279,27 @@ describe('aiSessionsPanelViewRuntime', () => {
     ).toBe('Needs input / Hibernated / Claude Code / api (2) / Search: deploy')
   })
 
+  it('builds the compact panel mode buttons and maps modes to state filters', () => {
+    expect(managedAiPanelModeStateFilter('pending')).toBe('needsInput')
+    expect(managedAiPanelModeStateFilter('running')).toBe('working')
+    expect(managedAiPanelModeStateFilter('library')).toBe('all')
+    expect(managedAiPanelModeForSession(sessions[0])).toBe('pending')
+    expect(managedAiPanelModeForSession(sessions[1])).toBe('running')
+    expect(managedAiPanelModeForSession(sessions[2])).toBe('library')
+
+    expect(
+      buildManagedAiPanelModeButtons({
+        sessions,
+        mode: 'running',
+        translate: t
+      })
+    ).toEqual([
+      { key: 'pending', label: 'Pending', tooltip: 'Needs your action', count: 1, active: false },
+      { key: 'running', label: 'Running', tooltip: 'Working sessions', count: 1, active: true },
+      { key: 'library', label: 'Library', tooltip: 'All sessions', active: false }
+    ])
+  })
+
   it('filters visible sessions by state, source, project, query, and hibernation state', () => {
     expect(
       visibleManagedAiSessions({
@@ -241,9 +324,9 @@ describe('aiSessionsPanelViewRuntime', () => {
     ).toEqual(['cursor-unknown'])
   })
 
-  it('falls back to the first visible session and filters timeline events newest first', () => {
+  it('keeps detail closed until a visible session is selected and filters timeline events newest first', () => {
     const visible = sessions.slice(1, 3)
-    expect(selectedVisibleManagedAiSession({ selectedSession: sessions[0], visibleSessions: visible })?.id).toBe('gemini-api')
+    expect(selectedVisibleManagedAiSession({ selectedSession: sessions[0], visibleSessions: visible })).toBeNull()
     expect(selectedVisibleManagedAiSession({ selectedSession: sessions[1], visibleSessions: visible })?.id).toBe('gemini-api')
 
     const timelineSession = makeSession({

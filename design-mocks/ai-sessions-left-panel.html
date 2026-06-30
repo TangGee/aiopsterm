@@ -1,0 +1,733 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AI 会话左侧面板设计稿</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0c0f14;
+        --surface: #11161d;
+        --surface-2: #171d26;
+        --surface-3: #1d2530;
+        --border: #2a3340;
+        --border-soft: #202833;
+        --text: #e6edf3;
+        --muted: #8b98a7;
+        --muted-2: #657181;
+        --orange: #f59e0b;
+        --orange-bg: rgba(245, 158, 11, 0.14);
+        --blue: #60a5fa;
+        --blue-bg: rgba(96, 165, 250, 0.13);
+        --green: #22c55e;
+        --green-bg: rgba(34, 197, 94, 0.12);
+        --red: #ef4444;
+        --font: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        --mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: var(--bg);
+        color: var(--text);
+        font-family: var(--font);
+        font-size: 12px;
+        letter-spacing: 0;
+      }
+
+      .app {
+        width: 1180px;
+        height: 780px;
+        margin: 24px auto;
+        border: 1px solid #222b36;
+        background: #0d1117;
+        display: grid;
+        grid-template-rows: 38px 1fr;
+        overflow: hidden;
+      }
+
+      .topbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        border-bottom: 1px solid var(--border-soft);
+        background: rgba(17, 22, 29, 0.92);
+        padding: 0 10px;
+      }
+
+      .top-left,
+      .top-right {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+      }
+
+      .brand-mark {
+        width: 20px;
+        height: 20px;
+        border-radius: 5px;
+        display: grid;
+        place-items: center;
+        background: #5eead4;
+        color: #06110f;
+        font-size: 11px;
+        font-weight: 800;
+      }
+
+      .brand-name {
+        color: #aab4c0;
+        font-weight: 600;
+      }
+
+      .top-icon {
+        width: 28px;
+        height: 26px;
+        border: 1px solid transparent;
+        border-radius: 6px;
+        display: grid;
+        place-items: center;
+        color: var(--muted);
+      }
+
+      .top-icon.attention {
+        position: relative;
+        border-color: rgba(96, 165, 250, 0.36);
+        background: rgba(96, 165, 250, 0.12);
+        color: var(--text);
+      }
+
+      .top-icon.attention::after {
+        content: "5";
+        position: absolute;
+        top: -5px;
+        right: -5px;
+        min-width: 16px;
+        height: 16px;
+        border-radius: 999px;
+        background: #60a5fa;
+        color: #06111f;
+        display: grid;
+        place-items: center;
+        font-size: 10px;
+        font-weight: 800;
+        border: 1px solid #0d1117;
+      }
+
+      .workspace {
+        min-height: 0;
+        display: grid;
+        grid-template-columns: 44px 330px 1fr;
+      }
+
+      .rail {
+        border-right: 1px solid var(--border-soft);
+        background: #0f141b;
+        padding: 8px 7px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .rail-btn {
+        width: 30px;
+        height: 30px;
+        border-radius: 7px;
+        display: grid;
+        place-items: center;
+        color: var(--muted);
+      }
+
+      .rail-btn.active {
+        background: var(--surface-3);
+        color: #d8e2ed;
+      }
+
+      .panel {
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        border-right: 1px solid var(--border-soft);
+        background: var(--surface);
+      }
+
+      .panel-header {
+        padding: 12px 12px 8px;
+        border-bottom: 1px solid var(--border-soft);
+      }
+
+      .title-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+      }
+
+      .title {
+        font-size: 13px;
+        font-weight: 700;
+      }
+
+      .header-actions {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .icon-btn {
+        width: 28px;
+        height: 26px;
+        border: 1px solid var(--border);
+        border-radius: 7px;
+        display: grid;
+        place-items: center;
+        background: var(--surface-2);
+        color: var(--muted);
+      }
+
+      .mode-nav {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 6px;
+        margin-top: 10px;
+      }
+
+      .mode-button {
+        position: relative;
+        height: 38px;
+        border: 1px solid var(--border);
+        border-radius: 7px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--muted);
+        background: var(--surface-2);
+      }
+
+      .mode-button svg {
+        width: 17px;
+        height: 17px;
+        stroke-width: 1.9;
+      }
+
+      .mode-button.active {
+        background: rgba(96, 165, 250, 0.12);
+        color: var(--text);
+        border-color: rgba(96, 165, 250, 0.48);
+      }
+
+      .mode-button.pending {
+        color: #f6d7aa;
+      }
+
+      .mode-button.running {
+        color: #a7f3d0;
+      }
+
+      .mode-count {
+        position: absolute;
+        top: -6px;
+        right: -5px;
+        min-width: 17px;
+        height: 17px;
+        border-radius: 999px;
+        display: grid;
+        place-items: center;
+        padding: 0 5px;
+        border: 1px solid #11161d;
+        background: #475569;
+        color: #f8fafc;
+        font-size: 10px;
+        font-weight: 800;
+        line-height: 1;
+      }
+
+      .mode-button.pending .mode-count {
+        background: var(--orange);
+        color: #201304;
+      }
+
+      .mode-button.running .mode-count {
+        background: var(--green);
+        color: #03160b;
+      }
+
+      .tooltip {
+        position: absolute;
+        left: 50%;
+        top: calc(100% + 8px);
+        z-index: 3;
+        width: max-content;
+        max-width: 180px;
+        transform: translateX(-50%);
+        border: 1px solid #334155;
+        border-radius: 7px;
+        background: #0b0f15;
+        color: #dbe4ef;
+        box-shadow: 0 8px 18px rgba(0, 0, 0, 0.34);
+        padding: 6px 8px;
+        text-align: center;
+        opacity: 0;
+        pointer-events: none;
+        font-size: 11px;
+        line-height: 1.35;
+      }
+
+      .tooltip strong {
+        display: block;
+        color: var(--text);
+        font-size: 11px;
+      }
+
+      .mode-button:hover .tooltip {
+        opacity: 1;
+      }
+
+      .search {
+        margin: 8px 12px 0;
+        height: 30px;
+        border: 1px solid var(--border);
+        border-radius: 7px;
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        padding: 0 9px;
+        color: var(--muted-2);
+        background: #0f141b;
+      }
+
+      .content {
+        min-height: 0;
+        overflow: hidden;
+        padding: 10px 8px 12px;
+        display: flex;
+        flex-direction: column;
+      }
+
+      .section-head {
+        height: 24px;
+        padding: 0 4px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        color: var(--muted);
+      }
+
+      .section-head strong {
+        color: #cbd5e1;
+        font-size: 11px;
+      }
+
+      .section-title {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        min-width: 0;
+      }
+
+      .section-title svg {
+        width: 14px;
+        height: 14px;
+        color: var(--orange);
+      }
+
+      .message-list {
+        border: 1px solid var(--border-soft);
+        border-radius: 8px;
+        overflow: hidden;
+        background: #10151c;
+      }
+
+      .message-row {
+        display: grid;
+        grid-template-columns: 8px minmax(0, 1fr) auto;
+        gap: 9px;
+        padding: 10px 9px;
+        border-bottom: 1px solid var(--border-soft);
+      }
+
+      .message-row:last-child {
+        border-bottom: 0;
+      }
+
+      .message-row.active {
+        background: rgba(96, 165, 250, 0.08);
+      }
+
+      .status-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 999px;
+        margin-top: 5px;
+      }
+
+      .status-dot.orange {
+        background: var(--orange);
+      }
+
+      .status-dot.blue {
+        background: var(--blue);
+      }
+
+      .status-dot.red {
+        background: var(--red);
+      }
+
+      .message-main {
+        min-width: 0;
+      }
+
+      .message-title {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        min-width: 0;
+      }
+
+      .message-title strong {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 12px;
+        font-weight: 650;
+      }
+
+      .badge {
+        flex: 0 0 auto;
+        border-radius: 999px;
+        padding: 1px 6px;
+        font-size: 10px;
+        color: #f6d7aa;
+        background: rgba(245, 158, 11, 0.16);
+        border: 1px solid rgba(245, 158, 11, 0.28);
+      }
+
+      .badge.review {
+        color: #bfdbfe;
+        background: rgba(96, 165, 250, 0.14);
+        border-color: rgba(96, 165, 250, 0.28);
+      }
+
+      .message-meta {
+        margin-top: 3px;
+        color: var(--muted);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .message-preview {
+        margin-top: 5px;
+        color: #a7b3c2;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .actions {
+        display: flex;
+        align-items: flex-start;
+        gap: 5px;
+      }
+
+      .action {
+        height: 24px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        background: var(--surface-2);
+        color: #cbd5e1;
+        padding: 0 7px;
+        display: inline-flex;
+        align-items: center;
+        white-space: nowrap;
+      }
+
+      .action.primary {
+        border-color: rgba(96, 165, 250, 0.45);
+        background: rgba(96, 165, 250, 0.14);
+        color: #dbeafe;
+      }
+
+      .running-strip {
+        margin-top: 10px;
+        border-top: 1px solid var(--border-soft);
+        padding-top: 8px;
+      }
+
+      .mini-running {
+        display: grid;
+        grid-template-columns: 8px minmax(0, 1fr) auto;
+        gap: 8px;
+        align-items: center;
+        padding: 7px 5px;
+        border-radius: 7px;
+      }
+
+      .mini-running:hover {
+        background: var(--surface-2);
+      }
+
+      .mini-running strong,
+      .mini-running span {
+        display: block;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .mini-running strong {
+        font-size: 11px;
+        color: #cdd7e4;
+      }
+
+      .mini-running span {
+        margin-top: 2px;
+        color: var(--muted);
+      }
+
+      .main {
+        position: relative;
+        min-width: 0;
+        background:
+          linear-gradient(rgba(96, 165, 250, 0.04), transparent 240px),
+          #0b0f15;
+        padding: 18px;
+        overflow: hidden;
+      }
+
+      .terminal {
+        height: 100%;
+        border: 1px solid #202936;
+        background: #080c12;
+        border-radius: 8px;
+        overflow: hidden;
+        display: grid;
+        grid-template-rows: 34px 1fr;
+      }
+
+      .terminal-head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 0 12px;
+        border-bottom: 1px solid #18202b;
+        color: var(--muted);
+      }
+
+      .terminal-body {
+        padding: 14px;
+        font-family: var(--mono);
+        color: #8492a6;
+        line-height: 1.7;
+        font-size: 12px;
+      }
+
+      .glyph {
+        font-family: var(--mono);
+        font-size: 13px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <div class="topbar">
+        <div class="top-left">
+          <div class="brand-mark">A</div>
+          <div class="brand-name">aiopsterm</div>
+          <div class="top-icon attention" title="AI 消息">
+            <span class="glyph">!</span>
+          </div>
+        </div>
+        <div class="top-right">
+          <div class="top-icon">⌕</div>
+          <div class="top-icon">⚙</div>
+        </div>
+      </div>
+
+      <div class="workspace">
+        <nav class="rail">
+          <div class="rail-btn">⌘</div>
+          <div class="rail-btn active">AI</div>
+          <div class="rail-btn">▣</div>
+          <div class="rail-btn">☰</div>
+        </nav>
+
+        <aside class="panel">
+          <header class="panel-header">
+            <div class="title-row">
+              <div class="title">AI 会话</div>
+              <div class="header-actions">
+                <div class="icon-btn">↻</div>
+                <div class="icon-btn">⚙</div>
+              </div>
+            </div>
+
+            <div class="mode-nav" aria-label="AI 会话视图">
+              <div class="mode-button pending active" title="待处理">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="22 12 16 12 14 15 10 15 8 12 2 12"></polyline>
+                  <path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"></path>
+                </svg>
+                <span class="mode-count">5</span>
+                <span class="tooltip"><strong>待处理</strong>等待你决策、验收或确认</span>
+              </div>
+              <div class="mode-button running" title="运行中">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"></path>
+                </svg>
+                <span class="mode-count">5</span>
+                <span class="tooltip"><strong>运行中</strong>正在工作的 AI 会话</span>
+              </div>
+              <div class="mode-button" title="会话库">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+                  <rect width="20" height="5" x="2" y="3" rx="1"></rect>
+                  <path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"></path>
+                  <path d="M10 12h4"></path>
+                </svg>
+                <span class="tooltip"><strong>会话库</strong>搜索、恢复和查看历史</span>
+              </div>
+            </div>
+          </header>
+
+          <div class="search">⌕ 搜索待处理项、会话或项目</div>
+
+          <main class="content">
+            <div class="section-head">
+              <div class="section-title">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="22 12 16 12 14 15 10 15 8 12 2 12"></polyline>
+                  <path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"></path>
+                </svg>
+                <strong>待处理</strong>
+              </div>
+              <span>按阻塞程度排序</span>
+            </div>
+
+            <div class="message-list">
+              <div class="message-row active">
+                <span class="status-dot orange"></span>
+                <div class="message-main">
+                  <div class="message-title">
+                    <span class="badge">权限</span>
+                    <strong>允许执行 npm install？</strong>
+                  </div>
+                  <div class="message-meta">aiopsterm · UI 重构 · 2 分钟前</div>
+                  <div class="message-preview">需要安装依赖以运行面板测试。</div>
+                </div>
+                <div class="actions">
+                  <div class="action primary">处理</div>
+                </div>
+              </div>
+
+              <div class="message-row">
+                <span class="status-dot orange"></span>
+                <div class="message-main">
+                  <div class="message-title">
+                    <span class="badge">计划</span>
+                    <strong>确认 AI 会话面板实现计划</strong>
+                  </div>
+                  <div class="message-meta">Terminal 3 · 8 分钟前</div>
+                  <div class="message-preview">将消息、运行中、会话库收敛到左侧面板。</div>
+                </div>
+                <div class="actions">
+                  <div class="action">查看</div>
+                </div>
+              </div>
+
+              <div class="message-row">
+                <span class="status-dot blue"></span>
+                <div class="message-main">
+                  <div class="message-title">
+                    <span class="badge review">验收</span>
+                    <strong>顶部铃铛位置已调整</strong>
+                  </div>
+                  <div class="message-meta">TopBar.vue · 22 分钟前</div>
+                  <div class="message-preview">请确认是否符合放在 aiopsterm 右侧的要求。</div>
+                </div>
+                <div class="actions">
+                  <div class="action">验收</div>
+                </div>
+              </div>
+
+              <div class="message-row">
+                <span class="status-dot blue"></span>
+                <div class="message-main">
+                  <div class="message-title">
+                    <span class="badge review">验收</span>
+                    <strong>测试已跑完，需要查看结果</strong>
+                  </div>
+                  <div class="message-meta">vitest · 29 分钟前</div>
+                  <div class="message-preview">3 个测试文件通过，typecheck 未发现错误。</div>
+                </div>
+                <div class="actions">
+                  <div class="action">打开</div>
+                </div>
+              </div>
+
+              <div class="message-row">
+                <span class="status-dot red"></span>
+                <div class="message-main">
+                  <div class="message-title">
+                    <span class="badge review">确认</span>
+                    <strong>文档审计已完成</strong>
+                  </div>
+                  <div class="message-meta">docs · 43 分钟前</div>
+                  <div class="message-preview">无需更新项目文档，仍需你确认结论。</div>
+                </div>
+                <div class="actions">
+                  <div class="action">确认</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="running-strip">
+              <div class="section-head">
+                <strong>运行中预览</strong>
+                <span>5 个</span>
+              </div>
+
+              <div class="mini-running">
+                <span class="status-dot green"></span>
+                <div>
+                  <strong>重构 AI 会话左栏</strong>
+                  <span>正在生成设计稿 · 4m 20s</span>
+                </div>
+                <span>打开</span>
+              </div>
+
+              <div class="mini-running">
+                <span class="status-dot green"></span>
+                <div>
+                  <strong>排查 terminal restore</strong>
+                  <span>正在运行测试 · 12m 05s</span>
+                </div>
+                <span>打开</span>
+              </div>
+            </div>
+          </main>
+        </aside>
+
+        <section class="main">
+          <div class="terminal">
+            <div class="terminal-head">
+              <span>Terminal</span>
+              <span>~/work/learn_ai/aiopsterm</span>
+            </div>
+            <div class="terminal-body">
+              <div>$ npm run dev</div>
+              <div>renderer ready in 612ms</div>
+              <div>main process listening...</div>
+              <div style="margin-top: 18px; color: #cbd5e1;">AI 会话面板保持在左侧，不占用右侧空间。</div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+  </body>
+</html>

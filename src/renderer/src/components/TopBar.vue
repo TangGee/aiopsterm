@@ -15,6 +15,23 @@
       </button>
       <div class="brand-mark">ai</div>
       <span class="brand-name">aiopsterm</span>
+      <button
+        class="icon-button ai-attention-button"
+        :class="{ unread: aiAttentionVisibleCount > 0 }"
+        :title="aiAttentionTitle"
+        :aria-label="aiAttentionTitle"
+        data-testid="ai-attention-bell"
+        @click="workspace.jumpToNextAiAttention"
+      >
+        <Bell />
+        <span
+          v-if="aiAttentionVisibleCount > 0"
+          class="ai-attention-badge"
+          data-testid="ai-attention-count"
+        >
+          {{ aiAttentionBadge }}
+        </span>
+      </button>
     </div>
     <div class="top-actions">
       <button
@@ -28,23 +45,6 @@
         <CheckCircle2 v-else />
         <span>{{ updateLabel }}</span>
         <ChevronRight v-if="workspace.topUpdateState === 'available'" />
-      </button>
-      <button
-        class="icon-button ai-attention-button"
-        :class="{ unread: workspace.aiAttentionUnreadCount > 0 }"
-        :title="aiAttentionTitle"
-        :aria-label="aiAttentionTitle"
-        data-testid="ai-attention-bell"
-        @click="workspace.jumpToNextAiAttention"
-      >
-        <Bell />
-        <span
-          v-if="workspace.aiAttentionUnreadCount > 0"
-          class="ai-attention-badge"
-          data-testid="ai-attention-count"
-        >
-          {{ aiAttentionBadge }}
-        </span>
       </button>
       <button
         class="icon-button layout-toggle"
@@ -164,8 +164,19 @@ const updateTitle = computed(() => {
   if (workspace.topUpdateState === 'install-requested') return t('top.updateInstallRequested')
   return t('top.updateChecking')
 })
-const aiAttentionBadge = computed(() => (workspace.aiAttentionUnreadCount > 99 ? '99+' : String(workspace.aiAttentionUnreadCount)))
+const aiSessionAttentionCount = computed(() => workspace.managedAiNeedsInputSessions.length)
+const aiAttentionVisibleCount = computed(() => aiSessionAttentionCount.value || workspace.aiAttentionUnreadCount)
+const aiAttentionBadge = computed(() => (aiAttentionVisibleCount.value > 99 ? '99+' : String(aiAttentionVisibleCount.value)))
 const aiAttentionTitle = computed(() => {
+  const session = workspace.selectedManagedAiSession?.state === 'needsInput'
+    ? workspace.selectedManagedAiSession
+    : workspace.managedAiNeedsInputSessions[0]
+  if (session) {
+    return t('top.aiSessionAttentionPending', {
+      count: String(aiSessionAttentionCount.value),
+      title: session.title
+    })
+  }
   const item = workspace.currentAiAttentionItem
   if (!item) return t('top.aiAttentionOpen')
   return t('top.aiAttentionPending', {

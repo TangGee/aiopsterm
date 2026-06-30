@@ -31,6 +31,7 @@ export const createWorkspaceManagedAiController = (
     aiAttentionFocusRequest
   } = state
   const { setTopNotice, i18nText, runTerminalCommand } = deps
+  let openLocalTerminalPanel = deps.openLocalTerminalPanel
 
   const agentHookRuntime = createWorkspaceAgentHookInstallerRuntime({
     state: {
@@ -85,11 +86,25 @@ export const createWorkspaceManagedAiController = (
     i18nText,
     applyManagedAiSessionSnapshot: sessionRuntime.applyManagedAiSessionSnapshot,
     focusManagedAiSession: sessionRuntime.focusManagedAiSession,
+    openLocalTerminalPanel: async (options) => openLocalTerminalPanel?.(options) ?? null,
     runTerminalCommand
   })
 
+  let lastJumpedAiAttentionId = ''
+
+  const nextManagedAiAttentionItem = () => {
+    const pending = attentionRuntime.pendingAiAttentionItems.value
+    const managedPending = pending.filter((item) => item.id.startsWith('managed-ai:'))
+    const queue = managedPending.length ? managedPending : pending
+    if (!queue.length) return null
+    const selectedManagedId = sessionRuntime.selectedManagedAiSession.value ? `managed-ai:${sessionRuntime.selectedManagedAiSession.value.source}:${sessionRuntime.selectedManagedAiSession.value.id}` : ''
+    const currentId = queue.some((item) => item.id === lastJumpedAiAttentionId) ? lastJumpedAiAttentionId : selectedManagedId
+    const currentIndex = queue.findIndex((item) => item.id === currentId)
+    return queue[(currentIndex + 1) % queue.length]
+  }
+
   const jumpToNextAiAttention = () => {
-    const item = attentionRuntime.currentAiAttentionItem.value
+    const item = nextManagedAiAttentionItem()
     if (!item) {
       mode.value = 'terminal'
       activeModule.value = 'aiSessions'
@@ -97,6 +112,7 @@ export const createWorkspaceManagedAiController = (
       setTopNotice(i18nText('aiSessions.notice.noPendingMessages'))
       return null
     }
+    lastJumpedAiAttentionId = item.id
     const managedSession = item.id.startsWith('managed-ai:') && item.sessionId ? sessionRuntime.focusManagedAiSession(item.sessionId) : null
     if (managedSession) {
       activeModule.value = 'aiSessions'
@@ -154,6 +170,9 @@ export const createWorkspaceManagedAiController = (
     focusManagedAiSession: sessionRuntime.focusManagedAiSession,
     focusManagedAiSessionRequest: sessionRuntime.focusManagedAiSessionRequest,
     resumeManagedAiSession: hibernationRuntime.resumeManagedAiSession,
+    bindManagedAiSessionLocalTerminalOpener: (opener: typeof openLocalTerminalPanel) => {
+      openLocalTerminalPanel = opener
+    },
     touchManagedAiTerminalActivity: sessionRuntime.touchManagedAiTerminalActivity,
     applyManagedAiTerminalLifecycle: sessionRuntime.applyManagedAiTerminalLifecycle,
     applyManagedAiTerminalExit: sessionRuntime.applyManagedAiTerminalExit

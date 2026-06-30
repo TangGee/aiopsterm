@@ -15,6 +15,8 @@ export type ManagedAiStateFilter = 'all' | ManagedAiSessionState
 export type ManagedAiRequestKindFilter = 'all' | ManagedAiTimelineEvent['requestKind']
 export type ManagedAiSourceFilter = 'all' | AiAgentSessionSource
 export type ManagedAiCockpitFilterKey = 'all' | 'needsInput' | 'working' | 'idle' | 'ended' | 'hibernated'
+export type ManagedAiPanelMode = 'pending' | 'running' | 'library'
+export type ManagedAiLibraryGrouping = 'project' | 'agent'
 
 export type ManagedAiProjectOption = {
   key: string
@@ -23,10 +25,26 @@ export type ManagedAiProjectOption = {
   latest: number
 }
 
+export type ManagedAiLibrarySection = {
+  key: string
+  label: string
+  count: number
+  latest: number
+  sessions: ManagedAiSession[]
+}
+
 export type ManagedAiCockpitCard = {
   key: ManagedAiCockpitFilterKey
   label: string
   value: number
+  active: boolean
+}
+
+export type ManagedAiPanelModeButton = {
+  key: ManagedAiPanelMode
+  label: string
+  tooltip: string
+  count?: number
   active: boolean
 }
 
@@ -122,16 +140,153 @@ export const managedAiDecisionLabelKey = (kind: ManagedAiSessionDecisionKind | s
 
 export const managedAiSessionKey = (session: Pick<ManagedAiSession, 'source' | 'id'>) => `${session.source}:${session.id}`
 
+export const managedAiPanelModeStateFilter = (mode: ManagedAiPanelMode): ManagedAiStateFilter => {
+  if (mode === 'pending') return 'needsInput'
+  if (mode === 'running') return 'working'
+  return 'all'
+}
+
+export const managedAiPanelModeForSession = (session: Pick<ManagedAiSession, 'state'>): ManagedAiPanelMode => {
+  if (session.state === 'needsInput') return 'pending'
+  if (session.state === 'working') return 'running'
+  return 'library'
+}
+
+export const buildManagedAiPanelModeButtons = (input: {
+  sessions: ManagedAiSession[]
+  mode: ManagedAiPanelMode
+  translate: ManagedAiPanelTranslate
+}): ManagedAiPanelModeButton[] => {
+  const pendingCount = input.sessions.filter((session) => session.state === 'needsInput').length
+  const runningCount = input.sessions.filter((session) => session.state === 'working').length
+  return [
+    {
+      key: 'pending',
+      label: input.translate('aiSessions.mode.pending'),
+      tooltip: input.translate('aiSessions.mode.pendingTooltip'),
+      count: pendingCount,
+      active: input.mode === 'pending'
+    },
+    {
+      key: 'running',
+      label: input.translate('aiSessions.mode.running'),
+      tooltip: input.translate('aiSessions.mode.runningTooltip'),
+      count: runningCount,
+      active: input.mode === 'running'
+    },
+    {
+      key: 'library',
+      label: input.translate('aiSessions.mode.library'),
+      tooltip: input.translate('aiSessions.mode.libraryTooltip'),
+      active: input.mode === 'library'
+    }
+  ]
+}
+
 export const managedAiProjectKey = (cwd?: string) => {
   const normalized = String(cwd || '').trim()
   return normalized || '__unknown__'
 }
 
+const managedAiPathSegments = (cwd?: string) => String(cwd || '').trim().split(/[\\/]+/).filter(Boolean)
+
 export const managedAiProjectLabel = (cwd: string | undefined, unknownPathLabel: string) => {
   const normalized = String(cwd || '').trim()
   if (!normalized) return unknownPathLabel
-  const parts = normalized.split(/[\\/]+/).filter(Boolean)
+  const parts = managedAiPathSegments(normalized)
   return parts.at(-1) || normalized
+}
+
+const projectLabelFromSegments = (segments: string[], depth: number) => {
+  if (segments.length === 0) return ''
+  return segments.slice(Math.max(0, segments.length - depth)).join(' / ')
+}
+
+export const managedAiProjectDisplayLabels = (sessions: ManagedAiSession[], unknownProjectLabel: string): Map<string, string> => {
+  const projects = new Map<string, string[]>()
+  sessions.forEach((session) => {
+    const key = managedAiProjectKey(session.cwd)
+    if (projects.has(key)) return
+    projects.set(key, managedAiPathSegments(session.cwd))
+  })
+
+  const known = [...projects.entries()].filter(([key, segments]) => key !== '__unknown__' && segments.length > 0)
+  const depths = new Map<string, number>(known.map(([key]) => [key, 1]))
+
+  let changed = true
+  while (changed) {
+    changed = false
+    const labels = new Map<string, string[]>()
+    known.forEach(([key, segments]) => {
+      const depth = depths.get(key) || 1
+      const label = projectLabelFromSegments(segments, depth)
+      labels.set(label, [...(labels.get(label) || []), key])
+    })
+    labels.forEach((keys) => {
+      if (keys.length < 2) return
+      keys.forEach((key) => {
+        const segments = projects.get(key) || []
+        const depth = depths.get(key) || 1
+        if (depth < segments.length) {
+          depths.set(key, depth + 1)
+          changed = true
+        }
+      })
+    })
+  }
+
+  const labels = new Map<string, string>()
+  projects.forEach((segments, key) => {
+    if (key === '__unknown__' || segments.length === 0) {
+      labels.set(key, unknownProjectLabel)
+      return
+    }
+    labels.set(key, projectLabelFromSegments(segments, depths.get(key) || 1))
+  })
+  return labels
+}
+
+export const managedAiProjectDisplayLabel = (session: Pick<ManagedAiSession, 'cwd'>, labels: Map<string, string>, unknownProjectLabel: string) =>
+  labels.get(managedAiProjectKey(session.cwd)) || managedAiProjectLabel(session.cwd, unknownProjectLabel)
+
+export const managedAiSessionDisplayTitle = (session: Pick<ManagedAiSession, 'userTitle' | 'autoTitle' | 'title' | 'summary' | 'id'>) => {
+  const userTitle = String(session.userTitle || '').trim()
+  if (userTitle) return userTitle
+  const autoTitle = String(session.autoTitle || '').trim()
+  if (autoTitle) return autoTitle
+  const title = session.title.trim()
+  if (title) return title
+  const summary = session.summary.trim()
+  if (summary) return summary
+  return session.id
+}
+
+export const buildManagedAiLibrarySections = (input: {
+  sessions: ManagedAiSession[]
+  grouping: ManagedAiLibraryGrouping
+  unknownProjectLabel: string
+}): ManagedAiLibrarySection[] => {
+  const projectLabels = managedAiProjectDisplayLabels(input.sessions, input.unknownProjectLabel)
+  const sections = new Map<string, ManagedAiLibrarySection>()
+  input.sessions.forEach((session) => {
+    const key = input.grouping === 'project' ? `project:${managedAiProjectKey(session.cwd)}` : `agent:${session.source}`
+    const label = input.grouping === 'project' ? managedAiProjectDisplayLabel(session, projectLabels, input.unknownProjectLabel) : managedAiSourceLabel(session.source)
+    const existing = sections.get(key)
+    sections.set(key, {
+      key,
+      label,
+      count: (existing?.count || 0) + 1,
+      latest: Math.max(existing?.latest || 0, session.lastActivityAt || 0),
+      sessions: [...(existing?.sessions || []), session]
+    })
+  })
+
+  return [...sections.values()]
+    .map((section) => ({
+      ...section,
+      sessions: section.sessions.slice().sort((first, second) => second.lastActivityAt - first.lastActivityAt)
+    }))
+    .sort((first, second) => second.latest - first.latest || first.label.localeCompare(second.label))
 }
 
 export const managedAiSourceOptions = (sessions: ManagedAiSession[]) => {
@@ -251,7 +406,7 @@ export const selectedVisibleManagedAiSession = (input: {
 }) => {
   const { selectedSession, visibleSessions } = input
   if (selectedSession && visibleSessions.some((session) => managedAiSessionKey(session) === managedAiSessionKey(selectedSession))) return selectedSession
-  return visibleSessions[0] || null
+  return null
 }
 
 export const filteredManagedAiTimelineEvents = (session: ManagedAiSession | null, eventFilter: ManagedAiRequestKindFilter) => {

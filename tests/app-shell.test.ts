@@ -1061,40 +1061,52 @@ describe('AppShell', () => {
       })
       await flushPromises()
 
-      expect(wrapper.find('.ai-sessions-cockpit').text()).toContain('总会话')
-      expect(wrapper.find('.ai-sessions-cockpit').text()).toContain('待处理')
-      expect(wrapper.find('.ai-sessions-attention-strip').text()).toContain('Deploy approval')
-      expect(wrapper.findAll('.ai-session-row')).toHaveLength(3)
-
-      await wrapper.find('.ai-sessions-attention-strip button').trigger('click')
-      await flushPromises()
-      expect(store.selectedManagedAiSessionKey).toBe('claude-code:claude-attention-1')
-
-      const sourceSelect = wrapper.findAll('.ai-sessions-context select').at(0)!
-      await sourceSelect.setValue('gemini')
-      await flushPromises()
+      const modeButtons = wrapper.findAll('.ai-sessions-mode-button')
+      expect(modeButtons).toHaveLength(3)
+      expect(modeButtons.at(0)!.attributes('title')).toBe('等待你决策、验收或确认')
+      expect(modeButtons.at(1)!.attributes('title')).toBe('正在工作的 AI 会话')
+      expect(modeButtons.at(2)!.attributes('title')).toBe('搜索、恢复和查看历史')
+      expect(modeButtons.at(0)!.find('.ai-sessions-mode-count').text()).toBe('1')
+      expect(modeButtons.at(1)!.find('.ai-sessions-mode-count').text()).toBe('1')
+      expect(wrapper.find('.ai-sessions-section-header').text()).toContain('待处理')
       expect(wrapper.findAll('.ai-session-row')).toHaveLength(1)
-      expect(wrapper.find('.ai-session-row').text()).toContain('API refactor')
+      expect(wrapper.text()).toContain('Deploy approval')
 
-      await sourceSelect.setValue('all')
-      const projectSelect = wrapper.findAll('.ai-sessions-context select').at(1)!
-      await projectSelect.setValue('/work/api')
+      await modeButtons.at(1)!.trigger('click')
       await flushPromises()
-      expect(wrapper.findAll('.ai-session-row')).toHaveLength(2)
+      expect(wrapper.find('.ai-sessions-section-header').text()).toContain('运行中')
+      expect(wrapper.find('.ai-sessions-library-grouping').exists()).toBe(true)
+      expect(wrapper.find('.ai-session-library-section-header').text()).toContain('api')
+      expect(wrapper.findAll('.ai-session-row')).toHaveLength(1)
+      expect(wrapper.text()).toContain('API refactor')
+
+      await wrapper.find('.ai-session-row').trigger('click')
+      await flushPromises()
+      expect(store.selectedManagedAiSessionKey).toBe('gemini:gemini-work-1')
+      expect(wrapper.find('.ai-session-detail').exists()).toBe(false)
+      expect(wrapper.find('.ai-session-row-action').attributes('title')).toBe('定位终端')
+
+      await wrapper.findAll('.ai-sessions-library-grouping button').at(1)!.trigger('click')
+      await flushPromises()
+      expect(wrapper.find('.ai-session-library-section-header').text()).toContain('Gemini')
+
+      await modeButtons.at(2)!.trigger('click')
+      await flushPromises()
+      expect(wrapper.find('.ai-sessions-section-header').text()).toContain('会话库')
+      expect(wrapper.findAll('.ai-session-row')).toHaveLength(3)
       expect(wrapper.text()).toContain('Deploy approval')
       expect(wrapper.text()).toContain('API refactor')
-      expect(wrapper.text()).not.toContain('Docs cleanup')
+      expect(wrapper.text()).toContain('Docs cleanup')
     } finally {
       wrapper?.unmount()
       dateNowSpy.mockRestore()
     }
   })
 
-  it('copies and handles the currently filtered AI session queue', async () => {
+  it('switches the compact AI session panel modes without exposing extra filter chrome', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     const store = useWorkspaceStore()
-    vi.mocked(navigator.clipboard.writeText).mockClear()
     store.upsertManagedAiSession({
       source: 'claude-code',
       event: 'permission_request',
@@ -1130,19 +1142,6 @@ describe('AppShell', () => {
       decisionMode: 'telemetry',
       receivedAt: 1717200550000
     })
-    vi.mocked(window.aiops.bulkManagedAiSessions).mockImplementationOnce(async (input) => ({
-      ok: true,
-      data: {
-        changed: 1,
-        snapshot: {
-          sessions: store.managedAiSessions.map((session) =>
-            input.sources?.includes(session.source) && input.sessionIds?.includes(session.id)
-              ? { ...session, state: 'idle' as const, handledAt: 1717200600000, updatedAt: 1717200600000 }
-              : session
-          )
-        }
-      }
-    }))
 
     const wrapper = mount(AiSessionsPanel, {
       global: {
@@ -1151,32 +1150,28 @@ describe('AppShell', () => {
     })
     await flushPromises()
 
-    const projectSelect = wrapper.findAll('.ai-sessions-context select').at(1)!
-    await projectSelect.setValue('/work/api')
+    expect(wrapper.find('.ai-sessions-filter-toggle').exists()).toBe(false)
+    expect(wrapper.find('.ai-sessions-summary').exists()).toBe(false)
+    expect(wrapper.find('.ai-sessions-section-header').text()).toContain('待处理')
+    expect(wrapper.findAll('.ai-session-row')).toHaveLength(2)
+    expect(wrapper.text()).toContain('API approval')
+    expect(wrapper.text()).toContain('Docs approval')
+    expect(wrapper.text()).not.toContain('API work')
+
+    const modeButtons = wrapper.findAll('.ai-sessions-mode-button')
+    await modeButtons.at(1)!.trigger('click')
     await flushPromises()
 
-    expect(wrapper.find('.ai-sessions-queue-bar').text()).toContain('2 个当前会话')
-    expect(wrapper.find('.ai-sessions-queue-bar').text()).toContain('1 个待处理')
-    const queueButtons = wrapper.findAll('.ai-sessions-queue-actions button')
-    await queueButtons.at(1)!.trigger('click')
+    expect(wrapper.find('.ai-sessions-section-header').text()).toContain('运行中')
+    expect(wrapper.findAll('.ai-session-row')).toHaveLength(1)
+    expect(wrapper.text()).toContain('API work')
+    expect(wrapper.text()).not.toContain('Docs approval')
+
+    await modeButtons.at(2)!.trigger('click')
     await flushPromises()
 
-    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(expect.stringContaining('AI 会话队列：api (2)'))
-    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(expect.stringContaining('API approval'))
-    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(expect.stringContaining('API work'))
-    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(expect.not.stringContaining('Docs approval'))
-
-    await queueButtons.at(2)!.trigger('click')
-    await flushPromises()
-
-    expect(window.aiops.bulkManagedAiSessions).toHaveBeenCalledWith({
-      operation: 'mark-handled',
-      sources: ['claude-code'],
-      sessionIds: ['claude-api-approval']
-    })
-    expect(store.managedAiSessions.find((session) => session.id === 'claude-api-approval')?.state).toBe('idle')
-    expect(store.managedAiSessions.find((session) => session.id === 'claude-docs-approval')?.state).toBe('needsInput')
-    expect(store.topNotice).toBe('已处理 1 个 AI 会话')
+    expect(wrapper.find('.ai-sessions-section-header').text()).toContain('会话库')
+    expect(wrapper.findAll('.ai-session-row')).toHaveLength(3)
 
     wrapper.unmount()
   })
@@ -1237,11 +1232,15 @@ describe('AppShell', () => {
     expect(store.topNotice).toBe('AI 会话事件已复制')
   })
 
-  it('links the empty AI session panel to AI settings for hook setup', async () => {
+  it('rescans AI conversations from the empty AI session panel', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     const store = useWorkspaceStore()
     store.setActiveModule('aiSessions')
+    vi.mocked(window.aiops.listManagedAiSessions).mockResolvedValueOnce({
+      ok: true,
+      data: { sessions: [] }
+    } as any)
 
     const wrapper = mount(AiSessionsPanel, {
       global: {
@@ -1254,12 +1253,12 @@ describe('AppShell', () => {
     await wrapper.find('.ai-sessions-empty-action').trigger('click')
     await flushPromises()
 
-    expect(store.activeModule).toBe('settings')
-    expect(store.activeSettingsSection).toBe('ai')
-    expect(store.rightPanelOpen).toBe(false)
+    expect(window.aiops.listManagedAiSessions).toHaveBeenCalled()
+    expect(store.activeModule).toBe('aiSessions')
+    expect(store.topNotice).toBe('AI 会话已刷新')
   })
 
-  it('opens AI settings from the AI session panel header', async () => {
+  it('rescans AI conversations from the AI session panel header', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     const store = useWorkspaceStore()
@@ -1280,12 +1279,19 @@ describe('AppShell', () => {
       }
     })
     await flushPromises()
+    vi.mocked(window.aiops.listManagedAiSessions).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        sessions: store.managedAiSessions
+      }
+    } as any)
 
-    await wrapper.find('.ai-sessions-settings').trigger('click')
+    await wrapper.find('.ai-sessions-icon-button').trigger('click')
     await flushPromises()
 
-    expect(store.activeModule).toBe('settings')
-    expect(store.activeSettingsSection).toBe('ai')
+    expect(window.aiops.listManagedAiSessions).toHaveBeenCalled()
+    expect(store.activeModule).not.toBe('settings')
+    expect(store.topNotice).toBe('AI 会话已刷新')
   })
 
   it('applies persisted background and watermark settings at the app shell level', async () => {
@@ -2006,9 +2012,10 @@ describe('AppShell', () => {
     await flushPromises()
 
     expect(sessions.text()).toContain('AI Sessions')
-    expect(sessions.find('input').attributes('placeholder')).toBe('Search sessions')
-    expect(sessions.find('.ai-sessions-queue-bar').text()).toContain('1 current sessions')
-    expect(sessions.find('.ai-sessions-queue-bar').text()).toContain('1 pending')
+    expect(sessions.find('input').attributes('placeholder')).toBe('Search pending items, sessions, or projects')
+    expect(sessions.find('.ai-sessions-mode-nav').attributes('aria-label')).toBe('AI session views')
+    expect(sessions.find('.ai-sessions-section-header').text()).toContain('Pending')
+    expect(sessions.find('.ai-sessions-mode-button.mode-pending').attributes('title')).toBe('Waiting for your decision, review, or confirmation')
     expect(sessions.text()).toContain('Permission approval')
 
     const terminal = mount(TerminalWorkspace, {
@@ -2347,6 +2354,8 @@ describe('AppShell', () => {
     expect(wrapper.findAll('.mode-button')).toHaveLength(1)
     expect(wrapper.find('.right-ai-toggle').attributes('data-onboarding-id')).toBe('right-ai-toggle')
     expect(wrapper.find('[data-testid="ai-attention-bell"]').exists()).toBe(true)
+    expect(wrapper.find('.top-left [data-testid="ai-attention-bell"]').exists()).toBe(true)
+    expect(wrapper.find('.top-actions [data-testid="ai-attention-bell"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="ai-attention-count"]').exists()).toBe(false)
     expect(wrapper.text()).toContain('本地版本')
 
@@ -2405,6 +2414,44 @@ describe('AppShell', () => {
       sequence: 1,
       item: expect.objectContaining({ id: 'codex:error:topbar' })
     })
+  })
+
+  it('uses the top bell as a global managed AI pending session navigator', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const wrapper = mount(TopBar, {
+      global: { plugins: [pinia] }
+    })
+    const store = useWorkspaceStore()
+    store.mode = 'agents'
+    store.activeModule = 'database'
+
+    store.upsertManagedAiSession({
+      source: 'claude-code',
+      event: 'question',
+      sessionId: 'claude-topbar',
+      title: 'Claude Code',
+      summary: 'Need confirmation',
+      panelId: 'panel-main',
+      terminalSessionId: 'terminal-main',
+      requestKind: 'question',
+      decisionMode: 'blocking',
+      actionable: true,
+      receivedAt: 100
+    })
+    await wrapper.vm.$nextTick()
+
+    const bell = wrapper.find('[data-testid="ai-attention-bell"]')
+    expect(wrapper.find('[data-testid="ai-attention-count"]').text()).toBe('1')
+    expect(bell.attributes('title')).toContain('Claude Code')
+    expect(bell.attributes('title')).toContain('再次点击')
+
+    await bell.trigger('click')
+    await flushPromises()
+
+    expect(store.mode).toBe('terminal')
+    expect(store.activeModule).toBe('aiSessions')
+    expect(store.selectedManagedAiSessionKey).toBe('claude-code:claude-topbar')
   })
 
   it('does not fabricate top layout changes when config persistence is unavailable or malformed', async () => {

@@ -562,6 +562,14 @@ describe('workspace store', () => {
     expect(store.activePanelId).toBe(firstPanelId)
     expect(store.selectedManagedAiSessionKey).toBe('claude-code:claude-first')
 
+    expect(store.jumpToNextAiAttention()?.id).toBe('managed-ai:claude-code:claude-second')
+    expect(store.activePanelId).toBe(secondPanelId)
+    expect(store.selectedManagedAiSessionKey).toBe('claude-code:claude-second')
+
+    expect(store.jumpToNextAiAttention()?.id).toBe('managed-ai:claude-code:claude-first')
+    expect(store.activePanelId).toBe(firstPanelId)
+    expect(store.selectedManagedAiSessionKey).toBe('claude-code:claude-first')
+
     expect(store.markManagedAiSessionHandled('claude-code', 'claude-first')).toBe(true)
     expect(store.aiAttentionUnreadCount).toBe(1)
     expect(store.selectedManagedAiSessionKey).toBe('')
@@ -783,6 +791,42 @@ describe('workspace store', () => {
     expect(store.activePanelId).toBe('panel-main')
     expect(store.selectedManagedAiSessionKey).toBe('codex:codex-session-1')
     expect(window.aiops.writeTerminal).toHaveBeenCalledWith('terminal-session-1', "cd '/work/project' && codex resume 'codex-session-1'\n")
+    expect(store.topNotice).toBe('已向所属终端写入 AI 会话恢复命令')
+  })
+
+  it('opens a local terminal before resuming restorable managed AI history sessions', async () => {
+    const store = useWorkspaceStore()
+    vi.mocked(window.aiops.createTerminal).mockClear()
+    vi.mocked(window.aiops.writeTerminal).mockClear()
+
+    store.upsertManagedAiSession({
+      source: 'codex',
+      event: 'session_start',
+      sessionId: 'codex-history-1',
+      title: 'Fix history restore',
+      summary: '',
+      cwd: '/work/history-project',
+      resumeCommand: "cd '/work/history-project' && codex resume 'codex-history-1'",
+      receivedAt: 500
+    })
+
+    await expect(store.resumeManagedAiSession('codex', 'codex-history-1')).resolves.toBe(true)
+
+    expect(window.aiops.createTerminal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: 'local',
+        title: 'Fix history restore',
+        cwd: '/work/history-project'
+      })
+    )
+    expect(window.aiops.writeTerminal).toHaveBeenCalledWith('test-session-local', "cd '/work/history-project' && codex resume 'codex-history-1'\n")
+    expect(store.activePanel).toEqual(expect.objectContaining({ sessionId: 'test-session-local', title: 'Fix history restore', cwd: '/' }))
+    expect(store.managedAiSessions[0]).toEqual(
+      expect.objectContaining({
+        panelId: store.activePanel.id,
+        terminalSessionId: 'test-session-local'
+      })
+    )
     expect(store.topNotice).toBe('已向所属终端写入 AI 会话恢复命令')
   })
 
