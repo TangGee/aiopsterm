@@ -33,6 +33,17 @@ vi.mock('@/services/terminal/threadedTerminalCoreWorker?worker', () => ({
     }
     postMessage(message: unknown) {
       this.messages.push(message)
+      if ((message as { type?: string }).type === 'read-selection') {
+        const request = message as { requestId?: string; terminalId?: string }
+        this.onmessage?.({
+          data: {
+            type: 'read-selection-result',
+            requestId: request.requestId,
+            terminalId: request.terminalId,
+            text: 'worker selection text'
+          }
+        } as MessageEvent)
+      }
     }
   }
 }))
@@ -195,6 +206,10 @@ const workerMessages = async () => {
     core: (coreModule.default as any).instances.flatMap((worker: { messages: unknown[] }) => worker.messages),
     render: (renderModule.default as any).instances.flatMap((worker: { messages: unknown[] }) => worker.messages)
   }
+}
+
+const drainMicrotasks = async (count = 4) => {
+  for (let index = 0; index < count; index += 1) await Promise.resolve()
 }
 
 const droppedFileEvent = (type: 'dragover' | 'drop', paths: string[]) => {
@@ -559,13 +574,61 @@ describe('threadedTerminalRuntime', () => {
     const afterCopy = await workerMessages()
     const copyInputs = afterCopy.core.slice(beforeCopy.core.length).filter((message: any) => message.type === 'input')
     expect(copyInputs).toEqual([])
-    expect(clipboardRuntime.copyTextToClipboard).toHaveBeenCalledWith('copy me')
+    expect(afterCopy.core).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: 'read-selection',
+        terminalId: 'panel-1',
+        range: { start: { x: 0, y: 0 }, end: { x: 8, y: 0 } }
+      })
+    ]))
+    expect(clipboardRuntime.copyTextToClipboard).toHaveBeenCalledWith('worker selection text')
 
     element.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'c', ctrlKey: true }))
     const afterInterrupt = await workerMessages()
     expect(afterInterrupt.core).toEqual(expect.arrayContaining([
       expect.objectContaining({ type: 'input', terminalId: 'panel-1', data: '\x03' })
     ]))
+    host.dispose()
+  })
+
+  it('sets DOM copy event data synchronously while resolving full selection through the core worker', async () => {
+    installOffscreenCanvasSupport()
+    const host = createHost()
+    const element = createHostElement()
+    Object.defineProperty(element, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({ left: 0, top: 0, width: 800, height: 400, right: 800, bottom: 400, x: 0, y: 0, toJSON: () => ({}) })
+    })
+    host.open(element)
+    host.applySnapshot({
+      terminalId: 'panel-1',
+      seq: 1,
+      cols: 80,
+      rows: 10,
+      cursorX: 0,
+      cursorY: 9,
+      cursorAbsoluteY: 9,
+      viewportY: 0,
+      baseY: 0,
+      lines: [{ y: 0, text: 'copy me', cells: [] }],
+      dirtyRows: [0],
+      full: true,
+      visible: true,
+      priority: 'active'
+    })
+    element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0, clientX: 0, clientY: 0 }))
+    element.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, button: 0, clientX: 64, clientY: 0 }))
+    window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0, clientX: 64, clientY: 0 }))
+
+    const setData = vi.fn()
+    const event = new Event('copy', { bubbles: true, cancelable: true }) as ClipboardEvent
+    Object.defineProperty(event, 'clipboardData', { configurable: true, value: { setData } })
+    element.dispatchEvent(event)
+
+    expect(event.defaultPrevented).toBe(true)
+    expect(setData).toHaveBeenCalledWith('text/plain', 'copy me')
+    await drainMicrotasks()
+    expect(clipboardRuntime.copyTextToClipboard).toHaveBeenCalledWith('worker selection text')
     host.dispose()
   })
 
@@ -862,6 +925,106 @@ describe('threadedTerminalRuntime', () => {
     expect(host.getSelection()).toBe('alpha')
     expect(host.getSelectionPosition()).toEqual({ start: { x: 0, y: 0 }, end: { x: 5, y: 0 } })
     expect(element.querySelectorAll('.threaded-terminal-selection-rect').length).toBe(1)
+    host.dispose()
+  })
+
+  it('sends mouse events to mouse-aware terminal apps unless Shift forces selection', async () => {
+    installOffscreenCanvasSupport()
+    const host = createHost()
+    const element = createHostElement()
+    Object.defineProperty(element, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({ left: 0, top: 0, width: 800, height: 400, right: 800, bottom: 400, x: 0, y: 0, toJSON: () => ({}) })
+    })
+    host.open(element)
+    host.applySnapshot({
+      terminalId: 'panel-1',
+      seq: 1,
+      cols: 80,
+      rows: 10,
+      cursorX: 0,
+      cursorY: 9,
+      cursorAbsoluteY: 9,
+      viewportY: 0,
+      baseY: 0,
+      lines: [{ y: 0, text: 'vim row', cells: [] }],
+      dirtyRows: [0],
+      full: true,
+      visible: true,
+      priority: 'active',
+      modes: {
+        applicationCursorKeysMode: true,
+        applicationKeypadMode: false,
+        bracketedPasteMode: false,
+        mouseTrackingMode: 'vt200',
+        activeBufferType: 'alternate'
+      }
+    })
+
+    const beforeMouse = await workerMessages()
+    element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0, clientX: 16, clientY: 30 }))
+    window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0, clientX: 16, clientY: 30 }))
+    const afterMouse = await workerMessages()
+    expect(afterMouse.core.slice(beforeMouse.core.length)).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: 'mouse-event',
+        terminalId: 'panel-1',
+        event: expect.objectContaining({ action: 'down', button: 'left', col: 2, row: 2 })
+      }),
+      expect.objectContaining({
+        type: 'mouse-event',
+        terminalId: 'panel-1',
+        event: expect.objectContaining({ action: 'up', button: 'left', col: 2, row: 2 })
+      })
+    ]))
+    expect(host.hasSelection()).toBe(false)
+
+    element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0, shiftKey: true, clientX: 0, clientY: 0 }))
+    element.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, button: 0, shiftKey: true, clientX: 24, clientY: 0 }))
+    window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0, shiftKey: true, clientX: 24, clientY: 0 }))
+    expect(host.getSelection()).toBe('vim')
+    host.dispose()
+  })
+
+  it('uses application cursor keys and alternate-screen wheel fallback for Vim-style editors', async () => {
+    installOffscreenCanvasSupport()
+    const host = createHost()
+    const element = createHostElement()
+    host.open(element)
+    host.applySnapshot({
+      terminalId: 'panel-1',
+      seq: 1,
+      cols: 80,
+      rows: 10,
+      cursorX: 0,
+      cursorY: 9,
+      cursorAbsoluteY: 9,
+      viewportY: 0,
+      baseY: 0,
+      lines: [{ y: 0, text: 'vim row', cells: [] }],
+      dirtyRows: [0],
+      full: true,
+      visible: true,
+      priority: 'active',
+      modes: {
+        applicationCursorKeysMode: true,
+        applicationKeypadMode: false,
+        bracketedPasteMode: false,
+        mouseTrackingMode: 'none',
+        activeBufferType: 'alternate'
+      }
+    })
+
+    const before = await workerMessages()
+    element.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'ArrowUp', keyCode: 38 }))
+    element.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Home', keyCode: 36 }))
+    element.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: 30, clientX: 20, clientY: 20 }))
+    const after = await workerMessages()
+    expect(after.core.slice(before.core.length)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'input', terminalId: 'panel-1', data: '\x1bOA' }),
+      expect.objectContaining({ type: 'input', terminalId: 'panel-1', data: '\x1bOH' }),
+      expect.objectContaining({ type: 'input', terminalId: 'panel-1', data: '\x1bOB\x1bOB' })
+    ]))
     host.dispose()
   })
 

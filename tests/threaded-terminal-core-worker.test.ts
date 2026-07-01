@@ -246,4 +246,74 @@ describe('threadedTerminalCoreWorker', () => {
     })
     expect(workspaceFrame.full).toBe(false)
   })
+
+  it('reads selected text from the full scrollback buffer with wrapped rows and wide glyph cells', async () => {
+    await createTerminal()
+    send({
+      type: 'data',
+      terminalId: createOptions().terminalId,
+      data: [
+        'line-0\n',
+        'wide-你-tail\n',
+        'soft-wrap-part-one-',
+        'part-two\n',
+        'line-4\n',
+        'line-5\n',
+        'line-6\n',
+        'line-7\n',
+        'line-8\n'
+      ].join('')
+    })
+    await waitFor(() => {
+      const snapshot = latestScreen(messages)
+      return snapshot && snapshot.baseY > 0 ? snapshot : undefined
+    })
+
+    send({
+      type: 'read-selection',
+      terminalId: createOptions().terminalId,
+      requestId: 'selection-1',
+      range: {
+        start: { x: 5, y: 1 },
+        end: { x: 8, y: 3 }
+      }
+    })
+
+    const result = await waitFor(() =>
+      messages.find((message): message is Extract<ThreadedTerminalCoreResponse, { type: 'read-selection-result' }> =>
+        message.type === 'read-selection-result' && message.requestId === 'selection-1'
+      )
+    )
+    expect(result.text).toContain('你-')
+    expect(result.text).toContain('soft-wrap-part-one-part-two')
+  })
+
+  it('forwards xterm mouse tracking reports through the core worker', async () => {
+    await createTerminal()
+    send({ type: 'data', terminalId: createOptions().terminalId, data: '\x1b[?1000h\x1b[?1006h' })
+    await waitFor(() => {
+      const snapshot = latestScreen(messages)
+      return snapshot?.modes?.mouseTrackingMode === 'vt200' ? snapshot : undefined
+    })
+
+    send({
+      type: 'mouse-event',
+      terminalId: createOptions().terminalId,
+      event: {
+        x: 8,
+        y: 10,
+        col: 1,
+        row: 2,
+        button: 'left',
+        action: 'down'
+      }
+    })
+
+    const data = await waitFor(() =>
+      messages.find((message): message is Extract<ThreadedTerminalCoreResponse, { type: 'data' }> =>
+        message.type === 'data' && message.data.includes('\x1b[<0;2;3M')
+      )
+    )
+    expect(data.data).toBe('\x1b[<0;2;3M')
+  })
 })

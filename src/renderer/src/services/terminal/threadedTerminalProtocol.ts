@@ -40,6 +40,44 @@ export type ThreadedTerminalTheme = {
 
 export type ThreadedTerminalKeywordHighlightConfig = KeywordHighlightUserConfig | null | undefined
 
+export type ThreadedTerminalSelectionPoint = {
+  x: number
+  y: number
+}
+
+export type ThreadedTerminalSelectionRange = {
+  start: ThreadedTerminalSelectionPoint
+  end: ThreadedTerminalSelectionPoint
+}
+
+export type ThreadedTerminalMouseTrackingMode = 'none' | 'x10' | 'vt200' | 'drag' | 'any'
+
+export type ThreadedTerminalActiveBufferType = 'normal' | 'alternate'
+
+export type ThreadedTerminalModeState = {
+  applicationCursorKeysMode: boolean
+  applicationKeypadMode: boolean
+  bracketedPasteMode: boolean
+  mouseTrackingMode: ThreadedTerminalMouseTrackingMode
+  activeBufferType: ThreadedTerminalActiveBufferType
+}
+
+export type ThreadedTerminalMouseButton = 'left' | 'middle' | 'right' | 'none' | 'wheel'
+
+export type ThreadedTerminalMouseAction = 'down' | 'up' | 'move' | 'wheel-up' | 'wheel-down' | 'wheel-left' | 'wheel-right'
+
+export type ThreadedTerminalMouseEventPayload = {
+  x: number
+  y: number
+  col: number
+  row: number
+  button: ThreadedTerminalMouseButton
+  action: ThreadedTerminalMouseAction
+  ctrl?: boolean
+  alt?: boolean
+  shift?: boolean
+}
+
 export type ThreadedTerminalHighlightRun = {
   x: number
   text: string
@@ -156,6 +194,7 @@ export type ThreadedTerminalScreenSnapshot = {
   scrollDeltaRows?: number
   visible: boolean
   priority: ThreadedTerminalPriority
+  modes?: ThreadedTerminalModeState
 }
 
 export type ThreadedTerminalPerfSample = {
@@ -204,6 +243,8 @@ export type ThreadedTerminalCoreRequest =
   | { type: 'scroll-lines'; terminalId: string; amount: number }
   | { type: 'scroll-to-line'; terminalId: string; line: number }
   | { type: 'read-screen'; terminalId: string; requestId: string; tailLines?: number }
+  | { type: 'read-selection'; terminalId: string; requestId: string; range: ThreadedTerminalSelectionRange }
+  | { type: 'mouse-event'; terminalId: string; event: ThreadedTerminalMouseEventPayload }
   | { type: 'export'; terminalId: string; requestId: string }
   | { type: 'import'; requestId?: string; state: ThreadedTerminalExportedState }
   | { type: 'dispose'; terminalId: string }
@@ -216,6 +257,7 @@ export type ThreadedTerminalCoreResponse =
   | { type: 'resize'; terminalId: string; cols: number; rows: number }
   | { type: 'data'; terminalId: string; data: string }
   | { type: 'read-screen-result'; requestId: string; terminalId: string; text: string; cols: number; rows: number }
+  | { type: 'read-selection-result'; requestId: string; terminalId: string; text: string }
   | { type: 'export-result'; requestId: string; state: ThreadedTerminalExportedState }
   | { type: 'perf'; sample: ThreadedTerminalPerfSample }
   | { type: 'pong'; requestId: string }

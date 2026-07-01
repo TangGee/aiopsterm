@@ -6,10 +6,15 @@ import type {
   ThreadedTerminalExportedState,
   ThreadedTerminalFullReason,
   ThreadedTerminalKeywordHighlightConfig,
+  ThreadedTerminalModeState,
+  ThreadedTerminalMouseAction,
+  ThreadedTerminalMouseButton,
+  ThreadedTerminalMouseEventPayload,
   ThreadedTerminalPerfSample,
   ThreadedTerminalPriority,
   ThreadedTerminalScreenLine,
   ThreadedTerminalScreenSnapshot,
+  ThreadedTerminalSelectionRange,
   ThreadedTerminalSettings,
   ThreadedTerminalTheme
 } from '@/services/terminal/threadedTerminalProtocol'
@@ -28,6 +33,23 @@ type DedicatedWorkerScopeLike = {
 type HeadlessTerminalClass = typeof import('@xterm/headless').Terminal
 type HeadlessTerminalLike = InstanceType<HeadlessTerminalClass>
 type HeadlessTerminalOptionsWithTermName = HeadlessTerminalLike['options'] & { termName?: string }
+type HeadlessTerminalWithCoreMouse = HeadlessTerminalLike & {
+  _core?: {
+    coreMouseService?: {
+      triggerMouseEvent?: (event: {
+        col: number
+        row: number
+        x: number
+        y: number
+        button: number
+        action: number
+        ctrl?: boolean
+        alt?: boolean
+        shift?: boolean
+      }) => boolean
+    }
+  }
+}
 
 type CoreTerminalRecord = {
   terminal: HeadlessTerminalLike
@@ -457,6 +479,14 @@ const markChangedVisibleRows = (record: CoreTerminalRecord, beforeSignatures?: s
   record.lastVisibleLineSignatures = nextSignatures
 }
 
+const modeState = (record: CoreTerminalRecord): ThreadedTerminalModeState => ({
+  applicationCursorKeysMode: Boolean(record.terminal.modes.applicationCursorKeysMode),
+  applicationKeypadMode: Boolean(record.terminal.modes.applicationKeypadMode),
+  bracketedPasteMode: Boolean(record.terminal.modes.bracketedPasteMode),
+  mouseTrackingMode: record.terminal.modes.mouseTrackingMode || 'none',
+  activeBufferType: record.terminal.buffer.active.type === 'alternate' ? 'alternate' : 'normal'
+})
+
 const buildSnapshot = (record: CoreTerminalRecord, forceFull = false, fullReason?: ThreadedTerminalFullReason): ThreadedTerminalScreenSnapshot => {
   const startedAt = nowMs()
   const buffer = record.terminal.buffer.active
@@ -513,7 +543,8 @@ const buildSnapshot = (record: CoreTerminalRecord, forceFull = false, fullReason
     repaintReason: repaintVisibleRows ? 'jump' : undefined,
     scrollDeltaRows: 0,
     visible: record.visible,
-    priority: record.priority
+    priority: record.priority,
+    modes: modeState(record)
   }
 }
 
@@ -598,6 +629,9 @@ const installTerminalEvents = (record: CoreTerminalRecord) => {
     post({ type: 'resize', terminalId: record.terminalId, cols, rows })
   })
   record.terminal.onData((data) => {
+    post({ type: 'data', terminalId: record.terminalId, data })
+  })
+  record.terminal.onBinary((data) => {
     post({ type: 'data', terminalId: record.terminalId, data })
   })
 }
@@ -759,6 +793,87 @@ const readScreenText = (record: CoreTerminalRecord, tailLines = record.terminal.
     lines.push(buffer.getLine(index)?.translateToString(true) || '')
   }
   return lines.join('\n').replace(/\s+$/g, '')
+}
+
+const lineCellEntries = (record: CoreTerminalRecord, lineIndex: number) => {
+  const line = record.terminal.buffer.active.getLine(lineIndex)
+  if (!line) return []
+  const cell = record.terminal.buffer.active.getNullCell()
+  const entries: Array<{ char: string; start: number; end: number }> = []
+  for (let x = 0; x < record.terminal.cols; x += 1) {
+    const nextCell = line.getCell(x, cell)
+    if (!nextCell || nextCell.getWidth() === 0) continue
+    const char = nextCell.getChars() || ' '
+    const width = Math.max(1, nextCell.getWidth() || 1)
+    entries.push({ char, start: x, end: x + width })
+  }
+  return entries
+}
+
+const textForSelectionRow = (record: CoreTerminalRecord, row: number, startX: number, endX: number) => {
+  let text = ''
+  for (const entry of lineCellEntries(record, row)) {
+    if (entry.end > startX && entry.start < endX) text += entry.char
+  }
+  return text.replace(/\s+$/g, '')
+}
+
+const readSelectionText = (record: CoreTerminalRecord, range: ThreadedTerminalSelectionRange) => {
+  const anchor = range.start
+  const focus = range.end
+  if (anchor.x === focus.x && anchor.y === focus.y) return ''
+  const anchorBeforeFocus = anchor.y < focus.y || (anchor.y === focus.y && anchor.x <= focus.x)
+  const start = anchorBeforeFocus ? anchor : focus
+  const end = anchorBeforeFocus ? focus : anchor
+  const buffer = record.terminal.buffer.active
+  const firstRow = Math.max(0, Math.min(buffer.length - 1, Math.floor(start.y)))
+  const lastRow = Math.max(0, Math.min(buffer.length - 1, Math.floor(end.y)))
+  if (lastRow < firstRow) return ''
+  const lines: string[] = []
+  for (let row = firstRow; row <= lastRow; row += 1) {
+    const startX = row === start.y ? Math.max(0, Math.min(record.terminal.cols, Math.floor(start.x))) : 0
+    const endX = row === end.y ? Math.max(0, Math.min(record.terminal.cols, Math.floor(end.x))) : record.terminal.cols
+    const lineText = textForSelectionRow(record, row, startX, endX)
+    const line = buffer.getLine(row)
+    if (row > firstRow && line?.isWrapped) {
+      lines[lines.length - 1] = `${lines[lines.length - 1] || ''}${lineText}`
+    } else {
+      lines.push(lineText)
+    }
+  }
+  return lines.join('\n').replace(/\s+$/g, '')
+}
+
+const mouseButtonCode = (button: ThreadedTerminalMouseButton) => {
+  if (button === 'left') return 0
+  if (button === 'middle') return 1
+  if (button === 'right') return 2
+  if (button === 'wheel') return 4
+  return 3
+}
+
+const mouseActionCode = (action: ThreadedTerminalMouseAction) => {
+  if (action === 'up' || action === 'wheel-up') return 0
+  if (action === 'down' || action === 'wheel-down') return 1
+  if (action === 'wheel-left') return 2
+  if (action === 'wheel-right') return 3
+  return 32
+}
+
+const triggerMouseEvent = (record: CoreTerminalRecord, event: ThreadedTerminalMouseEventPayload) => {
+  const coreMouseService = (record.terminal as HeadlessTerminalWithCoreMouse)._core?.coreMouseService
+  if (!coreMouseService?.triggerMouseEvent) return false
+  return Boolean(coreMouseService.triggerMouseEvent({
+    col: Math.max(0, Math.min(record.terminal.cols - 1, Math.floor(event.col))),
+    row: Math.max(0, Math.min(record.terminal.rows - 1, Math.floor(event.row))),
+    x: Math.max(0, Math.floor(event.x)),
+    y: Math.max(0, Math.floor(event.y)),
+    button: mouseButtonCode(event.button),
+    action: mouseActionCode(event.action),
+    ctrl: Boolean(event.ctrl),
+    alt: Boolean(event.alt),
+    shift: Boolean(event.shift)
+  }))
 }
 
 const exportState = (record: CoreTerminalRecord): ThreadedTerminalExportedState => ({
@@ -934,6 +1049,19 @@ const handleMessage = (message: ThreadedTerminalCoreRequest) => {
         cols: record.terminal.cols,
         rows: record.terminal.rows
       })
+      return
+    }
+    if (message.type === 'read-selection') {
+      post({
+        type: 'read-selection-result',
+        requestId: message.requestId,
+        terminalId: record.terminalId,
+        text: readSelectionText(record, message.range)
+      })
+      return
+    }
+    if (message.type === 'mouse-event') {
+      triggerMouseEvent(record, message.event)
       return
     }
     if (message.type === 'export') {

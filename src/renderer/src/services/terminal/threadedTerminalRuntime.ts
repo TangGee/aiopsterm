@@ -19,6 +19,8 @@ import type {
   ThreadedTerminalGpuInfo,
   ThreadedTerminalHostCapability,
   ThreadedTerminalKeywordHighlightConfig,
+  ThreadedTerminalModeState,
+  ThreadedTerminalMouseButton,
   ThreadedTerminalPriority,
   ThreadedTerminalRenderBackend,
   ThreadedTerminalRenderRequest,
@@ -77,9 +79,18 @@ type ThreadedTerminalRenderDebug = {
 }
 
 type ReadScreenPending = {
+  kind: 'screen'
   resolve: (value: { text: string; cols: number; rows: number }) => void
   reject: (error: Error) => void
 }
+
+type ReadSelectionPending = {
+  kind: 'selection'
+  resolve: (value: string) => void
+  reject: (error: Error) => void
+}
+
+type CoreRequestPending = ReadScreenPending | ReadSelectionPending
 
 type ThreadedTerminalBufferLine = {
   translateToString: (trimRight?: boolean) => string
@@ -226,7 +237,7 @@ export type ThreadedTerminalPaintMeasure = {
   seq: number
 }
 
-const requestMap = new Map<string, ReadScreenPending>()
+const requestMap = new Map<string, CoreRequestPending>()
 const hostMap = new Map<string, ThreadedTerminalHost>()
 const renderGroupMap = new Map<string, ThreadedTerminalRenderGroupHandle>()
 let corePool: ThreadedTerminalCoreHandle[] | null = null
@@ -326,6 +337,15 @@ const terminalMinimumStableHostHeightPx = 24
 const workspaceRenderGroupId = 'workspace-main'
 const codexRenderGroupId = 'codex-side'
 const defaultRenderBackend = (): ThreadedTerminalRenderBackend => terminalRenderBackend()
+const selectionAutoscrollIntervalMs = 40
+
+const defaultModeState = (): ThreadedTerminalModeState => ({
+  applicationCursorKeysMode: false,
+  applicationKeypadMode: false,
+  bracketedPasteMode: false,
+  mouseTrackingMode: 'none',
+  activeBufferType: 'normal'
+})
 
 const blankScreenLine = (y: number): ThreadedTerminalScreenLine => ({ y, text: '', cells: [] })
 
@@ -534,9 +554,16 @@ const handleCoreMessage = (handle: ThreadedTerminalCoreHandle, message: Threaded
   }
   if (message.type === 'read-screen-result') {
     const pending = requestMap.get(message.requestId)
-    if (!pending) return
+    if (!pending || pending.kind !== 'screen') return
     requestMap.delete(message.requestId)
     pending.resolve({ text: message.text, cols: message.cols, rows: message.rows })
+    return
+  }
+  if (message.type === 'read-selection-result') {
+    const pending = requestMap.get(message.requestId)
+    if (!pending || pending.kind !== 'selection') return
+    requestMap.delete(message.requestId)
+    pending.resolve(message.text)
     return
   }
   if (message.type === 'perf') {
@@ -740,17 +767,72 @@ export const terminalDropInputText = (dataTransfer: DataTransfer | null | undefi
     .filter(Boolean)
     .join(' ')
 
-const keyEventToInput = (event: KeyboardEvent) => {
+const keyboardModifierCode = (event: KeyboardEvent) => {
+  const modifiers = (event.shiftKey ? 1 : 0) | (event.altKey ? 2 : 0) | (event.ctrlKey ? 4 : 0) | (event.metaKey ? 8 : 0)
+  return modifiers ? modifiers + 1 : 0
+}
+
+const modifiedCsi = (event: KeyboardEvent, final: string) => {
+  const modifier = keyboardModifierCode(event)
+  return modifier ? `\x1b[1;${modifier}${final}` : ''
+}
+
+const modifiedTilde = (event: KeyboardEvent, code: number) => {
+  const modifier = keyboardModifierCode(event)
+  return modifier ? `\x1b[${code};${modifier}~` : `\x1b[${code}~`
+}
+
+const arrowKeyToInput = (event: KeyboardEvent, mode: ThreadedTerminalModeState) => {
+  const map: Record<string, string> = {
+    ArrowUp: 'A',
+    ArrowDown: 'B',
+    ArrowRight: 'C',
+    ArrowLeft: 'D'
+  }
+  const final = map[event.key]
+  if (!final) return ''
+  const modified = modifiedCsi(event, final)
+  if (modified) return modified
+  return mode.applicationCursorKeysMode ? `\x1bO${final}` : `\x1b[${final}`
+}
+
+const keyEventToInput = (event: KeyboardEvent, mode: ThreadedTerminalModeState = defaultModeState()) => {
   if (event.defaultPrevented) return ''
   if (event.isComposing || event.key === 'Process') return ''
   if (event.key === 'Enter') return '\r'
-  if (event.key === 'Tab') return '\t'
-  if (event.key === 'Backspace') return '\x7f'
+  if (event.key === 'Tab') return event.shiftKey ? '\x1b[Z' : '\t'
+  if (event.key === 'Backspace') return event.ctrlKey ? '\b' : '\x7f'
   if (event.key === 'Escape') return '\x1b'
-  if (event.key === 'ArrowUp') return '\x1b[A'
-  if (event.key === 'ArrowDown') return '\x1b[B'
-  if (event.key === 'ArrowRight') return '\x1b[C'
-  if (event.key === 'ArrowLeft') return '\x1b[D'
+  if (event.key.startsWith('Arrow')) return arrowKeyToInput(event, mode)
+  if (event.key === 'Home') {
+    const modified = modifiedCsi(event, 'H')
+    if (modified) return modified
+    return mode.applicationCursorKeysMode ? '\x1bOH' : '\x1b[H'
+  }
+  if (event.key === 'End') {
+    const modified = modifiedCsi(event, 'F')
+    if (modified) return modified
+    return mode.applicationCursorKeysMode ? '\x1bOF' : '\x1b[F'
+  }
+  if (event.key === 'Insert' && !event.shiftKey && !event.ctrlKey) return '\x1b[2~'
+  if (event.key === 'Delete') return modifiedTilde(event, 3)
+  if (event.key === 'PageUp' && !event.shiftKey) return modifiedTilde(event, 5)
+  if (event.key === 'PageDown' && !event.shiftKey) return modifiedTilde(event, 6)
+  if (/^F([1-9]|1[0-2])$/.test(event.key)) {
+    const number = Number(event.key.slice(1))
+    const base: Record<number, string> = {
+      1: 'P',
+      2: 'Q',
+      3: 'R',
+      4: 'S'
+    }
+    if (base[number]) {
+      const modifier = keyboardModifierCode(event)
+      return modifier ? `\x1b[1;${modifier}${base[number]}` : `\x1bO${base[number]}`
+    }
+    const tildeCode: Record<number, number> = { 5: 15, 6: 17, 7: 18, 8: 19, 9: 20, 10: 21, 11: 23, 12: 24 }
+    return modifiedTilde(event, tildeCode[number])
+  }
   if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.length === 1) {
     const code = event.key.toUpperCase().charCodeAt(0)
     if (code >= 64 && code <= 95) return String.fromCharCode(code - 64)
@@ -823,6 +905,7 @@ export class ThreadedTerminalHost {
   private lastSmallLayoutLogSignature = ''
   private pendingSmallLayoutFrame: number | null = null
   private selection: ThreadedTerminalSelection | null = null
+  private modeState: ThreadedTerminalModeState = defaultModeState()
   private cellMetrics: ThreadedTerminalCellMetrics = fallbackTerminalCellMetrics({
     fontSize: 12,
     lineHeight: 1
@@ -841,6 +924,9 @@ export class ThreadedTerminalHost {
   private keywordHighlight?: ThreadedTerminalKeywordHighlightConfig
   private settingsSignature: string
   private scrollbarDrag: { startClientY: number; startViewportY: number; max: number; trackHeight: number; thumbHeight: number } | null = null
+  private selectionAutoscrollTimer: number | null = null
+  private selectionAutoscrollDirection: -1 | 0 | 1 = 0
+  private lastSelectionMouseEvent: MouseEvent | null = null
   private composing = false
   private skipNextInputText: string | null = null
   private readonly groupId: string
@@ -1096,6 +1182,7 @@ export class ThreadedTerminalHost {
     this.geometry = null
     this.lastStableFit = null
     this.selection = null
+    this.stopSelectionAutoscroll()
     this.composing = false
     this.skipNextInputText = null
     if (hadSurface) {
@@ -1190,6 +1277,7 @@ export class ThreadedTerminalHost {
   clearSelection() {
     if (!this.selection) return
     this.selection = null
+    this.stopSelectionAutoscroll()
     this.renderSelection()
     this.emitSelectionChange()
   }
@@ -1241,6 +1329,7 @@ export class ThreadedTerminalHost {
 
   applySnapshot(snapshot: ThreadedTerminalScreenSnapshot) {
     this.lastSnapshot = snapshot
+    this.modeState = snapshot.modes || this.modeState
     this.cols = snapshot.cols
     this.rows = snapshot.rows
     this.buffer.active.cursorX = snapshot.cursorX
@@ -1361,9 +1450,9 @@ export class ThreadedTerminalHost {
       return Promise.resolve({ text: this.snapshotLines.slice(-(tailLines || this.rows)).join('\n').replace(/\s+$/g, ''), cols: this.cols, rows: this.rows })
     }
     const requestId = nextRequestId('screen')
-    postCore(this.coreHandle, { type: 'read-screen', terminalId: this.terminalId, requestId, tailLines })
     return new Promise<{ text: string; cols: number; rows: number }>((resolve, reject) => {
-      requestMap.set(requestId, { resolve, reject })
+      requestMap.set(requestId, { kind: 'screen', resolve, reject })
+      postCore(this.coreHandle, { type: 'read-screen', terminalId: this.terminalId, requestId, tailLines })
       window.setTimeout(() => {
         if (!requestMap.has(requestId)) return
         requestMap.delete(requestId)
@@ -1795,12 +1884,17 @@ export class ThreadedTerminalHost {
   }
 
   private async copySelectionToClipboard(event?: ClipboardEvent | KeyboardEvent) {
-    const text = this.selectionText()
-    if (!text) return false
+    const range = this.normalizedSelection()
+    if (!range) return false
+    const fallbackText = this.selectionText()
     event?.preventDefault()
     event?.stopPropagation()
-    if (event && 'clipboardData' in event) event.clipboardData?.setData('text/plain', text)
-    await copyTextToClipboard(text)
+    if (event && 'clipboardData' in event && fallbackText) event.clipboardData?.setData('text/plain', fallbackText)
+    const text = await this.selectionTextForClipboard()
+    const clipboardText = text || fallbackText
+    if (event && 'clipboardData' in event && text && text !== fallbackText) event.clipboardData?.setData('text/plain', text)
+    if (!clipboardText) return false
+    await copyTextToClipboard(clipboardText)
     return true
   }
 
@@ -1827,7 +1921,7 @@ export class ThreadedTerminalHost {
       void this.pasteFromClipboard()
       return true
     }
-    const input = keyEventToInput(event)
+    const input = keyEventToInput(event, this.modeState)
     if (!input) return false
     event.preventDefault()
     event.stopPropagation()
@@ -1947,13 +2041,160 @@ export class ThreadedTerminalHost {
     return lines.join('\n').replace(/\s+$/g, '')
   }
 
+  private readSelectionTextFromCore(range: { start: ThreadedTerminalSelectionPoint; end: ThreadedTerminalSelectionPoint }) {
+    if (!this.coreCreated) return Promise.resolve(this.selectionText())
+    const requestId = nextRequestId('selection')
+    return new Promise<string>((resolve, reject) => {
+      requestMap.set(requestId, { kind: 'selection', resolve, reject })
+      postCore(this.coreHandle, {
+        type: 'read-selection',
+        terminalId: this.terminalId,
+        requestId,
+        range: {
+          start: { ...range.start },
+          end: { ...range.end }
+        }
+      })
+      window.setTimeout(() => {
+        if (!requestMap.has(requestId)) return
+        requestMap.delete(requestId)
+        resolve(this.selectionText())
+      }, 1500)
+    })
+  }
+
+  private async selectionTextForClipboard() {
+    const range = this.normalizedSelection()
+    if (!range) return ''
+    try {
+      const text = await this.readSelectionTextFromCore(range)
+      return text || this.selectionText()
+    } catch {
+      return this.selectionText()
+    }
+  }
+
+  private terminalContentRect() {
+    const surfaceRect = this.renderSurfaceElement?.getBoundingClientRect()
+    if (surfaceRect && surfaceRect.width > 0 && surfaceRect.height > 0) return surfaceRect
+    const hostRect = this.host?.getBoundingClientRect()
+    if (hostRect && hostRect.width > 0 && hostRect.height > 0) return hostRect
+    return surfaceRect || hostRect || null
+  }
+
   private pointFromMouseEvent(event: MouseEvent): ThreadedTerminalSelectionPoint {
-    const rect = this.renderSurfaceElement?.getBoundingClientRect() || this.host?.getBoundingClientRect()
+    const rect = this.terminalContentRect()
     const left = (rect?.left || 0) + (this.geometry?.paddingLeft || 0)
     const top = (rect?.top || 0) + (this.geometry?.paddingTop || 0)
     const x = Math.max(0, Math.min(this.cols, Math.floor((event.clientX - left) / Math.max(1, this.cellMetrics.width))))
     const y = Math.max(0, Math.min(this.rows - 1, Math.floor((event.clientY - top) / Math.max(1, this.cellMetrics.height))))
     return { x, y: this.buffer.active.viewportY + y }
+  }
+
+  private viewportCellFromMouseEvent(event: MouseEvent | WheelEvent) {
+    const rect = this.terminalContentRect()
+    const left = (rect?.left || 0) + (this.geometry?.paddingLeft || 0)
+    const top = (rect?.top || 0) + (this.geometry?.paddingTop || 0)
+    const cellWidth = Math.max(1, this.cellMetrics.width)
+    const cellHeight = Math.max(1, this.cellMetrics.height)
+    const rawX = Math.floor((event.clientX - left) / cellWidth)
+    const rawY = Math.floor((event.clientY - top) / cellHeight)
+    return {
+      col: Math.max(0, Math.min(this.cols - 1, rawX)),
+      row: Math.max(0, Math.min(this.rows - 1, rawY)),
+      x: Math.max(0, Math.floor(event.clientX - (rect?.left || 0))),
+      y: Math.max(0, Math.floor(event.clientY - (rect?.top || 0)))
+    }
+  }
+
+  private mouseTrackingActive() {
+    return this.modeState.mouseTrackingMode !== 'none'
+  }
+
+  private mouseButtonFromEvent(event: MouseEvent): ThreadedTerminalMouseButton {
+    if (event.button === 0) return 'left'
+    if (event.button === 1) return 'middle'
+    if (event.button === 2) return 'right'
+    return 'none'
+  }
+
+  private mouseButtonFromButtons(event: MouseEvent): ThreadedTerminalMouseButton {
+    if (event.buttons & 1) return 'left'
+    if (event.buttons & 4) return 'middle'
+    if (event.buttons & 2) return 'right'
+    return 'none'
+  }
+
+  private sendMouseEventToCore(event: MouseEvent | WheelEvent, options: { action: 'down' | 'up' | 'move' | 'wheel-up' | 'wheel-down' | 'wheel-left' | 'wheel-right'; button?: ThreadedTerminalMouseButton }) {
+    if (!this.coreCreated) return
+    const point = this.viewportCellFromMouseEvent(event)
+    postCore(this.coreHandle, {
+      type: 'mouse-event',
+      terminalId: this.terminalId,
+      event: {
+        ...point,
+        action: options.action,
+        button: options.button || (options.action.startsWith('wheel') ? 'wheel' : 'none'),
+        ctrl: event.ctrlKey,
+        alt: event.altKey,
+        shift: event.shiftKey
+      }
+    })
+  }
+
+  private selectionAutoscrollDirectionFor(event: MouseEvent) {
+    const rect = this.terminalContentRect()
+    if (!rect) return 0
+    if (event.clientY < rect.top) return -1
+    if (event.clientY >= rect.bottom) return 1
+    return 0
+  }
+
+  private pointForSelectionDrag(event: MouseEvent) {
+    const point = this.pointFromMouseEvent(event)
+    const direction = this.selectionAutoscrollDirectionFor(event)
+    if (direction < 0) return { x: 0, y: this.buffer.active.viewportY }
+    if (direction > 0) return { x: this.cols, y: this.buffer.active.viewportY + this.rows - 1 }
+    return point
+  }
+
+  private updateSelectionFromMouseEvent(event: MouseEvent) {
+    this.lastSelectionMouseEvent = event
+    this.updateActiveSelectionFocus(this.pointForSelectionDrag(event))
+    this.updateSelectionAutoscroll(event)
+    this.renderSelection()
+    this.emitSelectionChange()
+  }
+
+  private updateSelectionAutoscroll(event: MouseEvent) {
+    this.selectionAutoscrollDirection = this.selectionAutoscrollDirectionFor(event)
+    if (this.selectionAutoscrollDirection === 0 || !this.selection?.selecting) {
+      this.stopSelectionAutoscroll()
+      return
+    }
+    if (this.selectionAutoscrollTimer !== null) return
+    this.selectionAutoscrollTimer = window.setInterval(() => {
+      if (!this.selection?.selecting || !this.lastSelectionMouseEvent || this.selectionAutoscrollDirection === 0) {
+        this.stopSelectionAutoscroll()
+        return
+      }
+      const before = this.buffer.active.viewportY
+      this.scrollLines(this.selectionAutoscrollDirection)
+      const direction = this.selectionAutoscrollDirection
+      const nextY = Math.max(0, before + direction + (direction > 0 ? this.rows - 1 : 0))
+      this.updateActiveSelectionFocus({ x: direction > 0 ? this.cols : 0, y: nextY })
+      this.renderSelection()
+      this.emitSelectionChange()
+    }, selectionAutoscrollIntervalMs)
+  }
+
+  private stopSelectionAutoscroll() {
+    if (this.selectionAutoscrollTimer !== null) {
+      window.clearInterval(this.selectionAutoscrollTimer)
+      this.selectionAutoscrollTimer = null
+    }
+    this.selectionAutoscrollDirection = 0
+    this.lastSelectionMouseEvent = null
   }
 
   private isWordSeparator(char: string) {
@@ -2224,18 +2465,25 @@ export class ThreadedTerminalHost {
       if ((event.target as HTMLElement | null)?.closest?.('.threaded-terminal-scrollbar')) return
       event.preventDefault()
       this.focusInput()
+      if (this.mouseTrackingActive() && !event.shiftKey) {
+        this.sendMouseEventToCore(event, { action: 'down', button: this.mouseButtonFromEvent(event) })
+        return
+      }
       const point = this.pointFromMouseEvent(event)
       const mode: ThreadedTerminalSelectionMode = event.detail >= 3 ? 'line' : event.detail === 2 ? 'word' : 'char'
       this.beginSelection(point, mode)
+      this.updateSelectionAutoscroll(event)
       this.renderSelection()
       this.emitSelectionChange()
     }, { signal })
     host.addEventListener('mousemove', (event) => {
+      if (this.mouseTrackingActive() && !this.selection?.selecting) {
+        this.sendMouseEventToCore(event, { action: 'move', button: this.mouseButtonFromButtons(event) })
+        return
+      }
       if (!this.selection?.selecting) return
       event.preventDefault()
-      this.updateActiveSelectionFocus(this.pointFromMouseEvent(event))
-      this.renderSelection()
-      this.emitSelectionChange()
+      this.updateSelectionFromMouseEvent(event)
     }, { signal })
     window.addEventListener('mouseup', (event) => {
       if (this.scrollbarDrag) {
@@ -2246,9 +2494,14 @@ export class ThreadedTerminalHost {
         }
         return
       }
+      if (this.mouseTrackingActive() && !this.selection?.selecting) {
+        this.sendMouseEventToCore(event, { action: 'up', button: this.mouseButtonFromEvent(event) })
+        return
+      }
       if (!this.selection?.selecting) return
-      this.updateActiveSelectionFocus(this.pointFromMouseEvent(event))
+      this.updateSelectionFromMouseEvent(event)
       this.selection.selecting = false
+      this.stopSelectionAutoscroll()
       this.renderSelection()
       this.emitSelectionChange()
     }, { signal })
@@ -2351,6 +2604,22 @@ export class ThreadedTerminalHost {
       const rows = Math.trunc(deltaRows)
       if (!rows) return
       event.preventDefault()
+      if (this.mouseTrackingActive()) {
+        const action = rows < 0 ? 'wheel-up' : 'wheel-down'
+        const count = Math.max(1, Math.min(10, Math.abs(rows)))
+        for (let index = 0; index < count; index += 1) {
+          this.sendMouseEventToCore(event, { action, button: 'wheel' })
+        }
+        return
+      }
+      if (this.modeState.activeBufferType === 'alternate') {
+        const key = rows > 0
+          ? (this.modeState.applicationCursorKeysMode ? '\x1bOB' : '\x1b[B')
+          : (this.modeState.applicationCursorKeysMode ? '\x1bOA' : '\x1b[A')
+        const count = Math.max(1, Math.min(10, Math.abs(rows)))
+        this.input(Array.from({ length: count }, () => key).join(''))
+        return
+      }
       this.scrollLines(rows)
     }, { passive: false, signal })
     if (typeof ResizeObserver !== 'undefined') {
@@ -2433,7 +2702,8 @@ export class ThreadedTerminalHost {
       repaintReason: reason,
       scrollDeltaRows: 0,
       visible: this.visible,
-      priority: this.priority
+      priority: this.priority,
+      modes: this.modeState
     }
   }
 

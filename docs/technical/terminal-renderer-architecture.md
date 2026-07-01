@@ -50,9 +50,10 @@ The worker renderer follows VTE's correctness model before applying aggressive c
 - Output follow mode mirrors VTE's `context.m_bottom` behavior: the core worker records whether the viewport was at the bottom before each parsed output batch. If it was, output keeps the viewport at the new bottom and repaints the visible rows; if the user scrolled into history, output updates scrollback without stealing the viewport until explicit bottom scroll or user input.
 - When the viewport changes, including wheel scrollback, the core worker emits the current visible rows and the render worker repaints them. This mirrors VTE's `queue_adjustment_value_changed()` path, which invalidates the ring view and queues a full visible repaint for user scroll changes.
 - Cursor rows are converted from absolute buffer position to visible viewport row before painting. When the user scrolls into history and the real cursor is outside the visible viewport, the renderer does not draw a fixed-position cursor.
-- Selection uses the core worker's wrapped-row metadata in the main renderer: copying joins soft-wrapped rows without inserting newlines, double click selects a word, and triple click selects the full soft-wrapped logical line, matching VTE/xterm behavior.
+- Selection uses absolute buffer coordinates, following VTE's model of resolving selection against the terminal ring rather than only against painted pixels. The main renderer owns drag gestures, overlay rendering, word expansion, and soft-wrapped logical-line expansion; copy requests ask the core worker to read the selected range from the full `@xterm/headless` buffer, so selection can include scrollback rows that are no longer in the visible snapshot.
 - The main renderer owns the lightweight terminal adjustment layer: a thin custom scrollbar maps to core-worker `scrollToLine()`, matching VTE's separation between terminal scroll state and the scrollbar widget while keeping visual styling inside aiopsterm's theme system.
-- Text selection is handled in the main renderer as grid coordinates over the canvas. Selection is rendered as an overlay and copied from the current visible snapshot with the same cell width metadata used by the renderer, so copying CJK/wide glyph rows follows terminal columns instead of Unicode character indexes. The render worker remains a paint target only.
+- Text selection is handled in the main renderer as grid coordinates over the canvas. Selection is rendered as an overlay and copied from core-worker cell metadata, so copying CJK/wide glyph rows follows terminal columns instead of Unicode character indexes. The render worker remains a paint target only.
+- Drag selection autoscroll mirrors VTE's edge-scroll behavior: while the pointer is held outside the terminal viewport, the renderer scrolls the core viewport and extends the selection to the newly exposed buffer rows.
 - Normal content changes still use dirty-row snapshots when the viewport is stable. If output moves the viewport, aiopsterm prefers repainting the visible rows over copying old canvas pixels until a pixel-scroll path can prove it never leaves stale glyphs.
 
 VTE's row renderer first paints cell-background runs and then text runs. The threaded renderer keeps the same ordering in canvas form: row background first, custom background runs next, then text cells.
@@ -66,6 +67,9 @@ VTE keeps the input-method boundary on the GTK widget: key events are filtered t
 - The hidden input is moved to the current terminal cursor cell after snapshots and fits, mirroring VTE's `gtk_im_context_set_cursor_location()` role.
 - `compositionstart`/`compositionend` gate text delivery so IME preedit text is not sent to the PTY; only committed text is posted to the core worker.
 - `Ctrl+Shift+C` and `Ctrl+Shift+V` are terminal clipboard actions. Plain `Ctrl+C` still maps to ETX and is delivered to the shell.
+- The core worker reports terminal mode state in snapshots, including application cursor keys, mouse tracking, bracketed paste, and normal versus alternate buffer. The renderer uses that state for keyboard and mouse routing instead of treating all panes as shell prompts.
+- In mouse-tracking modes used by Vim, less, tmux, and other TUIs, normal mouse presses, releases, movement, and wheel events are forwarded to `@xterm/headless`'s core mouse service. Holding Shift forces terminal selection, matching the VTE convention for selecting text inside mouse-aware applications.
+- In the alternate screen without mouse tracking, wheel input is converted to Up/Down key sequences, using application cursor sequences when that mode is active. This keeps Vim-style editors responsive to scroll wheels without moving scrollback that does not apply to the alternate buffer.
 - Printable text is read from DOM `input` events instead of being synthesized from `keydown`, leaving non-US keyboard layouts and IME commits on Chromium's native path.
 
 ## Data Coalescing
@@ -177,9 +181,10 @@ The stress result also includes `regressions` probes for the recent terminal fai
 - Foreground/background switching must repaint the newly visible terminal.
 - Same-text ANSI style changes must repaint dirty rows, covering Codex-style shimmer animations.
 - Scrollback must expose a themed scrollbar, move the viewport, and keep the cursor tied to the terminal viewport.
-- Soft-wrapped selection must copy one logical line without inserted newlines.
+- Selection must copy from the core worker's full scrollback buffer, preserve wide-glyph cell columns, and join soft-wrapped logical lines without inserted newlines.
 - Focus, IME input target, `Ctrl+Shift+C`, and plain `Ctrl+C` must stay separated.
+- Mouse-aware terminal apps must receive mouse protocol events unless Shift is held to force text selection, and alternate-screen wheel fallback must emit cursor-key input for Vim-style editors.
 
 ## Current Limits
 
-The v1 path is built for throughput validation. Threaded rendering supports text output, ANSI foreground/background runs, cursor rendering, resize, direct PTY data, wheel and scrollbar scrollback, visible-viewport text selection, WebGL2 RenderGroup presentation, and background no-paint behavior. Rich xterm decorations, full scrollback-range selection, link hover handling, and mouse application protocols remain on the legacy path for now.
+The v1 path is built for throughput validation. Threaded rendering supports text output, ANSI foreground/background runs, cursor rendering, resize, direct PTY data, wheel and scrollbar scrollback, full-buffer text selection for copy, mouse-aware terminal application routing, application cursor keys, alternate-screen wheel fallback, WebGL2 RenderGroup presentation, and background no-paint behavior. Rich xterm decorations and link hover handling remain on the legacy path for now.
