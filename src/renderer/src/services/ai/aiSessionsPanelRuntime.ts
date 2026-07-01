@@ -17,6 +17,7 @@ import {
   managedAiPanelModeForSession,
   managedAiPanelModeStateFilter,
   managedAiProjectDisplayLabel,
+  managedAiProjectDisplayLabelSet,
   managedAiProjectDisplayLabels,
   managedAiRequestKindLabelKey,
   managedAiSessionDisplayTitle,
@@ -122,10 +123,11 @@ export const useAiSessionsPanelRuntime = () => {
     })
   )
 
-  const projectLabel = (session: Pick<ManagedAiSession, 'cwd'>) => managedAiProjectDisplayLabel(session, projectLabels.value, t('aiSessions.unknownProject'))
+  const projectLabel = (session: Pick<ManagedAiSession, 'cwd' | 'canonicalCwd'>) => managedAiProjectDisplayLabel(session, projectLabels.value, t('aiSessions.unknownProject'))
+  const projectLabelCandidates = (session: Pick<ManagedAiSession, 'cwd' | 'canonicalCwd'>) =>
+    managedAiProjectDisplayLabelSet(session, projectLabels.value, t('aiSessions.unknownProject')).candidates
   const sessionDisplayTitle = (session: Pick<ManagedAiSession, 'userTitle' | 'autoTitle' | 'title' | 'summary' | 'id'>) => managedAiSessionDisplayTitle(session)
-  const sessionRowTooltip = (session: ManagedAiSession) =>
-    [projectLabel(session), sessionDisplayTitle(session), session.cwd || '', session.summary || ''].filter(Boolean).join('\n')
+  const sessionRowTitle = (session: ManagedAiSession) => sessionDisplayTitle(session)
   const liveLinkedPanelForSession = (session: Pick<ManagedAiSession, 'panelId' | 'terminalSessionId'>) => {
     const targetIds = [session.panelId, session.terminalSessionId].filter(Boolean)
     if (!targetIds.length) return null
@@ -145,7 +147,6 @@ export const useAiSessionsPanelRuntime = () => {
     if (liveLinkedPanelForSession(session)) return 'linked'
     return 'other'
   }
-  const sessionRowDetail = (session: ManagedAiSession) => session.summary.trim() || sessionDisplayTitle(session)
   const sessionRowStatusLabel = (session: Pick<ManagedAiSession, 'state' | 'panelId' | 'terminalSessionId'>) => {
     const dotState = sessionDotState(session)
     if (dotState === 'working') return t('aiSessions.rowStatus.running')
@@ -153,6 +154,15 @@ export const useAiSessionsPanelRuntime = () => {
     if (dotState === 'linked') return t('aiSessions.rowStatus.linked')
     return t('aiSessions.rowStatus.other')
   }
+  const isSyntheticRowDetail = (_session: ManagedAiSession, detail: string) =>
+    detail.trim().toLowerCase() === 'terminal closed'
+  const sessionRowDetail = (session: ManagedAiSession) => {
+    const detail = session.summary.trim()
+    if (isSyntheticRowDetail(session, detail)) return ''
+    return detail
+  }
+  const sessionRowTooltip = (session: ManagedAiSession) =>
+    [sessionRowTitle(session), sessionRowDetail(session), sessionRowStatusLabel(session), sessionRowMeta(session), session.cwd || ''].filter(Boolean).join('\n')
   const selectLibraryGrouping = (nextGrouping: ManagedAiLibraryGrouping) => {
     libraryGrouping.value = nextGrouping
   }
@@ -226,14 +236,19 @@ export const useAiSessionsPanelRuntime = () => {
   const canResumeSession = (session: Pick<ManagedAiSession, 'state' | 'resumeCommand'>) =>
     session.state !== 'working' && session.state !== 'needsInput' && Boolean(session.resumeCommand?.trim())
 
-  const sessionRowMeta = (session: ManagedAiSession) =>
-    [sourceLabel(session.source), formatRelativeTime(session.lastActivityAt), session.cwd || projectLabel(session)].filter(Boolean).join(' · ')
-
-  const sessionRowActionHint = (session: ManagedAiSession) => {
-    if (liveLinkedPanelForSession(session)) return t('aiSessions.rowAction.locate')
-    if (canResumeSession(session)) return t('aiSessions.rowAction.open')
-    return ''
+  const sessionGitMeta = (session: Pick<ManagedAiSession, 'gitBranch' | 'gitDirty'>) => {
+    const branch = String(session.gitBranch || '').trim()
+    return branch ? `${branch}${session.gitDirty ? '*' : ''}` : ''
   }
+
+  const sessionRowMetaCandidates = (session: ManagedAiSession) => {
+    const source = sourceLabel(session.source)
+    const branch = sessionGitMeta(session)
+    const time = formatRelativeTime(session.lastActivityAt)
+    return projectLabelCandidates(session).map((project) => [source, branch, project, time].filter(Boolean).join(' · '))
+  }
+
+  const sessionRowMeta = (session: ManagedAiSession) => sessionRowMetaCandidates(session).at(-1) || ''
 
   const resumeOrFocusSession = (session: ManagedAiSession) => {
     if (focusLinkedPanel(session)) return
@@ -241,7 +256,7 @@ export const useAiSessionsPanelRuntime = () => {
       void workspace.resumeManagedAiSession(session.source, session.id)
       return
     }
-    workspace.focusManagedAiSession(session.id)
+    workspace.selectedManagedAiSessionKey = sessionKey(session)
   }
 
   const renameSelectedSession = () => {
@@ -319,10 +334,10 @@ export const useAiSessionsPanelRuntime = () => {
     projectLabel,
     sessionDisplayTitle,
     sessionRowTooltip,
+    sessionRowTitle,
     sessionRowDetail,
-    sessionRowStatusLabel,
     sessionRowMeta,
-    sessionRowActionHint,
+    sessionRowMetaCandidates,
     sessionDotState,
     formatTime,
     formatRelativeTime

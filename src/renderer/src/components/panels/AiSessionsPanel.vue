@@ -113,7 +113,10 @@
           </button>
         </span>
       </div>
-      <div class="ai-sessions-list">
+      <div
+        ref="sessionListElement"
+        class="ai-sessions-list"
+      >
         <template v-if="mode === 'running'">
           <section
             v-for="section in runningSections"
@@ -139,7 +142,7 @@
               <div
                 v-for="session in section.sessions"
                 :key="`${session.source}:${session.id}`"
-                class="ai-session-row library has-row-action"
+                class="ai-session-row library"
                 role="button"
                 tabindex="0"
                 :title="sessionRowTooltip(session)"
@@ -151,25 +154,15 @@
               >
                 <span :class="`ai-session-state dot-${sessionDotState(session)}`"></span>
                 <span class="ai-session-row-body">
-                  <span class="ai-session-row-detail">{{ sessionRowDetail(session) }}</span>
+                  <span class="ai-session-row-title">{{ sessionRowTitle(session) }}</span>
+                  <span
+                    v-if="sessionRowDetail(session)"
+                    class="ai-session-row-detail"
+                  >{{ sessionRowDetail(session) }}</span>
                   <span class="ai-session-row-meta">
-                    <span :class="['ai-session-row-status', `status-${sessionDotState(session)}`]">
-                      {{ sessionRowStatusLabel(session) }}
-                    </span>
-                    <span class="ai-session-row-meta-main">{{ sessionRowMeta(session) }}</span>
-                    <span
-                      v-if="sessionRowActionHint(session)"
-                      class="ai-session-row-hint"
-                    >{{ sessionRowActionHint(session) }}</span>
+                    <span class="ai-session-row-meta-main">{{ adaptiveSessionRowMeta(session) }}</span>
                   </span>
                 </span>
-                <button
-                  class="ai-session-row-action"
-                  :title="t('aiSessions.locateTerminal')"
-                  @click.stop="resumeOrFocusSession(session)"
-                >
-                  <LocateFixed />
-                </button>
               </div>
             </template>
           </section>
@@ -211,16 +204,13 @@
               >
                 <span :class="`ai-session-state dot-${sessionDotState(session)}`"></span>
                 <span class="ai-session-row-body">
-                  <span class="ai-session-row-detail">{{ sessionRowDetail(session) }}</span>
+                  <span class="ai-session-row-title">{{ sessionRowTitle(session) }}</span>
+                  <span
+                    v-if="sessionRowDetail(session)"
+                    class="ai-session-row-detail"
+                  >{{ sessionRowDetail(session) }}</span>
                   <span class="ai-session-row-meta">
-                    <span :class="['ai-session-row-status', `status-${sessionDotState(session)}`]">
-                      {{ sessionRowStatusLabel(session) }}
-                    </span>
-                    <span class="ai-session-row-meta-main">{{ sessionRowMeta(session) }}</span>
-                    <span
-                      v-if="sessionRowActionHint(session)"
-                      class="ai-session-row-hint"
-                    >{{ sessionRowActionHint(session) }}</span>
+                    <span class="ai-session-row-meta-main">{{ adaptiveSessionRowMeta(session) }}</span>
                   </span>
                 </span>
                 <button
@@ -251,16 +241,13 @@
           >
             <span :class="`ai-session-state dot-${sessionDotState(session)}`"></span>
             <span class="ai-session-row-body">
-              <span class="ai-session-row-detail">{{ sessionRowDetail(session) }}</span>
+              <span class="ai-session-row-title">{{ sessionRowTitle(session) }}</span>
+              <span
+                v-if="sessionRowDetail(session)"
+                class="ai-session-row-detail"
+              >{{ sessionRowDetail(session) }}</span>
               <span class="ai-session-row-meta">
-                <span :class="['ai-session-row-status', `status-${sessionDotState(session)}`]">
-                  {{ sessionRowStatusLabel(session) }}
-                </span>
-                <span class="ai-session-row-meta-main">{{ sessionRowMeta(session) }}</span>
-                <span
-                  v-if="sessionRowActionHint(session)"
-                  class="ai-session-row-hint"
-                >{{ sessionRowActionHint(session) }}</span>
+                <span class="ai-session-row-meta-main">{{ adaptiveSessionRowMeta(session) }}</span>
               </span>
             </span>
             <button
@@ -288,216 +275,13 @@
           </button>
         </div>
       </div>
-
-      <aside
-        v-if="selectedSession && mode !== 'running'"
-        class="ai-session-detail"
-      >
-        <header>
-          <div>
-            <p>{{ sourceLabel(selectedSession.source) }} · {{ stateLabel(selectedSession.state) }} · {{ requestKindLabel(selectedSession.requestKind) }}</p>
-            <input
-              v-model="renameTitle"
-              @keydown.enter.prevent="renameSelectedSession"
-              @blur="renameSelectedSession"
-            />
-          </div>
-          <div class="ai-session-detail-actions">
-            <button
-              :title="t('aiSessions.locateTerminal')"
-              @click="locateSessionTerminal(selectedSession)"
-            >
-              <LocateFixed />
-            </button>
-          </div>
-        </header>
-
-        <dl class="ai-session-meta">
-          <div>
-            <dt>{{ t('aiSessions.meta.path') }}</dt>
-            <dd>{{ selectedSession.cwd || '-' }}</dd>
-          </div>
-          <div>
-            <dt>{{ t('aiSessions.meta.session') }}</dt>
-            <dd>{{ selectedSession.id }}</dd>
-          </div>
-          <div v-if="selectedSession.agentLifecycle">
-            <dt>{{ t('aiSessions.meta.agentLifecycle') }}</dt>
-            <dd>{{ lifecycleLabel(selectedSession.agentLifecycle) }}</dd>
-          </div>
-          <div>
-            <dt>{{ t('aiSessions.meta.requestKind') }}</dt>
-            <dd>{{ requestKindLabel(selectedSession.requestKind) }}</dd>
-          </div>
-          <div>
-            <dt>{{ t('aiSessions.meta.decisionMode') }}</dt>
-            <dd>{{ decisionModeLabel(selectedSession.decisionMode) }}</dd>
-          </div>
-          <div v-if="selectedSession.waitTimeoutMs">
-            <dt>{{ t('aiSessions.meta.waitTimeout') }}</dt>
-            <dd>{{ Math.round(selectedSession.waitTimeoutMs / 1000) }}s</dd>
-          </div>
-          <div v-if="selectedSession.toolName">
-            <dt>{{ t('aiSessions.meta.tool') }}</dt>
-            <dd>{{ selectedSession.toolName }}</dd>
-          </div>
-          <div v-if="selectedSession.processId">
-            <dt>{{ t('aiSessions.meta.agentPid') }}</dt>
-            <dd>{{ selectedSession.processId }}</dd>
-          </div>
-          <div v-if="selectedSession.parentProcessId">
-            <dt>{{ t('aiSessions.meta.parentProcess') }}</dt>
-            <dd>{{ selectedSession.parentProcessId }}</dd>
-          </div>
-          <div v-if="selectedSession.processGroupId">
-            <dt>{{ t('aiSessions.meta.processGroup') }}</dt>
-            <dd>{{ selectedSession.processGroupId }}</dd>
-          </div>
-          <div v-if="selectedSession.terminalProcessId">
-            <dt>{{ t('aiSessions.meta.terminalPid') }}</dt>
-            <dd>{{ selectedSession.terminalProcessId }}</dd>
-          </div>
-          <div v-if="selectedSession.terminalActivityAt">
-            <dt>{{ t('aiSessions.meta.terminalActivity') }}</dt>
-            <dd>{{ formatTime(selectedSession.terminalActivityAt) }}</dd>
-          </div>
-          <div v-if="selectedSession.transcriptPath">
-            <dt>{{ t('aiSessions.meta.transcript') }}</dt>
-            <dd>{{ selectedSession.transcriptPath }}</dd>
-          </div>
-          <div v-if="selectedSession.launchCommand">
-            <dt>{{ t('aiSessions.meta.launchCommand') }}</dt>
-            <dd class="ai-session-command">{{ selectedSession.launchCommand }}</dd>
-          </div>
-          <div v-if="selectedSession.resumeCommand">
-            <dt>{{ t('aiSessions.meta.resumeCommand') }}</dt>
-            <dd class="ai-session-command">{{ selectedSession.resumeCommand }}</dd>
-          </div>
-        </dl>
-
-        <div
-          v-if="selectedSession.state === 'needsInput'"
-          class="ai-session-actions"
-        >
-          <button
-            v-if="selectedSession.requestKind === 'question'"
-            @click="submitQuestionReply"
-          >
-            <Send />
-            {{ t('aiSessions.action.submitReply') }}
-          </button>
-          <button
-            v-if="selectedSession.requestKind !== 'question' && selectedSession.requestKind !== 'notification'"
-            @click="workspace.replyManagedAiSession(selectedSession.source, selectedSession.id, 'allow')"
-          >
-            <Check />
-            {{ t('aiSessions.action.allow') }}
-          </button>
-          <button
-            v-if="selectedSession.requestKind === 'permission' && selectedSession.actionable"
-            @click="workspace.replyManagedAiSession(selectedSession.source, selectedSession.id, 'always')"
-          >
-            <CheckCheck />
-            {{ t('aiSessions.action.alwaysAllow') }}
-          </button>
-          <button
-            v-if="selectedSession.requestKind === 'permission' && selectedSession.actionable"
-            @click="workspace.replyManagedAiSession(selectedSession.source, selectedSession.id, 'bypass')"
-          >
-            <ShieldCheck />
-            {{ t('aiSessions.action.bypassSession') }}
-          </button>
-          <button @click="workspace.replyManagedAiSession(selectedSession.source, selectedSession.id, 'deny', replyText.trim() || undefined)">
-            <Ban />
-            {{ t('aiSessions.action.deny') }}
-          </button>
-          <button @click="workspace.replyManagedAiSession(selectedSession.source, selectedSession.id, 'handled')">
-            <CheckCheck />
-            {{ t('aiSessions.action.handled') }}
-          </button>
-        </div>
-
-        <div class="ai-session-reply">
-          <textarea
-            v-model="replyText"
-            rows="2"
-            :placeholder="selectedSession.requestKind === 'question' ? t('aiSessions.replyQuestionPlaceholder') : t('aiSessions.replyOptionalPlaceholder')"
-          ></textarea>
-          <button
-            v-if="selectedSession.requestKind === 'question'"
-            :disabled="replyText.trim() === ''"
-            @click="submitReply"
-          >
-            <Send />
-          </button>
-        </div>
-
-        <section class="ai-session-timeline">
-          <div class="ai-session-section-header">
-            <h3>{{ t('aiSessions.timeline') }}</h3>
-            <span>{{ filteredTimelineEvents.length }} / {{ selectedSession.events.length }}</span>
-          </div>
-          <div class="ai-session-event-filters">
-            <button
-              v-for="option in eventFilters"
-              :key="option.key"
-              :class="{ active: eventFilter === option.key }"
-              @click="eventFilter = option.key"
-            >
-              {{ option.label }}
-            </button>
-          </div>
-          <div
-            v-for="event in filteredTimelineEvents"
-            :key="event.id"
-            class="ai-session-event"
-          >
-            <span :class="`ai-session-event-state state-${eventState(event)}`"></span>
-            <div>
-              <strong>{{ eventLabel(event.event) }}</strong>
-              <small>{{ formatTime(event.receivedAt) }} · {{ requestKindLabel(event.requestKind) }} · {{ decisionModeLabel(event.decisionMode) }}</small>
-              <p v-if="event.summary">{{ event.summary }}</p>
-            </div>
-            <button
-              class="ai-session-event-copy"
-              :title="t('aiSessions.copyEvent')"
-              @click="copyTimelineEvent(event)"
-            >
-              <Copy />
-            </button>
-          </div>
-        </section>
-
-        <section
-          v-if="selectedSession.decisions.length"
-          class="ai-session-decisions"
-        >
-          <h3>{{ t('aiSessions.decisions') }}</h3>
-          <div
-            v-for="decision in selectedSession.decisions.slice().reverse()"
-            :key="decision.id"
-          >
-            <strong>{{ decisionLabel(decision.kind) }}</strong>
-            <small>{{ formatTime(decision.createdAt) }}</small>
-            <p v-if="decision.message">{{ decision.message }}</p>
-          </div>
-        </section>
-
-        <button
-          class="ai-session-clear"
-          @click="workspace.clearManagedAiSession(selectedSession.source, selectedSession.id)"
-        >
-          <Trash2 />
-          {{ t('aiSessions.clearSession') }}
-        </button>
-      </aside>
     </div>
   </section>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
-import { Activity, Archive, Ban, Bot, Check, CheckCheck, ChevronDown, Copy, FolderTree, Inbox, LocateFixed, RefreshCw, Search, Send, ShieldCheck, Trash2 } from 'lucide-vue-next'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { Activity, Archive, Bot, Check, ChevronDown, FolderTree, Inbox, RefreshCw, Search } from 'lucide-vue-next'
 import type { ManagedAiPanelModeButton } from '@/services/ai/aiSessionsPanelViewRuntime'
 import { useAiSessionsPanelRuntime } from '@/services/ai/aiSessionsPanelRuntime'
 
@@ -507,21 +291,9 @@ const {
   query,
   mode,
   libraryGrouping,
-  eventFilter,
-  replyText,
-  renameTitle,
   modeButtons,
   activeModeLabel,
   searchPlaceholder,
-  eventFilters,
-  sourceLabel,
-  stateLabel,
-  lifecycleLabel,
-  requestKindLabel,
-  decisionModeLabel,
-  eventLabel,
-  eventState,
-  decisionLabel,
   sessionKey,
   selectMode,
   selectLibraryGrouping,
@@ -531,23 +303,61 @@ const {
   librarySections,
   runningSections,
   activeScopeLabel,
-  selectedSession,
-  filteredTimelineEvents,
   selectSession,
-  locateSessionTerminal,
-  renameSelectedSession,
-  submitReply,
-  submitQuestionReply,
-  copyTimelineEvent,
   resumeOrFocusSession,
   sessionRowTooltip,
+  sessionRowTitle,
   sessionRowDetail,
-  sessionRowStatusLabel,
   sessionRowMeta,
-  sessionRowActionHint,
-  sessionDotState,
-  formatTime
+  sessionRowMetaCandidates,
+  sessionDotState
 } = useAiSessionsPanelRuntime()
+
+const sessionListElement = ref<HTMLElement | null>(null)
+const rowMetaWidth = ref(0)
+let measureCanvasContext: CanvasRenderingContext2D | null = null
+let listResizeObserver: ResizeObserver | null = null
+
+const rowMetaSignature = computed(() => workspace.sortedManagedAiSessions.map((session) => `${sessionKey(session)}:${session.gitBranch || ''}:${session.gitDirty ? 1 : 0}:${session.canonicalCwd || session.cwd || ''}:${session.lastActivityAt}`).join('|'))
+
+const measureRowMetaText = (text: string) => {
+  if (!measureCanvasContext && typeof document !== 'undefined') {
+    measureCanvasContext = document.createElement('canvas').getContext('2d')
+  }
+  if (!measureCanvasContext) return text.length * 7
+  measureCanvasContext.font = '10px sans-serif'
+  return measureCanvasContext.measureText(text).width
+}
+
+const updateRowMetaWidth = () => {
+  const width = sessionListElement.value?.clientWidth || sessionListElement.value?.getBoundingClientRect().width || 0
+  const nextWidth = Math.max(0, Math.floor(width - 64))
+  if (rowMetaWidth.value !== nextWidth) rowMetaWidth.value = nextWidth
+}
+
+const adaptiveSessionRowMeta = (session: Parameters<typeof sessionRowMeta>[0]) => {
+  const candidates = sessionRowMetaCandidates(session)
+  const fallback = candidates.at(-1) || sessionRowMeta(session)
+  const width = rowMetaWidth.value
+  if (width <= 0) return fallback
+  return candidates.find((candidate) => measureRowMetaText(candidate) <= width) || fallback
+}
+
+watch(rowMetaSignature, () => {
+  void nextTick(updateRowMetaWidth)
+})
+
+onMounted(() => {
+  updateRowMetaWidth()
+  if (typeof ResizeObserver === 'undefined' || !sessionListElement.value) return
+  listResizeObserver = new ResizeObserver(updateRowMetaWidth)
+  listResizeObserver.observe(sessionListElement.value)
+})
+
+onBeforeUnmount(() => {
+  listResizeObserver?.disconnect()
+  listResizeObserver = null
+})
 
 const modeTooltip = ref<{ label: string; tooltip: string; left: number; top: number } | null>(null)
 

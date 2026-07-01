@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   ThreadedTerminalHost,
+  quoteTerminalDropPath,
   threadedTerminalCapability,
   threadedTerminalDefaultWorkerCount,
   threadedTerminalPriorityFor
@@ -194,6 +195,26 @@ const workerMessages = async () => {
     core: (coreModule.default as any).instances.flatMap((worker: { messages: unknown[] }) => worker.messages),
     render: (renderModule.default as any).instances.flatMap((worker: { messages: unknown[] }) => worker.messages)
   }
+}
+
+const droppedFileEvent = (type: 'dragover' | 'drop', paths: string[]) => {
+  const files = paths.map((path, index) => {
+    const file = new File([''], path.split('/').pop() || `file-${index}`)
+    Object.defineProperty(file, 'path', { configurable: true, value: path })
+    return file
+  })
+  const event = new Event(type, { bubbles: true, cancelable: true }) as DragEvent
+  const dataTransfer = {
+    files,
+    types: ['Files'],
+    dropEffect: 'none',
+    getData: vi.fn(() => '')
+  }
+  Object.defineProperty(event, 'dataTransfer', {
+    configurable: true,
+    value: dataTransfer
+  })
+  return { event, dataTransfer }
 }
 
 afterEach(() => {
@@ -587,6 +608,41 @@ describe('threadedTerminalRuntime', () => {
       expect.objectContaining({ type: 'input', terminalId: 'panel-1', data: 'pasted-text' })
     ]))
     host.dispose()
+  })
+
+  it('quotes dropped local file paths and writes them to terminal input', async () => {
+    installOffscreenCanvasSupport()
+    const host = createHost()
+    const element = createHostElement()
+    host.open(element)
+
+    const dragover = droppedFileEvent('dragover', ['/tmp/report 1.txt'])
+    element.dispatchEvent(dragover.event)
+    expect(dragover.event.defaultPrevented).toBe(true)
+    expect(dragover.dataTransfer.dropEffect).toBe('copy')
+
+    const before = await workerMessages()
+    const drop = droppedFileEvent('drop', [
+      '/tmp/report 1.txt',
+      "/home/ops/that's fine.log"
+    ])
+    element.dispatchEvent(drop.event)
+    const after = await workerMessages()
+
+    expect(drop.event.defaultPrevented).toBe(true)
+    expect(after.core.slice(before.core.length)).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: 'input',
+        terminalId: 'panel-1',
+        data: "'/tmp/report 1.txt' '/home/ops/that'\\''s fine.log'"
+      })
+    ]))
+    host.dispose()
+  })
+
+  it('keeps safe dropped paths bare', () => {
+    expect(quoteTerminalDropPath('/tmp/release-v1.2/app.log')).toBe('/tmp/release-v1.2/app.log')
+    expect(quoteTerminalDropPath('/tmp/a b/app.log')).toBe("'/tmp/a b/app.log'")
   })
 
   it('sends committed textarea input and IME composition text once', async () => {

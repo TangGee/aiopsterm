@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, writeFile } from 'fs/promises'
+import { mkdir, mkdtemp, readFile, symlink, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { createConnection } from 'net'
@@ -8,6 +8,7 @@ type AgentSessionsBackend = {
   configureAiAgentSessionStore: (userDataPath: string) => Promise<void>
   listManagedAiSessions: () => Promise<unknown>
   configureManagedAiSessionImportRuntime: (config?: Record<string, unknown> & { importSessions?: () => Promise<unknown[]> }) => void
+  configureManagedAiSessionGitRuntime: (config?: Record<string, unknown> & { runGit?: (cwd: string, args: string[], timeoutMs: number) => Promise<string> }) => void
   listManagedAiSessionEvents: (input?: Record<string, unknown>) => unknown
   listManagedAiNotifications: (input?: Record<string, unknown>) => Promise<unknown>
   markManagedAiNotificationRead: (input: Record<string, unknown>) => Promise<unknown>
@@ -157,6 +158,7 @@ describe('agent session backend', () => {
         panelId: 'panel-1',
         terminalSessionId: 'terminal-1',
         cwd: '/work/project',
+        canonicalCwd: '/work/project',
         summary: 'Approve shell command',
         requestKind: 'permission',
         decisionMode: 'local',
@@ -164,6 +166,79 @@ describe('agent session backend', () => {
         receivedAt: 100
       })
     })
+  })
+
+  it('stores canonical cwd metadata for symlink-aware project grouping', async () => {
+    const { configureAiAgentSessionStore, listManagedAiSessions, publishAiAgentSessionEvent } = await loadBackend()
+    const root = await mkdtemp(join(tmpdir(), 'aiopsterm-agent-canonical-cwd-'))
+    const realProject = join(root, 'real', 'aiopsterm')
+    const linkedProject = join(root, 'link-aiopsterm')
+    await mkdir(realProject, { recursive: true })
+    await symlink(realProject, linkedProject)
+    await configureAiAgentSessionStore(join(root, 'user-data'))
+
+    publishAiAgentSessionEvent(
+      {
+        source: 'codex',
+        event: 'SessionStart',
+        sessionId: 'codex-canonical-1',
+        cwd: linkedProject,
+        receivedAt: 160
+      },
+      null
+    )
+
+    const response = (await listManagedAiSessions()) as { data?: { sessions?: Array<Record<string, unknown>> } }
+    expect(response.data?.sessions?.[0]).toEqual(
+      expect.objectContaining({
+        id: 'codex-canonical-1',
+        cwd: linkedProject,
+        canonicalCwd: realProject
+      })
+    )
+  })
+
+  it('adds cached git branch and dirty metadata to managed AI session snapshots', async () => {
+    const { configureAiAgentSessionStore, configureManagedAiSessionGitRuntime, listManagedAiSessions, publishAiAgentSessionEvent } = await loadBackend()
+    const root = await mkdtemp(join(tmpdir(), 'aiopsterm-agent-git-'))
+    const project = join(root, 'repo')
+    await mkdir(project, { recursive: true })
+    await configureAiAgentSessionStore(join(root, 'user-data'))
+    const runGit = vi.fn(async (_cwd: string, args: string[]) => {
+      if (args.join(' ') === 'rev-parse --abbrev-ref HEAD') return 'main\n'
+      if (args.join(' ') === 'status --porcelain') return ' M src/app.ts\n'
+      return ''
+    })
+    configureManagedAiSessionGitRuntime({
+      ttlMs: 1000,
+      now: () => 200,
+      runGit
+    })
+
+    publishAiAgentSessionEvent(
+      {
+        source: 'codex',
+        event: 'SessionStart',
+        sessionId: 'codex-git-1',
+        cwd: project,
+        receivedAt: 160
+      },
+      null
+    )
+
+    const first = (await listManagedAiSessions()) as { data?: { sessions?: Array<Record<string, unknown>> } }
+    const second = (await listManagedAiSessions()) as { data?: { sessions?: Array<Record<string, unknown>> } }
+
+    expect(first.data?.sessions?.[0]).toEqual(
+      expect.objectContaining({
+        id: 'codex-git-1',
+        gitBranch: 'main',
+        gitDirty: true,
+        gitStatusUpdatedAt: 200
+      })
+    )
+    expect(second.data?.sessions?.[0]).toEqual(expect.objectContaining({ gitBranch: 'main', gitDirty: true }))
+    expect(runGit).toHaveBeenCalledTimes(2)
   })
 
   it('keeps stock Codex permission hooks as timeline telemetry instead of pending attention', async () => {

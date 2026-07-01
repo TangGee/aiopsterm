@@ -60,6 +60,17 @@ export type AiAgentSessionEventInput = {
   workspaceId?: string
   workspace_id?: string
   cwd?: string
+  canonicalCwd?: string
+  canonical_cwd?: string
+  gitBranch?: string
+  git_branch?: string
+  gitDirty?: boolean
+  git_dirty?: boolean
+  gitStatusUpdatedAt?: number
+  git_status_updated_at?: number
+  realCwd?: string
+  real_cwd?: string
+  realpath?: string
   workingDirectory?: string
   working_directory?: string
   transcriptPath?: string
@@ -114,6 +125,10 @@ export type AiAgentSessionEvent = {
   terminalSessionId?: string
   workspaceId?: string
   cwd?: string
+  canonicalCwd?: string
+  gitBranch?: string
+  gitDirty?: boolean
+  gitStatusUpdatedAt?: number
   transcriptPath?: string
   requestId?: string
   requestKind?: ManagedAiRequestKind
@@ -173,6 +188,10 @@ export type ManagedAiSessionRecord = {
   terminalSessionId?: string
   workspaceId?: string
   cwd?: string
+  canonicalCwd?: string
+  gitBranch?: string
+  gitDirty?: boolean
+  gitStatusUpdatedAt?: number
   transcriptPath?: string
   pendingRequestId?: string
   requestKind: ManagedAiRequestKind
@@ -302,6 +321,10 @@ export type ManagedAiNotificationRecord = {
   terminalSessionId?: string
   workspaceId?: string
   cwd?: string
+  canonicalCwd?: string
+  gitBranch?: string
+  gitDirty?: boolean
+  gitStatusUpdatedAt?: number
   transcriptPath?: string
   createdAt: number
   updatedAt: number

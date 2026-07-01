@@ -114,7 +114,14 @@ vi.mock('@/services/terminal/threadedTerminalRuntime', () => ({
   ThreadedTerminalFitAddon: threadedTerminalMocks.FakeThreadedFitAddon,
   ThreadedTerminalSearchAddon: threadedTerminalMocks.FakeThreadedSearchAddon,
   createThreadedTerminalHost: () => new threadedTerminalMocks.FakeThreadedTerminal(),
+  hasTerminalDropFilePayload: (dataTransfer: DataTransfer | null | undefined) => Boolean(dataTransfer?.files?.length),
   isThreadedTerminalHost: (value: unknown) => value instanceof threadedTerminalMocks.FakeThreadedTerminal,
+  terminalDropInputText: (dataTransfer: DataTransfer | null | undefined) =>
+    Array.from(dataTransfer?.files || [])
+      .map((file) => String((file as File & { path?: string }).path || '').trim())
+      .filter(Boolean)
+      .map((path) => (path.includes(' ') ? `'${path}'` : path))
+      .join(' '),
   threadedTerminalCapability: () => ({ supported: true }),
   threadedTerminalPriorityFor: (terminalId: string, activeTerminalId: string, visible: boolean) =>
     terminalId === activeTerminalId ? 'active' : visible ? 'visible' : 'background'
@@ -148,6 +155,7 @@ class FakeTerminal {
   clearSelection = vi.fn()
   scrollToBottom = vi.fn()
   refresh = vi.fn()
+  input = vi.fn()
   write = vi.fn((data: string, callback?: () => void) => {
     this.output += data
     callback?.()
@@ -193,6 +201,20 @@ const flushFrames = async (count = 1) => {
 const flushOutput = async () => {
   await new Promise((resolve) => window.setTimeout(resolve, 0))
   await Promise.resolve()
+}
+
+const droppedFileEvent = (type: 'dragover' | 'drop', path: string) => {
+  const file = new File([''], path.split('/').pop() || 'dropped.txt')
+  Object.defineProperty(file, 'path', { configurable: true, value: path })
+  const event = new Event(type, { bubbles: true, cancelable: true }) as DragEvent
+  const dataTransfer = {
+    files: [file],
+    types: ['Files'],
+    dropEffect: 'none',
+    getData: vi.fn(() => '')
+  }
+  Object.defineProperty(event, 'dataTransfer', { configurable: true, value: dataTransfer })
+  return { event, dataTransfer }
 }
 
 const createWorkspace = (panel: TerminalPanel) =>
@@ -322,6 +344,31 @@ describe('terminalWorkspaceViewRuntime', () => {
     expect(terminal.scrollToBottom).toHaveBeenCalledTimes(1)
     expect(fit.fit).not.toHaveBeenCalled()
     expect(logs.some((entry) => entry.event === 'renderer.terminal-output.summary')).toBe(false)
+  })
+
+  it('routes dropped local files into legacy xterm input', async () => {
+    const panel = createEmptyTerminalPanel('panel-1', 'Local')
+    const { runtime } = createRuntime(panel)
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    runtime.setTerminalElement(panel.id, host)
+    await flushFrames(3)
+    const view = runtime.terminalViews.get(panel.id)
+    if (!view) throw new Error('terminal view was not created')
+    const terminal = view.terminal as unknown as FakeTerminal
+
+    const dragover = droppedFileEvent('dragover', '/tmp/report 1.txt')
+    host.dispatchEvent(dragover.event)
+    expect(dragover.event.defaultPrevented).toBe(true)
+    expect(dragover.dataTransfer.dropEffect).toBe('copy')
+
+    const drop = droppedFileEvent('drop', '/tmp/report 1.txt')
+    host.dispatchEvent(drop.event)
+
+    expect(drop.event.defaultPrevented).toBe(true)
+    expect(terminal.focus).toHaveBeenCalled()
+    expect(terminal.input).toHaveBeenCalledWith("'/tmp/report 1.txt'", true)
   })
 
   it('coalesces multiple terminal output syncs into one xterm write per flush', async () => {

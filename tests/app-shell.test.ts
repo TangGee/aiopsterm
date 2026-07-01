@@ -1040,6 +1040,8 @@ describe('AppShell', () => {
         title: 'Deploy approval',
         summary: 'Approve release',
         cwd: '/work/api',
+        gitBranch: 'main',
+        gitDirty: true,
         requestKind: 'permission',
         decisionMode: 'blocking',
         actionable: true,
@@ -1080,6 +1082,8 @@ describe('AppShell', () => {
         title: 'API refactor',
         summary: 'Reading files',
         cwd: '/work/api',
+        gitBranch: 'feature/sidebar',
+        gitDirty: false,
         requestKind: 'telemetry',
         decisionMode: 'telemetry',
         receivedAt: 1717200550000
@@ -1109,7 +1113,9 @@ describe('AppShell', () => {
       expect(wrapper.find('.ai-sessions-section-header').text()).toContain('待处理')
       expect(wrapper.findAll('.ai-session-row')).toHaveLength(1)
       expect(wrapper.text()).toContain('Approve release')
+      expect(wrapper.find('.ai-session-row-title').text()).toBe('Deploy approval')
       expect(wrapper.find('.ai-session-row-detail').text()).toBe('Approve release')
+      expect(wrapper.find('.ai-session-row-meta').text()).toContain('Claude Code · main* · api')
       expect(wrapper.find('.ai-session-row-top').exists()).toBe(false)
       expect(wrapper.find('.ai-session-state').classes()).toContain('dot-needsInput')
 
@@ -1120,13 +1126,15 @@ describe('AppShell', () => {
       expect(wrapper.find('.ai-session-library-section-header').text()).toContain('api')
       expect(wrapper.findAll('.ai-session-row')).toHaveLength(1)
       expect(wrapper.text()).toContain('Reading files')
+      expect(wrapper.find('.ai-session-row-title').text()).toBe('API refactor')
+      expect(wrapper.find('.ai-session-row-meta').text()).toContain('Gemini · feature/sidebar · api')
       expect(wrapper.find('.ai-session-state').classes()).toContain('dot-working')
 
       await wrapper.find('.ai-session-row').trigger('click')
       await flushPromises()
       expect(store.selectedManagedAiSessionKey).toBe('gemini:gemini-work-1')
       expect(wrapper.find('.ai-session-detail').exists()).toBe(false)
-      expect(wrapper.find('.ai-session-row-action').attributes('title')).toBe('定位终端')
+      expect(wrapper.find('.ai-session-row-action').exists()).toBe(false)
 
       await wrapper.findAll('.ai-sessions-library-grouping button').at(1)!.trigger('click')
       await flushPromises()
@@ -1139,20 +1147,22 @@ describe('AppShell', () => {
       expect(wrapper.text()).toContain('Approve release')
       expect(wrapper.text()).toContain('Reading files')
       expect(wrapper.text()).toContain('Round finished')
-      expect(wrapper.text()).toContain('Terminal closed')
-      expect(wrapper.text()).not.toContain('Deploy approval')
-      expect(wrapper.text()).not.toContain('API refactor')
-      expect(wrapper.text()).not.toContain('Docs cleanup')
-      expect(wrapper.text()).not.toContain('Restore session')
+      expect(wrapper.text()).not.toContain('Terminal closed')
+      expect(wrapper.text()).toContain('Deploy approval')
+      expect(wrapper.text()).toContain('API refactor')
+      expect(wrapper.text()).toContain('Docs cleanup')
+      expect(wrapper.text()).toContain('Restore session')
       expect(wrapper.text()).not.toContain('已结束')
       expect(wrapper.text()).not.toContain('可恢复')
       expect(wrapper.text()).not.toContain('历史')
-      expect(wrapper.text()).toContain('其他')
       const rowFor = (text: string) => wrapper!.findAll('.ai-session-row').find((row) => row.text().includes(text))!
       expect(rowFor('Reading files').find('.ai-session-state').classes()).toContain('dot-working')
       expect(rowFor('Approve release').find('.ai-session-state').classes()).toContain('dot-needsInput')
       expect(rowFor('Round finished').find('.ai-session-state').classes()).toContain('dot-linked')
-      expect(rowFor('Terminal closed').find('.ai-session-state').classes()).toContain('dot-other')
+      expect(rowFor('Restore session').find('.ai-session-state').classes()).toContain('dot-other')
+      expect(rowFor('Restore session').text()).not.toContain('Terminal closed')
+      expect(rowFor('Round finished').text()).not.toContain('/work/docs')
+      expect(rowFor('Round finished').attributes('title')).toContain('/work/docs')
       expect(wrapper.findAll('.ai-session-row-action')).toHaveLength(0)
 
       store.activePanelId = secondaryPanel.id
@@ -1187,10 +1197,12 @@ describe('AppShell', () => {
 
       vi.mocked(window.aiops.createTerminal).mockClear()
       vi.mocked(window.aiops.writeTerminal).mockClear()
-      await rowFor('Terminal closed').trigger('dblclick')
+      store.activeModule = 'aiSessions'
+      await rowFor('Restore session').trigger('dblclick')
       await flushPromises()
       expect(window.aiops.createTerminal).toHaveBeenCalledWith(expect.objectContaining({ kind: 'local', cwd: '/work/restore', title: 'Restore session' }))
       expect(window.aiops.writeTerminal).toHaveBeenCalledWith('test-session-local', "cd '/work/restore' && codex resume 'codex-restore-1'\n")
+      expect(store.activeModule).toBe('aiSessions')
     } finally {
       wrapper?.unmount()
       dateNowSpy.mockRestore()
@@ -1270,7 +1282,37 @@ describe('AppShell', () => {
     wrapper.unmount()
   })
 
-  it('filters and copies managed AI session timeline events', async () => {
+  it('shows duplicated managed AI summaries when the title is truncated', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const store = useWorkspaceStore()
+    const duplicatedText = 'Investigate imported Codex history row title compression'
+    store.upsertManagedAiSession({
+      source: 'codex',
+      event: 'notification',
+      sessionId: 'codex-duplicate-summary',
+      title: duplicatedText,
+      summary: duplicatedText,
+      cwd: '/work/imported',
+      requestKind: 'notification',
+      decisionMode: 'local',
+      receivedAt: 1717200800000
+    })
+
+    const wrapper = mount(AiSessionsPanel, {
+      global: {
+        plugins: [pinia]
+      }
+    })
+    await flushPromises()
+
+    expect(wrapper.find('.ai-session-row-title').text()).toBe(duplicatedText)
+    expect(wrapper.find('.ai-session-row-detail').text()).toBe(duplicatedText)
+
+    wrapper.unmount()
+  })
+
+  it('keeps managed AI session rows list-only when selected', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     const store = useWorkspaceStore()
@@ -1308,22 +1350,14 @@ describe('AppShell', () => {
     })
     await flushPromises()
 
-    expect(wrapper.find('.ai-session-section-header').text()).toContain('2 / 2')
-    const questionFilter = wrapper.findAll('.ai-session-event-filters button').find((button) => button.text() === '提问')
-    expect(questionFilter).toBeTruthy()
-    await questionFilter!.trigger('click')
+    expect(wrapper.find('.ai-session-row').text()).toContain('Which window should deploy?')
+    await wrapper.find('.ai-session-row').trigger('click')
     await flushPromises()
 
-    expect(wrapper.find('.ai-session-section-header').text()).toContain('1 / 2')
-    expect(wrapper.find('.ai-session-timeline').text()).toContain('Which window should deploy?')
-    expect(wrapper.find('.ai-session-timeline').text()).not.toContain('Approve deployment command')
-
-    await wrapper.find('.ai-session-event-copy').trigger('click')
-    await flushPromises()
-
-    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(expect.stringContaining('"requestKind": "question"'))
-    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(expect.not.stringContaining('"raw"'))
-    expect(store.topNotice).toBe('AI 会话事件已复制')
+    expect(store.selectedManagedAiSessionKey).toBe('claude-code:claude-timeline-1')
+    expect(wrapper.find('.ai-session-detail').exists()).toBe(false)
+    expect(wrapper.find('.ai-session-timeline').exists()).toBe(false)
+    expect(navigator.clipboard.writeText).not.toHaveBeenCalled()
   })
 
   it('rescans AI conversations from the empty AI session panel', async () => {
@@ -2116,8 +2150,11 @@ describe('AppShell', () => {
     await sessions.find('.ai-sessions-mode-button.mode-pending').trigger('blur')
     await flushPromises()
     expect(document.body.querySelector('.ai-sessions-mode-tooltip')).toBeNull()
+    expect(sessions.find('.ai-session-row-title').text()).toBe('Deploy approval')
     expect(sessions.find('.ai-session-row-detail').text()).toBe('Approve deployment command')
-    expect(sessions.find('.ai-session-row-status').text()).toBe('Pending')
+    expect(sessions.find('.ai-session-row-meta').text()).toContain('Claude Code')
+    expect(sessions.find('.ai-session-row-meta').text()).not.toContain('Pending')
+    expect(sessions.find('.ai-session-state').classes()).toContain('dot-needsInput')
 
     const terminal = mount(TerminalWorkspace, {
       attachTo: document.body,

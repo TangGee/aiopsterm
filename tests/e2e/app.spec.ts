@@ -735,7 +735,8 @@ test('managed AI session notifications flow through real local terminal hooks', 
     await expect(codexRow).toContainText(`shell: echo codex approval`)
     await expect(codexRow).toContainText(`/tmp/aiopsterm-codex-project-${runId}`)
     await codexRow.click()
-    await expect(page.locator('.ai-session-detail')).toContainText('本地处理')
+    await expect(codexRow).toHaveClass(/active/)
+    await expect(page.locator('.ai-session-detail')).toHaveCount(0)
     await expect(page.locator('.terminal-tab').filter({ hasText: '127.0.0.1' })).toHaveClass(/active/)
     await sendTerminalCommand(
       page,

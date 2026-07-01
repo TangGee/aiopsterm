@@ -305,7 +305,7 @@ export const createWorkspaceTerminalPanelsController = (
     }
   }
 
-  const openLocalTerminalPanel = async (options: { title?: string; cwd?: string } = {}) => {
+  const openLocalTerminalPanel = async (options: { title?: string; cwd?: string; preserveActiveModule?: boolean } = {}) => {
     const previousActivePanelId = activePanelId.value
     const panel = createPanel()
     const panelId = panel.id
@@ -337,7 +337,7 @@ export const createWorkspaceTerminalPanelsController = (
         return null
       }
       renamePanel(panelId, label, 'auto')
-      activeModule.value = 'workspace'
+      if (!options.preserveActiveModule) activeModule.value = 'workspace'
       activePanelId.value = panelId
       return connected
     } catch (error) {

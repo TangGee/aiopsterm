@@ -17,6 +17,7 @@ import {
   createAgentSessionImportRuntime,
   type ImportedAgentSession
 } from './agentSessionImportRuntime'
+import { createAgentSessionGitRuntime, type ManagedAiSessionGitInfo } from './agentSessionGitRuntime'
 import { createAgentSessionStoreRuntime } from './agentSessionStoreRuntime'
 import {
   autoTitleFor,
@@ -132,6 +133,7 @@ const storeRuntime = createAgentSessionStoreRuntime({
   }
 })
 const importRuntime = createAgentSessionImportRuntime()
+const gitRuntime = createAgentSessionGitRuntime()
 const autoNamingRuntime = createAgentSessionAutoNamingRuntime({
   getSession: (key) => sessions.get(key),
   setSession: (key, session) => {
@@ -251,6 +253,47 @@ export const configureManagedAiSessionImportRuntime = (config?: Parameters<typeo
   importRuntime.configure(config)
 }
 
+export const configureManagedAiSessionGitRuntime = (config?: Parameters<typeof gitRuntime.configure>[0]) => {
+  gitRuntime.configure(config)
+}
+
+const withGitInfo = <T extends ManagedAiSessionRecord | ImportedAgentSession>(session: T, gitInfo: ManagedAiSessionGitInfo): T => {
+  if (!gitInfo.gitStatusUpdatedAt && !gitInfo.gitBranch) return session
+  return {
+    ...session,
+    gitBranch: gitInfo.gitBranch,
+    gitDirty: gitInfo.gitBranch && typeof gitInfo.gitDirty === 'boolean' ? gitInfo.gitDirty : undefined,
+    ...(gitInfo.gitStatusUpdatedAt ? { gitStatusUpdatedAt: gitInfo.gitStatusUpdatedAt } : {})
+  }
+}
+
+const refreshGitInfoForSessions = async () => {
+  const candidates = [...sessions.values()].filter((session) => session.canonicalCwd || session.cwd)
+  if (!candidates.length) return 0
+  const updates = await Promise.all(
+    candidates.map(async (session) => ({
+      session,
+      gitInfo: await gitRuntime.gitInfoForCwd(session.canonicalCwd || session.cwd)
+    }))
+  )
+  let changed = 0
+  updates.forEach(({ session, gitInfo }) => {
+    if (!gitInfo.gitBranch && typeof gitInfo.gitDirty !== 'boolean' && !gitInfo.gitStatusUpdatedAt) return
+    const next = withGitInfo(session, gitInfo)
+    if (
+      next.gitBranch === session.gitBranch &&
+      next.gitDirty === session.gitDirty &&
+      next.gitStatusUpdatedAt === session.gitStatusUpdatedAt
+    ) {
+      return
+    }
+    sessions.set(sessionKey(session.source, session.id), next)
+    changed += 1
+  })
+  if (changed) persistSnapshot()
+  return changed
+}
+
 const upsertSessionForEvent = (event: AiAgentSessionEvent, raw: Record<string, unknown>) => {
   const key = sessionKey(event.source, event.sessionId)
   const existing = sessions.get(key)
@@ -264,6 +307,10 @@ const upsertSessionForEvent = (event: AiAgentSessionEvent, raw: Record<string, u
   const waitTimeoutMs = event.waitTimeoutMs || existing?.waitTimeoutMs
   const toolName = event.toolName || existing?.toolName
   const cwd = event.cwd || existing?.cwd
+  const canonicalCwd = event.canonicalCwd || existing?.canonicalCwd
+  const gitBranch = event.gitBranch || existing?.gitBranch
+  const gitDirty = typeof event.gitDirty === 'boolean' ? event.gitDirty : existing?.gitDirty
+  const gitStatusUpdatedAt = event.gitStatusUpdatedAt || existing?.gitStatusUpdatedAt
   const launchCommand = event.launchCommand || existing?.launchCommand
   const resumeCommand = event.resumeCommand && event.cwd ? event.resumeCommand : existing?.resumeCommand || resumeCommandFor(event.source, event.sessionId, cwd, launchCommand)
   const processId = event.processId || existing?.processId
@@ -291,6 +338,10 @@ const upsertSessionForEvent = (event: AiAgentSessionEvent, raw: Record<string, u
     ...(event.terminalSessionId || existing?.terminalSessionId ? { terminalSessionId: event.terminalSessionId || existing?.terminalSessionId } : {}),
     ...(event.workspaceId || existing?.workspaceId ? { workspaceId: event.workspaceId || existing?.workspaceId } : {}),
     ...(cwd ? { cwd } : {}),
+    ...(canonicalCwd ? { canonicalCwd } : {}),
+    ...(gitBranch ? { gitBranch } : {}),
+    ...(typeof gitDirty === 'boolean' ? { gitDirty } : {}),
+    ...(gitStatusUpdatedAt ? { gitStatusUpdatedAt } : {}),
     ...(event.transcriptPath || existing?.transcriptPath ? { transcriptPath: event.transcriptPath || existing?.transcriptPath } : {}),
     ...(pendingRequestId ? { pendingRequestId } : {}),
     requestKind,
@@ -353,6 +404,12 @@ const mergeImportedSession = (imported: ImportedAgentSession) => {
     createdAt: Math.min(existing.createdAt, imported.createdAt),
     updatedAt: Date.now(),
     ...(existing.cwd || imported.cwd ? { cwd: existing.cwd || imported.cwd } : {}),
+    ...(existing.canonicalCwd || imported.canonicalCwd ? { canonicalCwd: existing.canonicalCwd || imported.canonicalCwd } : {}),
+    ...(existing.gitBranch || imported.gitBranch ? { gitBranch: existing.gitBranch || imported.gitBranch } : {}),
+    ...(typeof existing.gitDirty === 'boolean' || typeof imported.gitDirty === 'boolean'
+      ? { gitDirty: typeof existing.gitDirty === 'boolean' ? existing.gitDirty : imported.gitDirty }
+      : {}),
+    ...(existing.gitStatusUpdatedAt || imported.gitStatusUpdatedAt ? { gitStatusUpdatedAt: existing.gitStatusUpdatedAt || imported.gitStatusUpdatedAt } : {}),
     ...(existing.transcriptPath || imported.transcriptPath ? { transcriptPath: existing.transcriptPath || imported.transcriptPath } : {}),
     requestKind: existing.requestKind || imported.requestKind,
     decisionMode: existing.decisionMode || imported.decisionMode,
@@ -548,6 +605,7 @@ const publishAiAgentSessionSocketEvent = async (input: AiAgentSessionEventInput,
 export const listManagedAiSessions = async (): Promise<ManagedAiSessionListResult> => {
   await loadStoreIfNeeded()
   await importExternalManagedAiSessions()
+  await refreshGitInfoForSessions()
   return { ok: true, data: snapshot() }
 }
 

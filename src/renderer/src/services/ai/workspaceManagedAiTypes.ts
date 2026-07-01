@@ -38,6 +38,7 @@ export type AiAttentionFocusRequest = {
 }
 export type ManagedAiSessionState = ManagedAiSessionRecord['state']
 export type ManagedAiSession = ManagedAiSessionRecord
+export type ManagedAiLocalTerminalOpenOptions = { title?: string; cwd?: string; preserveActiveModule?: boolean }
 
 export const defaultAgentHibernationConfig: AgentHibernationConfig = {
   enabled: false,
@@ -78,5 +79,5 @@ export type WorkspaceManagedAiControllerDeps = {
     command: string,
     options?: TerminalCommandExecutionOptions
   ) => Promise<TerminalSecurityDecision>
-  openLocalTerminalPanel?: (options?: { title?: string; cwd?: string }) => Promise<TerminalPanel | null | undefined>
+  openLocalTerminalPanel?: (options?: ManagedAiLocalTerminalOpenOptions) => Promise<TerminalPanel | null | undefined>
 }

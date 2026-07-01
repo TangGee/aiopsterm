@@ -15,6 +15,7 @@ import type {
   ManagedAiSessionSnapshot
 } from '@shared/contracts/managedAiSessions'
 import type {
+  ManagedAiLocalTerminalOpenOptions,
   ManagedAiSession,
   WorkspaceManagedAiControllerState
 } from '@/services/ai/workspaceManagedAiTypes'
@@ -25,7 +26,7 @@ export const createWorkspaceManagedAiHibernationRuntime = (input: {
   i18nText: (key: I18nKey, params?: Record<string, string | number>) => string
   applyManagedAiSessionSnapshot: (snapshot: ManagedAiSessionSnapshot) => void
   focusManagedAiSession: (sessionIdOrPanelId: string) => ManagedAiSession | null
-  openLocalTerminalPanel?: (options?: { title?: string; cwd?: string }) => Promise<TerminalPanel | null | undefined>
+  openLocalTerminalPanel?: (options?: ManagedAiLocalTerminalOpenOptions) => Promise<TerminalPanel | null | undefined>
   runTerminalCommand: (
     panelId: string,
     command: string,
@@ -149,7 +150,8 @@ export const createWorkspaceManagedAiHibernationRuntime = (input: {
     if (openLocalTerminalPanel) {
       const opened = await openLocalTerminalPanel({
         title: session.title,
-        cwd: session.cwd
+        cwd: session.cwd,
+        preserveActiveModule: true
       })
       panel = opened ? panels.value.find((item) => item.id === opened.id || item.sessionId === opened.sessionId) || opened : null
       if (panel?.sessionId) {

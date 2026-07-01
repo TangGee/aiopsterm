@@ -25,6 +25,11 @@ export type ManagedAiProjectOption = {
   latest: number
 }
 
+export type ManagedAiProjectDisplayLabelSet = {
+  compact: string
+  candidates: string[]
+}
+
 export type ManagedAiLibrarySection = {
   key: string
   label: string
@@ -188,6 +193,9 @@ export const managedAiProjectKey = (cwd?: string) => {
   return normalized || '__unknown__'
 }
 
+export const managedAiProjectGroupKey = (session: Pick<ManagedAiSession, 'cwd' | 'canonicalCwd'>) =>
+  managedAiProjectKey(session.canonicalCwd || session.cwd)
+
 const managedAiPathSegments = (cwd?: string) => String(cwd || '').trim().split(/[\\/]+/).filter(Boolean)
 
 export const managedAiProjectLabel = (cwd: string | undefined, unknownPathLabel: string) => {
@@ -197,57 +205,173 @@ export const managedAiProjectLabel = (cwd: string | undefined, unknownPathLabel:
   return parts.at(-1) || normalized
 }
 
-const projectLabelFromSegments = (segments: string[], depth: number) => {
-  if (segments.length === 0) return ''
-  return segments.slice(Math.max(0, segments.length - depth)).join(' / ')
+const projectLabelFromSegments = (segments: string[]) => segments.at(-1) || ''
+
+const circledProjectDuplicateMarkers = [
+  '①',
+  '②',
+  '③',
+  '④',
+  '⑤',
+  '⑥',
+  '⑦',
+  '⑧',
+  '⑨',
+  '⑩',
+  '⑪',
+  '⑫',
+  '⑬',
+  '⑭',
+  '⑮',
+  '⑯',
+  '⑰',
+  '⑱',
+  '⑲',
+  '⑳',
+  '㉑',
+  '㉒',
+  '㉓',
+  '㉔',
+  '㉕',
+  '㉖',
+  '㉗',
+  '㉘',
+  '㉙',
+  '㉚',
+  '㉛',
+  '㉜',
+  '㉝',
+  '㉞',
+  '㉟',
+  '㊱',
+  '㊲',
+  '㊳',
+  '㊴',
+  '㊵',
+  '㊶',
+  '㊷',
+  '㊸',
+  '㊹',
+  '㊺',
+  '㊻',
+  '㊼',
+  '㊽',
+  '㊾',
+  '㊿'
+]
+
+const circledDigitFallback: Record<string, string> = {
+  '0': '⓪',
+  '1': '①',
+  '2': '②',
+  '3': '③',
+  '4': '④',
+  '5': '⑤',
+  '6': '⑥',
+  '7': '⑦',
+  '8': '⑧',
+  '9': '⑨'
 }
 
-export const managedAiProjectDisplayLabels = (sessions: ManagedAiSession[], unknownProjectLabel: string): Map<string, string> => {
+const projectDuplicateMarker = (index: number) =>
+  circledProjectDuplicateMarkers[index] || String(index + 1).replace(/\d/g, (digit) => circledDigitFallback[digit] || digit)
+
+const appendProjectMarker = (label: string, marker?: string) => (marker ? `${label} ${marker}` : label)
+
+const compactHomePath = (path: string) => {
+  const home = (typeof process !== 'undefined' ? process.env?.HOME : '') || ''
+  if (!home || !path.startsWith(home)) return path
+  const rest = path.slice(home.length).replace(/^[/\\]+/, '')
+  return rest ? `~/${rest}` : '~'
+}
+
+const uniqueStrings = (values: string[]) => {
+  const seen = new Set<string>()
+  return values.filter((value) => {
+    const text = value.trim()
+    if (!text || seen.has(text)) return false
+    seen.add(text)
+    return true
+  })
+}
+
+export const managedAiProjectDisplayLabelCandidates = (session: Pick<ManagedAiSession, 'cwd' | 'canonicalCwd'>, compactLabel: string, unknownProjectLabel: string) => {
+  const cwd = String(session.canonicalCwd || session.cwd || '').trim()
+  if (!cwd) return [compactLabel || unknownProjectLabel]
+  const markerMatch = compactLabel.match(/\s([⓪①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳㉑-㊿]+)$/u)
+  const marker = markerMatch?.[1]
+  const segments = managedAiPathSegments(cwd)
+  const last = segments.at(-1) || compactLabel
+  const shortPair = segments.length >= 2 ? segments.slice(-2).join('/') : last
+  const shortTriple = segments.length >= 3 ? segments.slice(-3).join('/') : shortPair
+  const full = compactHomePath(cwd)
+  return uniqueStrings([
+    appendProjectMarker(full, marker),
+    appendProjectMarker(shortTriple, marker),
+    appendProjectMarker(shortPair, marker),
+    compactLabel || appendProjectMarker(last, marker)
+  ])
+}
+
+export const managedAiProjectDisplayLabels = (sessions: ManagedAiSession[], unknownProjectLabel: string): Map<string, ManagedAiProjectDisplayLabelSet> => {
   const projects = new Map<string, string[]>()
   sessions.forEach((session) => {
-    const key = managedAiProjectKey(session.cwd)
+    const key = managedAiProjectGroupKey(session)
     if (projects.has(key)) return
-    projects.set(key, managedAiPathSegments(session.cwd))
+    projects.set(key, managedAiPathSegments(session.canonicalCwd || session.cwd))
   })
 
   const known = [...projects.entries()].filter(([key, segments]) => key !== '__unknown__' && segments.length > 0)
-  const depths = new Map<string, number>(known.map(([key]) => [key, 1]))
+  const duplicateIndexes = new Map<string, number>()
+  const baseLabelGroups = new Map<string, Array<{ key: string; path: string }>>()
+  known.forEach(([key, segments]) => {
+    const label = projectLabelFromSegments(segments)
+    baseLabelGroups.set(label, [...(baseLabelGroups.get(label) || []), { key, path: key }])
+  })
+  baseLabelGroups.forEach((items) => {
+    if (items.length < 2) return
+    items
+      .slice()
+      .sort((first, second) => first.path.localeCompare(second.path))
+      .forEach((item, index) => duplicateIndexes.set(item.key, index))
+  })
 
-  let changed = true
-  while (changed) {
-    changed = false
-    const labels = new Map<string, string[]>()
-    known.forEach(([key, segments]) => {
-      const depth = depths.get(key) || 1
-      const label = projectLabelFromSegments(segments, depth)
-      labels.set(label, [...(labels.get(label) || []), key])
-    })
-    labels.forEach((keys) => {
-      if (keys.length < 2) return
-      keys.forEach((key) => {
-        const segments = projects.get(key) || []
-        const depth = depths.get(key) || 1
-        if (depth < segments.length) {
-          depths.set(key, depth + 1)
-          changed = true
-        }
-      })
-    })
-  }
-
-  const labels = new Map<string, string>()
+  const labels = new Map<string, ManagedAiProjectDisplayLabelSet>()
   projects.forEach((segments, key) => {
     if (key === '__unknown__' || segments.length === 0) {
-      labels.set(key, unknownProjectLabel)
+      labels.set(key, {
+        compact: unknownProjectLabel,
+        candidates: [unknownProjectLabel]
+      })
       return
     }
-    labels.set(key, projectLabelFromSegments(segments, depths.get(key) || 1))
+    const label = projectLabelFromSegments(segments)
+    const duplicateIndex = duplicateIndexes.get(key)
+    const compact = typeof duplicateIndex === 'number' ? `${label} ${projectDuplicateMarker(duplicateIndex)}` : label
+    labels.set(key, {
+      compact,
+      candidates: managedAiProjectDisplayLabelCandidates({ cwd: key, canonicalCwd: key }, compact, unknownProjectLabel)
+    })
   })
   return labels
 }
 
-export const managedAiProjectDisplayLabel = (session: Pick<ManagedAiSession, 'cwd'>, labels: Map<string, string>, unknownProjectLabel: string) =>
-  labels.get(managedAiProjectKey(session.cwd)) || managedAiProjectLabel(session.cwd, unknownProjectLabel)
+export const managedAiProjectDisplayLabelSet = (
+  session: Pick<ManagedAiSession, 'cwd' | 'canonicalCwd'>,
+  labels: Map<string, ManagedAiProjectDisplayLabelSet>,
+  unknownProjectLabel: string
+): ManagedAiProjectDisplayLabelSet => {
+  const known = labels.get(managedAiProjectGroupKey(session))
+  if (known) return known
+  const compact = managedAiProjectLabel(session.canonicalCwd || session.cwd, unknownProjectLabel)
+  return {
+    compact,
+    candidates: managedAiProjectDisplayLabelCandidates(session, compact, unknownProjectLabel)
+  }
+}
+
+export const managedAiProjectDisplayLabel = (session: Pick<ManagedAiSession, 'cwd' | 'canonicalCwd'>, labels: Map<string, ManagedAiProjectDisplayLabelSet>, unknownProjectLabel: string) =>
+  managedAiProjectDisplayLabelSet(session, labels, unknownProjectLabel).compact
 
 export const managedAiSessionDisplayTitle = (session: Pick<ManagedAiSession, 'userTitle' | 'autoTitle' | 'title' | 'summary' | 'id'>) => {
   const userTitle = String(session.userTitle || '').trim()
@@ -269,7 +393,7 @@ export const buildManagedAiLibrarySections = (input: {
   const projectLabels = managedAiProjectDisplayLabels(input.sessions, input.unknownProjectLabel)
   const sections = new Map<string, ManagedAiLibrarySection>()
   input.sessions.forEach((session) => {
-    const key = input.grouping === 'project' ? `project:${managedAiProjectKey(session.cwd)}` : `agent:${session.source}`
+    const key = input.grouping === 'project' ? `project:${managedAiProjectGroupKey(session)}` : `agent:${session.source}`
     const label = input.grouping === 'project' ? managedAiProjectDisplayLabel(session, projectLabels, input.unknownProjectLabel) : managedAiSourceLabel(session.source)
     const existing = sections.get(key)
     sections.set(key, {
@@ -298,11 +422,11 @@ export const managedAiSourceOptions = (sessions: ManagedAiSession[]) => {
 export const managedAiProjectOptions = (sessions: ManagedAiSession[], unknownPathLabel: string): ManagedAiProjectOption[] => {
   const projects = new Map<string, ManagedAiProjectOption>()
   sessions.forEach((session) => {
-    const key = managedAiProjectKey(session.cwd)
+    const key = managedAiProjectGroupKey(session)
     const existing = projects.get(key)
     projects.set(key, {
       key,
-      label: existing?.label || managedAiProjectLabel(session.cwd, unknownPathLabel),
+      label: existing?.label || managedAiProjectLabel(session.canonicalCwd || session.cwd, unknownPathLabel),
       count: (existing?.count || 0) + 1,
       latest: Math.max(existing?.latest || 0, session.lastActivityAt || 0)
     })
@@ -375,9 +499,9 @@ export const visibleManagedAiSessions = (input: {
     if (input.hibernatedOnly && session.hibernated !== true) return false
     if (input.filter !== 'all' && session.state !== input.filter) return false
     if (input.sourceFilter !== 'all' && session.source !== input.sourceFilter) return false
-    if (input.projectFilter !== 'all' && managedAiProjectKey(session.cwd) !== input.projectFilter) return false
+    if (input.projectFilter !== 'all' && managedAiProjectGroupKey(session) !== input.projectFilter) return false
     if (!needle) return true
-    return [session.title, session.summary, session.source, session.cwd, session.id].some((value) => String(value || '').toLowerCase().includes(needle))
+    return [session.title, session.summary, session.source, session.cwd, session.canonicalCwd, session.id].some((value) => String(value || '').toLowerCase().includes(needle))
   })
 }
 

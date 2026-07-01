@@ -10,7 +10,9 @@ import {
   managedAiPanelModeForSession,
   managedAiPanelModeStateFilter,
   managedAiProjectDisplayLabel,
+  managedAiProjectDisplayLabelSet,
   managedAiProjectDisplayLabels,
+  managedAiProjectGroupKey,
   managedAiProjectKey,
   managedAiProjectOptions,
   managedAiSessionDisplayTitle,
@@ -112,6 +114,9 @@ const makeSession = (input: {
   lastEvent?: AiAgentSessionEventName
   lastActivityAt: number
   cwd?: string
+  canonicalCwd?: string
+  gitBranch?: string
+  gitDirty?: boolean
   requestKind?: ManagedAiRequestKind
   decisionMode?: ManagedAiDecisionMode
   hibernated?: boolean
@@ -128,6 +133,9 @@ const makeSession = (input: {
   createdAt: input.lastActivityAt - 10,
   updatedAt: input.lastActivityAt,
   ...(input.cwd ? { cwd: input.cwd } : {}),
+  ...(input.canonicalCwd ? { canonicalCwd: input.canonicalCwd } : {}),
+  ...(input.gitBranch ? { gitBranch: input.gitBranch } : {}),
+  ...(typeof input.gitDirty === 'boolean' ? { gitDirty: input.gitDirty } : {}),
   requestKind: input.requestKind || 'permission',
   decisionMode: input.decisionMode || 'blocking',
   ...(input.hibernated ? { hibernated: input.hibernated } : {}),
@@ -190,6 +198,7 @@ describe('aiSessionsPanelViewRuntime', () => {
   it('projects source and project options with stable labels, counts, and recency ordering', () => {
     expect(managedAiSessionKey(sessions[0])).toBe('claude-code:claude-api')
     expect(managedAiProjectKey(undefined)).toBe('__unknown__')
+    expect(managedAiProjectGroupKey({ cwd: '/link/api', canonicalCwd: '/work/api' })).toBe('/work/api')
     expect(managedAiSourceOptions(sessions)).toEqual(['claude-code', 'codex', 'cursor', 'gemini'])
 
     expect(managedAiProjectOptions(sessions, 'Unknown path')).toEqual([
@@ -199,7 +208,66 @@ describe('aiSessionsPanelViewRuntime', () => {
     ])
   })
 
-  it('builds project-first row labels and library sections with path disambiguation', () => {
+  it('groups symlink aliases by canonical project path before adding duplicate markers', () => {
+    const aliasedProjectSessions = [
+      makeSession({
+        id: 'codex-real-aiopsterm',
+        source: 'codex',
+        title: 'Real cwd',
+        state: 'idle',
+        lastActivityAt: 500,
+        cwd: '/home/tlinux/sdd/work/learn_ai/aiopsterm',
+        canonicalCwd: '/home/tlinux/sdd/work/learn_ai/aiopsterm',
+        requestKind: 'telemetry',
+        decisionMode: 'telemetry'
+      }),
+      makeSession({
+        id: 'claude-link-aiopsterm',
+        source: 'claude-code',
+        title: 'Link cwd',
+        state: 'idle',
+        lastActivityAt: 490,
+        cwd: '/home/tlinux/sdd/links/aiopsterm',
+        canonicalCwd: '/home/tlinux/sdd/work/learn_ai/aiopsterm',
+        requestKind: 'telemetry',
+        decisionMode: 'telemetry'
+      }),
+      makeSession({
+        id: 'gemini-other-aiopsterm',
+        source: 'gemini',
+        title: 'Other cwd',
+        state: 'idle',
+        lastActivityAt: 480,
+        cwd: '/tmp/other/aiopsterm',
+        canonicalCwd: '/tmp/other/aiopsterm',
+        requestKind: 'telemetry',
+        decisionMode: 'telemetry'
+      })
+    ]
+    const projectLabels = managedAiProjectDisplayLabels(aliasedProjectSessions, 'Unknown project')
+
+    expect(managedAiProjectDisplayLabel(aliasedProjectSessions[0], projectLabels, 'Unknown project')).toBe('aiopsterm ①')
+    expect(managedAiProjectDisplayLabel(aliasedProjectSessions[1], projectLabels, 'Unknown project')).toBe('aiopsterm ①')
+    expect(managedAiProjectDisplayLabel(aliasedProjectSessions[2], projectLabels, 'Unknown project')).toBe('aiopsterm ②')
+    expect(managedAiProjectDisplayLabelSet(aliasedProjectSessions[0], projectLabels, 'Unknown project').candidates).toEqual([
+      '~/sdd/work/learn_ai/aiopsterm ①',
+      'work/learn_ai/aiopsterm ①',
+      'learn_ai/aiopsterm ①',
+      'aiopsterm ①'
+    ])
+    expect(
+      buildManagedAiLibrarySections({
+        sessions: aliasedProjectSessions,
+        grouping: 'project',
+        unknownProjectLabel: 'Unknown project'
+      }).map((section) => [section.label, section.count, section.sessions.map((session) => session.id)])
+    ).toEqual([
+      ['aiopsterm ①', 2, ['codex-real-aiopsterm', 'claude-link-aiopsterm']],
+      ['aiopsterm ②', 1, ['gemini-other-aiopsterm']]
+    ])
+  })
+
+  it('builds project-first row labels and library sections with lightweight duplicate markers', () => {
     const duplicateProjectSessions = [
       ...sessions,
       makeSession({
@@ -216,8 +284,8 @@ describe('aiSessionsPanelViewRuntime', () => {
     ]
     const projectLabels = managedAiProjectDisplayLabels(duplicateProjectSessions, 'Unknown project')
 
-    expect(managedAiProjectDisplayLabel(duplicateProjectSessions[0], projectLabels, 'Unknown project')).toBe('work / api')
-    expect(managedAiProjectDisplayLabel(duplicateProjectSessions[4], projectLabels, 'Unknown project')).toBe('marketing / api')
+    expect(managedAiProjectDisplayLabel(duplicateProjectSessions[0], projectLabels, 'Unknown project')).toBe('api ①')
+    expect(managedAiProjectDisplayLabel(duplicateProjectSessions[4], projectLabels, 'Unknown project')).toBe('api ②')
     expect(managedAiProjectDisplayLabel(sessions[3], projectLabels, 'Unknown project')).toBe('Unknown project')
     expect(managedAiSessionDisplayTitle(duplicateProjectSessions[4])).toBe('Review campaign endpoint')
 
@@ -228,9 +296,9 @@ describe('aiSessionsPanelViewRuntime', () => {
         unknownProjectLabel: 'Unknown project'
       }).map((section) => [section.label, section.count, section.sessions.map((session) => session.id)])
     ).toEqual([
-      ['marketing / api', 1, ['codex-marketing-api']],
+      ['api ②', 1, ['codex-marketing-api']],
       ['Unknown project', 1, ['cursor-unknown']],
-      ['work / api', 2, ['claude-api', 'gemini-api']],
+      ['api ①', 2, ['claude-api', 'gemini-api']],
       ['docs', 1, ['codex-docs']]
     ])
 

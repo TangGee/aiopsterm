@@ -116,6 +116,10 @@ export const isManagedAiSessionTimelineEvent = (value: unknown): value is Manage
   isOptionalField(value, 'decisionMode', isManagedAiDecisionMode) &&
   isOptionalField(value, 'waitTimeoutMs', isPositiveInteger) &&
   isOptionalField(value, 'toolName', isNonEmptyString) &&
+  isOptionalField(value, 'canonicalCwd', isNonEmptyString) &&
+  isOptionalField(value, 'gitBranch', isNonEmptyString) &&
+  isOptionalField(value, 'gitDirty', (item) => typeof item === 'boolean') &&
+  isOptionalField(value, 'gitStatusUpdatedAt', (item) => typeof item === 'number' && Number.isFinite(item)) &&
   isOptionalField(value, 'launchCommand', isNonEmptyString) &&
   isOptionalField(value, 'resumeCommand', isNonEmptyString) &&
   isOptionalField(value, 'processId', isPositiveInteger) &&
@@ -155,6 +159,10 @@ export const isManagedAiSessionRecord = (value: unknown): value is ManagedAiSess
   typeof value.updatedAt === 'number' &&
   isOptionalField(value, 'waitTimeoutMs', isPositiveInteger) &&
   isOptionalField(value, 'toolName', isNonEmptyString) &&
+  isOptionalField(value, 'canonicalCwd', isNonEmptyString) &&
+  isOptionalField(value, 'gitBranch', isNonEmptyString) &&
+  isOptionalField(value, 'gitDirty', (item) => typeof item === 'boolean') &&
+  isOptionalField(value, 'gitStatusUpdatedAt', (item) => typeof item === 'number' && Number.isFinite(item)) &&
   isOptionalField(value, 'launchCommand', isNonEmptyString) &&
   isOptionalField(value, 'resumeCommand', isNonEmptyString) &&
   isOptionalField(value, 'processId', isPositiveInteger) &&

@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'crypto'
+import { realpathSync } from 'fs'
 import type {
   AiAgentSessionEvent,
   AiAgentSessionEventName,
@@ -70,6 +71,22 @@ export const cleanOptionalText = (value: unknown) => {
   return text || undefined
 }
 
+export const canonicalCwdFor = (cwd?: string, provided?: unknown) => {
+  const explicit = cleanOptionalText(provided)
+  if (explicit) return explicit
+  const path = cleanOptionalText(cwd)
+  if (!path) return undefined
+  try {
+    return realpathSync.native(path)
+  } catch {
+    try {
+      return realpathSync(path)
+    } catch {
+      return path
+    }
+  }
+}
+
 const shellQuote = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`
 
 const shellToken = (value: string) => (/^[A-Za-z0-9_./:=@+-]+$/.test(value) ? value : shellQuote(value))
@@ -115,6 +132,8 @@ const normalizeBoolean = (value: unknown) => {
   }
   return undefined
 }
+
+const normalizeTimestamp = (value: unknown) => (typeof value === 'number' && Number.isFinite(value) ? value : undefined)
 
 const normalizeRequestKind = (value: unknown): ManagedAiRequestKind | undefined => {
   const normalized = cleanText(value).toLowerCase().replace(/[\s_-]+/g, '')
@@ -616,6 +635,11 @@ const normalizeStoredTimelineEvent = (value: Record<string, unknown>, fallbackSo
   const toolName = cleanOptionalText(value.toolName || value.tool_name)
   const requestKind = normalizeRequestKind(value.requestKind || value.request_kind) || requestKindFor(source, event, value, toolName)
   const decisionMode = normalizeDecisionMode(value.decisionMode || value.decision_mode) || decisionModeFor(source, event, value, requestKind)
+  const cwd = cleanOptionalText(value.cwd)
+  const canonicalCwd = canonicalCwdFor(cwd, value.canonicalCwd || value.canonical_cwd || value.realCwd || value.real_cwd || value.realpath)
+  const gitBranch = cleanOptionalText(value.gitBranch || value.git_branch)
+  const gitDirty = normalizeBoolean(value.gitDirty ?? value.git_dirty)
+  const gitStatusUpdatedAt = normalizeTimestamp(value.gitStatusUpdatedAt ?? value.git_status_updated_at)
   return {
     source,
     event,
@@ -629,7 +653,11 @@ const normalizeStoredTimelineEvent = (value: Record<string, unknown>, fallbackSo
     ...(cleanOptionalText(value.panelId) ? { panelId: cleanOptionalText(value.panelId) } : {}),
     ...(cleanOptionalText(value.terminalSessionId) ? { terminalSessionId: cleanOptionalText(value.terminalSessionId) } : {}),
     ...(cleanOptionalText(value.workspaceId) ? { workspaceId: cleanOptionalText(value.workspaceId) } : {}),
-    ...(cleanOptionalText(value.cwd) ? { cwd: cleanOptionalText(value.cwd) } : {}),
+    ...(cwd ? { cwd } : {}),
+    ...(canonicalCwd ? { canonicalCwd } : {}),
+    ...(gitBranch ? { gitBranch } : {}),
+    ...(typeof gitDirty === 'boolean' ? { gitDirty } : {}),
+    ...(gitStatusUpdatedAt ? { gitStatusUpdatedAt } : {}),
     ...(cleanOptionalText(value.transcriptPath) ? { transcriptPath: cleanOptionalText(value.transcriptPath) } : {}),
     ...(cleanOptionalText(value.requestId) ? { requestId: cleanOptionalText(value.requestId) } : {}),
     ...(cleanPositiveInteger(value.waitTimeoutMs || value.wait_timeout_ms) ? { waitTimeoutMs: cleanPositiveInteger(value.waitTimeoutMs || value.wait_timeout_ms) } : {}),
@@ -673,6 +701,11 @@ export const normalizeStoredSession = (value: unknown): ManagedAiSessionRecord |
   const storedToolName = cleanOptionalText(value.toolName || value.tool_name)
   const requestKind = normalizeRequestKind(value.requestKind || value.request_kind) || latestEvent?.requestKind || requestKindFor(source, lastEvent, value, storedToolName)
   const decisionMode = normalizeDecisionMode(value.decisionMode || value.decision_mode) || latestEvent?.decisionMode || decisionModeFor(source, lastEvent, value, requestKind)
+  const cwd = cleanOptionalText(value.cwd)
+  const canonicalCwd = canonicalCwdFor(cwd, value.canonicalCwd || value.canonical_cwd || value.realCwd || value.real_cwd || value.realpath || latestEvent?.canonicalCwd)
+  const gitBranch = cleanOptionalText(value.gitBranch || value.git_branch || latestEvent?.gitBranch)
+  const gitDirty = normalizeBoolean(value.gitDirty ?? value.git_dirty ?? latestEvent?.gitDirty)
+  const gitStatusUpdatedAt = normalizeTimestamp(value.gitStatusUpdatedAt ?? value.git_status_updated_at ?? latestEvent?.gitStatusUpdatedAt)
   return {
     id,
     source,
@@ -694,7 +727,11 @@ export const normalizeStoredSession = (value: unknown): ManagedAiSessionRecord |
     ...(cleanOptionalText(value.panelId) ? { panelId: cleanOptionalText(value.panelId) } : {}),
     ...(cleanOptionalText(value.terminalSessionId) ? { terminalSessionId: cleanOptionalText(value.terminalSessionId) } : {}),
     ...(cleanOptionalText(value.workspaceId) ? { workspaceId: cleanOptionalText(value.workspaceId) } : {}),
-    ...(cleanOptionalText(value.cwd) ? { cwd: cleanOptionalText(value.cwd) } : {}),
+    ...(cwd ? { cwd } : {}),
+    ...(canonicalCwd ? { canonicalCwd } : {}),
+    ...(gitBranch ? { gitBranch } : {}),
+    ...(typeof gitDirty === 'boolean' ? { gitDirty } : {}),
+    ...(gitStatusUpdatedAt ? { gitStatusUpdatedAt } : {}),
     ...(cleanOptionalText(value.transcriptPath) ? { transcriptPath: cleanOptionalText(value.transcriptPath) } : {}),
     ...(cleanOptionalText(value.pendingRequestId) ? { pendingRequestId: cleanOptionalText(value.pendingRequestId) } : {}),
     requestKind,
@@ -756,6 +793,10 @@ export const normalizeAiAgentSessionEventInput = (input: unknown, now = Date.now
   const terminalSessionId = cleanOptionalText(record.terminalSessionId || record.terminal_session_id || record.terminalId || record.terminal_id)
   const workspaceId = cleanOptionalText(record.workspaceId || record.workspace_id)
   const cwd = cleanOptionalText(record.cwd || record.workingDirectory || record.working_directory || record.project_dir || record.projectDir || record.project_path || record.projectPath)
+  const canonicalCwd = canonicalCwdFor(cwd, record.canonicalCwd || record.canonical_cwd || record.realCwd || record.real_cwd || record.realpath)
+  const gitBranch = cleanOptionalText(record.gitBranch || record.git_branch)
+  const gitDirty = normalizeBoolean(record.gitDirty ?? record.git_dirty)
+  const gitStatusUpdatedAt = normalizeTimestamp(record.gitStatusUpdatedAt ?? record.git_status_updated_at)
   const transcriptPath = cleanOptionalText(record.transcriptPath || record.transcript_path)
   const requestId = cleanOptionalText(record.requestId || record.request_id || record.tool_use_id)
   const toolName = toolNameFor(record)
@@ -781,6 +822,10 @@ export const normalizeAiAgentSessionEventInput = (input: unknown, now = Date.now
     ...(terminalSessionId ? { terminalSessionId } : {}),
     ...(workspaceId ? { workspaceId } : {}),
     ...(cwd ? { cwd } : {}),
+    ...(canonicalCwd ? { canonicalCwd } : {}),
+    ...(gitBranch ? { gitBranch } : {}),
+    ...(typeof gitDirty === 'boolean' ? { gitDirty } : {}),
+    ...(gitStatusUpdatedAt ? { gitStatusUpdatedAt } : {}),
     ...(transcriptPath ? { transcriptPath } : {}),
     ...(requestId ? { requestId } : {}),
     requestKind,

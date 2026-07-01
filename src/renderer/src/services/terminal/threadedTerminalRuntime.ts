@@ -2,6 +2,7 @@ import CoreWorker from '@/services/terminal/threadedTerminalCoreWorker?worker'
 import RenderWorker from '@/services/terminal/threadedTerminalRenderWorker?worker'
 import { writeRendererRuntimeLog } from '@/services/app/runtimeLogClient'
 import { copyTextToClipboard, readTextFromClipboard } from '@/services/app/clipboardRuntime'
+import { localFilesClient } from '@/services/app/localFilesClient'
 import { shouldUseTerminalDebugLogs, terminalRenderBackend } from '@shared/runtimeSwitches'
 import {
   fallbackTerminalCellMetrics,
@@ -682,6 +683,62 @@ const isPasteShortcut = (event: KeyboardEvent) => {
   if (event.shiftKey && (event.ctrlKey || event.metaKey) && !event.altKey) return true
   return event.metaKey && !event.ctrlKey && !event.altKey
 }
+
+const terminalDropSafeBarePathPattern = /^[A-Za-z0-9_@%+=:,./-]+$/
+
+export const quoteTerminalDropPath = (path: string) => {
+  const normalized = path.trim()
+  if (!normalized) return ''
+  if (terminalDropSafeBarePathPattern.test(normalized)) return normalized
+  return `'${normalized.replace(/'/g, `'\\''`)}'`
+}
+
+const localPathFromFileUri = (uri: string) => {
+  const trimmed = uri.trim()
+  if (!trimmed) return ''
+  try {
+    const parsed = new URL(trimmed)
+    if (parsed.protocol !== 'file:') return ''
+    const pathname = decodeURIComponent(parsed.pathname)
+    if (parsed.hostname && parsed.hostname !== 'localhost') return `//${parsed.hostname}${pathname}`
+    return /^\/[A-Za-z]:\//.test(pathname) ? pathname.slice(1) : pathname
+  } catch {
+    return ''
+  }
+}
+
+const filePathFromDropFile = (file: File) => {
+  const getPathForFile = localFilesClient.getPathForFile()
+  return ((getPathForFile ? getPathForFile(file) : '') || String((file as File & { path?: string }).path || '')).trim()
+}
+
+const droppedFilePaths = (dataTransfer: DataTransfer | null | undefined) => {
+  if (!dataTransfer) return []
+  const filePaths = Array.from(dataTransfer.files || [])
+    .map(filePathFromDropFile)
+    .filter(Boolean)
+  if (filePaths.length) return filePaths
+  const uriList = dataTransfer.getData?.('text/uri-list') || ''
+  return uriList
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith('#'))
+    .map(localPathFromFileUri)
+    .filter(Boolean)
+}
+
+export const hasTerminalDropFilePayload = (dataTransfer: DataTransfer | null | undefined) => {
+  if (!dataTransfer) return false
+  if (dataTransfer.files?.length) return true
+  const types = Array.from(dataTransfer.types || [])
+  return types.includes('Files') || types.includes('text/uri-list')
+}
+
+export const terminalDropInputText = (dataTransfer: DataTransfer | null | undefined) =>
+  droppedFilePaths(dataTransfer)
+    .map(quoteTerminalDropPath)
+    .filter(Boolean)
+    .join(' ')
 
 const keyEventToInput = (event: KeyboardEvent) => {
   if (event.defaultPrevented) return ''
@@ -2197,6 +2254,24 @@ export class ThreadedTerminalHost {
     }, { signal })
     host.addEventListener('copy', (event) => {
       void this.copySelectionToClipboard(event)
+    }, { signal })
+    const handleFileDrag = (event: DragEvent) => {
+      if (!hasTerminalDropFilePayload(event.dataTransfer)) return
+      event.preventDefault()
+      event.stopPropagation()
+      if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'
+    }
+    host.addEventListener('dragenter', handleFileDrag, { signal })
+    host.addEventListener('dragover', handleFileDrag, { signal })
+    host.addEventListener('drop', (event) => {
+      if (!hasTerminalDropFilePayload(event.dataTransfer)) return
+      event.preventDefault()
+      event.stopPropagation()
+      const text = terminalDropInputText(event.dataTransfer)
+      if (!text) return
+      this.focusInput()
+      this.resetInputElement()
+      this.input(text)
     }, { signal })
     const handleKeydown = (event: KeyboardEvent) => {
       this.handleKeyboardEvent(event)

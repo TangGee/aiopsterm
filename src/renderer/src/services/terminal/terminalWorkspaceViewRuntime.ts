@@ -11,6 +11,8 @@ import {
   ThreadedTerminalSearchAddon,
   createThreadedTerminalHost,
   isThreadedTerminalHost,
+  terminalDropInputText,
+  hasTerminalDropFilePayload,
   threadedTerminalCapability,
   threadedTerminalPriorityFor
 } from '@/services/terminal/threadedTerminalRuntime'
@@ -41,6 +43,7 @@ type XtermLike = {
   clear: () => void
   dispose: () => void
   write: (data: string, callback?: () => void) => void
+  input?: (data: string, wasUserInput?: boolean) => void
   scrollToBottom: () => void
   refresh: (start: number, end: number) => void
   ensureSurfaceAttached?: (options?: { forceGeometry?: boolean }) => boolean
@@ -65,6 +68,7 @@ export type TerminalView = {
   search: SearchLike
   lastOutput: string
   openedElement?: HTMLElement
+  domDisposables?: Array<() => void>
   outputQueue?: TerminalOutputWriteQueue
   outputPerf?: TerminalOutputPerfSummary
   clearPendingOutput?: () => void
@@ -394,6 +398,34 @@ export const createTerminalWorkspaceViewRuntime = ({
       }
       void writeXtermInput(panel.id, data)
     })
+    const openedElement = view.openedElement
+    if (openedElement && !isThreadedTerminalHost(view.terminal)) {
+      const handleFileDrag = (event: DragEvent) => {
+        if (!hasTerminalDropFilePayload(event.dataTransfer)) return
+        event.preventDefault()
+        event.stopPropagation()
+        if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'
+      }
+      openedElement.addEventListener('dragenter', handleFileDrag)
+      openedElement.addEventListener('dragover', handleFileDrag)
+      const handleFileDrop = (event: DragEvent) => {
+        if (!hasTerminalDropFilePayload(event.dataTransfer)) return
+        event.preventDefault()
+        event.stopPropagation()
+        const text = terminalDropInputText(event.dataTransfer)
+        if (!text) return
+        view.terminal.focus()
+        if (view.terminal.input) view.terminal.input(text, true)
+        else void writeXtermInput(panel.id, text)
+      }
+      openedElement.addEventListener('drop', handleFileDrop)
+      view.domDisposables = [
+        ...(view.domDisposables || []),
+        () => openedElement.removeEventListener('dragenter', handleFileDrag),
+        () => openedElement.removeEventListener('dragover', handleFileDrag),
+        () => openedElement.removeEventListener('drop', handleFileDrop)
+      ]
+    }
     view.terminal.onSelectionChange(() => {
       const selectedText = view.terminal.getSelection()
       if (selectedText.trim()) void mirrorTextToClipboardQuietly(selectedText.trim())
@@ -446,6 +478,7 @@ export const createTerminalWorkspaceViewRuntime = ({
     clearQueuedTerminalOutput(view, { dispose: true })
     flushTerminalOutputPerf(panelId, view, reason)
     view.resizeObserver?.disconnect()
+    view.domDisposables?.forEach((dispose) => dispose())
     view.terminal.dispose()
     terminalViews.delete(panelId)
     terminalViewPanels.delete(panelId)
@@ -1067,13 +1100,7 @@ export const createTerminalWorkspaceViewRuntime = ({
           view.terminal.detachSurface()
           return
         }
-        clearQueuedTerminalOutput(view, { dispose: true })
-        flushTerminalOutputPerf(panelId, view, 'view-disposed')
-        view.resizeObserver?.disconnect()
-        view.terminal.dispose()
-        view.openedElement = undefined
-        terminalViews.delete(panelId)
-        terminalViewPanels.delete(panelId)
+        disposeTerminalView(panelId, 'view-disposed')
       }
       return
     }

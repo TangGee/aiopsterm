@@ -10,6 +10,7 @@ import type {
   ManagedAiSessionTimelineEvent
 } from '@shared/contracts/managedAiSessions'
 import {
+  canonicalCwdFor,
   cleanOptionalText,
   compactRawRecord,
   resumeCommandFor,
@@ -40,6 +41,10 @@ type CandidateBase = {
   title?: string
   summary?: string
   cwd?: string
+  canonicalCwd?: string
+  gitBranch?: string
+  gitDirty?: boolean
+  gitStatusUpdatedAt?: number
   transcriptPath?: string
   modifiedAt: number
   model?: string
@@ -120,6 +125,7 @@ const importedRecordFor = (candidate: CandidateBase, now: number): ImportedAgent
   const title = normalizeImportedTitle(candidate.source, candidate.title, candidate.cwd)
   const summary = normalizeImportedSummary(candidate.summary, 'Imported from local agent history')
   const resumeCommand = candidate.resumeCommand || resumeCommandFor(candidate.source, candidate.sessionId, candidate.cwd, candidate.launchCommand)
+  const canonicalCwd = canonicalCwdFor(candidate.cwd, candidate.canonicalCwd)
   const event: ManagedAiSessionTimelineEvent = {
     id: importedEventId(candidate),
     source: candidate.source,
@@ -131,6 +137,10 @@ const importedRecordFor = (candidate: CandidateBase, now: number): ImportedAgent
     requestKind: 'telemetry',
     decisionMode: 'telemetry',
     ...(candidate.cwd ? { cwd: candidate.cwd } : {}),
+    ...(canonicalCwd ? { canonicalCwd } : {}),
+    ...(candidate.gitBranch ? { gitBranch: candidate.gitBranch } : {}),
+    ...(typeof candidate.gitDirty === 'boolean' ? { gitDirty: candidate.gitDirty } : {}),
+    ...(candidate.gitStatusUpdatedAt ? { gitStatusUpdatedAt: candidate.gitStatusUpdatedAt } : {}),
     ...(candidate.transcriptPath ? { transcriptPath: candidate.transcriptPath } : {}),
     ...(resumeCommand ? { resumeCommand } : {}),
     raw: compactRawRecord({
@@ -151,6 +161,10 @@ const importedRecordFor = (candidate: CandidateBase, now: number): ImportedAgent
     createdAt: candidate.modifiedAt || now,
     updatedAt: now,
     ...(candidate.cwd ? { cwd: candidate.cwd } : {}),
+    ...(canonicalCwd ? { canonicalCwd } : {}),
+    ...(candidate.gitBranch ? { gitBranch: candidate.gitBranch } : {}),
+    ...(typeof candidate.gitDirty === 'boolean' ? { gitDirty: candidate.gitDirty } : {}),
+    ...(candidate.gitStatusUpdatedAt ? { gitStatusUpdatedAt: candidate.gitStatusUpdatedAt } : {}),
     ...(candidate.transcriptPath ? { transcriptPath: candidate.transcriptPath } : {}),
     requestKind: 'telemetry',
     decisionMode: 'telemetry',
@@ -326,6 +340,7 @@ const importCodexFromSqlite = async (codexHome: string, limit: number): Promise<
           transcriptPath: cleanOptionalText(row.rollout_path),
           modifiedAt: Number(row.updated_at_ms || 0) || safeStatMtime(cleanOptionalText(row.rollout_path) || ''),
           model: cleanOptionalText(row.model),
+          gitBranch: cleanOptionalText(row.git_branch),
           resumeCommand: codexResumeCommand(row, cwd)
         } satisfies CandidateBase
       })
