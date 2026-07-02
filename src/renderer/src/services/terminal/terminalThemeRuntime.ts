@@ -39,10 +39,37 @@ const safeSystemTheme = () => {
   return 'dark'
 }
 
+const ubuntuTerminalTheme = (background: string): TerminalRuntimeTheme => ({
+  background,
+  foreground: '#ffffff',
+  cursor: '#ffffff',
+  selectionBackground: '#75507b88',
+  black: '#2e3436',
+  red: '#cc0000',
+  green: '#4e9a06',
+  yellow: '#c4a000',
+  blue: '#3465a4',
+  magenta: '#75507b',
+  cyan: '#06989a',
+  white: '#d3d7cf',
+  brightBlack: '#555753',
+  brightRed: '#ef2929',
+  brightGreen: '#8ae234',
+  brightYellow: '#fce94f',
+  brightBlue: '#729fcf',
+  brightMagenta: '#ad7fa8',
+  brightCyan: '#34e2e2',
+  brightWhite: '#eeeeec',
+  scrollbarTrack: '#6d4f6366',
+  scrollbarThumb: '#c8b7c299',
+  scrollbarThumbHover: '#ad7fa8'
+})
+
 export const terminalThemeForAppTheme = (themeId: string, options: { transparentBackground?: boolean } = {}): TerminalRuntimeTheme => {
   const preset = resolveThemePreset(themeId, safeSystemTheme())
   const tokens = preset.tokens
-  const background = options.transparentBackground ? 'rgba(0, 0, 0, 0)' : tokens['--bg']
+  const background = options.transparentBackground && preset.id !== 'ubuntu-terminal' ? 'rgba(0, 0, 0, 0)' : tokens['--bg']
+  if (preset.id === 'ubuntu-terminal') return ubuntuTerminalTheme(background)
   return {
     background,
     foreground: tokens['--text'],

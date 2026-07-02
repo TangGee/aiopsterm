@@ -2250,6 +2250,12 @@ describe('workspace store', () => {
     expect(document.documentElement.classList.contains('theme-dark')).toBe(true)
     expect(document.documentElement.style.getPropertyValue('--accent')).toBe('#7e9cd8')
 
+    await store.saveConfig({ theme: 'ubuntu-terminal' })
+    expect(store.config.theme).toBe('ubuntu-terminal')
+    expect(document.documentElement.dataset.theme).toBe('dark')
+    expect(document.documentElement.dataset.themeId).toBe('ubuntu-terminal')
+    expect(document.documentElement.style.getPropertyValue('--bg')).toBe('#300A24')
+
     await store.saveConfig({ theme: 'auto' })
     expect(store.config.theme).toBe('auto')
     expect(document.documentElement.dataset.themeId).toBe('light')

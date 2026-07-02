@@ -4,7 +4,7 @@ This page controls app-wide appearance, language, default layout, and built-in e
 
 ## Basic Settings
 
-- Theme: Changes the app color theme. `System` follows the operating system; `Default` uses aiopsterm built-in themes; `Official` contains third-party style presets.
+- Theme: Changes the app color theme. `System` follows the operating system; `Default` uses aiopsterm built-in themes; `Official` contains third-party style presets plus `Ubuntu Terminal`, which matches the Ubuntu/GNOME Terminal aubergine background and terminal palette.
 - Background: Controls the app shell background. `Default Background` disables custom backgrounds; presets apply bundled low-distraction backgrounds; upload selects a local JPG, PNG, WebP, or GIF.
 - Delete custom background: Removes the saved custom background and returns to no background.
 - Opacity: Appears only when a background is selected. Lower values make the background less visible.

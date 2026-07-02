@@ -331,6 +331,19 @@
   background: transparent !important;
 }
 
+:root[data-theme-id='ubuntu-terminal'] .app-shell.has-app-background .ai-codex-xterm-stack,
+:root[data-theme-id='ubuntu-terminal'] .app-shell.has-app-background .ai-codex-xterm-stack.is-idle {
+  background: var(--terminal-host-bg);
+  backdrop-filter: none;
+}
+
+:root[data-theme-id='ubuntu-terminal'] .app-shell.has-app-background .ai-codex-xterm .xterm-viewport,
+:root[data-theme-id='ubuntu-terminal'] .app-shell.has-app-background .ai-codex-xterm .xterm-screen,
+:root[data-theme-id='ubuntu-terminal'] .app-shell.has-app-background .ai-codex-xterm.is-idle .xterm-viewport,
+:root[data-theme-id='ubuntu-terminal'] .app-shell.has-app-background .ai-codex-xterm.is-idle .xterm-screen {
+  background: var(--terminal-host-bg) !important;
+}
+
 .ai-codex-xterm.threaded-terminal-host {
   border: 0;
   border-radius: 0;

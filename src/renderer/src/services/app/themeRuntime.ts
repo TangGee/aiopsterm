@@ -6,6 +6,7 @@ export type ThemeId =
   | 'light'
   | 'termius-dark'
   | 'termius-light'
+  | 'ubuntu-terminal'
   | 'flexoki-dark'
   | 'flexoki-light'
   | 'kanagawa-wave'
@@ -124,6 +125,26 @@ export const themePresets: Record<Exclude<ThemeId, 'auto'>, ThemePreset> = {
       '--warn': '#b08800',
       '--danger': '#d03035',
       '--shadow': lightShadow
+    }
+  },
+  'ubuntu-terminal': {
+    id: 'ubuntu-terminal',
+    name: 'Ubuntu Terminal',
+    appearance: 'dark',
+    tokens: {
+      '--bg': '#300A24',
+      '--surface': '#3b102d',
+      '--surface-2': '#461738',
+      '--surface-3': '#512043',
+      '--border': '#6d4f63',
+      '--text': '#ffffff',
+      '--muted': '#c8b7c2',
+      '--accent': '#3465a4',
+      '--accent-2': '#4e9a06',
+      '--success': '#4e9a06',
+      '--warn': '#c4a000',
+      '--danger': '#cc0000',
+      '--shadow': '0 18px 48px rgb(48 10 36 / 0.38)'
     }
   },
   'flexoki-dark': {

@@ -69,7 +69,7 @@
   grid-template-columns: minmax(0, 1fr);
   grid-template-rows: 28px minmax(0, 1fr);
   border: 1px solid var(--border);
-  background: #090b10;
+  background: var(--terminal-host-bg, #090b10);
   border-radius: 8px;
   overflow: hidden;
   position: relative;
@@ -77,7 +77,7 @@
 }
 
 .terminal-pane:has(.threaded-terminal-host) {
-  background: transparent;
+  background: var(--threaded-terminal-pane-bg, transparent);
 }
 
 .terminal-pane:has(.threaded-terminal-host) > .xterm-host {

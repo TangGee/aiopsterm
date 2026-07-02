@@ -73,11 +73,16 @@
 }
 
 .app-shell.has-app-background .terminal-pane {
-  background: color-mix(in srgb, #090b10 94%, transparent);
+  background: color-mix(in srgb, var(--terminal-host-bg, #090b10) 94%, transparent);
 }
 
 .app-shell.has-app-background .terminal-pane:has(.threaded-terminal-host) {
-  background: transparent;
+  background: var(--threaded-terminal-pane-bg, transparent);
+}
+
+:root[data-theme-id='ubuntu-terminal'] .app-shell.has-app-background .terminal-pane,
+:root[data-theme-id='ubuntu-terminal'] .app-shell.has-app-background .terminal-pane:has(.threaded-terminal-host) {
+  background: var(--threaded-terminal-pane-bg);
 }
 
 .app-shell.has-app-background .terminal-pane.knowledge-pane {

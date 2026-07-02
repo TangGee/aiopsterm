@@ -6,6 +6,7 @@ This page controls defaults for new terminal sessions and opened terminal panes.
 
 - Terminal Type: Sets xterm `termName` and the `TERM` value for new local shells, SSH shells, and relay shells. It affects capability detection, color support, and full-screen program compatibility more than appearance.
 - Font: Terminal font family. It is visible only when the system has or can match the font.
+- Ubuntu Terminal theme: Select `Ubuntu Terminal` under General -> Theme to use the Ubuntu/GNOME Terminal-style solid background and ANSI color palette. For the closest text shape, also select `Ubuntu Mono` here when the font is installed on the system.
 - Font Size: Default terminal font size. Pane-local zoom can override it until the pane closes.
 - ScrollBack: Number of history lines kept by the terminal. Higher values keep more output and use more memory.
 - Cursor Style: Block, bar, or underline cursor.

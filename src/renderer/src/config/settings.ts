@@ -63,6 +63,7 @@ export const settingsThemeOptions: ThemeOption[] = [
   { value: 'light', label: '浅色', group: 'default', background: '#f7fafc', surface: '#e8edf4', accent: '#1677ff' },
   { value: 'termius-dark', label: 'Termius Dark', group: 'official', background: '#111417', surface: '#202830', accent: '#6c9cf4' },
   { value: 'termius-light', label: 'Termius Light', group: 'official', background: '#ffffff', surface: '#eef3f8', accent: '#0366d6' },
+  { value: 'ubuntu-terminal', label: 'Ubuntu Terminal', group: 'official', background: '#300A24', surface: '#461738', accent: '#4E9A06' },
   { value: 'flexoki-dark', label: 'Flexoki Dark', group: 'official', background: '#100f0f', surface: '#1c1b1a', accent: '#da702c' },
   { value: 'flexoki-light', label: 'Flexoki Light', group: 'official', background: '#fffcf0', surface: '#f2edda', accent: '#205ea6' },
   { value: 'kanagawa-wave', label: 'Kanagawa Wave', group: 'official', background: '#1f1f28', surface: '#2a2a37', accent: '#7e9cd8' },
