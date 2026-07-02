@@ -8,6 +8,7 @@
 - [Hook Behavior](hook-behavior.md)
 - [Internationalization](internationalization.md)
 - [Managed AI Sessions](managed-ai-sessions.md)
+- [SSH Terminal Runtime](ssh-terminal.md)
 - [Threaded Terminal Renderer](terminal-renderer-architecture.md)
 - [xterm Fork](xterm-fork.md)
 - [Architecture Design Principles](architecture-principles.md)

@@ -4,7 +4,7 @@ import type { UserConfig } from '@shared/contracts/userConfig'
 import type { ConnectConfig, SFTPWrapper } from 'ssh2'
 import { getAsset, getAssetSecret, getKeychainSecret } from '../assets/assets'
 import { createConfiguredSshAgentAuth } from '../ssh/sshAgent'
-import { defaultSshKeepaliveIntervalMs, defaultSshReadyTimeoutMs } from '../ssh/sshDefaults'
+import { defaultSshKeepaliveCountMax, defaultSshKeepaliveIntervalMs, defaultSshReadyTimeoutMs } from '../ssh/sshDefaults'
 import { createSshProxySocketForAsset, type SshProxySocket } from '../ssh/sshProxy'
 import { loadSsh2 } from '../ssh/ssh2Runtime'
 import { isFileTransferCancelledError } from './filesTransferRuntime'
@@ -207,7 +207,8 @@ const createRemoteSftpConnection = async (target: RemoteSftpTarget, key: string)
     port: target.port,
     username: target.username,
     readyTimeout: defaultSshReadyTimeoutMs,
-    keepaliveInterval: defaultSshKeepaliveIntervalMs
+    keepaliveInterval: defaultSshKeepaliveIntervalMs,
+    keepaliveCountMax: defaultSshKeepaliveCountMax
   }
   if (target.password) connectConfig.password = target.password
   if (target.privateKey) connectConfig.privateKey = target.privateKey

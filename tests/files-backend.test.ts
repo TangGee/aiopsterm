@@ -1049,7 +1049,9 @@ describe('files backend content boundary', () => {
           host: 'sftp.example.test',
           port: 7992,
           username: 'ops',
-          password: 'backend-secret'
+          password: 'backend-secret',
+          keepaliveInterval: 10000,
+          keepaliveCountMax: 3
         })
       ])
     )

@@ -262,6 +262,7 @@ describe('Codex CLI backend runtime', () => {
     expect(configToml).toContain('mode: \\"return_immediately\\"')
     expect(configToml).toContain('execution: \\"background\\"')
     expect(configToml).toContain('visible terminal is occupied')
+    expect(configToml).toContain('Do not send naked shell-state or shell-lifecycle commands')
     expect(configToml).toContain('aiopsterm disables Codex environment-context injection')
     expect(configToml).toContain('current date/time, timezone, hostname')
     expect(configToml).toContain('Never invent command output')

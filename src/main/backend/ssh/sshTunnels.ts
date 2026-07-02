@@ -14,7 +14,7 @@ import type { UserConfig } from '@shared/contracts/userConfig'
 import { getAsset, getAssetSecret, getKeychainSecret, listAssets, saveAsset } from '../assets/assets'
 import { applyConfiguredSshAgentAuth } from './sshAgent'
 import { loadSsh2 } from './ssh2Runtime'
-import { defaultSshKeepaliveIntervalMs, defaultSshReadyTimeoutMs } from './sshDefaults'
+import { defaultSshKeepaliveCountMax, defaultSshKeepaliveIntervalMs, defaultSshReadyTimeoutMs } from './sshDefaults'
 import { createSshProxySocketForAsset, type SshProxySocket } from './sshProxy'
 
 type TunnelClient = Pick<Client, 'connect' | 'end' | 'forwardIn' | 'forwardOut' | 'unforwardIn' | 'on' | 'off' | 'once'>
@@ -171,7 +171,8 @@ const buildConnectConfig = async (asset: AiopsAssetRecord, proxyTargetHost: stri
     port,
     username,
     readyTimeout: defaultSshReadyTimeoutMs,
-    keepaliveInterval: defaultSshKeepaliveIntervalMs
+    keepaliveInterval: defaultSshKeepaliveIntervalMs,
+    keepaliveCountMax: defaultSshKeepaliveCountMax
   }
   if (password) connectConfig.password = password
   if (privateKey) connectConfig.privateKey = privateKey

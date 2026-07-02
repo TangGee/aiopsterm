@@ -166,12 +166,16 @@ const tools = [
     name: 'run_command',
     title: 'Run command on external aiopsterm host',
     description:
-      'Run a bounded, non-interactive command on an external MCP-owned host connection. Use connect_host first; this does not run in a visible terminal or the local Codex process.',
+      'Run a bounded, non-interactive command on an external MCP-owned host connection. Use connect_host first; this does not run in a visible terminal or the local Codex process. Commands are run in an isolated command-local child shell; avoid naked shell-state or shell-lifecycle commands such as set -e, set -u, set -o pipefail, trap, exit, or exec unless scoped inside that command.',
     inputSchema: {
       type: 'object',
       properties: {
         ...hostSelectorProperties,
-        command: { type: 'string', description: 'Non-interactive shell command to run on the connected host.' },
+        command: {
+          type: 'string',
+          description:
+            'Non-interactive shell command to run on the connected host. Avoid naked shell-state or shell-lifecycle commands such as set -e, trap, exit, or exec unless scoped inside the command.'
+        },
         autoConnect: { type: 'boolean', description: 'When true and assetId is supplied, connect before running if no external connection exists.' },
         timeoutMs: { type: 'number', description: 'Optional timeout in milliseconds. Defaults to 30000 and is capped by aiopsterm.' }
       },

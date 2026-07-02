@@ -451,6 +451,7 @@ describe('external Codex MCP bridge runtime', () => {
     })
     await waitFor(() => ssh.channels[0].writes.length === 1)
     expect(String(ssh.channels[0].writes[0])).toContain("echo '__AIOPSTERM_EXT_CODEX_START_cmd-1__'")
+    expect(String(ssh.channels[0].writes[0])).toContain('if "${SHELL:-sh}" -c')
     expect(String(ssh.channels[0].writes[0])).toContain('pwd')
 
     bridge.appendExternalConnectionData(

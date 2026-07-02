@@ -273,7 +273,11 @@ const codexBridgeInputEchoPromptPrefix = (line: string, pending: PendingCommand)
   }
   for (const fragment of commandEchoFragments(pending.command)) {
     const fragmentIndex = text.indexOf(fragment)
-    if (fragmentIndex >= 0) return text.slice(0, fragmentIndex)
+    if (fragmentIndex >= 0) {
+      const isolatedShellIndex = text.lastIndexOf('if "${SHELL:-sh}" -c ', fragmentIndex)
+      if (isolatedShellIndex >= 0) return text.slice(0, isolatedShellIndex)
+      return text.slice(0, fragmentIndex)
+    }
   }
   return null
 }
@@ -443,12 +447,13 @@ const parseGrepMatches = (output: string) =>
     .filter((match): match is { path: string; line: number; text: string } => Boolean(match))
 
 const buildWrappedCommand = (command: string, markerStart: string, markerEnd: string) => {
+  const isolatedCommand = `"\${SHELL:-sh}" -c ${shellQuote(command)}`
   return [
     'echo ',
     shellQuote(markerStart),
-    '; ',
-    command,
-    '; __aiopsterm_status=$?; echo ',
+    '; if ',
+    isolatedCommand,
+    '; then __aiopsterm_status=0; else __aiopsterm_status=$?; fi; echo ',
     shellQuote(markerEnd),
     ':$__aiopsterm_status',
     '\n'

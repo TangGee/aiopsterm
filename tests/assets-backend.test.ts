@@ -468,7 +468,9 @@ describe('assets backend boundary', () => {
         host: '10.71.0.8',
         port: 2222,
         username: 'deploy',
-        password: 'backend-secret'
+        password: 'backend-secret',
+        keepaliveInterval: 10000,
+        keepaliveCountMax: 3
       })
     )
     expect(ssh.clients.at(-1)?.ended).toBe(true)

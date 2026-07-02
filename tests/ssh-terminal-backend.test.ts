@@ -287,7 +287,8 @@ describe('ssh terminal backend runtime', () => {
         username: 'deploy',
         password: 'secret',
         readyTimeout: 120000,
-        keepaliveInterval: 10000
+        keepaliveInterval: 10000,
+        keepaliveCountMax: 3
       })
     ])
     expect(ssh.shellOptions).toEqual([expect.objectContaining({ term: 'vt220', cols: 132, rows: 44 })])
@@ -1104,7 +1105,8 @@ describe('ssh terminal backend runtime', () => {
         '/dev/null',
         'ControlMaster=auto',
         'ControlPersist=yes',
-        'ServerAliveInterval=60',
+        'ServerAliveInterval=10',
+        'ServerAliveCountMax=3',
         'HostKeyAlgorithms=+ssh-rsa',
         'PubkeyAcceptedAlgorithms=+ssh-rsa',
         '-tt',
@@ -1135,7 +1137,7 @@ describe('ssh terminal backend runtime', () => {
     pty.processes[0].emitData('ops@relay:~$ ')
     expect(pty.processes[0].writes).toHaveLength(1)
     const command = pty.processes[0].writes[0]
-    expect(command).toBe("ssh -tt -p 22 -- 'root@target.internal'\n")
+    expect(command).toBe("ssh -o ServerAliveInterval=10 -o ServerAliveCountMax=3 -tt -p 22 -- 'root@target.internal'\n")
     expect(command).not.toContain('queued-before-relay')
     expect(command).not.toContain('__AIO_CTX')
     expect(command).not.toContain('printf')
@@ -1251,25 +1253,26 @@ describe('ssh terminal backend runtime', () => {
     await waitForMicrotasks(4)
     pty.processes[0].emitData('ops@relay:~$ ')
     pty.processes[0].emitData('target login banner\n[root@target.internal ~]# ')
-    expect(pty.processes[0].writes).toEqual(["ssh -tt -p 22 -- 'root@target.internal'\n"])
+    expect(pty.processes[0].writes).toEqual(["ssh -o ServerAliveInterval=10 -o ServerAliveCountMax=3 -tt -p 22 -- 'root@target.internal'\n"])
 
     const backgroundPromise = result.session!.runBackgroundCommand!({ command: 'pwd && hostname', cwd: '/root', timeoutMs: 5000 })
     expect(pty.spawnCalls).toHaveLength(2)
     const hidden = pty.processes[1]
     expect(hidden).not.toBe(pty.processes[0])
     hidden.emitData('ops@relay:~$ ')
-    expect(hidden.writes).toEqual(["ssh -tt -p 22 -- 'root@target.internal'\n"])
+    expect(hidden.writes).toEqual(["ssh -o ServerAliveInterval=10 -o ServerAliveCountMax=3 -tt -p 22 -- 'root@target.internal'\n"])
     hidden.emitData('target login banner\n[root@target.internal ~]# ')
     expect(hidden.writes).toHaveLength(2)
     const command = hidden.writes[1]
     expect(command).toContain("echo '__AIOPSTERM_BACKGROUND_START_")
-    expect(command).toContain("cd '/root' && pwd && hostname")
+    expect(command).toContain('if "${SHELL:-sh}" -c')
+    expect(command).toContain("cd '\\''/root'\\'' && pwd && hostname")
     expect(command).toContain('__aiopsterm_status')
     const commandId = command.match(/__AIOPSTERM_BACKGROUND_START_([a-zA-Z0-9_-]+)__/)?.[1] || ''
     hidden.emitData(`__AIOPSTERM_BACKGROUND_START_${commandId}__\n/root\ntarget.internal\n__AIOPSTERM_BACKGROUND_END_${commandId}__:0\n[root@target.internal ~]# `)
     const background = await backgroundPromise
 
-    expect(pty.processes[0].writes).toEqual(["ssh -tt -p 22 -- 'root@target.internal'\n"])
+    expect(pty.processes[0].writes).toEqual(["ssh -o ServerAliveInterval=10 -o ServerAliveCountMax=3 -tt -p 22 -- 'root@target.internal'\n"])
     expect(background).toEqual(
       expect.objectContaining({
         output: '/root\ntarget.internal',

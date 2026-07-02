@@ -412,8 +412,19 @@ const extractCompletedMarkedOutput = (value: string, markerStart: string, marker
   }
 }
 
-const buildWrappedCommand = (command: string, markerStart: string, markerEnd: string) =>
-  ['echo ', shellQuote(markerStart), '; ', command, '; __aiopsterm_status=$?; echo ', shellQuote(markerEnd), ':$__aiopsterm_status', '\n'].join('')
+const buildWrappedCommand = (command: string, markerStart: string, markerEnd: string) => {
+  const isolatedCommand = `"\${SHELL:-sh}" -c ${shellQuote(command)}`
+  return [
+    'echo ',
+    shellQuote(markerStart),
+    '; if ',
+    isolatedCommand,
+    '; then __aiopsterm_status=0; else __aiopsterm_status=$?; fi; echo ',
+    shellQuote(markerEnd),
+    ':$__aiopsterm_status',
+    '\n'
+  ].join('')
+}
 
 export const appendExternalConnectionData = (connectionId: string, chunk: string | Buffer) => {
   const connection = connections.get(connectionId)

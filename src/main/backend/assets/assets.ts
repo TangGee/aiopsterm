@@ -30,7 +30,7 @@ import type { AiopsMutationResult } from '@shared/contracts/common'
 import type { SshAgentKeychainOption } from '@shared/contracts/appRuntime'
 import { createConfiguredSshAgentAuth } from '../ssh/sshAgent'
 import { loadSsh2 } from '../ssh/ssh2Runtime'
-import { defaultSshKeepaliveIntervalMs, defaultSshReadyTimeoutMs } from '../ssh/sshDefaults'
+import { defaultSshKeepaliveCountMax, defaultSshKeepaliveIntervalMs, defaultSshReadyTimeoutMs } from '../ssh/sshDefaults'
 import { createSshProxySocketForAsset, type SshProxySocket } from '../ssh/sshProxy'
 import { diagnoseSshConnectionError } from '../terminal/terminal'
 import {
@@ -374,7 +374,8 @@ export const testAssetConnection = async (input: AiopsAssetConnectionTestInput =
       port: target.port,
       username: target.username,
       readyTimeout: timeoutMs,
-      keepaliveInterval: defaultSshKeepaliveIntervalMs
+      keepaliveInterval: defaultSshKeepaliveIntervalMs,
+      keepaliveCountMax: defaultSshKeepaliveCountMax
     }
     if (target.password) connectConfig.password = target.password
     if (target.privateKey) connectConfig.privateKey = target.privateKey

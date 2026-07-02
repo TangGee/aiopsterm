@@ -379,7 +379,9 @@ describe('ssh tunnel backend boundary', () => {
         host: '10.11.7.21',
         port: 2222,
         username: 'ops',
-        password: 'backend-secret'
+        password: 'backend-secret',
+        keepaliveInterval: 10000,
+        keepaliveCountMax: 3
       })
     ])
     expect(netRuntime.servers).toHaveLength(1)

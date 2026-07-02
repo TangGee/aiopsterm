@@ -6,6 +6,7 @@ import type {
   TerminalLifecycleEvent
 } from '@shared/contracts/terminalSessions'
 import { applyConfiguredSshAgentAuth } from './sshAgent'
+import { defaultSshKeepaliveCountMax } from './sshDefaults'
 import { resolveSshProxyConfigForAsset, type SshProxySocket } from './sshProxy'
 import { diagnoseSshConnectionError } from '../terminal/terminal'
 import {
@@ -92,10 +93,20 @@ const buildMarkedBackgroundCommand = (command: string, commandId: string) => {
   const markerStart = `__AIOPSTERM_BACKGROUND_START_${commandId}__`
   const markerEnd = `__AIOPSTERM_BACKGROUND_END_${commandId}__`
   const markerEndPrefix = `${markerEnd}:`
+  const isolatedCommand = `"\${SHELL:-sh}" -c ${shellSingleQuote(command)}`
   return {
     markerStart,
     markerEndPrefix,
-    input: ['echo ', shellSingleQuote(markerStart), '; ', command, '; __aiopsterm_status=$?; echo ', shellSingleQuote(markerEnd), ':$__aiopsterm_status', '\n'].join('')
+    input: [
+      'echo ',
+      shellSingleQuote(markerStart),
+      '; if ',
+      isolatedCommand,
+      '; then __aiopsterm_status=0; else __aiopsterm_status=$?; fi; echo ',
+      shellSingleQuote(markerEnd),
+      ':$__aiopsterm_status',
+      '\n'
+    ].join('')
   }
 }
 
@@ -606,7 +617,8 @@ export const createSshTerminalSession = (
       username: authTarget.username,
       tryKeyboard: Boolean(sink.keyboardInteractive),
       readyTimeout: getSshReadyTimeoutMs(),
-      keepaliveInterval: getSshKeepaliveIntervalMs()
+      keepaliveInterval: getSshKeepaliveIntervalMs(),
+      keepaliveCountMax: defaultSshKeepaliveCountMax
     }
     if (authTarget.password) connectConfig.password = authTarget.password
     if (authTarget.privateKey) connectConfig.privateKey = authTarget.privateKey

@@ -2,7 +2,8 @@ import { mkdirSync, statSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { jumpPoolKey } from './sshTerminalConnectionPool'
-import { cleanText, getConfiguredSshControlDir, getEnv } from './sshTerminalRuntimeConfig'
+import { defaultSshKeepaliveCountMax } from './sshDefaults'
+import { cleanText, getConfiguredSshControlDir, getEnv, getSshKeepaliveIntervalMs } from './sshTerminalRuntimeConfig'
 import type { SshTerminalTarget } from './sshTerminalTypes'
 
 export const getSshControlDir = () => {
@@ -43,6 +44,15 @@ export const shellSingleQuote = (value: string) => `'${value.replace(/'/g, `'\\'
 
 export const sshDestination = (target: Pick<SshTerminalTarget, 'username' | 'host'>) => `${target.username}@${target.host}`
 
+export const sshKeepaliveIntervalSeconds = () => Math.max(1, Math.ceil(getSshKeepaliveIntervalMs() / 1000))
+
+export const sshKeepaliveOptions = () => [
+  '-o',
+  `ServerAliveInterval=${sshKeepaliveIntervalSeconds()}`,
+  '-o',
+  `ServerAliveCountMax=${defaultSshKeepaliveCountMax}`
+]
+
 export const relayShellSshArgs = (jumpTarget: SshTerminalTarget) => [
   '-F',
   '/dev/null',
@@ -52,8 +62,7 @@ export const relayShellSshArgs = (jumpTarget: SshTerminalTarget) => [
   'ControlPersist=yes',
   '-o',
   `ControlPath=${relayControlPath(jumpTarget)}`,
-  '-o',
-  'ServerAliveInterval=60',
+  ...sshKeepaliveOptions(),
   '-o',
   'HostKeyAlgorithms=+ssh-rsa',
   '-o',
@@ -183,4 +192,4 @@ export const createHiddenTextFilter = (onData: (chunk: string) => void) => {
   return { addHiddenText, handle, flush }
 }
 
-export const relayShellCommand = (target: SshTerminalTarget) => ['ssh', '-tt', '-p', String(target.port), '--', shellSingleQuote(sshDestination(target))].join(' ')
+export const relayShellCommand = (target: SshTerminalTarget) => ['ssh', ...sshKeepaliveOptions(), '-tt', '-p', String(target.port), '--', shellSingleQuote(sshDestination(target))].join(' ')

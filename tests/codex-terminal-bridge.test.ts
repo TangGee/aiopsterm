@@ -169,6 +169,7 @@ describe('Codex terminal bridge runtime', () => {
       await waitFor(() => writes.length === 1)
       expect(writes[0]).toContain("echo '__AIOPSTERM_CODEX_START_cmd-1__'")
       expect(writes[0]).toContain('pwd')
+      expect(writes[0]).toContain('if "${SHELL:-sh}" -c')
       expect(writes[0]).toContain("echo '__AIOPSTERM_CODEX_END_cmd-1__':$__aiopsterm_status")
       expect(
         bridge.filterCodexTerminalBridgeDisplayData(
@@ -259,7 +260,7 @@ describe('Codex terminal bridge runtime', () => {
       expect(
         bridge.filterCodexTerminalBridgeDisplayData(
           'terminal-echo',
-          'tlinux@tlinux:~$ echo "created:"; cat /home/tlinux/loop1111.sh; __aiopsterm_status=$?; echo \'__AIOPSTERM_CODEX_END_cmd-echo__\':$__aiopsterm_status\r\n'
+          'tlinux@tlinux:~$ if "${SHELL:-sh}" -c \'echo "created:"; cat /home/tlinux/loop1111.sh\'; then __aiopsterm_status=0; else __aiopsterm_status=$?; fi; echo \'__AIOPSTERM_CODEX_END_cmd-echo__\':$__aiopsterm_status\r\n'
         )
       ).toBe('tlinux@tlinux:~$ echo "created:"; cat /home/tlinux/loop1111.sh\r\n')
       expect(bridge.filterCodexTerminalBridgeDisplayData('terminal-echo', 'created:\r\n#!/bin/bash\r\n')).toBe('created:\r\n#!/bin/bash\r\n')
@@ -287,6 +288,69 @@ describe('Codex terminal bridge runtime', () => {
           data: expect.objectContaining({
             output: 'created:\n#!/bin/bash',
             exitCode: 0
+          })
+        })
+      )
+    } finally {
+      bridge.closeCodexTerminalBridgeServer()
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('wraps wait commands in a command-local child shell so strict mode cannot exit the interactive shell', async () => {
+    const bridge = await loadBridge()
+    const root = await mkdtemp(join(tmpdir(), 'aiopsterm-codex-bridge-'))
+    const writes: string[] = []
+    try {
+      bridge.registerCodexTerminalBridgeSession({
+        id: 'terminal-strict',
+        kind: 'ssh',
+        host: 'prod.internal',
+        cwd: '/home/deploy',
+        window: {} as never,
+        target: {
+          kind: 'ssh',
+          sessionId: 'terminal-strict',
+          label: 'prod.internal',
+          host: 'prod.internal',
+          username: 'deploy',
+          cwd: '/home/deploy'
+        },
+        write: (data: string | Buffer) => writes.push(String(data))
+      })
+      bridge.setCodexTerminalBridgePreferredSession('terminal-strict')
+      const socketPath = await bridge.ensureCodexTerminalBridgeServer(root)
+
+      const responsePromise = socketRequest(socketPath, {
+        id: 'request-strict',
+        method: 'run_command',
+        params: {
+          command: 'set -euo pipefail; python3 -m py_compile /tmp/missing.py',
+          commandId: 'cmd-strict',
+          timeoutMs: 5000
+        }
+      })
+      await waitFor(() => writes.length === 1)
+      expect(writes[0]).toContain("if \"${SHELL:-sh}\" -c 'set -euo pipefail; python3 -m py_compile /tmp/missing.py'")
+      expect(writes[0]).toContain('then __aiopsterm_status=0; else __aiopsterm_status=$?; fi')
+
+      bridge.appendCodexTerminalBridgeData(
+        'terminal-strict',
+        [
+          '__AIOPSTERM_CODEX_START_cmd-strict__',
+          'sh: python3: command not found',
+          '__AIOPSTERM_CODEX_END_cmd-strict__:127'
+        ].join('\r\n') + '\r\n'
+      )
+      const response = await responsePromise
+
+      expect(response).toEqual(
+        expect.objectContaining({
+          ok: true,
+          data: expect.objectContaining({
+            command: 'set -euo pipefail; python3 -m py_compile /tmp/missing.py',
+            output: 'sh: python3: command not found',
+            exitCode: 127
           })
         })
       )
@@ -896,7 +960,8 @@ describe('Codex terminal bridge runtime', () => {
         }
       })
       await waitFor(() => writes.length === 1)
-      expect(writes[0]).toContain("sed -n '2,3p' '/etc/nginx/nginx.conf'")
+      expect(writes[0]).toContain('LC_ALL=C sed -n')
+      expect(writes[0]).toContain('/etc/nginx/nginx.conf')
       const readCommandId = writes[0].match(/__AIOPSTERM_CODEX_START_([a-zA-Z0-9_-]+)__/)?.[1] || ''
       bridge.appendCodexTerminalBridgeData(
         'terminal-files',
@@ -932,8 +997,9 @@ describe('Codex terminal bridge runtime', () => {
         }
       })
       await waitFor(() => writes.length === 2)
-      expect(writes[1]).toContain("find '/srv/app'")
-      expect(writes[1]).toContain("-path '/srv/app/*.log'")
+      expect(writes[1]).toContain('find')
+      expect(writes[1]).toContain('/srv/app')
+      expect(writes[1]).toContain('/srv/app/*.log')
       const globCommandId = writes[1].match(/__AIOPSTERM_CODEX_START_([a-zA-Z0-9_-]+)__/)?.[1] || ''
       bridge.appendCodexTerminalBridgeData(
         'terminal-files',
@@ -972,8 +1038,9 @@ describe('Codex terminal bridge runtime', () => {
       })
       await waitFor(() => writes.length === 3)
       expect(writes[2]).toContain('grep -R -n -I -E -m 10 -i')
-      expect(writes[2]).toContain("'--include=*.log'")
-      expect(writes[2]).toContain("'error|warn' '/var/log'")
+      expect(writes[2]).toContain('--include=*.log')
+      expect(writes[2]).toContain('error|warn')
+      expect(writes[2]).toContain('/var/log')
       const grepCommandId = writes[2].match(/__AIOPSTERM_CODEX_START_([a-zA-Z0-9_-]+)__/)?.[1] || ''
       bridge.appendCodexTerminalBridgeData(
         'terminal-files',
@@ -1073,11 +1140,11 @@ describe('Codex terminal bridge runtime', () => {
           inputSchema: expect.objectContaining({
             properties: expect.objectContaining({
               command: expect.objectContaining({
-                description: expect.stringContaining('never runs in the local Codex client process')
+                description: expect.stringContaining('Avoid naked shell-state')
               }),
               mode: expect.objectContaining({
                 enum: ['wait', 'return_immediately'],
-                description: expect.stringContaining('return_immediately')
+                description: expect.stringContaining('isolated command-local child shell')
               }),
               execution: expect.objectContaining({
                 enum: ['terminal', 'background'],

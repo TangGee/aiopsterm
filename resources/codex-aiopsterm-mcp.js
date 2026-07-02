@@ -64,7 +64,7 @@ const runCommandSchema = {
     command: {
       type: 'string',
       description:
-        'Non-interactive shell command to run in the currently selected aiopsterm terminal session on the managed host. This never runs in the local Codex client process.'
+        'Non-interactive shell command to run in the currently selected aiopsterm terminal session on the managed host. This never runs in the local Codex client process. Avoid naked shell-state or shell-lifecycle commands such as set -e, set -u, set -o pipefail, trap, exit, or exec in visible terminal execution; keep strict shell behavior inside the command-local child shell or a script.'
     },
     timeoutMs: {
       type: 'number',
@@ -74,7 +74,7 @@ const runCommandSchema = {
       type: 'string',
       enum: ['wait', 'return_immediately'],
       description:
-        'Defaults to wait. wait captures output until the command exits. return_immediately writes the command into the visible terminal and returns after the write, for long-running foreground commands or commands that manage their own backgrounding.'
+        'Defaults to wait. wait runs the command in an isolated command-local child shell, captures output until the command exits, and returns its exit code. return_immediately writes the command into the visible terminal and returns after the write, for long-running foreground commands or commands that manage their own backgrounding.'
     },
     execution: {
       type: 'string',
@@ -247,7 +247,7 @@ const tools = [
     name: 'run_command',
     title: 'Run command in aiopsterm terminal',
     description:
-      'Run a command in the selected real aiopsterm terminal session on the managed host. Default execution terminal writes to the visible terminal. execution background uses an independent channel only for parallel work or when the visible terminal is occupied. Default mode wait is bounded, marker-captured, and returns output plus exit code. mode return_immediately writes the command and returns after the write for long-running foreground tasks or shell-managed background tasks. Use target_context first when the target is ambiguous. This is the only command tool that targets the managed host instead of the local Codex client process.',
+      'Run a command in the selected real aiopsterm terminal session on the managed host. Default execution terminal writes to the visible terminal. execution background uses an independent channel only for parallel work or when the visible terminal is occupied. Default mode wait runs the command in an isolated command-local child shell, is bounded and marker-captured, and returns output plus exit code. mode return_immediately writes the command and returns after the write for long-running foreground tasks or shell-managed background tasks. Avoid naked shell-state or shell-lifecycle commands such as set -e, trap, exit, or exec in visible terminal execution. Use target_context first when the target is ambiguous. This is the only command tool that targets the managed host instead of the local Codex client process.',
     inputSchema: runCommandSchema,
     annotations: {
       readOnlyHint: false,
