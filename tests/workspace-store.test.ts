@@ -644,6 +644,57 @@ describe('workspace store', () => {
     expect(store.aiAttentionUnreadCount).toBe(0)
   })
 
+  it('routes managed AI control notifications to the AI session panel', () => {
+    const store = useWorkspaceStore()
+    store.applyLocalTerminalSession('panel-main', {
+      id: 'terminal-session-1',
+      kind: 'local',
+      shell: '/bin/bash',
+      cwd: '/work/project'
+    })
+    store.upsertManagedAiSession({
+      source: 'claude-code',
+      event: 'notification',
+      sessionId: 'claude-session-1',
+      title: 'Claude waiting',
+      summary: 'Needs approval',
+      panelId: 'panel-main',
+      terminalSessionId: 'terminal-session-1',
+      requestKind: 'notification',
+      decisionMode: 'blocking',
+      actionable: true,
+      receivedAt: 600
+    })
+
+    expect(
+      store.focusControlNotification({
+        notification: {
+          id: 'managed-ai:claude-code:claude-session-1',
+          title: 'Claude waiting',
+          source: 'claude-code',
+          level: 'approval',
+          read: false,
+          isRead: false,
+          createdAt: 600,
+          updatedAt: 600,
+          panelId: 'panel-main',
+          sessionId: 'claude-session-1',
+          terminalSessionId: 'terminal-session-1'
+        },
+        panelId: 'panel-main',
+        sessionId: 'claude-session-1',
+        terminalSessionId: 'terminal-session-1'
+      })
+    ).toBe(true)
+
+    expect(store.mode).toBe('terminal')
+    expect(store.activeModule).toBe('aiSessions')
+    expect(store.leftPanelOpen).toBe(true)
+    expect(store.activePanelId).toBe('panel-main')
+    expect(store.selectedManagedAiSessionKey).toBe('claude-code:claude-session-1')
+    expect(store.managedAiSessionFocusRequest.session?.id).toBe('claude-session-1')
+  })
+
   it('moves completed managed AI turns to pending validation and clears attention on terminal exit', () => {
     const store = useWorkspaceStore()
     store.applyLocalTerminalSession('panel-main', {
@@ -5207,13 +5258,23 @@ describe('workspace store', () => {
         }),
         notifications: {
           desktopNotifications: true,
-          controlNotificationBell: false
+          controlNotificationBell: false,
+          soundEnabled: true,
+          soundPreset: 'chime',
+          customSoundPath: '',
+          customSoundUrl: '',
+          customSoundName: ''
         }
       })
     )
     expect(store.notificationSettings).toEqual({
       desktopNotifications: true,
-      controlNotificationBell: false
+      controlNotificationBell: false,
+      soundEnabled: true,
+      soundPreset: 'chime',
+      customSoundPath: '',
+      customSoundUrl: '',
+      customSoundName: ''
     })
   })
 

@@ -150,6 +150,7 @@ export const createTerminalWorkspaceSessionRuntime = ({
           username: ssh.username,
           needProxy: Boolean(ssh.needProxy),
           proxyName: ssh.proxyName || '',
+          ...(ssh.jumpHostId ? { jumpHostId: ssh.jumpHostId } : {}),
           ...(ssh.forkFromConnectionId ? { forkFromConnectionId: ssh.forkFromConnectionId } : {})
         }
       })
@@ -164,7 +165,8 @@ export const createTerminalWorkspaceSessionRuntime = ({
         asset_type: ssh.assetType,
         auth_type: ssh.authType,
         needProxy: ssh.needProxy,
-        proxyName: ssh.proxyName
+        proxyName: ssh.proxyName,
+        jumpHostId: ssh.jumpHostId
       }))
       if (!connected) workspace.setTopNotice('SSH 终端启动失败')
       return connected

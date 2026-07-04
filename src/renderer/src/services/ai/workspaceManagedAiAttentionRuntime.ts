@@ -1,6 +1,9 @@
 import { computed } from 'vue'
 import { controlClient } from '@/services/app/controlClient'
+import { isAiAgentSessionSource } from '@/services/ai/managedAiBackendGuards'
+import { playAiNotificationSound } from '@/services/ai/notificationSoundRuntime'
 import type { ControlNotificationFocusRequest, ControlNotificationRecord } from '@shared/contracts/control'
+import type { ManagedAiSessionFocusRequest } from '@shared/contracts/managedAiSessions'
 import type {
   AiAttentionInput,
   AiAttentionItem,
@@ -20,12 +23,22 @@ const attentionPriority = (kind: AiAttentionKind) => {
 
 const controlNotificationAttentionId = (notification: Pick<ControlNotificationRecord, 'id'>) => `notification:${notification.id}`
 
+const managedAiNotificationPartsFromId = (id?: string) => {
+  if (!id) return null
+  const match = id.match(/^managed-ai:([^:]+):(.+)$/)
+  const source = match?.[1]
+  const sessionId = match?.[2]
+  if (!source || !sessionId || !isAiAgentSessionSource(source)) return null
+  return { source, sessionId }
+}
+
 export const createWorkspaceManagedAiAttentionRuntime = (input: {
   state: Pick<
     WorkspaceManagedAiControllerState,
     'mode' | 'activeModule' | 'activePanelId' | 'panels' | 'notificationSettings' | 'aiAttentionItems' | 'controlNotifications'
   >
   setTopNotice: (message: string) => void
+  focusManagedAiSession?: (request: ManagedAiSessionFocusRequest) => boolean
 }) => {
   const { state, setTopNotice } = input
   const { mode, activeModule, activePanelId, panels, notificationSettings, aiAttentionItems, controlNotifications } = state
@@ -60,7 +73,9 @@ export const createWorkspaceManagedAiAttentionRuntime = (input: {
       ...(input.surfaceId ? { surfaceId: input.surfaceId } : {}),
       ...(input.notificationId ? { notificationId: input.notificationId } : {})
     }
+    const shouldPlaySound = !next.handledAt && (!existing || Boolean(existing.handledAt))
     aiAttentionItems.value = existing ? aiAttentionItems.value.map((item) => (item.id === input.id ? next : item)) : [next, ...aiAttentionItems.value]
+    if (shouldPlaySound) playAiNotificationSound(notificationSettings.value, { title: next.title, summary: next.summary })
     return next
   }
 
@@ -117,8 +132,32 @@ export const createWorkspaceManagedAiAttentionRuntime = (input: {
     refreshControlNotificationAttentionItems()
   }
 
+  const managedAiFocusRequestForControlNotification = (
+    request: ControlNotificationFocusRequest | ControlNotificationRecord,
+    notification: ControlNotificationRecord
+  ): ManagedAiSessionFocusRequest | null => {
+    const parsed = managedAiNotificationPartsFromId(notification.id) || managedAiNotificationPartsFromId(notification.key)
+    const source = parsed?.source || (isAiAgentSessionSource(notification.source) ? notification.source : undefined)
+    if (!source && !parsed?.sessionId) return null
+    const panelId = 'panelId' in request && request.panelId ? request.panelId : notification.panelId
+    const sessionId = parsed?.sessionId || ('sessionId' in request && request.sessionId ? request.sessionId : notification.sessionId)
+    const terminalSessionId = 'terminalSessionId' in request && request.terminalSessionId ? request.terminalSessionId : notification.terminalSessionId
+    return {
+      ...(source ? { source } : {}),
+      ...(sessionId ? { sessionId } : {}),
+      ...(panelId ? { panelId } : {}),
+      ...(terminalSessionId ? { terminalSessionId } : {})
+    }
+  }
+
   const focusControlNotification = (request: ControlNotificationFocusRequest | ControlNotificationRecord) => {
     const notification = 'notification' in request ? request.notification : request
+    const managedAiFocusRequest = managedAiFocusRequestForControlNotification(request, notification)
+    if (managedAiFocusRequest && input.focusManagedAiSession?.(managedAiFocusRequest)) {
+      markAiAttentionHandled(controlNotificationAttentionId(notification))
+      setTopNotice(`已定位通知：${notification.title}`)
+      return true
+    }
     const panelId = 'panelId' in request && request.panelId ? request.panelId : notification.panelId
     const sessionId = 'sessionId' in request && request.sessionId ? request.sessionId : notification.sessionId || notification.terminalSessionId
     const target = panels.value.find((panel) => panel.kind !== 'knowledge' && (panel.id === panelId || panel.sessionId === sessionId))

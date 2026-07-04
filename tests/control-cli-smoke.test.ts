@@ -11,6 +11,14 @@ const execFileAsync = promisify(execFile)
 const servers: Server[] = []
 const socketPaths: string[] = []
 
+const runCliCompletion = async (args: string[]) => {
+  const result = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', ...args], {
+    cwd: process.cwd(),
+    env: { ...process.env, AIOPSTERM_CONTROL_SOCKET: '' }
+  })
+  return result.stdout.split(/\r?\n/).filter(Boolean)
+}
+
 const startControlServer = async (handler: (request: Record<string, unknown>) => Record<string, unknown>) => {
   const socketPath = join(tmpdir(), `aiopsterm-control-cli-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}.sock`)
   const server = createServer((socket) => {
@@ -57,7 +65,7 @@ const startControlStreamServer = async (handler: (request: Record<string, unknow
   return socketPath
 }
 
-describe('aiopsterm-control CLI', () => {
+describe('aio CLI', () => {
   afterEach(async () => {
     await Promise.all(servers.splice(0).map((server) => new Promise<void>((resolve) => server.close(() => resolve()))))
     await Promise.all(socketPaths.splice(0).map((socketPath) => rm(socketPath, { force: true })))
@@ -68,10 +76,10 @@ describe('aiopsterm-control CLI', () => {
       cwd: process.cwd(),
       env: { ...process.env, AIOPSTERM_CONTROL_SOCKET: '' }
     })
-    expect(all.stdout).toContain('aiopsterm-control recipes')
-    expect(all.stdout).toContain('aiopsterm-control context')
-    expect(all.stdout).toContain('aiopsterm-control notify --source ci')
-    expect(all.stdout).toContain('aiopsterm-control agent session list --needs-input')
+    expect(all.stdout).toContain('aio recipes')
+    expect(all.stdout).toContain('aio context')
+    expect(all.stdout).toContain('aio notify --source ci')
+    expect(all.stdout).toContain('aio agent session list --needs-input')
 
     const remote = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', 'recipes', 'remote'], {
       cwd: process.cwd(),
@@ -116,6 +124,121 @@ describe('aiopsterm-control CLI', () => {
     expect(seen).toEqual([expect.objectContaining({ method: 'terminal.list' })])
   })
 
+  it('routes managed host ssh shortcuts and completion requests', async () => {
+    const seen: Record<string, unknown>[] = []
+    const socketPath = await startControlServer((request) => {
+      seen.push(request)
+      if (request.method === 'asset.complete') {
+        return {
+          id: request.id,
+          ok: true,
+          data: {
+            completions: ['prod-bastion', 'prod-api'],
+            candidates: [],
+            count: 2
+          }
+        }
+      }
+      return {
+        id: request.id,
+        ok: true,
+        data: {
+          connected: true,
+          configured: true,
+          asset: { id: 'asset-1', name: 'prod-bastion', host: '10.24.8.12', username: 'ops', port: 22 },
+          surfaceId: 'panel-prod',
+          remote: { connection_state: 'connected', host: '10.24.8.12', remote_display_target: 'ops@10.24.8.12' }
+        }
+      }
+    })
+
+    const ssh = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'ssh', 'prod-bastion'], {
+      cwd: process.cwd()
+    })
+    expect(ssh.stdout).toContain('remote')
+
+    const completion = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'ssh', '--complete', 'prod'], {
+      cwd: process.cwd()
+    })
+    expect(completion.stdout).toBe('prod-bastion\nprod-api\n')
+
+    const genericSshCompletion = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'complete', 'cli', '--index', '2', '--', 'aio', 'ssh', 'prod'], {
+      cwd: process.cwd()
+    })
+    expect(genericSshCompletion.stdout).toBe('prod-bastion\nprod-api\n')
+
+    const directAiosshCompletion = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'complete', 'cli', '--index', '1', '--', 'aiossh', 'prod'], {
+      cwd: process.cwd()
+    })
+    expect(directAiosshCompletion.stdout).toBe('prod-bastion\nprod-api\n')
+
+    const noSocketCompletion = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', 'ssh', '--complete', 'prod'], {
+      cwd: process.cwd(),
+      env: { ...process.env, AIOPSTERM_CONTROL_SOCKET: '' }
+    })
+    expect(noSocketCompletion.stdout).toBe('')
+    expect(noSocketCompletion.stderr).toBe('')
+
+    expect(seen).toEqual([
+      expect.objectContaining({ method: 'asset.ssh.connect', params: expect.objectContaining({ target: 'prod-bastion', auto_connect: true, reuse: true }) }),
+      expect.objectContaining({ method: 'asset.complete', params: expect.objectContaining({ prefix: 'prod', connectable_only: true }) }),
+      expect.objectContaining({ method: 'asset.complete', params: expect.objectContaining({ prefix: 'prod', connectable_only: true }) }),
+      expect.objectContaining({ method: 'asset.complete', params: expect.objectContaining({ prefix: 'prod', connectable_only: true }) })
+    ])
+  })
+
+  it('completes aio command paths and options through the generic completion target', async () => {
+    const topLevel = await runCliCompletion(['complete', 'cli', '--index', '1', '--', 'aio', ''])
+    expect(topLevel).toEqual(expect.arrayContaining(['notify', 'open-notification', 'agent-hibernation', 'workspace-group', 'capture-pane', 'terminal']))
+
+    const agent = await runCliCompletion(['complete', 'cli', '--index', '2', '--', 'aio', 'agent', ''])
+    expect(agent).toEqual(expect.arrayContaining(['session', 'vault', 'team', 'hibernate', 'resume']))
+
+    const agentVault = await runCliCompletion(['complete', 'cli', '--index', '3', '--', 'aio', 'agent', 'vault', ''])
+    expect(agentVault).toEqual(expect.arrayContaining(['register', 'list', 'scan', 'scan-processes']))
+
+    const terminal = await runCliCompletion(['complete', 'cli', '--index', '2', '--', 'aio', 'terminal', ''])
+    expect(terminal).toEqual(expect.arrayContaining(['list', 'focus', 'create', 'paste', 'viewport', 'read-screen', 'send-key']))
+
+    const workspaceRemote = await runCliCompletion(['complete', 'cli', '--index', '3', '--', 'aio', 'workspace', 'remote', ''])
+    expect(workspaceRemote).toEqual(expect.arrayContaining(['status', 'configure', 'foreground-auth-ready', 'pty-bridge', 'pty-resize']))
+
+    const terminalFocusOptions = await runCliCompletion(['complete', 'cli', '--index', '3', '--', 'aio', 'terminal', 'focus', '--p'])
+    expect(terminalFocusOptions).toEqual(expect.arrayContaining(['--panel', '--panel-id']))
+
+    const notifyOptions = await runCliCompletion(['complete', 'cli', '--index', '2', '--', 'aio', 'notify', '--t'])
+    expect(notifyOptions).toEqual(expect.arrayContaining(['--title', '--type']))
+
+    const mobileChat = await runCliCompletion(['complete', 'cli', '--index', '3', '--', 'aio', 'mobile', 'chat', ''])
+    expect(mobileChat).toEqual(expect.arrayContaining(['sessions', 'history', 'send', 'interrupt', 'answer']))
+
+    const surfaceResume = await runCliCompletion(['complete', 'cli', '--index', '3', '--', 'aio', 'surface', 'resume', ''])
+    expect(surfaceResume).toEqual(expect.arrayContaining(['set', 'get', 'trust', 'preview', 'autorun', 'run']))
+  })
+
+  it('emits shell completion scripts that delegate to generic aio completion', async () => {
+    const bash = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', 'completion', 'bash'], {
+      cwd: process.cwd(),
+      env: { ...process.env, AIOPSTERM_CONTROL_SOCKET: '' }
+    })
+    expect(bash.stdout).toContain('complete cli --index "$COMP_CWORD"')
+    expect(bash.stdout).toContain('complete -F _aiopsterm_control_complete aio aictl aiopsterm-control aiossh')
+
+    const zsh = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', 'completion', 'zsh'], {
+      cwd: process.cwd(),
+      env: { ...process.env, AIOPSTERM_CONTROL_SOCKET: '' }
+    })
+    expect(zsh.stdout).toContain('complete cli --index "$index"')
+    expect(zsh.stdout).toContain('compdef _aiopsterm_control_complete aio aictl aiopsterm-control aiossh')
+
+    const fish = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', 'completion', 'fish'], {
+      cwd: process.cwd(),
+      env: { ...process.env, AIOPSTERM_CONTROL_SOCKET: '' }
+    })
+    expect(fish.stdout).toContain('complete cli --index $index')
+    expect(fish.stdout).toContain('complete -c aiopsterm-control')
+  })
+
   it('sends control_compat-style system, settings, app, and window requests from the CLI helper', async () => {
     const seen: Record<string, unknown>[] = []
     const socketPath = await startControlServer((request) => {
@@ -137,6 +260,8 @@ describe('aiopsterm-control CLI', () => {
     await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'auth', 'begin-sign-in', '--timeout-seconds', '2'], { cwd: process.cwd() })
     await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'auth', 'sign-out'], { cwd: process.cwd() })
     await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'settings', 'open', '--target', 'models'], { cwd: process.cwd() })
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'settings', 'get', 'terminal.fontSize'], { cwd: process.cwd() })
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'settings', 'put', 'terminal.fontSize', '14'], { cwd: process.cwd() })
     await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'feedback', 'open'], { cwd: process.cwd() })
     await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'feedback', 'submit', '--email', 'dev@example.test', '--body', 'hello', '--image-path', '/tmp/a.png'], { cwd: process.cwd() })
     await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'sidebar', 'snapshot', '--window', 'window:1'], { cwd: process.cwd() })
@@ -166,6 +291,8 @@ describe('aiopsterm-control CLI', () => {
       expect.objectContaining({ method: 'auth.begin_sign_in', params: expect.objectContaining({ timeout_seconds: 2, timeoutSeconds: 2 }) }),
       expect.objectContaining({ method: 'auth.sign_out' }),
       expect.objectContaining({ method: 'settings.open', params: expect.objectContaining({ target: 'models', activate: true }) }),
+      expect.objectContaining({ method: 'settings.get', params: expect.objectContaining({ path: 'terminal.fontSize' }) }),
+      expect.objectContaining({ method: 'settings.put', params: expect.objectContaining({ path: 'terminal.fontSize', value: 14 }) }),
       expect.objectContaining({ method: 'feedback.open', params: expect.objectContaining({ activate: true }) }),
       expect.objectContaining({ method: 'feedback.submit', params: expect.objectContaining({ email: 'dev@example.test', body: 'hello', image_paths: ['/tmp/a.png'] }) }),
       expect.objectContaining({ method: 'extension.sidebar.snapshot', params: expect.objectContaining({ windowId: 'window:1' }) }),
@@ -1076,7 +1203,7 @@ describe('aiopsterm-control CLI', () => {
           ],
           unreadNotifications: [{ id: 'notify-1', source: 'ci', level: 'success', title: 'Deploy done' }],
           counts: { writableTerminals: 1, pendingAiSessions: 1, unreadNotifications: 1 },
-          suggestions: [{ label: 'Read active terminal screen', command: 'aiopsterm-control terminal read-screen --panel panel-1 --lines 80' }]
+          suggestions: [{ label: 'Read active terminal screen', command: 'aio terminal read-screen --panel panel-1 --lines 80' }]
         }
       }
     })
@@ -1087,7 +1214,7 @@ describe('aiopsterm-control CLI', () => {
     expect(result.stdout).toContain('context\tactive=panel-1\tterminal=terminal-1\twritable=1\tpending_ai=1\tunread=1')
     expect(result.stdout).toContain('active-terminal\tpanel-1\tterminal-1\tlocal\t/work/api\tLocal API')
     expect(result.stdout).toContain('pending-ai\t!\tclaude-code\tclaude-approval-1\tneedsInput\tpermission\tpanel-1\tDeploy approval')
-    expect(result.stdout).toContain('suggest\tRead active terminal screen\taiopsterm-control terminal read-screen --panel panel-1 --lines 80')
+    expect(result.stdout).toContain('suggest\tRead active terminal screen\taio terminal read-screen --panel panel-1 --lines 80')
     expect(seen).toEqual([expect.objectContaining({ method: 'workspace.context' })])
   })
 

@@ -3762,6 +3762,9 @@ type TestTerminalCreateOptions = {
     host: string
     port?: number
     username: string
+    needProxy?: boolean
+    proxyName?: string
+    jumpHostId?: string
     forkFromConnectionId?: string
   }
 }
@@ -5378,7 +5381,12 @@ const createDefaultConfigMock = () => ({
   aiPreferences: defaultAiPreferences,
   notifications: {
     desktopNotifications: true,
-    controlNotificationBell: true
+    controlNotificationBell: true,
+    soundEnabled: true,
+    soundPreset: 'chime',
+    customSoundPath: '',
+    customSoundUrl: '',
+    customSoundName: ''
   },
   modelSettings: defaultModelSettings,
   shortcuts: defaultShortcuts,
@@ -6435,6 +6443,8 @@ Object.defineProperty(window, 'aiops', {
     maximizeWindow: vi.fn(async () => undefined),
     unmaximizeWindow: vi.fn(async () => undefined),
     isMaximized: vi.fn(async () => false),
+    newWindow: vi.fn(async () => undefined),
+    toggleFullScreen: vi.fn(async () => false),
     closeWindow: vi.fn(async () => undefined),
     onMaximized: vi.fn(() => () => undefined),
     onUnmaximized: vi.fn(() => () => undefined),
@@ -6753,6 +6763,17 @@ Object.defineProperty(window, 'aiops', {
       return {
         filePath: `/tmp/aiopsterm/backgrounds/${name}`,
         url: `aiopsterm-background://local/${encodeURIComponent(name)}`,
+        name,
+        size: 128,
+        bytes: 128,
+        mtimeMs: 1717200000000
+      }
+    }),
+    saveCustomNotificationSound: vi.fn(async (srcAbsPath: string) => {
+      const name = srcAbsPath.split(/[/\\]/).pop() || 'custom-notification.wav'
+      return {
+        filePath: `/tmp/aiopsterm/notification-sounds/${name}`,
+        url: `file:///tmp/aiopsterm/notification-sounds/${encodeURIComponent(name)}`,
         name,
         size: 128,
         bytes: 128,
@@ -7436,6 +7457,9 @@ Object.defineProperty(window, 'aiops', {
                 ...(asset?.asset_type ? { assetType: asset.asset_type } : {}),
                 ...(asset?.organizationId || asset?.group_name ? { organizationId: asset.organizationId || asset.group_name } : {}),
                 ...(asset?.auth_type ? { authType: asset.auth_type } : {}),
+                ...(options.ssh?.jumpHostId || asset?.jumpHostId ? { jumpHostId: options.ssh?.jumpHostId || asset?.jumpHostId } : {}),
+                ...(options.ssh?.needProxy || asset?.needProxy ? { needProxy: true } : {}),
+                ...(options.ssh?.proxyName || asset?.proxyName ? { proxyName: options.ssh?.proxyName || asset?.proxyName } : {}),
                 title: options.title || asset?.title || asset?.name || host,
                 createdAt: 1717200001000,
                 ...(options.ssh?.forkFromConnectionId ? { forkFromConnectionId: options.ssh.forkFromConnectionId } : {})

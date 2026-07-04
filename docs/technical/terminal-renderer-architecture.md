@@ -67,6 +67,8 @@ VTE keeps the input-method boundary on the GTK widget: key events are filtered t
 - The hidden input is moved to the current terminal cursor cell after snapshots and fits, mirroring VTE's `gtk_im_context_set_cursor_location()` role.
 - `compositionstart`/`compositionend` gate text delivery so IME preedit text is not sent to the PTY; only committed text is posted to the core worker.
 - `Ctrl+Shift+C` and `Ctrl+Shift+V` are terminal clipboard actions. Plain `Ctrl+C` still maps to ETX and is delivered to the shell.
+- Terminal shortcut parsing is centralized in `src/renderer/src/services/terminal/terminalKeyboardShortcuts.ts` and shared by the workspace terminal, threaded terminal host, and embedded Codex terminal copy handler. The parser classifies plain `Ctrl+<single character>` events as terminal control input before app-level shortcut matching, so readline/TUI keys such as `Ctrl+a`, `Ctrl+c`, `Ctrl+e`, `Ctrl+k`, and `Ctrl+l` are not intercepted by global app bindings while a terminal host is focused.
+- Workspace-scoped terminal actions use xterm's `attachCustomKeyEventHandler()` when available, with a window-level fallback for terminal DOM targets. The custom handler runs before the threaded host's own copy/paste/input mapping; handled app actions stop propagation, while unhandled keys fall through to normal PTY input. GNOME Terminal-style actions such as search navigation, full-screen toggle, tab move, one-line scroll, and known-command jump are implemented at this workspace layer instead of inside the PTY input mapper.
 - The core worker reports terminal mode state in snapshots, including application cursor keys, mouse tracking, bracketed paste, and normal versus alternate buffer. The renderer uses that state for keyboard and mouse routing instead of treating all panes as shell prompts.
 - In mouse-tracking modes used by Vim, less, tmux, and other TUIs, normal mouse presses, releases, movement, and wheel events are forwarded to `@xterm/headless`'s core mouse service. Holding Shift forces terminal selection, matching the VTE convention for selecting text inside mouse-aware applications.
 - In the alternate screen without mouse tracking, wheel input is converted to Up/Down key sequences, using application cursor sequences when that mode is active. This keeps Vim-style editors responsive to scroll wheels without moving scrollback that does not apply to the alternate buffer.
@@ -182,7 +184,7 @@ The stress result also includes `regressions` probes for the recent terminal fai
 - Same-text ANSI style changes must repaint dirty rows, covering Codex-style shimmer animations.
 - Scrollback must expose a themed scrollbar, move the viewport, and keep the cursor tied to the terminal viewport.
 - Selection must copy from the core worker's full scrollback buffer, preserve wide-glyph cell columns, and join soft-wrapped logical lines without inserted newlines.
-- Focus, IME input target, `Ctrl+Shift+C`, and plain `Ctrl+C` must stay separated.
+- Focus, IME input target, `Ctrl+Shift+C`, app-level terminal shortcuts, and plain terminal control keys such as `Ctrl+C` must stay separated.
 - Mouse-aware terminal apps must receive mouse protocol events unless Shift is held to force text selection, and alternate-screen wheel fallback must emit cursor-key input for Vim-style editors.
 
 ## Current Limits

@@ -89,6 +89,8 @@ const api: AiopsPreloadApi = {
   maximizeWindow: () => ipcRenderer.invoke('window:maximize'),
   unmaximizeWindow: () => ipcRenderer.invoke('window:unmaximize'),
   isMaximized: () => ipcRenderer.invoke('window:is-maximized') as Promise<boolean>,
+  newWindow: () => ipcRenderer.invoke('window:new'),
+  toggleFullScreen: () => ipcRenderer.invoke('window:toggle-fullscreen') as Promise<boolean>,
   closeWindow: () => ipcRenderer.invoke('window:close'),
   onMaximized: (listener: () => void) => {
     const wrapped = () => listener()
@@ -164,6 +166,7 @@ const api: AiopsPreloadApi = {
   showOpenDialog: (options) => ipcRenderer.invoke('dialog:open-file', options),
   showSaveDialog: (options) => ipcRenderer.invoke('dialog:save-file', options),
   saveCustomBackground: (srcAbsPath: string) => ipcRenderer.invoke('settings:save-custom-background', srcAbsPath),
+  saveCustomNotificationSound: (srcAbsPath: string) => ipcRenderer.invoke('settings:save-custom-notification-sound', srcAbsPath),
   readLocalFile: (filePath: string) => ipcRenderer.invoke('files:read-local', filePath),
   writeLocalFile: (filePath: string, content: string) => ipcRenderer.invoke('files:write-local', filePath, content),
   stageChatAttachment: (payload) => ipcRenderer.invoke('chat:stage-attachment', payload),

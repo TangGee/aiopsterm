@@ -3,6 +3,7 @@ import type {
   NotificationUserConfig,
   PrivacyUserConfig
 } from '@shared/contracts/appRuntime'
+import { notificationSoundPresetValues } from '@shared/contracts/appRuntime'
 import {
   defaultKeywordHighlightSettings,
   defaultNotificationSettings,
@@ -269,13 +270,24 @@ export const normalizeNotificationConfig = (source?: Partial<NotificationUserCon
   const incoming = isRecord(source) ? source : {}
   const normalized: NotificationUserConfig = {
     desktopNotifications: typeof incoming.desktopNotifications === 'boolean' ? incoming.desktopNotifications : defaultNotificationSettings.desktopNotifications,
-    controlNotificationBell: typeof incoming.controlNotificationBell === 'boolean' ? incoming.controlNotificationBell : defaultNotificationSettings.controlNotificationBell
+    controlNotificationBell: typeof incoming.controlNotificationBell === 'boolean' ? incoming.controlNotificationBell : defaultNotificationSettings.controlNotificationBell,
+    soundEnabled: typeof incoming.soundEnabled === 'boolean' ? incoming.soundEnabled : defaultNotificationSettings.soundEnabled,
+    soundPreset: stringFromOptions(incoming.soundPreset, notificationSoundPresetValues, defaultNotificationSettings.soundPreset),
+    customSoundPath: typeof incoming.customSoundPath === 'string' ? incoming.customSoundPath : defaultNotificationSettings.customSoundPath,
+    customSoundUrl: typeof incoming.customSoundUrl === 'string' ? incoming.customSoundUrl : defaultNotificationSettings.customSoundUrl,
+    customSoundName: typeof incoming.customSoundName === 'string' ? incoming.customSoundName : defaultNotificationSettings.customSoundName
   }
+  const allowedKeys = new Set(['desktopNotifications', 'controlNotificationBell', 'soundEnabled', 'soundPreset', 'customSoundPath', 'customSoundUrl', 'customSoundName'])
   const changed =
     isRecord(source) &&
     (incoming.desktopNotifications !== normalized.desktopNotifications ||
       incoming.controlNotificationBell !== normalized.controlNotificationBell ||
-      Object.keys(incoming).some((key) => key !== 'desktopNotifications' && key !== 'controlNotificationBell'))
+      incoming.soundEnabled !== normalized.soundEnabled ||
+      incoming.soundPreset !== normalized.soundPreset ||
+      incoming.customSoundPath !== normalized.customSoundPath ||
+      incoming.customSoundUrl !== normalized.customSoundUrl ||
+      incoming.customSoundName !== normalized.customSoundName ||
+      Object.keys(incoming).some((key) => !allowedKeys.has(key)))
 
   return {
     normalized,

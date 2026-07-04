@@ -20,6 +20,7 @@ import {
   threadedTerminalCapability,
   type ThreadedTerminalHost
 } from '@/services/terminal/threadedTerminalRuntime'
+import { isTerminalCopyShortcut } from '@/services/terminal/terminalKeyboardShortcuts'
 import type { CodexTargetEventKind } from '@/services/ai/codexTargetRuntime'
 import type { TerminalSettings } from '@/services/settings/workspaceConfigRuntime'
 import type { RuntimeLogLevel } from '@shared/contracts/appRuntime'
@@ -141,12 +142,7 @@ type CodexTerminalOutputState = {
   perf?: CodexTerminalOutputPerfSummary
 }
 
-export const codexTerminalCopyShortcut = (event: Pick<KeyboardEvent, 'key' | 'shiftKey' | 'ctrlKey' | 'metaKey' | 'altKey'>) => {
-  const key = event.key.toLowerCase()
-  if (key !== 'c') return false
-  if (event.shiftKey && (event.ctrlKey || event.metaKey)) return true
-  return event.metaKey && !event.ctrlKey && !event.altKey
-}
+export const codexTerminalCopyShortcut = isTerminalCopyShortcut
 
 const setXtermTermName = (terminal: AiPanelCodexTerminalLike, terminalType: string) => {
   terminal.options.termName = terminalType || 'xterm-256color'

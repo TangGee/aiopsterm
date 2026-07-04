@@ -1,5 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'child_process'
-import { basename } from 'path'
+import { chmodSync, mkdirSync, writeFileSync } from 'fs'
+import { tmpdir } from 'os'
+import { basename, delimiter, join } from 'path'
 import type { TerminalCreateOptions, TerminalDisconnectReason, TerminalLifecycleEvent } from '@shared/contracts/terminalSessions'
 import { defaultShellForPlatform, localShellArgsForPlatform } from '../app/platformRuntime'
 import { createTerminalErrorLifecycleEvent, createTerminalLifecycleEvent } from './terminal'
@@ -100,6 +102,69 @@ const getTerminalType = (options: TerminalCreateOptions) => {
 
 const cleanManagedContextValue = (value: unknown) => (typeof value === 'string' ? value.trim() : '')
 
+const controlCommandShims = [
+  { name: 'aio', helperArgs: [] },
+  { name: 'aictl', helperArgs: [] },
+  { name: 'aiopsterm-control', helperArgs: [] },
+  { name: 'aiossh', helperArgs: ['ssh'] }
+]
+
+const controlCommandShimDirectory = () => join(tmpdir(), `aiopsterm-control-bin-${process.pid}`)
+
+const controlCompletionScriptName = 'aiopsterm-control-completion.bash'
+
+const controlCommandShimContent = (platform: NodeJS.Platform, helperArgs: string[] = []) => {
+  const prefix = helperArgs.map((arg) => (platform === 'win32' ? arg : `'${arg.replace(/'/g, "'\\''")}'`)).join(platform === 'win32' ? ' ' : ' ')
+  if (platform === 'win32') {
+    return `@echo off\r\nset ELECTRON_RUN_AS_NODE=1\r\n"%AIOPSTERM_JS_RUNTIME%" "%AIOPSTERM_CONTROL_HELPER_PATH%"${prefix ? ` ${prefix}` : ''} %*\r\n`
+  }
+  return `#!/bin/sh\nELECTRON_RUN_AS_NODE=1 exec "$AIOPSTERM_JS_RUNTIME" "$AIOPSTERM_CONTROL_HELPER_PATH"${prefix ? ` ${prefix}` : ''} "$@"\n`
+}
+
+const controlCompletionShimContent = () =>
+  [
+    '# aiopsterm managed terminal completion bootstrap',
+    'if type complete >/dev/null 2>&1 && command -v aio >/dev/null 2>&1; then',
+    '  eval "$(aio completion bash 2>/dev/null)"',
+    'fi',
+    ''
+  ].join('\n')
+
+const ensureControlCommandShims = (platform: NodeJS.Platform) => {
+  const directory = controlCommandShimDirectory()
+  try {
+    mkdirSync(directory, { recursive: true })
+    const extension = platform === 'win32' ? '.cmd' : ''
+    for (const shim of controlCommandShims) {
+      const commandPath = join(directory, `${shim.name}${extension}`)
+      writeFileSync(commandPath, controlCommandShimContent(platform, shim.helperArgs))
+      if (platform !== 'win32') chmodSync(commandPath, 0o755)
+    }
+    if (platform !== 'win32') {
+      const completionPath = join(directory, controlCompletionScriptName)
+      writeFileSync(completionPath, controlCompletionShimContent())
+      chmodSync(completionPath, 0o644)
+    }
+    return directory
+  } catch {
+    return ''
+  }
+}
+
+const prependPathEntry = (pathValue: string | undefined, entry: string) => {
+  if (!entry) return pathValue
+  const currentPath = pathValue || ''
+  return currentPath ? `${entry}${delimiter}${currentPath}` : entry
+}
+
+const completionBootstrapPromptCommand = () =>
+  '[ -n "$AIOPSTERM_CONTROL_COMPLETION_BASH" ] && [ -r "$AIOPSTERM_CONTROL_COMPLETION_BASH" ] && . "$AIOPSTERM_CONTROL_COMPLETION_BASH" && unset AIOPSTERM_CONTROL_COMPLETION_BASH;'
+
+const prependPromptCommand = (current: string | undefined, command: string) => {
+  const trimmed = current?.trim()
+  return trimmed ? `${command} ${trimmed}` : command
+}
+
 export const managedLocalTerminalEnvironment = (id: string, options: TerminalCreateOptions, baseEnv: NodeJS.ProcessEnv = getEnv()) => {
   const panelId = cleanManagedContextValue(options.panelId)
   const workspaceId = cleanManagedContextValue(options.workspaceId) || 'local'
@@ -123,6 +188,17 @@ export const managedLocalTerminalEnvironment = (id: string, options: TerminalCre
   if (controlSocketPath) env.AIOPSTERM_CONTROL_SOCKET = controlSocketPath
   if (jsRuntimeExecutable) env.AIOPSTERM_JS_RUNTIME = jsRuntimeExecutable
   if (controlHelperScriptPath) env.AIOPSTERM_CONTROL_HELPER_PATH = controlHelperScriptPath
+  if (jsRuntimeExecutable && controlHelperScriptPath) {
+    const controlCommandDirectory = ensureControlCommandShims(getPlatform())
+    if (controlCommandDirectory) {
+      env.AIOPSTERM_CONTROL_COMMAND = 'aio'
+      if (getPlatform() !== 'win32') {
+        env.AIOPSTERM_CONTROL_COMPLETION_BASH = join(controlCommandDirectory, controlCompletionScriptName)
+        env.PROMPT_COMMAND = prependPromptCommand(env.PROMPT_COMMAND, completionBootstrapPromptCommand())
+      }
+      env.PATH = prependPathEntry(env.PATH, controlCommandDirectory)
+    }
+  }
   return env
 }
 

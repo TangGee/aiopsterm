@@ -1,4 +1,5 @@
 import { createTerminalControlSurfaceAgentHandlers } from '@/services/terminal/terminalControlSurfaceAgents'
+import { createTerminalControlSurfaceAssetHandlers } from '@/services/terminal/terminalControlSurfaceAssets'
 import { createTerminalControlSurfaceDispatcher } from '@/services/terminal/terminalControlSurfaceDispatcher'
 import { createTerminalControlSurfaceGroupHandlers } from '@/services/terminal/terminalControlSurfaceGroups'
 import { createTerminalControlSurfaceMobileHandlers } from '@/services/terminal/terminalControlSurfaceMobile'
@@ -62,6 +63,15 @@ export const createTerminalControlSurfaceRuntime = ({
     surfaceSummaryForControl: state.surfaceSummaryForControl,
     startSshTerminalForPanel,
     disconnectTerminalPanel
+  })
+
+  const assetControlHandlers = createTerminalControlSurfaceAssetHandlers({
+    workspace,
+    controlWorkspaceRemote: state.controlWorkspaceRemote,
+    workspaceRemoteSummaryForControl: state.workspaceRemoteSummaryForControl,
+    workspaceSnapshotForControl: state.workspaceSnapshotForControl,
+    surfaceSummaryForControl: state.surfaceSummaryForControl,
+    startSshTerminalForPanel
   })
 
   const groupControlHandlers = createTerminalControlSurfaceGroupHandlers({
@@ -141,6 +151,7 @@ export const createTerminalControlSurfaceRuntime = ({
     workspace,
     sessionControlHandlers,
     mobileControlHandlers,
+    assetControlHandlers,
     remoteControlHandlers,
     groupControlHandlers,
     paneControlHandlers,

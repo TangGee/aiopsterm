@@ -25,6 +25,10 @@ type MockXtermInstance = {
   dispose: ReturnType<typeof vi.fn>
   clearSelection: ReturnType<typeof vi.fn>
   scrollToBottom: ReturnType<typeof vi.fn>
+  scrollLines: ReturnType<typeof vi.fn>
+  scrollPages: ReturnType<typeof vi.fn>
+  scrollToTop: ReturnType<typeof vi.fn>
+  scrollToLine: ReturnType<typeof vi.fn>
   refresh: ReturnType<typeof vi.fn>
   hasSelection: () => boolean
   getSelection: () => string
@@ -131,6 +135,10 @@ vi.mock('@xterm/xterm', () => ({
       focus: vi.fn(),
       dispose: vi.fn(),
       scrollToBottom: vi.fn(),
+      scrollLines: vi.fn(),
+      scrollPages: vi.fn(),
+      scrollToTop: vi.fn(),
+      scrollToLine: vi.fn(),
       refresh: vi.fn(),
       clearSelection: vi.fn(function (this: any) {
         this.selectedText = ''
@@ -255,6 +263,10 @@ vi.mock('@/services/terminal/threadedTerminalRuntime', () => ({
       focus: vi.fn(),
       dispose: vi.fn(),
       scrollToBottom: vi.fn(),
+      scrollLines: vi.fn(),
+      scrollPages: vi.fn(),
+      scrollToTop: vi.fn(),
+      scrollToLine: vi.fn(),
       refresh: vi.fn(),
       clearSelection: vi.fn(function (this: MockXtermInstance) {
         this.selectedText = ''
@@ -777,6 +789,21 @@ const dispatchShortcut = (key: string, init: Partial<KeyboardEventInit> = {}) =>
   return event.defaultPrevented
 }
 
+const dispatchShortcutOn = (target: Element, key: string, init: Partial<KeyboardEventInit> = {}) => {
+  const event = new KeyboardEvent('keydown', {
+    key,
+    code: init.code,
+    ctrlKey: init.ctrlKey,
+    shiftKey: init.shiftKey,
+    altKey: init.altKey,
+    metaKey: init.metaKey,
+    bubbles: true,
+    cancelable: true
+  })
+  target.dispatchEvent(event)
+  return event.defaultPrevented
+}
+
 const installMockVoiceRecorder = () => {
   const originalMediaRecorder = (globalThis as { MediaRecorder?: unknown }).MediaRecorder
   const originalWindowMediaRecorder = (window as unknown as { MediaRecorder?: unknown }).MediaRecorder
@@ -971,7 +998,7 @@ describe('AppShell', () => {
     expect(store.managedAiSessions[0]?.autoTitle).toBe('发布脚本修复')
   })
 
-  it('lets the AI session panel mark the selected managed session as handled', async () => {
+  it('keeps pending session handling out of AI session panel rows', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     const store = useWorkspaceStore()
@@ -1005,11 +1032,9 @@ describe('AppShell', () => {
 
     expect(wrapper.find('.ai-session-row.active').text()).toContain('Approve npm test')
     expect(store.aiAttentionUnreadCount).toBe(1)
-    await wrapper.find('.ai-session-handle').trigger('click')
-    await flushPromises()
-
-    expect(store.aiAttentionUnreadCount).toBe(0)
-    expect(store.selectedManagedAiSessionKey).toBe('')
+    expect(wrapper.find('.ai-session-handle').exists()).toBe(false)
+    expect(wrapper.find('.ai-session-row-action').exists()).toBe(false)
+    expect(store.selectedManagedAiSessionKey).toBe('claude-code:claude-session-1')
     expect(store.activePanelId).toBe('panel-main')
   })
 
@@ -1082,6 +1107,8 @@ describe('AppShell', () => {
         title: 'API refactor',
         summary: 'Reading files',
         cwd: '/work/api',
+        panelId: secondaryPanel.id,
+        terminalSessionId: 'terminal-session-2',
         gitBranch: 'feature/sidebar',
         gitDirty: false,
         requestKind: 'telemetry',
@@ -1164,6 +1191,13 @@ describe('AppShell', () => {
       expect(rowFor('Round finished').text()).not.toContain('/work/docs')
       expect(rowFor('Round finished').attributes('title')).toContain('/work/docs')
       expect(wrapper.findAll('.ai-session-row-action')).toHaveLength(0)
+      expect(wrapper.findAll('.ai-session-handle')).toHaveLength(0)
+
+      store.activePanelId = 'panel-main'
+      await rowFor('Reading files').trigger('dblclick')
+      await flushPromises()
+      expect(store.activePanelId).toBe(secondaryPanel.id)
+      expect(wrapper.find('.ai-sessions-section-header').text()).toContain('会话库')
 
       store.activePanelId = secondaryPanel.id
       await rowFor('Round finished').trigger('click')
@@ -2385,11 +2419,17 @@ describe('AppShell', () => {
     })
     const store = useWorkspaceStore()
     await flushPromises()
+    await waitForMockCall(vi.mocked(window.aiops.getSettingsPreferences), 'settings preferences')
+    await flushPromises()
+    expect(store.settingsShortcuts.find((shortcut) => shortcut.id === 'newTerminal')?.shortcut).toBe('Ctrl+Shift+T')
 
     expect(store.panels).toHaveLength(1)
+    vi.mocked(window.aiops.createTerminal).mockClear()
     expect(dispatchShortcut('T', { ctrlKey: true, shiftKey: true, code: 'KeyT' })).toBe(true)
+    await flushPromises()
+    expect(window.aiops.createTerminal).toHaveBeenCalledWith(expect.objectContaining({ kind: 'local', title: 'Local terminal' }))
     expect(store.panels).toHaveLength(1)
-    expect(store.activePanelId).toBe(store.panels[0].id)
+    expect(store.activePanel.sessionId).toBe('test-session-local')
 
     expect(store.rightPanelOpen).toBe(true)
     expect(dispatchShortcut('A', { ctrlKey: true, shiftKey: true, code: 'KeyA' })).toBe(true)
@@ -2397,16 +2437,24 @@ describe('AppShell', () => {
     expect(store.rightPanelOpen).toBe(false)
 
     store.startShortcutRecording('newTerminal')
+    vi.mocked(window.aiops.createTerminal).mockClear()
     expect(dispatchShortcut('T', { ctrlKey: true, shiftKey: true, code: 'KeyT' })).toBe(false)
+    await flushPromises()
+    expect(window.aiops.createTerminal).not.toHaveBeenCalled()
     expect(store.panels).toHaveLength(1)
     store.cancelShortcutRecording()
 
     store.startShortcutRecording('newTerminal')
     store.updateShortcutRecording('Ctrl+Alt+N')
     expect(await store.saveShortcutRecording()).toBe(true)
+    vi.mocked(window.aiops.createTerminal).mockClear()
     expect(dispatchShortcut('T', { ctrlKey: true, shiftKey: true, code: 'KeyT' })).toBe(false)
+    await flushPromises()
+    expect(window.aiops.createTerminal).not.toHaveBeenCalled()
     expect(store.panels).toHaveLength(1)
     expect(dispatchShortcut('N', { ctrlKey: true, altKey: true, code: 'KeyN' })).toBe(true)
+    await flushPromises()
+    expect(window.aiops.createTerminal).toHaveBeenCalledWith(expect.objectContaining({ kind: 'local', title: 'Local terminal' }))
     expect(store.panels).toHaveLength(2)
 
     expect(dispatchShortcut('1', { altKey: true, code: 'Digit1' })).toBe(true)
@@ -2417,6 +2465,26 @@ describe('AppShell', () => {
     expect(dispatchShortcut('P', { ctrlKey: true, shiftKey: true, code: 'KeyP' })).toBe(true)
     expect(store.activeModule).toBe('snippets')
     expect(store.leftPanelOpen).toBe(true)
+
+    store.startShortcutRecording('newTerminal')
+    store.updateShortcutRecording('Ctrl+K')
+    expect(await store.saveShortcutRecording()).toBe(true)
+    const terminalHost = document.createElement('div')
+    terminalHost.className = 'xterm-host'
+    document.body.appendChild(terminalHost)
+    try {
+      const panelCountBeforeTerminalCtrlK = store.panels.length
+      expect(dispatchShortcutOn(terminalHost, 'k', { ctrlKey: true, code: 'KeyK' })).toBe(false)
+      await flushPromises()
+      expect(store.panels).toHaveLength(panelCountBeforeTerminalCtrlK)
+      vi.mocked(window.aiops.createTerminal).mockClear()
+      expect(dispatchShortcut('k', { ctrlKey: true, code: 'KeyK' })).toBe(true)
+      await flushPromises()
+      expect(window.aiops.createTerminal).toHaveBeenCalledWith(expect.objectContaining({ kind: 'local', title: 'Local terminal' }))
+      expect(store.panels).toHaveLength(panelCountBeforeTerminalCtrlK + 1)
+    } finally {
+      terminalHost.remove()
+    }
 
     wrapper.unmount()
   })
@@ -7596,7 +7664,10 @@ describe('AppShell', () => {
       username: 'ops',
       group_name: '生产',
       asset_type: 'person',
-      auth_type: 'keyBased'
+      auth_type: 'keyBased',
+      needProxy: true,
+      proxyName: 'relay-proxy',
+      jumpHostId: 'asset-jump-unit'
     })
     store.applySshTerminalSession(
       store.activePanelId,
@@ -7615,6 +7686,9 @@ describe('AppShell', () => {
           assetType: 'person',
           organizationId: '生产',
           authType: 'keyBased',
+          needProxy: true,
+          proxyName: 'relay-proxy',
+          jumpHostId: 'asset-jump-unit',
           title: 'fork-source',
           createdAt: 1717200000000
         }
@@ -7627,13 +7701,18 @@ describe('AppShell', () => {
         username: 'ops',
         group_name: '生产',
         asset_type: 'person',
-        auth_type: 'keyBased'
+        auth_type: 'keyBased',
+        needProxy: true,
+        proxyName: 'relay-proxy',
+        jumpHostId: 'asset-jump-unit'
       }
     )
     await wrapper.find('.terminal-tab.active').trigger('contextmenu', { clientX: 120, clientY: 40 })
     expect(wrapper.find('.tab-menu').text()).toContain('Fork SSH Channel')
+    await wrapper.find('.terminal-pane.active .xterm-host').trigger('contextmenu')
+    expect(wrapper.find('.terminal-context-menu').text()).toContain('Fork SSH')
     vi.mocked(window.aiops.createTerminal).mockClear()
-    await wrapper.find('.tab-menu').findAll('button').find((button) => button.text().includes('Fork SSH Channel'))!.trigger('click')
+    await wrapper.find('.terminal-context-menu').findAll('button').find((button) => button.text().includes('Fork SSH'))!.trigger('click')
     await flushPromises()
     expect(store.activePanel.title).toBe('fork-source fork')
     expect(store.activePanel.output).not.toContain('aiopsterm ssh ops@10.8.0.6:2222')
@@ -7643,12 +7722,21 @@ describe('AppShell', () => {
         kind: 'ssh',
         assetId: 'asset-fork-unit',
         title: 'fork-source fork',
-        ssh: expect.objectContaining({ host: '10.8.0.6', port: 2222, username: 'ops', forkFromConnectionId: 'ssh-source-fork-unit' })
+        ssh: expect.objectContaining({
+          host: '10.8.0.6',
+          port: 2222,
+          username: 'ops',
+          needProxy: true,
+          proxyName: 'relay-proxy',
+          jumpHostId: 'asset-jump-unit',
+          forkFromConnectionId: 'ssh-source-fork-unit'
+        })
       })
     )
     expect(store.activePanel.sessionId).toBe('test-session-asset-fork-unit')
     expect(store.activePanel.sshSession?.connectionId).toBe('ssh-test-session-asset-fork-unit')
     expect(store.activePanel.sshSession?.forkFromConnectionId).toBe('ssh-source-fork-unit')
+    expect(store.activePanel.sshSession?.jumpHostId).toBe('asset-jump-unit')
     expect(store.selectedContexts.some((context) => context.id === 'asset-fork-unit' && context.detail === 'fork-source fork')).toBe(true)
 
     store.selectedContexts = []
@@ -7719,7 +7807,15 @@ describe('AppShell', () => {
         kind: 'ssh',
         assetId: 'asset-fork-unit',
         title: 'fork-source fork',
-        ssh: expect.objectContaining({ host: '10.8.0.6', port: 2222, username: 'ops', forkFromConnectionId: 'ssh-source-fork-unit' })
+        ssh: expect.objectContaining({
+          host: '10.8.0.6',
+          port: 2222,
+          username: 'ops',
+          needProxy: true,
+          proxyName: 'relay-proxy',
+          jumpHostId: 'asset-jump-unit',
+          forkFromConnectionId: 'ssh-source-fork-unit'
+        })
       })
     )
     expect(store.activePanel.sessionId).toBe('test-session-asset-fork-unit')
@@ -8673,6 +8769,76 @@ describe('AppShell', () => {
     wrapper.unmount()
   })
 
+  it('connects managed asset hosts through the control socket and reuses the visible SSH panel', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    mockXtermInstances.length = 0
+    let controlHandler: ((request: any) => Promise<any> | any) | null = null
+    vi.mocked(window.aiops.onControlRequest).mockImplementationOnce((handler: any) => {
+      controlHandler = handler
+      return () => {
+        controlHandler = null
+      }
+    })
+
+    const wrapper = mount(TerminalWorkspace, {
+      attachTo: document.body,
+      global: { plugins: [pinia] }
+    })
+    await flushPromises()
+    const invokeControlHandler = controlHandler as unknown as (request: any) => Promise<any>
+    expect(invokeControlHandler).toBeTruthy()
+    const store = useWorkspaceStore()
+    vi.mocked(window.aiops.createTerminal).mockClear()
+
+    const listResponse = await invokeControlHandler({ id: 'asset-list', method: 'asset.list', params: { prefix: 'prod' } })
+    expect(listResponse).toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
+          assets: expect.arrayContaining([expect.objectContaining({ id: 'asset-1', name: 'prod-bastion', connectable: true })])
+        })
+      })
+    )
+
+    const completeResponse = await invokeControlHandler({ id: 'asset-complete', method: 'asset.complete', params: { prefix: 'prod' } })
+    expect(completeResponse).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ completions: expect.arrayContaining(['prod-bastion']) }) }))
+
+    const connected = await invokeControlHandler({ id: 'asset-connect', method: 'asset.ssh.connect', params: { target: 'prod' } })
+    expect(connected).toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
+          connected: true,
+          created: true,
+          asset: expect.objectContaining({ id: 'asset-1', host: '10.24.8.12', username: 'ops' }),
+          surfaceId: expect.any(String),
+          remote: expect.objectContaining({ connection_state: 'connected', host: '10.24.8.12' })
+        })
+      })
+    )
+    const assetPanelId = connected.data.surfaceId
+    expect(store.activePanelId).toBe(assetPanelId)
+    expect(store.panels.find((panel) => panel.id === assetPanelId)).toEqual(
+      expect.objectContaining({
+        title: 'prod-bastion',
+        sshSession: expect.objectContaining({ assetId: 'asset-1', host: '10.24.8.12', username: 'ops' }),
+        sessionId: 'test-session-asset-1'
+      })
+    )
+    expect(window.aiops.createTerminal).toHaveBeenCalledTimes(1)
+    expect(window.aiops.createTerminal).toHaveBeenCalledWith(expect.objectContaining({ kind: 'ssh', assetId: 'asset-1' }))
+
+    const reused = await invokeControlHandler({ id: 'asset-connect-reuse', method: 'asset.ssh.connect', params: { target: 'asset-1' } })
+    expect(reused).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ connected: true, reused: true, surfaceId: assetPanelId }) }))
+    expect(window.aiops.createTerminal).toHaveBeenCalledTimes(1)
+
+    const ambiguous = await invokeControlHandler({ id: 'asset-connect-ambiguous', method: 'asset.ssh.connect', params: { target: '10' } })
+    expect(ambiguous).toEqual(expect.objectContaining({ ok: false, errorCode: 'ASSET_TARGET_AMBIGUOUS' }))
+
+    wrapper.unmount()
+  })
+
   it('opens control_compat-style settings, feedback, and sidebar snapshots through the shared terminal workspace control handler', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
@@ -8725,6 +8891,14 @@ describe('AppShell', () => {
 
     const invalidSettingsResponse = await invokeControlHandler({ id: 'settings-invalid', method: 'settings.open', params: { target: 'not-a-section' } })
     expect(invalidSettingsResponse).toEqual(expect.objectContaining({ ok: false, errorCode: 'SETTINGS_TARGET_INVALID' }))
+
+    const settingsGetResponse = await invokeControlHandler({ id: 'settings-get', method: 'settings.get', params: { path: 'terminal.fontSize' } })
+    expect(settingsGetResponse).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ setting: expect.objectContaining({ path: 'terminal.fontSize', value: 12 }) }) }))
+
+    vi.mocked(window.aiops.saveConfig).mockClear()
+    const settingsPutResponse = await invokeControlHandler({ id: 'settings-put', method: 'settings.put', params: { path: 'terminal.fontSize', value: 15 } })
+    expect(settingsPutResponse).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ saved: true, setting: expect.objectContaining({ value: 15 }) }) }))
+    expect(window.aiops.saveConfig).toHaveBeenCalledWith({ terminal: { fontSize: 15 } })
 
     vi.mocked(window.aiops.submitSettingsFeedbackReport).mockClear()
     const feedbackResponse = await invokeControlHandler({ id: 'feedback-open', method: 'feedback.open', params: {} })
@@ -10200,7 +10374,7 @@ describe('AppShell', () => {
     expect(wrapper.find('.command-line input').exists()).toBe(false)
 
     await enableCatalogModelOptions(store)
-    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true }))
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, shiftKey: true }))
     await wrapper.vm.$nextTick()
     expect(wrapper.find('.terminal-command-dialog').exists()).toBe(true)
     await flushPromises()
@@ -10318,6 +10492,146 @@ describe('AppShell', () => {
     await expect(store.updateTerminalSettings({ middleMouseEvent: 'closeTab' })).resolves.toBe(true)
     await wrapper.find('.xterm-host').trigger('mousedown', { button: 1 })
     expect(store.panels.some((panel) => panel.id === activePanelId)).toBe(false)
+
+    wrapper.unmount()
+  })
+
+  it('keeps readline control keys passthrough while handling terminal app shortcuts', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    mockXtermInstances.length = 0
+    const wrapper = mount(TerminalWorkspace, {
+      attachTo: document.body,
+      global: { plugins: [pinia] }
+    })
+    const store = useWorkspaceStore()
+
+    await openLocalShellFromActiveTab(wrapper)
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+    const terminal = mockXtermInstances.at(-1)!
+    terminal.emitSelection('shortcut copied text')
+    vi.mocked(window.aiops.writeTerminal).mockClear()
+    vi.mocked(navigator.clipboard.writeText).mockClear()
+    vi.mocked(window.aiops.newWindow).mockClear()
+    vi.mocked(window.aiops.toggleFullScreen).mockClear()
+    vi.mocked(window.aiops.closeWindow).mockClear()
+
+    for (const key of ['a', 'c', 'e', 'f', 'k', 'l', 'm']) {
+      const event = new KeyboardEvent('keydown', { key, ctrlKey: true, bubbles: true, cancelable: true })
+      expect(terminal.emitKeyEvent(event)).toBe(true)
+      expect(event.defaultPrevented).toBe(false)
+    }
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+    expect(navigator.clipboard.writeText).not.toHaveBeenCalled()
+    expect(window.aiops.writeTerminal).not.toHaveBeenCalled()
+    expect(wrapper.find('.terminal-search-overlay').exists()).toBe(false)
+    expect(wrapper.find('.terminal-command-dialog').exists()).toBe(false)
+    expect(terminal.clear).not.toHaveBeenCalled()
+    expect(store.activeModule).toBe('workspace')
+
+    const copyEvent = new KeyboardEvent('keydown', { key: 'c', ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true })
+    expect(terminal.emitKeyEvent(copyEvent)).toBe(false)
+    await flushPromises()
+    expect(copyEvent.defaultPrevented).toBe(true)
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith('shortcut copied text')
+
+    const pasteEvent = new KeyboardEvent('keydown', { key: 'v', ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true })
+    expect(terminal.emitKeyEvent(pasteEvent)).toBe(false)
+    await flushPromises()
+    expect(window.aiops.writeTerminal).toHaveBeenCalledWith('test-session-local', 'clipboard-command')
+
+    const searchEvent = new KeyboardEvent('keydown', { key: 'f', ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true })
+    store.appendTerminalOutput(store.activePanelId, 'needle one\nneedle two\n')
+    expect(terminal.emitKeyEvent(searchEvent)).toBe(false)
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('.terminal-search-overlay').exists()).toBe(true)
+    expect(searchEvent.defaultPrevented).toBe(true)
+    await wrapper.find('.terminal-search-overlay input').setValue('needle')
+    const searchAddon = terminal.loadAddon.mock.calls.find(([addon]) => 'findNext' in addon)?.[0]
+    const searchNextEvent = new KeyboardEvent('keydown', { key: 'g', ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true })
+    expect(terminal.emitKeyEvent(searchNextEvent)).toBe(false)
+    expect(searchAddon.findNext).toHaveBeenCalledWith('needle', { caseSensitive: false })
+    const searchPreviousEvent = new KeyboardEvent('keydown', { key: 'h', ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true })
+    expect(terminal.emitKeyEvent(searchPreviousEvent)).toBe(false)
+    expect(searchAddon.findPrevious).toHaveBeenCalledWith('needle', { caseSensitive: false })
+    const searchClearEvent = new KeyboardEvent('keydown', { key: 'j', ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true })
+    expect(terminal.emitKeyEvent(searchClearEvent)).toBe(false)
+    expect(searchAddon.clearDecorations).toHaveBeenCalled()
+    await wrapper.vm.$nextTick()
+    await wrapper.find('.terminal-search-overlay input').setValue('needle')
+    wrapper.find('.terminal-search-overlay input').element.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+    await wrapper.vm.$nextTick()
+
+    const commandEvent = new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true })
+    expect(terminal.emitKeyEvent(commandEvent)).toBe(false)
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('.terminal-command-dialog').exists()).toBe(true)
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    await wrapper.vm.$nextTick()
+
+    const clearEvent = new KeyboardEvent('keydown', { key: 'l', ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true })
+    expect(terminal.emitKeyEvent(clearEvent)).toBe(false)
+    expect(terminal.clear).toHaveBeenCalled()
+
+    const zoomInEvent = new KeyboardEvent('keydown', { key: '=', ctrlKey: true, bubbles: true, cancelable: true })
+    expect(terminal.emitKeyEvent(zoomInEvent)).toBe(false)
+    expect(terminal.options.fontSize).toBe(13)
+    const zoomResetEvent = new KeyboardEvent('keydown', { key: '0', ctrlKey: true, bubbles: true, cancelable: true })
+    expect(terminal.emitKeyEvent(zoomResetEvent)).toBe(false)
+    expect(terminal.options.fontSize).toBe(12)
+
+    const pageUpEvent = new KeyboardEvent('keydown', { key: 'PageUp', shiftKey: true, bubbles: true, cancelable: true })
+    expect(terminal.emitKeyEvent(pageUpEvent)).toBe(false)
+    expect(terminal.scrollPages).toHaveBeenCalledWith(-1)
+    const endEvent = new KeyboardEvent('keydown', { key: 'End', shiftKey: true, bubbles: true, cancelable: true })
+    expect(terminal.emitKeyEvent(endEvent)).toBe(false)
+    expect(terminal.scrollToBottom).toHaveBeenCalled()
+    const lineUpEvent = new KeyboardEvent('keydown', { key: 'ArrowUp', ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true })
+    expect(terminal.emitKeyEvent(lineUpEvent)).toBe(false)
+    expect(terminal.scrollLines).toHaveBeenCalledWith(-1)
+    const lineDownEvent = new KeyboardEvent('keydown', { key: 'ArrowDown', ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true })
+    expect(terminal.emitKeyEvent(lineDownEvent)).toBe(false)
+    expect(terminal.scrollLines).toHaveBeenCalledWith(1)
+
+    const fullScreenEvent = new KeyboardEvent('keydown', { key: 'F11', bubbles: true, cancelable: true })
+    expect(terminal.emitKeyEvent(fullScreenEvent)).toBe(false)
+    expect(window.aiops.toggleFullScreen).toHaveBeenCalledTimes(1)
+    const newWindowEvent = new KeyboardEvent('keydown', { key: 'n', ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true })
+    expect(terminal.emitKeyEvent(newWindowEvent)).toBe(false)
+    expect(window.aiops.newWindow).toHaveBeenCalledTimes(1)
+    const closeWindowEvent = new KeyboardEvent('keydown', { key: 'q', ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true })
+    expect(terminal.emitKeyEvent(closeWindowEvent)).toBe(false)
+    expect(window.aiops.closeWindow).toHaveBeenCalledTimes(1)
+
+    store.createPanel()
+    store.appendTerminalOutput(store.activePanelId, 'second panel\n')
+    await wrapper.vm.$nextTick()
+    await wrapper.vm.$nextTick()
+    const secondTerminal = mockXtermInstances.at(-1)!
+    const firstPanelId = store.panels[0].id
+    const secondPanelId = store.activePanelId
+    expect(store.activePanelId).not.toBe(firstPanelId)
+    expect(secondTerminal.emitKeyEvent(new KeyboardEvent('keydown', { key: 'PageUp', ctrlKey: true, bubbles: true, cancelable: true }))).toBe(false)
+    expect(store.activePanelId).toBe(firstPanelId)
+
+    store.activePanelId = secondPanelId
+    expect(secondTerminal.emitKeyEvent(new KeyboardEvent('keydown', { key: 'PageUp', ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true }))).toBe(false)
+    expect(store.panels[0].id).toBe(secondPanelId)
+    expect(secondTerminal.emitKeyEvent(new KeyboardEvent('keydown', { key: 'PageDown', ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true }))).toBe(false)
+    expect(store.panels[1].id).toBe(secondPanelId)
+
+    store.appendTerminalOutput(secondPanelId, 'before command\n')
+    store.appendTerminalInput(secondPanelId, 'cmd-one\n')
+    store.appendTerminalOutput(secondPanelId, 'between commands\n')
+    store.appendTerminalInput(secondPanelId, 'cmd-two\n')
+    secondTerminal.buffer.active.viewportY = 3
+    expect(secondTerminal.emitKeyEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true }))).toBe(false)
+    expect(secondTerminal.scrollToLine).toHaveBeenCalledWith(2)
+    secondTerminal.buffer.active.viewportY = 2
+    expect(secondTerminal.emitKeyEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true }))).toBe(false)
+    expect(secondTerminal.scrollToLine).toHaveBeenCalledWith(4)
 
     wrapper.unmount()
   })
@@ -16743,6 +17057,8 @@ describe('AppShell', () => {
 
     const desktopNotification = workspace.findAll('.settings-checkbox-item').find((item) => item.text().includes('桌面通知'))!.find('input')
     expect((desktopNotification.element as HTMLInputElement).checked).toBe(true)
+    expect(workspace.text()).toContain('通知声音')
+    expect(workspace.text()).toContain('启禀殿下')
     const notificationAutomationCard = workspace.find('.notification-automation-card')
     expect(notificationAutomationCard.text()).toContain('Control Socket')
     expect(notificationAutomationCard.text()).toContain('CLI Helper')
@@ -16760,6 +17076,25 @@ describe('AppShell', () => {
         })
       })
     )
+
+    vi.mocked(window.aiops.showOpenDialog).mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/approval.wav'] })
+    vi.mocked(window.aiops.saveCustomNotificationSound).mockResolvedValueOnce({
+      filePath: '/tmp/aiopsterm/notification-sounds/approval.wav',
+      url: 'file:///tmp/aiopsterm/notification-sounds/approval.wav',
+      name: 'approval.wav',
+      size: 128,
+      bytes: 128,
+      mtimeMs: 1717200000000
+    })
+    await workspace.findAll('button').find((button) => button.text().includes('选择声音'))!.trigger('click')
+    await flushPromises()
+    expect(window.aiops.showOpenDialog).toHaveBeenCalledWith({
+      properties: ['openFile'],
+      filters: [{ name: 'Audio Files', extensions: ['mp3', 'wav', 'ogg', 'm4a', 'aac', 'flac', 'webm'] }]
+    })
+    expect(window.aiops.saveCustomNotificationSound).toHaveBeenCalledWith('/tmp/approval.wav')
+    expect(store.notificationSettings.soundPreset).toBe('custom')
+    expect(store.notificationSettings.customSoundName).toBe('approval.wav')
 
     workspace.unmount()
   })

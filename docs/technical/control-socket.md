@@ -21,7 +21,7 @@ The first control-socket slice supports these terminal primitives:
 
 The bundled CLI helper also has a no-socket discovery command:
 
-- `aiopsterm-control recipes [context|notify|agent|terminal|remote|session]`: print copyable automation recipes without connecting to the control socket. This is the fastest entry point for scripts that need the current workspace context, notifications, managed AI sessions, visible terminal primitives, SSH remote controls, or session restore/resume commands.
+- `aio recipes [context|notify|agent|terminal|remote|session]`: print copyable automation recipes without connecting to the control socket. This is the fastest entry point for scripts that need the current workspace context, notifications, managed AI sessions, visible terminal primitives, SSH remote controls, or session restore/resume commands.
 
 The notification slice adds these generic notification primitives:
 
@@ -77,6 +77,8 @@ The control_compat system/window/settings compatibility slice adds local app aut
 - `window.create`, `window.close`, and `window.display`: recognized compatibility controls that return `unsupported=true` rather than creating, closing, or moving native windows unexpectedly.
 - `window.displays`: return connected display metadata when the packaged main process provides it.
 - `settings.open`: open the existing Settings module and select a supported settings section such as `general`, `terminal`, `models`, `ai-notifications`, `ai-remote-host-management`, `mcp`, `skills`, or `about`.
+- `settings.get`: read a config value by a dot-separated path such as `terminal.fontSize`.
+- `settings.put`: save one config value by a dot-separated path. The renderer converts the path into a structured `Partial<UserConfig>` patch and persists it through the normal settings save bridge.
 - `feedback.open`: reuse the existing local feedback report action.
 - `feedback.submit`: validate control_compat-style feedback fields (`email`, `body`, optional image paths) and return a local-only accepted response. aiopsterm does not submit to an external feedback service through the control socket.
 - `vm.list`, `vm.create`, `vm.destroy`, `vm.exec`, `vm.ssh_info`, and `vm.attach_info`: recognized control_compat Cloud VM controls. aiopsterm validates the same required identifiers/commands where useful, then returns `unsupported=true` instead of contacting control_compat's Cloud VM API or creating hidden infrastructure.
@@ -138,6 +140,15 @@ The workspace remote compatibility slice maps control_compat remote-workspace co
 - `remote.tmux.sessions`, `remote.tmux.attach`, `remote.tmux.detach`, `remote.tmux.state`, `remote.tmux.mirror`, and `remote.tmux.window`: recognized as compatibility commands but return `unsupported=true`, because aiopsterm does not implement control_compat remote tmux control-mode mirroring in the control socket.
 
 This slice deliberately keeps remote execution visible. It does not create hidden SSH control streams, remote daemons, or background tmux mirrors. Automation that needs a remote shell should configure/reconnect a visible SSH panel and then use normal terminal controls against that panel.
+
+The managed asset host slice adds aiopsterm-native SSH shortcuts over the same visible terminal model:
+
+- `asset.list`: list saved hosts from the local asset inventory. By default it excludes the local shell pseudo-asset and non-connectable organization records.
+- `asset.complete`: return newline-friendly completion candidates for managed hosts. The bundled `aiossh` completion uses this method and does not probe the network.
+- `asset.save` / `asset.add`: save host metadata through the normal asset bridge. This is intended for non-secret fields such as name, host, user, port, group, proxy, jump-host id, or keychain id.
+- `asset.ssh.connect`: resolve a saved host by id, uuid, name, title, host, ip, or `user@host`, then focus an existing visible SSH panel for that asset or create one and connect it.
+
+The CLI alias `aiossh <managed-host>` maps to `asset.ssh.connect`. It is deliberately separate from `asset.save` so connection and host creation remain distinct workflows.
 
 The session restore slice adds control_compat-style saved layouts for the shared main work panel:
 
@@ -351,134 +362,136 @@ Errors use the common mutation shape:
 
 ## CLI Helper
 
-The packaged helper is `resources/aiopsterm-control.js`. It defaults to `AIOPSTERM_CONTROL_SOCKET`, so it works naturally inside an aiopsterm local terminal. Local terminals created by aiopsterm also receive `AIOPSTERM_JS_RUNTIME` and `AIOPSTERM_CONTROL_HELPER_PATH`, allowing scripts to use aiopsterm's packaged JavaScript runtime instead of a system `node` command:
+For a user-facing walkthrough of the short command, see [Control CLI Tutorial](../usage/control-cli-tutorial.md).
 
-```bash
-aiopsterm-control() {
-  ELECTRON_RUN_AS_NODE=1 "$AIOPSTERM_JS_RUNTIME" "$AIOPSTERM_CONTROL_HELPER_PATH" "$@"
-}
-```
+The packaged helper is `resources/aiopsterm-control.js`. It defaults to `AIOPSTERM_CONTROL_SOCKET`, so it works naturally inside an aiopsterm local terminal. Local terminals created by aiopsterm also receive `AIOPSTERM_JS_RUNTIME`, `AIOPSTERM_CONTROL_HELPER_PATH`, and a PATH shim directory with these commands:
+
+- `aio`: preferred short command.
+- `aictl`: explicit compatibility alias.
+- `aiopsterm-control`: long compatibility alias.
+
+Each shim launches aiopsterm's packaged JavaScript runtime with `ELECTRON_RUN_AS_NODE=1`, so scripts do not depend on a system `node` command. External terminals can still run the helper directly when they pass `--socket <path>` and provide the runtime/helper paths.
 
 Examples:
 
 ```bash
-aiopsterm-control terminal list
-aiopsterm-control capabilities
-aiopsterm-control identify --panel "$AIOPSTERM_PANEL_ID" --session "$AIOPSTERM_TERMINAL_SESSION_ID"
-aiopsterm-control rpc terminal.list --params-json '{"limit":2}'
-aiopsterm-control hooks list
-aiopsterm-control hooks setup
-aiopsterm-control hooks setup --agent codex
-aiopsterm-control hooks uninstall codex
-aiopsterm-control auth login
-aiopsterm-control system tree
-aiopsterm-control settings open --target models
-aiopsterm-control feedback open
-aiopsterm-control sidebar snapshot
-aiopsterm-control markdown open commands/diagnose.md --line 2
-aiopsterm-control file open commands/diagnose.md Markdown语法指南.md
-aiopsterm-control project open commands/diagnose.md
-aiopsterm-control project get-state --surface kb:commands/diagnose.md
-aiopsterm-control window list
-aiopsterm-control window focus --window window:1
-aiopsterm-control app focus-override active
-aiopsterm-control workspace snapshot
-aiopsterm-control workspace-group list
-aiopsterm-control workspace-group create --name "deploy" --from panel-1,panel-2
-aiopsterm-control workspace-group focus workspace_group:1
-aiopsterm-control session save --id latest --name "Work Layout"
-aiopsterm-control session list
-aiopsterm-control session restore --id latest
-aiopsterm-control surface list
-aiopsterm-control surface resume set --kind tmux --checkpoint work --shell "tmux attach -t work"
-aiopsterm-control surface resume trust --panel panel-main --policy auto --reason "trusted tmux session"
-aiopsterm-control surface resume preview --panel panel-main
-aiopsterm-control surface resume autorun --panel panel-main
-aiopsterm-control surface resume show --json
-aiopsterm-control surface resume run --panel panel-main
-aiopsterm-control surface resume clear --checkpoint work
-aiopsterm-control agent-hibernation status
-aiopsterm-control agent-hibernation on
-aiopsterm-control agent-hibernation preview
-aiopsterm-control agent-hibernation sweep
-aiopsterm-control agent hibernate --session codex-session-1 --source codex
-aiopsterm-control agent resume --session codex-session-1 --source codex
-aiopsterm-control agent session list --needs-input
-aiopsterm-control agent session show claude-session-1 --source claude-code
-aiopsterm-control agent session approve claude-session-1 --source claude-code
-aiopsterm-control agent session deny claude-session-1 --source claude-code --message "Use staging first"
-aiopsterm-control agent session rename claude-session-1 --source claude-code --title "Deploy review"
-aiopsterm-control agent session clear claude-session-1 --source claude-code
-aiopsterm-control feed list
-aiopsterm-control feed mark-handled
-aiopsterm-control feed clear-ended
-aiopsterm-control feed clear --yes
-aiopsterm-control mobile chat sessions --workspace main
-aiopsterm-control mobile chat send --session claude-session-1 --text "继续"
-aiopsterm-control mobile attach-ticket create --workspace main --ttl-seconds 600
-aiopsterm-control agent team launch --source codex --count 3 --cwd "$PWD" --prompt "review this repo"
-aiopsterm-control agent team launch --source claude-code --count 2 --cwd "$PWD" --prompt "investigate flaky tests"
-aiopsterm-control agent team launch --source custom --count 2 --command "my-agent --role reviewer --index {{index}}"
-aiopsterm-control agent vault register --id my-agent --name "My Agent" --process-name my-agent --session-option --session --launch-command "my-agent --cwd {{cwd}} --index {{index}} {{prompt}}" --resume-command "my-agent --session {{sessionId}}"
-aiopsterm-control agent vault render --id my-agent --kind resume --session session-1
-aiopsterm-control agent vault identify --process-name my-agent --argv /usr/local/bin/my-agent --argv --session --argv session-1
-aiopsterm-control agent vault scan --source my-agent --panel panel-main
-aiopsterm-control agent team launch --source my-agent --count 3 --cwd "$PWD" --prompt "review this repo"
-aiopsterm-control events --category notification --cursor-file ~/.cache/aiopsterm/events.seq --limit 10
-aiopsterm-control tree
-aiopsterm-control terminal read-screen --lines 40
-aiopsterm-control capture-pane --panel panel-main --lines 200
-aiopsterm-control pipe-pane --panel panel-main --command "grep ERROR"
-aiopsterm-control clear-history --panel panel-main
-aiopsterm-control respawn-pane --panel panel-main --command 'exec ${SHELL:-/bin/bash} -l'
-aiopsterm-control break-pane --pane panel-2 --focus true
-aiopsterm-control join-pane --pane panel-2 --target-pane panel-main --direction below
-aiopsterm-control swap-pane --pane panel-2 --target-pane panel-main
-aiopsterm-control resize-pane --pane panel-main -R --amount 5
-aiopsterm-control next-window
-aiopsterm-control select-pane --target panel-main
-aiopsterm-control find-window --content --select "deploy"
-aiopsterm-control list-panes
-aiopsterm-control current-window
-aiopsterm-control new-window --name "Scratch"
-aiopsterm-control split-window -h --target panel-main
-aiopsterm-control rename-window --target panel-main "Main Ops"
-aiopsterm-control kill-pane --target panel-2
-aiopsterm-control terminal focus --panel panel-main
-aiopsterm-control terminal send --session "$AIOPSTERM_TERMINAL_SESSION_ID" --text $'pwd\n'
-aiopsterm-control terminal send-key --session "$AIOPSTERM_TERMINAL_SESSION_ID" ctrl+c
-aiopsterm-control send-panel --panel panel-main "echo hello\n"
-aiopsterm-control send-key-panel --panel panel-main enter
-aiopsterm-control wait-for build-ready --timeout 30
-aiopsterm-control wait-for --signal build-ready
-aiopsterm-control display-message "deploy done"
-aiopsterm-control display-message --print "deploy done"
-aiopsterm-control set-buffer --name deploy "kubectl rollout status deploy/api"
-aiopsterm-control list-buffers
-aiopsterm-control show-buffer --name deploy
-aiopsterm-control save-buffer --name deploy /tmp/deploy-buffer.txt
-aiopsterm-control paste-buffer --name deploy --panel panel-main
-aiopsterm-control show-options -v extended-keys
-aiopsterm-control set-hook after-split-window "display-message split"
-aiopsterm-control set-hook --list
-aiopsterm-control popup
-aiopsterm-control set-status build compiling --priority 80
-aiopsterm-control set-progress 0.5 --label "Building"
-aiopsterm-control log --level success --source test "All green"
-aiopsterm-control sidebar-state
-aiopsterm-control notify --title "Build done" --body "All tests passed"
-aiopsterm-control notify --source ci --level success --group build --key main --title "Build done" --body "All tests passed"
-aiopsterm-control notify-surface --surface panel-main --source deploy --level warning --group prod --key deploy-prod --title "Deploy needs review" --body "Check logs"
-aiopsterm-control list-notifications
-aiopsterm-control list-notifications --source ci --group build --unread
-aiopsterm-control jump-to-unread
+aio terminal list
+aio capabilities
+aio identify --panel "$AIOPSTERM_PANEL_ID" --session "$AIOPSTERM_TERMINAL_SESSION_ID"
+aio rpc terminal.list --params-json '{"limit":2}'
+aio hooks list
+aio hooks setup
+aio hooks setup --agent codex
+aio hooks uninstall codex
+aio auth login
+aio system tree
+aio settings open --target models
+aio feedback open
+aio sidebar snapshot
+aio markdown open commands/diagnose.md --line 2
+aio file open commands/diagnose.md Markdown语法指南.md
+aio project open commands/diagnose.md
+aio project get-state --surface kb:commands/diagnose.md
+aio window list
+aio window focus --window window:1
+aio app focus-override active
+aio workspace snapshot
+aio workspace-group list
+aio workspace-group create --name "deploy" --from panel-1,panel-2
+aio workspace-group focus workspace_group:1
+aio session save --id latest --name "Work Layout"
+aio session list
+aio session restore --id latest
+aio surface list
+aio surface resume set --kind tmux --checkpoint work --shell "tmux attach -t work"
+aio surface resume trust --panel panel-main --policy auto --reason "trusted tmux session"
+aio surface resume preview --panel panel-main
+aio surface resume autorun --panel panel-main
+aio surface resume show --json
+aio surface resume run --panel panel-main
+aio surface resume clear --checkpoint work
+aio agent-hibernation status
+aio agent-hibernation on
+aio agent-hibernation preview
+aio agent-hibernation sweep
+aio agent hibernate --session codex-session-1 --source codex
+aio agent resume --session codex-session-1 --source codex
+aio agent session list --needs-input
+aio agent session show claude-session-1 --source claude-code
+aio agent session approve claude-session-1 --source claude-code
+aio agent session deny claude-session-1 --source claude-code --message "Use staging first"
+aio agent session rename claude-session-1 --source claude-code --title "Deploy review"
+aio agent session clear claude-session-1 --source claude-code
+aio feed list
+aio feed mark-handled
+aio feed clear-ended
+aio feed clear --yes
+aio mobile chat sessions --workspace main
+aio mobile chat send --session claude-session-1 --text "继续"
+aio mobile attach-ticket create --workspace main --ttl-seconds 600
+aio agent team launch --source codex --count 3 --cwd "$PWD" --prompt "review this repo"
+aio agent team launch --source claude-code --count 2 --cwd "$PWD" --prompt "investigate flaky tests"
+aio agent team launch --source custom --count 2 --command "my-agent --role reviewer --index {{index}}"
+aio agent vault register --id my-agent --name "My Agent" --process-name my-agent --session-option --session --launch-command "my-agent --cwd {{cwd}} --index {{index}} {{prompt}}" --resume-command "my-agent --session {{sessionId}}"
+aio agent vault render --id my-agent --kind resume --session session-1
+aio agent vault identify --process-name my-agent --argv /usr/local/bin/my-agent --argv --session --argv session-1
+aio agent vault scan --source my-agent --panel panel-main
+aio agent team launch --source my-agent --count 3 --cwd "$PWD" --prompt "review this repo"
+aio events --category notification --cursor-file ~/.cache/aiopsterm/events.seq --limit 10
+aio tree
+aio terminal read-screen --lines 40
+aio capture-pane --panel panel-main --lines 200
+aio pipe-pane --panel panel-main --command "grep ERROR"
+aio clear-history --panel panel-main
+aio respawn-pane --panel panel-main --command 'exec ${SHELL:-/bin/bash} -l'
+aio break-pane --pane panel-2 --focus true
+aio join-pane --pane panel-2 --target-pane panel-main --direction below
+aio swap-pane --pane panel-2 --target-pane panel-main
+aio resize-pane --pane panel-main -R --amount 5
+aio next-window
+aio select-pane --target panel-main
+aio find-window --content --select "deploy"
+aio list-panes
+aio current-window
+aio new-window --name "Scratch"
+aio split-window -h --target panel-main
+aio rename-window --target panel-main "Main Ops"
+aio kill-pane --target panel-2
+aio terminal focus --panel panel-main
+aio terminal send --session "$AIOPSTERM_TERMINAL_SESSION_ID" --text $'pwd\n'
+aio terminal send-key --session "$AIOPSTERM_TERMINAL_SESSION_ID" ctrl+c
+aio send-panel --panel panel-main "echo hello\n"
+aio send-key-panel --panel panel-main enter
+aio wait-for build-ready --timeout 30
+aio wait-for --signal build-ready
+aio display-message "deploy done"
+aio display-message --print "deploy done"
+aio set-buffer --name deploy "kubectl rollout status deploy/api"
+aio list-buffers
+aio show-buffer --name deploy
+aio save-buffer --name deploy /tmp/deploy-buffer.txt
+aio paste-buffer --name deploy --panel panel-main
+aio show-options -v extended-keys
+aio set-hook after-split-window "display-message split"
+aio set-hook --list
+aio popup
+aio set-status build compiling --priority 80
+aio set-progress 0.5 --label "Building"
+aio log --level success --source test "All green"
+aio sidebar-state
+aio notify --title "Build done" --body "All tests passed"
+aio notify --source ci --level success --group build --key main --title "Build done" --body "All tests passed"
+aio notify-surface --surface panel-main --source deploy --level warning --group prod --key deploy-prod --title "Deploy needs review" --body "Check logs"
+aio list-notifications
+aio list-notifications --source ci --group build --unread
+aio jump-to-unread
 ```
 
 Use `--json` for scripting:
 
 ```bash
-aiopsterm-control --json workspace snapshot
-aiopsterm-control context
+aio --json workspace snapshot
+aio context
 ```
 
 ## Safety Boundary

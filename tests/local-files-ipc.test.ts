@@ -9,6 +9,7 @@ const backendMocks = vi.hoisted(() => ({
   prepareChatImageAttachmentFromClipboard: vi.fn(),
   prepareChatImageAttachmentFromFile: vi.fn(),
   saveCustomBackgroundFile: vi.fn(),
+  saveCustomNotificationSoundFile: vi.fn(),
   stageChatAttachment: vi.fn(),
   validateChatImageAttachment: vi.fn(),
   writeLocalTextFile: vi.fn()
@@ -27,6 +28,7 @@ vi.mock('../src/main/backend/chat/chatImageAttachment', () => ({
 
 vi.mock('../src/main/backend/files/localFileWrites', () => ({
   saveCustomBackgroundFile: backendMocks.saveCustomBackgroundFile,
+  saveCustomNotificationSoundFile: backendMocks.saveCustomNotificationSoundFile,
   writeLocalTextFile: backendMocks.writeLocalTextFile
 }))
 
@@ -63,6 +65,7 @@ const createRegistrationInput = (overrides: Record<string, unknown> = {}) => {
     getDownloadsPath: vi.fn(() => '/tmp/aiopsterm-downloads'),
     getChatAttachmentsPath: vi.fn(() => '/tmp/aiopsterm-user-data/chat-attachments'),
     getCustomBackgroundsPath: vi.fn(() => '/tmp/aiopsterm-user-data/backgrounds'),
+    getCustomNotificationSoundsPath: vi.fn(() => '/tmp/aiopsterm-user-data/notification-sounds'),
     customBackgroundUrlForPath,
     writeFixtureFile: vi.fn(async () => undefined),
     ...overrides
@@ -82,6 +85,14 @@ describe('local files IPC registrar', () => {
       filePath: '/tmp/aiopsterm-user-data/backgrounds/custom.png',
       url: 'aiopsterm-background://local/custom.png',
       name: 'custom.png',
+      size: 4,
+      bytes: 4,
+      mtimeMs: 1780490000000
+    })
+    backendMocks.saveCustomNotificationSoundFile.mockResolvedValue({
+      filePath: '/tmp/aiopsterm-user-data/notification-sounds/notify.wav',
+      url: 'file:///tmp/aiopsterm-user-data/notification-sounds/notify.wav',
+      name: 'notify.wav',
       size: 4,
       bytes: 4,
       mtimeMs: 1780490000000
@@ -122,6 +133,7 @@ describe('local files IPC registrar', () => {
       'dialog:open-file',
       'dialog:save-file',
       'settings:save-custom-background',
+      'settings:save-custom-notification-sound',
       'files:read-local',
       'files:write-local',
       'chat:stage-attachment',
@@ -232,6 +244,15 @@ describe('local files IPC registrar', () => {
       maxBytes: 20 * 1024 * 1024,
       allowedExtensions: new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp']),
       toUrl: input.customBackgroundUrlForPath
+    })
+
+    await expect(handlers.get('settings:save-custom-notification-sound')?.({}, '/tmp/source/notify.wav')).resolves.toMatchObject({
+      filePath: '/tmp/aiopsterm-user-data/notification-sounds/notify.wav'
+    })
+    expect(backendMocks.saveCustomNotificationSoundFile).toHaveBeenCalledWith('/tmp/source/notify.wav', {
+      soundDir: '/tmp/aiopsterm-user-data/notification-sounds',
+      maxBytes: 10 * 1024 * 1024,
+      allowedExtensions: new Set(['.mp3', '.wav', '.ogg', '.m4a', '.aac', '.flac', '.webm'])
     })
 
     await expect(handlers.get('files:write-local')?.({}, '/tmp/query.sql', 'select 1;\n')).resolves.toMatchObject({ ok: true })

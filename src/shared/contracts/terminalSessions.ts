@@ -20,6 +20,7 @@ export type TerminalCreateOptions = {
     passphrase?: string
     needProxy?: boolean
     proxyName?: string
+    jumpHostId?: string
     forkFromConnectionId?: string
   }
 }
@@ -34,6 +35,7 @@ export type TerminalSshConnectionInfo = {
   assetType?: string
   organizationId?: string
   authType?: string
+  jumpHostId?: string
   needProxy?: boolean
   proxyName?: string
   title?: string

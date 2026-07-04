@@ -7,6 +7,7 @@ import type {
   WorkspaceManagedAiControllerDeps,
   WorkspaceManagedAiControllerState
 } from '@/services/ai/workspaceManagedAiTypes'
+import type { ManagedAiSessionFocusRequest } from '@shared/contracts/managedAiSessions'
 
 export type {
   AiAttentionFocusRequest,
@@ -33,6 +34,7 @@ export const createWorkspaceManagedAiController = (
   } = state
   const { setTopNotice, i18nText, runTerminalCommand } = deps
   let openLocalTerminalPanel = deps.openLocalTerminalPanel
+  let focusManagedAiSessionFromNotification = (_request: ManagedAiSessionFocusRequest) => false
 
   const agentHookRuntime = createWorkspaceAgentHookInstallerRuntime({
     state: {
@@ -67,7 +69,8 @@ export const createWorkspaceManagedAiController = (
       aiAttentionItems: state.aiAttentionItems,
       controlNotifications: state.controlNotifications
     },
-    setTopNotice
+    setTopNotice,
+    focusManagedAiSession: (request) => focusManagedAiSessionFromNotification(request)
   })
 
   const sessionRuntime = createWorkspaceManagedAiSessionRuntime({
@@ -102,6 +105,17 @@ export const createWorkspaceManagedAiController = (
     openLocalTerminalPanel: async (options) => openLocalTerminalPanel?.(options) ?? null,
     runTerminalCommand
   })
+
+  focusManagedAiSessionFromNotification = (request) => {
+    const focused =
+      (request.sessionId ? sessionRuntime.focusManagedAiSession(request.sessionId) : null) ||
+      (request.panelId ? sessionRuntime.focusManagedAiSession(request.panelId) : null) ||
+      (request.terminalSessionId ? sessionRuntime.focusManagedAiSession(request.terminalSessionId) : null)
+    if (!focused) return false
+    activeModule.value = 'aiSessions'
+    leftPanelOpen.value = true
+    return true
+  }
 
   let lastJumpedAiAttentionId = ''
 

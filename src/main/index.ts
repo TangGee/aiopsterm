@@ -76,6 +76,7 @@ const getDefaultShell = () => {
 
 const getChatAttachmentsPath = () => join(app.getPath('userData'), 'chat-attachments')
 const getCustomBackgroundsPath = () => join(app.getPath('userData'), 'backgrounds')
+const getCustomNotificationSoundsPath = () => join(app.getPath('userData'), 'notification-sounds')
 const getLogDirPath = () => join(app.getPath('userData'), 'logs')
 const settingsExternalActionRuntime = () => ({
   userDataPath: app.getPath('userData'),
@@ -181,7 +182,12 @@ const broadcastAiAgentSessionEvent = (event: AiAgentSessionEvent) => {
     onClick: () => {
       const target = BrowserWindow.getFocusedWindow() || mainWindow || BrowserWindow.getAllWindows()[0]
       appBootstrapRuntime.focusWindow(target)
-      broadcastWindowEvent(BrowserWindow.getAllWindows(), 'ai-agent:session-event', event)
+      broadcastWindowEvent(BrowserWindow.getAllWindows(), 'ai-agent:session-focus', {
+        source: event.source,
+        sessionId: event.sessionId,
+        ...(event.panelId ? { panelId: event.panelId } : {}),
+        ...(event.terminalSessionId ? { terminalSessionId: event.terminalSessionId } : {})
+      })
     }
   }, desktopNotificationsEnabled)
   logRuntimeEvent('debug', 'native-notification.result', {
@@ -289,6 +295,7 @@ app.whenReady().then(async () => {
     getDefaultShell,
     getChatAttachmentsPath,
     getCustomBackgroundsPath,
+    getCustomNotificationSoundsPath,
     getLogDirPath,
     settingsExternalActionRuntime,
     normalizeSecurityConfig,

@@ -227,6 +227,7 @@ import type {
   AppUpdateInstallResult,
   AppUpdateProgressEvent,
   CustomBackgroundSaveResult,
+  CustomNotificationSoundSaveResult,
   EditorUserConfig,
   ExportMcpUserConfig,
   KeywordHighlightConfigWriteResult,
@@ -435,6 +436,8 @@ export type AiopsPreloadApi = {
   maximizeWindow: () => Promise<void>
   unmaximizeWindow: () => Promise<void>
   isMaximized: () => Promise<boolean>
+  newWindow: () => Promise<void>
+  toggleFullScreen: () => Promise<boolean>
   closeWindow: () => Promise<void>
   onMaximized: (listener: () => void) => () => void
   onUnmaximized: (listener: () => void) => () => void
@@ -482,6 +485,7 @@ export type AiopsPreloadApi = {
   showOpenDialog: (options: OpenDialogOptions) => Promise<OpenDialogResult | undefined>
   showSaveDialog: (options: SaveDialogOptions) => Promise<SaveDialogResult | undefined>
   saveCustomBackground: (srcAbsPath: string) => Promise<CustomBackgroundSaveResult>
+  saveCustomNotificationSound: (srcAbsPath: string) => Promise<CustomNotificationSoundSaveResult>
   readLocalFile: (filePath: string) => Promise<LocalFileReadResult>
   writeLocalFile: (filePath: string, content: string) => Promise<LocalFileWriteResult>
   stageChatAttachment: (payload: { taskId: string; srcAbsPath: string }) => Promise<ChatAttachmentStageResult>

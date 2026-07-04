@@ -1,6 +1,7 @@
 import { computed, defineComponent, h, ref } from 'vue'
-import { Brain, Copy, Eye, EyeOff, LockKeyhole, X } from 'lucide-vue-next'
+import { Brain, Copy, Eye, EyeOff, LockKeyhole, Upload, Volume2, X } from 'lucide-vue-next'
 import type { AgentHookInstallerStatus } from '@shared/contracts/agentHooks'
+import type { NotificationSoundPreset } from '@shared/contracts/appRuntime'
 import type { SettingsModelProviderKey, SettingsWorkspacePageContext, SettingsWorkspaceStore, SettingsWorkspaceTranslate } from '@/services/settings/settingsWorkspacePageContext'
 
 export const createSettingsWorkspaceModelAiPages = (
@@ -25,6 +26,13 @@ export const createSettingsWorkspaceModelAiPages = (
     selectRow,
     settingsPageTitle
   } = context
+
+  const notificationSoundPresetOptions: Array<{ value: NotificationSoundPreset; labelKey: Parameters<SettingsWorkspaceTranslate>[0] }> = [
+    { value: 'chime', labelKey: 'settings.ai.notification.soundPresetChime' },
+    { value: 'soft-ding', labelKey: 'settings.ai.notification.soundPresetSoftDing' },
+    { value: 'approval-voice', labelKey: 'settings.ai.notification.soundPresetApprovalVoice' },
+    { value: 'custom', labelKey: 'settings.ai.notification.soundPresetCustom' }
+  ]
 
   const ModelSettings = defineComponent({
     name: 'ModelSettings',
@@ -556,7 +564,57 @@ export const createSettingsWorkspaceModelAiPages = (
             description: t('settings.ai.notification.controlBellDescription'),
             checked: workspace.notificationSettings.controlNotificationBell,
             onChange: (checked: boolean) => workspace.updateNotificationSettings({ controlNotificationBell: checked })
-          })
+          }),
+          h(SettingsCheckbox, {
+            label: t('settings.ai.notification.sound'),
+            description: t('settings.ai.notification.soundDescription'),
+            checked: workspace.notificationSettings.soundEnabled,
+            onChange: (checked: boolean) => workspace.updateNotificationSettings({ soundEnabled: checked })
+          }),
+          selectRow(
+            t('settings.ai.notification.soundPreset'),
+            workspace.notificationSettings.soundPreset,
+            notificationSoundPresetOptions.map((option) => ({ value: option.value, label: t(option.labelKey) })),
+            (value: string) => workspace.updateNotificationSettings({ soundEnabled: true, soundPreset: value as NotificationSoundPreset })
+          ),
+          h('p', { class: 'setting-description-no-padding' }, t('settings.ai.notification.soundPresetDescription')),
+          h('div', { class: 'settings-form-row align-start notification-sound-row' }, [
+            h('label', t('settings.ai.notification.customSound')),
+            h('div', { class: 'notification-sound-controls' }, [
+              h('div', { class: 'notification-sound-file', title: workspace.notificationSettings.customSoundPath || workspace.notificationSettings.customSoundUrl || '' }, [
+                workspace.notificationSettings.customSoundName || t('settings.ai.notification.customSoundEmpty')
+              ]),
+              h('div', { class: 'settings-action-row notification-sound-actions' }, [
+                h(
+                  'button',
+                  {
+                    class: 'settings-button',
+                    onClick: () => workspace.uploadCustomNotificationSound()
+                  },
+                  [h(Upload), t('settings.ai.notification.uploadSound')]
+                ),
+                h(
+                  'button',
+                  {
+                    class: 'settings-button',
+                    onClick: () => workspace.previewNotificationSound()
+                  },
+                  [h(Volume2), t('settings.ai.notification.previewSound')]
+                ),
+                workspace.notificationSettings.customSoundName
+                  ? h(
+                      'button',
+                      {
+                        class: 'settings-button',
+                        onClick: () => workspace.clearCustomNotificationSound()
+                      },
+                      [h(X), t('settings.ai.notification.clearSound')]
+                    )
+                  : null
+              ]),
+              h('small', t('settings.ai.notification.customSoundDescription'))
+            ])
+          ])
         ])
     }
   })

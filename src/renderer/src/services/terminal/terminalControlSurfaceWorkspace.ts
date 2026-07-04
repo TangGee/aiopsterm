@@ -13,6 +13,7 @@ import type {
   ControlNotificationRecord,
   ControlWorkspaceSnapshot
 } from '@shared/contracts/control'
+import type { UserConfig } from '@shared/contracts/userConfig'
 
 type TerminalControlSurfaceWorkspaceDependencies = {
   workspace: WorkspaceStore
@@ -70,6 +71,41 @@ const resolveControlSettingsSection = (value: unknown): SettingSectionKey | null
   if (!target) return 'general'
   const normalized = target.replace(/[_\s]+/g, '-')
   return controlSettingsTargetAliases[normalized.toLowerCase()] || null
+}
+
+const invalidSettingPathSegments = new Set(['__proto__', 'prototype', 'constructor'])
+
+const settingsPathSegments = (path: unknown) =>
+  controlText(path)
+    .split('.')
+    .map((segment) => segment.trim())
+    .filter(Boolean)
+
+const isValidSettingsPath = (segments: string[]) =>
+  Boolean(segments.length) &&
+  segments.every((segment) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(segment) && !invalidSettingPathSegments.has(segment))
+
+const readSettingsPathValue = (source: unknown, segments: string[]) => {
+  let current = source as Record<string, unknown> | undefined
+  for (const segment of segments) {
+    if (!current || typeof current !== 'object' || Array.isArray(current)) return undefined
+    current = current[segment] as Record<string, unknown> | undefined
+  }
+  return current as unknown
+}
+
+const settingsPatchFromPath = (segments: string[], value: unknown) => {
+  const root: Record<string, unknown> = {}
+  let current = root
+  segments.forEach((segment, index) => {
+    if (index === segments.length - 1) {
+      current[segment] = value
+      return
+    }
+    current[segment] = {}
+    current = current[segment] as Record<string, unknown>
+  })
+  return root as Partial<UserConfig>
 }
 
 export const createTerminalControlSurfaceWorkspaceHandlers = ({
@@ -204,6 +240,34 @@ export const createTerminalControlSurfaceWorkspaceHandlers = ({
     })
   }
 
+  const handleSettingsValueControlRequest = async (method: string, params: Record<string, unknown>) => {
+    const path = controlText(params.path || params.key)
+    const segments = settingsPathSegments(path)
+    if (!isValidSettingsPath(segments)) return controlFail('SETTINGS_PATH_INVALID', 'Settings path must use dot-separated config keys.', { path })
+    if (method === 'settings.get') {
+      const value = readSettingsPathValue(workspace.config, segments)
+      return controlOk({
+        setting: {
+          path,
+          value
+        },
+        raw: controlBool(params.raw, false)
+      })
+    }
+    if (method === 'settings.put') {
+      await workspace.saveConfig(settingsPatchFromPath(segments, params.value))
+      const value = readSettingsPathValue(workspace.config, segments)
+      return controlOk({
+        saved: true,
+        setting: {
+          path,
+          value
+        }
+      })
+    }
+    return controlFail('UNKNOWN_CONTROL_RENDERER_METHOD', `Unknown renderer control method: ${method}`)
+  }
+
   const handleFeedbackOpenControlRequest = async () => {
     const opened = await workspace.openSettingsExternalAction('反馈页面')
     return controlOk({
@@ -247,6 +311,7 @@ export const createTerminalControlSurfaceWorkspaceHandlers = ({
     handleFeedbackOpenControlRequest,
     handleNotificationControlRequest,
     handleSettingsOpenControlRequest,
+    handleSettingsValueControlRequest,
     handleWorkspaceMetadataControlRequest
   }
 }

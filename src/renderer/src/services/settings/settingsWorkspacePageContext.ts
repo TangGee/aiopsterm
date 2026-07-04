@@ -299,7 +299,7 @@ export const createSettingsWorkspacePageContext = (workspace: SettingsWorkspaceS
     {
       label: 'CLI Helper',
       descriptionKey: 'settings.ai.automation.cliHelperDescription' as const,
-      value: 'ELECTRON_RUN_AS_NODE=1 "$AIOPSTERM_JS_RUNTIME" "$AIOPSTERM_CONTROL_HELPER_PATH" list-notifications'
+      value: 'aio list-notifications'
     },
     {
       label: 'External Codex MCP',

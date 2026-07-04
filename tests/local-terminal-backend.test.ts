@@ -1,4 +1,6 @@
 import { EventEmitter } from 'events'
+import { readFileSync, statSync } from 'fs'
+import { basename, delimiter, join } from 'path'
 import { PassThrough } from 'stream'
 import { beforeEach, describe, expect, it } from 'vitest'
 
@@ -248,6 +250,30 @@ describe('local terminal backend runtime', () => {
         PATH: '/usr/bin'
       })
     )
+  })
+
+  it('adds short control command shims to managed local terminal PATH', async () => {
+    const backend = await loadBackend()
+    backend.configureLocalTerminalBackendRuntime({
+      getJsRuntimeExecutable: () => '/opt/aiopsterm/aiopsterm',
+      getControlHelperScriptPath: () => '/opt/aiopsterm/resources/aiopsterm-control.js',
+      getPlatform: () => 'linux'
+    })
+
+    const env = backend.managedLocalTerminalEnvironment('local-managed-2', { panelId: 'panel-2', workspaceId: 'workspace' }, { PATH: '/usr/bin' })
+    const controlBinDir = String(env.PATH || '').split(delimiter)[0]
+
+    expect(env.AIOPSTERM_CONTROL_COMMAND).toBe('aio')
+    expect(env.PATH).toBe(`${controlBinDir}${delimiter}/usr/bin`)
+    expect(basename(controlBinDir)).toMatch(/^aiopsterm-control-bin-/)
+    for (const commandName of ['aio', 'aictl', 'aiopsterm-control']) {
+      const commandPath = join(controlBinDir, commandName)
+      expect(readFileSync(commandPath, 'utf8')).toContain('ELECTRON_RUN_AS_NODE=1 exec "$AIOPSTERM_JS_RUNTIME" "$AIOPSTERM_CONTROL_HELPER_PATH" "$@"')
+      expect(statSync(commandPath).mode & 0o111).not.toBe(0)
+    }
+    const aiosshPath = join(controlBinDir, 'aiossh')
+    expect(readFileSync(aiosshPath, 'utf8')).toContain('ELECTRON_RUN_AS_NODE=1 exec "$AIOPSTERM_JS_RUNTIME" "$AIOPSTERM_CONTROL_HELPER_PATH" \'ssh\' "$@"')
+    expect(statSync(aiosshPath).mode & 0o111).not.toBe(0)
   })
 
   it('uses subprocess fallback without writing fallback status text into terminal data', async () => {

@@ -142,7 +142,12 @@ export const defaultConfig: UserConfig = {
   },
   notifications: {
     desktopNotifications: true,
-    controlNotificationBell: true
+    controlNotificationBell: true,
+    soundEnabled: true,
+    soundPreset: 'chime',
+    customSoundPath: '',
+    customSoundUrl: '',
+    customSoundName: ''
   },
   exportMcp: {
     allowAgentSshAuthSubmit: false

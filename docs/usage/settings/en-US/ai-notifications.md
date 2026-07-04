@@ -6,6 +6,10 @@ This page controls AI session discovery, notifications, hibernation, external no
 
 - Desktop Notifications: Controls system desktop notifications from the external notification protocol and AI session events. In-app notification history, AI Sessions, and event records remain available when this is off.
 - Top Bell for Control Notifications: Controls whether unread notifications from the external notification protocol enter the top bell queue. AI session approval, question, and pending-input reminders are always kept.
+- Notification Focus: AI session notifications open the left `AI Sessions` panel and select the matching conversation. Generic control notifications still focus the owning terminal panel.
+- Notification Sound: New AI pending-input, approval, question, or control notifications can play a sound when they enter the top reminder queue. Built-in choices include a bright chime, a soft ding, and a playful “royal approval voice” preset.
+- Custom Sound: The settings page accepts MP3, WAV, OGG, M4A, AAC, FLAC, and WebM files. aiopsterm copies the selected file into `notification-sounds/` under app data and stores the copied path and URL in settings.
+- Preview: Use the preview button to confirm the selected preset or custom audio can play.
 
 ## Agent Hook Installer
 
@@ -24,5 +28,5 @@ This page controls AI session discovery, notifications, hibernation, external no
 ## Automation Entries
 
 - Control Socket: aiopsterm local-connection terminals receive `AIOPSTERM_CONTROL_SOCKET`. Scripts and CLI helpers use it to call the control protocol for notifications, notification focus, automation requests, and managed AI sessions.
-- CLI Helper: `resources/aiopsterm-control.js` is the control protocol helper. aiopsterm local-connection terminals receive `AIOPSTERM_JS_RUNTIME`, `AIOPSTERM_CONTROL_HELPER_PATH`, and `AIOPSTERM_CONTROL_SOCKET`, so scripts can call it with `ELECTRON_RUN_AS_NODE=1 "$AIOPSTERM_JS_RUNTIME" "$AIOPSTERM_CONTROL_HELPER_PATH"` without system `node`.
+- CLI Helper: `resources/aiopsterm-control.js` is the control protocol helper. aiopsterm local-connection terminals add `aio`, `aictl`, and `aiopsterm-control` to PATH; prefer the short form `aio list-notifications`. These commands use aiopsterm's packaged JavaScript runtime internally and do not require system `node`.
 - Control protocol documentation: See [Control Socket](../../../technical/control-socket.md).

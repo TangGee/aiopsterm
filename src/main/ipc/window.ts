@@ -1,6 +1,10 @@
 import { BrowserWindow, type IpcMain } from 'electron'
 
-export const registerWindowIpc = (ipcMain: IpcMain) => {
+type WindowIpcDeps = {
+  createWindow?: () => BrowserWindow
+}
+
+export const registerWindowIpc = (ipcMain: IpcMain, deps: WindowIpcDeps = {}) => {
   ipcMain.handle('window:minimize', (event) => {
     BrowserWindow.fromWebContents(event.sender)?.minimize()
   })
@@ -11,6 +15,16 @@ export const registerWindowIpc = (ipcMain: IpcMain) => {
     BrowserWindow.fromWebContents(event.sender)?.unmaximize()
   })
   ipcMain.handle('window:is-maximized', (event) => BrowserWindow.fromWebContents(event.sender)?.isMaximized() || false)
+  ipcMain.handle('window:new', () => {
+    deps.createWindow?.()
+  })
+  ipcMain.handle('window:toggle-fullscreen', (event) => {
+    const window = BrowserWindow.fromWebContents(event.sender)
+    if (!window) return false
+    const next = !window.isFullScreen()
+    window.setFullScreen(next)
+    return next
+  })
   ipcMain.handle('window:close', (event) => {
     BrowserWindow.fromWebContents(event.sender)?.close()
   })

@@ -117,15 +117,24 @@
     >
       <button @click="copySelection(termMenu.panelId)"><span>{{ t('terminal.context.copy') }}</span><kbd>Ctrl+Shift+C</kbd></button>
       <button @click="pasteClipboard(termMenu.panelId)"><span>{{ t('terminal.context.paste') }}</span><kbd>Ctrl+Shift+V</kbd></button>
-      <button @click="openSearchOverlay(termMenu.panelId)"><span>搜索</span><kbd>Ctrl+F</kbd></button>
+      <button @click="openSearchOverlay(termMenu.panelId)"><span>搜索</span><kbd>Ctrl+Shift+F</kbd></button>
       <i />
-      <button @click="togglePanelConnection(termMenu.panelId)">{{ connectionActionLabel(panelById(termMenu.panelId)) }}<kbd>{{ connectionActionShortcut(panelById(termMenu.panelId)) }}</kbd></button>
+      <button @click="togglePanelConnection(termMenu.panelId)">
+        {{ connectionActionLabel(panelById(termMenu.panelId)) }}
+        <kbd v-if="connectionActionShortcut(panelById(termMenu.panelId))">{{ connectionActionShortcut(panelById(termMenu.panelId)) }}</kbd>
+      </button>
       <i />
-      <button @click="openCommandDialogFromTermMenu"><span>AI 命令</span><kbd>Ctrl+K</kbd></button>
+      <button @click="openCommandDialogFromTermMenu"><span>AI 命令</span><kbd>Ctrl+Shift+K</kbd></button>
       <button @click="openCommandLineFromMenu"><span>输入命令</span><kbd>Enter</kbd></button>
-      <button @click="createTerminalFromMenu"><span>新建终端</span><kbd>Ctrl+N</kbd></button>
-      <button @click="closeTerminalFromMenu"><span>关闭终端</span><kbd>Ctrl+W</kbd></button>
-      <button @click="clearTerminal(termMenu.panelId)"><span>清屏</span><kbd>Ctrl+L</kbd></button>
+      <button @click="createTerminalFromMenu"><span>新建终端</span><kbd>Ctrl+Shift+T</kbd></button>
+      <button
+        v-if="canForkTerminalMenuPanel"
+        @click="forkFromTermMenu"
+      >
+        <span>Fork SSH</span><kbd>Ctrl+Shift+Y</kbd>
+      </button>
+      <button @click="closeTerminalFromMenu"><span>关闭终端</span><kbd>Ctrl+Shift+W</kbd></button>
+      <button @click="clearTerminal(termMenu.panelId)"><span>清屏</span><kbd>Ctrl+Shift+L</kbd></button>
       <i />
       <button @click="splitFromTermMenu('right')">向右拆分</button>
       <button @click="splitFromTermMenu('below')">向下拆分</button>
@@ -138,7 +147,7 @@
       <i />
       <button @click="toggleGlobalInput">{{ globalInputVisible ? '关闭全局执行' : '全局执行' }}</button>
       <i />
-      <button @click="openFileManagerFromMenu"><span>文件管理</span><kbd>Ctrl+M</kbd></button>
+      <button @click="openFileManagerFromMenu"><span>文件管理</span><kbd>Ctrl+Shift+M</kbd></button>
       <i />
       <button @click="increaseFontFromMenu"><span>字体放大</span><kbd>Ctrl+=</kbd></button>
       <button @click="decreaseFontFromMenu"><span>字体缩小</span><kbd>Ctrl+-</kbd></button>
@@ -273,10 +282,10 @@
       >
         <div class="terminal-dashboard-icon"><Terminal /></div>
         <div class="terminal-dashboard-shortcuts">
-          <span>与AI对话 <kbd>Ctrl</kbd><kbd>L</kbd></span>
+          <span>与AI对话</span>
           <span>资产列表 <kbd>Ctrl</kbd><kbd>B</kbd></span>
           <span>打开设置 <kbd>Ctrl</kbd><kbd>,</kbd></span>
-          <span>内联命令生成 <kbd>Ctrl</kbd><kbd>K</kbd></span>
+          <span>内联命令生成 <kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>K</kbd></span>
           <span>切换布局 (Terminal/Agents) <kbd>Ctrl</kbd><kbd>E</kbd></span>
         </div>
       </div>
@@ -447,7 +456,6 @@
           @click="chatSelectionToAi(panel.id)"
         >
           <span>Chat to AI</span>
-          <kbd>Ctrl L</kbd>
         </button>
         <div
           v-if="suggestionPanel.panelId === panel.id && (suggestionItems.length || aiSuggestLoading)"
@@ -538,6 +546,7 @@ const {
   applyGeneratedCommand,
   applySuggestion,
   approveSecurityPrompt,
+  canForkTerminalMenuPanel,
   canForkSelected,
   cancelSecurityPrompt,
   cancelZmodemTransfer,
@@ -573,6 +582,7 @@ const {
   findNext,
   findPrevious,
   finishRename,
+  forkFromTermMenu,
   forkSelected,
   formatZmodemBytes,
   focusActiveTerminalFromContextBar,

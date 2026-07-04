@@ -2,6 +2,7 @@
 
 - [Assets And Workspace Resources](assets-workspace.md)
 - [AI Command Tools](ai-command-tools.md)
+- [Control CLI Tutorial](control-cli-tutorial.md)
 - [Development Commands](development-commands.md)
 - [Desktop Protocol](desktop-protocol.md)
 - [Installation](installation.md)

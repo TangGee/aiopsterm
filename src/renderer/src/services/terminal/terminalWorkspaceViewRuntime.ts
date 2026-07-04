@@ -7,6 +7,10 @@ import { writeRendererRuntimeLog as writeRuntimeLog } from '@/services/app/runti
 import { terminalClient } from '@/services/terminal/terminalClient'
 import { terminalThemeForAppTheme } from '@/services/terminal/terminalThemeRuntime'
 import {
+  terminalShortcutActionForEvent,
+  type TerminalShortcutAction
+} from '@/services/terminal/terminalKeyboardShortcuts'
+import {
   ThreadedTerminalFitAddon,
   ThreadedTerminalSearchAddon,
   createThreadedTerminalHost,
@@ -44,6 +48,11 @@ type XtermLike = {
   dispose: () => void
   write: (data: string, callback?: () => void) => void
   input?: (data: string, wasUserInput?: boolean) => void
+  attachCustomKeyEventHandler?: (handler: (event: KeyboardEvent) => boolean) => void
+  scrollLines?: (amount: number) => void
+  scrollPages?: (pageCount: number) => void
+  scrollToTop?: () => void
+  scrollToLine?: (line: number) => void
   scrollToBottom: () => void
   refresh: (start: number, end: number) => void
   ensureSurfaceAttached?: (options?: { forceGeometry?: boolean }) => boolean
@@ -77,6 +86,8 @@ export type TerminalView = {
   lastFitRows?: number
   resizeObserver?: ResizeObserver
 }
+
+export type TerminalKeyboardShortcutHandler = (panelId: string, action: TerminalShortcutAction, event: KeyboardEvent) => boolean
 
 type TerminalOutputPerfSummary = {
   chunks: number
@@ -219,6 +230,7 @@ export const createTerminalWorkspaceViewRuntime = ({
   const terminalElements = new Map<string, HTMLElement>()
   const terminalViews = new Map<string, TerminalView>()
   const terminalViewPanels = new Map<string, TerminalPanel>()
+  let terminalKeyboardShortcutHandler: TerminalKeyboardShortcutHandler | null = null
 
   const requestOutputFlush = (callback: () => void) =>
     typeof window !== 'undefined' && typeof window.setTimeout === 'function' ? window.setTimeout(callback, 0) : setTimeout(callback, 0)
@@ -384,6 +396,18 @@ export const createTerminalWorkspaceViewRuntime = ({
     terminalViews.forEach((view) => {
       if (!isThreadedTerminalHost(view.terminal)) return
       view.terminal.updateKeywordHighlight(config)
+    })
+  }
+
+  const attachTerminalKeyboardShortcutHandler = (panel: TerminalPanel, view: TerminalView) => {
+    view.terminal.attachCustomKeyEventHandler?.((event) => {
+      const action = terminalShortcutActionForEvent(event)
+      if (!action || !terminalKeyboardShortcutHandler) return true
+      const handled = terminalKeyboardShortcutHandler(panel.id, action, event)
+      if (!handled) return true
+      event.preventDefault()
+      event.stopPropagation()
+      return false
     })
   }
 
@@ -990,6 +1014,7 @@ export const createTerminalWorkspaceViewRuntime = ({
         existing.openedElement = element
         existing.terminal.setVisibility(visible, terminalPriorityForPanel(panel.id))
         existing.terminal.ensureSurfaceAttached({ forceGeometry: true })
+        attachTerminalKeyboardShortcutHandler(panel, existing)
         applyTerminalSettingsToView(panel.id, existing, workspace.terminalSettings, { refit: false })
         existing.resizeObserver?.disconnect()
         if (typeof ResizeObserver !== 'undefined') {
@@ -1058,6 +1083,7 @@ export const createTerminalWorkspaceViewRuntime = ({
     terminalViews.set(panel.id, view)
     terminalViewPanels.set(panel.id, panel)
     view.clearPendingOutput = () => clearQueuedTerminalOutput(view)
+    attachTerminalKeyboardShortcutHandler(panel, view)
     applyTerminalSettingsToView(panel.id, view, workspace.terminalSettings, { refit: false })
     if (typeof ResizeObserver !== 'undefined') {
       view.resizeObserver = new ResizeObserver(() => {
@@ -1181,6 +1207,14 @@ export const createTerminalWorkspaceViewRuntime = ({
     focusPanel(workspace.activePanelId)
   }
 
+  const setTerminalKeyboardShortcutHandler = (handler: TerminalKeyboardShortcutHandler | null) => {
+    terminalKeyboardShortcutHandler = handler
+    terminalViews.forEach((view, panelId) => {
+      const panel = terminalViewPanels.get(panelId) || workspace.panels.find((item) => item.id === panelId)
+      if (panel) attachTerminalKeyboardShortcutHandler(panel, view)
+    })
+  }
+
   const dispose = () => {
     terminalViews.forEach((view, panelId) => {
       clearQueuedTerminalOutput(view, { dispose: true })
@@ -1201,6 +1235,7 @@ export const createTerminalWorkspaceViewRuntime = ({
     focusActivePanel,
     focusPanel,
     getTerminalElement,
+    setTerminalKeyboardShortcutHandler,
     refitAfterLayoutChange,
     scheduleTerminalFit,
     scheduleVisibleTerminalFit,

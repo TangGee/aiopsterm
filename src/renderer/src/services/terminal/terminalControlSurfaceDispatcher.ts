@@ -12,6 +12,9 @@ type TerminalControlSurfaceDispatcherDependencies = {
     restoreSessionSnapshotForControl(params: Record<string, unknown>): Promise<ControlResponse> | ControlResponse
   }
   mobileControlHandlers: Record<string, any>
+  assetControlHandlers: {
+    handleAssetControlRequest(method: string, params: Record<string, unknown>): Promise<ControlResponse> | ControlResponse
+  }
   remoteControlHandlers: {
     handleWorkspaceRemoteControlRequest(method: string, params: Record<string, unknown>): Promise<ControlResponse> | ControlResponse
   }
@@ -32,6 +35,7 @@ type TerminalControlSurfaceDispatcherDependencies = {
   }
   workspaceControlHandlers: {
     handleSettingsOpenControlRequest(params: Record<string, unknown>): Promise<ControlResponse> | ControlResponse
+    handleSettingsValueControlRequest(method: string, params: Record<string, unknown>): Promise<ControlResponse> | ControlResponse
     handleFeedbackOpenControlRequest(): Promise<ControlResponse> | ControlResponse
     handleExtensionSidebarSnapshotControlRequest(params: Record<string, unknown>): ControlResponse
     handleWorkspaceMetadataControlRequest(method: string, params: Record<string, unknown>): Promise<ControlResponse> | ControlResponse
@@ -80,6 +84,7 @@ export const createTerminalControlSurfaceDispatcher = ({
   workspace,
   sessionControlHandlers,
   mobileControlHandlers,
+  assetControlHandlers,
   remoteControlHandlers,
   groupControlHandlers,
   paneControlHandlers,
@@ -95,6 +100,7 @@ export const createTerminalControlSurfaceDispatcher = ({
     if (request.method === 'session.export') return controlOk({ snapshot: sessionControlHandlers.exportSessionSnapshotForControl(params) })
     if (request.method === 'session.restore') return sessionControlHandlers.restoreSessionSnapshotForControl(params)
     if (request.method === 'settings.open') return workspaceControlHandlers.handleSettingsOpenControlRequest(params)
+    if (request.method === 'settings.get' || request.method === 'settings.put') return workspaceControlHandlers.handleSettingsValueControlRequest(request.method, params)
     if (request.method === 'feedback.open') return workspaceControlHandlers.handleFeedbackOpenControlRequest()
     if (request.method === 'extension.sidebar.snapshot') return workspaceControlHandlers.handleExtensionSidebarSnapshotControlRequest(params)
     if (
@@ -105,6 +111,7 @@ export const createTerminalControlSurfaceDispatcher = ({
       return projectFileControlHandlers.handleProjectFileControlRequest(request.method, params)
     }
     if (request.method === 'workspace.env' || request.method === 'workspace.set_auto_title') return workspaceControlHandlers.handleWorkspaceMetadataControlRequest(request.method, params)
+    if (request.method.startsWith('asset.') || request.method.startsWith('host.')) return assetControlHandlers.handleAssetControlRequest(request.method, params)
     if (request.method === 'workspace.action') return paneControlHandlers.handleWorkspaceActionControlRequest(params)
     if (request.method.startsWith('workspace.remote.') || request.method.startsWith('remote.tmux.')) return remoteControlHandlers.handleWorkspaceRemoteControlRequest(request.method, params)
     if (request.method.startsWith('workspace.group.')) return groupControlHandlers.handleWorkspaceGroupControlRequest(request.method, params)

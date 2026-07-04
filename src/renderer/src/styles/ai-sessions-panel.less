@@ -331,10 +331,6 @@
   padding-bottom: 7px;
 }
 
-.ai-session-row.has-row-action {
-  grid-template-columns: 8px minmax(0, 1fr) 24px;
-}
-
 .ai-session-row:hover,
 .ai-session-row.active {
   background: var(--surface-2);
@@ -404,35 +400,6 @@
 .ai-session-row-meta-main {
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.ai-session-handle,
-.ai-session-row-action {
-  width: 22px;
-  height: 22px;
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--surface-2);
-  color: var(--accent-color);
-}
-
-.ai-session-row-action {
-  color: var(--text-secondary);
-}
-
-.ai-session-handle:hover,
-.ai-session-row-action:hover {
-  color: var(--text-primary);
-  border-color: var(--accent-color);
-}
-
-.ai-session-handle svg,
-.ai-session-row-action svg {
-  width: 14px;
-  height: 14px;
 }
 
 .ai-session-state {

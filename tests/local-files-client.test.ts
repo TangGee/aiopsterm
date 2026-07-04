@@ -24,6 +24,14 @@ describe('localFilesClient', () => {
         bytes: 12,
         mtimeMs: 1781884800000
       })),
+      saveCustomNotificationSound: vi.fn(async () => ({
+        url: 'file:///tmp/notify.wav',
+        filePath: '/tmp/notify.wav',
+        name: 'notify.wav',
+        size: 12,
+        bytes: 12,
+        mtimeMs: 1781884800000
+      })),
       readLocalFile: vi.fn(async () => ({ content: 'hello', mtimeMs: 1781884800000, size: 5 })),
       writeLocalFile: vi.fn(async (filePath, content) => ({ ok: true, data: { filePath, bytes: content.length, size: content.length, mtimeMs: 1781884800000 } })),
       stageChatAttachment: vi.fn(async ({ taskId, srcAbsPath }) => ({
@@ -52,6 +60,14 @@ describe('localFilesClient', () => {
       bytes: 12,
       mtimeMs: 1781884800000
     })
+    await expect(localFilesClient.saveCustomNotificationSound()?.('/tmp/notify.wav')).resolves.toEqual({
+      url: 'file:///tmp/notify.wav',
+      filePath: '/tmp/notify.wav',
+      name: 'notify.wav',
+      size: 12,
+      bytes: 12,
+      mtimeMs: 1781884800000
+    })
     await expect(localFilesClient.readLocalFile()?.('/tmp/note.md')).resolves.toEqual({ content: 'hello', mtimeMs: 1781884800000, size: 5 })
     await expect(localFilesClient.writeLocalFile()?.('/tmp/query.sql', 'select 1;')).resolves.toEqual(
       expect.objectContaining({ ok: true, data: expect.objectContaining({ filePath: '/tmp/query.sql', bytes: 9 }) })
@@ -76,6 +92,7 @@ describe('localFilesClient', () => {
     expect(window.aiops.showOpenDialog).toHaveBeenCalledWith({ properties: ['openFile'] })
     expect(window.aiops.showSaveDialog).toHaveBeenCalledWith({ defaultPath: 'query.sql' })
     expect(window.aiops.saveCustomBackground).toHaveBeenCalledWith('/tmp/custom.webp')
+    expect(window.aiops.saveCustomNotificationSound).toHaveBeenCalledWith('/tmp/notify.wav')
     expect(window.aiops.readLocalFile).toHaveBeenCalledWith('/tmp/note.md')
     expect(window.aiops.writeLocalFile).toHaveBeenCalledWith('/tmp/query.sql', 'select 1;')
     expect(window.aiops.stageChatAttachment).toHaveBeenCalledWith({ taskId: 'conv-1', srcAbsPath: '/tmp/note.md' })
@@ -90,6 +107,7 @@ describe('localFilesClient', () => {
       showOpenDialog: undefined as any,
       showSaveDialog: undefined as any,
       saveCustomBackground: undefined as any,
+      saveCustomNotificationSound: undefined as any,
       readLocalFile: undefined as any,
       writeLocalFile: undefined as any,
       stageChatAttachment: undefined as any,
@@ -102,6 +120,7 @@ describe('localFilesClient', () => {
     expect(localFilesClient.showOpenDialog()).toBeUndefined()
     expect(localFilesClient.showSaveDialog()).toBeUndefined()
     expect(localFilesClient.saveCustomBackground()).toBeUndefined()
+    expect(localFilesClient.saveCustomNotificationSound()).toBeUndefined()
     expect(localFilesClient.readLocalFile()).toBeUndefined()
     expect(localFilesClient.writeLocalFile()).toBeUndefined()
     expect(localFilesClient.stageChatAttachment()).toBeUndefined()

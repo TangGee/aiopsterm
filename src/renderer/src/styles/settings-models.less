@@ -279,6 +279,30 @@
   line-height: 1.55;
 }
 
+.notification-sound-controls {
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.notification-sound-file {
+  width: min(420px, 100%);
+  min-height: 32px;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.notification-sound-actions {
+  flex-wrap: wrap;
+}
+
 .provider-help.url-preview {
   color: var(--accent);
   overflow-wrap: anywhere;

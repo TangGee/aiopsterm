@@ -1,8 +1,13 @@
 import { computed, nextTick, reactive, ref, type Ref } from 'vue'
 import { copyTextToClipboard, readTextFromClipboard, type ClipboardTextReadResult } from '@/services/app/clipboardRuntime'
+import { windowControlsClient } from '@/services/app/windowControlsClient'
 import type { TerminalPanel, useWorkspaceStore } from '@/stores/workspace'
 import type { PanelDirection } from '@/services/terminal/terminalPanelRuntime'
 import type { TerminalView } from '@/services/terminal/terminalWorkspaceViewRuntime'
+import {
+  terminalShortcutActionForEvent,
+  type TerminalShortcutAction
+} from '@/services/terminal/terminalKeyboardShortcuts'
 
 type WorkspaceStore = ReturnType<typeof useWorkspaceStore>
 
@@ -22,11 +27,14 @@ type TerminalWorkspaceShellRuntimeInput = {
   closeCommandDialog: () => void
   closeSearchOverlay: () => void
   disconnectTerminalPanel: (panel: TerminalPanel) => Promise<boolean>
+  findNext: () => void
+  findPrevious: () => void
   focusActivePanel: () => void
   focusCommandDialogInput: () => void
   focusPanel: (panelId: string) => void
   getCommandDialogInput: () => HTMLTextAreaElement | null
   hideSuggestions: () => void
+  clearSearchFromButton: () => void
   openCommandDialog: (panelId: string) => void | Promise<void>
   openSearchOverlay: (panelId: string) => void
   reconnectTerminalPanel: (panel: TerminalPanel) => Promise<boolean>
@@ -77,11 +85,14 @@ export const createTerminalWorkspaceShellRuntime = (
     closeCommandDialog,
     closeSearchOverlay,
     disconnectTerminalPanel,
+    findNext,
+    findPrevious,
     focusActivePanel,
     focusCommandDialogInput,
     focusPanel,
     getCommandDialogInput,
     hideSuggestions,
+    clearSearchFromButton,
     openCommandDialog,
     openSearchOverlay,
     reconnectTerminalPanel,
@@ -109,8 +120,18 @@ export const createTerminalWorkspaceShellRuntime = (
   const getViewportSize = deps.getViewportSize ?? (() => ({ innerWidth: window.innerWidth, innerHeight: window.innerHeight }))
 
   const panelById = (panelId: string) => workspace.panels.find((panel) => panel.id === panelId)
+  const terminalPanels = () => workspace.panels.filter((panel) => panel.kind !== 'knowledge')
+  const keyboardEventTargetElement = (event: KeyboardEvent) => (event.target instanceof Element ? event.target : null)
+  const isTerminalKeyboardTarget = (event: KeyboardEvent) =>
+    Boolean(keyboardEventTargetElement(event)?.closest('.xterm-host, .threaded-terminal-host'))
+  const compactShortcut = (shortcut: string) => shortcut.replace(/\s+/g, '').toLowerCase()
+  const terminalDefaultShortcutOverridden = (actionId: string, defaultShortcut: string) => {
+    const shortcut = workspace.settingsShortcuts.find((item) => item.id === actionId)?.shortcut
+    return Boolean(shortcut && compactShortcut(shortcut) !== compactShortcut(defaultShortcut))
+  }
 
   const canForkSelected = computed(() => workspace.canForkSshPanel(menu.panelId))
+  const canForkTerminalMenuPanel = computed(() => workspace.canForkSshPanel(termMenu.panelId))
   const isTerminalMenuPanel = computed(() => panelById(menu.panelId)?.kind === 'terminal')
   const isReconnectablePanel = (panel?: TerminalPanel | null) => !panel?.sessionId || panel.status === 'closed' || panel.status === 'error'
 
@@ -126,7 +147,7 @@ export const createTerminalWorkspaceShellRuntime = (
     return '断开连接'
   }
 
-  const connectionActionShortcut = (panel?: TerminalPanel | null) => (panel?.sessionId ? 'Ctrl+D' : 'Enter')
+  const connectionActionShortcut = (panel?: TerminalPanel | null) => (panel?.sessionId ? '' : 'Enter')
 
   const clampFloatingMenuPosition = (event: MouseEvent, width: number, height: number) => {
     const padding = 8
@@ -298,6 +319,21 @@ export const createTerminalWorkspaceShellRuntime = (
     menu.visible = false
   }
 
+  const localTerminalOptionsFromSource = (panelId: string) => {
+    const source = panelById(panelId)
+    if (!source || source.sshSession || !source.sessionId || !source.cwd?.trim()) return {}
+    return { cwd: source.cwd.trim() }
+  }
+
+  const openLocalTerminalFromSource = async (sourcePanelId: string) => {
+    const connected = await workspace.openLocalTerminalPanel(localTerminalOptionsFromSource(sourcePanelId))
+    if (connected) {
+      await afterDomUpdate()
+      focusPanel(connected.id)
+    }
+    return connected
+  }
+
   const unsplitSelected = () => {
     workspace.unsplitPanel(menu.panelId)
     menu.visible = false
@@ -305,10 +341,10 @@ export const createTerminalWorkspaceShellRuntime = (
     focusActivePanel()
   }
 
-  const forkSelected = async () => {
-    const sourcePanelId = menu.panelId
-    const forkPanel = workspace.forkSshPanel(menu.panelId)
+  const forkSshFromPanel = async (sourcePanelId: string) => {
+    const forkPanel = workspace.forkSshPanel(sourcePanelId)
     menu.visible = false
+    termMenu.visible = false
     if (!forkPanel) return
     const pendingSsh = forkPanel.sshSession ? { ...forkPanel.sshSession } : null
     const connected = await startSshTerminalForPanel(forkPanel)
@@ -329,6 +365,14 @@ export const createTerminalWorkspaceShellRuntime = (
         detail: `${pendingSsh?.assetName || ssh.assetName} fork`
       }
     ]
+  }
+
+  const forkSelected = async () => {
+    await forkSshFromPanel(menu.panelId)
+  }
+
+  const forkFromTermMenu = async () => {
+    await forkSshFromPanel(termMenu.panelId || workspace.activePanelId)
   }
 
   const copySelection = async (panelId = workspace.activePanelId) => {
@@ -383,6 +427,7 @@ export const createTerminalWorkspaceShellRuntime = (
 
   const increaseFont = (panelId = workspace.activePanelId) => updateFontSize(panelId, terminalFontSizeForPanel(panelId) + 1)
   const decreaseFont = (panelId = workspace.activePanelId) => updateFontSize(panelId, terminalFontSizeForPanel(panelId) - 1)
+  const resetFont = (panelId = workspace.activePanelId) => updateFontSize(panelId, workspace.terminalSettings.fontSize || 12)
 
   const increaseFontFromMenu = () => {
     increaseFont(termMenu.panelId || workspace.activePanelId)
@@ -401,6 +446,193 @@ export const createTerminalWorkspaceShellRuntime = (
     event.preventDefault()
     if (event.deltaY < 0) increaseFont(panelId)
     if (event.deltaY > 0) decreaseFont(panelId)
+  }
+
+  const scrollTerminalViewport = (panelId: string, action: TerminalShortcutAction['type']) => {
+    const terminal = terminalViews.get(panelId)?.terminal
+    if (!terminal) return false
+    if (action === 'scrollLineUp') {
+      terminal.scrollLines?.(-1)
+      return true
+    }
+    if (action === 'scrollLineDown') {
+      terminal.scrollLines?.(1)
+      return true
+    }
+    if (action === 'scrollPageUp') {
+      if (terminal.scrollPages) terminal.scrollPages(-1)
+      else terminal.scrollLines?.(-Math.max(1, terminal.rows - 1))
+      return true
+    }
+    if (action === 'scrollPageDown') {
+      if (terminal.scrollPages) terminal.scrollPages(1)
+      else terminal.scrollLines?.(Math.max(1, terminal.rows - 1))
+      return true
+    }
+    if (action === 'scrollTop') {
+      if (terminal.scrollToTop) terminal.scrollToTop()
+      else terminal.scrollToLine?.(0)
+      return true
+    }
+    if (action === 'scrollBottom') {
+      terminal.scrollToBottom()
+      return true
+    }
+    return false
+  }
+
+  const commandMarkerLinesForPanel = (panel: TerminalPanel) => {
+    let line = 0
+    const markers: number[] = []
+    const segments = panel.outputSegments?.length ? panel.outputSegments : [{ text: panel.output, scope: 'output' as const }]
+    segments.forEach((segment) => {
+      if (segment.scope === 'input' && segment.text.trim()) markers.push(line)
+      line += (segment.text.match(/\n/g) || []).length
+    })
+    return markers.filter((marker, index, list) => index === 0 || marker !== list[index - 1])
+  }
+
+  const jumpToKnownCommand = (panelId: string, direction: -1 | 1) => {
+    const panel = panelById(panelId)
+    const terminal = terminalViews.get(panelId)?.terminal
+    if (!panel || !terminal?.scrollToLine) return false
+    const markers = commandMarkerLinesForPanel(panel)
+    if (!markers.length) return true
+    const viewportY = terminal.buffer.active.viewportY || 0
+    const target =
+      direction < 0
+        ? [...markers].reverse().find((line) => line < viewportY) ?? markers.at(-1)
+        : markers.find((line) => line > viewportY) ?? markers[0]
+    if (target === undefined) return true
+    terminal.scrollToLine(target)
+    return true
+  }
+
+  const moveActiveTab = (panelId: string, direction: -1 | 1) => {
+    const index = workspace.panels.findIndex((panel) => panel.id === panelId)
+    if (index < 0) return false
+    const targetIndex = index + direction
+    if (targetIndex < 0 || targetIndex >= workspace.panels.length) return false
+    const [panel] = workspace.panels.splice(index, 1)
+    workspace.panels.splice(targetIndex, 0, panel)
+    workspace.activePanelId = panel.id
+    void Promise.resolve(afterDomUpdate()).then(() => scheduleVisibleTerminalFit({ scrollToBottom: false, frames: 2, forceGeometry: true }))
+    return true
+  }
+
+  const switchRelativeTab = (delta: -1 | 1) => {
+    const panels = terminalPanels()
+    if (panels.length <= 1) return false
+    const index = panels.findIndex((panel) => panel.id === workspace.activePanelId)
+    const currentIndex = index >= 0 ? index : 0
+    const target = panels[(currentIndex + delta + panels.length) % panels.length]
+    if (!target) return false
+    activatePanel(target.id)
+    return true
+  }
+
+  const switchToSpecificTerminalTab = (digit: number) => {
+    const panels = terminalPanels()
+    const index = digit === 10 ? 9 : digit - 1
+    const target = panels[index]
+    if (!target) return false
+    activatePanel(target.id)
+    return true
+  }
+
+  const handleTerminalKeyboardShortcut = (panelId: string, action: TerminalShortcutAction, event?: KeyboardEvent) => {
+    const panel = panelById(panelId)
+    if (!panel || panel.kind === 'knowledge') return false
+    workspace.activePanelId = panelId
+    switch (action.type) {
+      case 'copy':
+        void copySelection(panelId)
+        return true
+      case 'paste':
+        void pasteClipboard(panelId)
+        return true
+      case 'search':
+        void openSearchOverlay(panelId)
+        return true
+      case 'searchNext':
+        findNext()
+        return true
+      case 'searchPrevious':
+        findPrevious()
+        return true
+      case 'searchClear':
+        clearSearchFromButton()
+        return true
+      case 'newWindow':
+        void windowControlsClient.newWindow()?.()
+        return true
+      case 'closeWindow':
+        void windowControlsClient.closeWindow()?.()
+        return true
+      case 'fullscreen':
+        void windowControlsClient.toggleFullScreen()?.()
+        return true
+      case 'newTab':
+        if (terminalDefaultShortcutOverridden('newTerminal', 'Ctrl+Shift+T')) return false
+        void openLocalTerminalFromSource(panelId)
+        termMenu.visible = false
+        return true
+      case 'forkSsh':
+        if (!workspace.canForkSshPanel(panelId)) return false
+        void forkSshFromPanel(panelId)
+        return true
+      case 'closeTab':
+        closeTab(panelId)
+        return true
+      case 'commandDialog':
+        if (commandDialog.visible) {
+          const activeInput = getCommandDialogInput()
+          if (document.activeElement === activeInput) focusPanel(commandDialog.panelId)
+          else focusCommandDialogInput()
+        } else {
+          void openCommandDialog(panelId)
+        }
+        return true
+      case 'clear':
+        clearTerminal(panelId)
+        return true
+      case 'fileManager':
+        void workspace.ensureFileSessionForTerminalPanel(panelId)
+        return true
+      case 'zoomIn':
+        increaseFont(panelId)
+        return true
+      case 'zoomOut':
+        decreaseFont(panelId)
+        return true
+      case 'zoomReset':
+        resetFont(panelId)
+        return true
+      case 'previousTab':
+        return switchRelativeTab(-1)
+      case 'nextTab':
+        return switchRelativeTab(1)
+      case 'moveTabLeft':
+        return moveActiveTab(panelId, -1)
+      case 'moveTabRight':
+        return moveActiveTab(panelId, 1)
+      case 'specificTab':
+        if (terminalDefaultShortcutOverridden('switchToSpecificTab', 'Alt')) return false
+        return switchToSpecificTerminalTab(action.digit)
+      case 'scrollLineUp':
+      case 'scrollLineDown':
+      case 'scrollPageUp':
+      case 'scrollPageDown':
+      case 'scrollTop':
+      case 'scrollBottom':
+        return scrollTerminalViewport(panelId, action.type)
+      case 'previousCommand':
+        return jumpToKnownCommand(panelId, -1)
+      case 'nextCommand':
+        return jumpToKnownCommand(panelId, 1)
+    }
+    event?.preventDefault()
+    return false
   }
 
   const togglePanelConnection = async (panelId: string) => {
@@ -424,10 +656,10 @@ export const createTerminalWorkspaceShellRuntime = (
     menu.visible = false
   }
 
-  const createTerminalFromMenu = () => {
-    const panel = workspace.createPanel()
+  const createTerminalFromMenu = async () => {
+    const sourcePanelId = termMenu.panelId || workspace.activePanelId
     termMenu.visible = false
-    focusPanelAfterDomUpdate(panel.id)
+    await openLocalTerminalFromSource(sourcePanelId)
   }
 
   const closeTerminalFromMenu = () => {
@@ -468,13 +700,15 @@ export const createTerminalWorkspaceShellRuntime = (
   }
 
   const handleShortcut = async (event: KeyboardEvent) => {
-    const key = event.key.toLowerCase()
-    const hasPrimaryModifier = event.ctrlKey || event.metaKey
-    if (hasPrimaryModifier && key === 'f') {
+    if (workspace.shortcutRecording.actionId) return
+    const terminalAction = terminalShortcutActionForEvent(event)
+    if (terminalAction && isTerminalKeyboardTarget(event) && handleTerminalKeyboardShortcut(workspace.activePanelId, terminalAction, event)) {
       event.preventDefault()
-      openSearchOverlay(workspace.activePanelId)
+      event.stopPropagation()
       return
     }
+    const key = event.key.toLowerCase()
+    const hasPrimaryModifier = event.ctrlKey || event.metaKey
     if (event.key === 'Escape') {
       menu.visible = false
       termMenu.visible = false
@@ -483,7 +717,7 @@ export const createTerminalWorkspaceShellRuntime = (
       hideSuggestions()
       return
     }
-    if (hasPrimaryModifier && key === 'k') {
+    if (hasPrimaryModifier && event.shiftKey && key === 'k') {
       event.preventDefault()
       if (commandDialog.visible) {
         const activeInput = getCommandDialogInput()
@@ -497,7 +731,7 @@ export const createTerminalWorkspaceShellRuntime = (
       void openCommandDialog(workspace.activePanelId)
       return
     }
-    if (hasPrimaryModifier && key === 'l') {
+    if (hasPrimaryModifier && event.shiftKey && key === 'l') {
       event.preventDefault()
       clearTerminal()
       return
@@ -512,7 +746,7 @@ export const createTerminalWorkspaceShellRuntime = (
       decreaseFont(workspace.activePanelId)
       return
     }
-    if (hasPrimaryModifier && key === 'm') {
+    if (hasPrimaryModifier && event.shiftKey && key === 'm') {
       event.preventDefault()
       await workspace.ensureFileSessionForTerminalPanel(workspace.activePanelId)
     }
@@ -520,6 +754,7 @@ export const createTerminalWorkspaceShellRuntime = (
 
   return {
     activatePanel,
+    canForkTerminalMenuPanel,
     canForkSelected,
     chatSelectionToAi,
     clearTerminal,
@@ -537,12 +772,14 @@ export const createTerminalWorkspaceShellRuntime = (
     createTerminalFromMenu,
     decreaseFontFromMenu,
     finishRename,
+    forkFromTermMenu,
     forkSelected,
     handleShortcut,
     handleTerminalContextMenu,
     handleTerminalMouseDown,
     handleTerminalMouseUp,
     handleTerminalWheel,
+    handleTerminalKeyboardShortcut,
     increaseFontFromMenu,
     isTerminalMenuPanel,
     openFileManagerFromMenu,

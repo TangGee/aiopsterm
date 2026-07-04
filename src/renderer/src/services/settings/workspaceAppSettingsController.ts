@@ -356,6 +356,9 @@ export const createWorkspaceAppSettingsController = (state: WorkspaceAppSettings
     updateWorkspacePreferences,
     updateAiPreferences,
     updateNotificationSettings,
+    uploadCustomNotificationSound,
+    clearCustomNotificationSound,
+    previewNotificationSound,
     updateExtensionSettings,
     updatePrivacySettings
   } = createWorkspacePreferenceSettingsController(
@@ -717,6 +720,9 @@ export const createWorkspaceAppSettingsController = (state: WorkspaceAppSettings
     saveModelProvider,
     updateAiPreferences,
     updateNotificationSettings,
+    uploadCustomNotificationSound,
+    clearCustomNotificationSound,
+    previewNotificationSound,
     updateExtensionSettings,
     openKeywordHighlightEditor,
     closeKeywordHighlightEditor,

@@ -12,7 +12,7 @@ import type {
 
 export type SshTerminalConnectionTarget = {
   asset?: Partial<
-    Pick<AiopsAssetRecord, 'id' | 'name' | 'title' | 'asset_type' | 'organizationId' | 'group_name' | 'auth_type' | 'needProxy' | 'proxyName'>
+    Pick<AiopsAssetRecord, 'id' | 'name' | 'title' | 'asset_type' | 'organizationId' | 'group_name' | 'auth_type' | 'needProxy' | 'proxyName' | 'jumpHostId'>
   > | null
   host: string
   port: number
@@ -319,6 +319,9 @@ export const createSshTerminalConnectionInfo = (
       ? { organizationId: cleanOptional(asset?.organizationId) || cleanOptional(asset?.group_name) }
       : {}),
     ...(cleanOptional(asset?.auth_type) ? { authType: cleanOptional(asset?.auth_type) } : {}),
+    ...(cleanOptional(asset?.jumpHostId) || cleanOptional(options.ssh?.jumpHostId)
+      ? { jumpHostId: cleanOptional(asset?.jumpHostId) || cleanOptional(options.ssh?.jumpHostId) }
+      : {}),
     ...(asset?.needProxy ? { needProxy: true } : {}),
     ...(asset?.needProxy && cleanOptional(asset?.proxyName) ? { proxyName: cleanOptional(asset?.proxyName) } : {}),
     ...(title ? { title } : {}),

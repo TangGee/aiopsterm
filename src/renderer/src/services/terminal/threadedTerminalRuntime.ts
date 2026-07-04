@@ -9,6 +9,10 @@ import {
   measureTerminalCellMetrics,
   terminalFontSpec
 } from '@/services/terminal/threadedTerminalMetrics'
+import {
+  isTerminalCopyShortcut,
+  isTerminalPasteShortcut
+} from '@/services/terminal/terminalKeyboardShortcuts'
 import type {
   ThreadedTerminalCellMetrics,
   ThreadedTerminalCoreRequest,
@@ -696,20 +700,6 @@ const pickCoreWorker = (terminalId: string) => {
 }
 
 const createDisposable = (dispose: () => void): DisposableLike => ({ dispose })
-
-const isCopyShortcut = (event: KeyboardEvent) => {
-  const key = event.key.toLowerCase()
-  if (key !== 'c') return false
-  if (event.shiftKey && (event.ctrlKey || event.metaKey) && !event.altKey) return true
-  return event.metaKey && !event.ctrlKey && !event.altKey
-}
-
-const isPasteShortcut = (event: KeyboardEvent) => {
-  const key = event.key.toLowerCase()
-  if (key !== 'v') return false
-  if (event.shiftKey && (event.ctrlKey || event.metaKey) && !event.altKey) return true
-  return event.metaKey && !event.ctrlKey && !event.altKey
-}
 
 const terminalDropSafeBarePathPattern = /^[A-Za-z0-9_@%+=:,./-]+$/
 
@@ -1909,13 +1899,13 @@ export class ThreadedTerminalHost {
       event.stopPropagation()
       return true
     }
-    if (isCopyShortcut(event)) {
+    if (isTerminalCopyShortcut(event)) {
       event.preventDefault()
       event.stopPropagation()
       void this.copySelectionToClipboard()
       return true
     }
-    if (isPasteShortcut(event)) {
+    if (isTerminalPasteShortcut(event)) {
       event.preventDefault()
       event.stopPropagation()
       void this.pasteFromClipboard()

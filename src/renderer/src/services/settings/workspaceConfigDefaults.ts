@@ -86,7 +86,12 @@ export const layoutWidthLimits = {
 
 export const defaultNotificationSettings: NotificationUserConfig = {
   desktopNotifications: true,
-  controlNotificationBell: true
+  controlNotificationBell: true,
+  soundEnabled: true,
+  soundPreset: 'chime',
+  customSoundPath: '',
+  customSoundUrl: '',
+  customSoundName: ''
 }
 
 const defaultWorkspacePreferencesUserConfig: WorkspaceUserConfig = defaultWorkspacePreferencesData()

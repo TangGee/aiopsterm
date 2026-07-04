@@ -8,7 +8,7 @@ import {
   prepareChatImageAttachmentFromFile,
   validateChatImageAttachment
 } from '../backend/chat/chatImageAttachment'
-import { saveCustomBackgroundFile, writeLocalTextFile } from '../backend/files/localFileWrites'
+import { saveCustomBackgroundFile, saveCustomNotificationSoundFile, writeLocalTextFile } from '../backend/files/localFileWrites'
 import type {
   ChatImageAttachmentClipboardInput,
   ChatImageAttachmentFileInput,
@@ -30,13 +30,16 @@ type RegisterLocalFilesIpcInput = {
   getDownloadsPath: () => string
   getChatAttachmentsPath: () => string
   getCustomBackgroundsPath: () => string
+  getCustomNotificationSoundsPath: () => string
   customBackgroundUrlForPath: (filePath: string) => string
   writeFixtureFile?: WriteFixtureFile
 }
 
 const maxCustomBackgroundBytes = 20 * 1024 * 1024
+const maxCustomNotificationSoundBytes = 10 * 1024 * 1024
 const maxLocalTextReadBytes = 2 * 1024 * 1024
 const allowedCustomBackgroundExtensions = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp'])
+const allowedCustomNotificationSoundExtensions = new Set(['.mp3', '.wav', '.ogg', '.m4a', '.aac', '.flac', '.webm'])
 
 const hasOpenProperty = (options: OpenDialogOptions | undefined, property: string) =>
   Array.isArray(options?.properties) && options.properties.includes(property as OpenDialogProperty)
@@ -127,6 +130,13 @@ export const registerLocalFilesIpc = (ipcMain: IpcMain, input: RegisterLocalFile
       maxBytes: maxCustomBackgroundBytes,
       allowedExtensions: allowedCustomBackgroundExtensions,
       toUrl: input.customBackgroundUrlForPath
+    })
+  )
+  ipcMain.handle('settings:save-custom-notification-sound', async (_event, srcAbsPath: string) =>
+    saveCustomNotificationSoundFile(srcAbsPath, {
+      soundDir: input.getCustomNotificationSoundsPath(),
+      maxBytes: maxCustomNotificationSoundBytes,
+      allowedExtensions: allowedCustomNotificationSoundExtensions
     })
   )
   ipcMain.handle('files:read-local', async (_event, filePath: string) => {

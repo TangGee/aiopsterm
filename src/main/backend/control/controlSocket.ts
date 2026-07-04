@@ -200,6 +200,11 @@ const handleControlRequest = async (request: ControlSocketRequest): Promise<Cont
     publishRendererMutationEvent(method, params, response)
     return response
   }
+  if (method.startsWith('asset.') || method.startsWith('host.')) {
+    const response = await dispatchRendererControlRequest(method, params, { focus: method === 'asset.ssh.connect' && params.focus !== false })
+    publishRendererMutationEvent(method, params, response)
+    return response
+  }
   if (
     method === 'workspace.snapshot' ||
     method === 'workspace.list' ||

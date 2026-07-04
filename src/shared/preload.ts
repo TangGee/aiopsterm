@@ -299,6 +299,7 @@ export type {
   AppUpdateProgressEvent,
   AppUpdateSignatureInfo,
   CustomBackgroundSaveResult,
+  CustomNotificationSoundSaveResult,
   EditorUserConfig,
   ExportMcpUserConfig,
   KeywordHighlightConfigWriteResult,

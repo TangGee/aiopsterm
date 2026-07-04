@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm, stat, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { CustomBackgroundSaveResult } from '../src/shared/contracts/appRuntime'
+import type { CustomBackgroundSaveResult, CustomNotificationSoundSaveResult } from '../src/shared/contracts/appRuntime'
 import type { LocalFileWriteResult } from '../src/shared/contracts/localFiles'
 
 type LocalFileWritesBackend = {
@@ -16,6 +16,16 @@ type LocalFileWritesBackend = {
       now?: () => Date
     }
   ) => Promise<CustomBackgroundSaveResult>
+  saveCustomNotificationSoundFile: (
+    srcAbsPath: string,
+    runtime: {
+      soundDir: string
+      maxBytes?: number
+      allowedExtensions?: Set<string>
+      copyFile?: (source: string, target: string) => Promise<void>
+      now?: () => Date
+    }
+  ) => Promise<CustomNotificationSoundSaveResult>
   writeLocalTextFile: (
     filePath: string,
     content: string,
@@ -131,5 +141,34 @@ describe('local file write backend boundary', () => {
         }
       })
     ).rejects.toThrow('Saved background size does not match the source file.')
+  })
+
+  it('copies custom notification sounds into the owned directory and rejects unsupported sources', async () => {
+    const { saveCustomNotificationSoundFile } = await loadBackend()
+    const dir = await createTempDir()
+    const source = join(dir, 'approval 声音.wav')
+    const soundDir = join(dir, 'notification-sounds')
+    const bytes = Buffer.from([0x52, 0x49, 0x46, 0x46, 0x05, 0x06, 0x07])
+    await writeFile(source, bytes)
+
+    const result = await saveCustomNotificationSoundFile(source, {
+      soundDir,
+      now: () => new Date('2026-06-12T10:00:00.000Z')
+    })
+    const expectedPath = join(soundDir, 'approval.wav')
+
+    expect(result).toEqual({
+      filePath: expectedPath,
+      url: `file://${expectedPath}`,
+      name: 'approval.wav',
+      size: bytes.byteLength,
+      bytes: bytes.byteLength,
+      mtimeMs: expect.any(Number)
+    })
+    await expect(readFile(result.filePath)).resolves.toEqual(bytes)
+
+    await expect(saveCustomNotificationSoundFile('relative.wav', { soundDir })).rejects.toThrow('srcAbsPath must be absolute')
+    await expect(saveCustomNotificationSoundFile(source, { soundDir, maxBytes: 2 })).rejects.toThrow('Notification sound file too large')
+    await expect(saveCustomNotificationSoundFile(source, { soundDir, allowedExtensions: new Set(['.mp3']) })).rejects.toThrow('Notification sound file type not allowed')
   })
 })

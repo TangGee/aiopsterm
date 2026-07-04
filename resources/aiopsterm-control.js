@@ -7,7 +7,7 @@ const { spawnSync } = require('child_process')
 
 const args = process.argv.slice(2)
 
-const usage = () => `aiopsterm-control [--socket <path>] [--json] <command>
+const usage = () => `aio [--socket <path>] [--json] <command>
 
 Commands:
   ping
@@ -18,6 +18,8 @@ Commands:
   rpc <method> [--params-json <json>]
   auth login|status|sign-in-url|begin-sign-in|sign-out
   settings open [--target <section>]
+  settings get <path> [--raw]
+  settings put <path> <json-or-text-value>
   feedback open|submit [--email <email>] [--body <text>] [--image-path <path>...]
   sidebar snapshot | sidebar custom validate|reload|select [name]
   system ping|tree|top|memory|identify|capabilities [--include-processes]
@@ -43,6 +45,9 @@ Commands:
   workspace env [--workspace <id>|--surface <id>] [--mask]
   workspace set-auto-title <title> [--workspace <id>|--panel <id>] [--probe]
   workspace remote status|configure|reconnect|disconnect|pty-sessions
+  ssh <managed-host>
+  host list|add|complete
+  completion bash|zsh|fish
   workspace group <subcommand>
   workspace-group <subcommand>
   vm list|create|destroy|exec|ssh-info|attach-info
@@ -150,6 +155,10 @@ Commands:
   dismiss-notification (--id <id> | --all-read)
   jump-to-unread
   clear-notifications
+
+Short SSH:
+  aiossh <managed-host>
+  aiossh --complete <prefix>
 `
 
 const readOption = (name) => {
@@ -175,6 +184,805 @@ const unescapeTerminalText = (value) =>
     return '\\'
   })
 
+const uniqueCompletionItems = (items) => {
+  const seen = new Set()
+  const result = []
+  for (const item of items.flat().filter(Boolean)) {
+    const value = String(item)
+    if (seen.has(value)) continue
+    seen.add(value)
+    result.push(value)
+  }
+  return result
+}
+
+const completionNode = ({ children = {}, options = [], values = [], dynamic = '' } = {}) => ({
+  children,
+  options: uniqueCompletionItems(options),
+  values: uniqueCompletionItems(values),
+  dynamic
+})
+
+const completionLeaf = (options = [], values = []) => completionNode({ options, values })
+
+const addCompletionAliases = (spec, names, node) => {
+  for (const name of names) spec[name] = node
+  return node
+}
+
+const completionChildren = (names, options = [], values = []) =>
+  Object.fromEntries(names.map((name) => [name, completionLeaf(options, values)]))
+
+const globalCompletionOptions = ['--socket', '--json', '--help', '-h']
+const workspaceSelectorOptions = ['--workspace', '--workspace-id', '--tab', '--tab-id']
+const surfaceSelectorOptions = ['--surface', '--surface-id', '--panel', '--panel-id', '--pane', '--pane-id', '--target', '-t']
+const terminalSelectorOptions = ['--panel', '--panel-id', '--surface', '--surface-id', '--session', '--session-id', '--terminal', '--terminal-id']
+const lineRangeCompletionOptions = ['--line', '--start-line', '--start', '--end-line', '--end']
+const notificationCompletionOptions = [
+  '--title',
+  '--subtitle',
+  '--body',
+  '--source',
+  '--from',
+  '--app',
+  '--level',
+  '--severity',
+  '--group',
+  '--category',
+  '--key',
+  '--dedupe-key',
+  '--dedupe_key',
+  '--idempotency-key',
+  '--idempotency_key',
+  '--action',
+  '--kind',
+  '--type',
+  '--url',
+  '--link',
+  '--panel',
+  '--surface',
+  '--session',
+  '--session-id',
+  '--workspace',
+  '--workspace-id'
+]
+const managedHostSshOptions = [
+  '--asset',
+  '--host',
+  '--name',
+  '--target',
+  '--workspace',
+  '--workspace-id',
+  '--surface',
+  '--surface-id',
+  '--panel',
+  '--panel-id',
+  '--complete',
+  '--no-connect',
+  '--configure-only',
+  '--new',
+  '--no-focus',
+  '--background'
+]
+const completionBooleanOptions = new Set([
+  '--json',
+  '--help',
+  '-h',
+  '--include-snapshot',
+  '--raw',
+  '--no-activate',
+  '--include-processes',
+  '--processes',
+  '--mask',
+  '--probe',
+  '--panel-only-if-multiple',
+  '--connect',
+  '--auto-connect',
+  '--clear',
+  '--clear-configuration',
+  '--all-workspaces',
+  '--all',
+  '--require-existing',
+  '--wait-for-ready',
+  '--require-daemon',
+  '--right',
+  '--below',
+  '--no-focus',
+  '--background',
+  '--dry-run',
+  '--scrollback',
+  '--signal',
+  '-S',
+  '--print',
+  '-p',
+  '--list',
+  '-l',
+  '--unset',
+  '-u',
+  '-g',
+  '-q',
+  '-s',
+  '-w',
+  '--value',
+  '--value-only',
+  '--names',
+  '--name-only',
+  '--names-only',
+  '--include-local',
+  '--new',
+  '--configure-only',
+  '--no-connect',
+  '--all-read',
+  '--unread',
+  '--read',
+  '--include-ended',
+  '--hard',
+  '--mac',
+  '--needs-input',
+  '--needs_input',
+  '--include-events',
+  '--include-decisions',
+  '--no-events',
+  '--no-decisions',
+  '--yes',
+  '--confirm',
+  '--force',
+  '--wait',
+  '--manual',
+  '--auto-resume',
+  '--no-ack',
+  '--no-heartbeat',
+  '--no-heartbeats',
+  '--create',
+  '--no-activate',
+  '--names-only',
+  '--clear',
+  '--value-only'
+])
+
+const completionOptionTakesValue = (token) => token.startsWith('-') && !token.includes('=') && !completionBooleanOptions.has(token)
+
+const buildCompletionSpec = () => {
+  const spec = {}
+
+  const managedHostNode = completionNode({ options: managedHostSshOptions, dynamic: 'managed-host' })
+  const managedHostCompleteNode = completionNode({ options: ['--prefix', '--query'], dynamic: 'managed-host' })
+  const hostListOptions = ['--prefix', '--query', '--filter', '--names', '--name-only', '--names-only', '--all', '--include-local']
+  const hostAddOptions = [
+    '--id',
+    '--name',
+    '--title',
+    '--host',
+    '--ip',
+    '--destination',
+    '--port',
+    '--user',
+    '--username',
+    '--group',
+    '--group-name',
+    '--auth-type',
+    '--auth',
+    '--keychain',
+    '--keychain-id',
+    '--jump-host',
+    '--jump-host-id',
+    '--proxy',
+    '--proxy-name',
+    '--proxy-enabled'
+  ]
+  const hostNode = completionNode({
+    children: {
+      list: completionLeaf(hostListOptions),
+      ls: completionLeaf(hostListOptions),
+      add: completionLeaf(hostAddOptions),
+      create: completionLeaf(hostAddOptions),
+      save: completionLeaf(hostAddOptions),
+      ssh: managedHostNode,
+      connect: managedHostNode,
+      complete: managedHostCompleteNode,
+      completion: managedHostCompleteNode
+    }
+  })
+
+  addCompletionAliases(spec, ['ping'], completionLeaf())
+  addCompletionAliases(spec, ['capabilities', 'system-capabilities'], completionLeaf())
+  addCompletionAliases(spec, ['identify', 'system-identify'], completionLeaf([...surfaceSelectorOptions, ...terminalSelectorOptions, ...workspaceSelectorOptions, '--cwd']))
+  addCompletionAliases(spec, ['context'], completionLeaf([...surfaceSelectorOptions, ...terminalSelectorOptions, ...workspaceSelectorOptions, '--cwd', '--include-snapshot']))
+  addCompletionAliases(spec, ['recipes', 'recipe', 'examples'], completionLeaf(['--topic', '--section'], ['context', 'notify', 'agent', 'terminal', 'remote', 'session']))
+  addCompletionAliases(spec, ['rpc'], completionLeaf(['--params-json', '--json-params', '--params']))
+  addCompletionAliases(spec, ['completion', 'completions'], completionNode({ children: completionChildren(['bash', 'zsh', 'fish']) }))
+  addCompletionAliases(
+    spec,
+    ['complete'],
+    completionNode({
+      children: {
+        cli: completionLeaf(['--index', '-i']),
+        command: completionLeaf(['--index', '-i']),
+        commands: completionLeaf(['--index', '-i']),
+        aiossh: managedHostCompleteNode,
+        ssh: managedHostCompleteNode,
+        host: managedHostCompleteNode
+      }
+    })
+  )
+  addCompletionAliases(spec, ['ssh'], managedHostNode)
+  addCompletionAliases(spec, ['host', 'hosts', 'asset', 'assets'], hostNode)
+
+  addCompletionAliases(
+    spec,
+    ['auth'],
+    completionNode({
+      children: {
+        login: completionLeaf(),
+        status: completionLeaf(),
+        'sign-in-url': completionLeaf(),
+        sign_in_url: completionLeaf(),
+        'signin-url': completionLeaf(),
+        'begin-sign-in': completionLeaf(['--timeout-seconds', '--timeout']),
+        begin_sign_in: completionLeaf(['--timeout-seconds', '--timeout']),
+        signin: completionLeaf(['--timeout-seconds', '--timeout']),
+        'sign-in': completionLeaf(['--timeout-seconds', '--timeout']),
+        'sign-out': completionLeaf(),
+        sign_out: completionLeaf(),
+        logout: completionLeaf()
+      }
+    })
+  )
+
+  const settingsTargets = ['general', 'terminal', 'theme', 'models', 'ai-notifications', 'shortcuts', 'security']
+  const settingsNode = completionNode({
+    children: {
+      open: completionLeaf(['--target', '--section', '--page', '--no-activate'], settingsTargets),
+      get: completionLeaf(['--path', '--key', '--raw']),
+      show: completionLeaf(['--path', '--key', '--raw']),
+      put: completionLeaf(['--path', '--key', '--value', '--value-json', '--json-value']),
+      set: completionLeaf(['--path', '--key', '--value', '--value-json', '--json-value'])
+    }
+  })
+  addCompletionAliases(spec, ['settings'], settingsNode)
+
+  addCompletionAliases(
+    spec,
+    ['feedback'],
+    completionNode({
+      children: {
+        open: completionLeaf(['--no-activate']),
+        submit: completionLeaf(['--email', '--from', '--body', '--message', '--text', '--image-path', '--image', '--attachment'])
+      }
+    })
+  )
+
+  const sidebarCustomNode = completionNode({
+    children: completionChildren(['validate', 'reload', 'select'], ['--name'])
+  })
+  addCompletionAliases(
+    spec,
+    ['sidebar'],
+    completionNode({
+      children: {
+        snapshot: completionLeaf(['--window', '--window-id', '--workspace', '--workspace-id']),
+        custom: sidebarCustomNode,
+        'custom.validate': completionLeaf(['--name']),
+        'custom.reload': completionLeaf(['--name']),
+        'custom.select': completionLeaf(['--name'])
+      }
+    })
+  )
+
+  addCompletionAliases(
+    spec,
+    ['system'],
+    completionNode({
+      children: {
+        ping: completionLeaf(),
+        tree: completionLeaf(['--window', '--window-id', '--workspace', '--workspace-id']),
+        top: completionLeaf(['--window', '--window-id', '--workspace', '--workspace-id', '--include-processes', '--include_processes', '--processes', '--top-group-limit', '--group-limit']),
+        memory: completionLeaf(['--window', '--window-id', '--workspace', '--workspace-id', '--include-processes', '--include_processes', '--processes', '--top-group-limit', '--group-limit']),
+        identify: completionLeaf([...surfaceSelectorOptions, ...terminalSelectorOptions, ...workspaceSelectorOptions, '--cwd']),
+        capabilities: completionLeaf()
+      }
+    })
+  )
+
+  addCompletionAliases(
+    spec,
+    ['project'],
+    completionNode({
+      children: {
+        open: completionLeaf(['--path', '--project', ...surfaceSelectorOptions, '--no-focus']),
+        'get-state': completionLeaf(surfaceSelectorOptions),
+        get_state: completionLeaf(surfaceSelectorOptions),
+        state: completionLeaf(surfaceSelectorOptions),
+        'set-tab': completionLeaf(['--tab', ...surfaceSelectorOptions], ['files', 'targets', 'buildSettings', 'schemes']),
+        set_tab: completionLeaf(['--tab', ...surfaceSelectorOptions], ['files', 'targets', 'buildSettings', 'schemes']),
+        'set-scheme': completionLeaf(['--name', '--scheme', ...surfaceSelectorOptions]),
+        set_scheme: completionLeaf(['--name', '--scheme', ...surfaceSelectorOptions]),
+        'set-configuration': completionLeaf(['--name', '--configuration', ...surfaceSelectorOptions]),
+        set_configuration: completionLeaf(['--name', '--configuration', ...surfaceSelectorOptions]),
+        'set-selected-target': completionLeaf(['--name', '--target', ...surfaceSelectorOptions]),
+        set_selected_target: completionLeaf(['--name', '--target', ...surfaceSelectorOptions]),
+        'set-selected-file': completionLeaf(['--path', '--file', ...surfaceSelectorOptions]),
+        set_selected_file: completionLeaf(['--path', '--file', ...surfaceSelectorOptions]),
+        'set-settings-filter': completionLeaf(['--text', '--filter', ...surfaceSelectorOptions]),
+        set_settings_filter: completionLeaf(['--text', '--filter', ...surfaceSelectorOptions])
+      }
+    })
+  )
+
+  const openFileOptions = ['--path', '--file', ...surfaceSelectorOptions, ...lineRangeCompletionOptions, '--no-focus']
+  addCompletionAliases(spec, ['markdown'], completionNode({ children: { open: completionLeaf(openFileOptions) } }))
+  addCompletionAliases(spec, ['file'], completionNode({ children: { open: completionLeaf(openFileOptions) } }))
+  addCompletionAliases(
+    spec,
+    ['app'],
+    completionNode({
+      children: {
+        'focus-override': completionLeaf(['--state'], ['active', 'inactive', 'clear']),
+        focus_override: completionLeaf(['--state'], ['active', 'inactive', 'clear']),
+        'simulate-active': completionLeaf(),
+        simulate_active: completionLeaf()
+      }
+    })
+  )
+  addCompletionAliases(
+    spec,
+    ['window'],
+    completionNode({
+      children: {
+        list: completionLeaf(),
+        ls: completionLeaf(),
+        current: completionLeaf(['--window', '--window-id', '--id']),
+        focus: completionLeaf(['--window', '--window-id', '--id']),
+        create: completionLeaf(),
+        new: completionLeaf(),
+        close: completionLeaf(['--window', '--window-id', '--id']),
+        displays: completionLeaf(),
+        display: completionLeaf(['--window', '--window-id', '--id', '--display', '--name'])
+      }
+    })
+  )
+
+  const mobileChatNode = completionNode({
+    children: {
+      sessions: completionLeaf(['--workspace', '--workspace-id', '--source', '--agent', '--agent-kind', '--include-ended', '--all', '--limit']),
+      list: completionLeaf(['--workspace', '--workspace-id', '--source', '--agent', '--agent-kind', '--include-ended', '--all', '--limit']),
+      history: completionLeaf(['--session', '--session-id', '--id', '--source', '--agent', '--agent-kind', '--limit', '--before-seq', '--before_seq']),
+      get: completionLeaf(['--session', '--session-id', '--id', '--source', '--agent', '--agent-kind', '--limit', '--before-seq', '--before_seq']),
+      send: completionLeaf(['--session', '--session-id', '--id', '--source', '--agent', '--agent-kind', '--text']),
+      interrupt: completionLeaf(['--session', '--session-id', '--id', '--source', '--agent', '--agent-kind', '--hard']),
+      answer: completionLeaf(['--session', '--session-id', '--id', '--source', '--agent', '--agent-kind', '--option-index', '--option_index', '--index'])
+    }
+  })
+  const mobileAttachTicketNode = completionNode({
+    children: {
+      create: completionLeaf(['--scope', '--ttl-seconds', '--ttl_seconds', '--ttl', '--workspace', '--workspace-id', '--terminal', '--terminal-id', '--surface', '--surface-id', '--panel', '--panel-id', '--mac'])
+    }
+  })
+  const mobileEventsNode = completionNode({
+    children: {
+      subscribe: completionLeaf(['--stream', '--stream-id', '--id', '--stream_id', '--topic', '--category', '--name']),
+      sub: completionLeaf(['--stream', '--stream-id', '--id', '--stream_id', '--topic', '--category', '--name']),
+      unsubscribe: completionLeaf(['--stream', '--stream-id', '--id', '--stream_id']),
+      unsub: completionLeaf(['--stream', '--stream-id', '--id', '--stream_id'])
+    }
+  })
+  addCompletionAliases(
+    spec,
+    ['mobile'],
+    completionNode({
+      children: {
+        'host-status': completionLeaf(),
+        'host.status': completionLeaf(),
+        status: completionLeaf(),
+        'workspace-list': completionLeaf(),
+        'workspace.list': completionLeaf(),
+        chat: mobileChatNode,
+        'chat.sessions': mobileChatNode.children.sessions,
+        'chat.list': mobileChatNode.children.list,
+        'chat.history': mobileChatNode.children.history,
+        'chat.get': mobileChatNode.children.get,
+        'chat.send': mobileChatNode.children.send,
+        'chat.interrupt': mobileChatNode.children.interrupt,
+        'chat.answer': mobileChatNode.children.answer,
+        'chat-sessions': mobileChatNode.children.sessions,
+        'chat-list': mobileChatNode.children.list,
+        'chat-history': mobileChatNode.children.history,
+        'chat-get': mobileChatNode.children.get,
+        'chat-send': mobileChatNode.children.send,
+        'chat-interrupt': mobileChatNode.children.interrupt,
+        'chat-answer': mobileChatNode.children.answer,
+        'attach-ticket': mobileAttachTicketNode,
+        attach_ticket: mobileAttachTicketNode,
+        'attach-ticket.create': mobileAttachTicketNode.children.create,
+        'attach_ticket.create': mobileAttachTicketNode.children.create,
+        events: mobileEventsNode,
+        event: mobileEventsNode,
+        'events.subscribe': mobileEventsNode.children.subscribe,
+        'event.subscribe': mobileEventsNode.children.subscribe,
+        'events.unsubscribe': mobileEventsNode.children.unsubscribe,
+        'event.unsubscribe': mobileEventsNode.children.unsubscribe,
+        'events-subscribe': mobileEventsNode.children.subscribe,
+        'event-subscribe': mobileEventsNode.children.subscribe,
+        'events-unsubscribe': mobileEventsNode.children.unsubscribe,
+        'event-unsubscribe': mobileEventsNode.children.unsubscribe
+      }
+    })
+  )
+  addCompletionAliases(
+    spec,
+    ['chat'],
+    completionNode({
+      children: {
+        sessions: completionNode({ children: completionChildren(['dump', 'debug']) }),
+        'sessions.dump': completionLeaf()
+      }
+    })
+  )
+
+  const hooksNode = completionNode({
+    children: completionChildren(['list', 'status', 'setup', 'add', 'install', 'remove', 'uninstall'], ['--agent', '--source'])
+  })
+  addCompletionAliases(spec, ['hooks', 'hook'], hooksNode)
+
+  const feedReplyOptions = ['--source', '--agent', '--mode', '--decision', '--kind', '--message', '--reason', '--feedback', '--answer', '--reply', '--request', '--request-id', '--id', '--selection']
+  addCompletionAliases(
+    spec,
+    ['feed'],
+    completionNode({
+      children: {
+        list: completionLeaf(['--all']),
+        status: completionLeaf(['--all']),
+        jump: completionLeaf(['--workstream', '--workstream-id', '--session', '--request']),
+        push: completionLeaf(['--event-json', '--params-json', '--json-params', '--params', '--source', '--agent', '--session', '--session-id', '--workstream', '--workstream-id', '--request', '--request-id', '--event', '--hook-event', '--kind', '--title', '--summary', '--cwd', '--tool', '--wait-timeout-seconds', '--wait']),
+        permission: completionNode({ children: { reply: completionLeaf(feedReplyOptions) } }),
+        question: completionNode({ children: { reply: completionLeaf(feedReplyOptions) } }),
+        'exit-plan': completionNode({ children: { reply: completionLeaf(feedReplyOptions) } }),
+        exit_plan: completionNode({ children: { reply: completionLeaf(feedReplyOptions) } }),
+        'permission-reply': completionLeaf(feedReplyOptions),
+        'question-reply': completionLeaf(feedReplyOptions),
+        'exit-plan-reply': completionLeaf(feedReplyOptions),
+        done: completionLeaf(),
+        'mark-read': completionLeaf(),
+        'mark-handled': completionLeaf(),
+        'clear-ended': completionLeaf(),
+        clear: completionLeaf(['--yes', '--confirm'])
+      }
+    })
+  )
+
+  const workspaceRemoteOptions = [...workspaceSelectorOptions, ...surfaceSelectorOptions]
+  const workspaceRemoteNode = completionNode({
+    children: {
+      status: completionLeaf(workspaceRemoteOptions),
+      show: completionLeaf(workspaceRemoteOptions),
+      configure: completionLeaf([...workspaceRemoteOptions, '--destination', '--host', '--username', '--user', '--port', '--title', '--name', '--proxy', '--proxy-name', '--proxy-enabled', '--connect', '--auto-connect']),
+      config: completionLeaf([...workspaceRemoteOptions, '--destination', '--host', '--username', '--user', '--port', '--title', '--name', '--proxy', '--proxy-name', '--proxy-enabled', '--connect', '--auto-connect']),
+      reconnect: completionLeaf(workspaceRemoteOptions),
+      connect: completionLeaf(workspaceRemoteOptions),
+      disconnect: completionLeaf([...workspaceRemoteOptions, '--clear', '--clear-configuration']),
+      'foreground-auth-ready': completionLeaf([...workspaceRemoteOptions, '--token']),
+      'pty-sessions': completionLeaf([...workspaceRemoteOptions, '--all-workspaces', '--all']),
+      'pty-close': completionLeaf([...workspaceRemoteOptions, '--session', '--session-id']),
+      'pty-detach': completionLeaf([...workspaceRemoteOptions, '--session', '--session-id', '--attachment', '--attachment-id', '--token', '--attachment-token']),
+      'pty-bridge': completionLeaf([...workspaceRemoteOptions, '--session', '--session-id', '--attachment', '--attachment-id', '--command', '--require-existing', '--wait-for-ready']),
+      'pty-resize': completionLeaf([...workspaceRemoteOptions, '--session', '--session-id', '--attachment', '--attachment-id', '--token', '--attachment-token', '--cols', '--columns', '--rows'])
+    }
+  })
+  const workspaceGroupOptions = ['--group', '--group-id', '--name', '--cwd', '--from', '--confirm', '--force', '--workspace', '--panel', '--surface', '--placement', '--hex', '--color', '--symbol', '--icon']
+  const workspaceGroupNode = completionNode({
+    children: completionChildren(['list', 'create', 'ungroup', 'delete', 'rename', 'collapse', 'expand', 'pin', 'unpin', 'focus', 'add', 'remove', 'set-anchor', 'new-workspace', 'set-color', 'set-icon'], workspaceGroupOptions)
+  })
+  addCompletionAliases(
+    spec,
+    ['workspace'],
+    completionNode({
+      children: {
+        snapshot: completionLeaf(),
+        context: completionLeaf([...surfaceSelectorOptions, ...terminalSelectorOptions, ...workspaceSelectorOptions, '--cwd', '--include-snapshot']),
+        list: completionLeaf(),
+        current: completionLeaf(),
+        action: completionLeaf(['--action', '--name', '--title', '--new-title', '--cwd', '--url', ...workspaceSelectorOptions, ...surfaceSelectorOptions, '--focus', '--no-focus']),
+        env: completionLeaf([...workspaceSelectorOptions, ...surfaceSelectorOptions, '--mask']),
+        'set-auto-title': completionLeaf([...workspaceSelectorOptions, ...surfaceSelectorOptions, '--title', '--name', '--probe', '--panel-only-if-multiple', '--failure', '--agent']),
+        set_auto_title: completionLeaf([...workspaceSelectorOptions, ...surfaceSelectorOptions, '--title', '--name', '--probe', '--panel-only-if-multiple', '--failure', '--agent']),
+        'auto-title': completionLeaf([...workspaceSelectorOptions, ...surfaceSelectorOptions, '--title', '--name', '--probe', '--panel-only-if-multiple', '--failure', '--agent']),
+        remote: workspaceRemoteNode,
+        group: workspaceGroupNode
+      }
+    })
+  )
+  addCompletionAliases(spec, ['workspace-group'], workspaceGroupNode)
+
+  addCompletionAliases(
+    spec,
+    ['remote'],
+    completionNode({
+      children: {
+        tmux: completionNode({
+          children: completionChildren(['sessions', 'attach', 'detach', 'state', 'mirror', 'window'], ['--host', '--destination', '--session', '--name', '--port', '--identity-file', '--create', '--no-activate'])
+        })
+      }
+    })
+  )
+
+  addCompletionAliases(
+    spec,
+    ['vm'],
+    completionNode({
+      children: {
+        list: completionLeaf(),
+        ls: completionLeaf(),
+        create: completionLeaf(['--image', '--provider', '--idempotency-key', '--idempotency_key', '--key']),
+        new: completionLeaf(['--image', '--provider', '--idempotency-key', '--idempotency_key', '--key']),
+        destroy: completionLeaf(['--id']),
+        rm: completionLeaf(['--id']),
+        remove: completionLeaf(['--id']),
+        exec: completionLeaf(['--id', '--timeout-ms', '--timeout', '--command', '--cmd']),
+        'ssh-info': completionLeaf(['--id']),
+        ssh_info: completionLeaf(['--id']),
+        ssh: completionLeaf(['--id']),
+        'attach-info': completionLeaf(['--id', '--require-daemon', '--require_daemon']),
+        attach_info: completionLeaf(['--id', '--require-daemon', '--require_daemon']),
+        attach: completionLeaf(['--id', '--require-daemon', '--require_daemon'])
+      }
+    })
+  )
+  addCompletionAliases(
+    spec,
+    ['remotes'],
+    completionNode({
+      children: {
+        list: completionLeaf(),
+        ls: completionLeaf(),
+        add: completionLeaf(['--name', '--route', '--routes', '--tag']),
+        remove: completionLeaf(['--target', '--name']),
+        rm: completionLeaf(['--target', '--name'])
+      }
+    })
+  )
+
+  const sessionNode = completionNode({
+    children: completionChildren(['save', 'list', 'show', 'get', 'restore', 'reopen', 'clear', 'delete', 'remove'], ['--id', '--snapshot', '--name'])
+  })
+  addCompletionAliases(spec, ['session', 'restore-session'], sessionNode)
+
+  const agentSessionOptions = ['--session', '--session-id', '--id', '--source', '--agent', '--limit', '--event-limit', '--decision-limit', '--needs-input', '--needs_input', '--unread', '--include-events', '--include-decisions', '--no-events', '--no-decisions', '--kind', '--decision', '--message', '--reason', '--answer', '--reply', '--title', '--name', '--operation', '--op', '--yes', '--confirm']
+  const agentSessionNode = completionNode({
+    children: completionChildren(['list', 'ls', 'show', 'get', 'reply', 'approve', 'deny', 'handle', 'done', 'rename', 'clear', 'delete', 'remove', 'bulk', 'mark-handled', 'clear-ended', 'clear-all'], agentSessionOptions)
+  })
+  addCompletionAliases(spec, ['agent-session', 'ai-session', 'ai-sessions'], agentSessionNode)
+
+  const surfaceResumeOptions = [...terminalSelectorOptions, '--name', '--kind', '--shell', '--command', '--cwd', '--checkpoint', '--checkpoint-id', '--source', '--auto-resume', '--policy', '--manual', '--reason']
+  const surfaceResumeNode = completionNode({
+    children: completionChildren(['show', 'get', 'set', 'trust', 'approve', 'preview', 'autorun-preview', 'autorun', 'run-auto', 'clear', 'run'], surfaceResumeOptions)
+  })
+  addCompletionAliases(
+    spec,
+    ['surface'],
+    completionNode({
+      children: {
+        list: completionLeaf(),
+        current: completionLeaf(),
+        resume: surfaceResumeNode,
+        action: completionLeaf(['--action', '--name', '--title', '--new-title', '--cwd', '--url', ...workspaceSelectorOptions, ...surfaceSelectorOptions, '--focus', '--no-focus']),
+        focus: completionLeaf(surfaceSelectorOptions),
+        select: completionLeaf(surfaceSelectorOptions),
+        create: completionLeaf([...surfaceSelectorOptions, '--title', '--name', '--cwd', '--working-directory', '--type', '--url', '--focus']),
+        new: completionLeaf([...surfaceSelectorOptions, '--title', '--name', '--cwd', '--working-directory', '--type', '--url', '--focus']),
+        'report-tty': completionLeaf([...surfaceSelectorOptions, '--tty-name', '--tty']),
+        report_tty: completionLeaf([...surfaceSelectorOptions, '--tty-name', '--tty']),
+        'report-shell-state': completionLeaf([...surfaceSelectorOptions, '--state', '--shell-state']),
+        report_shell_state: completionLeaf([...surfaceSelectorOptions, '--state', '--shell-state']),
+        'ports-kick': completionLeaf([...surfaceSelectorOptions, '--reason']),
+        ports_kick: completionLeaf([...surfaceSelectorOptions, '--reason'])
+      }
+    })
+  )
+  addCompletionAliases(
+    spec,
+    ['pane'],
+    completionNode({
+      children: {
+        list: completionLeaf(),
+        create: completionLeaf([...surfaceSelectorOptions, '--direction', '--split', '--title', '--name', '--cwd', '--working-directory', '--type', '--focus'], ['right', 'below']),
+        new: completionLeaf([...surfaceSelectorOptions, '--direction', '--split', '--title', '--name', '--cwd', '--working-directory', '--type', '--focus'], ['right', 'below'])
+      }
+    })
+  )
+
+  addCompletionAliases(
+    spec,
+    ['agent-hibernation'],
+    completionNode({
+      children: {
+        on: completionLeaf(),
+        enable: completionLeaf(),
+        off: completionLeaf(),
+        disable: completionLeaf(),
+        status: completionLeaf(),
+        preview: completionLeaf(),
+        sweep: completionLeaf(['--no-confirm', '--force', '--reason']),
+        reap: completionLeaf(['--no-confirm', '--force', '--reason'])
+      }
+    })
+  )
+
+  const agentVaultOptions = [
+    '--id',
+    '--agent',
+    '--name',
+    '--description',
+    '--executable',
+    '--process-name',
+    '--argv-contains',
+    '--command-contains',
+    '--executable-contains',
+    '--session-option',
+    '--session-env',
+    '--launch-command',
+    '--launch',
+    '--command',
+    '--shell',
+    '--resume-command',
+    '--resume',
+    '--fork-command',
+    '--fork',
+    '--session-directory',
+    '--session-dir',
+    '--cwd-mode',
+    '--cwd',
+    '--icon',
+    '--kind',
+    '--prompt',
+    '--role',
+    '--model',
+    '--index',
+    '--count',
+    '--session',
+    '--session-id',
+    '--session-path',
+    '--argv',
+    '--argv-line',
+    '--command-line',
+    '--env',
+    '--pid',
+    '--ppid',
+    '--pgid',
+    '--source',
+    '--panel',
+    '--surface'
+  ]
+  const agentVaultNode = completionNode({
+    children: completionChildren(['list', 'register', 'set', 'get', 'show', 'remove', 'delete', 'unset', 'render', 'identify', 'detect', 'scan', 'scan-processes'], agentVaultOptions)
+  })
+  const agentTeamNode = completionNode({
+    children: completionChildren(['launch', 'start'], ['--source', '--agent', '--count', '-n', '--cwd', '-C', '--prompt', '-p', '--command', '--shell', '--name', '--group-name'], ['codex', 'claude-code', 'custom'])
+  })
+  addCompletionAliases(
+    spec,
+    ['agent'],
+    completionNode({
+      children: {
+        status: completionLeaf(),
+        hooks: hooksNode,
+        hook: hooksNode,
+        session: agentSessionNode,
+        sessions: agentSessionNode,
+        'ai-session': agentSessionNode,
+        vault: agentVaultNode,
+        'agent-vault': agentVaultNode,
+        team: agentTeamNode,
+        teams: agentTeamNode,
+        preview: completionLeaf(['--no-confirm', '--force', '--reason']),
+        sweep: completionLeaf(['--no-confirm', '--force', '--reason']),
+        reap: completionLeaf(['--no-confirm', '--force', '--reason']),
+        hibernate: completionLeaf(['--session', '--session-id', '--source', '--agent', '--reason']),
+        resume: completionLeaf(['--session', '--session-id', '--source', '--agent', '--reason'])
+      }
+    })
+  )
+
+  addCompletionAliases(spec, ['events', 'event'], completionLeaf(['--after', '--cursor-file', '--name', '--category', '--limit', '--no-ack', '--no-heartbeat', '--no-heartbeats']))
+  addCompletionAliases(spec, ['wait-for', 'wait_for'], completionLeaf(['-S', '--signal', '--timeout']))
+  addCompletionAliases(spec, ['display-message', 'display', 'displayp'], completionLeaf(['-p', '--print']))
+  addCompletionAliases(spec, ['set-buffer'], completionLeaf(['--name', '--buffer', '-b']))
+  addCompletionAliases(spec, ['paste-buffer'], completionLeaf(['--name', '--buffer', '-b', ...terminalSelectorOptions]))
+  addCompletionAliases(spec, ['list-buffers'], completionLeaf())
+  addCompletionAliases(spec, ['show-buffer', 'showb'], completionLeaf(['--name', '--buffer', '-b']))
+  addCompletionAliases(spec, ['save-buffer', 'saveb'], completionLeaf(['--name', '--buffer', '-b']))
+  addCompletionAliases(spec, ['show-options', 'show-option', 'show'], completionLeaf(['-v', '--value', '--value-only', '-g', '-q', '-s', '-w'], ['extended-keys']))
+  addCompletionAliases(spec, ['set-hook'], completionLeaf(['--list', '-l', '--unset', '-u']))
+  addCompletionAliases(spec, ['set-option', 'set', 'set-window-option', 'setw', 'source-file', 'refresh-client', 'attach-session', 'detach-client', 'popup', 'bind-key', 'unbind-key', 'copy-mode'], completionLeaf())
+  addCompletionAliases(spec, ['set-status'], completionLeaf([...workspaceSelectorOptions, ...surfaceSelectorOptions, '--icon', '--color', '--priority']))
+  addCompletionAliases(spec, ['clear-status'], completionLeaf([...workspaceSelectorOptions, ...surfaceSelectorOptions]))
+  addCompletionAliases(spec, ['list-status'], completionLeaf([...workspaceSelectorOptions, ...surfaceSelectorOptions]))
+  addCompletionAliases(spec, ['set-progress'], completionLeaf([...workspaceSelectorOptions, ...surfaceSelectorOptions, '--label']))
+  addCompletionAliases(spec, ['clear-progress'], completionLeaf([...workspaceSelectorOptions, ...surfaceSelectorOptions]))
+  addCompletionAliases(spec, ['log'], completionLeaf([...workspaceSelectorOptions, ...surfaceSelectorOptions, '--level', '--source']))
+  addCompletionAliases(spec, ['clear-log'], completionLeaf([...workspaceSelectorOptions, ...surfaceSelectorOptions]))
+  addCompletionAliases(spec, ['list-log'], completionLeaf([...workspaceSelectorOptions, ...surfaceSelectorOptions, '--limit']))
+  addCompletionAliases(spec, ['sidebar-state'], completionLeaf([...workspaceSelectorOptions, ...surfaceSelectorOptions]))
+
+  const paneLayoutOptions = [...surfaceSelectorOptions, ...terminalSelectorOptions, '--amount', '-x', '-y', '-L', '-R', '-U', '-D', '--target-pane', '--target', '--target-panel', '-s', '--direction', '--split', '--focus', '--no-focus']
+  addCompletionAliases(spec, ['resize-pane', 'resizep', 'swap-pane', 'swapp', 'break-pane', 'breakp', 'join-pane', 'joinp'], completionLeaf(paneLayoutOptions, ['left', 'right', 'up', 'down', 'below']))
+
+  addCompletionAliases(spec, ['surface-focus', 'focus-surface'], completionLeaf(surfaceSelectorOptions))
+  addCompletionAliases(spec, ['create-surface', 'new-surface', 'create-pane'], completionLeaf([...surfaceSelectorOptions, '--title', '--name', '--cwd', '--working-directory', '--type', '--url', '--direction', '--split', '--focus'], ['right', 'below']))
+  addCompletionAliases(spec, ['report-tty', 'report_tty'], completionLeaf([...surfaceSelectorOptions, '--tty-name', '--tty']))
+  addCompletionAliases(spec, ['report-shell-state', 'report_shell_state'], completionLeaf([...surfaceSelectorOptions, '--state', '--shell-state']))
+  addCompletionAliases(spec, ['ports-kick', 'ports_kick'], completionLeaf([...surfaceSelectorOptions, '--reason']))
+  addCompletionAliases(spec, ['move-surface', 'reorder-surface'], completionLeaf([...surfaceSelectorOptions, '--before', '--before-surface', '--before-panel', '--after', '--after-surface', '--after-panel', '--index', '--focus']))
+  addCompletionAliases(spec, ['split-off', 'drag-surface-to-split'], completionLeaf([...surfaceSelectorOptions, '--direction', '--split', '--focus'], ['left', 'right', 'up', 'down', 'below']))
+  addCompletionAliases(spec, ['refresh-surfaces', 'surface-health'], completionLeaf())
+  addCompletionAliases(spec, ['trigger-flash'], completionLeaf(surfaceSelectorOptions))
+  addCompletionAliases(spec, ['reorder-workspace'], completionLeaf(['--workspace', '--target', '--panel', '--before', '--before-workspace', '--after', '--after-workspace', '--index', '--dry-run']))
+  addCompletionAliases(spec, ['reorder-workspaces'], completionLeaf(['--order', '--dry-run']))
+  addCompletionAliases(spec, ['move-workspace-to-window'], completionLeaf(['--workspace', '--target', '--panel', '--window']))
+
+  addCompletionAliases(spec, ['new-workspace'], completionLeaf(['--name', '-n', '--title', '--cwd', '-c', '--no-focus', '-d', '--workspace-env']))
+  addCompletionAliases(spec, ['current-workspace'], completionLeaf())
+  addCompletionAliases(spec, ['select-workspace', 'close-workspace'], completionLeaf(['--workspace', '--target', '--panel']))
+  addCompletionAliases(spec, ['list-panels'], completionLeaf())
+  addCompletionAliases(spec, ['list-pane-surfaces'], completionLeaf(['--pane', '--pane-id', '--panel', '--panel-id', '--surface', '--surface-id', '--session', '--session-id']))
+  addCompletionAliases(spec, ['close-surface'], completionLeaf(['--surface', '--panel', '--target', '-t']))
+  addCompletionAliases(spec, ['new-split', 'new-pane'], completionLeaf([...surfaceSelectorOptions, '--direction', '--split', '--focus', '--no-focus'], ['right', 'below', 'left', 'up', 'down']))
+  addCompletionAliases(spec, ['next-window', 'nextw', 'previous-window', 'prev-window', 'previousw', 'prevw', 'last-window', 'lastw', 'last-pane', 'lastp'], completionLeaf())
+  addCompletionAliases(spec, ['select-window', 'selectw'], completionLeaf(['--target', '--window', '--workspace', '--panel', '-t']))
+  addCompletionAliases(spec, ['select-pane', 'selectp', 'focus-pane'], completionLeaf(['--target', '--pane', '--panel', '--surface', '-t']))
+  addCompletionAliases(spec, ['find-window', 'findw'], completionLeaf(['--content', '--select', '--window']))
+  addCompletionAliases(spec, ['list-windows', 'lsw', 'current-window', 'currentw', 'list-panes', 'lsp'], completionLeaf())
+  addCompletionAliases(spec, ['new-window', 'neww'], completionLeaf(['--name', '-n', '--title', '--cwd', '-c', '--no-focus', '-d', '--workspace-env']))
+  addCompletionAliases(spec, ['split-window', 'splitw'], completionLeaf(['--target', '--pane', '--panel', '-t', '--cwd', '-c', '-h', '-v', '--no-focus', '-d'], ['right', 'below']))
+  addCompletionAliases(spec, ['rename-window', 'renamew', 'rename-workspace'], completionLeaf(['--target', '--workspace', '--panel', '-t']))
+  addCompletionAliases(spec, ['kill-window', 'killw'], completionLeaf(['--target', '--workspace', '--panel', '-t']))
+  addCompletionAliases(spec, ['kill-pane', 'killp'], completionLeaf(['--target', '--pane', '--panel', '--surface', '-t']))
+  addCompletionAliases(spec, ['has-session', 'has'], completionLeaf(['--target', '--workspace', '--panel', '-t']))
+  addCompletionAliases(spec, ['select-layout'], completionLeaf(['--layout', '--target', '--workspace', '--pane', '-t'], ['even-horizontal', 'even-vertical', 'main-horizontal', 'main-vertical', 'tiled']))
+  addCompletionAliases(spec, ['tree', 'list-workspaces', 'list-surfaces', 'list-terminals'], completionLeaf())
+  addCompletionAliases(spec, ['focus-panel', 'focus-terminal'], completionLeaf(['--panel', '--panel-id', '--session', '--session-id']))
+  addCompletionAliases(spec, ['read-screen', 'capture-pane'], completionLeaf(['--panel', '--panel-id', '--session', '--session-id', '--lines', '--tail-lines', '--scrollback']))
+  addCompletionAliases(spec, ['pipe-pane'], completionLeaf(['--panel', '--panel-id', '--surface', '--surface-id', '--session', '--session-id', '--lines', '--command']))
+  addCompletionAliases(spec, ['clear-history'], completionLeaf(terminalSelectorOptions))
+  addCompletionAliases(spec, ['respawn-pane'], completionLeaf([...terminalSelectorOptions, '--command', '--shell']))
+  addCompletionAliases(spec, ['send', 'send-panel'], completionLeaf([...terminalSelectorOptions, '--text']))
+  addCompletionAliases(spec, ['send-key', 'send-key-panel'], completionLeaf([...terminalSelectorOptions, '--key']))
+
+  addCompletionAliases(
+    spec,
+    ['terminal'],
+    completionNode({
+      children: {
+        list: completionLeaf(),
+        focus: completionLeaf(['--panel', '--panel-id', '--session', '--session-id']),
+        create: completionLeaf(['--title', '--name', '--cwd', '--focus']),
+        new: completionLeaf(['--title', '--name', '--cwd', '--focus']),
+        input: completionLeaf([...terminalSelectorOptions, '--text']),
+        paste: completionLeaf([...terminalSelectorOptions, '--text', '--submit-key', '--submit_key'], ['return', 'ctrl+enter', 'none']),
+        replay: completionLeaf([...terminalSelectorOptions, '--lines', '--tail-lines']),
+        viewport: completionLeaf([...terminalSelectorOptions, '--columns', '--cols', '--rows', '--clear']),
+        'read-screen': completionLeaf([...terminalSelectorOptions, '--lines', '--tail-lines']),
+        send: completionLeaf([...terminalSelectorOptions, '--text']),
+        'send-key': completionLeaf([...terminalSelectorOptions, '--key'])
+      }
+    })
+  )
+
+  addCompletionAliases(spec, ['notify', 'notify-caller'], completionLeaf(notificationCompletionOptions, ['info', 'success', 'warning', 'error', 'approval', 'done']))
+  addCompletionAliases(spec, ['notify-surface'], completionLeaf(notificationCompletionOptions, ['info', 'success', 'warning', 'error', 'approval', 'done']))
+  addCompletionAliases(spec, ['notify-target'], completionLeaf(notificationCompletionOptions, ['info', 'success', 'warning', 'error', 'approval', 'done']))
+  addCompletionAliases(spec, ['list-notifications'], completionLeaf(['--source', '--from', '--level', '--severity', '--group', '--query', '--search', '--read', '--unread', '--limit']))
+  addCompletionAliases(spec, ['open-notification'], completionLeaf(['--id']))
+  addCompletionAliases(spec, ['mark-notification-read'], completionLeaf(['--id', '--all']))
+  addCompletionAliases(spec, ['dismiss-notification'], completionLeaf(['--id', '--all-read']))
+  addCompletionAliases(spec, ['jump-to-unread', 'clear-notifications'], completionLeaf())
+
+  return spec
+}
+
+const completionSpec = buildCompletionSpec()
+const completionRootNode = completionNode({ children: completionSpec, options: globalCompletionOptions })
+const shellCompletionCommands = Object.keys(completionSpec)
+
 const socketPath = readOption('--socket') || process.env.AIOPSTERM_CONTROL_SOCKET || process.env.AIOPSTERM_SOCKET_PATH || ''
 const outputJson = hasFlag('--json')
 
@@ -190,6 +998,10 @@ const methodParams = () => {
   if (command === 'identify' || command === 'system-identify') return { method: 'system.identify', params: { caller: readCallerParams() } }
   if (command === 'context') return workspaceContextMethodParams()
   if (command === 'recipes' || command === 'recipe' || command === 'examples') return controlRecipesMethodParams()
+  if (command === 'completion' || command === 'completions') return shellCompletionMethodParams(args.shift() || 'bash')
+  if (command === 'complete') return completeMethodParams(args.shift() || '')
+  if (command === 'ssh') return managedHostSshMethodParams()
+  if (command === 'host' || command === 'hosts' || command === 'asset' || command === 'assets') return managedHostMethodParams(args.shift() || 'list')
   if (command === 'auth') return authMethodParams(args.shift() || 'login')
   if (command === 'settings') return settingsMethodParams(args.shift() || 'open')
   if (command === 'feedback') return feedbackMethodParams(args.shift() || 'open')
@@ -717,58 +1529,58 @@ const controlRecipeSections = [
     topic: 'context',
     title: 'Current Workspace Context',
     rows: [
-      ['Inspect active terminal and pending work', 'aiopsterm-control context'],
-      ['Include the full renderer snapshot', 'aiopsterm-control context --include-snapshot'],
-      ['List surfaces in the shared work panel', 'aiopsterm-control surface list']
+      ['Inspect active terminal and pending work', 'aio context'],
+      ['Include the full renderer snapshot', 'aio context --include-snapshot'],
+      ['List surfaces in the shared work panel', 'aio surface list']
     ]
   },
   {
     topic: 'notify',
     title: 'Notifications',
     rows: [
-      ['Notify the active queue from a script', 'aiopsterm-control notify --source ci --level warning --title "Build needs review" --body "npm test failed"'],
-      ['Open the newest unread item', 'aiopsterm-control jump-to-unread'],
-      ['List unread deploy notifications', 'aiopsterm-control list-notifications --unread --source deploy']
+      ['Notify the active queue from a script', 'aio notify --source ci --level warning --title "Build needs review" --body "npm test failed"'],
+      ['Open the newest unread item', 'aio jump-to-unread'],
+      ['List unread deploy notifications', 'aio list-notifications --unread --source deploy']
     ]
   },
   {
     topic: 'agent',
     title: 'AI Sessions',
     rows: [
-      ['Install detected agent hooks', 'aiopsterm-control hooks setup'],
-      ['List sessions that need input', 'aiopsterm-control agent session list --needs-input'],
-      ['Jump to a pending feed item', 'aiopsterm-control feed jump --workstream <id>'],
-      ['Launch a visible local agent team', 'aiopsterm-control agent team launch --source codex --count 3 --cwd "$PWD" --prompt "review this repo"']
+      ['Install detected agent hooks', 'aio hooks setup'],
+      ['List sessions that need input', 'aio agent session list --needs-input'],
+      ['Jump to a pending feed item', 'aio feed jump --workstream <id>'],
+      ['Launch a visible local agent team', 'aio agent team launch --source codex --count 3 --cwd "$PWD" --prompt "review this repo"']
     ]
   },
   {
     topic: 'terminal',
     title: 'Terminal Primitives',
     rows: [
-      ['Read visible screen text', 'aiopsterm-control terminal read-screen --panel <panel-id> --lines 80'],
-      ['Send text to a connected terminal', 'aiopsterm-control terminal send --session <terminal-session-id> --text "pwd\\n"'],
-      ['Split the active surface', 'aiopsterm-control new-split right --surface <panel-id>'],
-      ['Copy screen text through a shell command', 'aiopsterm-control pipe-pane --panel <panel-id> --command "tail -40"']
+      ['Read visible screen text', 'aio terminal read-screen --panel <panel-id> --lines 80'],
+      ['Send text to a connected terminal', 'aio terminal send --session <terminal-session-id> --text "pwd\\n"'],
+      ['Split the active surface', 'aio new-split right --surface <panel-id>'],
+      ['Copy screen text through a shell command', 'aio pipe-pane --panel <panel-id> --command "tail -40"']
     ]
   },
   {
     topic: 'remote',
     title: 'Visible SSH Remote',
     rows: [
-      ['Show current remote panel state', 'aiopsterm-control workspace remote status'],
-      ['Configure SSH metadata without connecting', 'aiopsterm-control workspace remote configure --surface <panel-id> --host example.com --user root --port 22'],
-      ['Reconnect a visible SSH panel', 'aiopsterm-control workspace remote reconnect --surface <panel-id>'],
-      ['Disconnect without clearing terminal metadata', 'aiopsterm-control workspace remote disconnect --surface <panel-id>']
+      ['Show current remote panel state', 'aio workspace remote status'],
+      ['Configure SSH metadata without connecting', 'aio workspace remote configure --surface <panel-id> --host example.com --user root --port 22'],
+      ['Reconnect a visible SSH panel', 'aio workspace remote reconnect --surface <panel-id>'],
+      ['Disconnect without clearing terminal metadata', 'aio workspace remote disconnect --surface <panel-id>']
     ]
   },
   {
     topic: 'session',
     title: 'Restore And Resume',
     rows: [
-      ['Save the current panel layout', 'aiopsterm-control session save --name work'],
-      ['Restore a saved layout', 'aiopsterm-control session restore --name work'],
-      ['Bind a manual resume command to a surface', 'aiopsterm-control surface resume set --panel <panel-id> --kind custom --shell "tmux attach -t work"'],
-      ['Preview trusted resume bindings', 'aiopsterm-control surface resume preview']
+      ['Save the current panel layout', 'aio session save --name work'],
+      ['Restore a saved layout', 'aio session restore --name work'],
+      ['Bind a manual resume command to a surface', 'aio surface resume set --panel <panel-id> --kind custom --shell "tmux attach -t work"'],
+      ['Preview trusted resume bindings', 'aio surface resume preview']
     ]
   }
 ]
@@ -783,7 +1595,7 @@ const controlRecipesText = (topic = '') => {
     ].join('\n')
   }
   return [
-    'aiopsterm-control recipes',
+    'aio recipes',
     'Run inside an aiopsterm-managed local terminal, or pass --socket <path>.',
     '',
     ...sections.flatMap((section) => [
@@ -799,6 +1611,229 @@ const controlRecipesText = (topic = '') => {
 const controlRecipesMethodParams = () => ({
   localPrint: controlRecipesText(readOption('--topic') || readOption('--section') || readPositional())
 })
+
+const completionFilter = (items, prefix = '') => {
+  const value = String(prefix || '')
+  return uniqueCompletionItems(items).filter((item) => !value || item.startsWith(value))
+}
+
+const completionBasename = (value) => String(value || '').split(/[\\/]/).filter(Boolean).pop() || String(value || '')
+
+const readCliCompletionRequest = () => {
+  const indexRaw = readOption('--index') || readOption('-i')
+  const delimiter = args.indexOf('--')
+  const words = delimiter >= 0 ? args.slice(delimiter + 1) : args.slice()
+  const numericIndex = Number(indexRaw)
+  const index = Number.isFinite(numericIndex) ? Math.max(0, Math.floor(numericIndex)) : Math.max(0, words.length - 1)
+  while (words.length <= index) words.push('')
+  return { words, index }
+}
+
+const completionPlanForNode = (node, currentWord) => {
+  const current = String(currentWord || '')
+  if (current.startsWith('-')) return { candidates: completionFilter([...(node.options || []), ...globalCompletionOptions], current) }
+  if (node.dynamic) return { dynamic: node.dynamic, prefix: current }
+  const childNames = Object.keys(node.children || {})
+  const structuralCandidates = [...childNames, ...(node.values || [])]
+  if (structuralCandidates.length) return { candidates: completionFilter(structuralCandidates, current) }
+  return { candidates: completionFilter([...(node.options || []), ...globalCompletionOptions], current) }
+}
+
+const nodeForCompletionPath = (tokens) => {
+  let node = completionRootNode
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = String(tokens[index] || '')
+    if (!token || token === '--') continue
+    if (token.startsWith('-')) {
+      if (completionOptionTakesValue(token) && index + 1 < tokens.length) index += 1
+      continue
+    }
+    const next = node.children?.[token]
+    if (!next) break
+    node = next
+  }
+  return node
+}
+
+const cliCompletionPlan = ({ words, index }) => {
+  const bin = completionBasename(words[0] || 'aio')
+  const currentWord = words[index] || ''
+  if (bin === 'aiossh') {
+    if (String(currentWord).startsWith('-')) return { candidates: completionFilter(managedHostSshOptions, currentWord) }
+    return { dynamic: 'managed-host', prefix: currentWord }
+  }
+
+  const commandIndex = index - 1
+  if (commandIndex <= 0) return completionPlanForNode(completionRootNode, currentWord)
+  const commandWords = words.slice(1)
+  const previousTokens = commandWords.slice(0, commandIndex)
+  const node = nodeForCompletionPath(previousTokens)
+  return completionPlanForNode(node, currentWord)
+}
+
+const cliCompletionMethodParams = () => {
+  const plan = cliCompletionPlan(readCliCompletionRequest())
+  if (plan.dynamic === 'managed-host') {
+    const prefix = plan.prefix || ''
+    return { method: 'asset.complete', params: { prefix, query: prefix, connectableOnly: true, connectable_only: true }, silentOnNoSocket: true }
+  }
+  return { localPrint: (plan.candidates || []).join('\n') }
+}
+
+const shellCompletionBash = () => `# aiopsterm control completion
+_aiopsterm_control_complete() {
+  local cur helper bin
+  COMPREPLY=()
+  cur="\${COMP_WORDS[COMP_CWORD]}"
+  helper="\${COMP_WORDS[0]}"
+  bin="\${helper##*/}"
+  if [[ "$bin" == "aiossh" ]]; then
+    mapfile -t COMPREPLY < <(compgen -W "$("$helper" --complete "$cur" 2>/dev/null)" -- "$cur")
+    return 0
+  fi
+  mapfile -t COMPREPLY < <(compgen -W "$("$helper" complete cli --index "$COMP_CWORD" -- "\${COMP_WORDS[@]}" 2>/dev/null)" -- "$cur")
+  return 0
+}
+complete -F _aiopsterm_control_complete aio aictl aiopsterm-control aiossh
+`
+
+const shellCompletionZsh = () => `#compdef aio aictl aiopsterm-control aiossh
+_aiopsterm_control_complete() {
+  local helper bin index
+  local -a candidates
+  helper="$words[1]"
+  bin="\${helper:t}"
+  if [[ "$bin" == "aiossh" ]]; then
+    candidates=("\${(@f)$("$helper" --complete "$words[CURRENT]" 2>/dev/null)}")
+  else
+    index=$((CURRENT - 1))
+    candidates=("\${(@f)$("$helper" complete cli --index "$index" -- "\${words[@]}" 2>/dev/null)}")
+  fi
+  compadd -- $candidates
+}
+compdef _aiopsterm_control_complete aio aictl aiopsterm-control aiossh
+`
+
+const shellCompletionFish = () => `# aiopsterm control completion
+function __aiopsterm_control_complete
+  set -l tokens (commandline -opc)
+  set -l current (commandline -ct)
+  if test (count $tokens) -eq 0
+    set tokens (commandline -pco)
+  end
+  if test (count $tokens) -eq 0
+    return
+  end
+  if test -n "$current"; and test "$tokens[-1]" != "$current"
+    set tokens $tokens $current
+  end
+  set -l helper $tokens[1]
+  set -l bin (basename -- $helper)
+  set -l index (math (count $tokens) - 1)
+  if test "$bin" = "aiossh"
+    $helper --complete $current 2>/dev/null
+  else
+    $helper complete cli --index $index -- $tokens 2>/dev/null
+  end
+end
+complete -c aio -f -a "(__aiopsterm_control_complete)"
+complete -c aictl -f -a "(__aiopsterm_control_complete)"
+complete -c aiopsterm-control -f -a "(__aiopsterm_control_complete)"
+complete -c aiossh -f -a "(__aiopsterm_control_complete)"
+`
+
+const shellCompletionMethodParams = (shell) => {
+  const normalized = String(shell || 'bash').trim().toLowerCase()
+  if (normalized === 'bash') return { localPrint: shellCompletionBash() }
+  if (normalized === 'zsh') return { localPrint: shellCompletionZsh() }
+  if (normalized === 'fish') return { localPrint: shellCompletionFish() }
+  throw new Error(`Unknown completion shell: ${shell}`)
+}
+
+const completeMethodParams = (target) => {
+  const normalized = String(target || '').trim().toLowerCase()
+  if (normalized === 'cli' || normalized === 'command' || normalized === 'commands') return cliCompletionMethodParams()
+  if (!normalized || normalized === 'aiossh' || normalized === 'ssh' || normalized === 'host') {
+    const prefix = readOption('--prefix') || readOption('--query') || readPositional()
+    return { method: 'asset.complete', params: { prefix, query: prefix, connectableOnly: true, connectable_only: true }, silentOnNoSocket: true }
+  }
+  throw new Error(`Unknown completion target: ${target}`)
+}
+
+const managedHostCompletionMethodParams = () => {
+  const prefix = readOption('--prefix') || readOption('--query') || readPositional()
+  return { method: 'asset.complete', params: { prefix, query: prefix, connectableOnly: true, connectable_only: true }, silentOnNoSocket: true }
+}
+
+const managedHostSshMethodParams = () => {
+  if (hasFlag('--complete')) return managedHostCompletionMethodParams()
+  const target = workspaceRemoteTargetParams()
+  const host = readOption('--asset') || readOption('--host') || readOption('--name') || readOption('--target') || readPositional()
+  if (!host) throw new Error('aiossh requires a managed host name')
+  const connect = !(hasFlag('--no-connect') || hasFlag('--configure-only'))
+  const reuse = !hasFlag('--new')
+  return {
+    method: 'asset.ssh.connect',
+    params: {
+      ...target,
+      target: host,
+      query: host,
+      connect,
+      autoConnect: connect,
+      auto_connect: connect,
+      reuse,
+      focus: !(hasFlag('--no-focus') || hasFlag('--background'))
+    }
+  }
+}
+
+const managedHostMethodParams = (subcommand) => {
+  if (subcommand === 'complete' || subcommand === 'completion') return managedHostCompletionMethodParams()
+  if (subcommand === 'list' || subcommand === 'ls') {
+    const prefix = readOption('--prefix') || readOption('--query') || readOption('--filter')
+    const namesOnly = hasFlag('--names') || hasFlag('--name-only') || hasFlag('--names-only')
+    const includeAll = hasFlag('--all') || hasFlag('--include-local')
+    return {
+      method: 'asset.list',
+      params: {
+        prefix,
+        query: prefix,
+        namesOnly,
+        names_only: namesOnly,
+        connectableOnly: !includeAll,
+        connectable_only: !includeAll
+      }
+    }
+  }
+  if (subcommand === 'add' || subcommand === 'create' || subcommand === 'save') {
+    const name = readOption('--name') || readOption('--title') || readPositional()
+    const host = readOption('--host') || readOption('--ip') || readOption('--destination') || readPositional()
+    if (!host) throw new Error('host add requires --host <host>')
+    const portRaw = readOption('--port')
+    const port = portRaw === '' ? undefined : Number(portRaw)
+    return {
+      method: 'asset.save',
+      params: {
+        id: readOption('--id'),
+        name: name || host,
+        title: readOption('--title') || name || host,
+        host,
+        ip: host,
+        username: readOption('--user') || readOption('--username') || 'root',
+        ...(Number.isFinite(port) ? { port: Math.floor(port) } : {}),
+        group: readOption('--group') || readOption('--group-name'),
+        group_name: readOption('--group-name'),
+        auth_type: readOption('--auth-type') || readOption('--auth') || 'keyBased',
+        keychainId: readOption('--keychain') || readOption('--keychain-id'),
+        jumpHostId: readOption('--jump-host') || readOption('--jump-host-id'),
+        proxyName: readOption('--proxy') || readOption('--proxy-name'),
+        needProxy: hasFlag('--proxy-enabled')
+      }
+    }
+  }
+  if (subcommand === 'ssh' || subcommand === 'connect') return managedHostSshMethodParams()
+  throw new Error(`Unknown host command: ${subcommand}`)
+}
 
 const notificationMetadataParams = () => ({
   source: readOption('--source') || readOption('--from') || readOption('--app'),
@@ -825,10 +1860,38 @@ const authMethodParams = (subcommand) => {
 }
 
 const settingsMethodParams = (subcommand) => {
-  if (subcommand !== 'open') throw new Error(`Unknown settings command: ${subcommand}`)
-  const target = readOption('--target') || readOption('--section') || readOption('--page') || readPositional() || 'general'
-  const activate = !hasFlag('--no-activate')
-  return { method: 'settings.open', params: { target, section: target, activate } }
+  if (subcommand === 'open') {
+    const target = readOption('--target') || readOption('--section') || readOption('--page') || readPositional() || 'general'
+    const activate = !hasFlag('--no-activate')
+    return { method: 'settings.open', params: { target, section: target, activate } }
+  }
+  if (subcommand === 'get' || subcommand === 'show') {
+    const path = readOption('--path') || readOption('--key') || readPositional()
+    if (!path) throw new Error('settings get requires a path')
+    return { method: 'settings.get', params: { path, key: path, raw: hasFlag('--raw') } }
+  }
+  if (subcommand === 'put' || subcommand === 'set') {
+    const path = readOption('--path') || readOption('--key') || readPositional()
+    if (!path) throw new Error('settings put requires a path')
+    const jsonValue = readOption('--value-json') || readOption('--json-value')
+    const textValue = jsonValue || readOption('--value') || args.filter((arg) => arg !== '--').join(' ')
+    if (!textValue && textValue !== '') throw new Error('settings put requires a value')
+    let value = textValue
+    let valueKind = 'text'
+    if (jsonValue) {
+      value = JSON.parse(jsonValue)
+      valueKind = 'json'
+    } else {
+      try {
+        value = JSON.parse(textValue)
+        valueKind = 'json'
+      } catch {
+        value = textValue
+      }
+    }
+    return { method: 'settings.put', params: { path, key: path, value, valueKind, value_kind: valueKind } }
+  }
+  throw new Error(`Unknown settings command: ${subcommand}`)
 }
 
 const feedbackMethodParams = (subcommand) => {
@@ -2294,6 +3357,35 @@ const printResponse = (response) => {
     return
   }
   const data = response.data || {}
+  if (Array.isArray(data.completions)) {
+    for (const item of data.completions) process.stdout.write(`${item}\n`)
+    return
+  }
+  if (data.setting && Object.prototype.hasOwnProperty.call(data.setting, 'value')) {
+    const value = data.setting.value
+    if (data.raw && (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean')) {
+      process.stdout.write(`${value}\n`)
+    } else {
+      process.stdout.write(`${JSON.stringify(value, null, 2)}\n`)
+    }
+    return
+  }
+  if (data.asset && data.saved) {
+    const asset = data.asset || {}
+    process.stdout.write(['host', 'saved', asset.name || asset.title || asset.id || '-', `${asset.username || 'root'}@${asset.host || asset.ip || '-'}:${asset.port || 22}`].join('\t') + '\n')
+    return
+  }
+  if (Array.isArray(data.assets)) {
+    for (const asset of data.assets) {
+      if (data.namesOnly || data.names_only) {
+        process.stdout.write(`${asset.name || asset.title || asset.host || asset.id || ''}\n`)
+      } else {
+        process.stdout.write(['host', asset.name || asset.title || asset.id || '-', `${asset.username || 'root'}@${asset.host || asset.ip || '-'}:${asset.port || 22}`, asset.group || asset.group_name || '-'].join('\t') + '\n')
+      }
+    }
+    if (data.assets.length === 0 && !(data.namesOnly || data.names_only)) process.stdout.write('No managed hosts\n')
+    return
+  }
   if (data.stream_id && Array.isArray(data.topics)) {
     process.stdout.write(['mobile-events', 'subscribe', data.stream_id, data.already_subscribed ? 'existing' : 'new', data.topics.join(',')].join('\t') + '\n')
     return
@@ -2995,6 +4087,7 @@ if ('localPrint' in request) {
 }
 
 if (!socketPath) {
+  if (request.silentOnNoSocket) process.exit(0)
   process.stderr.write('AIOPSTERM_CONTROL_SOCKET is not set. Start this CLI inside an aiopsterm managed local terminal or pass --socket.\n')
   process.exit(2)
 }

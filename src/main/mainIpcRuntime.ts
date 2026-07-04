@@ -91,6 +91,7 @@ type MainIpcRuntimeInput = {
   getDefaultShell: () => string
   getChatAttachmentsPath: () => string
   getCustomBackgroundsPath: () => string
+  getCustomNotificationSoundsPath: () => string
   getLogDirPath: () => string
   settingsExternalActionRuntime: () => {
     userDataPath: string
@@ -170,6 +171,7 @@ export const registerMainIpcRuntime = (input: MainIpcRuntimeInput) => {
     getDownloadsPath: () => app.getPath('downloads'),
     getChatAttachmentsPath: input.getChatAttachmentsPath,
     getCustomBackgroundsPath: input.getCustomBackgroundsPath,
+    getCustomNotificationSoundsPath: input.getCustomNotificationSoundsPath,
     customBackgroundUrlForPath: input.appBootstrapRuntime.customBackgroundUrlForPath
   })
   registerAliasesIpc(ipcMain)
@@ -201,7 +203,9 @@ export const registerMainIpcRuntime = (input: MainIpcRuntimeInput) => {
   registerTerminalToolsIpc(ipcMain)
   registerUserAccountIpc(ipcMain)
   registerVoiceIpc(ipcMain)
-  registerWindowIpc(ipcMain)
+  registerWindowIpc(ipcMain, {
+    createWindow: input.appBootstrapRuntime.createWindow
+  })
   registerZmodemIpc(ipcMain, {
     showOpenDialog: (options) => {
       const owner = BrowserWindow.getFocusedWindow()

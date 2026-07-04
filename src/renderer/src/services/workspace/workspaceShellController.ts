@@ -29,7 +29,7 @@ type WorkspaceShellControllerState = {
 
 type WorkspaceShellControllerDeps = {
   setTopNotice: (message: string) => void
-  createPanel: () => unknown
+  openLocalTerminalPanel: (options?: { cwd?: string }) => Promise<TerminalPanel | null>
   toggleRight: () => Promise<boolean> | boolean
   setActiveSettingsSection: (section: SettingSectionKey) => void
 }
@@ -50,7 +50,7 @@ export const createWorkspaceShellController = (
     onboardingGuideOpen,
     assetManagementOpenRequest
   } = state
-  const { setTopNotice, createPanel, toggleRight, setActiveSettingsSection } = deps
+  const { setTopNotice, openLocalTerminalPanel, toggleRight, setActiveSettingsSection } = deps
 
   const switchToTerminalPanelIndex = (digit: number) => {
     const index = Math.max(1, Math.min(9, Math.floor(digit))) - 1
@@ -67,8 +67,11 @@ export const createWorkspaceShellController = (
     if (actionId === 'newTerminal') {
       mode.value = 'terminal'
       activeModule.value = 'workspace'
-      createPanel()
-      setTopNotice('已通过快捷键新建终端')
+      const source = panels.value.find((panel) => panel.id === activePanelId.value)
+      const cwd = !source?.sshSession && source?.sessionId && source.cwd?.trim() ? source.cwd.trim() : undefined
+      void openLocalTerminalPanel(cwd ? { cwd } : undefined).then((panel) => {
+        if (panel) setTopNotice('已通过快捷键新建终端')
+      })
       return true
     }
     if (actionId === 'toggleAi') {

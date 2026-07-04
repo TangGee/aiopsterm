@@ -353,7 +353,7 @@ export const workspaceContextPayload = async (params: Record<string, unknown>) =
     activeTerminal
       ? commandSuggestion(
           'Read active terminal screen',
-          `aiopsterm-control terminal read-screen --panel ${activeTerminal.panelId} --lines 80`,
+          `aio terminal read-screen --panel ${activeTerminal.panelId} --lines 80`,
           'terminal.read_screen',
           { panelId: activeTerminal.panelId, surfaceId: activeTerminal.panelId, sessionId: activeTerminal.sessionId, lines: 80, tailLines: 80 }
         )
@@ -361,7 +361,7 @@ export const workspaceContextPayload = async (params: Record<string, unknown>) =
     activeTerminal
       ? commandSuggestion(
           'Send text to active terminal',
-          `aiopsterm-control terminal send --panel ${activeTerminal.panelId} --text <text>`,
+          `aio terminal send --panel ${activeTerminal.panelId} --text <text>`,
           'terminal.send_text',
           { panelId: activeTerminal.panelId, surfaceId: activeTerminal.panelId, sessionId: activeTerminal.sessionId, text: '<text>' }
         )
@@ -369,7 +369,7 @@ export const workspaceContextPayload = async (params: Record<string, unknown>) =
     pendingAiSessions[0]
       ? commandSuggestion(
           'Open next pending AI session',
-          `aiopsterm-control feed jump ${pendingAiSessions[0].pendingRequestId || pendingAiSessions[0].id}`,
+          `aio feed jump ${pendingAiSessions[0].pendingRequestId || pendingAiSessions[0].id}`,
           'feed.jump',
           { workstream_id: pendingAiSessions[0].pendingRequestId || pendingAiSessions[0].id, source: pendingAiSessions[0].source }
         )
@@ -377,13 +377,13 @@ export const workspaceContextPayload = async (params: Record<string, unknown>) =
     unreadNotifications[0]
       ? commandSuggestion(
           'Open next unread notification',
-          'aiopsterm-control jump-to-unread',
+          'aio jump-to-unread',
           'notification.jump_to_unread',
           {}
         )
       : null,
-    commandSuggestion('List all surfaces', 'aiopsterm-control surface list', 'surface.list', {}),
-    commandSuggestion('List managed AI sessions', 'aiopsterm-control agent session list --all', 'agent.session.list', {})
+    commandSuggestion('List all surfaces', 'aio surface list', 'surface.list', {}),
+    commandSuggestion('List managed AI sessions', 'aio agent session list --all', 'agent.session.list', {})
   ].filter(Boolean)
   return ok({
     generatedAt: Date.now(),
@@ -427,6 +427,8 @@ export const isControlSystemCompatibilityMethod = (method: string) =>
     'system.top',
     'system.memory',
     'settings.open',
+    'settings.get',
+    'settings.put',
     'feedback.open',
     'feedback.submit',
     'extension.sidebar.snapshot',
@@ -451,8 +453,8 @@ export const handleControlSystemCompatibilityRequest = async (method: string, pa
   if (method === 'system.tree') return handleSystemTreeControlRequest(params)
   if (method === 'system.top') return handleSystemTopControlRequest(params)
   if (method === 'system.memory') return handleSystemMemoryControlRequest(params)
-  if (method === 'settings.open' || method === 'feedback.open' || method === 'extension.sidebar.snapshot') {
-    return dispatchRendererControlRequest(method, params, { focus: params.activate !== false })
+  if (method === 'settings.open' || method === 'settings.get' || method === 'settings.put' || method === 'feedback.open' || method === 'extension.sidebar.snapshot') {
+    return dispatchRendererControlRequest(method, params, { focus: (method === 'settings.open' || method === 'feedback.open') && params.activate !== false })
   }
   if (method === 'app.focus_override.set') {
     const state = cleanText(params.state).toLowerCase()

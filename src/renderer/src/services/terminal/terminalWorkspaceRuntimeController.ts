@@ -474,6 +474,7 @@ export const useTerminalWorkspaceContainerRuntime = () => {
     refitAfterLayoutChange,
     scheduleTerminalFit,
     scheduleVisibleTerminalFit,
+    setTerminalKeyboardShortcutHandler,
     setTerminalElement,
     syncPanelViews,
     syncTerminalView,
@@ -575,6 +576,7 @@ export const useTerminalWorkspaceContainerRuntime = () => {
 
   const {
     activatePanel,
+    canForkTerminalMenuPanel,
     canForkSelected,
     chatSelectionToAi,
     clearTerminal,
@@ -591,12 +593,14 @@ export const useTerminalWorkspaceContainerRuntime = () => {
     createTerminalFromMenu,
     decreaseFontFromMenu,
     finishRename,
+    forkFromTermMenu,
     forkSelected,
     handleShortcut,
     handleTerminalContextMenu,
     handleTerminalMouseDown,
     handleTerminalMouseUp,
     handleTerminalWheel,
+    handleTerminalKeyboardShortcut,
     increaseFontFromMenu,
     isTerminalMenuPanel,
     openFileManagerFromMenu,
@@ -620,10 +624,13 @@ export const useTerminalWorkspaceContainerRuntime = () => {
     closeCommandDialog,
     closeSearchOverlay,
     disconnectTerminalPanel,
+    findNext,
+    findPrevious,
     focusActivePanel,
     focusCommandDialogInput,
     focusPanel,
     getCommandDialogInput,
+    clearSearchFromButton,
     hideSuggestions,
     openCommandDialog,
     openSearchOverlay,
@@ -639,6 +646,7 @@ export const useTerminalWorkspaceContainerRuntime = () => {
   }, {
     afterDomUpdate: () => nextTick()
   })
+  setTerminalKeyboardShortcutHandler(handleTerminalKeyboardShortcut)
 
   const terminalControlSurface = useTerminalControlSurface({
     workspace,
@@ -827,6 +835,7 @@ export const useTerminalWorkspaceContainerRuntime = () => {
     applyGeneratedCommand,
     applySuggestion,
     approveSecurityPrompt,
+    canForkTerminalMenuPanel,
     canForkSelected,
     cancelSecurityPrompt,
     cancelZmodemTransfer,
@@ -862,6 +871,7 @@ export const useTerminalWorkspaceContainerRuntime = () => {
     findNext,
     findPrevious,
     finishRename,
+    forkFromTermMenu,
     forkSelected,
     formatZmodemBytes,
     focusActiveTerminalFromContextBar,

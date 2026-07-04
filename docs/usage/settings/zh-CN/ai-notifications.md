@@ -6,6 +6,10 @@
 
 - 桌面通知：控制外部通知协议和 AI 会话事件是否触发系统桌面通知。关闭后，应用内通知列表、AI 会话面板和事件记录仍会保留。
 - 顶部铃铛提醒控制通知：控制外部通知协议产生的未读通知是否进入顶部铃铛队列。AI 会话审批、问题和待处理提醒始终保留，避免误关关键交互。
+- 通知点击定位：AI 会话类通知会打开左侧 `AI 会话` 面板并选中对应对话；普通控制通知仍定位到对应终端面板。
+- 通知声音：新的 AI 待处理、审批、问题或控制通知进入顶部提醒队列时，可以播放声音。内置声音包含清脆提示音、柔和提示音，以及“启禀殿下，AI需要你审批了”的趣味语音方案。
+- 自定义声音：可在设置页选择 MP3、WAV、OGG、M4A、AAC、FLAC 或 WebM 文件。aiopsterm 会把文件复制到应用数据目录下的 `notification-sounds/`，配置中保存复制后的路径和 URL。
+- 试听：设置页提供试听按钮，用于确认当前声音方案或自定义音频能正常播放。
 
 ## Agent Hook 安装器
 
@@ -24,5 +28,5 @@
 ## 自动化入口
 
 - Control Socket：aiopsterm 本地连接终端会注入 `AIOPSTERM_CONTROL_SOCKET`。脚本和 CLI 可以通过该 socket 调用控制协议，例如发送通知、列出通知、打开通知或操作受管 AI 会话。
-- CLI Helper：`resources/aiopsterm-control.js` 是控制协议 helper。aiopsterm 本地连接终端会注入 `AIOPSTERM_JS_RUNTIME`、`AIOPSTERM_CONTROL_HELPER_PATH` 和 `AIOPSTERM_CONTROL_SOCKET`，脚本可用 `ELECTRON_RUN_AS_NODE=1 "$AIOPSTERM_JS_RUNTIME" "$AIOPSTERM_CONTROL_HELPER_PATH"` 调用它，不需要系统 `node`。
+- CLI Helper：`resources/aiopsterm-control.js` 是控制协议 helper。aiopsterm 本地连接终端会把 `aio`、`aictl` 和 `aiopsterm-control` 加入 PATH，首选短命令是 `aio list-notifications`。这些命令内部使用 aiopsterm 自带 JavaScript runtime，不需要系统 `node`。
 - 控制协议文档：打开 [Control Socket](../../../technical/control-socket.md) 查看 `notify`、`list-notifications`、自动化请求和通知字段说明。

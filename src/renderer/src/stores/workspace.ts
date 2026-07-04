@@ -1107,6 +1107,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     saveModelProvider,
     updateAiPreferences,
     updateNotificationSettings,
+    uploadCustomNotificationSound,
+    clearCustomNotificationSound,
+    previewNotificationSound,
     updateExtensionSettings,
     openKeywordHighlightEditor,
     closeKeywordHighlightEditor,
@@ -1243,7 +1246,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     },
     {
       setTopNotice,
-      createPanel,
+      openLocalTerminalPanel,
       toggleRight,
       setActiveSettingsSection
     }
@@ -1596,6 +1599,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     saveModelProvider,
     updateAiPreferences,
     updateNotificationSettings,
+    uploadCustomNotificationSound,
+    clearCustomNotificationSound,
+    previewNotificationSound,
     updateExtensionSettings,
     openKeywordHighlightEditor,
     closeKeywordHighlightEditor,

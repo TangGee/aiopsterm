@@ -7,6 +7,7 @@ type LocalFilesBridge = Pick<
   | 'showOpenDialog'
   | 'showSaveDialog'
   | 'saveCustomBackground'
+  | 'saveCustomNotificationSound'
   | 'readLocalFile'
   | 'writeLocalFile'
   | 'stageChatAttachment'
@@ -23,6 +24,7 @@ export const localFilesClient = {
   showOpenDialog: () => bridgeMethod('showOpenDialog'),
   showSaveDialog: () => bridgeMethod('showSaveDialog'),
   saveCustomBackground: () => bridgeMethod('saveCustomBackground'),
+  saveCustomNotificationSound: () => bridgeMethod('saveCustomNotificationSound'),
   readLocalFile: () => bridgeMethod('readLocalFile'),
   writeLocalFile: () => bridgeMethod('writeLocalFile'),
   stageChatAttachment: () => bridgeMethod('stageChatAttachment'),

@@ -216,7 +216,7 @@ export const useAiSessionsPanelRuntime = () => {
   const focusLinkedPanel = (session: Pick<ManagedAiSession, 'source' | 'id' | 'panelId' | 'terminalSessionId'>) => {
     const linkedPanel = liveLinkedPanelForSession(session)
     if (!linkedPanel) return false
-    workspace.focusManagedAiSession(session.id)
+    workspace.mode = 'terminal'
     workspace.activePanelId = linkedPanel.id
     workspace.selectedManagedAiSessionKey = sessionKey(session)
     return true

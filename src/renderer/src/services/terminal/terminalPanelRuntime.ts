@@ -602,7 +602,7 @@ export const terminalSshSessionFromConnection = (
   authType: connection.authType || asset?.auth_type || previous?.authType,
   needProxy: Boolean(connection.needProxy || asset?.needProxy || previous?.needProxy),
   proxyName: connection.proxyName || asset?.proxyName || previous?.proxyName || '',
-  jumpHostId: asset?.jumpHostId || previous?.jumpHostId,
+  jumpHostId: connection.jumpHostId || asset?.jumpHostId || previous?.jumpHostId,
   createdAt: connection.createdAt
 })
 

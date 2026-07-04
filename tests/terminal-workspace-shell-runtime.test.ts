@@ -35,7 +35,10 @@ const createKeyboardEvent = (patch: Partial<KeyboardEvent> = {}) => ({
   key: '',
   ctrlKey: false,
   metaKey: false,
+  shiftKey: false,
+  altKey: false,
   preventDefault: vi.fn(),
+  stopPropagation: vi.fn(),
   ...patch
 }) as unknown as KeyboardEvent
 
@@ -69,6 +72,13 @@ const createWorkspace = (panel = createPanel()) => {
       workspace.activePanelId = next.id
       return next
     }),
+    openLocalTerminalPanel: vi.fn(async (options?: { cwd?: string }) => {
+      const next = workspace.createPanel()
+      next.sessionId = `session-${panels.length}`
+      next.status = 'running'
+      next.cwd = options?.cwd || next.cwd
+      return next
+    }),
     discardPendingTerminalPanel: vi.fn(),
     ensureFileSessionForTerminalPanel: vi.fn(async () => undefined),
     forkSshPanel: vi.fn(),
@@ -86,6 +96,8 @@ const createWorkspace = (panel = createPanel()) => {
     selectedContexts: [] as Array<{ id: string; kind: string; label: string; detail?: string }>,
     sendChat: vi.fn(async () => undefined),
     setTopNotice: vi.fn(),
+    settingsShortcuts: [],
+    shortcutRecording: { actionId: null, tempShortcut: '' },
     terminalSettings: {
       middleMouseEvent: 'contextMenu',
       pinchZoomStatus: true,
@@ -110,11 +122,14 @@ const createRuntime = (options: {
     closeCommandDialog: vi.fn(),
     closeSearchOverlay: vi.fn(),
     disconnectTerminalPanel: vi.fn(async () => true),
+    findNext: vi.fn(),
+    findPrevious: vi.fn(),
     focusActivePanel: vi.fn(),
     focusCommandDialogInput: vi.fn(),
     focusPanel: vi.fn(),
     getCommandDialogInput: vi.fn(() => null as HTMLTextAreaElement | null),
     hideSuggestions: vi.fn(),
+    clearSearchFromButton: vi.fn(),
     openCommandDialog: vi.fn(),
     openSearchOverlay: vi.fn(),
     reconnectTerminalPanel: vi.fn(async (panel: TerminalPanel) => {
@@ -233,27 +248,30 @@ describe('terminalWorkspaceShellRuntime', () => {
     })
     state.menu.visible = true
     state.termMenu.visible = true
+    const terminalHost = document.createElement('div')
+    terminalHost.className = 'xterm-host'
 
-    const searchShortcut = createKeyboardEvent({ ctrlKey: true, key: 'f' })
+    const searchShortcut = createKeyboardEvent({ ctrlKey: true, shiftKey: true, key: 'f', target: terminalHost })
     await runtime.handleShortcut(searchShortcut)
     expect(searchShortcut.preventDefault).toHaveBeenCalledTimes(1)
+    expect(searchShortcut.stopPropagation).toHaveBeenCalledTimes(1)
     expect(calls.openSearchOverlay).toHaveBeenCalledWith('panel-1')
 
     await runtime.pasteClipboard('panel-1')
     expect(workspace.setTopNotice).toHaveBeenCalledWith('终端剪贴板读取服务不可用')
 
-    const commandShortcut = createKeyboardEvent({ ctrlKey: true, key: 'k' })
+    const commandShortcut = createKeyboardEvent({ ctrlKey: true, shiftKey: true, key: 'k' })
     await runtime.handleShortcut(commandShortcut)
     expect(calls.openCommandDialog).toHaveBeenCalledWith('panel-1')
 
     commandDialog.visible = true
-    await runtime.handleShortcut(createKeyboardEvent({ ctrlKey: true, key: 'k' }))
+    await runtime.handleShortcut(createKeyboardEvent({ ctrlKey: true, shiftKey: true, key: 'k' }))
     expect(calls.focusCommandDialogInput).toHaveBeenCalledTimes(1)
 
-    await runtime.handleShortcut(createKeyboardEvent({ ctrlKey: true, key: 'l' }))
+    await runtime.handleShortcut(createKeyboardEvent({ ctrlKey: true, shiftKey: true, key: 'l' }))
     expect(workspace.replaceTerminalOutput).toHaveBeenCalledWith('panel-1', '')
 
-    await runtime.handleShortcut(createKeyboardEvent({ ctrlKey: true, key: 'm' }))
+    await runtime.handleShortcut(createKeyboardEvent({ ctrlKey: true, shiftKey: true, key: 'm' }))
     expect(workspace.ensureFileSessionForTerminalPanel).toHaveBeenCalledWith('panel-1')
 
     await runtime.handleShortcut(createKeyboardEvent({ key: 'Escape' }))
@@ -265,13 +283,13 @@ describe('terminalWorkspaceShellRuntime', () => {
   })
 
   it('focuses terminal panels after create, split, and reconnect actions', async () => {
-    const workspace = createWorkspace(createPanel({ sessionId: 'source-session', status: 'running' }))
+    const workspace = createWorkspace(createPanel({ sessionId: 'source-session', status: 'running', cwd: '/work/local' }))
     const { calls, runtime, state } = createRuntime({ workspace })
     state.termMenu.panelId = 'panel-1'
     state.termMenu.visible = true
 
-    runtime.createTerminalFromMenu()
-    await Promise.resolve()
+    await runtime.createTerminalFromMenu()
+    expect(workspace.openLocalTerminalPanel).toHaveBeenCalledWith({ cwd: '/work/local' })
     expect(calls.focusPanel).toHaveBeenCalledWith('panel-2')
 
     state.termMenu.panelId = 'panel-1'
@@ -284,5 +302,148 @@ describe('terminalWorkspaceShellRuntime', () => {
     await runtime.togglePanelConnection('panel-1')
     expect(calls.focusPanel).toHaveBeenCalledWith('panel-1')
     expect(calls.syncTerminalView).toHaveBeenCalledWith(workspace.panels[0])
+  })
+
+  it('opens local terminals from Ctrl+Shift+T without cloning SSH sessions implicitly', async () => {
+    const workspace = createWorkspace(
+      createPanel({
+        sessionId: 'ssh-session',
+        status: 'running',
+        cwd: '/home/root',
+        sshSession: { connectionId: 'ssh-1', host: 'example.com', port: 22, username: 'root', assetName: 'example.com' }
+      })
+    )
+    const { runtime } = createRuntime({ workspace })
+    const terminalHost = document.createElement('div')
+    terminalHost.className = 'xterm-host'
+
+    const event = createKeyboardEvent({ ctrlKey: true, shiftKey: true, key: 'T', target: terminalHost })
+    await runtime.handleShortcut(event)
+    await Promise.resolve()
+
+    expect(event.preventDefault).toHaveBeenCalledTimes(1)
+    expect(event.stopPropagation).toHaveBeenCalledTimes(1)
+    expect(workspace.openLocalTerminalPanel).toHaveBeenCalledWith({})
+    expect(workspace.panels.at(-1)).toMatchObject({
+      id: 'panel-2',
+      sessionId: 'session-2',
+      status: 'running'
+    })
+  })
+
+  it('forks SSH from the terminal context menu while preserving relay metadata', async () => {
+    const workspace = createWorkspace(
+      createPanel({
+        title: 'relay-source',
+        sessionId: 'ssh-session',
+        status: 'running',
+        cwd: '/home/ops',
+        sshSession: {
+          connectionId: 'ssh-source',
+          host: '10.8.0.6',
+          port: 2222,
+          username: 'ops',
+          assetId: 'asset-relay',
+          assetName: 'relay-source',
+          jumpHostId: 'jump-asset',
+          needProxy: true,
+          proxyName: 'relay-proxy'
+        }
+      })
+    )
+    vi.mocked(workspace.canForkSshPanel).mockImplementation((panelId: string) =>
+      Boolean(workspace.panels.find((panel) => panel.id === panelId)?.sshSession?.connectionId)
+    )
+    vi.mocked(workspace.forkSshPanel).mockImplementation((panelId: string) => {
+      const source = workspace.panels.find((panel) => panel.id === panelId)
+      if (!source?.sshSession?.connectionId) return null
+      const fork = createPanel({
+        id: `panel-${workspace.panels.length + 1}`,
+        title: `${source.title} fork`,
+        cwd: source.cwd,
+        sshSession: {
+          ...source.sshSession,
+          connectionId: undefined,
+          sourcePanelId: source.id,
+          forkFromConnectionId: source.sshSession.connectionId
+        }
+      })
+      workspace.panels.push(fork)
+      workspace.activePanelId = fork.id
+      return fork
+    })
+    const { calls, runtime, state } = createRuntime({ workspace })
+    state.termMenu.panelId = 'panel-1'
+    state.termMenu.visible = true
+
+    await runtime.forkFromTermMenu()
+    await Promise.resolve()
+
+    expect(calls.startSshTerminalForPanel).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'panel-2',
+        title: 'relay-source fork',
+        sshSession: expect.objectContaining({
+          host: '10.8.0.6',
+          jumpHostId: 'jump-asset',
+          needProxy: true,
+          proxyName: 'relay-proxy',
+          forkFromConnectionId: 'ssh-source'
+        })
+      })
+    )
+    expect(state.termMenu.visible).toBe(false)
+    expect(calls.focusPanel).toHaveBeenCalledWith('panel-2')
+    expect(workspace.selectedContexts).toEqual([
+      { id: 'asset-relay', kind: 'hosts', label: '10.8.0.6', detail: 'relay-source fork' }
+    ])
+  })
+
+  it('forks SSH from Ctrl+Shift+Y when the active terminal is forkable', async () => {
+    const workspace = createWorkspace(
+      createPanel({
+        title: 'ssh-source',
+        sessionId: 'ssh-session',
+        status: 'running',
+        sshSession: {
+          connectionId: 'ssh-source',
+          host: 'example.com',
+          port: 22,
+          username: 'root',
+          assetName: 'example.com'
+        }
+      })
+    )
+    vi.mocked(workspace.canForkSshPanel).mockImplementation((panelId: string) =>
+      Boolean(workspace.panels.find((panel) => panel.id === panelId)?.sshSession?.connectionId)
+    )
+    vi.mocked(workspace.forkSshPanel).mockImplementation((panelId: string) => {
+      const source = workspace.panels.find((panel) => panel.id === panelId)
+      if (!source?.sshSession?.connectionId) return null
+      const fork = createPanel({
+        id: `panel-${workspace.panels.length + 1}`,
+        title: `${source.title} fork`,
+        sshSession: {
+          ...source.sshSession,
+          connectionId: undefined,
+          sourcePanelId: source.id,
+          forkFromConnectionId: source.sshSession.connectionId
+        }
+      })
+      workspace.panels.push(fork)
+      workspace.activePanelId = fork.id
+      return fork
+    })
+    const { calls, runtime } = createRuntime({ workspace })
+    const terminalHost = document.createElement('div')
+    terminalHost.className = 'xterm-host'
+
+    const event = createKeyboardEvent({ ctrlKey: true, shiftKey: true, key: 'Y', target: terminalHost })
+    await runtime.handleShortcut(event)
+    await Promise.resolve()
+
+    expect(event.preventDefault).toHaveBeenCalledTimes(1)
+    expect(event.stopPropagation).toHaveBeenCalledTimes(1)
+    expect(calls.startSshTerminalForPanel).toHaveBeenCalledWith(expect.objectContaining({ id: 'panel-2' }))
   })
 })

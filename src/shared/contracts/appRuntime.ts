@@ -161,9 +161,17 @@ export type AiPreferencesUserConfig = {
   shellIntegrationTimeout: number
 }
 
+export const notificationSoundPresetValues = ['chime', 'soft-ding', 'approval-voice', 'custom'] as const
+export type NotificationSoundPreset = (typeof notificationSoundPresetValues)[number]
+
 export type NotificationUserConfig = {
   desktopNotifications: boolean
   controlNotificationBell: boolean
+  soundEnabled: boolean
+  soundPreset: NotificationSoundPreset
+  customSoundPath: string
+  customSoundUrl: string
+  customSoundName: string
 }
 
 export type ExportMcpUserConfig = {
@@ -354,6 +362,15 @@ export type SettingsDocumentationResult = {
 }
 
 export type CustomBackgroundSaveResult = {
+  filePath: string
+  url: string
+  name: string
+  size: number
+  bytes: number
+  mtimeMs: number
+}
+
+export type CustomNotificationSoundSaveResult = {
   filePath: string
   url: string
   name: string

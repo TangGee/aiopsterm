@@ -81,8 +81,9 @@ export const resolveSshTerminalTarget = (options: TerminalCreateOptions): SshTer
   const port = Number(options.ssh?.port || asset?.port || 22)
   const requestProxyName = cleanText(options.ssh?.proxyName)
   const targetProxyName = asset?.needProxy ? cleanText(asset.proxyName) : requestProxyName
+  const requestJumpHostId = cleanText(options.ssh?.jumpHostId)
   return {
-    asset: asset || (options.ssh?.needProxy ? { needProxy: true, proxyName: targetProxyName } : null),
+    asset: asset || (options.ssh?.needProxy || requestJumpHostId ? { needProxy: Boolean(options.ssh?.needProxy), proxyName: targetProxyName, jumpHostId: requestJumpHostId } : null),
     host,
     username,
     port,

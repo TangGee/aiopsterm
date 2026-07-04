@@ -196,7 +196,7 @@
                 role="button"
                 tabindex="0"
                 :title="sessionRowTooltip(session)"
-                :class="{ active: sessionKey(session) === workspace.selectedManagedAiSessionKey, attention: session.state === 'needsInput', 'has-row-action': session.state === 'needsInput' }"
+                :class="{ active: sessionKey(session) === workspace.selectedManagedAiSessionKey, attention: session.state === 'needsInput' }"
                 @click="selectSession(session)"
                 @dblclick="resumeOrFocusSession(session)"
                 @keydown.enter.prevent="selectSession(session)"
@@ -213,14 +213,6 @@
                     <span class="ai-session-row-meta-main">{{ adaptiveSessionRowMeta(session) }}</span>
                   </span>
                 </span>
-                <button
-                  v-if="session.state === 'needsInput'"
-                  class="ai-session-handle"
-                  :title="t('aiSessions.markHandled')"
-                  @click.stop="workspace.markManagedAiSessionHandled(session.source, session.id)"
-                >
-                  <Check />
-                </button>
               </div>
             </template>
           </section>
@@ -233,7 +225,7 @@
             role="button"
             tabindex="0"
             :title="sessionRowTooltip(session)"
-            :class="{ active: sessionKey(session) === workspace.selectedManagedAiSessionKey, attention: session.state === 'needsInput', 'has-row-action': session.state === 'needsInput' }"
+            :class="{ active: sessionKey(session) === workspace.selectedManagedAiSessionKey, attention: session.state === 'needsInput' }"
             @click="selectSession(session)"
             @dblclick="resumeOrFocusSession(session)"
             @keydown.enter.prevent="selectSession(session)"
@@ -250,14 +242,6 @@
                 <span class="ai-session-row-meta-main">{{ adaptiveSessionRowMeta(session) }}</span>
               </span>
             </span>
-            <button
-              v-if="session.state === 'needsInput'"
-              class="ai-session-handle"
-              :title="t('aiSessions.markHandled')"
-              @click.stop="workspace.markManagedAiSessionHandled(session.source, session.id)"
-            >
-              <Check />
-            </button>
           </div>
         </template>
         <div
@@ -281,7 +265,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { Activity, Archive, Bot, Check, ChevronDown, FolderTree, Inbox, RefreshCw, Search } from 'lucide-vue-next'
+import { Activity, Archive, Bot, ChevronDown, FolderTree, Inbox, RefreshCw, Search } from 'lucide-vue-next'
 import type { ManagedAiPanelModeButton } from '@/services/ai/aiSessionsPanelViewRuntime'
 import { useAiSessionsPanelRuntime } from '@/services/ai/aiSessionsPanelRuntime'
 

@@ -1,4 +1,5 @@
 import type { ShortcutUserConfig } from '@shared/contracts/settingsPreferences'
+import { isPlainTerminalControlShortcut } from '@/services/terminal/terminalKeyboardShortcuts'
 
 export type ShortcutActionHandler = (payload?: { digit?: number }) => void
 
@@ -80,6 +81,9 @@ const eventKeyName = (event: KeyboardEvent) => {
 
 const normalizedKey = (key: string) => specialKeyAliases[key.toLowerCase()] || key.toLowerCase()
 
+const isTerminalEventTarget = (event: KeyboardEvent) =>
+  event.target instanceof Element && Boolean(event.target.closest('.xterm-host, .threaded-terminal-host'))
+
 export const matchesShortcut = (event: KeyboardEvent, parsed: ParsedShortcut) => {
   if (event.ctrlKey !== parsed.ctrlKey || event.shiftKey !== parsed.shiftKey || event.altKey !== parsed.altKey || event.metaKey !== parsed.metaKey) {
     return false
@@ -143,6 +147,7 @@ export class ShortcutRuntime {
 
   private handleKeydown(event: KeyboardEvent) {
     if (this.recording) return
+    if (isTerminalEventTarget(event) && isPlainTerminalControlShortcut(event)) return
     const binding = this.bindings.find((item) => matchesShortcut(event, item.parsed))
     if (!binding) return
     event.preventDefault()

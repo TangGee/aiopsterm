@@ -1,11 +1,13 @@
 import { cp, mkdir, stat, writeFile } from 'fs/promises'
 import { basename, dirname, extname, isAbsolute, join } from 'path'
 import { pathToFileURL } from 'url'
-import type { CustomBackgroundSaveResult } from '@shared/contracts/appRuntime'
+import type { CustomBackgroundSaveResult, CustomNotificationSoundSaveResult } from '@shared/contracts/appRuntime'
 import type { LocalFileWriteResult } from '@shared/contracts/localFiles'
 
 const defaultAllowedCustomBackgroundExtensions = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp'])
 const defaultMaxCustomBackgroundBytes = 20 * 1024 * 1024
+const defaultAllowedCustomNotificationSoundExtensions = new Set(['.mp3', '.wav', '.ogg', '.m4a', '.aac', '.flac', '.webm'])
+const defaultMaxCustomNotificationSoundBytes = 10 * 1024 * 1024
 
 type LocalFileWriteRuntime = {
   writeFile?: (filePath: string, content: string, encoding: 'utf-8') => Promise<void>
@@ -13,6 +15,15 @@ type LocalFileWriteRuntime = {
 
 type CustomBackgroundRuntime = {
   backgroundDir: string
+  maxBytes?: number
+  allowedExtensions?: Set<string>
+  toUrl?: (filePath: string) => string
+  copyFile?: (source: string, target: string) => Promise<void>
+  now?: () => Date
+}
+
+type CustomNotificationSoundRuntime = {
+  soundDir: string
   maxBytes?: number
   allowedExtensions?: Set<string>
   toUrl?: (filePath: string) => string
@@ -40,6 +51,16 @@ class CustomBackgroundError extends Error {
   }
 }
 
+class CustomNotificationSoundError extends Error {
+  constructor(
+    public errorCode: string,
+    message: string
+  ) {
+    super(message)
+    this.name = 'CustomNotificationSoundError'
+  }
+}
+
 const localFileWriteErrorResult = (error: unknown): LocalFileWriteResult => ({
   ok: false,
   errorCode: error instanceof LocalFileWriteError ? error.errorCode : 'LOCAL_FILE_WRITE_FAILED',
@@ -54,6 +75,16 @@ export const sanitizeCustomBackgroundName = (name: string, now = new Date()) => 
     .replace(/^-+|-+$/g, '')
     .slice(0, 80)
   return `${base || `background-${now.getTime()}`}${ext}`
+}
+
+export const sanitizeCustomNotificationSoundName = (name: string, now = new Date()) => {
+  const ext = extname(name).toLowerCase()
+  const base = basename(name, ext)
+    .replace(/[<>:"/\\|?*\x00-\x1f]/g, '_')
+    .replace(/[^a-zA-Z0-9._-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 80)
+  return `${base || `notification-sound-${now.getTime()}`}${ext}`
 }
 
 const pathExists = async (absPath: string) => {
@@ -129,6 +160,38 @@ export const saveCustomBackgroundFile = async (srcAbsPath: string, runtime: Cust
   if (!targetMetadata.isFile()) throw new CustomBackgroundError('CUSTOM_BACKGROUND_WRITE_CONFIRMATION_INVALID', 'Saved background target is not a file.')
   if (targetMetadata.size !== sourceMetadata.size) {
     throw new CustomBackgroundError('CUSTOM_BACKGROUND_WRITE_CONFIRMATION_INVALID', 'Saved background size does not match the source file.')
+  }
+  return {
+    filePath: finalPath,
+    url: runtime.toUrl ? runtime.toUrl(finalPath) : pathToFileURL(finalPath).href,
+    name: finalName,
+    size: targetMetadata.size,
+    bytes: targetMetadata.size,
+    mtimeMs: targetMetadata.mtimeMs
+  }
+}
+
+export const saveCustomNotificationSoundFile = async (srcAbsPath: string, runtime: CustomNotificationSoundRuntime): Promise<CustomNotificationSoundSaveResult> => {
+  if (!srcAbsPath || typeof srcAbsPath !== 'string') throw new CustomNotificationSoundError('CUSTOM_NOTIFICATION_SOUND_SOURCE_REQUIRED', 'srcAbsPath is required')
+  if (!isAbsolute(srcAbsPath)) throw new CustomNotificationSoundError('CUSTOM_NOTIFICATION_SOUND_SOURCE_INVALID', 'srcAbsPath must be absolute')
+  const sourceMetadata = await stat(srcAbsPath)
+  if (!sourceMetadata.isFile()) throw new CustomNotificationSoundError('CUSTOM_NOTIFICATION_SOUND_SOURCE_NOT_FILE', 'Notification sound source must be a file')
+  const maxBytes = runtime.maxBytes ?? defaultMaxCustomNotificationSoundBytes
+  if (sourceMetadata.size > maxBytes) throw new CustomNotificationSoundError('CUSTOM_NOTIFICATION_SOUND_TOO_LARGE', 'Notification sound file too large')
+  const ext = extname(srcAbsPath).toLowerCase()
+  const allowedExtensions = runtime.allowedExtensions ?? defaultAllowedCustomNotificationSoundExtensions
+  if (!allowedExtensions.has(ext)) throw new CustomNotificationSoundError('CUSTOM_NOTIFICATION_SOUND_TYPE_NOT_ALLOWED', 'Notification sound file type not allowed')
+
+  const soundDir = runtime.soundDir
+  if (!soundDir || !isAbsolute(soundDir)) throw new CustomNotificationSoundError('CUSTOM_NOTIFICATION_SOUND_DIR_INVALID', 'Notification sound directory must be absolute')
+  await mkdir(soundDir, { recursive: true })
+  const finalName = await ensureUniqueLocalFileName(soundDir, sanitizeCustomNotificationSoundName(basename(srcAbsPath), runtime.now?.() || new Date()))
+  const finalPath = join(soundDir, finalName)
+  await (runtime.copyFile || cp)(srcAbsPath, finalPath)
+  const targetMetadata = await stat(finalPath)
+  if (!targetMetadata.isFile()) throw new CustomNotificationSoundError('CUSTOM_NOTIFICATION_SOUND_WRITE_CONFIRMATION_INVALID', 'Saved notification sound target is not a file.')
+  if (targetMetadata.size !== sourceMetadata.size) {
+    throw new CustomNotificationSoundError('CUSTOM_NOTIFICATION_SOUND_WRITE_CONFIRMATION_INVALID', 'Saved notification sound size does not match the source file.')
   }
   return {
     filePath: finalPath,

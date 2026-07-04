@@ -1,5 +1,7 @@
 import { type Ref } from 'vue'
 import { appRuntimeClient } from '@/services/app/appRuntimeClient'
+import { localFilesClient } from '@/services/app/localFilesClient'
+import { notificationSoundPreviewContext, playAiNotificationSound } from '@/services/ai/notificationSoundRuntime'
 import {
   cloneWorkspacePreferencesSnapshot,
   isAiPreferencesSnapshot,
@@ -21,6 +23,7 @@ import {
 import type { AiopsPreloadApi } from '@shared/contracts/preloadApi'
 import type {
   AiPreferencesUserConfig,
+  CustomNotificationSoundSaveResult,
   KnowledgeSearchRuntimeSnapshot,
   NotificationUserConfig,
   PrivacyRuntimeSnapshot,
@@ -54,6 +57,21 @@ type PrivacyRuntimeApplyData = PrivacyRuntimeSnapshot
 type KnowledgeSearchRuntimeApplyData = KnowledgeSearchRuntimeSnapshot
 
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+const isNonEmptyString = (value: unknown): value is string => typeof value === 'string' && value.trim().length > 0
+const isCustomNotificationSoundSaveResult = (source: unknown): source is CustomNotificationSoundSaveResult =>
+  isRecord(source) &&
+  isNonEmptyString(source.filePath) &&
+  isNonEmptyString(source.url) &&
+  isNonEmptyString(source.name) &&
+  typeof source.size === 'number' &&
+  Number.isInteger(source.size) &&
+  source.size > 0 &&
+  typeof source.bytes === 'number' &&
+  Number.isInteger(source.bytes) &&
+  source.bytes === source.size &&
+  typeof source.mtimeMs === 'number' &&
+  Number.isFinite(source.mtimeMs) &&
+  source.mtimeMs > 0
 
 export const createWorkspacePreferenceSettingsController = (
   state: WorkspacePreferenceSettingsControllerState,
@@ -396,6 +414,58 @@ export const createWorkspacePreferenceSettingsController = (
     }
   }
 
+  const uploadCustomNotificationSound = async () => {
+    const showOpenDialog = localFilesClient.showOpenDialog()
+    if (!showOpenDialog) {
+      setSettingsNotice('自定义通知声音选择服务不可用')
+      return false
+    }
+    const saveCustomNotificationSound = localFilesClient.saveCustomNotificationSound()
+    if (!saveCustomNotificationSound) {
+      setSettingsNotice('自定义通知声音保存服务不可用')
+      return false
+    }
+    try {
+      const result = await showOpenDialog({
+        properties: ['openFile'],
+        filters: [{ name: 'Audio Files', extensions: ['mp3', 'wav', 'ogg', 'm4a', 'aac', 'flac', 'webm'] }]
+      })
+      if (!result || result.canceled || !result.filePaths.length) return false
+      const saved = await saveCustomNotificationSound(result.filePaths[0])
+      if (!isCustomNotificationSoundSaveResult(saved)) {
+        setSettingsNotice('自定义通知声音保存失败')
+        return false
+      }
+      const persisted = await updateNotificationSettings({
+        soundEnabled: true,
+        soundPreset: 'custom',
+        customSoundPath: saved.filePath,
+        customSoundUrl: saved.url,
+        customSoundName: saved.name
+      })
+      if (!persisted) return false
+      setSettingsNotice(`自定义通知声音已保存：${saved.name}`)
+      return true
+    } catch (error) {
+      setSettingsNotice(`自定义通知声音保存失败：${error instanceof Error ? error.message : String(error)}`)
+      return false
+    }
+  }
+
+  const clearCustomNotificationSound = async () =>
+    updateNotificationSettings({
+      soundPreset: 'chime',
+      customSoundPath: '',
+      customSoundUrl: '',
+      customSoundName: ''
+    })
+
+  const previewNotificationSound = () => {
+    const played = playAiNotificationSound(notificationSettings.value, notificationSoundPreviewContext())
+    setSettingsNotice(played ? '已播放通知声音' : '当前环境无法播放通知声音')
+    return played
+  }
+
   const updateExtensionSettings = async (patch: Partial<ExtensionSettings>) => {
     const nextSettings = normalizeExtensionSettingsConfig({ ...extensionSettings.value, ...patch }).normalized
     const saved = await persistExtensionSettings(nextSettings)
@@ -433,6 +503,9 @@ export const createWorkspacePreferenceSettingsController = (
     updateWorkspacePreferences,
     updateAiPreferences,
     updateNotificationSettings,
+    uploadCustomNotificationSound,
+    clearCustomNotificationSound,
+    previewNotificationSound,
     updateExtensionSettings,
     updatePrivacySettings
   }

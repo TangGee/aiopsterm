@@ -13,3 +13,11 @@
 - 重置全部：恢复所有快捷键为默认值。
 
 修改快捷键后会影响窗口、终端、AI 面板等全局操作。
+
+## 终端焦点下的规则
+
+- 终端窗格获得焦点时，普通 `Ctrl+字母` 会发送给 shell/PTY，例如 `Ctrl+a`、`Ctrl+c`、`Ctrl+e`、`Ctrl+k`、`Ctrl+l`。这里的 `Ctrl+a` 是按住 Control 后按小写 `a`，不是 `Ctrl+Shift+A`。
+- 终端内置应用操作默认使用 `Ctrl+Shift+...`，例如复制/粘贴、搜索、搜索下一个/上一个、清除搜索高亮、AI 命令、新建/关闭窗口、新建/关闭终端、清屏、文件管理、移动标签页、单行滚动和命令段跳转，以避免抢占 readline、bash、vim、tmux 等终端程序的控制键。`F11` 用于切换全屏。
+- `Ctrl+Shift+T` 和终端右键菜单里的新建终端会打开新的本地 shell；如果来源是已连接的本地终端，会继承当前 cwd；如果来源是 SSH 终端，不会隐式克隆远端连接，SSH 克隆仍通过显式克隆/Fork SSH 动作完成。
+- `Ctrl+Shift+Y` 会在当前终端是可 fork 的 SSH 通道时执行 Fork SSH；终端内容右键菜单也会显示 `Fork SSH`。通过跳板/relay shell 建立的 SSH 会话会携带 jump host 元数据继续 fork。
+- 如果把某个应用动作改成 `Ctrl+K` 这类普通 `Ctrl+字母`，它仍会在非终端区域生效；在终端窗格内，aiopsterm 会优先把该组合键交给 shell。
