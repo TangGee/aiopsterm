@@ -20,6 +20,10 @@ Hook commands run that helper with aiopsterm's packaged JavaScript runtime, not 
 
 Opening Codex with `codex resume` restores the TUI and selected conversation, but it does not reliably produce an aiopsterm notification by itself. The installed Codex hooks are event-driven. Notifications are expected after Codex emits hook events such as `UserPromptSubmit`, `PreToolUse`, or `Stop`, which normally requires the user to submit at least one message in the resumed session.
 
+Codex `request_user_input` prompts are different from normal hook events. Stock Codex can write those prompts into the session transcript without emitting a matching aiopsterm hook. After a managed Codex `UserPromptSubmit` event, aiopsterm watches the reported `transcriptPath` for the active turn and promotes `request_user_input` entries into a local managed-AI `question` event. That creates the normal pending notification and bell attention, but it does not answer Codex from the sidebar; opening the notification focuses the owning terminal so the user can respond in the Codex TUI.
+
+The Codex transcript monitor is fail-open and scoped to aiopsterm-managed local terminals. It stops after the matching turn completes, after `Stop` or `SessionEnd`, or after its bounded monitor lifetime. If the transcript path is missing or temporarily unavailable, the agent keeps running and the monitor retries without blocking Codex.
+
 ## Runtime Environment
 
 Local terminals created by aiopsterm receive managed-terminal environment variables:
@@ -37,3 +41,13 @@ Local terminals created by aiopsterm receive managed-terminal environment variab
 ## Home Resolution
 
 Hook installation and local terminal startup should resolve the same shell home. aiopsterm prefers `process.env.HOME` and falls back to Electron `app.getPath('home')`. This keeps installed Codex hooks aligned with the `codex` process a user starts inside an aiopsterm terminal.
+
+## Agent-Specific Notification Notes
+
+Claude Code has explicit `PermissionRequest` and `AskUserQuestion` hooks. aiopsterm installs those with `--wait-decision`, so the managed-session backend can block the hook briefly and return Claude-native approval or question output.
+
+Codex permission hooks remain local visibility only because stock Codex owns the approval UI. Codex question prompts are covered by the transcript monitor above because they are not guaranteed to arrive through the normal hook channel.
+
+Cursor, Gemini, Copilot, Grok, CodeBuddy, Factory, Qoder, and Kiro currently report lifecycle, notification, and tool-related hook events through the generic managed-session normalization path. OpenCode, Amp, Pi, OMP, and Rovo Dev use plugin or config hooks for lifecycle/tool events. No second transcript-style question monitor is installed for those agents because their supported aiopsterm hook definitions do not expose a Codex-like hidden `request_user_input` transcript path.
+
+Antigravity and Hermes Agent are recognized event sources when compatible events are reported. aiopsterm does not yet install their hook files automatically; compatible approval or notification events are still normalized if they reach the managed-agent socket.

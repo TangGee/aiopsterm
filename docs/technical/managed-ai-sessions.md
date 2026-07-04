@@ -28,14 +28,16 @@ ELECTRON_RUN_AS_NODE=1 "$AIOPSTERM_JS_RUNTIME" "$AIOPSTERM_AGENT_HOOK_PATH" --so
 
 The helper reads hook JSON from stdin, adds the managed terminal identifiers, posts the event to `AIOPSTERM_AGENT_SOCKET_PATH`, prints `{}`, and exits zero when it is not running inside an aiopsterm-managed terminal. In installed fail-open mode it still waits for aiopsterm to acknowledge the socket event before returning, so the agent keeps running while the notification is not lost. This keeps agent CLI execution from blocking or failing when aiopsterm is not present.
 
-Claude Code `PermissionRequest` and `AskUserQuestion` hooks are actionable. The installed command passes `--wait-decision`, so the helper can wait up to roughly two minutes for the AI session panel to reply, then prints Claude's native `hookSpecificOutput` JSON. Timeout or missing aiopsterm still falls back to `{}` so Claude's own terminal prompt remains usable. Codex hook-level `PermissionRequest` remains timeline visibility because stock Codex performs its own approval flow outside the hook response path. It is shown in the AI session list as local handling, but it does not create an unread bell item or desktop approval notification.
+Claude Code `PermissionRequest` and `AskUserQuestion` hooks are actionable. The installed command passes `--wait-decision`, so the helper can wait up to roughly two minutes for aiopsterm's managed-session decision path to reply, then prints Claude's native `hookSpecificOutput` JSON. Timeout or missing aiopsterm still falls back to `{}` so Claude's own terminal prompt remains usable. Codex hook-level `PermissionRequest` remains timeline visibility because stock Codex performs its own approval flow outside the hook response path. It is shown in the AI session list as local handling, but it does not create an unread bell item or desktop approval notification.
 
 aiopsterm normalizes hook activity into Feed-style request semantics before it stores or displays a session:
 
 - `requestKind`: `permission`, `question`, `plan`, `notification`, or `telemetry`
 - `decisionMode`: `blocking`, `local`, or `telemetry`
 
-Claude Code requests launched with `--wait-decision` can be `blocking`, which lets the AI session panel answer the waiting hook. Codex stock hooks remain local visibility or telemetry; aiopsterm records and routes them but does not preempt Codex's native approval UI or mark the session as needing user input.
+Claude Code requests launched with `--wait-decision` can be `blocking`, which lets the AI session panel answer the waiting hook. Codex stock permission hooks remain local visibility or telemetry; aiopsterm records and routes them but does not preempt Codex's native approval UI or mark the session as needing user input.
+
+Codex `request_user_input` prompts are handled separately because they are transcript events rather than reliable hook events. After a managed Codex `UserPromptSubmit`, the main process watches the reported `transcriptPath` for the active turn. A matching `request_user_input` entry is synthesized as a local `question` event with `agentLifecycle: "needsInput"`, so it creates the same pending notification and top-bar bell attention as other local questions. The UI still sends the user back to the owning Codex terminal; aiopsterm does not answer the Codex TUI from the left session list.
 
 ## Local History Import
 

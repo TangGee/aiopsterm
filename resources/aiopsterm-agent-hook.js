@@ -150,6 +150,7 @@ const createEvent = (payload) => {
     cleanText(options.cwd || payload.cwd || payload.workingDirectory || payload.working_directory || payload.project_dir || payload.projectDir) ||
     cleanText(process.cwd())
   const requestId = cleanText(options['request-id'] || payload.requestId || payload.request_id || payload.tool_use_id || payload.toolUseID)
+  const turnId = cleanText(options['turn-id'] || payload.turnId || payload.turn_id)
   const launchCommand = cleanText(options['launch-command'] || payload.launchCommand || payload.launch_command || process.env.AIOPSTERM_AGENT_LAUNCH_COMMAND)
   const resumeCommand = cleanText(options['resume-command'] || payload.resumeCommand || payload.resume_command)
   const processId = positiveInteger(options.pid || options['process-id'] || payload.processId || payload.process_id || payload.pid || process.env.AIOPSTERM_AGENT_PID)
@@ -167,6 +168,8 @@ const createEvent = (payload) => {
     workspaceId: cleanText(options['workspace-id'] || payload.workspaceId || payload.workspace_id || process.env.AIOPSTERM_WORKSPACE_ID) || undefined,
     cwd: cwd || undefined,
     transcriptPath: cleanText(options['transcript-path'] || payload.transcriptPath || payload.transcript_path) || undefined,
+    turnId: turnId || undefined,
+    turn_id: turnId || undefined,
     requestId: requestId || undefined,
     actionable: waitDecision || undefined,
     waitForDecision: waitDecision || undefined,

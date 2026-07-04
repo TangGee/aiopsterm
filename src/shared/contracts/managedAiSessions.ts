@@ -75,6 +75,8 @@ export type AiAgentSessionEventInput = {
   working_directory?: string
   transcriptPath?: string
   transcript_path?: string
+  turnId?: string
+  turn_id?: string
   title?: string
   summary?: string
   message?: string

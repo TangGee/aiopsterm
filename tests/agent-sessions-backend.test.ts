@@ -34,6 +34,8 @@ type AgentSessionsBackend = {
     auditPathFor: (userDataPath: string) => string
     streamLatestSeq: () => number
     flushManagedAiSessionWrites: () => Promise<void>
+    flushCodexTranscriptMonitors: () => Promise<void>
+    activeCodexTranscriptMonitorCount: () => number
   }
 }
 
@@ -285,6 +287,157 @@ describe('agent session backend', () => {
           unreadCount: 0,
           notifications: []
         })
+      })
+    )
+  })
+
+  it('promotes Codex transcript request_user_input entries to question notifications', async () => {
+    const {
+      __testing,
+      configureAiAgentSessionStore,
+      listManagedAiNotifications,
+      listManagedAiSessions,
+      publishAiAgentSessionEvent
+    } = await loadBackend()
+    const root = await mkdtemp(join(tmpdir(), 'aiopsterm-codex-question-'))
+    const transcriptPath = join(root, 'codex-session.jsonl')
+    await configureAiAgentSessionStore(join(root, 'user-data'))
+    await writeFile(
+      transcriptPath,
+      [
+        JSON.stringify({ type: 'turn_context', payload: { turn_id: 'turn-1' } }),
+        JSON.stringify({ type: 'event_msg', payload: { type: 'task_started', turn_id: 'turn-1' } }),
+        JSON.stringify({
+          type: 'event_msg',
+          payload: {
+            type: 'request_user_input',
+            turn_id: 'turn-1',
+            call_id: 'call-question-1',
+            questions: [
+              {
+                id: 'site-style',
+                header: '儿童游戏网站',
+                question: '你更想让它像哪一种儿童游戏网站？',
+                options: [
+                  { label: '益智', description: '偏学习和轻互动' },
+                  { label: '闯关', description: '偏挑战和奖励' }
+                ]
+              }
+            ]
+          }
+        })
+      ].join('\n') + '\n',
+      'utf-8'
+    )
+
+    publishAiAgentSessionEvent(
+      {
+        source: 'codex',
+        event: 'UserPromptSubmit',
+        sessionId: 'codex-question-1',
+        cwd: '/work/kids-game',
+        transcriptPath,
+        turnId: 'turn-1',
+        receivedAt: 180
+      },
+      null
+    )
+    await __testing.flushCodexTranscriptMonitors()
+    await __testing.flushCodexTranscriptMonitors()
+
+    const sessionsResponse = (await listManagedAiSessions()) as { data?: { sessions?: Array<Record<string, unknown>> } }
+    const session = sessionsResponse.data?.sessions?.find((item) => item.id === 'codex-question-1')
+    expect(session).toEqual(
+      expect.objectContaining({
+        id: 'codex-question-1',
+        source: 'codex',
+        state: 'needsInput',
+        lastEvent: 'question',
+        summary: '你更想让它像哪一种儿童游戏网站？',
+        requestKind: 'question',
+        decisionMode: 'local',
+        actionable: true,
+        pendingRequestId: 'call-question-1',
+        transcriptPath
+      })
+    )
+    expect((session?.events as Array<Record<string, unknown>>).filter((event) => event.event === 'question')).toHaveLength(1)
+    await expect(listManagedAiNotifications({ unread: true })).resolves.toEqual(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          count: 1,
+          unreadCount: 1,
+          notifications: [
+            expect.objectContaining({
+              source: 'codex',
+              sessionId: 'codex-question-1',
+              needsInput: true,
+              requestKind: 'question',
+              pendingRequestId: 'call-question-1',
+              summary: '你更想让它像哪一种儿童游戏网站？'
+            })
+          ]
+        })
+      })
+    )
+  })
+
+  it('promotes Codex transcript request_user_input function calls to question notifications', async () => {
+    const {
+      __testing,
+      configureAiAgentSessionStore,
+      listManagedAiSessions,
+      publishAiAgentSessionEvent
+    } = await loadBackend()
+    const root = await mkdtemp(join(tmpdir(), 'aiopsterm-codex-function-question-'))
+    const transcriptPath = join(root, 'codex-session.jsonl')
+    await configureAiAgentSessionStore(join(root, 'user-data'))
+    await writeFile(
+      transcriptPath,
+      [
+        JSON.stringify({ type: 'turn_context', payload: { turn_id: 'turn-2' } }),
+        JSON.stringify({
+          type: 'response_item',
+          payload: {
+            type: 'function_call',
+            name: 'request_user_input',
+            call_id: 'call-question-2',
+            arguments: JSON.stringify({
+              questions: [
+                {
+                  id: 'approval-style',
+                  question: '要按哪种权限策略继续？'
+                }
+              ]
+            })
+          }
+        })
+      ].join('\n') + '\n',
+      'utf-8'
+    )
+
+    publishAiAgentSessionEvent(
+      {
+        source: 'codex',
+        event: 'UserPromptSubmit',
+        sessionId: 'codex-question-2',
+        cwd: '/work/approval',
+        transcriptPath,
+        turnId: 'turn-2',
+        receivedAt: 181
+      },
+      null
+    )
+    await __testing.flushCodexTranscriptMonitors()
+
+    const sessionsResponse = (await listManagedAiSessions()) as { data?: { sessions?: Array<Record<string, unknown>> } }
+    expect(sessionsResponse.data?.sessions?.find((item) => item.id === 'codex-question-2')).toEqual(
+      expect.objectContaining({
+        state: 'needsInput',
+        lastEvent: 'question',
+        summary: '要按哪种权限策略继续？',
+        requestKind: 'question',
+        pendingRequestId: 'call-question-2'
       })
     )
   })

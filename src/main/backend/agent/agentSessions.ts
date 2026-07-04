@@ -17,6 +17,7 @@ import {
   createAgentSessionImportRuntime,
   type ImportedAgentSession
 } from './agentSessionImportRuntime'
+import { createCodexTranscriptMonitorRuntime } from './agentSessionCodexTranscriptMonitor'
 import { createAgentSessionGitRuntime, type ManagedAiSessionGitInfo } from './agentSessionGitRuntime'
 import { createAgentSessionStoreRuntime } from './agentSessionStoreRuntime'
 import {
@@ -143,6 +144,11 @@ const autoNamingRuntime = createAgentSessionAutoNamingRuntime({
   appendManagedAiSessionAudit,
   publishManagedAiStreamFrame
 })
+const codexTranscriptMonitorRuntime = createCodexTranscriptMonitorRuntime({
+  publishEvent: (event) => {
+    publishAiAgentSessionEvent(event, eventSink)
+  }
+})
 
 const notificationRuntime = createAgentSessionNotificationRuntime({
   loadStoreIfNeeded: () => loadStoreIfNeeded(),
@@ -242,6 +248,7 @@ const loadStoreIfNeeded = storeRuntime.loadStoreIfNeeded
 const storePathFor = storeRuntime.storePathFor
 
 export const configureAiAgentSessionStore = async (userDataPath: string) => {
+  codexTranscriptMonitorRuntime.reset()
   auditRuntime.configure(auditPathFor(userDataPath))
   importRuntime.configure({
     enabled: process.env.NODE_ENV !== 'test' && process.env.AIOPSTERM_AGENT_SESSION_IMPORT_DISABLED !== '1'
@@ -454,12 +461,26 @@ const importExternalManagedAiSessions = async () => {
   return changed
 }
 
-export const publishAiAgentSessionEvent = (input: AiAgentSessionEventInput, emit: AgentSessionEventSink | null = eventSink) => {
+export function publishAiAgentSessionEvent(input: AiAgentSessionEventInput, emit: AgentSessionEventSink | null = eventSink) {
   const result = normalizeAiAgentSessionEventInput(input)
   if (!result.ok || !result.data) return result
-  upsertSessionForEvent(result.data, input as Record<string, unknown>)
+  const raw = input as Record<string, unknown>
+  upsertSessionForEvent(result.data, raw)
   emit?.(result.data)
+  updateCodexTranscriptMonitor(result.data, raw)
   return result
+}
+
+function updateCodexTranscriptMonitor(event: AiAgentSessionEvent, raw: Record<string, unknown>) {
+  if (event.source !== 'codex') return
+  const turnId = cleanOptionalText(raw.turnId || raw.turn_id)
+  if (event.event === 'prompt_submit') {
+    codexTranscriptMonitorRuntime.start({ event, raw })
+    return
+  }
+  if (event.event === 'stop' || event.event === 'session_end') {
+    codexTranscriptMonitorRuntime.stop(event.sessionId, turnId)
+  }
 }
 
 const isBlockingAgentEvent = (event: AiAgentSessionEvent, raw: Record<string, unknown>) =>
@@ -592,6 +613,7 @@ const publishAiAgentSessionSocketEvent = async (input: AiAgentSessionEventInput,
   const waiter = isBlockingAgentEvent(result.data, raw) ? waitForAgentDecision(result.data, raw) : null
   upsertSessionForEvent(result.data, raw)
   emit?.(result.data)
+  updateCodexTranscriptMonitor(result.data, raw)
   if (!waiter) {
     const response: AgentSessionSocketResponse = { ...result, status: 'acknowledged' }
     auditSocketCompleted(result.data, response)
@@ -995,6 +1017,7 @@ export const closeAiAgentSessionServer = () => {
   })
   pendingDecisions = new Map()
   agentSessionEventStreamRuntime.closeEventStreams()
+  codexTranscriptMonitorRuntime.reset()
 }
 
 export const __testing = {
@@ -1009,5 +1032,7 @@ export const __testing = {
   flushManagedAiSessionWrites: async () => {
     await storeRuntime.flush()
     await auditRuntime.flush()
-  }
+  },
+  flushCodexTranscriptMonitors: () => codexTranscriptMonitorRuntime.flush(),
+  activeCodexTranscriptMonitorCount: () => codexTranscriptMonitorRuntime.activeCount()
 }

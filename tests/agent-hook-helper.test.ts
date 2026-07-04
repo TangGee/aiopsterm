@@ -116,7 +116,8 @@ describe('aiopsterm agent hook helper', () => {
           tool_name: 'shell',
           tool_input: { command: 'npm test' },
           cwd: '/work/project',
-          transcript_path: '/tmp/codex.jsonl'
+          transcript_path: '/tmp/codex.jsonl',
+          turn_id: 'turn-1'
         }),
         {
           ...process.env,
@@ -141,7 +142,9 @@ describe('aiopsterm agent hook helper', () => {
           workspaceId: 'workspace-1',
           cwd: '/work/project',
           summary: 'shell: npm test',
-          transcriptPath: '/tmp/codex.jsonl'
+          transcriptPath: '/tmp/codex.jsonl',
+          turnId: 'turn-1',
+          turn_id: 'turn-1'
         })
       ])
     } finally {
