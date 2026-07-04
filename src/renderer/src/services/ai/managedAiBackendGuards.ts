@@ -20,11 +20,19 @@ import type {
   AgentHookInstallerSource,
   AgentHookInstallerStatus
 } from '@shared/contracts/agentHooks'
+import type {
+  ExportMcpBridgeStatus,
+  ExportMcpClientSource,
+  ExportMcpClientStatus,
+  ExportMcpInstallerOperationResult,
+  ExportMcpInstallerSnapshot
+} from '@shared/contracts/exportMcp'
 
 export type ManagedAiSessionMutationData = NonNullable<ManagedAiSessionMutationResult['data']>
 export type ManagedAiSessionBulkData = NonNullable<ManagedAiSessionBulkResult['data']>
 export type ManagedAiSessionHibernateData = NonNullable<ManagedAiSessionHibernateResult['data']>
 export type AgentHookInstallOperationData = NonNullable<AgentHookInstallerOperationResult['data']>
+export type ExportMcpInstallOperationData = NonNullable<ExportMcpInstallerOperationResult['data']>
 export type AgentHibernationConfigData = { config: AgentHibernationConfig }
 
 const agentHookInstallerSources = new Set<AgentHookInstallerSource>([
@@ -44,6 +52,7 @@ const agentHookInstallerSources = new Set<AgentHookInstallerSource>([
   'kiro',
   'rovodev'
 ])
+const exportMcpClientSources = new Set<ExportMcpClientSource>(['codex', 'claude-code'])
 const aiAgentSessionSources = new Set<AiAgentSessionSource>([
   'codex',
   'claude-code',
@@ -88,6 +97,9 @@ const isOptionalField = (record: Record<string, unknown>, key: string, guard: (v
 
 export const isAgentHookInstallerSource = (value: unknown): value is AgentHookInstallerSource =>
   agentHookInstallerSources.has(value as AgentHookInstallerSource)
+
+export const isExportMcpClientSource = (value: unknown): value is ExportMcpClientSource =>
+  exportMcpClientSources.has(value as ExportMcpClientSource)
 
 export const isAiAgentSessionSource = (value: unknown): value is AiAgentSessionSource => aiAgentSessionSources.has(value as AiAgentSessionSource)
 
@@ -216,3 +228,38 @@ export const isAgentHookInstallOperationData = (value: unknown): value is AgentH
   isAgentHookInstallerSource(value.source) &&
   isAgentHookInstallerStatus(value.status) &&
   isAgentHookInstallerSnapshot(value.snapshot)
+
+export const isExportMcpBridgeStatus = (value: unknown): value is ExportMcpBridgeStatus =>
+  isRecord(value) &&
+  typeof value.enabled === 'boolean' &&
+  typeof value.listening === 'boolean' &&
+  typeof value.tokenConfigured === 'boolean' &&
+  isNonEmptyString(value.socketPath) &&
+  isNonEmptyString(value.serverName)
+
+export const isExportMcpClientStatus = (value: unknown): value is ExportMcpClientStatus =>
+  isRecord(value) &&
+  isExportMcpClientSource(value.source) &&
+  isNonEmptyString(value.label) &&
+  isNonEmptyString(value.binaryName) &&
+  typeof value.binaryPath === 'string' &&
+  isNonEmptyString(value.configPath) &&
+  typeof value.configExists === 'boolean' &&
+  typeof value.installed === 'boolean' &&
+  typeof value.scriptPath === 'string' &&
+  typeof value.runtimePath === 'string' &&
+  isNonEmptyString(value.serverName) &&
+  isExportMcpBridgeStatus(value.bridge) &&
+  Array.isArray(value.warnings) &&
+  value.warnings.every((item) => typeof item === 'string') &&
+  isOptionalField(value, 'error', isNonEmptyString)
+
+export const isExportMcpInstallerSnapshot = (value: unknown): value is ExportMcpInstallerSnapshot =>
+  isRecord(value) && isExportMcpBridgeStatus(value.bridge) && Array.isArray(value.clients) && value.clients.every(isExportMcpClientStatus)
+
+export const isExportMcpInstallOperationData = (value: unknown): value is ExportMcpInstallOperationData =>
+  isRecord(value) &&
+  (value.operation === 'install' || value.operation === 'uninstall') &&
+  isExportMcpClientSource(value.source) &&
+  isExportMcpClientStatus(value.status) &&
+  isExportMcpInstallerSnapshot(value.snapshot)

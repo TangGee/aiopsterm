@@ -18,16 +18,49 @@ describe('aiopsterm deep links', () => {
   })
 
   it('accepts settings section links', () => {
-    const result = parseAiopstermDeepLink('aiopsterm://open/settings?section=mcp')
+    const result = parseAiopstermDeepLink('aiopsterm://open/settings?section=aiRemoteHostManagement')
 
     expect(result).toEqual({
       valid: true,
       payload: {
-        url: 'aiopsterm://open/settings?section=mcp',
+        url: 'aiopsterm://open/settings?section=aiRemoteHostManagement',
         action: 'open',
         target: 'settings',
         module: 'settings',
-        settingsSection: 'mcp'
+        settingsSection: 'aiRemoteHostManagement'
+      }
+    })
+
+    expect(parseAiopstermDeepLink('aiopsterm://open/settings?section=ai-notifications')).toEqual({
+      valid: true,
+      payload: {
+        url: 'aiopsterm://open/settings?section=ai-notifications',
+        action: 'open',
+        target: 'settings',
+        module: 'settings',
+        settingsSection: 'aiNotifications'
+      }
+    })
+
+    expect(parseAiopstermDeepLink('aiopsterm://open/settings?section=ai-hooks')).toEqual({
+      valid: true,
+      payload: {
+        url: 'aiopsterm://open/settings?section=ai-hooks',
+        action: 'open',
+        target: 'settings',
+        module: 'settings',
+        settingsSection: 'aiNotifications'
+      }
+    })
+
+    expect(parseAiopstermDeepLink('aiopsterm://open/settings?section=export-mcp')).toEqual({
+      valid: true,
+      payload: {
+        url: 'aiopsterm://open/settings?section=export-mcp',
+        action: 'open',
+        target: 'settings',
+        module: 'settings',
+        settingsSection: 'exportMcp'
       }
     })
   })

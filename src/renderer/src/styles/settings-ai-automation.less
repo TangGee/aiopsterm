@@ -46,6 +46,10 @@
   justify-content: space-between;
 }
 
+.agent-hook-card-header {
+  flex-wrap: wrap;
+}
+
 .agent-hook-card-header > div,
 .agent-hook-installer-main,
 .agent-hook-installer-row header > div {
@@ -91,6 +95,21 @@
   flex: 0 0 auto;
   flex-wrap: wrap;
   justify-content: flex-end;
+}
+
+.export-mcp-docs-button {
+  max-width: min(220px, 100%);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-hook-card-header > .export-mcp-card-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 .agent-hook-status-pill {
@@ -190,11 +209,53 @@
   white-space: normal;
 }
 
+.export-mcp-copy-row code {
+  width: 100%;
+  max-height: 148px;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
+.export-mcp-auth-toggle {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-2) 48%, transparent);
+  padding: 12px;
+}
+
+.export-mcp-auth-toggle > div {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.export-mcp-auth-toggle small,
+.export-mcp-auth-toggle em {
+  color: var(--muted);
+  font-size: 12px;
+  font-style: normal;
+  line-height: 1.5;
+}
+
+.export-mcp-auth-toggle em {
+  color: var(--danger);
+}
+
 @media (max-width: 920px) {
   .agent-hook-card-header,
   .agent-hook-installer-row {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .export-mcp-auth-toggle {
+    align-items: stretch;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .agent-hook-installer-actions {

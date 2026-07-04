@@ -10,11 +10,28 @@ import type {
 } from '@shared/contracts/control'
 import type { ManagedAiSessionFocusRequest } from '@shared/contracts/managedAiSessions'
 import type { AiopsAssetRecord } from '@shared/contracts/assets'
-import type { TerminalLifecycleEvent } from '@shared/contracts/terminalSessions'
+import type { TerminalKeyboardInteractiveRequest, TerminalKeyboardInteractiveResponse, TerminalKeyboardInteractiveResult, TerminalLifecycleEvent } from '@shared/contracts/terminalSessions'
+import type { UserConfig } from '@shared/contracts/userConfig'
 import { createSshTerminalSession, resolveSshTerminalTarget, type SshTerminalSession } from '../ssh/sshTerminal'
 import { listAssets } from '../assets/assets'
-import { platformSocketPath } from '../app/platformRuntime'
+import { isWindowsPlatform } from '../app/platformRuntime'
 import { handleExternalCodexMcpManagedAiRequest } from './externalCodexMcpManagedAiRuntime'
+import {
+  cancelExternalMcpAuthRequest,
+  cancelExternalMcpAuthRequestsForConnection,
+  clearExternalMcpAuthRequests,
+  configureExternalCodexMcpAuthRuntime,
+  createExternalMcpAuthRequiredData,
+  focusExternalMcpAuthRequest,
+  getExternalMcpAuthRequestStatus,
+  getPendingExternalMcpAuthRequestForConnection,
+  listExternalMcpAuthRequests,
+  recordExternalMcpAuthResult,
+  requestExternalMcpSshAuth,
+  subscribeExternalMcpAuthRequests,
+  submitExternalMcpAuthResponse,
+  type ExternalCodexMcpAuthRequestSnapshot
+} from './externalCodexMcpAuthRuntime'
 
 type ExternalCodexMcpRequest = {
   id?: string
@@ -46,9 +63,15 @@ type PendingCommand = {
 type ExternalCodexMcpRuntimeConfig = {
   enabled?: boolean
   token?: string
+  getToken?: () => string
+  getConfig?: () => Pick<UserConfig, 'language' | 'exportMcp'> | UserConfig
   socketPath?: string
   userDataPath?: string
   focusManagedAiSession?: (request: ManagedAiSessionFocusRequest) => void
+  requestKeyboardInteractive?: (request: TerminalKeyboardInteractiveRequest) => Promise<TerminalKeyboardInteractiveResponse>
+  sendKeyboardInteractiveResult?: (result: TerminalKeyboardInteractiveResult) => void
+  dismissKeyboardInteractive?: (id: string, message?: string) => void
+  focusKeyboardInteractive?: (request: TerminalKeyboardInteractiveRequest) => boolean | void
 }
 
 const connections = new Map<string, ExternalConnectionRecord>()
@@ -57,6 +80,16 @@ const pendingCommands = new Map<string, PendingCommand>()
 let server: Server | null = null
 let socketPath = ''
 let runtimeConfig: ExternalCodexMcpRuntimeConfig = {}
+
+class ExternalMcpAuthRequiredError extends Error {
+  authRequest: ExternalCodexMcpAuthRequestSnapshot
+
+  constructor(authRequest: ExternalCodexMcpAuthRequestSnapshot) {
+    super('SSH authentication is required in aiopsterm.')
+    this.name = 'ExternalMcpAuthRequiredError'
+    this.authRequest = authRequest
+  }
+}
 
 const cleanText = (value: unknown) => (typeof value === 'string' ? value.trim() : '')
 
@@ -97,22 +130,43 @@ const fail = (errorCode: string, errorMessage: string, data?: Record<string, unk
   ...(target ? { target } : {})
 })
 
-const configuredToken = () => cleanText(runtimeConfig.token) || cleanText(process.env.AIOPSTERM_EXTERNAL_CODEX_MCP_TOKEN)
+const configuredToken = () => {
+  try {
+    return cleanText(runtimeConfig.getToken?.()) || cleanText(runtimeConfig.token) || cleanText(process.env.AIOPSTERM_EXTERNAL_CODEX_MCP_TOKEN)
+  } catch {
+    return cleanText(runtimeConfig.token) || cleanText(process.env.AIOPSTERM_EXTERNAL_CODEX_MCP_TOKEN)
+  }
+}
 
 const isEnabled = () => runtimeConfig.enabled === true || process.env.AIOPSTERM_EXTERNAL_CODEX_MCP_ENABLE === '1'
 
 const defaultSocketPath = () => {
   const base = cleanText(runtimeConfig.userDataPath) || process.cwd()
-  return platformSocketPath(base, 'aiopsterm-external-codex', { directory: 'external-codex-mcp' })
+  if (isWindowsPlatform()) return '\\\\.\\pipe\\aiopsterm-external-codex'
+  return join(base, 'external-codex-mcp', 'aiopsterm-external-codex.sock')
 }
 
 const bridgeSocketPath = () => cleanText(runtimeConfig.socketPath) || cleanText(process.env.AIOPSTERM_EXTERNAL_CODEX_MCP_SOCKET) || defaultSocketPath()
 
 export const configureExternalCodexMcpBridgeRuntime = (config: ExternalCodexMcpRuntimeConfig = {}) => {
   runtimeConfig = { ...runtimeConfig, ...config }
+  configureExternalCodexMcpAuthRuntime({
+    getConfig: runtimeConfig.getConfig,
+    requestInAppAuth: runtimeConfig.requestKeyboardInteractive,
+    sendInAppAuthResult: runtimeConfig.sendKeyboardInteractiveResult,
+    dismissInAppAuth: runtimeConfig.dismissKeyboardInteractive,
+    focusInAppAuth: runtimeConfig.focusKeyboardInteractive
+  })
 }
 
 export const getExternalCodexMcpBridgeSocketPath = () => socketPath || bridgeSocketPath()
+
+export const getExternalCodexMcpBridgeRuntimeStatus = () => ({
+  enabled: isEnabled(),
+  listening: Boolean(server && socketPath),
+  tokenConfigured: Boolean(configuredToken()),
+  socketPath: getExternalCodexMcpBridgeSocketPath()
+})
 
 const authMethodsForAsset = (asset: AiopsAssetRecord) =>
   [
@@ -225,20 +279,35 @@ const resolveConnectionReady = (connection: ExternalConnectionRecord) => {
 const waitForConnectionReady = async (connection: ExternalConnectionRecord, timeoutMs: number) => {
   if (connection.status === 'connected' && connection.session) return connection
   if (connection.status === 'error' || connection.status === 'closed') throw new Error(connection.errorMessage || 'External MCP connection is not available.')
+  const existingAuthRequest = getPendingExternalMcpAuthRequestForConnection(connection.connectionId)
+  if (existingAuthRequest) throw new ExternalMcpAuthRequiredError(existingAuthRequest)
   if (!connection.readyPromise) throw new Error('External MCP connection did not expose a readiness signal.')
   let timer: NodeJS.Timeout | undefined
+  let unsubscribeAuthRequests: (() => void) | undefined
   try {
     await Promise.race([
       connection.readyPromise,
+      new Promise<never>((_, reject) => {
+        unsubscribeAuthRequests = subscribeExternalMcpAuthRequests((authRequest) => {
+          if (authRequest.connectionId !== connection.connectionId) return
+          reject(new ExternalMcpAuthRequiredError(authRequest))
+        })
+      }),
       new Promise<never>((_, reject) => {
         timer = setTimeout(() => reject(new Error(`SSH shell was not ready within ${timeoutMs}ms.`)), timeoutMs)
       })
     ])
   } finally {
     if (timer) clearTimeout(timer)
+    unsubscribeAuthRequests?.()
   }
   if (connection.status !== 'connected' || !connection.session) throw new Error(connection.errorMessage || 'External MCP connection is not ready.')
   return connection
+}
+
+const authRequiredResponse = (connection: ExternalConnectionRecord, authRequest: ExternalCodexMcpAuthRequestSnapshot) => {
+  const data = createExternalMcpAuthRequiredData(authRequest, { connection: connectionSnapshot(connection) })
+  return fail('SSH_AUTH_REQUIRED', String(data.userMessage || 'SSH authentication is required in aiopsterm.'), data, targetContextForConnection(connection))
 }
 
 const connectHost = async (params: Record<string, unknown>) => {
@@ -252,6 +321,10 @@ const connectHost = async (params: Record<string, unknown>) => {
       existing.lastUsedAt = Date.now()
       return ok({ connection: connectionSnapshot(existing), reused: true }, targetContextForConnection(existing))
     } catch (error) {
+      if (error instanceof ExternalMcpAuthRequiredError) {
+        existing.lastUsedAt = Date.now()
+        return authRequiredResponse(existing, error.authRequest)
+      }
       existing.status = 'error'
       existing.errorMessage = error instanceof Error ? error.message : String(error)
       try {
@@ -312,11 +385,15 @@ const connectHost = async (params: Record<string, unknown>) => {
         record.lifecycle = event
         record.status = event.stage === 'error' ? 'error' : 'closed'
         record.errorMessage = event.errorMessage || event.message
+        cancelExternalMcpAuthRequestsForConnection(connectionId, record.errorMessage || 'SSH connection closed before authentication completed.')
         rejectConnectionReady(record, new Error(record.errorMessage || 'SSH connection closed before shell was ready.'))
       },
       data: (chunk) => appendExternalConnectionData(connectionId, chunk),
+      keyboardInteractive: (request) => requestExternalMcpSshAuth(connectionId, request),
+      keyboardInteractiveResult: (result) => recordExternalMcpAuthResult(result),
       closed: () => {
         record.status = record.status === 'error' ? 'error' : 'closed'
+        cancelExternalMcpAuthRequestsForConnection(connectionId)
         rejectConnectionReady(record, new Error(record.errorMessage || 'SSH connection closed before shell was ready.'))
       }
     }
@@ -336,6 +413,10 @@ const connectHost = async (params: Record<string, unknown>) => {
   try {
     await waitForConnectionReady(record, connectTimeoutMs)
   } catch (error) {
+    if (error instanceof ExternalMcpAuthRequiredError) {
+      record.lastUsedAt = Date.now()
+      return authRequiredResponse(record, error.authRequest)
+    }
     record.status = 'error'
     record.errorMessage = error instanceof Error ? error.message : String(error)
     try {
@@ -364,6 +445,7 @@ const disconnectHost = (params: Record<string, unknown>) => {
   try {
     connection.session?.kill('manual')
   } catch {}
+  cancelExternalMcpAuthRequestsForConnection(connectionId, 'External MCP connection was disconnected.')
   connection.status = 'closed'
   connection.lastUsedAt = Date.now()
   connections.delete(connectionId)
@@ -668,6 +750,11 @@ export const handleExternalCodexMcpBridgeRequest = async (request: ExternalCodex
   if (request.method === 'connect_host') return connectHost(params)
   if (request.method === 'list_connections') return listConnections()
   if (request.method === 'disconnect_host') return disconnectHost(params)
+  if (request.method === 'list_auth_requests') return listExternalMcpAuthRequests(params)
+  if (request.method === 'get_auth_request_status') return getExternalMcpAuthRequestStatus(params)
+  if (request.method === 'focus_auth_request') return focusExternalMcpAuthRequest(params)
+  if (request.method === 'cancel_auth_request') return cancelExternalMcpAuthRequest(params)
+  if (request.method === 'submit_ssh_auth_response') return submitExternalMcpAuthResponse(params)
   if (request.method === 'target_context') return targetContext(params)
   if (request.method === 'run_command') return runCommand(params)
   if (request.method === 'read_file') return readFile(params)
@@ -735,6 +822,7 @@ export const ensureExternalCodexMcpBridgeServer = async (config: ExternalCodexMc
 export const closeExternalCodexMcpBridgeServer = () => {
   for (const pending of pendingCommands.values()) clearTimeout(pending.timer)
   pendingCommands.clear()
+  clearExternalMcpAuthRequests()
   for (const connection of connections.values()) {
     try {
       connection.session?.kill('manual')

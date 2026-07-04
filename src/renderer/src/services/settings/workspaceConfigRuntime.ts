@@ -1,6 +1,7 @@
 export type {
   AiPreferenceSettings,
   EditorSettings,
+  ExportMcpSettings,
   ExtensionSettings,
   KeywordHighlightSettings,
   KnowledgeSearchRuntimeApplyData,
@@ -17,6 +18,7 @@ export {
   defaultAliasCommands,
   defaultConfig,
   defaultEditorSettings,
+  defaultExportMcpSettings,
   defaultExtensionSettings,
   defaultKeywordHighlightSettings,
   defaultKnowledgeBase,
@@ -53,6 +55,7 @@ export {
   layoutWidthFromConfig,
   mergeGenericSavedConfig,
   mergeUserConfig,
+  normalizeExportMcpConfig,
   normalizeBackgroundConfig,
   normalizeCatalogModelProvider,
   normalizeGeneralBaseSettingsPatch,

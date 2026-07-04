@@ -260,14 +260,14 @@ export const createWorkspacePreferenceSettingsController = (
     message: string
   ) => {
     const rolledBack = await rollbackAiPreferencesConfig(saveConfigBridge, previousPreferences)
-    setSettingsNotice(rolledBack ? message : `${message}；AI 偏好设置回滚失败`)
+    setSettingsNotice(rolledBack ? message : `${message}；AI 设置回滚失败`)
     return false
   }
 
   const persistAiPreferences = async (previousPreferences: AiPreferenceSettings, nextPreferences: AiPreferenceSettings) => {
     const saveConfigBridge = appRuntimeClient.saveConfig()
     if (typeof saveConfigBridge !== 'function') {
-      setSettingsNotice('AI 偏好设置保存服务不可用')
+      setSettingsNotice('AI 设置保存服务不可用')
       return false
     }
     const normalizedPreferences = normalizeAiPreferencesConfig(nextPreferences).normalized
@@ -277,7 +277,7 @@ export const createWorkspacePreferenceSettingsController = (
       })
       const saved = validatedSavedAiPreferences(savedConfig, normalizedPreferences)
       if (!saved) {
-        setSettingsNotice('AI 偏好设置保存失败')
+        setSettingsNotice('AI 设置保存失败')
         return false
       }
 
@@ -309,7 +309,7 @@ export const createWorkspacePreferenceSettingsController = (
       aiPreferences.value = cloneAiPreferencesSnapshot(saved.savedPreferences)
       return true
     } catch (error) {
-      setSettingsNotice(error instanceof Error ? error.message : 'AI 偏好设置保存失败')
+      setSettingsNotice(error instanceof Error ? error.message : 'AI 设置保存失败')
       return false
     }
   }
@@ -358,7 +358,7 @@ export const createWorkspacePreferenceSettingsController = (
     if (enablesAutoApproval) {
       onboardingAutoApprovalEvent.value += 1
     }
-    setSettingsNotice('AI 偏好设置已保存')
+    setSettingsNotice('AI 设置已保存')
     return true
   }
 

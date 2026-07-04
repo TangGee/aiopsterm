@@ -8,6 +8,7 @@ import { normalizeConfigModelName, normalizeConfigModelProvider } from './backen
 import type { AliasCommandConfig } from '@shared/contracts/aliases'
 import type {
   EditorUserConfig,
+  ExportMcpUserConfig,
   KeywordHighlightUserConfig,
   ModelSettingsUserConfig,
   SecurityUserConfig,
@@ -143,6 +144,9 @@ export const defaultConfig: UserConfig = {
     desktopNotifications: true,
     controlNotificationBell: true
   },
+  exportMcp: {
+    allowAgentSshAuthSubmit: false
+  },
   modelSettings: defaultModelSettingsUserConfig,
   shortcuts: [
     { id: 'newTerminal', action: '新建终端', shortcut: 'Ctrl+Shift+T' },
@@ -214,6 +218,10 @@ const cloneSshProxyConfigs = (configs?: SshProxyConfig[]): SshProxyConfig[] | un
 
 const cloneSshAgentKeys = (keys?: SshAgentKeyConfig[]): SshAgentKeyConfig[] | undefined => keys?.map((key) => ({ ...key }))
 
+const normalizeExportMcpConfig = (config?: Partial<ExportMcpUserConfig>): ExportMcpUserConfig => ({
+  allowAgentSshAuthSubmit: config?.allowAgentSshAuthSubmit === true
+})
+
 const cloneKeywordHighlight = (config?: KeywordHighlightUserConfig): KeywordHighlightUserConfig | undefined =>
   config
     ? {
@@ -264,13 +272,24 @@ const toStringRecord = (source: unknown) => {
   return entries.length ? Object.fromEntries(entries) : undefined
 }
 
+const normalizeMcpTransportType = (server: Record<string, unknown>): McpConfigFile['mcpServers'][string]['type'] => {
+  const rawType = typeof server.type === 'string' ? server.type.trim() : ''
+  if (rawType === 'sse') return 'sse'
+  if (rawType === 'streamableHttp' || rawType === 'http' || rawType === 'streamable_http' || rawType === 'streamable-http') return 'streamableHttp'
+  if (rawType === 'stdio') return 'stdio'
+
+  const hasCommand = typeof server.command === 'string' && server.command.trim().length > 0
+  const hasUrl = typeof server.url === 'string' && server.url.trim().length > 0
+  return !hasCommand && hasUrl ? 'streamableHttp' : 'stdio'
+}
+
 export const normalizeMcpConfigFile = (source?: unknown): McpConfigFile => {
   const root = isRecord(source) ? source : {}
   const serverRoot = isRecord(root.mcpServers) ? root.mcpServers : {}
   const mcpServers: McpConfigFile['mcpServers'] = {}
   Object.entries(serverRoot).forEach(([name, value]) => {
     if (!name.trim() || !isRecord(value)) return
-    const type = value.type === 'sse' || value.type === 'streamableHttp' ? value.type : 'stdio'
+    const type = normalizeMcpTransportType(value)
     const server: McpConfigFile['mcpServers'][string] = {
       type,
       ...(typeof value.disabled === 'boolean' ? { disabled: value.disabled } : {}),
@@ -470,6 +489,10 @@ export const mergeConfig = (base: UserConfig, patch: Partial<UserConfig> = {}): 
     ...base.notifications!,
     ...(patch.notifications || {})
   },
+  exportMcp: normalizeExportMcpConfig({
+    ...(base.exportMcp || defaultConfig.exportMcp!),
+    ...(patch.exportMcp || {})
+  }),
   quickCommands:
     base.quickCommands || patch.quickCommands
       ? {

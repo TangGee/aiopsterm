@@ -152,6 +152,85 @@ const tools = [
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false }
   },
   {
+    name: 'list_auth_requests',
+    title: 'List pending aiopsterm SSH authentication requests',
+    description:
+      'List SSH password or keyboard-interactive authentication requests currently waiting in aiopsterm for external MCP host connections. Secrets are never returned.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        connectionId: { type: 'string', description: 'Optional external MCP connection id to filter by.' },
+        includeCompleted: { type: 'boolean', description: 'When true, include recently completed, canceled, failed, or timed-out requests.' },
+        include_completed: { type: 'boolean', description: 'Alias for includeCompleted.' }
+      },
+      additionalProperties: false
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }
+  },
+  {
+    name: 'get_auth_request_status',
+    title: 'Get aiopsterm SSH authentication request status',
+    description:
+      'Read the current status of one SSH authentication request returned by connect_host or list_auth_requests. Secrets are never returned.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        authRequestId: { type: 'string', description: 'Authentication request id returned by connect_host or list_auth_requests.' },
+        id: { type: 'string', description: 'Alias for authRequestId.' }
+      },
+      additionalProperties: false
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }
+  },
+  {
+    name: 'focus_auth_request',
+    title: 'Focus aiopsterm SSH authentication prompt',
+    description:
+      'Ask aiopsterm to focus and re-show the SSH authentication prompt for a pending request. Use this when connect_host returns SSH_AUTH_REQUIRED.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        authRequestId: { type: 'string', description: 'Authentication request id returned by connect_host or list_auth_requests.' },
+        id: { type: 'string', description: 'Alias for authRequestId.' }
+      },
+      additionalProperties: false
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false }
+  },
+  {
+    name: 'cancel_auth_request',
+    title: 'Cancel aiopsterm SSH authentication request',
+    description:
+      'Cancel a pending SSH authentication request for an external MCP host connection. This usually causes the connection attempt to fail.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        authRequestId: { type: 'string', description: 'Authentication request id returned by connect_host or list_auth_requests.' },
+        id: { type: 'string', description: 'Alias for authRequestId.' }
+      },
+      additionalProperties: false
+    },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false }
+  },
+  {
+    name: 'submit_ssh_auth_response',
+    title: 'Submit aiopsterm SSH authentication response',
+    description:
+      'Submit password, verification code, or keyboard-interactive responses for a pending SSH authentication request. This works only when aiopsterm Settings -> Export MCP allows external Agents to submit SSH authentication information.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        authRequestId: { type: 'string', description: 'Authentication request id returned by connect_host or list_auth_requests.' },
+        id: { type: 'string', description: 'Alias for authRequestId.' },
+        response: { type: 'string', description: 'Single password, verification code, or response value.' },
+        responses: { type: 'array', items: { type: 'string' }, description: 'Multiple keyboard-interactive responses, in prompt order.' },
+        rememberPassword: { type: 'boolean', description: 'When true and aiopsterm allows it, remember the submitted password for the host asset.' }
+      },
+      additionalProperties: false
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }
+  },
+  {
     name: 'target_context',
     title: 'Read aiopsterm host target context',
     description: 'Return context for an external MCP connection or a saved host asset.',

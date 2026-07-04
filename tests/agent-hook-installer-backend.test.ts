@@ -20,6 +20,7 @@ type AgentHookInstallerBackend = {
     getEnv?: () => NodeJS.ProcessEnv
     getPlatform?: () => NodeJS.Platform
     getAgentHookScriptPath?: () => string
+    getJsRuntimeExecutable?: () => string
   }) => void
   installAgentHook: (input: { source: AgentHookInstallerSource }) => Promise<{ ok: boolean; errorMessage?: string }>
   uninstallAgentHook: (input: { source: AgentHookInstallerSource }) => Promise<{ ok: boolean; errorMessage?: string }>
@@ -241,14 +242,22 @@ describe('agent hook installer backend', () => {
   })
 
   it('uses Codex-compatible fail-open hook commands and stable trust hashes', async () => {
-    const { agentHookCommandFor, codexHookHash } = await loadBackend()
-    const command = agentHookCommandFor('codex', 'Stop', '/opt/aiopsterm/aiopsterm-agent-hook.js')
+    const backend = await loadBackend()
+    backend.configureAgentHookInstallerRuntime({
+      getJsRuntimeExecutable: () => '/opt/aiopsterm/aiopsterm'
+    })
+    try {
+      const { agentHookCommandFor, codexHookHash } = backend
+      const command = agentHookCommandFor('codex', 'Stop', '/opt/aiopsterm/aiopsterm-agent-hook.js')
 
-    expect(command).toBe(
-      "command -v node >/dev/null 2>&1 && AIOPSTERM_AGENT_HOOK_MARKER=aiopsterm-agent-hook-v1 node '/opt/aiopsterm/aiopsterm-agent-hook.js' --source 'codex' --event 'Stop' || echo '{}'"
-    )
-    expect(command).not.toContain('printf')
-    expect(codexHookHash('Stop', command, 5)).toBe('sha256:9602d844b7330ac63541d559890c9f6dd9f155c1814bb8af441aa4e3999041ca')
+      expect(command).toBe(
+        "ELECTRON_RUN_AS_NODE=1 AIOPSTERM_AGENT_HOOK_MARKER=aiopsterm-agent-hook-v1 '/opt/aiopsterm/aiopsterm' '/opt/aiopsterm/aiopsterm-agent-hook.js' --source 'codex' --event 'Stop' || echo '{}'"
+      )
+      expect(command).not.toContain('printf')
+      expect(codexHookHash('Stop', command, 5)).toBe('sha256:1f8728044e5ea2880e5c6069fbd69718aa139bbeb7319e4e579359f418df31df')
+    } finally {
+      backend.configureAgentHookInstallerRuntime()
+    }
   })
 
   it('writes Codex hook trust entries using Codex hook state keys', async () => {

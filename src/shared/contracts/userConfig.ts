@@ -8,6 +8,7 @@ import type { SkillUserConfig } from './skills'
 import type {
   AiPreferencesUserConfig,
   EditorUserConfig,
+  ExportMcpUserConfig,
   KeywordHighlightUserConfig,
   ModelSettingsUserConfig,
   NotificationUserConfig,
@@ -51,6 +52,7 @@ export type UserConfig = {
   privacy?: PrivacyUserConfig
   aiPreferences?: AiPreferencesUserConfig
   notifications?: NotificationUserConfig
+  exportMcp?: ExportMcpUserConfig
   modelSettings?: ModelSettingsUserConfig
   shortcuts?: ShortcutUserConfig[]
   rules?: UserRuleConfig[]

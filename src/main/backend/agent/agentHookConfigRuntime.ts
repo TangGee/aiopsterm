@@ -260,6 +260,7 @@ const cleanOptionalString = (value: unknown) => cleanText(value) || undefined
 
 const shellSingleQuote = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`
 const windowsCommandDoubleQuote = (value: string) => `"${value.replace(/"/g, '\\"')}"`
+const defaultJsRuntimeExecutable = () => cleanText(process.env.APPIMAGE) || process.execPath
 
 export const normalizeSource = (value: unknown): AgentHookInstallerSource | null => {
   const raw = cleanText(value).toLowerCase().replace(/_/g, '-')
@@ -281,14 +282,22 @@ export const normalizeSource = (value: unknown): AgentHookInstallerSource | null
   return null
 }
 
-export const agentHookCommandFor = (source: AgentHookInstallerSource, hookEvent: string, scriptPath: string, platform: PlatformRuntime = process.platform) => {
+export const agentHookCommandFor = (
+  source: AgentHookInstallerSource,
+  hookEvent: string,
+  scriptPath: string,
+  platform: PlatformRuntime = process.platform,
+  jsRuntimeExecutable = defaultJsRuntimeExecutable()
+) => {
   const script = cleanText(scriptPath)
   if (!script) throw new AgentHookInstallerError('AGENT_HOOK_SCRIPT_MISSING', 'Agent hook helper path is unavailable.')
+  const runtime = cleanText(jsRuntimeExecutable)
+  if (!runtime) throw new AgentHookInstallerError('AGENT_HOOK_RUNTIME_MISSING', 'aiopsterm JavaScript runtime path is unavailable.')
   const normalizedSource = normalizeSource(source) || source
   const waitDecision = normalizedSource === 'claude-code' && (hookEvent === 'PermissionRequest' || hookEvent === 'AskUserQuestion')
   if (isWindowsPlatform(platform)) {
     const dispatch = [
-      'node',
+      windowsCommandDoubleQuote(runtime),
       windowsCommandDoubleQuote(script),
       '--source',
       windowsCommandDoubleQuote(normalizedSource),
@@ -296,17 +305,18 @@ export const agentHookCommandFor = (source: AgentHookInstallerSource, hookEvent:
       windowsCommandDoubleQuote(hookEvent),
       ...(waitDecision ? ['--wait-decision', '--wait-timeout-ms', '120000'] : [])
     ].join(' ')
-    return `where node >NUL 2>NUL && set AIOPSTERM_AGENT_HOOK_MARKER=${ownedMarker}&& ${dispatch} || echo {}`
+    return `set ELECTRON_RUN_AS_NODE=1&& set AIOPSTERM_AGENT_HOOK_MARKER=${ownedMarker}&& ${dispatch} || echo {}`
   }
   const dispatch = [
+    'ELECTRON_RUN_AS_NODE=1',
     `AIOPSTERM_AGENT_HOOK_MARKER=${ownedMarker}`,
-    'node',
+    shellSingleQuote(runtime),
     shellSingleQuote(script),
     `--source ${shellSingleQuote(normalizedSource)}`,
     `--event ${shellSingleQuote(hookEvent)}`,
     ...(waitDecision ? ['--wait-decision', '--wait-timeout-ms 120000'] : [])
   ].join(' ')
-  return `command -v node >/dev/null 2>&1 && ${dispatch} || echo '{}'`
+  return `${dispatch} || echo '{}'`
 }
 
 export const isPlainObject = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === 'object' && !Array.isArray(value))
@@ -335,14 +345,15 @@ const marker = ${JSON.stringify(fileHookMarker)}
 const source = ${JSON.stringify(source)}
 const cleanText = (value) => (typeof value === 'string' ? value.trim() : '')
 const helper = () => cleanText(process.env.AIOPSTERM_AGENT_HOOK_PATH)
+const runtime = () => cleanText(process.env.AIOPSTERM_JS_RUNTIME) || process.execPath
 const canReport = () => process.env.AIOPSTERM_MANAGED_TERMINAL === '1' && cleanText(process.env.AIOPSTERM_AGENT_SOCKET_PATH) && helper()
 const report = (event, payload = {}) => {
   if (!canReport()) return
   const args = [helper(), '--source', source, '--event', event, ...${extraArgs}]
-  spawnSync(process.execPath, args, {
+  spawnSync(runtime(), args, {
     input: JSON.stringify(payload),
     encoding: 'utf8',
-    env: { ...process.env, AIOPSTERM_AGENT_HOOK_MARKER: marker },
+    env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', AIOPSTERM_AGENT_HOOK_MARKER: marker },
     timeout: 2000,
     stdio: ['pipe', 'ignore', 'ignore']
   })
@@ -394,24 +405,48 @@ export default function aiopstermExtension(agent: { on?: (event: string, handler
   throw new AgentHookInstallerError('AGENT_HOOK_TEMPLATE_UNSUPPORTED', `Agent hook template for ${definition.source} is not supported.`)
 }
 
-const hookEntry = (definition: AgentHookDefinition, event: HookCommandEvent, scriptPath: string, platform: PlatformRuntime = process.platform) => ({
+const hookEntry = (
+  definition: AgentHookDefinition,
+  event: HookCommandEvent,
+  scriptPath: string,
+  platform: PlatformRuntime = process.platform,
+  jsRuntimeExecutable = defaultJsRuntimeExecutable()
+) => ({
   type: 'command',
-  command: agentHookCommandFor(definition.source, event.hookEvent, scriptPath, platform),
+  command: agentHookCommandFor(definition.source, event.hookEvent, scriptPath, platform, jsRuntimeExecutable),
   timeout: event.timeout
 })
 
-const groupedHookEntry = (definition: AgentHookDefinition, event: HookCommandEvent, scriptPath: string, platform: PlatformRuntime = process.platform) => ({
+const groupedHookEntry = (
+  definition: AgentHookDefinition,
+  event: HookCommandEvent,
+  scriptPath: string,
+  platform: PlatformRuntime = process.platform,
+  jsRuntimeExecutable = defaultJsRuntimeExecutable()
+) => ({
   ...(definition.source === 'codex' ? {} : { matcher: '' }),
-  hooks: [hookEntry(definition, event, scriptPath, platform)]
+  hooks: [hookEntry(definition, event, scriptPath, platform, jsRuntimeExecutable)]
 })
 
-const flatHookEntry = (definition: AgentHookDefinition, event: HookCommandEvent, scriptPath: string, platform: PlatformRuntime = process.platform) => ({
-  command: agentHookCommandFor(definition.source, event.hookEvent, scriptPath, platform),
+const flatHookEntry = (
+  definition: AgentHookDefinition,
+  event: HookCommandEvent,
+  scriptPath: string,
+  platform: PlatformRuntime = process.platform,
+  jsRuntimeExecutable = defaultJsRuntimeExecutable()
+) => ({
+  command: agentHookCommandFor(definition.source, event.hookEvent, scriptPath, platform, jsRuntimeExecutable),
   timeout: event.timeout
 })
 
-const kiroHookEntry = (definition: AgentHookDefinition, event: HookCommandEvent, scriptPath: string, platform: PlatformRuntime = process.platform) => ({
-  command: agentHookCommandFor(definition.source, event.hookEvent, scriptPath, platform),
+const kiroHookEntry = (
+  definition: AgentHookDefinition,
+  event: HookCommandEvent,
+  scriptPath: string,
+  platform: PlatformRuntime = process.platform,
+  jsRuntimeExecutable = defaultJsRuntimeExecutable()
+) => ({
+  command: agentHookCommandFor(definition.source, event.hookEvent, scriptPath, platform, jsRuntimeExecutable),
   timeout_ms: Math.max(1, event.timeout * 1000)
 })
 
@@ -460,7 +495,8 @@ export const mergeAgentHookJson = (
   definition: AgentHookDefinition,
   scriptPath: string,
   install: boolean,
-  platform: PlatformRuntime = process.platform
+  platform: PlatformRuntime = process.platform,
+  jsRuntimeExecutable = defaultJsRuntimeExecutable()
 ): { config: Record<string, unknown>; removed: number } => {
   const next: Record<string, unknown> = { ...existing }
   const rawHooks = isPlainObject(next.hooks) ? next.hooks : {}
@@ -483,10 +519,10 @@ export const mergeAgentHookJson = (
       hooks[event.agentEvent] = [
         ...existingGroups,
         definition.kiroAgentJson
-          ? kiroHookEntry(definition, event, scriptPath, platform)
+          ? kiroHookEntry(definition, event, scriptPath, platform, jsRuntimeExecutable)
           : definition.flatHooks
-            ? flatHookEntry(definition, event, scriptPath, platform)
-            : groupedHookEntry(definition, event, scriptPath, platform)
+            ? flatHookEntry(definition, event, scriptPath, platform, jsRuntimeExecutable)
+            : groupedHookEntry(definition, event, scriptPath, platform, jsRuntimeExecutable)
       ]
     }
   }
@@ -690,20 +726,31 @@ export const mergeOpenCodePluginRegistration = (existing: Record<string, unknown
 
 const yamlScalar = (value: string) => JSON.stringify(value)
 
-export const rovoDevYamlHooksBlock = (definition: AgentHookDefinition, scriptPath: string) => {
+export const rovoDevYamlHooksBlock = (
+  definition: AgentHookDefinition,
+  scriptPath: string,
+  platform: PlatformRuntime = process.platform,
+  jsRuntimeExecutable = defaultJsRuntimeExecutable()
+) => {
   const lines = [rovoYamlBegin, 'hooks:']
   for (const event of definition.events) {
     lines.push(`  ${event.agentEvent}:`)
-    lines.push(`    - command: ${yamlScalar(agentHookCommandFor(definition.source, event.hookEvent, scriptPath))}`)
+    lines.push(`    - command: ${yamlScalar(agentHookCommandFor(definition.source, event.hookEvent, scriptPath, platform, jsRuntimeExecutable))}`)
     lines.push(`      timeout: ${Math.max(1, event.timeout)}`)
   }
   lines.push(rovoYamlEnd)
   return `${lines.join('\n')}\n`
 }
 
-export const installRovoDevYaml = (content: string, definition: AgentHookDefinition, scriptPath: string) => {
+export const installRovoDevYaml = (
+  content: string,
+  definition: AgentHookDefinition,
+  scriptPath: string,
+  platform: PlatformRuntime = process.platform,
+  jsRuntimeExecutable = defaultJsRuntimeExecutable()
+) => {
   const stripped = removeMarkedBlock(content || '', rovoYamlBegin, rovoYamlEnd).replace(/\s+$/, '')
-  const block = rovoDevYamlHooksBlock(definition, scriptPath).replace(/\s+$/, '')
+  const block = rovoDevYamlHooksBlock(definition, scriptPath, platform, jsRuntimeExecutable).replace(/\s+$/, '')
   return `${stripped}${stripped ? '\n\n' : ''}${block}\n`
 }
 

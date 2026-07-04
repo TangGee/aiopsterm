@@ -5676,6 +5676,36 @@ Object.defineProperty(navigator, 'clipboard', {
   }
 })
 
+type TestExportMcpSource = 'codex' | 'claude-code'
+
+const exportMcpBridgeMock = () => ({
+  enabled: true,
+  listening: true,
+  tokenConfigured: true,
+  socketPath: '/tmp/aiopsterm-external-codex.sock',
+  serverName: 'aiopsterm_hosts'
+})
+
+const exportMcpClientMock = (source: TestExportMcpSource, installed = false) => ({
+  source,
+  label: source === 'codex' ? 'Codex' : 'Claude Code',
+  binaryName: source === 'codex' ? 'codex' : 'claude',
+  binaryPath: source === 'codex' ? '/usr/bin/codex' : '/home/test/.local/bin/claude',
+  configPath: source === 'codex' ? '/home/test/.codex/config.toml' : '/home/test/.claude.json',
+  configExists: true,
+  installed,
+  scriptPath: '/opt/aiopsterm/resources/aiopsterm-external-codex-mcp.js',
+  runtimePath: '/opt/aiopsterm/aiopsterm',
+  serverName: 'aiopsterm_hosts',
+  bridge: exportMcpBridgeMock(),
+  warnings: []
+})
+
+const exportMcpSnapshotMock = (installedSource?: TestExportMcpSource) => ({
+  bridge: exportMcpBridgeMock(),
+  clients: [exportMcpClientMock('codex', installedSource === 'codex'), exportMcpClientMock('claude-code', installedSource === 'claude-code')]
+})
+
 Object.defineProperty(window, 'aiops', {
   writable: true,
   value: {
@@ -5850,6 +5880,40 @@ Object.defineProperty(window, 'aiops', {
             }
           ]
         }
+      }
+    })),
+    listExportMcpInstallers: vi.fn(async () => ({
+      ok: true,
+      data: exportMcpSnapshotMock()
+    })),
+    installExportMcp: vi.fn(async (input: { source: TestExportMcpSource }) => ({
+      ok: true,
+      data: {
+        operation: 'install' as const,
+        source: input.source,
+        status: exportMcpClientMock(input.source, true),
+        snapshot: exportMcpSnapshotMock(input.source)
+      }
+    })),
+    uninstallExportMcp: vi.fn(async (input: { source: TestExportMcpSource }) => ({
+      ok: true,
+      data: {
+        operation: 'uninstall' as const,
+        source: input.source,
+        status: exportMcpClientMock(input.source, false),
+        snapshot: exportMcpSnapshotMock()
+      }
+    })),
+    copyExportMcpConfig: vi.fn(async (input: { kind: 'json' | 'command' }) => ({
+      ok: true,
+      data: {
+        kind: input.kind
+      }
+    })),
+    resetExportMcpToken: vi.fn(async () => ({
+      ok: true,
+      data: {
+        snapshot: exportMcpSnapshotMock()
       }
     })),
     listManagedAiSessions: vi.fn(async () => ({

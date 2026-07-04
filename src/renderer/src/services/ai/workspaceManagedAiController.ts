@@ -1,4 +1,5 @@
 import { createWorkspaceAgentHookInstallerRuntime } from '@/services/settings/workspaceAgentHookInstallerRuntime'
+import { createWorkspaceExportMcpInstallerRuntime } from '@/services/settings/workspaceExportMcpInstallerRuntime'
 import { createWorkspaceManagedAiAttentionRuntime } from '@/services/ai/workspaceManagedAiAttentionRuntime'
 import { createWorkspaceManagedAiHibernationRuntime } from '@/services/ai/workspaceManagedAiHibernationRuntime'
 import { createWorkspaceManagedAiSessionRuntime } from '@/services/ai/workspaceManagedAiSessionRuntime'
@@ -39,6 +40,18 @@ export const createWorkspaceManagedAiController = (
       agentHookInstallersLoading: state.agentHookInstallersLoading,
       agentHookInstallerBusySource: state.agentHookInstallerBusySource,
       agentHookInstallerError: state.agentHookInstallerError
+    },
+    setTopNotice,
+    i18nText
+  })
+
+  const exportMcpRuntime = createWorkspaceExportMcpInstallerRuntime({
+    state: {
+      exportMcpInstallers: state.exportMcpInstallers,
+      exportMcpInstallerBridge: state.exportMcpInstallerBridge,
+      exportMcpInstallersLoading: state.exportMcpInstallersLoading,
+      exportMcpInstallerBusySource: state.exportMcpInstallerBusySource,
+      exportMcpInstallerError: state.exportMcpInstallerError
     },
     setTopNotice,
     i18nText
@@ -153,6 +166,11 @@ export const createWorkspaceManagedAiController = (
     refreshAgentHookInstallers: agentHookRuntime.refreshAgentHookInstallers,
     installAgentHookInstaller: agentHookRuntime.installAgentHookInstaller,
     uninstallAgentHookInstaller: agentHookRuntime.uninstallAgentHookInstaller,
+    refreshExportMcpInstallers: exportMcpRuntime.refreshExportMcpInstallers,
+    installExportMcpInstaller: exportMcpRuntime.installExportMcpInstaller,
+    uninstallExportMcpInstaller: exportMcpRuntime.uninstallExportMcpInstaller,
+    copyExportMcpConfig: exportMcpRuntime.copyExportMcpConfig,
+    resetExportMcpToken: exportMcpRuntime.resetExportMcpToken,
     refreshManagedAiSessions: sessionRuntime.refreshManagedAiSessions,
     refreshManagedAiSessionsDebounced: sessionRuntime.refreshManagedAiSessionsDebounced,
     applyManagedAiSessionSnapshot: sessionRuntime.applyManagedAiSessionSnapshot,

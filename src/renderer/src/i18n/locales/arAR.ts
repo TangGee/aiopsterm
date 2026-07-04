@@ -19,7 +19,7 @@ export const arAR = completeLocaleMessages({
   'settings.nav.extensions': 'الإضافات',
   'settings.nav.models': 'النماذج',
   'settings.nav.billing': 'الفوترة',
-  'settings.nav.ai': 'تفضيلات AI',
+  'settings.nav.ai': 'Host Agent',
   'settings.nav.rules': 'القواعد',
   'settings.nav.shortcuts': 'الاختصارات',
   'settings.nav.trustedDevices': 'الأجهزة الموثوقة',

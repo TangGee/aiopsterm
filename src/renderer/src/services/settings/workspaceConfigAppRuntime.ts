@@ -6,6 +6,7 @@ import {
   defaultAiPreferences,
   defaultConfig,
   defaultEditorSettings,
+  defaultExportMcpSettings,
   defaultExtensionSettings,
   defaultNotificationSettings,
   defaultQuickCommands,
@@ -280,6 +281,20 @@ export const stripBusinessDataConfig = (source: Partial<UserConfig>): Partial<Us
   return rest
 }
 
+export const normalizeExportMcpConfig = (source?: UserConfig['exportMcp']) => {
+  const incoming: Record<string, unknown> = isRecord(source) ? source : {}
+  const normalized: NonNullable<UserConfig['exportMcp']> = {
+    allowAgentSshAuthSubmit:
+      typeof incoming.allowAgentSshAuthSubmit === 'boolean'
+        ? incoming.allowAgentSshAuthSubmit
+        : defaultExportMcpSettings.allowAgentSshAuthSubmit
+  }
+  return {
+    normalized,
+    changed: !isRecord(source) || incoming.allowAgentSshAuthSubmit !== normalized.allowAgentSshAuthSubmit
+  }
+}
+
 export const mergeUserConfig = (base: UserConfig, patch: Partial<UserConfig> = {}): UserConfig => {
   const normalizedMcp = normalizeMcpServersConfig(patch.mcpServers || base.mcpServers, patch.mcpToolStates || base.mcpToolStates)
 
@@ -337,6 +352,10 @@ export const mergeUserConfig = (base: UserConfig, patch: Partial<UserConfig> = {
     notifications: normalizeNotificationConfig({
       ...(base.notifications || defaultNotificationSettings),
       ...(patch.notifications || {})
+    }).normalized,
+    exportMcp: normalizeExportMcpConfig({
+      ...(base.exportMcp || defaultExportMcpSettings),
+      ...(patch.exportMcp || {})
     }).normalized,
     modelSettings: normalizeModelSettingsConfig(patch.modelSettings || base.modelSettings).normalized,
     quickCommands:

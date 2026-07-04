@@ -30,4 +30,22 @@
 - Ollama：配置 Ollama Base URL。Codex CLI 会按 OpenAI-compatible `/v1` 路径使用。
 - LM Studio：配置 LM Studio Base URL，需要 LM Studio 开启 OpenAI Compatible Server。
 
+## 通用
+
+- 启用 Extended Thinking：开启后，AI 请求会使用额外推理预算相关配置。
+- Budget：Extended Thinking 的 token 预算。预算越高，模型可用于推理的 token 越多，但请求成本和耗时也可能增加。
+
+## 功能
+
+- OpenAI Reasoning Effort：设置 OpenAI 模型的推理强度。`低` 更快更省，`高` 更偏向复杂推理。
+
+## AI 模型代理
+
+- 启用代理：控制 AI 模型 API 请求是否通过代理访问。
+- 代理类型：选择 HTTP、HTTPS、SOCKS4 或 SOCKS5。
+- Host：代理服务器地址。
+- Port：代理服务器端口。
+- 启用代理身份：代理需要用户名密码时开启。
+- Username / Password：代理身份认证凭据。
+
 保存配置只影响后续新请求；已经发出的 AI 请求不会被中途切换。

@@ -15,7 +15,7 @@ export const frFR = completeLocaleMessages({
   'settings.nav.extensions': 'Extensions',
   'settings.nav.models': 'Modèles',
   'settings.nav.billing': 'Facturation',
-  'settings.nav.ai': 'Préférences IA',
+  'settings.nav.ai': 'Host Agent',
   'settings.nav.rules': 'Règles',
   'settings.nav.shortcuts': 'Raccourcis',
   'settings.nav.trustedDevices': 'Appareils de confiance',

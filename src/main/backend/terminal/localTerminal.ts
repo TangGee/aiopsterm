@@ -35,6 +35,8 @@ type LocalTerminalRuntimeConfig = {
   getAgentSocketPath?: () => string
   getAgentHookScriptPath?: () => string
   getControlSocketPath?: () => string
+  getJsRuntimeExecutable?: () => string
+  getControlHelperScriptPath?: () => string
   getPlatform?: () => NodeJS.Platform
   loadPty?: () => LocalPtyRuntime | null
   processRuntime?: LocalProcessRuntime
@@ -78,6 +80,8 @@ export const configureLocalTerminalBackendRuntime = (config: LocalTerminalRuntim
   runtimeConfig.getAgentSocketPath = config.getAgentSocketPath
   runtimeConfig.getAgentHookScriptPath = config.getAgentHookScriptPath
   runtimeConfig.getControlSocketPath = config.getControlSocketPath
+  runtimeConfig.getJsRuntimeExecutable = config.getJsRuntimeExecutable
+  runtimeConfig.getControlHelperScriptPath = config.getControlHelperScriptPath
   runtimeConfig.getPlatform = config.getPlatform
   runtimeConfig.loadPty = config.loadPty
   runtimeConfig.processRuntime = config.processRuntime
@@ -102,6 +106,8 @@ export const managedLocalTerminalEnvironment = (id: string, options: TerminalCre
   const agentSocketPath = cleanManagedContextValue(runtimeConfig.getAgentSocketPath?.())
   const agentHookScriptPath = cleanManagedContextValue(runtimeConfig.getAgentHookScriptPath?.())
   const controlSocketPath = cleanManagedContextValue(runtimeConfig.getControlSocketPath?.())
+  const jsRuntimeExecutable = cleanManagedContextValue(runtimeConfig.getJsRuntimeExecutable?.())
+  const controlHelperScriptPath = cleanManagedContextValue(runtimeConfig.getControlHelperScriptPath?.())
   const env: NodeJS.ProcessEnv = {
     ...baseEnv,
     AIOPSTERM_TERMINAL_SESSION_ID: id,
@@ -115,6 +121,8 @@ export const managedLocalTerminalEnvironment = (id: string, options: TerminalCre
   if (agentSocketPath) env.AIOPSTERM_AGENT_SOCKET_PATH = agentSocketPath
   if (agentHookScriptPath) env.AIOPSTERM_AGENT_HOOK_PATH = agentHookScriptPath
   if (controlSocketPath) env.AIOPSTERM_CONTROL_SOCKET = controlSocketPath
+  if (jsRuntimeExecutable) env.AIOPSTERM_JS_RUNTIME = jsRuntimeExecutable
+  if (controlHelperScriptPath) env.AIOPSTERM_CONTROL_HELPER_PATH = controlHelperScriptPath
   return env
 }
 

@@ -80,9 +80,12 @@
   background: var(--threaded-terminal-pane-bg, transparent);
 }
 
-:root[data-theme-id='ubuntu-terminal'] .app-shell.has-app-background .terminal-pane,
+:root[data-theme-id='ubuntu-terminal'] .app-shell.has-app-background .terminal-pane {
+  background: var(--terminal-host-bg);
+}
+
 :root[data-theme-id='ubuntu-terminal'] .app-shell.has-app-background .terminal-pane:has(.threaded-terminal-host) {
-  background: var(--threaded-terminal-pane-bg);
+  background: var(--threaded-terminal-pane-bg, transparent);
 }
 
 .app-shell.has-app-background .terminal-pane.knowledge-pane {

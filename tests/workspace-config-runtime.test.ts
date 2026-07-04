@@ -32,6 +32,7 @@ import {
   normalizeBackgroundConfig,
   normalizeCatalogModelProvider,
   normalizeEditorSettingsConfig,
+  normalizeExportMcpConfig,
   normalizeGeneralBaseSettingsPatch,
   normalizeKeywordHighlightConfig,
   normalizeKnowledgeBaseConfig,
@@ -310,6 +311,14 @@ describe('workspaceConfigRuntime', () => {
     expect(normalizeAiPreferencesConfig({ ...defaultAiPreferences, enableExtendedThinking: false, thinkingBudgetTokens: 4096 }).normalized.thinkingBudgetTokens).toBe(0)
   })
 
+  it('normalizes Export MCP settings with agent-side SSH auth submission disabled by default', () => {
+    expect(normalizeExportMcpConfig(undefined).normalized).toEqual({ allowAgentSshAuthSubmit: false })
+    expect(normalizeExportMcpConfig({ allowAgentSshAuthSubmit: true }).normalized).toEqual({ allowAgentSshAuthSubmit: true })
+    expect(mergeUserConfig(defaultConfig, { exportMcp: { allowAgentSshAuthSubmit: true } }).exportMcp).toEqual({
+      allowAgentSshAuthSubmit: true
+    })
+  })
+
   it('normalizes model settings and hides legacy local model options', () => {
     const modelSettings = normalizeModelSettingsConfig({
       addModelSwitch: 'yes',
@@ -553,6 +562,26 @@ describe('workspaceConfigRuntime', () => {
           env: { A: '1', B: 2 },
           headers: { Authorization: 'token', Skip: false }
         },
+        codexStyleRemote: {
+          url: ' https://mcp.example.com/mcp ',
+          headers: { Authorization: 'token' }
+        },
+        httpAlias: {
+          type: 'http',
+          url: ' https://http.example.com/mcp '
+        },
+        snakeAlias: {
+          type: 'streamable_http',
+          url: ' https://snake.example.com/mcp '
+        },
+        kebabAlias: {
+          type: 'streamable-http',
+          url: ' https://kebab.example.com/mcp '
+        },
+        legacySse: {
+          type: 'sse',
+          url: ' https://sse.example.com/events '
+        },
         empty: null
       }
     })
@@ -568,6 +597,27 @@ describe('workspaceConfigRuntime', () => {
           cwd: '/tmp',
           env: { A: '1' },
           headers: { Authorization: 'token' }
+        },
+        codexStyleRemote: {
+          type: 'streamableHttp',
+          url: 'https://mcp.example.com/mcp',
+          headers: { Authorization: 'token' }
+        },
+        httpAlias: {
+          type: 'streamableHttp',
+          url: 'https://http.example.com/mcp'
+        },
+        snakeAlias: {
+          type: 'streamableHttp',
+          url: 'https://snake.example.com/mcp'
+        },
+        kebabAlias: {
+          type: 'streamableHttp',
+          url: 'https://kebab.example.com/mcp'
+        },
+        legacySse: {
+          type: 'sse',
+          url: 'https://sse.example.com/events'
         }
       }
     })

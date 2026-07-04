@@ -51,6 +51,8 @@ export const createMainTerminalRuntime = (input: TerminalRuntimeInput) => {
     onFlush: (flush) => flushTerminalData(flush)
   })
   const codexDataOwners = new Map<string, BrowserWindow>()
+  const keyboardInteractiveOwners = new Map<string, BrowserWindow>()
+  const keyboardInteractivePending = new Map<string, { dismiss: (message?: string) => void }>()
   const codexDataCoalescer = createTerminalDataCoalescer({
     onFlush: (flush) => flushCodexData(flush)
   })
@@ -294,16 +296,19 @@ export const createMainTerminalRuntime = (input: TerminalRuntimeInput) => {
       errorMessage: result.errorMessage
     })
     sendWindowEvent(owner, 'terminal:keyboard-interactive:result', result)
+    if (result.status === 'success' || result.final) keyboardInteractiveOwners.delete(result.id)
   }
 
   const requestTerminalKeyboardInteractive = (owner: BrowserWindow, request: TerminalKeyboardInteractiveRequest) =>
     new Promise<TerminalKeyboardInteractiveResponse>((resolve, reject) => {
       let settled = false
+      keyboardInteractiveOwners.set(request.id, owner)
       const responseChannel = `terminal:keyboard-interactive:response:${request.id}`
       const cancelChannel = `terminal:keyboard-interactive:cancel:${request.id}`
       const cleanup = () => {
         ipcMain.off(responseChannel, handleResponse)
         ipcMain.off(cancelChannel, handleCancel)
+        keyboardInteractivePending.delete(request.id)
         clearTimeout(timer)
       }
       const settle = (callback: () => void) => {
@@ -333,6 +338,11 @@ export const createMainTerminalRuntime = (input: TerminalRuntimeInput) => {
 
       ipcMain.on(responseChannel, handleResponse)
       ipcMain.on(cancelChannel, handleCancel)
+      keyboardInteractivePending.set(request.id, {
+        dismiss: (message = 'SSH authentication prompt was closed.') => {
+          settle(() => reject(new Error(message)))
+        }
+      })
       logRuntimeEvent('info', 'terminal.keyboard-interactive.request', {
         id: request.id,
         connectionId: request.connectionId,
@@ -353,6 +363,39 @@ export const createMainTerminalRuntime = (input: TerminalRuntimeInput) => {
       })
       sendWindowEvent(owner, 'terminal:keyboard-interactive:request', request)
     })
+
+  const resolveKeyboardInteractiveOwner = (requestId?: string) => {
+    const existing = requestId ? keyboardInteractiveOwners.get(requestId) : null
+    if (existing) return existing
+    const focused = BrowserWindow.getFocusedWindow()
+    return input.focusWindow(focused || undefined) || BrowserWindow.getAllWindows()[0] || null
+  }
+
+  const requestKeyboardInteractiveFromFocusedWindow = (request: TerminalKeyboardInteractiveRequest) => {
+    const owner = resolveKeyboardInteractiveOwner(request.id)
+    if (!owner) return Promise.reject(new Error('No aiopsterm window is available for SSH authentication.'))
+    input.focusWindow(owner)
+    return requestTerminalKeyboardInteractive(owner, request)
+  }
+
+  const focusKeyboardInteractiveRequest = (request: TerminalKeyboardInteractiveRequest) => {
+    const owner = resolveKeyboardInteractiveOwner(request.id)
+    if (!owner) return false
+    input.focusWindow(owner)
+    keyboardInteractiveOwners.set(request.id, owner)
+    sendWindowEvent(owner, 'terminal:keyboard-interactive:request', request)
+    return true
+  }
+
+  const sendKeyboardInteractiveResult = (result: TerminalKeyboardInteractiveResult) => {
+    const owner = resolveKeyboardInteractiveOwner(result.id)
+    if (!owner) return
+    sendTerminalKeyboardInteractiveResult(owner, result)
+  }
+
+  const dismissKeyboardInteractiveRequest = (id: string, message?: string) => {
+    keyboardInteractivePending.get(id)?.dismiss(message)
+  }
 
   const createSshTerminal = (owner: BrowserWindow, id: string, options: TerminalCreateOptions) => {
     return createSshTerminalSession(id, options, {
@@ -468,6 +511,10 @@ export const createMainTerminalRuntime = (input: TerminalRuntimeInput) => {
     registerTerminalForCodexBridge,
     writeTerminalBySessionId,
     rememberTerminalPassword,
+    requestKeyboardInteractiveFromFocusedWindow,
+    focusKeyboardInteractiveRequest,
+    sendKeyboardInteractiveResult,
+    dismissKeyboardInteractiveRequest,
     createSshTerminal,
     createLocalTerminal,
     sendCodexExit,

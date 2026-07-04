@@ -18,7 +18,7 @@ export const zhTW = completeLocaleMessages({
   'settings.nav.extensions': '擴充',
   'settings.nav.models': '模型',
   'settings.nav.billing': '計費概覽',
-  'settings.nav.ai': 'AI 偏好設定',
+  'settings.nav.ai': '主機Agent',
   'settings.nav.rules': '規則',
   'settings.nav.shortcuts': '快捷鍵',
   'settings.nav.trustedDevices': '信任裝置',

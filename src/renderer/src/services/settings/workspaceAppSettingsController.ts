@@ -147,6 +147,7 @@ type WorkspaceAppSettingsDeps = {
   hydrateClassicChatData: (options?: { restoreIfEmpty?: boolean }) => Promise<boolean>
   setupKnowledgeBridgeListeners: () => void
   refreshAgentHookInstallers: (options?: { silent?: boolean }) => Promise<boolean>
+  refreshExportMcpInstallers: (options?: { silent?: boolean }) => Promise<boolean>
   refreshUserAccount: () => Promise<boolean>
   hydrateAliasCommands: () => Promise<HydratedAliasResult>
   hydrateSettingsPreferences: (savedConfig: UserConfig) => Promise<{
@@ -501,6 +502,7 @@ export const createWorkspaceAppSettingsController = (state: WorkspaceAppSettings
       hydrateClassicChatData: deps.hydrateClassicChatData,
       setupKnowledgeBridgeListeners: deps.setupKnowledgeBridgeListeners,
       refreshAgentHookInstallers: deps.refreshAgentHookInstallers,
+      refreshExportMcpInstallers: deps.refreshExportMcpInstallers,
       refreshUserAccount: deps.refreshUserAccount,
       hydrateAliasCommands: deps.hydrateAliasCommands,
       hydrateSettingsPreferences: deps.hydrateSettingsPreferences,
@@ -603,7 +605,8 @@ export const createWorkspaceAppSettingsController = (state: WorkspaceAppSettings
     {
       setTopNotice,
       setActiveSettingsSection,
-      refreshAgentHookInstallers: deps.refreshAgentHookInstallers
+      refreshAgentHookInstallers: deps.refreshAgentHookInstallers,
+      refreshExportMcpInstallers: deps.refreshExportMcpInstallers
     }
   )
 

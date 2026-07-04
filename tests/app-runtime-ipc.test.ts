@@ -144,6 +144,13 @@ describe('app runtime IPC registrar', () => {
     })
 
     backendMocks.openSettingsDocumentation.mockClear()
+    await handlers.get('settings:open-documentation')?.({}, { page: 'aiRemoteHostManagement', locale: 'en-US' })
+    expect(backendMocks.openSettingsDocumentation).toHaveBeenCalledWith(runtime, {
+      page: 'aiRemoteHostManagement',
+      locale: 'en-US'
+    })
+
+    backendMocks.openSettingsDocumentation.mockClear()
     await handlers.get('settings:open-documentation')?.({}, { page: '../general', locale: 1, documentPath: 2, basePath: null })
     expect(backendMocks.openSettingsDocumentation).toHaveBeenCalledWith(runtime, {})
 

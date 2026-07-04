@@ -1,6 +1,6 @@
 # Rules Settings
 
-This page manages User Rules. Rules constrain Agent behavior during conversation and command generation.
+This page lives under `Settings -> Host Agent -> Rules`. It manages User Rules. Rules constrain Agent behavior during conversation and command generation.
 
 ## Options
 

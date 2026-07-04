@@ -108,6 +108,7 @@ type WorkspaceSettingsHydrationDeps = {
   hydrateClassicChatData: (options?: { restoreIfEmpty?: boolean }) => Promise<boolean>
   setupKnowledgeBridgeListeners: () => void
   refreshAgentHookInstallers: (options?: { silent?: boolean }) => Promise<boolean>
+  refreshExportMcpInstallers: (options?: { silent?: boolean }) => Promise<boolean>
   refreshUserAccount: () => Promise<boolean>
   hydrateAliasCommands: () => Promise<HydratedAliasResult>
   hydrateSettingsPreferences: (savedConfig: UserConfig) => Promise<{
@@ -172,6 +173,7 @@ export const createWorkspaceSettingsHydrationController = (
     hydrateClassicChatData,
     setupKnowledgeBridgeListeners,
     refreshAgentHookInstallers,
+    refreshExportMcpInstallers,
     refreshUserAccount,
     hydrateAliasCommands,
     hydrateSettingsPreferences,
@@ -389,6 +391,7 @@ export const createWorkspaceSettingsHydrationController = (
     await refreshUserAccount()
     setupKnowledgeBridgeListeners()
     void refreshAgentHookInstallers({ silent: true })
+    void refreshExportMcpInstallers({ silent: true })
     await aiStartupRefresh
     restoreSavedGeneralBaseSettings()
     applyDocumentLocale(currentLocale())

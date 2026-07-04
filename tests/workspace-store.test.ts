@@ -11961,13 +11961,13 @@ describe('workspace store', () => {
     try {
       ;(window.aiops as any).saveConfig = undefined
       await expect(store.updateAiPreferences({ autoApproval: true })).resolves.toBe(false)
-      expect(store.settingsNotice).toBe('AI 偏好设置保存服务不可用')
+      expect(store.settingsNotice).toBe('AI 设置保存服务不可用')
       assertAiPreferencesUnchanged()
 
       ;(window.aiops as any).saveConfig = originalSaveConfig
       vi.mocked(window.aiops.saveConfig!).mockResolvedValueOnce({} as any)
       await expect(store.updateAiPreferences({ autoApproval: true })).resolves.toBe(false)
-      expect(store.settingsNotice).toBe('AI 偏好设置保存失败')
+      expect(store.settingsNotice).toBe('AI 设置保存失败')
       assertAiPreferencesUnchanged()
 
       vi.mocked(window.aiops.saveConfig!).mockResolvedValueOnce({
@@ -11978,7 +11978,7 @@ describe('workspace store', () => {
         }
       } as any)
       await expect(store.updateAiPreferences({ autoApproval: true })).resolves.toBe(false)
-      expect(store.settingsNotice).toBe('AI 偏好设置保存失败')
+      expect(store.settingsNotice).toBe('AI 设置保存失败')
       assertAiPreferencesUnchanged()
 
       vi.mocked(window.aiops.saveConfig!).mockRejectedValueOnce(new Error('ai preferences save offline'))
@@ -12025,7 +12025,7 @@ describe('workspace store', () => {
 
       vi.mocked(window.aiops.applyKnowledgeSearchRuntimeSetting!).mockClear()
       await expect(store.updateAiPreferences({ autoApproval: true, needProxy: true, proxy: { host: '10.0.0.3', port: 18080 } })).resolves.toBe(true)
-      expect(store.settingsNotice).toBe('AI 偏好设置已保存')
+      expect(store.settingsNotice).toBe('AI 设置已保存')
       expect(window.aiops.applyKnowledgeSearchRuntimeSetting).not.toHaveBeenCalled()
       expect(store.aiPreferences.autoApproval).toBe(true)
       expect(store.aiPreferences.needProxy).toBe(true)

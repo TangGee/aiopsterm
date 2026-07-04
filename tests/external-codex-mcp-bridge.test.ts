@@ -407,6 +407,193 @@ describe('external Codex MCP bridge runtime', () => {
     expect(bridge.__getExternalCodexMcpConnectionCountForTests()).toBe(0)
   })
 
+  it('returns an i18n auth-required response when an external SSH connection needs keyboard-interactive input', async () => {
+    const { assets, sshTerminal, bridge } = await loadBackends()
+    activeBridge = bridge
+    activeSshTerminal = sshTerminal
+    const ssh = createSshRuntime({ manualReady: true })
+    sshTerminal.configureSshTerminalBackendRuntime({
+      ssh2Runtime: ssh.runtime as never,
+      getAsset: (id: string) => assets.getAsset(id),
+      getAssetSecret: (id: string) => assets.getAssetSecret(id),
+      getKeychainSecret: () => ({}),
+      getConfig: () => ({ sshProxyConfigs: [], sshAgentKeys: [], terminal: { sshAgentsStatus: false } })
+    })
+    bridge.configureExternalCodexMcpBridgeRuntime({
+      getConfig: () => ({
+        language: 'en-US',
+        exportMcp: { allowAgentSshAuthSubmit: false }
+      })
+    })
+    const saved = assets.saveAsset({
+      name: 'mfa-host',
+      title: 'MFA Host',
+      host: '10.91.0.18',
+      username: 'deploy',
+      port: 22,
+      asset_type: 'person',
+      auth_type: 'password',
+      group: '测试',
+      group_name: '测试',
+      tags: ['mfa']
+    })
+
+    const connectPromise = bridge.handleExternalCodexMcpBridgeRequest({
+      method: 'connect_host',
+      token: 'test-token',
+      params: { assetId: saved.data!.id, timeoutMs: 5000 }
+    })
+    await waitFor(() => ssh.clients.length === 1)
+    ssh.clients[0].emit(
+      'keyboard-interactive',
+      'Verification',
+      'Enter verification code',
+      '',
+      [{ prompt: 'Code:', echo: false }],
+      () => undefined
+    )
+
+    const connectResponse = await connectPromise
+
+    expect(connectResponse).toEqual(
+      expect.objectContaining({
+        ok: false,
+        errorCode: 'SSH_AUTH_REQUIRED',
+        errorMessage: expect.stringContaining('aiopsterm'),
+        data: expect.objectContaining({
+          messageKey: 'externalMcp.auth.required.openAiopsterm',
+          nextAction: 'OPEN_AIOPSTERM_AUTH_PROMPT',
+          authRequestId: expect.stringContaining('keyboard'),
+          agentSideAuthAvailable: true,
+          agentSideAuthEnabled: false,
+          authRequest: expect.objectContaining({
+            connectionId: expect.stringMatching(/^mcp-/),
+            host: '10.91.0.18',
+            username: 'deploy',
+            purpose: 'keyboard-interactive',
+            prompts: [{ prompt: 'Code:', echo: false }]
+          })
+        })
+      })
+    )
+
+    const listResponse = await bridge.handleExternalCodexMcpBridgeRequest({
+      method: 'list_auth_requests',
+      token: 'test-token',
+      params: {}
+    })
+    expect(listResponse).toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
+          count: 1,
+          authRequests: [expect.objectContaining({ status: 'pending', agentSideAuthEnabled: false })]
+        })
+      })
+    )
+  })
+
+  it('gates external Agent SSH auth submission behind the Export MCP setting', async () => {
+    const { assets, sshTerminal, bridge } = await loadBackends()
+    activeBridge = bridge
+    activeSshTerminal = sshTerminal
+    const ssh = createSshRuntime({ manualReady: true })
+    sshTerminal.configureSshTerminalBackendRuntime({
+      ssh2Runtime: ssh.runtime as never,
+      getAsset: (id: string) => assets.getAsset(id),
+      getAssetSecret: (id: string) => assets.getAssetSecret(id),
+      getKeychainSecret: () => ({}),
+      getConfig: () => ({ sshProxyConfigs: [], sshAgentKeys: [], terminal: { sshAgentsStatus: false } })
+    })
+    const saved = assets.saveAsset({
+      name: 'agent-auth-host',
+      title: 'Agent Auth Host',
+      host: '10.91.0.19',
+      username: 'ops',
+      port: 22,
+      asset_type: 'person',
+      auth_type: 'password',
+      group: '测试',
+      group_name: '测试',
+      tags: ['agent-auth']
+    })
+
+    let finishResponses: string[] = []
+    bridge.configureExternalCodexMcpBridgeRuntime({
+      getConfig: () => ({
+        language: 'en-US',
+        exportMcp: { allowAgentSshAuthSubmit: false }
+      })
+    })
+    const connectPromise = bridge.handleExternalCodexMcpBridgeRequest({
+      method: 'connect_host',
+      token: 'test-token',
+      params: { assetId: saved.data!.id, timeoutMs: 5000 }
+    })
+    await waitFor(() => ssh.clients.length === 1)
+    ssh.clients[0].emit(
+      'keyboard-interactive',
+      'Verification',
+      'Enter verification code',
+      '',
+      [{ prompt: 'Code:', echo: false }],
+      (responses: string[]) => {
+        finishResponses = responses
+      }
+    )
+    const connectResponse = await connectPromise
+    const authRequestId = String(connectResponse.data?.authRequestId || '')
+
+    const disabledSubmit = await bridge.handleExternalCodexMcpBridgeRequest({
+      method: 'submit_ssh_auth_response',
+      token: 'test-token',
+      params: { authRequestId, response: '123456' }
+    })
+    expect(disabledSubmit).toEqual(
+      expect.objectContaining({
+        ok: false,
+        errorCode: 'AGENT_SIDE_AUTH_DISABLED',
+        errorMessage: expect.stringContaining('Settings -> Export MCP'),
+        data: expect.objectContaining({
+          messageKey: 'externalMcp.auth.agentSubmitDisabled',
+          settingsTarget: 'exportMcp'
+        })
+      })
+    )
+    expect(finishResponses).toEqual([])
+
+    bridge.configureExternalCodexMcpBridgeRuntime({
+      getConfig: () => ({
+        language: 'en-US',
+        exportMcp: { allowAgentSshAuthSubmit: true }
+      })
+    })
+    const enabledSubmit = await bridge.handleExternalCodexMcpBridgeRequest({
+      method: 'submit_ssh_auth_response',
+      token: 'test-token',
+      params: { authRequestId, response: '123456' }
+    })
+    expect(enabledSubmit).toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
+          messageKey: 'externalMcp.auth.submitted',
+          submitted: true
+        })
+      })
+    )
+    expect(finishResponses).toEqual(['123456'])
+
+    ssh.clients[0].emit('ready')
+    await waitFor(() => ssh.channels.length === 1)
+    const connections = await bridge.handleExternalCodexMcpBridgeRequest({
+      method: 'list_connections',
+      token: 'test-token',
+      params: {}
+    })
+    expect(connections.data?.connections).toEqual([expect.objectContaining({ status: 'connected', assetId: saved.data!.id })])
+  })
+
   it('runs marked commands through the external connection and captures output', async () => {
     const { assets, sshTerminal, bridge } = await loadBackends()
     activeBridge = bridge
@@ -1110,6 +1297,11 @@ describe('external Codex MCP bridge runtime', () => {
           'connect_host',
           'list_connections',
           'disconnect_host',
+          'list_auth_requests',
+          'get_auth_request_status',
+          'focus_auth_request',
+          'cancel_auth_request',
+          'submit_ssh_auth_response',
           'target_context',
           'run_command',
           'read_file',
@@ -1156,6 +1348,34 @@ describe('external Codex MCP bridge runtime', () => {
       } finally {
         mcp.child.kill()
       }
+    } finally {
+      bridge.closeExternalCodexMcpBridgeServer()
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('uses a stable default socket path across app restarts', async () => {
+    const { bridge } = await loadBackends()
+    activeBridge = bridge
+    const root = await mkdtemp(join(tmpdir(), 'aiopsterm-external-mcp-stable-'))
+    const expectedSocket = process.platform === 'win32' ? '\\\\.\\pipe\\aiopsterm-external-codex' : join(root, 'external-codex-mcp', 'aiopsterm-external-codex.sock')
+
+    try {
+      const firstSocket = await bridge.ensureExternalCodexMcpBridgeServer({
+        enabled: true,
+        token: 'test-token',
+        userDataPath: root
+      })
+      expect(firstSocket).toBe(expectedSocket)
+
+      bridge.closeExternalCodexMcpBridgeServer()
+
+      const secondSocket = await bridge.ensureExternalCodexMcpBridgeServer({
+        enabled: true,
+        token: 'test-token',
+        userDataPath: root
+      })
+      expect(secondSocket).toBe(firstSocket)
     } finally {
       bridge.closeExternalCodexMcpBridgeServer()
       await rm(root, { recursive: true, force: true })

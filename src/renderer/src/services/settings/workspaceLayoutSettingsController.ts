@@ -31,6 +31,7 @@ type WorkspaceLayoutSettingsControllerDeps = {
   setTopNotice: (message: string) => void
   setActiveSettingsSection: (key: SettingSectionKey) => void
   refreshAgentHookInstallers: (options?: { silent?: boolean }) => Promise<boolean>
+  refreshExportMcpInstallers?: (options?: { silent?: boolean }) => Promise<boolean>
 }
 
 const numberInRange = (value: unknown, fallback: number, min: number, max?: number) =>
@@ -100,9 +101,10 @@ export const createWorkspaceLayoutSettingsController = (
     leftPanelOpen.value = true
     rightPanelOpen.value = false
     onboardingGuideOpen.value = false
-    setActiveSettingsSection('ai')
+    setActiveSettingsSection('aiRemoteHostManagement')
     void refreshAgentHookInstallers({ silent: true })
-    setTopNotice('已打开 AI 会话设置')
+    void deps.refreshExportMcpInstallers?.({ silent: true })
+    setTopNotice('已打开主机Agent设置')
   }
 
   const toggleMode = async () => {

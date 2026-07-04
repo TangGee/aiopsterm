@@ -115,6 +115,20 @@ export type {
   AgentHookInstallerStatus
 } from './contracts/agentHooks'
 export type {
+  ExportMcpBridgeStatus,
+  ExportMcpCopyConfigInput,
+  ExportMcpCopyConfigKind,
+  ExportMcpCopyConfigResult,
+  ExportMcpClientSource,
+  ExportMcpClientStatus,
+  ExportMcpInstallerListResult,
+  ExportMcpInstallerOperation,
+  ExportMcpInstallerOperationInput,
+  ExportMcpInstallerOperationResult,
+  ExportMcpInstallerSnapshot,
+  ExportMcpTokenResetResult
+} from './contracts/exportMcp'
+export type {
   ZmodemSavePathPickResult,
   ZmodemStreamCloseResult,
   ZmodemStreamOpenResult,
@@ -286,6 +300,7 @@ export type {
   AppUpdateSignatureInfo,
   CustomBackgroundSaveResult,
   EditorUserConfig,
+  ExportMcpUserConfig,
   KeywordHighlightConfigWriteResult,
   KeywordHighlightRuleConfig,
   KeywordHighlightUserConfig,

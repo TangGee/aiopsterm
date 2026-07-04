@@ -4,14 +4,14 @@
       v-for="item in settingsNavItems"
       :key="item.key"
       class="settings-nav-item"
-      :class="{ active: workspace.activeSettingsSection === item.key }"
+      :class="{ active: isSettingsNavItemActive(item.key) }"
       :data-onboarding-id="
         item.key === 'general'
           ? 'settings-side-nav'
           : item.key === 'terminal'
             ? 'settings-terminal-tab'
-            : item.key === 'ai'
-              ? 'settings-ai-preferences-tab'
+            : item.key === 'aiRemoteHostManagement'
+              ? 'settings-ai-remote-host-management-tab'
               : undefined
       "
       :title="t(item.labelKey)"
@@ -32,10 +32,14 @@
 
 <script setup lang="ts">
 import { ExternalLink } from 'lucide-vue-next'
-import { settingsNavItems } from '@/config/settings'
+import { settingsNavItems, type SettingSectionKey } from '@/config/settings'
 import { useI18n } from '@/i18n'
 import { useWorkspaceStore } from '@/stores/workspace'
 
 const workspace = useWorkspaceStore()
 const { t } = useI18n()
+
+const aiAgentSettingsSections = new Set<SettingSectionKey>(['aiRemoteHostManagement', 'mcp', 'skills', 'rules'])
+const isSettingsNavItemActive = (key: SettingSectionKey) =>
+  workspace.activeSettingsSection === key || (key === 'aiRemoteHostManagement' && aiAgentSettingsSections.has(workspace.activeSettingsSection))
 </script>

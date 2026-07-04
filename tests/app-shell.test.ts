@@ -1468,6 +1468,8 @@ describe('AppShell', () => {
     expect(styles).toContain('.ai-codex-xterm-stack > .threaded-terminal-render-group-canvas')
     expect(styles).toContain('.app-shell.has-app-background .ai-codex-xterm.threaded-terminal-host,')
     expect(styles).toContain('backdrop-filter: none;')
+    expect(styles).toContain(":root[data-theme-id='ubuntu-terminal'] {\n  --terminal-host-bg: #300A24;\n  --threaded-terminal-pane-bg: transparent;\n}")
+    expect(styles).toContain(":root[data-theme-id='ubuntu-terminal'] .app-shell.has-app-background .terminal-pane:has(.threaded-terminal-host) {\n  background: var(--threaded-terminal-pane-bg, transparent);\n}")
 
     await expect(store.selectBackground('preset', 'aurora-glass-image')).resolves.toBe(true)
     await wrapper.vm.$nextTick()
@@ -2083,7 +2085,8 @@ describe('AppShell', () => {
     expect(document.documentElement.dir).toBe('ltr')
     expect(wrapper.find('.settings-workspace-title h2').text()).toBe('Settings')
     expect(wrapper.find('.settings-side-panel').text()).toContain('General')
-    expect(wrapper.find('.settings-side-panel').text()).toContain('AI Preferences')
+    expect(wrapper.find('.settings-side-panel').text()).toContain('AI Notifications')
+    expect(wrapper.find('.settings-side-panel').text()).toContain('Host Agent')
     expect(wrapper.text()).toContain('Basic Settings')
     expect(wrapper.text()).toContain('Default Layout')
 
@@ -8701,6 +8704,24 @@ describe('AppShell', () => {
     expect(store.activeModule).toBe('settings')
     expect(store.activeSettingsSection).toBe('models')
     expect(store.rightPanelOpen).toBe(false)
+
+    const aiSettingsResponse = await invokeControlHandler({ id: 'settings-open-ai', method: 'settings.open', params: { target: 'ai-remote-host-management' } })
+    expect(aiSettingsResponse).toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({ opened: true, target: 'aiRemoteHostManagement', activeModule: 'settings' })
+      })
+    )
+    expect(store.activeSettingsSection).toBe('aiRemoteHostManagement')
+
+    const aiHooksSettingsResponse = await invokeControlHandler({ id: 'settings-open-ai-hooks', method: 'settings.open', params: { target: 'ai-hooks' } })
+    expect(aiHooksSettingsResponse).toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({ opened: true, target: 'aiNotifications', activeModule: 'settings' })
+      })
+    )
+    expect(store.activeSettingsSection).toBe('aiNotifications')
 
     const invalidSettingsResponse = await invokeControlHandler({ id: 'settings-invalid', method: 'settings.open', params: { target: 'not-a-section' } })
     expect(invalidSettingsResponse).toEqual(expect.objectContaining({ ok: false, errorCode: 'SETTINGS_TARGET_INVALID' }))
@@ -15794,7 +15815,7 @@ describe('AppShell', () => {
     wrapper.unmount()
   })
 
-  it('matches External reference-style settings nav, general, terminal, model, and AI preferences', async () => {
+  it('matches External reference-style settings nav, general, terminal, model, and split AI settings', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     const panel = mount(SettingsPanel, {
@@ -15804,7 +15825,14 @@ describe('AppShell', () => {
 
     expect(panel.text()).toContain('通用')
     expect(panel.text()).toContain('终端')
-    expect(panel.text()).toContain('AI 偏好设置')
+    expect(panel.text()).not.toContain('AI 偏好设置')
+    expect(panel.text()).toContain('AI 通知')
+    expect(panel.text()).toContain('主机Agent')
+    const settingsNavLabels = panel.findAll('.settings-nav-item span').map((item) => item.text())
+    expect(settingsNavLabels).toContain('导出 MCP')
+    expect(settingsNavLabels).not.toContain('MCP')
+    expect(panel.text()).not.toContain('Skills')
+    expect(panel.text()).not.toContain('规则')
     expect(panel.text()).toContain('文档')
     await panel.findAll('.settings-nav-item').find((item) => item.text().includes('文档'))!.trigger('click')
     await flushPromises()
@@ -16138,16 +16166,17 @@ describe('AppShell', () => {
     expect(workspace.text()).toContain('模型 Provider 检查服务返回数据无效')
     expect(workspace.text()).not.toContain('This malformed check must not be shown.')
 
-    await panel.findAll('.settings-nav-item').find((item) => item.text().includes('AI 偏好设置'))!.trigger('click')
-    await workspace.vm.$nextTick()
-    expect(workspace.find('.settings-page-help-button').exists()).toBe(true)
-    expect(workspace.text()).toContain('启用 Extended Thinking')
-    expect(workspace.text()).toContain('OpenAI Reasoning Effort')
-    expect(workspace.text()).toContain('AI 会话休眠')
-    expect(workspace.text()).toContain('通知')
-    expect(workspace.text()).toContain('自动化与开发者')
-    const shellTimeoutRow = workspace.findAll('.settings-form-row.full-label').find((row) => row.text().includes('Shell Integration Timeout'))!
-    expect(shellTimeoutRow.find('.settings-number.wide').attributes('max')).toBe('300')
+    let settingsContent = workspace.find('.settings-content-scroll').text()
+    expect(settingsContent).toContain('启用 Extended Thinking')
+    expect(settingsContent).toContain('OpenAI Reasoning Effort')
+    expect(settingsContent).toContain('AI 模型代理')
+    expect(settingsContent).not.toContain('AI 会话休眠')
+    expect(settingsContent).not.toContain('AI 通知')
+    expect(settingsContent).not.toContain('主机Agent')
+    expect(settingsContent).not.toContain('Control Socket')
+    expect(settingsContent).not.toContain('External Codex MCP')
+    expect(settingsContent).not.toContain('自动执行只读命令')
+    expect(settingsContent).not.toContain('自动化与开发者')
     await workspace.find('.settings-budget input[type="range"]').setValue('5000')
     await flushPromises()
     expect(store.aiPreferences.thinkingBudgetTokens).toBe(5000)
@@ -16158,6 +16187,43 @@ describe('AppShell', () => {
         })
       })
     )
+
+    await panel.findAll('.settings-nav-item').find((item) => item.text().includes('AI 通知'))!.trigger('click')
+    await workspace.vm.$nextTick()
+    settingsContent = workspace.find('.settings-content-scroll').text()
+    expect(store.activeSettingsSection).toBe('aiNotifications')
+    expect(settingsContent).toContain('AI 通知')
+    expect(settingsContent).toContain('桌面通知')
+    expect(settingsContent).toContain('Agent Hook 安装器')
+    expect(settingsContent).toContain('AI 会话休眠')
+    expect(settingsContent).toContain('Control Socket')
+    expect(settingsContent).toContain('CLI Helper')
+    expect(settingsContent).not.toContain('External Codex MCP')
+    vi.mocked(window.aiops.openSettingsDocumentation).mockClear()
+    await workspace.find('.settings-page-help-button').trigger('click')
+    await flushPromises()
+    expect(window.aiops.openSettingsDocumentation).toHaveBeenCalledWith({ page: 'aiNotifications', locale: 'zh-CN' })
+    await workspace.find('.settings-documentation-toolbar .settings-button').trigger('click')
+    await workspace.vm.$nextTick()
+
+    await panel.findAll('.settings-nav-item').find((item) => item.text().includes('主机Agent'))!.trigger('click')
+    await workspace.vm.$nextTick()
+    settingsContent = workspace.find('.settings-content-scroll').text()
+    expect(store.activeSettingsSection).toBe('aiRemoteHostManagement')
+    expect(settingsContent).toContain('对话与主机')
+    expect(settingsContent).toContain('MCP')
+    expect(settingsContent).toContain('Skills')
+    expect(settingsContent).toContain('规则')
+    expect(settingsContent).not.toContain('导出 MCP')
+    expect(settingsContent).toContain('自动执行只读命令')
+    expect(settingsContent).toContain('Shell Integration Timeout')
+    expect(settingsContent).not.toContain('Agent Hook 安装器')
+    expect(settingsContent).not.toContain('AI 会话休眠')
+    expect(settingsContent).not.toContain('External Codex MCP')
+    expect(settingsContent).not.toContain('Control Socket')
+    expect(settingsContent).not.toContain('桌面通知')
+    const shellTimeoutRow = workspace.findAll('.settings-form-row.full-label').find((row) => row.text().includes('Shell Integration Timeout'))!
+    expect(shellTimeoutRow.find('.settings-number.wide').attributes('max')).toBe('300')
     await workspace.findAll('.settings-checkbox-item').find((row) => row.text().includes('自动执行只读命令'))!.find('input').setValue(true)
     await flushPromises()
     expect(store.aiPreferences.autoExecuteReadOnlyCommands).toBe(true)
@@ -16572,14 +16638,14 @@ describe('AppShell', () => {
     expect((autoCompleteSwitch.element as HTMLInputElement).checked).toBe(true)
   })
 
-  it('does not leave AI preference controls visually changed when the config bridge rejects the snapshot', async () => {
+  it('does not leave migrated AI controls visually changed when the config bridge rejects the snapshot', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     const workspace = mount(SettingsWorkspace, {
       global: { plugins: [pinia] }
     })
     const store = useWorkspaceStore()
-    store.setActiveSettingsSection('ai')
+    store.setActiveSettingsSection('models')
     await workspace.vm.$nextTick()
     const savedAiPreferences = {
       ...store.aiPreferences,
@@ -16594,10 +16660,12 @@ describe('AppShell', () => {
     expect((budgetSlider.element as HTMLInputElement).value).toBe('4096')
     await budgetSlider.setValue('5000')
     await flushPromises()
-    expect(store.settingsNotice).toBe('AI 偏好设置保存失败')
+    expect(store.settingsNotice).toBe('AI 设置保存失败')
     expect(store.aiPreferences.thinkingBudgetTokens).toBe(4096)
     expect((budgetSlider.element as HTMLInputElement).value).toBe('4096')
 
+    store.setActiveSettingsSection('aiRemoteHostManagement')
+    await workspace.vm.$nextTick()
     vi.mocked(window.aiops.saveConfig).mockResolvedValueOnce({
       ...store.config,
       aiPreferences: savedAiPreferences
@@ -16606,7 +16674,7 @@ describe('AppShell', () => {
     expect((autoExecuteCheckbox.element as HTMLInputElement).checked).toBe(false)
     await autoExecuteCheckbox.setValue(true)
     await flushPromises()
-    expect(store.settingsNotice).toBe('AI 偏好设置保存失败')
+    expect(store.settingsNotice).toBe('AI 设置保存失败')
     expect(store.aiPreferences.autoExecuteReadOnlyCommands).toBe(false)
     expect((autoExecuteCheckbox.element as HTMLInputElement).checked).toBe(false)
   })
@@ -16618,7 +16686,7 @@ describe('AppShell', () => {
       global: { plugins: [pinia] }
     })
     const store = useWorkspaceStore()
-    store.setActiveSettingsSection('ai')
+    store.setActiveSettingsSection('aiNotifications')
     vi.mocked(window.aiops.listAgentHookInstallers).mockClear()
     vi.mocked(window.aiops.installAgentHook).mockClear()
 
@@ -16646,14 +16714,14 @@ describe('AppShell', () => {
     expect(workspace.text()).toContain('已安装')
   })
 
-  it('persists AI hibernation and notification settings from the AI preferences page', async () => {
+  it('persists AI hibernation and notification settings from the AI notifications page', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     const workspace = mount(SettingsWorkspace, {
       global: { plugins: [pinia] }
     })
     const store = useWorkspaceStore()
-    store.setActiveSettingsSection('ai')
+    store.setActiveSettingsSection('aiNotifications')
     vi.mocked(window.aiops.setAgentHibernationConfig).mockClear()
     vi.mocked(window.aiops.saveConfig).mockClear()
     await workspace.vm.$nextTick()
@@ -16675,6 +16743,11 @@ describe('AppShell', () => {
 
     const desktopNotification = workspace.findAll('.settings-checkbox-item').find((item) => item.text().includes('桌面通知'))!.find('input')
     expect((desktopNotification.element as HTMLInputElement).checked).toBe(true)
+    const notificationAutomationCard = workspace.find('.notification-automation-card')
+    expect(notificationAutomationCard.text()).toContain('Control Socket')
+    expect(notificationAutomationCard.text()).toContain('CLI Helper')
+    expect(notificationAutomationCard.text()).not.toContain('External Codex MCP')
+    expect(workspace.find('.remote-host-management-card').exists()).toBe(false)
     await desktopNotification.setValue(false)
     await flushPromises()
 
@@ -16741,7 +16814,7 @@ describe('AppShell', () => {
     expect((showCloseSwitch.element as HTMLInputElement).checked).toBe(true)
   })
 
-  it('matches External reference-style remaining settings pages for extensions, MCP, skills, rules, shortcuts, privacy, devices, billing, and about', async () => {
+  it('matches External reference-style remaining settings pages for extensions, nested AI agent pages, shortcuts, privacy, devices, billing, and about', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     const panel = mount(SettingsPanel, {
@@ -16755,6 +16828,12 @@ describe('AppShell', () => {
     const clickNav = async (label: string) => {
       await panel.findAll('.settings-nav-item').find((item) => item.text().includes(label))!.trigger('click')
       await workspace.vm.$nextTick()
+      expect(workspace.find('.settings-page-help-button').exists()).toBe(true)
+    }
+    const clickAgentTab = async (label: string) => {
+      await workspace.findAll('.settings-agent-tabs button').find((button) => button.text().includes(label))!.trigger('click')
+      await workspace.vm.$nextTick()
+      expect(panel.findAll('.settings-nav-item').find((item) => item.text().includes('主机Agent'))!.classes()).toContain('active')
       expect(workspace.find('.settings-page-help-button').exists()).toBe(true)
     }
 
@@ -16831,9 +16910,52 @@ describe('AppShell', () => {
     await workspace.findAll('.keyword-highlight-toolbar .settings-button').find((button) => button.text() === 'Close')!.trigger('click')
     expect(store.keywordHighlightEditorOpen).toBe(false)
 
-    await clickNav('MCP')
+    await clickNav('主机Agent')
+    expect(workspace.text()).toContain('对话与主机')
+    expect(workspace.find('.settings-agent-tabs').text()).toContain('MCP')
+    expect(workspace.find('.settings-agent-tabs').text()).toContain('Skills')
+    expect(workspace.find('.settings-agent-tabs').text()).toContain('规则')
+    expect(workspace.find('.settings-agent-tabs').text()).not.toContain('导出 MCP')
+    await clickAgentTab('MCP')
     expect(workspace.text()).toContain('MCP Servers')
     expect(workspace.text()).toContain('filesystem')
+    expect(workspace.text()).not.toContain('外部 Agent MCP 安装器')
+    await clickNav('导出 MCP')
+    await flushPromises()
+    expect(store.activeSettingsSection).toBe('exportMcp')
+    expect(panel.findAll('.settings-nav-item').find((item) => item.text().includes('导出 MCP'))!.classes()).toContain('active')
+    expect(panel.findAll('.settings-nav-item').find((item) => item.text().includes('主机Agent'))!.classes()).not.toContain('active')
+    expect(window.aiops.listExportMcpInstallers).toHaveBeenCalled()
+    expect(workspace.text()).toContain('外部 Agent MCP 安装器')
+    expect(workspace.text()).toContain('Codex')
+    expect(workspace.text()).toContain('Claude Code')
+    expect(workspace.text()).toContain('其他 Agent 手动配置')
+    expect(workspace.find('.external-codex-mcp-card').text()).toContain('aiopsterm_hosts')
+    expect(workspace.find('.export-mcp-manual-card').text()).toContain('复制 JSON 模板')
+    expect(workspace.find('.export-mcp-manual-card').text()).toContain('<aiopsterm-managed-token>')
+    vi.mocked(window.aiops.copyExportMcpConfig).mockClear()
+    vi.mocked(navigator.clipboard.writeText).mockClear()
+    await workspace.find('button[title="复制 JSON 模板"]').trigger('click')
+    expect(window.aiops.copyExportMcpConfig).toHaveBeenCalledWith({ kind: 'json' })
+    expect(navigator.clipboard.writeText).not.toHaveBeenCalled()
+    const resetConfirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(false)
+    vi.mocked(window.aiops.resetExportMcpToken).mockClear()
+    await workspace.findAll('button').find((button) => button.text() === '重新生成 Token')!.trigger('click')
+    expect(resetConfirm).toHaveBeenCalledWith(expect.stringContaining('需要重新安装'))
+    expect(window.aiops.resetExportMcpToken).not.toHaveBeenCalled()
+    resetConfirm.mockReturnValueOnce(true)
+    await workspace.findAll('button').find((button) => button.text() === '重新生成 Token')!.trigger('click')
+    await flushPromises()
+    expect(window.aiops.resetExportMcpToken).toHaveBeenCalled()
+    resetConfirm.mockRestore()
+    vi.mocked(window.aiops.installExportMcp).mockClear()
+    const codexExportInstaller = workspace.findAll('.export-mcp-installer-row').find((row) => row.text().includes('Codex'))!
+    await codexExportInstaller.findAll('button').find((button) => button.text() === '安装')!.trigger('click')
+    await flushPromises()
+    expect(window.aiops.installExportMcp).toHaveBeenCalledWith({ source: 'codex' })
+    expect(store.exportMcpInstallers.find((installer) => installer.source === 'codex')?.installed).toBe(true)
+    await clickNav('主机Agent')
+    await clickAgentTab('MCP')
     await workspace.findAll('.settings-section-title-row .settings-button').find((button) => button.text().includes('Add Server'))!.trigger('click')
     await flushPromises()
     expect(store.mcpConfigEditorOpen).toBe(true)
@@ -16870,7 +16992,7 @@ describe('AppShell', () => {
     expect(JSON.parse(String(vi.mocked(window.aiops.writeMcpConfig).mock.calls.at(-1)?.[0]))).toEqual(mcpConfig)
     await workspace.findAll('.mcp-config-toolbar .settings-button').find((button) => button.text() === 'Close')!.trigger('click')
     expect(store.mcpConfigEditorOpen).toBe(false)
-    await clickNav('MCP')
+    await clickAgentTab('MCP')
     const mcpToolInput = workspace.find('.mcp-tool-item .mcp-operation-input')
     expect((mcpToolInput.element as HTMLTextAreaElement).placeholder).toContain('"path"')
     await mcpToolInput.setValue('{"path":"/tmp/readme.md"}')
@@ -16908,7 +17030,7 @@ describe('AppShell', () => {
     expect(store.mcpServers[0].tools[0].autoApprove).toBe(true)
     expect((workspace.find('.mcp-auto-approve-row input').element as HTMLInputElement).checked).toBe(true)
 
-    await clickNav('Skills')
+    await clickAgentTab('Skills')
     expect(workspace.text()).toContain('incident-triage')
     await workspace.findAll('.settings-action-row button').find((button) => button.text() === 'Create')!.trigger('click')
     expect(store.skillModal.mode).toBe('create')
@@ -16930,7 +17052,7 @@ describe('AppShell', () => {
     expect(store.settingsSkills.some((skill) => skill.name === 'release-check')).toBe(true)
     expect(window.aiops.createSkill).toHaveBeenCalledWith({ name: 'release-check', description: 'Check release state' }, 'Always inspect rollout health before suggestions.')
 
-    await clickNav('规则')
+    await clickAgentTab('规则')
     await workspace.find('.settings-section-title-row .settings-button').trigger('click')
     const ruleTextarea = workspace.find('.rule-edit textarea')
     await ruleTextarea.setValue('新增规则')

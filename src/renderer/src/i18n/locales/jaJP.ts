@@ -15,7 +15,7 @@ export const jaJP = completeLocaleMessages({
   'settings.nav.extensions': '拡張機能',
   'settings.nav.models': 'モデル',
   'settings.nav.billing': '請求',
-  'settings.nav.ai': 'AI 設定',
+  'settings.nav.ai': 'Host Agent',
   'settings.nav.rules': 'ルール',
   'settings.nav.shortcuts': 'ショートカット',
   'settings.nav.trustedDevices': '信頼済みデバイス',

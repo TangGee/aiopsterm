@@ -1,6 +1,6 @@
 # Skills Settings
 
-This page manages local skill packages. Enabled skills can be attached to AI chat context.
+This page lives under `Settings -> Host Agent -> Skills`. It manages local skill packages. Enabled skills can be attached to AI chat context.
 
 ## Top Actions
 

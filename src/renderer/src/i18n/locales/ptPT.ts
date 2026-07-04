@@ -15,7 +15,7 @@ export const ptPT = completeLocaleMessages({
   'settings.nav.extensions': 'Extensões',
   'settings.nav.models': 'Modelos',
   'settings.nav.billing': 'Faturação',
-  'settings.nav.ai': 'Preferências de IA',
+  'settings.nav.ai': 'Host Agent',
   'settings.nav.rules': 'Regras',
   'settings.nav.shortcuts': 'Atalhos',
   'settings.nav.trustedDevices': 'Dispositivos fiáveis',

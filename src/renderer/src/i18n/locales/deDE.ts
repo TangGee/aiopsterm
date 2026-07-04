@@ -15,7 +15,7 @@ export const deDE = completeLocaleMessages({
   'settings.nav.extensions': 'Erweiterungen',
   'settings.nav.models': 'Modelle',
   'settings.nav.billing': 'Abrechnung',
-  'settings.nav.ai': 'AI-Einstellungen',
+  'settings.nav.ai': 'Host Agent',
   'settings.nav.rules': 'Regeln',
   'settings.nav.shortcuts': 'Tastenkürzel',
   'settings.nav.trustedDevices': 'Vertrauensgeräte',

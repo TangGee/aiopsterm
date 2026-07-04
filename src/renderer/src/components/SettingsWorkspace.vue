@@ -74,11 +74,38 @@
         </section>
 
         <section
-          v-else-if="workspace.activeSettingsSection === 'ai'"
+          v-else-if="workspace.activeSettingsSection === 'aiNotifications'"
           class="settings-content-page"
-          data-onboarding-id="settings-ai-preferences-content"
         >
-          <AiPreferenceSettings />
+          <AiNotificationSettings />
+        </section>
+
+        <section
+          v-else-if="workspace.activeSettingsSection === 'exportMcp'"
+          class="settings-content-page"
+        >
+          <ExportMcpSettingsPage />
+        </section>
+
+        <section
+          v-else-if="isAiAgentSettingsSection"
+          class="settings-content-page"
+          data-onboarding-id="settings-ai-remote-host-management-content"
+        >
+          <div class="settings-agent-tabs settings-tab-bar">
+            <button
+              v-for="item in aiAgentSettingsTabs"
+              :key="item.key"
+              :class="{ active: workspace.activeSettingsSection === item.key }"
+              @click="workspace.setActiveSettingsSection(item.key)"
+            >
+              {{ t(item.labelKey) }}
+            </button>
+          </div>
+          <McpSettingsPage v-if="workspace.activeSettingsSection === 'mcp'" />
+          <SkillsSettingsPage v-else-if="workspace.activeSettingsSection === 'skills'" />
+          <RulesSettingsPage v-else-if="workspace.activeSettingsSection === 'rules'" />
+          <AiRemoteHostManagementSettings v-else />
         </section>
 
         <section
@@ -93,27 +120,6 @@
           class="settings-content-page"
         >
           <BillingSettingsPage />
-        </section>
-
-        <section
-          v-else-if="workspace.activeSettingsSection === 'mcp'"
-          class="settings-content-page"
-        >
-          <McpSettingsPage />
-        </section>
-
-        <section
-          v-else-if="workspace.activeSettingsSection === 'skills'"
-          class="settings-content-page"
-        >
-          <SkillsSettingsPage />
-        </section>
-
-        <section
-          v-else-if="workspace.activeSettingsSection === 'rules'"
-          class="settings-content-page"
-        >
-          <RulesSettingsPage />
         </section>
 
         <section
@@ -163,13 +169,18 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
+import type { I18nKey } from '@/i18n'
+import type { SettingSectionKey } from '@/config/settings'
 import { useSettingsWorkspaceContainerRuntime } from '@/services/settings/settingsWorkspaceContainerRuntime'
 
 const {
   AboutSettingsPage,
-  AiPreferenceSettings,
+  AiNotificationSettings,
+  AiRemoteHostManagementSettings,
   BillingSettingsPage,
   ExtensionSettingsPage,
+  ExportMcpSettingsPage,
   GeneralSettings,
   KeywordHighlightEditorPage,
   McpConfigEditorPage,
@@ -189,4 +200,13 @@ const {
   t,
   workspace,
 } = useSettingsWorkspaceContainerRuntime()
+
+const aiAgentSettingsTabs: Array<{ key: SettingSectionKey; labelKey: I18nKey }> = [
+  { key: 'aiRemoteHostManagement', labelKey: 'settings.ai.agentManagement.conversationAndHosts' },
+  { key: 'mcp', labelKey: 'settings.nav.mcp' },
+  { key: 'skills', labelKey: 'settings.nav.skills' },
+  { key: 'rules', labelKey: 'settings.nav.rules' }
+]
+const aiAgentSettingsSections = new Set<SettingSectionKey>(aiAgentSettingsTabs.map((item) => item.key))
+const isAiAgentSettingsSection = computed(() => aiAgentSettingsSections.has(workspace.activeSettingsSection))
 </script>

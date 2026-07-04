@@ -15,7 +15,7 @@ export const ruRU = completeLocaleMessages({
   'settings.nav.extensions': 'Расширения',
   'settings.nav.models': 'Модели',
   'settings.nav.billing': 'Биллинг',
-  'settings.nav.ai': 'Настройки AI',
+  'settings.nav.ai': 'Host Agent',
   'settings.nav.rules': 'Правила',
   'settings.nav.shortcuts': 'Горячие клавиши',
   'settings.nav.trustedDevices': 'Доверенные устройства',

@@ -15,7 +15,7 @@ export const koKR = completeLocaleMessages({
   'settings.nav.extensions': '확장',
   'settings.nav.models': '모델',
   'settings.nav.billing': '결제',
-  'settings.nav.ai': 'AI 환경설정',
+  'settings.nav.ai': 'Host Agent',
   'settings.nav.rules': '규칙',
   'settings.nav.shortcuts': '단축키',
   'settings.nav.trustedDevices': '신뢰 기기',

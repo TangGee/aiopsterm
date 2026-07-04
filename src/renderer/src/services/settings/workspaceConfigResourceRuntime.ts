@@ -44,13 +44,24 @@ export const defaultMcpConfigFile = (): McpConfigFile => ({
   )
 })
 
+const normalizeMcpTransportType = (server: Record<string, unknown>): McpConfigFile['mcpServers'][string]['type'] => {
+  const rawType = typeof server.type === 'string' ? server.type.trim() : ''
+  if (rawType === 'sse') return 'sse'
+  if (rawType === 'streamableHttp' || rawType === 'http' || rawType === 'streamable_http' || rawType === 'streamable-http') return 'streamableHttp'
+  if (rawType === 'stdio') return 'stdio'
+
+  const hasCommand = typeof server.command === 'string' && server.command.trim().length > 0
+  const hasUrl = typeof server.url === 'string' && server.url.trim().length > 0
+  return !hasCommand && hasUrl ? 'streamableHttp' : 'stdio'
+}
+
 export const normalizeMcpConfigFile = (source?: unknown): McpConfigFile => {
   const root = isRecord(source) ? source : {}
   const serverRoot = isRecord(root.mcpServers) ? root.mcpServers : {}
   const mcpServers: McpConfigFile['mcpServers'] = {}
   Object.entries(serverRoot).forEach(([name, value]) => {
     if (!name.trim() || !isRecord(value)) return
-    const type = value.type === 'sse' || value.type === 'streamableHttp' ? value.type : 'stdio'
+    const type = normalizeMcpTransportType(value)
     const autoApprove = Array.isArray(value.autoApprove)
       ? value.autoApprove.filter((item): item is string => typeof item === 'string' && item.trim().length > 0).map((item) => item.trim())
       : undefined

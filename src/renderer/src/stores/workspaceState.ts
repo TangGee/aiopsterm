@@ -107,6 +107,7 @@ import type {
 import type { AgentHibernationConfig } from '@shared/contracts/managedAiSessions'
 import type { ControlNotificationRecord } from '@shared/contracts/control'
 import type { AgentHookInstallerSource, AgentHookInstallerStatus } from '@shared/contracts/agentHooks'
+import type { ExportMcpBridgeStatus, ExportMcpClientSource, ExportMcpClientStatus } from '@shared/contracts/exportMcp'
 
 type AiContextUsage = AiChatContextUsageSnapshot
 type RendererLocalIdPrefix = 'panel' | 'terminal-security' | 'aichat-agent-loop'
@@ -296,6 +297,11 @@ export const createWorkspaceStoreState = () => {
   const agentHookInstallersLoading = ref(false)
   const agentHookInstallerBusySource = ref<AgentHookInstallerSource | ''>('')
   const agentHookInstallerError = ref('')
+  const exportMcpInstallers = ref<ExportMcpClientStatus[]>([])
+  const exportMcpInstallerBridge = ref<ExportMcpBridgeStatus | null>(null)
+  const exportMcpInstallersLoading = ref(false)
+  const exportMcpInstallerBusySource = ref<ExportMcpClientSource | ''>('')
+  const exportMcpInstallerError = ref('')
   const mcpConfigEditorOpen = ref(false)
   const mcpConfigEditorContent = ref(JSON.stringify(defaultMcpConfigFile(), null, 2))
   const mcpConfigEditorError = ref('')
@@ -498,6 +504,11 @@ export const createWorkspaceStoreState = () => {
     agentHookInstallersLoading,
     agentHookInstallerBusySource,
     agentHookInstallerError,
+    exportMcpInstallers,
+    exportMcpInstallerBridge,
+    exportMcpInstallersLoading,
+    exportMcpInstallerBusySource,
+    exportMcpInstallerError,
     mcpConfigEditorOpen,
     mcpConfigEditorContent,
     mcpConfigEditorError,

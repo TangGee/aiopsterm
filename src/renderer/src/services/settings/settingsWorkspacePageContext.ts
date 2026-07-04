@@ -5,6 +5,7 @@ import type { useWorkspaceStore } from '@/stores/workspace'
 import { renderMarkdownDocumentHtml } from '@/services/common/markdownRuntime'
 import type { I18nKey } from '@/i18n'
 import type { AgentHookInstallerStatus } from '@shared/contracts/agentHooks'
+import type { ExportMcpBridgeStatus, ExportMcpClientStatus } from '@shared/contracts/exportMcp'
 import type { SettingsDocumentationPage } from '@shared/contracts/appRuntime'
 
 export type SettingsWorkspaceStore = ReturnType<typeof useWorkspaceStore>
@@ -236,6 +237,53 @@ export const createSettingsWorkspacePageContext = (workspace: SettingsWorkspaceS
   const agentHookInstallerRows = () =>
     agentHookInstallerFallbacks.map((fallback) => workspace.agentHookInstallers.find((installer) => installer.source === fallback.source) || { ...fallback, warnings: [t('settings.ai.agentHook.statusNotLoaded')] })
 
+  const exportMcpBridgeFallback: ExportMcpBridgeStatus = {
+    enabled: false,
+    listening: false,
+    tokenConfigured: false,
+    socketPath: '',
+    serverName: 'aiopsterm_hosts'
+  }
+
+  const exportMcpInstallerFallbacks: ExportMcpClientStatus[] = [
+    {
+      source: 'codex',
+      label: 'Codex',
+      binaryName: 'codex',
+      binaryPath: '',
+      configPath: '~/.codex/config.toml',
+      configExists: false,
+      installed: false,
+      scriptPath: '',
+      runtimePath: '',
+      serverName: 'aiopsterm_hosts',
+      bridge: exportMcpBridgeFallback,
+      warnings: []
+    },
+    {
+      source: 'claude-code',
+      label: 'Claude Code',
+      binaryName: 'claude',
+      binaryPath: '',
+      configPath: '~/.claude.json',
+      configExists: false,
+      installed: false,
+      scriptPath: '',
+      runtimePath: '',
+      serverName: 'aiopsterm_hosts',
+      bridge: exportMcpBridgeFallback,
+      warnings: []
+    }
+  ]
+
+  const exportMcpInstallerRows = () =>
+    exportMcpInstallerFallbacks.map((fallback) => {
+      const client = workspace.exportMcpInstallers.find((installer) => installer.source === fallback.source)
+      if (client) return client
+      const bridge = workspace.exportMcpInstallerBridge || exportMcpBridgeFallback
+      return { ...fallback, bridge, warnings: [t('settings.ai.exportMcp.statusNotLoaded')] }
+    })
+
   const agentHibernationLimits = {
     idleSeconds: { min: 5, max: 604800 },
     maxLiveTerminals: { min: 1, max: 256 },
@@ -251,7 +299,7 @@ export const createSettingsWorkspacePageContext = (workspace: SettingsWorkspaceS
     {
       label: 'CLI Helper',
       descriptionKey: 'settings.ai.automation.cliHelperDescription' as const,
-      value: 'node resources/aiopsterm-control.js list-notifications'
+      value: 'ELECTRON_RUN_AS_NODE=1 "$AIOPSTERM_JS_RUNTIME" "$AIOPSTERM_CONTROL_HELPER_PATH" list-notifications'
     },
     {
       label: 'External Codex MCP',
@@ -518,6 +566,7 @@ export const createSettingsWorkspacePageContext = (workspace: SettingsWorkspaceS
     cursorStyles,
     customBackgroundImage,
     displayModelLabel,
+    exportMcpInstallerRows,
     hasSelectedBackgroundImage,
     infoRow,
     mcpToolArgumentsPlaceholder,

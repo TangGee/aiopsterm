@@ -1,4 +1,5 @@
 import { BrowserWindow, app, net, screen, shell } from 'electron'
+import { existsSync } from 'fs'
 import { join } from 'path'
 import { configureAssetBackendRuntime, configureAssetConnectionRuntime, getAsset, getAssetSecret, getKeychainSecret } from '../assets/assets'
 import type { refreshOrganizationAssets } from '../assets/assets'
@@ -18,6 +19,8 @@ import { configureAppUpdateRuntime } from './appUpdate'
 import { configureChatHistoryBackendRuntime } from '../chat/chatHistory'
 import { configureCodexCliRuntime, refreshCodexConfig } from '../codex/codexCli'
 import { getCodexTerminalBridgeSocketPath } from '../codex/codexTerminalBridge'
+import { configureExportMcpInstallerRuntime, exportMcpScriptPathFor } from '../codex/exportMcpInstaller'
+import { configureExportMcpTokenRuntime, getEffectiveExportMcpToken, rotateStoredExportMcpToken } from '../codex/exportMcpTokenRuntime'
 import { configureControlSocketRuntime, getControlSocketPath } from '../control/controlSocket'
 import { configureDatabaseBackendRuntime } from '../database/database'
 import { configureDatabaseCommentsRuntime } from '../database/databaseComments'
@@ -58,6 +61,7 @@ import {
 } from '@shared/runtimeSwitches'
 import { broadcastWindowEvent } from '@shared/windowEvents'
 import type { KubernetesTerminalDataEvent, KubernetesTerminalExitEvent } from '@shared/contracts/kubernetes'
+import type { TerminalKeyboardInteractiveRequest, TerminalKeyboardInteractiveResponse, TerminalKeyboardInteractiveResult } from '@shared/contracts/terminalSessions'
 import type { UserConfig } from '@shared/contracts/userConfig'
 import type { ControlNotificationRecord, ControlResponse } from '@shared/contracts/control'
 import type { McpConfigFile } from '@shared/contracts/mcp'
@@ -75,6 +79,10 @@ type ConfigureMainRuntimeInput = {
   buildKnowledgeTreeFromDisk: () => Promise<KnowledgeBaseNodeConfig[]>
   loadSkillsFromDisk: () => Promise<SkillUserConfig[]>
   rememberTerminalPassword: (assetId: string, password: string) => void
+  requestTerminalKeyboardInteractive: (request: TerminalKeyboardInteractiveRequest) => Promise<TerminalKeyboardInteractiveResponse>
+  focusTerminalKeyboardInteractive: (request: TerminalKeyboardInteractiveRequest) => boolean | void
+  sendTerminalKeyboardInteractiveResult: (result: TerminalKeyboardInteractiveResult) => void
+  dismissTerminalKeyboardInteractive: (id: string, message?: string) => void
   refreshOrganizationAssets: typeof refreshOrganizationAssets
   writeTerminalBySessionId: (sessionId: string, data: string) => Promise<ControlResponse> | ControlResponse
   showControlNotification: (notification: ControlNotificationRecord) => void
@@ -83,9 +91,29 @@ type ConfigureMainRuntimeInput = {
 }
 
 const shellHomePath = () => String(process.env.HOME || '').trim() || app.getPath('home')
+const jsRuntimeExecutablePath = () => String(process.env.APPIMAGE || '').trim() || process.execPath
 const agentHookScriptPath = () => agentHookScriptPathFor(app.getAppPath(), process.resourcesPath || '', app.getPath('userData'))
+const exportMcpScriptPath = () => exportMcpScriptPathFor(app.getAppPath(), process.resourcesPath || '', app.getPath('userData'))
+const controlHelperScriptPath = () => {
+  const candidates = [
+    join(process.resourcesPath || '', 'aiopsterm-control.js'),
+    join(process.resourcesPath || '', 'resources', 'aiopsterm-control.js'),
+    join(app.getAppPath(), 'resources', 'aiopsterm-control.js')
+  ]
+  return candidates.find((candidate) => candidate && existsSync(candidate)) || candidates[candidates.length - 1]
+}
 
 export const configureMainBackendRuntimes = (input: ConfigureMainRuntimeInput) => {
+  const userDataPath = app.getPath('userData')
+  configureExportMcpTokenRuntime({
+    userDataPath,
+    getEnv: () => process.env
+  })
+  try {
+    getEffectiveExportMcpToken()
+  } catch {
+    // Export MCP will surface token storage errors when the user opens or uses its settings page.
+  }
   configureTerminalSuggestionsRuntime({ getConfig: input.getConfig })
   configureAssetConnectionRuntime({ getConfig: input.getConfig })
   configureDatabaseBackendRuntime({
@@ -118,10 +146,12 @@ export const configureMainBackendRuntimes = (input: ConfigureMainRuntimeInput) =
     getEnv: () => process.env,
     getAgentSocketPath: getAiAgentSessionSocketPath,
     getAgentHookScriptPath: agentHookScriptPath,
-    getControlSocketPath
+    getControlSocketPath,
+    getJsRuntimeExecutable: jsRuntimeExecutablePath,
+    getControlHelperScriptPath: controlHelperScriptPath
   })
   configureControlSocketRuntime({
-    userDataPath: app.getPath('userData'),
+    userDataPath,
     getWindows: () => BrowserWindow.getAllWindows(),
     focusWindow: input.focusWindow,
     getDisplays: () => screen.getAllDisplays().map((display) => ({ id: display.id, label: display.label, bounds: display.bounds, workArea: display.workArea })),
@@ -131,7 +161,16 @@ export const configureMainBackendRuntimes = (input: ConfigureMainRuntimeInput) =
   configureAgentHookInstallerRuntime({
     getHomeDir: shellHomePath,
     getEnv: () => process.env,
-    getAgentHookScriptPath: agentHookScriptPath
+    getAgentHookScriptPath: agentHookScriptPath,
+    getJsRuntimeExecutable: jsRuntimeExecutablePath
+  })
+  configureExportMcpInstallerRuntime({
+    getHomeDir: shellHomePath,
+    getEnv: () => process.env,
+    getExportMcpScriptPath: exportMcpScriptPath,
+    getJsRuntimeExecutable: jsRuntimeExecutablePath,
+    getExportMcpToken: getEffectiveExportMcpToken,
+    resetExportMcpToken: rotateStoredExportMcpToken
   })
   configureManagedAiSessionImportRuntime({
     getHomeDir: shellHomePath,
@@ -167,9 +206,15 @@ export const configureMainBackendRuntimes = (input: ConfigureMainRuntimeInput) =
   void ensureExternalCodexMcpBridgeServer({
     enabled: process.env.AIOPSTERM_EXTERNAL_CODEX_MCP_ENABLE === '1',
     token: process.env.AIOPSTERM_EXTERNAL_CODEX_MCP_TOKEN,
+    getToken: getEffectiveExportMcpToken,
+    getConfig: input.getConfig,
     socketPath: process.env.AIOPSTERM_EXTERNAL_CODEX_MCP_SOCKET,
-    userDataPath: app.getPath('userData'),
-    focusManagedAiSession: input.broadcastManagedAiSessionFocusRequest
+    userDataPath,
+    focusManagedAiSession: input.broadcastManagedAiSessionFocusRequest,
+    requestKeyboardInteractive: input.requestTerminalKeyboardInteractive,
+    focusKeyboardInteractive: input.focusTerminalKeyboardInteractive,
+    sendKeyboardInteractiveResult: input.sendTerminalKeyboardInteractiveResult,
+    dismissKeyboardInteractive: input.dismissTerminalKeyboardInteractive
   })
     .then((externalCodexMcpSocketPath) => {
       if (!externalCodexMcpSocketPath) return
@@ -181,11 +226,11 @@ export const configureMainBackendRuntimes = (input: ConfigureMainRuntimeInput) =
       })
     })
   configureExtensionBackendRuntime({
-    extensionRootDir: join(app.getPath('userData'), 'extensions'),
+    extensionRootDir: join(userDataPath, 'extensions'),
     fetch: (url, init) => net.fetch(url, init)
   })
   configureKubernetesBackendRuntime({
-    stateDir: join(app.getPath('userData'), 'kubernetes'),
+    stateDir: join(userDataPath, 'kubernetes'),
     useSeedData: shouldUseKubernetesSeedData(),
     refreshOrganizationAssets: input.refreshOrganizationAssets
   })
@@ -194,7 +239,7 @@ export const configureMainBackendRuntimes = (input: ConfigureMainRuntimeInput) =
     broadcastWindowEvent(BrowserWindow.getAllWindows(), channel, event)
   })
   configureUserAccountBackendRuntime({
-    stateFilePath: join(app.getPath('userData'), 'user-account.json'),
+    stateFilePath: join(userDataPath, 'user-account.json'),
     useSeedData: shouldUseUserAccountSeedData(),
     loginUrl: process.env.AIOPSTERM_USER_LOGIN_URL,
     accountCenterUrl: process.env.AIOPSTERM_USER_ACCOUNT_CENTER_URL,
@@ -204,19 +249,19 @@ export const configureMainBackendRuntimes = (input: ConfigureMainRuntimeInput) =
     useSeedData: shouldUseSettingsPreferencesSeedData()
   })
   configureAiTodoBackendRuntime({
-    stateFilePath: join(app.getPath('userData'), 'ai-todos.json'),
+    stateFilePath: join(userDataPath, 'ai-todos.json'),
     useSeedData: shouldUseAiTodoSeedData()
   })
   configureChatHistoryBackendRuntime({
-    stateFilePath: join(app.getPath('userData'), 'chat-history.json'),
+    stateFilePath: join(userDataPath, 'chat-history.json'),
     useSeedData: shouldUseChatHistorySeedData()
   })
   configureQuickCommandBackendRuntime({
-    databasePath: join(app.getPath('userData'), 'aiopsterm-state.db'),
+    databasePath: join(userDataPath, 'aiopsterm-state.db'),
     useSeedData: shouldUseQuickCommandsSeedData()
   })
   configureAliasBackendRuntime({
-    databasePath: join(app.getPath('userData'), 'aiopsterm-state.db'),
+    databasePath: join(userDataPath, 'aiopsterm-state.db'),
     useSeedData: shouldUseAliasesSeedData()
   })
   configureAppUpdateRuntime({

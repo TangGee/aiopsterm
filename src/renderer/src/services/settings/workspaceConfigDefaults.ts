@@ -1,6 +1,7 @@
 import type {
   AiPreferencesUserConfig,
   EditorUserConfig,
+  ExportMcpUserConfig,
   KeywordHighlightRuleConfig,
   KeywordHighlightUserConfig,
   KnowledgeSearchRuntimeSnapshot,
@@ -54,6 +55,7 @@ export type SettingsModelOption = {
 export type ExtensionSettings = ExtensionUserConfig
 export type KeywordHighlightSettings = KeywordHighlightUserConfig
 export type SecuritySettings = SecurityUserConfig
+export type ExportMcpSettings = ExportMcpUserConfig
 export type AiPreferenceSettings = AiPreferencesUserConfig
 export type PrivacySettings = PrivacyUserConfig & {
   dataSyncRuntime: PrivacyRuntimeSnapshot['dataSyncRuntime']
@@ -196,6 +198,9 @@ export const defaultConfig: UserConfig = {
     shellIntegrationTimeout: 4
   },
   notifications: { ...defaultNotificationSettings },
+  exportMcp: {
+    allowAgentSshAuthSubmit: false
+  },
   modelSettings: defaultModelSettingsUserConfig,
   shortcuts: [],
   rules: [],
@@ -283,6 +288,10 @@ export const defaultModelProviders: Record<ModelProviderKey, ModelProviderSettin
 export const defaultAiPreferences: AiPreferenceSettings = {
   ...defaultConfig.aiPreferences!,
   proxy: { ...defaultConfig.aiPreferences!.proxy }
+}
+
+export const defaultExportMcpSettings: ExportMcpSettings = {
+  ...defaultConfig.exportMcp!
 }
 
 export const defaultExtensionSettings: ExtensionSettings = {

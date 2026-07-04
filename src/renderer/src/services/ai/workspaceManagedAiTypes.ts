@@ -5,6 +5,7 @@ import type { TerminalCommandExecutionOptions, TerminalSecurityDecision } from '
 import type { TerminalPanel } from '@/services/terminal/terminalPanelRuntime'
 import type { NotificationUserConfig } from '@shared/contracts/appRuntime'
 import type { AgentHookInstallerSource, AgentHookInstallerStatus } from '@shared/contracts/agentHooks'
+import type { ExportMcpBridgeStatus, ExportMcpClientSource, ExportMcpClientStatus } from '@shared/contracts/exportMcp'
 import type { ControlNotificationRecord } from '@shared/contracts/control'
 import type {
   AiAgentSessionSource,
@@ -69,6 +70,11 @@ export type WorkspaceManagedAiControllerState = {
   agentHookInstallersLoading: Ref<boolean>
   agentHookInstallerBusySource: Ref<AgentHookInstallerSource | ''>
   agentHookInstallerError: Ref<string>
+  exportMcpInstallers: Ref<ExportMcpClientStatus[]>
+  exportMcpInstallerBridge: Ref<ExportMcpBridgeStatus | null>
+  exportMcpInstallersLoading: Ref<boolean>
+  exportMcpInstallerBusySource: Ref<ExportMcpClientSource | ''>
+  exportMcpInstallerError: Ref<string>
 }
 
 export type WorkspaceManagedAiControllerDeps = {

@@ -68,6 +68,14 @@ import type {
   AgentHookInstallerStatus as AgentHookInstallerStatusPreload
 } from '../src/shared/preload'
 import type {
+  ExportMcpInstallerOperationResult as ExportMcpInstallerOperationResultContract,
+  ExportMcpClientStatus as ExportMcpClientStatusContract
+} from '../src/shared/contracts/exportMcp'
+import type {
+  ExportMcpInstallerOperationResult as ExportMcpInstallerOperationResultPreload,
+  ExportMcpClientStatus as ExportMcpClientStatusPreload
+} from '../src/shared/preload'
+import type {
   ZmodemStreamOpenResult as ZmodemStreamOpenResultContract,
   ZmodemUploadPickResult as ZmodemUploadPickResultContract
 } from '../src/shared/contracts/zmodem'
@@ -473,6 +481,10 @@ type AgentHookStatusPreloadMatchesContract = AssertAssignable<AgentHookInstaller
 type AgentHookStatusContractMatchesPreload = AssertAssignable<AgentHookInstallerStatusPreload, AgentHookInstallerStatusContract>
 type AgentHookOperationPreloadMatchesContract = AssertAssignable<AgentHookInstallerOperationResultContract, AgentHookInstallerOperationResultPreload>
 type AgentHookOperationContractMatchesPreload = AssertAssignable<AgentHookInstallerOperationResultPreload, AgentHookInstallerOperationResultContract>
+type ExportMcpClientStatusPreloadMatchesContract = AssertAssignable<ExportMcpClientStatusContract, ExportMcpClientStatusPreload>
+type ExportMcpClientStatusContractMatchesPreload = AssertAssignable<ExportMcpClientStatusPreload, ExportMcpClientStatusContract>
+type ExportMcpOperationPreloadMatchesContract = AssertAssignable<ExportMcpInstallerOperationResultContract, ExportMcpInstallerOperationResultPreload>
+type ExportMcpOperationContractMatchesPreload = AssertAssignable<ExportMcpInstallerOperationResultPreload, ExportMcpInstallerOperationResultContract>
 type ZmodemUploadPickPreloadMatchesContract = AssertAssignable<ZmodemUploadPickResultContract, ZmodemUploadPickResultPreload>
 type ZmodemUploadPickContractMatchesPreload = AssertAssignable<ZmodemUploadPickResultPreload, ZmodemUploadPickResultContract>
 type ZmodemStreamOpenPreloadMatchesContract = AssertAssignable<ZmodemStreamOpenResultContract, ZmodemStreamOpenResultPreload>
@@ -842,10 +854,14 @@ describe('shared contract compatibility exports', () => {
       AgentHookStatusPreloadMatchesContract,
       AgentHookStatusContractMatchesPreload,
       AgentHookOperationPreloadMatchesContract,
-      AgentHookOperationContractMatchesPreload
-    ] = [true, true, true, true, true, true, true, true, true, true, true, true]
+      AgentHookOperationContractMatchesPreload,
+      ExportMcpClientStatusPreloadMatchesContract,
+      ExportMcpClientStatusContractMatchesPreload,
+      ExportMcpOperationPreloadMatchesContract,
+      ExportMcpOperationContractMatchesPreload
+    ] = [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true]
 
-    expect(checks).toEqual([true, true, true, true, true, true, true, true, true, true, true, true])
+    expect(checks).toEqual([true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true])
   })
 
   it('keeps ZMODEM contracts compatible through the preload export', () => {

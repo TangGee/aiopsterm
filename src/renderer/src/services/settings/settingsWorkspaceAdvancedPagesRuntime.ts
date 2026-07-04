@@ -1,8 +1,9 @@
 import { computed, defineComponent, h } from 'vue'
-import { BookOpen, ExternalLink, FolderOpen, MessageSquare, Play } from 'lucide-vue-next'
+import { BookOpen, Copy, ExternalLink, FolderOpen, MessageSquare, Play } from 'lucide-vue-next'
 import { settingsSecretPatterns } from '@/config/settings'
 import SettingsJsonEditor from '@/components/settings/SettingsJsonEditor.vue'
 import type { SettingsWorkspacePageContext, SettingsWorkspaceStore, SettingsWorkspaceTranslate } from '@/services/settings/settingsWorkspacePageContext'
+import type { ExportMcpClientStatus } from '@shared/contracts/exportMcp'
 
 export const createSettingsWorkspaceAdvancedPages = (
   workspace: SettingsWorkspaceStore,
@@ -10,6 +11,8 @@ export const createSettingsWorkspaceAdvancedPages = (
   context: SettingsWorkspacePageContext
 ) => {
   const {
+    automationSnippetRows,
+    exportMcpInstallerRows,
     infoRow,
     mcpToolArgumentsPlaceholder,
     radioRow,
@@ -118,6 +121,272 @@ export const createSettingsWorkspaceAdvancedPages = (
                   ])
                 ]
           )
+        ])
+    }
+  })
+
+  const ExportMcpSettingsPage = defineComponent({
+    name: 'ExportMcpSettingsPage',
+    setup() {
+      void workspace.refreshExportMcpInstallers({ silent: true })
+      const externalCodexMcpRows = automationSnippetRows.filter((item) => item.value.startsWith('AIOPSTERM_EXTERNAL_CODEX_MCP'))
+      const tokenPlaceholder = '<aiopsterm-managed-token>'
+      const socketPlaceholder = '<AIOPSTERM_EXTERNAL_CODEX_MCP_SOCKET>'
+      const scriptPlaceholder = '<path-to-aiopsterm-external-codex-mcp.js>'
+      const runtimePlaceholder = '<path-to-aiopsterm-executable>'
+      const shellQuote = (value: string) => `'${value.replace(/'/g, "'\\''")}'`
+
+      const manualTemplateState = () => {
+        const rows = exportMcpInstallerRows()
+        const bridge = workspace.exportMcpInstallerBridge || rows[0]?.bridge
+        const scriptPath = rows.find((client) => client.scriptPath)?.scriptPath || scriptPlaceholder
+        const runtimePath = rows.find((client) => client.runtimePath)?.runtimePath || runtimePlaceholder
+        const socketPath = bridge?.socketPath || socketPlaceholder
+        return { bridge, scriptPath, runtimePath, socketPath }
+      }
+
+      const manualJsonTemplate = () => {
+        const { scriptPath, runtimePath, socketPath } = manualTemplateState()
+        return JSON.stringify(
+          {
+            mcpServers: {
+              aiopsterm_hosts: {
+                type: 'stdio',
+                command: runtimePath,
+                args: [scriptPath],
+                env: {
+                  ELECTRON_RUN_AS_NODE: '1',
+                  AIOPSTERM_EXTERNAL_CODEX_MCP_SOCKET: socketPath,
+                  AIOPSTERM_EXTERNAL_CODEX_MCP_TOKEN: tokenPlaceholder
+                }
+              }
+            }
+          },
+          null,
+          2
+        )
+      }
+
+      const manualCommandTemplate = () => {
+        const { scriptPath, runtimePath, socketPath } = manualTemplateState()
+        return [
+          `ELECTRON_RUN_AS_NODE=${shellQuote('1')}`,
+          `AIOPSTERM_EXTERNAL_CODEX_MCP_SOCKET=${shellQuote(socketPath)}`,
+          `AIOPSTERM_EXTERNAL_CODEX_MCP_TOKEN=${shellQuote(tokenPlaceholder)}`,
+          shellQuote(runtimePath),
+          shellQuote(scriptPath)
+        ].join(' ')
+      }
+
+      const renderSnippet = (item: (typeof automationSnippetRows)[number]) =>
+        h('div', { class: 'automation-snippet-row' }, [
+          h('div', [
+            h('strong', item.label),
+            h('small', t(item.descriptionKey)),
+            h('code', item.value)
+          ]),
+          h(
+            'button',
+            {
+              class: 'settings-button icon-button',
+              title: t('settings.ai.automation.copySnippet', { label: item.label }),
+              onClick: () => workspace.copySettingsText(item.value, item.label)
+            },
+            [h(Copy)]
+          )
+        ])
+
+      const renderManualTemplateRow = (label: string, description: string, value: string, kind: 'json' | 'command') =>
+        h('div', { class: 'automation-snippet-row export-mcp-copy-row' }, [
+          h('div', [
+            h('strong', label),
+            h('small', description),
+            h('code', value)
+          ]),
+          h(
+            'button',
+            {
+              class: 'settings-button icon-button',
+              title: label,
+              onClick: () => workspace.copyExportMcpConfig(kind)
+            },
+            [h(Copy)]
+          )
+        ])
+
+      const resetToken = () => {
+        if (!window.confirm(t('settings.ai.exportMcp.resetTokenConfirm'))) return
+        void workspace.resetExportMcpToken()
+      }
+
+      const updateAgentSshAuthSubmit = (checked: boolean) =>
+        workspace.saveConfig({
+          exportMcp: {
+            ...(workspace.config.exportMcp || {}),
+            allowAgentSshAuthSubmit: checked
+          }
+        })
+
+      const renderAgentSshAuthSubmit = () =>
+        h('div', { class: 'export-mcp-auth-toggle' }, [
+          h('div', [
+            h('strong', t('settings.ai.exportMcp.agentSshAuthSubmitTitle')),
+            h('small', t('settings.ai.exportMcp.agentSshAuthSubmitDescription')),
+            h('em', t('settings.ai.exportMcp.agentSshAuthSubmitWarning'))
+          ]),
+          h('label', { class: 'settings-switch' }, [
+            h('input', {
+              type: 'checkbox',
+              checked: workspace.config.exportMcp?.allowAgentSshAuthSubmit === true,
+              onChange: async (event: Event) => {
+                const input = event.target as HTMLInputElement
+                const checked = input.checked
+                await updateAgentSshAuthSubmit(checked)
+                input.checked = workspace.config.exportMcp?.allowAgentSshAuthSubmit === true
+              }
+            }),
+            h('span')
+          ])
+        ])
+
+      const renderStatusPill = (client: ExportMcpClientStatus) =>
+        h(
+          'span',
+          {
+            class: ['agent-hook-status-pill', client.installed ? 'installed' : client.error ? 'error' : client.binaryPath && client.bridge.tokenConfigured ? 'ready' : 'missing']
+          },
+          client.installed
+            ? t('settings.ai.exportMcp.installed')
+            : client.error
+              ? t('settings.ai.exportMcp.configError')
+              : client.binaryPath && client.bridge.tokenConfigured
+                ? t('settings.ai.exportMcp.ready')
+                : t('settings.ai.exportMcp.notReady')
+        )
+
+      const renderMeta = (label: string, value: string) =>
+        h('div', { class: 'agent-hook-meta-row' }, [
+          h('span', label),
+          h('code', { title: value || t('settings.ai.exportMcp.detectedMissing') }, value || t('settings.ai.exportMcp.detectedMissing'))
+        ])
+
+      const renderBridgeStatus = () => {
+        const bridge = workspace.exportMcpInstallerBridge || exportMcpInstallerRows()[0]?.bridge
+        return h('div', { class: 'export-mcp-bridge-summary' }, [
+          renderMeta(t('settings.ai.exportMcp.serverName'), bridge?.serverName || 'aiopsterm_hosts'),
+          renderMeta(t('settings.ai.exportMcp.socket'), bridge?.socketPath || ''),
+          renderMeta(t('settings.ai.exportMcp.service'), bridge?.enabled ? (bridge.listening ? t('settings.ai.exportMcp.listening') : t('settings.ai.exportMcp.enabledNotListening')) : t('settings.ai.exportMcp.disabled')),
+          renderMeta(t('settings.ai.exportMcp.token'), bridge?.tokenConfigured ? t('settings.ai.exportMcp.configured') : t('settings.ai.exportMcp.missing'))
+        ])
+      }
+
+      const renderInstaller = (client: ExportMcpClientStatus) => {
+        const busy = workspace.exportMcpInstallerBusySource === client.source
+        const baseDisabled = busy || workspace.exportMcpInstallersLoading || !client.scriptPath || !client.binaryPath
+        const installDisabled = baseDisabled || !client.bridge.tokenConfigured
+        return h('article', { class: 'agent-hook-installer-row export-mcp-installer-row' }, [
+          h('div', { class: 'agent-hook-installer-main' }, [
+            h('header', [
+              h('div', [h('strong', client.label), h('small', `${t('settings.ai.agentHook.launchCommand')}: ${client.binaryName}`)]),
+              renderStatusPill(client)
+            ]),
+            h('p', { class: 'agent-hook-description' }, t('settings.ai.exportMcp.clientDescription')),
+            h('div', { class: 'agent-hook-meta-grid' }, [
+              renderMeta('CLI', client.binaryPath),
+              renderMeta(t('settings.ai.exportMcp.config'), client.configPath),
+              renderMeta(t('settings.ai.exportMcp.serverName'), client.serverName),
+              renderMeta(t('settings.ai.exportMcp.helper'), client.scriptPath)
+            ]),
+            client.error ? h('p', { class: 'agent-hook-error' }, client.error) : null,
+            client.warnings.length ? h('ul', { class: 'agent-hook-warnings' }, client.warnings.map((warning) => h('li', warning))) : null
+          ]),
+          h('div', { class: 'agent-hook-installer-actions' }, [
+            h(
+              'button',
+              {
+                class: ['settings-button', client.installed ? '' : 'primary'],
+                disabled: installDisabled,
+                onClick: () => workspace.installExportMcpInstaller(client.source)
+              },
+              busy ? t('common.processing') : client.installed ? t('common.reinstall') : t('common.install')
+            ),
+            h(
+              'button',
+              {
+                class: 'settings-button danger',
+                disabled: baseDisabled || !client.installed,
+                onClick: () => workspace.uninstallExportMcpInstaller(client.source)
+              },
+              t('common.uninstall')
+            )
+          ])
+        ])
+      }
+
+      return () =>
+        h('div', [
+          h('div', { class: 'settings-section-title-row' }, [
+            h('div', { class: 'settings-section-title-with-help' }, [
+              settingsPageTitle(t('settings.ai.exportMcp.title'), 'exportMcp', { compact: true }),
+              h('small', t('settings.ai.exportMcp.subtitle'))
+            ]),
+            h(
+              'button',
+              {
+                class: 'settings-button',
+                disabled: workspace.exportMcpInstallersLoading,
+                onClick: () => workspace.refreshExportMcpInstallers()
+              },
+              workspace.exportMcpInstallersLoading ? t('common.refreshing') : t('common.refresh')
+            )
+          ]),
+          h('div', { class: 'settings-section-card agent-hook-installer-card export-mcp-card external-codex-mcp-card' }, [
+            h('header', { class: 'agent-hook-card-header' }, [
+              h('div', [
+                h('strong', t('settings.ai.exportMcp.installerTitle')),
+                h('small', t('settings.ai.exportMcp.installerSubtitle'))
+              ]),
+              h('div', { class: 'export-mcp-card-actions' }, [
+                h(
+                  'button',
+                  {
+                    class: 'settings-button danger export-mcp-docs-button',
+                    disabled: workspace.exportMcpInstallersLoading,
+                    title: t('settings.ai.exportMcp.resetTokenDescription'),
+                    onClick: resetToken
+                  },
+                  t('settings.ai.exportMcp.resetToken')
+                ),
+                h(
+                  'button',
+                  {
+                    class: 'settings-button export-mcp-docs-button',
+                    onClick: () => workspace.openSettingsDocumentationFile('technical/external-codex-mcp.md')
+                  },
+                  t('settings.ai.automation.externalCodexMcpDocs')
+                )
+              ])
+            ]),
+            workspace.exportMcpInstallerError ? h('p', { class: 'agent-hook-error' }, workspace.exportMcpInstallerError) : null,
+            renderBridgeStatus(),
+            renderAgentSshAuthSubmit(),
+            ...exportMcpInstallerRows().map((client) => renderInstaller(client))
+          ]),
+          h('div', { class: 'settings-section-card automation-settings-card export-mcp-manual-card' }, [
+            h('div', { class: 'agent-hook-card-header' }, [
+              h('div', [
+                h('strong', t('settings.ai.exportMcp.manualTitle')),
+                h('small', t('settings.ai.exportMcp.manualSubtitle'))
+              ])
+            ]),
+            h('p', { class: 'setting-description-no-padding' }, t('settings.ai.exportMcp.manualTokenNotice')),
+            renderManualTemplateRow(t('settings.ai.exportMcp.copyJsonTemplate'), t('settings.ai.exportMcp.copyJsonTemplateDescription'), manualJsonTemplate(), 'json'),
+            renderManualTemplateRow(t('settings.ai.exportMcp.copyCommandTemplate'), t('settings.ai.exportMcp.copyCommandTemplateDescription'), manualCommandTemplate(), 'command')
+          ]),
+          h('div', { class: 'settings-section-card automation-settings-card export-mcp-snippets-card' }, [
+            h('p', { class: 'setting-description-no-padding' }, t('settings.ai.exportMcp.envDescription')),
+            ...externalCodexMcpRows.map((item) => renderSnippet(item))
+          ])
         ])
     }
   })
@@ -268,7 +537,7 @@ export const createSettingsWorkspaceAdvancedPages = (
                       : null
                   ])
                 })
-              )
+          )
         ])
     }
   })
@@ -643,6 +912,7 @@ export const createSettingsWorkspaceAdvancedPages = (
     AboutSettingsPage,
     BillingSettingsPage,
     ExtensionSettingsPage,
+    ExportMcpSettingsPage,
     KeywordHighlightEditorPage,
     McpConfigEditorPage,
     McpSettingsPage,

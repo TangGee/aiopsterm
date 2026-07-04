@@ -3,12 +3,15 @@ import {
   isAgentHibernationConfigData,
   isAgentHookInstallOperationData,
   isAgentHookInstallerSnapshot,
+  isExportMcpInstallOperationData,
+  isExportMcpInstallerSnapshot,
   isManagedAiSessionBulkData,
   isManagedAiSessionHibernateData,
   isManagedAiSessionMutationData,
   isManagedAiSessionSnapshot
 } from '@/services/ai/managedAiBackendGuards'
 import type { AgentHookInstallerSnapshot } from '@shared/contracts/agentHooks'
+import type { ExportMcpInstallerSnapshot } from '@shared/contracts/exportMcp'
 import type { AgentHibernationConfig, ManagedAiSessionRecord } from '@shared/contracts/managedAiSessions'
 
 const session: ManagedAiSessionRecord = {
@@ -70,6 +73,38 @@ const hookSnapshot: AgentHookInstallerSnapshot = {
   ]
 }
 
+const exportMcpSnapshot: ExportMcpInstallerSnapshot = {
+  bridge: {
+    enabled: true,
+    listening: true,
+    tokenConfigured: true,
+    socketPath: '/tmp/aiopsterm-external-codex.sock',
+    serverName: 'aiopsterm_hosts'
+  },
+  clients: [
+    {
+      source: 'codex',
+      label: 'Codex',
+      binaryName: 'codex',
+      binaryPath: '/usr/local/bin/codex',
+      configPath: '/home/unit/.codex/config.toml',
+      configExists: true,
+      installed: true,
+      scriptPath: '/opt/aiopsterm/aiopsterm-external-codex-mcp.js',
+      runtimePath: '/opt/aiopsterm/aiopsterm',
+      serverName: 'aiopsterm_hosts',
+      bridge: {
+        enabled: true,
+        listening: true,
+        tokenConfigured: true,
+        socketPath: '/tmp/aiopsterm-external-codex.sock',
+        serverName: 'aiopsterm_hosts'
+      },
+      warnings: []
+    }
+  ]
+}
+
 describe('managedAiBackendGuards', () => {
   it('validates managed AI session snapshots and mutation envelopes', () => {
     expect(isManagedAiSessionSnapshot(snapshot)).toBe(true)
@@ -93,5 +128,26 @@ describe('managedAiBackendGuards', () => {
     expect(isAgentHookInstallerSnapshot({ installers: [{ ...hookSnapshot.installers[0], source: 'antigravity' }] })).toBe(false)
     expect(isAgentHookInstallOperationData({ operation: 'install', source: 'codex', status: hookSnapshot.installers[0], snapshot: hookSnapshot })).toBe(true)
     expect(isAgentHookInstallOperationData({ operation: 'refresh', source: 'codex', status: hookSnapshot.installers[0], snapshot: hookSnapshot })).toBe(false)
+  })
+
+  it('validates Export MCP installer snapshots and operation data', () => {
+    expect(isExportMcpInstallerSnapshot(exportMcpSnapshot)).toBe(true)
+    expect(isExportMcpInstallerSnapshot({ ...exportMcpSnapshot, clients: [{ ...exportMcpSnapshot.clients[0], source: 'cursor' }] })).toBe(false)
+    expect(
+      isExportMcpInstallOperationData({
+        operation: 'install',
+        source: 'codex',
+        status: exportMcpSnapshot.clients[0],
+        snapshot: exportMcpSnapshot
+      })
+    ).toBe(true)
+    expect(
+      isExportMcpInstallOperationData({
+        operation: 'refresh',
+        source: 'codex',
+        status: exportMcpSnapshot.clients[0],
+        snapshot: exportMcpSnapshot
+      })
+    ).toBe(false)
   })
 })

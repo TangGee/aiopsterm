@@ -1,6 +1,6 @@
 # MCP Servers
 
-aiopsterm stores MCP server configuration in `setting/mcp_settings.json` under the app user-data directory. Open Settings -> MCP and use Add Server/Edit to open the JSON editor.
+aiopsterm stores MCP server configuration in `setting/mcp_settings.json` under the app user-data directory. Open Settings -> Host Agent -> MCP and use Add Server/Edit to open the JSON editor.
 
 New profiles start with an empty MCP config unless the development seed switch `AIOPSTERM_MCP_ENABLE_SEED=1` is set. `NODE_ENV=test` alone does not install sample MCP servers:
 
@@ -9,6 +9,8 @@ New profiles start with an empty MCP config unless the development seed switch `
   "mcpServers": {}
 }
 ```
+
+When the seed switch is enabled, aiopsterm may create development examples such as `filesystem` and `ops-inventory`. `ops-inventory` is a test/demo asset-inventory MCP server name used by aiopsterm tests and local seed data; it is not imported from External reference and is not required by normal usage. If it appears in an existing local config and the `ops-inventory` command is not installed, it will fail with a spawn/ENOENT-style error and can be deleted from `setting/mcp_settings.json`.
 
 ## Transport Discovery
 
@@ -51,13 +53,21 @@ If a server comes only from the JSON config or the backend returns a malformed/m
 }
 ```
 
-Legacy `sse` servers use the same `url`, `timeout`, and `headers` shape.
+aiopsterm also accepts Codex-style remote MCP configs that omit `type`: when a server has `url` and no `command`, it is treated as `streamableHttp`. Common aliases `http`, `streamable_http`, and `streamable-http` are normalized to `streamableHttp` when the config is saved. If both `command` and `url` are present without an explicit supported `type`, aiopsterm keeps the safer stdio interpretation.
+
+Legacy `sse` servers use the same `url`, `timeout`, and `headers` shape with `"type": "sse"`.
 
 Per-tool enabled state is stored separately by aiopsterm, so editing a server command does not force disabled tools back on.
 
+## Filesystem Scope
+
+`@modelcontextprotocol/server-filesystem` works on the local filesystem of the process that starts it. In aiopsterm, that means the app host running the MCP server, for example `/home/tlinux` when the configured argument is `/home/tlinux`.
+
+It does not use aiopsterm's SSH/SFTP asset connections, does not attach to the active terminal session, and does not follow a manual `relay ssh -> ssh target` chain. For files on a relay-connected remote shell, use terminal commands in that shell, or a purpose-built aiopsterm MCP server that explicitly bridges to a known asset SFTP channel or terminal session.
+
 ## Tool Auto Approve
 
-Settings -> MCP tool rows include an Auto Approve switch. The switch writes the tool name to the server's `autoApprove` array in `setting/mcp_settings.json` through the preload/main MCP config bridge, then refreshes the visible tool row from the backend-returned MCP snapshot.
+Settings -> Host Agent -> MCP tool rows include an Auto Approve switch. The switch writes the tool name to the server's `autoApprove` array in `setting/mcp_settings.json` through the preload/main MCP config bridge, then refreshes the visible tool row from the backend-returned MCP snapshot.
 
 Example:
 
@@ -82,6 +92,6 @@ AI chat also consumes the same stored flag. When a configured model returns a Ex
 
 The main process now exposes real runtime operations for discovered `stdio`, `streamableHttp`, and legacy `sse` servers through `window.aiops.callMcpTool(serverName, toolName, args)` and `window.aiops.readMcpResource(serverName, uri)`. The backend opens and initializes a transport client for the configured server, reuses that initialized operation client for later matching tool/resource requests, calls `tools/call` or `resources/read`, and returns the server response in an `ok` envelope. Runtime clients are closed when MCP config changes, when the app quits, or after an operation failure so the next request reconnects from the latest config.
 
-Settings -> MCP also exposes those operations directly on discovered server cards. A tool row accepts a JSON object argument draft and the Run button sends that exact object to the preload bridge. A resource row exposes Read for its discovered URI. The result preview is rendered only from the backend returned `content` or `contents` payload; invalid JSON arguments, disabled servers/tools, missing bridges, malformed success envelopes, or request-mismatched responses fail closed and show an error instead of local sample output.
+Settings -> Host Agent -> MCP also exposes those operations directly on discovered server cards. A tool row accepts a JSON object argument draft and the Run button sends that exact object to the preload bridge. A resource row exposes Read for its discovered URI. The result preview is rendered only from the backend returned `content` or `contents` payload; invalid JSON arguments, disabled servers/tools, missing bridges, malformed success envelopes, or request-mismatched responses fail closed and show an error instead of local sample output.
 
 Disabled servers, disabled tools, missing servers, invalid URLs, connection failures, invalid config files, command failures, HTTP status failures, and MCP protocol errors return structured `ok: false` results. Renderer code should display those backend results and must not synthesize MCP output locally.

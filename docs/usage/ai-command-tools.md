@@ -33,6 +33,6 @@ The AI sidebar has no user-facing task or task-progress concept in Agent or Comm
 
 OpenAI-compatible provider endpoints are called from the main process. Base URLs that already include a version segment such as `/v1` or `/v3` are preserved, and aiopsterm appends only the operation path such as `chat/completions` or `responses`. Add `#` at the end of the Base URL only when the provider needs aiopsterm to skip the automatic `/v1` version prefix; aiopsterm strips the `#` and still appends the selected operation path.
 
-Command execution still follows the terminal security policy from Settings -> AI Preferences -> Security Configuration. Commands blocked by policy stay blocked, commands requiring confirmation show the approval bar, and successful writes are accepted only after the terminal bridge confirms the exact backend session and byte count. Terminal output is rendered only from backend `terminal:data` events.
+Command execution still follows the terminal security policy from Settings -> Host Agent -> Conversation & Hosts -> Security Configuration. Commands blocked by policy stay blocked, commands requiring confirmation show the approval bar, and successful writes are accepted only after the terminal bridge confirms the exact backend session and byte count. Terminal output is rendered only from backend `terminal:data` events.
 
 Chat history and Markdown export preserve `commandExecution` and command-card execution status, so restored or exported conversations keep the original command-tool metadata and the latest visible command-card result.

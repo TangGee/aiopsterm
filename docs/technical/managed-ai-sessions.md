@@ -18,12 +18,12 @@ Every aiopsterm-created local shell receives these environment variables:
 
 Agent hooks can use `AIOPSTERM_AGENT_SOCKET_PATH` to send newline-delimited JSON events to the running app.
 
-`AIOPSTERM_AGENT_HOOK_PATH` points to aiopsterm's helper script. The helper is intentionally explicit and fail-open: the Settings -> AI Preferences hook installer can wire it into Codex/Claude user hooks, but aiopsterm does not silently modify global agent configuration.
+`AIOPSTERM_AGENT_HOOK_PATH` points to aiopsterm's helper script. The helper is intentionally explicit and fail-open: the Settings -> AI Notifications hook installer can wire it into Codex/Claude user hooks, but aiopsterm does not silently modify global agent configuration.
 
 Example hook command shape:
 
 ```sh
-node "$AIOPSTERM_AGENT_HOOK_PATH" --source codex --event PermissionRequest
+ELECTRON_RUN_AS_NODE=1 "$AIOPSTERM_JS_RUNTIME" "$AIOPSTERM_AGENT_HOOK_PATH" --source codex --event PermissionRequest
 ```
 
 The helper reads hook JSON from stdin, adds the managed terminal identifiers, posts the event to `AIOPSTERM_AGENT_SOCKET_PATH`, prints `{}`, and exits zero when it is not running inside an aiopsterm-managed terminal. In installed fail-open mode it still waits for aiopsterm to acknowledge the socket event before returning, so the agent keeps running while the notification is not lost. This keeps agent CLI execution from blocking or failing when aiopsterm is not present.
@@ -55,7 +55,7 @@ Other vibe-coding agents already recognized by the hook/event model include Curs
 
 ## Hook Installer
 
-Settings -> AI Preferences includes an `Agent Hook 安装器` section.
+Settings -> AI Notifications includes an `Agent Hook 安装器` section.
 The renderer reaches `listAgentHookInstallers`, `installAgentHook`, and `uninstallAgentHook` through `src/renderer/src/services/settings/agentHookClient.ts` before crossing the preload/main `agent-hooks:*` boundary, so Settings state owns UI application while the client owns bridge lookup and binding.
 
 - Codex installation merges aiopsterm-owned commands into `~/.codex/hooks.json` and enables the Codex hooks feature in `~/.codex/config.toml` inside an aiopsterm-marked block.
@@ -193,7 +193,7 @@ The notification API is derived from managed session records rather than a separ
 
 On `stop`, aiopsterm can derive a short 2-5 word title from the current turn summary when it is useful. Generic completion text such as `Turn complete` and tool summaries such as `shell: ...` are ignored, and manual titles are never overwritten.
 
-AI-powered auto-naming is controlled by Settings -> AI Preferences -> `AI 会话自动命名` and is off by default. When enabled, the main process builds a bounded context from recent managed session events and asks the currently configured AI model provider for a concise title. The request uses the existing model settings, proxy preferences, and provider timeout path; it does not create AI chat messages, mutate todo state, call Codex/Claude directly, or block the agent hook response. If no model is configured, the provider fails, the title is empty, the session is too short, or the session was manually renamed, aiopsterm keeps the existing title and records only compact audit metadata.
+AI-powered auto-naming is controlled by Settings -> Host Agent -> Conversation & Hosts -> `AI 会话自动命名` and is off by default. When enabled, the main process builds a bounded context from recent managed session events and asks the currently configured AI model provider for a concise title. The request uses the existing model settings, proxy preferences, and provider timeout path; it does not create AI chat messages, mutate todo state, call Codex/Claude directly, or block the agent hook response. If no model is configured, the provider fails, the title is empty, the session is too short, or the session was manually renamed, aiopsterm keeps the existing title and records only compact audit metadata.
 
 Auto-naming emits `managed_ai.session.renamed` with `auto: true` when it changes a title, records `session.auto_named` in the append-only audit log, and records `session.auto_name_skipped` for non-fatal skips that are useful for diagnostics.
 

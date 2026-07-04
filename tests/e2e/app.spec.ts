@@ -905,11 +905,11 @@ test('control socket and external Codex MCP expose automation without browser co
     const settingsOpen = await socketJsonRequest(controlSocket, {
       id: 'e2e-settings-open',
       method: 'settings.open',
-      params: { target: 'ai-preferences' }
+      params: { target: 'ai-remote-host-management' }
     })
-    expect(settingsOpen).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ target: 'ai' }) }))
+    expect(settingsOpen).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ target: 'aiRemoteHostManagement' }) }))
     await expect(page.locator('.settings-workspace-title').getByRole('heading', { name: '设置' })).toBeVisible()
-    await expect(page.locator('.settings-nav-item').filter({ hasText: 'AI 偏好设置' })).toHaveClass(/active/)
+    await expect(page.locator('.settings-nav-item').filter({ hasText: '主机Agent' })).toHaveClass(/active/)
 
     await pollValue(() => socketJsonRequest(externalSocketPath, { id: 'external-ping', method: 'list_hosts', params: {}, token: externalToken }), (response) => response.ok === true)
     mcp = startExternalCodexMcpScript(externalSocketPath, externalToken)
@@ -1739,16 +1739,17 @@ test('aiopsterm primary desktop flows', async () => {
     await page.locator('.provider-card').filter({ hasText: 'LiteLLM' }).locator('.settings-input').first().fill('http://litellm.e2e')
     await page.locator('.provider-card').filter({ hasText: 'LiteLLM' }).getByRole('button', { name: 'Save' }).click()
     await expect(page.getByText('LiteLLM Save 成功')).toBeVisible()
-    await page.locator('.settings-nav-item').filter({ hasText: 'AI 偏好设置' }).click()
+    await page.locator('.settings-nav-item').filter({ hasText: '模型' }).click()
     await expect(page.getByText('启用 Extended Thinking')).toBeVisible()
     await expect(page.getByText('OpenAI Reasoning Effort')).toBeVisible()
     await page.locator('.settings-section-card').filter({ hasText: '启用代理' }).locator('input[type="checkbox"]').first().check()
     await expect(page.getByText('代理类型')).toBeVisible()
-    await page.locator('.settings-nav-item').filter({ hasText: 'MCP' }).click()
+    await page.locator('.settings-nav-item').filter({ hasText: '主机Agent' }).click()
+    await page.locator('.settings-agent-tabs button').filter({ hasText: 'MCP' }).click()
     await expect(page.getByRole('heading', { name: 'MCP Servers' })).toBeVisible()
     await page.locator('.mcp-tool-header button').filter({ hasText: 'read_file' }).click()
     await expect(page.getByText('read_file 已禁用')).toBeVisible()
-    await page.locator('.settings-nav-item').filter({ hasText: 'Skills' }).click()
+    await page.locator('.settings-agent-tabs button').filter({ hasText: 'Skills' }).click()
     await expect(page.getByText('incident-triage')).toBeVisible()
     await page.getByRole('button', { name: 'Create' }).click()
     await page.locator('.settings-modal-card label').filter({ hasText: 'Skill Name' }).locator('input').fill('e-skill')
@@ -1756,7 +1757,7 @@ test('aiopsterm primary desktop flows', async () => {
     await page.locator('.settings-modal-card label').filter({ hasText: 'Content' }).locator('textarea').fill('E2E skill content')
     await page.locator('.settings-modal-card footer button').filter({ hasText: '创建' }).click()
     await expect(page.locator('.skills-list').getByText('e-skill', { exact: true })).toBeVisible()
-    await page.locator('.settings-nav-item').filter({ hasText: '规则' }).click()
+    await page.locator('.settings-agent-tabs button').filter({ hasText: '规则' }).click()
     await page.getByRole('button', { name: /添加规则/ }).click()
     await page.locator('.rules-list textarea').first().fill('E2E rule check')
     await page.locator('.rules-list button').filter({ hasText: '完成' }).click()

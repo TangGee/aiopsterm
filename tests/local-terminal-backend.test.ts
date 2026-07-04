@@ -27,6 +27,8 @@ type LocalTerminalBackend = {
     getAgentSocketPath?: () => string
     getAgentHookScriptPath?: () => string
     getControlSocketPath?: () => string
+    getJsRuntimeExecutable?: () => string
+    getControlHelperScriptPath?: () => string
     getPlatform?: () => NodeJS.Platform
     loadPty?: () => { spawn: (shell: string, args: string[], options: { name: string; cols: number; rows: number; cwd: string; env: NodeJS.ProcessEnv }) => MockPtyProcess } | null
     processRuntime?: {

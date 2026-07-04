@@ -138,210 +138,269 @@ export const createSettingsWorkspaceModelAiPages = (
           ]),
           workspace.addModelSwitch
             ? h('div', [h('h3', 'API 配置'), ...modelProviderCards.map((item) => h(ProviderCard, { key: item.provider, provider: item.provider, title: item.title }))])
+            : null,
+          h('h3', t('settings.ai.general')),
+          h(ModelAiPreferenceSettingsCard),
+          h('h3', t('settings.ai.features')),
+          h(ModelAiFeatureSettingsCard),
+          h('h3', t('settings.ai.modelProxy')),
+          h(ModelProxySettingsCard)
+        ])
+    }
+  })
+
+  const AiNotificationSettings = defineComponent({
+    name: 'AiNotificationSettings',
+    setup() {
+      return () =>
+        h('div', [
+          settingsPageTitle(t('settings.ai.notifications'), 'aiNotifications'),
+          h(NotificationPreferenceSettingsCard),
+          h('h3', t('settings.ai.agentHookInstaller')),
+          h(AgentHookInstallerCard),
+          h('h3', t('settings.ai.hibernation')),
+          h(AgentHibernationSettingsCard),
+          h(NotificationAutomationSettingsCard)
+        ])
+    }
+  })
+
+  const AiRemoteHostManagementSettings = defineComponent({
+    name: 'AiRemoteHostManagementSettings',
+    setup() {
+      return () =>
+        h('div', [
+          settingsPageTitle(t('settings.ai.remoteHostManagement'), 'aiRemoteHostManagement'),
+          h('h3', t('settings.ai.general')),
+          h(RemoteHostBehaviorSettingsCard),
+          h('h3', t('settings.ai.terminal')),
+          h(RemoteHostTerminalSettingsCard)
+        ])
+    }
+  })
+
+  const ModelAiPreferenceSettingsCard = defineComponent({
+    name: 'ModelAiPreferenceSettingsCard',
+    setup() {
+      return () =>
+        h('div', { class: 'settings-section-card ai-preferences' }, [
+          h('label', { class: 'settings-check-line' }, [
+            h('input', {
+              type: 'checkbox',
+              checked: workspace.aiPreferences.enableExtendedThinking,
+              onChange: (event: Event) =>
+                restoreCheckboxOnFailedSave(event, workspace.aiPreferences.enableExtendedThinking, (checked) =>
+                  workspace.updateAiPreferences({ enableExtendedThinking: checked })
+                )
+            }),
+            t('settings.ai.extendedThinking')
+          ]),
+          workspace.aiPreferences.enableExtendedThinking
+            ? h('div', { class: 'settings-budget' }, [
+                h('strong', `Budget: ${workspace.aiPreferences.thinkingBudgetTokens.toLocaleString()} tokens`),
+                h('input', {
+                  type: 'range',
+                  value: workspace.aiPreferences.thinkingBudgetTokens,
+                  min: 1024,
+                  max: 6553,
+                  step: 1,
+                  onInput: (event: Event) =>
+                    restoreInputOnFailedSave(event, workspace.aiPreferences.thinkingBudgetTokens, (value) =>
+                      workspace.updateAiPreferences({ thinkingBudgetTokens: Number(value) })
+                    )
+                }),
+                h('small', t('settings.ai.thinkingBudgetDescription'))
+              ])
             : null
         ])
     }
   })
 
-  const AiPreferenceSettings = defineComponent({
-    name: 'AiPreferenceSettings',
+  const ModelAiFeatureSettingsCard = defineComponent({
+    name: 'ModelAiFeatureSettingsCard',
     setup() {
       return () =>
-        h('div', [
-          settingsPageTitle(t('settings.ai.title'), 'ai'),
-          h('h3', t('settings.ai.agentHookInstaller')),
-          h(AgentHookInstallerCard),
-          h('h3', t('settings.ai.hibernation')),
-          h(AgentHibernationSettingsCard),
-          h('h3', t('settings.ai.notifications')),
-          h(NotificationPreferenceSettingsCard),
-          h('h3', t('settings.ai.automationDeveloper')),
-          h(AutomationDeveloperSettingsCard),
-          h('h3', t('settings.ai.general')),
-          h('div', { class: 'settings-section-card ai-preferences' }, [
-            h('label', { class: 'settings-check-line' }, [
-              h('input', {
-                type: 'checkbox',
-                checked: workspace.aiPreferences.enableExtendedThinking,
-                onChange: (event: Event) =>
-                  restoreCheckboxOnFailedSave(event, workspace.aiPreferences.enableExtendedThinking, (checked) =>
-                    workspace.updateAiPreferences({ enableExtendedThinking: checked })
-                  )
-              }),
-              t('settings.ai.extendedThinking')
-            ]),
-            workspace.aiPreferences.enableExtendedThinking
-              ? h('div', { class: 'settings-budget' }, [
-                  h('strong', `Budget: ${workspace.aiPreferences.thinkingBudgetTokens.toLocaleString()} tokens`),
+        h('div', { class: 'settings-section-card' }, [
+          selectRow(
+            'OpenAI Reasoning Effort',
+            workspace.aiPreferences.reasoningEffort,
+            [
+              { value: 'low', label: t('settings.ai.reasoningLow') },
+              { value: 'medium', label: t('settings.ai.reasoningMedium') },
+              { value: 'high', label: t('settings.ai.reasoningHigh') }
+            ],
+            (value) => workspace.updateAiPreferences({ reasoningEffort: value as any }),
+            true
+          )
+        ])
+    }
+  })
+
+  const ModelProxySettingsCard = defineComponent({
+    name: 'ModelProxySettingsCard',
+    setup() {
+      return () =>
+        h('div', { class: 'settings-section-card' }, [
+          h('label', { class: 'settings-check-line' }, [
+            h('input', {
+              type: 'checkbox',
+              checked: workspace.aiPreferences.needProxy,
+              onChange: (event: Event) =>
+                restoreCheckboxOnFailedSave(event, workspace.aiPreferences.needProxy, (checked) => workspace.updateAiPreferences({ needProxy: checked }))
+            }),
+            t('settings.ai.enableProxy')
+          ]),
+          workspace.aiPreferences.needProxy
+            ? h('div', [
+                h('div', { class: 'proxy-grid' }, [
+                  h('label', [
+                    h('span', t('settings.ai.proxyType')),
+                    h(
+                      'select',
+                      {
+                        class: 'settings-select',
+                        value: workspace.aiPreferences.proxy.type,
+                        onChange: (event: Event) =>
+                          restoreSelectOnFailedSave(event, workspace.aiPreferences.proxy.type, (value) =>
+                            workspace.updateAiPreferences({ proxy: { type: value as any } })
+                          )
+                      },
+                      ['HTTP', 'HTTPS', 'SOCKS4', 'SOCKS5'].map((item) => h('option', { value: item }, item))
+                    )
+                  ]),
+                  h('label', [
+                    h('span', 'Host'),
+                    h('input', {
+                      class: 'settings-input',
+                      value: workspace.aiPreferences.proxy.host,
+                      onChange: (event: Event) =>
+                        restoreInputOnFailedSave(event, workspace.aiPreferences.proxy.host, (value) => workspace.updateAiPreferences({ proxy: { host: value } }))
+                    })
+                  ]),
+                  h('label', [
+                    h('span', 'Port'),
+                    h('input', {
+                      class: 'settings-input',
+                      type: 'number',
+                      min: 1,
+                      max: 65535,
+                      value: workspace.aiPreferences.proxy.port,
+                      onChange: (event: Event) =>
+                        restoreInputOnFailedSave(event, workspace.aiPreferences.proxy.port, (value) =>
+                          workspace.updateAiPreferences({ proxy: { port: Number(value) } })
+                        )
+                    })
+                  ])
+                ]),
+                h('label', { class: 'settings-check-line' }, [
                   h('input', {
-                    type: 'range',
-                    value: workspace.aiPreferences.thinkingBudgetTokens,
-                    min: 1024,
-                    max: 6553,
-                    step: 1,
-                    onInput: (event: Event) =>
-                      restoreInputOnFailedSave(event, workspace.aiPreferences.thinkingBudgetTokens, (value) =>
-                        workspace.updateAiPreferences({ thinkingBudgetTokens: Number(value) })
+                    type: 'checkbox',
+                    checked: workspace.aiPreferences.proxy.enableProxyIdentity,
+                    onChange: (event: Event) =>
+                      restoreCheckboxOnFailedSave(event, workspace.aiPreferences.proxy.enableProxyIdentity, (checked) =>
+                        workspace.updateAiPreferences({ proxy: { enableProxyIdentity: checked } })
                       )
                   }),
-                  h('small', t('settings.ai.thinkingBudgetDescription'))
-                ])
-              : null,
-            h(SettingsCheckbox, {
-              label: t('settings.ai.autoExecuteReadOnly'),
-              description: t('settings.ai.autoExecuteReadOnlyDescription'),
-              checked: workspace.aiPreferences.autoExecuteReadOnlyCommands,
-              onChange: (checked: boolean) => workspace.updateAiPreferences({ autoExecuteReadOnlyCommands: checked })
-            }),
-            h(SettingsCheckbox, {
-              label: t('settings.ai.commandOutputFiltering'),
-              description: t('settings.ai.commandOutputFilteringDescription'),
-              checked: workspace.aiPreferences.commandOutputFilteringEnabled,
-              onChange: (checked: boolean) => workspace.updateAiPreferences({ commandOutputFilteringEnabled: checked })
-            }),
-            h(SettingsCheckbox, {
-              label: t('settings.ai.kbSearch'),
-              description: t('settings.ai.kbSearchDescription'),
-              checked: workspace.aiPreferences.kbSearchEnabled,
-              onChange: (checked: boolean) => workspace.updateAiPreferences({ kbSearchEnabled: checked })
-            }),
-            h(SettingsCheckbox, {
-              label: t('settings.ai.experienceExtraction'),
-              description: t('settings.ai.experienceExtractionDescription'),
-              checked: workspace.aiPreferences.experienceExtractionEnabled,
-              onChange: (checked: boolean) => workspace.updateAiPreferences({ experienceExtractionEnabled: checked })
-            }),
-            h(SettingsCheckbox, {
-              label: t('settings.ai.managedAiAutoNaming'),
-              description: t('settings.ai.managedAiAutoNamingDescription'),
-              checked: workspace.aiPreferences.managedAiAutoNamingEnabled,
-              onChange: (checked: boolean) => workspace.updateAiPreferences({ managedAiAutoNamingEnabled: checked })
-            }),
-            h(SettingsCheckbox, {
-              label: t('settings.ai.autoApproval'),
-              description: t('settings.ai.autoApprovalDescription'),
-              checked: workspace.aiPreferences.autoApproval,
-              onboardingId: 'settings-ai-auto-approval',
-              onChange: (checked: boolean) => workspace.updateAiPreferences({ autoApproval: checked })
-            }),
-            h('div', { class: 'security-config-row' }, [
-              h('span', t('settings.ai.securityConfig')),
-              h('button', { class: 'settings-button', onClick: () => workspace.openSecurityConfigEditor() }, t('settings.ai.openSecurityConfig'))
-            ])
-          ]),
-          h('h3', t('settings.ai.features')),
-          h('div', { class: 'settings-section-card' }, [
-            selectRow(
-              'OpenAI Reasoning Effort',
-              workspace.aiPreferences.reasoningEffort,
-              [
-                { value: 'low', label: t('settings.ai.reasoningLow') },
-                { value: 'medium', label: t('settings.ai.reasoningMedium') },
-                { value: 'high', label: t('settings.ai.reasoningHigh') }
-              ],
-              (value) => workspace.updateAiPreferences({ reasoningEffort: value as any }),
-              true
-            )
-          ]),
-          h('h3', t('settings.ai.modelProxy')),
-          h('div', { class: 'settings-section-card' }, [
-            h('label', { class: 'settings-check-line' }, [
-              h('input', {
-                type: 'checkbox',
-                checked: workspace.aiPreferences.needProxy,
-                onChange: (event: Event) =>
-                  restoreCheckboxOnFailedSave(event, workspace.aiPreferences.needProxy, (checked) => workspace.updateAiPreferences({ needProxy: checked }))
-              }),
-              t('settings.ai.enableProxy')
-            ]),
-            workspace.aiPreferences.needProxy
-              ? h('div', [
-                  h('div', { class: 'proxy-grid' }, [
-                    h('label', [
-                      h('span', t('settings.ai.proxyType')),
-                      h(
-                        'select',
-                        {
-                          class: 'settings-select',
-                          value: workspace.aiPreferences.proxy.type,
+                  t('settings.ai.enableProxyIdentity')
+                ]),
+                workspace.aiPreferences.proxy.enableProxyIdentity
+                  ? h('div', { class: 'proxy-grid credentials' }, [
+                      h('label', [
+                        h('span', 'Username'),
+                        h('input', {
+                          class: 'settings-input',
+                          value: workspace.aiPreferences.proxy.username,
                           onChange: (event: Event) =>
-                            restoreSelectOnFailedSave(event, workspace.aiPreferences.proxy.type, (value) =>
-                              workspace.updateAiPreferences({ proxy: { type: value as any } })
+                            restoreInputOnFailedSave(event, workspace.aiPreferences.proxy.username, (value) =>
+                              workspace.updateAiPreferences({ proxy: { username: value } })
                             )
-                        },
-                        ['HTTP', 'HTTPS', 'SOCKS4', 'SOCKS5'].map((item) => h('option', { value: item }, item))
-                      )
-                    ]),
-                    h('label', [
-                      h('span', 'Host'),
-                      h('input', {
-                        class: 'settings-input',
-                        value: workspace.aiPreferences.proxy.host,
-                        onChange: (event: Event) =>
-                          restoreInputOnFailedSave(event, workspace.aiPreferences.proxy.host, (value) => workspace.updateAiPreferences({ proxy: { host: value } }))
-                      })
-                    ]),
-                    h('label', [
-                      h('span', 'Port'),
-                      h('input', {
-                        class: 'settings-input',
-                        type: 'number',
-                        min: 1,
-                        max: 65535,
-                        value: workspace.aiPreferences.proxy.port,
-                        onChange: (event: Event) =>
-                          restoreInputOnFailedSave(event, workspace.aiPreferences.proxy.port, (value) =>
-                            workspace.updateAiPreferences({ proxy: { port: Number(value) } })
-                          )
-                      })
-                    ])
-                  ]),
-                  h('label', { class: 'settings-check-line' }, [
-                    h('input', {
-                      type: 'checkbox',
-                      checked: workspace.aiPreferences.proxy.enableProxyIdentity,
-                      onChange: (event: Event) =>
-                        restoreCheckboxOnFailedSave(event, workspace.aiPreferences.proxy.enableProxyIdentity, (checked) =>
-                          workspace.updateAiPreferences({ proxy: { enableProxyIdentity: checked } })
-                        )
-                    }),
-                    t('settings.ai.enableProxyIdentity')
-                  ]),
-                  workspace.aiPreferences.proxy.enableProxyIdentity
-                    ? h('div', { class: 'proxy-grid credentials' }, [
-                        h('label', [
-                          h('span', 'Username'),
-                          h('input', {
-                            class: 'settings-input',
-                            value: workspace.aiPreferences.proxy.username,
-                            onChange: (event: Event) =>
-                              restoreInputOnFailedSave(event, workspace.aiPreferences.proxy.username, (value) =>
-                                workspace.updateAiPreferences({ proxy: { username: value } })
-                              )
-                          })
-                        ]),
-                        h('label', [
-                          h('span', 'Password'),
-                          h('input', {
-                            class: 'settings-input',
-                            type: 'password',
-                            value: workspace.aiPreferences.proxy.password,
-                            onChange: (event: Event) =>
-                              restoreInputOnFailedSave(event, workspace.aiPreferences.proxy.password, (value) =>
-                                workspace.updateAiPreferences({ proxy: { password: value } })
-                              )
-                          })
-                        ])
+                        })
+                      ]),
+                      h('label', [
+                        h('span', 'Password'),
+                        h('input', {
+                          class: 'settings-input',
+                          type: 'password',
+                          value: workspace.aiPreferences.proxy.password,
+                          onChange: (event: Event) =>
+                            restoreInputOnFailedSave(event, workspace.aiPreferences.proxy.password, (value) =>
+                              workspace.updateAiPreferences({ proxy: { password: value } })
+                            )
+                        })
                       ])
-                    : null
-                ])
-              : null
-          ]),
-          h('h3', t('settings.ai.terminal')),
-          h('div', { class: 'settings-section-card' }, [
-            numberRow(t('settings.ai.shellIntegrationTimeout'), workspace.aiPreferences.shellIntegrationTimeout, 1, 300, (value) => workspace.updateAiPreferences({ shellIntegrationTimeout: value }), 1, true),
-            h('p', { class: 'setting-description-no-padding' }, t('settings.ai.shellIntegrationTimeoutDescription'))
+                    ])
+                  : null
+              ])
+            : null
+        ])
+    }
+  })
+
+  const RemoteHostBehaviorSettingsCard = defineComponent({
+    name: 'RemoteHostBehaviorSettingsCard',
+    setup() {
+      return () =>
+        h('div', { class: 'settings-section-card ai-preferences' }, [
+          h(SettingsCheckbox, {
+            label: t('settings.ai.autoExecuteReadOnly'),
+            description: t('settings.ai.autoExecuteReadOnlyDescription'),
+            checked: workspace.aiPreferences.autoExecuteReadOnlyCommands,
+            onChange: (checked: boolean) => workspace.updateAiPreferences({ autoExecuteReadOnlyCommands: checked })
+          }),
+          h(SettingsCheckbox, {
+            label: t('settings.ai.commandOutputFiltering'),
+            description: t('settings.ai.commandOutputFilteringDescription'),
+            checked: workspace.aiPreferences.commandOutputFilteringEnabled,
+            onChange: (checked: boolean) => workspace.updateAiPreferences({ commandOutputFilteringEnabled: checked })
+          }),
+          h(SettingsCheckbox, {
+            label: t('settings.ai.kbSearch'),
+            description: t('settings.ai.kbSearchDescription'),
+            checked: workspace.aiPreferences.kbSearchEnabled,
+            onChange: (checked: boolean) => workspace.updateAiPreferences({ kbSearchEnabled: checked })
+          }),
+          h(SettingsCheckbox, {
+            label: t('settings.ai.experienceExtraction'),
+            description: t('settings.ai.experienceExtractionDescription'),
+            checked: workspace.aiPreferences.experienceExtractionEnabled,
+            onChange: (checked: boolean) => workspace.updateAiPreferences({ experienceExtractionEnabled: checked })
+          }),
+          h(SettingsCheckbox, {
+            label: t('settings.ai.managedAiAutoNaming'),
+            description: t('settings.ai.managedAiAutoNamingDescription'),
+            checked: workspace.aiPreferences.managedAiAutoNamingEnabled,
+            onChange: (checked: boolean) => workspace.updateAiPreferences({ managedAiAutoNamingEnabled: checked })
+          }),
+          h(SettingsCheckbox, {
+            label: t('settings.ai.autoApproval'),
+            description: t('settings.ai.autoApprovalDescription'),
+            checked: workspace.aiPreferences.autoApproval,
+            onboardingId: 'settings-ai-auto-approval',
+            onChange: (checked: boolean) => workspace.updateAiPreferences({ autoApproval: checked })
+          }),
+          h('div', { class: 'security-config-row' }, [
+            h('span', t('settings.ai.securityConfig')),
+            h('button', { class: 'settings-button', onClick: () => workspace.openSecurityConfigEditor() }, t('settings.ai.openSecurityConfig'))
           ])
+        ])
+    }
+  })
+
+  const RemoteHostTerminalSettingsCard = defineComponent({
+    name: 'RemoteHostTerminalSettingsCard',
+    setup() {
+      return () =>
+        h('div', { class: 'settings-section-card' }, [
+          numberRow(
+            t('settings.ai.shellIntegrationTimeout'),
+            workspace.aiPreferences.shellIntegrationTimeout,
+            1,
+            300,
+            (value) => workspace.updateAiPreferences({ shellIntegrationTimeout: value }),
+            1,
+            true
+          ),
+          h('p', { class: 'setting-description-no-padding' }, t('settings.ai.shellIntegrationTimeoutDescription'))
         ])
     }
   })
@@ -502,9 +561,10 @@ export const createSettingsWorkspaceModelAiPages = (
     }
   })
 
-  const AutomationDeveloperSettingsCard = defineComponent({
-    name: 'AutomationDeveloperSettingsCard',
+  const NotificationAutomationSettingsCard = defineComponent({
+    name: 'NotificationAutomationSettingsCard',
     setup() {
+      const notificationAutomationRows = automationSnippetRows.filter((item) => !item.value.startsWith('AIOPSTERM_EXTERNAL_CODEX_MCP'))
       const renderSnippet = (item: (typeof automationSnippetRows)[number]) =>
         h('div', { class: 'automation-snippet-row' }, [
           h('div', [
@@ -524,9 +584,9 @@ export const createSettingsWorkspaceModelAiPages = (
         ])
 
       return () =>
-        h('div', { class: 'settings-section-card automation-settings-card' }, [
+        h('div', { class: 'settings-section-card automation-settings-card notification-automation-card' }, [
           h('p', { class: 'setting-description-no-padding' }, t('settings.ai.automation.description')),
-          ...automationSnippetRows.map((item) => renderSnippet(item)),
+          ...notificationAutomationRows.map((item) => renderSnippet(item)),
           h('div', { class: 'settings-action-row' }, [
             h(
               'button',
@@ -535,14 +595,6 @@ export const createSettingsWorkspaceModelAiPages = (
                 onClick: () => workspace.openSettingsDocumentationFile('technical/control-socket.md')
               },
               t('settings.ai.automation.controlProtocolDocs')
-            ),
-            h(
-              'button',
-              {
-                class: 'settings-button',
-                onClick: () => workspace.openSettingsDocumentationFile('technical/external-codex-mcp.md')
-              },
-              t('settings.ai.automation.externalCodexMcpDocs')
             )
           ])
         ])
@@ -724,7 +776,8 @@ export const createSettingsWorkspaceModelAiPages = (
   })
 
   return {
-    AiPreferenceSettings,
+    AiNotificationSettings,
+    AiRemoteHostManagementSettings,
     ModelSettings
   }
 }

@@ -166,6 +166,10 @@ export type NotificationUserConfig = {
   controlNotificationBell: boolean
 }
 
+export type ExportMcpUserConfig = {
+  allowAgentSshAuthSubmit: boolean
+}
+
 export type KnowledgeSearchRuntimeApplyInput = {
   previousEnabled: boolean
   nextEnabled: boolean
@@ -325,8 +329,10 @@ export type SettingsDocumentationPage =
   | 'extensions'
   | 'models'
   | 'billing'
-  | 'ai'
+  | 'aiNotifications'
+  | 'aiRemoteHostManagement'
   | 'mcp'
+  | 'exportMcp'
   | 'skills'
   | 'rules'
   | 'shortcuts'

@@ -197,8 +197,8 @@ export const createWorkspaceSettingsGuideController = (
       rightPanelOpen.value = false
       if (stepId === 'terminal-tab' || stepId === 'terminal-options') {
         activeSettingsSection.value = 'terminal'
-      } else if (stepId === 'ai-preferences-tab' || stepId === 'ai-preferences-content' || stepId === 'ai-auto-approval') {
-        activeSettingsSection.value = 'ai'
+      } else if (stepId === 'ai-remote-host-management-tab' || stepId === 'ai-remote-host-management-content' || stepId === 'ai-auto-approval') {
+        activeSettingsSection.value = 'aiRemoteHostManagement'
       } else {
         activeSettingsSection.value = 'general'
       }

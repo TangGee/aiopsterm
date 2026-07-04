@@ -1,5 +1,5 @@
 import type { Component } from 'vue'
-import { BookOpen, Bot, Box, CreditCard, Info, Keyboard, Lock, Plug, Settings, ShieldCheck, SlidersHorizontal, Smartphone, SquareTerminal, Zap } from 'lucide-vue-next'
+import { Bell, BookOpen, Bot, Box, CreditCard, Info, Keyboard, Lock, Server, Settings, Share2, Smartphone, SquareTerminal } from 'lucide-vue-next'
 import { localeDisplayNames, supportedLocales, type I18nKey } from '@/i18n/messages'
 import auroraGlassBackground from '@/assets/backgrounds/aurora-glass.webp'
 import coastDuskSoftBackground from '@/assets/backgrounds/coast-dusk-soft.webp'
@@ -14,7 +14,10 @@ export type SettingSectionKey =
   | 'models'
   | 'billing'
   | 'ai'
+  | 'aiNotifications'
+  | 'aiRemoteHostManagement'
   | 'mcp'
+  | 'exportMcp'
   | 'skills'
   | 'rules'
   | 'shortcuts'
@@ -37,10 +40,9 @@ export const settingsNavItems: SettingsNavItem[] = [
   { key: 'extensions', label: '扩展', labelKey: 'settings.nav.extensions', icon: Box },
   { key: 'models', label: '模型', labelKey: 'settings.nav.models', icon: Bot },
   { key: 'billing', label: '计费概览', labelKey: 'settings.nav.billing', icon: CreditCard },
-  { key: 'ai', label: 'AI 偏好设置', labelKey: 'settings.nav.ai', icon: SlidersHorizontal },
-  { key: 'mcp', label: 'MCP', labelKey: 'settings.nav.mcp', icon: Plug },
-  { key: 'skills', label: 'Skills', labelKey: 'settings.nav.skills', icon: Zap },
-  { key: 'rules', label: '规则', labelKey: 'settings.nav.rules', icon: ShieldCheck },
+  { key: 'aiNotifications', label: 'AI 通知', labelKey: 'settings.nav.aiNotifications', icon: Bell },
+  { key: 'aiRemoteHostManagement', label: '主机Agent', labelKey: 'settings.nav.aiRemoteHostManagement', icon: Server },
+  { key: 'exportMcp', label: '导出 MCP', labelKey: 'settings.nav.exportMcp', icon: Share2 },
   { key: 'shortcuts', label: '快捷键', labelKey: 'settings.nav.shortcuts', icon: Keyboard },
   { key: 'trustedDevices', label: '可信设备', labelKey: 'settings.nav.trustedDevices', icon: Smartphone },
   { key: 'privacy', label: '隐私', labelKey: 'settings.nav.privacy', icon: Lock },

@@ -4,6 +4,7 @@
 - [AI Command Tools](ai-command-tools.md)
 - [Development Commands](development-commands.md)
 - [Desktop Protocol](desktop-protocol.md)
+- [Installation](installation.md)
 - [Kubernetes](kubernetes.md)
 - [Knowledge Base](knowledge-base.md)
 - [MCP Servers](mcp-servers.md)

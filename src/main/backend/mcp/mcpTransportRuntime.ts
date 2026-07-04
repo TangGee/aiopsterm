@@ -241,7 +241,7 @@ const createMcpStdioClient = (server: McpConfigFileServer, timeoutMs: number): M
   const send = (message: JsonRpcMessage) => {
     if (closed || child.killed) throw new Error('MCP server process is not available.')
     const body = JSON.stringify({ jsonrpc: '2.0', ...message })
-    child.stdin.write(`Content-Length: ${Buffer.byteLength(body, 'utf8')}\r\n\r\n${body}`)
+    child.stdin.write(`${body}\n`)
   }
 
   const request = (method: string, params?: unknown) =>
@@ -561,11 +561,22 @@ const createMcpLegacySseClient = async (server: McpConfigFileServer, timeoutMs: 
   return { request, notify, close }
 }
 
+const mcpTransportTypeForServer = (server: McpConfigFileServer): 'stdio' | 'streamableHttp' | 'sse' | string => {
+  const rawType = cleanText((server as { type?: unknown }).type)
+  if (rawType === 'stdio' || rawType === 'sse' || rawType === 'streamableHttp') return rawType
+  if (rawType === 'http' || rawType === 'streamable_http' || rawType === 'streamable-http') return 'streamableHttp'
+
+  const hasCommand = cleanText(server.command).length > 0
+  const hasUrl = cleanText(server.url).length > 0
+  return !hasCommand && hasUrl ? 'streamableHttp' : rawType || 'stdio'
+}
+
 const createMcpClient = async (server: McpConfigFileServer, timeoutMs: number): Promise<McpClient> => {
-  if (server.type === 'stdio') return createMcpStdioClient(server, timeoutMs)
-  if (server.type === 'streamableHttp') return createMcpStreamableHttpClient(server, timeoutMs)
-  if (server.type === 'sse') return createMcpLegacySseClient(server, timeoutMs)
-  throw new Error(`MCP ${server.type} transport is not supported by aiopsterm.`)
+  const transportType = mcpTransportTypeForServer(server)
+  if (transportType === 'stdio') return createMcpStdioClient(server, timeoutMs)
+  if (transportType === 'streamableHttp') return createMcpStreamableHttpClient(server, timeoutMs)
+  if (transportType === 'sse') return createMcpLegacySseClient(server, timeoutMs)
+  throw new Error(`MCP ${transportType} transport is not supported by aiopsterm.`)
 }
 
 export const initializeMcpClient = async (server: McpConfigFileServer, options: Pick<McpDiscoveryOptions, 'clientName' | 'clientVersion' | 'timeoutMs' | 'maxTimeoutMs'>) => {

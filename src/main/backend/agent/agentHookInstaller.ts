@@ -46,6 +46,7 @@ type AgentHookInstallerRuntimeConfig = {
   getHomeDir?: () => string
   getPlatform?: () => PlatformRuntime
   getAgentHookScriptPath?: () => string
+  getJsRuntimeExecutable?: () => string
   readFile?: typeof readFile
   writeFile?: typeof writeFile
   rm?: typeof rm
@@ -61,6 +62,7 @@ export const configureAgentHookInstallerRuntime = (config: AgentHookInstallerRun
   runtimeConfig.getHomeDir = config.getHomeDir
   runtimeConfig.getPlatform = config.getPlatform
   runtimeConfig.getAgentHookScriptPath = config.getAgentHookScriptPath
+  runtimeConfig.getJsRuntimeExecutable = config.getJsRuntimeExecutable
   runtimeConfig.readFile = config.readFile
   runtimeConfig.writeFile = config.writeFile
   runtimeConfig.rm = config.rm
@@ -78,6 +80,7 @@ const getRm = () => runtimeConfig.rm || rm
 const getMkdir = () => runtimeConfig.mkdir || mkdir
 const getAccess = () => runtimeConfig.access || access
 const getStat = () => runtimeConfig.stat || stat
+const getJsRuntimeExecutable = () => cleanText(runtimeConfig.getJsRuntimeExecutable?.()) || cleanText(getEnv().APPIMAGE) || process.execPath
 
 const definitionFor = (source: AgentHookInstallerSource) => hookDefinitions.find((definition) => definition.source === source)
 
@@ -127,7 +130,7 @@ const findBinary = async (binaryName: string, env: NodeJS.ProcessEnv = getEnv())
 const hookScriptPath = () => cleanText(runtimeConfig.getAgentHookScriptPath?.())
 
 export const agentHookCommandFor = (source: AgentHookInstallerSource, hookEvent: string, scriptPath = hookScriptPath()) =>
-  renderAgentHookCommandFor(source, hookEvent, scriptPath, getPlatform())
+  renderAgentHookCommandFor(source, hookEvent, scriptPath, getPlatform(), getJsRuntimeExecutable())
 
 const openCodeConfigPathFor = (definition: AgentHookDefinition, env: NodeJS.ProcessEnv = getEnv()) => join(configDirFor(definition, env), 'opencode.json')
 
@@ -204,6 +207,9 @@ const statusForDefinition = async (definition: AgentHookDefinition): Promise<Age
       const config = parseConfigJson(configRaw, configPath)
       status.installed = configHasOwnedHooks(config)
     }
+    if (status.installed && !configRaw.includes('ELECTRON_RUN_AS_NODE')) {
+      status.warnings.push('aiopsterm hook is installed with a legacy JavaScript runtime command; reinstall this hook to use the packaged aiopsterm runtime')
+    }
   } catch (error) {
     status.error = error instanceof Error ? error.message : String(error)
   }
@@ -245,13 +251,13 @@ const installDefinition = async (definition: AgentHookDefinition): Promise<Agent
   }
   if (definition.yamlTemplate) {
     const existingRaw = (await pathExists(configPath)) ? String(await getReadFile()(configPath, 'utf-8')) : ''
-    await getWriteFile()(configPath, installRovoDevYaml(existingRaw, definition, scriptPath), 'utf-8')
+    await getWriteFile()(configPath, installRovoDevYaml(existingRaw, definition, scriptPath, getPlatform(), getJsRuntimeExecutable()), 'utf-8')
     const snapshot = await listAgentHookInstallers()
     return { ok: true, data: { operation: 'install', source: definition.source, status: snapshot.installers.find((item) => item.source === definition.source)!, snapshot } }
   }
   const existingRaw = (await pathExists(configPath)) ? String(await getReadFile()(configPath, 'utf-8')) : ''
   const existing = parseConfigJson(existingRaw, configPath)
-  const merged = mergeAgentHookJson(existing, definition, scriptPath, true, getPlatform())
+  const merged = mergeAgentHookJson(existing, definition, scriptPath, true, getPlatform(), getJsRuntimeExecutable())
   await getWriteFile()(configPath, prettyJson(merged.config), 'utf-8')
 
   if (definition.configToml) {
@@ -284,7 +290,7 @@ const uninstallDefinition = async (definition: AgentHookDefinition): Promise<Age
   if (await pathExists(configPath)) {
     const existingRaw = String(await getReadFile()(configPath, 'utf-8'))
     const existing = parseConfigJson(existingRaw, configPath)
-    const merged = mergeAgentHookJson(existing, definition, hookScriptPath() || 'aiopsterm-agent-hook', false, getPlatform())
+    const merged = mergeAgentHookJson(existing, definition, hookScriptPath() || 'aiopsterm-agent-hook', false, getPlatform(), getJsRuntimeExecutable())
     await getWriteFile()(configPath, prettyJson(merged.config), 'utf-8')
   }
 

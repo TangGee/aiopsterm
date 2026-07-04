@@ -76,7 +76,7 @@ The control_compat system/window/settings compatibility slice adds local app aut
 - `window.list`, `window.current`, and `window.focus`: inspect and focus existing Electron windows through the main-process runtime.
 - `window.create`, `window.close`, and `window.display`: recognized compatibility controls that return `unsupported=true` rather than creating, closing, or moving native windows unexpectedly.
 - `window.displays`: return connected display metadata when the packaged main process provides it.
-- `settings.open`: open the existing Settings module and select a supported settings section such as `general`, `terminal`, `models`, `ai`, `mcp`, `skills`, or `about`.
+- `settings.open`: open the existing Settings module and select a supported settings section such as `general`, `terminal`, `models`, `ai-notifications`, `ai-remote-host-management`, `mcp`, `skills`, or `about`.
 - `feedback.open`: reuse the existing local feedback report action.
 - `feedback.submit`: validate control_compat-style feedback fields (`email`, `body`, optional image paths) and return a local-only accepted response. aiopsterm does not submit to an external feedback service through the control socket.
 - `vm.list`, `vm.create`, `vm.destroy`, `vm.exec`, `vm.ssh_info`, and `vm.attach_info`: recognized control_compat Cloud VM controls. aiopsterm validates the same required identifiers/commands where useful, then returns `unsupported=true` instead of contacting control_compat's Cloud VM API or creating hidden infrastructure.
@@ -351,133 +351,141 @@ Errors use the common mutation shape:
 
 ## CLI Helper
 
-The packaged helper is `resources/aiopsterm-control.js`. It defaults to `AIOPSTERM_CONTROL_SOCKET`, so it works naturally inside an aiopsterm local terminal:
+The packaged helper is `resources/aiopsterm-control.js`. It defaults to `AIOPSTERM_CONTROL_SOCKET`, so it works naturally inside an aiopsterm local terminal. Local terminals created by aiopsterm also receive `AIOPSTERM_JS_RUNTIME` and `AIOPSTERM_CONTROL_HELPER_PATH`, allowing scripts to use aiopsterm's packaged JavaScript runtime instead of a system `node` command:
 
 ```bash
-node /path/to/resources/aiopsterm-control.js terminal list
-node /path/to/resources/aiopsterm-control.js capabilities
-node /path/to/resources/aiopsterm-control.js identify --panel "$AIOPSTERM_PANEL_ID" --session "$AIOPSTERM_TERMINAL_SESSION_ID"
-node /path/to/resources/aiopsterm-control.js rpc terminal.list --params-json '{"limit":2}'
-node /path/to/resources/aiopsterm-control.js hooks list
-node /path/to/resources/aiopsterm-control.js hooks setup
-node /path/to/resources/aiopsterm-control.js hooks setup --agent codex
-node /path/to/resources/aiopsterm-control.js hooks uninstall codex
-node /path/to/resources/aiopsterm-control.js auth login
-node /path/to/resources/aiopsterm-control.js system tree
-node /path/to/resources/aiopsterm-control.js settings open --target models
-node /path/to/resources/aiopsterm-control.js feedback open
-node /path/to/resources/aiopsterm-control.js sidebar snapshot
-node /path/to/resources/aiopsterm-control.js markdown open commands/diagnose.md --line 2
-node /path/to/resources/aiopsterm-control.js file open commands/diagnose.md Markdown语法指南.md
-node /path/to/resources/aiopsterm-control.js project open commands/diagnose.md
-node /path/to/resources/aiopsterm-control.js project get-state --surface kb:commands/diagnose.md
-node /path/to/resources/aiopsterm-control.js window list
-node /path/to/resources/aiopsterm-control.js window focus --window window:1
-node /path/to/resources/aiopsterm-control.js app focus-override active
-node /path/to/resources/aiopsterm-control.js workspace snapshot
-node /path/to/resources/aiopsterm-control.js workspace-group list
-node /path/to/resources/aiopsterm-control.js workspace-group create --name "deploy" --from panel-1,panel-2
-node /path/to/resources/aiopsterm-control.js workspace-group focus workspace_group:1
-node /path/to/resources/aiopsterm-control.js session save --id latest --name "Work Layout"
-node /path/to/resources/aiopsterm-control.js session list
-node /path/to/resources/aiopsterm-control.js session restore --id latest
-node /path/to/resources/aiopsterm-control.js surface list
-node /path/to/resources/aiopsterm-control.js surface resume set --kind tmux --checkpoint work --shell "tmux attach -t work"
-node /path/to/resources/aiopsterm-control.js surface resume trust --panel panel-main --policy auto --reason "trusted tmux session"
-node /path/to/resources/aiopsterm-control.js surface resume preview --panel panel-main
-node /path/to/resources/aiopsterm-control.js surface resume autorun --panel panel-main
-node /path/to/resources/aiopsterm-control.js surface resume show --json
-node /path/to/resources/aiopsterm-control.js surface resume run --panel panel-main
-node /path/to/resources/aiopsterm-control.js surface resume clear --checkpoint work
-node /path/to/resources/aiopsterm-control.js agent-hibernation status
-node /path/to/resources/aiopsterm-control.js agent-hibernation on
-node /path/to/resources/aiopsterm-control.js agent-hibernation preview
-node /path/to/resources/aiopsterm-control.js agent-hibernation sweep
-node /path/to/resources/aiopsterm-control.js agent hibernate --session codex-session-1 --source codex
-node /path/to/resources/aiopsterm-control.js agent resume --session codex-session-1 --source codex
-node /path/to/resources/aiopsterm-control.js agent session list --needs-input
-node /path/to/resources/aiopsterm-control.js agent session show claude-session-1 --source claude-code
-node /path/to/resources/aiopsterm-control.js agent session approve claude-session-1 --source claude-code
-node /path/to/resources/aiopsterm-control.js agent session deny claude-session-1 --source claude-code --message "Use staging first"
-node /path/to/resources/aiopsterm-control.js agent session rename claude-session-1 --source claude-code --title "Deploy review"
-node /path/to/resources/aiopsterm-control.js agent session clear claude-session-1 --source claude-code
-node /path/to/resources/aiopsterm-control.js feed list
-node /path/to/resources/aiopsterm-control.js feed mark-handled
-node /path/to/resources/aiopsterm-control.js feed clear-ended
-node /path/to/resources/aiopsterm-control.js feed clear --yes
-node /path/to/resources/aiopsterm-control.js mobile chat sessions --workspace main
-node /path/to/resources/aiopsterm-control.js mobile chat send --session claude-session-1 --text "继续"
-node /path/to/resources/aiopsterm-control.js mobile attach-ticket create --workspace main --ttl-seconds 600
-node /path/to/resources/aiopsterm-control.js agent team launch --source codex --count 3 --cwd "$PWD" --prompt "review this repo"
-node /path/to/resources/aiopsterm-control.js agent team launch --source claude-code --count 2 --cwd "$PWD" --prompt "investigate flaky tests"
-node /path/to/resources/aiopsterm-control.js agent team launch --source custom --count 2 --command "my-agent --role reviewer --index {{index}}"
-node /path/to/resources/aiopsterm-control.js agent vault register --id my-agent --name "My Agent" --process-name my-agent --session-option --session --launch-command "my-agent --cwd {{cwd}} --index {{index}} {{prompt}}" --resume-command "my-agent --session {{sessionId}}"
-node /path/to/resources/aiopsterm-control.js agent vault render --id my-agent --kind resume --session session-1
-node /path/to/resources/aiopsterm-control.js agent vault identify --process-name my-agent --argv /usr/local/bin/my-agent --argv --session --argv session-1
-node /path/to/resources/aiopsterm-control.js agent vault scan --source my-agent --panel panel-main
-node /path/to/resources/aiopsterm-control.js agent team launch --source my-agent --count 3 --cwd "$PWD" --prompt "review this repo"
-node /path/to/resources/aiopsterm-control.js events --category notification --cursor-file ~/.cache/aiopsterm/events.seq --limit 10
-node /path/to/resources/aiopsterm-control.js tree
-node /path/to/resources/aiopsterm-control.js terminal read-screen --lines 40
-node /path/to/resources/aiopsterm-control.js capture-pane --panel panel-main --lines 200
-node /path/to/resources/aiopsterm-control.js pipe-pane --panel panel-main --command "grep ERROR"
-node /path/to/resources/aiopsterm-control.js clear-history --panel panel-main
-node /path/to/resources/aiopsterm-control.js respawn-pane --panel panel-main --command 'exec ${SHELL:-/bin/bash} -l'
-node /path/to/resources/aiopsterm-control.js break-pane --pane panel-2 --focus true
-node /path/to/resources/aiopsterm-control.js join-pane --pane panel-2 --target-pane panel-main --direction below
-node /path/to/resources/aiopsterm-control.js swap-pane --pane panel-2 --target-pane panel-main
-node /path/to/resources/aiopsterm-control.js resize-pane --pane panel-main -R --amount 5
-node /path/to/resources/aiopsterm-control.js next-window
-node /path/to/resources/aiopsterm-control.js select-pane --target panel-main
-node /path/to/resources/aiopsterm-control.js find-window --content --select "deploy"
-node /path/to/resources/aiopsterm-control.js list-panes
-node /path/to/resources/aiopsterm-control.js current-window
-node /path/to/resources/aiopsterm-control.js new-window --name "Scratch"
-node /path/to/resources/aiopsterm-control.js split-window -h --target panel-main
-node /path/to/resources/aiopsterm-control.js rename-window --target panel-main "Main Ops"
-node /path/to/resources/aiopsterm-control.js kill-pane --target panel-2
-node /path/to/resources/aiopsterm-control.js terminal focus --panel panel-main
-node /path/to/resources/aiopsterm-control.js terminal send --session "$AIOPSTERM_TERMINAL_SESSION_ID" --text $'pwd\n'
-node /path/to/resources/aiopsterm-control.js terminal send-key --session "$AIOPSTERM_TERMINAL_SESSION_ID" ctrl+c
-node /path/to/resources/aiopsterm-control.js send-panel --panel panel-main "echo hello\n"
-node /path/to/resources/aiopsterm-control.js send-key-panel --panel panel-main enter
-node /path/to/resources/aiopsterm-control.js wait-for build-ready --timeout 30
-node /path/to/resources/aiopsterm-control.js wait-for --signal build-ready
-node /path/to/resources/aiopsterm-control.js display-message "deploy done"
-node /path/to/resources/aiopsterm-control.js display-message --print "deploy done"
-node /path/to/resources/aiopsterm-control.js set-buffer --name deploy "kubectl rollout status deploy/api"
-node /path/to/resources/aiopsterm-control.js list-buffers
-node /path/to/resources/aiopsterm-control.js show-buffer --name deploy
-node /path/to/resources/aiopsterm-control.js save-buffer --name deploy /tmp/deploy-buffer.txt
-node /path/to/resources/aiopsterm-control.js paste-buffer --name deploy --panel panel-main
-node /path/to/resources/aiopsterm-control.js show-options -v extended-keys
-node /path/to/resources/aiopsterm-control.js set-hook after-split-window "display-message split"
-node /path/to/resources/aiopsterm-control.js set-hook --list
-node /path/to/resources/aiopsterm-control.js popup
-node /path/to/resources/aiopsterm-control.js set-status build compiling --priority 80
-node /path/to/resources/aiopsterm-control.js set-progress 0.5 --label "Building"
-node /path/to/resources/aiopsterm-control.js log --level success --source test "All green"
-node /path/to/resources/aiopsterm-control.js sidebar-state
-node /path/to/resources/aiopsterm-control.js notify --title "Build done" --body "All tests passed"
-node /path/to/resources/aiopsterm-control.js notify --source ci --level success --group build --key main --title "Build done" --body "All tests passed"
-node /path/to/resources/aiopsterm-control.js notify-surface --surface panel-main --source deploy --level warning --group prod --key deploy-prod --title "Deploy needs review" --body "Check logs"
-node /path/to/resources/aiopsterm-control.js list-notifications
-node /path/to/resources/aiopsterm-control.js list-notifications --source ci --group build --unread
-node /path/to/resources/aiopsterm-control.js jump-to-unread
+aiopsterm-control() {
+  ELECTRON_RUN_AS_NODE=1 "$AIOPSTERM_JS_RUNTIME" "$AIOPSTERM_CONTROL_HELPER_PATH" "$@"
+}
+```
+
+Examples:
+
+```bash
+aiopsterm-control terminal list
+aiopsterm-control capabilities
+aiopsterm-control identify --panel "$AIOPSTERM_PANEL_ID" --session "$AIOPSTERM_TERMINAL_SESSION_ID"
+aiopsterm-control rpc terminal.list --params-json '{"limit":2}'
+aiopsterm-control hooks list
+aiopsterm-control hooks setup
+aiopsterm-control hooks setup --agent codex
+aiopsterm-control hooks uninstall codex
+aiopsterm-control auth login
+aiopsterm-control system tree
+aiopsterm-control settings open --target models
+aiopsterm-control feedback open
+aiopsterm-control sidebar snapshot
+aiopsterm-control markdown open commands/diagnose.md --line 2
+aiopsterm-control file open commands/diagnose.md Markdown语法指南.md
+aiopsterm-control project open commands/diagnose.md
+aiopsterm-control project get-state --surface kb:commands/diagnose.md
+aiopsterm-control window list
+aiopsterm-control window focus --window window:1
+aiopsterm-control app focus-override active
+aiopsterm-control workspace snapshot
+aiopsterm-control workspace-group list
+aiopsterm-control workspace-group create --name "deploy" --from panel-1,panel-2
+aiopsterm-control workspace-group focus workspace_group:1
+aiopsterm-control session save --id latest --name "Work Layout"
+aiopsterm-control session list
+aiopsterm-control session restore --id latest
+aiopsterm-control surface list
+aiopsterm-control surface resume set --kind tmux --checkpoint work --shell "tmux attach -t work"
+aiopsterm-control surface resume trust --panel panel-main --policy auto --reason "trusted tmux session"
+aiopsterm-control surface resume preview --panel panel-main
+aiopsterm-control surface resume autorun --panel panel-main
+aiopsterm-control surface resume show --json
+aiopsterm-control surface resume run --panel panel-main
+aiopsterm-control surface resume clear --checkpoint work
+aiopsterm-control agent-hibernation status
+aiopsterm-control agent-hibernation on
+aiopsterm-control agent-hibernation preview
+aiopsterm-control agent-hibernation sweep
+aiopsterm-control agent hibernate --session codex-session-1 --source codex
+aiopsterm-control agent resume --session codex-session-1 --source codex
+aiopsterm-control agent session list --needs-input
+aiopsterm-control agent session show claude-session-1 --source claude-code
+aiopsterm-control agent session approve claude-session-1 --source claude-code
+aiopsterm-control agent session deny claude-session-1 --source claude-code --message "Use staging first"
+aiopsterm-control agent session rename claude-session-1 --source claude-code --title "Deploy review"
+aiopsterm-control agent session clear claude-session-1 --source claude-code
+aiopsterm-control feed list
+aiopsterm-control feed mark-handled
+aiopsterm-control feed clear-ended
+aiopsterm-control feed clear --yes
+aiopsterm-control mobile chat sessions --workspace main
+aiopsterm-control mobile chat send --session claude-session-1 --text "继续"
+aiopsterm-control mobile attach-ticket create --workspace main --ttl-seconds 600
+aiopsterm-control agent team launch --source codex --count 3 --cwd "$PWD" --prompt "review this repo"
+aiopsterm-control agent team launch --source claude-code --count 2 --cwd "$PWD" --prompt "investigate flaky tests"
+aiopsterm-control agent team launch --source custom --count 2 --command "my-agent --role reviewer --index {{index}}"
+aiopsterm-control agent vault register --id my-agent --name "My Agent" --process-name my-agent --session-option --session --launch-command "my-agent --cwd {{cwd}} --index {{index}} {{prompt}}" --resume-command "my-agent --session {{sessionId}}"
+aiopsterm-control agent vault render --id my-agent --kind resume --session session-1
+aiopsterm-control agent vault identify --process-name my-agent --argv /usr/local/bin/my-agent --argv --session --argv session-1
+aiopsterm-control agent vault scan --source my-agent --panel panel-main
+aiopsterm-control agent team launch --source my-agent --count 3 --cwd "$PWD" --prompt "review this repo"
+aiopsterm-control events --category notification --cursor-file ~/.cache/aiopsterm/events.seq --limit 10
+aiopsterm-control tree
+aiopsterm-control terminal read-screen --lines 40
+aiopsterm-control capture-pane --panel panel-main --lines 200
+aiopsterm-control pipe-pane --panel panel-main --command "grep ERROR"
+aiopsterm-control clear-history --panel panel-main
+aiopsterm-control respawn-pane --panel panel-main --command 'exec ${SHELL:-/bin/bash} -l'
+aiopsterm-control break-pane --pane panel-2 --focus true
+aiopsterm-control join-pane --pane panel-2 --target-pane panel-main --direction below
+aiopsterm-control swap-pane --pane panel-2 --target-pane panel-main
+aiopsterm-control resize-pane --pane panel-main -R --amount 5
+aiopsterm-control next-window
+aiopsterm-control select-pane --target panel-main
+aiopsterm-control find-window --content --select "deploy"
+aiopsterm-control list-panes
+aiopsterm-control current-window
+aiopsterm-control new-window --name "Scratch"
+aiopsterm-control split-window -h --target panel-main
+aiopsterm-control rename-window --target panel-main "Main Ops"
+aiopsterm-control kill-pane --target panel-2
+aiopsterm-control terminal focus --panel panel-main
+aiopsterm-control terminal send --session "$AIOPSTERM_TERMINAL_SESSION_ID" --text $'pwd\n'
+aiopsterm-control terminal send-key --session "$AIOPSTERM_TERMINAL_SESSION_ID" ctrl+c
+aiopsterm-control send-panel --panel panel-main "echo hello\n"
+aiopsterm-control send-key-panel --panel panel-main enter
+aiopsterm-control wait-for build-ready --timeout 30
+aiopsterm-control wait-for --signal build-ready
+aiopsterm-control display-message "deploy done"
+aiopsterm-control display-message --print "deploy done"
+aiopsterm-control set-buffer --name deploy "kubectl rollout status deploy/api"
+aiopsterm-control list-buffers
+aiopsterm-control show-buffer --name deploy
+aiopsterm-control save-buffer --name deploy /tmp/deploy-buffer.txt
+aiopsterm-control paste-buffer --name deploy --panel panel-main
+aiopsterm-control show-options -v extended-keys
+aiopsterm-control set-hook after-split-window "display-message split"
+aiopsterm-control set-hook --list
+aiopsterm-control popup
+aiopsterm-control set-status build compiling --priority 80
+aiopsterm-control set-progress 0.5 --label "Building"
+aiopsterm-control log --level success --source test "All green"
+aiopsterm-control sidebar-state
+aiopsterm-control notify --title "Build done" --body "All tests passed"
+aiopsterm-control notify --source ci --level success --group build --key main --title "Build done" --body "All tests passed"
+aiopsterm-control notify-surface --surface panel-main --source deploy --level warning --group prod --key deploy-prod --title "Deploy needs review" --body "Check logs"
+aiopsterm-control list-notifications
+aiopsterm-control list-notifications --source ci --group build --unread
+aiopsterm-control jump-to-unread
 ```
 
 Use `--json` for scripting:
 
 ```bash
-node /path/to/resources/aiopsterm-control.js --json workspace snapshot
-node /path/to/resources/aiopsterm-control.js context
+aiopsterm-control --json workspace snapshot
+aiopsterm-control context
 ```
 
 ## Safety Boundary
 
 `system.capabilities`, `system.identify`, and CLI `rpc` are automation plumbing. The first two are read-only probes. `rpc` does not grant extra permission; it sends exactly the requested method and JSON object params through the same control socket dispatcher and inherits that method's safety policy.
 
-`agent.hooks.*` reuses the same explicit installer used by Settings -> AI Preferences. It only writes aiopsterm-owned hook commands, plugin files, or marked config blocks, and uninstall removes only those owned entries. `setup` mirrors control_compat's convenience behavior by skipping installers whose agent binary is not on `PATH`; `install` is for an explicit selected source when the user wants the config written anyway. Hook commands fail open outside aiopsterm-managed local connection terminals and do not take over external OS terminals.
+`agent.hooks.*` reuses the same explicit installer used by Settings -> AI Notifications. It only writes aiopsterm-owned hook commands, plugin files, or marked config blocks, and uninstall removes only those owned entries. `setup` mirrors control_compat's convenience behavior by skipping installers whose agent binary is not on `PATH`; `install` is for an explicit selected source when the user wants the config written anyway. Hook commands fail open outside aiopsterm-managed local connection terminals and do not take over external OS terminals.
 
 `terminal.send_text` and `terminal.send_key` are raw terminal input primitives, equivalent to typed text or a physical key press in the terminal. They do not run the existing AI command security approval flow, because they may need to send non-command input, prompts, or control sequences. Command-generation and AI-command execution still use the existing renderer security path.
 

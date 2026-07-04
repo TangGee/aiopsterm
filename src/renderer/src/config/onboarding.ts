@@ -34,7 +34,7 @@ export const onboardingModules: OnboardingModule[] = [
   {
     id: 'systemSettings',
     title: '系统设置',
-    description: '浏览通用设置、背景、终端配置和 AI 偏好设置。',
+    description: '浏览通用设置、背景、终端配置、模型和主机Agent。',
     icon: Settings
   },
   {
@@ -62,14 +62,14 @@ export const onboardingTourSteps: Record<OnboardingModuleId, OnboardingStep[]> =
   ],
   systemSettings: [
     { id: 'setting-entry', targetId: 'setting-entry', title: '设置入口', description: '底部设置入口会打开中央设置工作区。' },
-    { id: 'settings-side-nav', targetId: 'settings-side-nav', title: '设置导航', description: '左侧导航切换通用、终端、模型、AI 偏好、MCP、Skills 等设置页。' },
+    { id: 'settings-side-nav', targetId: 'settings-side-nav', title: '设置导航', description: '左侧导航切换通用、终端、模型、AI 通知、主机Agent等设置页；MCP、Skills 和规则在主机Agent中。' },
     { id: 'general-settings', targetId: 'settings-general-content', title: '通用设置', description: '通用页包含主题、背景、默认布局、语言、水印和入门引导。' },
     { id: 'background-settings', targetId: 'settings-background-section', title: '背景设置', description: '背景区域可选择默认、预设或自定义背景，并调整透明度和亮度。' },
     { id: 'background-preset', targetId: 'settings-background-preset', title: '背景预设', description: '选择预设后会显示调节滑杆。', hideCard: true, advanceOnTargetClick: true },
     { id: 'terminal-tab', targetId: 'settings-terminal-tab', title: '终端设置标签', description: '终端页提供终端类型、字体、光标、鼠标事件和 SSH Agent 入口。' },
     { id: 'terminal-options', targetId: 'settings-terminal-options', title: '终端选项', description: '这里调整字体大小、ScrollBack、光标样式和代理等终端参数。' },
-    { id: 'ai-preferences-tab', targetId: 'settings-ai-preferences-tab', title: 'AI 偏好设置标签', description: 'AI 偏好设置集中控制推理预算、代理、自动审批和安全项。', advanceOnTargetClick: true },
-    { id: 'ai-preferences-content', targetId: 'settings-ai-preferences-content', title: 'AI 偏好设置内容', description: '这里展示 Extended Thinking、Reasoning Effort、代理设置和终端超时。' },
+    { id: 'ai-remote-host-management-tab', targetId: 'settings-ai-remote-host-management-tab', title: '主机Agent标签', description: '主机Agent集中控制内嵌 AI 对话、MCP、Skills、规则和安全项。', advanceOnTargetClick: true },
+    { id: 'ai-remote-host-management-content', targetId: 'settings-ai-remote-host-management-content', title: '主机Agent内容', description: '这里通过二级入口管理对话与主机、MCP、Skills、规则和终端超时。' },
     {
       id: 'ai-auto-approval',
       targetId: 'settings-ai-auto-approval',

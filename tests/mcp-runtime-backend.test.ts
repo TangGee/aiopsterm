@@ -125,6 +125,14 @@ const handle = (message) => {
 process.stdin.on('data', (chunk) => {
   buffer += chunk.toString('utf8')
   while (buffer) {
+    if (!buffer.startsWith('Content-Length:')) {
+      const newline = buffer.indexOf('\\n')
+      if (newline === -1) return
+      const line = buffer.slice(0, newline).trim()
+      buffer = buffer.slice(newline + 1)
+      if (line) handle(JSON.parse(line))
+      continue
+    }
     const headerEnd = buffer.indexOf('\\r\\n\\r\\n')
     if (headerEnd === -1) return
     const header = buffer.slice(0, headerEnd)
@@ -541,6 +549,29 @@ describe('mcp runtime backend boundary', () => {
           'remoteSse:inspect_service': true
         })
       })
+    })
+  })
+
+  it('accepts Codex-style URL configs and HTTP aliases without an explicit protocol selector', async () => {
+    await withStreamableHttpFixture(async (httpUrl) => {
+      const snapshot = await discover({
+        mcpServers: {
+          inferredRemote: {
+            url: httpUrl,
+            timeout: 1
+          } as any,
+          httpAlias: {
+            type: 'http',
+            url: httpUrl,
+            timeout: 1
+          } as any
+        }
+      })
+
+      expect(snapshot.mcpServers.map((server) => [server.name, server.status, server.tools.map((tool) => tool.name)])).toEqual([
+        ['inferredRemote', 'connected', ['inspect_service']],
+        ['httpAlias', 'connected', ['inspect_service']]
+      ])
     })
   })
 

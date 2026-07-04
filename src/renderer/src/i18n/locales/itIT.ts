@@ -15,7 +15,7 @@ export const itIT = completeLocaleMessages({
   'settings.nav.extensions': 'Estensioni',
   'settings.nav.models': 'Modelli',
   'settings.nav.billing': 'Fatturazione',
-  'settings.nav.ai': 'Preferenze AI',
+  'settings.nav.ai': 'Host Agent',
   'settings.nav.rules': 'Regole',
   'settings.nav.shortcuts': 'Scorciatoie',
   'settings.nav.trustedDevices': 'Dispositivi attendibili',

@@ -89,6 +89,14 @@ import type {
   AgentHookInstallerOperationResult
 } from './agentHooks'
 import type {
+  ExportMcpCopyConfigInput,
+  ExportMcpCopyConfigResult,
+  ExportMcpInstallerListResult,
+  ExportMcpInstallerOperationInput,
+  ExportMcpInstallerOperationResult,
+  ExportMcpTokenResetResult
+} from './exportMcp'
+import type {
   ZmodemSavePathPickResult,
   ZmodemStreamCloseResult,
   ZmodemStreamOpenResult,
@@ -220,6 +228,7 @@ import type {
   AppUpdateProgressEvent,
   CustomBackgroundSaveResult,
   EditorUserConfig,
+  ExportMcpUserConfig,
   KeywordHighlightConfigWriteResult,
   KeywordHighlightUserConfig,
   KnowledgeSearchRuntimeApplyInput,
@@ -545,6 +554,11 @@ export type AiopsPreloadApi = {
   listAgentHookInstallers: () => Promise<AgentHookInstallerListResult>
   installAgentHook: (input: AgentHookInstallerOperationInput) => Promise<AgentHookInstallerOperationResult>
   uninstallAgentHook: (input: AgentHookInstallerOperationInput) => Promise<AgentHookInstallerOperationResult>
+  listExportMcpInstallers: () => Promise<ExportMcpInstallerListResult>
+  installExportMcp: (input: ExportMcpInstallerOperationInput) => Promise<ExportMcpInstallerOperationResult>
+  uninstallExportMcp: (input: ExportMcpInstallerOperationInput) => Promise<ExportMcpInstallerOperationResult>
+  copyExportMcpConfig: (input: ExportMcpCopyConfigInput) => Promise<ExportMcpCopyConfigResult>
+  resetExportMcpToken: () => Promise<ExportMcpTokenResetResult>
   listManagedAiSessions: () => Promise<ManagedAiSessionListResult>
   getAgentHibernationConfig: () => Promise<AgentHibernationConfigResult>
   setAgentHibernationConfig: (input: Partial<AgentHibernationConfig> & { enabled?: boolean }) => Promise<AgentHibernationConfigResult>

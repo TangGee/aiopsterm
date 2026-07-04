@@ -38,6 +38,7 @@ import { registerCodexSessionsIpc } from './ipc/codexSessions'
 import { registerControlSocketIpc } from './backend/control/controlSocket'
 import { registerDatabaseIpc } from './ipc/database'
 import { registerExtensionsIpc } from './ipc/extensions'
+import { registerExportMcpIpc } from './ipc/exportMcp'
 import { registerFilesIpc } from './ipc/files'
 import { registerKubernetesIpc } from './ipc/kubernetes'
 import { registerKnowledgeBaseIpc } from './ipc/knowledgeBase'
@@ -118,6 +119,7 @@ export const registerMainIpcRuntime = (input: MainIpcRuntimeInput) => {
 
   registerControlSocketIpc(ipcMain)
   registerAgentHooksIpc(ipcMain)
+  registerExportMcpIpc(ipcMain)
   registerAiCatalogIpc(ipcMain)
   registerAiChatIpc(ipcMain)
   registerAppUpdateIpc(ipcMain, {

@@ -21,8 +21,10 @@ export type AiopstermDeepLinkSettingsSection =
   | 'extensions'
   | 'models'
   | 'billing'
-  | 'ai'
+  | 'aiNotifications'
+  | 'aiRemoteHostManagement'
   | 'mcp'
+  | 'exportMcp'
   | 'skills'
   | 'rules'
   | 'shortcuts'
@@ -52,8 +54,10 @@ const settingsTargets = new Set<AiopstermDeepLinkSettingsSection>([
   'extensions',
   'models',
   'billing',
-  'ai',
+  'aiNotifications',
+  'aiRemoteHostManagement',
   'mcp',
+  'exportMcp',
   'skills',
   'rules',
   'shortcuts',
@@ -62,6 +66,20 @@ const settingsTargets = new Set<AiopstermDeepLinkSettingsSection>([
   'about',
   'docs'
 ])
+const settingsTargetAliases: Record<string, AiopstermDeepLinkSettingsSection> = {
+  ai: 'aiRemoteHostManagement',
+  aihooks: 'aiNotifications',
+  'ai-hooks': 'aiNotifications',
+  'ai-preferences': 'aiRemoteHostManagement',
+  airemotehostmanagement: 'aiRemoteHostManagement',
+  'ai-remote-host-management': 'aiRemoteHostManagement',
+  exportmcp: 'exportMcp',
+  'export-mcp': 'exportMcp',
+  ainotifications: 'aiNotifications',
+  'ai-notifications': 'aiNotifications',
+  trusteddevices: 'trustedDevices',
+  'trusted-devices': 'trustedDevices'
+}
 const internalHosts = new Set(['chat-attachment'])
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -81,7 +99,8 @@ const normalizeSettingsSection = (value: string | null | undefined): AiopstermDe
   const normalized = (value || '').trim()
   if (!normalized) return null
   if (settingsTargets.has(normalized as AiopstermDeepLinkSettingsSection)) return normalized as AiopstermDeepLinkSettingsSection
-  return null
+  const aliasKey = normalized.replace(/[_\s]+/g, '-').toLowerCase()
+  return settingsTargetAliases[aliasKey] || null
 }
 
 export const parseAiopstermDeepLink = (rawUrl: string): AiopstermDeepLinkParseResult => {
