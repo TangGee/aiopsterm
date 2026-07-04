@@ -486,6 +486,37 @@ describe('workspace store', () => {
     expect(store.managedAiSessionFocusRequest.session?.id).toBe('claude-session-1')
   })
 
+  it('keeps already handled managed AI snapshots out of pending attention', () => {
+    const store = useWorkspaceStore()
+
+    store.applyManagedAiSessionSnapshot({
+      sessions: [
+        {
+          id: 'claude-handled-snapshot',
+          source: 'claude-code',
+          title: 'Claude Code',
+          summary: 'Already reviewed',
+          state: 'needsInput',
+          lastEvent: 'question',
+          lastActivityAt: 700,
+          createdAt: 400,
+          updatedAt: 700,
+          handledAt: 650,
+          requestKind: 'question',
+          decisionMode: 'blocking',
+          actionable: true,
+          events: [],
+          decisions: []
+        }
+      ]
+    })
+
+    expect(store.managedAiSessions[0]).toEqual(expect.objectContaining({ state: 'needsInput', handledAt: 650 }))
+    expect(store.managedAiNeedsInputSessions).toHaveLength(0)
+    expect(store.aiAttentionUnreadCount).toBe(0)
+    expect(store.currentAiAttentionItem).toBeNull()
+  })
+
   it('classifies managed AI plan requests as plan attention items', () => {
     const store = useWorkspaceStore()
     store.upsertManagedAiSession({

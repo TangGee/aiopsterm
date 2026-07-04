@@ -116,7 +116,7 @@ export const createWorkspaceManagedAiSessionRuntime = (input: {
   const { upsertAiAttentionItem, removeAiAttentionItem, markAiAttentionHandled } = attention
 
   const sortedManagedAiSessions = computed(() => [...managedAiSessions.value].sort((first, second) => second.lastActivityAt - first.lastActivityAt))
-  const managedAiNeedsInputSessions = computed(() => sortedManagedAiSessions.value.filter((session) => session.state === 'needsInput'))
+  const managedAiNeedsInputSessions = computed(() => sortedManagedAiSessions.value.filter((session) => session.state === 'needsInput' && !session.handledAt))
   const selectedManagedAiSession = computed(() => sortedManagedAiSessions.value.find((session) => managedAiSessionKey(session) === selectedManagedAiSessionKey.value) || null)
   const managedAiAttentionPanelIds = computed(() => {
     const ids = new Set<string>()

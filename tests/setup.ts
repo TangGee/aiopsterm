@@ -6445,6 +6445,7 @@ Object.defineProperty(window, 'aiops', {
     isMaximized: vi.fn(async () => false),
     newWindow: vi.fn(async () => undefined),
     toggleFullScreen: vi.fn(async () => false),
+    setBadgeCount: vi.fn(async () => true),
     closeWindow: vi.fn(async () => undefined),
     onMaximized: vi.fn(() => () => undefined),
     onUnmaximized: vi.fn(() => () => undefined),

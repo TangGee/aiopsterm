@@ -2612,6 +2612,7 @@ describe('AppShell', () => {
 
     expect(wrapper.find('[data-testid="ai-attention-count"]').text()).toBe('1')
     expect(wrapper.find('[data-testid="ai-attention-bell"]').attributes('title')).toContain('Codex CLI')
+    expect(window.aiops.setBadgeCount).toHaveBeenLastCalledWith(1)
 
     await wrapper.find('[data-testid="ai-attention-bell"]').trigger('click')
     await flushPromises()
@@ -2653,7 +2654,8 @@ describe('AppShell', () => {
     const bell = wrapper.find('[data-testid="ai-attention-bell"]')
     expect(wrapper.find('[data-testid="ai-attention-count"]').text()).toBe('1')
     expect(bell.attributes('title')).toContain('Claude Code')
-    expect(bell.attributes('title')).toContain('再次点击')
+    expect(bell.attributes('title')).toContain('未处理消息')
+    expect(window.aiops.setBadgeCount).toHaveBeenLastCalledWith(1)
 
     await bell.trigger('click')
     await flushPromises()
@@ -2661,6 +2663,67 @@ describe('AppShell', () => {
     expect(store.mode).toBe('terminal')
     expect(store.activeModule).toBe('aiSessions')
     expect(store.selectedManagedAiSessionKey).toBe('claude-code:claude-topbar')
+  })
+
+  it('clears the top and dock AI attention badges when a managed AI snapshot is already handled', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const wrapper = mount(TopBar, {
+      global: { plugins: [pinia] }
+    })
+    const store = useWorkspaceStore()
+
+    store.applyManagedAiSessionSnapshot({
+      sessions: [
+        {
+          id: 'claude-stale-handled',
+          source: 'claude-code',
+          title: 'Claude Code',
+          summary: 'Need confirmation',
+          state: 'needsInput',
+          lastEvent: 'question',
+          lastActivityAt: 500,
+          createdAt: 400,
+          updatedAt: 500,
+          requestKind: 'question',
+          decisionMode: 'blocking',
+          actionable: true,
+          events: [],
+          decisions: []
+        }
+      ]
+    })
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('[data-testid="ai-attention-count"]').text()).toBe('1')
+    expect(window.aiops.setBadgeCount).toHaveBeenLastCalledWith(1)
+
+    store.applyManagedAiSessionSnapshot({
+      sessions: [
+        {
+          id: 'claude-stale-handled',
+          source: 'claude-code',
+          title: 'Claude Code',
+          summary: 'Need confirmation',
+          state: 'needsInput',
+          lastEvent: 'question',
+          lastActivityAt: 700,
+          createdAt: 400,
+          updatedAt: 700,
+          handledAt: 650,
+          requestKind: 'question',
+          decisionMode: 'blocking',
+          actionable: true,
+          events: [],
+          decisions: []
+        }
+      ]
+    })
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.find('[data-testid="ai-attention-count"]').exists()).toBe(false)
+    expect(store.aiAttentionUnreadCount).toBe(0)
+    expect(store.managedAiNeedsInputSessions).toHaveLength(0)
+    expect(window.aiops.setBadgeCount).toHaveBeenLastCalledWith(0)
   })
 
   it('does not fabricate top layout changes when config persistence is unavailable or malformed', async () => {

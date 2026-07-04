@@ -91,6 +91,7 @@ const api: AiopsPreloadApi = {
   isMaximized: () => ipcRenderer.invoke('window:is-maximized') as Promise<boolean>,
   newWindow: () => ipcRenderer.invoke('window:new'),
   toggleFullScreen: () => ipcRenderer.invoke('window:toggle-fullscreen') as Promise<boolean>,
+  setBadgeCount: (count: number) => ipcRenderer.invoke('window:set-badge-count', count) as Promise<boolean>,
   closeWindow: () => ipcRenderer.invoke('window:close'),
   onMaximized: (listener: () => void) => {
     const wrapped = () => listener()

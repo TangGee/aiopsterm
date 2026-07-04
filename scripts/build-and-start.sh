@@ -10,6 +10,38 @@ skip_codex=0
 use_sandbox=0
 extra_args=()
 
+desktop_escape() {
+  local value="$1"
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  printf '%s' "${value}"
+}
+
+ensure_desktop_hint() {
+  if [[ "$(uname -s)" != "Linux" ]]; then
+    return
+  fi
+
+  local desktop_dir desktop_file icon_path exec_path
+  desktop_dir="${XDG_DATA_HOME:-${HOME}/.local/share}/applications"
+  desktop_file="${desktop_dir}/aiopsterm.desktop"
+  icon_path="${APP_ROOT}/resources/icons/256x256.png"
+  exec_path="${APP_ROOT}/scripts/build-and-start.sh"
+  mkdir -p "${desktop_dir}"
+  cat >"${desktop_file}" <<EOF
+[Desktop Entry]
+Name=aiopsterm
+Exec="$(desktop_escape "${exec_path}")" --skip-build
+Terminal=false
+Type=Application
+Icon=$(desktop_escape "${icon_path}")
+StartupWMClass=aiopsterm
+Comment=Self-owned AI operations terminal shell with backend-owned runtime boundaries.
+Categories=Utility;
+EOF
+  export BAMF_DESKTOP_FILE_HINT="${desktop_file}"
+}
+
 usage() {
   cat <<'EOF'
 Usage: scripts/build-and-start.sh [options] [-- electron-vite-preview-args...]
@@ -108,6 +140,7 @@ if [[ ! -x "${codex_bin}" ]]; then
   exit 1
 fi
 export AIOPSTERM_CODEX_PACKAGE_DIR="${codex_package_dir}"
+ensure_desktop_hint
 
 mapfile -t pids < <(preview_pids)
 if ((${#pids[@]})); then

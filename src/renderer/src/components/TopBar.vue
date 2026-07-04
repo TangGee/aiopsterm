@@ -106,7 +106,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import {
   Bell,
   Bot,
@@ -164,19 +164,9 @@ const updateTitle = computed(() => {
   if (workspace.topUpdateState === 'install-requested') return t('top.updateInstallRequested')
   return t('top.updateChecking')
 })
-const aiSessionAttentionCount = computed(() => workspace.managedAiNeedsInputSessions.length)
-const aiAttentionVisibleCount = computed(() => aiSessionAttentionCount.value || workspace.aiAttentionUnreadCount)
+const aiAttentionVisibleCount = computed(() => workspace.aiAttentionUnreadCount)
 const aiAttentionBadge = computed(() => (aiAttentionVisibleCount.value > 99 ? '99+' : String(aiAttentionVisibleCount.value)))
 const aiAttentionTitle = computed(() => {
-  const session = workspace.selectedManagedAiSession?.state === 'needsInput'
-    ? workspace.selectedManagedAiSession
-    : workspace.managedAiNeedsInputSessions[0]
-  if (session) {
-    return t('top.aiSessionAttentionPending', {
-      count: String(aiSessionAttentionCount.value),
-      title: session.title
-    })
-  }
   const item = workspace.currentAiAttentionItem
   if (!item) return t('top.aiAttentionOpen')
   return t('top.aiAttentionPending', {
@@ -184,6 +174,14 @@ const aiAttentionTitle = computed(() => {
     title: item.title
   })
 })
+
+watch(
+  aiAttentionVisibleCount,
+  (count) => {
+    void windowControlsClient.setBadgeCount()?.(count)
+  },
+  { immediate: true }
+)
 
 const minimizeWindow = () => {
   windowControlsClient.minimizeWindow()?.()
