@@ -40,6 +40,7 @@ import {
   resetTerminalPanelToDefault,
   setTerminalOutput,
   setTerminalPanelAutoTitleInCollection,
+  setTerminalPanelProgressInCollection,
   terminalLifecycleMatchesPanel,
   terminalPanelIds,
   trimTerminalPanelOutputHistory,
@@ -150,6 +151,20 @@ describe('terminalPanelRuntime', () => {
     expect(isWelcomeTerminalPanelPlaceholder(panel)).toBe(true)
   })
 
+  it('tracks terminal program progress and clears it when a panel is reset or exits', () => {
+    const panel = createEmptyTerminalPanel('panel-1', 'Terminal 1')
+    panel.sessionId = 'terminal-1'
+    setTerminalPanelProgressInCollection([panel], panel.id, { status: 'running', value: 25, updatedAt: 1 })
+    expect(panel.terminalProgress).toEqual({ status: 'running', value: 25, updatedAt: 1 })
+
+    applyTerminalExitToPanel(panel, { id: 'terminal-1', kind: 'local', code: 0, reason: 'process' })
+    expect(panel.terminalProgress).toBeUndefined()
+
+    setTerminalPanelProgressInCollection([panel], panel.id, { status: 'paused', updatedAt: 2 })
+    resetTerminalPanelToDefault(panel)
+    expect(panel.terminalProgress).toBeUndefined()
+  })
+
   it('clears split state and creates SSH fork panels without reusing live connection ids', () => {
     const source = sshSourcePanel()
     source.split = 'below'
@@ -167,7 +182,7 @@ describe('terminalPanelRuntime', () => {
     expect(fork).toEqual(
       expect.objectContaining({
         id: 'panel-fork',
-        title: 'Prod shell fork',
+        title: 'prod-host',
         cwd: '/srv/app',
         kind: 'terminal',
         status: 'ready',
@@ -309,7 +324,7 @@ describe('terminalPanelRuntime', () => {
     expect(canForkSshTerminalPanel(source)).toBe(true)
 
     const fork = createForkSshTerminalPanelInCollection(panels, source.id, 'forked-panel')
-    expect(fork).toEqual(expect.objectContaining({ id: 'forked-panel', title: 'Auto title fork' }))
+    expect(fork).toEqual(expect.objectContaining({ id: 'forked-panel', title: 'prod-host' }))
     expect(panels.at(-1)).toBe(fork)
     expect(createForkSshTerminalPanelInCollection(panels, 'plain', 'forked-plain')).toBeNull()
     expect(terminalPanelIds(panels)).toEqual(['panel-source', 'plain', 'forked-panel'])

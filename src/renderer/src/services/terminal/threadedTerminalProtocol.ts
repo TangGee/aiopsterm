@@ -1,5 +1,6 @@
 import type { TerminalSettings } from '@/stores/workspace'
 import type { KeywordHighlightUserConfig } from '@shared/contracts/appRuntime'
+import type { TerminalProgress } from '@/services/terminal/terminalOscRuntime'
 
 export type ThreadedTerminalPriority = 'active' | 'visible' | 'background'
 
@@ -256,6 +257,8 @@ export type ThreadedTerminalCoreResponse =
   | { type: 'screen'; snapshot: ThreadedTerminalScreenSnapshot }
   | { type: 'resize'; terminalId: string; cols: number; rows: number }
   | { type: 'data'; terminalId: string; data: string }
+  | { type: 'title'; terminalId: string; title: string }
+  | { type: 'progress'; terminalId: string; progress: TerminalProgress | null }
   | { type: 'read-screen-result'; requestId: string; terminalId: string; text: string; cols: number; rows: number }
   | { type: 'read-selection-result'; requestId: string; terminalId: string; text: string }
   | { type: 'export-result'; requestId: string; state: ThreadedTerminalExportedState }

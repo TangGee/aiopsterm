@@ -11,6 +11,11 @@ import {
   type TerminalShortcutAction
 } from '@/services/terminal/terminalKeyboardShortcuts'
 import {
+  normalizeTerminalProgramTitle,
+  parseTerminalProgressOsc,
+  type TerminalProgress
+} from '@/services/terminal/terminalOscRuntime'
+import {
   ThreadedTerminalFitAddon,
   ThreadedTerminalSearchAddon,
   createThreadedTerminalHost,
@@ -60,9 +65,14 @@ type XtermLike = {
   getSelectionPosition: () => { start: { y: number }; end: { y: number } } | null | undefined
   hasSelection: () => boolean
   clearSelection?: () => void
+  parser?: {
+    registerOscHandler?: (ident: number, callback: (data: string) => boolean | Promise<boolean>) => unknown
+  }
   onData: (handler: (data: string) => void) => unknown
   onResize: (handler: (size: { cols: number; rows: number }) => unknown) => unknown
   onSelectionChange: (handler: () => void) => unknown
+  onTitleChange?: (handler: (title: string) => void) => unknown
+  onProgressChange?: (handler: (progress: TerminalProgress | null) => void) => unknown
 }
 type AddonLike = {
   activate: (terminal: any) => void
@@ -415,6 +425,20 @@ export const createTerminalWorkspaceViewRuntime = ({
   }
 
   const bindTerminalViewEvents = (panel: TerminalPanel, view: TerminalView) => {
+    view.terminal.onTitleChange?.((title) => {
+      const normalizedTitle = normalizeTerminalProgramTitle(title)
+      if (!normalizedTitle) return
+      workspace.setPanelAutoTitle(panel.id, normalizedTitle)
+    })
+    view.terminal.onProgressChange?.((progress) => {
+      workspace.setPanelProgress(panel.id, progress)
+    })
+    view.terminal.parser?.registerOscHandler?.(9, (data) => {
+      const change = parseTerminalProgressOsc(data)
+      if (change.action === 'ignore') return false
+      workspace.setPanelProgress(panel.id, change.action === 'set' ? change.progress : null)
+      return true
+    })
     view.terminal.onData((data) => {
       if (view.suppressInputReplyDepth) {
         writeTerminalDebugLog('renderer.terminal-input.suppressed-replay-reply', {

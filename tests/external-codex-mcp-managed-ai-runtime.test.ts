@@ -168,10 +168,9 @@ describe('externalCodexMcpManagedAiRuntime', () => {
     const codex = sessionRecord({
       id: 'codex-local',
       source: 'codex',
-      state: 'working',
+      state: 'needsInput',
       decisionMode: 'local',
-      actionable: false,
-      pendingRequestId: undefined
+      actionable: true
     })
     agentSessionsMock.listManagedAiSessions.mockResolvedValue({ ok: true, data: snapshot([claude, codex]) })
 
@@ -181,7 +180,7 @@ describe('externalCodexMcpManagedAiRuntime', () => {
         ok: true,
         data: expect.objectContaining({
           count: 2,
-          pendingCount: 1,
+          pendingCount: 2,
           blockingCount: 1,
           localOnlyCount: 1,
           approvals: expect.arrayContaining([

@@ -439,6 +439,7 @@ export type AiopsPreloadApi = {
   newWindow: () => Promise<void>
   toggleFullScreen: () => Promise<boolean>
   setBadgeCount?: (count: number) => Promise<boolean>
+  setBadgeState?: (input: { count: number; activeKeys: string[] }) => Promise<boolean>
   closeWindow: () => Promise<void>
   onMaximized: (listener: () => void) => () => void
   onUnmaximized: (listener: () => void) => () => void

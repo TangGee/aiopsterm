@@ -413,14 +413,19 @@ describe('aiSessionsPanelViewRuntime', () => {
     expect(filteredManagedAiTimelineEvents(timelineSession, 'question').map((event) => event.id)).toEqual(['question-1'])
   })
 
-  it('classifies timeline event state including the Codex permission telemetry rule', () => {
+  it('classifies timeline event state including Codex terminal permission prompts', () => {
     expect(managedAiTimelineEventState(makeEvent({ id: 'claude-permission', source: 'claude-code', event: 'permission_request', decisionMode: 'blocking' }))).toBe(
       'needsInput'
     )
-    expect(managedAiTimelineEventState(makeEvent({ id: 'codex-permission', source: 'codex', event: 'permission_request', decisionMode: 'blocking' }))).toBe('working')
+    expect(managedAiTimelineEventState(makeEvent({ id: 'codex-permission', source: 'codex', event: 'permission_request', decisionMode: 'local' }))).toBe('needsInput')
     expect(managedAiTimelineEventState(makeEvent({ id: 'notification', event: 'notification', requestKind: 'notification', decisionMode: 'local' }))).toBe(
       'needsInput'
     )
+    expect(
+      managedAiTimelineEventState(
+        makeEvent({ id: 'codex-question-pre-tool', source: 'codex', event: 'pre_tool_use', requestKind: 'question', decisionMode: 'local', actionable: true })
+      )
+    ).toBe('needsInput')
     expect(managedAiTimelineEventState(makeEvent({ id: 'end', event: 'session_end', requestKind: 'telemetry', decisionMode: 'telemetry' }))).toBe('ended')
   })
 

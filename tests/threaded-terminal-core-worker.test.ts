@@ -120,6 +120,37 @@ describe('threadedTerminalCoreWorker', () => {
     expect(visibleText(next)).toContain('after-find')
   })
 
+  it('emits title and progress protocol events from OSC sequences', async () => {
+    await createTerminal()
+    send({ type: 'data', terminalId: createOptions().terminalId, data: '\x1b]2;Build active\x07' })
+
+    const title = await waitFor(() =>
+      messages.find((message): message is Extract<ThreadedTerminalCoreResponse, { type: 'title' }> => message.type === 'title' && message.title === 'Build active')
+    )
+    expect(title).toEqual({ type: 'title', terminalId: createOptions().terminalId, title: 'Build active' })
+
+    const titleCount = messages.filter((message) => message.type === 'title').length
+    send({ type: 'data', terminalId: createOptions().terminalId, data: '\x1b]2;root@tlinux:~\x07' })
+    await new Promise((resolve) => setTimeout(resolve, 30))
+    expect(messages.filter((message) => message.type === 'title')).toHaveLength(titleCount)
+
+    send({ type: 'data', terminalId: createOptions().terminalId, data: '\x1b]9;4;1;33\x07' })
+    const progress = await waitFor(() =>
+      messages.find((message): message is Extract<ThreadedTerminalCoreResponse, { type: 'progress' }> => message.type === 'progress' && message.progress?.value === 33)
+    )
+    expect(progress).toEqual({
+      type: 'progress',
+      terminalId: createOptions().terminalId,
+      progress: expect.objectContaining({ status: 'running', value: 33 })
+    })
+
+    send({ type: 'data', terminalId: createOptions().terminalId, data: '\x1b]9;4;0;0\x07' })
+    const reset = await waitFor(() =>
+      messages.find((message): message is Extract<ThreadedTerminalCoreResponse, { type: 'progress' }> => message.type === 'progress' && message.progress === null)
+    )
+    expect(reset).toEqual({ type: 'progress', terminalId: createOptions().terminalId, progress: null })
+  })
+
   it('preserves user scrollback on output and returns to bottom on input', async () => {
     await createTerminal()
     send({

@@ -61,6 +61,8 @@ export const createTerminalWorkspaceShellState = () => {
   const menu = reactive({ visible: false, x: 0, y: 0, panelId: '' })
   const termMenu = reactive({ visible: false, x: 0, y: 0, panelId: '' })
   const terminalGrid = ref<HTMLElement | null>(null)
+  const terminalTabs = ref<HTMLElement | null>(null)
+  const terminalTabScrollState = reactive({ canScrollLeft: false, canScrollRight: false })
   const aiButtonPanelId = ref('')
   const aiButtonPosition = reactive({ top: 0, right: 26 })
 
@@ -71,7 +73,9 @@ export const createTerminalWorkspaceShellState = () => {
     renameText,
     renamingId,
     termMenu,
-    terminalGrid
+    terminalGrid,
+    terminalTabs,
+    terminalTabScrollState
   }
 }
 
@@ -112,7 +116,9 @@ export const createTerminalWorkspaceShellRuntime = (
     menu,
     renameText,
     renamingId,
-    termMenu
+    termMenu,
+    terminalTabs,
+    terminalTabScrollState
   } = state
   const afterDomUpdate = deps.afterDomUpdate ?? nextTick
   const copyToClipboard = deps.copyToClipboard ?? copyTextToClipboard
@@ -134,6 +140,56 @@ export const createTerminalWorkspaceShellRuntime = (
   const canForkTerminalMenuPanel = computed(() => workspace.canForkSshPanel(termMenu.panelId))
   const isTerminalMenuPanel = computed(() => panelById(menu.panelId)?.kind === 'terminal')
   const isReconnectablePanel = (panel?: TerminalPanel | null) => !panel?.sessionId || panel.status === 'closed' || panel.status === 'error'
+  const terminalTabsMaxScrollLeft = (element: HTMLElement) => Math.max(0, element.scrollWidth - element.clientWidth)
+  const terminalTabScrollStep = (element: HTMLElement) => Math.max(160, Math.round(element.clientWidth * 0.72))
+  const scrollTerminalTabsTo = (element: HTMLElement, left: number, behavior: ScrollBehavior = 'auto') => {
+    const target = Math.max(0, Math.min(left, terminalTabsMaxScrollLeft(element)))
+    if (typeof element.scrollTo === 'function') element.scrollTo({ left: target, behavior })
+    else element.scrollLeft = target
+  }
+
+  const updateTerminalTabScrollState = () => {
+    const element = terminalTabs.value
+    if (!element) {
+      terminalTabScrollState.canScrollLeft = false
+      terminalTabScrollState.canScrollRight = false
+      return
+    }
+    const maxScrollLeft = terminalTabsMaxScrollLeft(element)
+    if (element.scrollLeft < 0 || element.scrollLeft > maxScrollLeft) {
+      element.scrollLeft = Math.max(0, Math.min(element.scrollLeft, maxScrollLeft))
+    }
+    terminalTabScrollState.canScrollLeft = element.scrollLeft > 1
+    terminalTabScrollState.canScrollRight = element.scrollLeft < maxScrollLeft - 1
+  }
+
+  const updateTerminalTabScrollStateSoon = () => {
+    updateTerminalTabScrollState()
+    window.requestAnimationFrame?.(() => updateTerminalTabScrollState())
+    window.setTimeout(updateTerminalTabScrollState, 180)
+  }
+
+  const scrollTerminalTabs = (direction: 'left' | 'right') => {
+    const element = terminalTabs.value
+    if (!element) return
+    const left = terminalTabScrollStep(element) * (direction === 'left' ? -1 : 1)
+    scrollTerminalTabsTo(element, element.scrollLeft + left, 'smooth')
+    updateTerminalTabScrollStateSoon()
+  }
+
+  const scrollActiveTerminalTabIntoView = () => {
+    const element = terminalTabs.value
+    const activeTab = element?.querySelector<HTMLElement>('.terminal-tab.active') || null
+    if (element && activeTab) {
+      const viewLeft = element.scrollLeft
+      const viewRight = viewLeft + element.clientWidth
+      const tabLeft = activeTab.offsetLeft
+      const tabRight = tabLeft + activeTab.offsetWidth
+      if (tabLeft < viewLeft) scrollTerminalTabsTo(element, tabLeft)
+      else if (tabRight > viewRight) scrollTerminalTabsTo(element, tabRight - element.clientWidth)
+    }
+    updateTerminalTabScrollStateSoon()
+  }
 
   const focusPanelAfterDomUpdate = (panelId: string) => {
     void Promise.resolve(afterDomUpdate()).then(() => focusPanel(panelId))
@@ -788,11 +844,14 @@ export const createTerminalWorkspaceShellRuntime = (
     panelById,
     pasteClipboard,
     renameSelected,
+    scrollActiveTerminalTabIntoView,
+    scrollTerminalTabs,
     splitFromTermMenu,
     splitSelected,
     startRename,
     togglePanelConnection,
     toggleTabConnectionFromMenu,
+    updateTerminalTabScrollState,
     unsplitFromTermMenu,
     unsplitSelected
   }

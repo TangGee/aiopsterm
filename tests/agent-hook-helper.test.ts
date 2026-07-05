@@ -142,6 +142,9 @@ describe('aiopsterm agent hook helper', () => {
           workspaceId: 'workspace-1',
           cwd: '/work/project',
           summary: 'shell: npm test',
+          toolName: 'shell',
+          tool_name: 'shell',
+          tool_input: { command: 'npm test' },
           transcriptPath: '/tmp/codex.jsonl',
           turnId: 'turn-1',
           turn_id: 'turn-1'
@@ -181,7 +184,9 @@ describe('aiopsterm agent hook helper', () => {
           event: 'PermissionRequest',
           sessionId: 'codex-installed-mode-1',
           title: 'Codex · project',
-          summary: 'shell: npm run build'
+          summary: 'shell: npm run build',
+          toolName: 'shell',
+          tool_input: { command: 'npm run build' }
         })
       ])
     } finally {
@@ -294,6 +299,10 @@ describe('aiopsterm agent hook helper', () => {
           sessionId: 'claude-session-1',
           title: 'Claude Code · aiopsterm-hook-project',
           summary: 'Which environment should be deployed?',
+          toolName: 'ask_user_question',
+          tool_input: {
+            questions: [{ question: 'Which environment should be deployed?', options: [{ label: 'staging' }, { label: 'prod' }] }]
+          },
           cwd: projectDir,
           transcriptPath: '/tmp/claude-transcript.jsonl'
         })

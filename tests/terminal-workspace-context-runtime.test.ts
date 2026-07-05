@@ -19,6 +19,11 @@ const t = (key: string) =>
     'terminal.tab.path': 'Path',
     'terminal.tab.file': 'File',
     'terminal.tab.session': 'Session',
+    'terminal.tab.progress': 'Progress',
+    'terminal.progress.running': 'Running',
+    'terminal.progress.error': 'Error',
+    'terminal.progress.indeterminate': 'Working',
+    'terminal.progress.paused': 'Paused',
     'terminal.kind.localTerminal': 'Local Terminal',
     'terminal.kind.editor': 'Editor',
     'terminal.kind.local': 'Local'
@@ -102,9 +107,17 @@ describe('terminalWorkspaceContextRuntime', () => {
     expect(runtime.terminalTabKindBadge(panels[0])).toBe('')
 
     expect(runtime.terminalTabMeta(panels[1])).toBe('ops@10.0.0.8:2222')
-    expect(runtime.terminalTabKindBadge(panels[1])).toBe('ssh')
+    expect(runtime.terminalTabKindBadge(panels[1])).toBe('')
+    expect(runtime.terminalTabShowsState(panels[1])).toBe(false)
     expect(runtime.terminalTabTooltip(panels[1])).toContain('Host: ops@10.0.0.8:2222')
     expect(runtime.terminalTabTooltip(panels[1])).toContain('Session: session-ssh')
+
+    panels[1].terminalProgress = { status: 'running', value: 58, updatedAt: 1 }
+    expect(runtime.terminalTabShowsState(panels[1])).toBe(true)
+    expect(runtime.terminalTabStateClass(panels[1])).toBe('progress-running')
+    expect(runtime.terminalTabStateLabel(panels[1])).toBe('Running 58%')
+    expect(runtime.terminalTabProgressStyle(panels[1])).toEqual({ '--terminal-tab-progress': '58%' })
+    expect(runtime.terminalTabTooltip(panels[1])).toContain('Progress: Running 58%')
 
     expect(runtime.terminalTabMeta(panels[2])).toBe('runbooks/deploy.md')
     expect(runtime.terminalTabKindBadge(panels[2])).toBe('editor')

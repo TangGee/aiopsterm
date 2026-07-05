@@ -37,11 +37,13 @@ import type {
   ThreadedTerminalSurface,
   ThreadedTerminalTheme
 } from '@/services/terminal/threadedTerminalProtocol'
+import type { TerminalProgress } from '@/services/terminal/terminalOscRuntime'
 
 type DisposableLike = { dispose: () => void }
 type EventHandler<T> = (value: T) => void
 type ResizeHandler = (size: { cols: number; rows: number }) => unknown
 type SelectionHandler = () => void
+type ProgressHandler = (progress: TerminalProgress | null) => void
 type RenderFrameAck = Extract<ThreadedTerminalRenderResponse, { type: 'frame' }> & { at: number }
 
 type ThreadedTerminalInitOptions = {
@@ -556,6 +558,14 @@ const handleCoreMessage = (handle: ThreadedTerminalCoreHandle, message: Threaded
     hostMap.get(message.terminalId)?.emitData(message.data)
     return
   }
+  if (message.type === 'title') {
+    hostMap.get(message.terminalId)?.emitTitleChange(message.title)
+    return
+  }
+  if (message.type === 'progress') {
+    hostMap.get(message.terminalId)?.emitProgressChange(message.progress)
+    return
+  }
   if (message.type === 'read-screen-result') {
     const pending = requestMap.get(message.requestId)
     if (!pending || pending.kind !== 'screen') return
@@ -876,6 +886,8 @@ export class ThreadedTerminalHost {
   private dataHandlers = new Set<EventHandler<string>>()
   private resizeHandlers = new Set<ResizeHandler>()
   private selectionHandlers = new Set<SelectionHandler>()
+  private titleHandlers = new Set<EventHandler<string>>()
+  private progressHandlers = new Set<ProgressHandler>()
   private customKeyHandler: ((event: KeyboardEvent) => boolean) | null = null
   private snapshotLines: string[] = []
   private snapshotScreenLines: ThreadedTerminalScreenLine[] = []
@@ -1130,6 +1142,8 @@ export class ThreadedTerminalHost {
     this.dataHandlers.clear()
     this.resizeHandlers.clear()
     this.selectionHandlers.clear()
+    this.titleHandlers.clear()
+    this.progressHandlers.clear()
     this.rejectFrameWaiters('Threaded terminal disposed.')
     if (this.coreCreated) postCore(this.coreHandle, { type: 'dispose', terminalId: this.terminalId })
     this.coreHandle.terminals.delete(this.terminalId)
@@ -1291,6 +1305,16 @@ export class ThreadedTerminalHost {
     return createDisposable(() => this.selectionHandlers.delete(handler))
   }
 
+  onTitleChange(handler: EventHandler<string>) {
+    this.titleHandlers.add(handler)
+    return createDisposable(() => this.titleHandlers.delete(handler))
+  }
+
+  onProgressChange(handler: ProgressHandler) {
+    this.progressHandlers.add(handler)
+    return createDisposable(() => this.progressHandlers.delete(handler))
+  }
+
   emitData(data: string) {
     this.dataHandlers.forEach((handler) => handler(data))
   }
@@ -1299,6 +1323,14 @@ export class ThreadedTerminalHost {
     this.cols = cols
     this.rows = rows
     this.resizeHandlers.forEach((handler) => handler({ cols, rows }))
+  }
+
+  emitTitleChange(title: string) {
+    this.titleHandlers.forEach((handler) => handler(title))
+  }
+
+  emitProgressChange(progress: TerminalProgress | null) {
+    this.progressHandlers.forEach((handler) => handler(progress))
   }
 
   setSessionId(sessionId?: string) {

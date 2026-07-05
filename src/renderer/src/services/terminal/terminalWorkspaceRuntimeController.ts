@@ -98,7 +98,9 @@ export const useTerminalWorkspaceContainerRuntime = () => {
     renameText,
     renamingId,
     termMenu,
-    terminalGrid
+    terminalGrid,
+    terminalTabs,
+    terminalTabScrollState
   } = shellState
   const commandState = createTerminalWorkspaceCommandState()
   const {
@@ -417,6 +419,10 @@ export const useTerminalWorkspaceContainerRuntime = () => {
     terminalStatusLabel,
     terminalTabKindBadge,
     terminalTabMeta,
+    terminalTabProgressStyle,
+    terminalTabShowsState,
+    terminalTabStateClass,
+    terminalTabStateLabel,
     terminalTabTooltip
   } = createTerminalWorkspaceContextRuntime({
     workspace,
@@ -612,11 +618,14 @@ export const useTerminalWorkspaceContainerRuntime = () => {
     panelById,
     pasteClipboard,
     renameSelected,
+    scrollActiveTerminalTabIntoView,
+    scrollTerminalTabs,
     splitFromTermMenu,
     splitSelected,
     startRename,
     togglePanelConnection,
     toggleTabConnectionFromMenu,
+    updateTerminalTabScrollState,
     unsplitFromTermMenu,
     unsplitSelected
   } = createTerminalWorkspaceShellRuntime({
@@ -724,6 +733,11 @@ export const useTerminalWorkspaceContainerRuntime = () => {
     offControlRequest = controlClient.onControlRequest()?.(handleControlRequest) || null
     document.addEventListener('click', closeTerminalMenusFromDocument)
     window.addEventListener('keydown', handleShortcut)
+    window.addEventListener('resize', updateTerminalTabScrollState)
+    nextTick(() => {
+      updateTerminalTabScrollState()
+      scrollActiveTerminalTabIntoView()
+    })
     if (shouldUseTerminalStressHarness()) {
       void import('@/services/terminal/terminalStressHarness').then(({ installTerminalStressHarness }) => {
         if (!terminalRuntimeMounted) return
@@ -766,6 +780,7 @@ export const useTerminalWorkspaceContainerRuntime = () => {
     disposeTerminalViews()
     document.removeEventListener('click', closeTerminalMenusFromDocument)
     window.removeEventListener('keydown', handleShortcut)
+    window.removeEventListener('resize', updateTerminalTabScrollState)
     if (terminalIngressFlushTimer !== null) {
       window.clearTimeout(terminalIngressFlushTimer)
       terminalIngressFlushTimer = null
@@ -825,8 +840,22 @@ export const useTerminalWorkspaceContainerRuntime = () => {
         terminalControlSurface.recordLastActiveControlPanel(previousPanelId)
       }
       hideCommandDialogForActivePanel(panelId)
-      nextTick(() => visibleTerminalPanels.value.filter((panel) => panel.kind !== 'knowledge').forEach((panel) => syncTerminalView(panel)))
+      nextTick(() => {
+        scrollActiveTerminalTabIntoView()
+        visibleTerminalPanels.value.filter((panel) => panel.kind !== 'knowledge').forEach((panel) => syncTerminalView(panel))
+      })
     }
+  )
+
+  watch(
+    () => visibleTerminalTabPanels.value.map((panel) => panel.id).join('|'),
+    () => {
+      nextTick(() => {
+        updateTerminalTabScrollState()
+        scrollActiveTerminalTabIntoView()
+      })
+    },
+    { flush: 'post' }
   )
 
   watch(
@@ -956,14 +985,22 @@ export const useTerminalWorkspaceContainerRuntime = () => {
     termMenu,
     terminalGrid,
     terminalGridClasses,
+    terminalTabs,
+    terminalTabScrollState,
     terminalOutputMirrorText,
     terminalStatusLabel,
     terminalTabKindBadge,
     terminalTabMeta,
+    terminalTabProgressStyle,
+    terminalTabShowsState,
+    terminalTabStateClass,
+    terminalTabStateLabel,
     terminalTabTooltip,
     toggleGlobalInput,
     togglePanelConnection,
     toggleTabConnectionFromMenu,
+    scrollTerminalTabs,
+    updateTerminalTabScrollState,
     triggerAiSuggestion,
     unsplitFromTermMenu,
     unsplitSelected,

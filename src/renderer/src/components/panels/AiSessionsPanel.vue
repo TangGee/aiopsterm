@@ -152,7 +152,19 @@
                 @keydown.enter.prevent="selectSession(session)"
                 @keydown.space.prevent="selectSession(session)"
               >
-                <span :class="`ai-session-state dot-${sessionDotState(session)}`"></span>
+                <span class="ai-session-row-side">
+                  <span :class="`ai-session-state dot-${sessionDotState(session)}`"></span>
+                  <button
+                    v-if="session.state === 'needsInput'"
+                    type="button"
+                    class="ai-session-handle"
+                    :title="t('aiSessions.markHandled')"
+                    :aria-label="t('aiSessions.markHandled')"
+                    @click.stop="workspace.markManagedAiSessionHandled(session.source, session.id)"
+                  >
+                    <Check />
+                  </button>
+                </span>
                 <span class="ai-session-row-body">
                   <span class="ai-session-row-title">{{ sessionRowTitle(session) }}</span>
                   <span
@@ -202,7 +214,19 @@
                 @keydown.enter.prevent="selectSession(session)"
                 @keydown.space.prevent="selectSession(session)"
               >
-                <span :class="`ai-session-state dot-${sessionDotState(session)}`"></span>
+                <span class="ai-session-row-side">
+                  <span :class="`ai-session-state dot-${sessionDotState(session)}`"></span>
+                  <button
+                    v-if="session.state === 'needsInput'"
+                    type="button"
+                    class="ai-session-handle"
+                    :title="t('aiSessions.markHandled')"
+                    :aria-label="t('aiSessions.markHandled')"
+                    @click.stop="workspace.markManagedAiSessionHandled(session.source, session.id)"
+                  >
+                    <Check />
+                  </button>
+                </span>
                 <span class="ai-session-row-body">
                   <span class="ai-session-row-title">{{ sessionRowTitle(session) }}</span>
                   <span
@@ -231,7 +255,19 @@
             @keydown.enter.prevent="selectSession(session)"
             @keydown.space.prevent="selectSession(session)"
           >
-            <span :class="`ai-session-state dot-${sessionDotState(session)}`"></span>
+            <span class="ai-session-row-side">
+              <span :class="`ai-session-state dot-${sessionDotState(session)}`"></span>
+              <button
+                v-if="session.state === 'needsInput'"
+                type="button"
+                class="ai-session-handle"
+                :title="t('aiSessions.markHandled')"
+                :aria-label="t('aiSessions.markHandled')"
+                @click.stop="workspace.markManagedAiSessionHandled(session.source, session.id)"
+              >
+                <Check />
+              </button>
+            </span>
             <span class="ai-session-row-body">
               <span class="ai-session-row-title">{{ sessionRowTitle(session) }}</span>
               <span
@@ -265,7 +301,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { Activity, Archive, Bot, ChevronDown, FolderTree, Inbox, RefreshCw, Search } from 'lucide-vue-next'
+import { Activity, Archive, Bot, Check, ChevronDown, FolderTree, Inbox, RefreshCw, Search } from 'lucide-vue-next'
 import type { ManagedAiPanelModeButton } from '@/services/ai/aiSessionsPanelViewRuntime'
 import { useAiSessionsPanelRuntime } from '@/services/ai/aiSessionsPanelRuntime'
 

@@ -131,6 +131,9 @@ const managedAiSessionSummary = (session: ManagedAiSessionRecord, options: { inc
 
 const managedAiApprovalRequestKinds = new Set(['permission', 'question', 'plan'])
 
+const isCodexNativePermissionPrompt = (session: ManagedAiSessionRecord) =>
+  session.source === 'codex' && session.requestKind === 'permission' && session.decisionMode === 'local'
+
 const managedAiApprovalCapabilities = (session: ManagedAiSessionRecord) => {
   const localOnly = session.decisionMode !== 'blocking'
   const canUnblockAgent = session.decisionMode === 'blocking' && session.state === 'needsInput' && Boolean(session.pendingRequestId)
@@ -140,9 +143,9 @@ const managedAiApprovalCapabilities = (session: ManagedAiSessionRecord) => {
   if (!managedAiApprovalRequestKinds.has(session.requestKind)) {
     decisions.push('handled')
     noteParts.push('This managed AI item is informational; aiopsterm can only mark it handled.')
-  } else if (session.source === 'codex' && session.requestKind === 'permission' && session.decisionMode === 'local' && session.actionable !== true) {
+  } else if (isCodexNativePermissionPrompt(session)) {
     decisions.push('handled')
-    noteParts.push('Stock Codex hook permission requests stay in the Codex TUI; aiopsterm records local visibility only.')
+    noteParts.push('Stock Codex permission prompts stay in the Codex TUI; aiopsterm surfaces them as pending and can only mark them handled.')
   } else if (session.requestKind === 'question') {
     decisions.push('reply', 'deny', 'handled')
   } else if (session.requestKind === 'plan') {
@@ -166,7 +169,7 @@ const managedAiApprovalCapabilities = (session: ManagedAiSessionRecord) => {
     canUnblockAgent,
     blocking: session.decisionMode === 'blocking',
     localOnly,
-    nativePrompt: session.source === 'codex' && session.requestKind === 'permission' && session.decisionMode === 'local' && session.actionable !== true,
+    nativePrompt: isCodexNativePermissionPrompt(session),
     ...(noteParts.length ? { note: noteParts.join(' ') } : {})
   }
 }

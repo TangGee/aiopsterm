@@ -208,6 +208,11 @@ const workerMessages = async () => {
   }
 }
 
+const coreWorkers = async () => {
+  const coreModule = await import('@/services/terminal/threadedTerminalCoreWorker?worker')
+  return (coreModule.default as any).instances as Array<{ onmessage: ((event: MessageEvent) => void) | null }>
+}
+
 const drainMicrotasks = async (count = 4) => {
   for (let index = 0; index < count; index += 1) await Promise.resolve()
 }
@@ -304,6 +309,25 @@ describe('threadedTerminalRuntime', () => {
         expect.objectContaining({ type: 'dispose', terminalId: 'panel-1' })
       ])
     )
+  })
+
+  it('emits title and progress changes received from the core worker', async () => {
+    installOffscreenCanvasSupport()
+    const host = createHost()
+    const titles: string[] = []
+    const progress: unknown[] = []
+    host.onTitleChange((title) => titles.push(title))
+    host.onProgressChange((item) => progress.push(item))
+    host.open(createHostElement())
+
+    const worker = (await coreWorkers())[0]
+    worker.onmessage?.({ data: { type: 'title', terminalId: 'panel-1', title: 'vim main.ts' } } as MessageEvent)
+    worker.onmessage?.({ data: { type: 'progress', terminalId: 'panel-1', progress: { status: 'running', value: 64, updatedAt: 1 } } } as MessageEvent)
+    worker.onmessage?.({ data: { type: 'progress', terminalId: 'panel-1', progress: null } } as MessageEvent)
+
+    expect(titles).toEqual(['vim main.ts'])
+    expect(progress).toEqual([{ status: 'running', value: 64, updatedAt: 1 }, null])
+    host.dispose()
   })
 
   it('uses a single host-owned terminal geometry for core sizing and render attach', async () => {

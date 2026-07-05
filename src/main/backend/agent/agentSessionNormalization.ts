@@ -456,9 +456,17 @@ const questionSummary = (input: Record<string, unknown>) => {
 const toolNameFor = (input: Record<string, unknown>) =>
   firstText(input, ['toolName', 'tool_name', 'tool', 'name']) || firstText(firstNestedRecord(input, ['tool', 'tool_input', 'toolInput']), ['name', 'toolName', 'tool_name'])
 
-const isExitPlanTool = (toolName?: string) => cleanText(toolName).toLowerCase().replace(/[\s_-]+/g, '') === 'exitplanmode'
+const normalizedToolName = (toolName?: string) => cleanText(toolName).toLowerCase().replace(/[\s_-]+/g, '')
 
-const isAskUserQuestionTool = (toolName?: string) => cleanText(toolName).toLowerCase().replace(/[\s_-]+/g, '') === 'askuserquestion'
+const isExitPlanTool = (toolName?: string) => normalizedToolName(toolName) === 'exitplanmode'
+
+const isAskUserQuestionTool = (toolName?: string) => ['askuserquestion', 'requestuserinput'].includes(normalizedToolName(toolName))
+
+const isCodexTerminalPermissionRequest = (
+  source: AiAgentSessionSource,
+  event: AiAgentSessionEventName,
+  requestKind?: ManagedAiRequestKind
+) => source === 'codex' && event === 'permission_request' && requestKind === 'permission'
 
 const requestKindFor = (source: AiAgentSessionSource, event: AiAgentSessionEventName, input: Record<string, unknown>, toolName?: string): ManagedAiRequestKind => {
   const explicit = normalizeRequestKind(input.requestKind || input.request_kind || input.feedKind || input.feed_kind)
@@ -482,15 +490,15 @@ const decisionModeFor = (source: AiAgentSessionSource, event: AiAgentSessionEven
 
 const actionableFor = (source: AiAgentSessionSource, event: AiAgentSessionEventName, input: Record<string, unknown>, requestKind: ManagedAiRequestKind, decisionMode: ManagedAiDecisionMode) => {
   const explicit = normalizeBoolean(input.actionable ?? input.waitForDecision ?? input.wait_for_decision)
-  if (source === 'codex' && event === 'permission_request') return false
+  if (isCodexTerminalPermissionRequest(source, event, requestKind)) return true
   if (typeof explicit === 'boolean') return explicit
   if (decisionMode === 'blocking') return true
   return requestKind === 'permission' || requestKind === 'question' || requestKind === 'plan'
 }
 
 const managedAiSessionNeedsInputForEvent = (event: Pick<AiAgentSessionEvent, 'source' | 'event' | 'requestKind' | 'decisionMode' | 'actionable'>) => {
-  if (event.source === 'codex' && event.event === 'permission_request') return false
   if (event.requestKind === 'telemetry') return false
+  if (isCodexTerminalPermissionRequest(event.source, event.event, event.requestKind)) return true
   if (event.decisionMode === 'blocking') return true
   if (event.requestKind === 'notification') return true
   return event.actionable === true
@@ -511,6 +519,8 @@ export const managedAiSessionStateForEvent = (
   if (event === 'session_end') return 'ended'
   if (event === 'stop') return 'needsInput'
   const lifecycleState = stateForAgentLifecycle(lifecycle)
+  if (lifecycleState === 'ended') return lifecycleState
+  if (aiEvent && managedAiSessionNeedsInputForEvent(aiEvent)) return 'needsInput'
   if (lifecycleState) return lifecycleState
   if (event === 'session_start') return 'idle'
   if (event === 'prompt_submit' || event === 'pre_tool_use') return 'working'
@@ -635,6 +645,7 @@ const normalizeStoredTimelineEvent = (value: Record<string, unknown>, fallbackSo
   const toolName = cleanOptionalText(value.toolName || value.tool_name)
   const requestKind = normalizeRequestKind(value.requestKind || value.request_kind) || requestKindFor(source, event, value, toolName)
   const decisionMode = normalizeDecisionMode(value.decisionMode || value.decision_mode) || decisionModeFor(source, event, value, requestKind)
+  const actionable = isCodexTerminalPermissionRequest(source, event, requestKind) ? true : normalizeBoolean(value.actionable)
   const cwd = cleanOptionalText(value.cwd)
   const canonicalCwd = canonicalCwdFor(cwd, value.canonicalCwd || value.canonical_cwd || value.realCwd || value.real_cwd || value.realpath)
   const gitBranch = cleanOptionalText(value.gitBranch || value.git_branch)
@@ -662,7 +673,7 @@ const normalizeStoredTimelineEvent = (value: Record<string, unknown>, fallbackSo
     ...(cleanOptionalText(value.requestId) ? { requestId: cleanOptionalText(value.requestId) } : {}),
     ...(cleanPositiveInteger(value.waitTimeoutMs || value.wait_timeout_ms) ? { waitTimeoutMs: cleanPositiveInteger(value.waitTimeoutMs || value.wait_timeout_ms) } : {}),
     ...(toolName ? { toolName } : {}),
-    ...(typeof value.actionable === 'boolean' ? { actionable: value.actionable } : {}),
+    ...(typeof actionable === 'boolean' ? { actionable } : {}),
     ...(cleanOptionalText(value.launchCommand) ? { launchCommand: cleanOptionalText(value.launchCommand) } : {}),
     ...(cleanOptionalText(value.resumeCommand) ? { resumeCommand: cleanOptionalText(value.resumeCommand) } : {}),
     ...(cleanPositiveInteger(value.processId) ? { processId: cleanPositiveInteger(value.processId) } : {}),
@@ -701,6 +712,25 @@ export const normalizeStoredSession = (value: unknown): ManagedAiSessionRecord |
   const storedToolName = cleanOptionalText(value.toolName || value.tool_name)
   const requestKind = normalizeRequestKind(value.requestKind || value.request_kind) || latestEvent?.requestKind || requestKindFor(source, lastEvent, value, storedToolName)
   const decisionMode = normalizeDecisionMode(value.decisionMode || value.decision_mode) || latestEvent?.decisionMode || decisionModeFor(source, lastEvent, value, requestKind)
+  const actionable = isCodexTerminalPermissionRequest(source, lastEvent, requestKind)
+    ? true
+    : typeof value.actionable === 'boolean'
+      ? value.actionable
+      : latestEvent?.actionable
+  const storedState = value.state === 'idle' || value.state === 'working' || value.state === 'needsInput' || value.state === 'ended' || value.state === 'unknown' ? value.state : 'unknown'
+  const handledAt = typeof value.handledAt === 'number' ? value.handledAt : undefined
+  const shouldRestorePending =
+    !handledAt &&
+    (storedState === 'working' || storedState === 'unknown') &&
+    isCodexTerminalPermissionRequest(source, lastEvent, requestKind) &&
+    managedAiSessionNeedsInputForEvent({
+      source,
+      event: lastEvent,
+      requestKind,
+      decisionMode,
+      actionable
+    })
+  const state = shouldRestorePending ? 'needsInput' : storedState
   const cwd = cleanOptionalText(value.cwd)
   const canonicalCwd = canonicalCwdFor(cwd, value.canonicalCwd || value.canonical_cwd || value.realCwd || value.real_cwd || value.realpath || latestEvent?.canonicalCwd)
   const gitBranch = cleanOptionalText(value.gitBranch || value.git_branch || latestEvent?.gitBranch)
@@ -711,12 +741,12 @@ export const normalizeStoredSession = (value: unknown): ManagedAiSessionRecord |
     source,
     title: cleanOptionalText(value.title) || sourceLabel(source),
     summary: cleanOptionalText(value.summary) || '',
-    state: value.state === 'idle' || value.state === 'working' || value.state === 'needsInput' || value.state === 'ended' || value.state === 'unknown' ? value.state : 'unknown',
+    state,
     lastEvent,
     lastActivityAt: typeof value.lastActivityAt === 'number' ? value.lastActivityAt : now,
     createdAt: typeof value.createdAt === 'number' ? value.createdAt : now,
     updatedAt: typeof value.updatedAt === 'number' ? value.updatedAt : now,
-    ...(typeof value.handledAt === 'number' ? { handledAt: value.handledAt } : {}),
+    ...(typeof handledAt === 'number' ? { handledAt } : {}),
     ...(cleanOptionalText(value.autoTitle) ? { autoTitle: cleanOptionalText(value.autoTitle) } : {}),
     ...(cleanOptionalText(value.userTitle) ? { userTitle: cleanOptionalText(value.userTitle) } : {}),
     ...(typeof value.autoTitleEventCount === 'number' && Number.isFinite(value.autoTitleEventCount)
@@ -733,12 +763,16 @@ export const normalizeStoredSession = (value: unknown): ManagedAiSessionRecord |
     ...(typeof gitDirty === 'boolean' ? { gitDirty } : {}),
     ...(gitStatusUpdatedAt ? { gitStatusUpdatedAt } : {}),
     ...(cleanOptionalText(value.transcriptPath) ? { transcriptPath: cleanOptionalText(value.transcriptPath) } : {}),
-    ...(cleanOptionalText(value.pendingRequestId) ? { pendingRequestId: cleanOptionalText(value.pendingRequestId) } : {}),
+    ...(cleanOptionalText(value.pendingRequestId)
+      ? { pendingRequestId: cleanOptionalText(value.pendingRequestId) }
+      : state === 'needsInput' && actionable === true && latestEvent?.requestId
+        ? { pendingRequestId: latestEvent.requestId }
+        : {}),
     requestKind,
     decisionMode,
     ...(cleanPositiveInteger(value.waitTimeoutMs || value.wait_timeout_ms) ? { waitTimeoutMs: cleanPositiveInteger(value.waitTimeoutMs || value.wait_timeout_ms) } : latestEvent?.waitTimeoutMs ? { waitTimeoutMs: latestEvent.waitTimeoutMs } : {}),
     ...(storedToolName ? { toolName: storedToolName } : latestEvent?.toolName ? { toolName: latestEvent.toolName } : {}),
-    ...(typeof value.actionable === 'boolean' ? { actionable: value.actionable } : {}),
+    ...(typeof actionable === 'boolean' ? { actionable } : {}),
     ...(cleanOptionalText(value.launchCommand) ? { launchCommand: cleanOptionalText(value.launchCommand) } : {}),
     ...(cleanOptionalText(value.resumeCommand) ? { resumeCommand: cleanOptionalText(value.resumeCommand) } : {}),
     ...(cleanPositiveInteger(value.processId) ? { processId: cleanPositiveInteger(value.processId) } : {}),

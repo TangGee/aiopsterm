@@ -72,6 +72,11 @@ describe('agentHookConfigRuntime', () => {
       true
     )
     expect((grouped.config.hooks as any).Stop).toHaveLength(2)
+    expect((grouped.config.hooks as any).AskUserQuestion[0].hooks[0]).toEqual({
+      type: 'command',
+      command: runtime.agentHookCommandFor('codex', 'AskUserQuestion', '/opt/aiopsterm/hook.js'),
+      timeout: 5
+    })
     expect(JSON.stringify(grouped.config)).toContain('aiopsterm-agent-hook-v1')
 
     const flat = runtime.mergeAgentHookJson({ version: 1 }, cursor, '/opt/aiopsterm/hook.js', true)
@@ -115,6 +120,7 @@ describe('agentHookConfigRuntime', () => {
     expect(runtime.uninstallCodexHooksFeature(trusted)).toBe('[features]\nhooks = false\n')
     expect(trusted).toContain('[hooks.state."/home/ops/.codex/hooks.json:stop:0:0"]')
     expect(trusted).toContain(`trusted_hash = "${runtime.codexHookHash('Stop', command, 5)}"`)
+    expect(trusted).toContain('[hooks.state."/home/ops/.codex/hooks.json:ask_user_question:0:0"]')
   })
 
   it('renders plugin file templates, YAML hooks, and OpenCode registration without user plugin loss', async () => {

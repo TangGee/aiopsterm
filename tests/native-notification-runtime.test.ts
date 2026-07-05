@@ -5,14 +5,16 @@ type NativeNotificationRuntime = {
   create: (input: { title: string; body?: string; silent?: boolean }) => {
     on: (event: 'click', listener: () => void) => void
     show: () => void
+    close?: () => void
   }
 }
 
 type NativeNotificationRuntimeModule = {
   shouldShowNativeNotification: (enabled: boolean, isSupported: () => boolean) => boolean
+  syncNativeNotificationKeys: (activeKeys: Iterable<string>) => void
   showNativeNotification: (
     runtime: NativeNotificationRuntime,
-    input: { title: string; body?: string; silent?: boolean; onClick?: () => void },
+    input: { title: string; body?: string; silent?: boolean; key?: string; onClick?: () => void },
     enabled?: boolean
   ) => boolean
 }
@@ -25,14 +27,16 @@ const loadRuntime = async () => {
 const createRuntime = (supported = true) => {
   const clickListeners: Array<() => void> = []
   const show = vi.fn()
+  const close = vi.fn()
   const runtime: NativeNotificationRuntime = {
     isSupported: vi.fn(() => supported),
     create: vi.fn(() => ({
       on: (_event: 'click', listener: () => void) => clickListeners.push(listener),
-      show
+      show,
+      close
     }))
   }
-  return { runtime, show, clickListeners }
+  return { runtime, show, close, clickListeners }
 }
 
 describe('nativeNotificationRuntime', () => {
@@ -67,5 +71,20 @@ describe('nativeNotificationRuntime', () => {
     const unsupported = createRuntime(false)
     expect(showNativeNotification(unsupported.runtime, { title: 'Unsupported' }, true)).toBe(false)
     expect(unsupported.runtime.create).not.toHaveBeenCalled()
+  })
+
+  it('keeps keyed native notifications aligned with active attention ids', async () => {
+    const { showNativeNotification, syncNativeNotificationKeys } = await loadRuntime()
+    const first = createRuntime()
+    const second = createRuntime()
+
+    expect(showNativeNotification(first.runtime, { key: 'managed-ai:codex:one', title: 'First' }, true)).toBe(true)
+    expect(showNativeNotification(second.runtime, { key: 'managed-ai:codex:one', title: 'Second' }, true)).toBe(true)
+
+    expect(first.close).toHaveBeenCalledTimes(1)
+    expect(second.close).not.toHaveBeenCalled()
+
+    syncNativeNotificationKeys([])
+    expect(second.close).toHaveBeenCalledTimes(1)
   })
 })

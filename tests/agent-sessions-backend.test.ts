@@ -164,10 +164,232 @@ describe('agent session backend', () => {
         summary: 'Approve shell command',
         requestKind: 'permission',
         decisionMode: 'local',
-        actionable: false,
+        actionable: true,
         receivedAt: 100
       })
     })
+  })
+
+  it('restores old stored Codex permission prompts as pending terminal attention', async () => {
+    const { configureAiAgentSessionStore, listManagedAiSessions } = await loadBackend()
+    const root = await mkdtemp(join(tmpdir(), 'aiopsterm-codex-stored-permission-'))
+    const storeDir = join(root, 'agent-sessions')
+    await mkdir(storeDir, { recursive: true })
+    await writeFile(
+      join(storeDir, 'managed-ai-sessions.json'),
+      JSON.stringify({
+        version: 1,
+        sessions: [
+          {
+            id: 'codex-stored-permission-1',
+            source: 'codex',
+            title: 'Codex · api',
+            summary: 'Bash: npm test',
+            state: 'working',
+            lastEvent: 'permission_request',
+            lastActivityAt: 200,
+            createdAt: 100,
+            updatedAt: 200,
+            requestKind: 'permission',
+            decisionMode: 'local',
+            actionable: false,
+            events: [
+              {
+                id: 'event-1',
+                source: 'codex',
+                event: 'permission_request',
+                sessionId: 'codex-stored-permission-1',
+                requestId: 'codex-request-1',
+                title: 'Codex · api',
+                summary: 'Bash: npm test',
+                receivedAt: 200,
+                requestKind: 'permission',
+                decisionMode: 'local',
+                actionable: false
+              }
+            ],
+            decisions: []
+          }
+        ]
+      }),
+      'utf-8'
+    )
+
+    await configureAiAgentSessionStore(root)
+
+    await expect(listManagedAiSessions()).resolves.toEqual(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          sessions: [
+            expect.objectContaining({
+              id: 'codex-stored-permission-1',
+              state: 'needsInput',
+              requestKind: 'permission',
+              decisionMode: 'local',
+              actionable: true,
+              pendingRequestId: 'codex-request-1',
+              events: [expect.objectContaining({ actionable: true })]
+            })
+          ]
+        })
+      })
+    )
+  })
+
+  it('promotes Codex AskUserQuestion hooks to managed AI pending sessions', async () => {
+    const { configureAiAgentSessionStore, listManagedAiNotifications, listManagedAiSessions, publishAiAgentSessionEvent } = await loadBackend()
+    await configureAiAgentSessionStore(await mkdtemp(join(tmpdir(), 'aiopsterm-codex-ask-user-question-')))
+
+    publishAiAgentSessionEvent(
+      {
+        source: 'codex',
+        event: 'AskUserQuestion',
+        sessionId: 'codex-question-hook-1',
+        requestId: 'codex-question-request-1',
+        cwd: '/work/kids-game',
+        panelId: 'panel-codex-question',
+        terminalSessionId: 'terminal-codex-question',
+        tool_input: {
+          questions: [
+            {
+              question: '你最希望第一版上线后验证什么？',
+              options: [
+                { label: '孩子愿意反复玩', description: '优先做关卡反馈、趣味包装和可重复性' },
+                { label: '家长觉得有价值', description: '优先做能力说明、难度分级、时长建议' }
+              ]
+            }
+          ]
+        },
+        receivedAt: 260
+      },
+      null
+    )
+
+    const sessionsResponse = (await listManagedAiSessions()) as { data?: { sessions?: Array<Record<string, unknown>> } }
+    expect(sessionsResponse.data?.sessions?.find((item) => item.id === 'codex-question-hook-1')).toEqual(
+      expect.objectContaining({
+        id: 'codex-question-hook-1',
+        source: 'codex',
+        state: 'needsInput',
+        lastEvent: 'question',
+        summary: '你最希望第一版上线后验证什么？',
+        requestKind: 'question',
+        decisionMode: 'local',
+        actionable: true,
+        pendingRequestId: 'codex-question-request-1',
+        panelId: 'panel-codex-question',
+        terminalSessionId: 'terminal-codex-question'
+      })
+    )
+    await expect(listManagedAiNotifications({ unread: true })).resolves.toEqual(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          count: 1,
+          unreadCount: 1,
+          notifications: [
+            expect.objectContaining({
+              source: 'codex',
+              sessionId: 'codex-question-hook-1',
+              needsInput: true,
+              requestKind: 'question',
+              pendingRequestId: 'codex-question-request-1',
+              summary: '你最希望第一版上线后验证什么？'
+            })
+          ]
+        })
+      })
+    )
+  })
+
+  it('promotes Codex request_user_input pre-tool hooks to managed AI pending sessions', async () => {
+    const { configureAiAgentSessionStore, listManagedAiNotifications, listManagedAiSessions, normalizeAiAgentSessionEventInput, publishAiAgentSessionEvent } =
+      await loadBackend()
+    await configureAiAgentSessionStore(await mkdtemp(join(tmpdir(), 'aiopsterm-codex-request-user-input-pre-tool-')))
+
+    expect(
+      normalizeAiAgentSessionEventInput(
+        {
+          source: 'codex',
+          event: 'PreToolUse',
+          sessionId: 'codex-question-pre-tool-1',
+          requestId: 'codex-question-pre-tool-request-1',
+          tool_name: 'request_user_input',
+          tool_input: {
+            questions: [{ question: '请选择部署环境', options: [{ label: 'staging' }, { label: 'prod' }] }]
+          },
+          cwd: '/work/deploy',
+          receivedAt: 270
+        },
+        270
+      )
+    ).toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
+          event: 'pre_tool_use',
+          requestKind: 'question',
+          decisionMode: 'local',
+          actionable: true,
+          toolName: 'request_user_input',
+          summary: '请选择部署环境'
+        })
+      })
+    )
+
+    publishAiAgentSessionEvent(
+      {
+        source: 'codex',
+        event: 'PreToolUse',
+        sessionId: 'codex-question-pre-tool-1',
+        requestId: 'codex-question-pre-tool-request-1',
+        cwd: '/work/deploy',
+        panelId: 'panel-codex-pre-tool-question',
+        terminalSessionId: 'terminal-codex-pre-tool-question',
+        tool_name: 'request_user_input',
+        tool_input: {
+          questions: [{ question: '请选择部署环境', options: [{ label: 'staging' }, { label: 'prod' }] }]
+        },
+        receivedAt: 270
+      },
+      null
+    )
+
+    const sessionsResponse = (await listManagedAiSessions()) as { data?: { sessions?: Array<Record<string, unknown>> } }
+    expect(sessionsResponse.data?.sessions?.find((item) => item.id === 'codex-question-pre-tool-1')).toEqual(
+      expect.objectContaining({
+        id: 'codex-question-pre-tool-1',
+        source: 'codex',
+        state: 'needsInput',
+        lastEvent: 'pre_tool_use',
+        summary: '请选择部署环境',
+        requestKind: 'question',
+        decisionMode: 'local',
+        actionable: true,
+        pendingRequestId: 'codex-question-pre-tool-request-1',
+        toolName: 'request_user_input',
+        panelId: 'panel-codex-pre-tool-question',
+        terminalSessionId: 'terminal-codex-pre-tool-question'
+      })
+    )
+    await expect(listManagedAiNotifications({ unread: true })).resolves.toEqual(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          count: 1,
+          unreadCount: 1,
+          notifications: [
+            expect.objectContaining({
+              source: 'codex',
+              sessionId: 'codex-question-pre-tool-1',
+              needsInput: true,
+              requestKind: 'question',
+              pendingRequestId: 'codex-question-pre-tool-request-1',
+              toolName: 'request_user_input',
+              summary: '请选择部署环境'
+            })
+          ]
+        })
+      })
+    )
   })
 
   it('stores canonical cwd metadata for symlink-aware project grouping', async () => {
@@ -243,7 +465,7 @@ describe('agent session backend', () => {
     expect(runGit).toHaveBeenCalledTimes(2)
   })
 
-  it('keeps stock Codex permission hooks as timeline telemetry instead of pending attention', async () => {
+  it('promotes stock Codex permission hooks to pending terminal attention', async () => {
     const { configureAiAgentSessionStore, listManagedAiNotifications, listManagedAiSessions, publishAiAgentSessionEvent } = await loadBackend()
     await configureAiAgentSessionStore(await mkdtemp(join(tmpdir(), 'aiopsterm-codex-telemetry-')))
 
@@ -270,22 +492,22 @@ describe('agent session backend', () => {
           sessions: [
             expect.objectContaining({
               id: 'codex-telemetry-1',
-              state: 'working',
+              state: 'needsInput',
               requestKind: 'permission',
               decisionMode: 'local',
-              actionable: false
+              actionable: true,
+              pendingRequestId: 'codex-request-1'
             })
           ]
         })
       })
     )
-    expect(sessionsResponse.data?.sessions?.[0]).not.toHaveProperty('pendingRequestId')
     await expect(listManagedAiNotifications({ unread: true })).resolves.toEqual(
       expect.objectContaining({
         data: expect.objectContaining({
-          count: 0,
-          unreadCount: 0,
-          notifications: []
+          count: 1,
+          unreadCount: 1,
+          notifications: [expect.objectContaining({ source: 'codex', sessionId: 'codex-telemetry-1', needsInput: true })]
         })
       })
     )
@@ -466,7 +688,7 @@ describe('agent session backend', () => {
         requestKind: 'plan',
         decisionMode: 'local',
         toolName: 'ExitPlanMode',
-        actionable: false
+        actionable: true
       })
     })
   })

@@ -33,8 +33,15 @@ export type WorkspaceManagedAiSessionRuntime = ReturnType<typeof createWorkspace
 export const aiSessionAttentionId = (session: Pick<ManagedAiSession, 'source' | 'id'>) => `managed-ai:${session.source}:${session.id}`
 export const managedAiSessionKey = (session: Pick<ManagedAiSession, 'source' | 'id'>) => `${session.source}:${session.id}`
 
+const normalizedManagedAiToolName = (toolName?: string) => (toolName || '').trim().toLowerCase().replace(/[\s_-]+/g, '')
+
+const managedAiQuestionToolNames = new Set(['askuserquestion', 'requestuserinput'])
+
 const managedAiRequestKindForEvent = (event: AiAgentSessionEvent): ManagedAiSession['requestKind'] => {
   if (event.requestKind) return event.requestKind
+  const toolName = normalizedManagedAiToolName(event.toolName)
+  if (managedAiQuestionToolNames.has(toolName)) return 'question'
+  if (toolName === 'exitplanmode') return 'plan'
   if (event.event === 'permission_request') return 'permission'
   if (event.event === 'question') return 'question'
   if (event.event === 'notification') return 'notification'
@@ -51,8 +58,8 @@ const managedAiDecisionModeForEvent = (event: AiAgentSessionEvent): ManagedAiSes
 const managedAiSessionNeedsInputForEvent = (event: AiAgentSessionEvent) => {
   const requestKind = managedAiRequestKindForEvent(event)
   const decisionMode = managedAiDecisionModeForEvent(event)
-  if (event.source === 'codex' && event.event === 'permission_request') return false
   if (requestKind === 'telemetry') return false
+  if (event.source === 'codex' && event.event === 'permission_request' && requestKind === 'permission') return true
   if (decisionMode === 'blocking') return true
   if (requestKind === 'notification') return true
   return event.actionable === true
@@ -62,10 +69,11 @@ const managedAiSessionStateForEvent = (event: AiAgentSessionEvent, previous: Man
   if (event.event === 'session_end') return 'ended'
   if (event.event === 'stop') return 'needsInput'
   const lifecycle = event.agentLifecycle
+  if (lifecycle === 'ended') return 'ended'
+  if (managedAiSessionNeedsInputForEvent(event)) return 'needsInput'
   if (lifecycle === 'running') return 'working'
   if (lifecycle === 'idle') return 'idle'
   if (lifecycle === 'needsInput') return 'needsInput'
-  if (lifecycle === 'ended') return 'ended'
   if (lifecycle === 'unknown') return 'unknown'
   if (event.event === 'session_start') return 'idle'
   if (event.event === 'prompt_submit' || event.event === 'pre_tool_use') return 'working'

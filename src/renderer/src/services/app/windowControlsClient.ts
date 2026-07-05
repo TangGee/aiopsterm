@@ -11,6 +11,7 @@ type WindowControlsBridge = Pick<
   | 'newWindow'
   | 'toggleFullScreen'
   | 'setBadgeCount'
+  | 'setBadgeState'
   | 'closeWindow'
   | 'onMaximized'
   | 'onUnmaximized'
@@ -27,6 +28,7 @@ export const windowControlsClient = {
   newWindow: () => bridgeMethod('newWindow'),
   toggleFullScreen: () => bridgeMethod('toggleFullScreen'),
   setBadgeCount: () => bridgeMethod('setBadgeCount'),
+  setBadgeState: () => bridgeMethod('setBadgeState'),
   closeWindow: () => bridgeMethod('closeWindow'),
   onMaximized: () => bridgeMethod('onMaximized'),
   onUnmaximized: () => bridgeMethod('onUnmaximized')

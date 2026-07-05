@@ -711,9 +711,17 @@ describe('external Codex MCP bridge runtime', () => {
       expect.objectContaining({
         ok: true,
         data: expect.objectContaining({
-          count: 0,
-          needsInputCount: 0,
-          sessions: []
+          count: 1,
+          needsInputCount: 1,
+          sessions: [
+            expect.objectContaining({
+              source: 'codex',
+              sessionId: 'codex-managed-1',
+              state: 'needsInput',
+              needsInput: true,
+              requestKind: 'permission'
+            })
+          ]
         })
       })
     )
@@ -728,18 +736,18 @@ describe('external Codex MCP bridge runtime', () => {
         ok: true,
         data: expect.objectContaining({
           count: 1,
-          needsInputCount: 0,
+          needsInputCount: 1,
           sessions: [
             expect.objectContaining({
               source: 'codex',
               sessionId: 'codex-managed-1',
               title: 'Codex · api-service',
               summary: 'approve npm test',
-              state: 'working',
-              needsInput: false,
+              state: 'needsInput',
+              needsInput: true,
               requestKind: 'permission',
               decisionMode: 'local',
-              actionable: false,
+              actionable: true,
               panelId: 'panel-1',
               terminalSessionId: 'terminal-1',
               eventCount: 1,
@@ -805,7 +813,7 @@ describe('external Codex MCP bridge runtime', () => {
         data: expect.objectContaining({
           session: expect.objectContaining({
             sessionId: 'codex-managed-1',
-            state: 'working',
+            state: 'idle',
             needsInput: false
           }),
           needsInputCount: 0
@@ -866,7 +874,7 @@ describe('external Codex MCP bridge runtime', () => {
         ok: true,
         data: expect.objectContaining({
           count: 2,
-          pendingCount: 1,
+          pendingCount: 2,
           blockingCount: 1,
           localOnlyCount: 1,
           approvals: expect.arrayContaining([
@@ -890,8 +898,8 @@ describe('external Codex MCP bridge runtime', () => {
               approvalId: 'managed-ai:codex:codex-local-approval-1',
               source: 'codex',
               sessionId: 'codex-local-approval-1',
-              state: 'working',
-              pending: false,
+              state: 'needsInput',
+              pending: true,
               approvalKind: 'permission',
               decisionMode: 'local',
               capabilities: expect.objectContaining({
@@ -922,7 +930,7 @@ describe('external Codex MCP bridge runtime', () => {
             state: 'idle',
             needsInput: false
           }),
-          needsInputCount: 0
+          needsInputCount: 1
         })
       })
     )
@@ -1087,9 +1095,10 @@ describe('external Codex MCP bridge runtime', () => {
               source: 'codex',
               payload: expect.objectContaining({
                 sessionId: 'codex-event-cursor-1',
-                state: 'working',
+                state: 'needsInput',
                 requestKind: 'permission',
-                decisionMode: 'local'
+                decisionMode: 'local',
+                actionable: true
               })
             })
           ]

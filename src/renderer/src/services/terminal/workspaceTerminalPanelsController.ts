@@ -34,6 +34,7 @@ import {
   replaceTerminalOutputInPanelCollection,
   resetTerminalPanelCollectionToDefault,
   setTerminalPanelAutoTitleInCollection,
+  setTerminalPanelProgressInCollection,
   trimTerminalPanelOutputHistory,
   type PanelDirection,
   type TerminalLaunchAsset,
@@ -43,6 +44,7 @@ import {
 } from '@/services/terminal/terminalPanelRuntime'
 import type { ModuleKey } from '@/config/navigation'
 import type { ExtensionSettings, KeywordHighlightSettings, TerminalSettings } from '@/services/settings/workspaceConfigRuntime'
+import type { TerminalProgress } from '@/services/terminal/terminalOscRuntime'
 import type { AiContextOption } from '@shared/contracts/aiChat'
 import type { KnowledgeNode } from '@shared/contracts/knowledgeBase'
 import type { TerminalExitEvent, TerminalLifecycleEvent, TerminalSessionInfo } from '@shared/contracts/terminalSessions'
@@ -174,6 +176,9 @@ export const createWorkspaceTerminalPanelsController = (
 
   const setPanelAutoTitle = (id: string, title: string, options: { panelOnlyIfMultiple?: boolean } = {}) =>
     setTerminalPanelAutoTitleInCollection(panels.value, id, title, options)
+
+  const setPanelProgress = (id: string, progress: TerminalProgress | null) =>
+    setTerminalPanelProgressInCollection(panels.value, id, progress)
 
   const canForkSshPanel = (panelId: string) => canForkSshTerminalPanel(panels.value.find((item) => item.id === panelId))
 
@@ -470,6 +475,7 @@ export const createWorkspaceTerminalPanelsController = (
     closePanels,
     renamePanel,
     setPanelAutoTitle,
+    setPanelProgress,
     canForkSshPanel,
     forkSshPanel,
     registerSshSession,

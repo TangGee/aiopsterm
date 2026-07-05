@@ -156,12 +156,16 @@ const settingsConfigRuntime = createSettingsConfigRuntime({
 })
 
 const aiAgentEventNeedsAttention = (event: AiAgentSessionEvent) => {
-  if (event.source === 'codex' && event.event === 'permission_request') return false
   if (event.requestKind === 'telemetry') return false
+  if (event.source === 'codex' && event.event === 'permission_request' && event.requestKind === 'permission') return true
   if (event.decisionMode === 'blocking') return true
   if (event.requestKind === 'notification') return true
   return event.actionable === true
 }
+
+const managedAiNativeNotificationKey = (source: string, sessionId: string) => `managed-ai:${source}:${sessionId}`
+
+const controlNativeNotificationKey = (notificationId: string) => `notification:${notificationId}`
 
 const broadcastAiAgentSessionEvent = (event: AiAgentSessionEvent) => {
   logRuntimeEvent('info', 'ai-agent.event', {
@@ -186,6 +190,7 @@ const broadcastAiAgentSessionEvent = (event: AiAgentSessionEvent) => {
     supported: notificationSupported
   })
   const shown = showNativeNotification(nativeNotificationRuntime, {
+    key: managedAiNativeNotificationKey(event.source, event.sessionId),
     title: event.title || 'AI session needs attention',
     body: event.summary || `${event.source} needs attention`,
     silent: false,
@@ -248,6 +253,7 @@ const showControlNotification = (notification: ControlNotificationRecord) => {
     supported: notificationSupported
   })
   const shown = showNativeNotification(nativeNotificationRuntime, {
+    key: controlNativeNotificationKey(notification.id),
     title: notification.source ? `${notification.source}: ${notification.title}` : notification.title,
     body: [notification.level && notification.level !== 'info' ? `[${notification.level}]` : '', notification.group, notification.subtitle, notification.body].filter(Boolean).join('\n') || notification.title,
     silent: false,

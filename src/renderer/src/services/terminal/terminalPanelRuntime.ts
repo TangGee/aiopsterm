@@ -4,6 +4,7 @@ import type {
   TerminalSessionInfo,
   TerminalSshConnectionInfo
 } from '@shared/contracts/terminalSessions'
+import type { TerminalProgress } from '@/services/terminal/terminalOscRuntime'
 
 export type PanelDirection = 'right' | 'below'
 export type TerminalOutputScope = 'output' | 'input'
@@ -55,6 +56,7 @@ export type TerminalPanel = {
   sshSession?: TerminalSshSession
   terminalLifecycle?: TerminalLifecycleEvent
   terminalExit?: TerminalExitEvent
+  terminalProgress?: TerminalProgress
 }
 
 export type TerminalLaunchAsset = {
@@ -214,6 +216,7 @@ export const resetTerminalPanelToDefault = (panel: TerminalPanel) => {
   panel.sshSession = undefined
   panel.terminalLifecycle = undefined
   panel.terminalExit = undefined
+  panel.terminalProgress = undefined
   setTerminalOutput(panel, '')
 }
 
@@ -222,7 +225,7 @@ export const createForkSshTerminalPanel = (id: string, source: TerminalPanel): T
   const sourceSession = source.sshSession
   return {
     id,
-    title: `${source.title} fork`,
+    title: sourceSession.assetName || source.title,
     cwd: source.cwd,
     kind: 'terminal',
     output: '',
@@ -450,6 +453,17 @@ export const setTerminalPanelAutoTitleInCollection = (
   panel.title = normalizedTitle
   panel.titleSource = 'auto'
   return { found: true, applied: true, userOwned: false }
+}
+
+export const setTerminalPanelProgressInCollection = (
+  panels: TerminalPanel[],
+  id: string,
+  progress: TerminalProgress | null
+) => {
+  const panel = panels.find((item) => item.id === id)
+  if (!panel) return null
+  panel.terminalProgress = progress || undefined
+  return panel
 }
 
 export const canForkSshTerminalPanel = (panel?: TerminalPanel | null) => Boolean(panel?.kind === 'terminal' && panel.sshSession?.connectionId)
@@ -687,6 +701,7 @@ export const applyTerminalLifecycleToPanel = (panel: TerminalPanel, event: Termi
     panel.status = 'running'
     return panel
   }
+  panel.terminalProgress = undefined
   panel.status = event.stage === 'error' ? 'error' : 'closed'
   panel.terminalExit = {
     id: event.id,
@@ -710,6 +725,7 @@ export const applyTerminalExitToPanel = (panel: TerminalPanel, event: TerminalEx
     panel.sessionId = undefined
   }
   panel.status = event.reason === 'error' || event.reason === 'network' || event.errorMessage ? 'error' : 'closed'
+  panel.terminalProgress = undefined
   appendTerminalSegment(panel, `\n[process exited: ${event.code ?? 'unknown'}]\n`, 'output')
   return panel
 }

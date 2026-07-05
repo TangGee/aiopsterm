@@ -164,20 +164,26 @@ const updateTitle = computed(() => {
   if (workspace.topUpdateState === 'install-requested') return t('top.updateInstallRequested')
   return t('top.updateChecking')
 })
-const aiAttentionVisibleCount = computed(() => workspace.aiAttentionUnreadCount)
+const aiAttentionBadgeKeys = computed(() => workspace.pendingAiAttentionItems.map((item) => item.id))
+const aiAttentionVisibleCount = computed(() => aiAttentionBadgeKeys.value.length)
 const aiAttentionBadge = computed(() => (aiAttentionVisibleCount.value > 99 ? '99+' : String(aiAttentionVisibleCount.value)))
 const aiAttentionTitle = computed(() => {
   const item = workspace.currentAiAttentionItem
   if (!item) return t('top.aiAttentionOpen')
   return t('top.aiAttentionPending', {
-    count: String(workspace.aiAttentionUnreadCount),
+    count: String(aiAttentionVisibleCount.value),
     title: item.title
   })
 })
 
 watch(
-  aiAttentionVisibleCount,
-  (count) => {
+  () => ({ count: aiAttentionVisibleCount.value, activeKeys: aiAttentionBadgeKeys.value }),
+  ({ count, activeKeys }) => {
+    const syncBadgeState = windowControlsClient.setBadgeState()
+    if (syncBadgeState) {
+      void syncBadgeState({ count, activeKeys })
+      return
+    }
     void windowControlsClient.setBadgeCount()?.(count)
   },
   { immediate: true }

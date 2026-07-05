@@ -43,9 +43,33 @@ export const createTerminalWorkspaceContextRuntime = ({ workspace, activeTermina
 
   const terminalTabKindBadge = (panel: TerminalPanel) => {
     if (panel.kind === 'knowledge') return 'editor'
-    if (panel.sshSession) return 'ssh'
     return ''
   }
+
+  const terminalTabShowsState = (panel: TerminalPanel) =>
+    Boolean(panel.terminalProgress || panel.status === 'connecting' || panel.status === 'error' || panel.status === 'closed')
+
+  const terminalTabStateClass = (panel: TerminalPanel) =>
+    panel.terminalProgress ? `progress-${panel.terminalProgress.status}` : panel.status
+
+  const terminalTabStateLabel = (panel: TerminalPanel) => {
+    const progress = panel.terminalProgress
+    if (!progress) return terminalStatusLabel(panel)
+    const label =
+      progress.status === 'running'
+        ? t('terminal.progress.running')
+        : progress.status === 'error'
+          ? t('terminal.progress.error')
+          : progress.status === 'indeterminate'
+            ? t('terminal.progress.indeterminate')
+            : t('terminal.progress.paused')
+    return progress.value === undefined ? label : `${label} ${progress.value}%`
+  }
+
+  const terminalTabProgressStyle = (panel: TerminalPanel) =>
+    panel.terminalProgress?.value === undefined
+      ? {}
+      : { '--terminal-tab-progress': `${panel.terminalProgress.value}%` }
 
   const terminalTabTooltip = (panel: TerminalPanel) => {
     const lines = [
@@ -53,6 +77,7 @@ export const createTerminalWorkspaceContextRuntime = ({ workspace, activeTermina
       `${t('terminal.tab.type')}: ${panel.kind === 'knowledge' ? t('terminal.status.editor') : panel.sshSession ? 'SSH' : t('terminal.kind.localTerminal')}`,
       `${t('terminal.tab.status')}: ${terminalStatusLabel(panel)}`
     ]
+    if (panel.terminalProgress) lines.push(`${t('terminal.tab.progress')}: ${terminalTabStateLabel(panel)}`)
     const sshTarget = terminalSshTargetLabel(panel)
     if (sshTarget) lines.push(`${t('terminal.tab.host')}: ${sshTarget}`)
     if (panel.cwd) lines.push(`${t('terminal.tab.path')}: ${panel.cwd}`)
@@ -117,6 +142,10 @@ export const createTerminalWorkspaceContextRuntime = ({ workspace, activeTermina
     terminalSshTargetLabel,
     terminalTabKindBadge,
     terminalTabMeta,
+    terminalTabProgressStyle,
+    terminalTabShowsState,
+    terminalTabStateClass,
+    terminalTabStateLabel,
     terminalTabTooltip
   }
 }

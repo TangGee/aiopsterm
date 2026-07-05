@@ -540,17 +540,18 @@ export const filteredManagedAiTimelineEvents = (session: ManagedAiSession | null
 }
 
 export const managedAiTimelineEventNeedsInput = (event: ManagedAiTimelineEvent) => {
-  if (event.source === 'codex' && event.event === 'permission_request') return false
   if (event.requestKind === 'telemetry') return false
+  if (event.source === 'codex' && event.event === 'permission_request' && event.requestKind === 'permission') return true
   if (event.decisionMode === 'blocking') return true
   if (event.requestKind === 'notification') return true
   return event.actionable === true
 }
 
 export const managedAiTimelineEventState = (event: ManagedAiTimelineEvent): ManagedAiSessionState => {
+  if (event.event === 'session_end') return 'ended'
+  if (managedAiTimelineEventNeedsInput(event)) return 'needsInput'
   if (event.event === 'permission_request' || event.event === 'question' || event.event === 'notification') return managedAiTimelineEventNeedsInput(event) ? 'needsInput' : 'working'
   if (event.event === 'prompt_submit' || event.event === 'pre_tool_use' || event.event === 'lifecycle') return 'working'
-  if (event.event === 'session_end') return 'ended'
   return 'idle'
 }
 

@@ -1,73 +1,99 @@
 <template>
   <section class="terminal-workspace">
     <div
-      class="terminal-tabs"
-      data-onboarding-id="main-workspace-tabs"
-      :class="{ 'drag-restore': tabBarDragOver }"
+      class="terminal-tabs-frame"
+      :class="{ 'drag-restore': tabBarDragOver, 'can-scroll-left': terminalTabScrollState.canScrollLeft, 'can-scroll-right': terminalTabScrollState.canScrollRight }"
       @dragover.prevent="handleTabBarDragOver"
       @dragleave="handleTabBarDragLeave"
       @drop.prevent="handleTabBarDrop"
     >
-      <div
-        v-for="panel in visibleTerminalTabPanels"
-        :key="panel.id"
-        class="terminal-tab"
-        :class="{ active: panel.id === workspace.activePanelId, 'drag-over': tabDragOverPanelId === panel.id, 'ai-attention': panelNeedsAiAttention(panel), 'control-flash': controlFlashingPanelIds.includes(panel.id) }"
-        role="button"
-        tabindex="0"
-        :title="terminalTabTooltip(panel)"
-        :draggable="panel.kind === 'terminal' || panel.kind === 'knowledge'"
-        @click="activatePanel(panel.id)"
-        @keydown.enter.prevent="activatePanel(panel.id)"
-        @keydown.space.prevent="activatePanel(panel.id)"
-        @contextmenu.prevent="openMenu($event, panel.id)"
-        @dragstart="handleTabDragStart($event, panel)"
-        @dragenter.prevent.stop="handleTabDragEnter($event, panel)"
-        @dragover.prevent.stop="handleTabDragOver($event, panel)"
-        @dragleave="handleTabDragLeave(panel.id)"
-        @drop.prevent.stop="handleTabDrop($event, panel)"
-        @dragend="handleTabDragEnd"
+      <button
+        v-if="terminalTabScrollState.canScrollLeft || terminalTabScrollState.canScrollRight"
+        class="terminal-tabs-scroll left"
+        :disabled="!terminalTabScrollState.canScrollLeft"
+        title="向左滚动标签"
+        @click="scrollTerminalTabs('left')"
       >
-        <span
-          v-if="renamingId !== panel.id"
-          class="terminal-tab-label"
-          @dblclick.stop="startRename(panel.id, panel.title)"
+        <ChevronLeft />
+      </button>
+      <div
+        ref="terminalTabs"
+        class="terminal-tabs"
+        data-onboarding-id="main-workspace-tabs"
+        @scroll="updateTerminalTabScrollState"
+      >
+        <div
+          v-for="panel in visibleTerminalTabPanels"
+          :key="panel.id"
+          class="terminal-tab"
+          :class="{ active: panel.id === workspace.activePanelId, 'drag-over': tabDragOverPanelId === panel.id, 'ai-attention': panelNeedsAiAttention(panel), 'control-flash': controlFlashingPanelIds.includes(panel.id) }"
+          :style="terminalTabProgressStyle(panel)"
+          role="button"
+          tabindex="0"
+          :title="terminalTabTooltip(panel)"
+          :draggable="panel.kind === 'terminal' || panel.kind === 'knowledge'"
+          @click="activatePanel(panel.id)"
+          @keydown.enter.prevent="activatePanel(panel.id)"
+          @keydown.space.prevent="activatePanel(panel.id)"
+          @contextmenu.prevent="openMenu($event, panel.id)"
+          @dragstart="handleTabDragStart($event, panel)"
+          @dragenter.prevent.stop="handleTabDragEnter($event, panel)"
+          @dragover.prevent.stop="handleTabDragOver($event, panel)"
+          @dragleave="handleTabDragLeave(panel.id)"
+          @drop.prevent.stop="handleTabDrop($event, panel)"
+          @dragend="handleTabDragEnd"
         >
-          <strong class="terminal-tab-title">{{ panel.title }}</strong>
-          <small
-            v-if="terminalTabMeta(panel)"
-            class="terminal-tab-meta"
-          >{{ terminalTabMeta(panel) }}</small>
-        </span>
-        <input
-          v-else
-          v-model="renameText"
-          @blur="finishRename"
-          @keydown.enter="finishRename"
-          @keydown.esc="renamingId = ''"
-        />
-        <span
-          v-if="terminalTabKindBadge(panel)"
-          class="terminal-tab-kind"
-        >{{ terminalTabKindBadge(panel) }}</span>
-        <span
-          v-else-if="panel.status === 'connecting' || panel.status === 'error' || panel.status === 'closed'"
-          class="terminal-tab-state"
-          :class="panel.status"
-          :title="terminalStatusLabel(panel)"
-          aria-hidden="true"
-        ></span>
-        <button
-          v-if="workspace.terminalSettings.showCloseButton"
-          class="terminal-tab-close"
-          title="关闭"
-          @click.stop="closeTab(panel.id)"
-          @mousedown.stop
-          @dragstart.stop.prevent
-        >
-          <X />
-        </button>
+          <span
+            v-if="renamingId !== panel.id"
+            class="terminal-tab-label"
+            @dblclick.stop="startRename(panel.id, panel.title)"
+          >
+            <span class="terminal-tab-title">{{ panel.title }}</span>
+          </span>
+          <input
+            v-else
+            v-model="renameText"
+            @blur="finishRename"
+            @keydown.enter="finishRename"
+            @keydown.esc="renamingId = ''"
+          />
+          <span
+            v-if="terminalTabShowsState(panel)"
+            class="terminal-tab-state"
+            :class="terminalTabStateClass(panel)"
+            :title="terminalTabStateLabel(panel)"
+            aria-hidden="true"
+          ></span>
+          <span
+            v-if="terminalTabKindBadge(panel)"
+            class="terminal-tab-kind"
+          >{{ terminalTabKindBadge(panel) }}</span>
+          <span
+            v-if="panel.terminalProgress?.value !== undefined"
+            class="terminal-tab-progress-bar"
+            aria-hidden="true"
+          ></span>
+          <button
+            v-if="workspace.terminalSettings.showCloseButton"
+            class="terminal-tab-close"
+            title="关闭"
+            @click.stop="closeTab(panel.id)"
+            @mousedown.stop
+            @dragstart.stop.prevent
+          >
+            <X />
+          </button>
+        </div>
       </div>
+      <button
+        v-if="terminalTabScrollState.canScrollLeft || terminalTabScrollState.canScrollRight"
+        class="terminal-tabs-scroll right"
+        :disabled="!terminalTabScrollState.canScrollRight"
+        title="向右滚动标签"
+        @click="scrollTerminalTabs('right')"
+      >
+        <ChevronRight />
+      </button>
     </div>
 
     <div
@@ -172,60 +198,6 @@
     </div>
 
     <div
-      v-if="activeTerminalContextBar"
-      class="terminal-context-bar"
-    >
-      <div class="terminal-context-bar-main">
-        <strong>{{ activeTerminalContextBar.title }}</strong>
-        <span>{{ activeTerminalContextBar.kindLabel }}</span>
-        <span>{{ activeTerminalContextBar.statusLabel }}</span>
-      </div>
-      <div class="terminal-context-bar-meta">
-        <span
-          v-if="activeTerminalContextBar.target"
-          :title="activeTerminalContextBar.target"
-        >{{ activeTerminalContextBar.target }}</span>
-        <span
-          v-if="activeTerminalContextBar.path"
-          :title="activeTerminalContextBar.path"
-        >{{ activeTerminalContextBar.path }}</span>
-        <button
-          v-if="activeTerminalContextBar.pendingAiCount"
-          class="terminal-context-attention"
-          :title="t('terminal.context.locatePendingAi')"
-          @click="workspace.jumpToNextAiAttention"
-        >
-          {{ activeTerminalContextBar.pendingAiCount }} AI
-        </button>
-        <button
-          :title="t('terminal.context.openAiSessions')"
-          @click="openAiSessionsFromContextBar"
-        >
-          {{ t('terminal.context.aiSessions') }}
-        </button>
-        <button
-          :title="t('terminal.context.refreshAiSessions')"
-          @click="refreshAiSessionsFromContextBar"
-        >
-          {{ t('terminal.context.refresh') }}
-        </button>
-        <button
-          v-if="activeTerminalContextBar.focusable"
-          :title="t('terminal.context.focusTerminal')"
-          @click="focusActiveTerminalFromContextBar"
-        >
-          {{ t('terminal.context.focus') }}
-        </button>
-        <button
-          :title="t('terminal.context.copyContext')"
-          @click="copyActiveTerminalContext"
-        >
-          {{ t('terminal.context.copyContextButton') }}
-        </button>
-      </div>
-    </div>
-
-    <div
       v-if="workspace.terminalSecurityPrompt"
       class="terminal-security-prompt"
     >
@@ -294,7 +266,7 @@
         v-for="{ panel, style } in splitLayoutItems"
         :key="panel.id"
         class="terminal-pane"
-        :class="{ active: panel.id === workspace.activePanelId, below: panel.split === 'below', 'knowledge-pane': panel.kind === 'knowledge', 'drag-over': paneDragOverPanelId === panel.id, 'ai-attention': panelNeedsAiAttention(panel), 'control-flash': controlFlashingPanelIds.includes(panel.id) }"
+        :class="{ active: panel.id === workspace.activePanelId, below: panel.split === 'below', 'knowledge-pane': panel.kind === 'knowledge', 'with-pane-title': workspace.hasSplitState(panel.id), 'drag-over': paneDragOverPanelId === panel.id, 'ai-attention': panelNeedsAiAttention(panel), 'control-flash': controlFlashingPanelIds.includes(panel.id) }"
         :style="style"
         @click="activatePanel(panel.id)"
         @dragenter.prevent="handlePaneDragEnter($event, panel)"
@@ -431,7 +403,10 @@
             @keydown.enter.prevent="sendCommand(panel)"
           />
         </div>
-        <div class="pane-title">
+        <div
+          v-if="workspace.hasSplitState(panel.id)"
+          class="pane-title"
+        >
           <span>{{ panel.title }}</span>
           <small>{{ panel.cwd }}</small>
         </div>
@@ -531,7 +506,7 @@
 
 <script setup lang="ts">
 import '@xterm/xterm/css/xterm.css'
-import { ChevronDown, ChevronUp, Clock, ListTree, LoaderCircle, RadioTower, Search, Sparkles, Terminal, X } from 'lucide-vue-next'
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Clock, ListTree, LoaderCircle, RadioTower, Search, Sparkles, Terminal, X } from 'lucide-vue-next'
 import TransferProgress from '@/components/files/TransferProgress.vue'
 import KnowledgeCenterEditor from '@/components/KnowledgeCenterEditor.vue'
 import { useTerminalWorkspaceContainerRuntime } from '@/services/terminal/terminalWorkspaceContainerRuntime'
@@ -650,14 +625,22 @@ const {
   termMenu,
   terminalGrid,
   terminalGridClasses,
+  terminalTabs,
+  terminalTabScrollState,
   terminalOutputMirrorText,
   terminalStatusLabel,
   terminalTabKindBadge,
   terminalTabMeta,
+  terminalTabProgressStyle,
+  terminalTabShowsState,
+  terminalTabStateClass,
+  terminalTabStateLabel,
   terminalTabTooltip,
   toggleGlobalInput,
   togglePanelConnection,
   toggleTabConnectionFromMenu,
+  scrollTerminalTabs,
+  updateTerminalTabScrollState,
   triggerAiSuggestion,
   unsplitFromTermMenu,
   unsplitSelected,

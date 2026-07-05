@@ -2180,6 +2180,63 @@ test('terminal tab operations and visual baseline', async () => {
     await openTerminalContextAction('字体放大')
     await openTerminalContextAction('字体缩小')
 
+    const tabCountBeforeOverflow = await page.locator('.terminal-tab').count()
+    for (let index = 0; index < 10; index += 1) {
+      await page.keyboard.press(process.platform === 'darwin' ? 'Meta+Shift+T' : 'Control+Shift+T')
+    }
+    await expect(page.locator('.terminal-tab')).toHaveCount(tabCountBeforeOverflow + 10)
+    await expect.poll(
+      () =>
+        page.locator('.terminal-tabs').evaluate((element) => {
+          const stripRect = element.getBoundingClientRect()
+          const visibleTabs = Array.from(element.querySelectorAll<HTMLElement>('.terminal-tab')).filter((tab) => {
+            const rect = tab.getBoundingClientRect()
+            return rect.right > stripRect.left + 2 && rect.left < stripRect.right - 2 && rect.width > 20
+          })
+          const activeTab = element.querySelector<HTMLElement>('.terminal-tab.active')
+          const activeRect = activeTab?.getBoundingClientRect()
+          const activeVisible = Boolean(
+            activeRect &&
+              activeRect.right > stripRect.left + 2 &&
+              activeRect.left < stripRect.right - 2 &&
+              activeRect.width >= 60
+          )
+          const visibleTitles = visibleTabs.filter((tab) => {
+            const title = tab.querySelector<HTMLElement>('.terminal-tab-title')
+            const titleRect = title?.getBoundingClientRect()
+            return Boolean(title?.textContent?.trim() && titleRect && titleRect.width > 8)
+          }).length
+          return (
+            activeVisible &&
+            Math.round(stripRect.width) > 160 &&
+            element.scrollWidth > stripRect.width &&
+            visibleTabs.length > 0 &&
+            visibleTitles > 0
+          )
+        }),
+      { timeout: 10_000 }
+    ).toBe(true)
+    const overflowMetrics = await page.locator('.terminal-tabs').evaluate((element) => {
+      const stripRect = element.getBoundingClientRect()
+      return {
+        clientWidth: Math.round(stripRect.width),
+        scrollWidth: element.scrollWidth,
+        visibleTabs: Array.from(element.querySelectorAll<HTMLElement>('.terminal-tab')).filter((tab) => {
+          const rect = tab.getBoundingClientRect()
+          return rect.right > stripRect.left + 2 && rect.left < stripRect.right - 2 && rect.width > 20
+        }).length,
+        visibleTitles: Array.from(element.querySelectorAll<HTMLElement>('.terminal-tab-title')).filter((title) => {
+          const rect = title.getBoundingClientRect()
+          return Boolean(title.textContent?.trim() && rect.right > stripRect.left + 2 && rect.left < stripRect.right - 2 && rect.width > 8)
+        }).length
+      }
+    })
+    expect(overflowMetrics.clientWidth).toBeGreaterThan(160)
+    expect(overflowMetrics.scrollWidth).toBeGreaterThan(overflowMetrics.clientWidth)
+    expect(overflowMetrics.visibleTabs).toBeGreaterThan(0)
+    expect(overflowMetrics.visibleTitles).toBeGreaterThan(0)
+    await expect(page.locator('.terminal-tabs-scroll.right')).toBeVisible()
+
     await page.screenshot({ path: path.join('test-results', 'aiopsterm-terminal.png'), fullPage: true })
   } finally {
     await app.close()

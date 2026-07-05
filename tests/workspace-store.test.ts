@@ -408,7 +408,7 @@ describe('workspace store', () => {
     expect(store.topNotice).toBe('没有待处理的 AI 消息')
   })
 
-  it('keeps stock Codex permission hook telemetry out of managed AI attention', () => {
+  it('tracks stock Codex permission hooks as terminal attention', () => {
     const store = useWorkspaceStore()
     store.applyLocalTerminalSession('panel-main', {
       id: 'terminal-session-1',
@@ -428,21 +428,69 @@ describe('workspace store', () => {
       cwd: '/work/project',
       requestKind: 'permission',
       decisionMode: 'local',
-      actionable: false,
+      actionable: true,
       receivedAt: 500
     })
 
     expect(store.managedAiSessions[0]).toEqual(
       expect.objectContaining({
-        state: 'working',
+        state: 'needsInput',
         requestKind: 'permission',
         decisionMode: 'local',
-        actionable: false
+        actionable: true
       })
     )
-    expect(store.managedAiNeedsInputSessions).toHaveLength(0)
-    expect(store.aiAttentionUnreadCount).toBe(0)
-    expect(store.currentAiAttentionItem).toBeNull()
+    expect(store.managedAiNeedsInputSessions).toHaveLength(1)
+    expect(store.aiAttentionUnreadCount).toBe(1)
+    expect(store.currentAiAttentionItem).toMatchObject({
+      id: 'managed-ai:codex:codex-session-1',
+      kind: 'approval'
+    })
+  })
+
+  it('tracks Codex request_user_input pre-tool hooks as managed AI attention', () => {
+    const store = useWorkspaceStore()
+    store.applyLocalTerminalSession('panel-main', {
+      id: 'terminal-session-1',
+      kind: 'local',
+      shell: '/bin/bash',
+      cwd: '/work/project'
+    })
+
+    store.upsertManagedAiSession({
+      source: 'codex',
+      event: 'pre_tool_use',
+      sessionId: 'codex-question-pre-tool-1',
+      title: 'Codex · project',
+      summary: '请选择部署环境',
+      panelId: 'panel-main',
+      terminalSessionId: 'terminal-session-1',
+      cwd: '/work/project',
+      requestId: 'codex-question-pre-tool-request-1',
+      requestKind: 'question',
+      decisionMode: 'local',
+      actionable: true,
+      toolName: 'request_user_input',
+      receivedAt: 520
+    })
+
+    expect(store.managedAiSessions[0]).toEqual(
+      expect.objectContaining({
+        state: 'needsInput',
+        lastEvent: 'pre_tool_use',
+        requestKind: 'question',
+        decisionMode: 'local',
+        actionable: true,
+        pendingRequestId: 'codex-question-pre-tool-request-1',
+        toolName: 'request_user_input'
+      })
+    )
+    expect(store.managedAiNeedsInputSessions).toHaveLength(1)
+    expect(store.aiAttentionUnreadCount).toBe(1)
+    expect(store.currentAiAttentionItem).toMatchObject({
+      id: 'managed-ai:codex:codex-question-pre-tool-1',
+      kind: 'question'
+    })
   })
 
   it('tracks managed AI session events and routes real attention through the AI session panel to the owning terminal', () => {

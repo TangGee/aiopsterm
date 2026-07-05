@@ -1030,7 +1030,7 @@ describe('AppShell', () => {
     expect(store.managedAiSessions[0]?.autoTitle).toBe('发布脚本修复')
   })
 
-  it('keeps pending session handling out of AI session panel rows', async () => {
+  it('lets pending AI session rows mark notifications handled', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     const store = useWorkspaceStore()
@@ -1064,10 +1064,19 @@ describe('AppShell', () => {
 
     expect(wrapper.find('.ai-session-row.active').text()).toContain('Approve npm test')
     expect(store.aiAttentionUnreadCount).toBe(1)
-    expect(wrapper.find('.ai-session-handle').exists()).toBe(false)
+    expect(wrapper.find('.ai-session-row-side').exists()).toBe(true)
+    expect(wrapper.find('.ai-session-handle').attributes('title')).toBe('标记已处理')
     expect(wrapper.find('.ai-session-row-action').exists()).toBe(false)
     expect(store.selectedManagedAiSessionKey).toBe('claude-code:claude-session-1')
     expect(store.activePanelId).toBe('panel-main')
+
+    vi.mocked(window.aiops.replyManagedAiSession).mockResolvedValueOnce({ ok: false } as any)
+    await wrapper.find('.ai-session-handle').trigger('click')
+    await flushPromises()
+
+    expect(store.aiAttentionUnreadCount).toBe(0)
+    expect(store.selectedManagedAiSessionKey).toBe('')
+    expect(wrapper.find('.ai-session-handle').exists()).toBe(false)
   })
 
   it('summarizes and filters managed AI sessions by status, agent, and project', async () => {
@@ -1177,6 +1186,8 @@ describe('AppShell', () => {
       expect(wrapper.find('.ai-session-row-meta').text()).toContain('Claude Code · main* · api')
       expect(wrapper.find('.ai-session-row-top').exists()).toBe(false)
       expect(wrapper.find('.ai-session-state').classes()).toContain('dot-needsInput')
+      expect(wrapper.find('.ai-session-row-side').exists()).toBe(true)
+      expect(wrapper.find('.ai-session-handle').attributes('title')).toBe('标记已处理')
 
       await modeButtons.at(1)!.trigger('click')
       await flushPromises()
@@ -1194,6 +1205,7 @@ describe('AppShell', () => {
       expect(store.selectedManagedAiSessionKey).toBe('gemini:gemini-work-1')
       expect(wrapper.find('.ai-session-detail').exists()).toBe(false)
       expect(wrapper.find('.ai-session-row-action').exists()).toBe(false)
+      expect(wrapper.find('.ai-session-handle').exists()).toBe(false)
 
       await wrapper.findAll('.ai-sessions-library-grouping button').at(1)!.trigger('click')
       await flushPromises()
@@ -1223,7 +1235,9 @@ describe('AppShell', () => {
       expect(rowFor('Round finished').text()).not.toContain('/work/docs')
       expect(rowFor('Round finished').attributes('title')).toContain('/work/docs')
       expect(wrapper.findAll('.ai-session-row-action')).toHaveLength(0)
-      expect(wrapper.findAll('.ai-session-handle')).toHaveLength(0)
+      expect(wrapper.findAll('.ai-session-handle')).toHaveLength(1)
+      expect(rowFor('Approve release').find('.ai-session-handle').attributes('title')).toBe('标记已处理')
+      expect(rowFor('Reading files').find('.ai-session-handle').exists()).toBe(false)
 
       store.activePanelId = 'panel-main'
       await rowFor('Reading files').trigger('dblclick')
@@ -1517,8 +1531,14 @@ describe('AppShell', () => {
     expect(styles).toContain('--glass-surface: color-mix(in srgb, var(--surface) 36%, transparent);')
     expect(styles).toContain('--readable-surface: color-mix(in srgb, var(--surface-2) 82%, transparent);')
     expect(styles).toContain('.side-rail {\n  width: 48px;\n  border-right: 1px solid var(--border);\n  background: var(--glass-surface);')
-    expect(styles).toContain('.terminal-tab {\n  height: 31px;')
-    expect(styles).toContain('background: var(--glass-surface);')
+    expect(styles).toContain('.terminal-tabs-frame {\n  position: relative;')
+    expect(styles).toContain('grid-template-columns: auto minmax(0, 1fr) auto;')
+    expect(styles).toContain('grid-column: 2;')
+    expect(styles).toContain('width: 100%;')
+    expect(styles).toContain('.terminal-tab {\n  position: relative;\n  height: 33px;')
+    expect(styles).toContain('flex: 1 1 160px;')
+    expect(styles).toContain('min-width: 60px;')
+    expect(styles).toContain('min-inline-size: 60px;')
     expect(styles).toContain('.app-shell.has-app-background .terminal-context-menu')
     expect(styles).toContain('.app-shell.has-app-background .terminal-global-command')
     expect(styles).toContain('.app-shell.has-app-background .chat-input')
@@ -9739,7 +9759,8 @@ describe('AppShell', () => {
 
     const localTab = wrapper.find('.terminal-tab.active')
     expect(localTab.find('.terminal-tab-title').text()).toBe('API shell')
-    expect(localTab.find('.terminal-tab-meta').text()).toBe('api')
+    expect(localTab.find('.terminal-tab-meta').exists()).toBe(false)
+    expect(localTab.find('.terminal-tab-kind').exists()).toBe(false)
     expect(localTab.attributes('title')).toContain('本地终端')
     expect(localTab.attributes('title')).toContain('/srv/projects/api')
 
@@ -9759,8 +9780,8 @@ describe('AppShell', () => {
 
     const sshTab = wrapper.find('.terminal-tab.active')
     expect(sshTab.find('.terminal-tab-title').text()).toBe('Prod SSH')
-    expect(sshTab.find('.terminal-tab-meta').text()).toBe('ops@10.0.0.8:2222')
-    expect(sshTab.find('.terminal-tab-kind').text()).toBe('ssh')
+    expect(sshTab.find('.terminal-tab-meta').exists()).toBe(false)
+    expect(sshTab.find('.terminal-tab-kind').exists()).toBe(false)
     expect(sshTab.attributes('title')).toContain('SSH')
     expect(sshTab.attributes('title')).toContain('状态:')
     expect(sshTab.attributes('title')).toContain('主机: ops@10.0.0.8:2222')

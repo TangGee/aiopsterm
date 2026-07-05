@@ -24,6 +24,7 @@ describe('windowControlsClient', () => {
       newWindow: vi.fn(async () => undefined),
       toggleFullScreen: vi.fn(async () => true),
       setBadgeCount: vi.fn(async () => true),
+      setBadgeState: vi.fn(async () => true),
       closeWindow: vi.fn(async () => undefined),
       onMaximized: vi.fn(() => offMaximized),
       onUnmaximized: vi.fn(() => offUnmaximized)
@@ -37,6 +38,7 @@ describe('windowControlsClient', () => {
     await expect(windowControlsClient.newWindow()?.()).resolves.toBeUndefined()
     await expect(windowControlsClient.toggleFullScreen()?.()).resolves.toBe(true)
     await expect(windowControlsClient.setBadgeCount()?.(3)).resolves.toBe(true)
+    await expect(windowControlsClient.setBadgeState()?.({ count: 1, activeKeys: ['managed-ai:codex:one'] })).resolves.toBe(true)
     await expect(windowControlsClient.closeWindow()?.()).resolves.toBeUndefined()
     expect(windowControlsClient.onMaximized()?.(onMaximized)).toBe(offMaximized)
     expect(windowControlsClient.onUnmaximized()?.(onUnmaximized)).toBe(offUnmaximized)
@@ -49,6 +51,7 @@ describe('windowControlsClient', () => {
     expect(window.aiops.newWindow).toHaveBeenCalledTimes(1)
     expect(window.aiops.toggleFullScreen).toHaveBeenCalledTimes(1)
     expect(window.aiops.setBadgeCount).toHaveBeenCalledWith(3)
+    expect(window.aiops.setBadgeState).toHaveBeenCalledWith({ count: 1, activeKeys: ['managed-ai:codex:one'] })
     expect(window.aiops.closeWindow).toHaveBeenCalledTimes(1)
     expect(window.aiops.onMaximized).toHaveBeenCalledWith(onMaximized)
     expect(window.aiops.onUnmaximized).toHaveBeenCalledWith(onUnmaximized)
@@ -63,6 +66,7 @@ describe('windowControlsClient', () => {
       newWindow: undefined as any,
       toggleFullScreen: undefined as any,
       setBadgeCount: undefined as any,
+      setBadgeState: undefined as any,
       closeWindow: undefined as any,
       onMaximized: undefined as any,
       onUnmaximized: undefined as any
@@ -76,6 +80,7 @@ describe('windowControlsClient', () => {
     expect(windowControlsClient.newWindow()).toBeUndefined()
     expect(windowControlsClient.toggleFullScreen()).toBeUndefined()
     expect(windowControlsClient.setBadgeCount()).toBeUndefined()
+    expect(windowControlsClient.setBadgeState()).toBeUndefined()
     expect(windowControlsClient.closeWindow()).toBeUndefined()
     expect(windowControlsClient.onMaximized()).toBeUndefined()
     expect(windowControlsClient.onUnmaximized()).toBeUndefined()

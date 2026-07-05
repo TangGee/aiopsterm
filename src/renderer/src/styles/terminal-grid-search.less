@@ -67,13 +67,17 @@
   min-width: 0;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: 28px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   border: 1px solid var(--border);
   background: var(--terminal-host-bg, #090b10);
   border-radius: 8px;
   overflow: hidden;
   position: relative;
   z-index: 1;
+}
+
+.terminal-pane.with-pane-title {
+  grid-template-rows: 28px minmax(0, 1fr);
 }
 
 .terminal-pane:has(.threaded-terminal-host) {

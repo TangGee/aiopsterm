@@ -282,6 +282,43 @@ describe('terminalWorkspaceShellRuntime', () => {
     expect(calls.hideSuggestions).toHaveBeenCalled()
   })
 
+  it('keeps overflowing terminal tabs scrollable and scrolls the active tab into view', () => {
+    const { runtime, state } = createRuntime()
+    const tabs = document.createElement('div')
+    const activeTab = document.createElement('div')
+    activeTab.className = 'terminal-tab active'
+    activeTab.scrollIntoView = vi.fn()
+    tabs.appendChild(activeTab)
+    Object.defineProperty(tabs, 'clientWidth', { configurable: true, value: 300 })
+    Object.defineProperty(tabs, 'scrollWidth', { configurable: true, value: 920 })
+    tabs.scrollLeft = 0
+    tabs.scrollTo = vi.fn((options?: ScrollToOptions | number) => {
+      tabs.scrollLeft = typeof options === 'number' ? options : Number(options?.left || 0)
+    })
+    Object.defineProperty(activeTab, 'offsetLeft', { configurable: true, value: 760 })
+    Object.defineProperty(activeTab, 'offsetWidth', { configurable: true, value: 72 })
+    state.terminalTabs.value = tabs
+
+    runtime.updateTerminalTabScrollState()
+    expect(state.terminalTabScrollState.canScrollLeft).toBe(false)
+    expect(state.terminalTabScrollState.canScrollRight).toBe(true)
+
+    runtime.scrollTerminalTabs('right')
+    expect(tabs.scrollTo).toHaveBeenCalledWith({ left: 216, behavior: 'smooth' })
+    expect(tabs.scrollLeft).toBe(216)
+    expect(state.terminalTabScrollState.canScrollLeft).toBe(true)
+    expect(state.terminalTabScrollState.canScrollRight).toBe(true)
+
+    tabs.scrollLeft = 999
+    runtime.updateTerminalTabScrollState()
+    expect(tabs.scrollLeft).toBe(620)
+    expect(state.terminalTabScrollState.canScrollRight).toBe(false)
+
+    tabs.scrollLeft = 0
+    runtime.scrollActiveTerminalTabIntoView()
+    expect(tabs.scrollTo).toHaveBeenLastCalledWith({ left: 532, behavior: 'auto' })
+  })
+
   it('focuses terminal panels after create, split, and reconnect actions', async () => {
     const workspace = createWorkspace(createPanel({ sessionId: 'source-session', status: 'running', cwd: '/work/local' }))
     const { calls, runtime, state } = createRuntime({ workspace })

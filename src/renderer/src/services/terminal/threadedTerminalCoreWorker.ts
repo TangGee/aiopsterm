@@ -22,6 +22,10 @@ import {
   compileThreadedKeywordHighlightRules,
   findThreadedKeywordHighlightRuns
 } from '@/services/terminal/threadedTerminalKeywordHighlight'
+import {
+  normalizeTerminalProgramTitle,
+  parseTerminalProgressOsc
+} from '@/services/terminal/terminalOscRuntime'
 
 type DedicatedWorkerScopeLike = {
   onmessage: ((event: MessageEvent<ThreadedTerminalCoreRequest>) => void) | null
@@ -633,6 +637,16 @@ const installTerminalEvents = (record: CoreTerminalRecord) => {
   })
   record.terminal.onBinary((data) => {
     post({ type: 'data', terminalId: record.terminalId, data })
+  })
+  record.terminal.onTitleChange((title) => {
+    const normalizedTitle = normalizeTerminalProgramTitle(title)
+    if (normalizedTitle) post({ type: 'title', terminalId: record.terminalId, title: normalizedTitle })
+  })
+  record.terminal.parser.registerOscHandler(9, (data) => {
+    const change = parseTerminalProgressOsc(data)
+    if (change.action === 'ignore') return false
+    post({ type: 'progress', terminalId: record.terminalId, progress: change.action === 'set' ? change.progress : null })
+    return true
   })
 }
 

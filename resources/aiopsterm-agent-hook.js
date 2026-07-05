@@ -88,6 +88,16 @@ const nestedRecord = (record, key) => {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {}
 }
 
+const hasOwnKeys = (record) => record && typeof record === 'object' && !Array.isArray(record) && Object.keys(record).length > 0
+
+const firstNestedRecord = (record, keys) => {
+  for (const key of keys) {
+    const value = nestedRecord(record, key)
+    if (hasOwnKeys(value)) return value
+  }
+  return {}
+}
+
 const baseNameFromPath = (value) => {
   const text = cleanText(value).replace(/[\\/]+$/, '')
   if (!text) return ''
@@ -119,8 +129,10 @@ const buildTitle = (source, cwd, payload) => {
 const buildSummary = (payload) => {
   const direct = firstText(payload, ['summary', 'message', 'body', 'text', 'prompt', 'lastAssistantMessage', 'last_assistant_message'])
   if (direct) return direct
-  const toolName = firstText(payload, ['tool_name', 'toolName'])
-  const toolInput = nestedRecord(payload, 'tool_input')
+  const toolCall = nestedRecord(payload, 'toolCall')
+  const toolName = firstText(payload, ['tool_name', 'toolName']) || firstText(toolCall, ['name'])
+  const directToolInput = firstNestedRecord(payload, ['tool_input', 'toolInput'])
+  const toolInput = hasOwnKeys(directToolInput) ? directToolInput : nestedRecord(toolCall, 'args')
   const command = firstText(toolInput, ['command', 'description', 'query', 'pattern', 'file_path'])
   const questions = Array.isArray(toolInput.questions) ? toolInput.questions : []
   const question = questions.find((item) => item && typeof item === 'object' && !Array.isArray(item))
@@ -157,6 +169,10 @@ const createEvent = (payload) => {
   const parentProcessId = positiveInteger(options.ppid || options['parent-process-id'] || payload.parentProcessId || payload.parent_process_id || payload.ppid || process.env.PPID)
   const processGroupId = positiveInteger(options.pgid || options['process-group-id'] || payload.processGroupId || payload.process_group_id || payload.pgid)
   const agentLifecycle = cleanText(options.lifecycle || options.status || payload.agentLifecycle || payload.agent_lifecycle || payload.lifecycle || payload.status)
+  const toolCall = nestedRecord(payload, 'toolCall')
+  const toolName = cleanText(options.tool || payload.toolName || payload.tool_name || toolCall.name)
+  const directToolInput = firstNestedRecord(payload, ['tool_input', 'toolInput'])
+  const toolInput = hasOwnKeys(directToolInput) ? directToolInput : nestedRecord(toolCall, 'args')
   return {
     source,
     event,
@@ -171,6 +187,9 @@ const createEvent = (payload) => {
     turnId: turnId || undefined,
     turn_id: turnId || undefined,
     requestId: requestId || undefined,
+    toolName: toolName || undefined,
+    tool_name: toolName || undefined,
+    tool_input: hasOwnKeys(toolInput) ? toolInput : undefined,
     actionable: waitDecision || undefined,
     waitForDecision: waitDecision || undefined,
     waitTimeoutMs: waitDecision ? Number(options['wait-timeout-ms'] || 120000) : undefined,

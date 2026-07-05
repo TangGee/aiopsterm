@@ -1,7 +1,13 @@
 import { computed, ref } from 'vue'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createTerminalWorkspaceViewRuntime } from '@/services/terminal/terminalWorkspaceViewRuntime'
-import { createEmptyTerminalPanel, type TerminalPanel } from '@/services/terminal/terminalPanelRuntime'
+import {
+  createEmptyTerminalPanel,
+  setTerminalPanelAutoTitleInCollection,
+  setTerminalPanelProgressInCollection,
+  type TerminalPanel
+} from '@/services/terminal/terminalPanelRuntime'
+import type { TerminalProgress } from '@/services/terminal/terminalOscRuntime'
 import type { useWorkspaceStore } from '@/stores/workspace'
 
 type WorkspaceStore = ReturnType<typeof useWorkspaceStore>
@@ -21,6 +27,8 @@ const threadedTerminalMocks = vi.hoisted(() => {
     options: Record<string, unknown> = {}
     output = ''
     surfaceAttached = false
+    titleHandler: ((title: string) => void) | null = null
+    progressHandler: ((progress: TerminalProgress | null) => void) | null = null
     loadAddon = vi.fn()
     open = vi.fn(() => {
       this.surfaceAttached = true
@@ -67,6 +75,14 @@ const threadedTerminalMocks = vi.hoisted(() => {
       return { dispose: vi.fn() }
     }
     onSelectionChange() {
+      return { dispose: vi.fn() }
+    }
+    onTitleChange(handler: (title: string) => void) {
+      this.titleHandler = handler
+      return { dispose: vi.fn() }
+    }
+    onProgressChange(handler: (progress: TerminalProgress | null) => void) {
+      this.progressHandler = handler
       return { dispose: vi.fn() }
     }
   }
@@ -164,6 +180,14 @@ class FakeTerminal {
   dataHandler: ((data: string) => void) | null = null
   resizeHandler: ((size: { cols: number; rows: number }) => void) | null = null
   selectionHandler: (() => void) | null = null
+  titleHandler: ((title: string) => void) | null = null
+  oscHandlers = new Map<number, (data: string) => boolean | Promise<boolean>>()
+  parser = {
+    registerOscHandler: (ident: number, handler: (data: string) => boolean | Promise<boolean>) => {
+      this.oscHandlers.set(ident, handler)
+      return { dispose: vi.fn() }
+    }
+  }
   constructor(options: Record<string, unknown> = {}) {
     this.options = { ...options }
     FakeTerminal.instances.push(this)
@@ -187,6 +211,10 @@ class FakeTerminal {
   }
   onSelectionChange(handler: () => void) {
     this.selectionHandler = handler
+    return { dispose: vi.fn() }
+  }
+  onTitleChange(handler: (title: string) => void) {
+    this.titleHandler = handler
     return { dispose: vi.fn() }
   }
 }
@@ -232,7 +260,9 @@ const createWorkspace = (panel: TerminalPanel) =>
     },
     extensionSettings: { highlightStatus: false },
     keywordHighlightSettings: {},
-    getHighlightedTerminalOutput: (panelId: string) => (panelId === panel.id ? panel.output : '')
+    getHighlightedTerminalOutput: (panelId: string) => (panelId === panel.id ? panel.output : ''),
+    setPanelAutoTitle: (panelId: string, title: string) => setTerminalPanelAutoTitleInCollection([panel], panelId, title),
+    setPanelProgress: (panelId: string, progress: TerminalProgress | null) => setTerminalPanelProgressInCollection([panel], panelId, progress)
   }) as unknown as WorkspaceStore
 
 const createRuntime = (
@@ -287,6 +317,64 @@ describe('terminalWorkspaceViewRuntime', () => {
     if (!view) throw new Error('terminal view was not created')
     const terminal = view.terminal as unknown as FakeTerminal
     expect(terminal.focus).toHaveBeenCalled()
+  })
+
+  it('applies terminal program title changes without overriding user-owned tab names', async () => {
+    const panel = createEmptyTerminalPanel('panel-1', 'Local')
+    const { runtime } = createRuntime(panel)
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    runtime.setTerminalElement(panel.id, host)
+    await flushFrames(2)
+    const terminal = runtime.terminalViews.get(panel.id)?.terminal as unknown as FakeTerminal
+
+    terminal.titleHandler?.('ignored\u0007 control\nClaude Code')
+    expect(panel.title).toBe('ignored control Claude Code')
+    expect(panel.titleSource).toBe('auto')
+
+    terminal.titleHandler?.('root@tlinux:~')
+    expect(panel.title).toBe('ignored control Claude Code')
+
+    panel.title = 'Pinned name'
+    panel.titleSource = 'user'
+    terminal.titleHandler?.('Shell title')
+    expect(panel.title).toBe('Pinned name')
+  })
+
+  it('tracks terminal progress OSC 9;4 on legacy xterm views', async () => {
+    const panel = createEmptyTerminalPanel('panel-1', 'Local')
+    const { runtime } = createRuntime(panel)
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    runtime.setTerminalElement(panel.id, host)
+    await flushFrames(2)
+    const terminal = runtime.terminalViews.get(panel.id)?.terminal as unknown as FakeTerminal
+
+    expect(terminal.oscHandlers.get(9)?.('4;1;42')).toBe(true)
+    expect(panel.terminalProgress).toEqual(expect.objectContaining({ status: 'running', value: 42 }))
+
+    expect(terminal.oscHandlers.get(9)?.('4;0;0')).toBe(true)
+    expect(panel.terminalProgress).toBeUndefined()
+  })
+
+  it('applies threaded terminal title and progress events through the same panel state path', async () => {
+    threadedTerminalMocks.threadedEnabled = true
+    const panel = createEmptyTerminalPanel('panel-1', 'Local')
+    const { runtime } = createRuntime(panel, undefined, { threaded: true })
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    runtime.setTerminalElement(panel.id, host)
+    await flushFrames(3)
+    const terminal = runtime.terminalViews.get(panel.id)?.terminal as InstanceType<typeof threadedTerminalMocks.FakeThreadedTerminal>
+
+    terminal.titleHandler?.('Threaded shell')
+    terminal.progressHandler?.({ status: 'indeterminate', updatedAt: 1 })
+
+    expect(panel.title).toBe('Threaded shell')
+    expect(panel.terminalProgress).toEqual({ status: 'indeterminate', updatedAt: 1 })
   })
 
   it('keeps an existing threaded terminal attached in place without repeating hot-path open work', async () => {

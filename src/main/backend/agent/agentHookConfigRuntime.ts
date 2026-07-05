@@ -60,7 +60,8 @@ export const hookDefinitions: AgentHookDefinition[] = [
       { agentEvent: 'UserPromptSubmit', hookEvent: 'UserPromptSubmit', timeout: 5 },
       { agentEvent: 'Stop', hookEvent: 'Stop', timeout: 5 },
       { agentEvent: 'PreToolUse', hookEvent: 'PreToolUse', timeout: 5 },
-      { agentEvent: 'PermissionRequest', hookEvent: 'PermissionRequest', timeout: 5 }
+      { agentEvent: 'PermissionRequest', hookEvent: 'PermissionRequest', timeout: 5 },
+      { agentEvent: 'AskUserQuestion', hookEvent: 'AskUserQuestion', timeout: 5 }
     ]
   },
   {
@@ -649,6 +650,7 @@ const codexHookEventLabel = (eventName: string) => {
   const labels: Record<string, string> = {
     PreToolUse: 'pre_tool_use',
     PermissionRequest: 'permission_request',
+    AskUserQuestion: 'ask_user_question',
     SessionStart: 'session_start',
     UserPromptSubmit: 'user_prompt_submit',
     Stop: 'stop'
