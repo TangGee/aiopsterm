@@ -140,12 +140,22 @@ if [[ ! -x "${codex_bin}" ]]; then
   exit 1
 fi
 export AIOPSTERM_CODEX_PACKAGE_DIR="${codex_package_dir}"
+: "${AIOPSTERM_CRASH_DIAGNOSTICS:=1}"
+export AIOPSTERM_CRASH_DIAGNOSTICS
 ensure_desktop_hint
+user_data_dir="${AIOPSTERM_USER_DATA_DIR:-${HOME}/.config/aiopsterm}"
+log_dir="${user_data_dir}/logs"
+preview_log="${log_dir}/electron-preview.log"
+mkdir -p "${log_dir}"
 
 mapfile -t pids < <(preview_pids)
 if ((${#pids[@]})); then
   if ((restart)); then
     echo "[aiopsterm] stopping existing preview processes: ${pids[*]}"
+    diagnostic_dir="${user_data_dir}/crash-diagnostics"
+    mkdir -p "${diagnostic_dir}"
+    pids_csv="$(IFS=,; printf '%s' "${pids[*]}")"
+    printf '{"createdAt":"%s","pids":[%s]}\n' "$(date -Is)" "${pids_csv}" >"${diagnostic_dir}/expected-restart.json"
     kill "${pids[@]}" 2>/dev/null || true
     sleep 1
     mapfile -t remaining_pids < <(preview_pids)
@@ -176,7 +186,10 @@ fi
 cmd+=("${extra_args[@]}")
 
 echo "[aiopsterm] starting: ${cmd[*]}"
-"${cmd[@]}" &
+{
+  printf '\n[%s] starting: %s\n' "$(date -Is)" "${cmd[*]}"
+} >>"${preview_log}"
+"${cmd[@]}" > >(tee -a "${preview_log}") 2> >(tee -a "${preview_log}" >&2) &
 preview_pid=$!
 
 cleanup_preview() {
@@ -193,7 +206,7 @@ if ! kill -0 "${preview_pid}" 2>/dev/null; then
   status=$?
   set -e
   echo "[aiopsterm] preview exited during startup with status ${status}."
-  runtime_log="${HOME}/.config/aiopsterm/logs/aiopsterm-runtime.log"
+  runtime_log="${user_data_dir}/logs/aiopsterm-runtime.log"
   if [[ -f "${runtime_log}" ]]; then
     echo "[aiopsterm] recent runtime log: ${runtime_log}"
     tail -80 "${runtime_log}" || true

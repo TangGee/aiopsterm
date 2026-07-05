@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Notification, shell } from 'electron'
+import { app, BrowserWindow, crashReporter, Notification, shell } from 'electron'
 import { join } from 'path'
 import Store from 'electron-store'
 import { refreshOrganizationAssets } from './backend/assets/assets'
@@ -10,7 +10,8 @@ import {
   closeAiAgentSessionServer,
   ensureAiAgentSessionServer,
 } from './backend/agent/agentSessions'
-import { logRuntimeEvent } from './backend/app/runtimeLog'
+import { configureRuntimeLog, logRuntimeEvent } from './backend/app/runtimeLog'
+import { configureCrashDiagnosticsRuntime, shouldEnableCrashDiagnostics } from './backend/app/crashDiagnosticsRuntime'
 import {
   closeControlSocketServer,
   ensureControlSocketServer,
@@ -78,6 +79,7 @@ const getChatAttachmentsPath = () => join(app.getPath('userData'), 'chat-attachm
 const getCustomBackgroundsPath = () => join(app.getPath('userData'), 'backgrounds')
 const getCustomNotificationSoundsPath = () => join(app.getPath('userData'), 'notification-sounds')
 const getLogDirPath = () => join(app.getPath('userData'), 'logs')
+configureRuntimeLog({ getLogDir: getLogDirPath })
 const settingsExternalActionRuntime = () => ({
   userDataPath: app.getPath('userData'),
   appPath: app.getAppPath(),
@@ -102,8 +104,16 @@ const appBootstrapRuntime = createAppBootstrapRuntime({
   rendererIndexPath: join(__dirname, '../renderer/index.html')
 })
 
-appBootstrapRuntime.registerSingleInstanceDeepLinkHandling()
+const hasPrimaryInstanceLock = appBootstrapRuntime.registerSingleInstanceDeepLinkHandling()
 appBootstrapRuntime.registerOpenUrlDeepLinkHandling()
+if (hasPrimaryInstanceLock && !app.isPackaged && shouldEnableCrashDiagnostics()) {
+  configureCrashDiagnosticsRuntime({
+    app,
+    crashReporter,
+    getWindows: () => BrowserWindow.getAllWindows(),
+    browserWindowFromWebContents: (webContents) => BrowserWindow.fromWebContents(webContents)
+  })
+}
 
 const terminalRuntime = createMainTerminalRuntime({
   focusWindow: appBootstrapRuntime.focusWindow

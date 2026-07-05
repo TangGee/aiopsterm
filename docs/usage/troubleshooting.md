@@ -8,6 +8,12 @@ aiopsterm writes runtime diagnostics to:
 <userData>/logs/aiopsterm-runtime.log
 ```
 
+When started through `npm run build:start`, Electron preview stdout/stderr is also appended to:
+
+```text
+<userData>/logs/electron-preview.log
+```
+
 On a normal Linux development run, `<userData>` is usually:
 
 ```text
@@ -17,6 +23,23 @@ On a normal Linux development run, `<userData>` is usually:
 The terminal diagnostics include local/SSH terminal create, lifecycle, write, resize, kill, and backend data events. Terminal write logs intentionally record byte counts and session metadata only; command text and secrets are not written to the runtime log.
 
 When reporting a terminal input problem, include the recent `terminal.*` and `renderer.terminal-*` entries from this file.
+
+## Native Crashes
+
+Native crash diagnostics are enabled by `npm run build:start` through `AIOPSTERM_CRASH_DIAGNOSTICS=1`. Official packaged builds keep this diagnostic mode disabled. When enabled, aiopsterm starts Electron's Crashpad reporter early in the main process. Crash dumps are stored locally and are not uploaded:
+
+```text
+<userData>/crashes/
+```
+
+The app also writes process-level crash diagnostics to the runtime log:
+
+- `electron.render-process-gone`: renderer process crashed or was killed.
+- `electron.child-process-gone`: non-renderer Electron child process, such as GPU or utility process, crashed or was killed.
+- `process.uncaught-exception` and `process.unhandled-rejection`: JavaScript runtime failures that reached the process boundary.
+- `crash-diagnostics.ready`: startup diagnostic state, including whether the previous run ended abnormally and whether crash safe mode is active.
+
+If diagnostic mode is enabled and the previous run did not exit cleanly, the next launch automatically enters crash safe mode once. Safe mode disables threaded terminal rendering, forces the terminal render backend to worker 2D, and disables Electron hardware acceleration for that run. A clean exit clears it for the following launch. `build:start` marks its own planned preview restarts so replacing an existing preview does not look like a crash. Set `AIOPSTERM_CRASH_SAFE_MODE=0` to disable the automatic safe-mode response, or `AIOPSTERM_CRASH_SAFE_MODE=1` to force it for one launch.
 
 For lag while running an interactive program such as `codex` inside a normal local terminal tab, reproduce the slowdown and collect the nearby log entries below:
 
