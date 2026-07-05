@@ -31,6 +31,7 @@ export const createTerminalWorkspaceCommandState = () => {
   const command = ref('')
   const globalCommand = ref('')
   const globalInputVisible = ref(false)
+  const globalCommandInput = ref<HTMLInputElement | HTMLInputElement[] | null>(null)
   const searchOverlayInput = ref<HTMLInputElement | HTMLInputElement[] | null>(null)
   const commandLineInput = ref<HTMLInputElement | HTMLInputElement[] | null>(null)
   const commandDialogInput = ref<HTMLTextAreaElement | HTMLTextAreaElement[] | null>(null)
@@ -69,6 +70,7 @@ export const createTerminalWorkspaceCommandState = () => {
     commandLineInput,
     commandLinePanelId,
     globalCommand,
+    globalCommandInput,
     globalInputVisible,
     hasAiSuggestion,
     search,
@@ -110,6 +112,7 @@ export const createTerminalWorkspaceCommandRuntime = ({
     commandLineInput,
     commandLinePanelId,
     globalCommand,
+    globalCommandInput,
     globalInputVisible,
     search,
     searchMatchCount,
@@ -631,6 +634,13 @@ export const createTerminalWorkspaceCommandRuntime = ({
     globalInputVisible.value = !globalInputVisible.value
     termMenu.visible = false
     aiButtonPanelId.value = ''
+    if (globalInputVisible.value) {
+      nextTick(() => {
+        const input = Array.isArray(globalCommandInput.value) ? globalCommandInput.value[0] : globalCommandInput.value
+        input?.focus()
+        input?.select()
+      })
+    }
   }
 
   const hideCommandDialogForActivePanel = (panelId: string) => {

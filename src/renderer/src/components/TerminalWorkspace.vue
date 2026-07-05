@@ -182,12 +182,16 @@
     <div
       v-if="globalInputVisible"
       class="terminal-global-command"
+      @click.stop
+      @mousedown.stop
     >
       <span><RadioTower /> Broadcast to {{ connectedTerminalPanels.length }} windows</span>
       <input
+        ref="globalCommandInput"
         v-model="globalCommand"
         placeholder="Execute command to all windows"
-        @keydown.enter="sendGlobalCommand"
+        @keydown.enter.prevent.stop="sendGlobalCommand"
+        @keydown.esc.prevent.stop="globalInputVisible = false"
       />
       <button
         title="关闭"
@@ -564,6 +568,7 @@ const {
   formatZmodemBytes,
   focusActiveTerminalFromContextBar,
   globalCommand,
+  globalCommandInput,
   globalInputVisible,
   handlePaneDragEnter,
   handlePaneDragLeave,

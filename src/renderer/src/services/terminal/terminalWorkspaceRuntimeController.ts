@@ -113,6 +113,7 @@ export const useTerminalWorkspaceContainerRuntime = () => {
     commandLineInput,
     commandLinePanelId,
     globalCommand,
+    globalCommandInput,
     globalInputVisible,
     hasAiSuggestion,
     search,
@@ -508,7 +509,7 @@ export const useTerminalWorkspaceContainerRuntime = () => {
     suggestionItems,
     aiSuggestLoading,
     writeXtermInput: (panelId, data) => writeXtermInput(panelId, data),
-    shouldSuppressTerminalFocus: (panelId) => searchOverlayPanelId.value === panelId
+    shouldSuppressTerminalFocus: (panelId) => searchOverlayPanelId.value === panelId || globalInputVisible.value
   })
 
   const threadedDirectIngressForEvent = (event: TerminalDataEvent): TerminalThreadedDirectIngress | null => {
@@ -924,6 +925,7 @@ export const useTerminalWorkspaceContainerRuntime = () => {
     formatZmodemBytes,
     focusActiveTerminalFromContextBar,
     globalCommand,
+    globalCommandInput,
     globalInputVisible,
     handlePaneDragEnter,
     handlePaneDragLeave,

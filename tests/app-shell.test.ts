@@ -10380,9 +10380,18 @@ describe('AppShell', () => {
 
     await wrapper.find('.xterm-host').trigger('contextmenu')
     await wrapper.find('.terminal-context-menu').findAll('button').find((button) => button.text().includes('全局执行'))!.trigger('click')
+    await wrapper.vm.$nextTick()
     expect(wrapper.find('.terminal-global-command').exists()).toBe(true)
-    await wrapper.find('.terminal-global-command input').setValue('uptime')
-    await wrapper.find('.terminal-global-command input').trigger('keydown', { key: 'Enter' })
+    const globalCommandInput = wrapper.find('.terminal-global-command input')
+    expect(document.activeElement).toBe(globalCommandInput.element)
+    const globalCommandTerminal = mockXtermInstances.at(-1)!
+    const terminalFocusCallsBeforeGlobalInputClick = globalCommandTerminal.focus.mock.calls.length
+    await globalCommandInput.trigger('mousedown')
+    await globalCommandInput.trigger('click')
+    expect(globalCommandTerminal.focus).toHaveBeenCalledTimes(terminalFocusCallsBeforeGlobalInputClick)
+    expect(document.activeElement).toBe(globalCommandInput.element)
+    await globalCommandInput.setValue('uptime')
+    await globalCommandInput.trigger('keydown', { key: 'Enter' })
     await flushPromises()
     expect(store.panels.every((panel) => !panel.output.includes('[aiopsterm] broadcast queued without live sessions: uptime'))).toBe(true)
     expect(store.topNotice).toBe('终端会话不可用，请先打开本地 shell 或连接 SSH')
