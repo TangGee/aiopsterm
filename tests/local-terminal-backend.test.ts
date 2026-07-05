@@ -265,6 +265,7 @@ describe('local terminal backend runtime', () => {
 
     expect(env.AIOPSTERM_CONTROL_COMMAND).toBe('aio')
     expect(env.PATH).toBe(`${controlBinDir}${delimiter}/usr/bin`)
+    expect(env.AIOPSTERM_CONTROL_BIN_DIR).toBe(controlBinDir)
     expect(basename(controlBinDir)).toMatch(/^aiopsterm-control-bin-/)
     for (const commandName of ['aio', 'aictl', 'aiopsterm-control']) {
       const commandPath = join(controlBinDir, commandName)
@@ -274,6 +275,50 @@ describe('local terminal backend runtime', () => {
     const aiosshPath = join(controlBinDir, 'aiossh')
     expect(readFileSync(aiosshPath, 'utf8')).toContain('ELECTRON_RUN_AS_NODE=1 exec "$AIOPSTERM_JS_RUNTIME" "$AIOPSTERM_CONTROL_HELPER_PATH" \'ssh\' "$@"')
     expect(statSync(aiosshPath).mode & 0o111).not.toBe(0)
+
+    const completionPath = String(env.AIOPSTERM_CONTROL_COMPLETION_BASH || '')
+    expect(completionPath).toBe(join(controlBinDir, 'aiopsterm-control-completion.bash'))
+    expect(readFileSync(completionPath, 'utf8')).toContain('eval "$(aio completion bash 2>/dev/null)"')
+
+    const bashRcPath = String(env.AIOPSTERM_CONTROL_BASH_RC || '')
+    expect(bashRcPath).toBe(join(controlBinDir, 'aiopsterm-control-bashrc'))
+    expect(readFileSync(bashRcPath, 'utf8')).toContain('. /etc/profile')
+    expect(readFileSync(bashRcPath, 'utf8')).toContain('PATH="$AIOPSTERM_CONTROL_BIN_DIR:$PATH"; export PATH')
+    expect(readFileSync(bashRcPath, 'utf8')).toContain('. "$AIOPSTERM_CONTROL_COMPLETION_BASH"')
+  })
+
+  it('starts managed bash with the generated rcfile so aio completion is loaded after user startup files', async () => {
+    const backend = await loadBackend()
+    const events = createRecorder()
+    const pty = new MockPtyProcess()
+    const spawnCalls: Array<Record<string, unknown>> = []
+    backend.configureLocalTerminalBackendRuntime({
+      getDefaultShell: () => '/bin/bash',
+      getDefaultCwd: () => '/home/ops',
+      getEnv: () => ({ PATH: '/usr/bin', PROMPT_COMMAND: 'user_prompt' }),
+      getJsRuntimeExecutable: () => '/opt/aiopsterm/aiopsterm',
+      getControlHelperScriptPath: () => '/opt/aiopsterm/resources/aiopsterm-control.js',
+      getPlatform: () => 'linux',
+      loadPty: () => ({
+        spawn: (shell, args, options) => {
+          spawnCalls.push({ shell, args, options })
+          return pty
+        }
+      })
+    })
+
+    backend.createLocalTerminalSession('local-managed-bash', { kind: 'local', panelId: 'panel-managed' }, createSink(events))
+
+    const env = spawnCalls[0]?.options as { env?: NodeJS.ProcessEnv } | undefined
+    const bashRcPath = String(env?.env?.AIOPSTERM_CONTROL_BASH_RC || '')
+    expect(spawnCalls[0]).toEqual(
+      expect.objectContaining({
+        shell: '/bin/bash',
+        args: ['--rcfile', bashRcPath]
+      })
+    )
+    expect(readFileSync(bashRcPath, 'utf8')).toContain('. "$AIOPSTERM_CONTROL_COMPLETION_BASH"')
+    expect(String(env?.env?.PROMPT_COMMAND || '')).toContain('user_prompt')
   })
 
   it('uses subprocess fallback without writing fallback status text into terminal data', async () => {

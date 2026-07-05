@@ -71,6 +71,48 @@ describe('aio CLI', () => {
     await Promise.all(socketPaths.splice(0).map((socketPath) => rm(socketPath, { force: true })))
   })
 
+  it('prints help and reports unknown commands without a stack trace', async () => {
+    const help = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', 'help'], {
+      cwd: process.cwd(),
+      env: { ...process.env, AIOPSTERM_CONTROL_SOCKET: '' }
+    })
+    expect(help.stdout).toContain('aio [--socket <path>] [--json] <command>')
+    expect(help.stdout).toContain('help')
+    expect(help.stderr).toBe('')
+
+    try {
+      await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', 'missing-command'], {
+        cwd: process.cwd(),
+        env: { ...process.env, AIOPSTERM_CONTROL_SOCKET: '' }
+      })
+      throw new Error('expected missing command to fail')
+    } catch (error) {
+      expect(error).toMatchObject({
+        code: 2,
+        stdout: '',
+        stderr: expect.stringContaining('Unknown command: missing-command')
+      })
+      expect(String((error as { stderr?: unknown }).stderr || '')).not.toContain('at methodParams')
+    }
+
+    try {
+      await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--json', 'missing-command'], {
+        cwd: process.cwd(),
+        env: { ...process.env, AIOPSTERM_CONTROL_SOCKET: '' }
+      })
+      throw new Error('expected missing json command to fail')
+    } catch (error) {
+      expect(error).toMatchObject({ code: 2, stderr: '' })
+      expect(JSON.parse(String((error as { stdout?: unknown }).stdout || ''))).toEqual(
+        expect.objectContaining({
+          ok: false,
+          errorCode: 'AIO_CONTROL_COMMAND_INVALID',
+          errorMessage: 'Unknown command: missing-command'
+        })
+      )
+    }
+  })
+
   it('prints automation recipes without requiring a control socket', async () => {
     const all = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', 'recipes'], {
       cwd: process.cwd(),
@@ -189,7 +231,36 @@ describe('aio CLI', () => {
 
   it('completes aio command paths and options through the generic completion target', async () => {
     const topLevel = await runCliCompletion(['complete', 'cli', '--index', '1', '--', 'aio', ''])
-    expect(topLevel).toEqual(expect.arrayContaining(['notify', 'open-notification', 'agent-hibernation', 'workspace-group', 'capture-pane', 'terminal']))
+    expect(topLevel).toEqual([
+      'help',
+      'context',
+      'terminal',
+      'ssh',
+      'host',
+      'settings',
+      'agent',
+      'feed',
+      'workspace',
+      'surface',
+      'pane',
+      'session',
+      'project',
+      'file',
+      'system',
+      'window',
+      'notify',
+      'list-notifications',
+      'open-notification',
+      'recipes',
+      'completion'
+    ])
+    expect(topLevel).not.toContain('capture-pane')
+
+    const topLevelImplicitEmpty = await runCliCompletion(['complete', 'cli', '--index', '1', '--', 'aio'])
+    expect(topLevelImplicitEmpty).toEqual(topLevel)
+
+    const prefixedTopLevel = await runCliCompletion(['complete', 'cli', '--index', '1', '--', 'aio', 'capture'])
+    expect(prefixedTopLevel).toEqual(expect.arrayContaining(['capture-pane']))
 
     const agent = await runCliCompletion(['complete', 'cli', '--index', '2', '--', 'aio', 'agent', ''])
     expect(agent).toEqual(expect.arrayContaining(['session', 'vault', 'team', 'hibernate', 'resume']))

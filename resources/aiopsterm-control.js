@@ -10,6 +10,7 @@ const args = process.argv.slice(2)
 const usage = () => `aio [--socket <path>] [--json] <command>
 
 Commands:
+  help
   ping
   capabilities
   identify
@@ -385,6 +386,7 @@ const buildCompletionSpec = () => {
   })
 
   addCompletionAliases(spec, ['ping'], completionLeaf())
+  addCompletionAliases(spec, ['help', 'usage'], completionLeaf())
   addCompletionAliases(spec, ['capabilities', 'system-capabilities'], completionLeaf())
   addCompletionAliases(spec, ['identify', 'system-identify'], completionLeaf([...surfaceSelectorOptions, ...terminalSelectorOptions, ...workspaceSelectorOptions, '--cwd']))
   addCompletionAliases(spec, ['context'], completionLeaf([...surfaceSelectorOptions, ...terminalSelectorOptions, ...workspaceSelectorOptions, '--cwd', '--include-snapshot']))
@@ -982,11 +984,34 @@ const buildCompletionSpec = () => {
 const completionSpec = buildCompletionSpec()
 const completionRootNode = completionNode({ children: completionSpec, options: globalCompletionOptions })
 const shellCompletionCommands = Object.keys(completionSpec)
+const rootDefaultCompletionCommands = [
+  'help',
+  'context',
+  'terminal',
+  'ssh',
+  'host',
+  'settings',
+  'agent',
+  'feed',
+  'workspace',
+  'surface',
+  'pane',
+  'session',
+  'project',
+  'file',
+  'system',
+  'window',
+  'notify',
+  'list-notifications',
+  'open-notification',
+  'recipes',
+  'completion'
+]
 
 const socketPath = readOption('--socket') || process.env.AIOPSTERM_CONTROL_SOCKET || process.env.AIOPSTERM_SOCKET_PATH || ''
 const outputJson = hasFlag('--json')
 
-if (args[0] === '--help' || args[0] === '-h') {
+if (args[0] === '--help' || args[0] === '-h' || args[0] === 'help' || args[0] === 'usage') {
   process.stdout.write(usage())
   process.exit(0)
 }
@@ -1664,6 +1689,7 @@ const cliCompletionPlan = ({ words, index }) => {
   }
 
   const commandIndex = index - 1
+  if (commandIndex <= 0 && !String(currentWord || '').trim()) return { candidates: rootDefaultCompletionCommands }
   if (commandIndex <= 0) return completionPlanForNode(completionRootNode, currentWord)
   const commandWords = words.slice(1)
   const previousTokens = commandWords.slice(0, commandIndex)
@@ -4079,7 +4105,18 @@ const printResponse = (response) => {
   process.stdout.write(`${JSON.stringify(data)}\n`)
 }
 
-const request = methodParams()
+let request
+try {
+  request = methodParams()
+} catch (error) {
+  const message = error instanceof Error ? error.message : String(error)
+  if (outputJson) {
+    process.stdout.write(`${JSON.stringify({ ok: false, errorCode: 'AIO_CONTROL_COMMAND_INVALID', errorMessage: message })}\n`)
+  } else {
+    process.stderr.write(`${message}\nRun "aio help" for usage.\n`)
+  }
+  process.exit(2)
+}
 
 if ('localPrint' in request) {
   process.stdout.write(`${request.localPrint || ''}\n`)

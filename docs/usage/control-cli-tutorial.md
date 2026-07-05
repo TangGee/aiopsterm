@@ -42,6 +42,12 @@ SSH 远端 shell 通常不会有这些本地控制变量。要控制 SSH 面板�
 aio context
 ```
 
+查看命令帮助：
+
+```bash
+aio help
+```
+
 列出当前可见 surface：
 
 ```bash
@@ -233,7 +239,7 @@ aio settings put background.opacity 0.8
 
 ## Shell Completion
 
-`aio`、`aictl`、`aiopsterm-control` 和 `aiossh` 都提供 bash、zsh、fish 补全脚本。补全覆盖所有 `aio` 命令路径：顶层命令、嵌套子命令和常用选项都会按当前光标位置给出候选。`aiossh <managed-host>` 和 `aio ssh <managed-host>` 的主机候选会动态读取本地资产库，所以输入一半再按 Tab 可以补全已管理主机：
+`aio`、`aictl`、`aiopsterm-control` 和 `aiossh` 都提供 bash、zsh、fish 补全脚本。补全覆盖所有 `aio` 命令路径：顶层命令、嵌套子命令和常用选项都会按当前光标位置给出候选。`aio ` 后直接按 Tab 只展示常用主入口，避免把兼容别名和高级控制命令一次性全部展开；输入前缀后仍可补全完整命令集。`aiossh <managed-host>` 和 `aio ssh <managed-host>` 的主机候选会动态读取本地资产库，所以输入一半再按 Tab 可以补全已管理主机：
 
 ```bash
 source <(aio completion bash)
@@ -252,6 +258,26 @@ aio completion fish | source
 ```
 
 aiopsterm 创建的本地终端会自动加载补全。普通系统终端可以手动 source 上面的脚本。动态主机补全依赖当前 shell 能访问 `AIOPSTERM_CONTROL_SOCKET`；命令和选项补全不需要 socket。
+
+如果 `aio ` 后按 Tab 没有候选，先确认当前 shell 已注册补全：
+
+```bash
+complete -p aio
+```
+
+没有输出时，说明补全脚本没有加载，可以手动执行：
+
+```bash
+source <(aio completion bash)
+```
+
+也可以直接检查补全核心是否能返回顶层命令：
+
+```bash
+aio complete cli --index 1 -- aio
+```
+
+这条命令应输出 `help`、`terminal`、`settings`、`ssh` 等常用顶层候选。如果这里有输出而 Tab 没提示，问题在当前 shell 的 completion 加载；如果这里也没输出，再检查 `aio` 命令路径和环境变量。
 
 ## Notifications
 
@@ -315,5 +341,11 @@ aio context
 ```
 
 如果提示 `AIOPSTERM_CONTROL_SOCKET is not set`，说明当前 shell 没有连接到 aiopsterm 的本地控制 socket。普通使用场景下不要手动拼底层长命令，优先从 aiopsterm 本地终端执行 `aio`。
+
+如果输入了不存在的命令，`aio` 会输出可读错误并提示运行 `aio help`，不会打印 Node.js 调用栈。需要脚本解析错误时可以加 `--json`：
+
+```bash
+aio --json missing-command
+```
 
 更多协议细节见 [Control Socket](../technical/control-socket.md)。

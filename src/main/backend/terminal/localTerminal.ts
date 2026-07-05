@@ -112,6 +112,7 @@ const controlCommandShims = [
 const controlCommandShimDirectory = () => join(tmpdir(), `aiopsterm-control-bin-${process.pid}`)
 
 const controlCompletionScriptName = 'aiopsterm-control-completion.bash'
+const controlBashInitScriptName = 'aiopsterm-control-bashrc'
 
 const controlCommandShimContent = (platform: NodeJS.Platform, helperArgs: string[] = []) => {
   const prefix = helperArgs.map((arg) => (platform === 'win32' ? arg : `'${arg.replace(/'/g, "'\\''")}'`)).join(platform === 'win32' ? ' ' : ' ')
@@ -130,6 +131,34 @@ const controlCompletionShimContent = () =>
     ''
   ].join('\n')
 
+const controlBashInitContent = () =>
+  [
+    '# aiopsterm managed bash startup',
+    'if [ -r /etc/profile ]; then',
+    '  . /etc/profile',
+    'fi',
+    'if [ -r "$HOME/.bash_profile" ]; then',
+    '  . "$HOME/.bash_profile"',
+    'elif [ -r "$HOME/.bash_login" ]; then',
+    '  . "$HOME/.bash_login"',
+    'elif [ -r "$HOME/.profile" ]; then',
+    '  . "$HOME/.profile"',
+    'elif [ -r "$HOME/.bashrc" ]; then',
+    '  . "$HOME/.bashrc"',
+    'fi',
+    'if [ -n "$AIOPSTERM_CONTROL_BIN_DIR" ]; then',
+    '  case ":$PATH:" in',
+    '    *":$AIOPSTERM_CONTROL_BIN_DIR:"*) ;;',
+    '    *) PATH="$AIOPSTERM_CONTROL_BIN_DIR:$PATH"; export PATH ;;',
+    '  esac',
+    'fi',
+    'if [ -n "$AIOPSTERM_CONTROL_COMPLETION_BASH" ] && [ -r "$AIOPSTERM_CONTROL_COMPLETION_BASH" ]; then',
+    '  . "$AIOPSTERM_CONTROL_COMPLETION_BASH"',
+    '  unset AIOPSTERM_CONTROL_COMPLETION_BASH',
+    'fi',
+    ''
+  ].join('\n')
+
 const ensureControlCommandShims = (platform: NodeJS.Platform) => {
   const directory = controlCommandShimDirectory()
   try {
@@ -144,6 +173,9 @@ const ensureControlCommandShims = (platform: NodeJS.Platform) => {
       const completionPath = join(directory, controlCompletionScriptName)
       writeFileSync(completionPath, controlCompletionShimContent())
       chmodSync(completionPath, 0o644)
+      const bashInitPath = join(directory, controlBashInitScriptName)
+      writeFileSync(bashInitPath, controlBashInitContent())
+      chmodSync(bashInitPath, 0o644)
     }
     return directory
   } catch {
@@ -193,7 +225,9 @@ export const managedLocalTerminalEnvironment = (id: string, options: TerminalCre
     if (controlCommandDirectory) {
       env.AIOPSTERM_CONTROL_COMMAND = 'aio'
       if (getPlatform() !== 'win32') {
+        env.AIOPSTERM_CONTROL_BIN_DIR = controlCommandDirectory
         env.AIOPSTERM_CONTROL_COMPLETION_BASH = join(controlCommandDirectory, controlCompletionScriptName)
+        env.AIOPSTERM_CONTROL_BASH_RC = join(controlCommandDirectory, controlBashInitScriptName)
         env.PROMPT_COMMAND = prependPromptCommand(env.PROMPT_COMMAND, completionBootstrapPromptCommand())
       }
       env.PATH = prependPathEntry(env.PATH, controlCommandDirectory)
@@ -208,7 +242,10 @@ const getPtyRuntime = () => (runtimeConfig.loadPty || defaultLoadPty)()
 
 const getProcessRuntime = () => runtimeConfig.processRuntime || { spawn }
 
-const localShellArgs = (shell: string) => {
+const localShellArgs = (shell: string, env?: NodeJS.ProcessEnv) => {
+  const shellName = basename(shell).toLowerCase()
+  const bashInit = typeof env?.AIOPSTERM_CONTROL_BASH_RC === 'string' ? env.AIOPSTERM_CONTROL_BASH_RC : ''
+  if (getPlatform() !== 'win32' && shellName === 'bash' && bashInit) return ['--rcfile', bashInit]
   return localShellArgsForPlatform(shell, getPlatform())
 }
 
@@ -318,10 +355,10 @@ const cleanProcessId = (value: unknown) => (Number.isFinite(value) && Number(val
 
 export const createLocalTerminalSession = (id: string, options: TerminalCreateOptions, sink: LocalTerminalEventSink): LocalTerminalCreateResult => {
   const terminalShell = getShell(options)
-  const terminalArgs = localShellArgs(terminalShell)
   const cwd = getCwd(options)
   const terminalType = getTerminalType(options)
   const env = { ...managedLocalTerminalEnvironment(id, options), TERM: terminalType }
+  const terminalArgs = localShellArgs(terminalShell, env)
   const lifecycleBase = {
     kind: 'local' as const,
     shell: terminalShell,
