@@ -120,6 +120,52 @@ describe('threadedTerminalCoreWorker', () => {
     expect(visibleText(next)).toContain('after-find')
   })
 
+  it('searches the full scrollback, scrolls to the match, and clears search highlights', async () => {
+    await createTerminal()
+    send({
+      type: 'data',
+      terminalId: createOptions().terminalId,
+      data: Array.from({ length: 18 }, (_item, index) => `${index === 2 ? 'first-needle' : `line-${index}`}\n`).join('')
+    })
+
+    const bottom = await waitFor(() => {
+      const snapshot = latestScreen(messages)
+      return snapshot && visibleText(snapshot).includes('line-17') ? snapshot : undefined
+    })
+
+    send({
+      type: 'search',
+      terminalId: createOptions().terminalId,
+      query: 'first-needle',
+      direction: 'next',
+      incremental: true
+    })
+    const searched = await waitFor(() => {
+      const snapshot = latestScreen(messages)
+      return snapshot && snapshot.seq > bottom.seq && snapshot.fullReason === 'search' && visibleText(snapshot).includes('first-needle')
+        ? snapshot
+        : undefined
+    })
+    const matchLine = searched.lines.find((line) => line.text.includes('first-needle'))
+
+    expect(searched.viewportY).toBeLessThan(bottom.viewportY)
+    expect(matchLine?.highlights).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        text: 'first-needle',
+        fg: '#111827',
+        bg: '#facc15',
+        bold: true
+      })
+    ]))
+
+    send({ type: 'search-clear', terminalId: createOptions().terminalId })
+    const cleared = await waitFor(() => {
+      const snapshot = latestScreen(messages)
+      return snapshot && snapshot.seq > searched.seq && snapshot.fullReason === 'search' ? snapshot : undefined
+    })
+    expect(cleared.lines.flatMap((line) => line.highlights || []).filter((run) => run.bg)).toEqual([])
+  })
+
   it('emits title and progress protocol events from OSC sequences', async () => {
     await createTerminal()
     send({ type: 'data', terminalId: createOptions().terminalId, data: '\x1b]2;Build active\x07' })

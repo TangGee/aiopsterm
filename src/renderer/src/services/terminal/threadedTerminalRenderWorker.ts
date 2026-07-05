@@ -502,6 +502,18 @@ const drawStyledRuns = (surface: RenderSurface, line: ThreadedTerminalScreenLine
 }
 
 const drawHighlightRuns = (surface: RenderSurface, line: ThreadedTerminalScreenLine) => {
+  const context = surface.context
+  for (const run of line.highlights || []) {
+    if (run.bg) {
+      context.fillStyle = run.bg
+      context.fillRect(
+        surface.geometry.paddingLeft + run.x * surface.cellWidth,
+        surface.geometry.paddingTop + line.y * surface.cellHeight,
+        Math.max(surface.cellWidth, runColumns(run) * surface.cellWidth),
+        surface.cellHeight
+      )
+    }
+  }
   for (const run of line.highlights || []) {
     drawTextCells(surface, run.text, run.x, line.y, {
       fg: run.fg,

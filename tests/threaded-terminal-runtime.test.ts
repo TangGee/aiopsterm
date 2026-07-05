@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   ThreadedTerminalHost,
+  ThreadedTerminalSearchAddon,
   quoteTerminalDropPath,
   threadedTerminalCapability,
   threadedTerminalDefaultWorkerCount,
@@ -560,6 +561,40 @@ describe('threadedTerminalRuntime', () => {
     host.focus()
 
     expect(document.activeElement).toBe(input)
+    host.dispose()
+  })
+
+  it('routes search addon requests to the threaded core worker', async () => {
+    installOffscreenCanvasSupport()
+    const host = createHost()
+    host.open(createHostElement())
+    const searchAddon = new ThreadedTerminalSearchAddon()
+    host.loadAddon(searchAddon)
+
+    expect(searchAddon.findNext('needle', { incremental: true, caseSensitive: false })).toBe(true)
+    expect(searchAddon.findPrevious('needle', { caseSensitive: true })).toBe(true)
+    searchAddon.clearDecorations()
+
+    const messages = await workerMessages()
+    expect(messages.core).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: 'search',
+        terminalId: 'panel-1',
+        query: 'needle',
+        direction: 'next',
+        incremental: true,
+        caseSensitive: false
+      }),
+      expect.objectContaining({
+        type: 'search',
+        terminalId: 'panel-1',
+        query: 'needle',
+        direction: 'previous',
+        incremental: false,
+        caseSensitive: true
+      }),
+      expect.objectContaining({ type: 'search-clear', terminalId: 'panel-1' })
+    ]))
     host.dispose()
   })
 

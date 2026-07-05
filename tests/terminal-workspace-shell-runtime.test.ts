@@ -251,11 +251,33 @@ describe('terminalWorkspaceShellRuntime', () => {
     const terminalHost = document.createElement('div')
     terminalHost.className = 'xterm-host'
 
-    const searchShortcut = createKeyboardEvent({ ctrlKey: true, shiftKey: true, key: 'f', target: terminalHost })
+    const searchShortcut = createKeyboardEvent({ ctrlKey: true, altKey: true, key: 'f', target: terminalHost })
     await runtime.handleShortcut(searchShortcut)
     expect(searchShortcut.preventDefault).toHaveBeenCalledTimes(1)
     expect(searchShortcut.stopPropagation).toHaveBeenCalledTimes(1)
     expect(calls.openSearchOverlay).toHaveBeenCalledWith('panel-1')
+
+    calls.openSearchOverlay.mockClear()
+    const oldSearchShortcut = createKeyboardEvent({ ctrlKey: true, shiftKey: true, key: 'f', target: terminalHost })
+    await runtime.handleShortcut(oldSearchShortcut)
+    expect(oldSearchShortcut.preventDefault).not.toHaveBeenCalled()
+    expect(oldSearchShortcut.stopPropagation).not.toHaveBeenCalled()
+    expect(calls.openSearchOverlay).not.toHaveBeenCalled()
+
+    calls.openSearchOverlay.mockClear()
+    const bodySearchShortcut = createKeyboardEvent({ ctrlKey: true, altKey: true, key: 'f', target: document.body })
+    await runtime.handleShortcut(bodySearchShortcut)
+    expect(bodySearchShortcut.preventDefault).toHaveBeenCalledTimes(1)
+    expect(bodySearchShortcut.stopPropagation).toHaveBeenCalledTimes(1)
+    expect(calls.openSearchOverlay).toHaveBeenCalledWith('panel-1')
+
+    calls.openSearchOverlay.mockClear()
+    const input = document.createElement('input')
+    const inputSearchShortcut = createKeyboardEvent({ ctrlKey: true, altKey: true, key: 'f', target: input })
+    await runtime.handleShortcut(inputSearchShortcut)
+    expect(inputSearchShortcut.preventDefault).not.toHaveBeenCalled()
+    expect(inputSearchShortcut.stopPropagation).not.toHaveBeenCalled()
+    expect(calls.openSearchOverlay).not.toHaveBeenCalled()
 
     await runtime.pasteClipboard('panel-1')
     expect(workspace.setTopNotice).toHaveBeenCalledWith('终端剪贴板读取服务不可用')

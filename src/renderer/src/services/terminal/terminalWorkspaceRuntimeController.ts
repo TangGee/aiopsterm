@@ -341,7 +341,7 @@ export const useTerminalWorkspaceContainerRuntime = () => {
     summary.maxChunkBytes = Math.max(summary.maxChunkBytes, metrics.bytes)
     if (metrics.handledByZmodem) summary.zmodemChunks += 1
     terminalDataPerf.set(sessionId, summary)
-    if (metrics.appendMs >= terminalDataSlowThresholdMs || metrics.zmodemMs >= terminalDataSlowThresholdMs) {
+    if (terminalDebugLogs && (metrics.appendMs >= terminalDataSlowThresholdMs || metrics.zmodemMs >= terminalDataSlowThresholdMs)) {
       writeRendererRuntimeLog('warn', 'renderer.terminal-data.slow-handle', {
         sessionId,
         bytes: metrics.bytes,
@@ -507,7 +507,8 @@ export const useTerminalWorkspaceContainerRuntime = () => {
     suggestionPosition,
     suggestionItems,
     aiSuggestLoading,
-    writeXtermInput: (panelId, data) => writeXtermInput(panelId, data)
+    writeXtermInput: (panelId, data) => writeXtermInput(panelId, data),
+    shouldSuppressTerminalFocus: (panelId) => searchOverlayPanelId.value === panelId
   })
 
   const threadedDirectIngressForEvent = (event: TerminalDataEvent): TerminalThreadedDirectIngress | null => {
@@ -632,6 +633,7 @@ export const useTerminalWorkspaceContainerRuntime = () => {
     workspace,
     state: shellState,
     terminalViews,
+    terminalWorkspaceVisible,
     searchOverlayPanelId,
     commandDialog,
     closeCommandDialog,
@@ -732,7 +734,7 @@ export const useTerminalWorkspaceContainerRuntime = () => {
     offExit = terminalClient.onTerminalExit()?.((event) => workspace.applyTerminalExit(event)) || null
     offControlRequest = controlClient.onControlRequest()?.(handleControlRequest) || null
     document.addEventListener('click', closeTerminalMenusFromDocument)
-    window.addEventListener('keydown', handleShortcut)
+    window.addEventListener('keydown', handleShortcut, true)
     window.addEventListener('resize', updateTerminalTabScrollState)
     nextTick(() => {
       updateTerminalTabScrollState()
@@ -779,7 +781,7 @@ export const useTerminalWorkspaceContainerRuntime = () => {
     terminalZmodemShellRuntime.dispose()
     disposeTerminalViews()
     document.removeEventListener('click', closeTerminalMenusFromDocument)
-    window.removeEventListener('keydown', handleShortcut)
+    window.removeEventListener('keydown', handleShortcut, true)
     window.removeEventListener('resize', updateTerminalTabScrollState)
     if (terminalIngressFlushTimer !== null) {
       window.clearTimeout(terminalIngressFlushTimer)

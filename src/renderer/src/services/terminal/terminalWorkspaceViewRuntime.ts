@@ -151,6 +151,7 @@ type TerminalWorkspaceViewRuntimeInput = {
   suggestionItems: Ref<TerminalSuggestion[]>
   aiSuggestLoading: Ref<boolean>
   writeXtermInput: (panelId: string, data: string) => void | Promise<void>
+  shouldSuppressTerminalFocus?: (panelId: string) => boolean
   terminalConstructor?: new (options: ConstructorParameters<typeof XtermTerminal>[0]) => XtermLike
   fitConstructor?: new () => FitLike
   searchConstructor?: new () => SearchLike
@@ -210,6 +211,7 @@ export const createTerminalWorkspaceViewRuntime = ({
   suggestionItems,
   aiSuggestLoading,
   writeXtermInput,
+  shouldSuppressTerminalFocus,
   terminalConstructor,
   fitConstructor,
   searchConstructor
@@ -333,7 +335,7 @@ export const createTerminalWorkspaceViewRuntime = ({
     summary.maxPendingChunks = Math.max(summary.maxPendingChunks, metrics.pendingChunks)
     if (metrics.reset) summary.resets += 1
     view.outputPerf = summary
-    if (metrics.writeMs >= terminalOutputSlowThresholdMs || metrics.highlightMs >= terminalOutputSlowThresholdMs) {
+    if (terminalDebugLogs && (metrics.writeMs >= terminalOutputSlowThresholdMs || metrics.highlightMs >= terminalOutputSlowThresholdMs)) {
       writeRuntimeLog('warn', 'renderer.terminal-output.slow-write', {
         panelId,
         chunks: metrics.chunks,
@@ -388,6 +390,7 @@ export const createTerminalWorkspaceViewRuntime = ({
 
   const activeView = () => terminalViews.get(workspace.activePanelId)
   const isTerminalWorkspaceVisible = () => terminalWorkspaceVisible?.value ?? true
+  const isTerminalFocusSuppressed = (panelId: string) => Boolean(shouldSuppressTerminalFocus?.(panelId))
   const visibleTerminalPanelIds = () => new Set(visibleTerminalPanels.value.map((panel) => panel.id))
   const isTerminalPanelRenderable = (panelId: string) => {
     const element = terminalElements.get(panelId)
@@ -878,6 +881,7 @@ export const createTerminalWorkspaceViewRuntime = ({
   const scheduleTerminalFocus = (panelId: string, frames = 6) => {
     const run = (remaining: number) => {
       nextTick(() => {
+        if (isTerminalFocusSuppressed(panelId)) return
         const view = terminalViews.get(panelId)
         const element = terminalElements.get(panelId)
         if (view && element?.isConnected && isTerminalPanelRenderable(panelId)) {
@@ -958,7 +962,7 @@ export const createTerminalWorkspaceViewRuntime = ({
       }
       view.lastOutput = displayOutput
       wroteOutput = true
-    } else if (highlightMs >= terminalOutputSlowThresholdMs) {
+    } else if (terminalDebugLogs && highlightMs >= terminalOutputSlowThresholdMs) {
       writeRuntimeLog('warn', 'renderer.terminal-output.slow-highlight', {
         panelId: panel.id,
         highlightMs: Math.round(highlightMs * 10) / 10,

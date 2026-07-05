@@ -45,6 +45,11 @@ type ResizeHandler = (size: { cols: number; rows: number }) => unknown
 type SelectionHandler = () => void
 type ProgressHandler = (progress: TerminalProgress | null) => void
 type RenderFrameAck = Extract<ThreadedTerminalRenderResponse, { type: 'frame' }> & { at: number }
+type ThreadedTerminalSearchOptions = { caseSensitive?: boolean; incremental?: boolean }
+type ThreadedTerminalSearchHost = {
+  search: (query: string, direction: 'next' | 'previous', options?: ThreadedTerminalSearchOptions) => boolean
+  clearSearchDecorations: () => void
+}
 
 type ThreadedTerminalInitOptions = {
   terminalId: string
@@ -157,6 +162,11 @@ type ThreadedTerminalRenderGroupResolution = {
 }
 
 const defaultWordSeparators = new Set(Array.from(' ()[]{}\'"`'))
+
+const isThreadedTerminalSearchHost = (value: unknown): value is ThreadedTerminalSearchHost => {
+  const candidate = value as Partial<ThreadedTerminalSearchHost> | null | undefined
+  return typeof candidate?.search === 'function' && typeof candidate.clearSearchDecorations === 'function'
+}
 
 declare global {
   interface Window {
@@ -330,7 +340,7 @@ const settingsSignatureFor = (settings: ThreadedTerminalSettings, theme: Threade
   ].join('\u001f')
 
 const logThreadedTerminal = (level: 'debug' | 'info' | 'warn' | 'error', event: string, fields?: Record<string, unknown>) => {
-  if (level === 'debug' && !shouldUseTerminalDebugLogs()) return
+  if ((level === 'debug' || level === 'info') && !shouldUseTerminalDebugLogs()) return
   writeRendererRuntimeLog(level, event, fields)
 }
 
@@ -857,15 +867,27 @@ export class ThreadedTerminalFitAddon {
 }
 
 export class ThreadedTerminalSearchAddon {
-  activate(_terminal: unknown) {}
-  dispose() {}
-  findNext() {
-    return false
+  private host: ThreadedTerminalSearchHost | null = null
+
+  activate(terminal: unknown) {
+    if (isThreadedTerminalSearchHost(terminal)) this.host = terminal
   }
-  findPrevious() {
-    return false
+
+  dispose() {
+    this.host = null
   }
-  clearDecorations() {}
+
+  findNext(query: string, options?: ThreadedTerminalSearchOptions) {
+    return this.host?.search(query, 'next', options) ?? false
+  }
+
+  findPrevious(query: string, options?: ThreadedTerminalSearchOptions) {
+    return this.host?.search(query, 'previous', options) ?? false
+  }
+
+  clearDecorations() {
+    this.host?.clearSearchDecorations()
+  }
 }
 
 export class ThreadedTerminalHost {
@@ -1259,6 +1281,25 @@ export class ThreadedTerminalHost {
     if (!this.coreCreated) return
     const normalized = Math.max(0, Math.trunc(line))
     postCore(this.coreHandle, { type: 'scroll-to-line', terminalId: this.terminalId, line: normalized })
+  }
+
+  search(query: string, direction: 'next' | 'previous', options: ThreadedTerminalSearchOptions = {}) {
+    const term = query.trim()
+    if (!term || !this.coreCreated) return false
+    postCore(this.coreHandle, {
+      type: 'search',
+      terminalId: this.terminalId,
+      query: term,
+      direction,
+      caseSensitive: Boolean(options.caseSensitive),
+      incremental: Boolean(options.incremental)
+    })
+    return true
+  }
+
+  clearSearchDecorations() {
+    if (!this.coreCreated) return
+    postCore(this.coreHandle, { type: 'search-clear', terminalId: this.terminalId })
   }
 
   getSelection() {

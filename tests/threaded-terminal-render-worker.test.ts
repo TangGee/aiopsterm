@@ -347,6 +347,34 @@ describe('threadedTerminalRenderWorker', () => {
     expect(messages).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'frame', terminalId: 'render-worker-terminal', seq: 2, paintedRows: 1 })]))
   })
 
+  it('paints search highlight backgrounds before highlighted text', async () => {
+    send(attachGroupMessage(canvas))
+    const message = attachMessage()
+    if (message.type === 'attach') message.options.settings.cursorStyle = 'bar'
+    send(message)
+    const nextSnapshot = workingSnapshot()
+    nextSnapshot.lines[0].highlights = [
+      {
+        x: 0,
+        text: 'Work',
+        chars: Array.from('Work'),
+        widths: Array.from('Work').map(() => 1),
+        columns: 4,
+        fg: '#111827',
+        bg: '#facc15',
+        bold: true
+      }
+    ]
+    send({ type: 'screen', snapshot: nextSnapshot })
+
+    await vi.advanceTimersByTimeAsync(16)
+
+    expect(canvas.context.operations).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'fillRect', x: 0, y: 13, width: 32, height: 13, fillStyle: '#facc15' }),
+      expect.objectContaining({ type: 'fillText', text: 'W', x: 0, y: 23, fillStyle: '#111827' })
+    ]))
+  })
+
   it('clears transparent background rows before painting new Codex TUI text', async () => {
     send(attachGroupMessage(canvas))
     const message = attachMessage()

@@ -5,6 +5,7 @@ import type {
   ThreadedTerminalCreateOptions,
   ThreadedTerminalExportedState,
   ThreadedTerminalFullReason,
+  ThreadedTerminalHighlightRun,
   ThreadedTerminalKeywordHighlightConfig,
   ThreadedTerminalModeState,
   ThreadedTerminalMouseAction,
@@ -55,6 +56,19 @@ type HeadlessTerminalWithCoreMouse = HeadlessTerminalLike & {
   }
 }
 
+type CoreSearchMatch = {
+  row: number
+  column: number
+  length: number
+}
+
+type CoreSearchState = {
+  query: string
+  caseSensitive: boolean
+  matches: CoreSearchMatch[]
+  activeIndex: number
+}
+
 type CoreTerminalRecord = {
   terminal: HeadlessTerminalLike
   terminalId: string
@@ -67,6 +81,7 @@ type CoreTerminalRecord = {
   theme: ThreadedTerminalTheme
   keywordHighlight?: ThreadedTerminalKeywordHighlightConfig
   keywordHighlightRules: ReturnType<typeof compileThreadedKeywordHighlightRules>
+  search: CoreSearchState
   seq: number
   pendingChunks: string[]
   pendingBytes: number
@@ -174,6 +189,13 @@ const newPerfSample = (record: Pick<CoreTerminalRecord, 'terminalId' | 'priority
   pendingChunks: 0,
   maxPendingBytes: 0,
   droppedPaints: 0
+})
+
+const newSearchState = (): CoreSearchState => ({
+  query: '',
+  caseSensitive: false,
+  matches: [],
+  activeIndex: -1
 })
 
 const ansiPaletteForTheme = (theme: ThreadedTerminalTheme) => [
@@ -405,21 +427,190 @@ const sliceRunsByCharRange = (runs: ThreadedTerminalCellRun[], start: number, le
   return { chars, widths }
 }
 
+const mapHighlightRunToColumns = (run: ThreadedTerminalHighlightRun, plainRuns: ThreadedTerminalCellRun[]) => {
+  const startChar = Math.max(0, run.x)
+  const highlightChars = Array.from(run.text || '')
+  const mapped = sliceRunsByCharRange(plainRuns, startChar, highlightChars.length)
+  const x = textColumnsBeforeCharIndex(plainRuns, startChar)
+  const columns = mapped.widths.reduce((total, width) => total + width, 0)
+  return {
+    ...run,
+    x,
+    chars: mapped.chars.length ? mapped.chars : highlightChars,
+    widths: mapped.widths.length ? mapped.widths : highlightChars.map(() => 1),
+    columns: columns || highlightChars.length || 1
+  }
+}
+
 const extractKeywordHighlightRuns = (record: CoreTerminalRecord, text: string, plainRuns: ThreadedTerminalCellRun[]) =>
-  findThreadedKeywordHighlightRuns(text, record.keywordHighlightRules).map((run) => {
-    const startChar = Math.max(0, run.x)
-    const highlightChars = Array.from(run.text || '')
-    const mapped = sliceRunsByCharRange(plainRuns, startChar, highlightChars.length)
-    const x = textColumnsBeforeCharIndex(plainRuns, startChar)
-    const columns = mapped.widths.reduce((total, width) => total + width, 0)
-    return {
-      ...run,
-      x,
-      chars: mapped.chars.length ? mapped.chars : highlightChars,
-      widths: mapped.widths.length ? mapped.widths : highlightChars.map(() => 1),
-      columns: columns || highlightChars.length || 1
+  findThreadedKeywordHighlightRuns(text, record.keywordHighlightRules).map((run) => mapHighlightRunToColumns(run, plainRuns))
+
+const normalizeSearchText = (value: string, caseSensitive: boolean) =>
+  caseSensitive ? value : value.toLocaleLowerCase()
+
+const findLineSearchMatches = (text: string, query: string, caseSensitive: boolean) => {
+  const source = Array.from(normalizeSearchText(text, caseSensitive))
+  const needle = Array.from(normalizeSearchText(query, caseSensitive))
+  if (!needle.length || source.length < needle.length) return []
+  const matches: Array<{ column: number; length: number }> = []
+  const step = Math.max(1, needle.length)
+  for (let index = 0; index <= source.length - needle.length;) {
+    let matched = true
+    for (let offset = 0; offset < needle.length; offset += 1) {
+      if (source[index + offset] !== needle[offset]) {
+        matched = false
+        break
+      }
     }
+    if (matched) {
+      matches.push({ column: index, length: needle.length })
+      index += step
+    } else {
+      index += 1
+    }
+  }
+  return matches
+}
+
+const computeSearchMatches = (record: CoreTerminalRecord, query: string, caseSensitive: boolean) => {
+  const term = query.trim()
+  if (!term) return []
+  const buffer = record.terminal.buffer.active
+  const matches: CoreSearchMatch[] = []
+  for (let row = 0; row < buffer.length; row += 1) {
+    const line = buffer.getLine(row)
+    if (!line) continue
+    const text = line.translateToString(false, 0, record.terminal.cols) || ''
+    for (const match of findLineSearchMatches(text, term, caseSensitive)) {
+      matches.push({ row, column: match.column, length: match.length })
+    }
+  }
+  return matches
+}
+
+const firstSearchMatchAtOrAfter = (matches: CoreSearchMatch[], row: number, column: number) =>
+  matches.findIndex((match) => match.row > row || (match.row === row && match.column >= column))
+
+const lastSearchMatchAtOrBefore = (matches: CoreSearchMatch[], row: number, column: number) => {
+  for (let index = matches.length - 1; index >= 0; index -= 1) {
+    const match = matches[index]
+    if (match.row < row || (match.row === row && match.column <= column)) return index
+  }
+  return -1
+}
+
+const sameSearchMatch = (left: CoreSearchMatch | undefined, right: CoreSearchMatch) =>
+  Boolean(left && left.row === right.row && left.column === right.column && left.length === right.length)
+
+const preserveSearchActiveIndex = (previous: CoreSearchState, matches: CoreSearchMatch[]) => {
+  const active = previous.matches[previous.activeIndex]
+  const same = matches.findIndex((match) => sameSearchMatch(active, match))
+  if (same >= 0) return same
+  return matches.length ? 0 : -1
+}
+
+const chooseSearchActiveIndex = (
+  record: CoreTerminalRecord,
+  previous: CoreSearchState,
+  matches: CoreSearchMatch[],
+  direction: 'next' | 'previous',
+  incremental: boolean
+) => {
+  if (!matches.length) return -1
+  const sameQuery =
+    previous.query === record.search.query &&
+    previous.caseSensitive === record.search.caseSensitive &&
+    previous.matches.length > 0 &&
+    previous.activeIndex >= 0
+  if (sameQuery && !incremental) {
+    const current = Math.max(0, Math.min(matches.length - 1, previous.activeIndex))
+    return direction === 'previous'
+      ? (current <= 0 ? matches.length - 1 : current - 1)
+      : (current >= matches.length - 1 ? 0 : current + 1)
+  }
+  const buffer = record.terminal.buffer.active
+  if (direction === 'previous') {
+    const beforeVisibleEnd = lastSearchMatchAtOrBefore(matches, buffer.viewportY + record.terminal.rows - 1, record.terminal.cols)
+    return beforeVisibleEnd >= 0 ? beforeVisibleEnd : matches.length - 1
+  }
+  const afterVisibleStart = firstSearchMatchAtOrAfter(matches, buffer.viewportY, 0)
+  return afterVisibleStart >= 0 ? afterVisibleStart : 0
+}
+
+const refreshSearchMatches = (record: CoreTerminalRecord) => {
+  if (!record.search.query) return
+  const previous = record.search
+  const matches = computeSearchMatches(record, previous.query, previous.caseSensitive)
+  record.search = {
+    ...previous,
+    matches,
+    activeIndex: preserveSearchActiveIndex(previous, matches)
+  }
+}
+
+const scrollToSearchMatch = (record: CoreTerminalRecord, match: CoreSearchMatch) => {
+  const buffer = record.terminal.buffer.active
+  const maxTop = Math.max(0, buffer.length - record.terminal.rows)
+  const targetTop = Math.max(0, Math.min(maxTop, match.row - Math.floor(record.terminal.rows / 2)))
+  const beforeViewportY = buffer.viewportY
+  record.terminal.scrollToLine(targetTop)
+  record.followOutput = isAtScrollBottom(record)
+  return record.terminal.buffer.active.viewportY !== beforeViewportY
+}
+
+const applySearch = (
+  record: CoreTerminalRecord,
+  query: string,
+  direction: 'next' | 'previous',
+  options: { caseSensitive?: boolean; incremental?: boolean } = {}
+) => {
+  const term = query.trim()
+  if (!term) {
+    clearSearch(record)
+    return
+  }
+  const previous = record.search
+  const caseSensitive = Boolean(options.caseSensitive)
+  const matches = computeSearchMatches(record, term, caseSensitive)
+  record.search = {
+    query: term,
+    caseSensitive,
+    matches,
+    activeIndex: -1
+  }
+  record.search.activeIndex = chooseSearchActiveIndex(record, previous, matches, direction, Boolean(options.incremental))
+  const match = record.search.matches[record.search.activeIndex]
+  if (match) {
+    scrollToSearchMatch(record, match)
+  }
+  scheduleSnapshot(record, true, 'search')
+}
+
+function clearSearch(record: CoreTerminalRecord) {
+  const hadSearch = Boolean(record.search.query || record.search.matches.length)
+  record.search = newSearchState()
+  if (hadSearch) scheduleSnapshot(record, true, 'search')
+}
+
+const extractSearchHighlightRuns = (record: CoreTerminalRecord, lineIndex: number, text: string, plainRuns: ThreadedTerminalCellRun[]) => {
+  if (!record.search.query || !record.search.matches.length) return []
+  const textChars = Array.from(text)
+  const activeBg = record.theme.brightYellow || record.theme.yellow || '#facc15'
+  const inactiveBg = record.theme.yellow || '#7a6218'
+  return record.search.matches.flatMap((match, index) => {
+    if (match.row !== lineIndex) return []
+    const runText = textChars.slice(match.column, match.column + match.length).join('')
+    if (!runText) return []
+    const active = index === record.search.activeIndex
+    return mapHighlightRunToColumns({
+      x: match.column,
+      text: runText,
+      fg: active ? '#111827' : '#ffffff',
+      bg: active ? activeBg : inactiveBg,
+      bold: active || undefined
+    }, plainRuns)
   })
+}
 
 const extractPlainLineRuns = (record: CoreTerminalRecord, lineIndex: number) => {
   const line = record.terminal.buffer.active.getLine(lineIndex)
@@ -493,6 +684,7 @@ const modeState = (record: CoreTerminalRecord): ThreadedTerminalModeState => ({
 
 const buildSnapshot = (record: CoreTerminalRecord, forceFull = false, fullReason?: ThreadedTerminalFullReason): ThreadedTerminalScreenSnapshot => {
   const startedAt = nowMs()
+  refreshSearchMatches(record)
   const buffer = record.terminal.buffer.active
   const visibleIndexes = visibleLineIndexes(record)
   const visibleSignatures = visibleIndexes.map((lineIndex) => lineSignature(record, lineIndex))
@@ -515,12 +707,14 @@ const buildSnapshot = (record: CoreTerminalRecord, forceFull = false, fullReason
     const line = buffer.getLine(lineIndex)
     const text = line?.translateToString(false, 0, record.terminal.cols) || ''
     const runs = extractPlainLineRuns(record, lineIndex)
+    const keywordHighlights = extractKeywordHighlightRuns(record, text, runs)
+    const searchHighlights = extractSearchHighlightRuns(record, lineIndex, text, runs)
     return {
       y: row,
       text,
       runs,
       cells: extractLineRuns(record, lineIndex),
-      highlights: extractKeywordHighlightRuns(record, text, runs),
+      highlights: [...keywordHighlights, ...searchHighlights],
       wrapped: Boolean(line?.isWrapped)
     }
   })
@@ -675,6 +869,7 @@ const createRecord = (options: ThreadedTerminalCreateOptions): CoreTerminalRecor
     theme: options.theme,
     keywordHighlight: options.keywordHighlight,
     keywordHighlightRules: compileThreadedKeywordHighlightRules(options.keywordHighlight),
+    search: newSearchState(),
     seq: 0,
     pendingChunks: [],
     pendingBytes: 0,
@@ -1024,6 +1219,7 @@ const handleMessage = (message: ThreadedTerminalCoreRequest) => {
     if (message.type === 'clear') {
       record.pendingChunks = []
       record.pendingBytes = 0
+      record.search = newSearchState()
       record.terminal.clear()
       record.pendingFullSnapshot = true
       record.pendingFullSnapshotReason = 'clear'
@@ -1052,6 +1248,17 @@ const handleMessage = (message: ThreadedTerminalCoreRequest) => {
       record.terminal.scrollToLine(line)
       record.followOutput = isAtScrollBottom(record)
       if (record.terminal.buffer.active.viewportY !== beforeViewportY) scheduleSnapshot(record, true, 'jump')
+      return
+    }
+    if (message.type === 'search') {
+      applySearch(record, message.query, message.direction, {
+        caseSensitive: message.caseSensitive,
+        incremental: message.incremental
+      })
+      return
+    }
+    if (message.type === 'search-clear') {
+      clearSearch(record)
       return
     }
     if (message.type === 'read-screen') {

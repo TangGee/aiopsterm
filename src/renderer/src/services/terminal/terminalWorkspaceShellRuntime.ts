@@ -1,4 +1,4 @@
-import { computed, nextTick, reactive, ref, type Ref } from 'vue'
+import { computed, nextTick, reactive, ref, type Ref, type ComputedRef } from 'vue'
 import { copyTextToClipboard, readTextFromClipboard, type ClipboardTextReadResult } from '@/services/app/clipboardRuntime'
 import { windowControlsClient } from '@/services/app/windowControlsClient'
 import type { TerminalPanel, useWorkspaceStore } from '@/stores/workspace'
@@ -22,6 +22,7 @@ type TerminalWorkspaceShellRuntimeInput = {
   workspace: WorkspaceStore
   state: TerminalWorkspaceShellState
   terminalViews: Map<string, TerminalView>
+  terminalWorkspaceVisible?: Ref<boolean> | ComputedRef<boolean>
   searchOverlayPanelId: Ref<string>
   commandDialog: TerminalCommandDialogState
   closeCommandDialog: () => void
@@ -84,6 +85,7 @@ export const createTerminalWorkspaceShellRuntime = (
     workspace,
     state,
     terminalViews,
+    terminalWorkspaceVisible,
     searchOverlayPanelId,
     commandDialog,
     closeCommandDialog,
@@ -128,8 +130,16 @@ export const createTerminalWorkspaceShellRuntime = (
   const panelById = (panelId: string) => workspace.panels.find((panel) => panel.id === panelId)
   const terminalPanels = () => workspace.panels.filter((panel) => panel.kind !== 'knowledge')
   const keyboardEventTargetElement = (event: KeyboardEvent) => (event.target instanceof Element ? event.target : null)
-  const isTerminalKeyboardTarget = (event: KeyboardEvent) =>
-    Boolean(keyboardEventTargetElement(event)?.closest('.xterm-host, .threaded-terminal-host'))
+  const isEditableKeyboardTarget = (event: KeyboardEvent) => {
+    const target = keyboardEventTargetElement(event)
+    return Boolean(target?.closest('input, textarea, select, [contenteditable=""], [contenteditable="true"], [contenteditable="plaintext-only"]'))
+  }
+  const isTerminalKeyboardTarget = (event: KeyboardEvent) => {
+    const target = keyboardEventTargetElement(event)
+    if (target?.closest('.xterm-host, .threaded-terminal-host')) return true
+    if (terminalWorkspaceVisible && !terminalWorkspaceVisible.value) return false
+    return !isEditableKeyboardTarget(event)
+  }
   const compactShortcut = (shortcut: string) => shortcut.replace(/\s+/g, '').toLowerCase()
   const terminalDefaultShortcutOverridden = (actionId: string, defaultShortcut: string) => {
     const shortcut = workspace.settingsShortcuts.find((item) => item.id === actionId)?.shortcut

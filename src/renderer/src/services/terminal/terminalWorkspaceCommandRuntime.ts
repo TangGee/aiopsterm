@@ -167,6 +167,22 @@ export const createTerminalWorkspaceCommandRuntime = ({
     }
   }
 
+  const refocusSearchOverlayInput = (options: { select?: boolean } = {}) => {
+    const focus = () => {
+      const input = getSearchOverlayInput()
+      if (input && typeof input.focus === 'function') {
+        input.focus({ preventScroll: true })
+        if (options.select) input.select?.()
+      }
+    }
+    focus()
+    if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+      window.requestAnimationFrame(focus)
+    } else {
+      setTimeout(focus, 0)
+    }
+  }
+
   const findNext = () => {
     if (!search.value.trim() || searchMatchCount.value === 0) return
     const found = activeView()?.search.findNext(search.value, { caseSensitive: false })
@@ -440,20 +456,13 @@ export const createTerminalWorkspaceCommandRuntime = ({
     }
   }
 
-  const focusSearchOverlayInput = () => {
-    const input = getSearchOverlayInput()
-    if (input && typeof input.focus === 'function') {
-      input.focus()
-    }
-  }
-
   const openSearchOverlay = async (panelId = workspace.activePanelId) => {
     workspace.activePanelId = panelId
     searchOverlayPanelId.value = panelId
     termMenu.visible = false
     aiButtonPanelId.value = ''
     await nextTick()
-    focusSearchOverlayInput()
+    refocusSearchOverlayInput({ select: true })
     recalculateSearchMatches()
   }
 
@@ -469,7 +478,7 @@ export const createTerminalWorkspaceCommandRuntime = ({
     searchMatchCount.value = 0
     searchMatchIndex.value = 0
     if (options.refocus !== false && searchOverlayPanelId.value) {
-      nextTick(focusSearchOverlayInput)
+      nextTick(() => refocusSearchOverlayInput({ select: true }))
     }
   }
 

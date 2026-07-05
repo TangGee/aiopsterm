@@ -268,7 +268,7 @@ const createWorkspace = (panel: TerminalPanel) =>
 const createRuntime = (
   panel = createEmptyTerminalPanel('panel-1', 'Local'),
   visiblePanels?: { value: TerminalPanel[] },
-  options: { threaded?: boolean; terminalWorkspaceVisible?: { value: boolean } } = {}
+  options: { threaded?: boolean; terminalWorkspaceVisible?: { value: boolean }; suppressTerminalFocus?: { value: boolean } } = {}
 ) => {
   const workspace = createWorkspace(panel)
   const input: Parameters<typeof createTerminalWorkspaceViewRuntime>[0] = {
@@ -281,7 +281,8 @@ const createRuntime = (
     suggestionPosition: { left: 0, top: 0 },
     suggestionItems: ref([]),
     aiSuggestLoading: ref(false),
-    writeXtermInput: vi.fn()
+    writeXtermInput: vi.fn(),
+    shouldSuppressTerminalFocus: (panelId) => panelId === panel.id && Boolean(options.suppressTerminalFocus?.value)
   }
   if (!options.threaded) {
     input.terminalConstructor = FakeTerminal as any
@@ -316,6 +317,29 @@ describe('terminalWorkspaceViewRuntime', () => {
     const view = runtime.terminalViews.get(panel.id)
     if (!view) throw new Error('terminal view was not created')
     const terminal = view.terminal as unknown as FakeTerminal
+    expect(terminal.focus).toHaveBeenCalled()
+  })
+
+  it('does not let queued terminal focus steal focus while an overlay suppresses focus', async () => {
+    const panel = createEmptyTerminalPanel('panel-1', 'Local')
+    const suppressTerminalFocus = ref(false)
+    const { runtime } = createRuntime(panel, undefined, { suppressTerminalFocus })
+
+    runtime.focusPanel(panel.id)
+    suppressTerminalFocus.value = true
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    runtime.setTerminalElement(panel.id, host)
+    await flushFrames(3)
+
+    const view = runtime.terminalViews.get(panel.id)
+    if (!view) throw new Error('terminal view was not created')
+    const terminal = view.terminal as unknown as FakeTerminal
+    expect(terminal.focus).not.toHaveBeenCalled()
+
+    suppressTerminalFocus.value = false
+    runtime.focusPanel(panel.id)
+    await flushFrames(2)
     expect(terminal.focus).toHaveBeenCalled()
   })
 

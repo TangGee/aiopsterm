@@ -6,7 +6,7 @@ export type ThreadedTerminalPriority = 'active' | 'visible' | 'background'
 
 export type ThreadedTerminalSurface = 'workspace' | 'codex'
 
-export type ThreadedTerminalFullReason = 'create' | 'import' | 'settings' | 'resize' | 'visibility' | 'clear' | 'jump' | 'unknown'
+export type ThreadedTerminalFullReason = 'create' | 'import' | 'settings' | 'resize' | 'visibility' | 'clear' | 'jump' | 'search' | 'unknown'
 
 export type ThreadedTerminalSettings = Pick<
   TerminalSettings,
@@ -86,6 +86,7 @@ export type ThreadedTerminalHighlightRun = {
   widths?: number[]
   columns?: number
   fg?: string
+  bg?: string
   bold?: boolean
 }
 
@@ -243,6 +244,8 @@ export type ThreadedTerminalCoreRequest =
   | { type: 'scroll-to-bottom'; terminalId: string }
   | { type: 'scroll-lines'; terminalId: string; amount: number }
   | { type: 'scroll-to-line'; terminalId: string; line: number }
+  | { type: 'search'; terminalId: string; query: string; direction: 'next' | 'previous'; caseSensitive?: boolean; incremental?: boolean }
+  | { type: 'search-clear'; terminalId: string }
   | { type: 'read-screen'; terminalId: string; requestId: string; tailLines?: number }
   | { type: 'read-selection'; terminalId: string; requestId: string; range: ThreadedTerminalSelectionRange }
   | { type: 'mouse-event'; terminalId: string; event: ThreadedTerminalMouseEventPayload }

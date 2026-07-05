@@ -143,7 +143,7 @@
     >
       <button @click="copySelection(termMenu.panelId)"><span>{{ t('terminal.context.copy') }}</span><kbd>Ctrl+Shift+C</kbd></button>
       <button @click="pasteClipboard(termMenu.panelId)"><span>{{ t('terminal.context.paste') }}</span><kbd>Ctrl+Shift+V</kbd></button>
-      <button @click="openSearchOverlay(termMenu.panelId)"><span>搜索</span><kbd>Ctrl+Shift+F</kbd></button>
+      <button @click="openSearchOverlay(termMenu.panelId)"><span>搜索</span><kbd>Ctrl+Alt+F</kbd></button>
       <i />
       <button @click="togglePanelConnection(termMenu.panelId)">
         {{ connectionActionLabel(panelById(termMenu.panelId)) }}
@@ -286,6 +286,8 @@
         <div
           v-if="searchOverlayPanelId === panel.id"
           class="terminal-search-overlay"
+          @click.stop
+          @mousedown.stop
         >
           <div>
             <Search />
@@ -293,8 +295,8 @@
               ref="searchOverlayInput"
               v-model="search"
               placeholder="搜索终端输出"
-              @keydown.enter.prevent="findNext"
-              @keydown.esc.prevent="closeSearchOverlay"
+              @keydown.enter.prevent.stop="findNext"
+              @keydown.esc.prevent.stop="closeSearchOverlay"
             />
             <span v-if="search && searchMatchCount > 0">{{ searchMatchIndex }}/{{ searchMatchCount }}</span>
             <button

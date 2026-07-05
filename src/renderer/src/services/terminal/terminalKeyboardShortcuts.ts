@@ -63,11 +63,14 @@ export const terminalShortcutActionForEvent = (event: TerminalKeyboardEvent): Te
   if (isTerminalCopyShortcut(event)) return { type: 'copy' }
   if (isTerminalPasteShortcut(event)) return { type: 'paste' }
 
-  if (primary && event.shiftKey && !event.altKey) {
+  if (primary && event.altKey && !event.shiftKey) {
     if (key === 'f') return { type: 'search' }
     if (key === 'g') return { type: 'searchNext' }
     if (key === 'h') return { type: 'searchPrevious' }
     if (key === 'j') return { type: 'searchClear' }
+  }
+
+  if (primary && event.shiftKey && !event.altKey) {
     if (key === 'n') return { type: 'newWindow' }
     if (key === 'q') return { type: 'closeWindow' }
     if (key === 't') return { type: 'newTab' }
