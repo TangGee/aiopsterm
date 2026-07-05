@@ -1,6 +1,7 @@
-import { nextTick, onMounted, onUnmounted, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, watch } from 'vue'
 import { useTerminalControlSurface, type TerminalControlSurfaceView } from '@/composables/useTerminalControlSurface'
 import { useWorkspaceStore, type TerminalPanel } from '@/stores/workspace'
+import { isTerminalWorkspaceModule } from '@/config/navigation'
 import { copyTextToClipboard } from '@/services/app/clipboardRuntime'
 import { controlClient } from '@/services/app/controlClient'
 import { writeRendererRuntimeLog } from '@/services/app/runtimeLogClient'
@@ -139,6 +140,7 @@ export const useTerminalWorkspaceContainerRuntime = () => {
   const terminalDataSummaryIntervalMs = terminalDebugLogs ? terminalDataSummaryDebugIntervalMs : terminalDataSummaryFormalIntervalMs
   const terminalDataSummaryChunkThreshold = terminalDebugLogs ? terminalDataSummaryDebugChunkThreshold : terminalDataSummaryFormalChunkThreshold
   const terminalDataSummaryByteThreshold = terminalDebugLogs ? terminalDataSummaryDebugByteThreshold : terminalDataSummaryFormalByteThreshold
+  const terminalWorkspaceVisible = computed(() => workspace.mode === 'terminal' && isTerminalWorkspaceModule(workspace.activeModule))
 
   const logTerminalDataSummary = (sessionId: string, summary: TerminalDataPerfSummary, reason: string) => {
     if (!terminalDebugLogs) return
@@ -484,6 +486,7 @@ export const useTerminalWorkspaceContainerRuntime = () => {
     terminalFontSizeForPanel,
     terminalOutputMirrorText,
     syncThreadedKeywordHighlight,
+    syncThreadedTerminalPriorities,
     updateFontSize,
     writeLiveTerminalData,
     updateSelectionButtonPosition,
@@ -491,6 +494,7 @@ export const useTerminalWorkspaceContainerRuntime = () => {
   } = createTerminalWorkspaceViewRuntime({
     workspace,
     visibleTerminalPanels,
+    terminalWorkspaceVisible,
     aiButtonPanelId,
     aiButtonPosition,
     suggestionPanel,
@@ -823,6 +827,19 @@ export const useTerminalWorkspaceContainerRuntime = () => {
       hideCommandDialogForActivePanel(panelId)
       nextTick(() => visibleTerminalPanels.value.filter((panel) => panel.kind !== 'knowledge').forEach((panel) => syncTerminalView(panel)))
     }
+  )
+
+  watch(
+    terminalWorkspaceVisible,
+    (visible) => {
+      syncThreadedTerminalPriorities()
+      if (!visible) return
+      nextTick(() => {
+        void syncPanelViews()
+        scheduleVisibleTerminalFit({ frames: 4, forceGeometry: true })
+      })
+    },
+    { flush: 'post' }
   )
 
   return {

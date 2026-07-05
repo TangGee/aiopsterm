@@ -65,8 +65,8 @@
         <KubernetesWorkspace v-else-if="workspace.activeModule === 'kubernetes'" />
         <SettingsWorkspace v-else-if="workspace.activeModule === 'settings'" />
         <UserPanel v-else-if="workspace.activeModule === 'user'" />
-        <TerminalWorkspace v-else-if="workspace.activeModule !== 'database'" />
-        <DatabaseWorkspace v-else />
+        <DatabaseWorkspace v-else-if="workspace.activeModule === 'database'" />
+        <TerminalWorkspace v-show="showTerminalWorkspace" />
         <div
           v-if="showTerminalRightPane"
           class="layout-pane layout-pane-right ai-panel-pane"
@@ -204,6 +204,7 @@ const {
   showTerminalLeftPane,
   showTerminalPasswordRemember,
   showTerminalRightPane,
+  showTerminalWorkspace,
   startResize,
   submitTerminalMfa,
   terminalAuthDescription,

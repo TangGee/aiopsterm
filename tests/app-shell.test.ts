@@ -936,6 +936,38 @@ describe('AppShell', () => {
     expect(wrapper.text()).not.toContain('Managed Local Agents')
   })
 
+  it('keeps the terminal workspace mounted while full-page modules are visible', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const wrapper = mount(AppShell, {
+      attachTo: document.body,
+      global: {
+        plugins: [pinia],
+        stubs: {
+          teleport: true
+        }
+      }
+    })
+    const store = useWorkspaceStore()
+    await flushPromises()
+
+    expect(wrapper.find('.terminal-workspace').exists()).toBe(true)
+    expect(wrapper.find('.terminal-workspace').isVisible()).toBe(true)
+
+    store.setActiveModule('settings')
+    await flushPromises()
+
+    expect(wrapper.find('.settings-workspace').exists()).toBe(true)
+    expect(wrapper.find('.terminal-workspace').exists()).toBe(true)
+    expect(wrapper.find('.terminal-workspace').isVisible()).toBe(false)
+
+    store.setActiveModule('workspace')
+    await flushPromises()
+
+    expect(wrapper.find('.terminal-workspace').isVisible()).toBe(true)
+    wrapper.unmount()
+  })
+
   it('refreshes managed AI sessions when backend managed events arrive', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)

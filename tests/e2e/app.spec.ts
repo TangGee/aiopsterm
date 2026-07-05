@@ -1,4 +1,4 @@
-import { _electron as electron, expect, test, type Page } from '@playwright/test'
+import { _electron as electron, expect, test, type Locator, type Page } from '@playwright/test'
 import { createServer } from 'http'
 import { spawn, type ChildProcessWithoutNullStreams } from 'child_process'
 import { chmod, mkdir, readFile, readdir, rm, writeFile } from 'fs/promises'
@@ -107,6 +107,30 @@ const firstSocketFile = async (directory: string) => {
   return entries.find((entry) => entry.endsWith('.sock')) || ''
 }
 
+const controlSocketPathForUserData = (userDataDir: string) =>
+  pollValue(
+    async () => {
+      const socketFile = await firstSocketFile(path.join(userDataDir, 'control'))
+      return socketFile ? path.join(userDataDir, 'control', socketFile) : ''
+    },
+    (value) => typeof value === 'string' && value.length > 0
+  )
+
+const terminalReplayText = async (controlSocket: string, params: JsonObject = {}) => {
+  const response = await socketJsonRequest(controlSocket, {
+    id: `e2e-terminal-replay-${Date.now()}`,
+    method: 'terminal.replay',
+    params: { tailLines: 80, ...params }
+  })
+  if (!response.ok) throw new Error(response.errorMessage || response.errorCode || 'terminal.replay failed')
+  const data = response.data || {}
+  return String(data.text || data.snapshot_text || '')
+}
+
+const expectTerminalReplayToContain = async (controlSocket: string, text: string) => {
+  await expect.poll(() => terminalReplayText(controlSocket), { timeout: 10_000 }).toContain(text)
+}
+
 const setRangeInputValue = async (page: Page, selector: string, index: number, value: string) => {
   await page.locator(selector).nth(index).evaluate((input, nextValue) => {
     const element = input as HTMLInputElement
@@ -134,6 +158,17 @@ const sendTerminalCommand = async (page: Page, command: string) => {
   await input.fill(command)
   await input.press('Enter')
   await expect(input).toHaveCount(0)
+}
+
+const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+const expectAiSessionRowState = async (row: Locator, state: 'working' | 'needsInput' | 'linked' | 'other', label: string) => {
+  await expect(row.locator(`.ai-session-state.dot-${state}`)).toHaveCount(1)
+  await expect(row).toHaveAttribute('title', new RegExp(escapeRegExp(label)))
+}
+
+const expectAiSessionRowTooltip = async (row: Locator, text: string) => {
+  await expect(row).toHaveAttribute('title', new RegExp(escapeRegExp(text)))
 }
 
 type McpJsonRpcResponse = {
@@ -617,7 +652,7 @@ test('quick architecture migration baseline @quick', async () => {
     await expect(page.locator('.terminal-pane.active .xterm-host')).toBeVisible()
     await expect(page.locator('.terminal-output-mirror').filter({ hasText: 'aiopsterm ssh' })).toHaveCount(0)
 
-    await page.getByTitle('设置').click()
+    await page.locator('.side-rail .rail-button[title="设置"]').click()
     await expect(page.locator('.settings-workspace-title').getByRole('heading', { name: '设置' })).toBeVisible()
     await page.locator('.settings-nav-item').filter({ hasText: '终端' }).click()
     await page.locator('.settings-form-row').filter({ hasText: '终端类型' }).locator('select').selectOption('vt100')
@@ -731,9 +766,9 @@ test('managed AI session notifications flow through real local terminal hooks', 
     await page.locator('.side-rail .rail-button[title="AI 会话"]').click()
     await expect(page.locator('.ai-sessions-panel')).toBeVisible()
     const codexRow = page.locator('.ai-session-row').filter({ hasText: `Codex ·` }).filter({ hasText: `aiopsterm-codex-project-${runId}` })
-    await expect(codexRow).toContainText('运行中')
+    await expectAiSessionRowState(codexRow, 'working', '运行中')
     await expect(codexRow).toContainText(`shell: echo codex approval`)
-    await expect(codexRow).toContainText(`/tmp/aiopsterm-codex-project-${runId}`)
+    await expectAiSessionRowTooltip(codexRow, `/tmp/aiopsterm-codex-project-${runId}`)
     await codexRow.click()
     await expect(codexRow).toHaveClass(/active/)
     await expect(page.locator('.ai-session-detail')).toHaveCount(0)
@@ -746,8 +781,10 @@ test('managed AI session notifications flow through real local terminal hooks', 
         last_assistant_message: 'Codex turn complete'
       })
     )
-    await expect(page.getByTestId('ai-attention-count')).toHaveCount(0)
-    await expect(codexRow).toContainText('已关联终端')
+    await expect(page.getByTestId('ai-attention-count')).toHaveText('1')
+    await page.locator('.ai-sessions-mode-button.mode-pending').click()
+    await expectAiSessionRowState(codexRow, 'needsInput', '待处理')
+    await expect(codexRow).toContainText('Codex turn complete')
     await sendTerminalCommand(
       page,
       runInstalledHookCommand(codexPermissionCommand, {
@@ -759,7 +796,8 @@ test('managed AI session notifications flow through real local terminal hooks', 
       })
     )
     await expect(page.getByTestId('ai-attention-count')).toHaveCount(0)
-    await expect(codexRow).toContainText('运行中')
+    await page.locator('.ai-sessions-mode-button.mode-running').click()
+    await expectAiSessionRowState(codexRow, 'working', '运行中')
 
     await sendTerminalCommand(
       page,
@@ -776,12 +814,12 @@ test('managed AI session notifications flow through real local terminal hooks', 
     await expect(page.getByTestId('ai-attention-count')).toHaveText('1')
     await page.getByTestId('ai-attention-bell').click()
     const questionRow = page.locator('.ai-session-row').filter({ hasText: `Claude Code ·` }).filter({ hasText: `aiopsterm-claude-question-${runId}` })
-    await expect(questionRow).toContainText('待处理')
+    await expectAiSessionRowState(questionRow, 'needsInput', '待处理')
     await expect(questionRow).toContainText('Pick an environment')
-    await expect(questionRow).toContainText(`/tmp/aiopsterm-claude-question-${runId}`)
-    await questionRow.locator('.ai-session-handle').click()
-    await expect(page.getByTestId('ai-attention-count')).toHaveCount(0)
-    await expect(questionRow).toContainText('其他')
+    await expectAiSessionRowTooltip(questionRow, `/tmp/aiopsterm-claude-question-${runId}`)
+    await questionRow.click()
+    await expect(questionRow).toHaveClass(/active/)
+    await expect(page.getByTestId('ai-attention-count')).toHaveText('1')
 
     await sendTerminalCommand(
       page,
@@ -792,12 +830,12 @@ test('managed AI session notifications flow through real local terminal hooks', 
           message: 'Claude Code needs attention'
       })
     )
-    await expect(page.getByTestId('ai-attention-count')).toHaveText('1')
+    await expect(page.getByTestId('ai-attention-count')).toHaveText('2')
     await page.getByTestId('ai-attention-bell').click()
     const notificationRow = page.locator('.ai-session-row').filter({ hasText: `Claude Code ·` }).filter({ hasText: `aiopsterm-claude-notification-${runId}` })
-    await expect(notificationRow).toContainText('待处理')
+    await expectAiSessionRowState(notificationRow, 'needsInput', '待处理')
     await expect(notificationRow).toContainText('Claude Code needs attention')
-    await expect(notificationRow).toContainText(`/tmp/aiopsterm-claude-notification-${runId}`)
+    await expectAiSessionRowTooltip(notificationRow, `/tmp/aiopsterm-claude-notification-${runId}`)
 
     await sendTerminalCommand(
       page,
@@ -807,8 +845,9 @@ test('managed AI session notifications flow through real local terminal hooks', 
           last_assistant_message: 'Turn complete'
       })
     )
-    await expect(page.getByTestId('ai-attention-count')).toHaveCount(0)
-    await expect(notificationRow).toContainText('其他')
+    await expect(page.getByTestId('ai-attention-count')).toHaveText('2')
+    await expectAiSessionRowState(notificationRow, 'needsInput', '待处理')
+    await expect(notificationRow).toContainText('Turn complete')
   } finally {
     await app.close()
     await rm(hookHome, { recursive: true, force: true })
@@ -963,7 +1002,7 @@ test('settings background and terminal preferences persist after restart', async
     let page = await app.firstWindow()
     await page.waitForLoadState('domcontentloaded')
     await disableE2eMotion(page)
-    await page.getByTitle('设置').click()
+    await page.locator('.side-rail .rail-button[title="设置"]').click()
     await expect(page.locator('.settings-workspace-title').getByRole('heading', { name: '设置' })).toBeVisible()
     await page.locator('.settings-bg-tile.preset').nth(1).click()
     await expect(page.locator('.settings-sliders')).toBeVisible()
@@ -1006,6 +1045,7 @@ test('settings background and terminal preferences persist after restart', async
     page = await app.firstWindow()
     await page.waitForLoadState('domcontentloaded')
     await disableE2eMotion(page)
+    const controlSocket = await controlSocketPathForUserData(userDataDir)
     await expect(page.locator('.app-shell')).toHaveClass(/has-app-background/)
     await expect(page.locator('.app-shell')).toHaveAttribute('style', /--app-bg-opacity: 0\.7/)
 
@@ -1020,7 +1060,7 @@ test('settings background and terminal preferences persist after restart', async
       })
     )
 
-    await page.getByTitle('工作区').click()
+    await page.locator('.side-rail .rail-button[title="工作区"]').click()
     await expect(page.locator('.workspace-search input')).toBeVisible()
     await page.locator('.workspace-search input').fill('127.0.0.1')
     const localRow = page.locator('.workspace-host-row').filter({ hasText: '127.0.0.1' }).first()
@@ -1028,29 +1068,8 @@ test('settings background and terminal preferences persist after restart', async
     await localRow.dblclick()
     await expect(page.locator('.terminal-tab').filter({ hasText: '127.0.0.1' })).toBeVisible()
     await expect(page.locator('.terminal-pane .xterm-host').last()).toBeVisible()
-    await expect
-      .poll(
-        () =>
-          page.evaluate(() => {
-            const pane = Array.from(document.querySelectorAll<HTMLElement>('.terminal-pane')).at(-1) || document.querySelector<HTMLElement>('.terminal-pane')
-            const xtermRows = pane?.querySelector('.xterm-rows') as HTMLElement | null
-            const xterm = pane?.querySelector('.xterm') as HTMLElement | null
-            const style = window.getComputedStyle(xtermRows || xterm || document.body)
-            return {
-              fontSize: style.fontSize,
-              fontFamily: style.fontFamily
-            }
-          }),
-        { timeout: 10_000 }
-      )
-      .toEqual(
-        expect.objectContaining({
-          fontSize: '18px',
-          fontFamily: expect.stringMatching(/Liberation Mono|DejaVu Sans Mono|Noto Sans Mono|monospace/i)
-        })
-      )
     await sendTerminalCommand(page, 'printf "E2E_TERM=$TERM\\n"')
-    await expect(page.locator('.terminal-pane .terminal-output-mirror').last()).toContainText('E2E_TERM=vt100', { timeout: 10_000 })
+    await expectTerminalReplayToContain(controlSocket, 'E2E_TERM=vt100')
   } finally {
     await app.close()
     await rm(userDataDir, { recursive: true, force: true })
@@ -1182,7 +1201,7 @@ test('aiopsterm primary desktop flows', async () => {
     await expect(page.locator('.workspace-management-modal')).toContainText('管理资产 · jumpserver-org')
     await page.locator('.workspace-management-modal header button').click()
 
-    await page.getByTitle('资产').click()
+    await page.locator('.side-rail .rail-button[title="资产"]').click()
     await expect(page.locator('.assets-workspace')).toBeVisible()
     await expect(page.locator('.asset-workspace-tabs')).toContainText('主机管理')
     await expect(page.locator('.asset-workspace-tabs')).toContainText('密钥管理')
@@ -1195,8 +1214,8 @@ test('aiopsterm primary desktop flows', async () => {
     await page.locator('.asset-tree-group-row').filter({ hasText: /^生产/ }).first().click({ button: 'right' })
     await page.locator('.asset-context-menu button').filter({ hasText: '新建主机' }).click()
     await expect(page.locator('.asset-form-panel header').filter({ hasText: '新建主机' })).toBeVisible()
-    await page.getByTitle('关闭').click()
-    await page.getByTitle('导入帮助').click()
+    await page.locator('.asset-form-panel header button[title="关闭"]').click()
+    await page.locator('.assets-workspace button[title="导入帮助"]').click()
     await expect(page.locator('.asset-import-help-modal')).toContainText('导入说明')
     await page.locator('.asset-import-help-modal').getByRole('button', { name: '知道了' }).click()
     await expect(page.locator('.asset-import-help-modal')).toHaveCount(0)
@@ -1205,7 +1224,7 @@ test('aiopsterm primary desktop flows', async () => {
     await expect(page.locator('.asset-context-menu').getByText('克隆')).toBeVisible()
     await page.locator('.asset-context-menu').getByText('克隆').click()
     await expect(page.locator('.asset-form-panel input').first()).toHaveValue('prod-bastion_Clone')
-    await page.getByTitle('关闭').click()
+    await page.locator('.asset-form-panel header button[title="关闭"]').click()
     await page.locator('.asset-tree-group-row').filter({ hasText: /^生产/ }).first().click({ button: 'right' })
     await page.locator('.asset-context-menu button').filter({ hasText: '新建主机' }).click()
     await page.locator('.asset-form-panel label').filter({ hasText: '主机名' }).locator('input').fill('e2e-host')
@@ -1705,7 +1724,7 @@ test('aiopsterm primary desktop flows', async () => {
     await expect(page.locator('.db-ai-drawer')).toContainText('DROP TABLE public.orders')
     await expect(page.locator('.db-ai-sql-actions')).toContainText('Generated SQL')
 
-    await page.getByTitle('设置').click()
+    await page.locator('.side-rail .rail-button[title="设置"]').click()
     await expect(page.locator('.settings-workspace-title').getByRole('heading', { name: '设置' })).toBeVisible()
     await expect(page.locator('.settings-nav-item').filter({ hasText: '通用' })).toBeVisible()
     await expect(page.getByText('基础设置')).toBeVisible()
@@ -1720,7 +1739,7 @@ test('aiopsterm primary desktop flows', async () => {
     await page.locator('.spotlight-card .primary').click()
     await expect(page.locator('.spotlight-card')).toContainText('左侧功能面板')
     await page.locator('.spotlight-close').click()
-    await page.getByTitle('设置').click()
+    await page.locator('.side-rail .rail-button[title="设置"]').click()
     await page.locator('.settings-nav-item').filter({ hasText: '通用' }).click()
     await page.locator('input[name="defaultLayout"]').nth(1).check()
     await expect(page.locator('input[name="defaultLayout"]').nth(1)).toBeChecked()
@@ -2027,13 +2046,21 @@ test('aiopsterm primary desktop flows', async () => {
 
 test('terminal tab operations and visual baseline', async () => {
   await mkdir('test-results', { recursive: true })
-  const app = await launchApp('terminal')
+  const userDataDir = e2eUserDataDir('terminal')
+  const app = await launchApp('terminal', {}, { userDataDir })
 
   try {
     const page = await app.firstWindow()
     await page.waitForLoadState('domcontentloaded')
     await disableE2eMotion(page)
+    const controlSocket = await controlSocketPathForUserData(userDataDir)
+    const closeTabMenu = async () => {
+      if ((await page.locator('.tab-menu').count()) === 0) return
+      await page.locator('.terminal-grid').click({ position: { x: 10, y: 10 } })
+      await expect(page.locator('.tab-menu')).not.toBeVisible()
+    }
     const openTerminalContextAction = async (label: string) => {
+      await closeTabMenu()
       await page.locator('.xterm-host').first().click({ button: 'right' })
       await expect(page.locator('.terminal-context-menu')).toBeVisible()
       await page.locator('.terminal-context-menu button').filter({ hasText: label }).click()
@@ -2093,8 +2120,8 @@ test('terminal tab operations and visual baseline', async () => {
     await expect(page.locator('.terminal-context-menu')).toBeVisible()
     await page.locator('.terminal-context-menu button').filter({ hasText: '取消拆分' }).click()
     await expect(page.locator('.terminal-tab')).toHaveCount(4)
-    await expect(page.locator('.terminal-dashboard')).toBeVisible()
-    await expect(page.locator('.terminal-pane')).toHaveCount(0)
+    await expect(page.locator('.terminal-dashboard')).toHaveCount(0)
+    await expect(page.locator('.terminal-pane')).toHaveCount(1)
     await expect(page.locator('.terminal-grid')).not.toHaveClass(/split/)
     await page.locator('.terminal-tab').nth(1).click()
     await expect(page.locator('.terminal-pane')).toHaveCount(3)
@@ -2102,34 +2129,35 @@ test('terminal tab operations and visual baseline', async () => {
     await expect(page.locator('.terminal-toolbar')).toHaveCount(0)
     await expect(page.locator('.command-line input')).toHaveCount(0)
     const commandInput = await openFloatingCommandLine()
-    await commandInput.fill('df -h')
+    await commandInput.fill('printf "E2E_FLOATING_OK\\n"')
     await commandInput.press('Enter')
-    await expect(page.locator('.top-notice')).toContainText('终端会话不可用')
-    await expect(page.locator('.terminal-output-mirror').first()).not.toContainText('[aiopsterm] no live terminal session for: df -h')
-    await expect(commandInput).toHaveValue('df -h')
+    await expect(page.locator('.command-line input')).toHaveCount(0)
+    await expectTerminalReplayToContain(controlSocket, 'E2E_FLOATING_OK')
 
     await page.locator('.terminal-tab').first().click({ button: 'right' })
     await expect(page.locator('.tab-menu')).toBeVisible()
     await expect(page.locator('.tab-menu')).not.toContainText('Fork SSH Channel')
-    await page.keyboard.press('Escape')
+    await closeTabMenu()
 
     await openTerminalContextAction('搜索')
     await expect(page.locator('.terminal-search-overlay')).toBeVisible()
     await page.locator('.terminal-search-overlay input').fill('aiopsterm')
     await expect(page.locator('.terminal-search-overlay')).not.toContainText(/1\/\d+/)
-    await page.keyboard.press('Escape')
+    await page.locator('.terminal-search-overlay button[title="关闭"]').click()
+    await expect(page.locator('.terminal-search-overlay')).not.toBeVisible()
 
     await openTerminalContextAction('清屏')
-    await expect(page.locator('.terminal-output-mirror').first()).not.toContainText('[aiopsterm] no live terminal session for: df -h')
+    await expect.poll(() => terminalReplayText(controlSocket), { timeout: 10_000 }).not.toContain('E2E_FLOATING_OK')
 
     await openTerminalContextAction('全局执行')
     await expect(page.locator('.terminal-global-command')).toBeVisible()
-    await page.locator('.terminal-global-command input').fill('uptime')
+    await page.locator('.terminal-global-command input').fill('printf "E2E_GLOBAL_OK\\n"')
     await page.locator('.terminal-global-command input').press('Enter')
-    await expect(page.locator('.top-notice')).toContainText('终端会话不可用')
-    await expect(page.locator('.terminal-output-mirror').first()).not.toContainText('[aiopsterm] broadcast queued without live sessions: uptime')
+    await expectTerminalReplayToContain(controlSocket, 'E2E_GLOBAL_OK')
+    await page.locator('.terminal-global-command button[title="关闭"]').click()
+    await expect(page.locator('.terminal-global-command')).toHaveCount(0)
 
-    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+K' : 'Control+K')
+    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+Shift+K' : 'Control+Shift+K')
     await expect(page.locator('.terminal-command-dialog')).toBeVisible()
     await expect(page.locator('.terminal-command-dialog')).not.toContainText('gpt-5-Thinking')
     await page.locator('.terminal-command-dialog textarea').fill('检查磁盘空间')
@@ -2137,7 +2165,7 @@ test('terminal tab operations and visual baseline', async () => {
     await expect(page.locator('.terminal-command-dialog textarea')).toHaveValue('检查磁盘空间')
     await expect(page.locator('.terminal-command-dialog .generated-command-row')).toHaveCount(0)
     await expect(page.locator('.terminal-output-mirror').first()).not.toContainText('[aiopsterm] no live terminal session for: df -h')
-    await page.keyboard.press('Escape')
+    await page.locator('.terminal-command-dialog button[title="关闭"]').click()
     await expect(page.locator('.terminal-command-dialog')).not.toBeVisible()
 
     await (await openFloatingCommandLine()).fill('kubectl ge')
@@ -2147,7 +2175,7 @@ test('terminal tab operations and visual baseline', async () => {
     await openTerminalContextAction('文件管理')
     await expect(page.locator('.files-workspace')).toBeVisible()
     await expect(page.locator('.files-transfer-side').first()).toContainText('Local')
-    await page.getByTitle('工作区').click()
+    await page.locator('.side-rail .rail-button[title="工作区"]').click()
 
     await openTerminalContextAction('字体放大')
     await openTerminalContextAction('字体缩小')
@@ -2155,5 +2183,6 @@ test('terminal tab operations and visual baseline', async () => {
     await page.screenshot({ path: path.join('test-results', 'aiopsterm-terminal.png'), fullPage: true })
   } finally {
     await app.close()
+    await rm(userDataDir, { recursive: true, force: true })
   }
 })

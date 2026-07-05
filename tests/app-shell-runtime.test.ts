@@ -63,7 +63,7 @@ const createWindowHarness = () => {
   }
 }
 
-const createHarness = (overrides: Partial<AppShellRuntimeOptions> = {}) => {
+const createHarness = (overrides: Partial<AppShellRuntimeOptions> = {}, workspaceOverrides: Record<string, unknown> = {}) => {
   const locale = ref<SupportedLocale>('zh-CN')
   const win = createWindowHarness()
   const bodyClassList = {
@@ -118,7 +118,8 @@ const createHarness = (overrides: Partial<AppShellRuntimeOptions> = {}) => {
     }),
     quickCloseRightPanel: vi.fn(async () => {
       workspace.isRightVisible = false
-    })
+    }),
+    ...workspaceOverrides
   }
   const messages: Partial<Record<I18nKey, string>> = {
     'terminal.mfaTitle': 'MFA',
@@ -198,6 +199,7 @@ describe('appShellRuntime', () => {
 
     expect(runtime.showTerminalLeftPane.value).toBe(true)
     expect(runtime.showTerminalRightPane.value).toBe(true)
+    expect(runtime.showTerminalWorkspace.value).toBe(true)
     runtime.startResize('left', new MouseEvent('mousedown', { clientX: 286 }))
     expect(bodyClassList.add).toHaveBeenCalledWith('layout-resizing')
     win.emit('mousemove', new MouseEvent('mousemove', { clientX: 336 }))
@@ -213,6 +215,17 @@ describe('appShellRuntime', () => {
     expect(workspace.quickCloseRightPanel).toHaveBeenCalled()
     expect(workspace.resizeRightPanel).not.toHaveBeenCalled()
     expect(runtime.draggingSide.value).toBeNull()
+  })
+
+  it('keeps terminal workspace mounted only as the terminal main surface', () => {
+    ;(['workspace', 'aiSessions', 'snippets', 'knowledge'] as const).forEach((module) => {
+      const { runtime } = createHarness({}, { activeModule: module })
+      expect(runtime.showTerminalWorkspace.value).toBe(true)
+    })
+    ;(['assets', 'files', 'extensions', 'kubernetes', 'settings', 'database', 'user'] as const).forEach((module) => {
+      const { runtime } = createHarness({}, { activeModule: module })
+      expect(runtime.showTerminalWorkspace.value).toBe(false)
+    })
   })
 
   it('owns terminal authentication dialog state and response routing', async () => {

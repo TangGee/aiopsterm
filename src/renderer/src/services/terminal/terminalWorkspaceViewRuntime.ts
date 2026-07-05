@@ -133,6 +133,7 @@ type TerminalOutputWriteQueue = {
 type TerminalWorkspaceViewRuntimeInput = {
   workspace: WorkspaceStore
   visibleTerminalPanels: ComputedRef<TerminalPanel[]>
+  terminalWorkspaceVisible?: ComputedRef<boolean>
   aiButtonPanelId: Ref<string>
   aiButtonPosition: { top: number; right: number }
   suggestionPanel: { panelId: string }
@@ -191,6 +192,7 @@ const tailTextByBytes = (value: string, maxBytes: number) => {
 export const createTerminalWorkspaceViewRuntime = ({
   workspace,
   visibleTerminalPanels,
+  terminalWorkspaceVisible,
   aiButtonPanelId,
   aiButtonPosition,
   suggestionPanel,
@@ -375,10 +377,11 @@ export const createTerminalWorkspaceViewRuntime = ({
     workspace.extensionSettings.highlightStatus ? clonePlain(workspace.keywordHighlightSettings) : null
 
   const activeView = () => terminalViews.get(workspace.activePanelId)
+  const isTerminalWorkspaceVisible = () => terminalWorkspaceVisible?.value ?? true
   const visibleTerminalPanelIds = () => new Set(visibleTerminalPanels.value.map((panel) => panel.id))
   const isTerminalPanelRenderable = (panelId: string) => {
     const element = terminalElements.get(panelId)
-    return Boolean(element?.isConnected && visibleTerminalPanelIds().has(panelId))
+    return Boolean(isTerminalWorkspaceVisible() && element?.isConnected && visibleTerminalPanelIds().has(panelId))
   }
 
   const terminalPriorityForPanel = (panelId: string) => threadedTerminalPriorityFor(panelId, workspace.activePanelId, isTerminalPanelRenderable(panelId))
@@ -1133,7 +1136,7 @@ export const createTerminalWorkspaceViewRuntime = ({
     terminalElements.set(panelId, element)
     const panel = workspace.panels.find((item) => item.id === panelId)
     if (panel && panel.kind !== 'knowledge') {
-      createTerminalView(panel, element)
+      if (isTerminalWorkspaceVisible()) createTerminalView(panel, element)
     }
   }
 
@@ -1146,8 +1149,8 @@ export const createTerminalWorkspaceViewRuntime = ({
           else disposeTerminalView(panel.id, 'panel-replaced')
         }
         const element = terminalElements.get(panel.id)
-        if (element && visibleTerminalPanelIds().has(panel.id)) createTerminalView(panel, element)
-        else if (canUseThreadedTerminal() && !terminalViews.has(panel.id)) {
+        if (isTerminalWorkspaceVisible() && element && visibleTerminalPanelIds().has(panel.id)) createTerminalView(panel, element)
+        else if (isTerminalWorkspaceVisible() && canUseThreadedTerminal() && !terminalViews.has(panel.id)) {
           const view = createThreadedViewForPanel(panel)
           if (isThreadedTerminalHost(view.terminal)) view.terminal.startCoreOnly()
           terminalViews.set(panel.id, view)
@@ -1243,6 +1246,7 @@ export const createTerminalWorkspaceViewRuntime = ({
     syncPanelViews,
     syncTerminalView,
     syncThreadedKeywordHighlight,
+    syncThreadedTerminalPriorities,
     terminalSettingsSignature,
     terminalViewSize,
     terminalViews,

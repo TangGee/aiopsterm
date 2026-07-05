@@ -238,12 +238,13 @@ const createWorkspace = (panel: TerminalPanel) =>
 const createRuntime = (
   panel = createEmptyTerminalPanel('panel-1', 'Local'),
   visiblePanels?: { value: TerminalPanel[] },
-  options: { threaded?: boolean } = {}
+  options: { threaded?: boolean; terminalWorkspaceVisible?: { value: boolean } } = {}
 ) => {
   const workspace = createWorkspace(panel)
   const input: Parameters<typeof createTerminalWorkspaceViewRuntime>[0] = {
     workspace,
     visibleTerminalPanels: computed(() => visiblePanels?.value || workspace.panels),
+    terminalWorkspaceVisible: computed(() => options.terminalWorkspaceVisible?.value ?? true),
     aiButtonPanelId: ref(''),
     aiButtonPosition: { top: 0, right: 0 },
     suggestionPanel: { panelId: '' },
@@ -318,6 +319,27 @@ describe('terminalWorkspaceViewRuntime', () => {
     expect(terminal.updateSettings).not.toHaveBeenCalled()
     expect(fit.fit).not.toHaveBeenCalled()
     expect(logs.some((entry) => entry.event === 'renderer.terminal-view.threaded-attach-existing')).toBe(false)
+  })
+
+  it('does not create a terminal view while the terminal workspace is hidden', async () => {
+    threadedTerminalMocks.threadedEnabled = true
+    const panel = createEmptyTerminalPanel('panel-1', 'Local')
+    const terminalWorkspaceVisible = ref(false)
+    const { runtime } = createRuntime(panel, undefined, { threaded: true, terminalWorkspaceVisible })
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    runtime.setTerminalElement(panel.id, host)
+    await flushFrames(2)
+    expect(runtime.terminalViews.has(panel.id)).toBe(false)
+    expect(threadedTerminalMocks.FakeThreadedTerminal.instances).toHaveLength(0)
+
+    terminalWorkspaceVisible.value = true
+    await runtime.syncPanelViews()
+    await flushFrames(2)
+
+    expect(runtime.terminalViews.has(panel.id)).toBe(true)
+    expect(threadedTerminalMocks.FakeThreadedTerminal.instances).toHaveLength(1)
   })
 
   it('writes incremental terminal output without refitting the view on the hot path', async () => {

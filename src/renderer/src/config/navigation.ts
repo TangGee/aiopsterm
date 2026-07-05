@@ -23,6 +23,10 @@ export type MenuItem = {
   position: 'main' | 'bottom'
 }
 
+const terminalWorkspaceModules = new Set<ModuleKey>(['workspace', 'aiSessions', 'snippets', 'knowledge'])
+
+export const isTerminalWorkspaceModule = (key: ModuleKey) => terminalWorkspaceModules.has(key)
+
 export const menuItems: MenuItem[] = [
   { key: 'workspace', label: '工作区', labelKey: 'module.workspace', icon: Server, position: 'main' },
   { key: 'aiSessions', label: 'AI 会话', labelKey: 'module.aiSessions', icon: Bot, position: 'main' },
