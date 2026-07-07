@@ -43,6 +43,7 @@ type RenderSurface = {
   screenLines: ThreadedTerminalScreenLine[]
   lastSnapshot: ThreadedTerminalScreenSnapshot | null
   lastPaintAt: number
+  scrollScratch?: OffscreenCanvas
 }
 
 type WebglRenderGroupResources = {
@@ -370,6 +371,9 @@ const presentRenderGroup = (group: RenderGroup) => {
   gl.activeTexture(gl.TEXTURE0)
   gl.bindTexture(gl.TEXTURE_2D, webgl.texture)
   gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true)
+  // 画布以 premultipliedAlpha 合成,上传时必须同样预乘,
+  // 否则半透明像素(主题洗底、字形抗锯齿边缘)会被当作预乘数据而整体偏亮。
+  gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true)
   gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, group.paintCanvas)
   if (webgl.samplerLocation) gl.uniform1i(webgl.samplerLocation, 0)
   gl.drawArrays(gl.TRIANGLES, 0, 6)
@@ -476,21 +480,34 @@ const resizeSurface = (
   return changed
 }
 
+// 背景带以整数设备像素铺排:相邻行共享同一条取整后的边界,不重叠不留缝。
+// 半透明主题洗底若按 CSS 小数坐标填充,行边界的抗锯齿像素会出现 alpha 叠加/缺失,
+// 在背景图模式下表现为横向条纹。
 const fillBackground = (surface: RenderSurface, row?: number) => {
   const context = surface.context
   const transparentBackground = isTransparentColor(surface.settings.theme.background)
+  const dpr = Math.max(1, surface.dpr || 1)
+  const deviceLeft = Math.round(surface.rect.x * dpr)
+  const deviceRight = Math.round((surface.rect.x + surface.width) * dpr)
+  const deviceBandTop = (bandRow: number) =>
+    Math.round((surface.rect.y + surface.geometry.paddingTop + bandRow * surface.cellHeight) * dpr)
+  let deviceTop: number
+  let deviceBottom: number
   if (typeof row === 'number') {
-    const y = surface.geometry.paddingTop + row * surface.cellHeight
-    context.clearRect(0, y, surface.width, surface.cellHeight)
-    if (transparentBackground) return
-    context.fillStyle = surface.settings.theme.background
-    context.fillRect(0, y, surface.width, surface.cellHeight)
+    deviceTop = deviceBandTop(row)
+    deviceBottom = deviceBandTop(row + 1)
   } else {
-    context.clearRect(0, 0, surface.width, surface.height)
-    if (transparentBackground) return
-    context.fillStyle = surface.settings.theme.background
-    context.fillRect(0, 0, surface.width, surface.height)
+    deviceTop = Math.round(surface.rect.y * dpr)
+    deviceBottom = Math.round((surface.rect.y + surface.height) * dpr)
   }
+  context.save()
+  context.setTransform(1, 0, 0, 1, 0, 0)
+  context.clearRect(deviceLeft, deviceTop, deviceRight - deviceLeft, deviceBottom - deviceTop)
+  if (!transparentBackground) {
+    context.fillStyle = surface.settings.theme.background
+    context.fillRect(deviceLeft, deviceTop, deviceRight - deviceLeft, deviceBottom - deviceTop)
+  }
+  context.restore()
 }
 
 const drawTextCells = (
@@ -745,47 +762,37 @@ const rememberPaintedSnapshot = (surface: RenderSurface, snapshot: ThreadedTermi
   }
 }
 
+// 滚动搬运必须"先取样、清除目标、再原样贴回",并且全程走整数设备像素:
+// 直接对同一画布 drawImage 会把半透明背景在目标区再叠一层 alpha,
+// 小数目标坐标还会触发重采样,两者都会在背景图模式下产生条纹。
 const scrollSurface = (surface: RenderSurface, deltaRows: number) => {
   const gridRows = Math.max(1, surface.geometry.rows)
   if (!deltaRows || Math.abs(deltaRows) >= gridRows) return false
   const context = surface.context
-  const deltaY = Math.round(deltaRows * surface.cellHeight * surface.dpr) / surface.dpr
   const sourceX = Math.round((surface.rect.x + surface.geometry.paddingLeft) * surface.dpr)
   const sourceY = Math.round((surface.rect.y + surface.geometry.paddingTop) * surface.dpr)
   const pixelWidth = Math.max(1, Math.round(surface.geometry.cols * surface.cellWidth * surface.dpr))
   const gridPixelHeight = Math.max(1, Math.round(surface.geometry.rows * surface.cellHeight * surface.dpr))
-  const pixelDeltaY = Math.round(Math.abs(deltaY) * surface.dpr)
-  if (deltaRows > 0) {
-    const sourcePixelHeight = Math.max(0, gridPixelHeight - pixelDeltaY)
-    if (sourcePixelHeight > 0) {
-      context.drawImage(
-        surface.canvas,
-        sourceX,
-        sourceY + pixelDeltaY,
-        pixelWidth,
-        sourcePixelHeight,
-        surface.geometry.paddingLeft,
-        surface.geometry.paddingTop,
-        pixelWidth / surface.dpr,
-        sourcePixelHeight / surface.dpr
-      )
-    }
-  } else {
-    const sourcePixelHeight = Math.max(0, gridPixelHeight - pixelDeltaY)
-    if (sourcePixelHeight > 0) {
-      context.drawImage(
-        surface.canvas,
-        sourceX,
-        sourceY,
-        pixelWidth,
-        sourcePixelHeight,
-        surface.geometry.paddingLeft,
-        surface.geometry.paddingTop + pixelDeltaY / surface.dpr,
-        pixelWidth / surface.dpr,
-        sourcePixelHeight / surface.dpr
-      )
-    }
+  const pixelDeltaY = Math.max(1, Math.round(Math.abs(deltaRows) * surface.cellHeight * surface.dpr))
+  const sourcePixelHeight = Math.max(0, gridPixelHeight - pixelDeltaY)
+  if (sourcePixelHeight <= 0) return false
+  const copySourceY = deltaRows > 0 ? sourceY + pixelDeltaY : sourceY
+  const destY = deltaRows > 0 ? sourceY : sourceY + pixelDeltaY
+  if (!surface.scrollScratch || surface.scrollScratch.width < pixelWidth || surface.scrollScratch.height < sourcePixelHeight) {
+    surface.scrollScratch = new OffscreenCanvas(pixelWidth, sourcePixelHeight)
   }
+  const scratchContext = surface.scrollScratch.getContext('2d')
+  if (!scratchContext) return false
+  scratchContext.save()
+  scratchContext.setTransform(1, 0, 0, 1, 0, 0)
+  scratchContext.clearRect(0, 0, pixelWidth, sourcePixelHeight)
+  scratchContext.drawImage(surface.canvas, sourceX, copySourceY, pixelWidth, sourcePixelHeight, 0, 0, pixelWidth, sourcePixelHeight)
+  scratchContext.restore()
+  context.save()
+  context.setTransform(1, 0, 0, 1, 0, 0)
+  context.clearRect(sourceX, destY, pixelWidth, sourcePixelHeight)
+  context.drawImage(surface.scrollScratch, 0, 0, pixelWidth, sourcePixelHeight, sourceX, destY, pixelWidth, sourcePixelHeight)
+  context.restore()
   return true
 }
 

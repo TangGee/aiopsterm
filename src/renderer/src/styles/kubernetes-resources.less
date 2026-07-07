@@ -125,7 +125,7 @@
   justify-content: space-between;
   padding: 0 10px;
   border-bottom: 1px solid color-mix(in srgb, var(--theme-module-active-border) 55%, var(--theme-terminal-background));
-  color: #d7dae3;
+  color: var(--theme-terminal-foreground);
 }
 
 .k8s-resource-output header strong {
@@ -138,7 +138,7 @@
 .k8s-resource-output header span {
   min-width: 0;
   max-width: 42%;
-  color: #8f95a3;
+  color: color-mix(in srgb, var(--theme-terminal-foreground) 62%, var(--theme-terminal-background));
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -158,15 +158,15 @@
   border: 0;
   border-radius: 5px;
   background: transparent;
-  color: #8f95a3;
+  color: color-mix(in srgb, var(--theme-terminal-foreground) 62%, var(--theme-terminal-background));
   display: grid;
   place-items: center;
   cursor: pointer;
 }
 
 .k8s-resource-output-actions button:hover {
-  background: color-mix(in srgb, #fff 8%, transparent);
-  color: #d7dae3;
+  background: color-mix(in srgb, var(--theme-terminal-foreground) 10%, transparent);
+  color: var(--theme-terminal-foreground);
 }
 
 .k8s-resource-output pre {
@@ -175,7 +175,7 @@
   margin: 0;
   overflow: auto;
   padding: 10px;
-  color: #d7dae3;
+  color: var(--theme-terminal-foreground);
   white-space: pre-wrap;
   font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
   font-size: 12px;

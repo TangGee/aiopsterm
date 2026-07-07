@@ -19,9 +19,21 @@ export type ThemeId =
   | 'catppuccin-latte'
   | 'gruvbox-dark'
   | 'nord-frost'
+  | 'solarized-light'
+  | 'one-light'
+  | 'gruvbox-light'
+  | 'nord-snowstorm'
+  | 'rose-pine-dawn'
+  | 'ayu-light'
+  | 'obsidian-black'
+  | 'ubuntu-solid'
 
 export type ConcreteThemeId = Exclude<ThemeId, 'auto'>
 export type ThemeGroup = 'default' | 'official'
+
+// glass:背景图模式下用半透明毛玻璃表面;solid:背景图模式下用高不透明度实面、不做模糊,
+// 背景图只从工作区空隙透出。给不喜欢毛玻璃质感的用户提供整组实面主题。
+export type ThemeSurfaceStyle = 'glass' | 'solid'
 
 export type ThemeModuleKey =
   | 'workspace'
@@ -106,13 +118,13 @@ export type ThemeLayerTokens = {
   readableBg: string
   readableStrongBg: string
   overlayBg: string
+  border: string
   backdropFilter: string
 }
 
 export type ThemeModuleTokens = {
   text: string
   textMuted: string
-  border: string
   accent: string
   accentSecondary: string
   icon: string
@@ -192,6 +204,7 @@ export type ThemeDefinition = {
   name: string
   group: ThemeGroup
   appearance: ThemeAppearance
+  surfaceStyle: ThemeSurfaceStyle
   core: ThemeCoreTokens
   shell: ThemeShellTokens
   modules: Record<ThemeModuleKey, ThemeModuleTokens>
@@ -213,6 +226,7 @@ type ThemeSeed = {
   name: string
   group: ThemeGroup
   appearance: ThemeAppearance
+  surfaceStyle?: ThemeSurfaceStyle
   core: Omit<ThemeCoreTokens, 'shadowSoft' | 'shadowStrong'>
   terminalPalette?: Partial<Omit<ThemeTerminalPalette, 'base' | 'withBackground'>> & {
     base?: ThemeTerminalSurfaceSeed
@@ -248,8 +262,9 @@ const makeCore = (seed: ThemeSeed): ThemeCoreTokens => ({
   shadowStrong: seed.appearance === 'dark' ? '0 24px 64px rgb(0 0 0 / 0.34)' : '0 24px 58px rgb(36 47 70 / 0.18)'
 })
 
-const makeShellTokens = (core: ThemeCoreTokens, appearance: ThemeAppearance): ThemeShellTokens => {
+const makeShellTokens = (core: ThemeCoreTokens, appearance: ThemeAppearance, surfaceStyle: ThemeSurfaceStyle): ThemeShellTokens => {
   const dark = appearance === 'dark'
+  const solid = surfaceStyle === 'solid'
   const backgroundAccentWash = `linear-gradient(90deg, color-mix(in srgb, ${core.accent} ${dark ? '8%' : '3%'}, transparent), transparent 26%), ${core.bg}`
   return {
     bg: core.bg,
@@ -258,13 +273,13 @@ const makeShellTokens = (core: ThemeCoreTokens, appearance: ThemeAppearance): Th
       ? `linear-gradient(0deg, color-mix(in srgb, ${core.bg} 22%, transparent), color-mix(in srgb, ${core.bg} 22%, transparent)), ${backgroundAccentWash}`
       : backgroundAccentWash,
     topBarBg: `color-mix(in srgb, ${core.surface} ${dark ? '94%' : '96%'}, transparent)`,
-    topBarBgWithBackground: `color-mix(in srgb, ${core.surface} ${dark ? '54%' : '14%'}, transparent)`,
+    topBarBgWithBackground: `color-mix(in srgb, ${core.surface} ${solid ? '92%' : dark ? '54%' : '50%'}, transparent)`,
     topBarBorder: core.border,
     topBarText: core.textMuted,
     topBarIcon: core.textMuted,
     topBarIconActive: core.text,
     railBg: core.surface,
-    railBgWithBackground: `color-mix(in srgb, ${core.surface} ${dark ? '38%' : '12%'}, transparent)`,
+    railBgWithBackground: `color-mix(in srgb, ${core.surface} ${solid ? '90%' : dark ? '38%' : '44%'}, transparent)`,
     railIcon: core.textMuted,
     railIconActive: core.accent,
     railActiveBg: `color-mix(in srgb, ${core.accent} ${dark ? '20%' : '15%'}, ${core.surfaceMuted})`,
@@ -274,7 +289,7 @@ const makeShellTokens = (core: ThemeCoreTokens, appearance: ThemeAppearance): Th
     watermark: `color-mix(in srgb, ${core.textMuted} 22%, transparent)`,
     brandBg: core.accent,
     brandText: dark ? '#071113' : '#ffffff',
-    backdropFilter: dark ? 'blur(16px)' : 'none'
+    backdropFilter: solid ? 'none' : 'blur(16px)'
   }
 }
 
@@ -294,7 +309,12 @@ const moduleAccentFallbacks: Record<ThemeModuleKey, keyof ThemeCoreTokens> = {
   aiPanel: 'accentSecondary'
 }
 
-const makeLayerTokens = (core: ThemeCoreTokens, appearance: ThemeAppearance, withBackground: boolean): ThemeLayerTokens => {
+const makeLayerTokens = (
+  core: ThemeCoreTokens,
+  appearance: ThemeAppearance,
+  withBackground: boolean,
+  surfaceStyle: ThemeSurfaceStyle
+): ThemeLayerTokens => {
   const dark = appearance === 'dark'
   if (!withBackground) {
     return {
@@ -307,29 +327,51 @@ const makeLayerTokens = (core: ThemeCoreTokens, appearance: ThemeAppearance, wit
       readableBg: dark ? core.surfaceMuted : core.surface,
       readableStrongBg: core.surface,
       overlayBg: core.surface,
+      border: core.border,
+      backdropFilter: 'none'
+    }
+  }
+  if (surfaceStyle === 'solid') {
+    // 实面主题:背景图只从工作区透出,面板保持近实底且不做模糊。
+    return {
+      workspaceBg: dark ? `color-mix(in srgb, ${core.bg} 6%, transparent)` : transparent,
+      panelBg: `color-mix(in srgb, ${core.surface} 94%, transparent)`,
+      toolbarBg: `color-mix(in srgb, ${core.surface} 92%, transparent)`,
+      cardBg: `color-mix(in srgb, ${core.surfaceMuted} 92%, transparent)`,
+      cardStrongBg: `color-mix(in srgb, ${core.surfaceStrong} 92%, transparent)`,
+      inputBg: `color-mix(in srgb, ${dark ? core.surfaceMuted : core.surface} 96%, transparent)`,
+      readableBg: `color-mix(in srgb, ${core.surface} 96%, transparent)`,
+      readableStrongBg: `color-mix(in srgb, ${core.surface} 97%, transparent)`,
+      overlayBg: `color-mix(in srgb, ${core.surface} 97%, transparent)`,
+      border: `color-mix(in srgb, ${core.border} 85%, transparent)`,
       backdropFilter: 'none'
     }
   }
   return {
     workspaceBg: dark ? `color-mix(in srgb, ${core.bg} 6%, transparent)` : transparent,
-    panelBg: dark ? `color-mix(in srgb, ${core.surface} 36%, transparent)` : transparent,
-    toolbarBg: dark ? `color-mix(in srgb, ${core.surface} 34%, transparent)` : `color-mix(in srgb, ${core.surface} 10%, transparent)`,
-    cardBg: dark ? `color-mix(in srgb, ${core.surfaceMuted} 32%, transparent)` : `color-mix(in srgb, ${core.surfaceMuted} 24%, transparent)`,
-    cardStrongBg: dark ? `color-mix(in srgb, ${core.surfaceStrong} 30%, transparent)` : `color-mix(in srgb, ${core.surfaceStrong} 30%, transparent)`,
+    panelBg: dark ? `color-mix(in srgb, ${core.surface} 36%, transparent)` : `color-mix(in srgb, ${core.surface} 40%, transparent)`,
+    toolbarBg: dark ? `color-mix(in srgb, ${core.surface} 34%, transparent)` : `color-mix(in srgb, ${core.surface} 48%, transparent)`,
+    cardBg: dark ? `color-mix(in srgb, ${core.surfaceMuted} 32%, transparent)` : `color-mix(in srgb, ${core.surfaceMuted} 44%, transparent)`,
+    cardStrongBg: dark ? `color-mix(in srgb, ${core.surfaceStrong} 30%, transparent)` : `color-mix(in srgb, ${core.surfaceStrong} 56%, transparent)`,
     inputBg: dark ? `color-mix(in srgb, ${core.surfaceMuted} 82%, transparent)` : `color-mix(in srgb, ${core.surface} 74%, transparent)`,
-    readableBg: dark ? `color-mix(in srgb, ${core.surface} 82%, transparent)` : `color-mix(in srgb, ${core.surface} 76%, transparent)`,
+    readableBg: dark ? `color-mix(in srgb, ${core.surface} 82%, transparent)` : `color-mix(in srgb, ${core.surface} 82%, transparent)`,
     readableStrongBg: dark ? `color-mix(in srgb, ${core.surface} 86%, transparent)` : `color-mix(in srgb, ${core.surface} 86%, transparent)`,
     overlayBg: dark ? `color-mix(in srgb, ${core.surface} 88%, transparent)` : `color-mix(in srgb, ${core.surface} 92%, transparent)`,
-    backdropFilter: dark ? 'blur(16px)' : 'none'
+    border: dark ? `color-mix(in srgb, ${core.border} 62%, transparent)` : `color-mix(in srgb, ${core.text} 24%, transparent)`,
+    backdropFilter: 'blur(16px)'
   }
 }
 
-const makeModuleTokens = (core: ThemeCoreTokens, appearance: ThemeAppearance, moduleKey: ThemeModuleKey): ThemeModuleTokens => {
+const makeModuleTokens = (
+  core: ThemeCoreTokens,
+  appearance: ThemeAppearance,
+  moduleKey: ThemeModuleKey,
+  surfaceStyle: ThemeSurfaceStyle
+): ThemeModuleTokens => {
   const accent = String(core[moduleAccentFallbacks[moduleKey]])
   return {
     text: core.text,
     textMuted: core.textMuted,
-    border: core.border,
     accent,
     accentSecondary: core.accentSecondary,
     icon: core.textMuted,
@@ -339,16 +381,20 @@ const makeModuleTokens = (core: ThemeCoreTokens, appearance: ThemeAppearance, mo
     shadowSoft: core.shadowSoft,
     shadowStrong: core.shadowStrong,
     scrollbarThumb: alpha(core.textMuted, appearance === 'dark' ? '99' : 'b3'),
-    base: makeLayerTokens(core, appearance, false),
-    withBackground: makeLayerTokens(core, appearance, true)
+    base: makeLayerTokens(core, appearance, false, surfaceStyle),
+    withBackground: makeLayerTokens(core, appearance, true, surfaceStyle)
   }
 }
 
-const makeModules = (core: ThemeCoreTokens, appearance: ThemeAppearance): Record<ThemeModuleKey, ThemeModuleTokens> =>
+const makeModules = (
+  core: ThemeCoreTokens,
+  appearance: ThemeAppearance,
+  surfaceStyle: ThemeSurfaceStyle
+): Record<ThemeModuleKey, ThemeModuleTokens> =>
   themeModuleKeys.reduce(
     (modules, key) => ({
       ...modules,
-      [key]: makeModuleTokens(core, appearance, key)
+      [key]: makeModuleTokens(core, appearance, key, surfaceStyle)
     }),
     {} as Record<ThemeModuleKey, ThemeModuleTokens>
   )
@@ -374,9 +420,6 @@ function terminalAnsiPalette(core: ThemeCoreTokens, appearance: ThemeAppearance)
     brightWhite: core.text
   }
 }
-
-const terminalAnsiBackgroundPalette = (core: ThemeCoreTokens, appearance: ThemeAppearance): ThemeTerminalAnsiPalette =>
-  terminalAnsiPalette(core, appearance)
 
 const terminalAnsiBackgroundPaletteFrom = (palette: ThemeTerminalAnsiPalette): ThemeTerminalAnsiPalette => ({
   black: palette.black,
@@ -414,76 +457,89 @@ const codexAnsiBackgroundPalette = (
   }
 }
 
-const makeTerminalSurfaceTokens = (core: ThemeCoreTokens, appearance: ThemeAppearance, withBackground: boolean): ThemeTerminalSurfaceTokens => {
+const makeTerminalSurfaceTokens = (
+  core: ThemeCoreTokens,
+  appearance: ThemeAppearance,
+  withBackground: boolean,
+  terminalBg: string,
+  ansiPalette: ThemeTerminalAnsiPalette,
+  surfaceStyle: ThemeSurfaceStyle
+): ThemeTerminalSurfaceTokens => {
   const dark = appearance === 'dark'
+  const solid = surfaceStyle === 'solid'
   if (!withBackground) {
     return {
-      paneBg: core.bg,
+      paneBg: terminalBg,
       paneBackdropFilter: 'none',
       threadedPaneBg: transparent,
-      titleBg: core.bg,
+      titleBg: terminalBg,
       titleBackdropFilter: 'none',
-      commandLineBg: `color-mix(in srgb, ${core.bg} 92%, ${core.surface})`,
+      commandLineBg: `color-mix(in srgb, ${terminalBg} 92%, ${core.surface})`,
       commandLineBackdropFilter: 'none',
-      xtermViewportBg: core.bg,
-      xtermScreenBg: core.bg,
-      runtimeBackground: core.bg,
-      codexRuntimeBackground: core.bg,
-      codexStackBg: core.bg,
-      codexStackIdleBg: core.bg,
+      xtermViewportBg: terminalBg,
+      xtermScreenBg: terminalBg,
+      runtimeBackground: terminalBg,
+      codexRuntimeBackground: terminalBg,
+      codexStackBg: terminalBg,
+      codexStackIdleBg: terminalBg,
       codexStackBackdropFilter: 'none',
-      codexXtermViewportBg: core.bg,
-      codexXtermScreenBg: core.bg,
-      ansiBackground: terminalAnsiBackgroundPalette(core, appearance),
-      codexAnsiBackground: codexAnsiBackgroundPalette(terminalAnsiBackgroundPalette(core, appearance), core, appearance, core.bg, false)
+      codexXtermViewportBg: terminalBg,
+      codexXtermScreenBg: terminalBg,
+      ansiBackground: terminalAnsiBackgroundPaletteFrom(ansiPalette),
+      codexAnsiBackground: codexAnsiBackgroundPalette(terminalAnsiBackgroundPaletteFrom(ansiPalette), core, appearance, terminalBg, false)
     }
   }
-  const terminalBodyBg = transparent
-  const lightCommandLineBg = rgba(core.surface, '0.78')
+  // 终端正文在背景图之上必须保留一层可读洗底:浅色主题文字深、需要接近实底,
+  // 深色主题保留更多背景透出,实面主题几乎全实且不做模糊。真实绘制发生在
+  // xterm/threaded canvas(runtimeBackground),CSS 层的 viewport/screen 保持透明避免双重叠加。
+  const terminalBodyBg = rgba(terminalBg, solid ? '0.97' : dark ? '0.7' : '0.94')
+  const lightCommandLineBg = rgba(core.surface, solid ? '0.95' : '0.78')
   return {
-    paneBg: dark ? `color-mix(in srgb, ${core.bg} 78%, transparent)` : transparent,
+    paneBg: dark ? `color-mix(in srgb, ${terminalBg} ${solid ? '90%' : '30%'}, transparent)` : transparent,
     paneBackdropFilter: 'none',
     threadedPaneBg: transparent,
-    titleBg: dark ? `color-mix(in srgb, ${core.bg} 74%, transparent)` : transparent,
-    titleBackdropFilter: dark ? 'blur(10px)' : 'none',
-    commandLineBg: dark ? `color-mix(in srgb, ${core.bg} 78%, transparent)` : lightCommandLineBg,
-    commandLineBackdropFilter: dark ? 'blur(14px)' : 'none',
-    xtermViewportBg: terminalBodyBg,
-    xtermScreenBg: terminalBodyBg,
+    titleBg: dark
+      ? `color-mix(in srgb, ${terminalBg} ${solid ? '92%' : '74%'}, transparent)`
+      : rgba(core.surface, solid ? '0.95' : '0.66'),
+    titleBackdropFilter: solid ? 'none' : 'blur(10px)',
+    commandLineBg: dark ? `color-mix(in srgb, ${terminalBg} ${solid ? '92%' : '78%'}, transparent)` : lightCommandLineBg,
+    commandLineBackdropFilter: solid ? 'none' : 'blur(14px)',
+    xtermViewportBg: transparent,
+    xtermScreenBg: transparent,
     runtimeBackground: terminalBodyBg,
     codexRuntimeBackground: terminalBodyBg,
-    codexStackBg: dark ? `color-mix(in srgb, ${core.bg} 76%, transparent)` : transparent,
-    codexStackIdleBg: dark ? `color-mix(in srgb, ${core.bg} 52%, transparent)` : transparent,
-    codexStackBackdropFilter: dark ? 'blur(10px)' : 'none',
-    codexXtermViewportBg: terminalBodyBg,
-    codexXtermScreenBg: terminalBodyBg,
-    ansiBackground: terminalAnsiBackgroundPalette(core, appearance),
-    codexAnsiBackground: codexAnsiBackgroundPalette(terminalAnsiBackgroundPalette(core, appearance), core, appearance, terminalBodyBg, true)
+    codexStackBg: dark
+      ? `color-mix(in srgb, ${terminalBg} ${solid ? '94%' : '76%'}, transparent)`
+      : rgba(terminalBg, solid ? '0.94' : '0.7'),
+    codexStackIdleBg: dark
+      ? `color-mix(in srgb, ${terminalBg} ${solid ? '88%' : '52%'}, transparent)`
+      : rgba(terminalBg, solid ? '0.88' : '0.6'),
+    codexStackBackdropFilter: solid ? 'none' : 'blur(10px)',
+    codexXtermViewportBg: transparent,
+    codexXtermScreenBg: transparent,
+    ansiBackground: terminalAnsiBackgroundPaletteFrom(ansiPalette),
+    codexAnsiBackground: codexAnsiBackgroundPalette(terminalAnsiBackgroundPaletteFrom(ansiPalette), core, appearance, terminalBodyBg, true)
   }
 }
 
-const defaultTerminalPalette = (core: ThemeCoreTokens, appearance: ThemeAppearance): ThemeTerminalPalette => ({
-  background: core.bg,
-  contrastBackground: core.bg,
-  foreground: core.text,
-  minimumContrastRatio: 3,
-  cursor: core.accentSecondary,
-  selectionBackground: alpha(core.accent, appearance === 'dark' ? '55' : '3d'),
-  ...terminalAnsiPalette(core, appearance),
-  scrollbarTrack: alpha(core.border, appearance === 'dark' ? '66' : '80'),
-  scrollbarThumb: alpha(core.textMuted, appearance === 'dark' ? '99' : 'b3'),
-  scrollbarThumbHover: core.accent,
-  base: makeTerminalSurfaceTokens(core, appearance, false),
-  withBackground: makeTerminalSurfaceTokens(core, appearance, true)
-})
-
 const makeTheme = (seed: ThemeSeed): ThemeDefinition => {
   const core = makeCore(seed)
-  const terminalPalette = defaultTerminalPalette(core, seed.appearance)
+  const surfaceStyle: ThemeSurfaceStyle = seed.surfaceStyle || 'glass'
+  const { base: baseSeed, withBackground: withBackgroundSeed, ...paletteSeed } = seed.terminalPalette || {}
   const mergedPalette = {
-    ...terminalPalette,
-    ...(seed.terminalPalette || {})
+    background: core.bg,
+    contrastBackground: core.bg,
+    foreground: core.text,
+    minimumContrastRatio: 3,
+    cursor: core.accentSecondary,
+    selectionBackground: alpha(core.accent, seed.appearance === 'dark' ? '55' : '3d'),
+    ...terminalAnsiPalette(core, seed.appearance),
+    scrollbarTrack: alpha(core.border, seed.appearance === 'dark' ? '66' : '80'),
+    scrollbarThumb: alpha(core.textMuted, seed.appearance === 'dark' ? '99' : 'b3'),
+    scrollbarThumbHover: core.accent,
+    ...paletteSeed
   }
+  const terminalBg = mergedPalette.background
   const finalAnsiBackground = terminalAnsiBackgroundPaletteFrom(mergedPalette)
   const mergeSurface = (surface: ThemeTerminalSurfaceTokens, override: ThemeTerminalSurfaceSeed | undefined, withBackground: boolean): ThemeTerminalSurfaceTokens => {
     const mergedSurface = {
@@ -503,16 +559,25 @@ const makeTheme = (seed: ThemeSeed): ThemeDefinition => {
       }
     }
   }
-  const baseSurface = mergeSurface(terminalPalette.base, seed.terminalPalette?.base, false)
-  const withBackgroundSurface = mergeSurface(terminalPalette.withBackground, seed.terminalPalette?.withBackground, true)
+  const baseSurface = mergeSurface(
+    makeTerminalSurfaceTokens(core, seed.appearance, false, terminalBg, finalAnsiBackground, surfaceStyle),
+    baseSeed,
+    false
+  )
+  const withBackgroundSurface = mergeSurface(
+    makeTerminalSurfaceTokens(core, seed.appearance, true, terminalBg, finalAnsiBackground, surfaceStyle),
+    withBackgroundSeed,
+    true
+  )
   return {
     id: seed.id,
     name: seed.name,
     group: seed.group,
     appearance: seed.appearance,
+    surfaceStyle,
     core,
-    shell: makeShellTokens(core, seed.appearance),
-    modules: makeModules(core, seed.appearance),
+    shell: makeShellTokens(core, seed.appearance, surfaceStyle),
+    modules: makeModules(core, seed.appearance, surfaceStyle),
     terminalPalette: {
       ...mergedPalette,
       base: baseSurface,
@@ -547,6 +612,24 @@ export const themePresets = {
       warning: '#e6b450',
       danger: '#e06c75',
       shadow: darkShadow
+    },
+    terminalPalette: {
+      black: '#282c34',
+      red: '#e06c75',
+      green: '#98c379',
+      yellow: '#e5c07b',
+      blue: '#61afef',
+      magenta: '#c678dd',
+      cyan: '#56b6c2',
+      white: '#abb2bf',
+      brightBlack: '#5c6370',
+      brightRed: '#ec8b93',
+      brightGreen: '#b3d39c',
+      brightYellow: '#edd4a6',
+      brightBlue: '#8fc6f4',
+      brightMagenta: '#d7a1e7',
+      brightCyan: '#7bc6d0',
+      brightWhite: '#e6eaf2'
     }
   }),
   light: makeTheme({
@@ -568,6 +651,24 @@ export const themePresets = {
       warning: '#b7791f',
       danger: '#d64545',
       shadow: lightShadow
+    },
+    terminalPalette: {
+      black: '#24292f',
+      red: '#cf222e',
+      green: '#1a7f37',
+      yellow: '#9a6700',
+      blue: '#0969da',
+      magenta: '#8250df',
+      cyan: '#1b7c83',
+      white: '#8c959f',
+      brightBlack: '#57606a',
+      brightRed: '#e5534b',
+      brightGreen: '#2da44e',
+      brightYellow: '#bf8700',
+      brightBlue: '#218bff',
+      brightMagenta: '#a475f9',
+      brightCyan: '#3192aa',
+      brightWhite: '#d0d7de'
     }
   }),
   'termius-dark': makeTheme({
@@ -589,6 +690,24 @@ export const themePresets = {
       warning: '#eebe6c',
       danger: '#f36e6e',
       shadow: darkShadow
+    },
+    terminalPalette: {
+      black: '#2a333d',
+      red: '#f36e6e',
+      green: '#7fc06e',
+      yellow: '#eebe6c',
+      blue: '#6c9cf4',
+      magenta: '#c586c0',
+      cyan: '#5fb3b3',
+      white: '#d9dbde',
+      brightBlack: '#55606d',
+      brightRed: '#f78c8c',
+      brightGreen: '#9bd08a',
+      brightYellow: '#f3cf8e',
+      brightBlue: '#8fb3f7',
+      brightMagenta: '#d8a6d3',
+      brightCyan: '#83cccc',
+      brightWhite: '#f0f2f4'
     }
   }),
   'termius-light': makeTheme({
@@ -610,6 +729,24 @@ export const themePresets = {
       warning: '#b08800',
       danger: '#d03035',
       shadow: lightShadow
+    },
+    terminalPalette: {
+      black: '#2a2f33',
+      red: '#d03035',
+      green: '#22863a',
+      yellow: '#b08800',
+      blue: '#0366d6',
+      magenta: '#6f42c1',
+      cyan: '#1b7c83',
+      white: '#959da5',
+      brightBlack: '#586069',
+      brightRed: '#e5534b',
+      brightGreen: '#28a745',
+      brightYellow: '#dbab09',
+      brightBlue: '#2188ff',
+      brightMagenta: '#8a63d2',
+      brightCyan: '#3192aa',
+      brightWhite: '#d1d5da'
     }
   }),
   'ubuntu-terminal': makeTheme({
@@ -677,6 +814,24 @@ export const themePresets = {
       warning: '#d0a215',
       danger: '#d14d41',
       shadow: darkShadow
+    },
+    terminalPalette: {
+      black: '#282726',
+      red: '#d14d41',
+      green: '#879a39',
+      yellow: '#d0a215',
+      blue: '#4385be',
+      magenta: '#ce5d97',
+      cyan: '#3aa99f',
+      white: '#b7b5ac',
+      brightBlack: '#575653',
+      brightRed: '#e8705f',
+      brightGreen: '#a0af54',
+      brightYellow: '#e3b62f',
+      brightBlue: '#66a0d8',
+      brightMagenta: '#e47eb0',
+      brightCyan: '#5abdb3',
+      brightWhite: '#cecdc3'
     }
   }),
   'flexoki-light': makeTheme({
@@ -698,6 +853,24 @@ export const themePresets = {
       warning: '#ad8301',
       danger: '#af3029',
       shadow: lightShadow
+    },
+    terminalPalette: {
+      black: '#100f0f',
+      red: '#af3029',
+      green: '#66800b',
+      yellow: '#ad8301',
+      blue: '#205ea6',
+      magenta: '#a02f6f',
+      cyan: '#24837b',
+      white: '#b7b5ac',
+      brightBlack: '#6f6e69',
+      brightRed: '#d14d41',
+      brightGreen: '#879a39',
+      brightYellow: '#d0a215',
+      brightBlue: '#4385be',
+      brightMagenta: '#ce5d97',
+      brightCyan: '#3aa99f',
+      brightWhite: '#e6e4d9'
     }
   }),
   'kanagawa-wave': makeTheme({
@@ -719,6 +892,24 @@ export const themePresets = {
       warning: '#e6c384',
       danger: '#e82424',
       shadow: darkShadow
+    },
+    terminalPalette: {
+      black: '#090618',
+      red: '#c34043',
+      green: '#76946a',
+      yellow: '#c0a36e',
+      blue: '#7e9cd8',
+      magenta: '#957fb8',
+      cyan: '#6a9589',
+      white: '#c8c093',
+      brightBlack: '#727169',
+      brightRed: '#e82424',
+      brightGreen: '#98bb6c',
+      brightYellow: '#e6c384',
+      brightBlue: '#7fb4ca',
+      brightMagenta: '#938aa9',
+      brightCyan: '#7aa89f',
+      brightWhite: '#dcd7ba'
     }
   }),
   'kanagawa-dragon': makeTheme({
@@ -740,6 +931,24 @@ export const themePresets = {
       warning: '#e6c384',
       danger: '#e46876',
       shadow: darkShadow
+    },
+    terminalPalette: {
+      black: '#0d0c0c',
+      red: '#c4746e',
+      green: '#8a9a7b',
+      yellow: '#c4b28a',
+      blue: '#8ba4b0',
+      magenta: '#a292a3',
+      cyan: '#8ea4a2',
+      white: '#c8c093',
+      brightBlack: '#a6a69c',
+      brightRed: '#e46876',
+      brightGreen: '#87a987',
+      brightYellow: '#e6c384',
+      brightBlue: '#7fb4ca',
+      brightMagenta: '#938aa9',
+      brightCyan: '#7aa89f',
+      brightWhite: '#c5c9c5'
     }
   }),
   'kanagawa-lotus': makeTheme({
@@ -761,6 +970,24 @@ export const themePresets = {
       warning: '#836f4a',
       danger: '#c84053',
       shadow: lightShadow
+    },
+    terminalPalette: {
+      black: '#545464',
+      red: '#c84053',
+      green: '#6f894e',
+      yellow: '#836f4a',
+      blue: '#4d699b',
+      magenta: '#b35b79',
+      cyan: '#597b75',
+      white: '#a8a48d',
+      brightBlack: '#8a8980',
+      brightRed: '#d7474b',
+      brightGreen: '#7d9868',
+      brightYellow: '#a28a50',
+      brightBlue: '#6693bf',
+      brightMagenta: '#c86a86',
+      brightCyan: '#6e8e87',
+      brightWhite: '#e7dba0'
     }
   }),
   'hacker-blue': makeTheme({
@@ -782,6 +1009,24 @@ export const themePresets = {
       warning: '#80bfff',
       danger: '#2a6fc7',
       shadow: '0 18px 48px rgb(0 25 80 / 0.36)'
+    },
+    terminalPalette: {
+      black: '#123055',
+      red: '#2a6fc7',
+      green: '#66b2ff',
+      yellow: '#99ccff',
+      blue: '#4d9fff',
+      magenta: '#8ab8ff',
+      cyan: '#4dc3ff',
+      white: '#b3d9ff',
+      brightBlack: '#33608f',
+      brightRed: '#4d88e0',
+      brightGreen: '#85c2ff',
+      brightYellow: '#b3dbff',
+      brightBlue: '#70b2ff',
+      brightMagenta: '#a6c8ff',
+      brightCyan: '#7fd7ff',
+      brightWhite: '#e0f0ff'
     }
   }),
   'hacker-green': makeTheme({
@@ -803,6 +1048,24 @@ export const themePresets = {
       warning: '#66ff66',
       danger: '#00c000',
       shadow: '0 18px 48px rgb(0 80 0 / 0.36)'
+    },
+    terminalPalette: {
+      black: '#0a3d1a',
+      red: '#00b300',
+      green: '#00ff41',
+      yellow: '#7dff7d',
+      blue: '#00e6a8',
+      magenta: '#00bb88',
+      cyan: '#33ffc2',
+      white: '#ccffcc',
+      brightBlack: '#1f6b38',
+      brightRed: '#33cc33',
+      brightGreen: '#66ff85',
+      brightYellow: '#b3ffb3',
+      brightBlue: '#4dffc4',
+      brightMagenta: '#33d4a3',
+      brightCyan: '#80ffd6',
+      brightWhite: '#eaffea'
     }
   }),
   'dracula-night': makeTheme({
@@ -824,6 +1087,24 @@ export const themePresets = {
       warning: '#f1fa8c',
       danger: '#ff5555',
       shadow: darkShadow
+    },
+    terminalPalette: {
+      black: '#21222c',
+      red: '#ff5555',
+      green: '#50fa7b',
+      yellow: '#f1fa8c',
+      blue: '#bd93f9',
+      magenta: '#ff79c6',
+      cyan: '#8be9fd',
+      white: '#f8f8f2',
+      brightBlack: '#6272a4',
+      brightRed: '#ff6e6e',
+      brightGreen: '#69ff94',
+      brightYellow: '#ffffa5',
+      brightBlue: '#d6acff',
+      brightMagenta: '#ff92df',
+      brightCyan: '#a4ffff',
+      brightWhite: '#ffffff'
     }
   }),
   'catppuccin-mocha': makeTheme({
@@ -845,6 +1126,24 @@ export const themePresets = {
       warning: '#f9e2af',
       danger: '#f38ba8',
       shadow: darkShadow
+    },
+    terminalPalette: {
+      black: '#45475a',
+      red: '#f38ba8',
+      green: '#a6e3a1',
+      yellow: '#f9e2af',
+      blue: '#89b4fa',
+      magenta: '#f5c2e7',
+      cyan: '#94e2d5',
+      white: '#bac2de',
+      brightBlack: '#585b70',
+      brightRed: '#f37799',
+      brightGreen: '#89d88b',
+      brightYellow: '#ebd391',
+      brightBlue: '#74a8fc',
+      brightMagenta: '#f2aede',
+      brightCyan: '#6bd7ca',
+      brightWhite: '#cdd6f4'
     }
   }),
   'catppuccin-latte': makeTheme({
@@ -866,6 +1165,24 @@ export const themePresets = {
       warning: '#df8e1d',
       danger: '#d20f39',
       shadow: lightShadow
+    },
+    terminalPalette: {
+      black: '#5c5f77',
+      red: '#d20f39',
+      green: '#40a02b',
+      yellow: '#df8e1d',
+      blue: '#1e66f5',
+      magenta: '#ea76cb',
+      cyan: '#179299',
+      white: '#acb0be',
+      brightBlack: '#6c6f85',
+      brightRed: '#de293e',
+      brightGreen: '#49af3d',
+      brightYellow: '#eea02d',
+      brightBlue: '#456eff',
+      brightMagenta: '#fe85d8',
+      brightCyan: '#2d9fa8',
+      brightWhite: '#bcc0cc'
     }
   }),
   'gruvbox-dark': makeTheme({
@@ -887,6 +1204,24 @@ export const themePresets = {
       warning: '#fabd2f',
       danger: '#fb4934',
       shadow: darkShadow
+    },
+    terminalPalette: {
+      black: '#32302f',
+      red: '#cc241d',
+      green: '#98971a',
+      yellow: '#d79921',
+      blue: '#458588',
+      magenta: '#b16286',
+      cyan: '#689d6a',
+      white: '#a89984',
+      brightBlack: '#928374',
+      brightRed: '#fb4934',
+      brightGreen: '#b8bb26',
+      brightYellow: '#fabd2f',
+      brightBlue: '#83a598',
+      brightMagenta: '#d3869b',
+      brightCyan: '#8ec07c',
+      brightWhite: '#ebdbb2'
     }
   }),
   'nord-frost': makeTheme({
@@ -908,6 +1243,348 @@ export const themePresets = {
       warning: '#ebcb8b',
       danger: '#bf616a',
       shadow: darkShadow
+    },
+    terminalPalette: {
+      black: '#3b4252',
+      red: '#bf616a',
+      green: '#a3be8c',
+      yellow: '#ebcb8b',
+      blue: '#81a1c1',
+      magenta: '#b48ead',
+      cyan: '#88c0d0',
+      white: '#e5e9f0',
+      brightBlack: '#4c566a',
+      brightRed: '#cb727b',
+      brightGreen: '#b0c99b',
+      brightYellow: '#f0d8a8',
+      brightBlue: '#8fabc7',
+      brightMagenta: '#c19dbb',
+      brightCyan: '#8fbcbb',
+      brightWhite: '#eceff4'
+    }
+  }),
+  'solarized-light': makeTheme({
+    id: 'solarized-light',
+    name: 'Solarized Light',
+    group: 'official',
+    appearance: 'light',
+    core: {
+      bg: '#f4eedb',
+      surface: '#fdf6e3',
+      surfaceMuted: '#eee8d5',
+      surfaceStrong: '#e4dcc3',
+      border: '#d3cbb7',
+      text: '#073642',
+      textMuted: '#586e75',
+      accent: '#268bd2',
+      accentSecondary: '#2aa198',
+      success: '#859900',
+      warning: '#b58900',
+      danger: '#dc322f',
+      shadow: '0 18px 42px rgb(88 74 40 / 0.16)'
+    },
+    terminalPalette: {
+      black: '#073642',
+      red: '#dc322f',
+      green: '#859900',
+      yellow: '#b58900',
+      blue: '#268bd2',
+      magenta: '#d33682',
+      cyan: '#2aa198',
+      white: '#93a1a1',
+      brightBlack: '#586e75',
+      brightRed: '#cb4b16',
+      brightGreen: '#9cb305',
+      brightYellow: '#d1a416',
+      brightBlue: '#4ba3dd',
+      brightMagenta: '#6c71c4',
+      brightCyan: '#3cbcb2',
+      brightWhite: '#fdf6e3'
+    }
+  }),
+  'one-light': makeTheme({
+    id: 'one-light',
+    name: 'One Light',
+    group: 'official',
+    appearance: 'light',
+    surfaceStyle: 'solid',
+    core: {
+      bg: '#f2f2f3',
+      surface: '#fafafa',
+      surfaceMuted: '#eaeaeb',
+      surfaceStrong: '#dbdbdc',
+      border: '#c5c5c8',
+      text: '#383a42',
+      textMuted: '#696c77',
+      accent: '#4078f2',
+      accentSecondary: '#0184bc',
+      success: '#50a14f',
+      warning: '#c18401',
+      danger: '#e45649',
+      shadow: lightShadow
+    },
+    terminalPalette: {
+      black: '#383a42',
+      red: '#e45649',
+      green: '#50a14f',
+      yellow: '#c18401',
+      blue: '#4078f2',
+      magenta: '#a626a4',
+      cyan: '#0184bc',
+      white: '#a0a1a7',
+      brightBlack: '#565963',
+      brightRed: '#ec7063',
+      brightGreen: '#67b26a',
+      brightYellow: '#d9a441',
+      brightBlue: '#6a95f5',
+      brightMagenta: '#c05fc0',
+      brightCyan: '#2ba4d4',
+      brightWhite: '#ffffff'
+    }
+  }),
+  'gruvbox-light': makeTheme({
+    id: 'gruvbox-light',
+    name: 'Gruvbox Light',
+    group: 'official',
+    appearance: 'light',
+    surfaceStyle: 'solid',
+    core: {
+      bg: '#f5ecc5',
+      surface: '#fbf1c7',
+      surfaceMuted: '#ebdbb2',
+      surfaceStrong: '#d5c4a1',
+      border: '#bdae93',
+      text: '#3c3836',
+      textMuted: '#665c54',
+      accent: '#076678',
+      accentSecondary: '#427b58',
+      success: '#79740e',
+      warning: '#b57614',
+      danger: '#9d0006',
+      shadow: '0 18px 42px rgb(80 66 40 / 0.16)'
+    },
+    terminalPalette: {
+      black: '#3c3836',
+      red: '#cc241d',
+      green: '#98971a',
+      yellow: '#d79921',
+      blue: '#458588',
+      magenta: '#b16286',
+      cyan: '#689d6a',
+      white: '#7c6f64',
+      brightBlack: '#928374',
+      brightRed: '#9d0006',
+      brightGreen: '#79740e',
+      brightYellow: '#b57614',
+      brightBlue: '#076678',
+      brightMagenta: '#8f3f71',
+      brightCyan: '#427b58',
+      brightWhite: '#ebdbb2'
+    }
+  }),
+  'nord-snowstorm': makeTheme({
+    id: 'nord-snowstorm',
+    name: 'Nord Snow Storm',
+    group: 'official',
+    appearance: 'light',
+    core: {
+      bg: '#e5e9f0',
+      surface: '#eceff4',
+      surfaceMuted: '#dde3ec',
+      surfaceStrong: '#ccd4e0',
+      border: '#b4bfd0',
+      text: '#2e3440',
+      textMuted: '#556077',
+      accent: '#5272a3',
+      accentSecondary: '#40808f',
+      success: '#5f8752',
+      warning: '#9e7c37',
+      danger: '#a54e57',
+      shadow: '0 18px 42px rgb(46 52 64 / 0.14)'
+    },
+    terminalPalette: {
+      black: '#3b4252',
+      red: '#a54e57',
+      green: '#5f8752',
+      yellow: '#a8853c',
+      blue: '#5272a3',
+      magenta: '#8d6a92',
+      cyan: '#507e88',
+      white: '#7b88a1',
+      brightBlack: '#4c566a',
+      brightRed: '#bf616a',
+      brightGreen: '#7f9f6e',
+      brightYellow: '#c1a15e',
+      brightBlue: '#81a1c1',
+      brightMagenta: '#b48ead',
+      brightCyan: '#6e9ba6',
+      brightWhite: '#d8dee9'
+    }
+  }),
+  'rose-pine-dawn': makeTheme({
+    id: 'rose-pine-dawn',
+    name: 'Rose Pine Dawn',
+    group: 'official',
+    appearance: 'light',
+    core: {
+      bg: '#faf4ed',
+      surface: '#fffaf3',
+      surfaceMuted: '#f2e9e1',
+      surfaceStrong: '#e5dbd2',
+      border: '#cecacd',
+      text: '#575279',
+      textMuted: '#797593',
+      accent: '#286983',
+      accentSecondary: '#907aa9',
+      success: '#56949f',
+      warning: '#c98322',
+      danger: '#b4637a',
+      shadow: '0 18px 42px rgb(87 82 121 / 0.14)'
+    },
+    terminalPalette: {
+      black: '#575279',
+      red: '#b4637a',
+      green: '#286983',
+      yellow: '#c98322',
+      blue: '#56949f',
+      magenta: '#907aa9',
+      cyan: '#d7827e',
+      white: '#9893a5',
+      brightBlack: '#797593',
+      brightRed: '#c98096',
+      brightGreen: '#3a7f9c',
+      brightYellow: '#ea9d34',
+      brightBlue: '#6ba7b3',
+      brightMagenta: '#a68abd',
+      brightCyan: '#e19c98',
+      brightWhite: '#f2e9e1'
+    }
+  }),
+  'ayu-light': makeTheme({
+    id: 'ayu-light',
+    name: 'Ayu Light',
+    group: 'official',
+    appearance: 'light',
+    surfaceStyle: 'solid',
+    core: {
+      bg: '#f3f4f5',
+      surface: '#fcfcfc',
+      surfaceMuted: '#ebedef',
+      surfaceStrong: '#dadde1',
+      border: '#c4cad1',
+      text: '#40454a',
+      textMuted: '#656f79',
+      accent: '#1c7ec7',
+      accentSecondary: '#8757ba',
+      success: '#5f8f00',
+      warning: '#a87513',
+      danger: '#cc4d4d',
+      shadow: lightShadow
+    },
+    terminalPalette: {
+      black: '#33383d',
+      red: '#cf4f4f',
+      green: '#6f9414',
+      yellow: '#a87513',
+      blue: '#1c7ec7',
+      magenta: '#8757ba',
+      cyan: '#2f9e83',
+      white: '#9da3aa',
+      brightBlack: '#5c6166',
+      brightRed: '#f07171',
+      brightGreen: '#86b300',
+      brightYellow: '#f2ae49',
+      brightBlue: '#399ee6',
+      brightMagenta: '#a37acc',
+      brightCyan: '#4cbf99',
+      brightWhite: '#e7eaed'
+    }
+  }),
+  'obsidian-black': makeTheme({
+    id: 'obsidian-black',
+    name: 'Obsidian Black',
+    group: 'official',
+    appearance: 'dark',
+    surfaceStyle: 'solid',
+    core: {
+      bg: '#08080c',
+      surface: '#101016',
+      surfaceMuted: '#171720',
+      surfaceStrong: '#21212c',
+      border: '#343444',
+      text: '#e8e8f2',
+      textMuted: '#9698ac',
+      accent: '#00d4ff',
+      accentSecondary: '#ff4d9d',
+      success: '#3ddc84',
+      warning: '#ffb454',
+      danger: '#ff5370',
+      shadow: '0 18px 48px rgb(0 0 0 / 0.5)'
+    },
+    terminalPalette: {
+      black: '#262633',
+      red: '#ff5370',
+      green: '#3ddc84',
+      yellow: '#ffcb6b',
+      blue: '#3d8bff',
+      magenta: '#ff4d9d',
+      cyan: '#00d4ff',
+      white: '#d8d8e4',
+      brightBlack: '#4a4a5e',
+      brightRed: '#ff7a93',
+      brightGreen: '#6ee8a5',
+      brightYellow: '#ffd98c',
+      brightBlue: '#6faaff',
+      brightMagenta: '#ff80b8',
+      brightCyan: '#55e0ff',
+      brightWhite: '#f2f2f8'
+    }
+  }),
+  'ubuntu-solid': makeTheme({
+    id: 'ubuntu-solid',
+    name: 'Ubuntu Solid',
+    group: 'official',
+    appearance: 'dark',
+    surfaceStyle: 'solid',
+    core: {
+      bg: '#300A24',
+      surface: '#3b102d',
+      surfaceMuted: '#461738',
+      surfaceStrong: '#512043',
+      border: '#6d4f63',
+      text: '#ffffff',
+      textMuted: '#c8b7c2',
+      accent: '#3465a4',
+      accentSecondary: '#4e9a06',
+      success: '#4e9a06',
+      warning: '#c4a000',
+      danger: '#cc0000',
+      shadow: '0 18px 48px rgb(48 10 36 / 0.38)'
+    },
+    terminalPalette: {
+      background: '#300A24',
+      foreground: '#ffffff',
+      cursor: '#ffffff',
+      selectionBackground: '#75507b88',
+      black: '#2e3436',
+      red: '#cc0000',
+      green: '#4e9a06',
+      yellow: '#c4a000',
+      blue: '#3465a4',
+      magenta: '#75507b',
+      cyan: '#06989a',
+      white: '#d3d7cf',
+      brightBlack: '#555753',
+      brightRed: '#ef2929',
+      brightGreen: '#8ae234',
+      brightYellow: '#fce94f',
+      brightBlue: '#729fcf',
+      brightMagenta: '#ad7fa8',
+      brightCyan: '#34e2e2',
+      brightWhite: '#eeeeec',
+      scrollbarTrack: '#6d4f6366',
+      scrollbarThumb: '#c8b7c299',
+      scrollbarThumbHover: '#ad7fa8'
     }
   })
 } satisfies Record<ConcreteThemeId, ThemeDefinition>
@@ -978,6 +1655,22 @@ const terminalActiveSurfaceVariables = (theme: ThemeDefinition) => {
   return variables
 }
 
+// Teleport 到 body 的弹层(右键菜单、下拉、tooltip)不在 .app-body.module-* 作用域内,
+// 只能继承 html 上的变量。这里把 workspace 模块的 base 层平铺成 --theme-module-active-*
+// 内联默认值;.app-shell 内部的 class 作用域声明仍会按当前模块/背景层覆盖它。
+const moduleActiveFallbackVariables = (theme: ThemeDefinition) => {
+  const variables: Record<string, string> = {}
+  const { base, withBackground, ...plain } = theme.modules.workspace
+  void withBackground
+  flattenRecord('--theme-module-active', plain as unknown as Record<string, unknown>, variables)
+  flattenRecord('--theme-module-active', base as unknown as Record<string, unknown>, variables)
+  return variables
+}
+
+// setProperty 每次都会重新序列化整个内联样式,主题包含数百个变量时重复全量写入的
+// 开销是平方级的;按根元素缓存上次写入的值,只落差量。
+const appliedThemeVariables = new WeakMap<HTMLElement, Record<string, string>>()
+
 export const applyThemeToDocument = (theme: string) => {
   if (typeof document === 'undefined') return resolveThemePreset(theme)
   const preset = resolveThemePreset(theme)
@@ -987,13 +1680,21 @@ export const applyThemeToDocument = (theme: string) => {
   root.dataset.theme = preset.appearance
   root.dataset.themeId = preset.id
   root.dataset.themePreference = isThemeId(theme) ? theme : 'dark'
-  root.style.setProperty('color-scheme', preset.appearance)
-  for (const [key, value] of Object.entries(themeCssVariables(preset))) {
+  const variables: Record<string, string> = {
+    'color-scheme': preset.appearance,
+    ...themeCssVariables(preset),
+    ...terminalActiveSurfaceVariables(preset),
+    ...moduleActiveFallbackVariables(preset)
+  }
+  const applied = appliedThemeVariables.get(root) || {}
+  for (const [key, value] of Object.entries(variables)) {
+    if (applied[key] === value) continue
     root.style.setProperty(key, value)
   }
-  for (const [key, value] of Object.entries(terminalActiveSurfaceVariables(preset))) {
-    root.style.setProperty(key, value)
+  for (const key of Object.keys(applied)) {
+    if (!(key in variables)) root.style.removeProperty(key)
   }
+  appliedThemeVariables.set(root, variables)
   return preset
 }
 

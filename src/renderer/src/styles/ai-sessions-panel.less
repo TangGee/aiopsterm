@@ -138,22 +138,22 @@
   z-index: 60;
   width: max-content;
   max-width: 190px;
-  border: 1px solid rgba(148, 163, 184, 0.28);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 7px;
-  background: #0f1720;
-  color: #d7dee8;
+  background: var(--theme-module-active-overlay-bg);
+  color: var(--theme-module-active-text);
   font-size: 11px;
   line-height: 1.35;
   text-align: center;
   padding: 6px 8px;
-  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.48);
+  box-shadow: var(--theme-module-active-shadow-soft);
   pointer-events: none;
   transform: translateY(-50%);
 }
 
 .ai-sessions-mode-tooltip strong {
   display: block;
-  color: #ffffff;
+  color: var(--theme-module-active-text);
 }
 
 .ai-sessions-error {
@@ -350,7 +350,7 @@
 }
 
 .ai-session-row.attention {
-  border-color: rgba(59, 130, 246, 0.35);
+  border-color: color-mix(in srgb, var(--theme-module-active-accent) 44%, transparent);
 }
 
 .ai-session-row-body {
@@ -460,15 +460,15 @@
 }
 
 .ai-session-state.dot-linked {
-  background: #38bdf8;
+  background: var(--theme-module-active-accent);
 }
 
 .ai-session-state.dot-other {
-  background: #8b949e;
+  background: var(--theme-module-active-text-muted);
 }
 
 .state-ended {
-  background: #71717a;
+  background: var(--theme-module-active-text-muted);
 }
 
 .state-idle {
