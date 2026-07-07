@@ -5,6 +5,7 @@ type TerminalBridge = Pick<
   AiopsPreloadApi,
   | 'createTerminal'
   | 'writeTerminal'
+  | 'ackTerminalData'
   | 'writeTerminalBinary'
   | 'resizeTerminal'
   | 'killTerminal'
@@ -24,6 +25,7 @@ const bridgeMethod = createBridgeMethod<TerminalBridge>()
 export const terminalClient = {
   createTerminal: () => bridgeMethod('createTerminal'),
   writeTerminal: () => bridgeMethod('writeTerminal'),
+  ackTerminalData: () => bridgeMethod('ackTerminalData'),
   writeTerminalBinary: () => bridgeMethod('writeTerminalBinary'),
   resizeTerminal: () => bridgeMethod('resizeTerminal'),
   killTerminal: () => bridgeMethod('killTerminal'),

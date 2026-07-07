@@ -17,7 +17,8 @@ import type {
   DatabaseWorkspaceCatalog
 } from './contracts/database'
 import { buildDatabaseMutationStatement, databaseMutationPlanData, inputKnownColumns } from './databaseMutationPlanner'
-import type { DatabaseSqlExecuteRawResult } from './databaseSqlExecution'
+import type { DatabaseSqlExecuteRawData, DatabaseSqlExecuteRawResult } from './databaseSqlExecution'
+import { executeSqliteStatementInWorker } from './databaseSqliteWorkerRuntime'
 import {
   columnsForRows,
   parseOrderByRaw,
@@ -52,6 +53,7 @@ export type DatabaseSqliteRuntimeConfig = {
 
 const SQLITE_MAIN_SCHEMA = 'main'
 const SQLITE_TIMEOUT_MS = 5000
+const SQLITE_EXECUTE_MAX_ROWS = 5000
 let sqliteRuntime: SqliteDatabaseConstructor | null | undefined
 let runtimeConfig: DatabaseSqliteRuntimeConfig | null = null
 
@@ -128,16 +130,6 @@ const sqliteIdentifier = (value: string) => `"${String(value || '').replace(/"/g
 const sqliteTableReference = (connection: DatabaseConnectionInfo, databaseName: string | undefined, tableName: string) =>
   `${sqliteIdentifier(sqliteSchemaNameFor(connection, databaseName))}.${sqliteIdentifier(tableName)}`
 
-const sqliteCall = (stmt: SqliteStatement, params: unknown[], mode: 'all' | 'run') => (params.length ? stmt[mode](...params) : stmt[mode]())
-
-const sqliteColumnNamesFromStatement = (stmt: SqliteStatement, rows: Array<Record<string, unknown>>) => {
-  const columns = stmt
-    .columns()
-    .map((column) => trim(column.name))
-    .filter(Boolean)
-  return columns.length ? columns : columnsForRows(rows)
-}
-
 const sqliteColumnsForTable = (db: SqliteDatabase, schemaName: string, tableName: string): DatabaseColumnInfo[] => {
   const rows = db.prepare(`PRAGMA ${sqliteIdentifier(schemaName)}.table_xinfo(${sqliteIdentifier(tableName)})`).all() as SqliteTableColumnRow[]
   return rows
@@ -188,30 +180,32 @@ export const sqliteCatalogsForConnection = (connection: DatabaseConnectionInfo):
   }
 }
 
-export const sqliteExecute = (connection: DatabaseConnectionInfo, sql: string, startedAt: number): DatabaseSqlExecuteRawResult => {
-  let db: SqliteDatabase | null = null
+// 用户 SQL 在 worker 线程执行，主线程不再被长查询阻塞；reader 结果超过上限时截断并标记 truncated。
+export const sqliteExecute = async (connection: DatabaseConnectionInfo, sql: string, startedAt: number): Promise<DatabaseSqlExecuteRawResult> => {
   try {
-    db = openSqliteDatabase(sqliteFilePathFromConnection(connection), !!connection.readonly)
-    const stmt = db.prepare(sql)
-    if (stmt.reader) {
-      const rows = sqliteCall(stmt, [], 'all') as Array<Record<string, unknown>>
-      return {
-        ok: true,
-        data: {
-          columns: sqliteColumnNamesFromStatement(stmt, rows),
-          rows,
-          rowCount: rows.length,
-          durationMs: Math.max(1, Date.now() - startedAt)
-        }
+    const outcome = await executeSqliteStatementInWorker({
+      filePath: sqliteFilePathFromConnection(connection),
+      readonly: !!connection.readonly,
+      sql,
+      maxRows: SQLITE_EXECUTE_MAX_ROWS,
+      timeoutMs: SQLITE_TIMEOUT_MS
+    })
+    if (outcome.reader) {
+      const data: DatabaseSqlExecuteRawData & { truncated?: boolean } = {
+        columns: outcome.columns.length ? outcome.columns : columnsForRows(outcome.rows),
+        rows: outcome.rows,
+        rowCount: outcome.rows.length,
+        durationMs: Math.max(1, Date.now() - startedAt),
+        ...(outcome.truncated ? { truncated: true } : {})
       }
+      return { ok: true, data }
     }
-    const result = sqliteCall(stmt, [], 'run') as SqliteRunResult
     return {
       ok: true,
       data: {
         columns: [],
         rows: [],
-        rowCount: Number(result.changes ?? 0),
+        rowCount: outcome.changes,
         durationMs: Math.max(1, Date.now() - startedAt)
       }
     }
@@ -221,8 +215,6 @@ export const sqliteExecute = (connection: DatabaseConnectionInfo, sql: string, s
       errorCode: sqliteErrorCode(error, 'DB_SQLITE_QUERY_FAILED'),
       errorMessage: sqliteErrorMessage(error, 'SQLite query failed.')
     }
-  } finally {
-    db?.close()
   }
 }
 

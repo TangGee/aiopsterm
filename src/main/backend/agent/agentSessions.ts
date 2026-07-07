@@ -1,8 +1,8 @@
 import { randomUUID } from 'crypto'
 import { createServer, type Server, type Socket } from 'net'
-import { copyFileSync, existsSync, mkdirSync, rmSync } from 'fs'
+import { copyFileSync, existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'fs'
 import { dirname, join } from 'path'
-import { mkdir } from 'fs/promises'
+import { mkdir, stat } from 'fs/promises'
 import { platformSocketPath } from '../app/platformRuntime'
 import {
   createAgentSessionEventStreamRuntime,
@@ -140,7 +140,7 @@ const autoNamingRuntime = createAgentSessionAutoNamingRuntime({
   setSession: (key, session) => {
     sessions.set(key, session)
   },
-  persistSnapshot: () => storeRuntime.persistSnapshot(),
+  persistSnapshot: () => persistSnapshot(),
   appendManagedAiSessionAudit,
   publishManagedAiStreamFrame
 })
@@ -243,11 +243,58 @@ const snapshot = (): ManagedAiSessionSnapshot => ({
     }))
 })
 
-const persistSnapshot = storeRuntime.persistSnapshot
 const loadStoreIfNeeded = storeRuntime.loadStoreIfNeeded
 const storePathFor = storeRuntime.storePathFor
 
+// 内存 sessions 为权威数据；hook 事件高频触发时按去抖窗口合并整库落盘，进程退出时同步兜底一次。
+const persistDebounceMs = 400
+let persistTimer: NodeJS.Timeout | null = null
+let persistDirty = false
+let storeUserDataPath = ''
+
+const persistSnapshotOnExit = () => {
+  if (!persistDirty || !storeUserDataPath) return
+  persistDirty = false
+  try {
+    const storePath = storePathFor(storeUserDataPath)
+    const payload = {
+      version: storeVersion,
+      agentHibernation: agentHibernationConfig,
+      ...snapshot()
+    }
+    mkdirSync(dirname(storePath), { recursive: true })
+    const tempPath = `${storePath}.${process.pid}.exit.tmp`
+    writeFileSync(tempPath, `${JSON.stringify(payload, null, 2)}\n`, 'utf-8')
+    renameSync(tempPath, storePath)
+  } catch {
+    /* 退出兜底写盘失败时已无恢复手段，保持静默。 */
+  }
+}
+
+const flushPersistSnapshotNow = () => {
+  if (persistTimer) {
+    clearTimeout(persistTimer)
+    persistTimer = null
+  }
+  if (!persistDirty) return
+  persistDirty = false
+  process.removeListener('exit', persistSnapshotOnExit)
+  storeRuntime.persistSnapshot()
+}
+
+const persistSnapshot = () => {
+  if (!persistDirty) {
+    persistDirty = true
+    process.once('exit', persistSnapshotOnExit)
+  }
+  if (persistTimer) return
+  persistTimer = setTimeout(flushPersistSnapshotNow, persistDebounceMs)
+  persistTimer.unref()
+}
+
 export const configureAiAgentSessionStore = async (userDataPath: string) => {
+  flushPersistSnapshotNow()
+  storeUserDataPath = userDataPath
   codexTranscriptMonitorRuntime.reset()
   auditRuntime.configure(auditPathFor(userDataPath))
   importRuntime.configure({
@@ -262,6 +309,7 @@ export const configureManagedAiSessionImportRuntime = (config?: Parameters<typeo
 
 export const configureManagedAiSessionGitRuntime = (config?: Parameters<typeof gitRuntime.configure>[0]) => {
   gitRuntime.configure(config)
+  gitInfoCacheByCwd.clear()
 }
 
 const withGitInfo = <T extends ManagedAiSessionRecord | ImportedAgentSession>(session: T, gitInfo: ManagedAiSessionGitInfo): T => {
@@ -274,13 +322,35 @@ const withGitInfo = <T extends ManagedAiSessionRecord | ImportedAgentSession>(se
   }
 }
 
+// git 探测结果按 (repoPath, HEAD mtime) 缓存：HEAD 未变化时直接复用，跳过 git 子进程。
+type GitInfoCacheEntry = { headMtimeMs: number; info: ManagedAiSessionGitInfo }
+const gitInfoCacheByCwd = new Map<string, GitInfoCacheEntry>()
+
+const gitHeadMtimeFor = async (cwd: string) => {
+  try {
+    return (await stat(join(cwd, '.git', 'HEAD'))).mtimeMs
+  } catch {
+    return null
+  }
+}
+
+const gitInfoForCwdCached = async (cwd: string): Promise<ManagedAiSessionGitInfo> => {
+  const headMtimeMs = await gitHeadMtimeFor(cwd)
+  if (headMtimeMs === null) return gitRuntime.gitInfoForCwd(cwd)
+  const cached = gitInfoCacheByCwd.get(cwd)
+  if (cached && cached.headMtimeMs === headMtimeMs) return cached.info
+  const info = await gitRuntime.gitInfoForCwd(cwd)
+  if (info.gitBranch) gitInfoCacheByCwd.set(cwd, { headMtimeMs, info })
+  return info
+}
+
 const refreshGitInfoForSessions = async () => {
   const candidates = [...sessions.values()].filter((session) => session.canonicalCwd || session.cwd)
   if (!candidates.length) return 0
   const updates = await Promise.all(
     candidates.map(async (session) => ({
       session,
-      gitInfo: await gitRuntime.gitInfoForCwd(session.canonicalCwd || session.cwd)
+      gitInfo: await gitInfoForCwdCached(session.canonicalCwd || session.cwd || '')
     }))
   )
   let changed = 0
@@ -461,6 +531,17 @@ const importExternalManagedAiSessions = async () => {
   return changed
 }
 
+// 并发 list 只触发一次导入扫描，后续调用复用同一个在途 Promise。
+let importScanInFlight: Promise<number> | null = null
+
+const importExternalManagedAiSessionsOnce = () => {
+  if (importScanInFlight) return importScanInFlight
+  importScanInFlight = importExternalManagedAiSessions().finally(() => {
+    importScanInFlight = null
+  })
+  return importScanInFlight
+}
+
 export function publishAiAgentSessionEvent(input: AiAgentSessionEventInput, emit: AgentSessionEventSink | null = eventSink) {
   const result = normalizeAiAgentSessionEventInput(input)
   if (!result.ok || !result.data) return result
@@ -626,8 +707,8 @@ const publishAiAgentSessionSocketEvent = async (input: AiAgentSessionEventInput,
 
 export const listManagedAiSessions = async (): Promise<ManagedAiSessionListResult> => {
   await loadStoreIfNeeded()
-  await importExternalManagedAiSessions()
-  await refreshGitInfoForSessions()
+  // 导入扫描与 git 探测并行执行，两者内部都有缓存兜底；导入结果同时通过 managed_ai.sessions.imported 增量推送。
+  await Promise.all([importExternalManagedAiSessionsOnce(), refreshGitInfoForSessions()])
   return { ok: true, data: snapshot() }
 }
 
@@ -995,6 +1076,7 @@ export const ensureAiAgentSessionServer = async ({ userDataPath, emit }: AgentSe
 }
 
 export const closeAiAgentSessionServer = () => {
+  flushPersistSnapshotNow()
   const existing = server
   server = null
   if (existing) existing.close()
@@ -1030,6 +1112,7 @@ export const __testing = {
   streamEventCount: agentSessionEventStreamRuntime.streamEventCount,
   streamLatestSeq: agentSessionEventStreamRuntime.streamLatestSeq,
   flushManagedAiSessionWrites: async () => {
+    flushPersistSnapshotNow()
     await storeRuntime.flush()
     await auditRuntime.flush()
   },

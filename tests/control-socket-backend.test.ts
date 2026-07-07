@@ -75,6 +75,11 @@ const loadBackend = async () => {
   return (await import(modulePath)) as unknown as ControlSocketBackend
 }
 
+const loadControlSocketStateRuntime = async () => {
+  const modulePath = '../src/main/backend/control/controlSocketStateRuntime'
+  return (await import(modulePath)) as { flushControlSocketDurableEventLog: () => Promise<void> }
+}
+
 const loadAgentSessionsBackend = async () => {
   const modulePath = '../src/main/backend/agent/agentSessions'
   return (await import(modulePath)) as AgentSessionsBackend
@@ -2216,6 +2221,8 @@ describe('control socket backend', () => {
       ).resolves.toEqual(expect.objectContaining({ ok: false, errorCode: 'WAIT_FOR_TIMEOUT' }))
     } finally {
       backend.closeControlSocketServer()
+      const { flushControlSocketDurableEventLog } = await loadControlSocketStateRuntime()
+      await flushControlSocketDurableEventLog()
       await rm(root, { recursive: true, force: true })
     }
   })
@@ -2281,6 +2288,8 @@ describe('control socket backend', () => {
         params: { title: 'Durable event', body: 'durable body should not be copied into jsonl' }
       })
 
+      const { flushControlSocketDurableEventLog } = await loadControlSocketStateRuntime()
+      await flushControlSocketDurableEventLog()
       const eventFile = await readFile(backend.__testing.eventLogPathFor(root), 'utf-8')
       expect(eventFile).toContain('"name":"terminal.text_sent"')
       expect(eventFile).toContain('"name":"notification.created"')

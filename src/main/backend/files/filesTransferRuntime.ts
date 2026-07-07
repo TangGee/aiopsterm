@@ -6,7 +6,8 @@ import type {
   FileListOptions,
   FileTransferTask,
   FileTransferTaskCancelInput,
-  FileTransferTaskCancelResult
+  FileTransferTaskCancelResult,
+  FileTransferTaskEvent
 } from '@shared/contracts/files'
 import { remoteBasename, remoteDirname } from './filesPathRuntime'
 
@@ -48,6 +49,50 @@ const cloneFileTransferTask = (task: FileTransferTask): FileTransferTask => ({
 
 const activeFileTransferTasks = new Map<string, FileTransferTask>()
 const activeFileTransferControls = new Map<string, FileTransferAbortControl>()
+
+export type FileTransferTaskEventSender = (event: FileTransferTaskEvent) => void
+
+const fileTransferProgressCoalesceMs = 100
+
+type PendingFileTransferProgress = { task: FileTransferTask | null; timer: NodeJS.Timeout }
+
+let fileTransferTaskEventSender: FileTransferTaskEventSender | null = null
+const pendingFileTransferProgress = new Map<string, PendingFileTransferProgress>()
+
+export const setFileTransferTaskEventSender = (sender: FileTransferTaskEventSender | null) => {
+  fileTransferTaskEventSender = sender
+}
+
+const dropPendingFileTransferProgress = (taskId: string) => {
+  const pending = pendingFileTransferProgress.get(taskId)
+  if (!pending) return
+  clearTimeout(pending.timer)
+  pendingFileTransferProgress.delete(taskId)
+}
+
+const emitFileTransferTaskEvent = (kind: FileTransferTaskEvent['kind'], task: FileTransferTask) => {
+  fileTransferTaskEventSender?.({ kind, task: cloneFileTransferTask(task) })
+}
+
+// 同一任务 100ms 内的进度变化合并成一条推送：首次立即发送，窗口内只保留最后一次并在窗口结束时补发
+const emitFileTransferProgressEvent = (task: FileTransferTask) => {
+  if (!fileTransferTaskEventSender) return
+  const pending = pendingFileTransferProgress.get(task.id)
+  if (pending) {
+    pending.task = cloneFileTransferTask(task)
+    return
+  }
+  emitFileTransferTaskEvent('progress', task)
+  const taskId = task.id
+  const entry: PendingFileTransferProgress = {
+    task: null,
+    timer: setTimeout(() => {
+      pendingFileTransferProgress.delete(taskId)
+      if (entry.task) fileTransferTaskEventSender?.({ kind: 'progress', task: entry.task })
+    }, fileTransferProgressCoalesceMs)
+  }
+  pendingFileTransferProgress.set(taskId, entry)
+}
 
 export const transferCancelledError = () => Object.assign(new Error('File transfer cancelled'), { code: 'FILES_TRANSFER_CANCELLED' })
 
@@ -137,23 +182,27 @@ export const registerActiveFileTransferTask = (task: FileTransferTask, control?:
   if (task.status !== 'running') return
   activeFileTransferTasks.set(task.id, cloneFileTransferTask(task))
   if (control) registerFileTransferTaskControl(task, control)
+  emitFileTransferTaskEvent('registered', task)
 }
 
 export const updateActiveFileTransferTask = (task: FileTransferTask, control?: FileTransferAbortControl) => {
   if (task.status !== 'running' || !activeFileTransferTasks.has(task.id)) return
   activeFileTransferTasks.set(task.id, cloneFileTransferTask(task))
   if (control) registerFileTransferTaskControl(task, control)
+  emitFileTransferProgressEvent(task)
 }
 
 const deleteActiveFileTransferTaskIds = (taskIds: Iterable<string>) => {
   for (const taskId of taskIds) {
     activeFileTransferTasks.delete(taskId)
     activeFileTransferControls.delete(taskId)
+    dropPendingFileTransferProgress(taskId)
   }
 }
 
 export const finishActiveFileTransferTask = (task: FileTransferTask) => {
   deleteActiveFileTransferTaskIds(fileTransferTaskIds(task))
+  emitFileTransferTaskEvent('finished', task)
 }
 
 export const addActiveFileTransferChild = (task: FileTransferTask, child: FileTransferTask, control: FileTransferAbortControl) => {
@@ -344,6 +393,9 @@ export const cancelFileTransferTask = async (input: FileTransferTaskCancelInput)
 export const resetFileTransferRuntimeForTests = () => {
   activeFileTransferTasks.clear()
   activeFileTransferControls.clear()
+  pendingFileTransferProgress.forEach((pending) => clearTimeout(pending.timer))
+  pendingFileTransferProgress.clear()
+  fileTransferTaskEventSender = null
 }
 
 export const listFileTransferTasks = async (): Promise<FileTransferTask[]> =>

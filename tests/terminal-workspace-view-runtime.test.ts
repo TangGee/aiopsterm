@@ -127,6 +127,7 @@ vi.mock('@shared/runtimeSwitches', () => ({
 }))
 
 vi.mock('@/services/terminal/threadedTerminalRuntime', () => ({
+  setThreadedTerminalDataConsumedSink: vi.fn(),
   ThreadedTerminalFitAddon: threadedTerminalMocks.FakeThreadedFitAddon,
   ThreadedTerminalSearchAddon: threadedTerminalMocks.FakeThreadedSearchAddon,
   createThreadedTerminalHost: () => new threadedTerminalMocks.FakeThreadedTerminal(),

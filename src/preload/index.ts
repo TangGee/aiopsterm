@@ -236,6 +236,9 @@ const api: AiopsPreloadApi = {
   deleteAliasCommand: (input) => ipcRenderer.invoke('aliases:delete', input),
   createTerminal: (options?: TerminalCreateOptions) => ipcRenderer.invoke('terminal:create', options) as Promise<TerminalSessionInfo>,
   writeTerminal: (id: string, data: string) => ipcRenderer.invoke('terminal:write', id, data),
+  ackTerminalData: (id: string, bytes: number) => {
+    ipcRenderer.send('terminal:ack-data', id, bytes)
+  },
   writeTerminalBinary: (id: string, data) => ipcRenderer.invoke('terminal:write-binary', id, data),
   resizeTerminal: (id: string, cols: number, rows: number) => ipcRenderer.invoke('terminal:resize', id, cols, rows),
   killTerminal: (id: string) => ipcRenderer.invoke('terminal:kill', id),
@@ -382,6 +385,11 @@ const api: AiopsPreloadApi = {
   transferFileEntry: (operation, options) => ipcRenderer.invoke('files:transfer-entry', operation, options),
   cancelFileTransferTask: (input) => ipcRenderer.invoke('files:transfer-task:cancel', input),
   listFileTransferTasks: () => ipcRenderer.invoke('files:list-transfer-tasks'),
+  onFileTransferTaskEvent: (listener) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, payload: Parameters<typeof listener>[0]) => listener(payload)
+    ipcRenderer.on('files:transfer-task-event', wrapped)
+    return () => ipcRenderer.off('files:transfer-task-event', wrapped)
+  },
   onTerminalData: (listener: (event: TerminalDataEvent) => void) => {
     const wrapped = (_event: Electron.IpcRendererEvent, payload: TerminalDataEvent) => listener(payload)
     ipcRenderer.on('terminal:data', wrapped)

@@ -2,7 +2,7 @@ import { beforeAll, describe, expect, it } from 'vitest'
 
 let createSshTerminalConnectionInfo: (terminalId: string, target: any, options?: any, createdAt?: number) => any
 let createTerminalBinaryWriteResult: (id: string, bytes: number, exists: boolean) => any
-let createTerminalDataEvent: (id: string, chunk: string | Buffer) => any
+let createTerminalDataEvent: (id: string, chunk: string | Buffer, options?: { includeRaw?: boolean }) => any
 let createTerminalErrorLifecycleEvent: (id: string, kind: any, error: unknown, event?: any, at?: number) => any
 let createTerminalKillResult: (id: string, exists: boolean) => any
 let createTerminalLifecycleEvent: (id: string, event: any, at?: number) => any
@@ -108,16 +108,20 @@ describe('terminal backend boundary', () => {
   })
 
   it('carries raw terminal bytes for ZMODEM detection while preserving display text', () => {
-    expect(createTerminalDataEvent('terminal-raw-unit', Buffer.from([0x2a, 0x2a, 0x18, 0x42, 0xff]))).toEqual({
+    expect(createTerminalDataEvent('terminal-raw-unit', Buffer.from([0x2a, 0x2a, 0x18, 0x42, 0xff]), { includeRaw: true })).toEqual({
       id: 'terminal-raw-unit',
       data: '**\u0018B�',
-      raw: [42, 42, 24, 66, 255]
+      raw: new Uint8Array([42, 42, 24, 66, 255])
     })
 
-    expect(createTerminalDataEvent('terminal-text-unit', 'uptime\n')).toEqual({
+    expect(createTerminalDataEvent('terminal-text-unit', 'uptime\n', { includeRaw: true })).toEqual({
       id: 'terminal-text-unit',
-      data: 'uptime\n',
-      raw: [117, 112, 116, 105, 109, 101, 10]
+      data: 'uptime\n'
+    })
+
+    expect(createTerminalDataEvent('terminal-default-unit', Buffer.from([0x2a, 0x2a, 0x18, 0x42]))).toEqual({
+      id: 'terminal-default-unit',
+      data: '**\u0018B'
     })
   })
 

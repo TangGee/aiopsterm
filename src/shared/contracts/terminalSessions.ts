@@ -64,7 +64,7 @@ export type TerminalKillResult = AiopsMutationResult<{
 export type TerminalDataEvent = {
   id: string
   data: string
-  raw?: number[]
+  raw?: Uint8Array
 }
 
 export type TerminalBinaryWriteResult = AiopsMutationResult<{

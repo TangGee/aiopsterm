@@ -42,7 +42,6 @@ type ExternalCodexMcpRequest = {
 
 type ExternalConnectionRecord = ExternalCodexMcpConnection & {
   session: SshTerminalSession | null
-  output: string
   lifecycle?: TerminalLifecycleEvent
   readyPromise?: Promise<ExternalConnectionRecord>
   resolveReady?: (connection: ExternalConnectionRecord) => void
@@ -264,6 +263,21 @@ const remoteBasePattern = (basePath: string, pattern: string) => {
   return `${cleanBase}/${pattern}`
 }
 
+const failPendingCommandsForConnection = (connection: ExternalConnectionRecord, message: string) => {
+  for (const [commandId, pending] of pendingCommands.entries()) {
+    if (pending.connectionId !== connection.connectionId) continue
+    clearTimeout(pending.timer)
+    pendingCommands.delete(commandId)
+    pending.resolve(fail('CONNECTION_CLOSED', message, undefined, targetContextForConnection(connection)))
+  }
+}
+
+// 终态连接必须从 Map 移除，避免断线重连时连接记录无限堆积。
+const removeTerminalConnection = (connection: ExternalConnectionRecord, message: string) => {
+  failPendingCommandsForConnection(connection, message)
+  connections.delete(connection.connectionId)
+}
+
 const rejectConnectionReady = (connection: ExternalConnectionRecord, error: Error) => {
   connection.rejectReady?.(error)
   connection.resolveReady = undefined
@@ -353,8 +367,7 @@ const connectHost = async (params: Record<string, unknown>) => {
     cwd: target.username === 'root' ? '/root' : target.username ? `/home/${target.username}` : '~',
     createdAt,
     lastUsedAt: createdAt,
-    session: null,
-    output: ''
+    session: null
   }
   record.readyPromise = new Promise<ExternalConnectionRecord>((resolve, reject) => {
     record.resolveReady = resolve
@@ -387,6 +400,7 @@ const connectHost = async (params: Record<string, unknown>) => {
         record.errorMessage = event.errorMessage || event.message
         cancelExternalMcpAuthRequestsForConnection(connectionId, record.errorMessage || 'SSH connection closed before authentication completed.')
         rejectConnectionReady(record, new Error(record.errorMessage || 'SSH connection closed before shell was ready.'))
+        removeTerminalConnection(record, record.errorMessage || 'Connection closed before command output completed.')
       },
       data: (chunk) => appendExternalConnectionData(connectionId, chunk),
       keyboardInteractive: (request) => requestExternalMcpSshAuth(connectionId, request),
@@ -395,6 +409,7 @@ const connectHost = async (params: Record<string, unknown>) => {
         record.status = record.status === 'error' ? 'error' : 'closed'
         cancelExternalMcpAuthRequestsForConnection(connectionId)
         rejectConnectionReady(record, new Error(record.errorMessage || 'SSH connection closed before shell was ready.'))
+        removeTerminalConnection(record, record.errorMessage || 'Connection closed before command output completed.')
       }
     }
   )
@@ -404,6 +419,7 @@ const connectHost = async (params: Record<string, unknown>) => {
     record.status = 'error'
     record.errorMessage = result.lifecycle.errorMessage || result.lifecycle.message || 'SSH connection failed.'
     rejectConnectionReady(record, new Error(record.errorMessage))
+    removeTerminalConnection(record, record.errorMessage)
     return fail('CONNECT_HOST_FAILED', record.errorMessage, { connection: connectionSnapshot(record) }, targetContextForConnection(record))
   }
   if (result.lifecycle.stage === 'shell-ready') {
@@ -436,12 +452,7 @@ const disconnectHost = (params: Record<string, unknown>) => {
   }
   const connection = connections.get(connectionId)
   if (!connection) return fail('CONNECTION_NOT_FOUND', `External MCP connection was not found: ${connectionId}`)
-  for (const [commandId, pending] of pendingCommands.entries()) {
-    if (pending.connectionId !== connectionId) continue
-    clearTimeout(pending.timer)
-    pendingCommands.delete(commandId)
-    pending.resolve(fail('CONNECTION_CLOSED', 'Connection closed before command output completed.', undefined, targetContextForConnection(connection)))
-  }
+  failPendingCommandsForConnection(connection, 'Connection closed before command output completed.')
   try {
     connection.session?.kill('manual')
   } catch {}
@@ -513,7 +524,6 @@ export const appendExternalConnectionData = (connectionId: string, chunk: string
   if (!connection) return
   const text = Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk || '')
   if (!text) return
-  connection.output += text
   for (const [commandId, pending] of pendingCommands.entries()) {
     if (pending.connectionId !== connectionId) continue
     pending.output += text

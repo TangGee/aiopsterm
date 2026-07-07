@@ -634,3 +634,12 @@ const {
   workspace
 } = useAiPanelRuntimeContext()
 </script>
+
+<style scoped>
+/* 长会话窗口化：视口外消息跳过渲染与布局开销；
+   contain-intrinsic-size 记忆实际高度作屏外占位，保持滚动条与滚动到底部跟随行为 */
+.message {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 120px;
+}
+</style>

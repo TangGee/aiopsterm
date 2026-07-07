@@ -52,6 +52,8 @@ export type SshTerminalSession = {
   runBackgroundCommand?(options: TerminalBackgroundCommandOptions): Promise<TerminalBackgroundCommandResult>
   resize(cols: number, rows: number): void
   kill(reason?: TerminalDisconnectReason): void
+  pause?(): void
+  resume?(): void
 }
 
 export type SshTerminalChannel = ClientChannel
@@ -108,6 +110,8 @@ export type SshTerminalWritable = {
   write(data: string | Buffer): unknown
   close?: () => unknown
   setWindow?: (...args: number[]) => void
+  pause?: () => unknown
+  resume?: () => unknown
 }
 
 export type SshTerminalSsh2Runtime = {

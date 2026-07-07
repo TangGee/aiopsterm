@@ -309,6 +309,7 @@ describe('workspace store', () => {
     ;(globalThis as any).__resetAssetStoreMock?.()
     ;(globalThis as any).__resetKubernetesCatalogMock?.()
     ;(globalThis as any).__resetFileSessionCatalogMock?.()
+    ;(globalThis as any).__resetFileTransferTaskEventMock?.()
     ;(globalThis as any).__resetChatHistoryStoreMock?.()
     ;(globalThis as any).__resetAiTodoSnapshotMock?.()
     ;(globalThis as any).__resetExtensionPluginStoreMock?.()
@@ -4449,16 +4450,14 @@ describe('workspace store', () => {
         }
       ]
     }
-    vi.mocked(window.aiops.listFileTransferTasks)
-      .mockResolvedValueOnce([runningTask])
-      .mockResolvedValueOnce([progressedTask])
-      .mockResolvedValueOnce([])
-      .mockResolvedValue([])
+    vi.mocked(window.aiops.listFileTransferTasks).mockResolvedValueOnce([runningTask])
 
     const stopObserving = store.observeFileTransferTasks()
+    expect(vi.mocked(window.aiops.onFileTransferTaskEvent)).toHaveBeenCalledTimes(1)
     await Promise.resolve()
     await Promise.resolve()
 
+    expect(vi.mocked(window.aiops.listFileTransferTasks)).toHaveBeenCalledTimes(1)
     expect(store.fileTransferTasks).toEqual([
       expect.objectContaining({
         id: 'backend-running-transfer',
@@ -4468,7 +4467,7 @@ describe('workspace store', () => {
       })
     ])
 
-    await vi.advanceTimersByTimeAsync(250)
+    ;(globalThis as any).__emitFileTransferTaskEventMock({ kind: 'progress', task: progressedTask })
     expect(store.fileTransferTasks.find((task) => task.id === 'backend-running-transfer')).toEqual(
       expect.objectContaining({
         progress: 75,
@@ -4477,18 +4476,15 @@ describe('workspace store', () => {
       })
     )
 
-    store.pushFileTransferTask({
+    const finishedTask = {
       ...progressedTask,
       progress: 100,
       speed: '完成',
-      status: 'success',
+      status: 'success' as const,
       finishedFiles: 2,
       children: progressedTask.children.map((child) => ({ ...child, status: 'success' as const, progress: 100, speed: '完成' }))
-    })
-    stopObserving()
-    await Promise.resolve()
-    await Promise.resolve()
-
+    }
+    ;(globalThis as any).__emitFileTransferTaskEventMock({ kind: 'finished', task: finishedTask })
     expect(store.fileTransferTasks.find((task) => task.id === 'backend-running-transfer')).toEqual(
       expect.objectContaining({
         progress: 100,
@@ -4496,9 +4492,16 @@ describe('workspace store', () => {
         speed: '完成'
       })
     )
-    const callsAfterStop = vi.mocked(window.aiops.listFileTransferTasks).mock.calls.length
+
+    await vi.advanceTimersByTimeAsync(2500)
+    expect(store.fileTransferTasks.some((task) => task.id === 'backend-running-transfer')).toBe(false)
+
+    stopObserving()
+    ;(globalThis as any).__emitFileTransferTaskEventMock({ kind: 'progress', task: progressedTask })
+    expect(store.fileTransferTasks.some((task) => task.id === 'backend-running-transfer')).toBe(false)
+
     await vi.advanceTimersByTimeAsync(500)
-    expect(vi.mocked(window.aiops.listFileTransferTasks).mock.calls.length).toBe(callsAfterStop)
+    expect(vi.mocked(window.aiops.listFileTransferTasks)).toHaveBeenCalledTimes(1)
   })
 
   it('hydrates persisted External reference-style alias commands', async () => {

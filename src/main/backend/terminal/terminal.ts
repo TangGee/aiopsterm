@@ -366,13 +366,15 @@ export const createTerminalBinaryWriteResult = (id: string, bytes: number, exist
   }
 }
 
-export const createTerminalDataEvent = (id: string, chunk: string | Buffer): TerminalDataEvent => {
-  const raw = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk || ''), 'utf8')
-  return {
+export const createTerminalDataEvent = (id: string, chunk: string | Buffer, options?: { includeRaw?: boolean }): TerminalDataEvent => {
+  const event: TerminalDataEvent = {
     id: cleanOptional(id) || '',
-    data: Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk || ''),
-    raw: Array.from(raw)
+    data: Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk || '')
   }
+  // raw 仅供 ZMODEM 检测消费:字符串 chunk 的字节可由 data 无损重建,只有二进制 Buffer 需要附带;
+  // 独立拷贝为 Uint8Array,避免结构化克隆携带 Buffer 池的整个底层 ArrayBuffer。
+  if (options?.includeRaw && Buffer.isBuffer(chunk)) event.raw = new Uint8Array(chunk)
+  return event
 }
 
 export const createTerminalKillResult = (id: string, exists: boolean): TerminalKillResult => {

@@ -313,6 +313,9 @@ class FallbackAssetStore {
 class SqliteAssetStore {
   constructor(private db: SqliteDatabase) {
     this.db.exec(`
+      PRAGMA journal_mode=WAL;
+      PRAGMA synchronous=NORMAL;
+      PRAGMA busy_timeout=5000;
       CREATE TABLE IF NOT EXISTS assets (
         id TEXT PRIMARY KEY,
         data TEXT NOT NULL,

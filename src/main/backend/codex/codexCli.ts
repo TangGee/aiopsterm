@@ -1,7 +1,8 @@
-import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from 'child_process'
+import { execFile, spawn, type ChildProcessWithoutNullStreams } from 'child_process'
 import { existsSync } from 'fs'
-import { mkdir, readFile, writeFile } from 'fs/promises'
+import { mkdir, readFile, stat, writeFile } from 'fs/promises'
 import { basename, dirname, join, resolve } from 'path'
+import { promisify } from 'util'
 import type {
   CodexSessionCreateOptions,
   CodexSessionInfo,
@@ -29,8 +30,8 @@ export type CodexProcessRuntime = Pick<typeof import('child_process'), 'spawn'>
 type CodexBinaryHealthCheckRunner = (
   binaryPath: string,
   args: string[],
-  options: { stdio: 'pipe'; timeout: number; env: NodeJS.ProcessEnv }
-) => Buffer | string
+  options: { timeout: number; env: NodeJS.ProcessEnv }
+) => Promise<unknown>
 
 type CodexRuntimeConfig = {
   getUserDataPath?: () => string
@@ -44,9 +45,9 @@ type CodexRuntimeConfig = {
   readFile?: typeof readFile
   writeFile?: typeof writeFile
   existsSync?: typeof existsSync
-  execFileSync?: CodexBinaryHealthCheckRunner
+  execFile?: CodexBinaryHealthCheckRunner
   binaryPath?: string
-  binaryHealthCheck?: false | ((binaryPath: string) => void)
+  binaryHealthCheck?: false | ((binaryPath: string) => void | Promise<void>)
   binaryHealthCheckTimeoutMs?: number
   getBridgeSocketPath?: () => string
 }
@@ -77,6 +78,8 @@ type CodexProcessSession = {
 
 const runtimeConfig: CodexRuntimeConfig = {}
 const sessions = new Map<string, CodexSessionRecord>()
+// 健康检查结果按 binaryPath+mtime 缓存，避免每次创建会话都执行 codex --version。
+const codexBinaryHealthChecks = new Map<string, Promise<void>>()
 
 const defaultLoadPty = (): CodexPtyRuntime | null => {
   try {
@@ -95,7 +98,8 @@ const getReadFile = () => runtimeConfig.readFile || readFile
 const getWriteFile = () => runtimeConfig.writeFile || writeFile
 const getPtyRuntime = () => (runtimeConfig.loadPty || defaultLoadPty)()
 const getProcessRuntime = () => runtimeConfig.processRuntime || { spawn }
-const getExecFileSync = (): CodexBinaryHealthCheckRunner => runtimeConfig.execFileSync || ((file, args, options) => execFileSync(file, args, options))
+const execFileAsync = promisify(execFile)
+const getExecFile = (): CodexBinaryHealthCheckRunner => runtimeConfig.execFile || ((file, args, options) => execFileAsync(file, args, options))
 
 const codexTerminalEnv = (baseEnv: NodeJS.ProcessEnv): NodeJS.ProcessEnv => {
   const env: NodeJS.ProcessEnv = {
@@ -120,12 +124,13 @@ export const configureCodexCliRuntime = (config: CodexRuntimeConfig = {}) => {
   runtimeConfig.readFile = config.readFile
   runtimeConfig.writeFile = config.writeFile
   runtimeConfig.existsSync = config.existsSync
-  runtimeConfig.execFileSync = config.execFileSync
+  runtimeConfig.execFile = config.execFile
   runtimeConfig.binaryPath = config.binaryPath
   runtimeConfig.binaryHealthCheck = config.binaryHealthCheck
   runtimeConfig.binaryHealthCheckTimeoutMs = config.binaryHealthCheckTimeoutMs
   runtimeConfig.getBridgeSocketPath = config.getBridgeSocketPath
   sessions.clear()
+  codexBinaryHealthChecks.clear()
 }
 
 const codexHomePath = () => {
@@ -200,11 +205,10 @@ const normalizeCodexBinaryHealthCheckTimeoutMs = (value: unknown) => {
 const codexBinaryHealthCheckTimeoutMs = () =>
   normalizeCodexBinaryHealthCheckTimeoutMs(runtimeConfig.binaryHealthCheckTimeoutMs ?? process.env.AIOPSTERM_CODEX_HEALTH_CHECK_TIMEOUT_MS)
 
-const defaultCodexBinaryHealthCheck = (binaryPath: string) => {
+const defaultCodexBinaryHealthCheck = async (binaryPath: string) => {
   const timeout = codexBinaryHealthCheckTimeoutMs()
   try {
-    getExecFileSync()(binaryPath, ['--version'], {
-      stdio: 'pipe',
+    await getExecFile()(binaryPath, ['--version'], {
       timeout,
       env: {
         ...process.env,
@@ -212,12 +216,15 @@ const defaultCodexBinaryHealthCheck = (binaryPath: string) => {
       }
     })
   } catch (error) {
-    const record = error as { code?: string; stdout?: Buffer | string; stderr?: Buffer | string; message?: string }
+    const record = error as { code?: string; killed?: boolean; signal?: string; stdout?: Buffer | string; stderr?: Buffer | string; message?: string }
     const details = [record.stderr, record.stdout, record.message]
       .map((value) => String(value || '').trim())
       .filter(Boolean)
       .join('\n')
-    const timedOut = String(record.code || '').toUpperCase() === 'ETIMEDOUT' || /\bETIMEDOUT\b/i.test(String(record.message || ''))
+    const timedOut =
+      String(record.code || '').toUpperCase() === 'ETIMEDOUT' ||
+      /\bETIMEDOUT\b/i.test(String(record.message || '')) ||
+      (record.killed === true && Boolean(record.signal))
     const reason = timedOut ? `timed out after ${timeout}ms running ${binaryPath} --version` : details || binaryPath
     throw Object.assign(new Error(`Codex binary failed health check: ${reason}${timedOut && details ? `\n${details}` : ''}`), {
       code: 'CODEX_BINARY_UNUSABLE',
@@ -227,19 +234,39 @@ const defaultCodexBinaryHealthCheck = (binaryPath: string) => {
   }
 }
 
-const checkCodexBinary = (binaryPath: string) => {
+const codexBinaryMtimeMs = async (binaryPath: string) => {
+  try {
+    return (await stat(binaryPath)).mtimeMs
+  } catch {
+    return 0
+  }
+}
+
+export const checkCodexBinary = async (binaryPath: string) => {
   if (runtimeConfig.binaryHealthCheck === false) return
-  ;(runtimeConfig.binaryHealthCheck || defaultCodexBinaryHealthCheck)(binaryPath)
+  if (runtimeConfig.binaryHealthCheck) {
+    await runtimeConfig.binaryHealthCheck(binaryPath)
+    return
+  }
+  const cacheKey = `${binaryPath}:${await codexBinaryMtimeMs(binaryPath)}`
+  const cached = codexBinaryHealthChecks.get(cacheKey)
+  if (cached) return cached
+  const check = defaultCodexBinaryHealthCheck(binaryPath)
+  codexBinaryHealthChecks.set(cacheKey, check)
+  try {
+    await check
+  } catch (error) {
+    // 失败不缓存：二进制未变时也允许下次会话重试（如瞬时超时）。
+    codexBinaryHealthChecks.delete(cacheKey)
+    throw error
+  }
 }
 
 export const resolveCodexBinaryPath = () => {
   const exists = getExistsSync()
   const candidates = candidateCodexBinaryPaths()
   const found = candidates.find((path) => exists(path))
-  if (found) {
-    checkCodexBinary(found)
-    return found
-  }
+  if (found) return found
   const error = new Error(`Codex binary was not found. Checked: ${candidates.join(', ')}`)
   throw Object.assign(error, { code: 'CODEX_BINARY_NOT_FOUND', candidates })
 }
@@ -306,6 +333,7 @@ export const createCodexSession = async (
   sink: CodexEventSink
 ): Promise<CodexSessionInfo> => {
   const binaryPath = resolveCodexBinaryPath()
+  await checkCodexBinary(binaryPath)
   const codexPackageRoot = codexPackageRootForBinary(binaryPath)
   const codexHome = codexHomePath()
   const pendingContextPath = codexPendingContextPath(codexHome, id)

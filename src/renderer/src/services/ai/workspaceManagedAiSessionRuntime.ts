@@ -280,14 +280,14 @@ export const createWorkspaceManagedAiSessionRuntime = (input: {
     }
   }
 
-  let managedAiSessionRefreshQueued = false
+  // 事件驱动的整库快照重拉按 150ms 去抖合并，事件风暴下只触发一次全量刷新
+  let managedAiSessionRefreshTimer: number | null = null
   const refreshManagedAiSessionsDebounced = () => {
-    if (managedAiSessionRefreshQueued) return
-    managedAiSessionRefreshQueued = true
-    queueMicrotask(() => {
-      managedAiSessionRefreshQueued = false
+    if (managedAiSessionRefreshTimer !== null) return
+    managedAiSessionRefreshTimer = window.setTimeout(() => {
+      managedAiSessionRefreshTimer = null
       void refreshManagedAiSessions({ silent: true })
-    })
+    }, 150)
   }
 
   const upsertManagedAiSession = (event: AiAgentSessionEvent) => {
@@ -518,9 +518,13 @@ export const createWorkspaceManagedAiSessionRuntime = (input: {
   }
 
   const touchManagedAiTerminalActivity = (panel: Pick<TerminalPanel, 'id' | 'sessionId'>, at = Date.now()) => {
-    managedAiSessions.value = managedAiSessions.value.map((session) =>
-      session.terminalSessionId === panel.sessionId || session.panelId === panel.id ? { ...session, terminalActivityAt: at, updatedAt: Date.now() } : session
-    )
+    // 只回写目标会话的活动时间字段并保持数组引用不变；排序键 lastActivityAt 不受影响，无需重排
+    const now = Date.now()
+    for (const session of managedAiSessions.value) {
+      if (session.terminalSessionId !== panel.sessionId && session.panelId !== panel.id) continue
+      session.terminalActivityAt = at
+      session.updatedAt = now
+    }
   }
 
   const applyManagedAiTerminalLifecycle = (panel: Pick<TerminalPanel, 'id'>, event: TerminalLifecycleEvent) => {

@@ -160,7 +160,7 @@ async function inferLocalAiSuggestions(
     // Fig catalog lookup must not fabricate fallback rows on failure.
   }
   try {
-    suggestions.push(...dependencies.executableRuntime.getSuggestions(partial))
+    suggestions.push(...(await dependencies.executableRuntime.getSuggestions(partial)))
   } catch {
     // PATH discovery is best-effort and stays behind the backend boundary.
   }

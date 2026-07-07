@@ -1,5 +1,5 @@
 import { marked } from 'marked'
-import hljs from 'highlight.js'
+import { highlightAutoValue, hljs } from '@/services/common/highlightRuntime'
 import {
   createKnowledgeEditorRelPath,
   getKnowledgeEditorParentRelDir,
@@ -196,8 +196,9 @@ const highlightCodeBlocks = (doc: Document) => {
       continue
     }
 
-    const highlighted = language && hljs.getLanguage(language) ? hljs.highlight(source, { language }) : hljs.highlightAuto(source)
-    code.innerHTML = highlighted.value
+    const highlightedValue =
+      language && hljs.getLanguage(language) ? hljs.highlight(source, { language }).value : highlightAutoValue(source)
+    if (highlightedValue !== null) code.innerHTML = highlightedValue
     code.classList.add('hljs')
     if (language) code.classList.add(`language-${language}`)
   }

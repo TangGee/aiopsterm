@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto'
-import { appendFileSync, existsSync } from 'fs'
-import { mkdir, readFile, writeFile } from 'fs/promises'
+import { existsSync } from 'fs'
+import { appendFile, mkdir, readFile, stat, writeFile } from 'fs/promises'
 import { dirname, join } from 'path'
 import type { Socket } from 'net'
 import type {
@@ -80,6 +80,10 @@ export type ControlSocketEventInput = {
 }
 
 const eventReplayLimit = 4096
+// 超限后批量裁剪，避免每个事件都整段拷贝回放数组。
+const eventReplayTrimBatch = 512
+// events.jsonl 大小轮转阈值：超过后用内存回放尾部截断重写。
+const eventLogMaxBytes = 8 * 1024 * 1024
 const eventHeartbeatIntervalMs = 15000
 const eventProtocol = 'aiopsterm-events' as const
 const maxSessionSnapshots = 20
@@ -95,6 +99,9 @@ let nextEventSeq = 1
 let eventLog: ControlEventFrame[] = []
 let eventLogStorePath = ''
 let eventLogLoadedPath = ''
+let eventLogWriteQueue: Promise<void> = Promise.resolve()
+// -1 表示尚未探测过磁盘上 events.jsonl 的当前大小。
+let eventLogBytes = -1
 const eventSubscriptions = new Map<string, ControlEventSubscription>()
 let mobileEventSubscriptions = new Map<string, MobileEventSubscription>()
 let sessionSnapshotStorePath = ''
@@ -159,6 +166,7 @@ export const configureControlSocketStateRuntime = (config: ControlSocketStateRun
   if (config.userDataPath) {
     const nextEventPath = controlSocketEventLogPathFor(config.userDataPath)
     if (eventLogLoadedPath && eventLogLoadedPath !== nextEventPath) eventLogLoadedPath = ''
+    if (eventLogStorePath !== nextEventPath) eventLogBytes = -1
     eventLogStorePath = nextEventPath
     const nextSessionPath = controlSocketSessionSnapshotPathFor(config.userDataPath)
     if (sessionSnapshotLoadedPath && sessionSnapshotLoadedPath !== nextSessionPath) sessionSnapshotLoadedPath = ''
@@ -240,11 +248,18 @@ const normalizeDurableEvent = (value: unknown): ControlEventFrame | null => {
 }
 
 export const loadControlSocketDurableEventLog = async (userDataPath?: string) => {
-  if (userDataPath) eventLogStorePath = controlSocketEventLogPathFor(userDataPath)
+  if (userDataPath) {
+    const nextEventPath = controlSocketEventLogPathFor(userDataPath)
+    if (eventLogStorePath !== nextEventPath) eventLogBytes = -1
+    eventLogStorePath = nextEventPath
+  }
   if (!eventLogStorePath || eventLogLoadedPath === eventLogStorePath) return
+  // 先等待在途写入排空，重启加载才能读到完整的审计日志。
+  await eventLogWriteQueue.catch(() => undefined)
   eventLogLoadedPath = eventLogStorePath
   eventLog = []
   nextEventSeq = 1
+  eventLogBytes = -1
   if (!existsSync(eventLogStorePath)) return
   try {
     const raw = await readFile(eventLogStorePath, 'utf-8')
@@ -270,13 +285,52 @@ export const loadControlSocketDurableEventLog = async (userDataPath?: string) =>
   }
 }
 
+// 轮转重写内容：从内存回放尾部倒序取行，字节预算取轮转阈值的一半。
+// 只取 seq 不超过当前写入事件的行，后续排队中的事件仍由各自的追加任务落盘。
+const rotatedEventLogContent = (maxSeq: number) => {
+  const budget = eventLogMaxBytes / 2
+  const lines: string[] = []
+  let bytes = 0
+  for (let index = eventLog.length - 1; index >= 0; index -= 1) {
+    if (eventLog[index].seq > maxSeq) continue
+    const line = `${JSON.stringify(eventLog[index])}\n`
+    const lineBytes = Buffer.byteLength(line, 'utf8')
+    if (bytes + lineBytes > budget) break
+    lines.push(line)
+    bytes += lineBytes
+  }
+  return lines.reverse().join('')
+}
+
 const appendDurableEvent = (event: ControlEventFrame) => {
   if (!eventLogStorePath) return
-  try {
-    appendFileSync(eventLogStorePath, `${JSON.stringify(event)}\n`, 'utf-8')
-  } catch {
-    // Event streaming must keep working even if the audit log cannot be written.
-  }
+  const storePath = eventLogStorePath
+  const line = `${JSON.stringify(event)}\n`
+  eventLogWriteQueue = eventLogWriteQueue
+    .catch(() => undefined)
+    .then(async () => {
+      try {
+        if (eventLogBytes < 0) {
+          await mkdir(dirname(storePath), { recursive: true })
+          try {
+            eventLogBytes = (await stat(storePath)).size
+          } catch {
+            eventLogBytes = 0
+          }
+        }
+        const lineBytes = Buffer.byteLength(line, 'utf8')
+        if (eventLogBytes + lineBytes > eventLogMaxBytes) {
+          const content = rotatedEventLogContent(event.seq)
+          await writeFile(storePath, content, 'utf-8')
+          eventLogBytes = Buffer.byteLength(content, 'utf8')
+        } else {
+          await appendFile(storePath, line, 'utf-8')
+          eventLogBytes += lineBytes
+        }
+      } catch {
+        // Event streaming must keep working even if the audit log cannot be written.
+      }
+    })
 }
 
 export const publishControlEvent = (input: ControlSocketEventInput) => {
@@ -296,7 +350,8 @@ export const publishControlEvent = (input: ControlSocketEventInput) => {
     ...(input.surfaceId ? { surface_id: input.surfaceId } : {}),
     payload: boundedPayload(input.payload || {})
   }
-  eventLog = [...eventLog, event].slice(-eventReplayLimit)
+  eventLog.push(event)
+  if (eventLog.length > eventReplayLimit + eventReplayTrimBatch) eventLog.splice(0, eventLog.length - eventReplayLimit)
   appendDurableEvent(event)
   for (const subscription of eventSubscriptions.values()) {
     if (eventMatchesFilters(event, subscription.filters)) writeEventFrame(subscription.socket, event)
@@ -772,6 +827,9 @@ export const controlSocketStateSummary = () => ({
   latestEventSeq: nextEventSeq - 1
 })
 
+// 等待审计日志异步写入队列排空（关闭前或测试断言前使用）。
+export const flushControlSocketDurableEventLog = () => eventLogWriteQueue.catch(() => undefined)
+
 export const listEventsForTesting = () => eventLog
 
 export const listSessionSnapshotsForTesting = () => sortedSessionSnapshots()
@@ -801,6 +859,8 @@ export const closeControlSocketStateRuntime = () => {
   nextEventSeq = 1
   eventLogLoadedPath = ''
   eventLogStorePath = ''
+  // 在途写入让其自然排空保证审计完整，这里只重置大小探测状态。
+  eventLogBytes = -1
   sessionSnapshots = []
   sessionSnapshotLoadedPath = ''
   sessionSnapshotStorePath = ''

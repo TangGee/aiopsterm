@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto'
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs'
+import { mkdir, rename, writeFile } from 'fs/promises'
 import { dirname, isAbsolute, resolve } from 'path'
 import type {
   AiChatConversationDeleteResult,
@@ -376,11 +377,82 @@ const readPersistedState = (stateFilePath: string) => {
   return normalizeState(parsed)
 }
 
+const tempStatePathFor = (stateFilePath: string) => `${stateFilePath}.${process.pid}.${Date.now()}.tmp`
+
 const writeStateToFilePath = (stateFilePath: string, state: ChatHistoryStoreShape) => {
   mkdirSync(dirname(stateFilePath), { recursive: true })
-  const tempPath = `${stateFilePath}.${process.pid}.${Date.now()}.tmp`
-  writeFileSync(tempPath, JSON.stringify(state, null, 2), 'utf-8')
+  const tempPath = tempStatePathFor(stateFilePath)
+  writeFileSync(tempPath, JSON.stringify(state), 'utf-8')
   renameSync(tempPath, stateFilePath)
+}
+
+const writeStatePayloadToFilePath = async (stateFilePath: string, payload: string) => {
+  await mkdir(dirname(stateFilePath), { recursive: true })
+  const tempPath = tempStatePathFor(stateFilePath)
+  await writeFile(tempPath, payload, 'utf-8')
+  await rename(tempPath, stateFilePath)
+}
+
+// 内存 state 是权威数据，磁盘写入按去抖窗口异步合并；进程退出与运行时重配置时同步兜底。
+const persistDebounceMs = 400
+let persistTimer: NodeJS.Timeout | null = null
+let persistDirty = false
+let persistQueue: Promise<void> = Promise.resolve()
+
+const flushPendingPersistSync = () => {
+  if (persistTimer) {
+    clearTimeout(persistTimer)
+    persistTimer = null
+  }
+  if (!persistDirty) return
+  persistDirty = false
+  process.removeListener('exit', flushPendingPersistSync)
+  try {
+    writeStateToFilePath(runtimeConfig.stateFilePath, chatHistoryState)
+  } catch {
+    /* Chat history persistence should not turn successful UI mutations into failures. */
+  }
+}
+
+const enqueuePendingPersist = () => {
+  if (persistTimer) {
+    clearTimeout(persistTimer)
+    persistTimer = null
+  }
+  if (!persistDirty) return
+  persistDirty = false
+  process.removeListener('exit', flushPendingPersistSync)
+  const stateFilePath = runtimeConfig.stateFilePath
+  const payload = JSON.stringify(chatHistoryState)
+  persistQueue = persistQueue
+    .catch(() => undefined)
+    .then(() => writeStatePayloadToFilePath(stateFilePath, payload))
+    .catch(() => undefined)
+}
+
+const schedulePersistState = () => {
+  if (!persistDirty) {
+    persistDirty = true
+    process.once('exit', flushPendingPersistSync)
+  }
+  if (persistTimer) return
+  persistTimer = setTimeout(enqueuePendingPersist, persistDebounceMs)
+  persistTimer.unref()
+}
+
+const dropPendingPersist = () => {
+  if (persistTimer) {
+    clearTimeout(persistTimer)
+    persistTimer = null
+  }
+  if (!persistDirty) return
+  persistDirty = false
+  process.removeListener('exit', flushPendingPersistSync)
+}
+
+export const flushChatHistoryWrites = async () => {
+  enqueuePendingPersist()
+  await persistQueue
 }
 
 const rewriteNormalizedStateFile = (stateFilePath: string) => {
@@ -403,25 +475,24 @@ const ensureStateLoaded = () => {
   if (!existsSync(stateFilePath)) return
   try {
     chatHistoryState = readPersistedState(stateFilePath)
-    if (stateFilePath !== runtimeConfig.stateFilePath || !runtimeConfig.useSeedData) saveState(chatHistoryState)
+    // 启动迁移属于一次性写入，保持同步落盘，之后的运行时更新才走去抖。
+    if (stateFilePath !== runtimeConfig.stateFilePath || !runtimeConfig.useSeedData) {
+      try {
+        writeStateToFilePath(runtimeConfig.stateFilePath, chatHistoryState)
+      } catch {
+        /* Chat history persistence should not turn successful UI mutations into failures. */
+      }
+    }
     if (!runtimeConfig.useSeedData && primaryStateExists) rewriteNormalizedStateFile(legacyStateFilePath)
   } catch {
     /* Keep the backend-owned empty or seed state when persisted chat history is corrupt. */
   }
 }
 
+// 加载时已全量 normalize，之后返回权威 state 引用，变更处只 normalize 被修改的数据。
 const getState = () => {
   ensureStateLoaded()
-  return normalizeState(chatHistoryState)
-}
-
-const saveState = (state: ChatHistoryStoreShape) => {
-  chatHistoryState = normalizeState(state)
-  try {
-    writeStateToFilePath(runtimeConfig.stateFilePath, chatHistoryState)
-  } catch {
-    /* Chat history persistence should not turn successful UI mutations into failures. */
-  }
+  return chatHistoryState
 }
 
 const successSnapshot = (state: ChatHistoryStoreShape): AiChatHistoryListResult => ({
@@ -459,7 +530,7 @@ export const replaceChatConversationMessages = (conversationIdInput: string, mes
   state.selectedConversationId = conversationId
   conversation.updatedAt = nowText()
   conversation.ts = Math.max(Date.now(), ...state.conversations.map((item) => item.ts), 0) + 1
-  saveState(state)
+  schedulePersistState()
   return {
     ok: true,
     data: {
@@ -497,6 +568,7 @@ export const getChatConversationMessages = (
 }
 
 export const configureChatHistoryBackendRuntime = (config: ChatHistoryBackendRuntimeConfig = {}) => {
+  flushPendingPersistSync()
   runtimeConfig = {
     stateFilePath: config.stateFilePath ? (isAbsolute(config.stateFilePath) ? config.stateFilePath : resolve(config.stateFilePath)) : defaultChatHistoryStateFilePath(),
     useSeedData: config.useSeedData ?? defaultChatHistorySeedMode()
@@ -507,6 +579,7 @@ export const configureChatHistoryBackendRuntime = (config: ChatHistoryBackendRun
 }
 
 export const resetChatHistoryForTests = () => {
+  dropPendingPersist()
   applyInitialState()
   chatHistoryStateLoaded = true
   loadedStateFilePath = runtimeConfig.stateFilePath
@@ -526,7 +599,7 @@ export const createChatConversation = (): AiChatConversationMutationResult => {
   state.conversations.unshift(conversation)
   state.selectedConversationId = conversation.id
   state.messagesByConversationId[conversation.id] = []
-  saveState(state)
+  schedulePersistState()
   return mutationResult(state, conversation)
 }
 
@@ -556,7 +629,7 @@ export const updateChatConversation = (input: AiChatConversationUpdateInput): Ai
   conversation.updatedAt = nowText()
   conversation.ts = Math.max(Date.now(), ...state.conversations.map((item) => item.ts), 0) + 1
   if (savedMessages) state.selectedConversationId = id
-  saveState(state)
+  schedulePersistState()
   return mutationResult(state, conversation)
 }
 
@@ -570,7 +643,7 @@ export const deleteChatConversation = (idInput: string): AiChatConversationDelet
   state.conversations = state.conversations.filter((item) => item.id !== id)
   delete state.messagesByConversationId[id]
   if (state.selectedConversationId === id) state.selectedConversationId = state.conversations[0]?.id || ''
-  saveState(state)
+  schedulePersistState()
   return {
     ok: true,
     data: {
@@ -588,7 +661,7 @@ export const restoreChatConversation = (idInput: string): AiChatConversationRest
   const conversation = state.conversations.find((item) => item.id === id)
   if (!conversation) return errorResult('CHAT_HISTORY_NOT_FOUND', 'Conversation not found.') as AiChatConversationRestoreResult
   state.selectedConversationId = id
-  saveState(state)
+  schedulePersistState()
   const restoreMessages = buildRestoreMessages(state.messagesByConversationId[id] || [])
   return {
     ok: true,
@@ -622,7 +695,7 @@ export const saveChatMessageMetadata = (input: AiChatMessageMetadataInput): AiCh
     }
   }
   state.messagesByConversationId[conversationId] = messages
-  saveState(state)
+  schedulePersistState()
   return {
     ok: true,
     data: {

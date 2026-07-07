@@ -1,5 +1,5 @@
 import { marked } from 'marked'
-import hljs from 'highlight.js'
+import { highlightAutoValue, hljs } from '@/services/common/highlightRuntime'
 import { sanitizeMarkdownHtml } from '@/services/common/markdownRuntime'
 import { plainTextForAiContentPart } from '@/services/ai/aiPanelInputRuntime'
 import type {
@@ -91,7 +91,7 @@ export const aiPanelMessagePlainText = (message: { text: string; contentParts?: 
 
 const markdownFencePattern = /```([^\n`]*)\n([\s\S]*?)```/g
 const renderedMarkdownCache = new Map<string, AiPanelRenderedMarkdownPart[]>()
-const renderedMarkdownCacheLimit = 80
+const renderedMarkdownCacheLimit = 512
 
 export const escapeHtml = (value: string) =>
   value
@@ -127,7 +127,8 @@ const highlightCodeHtml = (code: string, language: string) => {
       return sanitizeMarkdownHtml(hljs.highlight(code, { language: normalizedLanguage, ignoreIllegals: true }).value)
     }
     if (!normalizedLanguage) {
-      return sanitizeMarkdownHtml(hljs.highlightAuto(code).value)
+      const autoValue = highlightAutoValue(code)
+      if (autoValue !== null) return sanitizeMarkdownHtml(autoValue)
     }
   } catch {
     return escapeHtml(code)
@@ -149,7 +150,12 @@ export const clearAiPanelRenderedMarkdownCache = () => {
 
 export const renderAiPanelMarkdownParts = (text: string): AiPanelRenderedMarkdownPart[] => {
   const cached = renderedMarkdownCache.get(text)
-  if (cached) return cached
+  if (cached) {
+    // LRU：命中即刷新插入序，淘汰时 Map 首键即最久未使用
+    renderedMarkdownCache.delete(text)
+    renderedMarkdownCache.set(text, cached)
+    return cached
+  }
   const parts: AiPanelRenderedMarkdownPart[] = []
   let lastIndex = 0
   markdownFencePattern.lastIndex = 0

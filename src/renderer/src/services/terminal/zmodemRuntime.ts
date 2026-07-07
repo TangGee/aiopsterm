@@ -343,5 +343,7 @@ export const createTerminalZmodemRuntime = (options: TerminalZmodemRuntimeOption
     sessions.clear()
   }
 
-  return { handleTerminalData, cancel, dispose }
+  const isSessionActive = (sessionId: string) => !!sessions.get(sessionId)?.active
+
+  return { handleTerminalData, isSessionActive, cancel, dispose }
 }

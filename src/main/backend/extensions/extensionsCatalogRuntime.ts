@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'fs'
 import { isAbsolute, join, resolve } from 'path'
 import type { ExtensionPluginListResult, ExtensionPluginRuntimeConfig } from '@shared/contracts/extensions'
 import {
@@ -19,7 +19,7 @@ import {
   type RemoteExtensionCatalogManifest,
   type RemoteExtensionCatalogPluginManifest
 } from './extensionsRuntimeCore'
-import { configureExtensionPackageRuntime, latestStorePluginsFromPackageDir } from './extensionsPackageRuntime'
+import { configureExtensionPackageRuntime, latestStorePluginsFromPackageDir, walkStorePackageFiles } from './extensionsPackageRuntime'
 
 export const defaultExtensionRootDir = () => {
   const envRoot = String(process.env.AIOPSTERM_EXTENSIONS_DIR || '').trim()
@@ -175,18 +175,57 @@ const normalizeLocalRegistryPlugins = (value: unknown): ExtensionPluginRuntimeCo
   return plugins
 }
 
-const readLocalExtensionRegistry = (): ExtensionPluginRuntimeConfig[] => {
+// extensions:list 会反复触发目录重扫：store 包目录的 zip 解析按文件列表签名缓存，
+// registry.json 按文件签名缓存原始内容；签名未变时直接复用，失效才重扫。
+let storeCatalogCache: { signature: string; plugins: ExtensionPluginRuntimeConfig[] } | null = null
+let localRegistryCache: { signature: string; plugins: unknown } | null = null
+
+const invalidateExtensionSourceCaches = () => {
+  storeCatalogCache = null
+  localRegistryCache = null
+}
+
+const fileSignature = (filePath: string) => {
   try {
-    const registryPath = extensionRegistryPath()
-    if (!existsSync(registryPath)) return []
-    const parsed = JSON.parse(readFileSync(registryPath, 'utf8')) as { plugins?: unknown }
-    return normalizeLocalRegistryPlugins(parsed.plugins)
+    const stats = statSync(filePath)
+    return `${filePath}:${stats.mtimeMs}:${stats.size}`
   } catch {
-    return []
+    return `${filePath}:missing`
   }
 }
 
-const readStoreExtensionCatalog = (): ExtensionPluginRuntimeConfig[] => latestStorePluginsFromPackageDir(trimText(runtimeConfig.storePackageDir))
+const storePackageDirSignature = (rootDir: string) => {
+  if (!rootDir) return 'store:none'
+  return ['store', rootDir, ...walkStorePackageFiles(rootDir).map(fileSignature)].join('|')
+}
+
+const readLocalExtensionRegistry = (): ExtensionPluginRuntimeConfig[] => {
+  const registryPath = extensionRegistryPath()
+  const signature = fileSignature(registryPath)
+  const cached = localRegistryCache
+  // 归一化依赖当前 extensionCatalog（合并 store 端最新版本等），每次都要重新执行。
+  if (cached && cached.signature === signature) return normalizeLocalRegistryPlugins(cached.plugins)
+  let rawPlugins: unknown = []
+  try {
+    if (existsSync(registryPath)) {
+      rawPlugins = (JSON.parse(readFileSync(registryPath, 'utf8')) as { plugins?: unknown }).plugins
+    }
+  } catch {
+    rawPlugins = []
+  }
+  localRegistryCache = { signature, plugins: rawPlugins }
+  return normalizeLocalRegistryPlugins(rawPlugins)
+}
+
+const readStoreExtensionCatalog = (): ExtensionPluginRuntimeConfig[] => {
+  const rootDir = trimText(runtimeConfig.storePackageDir)
+  const signature = storePackageDirSignature(rootDir)
+  const cached = storeCatalogCache
+  if (cached && cached.signature === signature) return cached.plugins
+  const plugins = latestStorePluginsFromPackageDir(rootDir)
+  storeCatalogCache = { signature, plugins }
+  return plugins
+}
 
 const remoteCatalogPluginFromManifest = (
   manifest: RemoteExtensionCatalogPluginManifest,
@@ -263,6 +302,7 @@ const writeLocalExtensionRegistry = () => {
     .filter((plugin) => (plugin.source === 'local' || plugin.source === 'store') && plugin.installed && plugin.packagePath)
     .map(clonePlugin)
   writeFileSync(extensionRegistryPath(), JSON.stringify({ plugins: installedPlugins }, null, 2), 'utf8')
+  localRegistryCache = null
 }
 
 const persistLocalExtensionCatalogPlugin = (plugin: ExtensionPluginRuntimeConfig) => {
@@ -313,10 +353,12 @@ export const configureExtensionBackendRuntimeState = (config: ExtensionBackendRu
     fetch: config.fetch || defaultExtensionFetch
   }
   syncPackageRuntime()
+  invalidateExtensionSourceCaches()
   reloadExtensionCatalog()
 }
 
 export const resetExtensionPluginCatalogState = () => {
+  invalidateExtensionSourceCaches()
   reloadExtensionCatalog()
 }
 

@@ -22,15 +22,10 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import * as monaco from 'monaco-editor/esm/vs/editor/editor.api'
-import 'monaco-editor/esm/vs/editor/contrib/folding/browser/folding'
-import 'monaco-editor/esm/vs/editor/contrib/find/browser/findController'
-import 'monaco-editor/esm/vs/basic-languages/monaco.contribution'
+import type * as monaco from 'monaco-editor/esm/vs/editor/editor.api'
 import { editorLineHeightPx, resolveEditorFontFamily } from '@/services/common/editorRuntime'
-import { ensureMonacoEnvironment } from '@/services/common/monacoRuntime'
+import { loadMonaco, type MonacoModule } from '@/services/common/monacoRuntime'
 import { useWorkspaceStore } from '@/stores/workspace'
-
-ensureMonacoEnvironment()
 
 const props = defineProps<{
   modelValue: string
@@ -47,6 +42,7 @@ const workspace = useWorkspaceStore()
 const containerRef = ref<HTMLElement | null>(null)
 const fallbackRef = ref<HTMLTextAreaElement | null>(null)
 const monacoReady = ref(false)
+let monacoApi: MonacoModule | null = null
 let editor: monaco.editor.IStandaloneCodeEditor | null = null
 let suppressEditorEmit = false
 let suppressFallbackEmit = false
@@ -87,8 +83,8 @@ const syncFallbackValue = (value: string) => {
 }
 
 const createEditor = () => {
-  if (!containerRef.value || editor) return
-  editor = monaco.editor.create(containerRef.value, {
+  if (!containerRef.value || editor || !monacoApi) return
+  editor = monacoApi.editor.create(containerRef.value, {
     value: props.modelValue,
     language: normalizedLanguage.value,
     automaticLayout: true,
@@ -114,7 +110,7 @@ const createEditor = () => {
     ...editorOptions.value
   })
   applyModelOptions()
-  editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => emit('save'))
+  editor.addCommand(monacoApi.KeyMod.CtrlCmd | monacoApi.KeyCode.KeyS, () => emit('save'))
   editor.onDidChangeModelContent(() => {
     if (suppressEditorEmit) return
     const value = editor?.getValue() || ''
@@ -151,9 +147,11 @@ const focus = () => {
   fallbackRef.value?.focus()
 }
 
-onMounted(() => {
+onMounted(async () => {
   syncFallbackValue(props.modelValue)
-  void nextTick(createEditor)
+  monacoApi = await loadMonaco()
+  await nextTick()
+  createEditor()
 })
 
 watch(
@@ -171,8 +169,8 @@ watch(
   normalizedLanguage,
   (language) => {
     const model = editor?.getModel()
-    if (!model) return
-    monaco.editor.setModelLanguage(model, language)
+    if (!model || !monacoApi) return
+    monacoApi.editor.setModelLanguage(model, language)
   }
 )
 

@@ -228,6 +228,7 @@ export type DatabaseSqlExecuteResult = AiopsMutationResult<{
   rows: Array<Record<string, unknown>>
   rowCount: number
   durationMs: number
+  truncated?: boolean
   execution: DatabaseSqlExecutionRecord
 }> & {
   execution?: DatabaseSqlExecutionRecord

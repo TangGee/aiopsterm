@@ -9,6 +9,7 @@ import {
   isFileTransferTaskData,
   malformedFilesBackendResultMessage
 } from '@/services/files/filesBackendGuards'
+import { createBridgeMethod } from '@/services/common/preloadBridgeClient'
 import { filesClient } from '@/services/files/filesClient'
 import {
   affectedFileTransferTaskIds as affectedFileTransferTaskIdsRuntime,
@@ -39,10 +40,13 @@ import type {
   FileSessionFolderSaveInput,
   FileSessionInfo,
   FileSessionPatch,
-  FileTransferTask
+  FileTransferTask,
+  FileTransferTaskEvent
 } from '@shared/contracts/files'
 
 export type FilesUiMode = 'transfer' | 'default'
+
+const fileTransferTaskEventBridge = createBridgeMethod<Pick<AiopsPreloadApi, 'onFileTransferTaskEvent'>>()
 
 type WorkspaceFilesControllerState = {
   filesUiMode: Ref<FilesUiMode>
@@ -75,7 +79,7 @@ export const createWorkspaceFilesController = (state: WorkspaceFilesControllerSt
 
   const fileTransferTaskRemovalTimers = new Map<string, number>()
   let fileTransferTaskObserverCount = 0
-  let fileTransferTaskPoller: number | null = null
+  let stopFileTransferTaskEvents: (() => void) | null = null
 
   const selectedLeftFileSession = computed(() => findFileSession(fileSessions.value, selectedLeftFileSessionId.value))
   const selectedRightFileSession = computed(() => findFileSession(fileSessions.value, selectedRightFileSessionId.value))
@@ -288,29 +292,43 @@ export const createWorkspaceFilesController = (state: WorkspaceFilesControllerSt
     fileTransferTaskRemovalTimers.set(id, timer)
   }
 
-  const startFileTransferTaskPolling = () => {
-    if (fileTransferTaskPoller !== null) return
-    fileTransferTaskPoller = window.setInterval(() => {
-      void refreshFileTransferTasks()
-    }, 250)
+  const stopFileTransferTaskEventsIfIdle = () => {
+    if (fileTransferTaskObserverCount > 0 || hasRunningFileTransferTasks.value || !stopFileTransferTaskEvents) return
+    stopFileTransferTaskEvents()
+    stopFileTransferTaskEvents = null
   }
 
-  const stopFileTransferTaskPollingIfIdle = () => {
-    if (fileTransferTaskObserverCount > 0 || hasRunningFileTransferTasks.value || fileTransferTaskPoller === null) return
-    window.clearInterval(fileTransferTaskPoller)
-    fileTransferTaskPoller = null
+  const applyFileTransferTaskEvent = (event: FileTransferTaskEvent) => {
+    // 主进程异常中止的任务不会再推送终态，收到 running 态的 finished 事件时直接移除残留项
+    if (event.kind === 'finished' && event.task.status === 'running') {
+      clearFileTransferTaskRemovalTimer(event.task.id)
+      fileTransferTasks.value = fileTransferTasks.value.filter((item) => item.id !== event.task.id)
+    } else {
+      pushFileTransferTask(event.task)
+    }
+    if (event.kind === 'finished') stopFileTransferTaskEventsIfIdle()
+  }
+
+  const startFileTransferTaskEvents = () => {
+    if (stopFileTransferTaskEvents) return
+    const onFileTransferTaskEvent = fileTransferTaskEventBridge('onFileTransferTaskEvent')
+    if (!onFileTransferTaskEvent) {
+      setTopNotice('文件传输任务事件服务不可用')
+      return
+    }
+    stopFileTransferTaskEvents = onFileTransferTaskEvent(applyFileTransferTaskEvent)
   }
 
   const observeFileTransferTasks = () => {
     fileTransferTaskObserverCount += 1
-    startFileTransferTaskPolling()
+    startFileTransferTaskEvents()
     void refreshFileTransferTasks()
     let stopped = false
     return () => {
       if (stopped) return
       stopped = true
       fileTransferTaskObserverCount = Math.max(0, fileTransferTaskObserverCount - 1)
-      void refreshFileTransferTasks().finally(stopFileTransferTaskPollingIfIdle)
+      stopFileTransferTaskEventsIfIdle()
     }
   }
 
@@ -483,7 +501,7 @@ export const createWorkspaceFilesController = (state: WorkspaceFilesControllerSt
       return false
     }
     markFileTransferTasksCancelled(result.data.taskIds.length ? result.data.taskIds : affectedFileTransferTaskIds(id))
-    void refreshFileTransferTasks().finally(stopFileTransferTaskPollingIfIdle)
+    void refreshFileTransferTasks().finally(stopFileTransferTaskEventsIfIdle)
     return true
   }
 

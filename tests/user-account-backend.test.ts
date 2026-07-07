@@ -11,24 +11,24 @@ type UserBackend = {
     accountCenterUrl?: string
     openExternal?: (url: string) => Promise<void> | void
   }) => void
-  resetUserAccountForTests: () => void
-  patchUserAccountForTests: (patch: Record<string, unknown>) => void
-  getUserAccount: () => any
+  resetUserAccountForTests: () => Promise<void>
+  patchUserAccountForTests: (patch: Record<string, unknown>) => Promise<void>
+  getUserAccount: () => Promise<any>
   openUserLogin: () => Promise<any>
   openUserAccountCenter: () => Promise<any>
-  loginUserAccount: (input: any) => any
-  logoutUserAccount: () => any
-  skipUserLogin: () => any
+  loginUserAccount: (input: any) => Promise<any>
+  logoutUserAccount: () => Promise<any>
+  skipUserLogin: () => Promise<any>
   sendUserLoginCode: (input: any) => any
   peekUserCodeForTests: (scope: 'login' | 'contact', kind: 'email' | 'mobile', target: string) => string
   prepareUserAvatarImage: (input: any) => Promise<any>
   resolveUserAvatarAssetPath: (avatarImageUrl: string) => string
-  updateUserProfile: (input: any) => any
-  sendUserContactCode: (input: any) => any
-  bindUserContact: (input: any) => any
-  resetUserPassword: (input: any) => any
-  deactivateUserAccount: (input: any) => any
-  revokeTrustedDevice: (id: number) => any
+  updateUserProfile: (input: any) => Promise<any>
+  sendUserContactCode: (input: any) => Promise<any>
+  bindUserContact: (input: any) => Promise<any>
+  resetUserPassword: (input: any) => Promise<any>
+  deactivateUserAccount: (input: any) => Promise<any>
+  revokeTrustedDevice: (id: number) => Promise<any>
 }
 
 let backend: UserBackend
@@ -68,11 +68,11 @@ describe('user account backend boundary', () => {
     const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-user-account-'))
     tempDirs.push(dir)
     backend.configureUserAccountBackendRuntime({ stateFilePath: join(dir, 'user-account.json'), useSeedData: true })
-    backend.resetUserAccountForTests()
+    await backend.resetUserAccountForTests()
   })
 
-  it('returns backend-owned profile and trusted device snapshots', () => {
-    const result = backend.getUserAccount()
+  it('returns backend-owned profile and trusted device snapshots', async () => {
+    const result = await backend.getUserAccount()
 
     const data = expectOkData(result)
     expect(data.profile).toMatchObject({
@@ -90,7 +90,7 @@ describe('user account backend boundary', () => {
   })
 
   it('opens login and account center only through configured external actions', async () => {
-    const initialSnapshot = backend.getUserAccount().data
+    const initialSnapshot = (await backend.getUserAccount()).data
     await expect(backend.openUserLogin()).resolves.toEqual({
       ok: false,
       errorCode: 'USER_LOGIN_EXTERNAL_UNAVAILABLE',
@@ -101,7 +101,7 @@ describe('user account backend boundary', () => {
       errorCode: 'USER_ACCOUNT_CENTER_EXTERNAL_UNAVAILABLE',
       errorMessage: '账号中心服务不可用'
     })
-    expect(backend.getUserAccount().data).toEqual(initialSnapshot)
+    expect((await backend.getUserAccount()).data).toEqual(initialSnapshot)
 
     const openedUrls: string[] = []
     const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-user-account-external-action-'))
@@ -115,8 +115,8 @@ describe('user account backend boundary', () => {
         openedUrls.push(url)
       }
     })
-    backend.resetUserAccountForTests()
-    const profileBefore = backend.getUserAccount().data.profile
+    await backend.resetUserAccountForTests()
+    const profileBefore = (await backend.getUserAccount()).data.profile
 
     const login = expectOkData(await backend.openUserLogin())
     expect(login).toMatchObject({
@@ -126,7 +126,7 @@ describe('user account backend boundary', () => {
       message: '登录页面已打开'
     })
     expect(login.openedAt).toEqual(expect.any(String))
-    expect(backend.getUserAccount().data.profile).toEqual(profileBefore)
+    expect((await backend.getUserAccount()).data.profile).toEqual(profileBefore)
 
     const accountCenter = expectOkData(await backend.openUserAccountCenter())
     expect(accountCenter).toMatchObject({
@@ -136,7 +136,7 @@ describe('user account backend boundary', () => {
       message: '账号中心已打开'
     })
     expect(openedUrls).toEqual(['https://accounts.aiopsterm.local/login?client_id=aiopsterm', 'https://accounts.aiopsterm.local/account'])
-    expect(backend.getUserAccount().data.profile).toEqual(profileBefore)
+    expect((await backend.getUserAccount()).data.profile).toEqual(profileBefore)
   })
 
   it('rejects malformed or failing external user action runtime configuration', async () => {
@@ -152,8 +152,8 @@ describe('user account backend boundary', () => {
         openedUrls.push(url)
       }
     })
-    backend.resetUserAccountForTests()
-    const profileBefore = backend.getUserAccount().data.profile
+    await backend.resetUserAccountForTests()
+    const profileBefore = (await backend.getUserAccount()).data.profile
 
     await expect(backend.openUserLogin()).resolves.toEqual({
       ok: false,
@@ -176,7 +176,7 @@ describe('user account backend boundary', () => {
         throw new Error('os browser unavailable')
       }
     })
-    backend.resetUserAccountForTests()
+    await backend.resetUserAccountForTests()
     await expect(backend.openUserLogin()).resolves.toEqual({
       ok: false,
       errorCode: 'USER_LOGIN_EXTERNAL_FAILED',
@@ -187,11 +187,11 @@ describe('user account backend boundary', () => {
       errorCode: 'USER_ACCOUNT_CENTER_EXTERNAL_FAILED',
       errorMessage: 'os browser unavailable'
     })
-    expect(backend.getUserAccount().data.profile).toEqual(profileBefore)
+    expect((await backend.getUserAccount()).data.profile).toEqual(profileBefore)
   })
 
-  it('keeps device verification state behind the login boundary', () => {
-    const result = backend.loginUserAccount({ method: 'account', username: 'verify-device', password: 'secret' })
+  it('keeps device verification state behind the login boundary', async () => {
+    const result = await backend.loginUserAccount({ method: 'account', username: 'verify-device', password: 'secret' })
 
     expect(result.ok).toBe(false)
     expect(result.errorCode).toBe('USER_DEVICE_VERIFICATION_REQUIRED')
@@ -201,24 +201,24 @@ describe('user account backend boundary', () => {
     })
   })
 
-  it('updates profile identity from account, email, mobile, and skip login methods', () => {
-    expect(backend.loginUserAccount({ method: 'account', username: '', password: '' })).toEqual({
+  it('updates profile identity from account, email, mobile, and skip login methods', async () => {
+    expect(await backend.loginUserAccount({ method: 'account', username: '', password: '' })).toEqual({
       ok: false,
       errorCode: 'USER_LOGIN_REQUIRED',
       errorMessage: '请输入用户名和密码'
     })
-    expect(backend.loginUserAccount({ method: 'account', username: 'unknown_ops', password: 'secret' })).toEqual({
+    expect(await backend.loginUserAccount({ method: 'account', username: 'unknown_ops', password: 'secret' })).toEqual({
       ok: false,
       errorCode: 'USER_LOGIN_INVALID',
       errorMessage: '用户名或密码不正确'
     })
-    expect(backend.loginUserAccount({ method: 'account', username: 'ops_login', password: 'wrong-secret' })).toEqual({
+    expect(await backend.loginUserAccount({ method: 'account', username: 'ops_login', password: 'wrong-secret' })).toEqual({
       ok: false,
       errorCode: 'USER_LOGIN_INVALID',
       errorMessage: '用户名或密码不正确'
     })
 
-    const account = backend.loginUserAccount({ method: 'account', username: 'ops_login', password: 'secret' })
+    const account = await backend.loginUserAccount({ method: 'account', username: 'ops_login', password: 'secret' })
     expect(expectOkData(account).profile).toMatchObject({
       username: 'ops_login',
       registrationCode: 9,
@@ -226,14 +226,14 @@ describe('user account backend boundary', () => {
       localDatabaseReady: true
     })
 
-    expect(backend.loginUserAccount({ method: 'email', email: 'login@example.local', code: '246810' })).toEqual({
+    expect(await backend.loginUserAccount({ method: 'email', email: 'login@example.local', code: '246810' })).toEqual({
       ok: false,
       errorCode: 'USER_CODE_NOT_SENT',
       errorMessage: '请先获取验证码'
     })
 
     expectOkData(backend.sendUserLoginCode({ kind: 'email', value: 'login@example.local' }))
-    const email = backend.loginUserAccount({
+    const email = await backend.loginUserAccount({
       method: 'email',
       email: 'login@example.local',
       code: backend.peekUserCodeForTests('login', 'email', 'login@example.local')
@@ -246,7 +246,7 @@ describe('user account backend boundary', () => {
     })
 
     expectOkData(backend.sendUserLoginCode({ kind: 'mobile', value: '13800000001' }))
-    const mobile = backend.loginUserAccount({
+    const mobile = await backend.loginUserAccount({
       method: 'mobile',
       mobile: '13800000001',
       code: backend.peekUserCodeForTests('login', 'mobile', '13800000001')
@@ -257,7 +257,7 @@ describe('user account backend boundary', () => {
       lastLoginMethod: 'mobile'
     })
 
-    const guest = backend.skipUserLogin()
+    const guest = await backend.skipUserLogin()
     expect(expectOkData(guest).profile).toMatchObject({
       uid: 999999999,
       username: 'guest',
@@ -265,7 +265,7 @@ describe('user account backend boundary', () => {
     })
   })
 
-  it('validates login code targets before issuing backend-owned cooldowns', () => {
+  it('validates login code targets before issuing backend-owned cooldowns', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-06-09T10:00:00Z'))
 
@@ -301,12 +301,14 @@ describe('user account backend boundary', () => {
       expect(repeated.remainingSeconds).toBe(240)
       expect(repeated.message).toBe('验证码已发送，请 240 秒后重试')
 
-      const contact = expectOkData(backend.sendUserContactCode({ kind: 'email', value: 'login@example.local' }))
+      const contact = expectOkData(await backend.sendUserContactCode({ kind: 'email', value: 'login@example.local' }))
       expect(contact.expiresAt).toBe(Date.now() + 300_000)
       expect(contact.expiresAt).not.toBe(first.expiresAt)
 
       const code = backend.peekUserCodeForTests('login', 'email', 'login@example.local')
-      expect(expectOkData(backend.loginUserAccount({ method: 'email', email: 'login@example.local', code })).profile.email).toBe('login@example.local')
+      expect(expectOkData(await backend.loginUserAccount({ method: 'email', email: 'login@example.local', code })).profile.email).toBe(
+        'login@example.local'
+      )
       const afterLogin = expectOkData(backend.sendUserLoginCode({ kind: 'email', value: 'login@example.local' }))
       expect(afterLogin.expiresAt).toBe(Date.now() + 300_000)
       expect(afterLogin.expiresAt).not.toBe(first.expiresAt)
@@ -315,27 +317,27 @@ describe('user account backend boundary', () => {
     }
   })
 
-  it('requires issued, unexpired, single-use login verification codes', () => {
+  it('requires issued, unexpired, single-use login verification codes', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-06-09T10:00:00Z'))
 
     try {
-      expect(backend.loginUserAccount({ method: 'email', email: 'login@example.local', code: '000000' })).toEqual({
+      expect(await backend.loginUserAccount({ method: 'email', email: 'login@example.local', code: '000000' })).toEqual({
         ok: false,
         errorCode: 'USER_CODE_NOT_SENT',
         errorMessage: '请先获取验证码'
       })
 
       expectOkData(backend.sendUserLoginCode({ kind: 'email', value: 'login@example.local' }))
-      expect(backend.loginUserAccount({ method: 'email', email: 'login@example.local', code: '000000' })).toEqual({
+      expect(await backend.loginUserAccount({ method: 'email', email: 'login@example.local', code: '000000' })).toEqual({
         ok: false,
         errorCode: 'USER_CODE_INVALID',
         errorMessage: '验证码错误'
       })
 
       const code = backend.peekUserCodeForTests('login', 'email', 'login@example.local')
-      expectOkData(backend.loginUserAccount({ method: 'email', email: 'login@example.local', code }))
-      expect(backend.loginUserAccount({ method: 'email', email: 'login@example.local', code })).toEqual({
+      expectOkData(await backend.loginUserAccount({ method: 'email', email: 'login@example.local', code }))
+      expect(await backend.loginUserAccount({ method: 'email', email: 'login@example.local', code })).toEqual({
         ok: false,
         errorCode: 'USER_CODE_NOT_SENT',
         errorMessage: '请先获取验证码'
@@ -344,7 +346,7 @@ describe('user account backend boundary', () => {
       expectOkData(backend.sendUserLoginCode({ kind: 'mobile', value: '13800000001' }))
       const mobileCode = backend.peekUserCodeForTests('login', 'mobile', '13800000001')
       vi.advanceTimersByTime(300_001)
-      expect(backend.loginUserAccount({ method: 'mobile', mobile: '13800000001', code: mobileCode })).toEqual({
+      expect(await backend.loginUserAccount({ method: 'mobile', mobile: '13800000001', code: mobileCode })).toEqual({
         ok: false,
         errorCode: 'USER_CODE_EXPIRED',
         errorMessage: '验证码已过期，请重新获取'
@@ -354,14 +356,14 @@ describe('user account backend boundary', () => {
     }
   })
 
-  it('validates and applies profile edits through backend-owned mutations', () => {
-    expect(backend.updateUserProfile({ username: 'bad-name!' })).toEqual({
+  it('validates and applies profile edits through backend-owned mutations', async () => {
+    expect(await backend.updateUserProfile({ username: 'bad-name!' })).toEqual({
       ok: false,
       errorCode: 'USER_PROFILE_INVALID',
       errorMessage: '用户名仅支持字母、数字和下划线'
     })
 
-    const result = backend.updateUserProfile({ name: '  Ops Lead  ', username: 'ops_lead', avatarInitials: 'ol' })
+    const result = await backend.updateUserProfile({ name: '  Ops Lead  ', username: 'ops_lead', avatarInitials: 'ol' })
     const data = expectOkData(result)
     expect(data.profile).toMatchObject({
       name: 'Ops Lead',
@@ -393,24 +395,24 @@ describe('user account backend boundary', () => {
       expect(data.dataUrl).toBe(`data:image/png;base64,${bytes.toString('base64')}`)
       expect(data.avatarImageUrl).toBe(`aiopsterm-user-avatar://${data.assetFileName}`)
       await expect(readFile(backend.resolveUserAvatarAssetPath(data.avatarImageUrl))).resolves.toEqual(bytes)
-      expect(expectOkData(backend.updateUserProfile({ avatarImageUrl: data.avatarImageUrl })).profile.avatarImageUrl).toBe(data.avatarImageUrl)
+      expect(expectOkData(await backend.updateUserProfile({ avatarImageUrl: data.avatarImageUrl })).profile.avatarImageUrl).toBe(data.avatarImageUrl)
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
   })
 
-  it('rejects renderer-fabricated avatar urls before profile mutation', () => {
-    expect(backend.updateUserProfile({ avatarImageUrl: 'data:image/png;base64,avatar' })).toEqual({
+  it('rejects renderer-fabricated avatar urls before profile mutation', async () => {
+    expect(await backend.updateUserProfile({ avatarImageUrl: 'data:image/png;base64,avatar' })).toEqual({
       ok: false,
       errorCode: 'USER_AVATAR_ASSET_INVALID',
       errorMessage: '头像图片必须来自后端头像上传结果'
     })
-    expect(backend.updateUserProfile({ avatarImageUrl: 'file:///tmp/avatar.png' })).toEqual({
+    expect(await backend.updateUserProfile({ avatarImageUrl: 'file:///tmp/avatar.png' })).toEqual({
       ok: false,
       errorCode: 'USER_AVATAR_ASSET_INVALID',
       errorMessage: '头像图片必须来自后端头像上传结果'
     })
-    expect(backend.getUserAccount().data?.profile.avatarImageUrl).toBe('')
+    expect((await backend.getUserAccount()).data?.profile.avatarImageUrl).toBe('')
   })
 
   it('rejects non-image avatar files before profile mutation', async () => {
@@ -426,27 +428,27 @@ describe('user account backend boundary', () => {
         errorCode: 'USER_AVATAR_INVALID_IMAGE',
         errorMessage: '请选择图片文件'
       })
-      expect(backend.getUserAccount().data?.profile.avatarImageUrl).toBe('')
+      expect((await backend.getUserAccount()).data?.profile.avatarImageUrl).toBe('')
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
   })
 
-  it('enforces contact binding gates based on the current login registration code', () => {
+  it('enforces contact binding gates based on the current login registration code', async () => {
     expectOkData(backend.sendUserLoginCode({ kind: 'email', value: 'login@example.local' }))
-    backend.loginUserAccount({
+    await backend.loginUserAccount({
       method: 'email',
       email: 'login@example.local',
       code: backend.peekUserCodeForTests('login', 'email', 'login@example.local')
     })
 
-    expect(backend.sendUserContactCode({ kind: 'email', value: 'ops@example.local' })).toEqual({
+    expect(await backend.sendUserContactCode({ kind: 'email', value: 'ops@example.local' })).toEqual({
       ok: false,
       errorCode: 'USER_EMAIL_INVALID',
       errorMessage: '当前登录方式不允许修改邮箱'
     })
 
-    const mobileCode = backend.sendUserContactCode({ kind: 'mobile', value: '  13800000002  ' })
+    const mobileCode = await backend.sendUserContactCode({ kind: 'mobile', value: '  13800000002  ' })
     expect(expectOkData(mobileCode)).toMatchObject({
       challengeId: expect.stringMatching(/^[a-f0-9]{24}$/),
       target: '13800000002',
@@ -455,20 +457,20 @@ describe('user account backend boundary', () => {
       message: '手机验证码已发送'
     })
 
-    const bindMissingCode = backend.bindUserContact({ kind: 'mobile', value: '13800000002', code: '' })
+    const bindMissingCode = await backend.bindUserContact({ kind: 'mobile', value: '13800000002', code: '' })
     expect(bindMissingCode).toEqual({
       ok: false,
       errorCode: 'USER_CONTACT_CODE_REQUIRED',
       errorMessage: '请输入手机验证码'
     })
 
-    expect(backend.bindUserContact({ kind: 'mobile', value: '13800000002', code: '000000' })).toEqual({
+    expect(await backend.bindUserContact({ kind: 'mobile', value: '13800000002', code: '000000' })).toEqual({
       ok: false,
       errorCode: 'USER_CODE_INVALID',
       errorMessage: '验证码错误'
     })
 
-    const bound = backend.bindUserContact({
+    const bound = await backend.bindUserContact({
       kind: 'mobile',
       value: '13800000002',
       code: backend.peekUserCodeForTests('contact', 'mobile', '13800000002')
@@ -476,75 +478,77 @@ describe('user account backend boundary', () => {
     expect(expectOkData(bound).profile.mobile).toBe('13800000002')
 
     expectOkData(backend.sendUserLoginCode({ kind: 'mobile', value: '13800000003' }))
-    backend.loginUserAccount({
+    await backend.loginUserAccount({
       method: 'mobile',
       mobile: '13800000003',
       code: backend.peekUserCodeForTests('login', 'mobile', '13800000003')
     })
-    expect(backend.sendUserContactCode({ kind: 'mobile', value: '13800000004' })).toEqual({
+    expect(await backend.sendUserContactCode({ kind: 'mobile', value: '13800000004' })).toEqual({
       ok: false,
       errorCode: 'USER_MOBILE_INVALID',
       errorMessage: '当前登录方式不允许修改手机号'
     })
   })
 
-  it('enforces password reset gates and records password update timestamps', () => {
-    backend.patchUserAccountForTests({ authProvider: 'sso' })
-    expect(backend.resetUserPassword({ password: 'Aa123456!' })).toEqual({
+  it('enforces password reset gates and records password update timestamps', async () => {
+    await backend.patchUserAccountForTests({ authProvider: 'sso' })
+    expect(await backend.resetUserPassword({ password: 'Aa123456!' })).toEqual({
       ok: false,
       errorCode: 'USER_PASSWORD_RESET_FORBIDDEN',
       errorMessage: 'SSO 用户不能修改密码'
     })
 
-    backend.patchUserAccountForTests({ authProvider: 'local' })
-    expect(backend.resetUserPassword({ password: '12345' })).toEqual({
+    await backend.patchUserAccountForTests({ authProvider: 'local' })
+    expect(await backend.resetUserPassword({ password: '12345' })).toEqual({
       ok: false,
       errorCode: 'USER_PASSWORD_TOO_SHORT',
       errorMessage: '密码长度不能小于6位'
     })
 
-    const result = backend.resetUserPassword({ password: 'Aa123456!' })
+    const result = await backend.resetUserPassword({ password: 'Aa123456!' })
     expect(expectOkData(result).profile.passwordUpdatedAt).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/)
   })
 
-  it('updates backend-owned account credentials after password reset', () => {
-    expectOkData(backend.loginUserAccount({ method: 'account', username: 'ops_login', password: 'secret' }))
-    expectOkData(backend.resetUserPassword({ password: 'Newpass1!' }))
-    expect(backend.loginUserAccount({ method: 'account', username: 'ops_login', password: 'secret' })).toEqual({
+  it('updates backend-owned account credentials after password reset', async () => {
+    expectOkData(await backend.loginUserAccount({ method: 'account', username: 'ops_login', password: 'secret' }))
+    expectOkData(await backend.resetUserPassword({ password: 'Newpass1!' }))
+    expect(await backend.loginUserAccount({ method: 'account', username: 'ops_login', password: 'secret' })).toEqual({
       ok: false,
       errorCode: 'USER_LOGIN_INVALID',
       errorMessage: '用户名或密码不正确'
     })
-    expect(expectOkData(backend.loginUserAccount({ method: 'account', username: 'ops_login', password: 'Newpass1!' })).profile).toMatchObject({
+    expect(expectOkData(await backend.loginUserAccount({ method: 'account', username: 'ops_login', password: 'Newpass1!' })).profile).toMatchObject({
       username: 'ops_login',
       lastLoginMethod: 'account'
     })
   })
 
-  it('keeps account credentials aligned with backend-owned username edits', () => {
-    expectOkData(backend.loginUserAccount({ method: 'account', username: 'ops_login', password: 'secret' }))
-    expectOkData(backend.updateUserProfile({ username: 'ops_renamed' }))
-    expectOkData(backend.resetUserPassword({ password: 'Renamed1!' }))
+  it('keeps account credentials aligned with backend-owned username edits', async () => {
+    expectOkData(await backend.loginUserAccount({ method: 'account', username: 'ops_login', password: 'secret' }))
+    expectOkData(await backend.updateUserProfile({ username: 'ops_renamed' }))
+    expectOkData(await backend.resetUserPassword({ password: 'Renamed1!' }))
 
-    expect(backend.loginUserAccount({ method: 'account', username: 'ops_login', password: 'secret' })).toEqual({
+    expect(await backend.loginUserAccount({ method: 'account', username: 'ops_login', password: 'secret' })).toEqual({
       ok: false,
       errorCode: 'USER_LOGIN_INVALID',
       errorMessage: '用户名或密码不正确'
     })
-    expect(expectOkData(backend.loginUserAccount({ method: 'account', username: 'ops_renamed', password: 'Renamed1!' })).profile).toMatchObject({
+    expect(
+      expectOkData(await backend.loginUserAccount({ method: 'account', username: 'ops_renamed', password: 'Renamed1!' })).profile
+    ).toMatchObject({
       username: 'ops_renamed',
       lastLoginMethod: 'account'
     })
   })
 
-  it('rejects current trusted device revocation and removes non-current devices', () => {
-    expect(backend.revokeTrustedDevice(1)).toEqual({
+  it('rejects current trusted device revocation and removes non-current devices', async () => {
+    expect(await backend.revokeTrustedDevice(1)).toEqual({
       ok: false,
       errorCode: 'TRUSTED_DEVICE_CURRENT',
       errorMessage: 'Current trusted device cannot be revoked.'
     })
 
-    const result = backend.revokeTrustedDevice(2)
+    const result = await backend.revokeTrustedDevice(2)
     const data = expectOkData(result)
     expect(data).toMatchObject({
       deviceId: 2,
@@ -553,20 +557,20 @@ describe('user account backend boundary', () => {
     expect(data.trustedDevices.map((device: { id: number }) => device.id)).toEqual([1])
   })
 
-  it('deactivates the current logged-in account and clears local account state', () => {
-    expect(backend.deactivateUserAccount({ uid: 0 })).toEqual({
+  it('deactivates the current logged-in account and clears local account state', async () => {
+    expect(await backend.deactivateUserAccount({ uid: 0 })).toEqual({
       ok: false,
       errorCode: 'USER_DEACTIVATE_UID_REQUIRED',
       errorMessage: '无法确定当前用户账号'
     })
 
-    expect(backend.deactivateUserAccount({ uid: 123456 })).toEqual({
+    expect(await backend.deactivateUserAccount({ uid: 123456 })).toEqual({
       ok: false,
       errorCode: 'USER_DEACTIVATE_UID_MISMATCH',
       errorMessage: '当前用户账号不匹配'
     })
 
-    const result = backend.deactivateUserAccount({ uid: 2001007 })
+    const result = await backend.deactivateUserAccount({ uid: 2001007 })
     const data = expectOkData(result)
     expect(data.message).toBe('账号已停用，当前登录状态已清除')
     expect(data.profile).toMatchObject({
@@ -582,7 +586,7 @@ describe('user account backend boundary', () => {
     expect(data.trustedDevices).toHaveLength(1)
     expect(data.trustedDevices[0]).toMatchObject({ id: 1, current: true })
 
-    expect(backend.deactivateUserAccount({ uid: 2001007 })).toEqual({
+    expect(await backend.deactivateUserAccount({ uid: 2001007 })).toEqual({
       ok: false,
       errorCode: 'USER_DEACTIVATE_LOGIN_REQUIRED',
       errorMessage: '请先登录账号'
@@ -593,9 +597,9 @@ describe('user account backend boundary', () => {
     const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-user-account-nonseed-'))
     tempDirs.push(dir)
     backend.configureUserAccountBackendRuntime({ stateFilePath: join(dir, 'user-account.json'), useSeedData: false })
-    backend.resetUserAccountForTests()
+    await backend.resetUserAccountForTests()
 
-    const data = expectOkData(backend.getUserAccount())
+    const data = expectOkData(await backend.getUserAccount())
 
     expect(data.profile).toMatchObject({
       uid: 0,
@@ -615,9 +619,9 @@ describe('user account backend boundary', () => {
     const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-user-account-default-nonseed-'))
     tempDirs.push(dir)
     backend.configureUserAccountBackendRuntime({ stateFilePath: join(dir, 'user-account.json') })
-    backend.resetUserAccountForTests()
+    await backend.resetUserAccountForTests()
 
-    const data = expectOkData(backend.getUserAccount())
+    const data = expectOkData(await backend.getUserAccount())
 
     expect(process.env.NODE_ENV).toBe('test')
     expect(data.profile).toMatchObject({
@@ -636,9 +640,9 @@ describe('user account backend boundary', () => {
     tempDirs.push(dir)
     process.env.AIOPSTERM_USER_ACCOUNT_ENABLE_SEED = '1'
     backend.configureUserAccountBackendRuntime({ stateFilePath: join(dir, 'user-account.json') })
-    backend.resetUserAccountForTests()
+    await backend.resetUserAccountForTests()
 
-    const data = expectOkData(backend.getUserAccount())
+    const data = expectOkData(await backend.getUserAccount())
 
     expect(data.profile).toMatchObject({
       name: 'Local Operator',
@@ -654,7 +658,7 @@ describe('user account backend boundary', () => {
     tempDirs.push(dir)
     delete process.env.AIOPSTERM_USER_ACCOUNT_CODE_BACKEND_DOUBLE
     backend.configureUserAccountBackendRuntime({ stateFilePath: join(dir, 'user-account.json'), useSeedData: false })
-    backend.resetUserAccountForTests()
+    await backend.resetUserAccountForTests()
 
     expectOkData(backend.sendUserLoginCode({ kind: 'email', value: 'login@example.local' }))
 
@@ -663,7 +667,7 @@ describe('user account backend boundary', () => {
 
     process.env.AIOPSTERM_USER_ACCOUNT_CODE_BACKEND_DOUBLE = '1'
     backend.configureUserAccountBackendRuntime({ stateFilePath: join(dir, 'user-account-double.json'), useSeedData: false })
-    backend.resetUserAccountForTests()
+    await backend.resetUserAccountForTests()
     expectOkData(backend.sendUserLoginCode({ kind: 'email', value: 'login@example.local' }))
 
     expect(backend.peekUserCodeForTests('login', 'email', 'login@example.local')).toBe('246810')
@@ -674,11 +678,11 @@ describe('user account backend boundary', () => {
     tempDirs.push(dir)
     const stateFilePath = join(dir, 'user-account.json')
     backend.configureUserAccountBackendRuntime({ stateFilePath, useSeedData: true })
-    backend.resetUserAccountForTests()
-    expectOkData(backend.updateUserProfile({ username: 'local_ops', name: 'Local Operator' }))
+    await backend.resetUserAccountForTests()
+    expectOkData(await backend.updateUserProfile({ username: 'local_ops', name: 'Local Operator' }))
 
     backend.configureUserAccountBackendRuntime({ stateFilePath, useSeedData: false })
-    const data = expectOkData(backend.getUserAccount())
+    const data = expectOkData(await backend.getUserAccount())
 
     expect(data.profile).toMatchObject({
       uid: 0,
@@ -761,7 +765,7 @@ describe('user account backend boundary', () => {
     )
 
     backend.configureUserAccountBackendRuntime({ stateFilePath, useSeedData: false })
-    const data = expectOkData(backend.getUserAccount())
+    const data = expectOkData(await backend.getUserAccount())
 
     expect(data.profile).toMatchObject({
       uid: 2001007,
@@ -793,20 +797,20 @@ describe('user account backend boundary', () => {
     tempDirs.push(dir)
     const stateFilePath = join(dir, 'user-account.json')
     backend.configureUserAccountBackendRuntime({ stateFilePath, useSeedData: true })
-    backend.resetUserAccountForTests()
+    await backend.resetUserAccountForTests()
 
-    expectOkData(backend.loginUserAccount({ method: 'account', username: 'ops_login', password: 'secret' }))
-    expectOkData(backend.updateUserProfile({ name: 'Ops Lead', username: 'ops_lead', avatarInitials: 'ol' }))
-    expectOkData(backend.sendUserContactCode({ kind: 'email', value: 'ops@example.local' }))
+    expectOkData(await backend.loginUserAccount({ method: 'account', username: 'ops_login', password: 'secret' }))
+    expectOkData(await backend.updateUserProfile({ name: 'Ops Lead', username: 'ops_lead', avatarInitials: 'ol' }))
+    expectOkData(await backend.sendUserContactCode({ kind: 'email', value: 'ops@example.local' }))
     expectOkData(
-      backend.bindUserContact({
+      await backend.bindUserContact({
         kind: 'email',
         value: 'ops@example.local',
         code: backend.peekUserCodeForTests('contact', 'email', 'ops@example.local')
       })
     )
-    expectOkData(backend.resetUserPassword({ password: 'Aa123456!' }))
-    expectOkData(backend.revokeTrustedDevice(2))
+    expectOkData(await backend.resetUserPassword({ password: 'Aa123456!' }))
+    expectOkData(await backend.revokeTrustedDevice(2))
 
     const persisted = JSON.parse(await readFile(stateFilePath, 'utf-8')) as {
       profile: { name: string; username: string; email: string; passwordUpdatedAt: string; avatarInitials: string }
@@ -829,7 +833,7 @@ describe('user account backend boundary', () => {
     expect(JSON.stringify(persisted.credentials)).not.toContain('Aa123456!')
 
     backend.configureUserAccountBackendRuntime({ stateFilePath, useSeedData: true })
-    const restored = expectOkData(backend.getUserAccount())
+    const restored = expectOkData(await backend.getUserAccount())
 
     expect(restored.profile).toMatchObject({
       name: 'Ops Lead',
@@ -842,7 +846,9 @@ describe('user account backend boundary', () => {
     expect(restored.profile.passwordUpdatedAt).toBe(persisted.profile.passwordUpdatedAt)
     expect(restored.trustedDevices.map((device: { id: number }) => device.id)).toEqual([1])
     expect(restored).not.toHaveProperty('credentials')
-    expect(expectOkData(backend.loginUserAccount({ method: 'account', username: 'ops_lead', password: 'Aa123456!' })).profile.username).toBe('ops_lead')
+    expect(expectOkData(await backend.loginUserAccount({ method: 'account', username: 'ops_lead', password: 'Aa123456!' })).profile.username).toBe(
+      'ops_lead'
+    )
   })
 
   it('starts non-seed runtime without development account credentials', async () => {
@@ -850,14 +856,14 @@ describe('user account backend boundary', () => {
     tempDirs.push(dir)
     const stateFilePath = join(dir, 'user-account.json')
     backend.configureUserAccountBackendRuntime({ stateFilePath, useSeedData: false })
-    backend.resetUserAccountForTests()
+    await backend.resetUserAccountForTests()
 
-    expect(backend.loginUserAccount({ method: 'account', username: 'ops_login', password: 'secret' })).toEqual({
+    expect(await backend.loginUserAccount({ method: 'account', username: 'ops_login', password: 'secret' })).toEqual({
       ok: false,
       errorCode: 'USER_LOGIN_INVALID',
       errorMessage: '用户名或密码不正确'
     })
-    expect(backend.loginUserAccount({ method: 'account', username: 'verify-device', password: 'secret' })).toEqual({
+    expect(await backend.loginUserAccount({ method: 'account', username: 'verify-device', password: 'secret' })).toEqual({
       ok: false,
       errorCode: 'USER_LOGIN_INVALID',
       errorMessage: '用户名或密码不正确'
@@ -892,7 +898,7 @@ describe('user account backend boundary', () => {
     )
 
     backend.configureUserAccountBackendRuntime({ stateFilePath, useSeedData: true })
-    const restored = expectOkData(backend.getUserAccount())
+    const restored = expectOkData(await backend.getUserAccount())
 
     expect(restored.profile).toMatchObject({
       name: 'Restored User',
@@ -918,7 +924,7 @@ describe('user account backend boundary', () => {
     await writeFile(stateFilePath, '{bad json', 'utf-8')
 
     backend.configureUserAccountBackendRuntime({ stateFilePath, useSeedData: true })
-    const restored = expectOkData(backend.getUserAccount())
+    const restored = expectOkData(await backend.getUserAccount())
 
     expect(restored.profile).toMatchObject({
       name: 'Local Operator',

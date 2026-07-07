@@ -23,13 +23,16 @@ type AliasBackendRuntimeConfig = {
   forceFallbackStore?: boolean
 }
 
+type SqliteStatement = {
+  all(...args: unknown[]): unknown[]
+  get(...args: unknown[]): unknown
+  run(...args: unknown[]): { changes: number; lastInsertRowid: number | bigint }
+}
+
 type SqliteDatabase = {
   exec(sql: string): void
-  prepare(sql: string): {
-    all(...args: unknown[]): unknown[]
-    get(...args: unknown[]): unknown
-    run(...args: unknown[]): { changes: number; lastInsertRowid: number | bigint }
-  }
+  prepare(sql: string): SqliteStatement
+  transaction<T extends (...args: never[]) => unknown>(fn: T): T
 }
 
 const defaultAliases: AliasCommandConfig[] = [
@@ -132,8 +135,15 @@ class FallbackAliasStore {
 }
 
 class SqliteAliasStore {
+  private readonly insertStatement: SqliteStatement
+  private readonly listStatement: SqliteStatement
+  private readonly replaceAll: (commands: AliasCommandConfig[]) => void
+
   constructor(private db: SqliteDatabase) {
     this.db.exec(`
+      PRAGMA journal_mode=WAL;
+      PRAGMA synchronous=NORMAL;
+      PRAGMA busy_timeout=5000;
       CREATE TABLE IF NOT EXISTS aliases (
         id TEXT PRIMARY KEY,
         alias TEXT NOT NULL UNIQUE,
@@ -143,44 +153,45 @@ class SqliteAliasStore {
       CREATE INDEX IF NOT EXISTS idx_aliases_created_at ON aliases(created_at DESC);
       CREATE INDEX IF NOT EXISTS idx_aliases_alias ON aliases(alias);
     `)
+    this.insertStatement = this.db.prepare('INSERT INTO aliases (id, alias, command, created_at) VALUES (?, ?, ?, ?)')
+    this.listStatement = this.db.prepare('SELECT id, alias, command, created_at FROM aliases ORDER BY created_at DESC')
+    this.replaceAll = this.db.transaction((commands: AliasCommandConfig[]) => {
+      this.db.exec('DELETE FROM aliases;')
+      for (const item of commands) {
+        this.insertStatement.run(item.id, item.alias, item.command, item.createdAt || Date.now())
+      }
+    })
     if (runtimeConfig.useSeedData) this.seed()
   }
 
   private seed() {
     const count = this.db.prepare('SELECT COUNT(*) as count FROM aliases').get() as { count: number }
     if (count?.count) return
-    for (const item of defaultAliases) {
-      this.db
-        .prepare('INSERT INTO aliases (id, alias, command, created_at) VALUES (?, ?, ?, ?)')
-        .run(item.id, item.alias, item.command, item.createdAt || Date.now())
-    }
+    const seedTransaction = this.db.transaction(() => {
+      for (const item of defaultAliases) {
+        this.insertStatement.run(item.id, item.alias, item.command, item.createdAt || Date.now())
+      }
+    })
+    seedTransaction()
   }
 
   list(): AliasCommandConfig[] {
-    const aliases = this.db
-      .prepare('SELECT id, alias, command, created_at FROM aliases ORDER BY created_at DESC')
-      .all()
-      .map((row) => {
-        const item = row as { id: string; alias: string; command: string; created_at: number }
-        return {
-          id: item.id,
-          alias: item.alias,
-          command: item.command,
-          createdAt: item.created_at
-        }
-      })
+    const aliases = this.listStatement.all().map((row) => {
+      const item = row as { id: string; alias: string; command: string; created_at: number }
+      return {
+        id: item.id,
+        alias: item.alias,
+        command: item.command,
+        createdAt: item.created_at
+      }
+    })
     const normalized = stripLegacySeedAliases(normalizeAliases(aliases))
     if (JSON.stringify(normalized) !== JSON.stringify(aliases)) return this.save(normalized)
     return normalized
   }
 
   save(commands: AliasCommandConfig[]) {
-    this.db.exec('DELETE FROM aliases;')
-    for (const item of normalizeAliases(commands)) {
-      this.db
-        .prepare('INSERT INTO aliases (id, alias, command, created_at) VALUES (?, ?, ?, ?)')
-        .run(item.id, item.alias, item.command, item.createdAt || Date.now())
-    }
+    this.replaceAll(normalizeAliases(commands))
     return this.list()
   }
 }

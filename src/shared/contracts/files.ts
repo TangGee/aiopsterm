@@ -151,6 +151,13 @@ export type FileTransferTask = {
   children?: FileTransferTask[]
 }
 
+export type FileTransferTaskEventKind = 'registered' | 'progress' | 'finished'
+
+export type FileTransferTaskEvent = {
+  kind: FileTransferTaskEventKind
+  task: FileTransferTask
+}
+
 export type FileTransferTaskCancelInput = {
   id: string
 }

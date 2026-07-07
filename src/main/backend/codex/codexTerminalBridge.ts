@@ -73,6 +73,8 @@ let preferredSessionId = ''
 let preferredSessionStrict = false
 
 const terminalOutputHistoryMaxLines = 10000
+// 只发 \r 不发 \n 的进度流（wget/npm 等）不会触发换行落盘，pending 必须有硬上限。
+const terminalOutputHistoryPendingMaxLength = 64 * 1024
 
 const cleanText = (value: unknown) => (typeof value === 'string' ? value.trim() : '')
 
@@ -184,7 +186,13 @@ const appendTerminalOutputHistoryLine = (history: TerminalOutputHistory, line: s
   trimTerminalOutputHistory(history)
 }
 
+// 历史记录里 \r 视为回车覆写：只保留最后一次覆写的内容（wget/npm 进度条场景）。
+const applyCarriageReturnOverwrite = (value: string) => value.slice(value.lastIndexOf('\r') + 1)
+
 export const appendCodexTerminalBridgeDisplayData = (sessionId: string, chunk: string | Buffer) => {
+  // bridge 服务未启动(从未创建过 codex 会话)时不维护输出历史,终端输出热路径零开销;
+  // read_terminal_output 只覆盖首个 codex 会话启动之后产生的输出。
+  if (!server) return
   const rawText = Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk || '')
   if (!rawText) return
   const history = terminalOutputHistoryForSession(sessionId)
@@ -192,14 +200,17 @@ export const appendCodexTerminalBridgeDisplayData = (sessionId: string, chunk: s
     resetTerminalOutputHistory(history)
     terminalClearSequencePattern.lastIndex = 0
   }
-  const text = stripTerminalControl(rawText)
+  const text = stripTerminalControlKeepingCarriageReturns(rawText)
   if (!text) return
-  const parts = text.split('\n')
+  const parts = text.replace(/\r\n/g, '\n').split('\n')
   for (let index = 0; index < parts.length - 1; index += 1) {
-    appendTerminalOutputHistoryLine(history, `${history.pending}${parts[index]}`)
+    appendTerminalOutputHistoryLine(history, applyCarriageReturnOverwrite(`${history.pending}${parts[index]}`))
     history.pending = ''
   }
-  history.pending += parts[parts.length - 1] || ''
+  history.pending = applyCarriageReturnOverwrite(`${history.pending}${parts[parts.length - 1] || ''}`)
+  if (history.pending.length > terminalOutputHistoryPendingMaxLength) {
+    history.pending = history.pending.slice(-terminalOutputHistoryPendingMaxLength)
+  }
   history.updatedAt = Date.now()
 }
 
@@ -339,11 +350,12 @@ export const filterCodexTerminalBridgeDisplayData = (sessionId: string, chunk: s
   return visible
 }
 
-const stripTerminalControl = (value: string) =>
+const stripTerminalControlKeepingCarriageReturns = (value: string) =>
   value
     .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, '')
     .replace(/\u001b\][^\u0007]*(?:\u0007|\u001b\\)/g, '')
-    .replace(/\r/g, '')
+
+const stripTerminalControl = (value: string) => stripTerminalControlKeepingCarriageReturns(value).replace(/\r/g, '')
 
 const extractMarkedOutput = (value: string, markerStart: string) => {
   const cleaned = stripTerminalControl(value)

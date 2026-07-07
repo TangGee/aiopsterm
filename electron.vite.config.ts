@@ -39,6 +39,18 @@ export default defineConfig({
     build: {
       commonjsOptions: {
         include: [/node_modules/, /vendor\/xterm/]
+      },
+      rollupOptions: {
+        output: {
+          // 兜底拆分大依赖，防止被意外并入首屏 index chunk；monaco 主体依赖动态导入拆分
+          manualChunks(id: string) {
+            if (id.includes('node_modules/monaco-editor/')) return 'monaco'
+            if (id.includes('node_modules/mermaid/')) return 'mermaid'
+            if (id.includes('node_modules/highlight.js/')) return 'hljs'
+            if (id.includes('node_modules/@xterm/') || id.includes('vendor/xterm/')) return 'xterm'
+            return undefined
+          }
+        }
       }
     },
     worker: {

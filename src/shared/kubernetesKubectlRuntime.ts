@@ -84,6 +84,10 @@ const stripAnsi = (value: string) =>
 
 const resolveKubectlCommand = () => process.env.AIOPSTERM_KUBECTL_PATH?.trim() || 'kubectl'
 
+// kubectl 输出收集上限：超限截断并在输出尾部标记，避免大结果集撑爆主进程内存。
+const kubectlOutputMaxLength = 10 * 1024 * 1024
+const kubectlOutputTruncatedNotice = '[aiopsterm] kubectl output truncated at 10MB.'
+
 const hasArgument = (args: string[], names: string[]) =>
   args.some((arg, index) => names.includes(arg) || names.some((name) => arg.startsWith(`${name}=`)) || (names.includes(args[index - 1]) && !arg.startsWith('-')))
 
@@ -285,8 +289,20 @@ export const runLocalKubectl = async (
       })
       let stdout = ''
       let stderr = ''
+      let outputTruncated = false
       let settled = false
       let timeoutId: ReturnType<typeof setTimeout>
+      const collect = (current: string, data: unknown) => {
+        if (current.length >= kubectlOutputMaxLength) {
+          outputTruncated = true
+          return current
+        }
+        const next = current + String(data)
+        if (next.length <= kubectlOutputMaxLength) return next
+        outputTruncated = true
+        return next.slice(0, kubectlOutputMaxLength)
+      }
+      const withTruncationNotice = (output: string) => (outputTruncated ? [output, kubectlOutputTruncatedNotice].filter(Boolean).join('\n') : output)
       const finish = (result: { success: boolean; output: string; error: string; exitCode?: number | null }) => {
         if (settled) return
         settled = true
@@ -298,17 +314,17 @@ export const runLocalKubectl = async (
         const output = stripAnsi([stdout, stderr].filter(Boolean).join('\n')).trimEnd()
         finish({
           success: false,
-          output,
+          output: withTruncationNotice(output),
           error: `kubectl command timed out after ${timeoutMs}ms.`,
           exitCode: -1
         })
       }, timeoutMs)
 
       child.stdout?.on('data', (data) => {
-        stdout += String(data)
+        stdout = collect(stdout, data)
       })
       child.stderr?.on('data', (data) => {
-        stderr += String(data)
+        stderr = collect(stderr, data)
       })
       child.on('error', (error) => {
         finish({
@@ -325,7 +341,7 @@ export const runLocalKubectl = async (
         const success = code === 0
         finish({
           success,
-          output,
+          output: withTruncationNotice(output),
           error: success ? '' : cleanStderr || (signal ? `Command exited from signal ${signal}.` : `Command exited with code ${code}.`),
           exitCode: code
         })

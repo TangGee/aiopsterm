@@ -1042,6 +1042,8 @@ const simplifiedToTraditional: Array<[RegExp, string]> = [
   [/操作/g, '操作']
 ]
 
+const translatableTextPattern = /[\u3400-\u9fff]/
+
 const shouldSkipNode = (node: Node) => {
   const element = node instanceof Element ? node : node.parentElement
   return Boolean(
@@ -1079,10 +1081,10 @@ const translateToEnglish = (text: string) => {
 
 export const hasStaticTextTranslation = (text: string) => {
   const normalized = normalizeText(text)
-  if (!normalized || !/[\u3400-\u9fff]/.test(normalized)) return true
+  if (!normalized || !translatableTextPattern.test(normalized)) return true
   if (exactEnUS[normalized]) return true
   if (staticPatterns.some(([pattern]) => pattern.test(normalized))) return true
-  return !/[\u3400-\u9fff]/.test(applyGenericEnglish(normalized))
+  return !translatableTextPattern.test(applyGenericEnglish(normalized))
 }
 
 const translateToTraditional = (text: string) => {
@@ -1093,7 +1095,7 @@ const translateToTraditional = (text: string) => {
 
 export const translateStaticText = (locale: SupportedLocale, text: string) => {
   const normalized = normalizeText(text)
-  if (!normalized || !/[\u3400-\u9fff]/.test(normalized)) return text
+  if (!normalized || !translatableTextPattern.test(normalized)) return text
   if (locale === 'zh-CN') return text
   if (locale === 'zh-TW') return text.replace(normalized, translateToTraditional(normalized))
   return text.replace(normalized, translateToEnglish(normalized))
@@ -1106,11 +1108,12 @@ export const installStaticTextI18n = (options: StaticTextRuntimeOptions) => {
   let observer: MutationObserver | null = null
 
   const translateTextNode = (node: Text) => {
-    if (shouldSkipNode(node)) return
+    // \u5148\u505a\u5ec9\u4ef7\u7684 CJK \u5224\u65ad\uff0c\u672a\u8ddf\u8e2a\u4e14\u65e0\u53ef\u7ffb\u8bd1\u5185\u5bb9\u7684\u8282\u70b9\u4e0d\u8fdb\u5165 closest \u9009\u62e9\u5668\u5339\u914d
     const value = node.nodeValue ?? ''
     const tracked = textOriginals.get(node)
-    if (!tracked && !/[\u3400-\u9fff]/.test(value)) return
-    if (tracked && value !== tracked.original && value !== tracked.translated && !/[\u3400-\u9fff]/.test(value)) {
+    if (!tracked && !translatableTextPattern.test(value)) return
+    if (shouldSkipNode(node)) return
+    if (tracked && value !== tracked.original && value !== tracked.translated && !translatableTextPattern.test(value)) {
       textOriginals.delete(node)
       return
     }
@@ -1121,15 +1124,18 @@ export const installStaticTextI18n = (options: StaticTextRuntimeOptions) => {
   }
 
   const translateElementAttrs = (element: Element) => {
+    // \u672a\u8ddf\u8e2a\u4e14\u6240\u6709\u5c5e\u6027\u90fd\u65e0\u53ef\u7ffb\u8bd1\u5185\u5bb9\u65f6\u8df3\u8fc7\uff0c\u907f\u514d\u4e3a\u6bcf\u4e2a\u53d8\u66f4\u5143\u7d20\u8dd1 closest
+    const trackedAttrs = attrOriginals.get(element)
+    if (!trackedAttrs && !attrs.some((attr) => translatableTextPattern.test(element.getAttribute(attr) ?? ''))) return
     if (shouldSkipNode(element)) return
     for (const attr of attrs) {
       const value = element.getAttribute(attr)
       if (!value) continue
       let originals = attrOriginals.get(element)
-      if (!originals && !/[\u3400-\u9fff]/.test(value)) continue
+      if (!originals && !translatableTextPattern.test(value)) continue
       if (!originals) originals = new Map()
       const tracked = originals.get(attr)
-      if (tracked && value !== tracked.original && value !== tracked.translated && !/[\u3400-\u9fff]/.test(value)) {
+      if (tracked && value !== tracked.original && value !== tracked.translated && !translatableTextPattern.test(value)) {
         originals.delete(attr)
         if (originals.size === 0) attrOriginals.delete(element)
         continue
@@ -1157,6 +1163,8 @@ export const installStaticTextI18n = (options: StaticTextRuntimeOptions) => {
   const start = () => {
     refresh()
     observer = new MutationObserver((mutations) => {
+      // zh-CN 下译文与原文一致，变更无需处理；切换 locale 时由 refresh 全量重走
+      if (options.locale() === 'zh-CN') return
       for (const mutation of mutations) {
         if (mutation.type === 'characterData' && mutation.target.nodeType === Node.TEXT_NODE) translateTextNode(mutation.target as Text)
         if (mutation.type === 'attributes' && mutation.target instanceof Element) translateElementAttrs(mutation.target)

@@ -37,7 +37,7 @@ vi.mock('zmodem.js', () => {
 const terminalEvent = {
   id: 'terminal-zmodem-unit',
   data: '**\x18B',
-  raw: [0x2a, 0x2a, 0x18, 0x42]
+  raw: new Uint8Array([0x2a, 0x2a, 0x18, 0x42])
 }
 
 const flushAsync = async (cycles = 4) => {

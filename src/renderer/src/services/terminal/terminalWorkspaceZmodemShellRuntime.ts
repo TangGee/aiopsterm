@@ -77,6 +77,8 @@ export const createTerminalWorkspaceZmodemShellRuntime = ({
 
   const handleTerminalData = (event: TerminalDataEvent) => terminalZmodemRuntime.handleTerminalData(event)
 
+  const isZmodemSessionActive = (sessionId: string) => terminalZmodemRuntime.isSessionActive(sessionId)
+
   const cancelZmodemTransfer = () => {
     if (!zmodemSessionId.value || zmodemProgress.status !== 'running') return
     void terminalZmodemRuntime.cancel(zmodemSessionId.value)
@@ -92,6 +94,7 @@ export const createTerminalWorkspaceZmodemShellRuntime = ({
     dispose,
     formatZmodemBytes: formatTerminalWorkspaceZmodemBytes,
     handleTerminalData,
+    isZmodemSessionActive,
     zmodemPercent,
     zmodemProgress,
     zmodemSessionId

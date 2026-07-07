@@ -110,7 +110,7 @@ export async function executeDatabaseSql(input: DatabaseSqlExecuteInput): Promis
 
   const connection = databaseCatalogBackendRuntimeContext.findConnection(input.connectionId)
   if (connection?.dbType === 'sqlite' && isRealSqliteConnection(connection)) {
-    return withDatabaseSqlExecutionRecord(sqliteExecute(connection, rawSql, startedAt), startedAt)
+    return withDatabaseSqlExecutionRecord(await sqliteExecute(connection, rawSql, startedAt), startedAt)
   }
   if (!connection) {
     return withDatabaseSqlExecutionRecord({ ok: false, errorCode: 'DB_CONNECTION_NOT_FOUND', errorMessage: 'Database connection was not found.' }, startedAt)

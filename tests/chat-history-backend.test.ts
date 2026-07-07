@@ -12,6 +12,7 @@ type ChatHistoryBackend = {
   deleteChatConversation: (id: string) => any
   restoreChatConversation: (id: string) => any
   saveChatMessageMetadata: (input: any) => any
+  flushChatHistoryWrites: () => Promise<void>
   chatHistoryRestoreMessageLimit: number
   chatHistoryRestorePayloadByteLimit: number
   chatHistoryTruncationMessageId: string
@@ -99,6 +100,7 @@ describe('AI chat history backend boundary', () => {
   it('strips unmodified legacy seed conversations from non-seed runtime state', async () => {
     const stateFilePath = await useTempRuntime({ useSeedData: true, prefix: 'aiopsterm-chat-history-legacy-seed-empty-' })
     backend.restoreChatConversation('conv-1')
+    await backend.flushChatHistoryWrites()
     expect(JSON.parse(await readFile(stateFilePath, 'utf-8')).conversations.map((conversation: { id: string }) => conversation.id)).toEqual(['conv-1', 'conv-2', 'conv-3'])
 
     backend.configureChatHistoryBackendRuntime({ stateFilePath, useSeedData: false })
@@ -267,6 +269,7 @@ describe('AI chat history backend boundary', () => {
     )
     expect(saved.selectedConversationId).toBe(created.conversation.id)
 
+    await backend.flushChatHistoryWrites()
     let persisted = JSON.parse(await readFile(stateFilePath, 'utf-8')) as {
       selectedConversationId: string
       conversations: Array<{ id: string; summary: string }>
@@ -435,6 +438,7 @@ describe('AI chat history backend boundary', () => {
       errorMessage: 'Conversation not found.'
     })
 
+    await backend.flushChatHistoryWrites()
     persisted = JSON.parse(await readFile(stateFilePath, 'utf-8'))
     expect(persisted.conversations).toEqual([])
     expect(persisted.selectedConversationId).toBe('')
@@ -493,6 +497,7 @@ describe('AI chat history backend boundary', () => {
       })
     )
 
+    await backend.flushChatHistoryWrites()
     const persisted = JSON.parse(await readFile(stateFilePath, 'utf-8')) as {
       messagesByConversationId: Record<string, Array<{ id: string }>>
     }
@@ -562,6 +567,7 @@ describe('AI chat history backend boundary', () => {
       { id: 'history-message-1', role: 'user', text: 'hi', hosts: [{ id: 'history-host-0', kind: 'hosts', label: 'prod' }] }
     ])
 
+    await backend.flushChatHistoryWrites()
     await writeFile(stateFilePath, '{bad json', 'utf-8')
     backend.configureChatHistoryBackendRuntime({ stateFilePath, useSeedData: false })
     list = expectOkData(backend.listChatConversations())

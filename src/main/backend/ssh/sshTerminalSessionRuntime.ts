@@ -508,6 +508,16 @@ export const createSshTerminalSession = (
       rows = nextRows
       stream?.setWindow?.(rows, cols, 0, 0)
     },
+    pause() {
+      try {
+        stream?.pause?.()
+      } catch {}
+    },
+    resume() {
+      try {
+        stream?.resume?.()
+      } catch {}
+    },
     kill(reason: TerminalDisconnectReason = 'manual') {
       finish(0, reason)
       try {

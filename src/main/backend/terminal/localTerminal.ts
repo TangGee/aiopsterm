@@ -12,6 +12,8 @@ export type LocalPtyProcess = {
   write(data: string): void
   resize(cols: number, rows: number): void
   kill(): void
+  pause?(): void
+  resume?(): void
   onData(callback: (data: string) => void): void
   onExit(callback: (event: { exitCode: number }) => void): void
 }
@@ -28,6 +30,8 @@ export type LocalTerminalSession = {
   runBackgroundCommand?(options: TerminalBackgroundCommandOptions): Promise<TerminalBackgroundCommandResult>
   resize(cols: number, rows: number): void
   kill(reason?: TerminalDisconnectReason): void
+  pause?(): void
+  resume?(): void
 }
 
 type LocalTerminalRuntimeConfig = {
@@ -421,6 +425,12 @@ export const createLocalTerminalSession = (id: string, options: TerminalCreateOp
       resize(cols: number, rows: number) {
         ptyProcess.resize(cols, rows)
       },
+      pause() {
+        ptyProcess.pause?.()
+      },
+      resume() {
+        ptyProcess.resume?.()
+      },
       kill(reason: TerminalDisconnectReason = 'manual') {
         try {
           ptyProcess.kill()
@@ -461,6 +471,14 @@ export const createLocalTerminalSession = (id: string, options: TerminalCreateOp
     },
     resize() {
       /* Subprocess fallback has no terminal window to resize. */
+    },
+    pause() {
+      child.stdout.pause()
+      child.stderr.pause()
+    },
+    resume() {
+      child.stdout.resume()
+      child.stderr.resume()
     },
     kill(reason: TerminalDisconnectReason = 'manual') {
       try {

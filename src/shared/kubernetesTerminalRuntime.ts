@@ -58,6 +58,15 @@ const clampTerminalDimension = (value: unknown, fallback: number, min: number, m
 
 const k8sTerminalPrompt = (namespace: string) => `[${namespace || 'default'}]$ `
 
+// 会话累计输出必须有上限：超限只保留尾部，避免长跑终端把主进程内存拖爆。
+const k8sTerminalOutputMaxLength = 1024 * 1024
+
+const appendK8sTerminalOutput = (current: string, chunk: string) => {
+  if (!chunk) return current
+  const joined = current.endsWith('\n') || !current ? `${current}${chunk}` : `${current}\n${chunk}`
+  return joined.length > k8sTerminalOutputMaxLength ? joined.slice(-k8sTerminalOutputMaxLength) : joined
+}
+
 const k8sTerminalSessionName = (clusterName: string, index: number) => (index <= 1 ? clusterName : `${clusterName}-${index}`)
 
 const cloneTerminalRecord = (record: KubernetesTerminalRecord): KubernetesTerminalRecord => ({ ...record })
@@ -103,7 +112,7 @@ export const createKubernetesTerminalRuntime = (options: KubernetesTerminalRunti
         if (session.clusterId !== clusterId || session.status === 'ended' || session.status === 'error') return session
         const failed: KubernetesTerminalRecord = {
           ...session,
-          output: session.output.endsWith('\n') || !session.output ? `${session.output}${error}` : `${session.output}\n${error}`,
+          output: appendK8sTerminalOutput(session.output, error),
           status: 'error',
           updatedAt: options.nowLabel()
         }
@@ -185,7 +194,7 @@ export const createKubernetesTerminalRuntime = (options: KubernetesTerminalRunti
       const terminalOutput = result.data.terminalOutput
       const updated: KubernetesTerminalRecord = {
         ...current,
-        output: terminalOutput ? (current.output.endsWith('\n') || !current.output ? `${current.output}${terminalOutput}` : `${current.output}\n${terminalOutput}`) : current.output,
+        output: terminalOutput ? appendK8sTerminalOutput(current.output, terminalOutput) : current.output,
         status: current.status,
         updatedAt: options.nowLabel()
       }

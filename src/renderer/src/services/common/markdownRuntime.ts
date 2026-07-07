@@ -1,5 +1,5 @@
 import { marked } from 'marked'
-import hljs from 'highlight.js'
+import { highlightAutoValue, hljs } from '@/services/common/highlightRuntime'
 
 const removedMarkdownTags = new Set(['script', 'style', 'iframe', 'object', 'embed', 'link', 'meta', 'svg', 'math', 'form', 'input'])
 const allowedMarkdownTags = new Set([
@@ -132,8 +132,9 @@ const highlightCodeBlocks = (doc: Document) => {
     const language = languageClass?.replace(/^language-/, '').toLowerCase()
     const source = code.textContent || ''
     try {
-      const highlighted = language && hljs.getLanguage(language) ? hljs.highlight(source, { language, ignoreIllegals: true }) : hljs.highlightAuto(source)
-      code.innerHTML = highlighted.value
+      const highlightedValue =
+        language && hljs.getLanguage(language) ? hljs.highlight(source, { language, ignoreIllegals: true }).value : highlightAutoValue(source)
+      if (highlightedValue !== null) code.innerHTML = highlightedValue
       code.classList.add('hljs')
       if (language) code.classList.add(`language-${language}`)
     } catch {

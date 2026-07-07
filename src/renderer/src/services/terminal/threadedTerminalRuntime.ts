@@ -269,7 +269,19 @@ const renderDebug: ThreadedTerminalRenderDebug = {
 
 const encoder = new TextEncoder()
 const nowMs = () => globalThis.performance?.now?.() ?? Date.now()
-const textByteLength = (value: string) => encoder.encode(value).length
+const textByteLength = (value: string) => {
+  let bytes = 0
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index)
+    if (code < 0x80) bytes += 1
+    else if (code < 0x800) bytes += 2
+    else if (code >= 0xd800 && code <= 0xdbff) {
+      bytes += 4
+      index += 1
+    } else bytes += 3
+  }
+  return bytes
+}
 
 export const threadedTerminalCapability = (): ThreadedTerminalHostCapability => {
   if (typeof window === 'undefined') return { supported: false, reason: 'window-unavailable' }
@@ -581,6 +593,13 @@ const rectForHostInGroup = (host: HTMLElement, group: ThreadedTerminalRenderGrou
   }
 }
 
+// 背压 ack 出口:core worker 消费一个 batch 后经此回执主进程,由 controller 注册具体实现。
+let terminalDataConsumedSink: ((sessionId: string, bytes: number) => void) | null = null
+
+export const setThreadedTerminalDataConsumedSink = (sink: ((sessionId: string, bytes: number) => void) | null) => {
+  terminalDataConsumedSink = sink
+}
+
 const handleCoreMessage = (handle: ThreadedTerminalCoreHandle, message: ThreadedTerminalCoreResponse) => {
   if (message.type === 'ready') {
     handle.ready = true
@@ -604,6 +623,10 @@ const handleCoreMessage = (handle: ThreadedTerminalCoreHandle, message: Threaded
   }
   if (message.type === 'data') {
     hostMap.get(message.terminalId)?.emitData(message.data)
+    return
+  }
+  if (message.type === 'consumed') {
+    if (message.sessionId) terminalDataConsumedSink?.(message.sessionId, message.bytes)
     return
   }
   if (message.type === 'title') {
@@ -956,6 +979,7 @@ export class ThreadedTerminalHost {
   private renderGroup: ThreadedTerminalRenderGroupHandle | null = null
   private lastSurfaceLayout: { renderGroupId: string; x: number; y: number; width: number; height: number; geometrySeq: number } | null = null
   private geometrySeq = 0
+  private lastComputedGeometry: ThreadedTerminalGeometry | null = null
   private geometry: ThreadedTerminalGeometry | null = null
   private pendingFitFrame: number | null = null
   private pendingSurfaceAttachFrame: number | null = null
@@ -1699,7 +1723,22 @@ export class ThreadedTerminalHost {
     const rows = Math.max(1, Math.floor(canvasHeight / metrics.height))
     const gridWidth = cols * metrics.width
     const gridHeight = rows * metrics.height
-    return {
+    // 几何值未变时复用上一个对象(含 seq):上层的多帧 fit 重试与设置 watch 会反复调用此函数,
+    // seq 按值去重后,下游 resize/全量重绘只在几何真正变化时发生。
+    const previous = this.lastComputedGeometry
+    if (
+      previous &&
+      previous.canvasWidth === canvasWidth &&
+      previous.canvasHeight === canvasHeight &&
+      previous.cols === cols &&
+      previous.rows === rows &&
+      previous.cellWidth === metrics.width &&
+      previous.cellHeight === metrics.height &&
+      previous.baseline === metrics.baseline
+    ) {
+      return previous
+    }
+    const geometry: ThreadedTerminalGeometry = {
       seq: ++this.geometrySeq,
       canvasWidth,
       canvasHeight,
@@ -1713,6 +1752,8 @@ export class ThreadedTerminalHost {
       paddingTop: 0,
       paddingBottom: Math.max(0, canvasHeight - gridHeight)
     }
+    this.lastComputedGeometry = geometry
+    return geometry
   }
 
   private logSmallGeometryDiagnostic(hostWidth: number, hostHeight: number, geometry: ThreadedTerminalGeometry) {

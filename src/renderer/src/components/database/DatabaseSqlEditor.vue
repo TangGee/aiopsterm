@@ -26,15 +26,10 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import * as monaco from 'monaco-editor/esm/vs/editor/editor.api'
-import 'monaco-editor/esm/vs/editor/contrib/folding/browser/folding'
-import 'monaco-editor/esm/vs/editor/contrib/find/browser/findController'
-import 'monaco-editor/esm/vs/basic-languages/sql/sql.contribution'
+import type * as monaco from 'monaco-editor/esm/vs/editor/editor.api'
 import { editorIndent, editorLineHeightPx, resolveEditorFontFamily } from '@/services/common/editorRuntime'
-import { ensureMonacoEnvironment } from '@/services/common/monacoRuntime'
+import { loadMonaco, type MonacoModule } from '@/services/common/monacoRuntime'
 import { useWorkspaceStore } from '@/stores/workspace'
-
-ensureMonacoEnvironment()
 
 export interface DatabaseSqlEditorMetrics {
   line: number
@@ -64,6 +59,7 @@ const workspace = useWorkspaceStore()
 const containerRef = ref<HTMLElement | null>(null)
 const fallbackRef = ref<HTMLTextAreaElement | null>(null)
 const monacoReady = ref(false)
+let monacoApi: MonacoModule | null = null
 let editor: monaco.editor.IStandaloneCodeEditor | null = null
 let suppressEditorEmit = false
 let suppressFallbackEmit = false
@@ -173,8 +169,8 @@ const applyModelOptions = () => {
 }
 
 const createEditor = () => {
-  if (!containerRef.value || editor) return
-  editor = monaco.editor.create(containerRef.value, {
+  if (!containerRef.value || editor || !monacoApi) return
+  editor = monacoApi.editor.create(containerRef.value, {
     value: props.modelValue,
     language: 'sql',
     automaticLayout: true,
@@ -203,7 +199,7 @@ const createEditor = () => {
     ...editorOptions.value
   })
   applyModelOptions()
-  editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => emit('run', getSelectedText().trim() ? 'current' : 'all'))
+  editor.addCommand(monacoApi.KeyMod.CtrlCmd | monacoApi.KeyCode.Enter, () => emit('run', getSelectedText().trim() ? 'current' : 'all'))
   editor.onDidChangeModelContent(() => {
     if (suppressEditorEmit) return
     const value = editor?.getValue() || ''
@@ -380,8 +376,8 @@ const replaceRange = (next: string, range: TextRange) => {
   const start = clampOffset(Math.min(range.start, range.end), text)
   const end = clampOffset(Math.max(range.start, range.end), text)
   const model = editor?.getModel()
-  if (editor && model) {
-    const monacoRange = new monaco.Range(
+  if (editor && model && monacoApi) {
+    const monacoRange = new monacoApi.Range(
       model.getPositionAt(start).lineNumber,
       model.getPositionAt(start).column,
       model.getPositionAt(end).lineNumber,
@@ -477,9 +473,11 @@ const focus = () => {
   emitFallbackMetrics()
 }
 
-onMounted(() => {
+onMounted(async () => {
   syncFallbackValue(props.modelValue)
-  void nextTick(createEditor)
+  monacoApi = await loadMonaco()
+  await nextTick()
+  createEditor()
 })
 
 watch(

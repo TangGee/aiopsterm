@@ -651,7 +651,15 @@ export const createTerminalWorkspaceCommandRuntime = ({
     }
   }
 
-  watch(search, runIncrementalSearch)
+  // 按键节奏内合并增量搜索:每次全量扫描发生在 worker,防抖避免逐键触发。
+  let incrementalSearchTimer: ReturnType<typeof setTimeout> | null = null
+  watch(search, () => {
+    if (incrementalSearchTimer) clearTimeout(incrementalSearchTimer)
+    incrementalSearchTimer = setTimeout(() => {
+      incrementalSearchTimer = null
+      runIncrementalSearch()
+    }, 120)
+  })
 
   watch(
     () => workspace.extensionSettings.autoCompleteStatus,

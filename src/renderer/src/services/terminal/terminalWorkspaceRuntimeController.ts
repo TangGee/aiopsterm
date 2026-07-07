@@ -13,7 +13,7 @@ import { createTerminalWorkspaceSessionRuntime } from '@/services/terminal/termi
 import { createTerminalWorkspaceShellRuntime, createTerminalWorkspaceShellState } from '@/services/terminal/terminalWorkspaceShellRuntime'
 import { createTerminalWorkspaceViewRuntime } from '@/services/terminal/terminalWorkspaceViewRuntime'
 import { createTerminalWorkspaceZmodemShellRuntime } from '@/services/terminal/terminalWorkspaceZmodemShellRuntime'
-import { isThreadedTerminalHost } from '@/services/terminal/threadedTerminalRuntime'
+import { isThreadedTerminalHost, setThreadedTerminalDataConsumedSink } from '@/services/terminal/threadedTerminalRuntime'
 import { useI18n } from '@/i18n'
 import type { TerminalStressQueueSample } from '@/services/terminal/terminalStressHarness'
 import type { TerminalDataEvent } from '@shared/contracts/terminalSessions'
@@ -77,7 +77,19 @@ const terminalIngressFlushPanelsPerSlice = 8
 const terminalTextEncoder = new TextEncoder()
 const terminalTextDecoder = new TextDecoder()
 const nowMs = () => globalThis.performance?.now?.() ?? Date.now()
-const textByteLength = (value: string) => terminalTextEncoder.encode(value).length
+const textByteLength = (value: string) => {
+  let bytes = 0
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index)
+    if (code < 0x80) bytes += 1
+    else if (code < 0x800) bytes += 2
+    else if (code >= 0xd800 && code <= 0xdbff) {
+      bytes += 4
+      index += 1
+    } else bytes += 3
+  }
+  return bytes
+}
 const detachText = (value: string) => (value ? terminalTextDecoder.decode(terminalTextEncoder.encode(value)) : '')
 const tailTextByBytes = (value: string, maxBytes: number) => {
   if (!value) return ''
@@ -476,6 +488,7 @@ export const useTerminalWorkspaceContainerRuntime = () => {
     cancelZmodemTransfer,
     formatZmodemBytes,
     handleTerminalData: handleTerminalZmodemData,
+    isZmodemSessionActive,
     zmodemPercent,
     zmodemProgress
   } = terminalZmodemShellRuntime
@@ -699,6 +712,23 @@ export const useTerminalWorkspaceContainerRuntime = () => {
   const handleTerminalData = (event: TerminalDataEvent) => {
     const threaded = threadedDirectIngressForEvent(event)
     if (threaded) {
+      // threaded 直通路径不经过下方的 ZMODEM sentry,必须在写入终端前用廉价的
+      // magic/活跃判断把 rz/sz 数据流让给 ZMODEM,否则二进制帧会作为文本喷进终端。
+      if (isZmodemSessionActive(event.id) || (event.data && event.data.includes('**\x18B'))) {
+        const zmodemStartedAt = nowMs()
+        const handledByZmodem = handleTerminalZmodemData(event)
+        const zmodemMs = nowMs() - zmodemStartedAt
+        if (handledByZmodem) {
+          terminalClient.ackTerminalData()?.(event.id, threaded.bytes)
+          recordTerminalDataPerf(threaded.sessionId, {
+            bytes: threaded.bytes,
+            appendMs: 0,
+            zmodemMs,
+            handledByZmodem
+          })
+          return
+        }
+      }
       const appendStartedAt = nowMs()
       const handledLive = writeLiveTerminalData(threaded.panel.id, event.data)
       const appendMs = nowMs() - appendStartedAt
@@ -718,6 +748,8 @@ export const useTerminalWorkspaceContainerRuntime = () => {
     const zmodemStartedAt = nowMs()
     const handledByZmodem = handleTerminalZmodemData(event)
     const zmodemMs = nowMs() - zmodemStartedAt
+    // 非 threaded 消费发生在 UI 线程,收到即视为消费,立刻回执背压 ack。
+    terminalClient.ackTerminalData()?.(event.id, textByteLength(event.data || ''))
     if (handledByZmodem) {
       recordTerminalDataPerf(event.id, {
         bytes: textByteLength(event.data || ''),
@@ -747,6 +779,9 @@ export const useTerminalWorkspaceContainerRuntime = () => {
     terminalRuntimeMounted = true
     activeTerminalWorkspaceRuntimeToken = runtimeToken
     offData = terminalClient.onTerminalData()?.(handleTerminalData) || null
+    setThreadedTerminalDataConsumedSink((sessionId, bytes) => {
+      terminalClient.ackTerminalData()?.(sessionId, bytes)
+    })
     offLifecycle = terminalClient.onTerminalLifecycle()?.((event) => workspace.applyTerminalLifecycle(event)) || null
     offExit = terminalClient.onTerminalExit()?.((event) => workspace.applyTerminalExit(event)) || null
     offControlRequest = controlClient.onControlRequest()?.(handleControlRequest) || null
@@ -786,6 +821,7 @@ export const useTerminalWorkspaceContainerRuntime = () => {
   })
 
   onUnmounted(() => {
+    setThreadedTerminalDataConsumedSink(null)
     terminalRuntimeMounted = false
     uninstallTerminalStressHarness?.()
     uninstallTerminalStressHarness = null

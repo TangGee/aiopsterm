@@ -40,6 +40,9 @@ const createIpcHarness = () => {
   const ipcMain = {
     handle: vi.fn((channel: string, handler: IpcHandler) => {
       handlers.set(channel, handler)
+    }),
+    on: vi.fn((channel: string, handler: IpcHandler) => {
+      handlers.set(channel, handler)
     })
   } as unknown as IpcMain
   return { ipcMain, handlers }
@@ -177,6 +180,7 @@ const createRegistrationInput = (overrides: Record<string, unknown> = {}) => {
     ),
     registerTerminalForCodexBridge: vi.fn(),
     recordTerminalCommandHistory: vi.fn(),
+    ackTerminalData: vi.fn(),
     ownerWindow,
     ...overrides
   }
@@ -193,7 +197,7 @@ describe('terminal sessions IPC registrar', () => {
 
     registerTerminalSessionsIpc(ipcMain, createRegistrationInput())
 
-    expect([...handlers.keys()]).toEqual(['terminal:create', 'terminal:write', 'terminal:write-binary', 'terminal:resize', 'terminal:kill'])
+    expect([...handlers.keys()]).toEqual(['terminal:create', 'terminal:ack-data', 'terminal:write', 'terminal:write-binary', 'terminal:resize', 'terminal:kill'])
   })
 
   it('rejects terminal creation when no owner window is available', async () => {

@@ -1,4 +1,6 @@
-import type { IpcMain } from 'electron'
+import { BrowserWindow, type IpcMain } from 'electron'
+import { broadcastWindowEvent } from '@shared/windowEvents'
+import { setFileTransferTaskEventSender } from '../backend/files/filesTransferRuntime'
 import {
   cancelFileTransferTask,
   deleteFileSession,
@@ -30,6 +32,8 @@ import type {
 } from '@shared/contracts/files'
 
 export const registerFilesIpc = (ipcMain: IpcMain) => {
+  // 传输任务状态由主进程推送，渲染端只做一次初始拉取，不再轮询 files:list-transfer-tasks
+  setFileTransferTaskEventSender((event) => broadcastWindowEvent(BrowserWindow.getAllWindows(), 'files:transfer-task-event', event))
   ipcMain.handle('files:sessions:catalog', () => listFileSessionCatalog())
   ipcMain.handle('files:sessions:save', (_event, session: FileSessionInfo) => saveFileSession(session))
   ipcMain.handle('files:sessions:save-from-sftp-payload', (_event, payload: FileSessionSftpPayload) => saveFileSessionFromSftpPayload(payload))

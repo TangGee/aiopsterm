@@ -20,7 +20,7 @@ import type {
 } from '@shared/contracts/userAccount'
 import { normalizeExternalHttpUrl } from '@shared/externalUrl'
 import { shouldUseUserAccountSeedData } from '@shared/runtimeSwitches'
-import { randomBytes, scryptSync, timingSafeEqual } from 'crypto'
+import { randomBytes, scrypt, timingSafeEqual } from 'crypto'
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs'
 import { hostname, networkInterfaces, userInfo } from 'os'
 import { dirname, isAbsolute, resolve } from 'path'
@@ -223,38 +223,49 @@ const isUsableCredentialUsername = (username: string) => {
   return value.length > 0 && value.length <= 64
 }
 
-const userPasswordHash = (password: string, salt: string) => scryptSync(password, `aiopsterm-user-account-v1\0${salt}`, 32).toString('hex')
+// scrypt 派生耗时 30-100ms，必须走异步版本，避免阻塞主进程事件循环。
+const userPasswordHash = (password: string, salt: string) =>
+  new Promise<string>((resolve, reject) => {
+    scrypt(password, `aiopsterm-user-account-v1\0${salt}`, 32, (error, derivedKey) => {
+      if (error) reject(error)
+      else resolve(derivedKey.toString('hex'))
+    })
+  })
 
-const createUserCredential = (
+const createUserCredential = async (
   username: string,
   password: string,
   options: { salt?: string; updatedAt?: string; requiresDeviceVerification?: boolean } = {}
-): UserAccountCredential => {
+): Promise<UserAccountCredential> => {
   const salt = options.salt || randomBytes(16).toString('hex')
   return {
     username: credentialText(username),
     salt,
-    passwordHash: userPasswordHash(password, salt),
+    passwordHash: await userPasswordHash(password, salt),
     updatedAt: options.updatedAt || defaultUserProfile.passwordUpdatedAt,
     ...(options.requiresDeviceVerification ? { requiresDeviceVerification: true } : {})
   }
 }
 
 const createSeedUserCredentials = () =>
-  seedUserAccountCredentials.map((credential) =>
-    createUserCredential(credential.username, credential.password, {
-      updatedAt: defaultUserProfile.passwordUpdatedAt,
-      requiresDeviceVerification: credential.requiresDeviceVerification
-    })
+  Promise.all(
+    seedUserAccountCredentials.map((credential) =>
+      createUserCredential(credential.username, credential.password, {
+        updatedAt: defaultUserProfile.passwordUpdatedAt,
+        requiresDeviceVerification: credential.requiresDeviceVerification
+      })
+    )
   )
 
-const createInitialCredentials = () => (runtimeConfig.useSeedData ? createSeedUserCredentials() : [])
+const createInitialCredentials = (): Promise<UserAccountCredential[]> => (runtimeConfig.useSeedData ? createSeedUserCredentials() : Promise.resolve([]))
 
+// 种子凭据的批量 hash 延迟到首次状态加载时异步执行，模块加载阶段不做 scrypt。
 let profileStore: AiopsUserProfile = createInitialUserProfile()
 let trustedDeviceStore: AiopsTrustedDevice[] = createInitialTrustedDevices()
-let credentialStore: UserAccountCredential[] = createInitialCredentials()
+let credentialStore: UserAccountCredential[] = []
 let userAccountStateLoaded = false
 let userAccountLoadedStateFilePath = ''
+let userAccountStateLoadPromise: Promise<void> | null = null
 
 const codeRuntime = createUserAccountCodeRuntime(() => ({
   stateFilePath: runtimeConfig.stateFilePath,
@@ -419,9 +430,9 @@ const normalizePersistedCredentials = (value: unknown) => {
   return [...credentialsByKey.values()]
 }
 
-const mergeSeedUserCredentials = (credentials: UserAccountCredential[]) => {
+const mergeSeedUserCredentials = async (credentials: UserAccountCredential[]) => {
   const credentialsByKey = new Map<string, UserAccountCredential>()
-  createSeedUserCredentials().forEach((credential) => {
+  ;(await createSeedUserCredentials()).forEach((credential) => {
     credentialsByKey.set(userCredentialKey(credential.username), credential)
   })
   credentials.forEach((credential) => {
@@ -430,52 +441,50 @@ const mergeSeedUserCredentials = (credentials: UserAccountCredential[]) => {
   return [...credentialsByKey.values()]
 }
 
-const isUnchangedSeedUserCredential = (credential: UserAccountCredential) => {
+const isUnchangedSeedUserCredential = async (credential: UserAccountCredential) => {
   const seed = seedUserAccountCredentialsByKey.get(userCredentialKey(credential.username))
-  return (
-    Boolean(seed) &&
-    Boolean(credential.requiresDeviceVerification) === Boolean(seed?.requiresDeviceVerification) &&
-    verifyUserCredentialPassword(credential, seed!.password)
-  )
+  if (!seed || Boolean(credential.requiresDeviceVerification) !== Boolean(seed.requiresDeviceVerification)) return false
+  return verifyUserCredentialPassword(credential, seed.password)
 }
 
-const stripLegacySeedUserAccountState = (state: UserAccountPersistedState): UserAccountPersistedState => {
+const stripLegacySeedUserAccountState = async (state: UserAccountPersistedState): Promise<UserAccountPersistedState> => {
   if (runtimeConfig.useSeedData) return state
   const profile = stableJson(state.profile) === stableJson(defaultUserProfile) ? createLocalUserProfile() : state.profile
   const trustedDevices = state.trustedDevices.filter((device) => {
     const seed = seedTrustedDevicesById.get(device.id)
     return !seed || stableJson(device) !== stableJson(seed)
   })
+  const unchangedSeedFlags = await Promise.all(state.credentials.map((credential) => isUnchangedSeedUserCredential(credential)))
   return {
     version: 1,
     profile,
     trustedDevices: withSingleCurrentTrustedDevice(trustedDevices, createLocalTrustedDevices()),
-    credentials: state.credentials.filter((credential) => !isUnchangedSeedUserCredential(credential))
+    credentials: state.credentials.filter((_, index) => !unchangedSeedFlags[index])
   }
 }
 
-const normalizePersistedUserAccountState = (value: unknown): UserAccountPersistedState | null => {
+const normalizePersistedUserAccountState = async (value: unknown): Promise<UserAccountPersistedState | null> => {
   if (!isRecord(value)) return null
   const credentials = normalizePersistedCredentials(value.credentials)
   const state: UserAccountPersistedState = {
     version: 1,
     profile: normalizePersistedProfile(value.profile),
     trustedDevices: normalizePersistedTrustedDevices(value.trustedDevices),
-    credentials: runtimeConfig.useSeedData ? mergeSeedUserCredentials(credentials) : credentials
+    credentials: runtimeConfig.useSeedData ? await mergeSeedUserCredentials(credentials) : credentials
   }
   return runtimeConfig.useSeedData ? state : stripLegacySeedUserAccountState(state)
 }
 
-const applyInitialUserAccountState = () => {
+const applyInitialUserAccountState = async () => {
   profileStore = createInitialUserProfile()
   trustedDeviceStore = createInitialTrustedDevices()
-  credentialStore = createInitialCredentials()
+  credentialStore = await createInitialCredentials()
 }
 
-const applyDeactivatedUserAccountState = () => {
+const applyDeactivatedUserAccountState = async () => {
   profileStore = createLocalUserProfile()
   trustedDeviceStore = createLocalTrustedDevices()
-  credentialStore = createInitialCredentials()
+  credentialStore = await createInitialCredentials()
 }
 
 const applyPersistedUserAccountState = (state: UserAccountPersistedState) => {
@@ -484,15 +493,12 @@ const applyPersistedUserAccountState = (state: UserAccountPersistedState) => {
   credentialStore = state.credentials.map((credential) => ({ ...credential }))
 }
 
-const ensureUserAccountStateLoaded = () => {
-  if (userAccountStateLoaded && userAccountLoadedStateFilePath === runtimeConfig.stateFilePath) return
-  userAccountStateLoaded = true
-  userAccountLoadedStateFilePath = runtimeConfig.stateFilePath
-  applyInitialUserAccountState()
+const loadUserAccountState = async () => {
+  await applyInitialUserAccountState()
   if (!existsSync(runtimeConfig.stateFilePath)) return
   try {
     const parsed = JSON.parse(readFileSync(runtimeConfig.stateFilePath, 'utf-8')) as unknown
-    const state = normalizePersistedUserAccountState(parsed)
+    const state = await normalizePersistedUserAccountState(parsed)
     if (state) {
       applyPersistedUserAccountState(state)
       if (!runtimeConfig.useSeedData) persistUserAccountState()
@@ -502,8 +508,19 @@ const ensureUserAccountStateLoaded = () => {
   }
 }
 
+const ensureUserAccountStateLoaded = async () => {
+  if (userAccountStateLoaded && userAccountLoadedStateFilePath === runtimeConfig.stateFilePath) return
+  if (!userAccountStateLoadPromise || userAccountLoadedStateFilePath !== runtimeConfig.stateFilePath) {
+    userAccountLoadedStateFilePath = runtimeConfig.stateFilePath
+    userAccountStateLoadPromise = loadUserAccountState().then(() => {
+      userAccountStateLoaded = true
+    })
+  }
+  await userAccountStateLoadPromise
+}
+
+// 调用方必须先通过 ensureUserAccountStateLoaded 完成状态加载。
 const persistUserAccountState = () => {
-  ensureUserAccountStateLoaded()
   const state: UserAccountPersistedState = {
     version: 1,
     profile: { ...profileStore },
@@ -524,8 +541,8 @@ const cloneProfile = (profile: AiopsUserProfile = profileStore): AiopsUserProfil
 
 const cloneTrustedDevices = (devices: AiopsTrustedDevice[] = trustedDeviceStore) => devices.map((device) => ({ ...device }))
 
-const snapshot = (): AiopsUserAccountSnapshot => {
-  ensureUserAccountStateLoaded()
+const snapshot = async (): Promise<AiopsUserAccountSnapshot> => {
+  await ensureUserAccountStateLoaded()
   return {
     profile: cloneProfile(),
     trustedDevices: cloneTrustedDevices()
@@ -555,15 +572,15 @@ const secureHashEqual = (left: string, right: string) => {
   return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer)
 }
 
-const verifyUserCredentialPassword = (credential: UserAccountCredential, password: string) =>
-  secureHashEqual(credential.passwordHash, userPasswordHash(password, credential.salt))
+const verifyUserCredentialPassword = async (credential: UserAccountCredential, password: string) =>
+  secureHashEqual(credential.passwordHash, await userPasswordHash(password, credential.salt))
 
 const findUserCredential = (username: string) => {
   const key = userCredentialKey(username)
   return credentialStore.find((credential) => userCredentialKey(credential.username) === key) || null
 }
 
-const upsertUserCredential = (
+const upsertUserCredential = async (
   username: string,
   password: string,
   options: { updatedAt?: string; requiresDeviceVerification?: boolean } = {}
@@ -572,7 +589,7 @@ const upsertUserCredential = (
   if (!isUsableCredentialUsername(normalizedUsername)) return null
   const key = userCredentialKey(normalizedUsername)
   const existing = credentialStore.find((credential) => userCredentialKey(credential.username) === key)
-  const credential = createUserCredential(normalizedUsername, password, {
+  const credential = await createUserCredential(normalizedUsername, password, {
     updatedAt: options.updatedAt || timestamp(),
     requiresDeviceVerification: options.requiresDeviceVerification ?? existing?.requiresDeviceVerification
   })
@@ -609,15 +626,15 @@ const passwordScore = (password: string) => {
   return score
 }
 
-const applyProfile = (patch: Partial<AiopsUserProfile>) => {
-  ensureUserAccountStateLoaded()
+const applyProfile = async (patch: Partial<AiopsUserProfile>) => {
+  await ensureUserAccountStateLoaded()
   profileStore = {
     ...profileStore,
     ...patch
   }
 }
 
-const loginProfile = (patch: Partial<AiopsUserProfile>) => {
+const loginProfile = (patch: Partial<AiopsUserProfile>) =>
   applyProfile({
     ...patch,
     skippedLogin: false,
@@ -625,14 +642,13 @@ const loginProfile = (patch: Partial<AiopsUserProfile>) => {
     localDatabaseReady: true,
     lastLoginAt: timestamp()
   })
-}
 
-const successMutation = (message: string): AiopsUserMutationResult => {
+const successMutation = async (message: string): Promise<AiopsUserMutationResult> => {
   persistUserAccountState()
   return {
     ok: true,
     data: {
-      ...snapshot(),
+      ...(await snapshot()),
       message
     }
   }
@@ -692,40 +708,46 @@ export const configureUserAccountBackendRuntime = (config: UserAccountBackendRun
   codeRuntime.reset()
   userAccountStateLoaded = false
   userAccountLoadedStateFilePath = ''
-  applyInitialUserAccountState()
+  userAccountStateLoadPromise = null
+  // 种子凭据 hash 留给下一次异步状态加载，这里保持同步配置语义。
+  profileStore = createInitialUserProfile()
+  trustedDeviceStore = createInitialTrustedDevices()
+  credentialStore = []
 }
 
-export const resetUserAccountForTests = () => {
-  applyInitialUserAccountState()
+export const resetUserAccountForTests = async () => {
+  await applyInitialUserAccountState()
   codeRuntime.reset()
   userAccountStateLoaded = true
   userAccountLoadedStateFilePath = runtimeConfig.stateFilePath
+  userAccountStateLoadPromise = Promise.resolve()
 }
 
-export const patchUserAccountForTests = (patch: Partial<AiopsUserProfile>) => {
-  applyProfile(patch)
+export const patchUserAccountForTests = async (patch: Partial<AiopsUserProfile>) => {
+  await applyProfile(patch)
   persistUserAccountState()
 }
 
-export const getUserAccount = (): AiopsUserAccountResult => ({
+export const getUserAccount = async (): Promise<AiopsUserAccountResult> => ({
   ok: true,
-  data: snapshot()
+  data: await snapshot()
 })
 
 export const openUserLogin = () => openUserExternalAction('login')
 
 export const openUserAccountCenter = () => openUserExternalAction('account-center')
 
-export const loginUserAccount = (input: AiopsUserLoginInput): AiopsUserMutationResult => {
+export const loginUserAccount = async (input: AiopsUserLoginInput): Promise<AiopsUserMutationResult> => {
+  await ensureUserAccountStateLoaded()
   if (input.method === 'account') {
     const username = trimText(input.username)
     if (!username || !input.password) return errorResult('USER_LOGIN_REQUIRED', '请输入用户名和密码')
     const credential = findUserCredential(username)
-    if (!credential || !verifyUserCredentialPassword(credential, input.password)) {
+    if (!credential || !(await verifyUserCredentialPassword(credential, input.password))) {
       return errorResult('USER_LOGIN_INVALID', '用户名或密码不正确')
     }
     if (credential.requiresDeviceVerification) {
-      applyProfile({
+      await applyProfile({
         username: credential.username,
         needDeviceVerification: true,
         localDatabaseReady: false
@@ -734,14 +756,14 @@ export const loginUserAccount = (input: AiopsUserLoginInput): AiopsUserMutationR
       return {
         ok: false,
         data: {
-          ...snapshot(),
+          ...(await snapshot()),
           message: '当前设备需要验证后才能登录'
         },
         errorCode: 'USER_DEVICE_VERIFICATION_REQUIRED',
         errorMessage: '当前设备需要验证后才能登录'
       }
     }
-    loginProfile({
+    await loginProfile({
       username: credential.username,
       name: profileStore.name || credential.username,
       authProvider: 'local',
@@ -758,7 +780,7 @@ export const loginUserAccount = (input: AiopsUserLoginInput): AiopsUserMutationR
     if (!isValidEmail(email)) return errorResult('USER_EMAIL_INVALID', '邮箱格式不正确')
     const verificationError = codeRuntime.verify('login', 'email', email, code)
     if (verificationError) return verificationError
-    loginProfile({
+    await loginProfile({
       email,
       username: email.split('@')[0] || profileStore.username,
       authProvider: 'local',
@@ -775,7 +797,7 @@ export const loginUserAccount = (input: AiopsUserLoginInput): AiopsUserMutationR
   if (!isValidMobile(mobile)) return errorResult('USER_MOBILE_INVALID', '手机号格式不正确')
   const verificationError = codeRuntime.verify('login', 'mobile', mobile, code)
   if (verificationError) return verificationError
-  loginProfile({
+  await loginProfile({
     mobile,
     authProvider: 'local',
     registrationCode: 7,
@@ -785,8 +807,8 @@ export const loginUserAccount = (input: AiopsUserLoginInput): AiopsUserMutationR
   return successMutation('手机号登录成功，本地数据库初始化完成')
 }
 
-export const logoutUserAccount = (): AiopsUserMutationResult => {
-  applyProfile({
+export const logoutUserAccount = async (): Promise<AiopsUserMutationResult> => {
+  await applyProfile({
     skippedLogin: true,
     localDatabaseReady: false,
     needDeviceVerification: false
@@ -794,20 +816,20 @@ export const logoutUserAccount = (): AiopsUserMutationResult => {
   return successMutation('已退出登录')
 }
 
-export const deactivateUserAccount = (input: AiopsUserDeactivateInput): AiopsUserMutationResult => {
-  ensureUserAccountStateLoaded()
+export const deactivateUserAccount = async (input: AiopsUserDeactivateInput): Promise<AiopsUserMutationResult> => {
+  await ensureUserAccountStateLoaded()
   const uid = Number(input?.uid)
   if (!Number.isFinite(uid) || uid <= 0) return errorResult('USER_DEACTIVATE_UID_REQUIRED', '无法确定当前用户账号')
   if (profileStore.skippedLogin || profileStore.lastLoginMethod === 'skip' || !profileStore.uid) {
     return errorResult('USER_DEACTIVATE_LOGIN_REQUIRED', '请先登录账号')
   }
   if (uid !== profileStore.uid) return errorResult('USER_DEACTIVATE_UID_MISMATCH', '当前用户账号不匹配')
-  applyDeactivatedUserAccountState()
+  await applyDeactivatedUserAccountState()
   return successMutation('账号已停用，当前登录状态已清除')
 }
 
-export const skipUserLogin = (): AiopsUserMutationResult => {
-  loginProfile({
+export const skipUserLogin = async (): Promise<AiopsUserMutationResult> => {
+  await loginProfile({
     uid: 999999999,
     name: 'Guest',
     username: 'guest',
@@ -829,8 +851,8 @@ export const sendUserLoginCode = (input: AiopsUserCodeInput): AiopsUserCodeResul
 
 export const prepareUserAvatarImage = (input: AiopsUserAvatarPrepareInput): Promise<AiopsUserAvatarPrepareResult> => avatarRuntime.prepare(input)
 
-const validateProfileUpdate = (input: AiopsUserProfileUpdateInput) => {
-  ensureUserAccountStateLoaded()
+const validateProfileUpdate = async (input: AiopsUserProfileUpdateInput) => {
+  await ensureUserAccountStateLoaded()
   const username = trimText(input.username ?? profileStore.username)
   const name = trimText(input.name ?? profileStore.name)
   if (!username || username.length < 6 || username.length > 20) return '用户名长度需要在 6 到 20 个字符之间'
@@ -839,8 +861,8 @@ const validateProfileUpdate = (input: AiopsUserProfileUpdateInput) => {
   return ''
 }
 
-export const updateUserProfile = (input: AiopsUserProfileUpdateInput): AiopsUserMutationResult => {
-  const validation = validateProfileUpdate(input)
+export const updateUserProfile = async (input: AiopsUserProfileUpdateInput): Promise<AiopsUserMutationResult> => {
+  const validation = await validateProfileUpdate(input)
   if (validation) return errorResult('USER_PROFILE_INVALID', validation)
   const nextAvatarInitials = trimText(input.avatarInitials).toUpperCase().slice(0, 3)
   const avatarChanged = input.avatarImageUrl !== undefined || input.avatarInitials !== undefined
@@ -851,7 +873,7 @@ export const updateUserProfile = (input: AiopsUserProfileUpdateInput): AiopsUser
     return errorResult('USER_AVATAR_ASSET_INVALID', '头像图片必须来自后端头像上传结果')
   }
   if (!profileStore.skippedLogin) renameCurrentUserCredential(previousUsername, nextUsername)
-  applyProfile({
+  await applyProfile({
     name: input.name !== undefined ? trimText(input.name) : profileStore.name,
     username: nextUsername,
     avatarInitials: nextAvatarInitials || profileStore.avatarInitials,
@@ -865,8 +887,8 @@ const canEditMobile = () => profileStore.registrationCode !== 7
 const canEditEmail = () => ![2, 3, 4, 6].includes(profileStore.registrationCode)
 const canResetPassword = () => profileStore.registrationCode !== 1 && profileStore.authProvider !== 'sso'
 
-const validateContact = (kind: 'email' | 'mobile', value: string) => {
-  ensureUserAccountStateLoaded()
+const validateContact = async (kind: 'email' | 'mobile', value: string) => {
+  await ensureUserAccountStateLoaded()
   if (kind === 'email') {
     if (!canEditEmail()) return '当前登录方式不允许修改邮箱'
     if (!isValidEmail(value)) return '邮箱格式不正确'
@@ -877,45 +899,45 @@ const validateContact = (kind: 'email' | 'mobile', value: string) => {
   return ''
 }
 
-export const sendUserContactCode = (input: AiopsUserCodeInput): AiopsUserCodeResult => {
+export const sendUserContactCode = async (input: AiopsUserCodeInput): Promise<AiopsUserCodeResult> => {
   const value = trimText(input.value)
-  const validation = validateContact(input.kind, value)
+  const validation = await validateContact(input.kind, value)
   if (validation) return errorResult(input.kind === 'email' ? 'USER_EMAIL_INVALID' : 'USER_MOBILE_INVALID', validation)
   return codeRuntime.issue('contact', input.kind, value, `${input.kind === 'email' ? '邮箱' : '手机'}验证码已发送`)
 }
 
-export const bindUserContact = (input: AiopsUserContactBindInput): AiopsUserMutationResult => {
+export const bindUserContact = async (input: AiopsUserContactBindInput): Promise<AiopsUserMutationResult> => {
   const value = trimText(input.value)
   const code = normalizeUserAccountCode(input.code)
-  const validation = validateContact(input.kind, value)
+  const validation = await validateContact(input.kind, value)
   if (validation) return errorResult(input.kind === 'email' ? 'USER_EMAIL_INVALID' : 'USER_MOBILE_INVALID', validation)
   if (!code) return errorResult('USER_CONTACT_CODE_REQUIRED', `请输入${input.kind === 'email' ? '邮箱' : '手机'}验证码`)
   const verificationError = codeRuntime.verify('contact', input.kind, value, code)
   if (verificationError) return verificationError
-  applyProfile({ [input.kind]: value })
+  await applyProfile({ [input.kind]: value })
   codeRuntime.clear('contact', input.kind, value)
   return successMutation(input.kind === 'email' ? '邮箱绑定成功' : '手机号绑定成功')
 }
 
-export const resetUserPassword = (input: AiopsUserPasswordInput): AiopsUserMutationResult => {
-  ensureUserAccountStateLoaded()
+export const resetUserPassword = async (input: AiopsUserPasswordInput): Promise<AiopsUserMutationResult> => {
+  await ensureUserAccountStateLoaded()
   if (!canResetPassword()) return errorResult('USER_PASSWORD_RESET_FORBIDDEN', 'SSO 用户不能修改密码')
   if (input.password.length < 6) return errorResult('USER_PASSWORD_TOO_SHORT', '密码长度不能小于6位')
   if (passwordScore(input.password) < 1) return errorResult('USER_PASSWORD_WEAK', '请具有弱以上的密码强度')
   const updatedAt = timestamp()
   if (!profileStore.skippedLogin && isUsableCredentialUsername(profileStore.username)) {
     const existing = findUserCredential(profileStore.username)
-    upsertUserCredential(profileStore.username, input.password, {
+    await upsertUserCredential(profileStore.username, input.password, {
       updatedAt,
       requiresDeviceVerification: existing?.requiresDeviceVerification
     })
   }
-  applyProfile({ passwordUpdatedAt: updatedAt })
+  await applyProfile({ passwordUpdatedAt: updatedAt })
   return successMutation('密码重置成功')
 }
 
-export const revokeTrustedDevice = (id: number): AiopsTrustedDeviceRevokeResult => {
-  ensureUserAccountStateLoaded()
+export const revokeTrustedDevice = async (id: number): Promise<AiopsTrustedDeviceRevokeResult> => {
+  await ensureUserAccountStateLoaded()
   const deviceId = Number(id)
   const device = trustedDeviceStore.find((item) => item.id === deviceId)
   if (!device) return errorResult('TRUSTED_DEVICE_NOT_FOUND', 'Trusted device not found.')

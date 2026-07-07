@@ -156,15 +156,68 @@ export const createMainTerminalRuntime = (input: TerminalRuntimeInput) => {
     })
   }
 
+  // 输出链路背压:主进程按未确认字节数暂停/恢复数据源(pty/ssh channel),
+  // 渲染端在 core worker 消费后回 ack。字节计量双方统一用 data 字符串的 UTF-8 长度。
+  const terminalFlowHighWatermarkBytes = 2 * 1024 * 1024
+  const terminalFlowLowWatermarkBytes = 512 * 1024
+  const terminalFlowPauseSafetyMs = 15_000
+  const terminalFlows = new Map<string, { unacked: number; paused: boolean; pausedAt: number }>()
+
+  const setTerminalSourcePaused = (id: string, paused: boolean) => {
+    const session = sessions.get(id)
+    if (!session) return
+    const process = session.process as { pause?: () => void; resume?: () => void }
+    try {
+      if (paused) process.pause?.()
+      else process.resume?.()
+    } catch {}
+  }
+
+  const trackTerminalFlowSend = (id: string, bytes: number) => {
+    if (!id || bytes <= 0) return
+    const flow = terminalFlows.get(id) || { unacked: 0, paused: false, pausedAt: 0 }
+    flow.unacked += bytes
+    terminalFlows.set(id, flow)
+    if (!flow.paused && flow.unacked >= terminalFlowHighWatermarkBytes) {
+      flow.paused = true
+      flow.pausedAt = Date.now()
+      setTerminalSourcePaused(id, true)
+      logRuntimeEvent('info', 'terminal.flow.paused', { id, unacked: flow.unacked })
+      return
+    }
+    // 渲染端崩溃/重载会丢失 ack,超时强制恢复避免会话死锁。
+    if (flow.paused && Date.now() - flow.pausedAt > terminalFlowPauseSafetyMs) {
+      flow.unacked = bytes
+      flow.paused = false
+      flow.pausedAt = 0
+      setTerminalSourcePaused(id, false)
+      logRuntimeEvent('warn', 'terminal.flow.safety-resume', { id })
+    }
+  }
+
+  const ackTerminalData = (id: string, bytes: number) => {
+    const flow = terminalFlows.get(id)
+    if (!flow) return
+    flow.unacked = Math.max(0, flow.unacked - Math.max(0, Math.floor(Number(bytes) || 0)))
+    if (flow.paused && flow.unacked <= terminalFlowLowWatermarkBytes) {
+      flow.paused = false
+      flow.pausedAt = 0
+      setTerminalSourcePaused(id, false)
+      logRuntimeEvent('info', 'terminal.flow.resumed', { id, unacked: flow.unacked })
+    }
+  }
+
   const terminalDataPayload = (id: string, chunk: string | Buffer) => {
-    return createTerminalDataEvent(id, chunk)
+    return createTerminalDataEvent(id, chunk, { includeRaw: true })
   }
 
   const flushTerminalData = (flush: TerminalDataCoalescerFlush) => {
     const session = sessions.get(flush.id)
     if (!session) return
     appendCodexTerminalBridgeDisplayData(flush.id, flush.chunk)
-    sendWindowEvent(session.window, 'terminal:data', terminalDataPayload(flush.id, flush.chunk))
+    const payload = terminalDataPayload(flush.id, flush.chunk)
+    sendWindowEvent(session.window, 'terminal:data', payload)
+    trackTerminalFlowSend(flush.id, Buffer.byteLength(payload.data, 'utf8'))
     if (terminalDebugLogs && shouldLogCoalescedTerminalData(flush)) {
       logRuntimeEvent('debug', 'terminal.data.coalesced', {
         id: flush.id,
@@ -193,7 +246,9 @@ export const createMainTerminalRuntime = (input: TerminalRuntimeInput) => {
       const session = sessions.get(id)
       if (session?.window !== owner) {
         appendCodexTerminalBridgeDisplayData(id, displayChunk)
-        sendWindowEvent(owner, 'terminal:data', terminalDataPayload(id, displayChunk))
+        const payload = terminalDataPayload(id, displayChunk)
+        sendWindowEvent(owner, 'terminal:data', payload)
+        trackTerminalFlowSend(id, Buffer.byteLength(payload.data, 'utf8'))
         return
       }
       terminalDataCoalescer.push(id, displayChunk)
@@ -451,6 +506,7 @@ export const createMainTerminalRuntime = (input: TerminalRuntimeInput) => {
         flushDataSummary(id, 'session-closed')
         unregisterCodexTerminalBridgeSession(id)
         sessions.delete(id)
+        terminalFlows.delete(id)
         logRuntimeEvent('info', 'terminal.session-removed', { id, kind: 'ssh' })
       }
     })
@@ -489,6 +545,7 @@ export const createMainTerminalRuntime = (input: TerminalRuntimeInput) => {
         flushDataSummary(id, 'session-closed')
         unregisterCodexTerminalBridgeSession(id)
         sessions.delete(id)
+        terminalFlows.delete(id)
         logRuntimeEvent('info', 'terminal.session-removed', { id, kind: 'local' })
       }
     })
@@ -523,6 +580,7 @@ export const createMainTerminalRuntime = (input: TerminalRuntimeInput) => {
     killAllSessions,
     createTerminalWriteResult,
     createTerminalKillResult,
+    ackTerminalData,
     focusWindow: input.focusWindow
   }
 }

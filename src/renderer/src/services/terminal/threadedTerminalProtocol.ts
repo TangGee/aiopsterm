@@ -288,6 +288,7 @@ export type ThreadedTerminalCoreResponse =
   | { type: 'read-screen-result'; requestId: string; terminalId: string; text: string; cols: number; rows: number }
   | { type: 'read-selection-result'; requestId: string; terminalId: string; text: string }
   | { type: 'export-result'; requestId: string; state: ThreadedTerminalExportedState }
+  | { type: 'consumed'; terminalId: string; sessionId?: string; bytes: number }
   | { type: 'perf'; sample: ThreadedTerminalPerfSample }
   | { type: 'pong'; requestId: string }
   | { type: 'error'; requestId?: string; terminalId?: string; message: string }

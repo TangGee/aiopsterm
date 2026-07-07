@@ -124,6 +124,7 @@ import type {
   FileTransferTask,
   FileTransferTaskCancelInput,
   FileTransferTaskCancelResult,
+  FileTransferTaskEvent,
   FileWriteContentResult
 } from './files'
 import type {
@@ -548,6 +549,7 @@ export type AiopsPreloadApi = {
   deleteAliasCommand: (input: AliasCommandDeleteInput) => Promise<AliasCommandDeleteResult>
   createTerminal: (options?: TerminalCreateOptions) => Promise<TerminalSessionInfo>
   writeTerminal: (id: string, data: string) => Promise<TerminalWriteResult>
+  ackTerminalData: (id: string, bytes: number) => void
   writeTerminalBinary: (id: string, data: number[] | Uint8Array | ArrayBuffer) => Promise<TerminalBinaryWriteResult>
   resizeTerminal: (id: string, cols: number, rows: number) => Promise<void>
   killTerminal: (id: string) => Promise<TerminalKillResult>
@@ -676,6 +678,7 @@ export type AiopsPreloadApi = {
   transferFileEntry: (operation: FileTransferOperation, options?: FileListOptions) => Promise<FileTransferOperationResult>
   cancelFileTransferTask: (input: FileTransferTaskCancelInput) => Promise<FileTransferTaskCancelResult>
   listFileTransferTasks: () => Promise<FileTransferTask[]>
+  onFileTransferTaskEvent: (listener: (event: FileTransferTaskEvent) => void) => () => void
   onTerminalData: (listener: (event: TerminalDataEvent) => void) => () => void
   onTerminalLifecycle: (listener: (event: TerminalLifecycleEvent) => void) => () => void
   onTerminalExit: (listener: (event: TerminalExitEvent) => void) => () => void

@@ -67,6 +67,7 @@ type CoreSearchState = {
   caseSensitive: boolean
   matches: CoreSearchMatch[]
   activeIndex: number
+  epoch: number
 }
 
 type CoreTerminalRecord = {
@@ -84,7 +85,9 @@ type CoreTerminalRecord = {
   search: CoreSearchState
   seq: number
   pendingChunks: string[]
+  pendingChunkBytes: number[]
   pendingBytes: number
+  contentEpoch: number
   scheduled: boolean
   flushTimer: ReturnType<typeof setTimeout> | null
   flushDueAt: number
@@ -92,7 +95,7 @@ type CoreTerminalRecord = {
   pendingFullSnapshot: boolean
   pendingFullSnapshotReason?: ThreadedTerminalFullReason
   dirtyRows: Set<number>
-  lastVisibleLineSignatures: string[]
+  lastVisibleLineSignatures: number[] | null
   snapshotScheduled: boolean
   snapshotTimer: ReturnType<typeof setTimeout> | null
   snapshotDueAt: number
@@ -104,7 +107,6 @@ type CoreTerminalRecord = {
   lastPerfAt: number
 }
 
-const encoder = new TextEncoder()
 const terminals = new Map<string, CoreTerminalRecord>()
 const workerScope = self as unknown as DedicatedWorkerScopeLike
 const defaultBatchBytes = 64 * 1024
@@ -118,7 +120,20 @@ const nowMs = () => globalThis.performance?.now?.() ?? Date.now()
 
 const post = (message: ThreadedTerminalCoreResponse) => workerScope.postMessage(message)
 
-const textByteLength = (value: string) => encoder.encode(value).length
+// 无分配的 UTF-8 字节长度:数据链路上每个 chunk 都要量长度,不能为此整串编码出一份 Uint8Array。
+const textByteLength = (value: string) => {
+  let bytes = 0
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index)
+    if (code < 0x80) bytes += 1
+    else if (code < 0x800) bytes += 2
+    else if (code >= 0xd800 && code <= 0xdbff) {
+      bytes += 4
+      index += 1
+    } else bytes += 3
+  }
+  return bytes
+}
 
 const installHeadlessRuntimeGlobals = () => {
   const globalLike = globalThis as typeof globalThis & {
@@ -195,7 +210,8 @@ const newSearchState = (): CoreSearchState => ({
   query: '',
   caseSensitive: false,
   matches: [],
-  activeIndex: -1
+  activeIndex: -1,
+  epoch: -1
 })
 
 const ansiForegroundPaletteForTheme = (theme: ThreadedTerminalTheme) => [
@@ -286,41 +302,30 @@ const cellColor = (
 
 const cellFlag = (cell: HeadlessCellLike, key: 'isDim' | 'isBlink' | 'isInvisible' | 'isStrikethrough' | 'isOverline') => Boolean(cell[key]?.())
 
-const cellSignatureParts = (cell: HeadlessCellLike) => [
-  cell.getChars() || ' ',
-  cell.getWidth(),
-  cell.getCode(),
-  cell.getFgColorMode(),
-  cell.getFgColor(),
-  cell.getBgColorMode(),
-  cell.getBgColor(),
-  cell.isBold(),
-  cell.isDim(),
-  cell.isItalic(),
-  cell.isUnderline(),
-  cell.isBlink(),
-  cell.isInverse(),
-  cell.isInvisible(),
-  cell.isStrikethrough(),
-  cell.isOverline(),
-  String(cell.extended?.underlineStyle ?? ''),
-  String(cell.extended?.underlineColor ?? '')
-]
-
 const absoluteCursorRow = (buffer: HeadlessTerminalLike['buffer']['active']) => buffer.baseY + buffer.cursorY
 
+// 单列且单码元的 run 不携带 chars/widths:所有消费方都有 Array.from(text)/宽度 1 的回退,
+// 这一表示对 ASCII 为主的终端内容省掉每 cell 两个数组元素的分配与克隆。
 const createCellRun = (options: Omit<ThreadedTerminalCellRun, 'text' | 'chars' | 'widths' | 'columns'> & { char: string; width: number }): ThreadedTerminalCellRun => {
   const { char, width, ...style } = options
-  return {
+  const run: ThreadedTerminalCellRun = {
     ...style,
     text: char,
-    chars: [char],
-    widths: [width],
     columns: width
   }
+  if (width !== 1 || char.length !== 1) {
+    run.chars = [char]
+    run.widths = [width]
+  }
+  return run
 }
 
 const appendCellToRun = (run: ThreadedTerminalCellRun, char: string, width: number) => {
+  if (!run.chars && width === 1 && char.length === 1) {
+    run.text = (run.text || '') + char
+    run.columns = (run.columns || 0) + 1
+    return
+  }
   const chars = run.chars || Array.from(run.text || '')
   const widths = run.widths || chars.map(() => 1)
   chars.push(char)
@@ -559,13 +564,16 @@ const chooseSearchActiveIndex = (
   return afterVisibleStart >= 0 ? afterVisibleStart : 0
 }
 
+// 匹配集只在缓冲区内容变化后失效:滚动/光标快照不再触发全 scrollback 重扫。
 const refreshSearchMatches = (record: CoreTerminalRecord) => {
   if (!record.search.query) return
+  if (record.search.epoch === record.contentEpoch) return
   const previous = record.search
   const matches = computeSearchMatches(record, previous.query, previous.caseSensitive)
   record.search = {
     ...previous,
     matches,
+    epoch: record.contentEpoch,
     activeIndex: preserveSearchActiveIndex(previous, matches)
   }
 }
@@ -598,7 +606,8 @@ const applySearch = (
     query: term,
     caseSensitive,
     matches,
-    activeIndex: -1
+    activeIndex: -1,
+    epoch: record.contentEpoch
   }
   record.search.activeIndex = chooseSearchActiveIndex(record, previous, matches, direction, Boolean(options.incremental))
   const match = record.search.matches[record.search.activeIndex]
@@ -665,34 +674,73 @@ const visibleLineIndexes = (record: CoreTerminalRecord) => {
   return indexes
 }
 
+const fnvCombine = (hash: number, value: number) => Math.imul(hash ^ value, 0x01000193) >>> 0
+
+const fnvCombineString = (hash: number, value: string) => {
+  let next = hash
+  for (let index = 0; index < value.length; index += 1) next = fnvCombine(next, value.charCodeAt(index))
+  return next
+}
+
+// 行签名用两条独立 FNV 流合成 53 位整数,替代逐 cell 字符串拼接:
+// diff 只需要相等比较,数值哈希把每行数万次短字符串分配降为零。
 const lineSignature = (record: CoreTerminalRecord, lineIndex: number) => {
   const line = record.terminal.buffer.active.getLine(lineIndex)
-  if (!line) return ''
+  if (!line) return -1
   const cell = record.terminal.buffer.active.getNullCell()
-  const parts: string[] = [line.isWrapped ? 'w1' : 'w0']
+  let h1 = line.isWrapped ? 0x811c9dc5 : 0x811c9dc4
+  let h2 = 0x9e3779b9
+  const mix = (value: number) => {
+    h1 = fnvCombine(h1, value)
+    h2 = fnvCombine(h2, value ^ 0x5bd1e995)
+  }
   for (let x = 0; x < record.terminal.cols; x += 1) {
     const nextCell = line.getCell(x, cell) as HeadlessCellLike | undefined
     if (!nextCell) {
-      parts.push(`${x}:missing`)
+      mix(0x7fffffff)
       continue
     }
     const width = nextCell.getWidth()
     if (width === 0) {
-      parts.push(`${x}:cont`)
+      mix(0x7ffffffe)
       continue
     }
-    parts.push([x, ...cellSignatureParts(nextCell)].join(':'))
+    const chars = nextCell.getChars() || ' '
+    h1 = fnvCombineString(h1, chars)
+    h2 = fnvCombineString(h2, chars)
+    mix(width)
+    mix(nextCell.getCode())
+    mix(nextCell.getFgColorMode())
+    mix(nextCell.getFgColor())
+    mix(nextCell.getBgColorMode())
+    mix(nextCell.getBgColor())
+    mix(
+      (nextCell.isBold() ? 1 : 0) |
+        (cellFlag(nextCell, 'isDim') ? 2 : 0) |
+        (nextCell.isItalic() ? 4 : 0) |
+        (nextCell.isUnderline() ? 8 : 0) |
+        (cellFlag(nextCell, 'isBlink') ? 16 : 0) |
+        (nextCell.isInverse() ? 32 : 0) |
+        (cellFlag(nextCell, 'isInvisible') ? 64 : 0) |
+        (cellFlag(nextCell, 'isStrikethrough') ? 128 : 0) |
+        (cellFlag(nextCell, 'isOverline') ? 256 : 0)
+    )
+    mix(Number(nextCell.extended?.underlineStyle ?? -1) + 1)
+    mix(Number(nextCell.extended?.underlineColor ?? -1) + 1)
   }
-  return parts.join('|')
+  return h1 * 0x200000 + (h2 & 0x1fffff)
 }
 
-const markChangedVisibleRows = (record: CoreTerminalRecord, beforeSignatures?: string[]) => {
+// 基线为 null 表示未知(刚创建或刚发过全量快照),此时整屏标脏一次后重建基线。
+const markChangedVisibleRows = (record: CoreTerminalRecord) => {
   const visibleIndexes = visibleLineIndexes(record)
-  const nextSignatures = visibleIndexes.map((lineIndex) => lineSignature(record, lineIndex))
-  const previous = beforeSignatures || record.lastVisibleLineSignatures
-  nextSignatures.forEach((signature, row) => {
-    if (signature !== previous[row]) record.dirtyRows.add(row)
-  })
+  const previous = record.lastVisibleLineSignatures
+  const nextSignatures = new Array<number>(visibleIndexes.length)
+  for (let row = 0; row < visibleIndexes.length; row += 1) {
+    const signature = lineSignature(record, visibleIndexes[row])
+    nextSignatures[row] = signature
+    if (!previous || signature !== previous[row]) record.dirtyRows.add(row)
+  }
   record.lastVisibleLineSignatures = nextSignatures
 }
 
@@ -709,7 +757,6 @@ const buildSnapshot = (record: CoreTerminalRecord, forceFull = false, fullReason
   refreshSearchMatches(record)
   const buffer = record.terminal.buffer.active
   const visibleIndexes = visibleLineIndexes(record)
-  const visibleSignatures = visibleIndexes.map((lineIndex) => lineSignature(record, lineIndex))
   const allRows = visibleIndexes.map((_lineIndex, row) => row)
   const viewportDelta = record.lastSnapshotAt ? buffer.viewportY - record.lastSnapshotViewportY : 0
   const cursorAbsoluteY = absoluteCursorRow(buffer)
@@ -741,7 +788,8 @@ const buildSnapshot = (record: CoreTerminalRecord, forceFull = false, fullReason
     }
   })
   record.dirtyRows.clear()
-  record.lastVisibleLineSignatures = visibleSignatures
+  // 全量/滚动快照不再重算签名:基线置空,下次增量 diff 整屏标脏一次即可收敛。
+  if (effectiveFull || repaintVisibleRows) record.lastVisibleLineSignatures = null
   record.pendingFullSnapshot = false
   record.pendingFullSnapshotReason = undefined
   record.lastSnapshotViewportY = buffer.viewportY
@@ -894,7 +942,9 @@ const createRecord = (options: ThreadedTerminalCreateOptions): CoreTerminalRecor
     search: newSearchState(),
     seq: 0,
     pendingChunks: [],
+    pendingChunkBytes: [],
     pendingBytes: 0,
+    contentEpoch: 0,
     scheduled: false,
     flushTimer: null,
     flushDueAt: 0,
@@ -902,7 +952,7 @@ const createRecord = (options: ThreadedTerminalCreateOptions): CoreTerminalRecor
     pendingFullSnapshot: true,
     pendingFullSnapshotReason: 'create',
     dirtyRows: new Set(),
-    lastVisibleLineSignatures: [],
+    lastVisibleLineSignatures: null,
     snapshotScheduled: false,
     snapshotTimer: null,
     snapshotDueAt: 0,
@@ -937,20 +987,27 @@ const applyKeywordHighlight = (record: CoreTerminalRecord, config: ThreadedTermi
   scheduleSnapshot(record, true, 'settings')
 }
 
+const enqueueChunk = (record: CoreTerminalRecord, chunk: string) => {
+  const bytes = textByteLength(chunk)
+  record.pendingChunks.push(chunk)
+  record.pendingChunkBytes.push(bytes)
+  record.pendingBytes += bytes
+}
+
 const takeBatch = (record: CoreTerminalRecord) => {
   const chunks: string[] = []
   let bytes = 0
   while (record.pendingChunks.length) {
-    const chunk = record.pendingChunks[0]
-    const chunkBytes = textByteLength(chunk)
+    const chunkBytes = record.pendingChunkBytes[0]
     if (chunks.length && bytes + chunkBytes > defaultBatchBytes) break
-    chunks.push(chunk)
+    chunks.push(record.pendingChunks[0])
     bytes += chunkBytes
     record.pendingChunks.shift()
+    record.pendingChunkBytes.shift()
     record.pendingBytes = Math.max(0, record.pendingBytes - chunkBytes)
     if (bytes >= defaultBatchBytes) break
   }
-  return chunks.join('')
+  return { data: chunks.join(''), bytes }
 }
 
 const scheduleFlush = (record: CoreTerminalRecord) => {
@@ -975,13 +1032,11 @@ const flushRecord = (record: CoreTerminalRecord) => {
     return
   }
   const flushStartedAt = nowMs()
-  const data = takeBatch(record)
-  const bytes = textByteLength(data)
+  const { data, bytes } = takeBatch(record)
   const beforeBuffer = record.terminal.buffer.active
   const beforeCursorAbsoluteY = absoluteCursorRow(beforeBuffer)
   const beforeViewportY = beforeBuffer.viewportY
   const beforeBaseY = beforeBuffer.baseY
-  const beforeVisibleLineSignatures = visibleLineIndexes(record).map((lineIndex) => lineSignature(record, lineIndex))
   const shouldFollowOutput = record.followOutput || isAtScrollBottom(record)
   if (shouldFollowOutput) record.followOutput = true
   record.perf.chunks += 1
@@ -995,18 +1050,22 @@ const flushRecord = (record: CoreTerminalRecord) => {
     try {
       record.perf.parseMs += nowMs() - parseStartedAt
       record.perf.flushMs += nowMs() - flushStartedAt
+      post({ type: 'consumed', terminalId: record.terminalId, sessionId: record.sessionId, bytes })
       if (shouldFollowOutput && !isAtScrollBottom(record)) {
         record.terminal.scrollToBottom()
       }
       const buffer = record.terminal.buffer.active
       const viewportChanged = buffer.viewportY !== beforeViewportY
       const baseChanged = buffer.baseY !== beforeBaseY
-      markChangedVisibleRows(record, beforeVisibleLineSignatures)
-      record.dirtyRows.add(beforeCursorAbsoluteY - buffer.viewportY)
-      record.dirtyRows.add(absoluteCursorRow(buffer) - buffer.viewportY)
+      record.contentEpoch += 1
       if (viewportChanged || (shouldFollowOutput && baseChanged)) {
+        // 滚动场景必发全量快照,行级签名 diff 的结果会被整体丢弃,直接跳过计算。
+        record.lastVisibleLineSignatures = null
         scheduleSnapshot(record, true, 'jump')
       } else {
+        markChangedVisibleRows(record)
+        record.dirtyRows.add(beforeCursorAbsoluteY - buffer.viewportY)
+        record.dirtyRows.add(absoluteCursorRow(buffer) - buffer.viewportY)
         scheduleSnapshot(record)
       }
     } finally {
@@ -1139,8 +1198,7 @@ const importState = (state: ThreadedTerminalExportedState) => {
   terminals.set(state.terminalId, record)
   if (state.scrollbackText) {
     record.pendingFullSnapshotReason = 'import'
-    record.pendingChunks.push(state.scrollbackText)
-    record.pendingBytes += textByteLength(state.scrollbackText)
+    enqueueChunk(record, state.scrollbackText)
     flushRecord(record)
   } else {
     scheduleSnapshot(record, true, 'import')
@@ -1164,8 +1222,7 @@ const handleMessage = (message: ThreadedTerminalCoreRequest) => {
       terminals.set(message.options.terminalId, record)
       post({ type: 'created', requestId: message.requestId, terminalId: message.options.terminalId })
       if (message.initialData) {
-        record.pendingChunks.push(message.initialData)
-        record.pendingBytes += textByteLength(message.initialData)
+        enqueueChunk(record, message.initialData)
         scheduleFlush(record)
       } else {
         scheduleSnapshot(record, true, 'create')
@@ -1184,8 +1241,7 @@ const handleMessage = (message: ThreadedTerminalCoreRequest) => {
     }
     if (message.type === 'data') {
       if (!message.data) return
-      record.pendingChunks.push(message.data)
-      record.pendingBytes += textByteLength(message.data)
+      enqueueChunk(record, message.data)
       record.perf.maxPendingBytes = Math.max(record.perf.maxPendingBytes, record.pendingBytes)
       scheduleFlush(record)
       return
@@ -1205,6 +1261,8 @@ const handleMessage = (message: ThreadedTerminalCoreRequest) => {
       const rows = Math.max(1, Math.floor(message.rows))
       if (cols !== record.terminal.cols || rows !== record.terminal.rows) {
         record.terminal.resize(cols, rows)
+        record.contentEpoch += 1
+        record.lastVisibleLineSignatures = null
       }
       record.pendingFullSnapshot = true
       record.pendingFullSnapshotReason = 'resize'
@@ -1240,7 +1298,9 @@ const handleMessage = (message: ThreadedTerminalCoreRequest) => {
     }
     if (message.type === 'clear') {
       record.pendingChunks = []
+      record.pendingChunkBytes = []
       record.pendingBytes = 0
+      record.contentEpoch += 1
       record.search = newSearchState()
       record.terminal.clear()
       record.pendingFullSnapshot = true

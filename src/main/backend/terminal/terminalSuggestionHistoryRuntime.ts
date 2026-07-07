@@ -11,13 +11,16 @@ import {
 
 type SqliteRunResult = { changes: number; lastInsertRowid: number | bigint }
 
+type SqliteStatement = {
+  all(...args: unknown[]): unknown[]
+  get(...args: unknown[]): unknown
+  run(...args: unknown[]): SqliteRunResult
+}
+
 type SqliteDatabase = {
   exec(sql: string): void
-  prepare(sql: string): {
-    all(...args: unknown[]): unknown[]
-    get(...args: unknown[]): unknown
-    run(...args: unknown[]): SqliteRunResult
-  }
+  prepare(sql: string): SqliteStatement
+  transaction<T extends (...args: never[]) => unknown>(fn: T): T
 }
 
 export type TerminalSuggestionHistoryRow = {
@@ -154,12 +157,43 @@ class MemoryTerminalSuggestionStore implements TerminalSuggestionStore {
   }
 }
 
+type PendingSuggestionRecord = {
+  command: string
+  host: string
+  count: number
+  firstUsedAt: number
+  lastUsedAt: number
+}
+
+// record 批量落盘的延迟窗口：合并高频命令写入，避免每条命令一次独立 fsync 事务。
+const SUGGESTION_FLUSH_DELAY_MS = 50
+
+const suggestionExitFlushes = new Set<() => void>()
+let suggestionExitFlushHookInstalled = false
+
+const installSuggestionExitFlushHook = () => {
+  if (suggestionExitFlushHookInstalled) return
+  suggestionExitFlushHookInstalled = true
+  process.once('exit', () => {
+    for (const flush of suggestionExitFlushes) flush()
+  })
+}
+
 class SqliteTerminalSuggestionStore implements TerminalSuggestionStore {
+  private readonly upsertStatement: SqliteStatement
+  private readonly queryStatement: SqliteStatement
+  private readonly flushTransaction: (rows: PendingSuggestionRecord[]) => void
+  private readonly pending = new Map<string, PendingSuggestionRecord>()
+  private flushTimer: ReturnType<typeof setTimeout> | null = null
+
   constructor(
     private db: SqliteDatabase,
     private readonly nowSeconds: () => number
   ) {
     this.db.exec(`
+      PRAGMA journal_mode=WAL;
+      PRAGMA synchronous=NORMAL;
+      PRAGMA busy_timeout=5000;
       CREATE TABLE IF NOT EXISTS terminal_command_history (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         command TEXT NOT NULL,
@@ -173,6 +207,48 @@ class SqliteTerminalSuggestionStore implements TerminalSuggestionStore {
       CREATE INDEX IF NOT EXISTS idx_terminal_command_history_host_command ON terminal_command_history(host, command);
       CREATE INDEX IF NOT EXISTS idx_terminal_command_history_last_used ON terminal_command_history(last_used_at DESC);
     `)
+    this.upsertStatement = this.db.prepare(
+      `INSERT INTO terminal_command_history (command, host, count, created_at, updated_at, last_used_at)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(command, host) DO UPDATE SET
+         count = count + excluded.count,
+         updated_at = excluded.updated_at,
+         last_used_at = excluded.last_used_at`
+    )
+    this.queryStatement = this.db.prepare(
+      `SELECT command, host, count, last_used_at
+       FROM terminal_command_history
+       WHERE command != ?
+       ORDER BY last_used_at DESC
+       LIMIT 500`
+    )
+    this.flushTransaction = this.db.transaction((rows: PendingSuggestionRecord[]) => {
+      for (const row of rows) {
+        this.upsertStatement.run(row.command, row.host, row.count, row.firstUsedAt, row.lastUsedAt, row.lastUsedAt)
+      }
+    })
+    suggestionExitFlushes.add(() => this.flush())
+    installSuggestionExitFlushHook()
+  }
+
+  private flush(): void {
+    if (this.flushTimer) {
+      clearTimeout(this.flushTimer)
+      this.flushTimer = null
+    }
+    if (!this.pending.size) return
+    const rows = Array.from(this.pending.values())
+    this.pending.clear()
+    this.flushTransaction(rows)
+  }
+
+  private scheduleFlush(): void {
+    if (this.flushTimer) return
+    this.flushTimer = setTimeout(() => {
+      this.flushTimer = null
+      this.flush()
+    }, SUGGESTION_FLUSH_DELAY_MS)
+    this.flushTimer.unref()
   }
 
   record(command: string, host?: string): void {
@@ -180,30 +256,23 @@ class SqliteTerminalSuggestionStore implements TerminalSuggestionStore {
     if (!isValidTerminalCommandForHistory(normalized)) return
     const normalizedHost = normalizeHost(host)
     const now = this.nowSeconds()
-    this.db
-      .prepare(
-        `INSERT INTO terminal_command_history (command, host, count, created_at, updated_at, last_used_at)
-         VALUES (?, ?, 1, ?, ?, ?)
-         ON CONFLICT(command, host) DO UPDATE SET
-           count = count + 1,
-           updated_at = excluded.updated_at,
-           last_used_at = excluded.last_used_at`
-      )
-      .run(normalized, normalizedHost, now, now, now)
+    const key = `${normalizedHost}\0${normalized}`
+    const existing = this.pending.get(key)
+    if (existing) {
+      existing.count += 1
+      existing.lastUsedAt = now
+    } else {
+      this.pending.set(key, { command: normalized, host: normalizedHost, count: 1, firstUsedAt: now, lastUsedAt: now })
+    }
+    this.scheduleFlush()
   }
 
   query(command: string, host?: string, limit = maxSuggestionRows): TerminalCommandSuggestion[] {
     const normalized = command.trim()
     if (normalized.length < 2) return []
-    const rows = this.db
-      .prepare(
-        `SELECT command, host, count, last_used_at
-         FROM terminal_command_history
-         WHERE command != ?
-         ORDER BY last_used_at DESC
-         LIMIT 500`
-      )
-      .all(normalized) as TerminalSuggestionHistoryRow[]
+    // 保持 read-your-writes：查询前先把内存队列落盘。
+    this.flush()
+    const rows = this.queryStatement.all(normalized) as TerminalSuggestionHistoryRow[]
     return queryTerminalSuggestionHistoryRows(rows, normalized, normalizeHost(host), limit, this.nowSeconds())
   }
 }

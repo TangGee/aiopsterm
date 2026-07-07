@@ -28,6 +28,7 @@ import type {
 } from '@shared/contracts/managedAiSessions'
 import type { AiChatExportInput, AiTodoItem, AiTodoSnapshotResult } from '@shared/contracts/aiChat'
 import type { SshAgentKeychainOption } from '@shared/contracts/appRuntime'
+import type { FileTransferTaskEvent } from '@shared/contracts/files'
 import type { McpServerUserConfig } from '@shared/contracts/mcp'
 import type {
   TerminalKeyboardInteractiveRequest,
@@ -63,6 +64,7 @@ const aiAgentSessionEventListeners = new Set<(event: AiAgentSessionEvent) => voi
 const managedAiSessionEventListeners = new Set<(event: ManagedAiSessionEvent) => void>()
 const terminalKeyboardInteractiveRequestListeners = new Set<(event: TerminalKeyboardInteractiveRequest) => void>()
 const terminalKeyboardInteractiveResultListeners = new Set<(event: TerminalKeyboardInteractiveResult) => void>()
+const fileTransferTaskEventListeners = new Set<(event: FileTransferTaskEvent) => void>()
 
 const emitAppUpdateProgressMock = (event: TestAppUpdateProgressEvent) => {
   appUpdateProgressListeners.forEach((listener) => listener(event))
@@ -92,6 +94,14 @@ const emitAppUpdateProgressMock = (event: TestAppUpdateProgressEvent) => {
 
 ;(globalThis as any).__emitManagedAiSessionEventMock = (event: ManagedAiSessionEvent) => {
   managedAiSessionEventListeners.forEach((listener) => listener(event))
+}
+
+;(globalThis as any).__emitFileTransferTaskEventMock = (event: FileTransferTaskEvent) => {
+  fileTransferTaskEventListeners.forEach((listener) => listener(event))
+}
+
+;(globalThis as any).__resetFileTransferTaskEventMock = () => {
+  fileTransferTaskEventListeners.clear()
 }
 
 const defaultQuickCommands = {
@@ -9302,6 +9312,12 @@ Object.defineProperty(window, 'aiops', {
       return { ok: true, data: { id, taskIds, status: 'aborted' as const } }
     }),
     listFileTransferTasks: vi.fn(async () => fileTransferTasksMock.map((task) => ({ ...task, children: task.children?.map((child: any) => ({ ...child })) }))),
+    onFileTransferTaskEvent: vi.fn((listener: (event: FileTransferTaskEvent) => void) => {
+      fileTransferTaskEventListeners.add(listener)
+      return () => {
+        fileTransferTaskEventListeners.delete(listener)
+      }
+    }),
     invokeControlRequest: vi.fn(async () => ({ ok: true, data: {} })),
     respondControlRequest: vi.fn(async () => undefined),
     onControlRequest: vi.fn(() => () => undefined),

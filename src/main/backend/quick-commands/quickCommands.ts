@@ -35,13 +35,16 @@ type QuickCommandBackendRuntimeConfig = {
   forceFallbackStore?: boolean
 }
 
+type SqliteStatement = {
+  all(...args: unknown[]): unknown[]
+  get(...args: unknown[]): unknown
+  run(...args: unknown[]): { changes: number; lastInsertRowid: number | bigint }
+}
+
 type SqliteDatabase = {
   exec(sql: string): void
-  prepare(sql: string): {
-    all(...args: unknown[]): unknown[]
-    get(...args: unknown[]): unknown
-    run(...args: unknown[]): { changes: number; lastInsertRowid: number | bigint }
-  }
+  prepare(sql: string): SqliteStatement
+  transaction<T extends (...args: never[]) => unknown>(fn: T): T
 }
 
 type ParsedQuickCommandScriptItem =
@@ -511,8 +514,15 @@ class FallbackQuickCommandStore {
 }
 
 class SqliteQuickCommandStore {
+  private readonly insertGroupStatement: SqliteStatement
+  private readonly insertSnippetStatement: SqliteStatement
+  private readonly replaceAll: (config: QuickCommandsUserConfig) => void
+
   constructor(private db: SqliteDatabase) {
     this.db.exec(`
+      PRAGMA journal_mode=WAL;
+      PRAGMA synchronous=NORMAL;
+      PRAGMA busy_timeout=5000;
       CREATE TABLE IF NOT EXISTS quick_command_groups (
         uuid TEXT PRIMARY KEY,
         data TEXT NOT NULL
@@ -524,6 +534,17 @@ class SqliteQuickCommandStore {
         sort_order INTEGER NOT NULL DEFAULT 0
       );
     `)
+    this.insertGroupStatement = this.db.prepare('INSERT INTO quick_command_groups (uuid, data) VALUES (?, ?)')
+    this.insertSnippetStatement = this.db.prepare('INSERT INTO quick_command_snippets (id, uuid, data, sort_order) VALUES (?, ?, ?, ?)')
+    this.replaceAll = this.db.transaction((config: QuickCommandsUserConfig) => {
+      this.db.exec('DELETE FROM quick_command_groups; DELETE FROM quick_command_snippets;')
+      for (const group of config.groups) {
+        this.insertGroupStatement.run(group.uuid, JSON.stringify(group))
+      }
+      for (const [index, snippet] of config.snippets.entries()) {
+        this.insertSnippetStatement.run(snippet.id, snippet.uuid || randomUUID(), JSON.stringify(snippet), (index + 1) * 10)
+      }
+    })
     if (runtimeConfig.useSeedData) this.seed()
   }
 
@@ -531,16 +552,19 @@ class SqliteQuickCommandStore {
     const groupCount = this.db.prepare('SELECT COUNT(*) as count FROM quick_command_groups').get() as { count: number }
     const snippetCount = this.db.prepare('SELECT COUNT(*) as count FROM quick_command_snippets').get() as { count: number }
     if (!groupCount) return
-    if (!groupCount.count) {
-      for (const group of defaultGroups) {
-        this.db.prepare('INSERT INTO quick_command_groups (uuid, data) VALUES (?, ?)').run(group.uuid, JSON.stringify(group))
+    const seedTransaction = this.db.transaction(() => {
+      if (!groupCount.count) {
+        for (const group of defaultGroups) {
+          this.insertGroupStatement.run(group.uuid, JSON.stringify(group))
+        }
       }
-    }
-    if (!snippetCount.count) {
-      for (const [index, snippet] of defaultSnippets.entries()) {
-        this.db.prepare('INSERT INTO quick_command_snippets (id, uuid, data, sort_order) VALUES (?, ?, ?, ?)').run(snippet.id, snippet.uuid, JSON.stringify(snippet), (index + 1) * 10)
+      if (!snippetCount.count) {
+        for (const [index, snippet] of defaultSnippets.entries()) {
+          this.insertSnippetStatement.run(snippet.id, snippet.uuid, JSON.stringify(snippet), (index + 1) * 10)
+        }
       }
-    }
+    })
+    seedTransaction()
   }
 
   private parseRecord<T>(row: unknown): T | null {
@@ -570,13 +594,7 @@ class SqliteQuickCommandStore {
 
   save(config: QuickCommandsUserConfig): QuickCommandsUserConfig {
     const normalized = normalizeQuickCommands(config)
-    this.db.exec('DELETE FROM quick_command_groups; DELETE FROM quick_command_snippets;')
-    for (const group of normalized.groups) {
-      this.db.prepare('INSERT INTO quick_command_groups (uuid, data) VALUES (?, ?)').run(group.uuid, JSON.stringify(group))
-    }
-    for (const [index, snippet] of normalized.snippets.entries()) {
-      this.db.prepare('INSERT INTO quick_command_snippets (id, uuid, data, sort_order) VALUES (?, ?, ?, ?)').run(snippet.id, snippet.uuid || randomUUID(), JSON.stringify(snippet), (index + 1) * 10)
-    }
+    this.replaceAll(normalized)
     return cloneQuickCommands(normalized)
   }
 

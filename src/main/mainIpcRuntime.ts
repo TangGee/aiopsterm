@@ -314,7 +314,8 @@ export const registerMainIpcRuntime = (input: MainIpcRuntimeInput) => {
     createTerminalKillResult,
     createLocalTerminal: input.terminalRuntime.createLocalTerminal,
     registerTerminalForCodexBridge: input.terminalRuntime.registerTerminalForCodexBridge,
-    recordTerminalCommandHistory
+    recordTerminalCommandHistory,
+    ackTerminalData: input.terminalRuntime.ackTerminalData
   })
 
   registerCodexSessionsIpc(ipcMain, {

@@ -29,13 +29,15 @@ type SettingsPreferencesRuntimeConfig = {
   useSeedData?: boolean
 }
 
+type SqliteStatement = {
+  all(...args: unknown[]): unknown[]
+  get(...args: unknown[]): unknown
+  run(...args: unknown[]): { changes: number; lastInsertRowid: number | bigint }
+}
+
 type SqliteDatabase = {
   exec(sql: string): void
-  prepare(sql: string): {
-    all(...args: unknown[]): unknown[]
-    get(...args: unknown[]): unknown
-    run(...args: unknown[]): { changes: number; lastInsertRowid: number | bigint }
-  }
+  prepare(sql: string): SqliteStatement
 }
 
 const defaultShortcuts: ShortcutUserConfig[] = [
@@ -185,6 +187,7 @@ export const normalizeSettingsPreferences = (source?: SettingsPreferencesSeedInp
 class FallbackSettingsPreferencesStore {
   private store: Store<SettingsPreferencesStoreShape> | null = null
   private memory: SettingsPreferencesSnapshot | null = null
+  private cache: SettingsPreferencesSnapshot | null = null
 
   constructor() {
     try {
@@ -197,42 +200,60 @@ class FallbackSettingsPreferencesStore {
   }
 
   get(seed?: SettingsPreferencesSeedInput): SettingsPreferencesSnapshot {
+    if (this.cache) return clonePreferences(this.cache)
     const stored = this.store ? this.store.get('preferences') : this.memory
-    if (stored) return this.save(stored)
-    return this.save(seed ? normalizeSettingsPreferences(seed) : defaultPreferences())
+    if (!stored) return this.save(seed ? normalizeSettingsPreferences(seed) : defaultPreferences())
+    const normalized = normalizeSettingsPreferences(stored)
+    // 只有迁移或 seed 清理真的改变了数据才回写，常态读取不触发写盘。
+    if (stableJson(normalized) !== stableJson(stored)) return this.save(normalized)
+    this.cache = normalized
+    return clonePreferences(normalized)
   }
 
   save(preferences: SettingsPreferencesSnapshot): SettingsPreferencesSnapshot {
     const normalized = normalizeSettingsPreferences(preferences)
     if (this.store) this.store.set('preferences', normalized)
     else this.memory = clonePreferences(normalized)
+    this.cache = normalized
     return clonePreferences(normalized)
   }
 }
 
 class SqliteSettingsPreferencesStore {
+  private readonly selectStatement: SqliteStatement
+  private readonly upsertStatement: SqliteStatement
+  private cache: SettingsPreferencesSnapshot | null = null
+
   constructor(private db: SqliteDatabase) {
     this.db.exec(`
+      PRAGMA journal_mode=WAL;
+      PRAGMA synchronous=NORMAL;
+      PRAGMA busy_timeout=5000;
       CREATE TABLE IF NOT EXISTS settings_preferences (
         key TEXT PRIMARY KEY,
         data TEXT NOT NULL
       );
     `)
+    this.selectStatement = this.db.prepare('SELECT data FROM settings_preferences WHERE key = ?')
+    this.upsertStatement = this.db.prepare('INSERT OR REPLACE INTO settings_preferences (key, data) VALUES (?, ?)')
   }
 
   get(seed?: SettingsPreferencesSeedInput): SettingsPreferencesSnapshot {
-    const row = this.db.prepare('SELECT data FROM settings_preferences WHERE key = ?').get('preferences') as { data: string } | undefined
-    if (row?.data) {
-      return this.save(JSON.parse(row.data) as SettingsPreferencesSnapshot)
-    }
-    return this.save(seed ? normalizeSettingsPreferences(seed) : defaultPreferences())
+    if (this.cache) return clonePreferences(this.cache)
+    const row = this.selectStatement.get('preferences') as { data: string } | undefined
+    if (!row?.data) return this.save(seed ? normalizeSettingsPreferences(seed) : defaultPreferences())
+    const stored = JSON.parse(row.data) as SettingsPreferencesSnapshot
+    const normalized = normalizeSettingsPreferences(stored)
+    // 只有迁移或 seed 清理真的改变了数据才回写，常态读取不触发写盘。
+    if (stableJson(normalized) !== stableJson(stored)) return this.save(normalized)
+    this.cache = normalized
+    return clonePreferences(normalized)
   }
 
   save(preferences: SettingsPreferencesSnapshot): SettingsPreferencesSnapshot {
     const normalized = normalizeSettingsPreferences(preferences)
-    this.db
-      .prepare('INSERT OR REPLACE INTO settings_preferences (key, data) VALUES (?, ?)')
-      .run('preferences', JSON.stringify(normalized))
+    this.upsertStatement.run('preferences', JSON.stringify(normalized))
+    this.cache = normalized
     return clonePreferences(normalized)
   }
 }

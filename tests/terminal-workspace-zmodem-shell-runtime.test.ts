@@ -105,7 +105,7 @@ describe('terminalWorkspaceZmodemShellRuntime', () => {
         clearTimer: vi.fn()
       }
     })
-    const event = { id: 'session-1', data: '**\x18B', raw: [0x2a, 0x2a, 0x18, 0x42] }
+    const event = { id: 'session-1', data: '**\x18B', raw: new Uint8Array([0x2a, 0x2a, 0x18, 0x42]) }
 
     expect(runtime.handleTerminalData(event)).toBe(true)
     expect(zmodemRuntimeState.handleTerminalData).toHaveBeenCalledWith(event)

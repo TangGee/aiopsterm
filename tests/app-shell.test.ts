@@ -196,6 +196,7 @@ vi.mock('@xterm/addon-search', () => ({
 }))
 
 vi.mock('@/services/terminal/threadedTerminalRuntime', () => ({
+  setThreadedTerminalDataConsumedSink: vi.fn(),
   ThreadedTerminalFitAddon: vi.fn().mockImplementation(() => ({ fit: vi.fn() })),
   ThreadedTerminalSearchAddon: vi.fn().mockImplementation(() => ({
     findNext: vi.fn(() => true),
@@ -1024,7 +1025,8 @@ describe('AppShell', () => {
       seq: 2
     })
     await flushPromises()
-    await new Promise((resolve) => queueMicrotask(() => resolve(undefined)))
+    // 会话事件驱动的全量重拉带 150ms 去抖,等待去抖窗口结束。
+    await new Promise((resolve) => setTimeout(resolve, 200))
     await flushPromises()
 
     expect(window.aiops.onManagedAiSessionEvent).toHaveBeenCalled()
@@ -10324,6 +10326,9 @@ describe('AppShell', () => {
     expect(searchTerminal.focus).toHaveBeenCalledTimes(terminalFocusCallsBeforeSearchInputClick)
     expect(document.activeElement).toBe(searchInput.element)
     await searchInput.setValue('missing-term')
+    // 增量搜索有 120ms 防抖,等待其触发后再断言。
+    await new Promise((resolve) => setTimeout(resolve, 150))
+    await wrapper.vm.$nextTick()
     expect(wrapper.find('.terminal-search-overlay').text()).not.toContain('0/0')
     expect(wrapper.find('.terminal-search-overlay div button[title="清空"]').exists()).toBe(true)
     const searchAddon = mockXtermInstances.at(-1)!.loadAddon.mock.calls.find(([addon]) => 'findNext' in addon)?.[0]
@@ -10332,6 +10337,8 @@ describe('AppShell', () => {
     expect(searchAddon.findNext.mock.calls).toHaveLength(missingTermFindNextCalls)
     store.appendTerminalOutput(store.activePanelId, 'LOOPNEEDLE first\nLOOPNEEDLE second\n')
     await wrapper.find('.terminal-search-overlay input').setValue('LOOPNEEDLE')
+    await new Promise((resolve) => setTimeout(resolve, 150))
+    await wrapper.vm.$nextTick()
     expect(wrapper.find('.terminal-search-overlay').text()).toContain('1/2')
     expect(searchAddon.findNext).toHaveBeenCalledWith('LOOPNEEDLE', { incremental: true, caseSensitive: false })
     const bubbledEnter = vi.fn()
@@ -10669,6 +10676,8 @@ describe('AppShell', () => {
     expect(searchEvent.defaultPrevented).toBe(true)
     expect(document.activeElement).toBe(wrapper.find('.terminal-search-overlay input').element)
     await wrapper.find('.terminal-search-overlay input').setValue('needle')
+    await new Promise((resolve) => setTimeout(resolve, 150))
+    await wrapper.vm.$nextTick()
     const searchAddon = terminal.loadAddon.mock.calls.find(([addon]) => 'findNext' in addon)?.[0]
     const searchNextEvent = new KeyboardEvent('keydown', { key: 'g', ctrlKey: true, altKey: true, bubbles: true, cancelable: true })
     expect(terminal.emitKeyEvent(searchNextEvent)).toBe(false)
@@ -10681,6 +10690,8 @@ describe('AppShell', () => {
     expect(searchAddon.clearDecorations).toHaveBeenCalled()
     await wrapper.vm.$nextTick()
     await wrapper.find('.terminal-search-overlay input').setValue('needle')
+    await new Promise((resolve) => setTimeout(resolve, 150))
+    await wrapper.vm.$nextTick()
     wrapper.find('.terminal-search-overlay input').element.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
     await wrapper.vm.$nextTick()
     expect(wrapper.find('.terminal-search-overlay').exists()).toBe(false)
