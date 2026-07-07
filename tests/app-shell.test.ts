@@ -1570,10 +1570,10 @@ describe('AppShell', () => {
     expect(styles).toContain('backdrop-filter: none;')
     expect(styles).toContain('background: var(--theme-terminal-active-threaded-pane-bg);')
 
-    await expect(store.selectBackground('preset', 'aurora-glass-image')).resolves.toBe(true)
+    await expect(store.selectBackground('preset', 'aurora-veil')).resolves.toBe(true)
     await wrapper.vm.$nextTick()
     expect(shell.attributes('style')).toContain('--app-bg-image: url(\"')
-    expect(shell.attributes('style')).toContain('aurora-glass')
+    expect(shell.attributes('style')).toContain('aurora-veil')
   })
 
   it('keeps the general settings background picker from forcing horizontal scrolling', () => {
@@ -16334,15 +16334,15 @@ describe('AppShell', () => {
     expect(workspace.text()).toContain('Kanagawa Dragon')
     expect(workspace.text()).toContain('Catppuccin Latte')
     expect(workspace.text()).toContain('打开入门引导')
-    const generatedBackgroundPreset = settingsBackgroundPresets.find((preset) => preset.id === 'aurora-glass-image')
-    expect(generatedBackgroundPreset?.image).toContain('aurora-glass')
+    const generatedBackgroundPreset = settingsBackgroundPresets.find((preset) => preset.id === 'aurora-veil')
+    expect(generatedBackgroundPreset?.image).toContain('aurora-veil')
     expect(workspace.findAll('.settings-bg-tile.preset')).toHaveLength(settingsBackgroundPresets.length)
-    const generatedBackgroundTile = workspace.findAll('.settings-bg-tile.preset').at(settingsBackgroundPresets.findIndex((preset) => preset.id === 'aurora-glass-image'))!
-    expect(generatedBackgroundTile.attributes('style')).toContain('aurora-glass')
+    const generatedBackgroundTile = workspace.findAll('.settings-bg-tile.preset').at(settingsBackgroundPresets.findIndex((preset) => preset.id === 'aurora-veil'))!
+    expect(generatedBackgroundTile.attributes('style')).toContain('aurora-veil')
     await generatedBackgroundTile.trigger('click')
     await flushPromises()
     expect(store.config.background.mode).toBe('preset')
-    expect(store.config.background.image).toBe('aurora-glass-image')
+    expect(store.config.background.image).toBe('aurora-veil')
     await workspace.find('.theme-select').setValue('catppuccin-latte')
     await flushPromises()
     expect(store.config.theme).toBe('catppuccin-latte')
@@ -16870,13 +16870,13 @@ describe('AppShell', () => {
       background: {
         ...store.config.background,
         mode: 'preset',
-        image: 'mist-lake'
+        image: 'aurora-veil'
       }
     })
     await firstPreset.trigger('click')
     await flushPromises()
     expect(store.config.background.mode).toBe('preset')
-    expect(store.config.background.image).toBe('mist-lake')
+    expect(store.config.background.image).toBe('aurora-veil')
     await workspace.vm.$nextTick()
     const opacityInput = workspace.find('.settings-sliders input[type="range"]')
     expect((opacityInput.element as HTMLInputElement).value).toBe('0.68')

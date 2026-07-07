@@ -26,14 +26,17 @@ export type ThemeId =
   | 'rose-pine-dawn'
   | 'ayu-light'
   | 'obsidian-black'
-  | 'ubuntu-solid'
+  | 'sakura-blossom'
+  | 'neon-pink'
+  | 'rose-milk'
 
 export type ConcreteThemeId = Exclude<ThemeId, 'auto'>
 export type ThemeGroup = 'default' | 'official'
 
-// glass:背景图模式下用半透明毛玻璃表面;solid:背景图模式下用高不透明度实面、不做模糊,
-// 背景图只从工作区空隙透出。给不喜欢毛玻璃质感的用户提供整组实面主题。
-export type ThemeSurfaceStyle = 'glass' | 'solid'
+// 材质属性,只决定设置了背景图之后"怎么透":
+// frosted = 毛玻璃,磨砂透出;clear = 亮面,清透无模糊,背景纹理保持锐利。
+// 无背景图时两者没有区别,base 层都是全实面。
+export type ThemeSurfaceFinish = 'frosted' | 'clear'
 
 export type ThemeModuleKey =
   | 'workspace'
@@ -204,7 +207,7 @@ export type ThemeDefinition = {
   name: string
   group: ThemeGroup
   appearance: ThemeAppearance
-  surfaceStyle: ThemeSurfaceStyle
+  surfaceFinish: ThemeSurfaceFinish
   core: ThemeCoreTokens
   shell: ThemeShellTokens
   modules: Record<ThemeModuleKey, ThemeModuleTokens>
@@ -226,7 +229,7 @@ type ThemeSeed = {
   name: string
   group: ThemeGroup
   appearance: ThemeAppearance
-  surfaceStyle?: ThemeSurfaceStyle
+  surfaceFinish?: ThemeSurfaceFinish
   core: Omit<ThemeCoreTokens, 'shadowSoft' | 'shadowStrong'>
   terminalPalette?: Partial<Omit<ThemeTerminalPalette, 'base' | 'withBackground'>> & {
     base?: ThemeTerminalSurfaceSeed
@@ -262,9 +265,8 @@ const makeCore = (seed: ThemeSeed): ThemeCoreTokens => ({
   shadowStrong: seed.appearance === 'dark' ? '0 24px 64px rgb(0 0 0 / 0.34)' : '0 24px 58px rgb(36 47 70 / 0.18)'
 })
 
-const makeShellTokens = (core: ThemeCoreTokens, appearance: ThemeAppearance, surfaceStyle: ThemeSurfaceStyle): ThemeShellTokens => {
+const makeShellTokens = (core: ThemeCoreTokens, appearance: ThemeAppearance, finish: ThemeSurfaceFinish): ThemeShellTokens => {
   const dark = appearance === 'dark'
-  const solid = surfaceStyle === 'solid'
   const backgroundAccentWash = `linear-gradient(90deg, color-mix(in srgb, ${core.accent} ${dark ? '8%' : '3%'}, transparent), transparent 26%), ${core.bg}`
   return {
     bg: core.bg,
@@ -273,13 +275,13 @@ const makeShellTokens = (core: ThemeCoreTokens, appearance: ThemeAppearance, sur
       ? `linear-gradient(0deg, color-mix(in srgb, ${core.bg} 22%, transparent), color-mix(in srgb, ${core.bg} 22%, transparent)), ${backgroundAccentWash}`
       : backgroundAccentWash,
     topBarBg: `color-mix(in srgb, ${core.surface} ${dark ? '94%' : '96%'}, transparent)`,
-    topBarBgWithBackground: `color-mix(in srgb, ${core.surface} ${solid ? '92%' : dark ? '54%' : '50%'}, transparent)`,
+    topBarBgWithBackground: `color-mix(in srgb, ${core.surface} ${dark ? '48%' : '50%'}, transparent)`,
     topBarBorder: core.border,
     topBarText: core.textMuted,
     topBarIcon: core.textMuted,
     topBarIconActive: core.text,
     railBg: core.surface,
-    railBgWithBackground: `color-mix(in srgb, ${core.surface} ${solid ? '90%' : dark ? '38%' : '44%'}, transparent)`,
+    railBgWithBackground: `color-mix(in srgb, ${core.surface} ${dark ? '32%' : '44%'}, transparent)`,
     railIcon: core.textMuted,
     railIconActive: core.accent,
     railActiveBg: `color-mix(in srgb, ${core.accent} ${dark ? '20%' : '15%'}, ${core.surfaceMuted})`,
@@ -289,7 +291,7 @@ const makeShellTokens = (core: ThemeCoreTokens, appearance: ThemeAppearance, sur
     watermark: `color-mix(in srgb, ${core.textMuted} 22%, transparent)`,
     brandBg: core.accent,
     brandText: dark ? '#071113' : '#ffffff',
-    backdropFilter: solid ? 'none' : 'blur(16px)'
+    backdropFilter: finish === 'clear' ? 'none' : 'blur(16px)'
   }
 }
 
@@ -309,11 +311,13 @@ const moduleAccentFallbacks: Record<ThemeModuleKey, keyof ThemeCoreTokens> = {
   aiPanel: 'accentSecondary'
 }
 
+// 质感模型:不设背景图时 base 层全部是实色主题表面;用户选择了背景图,
+// 意图就是要看到它,withBackground 层一律半透明透出,磨砂还是清透由主题材质决定。
 const makeLayerTokens = (
   core: ThemeCoreTokens,
   appearance: ThemeAppearance,
   withBackground: boolean,
-  surfaceStyle: ThemeSurfaceStyle
+  finish: ThemeSurfaceFinish
 ): ThemeLayerTokens => {
   const dark = appearance === 'dark'
   if (!withBackground) {
@@ -331,34 +335,18 @@ const makeLayerTokens = (
       backdropFilter: 'none'
     }
   }
-  if (surfaceStyle === 'solid') {
-    // 实面主题:背景图只从工作区透出,面板保持近实底且不做模糊。
-    return {
-      workspaceBg: dark ? `color-mix(in srgb, ${core.bg} 6%, transparent)` : transparent,
-      panelBg: `color-mix(in srgb, ${core.surface} 94%, transparent)`,
-      toolbarBg: `color-mix(in srgb, ${core.surface} 92%, transparent)`,
-      cardBg: `color-mix(in srgb, ${core.surfaceMuted} 92%, transparent)`,
-      cardStrongBg: `color-mix(in srgb, ${core.surfaceStrong} 92%, transparent)`,
-      inputBg: `color-mix(in srgb, ${dark ? core.surfaceMuted : core.surface} 96%, transparent)`,
-      readableBg: `color-mix(in srgb, ${core.surface} 96%, transparent)`,
-      readableStrongBg: `color-mix(in srgb, ${core.surface} 97%, transparent)`,
-      overlayBg: `color-mix(in srgb, ${core.surface} 97%, transparent)`,
-      border: `color-mix(in srgb, ${core.border} 85%, transparent)`,
-      backdropFilter: 'none'
-    }
-  }
   return {
     workspaceBg: dark ? `color-mix(in srgb, ${core.bg} 6%, transparent)` : transparent,
-    panelBg: dark ? `color-mix(in srgb, ${core.surface} 36%, transparent)` : `color-mix(in srgb, ${core.surface} 40%, transparent)`,
-    toolbarBg: dark ? `color-mix(in srgb, ${core.surface} 34%, transparent)` : `color-mix(in srgb, ${core.surface} 48%, transparent)`,
-    cardBg: dark ? `color-mix(in srgb, ${core.surfaceMuted} 32%, transparent)` : `color-mix(in srgb, ${core.surfaceMuted} 44%, transparent)`,
+    panelBg: dark ? `color-mix(in srgb, ${core.surface} 30%, transparent)` : `color-mix(in srgb, ${core.surface} 40%, transparent)`,
+    toolbarBg: dark ? `color-mix(in srgb, ${core.surface} 30%, transparent)` : `color-mix(in srgb, ${core.surface} 48%, transparent)`,
+    cardBg: dark ? `color-mix(in srgb, ${core.surfaceMuted} 28%, transparent)` : `color-mix(in srgb, ${core.surfaceMuted} 44%, transparent)`,
     cardStrongBg: dark ? `color-mix(in srgb, ${core.surfaceStrong} 30%, transparent)` : `color-mix(in srgb, ${core.surfaceStrong} 56%, transparent)`,
     inputBg: dark ? `color-mix(in srgb, ${core.surfaceMuted} 82%, transparent)` : `color-mix(in srgb, ${core.surface} 74%, transparent)`,
     readableBg: dark ? `color-mix(in srgb, ${core.surface} 82%, transparent)` : `color-mix(in srgb, ${core.surface} 82%, transparent)`,
     readableStrongBg: dark ? `color-mix(in srgb, ${core.surface} 86%, transparent)` : `color-mix(in srgb, ${core.surface} 86%, transparent)`,
     overlayBg: dark ? `color-mix(in srgb, ${core.surface} 88%, transparent)` : `color-mix(in srgb, ${core.surface} 92%, transparent)`,
     border: dark ? `color-mix(in srgb, ${core.border} 62%, transparent)` : `color-mix(in srgb, ${core.text} 24%, transparent)`,
-    backdropFilter: 'blur(16px)'
+    backdropFilter: finish === 'clear' ? 'none' : 'blur(16px)'
   }
 }
 
@@ -366,7 +354,7 @@ const makeModuleTokens = (
   core: ThemeCoreTokens,
   appearance: ThemeAppearance,
   moduleKey: ThemeModuleKey,
-  surfaceStyle: ThemeSurfaceStyle
+  finish: ThemeSurfaceFinish
 ): ThemeModuleTokens => {
   const accent = String(core[moduleAccentFallbacks[moduleKey]])
   return {
@@ -381,20 +369,20 @@ const makeModuleTokens = (
     shadowSoft: core.shadowSoft,
     shadowStrong: core.shadowStrong,
     scrollbarThumb: alpha(core.textMuted, appearance === 'dark' ? '99' : 'b3'),
-    base: makeLayerTokens(core, appearance, false, surfaceStyle),
-    withBackground: makeLayerTokens(core, appearance, true, surfaceStyle)
+    base: makeLayerTokens(core, appearance, false, finish),
+    withBackground: makeLayerTokens(core, appearance, true, finish)
   }
 }
 
 const makeModules = (
   core: ThemeCoreTokens,
   appearance: ThemeAppearance,
-  surfaceStyle: ThemeSurfaceStyle
+  finish: ThemeSurfaceFinish
 ): Record<ThemeModuleKey, ThemeModuleTokens> =>
   themeModuleKeys.reduce(
     (modules, key) => ({
       ...modules,
-      [key]: makeModuleTokens(core, appearance, key, surfaceStyle)
+      [key]: makeModuleTokens(core, appearance, key, finish)
     }),
     {} as Record<ThemeModuleKey, ThemeModuleTokens>
   )
@@ -463,10 +451,10 @@ const makeTerminalSurfaceTokens = (
   withBackground: boolean,
   terminalBg: string,
   ansiPalette: ThemeTerminalAnsiPalette,
-  surfaceStyle: ThemeSurfaceStyle
+  finish: ThemeSurfaceFinish
 ): ThemeTerminalSurfaceTokens => {
   const dark = appearance === 'dark'
-  const solid = surfaceStyle === 'solid'
+  const clear = finish === 'clear'
   if (!withBackground) {
     return {
       paneBg: terminalBg,
@@ -490,31 +478,25 @@ const makeTerminalSurfaceTokens = (
     }
   }
   // 终端正文在背景图之上必须保留一层可读洗底:浅色主题文字深、需要接近实底,
-  // 深色主题保留更多背景透出,实面主题几乎全实且不做模糊。真实绘制发生在
-  // xterm/threaded canvas(runtimeBackground),CSS 层的 viewport/screen 保持透明避免双重叠加。
-  const terminalBodyBg = rgba(terminalBg, solid ? '0.97' : dark ? '0.7' : '0.94')
-  const lightCommandLineBg = rgba(core.surface, solid ? '0.95' : '0.78')
+  // 深色主题保留更多背景透出。真实绘制发生在 xterm/threaded canvas(runtimeBackground),
+  // CSS 层的 viewport/screen 保持透明避免双重叠加。
+  const terminalBodyBg = rgba(terminalBg, dark ? '0.7' : '0.94')
+  const lightCommandLineBg = rgba(core.surface, '0.78')
   return {
-    paneBg: dark ? `color-mix(in srgb, ${terminalBg} ${solid ? '90%' : '30%'}, transparent)` : transparent,
+    paneBg: dark ? `color-mix(in srgb, ${terminalBg} 30%, transparent)` : transparent,
     paneBackdropFilter: 'none',
     threadedPaneBg: transparent,
-    titleBg: dark
-      ? `color-mix(in srgb, ${terminalBg} ${solid ? '92%' : '74%'}, transparent)`
-      : rgba(core.surface, solid ? '0.95' : '0.66'),
-    titleBackdropFilter: solid ? 'none' : 'blur(10px)',
-    commandLineBg: dark ? `color-mix(in srgb, ${terminalBg} ${solid ? '92%' : '78%'}, transparent)` : lightCommandLineBg,
-    commandLineBackdropFilter: solid ? 'none' : 'blur(14px)',
+    titleBg: dark ? `color-mix(in srgb, ${terminalBg} 74%, transparent)` : rgba(core.surface, '0.66'),
+    titleBackdropFilter: clear ? 'none' : 'blur(10px)',
+    commandLineBg: dark ? `color-mix(in srgb, ${terminalBg} 78%, transparent)` : lightCommandLineBg,
+    commandLineBackdropFilter: clear ? 'none' : 'blur(14px)',
     xtermViewportBg: transparent,
     xtermScreenBg: transparent,
     runtimeBackground: terminalBodyBg,
     codexRuntimeBackground: terminalBodyBg,
-    codexStackBg: dark
-      ? `color-mix(in srgb, ${terminalBg} ${solid ? '94%' : '76%'}, transparent)`
-      : rgba(terminalBg, solid ? '0.94' : '0.7'),
-    codexStackIdleBg: dark
-      ? `color-mix(in srgb, ${terminalBg} ${solid ? '88%' : '52%'}, transparent)`
-      : rgba(terminalBg, solid ? '0.88' : '0.6'),
-    codexStackBackdropFilter: solid ? 'none' : 'blur(10px)',
+    codexStackBg: dark ? `color-mix(in srgb, ${terminalBg} 76%, transparent)` : rgba(terminalBg, '0.7'),
+    codexStackIdleBg: dark ? `color-mix(in srgb, ${terminalBg} 44%, transparent)` : rgba(terminalBg, '0.6'),
+    codexStackBackdropFilter: clear ? 'none' : 'blur(10px)',
     codexXtermViewportBg: transparent,
     codexXtermScreenBg: transparent,
     ansiBackground: terminalAnsiBackgroundPaletteFrom(ansiPalette),
@@ -524,7 +506,7 @@ const makeTerminalSurfaceTokens = (
 
 const makeTheme = (seed: ThemeSeed): ThemeDefinition => {
   const core = makeCore(seed)
-  const surfaceStyle: ThemeSurfaceStyle = seed.surfaceStyle || 'glass'
+  const surfaceFinish: ThemeSurfaceFinish = seed.surfaceFinish || 'frosted'
   const { base: baseSeed, withBackground: withBackgroundSeed, ...paletteSeed } = seed.terminalPalette || {}
   const mergedPalette = {
     background: core.bg,
@@ -560,12 +542,12 @@ const makeTheme = (seed: ThemeSeed): ThemeDefinition => {
     }
   }
   const baseSurface = mergeSurface(
-    makeTerminalSurfaceTokens(core, seed.appearance, false, terminalBg, finalAnsiBackground, surfaceStyle),
+    makeTerminalSurfaceTokens(core, seed.appearance, false, terminalBg, finalAnsiBackground, surfaceFinish),
     baseSeed,
     false
   )
   const withBackgroundSurface = mergeSurface(
-    makeTerminalSurfaceTokens(core, seed.appearance, true, terminalBg, finalAnsiBackground, surfaceStyle),
+    makeTerminalSurfaceTokens(core, seed.appearance, true, terminalBg, finalAnsiBackground, surfaceFinish),
     withBackgroundSeed,
     true
   )
@@ -574,10 +556,10 @@ const makeTheme = (seed: ThemeSeed): ThemeDefinition => {
     name: seed.name,
     group: seed.group,
     appearance: seed.appearance,
-    surfaceStyle,
+    surfaceFinish,
     core,
-    shell: makeShellTokens(core, seed.appearance, surfaceStyle),
-    modules: makeModules(core, seed.appearance, surfaceStyle),
+    shell: makeShellTokens(core, seed.appearance, surfaceFinish),
+    modules: makeModules(core, seed.appearance, surfaceFinish),
     terminalPalette: {
       ...mergedPalette,
       base: baseSurface,
@@ -754,6 +736,7 @@ export const themePresets = {
     name: 'Ubuntu Terminal',
     group: 'official',
     appearance: 'dark',
+    surfaceFinish: 'clear',
     core: {
       bg: '#300A24',
       surface: '#3b102d',
@@ -1307,7 +1290,7 @@ export const themePresets = {
     name: 'One Light',
     group: 'official',
     appearance: 'light',
-    surfaceStyle: 'solid',
+    surfaceFinish: 'clear',
     core: {
       bg: '#f2f2f3',
       surface: '#fafafa',
@@ -1347,7 +1330,7 @@ export const themePresets = {
     name: 'Gruvbox Light',
     group: 'official',
     appearance: 'light',
-    surfaceStyle: 'solid',
+    surfaceFinish: 'clear',
     core: {
       bg: '#f5ecc5',
       surface: '#fbf1c7',
@@ -1465,7 +1448,7 @@ export const themePresets = {
     name: 'Ayu Light',
     group: 'official',
     appearance: 'light',
-    surfaceStyle: 'solid',
+    surfaceFinish: 'clear',
     core: {
       bg: '#f3f4f5',
       surface: '#fcfcfc',
@@ -1500,91 +1483,167 @@ export const themePresets = {
       brightWhite: '#e7eaed'
     }
   }),
+  // 亮黑:对齐 macOS iTerm2 的观感——纯黑终端底、银灰前景、macOS 系统色点缀、
+  // iTerm2 默认 ANSI 调色板(black 槽位提亮避免与纯黑底融合)。
   'obsidian-black': makeTheme({
     id: 'obsidian-black',
     name: 'Obsidian Black',
     group: 'official',
     appearance: 'dark',
-    surfaceStyle: 'solid',
+    surfaceFinish: 'clear',
     core: {
-      bg: '#08080c',
-      surface: '#101016',
-      surfaceMuted: '#171720',
-      surfaceStrong: '#21212c',
-      border: '#343444',
-      text: '#e8e8f2',
-      textMuted: '#9698ac',
-      accent: '#00d4ff',
-      accentSecondary: '#ff4d9d',
-      success: '#3ddc84',
-      warning: '#ffb454',
-      danger: '#ff5370',
-      shadow: '0 18px 48px rgb(0 0 0 / 0.5)'
+      bg: '#000000',
+      surface: '#111113',
+      surfaceMuted: '#1a1a1d',
+      surfaceStrong: '#26262a',
+      border: '#38383e',
+      text: '#dcdcdc',
+      textMuted: '#98989f',
+      accent: '#0a84ff',
+      accentSecondary: '#64d2ff',
+      success: '#32d74b',
+      warning: '#ffd60a',
+      danger: '#ff453a',
+      shadow: '0 18px 48px rgb(0 0 0 / 0.55)'
     },
     terminalPalette: {
-      black: '#262633',
-      red: '#ff5370',
-      green: '#3ddc84',
-      yellow: '#ffcb6b',
-      blue: '#3d8bff',
-      magenta: '#ff4d9d',
-      cyan: '#00d4ff',
-      white: '#d8d8e4',
-      brightBlack: '#4a4a5e',
-      brightRed: '#ff7a93',
-      brightGreen: '#6ee8a5',
-      brightYellow: '#ffd98c',
-      brightBlue: '#6faaff',
-      brightMagenta: '#ff80b8',
-      brightCyan: '#55e0ff',
-      brightWhite: '#f2f2f8'
+      foreground: '#c7c7c7',
+      cursor: '#c7c7c7',
+      selectionBackground: '#4d9dff55',
+      black: '#262626',
+      red: '#c91b00',
+      green: '#00c200',
+      yellow: '#c7c400',
+      blue: '#2445d4',
+      magenta: '#ca30c7',
+      cyan: '#00c5c7',
+      white: '#c7c7c7',
+      brightBlack: '#686868',
+      brightRed: '#ff6e67',
+      brightGreen: '#5ffa68',
+      brightYellow: '#fffc67',
+      brightBlue: '#6871ff',
+      brightMagenta: '#ff77ff',
+      brightCyan: '#60fdff',
+      brightWhite: '#ffffff'
     }
   }),
-  'ubuntu-solid': makeTheme({
-    id: 'ubuntu-solid',
-    name: 'Ubuntu Solid',
+  'sakura-blossom': makeTheme({
+    id: 'sakura-blossom',
+    name: 'Sakura Blossom',
     group: 'official',
-    appearance: 'dark',
-    surfaceStyle: 'solid',
+    appearance: 'light',
     core: {
-      bg: '#300A24',
-      surface: '#3b102d',
-      surfaceMuted: '#461738',
-      surfaceStrong: '#512043',
-      border: '#6d4f63',
-      text: '#ffffff',
-      textMuted: '#c8b7c2',
-      accent: '#3465a4',
-      accentSecondary: '#4e9a06',
-      success: '#4e9a06',
-      warning: '#c4a000',
-      danger: '#cc0000',
-      shadow: '0 18px 48px rgb(48 10 36 / 0.38)'
+      bg: '#faeef2',
+      surface: '#fff7f9',
+      surfaceMuted: '#f7e3e9',
+      surfaceStrong: '#eed3dc',
+      border: '#dcb6c4',
+      text: '#4a2c3a',
+      textMuted: '#7f576b',
+      accent: '#d64d8a',
+      accentSecondary: '#9b6bb3',
+      success: '#3d8f63',
+      warning: '#b8791f',
+      danger: '#d23d5e',
+      shadow: '0 18px 42px rgb(120 60 90 / 0.16)'
     },
     terminalPalette: {
-      background: '#300A24',
-      foreground: '#ffffff',
-      cursor: '#ffffff',
-      selectionBackground: '#75507b88',
-      black: '#2e3436',
-      red: '#cc0000',
-      green: '#4e9a06',
-      yellow: '#c4a000',
-      blue: '#3465a4',
-      magenta: '#75507b',
-      cyan: '#06989a',
-      white: '#d3d7cf',
-      brightBlack: '#555753',
-      brightRed: '#ef2929',
-      brightGreen: '#8ae234',
-      brightYellow: '#fce94f',
-      brightBlue: '#729fcf',
-      brightMagenta: '#ad7fa8',
-      brightCyan: '#34e2e2',
-      brightWhite: '#eeeeec',
-      scrollbarTrack: '#6d4f6366',
-      scrollbarThumb: '#c8b7c299',
-      scrollbarThumbHover: '#ad7fa8'
+      black: '#4a2c3a',
+      red: '#d23d5e',
+      green: '#3d8f63',
+      yellow: '#b8791f',
+      blue: '#6a7bd8',
+      magenta: '#d64d8a',
+      cyan: '#3f9baa',
+      white: '#c9a8b6',
+      brightBlack: '#7d5a6d',
+      brightRed: '#e76a85',
+      brightGreen: '#57b283',
+      brightYellow: '#d9a04a',
+      brightBlue: '#8b93e8',
+      brightMagenta: '#ea77ab',
+      brightCyan: '#5cb4c2',
+      brightWhite: '#fff0f5'
+    }
+  }),
+  'neon-pink': makeTheme({
+    id: 'neon-pink',
+    name: 'Neon Pink',
+    group: 'official',
+    appearance: 'dark',
+    core: {
+      bg: '#16080f',
+      surface: '#200d18',
+      surfaceMuted: '#2a1220',
+      surfaceStrong: '#38182b',
+      border: '#55243f',
+      text: '#f7e3ee',
+      textMuted: '#bd8ca6',
+      accent: '#ff3d9a',
+      accentSecondary: '#c77dff',
+      success: '#3ddc97',
+      warning: '#ffb454',
+      danger: '#ff4d6d',
+      shadow: '0 18px 48px rgb(40 5 25 / 0.5)'
+    },
+    terminalPalette: {
+      black: '#3a1830',
+      red: '#ff4d6d',
+      green: '#3ddc97',
+      yellow: '#ffc069',
+      blue: '#7a8cff',
+      magenta: '#ff3d9a',
+      cyan: '#4dd8e6',
+      white: '#f2d7e5',
+      brightBlack: '#5e2c4c',
+      brightRed: '#ff7a90',
+      brightGreen: '#6ee9b4',
+      brightYellow: '#ffd493',
+      brightBlue: '#9fb0ff',
+      brightMagenta: '#ff70b5',
+      brightCyan: '#79e6f0',
+      brightWhite: '#fff0f7'
+    }
+  }),
+  'rose-milk': makeTheme({
+    id: 'rose-milk',
+    name: 'Rose Milk',
+    group: 'official',
+    appearance: 'light',
+    surfaceFinish: 'clear',
+    core: {
+      bg: '#f8ecea',
+      surface: '#fdf6f4',
+      surfaceMuted: '#f2e0dd',
+      surfaceStrong: '#e7cdc9',
+      border: '#d3aea8',
+      text: '#503732',
+      textMuted: '#7f5c55',
+      accent: '#c25e7d',
+      accentSecondary: '#9a6fb5',
+      success: '#4f8f5e',
+      warning: '#a87513',
+      danger: '#c74854',
+      shadow: '0 18px 42px rgb(110 70 65 / 0.15)'
+    },
+    terminalPalette: {
+      black: '#503732',
+      red: '#c74854',
+      green: '#4f8f5e',
+      yellow: '#ab7c26',
+      blue: '#6a7fc9',
+      magenta: '#c25e7d',
+      cyan: '#4899a4',
+      white: '#c4a8a2',
+      brightBlack: '#7f5c55',
+      brightRed: '#de6d77',
+      brightGreen: '#6cab7a',
+      brightYellow: '#c99a44',
+      brightBlue: '#8a9cdd',
+      brightMagenta: '#d97f9c',
+      brightCyan: '#66b3bd',
+      brightWhite: '#fbf1ef'
     }
   })
 } satisfies Record<ConcreteThemeId, ThemeDefinition>

@@ -86,14 +86,14 @@ describe('theme runtime', () => {
     const lightThemes = Object.values(themePresets).filter((theme) => theme.appearance === 'light')
     expect(lightThemes.length).toBeGreaterThan(0)
     for (const theme of lightThemes) {
-      const solid = theme.surfaceStyle === 'solid'
+      const clear = theme.surfaceFinish === 'clear'
       expect(theme.shell.bg).toBe(theme.core.bg)
       expect(theme.shell.bgWashWithBackground).not.toContain('46%')
-      expect(theme.shell.backdropFilter).toBe(solid ? 'none' : 'blur(16px)')
+      expect(theme.shell.backdropFilter).toBe(clear ? 'none' : 'blur(16px)')
       for (const key of themeModuleKeys) {
         expect(theme.modules[key].withBackground.workspaceBg).toBe('rgba(0, 0, 0, 0)')
         expect(theme.modules[key].withBackground.panelBg).toMatch(/color-mix/)
-        expect(theme.modules[key].withBackground.backdropFilter).toBe(solid ? 'none' : 'blur(16px)')
+        expect(theme.modules[key].withBackground.backdropFilter).toBe(clear ? 'none' : 'blur(16px)')
         expect(theme.modules[key].withBackground.readableBg).toMatch(/color-mix/)
         expect(theme.modules[key].withBackground.overlayBg).toMatch(/color-mix/)
         expect(theme.modules[key].base.border).toBe(theme.core.border)
@@ -109,11 +109,11 @@ describe('theme runtime', () => {
       expect(theme.terminalPalette.withBackground.paneBg).toBe('rgba(0, 0, 0, 0)')
       expect(theme.terminalPalette.withBackground.titleBg).toMatch(/^rgba\(/)
       expect(theme.terminalPalette.withBackground.titleBg).not.toBe('rgba(0, 0, 0, 0)')
-      expect(theme.terminalPalette.withBackground.runtimeBackground).toMatch(solid ? /0\.97\)$/ : /0\.94\)$/)
+      expect(theme.terminalPalette.withBackground.runtimeBackground).toMatch(/0\.94\)$/)
       expect(theme.terminalPalette.withBackground.xtermViewportBg).toBe('rgba(0, 0, 0, 0)')
       expect(theme.terminalPalette.withBackground.xtermScreenBg).toBe('rgba(0, 0, 0, 0)')
       expect(theme.terminalPalette.withBackground.codexStackBg).not.toBe('rgba(0, 0, 0, 0)')
-      expect(theme.terminalPalette.withBackground.codexStackBackdropFilter).toBe(solid ? 'none' : 'blur(10px)')
+      expect(theme.terminalPalette.withBackground.codexStackBackdropFilter).toBe(clear ? 'none' : 'blur(10px)')
       expect(theme.terminalPalette.withBackground.codexRuntimeBackground).toBe(theme.terminalPalette.withBackground.runtimeBackground)
       expect(theme.terminalPalette.withBackground.codexXtermViewportBg).toBe('rgba(0, 0, 0, 0)')
       expect(theme.terminalPalette.withBackground.codexXtermScreenBg).toBe('rgba(0, 0, 0, 0)')
@@ -137,20 +137,36 @@ describe('theme runtime', () => {
     }
   })
 
-  it('keeps solid dark themes opaque without backdrop blur under app backgrounds', () => {
-    const solidDarkThemes = Object.values(themePresets).filter(
-      (theme) => theme.appearance === 'dark' && theme.surfaceStyle === 'solid'
-    )
-    expect(solidDarkThemes.length).toBeGreaterThan(0)
-    for (const theme of solidDarkThemes) {
-      expect(theme.shell.backdropFilter).toBe('none')
+  it('keeps every theme fully solid without a background and translucent when one is set', () => {
+    // 质感契约:不设背景图时 base 层必须全部是实色表面(没有任何透出);
+    // 用户设置了背景图,withBackground 层必须让它透出(半透明表面 + 终端半透明洗底)。
+    for (const theme of Object.values(themePresets)) {
+      const dark = theme.appearance === 'dark'
       for (const key of themeModuleKeys) {
-        expect(theme.modules[key].withBackground.backdropFilter).toBe('none')
-        expect(theme.modules[key].withBackground.panelBg).toContain('94%')
+        const base = theme.modules[key].base
+        expect(base.workspaceBg).toBe(theme.core.bg)
+        expect(base.panelBg).toBe(theme.core.surface)
+        expect(base.backdropFilter).toBe('none')
+        for (const value of [base.workspaceBg, base.panelBg, base.cardBg, base.inputBg, base.readableBg, base.overlayBg, base.border]) {
+          expect(value, `theme ${theme.id} module ${key} base surface must be opaque`).not.toContain('transparent')
+          expect(value).not.toMatch(/rgba\(/)
+        }
+        const withBackground = theme.modules[key].withBackground
+        expect(withBackground.panelBg, `theme ${theme.id} module ${key} must reveal the background`).toMatch(/color-mix.*transparent/)
+        // 怎么透由材质决定:亮面(clear)清透无模糊,毛玻璃(frosted)磨砂透出
+        expect(withBackground.backdropFilter).toBe(theme.surfaceFinish === 'clear' ? 'none' : 'blur(16px)')
       }
-      expect(theme.terminalPalette.withBackground.runtimeBackground).toMatch(/0\.97\)$/)
-      expect(theme.terminalPalette.withBackground.codexStackBackdropFilter).toBe('none')
-      expect(theme.terminalPalette.withBackground.titleBackdropFilter).toBe('none')
+      const terminalBase = theme.terminalPalette.base
+      const terminalBg = theme.terminalPalette.background
+      expect(terminalBase.paneBg).toBe(terminalBg)
+      expect(terminalBase.runtimeBackground).toBe(terminalBg)
+      expect(terminalBase.codexRuntimeBackground).toBe(terminalBg)
+      expect(terminalBase.codexStackBg).toBe(terminalBg)
+      const terminalWithBackground = theme.terminalPalette.withBackground
+      expect(terminalWithBackground.runtimeBackground, `theme ${theme.id} terminal must reveal the background`).toMatch(
+        dark ? /0\.7\)$/ : /0\.94\)$/
+      )
+      expect(theme.shell.backdropFilter).toBe(theme.surfaceFinish === 'clear' ? 'none' : 'blur(16px)')
     }
   })
 

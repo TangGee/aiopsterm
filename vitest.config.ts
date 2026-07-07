@@ -8,7 +8,10 @@ export default defineConfig({
     environment: 'jsdom',
     globals: true,
     setupFiles: ['tests/setup.ts'],
-    include: ['tests/**/*.test.ts']
+    include: ['tests/**/*.test.ts'],
+    // app-shell.test.ts 单文件上百个重 DOM 测试,负载稍高就会越过 5s 默认线;
+    // 15s 仍能兜住真正的挂死,同时消除负载抖动带来的偶发超时。
+    testTimeout: 15000
   },
   resolve: {
     alias: {

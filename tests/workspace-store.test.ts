@@ -10837,13 +10837,13 @@ describe('workspace store', () => {
 
     try {
       ;(window.aiops as any).saveConfig = undefined
-      await expect(store.selectBackground('preset', 'star-field')).resolves.toBe(false)
+      await expect(store.selectBackground('preset', 'nebula-dust')).resolves.toBe(false)
       expect(store.settingsNotice).toBe('背景设置保存服务不可用')
       assertBackgroundUnchanged()
 
       ;(window.aiops as any).saveConfig = originalSaveConfig
       vi.mocked(window.aiops.saveConfig!).mockResolvedValueOnce({} as any)
-      await expect(store.selectBackground('preset', 'star-field')).resolves.toBe(false)
+      await expect(store.selectBackground('preset', 'nebula-dust')).resolves.toBe(false)
       expect(store.settingsNotice).toBe('背景设置保存失败')
       assertBackgroundUnchanged()
 
@@ -10856,7 +10856,7 @@ describe('workspace store', () => {
       assertBackgroundUnchanged()
 
       vi.mocked(window.aiops.saveConfig!).mockRejectedValueOnce(new Error('background config offline'))
-      await expect(store.selectBackground('preset', 'star-field')).resolves.toBe(false)
+      await expect(store.selectBackground('preset', 'nebula-dust')).resolves.toBe(false)
       expect(store.settingsNotice).toBe('background config offline')
       assertBackgroundUnchanged()
 
@@ -10864,10 +10864,10 @@ describe('workspace store', () => {
       expect(store.settingsNotice).toBe('请先上传自定义背景')
       assertBackgroundUnchanged()
 
-      await expect(store.selectBackground('preset', 'star-field')).resolves.toBe(true)
+      await expect(store.selectBackground('preset', 'nebula-dust')).resolves.toBe(true)
       expect(store.settingsNotice).toBe('背景设置已保存')
       expect(store.config.background.mode).toBe('preset')
-      expect(store.config.background.image).toBe('star-field')
+      expect(store.config.background.image).toBe('nebula-dust')
     } finally {
       ;(window.aiops as any).saveConfig = originalSaveConfig
     }
@@ -10944,9 +10944,9 @@ describe('workspace store', () => {
     store.setActiveSettingsSection('terminal')
     expect(store.activeSettingsSection).toBe('terminal')
 
-    await expect(store.selectBackground('preset', 'star-field')).resolves.toBe(true)
+    await expect(store.selectBackground('preset', 'nebula-dust')).resolves.toBe(true)
     expect(store.config.background.mode).toBe('preset')
-    expect(store.config.background.image).toBe('star-field')
+    expect(store.config.background.image).toBe('nebula-dust')
     await expect(store.updateBackgroundTuning({ opacity: 0.35, brightness: 0.8 })).resolves.toBe(true)
     expect(store.config.background.opacity).toBe(0.35)
     expect(store.config.background.brightness).toBe(0.8)
@@ -10972,7 +10972,7 @@ describe('workspace store', () => {
         lastCustomImage: 'aiopsterm-background://local/settings-bg.png'
       })
     )
-    await expect(store.selectBackground('preset', 'dark-grid')).resolves.toBe(true)
+    await expect(store.selectBackground('preset', 'neon-horizon')).resolves.toBe(true)
     await expect(store.selectCustomBackground()).resolves.toBe(true)
     expect(store.config.background.mode).toBe('custom')
     await expect(store.clearCustomBackground()).resolves.toBe(true)

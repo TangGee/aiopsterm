@@ -2,11 +2,17 @@ import type { Component } from 'vue'
 import { Bell, BookOpen, Bot, Box, CreditCard, Info, Keyboard, Lock, Server, Settings, Share2, Smartphone, SquareTerminal } from 'lucide-vue-next'
 import { localeDisplayNames, supportedLocales, type I18nKey } from '@/i18n/messages'
 import { themeSelectionOptions } from '@/services/app/themeRuntime'
-import auroraGlassBackground from '@/assets/backgrounds/aurora-glass.webp'
-import coastDuskSoftBackground from '@/assets/backgrounds/coast-dusk-soft.webp'
-import dawnGlassBackground from '@/assets/backgrounds/dawn-glass.webp'
-import graphiteSignalBackground from '@/assets/backgrounds/graphite-signal.webp'
-import midnightTopographyBackground from '@/assets/backgrounds/midnight-topography.webp'
+import auroraVeilBackground from '@/assets/backgrounds/aurora-veil.webp'
+import nebulaDustBackground from '@/assets/backgrounds/nebula-dust.webp'
+import neonHorizonBackground from '@/assets/backgrounds/neon-horizon.webp'
+import kanagawaTideBackground from '@/assets/backgrounds/kanagawa-tide.webp'
+import aubergineDuneBackground from '@/assets/backgrounds/aubergine-dune.webp'
+import carbonWeaveBackground from '@/assets/backgrounds/carbon-weave.webp'
+import paperFogBackground from '@/assets/backgrounds/paper-fog.webp'
+import porcelainSkyBackground from '@/assets/backgrounds/porcelain-sky.webp'
+import roseDawnBackground from '@/assets/backgrounds/rose-dawn.webp'
+import sakuraDriftBackground from '@/assets/backgrounds/sakura-drift.webp'
+import jadeMistBackground from '@/assets/backgrounds/jade-mist.webp'
 
 export type SettingSectionKey =
   | 'general'
@@ -73,79 +79,70 @@ export type BackgroundPreset = {
 
 export const settingsBackgroundPresets: BackgroundPreset[] = [
   {
-    id: 'mist-lake',
-    label: 'mist lake',
-    css: 'radial-gradient(circle at 18% 16%, rgb(214 244 235 / 0.62), transparent 34%), radial-gradient(circle at 82% 18%, rgb(132 177 191 / 0.48), transparent 36%), linear-gradient(145deg, #273845 0%, #617985 48%, #16202a 100%)'
+    id: 'aurora-veil',
+    label: 'aurora veil',
+    css: `url("${auroraVeilBackground}")`,
+    image: auroraVeilBackground
   },
   {
-    id: 'snow-peak',
-    label: 'snow peak',
-    css: 'radial-gradient(circle at 28% 20%, rgb(248 252 255 / 0.7), transparent 30%), radial-gradient(circle at 72% 40%, rgb(134 190 201 / 0.38), transparent 42%), linear-gradient(150deg, #263b4d 0%, #8eb1bd 52%, #1a2533 100%)'
+    id: 'nebula-dust',
+    label: 'nebula dust',
+    css: `url("${nebulaDustBackground}")`,
+    image: nebulaDustBackground
   },
   {
-    id: 'sunset-ridge',
-    label: 'sunset ridge',
-    css: 'radial-gradient(circle at 20% 18%, rgb(247 180 92 / 0.58), transparent 34%), radial-gradient(circle at 78% 34%, rgb(98 142 116 / 0.36), transparent 40%), linear-gradient(148deg, #352d2d 0%, #596b54 48%, #151d28 100%)'
+    id: 'neon-horizon',
+    label: 'neon horizon',
+    css: `url("${neonHorizonBackground}")`,
+    image: neonHorizonBackground
   },
   {
-    id: 'coast-dusk',
-    label: 'coast dusk',
-    css: 'radial-gradient(circle at 18% 24%, rgb(232 136 95 / 0.5), transparent 34%), radial-gradient(circle at 78% 26%, rgb(107 169 154 / 0.42), transparent 40%), linear-gradient(145deg, #372b35 0%, #5f7f7b 48%, #172230 100%)'
+    id: 'kanagawa-tide',
+    label: 'kanagawa tide',
+    css: `url("${kanagawaTideBackground}")`,
+    image: kanagawaTideBackground
   },
   {
-    id: 'star-field',
-    label: 'star field',
-    css: 'radial-gradient(circle at 30% 30%, rgb(247 250 252 / 0.68) 0 1px, transparent 2px), radial-gradient(circle at 70% 55%, rgb(207 216 227 / 0.55) 0 1px, transparent 2px), radial-gradient(circle at 18% 70%, rgb(86 182 194 / 0.24), transparent 34%), linear-gradient(145deg, #050814, #111827 56%, #1f2937)'
+    id: 'aubergine-dune',
+    label: 'aubergine dune',
+    css: `url("${aubergineDuneBackground}")`,
+    image: aubergineDuneBackground
   },
   {
-    id: 'dark-grid',
-    label: 'dark grid',
-    css: 'linear-gradient(rgb(255 255 255 / 0.045) 1px, transparent 1px), linear-gradient(90deg, rgb(255 255 255 / 0.035) 1px, transparent 1px), radial-gradient(circle at 18% 20%, rgb(86 182 194 / 0.26), transparent 34%), linear-gradient(145deg, #11151d 0%, #202837 52%, #10141b 100%)'
+    id: 'carbon-weave',
+    label: 'carbon weave',
+    css: `url("${carbonWeaveBackground}")`,
+    image: carbonWeaveBackground
   },
   {
-    id: 'aurora-terminal',
-    label: 'aurora terminal',
-    css: 'radial-gradient(circle at 20% 22%, rgb(80 203 180 / 0.42), transparent 32%), radial-gradient(circle at 78% 28%, rgb(159 133 204 / 0.34), transparent 36%), radial-gradient(circle at 62% 78%, rgb(230 180 80 / 0.18), transparent 34%), linear-gradient(150deg, #131820 0%, #232332 48%, #0f151d 100%)'
+    id: 'paper-fog',
+    label: 'paper fog',
+    css: `url("${paperFogBackground}")`,
+    image: paperFogBackground
   },
   {
-    id: 'graphite-signal',
-    label: 'graphite signal',
-    css: 'radial-gradient(circle at 18% 70%, rgb(140 207 126 / 0.32), transparent 34%), radial-gradient(circle at 82% 18%, rgb(86 182 194 / 0.28), transparent 35%), linear-gradient(160deg, #191b1f 0%, #323840 46%, #101217 100%)'
+    id: 'porcelain-sky',
+    label: 'porcelain sky',
+    css: `url("${porcelainSkyBackground}")`,
+    image: porcelainSkyBackground
   },
   {
-    id: 'dawn-glass',
-    label: 'dawn glass',
-    css: 'radial-gradient(circle at 20% 18%, rgb(242 166 112 / 0.46), transparent 30%), radial-gradient(circle at 78% 22%, rgb(112 186 177 / 0.34), transparent 38%), radial-gradient(circle at 58% 82%, rgb(139 160 199 / 0.26), transparent 36%), linear-gradient(150deg, #2b2a34 0%, #495d62 50%, #151922 100%)'
+    id: 'rose-dawn',
+    label: 'rose dawn',
+    css: `url("${roseDawnBackground}")`,
+    image: roseDawnBackground
   },
   {
-    id: 'aurora-glass-image',
-    label: 'aurora glass',
-    css: `url("${auroraGlassBackground}")`,
-    image: auroraGlassBackground
+    id: 'sakura-drift',
+    label: 'sakura drift',
+    css: `url("${sakuraDriftBackground}")`,
+    image: sakuraDriftBackground
   },
   {
-    id: 'graphite-signal-image',
-    label: 'graphite signal',
-    css: `url("${graphiteSignalBackground}")`,
-    image: graphiteSignalBackground
-  },
-  {
-    id: 'dawn-glass-image',
-    label: 'dawn glass image',
-    css: `url("${dawnGlassBackground}")`,
-    image: dawnGlassBackground
-  },
-  {
-    id: 'coast-dusk-soft-image',
-    label: 'coast dusk soft',
-    css: `url("${coastDuskSoftBackground}")`,
-    image: coastDuskSoftBackground
-  },
-  {
-    id: 'midnight-topography-image',
-    label: 'midnight topography',
-    css: `url("${midnightTopographyBackground}")`,
-    image: midnightTopographyBackground
+    id: 'jade-mist',
+    label: 'jade mist',
+    css: `url("${jadeMistBackground}")`,
+    image: jadeMistBackground
   }
 ]
 
