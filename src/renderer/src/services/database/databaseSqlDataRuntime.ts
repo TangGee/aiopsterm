@@ -129,6 +129,7 @@ export const sqlOutcomeFromBackendResult = (result: DatabaseSqlExecuteResult | u
       rows: data.rows,
       rowCount: data.rowCount,
       durationMs: data.durationMs,
+      ...(data.truncated === true ? { truncated: true } : {}),
       error: null,
       message: data.execution.message
     },

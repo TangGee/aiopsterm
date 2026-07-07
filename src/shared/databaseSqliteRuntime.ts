@@ -52,7 +52,8 @@ export type DatabaseSqliteRuntimeConfig = {
 }
 
 const SQLITE_MAIN_SCHEMA = 'main'
-const SQLITE_TIMEOUT_MS = 5000
+// better-sqlite3 的 busy timeout(等锁上限),不约束查询执行时长。
+const SQLITE_BUSY_TIMEOUT_MS = 5000
 const SQLITE_EXECUTE_MAX_ROWS = 5000
 let sqliteRuntime: SqliteDatabaseConstructor | null | undefined
 let runtimeConfig: DatabaseSqliteRuntimeConfig | null = null
@@ -103,7 +104,7 @@ export const openSqliteDatabase = (filePath: string, readonly: boolean) => {
       code: 'DB_SQLITE_DRIVER_UNAVAILABLE'
     })
   }
-  return new Database(filePath, { readonly, fileMustExist: true, timeout: SQLITE_TIMEOUT_MS })
+  return new Database(filePath, { readonly, fileMustExist: true, timeout: SQLITE_BUSY_TIMEOUT_MS })
 }
 
 export const sqliteErrorCode = (error: unknown, fallback: string) => {
@@ -188,7 +189,7 @@ export const sqliteExecute = async (connection: DatabaseConnectionInfo, sql: str
       readonly: !!connection.readonly,
       sql,
       maxRows: SQLITE_EXECUTE_MAX_ROWS,
-      timeoutMs: SQLITE_TIMEOUT_MS
+      busyTimeoutMs: SQLITE_BUSY_TIMEOUT_MS
     })
     if (outcome.reader) {
       const data: DatabaseSqlExecuteRawData & { truncated?: boolean } = {

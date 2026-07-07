@@ -5,7 +5,9 @@ export type SqliteWorkerExecuteInput = {
   readonly: boolean
   sql: string
   maxRows: number
-  timeoutMs: number
+  // better-sqlite3 的 busy timeout(等待数据库锁的时长上限),不是查询执行超时;
+  // 长 CPU 查询仍会占住单个 worker,后续请求在 worker 消息队列里排队。
+  busyTimeoutMs: number
 }
 
 export type SqliteWorkerExecuteOutcome =
@@ -31,7 +33,7 @@ const Database = require(workerData.betterSqlite3Path)
 parentPort.on('message', (request) => {
   let db = null
   try {
-    db = new Database(request.filePath, { readonly: request.readonly, fileMustExist: true, timeout: request.timeoutMs })
+    db = new Database(request.filePath, { readonly: request.readonly, fileMustExist: true, timeout: request.busyTimeoutMs })
     const stmt = db.prepare(request.sql)
     if (stmt.reader) {
       const columns = stmt.columns().map((column) => String((column && column.name) || '').trim()).filter(Boolean)

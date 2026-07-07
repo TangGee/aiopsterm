@@ -1,7 +1,7 @@
 import { type Ref } from 'vue'
 import { copyTextToClipboard } from '@/services/app/clipboardRuntime'
 import { applyEditorSettingsToDocument } from '@/services/common/editorRuntime'
-import { addSystemThemeListener, applyThemeToDocument, isThemeId, type ThemeId } from '@/services/app/themeRuntime'
+import { addSystemThemeListener, applyThemeToDocument, isThemeId, resolveLegacyThemeId, type ThemeId } from '@/services/app/themeRuntime'
 import { appRuntimeClient, isOpenPathResult } from '@/services/app/appRuntimeClient'
 import { createWorkspaceAppearanceSettingsController } from '@/services/settings/workspaceAppearanceSettingsController'
 import { createWorkspaceAppUpdateController } from '@/services/settings/workspaceAppUpdateController'
@@ -171,7 +171,7 @@ type WorkspaceAppSettingsDeps = {
 
 const ONBOARDING_VERSION = defaultConfig.onboarding!.version
 
-const normalizeThemeId = (theme: string): ThemeId => (isThemeId(theme) ? theme : 'dark')
+const normalizeThemeId = (theme: string): ThemeId => (isThemeId(theme) ? theme : resolveLegacyThemeId(theme) ?? 'dark')
 
 export const createDefaultWorkspaceAboutSettings = (): WorkspaceAboutSettings => ({
   version: '0.1.0',

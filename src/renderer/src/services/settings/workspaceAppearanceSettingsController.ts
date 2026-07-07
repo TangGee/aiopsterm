@@ -1,7 +1,7 @@
 import { type Ref } from 'vue'
 import { appRuntimeClient } from '@/services/app/appRuntimeClient'
 import { applyDocumentLocale, resolveLocale } from '@/i18n/runtime'
-import { applyThemeToDocument, isThemeId, type ThemeId } from '@/services/app/themeRuntime'
+import { applyThemeToDocument, isThemeId, resolveLegacyThemeId, type ThemeId } from '@/services/app/themeRuntime'
 import { applyEditorSettingsToDocument } from '@/services/common/editorRuntime'
 import { localFilesClient } from '@/services/app/localFilesClient'
 import {
@@ -49,7 +49,7 @@ type WorkspaceAppearanceSettingsControllerDeps = {
 
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 
-const normalizeThemeId = (theme: string): ThemeId => (isThemeId(theme) ? theme : 'dark')
+const normalizeThemeId = (theme: string): ThemeId => (isThemeId(theme) ? theme : resolveLegacyThemeId(theme) ?? 'dark')
 
 const isThemeSnapshot = (value: unknown): value is ThemeId => typeof value === 'string' && isThemeId(value)
 

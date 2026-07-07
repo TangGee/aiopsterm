@@ -1,4 +1,5 @@
 import { isLocaleSetting } from '@/i18n/runtime'
+import { legacyBackgroundPresetAliases, settingsBackgroundPresets } from '@/config/settings'
 import type { CustomBackgroundSaveResult } from '@shared/contracts/appRuntime'
 import type { UserConfig } from '@shared/contracts/userConfig'
 import {
@@ -177,6 +178,17 @@ export const isLayoutPreferencesSnapshot = (
   isLayoutWidthValue(source.rightPanelWidth) &&
   isLayoutWidthValue(source.agentsLeftWidth)
 
+const knownBackgroundPresetIds = new Set(settingsBackgroundPresets.map((preset) => preset.id))
+
+// preset 目录更换后旧 id 不再存在,归一化时迁移到别名映射的新 preset,
+// 未知 id 迁移到第一个可用 preset,保留用户"有壁纸"的原始意图。
+const migrateBackgroundPresetId = (image: string) => {
+  if (!image || knownBackgroundPresetIds.has(image)) return image
+  const alias = legacyBackgroundPresetAliases[image]
+  if (alias && knownBackgroundPresetIds.has(alias)) return alias
+  return settingsBackgroundPresets[0]?.id || ''
+}
+
 export const normalizeBackgroundConfig = (source?: Partial<BackgroundUserConfig>) => {
   const incoming = isRecord(source) ? source : {}
   const mode = stringFromOptions(incoming.mode, backgroundModeValues, defaultConfig.background.mode)
@@ -189,6 +201,10 @@ export const normalizeBackgroundConfig = (source?: Partial<BackgroundUserConfig>
   }
   if (normalized.mode === 'none') {
     normalized.image = ''
+  }
+  if (normalized.mode === 'preset') {
+    normalized.image = migrateBackgroundPresetId(normalized.image)
+    if (!normalized.image) normalized.mode = 'none'
   }
   const changed =
     !isRecord(source) ||

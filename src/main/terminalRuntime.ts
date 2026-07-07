@@ -161,7 +161,8 @@ export const createMainTerminalRuntime = (input: TerminalRuntimeInput) => {
   const terminalFlowHighWatermarkBytes = 2 * 1024 * 1024
   const terminalFlowLowWatermarkBytes = 512 * 1024
   const terminalFlowPauseSafetyMs = 15_000
-  const terminalFlows = new Map<string, { unacked: number; paused: boolean; pausedAt: number }>()
+  type TerminalFlowState = { unacked: number; paused: boolean; pausedAt: number; safetyTimer: NodeJS.Timeout | null }
+  const terminalFlows = new Map<string, TerminalFlowState>()
 
   const setTerminalSourcePaused = (id: string, paused: boolean) => {
     const session = sessions.get(id)
@@ -173,25 +174,50 @@ export const createMainTerminalRuntime = (input: TerminalRuntimeInput) => {
     } catch {}
   }
 
+  const clearTerminalFlowSafetyTimer = (flow: TerminalFlowState) => {
+    if (!flow.safetyTimer) return
+    clearTimeout(flow.safetyTimer)
+    flow.safetyTimer = null
+  }
+
+  const releaseTerminalFlow = (id: string) => {
+    const flow = terminalFlows.get(id)
+    if (!flow) return
+    clearTerminalFlowSafetyTimer(flow)
+    terminalFlows.delete(id)
+  }
+
+  // 暂停后数据源不再产生 send,ack 又可能因渲染端崩溃/重载永久丢失,
+  // 所以安全恢复必须是真实定时器,不能依赖下一次 send 时的内联检查。
+  const forceResumeTerminalFlow = (id: string) => {
+    const flow = terminalFlows.get(id)
+    if (!flow) return
+    flow.safetyTimer = null
+    if (!flow.paused) return
+    flow.unacked = 0
+    flow.paused = false
+    flow.pausedAt = 0
+    if (!sessions.has(id)) {
+      terminalFlows.delete(id)
+      return
+    }
+    setTerminalSourcePaused(id, false)
+    logRuntimeEvent('warn', 'terminal.flow.safety-resume', { id })
+  }
+
   const trackTerminalFlowSend = (id: string, bytes: number) => {
     if (!id || bytes <= 0) return
-    const flow = terminalFlows.get(id) || { unacked: 0, paused: false, pausedAt: 0 }
+    const flow = terminalFlows.get(id) || { unacked: 0, paused: false, pausedAt: 0, safetyTimer: null }
     flow.unacked += bytes
     terminalFlows.set(id, flow)
     if (!flow.paused && flow.unacked >= terminalFlowHighWatermarkBytes) {
       flow.paused = true
       flow.pausedAt = Date.now()
       setTerminalSourcePaused(id, true)
+      clearTerminalFlowSafetyTimer(flow)
+      flow.safetyTimer = setTimeout(() => forceResumeTerminalFlow(id), terminalFlowPauseSafetyMs)
+      flow.safetyTimer.unref?.()
       logRuntimeEvent('info', 'terminal.flow.paused', { id, unacked: flow.unacked })
-      return
-    }
-    // 渲染端崩溃/重载会丢失 ack,超时强制恢复避免会话死锁。
-    if (flow.paused && Date.now() - flow.pausedAt > terminalFlowPauseSafetyMs) {
-      flow.unacked = bytes
-      flow.paused = false
-      flow.pausedAt = 0
-      setTerminalSourcePaused(id, false)
-      logRuntimeEvent('warn', 'terminal.flow.safety-resume', { id })
     }
   }
 
@@ -202,6 +228,7 @@ export const createMainTerminalRuntime = (input: TerminalRuntimeInput) => {
     if (flow.paused && flow.unacked <= terminalFlowLowWatermarkBytes) {
       flow.paused = false
       flow.pausedAt = 0
+      clearTerminalFlowSafetyTimer(flow)
       setTerminalSourcePaused(id, false)
       logRuntimeEvent('info', 'terminal.flow.resumed', { id, unacked: flow.unacked })
     }
@@ -216,8 +243,9 @@ export const createMainTerminalRuntime = (input: TerminalRuntimeInput) => {
     if (!session) return
     appendCodexTerminalBridgeDisplayData(flush.id, flush.chunk)
     const payload = terminalDataPayload(flush.id, flush.chunk)
-    sendWindowEvent(session.window, 'terminal:data', payload)
-    trackTerminalFlowSend(flush.id, Buffer.byteLength(payload.data, 'utf8'))
+    // 投递失败(窗口已销毁)时不计入未确认字节,避免给不到 ack 的数据触发暂停。
+    const delivered = sendWindowEvent(session.window, 'terminal:data', payload)
+    if (delivered) trackTerminalFlowSend(flush.id, Buffer.byteLength(payload.data, 'utf8'))
     if (terminalDebugLogs && shouldLogCoalescedTerminalData(flush)) {
       logRuntimeEvent('debug', 'terminal.data.coalesced', {
         id: flush.id,
@@ -247,8 +275,8 @@ export const createMainTerminalRuntime = (input: TerminalRuntimeInput) => {
       if (session?.window !== owner) {
         appendCodexTerminalBridgeDisplayData(id, displayChunk)
         const payload = terminalDataPayload(id, displayChunk)
-        sendWindowEvent(owner, 'terminal:data', payload)
-        trackTerminalFlowSend(id, Buffer.byteLength(payload.data, 'utf8'))
+        const delivered = sendWindowEvent(owner, 'terminal:data', payload)
+        if (delivered) trackTerminalFlowSend(id, Buffer.byteLength(payload.data, 'utf8'))
         return
       }
       terminalDataCoalescer.push(id, displayChunk)
@@ -506,7 +534,7 @@ export const createMainTerminalRuntime = (input: TerminalRuntimeInput) => {
         flushDataSummary(id, 'session-closed')
         unregisterCodexTerminalBridgeSession(id)
         sessions.delete(id)
-        terminalFlows.delete(id)
+        releaseTerminalFlow(id)
         logRuntimeEvent('info', 'terminal.session-removed', { id, kind: 'ssh' })
       }
     })
@@ -545,7 +573,7 @@ export const createMainTerminalRuntime = (input: TerminalRuntimeInput) => {
         flushDataSummary(id, 'session-closed')
         unregisterCodexTerminalBridgeSession(id)
         sessions.delete(id)
-        terminalFlows.delete(id)
+        releaseTerminalFlow(id)
         logRuntimeEvent('info', 'terminal.session-removed', { id, kind: 'local' })
       }
     })

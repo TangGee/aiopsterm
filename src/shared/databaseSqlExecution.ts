@@ -31,7 +31,10 @@ const createDatabaseSqlExecutionRecord = (input: {
   createdAt: sqlExecutionTimestamp()
 })
 
-const databaseSqlExecutionMessage = (rowCount: number) => `Execution OK (${rowCount} row${rowCount === 1 ? '' : 's'})`
+const databaseSqlExecutionMessage = (rowCount: number, truncated: boolean) =>
+  truncated
+    ? `Execution OK (first ${rowCount} row${rowCount === 1 ? '' : 's'}, result truncated)`
+    : `Execution OK (${rowCount} row${rowCount === 1 ? '' : 's'})`
 
 export const withDatabaseSqlExecutionRecord = (result: DatabaseSqlExecuteRawResult, startedAt: number): DatabaseSqlExecuteResult => {
   if (result.ok && result.data) {
@@ -39,7 +42,7 @@ export const withDatabaseSqlExecutionRecord = (result: DatabaseSqlExecuteRawResu
     const rowCount = Math.max(0, Math.round(Number(result.data.rowCount) || 0))
     const execution = createDatabaseSqlExecutionRecord({
       status: 'ok',
-      message: databaseSqlExecutionMessage(rowCount),
+      message: databaseSqlExecutionMessage(rowCount, result.data.truncated === true),
       durationMs,
       rowCount
     })

@@ -394,19 +394,42 @@ const writeStatePayloadToFilePath = async (stateFilePath: string, payload: strin
 }
 
 // 内存 state 是权威数据，磁盘写入按去抖窗口异步合并；进程退出与运行时重配置时同步兜底。
+// 同步兜底写与异步队列写通过 persistGeneration 串接：同步写递增代数并作废所有已入队
+// 的异步快照，防止旧快照在同步写之后落盘、把更新的内容覆盖回旧状态。
 const persistDebounceMs = 400
 let persistTimer: NodeJS.Timeout | null = null
 let persistDirty = false
 let persistQueue: Promise<void> = Promise.resolve()
+let persistGeneration = 0
+let pendingAsyncPersists = 0
+let exitFlushArmed = false
+
+const clearPersistTimer = () => {
+  if (!persistTimer) return
+  clearTimeout(persistTimer)
+  persistTimer = null
+}
+
+const armExitFlush = () => {
+  if (exitFlushArmed) return
+  exitFlushArmed = true
+  process.once('exit', flushPendingPersistSync)
+}
+
+const disarmExitFlush = () => {
+  if (!exitFlushArmed) return
+  exitFlushArmed = false
+  process.removeListener('exit', flushPendingPersistSync)
+}
 
 const flushPendingPersistSync = () => {
-  if (persistTimer) {
-    clearTimeout(persistTimer)
-    persistTimer = null
-  }
-  if (!persistDirty) return
+  clearPersistTimer()
+  // 在途异步写在进程退出时不会再被事件循环推进，此处同样需要兜底落盘当前状态。
+  const mustWrite = persistDirty || pendingAsyncPersists > 0
   persistDirty = false
-  process.removeListener('exit', flushPendingPersistSync)
+  persistGeneration += 1
+  disarmExitFlush()
+  if (!mustWrite) return
   try {
     writeStateToFilePath(runtimeConfig.stateFilePath, chatHistoryState)
   } catch {
@@ -415,39 +438,36 @@ const flushPendingPersistSync = () => {
 }
 
 const enqueuePendingPersist = () => {
-  if (persistTimer) {
-    clearTimeout(persistTimer)
-    persistTimer = null
-  }
+  clearPersistTimer()
   if (!persistDirty) return
   persistDirty = false
-  process.removeListener('exit', flushPendingPersistSync)
+  const generation = persistGeneration
   const stateFilePath = runtimeConfig.stateFilePath
   const payload = JSON.stringify(chatHistoryState)
+  pendingAsyncPersists += 1
   persistQueue = persistQueue
     .catch(() => undefined)
-    .then(() => writeStatePayloadToFilePath(stateFilePath, payload))
+    .then(() => (generation === persistGeneration ? writeStatePayloadToFilePath(stateFilePath, payload) : undefined))
     .catch(() => undefined)
+    .then(() => {
+      pendingAsyncPersists = Math.max(0, pendingAsyncPersists - 1)
+      if (!persistDirty && pendingAsyncPersists === 0) disarmExitFlush()
+    })
 }
 
 const schedulePersistState = () => {
-  if (!persistDirty) {
-    persistDirty = true
-    process.once('exit', flushPendingPersistSync)
-  }
+  persistDirty = true
+  armExitFlush()
   if (persistTimer) return
   persistTimer = setTimeout(enqueuePendingPersist, persistDebounceMs)
   persistTimer.unref()
 }
 
 const dropPendingPersist = () => {
-  if (persistTimer) {
-    clearTimeout(persistTimer)
-    persistTimer = null
-  }
-  if (!persistDirty) return
+  clearPersistTimer()
   persistDirty = false
-  process.removeListener('exit', flushPendingPersistSync)
+  persistGeneration += 1
+  disarmExitFlush()
 }
 
 export const flushChatHistoryWrites = async () => {

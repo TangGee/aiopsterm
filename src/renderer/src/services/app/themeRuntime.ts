@@ -1694,6 +1694,13 @@ export const themeSelectionOptions: ThemeSelectOption[] = [
 
 export const isThemeId = (theme: string): theme is ThemeId => theme === 'auto' || Object.prototype.hasOwnProperty.call(themePresets, theme)
 
+// 被移除的主题 id 通过别名迁移到最接近的现存主题,避免老配置静默回落到 dark。
+const legacyThemeIdAliases: Record<string, ConcreteThemeId> = {
+  'ubuntu-solid': 'ubuntu-terminal'
+}
+
+export const resolveLegacyThemeId = (theme: string): ConcreteThemeId | null => legacyThemeIdAliases[theme] ?? null
+
 export const getSystemTheme = (): ThemeAppearance => {
   if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return 'dark'
   if (window.matchMedia('(prefers-color-scheme: dark)').matches) return 'dark'
@@ -1703,7 +1710,8 @@ export const getSystemTheme = (): ThemeAppearance => {
 
 export const resolveEffectiveThemeId = (theme: string, system: ThemeAppearance = getSystemTheme()): ConcreteThemeId => {
   if (theme === 'auto') return system
-  return Object.prototype.hasOwnProperty.call(themePresets, theme) ? (theme as ConcreteThemeId) : 'dark'
+  if (Object.prototype.hasOwnProperty.call(themePresets, theme)) return theme as ConcreteThemeId
+  return resolveLegacyThemeId(theme) ?? 'dark'
 }
 
 export const resolveThemePreset = (theme: string, system: ThemeAppearance = getSystemTheme()) => themePresets[resolveEffectiveThemeId(theme, system)]
@@ -1738,7 +1746,7 @@ export const applyThemeToDocument = (theme: string) => {
   root.classList.add(`theme-${preset.appearance}`)
   root.dataset.theme = preset.appearance
   root.dataset.themeId = preset.id
-  root.dataset.themePreference = isThemeId(theme) ? theme : 'dark'
+  root.dataset.themePreference = isThemeId(theme) ? theme : resolveLegacyThemeId(theme) ?? 'dark'
   const variables: Record<string, string> = {
     'color-scheme': preset.appearance,
     ...themeCssVariables(preset),

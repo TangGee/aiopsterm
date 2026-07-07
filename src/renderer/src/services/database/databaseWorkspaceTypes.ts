@@ -14,6 +14,7 @@ export type SqlResult = {
   rows: Array<Record<string, unknown>>
   rowCount: number
   durationMs: number
+  truncated?: boolean
   error: string | null
   message: string
 }

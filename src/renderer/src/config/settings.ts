@@ -146,6 +146,25 @@ export const settingsBackgroundPresets: BackgroundPreset[] = [
   }
 ]
 
+// 背景 preset 目录整批更换过一次(2de8461),旧配置里的 preset id 需要迁移到
+// 观感最接近的新 preset,否则老用户的壁纸会静默丢失。
+export const legacyBackgroundPresetAliases: Record<string, string> = {
+  'mist-lake': 'jade-mist',
+  'snow-peak': 'porcelain-sky',
+  'sunset-ridge': 'rose-dawn',
+  'coast-dusk': 'kanagawa-tide',
+  'star-field': 'nebula-dust',
+  'dark-grid': 'carbon-weave',
+  'aurora-terminal': 'aurora-veil',
+  'graphite-signal': 'carbon-weave',
+  'dawn-glass': 'paper-fog',
+  'aurora-glass-image': 'aurora-veil',
+  'graphite-signal-image': 'carbon-weave',
+  'dawn-glass-image': 'paper-fog',
+  'coast-dusk-soft-image': 'kanagawa-tide',
+  'midnight-topography-image': 'nebula-dust'
+}
+
 export const settingsLanguageOptions = [
   { value: 'system', label: '跟随系统', labelKey: 'settings.general.followSystem' as const },
   ...supportedLocales.map((locale) => ({ value: locale, label: localeDisplayNames[locale], labelKey: null }))
