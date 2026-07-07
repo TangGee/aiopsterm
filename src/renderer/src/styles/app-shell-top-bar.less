@@ -6,15 +6,15 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border-bottom: 1px solid var(--border);
-  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  border-bottom: 1px solid var(--theme-shell-top-bar-border);
+  background: var(--theme-shell-top-bar-bg);
   padding: 0 8px;
   user-select: none;
 }
 
 .app-shell.has-app-background .top-bar {
-  background: color-mix(in srgb, var(--surface) 54%, transparent);
-  backdrop-filter: blur(14px);
+  background: var(--theme-shell-top-bar-bg-with-background);
+  backdrop-filter: var(--theme-shell-backdrop-filter);
 }
 
 .top-left,
@@ -39,8 +39,8 @@
   display: grid;
   place-items: center;
   border-radius: 5px;
-  background: var(--accent);
-  color: #071113;
+  background: var(--theme-shell-brand-bg);
+  color: var(--theme-shell-brand-text);
   font-weight: 800;
   font-size: 11px;
 }
@@ -48,7 +48,7 @@
 .brand-name,
 .window-title {
   font-size: 12px;
-  color: var(--muted);
+  color: var(--theme-shell-top-bar-text);
 }
 
 .window-title {
@@ -58,10 +58,10 @@
 
 .top-update-badge,
 .model-provider-badge {
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-shell-top-bar-border);
   border-radius: 999px;
   padding: 2px 8px;
-  background: var(--surface-2);
+  background: var(--theme-module-active-card-bg);
 }
 
 .top-update-badge {
@@ -71,18 +71,18 @@
   align-items: center;
   gap: 5px;
   cursor: pointer;
-  color: var(--muted);
+  color: var(--theme-shell-top-bar-icon);
   font-size: 11px;
 }
 
 .top-update-badge:hover {
-  background: var(--surface-3);
-  color: var(--text);
+  background: var(--theme-module-active-card-strong-bg);
+  color: var(--theme-module-active-text);
 }
 
 .top-update-badge.state-available {
-  color: var(--accent);
-  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  color: var(--theme-module-active-accent);
+  border-color: color-mix(in srgb, var(--theme-module-active-accent) 45%, var(--theme-module-active-border));
 }
 
 .top-update-badge.state-checking svg {
@@ -91,17 +91,17 @@
 
 .ai-attention-button {
   position: relative;
-  color: var(--muted);
+  color: var(--theme-shell-top-bar-icon);
 }
 
 .ai-attention-button.unread {
-  color: var(--text);
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
-  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+  color: var(--theme-module-active-text);
+  background: color-mix(in srgb, var(--theme-module-active-accent) 12%, transparent);
+  border-color: color-mix(in srgb, var(--theme-module-active-accent) 35%, transparent);
 }
 
 .ai-attention-button.unread:hover {
-  color: var(--accent);
+  color: var(--theme-module-active-accent);
 }
 
 .ai-attention-badge {
@@ -115,19 +115,19 @@
   align-items: center;
   justify-content: center;
   padding: 0 4px;
-  border: 1px solid color-mix(in srgb, var(--bg) 70%, transparent);
-  background: var(--accent);
-  color: #071113;
+  border: 1px solid color-mix(in srgb, var(--theme-shell-bg) 70%, transparent);
+  background: var(--theme-shell-brand-bg);
+  color: var(--theme-shell-brand-text);
   font-size: 10px;
   font-weight: 800;
   line-height: 1;
   pointer-events: none;
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 28%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--theme-module-active-accent) 28%, transparent);
 }
 
 .top-notice {
   max-width: 260px;
-  color: var(--accent-2);
+  color: var(--theme-module-active-accent-secondary);
   font-size: 12px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -166,8 +166,8 @@ svg {
 .toolbar-group button:hover,
 .editor-toolbar button:hover,
 .chat-input button:hover:not(:disabled) {
-  background: var(--surface-3);
-  border-color: var(--border);
+  background: var(--theme-module-active-card-strong-bg);
+  border-color: var(--theme-module-active-border);
 }
 
 .chat-input button:disabled {
@@ -180,11 +180,11 @@ svg {
 }
 
 .mode-button-agents {
-  color: var(--accent-2);
+  color: var(--theme-module-active-accent-secondary);
 }
 
 .layout-toggle.collapsed {
-  color: var(--muted);
+  color: var(--theme-shell-top-bar-icon);
 }
 
 .layout-toggle:disabled {
@@ -214,15 +214,15 @@ svg {
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  color: var(--muted);
+  color: var(--theme-shell-top-bar-icon);
 }
 
 .window-control-button:hover {
-  background: var(--surface-3);
-  color: var(--text);
+  background: var(--theme-module-active-card-strong-bg);
+  color: var(--theme-shell-top-bar-icon-active);
 }
 
 .window-control-button.close:hover {
-  background: var(--danger);
+  background: var(--theme-core-danger);
   color: #fff;
 }

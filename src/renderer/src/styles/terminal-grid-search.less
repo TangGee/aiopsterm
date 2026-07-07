@@ -22,7 +22,7 @@
   width: 82px;
   height: 82px;
   margin: 0 auto 26px;
-  border: 2px solid color-mix(in srgb, var(--accent) 65%, var(--border));
+  border: 2px solid color-mix(in srgb, var(--theme-module-active-accent) 65%, var(--theme-module-active-border));
   border-radius: 28px;
   display: grid;
   place-items: center;
@@ -39,7 +39,7 @@
 .terminal-dashboard-shortcuts {
   display: grid;
   gap: 14px;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   font-size: 15px;
 }
 
@@ -68,8 +68,9 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr);
-  border: 1px solid var(--border);
-  background: var(--terminal-host-bg, #090b10);
+  border: 1px solid color-mix(in srgb, var(--theme-module-active-border) 72%, transparent);
+  background: var(--theme-terminal-active-pane-bg);
+  backdrop-filter: var(--theme-terminal-active-pane-backdrop-filter);
   border-radius: 8px;
   overflow: hidden;
   position: relative;
@@ -81,7 +82,7 @@
 }
 
 .terminal-pane:has(.threaded-terminal-host) {
-  background: var(--threaded-terminal-pane-bg, transparent);
+  background: var(--theme-terminal-active-threaded-pane-bg);
 }
 
 .terminal-pane:has(.threaded-terminal-host) > .xterm-host {
@@ -101,25 +102,25 @@
   z-index: 8;
   height: 34px;
   padding: 4px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 8px;
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  background: color-mix(in srgb, var(--surface) 94%, transparent);
-  box-shadow: var(--shadow);
+  background: color-mix(in srgb, var(--theme-module-active-panel-bg) 94%, transparent);
+  box-shadow: var(--theme-module-active-shadow);
 }
 
 .terminal-search-overlay > div {
   height: 26px;
   min-width: 230px;
   padding: 0 6px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 6px;
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  background: var(--surface-2);
+  background: var(--theme-module-active-card-bg);
 }
 
 .terminal-search-overlay input {
@@ -127,12 +128,12 @@
   width: 150px;
   border: 0;
   outline: 0;
-  color: var(--text);
+  color: var(--theme-module-active-text);
   background: transparent;
 }
 
 .terminal-search-overlay span {
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   font-size: 12px;
 }
 
@@ -141,14 +142,14 @@
   height: 24px;
   border: 0;
   border-radius: 4px;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   background: transparent;
   cursor: pointer;
 }
 
 .terminal-search-overlay button:hover:not(:disabled) {
-  background: var(--surface-3);
-  color: var(--text);
+  background: var(--theme-module-active-card-strong-bg);
+  color: var(--theme-module-active-text);
 }
 
 .terminal-search-overlay button:disabled {
@@ -159,5 +160,5 @@
 .terminal-search-overlay i {
   width: 1px;
   height: 18px;
-  background: var(--border);
+  background: var(--theme-module-active-border);
 }

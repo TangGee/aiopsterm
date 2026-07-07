@@ -14,7 +14,7 @@
 
 .asset-table-page th,
 .asset-table-page td {
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--theme-module-active-border);
   padding: 8px 6px;
   text-align: left;
 }
@@ -22,7 +22,7 @@
 .asset-table-page button {
   border: 0;
   background: transparent;
-  color: var(--accent);
+  color: var(--theme-module-active-accent);
   cursor: pointer;
 }
 
@@ -57,7 +57,7 @@
 .asset-management-context {
   flex: 1;
   min-width: 120px;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   font-size: 12px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -67,9 +67,9 @@
 .asset-table-scroll {
   min-height: 0;
   overflow: auto;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 7px;
-  background: var(--surface);
+  background: var(--theme-module-active-panel-bg);
 }
 
 .asset-table-scroll table {
@@ -81,7 +81,7 @@
 .asset-table-scroll th,
 .asset-table-scroll td {
   height: 36px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--theme-module-active-border);
   padding: 6px 8px;
   text-align: left;
   vertical-align: middle;
@@ -91,14 +91,14 @@
   position: sticky;
   top: 0;
   z-index: 1;
-  background: var(--surface-2);
-  color: var(--muted);
+  background: var(--theme-module-active-card-bg);
+  color: var(--theme-module-active-text-muted);
   font-weight: 600;
 }
 
 .asset-table-scroll tbody tr:hover,
 .asset-table-scroll tbody tr.selected {
-  background: var(--surface-2);
+  background: var(--theme-module-active-card-bg);
 }
 
 .asset-table-scroll td {

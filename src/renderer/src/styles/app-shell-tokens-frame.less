@@ -1,50 +1,315 @@
 :root {
   color-scheme: dark;
-  --bg: #0f1117;
-  --surface: #151922;
-  --surface-2: #1b202b;
-  --surface-3: #232938;
-  --border: #2b3242;
-  --text: #e6eaf2;
-  --muted: #8993a8;
-  --accent: #56b6c2;
-  --accent-2: #8ccf7e;
-  --success: #8ccf7e;
-  --warn: #e6b450;
-  --danger: #e06c75;
-  --shadow: 0 18px 48px rgb(0 0 0 / 0.28);
-  --editor-font-family: "Cascadia Mono", "Cascadia Code", Consolas, "Courier New", monospace;
-  --editor-font-size: 14px;
-  --editor-line-height: 20px;
-  --editor-tab-size: 4;
+  --theme-core-bg: #0f1117;
+  --theme-core-surface: #151922;
+  --theme-core-surface-muted: #1b202b;
+  --theme-core-surface-strong: #232938;
+  --theme-core-border: #2b3242;
+  --theme-core-text: #e6eaf2;
+  --theme-core-text-muted: #8993a8;
+  --theme-core-accent: #56b6c2;
+  --theme-core-accent-secondary: #8ccf7e;
+  --theme-core-success: #8ccf7e;
+  --theme-core-warning: #e6b450;
+  --theme-core-danger: #e06c75;
+  --theme-core-shadow: 0 18px 48px rgb(0 0 0 / 0.28);
+  --theme-core-shadow-soft: 0 12px 32px rgb(0 0 0 / 0.24);
+  --theme-core-shadow-strong: 0 24px 64px rgb(0 0 0 / 0.34);
+  --theme-shell-bg: #0f1117;
+  --theme-shell-bg-wash: linear-gradient(90deg, color-mix(in srgb, #56b6c2 8%, transparent), transparent 24%), #0f1117;
+  --theme-shell-bg-wash-with-background: linear-gradient(0deg, color-mix(in srgb, #0f1117 22%, transparent), color-mix(in srgb, #0f1117 22%, transparent)), linear-gradient(90deg, color-mix(in srgb, #56b6c2 8%, transparent), transparent 24%), #0f1117;
+  --theme-shell-top-bar-bg: color-mix(in srgb, #151922 94%, transparent);
+  --theme-shell-top-bar-bg-with-background: color-mix(in srgb, #151922 54%, transparent);
+  --theme-shell-top-bar-border: #2b3242;
+  --theme-shell-top-bar-text: #8993a8;
+  --theme-shell-top-bar-icon: #8993a8;
+  --theme-shell-top-bar-icon-active: #e6eaf2;
+  --theme-shell-rail-bg: #151922;
+  --theme-shell-rail-bg-with-background: color-mix(in srgb, #151922 38%, transparent);
+  --theme-shell-rail-icon: #8993a8;
+  --theme-shell-rail-icon-active: #56b6c2;
+  --theme-shell-rail-active-bg: color-mix(in srgb, #56b6c2 20%, #1b202b);
+  --theme-shell-border: #2b3242;
+  --theme-shell-resizer-bg: color-mix(in srgb, #151922 24%, transparent);
+  --theme-shell-resizer-hover-bg: color-mix(in srgb, #56b6c2 14%, transparent);
+  --theme-shell-watermark: color-mix(in srgb, #8993a8 22%, transparent);
+  --theme-shell-brand-bg: #56b6c2;
+  --theme-shell-brand-text: #071113;
+  --theme-shell-backdrop-filter: blur(16px);
+  --theme-terminal-background: #0f1117;
+  --theme-terminal-base-pane-bg: #0f1117;
+  --theme-terminal-base-pane-backdrop-filter: none;
+  --theme-terminal-base-threaded-pane-bg: rgba(0, 0, 0, 0);
+  --theme-terminal-base-title-bg: #0f1117;
+  --theme-terminal-base-title-backdrop-filter: none;
+  --theme-terminal-base-command-line-bg: color-mix(in srgb, #0f1117 92%, #151922);
+  --theme-terminal-base-command-line-backdrop-filter: none;
+  --theme-terminal-base-xterm-viewport-bg: #0f1117;
+  --theme-terminal-base-xterm-screen-bg: #0f1117;
+  --theme-terminal-base-runtime-background: #0f1117;
+  --theme-terminal-base-codex-runtime-background: #0f1117;
+  --theme-terminal-base-codex-stack-bg: #0f1117;
+  --theme-terminal-base-codex-stack-idle-bg: #0f1117;
+  --theme-terminal-base-codex-stack-backdrop-filter: none;
+  --theme-terminal-base-codex-xterm-viewport-bg: #0f1117;
+  --theme-terminal-base-codex-xterm-screen-bg: #0f1117;
+  --theme-terminal-base-ansi-background-black: #0f1117;
+  --theme-terminal-base-ansi-background-red: #e06c75;
+  --theme-terminal-base-ansi-background-green: #8ccf7e;
+  --theme-terminal-base-ansi-background-yellow: #e6b450;
+  --theme-terminal-base-ansi-background-blue: #56b6c2;
+  --theme-terminal-base-ansi-background-magenta: #8ccf7e;
+  --theme-terminal-base-ansi-background-cyan: #56b6c2;
+  --theme-terminal-base-ansi-background-white: #e6eaf2;
+  --theme-terminal-base-ansi-background-bright-black: #8993a8;
+  --theme-terminal-base-ansi-background-bright-red: #e06c75;
+  --theme-terminal-base-ansi-background-bright-green: #8ccf7e;
+  --theme-terminal-base-ansi-background-bright-yellow: #e6b450;
+  --theme-terminal-base-ansi-background-bright-blue: #56b6c2;
+  --theme-terminal-base-ansi-background-bright-magenta: #8ccf7e;
+  --theme-terminal-base-ansi-background-bright-cyan: #8ccf7e;
+  --theme-terminal-base-ansi-background-bright-white: #e6eaf2;
+  --theme-terminal-base-codex-ansi-background-black: #0f1117;
+  --theme-terminal-base-codex-ansi-background-red: #e06c75;
+  --theme-terminal-base-codex-ansi-background-green: #8ccf7e;
+  --theme-terminal-base-codex-ansi-background-yellow: #e6b450;
+  --theme-terminal-base-codex-ansi-background-blue: #56b6c2;
+  --theme-terminal-base-codex-ansi-background-magenta: #8ccf7e;
+  --theme-terminal-base-codex-ansi-background-cyan: #56b6c2;
+  --theme-terminal-base-codex-ansi-background-white: #e6eaf2;
+  --theme-terminal-base-codex-ansi-background-bright-black: #8993a8;
+  --theme-terminal-base-codex-ansi-background-bright-red: #e06c75;
+  --theme-terminal-base-codex-ansi-background-bright-green: #8ccf7e;
+  --theme-terminal-base-codex-ansi-background-bright-yellow: #e6b450;
+  --theme-terminal-base-codex-ansi-background-bright-blue: #56b6c2;
+  --theme-terminal-base-codex-ansi-background-bright-magenta: #8ccf7e;
+  --theme-terminal-base-codex-ansi-background-bright-cyan: #8ccf7e;
+  --theme-terminal-base-codex-ansi-background-bright-white: #e6eaf2;
+  --theme-terminal-with-background-pane-bg: color-mix(in srgb, #0f1117 78%, transparent);
+  --theme-terminal-with-background-pane-backdrop-filter: none;
+  --theme-terminal-with-background-threaded-pane-bg: rgba(0, 0, 0, 0);
+  --theme-terminal-with-background-title-bg: color-mix(in srgb, #0f1117 74%, transparent);
+  --theme-terminal-with-background-title-backdrop-filter: blur(10px);
+  --theme-terminal-with-background-command-line-bg: color-mix(in srgb, #0f1117 78%, transparent);
+  --theme-terminal-with-background-command-line-backdrop-filter: blur(14px);
+  --theme-terminal-with-background-xterm-viewport-bg: transparent;
+  --theme-terminal-with-background-xterm-screen-bg: transparent;
+  --theme-terminal-with-background-runtime-background: rgba(0, 0, 0, 0);
+  --theme-terminal-with-background-codex-runtime-background: rgba(0, 0, 0, 0);
+  --theme-terminal-with-background-codex-stack-bg: color-mix(in srgb, #0f1117 76%, transparent);
+  --theme-terminal-with-background-codex-stack-idle-bg: color-mix(in srgb, #0f1117 52%, transparent);
+  --theme-terminal-with-background-codex-stack-backdrop-filter: blur(10px);
+  --theme-terminal-with-background-codex-xterm-viewport-bg: transparent;
+  --theme-terminal-with-background-codex-xterm-screen-bg: transparent;
+  --theme-terminal-with-background-ansi-background-black: #0f1117;
+  --theme-terminal-with-background-ansi-background-red: #e06c75;
+  --theme-terminal-with-background-ansi-background-green: #8ccf7e;
+  --theme-terminal-with-background-ansi-background-yellow: #e6b450;
+  --theme-terminal-with-background-ansi-background-blue: #56b6c2;
+  --theme-terminal-with-background-ansi-background-magenta: #8ccf7e;
+  --theme-terminal-with-background-ansi-background-cyan: #56b6c2;
+  --theme-terminal-with-background-ansi-background-white: #e6eaf2;
+  --theme-terminal-with-background-ansi-background-bright-black: #8993a8;
+  --theme-terminal-with-background-ansi-background-bright-red: #e06c75;
+  --theme-terminal-with-background-ansi-background-bright-green: #8ccf7e;
+  --theme-terminal-with-background-ansi-background-bright-yellow: #e6b450;
+  --theme-terminal-with-background-ansi-background-bright-blue: #56b6c2;
+  --theme-terminal-with-background-ansi-background-bright-magenta: #8ccf7e;
+  --theme-terminal-with-background-ansi-background-bright-cyan: #8ccf7e;
+  --theme-terminal-with-background-ansi-background-bright-white: #e6eaf2;
+  --theme-terminal-with-background-codex-ansi-background-black: #0f1117;
+  --theme-terminal-with-background-codex-ansi-background-red: #e06c75;
+  --theme-terminal-with-background-codex-ansi-background-green: #8ccf7e;
+  --theme-terminal-with-background-codex-ansi-background-yellow: #e6b450;
+  --theme-terminal-with-background-codex-ansi-background-blue: #56b6c2;
+  --theme-terminal-with-background-codex-ansi-background-magenta: #8ccf7e;
+  --theme-terminal-with-background-codex-ansi-background-cyan: #56b6c2;
+  --theme-terminal-with-background-codex-ansi-background-white: #e6eaf2;
+  --theme-terminal-with-background-codex-ansi-background-bright-black: #8993a8;
+  --theme-terminal-with-background-codex-ansi-background-bright-red: #e06c75;
+  --theme-terminal-with-background-codex-ansi-background-bright-green: #8ccf7e;
+  --theme-terminal-with-background-codex-ansi-background-bright-yellow: #e6b450;
+  --theme-terminal-with-background-codex-ansi-background-bright-blue: #56b6c2;
+  --theme-terminal-with-background-codex-ansi-background-bright-magenta: #8ccf7e;
+  --theme-terminal-with-background-codex-ansi-background-bright-cyan: #8ccf7e;
+  --theme-terminal-with-background-codex-ansi-background-bright-white: #e6eaf2;
+  --theme-terminal-active-pane-bg: var(--theme-terminal-base-pane-bg);
+  --theme-terminal-active-pane-backdrop-filter: var(--theme-terminal-base-pane-backdrop-filter);
+  --theme-terminal-active-threaded-pane-bg: var(--theme-terminal-base-threaded-pane-bg);
+  --theme-terminal-active-title-bg: var(--theme-terminal-base-title-bg);
+  --theme-terminal-active-title-backdrop-filter: var(--theme-terminal-base-title-backdrop-filter);
+  --theme-terminal-active-command-line-bg: var(--theme-terminal-base-command-line-bg);
+  --theme-terminal-active-command-line-backdrop-filter: var(--theme-terminal-base-command-line-backdrop-filter);
+  --theme-terminal-active-xterm-viewport-bg: var(--theme-terminal-base-xterm-viewport-bg);
+  --theme-terminal-active-xterm-screen-bg: var(--theme-terminal-base-xterm-screen-bg);
+  --theme-terminal-active-codex-stack-bg: var(--theme-terminal-base-codex-stack-bg);
+  --theme-terminal-active-codex-stack-idle-bg: var(--theme-terminal-base-codex-stack-idle-bg);
+  --theme-terminal-active-codex-stack-backdrop-filter: var(--theme-terminal-base-codex-stack-backdrop-filter);
+  --theme-terminal-active-codex-xterm-viewport-bg: var(--theme-terminal-base-codex-xterm-viewport-bg);
+  --theme-terminal-active-codex-xterm-screen-bg: var(--theme-terminal-base-codex-xterm-screen-bg);
+  --theme-editor-font-family: "Cascadia Mono", "Cascadia Code", Consolas, "Courier New", monospace;
+  --theme-editor-font-size: 14px;
+  --theme-editor-line-height: 20px;
+  --theme-editor-tab-size: 4;
   --app-bg-image: none;
   --app-bg-opacity: 0;
   --app-bg-brightness: 1;
-  --workspace-bg: var(--bg);
-  --terminal-host-bg: #090b10;
-  --threaded-terminal-pane-bg: transparent;
-  --glass-surface: var(--surface);
-  --glass-surface-2: var(--surface-2);
-  --glass-surface-3: var(--surface-3);
+  --theme-module-active-workspace-bg: #0f1117;
+  --theme-module-active-panel-bg: #151922;
+  --theme-module-active-toolbar-bg: color-mix(in srgb, #151922 86%, transparent);
+  --theme-module-active-card-bg: #1b202b;
+  --theme-module-active-card-strong-bg: #232938;
+  --theme-module-active-input-bg: #1b202b;
+  --theme-module-active-readable-bg: #1b202b;
+  --theme-module-active-readable-strong-bg: #151922;
+  --theme-module-active-overlay-bg: #151922;
+  --theme-module-active-backdrop-filter: none;
+  --theme-module-active-text: #e6eaf2;
+  --theme-module-active-text-muted: #8993a8;
+  --theme-module-active-border: #2b3242;
+  --theme-module-active-accent: #56b6c2;
+  --theme-module-active-accent-secondary: #8ccf7e;
+  --theme-module-active-icon: #8993a8;
+  --theme-module-active-icon-active: #56b6c2;
+  --theme-module-active-input-text: #e6eaf2;
+  --theme-module-active-shadow: 0 18px 48px rgb(0 0 0 / 0.28);
+  --theme-module-active-shadow-soft: 0 12px 32px rgb(0 0 0 / 0.24);
+  --theme-module-active-shadow-strong: 0 24px 64px rgb(0 0 0 / 0.34);
+  --theme-module-active-scrollbar-thumb: #8993a899;
   font-family:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
-:root[data-theme='light'] {
-  color-scheme: light;
-  --bg: #eef1f6;
-  --surface: #ffffff;
-  --surface-2: #f6f8fb;
-  --surface-3: #e8edf4;
-  --border: #d7deea;
-  --text: #1d2430;
-  --muted: #697386;
-  --shadow: 0 18px 42px rgb(36 47 70 / 0.14);
+.theme-module-active(@module, @layer) {
+  --theme-module-active-workspace-bg: var(~"--theme-module-@{module}-@{layer}-workspace-bg");
+  --theme-module-active-panel-bg: var(~"--theme-module-@{module}-@{layer}-panel-bg");
+  --theme-module-active-toolbar-bg: var(~"--theme-module-@{module}-@{layer}-toolbar-bg");
+  --theme-module-active-card-bg: var(~"--theme-module-@{module}-@{layer}-card-bg");
+  --theme-module-active-card-strong-bg: var(~"--theme-module-@{module}-@{layer}-card-strong-bg");
+  --theme-module-active-input-bg: var(~"--theme-module-@{module}-@{layer}-input-bg");
+  --theme-module-active-readable-bg: var(~"--theme-module-@{module}-@{layer}-readable-bg");
+  --theme-module-active-readable-strong-bg: var(~"--theme-module-@{module}-@{layer}-readable-strong-bg");
+  --theme-module-active-overlay-bg: var(~"--theme-module-@{module}-@{layer}-overlay-bg");
+  --theme-module-active-backdrop-filter: var(~"--theme-module-@{module}-@{layer}-backdrop-filter");
+  --theme-module-active-text: var(~"--theme-module-@{module}-text");
+  --theme-module-active-text-muted: var(~"--theme-module-@{module}-text-muted");
+  --theme-module-active-border: var(~"--theme-module-@{module}-border");
+  --theme-module-active-accent: var(~"--theme-module-@{module}-accent");
+  --theme-module-active-accent-secondary: var(~"--theme-module-@{module}-accent-secondary");
+  --theme-module-active-icon: var(~"--theme-module-@{module}-icon");
+  --theme-module-active-icon-active: var(~"--theme-module-@{module}-icon-active");
+  --theme-module-active-input-text: var(~"--theme-module-@{module}-input-text");
+  --theme-module-active-shadow: var(~"--theme-module-@{module}-shadow");
+  --theme-module-active-shadow-soft: var(~"--theme-module-@{module}-shadow-soft");
+  --theme-module-active-shadow-strong: var(~"--theme-module-@{module}-shadow-strong");
+  --theme-module-active-scrollbar-thumb: var(~"--theme-module-@{module}-scrollbar-thumb");
+  color: var(--theme-module-active-text);
 }
 
-:root[data-theme-id='ubuntu-terminal'] {
-  --terminal-host-bg: #300A24;
-  --threaded-terminal-pane-bg: transparent;
+.app-body.module-workspace,
+.terminal-workspace {
+  .theme-module-active(workspace, base);
+}
+
+.app-body.module-aiSessions {
+  .theme-module-active(ai-sessions, base);
+}
+
+.app-body.module-assets {
+  .theme-module-active(assets, base);
+}
+
+.app-body.module-files {
+  .theme-module-active(files, base);
+}
+
+.app-body.module-snippets {
+  .theme-module-active(snippets, base);
+}
+
+.app-body.module-knowledge {
+  .theme-module-active(knowledge, base);
+}
+
+.app-body.module-extensions {
+  .theme-module-active(extensions, base);
+}
+
+.app-body.module-kubernetes {
+  .theme-module-active(kubernetes, base);
+}
+
+.app-body.module-database {
+  .theme-module-active(database, base);
+}
+
+.app-body.module-settings {
+  .theme-module-active(settings, base);
+}
+
+.app-body.module-user {
+  .theme-module-active(user, base);
+}
+
+.mode-agents {
+  .theme-module-active(agents, base);
+}
+
+.ai-panel {
+  .theme-module-active(ai-panel, base);
+}
+
+.app-shell.has-app-background .app-body.module-workspace,
+.app-shell.has-app-background .terminal-workspace {
+  .theme-module-active(workspace, with-background);
+}
+
+.app-shell.has-app-background .app-body.module-aiSessions {
+  .theme-module-active(ai-sessions, with-background);
+}
+
+.app-shell.has-app-background .app-body.module-assets {
+  .theme-module-active(assets, with-background);
+}
+
+.app-shell.has-app-background .app-body.module-files {
+  .theme-module-active(files, with-background);
+}
+
+.app-shell.has-app-background .app-body.module-snippets {
+  .theme-module-active(snippets, with-background);
+}
+
+.app-shell.has-app-background .app-body.module-knowledge {
+  .theme-module-active(knowledge, with-background);
+}
+
+.app-shell.has-app-background .app-body.module-extensions {
+  .theme-module-active(extensions, with-background);
+}
+
+.app-shell.has-app-background .app-body.module-kubernetes {
+  .theme-module-active(kubernetes, with-background);
+}
+
+.app-shell.has-app-background .app-body.module-database {
+  .theme-module-active(database, with-background);
+}
+
+.app-shell.has-app-background .app-body.module-settings {
+  .theme-module-active(settings, with-background);
+}
+
+.app-shell.has-app-background .app-body.module-user {
+  .theme-module-active(user, with-background);
+}
+
+.app-shell.has-app-background .mode-agents {
+  .theme-module-active(agents, with-background);
+}
+
+.app-shell.has-app-background .ai-panel {
+  .theme-module-active(ai-panel, with-background);
 }
 
 * {
@@ -58,8 +323,8 @@ body,
   height: 100%;
   margin: 0;
   overflow: hidden;
-  background: var(--bg);
-  color: var(--text);
+  background: var(--theme-shell-bg);
+  color: var(--theme-module-active-text);
 }
 
 button,
@@ -74,36 +339,37 @@ button {
 }
 
 .app-shell {
+  .theme-module-active(workspace, base);
   position: relative;
   width: 100%;
   height: 100%;
   display: grid;
   grid-template-rows: 30px minmax(0, 1fr);
-  background:
-    linear-gradient(90deg, rgb(86 182 194 / 0.08), transparent 24%),
-    var(--bg);
-  background-size:
-    auto,
-    auto;
-  background-position:
-    0 0,
-    0 0;
+  background: var(--theme-shell-bg-wash);
+  background-size: auto;
+  background-position: 0 0;
   overflow: hidden;
 }
 
 .app-shell.has-app-background {
-  background:
-    linear-gradient(0deg, color-mix(in srgb, var(--bg) 22%, transparent), color-mix(in srgb, var(--bg) 22%, transparent)),
-    linear-gradient(90deg, rgb(86 182 194 / 0.08), transparent 24%),
-    var(--bg);
-  background-size:
-    auto,
-    auto,
-    auto;
-  background-position:
-    0 0,
-    0 0,
-    0 0;
+  .theme-module-active(workspace, with-background);
+  background: var(--theme-shell-bg-wash-with-background);
+  background-size: auto;
+  background-position: 0 0;
+  --theme-terminal-active-pane-bg: var(--theme-terminal-with-background-pane-bg);
+  --theme-terminal-active-pane-backdrop-filter: var(--theme-terminal-with-background-pane-backdrop-filter);
+  --theme-terminal-active-threaded-pane-bg: var(--theme-terminal-with-background-threaded-pane-bg);
+  --theme-terminal-active-title-bg: var(--theme-terminal-with-background-title-bg);
+  --theme-terminal-active-title-backdrop-filter: var(--theme-terminal-with-background-title-backdrop-filter);
+  --theme-terminal-active-command-line-bg: var(--theme-terminal-with-background-command-line-bg);
+  --theme-terminal-active-command-line-backdrop-filter: var(--theme-terminal-with-background-command-line-backdrop-filter);
+  --theme-terminal-active-xterm-viewport-bg: var(--theme-terminal-with-background-xterm-viewport-bg);
+  --theme-terminal-active-xterm-screen-bg: var(--theme-terminal-with-background-xterm-screen-bg);
+  --theme-terminal-active-codex-stack-bg: var(--theme-terminal-with-background-codex-stack-bg);
+  --theme-terminal-active-codex-stack-idle-bg: var(--theme-terminal-with-background-codex-stack-idle-bg);
+  --theme-terminal-active-codex-stack-backdrop-filter: var(--theme-terminal-with-background-codex-stack-backdrop-filter);
+  --theme-terminal-active-codex-xterm-viewport-bg: var(--theme-terminal-with-background-codex-xterm-viewport-bg);
+  --theme-terminal-active-codex-xterm-screen-bg: var(--theme-terminal-with-background-codex-xterm-screen-bg);
 }
 
 .app-shell::before {
@@ -126,7 +392,7 @@ button {
   bottom: 18px;
   z-index: 1;
   pointer-events: none;
-  color: color-mix(in srgb, var(--muted) 22%, transparent);
+  color: var(--theme-shell-watermark);
   font-size: 44px;
   font-weight: 700;
   letter-spacing: 0;
@@ -135,13 +401,4 @@ button {
 
 .app-shell.watermark-enabled::after {
   opacity: 0.2;
-}
-
-.app-shell.has-app-background {
-  --workspace-bg: color-mix(in srgb, var(--bg) 6%, transparent);
-  --glass-surface: color-mix(in srgb, var(--surface) 36%, transparent);
-  --glass-surface-2: color-mix(in srgb, var(--surface-2) 32%, transparent);
-  --glass-surface-3: color-mix(in srgb, var(--surface-3) 30%, transparent);
-  --readable-surface: color-mix(in srgb, var(--surface-2) 82%, transparent);
-  --readable-surface-strong: color-mix(in srgb, var(--surface) 86%, transparent);
 }

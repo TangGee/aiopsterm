@@ -10,12 +10,12 @@
 .db-sql-toolbar {
   flex: 0 0 36px;
   padding: 4px 8px;
-  border-bottom: 1px solid var(--border);
-  background: var(--surface);
+  border-bottom: 1px solid var(--theme-module-active-border);
+  background: var(--theme-module-active-panel-bg);
 }
 
 .db-sql-toolbar button:first-child {
-  color: #22c55e;
+  color: var(--theme-core-success);
 }
 
 .db-ai-toolbar {
@@ -25,7 +25,7 @@
 }
 
 .db-ai-toolbar button {
-  color: color-mix(in srgb, var(--accent) 72%, var(--text));
+  color: color-mix(in srgb, var(--theme-module-active-accent) 72%, var(--theme-module-active-text));
 }
 
 .db-ai-toolbar button:nth-child(2) {
@@ -42,16 +42,16 @@
 }
 
 .db-sql-toolbar-run {
-  color: var(--success);
+  color: var(--theme-core-success);
 }
 
 .db-sql-toolbar-run-current,
 .db-sql-toolbar-explain {
-  color: color-mix(in srgb, var(--accent) 78%, var(--text));
+  color: color-mix(in srgb, var(--theme-module-active-accent) 78%, var(--theme-module-active-text));
 }
 
 .db-sql-toolbar-format {
-  color: var(--text);
+  color: var(--theme-module-active-text);
 }
 
 .db-sql-toolbar button:disabled,
@@ -79,7 +79,7 @@
   width: 1px;
   height: 18px;
   margin: 0 4px;
-  background: var(--border);
+  background: var(--theme-module-active-border);
 }
 
 .db-toolbar-spacer {

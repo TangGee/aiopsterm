@@ -23,9 +23,9 @@
 .add-conn-tabs button {
   height: 34px;
   min-width: 98px;
-  border: 1px solid var(--border);
-  background: color-mix(in srgb, var(--surface-2) 82%, transparent);
-  color: var(--muted);
+  border: 1px solid var(--theme-module-active-border);
+  background: color-mix(in srgb, var(--theme-module-active-card-bg) 82%, transparent);
+  color: var(--theme-module-active-text-muted);
   cursor: pointer;
 }
 
@@ -44,8 +44,8 @@
 .files-source-tabs button.active,
 .files-mode-switch button.active,
 .add-conn-tabs button.active {
-  background: #1677ff;
-  border-color: #1677ff;
+  background: var(--theme-module-active-accent);
+  border-color: var(--theme-module-active-accent);
   color: #fff;
 }
 
@@ -60,10 +60,10 @@
 .add-conn-search {
   min-width: 0;
   height: 34px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 7px;
-  background: var(--surface-2);
-  color: var(--muted);
+  background: var(--theme-module-active-card-bg);
+  color: var(--theme-module-active-text-muted);
   display: flex;
   align-items: center;
   gap: 6px;
@@ -81,7 +81,7 @@
   border: 0;
   outline: 0;
   background: transparent;
-  color: var(--text);
+  color: var(--theme-module-active-text);
 }
 
 .files-tree-list {
@@ -97,7 +97,7 @@
   border: 0;
   border-radius: 6px;
   background: transparent;
-  color: var(--text);
+  color: var(--theme-module-active-text);
   display: flex;
   align-items: center;
   gap: 7px;
@@ -110,7 +110,7 @@
 .files-tree-group-row:hover,
 .files-tree-session:hover,
 .files-tree-session.selected {
-  background: var(--surface-3);
+  background: var(--theme-module-active-card-strong-bg);
 }
 
 .files-tree-group-row span,
@@ -134,10 +134,10 @@
   min-width: 0;
   width: 96px;
   height: 22px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 4px;
-  background: var(--surface);
-  color: var(--text);
+  background: var(--theme-module-active-panel-bg);
+  color: var(--theme-module-active-text);
   padding: 0 6px;
   font: inherit;
 }
@@ -150,12 +150,12 @@
   display: grid;
   place-items: center;
   background: transparent;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
 }
 
 .files-comment-edit button:hover {
-  background: var(--surface-4);
-  color: var(--text);
+  background: var(--theme-module-active-card-strong-bg);
+  color: var(--theme-module-active-text);
 }
 
 .files-comment-edit svg {
@@ -175,10 +175,10 @@
 .files-folder-modal {
   width: min(360px, calc(100vw - 32px));
   max-height: min(430px, calc(100vh - 48px));
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 8px;
-  background: var(--surface);
-  box-shadow: var(--shadow-lg);
+  background: var(--theme-module-active-panel-bg);
+  box-shadow: var(--theme-module-active-shadow-strong);
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   overflow: hidden;
@@ -191,7 +191,7 @@
   justify-content: space-between;
   gap: 8px;
   padding: 0 12px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--theme-module-active-border);
 }
 
 .files-folder-modal h3 {
@@ -208,12 +208,12 @@
   display: grid;
   place-items: center;
   background: transparent;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
 }
 
 .files-folder-modal header button:hover {
-  background: var(--surface-3);
-  color: var(--text);
+  background: var(--theme-module-active-card-strong-bg);
+  color: var(--theme-module-active-text);
 }
 
 .files-folder-modal header svg {
@@ -233,7 +233,7 @@
   display: grid;
   place-items: center;
   gap: 12px;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
 }
 
 .files-folder-empty p,
@@ -243,10 +243,10 @@
 
 .files-folder-empty button,
 .files-folder-option {
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 6px;
-  background: var(--surface-2);
-  color: var(--text);
+  background: var(--theme-module-active-card-bg);
+  color: var(--theme-module-active-text);
 }
 
 .files-folder-empty button {
@@ -270,7 +270,7 @@
 }
 
 .files-folder-option:hover {
-  background: var(--surface-3);
+  background: var(--theme-module-active-card-strong-bg);
 }
 
 .files-folder-option strong {
@@ -279,7 +279,7 @@
 }
 
 .files-folder-option small {
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
 }
 
 .files-folder-form {
@@ -290,22 +290,22 @@
 .files-folder-form label {
   display: grid;
   gap: 6px;
-  color: var(--text);
+  color: var(--theme-module-active-text);
   font-size: 12px;
 }
 
 .files-folder-form label span {
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
 }
 
 .files-folder-form input,
 .files-folder-form textarea {
   min-width: 0;
   width: 100%;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 6px;
-  background: var(--surface-2);
-  color: var(--text);
+  background: var(--theme-module-active-card-bg);
+  color: var(--theme-module-active-text);
   outline: 0;
   padding: 7px 8px;
   resize: vertical;
@@ -313,12 +313,12 @@
 
 .files-folder-form input:focus,
 .files-folder-form textarea:focus {
-  border-color: #1677ff;
+  border-color: var(--theme-module-active-accent);
 }
 
 .files-folder-error {
   margin: 0;
-  color: var(--danger);
+  color: var(--theme-core-danger);
   font-size: 12px;
 }
 
@@ -338,27 +338,27 @@
 .files-folder-confirm footer button {
   min-width: 64px;
   height: 30px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 6px;
-  background: var(--surface-2);
-  color: var(--text);
+  background: var(--theme-module-active-card-bg);
+  color: var(--theme-module-active-text);
 }
 
 .files-folder-form footer button.primary {
-  border-color: #1677ff;
-  background: #1677ff;
+  border-color: var(--theme-module-active-accent);
+  background: var(--theme-module-active-accent);
   color: #fff;
 }
 
 .files-folder-confirm footer button.danger {
-  border-color: var(--danger);
-  background: var(--danger);
+  border-color: var(--theme-core-danger);
+  background: var(--theme-core-danger);
   color: #fff;
 }
 
 .files-folder-confirm-body p {
   margin: 0;
-  color: var(--text);
+  color: var(--theme-module-active-text);
   line-height: 1.55;
 }
 

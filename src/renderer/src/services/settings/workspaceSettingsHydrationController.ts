@@ -210,12 +210,17 @@ export const createWorkspaceSettingsHydrationController = (
     const missingMcpServers = !Array.isArray(savedConfig.mcpServers)
     config.value = mergeUserConfig(defaultConfig, savedConfig)
     restoreSavedGeneralBaseSettings()
+    config.value.theme = normalizeThemeId(config.value.theme)
+    applyDocumentLocale(currentLocale())
+    applyCurrentTheme()
+    setupThemeBridge()
     const { normalized: normalizedTerminal, changed: terminalChanged } = normalizeTerminalConfig(config.value.terminal)
     terminalSettings.value = normalizedTerminal
     const { normalized: normalizedWorkspacePreferences, changed: workspacePreferencesChanged } = normalizeWorkspacePreferences(config.value.workspacePreferences)
     workspacePreferences.value = normalizedWorkspacePreferences
     const { normalized: normalizedEditorSettings, changed: editorSettingsChanged } = normalizeEditorSettingsConfig(savedConfig.editorSettings)
     editorSettings.value = normalizedEditorSettings
+    applyCurrentEditorSettings()
     const { normalized: normalizedSshProxyConfigs, changed: sshProxyConfigsChanged } = normalizeSshProxyConfigs(savedConfig.sshProxyConfigs)
     sshProxyConfigs.value = normalizedSshProxyConfigs.map((config) => ({ ...config }))
     const { normalized: normalizedSshAgentKeys, changed: sshAgentKeysChanged } = normalizeSshAgentKeys(savedConfig.sshAgentKeys)

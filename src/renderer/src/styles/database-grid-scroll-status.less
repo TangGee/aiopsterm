@@ -8,7 +8,7 @@
 .db-result-table-wrap {
   scrollbar-gutter: stable both-edges;
   scrollbar-width: auto;
-  scrollbar-color: var(--scrollbar-thumb, color-mix(in srgb, var(--muted) 45%, transparent)) var(--surface-2);
+  scrollbar-color: var(--theme-module-active-scrollbar-thumb, color-mix(in srgb, var(--theme-module-active-text-muted) 45%, transparent)) var(--theme-module-active-card-bg);
 }
 
 .db-result-table-wrap::-webkit-scrollbar {
@@ -18,7 +18,7 @@
 }
 
 .db-result-table-wrap::-webkit-scrollbar-track {
-  background: var(--surface-2);
+  background: var(--theme-module-active-card-bg);
 }
 
 .db-result-table-wrap::-webkit-scrollbar-thumb {
@@ -26,45 +26,45 @@
   min-height: 40px;
   border: 3px solid transparent;
   border-radius: 8px;
-  background: color-mix(in srgb, var(--muted) 42%, transparent);
+  background: color-mix(in srgb, var(--theme-module-active-text-muted) 42%, transparent);
   background-clip: padding-box;
 }
 
 .db-result-table-wrap::-webkit-scrollbar-thumb:hover {
-  background: color-mix(in srgb, var(--muted) 62%, transparent);
+  background: color-mix(in srgb, var(--theme-module-active-text-muted) 62%, transparent);
   background-clip: padding-box;
 }
 
 .db-result-table-wrap::-webkit-scrollbar-corner {
-  background: var(--surface-2);
+  background: var(--theme-module-active-card-bg);
 }
 
 .db-null {
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   font-style: italic;
 }
 
 .db-status-bar {
   flex: 0 0 28px;
   padding: 0 12px;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--theme-module-active-border);
   display: flex;
   align-items: center;
   gap: 18px;
-  background: var(--surface);
-  color: var(--danger);
+  background: var(--theme-module-active-panel-bg);
+  color: var(--theme-core-danger);
   font-size: 12px;
 }
 
 .db-status-bar:not(.error, .running) {
-  color: var(--accent-2);
+  color: var(--theme-module-active-accent-secondary);
 }
 
 .db-status-bar.running {
-  color: var(--warning);
+  color: var(--theme-core-warning);
 }
 
 .db-status-bar b {
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   font-weight: 500;
 }

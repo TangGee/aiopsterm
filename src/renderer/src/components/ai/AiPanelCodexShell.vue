@@ -128,7 +128,10 @@
     </div>
     <div
       class="ai-codex-xterm-stack"
-      :class="{ 'is-idle': activeCodexConversation?.status === 'idle' && !activeCodexConversation?.sessionId }"
+      :class="{
+        'is-idle': activeCodexConversation?.status === 'idle' && !activeCodexConversation?.sessionId,
+        'is-empty': !activeCodexConversation?.sessionId && activeCodexConversation?.status !== 'ready'
+      }"
     >
       <div
         v-for="conversation in codexConversations"
@@ -136,7 +139,11 @@
         :ref="(element) => setCodexTerminalHostRef(conversation.id, element)"
         v-show="activeCodexConversationId === conversation.id"
         class="xterm-host ai-codex-xterm"
-        :class="{ 'is-idle': conversation.status === 'idle' && !conversation.sessionId }"
+        :class="{
+          'threaded-terminal-host': conversation.threadedTerminal,
+          'is-idle': conversation.status === 'idle' && !conversation.sessionId,
+          'is-empty': !conversation.sessionId && conversation.status !== 'ready'
+        }"
         data-testid="ai-codex-xterm"
         @contextmenu.prevent.stop="copyCodexSelectionFromContextMenu"
       ></div>

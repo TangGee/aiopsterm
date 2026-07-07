@@ -9,7 +9,7 @@
   grid-template-rows: auto minmax(0, 1fr);
   gap: 10px;
   border-radius: 7px;
-  background: var(--surface);
+  background: var(--theme-module-active-panel-bg);
   padding: 10px;
 }
 
@@ -24,39 +24,39 @@
 
 .alias-config-hint,
 .alias-config-notice {
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   font-size: 12px;
 }
 
 .alias-config-notice {
-  border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--border));
+  border: 1px solid color-mix(in srgb, var(--theme-module-active-accent) 32%, var(--theme-module-active-border));
   border-radius: 6px;
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  background: color-mix(in srgb, var(--theme-module-active-accent) 10%, transparent);
   padding: 8px 10px;
 }
 
 .alias-config-table {
   width: 100%;
   border-collapse: collapse;
-  background: var(--surface);
-  color: var(--text);
+  background: var(--theme-module-active-panel-bg);
+  color: var(--theme-module-active-text);
 }
 
 .alias-config-table th,
 .alias-config-table td {
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--theme-module-active-border);
   padding: 8px;
   text-align: left;
   vertical-align: top;
 }
 
 .alias-config-table th {
-  background: var(--surface-2);
+  background: var(--theme-module-active-card-bg);
   font-size: 12px;
 }
 
 .alias-config-table tbody tr:nth-child(odd) td {
-  background: color-mix(in srgb, var(--surface-2) 70%, transparent);
+  background: color-mix(in srgb, var(--theme-module-active-card-bg) 70%, transparent);
 }
 
 .alias-config-table input,
@@ -66,7 +66,7 @@
   border: 0;
   outline: 0;
   background: transparent;
-  color: var(--text);
+  color: var(--theme-module-active-text);
 }
 
 .alias-config-table textarea {
@@ -77,9 +77,9 @@
 }
 
 .alias-config-table .editable-input {
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 5px;
-  background: var(--surface);
+  background: var(--theme-module-active-panel-bg);
   padding: 5px 7px;
 }
 

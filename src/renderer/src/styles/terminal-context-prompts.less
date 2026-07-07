@@ -2,30 +2,30 @@
 .terminal-global-command {
   height: 36px;
   padding: 5px 10px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--theme-module-active-border);
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) 28px;
   align-items: center;
   gap: 10px;
-  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  background: color-mix(in srgb, var(--theme-module-active-panel-bg) 88%, transparent);
 }
 
 .terminal-global-command span {
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   font-size: 12px;
 }
 
 .terminal-global-command input {
   min-width: 0;
   height: 26px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 6px;
   padding: 0 8px;
-  color: var(--text);
-  background: var(--surface-2);
+  color: var(--theme-module-active-text);
+  background: var(--theme-module-active-card-bg);
 }
 
 .terminal-global-command button {
@@ -33,120 +33,29 @@
   height: 26px;
   border: 0;
   border-radius: 5px;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   background: transparent;
   cursor: pointer;
 }
 
 .app-shell.has-app-background .terminal-global-command {
-  background: var(--glass-surface);
+  background: var(--theme-module-active-panel-bg);
   backdrop-filter: blur(14px);
 }
 
 .app-shell.has-app-background .terminal-global-command input {
-  background: var(--readable-surface);
-}
-
-.terminal-context-bar {
-  min-height: 34px;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 10px;
-  padding: 5px 10px;
-  border-bottom: 1px solid var(--border);
-  background: color-mix(in srgb, var(--surface) 82%, transparent);
-}
-
-.terminal-context-bar-main,
-.terminal-context-bar-meta {
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 7px;
-}
-
-.terminal-context-bar-main strong,
-.terminal-context-bar-main span,
-.terminal-context-bar-meta span {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.terminal-context-bar-main strong {
-  color: var(--text);
-  font-size: 12px;
-  font-weight: 650;
-}
-
-.terminal-context-bar-main span,
-.terminal-context-bar-meta span {
-  color: var(--muted);
-  font-size: 11px;
-}
-
-.terminal-context-bar-main span {
-  flex: 0 0 auto;
-  padding: 1px 5px;
-  border: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
-  border-radius: 4px;
-  background: color-mix(in srgb, var(--surface-2) 56%, transparent);
-}
-
-.terminal-context-bar-meta button {
-  flex: 0 0 auto;
-  min-height: 22px;
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  padding: 0 7px;
-  background: var(--surface-2);
-  color: var(--text);
-  font-size: 11px;
-  cursor: pointer;
-}
-
-.terminal-context-bar-meta button:hover {
-  background: var(--surface-3);
-}
-
-.terminal-context-bar-meta .terminal-context-attention {
-  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
-  color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 12%, var(--surface-2));
-}
-
-.app-shell.has-app-background .terminal-context-bar {
-  background: var(--glass-surface);
-  backdrop-filter: blur(14px);
-}
-
-.app-shell.has-app-background .terminal-context-bar-main span,
-.app-shell.has-app-background .terminal-context-bar-meta button {
-  background: var(--glass-surface-2);
-}
-
-@media (max-width: 760px) {
-  .terminal-context-bar {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 4px;
-  }
-
-  .terminal-context-bar-meta {
-    justify-content: flex-start;
-  }
+  background: var(--theme-module-active-readable-bg);
 }
 
 .terminal-security-prompt {
   min-height: 48px;
   padding: 7px 10px;
-  border-bottom: 1px solid color-mix(in srgb, var(--danger) 42%, var(--border));
+  border-bottom: 1px solid color-mix(in srgb, var(--theme-core-danger) 42%, var(--theme-module-active-border));
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 10px;
-  background: color-mix(in srgb, var(--danger) 12%, var(--surface));
+  background: color-mix(in srgb, var(--theme-core-danger) 12%, var(--theme-module-active-panel-bg));
 }
 
 .terminal-security-prompt > div {
@@ -156,7 +65,7 @@
 }
 
 .terminal-security-prompt strong {
-  color: var(--danger);
+  color: var(--theme-core-danger);
   font-size: 12px;
 }
 
@@ -169,18 +78,18 @@
 }
 
 .terminal-security-prompt span {
-  color: var(--text);
+  color: var(--theme-module-active-text);
   font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
   font-size: 12px;
 }
 
 .terminal-security-prompt small {
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   font-size: 11px;
 }
 
 .app-shell.has-app-background .terminal-security-prompt {
-  background: color-mix(in srgb, var(--danger) 13%, var(--glass-surface));
+  background: color-mix(in srgb, var(--theme-core-danger) 13%, var(--theme-module-active-panel-bg));
   backdrop-filter: blur(14px);
 }
 
@@ -190,8 +99,8 @@
   grid-template-columns: minmax(0, 1fr) minmax(120px, 180px) 30px;
   align-items: center;
   gap: 12px;
-  border-bottom: 1px solid var(--border);
-  background: color-mix(in srgb, var(--surface) 92%, var(--accent));
+  border-bottom: 1px solid var(--theme-module-active-border);
+  background: color-mix(in srgb, var(--theme-module-active-panel-bg) 92%, var(--theme-module-active-accent));
   padding: 8px 14px;
 }
 
@@ -211,20 +120,20 @@
 }
 
 .terminal-zmodem-progress strong {
-  color: var(--text);
+  color: var(--theme-module-active-text);
   font-size: 12px;
 }
 
 .terminal-zmodem-progress span,
 .terminal-zmodem-progress small {
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   font-size: 12px;
 }
 
 .terminal-zmodem-progress progress {
   width: 100%;
   height: 8px;
-  accent-color: var(--accent);
+  accent-color: var(--theme-module-active-accent);
 }
 
 .terminal-zmodem-progress button {
@@ -232,10 +141,10 @@
   height: 28px;
   display: grid;
   place-items: center;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 6px;
-  background: var(--surface-2);
-  color: var(--text);
+  background: var(--theme-module-active-card-bg);
+  color: var(--theme-module-active-text);
   cursor: pointer;
 }
 
@@ -245,14 +154,14 @@
 }
 
 .terminal-zmodem-progress.error {
-  background: color-mix(in srgb, var(--surface) 90%, var(--danger));
+  background: color-mix(in srgb, var(--theme-module-active-panel-bg) 90%, var(--theme-core-danger));
 }
 
 .app-shell.has-app-background .terminal-zmodem-progress {
-  background: color-mix(in srgb, var(--accent) 14%, var(--glass-surface));
+  background: color-mix(in srgb, var(--theme-module-active-accent) 14%, var(--theme-module-active-panel-bg));
   backdrop-filter: blur(14px);
 }
 
 .app-shell.has-app-background .terminal-zmodem-progress.error {
-  background: color-mix(in srgb, var(--danger) 18%, var(--glass-surface));
+  background: color-mix(in srgb, var(--theme-core-danger) 18%, var(--theme-module-active-panel-bg));
 }

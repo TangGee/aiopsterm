@@ -3,8 +3,8 @@
   min-height: 0;
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr);
-  background: var(--surface);
-  color: var(--text);
+  background: var(--theme-module-active-panel-bg);
+  color: var(--theme-module-active-text);
   position: relative;
   overflow: hidden;
 }
@@ -23,10 +23,10 @@
 .kb-search {
   min-width: 0;
   height: 34px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 7px;
-  background: var(--surface-2);
-  color: var(--muted);
+  background: var(--theme-module-active-card-bg);
+  color: var(--theme-module-active-text-muted);
   display: flex;
   align-items: center;
   gap: 7px;
@@ -40,7 +40,7 @@
   border: 0;
   outline: 0;
   background: transparent;
-  color: var(--text);
+  color: var(--theme-module-active-text);
 }
 
 .kb-add-wrapper {
@@ -50,10 +50,10 @@
 .kb-add-button {
   width: 38px;
   height: 34px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 7px;
-  background: var(--surface-2);
-  color: var(--text);
+  background: var(--theme-module-active-card-bg);
+  color: var(--theme-module-active-text);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -61,8 +61,8 @@
 }
 
 .kb-add-button:hover {
-  border-color: #1677ff;
-  color: #1677ff;
+  border-color: var(--theme-module-active-accent);
+  color: var(--theme-module-active-accent);
 }
 
 .kb-add-menu,
@@ -70,10 +70,10 @@
   position: fixed;
   z-index: 70;
   min-width: 168px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 7px;
-  background: var(--surface);
-  box-shadow: var(--shadow);
+  background: var(--theme-module-active-panel-bg);
+  box-shadow: var(--theme-module-active-shadow);
   padding: 5px;
 }
 
@@ -90,7 +90,7 @@
   border: 0;
   border-radius: 5px;
   background: transparent;
-  color: var(--text);
+  color: var(--theme-module-active-text);
   display: flex;
   align-items: center;
   justify-content: flex-start;
@@ -106,11 +106,11 @@
 
 .kb-add-menu button:hover,
 .kb-context-menu button:hover:not(:disabled) {
-  background: var(--surface-3);
+  background: var(--theme-module-active-card-strong-bg);
 }
 
 .kb-context-menu button:disabled {
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   cursor: not-allowed;
 }
 
@@ -119,11 +119,11 @@
   display: block;
   height: 1px;
   margin: 4px;
-  background: var(--border);
+  background: var(--theme-module-active-border);
 }
 
 .kb-context-menu em {
   margin-left: auto;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   font-size: 11px;
 }

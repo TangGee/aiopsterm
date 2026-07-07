@@ -3,9 +3,9 @@
 .k8s-cluster-config-container {
   min-width: 0;
   min-height: 0;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 8px;
-  background: var(--surface);
+  background: var(--theme-module-active-panel-bg);
   overflow: hidden;
 }
 
@@ -19,7 +19,7 @@
   align-items: center;
   gap: 8px;
   padding: 4px 8px 0;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--theme-module-active-border);
 }
 
 .k8s-tabs-list {
@@ -34,11 +34,11 @@
   min-width: 152px;
   max-width: 220px;
   height: 28px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-bottom: 0;
   border-radius: 6px 6px 0 0;
-  background: var(--surface-2);
-  color: var(--muted);
+  background: var(--theme-module-active-card-bg);
+  color: var(--theme-module-active-text-muted);
   display: flex;
   align-items: center;
   gap: 8px;
@@ -47,9 +47,9 @@
 }
 
 .k8s-tab-item.active {
-  color: var(--text);
-  background: var(--surface);
-  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  color: var(--theme-module-active-text);
+  background: var(--theme-module-active-panel-bg);
+  border-color: color-mix(in srgb, var(--theme-module-active-accent) 45%, var(--theme-module-active-border));
 }
 
 .k8s-tab-name {
@@ -67,7 +67,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 10px;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
 }
 
 .k8s-tab-item button {
@@ -75,7 +75,7 @@
   height: 20px;
   border: 0;
   background: transparent;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   display: grid;
   place-items: center;
   cursor: pointer;
@@ -87,9 +87,9 @@
   gap: 8px;
   min-width: 0;
   padding: 4px 8px;
-  border-bottom: 1px solid var(--border);
-  background: var(--surface-2);
-  color: var(--muted);
+  border-bottom: 1px solid var(--theme-module-active-border);
+  background: var(--theme-module-active-card-bg);
+  color: var(--theme-module-active-text-muted);
   font-size: 11px;
 }
 
@@ -104,10 +104,10 @@
 .k8s-terminal-meta button,
 .k8s-terminal-history button {
   height: 22px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 4px;
-  background: var(--surface);
-  color: var(--text);
+  background: var(--theme-module-active-panel-bg);
+  color: var(--theme-module-active-text);
   font-size: 11px;
   cursor: pointer;
 }
@@ -120,7 +120,7 @@
 .k8s-terminal-container {
   min-height: 0;
   overflow: auto;
-  background: #090b10;
+  background: var(--theme-terminal-background);
   padding: 10px;
 }
 
@@ -136,7 +136,7 @@
 .k8s-command-line {
   border-radius: 0;
   border-width: 1px 0 0;
-  background: var(--surface);
+  background: var(--theme-module-active-panel-bg);
 }
 
 .k8s-terminal-history {
@@ -145,8 +145,8 @@
   gap: 6px;
   min-width: 0;
   padding: 4px 8px;
-  border-top: 1px solid var(--border);
-  background: var(--surface);
+  border-top: 1px solid var(--theme-module-active-border);
+  background: var(--theme-module-active-panel-bg);
   overflow: hidden;
 }
 
@@ -167,7 +167,7 @@
 .k8s-left-section {
   min-width: 0;
   min-height: 0;
-  border-right: 1px solid var(--border);
+  border-right: 1px solid var(--theme-module-active-border);
   display: flex;
   flex-direction: column;
 }
@@ -180,15 +180,15 @@
   flex: 1;
   height: 38px;
   border: 0;
-  border-bottom: 1px solid var(--border);
-  background: var(--surface-2);
-  color: var(--muted);
+  border-bottom: 1px solid var(--theme-module-active-border);
+  background: var(--theme-module-active-card-bg);
+  color: var(--theme-module-active-text-muted);
   cursor: pointer;
 }
 
 .k8s-tab-bar button.active {
-  background: var(--surface);
-  color: var(--text);
+  background: var(--theme-module-active-panel-bg);
+  color: var(--theme-module-active-text);
 }
 
 .k8s-action-button {
@@ -207,7 +207,7 @@
 }
 
 .k8s-config-cluster-item svg {
-  color: var(--accent);
+  color: var(--theme-module-active-accent);
 }
 
 .k8s-config-cluster-item strong {

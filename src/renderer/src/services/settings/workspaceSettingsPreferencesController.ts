@@ -250,7 +250,7 @@ export const createWorkspaceSettingsPreferencesController = (
 
   const startShortcutRecording = (actionId: string) => {
     shortcutRecording.value = { actionId, tempShortcut: '' }
-    runtime.setRecording(true)
+    runtime.setRecording(true, deps.shortcutHandlers)
   }
 
   const updateShortcutRecording = (shortcut: string) => {
@@ -292,7 +292,7 @@ export const createWorkspaceSettingsPreferencesController = (
       }
       applySettingsPreferencesSnapshot(result.data)
       shortcutRecording.value = { actionId: null, tempShortcut: '' }
-      runtime.setRecording(false)
+      runtime.setRecording(false, deps.shortcutHandlers)
       deps.setSettingsNotice(result.data.message || '快捷键已保存')
       return true
     } catch {
@@ -303,7 +303,7 @@ export const createWorkspaceSettingsPreferencesController = (
 
   const cancelShortcutRecording = () => {
     shortcutRecording.value = { actionId: null, tempShortcut: '' }
-    runtime.setRecording(false)
+    runtime.setRecording(false, deps.shortcutHandlers)
   }
 
   const resetAllShortcuts = async () => {
@@ -324,7 +324,7 @@ export const createWorkspaceSettingsPreferencesController = (
       }
       applySettingsPreferencesSnapshot(result.data)
       shortcutRecording.value = { actionId: null, tempShortcut: '' }
-      runtime.setRecording(false)
+      runtime.setRecording(false, deps.shortcutHandlers)
       deps.setSettingsNotice(result.data.message || '快捷键已全部重置')
       return true
     } catch {

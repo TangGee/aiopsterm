@@ -10,7 +10,7 @@
   border-radius: 50%;
   display: grid;
   place-items: center;
-  background: var(--accent);
+  background: var(--theme-module-active-accent);
   color: #091316;
   font-weight: 800;
 }
@@ -21,12 +21,12 @@
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   position: relative;
-  background: var(--workspace-bg);
+  background: var(--theme-module-active-workspace-bg);
 }
 
 .user-info-title {
   height: 44px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--theme-module-active-border);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -49,10 +49,10 @@
 .user-info-card,
 .user-login-card {
   width: min(560px, 100%);
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 8px;
-  background: var(--surface);
-  box-shadow: var(--shadow);
+  background: var(--theme-module-active-panel-bg);
+  box-shadow: var(--theme-module-active-shadow);
   padding: 24px;
   display: grid;
   justify-items: center;
@@ -62,7 +62,7 @@
 
 .user-login-card p {
   margin: 0;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
 }
 
 .auth-login-card {
@@ -86,9 +86,9 @@
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 4px;
   padding: 3px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 7px;
-  background: var(--surface-2);
+  background: var(--theme-module-active-card-bg);
 }
 
 .user-login-tabs button {
@@ -97,13 +97,13 @@
   border: 0;
   border-radius: 5px;
   background: transparent;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
 }
 
 .user-login-tabs button.active {
-  background: var(--surface);
-  color: var(--text);
-  box-shadow: inset 0 0 0 1px var(--border);
+  background: var(--theme-module-active-panel-bg);
+  color: var(--theme-module-active-text);
+  box-shadow: inset 0 0 0 1px var(--theme-module-active-border);
 }
 
 .user-login-form {
@@ -117,7 +117,7 @@
 }
 
 .user-login-form label > span {
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   font-size: 12px;
 }
 
@@ -126,10 +126,10 @@
   width: 100%;
   min-width: 0;
   height: 32px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 6px;
-  background: var(--surface-2);
-  color: var(--text);
+  background: var(--theme-module-active-card-bg);
+  color: var(--theme-module-active-text);
 }
 
 .user-login-form input {
@@ -145,9 +145,9 @@
 
 .user-mobile-input em {
   padding: 0 10px;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   font-style: normal;
-  border-right: 1px solid var(--border);
+  border-right: 1px solid var(--theme-module-active-border);
 }
 
 .user-mobile-input input {
@@ -158,10 +158,10 @@
 .user-login-warning {
   margin: 0;
   padding: 8px 10px;
-  border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--border));
+  border: 1px solid color-mix(in srgb, var(--theme-core-warning) 45%, var(--theme-module-active-border));
   border-radius: 7px;
-  color: var(--warn);
-  background: color-mix(in srgb, var(--warn) 9%, transparent);
+  color: var(--theme-core-warning);
+  background: color-mix(in srgb, var(--theme-core-warning) 9%, transparent);
 }
 
 .user-skip-login {
@@ -169,13 +169,13 @@
   align-items: center;
   justify-content: center;
   gap: 6px;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   font-size: 12px;
 }
 
 .user-skip-login button {
   border: 0;
   background: transparent;
-  color: var(--accent);
+  color: var(--theme-module-active-accent);
   padding: 0;
 }

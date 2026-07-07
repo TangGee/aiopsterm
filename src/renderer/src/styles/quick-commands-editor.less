@@ -7,24 +7,24 @@
 .snippet-edit-panel h3 {
   margin: 0 0 8px;
   padding-bottom: 10px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--theme-module-active-border);
   font-size: 16px;
 }
 
 .snippet-edit-panel > input,
 .snippet-edit-panel > select {
   height: 32px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 7px;
-  background: var(--surface-2);
+  background: var(--theme-module-active-card-bg);
   padding: 0 8px;
 }
 
 .command-form-error {
   margin: 0;
-  border: 1px solid color-mix(in srgb, #ef4444 45%, var(--border));
+  border: 1px solid color-mix(in srgb, var(--theme-core-danger) 45%, var(--theme-module-active-border));
   border-radius: 6px;
-  background: color-mix(in srgb, #ef4444 10%, transparent);
+  background: color-mix(in srgb, var(--theme-core-danger) 10%, transparent);
   color: #fecaca;
   font-size: 12px;
   padding: 6px 8px;
@@ -33,9 +33,9 @@
 .script-editor-container {
   min-height: 168px;
   max-height: 260px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 7px;
-  background: var(--surface-2);
+  background: var(--theme-module-active-card-bg);
   display: grid;
   grid-template-columns: 30px minmax(0, 1fr);
   overflow: hidden;
@@ -43,9 +43,9 @@
 
 .line-numbers {
   padding: 8px 0;
-  border-right: 1px solid var(--border);
-  background: var(--surface);
-  color: var(--muted);
+  border-right: 1px solid var(--theme-module-active-border);
+  background: var(--theme-module-active-panel-bg);
+  color: var(--theme-module-active-text-muted);
   user-select: none;
   overflow: hidden;
 }
@@ -76,9 +76,9 @@
 }
 
 .script-help {
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 7px;
-  background: var(--surface-2);
+  background: var(--theme-module-active-card-bg);
   overflow: hidden;
 }
 
@@ -90,11 +90,11 @@
 }
 
 .help-content {
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--theme-module-active-border);
   padding: 10px;
   display: grid;
   gap: 8px;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   font-size: 12px;
 }
 
@@ -110,32 +110,32 @@
 }
 
 .help-content strong {
-  color: var(--text);
+  color: var(--theme-module-active-text);
 }
 
 .copy-example {
   min-height: 24px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 5px;
-  background: var(--surface);
-  color: var(--text);
+  background: var(--theme-module-active-panel-bg);
+  color: var(--theme-module-active-text);
   padding: 0 8px;
   cursor: pointer;
 }
 
 .copy-example:hover {
-  color: var(--accent);
-  background: var(--surface-3);
+  color: var(--theme-module-active-accent);
+  background: var(--theme-module-active-card-strong-bg);
 }
 
 .help-content pre {
   margin: 0;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 6px;
   background: rgb(0 0 0 / 0.18);
   padding: 8px;
   overflow: auto;
-  color: var(--text);
+  color: var(--theme-module-active-text);
   font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
 }
 
@@ -149,8 +149,8 @@
 .snippet-edit-panel footer button {
   min-width: 74px;
   height: 30px;
-  border-color: var(--border);
-  background: var(--surface-2);
+  border-color: var(--theme-module-active-border);
+  background: var(--theme-module-active-card-bg);
 }
 
 .snippet-edit-panel footer button:disabled {

@@ -27,19 +27,19 @@
 
 .file-path-input {
   height: 30px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 6px;
-  background: var(--surface-2);
+  background: var(--theme-module-active-card-bg);
   padding: 0 8px;
 }
 
 .file-icon-button.primary {
-  background: color-mix(in srgb, #1677ff 12%, transparent);
+  background: color-mix(in srgb, var(--theme-module-active-accent) 12%, transparent);
 }
 
 .file-error {
   margin: 8px 0 0;
-  color: var(--danger);
+  color: var(--theme-core-danger);
   font-weight: 700;
 }
 
@@ -53,13 +53,13 @@
 }
 
 .file-drop-zone.active {
-  border-color: #1677ff;
-  background: color-mix(in srgb, #1677ff 8%, transparent);
+  border-color: var(--theme-module-active-accent);
+  background: color-mix(in srgb, var(--theme-module-active-accent) 8%, transparent);
 }
 
 .file-drop-zone.forbidden {
-  border-color: var(--danger);
-  background: color-mix(in srgb, var(--danger) 8%, transparent);
+  border-color: var(--theme-core-danger);
+  background: color-mix(in srgb, var(--theme-core-danger) 8%, transparent);
 }
 
 .file-table {
@@ -72,7 +72,7 @@
 .file-table td {
   height: 34px;
   padding: 6px 8px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--theme-module-active-border);
   text-align: left;
   vertical-align: middle;
   overflow: visible;
@@ -82,8 +82,8 @@
   position: sticky;
   top: 0;
   z-index: 4;
-  color: var(--text);
-  background: var(--surface);
+  color: var(--theme-module-active-text);
+  background: var(--theme-module-active-panel-bg);
   font-weight: 600;
 }
 
@@ -92,11 +92,11 @@
 }
 
 .file-table tr:hover {
-  background: color-mix(in srgb, var(--surface-3) 72%, transparent);
+  background: color-mix(in srgb, var(--theme-module-active-card-strong-bg) 72%, transparent);
 }
 
 .file-table tr.selected {
-  background: color-mix(in srgb, #1677ff 11%, transparent);
+  background: color-mix(in srgb, var(--theme-module-active-accent) 11%, transparent);
 }
 
 .file-sort-button {
@@ -104,7 +104,7 @@
   height: 22px;
   border: 0;
   background: transparent;
-  color: var(--text);
+  color: var(--theme-module-active-text);
   display: inline-flex;
   align-items: center;
   justify-content: flex-start;
@@ -115,7 +115,7 @@
 }
 
 .file-sort-button.active {
-  color: #1677ff;
+  color: var(--theme-module-active-accent);
 }
 
 .file-sort-indicator {
@@ -123,7 +123,7 @@
   height: 16px;
   display: inline-grid;
   grid-template-rows: 8px 8px;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
 }
 
 .file-sort-indicator svg {
@@ -134,7 +134,7 @@
 }
 
 .file-sort-indicator svg.active {
-  color: #1677ff;
+  color: var(--theme-module-active-accent);
 }
 
 .file-browser.transfer-mode .file-table tr:not(.editing) {
@@ -142,8 +142,8 @@
 }
 
 .file-browser.transfer-mode .file-table tr.file-row-drag-target {
-  background: color-mix(in srgb, #1677ff 16%, transparent);
-  outline: 1px solid color-mix(in srgb, #1677ff 75%, transparent);
+  background: color-mix(in srgb, var(--theme-module-active-accent) 16%, transparent);
+  outline: 1px solid color-mix(in srgb, var(--theme-module-active-accent) 75%, transparent);
   outline-offset: -1px;
 }
 
@@ -167,7 +167,7 @@
   height: 24px;
   border: 0;
   background: transparent;
-  color: var(--text);
+  color: var(--theme-module-active-text);
   display: flex;
   align-items: center;
   gap: 7px;
@@ -188,8 +188,8 @@
 }
 
 .file-browser.transfer-mode .file-table tr.directory.file-row-drag-target {
-  outline: 1px solid var(--accent);
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  outline: 1px solid var(--theme-module-active-accent);
+  background: color-mix(in srgb, var(--theme-module-active-accent) 12%, transparent);
 }
 
 .file-name-cell span {
@@ -201,7 +201,7 @@
 
 .file-link-target {
   min-width: 0;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -209,7 +209,7 @@
 
 .file-name-cell svg,
 .file-rename-row svg {
-  color: #1677ff;
+  color: var(--theme-module-active-accent);
   flex: 0 0 auto;
 }
 
@@ -246,7 +246,7 @@
 .file-rename-row button {
   width: 24px;
   height: 24px;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
 }
 
 .file-more-menu {
@@ -255,10 +255,10 @@
   right: 8px;
   top: calc(100% - 2px);
   width: 150px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 7px;
-  background: var(--surface);
-  box-shadow: var(--shadow);
+  background: var(--theme-module-active-panel-bg);
+  box-shadow: var(--theme-module-active-shadow);
   padding: 4px;
 }
 
@@ -271,7 +271,7 @@
 }
 
 .file-more-menu button:hover {
-  background: var(--surface-3);
+  background: var(--theme-module-active-card-strong-bg);
 }
 
 .file-rename-row {
@@ -284,15 +284,15 @@
 .file-rename-row input,
 .file-modal-card input {
   height: 28px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 6px;
-  background: var(--surface-2);
+  background: var(--theme-module-active-card-bg);
   padding: 0 8px;
 }
 
 .file-loading,
 .file-empty {
   padding: 20px;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   text-align: center;
 }

@@ -22,10 +22,10 @@
   width: 100%;
   max-width: 100%;
   height: 24px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 5px;
-  background: var(--surface-2);
-  color: var(--text);
+  background: var(--theme-module-active-card-bg);
+  color: var(--theme-module-active-text);
   display: inline-flex;
   align-items: center;
   justify-content: space-between;
@@ -64,11 +64,11 @@
   width: 13px;
   height: 13px;
   flex: 0 0 13px;
-  color: var(--accent);
+  color: var(--theme-module-active-accent);
 }
 
 .ai-model-popup .locked-model-option {
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   cursor: not-allowed;
   opacity: 0.7;
 }
@@ -80,14 +80,14 @@
 .ai-model-popup .locked-model-icon {
   width: 14px;
   height: 14px;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
 }
 
 .ai-model-popup .locked-model-option strong {
   min-width: 0;
   border-radius: 3px;
-  background: color-mix(in srgb, var(--accent) 15%, transparent);
-  color: var(--accent);
+  background: color-mix(in srgb, var(--theme-module-active-accent) 15%, transparent);
+  color: var(--theme-module-active-accent);
   padding: 0 4px;
   font-size: 10px;
   line-height: 16px;

@@ -51,6 +51,8 @@ type TerminalThreadedDirectIngress = {
   bytes: number
 }
 
+let activeTerminalWorkspaceRuntimeToken: symbol | null = null
+
 const terminalDataSummaryDebugIntervalMs = 1000
 const terminalDataSummaryFormalIntervalMs = 10_000
 const terminalDataSummaryDebugChunkThreshold = 50
@@ -90,6 +92,7 @@ const tailTextByBytes = (value: string, maxBytes: number) => {
 export const useTerminalWorkspaceContainerRuntime = () => {
   const workspace = useWorkspaceStore()
   const { t } = useI18n()
+  const runtimeToken = Symbol('terminal-workspace-runtime')
   const shellState = createTerminalWorkspaceShellState()
   const {
     aiButtonPanelId,
@@ -417,6 +420,7 @@ export const useTerminalWorkspaceContainerRuntime = () => {
   const {
     activeTerminalContextBar,
     panelNeedsAiAttention,
+    pendingAiSessionsForPanel,
     terminalStatusLabel,
     terminalTabKindBadge,
     terminalTabMeta,
@@ -434,6 +438,12 @@ export const useTerminalWorkspaceContainerRuntime = () => {
   const openAiSessionsFromContextBar = () => {
     workspace.activeModule = 'aiSessions'
     workspace.leftPanelOpen = true
+  }
+  const openPendingAiSessionFromContextBar = () => {
+    const panel = activeTerminalPanel.value
+    const session = panel ? pendingAiSessionsForPanel(panel)[0] : null
+    if (session) workspace.selectedManagedAiSessionKey = `${session.source}:${session.id}`
+    openAiSessionsFromContextBar()
   }
   const refreshAiSessionsFromContextBar = async () => {
     const refreshed = await workspace.refreshManagedAiSessions()
@@ -728,14 +738,20 @@ export const useTerminalWorkspaceContainerRuntime = () => {
     Array.from(terminalHistoryBatches.keys()).forEach(flushTerminalHistoryBatch)
   }
 
+  const handleActiveShortcut = (event: KeyboardEvent) => {
+    if (activeTerminalWorkspaceRuntimeToken !== runtimeToken) return
+    void handleShortcut(event)
+  }
+
   onMounted(() => {
     terminalRuntimeMounted = true
+    activeTerminalWorkspaceRuntimeToken = runtimeToken
     offData = terminalClient.onTerminalData()?.(handleTerminalData) || null
     offLifecycle = terminalClient.onTerminalLifecycle()?.((event) => workspace.applyTerminalLifecycle(event)) || null
     offExit = terminalClient.onTerminalExit()?.((event) => workspace.applyTerminalExit(event)) || null
     offControlRequest = controlClient.onControlRequest()?.(handleControlRequest) || null
     document.addEventListener('click', closeTerminalMenusFromDocument)
-    window.addEventListener('keydown', handleShortcut, true)
+    window.addEventListener('keydown', handleActiveShortcut, true)
     window.addEventListener('resize', updateTerminalTabScrollState)
     nextTick(() => {
       updateTerminalTabScrollState()
@@ -782,8 +798,9 @@ export const useTerminalWorkspaceContainerRuntime = () => {
     terminalZmodemShellRuntime.dispose()
     disposeTerminalViews()
     document.removeEventListener('click', closeTerminalMenusFromDocument)
-    window.removeEventListener('keydown', handleShortcut, true)
+    window.removeEventListener('keydown', handleActiveShortcut, true)
     window.removeEventListener('resize', updateTerminalTabScrollState)
+    if (activeTerminalWorkspaceRuntimeToken === runtimeToken) activeTerminalWorkspaceRuntimeToken = null
     if (terminalIngressFlushTimer !== null) {
       window.clearTimeout(terminalIngressFlushTimer)
       terminalIngressFlushTimer = null
@@ -950,6 +967,7 @@ export const useTerminalWorkspaceContainerRuntime = () => {
     menu,
     moveSuggestion,
     openAiSessionsFromContextBar,
+    openPendingAiSessionFromContextBar,
     openCommandDialogFromTabMenu,
     openCommandDialogFromTermMenu,
     openCommandLineFromMenu,

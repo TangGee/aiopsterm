@@ -11,7 +11,7 @@
 .rule-content {
   border: 0;
   background: transparent;
-  color: var(--text);
+  color: var(--theme-module-active-text);
   text-align: left;
   cursor: pointer;
 }
@@ -34,7 +34,7 @@
   width: 16px;
   height: 16px;
   place-items: center;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   transition: transform 0.16s ease;
 }
 
@@ -44,10 +44,10 @@
 
 .mcp-status-badge,
 .mcp-tool-state {
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 999px;
   padding: 2px 8px;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   font-size: 11px;
   font-style: normal;
   white-space: nowrap;
@@ -55,25 +55,25 @@
 
 .mcp-status-badge.connected,
 .mcp-tool-state.success {
-  border-color: color-mix(in srgb, var(--success) 50%, transparent);
-  color: var(--success);
+  border-color: color-mix(in srgb, var(--theme-core-success) 50%, transparent);
+  color: var(--theme-core-success);
 }
 
 .mcp-status-badge.connecting {
-  border-color: color-mix(in srgb, #1677ff 55%, transparent);
-  color: #1677ff;
+  border-color: color-mix(in srgb, var(--theme-module-active-accent) 55%, transparent);
+  color: var(--theme-module-active-accent);
 }
 
 .mcp-status-badge.error,
 .mcp-status-badge.disconnected {
-  border-color: color-mix(in srgb, var(--danger) 50%, transparent);
-  color: var(--danger);
+  border-color: color-mix(in srgb, var(--theme-core-danger) 50%, transparent);
+  color: var(--theme-core-danger);
 }
 
 .mcp-server-title span,
 .mcp-tool-header span,
 .mcp-resource-header span {
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   font-size: 12px;
 }
 
@@ -90,7 +90,7 @@
 }
 
 .settings-error {
-  color: var(--danger);
+  color: var(--theme-core-danger);
 }
 
 .settings-tab-bar {
@@ -104,18 +104,18 @@
 
 .settings-tab-bar button {
   height: 30px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 6px;
-  background: var(--surface-2);
-  color: var(--muted);
+  background: var(--theme-module-active-card-bg);
+  color: var(--theme-module-active-text-muted);
   cursor: pointer;
   padding: 0 10px;
 }
 
 .settings-tab-bar button.active {
   color: #fff;
-  background: #1677ff;
-  border-color: #1677ff;
+  background: var(--theme-module-active-accent);
+  border-color: var(--theme-module-active-accent);
 }
 
 .mcp-tool-item,
@@ -123,14 +123,14 @@
 .skill-item,
 .rule-item,
 .trusted-device-item {
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 7px;
-  background: var(--surface-2);
+  background: var(--theme-module-active-card-bg);
   padding: 10px;
 }
 
 .mcp-parameters {
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--theme-module-active-border);
   padding-top: 8px;
 }
 
@@ -150,7 +150,7 @@
 .mcp-tool-icon {
   width: 58px;
   flex: 0 0 58px;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   font-size: 11px;
   text-transform: uppercase;
 }
@@ -165,12 +165,12 @@
   justify-content: space-between;
   gap: 12px;
   min-height: 30px;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--theme-module-active-border);
   padding-top: 8px;
 }
 
 .mcp-auto-approve-row > span {
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   font-size: 12px;
 }
 
@@ -184,10 +184,10 @@
   gap: 6px;
   margin: 10px 0 14px;
   padding: 10px 12px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 7px;
-  background: var(--surface-2);
-  color: var(--muted);
+  background: var(--theme-module-active-card-bg);
+  color: var(--theme-module-active-text-muted);
   font-size: 12px;
 }
 
@@ -199,7 +199,7 @@
 }
 
 .privacy-runtime-status strong {
-  color: var(--text);
+  color: var(--theme-module-active-text);
   font-weight: 600;
 }
 
@@ -208,7 +208,7 @@
 }
 
 .privacy-runtime-status .danger-text {
-  color: var(--danger);
+  color: var(--theme-core-danger);
 }
 
 .mcp-parameters p {
@@ -218,11 +218,11 @@
 }
 
 .mcp-parameters p span {
-  color: var(--text);
+  color: var(--theme-module-active-text);
 }
 
 .mcp-parameters p b {
-  color: var(--danger);
+  color: var(--theme-core-danger);
 }
 
 .mcp-parameters code,
@@ -230,7 +230,7 @@
 .mcp-tool-item code {
   display: block;
   margin-top: 5px;
-  color: var(--accent);
+  color: var(--theme-module-active-accent);
   overflow-wrap: anywhere;
 }
 
@@ -243,10 +243,10 @@
   width: 100%;
   min-height: 84px;
   resize: vertical;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 7px;
-  background: var(--surface-1);
-  color: var(--text);
+  background: var(--theme-module-active-panel-bg);
+  color: var(--theme-module-active-text);
   padding: 9px 10px;
   font-family: var(--mono-font, 'Menlo', 'Monaco', 'Courier New', monospace);
   font-size: 12px;
@@ -264,18 +264,18 @@
 }
 
 .mcp-operation-result {
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 7px;
-  background: var(--surface-1);
+  background: var(--theme-module-active-panel-bg);
   overflow: hidden;
 }
 
 .mcp-operation-result.success {
-  border-color: color-mix(in srgb, var(--success) 36%, var(--border));
+  border-color: color-mix(in srgb, var(--theme-core-success) 36%, var(--theme-module-active-border));
 }
 
 .mcp-operation-result.error {
-  border-color: color-mix(in srgb, var(--danger) 44%, var(--border));
+  border-color: color-mix(in srgb, var(--theme-core-danger) 44%, var(--theme-module-active-border));
 }
 
 .mcp-operation-result-header {
@@ -284,14 +284,14 @@
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--theme-module-active-border);
   padding: 0 10px;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   font-size: 12px;
 }
 
 .mcp-operation-result-header strong {
-  color: var(--text);
+  color: var(--theme-module-active-text);
 }
 
 .mcp-operation-result pre {
@@ -301,7 +301,7 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   padding: 10px;
-  color: var(--text);
+  color: var(--theme-module-active-text);
   font-family: var(--mono-font, 'Menlo', 'Monaco', 'Courier New', monospace);
   font-size: 12px;
   line-height: 1.5;

@@ -10,10 +10,10 @@
 
 .user-modal-card {
   width: min(420px, calc(100vw - 32px));
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 8px;
-  background: var(--surface);
-  box-shadow: var(--shadow);
+  background: var(--theme-module-active-panel-bg);
+  box-shadow: var(--theme-module-active-shadow);
   padding: 14px;
   display: grid;
   gap: 12px;
@@ -38,7 +38,7 @@
   border: 0;
   border-radius: 5px;
   background: transparent;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
 }
 
 .user-modal-card label {
@@ -47,13 +47,13 @@
 }
 
 .user-modal-card label span {
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   font-size: 12px;
 }
 
 .user-modal-error {
   margin: -4px 0 0;
-  color: var(--danger);
+  color: var(--theme-core-danger);
   font-size: 12px;
 }
 
@@ -69,13 +69,13 @@
 }
 
 .password-strength.weak {
-  color: var(--danger);
+  color: var(--theme-core-danger);
 }
 
 .password-strength.medium {
-  color: var(--warn);
+  color: var(--theme-core-warning);
 }
 
 .password-strength.strong {
-  color: var(--accent-2);
+  color: var(--theme-module-active-accent-secondary);
 }

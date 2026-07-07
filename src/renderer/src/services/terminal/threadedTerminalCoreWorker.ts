@@ -198,7 +198,7 @@ const newSearchState = (): CoreSearchState => ({
   activeIndex: -1
 })
 
-const ansiPaletteForTheme = (theme: ThreadedTerminalTheme) => [
+const ansiForegroundPaletteForTheme = (theme: ThreadedTerminalTheme) => [
   theme.black || theme.background,
   theme.red || '#e06c75',
   theme.green || '#8ccf7e',
@@ -217,8 +217,30 @@ const ansiPaletteForTheme = (theme: ThreadedTerminalTheme) => [
   theme.brightWhite || theme.foreground
 ]
 
-const colorFromPalette = (value: number, fallback: string, theme: ThreadedTerminalTheme) => {
-  if (value < 16) return ansiPaletteForTheme(theme)[value] || fallback
+const ansiBackgroundPaletteForTheme = (theme: ThreadedTerminalTheme) => {
+  const background = theme.ansiBackground || {}
+  return [
+    background.black || theme.black || theme.background,
+    background.red || theme.red || '#e06c75',
+    background.green || theme.green || '#8ccf7e',
+    background.yellow || theme.yellow || '#e6b450',
+    background.blue || theme.blue || '#56b6c2',
+    background.magenta || theme.magenta || '#8ccf7e',
+    background.cyan || theme.cyan || '#56b6c2',
+    background.white || theme.white || theme.foreground,
+    background.brightBlack || theme.brightBlack || '#8993a8',
+    background.brightRed || theme.brightRed || theme.red || '#e06c75',
+    background.brightGreen || theme.brightGreen || theme.green || '#8ccf7e',
+    background.brightYellow || theme.brightYellow || theme.yellow || '#e6b450',
+    background.brightBlue || theme.brightBlue || theme.blue || '#56b6c2',
+    background.brightMagenta || theme.brightMagenta || theme.magenta || '#8ccf7e',
+    background.brightCyan || theme.brightCyan || theme.cyan || '#56b6c2',
+    background.brightWhite || theme.brightWhite || theme.foreground
+  ]
+}
+
+const colorFromPalette = (kind: 'fg' | 'bg', value: number, fallback: string, theme: ThreadedTerminalTheme) => {
+  if (value < 16) return (kind === 'fg' ? ansiForegroundPaletteForTheme(theme) : ansiBackgroundPaletteForTheme(theme))[value] || fallback
   if (value >= 16 && value <= 231) {
     const index = value - 16
     const r = Math.floor(index / 36)
@@ -258,7 +280,7 @@ const cellColor = (
   const isPalette = kind === 'fg' ? cell.isFgPalette() : cell.isBgPalette()
   const value = kind === 'fg' ? cell.getFgColor() : cell.getBgColor()
   if (isRgb) return rgbNumberToCss(value)
-  if (isPalette) return colorFromPalette(kind === 'fg' ? normalizedPaletteIndex(value, Boolean(cell.isBold())) : value, fallback, theme)
+  if (isPalette) return colorFromPalette(kind, kind === 'fg' ? normalizedPaletteIndex(value, Boolean(cell.isBold())) : value, fallback, theme)
   return fallback
 }
 

@@ -8,6 +8,7 @@ import {
   type AiPanelCodexResizeObserverLike,
   type AiPanelCodexSessionClient
 } from '@/services/ai/aiPanelCodexTerminalRuntime'
+import { resolveThemePreset } from '@/services/app/themeRuntime'
 import type { CodexSessionDataEvent, CodexSessionExitEvent, CodexSessionLifecycleEvent, CodexSessionTargetContext } from '@shared/contracts/codexSessions'
 
 type TestConversation = AiPanelCodexTerminalConversation<FakeTerminal, FakeFit>
@@ -246,6 +247,29 @@ describe('aiPanelCodexTerminalRuntime', () => {
     expect(codexTerminalCopyShortcut({ key: 'x', shiftKey: true, ctrlKey: true, metaKey: false, altKey: false })).toBe(false)
   })
 
+  it('does not create an idle Codex terminal until a target is bound', async () => {
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const conversation = createConversation(null)
+    const { runtime, logs } = createRuntime(conversation)
+
+    runtime.setHostElement(conversation, host)
+    expect(conversation.terminal).toBeNull()
+    expect(FakeTerminal.instances).toHaveLength(0)
+    expect(FakeResizeObserver.instances).toHaveLength(0)
+    expect(logs.some((entry) => entry.event === 'renderer.codex-terminal.created')).toBe(false)
+
+    await runtime.startSession(conversation)
+    expect(conversation).toMatchObject({ status: 'idle', error: '' })
+    expect(conversation.terminal).toBeNull()
+
+    conversation.boundTarget = target
+    runtime.setHostElement(conversation, host)
+    expect(conversation.terminal).toBeTruthy()
+    expect(FakeTerminal.instances).toHaveLength(1)
+    expect(FakeResizeObserver.instances[0].observe).toHaveBeenCalledWith(host)
+  })
+
   it('creates a terminal, applies settings, copies selections, writes input, and resizes through fit notifications', async () => {
     const host = document.createElement('div')
     document.body.appendChild(host)
@@ -470,8 +494,17 @@ describe('aiPanelCodexTerminalRuntime', () => {
     })
 
     runtime.setHostElement(conversation, host)
+    const terminalAfterHost = conversation.terminal as unknown as FakeThreadedTerminal
+    terminalAfterHost.updateSettings.mockClear()
     const start = runtime.startSession(conversation)
     await Promise.resolve()
+    expect(terminalAfterHost.updateSettings).toHaveBeenCalledWith(
+      terminalSettings,
+      expect.objectContaining({
+        background: expect.any(String),
+        ansiBackground: expect.any(Object)
+      })
+    )
     clientBundle.emitData({ id: 'codex-session-1', data: 'early tui' })
     await flushAsyncHandlers()
     resolveCreateSession?.()
@@ -482,6 +515,79 @@ describe('aiPanelCodexTerminalRuntime', () => {
     expect(terminal.sessionId).toBe('codex-session-1')
     expect(terminal.setVisibility).toHaveBeenCalledWith(true, 'active')
     expect(terminal.ensureSurfaceAttached).toHaveBeenCalledWith({ forceGeometry: true })
+
+    runtime.disposeConversation(conversation)
+    vi.doUnmock('@shared/runtimeSwitches')
+    vi.doUnmock('@/services/terminal/threadedTerminalRuntime')
+    vi.resetModules()
+  })
+
+  it('creates threaded Codex hosts with the Codex terminal surface theme', async () => {
+    vi.resetModules()
+    vi.doMock('@shared/runtimeSwitches', () => ({
+      shouldUseTerminalDebugLogs: () => false,
+      shouldUseThreadedTerminal: () => true
+    }))
+    const createThreadedTerminalHost = vi.fn((options) => {
+      const terminal = new FakeThreadedTerminal({})
+      terminal.sessionId = options.sessionId || ''
+      return terminal
+    })
+    vi.doMock('@/services/terminal/threadedTerminalRuntime', () => ({
+      ThreadedTerminalFitAddon: FakeFit,
+      createThreadedTerminalHost,
+      isThreadedTerminalHost: (value: unknown) => value instanceof FakeThreadedTerminal,
+      threadedTerminalCapability: () => ({ supported: true })
+    }))
+    const { createAiPanelCodexTerminalRuntime: createRuntimeWithThreaded } = await import('@/services/ai/aiPanelCodexTerminalRuntime')
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const conversation = createConversation()
+    const runtime = createRuntimeWithThreaded<TestConversation>({
+      conversations: () => [conversation],
+      activeConversation: () => conversation,
+      activeConversationId: () => conversation.id,
+      terminalSettings: () => terminalSettings,
+      themeId: () => 'light',
+      terminalSurfaceMode: () => 'withBackground',
+      currentBoundTarget: (item) => item.boundTarget,
+      isConversationVisible: (item) => item.id === conversation.id,
+      syncAttentionState: vi.fn(),
+      labels: {
+        error: () => 'Codex error',
+        bridgeMissing: () => 'Bridge missing',
+        startFailed: () => 'Start failed',
+        threadedUnavailable: () => 'Threaded terminal unavailable',
+        copyEmpty: () => 'Select content first',
+        copySuccess: () => 'Copied',
+        copyFailure: () => 'Copy failed'
+      },
+      notify: vi.fn(),
+      afterDomUpdate: () => Promise.resolve(),
+      copyText: vi.fn(async () => true),
+      log: vi.fn(),
+      client: createClient().client,
+      requestFrame: (callback) => callback(),
+      resizeObserverFactory: (callback) => new FakeResizeObserver(callback)
+    })
+
+    runtime.setHostElement(conversation, host)
+
+    const lightTheme = resolveThemePreset('light', 'light')
+    expect(conversation.threadedTerminal).toBe(true)
+    expect(createThreadedTerminalHost).toHaveBeenCalledWith(
+      expect.objectContaining({
+        surface: 'codex',
+        theme: expect.objectContaining({
+          background: lightTheme.terminalPalette.withBackground.codexRuntimeBackground,
+          ansiBackground: expect.objectContaining({
+            black: lightTheme.terminalPalette.withBackground.codexAnsiBackground.black
+          })
+        })
+      })
+    )
+    const createdTheme = createThreadedTerminalHost.mock.calls[0]?.[0]?.theme
+    expect(createdTheme?.ansiBackground?.black).not.toBe(createdTheme?.black)
 
     runtime.disposeConversation(conversation)
     vi.doUnmock('@shared/runtimeSwitches')

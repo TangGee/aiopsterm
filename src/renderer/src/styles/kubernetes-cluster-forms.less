@@ -12,7 +12,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--theme-module-active-border);
   padding-bottom: 12px;
 }
 
@@ -22,7 +22,7 @@
   height: 28px;
   border: 0;
   background: transparent;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   cursor: pointer;
 }
 
@@ -44,7 +44,7 @@
 .k8s-detail-form label span,
 .k8s-modal-form label span,
 .k8s-form-status > span {
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   font-size: 12px;
 }
 
@@ -53,9 +53,9 @@
 .k8s-modal-form select,
 .k8s-modal-form textarea {
   min-height: 32px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 6px;
-  background: var(--surface-2);
+  background: var(--theme-module-active-card-bg);
   padding: 0 8px;
 }
 
@@ -76,10 +76,10 @@
 
 .k8s-file-picker-row > button {
   min-height: 32px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 6px;
-  background: var(--surface-2);
-  color: var(--text);
+  background: var(--theme-module-active-card-bg);
+  color: var(--theme-module-active-text);
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -94,8 +94,8 @@
 
 .k8s-detail-form input:disabled,
 .k8s-modal-form input:disabled {
-  color: var(--muted);
-  background: color-mix(in srgb, var(--surface-3) 72%, transparent);
+  color: var(--theme-module-active-text-muted);
+  background: color-mix(in srgb, var(--theme-module-active-card-strong-bg) 72%, transparent);
 }
 
 .k8s-form-actions {
@@ -107,7 +107,7 @@
 .k8s-form-actions.inline {
   justify-content: flex-start;
   flex-wrap: wrap;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--theme-module-active-border);
   padding-top: 10px;
 }
 
@@ -119,13 +119,13 @@
 
 .k8s-form-actions .primary,
 .file-modal-card footer .primary {
-  background: #1677ff;
-  border-color: #1677ff;
+  background: var(--theme-module-active-accent);
+  border-color: var(--theme-module-active-accent);
   color: #fff;
 }
 
 .k8s-danger-zone {
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--theme-module-active-border);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -139,7 +139,7 @@
 }
 
 .k8s-danger-zone p {
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   font-size: 12px;
   margin-top: 4px;
 }
@@ -161,8 +161,8 @@
 }
 
 .k8s-modal-tabs button.active {
-  color: var(--accent);
-  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  color: var(--theme-module-active-accent);
+  border-color: color-mix(in srgb, var(--theme-module-active-accent) 45%, var(--theme-module-active-border));
 }
 
 .k8s-test-connection {
@@ -173,30 +173,30 @@
 
 .k8s-form-error {
   margin: 0;
-  color: var(--danger);
+  color: var(--theme-core-danger);
   font-size: 12px;
 }
 
 .k8s-delete-confirm p {
   margin: 8px 0;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
 }
 
 .k8s-delete-confirm p strong {
-  color: var(--text);
+  color: var(--theme-module-active-text);
 }
 
 .k8s-test-connection .success {
-  color: var(--accent-2);
+  color: var(--theme-module-active-accent-secondary);
 }
 
 .k8s-test-connection .error {
-  color: var(--danger);
+  color: var(--theme-core-danger);
 }
 
 .k8s-proxy-hint {
   margin: 8px 0 0;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   font-size: 12px;
 }
 

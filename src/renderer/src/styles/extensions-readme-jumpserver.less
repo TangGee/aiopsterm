@@ -1,6 +1,6 @@
 
 .rendered_markdown {
-  color: var(--text);
+  color: var(--theme-module-active-text);
   line-height: 1.65;
 }
 
@@ -15,9 +15,9 @@
 }
 
 .connection_log_terminal {
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 7px;
-  background: #090b10;
+  background: var(--theme-terminal-background);
   padding: 12px;
   font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
   font-size: 12px;
@@ -28,37 +28,37 @@
 }
 
 .connection_log_terminal span {
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
 }
 
 .connection_log_terminal b {
   display: inline-block;
   width: 16px;
-  color: var(--accent);
+  color: var(--theme-module-active-accent);
   text-align: center;
 }
 
 .connection_log_success b {
-  color: var(--success);
+  color: var(--theme-core-success);
 }
 
 .connection_log_error b {
-  color: var(--danger);
+  color: var(--theme-core-danger);
 }
 
 .jumpserver_asset_notice {
   margin: 8px 0;
   padding: 8px 10px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 7px;
-  background: var(--surface-2);
-  color: var(--muted);
+  background: var(--theme-module-active-card-bg);
+  color: var(--theme-module-active-text-muted);
   font-size: 12px;
 }
 
 .jumpserver_asset_notice.error {
-  border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
-  color: var(--danger);
+  border-color: color-mix(in srgb, var(--theme-core-danger) 45%, var(--theme-module-active-border));
+  color: var(--theme-core-danger);
 }
 
 .jumpserver_asset_summary {
@@ -70,9 +70,9 @@
 
 .jumpserver_asset_summary > div {
   min-width: 0;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 7px;
-  background: var(--surface-2);
+  background: var(--theme-module-active-card-bg);
   padding: 10px 12px;
   display: grid;
   gap: 5px;
@@ -82,7 +82,7 @@
 .jumpserver_source_row small,
 .jumpserver_synced_asset small,
 .jumpserver_asset_actions span {
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   font-size: 12px;
 }
 
@@ -115,9 +115,9 @@
 .jumpserver_source_row,
 .jumpserver_synced_asset {
   min-height: 42px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 7px;
-  background: color-mix(in srgb, var(--surface-2) 80%, transparent);
+  background: color-mix(in srgb, var(--theme-module-active-card-bg) 80%, transparent);
   padding: 8px 10px;
 }
 
@@ -141,21 +141,21 @@
 .jumpserver_synced_asset b {
   flex: 0 0 auto;
   min-width: 58px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 999px;
   padding: 2px 8px;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   text-align: center;
   font-size: 11px;
   font-weight: 600;
 }
 
 .jumpserver_synced_asset .asset_status_online {
-  color: var(--success);
-  border-color: color-mix(in srgb, var(--success) 45%, var(--border));
+  color: var(--theme-core-success);
+  border-color: color-mix(in srgb, var(--theme-core-success) 45%, var(--theme-module-active-border));
 }
 
 .jumpserver_synced_asset .asset_status_offline {
-  color: var(--danger);
-  border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
+  color: var(--theme-core-danger);
+  border-color: color-mix(in srgb, var(--theme-core-danger) 45%, var(--theme-module-active-border));
 }

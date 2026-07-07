@@ -1,7 +1,7 @@
 
 .input-placeholder-notice {
   min-width: 0;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   font-size: 12px;
   line-height: 18px;
   overflow: hidden;
@@ -15,10 +15,10 @@
   gap: 5px;
   max-width: 100%;
   min-height: 23px;
-  border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--border));
+  border: 1px solid color-mix(in srgb, var(--theme-module-active-accent) 34%, var(--theme-module-active-border));
   border-radius: 999px;
-  background: color-mix(in srgb, var(--accent) 12%, var(--surface-3));
-  color: var(--text);
+  background: color-mix(in srgb, var(--theme-module-active-accent) 12%, var(--theme-module-active-card-strong-bg));
+  color: var(--theme-module-active-text);
   padding: 1px 5px 1px 7px;
   margin: 1px 4px 1px 0;
   vertical-align: middle;
@@ -55,7 +55,7 @@
   border: 0;
   border-radius: 50%;
   background: transparent;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -64,8 +64,8 @@
 }
 
 .mention-chip button:hover {
-  background: color-mix(in srgb, var(--surface) 68%, transparent);
-  color: var(--text);
+  background: color-mix(in srgb, var(--theme-module-active-panel-bg) 68%, transparent);
+  color: var(--theme-module-active-text);
 }
 
 .mention-image-thumb {
@@ -73,7 +73,7 @@
   height: 18px;
   border-radius: 4px;
   object-fit: cover;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
 }
 
 .image-preview-wrapper {
@@ -88,7 +88,7 @@
   max-width: 116px;
   max-height: 78px;
   border-radius: 6px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   object-fit: cover;
 }
 
@@ -98,10 +98,10 @@
   right: -6px;
   width: 16px;
   height: 16px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 50%;
-  background: var(--surface);
-  color: var(--muted);
+  background: var(--theme-module-active-panel-bg);
+  color: var(--theme-module-active-text-muted);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -111,6 +111,6 @@
 }
 
 .image-remove:hover {
-  color: var(--text);
-  background: var(--surface-3);
+  color: var(--theme-module-active-text);
+  background: var(--theme-module-active-card-strong-bg);
 }

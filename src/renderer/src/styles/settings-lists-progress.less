@@ -21,15 +21,15 @@
 
 .info-row > span:first-child,
 .billing-ratio-row > span:first-child {
-  color: var(--text);
+  color: var(--theme-module-active-text);
 }
 
 .subscription-type,
 .current-tag {
   width: max-content;
   border-radius: 999px;
-  background: color-mix(in srgb, #1677ff 16%, transparent);
-  color: #1677ff;
+  background: color-mix(in srgb, var(--theme-module-active-accent) 16%, transparent);
+  color: var(--theme-module-active-accent);
   padding: 2px 9px;
   font-size: 12px;
 }
@@ -38,14 +38,14 @@
   width: min(460px, 100%);
   height: 10px;
   border-radius: 999px;
-  background: var(--surface-3);
+  background: var(--theme-module-active-card-strong-bg);
   position: relative;
 }
 
 .settings-progress > div {
   height: 100%;
   border-radius: inherit;
-  background: var(--accent-2);
+  background: var(--theme-module-active-accent-secondary);
 }
 
 .settings-progress em {

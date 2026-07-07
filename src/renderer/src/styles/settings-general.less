@@ -8,7 +8,7 @@
 
 .settings-form-row > label:first-child,
 .settings-form-row.full-label > label:first-child {
-  color: var(--text);
+  color: var(--theme-module-active-text);
   font-size: 14px;
 }
 
@@ -22,10 +22,10 @@
   width: min(360px, 100%);
   min-width: 0;
   height: 34px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 7px;
-  background: var(--surface-2);
-  color: var(--text);
+  background: var(--theme-module-active-card-bg);
+  color: var(--theme-module-active-text);
   outline: 0;
   padding: 0 10px;
 }
@@ -70,10 +70,10 @@
   height: 92px;
   border: 1px solid transparent;
   border-radius: 8px;
-  background: var(--surface-2);
+  background: var(--theme-module-active-card-bg);
   background-position: center;
   background-size: cover;
-  color: var(--text);
+  color: var(--theme-module-active-text);
   cursor: pointer;
   overflow: hidden;
   position: relative;
@@ -81,7 +81,7 @@
 
 .settings-bg-tile.default,
 .settings-bg-tile.upload {
-  border: 1px dashed var(--muted);
+  border: 1px dashed var(--theme-module-active-text-muted);
   display: grid;
   place-items: center;
   align-content: center;
@@ -93,8 +93,8 @@
 }
 
 .settings-bg-tile.active {
-  border-color: #1677ff;
-  box-shadow: 0 0 0 2px color-mix(in srgb, #1677ff 38%, transparent);
+  border-color: var(--theme-module-active-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--theme-module-active-accent) 38%, transparent);
 }
 
 .settings-bg-delete {
@@ -125,7 +125,7 @@
 }
 
 .settings-upload-section > span {
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   font-size: 13px;
 }
 
@@ -161,10 +161,10 @@
   width: max-content;
   min-width: 68px;
   height: 32px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 7px;
-  background: var(--surface-2);
-  color: var(--text);
+  background: var(--theme-module-active-card-bg);
+  color: var(--theme-module-active-text);
   cursor: pointer;
   padding: 0 12px;
   display: inline-flex;
@@ -186,13 +186,13 @@
 }
 
 .settings-button.primary {
-  background: #1677ff;
-  border-color: #1677ff;
+  background: var(--theme-module-active-accent);
+  border-color: var(--theme-module-active-accent);
   color: #fff;
 }
 
 .settings-button.danger {
-  color: var(--danger);
+  color: var(--theme-core-danger);
 }
 
 .settings-button:disabled {
@@ -218,8 +218,8 @@
   position: absolute;
   inset: 0;
   border-radius: 999px;
-  background: var(--surface-3);
-  border: 1px solid var(--border);
+  background: var(--theme-module-active-card-strong-bg);
+  border: 1px solid var(--theme-module-active-border);
   cursor: pointer;
 }
 
@@ -231,13 +231,13 @@
   top: 2px;
   left: 2px;
   border-radius: 50%;
-  background: var(--text);
+  background: var(--theme-module-active-text);
   transition: transform 0.16s ease;
 }
 
 .settings-switch input:checked + span {
-  background: #1677ff;
-  border-color: #1677ff;
+  background: var(--theme-module-active-accent);
+  border-color: var(--theme-module-active-accent);
 }
 
 .settings-switch input:checked + span::after {
@@ -254,22 +254,22 @@
 .cursor-style-button {
   width: 42px;
   height: 30px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 6px;
-  background: var(--surface-2);
+  background: var(--theme-module-active-card-bg);
   display: grid;
   place-items: center;
   cursor: pointer;
 }
 
 .cursor-style-button.active {
-  border-color: #1677ff;
-  background: color-mix(in srgb, #1677ff 18%, var(--surface-2));
+  border-color: var(--theme-module-active-accent);
+  background: color-mix(in srgb, var(--theme-module-active-accent) 18%, var(--theme-module-active-card-bg));
 }
 
 .cursor-preview {
   display: block;
-  background: var(--text);
+  background: var(--theme-module-active-text);
 }
 
 .cursor-preview.block {
@@ -300,5 +300,5 @@
 
 .mouse-event-settings span {
   width: 44px;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
 }

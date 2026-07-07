@@ -99,9 +99,11 @@ export const matchesShortcut = (event: KeyboardEvent, parsed: ParsedShortcut) =>
 export class ShortcutRuntime {
   private bindings: ShortcutBinding[] = []
   private listener: ((event: KeyboardEvent) => void) | null = null
+  private owner: Record<string, ShortcutActionHandler> | null = null
   private recording = false
 
   install(shortcuts: ShortcutUserConfig[], handlers: Record<string, ShortcutActionHandler>) {
+    this.owner = handlers
     this.bindings = this.buildBindings(shortcuts, handlers)
     if (!this.listener) {
       this.listener = (event: KeyboardEvent) => this.handleKeydown(event)
@@ -110,10 +112,14 @@ export class ShortcutRuntime {
   }
 
   update(shortcuts: ShortcutUserConfig[], handlers: Record<string, ShortcutActionHandler>) {
+    if (this.owner && this.owner !== handlers) return
+    this.owner = handlers
     this.bindings = this.buildBindings(shortcuts, handlers)
   }
 
-  setRecording(recording: boolean) {
+  setRecording(recording: boolean, handlers?: Record<string, ShortcutActionHandler>) {
+    if (handlers && this.owner && this.owner !== handlers) return
+    if (handlers && !this.owner) this.owner = handlers
     this.recording = recording
   }
 
@@ -123,6 +129,7 @@ export class ShortcutRuntime {
       this.listener = null
     }
     this.bindings = []
+    this.owner = null
     this.recording = false
   }
 

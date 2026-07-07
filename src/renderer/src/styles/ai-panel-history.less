@@ -8,10 +8,10 @@
   right: 0;
   z-index: 25;
   width: 132px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 7px;
-  background: color-mix(in srgb, var(--surface-2) 96%, transparent);
-  box-shadow: var(--shadow-soft);
+  background: color-mix(in srgb, var(--theme-module-active-card-bg) 96%, transparent);
+  box-shadow: var(--theme-module-active-shadow-soft);
   padding: 4px;
 }
 
@@ -21,7 +21,7 @@
   border: 0;
   border-radius: 5px;
   background: transparent;
-  color: var(--text);
+  color: var(--theme-module-active-text);
   display: flex;
   align-items: center;
   gap: 7px;
@@ -31,14 +31,14 @@
 }
 
 .ai-more-actions-menu button:hover {
-  background: var(--surface-3);
+  background: var(--theme-module-active-card-strong-bg);
 }
 
 .ai-more-actions-menu svg {
   width: 13px;
   height: 13px;
   flex: 0 0 13px;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
 }
 
 .ai-more-actions-menu span {
@@ -51,8 +51,8 @@
 
 .app-shell.has-app-background .ai-more-actions-menu,
 .app-shell.has-app-background .ai-history-dropdown {
-  background: var(--readable-surface-strong);
-  backdrop-filter: blur(16px);
+  background: var(--theme-module-active-readable-strong-bg);
+  backdrop-filter: var(--theme-module-active-backdrop-filter);
 }
 
 .app-shell.has-app-background .ai-more-actions-menu button:hover,
@@ -64,7 +64,7 @@
 .app-shell.has-app-background .ai-history-favorite-toggle.active,
 .app-shell.has-app-background .ai-history-actions button:hover,
 .app-shell.has-app-background .ai-history-actions button.active {
-  background: var(--glass-surface-3);
+  background: var(--theme-module-active-card-strong-bg);
 }
 
 .ai-history-dropdown {
@@ -74,10 +74,10 @@
   z-index: 20;
   width: 320px;
   max-width: min(320px, calc(100vw - 32px));
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 8px;
-  background: color-mix(in srgb, var(--surface-2) 96%, transparent);
-  box-shadow: var(--shadow-soft);
+  background: color-mix(in srgb, var(--theme-module-active-card-bg) 96%, transparent);
+  box-shadow: var(--theme-module-active-shadow-soft);
   padding: 8px;
 }
 
@@ -101,16 +101,16 @@
   flex: 1;
   height: 28px;
   gap: 6px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 6px;
-  background: var(--surface);
+  background: var(--theme-module-active-panel-bg);
   padding: 0 6px;
 }
 
 .app-shell.has-app-background .ai-history-search,
 .app-shell.has-app-background .ai-history-favorite-toggle,
 .app-shell.has-app-background .ai-history-title-input {
-  background: var(--readable-surface);
+  background: var(--theme-module-active-readable-bg);
 }
 
 .ai-history-search svg,
@@ -127,7 +127,7 @@
   flex: 1;
   border: 0;
   outline: 0;
-  color: var(--text);
+  color: var(--theme-module-active-text);
   background: transparent;
   font-size: 12px;
 }
@@ -142,15 +142,15 @@
   justify-content: center;
   border: 0;
   border-radius: 5px;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   background: transparent;
   cursor: pointer;
   padding: 0;
 }
 
 .ai-history-favorite-toggle {
-  border: 1px solid var(--border);
-  background: var(--surface);
+  border: 1px solid var(--theme-module-active-border);
+  background: var(--theme-module-active-panel-bg);
 }
 
 .ai-history-search button:hover,
@@ -158,8 +158,8 @@
 .ai-history-favorite-toggle.active,
 .ai-history-actions button:hover,
 .ai-history-actions button.active {
-  color: var(--accent);
-  background: var(--surface-3);
+  color: var(--theme-module-active-accent);
+  background: var(--theme-module-active-card-strong-bg);
 }
 
 .ai-history-list {
@@ -169,13 +169,13 @@
 
 .ai-history-date {
   gap: 5px;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   font-size: 11px;
   padding: 7px 5px 4px;
 }
 
 .ai-history-date.favorite {
-  color: var(--warn);
+  color: var(--theme-core-warning);
 }
 
 .ai-history-item {
@@ -191,7 +191,7 @@
 
 .ai-history-item:hover,
 .ai-history-item.active {
-  background: var(--surface-3);
+  background: var(--theme-module-active-card-strong-bg);
 }
 
 .ai-history-content {
@@ -202,7 +202,7 @@
 
 .ai-history-title {
   overflow: hidden;
-  color: var(--text);
+  color: var(--theme-module-active-text);
   font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -212,11 +212,11 @@
   width: 100%;
   min-width: 0;
   height: 24px;
-  border: 1px solid var(--accent);
+  border: 1px solid var(--theme-module-active-accent);
   border-radius: 5px;
   outline: 0;
-  color: var(--text);
-  background: var(--surface);
+  color: var(--theme-module-active-text);
+  background: var(--theme-module-active-panel-bg);
   padding: 0 6px;
   font-size: 12px;
 }
@@ -224,7 +224,7 @@
 .ai-history-meta {
   min-width: 0;
   gap: 8px;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   font-size: 11px;
 }
 
@@ -247,7 +247,7 @@
 }
 
 .ai-history-empty {
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   font-size: 12px;
   text-align: center;
   padding: 30px 0;
@@ -259,15 +259,15 @@
   height: 30px;
   border: 0;
   border-radius: 6px;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   background: transparent;
   cursor: pointer;
   font-size: 12px;
 }
 
 .ai-history-load-more:hover:not(:disabled) {
-  color: var(--accent);
-  background: var(--surface-3);
+  color: var(--theme-module-active-accent);
+  background: var(--theme-module-active-card-strong-bg);
 }
 
 .ai-history-load-more:disabled {
@@ -284,10 +284,10 @@
   min-height: 34px;
   gap: 6px;
   padding: 4px;
-  border: 1px solid color-mix(in srgb, var(--accent) 36%, var(--border));
+  border: 1px solid color-mix(in srgb, var(--theme-module-active-accent) 36%, var(--theme-module-active-border));
   border-radius: 8px;
-  background: color-mix(in srgb, var(--surface-2) 92%, transparent);
-  box-shadow: var(--shadow-soft);
+  background: color-mix(in srgb, var(--theme-module-active-card-bg) 92%, transparent);
+  box-shadow: var(--theme-module-active-shadow-soft);
   backdrop-filter: blur(12px);
 }
 
@@ -297,9 +297,9 @@
   height: 26px;
   gap: 6px;
   padding: 0 6px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 6px;
-  background: var(--surface);
+  background: var(--theme-module-active-panel-bg);
 }
 
 .ai-chat-search-input-wrap > svg,
@@ -314,20 +314,20 @@
   flex: 1;
   border: 0;
   outline: 0;
-  color: var(--text);
+  color: var(--theme-module-active-text);
   background: transparent;
   font-size: 12px;
 }
 
 .ai-chat-search-count {
   flex-shrink: 0;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
 }
 
 .ai-chat-search-count.no-results {
-  color: var(--danger);
+  color: var(--theme-core-danger);
 }
 
 .ai-chat-search-input-wrap button,
@@ -336,7 +336,7 @@
   height: 22px;
   border: 0;
   border-radius: 5px;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   background: transparent;
   cursor: pointer;
   display: inline-flex;
@@ -347,8 +347,8 @@
 
 .ai-chat-search-input-wrap button:hover,
 .ai-chat-search-controls button:hover:not(:disabled) {
-  color: var(--text);
-  background: var(--surface-3);
+  color: var(--theme-module-active-text);
+  background: var(--theme-module-active-card-strong-bg);
 }
 
 .ai-chat-search-controls {
@@ -362,27 +362,26 @@
 }
 
 .app-shell.has-app-background .ai-chat-search-bar {
-  background: var(--readable-surface-strong);
+  background: var(--theme-module-active-readable-strong-bg);
 }
 
 .app-shell.has-app-background .ai-chat-search-input-wrap {
-  background: var(--readable-surface);
+  background: var(--theme-module-active-readable-bg);
 }
 
 .app-shell.has-app-background .ai-chat-search-input-wrap button:hover,
 .app-shell.has-app-background .ai-chat-search-controls button:hover:not(:disabled) {
-  background: var(--glass-surface-3);
+  background: var(--theme-module-active-card-strong-bg);
 }
 
 .ai-chat-search-highlight {
   border-radius: 3px;
-  color: var(--text);
-  background: color-mix(in srgb, var(--warn) 42%, transparent);
+  color: var(--theme-module-active-text);
+  background: color-mix(in srgb, var(--theme-core-warning) 42%, transparent);
   padding: 0 1px;
 }
 
 .ai-chat-search-highlight.active {
-  color: var(--surface);
-  background: var(--warn);
+  color: var(--theme-module-active-panel-bg);
+  background: var(--theme-core-warning);
 }
-

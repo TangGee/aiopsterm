@@ -4,13 +4,13 @@
   min-height: 0;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
-  background: var(--workspace-bg);
+  background: var(--theme-module-active-workspace-bg);
   overflow: hidden;
 }
 
 .k8s-context-strip {
-  border-bottom: 1px solid var(--border);
-  background: color-mix(in srgb, var(--surface) 86%, transparent);
+  border-bottom: 1px solid var(--theme-module-active-border);
+  background: color-mix(in srgb, var(--theme-module-active-panel-bg) 86%, transparent);
   padding: 10px;
 }
 
@@ -28,10 +28,10 @@
 }
 
 .k8s-context-item {
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 7px;
-  background: var(--surface-2);
-  color: var(--text);
+  background: var(--theme-module-active-card-bg);
+  color: var(--theme-module-active-text);
   display: grid;
   gap: 3px;
   padding: 10px;
@@ -40,7 +40,7 @@
 }
 
 .k8s-context-item.active {
-  border-color: color-mix(in srgb, var(--accent) 48%, var(--border));
+  border-color: color-mix(in srgb, var(--theme-module-active-accent) 48%, var(--theme-module-active-border));
 }
 
 .k8s-context-item strong {
@@ -52,10 +52,10 @@
 .k8s-context-item strong span,
 .k8s-status-tag,
 .k8s-config-cluster-item em {
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 999px;
   padding: 1px 7px;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   font-size: 11px;
   white-space: nowrap;
 }
@@ -63,18 +63,18 @@
 .k8s-context-item.active strong span,
 .k8s-status-tag.connected,
 .k8s-config-cluster-item em {
-  border-color: color-mix(in srgb, var(--accent-2) 45%, var(--border));
-  color: var(--accent-2);
+  border-color: color-mix(in srgb, var(--theme-module-active-accent-secondary) 45%, var(--theme-module-active-border));
+  color: var(--theme-module-active-accent-secondary);
 }
 
 .k8s-status-tag.error {
-  border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
-  color: var(--danger);
+  border-color: color-mix(in srgb, var(--theme-core-danger) 45%, var(--theme-module-active-border));
+  color: var(--theme-core-danger);
 }
 
 .k8s-status-tag.connecting {
-  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
-  color: var(--accent);
+  border-color: color-mix(in srgb, var(--theme-module-active-accent) 45%, var(--theme-module-active-border));
+  color: var(--theme-module-active-accent);
 }
 
 .k8s-main-grid {
@@ -89,9 +89,9 @@
   min-width: 0;
   min-height: 0;
   margin: 0 10px 10px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 8px;
-  background: var(--surface);
+  background: var(--theme-module-active-panel-bg);
   display: grid;
   grid-template-rows: auto auto auto auto minmax(0, 1fr);
   overflow: hidden;
@@ -108,7 +108,7 @@
 .k8s-resource-header {
   justify-content: space-between;
   padding: 10px 12px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--theme-module-active-border);
 }
 
 .k8s-resource-header h3,
@@ -117,7 +117,7 @@
 }
 
 .k8s-resource-header p {
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   font-size: 12px;
   margin-top: 2px;
 }

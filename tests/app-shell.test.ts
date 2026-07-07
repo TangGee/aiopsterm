@@ -890,6 +890,7 @@ describe('AppShell', () => {
   })
 
   it('renders primary product surfaces', async () => {
+    mockXtermInstances.length = 0
     const wrapper = mount(AppShell, {
       global: {
         plugins: [createPinia()],
@@ -908,7 +909,10 @@ describe('AppShell', () => {
     expect(wrapper.find('[data-testid="ai-codex-shell"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="ai-panel-mode-open"]').text()).toContain('Codex CLI')
     expect(wrapper.find('[data-testid="ai-codex-target-bar"]').text()).toContain('未绑定终端')
+    expect(wrapper.find('.ai-codex-xterm-stack').classes()).toContain('is-empty')
+    expect(wrapper.find('[data-testid="ai-codex-xterm"]').classes()).toContain('is-empty')
     expect(window.aiops.createCodexSession).not.toHaveBeenCalled()
+    expect(mockXtermInstances.some((terminal) => terminal.debugInfo?.().surface === 'codex')).toBe(false)
     expect(wrapper.text()).toContain('切换布局')
     expect(wrapper.text()).not.toContain('local shell')
   })
@@ -1527,10 +1531,14 @@ describe('AppShell', () => {
     expect(shell.attributes('style')).toContain('--app-bg-opacity: 0.4')
     expect(shell.attributes('style')).toContain('--app-bg-brightness: 0.7')
     const styles = appStyles()
-    expect(styles).toContain('--workspace-bg: color-mix(in srgb, var(--bg) 6%, transparent);')
-    expect(styles).toContain('--glass-surface: color-mix(in srgb, var(--surface) 36%, transparent);')
-    expect(styles).toContain('--readable-surface: color-mix(in srgb, var(--surface-2) 82%, transparent);')
-    expect(styles).toContain('.side-rail {\n  width: 48px;\n  border-right: 1px solid var(--border);\n  background: var(--glass-surface);')
+    expect(styles).toContain('--theme-module-active-workspace-bg: #0f1117;')
+    expect(styles).toContain('.theme-module-active(@module, @layer) {')
+    expect(styles).toContain('color: var(--theme-module-active-text);')
+    expect(styles).toContain('.app-shell {\n  .theme-module-active(workspace, base);')
+    expect(styles).toContain('.app-shell.has-app-background {\n  .theme-module-active(workspace, with-background);')
+    expect(styles).toContain('.app-body.module-database')
+    expect(styles).toContain('.theme-module-active(database, with-background);')
+    expect(styles).toContain('.side-rail {\n  width: 48px;\n  border-right: 1px solid var(--theme-shell-border);\n  background: var(--theme-shell-rail-bg);')
     expect(styles).toContain('.terminal-tabs-frame {\n  position: relative;')
     expect(styles).toContain('grid-template-columns: auto minmax(0, 1fr) auto;')
     expect(styles).toContain('grid-column: 2;')
@@ -1545,17 +1553,22 @@ describe('AppShell', () => {
     expect(styles).toContain('.app-shell.has-app-background .select-popup')
     expect(styles).toContain('.app-shell.has-app-background .message,')
     expect(styles).toContain('.app-shell.has-app-background .db-status-bar')
-    expect(styles).toContain('.app-shell.has-app-background .ai-codex-xterm-stack.is-idle')
-    expect(styles).toContain('.app-shell.has-app-background .ai-codex-xterm .xterm-viewport')
-    expect(styles).toContain('background: transparent !important;')
+    expect(styles).toContain('--theme-terminal-active-pane-bg: var(--theme-terminal-with-background-pane-bg);')
+    expect(styles).toContain('--theme-terminal-active-xterm-viewport-bg: var(--theme-terminal-with-background-xterm-viewport-bg);')
+    expect(styles).toContain('background: var(--theme-terminal-active-xterm-viewport-bg) !important;')
+    expect(styles).toContain('.xterm-host.threaded-terminal-host {\n  background: transparent !important;\n}')
     expect(styles).toContain('.ai-codex-xterm-stack {')
     expect(styles).toContain('grid-template: minmax(0, 1fr) / minmax(0, 1fr);')
-    expect(styles).toContain('border: 1px solid var(--border);')
+    expect(styles).toContain('border: 1px solid var(--theme-module-active-border);')
+    expect(styles).toContain('background: var(--theme-terminal-active-codex-stack-bg);')
     expect(styles).toContain('.ai-codex-xterm-stack > .threaded-terminal-render-group-canvas')
+    expect(styles).toContain('.ai-codex-xterm-stack > .threaded-terminal-render-group-canvas {\n  background: transparent !important;')
+    expect(styles).toContain('.ai-codex-xterm-stack.is-empty > .threaded-terminal-render-group-canvas,')
+    expect(styles).toContain('.ai-codex-xterm-stack.is-empty > .ai-codex-xterm {\n  opacity: 0;')
+    expect(styles).toContain('.ai-codex-xterm.threaded-terminal-host {\n  border: 0;\n  border-radius: 0;\n  background: transparent !important;\n}')
     expect(styles).toContain('.app-shell.has-app-background .ai-codex-xterm.threaded-terminal-host,')
     expect(styles).toContain('backdrop-filter: none;')
-    expect(styles).toContain(":root[data-theme-id='ubuntu-terminal'] {\n  --terminal-host-bg: #300A24;\n  --threaded-terminal-pane-bg: transparent;\n}")
-    expect(styles).toContain(":root[data-theme-id='ubuntu-terminal'] .app-shell.has-app-background .terminal-pane:has(.threaded-terminal-host) {\n  background: var(--threaded-terminal-pane-bg, transparent);\n}")
+    expect(styles).toContain('background: var(--theme-terminal-active-threaded-pane-bg);')
 
     await expect(store.selectBackground('preset', 'aurora-glass-image')).resolves.toBe(true)
     await wrapper.vm.$nextTick()
@@ -1662,6 +1675,9 @@ describe('AppShell', () => {
 
     const codexTerminal = mockXtermInstances.at(-1)!
     expect(codexTerminal.debugInfo?.().surface).toBe('codex')
+    const codexHost = wrapper.find('[data-testid="ai-codex-xterm"]')
+    expect(codexHost.classes()).toContain('threaded-terminal-host')
+    expect(codexHost.classes()).not.toContain('is-empty')
     expect(codexTerminal.options.termName).toBe('xterm-256color')
     const codexTerminalFont = '"Liberation Mono", "DejaVu Sans Mono", "Noto Sans Mono", monospace'
     await expect(
@@ -2263,11 +2279,7 @@ describe('AppShell', () => {
     await terminal.vm.$nextTick()
     await terminal.vm.$nextTick()
 
-    const contextBar = terminal.find('.terminal-context-bar')
-    expect(contextBar.text()).toContain('Local')
-    expect(contextBar.text()).toContain('AI Sessions')
-    expect(contextBar.text()).toContain('Copy context')
-    expect(contextBar.findAll('button').find((button) => button.text() === 'Refresh')?.attributes('title')).toBe('Refresh AI session status')
+    expect(terminal.find('.terminal-context-bar').exists()).toBe(false)
 
     sessions.unmount()
     terminal.unmount()
@@ -9790,7 +9802,7 @@ describe('AppShell', () => {
     wrapper.unmount()
   })
 
-  it('shows and copies the active terminal context bar with pending AI attention', async () => {
+  it('does not render the active terminal context bar with pending AI attention', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     mockXtermInstances.length = 0
@@ -9827,43 +9839,9 @@ describe('AppShell', () => {
     await wrapper.vm.$nextTick()
     await wrapper.vm.$nextTick()
 
-    const contextBar = wrapper.find('.terminal-context-bar')
-    expect(contextBar.exists()).toBe(true)
-    expect(contextBar.text()).toContain('bash')
-    expect(contextBar.text()).toContain('Local')
-    expect(contextBar.text()).toContain('/srv/projects/deploy')
-    expect(contextBar.text()).toContain('1 AI')
-
-    await contextBar.findAll('button').find((button) => button.text().includes('复制上下文'))!.trigger('click')
-    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(expect.stringContaining('Title: bash'))
-    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(expect.stringContaining('CWD: /srv/projects/deploy'))
-    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(expect.stringContaining('Pending AI: claude-code/Deploy approval'))
-    expect(store.topNotice).toBe('终端上下文已复制')
-
-    vi.mocked(window.aiops.listManagedAiSessions).mockResolvedValueOnce({
-      ok: true,
-      data: {
-        sessions: store.managedAiSessions.map((session) => ({
-          ...session,
-          events: session.events || [],
-          decisions: session.decisions || []
-        }))
-      }
-    } as any)
-    await contextBar.findAll('button').find((button) => button.text().includes('AI 会话'))!.trigger('click')
-    expect(store.activeModule).toBe('aiSessions')
-    await contextBar.findAll('button').find((button) => button.text() === '刷新')!.trigger('click')
-    await flushPromises()
-    expect(window.aiops.listManagedAiSessions).toHaveBeenCalled()
-    expect(store.topNotice).toBe('AI 会话已刷新')
-    await contextBar.findAll('button').find((button) => button.text() === '聚焦')!.trigger('click')
-    await wrapper.vm.$nextTick()
-    expect(store.activeModule).toBe('workspace')
-    expect(mockXtermInstances.at(-1)!.focus).toHaveBeenCalled()
-
-    await contextBar.find('.terminal-context-attention').trigger('click')
-    expect(store.activeModule).toBe('aiSessions')
-    expect(store.selectedManagedAiSession?.id).toBe('claude-deploy-approval')
+    expect(wrapper.find('.terminal-context-bar').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('复制上下文')
+    expect(wrapper.text()).not.toContain('1 AI')
 
     wrapper.unmount()
   })
@@ -16370,7 +16348,7 @@ describe('AppShell', () => {
     expect(store.config.theme).toBe('catppuccin-latte')
     expect(document.documentElement.dataset.theme).toBe('light')
     expect(document.documentElement.dataset.themeId).toBe('catppuccin-latte')
-    expect(document.documentElement.style.getPropertyValue('--accent')).toBe('#1e66f5')
+    expect(document.documentElement.style.getPropertyValue('--theme-core-accent')).toBe('#1e66f5')
     await workspace.find('.settings-button.primary').trigger('click')
     expect(store.onboardingGuideOpen).toBe(true)
     await workspace.vm.$nextTick()

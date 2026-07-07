@@ -1,12 +1,12 @@
 .message {
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 8px;
   padding: 10px;
-  background: var(--surface-2);
+  background: var(--theme-module-active-card-bg);
 }
 
 .message.user {
-  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  border-color: color-mix(in srgb, var(--theme-module-active-accent) 45%, var(--theme-module-active-border));
 }
 
 .app-shell.has-app-background .message,
@@ -15,7 +15,7 @@
 .app-shell.has-app-background .message-command-card,
 .app-shell.has-app-background .ai-mcp-tool-call,
 .app-shell.has-app-background .model-strip {
-  background: var(--readable-surface);
+  background: var(--theme-module-active-readable-bg);
 }
 
 .app-shell.has-app-background .ai-markdown-content code,
@@ -23,17 +23,17 @@
 .app-shell.has-app-background .ai-command-output-body,
 .app-shell.has-app-background .message-command-code,
 .app-shell.has-app-background .ai-mcp-tool-call pre {
-  background: var(--readable-surface-strong);
+  background: var(--theme-module-active-readable-strong-bg);
 }
 
 .app-shell.has-app-background .ai-rendered-block-header {
-  background: var(--glass-surface-3);
+  background: var(--theme-module-active-card-strong-bg);
 }
 
 .message-role {
   display: block;
   margin-bottom: 6px;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   font-size: 11px;
 }
 

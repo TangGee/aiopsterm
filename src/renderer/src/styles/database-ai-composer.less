@@ -1,9 +1,9 @@
 .db-ai-pane-composer {
   padding: 10px 12px 12px;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--theme-module-active-border);
   display: grid;
   gap: 8px;
-  background: var(--surface);
+  background: var(--theme-module-active-panel-bg);
 }
 
 .db-ai-pane-quick-actions {
@@ -17,8 +17,8 @@
   width: auto;
   min-height: 24px;
   padding: 0 8px;
-  border: 1px solid var(--border);
-  background: var(--surface-2);
+  border: 1px solid var(--theme-module-active-border);
+  background: var(--theme-module-active-card-bg);
   font-size: 11px;
 }
 
@@ -39,14 +39,14 @@
 }
 
 .db-ai-pane-composer-actions .primary {
-  border: 1px solid color-mix(in srgb, var(--accent) 55%, var(--border));
-  background: color-mix(in srgb, var(--accent) 16%, var(--surface));
-  color: var(--text);
+  border: 1px solid color-mix(in srgb, var(--theme-module-active-accent) 55%, var(--theme-module-active-border));
+  background: color-mix(in srgb, var(--theme-module-active-accent) 16%, var(--theme-module-active-panel-bg));
+  color: var(--theme-module-active-text);
 }
 
 .db-ai-pane-composer-actions button:disabled,
 .db-ai-pane-quick-actions button:disabled {
   cursor: not-allowed;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   opacity: 0.55;
 }

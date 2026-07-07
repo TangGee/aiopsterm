@@ -4,7 +4,7 @@
   min-height: 0;
   height: 100%;
   overflow: hidden;
-  background: var(--workspace-bg);
+  background: var(--theme-module-active-workspace-bg);
 }
 
 .plugin_detail_view,
@@ -12,8 +12,8 @@
   height: 100%;
   min-height: 0;
   overflow: auto;
-  background: color-mix(in srgb, var(--surface) 75%, transparent);
-  color: var(--text);
+  background: color-mix(in srgb, var(--theme-module-active-panel-bg) 75%, transparent);
+  color: var(--theme-module-active-text);
 }
 
 .plugin_detail_view {
@@ -22,7 +22,7 @@
 
 .detail_header {
   padding: 30px 0;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--theme-module-active-border);
 }
 
 .header_content,
@@ -46,7 +46,7 @@
   width: 90px;
   height: 90px;
   border-radius: 8px;
-  background: var(--surface-2);
+  background: var(--theme-module-active-card-bg);
 }
 
 .plugin_icon_large svg {
@@ -67,7 +67,7 @@
 
 .plugin_description {
   margin: 3px 0 10px;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   font-size: 14px;
 }
 
@@ -110,22 +110,22 @@
 
 .detail_tabs {
   min-height: 48px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--theme-module-active-border);
 }
 
 .detail_tabs button {
   border: 0;
   min-height: 36px;
   padding: 0 12px;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   background: transparent;
   border-bottom: 2px solid transparent;
   border-radius: 0;
 }
 
 .detail_tabs button.active {
-  color: var(--accent);
-  border-bottom-color: var(--accent);
+  color: var(--theme-module-active-accent);
+  border-bottom-color: var(--theme-module-active-accent);
 }
 
 .markdown_readme_container {
@@ -135,10 +135,10 @@
 .plugin_install_progress {
   position: relative;
   height: 30px;
-  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+  border: 1px solid color-mix(in srgb, var(--theme-module-active-accent) 35%, var(--theme-module-active-border));
   border-radius: 6px;
-  background: var(--surface-2);
-  color: var(--text);
+  background: var(--theme-module-active-card-bg);
+  color: var(--theme-module-active-text);
   overflow: hidden;
   margin-top: 14px;
   display: flex;

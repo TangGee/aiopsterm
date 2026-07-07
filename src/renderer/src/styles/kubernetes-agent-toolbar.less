@@ -6,8 +6,8 @@
   align-items: center;
   gap: 8px;
   padding: 8px 12px;
-  border-bottom: 1px solid var(--border);
-  background: var(--surface-2);
+  border-bottom: 1px solid var(--theme-module-active-border);
+  background: var(--theme-module-active-card-bg);
 }
 
 .k8s-agent-current {
@@ -27,31 +27,31 @@
 }
 
 .k8s-agent-current small {
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
 }
 
 .k8s-agent-current em {
   flex: 0 0 auto;
   border-radius: 999px;
   padding: 2px 7px;
-  background: color-mix(in srgb, var(--muted) 18%, transparent);
-  color: var(--muted);
+  background: color-mix(in srgb, var(--theme-module-active-text-muted) 18%, transparent);
+  color: var(--theme-module-active-text-muted);
   font-style: normal;
 }
 
 .k8s-agent-current em.ready {
-  background: color-mix(in srgb, var(--success) 18%, transparent);
-  color: var(--success);
+  background: color-mix(in srgb, var(--theme-core-success) 18%, transparent);
+  color: var(--theme-core-success);
 }
 
 .k8s-agent-current em.running {
-  background: color-mix(in srgb, var(--accent) 18%, transparent);
-  color: var(--accent);
+  background: color-mix(in srgb, var(--theme-module-active-accent) 18%, transparent);
+  color: var(--theme-module-active-accent);
 }
 
 .k8s-agent-current em.error {
-  background: color-mix(in srgb, var(--danger) 18%, transparent);
-  color: var(--danger);
+  background: color-mix(in srgb, var(--theme-core-danger) 18%, transparent);
+  color: var(--theme-core-danger);
 }
 
 .k8s-agent-bar select,
@@ -60,10 +60,10 @@
 .k8s-agent-history button {
   height: 28px;
   min-width: 0;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 5px;
-  background: var(--surface);
-  color: var(--text);
+  background: var(--theme-module-active-panel-bg);
+  color: var(--theme-module-active-text);
   font-size: 12px;
 }
 
@@ -90,7 +90,7 @@
   display: flex;
   gap: 6px;
   padding: 6px 12px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--theme-module-active-border);
   overflow: hidden;
 }
 
@@ -104,16 +104,16 @@
 .k8s-resource-toolbar {
   min-width: 0;
   padding: 8px 12px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--theme-module-active-border);
   flex-wrap: wrap;
 }
 
 .k8s-resource-filter {
   min-width: 190px;
   min-height: 30px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 7px;
-  background: var(--surface-2);
+  background: var(--theme-module-active-card-bg);
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
@@ -122,7 +122,7 @@
 }
 
 .k8s-resource-filter span {
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   font-size: 12px;
 }
 
@@ -131,7 +131,7 @@
   border: 0;
   outline: 0;
   background: transparent;
-  color: var(--text);
+  color: var(--theme-module-active-text);
 }
 
 .k8s-resource-kind-tabs {
@@ -144,10 +144,10 @@
 
 .k8s-resource-kind-tabs button {
   min-height: 30px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 6px;
-  background: var(--surface-2);
-  color: var(--muted);
+  background: var(--theme-module-active-card-bg);
+  color: var(--theme-module-active-text-muted);
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -156,16 +156,16 @@
 }
 
 .k8s-resource-kind-tabs button.active {
-  color: var(--text);
-  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
-  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+  color: var(--theme-module-active-text);
+  border-color: color-mix(in srgb, var(--theme-module-active-accent) 45%, var(--theme-module-active-border));
+  background: color-mix(in srgb, var(--theme-module-active-accent) 10%, var(--theme-module-active-panel-bg));
 }
 
 .k8s-resource-kind-tabs button span {
   min-width: 18px;
   border-radius: 999px;
-  background: var(--surface-3);
-  color: var(--text);
+  background: var(--theme-module-active-card-strong-bg);
+  color: var(--theme-module-active-text);
   font-size: 11px;
   line-height: 18px;
   text-align: center;

@@ -1,13 +1,12 @@
 
 .terminal-pane.active {
-  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  border-color: color-mix(in srgb, var(--theme-module-active-accent) 34%, var(--theme-module-active-border));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--theme-module-active-accent) 10%, transparent);
 }
 
 .terminal-pane.ai-attention {
-  border-color: color-mix(in srgb, var(--accent) 72%, var(--border));
-  box-shadow:
-    inset 0 0 0 1px color-mix(in srgb, var(--accent) 36%, transparent),
-    0 0 0 1px color-mix(in srgb, var(--accent) 14%, transparent);
+  border-color: color-mix(in srgb, var(--theme-module-active-accent) 46%, var(--theme-module-active-border));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--theme-module-active-accent) 14%, transparent);
 }
 
 .terminal-pane.control-flash {
@@ -15,20 +14,19 @@
 }
 
 .terminal-pane.drag-over {
-  border-color: color-mix(in srgb, var(--accent) 72%, var(--border));
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 42%, transparent);
+  border-color: color-mix(in srgb, var(--theme-module-active-accent) 58%, var(--theme-module-active-border));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--theme-module-active-accent) 14%, transparent);
 }
 
 @keyframes control-surface-flash {
   0% {
-    border-color: color-mix(in srgb, var(--accent) 86%, var(--border));
+    border-color: color-mix(in srgb, var(--theme-module-active-accent) 66%, var(--theme-module-active-border));
     box-shadow:
-      inset 0 0 0 1px color-mix(in srgb, var(--accent) 48%, transparent),
-      0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
+      0 0 0 3px color-mix(in srgb, var(--theme-module-active-accent) 20%, transparent);
   }
 
   100% {
-    border-color: var(--border);
+    border-color: color-mix(in srgb, var(--theme-module-active-border) 72%, transparent);
     box-shadow: none;
   }
 }
@@ -39,7 +37,7 @@
 
 .terminal-pane.knowledge-pane {
   grid-template-rows: minmax(0, 1fr);
-  background: var(--surface);
+  background: var(--theme-module-active-panel-bg);
 }
 
 .pane-title {
@@ -50,8 +48,9 @@
   justify-content: space-between;
   gap: 8px;
   overflow: hidden;
-  background: #111620;
-  border-bottom: 1px solid #202637;
+  background: var(--theme-terminal-active-title-bg);
+  backdrop-filter: var(--theme-terminal-active-title-backdrop-filter);
+  border-bottom: 1px solid var(--theme-module-active-border);
   padding: 0 9px;
 }
 
@@ -72,43 +71,22 @@
   text-align: right;
 }
 
-.app-shell.has-app-background .terminal-pane {
-  background: color-mix(in srgb, var(--terminal-host-bg, #090b10) 94%, transparent);
-}
-
-.app-shell.has-app-background .terminal-pane:has(.threaded-terminal-host) {
-  background: var(--threaded-terminal-pane-bg, transparent);
-}
-
-:root[data-theme-id='ubuntu-terminal'] .app-shell.has-app-background .terminal-pane {
-  background: var(--terminal-host-bg);
-}
-
-:root[data-theme-id='ubuntu-terminal'] .app-shell.has-app-background .terminal-pane:has(.threaded-terminal-host) {
-  background: var(--threaded-terminal-pane-bg, transparent);
-}
-
 .app-shell.has-app-background .terminal-pane.knowledge-pane {
-  background: var(--readable-surface-strong);
+  background: var(--theme-module-active-readable-strong-bg);
 }
 
 .app-shell.has-app-background .terminal-search-overlay,
 .app-shell.has-app-background .command-dialog-card,
 .app-shell.has-app-background .terminal-chat-ai-button,
 .app-shell.has-app-background .terminal-suggestions {
-  background: var(--readable-surface-strong);
+  background: var(--theme-module-active-readable-strong-bg);
   backdrop-filter: blur(16px);
 }
 
 .app-shell.has-app-background .terminal-search-overlay > div,
 .app-shell.has-app-background .command-dialog-card select,
 .app-shell.has-app-background .generated-command-row {
-  background: var(--readable-surface);
-}
-
-.app-shell.has-app-background .pane-title {
-  background: color-mix(in srgb, #111620 78%, transparent);
-  backdrop-filter: blur(10px);
+  background: var(--theme-module-active-readable-bg);
 }
 
 .app-shell.has-app-background .terminal-suggestions .terminal-suggestion-arrow,
@@ -116,7 +94,7 @@
 .app-shell.has-app-background .terminal-suggestions .suggestion-item:hover,
 .app-shell.has-app-background .command-dialog-close:hover,
 .app-shell.has-app-background .generated-command-row button {
-  background: var(--glass-surface-3);
+  background: var(--theme-module-active-card-strong-bg);
 }
 
 @import './knowledge-editor.less';
@@ -174,14 +152,14 @@
   z-index: 9;
   min-height: 30px;
   padding: 0 12px;
-  border: 1px solid color-mix(in srgb, var(--accent) 55%, var(--border));
+  border: 1px solid color-mix(in srgb, var(--theme-module-active-accent) 55%, var(--theme-module-active-border));
   border-radius: 7px;
   display: inline-flex;
   align-items: center;
   gap: 10px;
-  background: var(--surface);
-  color: var(--text);
-  box-shadow: var(--shadow);
+  background: var(--theme-module-active-panel-bg);
+  color: var(--theme-module-active-text);
+  box-shadow: var(--theme-module-active-shadow);
   cursor: pointer;
 }
 
@@ -193,9 +171,9 @@
   padding: 6px 8px;
   border: 2px solid transparent;
   border-radius: 8px;
-  background: var(--surface);
-  color: var(--muted);
-  box-shadow: var(--shadow);
+  background: var(--theme-module-active-panel-bg);
+  color: var(--theme-module-active-text-muted);
+  box-shadow: var(--theme-module-active-shadow);
   font-family: var(--editor-font-family);
   pointer-events: none;
 }
@@ -206,7 +184,7 @@
   width: 24px;
   height: 24px;
   border-radius: 4px;
-  background: var(--surface-3);
+  background: var(--theme-module-active-card-strong-bg);
   color: #52c41a;
   pointer-events: none;
   transition: top 0.15s ease, opacity 0.15s ease;
@@ -254,7 +232,7 @@
   grid-template-columns: 20px minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
-  color: var(--text);
+  color: var(--theme-module-active-text);
   background: transparent;
   text-align: left;
   cursor: pointer;
@@ -298,7 +276,7 @@
 
 .terminal-suggestions .suggestion-item.active,
 .terminal-suggestions .suggestion-item:hover {
-  background: var(--surface-3);
+  background: var(--theme-module-active-card-strong-bg);
 }
 
 .terminal-suggestions .suggestion-item span {
@@ -314,11 +292,11 @@
 .terminal-suggestions .keyboard-hints {
   margin-top: 5px;
   padding-top: 5px;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--theme-module-active-border);
   display: flex;
   align-items: center;
   gap: 10px;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   font-family: Inter, ui-sans-serif, system-ui, sans-serif;
   font-size: 11px;
 }

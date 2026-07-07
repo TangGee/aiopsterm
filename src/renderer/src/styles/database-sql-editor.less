@@ -17,12 +17,12 @@
 .db-sql-editor-shell {
   position: relative;
   min-height: 0;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--theme-module-active-border);
   display: grid;
   grid-template-columns: 48px minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr) 24px;
   overflow: hidden;
-  background: var(--surface-2);
+  background: var(--theme-module-active-card-bg);
   cursor: text;
 }
 
@@ -31,39 +31,39 @@
   height: 8px;
   padding: 0;
   border: 0;
-  border-top: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
+  border-top: 1px solid var(--theme-module-active-border);
+  border-bottom: 1px solid var(--theme-module-active-border);
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--surface);
+  background: var(--theme-module-active-panel-bg);
   cursor: row-resize;
 }
 
 .db-sql-splitter:hover,
 .db-sql-panes.resizing .db-sql-splitter {
-  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+  background: color-mix(in srgb, var(--theme-module-active-accent) 12%, var(--theme-module-active-panel-bg));
 }
 
 .db-sql-splitter span {
   width: 34px;
   height: 2px;
   border-radius: 999px;
-  background: var(--border);
+  background: var(--theme-module-active-border);
 }
 
 .db-sql-splitter:hover span,
 .db-sql-panes.resizing .db-sql-splitter span {
-  background: var(--accent);
+  background: var(--theme-module-active-accent);
 }
 
 .db-sql-editor-gutter {
   grid-column: 1;
   grid-row: 1;
   padding: 12px 8px 12px 0;
-  border-right: 1px solid var(--border);
-  color: var(--muted);
-  background: var(--surface);
+  border-right: 1px solid var(--theme-module-active-border);
+  color: var(--theme-module-active-text-muted);
+  background: var(--theme-module-active-panel-bg);
   font-family: var(--editor-font-family);
   font-size: var(--db-sql-editor-font-size, var(--editor-font-size));
   line-height: var(--db-sql-editor-line-height, var(--editor-line-height));
@@ -79,7 +79,7 @@
 }
 
 .db-sql-editor-gutter span.active {
-  color: var(--text);
+  color: var(--theme-module-active-text);
   font-weight: 600;
 }
 
@@ -91,8 +91,8 @@
   min-height: 0;
   overflow: hidden;
   background:
-    linear-gradient(to bottom, color-mix(in srgb, var(--border) 55%, transparent) 1px, transparent 1px) 0 11px / 100% var(--db-sql-editor-line-height, var(--editor-line-height)),
-    var(--surface-2);
+    linear-gradient(to bottom, color-mix(in srgb, var(--theme-module-active-border) 55%, transparent) 1px, transparent 1px) 0 11px / 100% var(--db-sql-editor-line-height, var(--editor-line-height)),
+    var(--theme-module-active-card-bg);
 }
 
 .db-sql-monaco-editor,
@@ -111,7 +111,7 @@
   left: 0;
   right: 0;
   height: var(--db-sql-editor-line-height, var(--editor-line-height));
-  background: color-mix(in srgb, var(--accent) 9%, transparent);
+  background: color-mix(in srgb, var(--theme-module-active-accent) 9%, transparent);
   pointer-events: none;
   will-change: transform;
 }
@@ -127,9 +127,9 @@
   font-family: var(--editor-font-family);
   font-size: var(--db-sql-editor-font-size, var(--editor-font-size));
   line-height: var(--db-sql-editor-line-height, var(--editor-line-height));
-  color: var(--text);
+  color: var(--theme-module-active-text);
   background: transparent;
-  caret-color: var(--accent);
+  caret-color: var(--theme-module-active-accent);
   white-space: pre;
   overflow: auto;
   tab-size: var(--db-sql-editor-tab-size, var(--editor-tab-size));

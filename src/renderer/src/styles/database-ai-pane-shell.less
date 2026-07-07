@@ -2,8 +2,8 @@
   position: relative;
   min-width: 0;
   min-height: 0;
-  border-left: 1px solid var(--border);
-  background: var(--surface);
+  border-left: 1px solid var(--theme-module-active-border);
+  background: var(--theme-module-active-panel-bg);
   overflow: hidden;
 }
 
@@ -29,7 +29,7 @@
 
 .db-ai-pane-resizer:hover::after,
 .database-workspace.db-ai-pane-resizing .db-ai-pane-resizer::after {
-  background: var(--accent);
+  background: var(--theme-module-active-accent);
 }
 
 .db-ai-pane-shell {
@@ -43,7 +43,7 @@
 .db-ai-pane-header {
   min-height: 44px;
   padding: 8px 10px 8px 12px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--theme-module-active-border);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -58,7 +58,7 @@
 }
 
 .db-ai-pane-title > svg {
-  color: var(--accent);
+  color: var(--theme-module-active-accent);
 }
 
 .db-ai-pane-title div {
@@ -76,6 +76,6 @@
 }
 
 .db-ai-pane-title span {
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   font-size: 11px;
 }

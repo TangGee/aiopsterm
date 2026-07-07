@@ -11,20 +11,20 @@
   position: relative;
   min-width: 280px;
   max-width: 600px;
-  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border));
+  border: 1px solid color-mix(in srgb, var(--theme-module-active-accent) 30%, var(--theme-module-active-border));
   border-radius: 8px;
-  background: color-mix(in srgb, var(--surface) 96%, transparent);
-  color: var(--text);
+  background: color-mix(in srgb, var(--theme-module-active-panel-bg) 96%, transparent);
+  color: var(--theme-module-active-text);
   box-shadow: 0 12px 36px rgb(0 0 0 / 0.32);
   backdrop-filter: blur(16px);
   overflow: hidden;
 }
 
 .command-dialog-card:focus-within {
-  border-color: color-mix(in srgb, var(--accent) 72%, var(--border));
+  border-color: color-mix(in srgb, var(--theme-module-active-accent) 72%, var(--theme-module-active-border));
   box-shadow:
     0 12px 36px rgb(0 0 0 / 0.32),
-    0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+    0 0 0 3px color-mix(in srgb, var(--theme-module-active-accent) 18%, transparent);
 }
 
 .command-dialog-card textarea {
@@ -36,13 +36,13 @@
   resize: none;
   padding: 8px 38px 6px 14px;
   background: transparent;
-  color: var(--text);
+  color: var(--theme-module-active-text);
   font: 13px/1.5 Inter, ui-sans-serif, system-ui, sans-serif;
   overflow: hidden;
 }
 
 .command-dialog-card textarea::placeholder {
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
 }
 
 .command-dialog-card footer {
@@ -59,7 +59,7 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   font-size: 11px;
   opacity: 0;
 }
@@ -71,7 +71,7 @@
 .command-dialog-card footer > span svg {
   width: 13px;
   height: 13px;
-  color: var(--accent);
+  color: var(--theme-module-active-accent);
   animation: terminal-command-spin 0.9s linear infinite;
 }
 
@@ -85,15 +85,15 @@
 .command-dialog-card select {
   max-width: 160px;
   height: 24px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 6px;
-  background: var(--surface-2);
-  color: var(--text);
+  background: var(--theme-module-active-card-bg);
+  color: var(--theme-module-active-text);
   font-size: 11px;
 }
 
 .command-dialog-card small {
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   font-size: 10px;
   white-space: nowrap;
 }
@@ -102,10 +102,10 @@
   min-width: 18px;
   min-height: 18px;
   padding: 1px 5px;
-  border: 1px solid color-mix(in srgb, var(--muted) 45%, transparent);
+  border: 1px solid color-mix(in srgb, var(--theme-module-active-text-muted) 45%, transparent);
   border-radius: 4px;
   background: rgb(255 255 255 / 0.08);
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
   font-size: 10px;
 }
@@ -122,29 +122,29 @@
   display: grid;
   place-items: center;
   background: transparent;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   cursor: pointer;
 }
 
 .command-dialog-close:hover {
-  background: var(--surface-3);
-  color: var(--text);
+  background: var(--theme-module-active-card-strong-bg);
+  color: var(--theme-module-active-text);
 }
 
 .command-dialog-card p {
   margin: 0 12px 8px;
-  color: var(--danger);
+  color: var(--theme-core-danger);
   font-size: 11px;
 }
 
 .generated-command-row {
   margin: 0 12px 10px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 6px;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  background: var(--surface-2);
+  background: var(--theme-module-active-card-bg);
 }
 
 .generated-command-row code {
@@ -153,7 +153,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   padding: 7px 8px;
-  color: var(--accent-2);
+  color: var(--theme-module-active-accent-secondary);
   font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
   font-size: 12px;
 }
@@ -163,8 +163,8 @@
   margin-right: 3px;
   border: 0;
   border-radius: 5px;
-  background: var(--surface-3);
-  color: var(--text);
+  background: var(--theme-module-active-card-strong-bg);
+  color: var(--theme-module-active-text);
   padding: 0 10px;
 }
 

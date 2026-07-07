@@ -297,6 +297,10 @@ const withMockExecCommand = async <T>(handler: () => boolean, callback: (execCom
   }
 }
 
+const flushMicrotasks = async (count = 5) => {
+  for (let index = 0; index < count; index += 1) await Promise.resolve()
+}
+
 describe('workspace store', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
@@ -2371,20 +2375,20 @@ describe('workspace store', () => {
     expect(document.documentElement.dataset.theme).toBe('light')
     expect(document.documentElement.dataset.themeId).toBe('light')
     expect(document.documentElement.classList.contains('theme-light')).toBe(true)
-    expect(document.documentElement.style.getPropertyValue('--bg')).toBe('#eef1f6')
+    expect(document.documentElement.style.getPropertyValue('--theme-core-bg')).toBe('#f5f7fb')
 
     await store.saveConfig({ theme: 'kanagawa-wave' })
     expect(store.config.theme).toBe('kanagawa-wave')
     expect(document.documentElement.dataset.theme).toBe('dark')
     expect(document.documentElement.dataset.themeId).toBe('kanagawa-wave')
     expect(document.documentElement.classList.contains('theme-dark')).toBe(true)
-    expect(document.documentElement.style.getPropertyValue('--accent')).toBe('#7e9cd8')
+    expect(document.documentElement.style.getPropertyValue('--theme-core-accent')).toBe('#7e9cd8')
 
     await store.saveConfig({ theme: 'ubuntu-terminal' })
     expect(store.config.theme).toBe('ubuntu-terminal')
     expect(document.documentElement.dataset.theme).toBe('dark')
     expect(document.documentElement.dataset.themeId).toBe('ubuntu-terminal')
-    expect(document.documentElement.style.getPropertyValue('--bg')).toBe('#300A24')
+    expect(document.documentElement.style.getPropertyValue('--theme-core-bg')).toBe('#300A24')
 
     await store.saveConfig({ theme: 'auto' })
     expect(store.config.theme).toBe('auto')
@@ -2399,6 +2403,35 @@ describe('workspace store', () => {
     await store.saveConfig({ theme: 'not-a-theme' as any })
     expect(store.config.theme).toBe('dark')
     expect(document.documentElement.dataset.themeId).toBe('dark')
+  })
+
+  it('applies the saved theme as soon as config hydrates, before slower startup data finishes', async () => {
+    const store = useWorkspaceStore()
+    const backendConfig = await window.aiops.getConfig()
+    let resolveModelCatalog: ((value: Awaited<ReturnType<NonNullable<typeof window.aiops.listAiModels>>>) => void) | undefined
+    const modelCatalog = window.aiops.listAiModels?.()
+    vi.mocked(window.aiops.getConfig).mockResolvedValueOnce({
+      ...backendConfig,
+      theme: 'light'
+    })
+    vi.mocked(window.aiops.listAiModels!).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveModelCatalog = resolve
+        }) as ReturnType<NonNullable<typeof window.aiops.listAiModels>>
+    )
+
+    const hydration = store.hydrateConfig()
+    await flushMicrotasks()
+
+    expect(window.aiops.listAiModels).toHaveBeenCalled()
+    expect(document.documentElement.dataset.theme).toBe('light')
+    expect(document.documentElement.dataset.themeId).toBe('light')
+    expect(document.documentElement.style.getPropertyValue('--theme-core-bg')).toBe('#f5f7fb')
+    expect(store.config.theme).toBe('light')
+
+    resolveModelCatalog?.(await modelCatalog!)
+    await hydration
   })
 
   it('persists top layout mode and sidebar toggles only after backend-confirmed config snapshots', async () => {

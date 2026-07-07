@@ -43,10 +43,10 @@
   min-width: 0;
   width: 100%;
   height: 32px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 6px;
-  background: var(--surface-2);
-  color: var(--text);
+  background: var(--theme-module-active-card-bg);
+  color: var(--theme-module-active-text);
   outline: 0;
   padding: 0 8px;
 }
@@ -67,9 +67,9 @@
 
 .workspace-tunnel-type-card {
   min-height: 82px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 7px;
-  background: var(--surface-2);
+  background: var(--theme-module-active-card-bg);
   padding: 9px;
   display: grid;
   grid-template-rows: auto auto 1fr;
@@ -88,18 +88,18 @@
 }
 
 .workspace-tunnel-type-card span {
-  color: var(--text);
+  color: var(--theme-module-active-text);
   font-weight: 600;
 }
 
 .workspace-tunnel-type-card small {
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   line-height: 1.35;
 }
 
 .workspace-tunnel-type-card.selected {
-  border-color: color-mix(in srgb, var(--accent) 65%, var(--border));
-  background: color-mix(in srgb, var(--accent) 10%, var(--surface-2));
+  border-color: color-mix(in srgb, var(--theme-module-active-accent) 65%, var(--theme-module-active-border));
+  background: color-mix(in srgb, var(--theme-module-active-accent) 10%, var(--theme-module-active-card-bg));
 }
 
 .workspace-management-modal {
@@ -136,10 +136,10 @@
 
 .workspace-management-row {
   min-height: 52px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 7px;
-  background: var(--surface-2);
-  color: var(--text);
+  background: var(--theme-module-active-card-bg);
+  color: var(--theme-module-active-text);
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(90px, auto) auto;
   align-items: center;
@@ -163,7 +163,7 @@
 
 .workspace-management-row small,
 .workspace-management-row em {
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   font-style: normal;
   font-size: 12px;
 }
@@ -171,22 +171,22 @@
 .workspace-management-row button {
   min-width: 48px;
   height: 28px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 6px;
-  background: var(--surface);
-  color: var(--text);
+  background: var(--theme-module-active-panel-bg);
+  color: var(--theme-module-active-text);
 }
 
 .workspace-management-row button:hover {
-  background: var(--surface-3);
+  background: var(--theme-module-active-card-strong-bg);
 }
 
 .workspace-management-empty {
   min-height: 120px;
   display: grid;
   place-items: center;
-  color: var(--muted);
-  border: 1px dashed var(--border);
+  color: var(--theme-module-active-text-muted);
+  border: 1px dashed var(--theme-module-active-border);
   border-radius: 7px;
 }
 

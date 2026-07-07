@@ -18,7 +18,7 @@
 }
 
 .app-shell.has-app-background .ai-panel {
-  background: color-mix(in srgb, var(--surface) 18%, transparent);
+  background: color-mix(in srgb, var(--theme-module-active-panel-bg) 18%, transparent);
 }
 
 .context-strip,
@@ -34,23 +34,23 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  border: 1px solid var(--border);
-  background: var(--surface-2);
-  color: var(--muted);
+  border: 1px solid var(--theme-module-active-border);
+  background: var(--theme-module-active-card-bg);
+  color: var(--theme-module-active-text-muted);
   border-radius: 999px;
   padding: 0 9px;
 }
 
 .app-shell.has-app-background .context-button,
 .app-shell.has-app-background .command-chip {
-  background: var(--glass-surface-2);
+  background: var(--theme-module-active-card-bg);
 }
 
 .context-button.active,
 .command-chip.active {
-  color: var(--accent);
-  border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 14%, var(--surface-2));
+  color: var(--theme-module-active-accent);
+  border-color: var(--theme-module-active-accent);
+  background: color-mix(in srgb, var(--theme-module-active-accent) 14%, var(--theme-module-active-card-bg));
 }
 
 .command-strip {
@@ -85,7 +85,7 @@
   place-items: center;
   align-content: center;
   gap: 8px;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   font-size: 12px;
   text-align: center;
 }
@@ -93,7 +93,7 @@
 .ai-empty-chat svg {
   width: 24px;
   height: 24px;
-  color: var(--accent);
+  color: var(--theme-module-active-accent);
 }
 
 .ai-empty-chat span {
@@ -106,7 +106,7 @@
 .ai-empty-chat.no-model {
   gap: 10px;
   padding: 18px;
-  color: var(--text);
+  color: var(--theme-module-active-text);
 }
 
 .ai-empty-chat.no-model svg {
@@ -122,7 +122,7 @@
 .ai-empty-chat.no-model p {
   max-width: min(260px, 82%);
   margin: 0;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   line-height: 1.5;
 }
 
@@ -136,20 +136,20 @@
 
 .ai-empty-actions button {
   height: 28px;
-  border: 1px solid var(--accent);
+  border: 1px solid var(--theme-module-active-accent);
   border-radius: 6px;
-  background: color-mix(in srgb, var(--accent) 16%, transparent);
-  color: var(--accent);
+  background: color-mix(in srgb, var(--theme-module-active-accent) 16%, transparent);
+  color: var(--theme-module-active-accent);
   padding: 0 12px;
   font-size: 12px;
 }
 
 .ai-empty-actions button:hover {
-  background: color-mix(in srgb, var(--accent) 24%, transparent);
+  background: color-mix(in srgb, var(--theme-module-active-accent) 24%, transparent);
 }
 
 .ai-empty-actions button.primary {
-  background: var(--accent);
+  background: var(--theme-module-active-accent);
   color: white;
 }
 
@@ -184,20 +184,20 @@
 .ai-panel-mode-trigger {
   width: 100%;
   height: 24px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 6px;
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  background: var(--glass-surface-2);
-  color: var(--muted);
+  background: var(--theme-module-active-card-bg);
+  color: var(--theme-module-active-text-muted);
   padding: 0 6px;
   cursor: pointer;
 }
 
 .ai-panel-mode-trigger:hover {
-  color: var(--text);
-  background: var(--glass-surface-3);
+  color: var(--theme-module-active-text);
+  background: var(--theme-module-active-card-strong-bg);
 }
 
 .ai-panel-mode-trigger svg {
@@ -221,10 +221,10 @@
   right: 0;
   z-index: 35;
   width: 150px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 7px;
-  background: var(--glass-surface);
-  box-shadow: var(--shadow);
+  background: var(--theme-module-active-panel-bg);
+  box-shadow: var(--theme-module-active-shadow);
   padding: 4px;
   backdrop-filter: blur(16px);
 }
@@ -238,7 +238,7 @@
   align-items: center;
   gap: 7px;
   background: transparent;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   padding: 0 8px;
   text-align: left;
   cursor: pointer;
@@ -246,8 +246,8 @@
 
 .ai-panel-mode-dropdown button:hover,
 .ai-panel-mode-dropdown button.active {
-  color: var(--text);
-  background: var(--glass-surface-3);
+  color: var(--theme-module-active-text);
+  background: var(--theme-module-active-card-strong-bg);
 }
 
 .ai-panel-mode-dropdown button svg {
@@ -270,12 +270,13 @@
 .app-shell.has-app-background .ai-codex-target-actions button,
 .app-shell.has-app-background .ai-codex-bind-button,
 .app-shell.has-app-background .ai-codex-target-list button {
-  background: color-mix(in srgb, var(--surface-2) 26%, transparent);
+  background: color-mix(in srgb, var(--theme-module-active-card-bg) 26%, transparent);
 }
 
 .app-shell.has-app-background .ai-panel-mode-dropdown,
 .app-shell.has-app-background .ai-codex-target-picker {
-  background: color-mix(in srgb, var(--surface) 48%, transparent);
+  background: var(--theme-module-active-overlay-bg);
+  backdrop-filter: var(--theme-module-active-backdrop-filter);
 }
 
 .app-shell.has-app-background .ai-panel-mode-trigger:hover,
@@ -287,7 +288,7 @@
 .app-shell.has-app-background .ai-codex-target-actions button:hover,
 .app-shell.has-app-background .ai-codex-bind-button:hover,
 .app-shell.has-app-background .ai-codex-target-list button:hover {
-  background: color-mix(in srgb, var(--surface-3) 40%, transparent);
+  background: color-mix(in srgb, var(--theme-module-active-card-strong-bg) 40%, transparent);
 }
 
 .ai-header-title {
@@ -305,10 +306,10 @@
 .ai-header-icon-button {
   width: 24px;
   height: 24px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 5px;
-  color: var(--muted);
-  background: var(--glass-surface-2);
+  color: var(--theme-module-active-text-muted);
+  background: var(--theme-module-active-card-bg);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
@@ -321,14 +322,14 @@
 }
 
 .ai-header-icon-button:hover {
-  color: var(--text);
-  background: var(--glass-surface-3);
+  color: var(--theme-module-active-text);
+  background: var(--theme-module-active-card-strong-bg);
 }
 
 .ai-header-icon-button.active {
-  color: var(--accent);
-  border-color: color-mix(in srgb, var(--accent) 54%, var(--border));
-  background: color-mix(in srgb, var(--accent) 12%, var(--glass-surface-2));
+  color: var(--theme-module-active-accent);
+  border-color: color-mix(in srgb, var(--theme-module-active-accent) 54%, var(--theme-module-active-border));
+  background: color-mix(in srgb, var(--theme-module-active-accent) 12%, var(--theme-module-active-card-bg));
 }
 
 .ai-conversation-tabs {
@@ -353,25 +354,25 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 6px;
-  color: var(--muted);
-  background: color-mix(in srgb, var(--surface-2) 58%, transparent);
+  color: var(--theme-module-active-text-muted);
+  background: color-mix(in srgb, var(--theme-module-active-card-bg) 58%, transparent);
   cursor: pointer;
   padding: 0 3px 0 7px;
 }
 
 .ai-conversation-tab:hover,
 .ai-conversation-tab:focus-visible {
-  color: var(--text);
-  background: var(--glass-surface-3);
+  color: var(--theme-module-active-text);
+  background: var(--theme-module-active-card-strong-bg);
   outline: 0;
 }
 
 .ai-conversation-tab.active {
-  color: var(--text);
-  border-color: color-mix(in srgb, var(--accent) 46%, var(--border));
-  background: color-mix(in srgb, var(--accent) 12%, var(--glass-surface-2));
+  color: var(--theme-module-active-text);
+  border-color: color-mix(in srgb, var(--theme-module-active-accent) 46%, var(--theme-module-active-border));
+  background: color-mix(in srgb, var(--theme-module-active-accent) 12%, var(--theme-module-active-card-bg));
 }
 
 .ai-conversation-tab-title {
@@ -387,7 +388,7 @@
   width: 11px;
   height: 11px;
   flex: 0 0 11px;
-  color: var(--warn);
+  color: var(--theme-core-warning);
 }
 
 .ai-conversation-tab-close {
@@ -399,7 +400,7 @@
   justify-content: center;
   border: 0;
   border-radius: 5px;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   background: transparent;
   cursor: pointer;
   padding: 0;
@@ -413,8 +414,8 @@
 }
 
 .ai-conversation-tab-close:hover {
-  color: var(--danger);
-  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  color: var(--theme-core-danger);
+  background: color-mix(in srgb, var(--theme-core-danger) 12%, transparent);
 }
 
 .ai-conversation-tab-close svg {

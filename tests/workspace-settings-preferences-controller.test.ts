@@ -236,7 +236,7 @@ describe('createWorkspaceSettingsPreferencesController', () => {
     await expect(harness.controller.saveShortcutRecording()).resolves.toBe(true)
     expect(window.aiops.saveSettingsShortcut).toHaveBeenCalledWith({ id: 'newTerminal', shortcut: 'Ctrl+Shift+N' })
     expect(harness.shortcutRecording.value).toEqual({ actionId: null, tempShortcut: '' })
-    expect(harness.runtime.setRecording).toHaveBeenLastCalledWith(false)
+    expect(harness.runtime.setRecording).toHaveBeenLastCalledWith(false, expect.objectContaining({ newTerminal: expect.any(Function) }))
     expect(harness.settingsShortcuts.value.find((shortcut) => shortcut.id === 'newTerminal')?.shortcut).toBe('Ctrl+Shift+N')
 
     harness.controller.startShortcutRecording('quickCommand')
@@ -251,7 +251,7 @@ describe('createWorkspaceSettingsPreferencesController', () => {
 
     harness.controller.cancelShortcutRecording()
     expect(harness.shortcutRecording.value).toEqual({ actionId: null, tempShortcut: '' })
-    expect(harness.runtime.setRecording).toHaveBeenLastCalledWith(false)
+    expect(harness.runtime.setRecording).toHaveBeenLastCalledWith(false, expect.objectContaining({ newTerminal: expect.any(Function) }))
 
     vi.mocked(window.aiops.resetSettingsShortcuts!).mockResolvedValueOnce({
       ok: true,

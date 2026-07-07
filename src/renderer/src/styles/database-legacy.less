@@ -3,7 +3,7 @@
   min-height: 0;
   display: grid;
   grid-template-columns: 280px minmax(0, 1fr);
-  background: var(--workspace-bg);
+  background: var(--theme-module-active-workspace-bg);
 }
 
 .database-sidebar {
@@ -34,13 +34,13 @@
 }
 
 .editor-toolbar {
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--theme-module-active-border);
   padding: 0 10px;
 }
 
 .editor-toolbar span {
   margin-left: auto;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   font-size: 12px;
 }
 
@@ -63,13 +63,13 @@ table {
 
 th,
 td {
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--theme-module-active-border);
   padding: 10px;
   text-align: left;
 }
 
 th {
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   font-weight: 600;
-  background: var(--surface);
+  background: var(--theme-module-active-panel-bg);
 }

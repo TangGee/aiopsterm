@@ -10,7 +10,7 @@
   padding: 18px;
   display: flex;
   align-items: flex-start;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   font-size: 12px;
 }
 
@@ -23,7 +23,7 @@
 
 .db-result-empty {
   padding: 16px;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
 }
 
 .db-result-table-wrap {
@@ -44,8 +44,8 @@
   min-width: 116px;
   height: 30px;
   padding: 0 8px;
-  border-right: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
+  border-right: 1px solid var(--theme-module-active-border);
+  border-bottom: 1px solid var(--theme-module-active-border);
   white-space: nowrap;
 }
 
@@ -53,37 +53,37 @@
   position: sticky;
   top: 0;
   z-index: 1;
-  background: var(--surface);
+  background: var(--theme-module-active-panel-bg);
 }
 
 .db-result-table .index {
   min-width: 42px;
   width: 42px;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   text-align: right;
 }
 
 .db-result-table tr.selected td {
-  background: color-mix(in srgb, var(--accent) 13%, transparent);
+  background: color-mix(in srgb, var(--theme-module-active-accent) 13%, transparent);
 }
 
 .db-result-table tr.new td {
-  background: color-mix(in srgb, var(--success) 13%, transparent);
+  background: color-mix(in srgb, var(--theme-core-success) 13%, transparent);
 }
 
 .db-result-table tr.deleted td {
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   text-decoration: line-through;
-  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  background: color-mix(in srgb, var(--theme-core-danger) 12%, transparent);
 }
 
 .db-result-table tr.updated td {
-  background: color-mix(in srgb, var(--warning) 10%, transparent);
+  background: color-mix(in srgb, var(--theme-core-warning) 10%, transparent);
 }
 
 .db-result-table td.updated {
   position: relative;
-  background: color-mix(in srgb, var(--warning) 18%, transparent);
+  background: color-mix(in srgb, var(--theme-core-warning) 18%, transparent);
 }
 
 .db-result-table td.updated::after {
@@ -92,7 +92,7 @@
   right: 0;
   width: 0;
   height: 0;
-  border-top: 7px solid var(--warning);
+  border-top: 7px solid var(--theme-core-warning);
   border-left: 7px solid transparent;
   content: '';
 }
@@ -111,21 +111,21 @@
 .db-th-controls button {
   min-width: 18px;
   height: 18px;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
 }
 
 .db-th-controls button.active {
-  color: var(--accent);
+  color: var(--theme-module-active-accent);
 }
 
 .db-filter-chip {
   max-width: 92px;
   min-height: 18px;
   padding: 0 5px;
-  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
+  border: 1px solid color-mix(in srgb, var(--theme-module-active-accent) 45%, var(--theme-module-active-border));
   border-radius: 4px;
-  color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: var(--theme-module-active-accent);
+  background: color-mix(in srgb, var(--theme-module-active-accent) 10%, transparent);
   font-size: 10px;
   overflow: hidden;
   text-overflow: ellipsis;

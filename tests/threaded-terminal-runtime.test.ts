@@ -1309,12 +1309,7 @@ describe('threadedTerminalRuntime', () => {
       cursorStyle: 'bar' as const,
       scrollBack: 2000
     }
-    const theme = {
-      background: '#090b10',
-      foreground: '#d7dae3',
-      cursor: '#8ccf7e',
-      selectionBackground: '#2d4059'
-    }
+    const theme = createHostOptions().theme
 
     host.updateSettings(settings, theme)
     host.updateSettings({ ...settings }, { ...theme })
@@ -1325,11 +1320,19 @@ describe('threadedTerminalRuntime', () => {
     expect(duplicateCoreMessages.filter((message: any) => message.type === 'settings')).toHaveLength(0)
     expect(duplicateRenderMessages.filter((message: any) => message.type === 'settings')).toHaveLength(0)
 
+    host.updateSettings(settings, { ...theme, green: '#16a34a' })
+
+    const afterPaletteChange = await workerMessages()
+    const paletteCoreMessages = afterPaletteChange.core.slice(afterDuplicates.core.length)
+    const paletteRenderMessages = afterPaletteChange.render.slice(afterDuplicates.render.length)
+    expect(paletteCoreMessages.filter((message: any) => message.type === 'settings')).toHaveLength(1)
+    expect(paletteRenderMessages.filter((message: any) => message.type === 'settings')).toHaveLength(1)
+
     host.updateSettings({ ...settings, fontSize: 14 }, theme)
 
     const afterChange = await workerMessages()
-    const changedCoreMessages = afterChange.core.slice(afterDuplicates.core.length)
-    const changedRenderMessages = afterChange.render.slice(afterDuplicates.render.length)
+    const changedCoreMessages = afterChange.core.slice(afterPaletteChange.core.length)
+    const changedRenderMessages = afterChange.render.slice(afterPaletteChange.render.length)
     expect(changedCoreMessages.filter((message: any) => message.type === 'settings')).toEqual([
       expect.objectContaining({ type: 'settings', terminalId: 'panel-1', settings: expect.objectContaining({ fontSize: 14 }) })
     ])

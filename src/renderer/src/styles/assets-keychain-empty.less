@@ -34,10 +34,10 @@
 .keychain-card {
   width: 100%;
   min-height: 64px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 7px;
-  background: var(--surface-2);
-  color: var(--text);
+  background: var(--theme-module-active-card-bg);
+  color: var(--theme-module-active-text);
   display: grid;
   grid-template-columns: 34px minmax(0, 1fr) auto;
   align-items: center;
@@ -48,13 +48,13 @@
 }
 
 .keychain-card:hover {
-  background: var(--surface-3);
+  background: var(--theme-module-active-card-strong-bg);
 }
 
 .keychain-icon {
   width: 32px;
   height: 32px;
-  color: var(--accent);
+  color: var(--theme-module-active-accent);
   display: grid;
   place-items: center;
 }
@@ -78,10 +78,10 @@
 
 .key-drop-area {
   min-height: 132px;
-  border: 1px dashed var(--border);
+  border: 1px dashed var(--theme-module-active-border);
   border-radius: 8px;
-  background: var(--surface-2);
-  color: var(--muted);
+  background: var(--theme-module-active-card-bg);
+  color: var(--theme-module-active-text-muted);
   display: grid;
   place-items: center;
   align-content: center;
@@ -92,9 +92,9 @@
 
 .key-drop-area.drag-over,
 .key-drop-area:hover {
-  border-color: var(--accent);
-  color: var(--accent);
-  background: var(--surface-3);
+  border-color: var(--theme-module-active-accent);
+  color: var(--theme-module-active-accent);
+  background: var(--theme-module-active-card-strong-bg);
 }
 
 .key-hidden-file-input {
@@ -118,10 +118,10 @@
 .asset-submit-button,
 .asset-empty-state button {
   height: 30px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 7px;
-  background: var(--surface-2);
-  color: var(--text);
+  background: var(--theme-module-active-card-bg);
+  color: var(--theme-module-active-text);
   cursor: pointer;
 }
 
@@ -136,7 +136,7 @@
 }
 
 .asset-connection-test-result.success {
-  color: #22c55e;
+  color: var(--theme-core-success);
 }
 
 .asset-empty-state {
@@ -145,7 +145,7 @@
   place-items: center;
   align-content: center;
   gap: 8px;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   text-align: center;
 }
 

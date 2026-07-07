@@ -8,7 +8,7 @@
   border-radius: 50%;
   display: grid;
   place-items: center;
-  background: var(--accent);
+  background: var(--theme-module-active-accent);
   color: #071113;
   font-size: 11px;
   font-weight: 800;
@@ -37,11 +37,11 @@
   z-index: 60;
   min-width: 132px;
   padding: 5px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 8px;
-  background: var(--glass-surface);
-  box-shadow: var(--shadow);
-  backdrop-filter: blur(16px);
+  background: var(--theme-module-active-overlay-bg);
+  box-shadow: var(--theme-module-active-shadow);
+  backdrop-filter: var(--theme-module-active-backdrop-filter);
 }
 
 .user-menu-popover button {
@@ -54,11 +54,11 @@
   gap: 8px;
   padding: 0 10px;
   background: transparent;
-  color: var(--text);
+  color: var(--theme-module-active-text);
   text-align: left;
   cursor: pointer;
 }
 
 .user-menu-popover button:hover {
-  background: var(--glass-surface-3);
+  background: var(--theme-module-active-card-strong-bg);
 }

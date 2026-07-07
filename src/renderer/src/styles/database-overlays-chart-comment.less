@@ -22,7 +22,7 @@
 .db-comment-modal header span {
   display: block;
   margin-top: 3px;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   font-size: 12px;
 }
 
@@ -34,18 +34,18 @@
 
 .db-chart-metrics span {
   min-width: 0;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 6px;
-  background: var(--surface-2);
+  background: var(--theme-module-active-card-bg);
   padding: 8px 10px;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   font-size: 12px;
 }
 
 .db-chart-metrics strong {
   display: block;
   overflow: hidden;
-  color: var(--text);
+  color: var(--theme-module-active-text);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -66,7 +66,7 @@
 
 .db-chart-bar-row > span {
   overflow: hidden;
-  color: var(--text);
+  color: var(--theme-module-active-text);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -74,16 +74,16 @@
 .db-chart-track {
   height: 18px;
   overflow: hidden;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 4px;
-  background: var(--surface-2);
+  background: var(--theme-module-active-card-bg);
 }
 
 .db-chart-track i {
   display: block;
   height: 100%;
   border-radius: 3px;
-  background: linear-gradient(90deg, #1677ff, #10b981);
+  background: linear-gradient(90deg, var(--theme-module-active-accent), #10b981);
 }
 
 .db-chart-bar-row strong {
@@ -95,22 +95,22 @@
 .db-chart-empty,
 .db-comment-error {
   margin: 0;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   font-size: 12px;
 }
 
 .db-chart-empty,
 .db-comment-error {
-  color: var(--danger);
+  color: var(--theme-core-danger);
 }
 
 .db-comment-modal textarea {
   width: 100%;
   min-height: 220px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 6px;
-  background: var(--surface-2);
-  color: var(--text);
+  background: var(--theme-module-active-card-bg);
+  color: var(--theme-module-active-text);
   padding: 10px;
   resize: vertical;
   line-height: 1.5;
@@ -124,7 +124,7 @@
 }
 
 .db-comment-modal footer span {
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   font-size: 12px;
 }
 
@@ -136,16 +136,16 @@
 .db-chart-modal button,
 .db-comment-modal button {
   min-height: 30px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 6px;
-  background: var(--surface-2);
-  color: var(--text);
+  background: var(--theme-module-active-card-bg);
+  color: var(--theme-module-active-text);
   padding: 0 12px;
 }
 
 .db-comment-modal footer button:last-child {
-  border-color: #1677ff;
-  background: #1677ff;
+  border-color: var(--theme-module-active-accent);
+  background: var(--theme-module-active-accent);
   color: #fff;
 }
 

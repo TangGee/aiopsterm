@@ -17,10 +17,10 @@
 .settings-modal-card textarea {
   width: 100%;
   min-height: 72px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 7px;
-  background: var(--surface-2);
-  color: var(--text);
+  background: var(--theme-module-active-card-bg);
+  color: var(--theme-module-active-text);
   padding: 8px;
   outline: 0;
 }
@@ -42,11 +42,11 @@
   gap: 16px;
   align-items: center;
   min-height: 42px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--theme-module-active-border);
 }
 
 .shortcuts-header {
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   font-size: 12px;
 }
 
@@ -59,10 +59,10 @@
 .shortcut-display {
   min-height: 30px;
   min-width: 120px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 6px;
-  background: var(--surface-2);
-  color: var(--text);
+  background: var(--theme-module-active-card-bg);
+  color: var(--theme-module-active-text);
   display: flex;
   align-items: center;
   gap: 4px;
@@ -71,12 +71,12 @@
 }
 
 .shortcut-display.recording {
-  border-color: #1677ff;
-  color: #1677ff;
+  border-color: var(--theme-module-active-accent);
+  color: var(--theme-module-active-accent);
 }
 
 .shortcut-display.is-empty {
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
 }
 
 kbd {
@@ -84,17 +84,17 @@ kbd {
   min-height: 22px;
   display: inline-grid;
   place-items: center;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 5px;
-  background: var(--surface-3);
-  color: var(--text);
+  background: var(--theme-module-active-card-strong-bg);
+  color: var(--theme-module-active-text);
   padding: 0 6px;
   font-family: inherit;
   font-size: 12px;
 }
 
 .key-chip-range {
-  color: var(--accent);
+  color: var(--theme-module-active-accent);
 }
 
 .shortcuts-footer {
@@ -105,5 +105,5 @@ kbd {
 
 .trusted-count {
   text-align: right;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
 }

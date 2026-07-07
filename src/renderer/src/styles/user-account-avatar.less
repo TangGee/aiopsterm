@@ -10,7 +10,7 @@
   border-radius: 50%;
   display: grid;
   place-items: center;
-  background: var(--accent);
+  background: var(--theme-module-active-accent);
   color: #071113;
   font-size: 52px;
   font-weight: 800;
@@ -20,9 +20,9 @@
 
 .avatar-preview-box.empty {
   cursor: pointer;
-  background: var(--surface-2);
-  color: var(--muted);
-  border: 1px dashed var(--border);
+  background: var(--theme-module-active-card-bg);
+  color: var(--theme-module-active-text-muted);
+  border: 1px dashed var(--theme-module-active-border);
 }
 
 .avatar-preview-placeholder {
@@ -57,7 +57,7 @@
   grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 8px;
   align-items: center;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
 }
 
 .avatar-actions-row {

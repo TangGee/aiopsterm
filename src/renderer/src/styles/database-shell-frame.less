@@ -5,8 +5,8 @@
   height: 100%;
   display: grid;
   grid-template-columns: 300px minmax(0, 1fr) var(--db-ai-pane-width, 0px) auto;
-  background: var(--workspace-bg);
-  color: var(--text);
+  background: var(--theme-module-active-workspace-bg);
+  color: var(--theme-module-active-text);
   overflow: hidden;
 }
 
@@ -20,8 +20,8 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
-  border-right: 1px solid var(--border);
-  background: var(--surface);
+  border-right: 1px solid var(--theme-module-active-border);
+  background: var(--theme-module-active-panel-bg);
 }
 
 .db-sidebar.collapsed {
@@ -99,7 +99,7 @@
 .db-toolbar button:hover:not(:disabled),
 .db-where-bar button:hover,
 .db-th-controls button:hover {
-  background: var(--surface-3);
+  background: var(--theme-module-active-card-strong-bg);
 }
 
 .app-shell.has-app-background .db-sidebar,
@@ -107,12 +107,16 @@
 .app-shell.has-app-background .db-toolbar,
 .app-shell.has-app-background .db-where-bar,
 .app-shell.has-app-background .db-result-tabs,
-.app-shell.has-app-background .db-status-bar,
+.app-shell.has-app-background .db-status-bar {
+  background: var(--theme-module-active-panel-bg);
+  backdrop-filter: var(--theme-module-active-backdrop-filter);
+}
+
 .app-shell.has-app-background .db-tab-menu,
 .app-shell.has-app-background .db-popup-menu,
 .app-shell.has-app-background .db-filter-popover {
-  background: var(--glass-surface);
-  backdrop-filter: blur(14px);
+  background: var(--theme-module-active-overlay-bg);
+  backdrop-filter: var(--theme-module-active-backdrop-filter);
 }
 
 .app-shell.has-app-background .db-search,
@@ -121,7 +125,7 @@
 .app-shell.has-app-background .db-toolbar select,
 .app-shell.has-app-background .db-filter-search,
 .app-shell.has-app-background .db-filter-list {
-  background: var(--readable-surface);
+  background: var(--theme-module-active-readable-bg);
 }
 
 .app-shell.has-app-background .db-sidebar-actions button:hover,
@@ -139,5 +143,5 @@
 .app-shell.has-app-background .db-filter-row:hover,
 .app-shell.has-app-background .db-filter-row button:hover,
 .app-shell.has-app-background .db-filter-footer button:hover {
-  background: var(--glass-surface-3);
+  background: var(--theme-module-active-card-strong-bg);
 }

@@ -6,19 +6,19 @@
   display: flex;
   align-items: flex-start;
   gap: 10px;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
 }
 
 .db-result-running strong {
   display: block;
   margin-bottom: 3px;
-  color: var(--text);
+  color: var(--theme-module-active-text);
 }
 
 .db-result-running small {
   display: block;
   margin-bottom: 6px;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   font-size: 11px;
 }
 
@@ -37,7 +37,7 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  color: var(--danger);
+  color: var(--theme-core-danger);
 }
 
 .db-result-error-text {
@@ -48,19 +48,19 @@
 
 .db-result-diagnose-success {
   flex-shrink: 0;
-  color: var(--success);
+  color: var(--theme-core-success);
   font-size: 11px;
 }
 
 .db-result-diagnose-error {
   flex-shrink: 0;
-  color: var(--danger);
+  color: var(--theme-core-danger);
   font-size: 11px;
 }
 
 .db-result-error button,
 .db-result-diagnose-btn {
-  border: 1px solid color-mix(in srgb, #a78bfa 70%, var(--border));
+  border: 1px solid color-mix(in srgb, #a78bfa 70%, var(--theme-module-active-border));
   border-radius: 5px;
   padding: 4px 10px;
   display: inline-flex;

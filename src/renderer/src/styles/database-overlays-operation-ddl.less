@@ -17,15 +17,15 @@
 .db-operation-confirm p,
 .db-danger-confirm p {
   margin: 0;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
 }
 
 .db-operation-confirm code,
 .db-danger-confirm code {
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 6px;
-  background: var(--surface-2);
-  color: var(--danger);
+  background: var(--theme-module-active-card-bg);
+  color: var(--theme-core-danger);
   padding: 8px;
   font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
   white-space: pre-wrap;
@@ -34,16 +34,16 @@
 .db-danger-confirm label {
   display: grid;
   gap: 6px;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   font-size: 12px;
 }
 
 .db-danger-confirm input {
   height: 30px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 6px;
-  background: var(--surface-2);
-  color: var(--text);
+  background: var(--theme-module-active-card-bg);
+  color: var(--theme-module-active-text);
   padding: 0 8px;
 }
 
@@ -57,17 +57,17 @@
 .db-operation-confirm footer button,
 .db-danger-confirm footer button {
   min-height: 30px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 6px;
-  background: var(--surface-2);
-  color: var(--text);
+  background: var(--theme-module-active-card-bg);
+  color: var(--theme-module-active-text);
   padding: 0 12px;
 }
 
 .db-operation-confirm .danger,
 .db-danger-confirm .danger {
-  border-color: color-mix(in srgb, var(--danger) 55%, var(--border));
-  color: var(--danger);
+  border-color: color-mix(in srgb, var(--theme-core-danger) 55%, var(--theme-module-active-border));
+  color: var(--theme-core-danger);
 }
 
 .db-operation-confirm .danger:disabled,
@@ -107,10 +107,10 @@
   min-height: 220px;
   margin: 8px 0 12px;
   padding: 12px;
-  border: 1px solid color-mix(in srgb, var(--danger) 45%, var(--border));
+  border: 1px solid color-mix(in srgb, var(--theme-core-danger) 45%, var(--theme-module-active-border));
   border-radius: 6px;
-  background: color-mix(in srgb, var(--surface) 88%, var(--danger));
-  color: var(--danger);
+  background: color-mix(in srgb, var(--theme-module-active-panel-bg) 88%, var(--theme-core-danger));
+  color: var(--theme-core-danger);
   font-size: 12px;
   line-height: 1.5;
 }

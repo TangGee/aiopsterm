@@ -8,8 +8,8 @@
 }
 
 .ai-codex-shell.drop-active .ai-codex-target-bar {
-  border-color: color-mix(in srgb, var(--accent) 62%, var(--border));
-  background: color-mix(in srgb, var(--accent) 12%, var(--glass-surface-2));
+  border-color: color-mix(in srgb, var(--theme-module-active-accent) 62%, var(--theme-module-active-border));
+  background: color-mix(in srgb, var(--theme-module-active-accent) 12%, var(--theme-module-active-card-bg));
 }
 
 .ai-codex-target-bar {
@@ -21,9 +21,9 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 7px;
-  background: color-mix(in srgb, var(--surface-2) 54%, transparent);
+  background: color-mix(in srgb, var(--theme-module-active-card-bg) 54%, transparent);
   padding: 7px;
   backdrop-filter: blur(12px);
 }
@@ -38,11 +38,11 @@
 }
 
 .app-shell.has-app-background .ai-codex-target-bar {
-  background: color-mix(in srgb, var(--surface-2) 24%, transparent);
+  background: color-mix(in srgb, var(--theme-module-active-card-bg) 24%, transparent);
 }
 
 .app-shell.has-app-background .ai-codex-shell.drop-active .ai-codex-target-bar {
-  background: color-mix(in srgb, var(--accent) 10%, var(--glass-surface-2));
+  background: color-mix(in srgb, var(--theme-module-active-accent) 10%, var(--theme-module-active-card-bg));
 }
 
 .ai-codex-target-main {
@@ -57,7 +57,7 @@
   width: 15px;
   height: 15px;
   flex: 0 0 auto;
-  color: var(--accent);
+  color: var(--theme-module-active-accent);
 }
 
 .ai-codex-target-main > div {
@@ -76,14 +76,14 @@
 }
 
 .ai-codex-target-main strong {
-  color: var(--text);
+  color: var(--theme-module-active-text);
   font-size: 12px;
   font-weight: 600;
 }
 
 .ai-codex-target-main span,
 .ai-codex-target-main em {
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   font-size: 11px;
   font-style: normal;
 }
@@ -98,10 +98,10 @@
 .ai-codex-target-actions button,
 .ai-codex-bind-button,
 .ai-codex-target-list button {
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 6px;
-  color: var(--muted);
-  background: var(--glass-surface-2);
+  color: var(--theme-module-active-text-muted);
+  background: var(--theme-module-active-card-bg);
   cursor: pointer;
 }
 
@@ -124,8 +124,8 @@
 .ai-codex-target-actions button:hover,
 .ai-codex-bind-button:hover,
 .ai-codex-target-list button:hover {
-  color: var(--text);
-  background: var(--glass-surface-3);
+  color: var(--theme-module-active-text);
+  background: var(--theme-module-active-card-strong-bg);
 }
 
 .ai-codex-bind-button {
@@ -145,16 +145,17 @@
   right: 0;
   top: calc(100% + 6px);
   z-index: 75;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 7px;
-  background: var(--surface);
-  box-shadow: var(--shadow);
+  background: var(--theme-module-active-panel-bg);
+  box-shadow: var(--theme-module-active-shadow);
   padding: 8px;
   pointer-events: auto;
 }
 
 .app-shell.has-app-background .ai-codex-target-picker {
-  background: var(--surface);
+  background: var(--theme-module-active-overlay-bg);
+  backdrop-filter: var(--theme-module-active-backdrop-filter);
 }
 
 .ai-codex-target-picker label {
@@ -162,10 +163,10 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 6px;
-  background: var(--glass-surface-2);
-  color: var(--muted);
+  background: var(--theme-module-active-card-bg);
+  color: var(--theme-module-active-text-muted);
   padding: 0 8px;
 }
 
@@ -175,7 +176,7 @@
   border: 0;
   outline: 0;
   background: transparent;
-  color: var(--text);
+  color: var(--theme-module-active-text);
   font-size: 12px;
 }
 
@@ -203,7 +204,7 @@
 
 .ai-codex-target-list button svg {
   grid-area: icon;
-  color: var(--accent);
+  color: var(--theme-module-active-accent);
 }
 
 .ai-codex-target-list button span {
@@ -212,7 +213,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--text);
+  color: var(--theme-module-active-text);
   font-size: 12px;
 }
 
@@ -222,14 +223,14 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   font-size: 11px;
   font-style: normal;
 }
 
 .ai-codex-target-empty {
   padding: 12px 8px;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   font-size: 12px;
   text-align: center;
 }
@@ -237,10 +238,10 @@
 .ai-codex-link-notice {
   grid-row: 2;
   min-width: 0;
-  border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--border));
+  border: 1px solid color-mix(in srgb, var(--theme-module-active-accent) 34%, var(--theme-module-active-border));
   border-radius: 6px;
-  color: var(--muted);
-  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  color: var(--theme-module-active-text-muted);
+  background: color-mix(in srgb, var(--theme-module-active-accent) 8%, transparent);
   padding: 6px 8px;
   font-size: 11px;
   line-height: 1.35;
@@ -253,7 +254,7 @@
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   font-size: 11px;
 }
 
@@ -261,7 +262,7 @@
   width: 7px;
   height: 7px;
   border-radius: 999px;
-  background: var(--muted);
+  background: var(--theme-module-active-text-muted);
 }
 
 .ai-codex-status-dot.starting {
@@ -273,7 +274,7 @@
 }
 
 .ai-codex-status-dot.error {
-  background: #ff4d4f;
+  background: var(--theme-core-danger);
 }
 
 .ai-codex-status-dot.closed {
@@ -289,9 +290,10 @@
   grid-template: minmax(0, 1fr) / minmax(0, 1fr);
   position: relative;
   overflow: hidden;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 7px;
-  background: #090b10;
+  background: var(--theme-terminal-active-codex-stack-bg);
+  backdrop-filter: var(--theme-terminal-active-codex-stack-backdrop-filter);
 }
 
 .ai-codex-xterm-stack > .ai-codex-xterm {
@@ -307,47 +309,43 @@
   z-index: 0;
 }
 
-.ai-codex-xterm {
-  background: transparent;
+.ai-codex-xterm,
+.ai-codex-xterm.xterm-host,
+.ai-codex-xterm .xterm,
+.ai-codex-xterm .xterm-scroll-area {
+  background: var(--theme-terminal-active-codex-xterm-viewport-bg) !important;
+  color: var(--theme-terminal-foreground);
 }
 
-.app-shell.has-app-background .ai-codex-xterm-stack {
-  background: color-mix(in srgb, #090b10 76%, transparent);
-  backdrop-filter: blur(10px);
-}
-
-.app-shell.has-app-background .ai-codex-xterm-stack.is-idle {
-  background: color-mix(in srgb, #090b10 52%, transparent);
-  backdrop-filter: blur(10px);
-}
-
-.app-shell.has-app-background .ai-codex-xterm .xterm-viewport,
-.app-shell.has-app-background .ai-codex-xterm .xterm-screen {
+.ai-codex-xterm-stack > .threaded-terminal-render-group-canvas {
   background: transparent !important;
+  color: var(--theme-terminal-foreground);
 }
 
-.app-shell.has-app-background .ai-codex-xterm.is-idle .xterm-viewport,
-.app-shell.has-app-background .ai-codex-xterm.is-idle .xterm-screen {
-  background: transparent !important;
+.ai-codex-xterm-stack.is-idle {
+  background: var(--theme-terminal-active-codex-stack-idle-bg);
 }
 
-:root[data-theme-id='ubuntu-terminal'] .app-shell.has-app-background .ai-codex-xterm-stack,
-:root[data-theme-id='ubuntu-terminal'] .app-shell.has-app-background .ai-codex-xterm-stack.is-idle {
-  background: var(--terminal-host-bg);
-  backdrop-filter: none;
+.ai-codex-xterm-stack.is-empty > .threaded-terminal-render-group-canvas,
+.ai-codex-xterm-stack.is-empty > .ai-codex-xterm {
+  opacity: 0;
+  pointer-events: none;
 }
 
-:root[data-theme-id='ubuntu-terminal'] .app-shell.has-app-background .ai-codex-xterm .xterm-viewport,
-:root[data-theme-id='ubuntu-terminal'] .app-shell.has-app-background .ai-codex-xterm .xterm-screen,
-:root[data-theme-id='ubuntu-terminal'] .app-shell.has-app-background .ai-codex-xterm.is-idle .xterm-viewport,
-:root[data-theme-id='ubuntu-terminal'] .app-shell.has-app-background .ai-codex-xterm.is-idle .xterm-screen {
-  background: var(--terminal-host-bg) !important;
+.ai-codex-xterm .xterm-viewport,
+.ai-codex-xterm .xterm-rows {
+  background: var(--theme-terminal-active-codex-xterm-viewport-bg) !important;
+}
+
+.ai-codex-xterm .xterm-screen,
+.ai-codex-xterm .xterm-screen canvas {
+  background: var(--theme-terminal-active-codex-xterm-screen-bg) !important;
 }
 
 .ai-codex-xterm.threaded-terminal-host {
   border: 0;
   border-radius: 0;
-  background: transparent;
+  background: transparent !important;
 }
 
 .app-shell.has-app-background .ai-codex-xterm.threaded-terminal-host,
@@ -358,11 +356,11 @@
 .ai-codex-error {
   grid-row: 5;
   min-height: 28px;
-  border: 1px solid color-mix(in srgb, #ff4d4f 46%, var(--border));
+  border: 1px solid color-mix(in srgb, var(--theme-core-danger) 46%, var(--theme-module-active-border));
   border-radius: 6px;
   padding: 7px 9px;
   color: #ffccc7;
-  background: color-mix(in srgb, #ff4d4f 10%, transparent);
+  background: color-mix(in srgb, var(--theme-core-danger) 10%, transparent);
   font-size: 12px;
   line-height: 1.4;
 }

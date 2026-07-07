@@ -1,9 +1,9 @@
 .db-ai-pane-context-card {
   padding: 10px 12px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--theme-module-active-border);
   display: grid;
   gap: 8px;
-  background: color-mix(in srgb, var(--surface) 88%, var(--surface-2));
+  background: color-mix(in srgb, var(--theme-module-active-panel-bg) 88%, var(--theme-module-active-card-bg));
 }
 
 .db-ai-pane-context-head {
@@ -12,7 +12,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   font-size: 12px;
 }
 
@@ -41,17 +41,17 @@
   min-width: 0;
   display: grid;
   gap: 4px;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   font-size: 11px;
 }
 
 .db-ai-pane-pickers select,
 .db-ai-pane-composer textarea {
   min-width: 0;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 5px;
-  background: var(--surface-2);
-  color: var(--text);
+  background: var(--theme-module-active-card-bg);
+  color: var(--theme-module-active-text);
   outline: 0;
 }
 
@@ -63,14 +63,14 @@
 .db-ai-pane-connect-row {
   min-width: 0;
   padding: 7px 8px;
-  border: 1px solid color-mix(in srgb, var(--warning) 45%, var(--border));
+  border: 1px solid color-mix(in srgb, var(--theme-core-warning) 45%, var(--theme-module-active-border));
   border-radius: 6px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  background: color-mix(in srgb, var(--warning) 10%, var(--surface-2));
-  color: var(--muted);
+  background: color-mix(in srgb, var(--theme-core-warning) 10%, var(--theme-module-active-card-bg));
+  color: var(--theme-module-active-text-muted);
   font-size: 12px;
 }
 

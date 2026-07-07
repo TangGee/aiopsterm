@@ -15,10 +15,10 @@
   max-width: calc(100vw - 32px);
   max-height: calc(100vh - 64px);
   overflow: auto;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 8px;
-  background: var(--surface);
-  box-shadow: var(--shadow);
+  background: var(--theme-module-active-panel-bg);
+  box-shadow: var(--theme-module-active-shadow);
   padding: 14px;
   display: grid;
   gap: 10px;
@@ -47,7 +47,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 6px;
   padding: 7px;
 }
@@ -69,7 +69,7 @@
 }
 
 .export-group-row {
-  background: var(--surface-2);
+  background: var(--theme-module-active-card-bg);
 }
 
 .export-leaf-row {
@@ -87,7 +87,7 @@
   min-height: 120px;
   display: grid;
   place-items: center;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
 }
 
 .import-preview-table {
@@ -95,8 +95,8 @@
 }
 
 .import-preview-table tr.duplicate td {
-  color: var(--warn);
-  background: color-mix(in srgb, var(--warn) 8%, transparent);
+  color: var(--theme-core-warning);
+  background: color-mix(in srgb, var(--theme-core-warning) 8%, transparent);
 }
 
 .asset-confirm-modal label {
@@ -105,20 +105,20 @@
 
 .asset-confirm-modal input {
   height: 30px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 6px;
-  background: var(--surface-2);
-  color: var(--text);
+  background: var(--theme-module-active-card-bg);
+  color: var(--theme-module-active-text);
   padding: 0 8px;
 }
 
 .export-assets-modal button,
 .asset-confirm-modal button {
   min-height: 28px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 6px;
-  background: var(--surface-2);
-  color: var(--text);
+  background: var(--theme-module-active-card-bg);
+  color: var(--theme-module-active-text);
   cursor: pointer;
 }
 

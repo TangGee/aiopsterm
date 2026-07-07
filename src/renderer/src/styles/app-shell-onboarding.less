@@ -20,7 +20,7 @@
 .onboarding-guide-header p,
 .onboarding-progress-line {
   margin: 0;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
 }
 
 .onboarding-progress-line {
@@ -37,25 +37,25 @@
 .onboarding-module-card {
   position: relative;
   min-height: 132px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 8px;
   padding: 18px;
   display: flex;
   align-items: flex-start;
   gap: 14px;
-  background: var(--surface-2);
-  color: var(--text);
+  background: var(--theme-module-active-card-bg);
+  color: var(--theme-module-active-text);
   text-align: left;
   cursor: pointer;
 }
 
 .onboarding-module-card:hover {
-  background: var(--surface-3);
-  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  background: var(--theme-module-active-card-strong-bg);
+  border-color: color-mix(in srgb, var(--theme-module-active-accent) 45%, var(--theme-module-active-border));
 }
 
 .onboarding-module-card.complete {
-  border-color: color-mix(in srgb, var(--accent-2) 60%, var(--border));
+  border-color: color-mix(in srgb, var(--theme-module-active-accent-secondary) 60%, var(--theme-module-active-border));
 }
 
 .onboarding-module-icon {
@@ -65,8 +65,8 @@
   border-radius: 8px;
   display: grid;
   place-items: center;
-  background: var(--surface);
-  color: var(--accent);
+  background: var(--theme-module-active-panel-bg);
+  color: var(--theme-module-active-accent);
 }
 
 .onboarding-module-copy {
@@ -81,7 +81,7 @@
 }
 
 .onboarding-module-copy small {
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   line-height: 1.5;
 }
 
@@ -89,7 +89,7 @@
   position: absolute;
   top: 14px;
   right: 14px;
-  color: var(--accent-2);
+  color: var(--theme-module-active-accent-secondary);
 }
 
 .spotlight-root {
@@ -111,7 +111,7 @@
 
 .spotlight-highlight {
   position: fixed;
-  border: 2px solid var(--accent);
+  border: 2px solid var(--theme-module-active-accent);
   border-radius: 8px;
   box-shadow:
     0 0 0 9999px rgb(0 0 0 / 0.12),
@@ -120,7 +120,7 @@
 }
 
 .spotlight-highlight-secondary {
-  border-color: var(--accent-2);
+  border-color: var(--theme-module-active-accent-secondary);
   box-shadow: 0 0 12px rgb(140 207 126 / 0.32);
 }
 
@@ -130,11 +130,11 @@
   width: min(320px, calc(100vw - 32px));
   max-height: calc(100vh - 32px);
   overflow: auto;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 8px;
   padding: 18px;
-  background: var(--surface);
-  box-shadow: var(--shadow);
+  background: var(--theme-module-active-panel-bg);
+  box-shadow: var(--theme-module-active-shadow);
   pointer-events: auto;
 }
 
@@ -145,12 +145,12 @@
 
 .spotlight-card p {
   margin: 0 0 12px;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   line-height: 1.55;
 }
 
 .spotlight-card small {
-  color: var(--warn);
+  color: var(--theme-core-warning);
 }
 
 .spotlight-close {
@@ -162,13 +162,13 @@
   border: 0;
   border-radius: 6px;
   background: transparent;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   cursor: pointer;
 }
 
 .spotlight-close:hover {
-  background: var(--surface-3);
-  color: var(--text);
+  background: var(--theme-module-active-card-strong-bg);
+  color: var(--theme-module-active-text);
 }
 
 .spotlight-card footer {
@@ -185,7 +185,7 @@
 }
 
 .spotlight-card footer span {
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   font-size: 12px;
 }
 

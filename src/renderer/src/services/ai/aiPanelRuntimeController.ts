@@ -240,6 +240,7 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     panels: () => workspace.panels,
     terminalSettings: () => workspace.terminalSettings,
     themeId: () => workspace.config.theme,
+    terminalSurfaceMode: () => (workspace.config.background.mode === 'none' ? 'base' : 'withBackground'),
     aiContextCatalog: () => workspace.aiContextCatalog,
     loadClassicChatData: shellAdapter.loadClassicChatData,
     closePopups: () => closePopups(),

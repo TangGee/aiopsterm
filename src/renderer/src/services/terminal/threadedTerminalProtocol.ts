@@ -8,6 +8,25 @@ export type ThreadedTerminalSurface = 'workspace' | 'codex'
 
 export type ThreadedTerminalFullReason = 'create' | 'import' | 'settings' | 'resize' | 'visibility' | 'clear' | 'jump' | 'search' | 'unknown'
 
+export type ThreadedTerminalAnsiPalette = {
+  black?: string
+  red?: string
+  green?: string
+  yellow?: string
+  blue?: string
+  magenta?: string
+  cyan?: string
+  white?: string
+  brightBlack?: string
+  brightRed?: string
+  brightGreen?: string
+  brightYellow?: string
+  brightBlue?: string
+  brightMagenta?: string
+  brightCyan?: string
+  brightWhite?: string
+}
+
 export type ThreadedTerminalSettings = Pick<
   TerminalSettings,
   'terminalType' | 'fontFamily' | 'fontSize' | 'lineHeight' | 'cursorBlink' | 'cursorStyle' | 'scrollBack'
@@ -15,8 +34,11 @@ export type ThreadedTerminalSettings = Pick<
 
 export type ThreadedTerminalTheme = {
   background: string
+  contrastBackground?: string
   foreground: string
+  minimumContrastRatio?: number
   cursor: string
+  cursorAccent?: string
   selectionBackground?: string
   black?: string
   red?: string
@@ -34,6 +56,7 @@ export type ThreadedTerminalTheme = {
   brightMagenta?: string
   brightCyan?: string
   brightWhite?: string
+  ansiBackground?: ThreadedTerminalAnsiPalette
   scrollbarTrack?: string
   scrollbarThumb?: string
   scrollbarThumbHover?: string

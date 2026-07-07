@@ -9,28 +9,28 @@
 .db-result-tabs {
   flex: 0 0 28px;
   overflow-x: auto;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--theme-module-active-border);
   display: flex;
   align-items: stretch;
-  background: var(--surface);
+  background: var(--theme-module-active-panel-bg);
 }
 
 .db-result-tabs [role="tab"] {
   min-width: 82px;
   height: 28px;
   padding: 0 10px;
-  border-right: 1px solid var(--border);
+  border-right: 1px solid var(--theme-module-active-border);
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   cursor: pointer;
   user-select: none;
 }
 
 .db-result-tabs [role="tab"].active {
-  color: var(--text);
-  background: var(--bg);
+  color: var(--theme-module-active-text);
+  background: var(--theme-module-active-workspace-bg);
 }
 
 .db-result-tab-title {
@@ -54,15 +54,15 @@
 }
 
 .db-result-tab-close:hover {
-  background: var(--surface-3);
+  background: var(--theme-module-active-card-strong-bg);
 }
 
 .db-result-dot.ok {
-  background: #22c55e;
+  background: var(--theme-core-success);
 }
 
 .db-result-dot.error {
-  background: #ef4444;
+  background: var(--theme-core-danger);
 }
 
 .db-result-dot.running {

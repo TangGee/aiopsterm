@@ -283,6 +283,46 @@ describe('threadedTerminalCoreWorker', () => {
     expect(secondWorkingLine?.cells?.[0]).toMatchObject({ x: 0, fg: '#c86432', bold: true })
   })
 
+  it('uses separate theme palettes for ANSI black foreground and background', async () => {
+    const options = createOptions()
+    send({
+      type: 'create',
+      requestId: 'create-ansi-background-1',
+      options: {
+        ...options,
+        terminalId: 'core-worker-ansi-background',
+        theme: {
+          background: '#f5f7fb',
+          foreground: '#263245',
+          cursor: '#2f6fed',
+          black: '#172033',
+          ansiBackground: {
+            black: 'rgba(245, 247, 251, 0.94)'
+          }
+        }
+      }
+    })
+    await waitFor(() => messages.some((message) => message.type === 'created' && message.terminalId === 'core-worker-ansi-background'))
+
+    send({
+      type: 'data',
+      terminalId: 'core-worker-ansi-background',
+      data: '\x1b[30mF\x1b[0m \x1b[40mB\x1b[0m\n'
+    })
+    const frame = await waitFor(() => {
+      const next = latestScreen(messages.filter((message) => message.type !== 'screen' || message.snapshot.terminalId === 'core-worker-ansi-background'))
+      return next?.lines.some((line) => line.text.includes('F B')) ? next : undefined
+    })
+    const line = frame.lines.find((item) => item.text.includes('F B'))
+
+    expect(line?.cells).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ text: 'F', fg: '#172033', bg: undefined }),
+        expect.objectContaining({ text: 'B', bg: 'rgba(245, 247, 251, 0.94)' })
+      ])
+    )
+  })
+
   it('uses the shared dirty snapshot path for Codex and workspace terminal output', async () => {
     send({
       type: 'create',

@@ -5,7 +5,7 @@ import { SearchAddon } from '@xterm/addon-search'
 import { mirrorTextToClipboardQuietly } from '@/services/app/clipboardRuntime'
 import { writeRendererRuntimeLog as writeRuntimeLog } from '@/services/app/runtimeLogClient'
 import { terminalClient } from '@/services/terminal/terminalClient'
-import { terminalThemeForAppTheme } from '@/services/terminal/terminalThemeRuntime'
+import { terminalThemeForAppTheme, type TerminalSurfaceMode } from '@/services/terminal/terminalThemeRuntime'
 import {
   terminalShortcutActionForEvent,
   type TerminalShortcutAction
@@ -30,7 +30,7 @@ import type { TerminalCommandSuggestion } from '@shared/contracts/terminalTools'
 import { shouldUseTerminalDebugLogs, shouldUseThreadedTerminal } from '@shared/runtimeSwitches'
 
 type WorkspaceStore = ReturnType<typeof useWorkspaceStore>
-type XtermRuntimeOptions = XtermTerminal['options'] & { termName?: string }
+type XtermRuntimeOptions = XtermTerminal['options'] & { termName?: string; minimumContrastRatio?: number }
 type TerminalSuggestion = TerminalCommandSuggestion
 type TerminalBufferLineLike = { translateToString: (trimRight?: boolean) => string }
 type XtermLike = {
@@ -371,10 +371,12 @@ export const createTerminalWorkspaceViewRuntime = ({
 
   const defaultTerminalFontSize = () => workspace.terminalSettings.fontSize || 12
   const terminalFontSizeForPanel = (panelId: string) => paneFontSizes[panelId] || defaultTerminalFontSize()
+  const terminalSurfaceMode = (): TerminalSurfaceMode => (workspace.config?.background?.mode === 'none' ? 'base' : 'withBackground')
   const terminalSettingsSignature = () => {
     const settings = workspace.terminalSettings
     return [
-      workspace.config.theme,
+      workspace.config?.theme || 'dark',
+      terminalSurfaceMode(),
       settings.terminalType,
       settings.fontFamily,
       settings.fontSize,
@@ -384,7 +386,7 @@ export const createTerminalWorkspaceViewRuntime = ({
       settings.scrollBack
     ].join('|')
   }
-  const terminalTheme = () => terminalThemeForAppTheme(workspace.config?.theme || 'dark')
+  const terminalTheme = () => terminalThemeForAppTheme(workspace.config?.theme || 'dark', { surfaceMode: terminalSurfaceMode() })
   const threadedKeywordHighlightConfig = () =>
     workspace.extensionSettings.highlightStatus ? clonePlain(workspace.keywordHighlightSettings) : null
 
@@ -915,13 +917,16 @@ export const createTerminalWorkspaceViewRuntime = ({
     view.terminal.options.cursorBlink = settings.cursorBlink
     view.terminal.options.cursorStyle = settings.cursorStyle
     view.terminal.options.scrollback = settings.scrollBack
+    const theme = terminalTheme()
+    view.terminal.options.theme = theme
+    view.terminal.options.minimumContrastRatio = theme.minimumContrastRatio
     if (isThreadedTerminalHost(view.terminal)) {
       view.terminal.updateSettings(
         {
           ...settings,
           fontSize: Number(view.terminal.options.fontSize || settings.fontSize || defaultTerminalFontSize())
         },
-        terminalTheme()
+        theme
       )
     }
     if (options.refit !== false) {
@@ -1071,12 +1076,14 @@ export const createTerminalWorkspaceViewRuntime = ({
     const useThreaded = canUseThreadedTerminal()
     const createLegacyView = () => {
       const terminal = new TerminalConstructor({
+        allowTransparency: true,
         cursorBlink: workspace.terminalSettings.cursorBlink,
         convertEol: true,
         cursorStyle: workspace.terminalSettings.cursorStyle,
         fontFamily: workspace.terminalSettings.fontFamily || '"JetBrains Mono", "SFMono-Regular", Consolas, monospace',
         fontSize: terminalFontSizeForPanel(panel.id),
         lineHeight: workspace.terminalSettings.lineHeight || 1,
+        minimumContrastRatio: theme.minimumContrastRatio,
         scrollback: workspace.terminalSettings.scrollBack,
         theme
       })

@@ -258,6 +258,12 @@ const createWorkspace = (panel: TerminalPanel) =>
       cursorStyle: 'bar',
       scrollBack: 2000
     },
+    config: {
+      theme: 'light',
+      background: {
+        mode: 'none'
+      }
+    },
     extensionSettings: { highlightStatus: false },
     keywordHighlightSettings: {},
     getHighlightedTerminalOutput: (panelId: string) => (panelId === panel.id ? panel.output : ''),
@@ -318,6 +324,24 @@ describe('terminalWorkspaceViewRuntime', () => {
     if (!view) throw new Error('terminal view was not created')
     const terminal = view.terminal as unknown as FakeTerminal
     expect(terminal.focus).toHaveBeenCalled()
+  })
+
+  it('lets the theme own xterm transparency when app background mode changes', async () => {
+    const panel = createEmptyTerminalPanel('panel-1', 'Local')
+    const { runtime, workspace } = createRuntime(panel)
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    runtime.setTerminalElement(panel.id, host)
+    await flushFrames(2)
+
+    const terminal = runtime.terminalViews.get(panel.id)?.terminal as unknown as FakeTerminal
+    expect(terminal.options.allowTransparency).toBe(true)
+    expect((terminal.options.theme as { background?: string }).background).toBe('#f5f7fb')
+
+    ;(workspace.config as any).background.mode = 'custom'
+    runtime.applyTerminalSettingsToAll()
+
+    expect((terminal.options.theme as { background?: string }).background).toBe('rgba(245, 247, 251, 0.94)')
   })
 
   it('does not let queued terminal focus steal focus while an overlay suppresses focus', async () => {

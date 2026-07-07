@@ -22,7 +22,7 @@
   border: 0;
   border-radius: 8px;
   background: transparent;
-  color: var(--text);
+  color: var(--theme-module-active-text);
   display: flex;
   align-items: center;
   gap: 12px;
@@ -32,15 +32,15 @@
 }
 
 .asset-management-item:hover {
-  background: var(--surface-3);
+  background: var(--theme-module-active-card-strong-bg);
 }
 
 .asset-management-icon {
   width: 32px;
   height: 32px;
   border-radius: 6px;
-  background: var(--surface-2);
-  color: var(--accent);
+  background: var(--theme-module-active-card-bg);
+  color: var(--theme-module-active-accent);
   display: grid;
   place-items: center;
 }
@@ -52,7 +52,7 @@
   align-items: end;
   gap: 4px;
   padding: 6px 8px 0;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--theme-module-active-border);
   overflow: hidden;
 }
 
@@ -61,11 +61,11 @@
   min-width: 96px;
   max-width: 178px;
   flex: 1 1 132px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-bottom: 0;
   border-radius: 7px 7px 0 0;
-  background: var(--surface);
-  color: var(--muted);
+  background: var(--theme-module-active-panel-bg);
+  color: var(--theme-module-active-text-muted);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -82,6 +82,6 @@
 }
 
 .asset-workspace-tab.active {
-  color: var(--text);
-  background: var(--surface-2);
+  color: var(--theme-module-active-text);
+  background: var(--theme-module-active-card-bg);
 }

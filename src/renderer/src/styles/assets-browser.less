@@ -16,7 +16,7 @@
 
 .asset-search-container {
   padding: 10px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--theme-module-active-border);
   display: grid;
   gap: 6px;
 }
@@ -47,15 +47,15 @@
   border: 0;
   border-radius: 4px;
   background: transparent;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   display: grid;
   place-items: center;
   cursor: pointer;
 }
 
 .asset-search-clear:hover {
-  background: var(--surface-3);
-  color: var(--text);
+  background: var(--theme-module-active-card-strong-bg);
+  color: var(--theme-module-active-text);
 }
 
 .asset-action-button.icon-only {
@@ -87,7 +87,7 @@
   border: 0;
   border-radius: 6px;
   background: transparent;
-  color: var(--text);
+  color: var(--theme-module-active-text);
   display: grid;
   grid-template-columns: 18px minmax(0, 1fr) auto;
   align-items: center;
@@ -100,11 +100,11 @@
 .asset-tree-group-row:hover,
 .asset-tree-host-row:hover,
 .asset-tree-host-row.selected {
-  background: var(--surface-2);
+  background: var(--theme-module-active-card-bg);
 }
 
 .asset-tree-group-row small {
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
 }
 
 .asset-tree-children {
@@ -124,7 +124,7 @@
 
 .asset-tree-host-row.host-card:hover,
 .asset-tree-host-row.host-card.selected {
-  background: var(--surface-2);
+  background: var(--theme-module-active-card-bg);
 }
 
 .asset-tree-host-row .host-card-icon {
@@ -164,10 +164,10 @@
 .host-card {
   width: 100%;
   min-height: 64px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 7px;
-  background: var(--surface-2);
-  color: var(--text);
+  background: var(--theme-module-active-card-bg);
+  color: var(--theme-module-active-text);
   display: grid;
   grid-template-columns: 34px minmax(0, 1fr) auto;
   align-items: center;
@@ -179,13 +179,13 @@
 }
 
 .host-card:hover {
-  background: var(--surface-3);
+  background: var(--theme-module-active-card-strong-bg);
 }
 
 .host-card-icon {
   width: 32px;
   height: 32px;
-  color: var(--accent);
+  color: var(--theme-module-active-accent);
   display: grid;
   place-items: center;
   position: relative;
@@ -199,8 +199,8 @@
   height: 13px;
   padding: 2px;
   border-radius: 50%;
-  background: var(--accent);
-  color: var(--bg);
+  background: var(--theme-module-active-accent);
+  color: var(--theme-module-active-workspace-bg);
 }
 
 .host-card-info {
@@ -238,7 +238,7 @@
   border: 0;
   border-radius: 5px;
   background: transparent;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -246,6 +246,6 @@
 }
 
 .host-card-actions button:hover {
-  background: var(--surface);
-  color: var(--accent);
+  background: var(--theme-module-active-panel-bg);
+  color: var(--theme-module-active-accent);
 }

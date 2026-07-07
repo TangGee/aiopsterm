@@ -2,9 +2,9 @@
 .kb-capacity-bar {
   min-height: 86px;
   margin: 8px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 8px;
-  background: color-mix(in srgb, var(--surface-2) 84%, transparent);
+  background: color-mix(in srgb, var(--theme-module-active-card-bg) 84%, transparent);
   display: grid;
   grid-template-columns: 28px minmax(0, 1fr) auto;
   align-items: center;
@@ -13,11 +13,11 @@
 }
 
 .kb-capacity-bar > svg {
-  color: var(--text);
+  color: var(--theme-module-active-text);
 }
 
 .kb-capacity-bar > svg.syncing {
-  color: #1677ff;
+  color: var(--theme-module-active-accent);
   animation: kb-cloud-sync 1.2s ease-in-out infinite;
 }
 
@@ -39,13 +39,13 @@
 }
 
 .kb-capacity-label {
-  color: var(--text);
+  color: var(--theme-module-active-text);
   font-weight: 700;
   font-size: 13px;
 }
 
 .kb-capacity-value {
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   font-size: 12px;
 }
 
@@ -56,7 +56,7 @@
 .kb-capacity-detail-link {
   border: 0;
   background: transparent;
-  color: #1677ff;
+  color: var(--theme-module-active-accent);
   cursor: pointer;
 }
 
@@ -67,7 +67,7 @@
 
 .kb-capacity-total {
   text-align: right;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   font-size: 12px;
 }
 
@@ -82,10 +82,10 @@
 }
 
 .kb-transfer-item {
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 7px;
-  background: var(--surface);
-  box-shadow: var(--shadow);
+  background: var(--theme-module-active-panel-bg);
+  box-shadow: var(--theme-module-active-shadow);
   padding: 8px;
   display: grid;
   gap: 6px;

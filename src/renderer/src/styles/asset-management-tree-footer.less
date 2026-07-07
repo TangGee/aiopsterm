@@ -1,10 +1,10 @@
 
 .asset-management-tree-group-row {
-  background: color-mix(in srgb, var(--surface-2) 72%, transparent);
+  background: color-mix(in srgb, var(--theme-module-active-card-bg) 72%, transparent);
 }
 
 .asset-management-tree-group-row td {
-  color: var(--text);
+  color: var(--theme-module-active-text);
   font-weight: 700;
 }
 
@@ -15,7 +15,7 @@
   align-items: center;
   justify-content: flex-start;
   gap: 7px;
-  color: var(--text);
+  color: var(--theme-module-active-text);
   font-weight: 700;
 }
 
@@ -26,7 +26,7 @@
 
 .asset-management-tree-toggle em {
   margin-left: auto;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   font-style: normal;
   font-weight: 600;
 }
@@ -39,7 +39,7 @@
 .asset-table-scroll button {
   border: 0;
   background: transparent;
-  color: var(--accent);
+  color: var(--theme-module-active-accent);
   cursor: pointer;
   padding: 2px 4px;
 }
@@ -47,7 +47,7 @@
 .asset-source-tag {
   min-width: 42px;
   min-height: 22px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 999px;
   display: inline-flex;
   align-items: center;
@@ -57,15 +57,15 @@
 }
 
 .asset-source-tag.manual {
-  color: var(--accent);
-  border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--theme-module-active-accent);
+  border-color: color-mix(in srgb, var(--theme-module-active-accent) 42%, var(--theme-module-active-border));
+  background: color-mix(in srgb, var(--theme-module-active-accent) 12%, transparent);
 }
 
 .asset-source-tag.refresh {
-  color: var(--warn);
-  border-color: color-mix(in srgb, var(--warn) 46%, var(--border));
-  background: color-mix(in srgb, var(--warn) 12%, transparent);
+  color: var(--theme-core-warning);
+  border-color: color-mix(in srgb, var(--theme-core-warning) 46%, var(--theme-module-active-border));
+  background: color-mix(in srgb, var(--theme-core-warning) 12%, transparent);
 }
 
 .asset-table-footer {
@@ -74,7 +74,7 @@
   align-items: center;
   justify-content: flex-end;
   gap: 10px;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   font-size: 12px;
 }
 
@@ -87,10 +87,10 @@
 .asset-table-footer select,
 .asset-table-footer button {
   height: 28px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 6px;
-  background: var(--surface-2);
-  color: var(--text);
+  background: var(--theme-module-active-card-bg);
+  color: var(--theme-module-active-text);
 }
 
 .asset-table-footer button {

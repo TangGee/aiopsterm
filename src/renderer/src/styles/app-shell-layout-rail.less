@@ -33,12 +33,17 @@
 
 .side-rail {
   width: 48px;
-  border-right: 1px solid var(--border);
-  background: var(--glass-surface);
+  border-right: 1px solid var(--theme-shell-border);
+  background: var(--theme-shell-rail-bg);
   display: flex;
   flex-direction: column;
   justify-content: space-between;
   padding: 8px 6px;
+}
+
+.app-shell.has-app-background .side-rail {
+  background: var(--theme-shell-rail-bg-with-background);
+  backdrop-filter: var(--theme-shell-backdrop-filter);
 }
 
 .rail-main,
@@ -51,13 +56,13 @@
 .rail-button {
   width: 34px;
   height: 34px;
-  color: var(--muted);
+  color: var(--theme-shell-rail-icon);
 }
 
 .rail-button.active {
-  background: color-mix(in srgb, var(--accent) 20%, var(--glass-surface-2));
-  color: var(--accent);
-  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  background: var(--theme-shell-rail-active-bg);
+  color: var(--theme-shell-rail-icon-active);
+  border-color: color-mix(in srgb, var(--theme-shell-rail-icon-active) 40%, var(--theme-shell-border));
 }
 
 @import './user-entry.less';

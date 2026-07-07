@@ -11,20 +11,20 @@
 }
 
 .chat-input.drop-active {
-  border-color: color-mix(in srgb, var(--accent) 62%, var(--border));
-  background: color-mix(in srgb, var(--accent) 9%, transparent);
+  border-color: color-mix(in srgb, var(--theme-module-active-accent) 62%, var(--theme-module-active-border));
+  background: color-mix(in srgb, var(--theme-module-active-accent) 9%, transparent);
 }
 
 .chat-input.drop-active::after {
   content: "添加知识库上下文";
   position: absolute;
   inset: 6px;
-  border: 1px dashed color-mix(in srgb, var(--accent) 62%, transparent);
+  border: 1px dashed color-mix(in srgb, var(--theme-module-active-accent) 62%, transparent);
   border-radius: 8px;
   display: grid;
   place-items: center;
-  color: var(--accent);
-  background: color-mix(in srgb, var(--surface) 72%, transparent);
+  color: var(--theme-module-active-accent);
+  background: color-mix(in srgb, var(--theme-module-active-panel-bg) 72%, transparent);
   pointer-events: none;
   font-size: 12px;
 }
@@ -35,17 +35,17 @@
   width: 100%;
   min-height: 78px;
   max-height: 160px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 8px;
   outline: 0;
-  background: var(--surface-2);
-  color: var(--text);
+  background: var(--theme-module-active-card-bg);
+  color: var(--theme-module-active-text);
   padding: 8px 9px;
   resize: none;
 }
 
 .app-shell.has-app-background .chat-input {
-  background: color-mix(in srgb, var(--surface-2) 30%, transparent);
+  background: color-mix(in srgb, var(--theme-module-active-card-bg) 30%, transparent);
   backdrop-filter: blur(14px);
 }
 
@@ -57,7 +57,7 @@
 .app-shell.has-app-background .context-trigger-tag,
 .app-shell.has-app-background .context-tag,
 .app-shell.has-app-background .mention-chip {
-  background: var(--readable-surface);
+  background: var(--theme-module-active-readable-bg);
 }
 
 .app-shell.has-app-background .select-popup {
@@ -70,7 +70,7 @@
 .app-shell.has-app-background .context-tag button:hover,
 .app-shell.has-app-background .mention-chip button:hover,
 .app-shell.has-app-background .host-batch-footer .batch-action-btn:hover {
-  background: var(--glass-surface-3);
+  background: var(--theme-module-active-card-strong-bg);
 }
 
 .chat-editable {
@@ -83,20 +83,20 @@
 
 .chat-editable.is-empty::before {
   content: attr(data-placeholder);
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   pointer-events: none;
   position: absolute;
 }
 
 .chat-editable:focus {
-  border-color: color-mix(in srgb, var(--accent) 54%, var(--border));
+  border-color: color-mix(in srgb, var(--theme-module-active-accent) 54%, var(--theme-module-active-border));
 }
 
 .file-placeholder-button,
 .file-upload-button,
 .voice-placeholder-button,
 .voice-input-button {
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   opacity: 0.58;
 }
 
@@ -104,7 +104,7 @@
 .file-upload-button:hover:not(:disabled),
 .voice-placeholder-button:hover:not(:disabled),
 .voice-input-button:hover:not(:disabled) {
-  color: var(--text);
+  color: var(--theme-module-active-text);
   opacity: 0.86;
 }
 
@@ -118,8 +118,8 @@
 
 .voice-input-button.recording {
   color: #ffffff;
-  background: var(--danger);
-  border-color: color-mix(in srgb, var(--danger) 70%, var(--border));
+  background: var(--theme-core-danger);
+  border-color: color-mix(in srgb, var(--theme-core-danger) 70%, var(--theme-module-active-border));
   opacity: 1;
 }
 

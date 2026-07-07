@@ -10,6 +10,7 @@
 - [Managed AI Sessions](managed-ai-sessions.md)
 - [SSH Terminal Runtime](ssh-terminal.md)
 - [Threaded Terminal Renderer](terminal-renderer-architecture.md)
+- [Theme System](theme-system.md)
 - [xterm Fork](xterm-fork.md)
 - [Architecture Design Principles](architecture-principles.md)
 - [Resource, Data, and Platform Plan](resource-data-platform-plan.md)

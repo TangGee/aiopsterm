@@ -6,14 +6,14 @@
   min-width: 0;
   max-width: 100%;
   overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border));
+  border: 1px solid color-mix(in srgb, var(--theme-module-active-accent) 22%, var(--theme-module-active-border));
   border-radius: 8px;
-  background: var(--surface-2);
+  background: var(--theme-module-active-card-bg);
 }
 
 .ai-command-output-renderer {
   margin-top: 8px;
-  border-color: color-mix(in srgb, var(--success) 28%, var(--border));
+  border-color: color-mix(in srgb, var(--theme-core-success) 28%, var(--theme-module-active-border));
 }
 
 .ai-rendered-block-header {
@@ -21,8 +21,8 @@
   align-items: center;
   gap: 7px;
   min-width: 0;
-  border-bottom: 1px solid var(--border);
-  background: color-mix(in srgb, var(--surface-3) 82%, transparent);
+  border-bottom: 1px solid var(--theme-module-active-border);
+  background: color-mix(in srgb, var(--theme-module-active-card-strong-bg) 82%, transparent);
   padding: 7px 8px;
 }
 
@@ -31,7 +31,7 @@
   align-items: center;
   gap: 6px;
   min-width: 0;
-  color: var(--text);
+  color: var(--theme-module-active-text);
   font-size: 12px;
 }
 
@@ -56,7 +56,7 @@
 }
 
 .ai-rendered-block-lines {
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   font-size: 11px;
   white-space: nowrap;
 }
@@ -69,16 +69,16 @@
   justify-content: center;
   border: 1px solid transparent;
   border-radius: 5px;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   background: transparent;
   padding: 0;
   cursor: pointer;
 }
 
 .ai-rendered-copy-button:hover {
-  color: var(--accent);
-  border-color: var(--border);
-  background: var(--surface-3);
+  color: var(--theme-module-active-accent);
+  border-color: var(--theme-module-active-border);
+  background: var(--theme-module-active-card-strong-bg);
 }
 
 .ai-rendered-code-body,
@@ -88,9 +88,9 @@
   max-height: 220px;
   overflow: auto;
   margin: 0;
-  background: var(--surface);
+  background: var(--theme-module-active-panel-bg);
   padding: 9px;
-  color: var(--text);
+  color: var(--theme-module-active-text);
   font-size: 12px;
   line-height: 1.48;
   white-space: pre;
@@ -103,5 +103,5 @@
 }
 
 .ai-command-output-body {
-  color: color-mix(in srgb, var(--text) 92%, var(--success));
+  color: color-mix(in srgb, var(--theme-module-active-text) 92%, var(--theme-core-success));
 }

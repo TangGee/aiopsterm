@@ -8,10 +8,28 @@
   box-sizing: border-box;
 }
 
+.xterm-host,
+.xterm-host .xterm,
 .xterm-host .xterm-viewport,
-.xterm-host .xterm-screen {
-  background: var(--terminal-host-bg, #090b10) !important;
+.xterm-host .xterm-screen,
+.xterm-host .xterm-scroll-area,
+.xterm-host .xterm-rows,
+.xterm-host .xterm-screen canvas,
+.terminal-grid > .threaded-terminal-render-group-canvas {
+  background: var(--theme-terminal-active-xterm-viewport-bg) !important;
+  color: var(--theme-terminal-foreground);
   width: 100% !important;
+}
+
+.xterm-host .xterm-screen,
+.xterm-host .xterm-rows,
+.xterm-host .xterm-screen canvas,
+.terminal-grid > .threaded-terminal-render-group-canvas {
+  background: var(--theme-terminal-active-xterm-screen-bg) !important;
+}
+
+.xterm-host.threaded-terminal-host {
+  background: transparent !important;
 }
 
 .command-line {
@@ -20,20 +38,16 @@
   gap: 4px;
   align-items: center;
   padding: 0 10px;
-  color: var(--accent-2);
+  color: var(--theme-module-active-accent-secondary);
 }
 
 .command-line.floating {
   position: absolute;
   z-index: 12;
   min-height: 38px;
-  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
+  border: 1px solid color-mix(in srgb, var(--theme-module-active-accent) 45%, var(--theme-module-active-border));
   border-radius: 8px;
-  background: color-mix(in srgb, #090b10 92%, var(--surface));
-  box-shadow: var(--shadow);
-}
-
-.app-shell.has-app-background .command-line.floating {
-  background: color-mix(in srgb, #090b10 82%, transparent);
-  backdrop-filter: blur(14px);
+  background: var(--theme-terminal-active-command-line-bg);
+  backdrop-filter: var(--theme-terminal-active-command-line-backdrop-filter);
+  box-shadow: var(--theme-module-active-shadow);
 }

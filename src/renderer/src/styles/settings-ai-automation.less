@@ -69,7 +69,7 @@
 .agent-hook-meta-row span,
 .agent-hook-warnings,
 .agent-hook-error {
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   font-size: 12px;
 }
 
@@ -80,9 +80,9 @@
 }
 
 .agent-hook-installer-row {
-  border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+  border: 1px solid color-mix(in srgb, var(--theme-module-active-border) 72%, transparent);
   border-radius: 8px;
-  background: color-mix(in srgb, var(--surface-2) 58%, transparent);
+  background: color-mix(in srgb, var(--theme-module-active-card-bg) 58%, transparent);
   padding: 12px;
   align-items: flex-start;
 }
@@ -114,27 +114,27 @@
 
 .agent-hook-status-pill {
   flex: 0 0 auto;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 999px;
   padding: 3px 8px;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   font-size: 12px;
   white-space: nowrap;
 }
 
 .agent-hook-status-pill.installed {
-  border-color: color-mix(in srgb, #16a34a 42%, var(--border));
-  color: #16a34a;
+  border-color: color-mix(in srgb, var(--theme-core-success) 42%, var(--theme-module-active-border));
+  color: var(--theme-core-success);
 }
 
 .agent-hook-status-pill.ready {
-  border-color: color-mix(in srgb, #1677ff 42%, var(--border));
-  color: #1677ff;
+  border-color: color-mix(in srgb, var(--theme-module-active-accent) 42%, var(--theme-module-active-border));
+  color: var(--theme-module-active-accent);
 }
 
 .agent-hook-status-pill.error,
 .agent-hook-error {
-  color: var(--danger);
+  color: var(--theme-core-danger);
 }
 
 .agent-hook-meta-grid {
@@ -154,8 +154,8 @@
   min-width: 0;
   max-width: 100%;
   border-radius: 6px;
-  background: color-mix(in srgb, var(--surface) 72%, transparent);
-  color: var(--text);
+  background: color-mix(in srgb, var(--theme-module-active-panel-bg) 72%, transparent);
+  color: var(--theme-module-active-text);
   padding: 4px 6px;
   overflow-wrap: anywhere;
   white-space: normal;
@@ -177,7 +177,7 @@
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 12px;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--theme-module-active-border);
   padding-top: 12px;
 }
 
@@ -194,7 +194,7 @@
 }
 
 .automation-snippet-row small {
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   line-height: 1.5;
 }
 
@@ -202,8 +202,8 @@
   width: max-content;
   max-width: 100%;
   border-radius: 6px;
-  background: color-mix(in srgb, var(--surface) 72%, transparent);
-  color: var(--text);
+  background: color-mix(in srgb, var(--theme-module-active-panel-bg) 72%, transparent);
+  color: var(--theme-module-active-text);
   padding: 4px 6px;
   overflow-wrap: anywhere;
   white-space: normal;
@@ -222,9 +222,9 @@
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 14px;
-  border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+  border: 1px solid color-mix(in srgb, var(--theme-module-active-border) 72%, transparent);
   border-radius: 8px;
-  background: color-mix(in srgb, var(--surface-2) 48%, transparent);
+  background: color-mix(in srgb, var(--theme-module-active-card-bg) 48%, transparent);
   padding: 12px;
 }
 
@@ -236,14 +236,14 @@
 
 .export-mcp-auth-toggle small,
 .export-mcp-auth-toggle em {
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   font-size: 12px;
   font-style: normal;
   line-height: 1.5;
 }
 
 .export-mcp-auth-toggle em {
-  color: var(--danger);
+  color: var(--theme-core-danger);
 }
 
 @media (max-width: 920px) {

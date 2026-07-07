@@ -21,7 +21,7 @@
   max-width: 180px;
   max-height: 120px;
   border-radius: 6px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   object-fit: cover;
 }
 
@@ -41,23 +41,23 @@
   justify-content: center;
   border: 1px solid transparent;
   border-radius: 5px;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   background: transparent;
   cursor: pointer;
 }
 
 .message-actions button:hover,
 .message-actions button.active {
-  color: var(--accent);
-  border-color: var(--border);
-  background: var(--surface-3);
+  color: var(--theme-module-active-accent);
+  border-color: var(--theme-module-active-border);
+  background: var(--theme-module-active-card-strong-bg);
 }
 
 .app-shell.has-app-background .message-actions button:hover,
 .app-shell.has-app-background .message-actions button.active,
 .app-shell.has-app-background .message-command-help:hover,
 .app-shell.has-app-background .message-command-icon-button:hover {
-  background: var(--glass-surface-3);
+  background: var(--theme-module-active-card-strong-bg);
 }
 
 .user-message-actions {

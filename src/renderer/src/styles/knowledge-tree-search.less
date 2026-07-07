@@ -22,17 +22,17 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   font-size: 12px;
   padding: 0 4px;
 }
 
 .kb-search-result {
   width: 100%;
-  border: 1px solid var(--border);
+  border: 1px solid var(--theme-module-active-border);
   border-radius: 7px;
-  background: var(--surface-2);
-  color: var(--text);
+  background: var(--theme-module-active-card-bg);
+  color: var(--theme-module-active-text);
   display: grid;
   gap: 4px;
   padding: 8px;
@@ -41,8 +41,8 @@
 }
 
 .kb-search-result:hover {
-  border-color: #1677ff;
-  background: var(--surface-3);
+  border-color: var(--theme-module-active-accent);
+  background: var(--theme-module-active-card-strong-bg);
 }
 
 .kb-search-result strong,
@@ -60,7 +60,7 @@
 .kb-search-result span,
 .kb-search-result small,
 .kb-search-empty {
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   font-size: 11px;
 }
 
@@ -92,12 +92,12 @@
 .kb-tree-node.selected,
 .kb-tree-node.editing,
 .kb-tree-node.drag-over {
-  background: var(--surface-3);
+  background: var(--theme-module-active-card-strong-bg);
 }
 
 .kb-tree-node.drag-over,
 .kb-tree-scroll.drag-over-root {
-  outline: 1px solid color-mix(in srgb, var(--accent) 70%, transparent);
+  outline: 1px solid color-mix(in srgb, var(--theme-module-active-accent) 70%, transparent);
   outline-offset: -1px;
 }
 
@@ -108,7 +108,7 @@
   flex: 0 0 auto;
   border: 0;
   background: transparent;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -117,7 +117,7 @@
 
 .kb-node-icon {
   flex: 0 0 auto;
-  color: var(--text);
+  color: var(--theme-module-active-text);
 }
 
 .kb-title-text {
@@ -130,9 +130,9 @@
 
 .kb-node-kind {
   flex: 0 0 auto;
-  border: 1px solid color-mix(in srgb, var(--muted) 28%, transparent);
+  border: 1px solid color-mix(in srgb, var(--theme-module-active-text-muted) 28%, transparent);
   border-radius: 4px;
-  color: var(--muted);
+  color: var(--theme-module-active-text-muted);
   font-size: 10px;
   font-style: normal;
   line-height: 16px;
@@ -140,14 +140,14 @@
 }
 
 .kb-node-kind.document {
-  color: #22c55e;
-  border-color: color-mix(in srgb, #22c55e 38%, transparent);
+  color: var(--theme-core-success);
+  border-color: color-mix(in srgb, var(--theme-core-success) 38%, transparent);
 }
 
 .kb-rename-input {
   height: 24px;
-  border: 1px solid #1677ff;
+  border: 1px solid var(--theme-module-active-accent);
   border-radius: 5px;
-  background: var(--surface-2);
+  background: var(--theme-module-active-card-bg);
   padding: 0 7px;
 }

@@ -347,6 +347,97 @@ describe('threadedTerminalRenderWorker', () => {
     expect(messages).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'frame', terminalId: 'render-worker-terminal', seq: 2, paintedRows: 1 })]))
   })
 
+  it('raises low-contrast truecolor foregrounds to the theme foreground', async () => {
+    send(attachGroupMessage(canvas))
+    const message = attachMessage()
+    if (message.type === 'attach') {
+      message.options.settings.cursorStyle = 'bar'
+      message.options.settings.theme = {
+        background: '#f5f7fb',
+        contrastBackground: '#f5f7fb',
+        foreground: '#172033',
+        minimumContrastRatio: 4.5,
+        cursor: '#2f6fed'
+      }
+    }
+    send(message)
+    send({
+      type: 'screen',
+      snapshot: {
+        ...workingSnapshot(),
+        lines: [
+          {
+            y: 1,
+            text: 'dim',
+            runs: [{ x: 0, text: 'dim', chars: Array.from('dim'), widths: [1, 1, 1], columns: 3 }],
+            cells: [
+              {
+                x: 0,
+                text: 'dim',
+                chars: Array.from('dim'),
+                widths: [1, 1, 1],
+                columns: 3,
+                fg: '#d8dde8'
+              }
+            ]
+          }
+        ]
+      }
+    })
+
+    await vi.advanceTimersByTimeAsync(16)
+
+    const dimOps = canvas.context.operations.filter((operation) => operation.type === 'fillText' && 'dim'.includes(operation.text || ''))
+    expect(dimOps).toHaveLength(3)
+    expect(dimOps.every((operation) => operation.fillStyle === '#172033')).toBe(true)
+  })
+
+  it('preserves theme ANSI palette foregrounds instead of flattening them to the default foreground', async () => {
+    send(attachGroupMessage(canvas))
+    const message = attachMessage()
+    if (message.type === 'attach') {
+      message.options.settings.cursorStyle = 'bar'
+      message.options.settings.theme = {
+        background: '#f5f7fb',
+        contrastBackground: '#f5f7fb',
+        foreground: '#172033',
+        minimumContrastRatio: 4.5,
+        cursor: '#2f6fed',
+        green: '#2f9e44'
+      }
+    }
+    send(message)
+    send({
+      type: 'screen',
+      snapshot: {
+        ...workingSnapshot(),
+        lines: [
+          {
+            y: 1,
+            text: 'ansi',
+            runs: [{ x: 0, text: 'ansi', chars: Array.from('ansi'), widths: [1, 1, 1, 1], columns: 4 }],
+            cells: [
+              {
+                x: 0,
+                text: 'ansi',
+                chars: Array.from('ansi'),
+                widths: [1, 1, 1, 1],
+                columns: 4,
+                fg: '#2f9e44'
+              }
+            ]
+          }
+        ]
+      }
+    })
+
+    await vi.advanceTimersByTimeAsync(16)
+
+    const ansiOps = canvas.context.operations.filter((operation) => operation.type === 'fillText' && 'ansi'.includes(operation.text || ''))
+    expect(ansiOps).toHaveLength(4)
+    expect(ansiOps.every((operation) => operation.fillStyle === '#2f9e44')).toBe(true)
+  })
+
   it('paints search highlight backgrounds before highlighted text', async () => {
     send(attachGroupMessage(canvas))
     const message = attachMessage()
@@ -392,7 +483,7 @@ describe('threadedTerminalRenderWorker', () => {
     const fillOrder = canvas.context.fillRect.mock.invocationCallOrder
     expect(clearOrder[clearOrder.length - 1]).toBeLessThan(fillOrder[fillOrder.length - 1])
     const rowFill = canvas.context.operations.find((operation) => operation.type === 'fillRect' && operation.y === 13)
-    expect(rowFill?.fillStyle).toBe('rgba(0, 0, 0, 0)')
+    expect(rowFill).toBeUndefined()
     expect(messages).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'frame', terminalId: 'render-worker-terminal', seq: 2 })]))
   })
 

@@ -34,6 +34,7 @@ import { writeRendererRuntimeLog } from '@/services/app/runtimeLogClient'
 import type { I18nKey } from '@/i18n'
 import type { AiAttentionInput, AiAttentionItem, TerminalPanel } from '@/stores/workspace'
 import type { TerminalSettings } from '@/services/settings/workspaceConfigRuntime'
+import type { TerminalSurfaceMode } from '@/services/terminal/terminalThemeRuntime'
 import type { RuntimeLogLevel } from '@shared/contracts/appRuntime'
 import type { AiContextCatalog, AiContextOption } from '@shared/contracts/aiChat'
 import type { CodexSessionTargetContext } from '@shared/contracts/codexSessions'
@@ -47,6 +48,7 @@ type AiPanelCodexConversationRuntimeInput = {
   panels: () => TerminalPanel[]
   terminalSettings: () => TerminalSettings
   themeId?: () => string
+  terminalSurfaceMode?: () => TerminalSurfaceMode
   aiContextCatalog: () => AiContextCatalog
   loadClassicChatData: () => Promise<void>
   closePopups: () => void
@@ -83,7 +85,8 @@ export const createAiPanelCodexConversationRuntime = (options: AiPanelCodexConve
   const activeCodexConversation = computed(() => codexConversations.value.find((conversation) => conversation.id === activeCodexConversationId.value) || null)
   const activeCodexBoundTarget = computed(() => activeCodexConversation.value?.boundTarget || null)
   const currentAiPanelModeLabel = computed(() => (aiPanelMode.value === 'codex' ? t('ai.codexCliMode') : t('ai.classicChatMode')))
-  const terminalSettingsSignature = () => `${options.themeId?.() || 'dark'}|${codexTerminalSettingsSignature(options.terminalSettings())}`
+  const terminalSettingsSignature = () =>
+    `${options.themeId?.() || 'dark'}|${options.terminalSurfaceMode?.() || 'base'}|${codexTerminalSettingsSignature(options.terminalSettings())}`
 
   const codexStatusLabel = computed(() => {
     const labelKey = codexStatusLabelKey(activeCodexConversation.value?.status || 'idle')
@@ -146,6 +149,7 @@ export const createAiPanelCodexConversationRuntime = (options: AiPanelCodexConve
     createCodexConversationRuntimeRecord<AiPanelCodexConversation>(nextCodexConversationId(), target, {
       host: null,
       terminal: null,
+      threadedTerminal: false,
       fit: null,
       resizeObserver: null
     })
@@ -221,6 +225,7 @@ export const createAiPanelCodexConversationRuntime = (options: AiPanelCodexConve
     activeConversationId: () => activeCodexConversationId.value,
     terminalSettings: options.terminalSettings,
     themeId: options.themeId,
+    terminalSurfaceMode: options.terminalSurfaceMode,
     currentBoundTarget: (conversation) => currentBoundCodexTarget(conversation),
     isConversationVisible: (conversation) => aiPanelMode.value === 'codex' && activeCodexConversationId.value === conversation.id,
     syncAttentionState: syncCodexAttentionState,

@@ -120,15 +120,81 @@ const blendColor = (from: string, to: string, amount: number) => {
   return `rgb(${mix(source.r, target.r)}, ${mix(source.g, target.g)}, ${mix(source.b, target.b)})`
 }
 
+const relativeLuminance = (color: { r: number; g: number; b: number }) => {
+  const channel = (value: number) => {
+    const normalized = Math.max(0, Math.min(255, value)) / 255
+    return normalized <= 0.03928 ? normalized / 12.92 : ((normalized + 0.055) / 1.055) ** 2.4
+  }
+  return 0.2126 * channel(color.r) + 0.7152 * channel(color.g) + 0.0722 * channel(color.b)
+}
+
+const contrastRatio = (foreground: { r: number; g: number; b: number }, background: { r: number; g: number; b: number }) => {
+  const fg = relativeLuminance(foreground)
+  const bg = relativeLuminance(background)
+  const lighter = Math.max(fg, bg)
+  const darker = Math.min(fg, bg)
+  return (lighter + 0.05) / (darker + 0.05)
+}
+
+const normalizedColorText = (value: string | undefined) => (value || '').trim().toLowerCase()
+
+const isThemePaletteColor = (theme: RenderSurface['settings']['theme'], color: string) => {
+  const normalized = normalizedColorText(color)
+  if (!normalized) return false
+  return [
+    theme.black,
+    theme.red,
+    theme.green,
+    theme.yellow,
+    theme.blue,
+    theme.magenta,
+    theme.cyan,
+    theme.white,
+    theme.brightBlack,
+    theme.brightRed,
+    theme.brightGreen,
+    theme.brightYellow,
+    theme.brightBlue,
+    theme.brightMagenta,
+    theme.brightCyan,
+    theme.brightWhite
+  ].some((value) => normalizedColorText(value) === normalized)
+}
+
+const readableForeground = (surface: RenderSurface, color: string, background?: string) => {
+  const minimumContrastRatio = surface.settings.theme.minimumContrastRatio || 1
+  if (minimumContrastRatio <= 1) return color
+  const bg = parseCssColor(background || surface.settings.theme.contrastBackground || surface.settings.theme.background)
+  const fg = parseCssColor(color)
+  if (!fg || !bg) return color
+  if (contrastRatio(fg, bg) >= minimumContrastRatio) return color
+  const themeForeground = parseCssColor(surface.settings.theme.foreground)
+  if (themeForeground && contrastRatio(themeForeground, bg) >= minimumContrastRatio) return surface.settings.theme.foreground
+  const black = { r: 0, g: 0, b: 0 }
+  const white = { r: 255, g: 255, b: 255 }
+  return contrastRatio(black, bg) >= contrastRatio(white, bg) ? '#000000' : '#ffffff'
+}
+
+const isTransparentColor = (value: string | undefined) => {
+  if (!value) return false
+  const normalized = value.trim().toLowerCase()
+  if (normalized === 'transparent') return true
+  if (normalized === 'rgba(0, 0, 0, 0)' || normalized === 'rgba(0,0,0,0)') return true
+  if (normalized === '#0000' || normalized === '#00000000') return true
+  return /\/\s*0(?:\.0+)?\s*\)$/.test(normalized) || /,\s*0(?:\.0+)?\s*\)$/.test(normalized)
+}
+
 const textForeground = (
   surface: RenderSurface,
-  options: { fg?: string; bold?: boolean; dim?: boolean; hidden?: boolean }
+  options: { fg?: string; bg?: string; bold?: boolean; dim?: boolean; hidden?: boolean }
 ) => {
-  if (options.hidden) return surface.settings.theme.background
+  if (options.hidden) return surface.settings.theme.cursorAccent || surface.settings.theme.background
   let color = options.fg || surface.settings.theme.foreground
+  const contrastBackground = surface.settings.theme.cursorAccent || surface.settings.theme.background
   if (options.bold && !options.fg) color = surface.settings.theme.brightWhite || blendColor(color, '#ffffff', 0.3)
-  if (options.dim) color = blendColor(color, surface.settings.theme.background, 0.45)
-  return color
+  if (options.dim) color = blendColor(color, contrastBackground, 0.45)
+  if (options.fg && !options.dim && isThemePaletteColor(surface.settings.theme, color)) return color
+  return readableForeground(surface, color, options.bg)
 }
 
 const rectsEqual = (left: ThreadedTerminalRenderSurfaceRect, right: ThreadedTerminalRenderSurfaceRect) =>
@@ -412,13 +478,17 @@ const resizeSurface = (
 
 const fillBackground = (surface: RenderSurface, row?: number) => {
   const context = surface.context
-  context.fillStyle = surface.settings.theme.background
+  const transparentBackground = isTransparentColor(surface.settings.theme.background)
   if (typeof row === 'number') {
     const y = surface.geometry.paddingTop + row * surface.cellHeight
     context.clearRect(0, y, surface.width, surface.cellHeight)
+    if (transparentBackground) return
+    context.fillStyle = surface.settings.theme.background
     context.fillRect(0, y, surface.width, surface.cellHeight)
   } else {
     context.clearRect(0, 0, surface.width, surface.height)
+    if (transparentBackground) return
+    context.fillStyle = surface.settings.theme.background
     context.fillRect(0, 0, surface.width, surface.height)
   }
 }
@@ -430,6 +500,7 @@ const drawTextCells = (
   row: number,
   options: {
     fg?: string
+    bg?: string
     bold?: boolean
     dim?: boolean
     italic?: boolean
@@ -487,6 +558,7 @@ const drawStyledRuns = (surface: RenderSurface, line: ThreadedTerminalScreenLine
   for (const run of line.cells || []) {
     drawTextCells(surface, run.text, run.x, line.y, {
       fg: run.fg,
+      bg: run.bg,
       bold: run.bold,
       dim: run.dim,
       italic: run.italic,
@@ -517,6 +589,7 @@ const drawHighlightRuns = (surface: RenderSurface, line: ThreadedTerminalScreenL
   for (const run of line.highlights || []) {
     drawTextCells(surface, run.text, run.x, line.y, {
       fg: run.fg,
+      bg: run.bg,
       bold: run.bold,
       chars: runChars(run),
       widths: runWidths(run),
@@ -603,7 +676,10 @@ const drawCursor = (surface: RenderSurface, snapshot: ThreadedTerminalScreenSnap
     context.fillRect(x, y + surface.cellHeight - 3, surface.cellWidth, 2)
   } else {
     context.fillRect(x, y + 1, surface.cellWidth, Math.max(2, surface.cellHeight - 2))
-    drawTextCells(surface, charAtCell(surface.screenLines[snapshot.cursorY], snapshot.cursorX), snapshot.cursorX, snapshot.cursorY, { fg: surface.settings.theme.background })
+    drawTextCells(surface, charAtCell(surface.screenLines[snapshot.cursorY], snapshot.cursorX), snapshot.cursorX, snapshot.cursorY, {
+      fg: surface.settings.theme.cursorAccent || surface.settings.theme.background,
+      bg: surface.settings.theme.cursor
+    })
   }
 }
 
