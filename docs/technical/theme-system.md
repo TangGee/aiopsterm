@@ -42,6 +42,46 @@ Idle Codex conversations do not create or reveal a terminal render canvas until 
 
 The app shell does not define a universal opacity policy for feature screens or terminal screens. A theme is responsible for keeping its own module and terminal surfaces readable.
 
+## Built-In Themes And Backgrounds
+
+Theme seeds use `surfaceFinish` to describe the material behavior in background mode:
+
+- `frosted`: translucent surfaces use backdrop blur.
+- `clear`: translucent surfaces stay crisp and do not blur the selected background.
+
+`surfaceFinish` replaces the older solid/glass split. A clear finish still reveals the configured background in `withBackground` mode; it only changes whether blur is applied. Built-in clear-finish themes include Ubuntu Terminal, One Light, Gruvbox Light, Ayu Light, Obsidian Black, and Rose Milk.
+
+Built-in background presets are real WebP assets under `src/renderer/src/assets/backgrounds/` and are exposed through `settingsBackgroundPresets` in `src/renderer/src/config/settings.ts`. Current preset ids are:
+
+- `aurora-veil`
+- `nebula-dust`
+- `neon-horizon`
+- `kanagawa-tide`
+- `aubergine-dune`
+- `carbon-weave`
+- `paper-fog`
+- `porcelain-sky`
+- `rose-dawn`
+- `sakura-drift`
+- `jade-mist`
+
+Regenerate these assets with:
+
+```bash
+node scripts/generate-backgrounds.mjs --preview-dir test-results/background-previews
+```
+
+The generator renders deterministic SVG artwork through Playwright Chromium at 1920x1080 and exports WebP files. The optional preview directory writes HTML previews for visual review. When adding or removing a preset, update the generator artwork map, the generated WebP file, `settingsBackgroundPresets`, and any tests or docs that enumerate built-in presets.
+
+## Legacy Id Migration
+
+Persisted configs can reference preset or theme ids that a later release removed. Two alias maps migrate them during normalization instead of silently dropping the user's choice:
+
+- `legacyBackgroundPresetAliases` in `src/renderer/src/config/settings.ts` maps each retired background preset id to the closest current preset. `normalizeBackgroundConfig` applies the map when `mode` is `preset`; ids with no alias fall back to the first available preset, and the normalization reports `changed: true` so the repaired value is persisted.
+- `legacyThemeIdAliases` in `src/renderer/src/services/app/themeRuntime.ts` maps retired theme ids (currently `ubuntu-solid` to `ubuntu-terminal`). `resolveEffectiveThemeId` and the settings controllers consult it before falling back to `dark`.
+
+When removing a preset or theme id, add an alias for it in the matching map in the same commit.
+
 ## Compatibility Policy
 
 The previous global variables such as `--bg`, `--surface`, `--accent`, `--glass-surface`, `--workspace-bg`, and terminal host aliases are not part of the theme API.

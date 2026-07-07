@@ -578,7 +578,7 @@ Current event categories are:
 - `surface`: surface resume mutations, surface create/focus events, and surface telemetry reports.
 - `agent`: hibernation and visible agent-team automation mutations.
 
-Events are appended to `<userData>/control/events.jsonl` and the app reloads the newest 4,096 events on startup for replay. `seq` continues from the largest durable event sequence, so cursor files remain useful across app restarts. Clients should still refresh state from `workspace.snapshot`, `surface.list`, and `notification.list` when `ack.resume.gap` is true, because the replay window is bounded.
+Events are appended to `<userData>/control/events.jsonl` through an asynchronous write queue so live publication is not blocked by disk I/O. The in-memory replay ring keeps the newest 4,096 events and trims in batches to avoid copying the array on every event. The app reloads the newest 4,096 durable events on startup for replay. `seq` continues from the largest durable event sequence, so cursor files remain useful across app restarts. When the JSONL file grows past 8 MiB, aiopsterm rewrites it from the retained replay tail under a half-size budget and then continues appending queued events. Tests or shutdown paths that need durable-log completeness should call the control-state flush helper before reading the file. Clients should still refresh state from `workspace.snapshot`, `surface.list`, and `notification.list` when `ack.resume.gap` is true, because the replay window is bounded.
 
 Notification event payloads include bounded title previews and content lengths; they do not copy full notification bodies into the event stream or JSONL audit log. Terminal input events store lengths and byte counts only, not raw terminal text.
 

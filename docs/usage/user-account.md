@@ -15,6 +15,7 @@ Playwright can set `AIOPSTERM_USER_EXTERNAL_OPEN_BACKEND_DOUBLE=1` so the main-p
 - Password reset updates the backend-owned credential hash for the currently logged-in local account when one exists.
 - Username edits keep the current account credential aligned with the backend profile username.
 - Credential records are private main-process state. Public user snapshots expose only profile and trusted-device data, never password, salt, or hash fields.
+- Credential hashing uses asynchronous `scrypt` in the main process. Account APIs that read or mutate credentials are asynchronous so login, password reset, and seed credential loading do not block the Electron event loop.
 
 ## Verification Code Login
 

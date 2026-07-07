@@ -79,10 +79,12 @@ VTE keeps the input-method boundary on the GTK widget: key events are filtered t
 Terminal output is merged at several boundaries:
 
 - The main process uses `terminalDataCoalescer` before `terminal:data` IPC delivery. Small output flushes quickly; bulk output can use the larger bulk merge window unless a caller passes an explicit `maxDelayMs`.
+- The main process also applies byte-level flow control. It counts unacknowledged UTF-8 bytes after each IPC send, pauses the PTY or SSH channel at 2 MiB, resumes it at 512 KiB, and safety-resumes after 15 seconds if acknowledgements are lost during renderer reload/crash.
 - The renderer batches ingress per terminal with priority-aware timing: active panes flush fastest, visible inactive panes flush near frame cadence, and background panes flush less often.
 - Threaded panes bypass the renderer main-thread ingress hot path. PTY data is mapped to the worker-backed host and posted directly to the core worker, while legacy xterm panes keep the renderer ingress batcher.
-- Threaded panes also skip default main-thread ZMODEM sentry scanning. That scanner is kept on the legacy path only, because normal high-volume terminal output should not be byte-scanned on the UI thread.
-- Core workers keep a per-terminal `pendingChunks` queue and parse bounded batches into `@xterm/headless`.
+- Threaded panes also skip default main-thread ZMODEM sentry scanning. That scanner is kept on the legacy path only, because normal high-volume terminal output should not be byte-scanned on the UI thread. The threaded direct path still routes active ZMODEM sessions, or chunks containing the `**\x18B` magic, through the ZMODEM runtime before writing to the worker.
+- Core workers keep a per-terminal `pendingChunks` queue plus byte-length sidecar data and parse bounded batches into `@xterm/headless`.
+- After a core worker consumes a batch it posts a `consumed` message. The renderer forwards that through `terminal:ack-data`, which is the acknowledgement source for main-process flow control.
 - Core workers emit screen snapshots at active/visible/background cadence. Background records keep terminal state and mark a pending full snapshot, but paint messages are dropped until visible.
 - The render worker keeps only the newest snapshot per terminal before painting. Stale snapshots are discarded.
 
@@ -93,6 +95,8 @@ This follows VTE's PTY pressure model: the fd read source only fills `m_incoming
 Keyword highlighting is also kept off the renderer hot path for threaded terminals. The main renderer sends the normalized keyword-highlight config to the core worker. The core worker compiles output/both-scope rules and adds highlight runs only for snapshot rows; the render worker paints those runs as a display overlay after ANSI text. This preserves raw PTY bytes and `@xterm/headless` buffer state, avoids injecting synthetic ANSI into the terminal stream, and prevents `highlightStatus=true` from falling back to main-thread `appendTerminalOutput()` and full `getHighlightedTerminalOutput()` scans. The legacy xterm path still uses the existing ANSI-injection highlighter.
 
 Worker messages must stay structured-clone safe. Renderer settings, theme values, and keyword-highlight config are normalized into plain data before `postMessage()` so Vue/Pinia proxies cannot make workspace terminals fail open and fall back to the legacy xterm renderer.
+
+Search and dirty-row detection avoid full-buffer work unless content actually changes. Search matches are cached by a terminal content epoch, so scroll and cursor-only snapshots do not rescan scrollback. Visible row signatures are numeric hashes over characters, widths, colors, and SGR flags instead of per-cell string concatenations. Full or scroll snapshots reset the signature baseline and let the next incremental batch converge from a known full repaint.
 
 ## Runtime Diagnostics
 

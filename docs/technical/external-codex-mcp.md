@@ -17,6 +17,8 @@ The external server can also inspect and act on managed AI sessions reported by 
 
 Visible terminals continue to be managed by the normal terminal workspace and the embedded Codex terminal bridge.
 
+Closed or failed external MCP connections are removed from the external connection map, and any pending command waiting on that connection is failed with `CONNECTION_CLOSED`. The bridge does not keep a connection-wide unbounded output string; pending command output is owned by the individual command request and bounded by the command/file/search tool limits.
+
 ## SSH Authentication Model
 
 External MCP host connections reuse `createSshTerminalSession`. The sink passed by `externalCodexMcpBridge.ts` records lifecycle/data/exit events and now also provides `keyboardInteractive` / `keyboardInteractiveResult` handlers backed by `externalCodexMcpAuthRuntime.ts`.

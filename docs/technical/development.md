@@ -92,6 +92,14 @@ npm run test:e2e
 
 Package and release work should also use the package audits documented in the usage package verification guide.
 
+For background preset changes, regenerate the deterministic WebP assets and review previews:
+
+```bash
+node scripts/generate-backgrounds.mjs --preview-dir test-results/background-previews
+```
+
+This script writes `src/renderer/src/assets/backgrounds/<id>.webp`. Keep `src/renderer/src/config/settings.ts` in sync with the generated preset ids.
+
 ## Terminal Performance Verification
 
 Terminal renderer throughput changes must be validated with the threaded stress harness before claiming performance success. Use the short gates while iterating:

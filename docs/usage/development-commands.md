@@ -89,6 +89,14 @@ npm run generate:icons
 
 The source bitmap lives at `resources/app-icon-source.png`. `generate:icons` reads that self-owned PNG and writes the Linux runtime/package sizes under `resources/icons`. During development the main process loads `resources/icons/256x256.png`; packaged builds copy `resources/icons` into Electron resources so Linux windows can load `icons/256x256.png` at runtime.
 
+Regenerate built-in app background presets:
+
+```bash
+node scripts/generate-backgrounds.mjs --preview-dir test-results/background-previews
+```
+
+The script renders deterministic SVG artwork through Playwright Chromium and writes WebP files under `src/renderer/src/assets/backgrounds`. Keep `src/renderer/src/config/settings.ts` synchronized with the generated preset ids.
+
 Build Linux packages:
 
 ```bash
