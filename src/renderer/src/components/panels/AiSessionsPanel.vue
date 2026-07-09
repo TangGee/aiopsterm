@@ -58,6 +58,47 @@
       </span>
     </Teleport>
 
+    <Teleport to="body">
+      <div
+        v-if="contextMenu.visible"
+        class="ai-session-context-menu"
+        :style="{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }"
+        @click.stop
+        @contextmenu.prevent.stop
+      >
+        <button
+          type="button"
+          @click="openContextSessionContent"
+        >
+          <FileText />
+          <span>{{ t('aiSessions.openContent') }}</span>
+        </button>
+        <button
+          type="button"
+          @click="locateContextSession"
+        >
+          <LocateFixed />
+          <span>{{ contextMenuSession && contextMenuSession.state !== 'working' && contextMenuSession.resumeCommand ? t('aiSessions.resume') : t('aiSessions.locateTerminal') }}</span>
+        </button>
+        <button
+          v-if="contextMenuSession?.state === 'needsInput'"
+          type="button"
+          @click="markContextSessionHandled"
+        >
+          <Check />
+          <span>{{ t('aiSessions.markHandled') }}</span>
+        </button>
+        <button
+          type="button"
+          class="danger"
+          @click="clearContextSession"
+        >
+          <Trash2 />
+          <span>{{ t('aiSessions.clearSession') }}</span>
+        </button>
+      </div>
+    </Teleport>
+
     <div class="panel-search">
       <Search />
       <input
@@ -149,6 +190,7 @@
                 :class="{ active: sessionKey(session) === workspace.selectedManagedAiSessionKey, attention: session.state === 'needsInput' }"
                 @click="selectSession(session)"
                 @dblclick="resumeOrFocusSession(session)"
+                @contextmenu.prevent="openSessionContextMenu(session, $event)"
                 @keydown.enter.prevent="selectSession(session)"
                 @keydown.space.prevent="selectSession(session)"
               >
@@ -211,6 +253,7 @@
                 :class="{ active: sessionKey(session) === workspace.selectedManagedAiSessionKey, attention: session.state === 'needsInput' }"
                 @click="selectSession(session)"
                 @dblclick="resumeOrFocusSession(session)"
+                @contextmenu.prevent="openSessionContextMenu(session, $event)"
                 @keydown.enter.prevent="selectSession(session)"
                 @keydown.space.prevent="selectSession(session)"
               >
@@ -252,6 +295,7 @@
             :class="{ active: sessionKey(session) === workspace.selectedManagedAiSessionKey, attention: session.state === 'needsInput' }"
             @click="selectSession(session)"
             @dblclick="resumeOrFocusSession(session)"
+            @contextmenu.prevent="openSessionContextMenu(session, $event)"
             @keydown.enter.prevent="selectSession(session)"
             @keydown.space.prevent="selectSession(session)"
           >
@@ -301,7 +345,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { Activity, Archive, Bot, Check, ChevronDown, FolderTree, Inbox, RefreshCw, Search } from 'lucide-vue-next'
+import { Activity, Archive, Bot, Check, ChevronDown, FileText, FolderTree, Inbox, LocateFixed, RefreshCw, Search, Trash2 } from 'lucide-vue-next'
 import type { ManagedAiPanelModeButton } from '@/services/ai/aiSessionsPanelViewRuntime'
 import { useAiSessionsPanelRuntime } from '@/services/ai/aiSessionsPanelRuntime'
 
@@ -312,10 +356,18 @@ const {
   mode,
   libraryGrouping,
   modeButtons,
+  contextMenu,
+  contextMenuSession,
   activeModeLabel,
   searchPlaceholder,
   sessionKey,
   selectMode,
+  openSessionContextMenu,
+  closeSessionContextMenu,
+  openContextSessionContent,
+  locateContextSession,
+  markContextSessionHandled,
+  clearContextSession,
   selectLibraryGrouping,
   isLibrarySectionCollapsed,
   toggleLibrarySection,
@@ -369,6 +421,8 @@ watch(rowMetaSignature, () => {
 
 onMounted(() => {
   updateRowMetaWidth()
+  document.addEventListener('click', closeSessionContextMenu)
+  document.addEventListener('keydown', closeContextMenuOnEscape)
   if (typeof ResizeObserver === 'undefined' || !sessionListElement.value) return
   listResizeObserver = new ResizeObserver(updateRowMetaWidth)
   listResizeObserver.observe(sessionListElement.value)
@@ -377,7 +431,13 @@ onMounted(() => {
 onBeforeUnmount(() => {
   listResizeObserver?.disconnect()
   listResizeObserver = null
+  document.removeEventListener('click', closeSessionContextMenu)
+  document.removeEventListener('keydown', closeContextMenuOnEscape)
 })
+
+const closeContextMenuOnEscape = (event: KeyboardEvent) => {
+  if (event.key === 'Escape') closeSessionContextMenu()
+}
 
 const modeTooltip = ref<{ label: string; tooltip: string; left: number; top: number } | null>(null)
 

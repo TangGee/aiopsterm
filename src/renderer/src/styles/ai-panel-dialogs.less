@@ -1,12 +1,12 @@
 .terminal-mfa-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 130;
+  z-index: var(--app-z-modal);
   display: flex;
   align-items: center;
   justify-content: center;
   background: color-mix(in srgb, var(--theme-module-active-panel-bg) 64%, transparent);
-  backdrop-filter: blur(8px);
+  backdrop-filter: none;
   padding: 24px;
 }
 
@@ -16,7 +16,10 @@
   gap: 12px;
   border: 1px solid color-mix(in srgb, var(--theme-module-active-accent) 30%, var(--theme-module-active-border));
   border-radius: 8px;
-  background: var(--theme-module-active-card-bg);
+  background: var(--theme-module-active-modal-surface-bg);
+  background-size: var(--theme-module-active-modal-surface-size);
+  background-position: var(--theme-module-active-modal-surface-position);
+  background-repeat: var(--theme-module-active-modal-surface-repeat);
   box-shadow: var(--theme-module-active-shadow-soft);
   padding: 14px;
 }
@@ -58,7 +61,7 @@
   height: 28px;
   border: 1px solid var(--theme-module-active-border);
   border-radius: 6px;
-  background: var(--theme-module-active-card-strong-bg);
+  background: var(--theme-module-active-modal-strong-bg);
   color: var(--theme-module-active-text);
   display: inline-flex;
   align-items: center;
@@ -111,7 +114,7 @@
   height: 34px;
   border: 1px solid var(--theme-module-active-border);
   border-radius: 7px;
-  background: var(--theme-module-active-panel-bg);
+  background: var(--theme-module-active-modal-card-bg);
   color: var(--theme-module-active-text);
   padding: 0 10px;
   font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
@@ -166,12 +169,12 @@
 .ai-command-audit-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 120;
+  z-index: var(--app-z-modal);
   display: flex;
   align-items: center;
   justify-content: center;
   background: color-mix(in srgb, var(--theme-module-active-panel-bg) 62%, transparent);
-  backdrop-filter: blur(8px);
+  backdrop-filter: none;
   padding: 24px;
 }
 
@@ -184,7 +187,10 @@
   gap: 12px;
   border: 1px solid color-mix(in srgb, var(--theme-module-active-accent) 28%, var(--theme-module-active-border));
   border-radius: 8px;
-  background: var(--theme-module-active-card-bg);
+  background: var(--theme-module-active-modal-surface-bg);
+  background-size: var(--theme-module-active-modal-surface-size);
+  background-position: var(--theme-module-active-modal-surface-position);
+  background-repeat: var(--theme-module-active-modal-surface-repeat);
   box-shadow: var(--theme-module-active-shadow-soft);
   padding: 14px;
 }
@@ -225,7 +231,7 @@
   height: 28px;
   border: 1px solid var(--theme-module-active-border);
   border-radius: 6px;
-  background: var(--theme-module-active-card-strong-bg);
+  background: var(--theme-module-active-modal-strong-bg);
   color: var(--theme-module-active-text);
   display: inline-flex;
   align-items: center;
@@ -293,7 +299,7 @@
   resize: vertical;
   border: 1px solid var(--theme-module-active-border);
   border-radius: 7px;
-  background: var(--theme-module-active-panel-bg);
+  background: var(--theme-module-active-modal-card-bg);
   color: var(--theme-module-active-text);
   padding: 10px;
   font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
@@ -363,4 +369,3 @@
     transform: rotate(360deg);
   }
 }
-

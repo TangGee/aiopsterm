@@ -13,10 +13,13 @@
   max-width: 600px;
   border: 1px solid color-mix(in srgb, var(--theme-module-active-accent) 30%, var(--theme-module-active-border));
   border-radius: 8px;
-  background: color-mix(in srgb, var(--theme-module-active-panel-bg) 96%, transparent);
+  background: var(--theme-module-active-modal-surface-bg);
+  background-size: var(--theme-module-active-modal-surface-size);
+  background-position: var(--theme-module-active-modal-surface-position);
+  background-repeat: var(--theme-module-active-modal-surface-repeat);
   color: var(--theme-module-active-text);
   box-shadow: 0 12px 36px rgb(0 0 0 / 0.32);
-  backdrop-filter: blur(16px);
+  backdrop-filter: none;
   overflow: hidden;
 }
 
@@ -87,7 +90,7 @@
   height: 24px;
   border: 1px solid var(--theme-module-active-border);
   border-radius: 6px;
-  background: var(--theme-module-active-card-bg);
+  background: var(--theme-module-active-modal-card-bg);
   color: var(--theme-module-active-text);
   font-size: 11px;
 }
@@ -127,7 +130,7 @@
 }
 
 .command-dialog-close:hover {
-  background: var(--theme-module-active-card-strong-bg);
+  background: var(--theme-module-active-modal-strong-bg);
   color: var(--theme-module-active-text);
 }
 
@@ -144,7 +147,7 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  background: var(--theme-module-active-card-bg);
+  background: var(--theme-module-active-modal-card-bg);
 }
 
 .generated-command-row code {

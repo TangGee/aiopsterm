@@ -15,6 +15,10 @@ import type {
   ManagedAiSessionTimelineEvent
 } from '@shared/contracts/managedAiSessions'
 import type {
+  ManagedAiSessionContentRecord,
+  ManagedAiSessionContentSnapshot
+} from '@shared/contracts/managedAiSessionContent'
+import type {
   AgentHookInstallerOperationResult,
   AgentHookInstallerSnapshot,
   AgentHookInstallerSource,
@@ -31,6 +35,7 @@ import type {
 export type ManagedAiSessionMutationData = NonNullable<ManagedAiSessionMutationResult['data']>
 export type ManagedAiSessionBulkData = NonNullable<ManagedAiSessionBulkResult['data']>
 export type ManagedAiSessionHibernateData = NonNullable<ManagedAiSessionHibernateResult['data']>
+export type ManagedAiSessionContentRecordData = { record: ManagedAiSessionContentRecord }
 export type AgentHookInstallOperationData = NonNullable<AgentHookInstallerOperationResult['data']>
 export type ExportMcpInstallOperationData = NonNullable<ExportMcpInstallerOperationResult['data']>
 export type AgentHibernationConfigData = { config: AgentHibernationConfig }
@@ -87,6 +92,8 @@ const managedAiSessionStates = new Set<ManagedAiSessionState>(['idle', 'working'
 const managedAiSessionLifecycles = new Set<ManagedAiSessionLifecycle>(['idle', 'running', 'needsInput', 'ended', 'unknown'])
 const managedAiRequestKinds = new Set<ManagedAiRequestKind>(['permission', 'question', 'plan', 'notification', 'telemetry'])
 const managedAiDecisionModes = new Set<ManagedAiDecisionMode>(['blocking', 'telemetry', 'local'])
+const managedAiContentFormats = new Set(['jsonl', 'opencode-sqlite', 'events', 'unsupported'])
+const managedAiContentRoles = new Set(['system', 'developer', 'user', 'assistant', 'tool', 'unknown'])
 
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 const isNonEmptyString = (value: unknown): value is string => typeof value === 'string' && value.trim() !== ''
@@ -203,6 +210,45 @@ export const isManagedAiSessionBulkData = (value: unknown): value is ManagedAiSe
 
 export const isManagedAiSessionHibernateData = (value: unknown): value is ManagedAiSessionHibernateData =>
   isRecord(value) && isManagedAiSessionRecord(value.session) && isManagedAiSessionSnapshot(value.snapshot) && isAgentHibernationConfig(value.config)
+
+export const isManagedAiSessionContentRecord = (value: unknown): value is ManagedAiSessionContentRecord =>
+  isRecord(value) &&
+  isAiAgentSessionSource(value.source) &&
+  isNonEmptyString(value.sessionId) &&
+  managedAiContentFormats.has(String(value.format)) &&
+  isNonEmptyString(value.recordId) &&
+  typeof value.ordinal === 'number' &&
+  typeof value.locationLabel === 'string' &&
+  managedAiContentRoles.has(String(value.role)) &&
+  typeof value.messageType === 'string' &&
+  typeof value.content === 'string' &&
+  typeof value.contentTruncated === 'boolean' &&
+  typeof value.fullLength === 'number' &&
+  typeof value.editable === 'boolean' &&
+  isOptionalField(value, 'editBlockedReason', (item) => typeof item === 'string') &&
+  isNonEmptyString(value.sourceRevision) &&
+  isOptionalField(value, 'createdAt', (item) => typeof item === 'number' && Number.isFinite(item))
+
+export const isManagedAiSessionContentSnapshot = (value: unknown): value is ManagedAiSessionContentSnapshot =>
+  isRecord(value) &&
+  isAiAgentSessionSource(value.source) &&
+  isNonEmptyString(value.sessionId) &&
+  typeof value.title === 'string' &&
+  managedAiContentFormats.has(String(value.format)) &&
+  isNonEmptyString(value.sourceRevision) &&
+  typeof value.total === 'number' &&
+  typeof value.offset === 'number' &&
+  typeof value.limit === 'number' &&
+  typeof value.editable === 'boolean' &&
+  isOptionalField(value, 'editBlockedReason', (item) => typeof item === 'string') &&
+  isOptionalField(value, 'sessionState', isManagedAiSessionState) &&
+  isOptionalField(value, 'storagePath', (item) => typeof item === 'string') &&
+  isOptionalField(value, 'unsupportedReason', (item) => typeof item === 'string') &&
+  Array.isArray(value.records) &&
+  value.records.every(isManagedAiSessionContentRecord)
+
+export const isManagedAiSessionContentRecordData = (value: unknown): value is ManagedAiSessionContentRecordData =>
+  isRecord(value) && isManagedAiSessionContentRecord(value.record)
 
 export const isAgentHookInstallerStatus = (value: unknown): value is AgentHookInstallerStatus =>
   isRecord(value) &&

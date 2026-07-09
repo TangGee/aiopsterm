@@ -19,6 +19,14 @@
   box-shadow: var(--theme-module-active-shadow);
 }
 
+.asset-host-modal .asset-form-panel {
+  border-left: 0;
+  background: var(--theme-module-active-modal-surface-bg);
+  background-size: var(--theme-module-active-modal-surface-size);
+  background-position: var(--theme-module-active-modal-surface-position);
+  background-repeat: var(--theme-module-active-modal-surface-repeat);
+}
+
 .assets-panel-workspace-mode .asset-form-panel {
   width: 340px;
 }
@@ -126,6 +134,12 @@
   background: var(--theme-module-active-card-bg);
   color: var(--theme-module-active-text);
   padding: 0 8px;
+}
+
+.asset-host-modal .asset-form-panel input,
+.asset-host-modal .asset-form-panel select,
+.asset-host-modal .asset-form-panel textarea {
+  background: var(--theme-module-active-modal-card-bg);
 }
 
 .asset-form-panel textarea {

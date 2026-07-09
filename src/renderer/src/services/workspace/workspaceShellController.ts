@@ -3,7 +3,7 @@ import { isAiopstermDeepLinkPayload } from '@shared/deepLink'
 import type { ModuleKey } from '@/config/navigation'
 import type { SettingSectionKey } from '@/config/settings'
 import type { UserConfig } from '@shared/contracts/userConfig'
-import type { TerminalPanel } from '@/services/terminal/terminalPanelRuntime'
+import { isTerminalWorkspacePanel, type TerminalPanel } from '@/services/terminal/terminalPanelRuntime'
 
 export type AssetManagementViewRequest = 'assetConfig' | 'assetManagement' | 'keyManagement' | 'proxyManagement'
 export type AssetManagementOpenAction = 'none' | 'create-key' | 'create-proxy'
@@ -54,7 +54,7 @@ export const createWorkspaceShellController = (
 
   const switchToTerminalPanelIndex = (digit: number) => {
     const index = Math.max(1, Math.min(9, Math.floor(digit))) - 1
-    const terminalPanels = panels.value.filter((panel) => panel.kind !== 'knowledge')
+    const terminalPanels = panels.value.filter((panel) => isTerminalWorkspacePanel(panel))
     const target = terminalPanels[index]
     if (!target) return false
     mode.value = 'terminal'

@@ -29,6 +29,7 @@ import {
   findTerminalPanelByIdOrSession,
   findTerminalPanelBySessionOrId,
   hasTerminalPanelSplitState,
+  isTerminalWorkspacePanel,
   renameTerminalPanelInCollection,
   registerTerminalSshSession,
   replaceTerminalOutputInPanelCollection,
@@ -48,12 +49,14 @@ import type { TerminalProgress } from '@/services/terminal/terminalOscRuntime'
 import type { AiContextOption } from '@shared/contracts/aiChat'
 import type { KnowledgeNode } from '@shared/contracts/knowledgeBase'
 import type { TerminalExitEvent, TerminalLifecycleEvent, TerminalSessionInfo } from '@shared/contracts/terminalSessions'
+import type { AiAgentSessionSource, ManagedAiSessionRecord } from '@shared/contracts/managedAiSessions'
 
 type WorkspaceTerminalPanelsControllerState = {
   mode: Ref<'terminal' | 'agents'>
   activeModule: Ref<ModuleKey>
   activePanelId: Ref<string>
   panels: Ref<TerminalPanel[]>
+  managedAiSessions: Ref<ManagedAiSessionRecord[]>
   terminalSettings: Ref<TerminalSettings>
   extensionSettings: Ref<ExtensionSettings>
   keywordHighlightSettings: Ref<KeywordHighlightSettings>
@@ -84,6 +87,7 @@ export const createWorkspaceTerminalPanelsController = (
     activeModule,
     activePanelId,
     panels,
+    managedAiSessions,
     terminalSettings,
     extensionSettings,
     keywordHighlightSettings,
@@ -113,7 +117,7 @@ export const createWorkspaceTerminalPanelsController = (
 
   const activateTerminalPanel = (panelIdOrSessionId: string) => {
     const target = panels.value.find((panel) => panel.id === panelIdOrSessionId || panel.sessionId === panelIdOrSessionId)
-    if (!target || target.kind !== 'terminal') return null
+    if (!target || !isTerminalWorkspacePanel(target)) return null
     activeModule.value = 'workspace'
     activePanelId.value = target.id
     return target
@@ -136,7 +140,7 @@ export const createWorkspaceTerminalPanelsController = (
   }
 
   const closePanel = (id = activePanelId.value) => {
-    const closing = panels.value.filter((panel) => panel.id === id || (panels.value.length === 1 && panel.kind !== 'knowledge'))
+    const closing = panels.value.filter((panel) => panel.id === id || (panels.value.length === 1 && isTerminalWorkspacePanel(panel)))
     activePanelId.value = closeTerminalPanelInCollection(panels.value, id, activePanelId.value)
     applyManagedAiTerminalPanelClosed(closing)
   }
@@ -353,6 +357,7 @@ export const createWorkspaceTerminalPanelsController = (
   }
 
   const knowledgePanelId = (relPath: string) => `kb:${relPath}`
+  const managedAiSessionPanelId = (source: AiAgentSessionSource, sessionId: string) => `ai-session:${source}:${encodeURIComponent(sessionId)}`
   let knowledgeJumpTokenSeed = 0
 
   const createKnowledgeJumpState = (range?: { startLine?: number; endLine?: number }) => {
@@ -396,6 +401,43 @@ export const createWorkspaceTerminalPanelsController = (
     panels.value.push(panel)
     activePanelId.value = panel.id
     kbSelectedKeys.value = [relPath]
+    return panel
+  }
+
+  const openManagedAiSessionContent = (source: AiAgentSessionSource, sessionId: string) => {
+    const normalizedSessionId = sessionId.trim()
+    if (!normalizedSessionId) return null
+    const existing = panels.value.find(
+      (panel) =>
+        panel.kind === 'managed-ai-session' &&
+        panel.managedAiSession?.source === source &&
+        panel.managedAiSession.sessionId === normalizedSessionId
+    )
+    if (existing) {
+      activeModule.value = 'workspace'
+      mode.value = 'terminal'
+      activePanelId.value = existing.id
+      return existing
+    }
+    const session = managedAiSessions.value.find((item) => item.source === source && item.id === normalizedSessionId)
+    const title = session?.title?.trim() || `${source} ${normalizedSessionId.slice(0, 8)}`
+    const panel: TerminalPanel = {
+      id: managedAiSessionPanelId(source, normalizedSessionId),
+      title,
+      cwd: session?.cwd || session?.canonicalCwd || '@ai-sessions',
+      kind: 'managed-ai-session',
+      status: 'ready',
+      output: '',
+      outputSegments: [],
+      managedAiSession: {
+        source,
+        sessionId: normalizedSessionId
+      }
+    }
+    panels.value.push(panel)
+    activeModule.value = 'workspace'
+    mode.value = 'terminal'
+    activePanelId.value = panel.id
     return panel
   }
 
@@ -482,6 +524,7 @@ export const createWorkspaceTerminalPanelsController = (
     applySshTerminalSession,
     applyLocalTerminalSession,
     openKnowledgeFile,
+    openManagedAiSessionContent,
     syncKnowledgePanelsAfterRename,
     closeKnowledgePanelsForRemoved,
     appendTerminalOutput,

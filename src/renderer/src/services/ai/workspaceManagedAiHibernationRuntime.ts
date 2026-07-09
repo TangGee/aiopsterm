@@ -5,7 +5,7 @@ import {
 } from '@/services/ai/managedAiBackendGuards'
 import { terminalClient } from '@/services/terminal/terminalClient'
 import type { I18nKey } from '@/i18n/messages'
-import type { TerminalPanel } from '@/services/terminal/terminalPanelRuntime'
+import { isTerminalWorkspacePanel, type TerminalPanel } from '@/services/terminal/terminalPanelRuntime'
 import type { TerminalCommandExecutionOptions, TerminalSecurityDecision } from '@/services/terminal/terminalExecutionRuntime'
 import type {
   AiAgentSessionSource,
@@ -139,7 +139,7 @@ export const createWorkspaceManagedAiHibernationRuntime = (input: {
     const focused = focusManagedAiSession(session.id)
     const targetIds = [focused?.panelId, focused?.terminalSessionId, session.panelId, session.terminalSessionId].filter(Boolean)
     let panel = targetIds.length ? panels.value.find((item) => targetIds.includes(item.id) || (item.sessionId ? targetIds.includes(item.sessionId) : false)) : null
-    if (panel?.sessionId && panel.kind !== 'knowledge' && panel.status !== 'closed' && panel.status !== 'error') {
+    if (panel?.sessionId && isTerminalWorkspacePanel(panel) && panel.status !== 'closed' && panel.status !== 'error') {
       return true
     }
     const command = session.resumeCommand?.trim()

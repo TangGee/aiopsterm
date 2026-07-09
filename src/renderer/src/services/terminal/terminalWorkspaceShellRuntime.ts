@@ -2,7 +2,7 @@ import { computed, nextTick, reactive, ref, type Ref, type ComputedRef } from 'v
 import { copyTextToClipboard, readTextFromClipboard, type ClipboardTextReadResult } from '@/services/app/clipboardRuntime'
 import { windowControlsClient } from '@/services/app/windowControlsClient'
 import type { TerminalPanel, useWorkspaceStore } from '@/stores/workspace'
-import type { PanelDirection } from '@/services/terminal/terminalPanelRuntime'
+import { isTerminalWorkspacePanel, type PanelDirection } from '@/services/terminal/terminalPanelRuntime'
 import type { TerminalView } from '@/services/terminal/terminalWorkspaceViewRuntime'
 import {
   terminalShortcutActionForEvent,
@@ -128,7 +128,7 @@ export const createTerminalWorkspaceShellRuntime = (
   const getViewportSize = deps.getViewportSize ?? (() => ({ innerWidth: window.innerWidth, innerHeight: window.innerHeight }))
 
   const panelById = (panelId: string) => workspace.panels.find((panel) => panel.id === panelId)
-  const terminalPanels = () => workspace.panels.filter((panel) => panel.kind !== 'knowledge')
+  const terminalPanels = () => workspace.panels.filter((panel) => isTerminalWorkspacePanel(panel))
   const keyboardEventTargetElement = (event: KeyboardEvent) => (event.target instanceof Element ? event.target : null)
   const isEditableKeyboardTarget = (event: KeyboardEvent) => {
     const target = keyboardEventTargetElement(event)
@@ -148,7 +148,7 @@ export const createTerminalWorkspaceShellRuntime = (
 
   const canForkSelected = computed(() => workspace.canForkSshPanel(menu.panelId))
   const canForkTerminalMenuPanel = computed(() => workspace.canForkSshPanel(termMenu.panelId))
-  const isTerminalMenuPanel = computed(() => panelById(menu.panelId)?.kind === 'terminal')
+  const isTerminalMenuPanel = computed(() => isTerminalWorkspacePanel(panelById(menu.panelId)))
   const isReconnectablePanel = (panel?: TerminalPanel | null) => !panel?.sessionId || panel.status === 'closed' || panel.status === 'error'
   const terminalTabsMaxScrollLeft = (element: HTMLElement) => Math.max(0, element.scrollWidth - element.clientWidth)
   const terminalTabScrollStep = (element: HTMLElement) => Math.max(160, Math.round(element.clientWidth * 0.72))
@@ -464,7 +464,7 @@ export const createTerminalWorkspaceShellRuntime = (
       return
     }
     const panel = panelById(panelId)
-    if (!panel || panel.kind === 'knowledge') {
+    if (!panel || !isTerminalWorkspacePanel(panel)) {
       termMenu.visible = false
       return
     }
@@ -481,7 +481,7 @@ export const createTerminalWorkspaceShellRuntime = (
 
   const clearTerminal = (panelId = workspace.activePanelId) => {
     const panel = panelById(panelId)
-    if (!panel || panel.kind === 'knowledge') return
+    if (!panel || !isTerminalWorkspacePanel(panel)) return
     workspace.replaceTerminalOutput(panel.id, '')
     const view = terminalViews.get(panelId)
     view?.clearPendingOutput?.()
@@ -608,7 +608,7 @@ export const createTerminalWorkspaceShellRuntime = (
 
   const handleTerminalKeyboardShortcut = (panelId: string, action: TerminalShortcutAction, event?: KeyboardEvent) => {
     const panel = panelById(panelId)
-    if (!panel || panel.kind === 'knowledge') return false
+    if (!panel || !isTerminalWorkspacePanel(panel)) return false
     workspace.activePanelId = panelId
     switch (action.type) {
       case 'copy':
@@ -703,7 +703,7 @@ export const createTerminalWorkspaceShellRuntime = (
 
   const togglePanelConnection = async (panelId: string) => {
     const panel = panelById(panelId)
-    if (!panel || panel.kind === 'knowledge') return
+    if (!panel || !isTerminalWorkspacePanel(panel)) return
     const wasNeverConnected = !panel.sessionId && panel.status === 'ready'
     if (!panel.sessionId) {
       const connected = await reconnectTerminalPanel(panel)

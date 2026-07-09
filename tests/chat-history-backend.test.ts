@@ -13,6 +13,7 @@ type ChatHistoryBackend = {
   restoreChatConversation: (id: string) => any
   saveChatMessageMetadata: (input: any) => any
   flushChatHistoryWrites: () => Promise<void>
+  configureChatHistoryPersistenceHooksForTests: (hooks?: { writeFile?: (path: string, payload: string, encoding: BufferEncoding) => Promise<unknown> }) => void
   chatHistoryRestoreMessageLimit: number
   chatHistoryRestorePayloadByteLimit: number
   chatHistoryTruncationMessageId: string
@@ -747,6 +748,78 @@ describe('AI chat history backend boundary', () => {
       id: 'legacy-assistant',
       text: 'legacy response',
       state: 'done'
+    })
+  })
+})
+
+describe('AI chat history persistence ordering', () => {
+  let tempDir = ''
+
+  afterEach(async () => {
+    vi.resetModules()
+    if (tempDir) await rm(tempDir, { recursive: true, force: true })
+    tempDir = ''
+    if (originalChatHistorySeedEnv === undefined) {
+      delete process.env.AIOPSTERM_CHAT_HISTORY_ENABLE_SEED
+    } else {
+      process.env.AIOPSTERM_CHAT_HISTORY_ENABLE_SEED = originalChatHistorySeedEnv
+    }
+  })
+
+  it('does not let an in-flight stale async persist overwrite a newer sync flush', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'aiopsterm-chat-history-persist-order-'))
+    const stateFilePath = join(tempDir, 'chat-history.json')
+    let resolveWriteStarted: () => void = () => {}
+    const writeStarted = new Promise<void>((resolve) => {
+      resolveWriteStarted = resolve
+    })
+    let releaseDelayedWrite: (() => void) | null = null
+    const withTimeout = <T>(promise: Promise<T>, label: string) =>
+      Promise.race([
+        promise,
+        new Promise<T>((_resolve, reject) => {
+          setTimeout(() => reject(new Error(label)), 1000)
+        })
+      ])
+
+    let delayed = false
+    const delayedWriteFile = (path: string, payload: string, encoding: BufferEncoding) => {
+      const targetPath = String(path)
+      if (!delayed && targetPath.includes('chat-history.json.')) {
+        delayed = true
+        resolveWriteStarted()
+        return new Promise<void>((resolve, reject) => {
+          releaseDelayedWrite = () => {
+            writeFile(path, payload, encoding).then(() => resolve(), reject)
+          }
+        })
+      }
+      return writeFile(path, payload, encoding)
+    }
+
+    delete process.env.AIOPSTERM_CHAT_HISTORY_ENABLE_SEED
+    vi.resetModules()
+    const modulePath = '../src/main/backend/chat/chatHistory'
+    const backend = (await import(modulePath)) as ChatHistoryBackend
+    backend.configureChatHistoryPersistenceHooksForTests({ writeFile: delayedWriteFile })
+    backend.configureChatHistoryBackendRuntime({ stateFilePath, useSeedData: false })
+    backend.resetChatHistoryForTests()
+
+    const created = expectOkData(backend.createChatConversation()).conversation
+    expectOkData(backend.updateChatConversation({ id: created.id, title: 'Stale Persist Title' }))
+    const stalePersist = backend.flushChatHistoryWrites()
+    await withTimeout(writeStarted, 'delayed chat-history write did not start')
+
+    expectOkData(backend.updateChatConversation({ id: created.id, title: 'Fresh Sync Title' }))
+    backend.configureChatHistoryBackendRuntime({ stateFilePath, useSeedData: false })
+    if (!releaseDelayedWrite) throw new Error('delayed chat-history write release was not registered')
+    const releaseWrite = releaseDelayedWrite as () => void
+    releaseWrite()
+    await withTimeout(stalePersist, 'stale chat-history persist did not finish after release')
+
+    const persisted = JSON.parse(await readFile(stateFilePath, 'utf-8'))
+    expect(persisted.conversations.find((conversation: { id: string }) => conversation.id === created.id)).toMatchObject({
+      title: 'Fresh Sync Title'
     })
   })
 })

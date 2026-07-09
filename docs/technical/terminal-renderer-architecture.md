@@ -96,7 +96,7 @@ Keyword highlighting is also kept off the renderer hot path for threaded termina
 
 Worker messages must stay structured-clone safe. Renderer settings, theme values, and keyword-highlight config are normalized into plain data before `postMessage()` so Vue/Pinia proxies cannot make workspace terminals fail open and fall back to the legacy xterm renderer.
 
-Search and dirty-row detection avoid full-buffer work unless content actually changes. Search matches are cached by a terminal content epoch, so scroll and cursor-only snapshots do not rescan scrollback. Visible row signatures are numeric hashes over characters, widths, colors, and SGR flags instead of per-cell string concatenations. Full or scroll snapshots reset the signature baseline and let the next incremental batch converge from a known full repaint.
+Search and dirty-row detection avoid full-buffer work unless content actually changes. Search matches are cached by a terminal content epoch, so scroll and cursor-only snapshots do not rescan scrollback. Visible row signatures are numeric hashes over characters, widths, colors, and SGR flags instead of per-cell string concatenations. Full, jump, visibility, and scroll-style visible repaints rebuild the visible-row signature baseline immediately after painting. The baseline must not be left `null` after these frames: doing so makes the next normal incremental snapshot treat every visible row as changed, which inflates `paintRows` and shifts full-frame work onto later steady-state paints.
 
 ## Runtime Diagnostics
 

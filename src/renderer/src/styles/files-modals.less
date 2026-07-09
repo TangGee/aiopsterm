@@ -2,7 +2,7 @@
 .file-modal {
   position: fixed;
   inset: 0;
-  z-index: 80;
+  z-index: var(--app-z-modal);
   display: grid;
   place-items: center;
   background: rgb(0 0 0 / 0.45);
@@ -13,7 +13,10 @@
   max-width: calc(100vw - 32px);
   border: 1px solid var(--theme-module-active-border);
   border-radius: 8px;
-  background: var(--theme-module-active-panel-bg);
+  background: var(--theme-module-active-modal-surface-bg);
+  background-size: var(--theme-module-active-modal-surface-size);
+  background-position: var(--theme-module-active-modal-surface-position);
+  background-repeat: var(--theme-module-active-modal-surface-repeat);
   box-shadow: var(--theme-module-active-shadow);
   padding: 14px;
   display: grid;
@@ -62,7 +65,7 @@
   height: 30px;
   border: 1px solid var(--theme-module-active-border);
   border-radius: 6px;
-  background: var(--theme-module-active-card-bg);
+  background: var(--theme-module-active-modal-card-bg);
   color: var(--theme-module-active-text);
   cursor: pointer;
 }
@@ -101,7 +104,7 @@
 .breadcrumb-row button {
   border: 1px solid var(--theme-module-active-border);
   border-radius: 5px;
-  background: var(--theme-module-active-card-bg);
+  background: var(--theme-module-active-modal-card-bg);
   color: var(--theme-module-active-text);
   min-height: 26px;
   cursor: pointer;
@@ -123,7 +126,7 @@
   min-height: 32px;
   border: 1px solid var(--theme-module-active-border);
   border-radius: 6px;
-  background: var(--theme-module-active-card-bg);
+  background: var(--theme-module-active-modal-card-bg);
   padding: 4px 6px;
 }
 
@@ -146,7 +149,7 @@
 .move-breadcrumb-part:hover,
 .move-breadcrumb-menu-trigger:hover,
 .move-path-edit-trigger:hover {
-  background: var(--theme-module-active-card-strong-bg);
+  background: var(--theme-module-active-modal-strong-bg);
 }
 
 .move-breadcrumb-menu-trigger {
@@ -168,7 +171,7 @@
 
 .move-dir-menu {
   position: absolute;
-  z-index: 95;
+  z-index: var(--app-z-modal-child);
   left: 0;
   top: calc(100% + 4px);
   width: 190px;
@@ -176,7 +179,10 @@
   overflow: auto;
   border: 1px solid var(--theme-module-active-border);
   border-radius: 7px;
-  background: var(--theme-module-active-panel-bg);
+  background: var(--theme-module-active-modal-surface-bg);
+  background-size: var(--theme-module-active-modal-surface-size);
+  background-position: var(--theme-module-active-modal-surface-position);
+  background-repeat: var(--theme-module-active-modal-surface-repeat);
   box-shadow: var(--theme-module-active-shadow);
   padding: 4px;
 }
@@ -223,7 +229,7 @@
   padding: 10px;
   display: grid;
   gap: 7px;
-  background: var(--theme-module-active-card-bg);
+  background: var(--theme-module-active-modal-card-bg);
 }
 
 .permission-grid span {

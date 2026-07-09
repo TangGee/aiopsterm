@@ -81,6 +81,8 @@ Rebuild native Electron modules explicitly:
 npm run rebuild:native
 ```
 
+This rebuilds both `node-pty` and `better-sqlite3` for the pinned Electron runtime. Run it after changing Electron, reinstalling dependencies, switching Node/Electron ABIs, or when SQLite-backed app data such as saved Assets hosts appears unavailable even though `aiopsterm-state.db` still contains rows.
+
 Regenerate self-owned app icon PNGs from the local GPT-generated source image:
 
 ```bash

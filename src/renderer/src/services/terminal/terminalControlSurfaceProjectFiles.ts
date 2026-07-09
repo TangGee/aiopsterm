@@ -1,5 +1,6 @@
 import { nextTick } from 'vue'
 import type { TerminalPanel } from '@/stores/workspace'
+import { isTerminalWorkspacePanel } from '@/services/terminal/terminalPanelRuntime'
 import {
   controlBool,
   controlFail,
@@ -61,7 +62,7 @@ export const createTerminalControlSurfaceProjectFileHandlers = ({
     workspace.activeModule = 'workspace'
     workspace.activePanelId = panel.id
     await nextTick()
-    if (requestedFocus && panel.kind !== 'knowledge') terminalViews.get(panel.id)?.terminal.focus()
+    if (requestedFocus && isTerminalWorkspacePanel(panel)) terminalViews.get(panel.id)?.terminal.focus()
   }
 
   const controlFileOpenRawPaths = (params: Record<string, unknown>) => {
@@ -191,7 +192,7 @@ export const createTerminalControlSurfaceProjectFileHandlers = ({
         panel = workspace.openKnowledgeFile(existingFile.relPath)
       } else {
         panel = resolveControlSourceSurfacePanel(params)
-        if (!panel || panel.kind === 'knowledge') panel = workspace.createPanel()
+        if (!panel || !isTerminalWorkspacePanel(panel)) panel = workspace.createPanel()
         const title = rawPath.split(/[\\/]/).filter(Boolean).pop() || rawPath || 'Project'
         workspace.renamePanel(panel.id, title)
         panel.cwd = rawPath

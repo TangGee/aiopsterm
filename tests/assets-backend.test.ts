@@ -140,6 +140,20 @@ describe('assets backend boundary', () => {
     expect(snapshot.folders).toEqual([])
   })
 
+  it('does not hide an existing SQLite asset database behind an empty fallback store when native SQLite is unavailable', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-assets-existing-sqlite-'))
+    try {
+      const databasePath = join(dir, 'aiopsterm-state.db')
+      await writeFile(databasePath, Buffer.from('SQLite format 3\0existing user data', 'binary'))
+      const backend = await loadBackend({ useDefaultRuntime: true })
+      backend.configureAssetBackendRuntime({ databasePath, useSeedData: false })
+
+      expect(() => backend.listAssets()).toThrow(/SQLite asset store is unavailable while an existing asset database is present/)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
   it('loads asset development seeds only when the seed environment switch is enabled', async () => {
     process.env.AIOPSTERM_ASSETS_ENABLE_SEED = '1'
     const backend = await loadBackend({ useDefaultRuntime: true })

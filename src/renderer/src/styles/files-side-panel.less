@@ -166,7 +166,7 @@
 .files-folder-modal-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 80;
+  z-index: var(--app-z-modal);
   display: grid;
   place-items: center;
   background: rgb(0 0 0 / 0.42);
@@ -177,7 +177,10 @@
   max-height: min(430px, calc(100vh - 48px));
   border: 1px solid var(--theme-module-active-border);
   border-radius: 8px;
-  background: var(--theme-module-active-panel-bg);
+  background: var(--theme-module-active-modal-surface-bg);
+  background-size: var(--theme-module-active-modal-surface-size);
+  background-position: var(--theme-module-active-modal-surface-position);
+  background-repeat: var(--theme-module-active-modal-surface-repeat);
   box-shadow: var(--theme-module-active-shadow-strong);
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
@@ -212,7 +215,7 @@
 }
 
 .files-folder-modal header button:hover {
-  background: var(--theme-module-active-card-strong-bg);
+  background: var(--theme-module-active-modal-strong-bg);
   color: var(--theme-module-active-text);
 }
 
@@ -245,7 +248,7 @@
 .files-folder-option {
   border: 1px solid var(--theme-module-active-border);
   border-radius: 6px;
-  background: var(--theme-module-active-card-bg);
+  background: var(--theme-module-active-modal-card-bg);
   color: var(--theme-module-active-text);
 }
 
@@ -270,7 +273,7 @@
 }
 
 .files-folder-option:hover {
-  background: var(--theme-module-active-card-strong-bg);
+  background: var(--theme-module-active-modal-strong-bg);
 }
 
 .files-folder-option strong {
@@ -304,7 +307,7 @@
   width: 100%;
   border: 1px solid var(--theme-module-active-border);
   border-radius: 6px;
-  background: var(--theme-module-active-card-bg);
+  background: var(--theme-module-active-modal-card-bg);
   color: var(--theme-module-active-text);
   outline: 0;
   padding: 7px 8px;
@@ -340,7 +343,7 @@
   height: 30px;
   border: 1px solid var(--theme-module-active-border);
   border-radius: 6px;
-  background: var(--theme-module-active-card-bg);
+  background: var(--theme-module-active-modal-card-bg);
   color: var(--theme-module-active-text);
 }
 

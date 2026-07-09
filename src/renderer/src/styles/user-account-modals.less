@@ -2,7 +2,7 @@
 .user-modal-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 70;
+  z-index: var(--app-z-modal);
   display: grid;
   place-items: center;
   background: rgb(0 0 0 / 0.48);
@@ -12,7 +12,10 @@
   width: min(420px, calc(100vw - 32px));
   border: 1px solid var(--theme-module-active-border);
   border-radius: 8px;
-  background: var(--theme-module-active-overlay-bg);
+  background: var(--theme-module-active-modal-surface-bg);
+  background-size: var(--theme-module-active-modal-surface-size);
+  background-position: var(--theme-module-active-modal-surface-position);
+  background-repeat: var(--theme-module-active-modal-surface-repeat);
   box-shadow: var(--theme-module-active-shadow);
   padding: 14px;
   display: grid;

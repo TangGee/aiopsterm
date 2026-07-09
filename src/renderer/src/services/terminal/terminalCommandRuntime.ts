@@ -1,6 +1,6 @@
 import type { TerminalCommandGenerationContext, TerminalCommandGenerationInput, TerminalCommandGenerationRecord } from '@shared/contracts/terminalTools'
 import type { SettingsModelOption } from '@/services/settings/workspaceConfigRuntime'
-import type { TerminalPanel } from '@/services/terminal/terminalPanelRuntime'
+import { isTerminalWorkspacePanel, type TerminalPanel } from '@/services/terminal/terminalPanelRuntime'
 
 export type TerminalCommandGenerationPlan =
   | {
@@ -35,7 +35,7 @@ export const prepareTerminalCommandGeneration = (
 ): TerminalCommandGenerationPlan => {
   const panel = panels.find((item) => item.id === input.panelId || item.sessionId === input.panelId) || null
   const instruction = input.instruction.trim()
-  if (!panel || panel.kind === 'knowledge' || !instruction) return { ok: false, reason: 'invalid-panel-or-prompt' }
+  if (!panel || !isTerminalWorkspacePanel(panel) || !instruction) return { ok: false, reason: 'invalid-panel-or-prompt' }
   const modelName = input.modelName || input.modelOptions[0]
   if (!modelName) return { ok: false, reason: 'missing-model' }
   return {

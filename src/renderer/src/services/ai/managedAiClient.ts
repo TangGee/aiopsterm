@@ -8,6 +8,9 @@ type ManagedAiBridge = Pick<
   | 'renameManagedAiSession'
   | 'clearManagedAiSession'
   | 'bulkManagedAiSessions'
+  | 'listManagedAiSessionContent'
+  | 'getManagedAiSessionContentRecord'
+  | 'updateManagedAiSessionContentRecord'
   | 'getAgentHibernationConfig'
   | 'setAgentHibernationConfig'
   | 'hibernateManagedAiSession'
@@ -25,6 +28,9 @@ export const managedAiClient = {
   renameManagedAiSession: () => bridgeMethod('renameManagedAiSession'),
   clearManagedAiSession: () => bridgeMethod('clearManagedAiSession'),
   bulkManagedAiSessions: () => bridgeMethod('bulkManagedAiSessions'),
+  listManagedAiSessionContent: () => bridgeMethod('listManagedAiSessionContent'),
+  getManagedAiSessionContentRecord: () => bridgeMethod('getManagedAiSessionContentRecord'),
+  updateManagedAiSessionContentRecord: () => bridgeMethod('updateManagedAiSessionContentRecord'),
   getAgentHibernationConfig: () => bridgeMethod('getAgentHibernationConfig'),
   setAgentHibernationConfig: () => bridgeMethod('setAgentHibernationConfig'),
   hibernateManagedAiSession: () => bridgeMethod('hibernateManagedAiSession'),

@@ -3,6 +3,7 @@ import {
   controlOk,
   type WorkspaceStore
 } from '@/services/terminal/terminalControlSurfaceCore'
+import { isTerminalWorkspacePanel } from '@/services/terminal/terminalPanelRuntime'
 import type { ControlRequest, ControlResponse } from '@shared/contracts/control'
 
 type TerminalControlSurfaceDispatcherDependencies = {
@@ -156,7 +157,7 @@ export const createTerminalControlSurfaceDispatcher = ({
       })
     }
     if (request.method === 'terminal.list') {
-      const terminals = workspace.panels.filter((panel) => panel.kind !== 'knowledge').map(terminalSummaryForControl)
+      const terminals = workspace.panels.filter((panel) => isTerminalWorkspacePanel(panel)).map(terminalSummaryForControl)
       return controlOk({
         terminals,
         count: terminals.length,

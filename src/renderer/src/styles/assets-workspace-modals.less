@@ -9,7 +9,7 @@
 }
 
 .workspace-child-modal-backdrop {
-  z-index: 90;
+  z-index: var(--app-z-modal-child);
 }
 
 .workspace-child-modal {
@@ -45,7 +45,7 @@
   height: 32px;
   border: 1px solid var(--theme-module-active-border);
   border-radius: 6px;
-  background: var(--theme-module-active-card-bg);
+  background: var(--theme-module-active-modal-card-bg);
   color: var(--theme-module-active-text);
   outline: 0;
   padding: 0 8px;
@@ -69,7 +69,7 @@
   min-height: 82px;
   border: 1px solid var(--theme-module-active-border);
   border-radius: 7px;
-  background: var(--theme-module-active-card-bg);
+  background: var(--theme-module-active-modal-card-bg);
   padding: 9px;
   display: grid;
   grid-template-rows: auto auto 1fr;
@@ -99,7 +99,7 @@
 
 .workspace-tunnel-type-card.selected {
   border-color: color-mix(in srgb, var(--theme-module-active-accent) 65%, var(--theme-module-active-border));
-  background: color-mix(in srgb, var(--theme-module-active-accent) 10%, var(--theme-module-active-card-bg));
+  background: color-mix(in srgb, var(--theme-module-active-accent) 10%, var(--theme-module-active-modal-card-bg));
 }
 
 .workspace-management-modal {
@@ -138,7 +138,7 @@
   min-height: 52px;
   border: 1px solid var(--theme-module-active-border);
   border-radius: 7px;
-  background: var(--theme-module-active-card-bg);
+  background: var(--theme-module-active-modal-card-bg);
   color: var(--theme-module-active-text);
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(90px, auto) auto;
@@ -173,12 +173,12 @@
   height: 28px;
   border: 1px solid var(--theme-module-active-border);
   border-radius: 6px;
-  background: var(--theme-module-active-panel-bg);
+  background: var(--theme-module-active-modal-card-bg);
   color: var(--theme-module-active-text);
 }
 
 .workspace-management-row button:hover {
-  background: var(--theme-module-active-card-strong-bg);
+  background: var(--theme-module-active-modal-strong-bg);
 }
 
 .workspace-management-empty {

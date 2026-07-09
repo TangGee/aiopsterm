@@ -1,6 +1,7 @@
 # Usage Docs
 
 - [Assets And Workspace Resources](assets-workspace.md)
+- [AI Sessions](ai-sessions.md)
 - [AI Command Tools](ai-command-tools.md)
 - [Control CLI Tutorial](control-cli-tutorial.md)
 - [Database Workspace](database.md)

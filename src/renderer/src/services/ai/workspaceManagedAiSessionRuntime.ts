@@ -19,7 +19,7 @@ import type {
   ManagedAiSessionTimelineEvent
 } from '@shared/contracts/managedAiSessions'
 import type { TerminalExitEvent, TerminalLifecycleEvent } from '@shared/contracts/terminalSessions'
-import type { TerminalPanel } from '@/services/terminal/terminalPanelRuntime'
+import { isTerminalWorkspacePanel, type TerminalPanel } from '@/services/terminal/terminalPanelRuntime'
 import type {
   AiAttentionKind,
   ManagedAiSession,
@@ -161,7 +161,7 @@ export const createWorkspaceManagedAiSessionRuntime = (input: {
   const managedAiLiveTerminalIds = () => {
     const ids = new Set<string>()
     panels.value.forEach((panel) => {
-      if (panel.kind === 'knowledge' || !panel.sessionId || panel.status === 'closed' || panel.status === 'error') return
+      if (!isTerminalWorkspacePanel(panel) || !panel.sessionId || panel.status === 'closed' || panel.status === 'error') return
       ids.add(panel.id)
       ids.add(panel.sessionId)
     })
@@ -474,7 +474,7 @@ export const createWorkspaceManagedAiSessionRuntime = (input: {
 
   const activateTerminalPanelForManagedAiSession = (panelIdOrSessionId: string) => {
     const target = panels.value.find((panel) => panel.id === panelIdOrSessionId || panel.sessionId === panelIdOrSessionId)
-    if (!target || target.kind !== 'terminal') return null
+    if (!target || !isTerminalWorkspacePanel(target)) return null
     activePanelId.value = target.id
     return target
   }

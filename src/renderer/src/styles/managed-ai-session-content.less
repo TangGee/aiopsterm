@@ -1,0 +1,572 @@
+.managed-ai-session-content {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  color: var(--theme-module-active-text);
+  background: var(--theme-module-active-workspace-bg);
+}
+
+.managed-ai-session-content-header {
+  min-height: 58px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--theme-module-active-border);
+  padding: 9px 14px;
+}
+
+.managed-ai-session-content-header h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.managed-ai-session-content-header p {
+  margin: 4px 0 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--theme-module-active-text-muted);
+  font-size: 11px;
+}
+
+.managed-ai-session-content-header p span {
+  min-width: 0;
+  max-width: 34vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.managed-ai-session-content-actions {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.managed-ai-session-content button {
+  border: 1px solid var(--theme-module-active-border);
+  border-radius: 7px;
+  background: var(--theme-module-active-card-bg);
+  color: var(--theme-module-active-text);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.managed-ai-session-content button:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--theme-module-active-accent) 42%, var(--theme-module-active-border));
+}
+
+.managed-ai-session-content button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.managed-ai-session-content-actions button,
+.managed-ai-session-record-actions button {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+}
+
+.managed-ai-session-record-actions button.primary {
+  border-color: color-mix(in srgb, var(--theme-module-active-accent) 62%, var(--theme-module-active-border));
+  background: color-mix(in srgb, var(--theme-module-active-accent) 18%, var(--theme-module-active-card-bg));
+  color: var(--theme-module-active-accent);
+}
+
+.managed-ai-session-content svg {
+  width: 15px;
+  height: 15px;
+}
+
+.managed-ai-session-content-error {
+  border-bottom: 1px solid color-mix(in srgb, var(--theme-core-danger) 42%, var(--theme-module-active-border));
+  background: color-mix(in srgb, var(--theme-core-danger) 10%, var(--theme-module-active-workspace-bg));
+  color: var(--theme-core-danger);
+  padding: 7px 14px;
+  font-size: 12px;
+}
+
+.managed-ai-session-content-body {
+  min-height: 0;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.managed-ai-session-content-toolbar {
+  min-height: 46px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--theme-module-active-border);
+  padding: 7px 14px;
+}
+
+.managed-ai-session-record-summary {
+  flex: 0 1 auto;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--theme-module-active-border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--theme-module-active-card-bg) 74%, transparent);
+  color: var(--theme-module-active-text);
+  padding: 0 10px;
+  height: 32px;
+  font-size: 12px;
+}
+
+.managed-ai-session-record-summary small {
+  color: var(--theme-module-active-text-muted);
+  font-size: 10px;
+}
+
+.managed-ai-session-record-search {
+  flex: 0 1 320px;
+  min-width: 180px;
+  max-width: 420px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--theme-module-active-border);
+  border-radius: 8px;
+  background: var(--theme-module-active-card-bg);
+  padding: 0 10px;
+}
+
+.managed-ai-session-record-search svg {
+  width: 14px;
+  height: 14px;
+  color: var(--theme-module-active-text-muted);
+}
+
+.managed-ai-session-record-search input {
+  min-width: 0;
+  width: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--theme-module-active-text);
+  font-size: 12px;
+}
+
+.managed-ai-session-record-list {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px 18px;
+}
+
+.managed-ai-session-record-card {
+  --record-accent: var(--theme-module-active-accent);
+  flex: 0 0 auto;
+  min-width: 0;
+  border: 1px solid color-mix(in srgb, var(--record-accent) 22%, var(--theme-module-active-border));
+  border-left: 3px solid var(--record-accent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--theme-module-active-card-bg) 86%, var(--theme-module-active-workspace-bg));
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--theme-module-active-border) 54%, transparent);
+  overflow: hidden;
+}
+
+.managed-ai-session-record-card.role-user {
+  --record-accent: var(--theme-module-active-accent);
+}
+
+.managed-ai-session-record-card.role-assistant {
+  --record-accent: var(--theme-core-success);
+}
+
+.managed-ai-session-record-card.role-system,
+.managed-ai-session-record-card.role-developer,
+.managed-ai-session-record-card.role-metadata {
+  --record-accent: var(--theme-module-active-text-muted);
+}
+
+.managed-ai-session-record-card.role-tool,
+.managed-ai-session-record-card.role-event {
+  --record-accent: var(--theme-core-warning);
+}
+
+.managed-ai-session-record-card.role-reasoning {
+  --record-accent: color-mix(in srgb, var(--theme-module-active-accent) 52%, var(--theme-core-warning));
+}
+
+.managed-ai-session-record-card.role-file,
+.managed-ai-session-record-card.role-record {
+  --record-accent: color-mix(in srgb, var(--theme-module-active-accent) 38%, var(--theme-module-active-text-muted));
+}
+
+.managed-ai-session-record-card-header {
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-bottom: 1px solid color-mix(in srgb, var(--theme-module-active-border) 82%, transparent);
+  padding: 7px 10px;
+}
+
+.managed-ai-session-record-meta {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.managed-ai-session-record-meta span {
+  max-width: 360px;
+  min-height: 22px;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid color-mix(in srgb, var(--theme-module-active-border) 78%, transparent);
+  border-radius: 7px;
+  padding: 0 7px;
+  color: var(--theme-module-active-text-muted);
+  font-size: 11px;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.managed-ai-session-record-meta .managed-ai-session-record-role {
+  border-color: color-mix(in srgb, var(--record-accent) 48%, var(--theme-module-active-border));
+  background: color-mix(in srgb, var(--record-accent) 12%, transparent);
+  color: var(--theme-module-active-text);
+  font-weight: 700;
+}
+
+.managed-ai-session-record-meta .managed-ai-session-record-warning {
+  border-color: color-mix(in srgb, var(--theme-core-warning) 55%, var(--theme-module-active-border));
+  color: var(--theme-core-warning);
+}
+
+.managed-ai-session-record-meta .managed-ai-session-record-readonly {
+  border-color: color-mix(in srgb, var(--theme-module-active-text-muted) 46%, var(--theme-module-active-border));
+}
+
+.managed-ai-session-record-actions {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.managed-ai-session-record-preview-block {
+  display: flex;
+  flex-direction: column;
+}
+
+.managed-ai-session-record-preview {
+  margin: 0;
+  padding: 10px 12px 8px;
+  color: var(--theme-module-active-text-muted);
+  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.managed-ai-session-record-expand-inline {
+  align-self: flex-start;
+  min-height: 30px;
+  gap: 6px;
+  margin: 0 12px 12px;
+  padding: 0 10px;
+  border-color: color-mix(in srgb, var(--record-accent) 45%, var(--theme-module-active-border));
+  background: color-mix(in srgb, var(--record-accent) 10%, var(--theme-module-active-card-bg));
+  color: var(--theme-module-active-text);
+  font-size: 12px;
+}
+
+.managed-ai-session-record-expand-inline svg {
+  width: 14px;
+  height: 14px;
+}
+
+.managed-ai-session-record-card textarea {
+  width: 100%;
+  min-height: 118px;
+  max-height: 420px;
+  resize: vertical;
+  border: 0;
+  outline: 0;
+  background: color-mix(in srgb, var(--theme-module-active-workspace-bg) 78%, var(--theme-module-active-card-bg));
+  color: var(--theme-module-active-text);
+  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  padding: 11px 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.managed-ai-session-record-card textarea:focus {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--record-accent) 45%, transparent);
+}
+
+.managed-ai-session-record-card textarea:read-only {
+  color: var(--theme-module-active-text-muted);
+}
+
+.managed-ai-session-record-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--app-z-modal);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 28px;
+  background: color-mix(in srgb, #000 58%, transparent);
+}
+
+.managed-ai-session-record-modal {
+  --record-accent: var(--theme-module-active-accent);
+  width: min(1120px, calc(100vw - 48px));
+  height: min(82vh, 900px);
+  min-height: 420px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--record-accent) 28%, var(--theme-module-active-border));
+  border-left: 3px solid var(--record-accent);
+  border-radius: 8px;
+  background: var(--theme-module-active-modal-surface-bg);
+  background-size: var(--theme-module-active-modal-surface-size);
+  background-position: var(--theme-module-active-modal-surface-position);
+  background-repeat: var(--theme-module-active-modal-surface-repeat);
+  box-shadow: 0 18px 56px color-mix(in srgb, #000 42%, transparent);
+}
+
+.managed-ai-session-record-modal.role-user {
+  --record-accent: var(--theme-module-active-accent);
+}
+
+.managed-ai-session-record-modal.role-assistant {
+  --record-accent: var(--theme-core-success);
+}
+
+.managed-ai-session-record-modal.role-system,
+.managed-ai-session-record-modal.role-developer,
+.managed-ai-session-record-modal.role-metadata {
+  --record-accent: var(--theme-module-active-text-muted);
+}
+
+.managed-ai-session-record-modal.role-tool,
+.managed-ai-session-record-modal.role-event {
+  --record-accent: var(--theme-core-warning);
+}
+
+.managed-ai-session-record-modal.role-reasoning {
+  --record-accent: color-mix(in srgb, var(--theme-module-active-accent) 52%, var(--theme-core-warning));
+}
+
+.managed-ai-session-record-modal.role-file,
+.managed-ai-session-record-modal.role-record {
+  --record-accent: color-mix(in srgb, var(--theme-module-active-accent) 38%, var(--theme-module-active-text-muted));
+}
+
+.managed-ai-session-record-modal-header {
+  flex: 0 0 auto;
+  min-height: 50px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--theme-module-active-border);
+  padding: 9px 12px;
+  background: color-mix(in srgb, var(--theme-module-active-modal-card-bg) 24%, transparent);
+}
+
+.managed-ai-session-record-modal-actions {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.managed-ai-session-record-modal-actions button {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+}
+
+.managed-ai-session-record-modal-body {
+  min-height: 0;
+  flex: 1 1 auto;
+  display: flex;
+  background: transparent;
+}
+
+.managed-ai-session-record-modal-editor {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  resize: none;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--theme-module-active-text);
+  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.7;
+  padding: 18px 20px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.managed-ai-session-record-modal-editor:focus {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--record-accent) 42%, transparent);
+}
+
+.managed-ai-session-record-modal-editor:read-only {
+  color: var(--theme-module-active-text-muted);
+}
+
+.managed-ai-session-record-modal-footer {
+  flex: 0 0 auto;
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-top: 1px solid var(--theme-module-active-border);
+  padding: 9px 12px;
+  background: color-mix(in srgb, var(--theme-module-active-modal-card-bg) 26%, transparent);
+}
+
+.managed-ai-session-record-modal-status {
+  min-width: 0;
+  color: var(--theme-module-active-text-muted);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.managed-ai-session-record-modal-footer-actions {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.managed-ai-session-record-modal-footer-actions button {
+  min-height: 32px;
+  gap: 6px;
+  padding: 0 11px;
+  font-size: 12px;
+}
+
+.managed-ai-session-record-modal-footer-actions button.primary {
+  border-color: color-mix(in srgb, var(--theme-module-active-accent) 62%, var(--theme-module-active-border));
+  background: color-mix(in srgb, var(--theme-module-active-accent) 18%, var(--theme-module-active-card-bg));
+  color: var(--theme-module-active-accent);
+}
+
+.managed-ai-session-record-footer {
+  border-top: 1px solid color-mix(in srgb, var(--theme-module-active-border) 76%, transparent);
+  padding: 7px 12px;
+  color: var(--theme-module-active-text-muted);
+  font-size: 11px;
+}
+
+.managed-ai-session-content-empty {
+  color: var(--theme-module-active-text-muted);
+  font-size: 12px;
+  padding: 22px 4px;
+  text-align: center;
+}
+
+.managed-ai-session-content-status {
+  min-height: 34px;
+  flex: 0 0 auto;
+  border-top: 1px solid var(--theme-module-active-border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 14px;
+  color: var(--theme-module-active-text-muted);
+  font-size: 11px;
+}
+
+.managed-ai-session-content-status span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.managed-ai-session-content-status .notice {
+  color: var(--theme-core-success);
+}
+
+@media (max-width: 820px) {
+  .managed-ai-session-content-header {
+    align-items: flex-start;
+  }
+
+  .managed-ai-session-content-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .managed-ai-session-record-summary,
+  .managed-ai-session-record-search {
+    width: 100%;
+    max-width: none;
+  }
+
+  .managed-ai-session-record-card-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .managed-ai-session-record-actions {
+    align-self: flex-end;
+  }
+
+  .managed-ai-session-record-modal-backdrop {
+    padding: 10px;
+  }
+
+  .managed-ai-session-record-modal {
+    width: calc(100vw - 20px);
+    height: calc(100vh - 20px);
+    min-height: 0;
+  }
+
+  .managed-ai-session-record-modal-header,
+  .managed-ai-session-record-modal-footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .managed-ai-session-record-modal-actions,
+  .managed-ai-session-record-modal-footer-actions {
+    align-self: flex-end;
+  }
+
+  .managed-ai-session-record-modal-status {
+    width: 100%;
+  }
+}

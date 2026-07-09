@@ -1,5 +1,6 @@
 import { nextTick } from 'vue'
 import type { TerminalPanel } from '@/stores/workspace'
+import { isTerminalWorkspacePanel } from '@/services/terminal/terminalPanelRuntime'
 import {
   controlBool,
   controlFail,
@@ -252,15 +253,16 @@ export const createTerminalControlSurfaceOperationHandlers = ({
 
   const surfaceHealthForControl = (panel: TerminalPanel, index: number) => {
     const view = terminalViews.get(panel.id)
+    const terminalSurface = isTerminalWorkspacePanel(panel)
     return {
       ...surfaceSummaryForControl(panel),
       id: panel.id,
       ref: panelRefForControl(panel.id),
       index: index + 1,
       selected: panel.id === workspace.activePanelId,
-      mounted: panel.kind === 'knowledge' ? true : Boolean(view),
-      viewReady: panel.kind === 'knowledge' ? true : Boolean(view),
-      view_ready: panel.kind === 'knowledge' ? true : Boolean(view),
+      mounted: terminalSurface ? Boolean(view) : true,
+      viewReady: terminalSurface ? Boolean(view) : true,
+      view_ready: terminalSurface ? Boolean(view) : true,
       inWindow: true,
       in_window: true,
       cols: view?.terminal.cols,
@@ -366,7 +368,7 @@ export const createTerminalControlSurfaceOperationHandlers = ({
       return controlOk({
         workspaceId: 'main',
         workspace_id: 'main',
-        refreshed: workspace.panels.filter((panel) => panel.kind !== 'knowledge').length,
+        refreshed: workspace.panels.filter((panel) => isTerminalWorkspacePanel(panel)).length,
         equalized: method === 'workspace.equalize_splits',
         action: method,
         snapshot: workspaceSnapshotForControl()
@@ -380,7 +382,7 @@ export const createTerminalControlSurfaceOperationHandlers = ({
       workspace.activeModule = 'workspace'
       workspace.activePanelId = panel.id
       await nextTick()
-      terminalViews.get(panel.id)?.terminal.focus()
+      if (isTerminalWorkspacePanel(panel)) terminalViews.get(panel.id)?.terminal.focus()
       return surfaceOperationPayload(panel, 'surface.trigger_flash', { flashed: true })
     }
 
@@ -407,7 +409,7 @@ export const createTerminalControlSurfaceOperationHandlers = ({
         workspace.activePanelId = previousActivePanelId
       }
       await nextTick()
-      if (controlBool(params.focus, false)) terminalViews.get(panel.id)?.terminal.focus()
+      if (controlBool(params.focus, false) && isTerminalWorkspacePanel(panel)) terminalViews.get(panel.id)?.terminal.focus()
       return surfaceOperationPayload(panel, method === 'surface.move' ? 'surface.move' : 'surface.reorder', {
         changed,
         moved: changed,
@@ -432,7 +434,7 @@ export const createTerminalControlSurfaceOperationHandlers = ({
         workspace.activePanelId = previousActivePanelId
       }
       await nextTick()
-      if (controlBool(params.focus, false)) terminalViews.get(panel.id)?.terminal.focus()
+      if (controlBool(params.focus, false) && isTerminalWorkspacePanel(panel)) terminalViews.get(panel.id)?.terminal.focus()
       return surfaceOperationPayload(panel, 'surface.split_off', {
         changed,
         splitOff: changed,
@@ -511,7 +513,7 @@ export const createTerminalControlSurfaceOperationHandlers = ({
     if (method === 'workspace.prompt_submit') {
       const panel = resolveControlSelectablePanel(controlTargetValue(params))
       if (!panel) return controlFail('WORKSPACE_NOT_FOUND', 'Workspace or panel not found.')
-      if (panel.kind === 'knowledge') return controlFail('WORKSPACE_PROMPT_TERMINAL_REQUIRED', 'Prompt submit requires a terminal surface.')
+      if (!isTerminalWorkspacePanel(panel)) return controlFail('WORKSPACE_PROMPT_TERMINAL_REQUIRED', 'Prompt submit requires a terminal surface.')
       const message = controlText(params.message || params.prompt || params.text || params.body)
       if (!message) return controlFail('WORKSPACE_PROMPT_REQUIRED', 'Prompt submit requires message text.')
       const shellText = message.endsWith('\n') ? message : `${message}\n`

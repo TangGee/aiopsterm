@@ -211,6 +211,8 @@
   --app-bg-image: none;
   --app-bg-opacity: 0;
   --app-bg-brightness: 1;
+  --app-z-modal: 1500;
+  --app-z-modal-child: 1510;
   --theme-module-active-workspace-bg: #0f1117;
   --theme-module-active-panel-bg: #151922;
   --theme-module-active-toolbar-bg: color-mix(in srgb, #151922 86%, #1b202b);
@@ -220,6 +222,13 @@
   --theme-module-active-readable-bg: #1b202b;
   --theme-module-active-readable-strong-bg: #151922;
   --theme-module-active-overlay-bg: #151922;
+  --theme-module-active-modal-bg: #151922;
+  --theme-module-active-modal-card-bg: #1b202b;
+  --theme-module-active-modal-strong-bg: #232938;
+  --theme-module-active-modal-surface-bg: var(--theme-module-active-modal-bg);
+  --theme-module-active-modal-surface-size: auto;
+  --theme-module-active-modal-surface-position: 0 0;
+  --theme-module-active-modal-surface-repeat: repeat;
   --theme-module-active-border: #2b3242;
   --theme-module-active-backdrop-filter: none;
   --theme-module-active-text: #e6eaf2;
@@ -247,6 +256,13 @@
   --theme-module-active-readable-bg: var(~"--theme-module-@{module}-@{layer}-readable-bg");
   --theme-module-active-readable-strong-bg: var(~"--theme-module-@{module}-@{layer}-readable-strong-bg");
   --theme-module-active-overlay-bg: var(~"--theme-module-@{module}-@{layer}-overlay-bg");
+  --theme-module-active-modal-bg: var(~"--theme-module-@{module}-base-panel-bg");
+  --theme-module-active-modal-card-bg: var(~"--theme-module-@{module}-base-card-bg");
+  --theme-module-active-modal-strong-bg: var(~"--theme-module-@{module}-base-card-strong-bg");
+  --theme-module-active-modal-surface-bg: var(~"--theme-module-@{module}-base-panel-bg");
+  --theme-module-active-modal-surface-size: auto;
+  --theme-module-active-modal-surface-position: 0 0;
+  --theme-module-active-modal-surface-repeat: repeat;
   --theme-module-active-backdrop-filter: var(~"--theme-module-@{module}-@{layer}-backdrop-filter");
   --theme-module-active-border: var(~"--theme-module-@{module}-@{layer}-border");
   --theme-module-active-text: var(~"--theme-module-@{module}-text");
@@ -261,6 +277,19 @@
   --theme-module-active-shadow-strong: var(~"--theme-module-@{module}-shadow-strong");
   --theme-module-active-scrollbar-thumb: var(~"--theme-module-@{module}-scrollbar-thumb");
   color: var(--theme-module-active-text);
+}
+
+.theme-module-active(@module, @layer) when (@layer = with-background) {
+  --theme-module-active-modal-surface-bg:
+    linear-gradient(
+      color-mix(in srgb, var(~"--theme-module-@{module}-base-panel-bg") 84%, transparent),
+      color-mix(in srgb, var(~"--theme-module-@{module}-base-panel-bg") 84%, transparent)
+    ),
+    var(--app-bg-image),
+    var(~"--theme-module-@{module}-base-panel-bg");
+  --theme-module-active-modal-surface-size: auto, cover, auto;
+  --theme-module-active-modal-surface-position: 0 0, center, 0 0;
+  --theme-module-active-modal-surface-repeat: repeat, no-repeat, repeat;
 }
 
 .app-body.module-workspace,

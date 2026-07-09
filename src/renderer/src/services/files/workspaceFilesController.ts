@@ -32,7 +32,7 @@ import {
   openFileSessionSelection,
   upsertFileTransferTask
 } from '@/services/files/filesRuntime'
-import type { TerminalPanel } from '@/services/terminal/terminalPanelRuntime'
+import { isTerminalWorkspacePanel, type TerminalPanel } from '@/services/terminal/terminalPanelRuntime'
 import type { AiopsPreloadApi } from '@shared/contracts/preloadApi'
 import type {
   FileSessionCatalog,
@@ -351,7 +351,7 @@ export const createWorkspaceFilesController = (state: WorkspaceFilesControllerSt
 
   const ensureFileSessionForTerminalPanel = async (panelId = activePanelId.value, side: 'left' | 'right' = fileSideForTerminalPanel()) => {
     const panel = panels.value.find((item) => item.id === panelId || item.sessionId === panelId)
-    if (!panel || panel.kind === 'knowledge') return null
+    if (!panel || !isTerminalWorkspacePanel(panel)) return null
     const saveFileSessionFromTerminalContextBridge = filesClient.saveFileSessionFromTerminalContext()
     if (!saveFileSessionFromTerminalContextBridge) {
       setTopNotice('文件会话写入服务不可用')

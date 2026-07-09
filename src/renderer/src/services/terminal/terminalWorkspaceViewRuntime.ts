@@ -26,6 +26,7 @@ import {
   threadedTerminalPriorityFor
 } from '@/services/terminal/threadedTerminalRuntime'
 import type { TerminalPanel, TerminalSettings, useWorkspaceStore } from '@/stores/workspace'
+import { isTerminalWorkspacePanel } from '@/services/terminal/terminalPanelRuntime'
 import type { TerminalCommandSuggestion } from '@shared/contracts/terminalTools'
 import { shouldUseTerminalDebugLogs, shouldUseThreadedTerminal } from '@shared/runtimeSwitches'
 
@@ -876,7 +877,7 @@ export const createTerminalWorkspaceViewRuntime = ({
 
   const scheduleVisibleTerminalFit = (options: { scrollToBottom?: boolean; frames?: number; forceGeometry?: boolean } = {}) => {
     visibleTerminalPanels.value
-      .filter((panel) => panel.kind !== 'knowledge')
+      .filter((panel) => isTerminalWorkspacePanel(panel))
       .forEach((panel) => scheduleTerminalFit(panel.id, options))
   }
 
@@ -940,7 +941,7 @@ export const createTerminalWorkspaceViewRuntime = ({
   }
 
   const syncTerminalView = (panel: TerminalPanel, options: { suppressInputReplies?: boolean; refit?: boolean } = {}) => {
-    if (panel.kind === 'knowledge') return false
+    if (!isTerminalWorkspacePanel(panel)) return false
     const view = terminalViews.get(panel.id)
     if (!view) return false
     if (!isTerminalPanelRenderable(panel.id)) return false
@@ -990,7 +991,7 @@ export const createTerminalWorkspaceViewRuntime = ({
   const writeLiveTerminalData = (sessionOrPanelId: string, data: string) => {
     if (!data) return false
     const panel = workspace.panels.find((item) => item.id === sessionOrPanelId || item.sessionId === sessionOrPanelId)
-    if (!panel || panel.kind === 'knowledge') return false
+    if (!panel || !isTerminalWorkspacePanel(panel)) return false
     const view = terminalViews.get(panel.id)
     if (!view || !isThreadedTerminalHost(view.terminal)) return false
     const visible = isTerminalPanelRenderable(panel.id)
@@ -1013,7 +1014,7 @@ export const createTerminalWorkspaceViewRuntime = ({
     const run = (remaining: number) => {
       nextTick(() => {
         const currentPanel = workspace.panels.find((item) => item.id === panel.id)
-        if (!currentPanel || currentPanel.kind === 'knowledge') return
+        if (!currentPanel || !isTerminalWorkspacePanel(currentPanel)) return
         if (syncTerminalView(currentPanel, options)) return
         if (remaining <= 0) return
         requestOutputFlush(() => run(remaining - 1))
@@ -1023,7 +1024,7 @@ export const createTerminalWorkspaceViewRuntime = ({
   }
 
   const createTerminalView = (panel: TerminalPanel, element: HTMLElement) => {
-    if (panel.kind === 'knowledge') return
+    if (!isTerminalWorkspacePanel(panel)) return
     const existing = terminalViews.get(panel.id)
     if (existing) {
       if (isThreadedTerminalHost(existing.terminal)) {
@@ -1170,14 +1171,14 @@ export const createTerminalWorkspaceViewRuntime = ({
     }
     terminalElements.set(panelId, element)
     const panel = workspace.panels.find((item) => item.id === panelId)
-    if (panel && panel.kind !== 'knowledge') {
+    if (panel && isTerminalWorkspacePanel(panel)) {
       if (isTerminalWorkspaceVisible()) createTerminalView(panel, element)
     }
   }
 
   const syncPanelViews = () => {
     return nextTick(() => {
-      workspace.panels.filter((panel) => panel.kind !== 'knowledge').forEach((panel) => {
+      workspace.panels.filter((panel) => isTerminalWorkspacePanel(panel)).forEach((panel) => {
         const existing = terminalViews.get(panel.id)
         if (existing && terminalViewPanels.get(panel.id) !== panel) {
           if (isThreadedTerminalHost(existing.terminal)) terminalViewPanels.set(panel.id, panel)

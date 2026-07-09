@@ -42,7 +42,7 @@ import {
   type TerminalSecurityExecution
 } from '@/services/terminal/terminalExecutionRuntime'
 import { mergeUserConfig } from '@/services/settings/workspaceConfigRuntime'
-import type { TerminalPanel } from '@/services/terminal/terminalPanelRuntime'
+import { isTerminalWorkspacePanel, type TerminalPanel } from '@/services/terminal/terminalPanelRuntime'
 import type { UserConfig } from '@shared/contracts/userConfig'
 import type { QuickCommandScriptPlan } from '@shared/contracts/quickCommands'
 
@@ -446,7 +446,7 @@ export const createWorkspaceQuickCommandsController = (
     if (isMacroRecording.value) return
     applyMacroRecordingState(
       startMacroRecordingState({
-        terminalId: terminalId || (activePanel.value.kind === 'knowledge' ? panels.value.find((panel) => panel.kind !== 'knowledge')?.id || null : activePanel.value.id),
+        terminalId: terminalId || (isTerminalWorkspacePanel(activePanel.value) ? activePanel.value.id : panels.value.find((panel) => isTerminalWorkspacePanel(panel))?.id || null),
         selectedGroupUuid: selectedSnippetGroupUuid.value
       })
     )

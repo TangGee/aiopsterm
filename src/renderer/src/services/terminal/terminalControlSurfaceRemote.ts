@@ -1,5 +1,6 @@
 import { nextTick } from 'vue'
 import type { TerminalPanel } from '@/stores/workspace'
+import { isTerminalWorkspacePanel } from '@/services/terminal/terminalPanelRuntime'
 import {
   controlBool,
   controlFail,
@@ -41,13 +42,13 @@ export const createTerminalControlSurfaceRemoteHandlers = ({
 }: TerminalControlSurfaceRemoteDependencies) => {
   const resolveRemoteWorkspacePanelForControl = (params: Record<string, unknown> = {}) => {
     const directPanel = resolveControlSourceSurfacePanel(params)
-    if (directPanel && directPanel.kind !== 'knowledge') return directPanel
+    if (directPanel && isTerminalWorkspacePanel(directPanel)) return directPanel
     const remoteSurfaceId = controlWorkspaceRemote.value?.surfaceId
     if (remoteSurfaceId) {
-      const panel = workspace.panels.find((item) => item.id === remoteSurfaceId && item.kind !== 'knowledge')
+      const panel = workspace.panels.find((item) => item.id === remoteSurfaceId && isTerminalWorkspacePanel(item))
       if (panel) return panel
     }
-    return workspace.panels.find((panel) => panel.id === workspace.activePanelId && panel.kind !== 'knowledge') || workspace.panels.find((panel) => panel.kind !== 'knowledge') || null
+    return workspace.panels.find((panel) => panel.id === workspace.activePanelId && isTerminalWorkspacePanel(panel)) || workspace.panels.find((panel) => isTerminalWorkspacePanel(panel)) || null
   }
 
   const hasExplicitRemotePanelTarget = (params: Record<string, unknown> = {}) =>
@@ -97,9 +98,9 @@ export const createTerminalControlSurfaceRemoteHandlers = ({
       }
       const panel =
         requestedPanel ||
-        (controlWorkspaceRemote.value ? workspace.panels.find((item) => item.id === controlWorkspaceRemote.value?.surfaceId && item.kind !== 'knowledge') || null : null) ||
+        (controlWorkspaceRemote.value ? workspace.panels.find((item) => item.id === controlWorkspaceRemote.value?.surfaceId && isTerminalWorkspacePanel(item)) || null : null) ||
         workspace.panels.find((item) => item.sshSession && !item.sessionId) ||
-        workspace.panels.find((item) => item.kind !== 'knowledge' && !item.sessionId && item.status !== 'running') ||
+        workspace.panels.find((item) => isTerminalWorkspacePanel(item) && !item.sessionId && item.status !== 'running') ||
         workspace.createPanel()
       const assetName = controlText(params.name || params.title || params.assetName || params.asset_name) || destination
       workspace.registerSshSession(panel.id, {

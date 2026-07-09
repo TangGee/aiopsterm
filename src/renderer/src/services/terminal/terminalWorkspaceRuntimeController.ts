@@ -13,6 +13,7 @@ import { createTerminalWorkspaceSessionRuntime } from '@/services/terminal/termi
 import { createTerminalWorkspaceShellRuntime, createTerminalWorkspaceShellState } from '@/services/terminal/terminalWorkspaceShellRuntime'
 import { createTerminalWorkspaceViewRuntime } from '@/services/terminal/terminalWorkspaceViewRuntime'
 import { createTerminalWorkspaceZmodemShellRuntime } from '@/services/terminal/terminalWorkspaceZmodemShellRuntime'
+import { isTerminalWorkspacePanel } from '@/services/terminal/terminalPanelRuntime'
 import { isThreadedTerminalHost, setThreadedTerminalDataConsumedSink } from '@/services/terminal/threadedTerminalRuntime'
 import { useI18n } from '@/i18n'
 import type { TerminalStressQueueSample } from '@/services/terminal/terminalStressHarness'
@@ -190,7 +191,7 @@ export const useTerminalWorkspaceContainerRuntime = () => {
     terminalHistoryBatches.delete(sessionId)
     if (!batch.data) return
     const panel = workspace.panels.find((item) => item.id === sessionId || item.sessionId === sessionId)
-    if (!panel || panel.kind === 'knowledge') return
+    if (!panel || !isTerminalWorkspacePanel(panel)) return
     const maxBytes = terminalHistoryMirrorTailBytesForPanel(panel)
     workspace.replaceTerminalOutput(panel.id, tailTextByBytes(`${panel.output || ''}${batch.data}`, maxBytes))
   }
@@ -385,7 +386,7 @@ export const useTerminalWorkspaceContainerRuntime = () => {
     Boolean(
       panel &&
         panel.id === 'panel-main' &&
-        panel.kind !== 'knowledge' &&
+        isTerminalWorkspacePanel(panel) &&
         panel.title === '欢迎' &&
         !panel.sessionId &&
         !panel.output &&
@@ -463,7 +464,7 @@ export const useTerminalWorkspaceContainerRuntime = () => {
   }
   const focusActiveTerminalFromContextBar = () => {
     const panel = activeTerminalPanel.value
-    if (!panel || panel.kind === 'knowledge') return
+    if (!panel || !isTerminalWorkspacePanel(panel)) return
     workspace.activeModule = 'workspace'
     workspace.activePanelId = panel.id
     focusPanel(panel.id)
@@ -539,7 +540,7 @@ export const useTerminalWorkspaceContainerRuntime = () => {
     const data = event.data || ''
     if (!event.id || !data) return null
     const panel = workspace.panels.find((item) => item.id === event.id || item.sessionId === event.id)
-    if (!panel || panel.kind === 'knowledge') return null
+    if (!panel || !isTerminalWorkspacePanel(panel)) return null
     const view = terminalViews.get(panel.id)
     if (!view || !isThreadedTerminalHost(view.terminal)) return null
     return {
@@ -701,7 +702,7 @@ export const useTerminalWorkspaceContainerRuntime = () => {
   const handleControlRequest = terminalControlSurface.handleControlRequest
 
   const terminalHistoryMirrorTailBytesForPanel = (panel?: TerminalPanel | null) => {
-    if (!panel || panel.kind === 'knowledge') return terminalHistoryBackgroundMirrorTailBytes
+    if (!panel || !isTerminalWorkspacePanel(panel)) return terminalHistoryBackgroundMirrorTailBytes
     const view = terminalViews.get(panel.id)
     const threaded = Boolean(view && isThreadedTerminalHost(view.terminal))
     if (panel.id === workspace.activePanelId) return threaded ? terminalThreadedVisibleMirrorTailBytes : terminalHistoryVisibleMirrorTailBytes
@@ -854,14 +855,14 @@ export const useTerminalWorkspaceContainerRuntime = () => {
   watch(
     () =>
       workspace.panels
-        .filter((panel) => panel.kind !== 'knowledge')
+        .filter((panel) => isTerminalWorkspacePanel(panel))
         .map((panel) => `${panel.id}:${panel.title}`)
         .join('|') + `${workspace.extensionSettings.highlightStatus}|${JSON.stringify(workspace.keywordHighlightSettings)}`,
     () => {
       nextTick(() => {
         syncThreadedKeywordHighlight()
         workspace.panels
-          .filter((panel) => panel.kind !== 'knowledge')
+          .filter((panel) => isTerminalWorkspacePanel(panel))
           .forEach((panel) => {
             const view = terminalViews.get(panel.id)
             if (view && isThreadedTerminalHost(view.terminal)) return
@@ -898,7 +899,7 @@ export const useTerminalWorkspaceContainerRuntime = () => {
       hideCommandDialogForActivePanel(panelId)
       nextTick(() => {
         scrollActiveTerminalTabIntoView()
-        visibleTerminalPanels.value.filter((panel) => panel.kind !== 'knowledge').forEach((panel) => syncTerminalView(panel))
+        visibleTerminalPanels.value.filter((panel) => isTerminalWorkspacePanel(panel)).forEach((panel) => syncTerminalView(panel))
       })
     }
   )

@@ -16,7 +16,7 @@
     "start": "electron-vite preview",
     "build": "npm run typecheck && electron-vite build",
     "build:codex": "node scripts/build-codex-cli.mjs",
-    "rebuild:native": "electron-rebuild -f -w node-pty -v 31.7.7 -d https://www.electronjs.org/headers",
+    "rebuild:native": "electron-rebuild -f -w node-pty,better-sqlite3 -v 31.7.7 -d https://www.electronjs.org/headers",
     "build:linux:appimage": "npm run generate:icons && npm run build:codex && npm run build && npm run rebuild:native && electron-builder --linux AppImage --config electron-builder.yml",
     "build:linux": "npm run generate:icons && npm run build:codex && npm run build && npm run rebuild:native && electron-builder --linux --config electron-builder.yml",
     "build:deb": "npm run generate:icons && npm run build:codex && npm run build && npm run rebuild:native && electron-builder --linux deb --config electron-builder.yml",

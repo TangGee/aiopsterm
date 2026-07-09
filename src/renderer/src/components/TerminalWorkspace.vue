@@ -31,7 +31,7 @@
           role="button"
           tabindex="0"
           :title="terminalTabTooltip(panel)"
-          :draggable="panel.kind === 'terminal' || panel.kind === 'knowledge'"
+          :draggable="panel.kind === 'terminal' || panel.kind === 'knowledge' || panel.kind === 'managed-ai-session'"
           @click="activatePanel(panel.id)"
           @keydown.enter.prevent="activatePanel(panel.id)"
           @keydown.space.prevent="activatePanel(panel.id)"
@@ -270,7 +270,7 @@
         v-for="{ panel, style } in splitLayoutItems"
         :key="panel.id"
         class="terminal-pane"
-        :class="{ active: panel.id === workspace.activePanelId, below: panel.split === 'below', 'knowledge-pane': panel.kind === 'knowledge', 'with-pane-title': workspace.hasSplitState(panel.id), 'drag-over': paneDragOverPanelId === panel.id, 'ai-attention': panelNeedsAiAttention(panel), 'control-flash': controlFlashingPanelIds.includes(panel.id) }"
+        :class="{ active: panel.id === workspace.activePanelId, below: panel.split === 'below', 'knowledge-pane': panel.kind === 'knowledge', 'managed-ai-session-pane': panel.kind === 'managed-ai-session', 'with-pane-title': workspace.hasSplitState(panel.id), 'drag-over': paneDragOverPanelId === panel.id, 'ai-attention': panelNeedsAiAttention(panel), 'control-flash': controlFlashingPanelIds.includes(panel.id) }"
         :style="style"
         @click="activatePanel(panel.id)"
         @dragenter.prevent="handlePaneDragEnter($event, panel)"
@@ -285,6 +285,12 @@
           :start-line="panel.knowledge.startLine"
           :end-line="panel.knowledge.endLine"
           :jump-token="panel.knowledge.jumpToken"
+        />
+        <ManagedAiSessionContentWorkspace
+          v-else-if="panel.kind === 'managed-ai-session' && panel.managedAiSession"
+          :source="panel.managedAiSession.source"
+          :session-id="panel.managedAiSession.sessionId"
+          :panel-title="panel.title"
         />
         <template v-else>
         <div
@@ -515,6 +521,7 @@ import '@xterm/xterm/css/xterm.css'
 import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Clock, ListTree, LoaderCircle, RadioTower, Search, Sparkles, Terminal, X } from 'lucide-vue-next'
 import TransferProgress from '@/components/files/TransferProgress.vue'
 import KnowledgeCenterEditor from '@/components/KnowledgeCenterEditor.vue'
+import ManagedAiSessionContentWorkspace from '@/components/ManagedAiSessionContentWorkspace.vue'
 import { useTerminalWorkspaceContainerRuntime } from '@/services/terminal/terminalWorkspaceContainerRuntime'
 
 const {

@@ -59,33 +59,35 @@
       </template>
     </nav>
 
-    <div
-      v-if="userMenuOpen"
-      class="user-menu-popover"
-      @click.stop
-    >
-      <button
-        v-if="workspace.userProfile.skippedLogin"
-        @click="login"
+    <Teleport to="body">
+      <div
+        v-if="userMenuOpen"
+        class="user-menu-popover"
+        @click.stop
       >
-        <LogIn />
-        <span>登录</span>
-      </button>
-      <template v-else>
-        <button @click="accountCenter">
-          <Gauge />
-          <span>账号中心</span>
+        <button
+          v-if="workspace.userProfile.skippedLogin"
+          @click="login"
+        >
+          <LogIn />
+          <span>登录</span>
         </button>
-        <button @click="openUserInfo">
-          <User />
-          <span>个人信息</span>
-        </button>
-        <button @click="logout">
-          <LogOut />
-          <span>退出登录</span>
-        </button>
-      </template>
-    </div>
+        <template v-else>
+          <button @click="accountCenter">
+            <Gauge />
+            <span>账号中心</span>
+          </button>
+          <button @click="openUserInfo">
+            <User />
+            <span>个人信息</span>
+          </button>
+          <button @click="logout">
+            <LogOut />
+            <span>退出登录</span>
+          </button>
+        </template>
+      </div>
+    </Teleport>
   </aside>
 </template>
 

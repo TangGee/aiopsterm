@@ -9,6 +9,7 @@ import {
   type AiPanelCommandSuggestionMessage
 } from '@/services/ai/aiPanelMessageRuntime'
 import type { TerminalCommandSource, TerminalSecurityDecision } from '@/services/terminal/terminalExecutionRuntime'
+import { isTerminalWorkspacePanel } from '@/services/terminal/terminalPanelRuntime'
 
 export type AiPanelCommandActionTerminalPanel = {
   id: string
@@ -128,7 +129,7 @@ const defaultLabels: AiPanelCommandActionLabels = {
 export const resolveAiPanelCommandActionTerminalPanel = (
   activePanel: AiPanelCommandActionTerminalPanel | null | undefined,
   panels: AiPanelCommandActionTerminalPanel[]
-) => (activePanel?.kind === 'knowledge' ? panels.find((panel) => panel.kind !== 'knowledge') : activePanel)
+) => (isTerminalWorkspacePanel(activePanel) ? activePanel : panels.find((panel) => isTerminalWorkspacePanel(panel)))
 
 export const createAiPanelCommandActionRuntime = (options: AiPanelCommandActionRuntimeOptions) => {
   const labels = { ...defaultLabels, ...options.labels }

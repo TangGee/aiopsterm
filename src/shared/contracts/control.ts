@@ -1,6 +1,6 @@
 import type { AiopsAssetAuthType, AiopsAssetRecord } from './assets'
 import type { AiopsMutationResult } from './common'
-import type { AgentHibernationConfig } from './managedAiSessions'
+import type { AgentHibernationConfig, AiAgentSessionSource } from './managedAiSessions'
 
 export type ControlTerminalSummary = {
   panelId: string
@@ -79,7 +79,7 @@ export type ControlSurfaceSummary = {
   title: string
   titleSource?: 'system' | 'user' | 'auto'
   title_source?: 'system' | 'user' | 'auto'
-  surfaceKind: 'terminal' | 'knowledge'
+  surfaceKind: 'terminal' | 'knowledge' | 'managed-ai-session'
   active: boolean
   status?: string
   cwd?: string
@@ -103,6 +103,10 @@ export type ControlSurfaceSummary = {
     isImage: boolean
     startLine?: number
     endLine?: number
+  }
+  managedAiSession?: {
+    source: AiAgentSessionSource
+    sessionId: string
   }
 }
 
@@ -387,7 +391,7 @@ export type ControlSessionPanelSnapshot = {
   id: string
   title: string
   cwd?: string
-  kind: 'terminal' | 'knowledge'
+  kind: 'terminal' | 'knowledge' | 'managed-ai-session'
   status?: string
   terminalKind?: ControlTerminalSummary['kind']
   split?: 'right' | 'below'
@@ -413,6 +417,10 @@ export type ControlSessionPanelSnapshot = {
     isImage: boolean
     startLine?: number
     endLine?: number
+  }
+  managedAiSession?: {
+    source: AiAgentSessionSource
+    sessionId: string
   }
   resumeBinding?: ControlSurfaceResumeBindingSummary
 }

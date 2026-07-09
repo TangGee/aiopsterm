@@ -1,5 +1,6 @@
 import { computed, ref } from 'vue'
 import type { TerminalPanel, useWorkspaceStore } from '@/stores/workspace'
+import { isTerminalWorkspacePanel } from '@/services/terminal/terminalPanelRuntime'
 
 type WorkspaceStore = ReturnType<typeof useWorkspaceStore>
 type SplitLayoutRect = { x: number; y: number; width: number; height: number }
@@ -77,7 +78,7 @@ export const createTerminalWorkspaceLayoutRuntime = ({ workspace, isWelcomePlace
   const tabBarDragOver = ref(false)
 
   const visibleTerminalTabPanels = computed(() => workspace.panels.filter((panel) => !isWelcomePlaceholderPanel(panel)))
-  const connectedTerminalPanels = computed(() => visibleTerminalTabPanels.value.filter((panel) => panel.kind !== 'knowledge'))
+  const connectedTerminalPanels = computed(() => visibleTerminalTabPanels.value.filter((panel) => isTerminalWorkspacePanel(panel)))
   const activeTerminalPanel = computed(() => workspace.panels.find((panel) => panel.id === workspace.activePanelId) || visibleTerminalTabPanels.value[0] || workspace.panels[0])
   const visibleTerminalPanels = computed(() => {
     const active = activeTerminalPanel.value
@@ -117,7 +118,7 @@ export const createTerminalWorkspaceLayoutRuntime = ({ workspace, isWelcomePlace
     const panel = visibleTerminalPanels.value[0]
     return (
       visibleTerminalPanels.value.length === 1 &&
-      panel?.kind !== 'knowledge' &&
+      isTerminalWorkspacePanel(panel) &&
       !panel.sessionId &&
       !panel.output &&
       panel.status === 'ready'
@@ -140,7 +141,7 @@ export const createTerminalWorkspaceLayoutRuntime = ({ workspace, isWelcomePlace
     if (!event.dataTransfer) return
     draggedTerminalPanelId.value = panel.id
     event.dataTransfer.setData(terminalTabDragType, panel.id)
-    if (panel.kind === 'terminal') {
+    if (isTerminalWorkspacePanel(panel)) {
       event.dataTransfer.setData('text/plain', panel.title)
       event.dataTransfer.effectAllowed = 'move'
       return

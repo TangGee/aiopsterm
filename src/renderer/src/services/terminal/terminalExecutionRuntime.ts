@@ -1,7 +1,7 @@
 import type { QuickCommandScriptSegment } from '@shared/contracts/quickCommands'
 import type { SecurityUserConfig } from '@shared/contracts/appRuntime'
 import { validateCommandSecurity, type CommandSecurityResult } from '@/services/terminal/commandSecurityRuntime'
-import type { TerminalPanel } from '@/services/terminal/terminalPanelRuntime'
+import { isTerminalWorkspacePanel, type TerminalPanel } from '@/services/terminal/terminalPanelRuntime'
 
 export type TerminalCommandSource = 'direct' | 'global' | 'snippet' | 'agent'
 
@@ -51,12 +51,12 @@ export const quickCommandPlanUnavailable = (
 ): TerminalSecurityDecision => terminalExecutionUnavailable(command, panelIds, reason)
 
 export const resolveQuickCommandPanelIds = (panels: TerminalPanel[], activePanel: TerminalPanel, allTabs: boolean) => {
-  const terminalPanels = panels.filter((panel) => panel.kind !== 'knowledge')
+  const terminalPanels = panels.filter((panel) => isTerminalWorkspacePanel(panel))
   if (allTabs) {
     const writablePanelIds = terminalPanels.filter((panel) => panel.sessionId).map((panel) => panel.id)
     return writablePanelIds.length ? writablePanelIds : terminalPanels.map((panel) => panel.id)
   }
-  const targetPanel = activePanel.kind === 'knowledge' ? terminalPanels[0] || activePanel : activePanel
+  const targetPanel = isTerminalWorkspacePanel(activePanel) ? activePanel : terminalPanels[0] || activePanel
   return [targetPanel.id]
 }
 

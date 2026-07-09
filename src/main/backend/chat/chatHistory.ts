@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto'
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs'
-import { mkdir, rename, writeFile } from 'fs/promises'
+import { mkdir, rm, writeFile } from 'fs/promises'
 import { dirname, isAbsolute, resolve } from 'path'
 import type {
   AiChatConversationDeleteResult,
@@ -19,6 +19,10 @@ import { shouldUseChatHistorySeedData } from '@shared/runtimeSwitches'
 type ChatHistoryBackendRuntimeConfig = {
   stateFilePath?: string
   useSeedData?: boolean
+}
+
+type ChatHistoryPersistenceTestHooks = {
+  writeFile?: (path: string, payload: string, encoding: BufferEncoding) => Promise<unknown>
 }
 
 type ChatHistoryStoreShape = {
@@ -126,6 +130,7 @@ const seedState = (): ChatHistoryStoreShape => ({
 let chatHistoryState: ChatHistoryStoreShape = runtimeConfig.useSeedData ? seedState() : emptyState()
 let chatHistoryStateLoaded = false
 let loadedStateFilePath = ''
+let persistenceTestHooks: ChatHistoryPersistenceTestHooks = {}
 
 const normalizeText = (value: unknown) => String(value || '').trim()
 
@@ -386,11 +391,28 @@ const writeStateToFilePath = (stateFilePath: string, state: ChatHistoryStoreShap
   renameSync(tempPath, stateFilePath)
 }
 
-const writeStatePayloadToFilePath = async (stateFilePath: string, payload: string) => {
+const removeTempStateFile = async (tempPath: string) => {
+  try {
+    await rm(tempPath, { force: true })
+  } catch {
+    /* Stale temp cleanup is best-effort. */
+  }
+}
+
+const writeStatePayloadToFilePath = async (stateFilePath: string, payload: string, shouldCommit: () => boolean) => {
   await mkdir(dirname(stateFilePath), { recursive: true })
   const tempPath = tempStatePathFor(stateFilePath)
-  await writeFile(tempPath, payload, 'utf-8')
-  await rename(tempPath, stateFilePath)
+  let committed = false
+  try {
+    await (persistenceTestHooks.writeFile || writeFile)(tempPath, payload, 'utf-8')
+    if (!shouldCommit()) return
+    // Keep the generation check and final commit in the same JS turn. This prevents
+    // a synchronous flush from interleaving after the check but before the rename.
+    renameSync(tempPath, stateFilePath)
+    committed = true
+  } finally {
+    if (!committed) await removeTempStateFile(tempPath)
+  }
 }
 
 // 内存 state 是权威数据，磁盘写入按去抖窗口异步合并；进程退出与运行时重配置时同步兜底。
@@ -447,7 +469,7 @@ const enqueuePendingPersist = () => {
   pendingAsyncPersists += 1
   persistQueue = persistQueue
     .catch(() => undefined)
-    .then(() => (generation === persistGeneration ? writeStatePayloadToFilePath(stateFilePath, payload) : undefined))
+    .then(() => (generation === persistGeneration ? writeStatePayloadToFilePath(stateFilePath, payload, () => generation === persistGeneration) : undefined))
     .catch(() => undefined)
     .then(() => {
       pendingAsyncPersists = Math.max(0, pendingAsyncPersists - 1)
@@ -603,6 +625,10 @@ export const resetChatHistoryForTests = () => {
   applyInitialState()
   chatHistoryStateLoaded = true
   loadedStateFilePath = runtimeConfig.stateFilePath
+}
+
+export const configureChatHistoryPersistenceHooksForTests = (hooks: ChatHistoryPersistenceTestHooks = {}) => {
+  persistenceTestHooks = hooks
 }
 
 export const listChatConversations = (): AiChatHistoryListResult => successSnapshot(getState())

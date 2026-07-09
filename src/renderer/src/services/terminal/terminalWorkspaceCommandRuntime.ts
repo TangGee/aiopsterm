@@ -2,6 +2,7 @@ import { computed, nextTick, reactive, ref, watch, type Ref } from 'vue'
 import { terminalClient } from '@/services/terminal/terminalClient'
 import type { TerminalView } from '@/services/terminal/terminalWorkspaceViewRuntime'
 import type { TerminalPanel, useWorkspaceStore } from '@/stores/workspace'
+import { isTerminalWorkspacePanel } from '@/services/terminal/terminalPanelRuntime'
 import type { TerminalCommandSuggestion, TerminalCommandSuggestionContext } from '@shared/contracts/terminalTools'
 
 type WorkspaceStore = ReturnType<typeof useWorkspaceStore>
@@ -285,7 +286,7 @@ export const createTerminalWorkspaceCommandRuntime = ({
 
   const openCommandLine = async (panelId = workspace.activePanelId) => {
     const panel = panelById(panelId)
-    if (!panel || panel.kind === 'knowledge') return
+    if (!panel || !isTerminalWorkspacePanel(panel)) return
     workspace.activePanelId = panel.id
     commandLinePanelId.value = panel.id
     command.value = ''
@@ -367,7 +368,7 @@ export const createTerminalWorkspaceCommandRuntime = ({
 
   const openCommandDialog = async (panelId = workspace.activePanelId) => {
     const panel = workspace.panels.find((item) => item.id === panelId)
-    if (!panel || panel.kind === 'knowledge') return
+    if (!panel || !isTerminalWorkspacePanel(panel)) return
     workspace.activePanelId = panelId
     commandDialog.visible = true
     commandDialog.panelId = panelId
@@ -396,7 +397,7 @@ export const createTerminalWorkspaceCommandRuntime = ({
     commandDialog.visible = false
     commandDialog.panelId = ''
     const active = workspace.activePanel
-    if (active?.kind !== 'knowledge') {
+    if (isTerminalWorkspacePanel(active)) {
       focusPanel(active.id)
     }
   }
@@ -608,7 +609,7 @@ export const createTerminalWorkspaceCommandRuntime = ({
     const text = globalCommand.value.trim()
     if (!text) return
     const decision = await workspace.runGlobalTerminalCommand(text)
-    workspace.panels.filter((panel) => panel.kind !== 'knowledge').forEach((panel) => syncTerminalView(panel))
+    workspace.panels.filter((panel) => isTerminalWorkspacePanel(panel)).forEach((panel) => syncTerminalView(panel))
     if (decision.status !== 'allow') return
     globalCommand.value = ''
   }
@@ -622,12 +623,12 @@ export const createTerminalWorkspaceCommandRuntime = ({
       commandLinePanelId.value = ''
       hideSuggestions()
     }
-    workspace.panels.filter((panel) => panel.kind !== 'knowledge').forEach((panel) => syncTerminalView(panel))
+    workspace.panels.filter((panel) => isTerminalWorkspacePanel(panel)).forEach((panel) => syncTerminalView(panel))
   }
 
   const cancelSecurityPrompt = () => {
     workspace.cancelTerminalSecurityPrompt()
-    workspace.panels.filter((panel) => panel.kind !== 'knowledge').forEach((panel) => syncTerminalView(panel))
+    workspace.panels.filter((panel) => isTerminalWorkspacePanel(panel)).forEach((panel) => syncTerminalView(panel))
   }
 
   const toggleGlobalInput = () => {

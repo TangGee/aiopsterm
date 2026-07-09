@@ -84,6 +84,14 @@ import type {
   ManagedAiSessionReplyInput
 } from './managedAiSessions'
 import type {
+  ManagedAiSessionContentListInput,
+  ManagedAiSessionContentListResult,
+  ManagedAiSessionContentRecordInput,
+  ManagedAiSessionContentRecordResult,
+  ManagedAiSessionContentUpdateInput,
+  ManagedAiSessionContentUpdateResult
+} from './managedAiSessionContent'
+import type {
   AgentHookInstallerListResult,
   AgentHookInstallerOperationInput,
   AgentHookInstallerOperationResult
@@ -576,6 +584,9 @@ export type AiopsPreloadApi = {
   renameManagedAiSession: (input: ManagedAiSessionRenameInput) => Promise<ManagedAiSessionMutationResult>
   clearManagedAiSession: (input: ManagedAiSessionClearInput) => Promise<ManagedAiSessionMutationResult>
   bulkManagedAiSessions: (input: ManagedAiSessionBulkInput) => Promise<ManagedAiSessionBulkResult>
+  listManagedAiSessionContent: (input: ManagedAiSessionContentListInput) => Promise<ManagedAiSessionContentListResult>
+  getManagedAiSessionContentRecord: (input: ManagedAiSessionContentRecordInput) => Promise<ManagedAiSessionContentRecordResult>
+  updateManagedAiSessionContentRecord: (input: ManagedAiSessionContentUpdateInput) => Promise<ManagedAiSessionContentUpdateResult>
   listManagedAiNotifications: (input?: ManagedAiNotificationListInput) => Promise<ManagedAiNotificationListResult>
   markManagedAiNotificationRead: (input: ManagedAiNotificationMarkReadInput) => Promise<ManagedAiNotificationMutationResult>
   dismissManagedAiNotification: (input: ManagedAiNotificationDismissInput) => Promise<ManagedAiNotificationMutationResult>

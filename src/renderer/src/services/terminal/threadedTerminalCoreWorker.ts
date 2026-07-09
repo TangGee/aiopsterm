@@ -731,7 +731,7 @@ const lineSignature = (record: CoreTerminalRecord, lineIndex: number) => {
   return h1 * 0x200000 + (h2 & 0x1fffff)
 }
 
-// 基线为 null 表示未知(刚创建或刚发过全量快照),此时整屏标脏一次后重建基线。
+// 基线为 null 表示未知；正常写入时通过可见行签名只标记真正变化的行。
 const markChangedVisibleRows = (record: CoreTerminalRecord) => {
   const visibleIndexes = visibleLineIndexes(record)
   const previous = record.lastVisibleLineSignatures
@@ -788,8 +788,9 @@ const buildSnapshot = (record: CoreTerminalRecord, forceFull = false, fullReason
     }
   })
   record.dirtyRows.clear()
-  // 全量/滚动快照不再重算签名:基线置空,下次增量 diff 整屏标脏一次即可收敛。
-  if (effectiveFull || repaintVisibleRows) record.lastVisibleLineSignatures = null
+  if (effectiveFull || repaintVisibleRows) {
+    record.lastVisibleLineSignatures = visibleIndexes.map((lineIndex) => lineSignature(record, lineIndex))
+  }
   record.pendingFullSnapshot = false
   record.pendingFullSnapshotReason = undefined
   record.lastSnapshotViewportY = buffer.viewportY

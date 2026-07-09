@@ -1,5 +1,6 @@
 import { ref } from 'vue'
 import type { TerminalPanel } from '@/stores/workspace'
+import { isTerminalWorkspacePanel } from '@/services/terminal/terminalPanelRuntime'
 import {
   controlText,
   isRecord,
@@ -204,6 +205,7 @@ export const createTerminalControlSurfaceState = ({
     const workspaceGroup = groupForPanelId(panel.id)
     const resumeBinding = controlSurfaceResumeBindings.value[panel.id]
     const telemetry = surfaceTelemetrySummaryForControl(controlSurfaceTelemetry.value[panel.id])
+    const terminalSurface = isTerminalWorkspacePanel(panel)
     return {
       panelId: panel.id,
       panel_id: panel.id,
@@ -211,12 +213,12 @@ export const createTerminalControlSurfaceState = ({
       surface_id: panel.id,
       title: panel.title,
       ...(panel.titleSource ? { titleSource: panel.titleSource, title_source: panel.titleSource } : {}),
-      surfaceKind: panel.kind === 'knowledge' ? 'knowledge' : 'terminal',
+      surfaceKind: panel.kind === 'knowledge' ? 'knowledge' : panel.kind === 'managed-ai-session' ? 'managed-ai-session' : 'terminal',
       active: panel.id === workspace.activePanelId,
       status: panel.status,
       cwd: panel.cwd,
       ...(panel.sessionId ? { sessionId: panel.sessionId, session_id: panel.sessionId, terminalSessionId: panel.sessionId, terminal_session_id: panel.sessionId } : {}),
-      ...(panel.kind === 'knowledge' ? {} : { terminalKind: terminalKindForControl(panel), connected: Boolean(panel.sessionId) }),
+      ...(terminalSurface ? { terminalKind: terminalKindForControl(panel), connected: Boolean(panel.sessionId) } : {}),
       ...(panel.split ? { split: panel.split } : {}),
       ...(panel.splitSourceId ? { splitSourceId: panel.splitSourceId } : {}),
       ...(panel.splitGroupId ? { splitGroupId: panel.splitGroupId } : {}),
@@ -231,6 +233,14 @@ export const createTerminalControlSurfaceState = ({
               isImage: panel.knowledge.isImage,
               ...(typeof panel.knowledge.startLine === 'number' ? { startLine: panel.knowledge.startLine } : {}),
               ...(typeof panel.knowledge.endLine === 'number' ? { endLine: panel.knowledge.endLine } : {})
+            }
+          }
+        : {}),
+      ...(panel.managedAiSession
+        ? {
+            managedAiSession: {
+              source: panel.managedAiSession.source,
+              sessionId: panel.managedAiSession.sessionId
             }
           }
         : {})
@@ -394,7 +404,7 @@ export const createTerminalControlSurfaceState = ({
 
   const workspaceSnapshotForControl = (): ControlWorkspaceSnapshot => {
     pruneWorkspaceGroups()
-    const terminals = workspace.panels.filter((panel) => panel.kind !== 'knowledge').map(terminalSummaryForControl)
+    const terminals = workspace.panels.filter((panel) => isTerminalWorkspacePanel(panel)).map(terminalSummaryForControl)
     const surfaces = workspace.panels.map(surfaceSummaryForControl)
     const splitGroups = splitGroupsForControl(surfaces)
     const workspaceGroups = controlWorkspaceGroups.value.map(workspaceGroupSummaryForControl)

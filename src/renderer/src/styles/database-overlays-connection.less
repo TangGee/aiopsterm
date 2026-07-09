@@ -1,7 +1,7 @@
 .db-modal-overlay {
   position: fixed;
   inset: 0;
-  z-index: 70;
+  z-index: var(--app-z-modal);
   display: grid;
   place-items: center;
   background: rgb(0 0 0 / 0.5);
@@ -19,7 +19,10 @@
   overflow: auto;
   border: 1px solid var(--theme-module-active-border);
   border-radius: 8px;
-  background: var(--theme-module-active-overlay-bg);
+  background: var(--theme-module-active-modal-surface-bg);
+  background-size: var(--theme-module-active-modal-surface-size);
+  background-position: var(--theme-module-active-modal-surface-position);
+  background-repeat: var(--theme-module-active-modal-surface-repeat);
   box-shadow: var(--theme-module-active-shadow);
 }
 
@@ -108,7 +111,7 @@
   padding: 0 10px;
   border: 1px solid var(--theme-module-active-border);
   border-radius: 6px;
-  background: var(--theme-module-active-card-bg);
+  background: var(--theme-module-active-modal-card-bg);
   color: var(--theme-module-active-text);
   white-space: nowrap;
 }
@@ -152,7 +155,7 @@
   padding: 0 12px;
   border: 1px solid var(--theme-module-active-border);
   border-radius: 6px;
-  background: var(--theme-module-active-card-bg);
+  background: var(--theme-module-active-modal-card-bg);
 }
 
 .db-connection-modal footer button[type='submit'],

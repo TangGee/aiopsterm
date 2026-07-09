@@ -1,5 +1,6 @@
 import { nextTick, ref } from 'vue'
 import type { TerminalPanel } from '@/stores/workspace'
+import { isTerminalWorkspacePanel } from '@/services/terminal/terminalPanelRuntime'
 import {
   controlBool,
   controlFail,
@@ -153,7 +154,7 @@ export const createTerminalControlSurfaceAgentHandlers = ({
     if (method !== 'agent.team.launch') return controlFail('UNKNOWN_CONTROL_RENDERER_METHOD', `Unknown renderer control method: ${method}`)
     const source = normalizeAgentTeamSource(params.source || params.agent)
     const count = controlNumber(params.count || params.n, 2, 1, 12)
-    const cwd = controlText(params.cwd) || (workspace.activePanel.kind === 'terminal' ? workspace.activePanel.cwd : '')
+    const cwd = controlText(params.cwd) || (isTerminalWorkspacePanel(workspace.activePanel) ? workspace.activePanel.cwd : '')
     const focus = controlBool(params.focus, true)
     const members: ControlAgentTeamLaunchMember[] = []
     const panelIds: string[] = []
@@ -241,7 +242,7 @@ export const createTerminalControlSurfaceAgentHandlers = ({
       if (session.hibernated || !session.resumeCommand?.trim()) return
       const targetId = session.panelId || session.terminalSessionId
       const panel = targetId ? workspace.panels.find((item) => item.id === targetId || item.sessionId === targetId) : null
-      if (!panel || panel.kind === 'knowledge' || !panel.sessionId || panel.status === 'closed' || panel.status === 'error') return
+      if (!panel || !isTerminalWorkspacePanel(panel) || !panel.sessionId || panel.status === 'closed' || panel.status === 'error') return
       sessions.push({
         session,
         panel,

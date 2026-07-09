@@ -120,6 +120,29 @@ describe('threadedTerminalCoreWorker', () => {
     expect(visibleText(next)).toContain('after-find')
   })
 
+  it('keeps incremental dirty rows narrow after a full scroll snapshot', async () => {
+    await createTerminal()
+    send({
+      type: 'data',
+      terminalId: createOptions().terminalId,
+      data: Array.from({ length: 12 }, (_item, index) => `jump-line-${index}\n`).join('')
+    })
+
+    const jump = await waitFor(() => {
+      const snapshot = latestScreen(messages)
+      return snapshot?.fullReason === 'jump' && visibleText(snapshot).includes('jump-line-11') ? snapshot : undefined
+    })
+
+    send({ type: 'data', terminalId: createOptions().terminalId, data: '\rprobe' })
+    const incremental = await waitFor(() => {
+      const snapshot = latestScreen(messages)
+      return snapshot && snapshot.seq > jump.seq && !snapshot.full && visibleText(snapshot).includes('probe') ? snapshot : undefined
+    })
+
+    expect(incremental.lines.length).toBeLessThanOrEqual(2)
+    expect(incremental.dirtyRows.length).toBeLessThanOrEqual(2)
+  })
+
   it('searches the full scrollback, scrolls to the match, and clears search highlights', async () => {
     await createTerminal()
     send({

@@ -1,5 +1,6 @@
 import { nextTick } from 'vue'
 import type { TerminalPanel } from '@/stores/workspace'
+import { isTerminalWorkspacePanel } from '@/services/terminal/terminalPanelRuntime'
 import {
   controlFail,
   controlOk,
@@ -46,9 +47,9 @@ export const createTerminalControlSurfaceSessionHandlers = ({
       id: panel.id,
       title: panel.title,
       cwd: panel.cwd,
-      kind: panel.kind === 'knowledge' ? 'knowledge' : 'terminal',
+      kind: panel.kind === 'knowledge' ? 'knowledge' : panel.kind === 'managed-ai-session' ? 'managed-ai-session' : 'terminal',
       status: panel.status,
-      ...(panel.kind !== 'knowledge' ? { terminalKind: terminalKindForControl(panel) } : {}),
+      ...(isTerminalWorkspacePanel(panel) ? { terminalKind: terminalKindForControl(panel) } : {}),
       ...(panel.split ? { split: panel.split } : {}),
       ...(panel.splitSourceId ? { splitSourceId: panel.splitSourceId } : {}),
       ...(panel.splitGroupId ? { splitGroupId: panel.splitGroupId } : {}),
@@ -78,6 +79,14 @@ export const createTerminalControlSurfaceSessionHandlers = ({
               isImage: panel.knowledge.isImage,
               ...(typeof panel.knowledge.startLine === 'number' ? { startLine: panel.knowledge.startLine } : {}),
               ...(typeof panel.knowledge.endLine === 'number' ? { endLine: panel.knowledge.endLine } : {})
+            }
+          }
+        : {}),
+      ...(panel.managedAiSession
+        ? {
+            managedAiSession: {
+              source: panel.managedAiSession.source,
+              sessionId: panel.managedAiSession.sessionId
             }
           }
         : {}),
@@ -123,7 +132,7 @@ export const createTerminalControlSurfaceSessionHandlers = ({
     if (!isRecord(value) || value.version !== 1 || !Array.isArray(value.panels) || !value.panels.length) return null
     const panels = value.panels.filter((panel): panel is ControlSessionPanelSnapshot => {
       if (!isRecord(panel) || !controlText(panel.id) || !controlText(panel.title)) return false
-      return panel.kind === 'terminal' || panel.kind === 'knowledge'
+      return panel.kind === 'terminal' || panel.kind === 'knowledge' || panel.kind === 'managed-ai-session'
     })
     if (!panels.length) return null
     const panelIds = new Set(panels.map((panel) => panel.id))
@@ -170,7 +179,7 @@ export const createTerminalControlSurfaceSessionHandlers = ({
     cwd: item.cwd || '~',
     output: '',
     outputSegments: [],
-    status: item.kind === 'knowledge' ? 'ready' : item.terminalKind === 'ssh' ? 'closed' : 'ready',
+    status: item.kind === 'knowledge' || item.kind === 'managed-ai-session' ? 'ready' : item.terminalKind === 'ssh' ? 'closed' : 'ready',
     kind: item.kind,
     ...(item.split ? { split: item.split } : {}),
     ...(item.splitSourceId ? { splitSourceId: item.splitSourceId } : {}),
@@ -183,6 +192,14 @@ export const createTerminalControlSurfaceSessionHandlers = ({
             isImage: item.knowledge.isImage,
             ...(typeof item.knowledge.startLine === 'number' ? { startLine: item.knowledge.startLine } : {}),
             ...(typeof item.knowledge.endLine === 'number' ? { endLine: item.knowledge.endLine } : {})
+          }
+        }
+      : {}),
+    ...(item.managedAiSession
+      ? {
+          managedAiSession: {
+            source: item.managedAiSession.source,
+            sessionId: item.managedAiSession.sessionId
           }
         }
       : {}),
@@ -222,7 +239,7 @@ export const createTerminalControlSurfaceSessionHandlers = ({
   }
 
   const restoreLocalSessionPanel = async (panel: TerminalPanel) => {
-    if (panel.kind === 'knowledge' || panel.sshSession) return false
+    if (!isTerminalWorkspacePanel(panel) || panel.sshSession) return false
     const createTerminal = terminalClient.createTerminal()
     if (!createTerminal) return false
     await nextTick()
@@ -267,7 +284,7 @@ export const createTerminalControlSurfaceSessionHandlers = ({
     let launchedLocalTerminals = 0
     let skippedRemoteTerminals = 0
     for (const panel of workspace.panels) {
-      if (panel.kind === 'knowledge') continue
+      if (!isTerminalWorkspacePanel(panel)) continue
       if (panel.sshSession) {
         skippedRemoteTerminals += 1
         continue

@@ -1,6 +1,7 @@
 import { app } from 'electron'
 import Store from 'electron-store'
 import { createRequire } from 'module'
+import { existsSync, statSync } from 'fs'
 import { isAbsolute, join, resolve } from 'path'
 import type {
   AiopsAssetInput,
@@ -570,17 +571,35 @@ class SqliteAssetStore {
 
 let assetStore: AssetStore | null = null
 
+const hasExistingSqliteDatabase = () => {
+  try {
+    const stat = statSync(runtimeConfig.databasePath)
+    return stat.isFile() && stat.size > 0
+  } catch {
+    return false
+  }
+}
+
 const createStore = (): AssetStore => {
   if (runtimeConfig.sqliteFactory) {
     return new SqliteAssetStore(new runtimeConfig.sqliteFactory(runtimeConfig.databasePath))
   }
+  if (runtimeConfig.forceFallbackStore) return new FallbackAssetStore()
   try {
-    if (runtimeConfig.forceFallbackStore) throw new Error('force fallback asset store')
     // Native SQLite is preferred. If the Electron ABI has not been rebuilt yet,
-    // the backend falls back to electron-store without changing renderer APIs.
+    // the backend can use electron-store only before a SQLite database exists.
     const Database = runtimeConfig.sqliteFactory || (requireNative('better-sqlite3') as new (path: string) => SqliteDatabase)
     return new SqliteAssetStore(new Database(runtimeConfig.databasePath))
-  } catch {
+  } catch (error) {
+    if (existsSync(runtimeConfig.databasePath) && hasExistingSqliteDatabase()) {
+      const detail = error instanceof Error ? error.message : String(error || 'unknown error')
+      throw Object.assign(
+        new Error(
+          `SQLite asset store is unavailable while an existing asset database is present at ${runtimeConfig.databasePath}. Rebuild better-sqlite3 for the Electron runtime before loading assets. ${detail}`
+        ),
+        { code: 'ASSET_SQLITE_UNAVAILABLE' }
+      )
+    }
     return new FallbackAssetStore()
   }
 }

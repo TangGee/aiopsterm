@@ -1722,7 +1722,7 @@ const terminalActiveSurfaceVariables = (theme: ThemeDefinition) => {
   return variables
 }
 
-// Teleport 到 body 的弹层(右键菜单、下拉、tooltip)不在 .app-body.module-* 作用域内,
+// Teleport 到 body 的弹层(右键菜单、下拉、tooltip、modal)不在 .app-body.module-* 作用域内,
 // 只能继承 html 上的变量。这里把 workspace 模块的 base 层平铺成 --theme-module-active-*
 // 内联默认值;.app-shell 内部的 class 作用域声明仍会按当前模块/背景层覆盖它。
 const moduleActiveFallbackVariables = (theme: ThemeDefinition) => {
@@ -1731,6 +1731,13 @@ const moduleActiveFallbackVariables = (theme: ThemeDefinition) => {
   void withBackground
   flattenRecord('--theme-module-active', plain as unknown as Record<string, unknown>, variables)
   flattenRecord('--theme-module-active', base as unknown as Record<string, unknown>, variables)
+  variables['--theme-module-active-modal-bg'] = base.panelBg
+  variables['--theme-module-active-modal-card-bg'] = base.cardBg
+  variables['--theme-module-active-modal-strong-bg'] = base.cardStrongBg
+  variables['--theme-module-active-modal-surface-bg'] = 'var(--theme-module-active-modal-bg)'
+  variables['--theme-module-active-modal-surface-size'] = 'auto'
+  variables['--theme-module-active-modal-surface-position'] = '0 0'
+  variables['--theme-module-active-modal-surface-repeat'] = 'repeat'
   return variables
 }
 

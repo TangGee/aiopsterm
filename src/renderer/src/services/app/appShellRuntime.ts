@@ -1,6 +1,6 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { appRuntimeClient } from '@/services/app/appRuntimeClient'
-import { backgroundStyleVars } from '@/services/app/backgroundRuntime'
+import { applyBackgroundToDocument, backgroundStyleVars } from '@/services/app/backgroundRuntime'
 import { managedAiClient } from '@/services/ai/managedAiClient'
 import { terminalClient } from '@/services/terminal/terminalClient'
 import { isTerminalWorkspaceModule } from '@/config/navigation'
@@ -420,6 +420,13 @@ export const useAppShellRuntime = () => {
       staticTextI18n.refresh()
     },
     { immediate: true }
+  )
+  watch(
+    () => [workspace.config.theme, workspace.config.background],
+    () => {
+      applyBackgroundToDocument(workspace.config.background)
+    },
+    { deep: true, immediate: true, flush: 'post' }
   )
 
   return {

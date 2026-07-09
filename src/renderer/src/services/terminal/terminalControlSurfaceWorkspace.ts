@@ -1,5 +1,6 @@
 import { nextTick } from 'vue'
 import type { SettingSectionKey } from '@/config/settings'
+import { isTerminalWorkspacePanel } from '@/services/terminal/terminalPanelRuntime'
 import {
   controlBool,
   controlFail,
@@ -131,7 +132,7 @@ export const createTerminalControlSurfaceWorkspaceHandlers = ({
       remote_display_target: snapshot.remote?.remote_display_target || item.remote_display_target || null,
       remote_connection_state: snapshot.remote?.connection_state || item.remote_connection_state || 'local',
       remote: snapshot.remote || null,
-      current_directory: workspace.activePanel.kind === 'terminal' ? workspace.activePanel.cwd : '',
+      current_directory: isTerminalWorkspacePanel(workspace.activePanel) ? workspace.activePanel.cwd : '',
       custom_color: null,
       unread_count: snapshot.attention.unreadCount,
       latest_notification_text: snapshot.attention.items[0]?.summary || snapshot.attention.items[0]?.title || null,

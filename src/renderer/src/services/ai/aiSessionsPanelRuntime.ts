@@ -49,6 +49,12 @@ export const useAiSessionsPanelRuntime = () => {
   const replyText = ref('')
   const renameTitle = ref('')
   const locallySelectedSessionKey = ref('')
+  const contextMenu = ref<{ visible: boolean; x: number; y: number; sessionKey: string }>({
+    visible: false,
+    x: 0,
+    y: 0,
+    sessionKey: ''
+  })
   const eventFilters = computed(() => aiSessionsEventFilterOptions.map((option) => ({ key: option.key, label: t(option.labelKey) })))
 
   const sourceLabel = (source: AiAgentSessionSource) => managedAiSourceLabel(source)
@@ -105,6 +111,7 @@ export const useAiSessionsPanelRuntime = () => {
   )
 
   const selectedSession = computed(() => selectedVisibleManagedAiSession({ selectedSession: workspace.selectedManagedAiSession, visibleSessions: visibleSessions.value }))
+  const contextMenuSession = computed(() => workspace.sortedManagedAiSessions.find((session) => sessionKey(session) === contextMenu.value.sessionKey) || null)
 
   const filteredTimelineEvents = computed(() => filteredManagedAiTimelineEvents(selectedSession.value, eventFilter.value))
   const projectLabels = computed(() => managedAiProjectDisplayLabels(workspace.sortedManagedAiSessions, t('aiSessions.unknownProject')))
@@ -134,7 +141,7 @@ export const useAiSessionsPanelRuntime = () => {
     return (
       workspace.panels.find(
         (panel) =>
-          panel.kind !== 'knowledge' &&
+          (!panel.kind || panel.kind === 'terminal') &&
           panel.status !== 'closed' &&
           panel.status !== 'error' &&
           (targetIds.includes(panel.id) || (panel.sessionId ? targetIds.includes(panel.sessionId) : false))
@@ -259,6 +266,53 @@ export const useAiSessionsPanelRuntime = () => {
     workspace.selectedManagedAiSessionKey = sessionKey(session)
   }
 
+  const closeSessionContextMenu = () => {
+    contextMenu.value = { visible: false, x: 0, y: 0, sessionKey: '' }
+  }
+
+  const openSessionContextMenu = (session: ManagedAiSession, event: MouseEvent) => {
+    selectSession(session)
+    const menuWidth = 210
+    const menuHeight = 176
+    const padding = 8
+    const x = Math.min(Math.max(event.clientX, padding), Math.max(padding, window.innerWidth - menuWidth - padding))
+    const y = Math.min(Math.max(event.clientY, padding), Math.max(padding, window.innerHeight - menuHeight - padding))
+    contextMenu.value = {
+      visible: true,
+      x,
+      y,
+      sessionKey: sessionKey(session)
+    }
+  }
+
+  const openContextSessionContent = () => {
+    const session = contextMenuSession.value
+    if (!session) return
+    workspace.openManagedAiSessionContent(session.source, session.id)
+    closeSessionContextMenu()
+  }
+
+  const locateContextSession = () => {
+    const session = contextMenuSession.value
+    if (!session) return
+    resumeOrFocusSession(session)
+    closeSessionContextMenu()
+  }
+
+  const markContextSessionHandled = () => {
+    const session = contextMenuSession.value
+    if (!session) return
+    workspace.markManagedAiSessionHandled(session.source, session.id)
+    closeSessionContextMenu()
+  }
+
+  const clearContextSession = () => {
+    const session = contextMenuSession.value
+    if (!session) return
+    void workspace.clearManagedAiSession(session.source, session.id)
+    closeSessionContextMenu()
+  }
+
   const renameSelectedSession = () => {
     const session = selectedSession.value
     const title = renameTitle.value.trim()
@@ -301,6 +355,8 @@ export const useAiSessionsPanelRuntime = () => {
     eventFilter,
     replyText,
     renameTitle,
+    contextMenu,
+    contextMenuSession,
     modeButtons,
     activeModeLabel,
     searchPlaceholder,
@@ -325,6 +381,12 @@ export const useAiSessionsPanelRuntime = () => {
     selectedSession,
     filteredTimelineEvents,
     selectSession,
+    openSessionContextMenu,
+    closeSessionContextMenu,
+    openContextSessionContent,
+    locateContextSession,
+    markContextSessionHandled,
+    clearContextSession,
     locateSessionTerminal,
     renameSelectedSession,
     submitReply,

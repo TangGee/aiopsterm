@@ -62,6 +62,13 @@ describe('app-shell-tokens-frame :root defaults', () => {
     for (const [key, value] of Object.entries(plain)) {
       if (typeof value === 'string') expected[`--theme-module-active-${kebab(key)}`] = value
     }
+    expected['--theme-module-active-modal-bg'] = workspace.base.panelBg
+    expected['--theme-module-active-modal-card-bg'] = workspace.base.cardBg
+    expected['--theme-module-active-modal-strong-bg'] = workspace.base.cardStrongBg
+    expected['--theme-module-active-modal-surface-bg'] = 'var(--theme-module-active-modal-bg)'
+    expected['--theme-module-active-modal-surface-size'] = 'auto'
+    expected['--theme-module-active-modal-surface-position'] = '0 0'
+    expected['--theme-module-active-modal-surface-repeat'] = 'repeat'
     for (const [key, value] of Object.entries(rootVars)) {
       if (!key.startsWith('--theme-module-active-')) continue
       expect(expected[key], `:root 中的 ${key} 与 dark workspace base 层漂移`).toBe(value)

@@ -1,5 +1,6 @@
 import { nextTick } from 'vue'
 import type { TerminalPanel } from '@/stores/workspace'
+import { isTerminalWorkspacePanel } from '@/services/terminal/terminalPanelRuntime'
 import {
   controlBool,
   controlFail,
@@ -28,10 +29,10 @@ export const createTerminalControlSurfaceMobileHandlers = ({
     const panelId = controlText(params.panelId || params.panel_id || params.surfaceId || params.surface_id || params.terminalId || params.terminal_id || params.tabId || params.tab_id)
     const sessionId = controlText(params.sessionId || params.session_id || params.terminalSessionId || params.terminal_session_id)
     if (panelId || sessionId) {
-      return workspace.panels.find((panel) => panel.kind !== 'knowledge' && (panel.id === panelId || panel.sessionId === sessionId)) || null
+      return workspace.panels.find((panel) => isTerminalWorkspacePanel(panel) && (panel.id === panelId || panel.sessionId === sessionId)) || null
     }
-    const active = workspace.panels.find((panel) => panel.kind !== 'knowledge' && panel.id === workspace.activePanelId)
-    return active || workspace.panels.find((panel) => panel.kind !== 'knowledge' && panel.sessionId) || null
+    const active = workspace.panels.find((panel) => isTerminalWorkspacePanel(panel) && panel.id === workspace.activePanelId)
+    return active || workspace.panels.find((panel) => isTerminalWorkspacePanel(panel) && panel.sessionId) || null
   }
 
   const terminalMobileTargetPayload = (panel: TerminalPanel, extra: Record<string, unknown> = {}) => {
@@ -152,7 +153,7 @@ export const createTerminalControlSurfaceMobileHandlers = ({
   const clearTerminalHistoryForControl = async (params: Record<string, unknown>) => {
     const panel = resolveControlTerminalPanel(params)
     if (!panel) return controlFail('TERMINAL_PANEL_NOT_FOUND', 'Terminal panel not found.')
-    if (panel.kind === 'knowledge') return controlFail('TERMINAL_PANEL_NOT_FOUND', 'Terminal panel not found.')
+    if (!isTerminalWorkspacePanel(panel)) return controlFail('TERMINAL_PANEL_NOT_FOUND', 'Terminal panel not found.')
     const view = terminalViews.get(panel.id)
     if (!view) return controlFail('TERMINAL_VIEW_NOT_READY', 'Terminal view is not ready.', { panelId: panel.id, sessionId: panel.sessionId })
     workspace.replaceTerminalOutput(panel.id, '')

@@ -1,5 +1,6 @@
 import { nextTick } from 'vue'
 import type { TerminalPanel } from '@/stores/workspace'
+import { isTerminalWorkspacePanel } from '@/services/terminal/terminalPanelRuntime'
 import {
   controlBool,
   controlFail,
@@ -153,7 +154,7 @@ export const createTerminalControlSurfacePaneHandlers = ({
     workspace.activeModule = 'workspace'
     workspace.activePanelId = panel.id
     await nextTick()
-    terminalViews.get(panel.id)?.terminal.focus()
+    if (isTerminalWorkspacePanel(panel)) terminalViews.get(panel.id)?.terminal.focus()
     return selectedPanePayload(panel, action, previousActivePanelId)
   }
 
@@ -207,7 +208,7 @@ export const createTerminalControlSurfacePaneHandlers = ({
             id: panel.id,
             title: panel.title,
             kind: panel.kind,
-            surfaceKind: panel.kind === 'knowledge' ? 'knowledge' : 'terminal',
+            surfaceKind: panel.kind === 'knowledge' ? 'knowledge' : panel.kind === 'managed-ai-session' ? 'managed-ai-session' : 'terminal',
             active: panel.id === workspace.activePanelId,
             cwd: panel.cwd,
             reason

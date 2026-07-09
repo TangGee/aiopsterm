@@ -1,6 +1,7 @@
 import { nextTick, type ComputedRef } from 'vue'
 import { appRuntimeClient } from '@/services/app/appRuntimeClient'
 import { terminalClient } from '@/services/terminal/terminalClient'
+import { isTerminalWorkspacePanel } from '@/services/terminal/terminalPanelRuntime'
 import { getThreadedTerminalDebugStats, isThreadedTerminalHost, type ThreadedTerminalHost } from '@/services/terminal/threadedTerminalRuntime'
 import type { TerminalView } from '@/services/terminal/terminalWorkspaceViewRuntime'
 import type { TerminalPanel, useWorkspaceStore } from '@/stores/workspace'
@@ -381,11 +382,11 @@ const stressSplitRectsFor = (panels: TerminalPanel[]) => {
 }
 
 const stressSplitGroupPanels = (workspace: WorkspaceStore) => {
-  const active = workspace.panels.find((panel) => panel.id === workspace.activePanelId && panel.kind !== 'knowledge') ||
-    workspace.panels.find((panel) => panel.kind !== 'knowledge')
+  const active = workspace.panels.find((panel) => panel.id === workspace.activePanelId && isTerminalWorkspacePanel(panel)) ||
+    workspace.panels.find((panel) => isTerminalWorkspacePanel(panel))
   if (!active) return []
   if (active.splitGroupId) {
-    const groupPanels = workspace.panels.filter((panel) => panel.kind !== 'knowledge' && panel.splitGroupId === active.splitGroupId)
+    const groupPanels = workspace.panels.filter((panel) => isTerminalWorkspacePanel(panel) && panel.splitGroupId === active.splitGroupId)
     return groupPanels.length ? groupPanels : [active]
   }
   return [active]
@@ -518,10 +519,10 @@ const ensureStressPanels = async (input: TerminalStressHarnessInput, foreground:
   const { workspace } = input
   const targetForeground = Math.max(1, foreground)
   const targetBackground = Math.max(0, background)
-  while (workspace.panels.filter((panel) => panel.kind !== 'knowledge' && panel.splitGroupId).length < targetForeground) {
+  while (workspace.panels.filter((panel) => isTerminalWorkspacePanel(panel) && panel.splitGroupId).length < targetForeground) {
     const target = largestStressSplitTarget(workspace)?.panel ||
-      workspace.panels.find((panel) => panel.id === workspace.activePanelId && panel.kind !== 'knowledge') ||
-      workspace.panels.find((panel) => panel.kind !== 'knowledge')
+      workspace.panels.find((panel) => panel.id === workspace.activePanelId && isTerminalWorkspacePanel(panel)) ||
+      workspace.panels.find((panel) => isTerminalWorkspacePanel(panel))
     if (target) workspace.activePanelId = target.id
     const targetRect = largestStressSplitTarget(workspace)?.rect
     const direction = !targetRect || targetRect.width >= targetRect.height ? 'right' : 'below'
@@ -531,13 +532,13 @@ const ensureStressPanels = async (input: TerminalStressHarnessInput, foreground:
     panel.status = 'running'
     await nextTick()
   }
-  while (workspace.panels.filter((panel) => panel.kind !== 'knowledge').length < targetForeground + targetBackground) {
+  while (workspace.panels.filter((panel) => isTerminalWorkspacePanel(panel)).length < targetForeground + targetBackground) {
     const panel = workspace.createPanel()
     panel.title = `Stress BG ${workspace.panels.length}`
     panel.sessionId = panel.sessionId || `stress-bg-${panel.id}`
     panel.status = 'running'
   }
-  const foregroundPanel = workspace.panels.find((panel) => panel.kind !== 'knowledge' && panel.splitGroupId)
+  const foregroundPanel = workspace.panels.find((panel) => isTerminalWorkspacePanel(panel) && panel.splitGroupId)
   if (foregroundPanel) workspace.activePanelId = foregroundPanel.id
   await nextTick()
   await syncStressPanelViews(input)
@@ -552,7 +553,7 @@ const runTerminalStressTeardown = async (
   input.flushAllTerminalIngressBatches()
   input.flushAllTerminalHistoryBatches()
   const beforeClose = await sampleMemory('teardown-before-close')
-  const panelsBeforeClose = workspace.panels.filter((panel) => panel.kind !== 'knowledge')
+  const panelsBeforeClose = workspace.panels.filter((panel) => isTerminalWorkspacePanel(panel))
   const teardownErrors: string[] = []
   try {
     workspace.closePanels('all')
@@ -660,8 +661,8 @@ const measureRealEchoLatency = async (input: TerminalStressHarnessInput, errors:
   const isRealLocalSession = (sessionId?: string) => Boolean(sessionId && !sessionId.startsWith('stress-'))
   const { workspace } = input
   let panel =
-    workspace.panels.find((item) => item.kind !== 'knowledge' && !item.sshSession && isRealLocalSession(item.sessionId)) ||
-    workspace.panels.find((item) => item.kind !== 'knowledge' && !item.sshSession && !item.sessionId)
+    workspace.panels.find((item) => isTerminalWorkspacePanel(item) && !item.sshSession && isRealLocalSession(item.sessionId)) ||
+    workspace.panels.find((item) => isTerminalWorkspacePanel(item) && !item.sshSession && !item.sessionId)
   if (!panel) {
     panel = workspace.createPanel()
     panel.title = 'Stress Echo PTY'
@@ -669,7 +670,7 @@ const measureRealEchoLatency = async (input: TerminalStressHarnessInput, errors:
     await nextTick()
     await syncStressPanelViews(input)
   }
-  if (!panel || panel.kind === 'knowledge') return { available: false, samples: [], error: 'No terminal panel available.' }
+  if (!panel || !isTerminalWorkspacePanel(panel)) return { available: false, samples: [], error: 'No terminal panel available.' }
   if (!isRealLocalSession(panel.sessionId)) {
     panel.sessionId = undefined
     const connected = await input.startLocalTerminalForPanel(panel)
@@ -763,7 +764,7 @@ const runTerminalRegressionProbes = async (
   }
   const visibleThreadedCandidate = () =>
     threadedCandidateFrom(context.currentForegroundPanels(), { requirePaintable: true }) ||
-    threadedCandidateFrom(input.visibleTerminalPanels.value.filter((panel) => panel.kind !== 'knowledge'), { requirePaintable: true })
+    threadedCandidateFrom(input.visibleTerminalPanels.value.filter((panel) => isTerminalWorkspacePanel(panel)), { requirePaintable: true })
   const waitForVisibleThreadedCandidate = async (timeoutMs = 5000, panels?: TerminalPanel[]) => {
     const deadline = nowMs() + timeoutMs
     let lastDebug: unknown[] = []
@@ -1027,10 +1028,10 @@ const runTerminalStressHarness = async (
   const teardownBaseline = await sampleMemory('teardown-baseline')
   await ensureStressPanels(input, foreground, background)
   await new Promise((resolve) => window.setTimeout(resolve, 500))
-  const terminalPanels = workspace.panels.filter((panel) => panel.kind !== 'knowledge')
-  let foregroundPanels = visibleTerminalPanels.value.filter((panel) => panel.kind !== 'knowledge').slice(0, foreground)
+  const terminalPanels = workspace.panels.filter((panel) => isTerminalWorkspacePanel(panel))
+  let foregroundPanels = visibleTerminalPanels.value.filter((panel) => isTerminalWorkspacePanel(panel)).slice(0, foreground)
   let backgroundPanels = terminalPanels.filter((panel) => !foregroundPanels.some((visible) => visible.id === panel.id)).slice(0, background)
-  const currentForegroundPanels = () => visibleTerminalPanels.value.filter((panel) => panel.kind !== 'knowledge').slice(0, foreground)
+  const currentForegroundPanels = () => visibleTerminalPanels.value.filter((panel) => isTerminalWorkspacePanel(panel)).slice(0, foreground)
   const rafIntervals: number[] = []
   const paintLatencySamples: number[] = []
   const paintFrameSamples: number[] = []
@@ -1118,7 +1119,7 @@ const runTerminalStressHarness = async (
           : null
         if (isStressRenderableElement(element)) {
           const panel = workspace.panels.find((item) => item.id === panelId)
-          if (panel && panel.kind !== 'knowledge') input.syncTerminalView(panel, { refit: true })
+          if (panel && isTerminalWorkspacePanel(panel)) input.syncTerminalView(panel, { refit: true })
           view.terminal.ensureSurfaceAttached({ forceGeometry: true })
           lastDebug = view.terminal.debugInfo()
         }
@@ -1158,7 +1159,7 @@ const runTerminalStressHarness = async (
     }
     switchProbeActive = true
     try {
-      foregroundPanels = visibleTerminalPanels.value.filter((panel) => panel.kind !== 'knowledge').slice(0, foreground)
+      foregroundPanels = visibleTerminalPanels.value.filter((panel) => isTerminalWorkspacePanel(panel)).slice(0, foreground)
       backgroundPanels = terminalPanels.filter((panel) => !foregroundPanels.some((visible) => visible.id === panel.id)).slice(0, background)
       if (!foregroundPanels.length || !backgroundPanels.length) return
       const outgoing = foregroundPanels[foregroundCursor % foregroundPanels.length]

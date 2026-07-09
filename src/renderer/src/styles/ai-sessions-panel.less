@@ -516,3 +516,43 @@
   color: var(--theme-module-active-text);
   padding: 6px 9px;
 }
+
+.ai-session-context-menu {
+  position: fixed;
+  z-index: 90;
+  width: 210px;
+  border: 1px solid var(--theme-module-active-border);
+  border-radius: 7px;
+  background: var(--theme-module-active-overlay-bg);
+  box-shadow: var(--theme-module-active-shadow-soft);
+  padding: 5px;
+}
+
+.ai-session-context-menu button {
+  width: 100%;
+  min-height: 30px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--theme-module-active-text);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px;
+  text-align: left;
+  font-size: 12px;
+}
+
+.ai-session-context-menu button:hover {
+  background: color-mix(in srgb, var(--theme-module-active-accent) 13%, transparent);
+}
+
+.ai-session-context-menu button.danger {
+  color: var(--theme-core-danger);
+}
+
+.ai-session-context-menu svg {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+}

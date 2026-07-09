@@ -1,4 +1,5 @@
 import type { TerminalPanel } from '@/stores/workspace'
+import { isTerminalWorkspacePanel } from '@/services/terminal/terminalPanelRuntime'
 import {
   controlBool,
   controlFail,
@@ -84,7 +85,7 @@ export const createTerminalControlSurfaceResumeHandlers = ({
     const binding = surfaceResumeBindingPayload(controlSurfaceResumeBindings.value[panel.id])
     return {
       surface: surfaceSummaryForControl(panel),
-      terminal: panel.kind === 'knowledge' ? null : terminalSummaryForControl(panel),
+      terminal: isTerminalWorkspacePanel(panel) ? terminalSummaryForControl(panel) : null,
       surfaceId: panel.id,
       surface_id: panel.id,
       surface_ref: panel.id,
@@ -101,15 +102,13 @@ export const createTerminalControlSurfaceResumeHandlers = ({
 
   const surfaceResumePreviewItems = (params: Record<string, unknown> = {}) =>
     workspace.panels
-      .filter((panel) => panel.kind !== 'knowledge')
+      .filter((panel) => isTerminalWorkspacePanel(panel))
       .map((panel) => {
         const binding = controlSurfaceResumeBindings.value[panel.id]
         const trusted = isSurfaceResumeTrustedForAuto(panel, binding)
         const reason = !binding?.command.trim()
           ? 'missing-binding'
-          : panel.kind === 'knowledge'
-            ? 'not-terminal'
-            : !panel.sessionId
+          : !panel.sessionId
               ? 'terminal-not-connected'
               : binding.autoResume !== true
                 ? 'manual'
@@ -249,7 +248,7 @@ export const createTerminalControlSurfaceResumeHandlers = ({
       return controlOk({ ...surfaceResumeAutoPayload(items), ranCount: decisions.length, decisions })
     }
     if (method === 'surface.resume.run') {
-      if (panel.kind === 'knowledge') return controlFail('SURFACE_RESUME_TERMINAL_REQUIRED', 'Resume command can only run in a terminal surface.')
+      if (!isTerminalWorkspacePanel(panel)) return controlFail('SURFACE_RESUME_TERMINAL_REQUIRED', 'Resume command can only run in a terminal surface.')
       const binding = controlSurfaceResumeBindings.value[panel.id]
       if (!binding?.command.trim()) return controlFail('SURFACE_RESUME_BINDING_NOT_FOUND', 'Surface has no resume binding.')
       const decision = await workspace.runTerminalCommand(panel.id, binding.command, { source: 'agent', writeToShell: true })
@@ -261,7 +260,7 @@ export const createTerminalControlSurfaceResumeHandlers = ({
   const handleSurfaceRespawnControlRequest = async (params: Record<string, unknown>): Promise<ControlResponse> => {
     const panel = resolveControlSurfacePanel(params)
     if (!panel) return controlFail('SURFACE_NOT_FOUND', 'Surface not found.')
-    if (panel.kind === 'knowledge') return controlFail('SURFACE_RESPAWN_TERMINAL_REQUIRED', 'Respawn command can only run in a terminal surface.')
+    if (!isTerminalWorkspacePanel(panel)) return controlFail('SURFACE_RESPAWN_TERMINAL_REQUIRED', 'Respawn command can only run in a terminal surface.')
     const command = controlText(params.command || params.tmux_start_command || params.shell || params.shellCommand) || 'exec ${SHELL:-/bin/bash} -l'
     const decision = await workspace.runTerminalCommand(panel.id, command, { source: 'agent', writeToShell: true })
     return controlOk({

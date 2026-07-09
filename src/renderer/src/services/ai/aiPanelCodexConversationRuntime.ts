@@ -34,6 +34,7 @@ import { writeRendererRuntimeLog } from '@/services/app/runtimeLogClient'
 import type { I18nKey } from '@/i18n'
 import type { AiAttentionInput, AiAttentionItem, TerminalPanel } from '@/stores/workspace'
 import type { TerminalSettings } from '@/services/settings/workspaceConfigRuntime'
+import { isTerminalWorkspacePanel } from '@/services/terminal/terminalPanelRuntime'
 import type { TerminalSurfaceMode } from '@/services/terminal/terminalThemeRuntime'
 import type { RuntimeLogLevel } from '@shared/contracts/appRuntime'
 import type { AiContextCatalog, AiContextOption } from '@shared/contracts/aiChat'
@@ -187,7 +188,7 @@ export const createAiPanelCodexConversationRuntime = (options: AiPanelCodexConve
 
   const selectCodexConversationForWorkspacePanel = async (panel: TerminalPanel | undefined | null) => {
     if (aiPanelMode.value !== 'codex' || aiPanelWorkspaceLinkMode.value !== 'follow-workspace') return false
-    if (!panel?.sessionId || panel.kind !== 'terminal') return false
+    if (!panel?.sessionId || !isTerminalWorkspacePanel(panel)) return false
     const conversation = matchingCodexConversationForPanel(panel)
     if (!conversation) {
       setWorkspaceLinkNotice(t('ai.codexWorkspaceLinkNoConversation'))

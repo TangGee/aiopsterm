@@ -17,6 +17,7 @@ import {
   createAgentSessionImportRuntime,
   type ImportedAgentSession
 } from './agentSessionImportRuntime'
+import { createAgentSessionContentRuntime } from './agentSessionContentRuntime'
 import { createCodexTranscriptMonitorRuntime } from './agentSessionCodexTranscriptMonitor'
 import { createAgentSessionGitRuntime, type ManagedAiSessionGitInfo } from './agentSessionGitRuntime'
 import { createAgentSessionStoreRuntime } from './agentSessionStoreRuntime'
@@ -72,6 +73,14 @@ import type {
   ManagedAiSessionReplyInput,
   ManagedAiSessionSnapshot
 } from '@shared/contracts/managedAiSessions'
+import type {
+  ManagedAiSessionContentListInput,
+  ManagedAiSessionContentListResult,
+  ManagedAiSessionContentRecordInput,
+  ManagedAiSessionContentRecordResult,
+  ManagedAiSessionContentUpdateInput,
+  ManagedAiSessionContentUpdateResult
+} from '@shared/contracts/managedAiSessionContent'
 
 export { normalizeAiAgentSessionEventInput } from './agentSessionNormalization'
 export type { ManagedAiSessionAutoNamingInput, ManagedAiSessionAutoNamingRuntime } from './agentSessionAutoNamingRuntime'
@@ -245,6 +254,14 @@ const snapshot = (): ManagedAiSessionSnapshot => ({
 
 const loadStoreIfNeeded = storeRuntime.loadStoreIfNeeded
 const storePathFor = storeRuntime.storePathFor
+const contentRuntime = createAgentSessionContentRuntime({
+  loadStoreIfNeeded: () => loadStoreIfNeeded(),
+  getSession: (source, sessionId) => sessions.get(sessionKey(source, sessionId)) || null,
+  getUserDataPath: () => storeUserDataPath,
+  getHomeDir: () => process.env.HOME || process.env.USERPROFILE || '',
+  getEnv: () => process.env,
+  now: () => Date.now()
+})
 
 // 内存 sessions 为权威数据；hook 事件高频触发时按去抖窗口合并整库落盘，进程退出时同步兜底一次。
 const persistDebounceMs = 400
@@ -710,6 +727,21 @@ export const listManagedAiSessions = async (): Promise<ManagedAiSessionListResul
   // 导入扫描与 git 探测并行执行，两者内部都有缓存兜底；导入结果同时通过 managed_ai.sessions.imported 增量推送。
   await Promise.all([importExternalManagedAiSessionsOnce(), refreshGitInfoForSessions()])
   return { ok: true, data: snapshot() }
+}
+
+export const listManagedAiSessionContent = async (input: ManagedAiSessionContentListInput): Promise<ManagedAiSessionContentListResult> => {
+  await listManagedAiSessions()
+  return contentRuntime.list(input)
+}
+
+export const getManagedAiSessionContentRecord = async (input: ManagedAiSessionContentRecordInput): Promise<ManagedAiSessionContentRecordResult> => {
+  await listManagedAiSessions()
+  return contentRuntime.getRecord(input)
+}
+
+export const updateManagedAiSessionContentRecord = async (input: ManagedAiSessionContentUpdateInput): Promise<ManagedAiSessionContentUpdateResult> => {
+  await loadStoreIfNeeded()
+  return contentRuntime.updateRecord(input)
 }
 
 export const listManagedAiNotifications = async (input: ManagedAiNotificationListInput = {}): Promise<ManagedAiNotificationListResult> => {

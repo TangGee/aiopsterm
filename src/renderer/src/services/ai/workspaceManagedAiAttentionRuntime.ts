@@ -2,6 +2,7 @@ import { computed } from 'vue'
 import { controlClient } from '@/services/app/controlClient'
 import { isAiAgentSessionSource } from '@/services/ai/managedAiBackendGuards'
 import { playAiNotificationSound } from '@/services/ai/notificationSoundRuntime'
+import { isTerminalWorkspacePanel } from '@/services/terminal/terminalPanelRuntime'
 import type { ControlNotificationFocusRequest, ControlNotificationRecord } from '@shared/contracts/control'
 import type { ManagedAiSessionFocusRequest } from '@shared/contracts/managedAiSessions'
 import type {
@@ -160,7 +161,7 @@ export const createWorkspaceManagedAiAttentionRuntime = (input: {
     }
     const panelId = 'panelId' in request && request.panelId ? request.panelId : notification.panelId
     const sessionId = 'sessionId' in request && request.sessionId ? request.sessionId : notification.sessionId || notification.terminalSessionId
-    const target = panels.value.find((panel) => panel.kind !== 'knowledge' && (panel.id === panelId || panel.sessionId === sessionId))
+    const target = panels.value.find((panel) => isTerminalWorkspacePanel(panel) && (panel.id === panelId || panel.sessionId === sessionId))
     if (!target) {
       setTopNotice(`通知已打开：${notification.title}`)
       return false

@@ -4,6 +4,7 @@ import type {
   TerminalSessionInfo,
   TerminalSshConnectionInfo
 } from '@shared/contracts/terminalSessions'
+import type { AiAgentSessionSource } from '@shared/contracts/managedAiSessions'
 import type { TerminalProgress } from '@/services/terminal/terminalOscRuntime'
 
 export type PanelDirection = 'right' | 'below'
@@ -40,7 +41,7 @@ export type TerminalPanel = {
   output: string
   outputSegments: TerminalOutputSegment[]
   status: 'ready' | 'connecting' | 'running' | 'closed' | 'error'
-  kind?: 'terminal' | 'knowledge'
+  kind?: 'terminal' | 'knowledge' | 'managed-ai-session'
   split?: PanelDirection
   splitSourceId?: string
   splitGroupId?: string
@@ -52,6 +53,10 @@ export type TerminalPanel = {
     startLine?: number
     endLine?: number
     jumpToken?: number
+  }
+  managedAiSession?: {
+    source: AiAgentSessionSource
+    sessionId: string
   }
   sshSession?: TerminalSshSession
   terminalLifecycle?: TerminalLifecycleEvent
@@ -100,6 +105,8 @@ const terminalTextDecoder = new TextDecoder()
 const detachTerminalText = (value: string) => (value ? terminalTextDecoder.decode(terminalTextEncoder.encode(value)) : '')
 
 export const isNonEmptyText = (value: unknown): value is string => typeof value === 'string' && value.trim() !== ''
+
+export const isTerminalWorkspacePanel = (panel?: { kind?: string } | null) => !panel?.kind || panel.kind === 'terminal'
 
 export const isTerminalPanelPort = (value: unknown): value is number =>
   typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 65535
@@ -190,7 +197,7 @@ export const createEmptyTerminalPanel = (
 export const isWelcomeTerminalPanelPlaceholder = (panel: TerminalPanel) =>
   panel.id === 'panel-main' &&
   panel.title === defaultTerminalPanelTitle &&
-  panel.kind !== 'knowledge' &&
+  isTerminalWorkspacePanel(panel) &&
   !panel.sessionId &&
   !panel.output &&
   panel.outputSegments.length === 0 &&
@@ -213,6 +220,7 @@ export const resetTerminalPanelToDefault = (panel: TerminalPanel) => {
   clearTerminalPanelSplitState(panel)
   panel.sessionId = undefined
   panel.knowledge = undefined
+  panel.managedAiSession = undefined
   panel.sshSession = undefined
   panel.terminalLifecycle = undefined
   panel.terminalExit = undefined
@@ -564,17 +572,17 @@ export const canWriteTerminalPanels = (panels: TerminalPanel[], execution: Pick<
 }
 
 export const liveTerminalPanelIds = (panels: TerminalPanel[]) =>
-  panels.filter((panel) => panel.kind !== 'knowledge' && panel.sessionId).map((panel) => panel.id)
+  panels.filter((panel) => isTerminalWorkspacePanel(panel) && panel.sessionId).map((panel) => panel.id)
 
-export const terminalPanelIds = (panels: TerminalPanel[]) => panels.filter((panel) => panel.kind !== 'knowledge').map((panel) => panel.id)
+export const terminalPanelIds = (panels: TerminalPanel[]) => panels.filter((panel) => isTerminalWorkspacePanel(panel)).map((panel) => panel.id)
 
 export const resolveActiveWritableTerminalPanel = (panels: TerminalPanel[], activePanel: TerminalPanel) =>
-  activePanel.kind === 'knowledge' ? panels.find((item) => item.kind !== 'knowledge') || null : activePanel
+  isTerminalWorkspacePanel(activePanel) ? activePanel : panels.find((item) => isTerminalWorkspacePanel(item)) || null
 
 export const appendGeneratedTerminalCommandToPanel = (panels: TerminalPanel[], panelId: string, command: string) => {
   const panel = findTerminalPanelByIdOrSession(panels, panelId)
   const text = command.trim()
-  if (!panel || panel.kind === 'knowledge' || !text) return null
+  if (!panel || !isTerminalWorkspacePanel(panel) || !text) return null
   appendTerminalSegment(panel, text, 'input')
   return { panel, text }
 }
