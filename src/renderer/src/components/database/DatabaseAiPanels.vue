@@ -68,7 +68,7 @@
             </select>
           </label>
           <label>
-            Database
+            {{ databaseCatalogFieldLabel(dbAiPaneConnection) }}
             <select
               class="db-ai-pane-database"
               :value="dbAiPaneContext.catalogName"
@@ -79,14 +79,14 @@
                 value=""
                 disabled
               >
-                Database
+                {{ databaseCatalogFieldLabel(dbAiPaneConnection) }}
               </option>
               <option
                 v-for="catalog in dbAiPaneCatalogOptions"
                 :key="catalog.name"
                 :value="catalog.name"
               >
-                {{ catalog.name }}
+                {{ databaseCatalogDisplayName(dbAiPaneConnection, catalog) }}
               </option>
             </select>
           </label>
@@ -388,6 +388,10 @@ import type {
   DbAiTargetDialect
 } from '@/services/database/databaseBackendGuards'
 import type { DbAiPaneQuickPrompt } from '@/services/database/databaseWorkspaceTypes'
+import {
+  databaseCatalogDisplayName,
+  databaseCatalogFieldLabel
+} from '@/services/database/databaseWorkspaceRuntime'
 
 defineProps<{
   dbAiPaneOpen: boolean

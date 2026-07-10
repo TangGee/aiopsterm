@@ -45,6 +45,18 @@ describe('managedAiClient', () => {
 
     window.aiops = {
       ...originalAiops,
+      publishAiAgentSessionEvent: vi.fn(async (input) => ({
+        ok: true,
+        data: {
+          source: input.source,
+          event: input.event,
+          sessionId: input.sessionId,
+          title: input.title || 'AI session',
+          summary: input.summary || '',
+          receivedAt: input.receivedAt || 120,
+          ...(input.agentLifecycle ? { agentLifecycle: input.agentLifecycle } : {})
+        }
+      })),
       listManagedAiSessions: vi.fn(async () => ({
         ok: true,
         data: managedAiSnapshot
@@ -126,6 +138,19 @@ describe('managedAiClient', () => {
       ok: true,
       data: managedAiSnapshot
     })
+    const terminalEndEvent = {
+      source: 'claude-code' as const,
+      event: 'session_end' as const,
+      sessionId: 'claude-session-1',
+      title: 'Claude Code',
+      summary: 'Terminal closed',
+      receivedAt: 120,
+      agentLifecycle: 'ended' as const
+    }
+    await expect(managedAiClient.publishAiAgentSessionEvent()?.(terminalEndEvent)).resolves.toEqual({
+      ok: true,
+      data: terminalEndEvent
+    })
     await expect(
       managedAiClient.replyManagedAiSession()?.({
         source: 'claude-code',
@@ -144,6 +169,7 @@ describe('managedAiClient', () => {
       })
     )
     expect(window.aiops.listManagedAiSessions).toHaveBeenCalledTimes(1)
+    expect(window.aiops.publishAiAgentSessionEvent).toHaveBeenCalledWith(terminalEndEvent)
     expect(window.aiops.replyManagedAiSession).toHaveBeenCalledWith({
       source: 'claude-code',
       sessionId: 'claude-session-1',
@@ -245,6 +271,7 @@ describe('managedAiClient', () => {
 
     window.aiops = {
       ...originalAiops,
+      publishAiAgentSessionEvent: undefined as any,
       listManagedAiSessions: undefined as any,
       replyManagedAiSession: undefined as any,
       renameManagedAiSession: undefined as any,
@@ -259,6 +286,7 @@ describe('managedAiClient', () => {
       onManagedAiSessionEvent: undefined as any,
       onManagedAiSessionFocusRequest: undefined as any
     }
+    expect(managedAiClient.publishAiAgentSessionEvent()).toBeUndefined()
     expect(managedAiClient.listManagedAiSessions()).toBeUndefined()
     expect(managedAiClient.replyManagedAiSession()).toBeUndefined()
     expect(managedAiClient.renameManagedAiSession()).toBeUndefined()

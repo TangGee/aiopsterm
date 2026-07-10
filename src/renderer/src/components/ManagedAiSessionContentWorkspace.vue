@@ -217,6 +217,7 @@
           <footer class="managed-ai-session-record-modal-footer">
             <div class="managed-ai-session-record-modal-status">
               <span v-if="loadingRecordIds.has(modalRecord.recordId)">{{ t('aiSessions.content.loadingFull') }}</span>
+              <span v-else-if="saveNotice" class="notice">{{ saveNotice }}</span>
               <span v-else-if="recordFor(modalRecord).editBlockedReason">{{ recordFor(modalRecord).editBlockedReason }}</span>
             </div>
             <div class="managed-ai-session-record-modal-footer-actions">
@@ -504,6 +505,7 @@ const clearRecordState = () => {
   contentLoadSeq += 1
   cancelIdleLoad()
   cancelScrollFrame()
+  saveNotice.value = ''
   contentRecords.value = []
   contentExhausted.value = false
   Object.keys(drafts).forEach((id) => delete drafts[id])
@@ -654,7 +656,6 @@ const loadContentPage = async (reason: ContentLoadReason, reset = false) => {
     loadingMore.value = true
   }
   error.value = ''
-  saveNotice.value = ''
   try {
     const result = await listContent({
       source: props.source,
@@ -756,6 +757,7 @@ const saveRecord = async (record: ManagedAiSessionContentRecord) => {
   setSetMembership(savingRecordIds, record.recordId, true)
   error.value = ''
   saveNotice.value = ''
+  let mutationSucceeded = false
   try {
     const result = await updateRecord({
       source: props.source,
@@ -768,6 +770,7 @@ const saveRecord = async (record: ManagedAiSessionContentRecord) => {
       error.value = result?.errorMessage || t('aiSessions.content.saveFailed')
       return
     }
+    mutationSucceeded = true
     const savedRecord = result.data.record
     fullRecords[savedRecordId] = savedRecord
     drafts[savedRecordId] = savedRecord.content
@@ -785,11 +788,11 @@ const saveRecord = async (record: ManagedAiSessionContentRecord) => {
     if (recordList) {
       recordList.scrollTop = Math.min(previousScrollTop, Math.max(0, recordList.scrollHeight - recordList.clientHeight))
     }
-    saveNotice.value = t('aiSessions.content.saved')
   } catch (err) {
     error.value = err instanceof Error ? err.message : t('aiSessions.content.saveFailed')
   } finally {
     setSetMembership(savingRecordIds, record.recordId, false)
+    if (mutationSucceeded) saveNotice.value = t('aiSessions.content.saved')
   }
 }
 
@@ -808,6 +811,7 @@ const deleteRecord = async (record: ManagedAiSessionContentRecord) => {
   setSetMembership(deletingRecordIds, deletedRecordId, true)
   error.value = ''
   saveNotice.value = ''
+  let mutationSucceeded = false
   try {
     const result = await deleteContentRecord({
       source: props.source,
@@ -819,6 +823,7 @@ const deleteRecord = async (record: ManagedAiSessionContentRecord) => {
       error.value = result?.errorMessage || t('aiSessions.content.deleteFailed')
       return
     }
+    mutationSucceeded = true
     removeRecordFromLocalState(deletedRecordId)
     if (!(await reloadContentThroughRecordCount(minimumRecordsAfterDelete, 'refresh'))) return
     await nextTick()
@@ -826,11 +831,11 @@ const deleteRecord = async (record: ManagedAiSessionContentRecord) => {
     if (recordList) {
       recordList.scrollTop = Math.min(previousScrollTop, Math.max(0, recordList.scrollHeight - recordList.clientHeight))
     }
-    saveNotice.value = t('aiSessions.content.deleted')
   } catch (err) {
     error.value = err instanceof Error ? err.message : t('aiSessions.content.deleteFailed')
   } finally {
     setSetMembership(deletingRecordIds, deletedRecordId, false)
+    if (mutationSucceeded) saveNotice.value = t('aiSessions.content.deleted')
   }
 }
 

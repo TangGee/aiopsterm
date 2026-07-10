@@ -1,3 +1,4 @@
+import { isProxy, toRaw } from 'vue'
 import {
   buildDataMutationPayload,
   clampPage,
@@ -80,18 +81,18 @@ export const createDataTab = (
   saveError: null
 })
 
-export const createRunningSqlResult = (tab: Pick<SqlTab, 'resultTabs'>, sql: string, seq: number): SqlResult => {
-  const idx = tab.resultTabs.length + 1
+export const createRunningSqlResult = (tab: Pick<SqlTab, 'resultTabs'>, sql: string, seq: number, position = tab.resultTabs.length + 1): SqlResult => {
   const preview = sql.replace(/\s+/g, ' ').trim().slice(0, 40) || 'SQL'
   return {
     id: `result-${seq}`,
-    title: `#${seq}-${idx} ${preview}`,
+    title: `#${seq}-${position} ${preview}`,
     sql,
     status: 'running',
     columns: [],
     rows: [],
     rowCount: 0,
     durationMs: 0,
+    pinned: false,
     error: null,
     message: 'Running'
   }
@@ -159,8 +160,15 @@ export const appendSqlHistoryFromExecution = (tab: SqlTab, result: SqlResult, sq
   })
 }
 
-export const defaultSqlFileName = (tab: SqlTab, connectionName = '') => {
-  const parts = [tab.title, connectionName, tab.catalogName, tab.schemaName].filter(Boolean)
+export const defaultSqlFileName = (tab: SqlTab, connectionName = '', catalogDisplayName = tab.catalogName) => {
+  const seenParts = new Set<string>()
+  const parts = [tab.title, connectionName, catalogDisplayName, tab.schemaName].filter((part) => {
+    if (!part) return false
+    const key = part.toLowerCase()
+    if (seenParts.has(key)) return false
+    seenParts.add(key)
+    return true
+  })
   const base = parts.join('-') || 'query'
   const safe = base
     .trim()
@@ -363,21 +371,74 @@ export const applyDataQueryResult = (tab: DataTab, data: NonNullable<DatabaseTab
   return { retry: false, dirtyPreserved: true }
 }
 
+const cloneDatabaseExportValue = <T>(value: T, seen = new WeakMap<object, unknown>()): T => {
+  if (value === null || typeof value !== 'object') return value
+
+  const rawValue = isProxy(value) ? toRaw(value) : value
+  const cached = seen.get(rawValue)
+  if (cached !== undefined) return cached as T
+
+  if (rawValue instanceof Date) return new Date(rawValue.getTime()) as T
+  if (rawValue instanceof RegExp) {
+    const clone = new RegExp(rawValue.source, rawValue.flags)
+    clone.lastIndex = rawValue.lastIndex
+    return clone as T
+  }
+  if (rawValue instanceof ArrayBuffer) return rawValue.slice(0) as T
+  if (ArrayBuffer.isView(rawValue)) {
+    const buffer = rawValue.buffer.slice(rawValue.byteOffset, rawValue.byteOffset + rawValue.byteLength)
+    if (rawValue instanceof DataView) return new DataView(buffer) as T
+    const TypedArray = rawValue.constructor as new (buffer: ArrayBufferLike) => ArrayBufferView
+    return new TypedArray(buffer) as T
+  }
+  if (rawValue instanceof Map) {
+    const clone = new Map<unknown, unknown>()
+    seen.set(rawValue, clone)
+    rawValue.forEach((entryValue, key) => {
+      clone.set(cloneDatabaseExportValue(key, seen), cloneDatabaseExportValue(entryValue, seen))
+    })
+    return clone as T
+  }
+  if (rawValue instanceof Set) {
+    const clone = new Set<unknown>()
+    seen.set(rawValue, clone)
+    rawValue.forEach((entryValue) => clone.add(cloneDatabaseExportValue(entryValue, seen)))
+    return clone as T
+  }
+  if (Array.isArray(rawValue)) {
+    const clone: unknown[] = []
+    seen.set(rawValue, clone)
+    rawValue.forEach((entryValue) => clone.push(cloneDatabaseExportValue(entryValue, seen)))
+    return clone as T
+  }
+
+  const prototype = Object.getPrototypeOf(rawValue)
+  if (prototype !== Object.prototype && prototype !== null) return rawValue as T
+
+  const clone: Record<string, unknown> = {}
+  seen.set(rawValue, clone)
+  Object.keys(rawValue).forEach((key) => {
+    clone[key] = cloneDatabaseExportValue((rawValue as Record<string, unknown>)[key], seen)
+  })
+  return clone as T
+}
+
 export const buildSqlResultExportInput = (
   tab: SqlTab,
   result: SqlResult,
   rows: Array<Record<string, unknown>>,
   viewState: SqlResultViewState,
   total: number,
-  connectionName?: string
-): DatabaseExportInput => ({
+  connectionName?: string,
+  catalogDisplayName = tab.catalogName
+): DatabaseExportInput => cloneDatabaseExportValue({
   title: `${tab.title}-${result.title}`,
   kind: 'sql-result',
   columns: result.columns,
   rows,
   metadata: {
     connectionName,
-    databaseName: tab.catalogName,
+    databaseName: catalogDisplayName,
     schemaName: tab.schemaName,
     sql: result.sql,
     page: viewState.page,
@@ -386,14 +447,19 @@ export const buildSqlResultExportInput = (
   }
 })
 
-export const buildDataPageExportInput = (tab: DataTab, rows: Array<Record<string, unknown>>, connectionName?: string): DatabaseExportInput => ({
+export const buildDataPageExportInput = (
+  tab: DataTab,
+  rows: Array<Record<string, unknown>>,
+  connectionName?: string,
+  catalogDisplayName = tab.catalogName
+): DatabaseExportInput => cloneDatabaseExportValue({
   title: `${tab.title}-page-${tab.page}`,
   kind: 'table-page',
   columns: tab.columns,
   rows,
   metadata: {
     connectionName,
-    databaseName: tab.catalogName,
+    databaseName: catalogDisplayName,
     schemaName: tab.schemaName,
     tableName: tab.tableName,
     page: tab.page,
@@ -409,9 +475,9 @@ export const sqlResultChartSource = (tab: SqlTab, result: SqlResult, rows: Array
   rows
 })
 
-export const dataPageChartSource = (tab: DataTab, rows: Array<Record<string, unknown>>): DatabaseChartSource => ({
+export const dataPageChartSource = (tab: DataTab, rows: Array<Record<string, unknown>>, catalogDisplayName = tab.catalogName): DatabaseChartSource => ({
   title: `${tab.title} - page ${tab.page}`,
-  scopeLabel: [tab.catalogName, tab.schemaName, tab.tableName].filter(Boolean).join(' / '),
+  scopeLabel: [catalogDisplayName, tab.schemaName, tab.tableName].filter(Boolean).join(' / '),
   columns: tab.columns,
   rows
 })

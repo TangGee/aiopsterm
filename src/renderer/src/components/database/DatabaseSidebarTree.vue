@@ -62,7 +62,7 @@
               class="db-tree-row group"
               :class="{ selected: selectedNodeId === group.id }"
               :style="{ paddingLeft: `${6 + group.depth * 14}px` }"
-              @click="$emit('selectNode', group.id)"
+              @click="selectAndToggleGroup(group.id)"
               @contextmenu.prevent="$emit('openContextMenu', $event, { type: 'group', groupId: group.id, label: group.name })"
             >
               <button
@@ -99,7 +99,7 @@
                 <div
                   class="db-tree-row connection"
                   :class="{ selected: selectedNodeId === connection.id }"
-                  @click="$emit('selectNode', connection.id)"
+                  @click="selectAndToggleConnection(connection.id)"
                   @contextmenu.prevent="$emit('openContextMenu', $event, { type: 'connection', connectionId: connection.id, label: connection.name })"
                 >
                   <button
@@ -138,9 +138,10 @@
                     :key="`${connection.id}:${catalog.name}`"
                   >
                     <div
+                      v-if="!isFlattenedSqliteConnection(connection)"
                       class="db-tree-row database"
                       :class="{ selected: selectedNodeId === `${connection.id}:${catalog.name}` }"
-                      @click="$emit('selectNode', `${connection.id}:${catalog.name}`)"
+                      @click="selectAndToggleCatalog(connection.id, catalog.name)"
                     >
                       <button
                         type="button"
@@ -150,12 +151,15 @@
                         <ChevronRight v-else />
                       </button>
                       <Database />
-                      <span>{{ catalog.name }}</span>
+                      <span>{{ databaseCatalogDisplayName(connection, catalog) }}</span>
                     </div>
 
                     <ul
-                      v-if="isCatalogExpanded(connection.id, catalog.name)"
-                      class="db-tree-children deep"
+                      v-if="isFlattenedSqliteConnection(connection) || isCatalogExpanded(connection.id, catalog.name)"
+                      :class="{
+                        'db-tree-children': !isFlattenedSqliteConnection(connection),
+                        deep: !isFlattenedSqliteConnection(connection)
+                      }"
                     >
                       <template v-if="catalog.schemas">
                         <li
@@ -165,7 +169,7 @@
                           <div
                             class="db-tree-row schema"
                             :class="{ selected: selectedNodeId === `${connection.id}:${catalog.name}:${schema.name}` }"
-                            @click="$emit('selectNode', `${connection.id}:${catalog.name}:${schema.name}`)"
+                            @click="selectAndToggleSchema(connection.id, catalog.name, schema.name)"
                           >
                             <button
                               type="button"
@@ -189,7 +193,7 @@
                               <div
                                 class="db-tree-row folder"
                                 :class="{ selected: selectedNodeId === schemaObjectFolderKey(connection.id, catalog.name, schema.name, folder.kind) }"
-                                @click="$emit('selectNode', schemaObjectFolderKey(connection.id, catalog.name, schema.name, folder.kind))"
+                                @click="selectAndToggleSchemaObjectFolder(connection.id, catalog.name, schema.name, folder.kind)"
                               >
                                 <button
                                   type="button"
@@ -279,12 +283,43 @@
                       </template>
 
                       <li v-if="catalog.tables">
-                        <div class="db-tree-row folder">
-                          <span class="db-tree-spacer" />
-                          <FolderOpen />
+                        <div
+                          class="db-tree-row folder"
+                          :class="{
+                            selected:
+                              isFlattenedSqliteConnection(connection) &&
+                              selectedNodeId === `${connection.id}:${catalog.name}`
+                          }"
+                          @click="isFlattenedSqliteConnection(connection) && selectAndToggleCatalog(connection.id, catalog.name)"
+                        >
+                          <button
+                            v-if="isFlattenedSqliteConnection(connection)"
+                            type="button"
+                            @click.stop="$emit('toggleCatalog', connection.id, catalog.name)"
+                          >
+                            <ChevronDown v-if="isCatalogExpanded(connection.id, catalog.name)" />
+                            <ChevronRight v-else />
+                          </button>
+                          <span
+                            v-else
+                            class="db-tree-spacer"
+                          />
+                          <FolderOpen
+                            v-if="
+                              !isFlattenedSqliteConnection(connection) ||
+                                isCatalogExpanded(connection.id, catalog.name)
+                            "
+                          />
+                          <Folder v-else />
                           <span>tables</span>
                         </div>
-                        <ul class="db-tree-children deep">
+                        <ul
+                          v-if="
+                            !isFlattenedSqliteConnection(connection) ||
+                              isCatalogExpanded(connection.id, catalog.name)
+                          "
+                          class="db-tree-children deep"
+                        >
                           <li
                             v-for="table in catalog.tables"
                             :key="table.id"
@@ -381,6 +416,7 @@ import {
 } from 'lucide-vue-next'
 import {
   columnNodeId,
+  databaseCatalogDisplayName,
   schemaObjectFolderKey,
   schemaObjectFolders,
   schemaRoutineNodeId,
@@ -450,8 +486,42 @@ function addButtonRect() {
   return addButtonRef.value?.getBoundingClientRect() ?? null
 }
 
+function selectAndToggleGroup(groupId: string) {
+  emit('selectNode', groupId)
+  emit('toggleGroup', groupId)
+}
+
+function selectAndToggleConnection(connectionId: string) {
+  emit('selectNode', connectionId)
+  emit('toggleConnection', connectionId)
+}
+
+function selectAndToggleCatalog(connectionId: string, catalogName: string) {
+  emit('selectNode', `${connectionId}:${catalogName}`)
+  emit('toggleCatalog', connectionId, catalogName)
+}
+
+function selectAndToggleSchema(connectionId: string, catalogName: string, schemaName: string) {
+  emit('selectNode', `${connectionId}:${catalogName}:${schemaName}`)
+  emit('toggleSchema', connectionId, catalogName, schemaName)
+}
+
+function selectAndToggleSchemaObjectFolder(
+  connectionId: string,
+  catalogName: string,
+  schemaName: string,
+  kind: SchemaObjectKind
+) {
+  emit('selectNode', schemaObjectFolderKey(connectionId, catalogName, schemaName, kind))
+  emit('toggleSchemaObjectFolder', connectionId, catalogName, schemaName, kind)
+}
+
 function isCatalogExpanded(connectionId: string, catalogName: string) {
   return props.expandedCatalogs.includes(`${connectionId}:${catalogName}`)
+}
+
+function isFlattenedSqliteConnection(connection: DatabaseConnectionInfo) {
+  return connection.dbType === 'sqlite' && connection.catalogs.length === 1
 }
 
 function isSchemaExpanded(connectionId: string, catalogName: string, schemaName: string) {

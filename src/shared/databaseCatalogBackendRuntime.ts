@@ -60,6 +60,7 @@ import {
   prestoCatalogsForConnection
 } from './databaseHttpEngines'
 import {
+  DATABASE_PERSISTED_STATE_VERSION,
   normalizePersistedState,
   type DatabasePersistedState
 } from './databasePersistenceRuntime'
@@ -226,6 +227,7 @@ let databaseGroups: DatabaseGroupInfo[] = databaseGroupSeed.map((group) => ({ ..
 let databaseGroupParents: Record<string, string | null> = { ...databaseGroupParentSeed }
 let databaseConnections: DatabaseConnectionInfo[] = []
 let databaseLoadedStateFilePath = ''
+let databaseReadOnlyStateFilePath = ''
 
 const databaseStateFilePath = () => trim(databaseRuntimeConfig.stateFilePath)
 
@@ -256,10 +258,16 @@ const ensureDatabaseStateLoaded = () => {
   if (!existsSync(filePath)) return
   try {
     const parsed = JSON.parse(readFileSync(filePath, 'utf-8')) as unknown
+    const persistedVersion = parsed && typeof parsed === 'object' ? Number((parsed as { version?: unknown }).version) : Number.NaN
+    if (Number.isFinite(persistedVersion) && persistedVersion > DATABASE_PERSISTED_STATE_VERSION) {
+      databaseReadOnlyStateFilePath = filePath
+      return
+    }
+    databaseReadOnlyStateFilePath = ''
     const state = normalizePersistedState(parsed)
     if (state) {
       applyPersistedDatabaseState(state)
-      if (state.needsSecretMigration) persistDatabaseState()
+      if (state.needsSecretMigration || state.needsStateMigration) persistDatabaseState()
     }
   } catch {
     /* Ignore corrupt local state and keep the backend fallback catalog. */
@@ -269,9 +277,11 @@ const ensureDatabaseStateLoaded = () => {
 const persistDatabaseState = () => {
   const filePath = databaseStateFilePath()
   if (!filePath) return
+  ensureDatabaseStateLoaded()
+  if (databaseReadOnlyStateFilePath === filePath) return
   try {
     const state: DatabasePersistedState = {
-      version: 1,
+      version: DATABASE_PERSISTED_STATE_VERSION,
       groups: databaseGroups.map((group) => ({ ...group })),
       groupParents: { ...databaseGroupParents },
       connections: visibleDatabaseConnections().map(cloneDatabaseConnection),
@@ -315,7 +325,7 @@ const databaseWorkspaceCatalogFor = (selectedConnectionId = 'conn-prod-pg'): Dat
 const defaultCatalogsForSavedConnectionAsync = async (connection: Omit<DatabaseConnectionInfo, 'catalogs'>): Promise<DatabaseConnectionInfo['catalogs']> => {
   if (connection.dbType !== 'sqlite') return defaultCatalogsForSavedConnection(connection)
   const catalogs = await sqliteCatalogsForConnectionAsync({ ...connection, catalogs: [] })
-  return catalogs ?? [{ name: trim(connection.database), tables: [] }]
+  return catalogs ?? [{ name: 'main', tables: [] }]
 }
 
 const databaseConnectionById = (connectionId: string) => databaseConnections.find((item) => item.id === trim(connectionId)) ?? null
@@ -334,6 +344,7 @@ export const databaseCatalogBackendRuntimeContext = {
 export function resetDatabaseBackendSeed() {
   databaseRuntimeConfig = {}
   databaseLoadedStateFilePath = ''
+  databaseReadOnlyStateFilePath = ''
   databaseConnectionSecrets.clear()
   databaseVerifiedConnections.clear()
   resetDatabaseSeedTableRuntime()
@@ -479,6 +490,13 @@ const databaseConnectionMutation = (
   }
 }
 
+const databaseNameAfterCatalogRefresh = (connection: DatabaseConnectionInfo, catalogs: DatabaseConnectionInfo['catalogs']) => {
+  const resolvedName = trim(catalogs[0]?.name)
+  if (!resolvedName) return connection.database
+  if (connection.dbType === 'oracle' || connection.dbType === 'sqlserver' || isPostgresCompatibleDbType(connection.dbType)) return resolvedName
+  return connection.database
+}
+
 export async function moveDatabaseConnection(input: DatabaseConnectionMoveInput): Promise<DatabaseConnectionMutationResult> {
   ensureDatabaseStateLoaded()
   const groupId = normalizedDatabaseGroupId(input.groupId, databaseGroups)
@@ -570,6 +588,7 @@ export async function connectDatabaseConnection(connectionId: string): Promise<D
       return databaseConnectionMutation(id, 'Connection opened', (current) => ({
         ...current,
         status: 'connected',
+        database: databaseNameAfterCatalogRefresh(current, catalogs),
         catalogs
       }))
     } catch (error) {
@@ -650,6 +669,7 @@ export async function refreshDatabaseConnection(connectionId: string): Promise<D
       return databaseConnectionMutation(id, 'Connection schema refreshed', (current) => ({
         ...current,
         status: 'connected',
+        database: databaseNameAfterCatalogRefresh(current, catalogs),
         catalogs
       }))
     } catch (error) {

@@ -56,6 +56,19 @@ const mysqlConnection: DatabaseConnectionInfo = {
   catalogs: [{ name: 'metrics', schemas: [] }]
 }
 
+const sqliteConnection: DatabaseConnectionInfo = {
+  ...postgresConnection,
+  id: 'conn-sqlite',
+  name: 'cache.sqlite3',
+  dbType: 'sqlite',
+  host: 'local',
+  port: null,
+  user: '',
+  database: 'stale.db',
+  filePath: '/srv/data/cache.sqlite3',
+  catalogs: [{ name: 'main', tables: [] }]
+}
+
 const sqlTab = {
   id: 'tab-sql-1',
   kind: 'sql' as const,
@@ -110,6 +123,9 @@ describe('databaseAiRuntime', () => {
     })
     expect(normalizeDbAiPaneContext({ connectionId: 'missing' }, [postgresConnection, mysqlConnection]).connectionId).toBe('conn-pg')
     expect(dbAiPaneContextSummary(postgresConnection, { connectionId: 'conn-pg', catalogName: 'orders', schemaName: 'public', dbType: 'postgresql' })).toBe('Orders PG · postgresql · orders · public')
+    expect(dbAiPaneContextSummary(sqliteConnection, { connectionId: 'conn-sqlite', catalogName: 'main', schemaName: '', dbType: 'sqlite' })).toBe(
+      'cache.sqlite3 · sqlite · cache.sqlite3'
+    )
     expect(dbAiPaneCanSend(' explain ', { connectionId: 'conn-pg', catalogName: 'orders', schemaName: 'public', dbType: 'postgresql' }, false)).toBe(true)
     expect(dbAiPaneIsStreaming([message()])).toBe(true)
     expect(dbAiPaneStatusLabel('cancelled')).toBe('Cancelled')
@@ -168,6 +184,11 @@ describe('databaseAiRuntime', () => {
 
     const context = dbAiBackendContext({ tab: sqlTab, connection: postgresConnection, contextSummary: 'summary' })
     expect(dbAiContextParts(sqlTab, postgresConnection)).toEqual(['Orders PG', 'postgresql', 'orders', 'public'])
+    expect(dbAiContextParts({ ...sqlTab, connectionId: 'conn-sqlite', catalogName: 'main', schemaName: '' }, sqliteConnection)).toEqual([
+      'cache.sqlite3',
+      'sqlite',
+      'cache.sqlite3'
+    ])
     expect(dbAiBackendContextForIpc(context)).toEqual(expect.objectContaining({ connectionId: 'conn-pg', dbType: 'postgresql', databaseName: 'orders', contextSummary: 'summary' }))
     expect(dbAiDrawerCreateInput({ action: 'explain', sourceSql: 'select 1', targetDialect: 'postgresql', context })).toEqual(
       expect.objectContaining({ action: 'explain', sourceSql: 'select 1', targetDialect: 'postgresql', context: expect.objectContaining({ connectionId: 'conn-pg' }) })

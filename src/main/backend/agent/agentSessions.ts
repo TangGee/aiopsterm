@@ -19,6 +19,7 @@ import {
   type ImportedAgentSession
 } from './agentSessionImportRuntime'
 import { createAgentSessionContentRuntime } from './agentSessionContentRuntime'
+import { disposeAgentSessionContentWorker } from './agentSessionContentWorkerRuntime'
 import { createCodexTranscriptMonitorRuntime } from './agentSessionCodexTranscriptMonitor'
 import { createAgentSessionGitRuntime, type ManagedAiSessionGitInfo } from './agentSessionGitRuntime'
 import { createAgentSessionStoreRuntime } from './agentSessionStoreRuntime'
@@ -124,6 +125,11 @@ let sessions = new Map<string, ManagedAiSessionRecord>()
 let agentHibernationConfig: AgentHibernationConfig = { ...defaultAgentHibernationConfig }
 let pendingDecisions = new Map<string, PendingAgentDecision>()
 let emitManagedAiSessionEvent: (event: ManagedAiSessionEvent) => void = () => undefined
+let isManagedAiTerminalSessionLive: ((sessionId: string) => boolean) | null = null
+
+export const configureManagedAiSessionTerminalLiveness = (resolver?: (sessionId: string) => boolean) => {
+  isManagedAiTerminalSessionLive = resolver || null
+}
 
 const agentSessionEventStreamRuntime = createAgentSessionEventStreamRuntime({
   compactRawValue,
@@ -429,6 +435,16 @@ const refreshGitInfoForSessions = async (generation = gitRefreshGeneration) => {
 const upsertSessionForEvent = (event: AiAgentSessionEvent, raw: Record<string, unknown>) => {
   const key = sessionKey(event.source, event.sessionId)
   const existing = sessions.get(key)
+  const timelineEvent = normalizeRecordEvent(event, raw)
+  if (existing) {
+    const duplicateTimelineEvent = existing.events.some((item) => item.id === timelineEvent.id)
+    const staleEvent = event.receivedAt < existing.lastActivityAt ||
+      (existing.state === 'ended' && event.event !== 'session_end' && event.receivedAt === existing.lastActivityAt)
+    const redundantSessionEnd = existing.state === 'ended' && event.event === 'session_end'
+    if (duplicateTimelineEvent || staleEvent || redundantSessionEnd) {
+      return { record: existing, applied: false }
+    }
+  }
   const state = managedAiSessionStateForEvent(event.event, existing?.state, event.agentLifecycle, event)
   const nextAutoTitle = event.event === 'stop' ? autoTitleFor(event, existing) : existing?.autoTitle
   const title = existing?.userTitle || nextAutoTitle || event.title || existing?.title || sourceLabel(event.source)
@@ -504,7 +520,7 @@ const upsertSessionForEvent = (event: AiAgentSessionEvent, raw: Record<string, u
     ...(preserveHibernation && existing?.hibernatedAt ? { hibernatedAt: existing.hibernatedAt } : {}),
     ...(preserveHibernation && existing?.hibernationReason ? { hibernationReason: existing.hibernationReason } : {}),
     ...(preserveHibernation && existing?.hibernatedTerminalSessionId ? { hibernatedTerminalSessionId: existing.hibernatedTerminalSessionId } : {}),
-    events: [...(existing?.events || []), normalizeRecordEvent(event, raw)].slice(-maxEventsPerSession),
+    events: [...(existing?.events || []), timelineEvent].slice(-maxEventsPerSession),
     decisions: [...(existing?.decisions || [])].slice(-maxDecisionsPerSession)
   }
   sessions.set(key, record)
@@ -514,7 +530,7 @@ const upsertSessionForEvent = (event: AiAgentSessionEvent, raw: Record<string, u
   auditEventReceived(event, record)
   publishAgentEventStreamFrame(event, record)
   autoNamingRuntime.maybeRunAutoNaming(record, event)
-  return record
+  return { record, applied: true }
 }
 
 const mergeImportedSession = (imported: ImportedAgentSession) => {
@@ -745,10 +761,48 @@ export function publishAiAgentSessionEvent(input: AiAgentSessionEventInput, emit
   const result = normalizeAiAgentSessionEventInput(input)
   if (!result.ok || !result.data) return result
   const raw = input as Record<string, unknown>
-  upsertSessionForEvent(result.data, raw)
-  emit?.(result.data)
-  updateCodexTranscriptMonitor(result.data, raw)
+  const upsert = upsertSessionForEvent(result.data, raw)
+  if (upsert.applied) {
+    emit?.(result.data)
+    updateCodexTranscriptMonitor(result.data, raw)
+  }
   return result
+}
+
+const reconcileManagedAiSessionsWithLiveTerminals = () => {
+  const isTerminalSessionLive = isManagedAiTerminalSessionLive
+  if (!isTerminalSessionLive) return 0
+  const staleSessions = [...sessions.values()].filter((session) =>
+    (session.state === 'working' || session.state === 'needsInput') &&
+    Boolean(session.terminalSessionId) &&
+    !isTerminalSessionLive(session.terminalSessionId || '')
+  )
+  staleSessions.forEach((session) => {
+    publishAiAgentSessionEvent(
+      {
+        source: session.source,
+        event: 'session_end',
+        sessionId: session.id,
+        title: session.title,
+        summary: 'Terminal no longer exists',
+        receivedAt: Math.max(Date.now(), session.lastActivityAt + 1),
+        agentLifecycle: 'ended',
+        ...(session.panelId ? { panelId: session.panelId } : {}),
+        ...(session.terminalSessionId ? { terminalSessionId: session.terminalSessionId } : {}),
+        ...(session.sessionKind ? { sessionKind: session.sessionKind } : {}),
+        ...(session.parentSessionId ? { parentSessionId: session.parentSessionId } : {}),
+        ...(typeof session.restorable === 'boolean' ? { restorable: session.restorable } : {})
+      },
+      eventSink
+    )
+  })
+  if (staleSessions.length) {
+    logRuntimeEvent('info', 'managed_ai.sessions.terminal-reconciled', {
+      changed: staleSessions.length,
+      sessions: staleSessions.map((session) => `${session.source}:${session.id}`)
+    })
+  }
+  return staleSessions.length
 }
 
 function updateCodexTranscriptMonitor(event: AiAgentSessionEvent, raw: Record<string, unknown>) {
@@ -890,8 +944,13 @@ const publishAiAgentSessionSocketEvent = async (input: AiAgentSessionEventInput,
   const result = normalizeAiAgentSessionEventInput(input)
   if (!result.ok || !result.data) return result
   const raw = input as Record<string, unknown>
+  const upsert = upsertSessionForEvent(result.data, raw)
+  if (!upsert.applied) {
+    const response: AgentSessionSocketResponse = { ...result, status: 'acknowledged' }
+    auditSocketCompleted(result.data, response)
+    return response
+  }
   const waiter = isBlockingAgentEvent(result.data, raw) ? waitForAgentDecision(result.data, raw) : null
-  upsertSessionForEvent(result.data, raw)
   emit?.(result.data)
   updateCodexTranscriptMonitor(result.data, raw)
   if (!waiter) {
@@ -906,6 +965,7 @@ const publishAiAgentSessionSocketEvent = async (input: AiAgentSessionEventInput,
 
 export const listManagedAiSessions = async (): Promise<ManagedAiSessionListResult> => {
   await loadStoreIfNeeded()
+  reconcileManagedAiSessionsWithLiveTerminals()
   // 本地历史导入和 git 探测都可能碰到大量文件/慢仓库。列表先返回快照，后台变更再发事件驱动前端刷新。
   scheduleImportExternalManagedAiSessions()
   scheduleRefreshGitInfoForSessions()
@@ -945,6 +1005,7 @@ export const listManagedAiSessionContent = async (input: ManagedAiSessionContent
       ...(result.ok && result.data
         ? {
             format: result.data.format,
+            executionThread: result.data.format === 'jsonl' ? 'worker' : 'main',
             records: result.data.records.length,
             total: result.data.total,
             offset: result.data.offset,
@@ -985,6 +1046,7 @@ export const getManagedAiSessionContentRecord = async (input: ManagedAiSessionCo
       ...(result.ok && result.data
         ? {
             format: result.data.record.format,
+            executionThread: result.data.record.format === 'jsonl' ? 'worker' : 'main',
             fullLength: result.data.record.fullLength,
             truncated: result.data.record.contentTruncated
           }
@@ -1414,6 +1476,7 @@ export const ensureAiAgentSessionServer = async ({ userDataPath, emit }: AgentSe
 }
 
 export const closeAiAgentSessionServer = () => {
+  void disposeAgentSessionContentWorker()
   flushPersistSnapshotNow()
   const existing = server
   server = null

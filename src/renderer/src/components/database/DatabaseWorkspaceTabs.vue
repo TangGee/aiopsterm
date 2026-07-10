@@ -1,14 +1,21 @@
 <template>
   <div class="db-workspace-tabs">
-    <div class="db-workspace-tab-scroll">
-      <button
+    <div
+      class="db-workspace-tab-scroll"
+      role="tablist"
+    >
+      <div
         v-for="tab in tabs"
         :key="tab.id"
         :ref="(el) => registerWorkspaceTabRef(tab.id, el)"
         class="db-workspace-tab"
         :class="{ active: activeTabId === tab.id }"
-        type="button"
+        role="tab"
+        tabindex="0"
+        :aria-selected="activeTabId === tab.id"
         @click="emit('update:activeTabId', tab.id)"
+        @keydown.enter.prevent="emit('update:activeTabId', tab.id)"
+        @keydown.space.prevent="emit('update:activeTabId', tab.id)"
       >
         <LayoutDashboard v-if="tab.kind === 'overview'" />
         <Table2 v-else-if="tab.kind === 'data'" />
@@ -16,22 +23,24 @@
         <span>{{ tab.title }}</span>
         <button
           v-if="tab.kind !== 'overview'"
+          class="db-workspace-tab-close"
           type="button"
           title="Close"
+          :aria-label="`Close ${tab.title}`"
           @click.stop="emit('closeTab', tab.id)"
         >
           <X />
         </button>
-      </button>
-      <button
-        class="db-workspace-add-tab"
-        type="button"
-        title="New SQL"
-        @click="emit('openSqlConsole')"
-      >
-        <Plus />
-      </button>
+      </div>
     </div>
+    <button
+      class="db-workspace-add-tab"
+      type="button"
+      title="New SQL"
+      @click="emit('openSqlConsole')"
+    >
+      <Plus />
+    </button>
     <div class="db-tab-overflow">
       <button
         type="button"
@@ -46,18 +55,20 @@
       <button
         type="button"
         title="Tabs"
-        @click="emit('update:overflowOpen', !overflowOpen)"
+        @click.stop="emit('update:overflowOpen', !overflowOpen)"
       >
         <MoreHorizontal />
       </button>
       <div
         v-if="overflowOpen"
         class="db-tab-menu"
+        @click.stop
       >
         <button
           v-for="tab in tabs"
           :key="tab.id"
           type="button"
+          :title="tab.title"
           @click="selectOverflowTab(tab.id)"
         >
           {{ tab.title }}

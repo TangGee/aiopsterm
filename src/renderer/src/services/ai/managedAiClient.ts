@@ -3,6 +3,7 @@ import { createBridgeMethod } from '@/services/common/preloadBridgeClient'
 
 type ManagedAiBridge = Pick<
   AiopsPreloadApi,
+  | 'publishAiAgentSessionEvent'
   | 'listManagedAiSessions'
   | 'replyManagedAiSession'
   | 'renameManagedAiSession'
@@ -24,6 +25,7 @@ type ManagedAiBridge = Pick<
 const bridgeMethod = createBridgeMethod<ManagedAiBridge>()
 
 export const managedAiClient = {
+  publishAiAgentSessionEvent: () => bridgeMethod('publishAiAgentSessionEvent'),
   listManagedAiSessions: () => bridgeMethod('listManagedAiSessions'),
   replyManagedAiSession: () => bridgeMethod('replyManagedAiSession'),
   renameManagedAiSession: () => bridgeMethod('renameManagedAiSession'),

@@ -215,11 +215,11 @@ const prestoColumnsForTable = async (
 export const prestoCatalogsForConnection = async (connection: DatabaseConnectionInfo): Promise<DatabaseCatalogInfo[]> => {
   const catalogRows = await prestoRows<Record<string, unknown>>(
     connection,
-    'SELECT catalog_name FROM information_schema.catalogs ORDER BY catalog_name',
-    { databaseName: trim(connection.database), schemaName: '' }
+    'SHOW CATALOGS',
+    { databaseName: '', schemaName: '' }
   )
   const selected = trim(connection.database)
-  const catalogNames = Array.from(new Set([selected, ...catalogRows.map((row) => trim(rowValue(row, 'catalog_name', 'CATALOG_NAME')))].filter(Boolean)))
+  const catalogNames = Array.from(new Set([selected, ...catalogRows.map((row) => trim(rowValue(row, 'Catalog', 'catalog', 'catalog_name')))].filter(Boolean)))
   const catalogs: DatabaseCatalogInfo[] = []
   for (const catalogName of catalogNames) {
     const schemaRows = await prestoRows<Record<string, unknown>>(

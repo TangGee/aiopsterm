@@ -203,15 +203,6 @@ function changePageSize(size: number) {
       >
         📊
       </button>
-      <button
-        type="button"
-        class="db-toolbar-btn db-toolbar-btn-comment"
-        :disabled="!canComment"
-        :title="canComment ? commentTitle : 'No page context for comment'"
-        @click="emit('comment')"
-      >
-        💬
-      </button>
     </div>
     <span class="db-toolbar-spacer" />
     <button

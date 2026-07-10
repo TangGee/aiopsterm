@@ -9,6 +9,7 @@ import type {
   DatabaseTableDdlResult,
   DatabaseTableInfo
 } from '@shared/contracts/database'
+import { databaseFileNameFromPath } from '@shared/databaseConnectionNaming'
 
 export type DatabaseChartSource = {
   title: string
@@ -81,6 +82,17 @@ export const isCreateDatabaseSupportedDbType = (dbType: DatabaseEngineCode | '')
 export const canCreateDatabaseForConnection = (connection: Pick<DatabaseConnectionInfo, 'dbType' | 'status'> | null | undefined) =>
   !!connection && connection.status === 'connected' && isCreateDatabaseSupportedDbType(connection.dbType)
 
+export const databaseCatalogDisplayName = (
+  connection: Pick<DatabaseConnectionInfo, 'dbType' | 'database' | 'filePath'> | null | undefined,
+  catalog: Pick<DatabaseCatalogInfo, 'name'>
+) => {
+  if (connection?.dbType !== 'sqlite' || catalog.name !== 'main') return catalog.name
+  return databaseFileNameFromPath(connection.filePath ?? '') || connection.database?.trim() || catalog.name
+}
+
+export const databaseCatalogFieldLabel = (connection: Pick<DatabaseConnectionInfo, 'dbType'> | null | undefined) =>
+  connection?.dbType === 'presto' ? 'Catalog' : connection?.dbType === 'oracle' ? 'Service' : 'Database'
+
 export const connectionSchemeForDbType = (dbType: DatabaseEngineCode) =>
   dbType === 'postgresql'
     ? 'jdbc:postgresql'
@@ -114,7 +126,23 @@ export function sqlConnectionRequiresSchema(connection: Pick<DatabaseConnectionI
 export function defaultSchemaForSqlConnection(connection: DatabaseConnectionInfo | undefined, catalog: DatabaseCatalogInfo | undefined) {
   if (!connection || !catalog || !sqlConnectionRequiresSchema(connection)) return ''
   if (!catalog.schemas?.length) return ''
-  return catalog.schemas.find((schema) => schema.name === 'public')?.name ?? catalog.schemas[0]?.name ?? ''
+  const preferredNames =
+    isPostgresCompatibleDbType(connection.dbType)
+      ? [connection.user, 'public']
+      : connection.dbType === 'oracle'
+        ? [connection.user]
+        : connection.dbType === 'sqlserver'
+          ? ['dbo']
+          : connection.dbType === 'presto'
+            ? ['default']
+            : []
+  for (const preferredName of preferredNames.map((name) => name.trim()).filter(Boolean)) {
+    const exact = catalog.schemas.find((schema) => schema.name === preferredName)
+    if (exact) return exact.name
+    const caseInsensitive = catalog.schemas.find((schema) => schema.name.toLowerCase() === preferredName.toLowerCase())
+    if (caseInsensitive) return caseInsensitive.name
+  }
+  return catalog.schemas[0]?.name ?? ''
 }
 
 export function renderCreateDatabaseTemplate(

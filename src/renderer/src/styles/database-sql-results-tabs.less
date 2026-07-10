@@ -41,6 +41,7 @@
   white-space: nowrap;
 }
 
+.db-result-tab-pin,
 .db-result-tab-close {
   width: 16px;
   min-width: 16px;
@@ -53,8 +54,23 @@
   color: inherit;
 }
 
+.db-result-tab-pin:hover,
 .db-result-tab-close:hover {
   background: var(--theme-module-active-card-strong-bg);
+}
+
+.db-result-tab-pin svg,
+.db-result-tab-close svg {
+  width: 12px;
+  height: 12px;
+}
+
+.db-result-tab-pin.active {
+  color: var(--theme-module-active-accent);
+}
+
+.db-result-tab-pin.active svg {
+  fill: currentColor;
 }
 
 .db-result-dot.ok {

@@ -6,6 +6,8 @@ import {
   collectDescendantGroupIds,
   columnNodeId,
   databasePageCommentKeyId,
+  databaseCatalogDisplayName,
+  databaseCatalogFieldLabel,
   defaultSchemaForSqlConnection,
   flattenVisibleGroups,
   formatDdlError,
@@ -52,6 +54,20 @@ describe('databaseWorkspaceRuntime', () => {
     expect(buildConnectionUrl({ dbType: 'clickhouse', host: 'click.local', port: 8123, database: 'ignored' })).toBe('http://click.local:8123')
     expect(sqlConnectionRequiresSchema(postgresConnection)).toBe(true)
     expect(defaultSchemaForSqlConnection(postgresConnection, postgresConnection.catalogs[0])).toBe('public')
+    expect(
+      databaseCatalogDisplayName(
+        { dbType: 'sqlite', database: 'stale-name.db', filePath: '/srv/data/youtube_downloads.db' },
+        { name: 'main' }
+      )
+    ).toBe('youtube_downloads.db')
+    expect(databaseCatalogDisplayName(postgresConnection, { name: 'orders' })).toBe('orders')
+    expect(databaseCatalogFieldLabel({ dbType: 'presto' })).toBe('Catalog')
+    expect(databaseCatalogFieldLabel({ dbType: 'oracle' })).toBe('Service')
+    const schemas = (names: string[]) => ({ name: 'scope', schemas: names.map((name) => ({ name, tables: [] })) })
+    expect(defaultSchemaForSqlConnection({ ...postgresConnection, user: 'ops' }, schemas(['public', 'ops']))).toBe('ops')
+    expect(defaultSchemaForSqlConnection({ ...postgresConnection, dbType: 'oracle', user: 'mixedCase' }, schemas(['ALPHA', 'MixedCase']))).toBe('MixedCase')
+    expect(defaultSchemaForSqlConnection({ ...postgresConnection, dbType: 'sqlserver' }, schemas(['alpha', 'dbo']))).toBe('dbo')
+    expect(defaultSchemaForSqlConnection({ ...postgresConnection, dbType: 'presto' }, schemas(['analytics', 'default']))).toBe('default')
   })
 
   it('formats identifiers, qualified table names, and create-database statements', () => {

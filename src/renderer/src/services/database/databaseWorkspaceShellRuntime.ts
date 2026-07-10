@@ -1,4 +1,15 @@
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, type ComputedRef, type Ref } from 'vue'
+import {
+  computed,
+  nextTick,
+  onActivated,
+  onBeforeUnmount,
+  onDeactivated,
+  onMounted,
+  ref,
+  watch,
+  type ComputedRef,
+  type Ref
+} from 'vue'
 import { copyTextToClipboard } from '@/services/app/clipboardRuntime'
 import type { EditorSettings } from '@/services/settings/workspaceConfigRuntime'
 
@@ -14,6 +25,8 @@ type DatabaseWorkspaceShellDeps = {
   queryGroupEditInput?: () => Pick<HTMLInputElement, 'focus' | 'select'> | null
   nextTickFn?: () => Promise<void>
   onMountedFn?: (callback: () => void) => void
+  onActivatedFn?: (callback: () => void) => void
+  onDeactivatedFn?: (callback: () => void) => void
   onBeforeUnmountFn?: (callback: () => void) => void
   addWindowClickListener?: (handler: () => void) => void
   removeWindowClickListener?: (handler: () => void) => void
@@ -46,6 +59,8 @@ export const createDatabaseWorkspaceShellRuntime = (
   const queryGroupEditInput = deps.queryGroupEditInput ?? (() => document.querySelector<HTMLInputElement>('.db-tree-edit'))
   const nextTickFn = deps.nextTickFn ?? nextTick
   const onMountedFn = deps.onMountedFn ?? onMounted
+  const onActivatedFn = deps.onActivatedFn ?? onActivated
+  const onDeactivatedFn = deps.onDeactivatedFn ?? onDeactivated
   const onBeforeUnmountFn = deps.onBeforeUnmountFn ?? onBeforeUnmount
   const addWindowClickListener = deps.addWindowClickListener ?? ((handler) => window.addEventListener('click', handler))
   const removeWindowClickListener = deps.removeWindowClickListener ?? ((handler) => window.removeEventListener('click', handler))
@@ -93,22 +108,39 @@ export const createDatabaseWorkspaceShellRuntime = (
     }))
 
   const registerLifecycle = (hooks: DatabaseWorkspaceLifecycleHooks) => {
+    let surfaceActive = false
     const handleWindowClick = () => {
       hooks.closeMenus()
     }
 
-    onMountedFn(() => {
-      void hooks.loadDatabaseCatalog().finally(() => hooks.loadDbAiPaneState())
+    const activateSurface = () => {
+      if (surfaceActive) return
+      surfaceActive = true
       addWindowClickListener(handleWindowClick)
-    })
+    }
 
-    onBeforeUnmountFn(() => {
+    const deactivateSurface = () => {
+      if (!surfaceActive) return
+      surfaceActive = false
+      hooks.closeMenus()
       hooks.stopSqlPaneResize()
       hooks.stopDbAiPaneResize()
-      hooks.clearSqlDiagnoseTimers()
       removeWindowClickListener(handleWindowClick)
-      clearNoticeTimer()
       hooks.persistDbAiPaneState()
+    }
+
+    onMountedFn(() => {
+      void hooks.loadDatabaseCatalog().finally(() => hooks.loadDbAiPaneState())
+      activateSurface()
+    })
+
+    onActivatedFn(activateSurface)
+    onDeactivatedFn(deactivateSurface)
+
+    onBeforeUnmountFn(() => {
+      deactivateSurface()
+      hooks.clearSqlDiagnoseTimers()
+      clearNoticeTimer()
       stopEditingGroupFocusWatch()
     })
   }

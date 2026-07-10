@@ -883,9 +883,20 @@ describe('workspace store', () => {
       receivedAt: 300
     })
     expect(store.aiAttentionUnreadCount).toBe(1)
+    vi.mocked(window.aiops.publishAiAgentSessionEvent).mockClear()
     store.applyTerminalExit({ id: 'terminal-session-1', code: 0, kind: 'local', reason: 'process' })
     expect(store.managedAiSessions[0].state).toBe('ended')
     expect(store.aiAttentionUnreadCount).toBe(0)
+    expect(window.aiops.publishAiAgentSessionEvent).toHaveBeenCalledOnce()
+    expect(window.aiops.publishAiAgentSessionEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        source: 'claude-code',
+        event: 'session_end',
+        sessionId: 'claude-session-1',
+        terminalSessionId: 'terminal-session-1',
+        agentLifecycle: 'ended'
+      })
+    )
   })
 
   it('tracks managed AI lifecycle and process metadata without detaching from the owning terminal', () => {
@@ -957,7 +968,173 @@ describe('workspace store', () => {
     )
   })
 
-  it('marks managed AI sessions ended when their owning terminal panel is closed', () => {
+  it('kills the terminal before ending a managed AI session and preserves the pre-reset panel descriptor', async () => {
+    const store = useWorkspaceStore()
+    const panel = store.createPanel()
+    const originalPanelId = panel.id
+    expect(originalPanelId).not.toBe('panel-main')
+    store.applyLocalTerminalSession(originalPanelId, {
+      id: 'terminal-session-1',
+      kind: 'local',
+      shell: '/bin/bash',
+      cwd: '/work/project'
+    })
+    store.upsertManagedAiSession({
+      source: 'codex',
+      event: 'pre_tool_use',
+      sessionId: 'codex-running-1',
+      title: 'Codex · project',
+      summary: 'Bash: npm test',
+      panelId: originalPanelId,
+      terminalSessionId: 'terminal-session-1',
+      cwd: '/work/project',
+      receivedAt: 500
+    })
+
+    expect(store.managedAiSessions[0]).toEqual(expect.objectContaining({ state: 'working' }))
+
+    vi.mocked(window.aiops.killTerminal).mockClear()
+    vi.mocked(window.aiops.publishAiAgentSessionEvent).mockClear()
+    store.closePanel(originalPanelId)
+
+    expect(store.panels[0].id).toBe(originalPanelId)
+    expect(store.managedAiSessions[0].state).toBe('working')
+    expect(window.aiops.killTerminal).toHaveBeenCalledOnce()
+    expect(window.aiops.killTerminal).toHaveBeenCalledWith('terminal-session-1')
+    expect(window.aiops.publishAiAgentSessionEvent).not.toHaveBeenCalled()
+
+    await flushMicrotasks()
+
+    expect(store.panels[0].id).toBe('panel-main')
+    expect(store.managedAiSessions[0]).toEqual(
+      expect.objectContaining({
+        state: 'ended',
+        lastEvent: 'session_end',
+        agentLifecycle: 'ended',
+        pendingRequestId: undefined
+      })
+    )
+    expect(store.managedAiNeedsInputSessions).toHaveLength(0)
+    expect(window.aiops.publishAiAgentSessionEvent).toHaveBeenCalledOnce()
+    const terminalEndEvent = vi.mocked(window.aiops.publishAiAgentSessionEvent).mock.calls[0][0]
+    expect(terminalEndEvent).toEqual(
+      expect.objectContaining({
+        source: 'codex',
+        event: 'session_end',
+        sessionId: 'codex-running-1',
+        panelId: originalPanelId,
+        terminalSessionId: 'terminal-session-1',
+        agentLifecycle: 'ended'
+      })
+    )
+
+    store.upsertManagedAiSession(terminalEndEvent as any)
+    expect(store.managedAiSessions[0].events.filter((event) => event.event === 'session_end')).toHaveLength(1)
+  })
+
+  it('does not end a managed AI session when closing its tab cannot kill the terminal', async () => {
+    const store = useWorkspaceStore()
+    store.applyLocalTerminalSession('panel-main', {
+      id: 'terminal-session-live',
+      kind: 'local',
+      shell: '/bin/bash',
+      cwd: '/work/project'
+    })
+    store.upsertManagedAiSession({
+      source: 'codex',
+      event: 'pre_tool_use',
+      sessionId: 'codex-live-1',
+      title: 'Codex · project',
+      summary: 'Still running',
+      panelId: 'panel-main',
+      terminalSessionId: 'terminal-session-live',
+      receivedAt: 500
+    })
+    vi.mocked(window.aiops.killTerminal).mockResolvedValueOnce({
+      ok: false,
+      errorCode: 'TERMINAL_KILL_FAILED',
+      errorMessage: 'Terminal is still owned elsewhere.'
+    })
+    vi.mocked(window.aiops.publishAiAgentSessionEvent).mockClear()
+
+    store.closePanel('panel-main')
+    await flushMicrotasks()
+
+    expect(store.managedAiSessions[0].state).toBe('working')
+    expect(store.panels[0]).toEqual(expect.objectContaining({ id: 'panel-main', sessionId: 'terminal-session-live' }))
+    expect(window.aiops.publishAiAgentSessionEvent).not.toHaveBeenCalled()
+    expect(store.topNotice).toBe('Terminal is still owned elsewhere.')
+  })
+
+  it('treats a missing Main terminal as already ended and closes its renderer tab', async () => {
+    const store = useWorkspaceStore()
+    store.applyLocalTerminalSession('panel-main', {
+      id: 'terminal-session-missing',
+      kind: 'local',
+      shell: '/bin/bash',
+      cwd: '/work/project'
+    })
+    store.upsertManagedAiSession({
+      source: 'codex',
+      event: 'pre_tool_use',
+      sessionId: 'codex-missing-1',
+      title: 'Codex · project',
+      summary: 'Running',
+      panelId: 'panel-main',
+      terminalSessionId: 'terminal-session-missing',
+      receivedAt: 500
+    })
+    vi.mocked(window.aiops.killTerminal).mockResolvedValueOnce({
+      ok: false,
+      errorCode: 'TERMINAL_SESSION_NOT_FOUND',
+      errorMessage: 'Terminal session not found.'
+    })
+
+    store.closePanel('panel-main')
+    await flushMicrotasks()
+
+    expect(store.panels[0]).toEqual(expect.objectContaining({ id: 'panel-main', sessionId: undefined }))
+    expect(store.managedAiSessions[0]).toEqual(expect.objectContaining({ state: 'ended', agentLifecycle: 'ended' }))
+  })
+
+  it('applies a real terminal close after its renderer tab has already been removed', () => {
+    const store = useWorkspaceStore()
+    store.applyLocalTerminalSession('panel-main', {
+      id: 'terminal-session-detached',
+      kind: 'local',
+      shell: '/bin/bash',
+      cwd: '/work/project'
+    })
+    store.upsertManagedAiSession({
+      source: 'codex',
+      event: 'pre_tool_use',
+      sessionId: 'codex-detached-1',
+      title: 'Codex · project',
+      summary: 'Still running',
+      panelId: 'panel-main',
+      terminalSessionId: 'terminal-session-detached',
+      receivedAt: 500
+    })
+    vi.mocked(window.aiops.killTerminal).mockImplementationOnce(() => new Promise(() => undefined))
+    vi.mocked(window.aiops.publishAiAgentSessionEvent).mockClear()
+
+    store.closePanel('panel-main')
+    expect(store.managedAiSessions[0].state).toBe('working')
+    store.panels.splice(0, store.panels.length)
+
+    store.applyTerminalLifecycle({
+      id: 'terminal-session-detached',
+      kind: 'local',
+      stage: 'closed',
+      reason: 'process',
+      at: 700
+    })
+
+    expect(store.managedAiSessions[0].state).toBe('ended')
+    expect(window.aiops.publishAiAgentSessionEvent).toHaveBeenCalledOnce()
+  })
+
+  it('publishes one managed AI session end across closed lifecycle and exit events', () => {
     const store = useWorkspaceStore()
     store.applyLocalTerminalSession('panel-main', {
       id: 'terminal-session-1',
@@ -970,30 +1147,30 @@ describe('workspace store', () => {
       event: 'pre_tool_use',
       sessionId: 'codex-running-1',
       title: 'Codex · project',
-      summary: 'Bash: npm test',
+      summary: 'Running tests',
       panelId: 'panel-main',
       terminalSessionId: 'terminal-session-1',
-      cwd: '/work/project',
       receivedAt: 500
     })
+    vi.mocked(window.aiops.publishAiAgentSessionEvent).mockClear()
 
-    expect(store.managedAiSessions[0]).toEqual(expect.objectContaining({ state: 'working' }))
+    store.applyTerminalLifecycle({
+      id: 'terminal-session-1',
+      kind: 'local',
+      stage: 'closed',
+      reason: 'process',
+      at: 700
+    })
+    store.applyTerminalExit({ id: 'terminal-session-1', code: 0, kind: 'local', reason: 'process' })
 
-    store.closePanel('panel-main')
-
-    expect(store.managedAiSessions[0]).toEqual(
-      expect.objectContaining({
-        state: 'ended',
-        lastEvent: 'session_end',
-        agentLifecycle: 'ended',
-        pendingRequestId: undefined
-      })
-    )
-    expect(store.managedAiNeedsInputSessions).toHaveLength(0)
+    expect(store.managedAiSessions[0].state).toBe('ended')
+    expect(store.managedAiSessions[0].events.filter((event) => event.event === 'session_end')).toHaveLength(1)
+    expect(window.aiops.publishAiAgentSessionEvent).toHaveBeenCalledOnce()
   })
 
-  it('downgrades stale working managed AI snapshots when no owning terminal is live locally', () => {
+  it('does not infer Main terminal death from missing renderer tabs during snapshot hydration', () => {
     const store = useWorkspaceStore()
+    vi.mocked(window.aiops.publishAiAgentSessionEvent).mockClear()
 
     store.applyManagedAiSessionSnapshot({
       sessions: [
@@ -1018,13 +1195,237 @@ describe('workspace store', () => {
       ]
     })
 
-    expect(store.managedAiSessions[0]).toEqual(
-      expect.objectContaining({
-        state: 'ended',
-        lastEvent: 'session_end',
-        agentLifecycle: 'ended'
-      })
-    )
+    expect(store.managedAiSessions[0]).toEqual(expect.objectContaining({ state: 'working', lastEvent: 'pre_tool_use' }))
+    expect(window.aiops.publishAiAgentSessionEvent).not.toHaveBeenCalled()
+  })
+
+  it('keeps terminal-end state across out-of-order events and stale snapshots until newer activity arrives', () => {
+    const store = useWorkspaceStore()
+    store.applyLocalTerminalSession('panel-main', {
+      id: 'terminal-session-order',
+      kind: 'local',
+      shell: '/bin/bash',
+      cwd: '/work/project'
+    })
+    store.upsertManagedAiSession({
+      source: 'codex',
+      event: 'pre_tool_use',
+      sessionId: 'codex-order-1',
+      title: 'Codex · project',
+      summary: 'Running',
+      panelId: 'panel-main',
+      terminalSessionId: 'terminal-session-order',
+      receivedAt: 500
+    })
+
+    store.applyTerminalLifecycle({
+      id: 'terminal-session-order',
+      kind: 'local',
+      stage: 'closed',
+      reason: 'process',
+      at: 700
+    })
+    store.upsertManagedAiSession({
+      source: 'codex',
+      event: 'pre_tool_use',
+      sessionId: 'codex-order-1',
+      title: 'Codex · project',
+      summary: 'Late event',
+      panelId: 'panel-main',
+      terminalSessionId: 'terminal-session-order',
+      receivedAt: 650
+    })
+
+    expect(store.managedAiSessions[0]).toEqual(expect.objectContaining({ state: 'ended', lastActivityAt: 700 }))
+
+    store.applyManagedAiSessionSnapshot({
+      sessions: [
+        {
+          id: 'codex-order-1',
+          source: 'codex',
+          title: 'Codex · project',
+          summary: 'Stale backend state',
+          state: 'working',
+          lastEvent: 'pre_tool_use',
+          lastActivityAt: 650,
+          createdAt: 500,
+          updatedAt: 650,
+          panelId: 'panel-main',
+          terminalSessionId: 'terminal-session-order',
+          requestKind: 'telemetry',
+          decisionMode: 'telemetry',
+          events: [],
+          decisions: []
+        }
+      ]
+    })
+    expect(store.managedAiSessions[0]).toEqual(expect.objectContaining({ state: 'ended', lastActivityAt: 700 }))
+
+    store.upsertManagedAiSession({
+      source: 'codex',
+      event: 'session_start',
+      sessionId: 'codex-order-1',
+      title: 'Codex · project',
+      summary: 'Resumed',
+      panelId: 'panel-main',
+      terminalSessionId: 'terminal-session-new',
+      agentLifecycle: 'idle',
+      receivedAt: 800
+    })
+    expect(store.managedAiSessions[0]).toEqual(expect.objectContaining({ state: 'idle', lastActivityAt: 800 }))
+  })
+
+  it('shows terminal-end publish failures, retries on refresh, and does not roll local state back', async () => {
+    vi.setSystemTime(1000)
+    const store = useWorkspaceStore()
+    store.applyLocalTerminalSession('panel-main', {
+      id: 'terminal-session-publish',
+      kind: 'local',
+      shell: '/bin/bash',
+      cwd: '/work/project'
+    })
+    store.upsertManagedAiSession({
+      source: 'codex',
+      event: 'pre_tool_use',
+      sessionId: 'codex-publish-1',
+      title: 'Codex · project',
+      summary: 'Running',
+      panelId: 'panel-main',
+      terminalSessionId: 'terminal-session-publish',
+      receivedAt: 500
+    })
+    vi.mocked(window.aiops.publishAiAgentSessionEvent).mockClear()
+    vi.mocked(window.aiops.publishAiAgentSessionEvent).mockResolvedValueOnce({
+      ok: false,
+      errorCode: 'AI_AGENT_EVENT_PERSIST_FAILED',
+      errorMessage: 'Session end was not saved.'
+    })
+
+    store.closePanel('panel-main')
+    await flushMicrotasks()
+
+    expect(store.managedAiSessions[0].state).toBe('ended')
+    expect(store.topNotice).toBe('Session end was not saved.')
+    expect(window.aiops.publishAiAgentSessionEvent).toHaveBeenCalledOnce()
+
+    store.applyManagedAiSessionSnapshot({
+      sessions: [
+        {
+          id: 'codex-publish-1',
+          source: 'codex',
+          title: 'Codex · project',
+          summary: 'Old running state',
+          state: 'working',
+          lastEvent: 'pre_tool_use',
+          lastActivityAt: 500,
+          createdAt: 500,
+          updatedAt: 500,
+          panelId: 'panel-main',
+          terminalSessionId: 'terminal-session-publish',
+          requestKind: 'telemetry',
+          decisionMode: 'telemetry',
+          events: [],
+          decisions: []
+        }
+      ]
+    })
+    await flushMicrotasks()
+
+    expect(store.managedAiSessions[0]).toEqual(expect.objectContaining({ state: 'ended', lastActivityAt: 1000 }))
+    expect(window.aiops.publishAiAgentSessionEvent).toHaveBeenCalledTimes(2)
+  })
+
+  it('accepts a confirmed backend terminal end without duplicating the renderer timeline event', async () => {
+    vi.setSystemTime(1000)
+    const store = useWorkspaceStore()
+    store.applyLocalTerminalSession('panel-main', {
+      id: 'terminal-session-confirmed',
+      kind: 'local',
+      shell: '/bin/bash',
+      cwd: '/work/project'
+    })
+    store.upsertManagedAiSession({
+      source: 'codex',
+      event: 'pre_tool_use',
+      sessionId: 'codex-confirmed-1',
+      title: 'Codex · project',
+      summary: 'Running',
+      panelId: 'panel-main',
+      terminalSessionId: 'terminal-session-confirmed',
+      receivedAt: 500
+    })
+
+    store.closePanel('panel-main')
+    await flushMicrotasks()
+    expect(store.managedAiSessions[0].events.filter((event) => event.event === 'session_end')).toHaveLength(1)
+
+    store.applyManagedAiSessionSnapshot({
+      sessions: [
+        {
+          id: 'codex-confirmed-1',
+          source: 'codex',
+          title: 'Codex · project',
+          summary: 'Terminal closed',
+          state: 'ended',
+          lastEvent: 'session_end',
+          lastActivityAt: 1000,
+          createdAt: 500,
+          updatedAt: 1000,
+          panelId: 'panel-main',
+          terminalSessionId: 'terminal-session-confirmed',
+          agentLifecycle: 'ended',
+          requestKind: 'telemetry',
+          decisionMode: 'telemetry',
+          events: [
+            {
+              id: 'main-session-end-hash',
+              source: 'codex',
+              event: 'session_end',
+              sessionId: 'codex-confirmed-1',
+              title: 'Codex · project',
+              summary: 'Terminal closed',
+              receivedAt: 1000,
+              agentLifecycle: 'ended',
+              requestKind: 'telemetry',
+              decisionMode: 'telemetry'
+            }
+          ],
+          decisions: []
+        }
+      ]
+    })
+
+    const endEvents = store.managedAiSessions[0].events.filter((event) => event.event === 'session_end')
+    expect(endEvents).toHaveLength(1)
+    expect(endEvents[0].id).toBe('main-session-end-hash')
+  })
+
+  it('shows rejected terminal-end publish calls without reverting the local end state', async () => {
+    vi.setSystemTime(1000)
+    const store = useWorkspaceStore()
+    store.applyLocalTerminalSession('panel-main', {
+      id: 'terminal-session-reject',
+      kind: 'local',
+      shell: '/bin/bash',
+      cwd: '/work/project'
+    })
+    store.upsertManagedAiSession({
+      source: 'codex',
+      event: 'pre_tool_use',
+      sessionId: 'codex-reject-1',
+      title: 'Codex · project',
+      summary: 'Running',
+      panelId: 'panel-main',
+      terminalSessionId: 'terminal-session-reject',
+      receivedAt: 500
+    })
+    vi.mocked(window.aiops.publishAiAgentSessionEvent).mockRejectedValueOnce(new Error('Managed AI bridge disconnected.'))
+
+    store.closePanel('panel-main')
+    await flushMicrotasks()
+
+    expect(store.managedAiSessions[0].state).toBe('ended')
+    expect(store.topNotice).toBe('Managed AI bridge disconnected.')
   })
 
   it('focuses live linked managed AI sessions without writing the resume command', async () => {

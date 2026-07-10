@@ -1,6 +1,6 @@
 import { computed, reactive, type ComputedRef } from 'vue'
 import { applyFilters, applySort, type DbFilter } from '@/services/database/databaseGridRuntime'
-import { currentSqlStatement, firstStatement, formatSqlText } from '@/services/database/databaseSqlEditorRuntime'
+import { currentSqlStatement, firstStatement, formatSqlText, splitSqlStatements } from '@/services/database/databaseSqlEditorRuntime'
 import {
   appendSqlHistoryFromExecution,
   applySqlResultFilter,
@@ -21,6 +21,7 @@ import {
   type SqlTab
 } from '@/services/database/databaseSqlDataRuntime'
 import { isLocalFileWriteData } from '@/services/database/databaseBackendGuards'
+import { databaseCatalogDisplayName } from '@/services/database/databaseWorkspaceRuntime'
 import type { SqlHistory, SqlResultViewState } from '@/services/database/databaseWorkspaceTypes'
 import type { DatabaseConnectionInfo, DatabaseSqlExecuteInput, DatabaseSqlExecuteResult } from '@shared/contracts/database'
 import type { LocalFileWriteResult } from '@shared/contracts/localFiles'
@@ -107,34 +108,76 @@ export const createDatabaseSqlExecutionWorkspaceRuntime = (
     tab.sql = value
   }
 
-  const runSql = (mode: 'all' | 'current' | 'explain') => {
+  const runSql = async (mode: 'all' | 'current' | 'explain') => {
     const tab = activeSqlTab.value
     if (!tab || !activeSqlCanRun.value) return
     const sql = resolveSqlForRun(tab, mode)
-    if (!sql.trim()) {
+    const statements = splitSqlStatements(sql)
+    if (!statements.length) {
       showNotice('SQL is empty')
       return
     }
-    void appendSqlExecution(tab, sql)
+    await appendSqlExecutions(tab, statements)
   }
 
   const appendSqlExecution = async (tab: SqlTab, sql: string) => {
-    const result = createRunningSqlResult(tab, sql, resultSeq.value++)
-    tab.resultTabs.push(result)
-    tab.activeResultTabId = result.id
+    const statements = splitSqlStatements(sql)
+    if (!statements.length) return
+    await appendSqlExecutions(tab, statements)
+  }
 
-    const response = await executeSqlThroughBackend(tab, sql)
-    const outcome = sqlOutcomeFromBackendResult(response)
+  const appendSqlExecutions = async (tab: SqlTab, statements: string[]) => {
+    const results = prepareSqlExecutionResults(tab, statements)
+    if (!results.length) return
+    tab.activeResultTabId = results[0].id
 
-    patchSqlResult(tab, result.id, outcome.payload)
-    if (outcome.execution) {
-      appendSqlHistoryFromExecution(tab, result, sql, outcome.execution)
+    for (let index = 0; index < statements.length; index += 1) {
+      const sql = statements[index]
+      const result = results[index]
+      const response = await executeSqlThroughBackend(tab, sql)
+      const outcome = sqlOutcomeFromBackendResult(response)
+
+      patchSqlResult(tab, result.id, outcome.payload)
+      if (outcome.execution) {
+        appendSqlHistoryFromExecution(tab, result, sql, outcome.execution)
+      }
     }
+  }
+
+  const prepareSqlExecutionResults = (tab: SqlTab, statements: string[]) => {
+    const reusable = tab.resultTabs.filter((result) => result.status !== 'running' && !result.pinned)
+    if (statements.length === 1) {
+      const activeIndex = reusable.findIndex((result) => result.id === tab.activeResultTabId)
+      if (activeIndex > 0) reusable.unshift(...reusable.splice(activeIndex, 1))
+    }
+    const reusableIds = reusable.slice(0, statements.length).map((result) => result.id)
+    reusable.slice(statements.length).forEach((result) => closeSqlResultTab(tab, result.id, sqlResultViewStateById))
+
+    return statements.map((sql, index) => {
+      const running = createRunningSqlResult(tab, sql, resultSeq.value++, index + 1)
+      const reusableId = reusableIds[index]
+      if (!reusableId) {
+        tab.resultTabs.push(running)
+        return running
+      }
+      const resultIndex = tab.resultTabs.findIndex((result) => result.id === reusableId)
+      if (resultIndex === -1) {
+        tab.resultTabs.push(running)
+        return running
+      }
+      tab.history.forEach((history) => {
+        if (history.resultTabId === reusableId) history.resultTabId = null
+      })
+      delete sqlResultViewStateById[reusableId]
+      const reused = { ...running, id: reusableId }
+      tab.resultTabs[resultIndex] = reused
+      return reused
+    })
   }
 
   const runSqlFromShortcut = () => {
     const selected = getSelectedSqlText()
-    runSql(selected.trim() ? 'current' : 'all')
+    void runSql(selected.trim() ? 'current' : 'all')
   }
 
   const resolveSqlForRun = (tab: SqlTab, mode: 'all' | 'current' | 'explain') => {
@@ -157,7 +200,8 @@ export const createDatabaseSqlExecutionWorkspaceRuntime = (
 
   const defaultSqlFileName = (tab: SqlTab) => {
     const connection = findConnection(tab.connectionId)
-    return runtimeDefaultSqlFileName(tab, connection?.name)
+    const catalogDisplayName = databaseCatalogDisplayName(connection, { name: tab.catalogName })
+    return runtimeDefaultSqlFileName(tab, connection?.name, catalogDisplayName)
   }
 
   const pickSqlSavePath = async (tab: SqlTab) => {
@@ -237,6 +281,13 @@ export const createDatabaseSqlExecutionWorkspaceRuntime = (
     tab.activeResultTabId = resultTabId
   }
 
+  const toggleResultTabPinned = (resultId: string) => {
+    const tab = activeSqlTab.value
+    const result = tab?.resultTabs.find((item) => item.id === resultId)
+    if (!result) return
+    result.pinned = !result.pinned
+  }
+
   const updateSqlResultPage = (page: number) => {
     const result = activeSqlResult.value
     if (!result) return
@@ -306,6 +357,7 @@ export const createDatabaseSqlExecutionWorkspaceRuntime = (
     openSqlHistoryResult,
     isSqlHistoryClosed,
     updateSqlResultActiveTab,
+    toggleResultTabPinned,
     updateSqlResultPage,
     updateSqlResultPageSize,
     gotoLastSqlResultPage,

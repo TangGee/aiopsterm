@@ -5,6 +5,10 @@ import { isTerminalWorkspaceModule } from '@/config/navigation'
 import { copyTextToClipboard } from '@/services/app/clipboardRuntime'
 import { controlClient } from '@/services/app/controlClient'
 import { writeRendererRuntimeLog } from '@/services/app/runtimeLogClient'
+import {
+  managedAiSessionTerminalSwitchTelemetry,
+  type ManagedAiSessionTerminalSwitchTrace
+} from '@/services/ai/managedAiSessionTerminalSwitchTelemetry'
 import { terminalClient } from '@/services/terminal/terminalClient'
 import { createTerminalWorkspaceCommandRuntime, createTerminalWorkspaceCommandState } from '@/services/terminal/terminalWorkspaceCommandRuntime'
 import { createTerminalWorkspaceContextRuntime } from '@/services/terminal/terminalWorkspaceContextRuntime'
@@ -890,9 +894,116 @@ export const useTerminalWorkspaceContainerRuntime = () => {
     { flush: 'post' }
   )
 
+  const nextAnimationFrame = () => new Promise<void>((resolve) => {
+    if (typeof window.requestAnimationFrame === 'function') {
+      window.requestAnimationFrame(() => resolve())
+      return
+    }
+    window.setTimeout(resolve, 0)
+  })
+
+  const finishManagedAiTerminalFrame = (
+    panelId: string,
+    trace: ManagedAiSessionTerminalSwitchTrace,
+    fields: Record<string, unknown>
+  ) => {
+    if (workspace.activePanelId !== panelId || !terminalWorkspaceVisible.value) {
+      managedAiSessionTerminalSwitchTelemetry.superseded(trace, {
+        targetPanelId: panelId,
+        activePanelId: workspace.activePanelId,
+        terminalWorkspaceVisible: terminalWorkspaceVisible.value,
+        outcome: 'target-changed-after-ui-frame'
+      })
+      return
+    }
+    if (fields.hostConnected !== true || (fields.threaded === true && fields.surfaceAttached !== true)) {
+      managedAiSessionTerminalSwitchTelemetry.terminalFrameTimeout(
+        trace,
+        new Error('Managed AI terminal surface was not connected after frame readiness.'),
+        { ...fields, targetPanelId: panelId, outcome: 'terminal-surface-unavailable' }
+      )
+      return
+    }
+    managedAiSessionTerminalSwitchTelemetry.terminalFrameReady(trace, fields)
+  }
+
+  const reportManagedAiTerminalFrame = async (
+    panelId: string,
+    trace: ManagedAiSessionTerminalSwitchTrace,
+    baselineFrameSeq: number,
+    surfaceWasAttached: boolean
+  ) => {
+    try {
+      await nextAnimationFrame()
+      const view = terminalViews.get(panelId)
+      if (!view) throw new Error('Managed AI terminal view was not created after activation.')
+      const host = view.openedElement
+      if (isThreadedTerminalHost(view.terminal)) {
+        const beforeWait = view.terminal.debugInfo()
+        if (surfaceWasAttached && beforeWait.surfaceAttached && host?.isConnected) {
+          finishManagedAiTerminalFrame(panelId, trace, {
+            terminalRenderer: 'threaded',
+            terminalFrameReused: true,
+            threaded: true,
+            surfaceWasAttached,
+            surfaceAttached: beforeWait.surfaceAttached,
+            hostConnected: true,
+            hostWidth: host.clientWidth,
+            hostHeight: host.clientHeight,
+            frameSeq: beforeWait.lastFrameSeq
+          })
+          return
+        }
+        const frame = await view.terminal.waitForNextRenderFrame(baselineFrameSeq, 2000)
+        const afterWait = view.terminal.debugInfo()
+        finishManagedAiTerminalFrame(panelId, trace, {
+          terminalRenderer: 'threaded',
+          terminalFrameReused: false,
+          threaded: true,
+          surfaceWasAttached,
+          surfaceAttached: afterWait.surfaceAttached,
+          hostConnected: Boolean(host?.isConnected),
+          hostWidth: host?.clientWidth || 0,
+          hostHeight: host?.clientHeight || 0,
+          frameSeq: frame.seq,
+          frameMs: frame.frameMs,
+          paintedRows: frame.paintedRows
+        })
+        return
+      }
+      await nextAnimationFrame()
+      finishManagedAiTerminalFrame(panelId, trace, {
+        terminalRenderer: 'legacy-xterm',
+        terminalFrameReused: false,
+        threaded: false,
+        hostConnected: Boolean(host?.isConnected),
+        hostWidth: host?.clientWidth || 0,
+        hostHeight: host?.clientHeight || 0
+      })
+    } catch (error) {
+      if (workspace.activePanelId !== panelId || !terminalWorkspaceVisible.value) {
+        managedAiSessionTerminalSwitchTelemetry.superseded(trace, {
+          targetPanelId: panelId,
+          activePanelId: workspace.activePanelId,
+          terminalWorkspaceVisible: terminalWorkspaceVisible.value,
+          outcome: 'target-changed-before-terminal-frame'
+        })
+        return
+      }
+      managedAiSessionTerminalSwitchTelemetry.terminalFrameTimeout(trace, error, {
+        targetPanelId: panelId
+      })
+    }
+  }
+
   watch(
     () => workspace.activePanelId,
     (panelId, previousPanelId) => {
+      const switchTrace = managedAiSessionTerminalSwitchTelemetry.activeTraceForPanel(panelId)
+      const existingView = terminalViews.get(panelId)
+      const existingThreadedInfo = existingView && isThreadedTerminalHost(existingView.terminal)
+        ? existingView.terminal.debugInfo()
+        : null
       if (previousPanelId && previousPanelId !== panelId && workspace.panels.some((panel) => panel.id === previousPanelId)) {
         terminalControlSurface.recordLastActiveControlPanel(previousPanelId)
       }
@@ -900,6 +1011,14 @@ export const useTerminalWorkspaceContainerRuntime = () => {
       nextTick(() => {
         scrollActiveTerminalTabIntoView()
         visibleTerminalPanels.value.filter((panel) => isTerminalWorkspacePanel(panel)).forEach((panel) => syncTerminalView(panel))
+        if (switchTrace) {
+          void reportManagedAiTerminalFrame(
+            panelId,
+            switchTrace,
+            existingThreadedInfo?.lastFrameSeq || 0,
+            Boolean(existingThreadedInfo?.surfaceAttached)
+          )
+        }
       })
     }
   )

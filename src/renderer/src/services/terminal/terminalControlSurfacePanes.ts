@@ -380,7 +380,8 @@ export const createTerminalControlSurfacePaneHandlers = ({
       const panel = method === 'workspace.close' ? resolveControlSelectablePanel(controlTargetValue(params)) : resolveControlPanePanel(params)
       if (!panel) return controlFail('PANE_NOT_FOUND', 'Pane not found.')
       const snapshot = surfaceSummaryForControl(panel)
-      workspace.closePanel(panel.id)
+      const result = await workspace.closePanel(panel.id)
+      if (!result.closed) return controlFail('PANE_CLOSE_FAILED', 'Terminal could not be closed.', { panelId: panel.id, terminalStatus: result.terminalStatus })
       await nextTick()
       return controlOk({
         closedPane: snapshot,

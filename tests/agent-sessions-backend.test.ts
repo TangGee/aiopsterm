@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 type AgentSessionsBackend = {
   configureAiAgentSessionStore: (userDataPath: string) => Promise<void>
+  configureManagedAiSessionTerminalLiveness: (resolver?: (sessionId: string) => boolean) => void
   listManagedAiSessions: () => Promise<unknown>
   listManagedAiSessionContent: (input: Record<string, unknown>) => Promise<unknown>
   configureManagedAiSessionImportRuntime: (config?: Record<string, unknown> & { importSessions?: () => Promise<unknown[]> }) => void
@@ -423,6 +424,106 @@ describe('agent session backend', () => {
         canonicalCwd: realProject
       })
     )
+  })
+
+  it('persists terminal-origin session end events over stale active state', async () => {
+    const { __testing, configureAiAgentSessionStore, listManagedAiSessions, publishAiAgentSessionEvent } = await loadBackend()
+    const root = await mkdtemp(join(tmpdir(), 'aiopsterm-agent-terminal-ended-'))
+    await configureAiAgentSessionStore(root)
+
+    publishAiAgentSessionEvent(
+      {
+        source: 'codex',
+        event: 'pre_tool_use',
+        sessionId: 'codex-terminal-ended-1',
+        title: 'Codex project',
+        summary: 'Running tests',
+        panelId: 'panel-main',
+        terminalSessionId: 'terminal-session-1',
+        agentLifecycle: 'running',
+        receivedAt: 100
+      },
+      null
+    )
+    publishAiAgentSessionEvent(
+      {
+        source: 'codex',
+        event: 'session_end',
+        sessionId: 'codex-terminal-ended-1',
+        title: 'Codex project',
+        summary: 'Terminal closed',
+        panelId: 'panel-main',
+        terminalSessionId: 'terminal-session-1',
+        agentLifecycle: 'ended',
+        receivedAt: 200
+      },
+      null
+    )
+    await __testing.flushManagedAiSessionWrites()
+
+    const response = (await listManagedAiSessions()) as { data?: { sessions?: Array<Record<string, unknown>> } }
+    expect(response.data?.sessions?.find((session) => session.id === 'codex-terminal-ended-1')).toEqual(
+      expect.objectContaining({
+        state: 'ended',
+        agentLifecycle: 'ended',
+        lastEvent: 'session_end',
+        lastActivityAt: 200
+      })
+    )
+    const stored = JSON.parse(await readFile(join(root, 'agent-sessions', 'managed-ai-sessions.json'), 'utf-8')) as {
+      sessions: Array<Record<string, unknown>>
+    }
+    expect(stored.sessions.find((session) => session.id === 'codex-terminal-ended-1')).toEqual(
+      expect.objectContaining({ state: 'ended', agentLifecycle: 'ended', lastEvent: 'session_end' })
+    )
+  })
+
+  it('reconciles persisted active state against Main terminal liveness without ending a live detached PTY', async () => {
+    const {
+      configureAiAgentSessionStore,
+      configureManagedAiSessionTerminalLiveness,
+      listManagedAiSessions,
+      publishAiAgentSessionEvent
+    } = await loadBackend()
+    await configureAiAgentSessionStore(await mkdtemp(join(tmpdir(), 'aiopsterm-agent-terminal-liveness-')))
+    const liveTerminalIds = new Set(['terminal-live'])
+    configureManagedAiSessionTerminalLiveness((sessionId) => liveTerminalIds.has(sessionId))
+    try {
+      for (const [sessionId, terminalSessionId] of [
+        ['codex-live-detached', 'terminal-live'],
+        ['codex-stale-active', 'terminal-stale']
+      ]) {
+        publishAiAgentSessionEvent(
+          {
+            source: 'codex',
+            event: 'pre_tool_use',
+            sessionId,
+            title: sessionId,
+            summary: 'Running',
+            terminalSessionId,
+            agentLifecycle: 'running',
+            receivedAt: 100
+          },
+          null
+        )
+      }
+
+      const first = (await listManagedAiSessions()) as { data?: { sessions?: Array<Record<string, unknown>> } }
+      expect(first.data?.sessions?.find((session) => session.id === 'codex-live-detached')).toEqual(
+        expect.objectContaining({ state: 'working', terminalSessionId: 'terminal-live' })
+      )
+      expect(first.data?.sessions?.find((session) => session.id === 'codex-stale-active')).toEqual(
+        expect.objectContaining({ state: 'ended', summary: 'Terminal no longer exists', agentLifecycle: 'ended' })
+      )
+
+      liveTerminalIds.delete('terminal-live')
+      const second = (await listManagedAiSessions()) as { data?: { sessions?: Array<Record<string, unknown>> } }
+      expect(second.data?.sessions?.find((session) => session.id === 'codex-live-detached')).toEqual(
+        expect.objectContaining({ state: 'ended', summary: 'Terminal no longer exists', agentLifecycle: 'ended' })
+      )
+    } finally {
+      configureManagedAiSessionTerminalLiveness()
+    }
   })
 
   it('adds cached git branch and dirty metadata to managed AI session snapshots', async () => {
@@ -1486,6 +1587,106 @@ describe('agent session backend', () => {
         })
       })
     )
+  })
+
+  it('does not let late events roll back a newer ended managed AI session', async () => {
+    const { __testing, configureAiAgentSessionStore, listManagedAiSessions, publishAiAgentSessionEvent } = await loadBackend()
+    await configureAiAgentSessionStore(await mkdtemp(join(tmpdir(), 'aiopsterm-agent-event-order-')))
+
+    publishAiAgentSessionEvent(
+      {
+        source: 'codex',
+        event: 'PreToolUse',
+        sessionId: 'codex-event-order-1',
+        summary: 'Run tests',
+        receivedAt: 100
+      },
+      null
+    )
+    publishAiAgentSessionEvent(
+      {
+        source: 'codex',
+        event: 'SessionEnd',
+        sessionId: 'codex-event-order-1',
+        summary: 'Terminal closed',
+        receivedAt: 200
+      },
+      null
+    )
+    const streamSeqAfterEnd = __testing.streamLatestSeq()
+    const emit = vi.fn()
+
+    expect(
+      publishAiAgentSessionEvent(
+        {
+          source: 'codex',
+          event: 'PreToolUse',
+          sessionId: 'codex-event-order-1',
+          summary: 'Late tool event',
+          receivedAt: 150
+        },
+        emit
+      )
+    ).toEqual(expect.objectContaining({ ok: true }))
+
+    expect(emit).not.toHaveBeenCalled()
+    expect(__testing.streamLatestSeq()).toBe(streamSeqAfterEnd)
+    const response = (await listManagedAiSessions()) as { data?: { sessions?: Array<Record<string, any>> } }
+    const session = response.data?.sessions?.find((item) => item.id === 'codex-event-order-1')
+    expect(session).toEqual(
+      expect.objectContaining({
+        state: 'ended',
+        lastEvent: 'session_end',
+        lastActivityAt: 200,
+        summary: 'Terminal closed'
+      })
+    )
+    expect(session?.events.map((event: Record<string, unknown>) => event.event)).toEqual(['pre_tool_use', 'session_end'])
+  })
+
+  it('deduplicates deterministic timeline events and repeated synthetic session ends', async () => {
+    const { __testing, configureAiAgentSessionStore, listManagedAiSessions, publishAiAgentSessionEvent } = await loadBackend()
+    await configureAiAgentSessionStore(await mkdtemp(join(tmpdir(), 'aiopsterm-agent-event-idempotent-')))
+    const workingEvent = {
+      source: 'codex',
+      event: 'PreToolUse',
+      sessionId: 'codex-event-idempotent-1',
+      summary: 'Run tests',
+      receivedAt: 100
+    }
+    const endEvent = {
+      source: 'codex',
+      event: 'SessionEnd',
+      sessionId: 'codex-event-idempotent-1',
+      summary: 'Terminal closed',
+      receivedAt: 200
+    }
+
+    publishAiAgentSessionEvent(workingEvent, null)
+    const duplicateEmit = vi.fn()
+    expect(publishAiAgentSessionEvent(workingEvent, duplicateEmit)).toEqual(expect.objectContaining({ ok: true }))
+    expect(duplicateEmit).not.toHaveBeenCalled()
+    publishAiAgentSessionEvent(endEvent, null)
+    const streamSeqAfterEnd = __testing.streamLatestSeq()
+    const repeatedEndEmit = vi.fn()
+
+    expect(publishAiAgentSessionEvent(endEvent, repeatedEndEmit)).toEqual(expect.objectContaining({ ok: true }))
+    expect(publishAiAgentSessionEvent({ ...endEvent, receivedAt: 250 }, repeatedEndEmit)).toEqual(expect.objectContaining({ ok: true }))
+
+    expect(repeatedEndEmit).not.toHaveBeenCalled()
+    expect(__testing.streamLatestSeq()).toBe(streamSeqAfterEnd)
+    const response = (await listManagedAiSessions()) as { data?: { sessions?: Array<Record<string, any>> } }
+    const session = response.data?.sessions?.find((item) => item.id === 'codex-event-idempotent-1')
+    const events = session?.events || []
+    expect(session).toEqual(
+      expect.objectContaining({
+        state: 'ended',
+        lastEvent: 'session_end',
+        lastActivityAt: 200
+      })
+    )
+    expect(events.map((event: Record<string, unknown>) => event.event)).toEqual(['pre_tool_use', 'session_end'])
+    expect(new Set(events.map((event: Record<string, unknown>) => event.id)).size).toBe(events.length)
   })
 
   it('tracks lifecycle and process metadata for managed AI sessions', async () => {

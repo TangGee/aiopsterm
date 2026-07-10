@@ -1,6 +1,12 @@
 import { computed, ref, watch } from 'vue'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { copyTextToClipboard } from '@/services/app/clipboardRuntime'
+import {
+  managedAiSessionTerminalSwitchTelemetry,
+  type ManagedAiSessionTerminalSwitchTelemetry,
+  type ManagedAiSessionTerminalSwitchTrace,
+  type ManagedAiSessionTerminalSwitchTrigger
+} from '@/services/ai/managedAiSessionTerminalSwitchTelemetry'
 import { useI18n } from '@/i18n'
 import {
   aiSessionsEventFilterOptions,
@@ -77,9 +83,14 @@ const writeAiSessionsPanelState = (state: AiSessionsPanelStoredState) => {
   }
 }
 
-export const useAiSessionsPanelRuntime = () => {
+type AiSessionsPanelRuntimeOptions = {
+  terminalSwitchTelemetry?: ManagedAiSessionTerminalSwitchTelemetry
+}
+
+export const useAiSessionsPanelRuntime = (options: AiSessionsPanelRuntimeOptions = {}) => {
   const workspace = useWorkspaceStore()
   const { t } = useI18n()
+  const terminalSwitchTelemetry = options.terminalSwitchTelemetry || managedAiSessionTerminalSwitchTelemetry
   const storedPanelState = readAiSessionsPanelState()
   const query = ref('')
   const mode = ref<ManagedAiPanelMode>('pending')
@@ -270,13 +281,68 @@ export const useAiSessionsPanelRuntime = () => {
     { immediate: true }
   )
 
-  const focusLinkedPanel = (session: Pick<ManagedAiSession, 'source' | 'id' | 'panelId' | 'terminalSessionId'>) => {
-    const linkedPanel = liveLinkedPanelForSession(session)
-    if (!linkedPanel) return false
+  const requestTerminalSwitch = (
+    session: Pick<ManagedAiSession, 'source' | 'id' | 'panelId' | 'terminalSessionId' | 'state' | 'sessionKind' | 'restorable'>,
+    trigger: ManagedAiSessionTerminalSwitchTrigger
+  ) => terminalSwitchTelemetry.requested({
+    source: session.source,
+    sessionId: session.id,
+    trigger,
+    previousPanelId: workspace.activePanelId,
+    requestedPanelId: session.panelId,
+    terminalSessionId: session.terminalSessionId,
+    activeModule: workspace.activeModule,
+    modeBefore: workspace.mode,
+    sessionState: session.state,
+    sessionKind: session.sessionKind,
+    restorable: session.restorable
+  })
+
+  const activateLinkedPanel = (
+    session: Pick<ManagedAiSession, 'source' | 'id'>,
+    linkedPanel: NonNullable<ReturnType<typeof liveLinkedPanelForSession>>,
+    trace: ManagedAiSessionTerminalSwitchTrace,
+    outcome: 'activated-existing' | 'already-active' | 'resumed'
+  ) => {
+    const samePanel = workspace.activePanelId === linkedPanel.id
+    if (!terminalSwitchTelemetry.targetResolved(trace, {
+      targetPanelId: linkedPanel.id,
+      targetTerminalSessionId: linkedPanel.sessionId,
+      targetStatus: linkedPanel.status,
+      samePanel
+    })) return false
     workspace.mode = 'terminal'
     workspace.activePanelId = linkedPanel.id
     workspace.selectedManagedAiSessionKey = sessionKey(session)
+    if (!terminalSwitchTelemetry.panelActivated(trace, {
+      activePanelId: workspace.activePanelId,
+      activeMode: workspace.mode,
+      outcome,
+      samePanel
+    })) return false
+    terminalSwitchTelemetry.uiFrameReady(trace, () => ({
+      activePanelId: workspace.activePanelId,
+      activeMode: workspace.mode,
+      activeModule: workspace.activeModule,
+      targetActive: workspace.activePanelId === linkedPanel.id,
+      outcome
+    }))
     return true
+  }
+
+  const focusLinkedPanel = (
+    session: Pick<ManagedAiSession, 'source' | 'id' | 'panelId' | 'terminalSessionId'>,
+    trace: ManagedAiSessionTerminalSwitchTrace,
+    outcome: 'activated-existing' | 'resumed' = 'activated-existing'
+  ) => {
+    const linkedPanel = liveLinkedPanelForSession(session)
+    if (!linkedPanel) return false
+    return activateLinkedPanel(
+      session,
+      linkedPanel,
+      trace,
+      outcome === 'resumed' ? 'resumed' : workspace.activePanelId === linkedPanel.id ? 'already-active' : 'activated-existing'
+    )
   }
 
   const selectSession = (session: Pick<ManagedAiSession, 'source' | 'id' | 'panelId' | 'terminalSessionId'>) => {
@@ -285,8 +351,16 @@ export const useAiSessionsPanelRuntime = () => {
     workspace.selectedManagedAiSessionKey = key
   }
 
-  const locateSessionTerminal = (session: Pick<ManagedAiSession, 'source' | 'id' | 'panelId' | 'terminalSessionId'>) => {
-    if (!focusLinkedPanel(session)) workspace.focusManagedAiSession(session.id)
+  const locateSessionTerminal = (
+    session: ManagedAiSession,
+    trigger: ManagedAiSessionTerminalSwitchTrigger = 'runtime-locate'
+  ) => {
+    const trace = requestTerminalSwitch(session, trigger)
+    if (focusLinkedPanel(session, trace)) return
+    workspace.focusManagedAiSession(session.id)
+    if (!focusLinkedPanel(session, trace)) {
+      terminalSwitchTelemetry.unavailable(trace, { outcome: 'target-unavailable' })
+    }
     workspace.selectedManagedAiSessionKey = sessionKey(session)
   }
 
@@ -323,13 +397,33 @@ export const useAiSessionsPanelRuntime = () => {
   const childSessionRowTooltip = (session: ManagedAiSession) =>
     [sessionRowTitle(session), sessionRowDetail(session), sessionKindLabel(session), childSessionRowMeta(session)].filter(Boolean).join('\n')
 
-  const resumeOrFocusSession = (session: ManagedAiSession) => {
-    if (focusLinkedPanel(session)) return
+  const resumeOrFocusSession = (
+    session: ManagedAiSession,
+    trigger: ManagedAiSessionTerminalSwitchTrigger = 'row-double-click'
+  ) => {
+    const trace = requestTerminalSwitch(session, trigger)
+    if (focusLinkedPanel(session, trace)) return
     if (canResumeSession(session)) {
+      terminalSwitchTelemetry.resumeRequested(trace)
       void workspace.resumeManagedAiSession(session.source, session.id)
+        .then((resumed) => {
+          const linkedPanel = liveLinkedPanelForSession(session)
+          terminalSwitchTelemetry.resumeFinished(trace, {
+            targetPanelId: linkedPanel?.id,
+            targetTerminalSessionId: linkedPanel?.sessionId,
+            activePanelId: workspace.activePanelId,
+            targetActive: Boolean(linkedPanel && workspace.activePanelId === linkedPanel.id),
+            outcome: resumed ? 'resume-finished' : 'resume-failed'
+          }, resumed ? undefined : new Error('Managed AI session resume did not activate a terminal.'))
+        })
+        .catch((error) => terminalSwitchTelemetry.resumeFinished(trace, {
+          activePanelId: workspace.activePanelId,
+          outcome: 'resume-failed'
+        }, error))
       return
     }
     workspace.selectedManagedAiSessionKey = sessionKey(session)
+    terminalSwitchTelemetry.unavailable(trace, { outcome: 'not-restorable' })
   }
 
   const closeSessionContextMenu = () => {
@@ -361,7 +455,7 @@ export const useAiSessionsPanelRuntime = () => {
   const locateContextSession = () => {
     const session = contextMenuSession.value
     if (!session) return
-    resumeOrFocusSession(session)
+    resumeOrFocusSession(session, 'context-menu')
     closeSessionContextMenu()
   }
 

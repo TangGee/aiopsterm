@@ -52,8 +52,16 @@ describe('databaseWorkspaceShellRuntime', () => {
 
   it('owns lifecycle hooks, menu close listener, cleanup, and group rename focus', async () => {
     const mountedCallbacks: Array<() => void> = []
+    const activatedCallbacks: Array<() => void> = []
+    const deactivatedCallbacks: Array<() => void> = []
     const unmountedCallbacks: Array<() => void> = []
     let clickHandler: (() => void) | null = null
+    const addWindowClickListener = vi.fn((handler: () => void) => {
+      clickHandler = handler
+    })
+    const removeWindowClickListener = vi.fn((handler: () => void) => {
+      if (clickHandler === handler) clickHandler = null
+    })
     const hooks = {
       loadDatabaseCatalog: vi.fn(async () => 'loaded'),
       loadDbAiPaneState: vi.fn(),
@@ -75,13 +83,11 @@ describe('databaseWorkspaceShellRuntime', () => {
       },
       {
         onMountedFn: (callback) => mountedCallbacks.push(callback),
+        onActivatedFn: (callback) => activatedCallbacks.push(callback),
+        onDeactivatedFn: (callback) => deactivatedCallbacks.push(callback),
         onBeforeUnmountFn: (callback) => unmountedCallbacks.push(callback),
-        addWindowClickListener: vi.fn((handler) => {
-          clickHandler = handler
-        }),
-        removeWindowClickListener: vi.fn((handler) => {
-          if (clickHandler === handler) clickHandler = null
-        }),
+        addWindowClickListener,
+        removeWindowClickListener,
         queryGroupEditInput: () => input,
         nextTickFn: nextTick,
         clearTimeoutFn: vi.fn()
@@ -90,13 +96,17 @@ describe('databaseWorkspaceShellRuntime', () => {
 
     runtime.registerLifecycle(hooks)
     expect(mountedCallbacks).toHaveLength(1)
+    expect(activatedCallbacks).toHaveLength(1)
+    expect(deactivatedCallbacks).toHaveLength(1)
     expect(unmountedCallbacks).toHaveLength(1)
 
     mountedCallbacks[0]()
+    activatedCallbacks[0]()
     await Promise.resolve()
     await Promise.resolve()
     expect(hooks.loadDatabaseCatalog).toHaveBeenCalledTimes(1)
     expect(hooks.loadDbAiPaneState).toHaveBeenCalledTimes(1)
+    expect(addWindowClickListener).toHaveBeenCalledTimes(1)
 
     requireCallback(clickHandler)()
     expect(hooks.closeMenus).toHaveBeenCalledTimes(1)
@@ -107,11 +117,24 @@ describe('databaseWorkspaceShellRuntime', () => {
     expect(input.focus).toHaveBeenCalledTimes(1)
     expect(input.select).toHaveBeenCalledTimes(1)
 
-    unmountedCallbacks[0]()
+    deactivatedCallbacks[0]()
+    deactivatedCallbacks[0]()
     expect(clickHandler).toBeNull()
+    expect(hooks.closeMenus).toHaveBeenCalledTimes(2)
     expect(hooks.stopSqlPaneResize).toHaveBeenCalledTimes(1)
     expect(hooks.stopDbAiPaneResize).toHaveBeenCalledTimes(1)
-    expect(hooks.clearSqlDiagnoseTimers).toHaveBeenCalledTimes(1)
+    expect(removeWindowClickListener).toHaveBeenCalledTimes(1)
     expect(hooks.persistDbAiPaneState).toHaveBeenCalledTimes(1)
+
+    activatedCallbacks[0]()
+    expect(addWindowClickListener).toHaveBeenCalledTimes(2)
+    expect(clickHandler).not.toBeNull()
+
+    unmountedCallbacks[0]()
+    expect(clickHandler).toBeNull()
+    expect(hooks.stopSqlPaneResize).toHaveBeenCalledTimes(2)
+    expect(hooks.stopDbAiPaneResize).toHaveBeenCalledTimes(2)
+    expect(hooks.clearSqlDiagnoseTimers).toHaveBeenCalledTimes(1)
+    expect(hooks.persistDbAiPaneState).toHaveBeenCalledTimes(2)
   })
 })

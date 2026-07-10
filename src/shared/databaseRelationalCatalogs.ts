@@ -5,6 +5,7 @@ import type {
   DatabaseSchemaInfo,
   DatabaseTableQueryInput
 } from './contracts/database'
+import { oracleServiceNameFromUrl } from './databaseConnectionNaming'
 import {
   databaseColumnId,
   isMysqlCompatibleDbType,
@@ -98,7 +99,11 @@ const mysqlCatalogsForConnection = async (connection: DatabaseConnectionInfo): P
 
 const postgresCatalogsForConnection = async (connection: DatabaseConnectionInfo): Promise<DatabaseCatalogInfo[]> =>
   withPostgresClient(connection, async (client) => {
-    const databaseName = trim(connection.database)
+    let databaseName = trim(connection.database)
+    if (!databaseName) {
+      const databaseRows = await postgresRows<Record<string, unknown>>(client, 'SELECT current_database() AS database_name')
+      databaseName = trim(rowValue(databaseRows[0] ?? {}, 'database_name', 'DATABASE_NAME'))
+    }
     const schemaRows = await postgresRows<{ schema_name?: string }>(
       client,
       "SELECT schema_name FROM information_schema.schemata WHERE schema_name NOT LIKE 'pg_toast%' AND schema_name NOT LIKE 'pg_temp_%' ORDER BY schema_name"
@@ -241,9 +246,10 @@ const oracleCatalogsForConnection = async (connection: DatabaseConnectionInfo): 
       "SELECT SYS_CONTEXT('USERENV', 'SERVICE_NAME') AS service_name, SYS_CONTEXT('USERENV', 'DB_NAME') AS db_name FROM DUAL"
     ).catch(() => [])
     const databaseName =
-      trim(connection.database) ||
       trim(rowValue(contextRows[0] ?? {}, 'SERVICE_NAME', 'service_name')) ||
       trim(rowValue(contextRows[0] ?? {}, 'DB_NAME', 'db_name')) ||
+      oracleServiceNameFromUrl(connection.url ?? '') ||
+      trim(connection.database) ||
       oracleConnectStringFromInput(connection)
     const schemaRows = await oracleRows<Record<string, unknown>>(
       client,

@@ -3,6 +3,7 @@ import {
   DB_AI_PANE_DEFAULT_WIDTH,
   DB_AI_PANE_MAX_WIDTH,
   DB_AI_PANE_MIN_WIDTH,
+  databaseCatalogDisplayName,
   defaultSchemaForSqlConnection,
   isMysqlCompatibleDbType,
   isPostgresCompatibleDbType,
@@ -61,7 +62,8 @@ export const normalizeDbAiPaneContext = (
 
 export const dbAiPaneContextSummary = (connection: DatabaseConnectionInfo | null | undefined, context: DbAiPaneContext) => {
   if (!connection) return 'No database context selected'
-  return [connection.name, connection.dbType, context.catalogName, context.schemaName].filter(Boolean).join(' · ')
+  const catalogName = databaseCatalogDisplayName(connection, { name: context.catalogName })
+  return [connection.name, connection.dbType, catalogName, context.schemaName].filter(Boolean).join(' · ')
 }
 
 export const dbAiPaneCanSend = (draft: string, context: DbAiPaneContext, isStreaming: boolean) =>
@@ -108,8 +110,10 @@ export const currentDbAiPaneStateSnapshot = (input: {
   messages: input.messages.slice(-24).map((message) => ({ ...message }))
 })
 
-export const dbAiContextParts = (tab: SqlTab, connection?: DatabaseConnectionInfo) =>
-  [connection?.name, connection?.dbType, tab.catalogName, tab.schemaName].filter(Boolean)
+export const dbAiContextParts = (tab: SqlTab, connection?: DatabaseConnectionInfo) => {
+  const catalogName = databaseCatalogDisplayName(connection, { name: tab.catalogName })
+  return [connection?.name, connection?.dbType, catalogName, tab.schemaName].filter(Boolean)
+}
 
 export const dbAiBackendContext = (
   input: {

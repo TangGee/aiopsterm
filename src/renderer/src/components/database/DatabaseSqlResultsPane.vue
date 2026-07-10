@@ -36,6 +36,17 @@
         </span>
         <button
           type="button"
+          class="db-result-tab-pin"
+          :class="{ active: result.pinned }"
+          :title="result.pinned ? 'Unpin result tab' : 'Pin result tab'"
+          :aria-label="result.pinned ? 'Unpin result tab' : 'Pin result tab'"
+          :aria-pressed="Boolean(result.pinned)"
+          @click.stop="emit('toggleResultTabPinned', result.id)"
+        >
+          <Pin />
+        </button>
+        <button
+          type="button"
           class="db-result-tab-close"
           aria-label="Close result tab"
           @click.stop="emit('closeResultTab', result.id)"
@@ -173,7 +184,7 @@
 </template>
 
 <script setup lang="ts">
-import { X } from 'lucide-vue-next'
+import { Pin, X } from 'lucide-vue-next'
 import DataGridToolbar from '@/components/database/DataGridToolbar.vue'
 import DataStatusBar from '@/components/database/DataStatusBar.vue'
 import ResultGrid from '@/components/database/ResultGrid.vue'
@@ -199,6 +210,7 @@ defineProps<{
 
 const emit = defineEmits<{
   updateSqlResultActiveTab: [resultTabId: string]
+  toggleResultTabPinned: [resultId: string]
   closeResultTab: [resultId: string]
   openSqlHistoryResult: [history: SqlHistory]
   diagnoseSqlError: [result: SqlResult]

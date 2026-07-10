@@ -178,6 +178,7 @@ export const createDatabaseCatalogConnectionWorkspaceController = (
   const formRuntime = createDatabaseConnectionFormRuntime(
     {
       databaseEngines,
+      connections,
       connectionModalOpen,
       connectionModalMode,
       connectionFeedback,

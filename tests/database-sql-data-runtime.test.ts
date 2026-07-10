@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { isProxy, reactive } from 'vue'
 import {
   appendSqlHistoryFromExecution,
   applyDataFilter,
@@ -203,5 +204,48 @@ describe('databaseSqlDataRuntime', () => {
     expect(buildSqlResultExportInput(tab, result, result.rows, view, 1, 'Orders DB')).toEqual(expect.objectContaining({ title: 'Orders Query-#1-1 select 1', kind: 'sql-result' }))
     expect(sqlResultChartSource(tab, result, result.rows, 1)).toEqual(expect.objectContaining({ title: 'Orders Query - #1-1 select 1', scopeLabel: 'SQL page 1' }))
     expect(sqlResultCommentKey(tab, result)).toEqual({ scope: 'sql-result', connectionId: 'conn-1', databaseName: 'orders', schemaName: 'public', resultId: result.id, sql: 'select 1' })
+
+    const sqliteTab = { ...tab, catalogName: 'main', schemaName: '' }
+    expect(defaultSqlFileName(sqliteTab, 'Local cache', 'cache.sqlite3')).toBe('Orders-Query-Local-cache-cache.sqlite3.sql')
+    expect(defaultSqlFileName(sqliteTab, 'cache.sqlite3', 'cache.sqlite3')).toBe('Orders-Query-cache.sqlite3.sql')
+    expect(buildSqlResultExportInput(sqliteTab, result, result.rows, view, 1, 'Local cache', 'cache.sqlite3').metadata?.databaseName).toBe('cache.sqlite3')
+    expect(sqlResultCommentKey(sqliteTab, result).databaseName).toBe('main')
+
+    const sqliteDataTab = { ...createDataTab({ connectionId: 'conn-sqlite', catalogName: 'main', table }), loading: false }
+    expect(buildDataPageExportInput(sqliteDataTab, [], 'Local cache', 'cache.sqlite3').metadata?.databaseName).toBe('cache.sqlite3')
+    expect(dataPageChartSource(sqliteDataTab, [], 'cache.sqlite3').scopeLabel).toBe('cache.sqlite3 / orders')
+    expect(dataPageCommentKey(sqliteDataTab).databaseName).toBe('main')
+  })
+
+  it('detaches reactive SQL and table page values before sending export inputs through IPC', () => {
+    const createdAt = new Date('2026-07-10T04:00:00.000Z')
+    const rows = reactive([
+      {
+        id: 1,
+        payload: { status: 'ready', tags: ['daily'] },
+        createdAt,
+        bytes: new Uint8Array([1, 2, 3])
+      }
+    ]) as Array<Record<string, unknown>>
+    const tab = reactive(makeSqlTab()) as SqlTab
+    const result = reactive(createRunningSqlResult(tab, 'select payload from orders', 1))
+    result.columns = reactive(['id', 'payload', 'createdAt', 'bytes'])
+    result.rows = rows
+
+    const sqlInput = buildSqlResultExportInput(tab, result, rows, createSqlResultViewState(), 1)
+    const dataTab = reactive(createDataTab({ connectionId: 'conn-1', catalogName: 'orders', table, schemaName: 'public' })) as DataTab
+    dataTab.columns = reactive(['id', 'payload', 'createdAt', 'bytes'])
+    const dataInput = buildDataPageExportInput(dataTab, rows)
+
+    for (const input of [sqlInput, dataInput]) {
+      expect(() => structuredClone(input)).not.toThrow()
+      expect(isProxy(input.columns)).toBe(false)
+      expect(isProxy(input.rows)).toBe(false)
+      expect(isProxy(input.rows[0])).toBe(false)
+      expect(isProxy(input.rows[0].payload)).toBe(false)
+      expect(input.rows[0].createdAt).toEqual(createdAt)
+      expect(input.rows[0].createdAt).not.toBe(createdAt)
+      expect(input.rows[0].bytes).toEqual(new Uint8Array([1, 2, 3]))
+    }
   })
 })

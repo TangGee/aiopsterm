@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref } from 'vue'
 import {
   DB_FILTER_NULL,
   distinctFilterValues,
@@ -232,13 +232,29 @@ function commit() {
   editing.value = null
 }
 
-onMounted(() => {
-  document.addEventListener('mousedown', onDocumentMouseDown, true)
-})
+let documentMouseDownAttached = false
 
-onBeforeUnmount(() => {
+function attachDocumentMouseDown() {
+  if (documentMouseDownAttached) return
+  document.addEventListener('mousedown', onDocumentMouseDown, true)
+  documentMouseDownAttached = true
+}
+
+function detachDocumentMouseDown() {
+  if (!documentMouseDownAttached) return
   document.removeEventListener('mousedown', onDocumentMouseDown, true)
-})
+  documentMouseDownAttached = false
+}
+
+function deactivateGridSurface() {
+  closeFilter()
+  detachDocumentMouseDown()
+}
+
+onMounted(attachDocumentMouseDown)
+onActivated(attachDocumentMouseDown)
+onDeactivated(deactivateGridSurface)
+onBeforeUnmount(deactivateGridSurface)
 </script>
 
 <template>

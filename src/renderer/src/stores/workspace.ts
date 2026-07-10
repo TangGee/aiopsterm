@@ -570,6 +570,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     },
     {
       setTopNotice,
+      i18nText,
       createRendererLocalId,
       findKnowledgeNode: (relPath) => findKnowledgeNode(relPath),
       recordMacroTerminalInput: (...args) => recordMacroTerminalInput(...args),

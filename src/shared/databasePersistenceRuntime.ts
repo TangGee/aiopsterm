@@ -18,18 +18,26 @@ import {
   supportedDatabaseEngines
 } from './databaseSeedData'
 import {
+  isLegacyDefaultDatabaseConnectionName,
+  suggestedDatabaseConnectionName,
+  uniqueDatabaseConnectionName
+} from './databaseConnectionNaming'
+import {
   isRecord,
   trim
 } from './databaseTableRuntime'
 
+export const DATABASE_PERSISTED_STATE_VERSION = 2 as const
+
 export type DatabasePersistedState = {
-  version: 1
+  version: typeof DATABASE_PERSISTED_STATE_VERSION
   groups: DatabaseGroupInfo[]
   groupParents: Record<string, string | null>
   connections: DatabaseConnectionInfo[]
   secrets: Record<string, { password?: string }>
   aiPaneState?: DatabaseAiPaneStateSnapshot
   needsSecretMigration?: boolean
+  needsStateMigration?: boolean
 }
 
 const databaseEnvValues = new Set<DatabaseConnectionInfo['env']>(['Development', 'TEST', 'Staging', 'Production'])
@@ -119,28 +127,45 @@ const normalizePersistedGroup = (value: unknown): DatabaseGroupInfo | null => {
   return { id, name }
 }
 
-const normalizePersistedConnection = (value: unknown, knownGroupIds: Set<string>): DatabaseConnectionInfo | null => {
+const normalizePersistedConnection = (
+  value: unknown,
+  knownGroupIds: Set<string>,
+  migrateLegacyNames: boolean
+): DatabaseConnectionInfo | null => {
   if (!isRecord(value)) return null
   const id = normalizePersistedString(value.id)
-  const name = normalizePersistedString(value.name)
+  const storedName = normalizePersistedString(value.name)
   const dbType = typeof value.dbType === 'string' && supportedDatabaseEngines.has(value.dbType as DatabaseEngineCode) ? (value.dbType as DatabaseEngineCode) : null
-  if (!id || !name || !dbType) return null
+  if (!id || !storedName || !dbType) return null
   const port = normalizedDatabasePort(typeof value.port === 'number' ? value.port : Number(value.port))
   const sslMode = postgresSslModeValues.has(String(value.sslMode ?? '')) ? (String(value.sslMode ?? '') as DatabaseConnectionInfo['sslMode']) : ''
   const proxyName = dbType !== 'sqlite' && value.needProxy === true ? normalizePersistedString(value.proxyName) : ''
+  const host = normalizePersistedString(value.host, dbType === 'sqlite' ? 'local' : '')
+  const database = normalizePersistedString(value.database)
+  const filePath = dbType === 'sqlite' ? normalizePersistedString(value.filePath) : ''
+  const name =
+    migrateLegacyNames && isLegacyDefaultDatabaseConnectionName(storedName, dbType)
+      ? suggestedDatabaseConnectionName({ dbType, host, port, database, filePath, url: normalizePersistedString(value.url) })
+      : storedName
+  const catalogs = Array.isArray(value.catalogs)
+    ? value.catalogs.map(normalizePersistedCatalog).filter((catalog): catalog is DatabaseCatalogInfo => Boolean(catalog))
+    : []
+  if (dbType === 'sqlite' && catalogs.length && !catalogs.some((catalog) => catalog.name === 'main')) {
+    catalogs[0] = { ...catalogs[0], name: 'main' }
+  }
   return {
     id,
     name,
     dbType,
     env: typeof value.env === 'string' && databaseEnvValues.has(value.env as DatabaseConnectionInfo['env']) ? (value.env as DatabaseConnectionInfo['env']) : 'Development',
     groupId: knownGroupIds.has(trim(value.groupId)) ? trim(value.groupId) : DEFAULT_DATABASE_GROUP_ID,
-    host: normalizePersistedString(value.host, dbType === 'sqlite' ? 'local' : ''),
+    host,
     port: dbType === 'sqlite' ? null : port,
     authentication: 'UserAndPassword',
     user: dbType === 'sqlite' ? '' : normalizePersistedString(value.user),
     hasPassword: value.hasPassword === true,
-    database: normalizePersistedString(value.database),
-    filePath: dbType === 'sqlite' ? normalizePersistedString(value.filePath) || undefined : undefined,
+    database,
+    filePath: dbType === 'sqlite' ? filePath || undefined : undefined,
     readonly: dbType === 'sqlite' ? value.readonly !== false : undefined,
     sslMode: isPostgresCompatibleDbType(dbType) || dbType === 'sqlserver' ? sslMode : '',
     needProxy: proxyName ? true : undefined,
@@ -150,14 +175,15 @@ const normalizePersistedConnection = (value: unknown, knownGroupIds: Set<string>
       typeof value.status === 'string' && databaseStatusValues.has(value.status as DatabaseConnectionInfo['status'])
         ? (value.status as DatabaseConnectionInfo['status'])
         : 'idle',
-    catalogs: Array.isArray(value.catalogs)
-      ? value.catalogs.map(normalizePersistedCatalog).filter((catalog): catalog is DatabaseCatalogInfo => Boolean(catalog))
-      : []
+    catalogs
   }
 }
 
 export const normalizePersistedState = (value: unknown): DatabasePersistedState | null => {
   if (!isRecord(value)) return null
+  const persistedVersion = Number(value.version)
+  if (Number.isFinite(persistedVersion) && persistedVersion > DATABASE_PERSISTED_STATE_VERSION) return null
+  const migrateLegacyNames = persistedVersion !== DATABASE_PERSISTED_STATE_VERSION
   const groups = Array.isArray(value.groups)
     ? value.groups.map(normalizePersistedGroup).filter((group): group is DatabaseGroupInfo => Boolean(group))
     : []
@@ -171,9 +197,33 @@ export const normalizePersistedState = (value: unknown): DatabasePersistedState 
     const parentId = trim(rawParents[group.id])
     groupParents[group.id] = parentId && parentId !== group.id && knownGroupIds.has(parentId) ? parentId : null
   })
-  const connections = Array.isArray(value.connections)
-    ? value.connections.map((connection) => normalizePersistedConnection(connection, knownGroupIds)).filter((connection): connection is DatabaseConnectionInfo => Boolean(connection))
-    : []
+  const normalizedConnections: Array<{ connection: DatabaseConnectionInfo; migratedName: boolean; migratedCatalogName: boolean }> = []
+  if (Array.isArray(value.connections)) {
+    value.connections.forEach((rawConnection) => {
+      const storedName = isRecord(rawConnection) ? normalizePersistedString(rawConnection.name) : ''
+      const storedCatalogNames =
+        isRecord(rawConnection) && Array.isArray(rawConnection.catalogs)
+          ? rawConnection.catalogs.map((catalog) => (isRecord(catalog) ? normalizePersistedString(catalog.name) : '')).filter(Boolean)
+          : []
+      const connection = normalizePersistedConnection(rawConnection, knownGroupIds, migrateLegacyNames)
+      if (connection) {
+        normalizedConnections.push({
+          connection,
+          migratedName: connection.name !== storedName,
+          migratedCatalogName: connection.catalogs.map((catalog) => catalog.name).join('\u001f') !== storedCatalogNames.join('\u001f')
+        })
+      }
+    })
+  }
+  const usedConnectionNames = new Set(
+    normalizedConnections.filter((item) => !item.migratedName).map((item) => item.connection.name.toLowerCase())
+  )
+  normalizedConnections.forEach((item) => {
+    if (!item.migratedName) return
+    item.connection.name = uniqueDatabaseConnectionName(item.connection.name, usedConnectionNames)
+    usedConnectionNames.add(item.connection.name.toLowerCase())
+  })
+  const connections = normalizedConnections.map((item) => item.connection)
   const secrets: DatabasePersistedState['secrets'] = {}
   const rawSecrets = isRecord(value.secrets) ? value.secrets : {}
   let needsSecretMigration = false
@@ -189,12 +239,13 @@ export const normalizePersistedState = (value: unknown): DatabasePersistedState 
     }
   })
   return {
-    version: 1,
+    version: DATABASE_PERSISTED_STATE_VERSION,
     groups,
     groupParents,
     connections,
     secrets,
     aiPaneState: isRecord(value.aiPaneState) ? normalizeDatabaseAiPaneState(value.aiPaneState) : undefined,
-    needsSecretMigration
+    needsSecretMigration,
+    needsStateMigration: migrateLegacyNames || normalizedConnections.some((item) => item.migratedCatalogName)
   }
 }

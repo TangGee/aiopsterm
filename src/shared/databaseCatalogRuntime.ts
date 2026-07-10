@@ -11,6 +11,7 @@ import type {
   DatabaseTableInfo
 } from './contracts/database'
 import { connectionUsesDatabaseProxy } from './databaseConnectionTestRuntime'
+import { databaseFileNameFromPath } from './databaseConnectionNaming'
 import {
   clickHouseBaseUrlFrom,
   isClickHouseConnection,
@@ -286,23 +287,19 @@ const buildSavedConnectionUrl = (
   return `${scheme}://${normalized.host}${port}${database}`
 }
 
-const basenameFromPath = (value: string) => {
-  const normalized = value.replace(/\\/g, '/')
-  return normalized.split('/').filter(Boolean).pop() || 'main'
-}
-
 export const defaultCatalogsForSavedConnection = (connection: Omit<DatabaseConnectionInfo, 'catalogs'>): DatabaseCatalogInfo[] => {
   const catalogName = trim(connection.database)
   if (!catalogName) return []
   if (connection.dbType === 'sqlite') {
     const sqliteCatalogs = sqliteCatalogsForConnection({ ...connection, catalogs: [] })
-    return sqliteCatalogs ?? [{ name: catalogName, tables: [] }]
+    return sqliteCatalogs ?? [{ name: 'main', tables: [] }]
   }
   if (isPostgresCompatibleDbType(connection.dbType)) {
     return [{ name: catalogName, schemas: [{ name: 'public', tables: [], views: [], functions: [], procedures: [] }] }]
   }
   if (connection.dbType === 'oracle') {
-    return [{ name: catalogName, schemas: [{ name: 'OPS', tables: [], views: [], functions: [], procedures: [] }] }]
+    const schemaName = trim(connection.user).toUpperCase()
+    return [{ name: catalogName, schemas: schemaName ? [{ name: schemaName, tables: [], views: [], functions: [], procedures: [] }] : [] }]
   }
   if (connection.dbType === 'sqlserver') {
     return [{ name: catalogName, schemas: [{ name: 'dbo', tables: [], views: [], functions: [], procedures: [] }] }]
@@ -338,7 +335,7 @@ export const normalizeDatabaseConnectionSaveDraft = (
   const isSqlite = input.dbType === 'sqlite'
   const hasOracleConnectString = input.dbType === 'oracle' && !!trim(input.url)
   const filePath = isSqlite ? trim(input.filePath) || sqlitePathFromUrl(trim(input.url)) : ''
-  const database = isSqlite ? basenameFromPath(filePath) : trim(input.database)
+  const database = isSqlite ? databaseFileNameFromPath(filePath) || 'main' : trim(input.database)
   const host = isSqlite ? 'local' : hasOracleConnectString ? 'connect-string' : trim(input.host)
   const port = isSqlite || hasOracleConnectString ? null : normalizedDatabasePort(input.port)
   const sslMode: DatabaseConnectionInfo['sslMode'] =

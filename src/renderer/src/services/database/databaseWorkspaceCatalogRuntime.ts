@@ -349,10 +349,7 @@ export const createDatabaseWorkspaceCatalogRuntime = (
       if (connection) {
         const catalogName = active.catalogName || connection.catalogs[0]?.name || ''
         const catalog = connection.catalogs.find((item) => item.name === catalogName) ?? connection.catalogs[0]
-        const schemaName =
-          active.kind === 'sql'
-            ? active.schemaName || pickDefaultSchemaName(catalog)
-            : active.schemaName || pickDefaultSchemaName(catalog)
+        const schemaName = active.schemaName || defaultSchemaForSqlConnection(connection, catalog)
         const context = { connectionId: connection.id, catalogName: catalog?.name ?? catalogName, schemaName: schemaName ?? '' }
         if (isSqlConsoleContextReady(context)) return context
       }
@@ -389,11 +386,6 @@ export const createDatabaseWorkspaceCatalogRuntime = (
     }
   }
 
-  function pickDefaultSchemaName(catalog: DatabaseCatalogInfo | undefined) {
-    if (!catalog?.schemas?.length) return ''
-    return catalog.schemas.find((schema) => schema.name === 'public')?.name ?? catalog.schemas[0]?.name ?? ''
-  }
-
   function resolveSelectedSqlContext(): SqlConsoleContext | null {
     const selectedId = selectedNodeId.value
     if (!selectedId) return null
@@ -402,7 +394,7 @@ export const createDatabaseWorkspaceCatalogRuntime = (
     for (const item of connections.value) {
       for (const catalog of item.catalogs) {
         if (`${item.id}:${catalog.name}` === selectedId) {
-          return { connectionId: item.id, catalogName: catalog.name, schemaName: pickDefaultSchemaName(catalog) ?? '' }
+          return { connectionId: item.id, catalogName: catalog.name, schemaName: defaultSchemaForSqlConnection(item, catalog) }
         }
         for (const schema of catalog.schemas ?? []) {
           if (`${item.id}:${catalog.name}:${schema.name}` === selectedId) {

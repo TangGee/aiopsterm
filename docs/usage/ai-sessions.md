@@ -14,12 +14,12 @@ The content workspace is organized as one readable full-record stream. It loads 
 
 Editing rules:
 
-- Running or pending-input sessions are read-only.
-- Codex and Claude Code JSONL text records can be edited when the session is not active.
-- OpenCode `text` and `reasoning` parts can be edited when the session is not active.
+- Codex and Claude Code JSONL text records can be edited regardless of whether the session is idle, running, or waiting for input.
+- OpenCode `text` and `reasoning` parts can be edited regardless of the managed-session state.
 - Non-text records and event-only fallback rows are read-only.
 - Saving checks the source revision first. If the transcript changed on disk, reload the content panel before saving again.
 - Deleting an editable content record uses the same source-revision check and creates a local backup before changing the transcript. JSONL records delete the selected text field and may remove the whole transcript line if no browseable text remains; OpenCode records delete the selected `part`.
+- After a save or delete succeeds, restart that AI conversation before expecting the agent to use the changed transcript. An already running agent can retain conversation context in memory even though the local transcript changed on disk.
 - Switching record views or refreshing the content panel with unsaved edits asks before discarding the local edit.
 
 Before writing, aiopsterm creates a backup under the app user data directory:
@@ -28,4 +28,4 @@ Before writing, aiopsterm creates a backup under the app user data directory:
 agent-sessions/content-backups/<source>/<session>/
 ```
 
-Use the normal tab close button to close a content workspace panel. Closing the content panel does not close or end the owning AI session or terminal.
+Use the normal tab close button to close a content workspace panel. Closing the content panel does not close or end the owning AI session or terminal. Closing the owning terminal tab is different: aiopsterm asks Main to terminate that PTY first, removes the tab only after termination succeeds or Main confirms that the PTY is already gone, and then records the AI session as ended. If termination fails, the terminal tab remains open and the error is shown.

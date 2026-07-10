@@ -189,7 +189,8 @@ export const registerMainIpcRuntime = (input: MainIpcRuntimeInput) => {
   registerKubernetesIpc(ipcMain)
   registerManagedAiSessionsIpc(ipcMain, {
     emitAgentSessionEvent: input.broadcastAiAgentSessionEvent,
-    focusManagedAiSession: input.broadcastManagedAiSessionFocusRequest
+    focusManagedAiSession: input.broadcastManagedAiSessionFocusRequest,
+    isTerminalSessionLive: (sessionId) => input.terminalRuntime.sessions.has(sessionId)
   })
   registerModelsIpc(ipcMain, {
     getConfig: input.getConfig,

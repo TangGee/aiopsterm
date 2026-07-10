@@ -109,8 +109,9 @@ export const createTerminalControlSurfaceOperationHandlers = ({
         continue
       }
       const snapshot = surfaceSummaryForControl(target)
-      workspace.closePanel(target.id)
-      closedSurfaces.push(snapshot)
+      const result = await workspace.closePanel(target.id)
+      if (result.closed) closedSurfaces.push(snapshot)
+      else skipped += 1
     }
     workspace.activePanelId = panel.id
     await nextTick()

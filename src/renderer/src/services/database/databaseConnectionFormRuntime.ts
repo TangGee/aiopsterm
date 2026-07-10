@@ -28,6 +28,11 @@ import type {
   DatabaseEngineInfo,
   DatabaseWorkspaceCatalog
 } from '@shared/contracts/database'
+import {
+  defaultDatabaseConnectionName,
+  suggestedDatabaseConnectionName,
+  uniqueDatabaseConnectionName
+} from '@shared/databaseConnectionNaming'
 
 const DATABASE_CONNECTION_TEST_MALFORMED_MESSAGE = 'Database connection test backend returned malformed result data.'
 const DATABASE_CONNECTION_SAVE_MALFORMED_MESSAGE = 'Database connection save backend returned malformed result data.'
@@ -35,6 +40,7 @@ const DATABASE_CREATE_DATABASE_MALFORMED_MESSAGE = 'Create database backend retu
 
 type DatabaseConnectionFormState = {
   databaseEngines: Ref<DatabaseEngineInfo[]>
+  connections: Ref<DatabaseConnectionInfo[]>
   connectionModalOpen: Ref<boolean>
   connectionModalMode: Ref<'create' | 'edit'>
   connectionFeedback: Ref<string>
@@ -90,6 +96,7 @@ export const createDatabaseConnectionFormRuntime = (
 ) => {
   const {
     databaseEngines,
+    connections,
     connectionModalOpen,
     connectionModalMode,
     connectionFeedback,
@@ -115,6 +122,7 @@ export const createDatabaseConnectionFormRuntime = (
     saveConnection,
     createDatabase: createDatabaseThroughBackend
   } = deps
+  let automaticConnectionName = ''
 
   const databaseProxyAvailable = computed(() => connectionDraft.dbType !== 'sqlite' && databaseSshProxyOptions.value.length > 0)
 
@@ -126,6 +134,7 @@ export const createDatabaseConnectionFormRuntime = (
     set(value: string) {
       connectionUrlDirty.value = true
       connectionDraft.url = value
+      syncAutomaticConnectionName()
     }
   }) as WritableComputedRef<string>
 
@@ -166,17 +175,31 @@ export const createDatabaseConnectionFormRuntime = (
     connectionFeedbackKind.value = 'info'
   }
 
+  function syncAutomaticConnectionName() {
+    if (connectionModalMode.value !== 'create') return
+    const currentName = connectionDraft.name.trim()
+    if (currentName && currentName !== automaticConnectionName) return
+    const suggestedName = suggestedDatabaseConnectionName(connectionDraft)
+    automaticConnectionName = uniqueDatabaseConnectionName(
+      suggestedName,
+      connections.value.filter((connection) => connection.id !== connectionDraft.id).map((connection) => connection.name)
+    )
+    connectionDraft.name = automaticConnectionName
+  }
+
   function markConnectionUrlAuto() {
+    syncAutomaticConnectionName()
     if (!connectionUrlDirty.value) connectionDraft.url = ''
     clearConnectionFeedback()
   }
 
   function openConnectionModal(dbType: DatabaseEngineCode, groupId: string) {
     connectionModalMode.value = 'create'
+    automaticConnectionName = defaultDatabaseConnectionName(dbType)
     Object.assign(connectionDraft, {
       id: '',
       dbType,
-      name: `${engineName(dbType).toLowerCase()}-connection`,
+      name: automaticConnectionName,
       env: 'Development',
       groupId,
       host: '127.0.0.1',
@@ -192,6 +215,7 @@ export const createDatabaseConnectionFormRuntime = (
       proxyName: '',
       url: ''
     })
+    syncAutomaticConnectionName()
     resetConnectionFeedback()
     connectionUrlDirty.value = false
     passwordVisible.value = false
@@ -201,6 +225,7 @@ export const createDatabaseConnectionFormRuntime = (
 
   function editConnection(connection: DatabaseConnectionInfo) {
     connectionModalMode.value = 'edit'
+    automaticConnectionName = ''
     Object.assign(connectionDraft, {
       id: connection.id,
       dbType: connection.dbType,
@@ -232,6 +257,7 @@ export const createDatabaseConnectionFormRuntime = (
     resetConnectionFeedback()
     connectionUrlDirty.value = false
     passwordVisible.value = false
+    automaticConnectionName = ''
   }
 
   function openSshProxyConfigFromConnectionModal() {
@@ -263,6 +289,7 @@ export const createDatabaseConnectionFormRuntime = (
     const filePath = result && !result.canceled ? result.filePaths?.[0] : ''
     if (!filePath) return
     connectionDraft.filePath = filePath
+    syncAutomaticConnectionName()
     connectionDraft.url = `sqlite://${filePath}`
     connectionUrlDirty.value = true
     clearConnectionFeedback()

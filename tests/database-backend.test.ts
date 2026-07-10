@@ -262,7 +262,7 @@ const createPrestoFetchDouble = () => {
     })
     const normalized = sql.replace(/\s+/g, ' ').trim().toLowerCase()
     if (normalized.startsWith('select node_version')) return rowsFor([{ name: 'version', type: 'varchar' }], [['0.286']])
-    if (normalized.includes('from information_schema.catalogs')) return rowsFor([{ name: 'catalog_name', type: 'varchar' }], [['hive']])
+    if (normalized === 'show catalogs') return rowsFor([{ name: 'Catalog', type: 'varchar' }], [['hive']])
     if (normalized.includes('information_schema.schemata')) return rowsFor([{ name: 'schema_name', type: 'varchar' }], [['ops'], ['analytics']])
     if (normalized.includes('information_schema.tables')) {
       return rowsFor(
@@ -3693,6 +3693,7 @@ WHERE status = ''open'';
     const connected = await connectDatabaseConnection('conn-live-presto')
     expect(connected.ok).toBe(true)
     expect(connected.data?.connection.status).toBe('connected')
+    expect(presto.state.requests.find((request) => request.sql === 'SHOW CATALOGS')).toMatchObject({ catalog: undefined, schema: undefined })
     const opsSchema = connected.data?.connection.catalogs[0]?.schemas?.find((schema) => schema.name === 'ops')
     expect(opsSchema?.tables[0]).toMatchObject({
       name: 'events',
@@ -4177,7 +4178,7 @@ WHERE status = ''open'';
         name: 'live-oracle',
         user: 'ops',
         password: 'secret',
-        database: 'ORCLPDB1',
+        database: 'STALEPDB',
         url: 'jdbc:oracle:thin:@//db.example.test:1521/ORCLPDB1',
         env: 'Production',
         groupId: 'group-prod',
@@ -4197,6 +4198,8 @@ WHERE status = ''open'';
     const connected = await connectDatabaseConnection('conn-live-oracle')
     expect(connected.ok).toBe(true)
     expect(connected.data?.connection.status).toBe('connected')
+    expect(connected.data?.connection.catalogs[0]?.name).toBe('ORCLPDB1')
+    expect(connected.data?.connection.database).toBe('ORCLPDB1')
     const opsSchema = connected.data?.connection.catalogs[0]?.schemas?.find((schema) => schema.name === 'OPS')
     expect(opsSchema?.tables[0]).toMatchObject({
       name: 'AUDIT_LOG',

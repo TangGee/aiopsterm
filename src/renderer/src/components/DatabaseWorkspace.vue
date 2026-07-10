@@ -122,6 +122,7 @@
       @start-sql-pane-resize="startSqlPaneResize"
       @reset-sql-pane-split="resetSqlPaneSplit"
       @update-sql-result-active-tab="updateSqlResultActiveTab"
+      @toggle-result-tab-pinned="toggleResultTabPinned"
       @close-result-tab="closeResultTab"
       @open-sql-history-result="openSqlHistoryResult"
       @diagnose-sql-error="diagnoseSqlError"
@@ -496,6 +497,7 @@ const {
   openSqlHistoryResult,
   isSqlHistoryClosed,
   updateSqlResultActiveTab,
+  toggleResultTabPinned,
   updateSqlResultPage,
   updateSqlResultPageSize,
   gotoLastSqlResultPage,

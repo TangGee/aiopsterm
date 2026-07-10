@@ -129,14 +129,14 @@
         value=""
         disabled
       >
-        Database
+        {{ databaseCatalogFieldLabel(activeSqlConnection) }}
       </option>
       <option
         v-for="catalog in currentSqlCatalogs"
         :key="catalog.name"
         :value="catalog.name"
       >
-        {{ catalog.name }}
+        {{ databaseCatalogDisplayName(activeSqlConnection, catalog) }}
       </option>
     </select>
     <select
@@ -164,6 +164,7 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import {
   AlignLeft,
   BrainCircuit,
@@ -179,8 +180,12 @@ import {
 } from 'lucide-vue-next'
 import type { DbAiToolbarAction, SqlTab } from '@/components/database/databaseMainWorkspaceTypes'
 import type { DatabaseCatalogInfo, DatabaseConnectionInfo } from '@shared/contracts/database'
+import {
+  databaseCatalogDisplayName,
+  databaseCatalogFieldLabel
+} from '@/services/database/databaseWorkspaceRuntime'
 
-defineProps<{
+const props = defineProps<{
   activeSqlTab: SqlTab
   activeSqlCanRun: boolean
   activeSqlSaving: boolean
@@ -191,6 +196,8 @@ defineProps<{
   currentSqlSchemas: NonNullable<DatabaseCatalogInfo['schemas']>
   activeSqlRequiresSchema: boolean
 }>()
+
+const activeSqlConnection = computed(() => props.connections.find((connection) => connection.id === props.activeSqlTab.connectionId) ?? null)
 
 const emit = defineEmits<{
   runSql: [mode: 'all' | 'current' | 'explain']

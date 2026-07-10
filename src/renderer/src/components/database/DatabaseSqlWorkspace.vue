@@ -80,6 +80,7 @@
         :sql-diagnose="sqlDiagnose"
         :is-sql-history-closed="isSqlHistoryClosed"
         @update-sql-result-active-tab="emit('updateSqlResultActiveTab', $event)"
+        @toggle-result-tab-pinned="emit('toggleResultTabPinned', $event)"
         @close-result-tab="emit('closeResultTab', $event)"
         @open-sql-history-result="emit('openSqlHistoryResult', $event)"
         @diagnose-sql-error="emit('diagnoseSqlError', $event)"
@@ -182,6 +183,7 @@ const emit = defineEmits<{
   startSqlPaneResize: [event: PointerEvent]
   resetSqlPaneSplit: []
   updateSqlResultActiveTab: [resultTabId: string]
+  toggleResultTabPinned: [resultId: string]
   closeResultTab: [resultId: string]
   openSqlHistoryResult: [history: SqlHistory]
   diagnoseSqlError: [result: SqlResult]

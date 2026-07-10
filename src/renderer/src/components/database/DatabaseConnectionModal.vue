@@ -132,7 +132,7 @@
           </div>
         </label>
         <label>
-          {{ connectionDraft.dbType === 'oracle' ? 'Service' : 'Database' }}
+          {{ databaseCatalogFieldLabel(connectionDraft) }}
           <input
             v-model="connectionDraft.database"
             @input="emit('markConnectionUrlAuto')"
@@ -236,7 +236,10 @@
 import { X } from 'lucide-vue-next'
 import type { SshProxyConfig } from '@shared/contracts/appRuntime'
 import type { DatabaseEngineCode, DatabaseGroupInfo } from '@shared/contracts/database'
-import { isPostgresCompatibleDbType } from '@/services/database/databaseWorkspaceRuntime'
+import {
+  databaseCatalogFieldLabel,
+  isPostgresCompatibleDbType
+} from '@/services/database/databaseWorkspaceRuntime'
 import type { DatabaseConnectionDraft } from '@/services/database/databaseWorkspaceTypes'
 
 defineProps<{

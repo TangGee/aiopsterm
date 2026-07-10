@@ -38,6 +38,7 @@ const createPostgresCatalogDriverDouble = (options: { failCatalog?: boolean } = 
       const normalized = sql.replace(/\s+/g, ' ').trim().toLowerCase()
       const rowsFor = (rows: Array<Record<string, unknown>>) => ({ rows: rows as T[], fields: fieldsForRows(rows), rowCount: rows.length })
       if (normalized.startsWith('select version()')) return rowsFor([{ version: 'PostgreSQL 16 catalog-runtime' }])
+      if (normalized.startsWith('select current_database()')) return rowsFor([{ database_name: 'runtime_default' }])
       if (options.failCatalog && normalized.startsWith('select schema_name from information_schema.schemata')) {
         throw Object.assign(new Error('catalog lookup unavailable'), { code: 'PG_CATALOG_DOWN' })
       }
@@ -193,6 +194,36 @@ describe('database catalog backend runtime', () => {
     ])
   })
 
+  it('uses the server current database when PostgreSQL-compatible drafts omit a database', async () => {
+    const { driver } = createPostgresCatalogDriverDouble()
+    configureDatabaseRuntime({ useSeedData: false, postgresDriver: driver })
+
+    for (const dbType of ['postgresql', 'kingbase'] as const) {
+      const saved = await saveDatabaseConnection({
+        mode: 'create',
+        connection: {
+          dbType,
+          name: `${dbType}@127.0.0.1:5432`,
+          host: '127.0.0.1',
+          port: 5432,
+          user: 'ops',
+          password: 'secret',
+          database: '',
+          env: 'Development',
+          groupId: 'group-default',
+          authentication: 'UserAndPassword'
+        }
+      })
+      expect(saved.ok).toBe(true)
+      expect(saved.data?.connection.catalogs).toEqual([])
+
+      const connected = await connectDatabaseConnection(saved.data!.connection.id)
+      expect(connected.ok).toBe(true)
+      expect(connected.data?.connection.catalogs[0]?.name).toBe('runtime_default')
+      expect(connected.data?.connection.database).toBe('runtime_default')
+    }
+  })
+
   it('migrates legacy plaintext secrets inside the catalog runtime state owner', async () => {
     const { driver } = createPostgresCatalogDriverDouble()
     const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-db-catalog-legacy-'))
@@ -246,5 +277,137 @@ describe('database catalog backend runtime', () => {
     const migrated = JSON.parse(migratedText) as { secrets: Record<string, { password?: string }> }
     expect(migratedText).not.toContain('legacy-runtime-secret')
     expect(migrated.secrets['conn-legacy-runtime'].password).toMatch(/^dk1:/)
+  })
+
+  it('migrates legacy automatic connection names once and preserves stable connection ids', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-db-catalog-name-migration-'))
+    tempDirs.push(dir)
+    const stateFilePath = join(dir, 'database-workspace.json')
+    const baseConnection = {
+      env: 'Development',
+      groupId: 'group-default',
+      authentication: 'UserAndPassword' as const,
+      hasPassword: false,
+      readonly: true,
+      status: 'idle' as const,
+      catalogs: [{ name: 'main', tables: [] }]
+    }
+    await writeFile(
+      stateFilePath,
+      JSON.stringify({
+        version: 1,
+        groups: [{ id: 'group-default', name: 'Default Group' }],
+        groupParents: { 'group-default': null },
+        connections: [
+          {
+            ...baseConnection,
+            id: 'conn-youtube',
+            name: 'sqlite-connection',
+            dbType: 'sqlite',
+            host: 'local',
+            port: null,
+            user: '',
+            database: 'youtube_downloads.db',
+            filePath: '/srv/data/youtube_downloads.db',
+            catalogs: [{ name: 'youtube_downloads.db', tables: [] }]
+          },
+          {
+            ...baseConnection,
+            id: 'conn-codex-state',
+            name: 'sqlite-connection',
+            dbType: 'sqlite',
+            host: 'local',
+            port: null,
+            user: '',
+            database: 'state_5.sqlite',
+            filePath: 'C:\\Users\\ops\\state_5.sqlite'
+          },
+          {
+            ...baseConnection,
+            id: 'conn-orders-auto',
+            name: 'postgresql-connection',
+            dbType: 'postgresql',
+            host: 'db.internal',
+            port: 5432,
+            user: 'ops',
+            database: 'orders',
+            readonly: undefined,
+            catalogs: [{ name: 'orders', schemas: [] }]
+          },
+          {
+            ...baseConnection,
+            id: 'conn-orders-custom',
+            name: 'orders@db.internal:5432',
+            dbType: 'postgresql',
+            host: 'db.internal',
+            port: 5432,
+            user: 'ops',
+            database: 'orders',
+            readonly: undefined,
+            catalogs: [{ name: 'orders', schemas: [] }]
+          }
+        ],
+        secrets: {}
+      }),
+      'utf-8'
+    )
+
+    configureDatabaseRuntime({ useSeedData: false, stateFilePath })
+    const catalog = await listDatabaseCatalog()
+    expect(catalog.data?.connections.map((connection) => [connection.id, connection.name])).toEqual([
+      ['conn-youtube', 'youtube_downloads.db'],
+      ['conn-codex-state', 'state_5.sqlite'],
+      ['conn-orders-auto', 'orders@db.internal:5432-2'],
+      ['conn-orders-custom', 'orders@db.internal:5432']
+    ])
+    expect(catalog.data?.connections.find((connection) => connection.id === 'conn-youtube')?.catalogs[0]?.name).toBe('main')
+
+    const persisted = JSON.parse(await readFile(stateFilePath, 'utf-8')) as {
+      version: number
+      connections: Array<{ id: string; name: string }>
+    }
+    expect(persisted.version).toBe(2)
+    expect(persisted.connections.map((connection) => [connection.id, connection.name])).toEqual([
+      ['conn-youtube', 'youtube_downloads.db'],
+      ['conn-codex-state', 'state_5.sqlite'],
+      ['conn-orders-auto', 'orders@db.internal:5432-2'],
+      ['conn-orders-custom', 'orders@db.internal:5432']
+    ])
+
+    const versionTwoState = JSON.parse(await readFile(stateFilePath, 'utf-8'))
+    versionTwoState.connections.push({
+      id: 'conn-explicit-placeholder',
+      name: 'mysql-connection',
+      dbType: 'mysql',
+      env: 'Development',
+      groupId: 'group-default',
+      host: 'mysql.internal',
+      port: 3306,
+      authentication: 'UserAndPassword',
+      user: 'ops',
+      hasPassword: false,
+      database: 'metrics',
+      status: 'idle',
+      catalogs: [{ name: 'metrics', tables: [] }]
+    })
+    await writeFile(stateFilePath, JSON.stringify(versionTwoState), 'utf-8')
+    configureDatabaseRuntime({ useSeedData: false, stateFilePath })
+    const reloaded = await listDatabaseCatalog()
+    expect(reloaded.data?.connections.find((connection) => connection.id === 'conn-explicit-placeholder')?.name).toBe('mysql-connection')
+  })
+
+  it('does not load or rewrite state from a newer persistence version', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-db-catalog-future-version-'))
+    tempDirs.push(dir)
+    const stateFilePath = join(dir, 'database-workspace.json')
+    const futureState = JSON.stringify({ version: 3, marker: 'future-state', groups: [], connections: [] })
+    await writeFile(stateFilePath, futureState, 'utf-8')
+
+    configureDatabaseRuntime({ useSeedData: false, stateFilePath })
+    const catalog = await listDatabaseCatalog()
+
+    expect(catalog.data?.connections).toEqual([])
+    expect((await createDatabaseGroup({ name: 'must-not-downgrade' })).ok).toBe(true)
+    expect(await readFile(stateFilePath, 'utf-8')).toBe(futureState)
   })
 })

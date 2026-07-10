@@ -1,12 +1,116 @@
 export type TextRange = { start: number; end: number }
 
+export function splitSqlStatements(sql: string) {
+  const statements: string[] = []
+  let buffer = ''
+  let hasSqlToken = false
+  let state: 'normal' | 'single' | 'double' | 'backtick' | 'bracket' | 'line-comment' | 'block-comment' | 'dollar' = 'normal'
+  let blockCommentDepth = 0
+  let dollarDelimiter = ''
+
+  const pushStatement = () => {
+    const statement = buffer.trim()
+    if (statement && hasSqlToken) statements.push(statement)
+    buffer = ''
+    hasSqlToken = false
+  }
+
+  for (let index = 0; index < sql.length; index += 1) {
+    const char = sql[index]
+    const next = sql[index + 1] || ''
+
+    if (state === 'line-comment') {
+      buffer += char
+      if (char === '\n') state = 'normal'
+      continue
+    }
+    if (state === 'block-comment') {
+      buffer += char
+      if (char === '/' && next === '*') {
+        buffer += next
+        blockCommentDepth += 1
+        index += 1
+      } else if (char === '*' && next === '/') {
+        buffer += next
+        blockCommentDepth -= 1
+        index += 1
+        if (blockCommentDepth === 0) state = 'normal'
+      }
+      continue
+    }
+    if (state === 'dollar') {
+      if (sql.startsWith(dollarDelimiter, index)) {
+        buffer += dollarDelimiter
+        index += dollarDelimiter.length - 1
+        state = 'normal'
+      } else {
+        buffer += char
+      }
+      continue
+    }
+    if (state !== 'normal') {
+      buffer += char
+      if (char === '\\' && next) {
+        buffer += next
+        index += 1
+        continue
+      }
+      const quote = state === 'single' ? "'" : state === 'double' ? '"' : state === 'backtick' ? '`' : ']'
+      if (char !== quote) continue
+      if (next === quote) {
+        buffer += next
+        index += 1
+      } else {
+        state = 'normal'
+      }
+      continue
+    }
+
+    if (char === '-' && next === '-') {
+      buffer += `${char}${next}`
+      state = 'line-comment'
+      index += 1
+      continue
+    }
+    if (char === '/' && next === '*') {
+      buffer += `${char}${next}`
+      state = 'block-comment'
+      blockCommentDepth = 1
+      index += 1
+      continue
+    }
+    if (char === '$') {
+      const delimiter = sql.slice(index).match(/^\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$/)?.[0]
+      if (delimiter) {
+        buffer += delimiter
+        hasSqlToken = true
+        dollarDelimiter = delimiter
+        state = 'dollar'
+        index += delimiter.length - 1
+        continue
+      }
+    }
+    if (char === "'" || char === '"' || char === '`' || char === '[') {
+      buffer += char
+      hasSqlToken = true
+      state = char === "'" ? 'single' : char === '"' ? 'double' : char === '`' ? 'backtick' : 'bracket'
+      continue
+    }
+    if (char === ';') {
+      pushStatement()
+      continue
+    }
+
+    buffer += char
+    if (!/\s/.test(char)) hasSqlToken = true
+  }
+
+  pushStatement()
+  return statements
+}
+
 export function firstStatement(sql: string) {
-  return (
-    sql
-      .split(';')
-      .map((item) => item.trim())
-      .find(Boolean) || ''
-  )
+  return splitSqlStatements(sql)[0] || ''
 }
 
 export function sqlCursorPosition(text: string, offset: number) {

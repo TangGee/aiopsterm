@@ -1935,6 +1935,7 @@ const buildSavedDatabaseConnectionUrlMock = (
 
 const defaultCatalogsForSavedConnectionMock = (connection: Omit<DatabaseConnectionInfo, 'catalogs'>): DatabaseCatalogInfo[] => {
   if (!connection.database) return []
+  if (connection.dbType === 'sqlite') return [{ name: 'main', tables: [] }]
   if (isPostgresCompatibleDatabaseMock(connection.dbType)) {
     return [{ name: connection.database, schemas: [{ name: 'public', tables: [], views: [], functions: [], procedures: [] }] }]
   }

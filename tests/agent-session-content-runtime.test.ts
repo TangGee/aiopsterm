@@ -196,9 +196,9 @@ describe('agentSessionContentRuntime', () => {
     }
   })
 
-  it('keeps active JSONL sessions read-only', async () => {
+  it.each(['working', 'needsInput'] as const)('edits JSONL content while the session is %s', async (state) => {
     const { createAgentSessionContentRuntime } = await loadRuntime()
-    const root = await mkdtemp(join(tmpdir(), 'aiopsterm-session-content-active-'))
+    const root = await mkdtemp(join(tmpdir(), `aiopsterm-session-content-active-${state}-`))
     try {
       const transcriptPath = join(root, 'claude-session.jsonl')
       await writeFile(
@@ -206,7 +206,7 @@ describe('agentSessionContentRuntime', () => {
         `${JSON.stringify({ type: 'user', message: { role: 'user', content: 'ship it' } })}\n`,
         'utf-8'
       )
-      const session = makeSession({ id: 'claude-session-1', source: 'claude-code', state: 'working', transcriptPath })
+      const session = makeSession({ id: 'claude-session-1', source: 'claude-code', state, transcriptPath })
       const runtime = createAgentSessionContentRuntime({
         loadStoreIfNeeded: async () => undefined,
         getSession: () => session,
@@ -217,22 +217,71 @@ describe('agentSessionContentRuntime', () => {
       })
 
       const listed = await runtime.list({ source: 'claude-code', sessionId: session.id })
-      expect(listed.data?.records[0]).toEqual(expect.objectContaining({ editable: false }))
-      const denied = await runtime.updateRecord({
+      const record = listed.data?.records[0]
+      expect(listed.data).toEqual(expect.objectContaining({ editable: true, sessionState: state }))
+      expect(record).toEqual(expect.objectContaining({ editable: true, content: 'ship it' }))
+      const updated = await runtime.updateRecord({
         source: 'claude-code',
         sessionId: session.id,
-        recordId: listed.data!.records[0].recordId,
+        recordId: record!.recordId,
         content: 'changed',
-        sourceRevision: listed.data!.records[0].sourceRevision
+        sourceRevision: record!.sourceRevision
       })
-      expect(denied).toEqual(expect.objectContaining({ ok: false, errorCode: 'MANAGED_AI_CONTENT_READ_ONLY' }))
-      const deleteDenied = await runtime.deleteRecord({
+      expect(updated).toEqual(expect.objectContaining({ ok: true }))
+      expect(existsSync(updated.data?.backupPath || '')).toBe(true)
+      const deleted = await runtime.deleteRecord({
         source: 'claude-code',
         sessionId: session.id,
-        recordId: listed.data!.records[0].recordId,
-        sourceRevision: listed.data!.records[0].sourceRevision
+        recordId: record!.recordId,
+        sourceRevision: updated.data!.sourceRevision
       })
-      expect(deleteDenied).toEqual(expect.objectContaining({ ok: false, errorCode: 'MANAGED_AI_CONTENT_READ_ONLY' }))
+      expect(deleted).toEqual(expect.objectContaining({ ok: true }))
+      expect(existsSync(deleted.data?.backupPath || '')).toBe(true)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('serializes concurrent edits against the same JSONL revision', async () => {
+    const { createAgentSessionContentRuntime } = await loadRuntime()
+    const root = await mkdtemp(join(tmpdir(), 'aiopsterm-session-content-concurrent-'))
+    try {
+      const transcriptPath = join(root, 'codex-session.jsonl')
+      await writeFile(transcriptPath, `${JSON.stringify({ type: 'event_msg', payload: { type: 'user_message', message: 'before' } })}\n`, 'utf-8')
+      const session = makeSession({ id: 'codex-concurrent-1', source: 'codex', state: 'working', transcriptPath })
+      const runtime = createAgentSessionContentRuntime({
+        loadStoreIfNeeded: async () => undefined,
+        getSession: () => session,
+        getUserDataPath: () => root,
+        getHomeDir: () => root,
+        getEnv: () => ({ CODEX_HOME: join(root, 'codex-home') }) as NodeJS.ProcessEnv,
+        now: () => 1781884900000
+      })
+      const listed = await runtime.list({ source: 'codex', sessionId: session.id })
+      const record = listed.data!.records[0]
+
+      const results = await Promise.all([
+        runtime.updateRecord({
+          source: 'codex',
+          sessionId: session.id,
+          recordId: record.recordId,
+          content: 'first edit',
+          sourceRevision: record.sourceRevision
+        }),
+        runtime.updateRecord({
+          source: 'codex',
+          sessionId: session.id,
+          recordId: record.recordId,
+          content: 'second edit',
+          sourceRevision: record.sourceRevision
+        })
+      ])
+
+      expect(results.filter((result) => result.ok)).toHaveLength(1)
+      expect(results.filter((result) => !result.ok)).toEqual([
+        expect.objectContaining({ errorCode: 'MANAGED_AI_CONTENT_REVISION_CONFLICT' })
+      ])
+      expect(await readFile(transcriptPath, 'utf-8')).toMatch(/first edit|second edit/)
     } finally {
       await rm(root, { recursive: true, force: true })
     }

@@ -3,6 +3,7 @@ import {
   bulkManagedAiSessions,
   clearManagedAiNotifications,
   clearManagedAiSession,
+  configureManagedAiSessionTerminalLiveness,
   deleteManagedAiSessionContentRecord,
   dismissManagedAiNotification,
   getAgentHibernationConfig,
@@ -26,9 +27,11 @@ import type { AiAgentSessionEventInput, ManagedAiSessionFocusRequest } from '@sh
 type RegisterManagedAiSessionsIpcInput = {
   emitAgentSessionEvent: Parameters<typeof publishAiAgentSessionEvent>[1]
   focusManagedAiSession: (request: ManagedAiSessionFocusRequest) => void
+  isTerminalSessionLive: (sessionId: string) => boolean
 }
 
 export const registerManagedAiSessionsIpc = (ipcMain: IpcMain, input: RegisterManagedAiSessionsIpcInput) => {
+  configureManagedAiSessionTerminalLiveness(input.isTerminalSessionLive)
   ipcMain.handle('ai-agent:session-event', (_event, eventInput: AiAgentSessionEventInput) =>
     publishAiAgentSessionEvent(eventInput, input.emitAgentSessionEvent)
   )

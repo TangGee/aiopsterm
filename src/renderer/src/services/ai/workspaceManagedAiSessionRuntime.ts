@@ -164,62 +164,98 @@ export const createWorkspaceManagedAiSessionRuntime = (input: {
     })
   }
 
-  const managedAiLiveTerminalIds = () => {
-    const ids = new Set<string>()
-    panels.value.forEach((panel) => {
-      if (!isTerminalWorkspacePanel(panel) || !panel.sessionId || panel.status === 'closed' || panel.status === 'error') return
-      ids.add(panel.id)
-      ids.add(panel.sessionId)
-    })
-    return ids
-  }
+  const terminalEndEvents = new Map<string, AiAgentSessionEvent>()
+  const pendingTerminalEndEvents = new Map<string, AiAgentSessionEvent>()
+  const terminalEndPublishInFlight = new Set<string>()
 
-  const endedManagedAiSessionFromTerminalClose = (session: ManagedAiSession, summary = 'Terminal closed'): ManagedAiSession => {
-    const now = Date.now()
-    const event: ManagedAiSessionTimelineEvent = {
-      source: session.source,
-      event: 'session_end',
-      sessionId: session.id,
-      title: session.title,
-      summary,
-      receivedAt: now,
-      ...(session.panelId ? { panelId: session.panelId } : {}),
-      ...(session.terminalSessionId ? { terminalSessionId: session.terminalSessionId } : {}),
-      ...(session.sessionKind ? { sessionKind: session.sessionKind } : {}),
-      ...(session.parentSessionId ? { parentSessionId: session.parentSessionId } : {}),
-      ...(typeof session.restorable === 'boolean' ? { restorable: session.restorable } : {}),
+  const endedManagedAiSessionFromTerminalClose = (session: ManagedAiSession, sessionEvent: AiAgentSessionEvent): ManagedAiSession => {
+    const timelineId = `${sessionEvent.receivedAt}-${sessionEvent.event}`
+    const timelineEvent: ManagedAiSessionTimelineEvent = {
+      ...sessionEvent,
       requestKind: 'telemetry',
       decisionMode: 'telemetry',
-      id: `${now}-terminal-close`
+      id: timelineId
     }
     return {
       ...session,
       state: 'ended',
       lastEvent: 'session_end',
-      summary,
-      updatedAt: now,
-      lastActivityAt: now,
+      summary: sessionEvent.summary || session.summary,
+      updatedAt: Date.now(),
+      lastActivityAt: sessionEvent.receivedAt,
       agentLifecycle: 'ended',
       pendingRequestId: undefined,
-      events: [...session.events, event].slice(-200)
+      events: session.events.some((item) => item.id === timelineId) ? session.events : [...session.events, timelineEvent].slice(-200)
     }
   }
 
-  const reconcileManagedAiSessionsWithLiveTerminals = () => {
-    const liveIds = managedAiLiveTerminalIds()
-    let changed = false
-    managedAiSessions.value = managedAiSessions.value.map((session) => {
-      if (session.state !== 'working' && session.state !== 'needsInput') return session
-      const boundIds = [session.panelId, session.terminalSessionId].filter((value): value is string => Boolean(value))
-      if (!boundIds.length || boundIds.some((id) => liveIds.has(id))) return session
-      changed = true
-      return endedManagedAiSessionFromTerminalClose(session)
-    })
-    if (changed) refreshManagedAiAttentionItems()
+  const publishManagedAiTerminalEnd = (event: AiAgentSessionEvent) => {
+    const key = managedAiSessionKey({ source: event.source, id: event.sessionId })
+    if (terminalEndPublishInFlight.has(key)) return
+    const publishEvent = managedAiClient.publishAiAgentSessionEvent()
+    if (!publishEvent) {
+      setTopNotice(i18nText('aiSessions.notice.serviceUnavailable'))
+      return
+    }
+    terminalEndPublishInFlight.add(key)
+    void publishEvent(event)
+      .then((result) => {
+        if (!result?.ok) {
+          setTopNotice(result?.errorMessage || i18nText('aiSessions.notice.processFailed'))
+          return
+        }
+        if (pendingTerminalEndEvents.get(key) === event) pendingTerminalEndEvents.delete(key)
+      })
+      .catch((error) => {
+        setTopNotice(error instanceof Error ? error.message : i18nText('aiSessions.notice.processFailed'))
+      })
+      .finally(() => {
+        terminalEndPublishInFlight.delete(key)
+      })
+  }
+
+  const applyTerminalEndEventToSession = (session: ManagedAiSession, event: AiAgentSessionEvent) => {
+    if (event.receivedAt < session.lastActivityAt) return session
+    return endedManagedAiSessionFromTerminalClose(session, event)
+  }
+
+  const endManagedAiSessionFromTerminal = (
+    session: ManagedAiSession,
+    input: { summary: string; receivedAt?: number; terminalSessionId?: string }
+  ) => {
+    const current = managedAiSessions.value.find((item) => item.source === session.source && item.id === session.id)
+    if (!current || current.state === 'ended') return false
+    const terminalSessionId = input.terminalSessionId || current.terminalSessionId
+    const event: AiAgentSessionEvent = {
+      source: current.source,
+      event: 'session_end',
+      sessionId: current.id,
+      title: current.title,
+      summary: input.summary,
+      receivedAt: input.receivedAt ?? Date.now(),
+      agentLifecycle: 'ended',
+      ...(current.panelId ? { panelId: current.panelId } : {}),
+      ...(terminalSessionId ? { terminalSessionId } : {}),
+      ...(current.sessionKind ? { sessionKind: current.sessionKind } : {}),
+      ...(current.parentSessionId ? { parentSessionId: current.parentSessionId } : {}),
+      ...(typeof current.restorable === 'boolean' ? { restorable: current.restorable } : {})
+    }
+    if (event.receivedAt < current.lastActivityAt) return false
+    const key = managedAiSessionKey(current)
+    const ended = applyTerminalEndEventToSession(current, event)
+    terminalEndEvents.set(key, event)
+    pendingTerminalEndEvents.set(key, event)
+    managedAiSessions.value = managedAiSessions.value.map((item) =>
+      item.source === ended.source && item.id === ended.id ? ended : item
+    )
+    refreshManagedAiAttentionItems()
+    publishManagedAiTerminalEnd(event)
+    return true
   }
 
   const applyManagedAiSessionSnapshot = (snapshot: ManagedAiSessionSnapshot) => {
-    managedAiSessions.value = snapshot.sessions.map((session) => ({
+    const previousSessions = new Map(managedAiSessions.value.map((session) => [managedAiSessionKey(session), session]))
+    const nextSessions = snapshot.sessions.map((session) => ({
       ...session,
       requestKind:
         session.requestKind ||
@@ -254,12 +290,36 @@ export const createWorkspaceManagedAiSessionRuntime = (input: {
       }),
       decisions: session.decisions.map((decision) => ({ ...decision }))
     }))
-    reconcileManagedAiSessionsWithLiveTerminals()
+    managedAiSessions.value = nextSessions.map((session) => {
+      const key = managedAiSessionKey(session)
+      const terminalEndEvent = terminalEndEvents.get(key)
+      if (terminalEndEvent) {
+        if (session.state === 'ended' && session.lastActivityAt >= terminalEndEvent.receivedAt) {
+          terminalEndEvents.delete(key)
+          pendingTerminalEndEvents.delete(key)
+          return session
+        }
+        if (session.lastActivityAt <= terminalEndEvent.receivedAt) {
+          return applyTerminalEndEventToSession(session, terminalEndEvent)
+        }
+        terminalEndEvents.delete(key)
+        pendingTerminalEndEvents.delete(key)
+      }
+      const previous = previousSessions.get(key)
+      return previous && previous.lastActivityAt > session.lastActivityAt ? previous : session
+    })
+    const snapshotKeys = new Set(managedAiSessions.value.map((session) => managedAiSessionKey(session)))
+    terminalEndEvents.forEach((_event, key) => {
+      if (snapshotKeys.has(key)) return
+      terminalEndEvents.delete(key)
+      pendingTerminalEndEvents.delete(key)
+    })
     managedAiSessionsError.value = ''
     if (selectedManagedAiSessionKey.value && !managedAiSessions.value.some((session) => managedAiSessionKey(session) === selectedManagedAiSessionKey.value)) {
       selectedManagedAiSessionKey.value = ''
     }
     refreshManagedAiAttentionItems()
+    pendingTerminalEndEvents.forEach((event) => publishManagedAiTerminalEnd(event))
   }
 
   const refreshManagedAiSessions = async (options: { silent?: boolean } = {}) => {
@@ -301,6 +361,21 @@ export const createWorkspaceManagedAiSessionRuntime = (input: {
 
   const upsertManagedAiSession = (event: AiAgentSessionEvent) => {
     const existing = managedAiSessions.value.find((session) => session.source === event.source && session.id === event.sessionId)
+    const key = managedAiSessionKey({ source: event.source, id: event.sessionId })
+    const terminalEndEvent = terminalEndEvents.get(key)
+    if (terminalEndEvent) {
+      const isTerminalEndEcho = event.event === 'session_end' && event.receivedAt === terminalEndEvent.receivedAt
+      if (isTerminalEndEcho) {
+        pendingTerminalEndEvents.delete(key)
+      } else if (event.receivedAt <= terminalEndEvent.receivedAt && existing) {
+        return existing
+      } else {
+        terminalEndEvents.delete(key)
+        pendingTerminalEndEvents.delete(key)
+      }
+    }
+    if (existing && event.receivedAt < existing.lastActivityAt) return existing
+    if (existing?.state === 'ended' && event.event !== 'session_end' && event.receivedAt === existing.lastActivityAt) return existing
     const now = Date.now()
     const requestKind = managedAiRequestKindForEvent(event)
     const decisionMode = event.decisionMode || (event.actionable === true ? 'local' : requestKind === 'telemetry' ? 'telemetry' : 'local')
@@ -316,6 +391,9 @@ export const createWorkspaceManagedAiSessionRuntime = (input: {
       decisionMode,
       id: `${event.receivedAt}-${event.event}`
     }
+    const events = existing?.events.some((item) => item.id === timelineEvent.id)
+      ? existing.events
+      : [...(existing?.events || []), timelineEvent].slice(-200)
     const next: ManagedAiSession = {
       id: event.sessionId,
       source: event.source,
@@ -328,7 +406,7 @@ export const createWorkspaceManagedAiSessionRuntime = (input: {
       updatedAt: now,
       ...(existing?.autoTitle ? { autoTitle: existing.autoTitle } : {}),
       ...(existing?.userTitle ? { userTitle: existing.userTitle } : {}),
-      events: [...(existing?.events || []), timelineEvent].slice(-200),
+      events,
       decisions: [...(existing?.decisions || [])],
       ...(event.panelId || existing?.panelId ? { panelId: event.panelId || existing?.panelId } : {}),
       ...(event.terminalSessionId || existing?.terminalSessionId ? { terminalSessionId: event.terminalSessionId || existing?.terminalSessionId } : {}),
@@ -545,47 +623,39 @@ export const createWorkspaceManagedAiSessionRuntime = (input: {
     }
   }
 
-  const applyManagedAiTerminalLifecycle = (panel: Pick<TerminalPanel, 'id'>, event: TerminalLifecycleEvent) => {
+  const managedAiSessionMatchesTerminal = (session: ManagedAiSession, panel: Pick<TerminalPanel, 'id'> | null, terminalSessionId: string) =>
+    session.terminalSessionId === terminalSessionId || Boolean(panel && session.panelId === panel.id)
+
+  const applyManagedAiTerminalLifecycle = (panel: Pick<TerminalPanel, 'id'> | null, event: TerminalLifecycleEvent) => {
     if (event.processId) {
       managedAiSessions.value = managedAiSessions.value.map((session) =>
-        session.terminalSessionId === event.id || session.panelId === panel.id
+        managedAiSessionMatchesTerminal(session, panel, event.id)
           ? { ...session, terminalProcessId: event.processId, terminalActivityAt: event.at, updatedAt: Date.now() }
           : session
       )
     }
     if (event.stage === 'closed' || event.stage === 'error') {
       managedAiSessions.value
-        .filter((session) => session.terminalSessionId === event.id || session.panelId === panel.id)
-        .forEach((session) =>
-          upsertManagedAiSession({
-            source: session.source,
-            event: 'session_end',
-            sessionId: session.id,
-            title: session.title,
+        .filter((session) => session.state !== 'ended' && managedAiSessionMatchesTerminal(session, panel, event.id))
+        .forEach((session) => {
+          endManagedAiSessionFromTerminal(session, {
             summary: event.errorMessage || 'Terminal closed',
-            receivedAt: event.at || Date.now(),
-            ...(session.panelId ? { panelId: session.panelId } : {}),
+            receivedAt: event.at,
             terminalSessionId: event.id
           })
-        )
+        })
     }
   }
 
-  const applyManagedAiTerminalExit = (panel: Pick<TerminalPanel, 'id'>, event: TerminalExitEvent) => {
+  const applyManagedAiTerminalExit = (panel: Pick<TerminalPanel, 'id'> | null, event: TerminalExitEvent) => {
     managedAiSessions.value
-      .filter((session) => session.terminalSessionId === event.id || session.panelId === panel.id)
-      .forEach((session) =>
-        upsertManagedAiSession({
-          source: session.source,
-          event: 'session_end',
-          sessionId: session.id,
-          title: session.title,
+      .filter((session) => session.state !== 'ended' && managedAiSessionMatchesTerminal(session, panel, event.id))
+      .forEach((session) => {
+        endManagedAiSessionFromTerminal(session, {
           summary: event.errorMessage || 'Terminal closed',
-          receivedAt: Date.now(),
-          ...(session.panelId ? { panelId: session.panelId } : {}),
           terminalSessionId: event.id
         })
-      )
+      })
   }
 
   const applyManagedAiTerminalPanelClosed = (closedPanels: Array<Pick<TerminalPanel, 'id' | 'sessionId'>>) => {
@@ -595,15 +665,13 @@ export const createWorkspaceManagedAiSessionRuntime = (input: {
       if (panel.sessionId) closedIds.add(panel.sessionId)
     })
     if (!closedIds.size) return
-    let changed = false
-    managedAiSessions.value = managedAiSessions.value.map((session) => {
-      if (session.state === 'ended') return session
-      if (!session.panelId && !session.terminalSessionId) return session
-      if (!closedIds.has(session.panelId || '') && !closedIds.has(session.terminalSessionId || '')) return session
-      changed = true
-      return endedManagedAiSessionFromTerminalClose(session)
+    const closingSessions = managedAiSessions.value.filter((session) => {
+      if (session.state === 'ended' || (!session.panelId && !session.terminalSessionId)) return false
+      return closedIds.has(session.panelId || '') || closedIds.has(session.terminalSessionId || '')
     })
-    if (changed) refreshManagedAiAttentionItems()
+    closingSessions.forEach((session) => {
+      endManagedAiSessionFromTerminal(session, { summary: 'Terminal closed' })
+    })
   }
 
   return {

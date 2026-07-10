@@ -15,6 +15,7 @@ export type SqlResult = {
   rowCount: number
   durationMs: number
   truncated?: boolean
+  pinned?: boolean
   error: string | null
   message: string
 }

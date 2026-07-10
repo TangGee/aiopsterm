@@ -4,6 +4,7 @@ import { createDatabaseConnectionFormRuntime } from '@/services/database/databas
 import type { DatabaseConnectionDraft, DatabaseCreateDatabaseModalState } from '@/services/database/databaseWorkspaceTypes'
 import type {
   DatabaseConnectionInfo,
+  DatabaseEngineCode,
   DatabaseEngineInfo,
   DatabaseWorkspaceCatalog
 } from '@shared/contracts/database'
@@ -79,6 +80,7 @@ const makeCreateDatabaseModal = (): DatabaseCreateDatabaseModalState => reactive
 })
 
 const createRuntime = (overrides: Partial<{
+  connections: DatabaseConnectionInfo[]
   engines: DatabaseEngineInfo[]
   findConnection: (id: string) => DatabaseConnectionInfo | undefined
   testConnection: ReturnType<typeof vi.fn>
@@ -90,6 +92,7 @@ const createRuntime = (overrides: Partial<{
   const closeMenus = vi.fn()
   const state = {
     databaseEngines: ref(overrides.engines ?? catalog.engines),
+    connections: ref(overrides.connections ?? catalog.connections),
     connectionModalOpen: ref(false),
     connectionModalMode: ref<'create' | 'edit'>('create'),
     connectionFeedback: ref(''),
@@ -131,7 +134,7 @@ describe('databaseConnectionFormRuntime', () => {
   it('owns connection draft defaults, validation, save flow, and proxy cleanup', async () => {
     const saveConnection = vi.fn(async () => {
       const nextConnection = savedConnection({
-        name: 'postgresql-connection',
+        name: 'postgresql@127.0.0.1:5432',
         env: 'Development',
         user: 'root',
         needProxy: true,
@@ -150,7 +153,7 @@ describe('databaseConnectionFormRuntime', () => {
     expect(state.connectionModalOpen.value).toBe(true)
     expect(state.connectionDraft).toMatchObject({
       dbType: 'postgresql',
-      name: 'postgresql-connection',
+      name: 'postgresql@127.0.0.1:5432',
       port: 5432,
       user: 'root',
       groupId: 'group-default'
@@ -176,6 +179,91 @@ describe('databaseConnectionFormRuntime', () => {
     expect(appliedCatalogs).toHaveLength(1)
     expect(notices).toEqual(['saved'])
     expect(state.connectionModalOpen.value).toBe(false)
+  })
+
+  it('keeps automatic connection names tied to endpoints and preserves explicit names', () => {
+    const { runtime, state } = createRuntime()
+
+    runtime.openConnectionModal('mysql', 'group-default')
+    expect(state.connectionDraft.name).toBe('mysql@127.0.0.1:3306')
+
+    state.connectionDraft.database = 'metrics'
+    runtime.markConnectionUrlAuto()
+    expect(state.connectionDraft.name).toBe('metrics@127.0.0.1:3306')
+
+    state.connectionDraft.host = 'db.internal'
+    runtime.markConnectionUrlAuto()
+    expect(state.connectionDraft.name).toBe('metrics@db.internal:3306')
+
+    state.connectionDraft.name = 'Production metrics'
+    state.connectionDraft.database = 'reporting'
+    state.connectionDraft.host = 'reporting.internal'
+    runtime.markConnectionUrlAuto()
+    expect(state.connectionDraft.name).toBe('Production metrics')
+  })
+
+  it('uses each network engine default endpoint and resolves automatic-name collisions', () => {
+    const defaults: Array<[DatabaseEngineCode, number]> = [
+      ['mysql', 3306],
+      ['mariadb', 3306],
+      ['oceanbase', 2881],
+      ['postgresql', 5432],
+      ['kingbase', 54321],
+      ['oracle', 1521],
+      ['sqlserver', 1433],
+      ['clickhouse', 8123],
+      ['presto', 8080]
+    ]
+    const { runtime, state } = createRuntime({ connections: [] })
+
+    defaults.forEach(([dbType, port]) => {
+      runtime.openConnectionModal(dbType, 'group-default')
+      expect(state.connectionDraft.port).toBe(port)
+      expect(state.connectionDraft.name).toBe(`${dbType}@127.0.0.1:${port}`)
+    })
+
+    runtime.openConnectionModal('oracle', 'group-default')
+    runtime.connectionUrl.value = 'oracle.internal:1522/ORCLPDB2'
+    expect(state.connectionDraft.name).toBe('ORCLPDB2@oracle.internal:1522')
+
+    const duplicate = savedConnection({ id: 'conn-local-mysql', name: 'mysql@127.0.0.1:3306', dbType: 'mysql', port: 3306 })
+    const duplicateRuntime = createRuntime({ connections: [duplicate] })
+    duplicateRuntime.runtime.openConnectionModal('mysql', 'group-default')
+    expect(duplicateRuntime.state.connectionDraft.name).toBe('mysql@127.0.0.1:3306-2')
+  })
+
+  it('uses the selected SQLite filename until the user supplies an explicit name', async () => {
+    const originalShowOpenDialog = window.aiops.showOpenDialog
+    const showOpenDialog = vi
+      .fn()
+      .mockResolvedValueOnce({ canceled: false, filePaths: ['/srv/data/youtube_downloads.db'] })
+      .mockResolvedValueOnce({ canceled: false, filePaths: ['C:\\Users\\ops\\state_5.sqlite'] })
+      .mockResolvedValueOnce({ canceled: false, filePaths: ['/srv/data/custom.sqlite3'] })
+    ;(window.aiops as any).showOpenDialog = showOpenDialog
+
+    try {
+      const { runtime, state } = createRuntime()
+      runtime.openConnectionModal('sqlite', 'group-default')
+      expect(state.connectionDraft.name).toBe('sqlite-connection')
+
+      await runtime.pickSqliteFile()
+      expect(state.connectionDraft).toMatchObject({
+        name: 'youtube_downloads.db',
+        filePath: '/srv/data/youtube_downloads.db',
+        url: 'sqlite:///srv/data/youtube_downloads.db'
+      })
+
+      await runtime.pickSqliteFile()
+      expect(state.connectionDraft.name).toBe('state_5.sqlite')
+      expect(state.connectionDraft.filePath).toBe('C:\\Users\\ops\\state_5.sqlite')
+
+      state.connectionDraft.name = 'Codex history'
+      await runtime.pickSqliteFile()
+      expect(state.connectionDraft.name).toBe('Codex history')
+      expect(state.connectionDraft.filePath).toBe('/srv/data/custom.sqlite3')
+    } finally {
+      ;(window.aiops as any).showOpenDialog = originalShowOpenDialog
+    }
   })
 
   it('owns create-database modal validation, SQL template sync, and catalog application', async () => {

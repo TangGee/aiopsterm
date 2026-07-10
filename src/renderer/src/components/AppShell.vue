@@ -65,7 +65,9 @@
         <KubernetesWorkspace v-else-if="workspace.activeModule === 'kubernetes'" />
         <SettingsWorkspace v-else-if="workspace.activeModule === 'settings'" />
         <UserPanel v-else-if="workspace.activeModule === 'user'" />
-        <DatabaseWorkspace v-else-if="workspace.activeModule === 'database'" />
+        <KeepAlive>
+          <DatabaseWorkspace v-if="workspace.activeModule === 'database'" />
+        </KeepAlive>
         <TerminalWorkspace v-show="showTerminalWorkspace" />
         <div
           v-if="showTerminalRightPane"

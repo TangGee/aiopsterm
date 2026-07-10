@@ -286,7 +286,7 @@ export const createTerminalWorkspaceShellRuntime = (
         openTerminalMenu(event, panelId)
         break
       case 'closeTab':
-        workspace.closePanel(panelId)
+        await workspace.closePanel(panelId)
         termMenu.visible = false
         break
       case 'none':
@@ -314,26 +314,27 @@ export const createTerminalWorkspaceShellRuntime = (
     renamingId.value = ''
   }
 
-  const closeSelected = () => {
-    workspace.closePanel(menu.panelId)
+  const closeSelected = async () => {
+    await workspace.closePanel(menu.panelId)
     menu.visible = false
   }
 
-  const closeTab = (panelId: string) => {
-    workspace.closePanel(panelId)
+  const closeTab = async (panelId: string) => {
+    await workspace.closePanel(panelId)
     menu.visible = false
     termMenu.visible = false
-    void Promise.resolve(afterDomUpdate()).then(() => scheduleVisibleTerminalFit({ scrollToBottom: true, frames: 3, forceGeometry: true }))
+    await afterDomUpdate()
+    scheduleVisibleTerminalFit({ scrollToBottom: true, frames: 3, forceGeometry: true })
   }
 
-  const closeOtherTabsFromMenu = () => {
+  const closeOtherTabsFromMenu = async () => {
     workspace.activePanelId = menu.panelId
-    workspace.closeOthers()
+    await workspace.closeOthers()
     menu.visible = false
   }
 
-  const closeAllTabsFromMenu = () => {
-    workspace.closeAllPanels()
+  const closeAllTabsFromMenu = async () => {
+    await workspace.closeAllPanels()
     menu.visible = false
   }
 
@@ -648,7 +649,7 @@ export const createTerminalWorkspaceShellRuntime = (
         void forkSshFromPanel(panelId)
         return true
       case 'closeTab':
-        closeTab(panelId)
+        void closeTab(panelId)
         return true
       case 'commandDialog':
         if (commandDialog.visible) {
@@ -728,8 +729,8 @@ export const createTerminalWorkspaceShellRuntime = (
     await openLocalTerminalFromSource(sourcePanelId)
   }
 
-  const closeTerminalFromMenu = () => {
-    workspace.closePanel(termMenu.panelId)
+  const closeTerminalFromMenu = async () => {
+    await workspace.closePanel(termMenu.panelId)
     termMenu.visible = false
   }
 

@@ -25,7 +25,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onActivated, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type * as monaco from 'monaco-editor/esm/vs/editor/editor.api'
 import { editorIndent, editorLineHeightPx, resolveEditorFontFamily } from '@/services/common/editorRuntime'
 import { loadMonaco, type MonacoModule } from '@/services/common/monacoRuntime'
@@ -478,6 +478,10 @@ onMounted(async () => {
   monacoApi = await loadMonaco()
   await nextTick()
   createEditor()
+})
+
+onActivated(() => {
+  void nextTick(() => editor?.layout())
 })
 
 watch(

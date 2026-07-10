@@ -3,11 +3,9 @@ import {
   controlFail,
   controlOk,
   controlText,
-  isTerminalKillSuccess,
   type ControlWorkspaceGroupState,
   type WorkspaceStore
 } from '@/services/terminal/terminalControlSurfaceCore'
-import { terminalClient } from '@/services/terminal/terminalClient'
 import type {
   ControlResponse,
   ControlSurfaceSummary,
@@ -131,21 +129,13 @@ export const createTerminalControlSurfaceGroupHandlers = ({
   const closeWorkspaceGroupPanelsForControl = async (panelIds: string[]) => {
     const closedPanelIds: string[] = []
     const killedSessionIds: string[] = []
-    const killTerminal = terminalClient.killTerminal()
     for (const panelId of panelIds) {
       const panel = workspace.panels.find((item) => item.id === panelId)
       if (!panel) continue
-      if (panel.sessionId && killTerminal) {
-        const sessionId = panel.sessionId
-        try {
-          const result = await killTerminal(sessionId)
-          if (result?.ok && isTerminalKillSuccess(result, sessionId)) killedSessionIds.push(sessionId)
-        } catch {
-          // Closing a group is best effort after explicit confirmation; the UI panel is still removed.
-        }
-      }
-      workspace.closePanel(panel.id)
+      const result = await workspace.closePanel(panel.id)
+      if (!result.closed) continue
       closedPanelIds.push(panel.id)
+      if (result.terminalStatus === 'killed' && result.terminalSessionId) killedSessionIds.push(result.terminalSessionId)
     }
     return { closedPanelIds, killedSessionIds }
   }

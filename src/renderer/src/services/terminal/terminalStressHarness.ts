@@ -556,7 +556,7 @@ const runTerminalStressTeardown = async (
   const panelsBeforeClose = workspace.panels.filter((panel) => isTerminalWorkspacePanel(panel))
   const teardownErrors: string[] = []
   try {
-    workspace.closePanels('all')
+    await workspace.closePanels('all')
     await nextTick()
     await syncStressPanelViews(input)
     await nextStressAnimationFrame()

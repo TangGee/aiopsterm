@@ -973,6 +973,54 @@ describe('AppShell', () => {
     wrapper.unmount()
   })
 
+  it('keeps opened Database tables and the active tab when switching workspaces', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const store = useWorkspaceStore()
+    store.setActiveModule('database')
+    const wrapper = mount(AppShell, {
+      attachTo: document.body,
+      global: {
+        plugins: [pinia],
+        stubs: {
+          teleport: true
+        }
+      }
+    })
+    await waitForDatabaseCatalog()
+
+    const openTable = async (name: string) => {
+      const row = wrapper.findAll('.db-tree-row.table').find((item) => item.text().trim() === name)
+      if (!row) throw new Error(`Database table row not found: ${name}`)
+      await row.trigger('dblclick')
+      await waitForDatabaseTableData(wrapper)
+    }
+
+    await openTable('orders')
+    await openTable('ops_incidents')
+    const tabTitlesBeforeSwitch = wrapper.findAll('.db-workspace-tab').map((tab) => tab.text().trim())
+    expect(tabTitlesBeforeSwitch).toEqual(['Overview', 'orders', 'ops_incidents'])
+    expect(wrapper.find('.db-workspace-tab.active').text()).toContain('ops_incidents')
+    expect(wrapper.find('.db-where-bar').text()).toContain('ops_incidents')
+    expect(window.aiops.listDatabaseCatalog).toHaveBeenCalledTimes(1)
+
+    store.setActiveModule('files')
+    await flushPromises()
+    expect(wrapper.find('.files-workspace').exists()).toBe(true)
+    expect(wrapper.find('.database-workspace').exists()).toBe(false)
+
+    store.setActiveModule('database')
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.findAll('.db-workspace-tab').map((tab) => tab.text().trim())).toEqual(tabTitlesBeforeSwitch)
+    expect(wrapper.find('.db-workspace-tab.active').text()).toContain('ops_incidents')
+    expect(wrapper.find('.db-where-bar').text()).toContain('ops_incidents')
+    expect(wrapper.find('.db-result-table').exists()).toBe(true)
+    expect(window.aiops.listDatabaseCatalog).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+  })
+
   it('refreshes managed AI sessions when backend managed events arrive', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
@@ -13364,25 +13412,30 @@ describe('AppShell', () => {
     await wrapper.findAll('.db-engine-grid button').find((button) => button.text().includes('SQLServer'))!.trigger('click')
     expect(wrapper.find('.db-connection-modal').text()).toContain('SQLServer')
     const sqlServerOverviewInputs = wrapper.findAll('.db-connection-modal input')
+    expect((sqlServerOverviewInputs.at(0)!.element as HTMLInputElement).value).toBe('sqlserver@127.0.0.1:1433')
     expect((sqlServerOverviewInputs.at(2)!.element as HTMLInputElement).value).toBe('1433')
     expect((sqlServerOverviewInputs.at(7)!.element as HTMLInputElement).value).toBe('jdbc:sqlserver://127.0.0.1:1433')
     await wrapper.find('.db-connection-modal > button[title="Close"]').trigger('click')
     await wrapper.findAll('.db-engine-grid button').find((button) => button.text().includes('MariaDB'))!.trigger('click')
     expect(wrapper.find('.db-connection-modal').text()).toContain('MariaDB')
     const mariaDbOverviewInputs = wrapper.findAll('.db-connection-modal input')
+    expect((mariaDbOverviewInputs.at(0)!.element as HTMLInputElement).value).toBe('mariadb@127.0.0.1:3306')
     expect((mariaDbOverviewInputs.at(2)!.element as HTMLInputElement).value).toBe('3306')
     expect((mariaDbOverviewInputs.at(7)!.element as HTMLInputElement).value).toBe('jdbc:mariadb://127.0.0.1:3306')
     await wrapper.find('.db-connection-modal > button[title="Close"]').trigger('click')
     await wrapper.findAll('.db-engine-grid button').find((button) => button.text().includes('ClickHouse'))!.trigger('click')
     expect(wrapper.find('.db-connection-modal').text()).toContain('ClickHouse')
     const clickHouseOverviewInputs = wrapper.findAll('.db-connection-modal input')
+    expect((clickHouseOverviewInputs.at(0)!.element as HTMLInputElement).value).toBe('clickhouse@127.0.0.1:8123')
     expect((clickHouseOverviewInputs.at(2)!.element as HTMLInputElement).value).toBe('8123')
     expect((clickHouseOverviewInputs.at(3)!.element as HTMLInputElement).value).toBe('default')
     expect((clickHouseOverviewInputs.at(7)!.element as HTMLInputElement).value).toBe('http://127.0.0.1:8123')
     await wrapper.find('.db-connection-modal > button[title="Close"]').trigger('click')
     await wrapper.findAll('.db-engine-grid button').find((button) => button.text().includes('Presto'))!.trigger('click')
     expect(wrapper.find('.db-connection-modal').text()).toContain('Presto')
+    expect(wrapper.find('.db-connection-modal').text()).toContain('Catalog')
     const prestoOverviewInputs = wrapper.findAll('.db-connection-modal input')
+    expect((prestoOverviewInputs.at(0)!.element as HTMLInputElement).value).toBe('presto@127.0.0.1:8080')
     expect((prestoOverviewInputs.at(2)!.element as HTMLInputElement).value).toBe('8080')
     expect((prestoOverviewInputs.at(3)!.element as HTMLInputElement).value).toBe('presto')
     expect((prestoOverviewInputs.at(7)!.element as HTMLInputElement).value).toBe('http://127.0.0.1:8080')
@@ -13390,6 +13443,7 @@ describe('AppShell', () => {
     await wrapper.findAll('.db-engine-grid button').find((button) => button.text().includes('OceanBase'))!.trigger('click')
     expect(wrapper.find('.db-connection-modal').text()).toContain('OceanBase')
     const oceanBaseOverviewInputs = wrapper.findAll('.db-connection-modal input')
+    expect((oceanBaseOverviewInputs.at(0)!.element as HTMLInputElement).value).toBe('oceanbase@127.0.0.1:2881')
     expect((oceanBaseOverviewInputs.at(2)!.element as HTMLInputElement).value).toBe('2881')
     expect((oceanBaseOverviewInputs.at(7)!.element as HTMLInputElement).value).toBe('jdbc:oceanbase://127.0.0.1:2881')
     await wrapper.find('.db-connection-modal > button[title="Close"]').trigger('click')
@@ -13397,6 +13451,7 @@ describe('AppShell', () => {
     expect(wrapper.find('.db-connection-modal').text()).toContain('KingBase')
     expect(wrapper.find('.db-connection-modal').text()).toContain('SSL Mode')
     const kingBaseOverviewInputs = wrapper.findAll('.db-connection-modal input')
+    expect((kingBaseOverviewInputs.at(0)!.element as HTMLInputElement).value).toBe('kingbase@127.0.0.1:54321')
     expect((kingBaseOverviewInputs.at(2)!.element as HTMLInputElement).value).toBe('54321')
     expect((kingBaseOverviewInputs.at(7)!.element as HTMLInputElement).value).toBe('jdbc:kingbase8://127.0.0.1:54321')
     await wrapper.find('.db-connection-modal > button[title="Close"]').trigger('click')
@@ -13503,6 +13558,7 @@ describe('AppShell', () => {
     await flushPromises()
     expect(window.aiops.showOpenDialog).toHaveBeenCalledWith(expect.objectContaining({ properties: ['openFile'] }))
     const sqliteInputs = wrapper.findAll('.db-connection-modal input')
+    expect((sqliteInputs.at(0)!.element as HTMLInputElement).value).toBe('unit-cache.sqlite3')
     expect((sqliteInputs.at(1)!.element as HTMLInputElement).value).toBe('/tmp/aiopsterm/unit-cache.sqlite3')
     expect((sqliteInputs.at(3)!.element as HTMLInputElement).value).toBe('sqlite:///tmp/aiopsterm/unit-cache.sqlite3')
     await sqliteInputs.at(0)!.setValue('unit-sqlite')
@@ -13531,6 +13587,11 @@ describe('AppShell', () => {
       })
     )
     expect(wrapper.text()).toContain('unit-sqlite')
+    const unitSqliteRow = wrapper.findAll('.db-tree-row.connection').find((row) => row.text().includes('unit-sqlite'))
+    expect(unitSqliteRow).toBeDefined()
+    const unitSqliteTreeItem = unitSqliteRow!.element.parentElement!
+    expect(unitSqliteTreeItem.querySelectorAll('.db-tree-row.database')).toHaveLength(0)
+    expect(unitSqliteTreeItem.querySelector('.db-tree-row.folder')?.textContent).toContain('tables')
 
     await wrapper.find('button[title="Add"]').trigger('click')
     await wrapper.find('.db-add-menu').findAll('button').find((button) => button.text().includes('SQLite'))!.trigger('click')
@@ -13572,6 +13633,7 @@ describe('AppShell', () => {
 
     await wrapper.find('button[title="Add"]').trigger('click')
     await wrapper.find('.db-add-menu').findAll('button').find((button) => button.text().includes('Oracle'))!.trigger('click')
+    expect(wrapper.find('.db-connection-modal').text()).toContain('Service')
     const oracleInputs = wrapper.findAll('.db-connection-modal input')
     await oracleInputs.at(0)!.setValue('hr-oracle-url')
     await oracleInputs.at(1)!.setValue('')
@@ -13818,7 +13880,9 @@ describe('AppShell', () => {
     expect(window.aiops.connectDatabaseConnection).toHaveBeenCalledWith(unitSqliteOptionValue)
     expect(wrapper.text()).toContain('Connection auto-connected for SQL context')
     expect(wrapper.findAll('.db-sql-toolbar select')).toHaveLength(2)
-    expect((wrapper.findAll('.db-sql-toolbar select').at(1)!.element as HTMLSelectElement).value).toBe('unit-cache.sqlite3')
+    const sqliteCatalogPicker = wrapper.findAll('.db-sql-toolbar select').at(1)!
+    expect((sqliteCatalogPicker.element as HTMLSelectElement).value).toBe('main')
+    expect(sqliteCatalogPicker.text()).toContain('unit-cache.sqlite3')
     await wrapper.findAll('.db-workspace-tab').find((tab) => tab.text().includes('Overview'))!.trigger('click')
     await wrapper.findAll('.db-tree-row.connection').find((row) => row.text().includes('e2e-postgres'))!.trigger('click')
     await wrapper.find('button[title="New SQL"]').trigger('click')
@@ -13826,7 +13890,12 @@ describe('AppShell', () => {
     expect((wrapper.findAll('.db-sql-toolbar select').at(1)!.element as HTMLSelectElement).value).toBe('orders')
     expect((wrapper.findAll('.db-sql-toolbar select').at(2)!.element as HTMLSelectElement).value).toBe('public')
     await wrapper.findAll('.db-workspace-tab').find((tab) => tab.text().includes('Overview'))!.trigger('click')
-    await wrapper.findAll('.db-tree-row.connection').find((row) => row.text().includes('orders-pg-edited'))!.trigger('click')
+    const ordersConnectionRow = wrapper.findAll('.db-tree-row.connection').find((row) => row.text().includes('orders-pg-edited'))!
+    const ordersConnectionItem = ordersConnectionRow.element.parentElement!
+    await ordersConnectionRow.trigger('click')
+    expect(ordersConnectionItem.querySelectorAll('.db-tree-row.database')).toHaveLength(0)
+    await ordersConnectionRow.trigger('click')
+    expect(ordersConnectionItem.querySelectorAll('.db-tree-row.database').length).toBeGreaterThan(0)
     await wrapper.find('button[title="New SQL"]').trigger('click')
     expect(wrapper.findAll('.db-workspace-tab').some((tab) => tab.text().includes('Query 3'))).toBe(true)
     expect((wrapper.find('.db-sql-toolbar select').element as HTMLSelectElement).value).toBe('conn-prod-pg')
@@ -13902,9 +13971,16 @@ describe('AppShell', () => {
     const selectionFormattedSql = (wrapper.find('.db-sql-editor').element as HTMLTextAreaElement).value
     expect(selectionFormattedSql).toContain('SELECT\n  id')
     expect(selectionFormattedSql).toContain('select * from ops.ops_incidents;')
+    vi.mocked(window.aiops.executeDatabaseSql).mockClear()
     await wrapper.find('button[title="Run all"]').trigger('click')
     await waitForDatabaseSqlResult()
+    expect(window.aiops.executeDatabaseSql).toHaveBeenCalledTimes(2)
+    expect(vi.mocked(window.aiops.executeDatabaseSql).mock.calls.map(([input]) => input.sql)).toEqual([
+      expect.stringContaining('public.orders'),
+      'select * from ops.ops_incidents'
+    ])
     expect(wrapper.find('.db-result-tabs').text()).toContain('#1-1')
+    expect(wrapper.findAll('.db-result-tabs [role="tab"]')).toHaveLength(3)
     expect(wrapper.find('.db-result-table').text()).toContain('payment-api')
     expect(wrapper.find('.db-status-bar').text()).toContain('Execution OK (4 rows)')
     expect(wrapper.text()).toContain('【Rows】')
@@ -13916,6 +13992,13 @@ describe('AppShell', () => {
     expect(firstResultAriaTab.attributes('aria-selected')).toBe('true')
     expect(firstResultAriaTab.attributes('title')).toContain('#1-1')
     expect(firstResultAriaTab.find('.db-result-tab-close').attributes('aria-label')).toBe('Close result tab')
+    const resultPinButton = firstResultAriaTab.find('.db-result-tab-pin')
+    expect(resultPinButton.attributes('aria-label')).toBe('Pin result tab')
+    await resultPinButton.trigger('click')
+    expect(resultPinButton.attributes('aria-label')).toBe('Unpin result tab')
+    expect(resultPinButton.attributes('aria-pressed')).toBe('true')
+    await resultPinButton.trigger('click')
+    expect(resultPinButton.attributes('aria-label')).toBe('Pin result tab')
     const serviceHeader = wrapper.findAll('.db-result-table th').find((header) => header.text().includes('service'))!
     const serviceFilterButton = serviceHeader.find('button[title="Filter"]')
     vi.spyOn(serviceFilterButton.element, 'getBoundingClientRect').mockReturnValue({
@@ -13992,21 +14075,7 @@ describe('AppShell', () => {
     expect(wrapper.find('.db-chart-modal').text()).toContain('SQL page 1')
     expect(wrapper.find('.db-chart-modal').text()).toContain('id')
     await wrapper.find('.db-chart-modal header button').trigger('click')
-    vi.mocked(window.aiops.getDatabasePageComment).mockClear()
-    const sqlCommentButton = wrapper.find('.db-sql-results .db-toolbar-btn-comment')
-    expect(sqlCommentButton.attributes('disabled')).toBeUndefined()
-    await sqlCommentButton.trigger('click')
-    await flushPromises()
-    expect(window.aiops.getDatabasePageComment).toHaveBeenCalledWith(
-      expect.objectContaining({
-        scope: 'sql-result',
-        connectionId: 'conn-prod-pg',
-        databaseName: 'orders',
-        schemaName: 'public',
-        sql: expect.stringContaining('public.orders')
-      })
-    )
-    await wrapper.find('.db-comment-modal header button').trigger('click')
+    expect(wrapper.find('.db-sql-results .db-toolbar-btn-comment').exists()).toBe(false)
     await sqlExportButton.trigger('click')
     await flushPromises()
     expect(window.aiops.exportDatabaseRows).toHaveBeenCalledWith(
@@ -14032,6 +14101,8 @@ describe('AppShell', () => {
     await firstResultTab.trigger('keydown', { key: 'Enter' })
     expect(wrapper.find('.db-result-table').text()).toContain('payment-api')
     await firstResultTab.find('.db-result-tab-close').trigger('click')
+    expect(wrapper.find('.db-result-table').text()).toContain('checkout')
+    await overviewResultTab.trigger('click')
     expect(wrapper.find('.db-sql-overview tbody tr').classes()).toContain('closed')
     expect(wrapper.find('.db-sql-overview-open').exists()).toBe(false)
     await wrapper.find('.db-sql-overview tbody tr').trigger('click')
@@ -14044,11 +14115,12 @@ describe('AppShell', () => {
     await waitForDatabaseSqlResult()
     expect(wrapper.find('.db-sql-overview').exists()).toBe(false)
     expect(wrapper.find('.db-result-table').text()).toContain('checkout')
-    expect(wrapper.find('.db-result-tabs').text()).toContain('#2-1')
+    expect(wrapper.findAll('.db-result-tabs [role="tab"]')).toHaveLength(2)
     editorElement.setSelectionRange(0, 'select * from public.orders'.length)
     await wrapper.find('button[title="Run current statement"]').trigger('click')
     await waitForDatabaseSqlResult()
     expect(wrapper.find('.db-result-table').text()).toContain('payment-api')
+    expect(wrapper.findAll('.db-result-tabs [role="tab"]')).toHaveLength(2)
     editorElement.setSelectionRange(secondStatementOffset, secondStatementOffset)
     await wrapper.find('button[title="Explain"]').trigger('click')
     await waitForDatabaseSqlResult()
@@ -14231,7 +14303,11 @@ describe('AppShell', () => {
     expect((wrapper.find('.db-sql-toolbar select').element as HTMLSelectElement).value).toBe('conn-prod-pg')
     expect((wrapper.findAll('.db-sql-toolbar select').at(1)!.element as HTMLSelectElement).value).toBe('orders')
     expect((wrapper.findAll('.db-sql-toolbar select').at(2)!.element as HTMLSelectElement).value).toBe('public')
+    const publicSchemaItem = publicSchemaRow.element.parentElement!
     await publicSchemaRow.trigger('click')
+    expect(publicSchemaItem.querySelectorAll('.db-tree-row.folder')).toHaveLength(0)
+    await publicSchemaRow.trigger('click')
+    expect(publicSchemaItem.querySelectorAll('.db-tree-row.folder').length).toBeGreaterThan(0)
 
     const ordersTable = wrapper.findAll('.db-tree-row.table').find((row) => row.text().includes('orders'))!
     await ordersTable.find('button').trigger('click')
@@ -14297,35 +14373,7 @@ describe('AppShell', () => {
     expect(wrapper.find('.db-chart-modal').text()).toContain('Rows')
     expect(wrapper.find('.db-chart-modal').text()).toContain('payment-api')
     await wrapper.find('.db-chart-modal header button').trigger('click')
-    vi.mocked(window.aiops.getDatabasePageComment).mockClear()
-    vi.mocked(window.aiops.saveDatabasePageComment).mockClear()
-    const tableCommentButton = wrapper.find('.db-data-workspace .db-toolbar-btn-comment')
-    expect(tableCommentButton.attributes('disabled')).toBeUndefined()
-    expect(tableCommentButton.attributes('title')).toBe('Comment current table page')
-    await tableCommentButton.trigger('click')
-    await flushPromises()
-    expect(window.aiops.getDatabasePageComment).toHaveBeenCalledWith({
-      scope: 'table-page',
-      connectionId: 'conn-prod-pg',
-      databaseName: 'orders',
-      schemaName: 'public',
-      tableName: 'orders'
-    })
-    await wrapper.find('.db-comment-modal textarea').setValue('Review rows with stale owners before paging.')
-    await wrapper.find('.db-comment-modal footer button:last-child').trigger('click')
-    await flushPromises()
-    expect(window.aiops.saveDatabasePageComment).toHaveBeenCalledWith({
-      key: {
-        scope: 'table-page',
-        connectionId: 'conn-prod-pg',
-        databaseName: 'orders',
-        schemaName: 'public',
-        tableName: 'orders'
-      },
-      comment: 'Review rows with stale owners before paging.'
-    })
-    expect(wrapper.text()).toContain('Comment saved')
-    await wrapper.find('.db-comment-modal header button').trigger('click')
+    expect(wrapper.find('.db-data-workspace .db-toolbar-btn-comment').exists()).toBe(false)
     const tableExportButton = wrapper.find('.db-data-workspace .db-toolbar-export')
     expect(tableExportButton.attributes('disabled')).toBeUndefined()
     expect(tableExportButton.attributes('title')).toBe('Export current table page')
@@ -14837,16 +14885,6 @@ describe('AppShell', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('Database export backend returned malformed result data.')
     expect(wrapper.text()).not.toContain('Exported 1 row to orders-page.csv')
-
-    vi.mocked(window.aiops.saveDatabasePageComment).mockResolvedValueOnce({ ok: true, data: { message: 'Comment saved' } } as any)
-    await wrapper.find('.db-data-workspace .db-toolbar-btn-comment').trigger('click')
-    await flushPromises()
-    await wrapper.find('.db-comment-modal textarea').setValue('Malformed save should not be accepted.')
-    await wrapper.find('.db-comment-modal footer button:last-child').trigger('click')
-    await flushPromises()
-    expect(wrapper.text()).toContain('Database comment backend returned malformed result data.')
-    expect(wrapper.text()).not.toContain('Saved ')
-    await wrapper.find('.db-comment-modal header button').trigger('click')
 
     vi.mocked(window.aiops.queryDatabaseTable).mockResolvedValueOnce({ ok: true } as any)
     await wrapper.find('.db-data-workspace .db-toolbar button[title="Refresh"]').trigger('click')
@@ -15419,6 +15457,32 @@ describe('AppShell', () => {
     wrapper.unmount()
   })
 
+  it('opens the Database tab overflow menu until a tab is selected or the user clicks outside', async () => {
+    const wrapper = mount(DatabaseWorkspace, {
+      attachTo: document.body,
+      global: { plugins: [createPinia()] }
+    })
+    await waitForDatabaseCatalog()
+    await wrapper.find('button[title="New SQL"]').trigger('click')
+
+    const overflowButton = wrapper.find('button[title="Tabs"]')
+    await overflowButton.trigger('click')
+    expect(wrapper.find('.db-tab-menu').exists()).toBe(true)
+    expect(wrapper.find('.db-tab-menu').text()).toContain('Overview')
+
+    await wrapper.find('.db-tab-menu').findAll('button').find((button) => button.text().includes('Overview'))!.trigger('click')
+    expect(wrapper.find('.db-tab-menu').exists()).toBe(false)
+    expect(wrapper.find('.db-workspace-tab.active').text()).toContain('Overview')
+
+    await overflowButton.trigger('click')
+    expect(wrapper.find('.db-tab-menu').exists()).toBe(true)
+    document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('.db-tab-menu').exists()).toBe(false)
+
+    wrapper.unmount()
+  })
+
   it('supports Monaco-like SQL editor indentation, run shortcut, and find/replace controls', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
@@ -15597,6 +15661,18 @@ describe('AppShell', () => {
     vi.mocked(window.aiops.startDatabaseAiPaneResponse).mockClear()
     vi.mocked(window.aiops.cancelDatabaseAiPaneResponse).mockClear()
     vi.mocked(window.aiops.generateDatabaseAiPaneResponse).mockClear()
+    await window.aiops.saveDatabaseConnection({
+      mode: 'create',
+      connection: {
+        dbType: 'sqlite',
+        name: 'ai-picker-sqlite',
+        filePath: '/tmp/ai-picker.sqlite3',
+        readonly: true,
+        env: 'Development',
+        groupId: 'group-local',
+        authentication: 'UserAndPassword'
+      }
+    })
     const wrapper = mount(DatabaseWorkspace, {
       attachTo: document.body,
       global: { plugins: [createPinia()] }
@@ -15666,6 +15742,10 @@ describe('AppShell', () => {
     await wrapper.find('.db-ai-pane-context-head button').trigger('click')
     expect((wrapper.find('.db-ai-pane-connection').element as HTMLSelectElement).value).toBe('conn-metrics-mysql')
     expect((wrapper.find('.db-ai-pane-database').element as HTMLSelectElement).value).toBe('metrics')
+    await wrapper.find('.db-ai-pane-connection').setValue('conn-ai-picker-sqlite')
+    const sqliteAiCatalogPicker = wrapper.find('.db-ai-pane-database')
+    expect((sqliteAiCatalogPicker.element as HTMLSelectElement).value).toBe('main')
+    expect(sqliteAiCatalogPicker.text()).toContain('ai-picker.sqlite3')
     await wrapper.find('.db-ai-pane-connection').setValue('conn-local-cache')
     expect((wrapper.find('.db-ai-pane-database').element as HTMLSelectElement).value).toBe('cache.db')
     expect(wrapper.find('.db-ai-pane-context-card').text()).toContain('local-cache is not connected')

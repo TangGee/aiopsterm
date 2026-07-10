@@ -1,4 +1,5 @@
 import { type Ref } from 'vue'
+import type { I18nKey } from '@/i18n/messages'
 import { terminalClient } from '@/services/terminal/terminalClient'
 import {
   isLocalTerminalSessionInfo,
@@ -17,7 +18,6 @@ import {
   appendTerminalOutputToPanelInCollection,
   attachTerminalPanelToSplit,
   canForkSshTerminalPanel,
-  closeOtherTerminalPanelsInCollection,
   closeTerminalPanelInCollection,
   createEmptyTerminalPanel,
   createForkSshTerminalPanelInCollection,
@@ -65,12 +65,13 @@ type WorkspaceTerminalPanelsControllerState = {
 
 type WorkspaceTerminalPanelsControllerDeps = {
   setTopNotice: (message: string) => void
+  i18nText: (key: I18nKey) => string
   createRendererLocalId: (prefix: 'panel') => string
   findKnowledgeNode: (relPath: string) => KnowledgeNode | null
   recordMacroTerminalInput: (panelId: string, data: string) => void
   touchManagedAiTerminalActivity: (panel: Pick<TerminalPanel, 'id' | 'sessionId'>, at?: number) => void
-  applyManagedAiTerminalLifecycle: (panel: Pick<TerminalPanel, 'id'>, event: TerminalLifecycleEvent) => void
-  applyManagedAiTerminalExit: (panel: Pick<TerminalPanel, 'id'>, event: TerminalExitEvent) => void
+  applyManagedAiTerminalLifecycle: (panel: Pick<TerminalPanel, 'id'> | null, event: TerminalLifecycleEvent) => void
+  applyManagedAiTerminalExit: (panel: Pick<TerminalPanel, 'id'> | null, event: TerminalExitEvent) => void
   applyManagedAiTerminalPanelClosed: (closedPanels: Array<Pick<TerminalPanel, 'id' | 'sessionId'>>) => void
 }
 
@@ -95,6 +96,7 @@ export const createWorkspaceTerminalPanelsController = (
   } = state
   const {
     setTopNotice,
+    i18nText,
     createRendererLocalId,
     findKnowledgeNode,
     recordMacroTerminalInput,
@@ -139,10 +141,45 @@ export const createWorkspaceTerminalPanelsController = (
     return true
   }
 
+  const closedPanelDescriptors = (items: TerminalPanel[]) =>
+    items.map((panel) => ({ id: panel.id, ...(panel.sessionId ? { sessionId: panel.sessionId } : {}) }))
+
+  const removeClosedPanel = (panel: Pick<TerminalPanel, 'id' | 'sessionId'>, terminalStatus: 'none' | 'killed' | 'missing') => {
+    const stillOpen = panels.value.some((item) => item.id === panel.id)
+    if (stillOpen) activePanelId.value = closeTerminalPanelInCollection(panels.value, panel.id, activePanelId.value)
+    if (panel.sessionId && terminalStatus !== 'none') applyManagedAiTerminalPanelClosed([panel])
+    return {
+      closed: stillOpen,
+      panelId: panel.id,
+      ...(panel.sessionId ? { terminalSessionId: panel.sessionId } : {}),
+      terminalStatus
+    }
+  }
+
   const closePanel = (id = activePanelId.value) => {
-    const closing = panels.value.filter((panel) => panel.id === id || (panels.value.length === 1 && isTerminalWorkspacePanel(panel)))
-    activePanelId.value = closeTerminalPanelInCollection(panels.value, id, activePanelId.value)
-    applyManagedAiTerminalPanelClosed(closing)
+    const descriptor = closedPanelDescriptors(
+      panels.value.filter((panel) => panel.id === id || (panels.value.length === 1 && isTerminalWorkspacePanel(panel)))
+    )[0]
+    if (!descriptor) return Promise.resolve({ closed: false, panelId: id, terminalStatus: 'none' as const })
+    if (!descriptor.sessionId) return Promise.resolve(removeClosedPanel(descriptor, 'none'))
+
+    const killTerminal = terminalClient.killTerminal()
+    if (!killTerminal) {
+      setTopNotice(i18nText('aiSessions.notice.terminalCloseUnavailable'))
+      return Promise.resolve({ closed: false, panelId: descriptor.id, terminalSessionId: descriptor.sessionId, terminalStatus: 'failed' as const })
+    }
+    const sessionId = descriptor.sessionId
+    return killTerminal(sessionId)
+      .then((result) => {
+        if (result?.ok && result.data?.id === sessionId) return removeClosedPanel(descriptor, 'killed')
+        if (!result?.ok && result?.errorCode === 'TERMINAL_SESSION_NOT_FOUND') return removeClosedPanel(descriptor, 'missing')
+        setTopNotice(result?.errorMessage || i18nText('aiSessions.notice.terminalCloseFailed'))
+        return { closed: false, panelId: descriptor.id, terminalSessionId: sessionId, terminalStatus: 'failed' as const }
+      })
+      .catch((error) => {
+        setTopNotice(error instanceof Error && error.message.trim() ? error.message : i18nText('aiSessions.notice.terminalCloseFailed'))
+        return { closed: false, panelId: descriptor.id, terminalSessionId: sessionId, terminalStatus: 'failed' as const }
+      })
   }
 
   const discardPendingTerminalPanel = (id: string, preferredActiveId?: string) => {
@@ -152,26 +189,28 @@ export const createWorkspaceTerminalPanelsController = (
   }
 
   const closeOthers = () => {
-    const closing = panels.value.filter((panel) => panel.id !== activePanelId.value)
-    closeOtherTerminalPanelsInCollection(panels.value, activePanelId.value)
-    applyManagedAiTerminalPanelClosed(closing)
+    const closing = closedPanelDescriptors(panels.value.filter((panel) => panel.id !== activePanelId.value))
+    return Promise.all(closing.map((panel) => closePanel(panel.id)))
   }
 
   const closeAllPanels = () => {
-    const closing = [...panels.value]
-    activePanelId.value = resetTerminalPanelCollectionToDefault(panels.value)
-    applyManagedAiTerminalPanelClosed(closing)
+    const closing = closedPanelDescriptors(panels.value)
+    if (!closing.length) {
+      activePanelId.value = resetTerminalPanelCollectionToDefault(panels.value)
+      return Promise.resolve([])
+    }
+    return Promise.all(closing.map((panel) => closePanel(panel.id)))
   }
 
   const closePanels = (closeMode: 'current' | 'others' | 'all', id = activePanelId.value) => {
     if (closeMode === 'all') {
-      closeAllPanels()
-    } else if (closeMode === 'others') {
-      activePanelId.value = id
-      closeOthers()
-    } else {
-      closePanel(id)
+      return closeAllPanels()
     }
+    if (closeMode === 'others') {
+      activePanelId.value = id
+      return closeOthers()
+    }
+    return closePanel(id)
   }
 
   const renamePanel = (id: string, title: string, source: TerminalPanel['titleSource'] = 'user') => {
@@ -202,7 +241,10 @@ export const createWorkspaceTerminalPanelsController = (
   const applyTerminalLifecycle = (event: TerminalLifecycleEvent) => {
     if (!isTerminalLifecycleEvent(event)) return null
     const panel = findTerminalPanelBySessionOrId(panels.value, event.id)
-    if (!panel) return null
+    if (!panel) {
+      applyManagedAiTerminalLifecycle(null, event)
+      return null
+    }
     const applied = applyTerminalLifecycleToPanel(panel, event)
     if (!applied) return null
     applyManagedAiTerminalLifecycle(panel, event)
@@ -212,7 +254,10 @@ export const createWorkspaceTerminalPanelsController = (
   const applyTerminalExit = (event: TerminalExitEvent) => {
     if (!isTerminalExitEvent(event)) return null
     const panel = findTerminalPanelBySessionOrId(panels.value, event.id)
-    if (!panel) return null
+    if (!panel) {
+      applyManagedAiTerminalExit(null, event)
+      return null
+    }
     const applied = applyTerminalExitToPanel(panel, event)
     if (!applied) return null
     applyManagedAiTerminalExit(panel, event)

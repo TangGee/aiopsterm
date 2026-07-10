@@ -8,11 +8,33 @@ import {
   firstStatement,
   formatSqlText,
   isReadOnlySql,
+  splitSqlStatements,
   sqlCursorPosition,
   stripLeadingSqlComments
 } from '@/services/database/databaseSqlEditorRuntime'
 
 describe('databaseSqlEditorRuntime', () => {
+  it('splits SQL scripts without breaking quoted or commented semicolons', () => {
+    expect(splitSqlStatements('select 1; select 2;')).toEqual(['select 1', 'select 2'])
+    expect(
+      splitSqlStatements("select ';' as value, \"semi;column\", `semi;table`, [semi;schema]; select 'it''s;fine';")
+    ).toEqual(["select ';' as value, \"semi;column\", `semi;table`, [semi;schema]", "select 'it''s;fine'"])
+    expect(splitSqlStatements('-- first; comment\nselect 1; /* second; /* nested; */ comment */\nselect 2;')).toEqual([
+      '-- first; comment\nselect 1',
+      '/* second; /* nested; */ comment */\nselect 2'
+    ])
+  })
+
+  it('keeps PostgreSQL dollar-quoted bodies together and ignores comment-only input', () => {
+    const sql = 'create function demo() returns void as $$ begin perform 1; perform 2; end $$ language plpgsql; select 3;'
+
+    expect(splitSqlStatements(sql)).toEqual([
+      'create function demo() returns void as $$ begin perform 1; perform 2; end $$ language plpgsql',
+      'select 3'
+    ])
+    expect(splitSqlStatements('-- comment; only\n/* block; only */ ;')).toEqual([])
+  })
+
   it('finds SQL matches with cursor wrapping helpers', () => {
     const matches = findSqlTextMatches('select id from orders where id = 1', 'id', false)
 

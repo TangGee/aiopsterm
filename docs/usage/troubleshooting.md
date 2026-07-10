@@ -32,10 +32,20 @@ For lag when opening the `AI 会话` module, check the same runtime log for `ai-
 
 Repeated `sessions.imported` or `sessions.git_refreshed` audit entries without user action usually mean a list reload is feeding another background refresh. Import scans are coalesced and cooled down after a run, and git timestamp-only probe results should not emit refresh events; if those entries continue every few hundred milliseconds, capture the adjacent runtime log lines and the audit tail.
 
+For lag when switching from an AI session row to its linked terminal, double-click the row or use the context-menu locate action, then collect the `renderer.managed-ai-session.terminal-switch.*` entries. A normal completed interaction has five entries with the same `interactionId` and increasing `phaseIndex`:
+
+- `requested`: the row or context-menu action reached the renderer; check `trigger`, `previousPanelId`, and the requested session identifiers.
+- `target-resolved`: the linked terminal panel was found; check `targetResolveMs`, `targetPanelId`, `targetStatus`, and `samePanel`.
+- `panel-activated`: workspace state now targets that terminal; check `panelActivateMs`, `activePanelId`, and `outcome`.
+- `ui-frame-ready`: Vue committed the state and the renderer passed two animation-frame callbacks; check `vueCommitMs`, `frameWaitMs`, `uiDurationMs`, and `targetActive`.
+- `terminal-frame-ready`: the terminal surface is actually ready. Threaded terminals wait for the render Worker frame acknowledgement; legacy xterm uses the browser-frame fallback. Check `terminalRenderer`, `terminalFrameWaitMs`, `surfaceAttached`, `hostConnected`, `frameSeq`, and final `durationMs`.
+
+`resume-requested` means the session had no live terminal and the restore path was started; its later `resume-finished` or `resume-failed` entry measures that separate restore operation and does not pretend to be a terminal frame. `terminal-frame-timeout`, `unavailable`, `failed`, or `superseded` explains why an interaction did not reach `terminal-frame-ready`. A single row click only selects the session and intentionally does not emit terminal-switch events.
+
 For lag after choosing `打开会话内容` or switching between content workspaces, collect both backend and renderer content-load entries from the runtime log:
 
-- `managed_ai.content.list` / `managed_ai.content.list.failed`: main-process transcript lookup and parse time for the requested page. Check `durationMs`, `format`, `records`, `total`, `offset`, `limit`, `existedBeforeImport`, and `importAttempted`.
-- `managed_ai.content.get-record` / `managed_ai.content.get-record.failed`: full-record lazy load time after expanding a truncated card.
+- `managed_ai.content.list` / `managed_ai.content.list.failed`: backend transcript lookup and parse time for the requested page. Check `durationMs`, `format`, `records`, `total`, `offset`, `limit`, `existedBeforeImport`, and `importAttempted`; successful entries use `executionThread: "worker"` for Codex/Claude JSONL and `executionThread: "main"` for other adapters.
+- `managed_ai.content.get-record` / `managed_ai.content.get-record.failed`: full-record lazy load time after expanding a truncated card, with the same `executionThread` field on successful entries.
 - `managed_ai.content.delete-record` / `managed_ai.content.delete-record.failed`: transcript record deletion time and whether a backup was created. Check `recordId`, `durationMs`, `backedUp`, `existedBeforeImport`, and `importAttempted`.
 - `renderer.managed-ai-content.load` / `renderer.managed-ai-content.load.failed`: renderer-side page wait plus Vue update timing. Check `apiDurationMs`, `durationMs`, `renderSettleMs`, `reason`, `offset`, `limit`, `records`, `loadedRecords`, `total`, and `hasMore`.
 

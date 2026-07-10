@@ -22,6 +22,7 @@ import {
 } from '@/services/database/databaseBackendGuards'
 import {
   buildChartSummary,
+  databaseCatalogDisplayName,
   databasePageCommentKeyId,
   type DatabaseChartSource
 } from '@/services/database/databaseWorkspaceRuntime'
@@ -113,6 +114,7 @@ export const createDatabaseSqlDataWorkspaceController = (
     openSqlHistoryResult,
     isSqlHistoryClosed,
     updateSqlResultActiveTab,
+    toggleResultTabPinned,
     updateSqlResultPage,
     updateSqlResultPageSize,
     gotoLastSqlResultPage,
@@ -195,6 +197,9 @@ export const createDatabaseSqlDataWorkspaceController = (
     return result.data
   }
 
+  const catalogDisplayNameFor = (tab: Pick<SqlTab | DataTab, 'connectionId' | 'catalogName'>) =>
+    databaseCatalogDisplayName(findConnection(tab.connectionId), { name: tab.catalogName })
+
   const exportActiveSqlResultPage = () => {
     const tab = activeSqlTab.value
     const result = activeSqlResult.value
@@ -203,7 +208,17 @@ export const createDatabaseSqlDataWorkspaceController = (
       return null
     }
     const connection = findConnection(tab.connectionId)
-    return exportDatabaseRowsThroughBackend(buildSqlResultExportInput(tab, result, pagedSqlRows.value, activeSqlResultViewState.value, filteredSqlRows.value.length, connection?.name))
+    return exportDatabaseRowsThroughBackend(
+      buildSqlResultExportInput(
+        tab,
+        result,
+        pagedSqlRows.value,
+        activeSqlResultViewState.value,
+        filteredSqlRows.value.length,
+        connection?.name,
+        catalogDisplayNameFor(tab)
+      )
+    )
   }
 
   const exportActiveDataPage = () => {
@@ -213,7 +228,7 @@ export const createDatabaseSqlDataWorkspaceController = (
       return null
     }
     const connection = findConnection(tab.connectionId)
-    return exportDatabaseRowsThroughBackend(buildDataPageExportInput(tab, pagedDataRows.value, connection?.name))
+    return exportDatabaseRowsThroughBackend(buildDataPageExportInput(tab, pagedDataRows.value, connection?.name, catalogDisplayNameFor(tab)))
   }
 
   const openChartModal = (source: DatabaseChartSource) => {
@@ -247,7 +262,7 @@ export const createDatabaseSqlDataWorkspaceController = (
       showNotice('No table rows to chart')
       return
     }
-    openChartModal(dataPageChartSource(tab, pagedDataRows.value))
+    openChartModal(dataPageChartSource(tab, pagedDataRows.value, catalogDisplayNameFor(tab)))
   }
 
   const openCommentModal = async (input: { title: string; scopeLabel: string; key: DatabasePageCommentKey }) => {
@@ -286,7 +301,7 @@ export const createDatabaseSqlDataWorkspaceController = (
     }
     void openCommentModal({
       title: `${tab.title} - ${result.title}`,
-      scopeLabel: `SQL result / ${tab.catalogName}${tab.schemaName ? ` / ${tab.schemaName}` : ''}`,
+      scopeLabel: `SQL result / ${catalogDisplayNameFor(tab)}${tab.schemaName ? ` / ${tab.schemaName}` : ''}`,
       key: sqlResultCommentKey(tab, result)
     })
   }
@@ -299,7 +314,7 @@ export const createDatabaseSqlDataWorkspaceController = (
     }
     void openCommentModal({
       title: `${tab.title} - page ${tab.page}`,
-      scopeLabel: [tab.catalogName, tab.schemaName, tab.tableName].filter(Boolean).join(' / '),
+      scopeLabel: [catalogDisplayNameFor(tab), tab.schemaName, tab.tableName].filter(Boolean).join(' / '),
       key: dataPageCommentKey(tab)
     })
   }
@@ -352,6 +367,7 @@ export const createDatabaseSqlDataWorkspaceController = (
     openSqlHistoryResult,
     isSqlHistoryClosed,
     updateSqlResultActiveTab,
+    toggleResultTabPinned,
     updateSqlResultPage,
     updateSqlResultPageSize,
     gotoLastSqlResultPage,

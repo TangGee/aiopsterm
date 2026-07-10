@@ -2,6 +2,7 @@ import type { ComputedRef, Ref } from 'vue'
 import { isDatabaseTableMutationData } from '@/services/database/databaseBackendGuards'
 import {
   buildQualifiedTableReference,
+  databaseCatalogDisplayName,
   formatDdlError,
   type TableDdlResult
 } from '@/services/database/databaseWorkspaceRuntime'
@@ -250,7 +251,8 @@ export const createDatabaseCatalogTableActionRuntime = (
   async function confirmDangerousTableAction() {
     if (!dangerConfirm.open || dangerConfirm.confirmText !== dangerConfirm.tableName) return
     const connection = findConnection(dangerConfirm.connectionId)
-    const context = [connection?.name, dangerConfirm.catalogName, dangerConfirm.schemaName, dangerConfirm.tableName].filter(Boolean).join(' · ')
+    const catalogDisplayName = databaseCatalogDisplayName(connection, { name: dangerConfirm.catalogName })
+    const context = [connection?.name, catalogDisplayName, dangerConfirm.schemaName, dangerConfirm.tableName].filter(Boolean).join(' · ')
     hooks.openDbAi(dangerConfirm.action, dangerConfirm.sql, context, {
       connectionId: dangerConfirm.connectionId,
       dbType: connection?.dbType ?? '',
