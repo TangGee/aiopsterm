@@ -13,6 +13,7 @@ type AssetsImportExportRuntimeModule = {
 type TestAssetImportExportRuntime = {
   listAssets: () => AiopsAssetSnapshot
   saveAsset: (input: AiopsAssetInput) => AiopsAssetRecord
+  saveAssets?: (inputs: AiopsAssetInput[]) => AiopsAssetRecord[]
   readFile: (filePath: string, encoding: 'utf-8') => Promise<string>
   stat?: (filePath: string) => Promise<{ size: number }>
 }
@@ -87,7 +88,7 @@ const createRuntime = (initialAssets: AiopsAssetRecord[], fileContent = '') => {
     assets = assets.some((item) => item.id === next.id) ? assets.map((item) => (item.id === next.id ? next : item)) : [...assets, next]
     return next
   })
-  const listAssets = (): AiopsAssetSnapshot => ({ assets: assets.map((item) => ({ ...item })), folders: [] })
+  const listAssets = vi.fn((): AiopsAssetSnapshot => ({ assets: assets.map((item) => ({ ...item })), folders: [] }))
   return { runtime: { listAssets, saveAsset, readFile } satisfies TestAssetImportExportRuntime, saveAsset, readFile, listAssets }
 }
 
@@ -121,6 +122,45 @@ describe('assetsImportExportRuntime', () => {
     const overwritten = await runtimeModule.confirmAssetImportRuntime({ filePath: '/tmp/external-reference-assets.json', overwrite: true }, runtime)
     expect(overwritten.ok).toBe(true)
     expect(overwritten.data).toMatchObject({ imported: 2, skipped: 0, created: 0, updated: 2 })
+  })
+
+  it('confirms large imports from one backend asset snapshot', async () => {
+    const runtimeModule = await loadRuntime()
+    const content = JSON.stringify(
+      Array.from({ length: 50 }, (_item, index) => ({
+        username: `user-${index}`,
+        ip: `10.80.0.${index}`,
+        label: `bulk-${index}`,
+        group_name: 'Bulk',
+        port: 2200 + index,
+        password: `secret-${index}`
+      }))
+    )
+    const { runtime, saveAsset, listAssets } = createRuntime([localAsset], content)
+
+    const result = await runtimeModule.confirmAssetImportRuntime({ filePath: '/tmp/bulk-assets.json', overwrite: false }, runtime)
+
+    expect(result.ok).toBe(true)
+    expect(result.data).toMatchObject({ imported: 50, skipped: 0, created: 50, updated: 0 })
+    expect(saveAsset).toHaveBeenCalledTimes(50)
+    expect(listAssets).toHaveBeenCalledTimes(2)
+  })
+
+  it('uses the bulk asset save path when the backend store provides it', async () => {
+    const runtimeModule = await loadRuntime()
+    const content = JSON.stringify([
+      { username: 'deploy', ip: '10.81.0.1', label: 'bulk-a', group_name: 'Bulk', port: 2201, password: 'secret-a' },
+      { username: 'deploy', ip: '10.81.0.2', label: 'bulk-b', group_name: 'Bulk', port: 2202, password: 'secret-b' }
+    ])
+    const { runtime, saveAsset } = createRuntime([localAsset], content)
+    const saveAssets = vi.fn((inputs: AiopsAssetInput[]) => inputs.map(saveAsset))
+
+    const result = await runtimeModule.confirmAssetImportRuntime({ filePath: '/tmp/bulk-assets.json', overwrite: false }, { ...runtime, saveAssets })
+
+    expect(result.ok).toBe(true)
+    expect(result.data).toMatchObject({ imported: 2, skipped: 0, created: 2, updated: 0 })
+    expect(saveAssets).toHaveBeenCalledTimes(1)
+    expect(saveAssets.mock.calls[0][0]).toHaveLength(2)
   })
 
   it('projects export payloads and filters non-exportable selected assets', async () => {

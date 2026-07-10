@@ -92,6 +92,24 @@ npm run test:e2e
 
 Package and release work should also use the package audits documented in the usage package verification guide.
 
+### Native Module ABI During Tests
+
+`better-sqlite3` and `node-pty` are native Node addons. Their `.node` binaries are compiled for one runtime ABI at a time. `npm run rebuild:native` rebuilds them for the pinned Electron runtime so the app and packaged builds can load them, but Vitest runs under the workspace's ordinary Node runtime. If a test logs an error such as `NODE_MODULE_VERSION 125` versus `NODE_MODULE_VERSION 115`, the installed native binary was built for Electron while the active Node test process needs the Node ABI.
+
+For Node/Vitest SQLite-backed tests, rebuild `better-sqlite3` for the active Node runtime:
+
+```bash
+npm rebuild better-sqlite3
+```
+
+Before running the Electron app or package builds again, rebuild the native modules back for Electron:
+
+```bash
+npm run rebuild:native
+```
+
+This ABI switch is an environment state issue, not by itself a product regression. Treat skipped or failed SQLite-backed tests as incomplete until the native module has been rebuilt for the runtime that is executing the test.
+
 For background preset changes, regenerate the deterministic WebP assets and review previews:
 
 ```bash

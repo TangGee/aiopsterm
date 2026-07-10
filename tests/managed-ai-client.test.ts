@@ -110,6 +110,13 @@ describe('managedAiClient', () => {
           config: hibernationConfig
         }
       })),
+      deleteManagedAiSessionContentRecord: vi.fn(async (input) => ({
+        ok: true,
+        data: {
+          recordId: input.recordId,
+          sourceRevision: 'revision-after-delete'
+        }
+      })),
       onAiAgentSessionEvent: vi.fn(() => offAiAgentSessionEvent),
       onManagedAiSessionEvent: vi.fn(() => offManagedAiSessionEvent),
       onManagedAiSessionFocusRequest: vi.fn(() => offManagedAiSessionFocusRequest)
@@ -196,6 +203,17 @@ describe('managedAiClient', () => {
         })
       })
     )
+    await expect(
+      managedAiClient.deleteManagedAiSessionContentRecord()?.({
+        source: 'claude-code',
+        sessionId: 'claude-session-1',
+        recordId: 'record-1',
+        sourceRevision: 'revision-before-delete'
+      })
+    ).resolves.toEqual({
+      ok: true,
+      data: { recordId: 'record-1', sourceRevision: 'revision-after-delete' }
+    })
     expect(managedAiClient.onAiAgentSessionEvent()?.(aiAgentSessionEventListener)).toBe(offAiAgentSessionEvent)
     expect(managedAiClient.onManagedAiSessionEvent()?.(managedAiSessionEventListener)).toBe(offManagedAiSessionEvent)
     expect(managedAiClient.onManagedAiSessionFocusRequest()?.(managedAiSessionFocusRequestListener)).toBe(offManagedAiSessionFocusRequest)
@@ -215,6 +233,12 @@ describe('managedAiClient', () => {
       terminalSessionId: 'terminal-session-1'
     })
     expect(window.aiops.wakeManagedAiSession).toHaveBeenCalledWith({ source: 'claude-code', sessionId: 'claude-session-1', reason: 'resume' })
+    expect(window.aiops.deleteManagedAiSessionContentRecord).toHaveBeenCalledWith({
+      source: 'claude-code',
+      sessionId: 'claude-session-1',
+      recordId: 'record-1',
+      sourceRevision: 'revision-before-delete'
+    })
     expect(window.aiops.onAiAgentSessionEvent).toHaveBeenCalledWith(aiAgentSessionEventListener)
     expect(window.aiops.onManagedAiSessionEvent).toHaveBeenCalledWith(managedAiSessionEventListener)
     expect(window.aiops.onManagedAiSessionFocusRequest).toHaveBeenCalledWith(managedAiSessionFocusRequestListener)
@@ -230,6 +254,7 @@ describe('managedAiClient', () => {
       setAgentHibernationConfig: undefined as any,
       hibernateManagedAiSession: undefined as any,
       wakeManagedAiSession: undefined as any,
+      deleteManagedAiSessionContentRecord: undefined as any,
       onAiAgentSessionEvent: undefined as any,
       onManagedAiSessionEvent: undefined as any,
       onManagedAiSessionFocusRequest: undefined as any
@@ -243,6 +268,7 @@ describe('managedAiClient', () => {
     expect(managedAiClient.setAgentHibernationConfig()).toBeUndefined()
     expect(managedAiClient.hibernateManagedAiSession()).toBeUndefined()
     expect(managedAiClient.wakeManagedAiSession()).toBeUndefined()
+    expect(managedAiClient.deleteManagedAiSessionContentRecord()).toBeUndefined()
     expect(managedAiClient.onAiAgentSessionEvent()).toBeUndefined()
     expect(managedAiClient.onManagedAiSessionEvent()).toBeUndefined()
     expect(managedAiClient.onManagedAiSessionFocusRequest()).toBeUndefined()

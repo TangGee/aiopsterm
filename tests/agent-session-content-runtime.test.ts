@@ -101,6 +101,22 @@ describe('agentSessionContentRuntime', () => {
         sourceRevision: userRecord!.sourceRevision
       })
       expect(conflict).toEqual(expect.objectContaining({ ok: false, errorCode: 'MANAGED_AI_CONTENT_REVISION_CONFLICT' }))
+
+      const deleted = await runtime.deleteRecord({
+        source: 'codex',
+        sessionId: session.id,
+        recordId: updated.data!.record.recordId,
+        sourceRevision: updated.data!.sourceRevision
+      })
+      expect(deleted.ok).toBe(true)
+      expect(existsSync(deleted.data?.backupPath || '')).toBe(true)
+      const deletedRaw = await readFile(transcriptPath, 'utf-8')
+      const deletedLines = deletedRaw.split(/\n/)
+      expect(deletedLines).toHaveLength(3)
+      expect(deletedLines[2]).toBe('')
+      expect(deletedRaw).not.toContain('fix the billing api')
+      const relisted = await runtime.list({ source: 'codex', sessionId: session.id })
+      expect(relisted.data?.records.map((record: ManagedAiSessionContentRecord) => record.content)).toEqual(['done'])
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -210,6 +226,13 @@ describe('agentSessionContentRuntime', () => {
         sourceRevision: listed.data!.records[0].sourceRevision
       })
       expect(denied).toEqual(expect.objectContaining({ ok: false, errorCode: 'MANAGED_AI_CONTENT_READ_ONLY' }))
+      const deleteDenied = await runtime.deleteRecord({
+        source: 'claude-code',
+        sessionId: session.id,
+        recordId: listed.data!.records[0].recordId,
+        sourceRevision: listed.data!.records[0].sourceRevision
+      })
+      expect(deleteDenied).toEqual(expect.objectContaining({ ok: false, errorCode: 'MANAGED_AI_CONTENT_READ_ONLY' }))
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -274,6 +297,19 @@ describe('agentSessionContentRuntime', () => {
       verifyDb.close()
       expect(JSON.parse(part.data).text).toBe('edited opencode answer')
       expect(existsSync(updated.data?.backupPath || '')).toBe(true)
+
+      const deleted = await runtime.deleteRecord({
+        source: 'opencode',
+        sessionId: session.id,
+        recordId: record!.recordId,
+        sourceRevision: updated.data!.sourceRevision
+      })
+      expect(deleted.ok).toBe(true)
+      const deletedDb = new Database(dbPath, { readonly: true })
+      const remainingPart = deletedDb.prepare('SELECT data FROM part WHERE id = ?').get('part-1')
+      deletedDb.close()
+      expect(remainingPart).toBeUndefined()
+      expect(existsSync(deleted.data?.backupPath || '')).toBe(true)
     } finally {
       await rm(root, { recursive: true, force: true })
     }

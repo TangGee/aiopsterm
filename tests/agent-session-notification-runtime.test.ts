@@ -78,8 +78,7 @@ const createHarness = async (initialSessions: ManagedAiSessionRecord[]) => {
     replyManagedAiSession,
     bulkManagedAiSessions,
     appendManagedAiSessionAudit: audit,
-    publishManagedAiStreamFrame: publish,
-    maxNotifications: 20
+    publishManagedAiStreamFrame: publish
   })
   return { runtime, sessions, audit, publish, persistSnapshot, replyManagedAiSession, bulkManagedAiSessions, snapshot }
 }

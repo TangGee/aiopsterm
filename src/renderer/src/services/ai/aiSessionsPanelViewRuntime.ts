@@ -16,7 +16,7 @@ export type ManagedAiRequestKindFilter = 'all' | ManagedAiTimelineEvent['request
 export type ManagedAiSourceFilter = 'all' | AiAgentSessionSource
 export type ManagedAiCockpitFilterKey = 'all' | 'needsInput' | 'working' | 'idle' | 'ended' | 'hibernated'
 export type ManagedAiPanelMode = 'pending' | 'running' | 'library'
-export type ManagedAiLibraryGrouping = 'project' | 'agent'
+export type ManagedAiLibraryGrouping = 'project' | 'agent' | 'time'
 
 export type ManagedAiProjectOption = {
   key: string
@@ -34,8 +34,23 @@ export type ManagedAiLibrarySection = {
   key: string
   label: string
   count: number
+  childCount: number
+  pendingCount: number
+  runningCount: number
   latest: number
   sessions: ManagedAiSession[]
+}
+
+export type ManagedAiSessionRowGroup = {
+  key: string
+  session: ManagedAiSession
+  childSessions: ManagedAiSession[]
+  latest: number
+}
+
+export type ManagedAiSessionRows = {
+  rows: ManagedAiSessionRowGroup[]
+  orphanChildSessions: ManagedAiSession[]
 }
 
 export type ManagedAiCockpitCard = {
@@ -145,6 +160,18 @@ export const managedAiDecisionLabelKey = (kind: ManagedAiSessionDecisionKind | s
 
 export const managedAiSessionKey = (session: Pick<ManagedAiSession, 'source' | 'id'>) => `${session.source}:${session.id}`
 
+export const managedAiSessionIsChild = (session: Pick<ManagedAiSession, 'sessionKind'>) =>
+  session.sessionKind === 'subagent' || session.sessionKind === 'internal'
+
+export const managedAiSessionAllowsResume = (session: Pick<ManagedAiSession, 'state' | 'resumeCommand' | 'sessionKind' | 'restorable'>) =>
+  session.state !== 'working' &&
+  session.state !== 'needsInput' &&
+  session.restorable !== false &&
+  !managedAiSessionIsChild(session) &&
+  Boolean(session.resumeCommand?.trim())
+
+export const managedAiPrimarySessions = (sessions: ManagedAiSession[]) => sessions.filter((session) => !managedAiSessionIsChild(session))
+
 export const managedAiPanelModeStateFilter = (mode: ManagedAiPanelMode): ManagedAiStateFilter => {
   if (mode === 'pending') return 'needsInput'
   if (mode === 'running') return 'working'
@@ -162,8 +189,9 @@ export const buildManagedAiPanelModeButtons = (input: {
   mode: ManagedAiPanelMode
   translate: ManagedAiPanelTranslate
 }): ManagedAiPanelModeButton[] => {
-  const pendingCount = input.sessions.filter((session) => session.state === 'needsInput').length
-  const runningCount = input.sessions.filter((session) => session.state === 'working').length
+  const primarySessions = managedAiPrimarySessions(input.sessions)
+  const pendingCount = primarySessions.filter((session) => session.state === 'needsInput').length
+  const runningCount = primarySessions.filter((session) => session.state === 'working').length
   return [
     {
       key: 'pending',
@@ -186,6 +214,36 @@ export const buildManagedAiPanelModeButtons = (input: {
       active: input.mode === 'library'
     }
   ]
+}
+
+export const buildManagedAiSessionRows = (sessions: ManagedAiSession[]): ManagedAiSessionRows => {
+  const sorted = sessions.slice().sort((first, second) => second.lastActivityAt - first.lastActivityAt)
+  const rows = managedAiPrimarySessions(sorted).map((session) => ({
+    key: managedAiSessionKey(session),
+    session,
+    childSessions: [] as ManagedAiSession[],
+    latest: session.lastActivityAt || 0
+  }))
+  const rowBySessionKey = new Map(rows.map((row) => [row.key, row]))
+  const rowById = new Map(rows.map((row) => [row.session.id, row]))
+  const orphanChildSessions: ManagedAiSession[] = []
+  sorted.filter(managedAiSessionIsChild).forEach((session) => {
+    const parentKey = session.parentSessionId ? `${session.source}:${session.parentSessionId}` : ''
+    const parent = (parentKey ? rowBySessionKey.get(parentKey) : undefined) || (session.parentSessionId ? rowById.get(session.parentSessionId) : undefined)
+    if (parent) {
+      parent.childSessions.push(session)
+      parent.latest = Math.max(parent.latest, session.lastActivityAt || 0)
+      return
+    }
+    orphanChildSessions.push(session)
+  })
+  rows.forEach((row) => {
+    row.childSessions.sort((first, second) => second.lastActivityAt - first.lastActivityAt)
+  })
+  return {
+    rows: rows.sort((first, second) => second.latest - first.latest || first.session.title.localeCompare(second.session.title)),
+    orphanChildSessions: orphanChildSessions.sort((first, second) => second.lastActivityAt - first.lastActivityAt)
+  }
 }
 
 export const managedAiProjectKey = (cwd?: string) => {
@@ -390,6 +448,7 @@ export const buildManagedAiLibrarySections = (input: {
   grouping: ManagedAiLibraryGrouping
   unknownProjectLabel: string
 }): ManagedAiLibrarySection[] => {
+  if (input.grouping === 'time') return []
   const projectLabels = managedAiProjectDisplayLabels(input.sessions, input.unknownProjectLabel)
   const sections = new Map<string, ManagedAiLibrarySection>()
   input.sessions.forEach((session) => {
@@ -400,6 +459,9 @@ export const buildManagedAiLibrarySections = (input: {
       key,
       label,
       count: (existing?.count || 0) + 1,
+      childCount: (existing?.childCount || 0) + (managedAiSessionIsChild(session) ? 1 : 0),
+      pendingCount: (existing?.pendingCount || 0) + (!managedAiSessionIsChild(session) && session.state === 'needsInput' ? 1 : 0),
+      runningCount: (existing?.runningCount || 0) + (!managedAiSessionIsChild(session) && session.state === 'working' ? 1 : 0),
       latest: Math.max(existing?.latest || 0, session.lastActivityAt || 0),
       sessions: [...(existing?.sessions || []), session]
     })

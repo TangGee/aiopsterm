@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from 'vitest'
 type AgentSessionsBackend = {
   configureAiAgentSessionStore: (userDataPath: string) => Promise<void>
   listManagedAiSessions: () => Promise<unknown>
+  listManagedAiSessionContent: (input: Record<string, unknown>) => Promise<unknown>
   configureManagedAiSessionImportRuntime: (config?: Record<string, unknown> & { importSessions?: () => Promise<unknown[]> }) => void
   configureManagedAiSessionGitRuntime: (config?: Record<string, unknown> & { runGit?: (cwd: string, args: string[], timeoutMs: number) => Promise<string> }) => void
   listManagedAiSessionEvents: (input?: Record<string, unknown>) => unknown
@@ -33,6 +34,8 @@ type AgentSessionsBackend = {
   __testing: {
     auditPathFor: (userDataPath: string) => string
     streamLatestSeq: () => number
+    flushManagedAiSessionImports: () => Promise<number>
+    flushManagedAiSessionGitRefresh: () => Promise<number>
     flushManagedAiSessionWrites: () => Promise<void>
     flushCodexTranscriptMonitors: () => Promise<void>
     activeCodexTranscriptMonitorCount: () => number
@@ -423,7 +426,7 @@ describe('agent session backend', () => {
   })
 
   it('adds cached git branch and dirty metadata to managed AI session snapshots', async () => {
-    const { configureAiAgentSessionStore, configureManagedAiSessionGitRuntime, listManagedAiSessions, publishAiAgentSessionEvent } = await loadBackend()
+    const { __testing, configureAiAgentSessionStore, configureManagedAiSessionGitRuntime, listManagedAiSessions, publishAiAgentSessionEvent } = await loadBackend()
     const root = await mkdtemp(join(tmpdir(), 'aiopsterm-agent-git-'))
     const project = join(root, 'repo')
     await mkdir(project, { recursive: true })
@@ -439,30 +442,201 @@ describe('agent session backend', () => {
       runGit
     })
 
-    publishAiAgentSessionEvent(
-      {
-        source: 'codex',
-        event: 'SessionStart',
-        sessionId: 'codex-git-1',
-        cwd: project,
-        receivedAt: 160
-      },
-      null
-    )
+    try {
+      publishAiAgentSessionEvent(
+        {
+          source: 'codex',
+          event: 'SessionStart',
+          sessionId: 'codex-git-1',
+          cwd: project,
+          receivedAt: 160
+        },
+        null
+      )
 
-    const first = (await listManagedAiSessions()) as { data?: { sessions?: Array<Record<string, unknown>> } }
-    const second = (await listManagedAiSessions()) as { data?: { sessions?: Array<Record<string, unknown>> } }
+      const initial = (await listManagedAiSessions()) as { data?: { sessions?: Array<Record<string, unknown>> } }
+      await __testing.flushManagedAiSessionGitRefresh()
+      const second = (await listManagedAiSessions()) as { data?: { sessions?: Array<Record<string, unknown>> } }
 
-    expect(first.data?.sessions?.[0]).toEqual(
-      expect.objectContaining({
-        id: 'codex-git-1',
-        gitBranch: 'main',
-        gitDirty: true,
-        gitStatusUpdatedAt: 200
+      expect(initial.data?.sessions?.[0]).toEqual(
+        expect.objectContaining({
+          id: 'codex-git-1'
+        })
+      )
+      expect(initial.data?.sessions?.[0]).not.toHaveProperty('gitBranch')
+      expect(second.data?.sessions?.[0]).toEqual(
+        expect.objectContaining({
+          id: 'codex-git-1',
+          gitBranch: 'main',
+          gitDirty: true,
+          gitStatusUpdatedAt: 200
+        })
+      )
+      expect(runGit).toHaveBeenCalledTimes(2)
+      await __testing.flushManagedAiSessionGitRefresh()
+    } finally {
+      configureManagedAiSessionGitRuntime()
+    }
+  })
+
+  it('does not publish git refreshes for timestamp-only probe results', async () => {
+    const { __testing, configureAiAgentSessionStore, configureManagedAiSessionGitRuntime, listManagedAiSessions, publishAiAgentSessionEvent } = await loadBackend()
+    const root = await mkdtemp(join(tmpdir(), 'aiopsterm-agent-git-timestamp-'))
+    const project = join(root, 'repo')
+    await mkdir(project, { recursive: true })
+    await configureAiAgentSessionStore(join(root, 'user-data'))
+    const runGit = vi.fn(async () => '')
+    configureManagedAiSessionGitRuntime({
+      ttlMs: 0,
+      now: () => 500,
+      runGit
+    })
+
+    try {
+      publishAiAgentSessionEvent(
+        {
+          source: 'codex',
+          event: 'SessionStart',
+          sessionId: 'codex-git-timestamp-1',
+          cwd: project,
+          receivedAt: 450
+        },
+        null
+      )
+
+      await listManagedAiSessions()
+      await expect(__testing.flushManagedAiSessionGitRefresh()).resolves.toBe(0)
+      const response = (await listManagedAiSessions()) as { data?: { sessions?: Array<Record<string, unknown>> } }
+
+      expect(response.data?.sessions?.[0]).toEqual(expect.objectContaining({ id: 'codex-git-timestamp-1' }))
+      expect(response.data?.sessions?.[0]).not.toHaveProperty('gitStatusUpdatedAt')
+      expect(runGit).toHaveBeenCalledTimes(2)
+      await __testing.flushManagedAiSessionGitRefresh()
+    } finally {
+      configureManagedAiSessionGitRuntime()
+    }
+  })
+
+  it('returns managed AI session snapshots without waiting for slow git metadata probes', async () => {
+    const { __testing, configureAiAgentSessionStore, configureManagedAiSessionGitRuntime, listManagedAiSessions, publishAiAgentSessionEvent } = await loadBackend()
+    const root = await mkdtemp(join(tmpdir(), 'aiopsterm-agent-git-slow-'))
+    const project = join(root, 'repo')
+    await mkdir(join(project, '.git'), { recursive: true })
+    await writeFile(join(project, '.git', 'HEAD'), 'ref: refs/heads/main\n', 'utf-8')
+    await configureAiAgentSessionStore(join(root, 'user-data'))
+    const gitRequests: Array<{ args: string[]; resolve: (value: string) => void }> = []
+    const runGit = vi.fn((_cwd: string, args: string[]) =>
+      new Promise<string>((resolve) => {
+        gitRequests.push({ args, resolve })
       })
     )
-    expect(second.data?.sessions?.[0]).toEqual(expect.objectContaining({ gitBranch: 'main', gitDirty: true }))
-    expect(runGit).toHaveBeenCalledTimes(2)
+    configureManagedAiSessionGitRuntime({
+      ttlMs: 1000,
+      now: () => 300,
+      runGit
+    })
+
+    try {
+      publishAiAgentSessionEvent(
+        {
+          source: 'codex',
+          event: 'SessionStart',
+          sessionId: 'codex-git-slow-1',
+          cwd: project,
+          receivedAt: 260
+        },
+        null
+      )
+      publishAiAgentSessionEvent(
+        {
+          source: 'claude-code',
+          event: 'SessionStart',
+          sessionId: 'claude-git-slow-1',
+          cwd: project,
+          receivedAt: 270
+        },
+        null
+      )
+
+      const initial = (await listManagedAiSessions()) as { data?: { sessions?: Array<Record<string, unknown>> } }
+
+      expect(initial.data?.sessions).toHaveLength(2)
+      expect(runGit).not.toHaveBeenCalled()
+
+      const refresh = __testing.flushManagedAiSessionGitRefresh()
+      await vi.waitFor(() => expect(gitRequests).toHaveLength(1))
+      expect(gitRequests[0].args).toEqual(['rev-parse', '--abbrev-ref', 'HEAD'])
+      gitRequests[0].resolve('feature/large-repo\n')
+      await vi.waitFor(() => expect(gitRequests).toHaveLength(2))
+      expect(gitRequests[1].args).toEqual(['status', '--porcelain'])
+      gitRequests[1].resolve('')
+      await expect(refresh).resolves.toBe(2)
+
+      const refreshed = (await listManagedAiSessions()) as { data?: { sessions?: Array<Record<string, unknown>> } }
+      expect(refreshed.data?.sessions).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: 'codex-git-slow-1', gitBranch: 'feature/large-repo', gitDirty: false }),
+          expect.objectContaining({ id: 'claude-git-slow-1', gitBranch: 'feature/large-repo', gitDirty: false })
+        ])
+      )
+      expect(runGit).toHaveBeenCalledTimes(2)
+      await __testing.flushManagedAiSessionGitRefresh()
+    } finally {
+      configureManagedAiSessionGitRuntime()
+    }
+  })
+
+  it('loads managed AI session content without refreshing imported sessions or git metadata for existing sessions', async () => {
+    const {
+      configureAiAgentSessionStore,
+      configureManagedAiSessionGitRuntime,
+      configureManagedAiSessionImportRuntime,
+      listManagedAiSessionContent,
+      publishAiAgentSessionEvent
+    } = await loadBackend()
+    const root = await mkdtemp(join(tmpdir(), 'aiopsterm-agent-content-no-refresh-'))
+    const project = join(root, 'repo')
+    const transcriptPath = join(root, 'codex-content.jsonl')
+    await mkdir(project, { recursive: true })
+    await writeFile(
+      transcriptPath,
+      `${JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'hello from transcript' }] } })}\n`,
+      'utf-8'
+    )
+    await configureAiAgentSessionStore(join(root, 'user-data'))
+    const importSessions = vi.fn(async () => [])
+    const runGit = vi.fn(async () => '')
+    configureManagedAiSessionImportRuntime({ importSessions })
+    configureManagedAiSessionGitRuntime({ runGit })
+
+    try {
+      publishAiAgentSessionEvent(
+        {
+          source: 'codex',
+          event: 'SessionStart',
+          sessionId: 'codex-content-no-refresh-1',
+          cwd: project,
+          transcriptPath,
+          receivedAt: 240
+        },
+        null
+      )
+
+      const response = (await listManagedAiSessionContent({
+        source: 'codex',
+        sessionId: 'codex-content-no-refresh-1',
+        limit: 10,
+        maxContentChars: 1000
+      })) as { ok?: boolean; data?: { records?: Array<Record<string, unknown>> } }
+
+      expect(response.ok).toBe(true)
+      expect(response.data?.records?.map((record) => record.content)).toContain('hello from transcript')
+      expect(importSessions).not.toHaveBeenCalled()
+      expect(runGit).not.toHaveBeenCalled()
+    } finally {
+      configureManagedAiSessionImportRuntime()
+      configureManagedAiSessionGitRuntime()
+    }
   })
 
   it('promotes stock Codex permission hooks to pending terminal attention', async () => {
@@ -791,6 +965,30 @@ describe('agent session backend', () => {
         resumeCommand: "cd '/work/project'\\''s app' && claude --resume 'claude-session-1'"
       })
     })
+
+    const childResult = normalizeAiAgentSessionEventInput(
+      {
+        source: 'cursor',
+        event: 'SessionStart',
+        session_id: 'cursor-child-1',
+        cwd: '/work/project',
+        thread_source: 'subagent',
+        parent_session_id: 'cursor-parent-1',
+        resumeCommand: "cursor-agent --resume 'cursor-child-1'"
+      },
+      270
+    )
+    expect(childResult).toEqual({
+      ok: true,
+      data: expect.objectContaining({
+        source: 'cursor',
+        sessionId: 'cursor-child-1',
+        sessionKind: 'subagent',
+        parentSessionId: 'cursor-parent-1',
+        restorable: false
+      })
+    })
+    expect((childResult as { data?: Record<string, unknown> }).data).not.toHaveProperty('resumeCommand')
   })
 
   it('persists resume command metadata across later events that omit it', async () => {
@@ -843,8 +1041,118 @@ describe('agent session backend', () => {
     })
   })
 
+  it('returns managed AI session snapshots without waiting for slow local history import', async () => {
+    const { __testing, configureAiAgentSessionStore, configureManagedAiSessionImportRuntime, listManagedAiSessions } = await loadBackend()
+    await configureAiAgentSessionStore(await mkdtemp(join(tmpdir(), 'aiopsterm-agent-import-slow-')))
+    const imported = [
+      {
+        id: 'codex-slow-import-1',
+        source: 'codex',
+        title: 'Imported Slow Codex',
+        summary: 'slow historical codex task',
+        state: 'idle',
+        lastEvent: 'session_start',
+        lastActivityAt: 1781884700000,
+        createdAt: 1781884700000,
+        updatedAt: 1781885000000,
+        requestKind: 'telemetry',
+        decisionMode: 'telemetry',
+        agentLifecycle: 'idle',
+        events: [
+          {
+            id: 'imported-slow-codex',
+            source: 'codex',
+            event: 'session_start',
+            sessionId: 'codex-slow-import-1',
+            title: 'Imported Slow Codex',
+            summary: 'slow historical codex task',
+            receivedAt: 1781884700000,
+            requestKind: 'telemetry',
+            decisionMode: 'telemetry'
+          }
+        ]
+      }
+    ]
+    let resolveImport: (value: unknown[]) => void = () => undefined
+    const importSessions = vi.fn(() =>
+      new Promise<unknown[]>((resolve) => {
+        resolveImport = resolve
+      })
+    )
+    configureManagedAiSessionImportRuntime({ importSessions })
+
+    try {
+      const initial = (await listManagedAiSessions()) as { data?: { sessions?: Array<Record<string, unknown>> } }
+      expect(initial.data?.sessions || []).toHaveLength(0)
+      expect(importSessions).not.toHaveBeenCalled()
+
+      const scan = __testing.flushManagedAiSessionImports()
+      await vi.waitFor(() => expect(importSessions).toHaveBeenCalledTimes(1))
+      resolveImport(imported)
+      await expect(scan).resolves.toBe(1)
+
+      const refreshed = (await listManagedAiSessions()) as { data?: { sessions?: Array<Record<string, unknown>> } }
+      expect(refreshed.data?.sessions).toEqual([
+        expect.objectContaining({
+          id: 'codex-slow-import-1',
+          title: 'Imported Slow Codex'
+        })
+      ])
+    } finally {
+      configureManagedAiSessionImportRuntime()
+    }
+  })
+
+  it('does not immediately rescan imported history after a background import event reloads the list', async () => {
+    const { __testing, configureAiAgentSessionStore, configureManagedAiSessionImportRuntime, listManagedAiSessions } = await loadBackend()
+    await configureAiAgentSessionStore(await mkdtemp(join(tmpdir(), 'aiopsterm-agent-import-cooldown-')))
+
+    const importSessions = vi.fn(async () => [
+      {
+        id: 'codex-import-cooldown-1',
+        source: 'codex',
+        title: 'Imported Cooldown Codex',
+        summary: 'historical codex task',
+        state: 'idle',
+        lastEvent: 'session_start',
+        lastActivityAt: 1781884700000,
+        createdAt: 1781884700000,
+        updatedAt: 1781885000000,
+        requestKind: 'telemetry',
+        decisionMode: 'telemetry',
+        agentLifecycle: 'idle',
+        events: [
+          {
+            id: `imported-cooldown-${importSessions.mock.calls.length}`,
+            source: 'codex',
+            event: 'session_start',
+            sessionId: 'codex-import-cooldown-1',
+            title: 'Imported Cooldown Codex',
+            summary: 'historical codex task',
+            receivedAt: 1781884700000,
+            requestKind: 'telemetry',
+            decisionMode: 'telemetry'
+          }
+        ]
+      }
+    ])
+    configureManagedAiSessionImportRuntime({ importSessions })
+
+    try {
+      await listManagedAiSessions()
+      await expect(__testing.flushManagedAiSessionImports()).resolves.toBe(1)
+      await listManagedAiSessions()
+      await expect(__testing.flushManagedAiSessionImports()).resolves.toBe(0)
+
+      expect(importSessions).toHaveBeenCalledTimes(1)
+    } finally {
+      configureManagedAiSessionImportRuntime()
+    }
+  })
+
   it('merges imported local agent history without overwriting live managed session state', async () => {
     const {
+      __testing,
       configureAiAgentSessionStore,
       configureManagedAiSessionImportRuntime,
       listManagedAiSessions,
@@ -935,30 +1243,170 @@ describe('agent session backend', () => {
       importSessions: async () => imported
     })
 
-    const response = (await listManagedAiSessions()) as { data?: { sessions?: Array<Record<string, unknown>> } }
-    const sessions = response.data?.sessions || []
-    const live = sessions.find((session) => session.id === 'claude-live-1')
-    const codex = sessions.find((session) => session.id === 'codex-imported-1')
+    try {
+      await listManagedAiSessions()
+      await __testing.flushManagedAiSessionImports()
+      const response = (await listManagedAiSessions()) as { data?: { sessions?: Array<Record<string, unknown>> } }
+      const sessions = response.data?.sessions || []
+      const live = sessions.find((session) => session.id === 'claude-live-1')
+      const codex = sessions.find((session) => session.id === 'codex-imported-1')
 
-    expect(live).toEqual(
-      expect.objectContaining({
-        title: 'Live Claude',
-        state: 'needsInput',
-        pendingRequestId: 'question-1',
-        cwd: '/work/claude-live',
-        resumeCommand: "cd '/work/claude-live' && claude --resume 'claude-live-1'"
-      })
-    )
-    expect(codex).toEqual(
-      expect.objectContaining({
+      expect(live).toEqual(
+        expect.objectContaining({
+          title: 'Live Claude',
+          state: 'needsInput',
+          pendingRequestId: 'question-1',
+          cwd: '/work/claude-live',
+          resumeCommand: "cd '/work/claude-live' && claude --resume 'claude-live-1'"
+        })
+      )
+      expect(codex).toEqual(
+        expect.objectContaining({
+          source: 'codex',
+          title: 'Imported Codex',
+          state: 'idle',
+          resumeCommand: "cd '/work/codex-imported' && codex resume 'codex-imported-1'"
+        })
+      )
+    } finally {
+      configureManagedAiSessionImportRuntime()
+    }
+  })
+
+  it('does not re-import unchanged review-only child sessions on every list refresh', async () => {
+    const {
+      __testing,
+      configureAiAgentSessionStore,
+      configureManagedAiSessionImportRuntime,
+      listManagedAiSessions
+    } = await loadBackend()
+    const userDataPath = await mkdtemp(join(tmpdir(), 'aiopsterm-agent-import-idempotent-'))
+    await configureAiAgentSessionStore(userDataPath)
+
+    const imported = [
+      {
+        id: 'codex-child-history-1',
         source: 'codex',
-        title: 'Imported Codex',
+        title: 'Child review',
+        summary: 'review-only child session',
         state: 'idle',
-        resumeCommand: "cd '/work/codex-imported' && codex resume 'codex-imported-1'"
-      })
-    )
+        lastEvent: 'session_start',
+        lastActivityAt: 1781884600000,
+        createdAt: 1781884600000,
+        updatedAt: 1781885000000,
+        requestKind: 'telemetry',
+        decisionMode: 'telemetry',
+        sessionKind: 'subagent',
+        parentSessionId: 'codex-parent-history-1',
+        restorable: false,
+        agentLifecycle: 'idle',
+        events: [
+          {
+            id: 'imported-codex-child',
+            source: 'codex',
+            event: 'session_start',
+            sessionId: 'codex-child-history-1',
+            title: 'Child review',
+            summary: 'review-only child session',
+            receivedAt: 1781884600000,
+            requestKind: 'telemetry',
+            decisionMode: 'telemetry',
+            sessionKind: 'subagent',
+            parentSessionId: 'codex-parent-history-1',
+            restorable: false
+          }
+        ]
+      }
+    ]
+    configureManagedAiSessionImportRuntime({
+      importSessions: async () => imported
+    })
 
-    configureManagedAiSessionImportRuntime()
+    try {
+      await listManagedAiSessions()
+      await __testing.flushManagedAiSessionImports()
+      const first = (await listManagedAiSessions()) as { data?: { sessions?: Array<Record<string, unknown>> } }
+      const firstSession = first.data?.sessions?.find((session) => session.id === 'codex-child-history-1')
+      const firstUpdatedAt = firstSession?.updatedAt
+
+      await __testing.flushManagedAiSessionImports()
+      const second = (await listManagedAiSessions()) as { data?: { sessions?: Array<Record<string, unknown>> } }
+      const secondSession = second.data?.sessions?.find((session) => session.id === 'codex-child-history-1')
+
+      expect(secondSession).toEqual(
+        expect.objectContaining({
+          sessionKind: 'subagent',
+          parentSessionId: 'codex-parent-history-1',
+          restorable: false
+        })
+      )
+      expect(secondSession?.updatedAt).toBe(firstUpdatedAt)
+
+      await __testing.flushManagedAiSessionWrites()
+      const entries = String(await readFile(__testing.auditPathFor(userDataPath), 'utf-8'))
+        .trim()
+        .split('\n')
+        .filter(Boolean)
+        .map((line) => JSON.parse(line) as Record<string, unknown>)
+      expect(entries.filter((entry) => entry.kind === 'sessions.imported')).toEqual([
+        expect.objectContaining({ changed: 1 })
+      ])
+    } finally {
+      configureManagedAiSessionImportRuntime()
+    }
+  })
+
+  it('keeps all imported sessions instead of capping the managed session store', async () => {
+    const {
+      __testing,
+      configureAiAgentSessionStore,
+      configureManagedAiSessionImportRuntime,
+      listManagedAiSessions
+    } = await loadBackend()
+    await configureAiAgentSessionStore(await mkdtemp(join(tmpdir(), 'aiopsterm-agent-import-unlimited-')))
+
+    const imported = Array.from({ length: 205 }, (_item, index) => ({
+      id: `codex-imported-many-${index}`,
+      source: 'codex',
+      title: `Imported Codex ${index}`,
+      summary: `historical codex task ${index}`,
+      state: 'idle',
+      lastEvent: 'session_start',
+      lastActivityAt: 1781885000000 - index,
+      createdAt: 1781884000000 - index,
+      updatedAt: 1781886000000,
+      requestKind: 'telemetry',
+      decisionMode: 'telemetry',
+      agentLifecycle: 'idle',
+      events: [
+        {
+          id: `imported-many-${index}`,
+          source: 'codex',
+          event: 'session_start',
+          sessionId: `codex-imported-many-${index}`,
+          title: `Imported Codex ${index}`,
+          summary: `historical codex task ${index}`,
+          receivedAt: 1781885000000 - index,
+          requestKind: 'telemetry',
+          decisionMode: 'telemetry'
+        }
+      ]
+    }))
+    configureManagedAiSessionImportRuntime({
+      importSessions: async () => imported
+    })
+
+    try {
+      await listManagedAiSessions()
+      await __testing.flushManagedAiSessionImports()
+      const response = (await listManagedAiSessions()) as { data?: { sessions?: Array<Record<string, unknown>> } }
+      const sessions = response.data?.sessions || []
+
+      expect(sessions).toHaveLength(205)
+      expect(sessions.some((session) => session.id === 'codex-imported-many-204')).toBe(true)
+    } finally {
+      configureManagedAiSessionImportRuntime()
+    }
   })
 
   it('tracks explicit agent hibernation state and config', async () => {

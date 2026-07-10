@@ -157,227 +157,66 @@
   </div>
 
   <Teleport to="body">
-    <div
-      v-if="editorOpen"
-      class="asset-host-modal file-modal"
-    >
-      <aside
-        class="asset-form-panel asset-host-form-modal"
-        :data-onboarding-id="editorOpen ? 'asset-form-fields' : undefined"
-      >
-        <header>
-          <strong>{{ editMode ? '编辑主机' : '新建主机' }}</strong>
-          <button
-            title="关闭"
-            @click="closeAssetEditor"
-          >
-            <X />
-          </button>
-        </header>
-        <label>
-          <span>设备类型</span>
-          <select v-model="form.asset_type">
-            <option value="person">服务器</option>
-            <option value="switch">交换机</option>
-            <option value="organization">堡垒机</option>
-          </select>
-        </label>
-        <label v-if="form.asset_type === 'organization'">
-          <span>堡垒机类型</span>
-          <select v-model="form.bastionType">
-            <option value="jumpserver">JumpServer</option>
-            <option value="teleport">Teleport</option>
-          </select>
-        </label>
-        <label v-if="form.asset_type === 'switch'">
-          <span>交换机品牌</span>
-          <select v-model="form.switchBrand">
-            <option value="cisco">Cisco</option>
-            <option value="huawei">Huawei</option>
-          </select>
-        </label>
-        <label>
-          <span>主机名</span>
-          <input v-model="form.title" />
-        </label>
-        <label>
-          <span>地址</span>
-          <input v-model="form.host" />
-        </label>
-        <label>
-          <span>认证方式</span>
-          <select v-model="form.auth_type">
-            <option value="password">密码</option>
-            <option value="keyBased">密钥</option>
-          </select>
-        </label>
-        <label>
-          <span>用户名</span>
-          <input v-model="form.username" />
-        </label>
-        <label v-if="form.auth_type === 'password'">
-          <span>密码</span>
-          <div class="asset-secret-field">
-            <input
-              v-model="form.password"
-              :type="assetPasswordVisible ? 'text' : 'password'"
-              :placeholder="editMode ? '清空将删除已保存密码' : ''"
-              autocomplete="new-password"
-            />
-            <button
-              type="button"
-              class="asset-secret-toggle"
-              :title="assetPasswordVisible ? '隐藏密码' : '显示密码'"
-              @click="assetPasswordVisible = !assetPasswordVisible"
-            >
-              <EyeOff v-if="assetPasswordVisible" />
-              <Eye v-else />
-            </button>
-          </div>
-        </label>
-        <label v-else>
-          <span class="asset-field-heading">
-            密钥链
-            <button
-              type="button"
-              @click="openKeyCreateFromHostForm"
-            >
-              新建密钥
-            </button>
-          </span>
-          <select v-model="form.keyId">
-            <option value="">请选择密钥</option>
-            <option
-              v-for="key in keychains"
-              :key="key.id"
-              :value="key.id"
-            >
-              {{ key.name }}
-            </option>
-          </select>
-        </label>
-        <label>
-          <span>分组</span>
-          <input
-            v-model="form.group"
-            list="asset-host-group-options"
-          />
-          <datalist id="asset-host-group-options">
-            <option
-              v-for="group in assetGroupOptions"
-              :key="group.key"
-              :value="group.name"
-            />
-          </datalist>
-        </label>
-        <label>
-          <span>端口</span>
-          <input
-            v-model.number="form.port"
-            type="number"
-          />
-        </label>
-        <label>
-          <span class="asset-field-heading">
-            代理
-            <button
-              type="button"
-              @click="openProxyAddPanel(true)"
-            >
-              新增代理
-            </button>
-          </span>
-          <select
-            v-if="sshProxyOptions.length"
-            v-model="form.proxyName"
-            data-testid="asset-proxy-select"
-          >
-            <option value="">不使用代理</option>
-            <option
-              v-for="proxy in sshProxyOptions"
-              :key="proxy.name"
-              :value="proxy.name"
-            >
-              {{ proxy.name }}
-            </option>
-          </select>
-          <div
-            v-else
-            class="asset-proxy-empty"
-          >
-            <small>暂无 SSH 代理配置</small>
-            <button
-              type="button"
-              @click="openProxyAddPanel(true)"
-            >
-              新增代理
-            </button>
-          </div>
-        </label>
-        <label>
-          <span class="asset-field-heading">
-            跳板机
-            <button
-              type="button"
-              @click="openJumpHostCreateFromHostForm"
-            >
-              新建跳板机
-            </button>
-          </span>
-          <select v-model="form.jumpHostId">
-            <option value="">不使用跳板机</option>
-            <option
-              v-for="asset in jumpHostOptions"
-              :key="asset.id"
-              :value="asset.id"
-            >
-              {{ asset.title }} ({{ asset.username }}@{{ asset.host }}:{{ asset.port }})
-            </option>
-          </select>
-        </label>
-        <div class="asset-form-actions">
-          <button
-            class="asset-submit-button secondary"
-            data-testid="asset-test-connection"
-            :disabled="assetTestLoading"
-            @click="testAssetFormConnection"
-          >
-            {{ assetTestLoading ? '测试中' : '测试连接' }}
-          </button>
-          <button
-            class="asset-submit-button"
-            data-onboarding-id="asset-form-submit"
-            @click="submitForm"
-          >
-            保存
-          </button>
-        </div>
-        <small
-          v-if="assetTestMessage"
-          class="asset-form-error asset-connection-test-result"
-          :class="{ success: assetTestOk }"
-        >
-          {{ assetTestMessage }}
-        </small>
-        <small
-          v-if="assetFormError"
-          class="asset-form-error"
-        >
-          {{ assetFormError }}
-        </small>
-      </aside>
-    </div>
+    <AssetHostFormDialog
+      :visible="editorOpen"
+      :title="editMode ? '编辑主机' : '新建主机'"
+      :asset-type="form.asset_type"
+      :host-title="form.title"
+      :host="form.host"
+      :auth-type="form.auth_type"
+      :username="form.username"
+      :password="form.password"
+      :password-visible="assetPasswordVisible"
+      :password-placeholder="editMode ? '清空将删除已保存密码' : ''"
+      :port="form.port"
+      :keychain-id="form.keyId"
+      :proxy-name="form.proxyName"
+      :jump-host-id="form.jumpHostId"
+      :group="form.group"
+      :bastion-type="form.bastionType"
+      :switch-brand="form.switchBrand"
+      :error="assetFormError"
+      :test-loading="assetTestLoading"
+      :test-message="assetTestMessage"
+      :test-ok="assetTestOk"
+      :keychain-options="keychains"
+      :group-options="assetGroupOptions"
+      :proxy-options="assetProxyOptions"
+      :jump-host-options="assetJumpHostOptions"
+      :show-bastion-type="form.asset_type === 'organization'"
+      :show-switch-brand="form.asset_type === 'switch'"
+      show-group
+      show-empty-jump-host-select
+      group-datalist-id="asset-host-group-options"
+      keychain-label="密钥链"
+      empty-keychain-label="请选择密钥"
+      empty-proxy-action-label="新增代理"
+      jump-host-label="跳板机"
+      port-input-type="number"
+      test-connection-test-id="asset-test-connection"
+      proxy-test-id="asset-proxy-select"
+      :onboarding-id="editorOpen ? 'asset-form-fields' : undefined"
+      submit-onboarding-id="asset-form-submit"
+      @close="closeAssetEditor"
+      @submit="submitAssetHostForm"
+      @test-connection="testAssetHostConnection"
+      @toggle-password="assetPasswordVisible = !assetPasswordVisible"
+      @create-keychain="openAssetHostKeyCreate"
+      @create-proxy="openAssetHostProxyAdd"
+      @create-jump-host="openAssetHostJumpHostCreate"
+      @field-change="updateAssetHostField"
+    />
   </Teleport>
 </template>
 
 <script setup lang="ts">
+import { computed, watch } from 'vue'
+import type { AiopsAssetAuthType, AiopsAssetType } from '@shared/contracts/assets'
 import {
   CircleHelp,
   Copy,
   Database,
   Download,
-  Eye,
-  EyeOff,
   Folder,
   Import,
   Laptop,
@@ -388,6 +227,7 @@ import {
   Trash2,
   X
 } from 'lucide-vue-next'
+import AssetHostFormDialog, { type AssetHostFormField } from '@/components/assets/AssetHostFormDialog.vue'
 import AssetTreeGroupNode from '@/components/assets/AssetTreeGroupNode.vue'
 import { useAssetsPanelRuntimeContext } from '@/services/assets/assetsPanelContext'
 
@@ -437,4 +277,129 @@ const {
   openImportDialog,
   openExportModal
 } = useAssetsPanelRuntimeContext()
+
+const assetJumpHostOptions = computed(() =>
+  jumpHostOptions.value.map((asset) => ({
+    id: asset.id,
+    name: asset.title,
+    label: `${asset.title} (${asset.username}@${asset.host}:${asset.port})`
+  }))
+)
+
+const assetProxyOptions = computed(() =>
+  sshProxyOptions.value.map((proxy) => ({
+    id: proxy.name,
+    name: proxy.name
+  }))
+)
+
+type AssetHostDraft = Partial<{
+  asset_type: AiopsAssetType
+  title: string
+  host: string
+  auth_type: AiopsAssetAuthType
+  username: string
+  password: string
+  port: number
+  keyId: string
+  proxyName: string
+  jumpHostId: string
+  group: string
+  bastionType: string
+  switchBrand: string
+}>
+
+const assetHostDraft: AssetHostDraft = {}
+
+const resetAssetHostDraft = () => {
+  for (const key of Object.keys(assetHostDraft) as Array<keyof AssetHostDraft>) {
+    delete assetHostDraft[key]
+  }
+}
+
+watch(
+  editorOpen,
+  (open) => {
+    if (open) resetAssetHostDraft()
+  },
+  { flush: 'sync' }
+)
+
+const syncAssetHostDraft = () => {
+  Object.assign(form, assetHostDraft)
+}
+
+const updateAssetHostField = (field: AssetHostFormField, value: string | number) => {
+  switch (field) {
+    case 'assetType':
+      assetHostDraft.asset_type = String(value) as AiopsAssetType
+      form.asset_type = assetHostDraft.asset_type
+      break
+    case 'hostTitle':
+      assetHostDraft.title = String(value)
+      break
+    case 'host':
+      assetHostDraft.host = String(value)
+      break
+    case 'authType':
+      assetHostDraft.auth_type = String(value) as AiopsAssetAuthType
+      form.auth_type = assetHostDraft.auth_type
+      break
+    case 'username':
+      assetHostDraft.username = String(value)
+      break
+    case 'password':
+      assetHostDraft.password = String(value)
+      break
+    case 'port':
+      assetHostDraft.port = Number(value)
+      break
+    case 'keychainId':
+      assetHostDraft.keyId = String(value)
+      break
+    case 'proxyName':
+      assetHostDraft.proxyName = String(value)
+      break
+    case 'jumpHostId':
+      assetHostDraft.jumpHostId = String(value)
+      break
+    case 'group':
+      assetHostDraft.group = String(value)
+      break
+    case 'bastionType':
+      assetHostDraft.bastionType = String(value)
+      break
+    case 'switchBrand':
+      assetHostDraft.switchBrand = String(value)
+      break
+    case 'comment':
+      break
+  }
+}
+
+const submitAssetHostForm = () => {
+  syncAssetHostDraft()
+  void submitForm()
+}
+
+const testAssetHostConnection = () => {
+  syncAssetHostDraft()
+  void testAssetFormConnection()
+}
+
+const openAssetHostKeyCreate = () => {
+  syncAssetHostDraft()
+  openKeyCreateFromHostForm()
+}
+
+const openAssetHostProxyAdd = () => {
+  syncAssetHostDraft()
+  openProxyAddPanel(true)
+}
+
+const openAssetHostJumpHostCreate = () => {
+  syncAssetHostDraft()
+  openJumpHostCreateFromHostForm()
+  resetAssetHostDraft()
+}
 </script>

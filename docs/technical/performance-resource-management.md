@@ -48,6 +48,7 @@ Main-process persistence avoids synchronous write storms while keeping explicit 
 - Extension catalog reads cache local `registry.json` by file signature and store packages by directory file signatures. Cache invalidates on runtime configuration changes or registry writes.
 
 SQLite-backed stores for assets, file sessions, quick commands, aliases, and settings preferences enable `WAL`, `synchronous=NORMAL`, and `busy_timeout=5000`. Quick commands, aliases, and settings preferences also reuse prepared statements; whole-store replacement paths use transactions where the local store API supports them.
+These stores are app-state stores, not the user-data SQL workspace path. Keep their records bounded and do not add bulk scan/import behavior on the synchronous store API; move that work behind an async cache or worker boundary before exposing large datasets. Assets are the high-growth exception: the backend keeps a sanitized asset-list snapshot cache, invalidates it on asset/folder/keychain mutations, confirms imports from one duplicate-indexed snapshot instead of rescanning for every row, and uses the store's bulk save path for import batches that can be committed safely in one transaction.
 
 User account password hashing uses asynchronous `crypto.scrypt`. Seed credential hashes are created on first state load instead of during module import, so configuring the backend does not block the main process event loop.
 
@@ -55,8 +56,8 @@ User account password hashing uses asynchronous `crypto.scrypt`. Seed credential
 
 Large outputs should be bounded at the boundary that produces them.
 
-- SQLite SQL execution now runs user SQL in a worker thread. Reader results are capped at 5000 rows and return `truncated: true` when more rows exist; the execution message then reads `Execution OK (first N rows, result truncated)` so the SQL editor shows the cap instead of presenting the preview as a complete result. The worker's `busyTimeoutMs` maps to the better-sqlite3 `timeout` option, which is SQLite's lock-wait busy timeout, not a query execution timeout; a long CPU-bound query still occupies the single worker until it finishes.
-- Local `kubectl` command output is capped at 10 MiB and appends a truncation notice when exceeded.
+- SQLite work that can touch user data files runs through the SQLite worker boundary: connection probes, saved-connection schema catalogs, table-page queries, table DDL lookup, mutation planning, mutation transactions, and raw SQL execution. Reader results are capped at 5000 rows and return `truncated: true` when more rows exist; the execution message then reads `Execution OK (first N rows, result truncated)` so the SQL editor shows the cap instead of presenting the preview as a complete result. The worker's `busyTimeoutMs` maps to the better-sqlite3 `timeout` option, which is SQLite's lock-wait busy timeout, not a query execution timeout; a long CPU-bound query still occupies the single worker until it finishes.
+- Local `kubectl` work runs as an asynchronous subprocess with 15-second connection probes and 30-second command/resource refresh defaults. Command output is capped at 10 MiB and appends a truncation notice when exceeded; parsing still happens after the subprocess returns, so large Kubernetes resource tables should remain bounded at the backend output limit instead of being expanded in renderer state.
 - Kubernetes terminal-session output keeps only the newest 1 MiB tail per session.
 - External Codex MCP terminal connections no longer keep a full connection-level output string; each pending command owns only its bounded command output.
 - The embedded Codex terminal bridge keeps up to 10000 visible lines per session and caps carriage-return-only pending progress text at 64 KiB.

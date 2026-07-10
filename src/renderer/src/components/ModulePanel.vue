@@ -14,20 +14,22 @@
     }"
   >
     <WorkspacePanel v-if="workspace.activeModule === 'workspace'" />
-    <AiSessionsPanel v-else-if="workspace.activeModule === 'aiSessions'" />
+    <KeepAlive>
+      <AiSessionsPanel v-if="workspace.activeModule === 'aiSessions'" />
+    </KeepAlive>
     <AssetsPanel
-      v-else-if="workspace.activeModule === 'assets'"
+      v-if="workspace.activeModule === 'assets'"
       :query="query"
     />
-    <FilesPanel v-else-if="workspace.activeModule === 'files'" />
+    <FilesPanel v-if="workspace.activeModule === 'files'" />
     <KnowledgePanel
-      v-else-if="workspace.activeModule === 'knowledge'"
+      v-if="workspace.activeModule === 'knowledge'"
       :query="query"
     />
-    <ExtensionsPanel v-else-if="workspace.activeModule === 'extensions'" />
-    <KubernetesPanel v-else-if="workspace.activeModule === 'kubernetes'" />
-    <SettingsPanel v-else-if="workspace.activeModule === 'settings'" />
-    <template v-else>
+    <ExtensionsPanel v-if="workspace.activeModule === 'extensions'" />
+    <KubernetesPanel v-if="workspace.activeModule === 'kubernetes'" />
+    <SettingsPanel v-if="workspace.activeModule === 'settings'" />
+    <template v-if="fallbackPanelVisible">
       <header class="panel-header">
         <div>
           <p class="eyebrow">{{ activeMeta ? t(activeMeta.labelKey) : '' }}</p>
@@ -72,4 +74,6 @@ const { t } = useI18n()
 const query = ref('')
 const activeMeta = computed(() => menuItems.find((item) => item.key === workspace.activeModule))
 const title = computed(() => (activeMeta.value ? t(activeMeta.value.labelKey) : t('module.workspace')))
+const nativePanelModules = new Set(['workspace', 'aiSessions', 'assets', 'files', 'knowledge', 'extensions', 'kubernetes', 'settings'])
+const fallbackPanelVisible = computed(() => !nativePanelModules.has(workspace.activeModule))
 </script>

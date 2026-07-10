@@ -525,7 +525,11 @@ export const refreshOrganizationAssets = (input: AiopsOrganizationAssetRefreshIn
 
 const createAssetImportExportRuntime = () => ({
   listAssets: () => getStore().list(),
-  saveAsset: (input: AiopsAssetInput) => getStore().save(input)
+  saveAsset: (input: AiopsAssetInput) => getStore().save(input),
+  saveAssets: (inputs: AiopsAssetInput[]) => {
+    inputs.forEach((input) => assertUserEditableAsset(input.id))
+    return getStore().saveMany(inputs)
+  }
 })
 
 export const previewAssetImport = async (input: AiopsAssetImportPreviewInput): Promise<AiopsAssetImportPreviewResult> => {

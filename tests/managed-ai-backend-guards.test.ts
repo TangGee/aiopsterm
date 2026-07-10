@@ -6,6 +6,7 @@ import {
   isExportMcpInstallOperationData,
   isExportMcpInstallerSnapshot,
   isManagedAiSessionBulkData,
+  isManagedAiSessionContentDeleteData,
   isManagedAiSessionHibernateData,
   isManagedAiSessionMutationData,
   isManagedAiSessionSnapshot
@@ -26,6 +27,8 @@ const session: ManagedAiSessionRecord = {
   updatedAt: 1781884800000,
   requestKind: 'permission',
   decisionMode: 'local',
+  sessionKind: 'main',
+  restorable: true,
   waitTimeoutMs: 60000,
   toolName: 'shell',
   terminalSessionId: 'terminal-1',
@@ -42,7 +45,9 @@ const session: ManagedAiSessionRecord = {
       requestKind: 'permission',
       decisionMode: 'local',
       waitTimeoutMs: 60000,
-      toolName: 'shell'
+      toolName: 'shell',
+      sessionKind: 'main',
+      restorable: true
     }
   ],
   decisions: [{ id: 'decision-1', kind: 'allow', createdAt: 1781884810000 }]
@@ -109,6 +114,7 @@ describe('managedAiBackendGuards', () => {
   it('validates managed AI session snapshots and mutation envelopes', () => {
     expect(isManagedAiSessionSnapshot(snapshot)).toBe(true)
     expect(isManagedAiSessionSnapshot({ sessions: [{ ...session, source: 'unknown' }] })).toBe(false)
+    expect(isManagedAiSessionSnapshot({ sessions: [{ ...session, sessionKind: 'sidequest' }] })).toBe(false)
     expect(isManagedAiSessionSnapshot({ sessions: [{ ...session, events: [{ ...session.events[0], waitTimeoutMs: 0 }] }] })).toBe(false)
     expect(isManagedAiSessionMutationData({ session, snapshot })).toBe(true)
     expect(isManagedAiSessionMutationData({ session: { ...session, decisions: [{ id: 'decision-1', kind: 'invalid', createdAt: 1 }] }, snapshot })).toBe(false)
@@ -121,6 +127,13 @@ describe('managedAiBackendGuards', () => {
     expect(isAgentHibernationConfigData({ config: { ...hibernationConfig, idleSeconds: 0 } })).toBe(false)
     expect(isManagedAiSessionHibernateData({ session, snapshot, config: hibernationConfig })).toBe(true)
     expect(isManagedAiSessionHibernateData({ session, snapshot, config: { ...hibernationConfig, maxLiveTerminals: 0 } })).toBe(false)
+  })
+
+  it('validates managed AI content delete data', () => {
+    expect(isManagedAiSessionContentDeleteData({ recordId: 'record-1', sourceRevision: 'revision-1' })).toBe(true)
+    expect(isManagedAiSessionContentDeleteData({ recordId: 'record-1', sourceRevision: 'revision-1', backupPath: '/tmp/backup' })).toBe(true)
+    expect(isManagedAiSessionContentDeleteData({ recordId: '', sourceRevision: 'revision-1' })).toBe(false)
+    expect(isManagedAiSessionContentDeleteData({ recordId: 'record-1', sourceRevision: '' })).toBe(false)
   })
 
   it('validates Agent Hook installer snapshots and operation data', () => {

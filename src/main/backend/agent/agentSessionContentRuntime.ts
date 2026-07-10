@@ -4,6 +4,8 @@ import { copyFile, mkdir, readFile, rename, rm, stat, writeFile } from 'fs/promi
 import { basename, dirname, join, resolve } from 'path'
 import { openSqliteDatabase, type SqliteDatabase } from '@shared/databaseSqliteRuntime'
 import type {
+  ManagedAiSessionContentDeleteInput,
+  ManagedAiSessionContentDeleteResult,
   ManagedAiSessionContentFormat,
   ManagedAiSessionContentListInput,
   ManagedAiSessionContentListResult,
@@ -391,6 +393,29 @@ const setValueAtPointer = (value: unknown, pointer: string, nextValue: string) =
   return true
 }
 
+const removeValueAtPointer = (value: unknown, pointer: string) => {
+  if (!isRecord(value) && !Array.isArray(value)) return false
+  if (pointer === '/' || pointer === '') return false
+  const segments = pointer.split('/').filter(Boolean).map(decodePointerSegment)
+  let current: unknown = value
+  for (let index = 0; index < segments.length - 1; index += 1) {
+    const segment = segments[index]
+    current = Array.isArray(current) ? current[Number(segment)] : isRecord(current) ? current[segment] : undefined
+    if (!isRecord(current) && !Array.isArray(current)) return false
+  }
+  const last = segments.at(-1)
+  if (last === undefined) return false
+  if (Array.isArray(current)) {
+    const index = Number(last)
+    if (!Number.isInteger(index) || typeof current[index] !== 'string') return false
+    current.splice(index, 1)
+    return true
+  }
+  if (!isRecord(current) || typeof current[last] !== 'string') return false
+  delete current[last]
+  return true
+}
+
 const isInjectedSessionContextText = (content: string) => {
   const text = content.trimStart().toLowerCase()
   return (
@@ -464,6 +489,9 @@ const shouldSkipJsonTextPointer = (line: JsonlLineRecord, item: TextPointer) => 
   if (line.parsed?.type === 'turn_context' && item.pointer === '/payload/summary') return true
   return false
 }
+
+const lineHasVisibleTextPointers = (line: JsonlLineRecord) =>
+  Boolean(line.parsed && collectTextPointers(line.parsed).some((item) => !shouldSkipJsonTextPointer(line, item)))
 
 const buildJsonlRecords = (input: {
   source: AiAgentSessionSource
@@ -819,6 +847,91 @@ const updateOpenCodeRecord = async (
   return { ok: true, data: { record: { ...record, sourceRevision: nextRevision }, sourceRevision: nextRevision, ...(backupPath ? { backupPath } : {}) } }
 }
 
+const deleteJsonlRecord = async (
+  config: AgentSessionContentRuntimeConfig,
+  session: ManagedAiSessionRecord,
+  input: ManagedAiSessionContentDeleteInput
+): Promise<ManagedAiSessionContentDeleteResult> => {
+  const locator = parseJsonlRecordId(input.recordId)
+  if (!locator) return contentError<ManagedAiSessionContentDeleteResult>('MANAGED_AI_CONTENT_RECORD_INVALID', 'Managed AI content record id is invalid.')
+  const path = findJsonlTranscriptPath(session, session.source, config)
+  if (!path) return contentError<ManagedAiSessionContentDeleteResult>('MANAGED_AI_CONTENT_STORE_MISSING', 'Managed AI transcript file was not found.')
+  const currentRevision = await revisionForFiles([path])
+  if (input.sourceRevision !== currentRevision) {
+    return contentError<ManagedAiSessionContentDeleteResult>('MANAGED_AI_CONTENT_REVISION_CONFLICT', 'Conversation content changed on disk. Reload before deleting.')
+  }
+  const { lines, trailingNewline } = await readJsonlLines(path)
+  const line = lines.find((item) => item.lineNumber === locator.lineNumber)
+  if (!line?.parsed || typeof valueAtPointer(line.parsed, locator.pointer) !== 'string') {
+    return contentError<ManagedAiSessionContentDeleteResult>('MANAGED_AI_CONTENT_RECORD_NOT_FOUND', 'Managed AI content record was not found.')
+  }
+  if (!removeValueAtPointer(line.parsed, locator.pointer)) {
+    return contentError<ManagedAiSessionContentDeleteResult>('MANAGED_AI_CONTENT_RECORD_READ_ONLY', 'Managed AI content record is read-only.')
+  }
+  const keepLine = lineHasVisibleTextPointers(line)
+  const backupPath = await backupFiles({
+    userDataPath: config.getUserDataPath(),
+    source: session.source,
+    sessionId: session.id,
+    paths: [path],
+    now: config.now()
+  })
+  const nextLines = lines
+    .filter((item) => item.lineNumber !== line.lineNumber || keepLine)
+    .map((item) => (item.lineNumber === line.lineNumber ? JSON.stringify(line.parsed) : item.raw))
+  const tempPath = join(dirname(path), `.${basename(path)}.${process.pid}.${randomUUID()}.tmp`)
+  await writeFile(tempPath, nextLines.join('\n') + (trailingNewline && nextLines.length ? '\n' : ''), 'utf-8')
+  await rename(tempPath, path)
+  const nextRevision = await revisionForFiles([path])
+  return { ok: true, data: { recordId: input.recordId, sourceRevision: nextRevision, ...(backupPath ? { backupPath } : {}) } }
+}
+
+const deleteOpenCodeRecord = async (
+  config: AgentSessionContentRuntimeConfig,
+  session: ManagedAiSessionRecord,
+  input: ManagedAiSessionContentDeleteInput
+): Promise<ManagedAiSessionContentDeleteResult> => {
+  const locator = parseOpenCodeRecordId(input.recordId)
+  if (!locator) return contentError<ManagedAiSessionContentDeleteResult>('MANAGED_AI_CONTENT_RECORD_INVALID', 'Managed AI content record id is invalid.')
+  const dbPath = openCodeDbPath(config)
+  if (!existsSync(dbPath)) return contentError<ManagedAiSessionContentDeleteResult>('MANAGED_AI_CONTENT_STORE_MISSING', 'OpenCode database was not found.')
+  const revisionPaths = opencodeRevisionPaths(dbPath)
+  const currentRevision = await revisionForFiles(revisionPaths)
+  if (input.sourceRevision !== currentRevision) {
+    return contentError<ManagedAiSessionContentDeleteResult>('MANAGED_AI_CONTENT_REVISION_CONFLICT', 'Conversation content changed on disk. Reload before deleting.')
+  }
+  let db: SqliteDatabase | null = null
+  let backupPath: string | undefined
+  try {
+    db = openSqliteDatabase(dbPath, false)
+    const rows = queryRows<{ data?: string }>(db, 'SELECT data FROM part WHERE id = ? AND message_id = ? AND session_id = ?', [
+      locator.partId,
+      locator.messageId,
+      session.id
+    ])
+    const data = rows[0]?.data ? safeJsonParse(rows[0].data) : null
+    if (!data || typeof data.text !== 'string') {
+      return contentError<ManagedAiSessionContentDeleteResult>('MANAGED_AI_CONTENT_RECORD_NOT_FOUND', 'Managed AI content record was not found.')
+    }
+    const type = cleanText(data.type)
+    if (type !== 'text' && type !== 'reasoning') {
+      return contentError<ManagedAiSessionContentDeleteResult>('MANAGED_AI_CONTENT_RECORD_READ_ONLY', 'Only OpenCode text and reasoning parts can be deleted.')
+    }
+    backupPath = await backupFiles({
+      userDataPath: config.getUserDataPath(),
+      source: session.source,
+      sessionId: session.id,
+      paths: revisionPaths,
+      now: config.now()
+    })
+    db.prepare('DELETE FROM part WHERE id = ? AND message_id = ? AND session_id = ?').run(locator.partId, locator.messageId, session.id)
+  } finally {
+    db?.close()
+  }
+  const nextRevision = await revisionForFiles(revisionPaths)
+  return { ok: true, data: { recordId: input.recordId, sourceRevision: nextRevision, ...(backupPath ? { backupPath } : {}) } }
+}
+
 export const createAgentSessionContentRuntime = (config: AgentSessionContentRuntimeConfig) => {
   const list = async (input: ManagedAiSessionContentListInput): Promise<ManagedAiSessionContentListResult> => {
     const resolved = await resolveSession(config, input?.source, input?.sessionId)
@@ -894,10 +1007,33 @@ export const createAgentSessionContentRuntime = (config: AgentSessionContentRunt
     }
   }
 
+  const deleteRecord = async (input: ManagedAiSessionContentDeleteInput): Promise<ManagedAiSessionContentDeleteResult> => {
+    const resolved = await resolveSession(config, input?.source, input?.sessionId)
+    if ('error' in resolved) return resolved.error as ManagedAiSessionContentDeleteResult
+    const recordId = cleanOptionalText(input?.recordId)
+    if (!recordId) return contentError<ManagedAiSessionContentDeleteResult>('MANAGED_AI_CONTENT_RECORD_ID_REQUIRED', 'Managed AI content record id is required.')
+    if (!cleanOptionalText(input?.sourceRevision)) return contentError<ManagedAiSessionContentDeleteResult>('MANAGED_AI_CONTENT_REVISION_REQUIRED', 'Managed AI content source revision is required.')
+    const editState = sourceIsEditable(resolved.session, resolved.source)
+    if (!editState.editable) {
+      return contentError<ManagedAiSessionContentDeleteResult>('MANAGED_AI_CONTENT_READ_ONLY', editState.reason || 'Managed AI session content is read-only.')
+    }
+    try {
+      if (resolved.source === 'opencode') return deleteOpenCodeRecord(config, resolved.session, input)
+      if (jsonlSources.has(resolved.source)) return deleteJsonlRecord(config, resolved.session, input)
+      return contentError<ManagedAiSessionContentDeleteResult>('MANAGED_AI_CONTENT_UNSUPPORTED', 'This AI source does not support content deletion yet.')
+    } catch (error) {
+      return contentError<ManagedAiSessionContentDeleteResult>(
+        'MANAGED_AI_CONTENT_DELETE_FAILED',
+        error instanceof Error ? error.message : 'Failed to delete managed AI session content.'
+      )
+    }
+  }
+
   return {
     list,
     getRecord,
     updateRecord,
+    deleteRecord,
     __testing: {
       collectTextPointers,
       parseJsonlRecordId,

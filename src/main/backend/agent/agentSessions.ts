@@ -4,6 +4,7 @@ import { copyFileSync, existsSync, mkdirSync, renameSync, rmSync, writeFileSync 
 import { dirname, join } from 'path'
 import { mkdir, stat } from 'fs/promises'
 import { platformSocketPath } from '../app/platformRuntime'
+import { logRuntimeEvent } from '../app/runtimeLog'
 import {
   createAgentSessionEventStreamRuntime,
   type AgentSessionEventStreamListResult
@@ -31,6 +32,7 @@ import {
   defaultAgentHibernationConfig,
   firstText,
   isRecord,
+  managedAiSessionAllowsResume,
   managedAiSessionStateForEvent,
   nestedRecord,
   normalizeAgentHibernationConfig,
@@ -74,6 +76,8 @@ import type {
   ManagedAiSessionSnapshot
 } from '@shared/contracts/managedAiSessions'
 import type {
+  ManagedAiSessionContentDeleteInput,
+  ManagedAiSessionContentDeleteResult,
   ManagedAiSessionContentListInput,
   ManagedAiSessionContentListResult,
   ManagedAiSessionContentRecordInput,
@@ -110,7 +114,6 @@ type AgentSessionSocketRuntime = {
 }
 
 const storeVersion = 1
-const maxSessions = 200
 const maxEventsPerSession = 200
 const maxDecisionsPerSession = 40
 
@@ -169,8 +172,7 @@ const notificationRuntime = createAgentSessionNotificationRuntime({
   replyManagedAiSession: (input) => replyManagedAiSession(input),
   bulkManagedAiSessions: (input) => bulkManagedAiSessions(input),
   appendManagedAiSessionAudit,
-  publishManagedAiStreamFrame,
-  maxNotifications: maxSessions
+  publishManagedAiStreamFrame
 })
 emitManagedAiSessionEvent = autoNamingRuntime.emitManagedAiSessionEvent
 
@@ -310,6 +312,12 @@ const persistSnapshot = () => {
 }
 
 export const configureAiAgentSessionStore = async (userDataPath: string) => {
+  importScanGeneration += 1
+  gitRefreshGeneration += 1
+  cancelScheduledImportScan()
+  cancelScheduledGitRefresh()
+  lastImportScanCompletedAt = 0
+  lastGitRefreshCompletedAt = 0
   flushPersistSnapshotNow()
   storeUserDataPath = userDataPath
   codexTranscriptMonitorRuntime.reset()
@@ -321,12 +329,18 @@ export const configureAiAgentSessionStore = async (userDataPath: string) => {
 }
 
 export const configureManagedAiSessionImportRuntime = (config?: Parameters<typeof importRuntime.configure>[0]) => {
+  importScanGeneration += 1
+  cancelScheduledImportScan()
+  lastImportScanCompletedAt = 0
   importRuntime.configure(config)
 }
 
 export const configureManagedAiSessionGitRuntime = (config?: Parameters<typeof gitRuntime.configure>[0]) => {
+  gitRefreshGeneration += 1
+  cancelScheduledGitRefresh()
   gitRuntime.configure(config)
   gitInfoCacheByCwd.clear()
+  lastGitRefreshCompletedAt = 0
 }
 
 const withGitInfo = <T extends ManagedAiSessionRecord | ImportedAgentSession>(session: T, gitInfo: ManagedAiSessionGitInfo): T => {
@@ -361,30 +375,54 @@ const gitInfoForCwdCached = async (cwd: string): Promise<ManagedAiSessionGitInfo
   return info
 }
 
-const refreshGitInfoForSessions = async () => {
-  const candidates = [...sessions.values()].filter((session) => session.canonicalCwd || session.cwd)
-  if (!candidates.length) return 0
+const backgroundRefreshCooldownMs = 30_000
+let lastImportScanCompletedAt = 0
+let lastGitRefreshCompletedAt = 0
+
+const refreshGitInfoForSessions = async (generation = gitRefreshGeneration) => {
+  const targetsByCwd = new Map<string, string[]>()
+  for (const session of sessions.values()) {
+    const cwd = session.canonicalCwd || session.cwd || ''
+    if (!cwd) continue
+    const key = sessionKey(session.source, session.id)
+    const keys = targetsByCwd.get(cwd) || []
+    if (!keys.includes(key)) keys.push(key)
+    targetsByCwd.set(cwd, keys)
+  }
+  if (!targetsByCwd.size) return 0
   const updates = await Promise.all(
-    candidates.map(async (session) => ({
-      session,
-      gitInfo: await gitInfoForCwdCached(session.canonicalCwd || session.cwd || '')
+    [...targetsByCwd.entries()].map(async ([cwd, keys]) => ({
+      cwd,
+      keys,
+      gitInfo: await gitInfoForCwdCached(cwd)
     }))
   )
+  if (generation !== gitRefreshGeneration) return 0
   let changed = 0
-  updates.forEach(({ session, gitInfo }) => {
-    if (!gitInfo.gitBranch && typeof gitInfo.gitDirty !== 'boolean' && !gitInfo.gitStatusUpdatedAt) return
-    const next = withGitInfo(session, gitInfo)
-    if (
-      next.gitBranch === session.gitBranch &&
-      next.gitDirty === session.gitDirty &&
-      next.gitStatusUpdatedAt === session.gitStatusUpdatedAt
-    ) {
-      return
+  updates.forEach(({ cwd, keys, gitInfo }) => {
+    if (!gitInfo.gitBranch && typeof gitInfo.gitDirty !== 'boolean') return
+    for (const key of keys) {
+      const session = sessions.get(key)
+      if (!session || (session.canonicalCwd || session.cwd || '') !== cwd) continue
+      const next = withGitInfo(session, gitInfo)
+      const metadataChanged = next.gitBranch !== session.gitBranch || next.gitDirty !== session.gitDirty
+      const timestampInitialized = !session.gitStatusUpdatedAt && Boolean(next.gitStatusUpdatedAt)
+      if (!metadataChanged && !timestampInitialized) {
+        continue
+      }
+      sessions.set(key, next)
+      changed += 1
     }
-    sessions.set(sessionKey(session.source, session.id), next)
-    changed += 1
   })
-  if (changed) persistSnapshot()
+  if (changed) {
+    persistSnapshot()
+    appendManagedAiSessionAudit({
+      at: Date.now(),
+      kind: 'sessions.git_refreshed',
+      changed
+    })
+    publishManagedAiStreamFrame('managed_ai.sessions.git_refreshed', null, { changed })
+  }
   return changed
 }
 
@@ -406,7 +444,17 @@ const upsertSessionForEvent = (event: AiAgentSessionEvent, raw: Record<string, u
   const gitDirty = typeof event.gitDirty === 'boolean' ? event.gitDirty : existing?.gitDirty
   const gitStatusUpdatedAt = event.gitStatusUpdatedAt || existing?.gitStatusUpdatedAt
   const launchCommand = event.launchCommand || existing?.launchCommand
-  const resumeCommand = event.resumeCommand && event.cwd ? event.resumeCommand : existing?.resumeCommand || resumeCommandFor(event.source, event.sessionId, cwd, launchCommand)
+  const sessionKind = event.sessionKind || existing?.sessionKind
+  const parentSessionId = event.parentSessionId || existing?.parentSessionId
+  const restorable = event.restorable === false || existing?.restorable === false || sessionKind === 'subagent' || sessionKind === 'internal'
+    ? false
+    : event.restorable ?? existing?.restorable
+  const allowResume = managedAiSessionAllowsResume({ sessionKind, restorable })
+  const resumeCommand = allowResume
+    ? event.resumeCommand && event.cwd
+      ? event.resumeCommand
+      : existing?.resumeCommand || resumeCommandFor(event.source, event.sessionId, cwd, launchCommand)
+    : undefined
   const processId = event.processId || existing?.processId
   const parentProcessId = event.parentProcessId || existing?.parentProcessId
   const processGroupId = event.processGroupId || existing?.processGroupId
@@ -445,6 +493,9 @@ const upsertSessionForEvent = (event: AiAgentSessionEvent, raw: Record<string, u
     ...(typeof event.actionable === 'boolean' ? { actionable: event.actionable } : existing?.actionable ? { actionable: existing.actionable } : {}),
     ...(launchCommand ? { launchCommand } : {}),
     ...(resumeCommand ? { resumeCommand } : {}),
+    ...(sessionKind ? { sessionKind } : {}),
+    ...(parentSessionId ? { parentSessionId } : {}),
+    ...(typeof restorable === 'boolean' ? { restorable } : {}),
     ...(processId ? { processId } : {}),
     ...(parentProcessId ? { parentProcessId } : {}),
     ...(processGroupId ? { processGroupId } : {}),
@@ -458,7 +509,7 @@ const upsertSessionForEvent = (event: AiAgentSessionEvent, raw: Record<string, u
   }
   sessions.set(key, record)
   const ordered = [...sessions.values()].sort((first, second) => second.lastActivityAt - first.lastActivityAt)
-  sessions = new Map(ordered.slice(0, maxSessions).map((session) => [sessionKey(session.source, session.id), session]))
+  sessions = new Map(ordered.map((session) => [sessionKey(session.source, session.id), session]))
   persistSnapshot()
   auditEventReceived(event, record)
   publishAgentEventStreamFrame(event, record)
@@ -480,14 +531,19 @@ const mergeImportedSession = (imported: ImportedAgentSession) => {
   const hasImportedEvent = importedEvent
     ? existing.events.some((event) => event.id === importedEvent.id)
     : true
-  const shouldRefreshImportedFacts =
-    imported.lastActivityAt > existing.lastActivityAt ||
-    !existing.resumeCommand ||
-    (Boolean(imported.cwd) && Boolean(imported.resumeCommand) && existing.resumeCommand !== imported.resumeCommand && !existing.resumeCommand.includes('cd ')) ||
-    !existing.cwd ||
-    !existing.transcriptPath
-  if (!shouldRefreshImportedFacts && hasImportedEvent) return false
   const preserveLiveState = existing.state === 'needsInput' || existing.state === 'working'
+  const sessionKind = imported.sessionKind || existing.sessionKind
+  const parentSessionId = imported.parentSessionId || existing.parentSessionId
+  const restorable = imported.restorable === false || existing.restorable === false || sessionKind === 'subagent' || sessionKind === 'internal'
+    ? false
+    : imported.restorable ?? existing.restorable
+  const allowResume = managedAiSessionAllowsResume({ sessionKind, restorable })
+  const resumeCommand = allowResume
+    ? imported.resumeCommand && imported.cwd && existing.resumeCommand && !existing.resumeCommand.includes('cd ')
+      ? imported.resumeCommand
+      : existing.resumeCommand || imported.resumeCommand
+    : undefined
+  const events = hasImportedEvent ? existing.events : [...existing.events, importedEvent].filter(Boolean).slice(-maxEventsPerSession)
   const next: ManagedAiSessionRecord = {
     ...existing,
     title: existing.userTitle || existing.title || imported.title,
@@ -496,7 +552,7 @@ const mergeImportedSession = (imported: ImportedAgentSession) => {
     lastEvent: preserveLiveState || existing.lastActivityAt >= imported.lastActivityAt ? existing.lastEvent : imported.lastEvent,
     lastActivityAt: Math.max(existing.lastActivityAt, imported.lastActivityAt),
     createdAt: Math.min(existing.createdAt, imported.createdAt),
-    updatedAt: Date.now(),
+    updatedAt: existing.updatedAt,
     ...(existing.cwd || imported.cwd ? { cwd: existing.cwd || imported.cwd } : {}),
     ...(existing.canonicalCwd || imported.canonicalCwd ? { canonicalCwd: existing.canonicalCwd || imported.canonicalCwd } : {}),
     ...(existing.gitBranch || imported.gitBranch ? { gitBranch: existing.gitBranch || imported.gitBranch } : {}),
@@ -508,36 +564,59 @@ const mergeImportedSession = (imported: ImportedAgentSession) => {
     requestKind: existing.requestKind || imported.requestKind,
     decisionMode: existing.decisionMode || imported.decisionMode,
     ...(existing.launchCommand || imported.launchCommand ? { launchCommand: existing.launchCommand || imported.launchCommand } : {}),
-    ...(existing.resumeCommand || imported.resumeCommand
-      ? {
-          resumeCommand:
-            imported.resumeCommand && imported.cwd && existing.resumeCommand && !existing.resumeCommand.includes('cd ')
-              ? imported.resumeCommand
-              : existing.resumeCommand || imported.resumeCommand
-        }
-      : {}),
+    resumeCommand,
+    ...(sessionKind ? { sessionKind } : {}),
+    ...(parentSessionId ? { parentSessionId } : {}),
+    ...(typeof restorable === 'boolean' ? { restorable } : {}),
     agentLifecycle: preserveLiveState ? existing.agentLifecycle : existing.agentLifecycle || imported.agentLifecycle,
-    events: hasImportedEvent ? existing.events : [...existing.events, importedEvent].filter(Boolean).slice(-maxEventsPerSession),
+    events,
     decisions: existing.decisions
   }
-  sessions.set(key, next)
+  const changed =
+    next.title !== existing.title ||
+    next.summary !== existing.summary ||
+    next.state !== existing.state ||
+    next.lastEvent !== existing.lastEvent ||
+    next.lastActivityAt !== existing.lastActivityAt ||
+    next.createdAt !== existing.createdAt ||
+    next.cwd !== existing.cwd ||
+    next.canonicalCwd !== existing.canonicalCwd ||
+    next.gitBranch !== existing.gitBranch ||
+    next.gitDirty !== existing.gitDirty ||
+    next.gitStatusUpdatedAt !== existing.gitStatusUpdatedAt ||
+    next.transcriptPath !== existing.transcriptPath ||
+    next.requestKind !== existing.requestKind ||
+    next.decisionMode !== existing.decisionMode ||
+    next.launchCommand !== existing.launchCommand ||
+    next.resumeCommand !== existing.resumeCommand ||
+    next.sessionKind !== existing.sessionKind ||
+    next.parentSessionId !== existing.parentSessionId ||
+    next.restorable !== existing.restorable ||
+    next.agentLifecycle !== existing.agentLifecycle ||
+    next.events !== existing.events
+  if (!changed) return false
+  sessions.set(key, {
+    ...next,
+    updatedAt: Date.now()
+  })
   return true
 }
 
-const importExternalManagedAiSessions = async () => {
+const importExternalManagedAiSessions = async (generation = importScanGeneration) => {
   let imported: ImportedAgentSession[]
   try {
     imported = await importRuntime.importSessions()
   } catch {
     return 0
   }
+  if (generation !== importScanGeneration) return 0
   let changed = 0
   for (const session of imported) {
     if (mergeImportedSession(session)) changed += 1
   }
   if (!changed) return 0
   const ordered = [...sessions.values()].sort((first, second) => second.lastActivityAt - first.lastActivityAt)
-  sessions = new Map(ordered.slice(0, maxSessions).map((session) => [sessionKey(session.source, session.id), session]))
+  sessions = new Map(ordered.map((session) => [sessionKey(session.source, session.id), session]))
   persistSnapshot()
   appendManagedAiSessionAudit({
     at: Date.now(),
@@ -550,13 +629,116 @@ const importExternalManagedAiSessions = async () => {
 
 // 并发 list 只触发一次导入扫描，后续调用复用同一个在途 Promise。
 let importScanInFlight: Promise<number> | null = null
+let importScanInFlightGeneration = 0
+let scheduledImportScan: Promise<number> | null = null
+let scheduledImportScanTimer: NodeJS.Timeout | null = null
+let scheduledImportScanResolve: ((changed: number) => void) | null = null
+let importScanGeneration = 0
 
-const importExternalManagedAiSessionsOnce = () => {
-  if (importScanInFlight) return importScanInFlight
-  importScanInFlight = importExternalManagedAiSessions().finally(() => {
-    importScanInFlight = null
+const importExternalManagedAiSessionsOnce = (generation = importScanGeneration) => {
+  if (importScanInFlight && importScanInFlightGeneration === generation) return importScanInFlight
+  const scan = importExternalManagedAiSessions(generation).catch(() => 0)
+  importScanInFlight = scan
+  importScanInFlightGeneration = generation
+  scan.finally(() => {
+    if (generation === importScanGeneration) lastImportScanCompletedAt = Date.now()
+    if (importScanInFlight === scan) importScanInFlight = null
   })
   return importScanInFlight
+}
+
+const scheduleImportExternalManagedAiSessions = () => {
+  if (importScanInFlight && importScanInFlightGeneration === importScanGeneration) return importScanInFlight
+  if (scheduledImportScan) return scheduledImportScan
+  if (lastImportScanCompletedAt && Date.now() - lastImportScanCompletedAt < backgroundRefreshCooldownMs) return Promise.resolve(0)
+  const generation = importScanGeneration
+  scheduledImportScan = new Promise<number>((resolve) => {
+    scheduledImportScanResolve = resolve
+    scheduledImportScanTimer = setTimeout(() => {
+      scheduledImportScanTimer = null
+      scheduledImportScanResolve = null
+      importExternalManagedAiSessionsOnce(generation)
+        .then(resolve)
+        .catch(() => resolve(0))
+        .finally(() => {
+          scheduledImportScan = null
+        })
+    }, 0)
+    scheduledImportScanTimer.unref()
+  })
+  return scheduledImportScan
+}
+
+const cancelScheduledImportScan = () => {
+  if (scheduledImportScanTimer) {
+    clearTimeout(scheduledImportScanTimer)
+    scheduledImportScanTimer = null
+  }
+  scheduledImportScanResolve?.(0)
+  scheduledImportScanResolve = null
+  scheduledImportScan = null
+}
+
+const flushScheduledImportScan = async () => {
+  const pending = scheduledImportScan || importScanInFlight
+  return pending ? pending.catch(() => 0) : 0
+}
+
+// git metadata can be slow in very large repositories. Keep it off the list path and collapse concurrent refreshes.
+let gitRefreshInFlight: Promise<number> | null = null
+let gitRefreshInFlightGeneration = 0
+let scheduledGitRefresh: Promise<number> | null = null
+let scheduledGitRefreshTimer: NodeJS.Timeout | null = null
+let scheduledGitRefreshResolve: ((changed: number) => void) | null = null
+let gitRefreshGeneration = 0
+
+const refreshGitInfoForSessionsOnce = (generation = gitRefreshGeneration) => {
+  if (gitRefreshInFlight && gitRefreshInFlightGeneration === generation) return gitRefreshInFlight
+  const refresh = refreshGitInfoForSessions(generation).catch(() => 0)
+  gitRefreshInFlight = refresh
+  gitRefreshInFlightGeneration = generation
+  refresh.finally(() => {
+    if (generation === gitRefreshGeneration) lastGitRefreshCompletedAt = Date.now()
+    if (gitRefreshInFlight === refresh) gitRefreshInFlight = null
+  })
+  return gitRefreshInFlight
+}
+
+const scheduleRefreshGitInfoForSessions = () => {
+  if (gitRefreshInFlight && gitRefreshInFlightGeneration === gitRefreshGeneration) return gitRefreshInFlight
+  if (scheduledGitRefresh) return scheduledGitRefresh
+  if (lastGitRefreshCompletedAt && Date.now() - lastGitRefreshCompletedAt < backgroundRefreshCooldownMs) return Promise.resolve(0)
+  const generation = gitRefreshGeneration
+  scheduledGitRefresh = new Promise<number>((resolve) => {
+    scheduledGitRefreshResolve = resolve
+    scheduledGitRefreshTimer = setTimeout(() => {
+      scheduledGitRefreshTimer = null
+      scheduledGitRefreshResolve = null
+      refreshGitInfoForSessionsOnce(generation)
+        .then(resolve)
+        .catch(() => resolve(0))
+        .finally(() => {
+          scheduledGitRefresh = null
+        })
+    }, 0)
+    scheduledGitRefreshTimer.unref()
+  })
+  return scheduledGitRefresh
+}
+
+const cancelScheduledGitRefresh = () => {
+  if (scheduledGitRefreshTimer) {
+    clearTimeout(scheduledGitRefreshTimer)
+    scheduledGitRefreshTimer = null
+  }
+  scheduledGitRefreshResolve?.(0)
+  scheduledGitRefreshResolve = null
+  scheduledGitRefresh = null
+}
+
+const flushScheduledGitRefresh = async () => {
+  const pending = scheduledGitRefresh || gitRefreshInFlight
+  return pending ? pending.catch(() => 0) : 0
 }
 
 export function publishAiAgentSessionEvent(input: AiAgentSessionEventInput, emit: AgentSessionEventSink | null = eventSink) {
@@ -724,24 +906,148 @@ const publishAiAgentSessionSocketEvent = async (input: AiAgentSessionEventInput,
 
 export const listManagedAiSessions = async (): Promise<ManagedAiSessionListResult> => {
   await loadStoreIfNeeded()
-  // 导入扫描与 git 探测并行执行，两者内部都有缓存兜底；导入结果同时通过 managed_ai.sessions.imported 增量推送。
-  await Promise.all([importExternalManagedAiSessionsOnce(), refreshGitInfoForSessions()])
+  // 本地历史导入和 git 探测都可能碰到大量文件/慢仓库。列表先返回快照，后台变更再发事件驱动前端刷新。
+  scheduleImportExternalManagedAiSessions()
+  scheduleRefreshGitInfoForSessions()
   return { ok: true, data: snapshot() }
 }
 
+const prepareManagedAiContentAccess = async (input: Pick<ManagedAiSessionContentListInput, 'source' | 'sessionId'>) => {
+  await loadStoreIfNeeded()
+  const source = normalizeSource(input?.source)
+  const sessionId = cleanOptionalText(input?.sessionId)
+  const existedBeforeImport = Boolean(source && sessionId && sessions.has(sessionKey(source, sessionId)))
+  let importAttempted = false
+  if (source && sessionId && !existedBeforeImport) {
+    importAttempted = true
+    await importExternalManagedAiSessionsOnce()
+  }
+  return { source, sessionId, existedBeforeImport, importAttempted }
+}
+
+const logManagedAiContentAccess = (event: string, level: 'info' | 'warn', fields: Record<string, unknown>) => {
+  logRuntimeEvent(level, event, fields)
+}
+
 export const listManagedAiSessionContent = async (input: ManagedAiSessionContentListInput): Promise<ManagedAiSessionContentListResult> => {
-  await listManagedAiSessions()
-  return contentRuntime.list(input)
+  const startedAt = Date.now()
+  let access: Awaited<ReturnType<typeof prepareManagedAiContentAccess>> | null = null
+  try {
+    access = await prepareManagedAiContentAccess(input)
+    const result = await contentRuntime.list(input)
+    logManagedAiContentAccess(result.ok ? 'managed_ai.content.list' : 'managed_ai.content.list.failed', result.ok ? 'info' : 'warn', {
+      source: access.source || input?.source,
+      sessionId: access.sessionId || input?.sessionId,
+      durationMs: Date.now() - startedAt,
+      existedBeforeImport: access.existedBeforeImport,
+      importAttempted: access.importAttempted,
+      ok: result.ok,
+      ...(result.ok && result.data
+        ? {
+            format: result.data.format,
+            records: result.data.records.length,
+            total: result.data.total,
+            offset: result.data.offset,
+            limit: result.data.limit
+          }
+        : {
+            errorCode: result.errorCode
+          })
+    })
+    return result
+  } catch (error) {
+    logManagedAiContentAccess('managed_ai.content.list.failed', 'warn', {
+      source: access?.source || input?.source,
+      sessionId: access?.sessionId || input?.sessionId,
+      durationMs: Date.now() - startedAt,
+      existedBeforeImport: access?.existedBeforeImport,
+      importAttempted: access?.importAttempted,
+      error
+    })
+    throw error
+  }
 }
 
 export const getManagedAiSessionContentRecord = async (input: ManagedAiSessionContentRecordInput): Promise<ManagedAiSessionContentRecordResult> => {
-  await listManagedAiSessions()
-  return contentRuntime.getRecord(input)
+  const startedAt = Date.now()
+  let access: Awaited<ReturnType<typeof prepareManagedAiContentAccess>> | null = null
+  try {
+    access = await prepareManagedAiContentAccess(input)
+    const result = await contentRuntime.getRecord(input)
+    logManagedAiContentAccess(result.ok ? 'managed_ai.content.get-record' : 'managed_ai.content.get-record.failed', result.ok ? 'info' : 'warn', {
+      source: access.source || input?.source,
+      sessionId: access.sessionId || input?.sessionId,
+      recordId: input?.recordId,
+      durationMs: Date.now() - startedAt,
+      existedBeforeImport: access.existedBeforeImport,
+      importAttempted: access.importAttempted,
+      ok: result.ok,
+      ...(result.ok && result.data
+        ? {
+            format: result.data.record.format,
+            fullLength: result.data.record.fullLength,
+            truncated: result.data.record.contentTruncated
+          }
+        : {
+            errorCode: result.errorCode
+          })
+    })
+    return result
+  } catch (error) {
+    logManagedAiContentAccess('managed_ai.content.get-record.failed', 'warn', {
+      source: access?.source || input?.source,
+      sessionId: access?.sessionId || input?.sessionId,
+      recordId: input?.recordId,
+      durationMs: Date.now() - startedAt,
+      existedBeforeImport: access?.existedBeforeImport,
+      importAttempted: access?.importAttempted,
+      error
+    })
+    throw error
+  }
 }
 
 export const updateManagedAiSessionContentRecord = async (input: ManagedAiSessionContentUpdateInput): Promise<ManagedAiSessionContentUpdateResult> => {
   await loadStoreIfNeeded()
   return contentRuntime.updateRecord(input)
+}
+
+export const deleteManagedAiSessionContentRecord = async (input: ManagedAiSessionContentDeleteInput): Promise<ManagedAiSessionContentDeleteResult> => {
+  const startedAt = Date.now()
+  let access: Awaited<ReturnType<typeof prepareManagedAiContentAccess>> | null = null
+  try {
+    access = await prepareManagedAiContentAccess(input)
+    const result = await contentRuntime.deleteRecord(input)
+    logManagedAiContentAccess(result.ok ? 'managed_ai.content.delete-record' : 'managed_ai.content.delete-record.failed', result.ok ? 'info' : 'warn', {
+      source: access.source || input?.source,
+      sessionId: access.sessionId || input?.sessionId,
+      recordId: input?.recordId,
+      durationMs: Date.now() - startedAt,
+      existedBeforeImport: access.existedBeforeImport,
+      importAttempted: access.importAttempted,
+      ok: result.ok,
+      ...(result.ok && result.data
+        ? {
+            sourceRevision: result.data.sourceRevision,
+            backedUp: Boolean(result.data.backupPath)
+          }
+        : {
+            errorCode: result.errorCode
+          })
+    })
+    return result
+  } catch (error) {
+    logManagedAiContentAccess('managed_ai.content.delete-record.failed', 'warn', {
+      source: access?.source || input?.source,
+      sessionId: access?.sessionId || input?.sessionId,
+      recordId: input?.recordId,
+      durationMs: Date.now() - startedAt,
+      existedBeforeImport: access?.existedBeforeImport,
+      importAttempted: access?.importAttempted,
+      error
+    })
+    throw error
+  }
 }
 
 export const listManagedAiNotifications = async (input: ManagedAiNotificationListInput = {}): Promise<ManagedAiNotificationListResult> => {
@@ -795,7 +1101,7 @@ export const hibernateManagedAiSession = async (input: ManagedAiSessionHibernate
   if (resolved.error) return resolved.error
   const session = resolved.session!
   if (session.state === 'needsInput' || session.agentLifecycle === 'needsInput') return hibernationError('AGENT_HIBERNATION_NEEDS_INPUT', 'Managed AI session needs input and cannot hibernate.')
-  if (!session.resumeCommand) return hibernationError('AGENT_HIBERNATION_RESUME_UNAVAILABLE', 'Managed AI session has no resume command.')
+  if (!managedAiSessionAllowsResume(session) || !session.resumeCommand) return hibernationError('AGENT_HIBERNATION_RESUME_UNAVAILABLE', 'Managed AI session has no resume command.')
   const now = Date.now()
   const next: ManagedAiSessionRecord = {
     ...session,
@@ -1143,6 +1449,8 @@ export const __testing = {
   streamBootId: agentSessionEventStreamRuntime.streamBootId,
   streamEventCount: agentSessionEventStreamRuntime.streamEventCount,
   streamLatestSeq: agentSessionEventStreamRuntime.streamLatestSeq,
+  flushManagedAiSessionImports: () => flushScheduledImportScan(),
+  flushManagedAiSessionGitRefresh: () => flushScheduledGitRefresh(),
   flushManagedAiSessionWrites: async () => {
     flushPersistSnapshotNow()
     await storeRuntime.flush()

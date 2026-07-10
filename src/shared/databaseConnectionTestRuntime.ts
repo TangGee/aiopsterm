@@ -22,18 +22,19 @@ import {
 } from './databaseSeedData'
 import {
   isSqliteFileExtension,
-  openSqliteDatabase,
   sqliteErrorCode,
   sqliteErrorMessage,
   sqliteFilePathFromTestInput,
-  sqlitePathFromUrl,
-  type SqliteDatabase
+  sqlitePathFromUrl
 } from './databaseSqliteRuntime'
+import { executeSqliteStatementInWorker } from './databaseSqliteWorkerRuntime'
 import { trim } from './databaseTableRuntime'
 
 type DatabaseConnectionTestRuntimeDeps = {
   shouldUseSeedData: () => boolean
 }
+
+const SQLITE_CONNECTION_TEST_BUSY_TIMEOUT_MS = 5000
 
 const databaseProxyRequested = (input: Pick<DatabaseConnectionTestInput, 'needProxy' | 'proxyName'>) => !!input.needProxy || !!trim(input.proxyName)
 
@@ -103,11 +104,15 @@ export const testDatabaseConnectionRuntime = async (
     if (!existsSync(filePath)) {
       return { ok: false, errorCode: 'DB_SQLITE_FILE_NOT_FOUND', errorMessage: 'SQLite file does not exist.' }
     }
-    let db: SqliteDatabase | null = null
     try {
-      db = openSqliteDatabase(filePath, input.readonly !== false)
-      const rows = db.prepare('SELECT sqlite_version() AS version').all()
-      const version = String(rows[0]?.version ?? '').trim()
+      const outcome = await executeSqliteStatementInWorker({
+        filePath,
+        readonly: input.readonly !== false,
+        sql: 'SELECT sqlite_version() AS version',
+        maxRows: 1,
+        busyTimeoutMs: SQLITE_CONNECTION_TEST_BUSY_TIMEOUT_MS
+      })
+      const version = outcome.reader ? String(outcome.rows[0]?.version ?? '').trim() : ''
       return {
         ok: true,
         data: {
@@ -123,8 +128,6 @@ export const testDatabaseConnectionRuntime = async (
         errorCode: sqliteErrorCode(error, 'DB_SQLITE_OPEN_FAILED'),
         errorMessage: sqliteErrorMessage(error, 'SQLite connection test failed.')
       }
-    } finally {
-      db?.close()
     }
   } else {
     const hasOracleConnectString = input.dbType === 'oracle' && !!trim(input.url)

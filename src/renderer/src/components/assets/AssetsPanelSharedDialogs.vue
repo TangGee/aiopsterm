@@ -278,52 +278,21 @@
       </div>
     </div>
 
-    <div
-      v-if="assetFolderModal.visible"
-      class="file-modal"
-    >
-      <div class="file-modal-card asset-folder-modal">
-        <header>
-          <strong>{{ assetFolderModal.parentKey ? '新建子目录' : '新建目录' }}</strong>
-          <button
-            title="关闭"
-            @click="closeAssetFolderModal"
-          >
-            <X />
-          </button>
-        </header>
-        <label class="modal-field">
-          <span>目录名称 *</span>
-          <input
-            v-model="assetFolderForm.name"
-            placeholder="请输入目录名称"
-          />
-        </label>
-        <label class="modal-field">
-          <span>目录描述</span>
-          <textarea
-            v-model="assetFolderForm.description"
-            rows="3"
-            placeholder="请输入目录描述"
-          />
-        </label>
-        <small
-          v-if="assetFolderFormError"
-          class="asset-form-error"
-        >
-          {{ assetFolderFormError }}
-        </small>
-        <footer>
-          <button @click="closeAssetFolderModal">取消</button>
-          <button
-            class="primary"
-            @click="submitAssetFolderForm"
-          >
-            确定
-          </button>
-        </footer>
-      </div>
-    </div>
+    <AssetFolderFormDialog
+      :visible="assetFolderModal.visible"
+      :title="assetFolderModal.parentKey ? '新建子目录' : '新建目录'"
+      :name="assetFolderForm.name"
+      :description="assetFolderForm.description"
+      :error="assetFolderFormError"
+      name-label="目录名称 *"
+      description-label="目录描述"
+      name-placeholder="请输入目录名称"
+      description-placeholder="请输入目录描述"
+      @close="closeAssetFolderModal"
+      @submit="submitAssetFolderForm"
+      @update:name="assetFolderForm.name = $event"
+      @update:description="assetFolderForm.description = $event"
+    />
   </Teleport>
 
   <small
@@ -337,6 +306,7 @@
 
 <script setup lang="ts">
 import { Search, X } from 'lucide-vue-next'
+import AssetFolderFormDialog from '@/components/assets/AssetFolderFormDialog.vue'
 import { useAssetsPanelRuntimeContext } from '@/services/assets/assetsPanelContext'
 
 const {

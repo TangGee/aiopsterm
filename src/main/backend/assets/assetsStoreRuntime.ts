@@ -25,6 +25,7 @@ import {
   assertFolderParent,
   assertUniqueKeychainName,
   assetGroupName,
+  cloneAsset,
   cloneFolder,
   defaultAssetKeychainSecrets,
   defaultAssetStoreShape,
@@ -88,6 +89,7 @@ export type AssetStore = {
   saveKeychain(input: AiopsKeychainInput): AiopsKeychainRecord
   deleteKeychain(id: string): void
   save(input: AiopsAssetInput): AiopsAssetRecord
+  saveMany(inputs: AiopsAssetInput[]): AiopsAssetRecord[]
   delete(id: string): void
   saveFolder(folder: AiopsCustomFolderSaveInput): AiopsCustomFolderRecord
   deleteFolder(uuid: string): void
@@ -132,7 +134,14 @@ export const configureAssetStoreRuntime = (config: AssetStoreRuntimeConfig = {})
 
 configureAssetCredentialRuntime({ credentialKeyPath: runtimeConfig.credentialKeyPath })
 
+const cloneAssetSnapshot = (snapshot: AiopsAssetSnapshot): AiopsAssetSnapshot => ({
+  assets: snapshot.assets.map(cloneAsset),
+  folders: snapshot.folders.map(cloneFolder)
+})
+
 class FallbackAssetStore {
+  private snapshotCache: AiopsAssetSnapshot | null = null
+
   private store = new Store<AssetStoreShape>({
     projectName: 'aiopsterm',
     name: 'aiopsterm-assets',
@@ -149,6 +158,10 @@ class FallbackAssetStore {
       this.stripLegacySeedData()
     }
     this.migratePlaintextSecrets()
+  }
+
+  private invalidateSnapshot() {
+    this.snapshotCache = null
   }
 
   private migratePlaintextSecrets() {
@@ -188,14 +201,14 @@ class FallbackAssetStore {
   }
 
   list(): AiopsAssetSnapshot {
-    if (!runtimeConfig.useSeedData) this.stripLegacySeedData()
-    this.migratePlaintextSecrets()
+    if (this.snapshotCache) return cloneAssetSnapshot(this.snapshotCache)
     const secrets = this.store.get('secrets') || {}
     const assets = withLocalShellAsset(this.store.get('assets') || [])
-    return {
+    this.snapshotCache = {
       assets: assets.map((asset) => sanitizeAsset(asset, decryptAssetSecret(secrets[asset.id]))),
       folders: (this.store.get('folders') || []).map(cloneFolder)
     }
+    return cloneAssetSnapshot(this.snapshotCache)
   }
 
   getAsset(id: string): AiopsAssetRecord | null {
@@ -208,6 +221,7 @@ class FallbackAssetStore {
     if (assetSecretNeedsEncryption(secret)) {
       const encrypted = encryptAssetSecretForStorage(secret)
       this.store.set('secrets', { ...secrets, [id]: encrypted })
+      this.invalidateSnapshot()
       return decryptAssetSecret(encrypted)
     }
     return decryptAssetSecret(secret)
@@ -230,6 +244,7 @@ class FallbackAssetStore {
     if (assetSecretNeedsEncryption(secret)) {
       const encrypted = encryptAssetSecretForStorage(secret)
       this.store.set('keychainSecrets', { ...keychainSecrets, [id]: encrypted })
+      this.invalidateSnapshot()
       return decryptAssetSecret(encrypted)
     }
     return decryptAssetSecret(secret)
@@ -247,6 +262,7 @@ class FallbackAssetStore {
     secrets[keychain.id] = encryptAssetSecretForStorage(secret)
     this.store.set('keychains', nextKeychains)
     this.store.set('keychainSecrets', secrets)
+    this.invalidateSnapshot()
     return sanitizeKeychain(keychain, secret)
   }
 
@@ -262,19 +278,30 @@ class FallbackAssetStore {
       'assets',
       (this.store.get('assets') || []).map((asset) => (asset.keychainId === id ? { ...asset, keychainId: undefined, hasPrivateKey: false } : asset))
     )
+    this.invalidateSnapshot()
   }
 
   save(input: AiopsAssetInput): AiopsAssetRecord {
+    return this.saveMany([input])[0]
+  }
+
+  saveMany(inputs: AiopsAssetInput[]): AiopsAssetRecord[] {
     const assets = this.store.get('assets') || []
-    const index = assets.findIndex((asset) => asset.id === input.id)
-    const asset = normalizeAssetInput(input, index >= 0 ? assets[index] : undefined)
-    const nextAssets = index >= 0 ? assets.map((item) => (item.id === asset.id ? asset : item)) : [...assets, asset]
+    let nextAssets = assets
     const secrets = { ...(this.store.get('secrets') || {}) }
-    const secret = mergeAssetSecretInput(decryptAssetSecret(secrets[asset.id]), input)
-    secrets[asset.id] = encryptAssetSecretForStorage(secret)
+    const saved: AiopsAssetRecord[] = []
+    for (const input of inputs) {
+      const index = nextAssets.findIndex((asset) => asset.id === input.id)
+      const asset = normalizeAssetInput(input, index >= 0 ? nextAssets[index] : undefined)
+      const secret = mergeAssetSecretInput(decryptAssetSecret(secrets[asset.id]), input)
+      secrets[asset.id] = encryptAssetSecretForStorage(secret)
+      nextAssets = index >= 0 ? nextAssets.map((item) => (item.id === asset.id ? asset : item)) : [...nextAssets, asset]
+      saved.push(sanitizeAsset(asset, secret))
+    }
     this.store.set('assets', nextAssets)
     this.store.set('secrets', secrets)
-    return sanitizeAsset(asset, secret)
+    this.invalidateSnapshot()
+    return saved
   }
 
   delete(id: string): void {
@@ -285,6 +312,7 @@ class FallbackAssetStore {
     const secrets = { ...(this.store.get('secrets') || {}) }
     delete secrets[id]
     this.store.set('secrets', secrets)
+    this.invalidateSnapshot()
   }
 
   saveFolder(folder: AiopsCustomFolderSaveInput): AiopsCustomFolderRecord {
@@ -296,6 +324,7 @@ class FallbackAssetStore {
       ? folders.map((item) => (item.uuid === normalized.uuid ? normalized : item))
       : [...folders, normalized]
     this.store.set('folders', nextFolders)
+    this.invalidateSnapshot()
     return cloneFolder(normalized)
   }
 
@@ -308,10 +337,13 @@ class FallbackAssetStore {
     )
     const nextAssets = (this.store.get('assets') || []).map((asset) => (asset.folderUuid === uuid ? { ...asset, folderUuid: undefined } : asset))
     this.store.set('assets', nextAssets)
+    this.invalidateSnapshot()
   }
 }
 
 class SqliteAssetStore {
+  private snapshotCache: AiopsAssetSnapshot | null = null
+
   constructor(private db: SqliteDatabase) {
     this.db.exec(`
       PRAGMA journal_mode=WAL;
@@ -335,6 +367,10 @@ class SqliteAssetStore {
     if (runtimeConfig.useSeedData) this.seed()
     else this.stripLegacySeedData()
     this.migratePlaintextSecrets()
+  }
+
+  private invalidateSnapshot() {
+    this.snapshotCache = null
   }
 
   private seed() {
@@ -424,18 +460,18 @@ class SqliteAssetStore {
   }
 
   list(): AiopsAssetSnapshot {
-    if (!runtimeConfig.useSeedData) this.stripLegacySeedData()
-    this.migratePlaintextSecrets()
+    if (this.snapshotCache) return cloneAssetSnapshot(this.snapshotCache)
     const rows = this.rawAssets()
     const rawAssets = withLocalShellAsset(rows.map(({ asset }) => asset))
     const secrets = new Map(rows.map(({ asset, secret }) => [asset.id, secret]))
-    return {
+    this.snapshotCache = {
       assets: rawAssets.map((asset) => sanitizeAsset(asset, decryptAssetSecret(secrets.get(asset.id)))),
       folders: this.db
         .prepare("SELECT data FROM asset_folders ORDER BY json_extract(data, '$.name') ASC")
         .all()
         .map((row) => cloneFolder(JSON.parse((row as { data: string }).data) as AiopsCustomFolderRecord))
     }
+    return cloneAssetSnapshot(this.snapshotCache)
   }
 
   getAsset(id: string): AiopsAssetRecord | null {
@@ -449,6 +485,7 @@ class SqliteAssetStore {
     if (assetSecretNeedsEncryption(secret)) {
       const encrypted = encryptAssetSecretForStorage(secret)
       this.db.prepare('UPDATE assets SET secret = ? WHERE id = ?').run(JSON.stringify(encrypted), id)
+      this.invalidateSnapshot()
       return decryptAssetSecret(encrypted)
     }
     return decryptAssetSecret(secret)
@@ -468,7 +505,6 @@ class SqliteAssetStore {
   }
 
   listKeychains(): AiopsKeychainRecord[] {
-    this.migratePlaintextSecrets()
     return this.rawKeychains().map(({ keychain, secret }) => sanitizeKeychain(keychain, decryptAssetSecret(secret)))
   }
 
@@ -485,12 +521,13 @@ class SqliteAssetStore {
     if (assetSecretNeedsEncryption(secret)) {
       const encrypted = encryptAssetSecretForStorage(secret)
       this.db.prepare('UPDATE asset_keychains SET secret = ? WHERE id = ?').run(JSON.stringify(encrypted), id)
+      this.invalidateSnapshot()
       return decryptAssetSecret(encrypted)
     }
     return decryptAssetSecret(secret)
   }
 
-  save(input: AiopsAssetInput): AiopsAssetRecord {
+  private saveAssetRow(input: AiopsAssetInput): AiopsAssetRecord {
     const existingRow = input.id ? (this.db.prepare('SELECT data, secret FROM assets WHERE id = ?').get(input.id) as { data: string; secret: string } | undefined) : undefined
     const existingAsset = existingRow ? (JSON.parse(existingRow.data) as AiopsAssetRecord) : undefined
     const existingSecret = existingRow ? decryptAssetSecret(JSON.parse(existingRow.secret || '{}') as AssetSecret) : {}
@@ -502,8 +539,25 @@ class SqliteAssetStore {
     return sanitizeAsset(asset, secret)
   }
 
+  save(input: AiopsAssetInput): AiopsAssetRecord {
+    const saved = this.saveAssetRow(input)
+    this.invalidateSnapshot()
+    return saved
+  }
+
+  saveMany(inputs: AiopsAssetInput[]): AiopsAssetRecord[] {
+    const saved: AiopsAssetRecord[] = []
+    const tx = this.db.transaction(() => {
+      for (const input of inputs) saved.push(this.saveAssetRow(input))
+    })
+    tx()
+    this.invalidateSnapshot()
+    return saved
+  }
+
   delete(id: string): void {
     this.db.prepare('DELETE FROM assets WHERE id = ?').run(id)
+    this.invalidateSnapshot()
   }
 
   saveKeychain(input: AiopsKeychainInput): AiopsKeychainRecord {
@@ -518,6 +572,7 @@ class SqliteAssetStore {
     this.db
       .prepare('INSERT INTO asset_keychains (id, data, secret) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data, secret = excluded.secret')
       .run(keychain.id, JSON.stringify(keychain), JSON.stringify(encryptAssetSecretForStorage(secret)))
+    this.invalidateSnapshot()
     return sanitizeKeychain(keychain, secret)
   }
 
@@ -532,6 +587,7 @@ class SqliteAssetStore {
       }
     })
     tx()
+    this.invalidateSnapshot()
   }
 
   saveFolder(folder: AiopsCustomFolderSaveInput): AiopsCustomFolderRecord {
@@ -544,6 +600,7 @@ class SqliteAssetStore {
     const folders = folderRows.map((row) => JSON.parse(row.data) as AiopsCustomFolderRecord)
     assertFolderParent(folders, normalized)
     this.db.prepare('INSERT INTO asset_folders (uuid, data) VALUES (?, ?) ON CONFLICT(uuid) DO UPDATE SET data = excluded.data').run(normalized.uuid, JSON.stringify(normalized))
+    this.invalidateSnapshot()
     return cloneFolder(normalized)
   }
 
@@ -566,6 +623,7 @@ class SqliteAssetStore {
       }
     })
     tx()
+    this.invalidateSnapshot()
   }
 }
 

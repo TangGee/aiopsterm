@@ -81,6 +81,12 @@ const managedAiSessionStateForEvent = (event: AiAgentSessionEvent, previous: Man
   return previous
 }
 
+const managedAiSessionAllowsResume = (session: Pick<ManagedAiSession, 'sessionKind' | 'restorable'>) =>
+  session.restorable !== false && session.sessionKind !== 'subagent' && session.sessionKind !== 'internal'
+
+const managedAiSessionIsChild = (session: Pick<ManagedAiSession, 'sessionKind'>) =>
+  session.sessionKind === 'subagent' || session.sessionKind === 'internal'
+
 const managedAiAttentionKindForSession = (session: Pick<ManagedAiSession, 'requestKind' | 'lastEvent'>): AiAttentionKind => {
   if (session.requestKind === 'plan') return 'plan'
   if (session.requestKind === 'permission' || session.lastEvent === 'permission_request') return 'approval'
@@ -124,7 +130,7 @@ export const createWorkspaceManagedAiSessionRuntime = (input: {
   const { upsertAiAttentionItem, removeAiAttentionItem, markAiAttentionHandled } = attention
 
   const sortedManagedAiSessions = computed(() => [...managedAiSessions.value].sort((first, second) => second.lastActivityAt - first.lastActivityAt))
-  const managedAiNeedsInputSessions = computed(() => sortedManagedAiSessions.value.filter((session) => session.state === 'needsInput' && !session.handledAt))
+  const managedAiNeedsInputSessions = computed(() => sortedManagedAiSessions.value.filter((session) => session.state === 'needsInput' && !session.handledAt && !managedAiSessionIsChild(session)))
   const selectedManagedAiSession = computed(() => sortedManagedAiSessions.value.find((session) => managedAiSessionKey(session) === selectedManagedAiSessionKey.value) || null)
   const managedAiAttentionPanelIds = computed(() => {
     const ids = new Set<string>()
@@ -140,7 +146,7 @@ export const createWorkspaceManagedAiSessionRuntime = (input: {
     aiAttentionItems.value = aiAttentionItems.value.filter((item) => !item.id.startsWith('managed-ai:') || managedIds.has(item.id))
     managedAiSessions.value.forEach((session) => {
       const id = aiSessionAttentionId(session)
-      if (session.state === 'needsInput') {
+      if (session.state === 'needsInput' && !managedAiSessionIsChild(session)) {
         upsertAiAttentionItem({
           id,
           source: session.source,
@@ -179,6 +185,9 @@ export const createWorkspaceManagedAiSessionRuntime = (input: {
       receivedAt: now,
       ...(session.panelId ? { panelId: session.panelId } : {}),
       ...(session.terminalSessionId ? { terminalSessionId: session.terminalSessionId } : {}),
+      ...(session.sessionKind ? { sessionKind: session.sessionKind } : {}),
+      ...(session.parentSessionId ? { parentSessionId: session.parentSessionId } : {}),
+      ...(typeof session.restorable === 'boolean' ? { restorable: session.restorable } : {}),
       requestKind: 'telemetry',
       decisionMode: 'telemetry',
       id: `${now}-terminal-close`
@@ -295,6 +304,12 @@ export const createWorkspaceManagedAiSessionRuntime = (input: {
     const now = Date.now()
     const requestKind = managedAiRequestKindForEvent(event)
     const decisionMode = event.decisionMode || (event.actionable === true ? 'local' : requestKind === 'telemetry' ? 'telemetry' : 'local')
+    const sessionKind = event.sessionKind || existing?.sessionKind
+    const parentSessionId = event.parentSessionId || existing?.parentSessionId
+    const restorable = event.restorable === false || existing?.restorable === false || sessionKind === 'subagent' || sessionKind === 'internal'
+      ? false
+      : event.restorable ?? existing?.restorable
+    const allowResume = managedAiSessionAllowsResume({ sessionKind, restorable })
     const timelineEvent: ManagedAiSessionTimelineEvent = {
       ...event,
       requestKind,
@@ -331,7 +346,10 @@ export const createWorkspaceManagedAiSessionRuntime = (input: {
       ...(event.toolName || existing?.toolName ? { toolName: event.toolName || existing?.toolName } : {}),
       ...(typeof event.actionable === 'boolean' ? { actionable: event.actionable } : existing?.actionable ? { actionable: existing.actionable } : {}),
       ...(event.launchCommand || existing?.launchCommand ? { launchCommand: event.launchCommand || existing?.launchCommand } : {}),
-      ...(event.resumeCommand || existing?.resumeCommand ? { resumeCommand: event.resumeCommand || existing?.resumeCommand } : {}),
+      ...(allowResume && (event.resumeCommand || existing?.resumeCommand) ? { resumeCommand: event.resumeCommand || existing?.resumeCommand } : {}),
+      ...(sessionKind ? { sessionKind } : {}),
+      ...(parentSessionId ? { parentSessionId } : {}),
+      ...(typeof restorable === 'boolean' ? { restorable } : {}),
       ...(event.processId || existing?.processId ? { processId: event.processId || existing?.processId } : {}),
       ...(event.parentProcessId || existing?.parentProcessId ? { parentProcessId: event.parentProcessId || existing?.parentProcessId } : {}),
       ...(event.processGroupId || existing?.processGroupId ? { processGroupId: event.processGroupId || existing?.processGroupId } : {}),

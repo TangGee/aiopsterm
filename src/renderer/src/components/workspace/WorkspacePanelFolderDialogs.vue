@@ -1,61 +1,16 @@
 <template>
   <Teleport to="body">
-    <div
-      v-if="folderModal.visible"
-      class="files-folder-modal-backdrop"
-    >
-      <section class="files-folder-modal workspace-folder-modal">
-        <header>
-          <h3>{{ folderModal.mode === 'create' ? '创建文件夹' : '编辑文件夹' }}</h3>
-          <button
-            type="button"
-            @click="closeFolderModal"
-          >
-            <X />
-          </button>
-        </header>
-        <form
-          class="files-folder-form"
-          @submit.prevent="saveFolderForm"
-        >
-          <label>
-            <span>文件夹名称 *</span>
-            <input
-              v-model="folderForm.name"
-              placeholder="请输入文件夹名称"
-            />
-          </label>
-          <label>
-            <span>文件夹描述</span>
-            <textarea
-              v-model="folderForm.description"
-              rows="3"
-              placeholder="请输入文件夹描述"
-            />
-          </label>
-          <p
-            v-if="folderFormError"
-            class="files-folder-error"
-          >
-            {{ folderFormError }}
-          </p>
-          <footer>
-            <button
-              type="button"
-              @click="closeFolderModal"
-            >
-              取消
-            </button>
-            <button
-              type="submit"
-              class="primary"
-            >
-              确定
-            </button>
-          </footer>
-        </form>
-      </section>
-    </div>
+    <AssetFolderFormDialog
+      :visible="folderModal.visible"
+      :title="folderModal.mode === 'create' ? '创建文件夹' : '编辑文件夹'"
+      :name="folderForm.name"
+      :description="folderForm.description"
+      :error="folderFormError"
+      @close="closeFolderModal"
+      @submit="saveFolderForm"
+      @update:name="folderForm.name = $event"
+      @update:description="folderForm.description = $event"
+    />
 
     <div
       v-if="moveModal.visible"
@@ -138,6 +93,7 @@
 
 <script setup lang="ts">
 import { X } from 'lucide-vue-next'
+import AssetFolderFormDialog from '@/components/assets/AssetFolderFormDialog.vue'
 import { useWorkspacePanelRuntimeContext } from '@/services/workspace/workspacePanelContext'
 
 const {

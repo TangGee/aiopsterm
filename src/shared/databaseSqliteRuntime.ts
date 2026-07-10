@@ -18,7 +18,7 @@ import type {
 } from './contracts/database'
 import { buildDatabaseMutationStatement, databaseMutationPlanData, inputKnownColumns } from './databaseMutationPlanner'
 import type { DatabaseSqlExecuteRawData, DatabaseSqlExecuteRawResult } from './databaseSqlExecution'
-import { executeSqliteStatementInWorker } from './databaseSqliteWorkerRuntime'
+import { executeSqliteStatementInWorker, executeSqliteTransactionInWorker, loadSqliteCatalogsInWorker, type SqliteWorkerStatementInput } from './databaseSqliteWorkerRuntime'
 import {
   columnsForRows,
   parseOrderByRaw,
@@ -181,6 +181,19 @@ export const sqliteCatalogsForConnection = (connection: DatabaseConnectionInfo):
   }
 }
 
+export const sqliteCatalogsForConnectionAsync = async (connection: DatabaseConnectionInfo): Promise<DatabaseCatalogInfo[] | null> => {
+  if (!isRealSqliteConnection(connection)) return null
+  try {
+    return await loadSqliteCatalogsInWorker({
+      filePath: sqliteFilePathFromConnection(connection),
+      connectionId: connection.id,
+      busyTimeoutMs: SQLITE_BUSY_TIMEOUT_MS
+    })
+  } catch {
+    return null
+  }
+}
+
 // 用户 SQL 在 worker 线程执行，主线程不再被长查询阻塞；reader 结果超过上限时截断并标记 truncated。
 export const sqliteExecute = async (connection: DatabaseConnectionInfo, sql: string, startedAt: number): Promise<DatabaseSqlExecuteRawResult> => {
   try {
@@ -272,13 +285,34 @@ const sqliteOrderByFor = (sort: DatabaseColumnSort | null | undefined, knownColu
   return ` ORDER BY ${sqliteIdentifier(column)} ${sort.direction === 'desc' ? 'DESC' : 'ASC'}`
 }
 
-export const sqliteQueryTable = (connection: DatabaseConnectionInfo, input: DatabaseTableQueryInput, startedAt: number): DatabaseTableQueryResult => {
-  let db: SqliteDatabase | null = null
+const sqliteColumnsForTableInWorker = async (connection: DatabaseConnectionInfo, schemaName: string, tableName: string) => {
+  const outcome = await executeSqliteStatementInWorker({
+    filePath: sqliteFilePathFromConnection(connection),
+    readonly: true,
+    sql: `PRAGMA ${sqliteIdentifier(schemaName)}.table_xinfo(${sqliteIdentifier(tableName)})`,
+    maxRows: 10_000,
+    busyTimeoutMs: SQLITE_BUSY_TIMEOUT_MS
+  })
+  if (!outcome.reader) return []
+  return (outcome.rows as SqliteTableColumnRow[])
+    .filter((row) => trim(row.name) && Number(row.hidden ?? 0) !== 1)
+    .sort((first, second) => Number(first.cid ?? 0) - Number(second.cid ?? 0))
+    .map((row) => {
+      const primaryKeyRank = Number(row.pk ?? 0)
+      return {
+        name: trim(row.name),
+        type: trim(row.type).toUpperCase() || 'TEXT',
+        nullable: primaryKeyRank <= 0 && Number(row.notnull ?? 0) === 0,
+        ...(primaryKeyRank > 0 ? { key: 'PK' as const } : {})
+      }
+    })
+}
+
+export const sqliteQueryTable = async (connection: DatabaseConnectionInfo, input: DatabaseTableQueryInput, startedAt: number): Promise<DatabaseTableQueryResult> => {
   try {
-    db = openSqliteDatabase(sqliteFilePathFromConnection(connection), true)
     const schemaName = sqliteSchemaNameFor(connection, input.databaseName)
     const tableName = trim(input.tableName)
-    const columns = sqliteColumnsForTable(db, schemaName, tableName)
+    const columns = await sqliteColumnsForTableInWorker(connection, schemaName, tableName)
     if (!columns.length) {
       return { ok: false, errorCode: 'DB_TABLE_NOT_FOUND', errorMessage: `Table not found: ${input.tableName}` }
     }
@@ -291,10 +325,27 @@ export const sqliteQueryTable = (connection: DatabaseConnectionInfo, input: Data
     const page = Math.max(1, Math.floor(Number(input.page) || 1))
     const offset = (page - 1) * pageSize
     const tableRef = sqliteTableReference(connection, input.databaseName, tableName)
-    const rows = db.prepare(`SELECT * FROM ${tableRef}${where.sql}${orderBy} LIMIT ? OFFSET ?`).all(...where.params, pageSize, offset)
-    const total = input.withTotal
-      ? Number((db.prepare(`SELECT COUNT(*) AS total FROM ${tableRef}${where.sql}`).all(...where.params)[0]?.total as number | undefined) ?? 0)
-      : null
+    const rowsOutcome = await executeSqliteStatementInWorker({
+      filePath: sqliteFilePathFromConnection(connection),
+      readonly: true,
+      sql: `SELECT * FROM ${tableRef}${where.sql}${orderBy} LIMIT ? OFFSET ?`,
+      params: [...where.params, pageSize, offset],
+      maxRows: pageSize,
+      busyTimeoutMs: SQLITE_BUSY_TIMEOUT_MS
+    })
+    const rows = rowsOutcome.reader ? rowsOutcome.rows : []
+    let total: number | null = null
+    if (input.withTotal) {
+      const totalOutcome = await executeSqliteStatementInWorker({
+        filePath: sqliteFilePathFromConnection(connection),
+        readonly: true,
+        sql: `SELECT COUNT(*) AS total FROM ${tableRef}${where.sql}`,
+        params: where.params,
+        maxRows: 1,
+        busyTimeoutMs: SQLITE_BUSY_TIMEOUT_MS
+      })
+      total = totalOutcome.reader ? Number((totalOutcome.rows[0]?.total as number | undefined) ?? 0) : 0
+    }
     return {
       ok: true,
       data: {
@@ -312,22 +363,21 @@ export const sqliteQueryTable = (connection: DatabaseConnectionInfo, input: Data
       errorCode: sqliteErrorCode(error, 'DB_SQLITE_QUERY_FAILED'),
       errorMessage: sqliteErrorMessage(error, 'SQLite table query failed.')
     }
-  } finally {
-    db?.close()
   }
 }
 
-export const sqliteTableDdl = (connection: DatabaseConnectionInfo, input: DatabaseTableDdlInput): DatabaseTableDdlResult => {
-  let db: SqliteDatabase | null = null
+export const sqliteTableDdl = async (connection: DatabaseConnectionInfo, input: DatabaseTableDdlInput): Promise<DatabaseTableDdlResult> => {
   try {
-    db = openSqliteDatabase(sqliteFilePathFromConnection(connection), true)
     const schemaName = sqliteSchemaNameFor(connection, input.databaseName)
-    const rows = db
-      .prepare(
-        `SELECT sql FROM ${sqliteIdentifier(schemaName)}.sqlite_schema WHERE type IN ('table', 'view') AND name = ? ORDER BY type LIMIT 1`
-      )
-      .all(trim(input.tableName))
-    const ddl = typeof rows[0]?.sql === 'string' ? rows[0].sql : ''
+    const outcome = await executeSqliteStatementInWorker({
+      filePath: sqliteFilePathFromConnection(connection),
+      readonly: true,
+      sql: `SELECT sql FROM ${sqliteIdentifier(schemaName)}.sqlite_schema WHERE type IN ('table', 'view') AND name = ? ORDER BY type LIMIT 1`,
+      params: [trim(input.tableName)],
+      maxRows: 1,
+      busyTimeoutMs: SQLITE_BUSY_TIMEOUT_MS
+    })
+    const ddl = outcome.reader && typeof outcome.rows[0]?.sql === 'string' ? outcome.rows[0].sql : ''
     if (!ddl) return { ok: false, errorCode: 'DB_TABLE_NOT_FOUND', errorMessage: `Table not found: ${input.tableName}` }
     return { ok: true, data: { ddl } }
   } catch (error) {
@@ -336,76 +386,53 @@ export const sqliteTableDdl = (connection: DatabaseConnectionInfo, input: Databa
       errorCode: sqliteErrorCode(error, 'DB_SQLITE_DDL_FAILED'),
       errorMessage: sqliteErrorMessage(error, 'SQLite DDL lookup failed.')
     }
-  } finally {
-    db?.close()
   }
 }
 
 export const sqliteKnownColumnsForTable = (db: SqliteDatabase, schemaName: string, tableName: string) =>
   sqliteColumnsForTable(db, schemaName, tableName).map((column) => column.name)
 
-const sqliteApplyMutation = (db: SqliteDatabase, tableRef: string, knownColumns: string[], mutation: DatabaseTableMutationInput['mutations'][number]) => {
-  if (mutation.kind === 'drop') {
-    db.prepare(`DROP TABLE ${tableRef}`).run()
-    return 0
-  }
-  const statement = buildDatabaseMutationStatement('sqlite', tableRef, knownColumns, mutation)
-  if (!statement) return 0
-  const result = db.prepare(statement.sql).run(...statement.params)
-  return Number(result.changes ?? 0)
-}
-
-export const sqliteMutationPlan = (
+export const sqliteMutationPlan = async (
   connection: DatabaseConnectionInfo,
   input: DatabaseTableMutationPlanInput
-): DatabaseTableMutationPlanResult['data'] => {
-  let db: SqliteDatabase | null = null
-  try {
-    db = openSqliteDatabase(sqliteFilePathFromConnection(connection), true)
-    const schemaName = sqliteSchemaNameFor(connection, input.databaseName)
-    const knownColumns = sqliteKnownColumnsForTable(db, schemaName, trim(input.tableName))
-    if (!knownColumns.length && input.mutations.every((mutation) => mutation.kind !== 'drop')) {
-      throw Object.assign(new Error(`Table not found: ${input.tableName}`), { code: 'DB_TABLE_NOT_FOUND' })
-    }
-    return databaseMutationPlanData(connection, input, knownColumns.length ? knownColumns : inputKnownColumns(input))
-  } finally {
-    db?.close()
+): Promise<DatabaseTableMutationPlanResult['data']> => {
+  const schemaName = sqliteSchemaNameFor(connection, input.databaseName)
+  const knownColumns = (await sqliteColumnsForTableInWorker(connection, schemaName, trim(input.tableName))).map((column) => column.name)
+  if (!knownColumns.length && input.mutations.every((mutation) => mutation.kind !== 'drop')) {
+    throw Object.assign(new Error(`Table not found: ${input.tableName}`), { code: 'DB_TABLE_NOT_FOUND' })
   }
+  return databaseMutationPlanData(connection, input, knownColumns.length ? knownColumns : inputKnownColumns(input))
 }
 
-export const sqliteMutateTable = (connection: DatabaseConnectionInfo, input: DatabaseTableMutationInput, startedAt: number): DatabaseTableMutationResult => {
+export const sqliteMutateTable = async (connection: DatabaseConnectionInfo, input: DatabaseTableMutationInput, startedAt: number): Promise<DatabaseTableMutationResult> => {
   if (connection.readonly) {
     return { ok: false, errorCode: 'DB_SQLITE_READONLY', errorMessage: 'SQLite connection is read-only.' }
   }
 
-  let db: SqliteDatabase | null = null
   try {
-    db = openSqliteDatabase(sqliteFilePathFromConnection(connection), false)
     const schemaName = sqliteSchemaNameFor(connection, input.databaseName)
     const tableName = trim(input.tableName)
-    const knownColumns = sqliteKnownColumnsForTable(db, schemaName, tableName)
+    const knownColumns = (await sqliteColumnsForTableInWorker(connection, schemaName, tableName)).map((column) => column.name)
     if (!knownColumns.length) {
       return { ok: false, errorCode: 'DB_TABLE_NOT_FOUND', errorMessage: `Table not found: ${input.tableName}` }
     }
     const tableRef = sqliteTableReference(connection, input.databaseName, tableName)
-    let affected = 0
-    db.prepare('BEGIN').run()
-    try {
-      input.mutations.forEach((mutation) => {
-        affected += sqliteApplyMutation(db!, tableRef, knownColumns, mutation)
-      })
-      db.prepare('COMMIT').run()
-    } catch (error) {
-      db.prepare('ROLLBACK').run()
-      throw error
-    }
-    const catalogs = sqliteCatalogsForConnection(connection)
+    const statements = input.mutations
+      .map((mutation) => buildDatabaseMutationStatement('sqlite', tableRef, knownColumns, mutation))
+      .filter((statement): statement is NonNullable<ReturnType<typeof buildDatabaseMutationStatement>> => Boolean(statement))
+      .map((statement): SqliteWorkerStatementInput => ({ sql: statement.sql, params: statement.params }))
+    const result = await executeSqliteTransactionInWorker({
+      filePath: sqliteFilePathFromConnection(connection),
+      statements,
+      busyTimeoutMs: SQLITE_BUSY_TIMEOUT_MS
+    })
+    const catalogs = await sqliteCatalogsForConnectionAsync(connection)
     const runtime = configuredRuntime()
     if (catalogs) runtime.refreshConnectionCatalog(connection.id, catalogs)
     return {
       ok: true,
       data: {
-        affected,
+        affected: result.changes,
         durationMs: Math.max(1, Date.now() - startedAt),
         catalog: runtime.workspaceCatalogFor(input.connectionId)
       }
@@ -416,7 +443,5 @@ export const sqliteMutateTable = (connection: DatabaseConnectionInfo, input: Dat
       errorCode: sqliteErrorCode(error, 'DB_SQLITE_MUTATION_FAILED'),
       errorMessage: sqliteErrorMessage(error, 'SQLite table mutation failed.')
     }
-  } finally {
-    db?.close()
   }
 }

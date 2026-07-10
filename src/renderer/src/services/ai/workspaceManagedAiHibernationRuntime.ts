@@ -20,6 +20,15 @@ import type {
   WorkspaceManagedAiControllerState
 } from '@/services/ai/workspaceManagedAiTypes'
 
+const managedAiSessionAllowsResume = (session: Pick<ManagedAiSession, 'sessionKind' | 'restorable' | 'resumeCommand'>) =>
+  session.restorable !== false &&
+  session.sessionKind !== 'subagent' &&
+  session.sessionKind !== 'internal' &&
+  Boolean(session.resumeCommand?.trim())
+
+const managedAiSessionIsReviewOnly = (session: Pick<ManagedAiSession, 'sessionKind' | 'restorable'>) =>
+  session.restorable === false || session.sessionKind === 'subagent' || session.sessionKind === 'internal'
+
 export const createWorkspaceManagedAiHibernationRuntime = (input: {
   state: Pick<WorkspaceManagedAiControllerState, 'agentHibernationConfig' | 'managedAiSessions' | 'panels'>
   setTopNotice: (message: string) => void
@@ -95,8 +104,8 @@ export const createWorkspaceManagedAiHibernationRuntime = (input: {
       setTopNotice(i18nText('aiSessions.notice.cannotHibernateNeedsInput'))
       return false
     }
-    if (!session.resumeCommand?.trim()) {
-      setTopNotice(i18nText('aiSessions.notice.noResumeCommand'))
+    if (!managedAiSessionAllowsResume(session)) {
+      setTopNotice(i18nText(managedAiSessionIsReviewOnly(session) ? 'aiSessions.notice.notRestorable' : 'aiSessions.notice.noResumeCommand'))
       return false
     }
     const targetId = session.panelId || session.terminalSessionId
@@ -141,6 +150,10 @@ export const createWorkspaceManagedAiHibernationRuntime = (input: {
     let panel = targetIds.length ? panels.value.find((item) => targetIds.includes(item.id) || (item.sessionId ? targetIds.includes(item.sessionId) : false)) : null
     if (panel?.sessionId && isTerminalWorkspacePanel(panel) && panel.status !== 'closed' && panel.status !== 'error') {
       return true
+    }
+    if (!managedAiSessionAllowsResume(session)) {
+      setTopNotice(i18nText(managedAiSessionIsReviewOnly(session) ? 'aiSessions.notice.notRestorable' : 'aiSessions.notice.noResumeCommand'))
+      return false
     }
     const command = session.resumeCommand?.trim()
     if (!command) {

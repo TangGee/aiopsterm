@@ -268,6 +268,7 @@ const api: AiopsPreloadApi = {
   listManagedAiSessionContent: (input) => ipcRenderer.invoke('ai-agent:sessions:content:list', input),
   getManagedAiSessionContentRecord: (input) => ipcRenderer.invoke('ai-agent:sessions:content:get-record', input),
   updateManagedAiSessionContentRecord: (input) => ipcRenderer.invoke('ai-agent:sessions:content:update-record', input),
+  deleteManagedAiSessionContentRecord: (input) => ipcRenderer.invoke('ai-agent:sessions:content:delete-record', input),
   listManagedAiNotifications: (input) => ipcRenderer.invoke('ai-agent:notifications:list', input),
   markManagedAiNotificationRead: (input) => ipcRenderer.invoke('ai-agent:notifications:mark-read', input),
   dismissManagedAiNotification: (input) => ipcRenderer.invoke('ai-agent:notifications:dismiss', input),

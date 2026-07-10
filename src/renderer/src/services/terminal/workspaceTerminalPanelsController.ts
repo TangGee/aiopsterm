@@ -43,7 +43,7 @@ import {
   type TerminalPanel,
   type TerminalSessionAsset
 } from '@/services/terminal/terminalPanelRuntime'
-import type { ModuleKey } from '@/config/navigation'
+import { isTerminalWorkspaceModule, type ModuleKey } from '@/config/navigation'
 import type { ExtensionSettings, KeywordHighlightSettings, TerminalSettings } from '@/services/settings/workspaceConfigRuntime'
 import type { TerminalProgress } from '@/services/terminal/terminalOscRuntime'
 import type { AiContextOption } from '@shared/contracts/aiChat'
@@ -360,6 +360,11 @@ export const createWorkspaceTerminalPanelsController = (
   const managedAiSessionPanelId = (source: AiAgentSessionSource, sessionId: string) => `ai-session:${source}:${encodeURIComponent(sessionId)}`
   let knowledgeJumpTokenSeed = 0
 
+  const revealManagedAiSessionContentPanel = () => {
+    mode.value = 'terminal'
+    if (!isTerminalWorkspaceModule(activeModule.value)) activeModule.value = 'workspace'
+  }
+
   const createKnowledgeJumpState = (range?: { startLine?: number; endLine?: number }) => {
     if (!range?.startLine) return {}
     knowledgeJumpTokenSeed += 1
@@ -414,8 +419,7 @@ export const createWorkspaceTerminalPanelsController = (
         panel.managedAiSession.sessionId === normalizedSessionId
     )
     if (existing) {
-      activeModule.value = 'workspace'
-      mode.value = 'terminal'
+      revealManagedAiSessionContentPanel()
       activePanelId.value = existing.id
       return existing
     }
@@ -435,8 +439,7 @@ export const createWorkspaceTerminalPanelsController = (
       }
     }
     panels.value.push(panel)
-    activeModule.value = 'workspace'
-    mode.value = 'terminal'
+    revealManagedAiSessionContentPanel()
     activePanelId.value = panel.id
     return panel
   }

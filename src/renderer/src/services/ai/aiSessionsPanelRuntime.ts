@@ -7,6 +7,7 @@ import {
   buildManagedAiActiveScopeLabel,
   buildManagedAiLibrarySections,
   buildManagedAiPanelModeButtons,
+  buildManagedAiSessionRows,
   filteredManagedAiTimelineEvents,
   formatManagedAiRelativeTime,
   formatManagedAiTime,
@@ -19,8 +20,11 @@ import {
   managedAiProjectDisplayLabel,
   managedAiProjectDisplayLabelSet,
   managedAiProjectDisplayLabels,
+  managedAiPrimarySessions,
   managedAiRequestKindLabelKey,
+  managedAiSessionAllowsResume,
   managedAiSessionDisplayTitle,
+  managedAiSessionIsChild,
   managedAiSessionKey,
   managedAiSessionStateLabelKey,
   managedAiSourceLabel,
@@ -37,13 +41,51 @@ import {
 import type { ManagedAiSession, ManagedAiSessionState } from '@/services/ai/workspaceManagedAiTypes'
 import type { AiAgentSessionEventName, AiAgentSessionSource } from '@shared/contracts/managedAiSessions'
 
+const aiSessionsPanelStateStorageKey = 'aiopsterm.aiSessionsPanelState'
+
+type AiSessionsPanelStoredState = {
+  libraryGrouping?: ManagedAiLibraryGrouping
+  collapsedLibrarySections?: string[]
+  expandedChildGroups?: string[]
+}
+
+const validLibraryGrouping = (value: unknown): value is ManagedAiLibraryGrouping =>
+  value === 'project' || value === 'agent' || value === 'time'
+
+const stringArray = (value: unknown) => Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0) : []
+
+const readAiSessionsPanelState = (): AiSessionsPanelStoredState => {
+  if (typeof window === 'undefined') return {}
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(aiSessionsPanelStateStorageKey) || '{}') as Record<string, unknown>
+    return {
+      ...(validLibraryGrouping(parsed.libraryGrouping) ? { libraryGrouping: parsed.libraryGrouping } : {}),
+      collapsedLibrarySections: stringArray(parsed.collapsedLibrarySections),
+      expandedChildGroups: stringArray(parsed.expandedChildGroups)
+    }
+  } catch {
+    return {}
+  }
+}
+
+const writeAiSessionsPanelState = (state: AiSessionsPanelStoredState) => {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(aiSessionsPanelStateStorageKey, JSON.stringify(state))
+  } catch {
+    /* localStorage may be unavailable in restricted webviews. */
+  }
+}
+
 export const useAiSessionsPanelRuntime = () => {
   const workspace = useWorkspaceStore()
   const { t } = useI18n()
+  const storedPanelState = readAiSessionsPanelState()
   const query = ref('')
   const mode = ref<ManagedAiPanelMode>('pending')
-  const libraryGrouping = ref<ManagedAiLibraryGrouping>('project')
-  const collapsedLibrarySections = ref<Set<string>>(new Set())
+  const libraryGrouping = ref<ManagedAiLibraryGrouping>(storedPanelState.libraryGrouping || 'project')
+  const collapsedLibrarySections = ref<Set<string>>(new Set(storedPanelState.collapsedLibrarySections || []))
+  const expandedChildGroups = ref<Set<string>>(new Set(storedPanelState.expandedChildGroups || []))
   const filter = ref<ManagedAiStateFilter>('needsInput')
   const eventFilter = ref<ManagedAiRequestKindFilter>('all')
   const replyText = ref('')
@@ -56,6 +98,13 @@ export const useAiSessionsPanelRuntime = () => {
     sessionKey: ''
   })
   const eventFilters = computed(() => aiSessionsEventFilterOptions.map((option) => ({ key: option.key, label: t(option.labelKey) })))
+  watch([libraryGrouping, collapsedLibrarySections, expandedChildGroups], () => {
+    writeAiSessionsPanelState({
+      libraryGrouping: libraryGrouping.value,
+      collapsedLibrarySections: [...collapsedLibrarySections.value],
+      expandedChildGroups: [...expandedChildGroups.value]
+    })
+  })
 
   const sourceLabel = (source: AiAgentSessionSource) => managedAiSourceLabel(source)
   const stateLabel = (state: ManagedAiSessionState) => t(managedAiSessionStateLabelKey(state))
@@ -73,6 +122,7 @@ export const useAiSessionsPanelRuntime = () => {
       translate: t
     })
   )
+  const primarySessions = computed(() => managedAiPrimarySessions(workspace.sortedManagedAiSessions))
 
   const activeModeLabel = computed(() => modeButtons.value.find((button) => button.active)?.label || t('aiSessions.mode.pending'))
 
@@ -211,11 +261,11 @@ export const useAiSessionsPanelRuntime = () => {
     () => workspace.sortedManagedAiSessions.map((session) => `${session.source}:${session.id}:${session.state}`).join('|'),
     () => {
       if (mode.value !== 'pending' || visibleSessions.value.length > 0) return
-      if (workspace.sortedManagedAiSessions.some((session) => session.state === 'working')) {
+      if (primarySessions.value.some((session) => session.state === 'working')) {
         selectMode('running')
         return
       }
-      if (workspace.sortedManagedAiSessions.length > 0) selectMode('library')
+      if (primarySessions.value.length > 0 || workspace.sortedManagedAiSessions.length > 0) selectMode('library')
     },
     { immediate: true }
   )
@@ -240,8 +290,21 @@ export const useAiSessionsPanelRuntime = () => {
     workspace.selectedManagedAiSessionKey = sessionKey(session)
   }
 
-  const canResumeSession = (session: Pick<ManagedAiSession, 'state' | 'resumeCommand'>) =>
-    session.state !== 'working' && session.state !== 'needsInput' && Boolean(session.resumeCommand?.trim())
+  const canResumeSession = (session: Pick<ManagedAiSession, 'state' | 'resumeCommand' | 'sessionKind' | 'restorable'>) => managedAiSessionAllowsResume(session)
+  const isChildSession = (session: Pick<ManagedAiSession, 'sessionKind'>) => managedAiSessionIsChild(session)
+  const childGroupKey = (session: Pick<ManagedAiSession, 'source' | 'id'>, suffix = 'children') => `${sessionKey(session)}:${suffix}`
+  const isChildGroupExpanded = (key: string) => Boolean(query.value.trim()) || expandedChildGroups.value.has(key)
+  const toggleChildGroup = (key: string) => {
+    const next = new Set(expandedChildGroups.value)
+    if (next.has(key)) next.delete(key)
+    else next.add(key)
+    expandedChildGroups.value = next
+  }
+  const sessionRows = (sessions: ManagedAiSession[]) => buildManagedAiSessionRows(sessions)
+  const sectionOrphanChildGroupKey = (sectionKey: string) => `section:${sectionKey}:orphan-children`
+  const flatOrphanChildGroupKey = () => `flat:${mode.value}:orphan-children`
+  const sessionKindLabel = (session: Pick<ManagedAiSession, 'sessionKind'>) =>
+    session.sessionKind === 'internal' ? t('aiSessions.internalSession') : t('aiSessions.childSession')
 
   const sessionGitMeta = (session: Pick<ManagedAiSession, 'gitBranch' | 'gitDirty'>) => {
     const branch = String(session.gitBranch || '').trim()
@@ -256,6 +319,9 @@ export const useAiSessionsPanelRuntime = () => {
   }
 
   const sessionRowMeta = (session: ManagedAiSession) => sessionRowMetaCandidates(session).at(-1) || ''
+  const childSessionRowMeta = (session: ManagedAiSession) => [sourceLabel(session.source), formatRelativeTime(session.lastActivityAt)].filter(Boolean).join(' · ')
+  const childSessionRowTooltip = (session: ManagedAiSession) =>
+    [sessionRowTitle(session), sessionRowDetail(session), sessionKindLabel(session), childSessionRowMeta(session)].filter(Boolean).join('\n')
 
   const resumeOrFocusSession = (session: ManagedAiSession) => {
     if (focusLinkedPanel(session)) return
@@ -352,6 +418,7 @@ export const useAiSessionsPanelRuntime = () => {
     mode,
     libraryGrouping,
     collapsedLibrarySections,
+    expandedChildGroups,
     eventFilter,
     replyText,
     renameTitle,
@@ -401,6 +468,17 @@ export const useAiSessionsPanelRuntime = () => {
     sessionRowMeta,
     sessionRowMetaCandidates,
     sessionDotState,
+    canResumeSession,
+    isChildSession,
+    childGroupKey,
+    isChildGroupExpanded,
+    toggleChildGroup,
+    sessionRows,
+    sectionOrphanChildGroupKey,
+    flatOrphanChildGroupKey,
+    sessionKindLabel,
+    childSessionRowMeta,
+    childSessionRowTooltip,
     formatTime,
     formatRelativeTime
   }

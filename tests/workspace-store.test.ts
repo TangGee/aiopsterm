@@ -779,6 +779,53 @@ describe('workspace store', () => {
     expect(store.managedAiSessionFocusRequest.session?.id).toBe('claude-session-1')
   })
 
+  it('keeps the AI session index selected when opening managed AI session content', () => {
+    const store = useWorkspaceStore()
+    store.mode = 'terminal'
+    store.activeModule = 'aiSessions'
+    store.upsertManagedAiSession({
+      source: 'claude-code',
+      event: 'session_start',
+      sessionId: 'claude-history-1',
+      title: 'Claude history',
+      summary: 'Review transcript',
+      cwd: '/work/project',
+      receivedAt: 500
+    })
+
+    const panel = store.openManagedAiSessionContent('claude-code', 'claude-history-1')
+
+    expect(panel).toEqual(
+      expect.objectContaining({
+        kind: 'managed-ai-session',
+        managedAiSession: {
+          source: 'claude-code',
+          sessionId: 'claude-history-1'
+        }
+      })
+    )
+    expect(store.mode).toBe('terminal')
+    expect(store.activeModule).toBe('aiSessions')
+    expect(store.activePanelId).toBe(panel?.id)
+
+    store.activeModule = 'aiSessions'
+    expect(store.openManagedAiSessionContent('claude-code', 'claude-history-1')?.id).toBe(panel?.id)
+    expect(store.activeModule).toBe('aiSessions')
+  })
+
+  it('reveals managed AI session content from standalone workspace modules', () => {
+    const store = useWorkspaceStore()
+    store.mode = 'terminal'
+    store.activeModule = 'settings'
+
+    const panel = store.openManagedAiSessionContent('codex', 'codex-history-1')
+
+    expect(panel).toEqual(expect.objectContaining({ kind: 'managed-ai-session' }))
+    expect(store.mode).toBe('terminal')
+    expect(store.activeModule).toBe('workspace')
+    expect(store.activePanelId).toBe(panel?.id)
+  })
+
   it('moves completed managed AI turns to pending validation and clears attention on terminal exit', () => {
     const store = useWorkspaceStore()
     store.applyLocalTerminalSession('panel-main', {
@@ -1044,6 +1091,32 @@ describe('workspace store', () => {
       })
     )
     expect(store.topNotice).toBe('已向所属终端写入 AI 会话恢复命令')
+  })
+
+  it('does not resume review-only subagent managed AI sessions even if stale commands exist', async () => {
+    const store = useWorkspaceStore()
+    vi.mocked(window.aiops.createTerminal).mockClear()
+    vi.mocked(window.aiops.writeTerminal).mockClear()
+
+    store.upsertManagedAiSession({
+      source: 'codex',
+      event: 'session_start',
+      sessionId: 'codex-child-1',
+      title: 'Child review',
+      summary: '',
+      cwd: '/work/history-project',
+      sessionKind: 'subagent',
+      parentSessionId: 'codex-parent-1',
+      restorable: false,
+      resumeCommand: "cd '/work/history-project' && codex resume 'codex-child-1'",
+      receivedAt: 500
+    })
+
+    await expect(store.resumeManagedAiSession('codex', 'codex-child-1')).resolves.toBe(false)
+
+    expect(window.aiops.createTerminal).not.toHaveBeenCalled()
+    expect(window.aiops.writeTerminal).not.toHaveBeenCalled()
+    expect(store.topNotice).toBe('此子会话或内部会话可用于查看学习，但不能恢复执行。')
   })
 
   it('routes risky managed AI session resume commands through terminal security approval', async () => {

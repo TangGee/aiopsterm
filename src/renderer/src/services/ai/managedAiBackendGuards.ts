@@ -7,6 +7,7 @@ import type {
   ManagedAiSessionBulkResult,
   ManagedAiSessionDecision,
   ManagedAiSessionHibernateResult,
+  ManagedAiSessionKind,
   ManagedAiSessionLifecycle,
   ManagedAiSessionMutationResult,
   ManagedAiSessionRecord,
@@ -15,6 +16,7 @@ import type {
   ManagedAiSessionTimelineEvent
 } from '@shared/contracts/managedAiSessions'
 import type {
+  ManagedAiSessionContentDeleteResult,
   ManagedAiSessionContentRecord,
   ManagedAiSessionContentSnapshot
 } from '@shared/contracts/managedAiSessionContent'
@@ -36,6 +38,7 @@ export type ManagedAiSessionMutationData = NonNullable<ManagedAiSessionMutationR
 export type ManagedAiSessionBulkData = NonNullable<ManagedAiSessionBulkResult['data']>
 export type ManagedAiSessionHibernateData = NonNullable<ManagedAiSessionHibernateResult['data']>
 export type ManagedAiSessionContentRecordData = { record: ManagedAiSessionContentRecord }
+export type ManagedAiSessionContentDeleteData = NonNullable<ManagedAiSessionContentDeleteResult['data']>
 export type AgentHookInstallOperationData = NonNullable<AgentHookInstallerOperationResult['data']>
 export type ExportMcpInstallOperationData = NonNullable<ExportMcpInstallerOperationResult['data']>
 export type AgentHibernationConfigData = { config: AgentHibernationConfig }
@@ -89,6 +92,7 @@ const aiAgentSessionEventNames = new Set<AiAgentSessionEventName>([
   'session_end'
 ])
 const managedAiSessionStates = new Set<ManagedAiSessionState>(['idle', 'working', 'needsInput', 'ended', 'unknown'])
+const managedAiSessionKinds = new Set<ManagedAiSessionKind>(['main', 'subagent', 'internal'])
 const managedAiSessionLifecycles = new Set<ManagedAiSessionLifecycle>(['idle', 'running', 'needsInput', 'ended', 'unknown'])
 const managedAiRequestKinds = new Set<ManagedAiRequestKind>(['permission', 'question', 'plan', 'notification', 'telemetry'])
 const managedAiDecisionModes = new Set<ManagedAiDecisionMode>(['blocking', 'telemetry', 'local'])
@@ -114,6 +118,8 @@ export const isAiAgentSessionEventName = (value: unknown): value is AiAgentSessi
   aiAgentSessionEventNames.has(value as AiAgentSessionEventName)
 
 export const isManagedAiSessionState = (value: unknown): value is ManagedAiSessionState => managedAiSessionStates.has(value as ManagedAiSessionState)
+
+export const isManagedAiSessionKind = (value: unknown): value is ManagedAiSessionKind => managedAiSessionKinds.has(value as ManagedAiSessionKind)
 
 export const isManagedAiSessionLifecycle = (value: unknown): value is ManagedAiSessionLifecycle =>
   managedAiSessionLifecycles.has(value as ManagedAiSessionLifecycle)
@@ -141,6 +147,9 @@ export const isManagedAiSessionTimelineEvent = (value: unknown): value is Manage
   isOptionalField(value, 'gitStatusUpdatedAt', (item) => typeof item === 'number' && Number.isFinite(item)) &&
   isOptionalField(value, 'launchCommand', isNonEmptyString) &&
   isOptionalField(value, 'resumeCommand', isNonEmptyString) &&
+  isOptionalField(value, 'sessionKind', isManagedAiSessionKind) &&
+  isOptionalField(value, 'parentSessionId', isNonEmptyString) &&
+  isOptionalField(value, 'restorable', (item) => typeof item === 'boolean') &&
   isOptionalField(value, 'processId', isPositiveInteger) &&
   isOptionalField(value, 'parentProcessId', isPositiveInteger) &&
   isOptionalField(value, 'processGroupId', isPositiveInteger) &&
@@ -184,6 +193,9 @@ export const isManagedAiSessionRecord = (value: unknown): value is ManagedAiSess
   isOptionalField(value, 'gitStatusUpdatedAt', (item) => typeof item === 'number' && Number.isFinite(item)) &&
   isOptionalField(value, 'launchCommand', isNonEmptyString) &&
   isOptionalField(value, 'resumeCommand', isNonEmptyString) &&
+  isOptionalField(value, 'sessionKind', isManagedAiSessionKind) &&
+  isOptionalField(value, 'parentSessionId', isNonEmptyString) &&
+  isOptionalField(value, 'restorable', (item) => typeof item === 'boolean') &&
   isOptionalField(value, 'processId', isPositiveInteger) &&
   isOptionalField(value, 'parentProcessId', isPositiveInteger) &&
   isOptionalField(value, 'processGroupId', isPositiveInteger) &&
@@ -249,6 +261,12 @@ export const isManagedAiSessionContentSnapshot = (value: unknown): value is Mana
 
 export const isManagedAiSessionContentRecordData = (value: unknown): value is ManagedAiSessionContentRecordData =>
   isRecord(value) && isManagedAiSessionContentRecord(value.record)
+
+export const isManagedAiSessionContentDeleteData = (value: unknown): value is ManagedAiSessionContentDeleteData =>
+  isRecord(value) &&
+  isNonEmptyString(value.recordId) &&
+  isNonEmptyString(value.sourceRevision) &&
+  isOptionalField(value, 'backupPath', (item) => typeof item === 'string')
 
 export const isAgentHookInstallerStatus = (value: unknown): value is AgentHookInstallerStatus =>
   isRecord(value) &&

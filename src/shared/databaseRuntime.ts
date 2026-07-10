@@ -166,7 +166,7 @@ export async function getDatabaseTableDdl(input: DatabaseTableDdlInput): Promise
 
   const connection = databaseCatalogBackendRuntimeContext.findConnection(input.connectionId)
   if (connection?.dbType === 'sqlite' && isRealSqliteConnection(connection)) {
-    return sqliteTableDdl(connection, input)
+    return await sqliteTableDdl(connection, input)
   }
   if (!connection) {
     return { ok: false, errorCode: 'DB_CONNECTION_NOT_FOUND', errorMessage: 'Database connection was not found.' }
@@ -196,7 +196,7 @@ export async function queryDatabaseTable(input: DatabaseTableQueryInput): Promis
 
   const connection = databaseCatalogBackendRuntimeContext.findConnection(input.connectionId)
   if (connection?.dbType === 'sqlite' && isRealSqliteConnection(connection)) {
-    return sqliteQueryTable(connection, input, startedAt)
+    return await sqliteQueryTable(connection, input, startedAt)
   }
   if (!connection) {
     return { ok: false, errorCode: 'DB_CONNECTION_NOT_FOUND', errorMessage: 'Database connection was not found.' }
@@ -229,7 +229,7 @@ export async function planDatabaseTableMutation(input: DatabaseTableMutationPlan
   const connection = databaseCatalogBackendRuntimeContext.findConnection(input.connectionId)
   if (connection?.dbType === 'sqlite' && isRealSqliteConnection(connection)) {
     try {
-      return { ok: true, data: sqliteMutationPlan(connection, input) }
+      return { ok: true, data: await sqliteMutationPlan(connection, input) }
     } catch (error) {
       return {
         ok: false,
@@ -287,7 +287,7 @@ export async function mutateDatabaseTable(input: DatabaseTableMutationInput): Pr
   const startedAt = Date.now()
   const connection = databaseCatalogBackendRuntimeContext.findConnection(input.connectionId)
   if (connection?.dbType === 'sqlite' && isRealSqliteConnection(connection)) {
-    return sqliteMutateTable(connection, input, startedAt)
+    return await sqliteMutateTable(connection, input, startedAt)
   }
   if (!connection) {
     return { ok: false, errorCode: 'DB_CONNECTION_NOT_FOUND', errorMessage: 'Database connection was not found.' }

@@ -84,6 +84,8 @@ import type {
   ManagedAiSessionReplyInput
 } from './managedAiSessions'
 import type {
+  ManagedAiSessionContentDeleteInput,
+  ManagedAiSessionContentDeleteResult,
   ManagedAiSessionContentListInput,
   ManagedAiSessionContentListResult,
   ManagedAiSessionContentRecordInput,
@@ -587,6 +589,7 @@ export type AiopsPreloadApi = {
   listManagedAiSessionContent: (input: ManagedAiSessionContentListInput) => Promise<ManagedAiSessionContentListResult>
   getManagedAiSessionContentRecord: (input: ManagedAiSessionContentRecordInput) => Promise<ManagedAiSessionContentRecordResult>
   updateManagedAiSessionContentRecord: (input: ManagedAiSessionContentUpdateInput) => Promise<ManagedAiSessionContentUpdateResult>
+  deleteManagedAiSessionContentRecord: (input: ManagedAiSessionContentDeleteInput) => Promise<ManagedAiSessionContentDeleteResult>
   listManagedAiNotifications: (input?: ManagedAiNotificationListInput) => Promise<ManagedAiNotificationListResult>
   markManagedAiNotificationRead: (input: ManagedAiNotificationMarkReadInput) => Promise<ManagedAiNotificationMutationResult>
   dismissManagedAiNotification: (input: ManagedAiNotificationDismissInput) => Promise<ManagedAiNotificationMutationResult>

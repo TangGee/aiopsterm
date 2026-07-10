@@ -32,7 +32,7 @@
       <div class="managed-ai-session-content-toolbar">
         <div class="managed-ai-session-record-summary">
           <span>{{ t('aiSessions.content.allRecords') }}</span>
-          <small>{{ records.length }}</small>
+          <small>{{ loadedRecordSummary }}</small>
         </div>
         <label class="managed-ai-session-record-search">
           <Search />
@@ -43,7 +43,11 @@
         </label>
       </div>
 
-      <div class="managed-ai-session-record-list">
+      <div
+        ref="recordListRef"
+        class="managed-ai-session-record-list"
+        @scroll.passive="handleRecordListScroll"
+      >
         <article
           v-for="record in filteredRecords"
           :key="record.recordId"
@@ -84,6 +88,15 @@
                 @click="resetRecord(record)"
               >
                 <RotateCcw />
+              </button>
+              <button
+                type="button"
+                class="danger"
+                :title="t('common.delete')"
+                :disabled="!canDeleteRecord(record)"
+                @click="deleteRecord(record)"
+              >
+                <Trash2 />
               </button>
               <button
                 type="button"
@@ -131,13 +144,13 @@
         </article>
 
         <div
-          v-if="!loading && filteredRecords.length === 0"
+          v-if="!loading && !loadingMore && filteredRecords.length === 0"
           class="managed-ai-session-content-empty"
         >
           {{ t('aiSessions.content.empty') }}
         </div>
         <div
-          v-if="loading"
+          v-if="loading || loadingMore"
           class="managed-ai-session-content-empty"
         >
           {{ t('common.refreshing') }}
@@ -146,7 +159,7 @@
     </main>
 
     <footer class="managed-ai-session-content-status">
-      <span>{{ filteredRecords.length }} / {{ records.length }}</span>
+      <span>{{ loadedRecordSummary }}</span>
       <span
         v-if="saveNotice"
         class="notice"
@@ -223,6 +236,15 @@
               </button>
               <button
                 type="button"
+                class="danger"
+                :disabled="!canDeleteRecord(modalRecord)"
+                @click="deleteRecord(modalRecord)"
+              >
+                <Trash2 />
+                <span>{{ t('common.delete') }}</span>
+              </button>
+              <button
+                type="button"
                 class="primary"
                 :disabled="!canSaveRecord(modalRecord)"
                 @click="saveRecord(modalRecord)"
@@ -239,11 +261,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { ChevronDown, ChevronRight, Maximize2, RefreshCw, RotateCcw, Save, Search, X } from 'lucide-vue-next'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { ChevronDown, ChevronRight, Maximize2, RefreshCw, RotateCcw, Save, Search, Trash2, X } from 'lucide-vue-next'
 import { useI18n } from '@/i18n'
 import { managedAiClient } from '@/services/ai/managedAiClient'
+import { writeRendererRuntimeLog } from '@/services/app/runtimeLogClient'
 import {
+  isManagedAiSessionContentDeleteData,
   isManagedAiSessionContentRecordData,
   isManagedAiSessionContentSnapshot
 } from '@/services/ai/managedAiBackendGuards'
@@ -253,6 +277,16 @@ import type { AiAgentSessionSource } from '@shared/contracts/managedAiSessions'
 import type { Ref } from 'vue'
 
 type RecordDisplayRole = 'user' | 'assistant' | 'system' | 'developer' | 'tool' | 'metadata' | 'event' | 'reasoning' | 'file' | 'record'
+type ContentLoadReason = 'initial' | 'refresh' | 'scroll' | 'fill' | 'search'
+type IdleWindow = Window & {
+  requestIdleCallback?: (callback: () => void, options?: { timeout?: number }) => number
+  cancelIdleCallback?: (handle: number) => void
+}
+
+const initialContentPageSize = 80
+const contentPageSize = 120
+const scrollLoadThresholdPx = 420
+const searchPrefetchTarget = 20
 
 const props = defineProps<{
   source: AiAgentSessionSource
@@ -262,8 +296,10 @@ const props = defineProps<{
 
 const { t } = useI18n()
 const snapshot = ref<ManagedAiSessionContentSnapshot | null>(null)
+const contentRecords = ref<ManagedAiSessionContentRecord[]>([])
 const query = ref('')
 const loading = ref(false)
+const loadingMore = ref(false)
 const error = ref('')
 const saveNotice = ref('')
 const drafts = reactive<Record<string, string>>({})
@@ -272,11 +308,19 @@ const fullRecords = reactive<Record<string, ManagedAiSessionContentRecord>>({})
 const expandedRecordIds = ref<Set<string>>(new Set())
 const loadingRecordIds = ref<Set<string>>(new Set())
 const savingRecordIds = ref<Set<string>>(new Set())
+const deletingRecordIds = ref<Set<string>>(new Set())
 const activeRecordId = ref('')
+const contentExhausted = ref(false)
+const recordListRef = ref<HTMLElement | null>(null)
+let contentLoadSeq = 0
+let idleLoadHandle: number | null = null
+let scrollFrameHandle: number | null = null
 
 const sourceLabel = computed(() => managedAiSourceLabel(props.source))
 const panelTitle = computed(() => props.panelTitle || `${sourceLabel.value} ${props.sessionId.slice(0, 8)}`)
-const records = computed(() => snapshot.value?.records || [])
+const records = computed(() => contentRecords.value)
+const recordsTotal = computed(() => snapshot.value?.total ?? records.value.length)
+const hasMoreRecords = computed(() => !contentExhausted.value && records.value.length < recordsTotal.value)
 const modalRecord = computed(() => records.value.find((record) => record.recordId === activeRecordId.value) || null)
 
 const normalizeRecordText = (record: ManagedAiSessionContentRecord) =>
@@ -300,6 +344,14 @@ const filteredRecords = computed(() => {
       String(value || '').toLowerCase().includes(text)
     )
   })
+})
+
+const loadedRecordSummary = computed(() => {
+  const total = recordsTotal.value
+  const loaded = records.value.length
+  const visible = filteredRecords.value.length
+  if (query.value.trim()) return total > loaded ? `${visible} / ${loaded} / ${total}` : `${visible} / ${loaded}`
+  return total > loaded ? `${loaded} / ${total}` : String(total)
 })
 
 const toolRecordKind = (record: ManagedAiSessionContentRecord): 'call' | 'result' | '' => {
@@ -375,6 +427,10 @@ const canSaveRecord = (record: ManagedAiSessionContentRecord) => {
   const current = recordFor(record)
   return Boolean(current.editable && !current.contentTruncated && isRecordDirty(record) && !savingRecordIds.value.has(record.recordId))
 }
+const canDeleteRecord = (record: ManagedAiSessionContentRecord) => {
+  const current = recordFor(record)
+  return Boolean(current.editable && !deletingRecordIds.value.has(record.recordId) && !savingRecordIds.value.has(record.recordId))
+}
 
 const collapsedPreview = (content: string) => {
   const preview = content.split('\n').filter(Boolean).slice(0, 2).join('\n') || content
@@ -384,6 +440,39 @@ const collapsedPreview = (content: string) => {
 const formatCharCount = (count: number) => {
   if (count >= 1000) return `${(count / 1000).toFixed(1)}k`
   return String(count)
+}
+
+const perfNow = () => (typeof performance !== 'undefined' ? performance.now() : Date.now())
+const roundedDuration = (startedAt: number) => Math.max(0, Math.round(perfNow() - startedAt))
+
+const scheduleIdleTask = (callback: () => void) => {
+  const idleWindow = window as IdleWindow
+  if (idleWindow.requestIdleCallback) return idleWindow.requestIdleCallback(callback, { timeout: 240 })
+  return window.setTimeout(callback, 32)
+}
+
+const cancelIdleLoad = () => {
+  if (idleLoadHandle === null) return
+  const idleWindow = window as IdleWindow
+  if (idleWindow.cancelIdleCallback) idleWindow.cancelIdleCallback(idleLoadHandle)
+  else window.clearTimeout(idleLoadHandle)
+  idleLoadHandle = null
+}
+
+const cancelScrollFrame = () => {
+  if (scrollFrameHandle === null) return
+  window.cancelAnimationFrame(scrollFrameHandle)
+  scrollFrameHandle = null
+}
+
+const mergeContentRecords = (existing: ManagedAiSessionContentRecord[], incoming: ManagedAiSessionContentRecord[]) => {
+  const seen = new Set(existing.map((record) => record.recordId))
+  const uniqueIncoming = incoming.filter((record) => {
+    if (seen.has(record.recordId)) return false
+    seen.add(record.recordId)
+    return true
+  })
+  return [...existing, ...uniqueIncoming]
 }
 
 const syncDraftsFromRecords = (nextRecords: ManagedAiSessionContentRecord[]) => {
@@ -412,12 +501,18 @@ const syncDraftsFromRecords = (nextRecords: ManagedAiSessionContentRecord[]) => 
 }
 
 const clearRecordState = () => {
+  contentLoadSeq += 1
+  cancelIdleLoad()
+  cancelScrollFrame()
+  contentRecords.value = []
+  contentExhausted.value = false
   Object.keys(drafts).forEach((id) => delete drafts[id])
   Object.keys(originals).forEach((id) => delete originals[id])
   Object.keys(fullRecords).forEach((id) => delete fullRecords[id])
   expandedRecordIds.value = new Set()
   loadingRecordIds.value = new Set()
   savingRecordIds.value = new Set()
+  deletingRecordIds.value = new Set()
   activeRecordId.value = ''
 }
 
@@ -476,38 +571,174 @@ const resetRecord = (record: ManagedAiSessionContentRecord) => {
   drafts[record.recordId] = originals[record.recordId] ?? recordFor(record).content
 }
 
-const loadContent = async () => {
+const removeRecordFromLocalState = (recordId: string) => {
+  contentRecords.value = contentRecords.value.filter((record) => record.recordId !== recordId)
+  delete drafts[recordId]
+  delete originals[recordId]
+  delete fullRecords[recordId]
+  setSetMembership(expandedRecordIds, recordId, false)
+  if (activeRecordId.value === recordId) activeRecordId.value = ''
+  if (!snapshot.value) return
+  snapshot.value = {
+    ...snapshot.value,
+    total: Math.max(0, snapshot.value.total - 1),
+    limit: contentRecords.value.length,
+    records: contentRecords.value
+  }
+}
+
+const shouldLoadMoreForViewport = () => {
+  const element = recordListRef.value
+  if (!element) return false
+  return element.scrollHeight - element.scrollTop - element.clientHeight <= scrollLoadThresholdPx
+}
+
+const maybeScheduleMoreRecords = (reason: ContentLoadReason) => {
+  if (!hasMoreRecords.value || loading.value || loadingMore.value) return
+  cancelIdleLoad()
+  idleLoadHandle = scheduleIdleTask(() => {
+    idleLoadHandle = null
+    if (!hasMoreRecords.value || loading.value || loadingMore.value) return
+    if (reason === 'fill' && !shouldLoadMoreForViewport()) return
+    if (reason === 'search' && (!query.value.trim() || filteredRecords.value.length >= searchPrefetchTarget)) return
+    void loadContentPage(reason)
+  })
+}
+
+const afterContentPageRendered = () => {
+  if (query.value.trim()) {
+    if (filteredRecords.value.length < searchPrefetchTarget) maybeScheduleMoreRecords('search')
+    return
+  }
+  maybeScheduleMoreRecords('fill')
+}
+
+const handleRecordListScroll = () => {
+  if (scrollFrameHandle !== null) return
+  scrollFrameHandle = window.requestAnimationFrame(() => {
+    scrollFrameHandle = null
+    if (shouldLoadMoreForViewport()) void loadContentPage('scroll')
+  })
+}
+
+const loadContentPage = async (reason: ContentLoadReason, reset = false) => {
   const listContent = managedAiClient.listManagedAiSessionContent()
   if (!listContent) {
     error.value = t('aiSessions.notice.serviceUnavailable')
-    return
+    return false
   }
-  loading.value = true
+  if (!reset && (loading.value || loadingMore.value)) return false
+  const seq = reset ? ++contentLoadSeq : contentLoadSeq
+  const startedAt = perfNow()
+  let apiDurationMs = 0
+  let logLevel: 'info' | 'warn' = 'info'
+  let logEvent = 'renderer.managed-ai-content.load'
+  let shouldLog = true
+  const offset = reset ? 0 : records.value.length
+  const limit = reset ? initialContentPageSize : contentPageSize
+  const logFields: Record<string, unknown> = {
+    source: props.source,
+    sessionId: props.sessionId,
+    reason,
+    offset,
+    limit
+  }
+  if (reset) {
+    cancelIdleLoad()
+    snapshot.value = null
+    contentRecords.value = []
+    contentExhausted.value = false
+    loading.value = true
+    loadingMore.value = false
+  } else {
+    loadingMore.value = true
+  }
   error.value = ''
   saveNotice.value = ''
   try {
     const result = await listContent({
       source: props.source,
       sessionId: props.sessionId,
-      limit: 500,
+      offset,
+      limit,
       maxContentChars: 1600
     })
-    if (!result?.ok || !isManagedAiSessionContentSnapshot(result.data)) {
-      error.value = result?.errorMessage || t('aiSessions.content.loadFailed')
-      return
+    apiDurationMs = roundedDuration(startedAt)
+    if (seq !== contentLoadSeq) {
+      shouldLog = false
+      return false
     }
-    snapshot.value = result.data
-    syncDraftsFromRecords(result.data.records)
+    if (!result?.ok || !isManagedAiSessionContentSnapshot(result.data)) {
+      logLevel = 'warn'
+      logEvent = 'renderer.managed-ai-content.load.failed'
+      logFields.errorCode = result?.errorCode
+      logFields.errorMessage = result?.errorMessage || t('aiSessions.content.loadFailed')
+      error.value = result?.errorMessage || t('aiSessions.content.loadFailed')
+      return false
+    }
+    const nextRecords = reset
+      ? result.data.records
+      : mergeContentRecords(contentRecords.value, result.data.records)
+    contentRecords.value = nextRecords
+    contentExhausted.value = result.data.records.length === 0 || nextRecords.length >= result.data.total
+    snapshot.value = {
+      ...result.data,
+      offset: 0,
+      limit: nextRecords.length,
+      records: nextRecords
+    }
+    syncDraftsFromRecords(nextRecords)
+    logFields.format = result.data.format
+    logFields.records = result.data.records.length
+    logFields.total = result.data.total
+    logFields.loadedRecords = nextRecords.length
+    logFields.hasMore = !contentExhausted.value
+    void nextTick().then(afterContentPageRendered)
+    return true
   } catch (err) {
+    if (seq !== contentLoadSeq) {
+      shouldLog = false
+      return false
+    }
+    apiDurationMs = apiDurationMs || roundedDuration(startedAt)
+    logLevel = 'warn'
+    logEvent = 'renderer.managed-ai-content.load.failed'
+    logFields.errorMessage = err instanceof Error ? err.message : t('aiSessions.content.loadFailed')
     error.value = err instanceof Error ? err.message : t('aiSessions.content.loadFailed')
+    return false
   } finally {
-    loading.value = false
+    if (seq === contentLoadSeq) {
+      if (reset) loading.value = false
+      else loadingMore.value = false
+    }
+    if (!shouldLog || seq !== contentLoadSeq) return
+    const renderTickStartedAt = perfNow()
+    void nextTick().then(() => {
+      writeRendererRuntimeLog(logLevel, logEvent, {
+        ...logFields,
+        apiDurationMs,
+        durationMs: roundedDuration(startedAt),
+        renderSettleMs: roundedDuration(renderTickStartedAt)
+      })
+    })
   }
+}
+
+const loadContent = (reason: ContentLoadReason = 'initial') => loadContentPage(reason, true)
+
+const reloadContentThroughRecordCount = async (minimumRecords: number, reason: ContentLoadReason) => {
+  const reloaded = await loadContentPage(reason, true)
+  if (!reloaded) return false
+  while (hasMoreRecords.value && records.value.length < minimumRecords) {
+    const loadedMore = await loadContentPage('fill')
+    if (!loadedMore) return false
+  }
+  return true
 }
 
 const refreshContent = () => {
   if (!confirmDiscardChanges()) return
-  void loadContent()
+  void loadContent('refresh')
 }
 
 const saveRecord = async (record: ManagedAiSessionContentRecord) => {
@@ -519,6 +750,9 @@ const saveRecord = async (record: ManagedAiSessionContentRecord) => {
     error.value = t('aiSessions.notice.serviceUnavailable')
     return
   }
+  const savedRecordId = record.recordId
+  const minimumRecordsAfterSave = Math.max(records.value.length, initialContentPageSize)
+  const previousScrollTop = recordListRef.value?.scrollTop ?? 0
   setSetMembership(savingRecordIds, record.recordId, true)
   error.value = ''
   saveNotice.value = ''
@@ -534,16 +768,69 @@ const saveRecord = async (record: ManagedAiSessionContentRecord) => {
       error.value = result?.errorMessage || t('aiSessions.content.saveFailed')
       return
     }
-    fullRecords[record.recordId] = result.data.record
-    drafts[record.recordId] = result.data.record.content
-    originals[record.recordId] = result.data.record.content
-    setSetMembership(expandedRecordIds, record.recordId, true)
-    await loadContent()
+    const savedRecord = result.data.record
+    fullRecords[savedRecordId] = savedRecord
+    drafts[savedRecordId] = savedRecord.content
+    originals[savedRecordId] = savedRecord.content
+    setSetMembership(expandedRecordIds, savedRecordId, true)
+    if (!(await reloadContentThroughRecordCount(minimumRecordsAfterSave, 'refresh'))) return
+    const refreshedRecord = records.value.find((item) => item.recordId === savedRecordId)
+    if (!refreshedRecord || refreshedRecord.sourceRevision === savedRecord.sourceRevision) {
+      fullRecords[savedRecordId] = savedRecord
+      drafts[savedRecordId] = savedRecord.content
+      originals[savedRecordId] = savedRecord.content
+    }
+    await nextTick()
+    const recordList = recordListRef.value
+    if (recordList) {
+      recordList.scrollTop = Math.min(previousScrollTop, Math.max(0, recordList.scrollHeight - recordList.clientHeight))
+    }
     saveNotice.value = t('aiSessions.content.saved')
   } catch (err) {
     error.value = err instanceof Error ? err.message : t('aiSessions.content.saveFailed')
   } finally {
     setSetMembership(savingRecordIds, record.recordId, false)
+  }
+}
+
+const deleteRecord = async (record: ManagedAiSessionContentRecord) => {
+  const current = recordFor(record)
+  if (!canDeleteRecord(record)) return
+  if (!window.confirm(t('aiSessions.content.deleteConfirm'))) return
+  const deleteContentRecord = managedAiClient.deleteManagedAiSessionContentRecord()
+  if (!deleteContentRecord) {
+    error.value = t('aiSessions.notice.serviceUnavailable')
+    return
+  }
+  const deletedRecordId = record.recordId
+  const minimumRecordsAfterDelete = Math.max(records.value.length - 1, initialContentPageSize)
+  const previousScrollTop = recordListRef.value?.scrollTop ?? 0
+  setSetMembership(deletingRecordIds, deletedRecordId, true)
+  error.value = ''
+  saveNotice.value = ''
+  try {
+    const result = await deleteContentRecord({
+      source: props.source,
+      sessionId: props.sessionId,
+      recordId: deletedRecordId,
+      sourceRevision: current.sourceRevision
+    })
+    if (!result?.ok || !isManagedAiSessionContentDeleteData(result.data)) {
+      error.value = result?.errorMessage || t('aiSessions.content.deleteFailed')
+      return
+    }
+    removeRecordFromLocalState(deletedRecordId)
+    if (!(await reloadContentThroughRecordCount(minimumRecordsAfterDelete, 'refresh'))) return
+    await nextTick()
+    const recordList = recordListRef.value
+    if (recordList) {
+      recordList.scrollTop = Math.min(previousScrollTop, Math.max(0, recordList.scrollHeight - recordList.clientHeight))
+    }
+    saveNotice.value = t('aiSessions.content.deleted')
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : t('aiSessions.content.deleteFailed')
+  } finally {
+    setSetMembership(deletingRecordIds, deletedRecordId, false)
   }
 }
 
@@ -556,7 +843,20 @@ watch(
   }
 )
 
+watch(query, () => {
+  cancelIdleLoad()
+  if (query.value.trim() && hasMoreRecords.value && filteredRecords.value.length < searchPrefetchTarget) {
+    maybeScheduleMoreRecords('search')
+  }
+})
+
 onMounted(() => {
   void loadContent()
+})
+
+onBeforeUnmount(() => {
+  contentLoadSeq += 1
+  cancelIdleLoad()
+  cancelScrollFrame()
 })
 </script>

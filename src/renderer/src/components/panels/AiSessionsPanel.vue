@@ -78,7 +78,7 @@
           @click="locateContextSession"
         >
           <LocateFixed />
-          <span>{{ contextMenuSession && contextMenuSession.state !== 'working' && contextMenuSession.resumeCommand ? t('aiSessions.resume') : t('aiSessions.locateTerminal') }}</span>
+          <span>{{ contextMenuSession && canResumeSession(contextMenuSession) ? t('aiSessions.resume') : t('aiSessions.locateTerminal') }}</span>
         </button>
         <button
           v-if="contextMenuSession?.state === 'needsInput'"
@@ -152,13 +152,22 @@
           >
             <Bot />
           </button>
+          <button
+            type="button"
+            :class="{ active: libraryGrouping === 'time' }"
+            :title="t('aiSessions.groupByTime')"
+            :aria-label="t('aiSessions.groupByTime')"
+            @click="selectLibraryGrouping('time')"
+          >
+            <List />
+          </button>
         </span>
       </div>
       <div
         ref="sessionListElement"
         class="ai-sessions-list"
       >
-        <template v-if="mode === 'running'">
+        <template v-if="mode === 'running' && libraryGrouping !== 'time'">
           <section
             v-for="section in runningSections"
             :key="section.key"
@@ -177,51 +186,193 @@
                 <Bot v-else />
                 <strong>{{ section.label }}</strong>
               </span>
-              <small>{{ section.count }}</small>
+              <small class="ai-session-library-section-count">
+                <span
+                  v-if="section.pendingCount"
+                  class="ai-session-library-state"
+                  :title="t('aiSessions.filter.needsInput')"
+                ></span>
+                <span
+                  v-else-if="section.runningCount"
+                  class="ai-session-library-state dot-working"
+                  :title="t('aiSessions.filter.working')"
+                ></span>
+                <span>{{ section.count }}</span>
+                <span
+                  v-if="section.childCount"
+                  class="ai-session-library-child-count"
+                  :title="t('aiSessions.childGroupCount', { count: section.childCount })"
+                >
+                  <GitBranch />
+                  {{ section.childCount }}
+                </span>
+              </small>
             </button>
             <template v-if="!isLibrarySectionCollapsed(section.key)">
-              <div
-                v-for="session in section.sessions"
-                :key="`${session.source}:${session.id}`"
-                class="ai-session-row library"
-                role="button"
-                tabindex="0"
-                :title="sessionRowTooltip(session)"
-                :class="{ active: sessionKey(session) === workspace.selectedManagedAiSessionKey, attention: session.state === 'needsInput' }"
-                @click="selectSession(session)"
-                @dblclick="resumeOrFocusSession(session)"
-                @contextmenu.prevent="openSessionContextMenu(session, $event)"
-                @keydown.enter.prevent="selectSession(session)"
-                @keydown.space.prevent="selectSession(session)"
+              <template
+                v-for="rows in [sessionRows(section.sessions)]"
+                :key="`${section.key}:rows`"
               >
-                <span class="ai-session-row-side">
-                  <span :class="`ai-session-state dot-${sessionDotState(session)}`"></span>
-                  <button
-                    v-if="session.state === 'needsInput'"
-                    type="button"
-                    class="ai-session-handle"
-                    :title="t('aiSessions.markHandled')"
-                    :aria-label="t('aiSessions.markHandled')"
-                    @click.stop="workspace.markManagedAiSessionHandled(session.source, session.id)"
+                <template
+                  v-for="row in rows.rows"
+                  :key="row.key"
+                >
+                  <div
+                    class="ai-session-row library"
+                    role="button"
+                    tabindex="0"
+                    :title="sessionRowTooltip(row.session)"
+                    :class="{ active: sessionKey(row.session) === workspace.selectedManagedAiSessionKey, attention: row.session.state === 'needsInput' }"
+                    @click="selectSession(row.session)"
+                    @dblclick="resumeOrFocusSession(row.session)"
+                    @contextmenu.prevent="openSessionContextMenu(row.session, $event)"
+                    @keydown.enter.prevent="selectSession(row.session)"
+                    @keydown.space.prevent="selectSession(row.session)"
                   >
-                    <Check />
+                    <span class="ai-session-row-side">
+                      <span :class="`ai-session-state dot-${sessionDotState(row.session)}`"></span>
+                      <button
+                        v-if="row.session.state === 'needsInput'"
+                        type="button"
+                        class="ai-session-handle"
+                        :title="t('aiSessions.markHandled')"
+                        :aria-label="t('aiSessions.markHandled')"
+                        @click.stop="workspace.markManagedAiSessionHandled(row.session.source, row.session.id)"
+                      >
+                        <Check />
+                      </button>
+                    </span>
+                    <span class="ai-session-row-body">
+                      <span class="ai-session-row-title">
+                        {{ sessionRowTitle(row.session) }}
+                        <span
+                          v-if="row.childSessions.length"
+                          class="ai-session-row-child-count"
+                          :title="t('aiSessions.childGroupCount', { count: row.childSessions.length })"
+                        >
+                          <GitBranch />
+                          {{ row.childSessions.length }}
+                        </span>
+                      </span>
+                      <span
+                        v-if="sessionRowDetail(row.session)"
+                        class="ai-session-row-detail"
+                      >{{ sessionRowDetail(row.session) }}</span>
+                      <span class="ai-session-row-meta">
+                        <span class="ai-session-row-meta-main">{{ adaptiveSessionRowMeta(row.session) }}</span>
+                      </span>
+                    </span>
+                  </div>
+                  <div
+                    v-if="row.childSessions.length"
+                    class="ai-session-child-branch"
+                    :class="{ expanded: isChildGroupExpanded(childGroupKey(row.session)) }"
+                  >
+                    <button
+                      type="button"
+                      class="ai-session-child-group-header"
+                      :aria-expanded="isChildGroupExpanded(childGroupKey(row.session))"
+                      @click="toggleChildGroup(childGroupKey(row.session))"
+                    >
+                      <span>
+                        <ChevronDown class="ai-session-child-chevron" />
+                        <GitBranch />
+                        <strong>{{ t('aiSessions.childGroup') }}</strong>
+                      </span>
+                      <small>{{ row.childSessions.length }}</small>
+                    </button>
+                    <template v-if="isChildGroupExpanded(childGroupKey(row.session))">
+                      <div
+                        v-for="session in row.childSessions"
+                        :key="`${session.source}:${session.id}`"
+                        class="ai-session-row library child"
+                        role="button"
+                        tabindex="0"
+                        :title="childSessionRowTooltip(session)"
+                        :class="{ active: sessionKey(session) === workspace.selectedManagedAiSessionKey }"
+                        @click="selectSession(session)"
+                        @dblclick="resumeOrFocusSession(session)"
+                        @contextmenu.prevent="openSessionContextMenu(session, $event)"
+                        @keydown.enter.prevent="selectSession(session)"
+                        @keydown.space.prevent="selectSession(session)"
+                      >
+                        <span class="ai-session-row-child-rail">
+                          <GitBranch />
+                        </span>
+                        <span class="ai-session-row-body">
+                          <span class="ai-session-row-title">
+                            {{ sessionRowTitle(session) }}
+                            <span class="ai-session-row-kind">{{ sessionKindLabel(session) }}</span>
+                          </span>
+                          <span
+                            v-if="sessionRowDetail(session)"
+                            class="ai-session-row-detail"
+                          >{{ sessionRowDetail(session) }}</span>
+                          <span class="ai-session-row-meta">
+                            <span class="ai-session-row-meta-main">{{ childSessionRowMeta(session) }}</span>
+                          </span>
+                        </span>
+                      </div>
+                    </template>
+                  </div>
+                </template>
+                <div
+                  v-if="rows.orphanChildSessions.length"
+                  class="ai-session-child-branch orphan"
+                  :class="{ expanded: isChildGroupExpanded(sectionOrphanChildGroupKey(section.key)) }"
+                >
+                  <button
+                    type="button"
+                    class="ai-session-child-group-header"
+                    :aria-expanded="isChildGroupExpanded(sectionOrphanChildGroupKey(section.key))"
+                    @click="toggleChildGroup(sectionOrphanChildGroupKey(section.key))"
+                  >
+                    <span>
+                      <ChevronDown class="ai-session-child-chevron" />
+                      <GitBranch />
+                      <strong>{{ t('aiSessions.orphanChildGroup') }}</strong>
+                    </span>
+                    <small>{{ rows.orphanChildSessions.length }}</small>
                   </button>
-                </span>
-                <span class="ai-session-row-body">
-                  <span class="ai-session-row-title">{{ sessionRowTitle(session) }}</span>
-                  <span
-                    v-if="sessionRowDetail(session)"
-                    class="ai-session-row-detail"
-                  >{{ sessionRowDetail(session) }}</span>
-                  <span class="ai-session-row-meta">
-                    <span class="ai-session-row-meta-main">{{ adaptiveSessionRowMeta(session) }}</span>
-                  </span>
-                </span>
-              </div>
+                  <template v-if="isChildGroupExpanded(sectionOrphanChildGroupKey(section.key))">
+                    <div
+                      v-for="session in rows.orphanChildSessions"
+                      :key="`${session.source}:${session.id}`"
+                      class="ai-session-row library child"
+                      role="button"
+                      tabindex="0"
+                      :title="childSessionRowTooltip(session)"
+                      :class="{ active: sessionKey(session) === workspace.selectedManagedAiSessionKey }"
+                      @click="selectSession(session)"
+                      @dblclick="resumeOrFocusSession(session)"
+                      @contextmenu.prevent="openSessionContextMenu(session, $event)"
+                      @keydown.enter.prevent="selectSession(session)"
+                      @keydown.space.prevent="selectSession(session)"
+                    >
+                      <span class="ai-session-row-child-rail">
+                        <GitBranch />
+                      </span>
+                      <span class="ai-session-row-body">
+                        <span class="ai-session-row-title">
+                          {{ sessionRowTitle(session) }}
+                          <span class="ai-session-row-kind">{{ sessionKindLabel(session) }}</span>
+                        </span>
+                        <span
+                          v-if="sessionRowDetail(session)"
+                          class="ai-session-row-detail"
+                        >{{ sessionRowDetail(session) }}</span>
+                        <span class="ai-session-row-meta">
+                          <span class="ai-session-row-meta-main">{{ childSessionRowMeta(session) }}</span>
+                        </span>
+                      </span>
+                    </div>
+                  </template>
+                </div>
+              </template>
             </template>
           </section>
         </template>
-        <template v-else-if="mode === 'library'">
+        <template v-else-if="mode === 'library' && libraryGrouping !== 'time'">
           <section
             v-for="section in librarySections"
             :key="section.key"
@@ -240,89 +391,353 @@
                 <Bot v-else />
                 <strong>{{ section.label }}</strong>
               </span>
-              <small>{{ section.count }}</small>
+              <small class="ai-session-library-section-count">
+                <span
+                  v-if="section.pendingCount"
+                  class="ai-session-library-state"
+                  :title="t('aiSessions.filter.needsInput')"
+                ></span>
+                <span
+                  v-else-if="section.runningCount"
+                  class="ai-session-library-state dot-working"
+                  :title="t('aiSessions.filter.working')"
+                ></span>
+                <span>{{ section.count }}</span>
+                <span
+                  v-if="section.childCount"
+                  class="ai-session-library-child-count"
+                  :title="t('aiSessions.childGroupCount', { count: section.childCount })"
+                >
+                  <GitBranch />
+                  {{ section.childCount }}
+                </span>
+              </small>
             </button>
             <template v-if="!isLibrarySectionCollapsed(section.key)">
+              <template
+                v-for="rows in [sessionRows(section.sessions)]"
+                :key="`${section.key}:rows`"
+              >
+                <template
+                  v-for="row in rows.rows"
+                  :key="row.key"
+                >
+                  <div
+                    class="ai-session-row library"
+                    role="button"
+                    tabindex="0"
+                    :title="sessionRowTooltip(row.session)"
+                    :class="{ active: sessionKey(row.session) === workspace.selectedManagedAiSessionKey, attention: row.session.state === 'needsInput' }"
+                    @click="selectSession(row.session)"
+                    @dblclick="resumeOrFocusSession(row.session)"
+                    @contextmenu.prevent="openSessionContextMenu(row.session, $event)"
+                    @keydown.enter.prevent="selectSession(row.session)"
+                    @keydown.space.prevent="selectSession(row.session)"
+                  >
+                    <span class="ai-session-row-side">
+                      <span :class="`ai-session-state dot-${sessionDotState(row.session)}`"></span>
+                      <button
+                        v-if="row.session.state === 'needsInput'"
+                        type="button"
+                        class="ai-session-handle"
+                        :title="t('aiSessions.markHandled')"
+                        :aria-label="t('aiSessions.markHandled')"
+                        @click.stop="workspace.markManagedAiSessionHandled(row.session.source, row.session.id)"
+                      >
+                        <Check />
+                      </button>
+                    </span>
+                    <span class="ai-session-row-body">
+                      <span class="ai-session-row-title">
+                        {{ sessionRowTitle(row.session) }}
+                        <span
+                          v-if="row.childSessions.length"
+                          class="ai-session-row-child-count"
+                          :title="t('aiSessions.childGroupCount', { count: row.childSessions.length })"
+                        >
+                          <GitBranch />
+                          {{ row.childSessions.length }}
+                        </span>
+                      </span>
+                      <span
+                        v-if="sessionRowDetail(row.session)"
+                        class="ai-session-row-detail"
+                      >{{ sessionRowDetail(row.session) }}</span>
+                      <span class="ai-session-row-meta">
+                        <span class="ai-session-row-meta-main">{{ adaptiveSessionRowMeta(row.session) }}</span>
+                      </span>
+                    </span>
+                  </div>
+                  <div
+                    v-if="row.childSessions.length"
+                    class="ai-session-child-branch"
+                    :class="{ expanded: isChildGroupExpanded(childGroupKey(row.session)) }"
+                  >
+                    <button
+                      type="button"
+                      class="ai-session-child-group-header"
+                      :aria-expanded="isChildGroupExpanded(childGroupKey(row.session))"
+                      @click="toggleChildGroup(childGroupKey(row.session))"
+                    >
+                      <span>
+                        <ChevronDown class="ai-session-child-chevron" />
+                        <GitBranch />
+                        <strong>{{ t('aiSessions.childGroup') }}</strong>
+                      </span>
+                      <small>{{ row.childSessions.length }}</small>
+                    </button>
+                    <template v-if="isChildGroupExpanded(childGroupKey(row.session))">
+                      <div
+                        v-for="session in row.childSessions"
+                        :key="`${session.source}:${session.id}`"
+                        class="ai-session-row library child"
+                        role="button"
+                        tabindex="0"
+                        :title="childSessionRowTooltip(session)"
+                        :class="{ active: sessionKey(session) === workspace.selectedManagedAiSessionKey }"
+                        @click="selectSession(session)"
+                        @dblclick="resumeOrFocusSession(session)"
+                        @contextmenu.prevent="openSessionContextMenu(session, $event)"
+                        @keydown.enter.prevent="selectSession(session)"
+                        @keydown.space.prevent="selectSession(session)"
+                      >
+                        <span class="ai-session-row-child-rail">
+                          <GitBranch />
+                        </span>
+                        <span class="ai-session-row-body">
+                          <span class="ai-session-row-title">
+                            {{ sessionRowTitle(session) }}
+                            <span class="ai-session-row-kind">{{ sessionKindLabel(session) }}</span>
+                          </span>
+                          <span
+                            v-if="sessionRowDetail(session)"
+                            class="ai-session-row-detail"
+                          >{{ sessionRowDetail(session) }}</span>
+                          <span class="ai-session-row-meta">
+                            <span class="ai-session-row-meta-main">{{ childSessionRowMeta(session) }}</span>
+                          </span>
+                        </span>
+                      </div>
+                    </template>
+                  </div>
+                </template>
+                <div
+                  v-if="rows.orphanChildSessions.length"
+                  class="ai-session-child-branch orphan"
+                  :class="{ expanded: isChildGroupExpanded(sectionOrphanChildGroupKey(section.key)) }"
+                >
+                  <button
+                    type="button"
+                    class="ai-session-child-group-header"
+                    :aria-expanded="isChildGroupExpanded(sectionOrphanChildGroupKey(section.key))"
+                    @click="toggleChildGroup(sectionOrphanChildGroupKey(section.key))"
+                  >
+                    <span>
+                      <ChevronDown class="ai-session-child-chevron" />
+                      <GitBranch />
+                      <strong>{{ t('aiSessions.orphanChildGroup') }}</strong>
+                    </span>
+                    <small>{{ rows.orphanChildSessions.length }}</small>
+                  </button>
+                  <template v-if="isChildGroupExpanded(sectionOrphanChildGroupKey(section.key))">
+                    <div
+                      v-for="session in rows.orphanChildSessions"
+                      :key="`${session.source}:${session.id}`"
+                      class="ai-session-row library child"
+                      role="button"
+                      tabindex="0"
+                      :title="childSessionRowTooltip(session)"
+                      :class="{ active: sessionKey(session) === workspace.selectedManagedAiSessionKey }"
+                      @click="selectSession(session)"
+                      @dblclick="resumeOrFocusSession(session)"
+                      @contextmenu.prevent="openSessionContextMenu(session, $event)"
+                      @keydown.enter.prevent="selectSession(session)"
+                      @keydown.space.prevent="selectSession(session)"
+                    >
+                      <span class="ai-session-row-child-rail">
+                        <GitBranch />
+                      </span>
+                      <span class="ai-session-row-body">
+                        <span class="ai-session-row-title">
+                          {{ sessionRowTitle(session) }}
+                          <span class="ai-session-row-kind">{{ sessionKindLabel(session) }}</span>
+                        </span>
+                        <span
+                          v-if="sessionRowDetail(session)"
+                          class="ai-session-row-detail"
+                        >{{ sessionRowDetail(session) }}</span>
+                        <span class="ai-session-row-meta">
+                          <span class="ai-session-row-meta-main">{{ childSessionRowMeta(session) }}</span>
+                        </span>
+                      </span>
+                    </div>
+                  </template>
+                </div>
+              </template>
+            </template>
+          </section>
+        </template>
+        <template v-else>
+          <template
+            v-for="rows in [sessionRows(visibleSessions)]"
+            :key="`flat:${mode}:rows`"
+          >
+            <template
+              v-for="row in rows.rows"
+              :key="row.key"
+            >
               <div
-                v-for="session in section.sessions"
-                :key="`${session.source}:${session.id}`"
-                class="ai-session-row library"
+                class="ai-session-row"
                 role="button"
                 tabindex="0"
-                :title="sessionRowTooltip(session)"
-                :class="{ active: sessionKey(session) === workspace.selectedManagedAiSessionKey, attention: session.state === 'needsInput' }"
-                @click="selectSession(session)"
-                @dblclick="resumeOrFocusSession(session)"
-                @contextmenu.prevent="openSessionContextMenu(session, $event)"
-                @keydown.enter.prevent="selectSession(session)"
-                @keydown.space.prevent="selectSession(session)"
+                :title="sessionRowTooltip(row.session)"
+                :class="{ active: sessionKey(row.session) === workspace.selectedManagedAiSessionKey, attention: row.session.state === 'needsInput' }"
+                @click="selectSession(row.session)"
+                @dblclick="resumeOrFocusSession(row.session)"
+                @contextmenu.prevent="openSessionContextMenu(row.session, $event)"
+                @keydown.enter.prevent="selectSession(row.session)"
+                @keydown.space.prevent="selectSession(row.session)"
               >
                 <span class="ai-session-row-side">
-                  <span :class="`ai-session-state dot-${sessionDotState(session)}`"></span>
+                  <span :class="`ai-session-state dot-${sessionDotState(row.session)}`"></span>
                   <button
-                    v-if="session.state === 'needsInput'"
+                    v-if="row.session.state === 'needsInput'"
                     type="button"
                     class="ai-session-handle"
                     :title="t('aiSessions.markHandled')"
                     :aria-label="t('aiSessions.markHandled')"
-                    @click.stop="workspace.markManagedAiSessionHandled(session.source, session.id)"
+                    @click.stop="workspace.markManagedAiSessionHandled(row.session.source, row.session.id)"
                   >
                     <Check />
                   </button>
                 </span>
                 <span class="ai-session-row-body">
-                  <span class="ai-session-row-title">{{ sessionRowTitle(session) }}</span>
+                  <span class="ai-session-row-title">
+                    {{ sessionRowTitle(row.session) }}
+                    <span
+                      v-if="row.childSessions.length"
+                      class="ai-session-row-child-count"
+                      :title="t('aiSessions.childGroupCount', { count: row.childSessions.length })"
+                    >
+                      <GitBranch />
+                      {{ row.childSessions.length }}
+                    </span>
+                  </span>
                   <span
-                    v-if="sessionRowDetail(session)"
+                    v-if="sessionRowDetail(row.session)"
                     class="ai-session-row-detail"
-                  >{{ sessionRowDetail(session) }}</span>
+                  >{{ sessionRowDetail(row.session) }}</span>
                   <span class="ai-session-row-meta">
-                    <span class="ai-session-row-meta-main">{{ adaptiveSessionRowMeta(session) }}</span>
+                    <span class="ai-session-row-meta-main">{{ adaptiveSessionRowMeta(row.session) }}</span>
                   </span>
                 </span>
               </div>
-            </template>
-          </section>
-        </template>
-        <template v-else>
-          <div
-            v-for="session in visibleSessions"
-            :key="`${session.source}:${session.id}`"
-            class="ai-session-row"
-            role="button"
-            tabindex="0"
-            :title="sessionRowTooltip(session)"
-            :class="{ active: sessionKey(session) === workspace.selectedManagedAiSessionKey, attention: session.state === 'needsInput' }"
-            @click="selectSession(session)"
-            @dblclick="resumeOrFocusSession(session)"
-            @contextmenu.prevent="openSessionContextMenu(session, $event)"
-            @keydown.enter.prevent="selectSession(session)"
-            @keydown.space.prevent="selectSession(session)"
-          >
-            <span class="ai-session-row-side">
-              <span :class="`ai-session-state dot-${sessionDotState(session)}`"></span>
-              <button
-                v-if="session.state === 'needsInput'"
-                type="button"
-                class="ai-session-handle"
-                :title="t('aiSessions.markHandled')"
-                :aria-label="t('aiSessions.markHandled')"
-                @click.stop="workspace.markManagedAiSessionHandled(session.source, session.id)"
+              <div
+                v-if="row.childSessions.length"
+                class="ai-session-child-branch flat"
+                :class="{ expanded: isChildGroupExpanded(childGroupKey(row.session)) }"
               >
-                <Check />
+                <button
+                  type="button"
+                  class="ai-session-child-group-header"
+                  :aria-expanded="isChildGroupExpanded(childGroupKey(row.session))"
+                  @click="toggleChildGroup(childGroupKey(row.session))"
+                >
+                  <span>
+                    <ChevronDown class="ai-session-child-chevron" />
+                    <GitBranch />
+                    <strong>{{ t('aiSessions.childGroup') }}</strong>
+                  </span>
+                  <small>{{ row.childSessions.length }}</small>
+                </button>
+                <template v-if="isChildGroupExpanded(childGroupKey(row.session))">
+                  <div
+                    v-for="session in row.childSessions"
+                    :key="`${session.source}:${session.id}`"
+                    class="ai-session-row child"
+                    role="button"
+                    tabindex="0"
+                    :title="childSessionRowTooltip(session)"
+                    :class="{ active: sessionKey(session) === workspace.selectedManagedAiSessionKey }"
+                    @click="selectSession(session)"
+                    @dblclick="resumeOrFocusSession(session)"
+                    @contextmenu.prevent="openSessionContextMenu(session, $event)"
+                    @keydown.enter.prevent="selectSession(session)"
+                    @keydown.space.prevent="selectSession(session)"
+                  >
+                    <span class="ai-session-row-child-rail">
+                      <GitBranch />
+                    </span>
+                    <span class="ai-session-row-body">
+                      <span class="ai-session-row-title">
+                        {{ sessionRowTitle(session) }}
+                        <span class="ai-session-row-kind">{{ sessionKindLabel(session) }}</span>
+                      </span>
+                      <span
+                        v-if="sessionRowDetail(session)"
+                        class="ai-session-row-detail"
+                      >{{ sessionRowDetail(session) }}</span>
+                      <span class="ai-session-row-meta">
+                        <span class="ai-session-row-meta-main">{{ childSessionRowMeta(session) }}</span>
+                      </span>
+                    </span>
+                  </div>
+                </template>
+              </div>
+            </template>
+            <div
+              v-if="rows.orphanChildSessions.length"
+              class="ai-session-child-branch flat orphan"
+              :class="{ expanded: isChildGroupExpanded(flatOrphanChildGroupKey()) }"
+            >
+              <button
+                type="button"
+                class="ai-session-child-group-header"
+                :aria-expanded="isChildGroupExpanded(flatOrphanChildGroupKey())"
+                @click="toggleChildGroup(flatOrphanChildGroupKey())"
+              >
+                <span>
+                  <ChevronDown class="ai-session-child-chevron" />
+                  <GitBranch />
+                  <strong>{{ t('aiSessions.orphanChildGroup') }}</strong>
+                </span>
+                <small>{{ rows.orphanChildSessions.length }}</small>
               </button>
-            </span>
-            <span class="ai-session-row-body">
-              <span class="ai-session-row-title">{{ sessionRowTitle(session) }}</span>
-              <span
-                v-if="sessionRowDetail(session)"
-                class="ai-session-row-detail"
-              >{{ sessionRowDetail(session) }}</span>
-              <span class="ai-session-row-meta">
-                <span class="ai-session-row-meta-main">{{ adaptiveSessionRowMeta(session) }}</span>
-              </span>
-            </span>
-          </div>
+              <template v-if="isChildGroupExpanded(flatOrphanChildGroupKey())">
+                <div
+                  v-for="session in rows.orphanChildSessions"
+                  :key="`${session.source}:${session.id}`"
+                  class="ai-session-row child"
+                  role="button"
+                  tabindex="0"
+                  :title="childSessionRowTooltip(session)"
+                  :class="{ active: sessionKey(session) === workspace.selectedManagedAiSessionKey }"
+                  @click="selectSession(session)"
+                  @dblclick="resumeOrFocusSession(session)"
+                  @contextmenu.prevent="openSessionContextMenu(session, $event)"
+                  @keydown.enter.prevent="selectSession(session)"
+                  @keydown.space.prevent="selectSession(session)"
+                >
+                  <span class="ai-session-row-child-rail">
+                    <GitBranch />
+                  </span>
+                  <span class="ai-session-row-body">
+                    <span class="ai-session-row-title">
+                      {{ sessionRowTitle(session) }}
+                      <span class="ai-session-row-kind">{{ sessionKindLabel(session) }}</span>
+                    </span>
+                    <span
+                      v-if="sessionRowDetail(session)"
+                      class="ai-session-row-detail"
+                    >{{ sessionRowDetail(session) }}</span>
+                    <span class="ai-session-row-meta">
+                      <span class="ai-session-row-meta-main">{{ childSessionRowMeta(session) }}</span>
+                    </span>
+                  </span>
+                </div>
+              </template>
+            </div>
+          </template>
         </template>
         <div
           v-if="visibleSessions.length === 0"
@@ -344,8 +759,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { Activity, Archive, Bot, Check, ChevronDown, FileText, FolderTree, Inbox, LocateFixed, RefreshCw, Search, Trash2 } from 'lucide-vue-next'
+import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue'
+import { Activity, Archive, Bot, Check, ChevronDown, FileText, FolderTree, GitBranch, Inbox, List, LocateFixed, RefreshCw, Search, Trash2 } from 'lucide-vue-next'
 import type { ManagedAiPanelModeButton } from '@/services/ai/aiSessionsPanelViewRuntime'
 import { useAiSessionsPanelRuntime } from '@/services/ai/aiSessionsPanelRuntime'
 
@@ -382,13 +797,24 @@ const {
   sessionRowDetail,
   sessionRowMeta,
   sessionRowMetaCandidates,
-  sessionDotState
+  sessionDotState,
+  canResumeSession,
+  isChildGroupExpanded,
+  toggleChildGroup,
+  childGroupKey,
+  sessionRows,
+  sectionOrphanChildGroupKey,
+  flatOrphanChildGroupKey,
+  sessionKindLabel,
+  childSessionRowMeta,
+  childSessionRowTooltip
 } = useAiSessionsPanelRuntime()
 
 const sessionListElement = ref<HTMLElement | null>(null)
 const rowMetaWidth = ref(0)
 let measureCanvasContext: CanvasRenderingContext2D | null = null
 let listResizeObserver: ResizeObserver | null = null
+let documentListenersAttached = false
 
 const rowMetaSignature = computed(() => workspace.sortedManagedAiSessions.map((session) => `${sessionKey(session)}:${session.gitBranch || ''}:${session.gitDirty ? 1 : 0}:${session.canonicalCwd || session.cwd || ''}:${session.lastActivityAt}`).join('|'))
 
@@ -415,25 +841,47 @@ const adaptiveSessionRowMeta = (session: Parameters<typeof sessionRowMeta>[0]) =
   return candidates.find((candidate) => measureRowMetaText(candidate) <= width) || fallback
 }
 
+const stopPanelSurfaceObservers = () => {
+  listResizeObserver?.disconnect()
+  listResizeObserver = null
+  if (documentListenersAttached) {
+    document.removeEventListener('click', closeSessionContextMenu)
+    document.removeEventListener('keydown', closeContextMenuOnEscape)
+    documentListenersAttached = false
+  }
+}
+
+const startPanelSurfaceObservers = () => {
+  updateRowMetaWidth()
+  if (!documentListenersAttached) {
+    document.addEventListener('click', closeSessionContextMenu)
+    document.addEventListener('keydown', closeContextMenuOnEscape)
+    documentListenersAttached = true
+  }
+  if (typeof ResizeObserver === 'undefined' || !sessionListElement.value) return
+  listResizeObserver?.disconnect()
+  listResizeObserver = new ResizeObserver(updateRowMetaWidth)
+  listResizeObserver.observe(sessionListElement.value)
+}
+
+const hideModeTooltip = () => {
+  modeTooltip.value = null
+}
+
+const deactivatePanelSurface = () => {
+  stopPanelSurfaceObservers()
+  closeSessionContextMenu()
+  hideModeTooltip()
+}
+
 watch(rowMetaSignature, () => {
   void nextTick(updateRowMetaWidth)
 })
 
-onMounted(() => {
-  updateRowMetaWidth()
-  document.addEventListener('click', closeSessionContextMenu)
-  document.addEventListener('keydown', closeContextMenuOnEscape)
-  if (typeof ResizeObserver === 'undefined' || !sessionListElement.value) return
-  listResizeObserver = new ResizeObserver(updateRowMetaWidth)
-  listResizeObserver.observe(sessionListElement.value)
-})
-
-onBeforeUnmount(() => {
-  listResizeObserver?.disconnect()
-  listResizeObserver = null
-  document.removeEventListener('click', closeSessionContextMenu)
-  document.removeEventListener('keydown', closeContextMenuOnEscape)
-})
+onMounted(startPanelSurfaceObservers)
+onActivated(startPanelSurfaceObservers)
+onDeactivated(deactivatePanelSurface)
+onBeforeUnmount(deactivatePanelSurface)
 
 const closeContextMenuOnEscape = (event: KeyboardEvent) => {
   if (event.key === 'Escape') closeSessionContextMenu()
@@ -463,7 +911,4 @@ const showModeTooltip = (option: ManagedAiPanelModeButton, event: Event) => {
   }
 }
 
-const hideModeTooltip = () => {
-  modeTooltip.value = null
-}
 </script>

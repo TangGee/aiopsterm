@@ -4,6 +4,7 @@ import {
   buildManagedAiCockpitCards,
   buildManagedAiLibrarySections,
   buildManagedAiPanelModeButtons,
+  buildManagedAiSessionRows,
   filteredManagedAiTimelineEvents,
   formatManagedAiRelativeTime,
   managedAiAttentionQueue,
@@ -15,7 +16,9 @@ import {
   managedAiProjectGroupKey,
   managedAiProjectKey,
   managedAiProjectOptions,
+  managedAiSessionAllowsResume,
   managedAiSessionDisplayTitle,
+  managedAiSessionIsChild,
   managedAiSessionKey,
   managedAiSourceOptions,
   managedAiTimelineEventCopyPayload,
@@ -121,6 +124,9 @@ const makeSession = (input: {
   decisionMode?: ManagedAiDecisionMode
   hibernated?: boolean
   resumeCommand?: string
+  sessionKind?: ManagedAiSession['sessionKind']
+  parentSessionId?: string
+  restorable?: boolean
   events?: ManagedAiTimelineEvent[]
 }): ManagedAiSession => ({
   id: input.id,
@@ -140,6 +146,9 @@ const makeSession = (input: {
   decisionMode: input.decisionMode || 'blocking',
   ...(input.hibernated ? { hibernated: input.hibernated } : {}),
   ...(input.resumeCommand ? { resumeCommand: input.resumeCommand } : {}),
+  ...(input.sessionKind ? { sessionKind: input.sessionKind } : {}),
+  ...(input.parentSessionId ? { parentSessionId: input.parentSessionId } : {}),
+  ...(typeof input.restorable === 'boolean' ? { restorable: input.restorable } : {}),
   events: input.events || [],
   decisions: []
 })
@@ -294,12 +303,12 @@ describe('aiSessionsPanelViewRuntime', () => {
         sessions: duplicateProjectSessions,
         grouping: 'project',
         unknownProjectLabel: 'Unknown project'
-      }).map((section) => [section.label, section.count, section.sessions.map((session) => session.id)])
+      }).map((section) => [section.label, section.count, section.pendingCount, section.runningCount, section.sessions.map((session) => session.id)])
     ).toEqual([
-      ['api ②', 1, ['codex-marketing-api']],
-      ['Unknown project', 1, ['cursor-unknown']],
-      ['api ①', 2, ['claude-api', 'gemini-api']],
-      ['docs', 1, ['codex-docs']]
+      ['api ②', 1, 0, 0, ['codex-marketing-api']],
+      ['Unknown project', 1, 0, 0, ['cursor-unknown']],
+      ['api ①', 2, 1, 1, ['claude-api', 'gemini-api']],
+      ['docs', 1, 0, 0, ['codex-docs']]
     ])
 
     expect(
@@ -307,13 +316,21 @@ describe('aiSessionsPanelViewRuntime', () => {
         sessions: duplicateProjectSessions,
         grouping: 'agent',
         unknownProjectLabel: 'Unknown project'
-      }).map((section) => [section.label, section.count])
+      }).map((section) => [section.label, section.count, section.pendingCount, section.runningCount])
     ).toEqual([
-      ['Codex', 2],
-      ['Cursor', 1],
-      ['Claude Code', 1],
-      ['Gemini', 1]
+      ['Codex', 2, 0, 0],
+      ['Cursor', 1, 0, 0],
+      ['Claude Code', 1, 1, 0],
+      ['Gemini', 1, 0, 1]
     ])
+
+    expect(
+      buildManagedAiLibrarySections({
+        sessions: duplicateProjectSessions,
+        grouping: 'time',
+        unknownProjectLabel: 'Unknown project'
+      })
+    ).toEqual([])
   })
 
   it('builds cockpit counts, attention ordering, and active scope labels without component state', () => {
@@ -366,6 +383,86 @@ describe('aiSessionsPanelViewRuntime', () => {
       { key: 'running', label: 'Running', tooltip: 'Working sessions', count: 1, active: true },
       { key: 'library', label: 'Library', tooltip: 'All sessions', active: false }
     ])
+  })
+
+  it('keeps subagent and internal sessions out of primary counts while preserving expandable child rows', () => {
+    const parent = makeSession({
+      id: 'codex-parent',
+      source: 'codex',
+      title: 'Parent task',
+      state: 'idle',
+      lastActivityAt: 700,
+      requestKind: 'telemetry',
+      decisionMode: 'telemetry',
+      resumeCommand: "codex resume 'codex-parent'"
+    })
+    const child = makeSession({
+      id: 'codex-child',
+      source: 'codex',
+      title: 'Review child',
+      state: 'idle',
+      lastActivityAt: 710,
+      requestKind: 'telemetry',
+      decisionMode: 'telemetry',
+      sessionKind: 'subagent',
+      parentSessionId: 'codex-parent',
+      restorable: false,
+      resumeCommand: "codex resume 'codex-child'"
+    })
+    const orphanInternal = makeSession({
+      id: 'codex-exec',
+      source: 'codex',
+      title: 'Exec run',
+      state: 'working',
+      lastActivityAt: 720,
+      requestKind: 'telemetry',
+      decisionMode: 'telemetry',
+      sessionKind: 'internal',
+      restorable: false
+    })
+    const newerSiblingParent = makeSession({
+      id: 'codex-sibling-parent',
+      source: 'codex',
+      title: 'Sibling parent',
+      state: 'idle',
+      lastActivityAt: 705,
+      requestKind: 'telemetry',
+      decisionMode: 'telemetry'
+    })
+
+    expect(managedAiSessionIsChild(child)).toBe(true)
+    expect(managedAiSessionAllowsResume(parent)).toBe(true)
+    expect(managedAiSessionAllowsResume(child)).toBe(false)
+
+    expect(
+      buildManagedAiPanelModeButtons({
+        sessions: [parent, child, orphanInternal],
+        mode: 'running',
+        translate: t
+      }).map((button) => [button.key, button.count])
+    ).toEqual([
+      ['pending', 0],
+      ['running', 0],
+      ['library', undefined]
+    ])
+
+    expect(buildManagedAiSessionRows([parent, child, orphanInternal, newerSiblingParent])).toEqual({
+      rows: [
+        expect.objectContaining({
+          key: 'codex:codex-parent',
+          session: parent,
+          childSessions: [child],
+          latest: 710
+        }),
+        expect.objectContaining({
+          key: 'codex:codex-sibling-parent',
+          session: newerSiblingParent,
+          childSessions: [],
+          latest: 705
+        })
+      ],
+      orphanChildSessions: [orphanInternal]
+    })
   })
 
   it('filters visible sessions by state, source, project, query, and hibernation state', () => {

@@ -10,6 +10,7 @@ import type {
   ManagedAiRequestKind,
   ManagedAiSessionDecision,
   ManagedAiSessionDecisionKind,
+  ManagedAiSessionKind,
   ManagedAiSessionLifecycle,
   ManagedAiSessionRecord,
   ManagedAiSessionState,
@@ -132,6 +133,46 @@ const normalizeBoolean = (value: unknown) => {
   }
   return undefined
 }
+
+export const normalizeManagedAiSessionKind = (value: unknown): ManagedAiSessionKind | undefined => {
+  const normalized = cleanText(value).toLowerCase().replace(/[\s_-]+/g, '')
+  if (!normalized) return undefined
+  if (normalized === 'main' || normalized === 'primary' || normalized === 'root' || normalized === 'user' || normalized === 'session') return 'main'
+  if (normalized === 'subagent' || normalized === 'subagentthread' || normalized === 'sidechain' || normalized === 'child' || normalized === 'agent') return 'subagent'
+  if (normalized === 'internal' || normalized === 'system' || normalized === 'synthetic' || normalized === 'exec' || normalized === 'oneshot') return 'internal'
+  return undefined
+}
+
+const normalizeRestorable = (value: unknown) => normalizeBoolean(value)
+
+const hasExplicitSubagentMarker = (record: Record<string, unknown>) => {
+  const booleanMarker = normalizeBoolean(record.isSubagent ?? record.is_subagent ?? record.isSidechain ?? record.is_sidechain ?? record.sidechain)
+  if (booleanMarker === true) return true
+  const subagent = record.subagent ?? record.subAgent ?? record.sub_agent
+  if (subagent === true) return true
+  if (typeof subagent === 'string' && subagent.trim()) return true
+  return Boolean(subagent && typeof subagent === 'object' && !Array.isArray(subagent))
+}
+
+const sessionKindForRecord = (record: Record<string, unknown>) => {
+  const explicit =
+    normalizeManagedAiSessionKind(record.sessionKind || record.session_kind || record.conversationKind || record.conversation_kind) ||
+    normalizeManagedAiSessionKind(record.threadSource || record.thread_source)
+  if (explicit) return explicit
+  if (hasExplicitSubagentMarker(record)) return 'subagent'
+  return undefined
+}
+
+const parentSessionIdForRecord = (record: Record<string, unknown>) =>
+  firstText(record, ['parentSessionId', 'parent_session_id', 'parentThreadId', 'parent_thread_id', 'parentConversationId', 'parent_conversation_id'])
+
+const restorableForRecord = (record: Record<string, unknown>, sessionKind?: ManagedAiSessionKind) => {
+  if (sessionKind === 'subagent' || sessionKind === 'internal') return false
+  return normalizeRestorable(record.restorable ?? record.isRestorable ?? record.is_restorable ?? record.canResume ?? record.can_resume)
+}
+
+export const managedAiSessionAllowsResume = (session: { sessionKind?: ManagedAiSessionKind; restorable?: boolean }) =>
+  session.restorable !== false && session.sessionKind !== 'subagent' && session.sessionKind !== 'internal'
 
 const normalizeTimestamp = (value: unknown) => (typeof value === 'number' && Number.isFinite(value) ? value : undefined)
 
@@ -651,6 +692,9 @@ const normalizeStoredTimelineEvent = (value: Record<string, unknown>, fallbackSo
   const gitBranch = cleanOptionalText(value.gitBranch || value.git_branch)
   const gitDirty = normalizeBoolean(value.gitDirty ?? value.git_dirty)
   const gitStatusUpdatedAt = normalizeTimestamp(value.gitStatusUpdatedAt ?? value.git_status_updated_at)
+  const sessionKind = sessionKindForRecord(value)
+  const parentSessionId = parentSessionIdForRecord(value)
+  const restorable = restorableForRecord(value, sessionKind)
   return {
     source,
     event,
@@ -675,7 +719,10 @@ const normalizeStoredTimelineEvent = (value: Record<string, unknown>, fallbackSo
     ...(toolName ? { toolName } : {}),
     ...(typeof actionable === 'boolean' ? { actionable } : {}),
     ...(cleanOptionalText(value.launchCommand) ? { launchCommand: cleanOptionalText(value.launchCommand) } : {}),
-    ...(cleanOptionalText(value.resumeCommand) ? { resumeCommand: cleanOptionalText(value.resumeCommand) } : {}),
+    ...(managedAiSessionAllowsResume({ sessionKind, restorable }) && cleanOptionalText(value.resumeCommand) ? { resumeCommand: cleanOptionalText(value.resumeCommand) } : {}),
+    ...(sessionKind ? { sessionKind } : {}),
+    ...(parentSessionId ? { parentSessionId } : {}),
+    ...(typeof restorable === 'boolean' ? { restorable } : {}),
     ...(cleanPositiveInteger(value.processId) ? { processId: cleanPositiveInteger(value.processId) } : {}),
     ...(cleanPositiveInteger(value.parentProcessId) ? { parentProcessId: cleanPositiveInteger(value.parentProcessId) } : {}),
     ...(cleanPositiveInteger(value.processGroupId) ? { processGroupId: cleanPositiveInteger(value.processGroupId) } : {}),
@@ -736,6 +783,9 @@ export const normalizeStoredSession = (value: unknown): ManagedAiSessionRecord |
   const gitBranch = cleanOptionalText(value.gitBranch || value.git_branch || latestEvent?.gitBranch)
   const gitDirty = normalizeBoolean(value.gitDirty ?? value.git_dirty ?? latestEvent?.gitDirty)
   const gitStatusUpdatedAt = normalizeTimestamp(value.gitStatusUpdatedAt ?? value.git_status_updated_at ?? latestEvent?.gitStatusUpdatedAt)
+  const sessionKind = sessionKindForRecord(value) || latestEvent?.sessionKind
+  const parentSessionId = parentSessionIdForRecord(value) || latestEvent?.parentSessionId
+  const restorable = restorableForRecord(value, sessionKind) ?? latestEvent?.restorable
   return {
     id,
     source,
@@ -774,7 +824,10 @@ export const normalizeStoredSession = (value: unknown): ManagedAiSessionRecord |
     ...(storedToolName ? { toolName: storedToolName } : latestEvent?.toolName ? { toolName: latestEvent.toolName } : {}),
     ...(typeof actionable === 'boolean' ? { actionable } : {}),
     ...(cleanOptionalText(value.launchCommand) ? { launchCommand: cleanOptionalText(value.launchCommand) } : {}),
-    ...(cleanOptionalText(value.resumeCommand) ? { resumeCommand: cleanOptionalText(value.resumeCommand) } : {}),
+    ...(managedAiSessionAllowsResume({ sessionKind, restorable }) && cleanOptionalText(value.resumeCommand) ? { resumeCommand: cleanOptionalText(value.resumeCommand) } : {}),
+    ...(sessionKind ? { sessionKind } : {}),
+    ...(parentSessionId ? { parentSessionId } : {}),
+    ...(typeof restorable === 'boolean' ? { restorable } : {}),
     ...(cleanPositiveInteger(value.processId) ? { processId: cleanPositiveInteger(value.processId) } : {}),
     ...(cleanPositiveInteger(value.parentProcessId) ? { parentProcessId: cleanPositiveInteger(value.parentProcessId) } : {}),
     ...(cleanPositiveInteger(value.processGroupId) ? { processGroupId: cleanPositiveInteger(value.processGroupId) } : {}),
@@ -840,7 +893,12 @@ export const normalizeAiAgentSessionEventInput = (input: unknown, now = Date.now
   const waitTimeoutMs = decisionMode === 'blocking' || waitTimeoutInput !== undefined ? normalizeWaitTimeoutMs(waitTimeoutInput) : undefined
   const actionable = actionableFor(source, event, record, requestKind, decisionMode)
   const launchCommand = sanitizeLaunchCommand(record.launchCommand || record.launch_command)
-  const resumeCommand = resumeCommandFor(source, sessionId, cwd, record.resumeCommand || record.resume_command || record.launchCommand || record.launch_command)
+  const sessionKind = sessionKindForRecord(record)
+  const parentSessionId = parentSessionIdForRecord(record)
+  const restorable = restorableForRecord(record, sessionKind)
+  const resumeCommand = managedAiSessionAllowsResume({ sessionKind, restorable })
+    ? resumeCommandFor(source, sessionId, cwd, record.resumeCommand || record.resume_command || record.launchCommand || record.launch_command)
+    : undefined
   const processId = cleanPositiveInteger(record.processId || record.process_id || record.pid || process.env.AIOPSTERM_AGENT_PID)
   const parentProcessId = cleanPositiveInteger(record.parentProcessId || record.parent_process_id || record.ppid || process.env.PPID)
   const processGroupId = cleanPositiveInteger(record.processGroupId || record.process_group_id || record.pgid)
@@ -869,6 +927,9 @@ export const normalizeAiAgentSessionEventInput = (input: unknown, now = Date.now
     ...(typeof actionable === 'boolean' ? { actionable } : {}),
     ...(launchCommand ? { launchCommand } : {}),
     ...(resumeCommand ? { resumeCommand } : {}),
+    ...(sessionKind ? { sessionKind } : {}),
+    ...(parentSessionId ? { parentSessionId } : {}),
+    ...(typeof restorable === 'boolean' ? { restorable } : {}),
     ...(processId ? { processId } : {}),
     ...(parentProcessId ? { parentProcessId } : {}),
     ...(processGroupId ? { processGroupId } : {}),

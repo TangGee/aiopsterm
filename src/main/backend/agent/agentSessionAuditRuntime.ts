@@ -23,6 +23,7 @@ export type ManagedAiSessionAuditKind =
   | 'session.hibernated'
   | 'session.woke'
   | 'sessions.imported'
+  | 'sessions.git_refreshed'
   | 'sessions.bulk'
   | 'notification.dismissed'
   | 'notification.opened'

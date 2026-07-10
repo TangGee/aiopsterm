@@ -81,6 +81,17 @@
   color: var(--theme-module-active-accent);
 }
 
+.managed-ai-session-record-actions button.danger,
+.managed-ai-session-record-modal-footer-actions button.danger {
+  border-color: color-mix(in srgb, var(--theme-core-danger) 52%, var(--theme-module-active-border));
+  color: var(--theme-core-danger);
+}
+
+.managed-ai-session-record-actions button.danger:hover:not(:disabled),
+.managed-ai-session-record-modal-footer-actions button.danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--theme-core-danger) 12%, var(--theme-module-active-card-bg));
+}
+
 .managed-ai-session-content svg {
   width: 15px;
   height: 15px;

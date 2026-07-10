@@ -35,6 +35,7 @@ export type AssetExportRuntime = {
 export type AssetImportExportRuntime = {
   listAssets: () => AiopsAssetSnapshot
   saveAsset: (input: AiopsAssetInput) => AiopsAssetRecord
+  saveAssets?: (inputs: AiopsAssetInput[]) => AiopsAssetRecord[]
   readFile?: (filePath: string, encoding: 'utf-8') => Promise<string>
   stat?: (filePath: string) => Promise<{ size: number }>
   writeFile?: typeof writeFile
@@ -104,24 +105,59 @@ const readAssetImportDrafts = async (input: AiopsAssetImportPreviewInput, runtim
 export const findAssetImportDuplicate = (assets: AiopsAssetRecord[], draft: ImportedAssetDraft) =>
   assets.find((asset) => !asset.isLocalShell && asset.host === draft.host && asset.username === draft.username && Number(asset.port) === Number(draft.port))
 
-export const assetImportPreviewRecord = (draft: ImportedAssetDraft, index: number, assets: AiopsAssetRecord[]): AiopsAssetImportPreviewRecord => {
-  const duplicate = findAssetImportDuplicate(assets, draft)
-  return {
-    previewId: `import-${index}-${draft.host}-${draft.port}`,
-    duplicateId: duplicate?.id,
-    duplicateTitle: duplicate?.title,
-    title: draft.title,
-    host: draft.host,
-    username: draft.username,
-    group: draft.group,
-    port: draft.port,
-    auth_type: draft.auth_type,
-    asset_type: draft.asset_type,
-    comment: draft.comment,
-    needProxy: draft.needProxy,
-    proxyName: draft.proxyName
+const assetImportDuplicateKey = (host: string, username: string, port: number | string) => `${host}\u0000${username}\u0000${Number(port)}`
+
+const assetImportDuplicateKeyForAsset = (asset: Pick<AiopsAssetRecord, 'host' | 'username' | 'port'>) => assetImportDuplicateKey(asset.host, asset.username, asset.port)
+
+const assetImportDuplicateKeyForDraft = (draft: ImportedAssetDraft) => assetImportDuplicateKey(draft.host, draft.username, draft.port)
+
+const assetImportDuplicateIndex = (assets: AiopsAssetRecord[]) => {
+  const duplicates = new Map<string, AiopsAssetRecord>()
+  for (const asset of assets) {
+    if (asset.isLocalShell) continue
+    const key = assetImportDuplicateKeyForAsset(asset)
+    if (!duplicates.has(key)) duplicates.set(key, asset)
   }
+  return duplicates
 }
+
+const pendingImportedAsset = (draft: ImportedAssetDraft): AiopsAssetRecord => ({
+  id: `pending-import-${draft.host}-${draft.username}-${draft.port}`,
+  uuid: `pending-import-${draft.host}-${draft.username}-${draft.port}`,
+  name: draft.title,
+  title: draft.title,
+  host: draft.host,
+  ip: draft.host,
+  group: draft.group,
+  group_name: draft.group,
+  status: 'online',
+  tags: ['imported'],
+  username: draft.username,
+  port: draft.port,
+  asset_type: draft.asset_type,
+  auth_type: draft.auth_type,
+  comment: draft.comment,
+  data_source: 'manual'
+})
+
+const assetImportPreviewRecordForDuplicate = (draft: ImportedAssetDraft, index: number, duplicate?: AiopsAssetRecord): AiopsAssetImportPreviewRecord => ({
+  previewId: `import-${index}-${draft.host}-${draft.port}`,
+  duplicateId: duplicate?.id,
+  duplicateTitle: duplicate?.title,
+  title: draft.title,
+  host: draft.host,
+  username: draft.username,
+  group: draft.group,
+  port: draft.port,
+  auth_type: draft.auth_type,
+  asset_type: draft.asset_type,
+  comment: draft.comment,
+  needProxy: draft.needProxy,
+  proxyName: draft.proxyName
+})
+
+export const assetImportPreviewRecord = (draft: ImportedAssetDraft, index: number, assets: AiopsAssetRecord[]): AiopsAssetImportPreviewRecord =>
+  assetImportPreviewRecordForDuplicate(draft, index, findAssetImportDuplicate(assets, draft))
 
 export const assetImportInput = (draft: ImportedAssetDraft, existing?: AiopsAssetRecord): AiopsAssetInput => ({
   ...(existing ? { id: existing.id } : {}),
@@ -151,7 +187,8 @@ export const previewAssetImportRuntime = async (
   try {
     const { filePath, fileName, drafts } = await readAssetImportDrafts(input, runtime)
     const snapshot = runtime.listAssets()
-    const assets = drafts.map((draft, index) => assetImportPreviewRecord(draft, index, snapshot.assets))
+    const duplicates = assetImportDuplicateIndex(snapshot.assets)
+    const assets = drafts.map((draft, index) => assetImportPreviewRecordForDuplicate(draft, index, duplicates.get(assetImportDuplicateKeyForDraft(draft))))
     return {
       ok: true,
       data: {
@@ -172,22 +209,46 @@ export const confirmAssetImportRuntime = async (
 ): Promise<AiopsAssetImportConfirmResult> => {
   try {
     const { filePath, fileName, drafts } = await readAssetImportDrafts(input, runtime)
+    const duplicateCounts = new Map<string, number>()
+    drafts.forEach((draft) => {
+      const key = assetImportDuplicateKeyForDraft(draft)
+      duplicateCounts.set(key, (duplicateCounts.get(key) || 0) + 1)
+    })
+    const snapshot = runtime.listAssets()
+    const duplicates = assetImportDuplicateIndex(snapshot.assets)
+    const canBatchSave =
+      typeof runtime.saveAssets === 'function' &&
+      !drafts.some((draft) => input.overwrite && (duplicateCounts.get(assetImportDuplicateKeyForDraft(draft)) || 0) > 1 && !duplicates.get(assetImportDuplicateKeyForDraft(draft)))
     let imported = 0
     let skipped = 0
     let created = 0
     let updated = 0
+    const pendingInputs: AiopsAssetInput[] = []
+
+    const saveInput = (assetInput: AiopsAssetInput, draft: ImportedAssetDraft, existing?: AiopsAssetRecord) => {
+      if (canBatchSave) {
+        pendingInputs.push(assetInput)
+        duplicates.set(assetImportDuplicateKeyForDraft(draft), existing || pendingImportedAsset(draft))
+        return
+      }
+      const saved = runtime.saveAsset(assetInput)
+      duplicates.set(assetImportDuplicateKeyForAsset(saved), saved)
+    }
 
     for (const draft of drafts) {
-      const existing = findAssetImportDuplicate(runtime.listAssets().assets, draft)
+      const key = assetImportDuplicateKeyForDraft(draft)
+      const existing = duplicates.get(key)
       if (existing && !input.overwrite) {
         skipped += 1
         continue
       }
-      runtime.saveAsset(assetImportInput(draft, existing))
+      saveInput(assetImportInput(draft, existing), draft, existing)
       imported += 1
       if (existing) updated += 1
       else created += 1
     }
+
+    if (canBatchSave && pendingInputs.length) runtime.saveAssets!(pendingInputs)
 
     return {
       ok: true,

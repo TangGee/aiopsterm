@@ -100,7 +100,7 @@ import {
   configureDatabaseSqliteRuntime,
   isRealSqliteConnection,
   resetDatabaseSqliteRuntime,
-  sqliteCatalogsForConnection
+  sqliteCatalogsForConnectionAsync
 } from './databaseSqliteRuntime'
 import { trim } from './databaseTableRuntime'
 import { shouldUseDatabaseSeedData as runtimeShouldUseDatabaseSeedData } from './runtimeSwitches'
@@ -311,6 +311,12 @@ const databaseWorkspaceCatalogFor = (selectedConnectionId = 'conn-prod-pg'): Dat
     shouldUseSeedData: shouldUseDatabaseSeedData()
   })
 })
+
+const defaultCatalogsForSavedConnectionAsync = async (connection: Omit<DatabaseConnectionInfo, 'catalogs'>): Promise<DatabaseConnectionInfo['catalogs']> => {
+  if (connection.dbType !== 'sqlite') return defaultCatalogsForSavedConnection(connection)
+  const catalogs = await sqliteCatalogsForConnectionAsync({ ...connection, catalogs: [] })
+  return catalogs ?? [{ name: trim(connection.database), tables: [] }]
+}
 
 const databaseConnectionById = (connectionId: string) => databaseConnections.find((item) => item.id === trim(connectionId)) ?? null
 
@@ -597,6 +603,10 @@ export async function refreshDatabaseConnection(connectionId: string): Promise<D
   if (!connection) {
     return { ok: false, errorCode: 'DB_CONNECTION_NOT_FOUND', errorMessage: 'Database connection was not found.' }
   }
+  if (connection.dbType === 'sqlite') {
+    const catalogs = await sqliteCatalogsForConnectionAsync(connection)
+    return databaseConnectionMutation(id, 'Connection schema refreshed', (current) => (catalogs ? { ...current, catalogs } : { ...current }))
+  }
   if (!shouldUseDatabaseSeedData() && isClickHouseConnection(connection)) {
     try {
       const catalogs = await clickHouseCatalogsForConnection(connection)
@@ -651,11 +661,7 @@ export async function refreshDatabaseConnection(connectionId: string): Promise<D
       )
     }
   }
-  return databaseConnectionMutation(connectionId, 'Connection schema refreshed', (connection) => {
-    if (connection.dbType !== 'sqlite') return { ...connection }
-    const catalogs = sqliteCatalogsForConnection(connection)
-    return catalogs ? { ...connection, catalogs } : { ...connection }
-  })
+  return databaseConnectionMutation(connectionId, 'Connection schema refreshed', (connection) => ({ ...connection }))
 }
 
 export async function testDatabaseConnection(input: DatabaseConnectionTestInput): Promise<DatabaseConnectionTestResult> {
@@ -706,14 +712,14 @@ export async function saveDatabaseConnection(input: DatabaseConnectionSaveInput)
           ? existing.status
           : 'idle',
       catalogs:
-        existing.dbType === normalized.dbType && existing.database === normalized.database && shouldUseDatabaseSeedData()
-          ? existing.catalogs.map((catalog) => cloneDatabaseCatalog(existing.id, catalog, databaseSeedTableExistsInBackend))
-          : defaultCatalogsForSavedConnection({
-              id: existing.id,
-              ...normalized,
-              hasPassword: connectionSecret ? true : existing.hasPassword,
-              status: existing.status
-            })
+          existing.dbType === normalized.dbType && existing.database === normalized.database && shouldUseDatabaseSeedData()
+            ? existing.catalogs.map((catalog) => cloneDatabaseCatalog(existing.id, catalog, databaseSeedTableExistsInBackend))
+            : await defaultCatalogsForSavedConnectionAsync({
+                id: existing.id,
+                ...normalized,
+                hasPassword: connectionSecret ? true : existing.hasPassword,
+                status: existing.status
+              })
     }
     databaseConnections[existingIndex] = saved
     if (connectionSecret) databaseConnectionSecrets.set(saved.id, connectionSecret)
@@ -737,7 +743,7 @@ export async function saveDatabaseConnection(input: DatabaseConnectionSaveInput)
     status: 'idle',
     catalogs: []
   }
-  saved.catalogs = defaultCatalogsForSavedConnection(saved)
+  saved.catalogs = await defaultCatalogsForSavedConnectionAsync(saved)
   databaseConnections.push(saved)
   if (connectionSecret) databaseConnectionSecrets.set(saved.id, connectionSecret)
   persistDatabaseState()

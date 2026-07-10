@@ -3,6 +3,7 @@ export {
   assertFolderParent,
   assertUniqueKeychainName,
   assetGroupName,
+  cloneAsset,
   cloneFolder,
   defaultAssetKeychainSecrets,
   defaultAssetStoreShape,

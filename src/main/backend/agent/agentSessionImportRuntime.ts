@@ -1,11 +1,12 @@
 import { createHash, randomUUID } from 'crypto'
-import { existsSync, readdirSync, statSync } from 'fs'
-import { copyFile, mkdir, readFile, rm } from 'fs/promises'
+import { existsSync, statSync, type Dirent } from 'fs'
+import { copyFile, mkdir, readFile, readdir, rm, stat } from 'fs/promises'
 import { dirname, join, resolve } from 'path'
 import { tmpdir } from 'os'
 import { openSqliteDatabase, type SqliteDatabase } from '@shared/databaseSqliteRuntime'
 import type {
   AiAgentSessionSource,
+  ManagedAiSessionKind,
   ManagedAiSessionRecord,
   ManagedAiSessionTimelineEvent
 } from '@shared/contracts/managedAiSessions'
@@ -29,9 +30,10 @@ type AgentSessionImportRuntimeConfig = {
   getHomeDir: () => string
   getEnv: () => NodeJS.ProcessEnv
   now: () => number
-  maxPerSource: number
   enabled: boolean
   cacheTtlMs: number
+  openSqliteDatabase: (filePath: string, readonly: boolean) => SqliteDatabase
+  jsonlParseCache: Map<string, JsonlParseCacheEntry>
   importSessions?: () => Promise<ImportedAgentSession[]>
 }
 
@@ -50,6 +52,21 @@ type CandidateBase = {
   model?: string
   launchCommand?: string
   resumeCommand?: string
+  sessionKind?: ManagedAiSessionKind
+  parentSessionId?: string
+  restorable?: boolean
+}
+
+type CollectedSessionFile = {
+  path: string
+  mtimeMs: number
+  size: number
+}
+
+type JsonlParseCacheEntry = {
+  mtimeMs: number
+  size: number
+  candidate: CandidateBase | null
 }
 
 type CodexThreadRow = {
@@ -57,6 +74,9 @@ type CodexThreadRow = {
   rollout_path?: string
   cwd?: string
   title?: string
+  source?: string
+  thread_source?: string
+  has_user_event?: number | boolean
   model?: string
   git_branch?: string
   approval_mode?: string
@@ -74,8 +94,6 @@ type OpenCodeSessionRow = {
   last_assistant?: string
 }
 
-const defaultMaxPerSource = 40
-const maxScanFiles = 1600
 const maxJsonlReadBytes = 4 * 1024 * 1024
 
 const cleanPath = (value: unknown) => cleanOptionalText(value)?.replace(/^~(?=$|\/)/, defaultHomeDir()) || undefined
@@ -113,6 +131,70 @@ const normalizeImportedSummary = (value: unknown, fallback: string) => {
   return text.slice(0, 240)
 }
 
+const importedCandidateAllowsResume = (candidate: Pick<CandidateBase, 'sessionKind' | 'restorable'>) =>
+  candidate.restorable !== false && candidate.sessionKind !== 'subagent' && candidate.sessionKind !== 'internal'
+
+const normalizeImportedSessionKind = (value: unknown): ManagedAiSessionKind | undefined => {
+  const normalized = String(value || '').trim().toLowerCase().replace(/[\s_-]+/g, '')
+  if (!normalized) return undefined
+  if (normalized === 'user' || normalized === 'main' || normalized === 'primary' || normalized === 'root' || normalized === 'cli') return 'main'
+  if (normalized === 'subagent' || normalized === 'sidechain' || normalized === 'child' || normalized === 'agent') return 'subagent'
+  if (normalized === 'internal' || normalized === 'system' || normalized === 'exec' || normalized === 'review' || normalized === 'oneshot') return 'internal'
+  return undefined
+}
+
+const firstDeepText = (value: unknown, keys: string[], depth = 0): string | undefined => {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || depth > 4) return undefined
+  const record = value as Record<string, unknown>
+  for (const key of keys) {
+    const text = cleanOptionalText(record[key])
+    if (text) return text
+  }
+  for (const item of Object.values(record)) {
+    const found = firstDeepText(item, keys, depth + 1)
+    if (found) return found
+  }
+  return undefined
+}
+
+const codexSourceRecord = (value: unknown) => {
+  if (value && typeof value === 'object' && !Array.isArray(value)) return value as Record<string, unknown>
+  const text = cleanOptionalText(value)
+  return text ? safeReadJson(text) : null
+}
+
+const codexSessionClassification = (input: {
+  source?: unknown
+  threadSource?: unknown
+}): Pick<CandidateBase, 'sessionKind' | 'parentSessionId' | 'restorable'> => {
+  const threadKind = normalizeImportedSessionKind(input.threadSource)
+  const sourceKind = normalizeImportedSessionKind(input.source)
+  if (threadKind === 'subagent') {
+    const source = codexSourceRecord(input.source)
+    return {
+      sessionKind: 'subagent',
+      parentSessionId: firstDeepText(source, ['parent_thread_id', 'parentThreadId', 'parent_session_id', 'parentSessionId']),
+      restorable: false
+    }
+  }
+  const source = codexSourceRecord(input.source)
+  if (source && (source.subagent !== undefined || source.subAgent !== undefined || source.thread_spawn !== undefined || source.threadSpawn !== undefined)) {
+    return {
+      sessionKind: 'subagent',
+      parentSessionId: firstDeepText(source, ['parent_thread_id', 'parentThreadId', 'parent_session_id', 'parentSessionId']),
+      restorable: false
+    }
+  }
+  if (sourceKind === 'subagent') {
+    return { sessionKind: 'subagent', restorable: false }
+  }
+  if (sourceKind === 'internal') {
+    return { sessionKind: 'internal', restorable: false }
+  }
+  if (threadKind === 'main' || sourceKind === 'main') return { sessionKind: 'main', restorable: true }
+  return {}
+}
+
 const importedEventId = (candidate: CandidateBase) => {
   const hash = createHash('sha1')
     .update([candidate.source, candidate.sessionId, candidate.modifiedAt, candidate.title || '', candidate.cwd || ''].join('\0'))
@@ -124,7 +206,9 @@ const importedEventId = (candidate: CandidateBase) => {
 const importedRecordFor = (candidate: CandidateBase, now: number): ImportedAgentSession => {
   const title = normalizeImportedTitle(candidate.source, candidate.title, candidate.cwd)
   const summary = normalizeImportedSummary(candidate.summary, 'Imported from local agent history')
-  const resumeCommand = candidate.resumeCommand || resumeCommandFor(candidate.source, candidate.sessionId, candidate.cwd, candidate.launchCommand)
+  const resumeCommand = importedCandidateAllowsResume(candidate)
+    ? candidate.resumeCommand || resumeCommandFor(candidate.source, candidate.sessionId, candidate.cwd, candidate.launchCommand)
+    : undefined
   const canonicalCwd = canonicalCwdFor(candidate.cwd, candidate.canonicalCwd)
   const event: ManagedAiSessionTimelineEvent = {
     id: importedEventId(candidate),
@@ -143,11 +227,17 @@ const importedRecordFor = (candidate: CandidateBase, now: number): ImportedAgent
     ...(candidate.gitStatusUpdatedAt ? { gitStatusUpdatedAt: candidate.gitStatusUpdatedAt } : {}),
     ...(candidate.transcriptPath ? { transcriptPath: candidate.transcriptPath } : {}),
     ...(resumeCommand ? { resumeCommand } : {}),
+    ...(candidate.sessionKind ? { sessionKind: candidate.sessionKind } : {}),
+    ...(candidate.parentSessionId ? { parentSessionId: candidate.parentSessionId } : {}),
+    ...(typeof candidate.restorable === 'boolean' ? { restorable: candidate.restorable } : {}),
     raw: compactRawRecord({
       imported: true,
       source: candidate.source,
       model: candidate.model,
-      transcriptPath: candidate.transcriptPath
+      transcriptPath: candidate.transcriptPath,
+      sessionKind: candidate.sessionKind,
+      parentSessionId: candidate.parentSessionId,
+      restorable: candidate.restorable
     })
   }
   return {
@@ -170,6 +260,9 @@ const importedRecordFor = (candidate: CandidateBase, now: number): ImportedAgent
     decisionMode: 'telemetry',
     ...(candidate.launchCommand ? { launchCommand: candidate.launchCommand } : {}),
     ...(resumeCommand ? { resumeCommand } : {}),
+    ...(candidate.sessionKind ? { sessionKind: candidate.sessionKind } : {}),
+    ...(candidate.parentSessionId ? { parentSessionId: candidate.parentSessionId } : {}),
+    ...(typeof candidate.restorable === 'boolean' ? { restorable: candidate.restorable } : {}),
     agentLifecycle: 'idle',
     events: [event]
   }
@@ -229,34 +322,51 @@ const readJsonLines = async (path: string, maxBytes = maxJsonlReadBytes) => {
   }
 }
 
-const collectFiles = (root: string, extension = '.jsonl') => {
-  const out: Array<{ path: string; mtimeMs: number }> = []
+const collectFiles = async (root: string, extension = '.jsonl') => {
+  const out: CollectedSessionFile[] = []
   const stack = [root]
-  while (stack.length && out.length < maxScanFiles) {
+  while (stack.length) {
     const current = stack.pop()!
-    let entries: string[]
+    let entries: Dirent[]
     try {
-      entries = readdirSync(current)
+      entries = await readdir(current, { withFileTypes: true })
     } catch {
       continue
     }
     for (const entry of entries) {
-      const path = join(current, entry)
-      let stat
-      try {
-        stat = statSync(path)
-      } catch {
-        continue
-      }
-      if (stat.isDirectory()) {
+      const path = join(current, entry.name)
+      if (entry.isSymbolicLink()) continue
+      if (entry.isDirectory()) {
         stack.push(path)
-      } else if (stat.isFile() && path.endsWith(extension)) {
-        out.push({ path, mtimeMs: stat.mtimeMs })
-        if (out.length >= maxScanFiles) break
+      } else if (entry.isFile() && path.endsWith(extension)) {
+        try {
+          const fileStat = await stat(path)
+          out.push({ path, mtimeMs: fileStat.mtimeMs, size: fileStat.size })
+        } catch {
+          continue
+        }
       }
     }
   }
   return out.sort((first, second) => second.mtimeMs - first.mtimeMs)
+}
+
+const parseCachedJsonl = async (
+  cache: Map<string, JsonlParseCacheEntry>,
+  kind: string,
+  file: CollectedSessionFile,
+  parse: (path: string, mtimeMs: number) => Promise<CandidateBase | null>
+) => {
+  const key = `${kind}:${file.path}`
+  const cached = cache.get(key)
+  if (cached && cached.mtimeMs === file.mtimeMs && cached.size === file.size) return cached.candidate
+  const candidate = await parse(file.path, file.mtimeMs)
+  cache.set(key, {
+    mtimeMs: file.mtimeMs,
+    size: file.size,
+    candidate
+  })
+  return candidate
 }
 
 const snapshotSqliteDatabase = async (sourcePath: string, prefix: string) => {
@@ -280,6 +390,15 @@ const queryRows = <T extends Record<string, unknown>>(db: SqliteDatabase, sql: s
   const statement = db.prepare(sql)
   return (params.length ? statement.all(...params) : statement.all()) as T[]
 }
+
+const sqliteColumnsForTable = (db: SqliteDatabase, table: string) =>
+  new Set(
+    queryRows<{ name?: string }>(db, `PRAGMA table_info(${table})`)
+      .map((row) => cleanOptionalText(row.name))
+      .filter((value): value is string => Boolean(value))
+  )
+
+const sqliteSelectColumn = (columns: Set<string>, column: string) => (columns.has(column) ? column : `NULL AS ${column}`)
 
 const parseSandboxMode = (value: unknown) => {
   const raw = cleanOptionalText(value)
@@ -310,27 +429,34 @@ const codexResumeCommand = (row: Pick<CodexThreadRow, 'id' | 'model' | 'approval
   return cwd ? `cd '${cwd.replace(/'/g, `'\\''`)}' && ${command}` : command
 }
 
-const importCodexFromSqlite = async (codexHome: string, limit: number): Promise<CandidateBase[] | null> => {
+const importCodexFromSqlite = async (
+  codexHome: string,
+  openDatabase: AgentSessionImportRuntimeConfig['openSqliteDatabase']
+): Promise<CandidateBase[] | null> => {
   const dbPath = join(codexHome, 'state_5.sqlite')
   const snapshot = await snapshotSqliteDatabase(dbPath, 'aiopsterm-codex-sessions')
   if (!snapshot) return null
   let db: SqliteDatabase | null = null
   try {
-    db = openSqliteDatabase(snapshot.path, true)
+    db = openDatabase(snapshot.path, true)
+    const columns = sqliteColumnsForTable(db, 'threads')
     const rows = queryRows<CodexThreadRow>(
       db,
-      `SELECT id, rollout_path, cwd, title, model, git_branch, approval_mode, sandbox_policy, reasoning_effort, first_user_message, updated_at_ms
+      `SELECT id, rollout_path, cwd, title, ${sqliteSelectColumn(columns, 'source')}, ${sqliteSelectColumn(columns, 'thread_source')}, ${sqliteSelectColumn(columns, 'has_user_event')}, model, git_branch, approval_mode, sandbox_policy, reasoning_effort, first_user_message, updated_at_ms
        FROM threads
        WHERE archived = 0
-       ORDER BY updated_at_ms DESC
-       LIMIT ?`,
-      [limit]
+       ORDER BY updated_at_ms DESC`
     )
     return rows
       .map((row) => {
         const sessionId = cleanOptionalText(row.id)
         if (!sessionId) return null
         const cwd = cleanOptionalText(row.cwd)
+        const classification = codexSessionClassification({
+          source: row.source,
+          threadSource: row.thread_source
+        })
+        const resumeCommand = importedCandidateAllowsResume(classification) ? codexResumeCommand(row, cwd) : undefined
         return {
           source: 'codex' as const,
           sessionId,
@@ -341,7 +467,8 @@ const importCodexFromSqlite = async (codexHome: string, limit: number): Promise<
           modifiedAt: Number(row.updated_at_ms || 0) || safeStatMtime(cleanOptionalText(row.rollout_path) || ''),
           model: cleanOptionalText(row.model),
           gitBranch: cleanOptionalText(row.git_branch),
-          resumeCommand: codexResumeCommand(row, cwd)
+          resumeCommand,
+          ...classification
         } satisfies CandidateBase
       })
       .filter(Boolean) as CandidateBase[]
@@ -363,12 +490,16 @@ const parseCodexJsonl = async (path: string, mtimeMs: number): Promise<Candidate
   let approvalPolicy: string | undefined
   let sandboxMode: string | undefined
   let effort: string | undefined
+  let codexSource: unknown
+  let threadSource: unknown
   for (const obj of lines) {
     const type = cleanOptionalText(obj.type)
     const payload = obj.payload && typeof obj.payload === 'object' && !Array.isArray(obj.payload) ? (obj.payload as Record<string, unknown>) : {}
     if (type === 'session_meta') {
       sessionId = cleanOptionalText(payload.id) || sessionId
       cwd = cleanOptionalText(payload.cwd) || cwd
+      codexSource = payload.source ?? codexSource
+      threadSource = payload.thread_source ?? payload.threadSource ?? threadSource
     } else if (type === 'turn_context') {
       model = cleanOptionalText(payload.model) || model
       approvalPolicy = cleanOptionalText(payload.approval_policy) || approvalPolicy
@@ -382,6 +513,22 @@ const parseCodexJsonl = async (path: string, mtimeMs: number): Promise<Candidate
   }
   if (!sessionId) sessionId = resolve(path).replace(/\.[^.]+$/, '').split(/[\\/]/).pop() || ''
   if (!sessionId) return null
+  const classification = codexSessionClassification({
+    source: codexSource,
+    threadSource
+  })
+  const resumeCommand = importedCandidateAllowsResume(classification)
+    ? codexResumeCommand(
+        {
+          id: sessionId,
+          model,
+          approval_mode: approvalPolicy,
+          sandbox_policy: sandboxMode ? JSON.stringify({ type: sandboxMode }) : undefined,
+          reasoning_effort: effort
+        },
+        cwd
+      )
+    : undefined
   return {
     source: 'codex',
     sessionId,
@@ -391,29 +538,21 @@ const parseCodexJsonl = async (path: string, mtimeMs: number): Promise<Candidate
     transcriptPath: path,
     modifiedAt: mtimeMs,
     model,
-    resumeCommand: codexResumeCommand(
-      {
-        id: sessionId,
-        model,
-        approval_mode: approvalPolicy,
-        sandbox_policy: sandboxMode ? JSON.stringify({ type: sandboxMode }) : undefined,
-        reasoning_effort: effort
-      },
-      cwd
-    )
+    resumeCommand,
+    ...classification
   }
 }
 
-const importCodexFromDisk = async (codexHome: string, limit: number) => {
-  const files = collectFiles(join(codexHome, 'sessions')).slice(0, Math.min(limit * 2, maxScanFiles))
-  const candidates = await Promise.all(files.map((file) => parseCodexJsonl(file.path, file.mtimeMs)))
-  return candidates.filter(Boolean).slice(0, limit) as CandidateBase[]
+const importCodexFromDisk = async (codexHome: string, jsonlParseCache: Map<string, JsonlParseCacheEntry>) => {
+  const files = await collectFiles(join(codexHome, 'sessions'))
+  const candidates = await Promise.all(files.map((file) => parseCachedJsonl(jsonlParseCache, 'codex', file, parseCodexJsonl)))
+  return candidates.filter(Boolean) as CandidateBase[]
 }
 
 const importCodexSessions = async (config: AgentSessionImportRuntimeConfig) => {
   const home = codexHomeFor(config.getEnv(), config.getHomeDir())
-  const sql = await importCodexFromSqlite(home, config.maxPerSource)
-  return sql ?? importCodexFromDisk(home, config.maxPerSource)
+  const sql = await importCodexFromSqlite(home, config.openSqliteDatabase)
+  return sql ?? importCodexFromDisk(home, config.jsonlParseCache)
 }
 
 const claudeDisplayTitle = (raw: unknown) => {
@@ -436,33 +575,69 @@ const textFromClaudeContent = (value: unknown) => {
 const parseClaudeJsonl = async (path: string, projectDirName: string, mtimeMs: number): Promise<CandidateBase | null> => {
   const lines = await readJsonLines(path)
   let title: string | undefined
+  let sidechainTitle: string | undefined
   let cwd = decodeClaudeProjectDir(projectDirName)
+  let sidechainCwd: string | undefined
   let model: string | undefined
+  let sidechainModel: string | undefined
   let permissionMode: string | undefined
+  let sidechainMessages = 0
+  let mainMessages = 0
   for (const obj of lines) {
-    cwd = cleanOptionalText(obj.cwd) || cwd
-    permissionMode = cleanOptionalText(obj.permissionMode) || permissionMode
+    const isSidechain = obj.isSidechain === true
+    if (isSidechain) {
+      sidechainCwd = cleanOptionalText(obj.cwd) || sidechainCwd
+    } else {
+      cwd = cleanOptionalText(obj.cwd) || cwd
+      permissionMode = cleanOptionalText(obj.permissionMode) || permissionMode
+    }
     const message = obj.message && typeof obj.message === 'object' && !Array.isArray(obj.message) ? obj.message as Record<string, unknown> : null
     if (!message) continue
-    if (message.role === 'user' && !title) title = claudeDisplayTitle(textFromClaudeContent(message.content))
-    if (message.role === 'assistant') model = cleanOptionalText(message.model) || model
+    if (isSidechain) sidechainMessages += 1
+    else mainMessages += 1
+    if (message.role === 'user') {
+      const displayTitle = claudeDisplayTitle(textFromClaudeContent(message.content))
+      if (isSidechain && !sidechainTitle) sidechainTitle = displayTitle
+      if (!isSidechain && !title) title = displayTitle
+    }
+    if (message.role === 'assistant') {
+      if (isSidechain) sidechainModel = cleanOptionalText(message.model) || sidechainModel
+      else model = cleanOptionalText(message.model) || model
+    }
   }
   const sessionId = resolve(path).replace(/\.[^.]+$/, '').split(/[\\/]/).pop() || ''
   if (!sessionId) return null
+  const isSubagent = sessionId.startsWith('agent-') || (sidechainMessages > 0 && mainMessages === 0)
+  const sessionKind: ManagedAiSessionKind | undefined = isSubagent ? 'subagent' : undefined
+  const parentSessionId = isSubagent ? claudeParentSessionIdFromPath(path) : undefined
+  const restorable = isSubagent ? false : undefined
+  const effectiveModel = isSubagent ? sidechainModel || model : model
+  const effectiveCwd = isSubagent ? sidechainCwd || cwd : cwd
+  const effectiveTitle = isSubagent ? sidechainTitle || title : title
   const launchCommand = ['claude', model ? `--model '${model.replace(/'/g, `'\\''`)}'` : '', permissionMode ? `--permission-mode '${permissionMode.replace(/'/g, `'\\''`)}'` : '']
     .filter(Boolean)
     .join(' ')
   return {
     source: 'claude-code',
     sessionId,
-    title,
-    summary: title,
-    cwd,
+    title: effectiveTitle,
+    summary: effectiveTitle,
+    cwd: effectiveCwd,
     transcriptPath: path,
     modifiedAt: mtimeMs,
-    model,
-    launchCommand
+    model: effectiveModel,
+    launchCommand: isSubagent ? undefined : launchCommand,
+    ...(sessionKind ? { sessionKind } : {}),
+    ...(parentSessionId ? { parentSessionId } : {}),
+    ...(typeof restorable === 'boolean' ? { restorable } : {})
   }
+}
+
+const claudeParentSessionIdFromPath = (path: string) => {
+  const parts = resolve(path).split(/[\\/]+/)
+  const subagentsIndex = parts.lastIndexOf('subagents')
+  if (subagentsIndex <= 0) return undefined
+  return cleanOptionalText(parts[subagentsIndex - 1])
 }
 
 const importClaudeSessions = async (config: AgentSessionImportRuntimeConfig) => {
@@ -471,19 +646,27 @@ const importClaudeSessions = async (config: AgentSessionImportRuntimeConfig) => 
     const projectsRoot = join(claudeHome, 'projects')
     let projectDirs: string[]
     try {
-      projectDirs = readdirSync(projectsRoot)
+      projectDirs = (await readdir(projectsRoot, { withFileTypes: true }))
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => entry.name)
     } catch {
       continue
     }
-    const files = projectDirs.flatMap((projectDirName) =>
-      collectFiles(join(projectsRoot, projectDirName))
-        .map((file) => ({ ...file, projectDirName }))
-    )
+    const files = (await Promise.all(
+      projectDirs.map(async (projectDirName) =>
+        (await collectFiles(join(projectsRoot, projectDirName)))
+          .map((file) => ({ ...file, projectDirName }))
+      )
+    )).flat()
     files.sort((first, second) => second.mtimeMs - first.mtimeMs)
-    const parsed = await Promise.all(files.slice(0, config.maxPerSource * 2).map((file) => parseClaudeJsonl(file.path, file.projectDirName, file.mtimeMs)))
+    const parsed = await Promise.all(
+      files.map((file) =>
+        parseCachedJsonl(config.jsonlParseCache, 'claude-code', file, (path, mtimeMs) => parseClaudeJsonl(path, file.projectDirName, mtimeMs))
+      )
+    )
     candidates.push(...(parsed.filter(Boolean) as CandidateBase[]))
   }
-  return candidates.sort((first, second) => second.modifiedAt - first.modifiedAt).slice(0, config.maxPerSource)
+  return candidates.sort((first, second) => second.modifiedAt - first.modifiedAt)
 }
 
 const opencodeConfigPath = (env: NodeJS.ProcessEnv, home: string) => cleanPath(env.OPENCODE_CONFIG_DIR) || pathInHome(home, '.local/share/opencode')
@@ -507,7 +690,7 @@ const importOpenCodeSessions = async (config: AgentSessionImportRuntimeConfig) =
   if (!snapshot) return []
   let db: SqliteDatabase | null = null
   try {
-    db = openSqliteDatabase(snapshot.path, true)
+    db = config.openSqliteDatabase(snapshot.path, true)
     const rows = queryRows<OpenCodeSessionRow>(
       db,
       `SELECT s.id, s.title, s.directory, s.time_updated, (
@@ -516,9 +699,7 @@ const importOpenCodeSessions = async (config: AgentSessionImportRuntimeConfig) =
            ORDER BY time_created DESC LIMIT 1
        ) AS last_assistant
        FROM session s
-       ORDER BY s.time_updated DESC
-       LIMIT ?`,
-      [config.maxPerSource]
+       ORDER BY s.time_updated DESC`
     )
     return rows
       .map((row) => {
@@ -545,21 +726,24 @@ const importOpenCodeSessions = async (config: AgentSessionImportRuntimeConfig) =
 }
 
 export const createAgentSessionImportRuntime = (config: Partial<AgentSessionImportRuntimeConfig> = {}): AgentSessionImportRuntime => {
+  let jsonlParseCache = new Map<string, JsonlParseCacheEntry>()
   const defaultConfig: AgentSessionImportRuntimeConfig = {
     getHomeDir: defaultHomeDir,
     getEnv: () => process.env,
     now: () => Date.now(),
-    maxPerSource: defaultMaxPerSource,
     enabled: process.env.AIOPSTERM_AGENT_SESSION_IMPORT_DISABLED !== '1',
-    cacheTtlMs: 30_000
+    cacheTtlMs: 30_000,
+    openSqliteDatabase,
+    jsonlParseCache
   }
-  let runtimeConfig: AgentSessionImportRuntimeConfig = { ...defaultConfig, ...config }
+  let runtimeConfig: AgentSessionImportRuntimeConfig = { ...defaultConfig, ...config, jsonlParseCache: config.jsonlParseCache || jsonlParseCache }
   let cachedAt = 0
   let cachedSessions: ImportedAgentSession[] = []
 
   return {
     configure: (input = {}) => {
-      runtimeConfig = { ...defaultConfig, ...input }
+      jsonlParseCache = input.jsonlParseCache || new Map<string, JsonlParseCacheEntry>()
+      runtimeConfig = { ...defaultConfig, ...input, jsonlParseCache }
       cachedAt = 0
       cachedSessions = []
     },

@@ -24,6 +24,23 @@ The terminal diagnostics include local/SSH terminal create, lifecycle, write, re
 
 When reporting a terminal input problem, include the recent `terminal.*` and `renderer.terminal-*` entries from this file.
 
+For lag when opening the `AI 会话` module, check the same runtime log for `ai-agent.managed-event` entries such as `managed_ai.sessions.imported`, then compare them with:
+
+```text
+<userData>/agent-sessions/managed-ai-sessions.audit.jsonl
+```
+
+Repeated `sessions.imported` or `sessions.git_refreshed` audit entries without user action usually mean a list reload is feeding another background refresh. Import scans are coalesced and cooled down after a run, and git timestamp-only probe results should not emit refresh events; if those entries continue every few hundred milliseconds, capture the adjacent runtime log lines and the audit tail.
+
+For lag after choosing `打开会话内容` or switching between content workspaces, collect both backend and renderer content-load entries from the runtime log:
+
+- `managed_ai.content.list` / `managed_ai.content.list.failed`: main-process transcript lookup and parse time for the requested page. Check `durationMs`, `format`, `records`, `total`, `offset`, `limit`, `existedBeforeImport`, and `importAttempted`.
+- `managed_ai.content.get-record` / `managed_ai.content.get-record.failed`: full-record lazy load time after expanding a truncated card.
+- `managed_ai.content.delete-record` / `managed_ai.content.delete-record.failed`: transcript record deletion time and whether a backup was created. Check `recordId`, `durationMs`, `backedUp`, `existedBeforeImport`, and `importAttempted`.
+- `renderer.managed-ai-content.load` / `renderer.managed-ai-content.load.failed`: renderer-side page wait plus Vue update timing. Check `apiDurationMs`, `durationMs`, `renderSettleMs`, `reason`, `offset`, `limit`, `records`, `loadedRecords`, `total`, and `hasMore`.
+
+For an existing session, content loading should not emit a new `managed_ai.sessions.imported` event and should not depend on git metadata refresh. The renderer loads transcript records in small pages and appends more on scroll, viewport fill, or search prefetch. If backend `managed_ai.content.list.durationMs` is low but renderer `renderSettleMs` or total `durationMs` is high, the remaining bottleneck is likely the currently rendered card batch rather than transcript IO.
+
 ## Native Crashes
 
 Native crash diagnostics are enabled by `npm run build:start` through `AIOPSTERM_CRASH_DIAGNOSTICS=1`. Official packaged builds keep this diagnostic mode disabled. When enabled, aiopsterm starts Electron's Crashpad reporter early in the main process. Crash dumps are stored locally and are not uploaded:

@@ -38,7 +38,6 @@ type AgentSessionNotificationRuntimeOptions = {
   bulkManagedAiSessions: (input: ManagedAiSessionBulkInput) => Promise<ManagedAiSessionBulkResult>
   appendManagedAiSessionAudit: (entry: ManagedAiSessionAuditEntry) => void
   publishManagedAiStreamFrame: (name: string, session: ManagedAiSessionRecord | null, payload: Record<string, unknown>) => void
-  maxNotifications?: number
 }
 
 const notificationMutationError = (errorCode: string, errorMessage: string): ManagedAiNotificationMutationResult => ({ ok: false, errorCode, errorMessage })
@@ -99,11 +98,9 @@ const focusRequestForSession = (session: ManagedAiSessionRecord): ManagedAiSessi
 })
 
 export const createAgentSessionNotificationRuntime = (options: AgentSessionNotificationRuntimeOptions) => {
-  const notificationLimit = () => options.maxNotifications || 200
-
   const allNotifications = () => options.getSnapshot().sessions.map(notificationForSession)
 
-  const normalizeLimit = (value: unknown) => Math.min(cleanPositiveInteger(value) || 50, notificationLimit())
+  const normalizeLimit = (value: unknown) => cleanPositiveInteger(value) || 50
 
   const listPayload = (input: ManagedAiNotificationListInput = {}) => {
     const source = normalizeSource(input.source)

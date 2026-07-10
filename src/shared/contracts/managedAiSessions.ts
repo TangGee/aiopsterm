@@ -34,6 +34,8 @@ export type ManagedAiRequestKind = 'permission' | 'question' | 'plan' | 'notific
 
 export type ManagedAiDecisionMode = 'blocking' | 'telemetry' | 'local'
 
+export type ManagedAiSessionKind = 'main' | 'subagent' | 'internal'
+
 export type AiAgentSessionEventInput = {
   source?: string
   agent?: string
@@ -99,6 +101,25 @@ export type AiAgentSessionEventInput = {
   launch_command?: string
   resumeCommand?: string
   resume_command?: string
+  sessionKind?: string
+  session_kind?: string
+  threadSource?: string
+  thread_source?: string
+  isSubagent?: boolean
+  is_subagent?: boolean
+  isSidechain?: boolean
+  is_sidechain?: boolean
+  sidechain?: boolean
+  subagent?: unknown
+  parentSessionId?: string
+  parent_session_id?: string
+  parentThreadId?: string
+  parent_thread_id?: string
+  restorable?: boolean
+  isRestorable?: boolean
+  is_restorable?: boolean
+  canResume?: boolean
+  can_resume?: boolean
   processId?: number
   process_id?: number
   pid?: number
@@ -140,6 +161,9 @@ export type AiAgentSessionEvent = {
   actionable?: boolean
   launchCommand?: string
   resumeCommand?: string
+  sessionKind?: ManagedAiSessionKind
+  parentSessionId?: string
+  restorable?: boolean
   processId?: number
   parentProcessId?: number
   processGroupId?: number
@@ -203,6 +227,9 @@ export type ManagedAiSessionRecord = {
   actionable?: boolean
   launchCommand?: string
   resumeCommand?: string
+  sessionKind?: ManagedAiSessionKind
+  parentSessionId?: string
+  restorable?: boolean
   processId?: number
   parentProcessId?: number
   processGroupId?: number

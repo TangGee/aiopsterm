@@ -3,6 +3,7 @@ import {
   bulkManagedAiSessions,
   clearManagedAiNotifications,
   clearManagedAiSession,
+  deleteManagedAiSessionContentRecord,
   dismissManagedAiNotification,
   getAgentHibernationConfig,
   getManagedAiSessionContentRecord,
@@ -43,6 +44,7 @@ export const registerManagedAiSessionsIpc = (ipcMain: IpcMain, input: RegisterMa
   ipcMain.handle('ai-agent:sessions:content:list', (_event, listInput) => listManagedAiSessionContent(listInput))
   ipcMain.handle('ai-agent:sessions:content:get-record', (_event, recordInput) => getManagedAiSessionContentRecord(recordInput))
   ipcMain.handle('ai-agent:sessions:content:update-record', (_event, updateInput) => updateManagedAiSessionContentRecord(updateInput))
+  ipcMain.handle('ai-agent:sessions:content:delete-record', (_event, deleteInput) => deleteManagedAiSessionContentRecord(deleteInput))
   ipcMain.handle('ai-agent:notifications:list', (_event, listInput) => listManagedAiNotifications(listInput))
   ipcMain.handle('ai-agent:notifications:mark-read', (_event, markReadInput) => markManagedAiNotificationRead(markReadInput))
   ipcMain.handle('ai-agent:notifications:dismiss', (_event, dismissInput) => dismissManagedAiNotification(dismissInput))
