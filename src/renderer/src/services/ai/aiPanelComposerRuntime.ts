@@ -5,8 +5,8 @@ import {
 } from '@/services/ai/aiPanelEditableRuntime'
 import type { AiContentPart, AiDocChipContentPart, AiImageContentPart } from '@shared/contracts/aiChat'
 
-export type AiPanelComposerChatMode = 'agent' | 'cmd'
-export type AiPanelComposerResponseMode = 'agent' | 'command'
+export type AiPanelComposerChatMode = 'agent' | 'cmd' | 'chat'
+export type AiPanelComposerResponseMode = 'agent' | 'command' | 'chat'
 
 export const AI_PANEL_COMPOSER_NO_MODEL_NOTICE = '请先配置可用模型。'
 
@@ -64,8 +64,10 @@ export const isAiPanelComposerEmpty = (input: {
   selectedCommand: unknown
 }) => !input.draft.trim() && input.selectedContextCount === 0 && input.images.length === 0 && input.files.length === 0 && !input.selectedCommand
 
-export const aiPanelComposerResponseMode = (input: { chatMode: AiPanelComposerChatMode; agentMode?: boolean }): AiPanelComposerResponseMode =>
-  input.chatMode === 'agent' || input.agentMode ? 'agent' : 'command'
+export const aiPanelComposerResponseMode = (input: { chatMode: AiPanelComposerChatMode; agentMode?: boolean }): AiPanelComposerResponseMode => {
+  if (input.chatMode === 'agent' || input.agentMode) return 'agent'
+  return input.chatMode === 'chat' ? 'chat' : 'command'
+}
 
 export const planAiPanelComposerSend = (input: {
   streaming: boolean

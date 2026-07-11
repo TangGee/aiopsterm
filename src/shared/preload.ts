@@ -449,6 +449,15 @@ export type {
   AiTodoSubtask
 } from './contracts/aiChat'
 export type {
+  ClineAgentAbortInput,
+  ClineAgentAbortResult,
+  ClineAgentApprovalInput,
+  ClineAgentApprovalResult,
+  ClineAgentProfile,
+  ClineAgentTaskEvent,
+  ClineAgentTurnResult
+} from './contracts/clineAgent'
+export type {
   DatabaseAiDrawerAction,
   DatabaseAiDrawerLifecycleInput,
   DatabaseAiDrawerLifecycleResult,

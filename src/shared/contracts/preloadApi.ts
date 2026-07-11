@@ -313,6 +313,13 @@ import type {
   AiTodoSnapshotResult
 } from './aiChat'
 import type {
+  ClineAgentAbortInput,
+  ClineAgentAbortResult,
+  ClineAgentApprovalInput,
+  ClineAgentApprovalResult,
+  ClineAgentTaskEvent
+} from './clineAgent'
+import type {
   DatabaseAiDrawerLifecycleInput,
   DatabaseAiDrawerLifecycleResult,
   DatabaseAiDrawerRequestInput,
@@ -623,6 +630,9 @@ export type AiopsPreloadApi = {
   createAiChatExchangeRequest: (input: AiChatExchangeRequestInput) => Promise<AiChatExchangeRequestResult>
   generateAiChatResponse: (input: AiChatResponseInput) => Promise<AiChatResponseResult>
   cancelAiChatResponse: (input: AiChatCancelInput) => Promise<AiChatCancelResult>
+  respondClineAgentApproval: (input: ClineAgentApprovalInput) => Promise<ClineAgentApprovalResult>
+  abortClineAgentTask: (input: ClineAgentAbortInput) => Promise<ClineAgentAbortResult>
+  onClineAgentTaskEvent: (listener: (event: ClineAgentTaskEvent) => void) => () => void
   transcribeVoiceInput: (input?: VoiceTranscriptionInput) => Promise<VoiceTranscriptionResult>
   testDatabaseConnection: (input: DatabaseConnectionTestInput) => Promise<DatabaseConnectionTestResult>
   saveDatabaseConnection: (input: DatabaseConnectionSaveInput) => Promise<DatabaseConnectionSaveResult>

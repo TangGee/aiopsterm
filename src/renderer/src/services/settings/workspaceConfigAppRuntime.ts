@@ -303,11 +303,18 @@ export const normalizeExportMcpConfig = (source?: UserConfig['exportMcp']) => {
     allowAgentSshAuthSubmit:
       typeof incoming.allowAgentSshAuthSubmit === 'boolean'
         ? incoming.allowAgentSshAuthSubmit
-        : defaultExportMcpSettings.allowAgentSshAuthSubmit
+        : defaultExportMcpSettings.allowAgentSshAuthSubmit,
+    allowDatabaseRead:
+      typeof incoming.allowDatabaseRead === 'boolean'
+        ? incoming.allowDatabaseRead
+        : defaultExportMcpSettings.allowDatabaseRead
   }
   return {
     normalized,
-    changed: !isRecord(source) || incoming.allowAgentSshAuthSubmit !== normalized.allowAgentSshAuthSubmit
+    changed:
+      !isRecord(source) ||
+      incoming.allowAgentSshAuthSubmit !== normalized.allowAgentSshAuthSubmit ||
+      incoming.allowDatabaseRead !== normalized.allowDatabaseRead
   }
 }
 

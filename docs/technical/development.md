@@ -90,6 +90,20 @@ For runtime or user-visible behavior changes, add focused tests at the changed b
 npm run test:e2e
 ```
 
+## Cline Agent Sidecar Verification
+
+Electron 31 cannot load the Node 22-oriented Cline SDK directly. Classic host management and DB AI therefore use an independent bundle executed by the exact-pinned Node `22.20.0` runtime. Bun `1.3.13` is only the bundler and is not distributed. After changing Agent contracts, profiles, provider mapping, tool bridges, persistence, approvals, abort handling, or packaging, run:
+
+```bash
+npm run typecheck
+npm run test -- tests/cline-agent-runtime.test.ts tests/cline-agent-sidecar-runtime.test.ts tests/cline-agent-sidecar-supervisor.test.ts tests/cline-agent-profiles.test.ts tests/classic-cline-ai-chat-runtime.test.ts tests/ai-chat-action-runtime.test.ts tests/ai-panel-history-runtime.test.ts tests/codex-terminal-bridge.test.ts tests/database-backend.test.ts
+npm run build:cline-sidecar
+npm run audit:cline-sidecar
+npm run audit:package-config
+```
+
+The sidecar audit launches the actual current-platform Node runtime and bundle, validates the versioned ready/ping/graceful-shutdown/zero-exit sequence, and creates/stops sessions for every supported provider mapping without network calls. A deterministic proxied SSE scenario also proves `model -> approval -> tool -> result -> model -> final`. The audit verifies bundle hashes, the metafile dependency boundary, the complete CycloneDX component inventory, third-party notices, Node's upstream license file, and the absence of Claude Agent SDK and SAP SDK implementation code. The ignored output directory must be rebuilt on each target OS. Release verification must additionally prove that packaged resources contain the runtime, bundle, manifest, metafile, SBOM, notices, Node license, Cline license, and attribution while `app.asar` excludes `@cline/*`, sidecar source, and `external-reference/`. macOS and Windows validation must run on native signing/package runners; Linux output does not prove those platform artifacts.
+
 Package and release work should also use the package audits documented in the usage package verification guide.
 
 ### Native Module ABI During Tests

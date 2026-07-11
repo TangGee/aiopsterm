@@ -45,6 +45,7 @@ const cloneMessage = (message: AiChatHistoryMessage): AiChatHistoryMessage => ({
   hosts: message.hosts ? message.hosts.map((host) => ({ ...host })) : undefined,
   contentParts: message.contentParts ? cloneJson(message.contentParts) : undefined,
   commandExecution: message.commandExecution ? cloneJson(message.commandExecution) : undefined,
+  agentTask: message.agentTask ? cloneJson(message.agentTask) : undefined,
   mcpToolCall: message.mcpToolCall ? cloneJson(message.mcpToolCall) : undefined,
   mcpResourceAccess: message.mcpResourceAccess ? cloneJson(message.mcpResourceAccess) : undefined,
   followupOptions: message.followupOptions ? [...message.followupOptions] : undefined
@@ -266,6 +267,24 @@ const normalizeMessages = (messages: unknown): AiChatHistoryMessage[] => {
             interactive: item.commandExecution.interactive === true
           }
         : undefined
+      const agentTask = isRecord(item.agentTask)
+        ? {
+            taskId: normalizeText(item.agentTask.taskId),
+            turnId: normalizeText(item.agentTask.turnId),
+            terminalSessionId: normalizeText(item.agentTask.terminalSessionId) || undefined,
+            toolCallId: normalizeText(item.agentTask.toolCallId) || undefined,
+            toolName: normalizeText(item.agentTask.toolName) || undefined,
+            status:
+              item.agentTask.status === 'starting' ||
+              item.agentTask.status === 'running' ||
+              item.agentTask.status === 'waiting-approval' ||
+              item.agentTask.status === 'done' ||
+              item.agentTask.status === 'cancelled' ||
+              item.agentTask.status === 'error'
+                ? item.agentTask.status
+                : undefined
+          }
+        : undefined
       const mcpResourceAccess = isRecord(item.mcpResourceAccess)
         ? {
             serverName: normalizeText(item.mcpResourceAccess.serverName),
@@ -283,10 +302,19 @@ const normalizeMessages = (messages: unknown): AiChatHistoryMessage[] => {
         favorite: item.favorite === true ? true : undefined,
         feedback: item.feedback === 'up' || item.feedback === 'down' ? item.feedback : undefined,
         executedCommand: normalizeText(item.executedCommand) || undefined,
+        commandExecutionStatus:
+          item.commandExecutionStatus === 'pending' ||
+          item.commandExecutionStatus === 'running' ||
+          item.commandExecutionStatus === 'succeeded' ||
+          item.commandExecutionStatus === 'failed'
+            ? item.commandExecutionStatus
+            : undefined,
+        commandExecutionMessage: normalizeText(item.commandExecutionMessage) || undefined,
         ask,
         say,
         action,
         commandExecution: commandExecution?.ip && commandExecution.command ? commandExecution : undefined,
+        agentTask: agentTask?.taskId && agentTask.turnId && agentTask.status ? (agentTask as AiChatHistoryMessage['agentTask']) : undefined,
         mcpToolCall: mcpToolCall?.serverName && mcpToolCall.toolName ? mcpToolCall : undefined,
         mcpResourceAccess: mcpResourceAccess?.serverName && mcpResourceAccess.uri ? mcpResourceAccess : undefined,
         followupOptions: followupOptions?.length ? followupOptions : undefined,

@@ -8,17 +8,17 @@
       @submit.prevent="$emit('createDatabase')"
     >
       <header>
-        <h2>Create Database</h2>
+        <h2>{{ t('database.modal.createDatabase') }}</h2>
         <button
           type="button"
-          title="Close"
+          :title="t('database.common.close')"
           @click="$emit('closeCreateDatabase')"
         >
           <X />
         </button>
       </header>
       <label>
-        Name:
+        {{ t('database.field.name') }}:
         <input
           :value="createDatabaseModal.name"
           :class="{ error: createDatabaseNameError }"
@@ -30,9 +30,9 @@
         v-if="createDatabaseNameError"
         class="db-modal-feedback error"
       >
-        Use a valid identifier: start with a letter or underscore, then letters, numbers, or underscores.
+        {{ t('database.modal.invalidDatabaseName') }}
       </p>
-      <strong>Preview</strong>
+      <strong>{{ t('database.modal.preview') }}</strong>
       <textarea
         :value="createDatabaseSql"
         spellcheck="false"
@@ -50,13 +50,13 @@
           type="button"
           @click="$emit('closeCreateDatabase')"
         >
-          Cancel
+          {{ t('database.common.cancel') }}
         </button>
         <button
           type="submit"
           :disabled="!createDatabaseCanSubmit"
         >
-          Create
+          {{ t('database.common.create') }}
         </button>
       </footer>
     </form>
@@ -69,12 +69,12 @@
     <section class="db-chart-modal">
       <header>
         <div>
-          <h2>{{ chartModal.summary?.title || 'Chart' }}</h2>
-          <span>{{ chartModal.summary?.scopeLabel }}</span>
+          <h2>{{ chartModal.summary ? localizePageLabel(chartModal.summary.title) : t('database.modal.chart') }}</h2>
+          <span>{{ chartModal.summary ? localizePageLabel(chartModal.summary.scopeLabel) : '' }}</span>
         </div>
         <button
           type="button"
-          title="Close"
+          :title="t('database.common.close')"
           @click="$emit('closeChart')"
         >
           <X />
@@ -85,9 +85,9 @@
         class="db-chart-body"
       >
         <div class="db-chart-metrics">
-          <span><strong>{{ chartModal.summary.rowCount }}</strong> Rows</span>
-          <span><strong>{{ chartModal.summary.valueColumn }}</strong> Value</span>
-          <span><strong>{{ chartModal.summary.categoryColumn }}</strong> Category</span>
+          <span><strong>{{ chartModal.summary.rowCount }}</strong> {{ t('database.modal.rows') }}</span>
+          <span><strong>{{ chartModal.summary.valueColumn }}</strong> {{ t('database.modal.value') }}</span>
+          <span><strong>{{ chartModal.summary.categoryColumn }}</strong> {{ t('database.modal.category') }}</span>
         </div>
         <div class="db-chart-bars">
           <div
@@ -103,14 +103,14 @@
           </div>
         </div>
         <p class="db-chart-footnote">
-          Numeric columns: {{ chartModal.summary.numericColumns.join(', ') }}
+          {{ t('database.modal.numericColumns') }}: {{ chartModal.summary.numericColumns.join(', ') }}
         </p>
       </div>
       <p
         v-else
         class="db-chart-empty"
       >
-        {{ chartModal.error || 'Current page does not contain a numeric column to chart.' }}
+        {{ localizeChartError(chartModal.error) }}
       </p>
     </section>
   </div>
@@ -122,12 +122,12 @@
     <section class="db-comment-modal">
       <header>
         <div>
-          <h2>{{ commentModal.title }}</h2>
-          <span>{{ commentModal.scopeLabel }}</span>
+          <h2>{{ localizePageLabel(commentModal.title) }}</h2>
+          <span>{{ localizePageLabel(commentModal.scopeLabel) }}</span>
         </div>
         <button
           type="button"
-          title="Close"
+          :title="t('database.common.close')"
           @click="$emit('closeComment')"
         >
           <X />
@@ -147,21 +147,21 @@
         @input="$emit('updateCommentDraft', ($event.target as HTMLTextAreaElement).value)"
       />
       <footer>
-        <span>{{ commentModal.updatedAt ? `Saved ${formatCommentTime(commentModal.updatedAt)}` : 'Not saved' }}</span>
+        <span>{{ commentModal.updatedAt ? t('database.modal.savedAt', { time: formatCommentTime(commentModal.updatedAt) }) : t('database.modal.notSaved') }}</span>
         <div>
           <button
             type="button"
             :disabled="commentModal.loading || commentModal.saving"
             @click="$emit('closeComment')"
           >
-            Cancel
+            {{ t('database.common.cancel') }}
           </button>
           <button
             type="button"
             :disabled="commentModal.loading || commentModal.saving"
             @click="$emit('saveComment')"
           >
-            {{ commentModal.saving ? 'Saving' : 'Save' }}
+            {{ commentModal.saving ? t('database.common.saving') : t('database.common.save') }}
           </button>
         </div>
       </footer>
@@ -177,7 +177,7 @@
         <h2>DDL - {{ ddlModal.tableName }}</h2>
         <button
           type="button"
-          title="Close"
+          :title="t('database.common.close')"
           @click="$emit('closeDdl')"
         >
           <X />
@@ -189,7 +189,7 @@
           :disabled="!ddlModal.ddl || ddlModal.loading"
           @click="$emit('copyDdl')"
         >
-          Copy
+          {{ t('database.common.copy') }}
         </button>
       </div>
       <p
@@ -200,7 +200,7 @@
       </p>
       <textarea
         v-else
-        :value="ddlModal.loading ? 'Loading DDL...' : ddlModal.ddl"
+        :value="ddlModal.loading ? t('database.modal.loadingDdl') : ddlModal.ddl"
         readonly
         spellcheck="false"
       />
@@ -213,21 +213,21 @@
   >
     <section class="db-danger-confirm">
       <header>
-        <h2>{{ dangerConfirm.action === 'drop' ? 'Drop Table' : 'Truncate Table' }}</h2>
+        <h2>{{ dangerConfirm.action === 'drop' ? t('database.modal.dropTable') : t('database.modal.truncateTable') }}</h2>
         <button
           type="button"
-          title="Close"
+          :title="t('database.common.close')"
           @click="$emit('cancelDanger')"
         >
           <X />
         </button>
       </header>
       <p>
-        {{ dangerConfirm.action === 'drop' ? 'This will remove the table in a real database.' : 'This will delete all table rows in a real database.' }}
+        {{ dangerConfirm.action === 'drop' ? t('database.modal.dropTableWarning') : t('database.modal.truncateTableWarning') }}
       </p>
       <code>{{ dangerConfirm.sql }}</code>
       <label>
-        Type table name to confirm
+        {{ t('database.modal.typeTableName') }}
         <input
           :value="dangerConfirm.confirmText"
           autocomplete="off"
@@ -239,7 +239,7 @@
           type="button"
           @click="$emit('cancelDanger')"
         >
-          Cancel
+          {{ t('database.common.cancel') }}
         </button>
         <button
           class="danger"
@@ -247,7 +247,7 @@
           :disabled="dangerConfirm.confirmText !== dangerConfirm.tableName"
           @click="$emit('confirmDanger')"
         >
-          Confirm
+          {{ t('database.common.confirm') }}
         </button>
       </footer>
     </section>
@@ -259,30 +259,30 @@
   >
     <section class="db-operation-confirm">
       <header>
-        <h2>{{ operationConfirm.title }}</h2>
+        <h2>{{ operationConfirmTitle }}</h2>
         <button
           type="button"
-          title="Close"
+          :title="t('database.common.close')"
           @click="$emit('cancelOperation')"
         >
           <X />
         </button>
       </header>
-      <p>{{ operationConfirm.message }}</p>
+      <p>{{ operationConfirmMessage }}</p>
       <code v-if="operationConfirm.detail">{{ operationConfirm.detail }}</code>
       <footer>
         <button
           type="button"
           @click="$emit('cancelOperation')"
         >
-          Cancel
+          {{ t('database.common.cancel') }}
         </button>
         <button
           class="danger"
           type="button"
           @click="$emit('confirmOperation')"
         >
-          {{ operationConfirm.confirmLabel }}
+          {{ operationConfirmConfirmLabel }}
         </button>
       </footer>
     </section>
@@ -290,7 +290,9 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import { X } from 'lucide-vue-next'
+import { useI18n } from '@/i18n'
 import { formatChartNumber, formatCommentTime, type DatabaseChartSummary } from '@/services/database/databaseWorkspaceRuntime'
 
 type CreateDatabaseModalState = {
@@ -335,13 +337,14 @@ type DangerConfirmState = {
 
 type OperationConfirmState = {
   open: boolean
+  action: '' | 'deleteGroup' | 'removeConnection'
   title: string
   message: string
   detail: string
   confirmLabel: string
 }
 
-defineProps<{
+const props = defineProps<{
   createDatabaseModal: CreateDatabaseModalState
   createDatabaseSql: string
   createDatabaseNameError: boolean
@@ -352,6 +355,46 @@ defineProps<{
   dangerConfirm: DangerConfirmState
   operationConfirm: OperationConfirmState
 }>()
+
+const { t } = useI18n()
+
+const operationConfirmTitle = computed(() => {
+  if (props.operationConfirm.action === 'deleteGroup') return t('database.modal.deleteGroup')
+  if (props.operationConfirm.action === 'removeConnection') return t('database.modal.removeConnection')
+  return props.operationConfirm.title
+})
+
+const operationConfirmMessage = computed(() => {
+  if (props.operationConfirm.action === 'deleteGroup') {
+    return t('database.modal.deleteGroupMessage', { name: props.operationConfirm.detail })
+  }
+  if (props.operationConfirm.action === 'removeConnection') {
+    const count = Number(props.operationConfirm.message.match(/(\d+) related workspace tab/)?.[1] || 0)
+    return count > 0
+      ? t('database.modal.removeConnectionWithTabsMessage', { name: props.operationConfirm.detail, count })
+      : t('database.modal.removeConnectionMessage', { name: props.operationConfirm.detail })
+  }
+  return props.operationConfirm.message
+})
+
+const operationConfirmConfirmLabel = computed(() => {
+  if (props.operationConfirm.action === 'deleteGroup') return t('database.common.delete')
+  if (props.operationConfirm.action === 'removeConnection') return t('database.common.remove')
+  return props.operationConfirm.confirmLabel
+})
+
+function localizePageLabel(value: string) {
+  return value
+    .replace(/SQL page (\d+)/g, (_match, page) => t('database.modal.sqlPage', { page }))
+    .replace(/SQL result/g, t('database.modal.sqlResult'))
+    .replace(/ - page (\d+)$/g, (_match, page) => ` - ${t('database.modal.pageNumber', { page })}`)
+}
+
+function localizeChartError(value: string) {
+  return !value || value === 'Current page does not contain a numeric column to chart.'
+    ? t('database.modal.noNumericColumn')
+    : value
+}
 
 defineEmits<{
   createDatabase: []

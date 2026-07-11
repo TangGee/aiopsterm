@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from '@/i18n'
 
 const pageSizes = [10, 50, 100, 500, 1000, 5000, 10000]
+const { t } = useI18n()
 
 const props = withDefaults(
   defineProps<{
@@ -30,11 +32,11 @@ const props = withDefaults(
     editDisabledReason: '',
     hideRefresh: false,
     canExport: false,
-    exportTitle: 'Export CSV',
+    exportTitle: '',
     canChart: false,
-    chartTitle: 'Chart',
+    chartTitle: '',
     canComment: false,
-    commentTitle: 'Comment'
+    commentTitle: ''
   }
 )
 
@@ -58,17 +60,25 @@ const pageCount = computed(() =>
 )
 const atFirstPage = computed(() => props.page <= 1)
 const atLastPage = computed(() => pageCount.value !== null && props.page >= pageCount.value)
-const addRowTitle = computed(() => (props.canEdit ? 'Add row' : props.editDisabledReason || 'Editing is disabled for this result'))
-const deleteRowTitle = computed(() => {
-  if (!props.canEdit) return props.editDisabledReason || 'Editing is disabled for this result'
-  if (!props.hasSelection) return 'Select a row before deleting'
-  return 'Delete row'
+const localizedEditDisabledReason = computed(() => {
+  if (props.editDisabledReason === 'Connection is unavailable') return t('database.data.edit.connectionUnavailable')
+  if (props.editDisabledReason === 'Connection is readonly') return t('database.data.edit.connectionReadonly')
+  if (props.editDisabledReason === 'View editing is disabled in this version') return t('database.data.edit.viewDisabled')
+  if (props.editDisabledReason === 'Table is unavailable') return t('database.data.edit.tableUnavailable')
+  return props.editDisabledReason
 })
-const undoTitle = computed(() => (props.canUndo ? 'Undo' : 'Nothing to undo'))
+const editingDisabledTitle = computed(() => localizedEditDisabledReason.value || t('database.grid.toolbar.editingDisabled'))
+const addRowTitle = computed(() => (props.canEdit ? t('database.grid.toolbar.addRow') : editingDisabledTitle.value))
+const deleteRowTitle = computed(() => {
+  if (!props.canEdit) return editingDisabledTitle.value
+  if (!props.hasSelection) return t('database.grid.toolbar.selectRowBeforeDeleting')
+  return t('database.grid.toolbar.deleteRow')
+})
+const undoTitle = computed(() => (props.canUndo ? t('database.grid.toolbar.undo') : t('database.grid.toolbar.nothingToUndo')))
 const saveTitle = computed(() => {
-  if (!props.canEdit) return props.editDisabledReason || 'Editing is disabled for this result'
-  if (!props.isDirty) return 'No changes to save'
-  return 'Save changes'
+  if (!props.canEdit) return editingDisabledTitle.value
+  if (!props.isDirty) return t('database.grid.toolbar.noChangesToSave')
+  return t('database.grid.toolbar.saveChanges')
 })
 
 function gotoPage(page: number) {
@@ -87,7 +97,7 @@ function changePageSize(size: number) {
         type="button"
         class="db-toolbar-btn db-toolbar-btn-first"
         :disabled="atFirstPage"
-        title="First page"
+        :title="t('database.grid.toolbar.firstPage')"
         @click="gotoPage(1)"
       >
         ⏮
@@ -96,7 +106,7 @@ function changePageSize(size: number) {
         type="button"
         class="db-toolbar-btn db-toolbar-btn-prev"
         :disabled="atFirstPage"
-        title="Previous page"
+        :title="t('database.grid.toolbar.previousPage')"
         @click="gotoPage(page - 1)"
       >
         ⏴
@@ -110,7 +120,7 @@ function changePageSize(size: number) {
       <button
         type="button"
         class="db-toolbar-btn db-toolbar-btn-next"
-        title="Next page"
+        :title="t('database.grid.toolbar.nextPage')"
         @click="gotoPage(page + 1)"
       >
         ⏵
@@ -119,7 +129,7 @@ function changePageSize(size: number) {
         type="button"
         class="db-toolbar-btn db-toolbar-btn-last"
         :disabled="pageCount === null || atLastPage"
-        title="Last page"
+        :title="t('database.grid.toolbar.lastPage')"
         @click="emit('gotoLastPage')"
       >
         ⏭
@@ -138,9 +148,9 @@ function changePageSize(size: number) {
       </select>
       <span
         class="db-toolbar-total"
-        title="Refresh total"
+        :title="t('database.grid.toolbar.refreshTotal')"
         @click="emit('refreshTotal')"
-      >Total:
+      >{{ t('database.grid.toolbar.total') }}
         <span
           v-if="total === null || total === undefined"
           class="db-toolbar-total-unknown"
@@ -153,7 +163,7 @@ function changePageSize(size: number) {
         v-if="!hideRefresh"
         type="button"
         class="db-toolbar-btn db-toolbar-btn-refresh"
-        title="Refresh"
+        :title="t('database.common.refresh')"
         @click="emit('refresh')"
       >
         ↻
@@ -198,7 +208,7 @@ function changePageSize(size: number) {
         type="button"
         class="db-toolbar-btn db-toolbar-btn-chart"
         :disabled="!canChart"
-        :title="canChart ? chartTitle : 'No rows to chart'"
+        :title="canChart ? (chartTitle || t('database.grid.toolbar.chart')) : t('database.grid.toolbar.noRowsToChart')"
         @click="emit('chart')"
       >
         📊
@@ -209,10 +219,10 @@ function changePageSize(size: number) {
       type="button"
       :disabled="!canExport"
       class="db-toolbar-btn db-toolbar-export"
-      :title="canExport ? exportTitle : 'No rows to export'"
+      :title="canExport ? (exportTitle || t('database.grid.toolbar.exportCsv')) : t('database.grid.toolbar.noRowsToExport')"
       @click="emit('export')"
     >
-      Export ▾
+      {{ t('database.common.export') }} ▾
     </button>
   </div>
 </template>

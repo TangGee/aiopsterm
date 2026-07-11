@@ -1,4 +1,5 @@
 import type { IpcMain } from 'electron'
+import { withClineAgentRendererOwner } from '../backend/agent/clineAgentOwnerRuntime'
 import {
   cancelDatabaseAiDrawerResponse,
   cancelDatabaseAiPaneResponse,
@@ -85,13 +86,31 @@ export const registerDatabaseIpc = (ipcMain: IpcMain, input: RegisterDatabaseIpc
   ipcMain.handle('database:comment:save', (_event, commentInput: DatabasePageCommentSaveInput) => saveDatabasePageComment(commentInput))
   ipcMain.handle('database:ai-pane-state:get', () => getDatabaseAiPaneState())
   ipcMain.handle('database:ai-pane-state:save', (_event, stateInput: DatabaseAiPaneStateSnapshot) => saveDatabaseAiPaneState(stateInput))
-  ipcMain.handle('database:ai-pane-request', (_event, requestInput: DatabaseAiPaneRequestInput) => createDatabaseAiPaneRequest(requestInput))
-  ipcMain.handle('database:ai-pane-start', (_event, lifecycleInput: DatabaseAiPaneLifecycleInput) => startDatabaseAiPaneResponse(lifecycleInput))
-  ipcMain.handle('database:ai-pane-cancel', (_event, lifecycleInput: DatabaseAiPaneLifecycleInput) => cancelDatabaseAiPaneResponse(lifecycleInput))
-  ipcMain.handle('database:ai-pane-response', (_event, responseInput: DatabaseAiPaneResponseInput) => generateDatabaseAiPaneResponse(responseInput))
-  ipcMain.handle('database:ai-drawer-request', (_event, requestInput: DatabaseAiDrawerRequestInput) => createDatabaseAiDrawerRequest(requestInput))
-  ipcMain.handle('database:ai-drawer-start', (_event, lifecycleInput: DatabaseAiDrawerLifecycleInput) => startDatabaseAiDrawerResponse(lifecycleInput))
-  ipcMain.handle('database:ai-drawer-cancel', (_event, lifecycleInput: DatabaseAiDrawerLifecycleInput) => cancelDatabaseAiDrawerResponse(lifecycleInput))
-  ipcMain.handle('database:ai-drawer-response', (_event, responseInput: DatabaseAiDrawerResponseInput) => generateDatabaseAiDrawerResponse(responseInput))
-  ipcMain.handle('database:ai-diagnose-sql-error', (_event, diagnosisInput: DatabaseSqlErrorDiagnosisInput) => diagnoseDatabaseSqlError(diagnosisInput))
+  ipcMain.handle('database:ai-pane-request', (event, requestInput: DatabaseAiPaneRequestInput) =>
+    withClineAgentRendererOwner(event.sender.id, () => createDatabaseAiPaneRequest(requestInput))
+  )
+  ipcMain.handle('database:ai-pane-start', (event, lifecycleInput: DatabaseAiPaneLifecycleInput) =>
+    withClineAgentRendererOwner(event.sender.id, () => startDatabaseAiPaneResponse(lifecycleInput))
+  )
+  ipcMain.handle('database:ai-pane-cancel', (event, lifecycleInput: DatabaseAiPaneLifecycleInput) =>
+    withClineAgentRendererOwner(event.sender.id, () => cancelDatabaseAiPaneResponse(lifecycleInput))
+  )
+  ipcMain.handle('database:ai-pane-response', (event, responseInput: DatabaseAiPaneResponseInput) =>
+    withClineAgentRendererOwner(event.sender.id, () => generateDatabaseAiPaneResponse(responseInput))
+  )
+  ipcMain.handle('database:ai-drawer-request', (event, requestInput: DatabaseAiDrawerRequestInput) =>
+    withClineAgentRendererOwner(event.sender.id, () => createDatabaseAiDrawerRequest(requestInput))
+  )
+  ipcMain.handle('database:ai-drawer-start', (event, lifecycleInput: DatabaseAiDrawerLifecycleInput) =>
+    withClineAgentRendererOwner(event.sender.id, () => startDatabaseAiDrawerResponse(lifecycleInput))
+  )
+  ipcMain.handle('database:ai-drawer-cancel', (event, lifecycleInput: DatabaseAiDrawerLifecycleInput) =>
+    withClineAgentRendererOwner(event.sender.id, () => cancelDatabaseAiDrawerResponse(lifecycleInput))
+  )
+  ipcMain.handle('database:ai-drawer-response', (event, responseInput: DatabaseAiDrawerResponseInput) =>
+    withClineAgentRendererOwner(event.sender.id, () => generateDatabaseAiDrawerResponse(responseInput))
+  )
+  ipcMain.handle('database:ai-diagnose-sql-error', (event, diagnosisInput: DatabaseSqlErrorDiagnosisInput) =>
+    withClineAgentRendererOwner(event.sender.id, () => diagnoseDatabaseSqlError(diagnosisInput))
+  )
 }

@@ -95,10 +95,10 @@ const createHarness = (input: { clipboardHasImage?: boolean; sendResult?: boolea
   let selectedCommandRef: { command: string; label?: string; path?: string } | null = null
   let streaming = false
   let noModelPrompt = false
-  let chatMode: 'agent' | 'cmd' = 'cmd'
+  let chatMode: 'agent' | 'cmd' | 'chat' = 'cmd'
   const calls = {
     cancelStreaming: vi.fn(async () => true),
-    sendChat: vi.fn(async (_text: string, _contentParts: AiContentPart[], _mode: 'agent' | 'command') => input.sendResult ?? true),
+    sendChat: vi.fn(async (_text: string, _contentParts: AiContentPart[], _mode: 'agent' | 'command' | 'chat') => input.sendResult ?? true),
     clearSelectedCommand: vi.fn(() => {
       selectedCommandId = null
       selectedCommandRef = null
@@ -138,7 +138,7 @@ const createHarness = (input: { clipboardHasImage?: boolean; sendResult?: boolea
   return {
     calls,
     runtime,
-    setChatMode: (mode: 'agent' | 'cmd') => {
+    setChatMode: (mode: 'agent' | 'cmd' | 'chat') => {
       chatMode = mode
     },
     setNoModelPrompt: (value: boolean) => {
@@ -207,6 +207,12 @@ describe('aiPanelComposerDomRuntime', () => {
     expect(calls.sendChat).toHaveBeenCalledWith('deploy', [{ type: 'text', text: 'deploy' }], 'command')
     expect(runtime.draft.value).toBe('')
     expect(calls.closePopups).toHaveBeenCalled()
+
+    setChatMode('chat')
+    runtime.setDraft('explain only')
+    await flushDomWork()
+    await runtime.handleSend()
+    expect(calls.sendChat).toHaveBeenLastCalledWith('explain only', [{ type: 'text', text: 'explain only' }], 'chat')
 
     setStreaming(true)
     await runtime.handleSend()

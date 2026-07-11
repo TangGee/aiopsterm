@@ -1,14 +1,32 @@
 import {
+  cancelDatabaseAiDrawerResponse as cancelDatabaseAiDrawerResponseRuntime,
+  cancelDatabaseAiPaneResponse as cancelDatabaseAiPaneResponseRuntime,
   configureDatabaseAiRuntime,
   configureDatabaseRuntime,
   type DatabaseAiProviderTextInput,
   type DatabaseAiProviderTextResult,
   type DatabaseRuntimeConfig
 } from '@shared/databaseRuntime'
-import type { DatabaseConnectionTestInput } from '@shared/contracts/database'
+import type {
+  DatabaseAiDrawerLifecycleInput,
+  DatabaseAiPaneLifecycleInput,
+  DatabaseConnectionTestInput
+} from '@shared/contracts/database'
 import type { UserConfig } from '@shared/contracts/userConfig'
-import { createProviderTextRequest, fetchProviderText, resolveModelProvider, type AiProviderTextMessage } from '../ai/modelProviderText'
+import { resolveModelProvider } from '../ai/modelProviderText'
+import {
+  abortClineAgentTask,
+  runClineAgentTurn,
+  type ClineAgentRunInput
+} from '../agent/clineAgentRuntime'
+import {
+  databaseClineSeedMessages,
+  databaseClineTools,
+  databaseClineTurnPrompt
+} from '../agent/clineAgentProfiles'
+import { resolveClineAgentProvider } from '../agent/clineAgentProviderRuntime'
 import { createSshProxySocket, type SshProxySocket } from '../ssh/sshProxy'
+import { loadDatabaseAiMcpContext, redactDatabaseAiProviderError } from './databaseMcp'
 
 type DatabaseBackendRuntimeConfig = {
   getConfig?: () => UserConfig
@@ -25,9 +43,18 @@ type DatabaseBackendRuntimeConfig = {
   stateFilePath?: string
   credentialKeyPath?: string
   useSeedData?: boolean
+  runClineAgentTurn?: (input: ClineAgentRunInput) => ReturnType<typeof runClineAgentTurn>
+  abortClineAgentTask?: typeof abortClineAgentTask
 }
 
 const normalizeText = (value: unknown) => String(value || '').trim()
+
+const activeDatabaseAgentTasks = new Map<string, {
+  taskId: string
+  turnId: string
+  cancelled: boolean
+  abort: typeof abortClineAgentTask
+}>()
 
 const databaseProxyError = (message: string, code: string) => Object.assign(new Error(message), { code })
 
@@ -64,54 +91,130 @@ async function generateDatabaseProviderText(
     }
   }
   const providerConfig = resolveModelProvider(userConfig, input.modelName)
-  if (!providerConfig) {
+  const clineProvider = resolveClineAgentProvider(userConfig, input.modelName)
+  if (!providerConfig || !clineProvider) {
     return {
       ok: false,
       errorCode: 'DB_AI_PROVIDER_UNAVAILABLE',
       errorMessage: 'Database AI provider is unavailable.'
     }
   }
-  const request = createProviderTextRequest(
-    providerConfig,
-    input.systemPrompt,
-    input.messages.map(
-      (message): AiProviderTextMessage => ({
-        role: message.role === 'assistant' ? 'assistant' : 'user',
-        content: message.content
-      })
-    ),
-    input.maxTokens
-  )
-  if (!request) {
+  const requestId = normalizeText(input.requestId) || normalizeText(input.assistantMessageId) || `${input.surface}-${Date.now()}`
+  const taskId = `dbai-${requestId}`
+  const turnId = requestId
+  const conversationKey = input.surface === 'pane'
+    ? [
+        normalizeText(input.conversationId) || 'legacy-pane',
+        input.responseLanguage,
+        input.context.connectionId,
+        input.context.databaseName,
+        input.context.schemaName
+      ].map(normalizeText).join('\u0000')
+    : `drawer:${requestId}`
+  const activeTask = {
+    taskId,
+    turnId,
+    cancelled: false,
+    abort: config.abortClineAgentTask || abortClineAgentTask
+  }
+  activeDatabaseAgentTasks.set(requestId, activeTask)
+  try {
+    const rawErrorMessage = String(input.errorMessage || '').trim()
+    const redactedErrorMessage = rawErrorMessage
+      ? await redactDatabaseAiProviderError(rawErrorMessage, input.context.connectionId, userConfig)
+      : ''
+    const providerMessages = rawErrorMessage
+      ? input.messages.map((message, index) => index === input.messages.length - 1
+        ? { ...message, content: message.content.replace(rawErrorMessage, () => redactedErrorMessage) }
+        : message)
+      : input.messages
+    const sanitizedInput: DatabaseAiProviderTextInput = {
+      ...input,
+      messages: providerMessages,
+      ...(rawErrorMessage ? { errorMessage: redactedErrorMessage } : {})
+    }
+    if (activeTask.cancelled) {
+      return {
+        ok: false,
+        errorCode: 'DB_AI_CANCELLED',
+        errorMessage: 'Database AI request was cancelled.',
+        provider: providerConfig.provider
+      }
+    }
+    const outcome = await (config.runClineAgentTurn || runClineAgentTurn)({
+      profile: 'database',
+      taskId,
+      turnId,
+      conversationKey,
+      prompt: databaseClineTurnPrompt(sanitizedInput),
+      systemPrompt: input.systemPrompt,
+      provider: { ...clineProvider, maxTokensPerTurn: input.maxTokens },
+      tools: databaseClineTools(),
+      initialMessages: databaseClineSeedMessages(sanitizedInput),
+      database: {
+        connectionId: normalizeText(input.context.connectionId),
+        databaseName: normalizeText(input.context.databaseName) || undefined,
+        schemaName: normalizeText(input.context.schemaName) || undefined
+      },
+      metadata: {
+        surface: input.surface,
+        responseLanguage: input.responseLanguage,
+        requestId
+      },
+      maxIterations: 8
+    })
+    if (outcome.status !== 'done') {
+      return {
+        ok: false,
+        errorCode: 'DB_AI_APPROVAL_UNEXPECTED',
+        errorMessage: 'A read-only DB AI tool unexpectedly requested operator approval.',
+        provider: providerConfig.provider
+      }
+    }
+    return {
+      ok: true,
+      text: outcome.result.text,
+      provider: providerConfig.provider,
+      model: providerConfig.modelName
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error || 'Database AI provider failed.')
     return {
       ok: false,
-      errorCode: 'DB_AI_PROVIDER_UNAVAILABLE',
-      errorMessage: 'Database AI provider is unavailable.',
+      errorCode: 'DB_AI_PROVIDER_REQUEST_FAILED',
+      errorMessage: await redactDatabaseAiProviderError(message, input.context.connectionId, userConfig),
       provider: providerConfig.provider
     }
-  }
-  const response = await fetchProviderText(request, {
-    fetch: config.fetch,
-    timeoutMs: config.timeoutMs || 30_000,
-    errorCodePrefix: 'DB_AI_PROVIDER'
-  })
-  if (!response.ok) {
-    return {
-      ok: false,
-      errorCode: response.errorCode,
-      errorMessage: response.errorMessage,
-      provider: providerConfig.provider
-    }
-  }
-  return {
-    ok: true,
-    text: response.text,
-    provider: providerConfig.provider,
-    model: providerConfig.modelName
+  } finally {
+    const active = activeDatabaseAgentTasks.get(requestId)
+    if (active?.taskId === taskId && active.turnId === turnId) activeDatabaseAgentTasks.delete(requestId)
   }
 }
 
+const abortDatabaseAgentTask = (requestId: string) => {
+  const active = activeDatabaseAgentTasks.get(normalizeText(requestId))
+  if (!active) return
+  active.cancelled = true
+  void active.abort({ taskId: active.taskId, turnId: active.turnId, reason: 'db_ai_cancelled' }).catch(() => undefined)
+}
+
+export const cancelDatabaseAiPaneResponse = (input: DatabaseAiPaneLifecycleInput) => {
+  abortDatabaseAgentTask(input.requestId)
+  return cancelDatabaseAiPaneResponseRuntime(input)
+}
+
+export const cancelDatabaseAiDrawerResponse = (input: DatabaseAiDrawerLifecycleInput) => {
+  abortDatabaseAgentTask(input.requestId)
+  return cancelDatabaseAiDrawerResponseRuntime(input)
+}
+
 export function configureDatabaseBackendRuntime(config?: DatabaseBackendRuntimeConfig) {
+  if (!config && activeDatabaseAgentTasks.size) {
+    for (const active of activeDatabaseAgentTasks.values()) {
+      void active.abort({ taskId: active.taskId, turnId: active.turnId, reason: 'database_runtime_reconfigured' }).catch(() => undefined)
+    }
+    activeDatabaseAgentTasks.clear()
+  }
   configureDatabaseRuntime(
     config
       ? {
@@ -134,6 +237,7 @@ export function configureDatabaseBackendRuntime(config?: DatabaseBackendRuntimeC
           localBackendDouble: config.localBackendDouble,
           wait: config.wait,
           now: config.now,
+          loadDatabaseContext: loadDatabaseAiMcpContext,
           generateText: (input) => generateDatabaseProviderText(input, config)
         }
       : undefined
@@ -141,8 +245,6 @@ export function configureDatabaseBackendRuntime(config?: DatabaseBackendRuntimeC
 }
 
 export {
-  cancelDatabaseAiDrawerResponse,
-  cancelDatabaseAiPaneResponse,
   connectDatabaseConnection,
   configureDatabaseAiRuntime,
   createDatabaseAiDrawerRequest,

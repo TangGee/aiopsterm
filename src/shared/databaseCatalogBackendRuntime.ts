@@ -91,10 +91,7 @@ import {
   databaseGroupSeed
 } from './databaseSeedData'
 import {
-  databaseSeedColumnsForTableKey,
   databaseSeedTableExistsInBackend,
-  databaseSeedTableKeyForContext,
-  databaseSeedTableKeysForContext,
   resetDatabaseSeedTableRuntime
 } from './databaseSeedTableRuntime'
 import {
@@ -159,9 +156,9 @@ const connectionTestInputFromSaved = (connection: DatabaseConnectionInfo): Datab
 configureDatabaseAiBackendContext({
   ensureStateLoaded: () => ensureDatabaseStateLoaded(),
   persistState: () => persistDatabaseState(),
-  tableKeysForContext: (input) => databaseSeedTableKeysForContext(input),
-  tableKeyForContext: (input) => databaseSeedTableKeyForContext(input),
-  columnsForTableKey: (key) => databaseSeedColumnsForTableKey(key)
+  tableKeysForContext: (input) => databaseAiCatalogTableKeysForContext(input),
+  tableKeyForContext: (input) => databaseAiCatalogTableKeyForContext(input),
+  columnsForTableKey: (key) => databaseAiCatalogColumnsForTableKey(key)
 })
 
 configureDatabaseHttpEngines({
@@ -308,6 +305,73 @@ const visibleDatabaseConnections = () =>
     isVerifiedConnection: (connectionId) => databaseVerifiedConnections.has(connectionId),
     hasConnectionSecret: (connectionId) => databaseConnectionSecrets.has(connectionId)
   })
+
+type DatabaseAiCatalogTableMetadata = {
+  key: string
+  tableName: string
+  columns: string[]
+}
+
+const databaseAiCatalogTableMetadataForContext = (input: {
+  connectionId: string
+  databaseName?: string
+  schemaName?: string
+}): DatabaseAiCatalogTableMetadata[] => {
+  const connectionId = trim(input.connectionId)
+  const databaseName = trim(input.databaseName)
+  const schemaName = trim(input.schemaName)
+  const connection = visibleDatabaseConnections().find((item) => item.id === connectionId)
+  if (!connection) return []
+
+  const metadata = new Map<string, DatabaseAiCatalogTableMetadata>()
+  const addTables = (catalogName: string, currentSchemaName: string, tables: DatabaseConnectionInfo['catalogs'][number]['tables']) => {
+    const sourceTables = tables ?? []
+    sourceTables.forEach((table) => {
+      const key = `${connectionId}:${catalogName}:${currentSchemaName}:${table.name}`
+      metadata.set(key, {
+        key,
+        tableName: table.name,
+        columns: table.columns.map((column) => column.name)
+      })
+    })
+  }
+
+  connection.catalogs.forEach((catalog) => {
+    if (databaseName && catalog.name !== databaseName) return
+    if (!schemaName) addTables(catalog.name, '', catalog.tables)
+    const schemas = catalog.schemas ?? []
+    schemas.forEach((schema) => {
+      if (schemaName && schema.name !== schemaName) return
+      addTables(catalog.name, schema.name, schema.tables)
+      addTables(catalog.name, schema.name, schema.views)
+    })
+  })
+  return [...metadata.values()]
+}
+
+const databaseAiCatalogTableKeysForContext = (input: { connectionId: string; databaseName?: string; schemaName?: string }) =>
+  databaseAiCatalogTableMetadataForContext(input).map((item) => item.key)
+
+const databaseAiCatalogTableKeyForContext = (input: {
+  connectionId: string
+  databaseName?: string
+  schemaName?: string
+  tableName?: string
+}) => {
+  const tableName = trim(input.tableName)
+  if (!tableName) return ''
+  const metadata = databaseAiCatalogTableMetadataForContext(input)
+  return metadata.find((item) => item.tableName === tableName)?.key
+    ?? metadata.find((item) => item.tableName.toLowerCase() === tableName.toLowerCase())?.key
+    ?? ''
+}
+
+const databaseAiCatalogColumnsForTableKey = (key: string) => {
+  const separatorIndex = key.indexOf(':')
+  if (separatorIndex < 1) return []
+  const connectionId = key.slice(0, separatorIndex)
+  return databaseAiCatalogTableMetadataForContext({ connectionId }).find((item) => item.key === key)?.columns.slice() ?? []
+}
 
 const databaseWorkspaceCatalogFor = (selectedConnectionId = 'conn-prod-pg'): DatabaseWorkspaceCatalog => ({
   engines: databaseEngines.map((engine) => ({ ...engine })),

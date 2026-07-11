@@ -349,6 +349,7 @@ class SqliteAssetStore {
       PRAGMA journal_mode=WAL;
       PRAGMA synchronous=NORMAL;
       PRAGMA busy_timeout=5000;
+      PRAGMA secure_delete=ON;
       CREATE TABLE IF NOT EXISTS assets (
         id TEXT PRIMARY KEY,
         data TEXT NOT NULL,
@@ -397,19 +398,23 @@ class SqliteAssetStore {
   }
 
   private migratePlaintextSecrets() {
+    let migrated = false
     const tx = this.db.transaction(() => {
       for (const { asset, secret } of this.rawAssets()) {
         if (assetSecretNeedsEncryption(secret)) {
           this.db.prepare('UPDATE assets SET secret = ? WHERE id = ?').run(JSON.stringify(encryptAssetSecretForStorage(secret)), asset.id)
+          migrated = true
         }
       }
       for (const { keychain, secret } of this.rawKeychains()) {
         if (assetSecretNeedsEncryption(secret)) {
           this.db.prepare('UPDATE asset_keychains SET secret = ? WHERE id = ?').run(JSON.stringify(encryptAssetSecretForStorage(secret)), keychain.id)
+          migrated = true
         }
       }
     })
     tx()
+    if (migrated) this.db.exec('PRAGMA wal_checkpoint(TRUNCATE);')
   }
 
   private stripLegacySeedData() {

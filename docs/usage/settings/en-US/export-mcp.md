@@ -1,6 +1,6 @@
 # Export MCP
 
-This page lives under `Settings -> Export MCP`. It exposes aiopsterm host connections, sessions, and tools as an external MCP server. External Codex, Claude Code, or another MCP-capable Agent can use this server to call the aiopsterm host gateway, session, and tool interfaces.
+This page lives under `Settings -> Export MCP`. It exposes aiopsterm host connections, sessions, and explicitly authorized read-only database capabilities as an external MCP server. External Codex, Claude Code, or another MCP-capable Agent can use this server to call the aiopsterm gateway, session, and tool interfaces.
 
 ## Prerequisites
 
@@ -23,6 +23,20 @@ External Agents can call `list_auth_requests`, `get_auth_request_status`, and `f
 If you trust the local external Agent, enable `Allow external Agents to submit SSH authentication` on this page. Then the Agent can call `submit_ssh_auth_response` to submit passwords, verification codes, or keyboard-interactive responses. When the setting is off, that tool returns a localized error explaining that the capability can be enabled in `Settings -> Export MCP`, or the user can complete authentication in aiopsterm.
 
 Relay-shell followed by a second `ssh` still exposes text prompts rather than structured SSH authentication events. It only works when both the relay login and nested target SSH need no interactive input. Use a visible aiopsterm terminal for relay flows that require dynamic codes, passwords, or host-key confirmation.
+
+## Database Read Permission
+
+Database MCP tools are discovered with `aiopsterm_hosts`, but database access is disabled by default. External Agents can call these tools only after `Allow external Agents to read databases` is enabled on this page:
+
+- `list_database_connections`
+- `search_database_objects`
+- `describe_database_table`
+- `get_database_table_ddl`
+- `query_database_table`
+
+While disabled, calls return `DB_MCP_DATABASE_READ_DISABLED` without reading the catalog or a connection. Connection listings expose a process-scoped random handle and generated label; they omit the saved id, user-defined name, host, port, username, URL, file path, proxy settings, and password. Handles change after aiopsterm restarts and must be rediscovered. DDL and table data reads also require non-SQLite connections to be open in the Database workspace.
+
+The first phase does not expose arbitrary SQL or writes. `query_database_table` accepts base tables only, bounded scalar column projections, catalog-validated structured filters, sorting, and pagination, with at most 100 rows per page. Views and unbounded LOB/TEXT/JSON/collection columns are rejected or omitted; DDL and total serialized response size are bounded as well. Strict data queries are supported for the relational drivers and SQLite. ClickHouse and Presto cannot hold a portable table-identity lock across HTTP requests, so their MCP data query fails closed while catalog, describe, and redacted DDL tools remain available. This permission can still expose database schemas and returned table data to the external Agent, so enable it only for a trusted local Agent.
 
 ## Why A Token Is Required
 

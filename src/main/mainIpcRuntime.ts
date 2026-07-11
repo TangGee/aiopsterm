@@ -34,6 +34,7 @@ import { registerAppRuntimeIpc } from './ipc/appRuntime'
 import { registerAppUpdateIpc } from './ipc/appUpdate'
 import { registerAssetsIpc } from './ipc/assets'
 import { registerChatHistoryIpc } from './ipc/chatHistory'
+import { registerClineAgentIpc } from './ipc/clineAgent'
 import { registerCodexSessionsIpc } from './ipc/codexSessions'
 import { registerControlSocketIpc } from './backend/control/controlSocket'
 import { registerDatabaseIpc } from './ipc/database'
@@ -122,7 +123,13 @@ export const registerMainIpcRuntime = (input: MainIpcRuntimeInput) => {
   registerAgentHooksIpc(ipcMain)
   registerExportMcpIpc(ipcMain)
   registerAiCatalogIpc(ipcMain)
-  registerAiChatIpc(ipcMain)
+  registerAiChatIpc(ipcMain, {
+    isTrustedTerminalSession: (event, terminalSessionId) => {
+      const session = input.terminalRuntime.sessions.get(terminalSessionId)
+      return Boolean(session && session.window.webContents.id === event.sender.id)
+    }
+  })
+  registerClineAgentIpc(ipcMain)
   registerAppUpdateIpc(ipcMain, {
     getVersion: () => app.getVersion(),
     getUserDataPath: () => app.getPath('userData')

@@ -23,6 +23,7 @@ import { createAiPanelChatNavigationRuntime } from '@/services/ai/aiPanelChatNav
 import { createAiPanelPresentationRuntime } from '@/services/ai/aiPanelPresentationRuntime'
 import { createAiPanelShellAdapterRuntime } from '@/services/ai/aiPanelShellAdapterRuntime'
 import { aiChatClient } from '@/services/ai/aiChatClient'
+import { isActiveClassicClineTaskMessage } from '@/services/ai/classicClineTaskRuntime'
 import { copyTextToClipboard } from '@/services/app/clipboardRuntime'
 import { codexTargetContextFromPanel } from '@/services/ai/aiPanelCodexRuntime'
 import { createAiPanelCodexConversationRuntime } from '@/services/ai/aiPanelCodexConversationRuntime'
@@ -42,7 +43,9 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
   const { locale, t } = useI18n()
   const agentMode = computed(() => Boolean(props.agentMode))
   let getEditHostContextsForPopup = (): AiContextOption[] => []
-  const streaming = computed(() => workspace.chatMessages.some((message) => message.state === 'streaming'))
+  const streaming = computed(() => workspace.chatMessages.some((message) =>
+    message.state === 'streaming' || isActiveClassicClineTaskMessage(message)
+  ))
 
   const shellAdapter = createAiPanelShellAdapterRuntime({
     refreshClassicCatalog: () => workspace.refreshAiModelCatalog({ replaceSettingsOptions: false }),
@@ -51,7 +54,8 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
 
   const aiPanelPresentationRuntime = createAiPanelPresentationRuntime({
     icons: shellAdapter.presentationIcons,
-    selectedContexts: () => workspace.selectedContexts
+    selectedContexts: () => workspace.selectedContexts,
+    translate: t
   })
   const {
     aiChatModeOptions,
@@ -65,7 +69,7 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
   } = aiPanelPresentationRuntime
 
   const aiPanelModelPopupShellRuntime = createAiPanelModelPopupShellRuntime({
-    chatModeOptions: () => aiChatModeOptions,
+    chatModeOptions: () => aiChatModeOptions.value,
     availableModels: () => workspace.aiModelOptions,
     lockedModels: () => workspace.lockedAiModelOptions,
     settingsModelCount: () => workspace.settingModelOptions.length,
@@ -319,6 +323,11 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     continueAgentCommandLoop: (input) => workspace.continueAgentCommandLoop(input),
     enableAgentReadOnlyAutoRunForCurrentConversation: () => workspace.enableAgentReadOnlyAutoRunForCurrentConversation(),
     syncCurrentConversationSnapshot: (options) => workspace.syncCurrentConversationSnapshot(options),
+    respondClineAgentApproval: async (input) => {
+      const respond = aiChatClient.respondClineAgentApproval()
+      if (!respond) return { ok: false, errorCode: 'CLINE_AGENT_APPROVAL_UNAVAILABLE', errorMessage: 'Cline Agent 审批服务不可用。' }
+      return respond(input)
+    },
     closePopups: () => closePopups(),
     afterDomUpdate: shellAdapter.afterDomUpdate
   })

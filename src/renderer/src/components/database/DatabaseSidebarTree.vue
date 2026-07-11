@@ -5,11 +5,11 @@
   >
     <template v-if="!sidebarCollapsed">
       <header class="db-sidebar-header">
-        <strong>Database</strong>
+        <strong>{{ t('database.sidebar.title') }}</strong>
         <div class="db-sidebar-actions">
           <button
             type="button"
-            title="Refresh connected"
+            :title="t('database.sidebar.refreshConnected')"
             @click="$emit('refreshConnected')"
           >
             <RefreshCw />
@@ -17,14 +17,14 @@
           <button
             ref="addButtonRef"
             type="button"
-            title="Add"
+            :title="t('database.common.add')"
             @click.stop="$emit('toggleAddMenu', $event)"
           >
             <Plus />
           </button>
           <button
             type="button"
-            title="Collapse"
+            :title="t('database.common.collapse')"
             @click="$emit('updateSidebarCollapsed', true)"
           >
             <PanelLeftClose />
@@ -37,7 +37,7 @@
         <input
           ref="searchInputRef"
           :value="keyword"
-          placeholder="Search"
+          :placeholder="t('database.common.search')"
           @input="$emit('updateKeyword', ($event.target as HTMLInputElement).value)"
           @keydown.esc.prevent="clearSearch"
         />
@@ -45,7 +45,7 @@
           v-if="keyword"
           class="db-search-clear"
           type="button"
-          title="Clear search"
+          :title="t('database.common.clearSearch')"
           @click="clearSearch"
         >
           <X />
@@ -121,7 +121,7 @@
                   <button
                     class="db-tree-connect"
                     type="button"
-                    :title="connection.status === 'connected' ? 'Disconnect' : 'Connect'"
+                    :title="connection.status === 'connected' ? t('database.connection.disconnect') : t('database.connection.connect')"
                     @click.stop="$emit('toggleConnectionStatus', connection.id)"
                   >
                     <Unplug v-if="connection.status === 'connected'" />
@@ -204,7 +204,7 @@
                                 </button>
                                 <FolderOpen v-if="isSchemaObjectFolderExpanded(connection.id, catalog.name, schema.name, folder.kind)" />
                                 <Folder v-else />
-                                <span>{{ folder.kind }}</span>
+                                <span>{{ schemaObjectKindLabel(folder.kind) }}</span>
                                 <small>{{ folder.count }}</small>
                               </div>
                               <ul
@@ -311,7 +311,7 @@
                             "
                           />
                           <Folder v-else />
-                          <span>tables</span>
+                          <span>{{ t('database.object.tables') }}</span>
                         </div>
                         <ul
                           v-if="
@@ -386,7 +386,7 @@
       v-else
       class="db-sidebar-expand"
       type="button"
-      title="Expand"
+      :title="t('database.common.expand')"
       @click="$emit('updateSidebarCollapsed', false)"
     >
       <PanelLeftOpen />
@@ -396,6 +396,7 @@
 
 <script setup lang="ts">
 import { nextTick, ref } from 'vue'
+import { useI18n } from '@/i18n'
 import {
   ChevronDown,
   ChevronRight,
@@ -447,6 +448,8 @@ const props = defineProps<{
   connectionsByGroup: (groupId: string) => DatabaseConnectionInfo[]
   engineAccent: (code: DatabaseEngineCode) => string
 }>()
+
+const { t } = useI18n()
 
 const emit = defineEmits<{
   updateSidebarCollapsed: [value: boolean]
@@ -534,6 +537,13 @@ function isSchemaObjectFolderExpanded(connectionId: string, catalogName: string,
 
 function isTableExpanded(tableId: string) {
   return props.expandedTables.includes(tableId)
+}
+
+function schemaObjectKindLabel(kind: SchemaObjectKind) {
+  if (kind === 'views') return t('database.object.views')
+  if (kind === 'functions') return t('database.object.functions')
+  if (kind === 'procedures') return t('database.object.procedures')
+  return t('database.object.tables')
 }
 
 defineExpose({ focusSearch, addButtonRect })

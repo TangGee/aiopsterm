@@ -53,7 +53,12 @@ import {
   mysqlExec,
   mysqlRows,
   type DatabaseSqlExecuteRawResult,
-  type RelationalDatabaseType
+  type MySqlConnection,
+  type OracleConnection,
+  type PostgresClient,
+  type RelationalDatabaseType,
+  type SqlServerPool,
+  type SqlServerTransaction
 } from './databaseRelationalCore'
 import {
   relationalCatalogsForConnection,
@@ -145,6 +150,120 @@ const oracleDdlPermissionError = (error: unknown) => {
   return /ORA-01031|insufficient privileges|permission/i.test(`${code} ${message}`)
 }
 
+type LiveTableIdentity = {
+  objectId: string
+  objectType: string
+}
+
+const stableBaseTableFailure = (
+  identity: LiveTableIdentity | null,
+  input: Pick<DatabaseTableQueryInput, 'tableName'>,
+  acceptedTypes: string[]
+): DatabaseTableQueryResult | null => {
+  if (!identity) {
+    return { ok: false, errorCode: 'DB_TABLE_NOT_FOUND', errorMessage: `Table not found: ${input.tableName}` }
+  }
+  if (!acceptedTypes.includes(identity.objectType.toUpperCase())) {
+    return {
+      ok: false,
+      errorCode: 'DB_TABLE_QUERY_UNSUPPORTED',
+      errorMessage: 'Stable database reads are limited to base tables.'
+    }
+  }
+  return null
+}
+
+const stableIdentityChangedFailure = (): DatabaseTableQueryResult => ({
+  ok: false,
+  errorCode: 'DB_TABLE_QUERY_UNSUPPORTED',
+  errorMessage: 'The database object changed while establishing a stable base-table read.'
+})
+
+const stableGuardUnavailableError = () =>
+  Object.assign(new Error('This database connection cannot establish a stable base-table read.'), {
+    code: 'DB_TABLE_QUERY_UNSUPPORTED'
+  })
+
+const mysqlLiveTableIdentity = async (
+  client: MySqlConnection,
+  input: Pick<DatabaseTableQueryInput, 'databaseName' | 'tableName'>
+): Promise<LiveTableIdentity | null> => {
+  const rows = await mysqlRows<Record<string, unknown>>(
+    client,
+    'SELECT TABLE_TYPE, ENGINE, CREATE_TIME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?',
+    [trim(input.databaseName), trim(input.tableName)]
+  )
+  if (rows.length !== 1) return null
+  const row = rows[0] ?? {}
+  const createTime = rowValue(row, 'CREATE_TIME', 'create_time')
+  return {
+    objectId: `${trim(rowValue(row, 'TABLE_TYPE', 'table_type'))}:${trim(rowValue(row, 'ENGINE', 'engine'))}:${createTime == null ? '' : String(createTime)}`,
+    objectType: trim(rowValue(row, 'TABLE_TYPE', 'table_type')).toUpperCase()
+  }
+}
+
+const postgresLiveTableIdentity = async (
+  client: PostgresClient,
+  input: Pick<DatabaseTableQueryInput, 'schemaName' | 'tableName'>
+): Promise<LiveTableIdentity | null> => {
+  const rows = await postgresRows<Record<string, unknown>>(
+    client,
+    'SELECT c.oid::text AS object_id, c.relkind::text AS object_type FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = $1 AND c.relname = $2',
+    [trim(input.schemaName) || 'public', trim(input.tableName)]
+  )
+  if (rows.length !== 1) return null
+  const row = rows[0] ?? {}
+  return {
+    objectId: trim(rowValue(row, 'object_id', 'OBJECT_ID')),
+    objectType: trim(rowValue(row, 'object_type', 'OBJECT_TYPE')).toLowerCase()
+  }
+}
+
+const oracleLiveTableIdentity = async (
+  client: OracleConnection,
+  connection: DatabaseConnectionInfo,
+  input: Pick<DatabaseTableQueryInput, 'schemaName' | 'tableName'>
+): Promise<LiveTableIdentity | null> => {
+  const rows = await oracleRows<Record<string, unknown>>(
+    client,
+    "SELECT object_id, object_type FROM all_objects WHERE owner = :1 AND object_name = :2 AND object_type IN ('TABLE', 'VIEW', 'MATERIALIZED VIEW')",
+    [oracleSchemaNameFor(connection, input), oracleLookupIdentifier(input.tableName)]
+  )
+  if (!rows.length) return null
+  const row = rows.find((candidate) => trim(rowValue(candidate, 'OBJECT_TYPE', 'object_type')).toUpperCase() !== 'TABLE') ?? rows[0] ?? {}
+  return {
+    objectId: trim(rowValue(row, 'OBJECT_ID', 'object_id')),
+    objectType: trim(rowValue(row, 'OBJECT_TYPE', 'object_type')).toUpperCase()
+  }
+}
+
+const sqlServerRowsInTransaction = async <T extends Record<string, unknown>>(
+  transaction: SqlServerTransaction,
+  sql: string,
+  params: unknown[] = []
+) => {
+  const result = await sqlServerRequestWithParams(transaction.request(), params).query<T>(sql)
+  return normalizeQueryRows(result.recordset) as T[]
+}
+
+const sqlServerLiveTableIdentity = async (
+  target: SqlServerPool | SqlServerTransaction,
+  input: Pick<DatabaseTableQueryInput, 'schemaName' | 'tableName'>
+): Promise<LiveTableIdentity | null> => {
+  const schemaName = trim(input.schemaName) || 'dbo'
+  const tableName = trim(input.tableName)
+  const sql = "SELECT o.object_id, o.type AS object_type FROM sys.objects o JOIN sys.schemas s ON s.schema_id = o.schema_id WHERE s.name = @p1 AND o.name = @p2 AND o.type IN ('U', 'V')"
+  const rows = 'close' in target
+    ? await sqlServerRows<Record<string, unknown>>(target, sql, [schemaName, tableName])
+    : await sqlServerRowsInTransaction<Record<string, unknown>>(target, sql, [schemaName, tableName])
+  if (rows.length !== 1) return null
+  const row = rows[0] ?? {}
+  return {
+    objectId: trim(rowValue(row, 'object_id', 'OBJECT_ID')),
+    objectType: trim(rowValue(row, 'object_type', 'OBJECT_TYPE')).toUpperCase()
+  }
+}
+
 export const relationalQueryTable = async (
   connection: DatabaseConnectionInfo,
   input: DatabaseTableQueryInput,
@@ -157,6 +276,12 @@ export const relationalQueryTable = async (
       return { ok: false, errorCode: 'DB_TABLE_NOT_FOUND', errorMessage: `Table not found: ${input.tableName}` }
     }
     const knownColumns = columns.map((column) => column.name)
+    const requestedColumns = (input.columns ?? []).map((column) => knownColumns.find((known) => known.toLowerCase() === trim(column).toLowerCase())).filter(Boolean) as string[]
+    if (input.columns?.length && requestedColumns.length !== input.columns.length) {
+      return { ok: false, errorCode: 'DB_COLUMNS_INVALID', errorMessage: 'One or more selected columns are not available.' }
+    }
+    const selectedColumns = input.columns?.length ? requestedColumns : knownColumns
+    if (!selectedColumns.length) return { ok: false, errorCode: 'DB_COLUMNS_REQUIRED', errorMessage: 'At least one selected column is required.' }
     const filters = [...parseWhereRaw(input.whereRaw), ...(input.filters ?? [])]
     const where = relationalWhereForFilters(dbType, filters, knownColumns)
     const sort = input.sort ?? parseOrderByRaw(input.orderByRaw, knownColumns)
@@ -167,21 +292,182 @@ export const relationalQueryTable = async (
     const tableRef = relationalTableReference(connection, input)
     const limitPlaceholder = relationalPlaceholder(dbType, where.params.length + (dbType === 'sqlserver' ? 2 : 1))
     const offsetPlaceholder = relationalPlaceholder(dbType, where.params.length + (dbType === 'sqlserver' ? 1 : 2))
+    const selectList = selectedColumns.map((column) => relationalIdentifier(column, dbType)).join(', ')
     const rowsSql =
       dbType === 'oracle' || dbType === 'sqlserver'
-        ? `SELECT * FROM ${tableRef}${where.sql}${orderBy || ' ORDER BY (SELECT 1)'} OFFSET ${offsetPlaceholder} ROWS FETCH NEXT ${limitPlaceholder} ROWS ONLY`
-        : `SELECT * FROM ${tableRef}${where.sql}${orderBy} LIMIT ${limitPlaceholder} OFFSET ${offsetPlaceholder}`
+        ? `SELECT ${selectList} FROM ${tableRef}${where.sql}${orderBy || ' ORDER BY (SELECT 1)'} OFFSET ${offsetPlaceholder} ROWS FETCH NEXT ${limitPlaceholder} ROWS ONLY`
+        : `SELECT ${selectList} FROM ${tableRef}${where.sql}${orderBy} LIMIT ${limitPlaceholder} OFFSET ${offsetPlaceholder}`
     const countSql = `SELECT COUNT(*) AS total FROM ${tableRef}${where.sql}`
     const params = dbType === 'oracle' || dbType === 'sqlserver' ? [...where.params, offset, pageSize] : [...where.params, pageSize, offset]
 
     if (isMysqlCompatibleDbType(connection.dbType)) {
       return await withMysqlConnection(connection, async (client) => {
-        const rows = await mysqlRows<Record<string, unknown>>(client, rowsSql, params)
-        const count = input.withTotal ? await mysqlRows<{ total?: number | string }>(client, countSql, where.params) : []
+        let tablesLocked = false
+        try {
+          let before: LiveTableIdentity | null = null
+          if (input.requireStableBaseTable) {
+            before = await mysqlLiveTableIdentity(client, input)
+            const failure = stableBaseTableFailure(before, input, ['BASE TABLE'])
+            if (failure) return failure
+            try {
+              await mysqlExec(client, `LOCK TABLES ${tableRef} READ`)
+              tablesLocked = true
+            } catch {
+              throw stableGuardUnavailableError()
+            }
+            const after = await mysqlLiveTableIdentity(client, input)
+            const lockedFailure = stableBaseTableFailure(after, input, ['BASE TABLE'])
+            if (lockedFailure) return lockedFailure
+            if (before?.objectId !== after?.objectId) return stableIdentityChangedFailure()
+          }
+          const rows = await mysqlRows<Record<string, unknown>>(client, rowsSql, params)
+          const count = input.withTotal ? await mysqlRows<{ total?: number | string }>(client, countSql, where.params) : []
+          return {
+            ok: true,
+            data: {
+              columns: selectedColumns,
+              rows,
+              rowCount: rows.length,
+              durationMs: Math.max(1, Date.now() - startedAt),
+              total: input.withTotal ? Number(count[0]?.total ?? 0) : null,
+              knownColumns
+            }
+          }
+        } finally {
+          if (tablesLocked) await mysqlExec(client, 'UNLOCK TABLES')
+        }
+      })
+    }
+    if (connection.dbType === 'oracle') {
+      return await withOracleConnection(connection, async (client) => {
+        let tableLocked = false
+        let transactionCompleted = false
+        try {
+          let before: LiveTableIdentity | null = null
+          if (input.requireStableBaseTable) {
+            before = await oracleLiveTableIdentity(client, connection, input)
+            const failure = stableBaseTableFailure(before, input, ['TABLE'])
+            if (failure) return failure
+            try {
+              await oracleExec(client, `LOCK TABLE ${tableRef} IN SHARE MODE NOWAIT`)
+              tableLocked = true
+            } catch {
+              throw stableGuardUnavailableError()
+            }
+            const after = await oracleLiveTableIdentity(client, connection, input)
+            const lockedFailure = stableBaseTableFailure(after, input, ['TABLE'])
+            if (lockedFailure) return lockedFailure
+            if (before?.objectId !== after?.objectId) return stableIdentityChangedFailure()
+          }
+          const rows = await oracleRows<Record<string, unknown>>(client, rowsSql, params)
+          const count = input.withTotal ? await oracleRows<Record<string, unknown>>(client, countSql, where.params) : []
+          if (tableLocked) {
+            await oracleCommit(client)
+            transactionCompleted = true
+          }
+          return {
+            ok: true,
+            data: {
+              columns: selectedColumns,
+              rows,
+              rowCount: rows.length,
+              durationMs: Math.max(1, Date.now() - startedAt),
+              total: input.withTotal ? Number(rowValue(count[0] ?? {}, 'TOTAL', 'total') ?? 0) : null,
+              knownColumns
+            }
+          }
+        } finally {
+          if (tableLocked && !transactionCompleted) await oracleRollback(client).catch(() => undefined)
+        }
+      })
+    }
+    if (connection.dbType === 'sqlserver') {
+      return await withSqlServerPool(connection, async (client) => {
+        if (!input.requireStableBaseTable) {
+          const rows = await sqlServerRows<Record<string, unknown>>(client, rowsSql, params)
+          const count = input.withTotal ? await sqlServerRows<Record<string, unknown>>(client, countSql, where.params) : []
+          return {
+            ok: true,
+            data: {
+              columns: selectedColumns,
+              rows,
+              rowCount: rows.length,
+              durationMs: Math.max(1, Date.now() - startedAt),
+              total: input.withTotal ? Number(rowValue(count[0] ?? {}, 'total', 'TOTAL') ?? 0) : null,
+              knownColumns
+            }
+          }
+        }
+
+        const transaction = client.transaction?.()
+        if (!transaction) throw stableGuardUnavailableError()
+        let transactionOpen = false
+        try {
+          await transaction.begin()
+          transactionOpen = true
+          await transaction.request().query('SET TRANSACTION ISOLATION LEVEL SERIALIZABLE')
+          const before = await sqlServerLiveTableIdentity(transaction, input)
+          const failure = stableBaseTableFailure(before, input, ['U'])
+          if (failure) return failure
+          try {
+            await transaction.request().query(`SELECT TOP (0) 1 AS guard FROM ${tableRef} WITH (TABLOCK, HOLDLOCK)`)
+          } catch {
+            throw stableGuardUnavailableError()
+          }
+          const after = await sqlServerLiveTableIdentity(transaction, input)
+          const lockedFailure = stableBaseTableFailure(after, input, ['U'])
+          if (lockedFailure) return lockedFailure
+          if (before?.objectId !== after?.objectId) return stableIdentityChangedFailure()
+          const rows = await sqlServerRowsInTransaction<Record<string, unknown>>(transaction, rowsSql, params)
+          const count = input.withTotal ? await sqlServerRowsInTransaction<Record<string, unknown>>(transaction, countSql, where.params) : []
+          await transaction.commit()
+          transactionOpen = false
+          return {
+            ok: true,
+            data: {
+              columns: selectedColumns,
+              rows,
+              rowCount: rows.length,
+              durationMs: Math.max(1, Date.now() - startedAt),
+              total: input.withTotal ? Number(rowValue(count[0] ?? {}, 'total', 'TOTAL') ?? 0) : null,
+              knownColumns
+            }
+          }
+        } finally {
+          if (transactionOpen) await transaction.rollback().catch(() => undefined)
+        }
+      })
+    }
+
+    return await withPostgresClient(connection, async (client) => {
+      let transactionOpen = false
+      try {
+        if (input.requireStableBaseTable) {
+          await postgresExec(client, 'BEGIN TRANSACTION READ ONLY')
+          transactionOpen = true
+          const before = await postgresLiveTableIdentity(client, input)
+          const failure = stableBaseTableFailure(before, input, ['R', 'P'])
+          if (failure) return failure
+          try {
+            await postgresExec(client, `LOCK TABLE ${tableRef} IN ACCESS SHARE MODE`)
+          } catch {
+            throw stableGuardUnavailableError()
+          }
+          const after = await postgresLiveTableIdentity(client, input)
+          const lockedFailure = stableBaseTableFailure(after, input, ['R', 'P'])
+          if (lockedFailure) return lockedFailure
+          if (before?.objectId !== after?.objectId) return stableIdentityChangedFailure()
+        }
+        const rows = await postgresRows<Record<string, unknown>>(client, rowsSql, params)
+        const count = input.withTotal ? await postgresRows<{ total?: number | string }>(client, countSql, where.params) : []
+        if (transactionOpen) {
+          await postgresExec(client, 'COMMIT')
+          transactionOpen = false
+        }
         return {
           ok: true,
           data: {
-            columns: knownColumns,
+            columns: selectedColumns,
             rows,
             rowCount: rows.length,
             durationMs: Math.max(1, Date.now() - startedAt),
@@ -189,56 +475,8 @@ export const relationalQueryTable = async (
             knownColumns
           }
         }
-      })
-    }
-    if (connection.dbType === 'oracle') {
-      return await withOracleConnection(connection, async (client) => {
-        const rows = await oracleRows<Record<string, unknown>>(client, rowsSql, params)
-        const count = input.withTotal ? await oracleRows<Record<string, unknown>>(client, countSql, where.params) : []
-        return {
-          ok: true,
-          data: {
-            columns: knownColumns,
-            rows,
-            rowCount: rows.length,
-            durationMs: Math.max(1, Date.now() - startedAt),
-            total: input.withTotal ? Number(rowValue(count[0] ?? {}, 'TOTAL', 'total') ?? 0) : null,
-            knownColumns
-          }
-        }
-      })
-    }
-    if (connection.dbType === 'sqlserver') {
-      return await withSqlServerPool(connection, async (client) => {
-        const rows = await sqlServerRows<Record<string, unknown>>(client, rowsSql, params)
-        const count = input.withTotal ? await sqlServerRows<Record<string, unknown>>(client, countSql, where.params) : []
-        return {
-          ok: true,
-          data: {
-            columns: knownColumns,
-            rows,
-            rowCount: rows.length,
-            durationMs: Math.max(1, Date.now() - startedAt),
-            total: input.withTotal ? Number(rowValue(count[0] ?? {}, 'total', 'TOTAL') ?? 0) : null,
-            knownColumns
-          }
-        }
-      })
-    }
-
-    return await withPostgresClient(connection, async (client) => {
-      const rows = await postgresRows<Record<string, unknown>>(client, rowsSql, params)
-      const count = input.withTotal ? await postgresRows<{ total?: number | string }>(client, countSql, where.params) : []
-      return {
-        ok: true,
-        data: {
-          columns: knownColumns,
-          rows,
-          rowCount: rows.length,
-          durationMs: Math.max(1, Date.now() - startedAt),
-          total: input.withTotal ? Number(count[0]?.total ?? 0) : null,
-          knownColumns
-        }
+      } finally {
+        if (transactionOpen) await postgresExec(client, 'ROLLBACK').catch(() => undefined)
       }
     })
   } catch (error) {

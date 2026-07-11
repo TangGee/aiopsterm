@@ -15,10 +15,12 @@ import type {
   DatabaseAiPaneMessageRecord,
   DatabaseAiPaneRequestInput,
   DatabaseAiPaneRequestResult,
+  DatabaseAiPaneStateContext,
   DatabaseAiPaneStateResult,
   DatabaseAiPaneStateSnapshot,
   DatabaseAiPaneResponseInput,
   DatabaseAiPaneResponseResult,
+  DatabaseAiResponseLanguage,
   DatabaseSqlErrorDiagnosisInput,
   DatabaseSqlErrorDiagnosisResult
 } from './contracts/database'
@@ -30,6 +32,7 @@ import {
   databaseAiDrawerTargetDialect,
   databaseAiFirstTableNameForPaneContext,
   databaseAiPaneSchemaSummaryForContext,
+  normalizeDatabaseAiResponseLanguage,
   suggestedDatabaseAiReadOnlySqlForContext,
   type DatabaseAiTableContext
 } from './databaseAiSqlRuntime'
@@ -57,6 +60,8 @@ import {
 import { shouldUseDatabaseAiBackendDouble } from './runtimeSwitches'
 
 const trim = (value: unknown) => (typeof value === 'string' ? value.trim() : '')
+const databaseAiLanguageText = (language: DatabaseAiResponseLanguage | undefined, zhCN: string, enUS: string) =>
+  normalizeDatabaseAiResponseLanguage(language) === 'zh-CN' ? zhCN : enUS
 
 export type DatabaseAiBackendContext = {
   ensureStateLoaded?: () => void
@@ -92,9 +97,17 @@ export type {
 type DatabaseAiRuntimeConfig = {
   getModelName?: () => string | undefined
   generateText?: (input: DatabaseAiProviderTextInput) => Promise<DatabaseAiProviderTextResult>
+  loadDatabaseContext?: (input: DatabaseAiContextLoadInput) => Promise<string>
   localBackendDouble?: boolean
   wait?: (durationMs: number) => Promise<unknown>
   now?: () => number
+}
+
+export type DatabaseAiContextLoadInput = {
+  surface: 'pane' | 'drawer'
+  context: DatabaseAiPaneResponseInput['context'] | DatabaseAiDrawerResponseInput['context']
+  action?: DatabaseAiDrawerAction
+  sql?: string
 }
 
 let databaseAiRuntime: DatabaseAiRuntimeConfig = {}
@@ -132,6 +145,15 @@ const databaseAiPaneContextSummary = (input: DatabaseAiPaneResponseInput) =>
   trim(input.context.contextSummary) ||
   [input.context.connectionId, input.context.dbType, input.context.databaseName, input.context.schemaName].filter(Boolean).join(' · ')
 
+const databaseAiPaneStateContext = (
+  context: DatabaseAiPaneRequestInput['context'] | DatabaseAiPaneResponseInput['context']
+): DatabaseAiPaneStateContext => ({
+  connectionId: trim(context.connectionId),
+  catalogName: trim(context.databaseName),
+  schemaName: trim(context.schemaName),
+  dbType: context.dbType || ''
+})
+
 const databaseAiPaneErrorResponse = (
   input: DatabaseAiPaneResponseInput,
   startedAt: number,
@@ -158,7 +180,9 @@ const databaseAiPaneErrorResponse = (
             status: 'error',
             content: errorMessage,
             contextSummary,
-            createdAt: startedAt
+            createdAt: startedAt,
+            responseLanguage: input.responseLanguage,
+            context: databaseAiPaneStateContext(input.context)
           },
           input.assistantMessageId || `dbai-pane-message-${randomUUID()}`
         )
@@ -180,6 +204,59 @@ const databaseAiPaneErrorResponse = (
   }
 }
 
+const databaseAiPaneDiscardedResponse = (
+  existing: DatabaseAiPaneMessageRecord,
+  requestId: string,
+  startedAt: number,
+  provider: DatabaseAiResponseProvider
+): DatabaseAiPaneResponseResult => {
+  const assistantMessage: DatabaseAiPaneMessageRecord = {
+    ...existing,
+    status: 'cancelled',
+    content: existing.content || databaseAiLanguageText(
+      existing.responseLanguage,
+      '由于会话已重置，响应已丢弃。',
+      'Response discarded because the conversation was reset.'
+    ),
+    updatedAt: databaseAiNow()
+  }
+  return {
+    ok: true,
+    data: {
+      requestId,
+      assistantMessage,
+      text: assistantMessage.content,
+      provider,
+      durationMs: Math.max(1, databaseAiNow() - startedAt)
+    }
+  }
+}
+
+const databaseAiPaneMissingLifecycleResponse = (
+  input: DatabaseAiPaneResponseInput,
+  startedAt: number
+): DatabaseAiPaneResponseResult => {
+  const requestId = trim(input.requestId)
+  const now = databaseAiNow()
+  return databaseAiPaneDiscardedResponse(
+    {
+      id: trim(input.assistantMessageId),
+      requestId,
+      role: 'assistant',
+      status: 'cancelled',
+      content: databaseAiLanguageText(input.responseLanguage, '由于会话已重置，响应已丢弃。', 'Response discarded because the conversation was reset.'),
+      contextSummary: databaseAiPaneContextSummary(input),
+      createdAt: startedAt,
+      updatedAt: now,
+      responseLanguage: normalizeDatabaseAiResponseLanguage(input.responseLanguage),
+      context: databaseAiPaneStateContext(input.context)
+    },
+    requestId,
+    startedAt,
+    'aiopsterm-local'
+  )
+}
+
 const databaseAiDrawerErrorResponse = (
   input: DatabaseAiDrawerResponseInput,
   startedAt: number,
@@ -190,7 +267,8 @@ const databaseAiDrawerErrorResponse = (
   const requestId = trim(input.requestId)
   const existing = requestId ? findDatabaseAiDrawerRequest({ requestId }) : null
   const targetDialect = databaseAiDrawerTargetDialect(input)
-  const text = `Reasoning\n- ${errorMessage}`
+  const responseLanguage = normalizeDatabaseAiResponseLanguage(existing?.responseLanguage ?? input.responseLanguage)
+  const text = `${responseLanguage === 'zh-CN' ? '分析' : 'Reasoning'}\n- ${errorMessage}`
   let request: DatabaseAiDrawerRequestRecord
   if (existing && existing.status !== 'cancelled') {
     request = updateDatabaseAiDrawerRequest({ requestId: existing.id }, { status: 'error', text, targetDialect }, databaseAiNow) ?? existing
@@ -200,12 +278,13 @@ const databaseAiDrawerErrorResponse = (
       storeDatabaseAiDrawerRequest({
         id: requestId || `dbai-drawer-request-${randomUUID()}`,
         action: input.action,
-        label: databaseAiDrawerActionName(input.action),
+        label: databaseAiDrawerActionName(input.action, responseLanguage),
         status: 'error',
         contextSummary: trim(input.context.contextSummary),
         sourceSql: input.sourceSql,
         text,
         targetDialect,
+        responseLanguage,
         backendContext: {
           connectionId: trim(input.context.connectionId),
           dbType: input.context.dbType || '',
@@ -253,6 +332,16 @@ const databaseAiTableMetadata = () => ({
   columnsForTableKey: (key: string) => (databaseAiBackendContext.columnsForTableKey?.(key) ?? []).slice()
 })
 
+const databaseAiLoadedContext = async (input: DatabaseAiContextLoadInput) => {
+  const loadDatabaseContext = databaseAiRuntime.loadDatabaseContext
+  if (!loadDatabaseContext) return ''
+  try {
+    return trim(await loadDatabaseContext(input))
+  } catch {
+    return ''
+  }
+}
+
 const storeDatabaseAiPaneDoneResponse = (
   input: DatabaseAiPaneResponseInput,
   startedAt: number,
@@ -270,7 +359,9 @@ const storeDatabaseAiPaneDoneResponse = (
           status: 'done',
           content: text,
           contextSummary: contextLine,
-          createdAt: existing?.createdAt ?? startedAt
+          createdAt: existing?.createdAt ?? startedAt,
+          responseLanguage: existing?.responseLanguage ?? input.responseLanguage,
+          context: databaseAiPaneStateContext(input.context)
         },
         input.assistantMessageId || existing?.id || `dbai-pane-message-${randomUUID()}`
       ),
@@ -306,19 +397,53 @@ async function generateProviderDatabaseAiPaneResponse(
     }
   }
 
+  const metadata = databaseAiTableMetadata()
+  const systemPrompt = databaseAiPaneProviderSystemPrompt(input)
+  const loadedContext = await databaseAiLoadedContext(
+    {
+      surface: 'pane',
+      context: input.context,
+      ...(input.action ? { action: input.action } : {}),
+      ...(trim(input.activeSql) ? { sql: input.activeSql } : {})
+    }
+  )
+  const cancelledAfterContext = findDatabaseAiPaneAssistantMessage({ requestId, assistantMessageId: input.assistantMessageId })
+  if (cancelledAfterContext?.status === 'cancelled') {
+    return {
+      ok: true,
+      data: {
+        requestId,
+        assistantMessage: cancelledAfterContext,
+        text: cancelledAfterContext.content,
+        provider: 'aiopsterm-local',
+        durationMs: Math.max(1, databaseAiNow() - startedAt)
+      }
+    }
+  }
   const providerResponse = await generateText({
     surface: 'pane',
+    conversationId: trim(input.conversationId) || undefined,
+    responseLanguage: normalizeDatabaseAiResponseLanguage(input.responseLanguage),
     modelName,
     prompt,
     context: input.context,
     requestId,
     assistantMessageId: input.assistantMessageId,
+    action: input.action,
     activeSql: input.activeSql,
-    systemPrompt: databaseAiPaneProviderSystemPrompt(input, databaseAiTableMetadata()),
-    messages: databaseAiPaneProviderMessages(input, prompt),
+    systemPrompt,
+    messages: databaseAiPaneProviderMessages(input, prompt, metadata, loadedContext),
     maxTokens: 1800
   })
   const existingAfter = findDatabaseAiPaneAssistantMessage({ requestId, assistantMessageId: input.assistantMessageId })
+  if (existingBefore && !existingAfter) {
+    return databaseAiPaneDiscardedResponse(
+      existingBefore,
+      requestId,
+      startedAt,
+      providerResponse.ok ? providerResponse.provider : providerResponse.provider || 'aiopsterm-local'
+    )
+  }
   if (existingAfter?.status === 'cancelled') {
     return {
       ok: true,
@@ -371,12 +496,13 @@ const storeDatabaseAiDrawerDoneResponse = (
     : storeDatabaseAiDrawerRequest({
         id: requestId || `dbai-drawer-request-${randomUUID()}`,
         action: input.action,
-        label: databaseAiDrawerActionName(input.action),
+        label: databaseAiDrawerActionName(input.action, normalizeDatabaseAiResponseLanguage(input.responseLanguage)),
         status: 'done',
         contextSummary: trim(input.context.contextSummary),
         sourceSql: input.sourceSql,
         text,
         targetDialect: dialect,
+        responseLanguage: normalizeDatabaseAiResponseLanguage(input.responseLanguage),
         backendContext: {
           connectionId: trim(input.context.connectionId),
           dbType: input.context.dbType || '',
@@ -416,18 +542,43 @@ async function generateProviderDatabaseAiDrawerResponse(
     }
   }
 
+  const metadata = databaseAiTableMetadata()
+  const systemPrompt = databaseAiDrawerProviderSystemPrompt(input, dialect)
+  const loadedContext = await databaseAiLoadedContext(
+    {
+      surface: 'drawer',
+      context: input.context,
+      action: input.action,
+      ...(trim(input.sourceSql) ? { sql: input.sourceSql } : {})
+    }
+  )
+  const cancelledAfterContext = requestId ? findDatabaseAiDrawerRequest({ requestId }) : null
+  if (cancelledAfterContext?.status === 'cancelled') {
+    return {
+      ok: true,
+      data: {
+        request: cancelledAfterContext,
+        text: cancelledAfterContext.text,
+        reasoning: '',
+        sql: '',
+        provider: 'aiopsterm-local',
+        durationMs: Math.max(1, databaseAiNow() - startedAt)
+      }
+    }
+  }
   const providerResponse = await generateText({
     surface: 'drawer',
+    responseLanguage: normalizeDatabaseAiResponseLanguage(input.responseLanguage),
     modelName,
-    prompt: databaseAiDrawerActionName(input.action),
+    prompt: databaseAiDrawerActionName(input.action, normalizeDatabaseAiResponseLanguage(input.responseLanguage)),
     context: input.context,
     requestId,
     action: input.action,
     sourceSql: input.sourceSql,
     targetDialect: dialect,
     errorMessage: input.errorMessage,
-    systemPrompt: databaseAiDrawerProviderSystemPrompt(input, dialect, databaseAiTableMetadata()),
-    messages: databaseAiDrawerProviderMessages(input, dialect),
+    systemPrompt,
+    messages: databaseAiDrawerProviderMessages(input, dialect, metadata, loadedContext),
     maxTokens: 1400
   })
   const existingAfter = requestId ? findDatabaseAiDrawerRequest({ requestId }) : null
@@ -467,7 +618,11 @@ async function generateProviderDatabaseAiDrawerResponse(
       providerResponse.provider
     )
   }
-  const reasoning = parsed.reasoning || `Reasoning\n- Provider returned SQL for ${databaseAiDrawerActionName(input.action)}.`
+  const reasoning = parsed.reasoning || databaseAiLanguageText(
+    input.responseLanguage,
+    `分析\n- Provider 已为${databaseAiDrawerActionName(input.action, 'zh-CN')}返回 SQL。`,
+    `Reasoning\n- Provider returned SQL for ${databaseAiDrawerActionName(input.action, 'en-US')}.`
+  )
   const text = composeDatabaseAiDrawerResponseText(reasoning, parsed.sql)
   const request = storeDatabaseAiDrawerDoneResponse(input, startedAt, requestId, dialect, text)
   if (!request) return { ok: false, errorCode: 'DB_AI_REQUEST_NOT_FOUND', errorMessage: 'DB AI drawer request was not found.' }
@@ -487,6 +642,7 @@ async function generateProviderDatabaseAiDrawerResponse(
 export async function createDatabaseAiPaneRequest(input: DatabaseAiPaneRequestInput): Promise<DatabaseAiPaneRequestResult> {
   databaseAiEnsureStateLoaded()
   const startedAt = Date.now()
+  const responseLanguage = normalizeDatabaseAiResponseLanguage(input.responseLanguage)
   const prompt = trim(input.prompt)
   if (!prompt) return { ok: false, errorCode: 'DB_AI_PROMPT_REQUIRED', errorMessage: 'Prompt is required.' }
   if (!trim(input.context.connectionId)) {
@@ -507,7 +663,9 @@ export async function createDatabaseAiPaneRequest(input: DatabaseAiPaneRequestIn
       status: 'done',
       content: prompt,
       contextSummary,
-      createdAt: userCreatedAt
+      createdAt: userCreatedAt,
+      responseLanguage,
+      context: databaseAiPaneStateContext(input.context)
     })
   )
   const assistantMessage = storeDatabaseAiPaneMessage(
@@ -517,7 +675,9 @@ export async function createDatabaseAiPaneRequest(input: DatabaseAiPaneRequestIn
       status: 'queued',
       content: '',
       contextSummary,
-      createdAt: userCreatedAt + 1
+      createdAt: userCreatedAt + 1,
+      responseLanguage,
+      context: databaseAiPaneStateContext(input.context)
     })
   )
   databaseAiPersistState()
@@ -548,7 +708,11 @@ export function cancelDatabaseAiPaneResponse(input: DatabaseAiPaneLifecycleInput
   if (existing.status === 'done') return { ok: true, data: { assistantMessage: existing } }
   const assistantMessage = updateDatabaseAiPaneAssistantMessage(input, {
     status: 'cancelled',
-    content: existing.content || 'Response cancelled before the first chunk.'
+    content: existing.content || databaseAiLanguageText(
+      existing.responseLanguage,
+      '响应已在第一个内容片段返回前取消。',
+      'Response cancelled before the first chunk.'
+    )
   }, databaseAiNow)
   if (assistantMessage) databaseAiPersistState()
   return assistantMessage ? { ok: true, data: { assistantMessage } } : { ok: false, errorCode: 'DB_AI_REQUEST_NOT_FOUND', errorMessage: 'DB AI pane request was not found.' }
@@ -557,6 +721,22 @@ export function cancelDatabaseAiPaneResponse(input: DatabaseAiPaneLifecycleInput
 export async function generateDatabaseAiPaneResponse(input: DatabaseAiPaneResponseInput): Promise<DatabaseAiPaneResponseResult> {
   databaseAiEnsureStateLoaded()
   const startedAt = databaseAiNow()
+  input = { ...input, responseLanguage: normalizeDatabaseAiResponseLanguage(input.responseLanguage) }
+  const explicitRequestId = trim(input.requestId)
+  const explicitAssistantMessageId = trim(input.assistantMessageId)
+  const lifecycleMessage = explicitRequestId
+    ? findDatabaseAiPaneAssistantMessage({ requestId: explicitRequestId, assistantMessageId: explicitAssistantMessageId })
+    : null
+  if (
+    explicitRequestId &&
+    explicitAssistantMessageId &&
+    !lifecycleMessage
+  ) {
+    return databaseAiPaneMissingLifecycleResponse(input, startedAt)
+  }
+  if (lifecycleMessage?.responseLanguage) {
+    input = { ...input, responseLanguage: normalizeDatabaseAiResponseLanguage(lifecycleMessage.responseLanguage) }
+  }
   const prompt = trim(input.prompt)
   if (!prompt) return databaseAiPaneErrorResponse(input, startedAt, 'DB_AI_PROMPT_REQUIRED', 'Prompt is required.')
   if (!trim(input.context.connectionId)) {
@@ -579,31 +759,61 @@ export async function generateDatabaseAiPaneResponse(input: DatabaseAiPaneRespon
   const recentTurns = (input.messages || []).filter((message) => message.role === 'user').slice(-4).length
   const metadata = databaseAiTableMetadata()
   const selectSql = suggestedDatabaseAiReadOnlySqlForContext(input, metadata)
-  const lines = [`Context: ${contextLine}`, '当前响应由 aiopsterm DB AI 本地后端生成，未连接远端数据库 AI 服务。', `Recent user turns: ${recentTurns}`]
+  const zhCN = input.responseLanguage === 'zh-CN'
+  const lines = zhCN
+    ? [`上下文：${contextLine}`, '当前响应由 aiopsterm DB AI 本地后端生成，未连接远端数据库 AI 服务。', `最近用户轮次：${recentTurns}`]
+    : [`Context: ${contextLine}`, 'This response was generated by the local aiopsterm DB AI backend without a remote database AI service.', `Recent user turns: ${recentTurns}`]
 
   if (promptLower.includes('explain') || promptLower.includes('解释')) {
+    lines.push(...(zhCN
+      ? [
+          '',
+          '我已读取当前 SQL 编辑器内容和数据库上下文。',
+          '执行注意事项：',
+          '- 从工作台运行前，请保持查询只读。',
+          '- 扩大结果集前，请检查 WHERE 条件。',
+          '- 如果延迟上升，请检查连接列和过滤列上的索引。',
+          '',
+          '建议的下一条 SQL：',
+          '```sql',
+          selectSql,
+          '```'
+        ]
+      : [
+          '',
+          'I read the active SQL editor and current database context.',
+          'Execution notes:',
+          '- Keep the query read-only before running it from the workbench.',
+          '- Verify WHERE clauses before widening result sets.',
+          '- Check indexes on join/filter columns if latency grows.',
+          '',
+          'Suggested next SQL:',
+          '```sql',
+          selectSql,
+          '```'
+        ]))
+  } else if (promptLower.includes('schema') || promptLower.includes('table') || promptLower.includes('表') || promptLower.includes('结构')) {
     lines.push(
       '',
-      'I read the active SQL editor and current database context.',
-      'Execution notes:',
-      '- Keep the query read-only before running it from the workbench.',
-      '- Verify WHERE clauses before widening result sets.',
-      '- Check indexes on join/filter columns if latency grows.',
+      zhCN ? '数据库结构摘要：' : 'Schema summary:',
+      ...databaseAiPaneSchemaSummaryForContext(input, metadata),
       '',
-      'Suggested next SQL:',
+      zhCN ? '建议的起始查询：' : 'Recommended starting point:',
       '```sql',
       selectSql,
       '```'
     )
-  } else if (promptLower.includes('schema') || promptLower.includes('table') || promptLower.includes('表')) {
-    lines.push('', 'Schema summary:', ...databaseAiPaneSchemaSummaryForContext(input, metadata), '', 'Recommended starting point:', '```sql', selectSql, '```')
   } else if (promptLower.includes('select') || promptLower.includes('query') || promptLower.includes('sql')) {
     const tableName = databaseAiFirstTableNameForPaneContext(input, metadata)
-    lines.push('', `Generated a conservative read-only query${tableName ? ` for ${tableName}` : ''}.`, '', '```sql', selectSql, '```')
+    lines.push('', zhCN
+      ? `已生成一条保守的只读查询${tableName ? `，目标 table 为 ${tableName}` : ''}。`
+      : `Generated a conservative read-only query${tableName ? ` for ${tableName}` : ''}.`, '', '```sql', selectSql, '```')
   } else {
     lines.push(
       '',
-      'I can help inspect schema metadata, draft read-only SQL, explain editor SQL, and suggest optimization checks in this database workspace.',
+      zhCN
+        ? '我可以在此数据库工作区中帮助检查数据库结构元数据、草拟只读 SQL、解释编辑器中的 SQL，并建议优化检查项。'
+        : 'I can help inspect schema metadata, draft read-only SQL, explain editor SQL, and suggest optimization checks in this database workspace.',
       '',
       '```sql',
       selectSql,
@@ -611,14 +821,18 @@ export async function generateDatabaseAiPaneResponse(input: DatabaseAiPaneRespon
     )
   }
 
+  const requestId = input.requestId || `dbai-pane-request-${randomUUID()}`
+  const existingBefore = findDatabaseAiPaneAssistantMessage({ requestId, assistantMessageId: input.assistantMessageId })
   const elapsedMs = databaseAiNow() - startedAt
   if (elapsedMs < DATABASE_AI_PANE_RESPONSE_MIN_DELAY_MS) {
     await wait(DATABASE_AI_PANE_RESPONSE_MIN_DELAY_MS - elapsedMs)
   }
 
-  const requestId = input.requestId || `dbai-pane-request-${randomUUID()}`
   const text = lines.join('\n')
   const existing = findDatabaseAiPaneAssistantMessage({ requestId, assistantMessageId: input.assistantMessageId })
+  if (existingBefore && !existing) {
+    return databaseAiPaneDiscardedResponse(existingBefore, requestId, startedAt, 'aiopsterm-local')
+  }
   if (existing?.status === 'cancelled') {
     return {
       ok: true,
@@ -640,7 +854,9 @@ export async function generateDatabaseAiPaneResponse(input: DatabaseAiPaneRespon
           status: 'done',
           content: text,
           contextSummary: contextLine,
-          createdAt: existing?.createdAt ?? startedAt
+          createdAt: existing?.createdAt ?? startedAt,
+          responseLanguage: existing?.responseLanguage ?? input.responseLanguage,
+          context: databaseAiPaneStateContext(input.context)
         },
         input.assistantMessageId || existing?.id || `dbai-pane-message-${randomUUID()}`
       ),
@@ -664,6 +880,7 @@ export async function createDatabaseAiDrawerRequest(input: DatabaseAiDrawerReque
   databaseAiEnsureStateLoaded()
   const now = Date.now()
   const action = input.action
+  const responseLanguage = normalizeDatabaseAiResponseLanguage(input.responseLanguage)
   const validActions: DatabaseAiDrawerAction[] = ['explain', 'nl2sql', 'optimize', 'convert', 'complete', 'diagnose', 'drop', 'truncate']
   if (!validActions.includes(action)) {
     return { ok: false, errorCode: 'DB_AI_ACTION_INVALID', errorMessage: 'DB AI action is not supported.' }
@@ -684,12 +901,13 @@ export async function createDatabaseAiDrawerRequest(input: DatabaseAiDrawerReque
   const request: DatabaseAiDrawerRequestRecord = {
     id: requestId,
     action,
-    label: databaseAiDrawerActionName(action),
+    label: databaseAiDrawerActionName(action, responseLanguage),
     status: 'queued',
     contextSummary: trim(input.context.contextSummary),
     sourceSql: input.sourceSql,
     text: '',
     targetDialect: databaseAiDrawerTargetDialect(input),
+    responseLanguage,
     backendContext: {
       connectionId: trim(input.context.connectionId),
       dbType: input.context.dbType || '',
@@ -725,6 +943,12 @@ export function cancelDatabaseAiDrawerResponse(input: DatabaseAiDrawerLifecycleI
 export async function generateDatabaseAiDrawerResponse(input: DatabaseAiDrawerResponseInput): Promise<DatabaseAiDrawerResponseResult> {
   databaseAiEnsureStateLoaded()
   const startedAt = databaseAiNow()
+  const requestId = trim(input.requestId)
+  const storedRequest = requestId ? findDatabaseAiDrawerRequest({ requestId }) : null
+  input = {
+    ...input,
+    responseLanguage: normalizeDatabaseAiResponseLanguage(storedRequest?.responseLanguage ?? input.responseLanguage)
+  }
   const action = input.action
   const validActions: DatabaseAiDrawerAction[] = ['explain', 'nl2sql', 'optimize', 'convert', 'complete', 'diagnose', 'drop', 'truncate']
   if (!validActions.includes(action)) {
@@ -748,7 +972,6 @@ export async function generateDatabaseAiDrawerResponse(input: DatabaseAiDrawerRe
 
   const generatedSql = buildDatabaseAiDrawerGeneratedSql(input, dialect, databaseAiTableMetadata())
   const reasoning = buildDatabaseAiDrawerReasoning(input, generatedSql, dialect)
-  const requestId = trim(input.requestId)
   const elapsedMs = databaseAiNow() - startedAt
   if (elapsedMs < DATABASE_AI_DRAWER_RESPONSE_MIN_DELAY_MS) {
     await wait(DATABASE_AI_DRAWER_RESPONSE_MIN_DELAY_MS - elapsedMs)
@@ -776,12 +999,13 @@ export async function generateDatabaseAiDrawerResponse(input: DatabaseAiDrawerRe
       : storeDatabaseAiDrawerRequest({
           id: requestId || `dbai-drawer-request-${randomUUID()}`,
           action,
-          label: databaseAiDrawerActionName(action),
+          label: databaseAiDrawerActionName(action, input.responseLanguage),
           status: 'done',
           contextSummary: trim(input.context.contextSummary),
           sourceSql: input.sourceSql,
           text,
           targetDialect: dialect,
+          responseLanguage: input.responseLanguage,
           backendContext: {
             connectionId: trim(input.context.connectionId),
             dbType: input.context.dbType || '',
@@ -814,12 +1038,14 @@ export async function diagnoseDatabaseSqlError(input: DatabaseSqlErrorDiagnosisI
   const requestId = trim(input.requestId) || `dbai-diagnose-request-${randomUUID()}`
   const sourceSql = trim(input.sourceSql)
   const errorMessage = trim(input.errorMessage)
+  const responseLanguage = normalizeDatabaseAiResponseLanguage(input.responseLanguage)
   if (!sourceSql) return { ok: false, errorCode: 'DB_AI_SQL_REQUIRED', errorMessage: 'SQL is required.' }
   if (!errorMessage) return { ok: false, errorCode: 'DB_AI_ERROR_REQUIRED', errorMessage: 'SQL error message is required.' }
 
   const created = await createDatabaseAiDrawerRequest({
     requestId,
     action: 'diagnose',
+    responseLanguage,
     sourceSql,
     targetDialect: input.targetDialect,
     context: input.context,
@@ -837,6 +1063,7 @@ export async function diagnoseDatabaseSqlError(input: DatabaseSqlErrorDiagnosisI
   return generateDatabaseAiDrawerResponse({
     requestId,
     action: 'diagnose',
+    responseLanguage: created.data.responseLanguage ?? responseLanguage,
     sourceSql: created.data.sourceSql,
     targetDialect: created.data.targetDialect,
     context: created.data.backendContext,

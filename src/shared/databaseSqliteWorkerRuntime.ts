@@ -22,6 +22,16 @@ export type SqliteWorkerTransactionInput = {
   busyTimeoutMs: number
 }
 
+export type SqliteWorkerGuardedTableQueryInput = {
+  filePath: string
+  schemaName: string
+  tableName: string
+  rowStatement: SqliteWorkerStatementInput
+  totalStatement?: SqliteWorkerStatementInput
+  maxRows: number
+  busyTimeoutMs: number
+}
+
 export type SqliteWorkerCatalogInput = {
   filePath: string
   busyTimeoutMs: number
@@ -30,6 +40,13 @@ export type SqliteWorkerCatalogInput = {
 export type SqliteWorkerExecuteOutcome =
   | { reader: true; columns: string[]; rows: Array<Record<string, unknown>>; truncated: boolean }
   | { reader: false; changes: number }
+
+export type SqliteWorkerGuardedTableQueryOutcome = {
+  columns: string[]
+  rows: Array<Record<string, unknown>>
+  truncated: boolean
+  total: number | null
+}
 
 export type SqliteWorkerCatalogOutcome = {
   name: string
@@ -46,6 +63,7 @@ type SqliteWorkerResponse =
   | { id: number; ok: true; reader: false; changes: number }
   | { id: number; ok: true; kind: 'transaction'; changes: number }
   | { id: number; ok: true; kind: 'catalog'; catalogs: SqliteWorkerCatalogOutcome[] }
+  | { id: number; ok: true; kind: 'guarded-table-query'; columns: string[]; rows: Array<Record<string, unknown>>; truncated: boolean; total: number | null }
   | { id: number; ok: false; code: string; message: string }
 
 type PendingWorkerRequest<T> = {
@@ -53,7 +71,7 @@ type PendingWorkerRequest<T> = {
   reject: (error: Error) => void
 }
 
-type WorkerRequestKind = 'statement' | 'transaction' | 'catalog'
+type WorkerRequestKind = 'statement' | 'transaction' | 'catalog' | 'guarded-table-query'
 
 // SQLite 在 worker 线程内同步执行，主线程只做异步等待，避免长查询或大 schema 扫描冻结整个应用。
 // eval worker 由 electron-vite 一起打包进主进程 bundle，不需要独立的构建入口。
@@ -118,6 +136,60 @@ const runTransaction = (db, request) => {
     throw error
   }
 }
+const collectReaderRows = (db, statement, maxRows) => {
+  const stmt = db.prepare(statement.sql)
+  if (!stmt.reader) {
+    const error = new Error('A guarded SQLite table query must be read-only.')
+    error.code = 'DB_TABLE_QUERY_UNSUPPORTED'
+    throw error
+  }
+  const params = Array.isArray(statement.params) ? statement.params : []
+  const columns = stmt.columns().map((column) => String((column && column.name) || '').trim()).filter(Boolean)
+  const rows = []
+  let truncated = false
+  for (const row of stmt.iterate(...params)) {
+    if (rows.length >= maxRows) {
+      truncated = true
+      break
+    }
+    rows.push(row)
+  }
+  return { columns, rows, truncated }
+}
+const runGuardedTableQuery = (db, request) => {
+  db.prepare('BEGIN').run()
+  try {
+    const schemaName = String(request.schemaName || '').trim()
+    const tableName = String(request.tableName || '').trim()
+    const objects = db
+      .prepare('SELECT type, sql FROM ' + sqliteIdentifier(schemaName) + ".sqlite_schema WHERE name = ? COLLATE BINARY AND type IN ('table', 'view')")
+      .all(tableName)
+    if (objects.length !== 1) {
+      const error = new Error('SQLite table was not found.')
+      error.code = 'DB_TABLE_NOT_FOUND'
+      throw error
+    }
+    const object = objects[0] || {}
+    if (String(object.type || '').toLowerCase() !== 'table' || /^\\s*create\\s+virtual\\s+table\\b/i.test(String(object.sql || ''))) {
+      const error = new Error('Stable SQLite reads are limited to base tables.')
+      error.code = 'DB_TABLE_QUERY_UNSUPPORTED'
+      throw error
+    }
+    const page = collectReaderRows(db, request.rowStatement, request.maxRows)
+    let total = null
+    if (request.totalStatement) {
+      const count = collectReaderRows(db, request.totalStatement, 1)
+      total = Number((count.rows[0] && count.rows[0].total) || 0)
+    }
+    db.prepare('COMMIT').run()
+    parentPort.postMessage({ id: request.id, ok: true, kind: 'guarded-table-query', columns: page.columns, rows: page.rows, truncated: page.truncated, total })
+  } catch (error) {
+    try {
+      db.prepare('ROLLBACK').run()
+    } catch {}
+    throw error
+  }
+}
 const runCatalog = (db, request) => {
   const schemaName = 'main'
   const rows = db
@@ -143,6 +215,7 @@ parentPort.on('message', (request) => {
     const kind = request.kind || 'statement'
     db = new Database(request.filePath, { readonly: kind !== 'transaction' && request.readonly !== false, fileMustExist: true, timeout: request.busyTimeoutMs })
     if (kind === 'transaction') runTransaction(db, request)
+    else if (kind === 'guarded-table-query') runGuardedTableQuery(db, request)
     else if (kind === 'catalog') runCatalog(db, request)
     else runStatement(db, request)
   } catch (error) {
@@ -204,6 +277,10 @@ const ensureSqliteWorker = (): Worker => {
       pending.resolve(response.catalogs)
       return
     }
+    if ('kind' in response && response.kind === 'guarded-table-query') {
+      pending.resolve({ columns: response.columns, rows: response.rows, truncated: response.truncated, total: response.total })
+      return
+    }
     pending.resolve(response.reader ? { reader: true, columns: response.columns, rows: response.rows, truncated: response.truncated } : { reader: false, changes: response.changes })
   })
   created.on('error', (error) => {
@@ -241,6 +318,11 @@ export const executeSqliteStatementInWorker = (input: SqliteWorkerExecuteInput):
 
 export const executeSqliteTransactionInWorker = (input: SqliteWorkerTransactionInput): Promise<{ changes: number }> =>
   requestSqliteWorker<{ changes: number }>('transaction', input)
+
+export const executeSqliteGuardedTableQueryInWorker = (
+  input: SqliteWorkerGuardedTableQueryInput
+): Promise<SqliteWorkerGuardedTableQueryOutcome> =>
+  requestSqliteWorker<SqliteWorkerGuardedTableQueryOutcome>('guarded-table-query', input)
 
 export const loadSqliteCatalogsInWorker = (input: SqliteWorkerCatalogInput & { connectionId: string }): Promise<SqliteWorkerCatalogOutcome[]> =>
   requestSqliteWorker<SqliteWorkerCatalogOutcome[]>('catalog', input)

@@ -6,6 +6,9 @@ type AiChatBridge = Pick<
   | 'createAiChatExchangeRequest'
   | 'generateAiChatResponse'
   | 'cancelAiChatResponse'
+  | 'respondClineAgentApproval'
+  | 'abortClineAgentTask'
+  | 'onClineAgentTaskEvent'
   | 'approveAiMcpToolCall'
   | 'rejectAiMcpToolCall'
   | 'approveAiMcpResourceAccess'
@@ -19,6 +22,9 @@ export const aiChatClient = {
   createAiChatExchangeRequest: () => bridgeMethod('createAiChatExchangeRequest'),
   generateAiChatResponse: () => bridgeMethod('generateAiChatResponse'),
   cancelAiChatResponse: () => bridgeMethod('cancelAiChatResponse'),
+  respondClineAgentApproval: () => bridgeMethod('respondClineAgentApproval'),
+  abortClineAgentTask: () => bridgeMethod('abortClineAgentTask'),
+  onClineAgentTaskEvent: () => bridgeMethod('onClineAgentTaskEvent'),
   approveAiMcpToolCall: () => bridgeMethod('approveAiMcpToolCall'),
   rejectAiMcpToolCall: () => bridgeMethod('rejectAiMcpToolCall'),
   approveAiMcpResourceAccess: () => bridgeMethod('approveAiMcpResourceAccess'),

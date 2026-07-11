@@ -204,7 +204,8 @@ export const defaultConfig: UserConfig = {
   },
   notifications: { ...defaultNotificationSettings },
   exportMcp: {
-    allowAgentSshAuthSubmit: false
+    allowAgentSshAuthSubmit: false,
+    allowDatabaseRead: false
   },
   modelSettings: defaultModelSettingsUserConfig,
   shortcuts: [],

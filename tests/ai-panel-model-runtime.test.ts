@@ -17,7 +17,8 @@ import type { AiModelCatalogOption } from '@shared/contracts/appRuntime'
 
 const modeOptions: AiPanelChatModeOption[] = [
   { id: 'agent', label: 'Agent', detail: 'agent mode' },
-  { id: 'cmd', label: 'Command', detail: 'command mode' }
+  { id: 'cmd', label: 'Command', detail: 'command mode' },
+  { id: 'chat', label: 'Chat', detail: 'chat mode' }
 ]
 
 const availableModels: AiModelCatalogOption[] = [
@@ -115,6 +116,9 @@ describe('aiPanelModelRuntime', () => {
     runtime.selectChatMode('cmd')
     expect(state.chatMode).toBe('cmd')
     expect(runtime.currentChatMode().label).toBe('Command')
+    runtime.selectChatMode('chat')
+    expect(state.chatMode).toBe('chat')
+    expect(runtime.currentChatMode().label).toBe('Chat')
 
     state.modelQuery = 'qwen'
     expect(runtime.filteredModelOptions().map((model) => model.id)).toEqual(['qwen2.5-coder'])

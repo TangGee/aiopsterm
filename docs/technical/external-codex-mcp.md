@@ -72,6 +72,11 @@ The external server currently exposes:
 - `clear_ai_notifications`: Clears all managed AI notification records without closing terminals or agent processes.
 - `open_ai_notification`: Requests aiopsterm to focus the notification's AI session and owning visible terminal.
 - `jump_to_unread_ai_notification`: Requests aiopsterm to focus the newest unread managed AI notification.
+- `list_database_connections`: Lists redacted saved database connection projections without endpoints or credentials.
+- `search_database_objects`: Searches current catalog metadata for table, view, function, and procedure objects.
+- `describe_database_table`: Returns current catalog column types, nullability, keys, and primary keys.
+- `get_database_table_ddl`: Reads bounded DDL for one catalog-known object through an open connection.
+- `query_database_table`: Reads a bounded table page through structured parameterized filters and sorting; it does not accept arbitrary SQL.
 
 `list_hosts` returns identifiers, host metadata, tags, proxy/jump-host labels, and auth method labels. It does not return passwords, private keys, passphrases, or token material.
 
@@ -98,6 +103,8 @@ By default, aiopsterm generates a persistent token on first use and stores it un
 ## Settings Installer
 
 The user-facing entry is `Settings -> Export MCP`. It exposes the same helper as an installable external MCP server named `aiopsterm_hosts`.
+
+Database tools are discovered with the other gateway tools, but database access is independently disabled by default. Enable `Allow external Agents to read databases` only for a trusted local Agent. Calls fail with `DB_MCP_DATABASE_READ_DISABLED` while the setting is off or the config cannot be read. External tools use process-scoped random database handles rather than saved connection ids or user-defined names. Non-SQLite DDL and table queries also require the saved connection to be open in the Database workspace.
 
 Built-in installers use the external client's official CLI rather than hand-editing client config files:
 
@@ -157,6 +164,9 @@ The external MCP is different: it is a headless host gateway for an external Cod
 - a stable socket path as service discovery only, not as authentication
 - no secret exposure in host listing or connection snapshots
 - SSH password/MFA entry stays in aiopsterm by default; external Agent submission requires the explicit Export MCP setting
+- database access requires the separate, default-off `allowDatabaseRead` Export MCP setting
+- database connection listings omit hosts, ports, usernames, URLs, file paths, proxy names, and credential state
+- database tools accept catalog selectors and structured filters rather than arbitrary SQL, with bounded rows, pages, DDL, and serialized payload size
 - external Codex MCP tool approval for execution tools
 - destructive tool annotations on `run_command` and `disconnect_host`
 - destructive tool annotations on `clear_ai_session`

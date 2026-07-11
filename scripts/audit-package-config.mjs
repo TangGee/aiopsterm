@@ -2,12 +2,31 @@ import { existsSync, readFileSync, statSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 const packageJson = JSON.parse(readFileSync(resolve('package.json'), 'utf8'))
+const packageLock = JSON.parse(readFileSync(resolve('package-lock.json'), 'utf8'))
 const builderConfig = readFileSync(resolve('electron-builder.yml'), 'utf8')
+const clineNodeRuntimePackages = [
+  'node-linux-x64',
+  'node-linux-arm64',
+  'node-darwin-x64',
+  'node-bin-darwin-arm64',
+  'node-win-x64',
+  'node-win-arm64'
+]
+const clineNodeRuntimeIntegrities = {
+  'node-linux-x64': 'sha512-CWyKqAkT1fUBr1IDD/JhDAYpUrBraNmSM9ndREbhAp14QmgBqq8CmgWHITSK1YXzJj+hWTEC1+F6gOgVFLIaSg==',
+  'node-linux-arm64': 'sha512-eVexvODYds5ya11f+1D0r33WVf6BGvoSvofyVYQFMFMytblCCwlgJStpOb4IdomSnfVQWLAt0tNgYE5iXxSRuA==',
+  'node-darwin-x64': 'sha512-N/X9n9cQYrQb43cVeEWw3uUwTBAVYO1/RKcfzQmwUSmDJxnYvcBu9eHwwLhfpuhHFZ/1ed1HMAOtQYgpSfSalg==',
+  'node-bin-darwin-arm64': 'sha512-3tuBY31BRdJlTmVSqCYBj/05j0LK8Ca/MW+VKzkdhO9KBQESNeVAemtpwMt1qVP/chGHvtlvHkguM1xNopPkcg==',
+  'node-win-x64': 'sha512-XhYJs77nWcwBDQy6JaCaguvT31j2aUw3M/mGsI0CgGvsGFpYKC9cGdzLkCnAJyj1AD6pNlDYmL29xIjYe+iAbg==',
+  'node-win-arm64': 'sha512-6HvEyE3kqKw7HwIo5GEAnyhbF170pJ0LztRSk/D8LSgctnsU+hYrq6/+jeYObeFVehyBsAobZ6KYExjdA8whrA=='
+}
 
 const packageScripts = packageJson.scripts || {}
 const requiredScripts = [
   'build:codex',
+  'build:cline-sidecar',
   'audit:codex-runtime',
+  'audit:cline-sidecar',
   'audit:packaged-app',
   'audit:linux-appimage',
   'audit:linux-deb',
@@ -30,13 +49,13 @@ if (missingScripts.length) {
 }
 
 const packageScriptRequirements = {
-  'build:linux:appimage': ['npm run build:codex', 'electron-builder --linux AppImage'],
-  'build:linux': ['npm run build:codex', 'electron-builder --linux'],
-  'build:deb': ['npm run build:codex', 'electron-builder --linux deb'],
-  'build:mac': ['npm run build:codex', 'electron-builder --mac'],
-  'build:mac:dir': ['npm run build:codex', 'electron-builder --mac --dir'],
-  'build:win': ['npm run build:codex', 'electron-builder --win'],
-  'build:win:dir': ['npm run build:codex', 'electron-builder --win --dir']
+  'build:linux:appimage': ['npm run build:codex', 'npm run build:cline-sidecar', 'electron-builder --linux AppImage'],
+  'build:linux': ['npm run build:codex', 'npm run build:cline-sidecar', 'electron-builder --linux'],
+  'build:deb': ['npm run build:codex', 'npm run build:cline-sidecar', 'electron-builder --linux deb'],
+  'build:mac': ['npm run build:codex', 'npm run build:cline-sidecar', 'electron-builder --mac'],
+  'build:mac:dir': ['npm run build:codex', 'npm run build:cline-sidecar', 'electron-builder --mac --dir'],
+  'build:win': ['npm run build:codex', 'npm run build:cline-sidecar', 'electron-builder --win'],
+  'build:win:dir': ['npm run build:codex', 'npm run build:cline-sidecar', 'electron-builder --win --dir']
 }
 const missingScriptRequirements = Object.entries(packageScriptRequirements).flatMap(([script, snippets]) =>
   snippets.filter((snippet) => !packageScripts[script].includes(snippet)).map((snippet) => `${script}: ${snippet}`)
@@ -47,6 +66,12 @@ if (missingScriptRequirements.length) {
 
 const mustContain = [
   '!external-reference/**',
+  '!src/**',
+  '!node_modules/@cline/**',
+  '!node_modules/node-linux-*/**',
+  '!node_modules/node-darwin-*/**',
+  '!node_modules/node-bin-darwin-*/**',
+  '!node_modules/node-win-*/**',
   'linux:',
   '- deb',
   '- AppImage',
@@ -67,6 +92,8 @@ const mustContain = [
   'to: aiopsterm-external-codex-mcp.js',
   'from: resources/aiopsterm-agent-hook.js',
   'to: aiopsterm-agent-hook.js',
+  'from: build/cline-sidecar',
+  'to: cline-sidecar',
   'afterPack: scripts/prune-packaged-native-modules.mjs',
   'schemes:',
   '- aiopsterm'
@@ -77,7 +104,48 @@ if (missingConfig.length) {
   throw new Error(`electron-builder.yml is missing required packaging settings:\n${missingConfig.join('\n')}`)
 }
 
+if (packageJson.dependencies?.['@cline/sdk']) {
+  throw new Error('@cline/sdk must not be a production dependency; it is compiled into the sidecar at build time.')
+}
+if (packageJson.devDependencies?.['@cline/sdk'] !== '0.0.59') {
+  throw new Error('@cline/sdk must stay exact-pinned to the audited 0.0.59 release.')
+}
+if (packageJson.devDependencies?.bun !== '1.3.13' || packageJson.devDependencies?.['@types/bun'] !== '1.3.13') {
+  throw new Error('Bun and @types/bun must stay exact-pinned to 1.3.13 for the Cline sidecar build.')
+}
+if (packageJson.devDependencies?.node) {
+  throw new Error('The script-installing node wrapper package must not be used for the Cline sidecar runtime.')
+}
+const invalidNodeRuntimePackages = clineNodeRuntimePackages.filter((name) => {
+  const locked = packageLock.packages?.[`node_modules/${name}`]
+  return packageJson.optionalDependencies?.[name] !== '22.20.0' ||
+    locked?.version !== '22.20.0' ||
+    locked?.optional !== true ||
+    locked?.integrity !== clineNodeRuntimeIntegrities[name]
+})
+if (invalidNodeRuntimePackages.length) {
+  throw new Error(`Cline sidecar Node runtime packages are not exact/integrity locked: ${invalidNodeRuntimePackages.join(', ')}`)
+}
+
+const clinePackagingFiles = [
+  'scripts/build-cline-sidecar.mjs',
+  'scripts/bundle-cline-sidecar.mjs',
+  'scripts/audit-cline-sidecar-runtime.mjs',
+  'resources/licenses/cline/LICENSE',
+  'resources/licenses/cline/ATTRIBUTION.txt',
+  'resources/licenses/cline-sidecar/PROVENANCE.md',
+  'resources/licenses/cline-sidecar/opencode-LICENSE',
+  'resources/licenses/cline-sidecar/simple-git-LICENSE'
+]
+const missingClinePackagingFiles = clinePackagingFiles.filter((file) => !existsSync(resolve(file)) || !statSync(resolve(file)).isFile())
+if (missingClinePackagingFiles.length) {
+  throw new Error(`Cline sidecar packaging files are missing:\n${missingClinePackagingFiles.join('\n')}`)
+}
+
 const codexBuildEntrypoint = readFileSync(resolve('scripts/build-codex-cli.mjs'), 'utf8')
+const clineBuildEntrypoint = readFileSync(resolve('scripts/build-cline-sidecar.mjs'), 'utf8')
+const clineBundleEntrypoint = readFileSync(resolve('scripts/bundle-cline-sidecar.mjs'), 'utf8')
+const clineAuditEntrypoint = readFileSync(resolve('scripts/audit-cline-sidecar-runtime.mjs'), 'utf8')
 const codexBuildScript = readFileSync(resolve('scripts/build-codex-cli.sh'), 'utf8')
 const codexDevBuildScript = readFileSync(resolve('scripts/build-codex-dev-package.sh'), 'utf8')
 const buildAndStartScript = readFileSync(resolve('scripts/build-and-start.sh'), 'utf8')
@@ -86,8 +154,24 @@ const packageTargetsScript = readFileSync(resolve('scripts/package-targets.mjs')
 const packagedAppAuditScript = readFileSync(resolve('scripts/audit-packaged-app.mjs'), 'utf8')
 const packagedE2eSpec = readFileSync(resolve('tests/packaged-e2e/packaged-app.spec.ts'), 'utf8')
 const codexPackagingRequirements = [
+  { label: 'Cline sidecar build entrypoint', source: packageScripts['build:cline-sidecar'], text: 'node scripts/build-cline-sidecar.mjs' },
+  { label: 'Cline sidecar audit entrypoint', source: packageScripts['audit:cline-sidecar'], text: 'node scripts/audit-cline-sidecar-runtime.mjs' },
+  { label: 'Cline sidecar Node runtime', source: clineBuildEntrypoint, text: "const NODE_VERSION = '22.20.0'" },
+  { label: 'Cline sidecar independent bundle', source: clineBuildEntrypoint, text: "const bundleName = 'cline-agent-sidecar.cjs'" },
+  { label: 'Cline sidecar CJS main definition', source: clineBundleEntrypoint, text: "define: { 'import.meta.main': 'true' }" },
+  { label: 'Cline sidecar SBOM', source: clineBuildEntrypoint, text: "'sbom.cdx.json'" },
+  { label: 'Cline sidecar third-party notices', source: clineBuildEntrypoint, text: "'THIRD-PARTY-NOTICES.txt'" },
+  { label: 'Cline sidecar Claude provider exclusion', source: clineBundleEntrypoint, text: "'ai-sdk-provider-claude-code'" },
+  { label: 'Cline sidecar SAP provider exclusion', source: clineBundleEntrypoint, text: "'@jerome-benoit/sap-ai-provider'" },
+  { label: 'Cline sidecar restricted package audit', source: clineAuditEntrypoint, text: 'restrictedPackagePatterns' },
+  { label: 'Cline sidecar provider initialization audit', source: clineAuditEntrypoint, text: 'providerConfigs' },
   { label: 'build-codex node entrypoint', source: packageScripts['build:codex'], text: 'node scripts/build-codex-cli.mjs' },
   { label: 'packaged app audit entrypoint', source: packageScripts['audit:packaged-app'], text: 'node scripts/audit-packaged-app.mjs' },
+  { label: 'packaged app Cline Node runtime audit', source: packagedAppAuditScript, text: "clineManifest.nodeVersion !== '22.20.0'" },
+  { label: 'packaged app Cline bundle audit', source: packagedAppAuditScript, text: "join(clineSidecar, 'cline-agent-sidecar.cjs')" },
+  { label: 'packaged app Cline SBOM audit', source: packagedAppAuditScript, text: "join(clineSidecar, 'sbom.cdx.json')" },
+  { label: 'packaged app Cline hash audit', source: packagedAppAuditScript, text: 'Packaged Cline sidecar hashes do not match its manifest.' },
+  { label: 'packaged app Cline Linux dynamic-link audit', source: packagedAppAuditScript, text: "execFileSync('ldd', [clineNode]" },
   { label: 'linux appimage audit entrypoint', source: packageScripts['audit:linux-appimage'], text: 'node scripts/audit-linux-appimage-package.mjs' },
   { label: 'linux deb audit entrypoint', source: packageScripts['audit:linux-deb'], text: 'node scripts/audit-linux-deb-package.mjs' },
   { label: 'packaged smoke node entrypoint', source: packageScripts['smoke:packaged'], text: 'node scripts/smoke-packaged-app.mjs' },

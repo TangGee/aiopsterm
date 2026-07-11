@@ -10,6 +10,7 @@ import {
   closeAiAgentSessionServer,
   ensureAiAgentSessionServer,
 } from './backend/agent/agentSessions'
+import { closeClineAgentRuntime } from './backend/agent/clineAgentRuntime'
 import { configureRuntimeLog, logRuntimeEvent } from './backend/app/runtimeLog'
 import { configureCrashDiagnosticsRuntime, shouldEnableCrashDiagnostics } from './backend/app/crashDiagnosticsRuntime'
 import {
@@ -294,6 +295,23 @@ const runtimeConfiguration = configureMainBackendRuntimes({
   broadcastManagedAiSessionEvent
 })
 
+let clineAgentShutdownComplete = false
+let clineAgentShutdownPromise: Promise<void> | null = null
+
+const shutdownClineAgentRuntime = () => {
+  if (clineAgentShutdownPromise) return clineAgentShutdownPromise
+  clineAgentShutdownPromise = closeClineAgentRuntime()
+    .catch((error) => {
+      logRuntimeEvent('error', 'cline-agent.shutdown-failed', {
+        errorMessage: error instanceof Error ? error.message : String(error)
+      })
+    })
+    .finally(() => {
+      clineAgentShutdownComplete = true
+    })
+  return clineAgentShutdownPromise
+}
+
 app.whenReady().then(async () => {
   appBootstrapRuntime.registerAssetProtocols()
   registerMainIpcRuntime({
@@ -352,10 +370,14 @@ app.on('window-all-closed', () => {
   }
 })
 
-app.on('before-quit', () => {
+app.on('before-quit', (event) => {
   closeControlSocketServer()
   closeCodexTerminalBridgeServer()
   closeExternalCodexMcpBridgeServer()
   settingsConfigRuntime.stopConfigWatchers()
   skillsRuntime.stopSkillsWatcher()
+  if (!clineAgentShutdownComplete) {
+    event.preventDefault()
+    void shutdownClineAgentRuntime().finally(() => app.quit())
+  }
 })

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref } from 'vue'
+import { useI18n } from '@/i18n'
 import {
   DB_FILTER_NULL,
   distinctFilterValues,
@@ -7,6 +8,8 @@ import {
   type DbSort,
   type DirtyState
 } from '@/services/database/databaseGridRuntime'
+
+const { t } = useI18n()
 
 const props = withDefaults(
   defineProps<{
@@ -108,7 +111,7 @@ function formatCellValue(value: unknown) {
     if (Array.isArray(value) || typeof value === 'object') return JSON.stringify(value)
     return String(value)
   } catch {
-    return '<unrenderable>'
+    return t('database.grid.unrenderable')
   }
 }
 
@@ -206,12 +209,12 @@ function applyFilter() {
 
 function filterSummary(column: string) {
   const filter = activeFilter(column)
-  if (!filter) return 'No filter'
+  if (!filter) return t('database.grid.noFilter')
   if (filter.operator === 'in') return `IN (${filter.values.length})`
   if (filter.operator === 'isnull') return 'IS NULL'
   if (filter.operator === 'notnull') return 'IS NOT NULL'
   if (filter.operator === 'eq' || filter.operator === 'neq' || filter.operator === 'like') return `${filter.operator.toUpperCase()} ${filter.value}`
-  return 'No filter'
+  return t('database.grid.noFilter')
 }
 
 function startEdit(origin: 'row' | 'new', key: string, column: string, value: unknown) {
@@ -267,7 +270,7 @@ onBeforeUnmount(deactivateGridSurface)
       v-if="columns.length === 0"
       class="db-result-empty"
     >
-      No Results
+      {{ t('database.grid.noResults') }}
     </div>
     <div
       v-else
@@ -298,7 +301,7 @@ onBeforeUnmount(deactivateGridSurface)
                 <button
                   type="button"
                   :class="{ active: sort?.column === column }"
-                  title="Sort"
+                  :title="t('database.grid.sort')"
                   @click="emit('sort', column)"
                 >
                   {{ sort?.column === column ? (sort.direction === 'asc' ? '▲' : '▼') : '⇅' }}
@@ -306,7 +309,7 @@ onBeforeUnmount(deactivateGridSurface)
                 <button
                   type="button"
                   :class="{ active: filters.some((filter) => filter.column === column) }"
-                  title="Filter"
+                  :title="t('database.grid.filter')"
                   @click="openFilter(column, $event)"
                 >
                   ▾
@@ -396,7 +399,8 @@ onBeforeUnmount(deactivateGridSurface)
         <input
           ref="filterInputRef"
           v-model="filterSearch"
-          :placeholder="`Search ${openFilterColumn}`"
+          :aria-label="t('database.grid.searchColumn', { column: openFilterColumn })"
+          :placeholder="t('database.grid.searchColumn', { column: openFilterColumn })"
           @keydown.enter="applyFilter"
           @keydown.escape="closeFilter"
         />
@@ -408,12 +412,12 @@ onBeforeUnmount(deactivateGridSurface)
           :indeterminate="someVisibleSelected && !allVisibleSelected"
           @change="toggleAllVisible(($event.target as HTMLInputElement).checked)"
         />
-        <span>All</span>
+        <span>{{ t('database.common.all') }}</span>
         <button
           type="button"
           @click="clearFilter"
         >
-          Clear
+          {{ t('database.common.clear') }}
         </button>
       </label>
       <div
@@ -424,7 +428,7 @@ onBeforeUnmount(deactivateGridSurface)
           v-if="filterLoading"
           class="db-filter-empty loading"
         >
-          Loading...
+          {{ t('database.common.loading') }}
         </div>
         <label
           v-else-if="visibleFilterValues.length"
@@ -444,7 +448,7 @@ onBeforeUnmount(deactivateGridSurface)
           v-else
           class="db-filter-empty"
         >
-          No Results
+          {{ t('database.grid.noResults') }}
         </div>
       </div>
       <footer class="db-filter-footer">
@@ -452,14 +456,14 @@ onBeforeUnmount(deactivateGridSurface)
           type="button"
           @click="closeFilter"
         >
-          Cancel
+          {{ t('database.common.cancel') }}
         </button>
         <button
           type="button"
           class="primary"
           @click="applyFilter"
         >
-          Apply
+          {{ t('database.common.apply') }}
         </button>
       </footer>
     </div>

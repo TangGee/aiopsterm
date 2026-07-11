@@ -22,6 +22,12 @@ import { createProviderTextRequest, fetchProviderText, resolveModelProvider, typ
 import { recordAiTodoCancelResult, recordAiTodoExchangeRequest, recordAiTodoResponseResult } from './aiTodos'
 import { createAiProviderProxyFetch } from './aiProviderProxyFetch'
 import { resolveCommandExecutionResponse, resolveMcpResourceAccessResponse, resolveMcpToolResponse } from './aiChatActionRuntime'
+import { abortClineAgentTask, runClineAgentTurn } from '../agent/clineAgentRuntime'
+import {
+  classicClineTaskIdentity,
+  generateClassicClineResponse,
+  type RunClassicClineTurn
+} from './classicClineAiChatRuntime'
 
 export { formatMcpResourceReadContent } from './aiChatActionRuntime'
 
@@ -62,6 +68,9 @@ type AiChatRuntimeConfig = {
   wait?: (durationMs: number) => Promise<unknown>
   now?: () => number
   timeoutMs?: number
+  clineEnabled?: boolean
+  runClineTurn?: RunClassicClineTurn
+  abortClineTask?: typeof abortClineAgentTask
 }
 
 let runtimeConfig: AiChatRuntimeConfig = {}
@@ -71,6 +80,11 @@ type AiChatResponseControl = {
   assistantMessageId?: string
   controller: AbortController
   cancelled: boolean
+  clineTask?: {
+    taskId: string
+    turnId: string
+    terminalSessionId?: string
+  }
 }
 
 const activeAiChatResponses = new Map<string, AiChatResponseControl>()
@@ -248,6 +262,16 @@ export const cancelAiChatResponse = (input: AiChatCancelInput): AiChatCancelResu
     control.cancelled = true
     control.controller.abort()
   }
+  const clineTask = control?.clineTask || (runtimeConfig.clineEnabled && ids.requestId && ids.assistantMessageId
+    ? { taskId: ids.requestId, turnId: ids.assistantMessageId }
+    : undefined)
+  if (clineTask) {
+    void (runtimeConfig.abortClineTask || abortClineAgentTask)({
+      taskId: clineTask.taskId,
+      turnId: clineTask.turnId,
+      reason: 'The operator cancelled the Classic AI turn.'
+    })
+  }
   keys.forEach((key) => pendingCancelledAiChatResponses.add(key))
 
   const result: AiChatCancelResult = {
@@ -414,7 +438,6 @@ const buildExchangePrompt = (text: string, contexts: AiChatContextInput[], skill
 
 const buildResponseMessages = (messages: AiChatMessageInput[] | undefined, prompt: string): AiChatMessageInput[] => {
   const history = (messages || [])
-    .slice(-12)
     .map((message): AiChatMessageInput | null => {
       const text = normalizeText(message.text)
       if (!text) return null
@@ -424,7 +447,8 @@ const buildResponseMessages = (messages: AiChatMessageInput[] | undefined, promp
         ask: message.ask,
         say: message.say,
         action: message.action,
-        commandExecution: message.commandExecution
+        commandExecution: message.commandExecution,
+        agentTask: message.agentTask
       }
     })
     .filter(Boolean) as AiChatMessageInput[]
@@ -449,6 +473,8 @@ export const createAiChatExchangeRequest = async (input: AiChatExchangeRequestIn
   const responseInput: AiChatResponseInput = {
     requestId,
     assistantMessageId: assistantMessage.id,
+    conversationId: normalizeText(input.conversationId) || undefined,
+    terminalSessionId: normalizeText(input.terminalSessionId) || undefined,
     prompt,
     messages: buildResponseMessages(input.messages, prompt),
     contexts,
@@ -592,6 +618,44 @@ const mapConversationForProvider = (messages: AiChatMessageInput[] | undefined, 
   return normalized
 }
 
+async function generateClineAiChatResponse(
+  input: AiChatResponseInput,
+  config: UserConfig,
+  modelName: string,
+  startedAt: number,
+  control: AiChatResponseControl
+): Promise<AiChatResponseResult> {
+  const identity = classicClineTaskIdentity(input)
+  control.clineTask = {
+    ...identity,
+    ...(normalizeText(input.terminalSessionId) ? { terminalSessionId: normalizeText(input.terminalSessionId) } : {})
+  }
+  const response = await generateClassicClineResponse({
+    request: input,
+    config,
+    modelName,
+    identity,
+    runTurn: runtimeConfig.runClineTurn || runClineAgentTurn
+  })
+  if (isAiChatResponseCancelled(control)) return cancelledAiChatResponse(input, control, modelName, startedAt)
+  if (!response.ok) return response
+  return {
+    ok: true,
+    data: {
+      text: response.data.text,
+      provider: response.data.provider,
+      model: response.data.model,
+      durationMs: Math.max(1, now() - startedAt),
+      status: response.data.agentTask.status === 'cancelled' ? 'cancelled' : 'done',
+      requestId: control.requestId,
+      assistantMessageId: control.assistantMessageId,
+      message: response.data.message,
+      agentTask: response.data.agentTask,
+      contextUsage: contextUsageForResponse(input, control, modelName, response.data.text)
+    }
+  }
+}
+
 async function generateProviderAiChatResponse(
   input: AiChatResponseInput,
   config: UserConfig,
@@ -688,6 +752,9 @@ export const generateAiChatResponse = async (input: AiChatResponseInput): Promis
     if (isAiChatResponseCancelled(control)) return complete(cancelledAiChatResponse(input, control, modelName, startedAt))
     const config = runtimeConfig.getConfig?.()
     if (config) {
+      if (runtimeConfig.clineEnabled) {
+        return complete(await generateClineAiChatResponse(input, config, modelName, startedAt, control))
+      }
       const providerResponse = await generateProviderAiChatResponse(input, config, modelName, startedAt, control)
       if (providerResponse) return complete(providerResponse)
     }

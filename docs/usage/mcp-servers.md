@@ -2,6 +2,8 @@
 
 aiopsterm stores MCP server configuration in `setting/mcp_settings.json` under the app user-data directory. Open Settings -> Host Agent -> MCP and use Add Server/Edit to open the JSON editor.
 
+This page configures third-party MCP servers consumed by aiopsterm. aiopsterm's first-party read-only database tools use the separate Export MCP gateway and resolve process-scoped random handles to saved connections inside the main process, without a second DSN or password. See [Database MCP](../technical/database-mcp.md) and the [Export MCP settings guide](settings/en-US/export-mcp.md).
+
 New profiles start with an empty MCP config unless the development seed switch `AIOPSTERM_MCP_ENABLE_SEED=1` is set. `NODE_ENV=test` alone does not install sample MCP servers:
 
 ```json

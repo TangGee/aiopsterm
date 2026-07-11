@@ -21,6 +21,7 @@ const labels: AiPanelHistoryRuntimeLabels = {
   historyFavorited: () => 'favorited',
   historyUnfavorited: () => 'unfavorited',
   historyFavoriteUpdateFailed: () => 'favorite failed',
+  activeTurnNavigationBlocked: () => 'active turn blocks navigation',
   exportEmpty: () => 'export empty',
   exportUnavailable: () => 'export unavailable',
   exportFailed: (message) => `export failed: ${message}`,
@@ -40,6 +41,7 @@ const createHarness = () => {
   let selectedConversationId = 'conv-1'
   let currentConversations = conversations.map((conversation) => ({ ...conversation }))
   let chatMessageCount = 1
+  let activeTurn = false
   let exportBridge: ((input: AiChatExportInput) => Promise<AiChatExportResult>) | undefined = vi.fn(async () => ({
     ok: true,
     data: {
@@ -86,6 +88,7 @@ const createHarness = () => {
     visibleTabs: () => currentConversations.filter((conversation) => state.openConversationTabIds.includes(conversation.id)),
     visibleHistoryCount: () => currentConversations.length,
     chatMessageCount: () => chatMessageCount,
+    hasActiveTurn: () => activeTurn,
     currentConversationTitle: () => 'Current chat',
     exportMessages: calls.exportMessages,
     createConversation: calls.createConversation,
@@ -114,6 +117,9 @@ const createHarness = () => {
     timers,
     setChatMessageCount: (count: number) => {
       chatMessageCount = count
+    },
+    setActiveTurn: (active: boolean) => {
+      activeTurn = active
     },
     setExportBridge: (bridge: typeof exportBridge) => {
       exportBridge = bridge
@@ -225,5 +231,21 @@ describe('aiPanelHistoryRuntime', () => {
     setExportBridge(vi.fn(async () => ({ ok: true, data: { exported: 1, fileName: '' } } as AiChatExportResult)))
     await runtime.exportCurrentChat()
     expect(state.chatExportNotice).toBe('export malformed')
+  })
+
+  it('keeps the active conversation selected while an AI turn is running', async () => {
+    const { runtime, state, calls, setActiveTurn } = createHarness()
+    setActiveTurn(true)
+
+    expect(await runtime.createNewConversation()).toBe(false)
+    await runtime.restoreConversationFromTab('conv-2')
+    await runtime.closeConversationTab('conv-1')
+    await runtime.deleteHistoryConversation('conv-2')
+
+    expect(calls.createConversation).not.toHaveBeenCalled()
+    expect(calls.restoreConversation).not.toHaveBeenCalled()
+    expect(calls.deleteConversation).not.toHaveBeenCalled()
+    expect(state.openConversationTabIds).toEqual(['conv-1', 'conv-2'])
+    expect(state.chatExportNotice).toBe('active turn blocks navigation')
   })
 })

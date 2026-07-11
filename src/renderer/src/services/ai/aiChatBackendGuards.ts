@@ -43,9 +43,17 @@ const aiChatAskValues: NonNullable<AiChatHistoryMessage['ask']>[] = ['command', 
 const aiChatSayValues: NonNullable<AiChatHistoryMessage['say']>[] = ['command', 'command_output', 'search_result', 'context_truncated']
 const aiChatActionValues: NonNullable<AiChatHistoryMessage['action']>[] = ['approved', 'rejected']
 const aiChatCommandExecutionStatusValues: NonNullable<AiChatHistoryMessage['commandExecutionStatus']>[] = ['pending', 'running', 'succeeded', 'failed']
+const aiChatAgentTaskStatusValues: NonNullable<AiChatHistoryMessage['agentTask']>['status'][] = [
+  'starting',
+  'running',
+  'waiting-approval',
+  'done',
+  'cancelled',
+  'error'
+]
 const aiChatModes: NonNullable<AiChatResponseInput['mode']>[] = ['agent', 'command', 'chat']
 const aiSupportedImageTypes: AiSupportedImageType[] = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/bmp', 'image/svg+xml']
-const aiProviderKeys = ['aiopsterm-local', 'litellm', 'openai', 'bedrock', 'deepseek', 'anthropic', 'ollama']
+const aiProviderKeys = ['aiopsterm-local', 'litellm', 'openai', 'bedrock', 'deepseek', 'anthropic', 'ollama', 'lmstudio']
 
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 const isNonNegativeFiniteNumber = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0
@@ -108,6 +116,15 @@ export const isAiChatCommandExecution = (source: unknown): source is NonNullable
   typeof source.requiresApproval === 'boolean' &&
   typeof source.interactive === 'boolean'
 
+export const isAiChatAgentTaskRef = (source: unknown): source is NonNullable<AiChatHistoryMessage['agentTask']> =>
+  isRecord(source) &&
+  isNonEmptyString(source.taskId) &&
+  isNonEmptyString(source.turnId) &&
+  isOptionalString(source.terminalSessionId) &&
+  isOptionalString(source.toolCallId) &&
+  isOptionalString(source.toolName) &&
+  aiChatAgentTaskStatusValues.includes(source.status as NonNullable<AiChatHistoryMessage['agentTask']>['status'])
+
 export const isAiChatHistoryMessage = (source: unknown): source is AiChatHistoryMessage =>
   isRecord(source) &&
   isNonEmptyString(source.id) &&
@@ -126,6 +143,7 @@ export const isAiChatHistoryMessage = (source: unknown): source is AiChatHistory
   (source.say === undefined || aiChatSayValues.includes(source.say as NonNullable<AiChatHistoryMessage['say']>)) &&
   (source.action === undefined || aiChatActionValues.includes(source.action as NonNullable<AiChatHistoryMessage['action']>)) &&
   (source.commandExecution === undefined || isAiChatCommandExecution(source.commandExecution)) &&
+  (source.agentTask === undefined || isAiChatAgentTaskRef(source.agentTask)) &&
   (source.mcpToolCall === undefined ||
     (isRecord(source.mcpToolCall) &&
       isNonEmptyString(source.mcpToolCall.serverName) &&
@@ -186,7 +204,8 @@ export const isAiChatMessageInput = (source: unknown): source is AiChatMessageIn
   (source.ask === undefined || aiChatAskValues.includes(source.ask as NonNullable<AiChatMessageInput['ask']>)) &&
   (source.say === undefined || aiChatSayValues.includes(source.say as NonNullable<AiChatMessageInput['say']>)) &&
   (source.action === undefined || aiChatActionValues.includes(source.action as NonNullable<AiChatMessageInput['action']>)) &&
-  (source.commandExecution === undefined || isAiChatCommandExecution(source.commandExecution))
+  (source.commandExecution === undefined || isAiChatCommandExecution(source.commandExecution)) &&
+  (source.agentTask === undefined || isAiChatAgentTaskRef(source.agentTask))
 
 export const isAiChatContextInput = (source: unknown): source is NonNullable<AiChatResponseInput['contexts']>[number] =>
   isRecord(source) &&
@@ -232,6 +251,8 @@ export const isAiChatResponseInput = (source: unknown): source is AiChatResponse
   isRecord(source) &&
   isOptionalString(source.requestId) &&
   isOptionalString(source.assistantMessageId) &&
+  isOptionalString(source.conversationId) &&
+  isOptionalString(source.terminalSessionId) &&
   isNonEmptyString(source.prompt) &&
   (source.messages === undefined || (Array.isArray(source.messages) && source.messages.every(isAiChatMessageInput))) &&
   (source.contexts === undefined || (Array.isArray(source.contexts) && source.contexts.every(isAiChatContextInput))) &&
@@ -260,6 +281,7 @@ export const isAiChatResponseData = (source: unknown): source is AiChatResponseD
   isOptionalString(source.requestId) &&
   isOptionalString(source.assistantMessageId) &&
   (source.message === undefined || isAiChatHistoryMessage(source.message)) &&
+  (source.agentTask === undefined || isAiChatAgentTaskRef(source.agentTask)) &&
   (source.contextUsage === undefined || isAiContextUsageSnapshot(source.contextUsage))
 
 export const aiChatRequestIdFromAssistantMessageId = (assistantMessageId: string) =>

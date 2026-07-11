@@ -266,6 +266,24 @@ export const clickHouseColumnsForTable = async (
     })
 }
 
+const clickHouseLiveTableEngine = async (
+  connection: DatabaseConnectionInfo,
+  input: Pick<DatabaseTableQueryInput, 'databaseName' | 'tableName'>
+) => {
+  const rows = await clickHouseRows<Record<string, unknown>>(
+    connection,
+    [
+      'SELECT engine',
+      'FROM system.tables',
+      `WHERE database = ${clickHouseLiteral(trim(input.databaseName))} AND name = ${clickHouseLiteral(trim(input.tableName))}`,
+      'LIMIT 2'
+    ].join(' '),
+    trim(input.databaseName)
+  )
+  if (rows.length !== 1) return ''
+  return trim(rowValue(rows[0] ?? {}, 'engine', 'ENGINE'))
+}
+
 export const clickHouseCatalogsForConnection = async (connection: DatabaseConnectionInfo): Promise<DatabaseCatalogInfo[]> => {
   const databaseRows = await clickHouseRows<Record<string, unknown>>(
     connection,
@@ -394,11 +412,30 @@ export const clickHouseQueryTable = async (
   startedAt: number
 ): Promise<DatabaseTableQueryResult> => {
   try {
+    if (input.requireStableBaseTable) {
+      const engine = await clickHouseLiveTableEngine(connection, input)
+      if (!engine) {
+        return { ok: false, errorCode: 'DB_TABLE_NOT_FOUND', errorMessage: `Table not found: ${input.tableName}` }
+      }
+      return {
+        ok: false,
+        errorCode: 'DB_TABLE_QUERY_UNSUPPORTED',
+        errorMessage: engine.toLowerCase().includes('view')
+          ? 'Stable database reads are limited to base tables.'
+          : 'ClickHouse HTTP connections cannot lock a base-table identity across metadata and data requests.'
+      }
+    }
     const columns = await clickHouseColumnsForTable(connection, input)
     if (!columns.length) {
       return { ok: false, errorCode: 'DB_TABLE_NOT_FOUND', errorMessage: `Table not found: ${input.tableName}` }
     }
     const knownColumns = columns.map((column) => column.name)
+    const requestedColumns = (input.columns ?? []).map((column) => knownColumns.find((known) => known.toLowerCase() === trim(column).toLowerCase())).filter(Boolean) as string[]
+    if (input.columns?.length && requestedColumns.length !== input.columns.length) {
+      return { ok: false, errorCode: 'DB_COLUMNS_INVALID', errorMessage: 'One or more selected columns are not available.' }
+    }
+    const selectedColumns = input.columns?.length ? requestedColumns : knownColumns
+    if (!selectedColumns.length) return { ok: false, errorCode: 'DB_COLUMNS_REQUIRED', errorMessage: 'At least one selected column is required.' }
     const filters = [...parseWhereRaw(input.whereRaw), ...(input.filters ?? [])]
     const where = clickHouseWhereForFilters(filters, knownColumns)
     const sort = input.sort ?? parseOrderByRaw(input.orderByRaw, knownColumns)
@@ -407,9 +444,10 @@ export const clickHouseQueryTable = async (
     const page = Math.max(1, Math.floor(Number(input.page) || 1))
     const offset = (page - 1) * pageSize
     const tableRef = clickHouseTableReference(input)
+    const selectList = selectedColumns.map(clickHouseIdentifier).join(', ')
     const rowsQuery = await clickHouseQueryJson<Record<string, unknown>>(
       clickHouseConnectionInput(connection),
-      `SELECT * FROM ${tableRef}${where}${orderBy} LIMIT ${pageSize} OFFSET ${offset}`,
+      `SELECT ${selectList} FROM ${tableRef}${where}${orderBy} LIMIT ${pageSize} OFFSET ${offset}`,
       trim(input.databaseName)
     )
     const countRows = input.withTotal
@@ -418,7 +456,7 @@ export const clickHouseQueryTable = async (
     return {
       ok: true,
       data: {
-        columns: rowsQuery.columns.length ? rowsQuery.columns : knownColumns,
+        columns: rowsQuery.columns.length ? rowsQuery.columns : selectedColumns,
         rows: rowsQuery.rows,
         rowCount: rowsQuery.rows.length,
         durationMs: Math.max(1, Date.now() - startedAt),

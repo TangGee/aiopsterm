@@ -4,7 +4,7 @@
   min-height: 0;
   height: 100%;
   display: grid;
-  grid-template-columns: 300px minmax(0, 1fr) var(--db-ai-pane-width, 0px) auto;
+  grid-template-columns: 300px minmax(0, 1fr) var(--db-ai-pane-width, 0px);
   background: var(--theme-module-active-workspace-bg);
   color: var(--theme-module-active-text);
   overflow: hidden;
@@ -62,7 +62,6 @@
 .db-where-bar button,
 .db-popup-menu button,
 .db-modal-overlay button,
-.db-ai-drawer button,
 .db-th-controls button {
   border: 0;
   background: transparent;

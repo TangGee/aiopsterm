@@ -222,7 +222,7 @@ export const createSettingsWorkspaceAdvancedPages = (
       const updateAgentSshAuthSubmit = (checked: boolean) =>
         workspace.saveConfig({
           exportMcp: {
-            ...(workspace.config.exportMcp || {}),
+            allowDatabaseRead: workspace.config.exportMcp?.allowDatabaseRead === true,
             allowAgentSshAuthSubmit: checked
           }
         })
@@ -243,6 +243,36 @@ export const createSettingsWorkspaceAdvancedPages = (
                 const checked = input.checked
                 await updateAgentSshAuthSubmit(checked)
                 input.checked = workspace.config.exportMcp?.allowAgentSshAuthSubmit === true
+              }
+            }),
+            h('span')
+          ])
+        ])
+
+      const updateDatabaseRead = (checked: boolean) =>
+        workspace.saveConfig({
+          exportMcp: {
+            allowAgentSshAuthSubmit: workspace.config.exportMcp?.allowAgentSshAuthSubmit === true,
+            allowDatabaseRead: checked
+          }
+        })
+
+      const renderDatabaseRead = () =>
+        h('div', { class: 'export-mcp-auth-toggle' }, [
+          h('div', [
+            h('strong', t('settings.ai.exportMcp.databaseReadTitle')),
+            h('small', t('settings.ai.exportMcp.databaseReadDescription')),
+            h('em', t('settings.ai.exportMcp.databaseReadWarning'))
+          ]),
+          h('label', { class: 'settings-switch' }, [
+            h('input', {
+              type: 'checkbox',
+              checked: workspace.config.exportMcp?.allowDatabaseRead === true,
+              onChange: async (event: Event) => {
+                const input = event.target as HTMLInputElement
+                const checked = input.checked
+                await updateDatabaseRead(checked)
+                input.checked = workspace.config.exportMcp?.allowDatabaseRead === true
               }
             }),
             h('span')
@@ -370,6 +400,7 @@ export const createSettingsWorkspaceAdvancedPages = (
             workspace.exportMcpInstallerError ? h('p', { class: 'agent-hook-error' }, workspace.exportMcpInstallerError) : null,
             renderBridgeStatus(),
             renderAgentSshAuthSubmit(),
+            renderDatabaseRead(),
             ...exportMcpInstallerRows().map((client) => renderInstaller(client))
           ]),
           h('div', { class: 'settings-section-card automation-settings-card export-mcp-manual-card' }, [

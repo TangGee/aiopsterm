@@ -9,6 +9,7 @@ import {
   dbAiContentText as runtimeDbAiContentText,
   dbAiContextParts,
   dbAiDrawerCreateInput,
+  dbAiPaneMessageGeneratedSql,
   dbAiReasoningText as runtimeDbAiReasoningText,
   dbAiRequestList as runtimeDbAiRequestList,
   dbAiSql as runtimeDbAiSql,
@@ -27,6 +28,7 @@ import {
   isDbAiDrawerResponseData,
   type DbAiAction,
   type DbAiBackendContext,
+  type DbAiPaneMessage,
   type DbAiRequest,
   type DbAiStatus,
   type DbAiTargetDialect
@@ -36,9 +38,11 @@ import type {
   DatabaseAiDrawerLifecycleResult,
   DatabaseAiDrawerRequestResult,
   DatabaseAiDrawerResponseResult,
+  DatabaseAiResponseLanguage,
   DatabaseCatalogInfo,
   DatabaseConnectionInfo
 } from '@shared/contracts/database'
+import { databaseAiReasoningHeading } from '@shared/databaseAiSqlRuntime'
 
 type DatabaseAiDrawerWorkspaceRuntimeState = {
   activeSqlTab: ComputedRef<SqlTab | null>
@@ -59,6 +63,8 @@ type DatabaseAiDrawerWorkspaceRuntimeDeps = {
   renderDefaultSql: (connection: DatabaseConnectionInfo | undefined, catalog: DatabaseCatalogInfo | undefined, schemaName?: string) => string
   setEditorSql: (nextSql: string, selectionStart: number, selectionEnd?: number) => void
   appendSqlExecution: (tab: SqlTab, sql: string) => Promise<void>
+  getResponseLanguage: () => DatabaseAiResponseLanguage
+  syncConversationRequest: (request: DbAiRequest) => void
 }
 
 export const createDatabaseAiDrawerWorkspaceRuntime = (
@@ -78,7 +84,9 @@ export const createDatabaseAiDrawerWorkspaceRuntime = (
     getSqlTextUntilCursor,
     renderDefaultSql,
     setEditorSql,
-    appendSqlExecution
+    appendSqlExecution,
+    getResponseLanguage,
+    syncConversationRequest
   } = deps
 
   const dbAiOpen = ref(false)
@@ -89,10 +97,12 @@ export const createDatabaseAiDrawerWorkspaceRuntime = (
     error: '',
     success: false,
     resultId: '',
+    resultTitle: '',
     requestId: ''
   })
   let sqlDiagnoseSuccessTimer: number | null = null
   let sqlDiagnoseRequestSequence = 1
+  let dbAiRequestGeneration = 0
 
   const dbAiRequestList = computed(() => runtimeDbAiRequestList(dbAiRequests.value))
   const activeDbAiRequest = computed(() => {
@@ -107,7 +117,9 @@ export const createDatabaseAiDrawerWorkspaceRuntime = (
       const request = activeDbAiRequest.value
       if (!request) return
       patchDbAiRequest(request.id, {
-        targetDialect: value
+        targetDialect: value,
+        status: 'queued',
+        text: ''
       })
       if (request.action === 'convert' && request.status !== 'cancelled') {
         void requestDbAiDrawerResponse(request.id)
@@ -171,10 +183,18 @@ export const createDatabaseAiDrawerWorkspaceRuntime = (
     return dbAiBackendContext({ tab, connection, contextSummary, override })
   }
 
-  const openDbAi = async (action: DbAiAction, sql: string, context = '', backendContextOverride: DbAiBackendContext = {}) => {
+  const openDbAi = async (
+    action: DbAiAction,
+    sql: string,
+    context = '',
+    backendContextOverride: DbAiBackendContext = {},
+    targetDialectOverride?: DbAiTargetDialect
+  ) => {
+    const requestGeneration = dbAiRequestGeneration
+    const responseLanguage = getResponseLanguage()
     const backendContext = buildDbAiBackendContext(context, backendContextOverride)
     const activeDialect = backendContext.dbType || (activeSqlTab.value ? findConnection(activeSqlTab.value.connectionId)?.dbType : undefined)
-    const targetDialect = normalizeDbAiTargetDialect(activeDialect)
+    const targetDialect = targetDialectOverride ?? normalizeDbAiTargetDialect(activeDialect)
     const createBridge = databaseClient.createDatabaseAiDrawerRequest()
     if (!createBridge) {
       showNotice('DB AI drawer request service unavailable')
@@ -186,12 +206,14 @@ export const createDatabaseAiDrawerWorkspaceRuntime = (
         action,
         sourceSql: sql,
         targetDialect,
+        responseLanguage,
         context: { ...backendContext, contextSummary: backendContext.contextSummary || context }
       }))
     } catch (error) {
       showNotice(bridgeErrorMessage(error, 'DB AI request failed'))
       return
     }
+    if (requestGeneration !== dbAiRequestGeneration) return
     if (!result.ok) {
       showNotice(result.errorMessage || 'DB AI request failed')
       return
@@ -203,13 +225,27 @@ export const createDatabaseAiDrawerWorkspaceRuntime = (
     const request = result.data
     dbAiRequests.value = { ...dbAiRequests.value, [request.id]: request }
     dbAiActiveReqId.value = request.id
-    dbAiOpen.value = true
+    dbAiOpen.value = false
+    syncConversationRequest(request)
     void requestDbAiDrawerResponse(request.id)
     closeMenus()
   }
 
   const patchDbAiRequest = (reqId: string, patch: Partial<DbAiRequest>) => {
     dbAiRequests.value = patchDbAiRequestRecord(dbAiRequests.value, reqId, patch)
+    const request = dbAiRequests.value[reqId]
+    if (request) syncConversationRequest(request)
+  }
+
+  const failDbAiRequest = (reqId: string, errorMessage: string, expectedDialect?: DbAiTargetDialect) => {
+    const request = dbAiRequests.value[reqId]
+    if (!request || (expectedDialect && request.targetDialect !== expectedDialect)) return
+    patchDbAiRequest(reqId, {
+      status: 'error',
+      text: `${databaseAiReasoningHeading(request.responseLanguage)}\n- ${errorMessage}`,
+      updatedAt: Date.now()
+    })
+    showNotice(errorMessage)
   }
 
   const requestDbAiDrawerResponse = async (reqId: string) => {
@@ -218,41 +254,43 @@ export const createDatabaseAiDrawerWorkspaceRuntime = (
     const expectedDialect = request.targetDialect
     const startBridge = databaseClient.startDatabaseAiDrawerResponse()
     if (!startBridge) {
-      showNotice('DB AI drawer start service unavailable')
+      failDbAiRequest(reqId, 'DB AI drawer start service unavailable', expectedDialect)
       return
     }
     let started: DatabaseAiDrawerLifecycleResult
     try {
       started = await startBridge({ requestId: reqId })
     } catch (error) {
-      showNotice(bridgeErrorMessage(error, 'DB AI drawer request failed to start'))
+      failDbAiRequest(reqId, bridgeErrorMessage(error, 'DB AI drawer request failed to start'), expectedDialect)
       return
     }
     if (!started.ok) {
-      showNotice(started.errorMessage || 'DB AI drawer request failed to start')
+      failDbAiRequest(reqId, started.errorMessage || 'DB AI drawer request failed to start', expectedDialect)
       return
     }
     if (!isDbAiDrawerRequestRecord(started.data, reqId)) {
-      showNotice('DB AI drawer backend returned malformed lifecycle data.')
+      failDbAiRequest(reqId, 'DB AI drawer backend returned malformed lifecycle data.', expectedDialect)
       return
     }
+    if (!dbAiRequests.value[reqId]) return
     patchDbAiRequest(reqId, { status: started.data.status, text: started.data.text, updatedAt: started.data.updatedAt })
     const generateBridge = databaseClient.generateDatabaseAiDrawerResponse()
     if (!generateBridge) {
-      showNotice('DB AI drawer response service unavailable')
+      failDbAiRequest(reqId, 'DB AI drawer response service unavailable', expectedDialect)
       return
     }
     try {
       const result = await generateBridge({
         requestId: reqId,
         action: request.action,
+        responseLanguage: request.responseLanguage === 'zh-CN' ? 'zh-CN' : 'en-US',
         sourceSql: request.sourceSql,
         targetDialect: expectedDialect,
         context: dbAiBackendContextForIpc(request.backendContext)
       })
       finishDbAiRequest(reqId, result, expectedDialect)
     } catch (error) {
-      showNotice(bridgeErrorMessage(error, 'DB AI drawer response failed'))
+      failDbAiRequest(reqId, bridgeErrorMessage(error, 'DB AI drawer response failed'), expectedDialect)
     }
   }
 
@@ -263,7 +301,7 @@ export const createDatabaseAiDrawerWorkspaceRuntime = (
     const hasValidResponseData = isDbAiDrawerResponseData(result.data, reqId)
     const responseData = hasValidResponseData ? result.data : null
     if (result.ok && !hasValidResponseData) {
-      showNotice('DB AI drawer backend returned malformed response data.')
+      failDbAiRequest(reqId, 'DB AI drawer backend returned malformed response data.', expectedDialect)
       return
     }
     if (responseData) {
@@ -271,46 +309,102 @@ export const createDatabaseAiDrawerWorkspaceRuntime = (
         ...dbAiRequests.value,
         [reqId]: responseData.request
       }
+      syncConversationRequest(responseData.request)
       return
     }
-    showNotice(result.errorMessage || 'DB AI drawer backend failed.')
+    failDbAiRequest(reqId, result.errorMessage || 'DB AI drawer backend failed.', expectedDialect)
   }
 
   const setActiveDbAiRequest = (reqId: string) => {
     const request = dbAiRequests.value[reqId]
     if (!request) return
     dbAiActiveReqId.value = reqId
-    dbAiOpen.value = true
+    dbAiOpen.value = false
   }
 
-  const copyDbAiSql = async () => {
-    if (await copyText(dbAiSql.value)) showNotice('Generated SQL copied')
+  const requestForMessage = (message?: DbAiPaneMessage) =>
+    message?.requestId ? dbAiRequests.value[message.requestId] : activeDbAiRequest.value
+
+  const sqlForMessage = (message?: DbAiPaneMessage) =>
+    (message ? dbAiPaneMessageGeneratedSql(message) : '') || runtimeDbAiSql(requestForMessage(message))
+
+  const copyDbAiSql = async (message?: DbAiPaneMessage) => {
+    const sql = sqlForMessage(message)
+    if (sql && await copyText(sql)) showNotice('Generated SQL copied')
   }
 
-  const insertDbAiSql = () => {
+  const insertDbAiSql = (message?: DbAiPaneMessage) => {
     const tab = activeSqlTab.value
     if (!tab) return
+    const sql = sqlForMessage(message)
+    if (!sql) return
     const range = getSqlSelectionRange()
-    const plan = planDbAiInsertSql(tab.sql, range, dbAiSql.value)
+    const plan = planDbAiInsertSql(tab.sql, range, sql)
     setEditorSql(plan.nextSql, plan.selectionStart)
     showNotice(plan.notice)
   }
 
-  const replaceDbAiSqlSelection = () => {
+  const replaceDbAiSqlSelection = (message?: DbAiPaneMessage) => {
     const tab = activeSqlTab.value
     if (!tab) return
+    const sql = sqlForMessage(message)
+    if (!sql) return
     const selection = getSqlSelectionRange()
     const range = selection.start !== selection.end ? selection : currentSqlStatementRange(tab.sql, getSqlCursorOffset())
-    const plan = planDbAiReplaceSql(tab.sql, range, dbAiSql.value, selection.start !== selection.end)
+    const plan = planDbAiReplaceSql(tab.sql, range, sql, selection.start !== selection.end)
     setEditorSql(plan.nextSql, plan.selectionStart, plan.selectionEnd)
     showNotice(plan.notice)
   }
 
-  const runDbAiReadonly = () => {
+  const messageContextMatchesActiveTab = (message?: DbAiPaneMessage) => {
     const tab = activeSqlTab.value
-    if (!tab || !dbAiCanRunReadOnly.value) return
-    void appendSqlExecution(tab, dbAiSql.value)
+    const context = message?.sqlAction?.context
+    if (!tab || !context?.connectionId || !context.databaseName) return false
+    return (
+      context.connectionId === tab.connectionId &&
+      context.databaseName === tab.catalogName &&
+      (context.schemaName || '') === (tab.schemaName || '')
+    )
+  }
+
+  const canRunDbAiPaneMessageSql = (message: DbAiPaneMessage) => {
+    const tab = activeSqlTab.value
+    const action = message.sqlAction
+    const sql = sqlForMessage(message)
+    if (!tab || !action || message.status !== 'done' || !sql || !messageContextMatchesActiveTab(message)) return false
+    return canRunDbAiReadOnly({
+      activeSqlCanRun: activeSqlCanRun.value,
+      action: action.action,
+      targetDialect: action.targetDialect,
+      connection: findConnection(tab.connectionId),
+      sql
+    })
+  }
+
+  const runDbAiReadonly = (message?: DbAiPaneMessage) => {
+    const tab = activeSqlTab.value
+    const sql = sqlForMessage(message)
+    if (!tab || !sql) return
+    if (message && !canRunDbAiPaneMessageSql(message)) {
+      showNotice('Open the matching database context before running this SQL')
+      return
+    }
+    if (!message && !dbAiCanRunReadOnly.value) return
+    void appendSqlExecution(tab, sql)
     showNotice('Read-only SQL executed')
+  }
+
+  const updateDbAiPaneMessageDialect = (message: DbAiPaneMessage, value: DbAiTargetDialect) => {
+    const action = message.sqlAction
+    if (!action || action.action !== 'convert' || !action.sourceSql.trim()) return
+    const request = dbAiRequests.value[message.requestId]
+    if (request) {
+      dbAiActiveReqId.value = request.id
+      patchDbAiRequest(request.id, { targetDialect: value, status: 'queued', text: '' })
+      void requestDbAiDrawerResponse(request.id)
+      return
+    }
+    void openDbAi('convert', action.sourceSql, action.context.contextSummary || message.contextSummary, action.context, value)
   }
 
   const clearSqlDiagnoseTimers = () => {
@@ -325,6 +419,26 @@ export const createDatabaseAiDrawerWorkspaceRuntime = (
     return `dbai-diagnose-${result.id}-${Date.now().toString(36)}-${sqlDiagnoseRequestSequence}`
   }
 
+  const isCurrentSqlDiagnosis = (result: SqlResult, requestId: string) => {
+    const currentResult = activeSqlTab.value?.resultTabs.find((candidate) => candidate.id === result.id)
+    return (
+      sqlDiagnose.resultId === result.id &&
+      sqlDiagnose.resultTitle === result.title &&
+      sqlDiagnose.requestId === requestId &&
+      currentResult?.title === result.title
+    )
+  }
+
+  const clearSqlDiagnosisIfCurrentRequest = (requestId: string) => {
+    if (sqlDiagnose.requestId !== requestId) return
+    sqlDiagnose.running = false
+    sqlDiagnose.success = false
+    sqlDiagnose.error = ''
+    sqlDiagnose.resultId = ''
+    sqlDiagnose.resultTitle = ''
+    sqlDiagnose.requestId = ''
+  }
+
   const diagnoseSqlError = async (result: SqlResult) => {
     const tab = activeSqlTab.value
     if (!tab || result.status !== 'error') return
@@ -332,6 +446,7 @@ export const createDatabaseAiDrawerWorkspaceRuntime = (
       sqlDiagnose.running = false
       sqlDiagnose.success = false
       sqlDiagnose.resultId = result.id
+      sqlDiagnose.resultTitle = result.title
       sqlDiagnose.requestId = ''
       sqlDiagnose.error = 'Database context is required before diagnosis.'
       return
@@ -342,6 +457,7 @@ export const createDatabaseAiDrawerWorkspaceRuntime = (
     sqlDiagnose.success = false
     sqlDiagnose.error = ''
     sqlDiagnose.resultId = result.id
+    sqlDiagnose.resultTitle = result.title
     sqlDiagnose.requestId = requestId
 
     try {
@@ -357,6 +473,7 @@ export const createDatabaseAiDrawerWorkspaceRuntime = (
       const response = await diagnoseBridge({
         requestId,
         sourceSql: result.sql,
+        responseLanguage: getResponseLanguage(),
         targetDialect: connection?.dbType ?? 'postgresql',
         context: dbAiBackendContextForIpc(
           buildDbAiBackendContext('', {
@@ -370,7 +487,10 @@ export const createDatabaseAiDrawerWorkspaceRuntime = (
         ),
         errorMessage: result.error ?? ''
       })
-      if (sqlDiagnose.resultId !== result.id || sqlDiagnose.requestId !== requestId) return
+      if (!isCurrentSqlDiagnosis(result, requestId)) {
+        clearSqlDiagnosisIfCurrentRequest(requestId)
+        return
+      }
       if (!response.ok) {
         sqlDiagnose.running = false
         sqlDiagnose.success = false
@@ -390,19 +510,22 @@ export const createDatabaseAiDrawerWorkspaceRuntime = (
       sqlDiagnose.error = ''
       showNotice('SQL diagnosis applied to editor')
       sqlDiagnoseSuccessTimer = window.setTimeout(() => {
-        if (sqlDiagnose.resultId === result.id && sqlDiagnose.requestId === requestId) sqlDiagnose.success = false
+        if (isCurrentSqlDiagnosis(result, requestId)) sqlDiagnose.success = false
         sqlDiagnoseSuccessTimer = null
       }, 3000)
     } catch (error) {
-      if (sqlDiagnose.resultId !== result.id || sqlDiagnose.requestId !== requestId) return
+      if (!isCurrentSqlDiagnosis(result, requestId)) {
+        clearSqlDiagnosisIfCurrentRequest(requestId)
+        return
+      }
       sqlDiagnose.running = false
       sqlDiagnose.success = false
       sqlDiagnose.error = bridgeErrorMessage(error, 'DB AI diagnosis failed.')
     }
   }
 
-  const cancelDbAiRequest = async () => {
-    const request = activeDbAiRequest.value
+  const cancelDbAiRequest = async (requestId?: string) => {
+    const request = requestId ? dbAiRequests.value[requestId] : activeDbAiRequest.value
     if (!request) return
     if (request.status === 'done' || request.status === 'error') return
     const cancelBridge = databaseClient.cancelDatabaseAiDrawerResponse()
@@ -425,11 +548,20 @@ export const createDatabaseAiDrawerWorkspaceRuntime = (
       showNotice('DB AI drawer backend returned malformed lifecycle data.')
       return
     }
+    if (!dbAiRequests.value[request.id]) return
     dbAiRequests.value = {
       ...dbAiRequests.value,
       [request.id]: result.data
     }
+    syncConversationRequest(result.data)
     showNotice('DB AI request cancelled')
+  }
+
+  const clearAllDbAiRequests = () => {
+    dbAiRequestGeneration += 1
+    dbAiRequests.value = {}
+    dbAiActiveReqId.value = null
+    dbAiOpen.value = false
   }
 
   const clearDbAiRequest = () => {
@@ -467,8 +599,11 @@ export const createDatabaseAiDrawerWorkspaceRuntime = (
     replaceDbAiSqlSelection,
     insertDbAiSql,
     runDbAiReadonly,
+    canRunDbAiPaneMessageSql,
+    updateDbAiPaneMessageDialect,
     cancelDbAiRequest,
     clearDbAiRequest,
+    clearAllDbAiRequests,
     formatDbAiRequestTime,
     clearSqlDiagnoseTimers,
     diagnoseSqlError

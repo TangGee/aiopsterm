@@ -4,6 +4,7 @@ import type { TerminalCommandSource, TerminalSecurityDecision } from '@/services
 import type { TerminalPanel } from '@/services/terminal/terminalPanelRuntime'
 import type { AiPreferenceSettings, normalizeMcpServersConfig } from '@/services/settings/workspaceConfigRuntime'
 import type {
+  AiChatAgentTaskRef,
   AiChatContextUsageSnapshot,
   AiChatResponseInput,
   AiCommandCatalogOption,
@@ -45,6 +46,7 @@ export type ChatMessage = {
     requiresApproval: boolean
     interactive: boolean
   }
+  agentTask?: AiChatAgentTaskRef
   mcpToolCall?: {
     serverName: string
     toolName: string
@@ -96,7 +98,7 @@ export type WorkspaceAiChatControllerDeps = {
   createRendererLocalId: (prefix: 'aichat-agent-loop') => string
   resolveAiKnowledgeSearchContexts: (prompt: string, contexts: AiContextOption[]) => Promise<AiContextOption[]>
   applyMcpServersSnapshot: (snapshot: ReturnType<typeof normalizeMcpServersConfig>) => void
-  resolveActiveWritableTerminalPanel: () => Pick<TerminalPanel, 'id' | 'output'> | null | undefined
+  resolveActiveWritableTerminalPanel: () => Pick<TerminalPanel, 'id' | 'output' | 'sessionId'> | null | undefined
   runActiveTerminalCommand: (command: string, source?: TerminalCommandSource) => Promise<TerminalSecurityDecision | null>
   waitForTerminalOutputAfter: (panelId: string, startLength: number, timeoutMs?: number) => Promise<string>
   findKnowledgeNode: (relPath: string) => KnowledgeNode | null

@@ -24,6 +24,8 @@ import {
 
 type PrestoDatabaseConnection = DatabaseConnectionInfo & { dbType: 'presto' }
 
+const MAX_PRESTO_RESPONSE_PAGES = 1000
+
 type PrestoColumn = {
   name?: string
   type?: string
@@ -92,6 +94,11 @@ export const prestoErrorCode = (error: unknown, fallback: string) => {
 export const prestoErrorMessage = (error: unknown, fallback: string) => (error instanceof Error ? error.message : String(error || fallback))
 
 const parsePrestoResponse = async (response: Response): Promise<PrestoStatementResponse> => {
+  if (response.status >= 300 && response.status < 400) {
+    throw Object.assign(new Error('Presto HTTP redirects are not allowed.'), {
+      code: 'DB_PRESTO_REDIRECT_REJECTED'
+    })
+  }
   const text = await response.text()
   if (!response.ok) {
     throw Object.assign(new Error(text.trim() || response.statusText || `Presto HTTP ${response.status}`), {
@@ -111,6 +118,22 @@ const ensurePrestoResponseOk = (payload: PrestoStatementResponse) => {
   if (!payload.error) return
   const message = trim(payload.error.message) || trim(payload.error.errorName) || 'Presto query failed.'
   throw Object.assign(new Error(message), { code: 'DB_PRESTO_QUERY_FAILED' })
+}
+
+const prestoNextUriError = (code: string, message: string) => Object.assign(new Error(message), { code })
+
+const resolvePrestoNextUri = (value: string, statementUrl: URL) => {
+  let nextUrl: URL
+  try {
+    nextUrl = new URL(value, statementUrl)
+  } catch {
+    throw prestoNextUriError('DB_PRESTO_NEXT_URI_INVALID', 'Presto returned an invalid next-page URI.')
+  }
+  nextUrl.hash = ''
+  if (nextUrl.origin !== statementUrl.origin) {
+    throw prestoNextUriError('DB_PRESTO_NEXT_URI_ORIGIN_INVALID', 'Presto returned a next-page URI for a different origin.')
+  }
+  return nextUrl
 }
 
 const prestoRowsFromData = <T extends Record<string, unknown>>(columns: PrestoColumn[], data: unknown[][] | undefined): T[] => {
@@ -134,10 +157,12 @@ export const prestoQuery = async <T extends Record<string, unknown>>(
     })
   }
   const headers = prestoHeadersFor(input, context)
-  const firstResponse = await fetchImpl(`${prestoBaseUrlFrom(input)}/v1/statement`, {
+  const statementUrl = new URL(`${prestoBaseUrlFrom(input)}/v1/statement`)
+  const firstResponse = await fetchImpl(statementUrl, {
     method: 'POST',
     headers,
-    body: sql
+    body: sql,
+    redirect: 'manual'
   })
   const raw: PrestoStatementResponse[] = []
   let payload = await parsePrestoResponse(firstResponse)
@@ -147,10 +172,20 @@ export const prestoQuery = async <T extends Record<string, unknown>>(
   ensurePrestoResponseOk(payload)
 
   let nextUri = trim(payload.nextUri)
+  const visitedNextUris = new Set<string>()
   while (nextUri) {
-    const nextResponse = await fetchImpl(nextUri, {
+    if (raw.length >= MAX_PRESTO_RESPONSE_PAGES) {
+      throw prestoNextUriError('DB_PRESTO_PAGE_LIMIT', 'Presto returned too many response pages.')
+    }
+    const nextUrl = resolvePrestoNextUri(nextUri, statementUrl)
+    if (visitedNextUris.has(nextUrl.href)) {
+      throw prestoNextUriError('DB_PRESTO_NEXT_URI_LOOP', 'Presto repeated a next-page URI.')
+    }
+    visitedNextUris.add(nextUrl.href)
+    const nextResponse = await fetchImpl(nextUrl, {
       method: 'GET',
-      headers
+      headers,
+      redirect: 'manual'
     })
     payload = await parsePrestoResponse(nextResponse)
     raw.push(payload)
@@ -377,11 +412,25 @@ export const prestoQueryTable = async (
   startedAt: number
 ): Promise<DatabaseTableQueryResult> => {
   try {
+    const requireStableBaseTable = input.requireStableBaseTable === true
+    if (requireStableBaseTable) {
+      return {
+        ok: false,
+        errorCode: 'DB_TABLE_QUERY_UNSUPPORTED',
+        errorMessage: 'Presto cannot guarantee a stable base-table query.'
+      }
+    }
     const columns = await prestoColumnsForTable(connection, input)
     if (!columns.length) {
       return { ok: false, errorCode: 'DB_TABLE_NOT_FOUND', errorMessage: `Table not found: ${input.tableName}` }
     }
     const knownColumns = columns.map((column) => column.name)
+    const requestedColumns = (input.columns ?? []).map((column) => knownColumns.find((known) => known.toLowerCase() === trim(column).toLowerCase())).filter(Boolean) as string[]
+    if (input.columns?.length && requestedColumns.length !== input.columns.length) {
+      return { ok: false, errorCode: 'DB_COLUMNS_INVALID', errorMessage: 'One or more selected columns are not available.' }
+    }
+    const selectedColumns = input.columns?.length ? requestedColumns : knownColumns
+    if (!selectedColumns.length) return { ok: false, errorCode: 'DB_COLUMNS_REQUIRED', errorMessage: 'At least one selected column is required.' }
     const filters = [...parseWhereRaw(input.whereRaw), ...(input.filters ?? [])]
     const where = prestoWhereForFilters(filters, knownColumns)
     const sort = input.sort ?? parseOrderByRaw(input.orderByRaw, knownColumns)
@@ -391,9 +440,10 @@ export const prestoQueryTable = async (
     const offset = (page - 1) * pageSize
     const tableRef = prestoTableReference(input)
     const context = { databaseName: trim(input.databaseName), schemaName: trim(input.schemaName) }
+    const selectList = selectedColumns.map(prestoIdentifier).join(', ')
     const rowsQuery = await prestoQuery<Record<string, unknown>>(
       prestoConnectionInput(connection),
-      `SELECT * FROM ${tableRef}${where}${orderBy} LIMIT ${pageSize} OFFSET ${offset}`,
+      `SELECT ${selectList} FROM ${tableRef}${where}${orderBy} LIMIT ${pageSize} OFFSET ${offset}`,
       context
     )
     const countRows = input.withTotal
@@ -402,7 +452,7 @@ export const prestoQueryTable = async (
     return {
       ok: true,
       data: {
-        columns: rowsQuery.columns.length ? rowsQuery.columns : knownColumns,
+        columns: rowsQuery.columns.length ? rowsQuery.columns : selectedColumns,
         rows: rowsQuery.rows,
         rowCount: rowsQuery.rows.length,
         durationMs: Math.max(1, Date.now() - startedAt),

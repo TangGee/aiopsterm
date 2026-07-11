@@ -40,15 +40,15 @@
         <input
           ref="sqlFindInputRef"
           :value="sqlFindQuery"
-          aria-label="Find in SQL"
-          placeholder="Find"
+          :aria-label="t('database.sql.find.findInSql')"
+          :placeholder="t('database.sql.find.find')"
           @input="emit('update:sqlFindQuery', ($event.target as HTMLInputElement).value)"
           @keydown="(event) => emit('handleSqlFindKeydown', event, 'query')"
         />
-        <span class="db-sql-find-count">{{ sqlFindSummary }}</span>
+        <span class="db-sql-find-count">{{ localizedSqlFindSummary }}</span>
         <button
           type="button"
-          title="Previous match"
+          :title="t('database.sql.find.previousMatch')"
           :disabled="sqlFindMatches.length === 0"
           @click="emit('goToSqlFindMatch', -1)"
         >
@@ -56,7 +56,7 @@
         </button>
         <button
           type="button"
-          title="Next match"
+          :title="t('database.sql.find.nextMatch')"
           :disabled="sqlFindMatches.length === 0"
           @click="emit('goToSqlFindMatch', 1)"
         >
@@ -64,15 +64,15 @@
         </button>
         <button
           type="button"
-          title="Toggle replace"
+          :title="t('database.sql.find.toggleReplace')"
           :class="{ active: sqlFindReplaceOpen }"
           @click="emit('toggleSqlFindReplace')"
         >
-          Replace
+          {{ t('database.sql.find.replace') }}
         </button>
         <button
           type="button"
-          title="Match case"
+          :title="t('database.sql.find.matchCase')"
           :class="{ active: sqlFindCaseSensitive }"
           @click="emit('update:sqlFindCaseSensitive', !sqlFindCaseSensitive)"
         >
@@ -80,7 +80,7 @@
         </button>
         <button
           type="button"
-          title="Close find"
+          :title="t('database.sql.find.close')"
           @click="emit('closeSqlFind', true)"
         >
           <X />
@@ -94,26 +94,26 @@
         <input
           ref="sqlReplaceInputRef"
           :value="sqlFindReplace"
-          aria-label="Replace in SQL"
-          placeholder="Replace"
+          :aria-label="t('database.sql.find.replaceInSql')"
+          :placeholder="t('database.sql.find.replace')"
           @input="emit('update:sqlFindReplace', ($event.target as HTMLInputElement).value)"
           @keydown="(event) => emit('handleSqlFindKeydown', event, 'replace')"
         />
         <button
           type="button"
-          title="Replace current"
+          :title="t('database.sql.find.replaceCurrent')"
           :disabled="sqlFindMatches.length === 0"
           @click="emit('replaceCurrentSqlFindMatch')"
         >
-          Replace
+          {{ t('database.sql.find.replace') }}
         </button>
         <button
           type="button"
-          title="Replace all"
+          :title="t('database.sql.find.replaceAll')"
           :disabled="sqlFindMatches.length === 0"
           @click="emit('replaceAllSqlFindMatches')"
         >
-          All
+          {{ t('database.sql.find.all') }}
         </button>
       </div>
     </div>
@@ -124,11 +124,11 @@
         :class="{ dirty: activeSqlIsDirty, saving: activeSqlSaving, error: Boolean(activeSqlTab.saveError) }"
         :title="activeSqlTab.filePath || activeSqlTab.saveError || undefined"
       >
-        {{ activeSqlSaveStateText }}
+        {{ localizedActiveSqlSaveStateText }}
       </span>
-      <span>{{ activeSqlEditorLineCount }} lines</span>
-      <span>Ln {{ sqlEditorActiveLine }}, Col {{ sqlEditorActiveColumn }}</span>
-      <span v-if="sqlEditorSelectionSize">{{ sqlEditorSelectionSize }} selected</span>
+      <span>{{ editorLineCountText }}</span>
+      <span>{{ t('database.sql.editor.position', { line: sqlEditorActiveLine, column: sqlEditorActiveColumn }) }}</span>
+      <span v-if="sqlEditorSelectionSize">{{ t('database.sql.editor.selectedCount', { count: sqlEditorSelectionSize }) }}</span>
     </footer>
   </div>
 </template>
@@ -136,6 +136,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref } from 'vue'
 import { Search, X } from 'lucide-vue-next'
+import { useI18n } from '@/i18n'
 import DatabaseSqlEditor, { type DatabaseSqlEditorMetrics } from '@/components/database/DatabaseSqlEditor.vue'
 import type { DatabaseSqlWorkspaceApi, SqlTab } from '@/components/database/databaseMainWorkspaceTypes'
 import type { TextRange } from '@/services/database/databaseSqlEditorRuntime'
@@ -180,6 +181,29 @@ const emit = defineEmits<{
 const sqlEditorRef = ref<DatabaseSqlWorkspaceApi | null>(null)
 const sqlFindInputRef = ref<HTMLInputElement | null>(null)
 const sqlReplaceInputRef = ref<HTMLInputElement | null>(null)
+const { t } = useI18n()
+
+const localizedSqlFindSummary = computed(() => {
+  if (props.sqlFindSummary === 'Find') return t('database.sql.find.find')
+  if (props.sqlFindSummary === 'No results') return t('database.sql.find.noResults')
+  return props.sqlFindSummary
+})
+
+const localizedActiveSqlSaveStateText = computed(() => {
+  if (props.activeSqlSaveStateText === 'Saving...') return t('database.sql.save.savingProgress')
+  if (props.activeSqlSaveStateText === 'Unsaved changes') return t('database.sql.save.unsavedChanges')
+  if (props.activeSqlSaveStateText === 'Not saved') return t('database.sql.save.notSaved')
+  if (props.activeSqlSaveStateText.startsWith('Saved: ')) {
+    return t('database.sql.save.savedFile', { file: props.activeSqlSaveStateText.slice('Saved: '.length) })
+  }
+  return props.activeSqlSaveStateText
+})
+
+const editorLineCountText = computed(() =>
+  props.activeSqlEditorLineCount === 1
+    ? t('database.sql.editor.lineCount.one', { count: props.activeSqlEditorLineCount })
+    : t('database.sql.editor.lineCount.many', { count: props.activeSqlEditorLineCount })
+)
 
 const activeSqlText = computed({
   get() {

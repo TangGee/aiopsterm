@@ -14,6 +14,7 @@ const createHarness = (input: {
   panels?: AiPanelCommandActionTerminalPanel[]
   terminalDecision?: TerminalSecurityDecision | null
   loopResult?: { status: string; reason?: string }
+  clineApprovalOk?: boolean
 } = {}) => {
   let messages: AiPanelCommandSuggestionMessage[] = [
     {
@@ -45,6 +46,18 @@ const createHarness = (input: {
       Object.hasOwn(input, 'terminalDecision') ? input.terminalDecision! : ({ status: 'allow' } as TerminalSecurityDecision)
     ),
     continueAgentCommandLoop: vi.fn(async () => input.loopResult ?? { status: 'continued' }),
+    respondClineAgentApproval: vi.fn(async (approval: any) => input.clineApprovalOk === false
+      ? { ok: false, errorCode: 'CLINE_AGENT_APPROVAL_FAILED', errorMessage: 'approval failed' }
+      : {
+          ok: true,
+          data: {
+            taskId: approval.taskId,
+            turnId: approval.turnId,
+            toolCallId: approval.toolCallId,
+            terminalSessionId: approval.terminalSessionId,
+            status: approval.approved ? 'approved' as const : 'rejected' as const
+          }
+        }),
     enableAgentReadOnlyAutoRunForCurrentConversation: vi.fn(() => true),
     syncCurrentConversationSnapshot: vi.fn()
   }
@@ -61,7 +74,8 @@ const createHarness = (input: {
     runActiveTerminalCommand: calls.runActiveTerminalCommand,
     continueAgentCommandLoop: calls.continueAgentCommandLoop,
     enableAgentReadOnlyAutoRunForCurrentConversation: calls.enableAgentReadOnlyAutoRunForCurrentConversation,
-    syncCurrentConversationSnapshot: calls.syncCurrentConversationSnapshot
+    syncCurrentConversationSnapshot: calls.syncCurrentConversationSnapshot,
+    respondClineAgentApproval: calls.respondClineAgentApproval
   })
 
   return {
@@ -195,6 +209,57 @@ describe('aiPanelCommandActionRuntime', () => {
     expect(message.commandExecutionStatus).toBe('succeeded')
     expect(message.commandExecutionMessage).toBe('已发送到终端：uptime')
     expect(notices.at(-1)).toBe('命令已写入终端输入区。')
+  })
+
+  it('routes Cline Agent command approvals through the backend without writing from the renderer', async () => {
+    const { calls, notices, runtime, setMessages, state } = createHarness({ chatMode: 'agent' })
+    const message: AiPanelCommandSuggestionMessage = {
+      id: 'request-1-assistant',
+      role: 'assistant',
+      text: 'systemctl restart api',
+      state: 'done',
+      ask: 'command',
+      commandExecution: {
+        ip: 'current terminal',
+        command: 'systemctl restart api',
+        requiresApproval: true,
+        interactive: false
+      },
+      commandExecutionStatus: 'pending',
+      agentTask: {
+        taskId: 'request-1',
+        turnId: 'request-1-assistant',
+        toolCallId: 'tool-1',
+        toolName: 'run_host_command',
+        terminalSessionId: 'terminal-session-1',
+        status: 'waiting-approval'
+      }
+    }
+    setMessages([message])
+
+    expect(runtime.openCommandAuditDialog(message)).toBe(true)
+    state.commandAuditDialog.draft = 'echo renderer-replacement'
+    expect(runtime.canEditActiveCommandAudit()).toBe(false)
+    expect(runtime.saveCommandAuditDraft()).toBe(false)
+    expect(message.commandExecution?.command).toBe('systemctl restart api')
+    expect(notices.at(-1)).toBe('待审批的 Agent 命令必须原样确认或拒绝。')
+    runtime.closeCommandAuditDialog()
+
+    await expect(runtime.runMessageCommand(message)).resolves.toMatchObject({ status: 'approved' })
+    expect(calls.respondClineAgentApproval).toHaveBeenCalledWith({
+      taskId: 'request-1',
+      turnId: 'request-1-assistant',
+      toolCallId: 'tool-1',
+      terminalSessionId: 'terminal-session-1',
+      approved: true,
+      reason: undefined
+    })
+    expect(calls.runActiveTerminalCommand).not.toHaveBeenCalled()
+    expect(calls.continueAgentCommandLoop).not.toHaveBeenCalled()
+    expect(message.agentTask?.status).toBe('running')
+    expect(message.commandExecutionStatus).toBe('running')
+    await expect(runtime.runMessageCommand(message)).resolves.toBe(false)
+    expect(calls.respondClineAgentApproval).toHaveBeenCalledTimes(1)
   })
 
   it('continues agent command loops and records returned output status', async () => {

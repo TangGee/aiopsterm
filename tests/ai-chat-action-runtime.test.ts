@@ -22,6 +22,7 @@ type ActionRuntimeRequest = {
 
 type AiChatActionRuntime = {
   formatMcpResourceReadContent: (contents: Array<Record<string, unknown> & { uri: string }>) => string
+  isAutoApprovableReadOnlyAiChatCommand: (command: string) => boolean
   isReadOnlyAiChatCommand: (command: string) => boolean
   parseCommandModeSuggestion: (input: AiChatResponseInput, text: string) => null | {
     ip: string
@@ -135,6 +136,20 @@ describe('aiChatActionRuntime', () => {
         }
       }
     })
+  })
+
+  it('auto-approves only fail-closed read-only shell forms', async () => {
+    const runtime = await loadRuntime()
+
+    expect(runtime.isAutoApprovableReadOnlyAiChatCommand('ps aux | grep nginx')).toBe(true)
+    expect(runtime.isAutoApprovableReadOnlyAiChatCommand('uptime')).toBe(true)
+    expect(runtime.isAutoApprovableReadOnlyAiChatCommand('uptime > /tmp/result')).toBe(false)
+    expect(runtime.isAutoApprovableReadOnlyAiChatCommand('uptime $(python -c "open(\'/tmp/pwned\', \'w\').write(\'x\')")')).toBe(false)
+    expect(runtime.isAutoApprovableReadOnlyAiChatCommand('uptime\npython -c "open(\'/tmp/pwned\', \'w\').write(\'x\')"')).toBe(false)
+    expect(runtime.isAutoApprovableReadOnlyAiChatCommand('sed -i s/a/b/ /tmp/file')).toBe(false)
+    expect(runtime.isAutoApprovableReadOnlyAiChatCommand('find /tmp -delete')).toBe(false)
+    expect(runtime.isAutoApprovableReadOnlyAiChatCommand('systemctl status nginx')).toBe(false)
+    expect(runtime.isAutoApprovableReadOnlyAiChatCommand('systemctl status nginx --no-pager')).toBe(true)
   })
 
   it('rejects CDATA execute_command blocks and decodes escaped shell text', async () => {

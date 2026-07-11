@@ -150,7 +150,8 @@ export const defaultConfig: UserConfig = {
     customSoundName: ''
   },
   exportMcp: {
-    allowAgentSshAuthSubmit: false
+    allowAgentSshAuthSubmit: false,
+    allowDatabaseRead: false
   },
   modelSettings: defaultModelSettingsUserConfig,
   shortcuts: [
@@ -224,7 +225,8 @@ const cloneSshProxyConfigs = (configs?: SshProxyConfig[]): SshProxyConfig[] | un
 const cloneSshAgentKeys = (keys?: SshAgentKeyConfig[]): SshAgentKeyConfig[] | undefined => keys?.map((key) => ({ ...key }))
 
 const normalizeExportMcpConfig = (config?: Partial<ExportMcpUserConfig>): ExportMcpUserConfig => ({
-  allowAgentSshAuthSubmit: config?.allowAgentSshAuthSubmit === true
+  allowAgentSshAuthSubmit: config?.allowAgentSshAuthSubmit === true,
+  allowDatabaseRead: config?.allowDatabaseRead === true
 })
 
 const cloneKeywordHighlight = (config?: KeywordHighlightUserConfig): KeywordHighlightUserConfig | undefined =>

@@ -1,6 +1,8 @@
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
+import { createPinia, setActivePinia } from 'pinia'
 import DatabaseSidebarTree from '@/components/database/DatabaseSidebarTree.vue'
+import { useWorkspaceStore } from '@/stores/workspace'
 import type { DatabaseConnectionInfo, DatabaseTableInfo } from '@shared/contracts/database'
 
 const sqliteTable: DatabaseTableInfo = {
@@ -55,7 +57,11 @@ const postgresConnection: DatabaseConnectionInfo = {
 
 describe('DatabaseSidebarTree', () => {
   it('flattens a single SQLite catalog while retaining main in table actions', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    useWorkspaceStore().config.language = 'en-US'
     const wrapper = mount(DatabaseSidebarTree, {
+      global: { plugins: [pinia] },
       props: {
         sidebarCollapsed: false,
         keyword: '',

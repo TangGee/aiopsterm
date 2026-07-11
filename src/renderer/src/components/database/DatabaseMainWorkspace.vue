@@ -197,6 +197,7 @@ const props = defineProps<{
     error: string
     success: boolean
     resultId: string
+    resultTitle: string
     requestId: string
   }
   activeDataTab: DataTab | null

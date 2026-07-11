@@ -27,6 +27,11 @@ files:
   - '!node_modules/**/changelog.md'
   - '!node_modules/**/.DS_Store'
   - '!node_modules/**/Thumbs.db'
+  - '!node_modules/@cline/**'
+  - '!node_modules/node-linux-*/**'
+  - '!node_modules/node-darwin-*/**'
+  - '!node_modules/node-bin-darwin-*/**'
+  - '!node_modules/node-win-*/**'
 extraResources:
   - from: resources/icons
     to: icons
@@ -38,6 +43,8 @@ extraResources:
     to: aiopsterm-agent-hook.js
   - from: resources/aiopsterm-control.js
     to: aiopsterm-control.js
+  - from: build/cline-sidecar
+    to: cline-sidecar
 asar: true
 npmRebuild: false
 afterPack: scripts/prune-packaged-native-modules.mjs
@@ -62,6 +69,9 @@ win:
       schemes:
         - aiopsterm
 mac:
+  hardenedRuntime: true
+  entitlements: resources/entitlements.mac.plist
+  entitlementsInherit: resources/entitlements.mac.plist
   target:
     - dmg
     - zip

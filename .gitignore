@@ -11,3 +11,4 @@ aiopsterm-state.db
 .aiopsterm-data-sync-runtime.json
 .cache/
 /codex/
+/build/cline-sidecar/

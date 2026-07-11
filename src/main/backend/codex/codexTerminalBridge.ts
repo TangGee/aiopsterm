@@ -43,7 +43,7 @@ type TerminalOutputHistory = {
   updatedAt: number
 }
 
-type CodexBridgeResponse = {
+export type CodexBridgeResponse = {
   ok: boolean
   errorCode?: string
   errorMessage?: string
@@ -399,6 +399,36 @@ const targetContextForSession = (session: CodexTerminalBridgeSession): CodexSess
   ...(session.cwd ? { cwd: session.cwd } : {}),
   ...(session.target || {})
 })
+
+export const cancelCodexTerminalBridgeCommand = (commandId: string, reason = 'The command was cancelled.') => {
+  const normalizedId = cleanText(commandId)
+  const pending = pendingCommands.get(normalizedId)
+  if (!pending) return false
+  clearTimeout(pending.timer)
+  pendingCommands.delete(normalizedId)
+  const session = sessions.get(pending.sessionId)
+  try {
+    session?.write('\x03')
+  } catch {
+    // The command is still resolved as cancelled when the terminal closes during interruption.
+  }
+  pending.resolve({
+    ok: false,
+    errorCode: 'COMMAND_ABORTED',
+    errorMessage: reason,
+    target: session ? targetContextForSession(session) : undefined,
+    data: {
+      commandId: normalizedId,
+      command: pending.command,
+      mode: 'wait',
+      output: stripTerminalControl(pending.output).trim(),
+      exitCode: null,
+      durationMs: Date.now() - pending.startedAt,
+      aborted: true
+    }
+  })
+  return true
+}
 
 const terminalSummaryForSession = (session: CodexTerminalBridgeSession) => {
   const target = targetContextForSession(session)
@@ -913,6 +943,11 @@ const handleBridgeRequest = async (request: CodexTerminalBridgeRequest): Promise
     errorMessage: `Unknown aiopsterm bridge method: ${request.method || ''}`
   }
 }
+
+export const callCodexTerminalBridgeTool = (
+  method: string,
+  params: Record<string, unknown> = {}
+): Promise<CodexBridgeResponse> => handleBridgeRequest({ method, params })
 
 const writeSocketResponse = (socket: Socket, id: string | undefined, response: CodexBridgeResponse) => {
   socket.write(`${JSON.stringify({ id, ...response })}\n`)

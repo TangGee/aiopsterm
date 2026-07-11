@@ -1,3 +1,4 @@
+import { createServer, type Server } from 'node:http'
 import { describe, expect, it } from 'vitest'
 import type {
   DatabaseConnectionInfo,
@@ -15,7 +16,8 @@ import {
   prestoBaseUrlFrom,
   prestoExecute,
   prestoMutationUnsupported,
-  prestoQuery
+  prestoQuery,
+  prestoQueryTable
 } from '@shared/databaseHttpEngines'
 
 type RequestRecord = {
@@ -27,6 +29,7 @@ type RequestRecord = {
   prestoUser?: string
   prestoCatalog?: string
   prestoSchema?: string
+  redirect?: RequestRedirect
 }
 
 const emptyWorkspaceCatalog = (): DatabaseWorkspaceCatalog => ({
@@ -54,9 +57,28 @@ const requestRecord = (url: Parameters<typeof fetch>[0], init?: Parameters<typeo
     contentType: headers.get('Content-Type') || undefined,
     prestoUser: headers.get('X-Presto-User') || undefined,
     prestoCatalog: headers.get('X-Presto-Catalog') || undefined,
-    prestoSchema: headers.get('X-Presto-Schema') || undefined
+    prestoSchema: headers.get('X-Presto-Schema') || undefined,
+    redirect: init?.redirect
   }
 }
+
+const listenOnLoopback = async (server: Server) => {
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject)
+    server.listen(0, '127.0.0.1', () => {
+      server.off('error', reject)
+      resolve()
+    })
+  })
+  const address = server.address()
+  if (!address || typeof address === 'string') throw new Error('Expected an HTTP server TCP address.')
+  return `http://127.0.0.1:${address.port}`
+}
+
+const closeHttpServer = (server: Server) =>
+  new Promise<void>((resolve, reject) => {
+    server.close((error) => (error ? reject(error) : resolve()))
+  })
 
 const jsonResponse = (payload: Record<string, unknown>, status = 200) =>
   new Response(JSON.stringify(payload), {
@@ -320,6 +342,7 @@ describe('database HTTP engine runtimes', () => {
       expect.objectContaining({
         url: 'http://presto.local:8080/v1/statement',
         method: 'POST',
+        redirect: 'manual',
         body: 'SELECT event_id, service FROM hive.ops.events',
         prestoUser: 'ops',
         prestoCatalog: 'hive',
@@ -329,12 +352,189 @@ describe('database HTTP engine runtimes', () => {
       expect.objectContaining({
         url: 'http://presto.local:8080/v1/statement/query-1/1',
         method: 'GET',
+        redirect: 'manual',
         prestoUser: 'ops',
         prestoCatalog: 'hive',
         prestoSchema: 'ops',
         authorization: `Basic ${Buffer.from('ops:pw').toString('base64')}`
       })
     ])
+  })
+
+  it('does not follow cross-origin redirects from Presto statement or next-page responses', async () => {
+    const collectorRequests: Array<{ authorization?: string; prestoUser?: string }> = []
+    const originRequests: Array<{ method?: string; url?: string; authorization?: string; prestoUser?: string }> = []
+    const collectorServer = createServer((request, response) => {
+      collectorRequests.push({
+        authorization: request.headers.authorization,
+        prestoUser: Array.isArray(request.headers['x-presto-user']) ? request.headers['x-presto-user'][0] : request.headers['x-presto-user']
+      })
+      response.writeHead(200, { 'Content-Type': 'application/json' })
+      response.end(JSON.stringify({ id: 'collector' }))
+    })
+    let collectorUrl = ''
+    let originUrl = ''
+    let redirectFrom: 'statement' | 'next-page' = 'statement'
+    const originServer = createServer((request, response) => {
+      originRequests.push({
+        method: request.method,
+        url: request.url,
+        authorization: request.headers.authorization,
+        prestoUser: Array.isArray(request.headers['x-presto-user']) ? request.headers['x-presto-user'][0] : request.headers['x-presto-user']
+      })
+      if (request.url === '/v1/statement' && redirectFrom === 'next-page') {
+        response.writeHead(200, { 'Content-Type': 'application/json' })
+        response.end(
+          JSON.stringify({
+            id: 'query-redirect',
+            columns: [{ name: 'event_id', type: 'bigint' }],
+            data: [[77]],
+            nextUri: `${originUrl}/v1/statement/query-redirect/1`
+          })
+        )
+        return
+      }
+      response.writeHead(307, { Location: `${collectorUrl}/collect` })
+      response.end()
+    })
+
+    try {
+      collectorUrl = await listenOnLoopback(collectorServer)
+      originUrl = await listenOnLoopback(originServer)
+      configureHttpRuntime(fetch)
+      const connection: DatabaseConnectionTestInput = {
+        dbType: 'presto',
+        name: 'redirect-presto',
+        host: '127.0.0.1',
+        port: null,
+        user: 'ops',
+        password: 'pw',
+        database: 'hive',
+        url: originUrl
+      }
+
+      await expect(prestoQuery(connection, 'SELECT 1', { databaseName: 'hive', schemaName: 'ops' })).rejects.toMatchObject({
+        code: 'DB_PRESTO_REDIRECT_REJECTED',
+        message: 'Presto HTTP redirects are not allowed.'
+      })
+      redirectFrom = 'next-page'
+      await expect(prestoQuery(connection, 'SELECT 2', { databaseName: 'hive', schemaName: 'ops' })).rejects.toMatchObject({
+        code: 'DB_PRESTO_REDIRECT_REJECTED',
+        message: 'Presto HTTP redirects are not allowed.'
+      })
+
+      expect(collectorRequests).toEqual([])
+      expect(originRequests).toHaveLength(3)
+      expect(originRequests).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ method: 'POST', url: '/v1/statement', authorization: expect.stringMatching(/^Basic /), prestoUser: 'ops' }),
+          expect.objectContaining({ method: 'GET', url: '/v1/statement/query-redirect/1', authorization: expect.stringMatching(/^Basic /), prestoUser: 'ops' })
+        ])
+      )
+    } finally {
+      if (originServer.listening) await closeHttpServer(originServer)
+      if (collectorServer.listening) await closeHttpServer(collectorServer)
+    }
+  })
+
+  it('rejects cross-origin Presto next-page URIs before forwarding authorization', async () => {
+    const requests: RequestRecord[] = []
+    const fetchDouble: typeof fetch = async (url, init) => {
+      const request = requestRecord(url, init)
+      requests.push(request)
+      return jsonResponse({
+        id: 'query-origin-check',
+        columns: [{ name: 'event_id', type: 'bigint' }],
+        data: [[77]],
+        nextUri: 'https://credential-collector.invalid/v1/statement/query-origin-check/1'
+      })
+    }
+    configureHttpRuntime(fetchDouble)
+
+    await expect(
+      prestoQuery<{ event_id: number }>(
+        {
+          dbType: 'presto',
+          name: 'runtime-presto',
+          host: 'presto.local',
+          port: null,
+          user: 'ops',
+          password: 'pw',
+          database: 'hive'
+        },
+        'SELECT event_id FROM hive.ops.events',
+        { databaseName: 'hive', schemaName: 'ops' }
+      )
+    ).rejects.toMatchObject({ code: 'DB_PRESTO_NEXT_URI_ORIGIN_INVALID' })
+    expect(requests).toHaveLength(1)
+    expect(requests[0]).toMatchObject({
+      url: 'http://presto.local:8080/v1/statement',
+      authorization: `Basic ${Buffer.from('ops:pw').toString('base64')}`
+    })
+    expect(requests.some((request) => request.url.includes('credential-collector.invalid'))).toBe(false)
+  })
+
+  it('fails closed without querying Presto when a stable base-table read is required', async () => {
+    const statements: string[] = []
+    configureHttpRuntime(async (_url, init) => {
+      const sql = String(init?.body ?? '')
+      statements.push(sql)
+      if (sql.includes('information_schema.columns')) {
+        return jsonResponse({
+          id: 'query-columns',
+          columns: [
+            { name: 'table_schema', type: 'varchar' },
+            { name: 'table_name', type: 'varchar' },
+            { name: 'column_name', type: 'varchar' },
+            { name: 'data_type', type: 'varchar' },
+            { name: 'is_nullable', type: 'varchar' }
+          ],
+          data: [
+            ['ops', 'events_view', 'event_id', 'bigint', 'NO'],
+            ['ops', 'events_view', 'service', 'varchar', 'NO']
+          ]
+        })
+      }
+      return jsonResponse({
+        id: 'view-data',
+        columns: [
+          { name: 'event_id', type: 'bigint' },
+          { name: 'service', type: 'varchar' }
+        ],
+        data: [[77, 'api']]
+      })
+    })
+    const queryInput = {
+      connectionId: 'conn-presto',
+      dbType: 'presto' as const,
+      databaseName: 'hive',
+      schemaName: 'ops',
+      page: 1,
+      pageSize: 20,
+      withTotal: false
+    }
+
+    const strictInput = { ...queryInput, tableName: 'events', requireStableBaseTable: true } as typeof queryInput & {
+      tableName: string
+      requireStableBaseTable: boolean
+    }
+    await expect(prestoQueryTable(prestoConnection(), strictInput, Date.now())).resolves.toMatchObject({
+      ok: false,
+      errorCode: 'DB_TABLE_QUERY_UNSUPPORTED',
+      errorMessage: 'Presto cannot guarantee a stable base-table query.'
+    })
+    expect(statements).toEqual([])
+
+    await expect(prestoQueryTable(prestoConnection(), { ...queryInput, tableName: 'events_view' }, Date.now())).resolves.toMatchObject({
+      ok: true,
+      data: {
+        columns: ['event_id', 'service'],
+        rows: [{ event_id: 77, service: 'api' }]
+      }
+    })
+    expect(statements).toHaveLength(2)
+    expect(statements[0]).toContain('FROM "hive".information_schema.columns')
+    expect(statements[1]).toContain('SELECT "event_id", "service" FROM "hive"."ops"."events_view"')
   })
 
   it('maps Presto query errors and keeps mutation rejection in the Presto runtime', async () => {

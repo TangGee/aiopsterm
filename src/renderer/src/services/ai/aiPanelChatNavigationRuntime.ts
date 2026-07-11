@@ -12,7 +12,7 @@ import {
 } from '@/services/ai/aiPanelHistoryRuntime'
 import { aiPanelChatExportMessage } from '@/services/ai/aiPanelMessageRuntime'
 import { malformedAiBackendResultMessage } from '@/services/ai/aiBackendGuards'
-import type { AiChatExportInput, AiChatExportResult, AiContentPart } from '@shared/contracts/aiChat'
+import type { AiChatAgentTaskRef, AiChatExportInput, AiChatExportResult, AiContentPart } from '@shared/contracts/aiChat'
 
 export type AiPanelChatNavigationMessage = {
   id: string
@@ -33,6 +33,8 @@ export type AiPanelChatNavigationMessage = {
     requiresApproval: boolean
     interactive: boolean
   }
+  agentTask?: AiChatAgentTaskRef
+  state?: 'streaming' | 'done' | 'error' | 'cancelled'
   mcpToolCall?: {
     serverName: string
     toolName: string
@@ -72,6 +74,7 @@ export type AiPanelChatNavigationI18nKey =
   | 'ai.historyFavorited'
   | 'ai.historyUnfavorited'
   | 'ai.historyFavoriteUpdateFailed'
+  | 'ai.activeTurnNavigationBlocked'
 
 export type AiPanelChatNavigationRuntimeOptions<TConversation extends AiPanelConversationLike, TMessage extends AiPanelChatNavigationMessage> = {
   conversations: () => TConversation[]
@@ -167,6 +170,7 @@ export const createAiPanelChatNavigationRuntime = <
     historyFavorited: () => options.t('ai.historyFavorited'),
     historyUnfavorited: () => options.t('ai.historyUnfavorited'),
     historyFavoriteUpdateFailed: () => options.t('ai.historyFavoriteUpdateFailed'),
+    activeTurnNavigationBlocked: () => options.t('ai.activeTurnNavigationBlocked'),
     exportEmpty: () => '当前会话为空，无法导出。',
     exportUnavailable: () => '聊天导出服务不可用。',
     exportFailed: (message) => `导出失败：${message}`,
@@ -181,6 +185,12 @@ export const createAiPanelChatNavigationRuntime = <
     visibleTabs: () => visibleConversationTabs.value,
     visibleHistoryCount: () => visibleHistoryConversations.value.length,
     chatMessageCount: () => options.messages().length,
+    hasActiveTurn: () => options.messages().some((message) =>
+      message.state === 'streaming' ||
+      message.agentTask?.status === 'starting' ||
+      message.agentTask?.status === 'running' ||
+      message.agentTask?.status === 'waiting-approval'
+    ),
     currentConversationTitle,
     exportMessages: () => options.messages().map(aiPanelChatExportMessage),
     createConversation: options.createConversation,

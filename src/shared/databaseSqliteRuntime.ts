@@ -18,7 +18,13 @@ import type {
 } from './contracts/database'
 import { buildDatabaseMutationStatement, databaseMutationPlanData, inputKnownColumns } from './databaseMutationPlanner'
 import type { DatabaseSqlExecuteRawData, DatabaseSqlExecuteRawResult } from './databaseSqlExecution'
-import { executeSqliteStatementInWorker, executeSqliteTransactionInWorker, loadSqliteCatalogsInWorker, type SqliteWorkerStatementInput } from './databaseSqliteWorkerRuntime'
+import {
+  executeSqliteGuardedTableQueryInWorker,
+  executeSqliteStatementInWorker,
+  executeSqliteTransactionInWorker,
+  loadSqliteCatalogsInWorker,
+  type SqliteWorkerStatementInput
+} from './databaseSqliteWorkerRuntime'
 import {
   columnsForRows,
   parseOrderByRaw,
@@ -317,6 +323,12 @@ export const sqliteQueryTable = async (connection: DatabaseConnectionInfo, input
       return { ok: false, errorCode: 'DB_TABLE_NOT_FOUND', errorMessage: `Table not found: ${input.tableName}` }
     }
     const knownColumns = columns.map((column) => column.name)
+    const requestedColumns = (input.columns ?? []).map((column) => knownColumns.find((known) => known.toLowerCase() === trim(column).toLowerCase())).filter(Boolean) as string[]
+    if (input.columns?.length && requestedColumns.length !== input.columns.length) {
+      return { ok: false, errorCode: 'DB_COLUMNS_INVALID', errorMessage: 'One or more selected columns are not available.' }
+    }
+    const selectedColumns = input.columns?.length ? requestedColumns : knownColumns
+    if (!selectedColumns.length) return { ok: false, errorCode: 'DB_COLUMNS_REQUIRED', errorMessage: 'At least one selected column is required.' }
     const filters = [...parseWhereRaw(input.whereRaw), ...(input.filters ?? [])]
     const where = sqliteWhereForFilters(filters, knownColumns)
     const sort = input.sort ?? parseOrderByRaw(input.orderByRaw, knownColumns)
@@ -325,31 +337,56 @@ export const sqliteQueryTable = async (connection: DatabaseConnectionInfo, input
     const page = Math.max(1, Math.floor(Number(input.page) || 1))
     const offset = (page - 1) * pageSize
     const tableRef = sqliteTableReference(connection, input.databaseName, tableName)
-    const rowsOutcome = await executeSqliteStatementInWorker({
-      filePath: sqliteFilePathFromConnection(connection),
-      readonly: true,
-      sql: `SELECT * FROM ${tableRef}${where.sql}${orderBy} LIMIT ? OFFSET ?`,
-      params: [...where.params, pageSize, offset],
-      maxRows: pageSize,
-      busyTimeoutMs: SQLITE_BUSY_TIMEOUT_MS
-    })
-    const rows = rowsOutcome.reader ? rowsOutcome.rows : []
-    let total: number | null = null
-    if (input.withTotal) {
-      const totalOutcome = await executeSqliteStatementInWorker({
+    const selectList = selectedColumns.map(sqliteIdentifier).join(', ')
+    const rowStatement = {
+      sql: `SELECT ${selectList} FROM ${tableRef}${where.sql}${orderBy} LIMIT ? OFFSET ?`,
+      params: [...where.params, pageSize, offset]
+    }
+    const totalStatement = input.withTotal
+      ? {
+          sql: `SELECT COUNT(*) AS total FROM ${tableRef}${where.sql}`,
+          params: where.params
+        }
+      : undefined
+    let rows: Array<Record<string, unknown>>
+    let total: number | null
+    if (input.requireStableBaseTable) {
+      const guarded = await executeSqliteGuardedTableQueryInWorker({
         filePath: sqliteFilePathFromConnection(connection),
-        readonly: true,
-        sql: `SELECT COUNT(*) AS total FROM ${tableRef}${where.sql}`,
-        params: where.params,
-        maxRows: 1,
+        schemaName,
+        tableName,
+        rowStatement,
+        ...(totalStatement ? { totalStatement } : {}),
+        maxRows: pageSize,
         busyTimeoutMs: SQLITE_BUSY_TIMEOUT_MS
       })
-      total = totalOutcome.reader ? Number((totalOutcome.rows[0]?.total as number | undefined) ?? 0) : 0
+      rows = guarded.rows
+      total = guarded.total
+    } else {
+      const rowsOutcome = await executeSqliteStatementInWorker({
+        filePath: sqliteFilePathFromConnection(connection),
+        readonly: true,
+        ...rowStatement,
+        maxRows: pageSize,
+        busyTimeoutMs: SQLITE_BUSY_TIMEOUT_MS
+      })
+      rows = rowsOutcome.reader ? rowsOutcome.rows : []
+      total = null
+      if (totalStatement) {
+        const totalOutcome = await executeSqliteStatementInWorker({
+          filePath: sqliteFilePathFromConnection(connection),
+          readonly: true,
+          ...totalStatement,
+          maxRows: 1,
+          busyTimeoutMs: SQLITE_BUSY_TIMEOUT_MS
+        })
+        total = totalOutcome.reader ? Number((totalOutcome.rows[0]?.total as number | undefined) ?? 0) : 0
+      }
     }
     return {
       ok: true,
       data: {
-        columns: knownColumns,
+        columns: selectedColumns,
         rows,
         rowCount: rows.length,
         durationMs: Math.max(1, Date.now() - startedAt),

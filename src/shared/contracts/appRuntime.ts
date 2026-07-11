@@ -176,6 +176,7 @@ export type NotificationUserConfig = {
 
 export type ExportMcpUserConfig = {
   allowAgentSshAuthSubmit: boolean
+  allowDatabaseRead: boolean
 }
 
 export type KnowledgeSearchRuntimeApplyInput = {

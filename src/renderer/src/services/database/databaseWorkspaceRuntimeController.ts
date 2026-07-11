@@ -1,6 +1,7 @@
 import { computed, ref, watch } from 'vue'
 import { createDatabaseCatalogConnectionWorkspaceController } from '@/services/database/databaseCatalogConnectionWorkspaceController'
 import { createDatabaseAiWorkspaceController } from '@/services/database/databaseAiWorkspaceController'
+import { dbAiResponseLanguageForLocale } from '@/services/database/databaseAiRuntime'
 import { createDatabaseSqlDataWorkspaceController } from '@/services/database/databaseSqlDataWorkspaceController'
 import { createDatabaseSqlEditorWorkspaceController } from '@/services/database/databaseSqlEditorWorkspaceController'
 import { createDatabaseWorkspaceCatalogRuntime } from '@/services/database/databaseWorkspaceCatalogRuntime'
@@ -20,10 +21,14 @@ import type {
   WorkspaceTab
 } from '@/services/database/databaseWorkspaceTypes'
 import { useWorkspaceStore } from '@/stores/workspace'
+import { resolveLocale } from '@/i18n/runtime'
 
 export const useDatabaseWorkspaceRuntime = () => {
 
   const workspaceStore = useWorkspaceStore()
+  const databaseAiResponseLanguage = computed(() => dbAiResponseLanguageForLocale(
+    resolveLocale(workspaceStore.config.language, typeof navigator === 'undefined' ? [] : navigator.languages || [navigator.language])
+  ))
 
   const overflowOpen = ref(false)
   const addMenuOpen = ref(false)
@@ -324,6 +329,8 @@ export const useDatabaseWorkspaceRuntime = () => {
     dbAiPaneResizing,
     dbAiPaneContext,
     dbAiPaneDraft,
+    dbAiPaneComposerAction,
+    dbAiPaneComposerPlaceholder,
     dbAiPaneMessages,
     dbAiOpen,
     dbAiActiveReqId,
@@ -364,6 +371,7 @@ export const useDatabaseWorkspaceRuntime = () => {
     updateDbAiPaneSchema,
     connectDbAiPaneConnection,
     handleDbAiPaneDraftKeydown,
+    cancelDbAiPaneActionMode,
     sendDbAiPaneQuickPrompt,
     resetDbAiPaneConversation,
     cancelDbAiPaneResponse,
@@ -380,6 +388,8 @@ export const useDatabaseWorkspaceRuntime = () => {
     replaceDbAiSqlSelection,
     insertDbAiSql,
     runDbAiReadonly,
+    canRunDbAiPaneMessageSql,
+    updateDbAiPaneMessageDialect,
     cancelDbAiRequest,
     clearDbAiRequest,
     formatDbAiRequestTime,
@@ -392,6 +402,7 @@ export const useDatabaseWorkspaceRuntime = () => {
       activeSqlTab,
       activeSqlCanRun,
       currentSqlCatalogs,
+      responseLanguage: databaseAiResponseLanguage,
       databaseAiPanelsRef
     },
     {
@@ -674,6 +685,8 @@ export const useDatabaseWorkspaceRuntime = () => {
     dbAiPaneResizing,
     dbAiPaneContext,
     dbAiPaneDraft,
+    dbAiPaneComposerAction,
+    dbAiPaneComposerPlaceholder,
     dbAiPaneMessages,
     dbAiOpen,
     dbAiActiveReqId,
@@ -712,6 +725,7 @@ export const useDatabaseWorkspaceRuntime = () => {
     updateDbAiPaneSchema,
     connectDbAiPaneConnection,
     handleDbAiPaneDraftKeydown,
+    cancelDbAiPaneActionMode,
     sendDbAiPaneQuickPrompt,
     resetDbAiPaneConversation,
     cancelDbAiPaneResponse,
@@ -724,6 +738,8 @@ export const useDatabaseWorkspaceRuntime = () => {
     replaceDbAiSqlSelection,
     insertDbAiSql,
     runDbAiReadonly,
+    canRunDbAiPaneMessageSql,
+    updateDbAiPaneMessageDialect,
     cancelDbAiRequest,
     clearDbAiRequest,
     formatDbAiRequestTime,

@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "types": ["bun", "vitest/globals"],
+    "noEmit": true
+  },
+  "include": [
+    "src/shared/**/*.ts",
+    "src/sidecar/**/*.ts",
+    "tests/cline-agent-sidecar-runtime.test.ts"
+  ]
+}

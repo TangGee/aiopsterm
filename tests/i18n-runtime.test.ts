@@ -52,8 +52,14 @@ describe('renderer i18n runtime', () => {
   it('translates core shell labels and sets RTL only for Arabic', () => {
     expect(translateWithLocale('en-US', 'settings.nav.general')).toBe('General')
     expect(translateWithLocale('ja-JP', 'module.workspace')).toBe('ワークスペース')
+    expect(translateWithLocale('en-US', 'ai.classicModeChatDetail')).toBe('Conversation without tool access')
+    expect(translateWithLocale('zh-CN', 'ai.classicModeChatDetail')).toBe('无工具调用的对话')
     expect(localeDirection('ar-AR')).toBe('rtl')
     expect(localeDirection('en-US')).toBe('ltr')
+  })
+
+  it('keeps the Database table object label as an English technical term', () => {
+    expect(translateWithLocale('zh-CN', 'database.object.tables')).toBe('table')
   })
 
   it('translates legacy static renderer text through the static catalog', () => {

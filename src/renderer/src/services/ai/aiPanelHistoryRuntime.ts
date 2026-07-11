@@ -30,6 +30,7 @@ export type AiPanelHistoryRuntimeLabels = {
   historyFavorited: () => string
   historyUnfavorited: () => string
   historyFavoriteUpdateFailed: () => string
+  activeTurnNavigationBlocked: () => string
   exportEmpty: () => string
   exportUnavailable: () => string
   exportFailed: (message: string) => string
@@ -44,6 +45,7 @@ export type AiPanelHistoryRuntimeOptions<TConversation extends AiPanelConversati
   visibleTabs: () => TConversation[]
   visibleHistoryCount: () => number
   chatMessageCount: () => number
+  hasActiveTurn: () => boolean
   currentConversationTitle: () => string
   exportMessages: () => AiChatExportInput['messages']
   createConversation: () => Promise<{ id: string } | null | undefined>
@@ -153,7 +155,14 @@ export const createAiPanelHistoryRuntime = <TConversation extends AiPanelConvers
     if (nextIds.length !== options.state.openConversationTabIds.length) options.state.openConversationTabIds = nextIds
   }
 
+  const blockActiveTurnNavigation = () => {
+    if (!options.hasActiveTurn()) return false
+    showNotice(options.labels.activeTurnNavigationBlocked())
+    return true
+  }
+
   const createNewConversation = async () => {
+    if (blockActiveTurnNavigation()) return false
     const created = await options.createConversation()
     options.state.historySearchTerm = ''
     options.state.historyCurrentPage = 1
@@ -172,6 +181,7 @@ export const createAiPanelHistoryRuntime = <TConversation extends AiPanelConvers
     failureMessage = options.labels.chatRestoreFailed()
   ) => {
     if (options.state.editingHistoryId) return false
+    if (options.selectedConversationId() !== id && blockActiveTurnNavigation()) return false
     const restored = await options.restoreConversation(id)
     if (restored) ensureConversationTab(id)
     showNotice(restored ? successMessage : failureMessage)
@@ -186,6 +196,7 @@ export const createAiPanelHistoryRuntime = <TConversation extends AiPanelConvers
 
   const closeConversationTab = async (id: string) => {
     closeHistoryMenu()
+    if (options.selectedConversationId() === id && blockActiveTurnNavigation()) return
     const result = closeAiConversationTab(options.state.openConversationTabIds, options.visibleTabs(), options.selectedConversationId(), id)
     if (result.status === 'keep-one') {
       showNotice(options.labels.keepOneTab())
@@ -225,6 +236,7 @@ export const createAiPanelHistoryRuntime = <TConversation extends AiPanelConvers
   }
 
   const deleteHistoryConversation = async (id: string) => {
+    if (blockActiveTurnNavigation()) return
     const deleted = await options.deleteConversation(id)
     options.state.historyCurrentPage = nextAiHistoryPageAfterDelete(options.visibleHistoryCount(), options.state.historyCurrentPage)
     showNotice(deleted ? options.labels.chatDeleted() : options.labels.chatDeleteFailed())

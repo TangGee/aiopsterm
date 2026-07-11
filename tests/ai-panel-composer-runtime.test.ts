@@ -98,6 +98,7 @@ describe('aiPanelComposerRuntime', () => {
       message: AI_PANEL_COMPOSER_NO_MODEL_NOTICE
     })
     expect(planAiPanelComposerSend({ streaming: false, noModelPrompt: false, chatMode: 'cmd' })).toEqual({ kind: 'send', mode: 'command' })
+    expect(planAiPanelComposerSend({ streaming: false, noModelPrompt: false, chatMode: 'chat' })).toEqual({ kind: 'send', mode: 'chat' })
     expect(planAiPanelComposerSend({ streaming: false, noModelPrompt: false, chatMode: 'cmd', agentMode: true })).toEqual({
       kind: 'send',
       mode: 'agent'

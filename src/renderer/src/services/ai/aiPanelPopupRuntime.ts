@@ -67,13 +67,13 @@ export const sortedAiPanelDocsContextOptions = (options: AiContextOption[], curr
 
 const textMatchesKeyword = (value: string, keyword: string) => !keyword || value.toLowerCase().includes(keyword)
 
-export const filteredAiPanelOpenedHosts = (openedHosts: AiContextOption[], query: string, chatMode: 'agent' | 'cmd', limit = 4) => {
+export const filteredAiPanelOpenedHosts = (openedHosts: AiContextOption[], query: string, chatMode: 'agent' | 'cmd' | 'chat', limit = 4) => {
   if (chatMode !== 'agent') return []
   const keyword = query.trim().toLowerCase()
   return openedHosts.filter((host) => textMatchesKeyword(`${host.label} ${host.detail || ''}`, keyword)).slice(0, limit).map(cloneAiContextOption)
 }
 
-export const visibleAiPanelContextCategories = <TIcon>(categories: Array<AiPanelContextCategoryView<TIcon>>, chatMode: 'agent' | 'cmd') =>
+export const visibleAiPanelContextCategories = <TIcon>(categories: Array<AiPanelContextCategoryView<TIcon>>, chatMode: 'agent' | 'cmd' | 'chat') =>
   categories.filter((category) => category.id !== 'hosts' || chatMode === 'agent')
 
 export const filteredAiPanelContextOptions = (input: {
@@ -250,7 +250,7 @@ export type AiPanelPopupViewRuntimeOptions<TIcon = unknown> = {
   contextQuery: () => string
   commandQuery: () => string
   docsCurrentRelDir: () => string
-  chatMode: () => 'agent' | 'cmd'
+  chatMode: () => 'agent' | 'cmd' | 'chat'
   iconForKind: (kind: AiContextKind) => TIcon
 }
 

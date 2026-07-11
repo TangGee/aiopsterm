@@ -45,10 +45,22 @@
 
 .db-ai-pane-message.assistant {
   margin-right: 18px;
+  border-color: transparent;
+  background: transparent;
+  padding-left: 2px;
+  padding-right: 2px;
 }
 
 .db-ai-pane-message.cancelled {
   border-color: color-mix(in srgb, var(--theme-core-danger) 38%, var(--theme-module-active-border));
+}
+
+.db-ai-pane-message.error {
+  border-color: color-mix(in srgb, var(--theme-core-danger) 48%, var(--theme-module-active-border));
+}
+
+.db-ai-pane-message.error .db-ai-pane-message-status {
+  color: var(--theme-core-danger);
 }
 
 .db-ai-pane-message header {
@@ -70,6 +82,19 @@
 
 .db-ai-pane-message-status {
   margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.db-ai-pane-message-spinner {
+  width: 12px;
+  height: 12px;
+  animation: db-ai-spin 0.9s linear infinite;
+}
+
+@keyframes db-ai-spin {
+  to { transform: rotate(360deg); }
 }
 
 .db-ai-pane-message-context {
@@ -86,4 +111,141 @@
   font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
   font-size: 12px;
   line-height: 1.55;
+}
+
+.db-ai-pane-message-content {
+  min-width: 0;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.db-ai-pane-message-working,
+.db-ai-pane-action-prompt {
+  margin: 0;
+  color: var(--theme-module-active-text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.db-ai-pane-source-sql {
+  max-height: 120px;
+  overflow: auto;
+  border: 0;
+  background: transparent;
+  padding: 0;
+}
+
+.db-ai-pane-sql-result {
+  min-width: 0;
+  border: 1px solid var(--theme-module-active-border);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--theme-module-active-card-bg);
+}
+
+.db-ai-pane-sql-result > header {
+  min-height: 30px;
+  padding: 3px 5px 3px 8px;
+  border-bottom: 1px solid var(--theme-module-active-border);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--theme-module-active-card-strong-bg);
+}
+
+.db-ai-pane-sql-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+}
+
+.db-ai-pane-sql-title svg,
+.db-ai-pane-sql-result button svg {
+  width: 13px;
+  height: 13px;
+}
+
+.db-ai-pane-sql-result select {
+  min-width: 94px;
+  max-width: 126px;
+  height: 24px;
+  border: 1px solid var(--theme-module-active-border);
+  border-radius: 4px;
+  background: var(--theme-module-active-panel-bg);
+  color: var(--theme-module-active-text);
+  font-size: 11px;
+}
+
+.db-ai-pane-sql-spacer {
+  flex: 1 1 auto;
+}
+
+.db-ai-pane-sql-result button {
+  flex: 0 0 24px;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+}
+
+.db-ai-pane-sql-result .db-ai-pane-sql-run {
+  width: auto;
+  flex-basis: auto;
+  padding: 0 7px;
+  color: var(--theme-module-active-accent);
+}
+
+.db-ai-pane-sql-result button:disabled {
+  cursor: not-allowed;
+  color: var(--theme-module-active-text-muted);
+  opacity: 0.48;
+}
+
+.db-ai-pane-sql-result > pre {
+  max-height: 220px;
+  overflow: auto;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 9px 10px;
+  white-space: pre;
+}
+
+.db-ai-pane-sql-pending {
+  min-height: 48px;
+  padding: 10px;
+  display: flex;
+  align-items: center;
+  color: var(--theme-module-active-text-muted);
+  font-size: 11px;
+}
+
+@container (max-width: 420px) {
+  .db-ai-pane-message.user,
+  .db-ai-pane-message.assistant {
+    margin-left: 0;
+    margin-right: 0;
+  }
+
+  .db-ai-pane-sql-run span {
+    display: none;
+  }
+
+  .db-ai-pane-sql-result > header {
+    flex-wrap: wrap;
+  }
+
+  .db-ai-pane-sql-result > header > select {
+    order: 1;
+    flex: 1 0 100%;
+    max-width: none;
+  }
+
+  .db-ai-pane-sql-spacer {
+    display: none;
+  }
+
+  .db-ai-pane-sql-title {
+    flex: 1 1 auto;
+  }
 }

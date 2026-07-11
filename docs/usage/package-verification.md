@@ -6,7 +6,9 @@ Before packaging changes are merged, run the package configuration audit:
 npm run audit:package-config
 ```
 
-`audit:package-config` verifies that the package scripts expose `build:codex`, `audit:codex-runtime`, `audit:packaged-app`, `audit:linux-appimage`, `audit:linux-deb`, `smoke:packaged`, `test:e2e:packaged`, `package:build`, `package:build:matrix`, `package:verify`, `build:linux:appimage`, `build:linux`, `build:deb`, `build:mac`, `build:mac:dir`, `build:win`, and `build:win:dir`; that Linux/macOS/Windows package scripts build the bundled Codex package before electron-builder; that the Codex build keeps the local shell builder for Linux/macOS and uses the Node entrypoint for Windows source packaging; that electron-builder keeps the External reference reference tree excluded; that Linux targets include AppImage and deb; that macOS targets include dmg and zip; that Windows targets include NSIS; that artifact names are explicit; that `resources/icons`, `resources/codex-aiopsterm-mcp.js`, `resources/aiopsterm-external-codex-mcp.js`, and `resources/aiopsterm-agent-hook.js` are copied into packaged resources; that the afterPack hook copies the complete generated Codex package into packaged resources; that the GPT-generated source PNG exists; that the required Linux PNG icon sizes are valid; and that the `aiopsterm://` protocol remains registered.
+`audit:package-config` verifies the existing Codex and platform package entry points plus the exact-pinned Cline SDK, Bun bundler, and Node runtime build/audit commands. Every platform package script must build the sidecar before electron-builder. The builder config must copy `build/cline-sidecar`, exclude `@cline/*`, all application source (including sidecar TypeScript), and `external-reference/` from `app.asar`, and retain the reviewed license overrides. Run `npm run build:cline-sidecar && npm run audit:cline-sidecar` before the package audit. The sidecar audit executes the current-platform `node[.exe]` with `cline-agent-sidecar.cjs`, verifies the protocol lifecycle and supported provider initialization, reconciles the Bun metafile with `sbom.cdx.json`, validates hashes and license evidence, and rejects the unused Claude Agent SDK and SAP provider dependency trees.
+
+The packaged `cline-sidecar` resource directory must contain `node`/`node.exe`, `cline-agent-sidecar.cjs`, `manifest.json`, `metafile.json`, `sbom.cdx.json`, `THIRD-PARTY-NOTICES.txt`, `NODE-LICENSE`, `CLINE-LICENSE`, and `CLINE-ATTRIBUTION.txt`. Bun is a build tool only and must not appear in that directory. The six platform Node packages are exact optional dependencies with root-lockfile SHA-512 integrity, but electron-builder must exclude every `node-linux-*`, `node-darwin-*`, `node-bin-darwin-*`, and `node-win-*` directory from `app.asar`; only the selected copied runtime may be distributed under `cline-sidecar`.
 
 The target-level package commands split the release surface into four installable package targets:
 
@@ -78,7 +80,7 @@ After a directory or full package build on any platform, run the unpacked resour
 npm run audit:packaged-app
 ```
 
-`audit:packaged-app` checks the current platform's unpacked app resources, the packaged Codex package, the platform `rg` helper name, and the platform `node-pty` runtime files. It does not replace `audit:linux-package` for Linux installer/deb/AppImage checks.
+`audit:packaged-app` checks the current platform's unpacked app resources, the packaged Codex package, the platform `rg` helper name, and the platform `node-pty` runtime files. It also requires every Cline sidecar runtime, bundle, manifest, SBOM, metafile, notice, and license artifact, executes the packaged Node `--version`, and validates the distributable manifest boundary. It does not replace `audit:linux-package` for Linux installer/deb/AppImage checks.
 
 `audit:linux-package` checks the Linux build output without launching the app. It verifies:
 

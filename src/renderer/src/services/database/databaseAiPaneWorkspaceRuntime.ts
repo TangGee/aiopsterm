@@ -1,16 +1,20 @@
 import { computed, nextTick, reactive, ref, watch, type ComputedRef, type Ref } from 'vue'
 import { databaseClient } from '@/services/database/databaseClient'
-import { currentSqlStatement } from '@/services/database/databaseSqlEditorRuntime'
+import { currentSqlStatement, extractFencedSql } from '@/services/database/databaseSqlEditorRuntime'
 import {
   applyDbAiPaneStateSnapshot as applyRuntimeDbAiPaneStateSnapshot,
   clampDbAiPaneWidth,
   currentDbAiPaneStateSnapshot as currentRuntimeDbAiPaneStateSnapshot,
+  dbAiActionLabel,
   dbAiPaneCanSend as runtimeDbAiPaneCanSend,
   dbAiPaneContextSummary as runtimeDbAiPaneContextSummary,
   dbAiPaneIsStreaming as runtimeDbAiPaneIsStreaming,
   dbAiPaneRequestInput,
   dbAiPaneStatusLabel,
   dbAiQuickPromptText,
+  dbAiSql,
+  dbAiDialectLabel,
+  normalizeDbAiTargetDialect,
   normalizeDbAiPaneContext as normalizeRuntimeDbAiPaneContext,
   type SqlTab
 } from '@/services/database/databaseAiRuntime'
@@ -20,7 +24,9 @@ import {
   isDbAiPaneResponseData,
   isDbAiPaneStateSnapshot,
   type DbAiPaneContext,
-  type DbAiPaneMessage
+  type DbAiPaneMessage,
+  type DbAiAction,
+  type DbAiRequest
 } from '@/services/database/databaseBackendGuards'
 import { DB_AI_PANE_DEFAULT_WIDTH, sqlConnectionRequiresSchema } from '@/services/database/databaseWorkspaceRuntime'
 import type { DbAiPaneQuickPrompt, SqlConsoleContext } from '@/services/database/databaseWorkspaceTypes'
@@ -28,15 +34,17 @@ import type {
   DatabaseAiPaneLifecycleResult,
   DatabaseAiPaneRequestResult,
   DatabaseAiPaneResponseResult,
+  DatabaseAiResponseLanguage,
   DatabaseAiPaneStateSnapshot,
   DatabaseConnectionInfo
 } from '@shared/contracts/database'
+import { databaseAiNl2SqlPrompt } from '@shared/databaseAiSqlRuntime'
 
 type DatabaseAiPaneWorkspaceRuntimeState = {
   connections: Ref<DatabaseConnectionInfo[]>
   expandedConnections: Ref<string[]>
   activeSqlTab: ComputedRef<SqlTab | null>
-  databaseAiPanelsRef: Ref<{ scrollPaneMessagesToBottom: () => void } | null>
+  databaseAiPanelsRef: Ref<{ scrollPaneMessagesToBottom: () => void; focusPaneComposer?: () => void } | null>
 }
 
 type DatabaseAiPaneWorkspaceRuntimeDeps = {
@@ -46,7 +54,14 @@ type DatabaseAiPaneWorkspaceRuntimeDeps = {
   defaultSqlContextForConnection: (connection: DatabaseConnectionInfo) => SqlConsoleContext
   resolveSqlConsoleContext: (connectionId?: string) => SqlConsoleContext
   connectConnection: (connectionId: string) => Promise<boolean>
+  getResponseLanguage: () => DatabaseAiResponseLanguage
+  getSelectedSqlText: () => string
   getSqlCursorOffset: () => number
+}
+
+const createDbAiPaneConversationId = () => {
+  const id = globalThis.crypto?.randomUUID?.()
+  return `dbai-pane-conversation-${id || `${Date.now()}-${Math.random().toString(16).slice(2)}`}`
 }
 
 export const createDatabaseAiPaneWorkspaceRuntime = (
@@ -61,6 +76,8 @@ export const createDatabaseAiPaneWorkspaceRuntime = (
     defaultSqlContextForConnection,
     resolveSqlConsoleContext,
     connectConnection,
+    getResponseLanguage,
+    getSelectedSqlText,
     getSqlCursorOffset
   } = deps
 
@@ -74,12 +91,18 @@ export const createDatabaseAiPaneWorkspaceRuntime = (
     dbType: ''
   })
   const dbAiPaneDraft = ref('')
+  const dbAiPaneComposerAction = ref<DbAiAction | null>(null)
   const dbAiPaneMessages = ref<DbAiPaneMessage[]>([])
+  const dbAiPaneConversationId = ref(createDbAiPaneConversationId())
+  const dbAiPaneRequestStarting = ref(false)
   let dbAiPaneResizeStartX = 0
   let dbAiPaneResizeStartWidth = DB_AI_PANE_DEFAULT_WIDTH
   let dbAiPaneContextTouched = false
   let dbAiPaneStateHydrating = false
   let dbAiPaneStateNoticeShown = false
+  let dbAiPaneConversationGeneration = 0
+  let dbAiPaneStateSaveQueue: Promise<void> = Promise.resolve()
+  let dbAiPaneStateSaveSuspended = false
 
   const canToggleDbAiPane = computed(() => connections.value.length > 0)
   const dbAiPaneConnection = computed(() => findConnection(dbAiPaneContext.connectionId) ?? null)
@@ -94,7 +117,39 @@ export const createDatabaseAiPaneWorkspaceRuntime = (
   const dbAiPaneContextTitle = computed(() => dbAiPaneContextSummary.value || 'No database context selected')
   const dbAiPaneContextSummary = computed(() => runtimeDbAiPaneContextSummary(dbAiPaneConnection.value, dbAiPaneContext))
   const dbAiPaneIsStreaming = computed(() => runtimeDbAiPaneIsStreaming(dbAiPaneMessages.value))
-  const dbAiPaneCanSend = computed(() => runtimeDbAiPaneCanSend(dbAiPaneDraft.value, dbAiPaneContext, dbAiPaneIsStreaming.value))
+  const dbAiPaneCanSend = computed(() =>
+    !dbAiPaneRequestStarting.value && runtimeDbAiPaneCanSend(dbAiPaneDraft.value, dbAiPaneContext, dbAiPaneIsStreaming.value)
+  )
+  const dbAiPaneComposerPlaceholder = computed(() =>
+    dbAiPaneComposerAction.value === 'nl2sql' ? 'Describe the data you want to query' : 'Ask DB AI'
+  )
+
+  const sqlTabMatchesDbAiPaneContext = (tab: SqlTab, context: DbAiPaneContext) =>
+    tab.connectionId === context.connectionId &&
+    tab.catalogName === context.catalogName &&
+    (tab.schemaName || '') === (context.schemaName || '')
+
+  const dbAiPaneMessageMatchesContext = (
+    message: DbAiPaneMessage,
+    context: DbAiPaneContext,
+    contextSummary: string
+  ) => {
+    if (message.context) {
+      return (
+        message.context.connectionId === context.connectionId &&
+        message.context.catalogName === context.catalogName &&
+        (message.context.schemaName || '') === (context.schemaName || '')
+      )
+    }
+    const actionContext = message.sqlAction?.context
+    if (!actionContext) return false
+    if (!actionContext.connectionId || !actionContext.databaseName) return message.contextSummary === contextSummary
+    return (
+      actionContext.connectionId === context.connectionId &&
+      actionContext.databaseName === context.catalogName &&
+      (actionContext.schemaName || '') === (context.schemaName || '')
+    )
+  }
 
   const normalizeDbAiPaneContext = (input: Partial<DbAiPaneContext> | SqlConsoleContext): DbAiPaneContext => {
     return normalizeRuntimeDbAiPaneContext(input, connections.value)
@@ -154,6 +209,17 @@ export const createDatabaseAiPaneWorkspaceRuntime = (
     showNotice('DB AI context synced with active workspace tab')
   }
 
+  const syncDbAiPaneContextToActiveSqlTab = () => {
+    const tab = activeSqlTab.value
+    if (!tab) return
+    applyDbAiPaneContext({
+      connectionId: tab.connectionId,
+      catalogName: tab.catalogName,
+      schemaName: tab.schemaName,
+      dbType: findConnection(tab.connectionId)?.dbType ?? ''
+    }, false)
+  }
+
   const updateDbAiPaneConnection = (event: Event) => {
     const connectionId = (event.target as HTMLSelectElement).value
     const connection = findConnection(connectionId)
@@ -187,114 +253,264 @@ export const createDatabaseAiPaneWorkspaceRuntime = (
     sendDbAiPaneMessage()
   }
 
+  const prepareDbAiPaneAction = (action: DbAiAction) => {
+    openDbAiPane()
+    dbAiPaneComposerAction.value = action
+    void nextTick(() => databaseAiPanelsRef.value?.focusPaneComposer?.())
+  }
+
+  const cancelDbAiPaneActionMode = () => {
+    dbAiPaneComposerAction.value = null
+  }
+
   const sendDbAiPaneQuickPrompt = (kind: DbAiPaneQuickPrompt) => {
-    if (dbAiPaneIsStreaming.value) return
+    if (dbAiPaneIsStreaming.value || dbAiPaneRequestStarting.value) return
+    const responseLanguage = getResponseLanguage()
     if (kind === 'explainActive') {
       const tab = activeSqlTab.value
       if (!tab) return
-      const sql = currentSqlStatement(tab.sql, getSqlCursorOffset()).trim() || tab.sql.trim()
-      sendDbAiPaneMessage(dbAiQuickPromptText(kind, sql))
+      const sql = getSelectedSqlText().trim() || currentSqlStatement(tab.sql, getSqlCursorOffset()).trim() || tab.sql.trim()
+      if (!sql) {
+        showNotice('SQL is empty')
+        return
+      }
+      syncDbAiPaneContextToActiveSqlTab()
+      openDbAiPane()
+      sendDbAiPaneMessage(dbAiQuickPromptText(kind, sql, responseLanguage), { action: 'explain', sourceSql: sql })
       return
     }
-    sendDbAiPaneMessage(dbAiQuickPromptText(kind))
+    openDbAiPane()
+    const prompt = dbAiQuickPromptText(kind, '', responseLanguage)
+    sendDbAiPaneMessage(prompt, kind === 'selectSample' ? { action: 'nl2sql', sourceSql: prompt } : {})
   }
 
-  const sendDbAiPaneMessage = async (promptOverride = '') => {
-    const prompt = (promptOverride || dbAiPaneDraft.value).trim()
-    if (!prompt || dbAiPaneIsStreaming.value) return
-    ensureDbAiPaneContextInitialized(false)
-    if (!dbAiPaneContext.connectionId || !dbAiPaneContext.catalogName) {
-      showNotice('Database context is required before using DB AI pane')
-      return
-    }
-    if (dbAiPaneConnectionNeedsConnect.value) {
-      await connectDbAiPaneConnection()
-      if (dbAiPaneConnectionNeedsConnect.value) return
-    }
-    const contextSummary = dbAiPaneContextSummary.value
-    const requestInput = dbAiPaneRequestInput({
-      prompt,
-      context: dbAiPaneContext,
-      contextSummary,
-      activeSql: activeSqlTab.value?.sql ?? '',
-      messages: dbAiPaneMessages.value
-    })
-    const createBridge = databaseClient.createDatabaseAiPaneRequest()
-    if (!createBridge) {
-      showNotice('DB AI pane request service unavailable')
-      return
-    }
-    let created: DatabaseAiPaneRequestResult
+  const sendDbAiPaneMessage = async (
+    promptOverride = '',
+    options: { action?: DbAiAction; sourceSql?: string } = {}
+  ) => {
+    const responseLanguage = getResponseLanguage()
+    const rawPrompt = (promptOverride || dbAiPaneDraft.value).trim()
+    const action = options.action ?? (promptOverride ? undefined : dbAiPaneComposerAction.value ?? undefined)
+    const prompt = action === 'nl2sql' && !promptOverride
+      ? databaseAiNl2SqlPrompt(rawPrompt, responseLanguage)
+      : rawPrompt
+    if (!prompt || dbAiPaneIsStreaming.value || dbAiPaneRequestStarting.value) return
+    dbAiPaneRequestStarting.value = true
     try {
-      created = await createBridge(requestInput)
-    } catch (error) {
-      showNotice(bridgeErrorMessage(error, 'DB AI pane request failed'))
-      return
+      ensureDbAiPaneContextInitialized(false)
+      if (!dbAiPaneContext.connectionId || !dbAiPaneContext.catalogName) {
+        showNotice('Database context is required before using DB AI pane')
+        return
+      }
+      if (dbAiPaneConnectionNeedsConnect.value) {
+        await connectDbAiPaneConnection()
+        if (dbAiPaneConnectionNeedsConnect.value) return
+      }
+      // Context/open-state watchers can otherwise overwrite lifecycle messages created by the next IPC call.
+      await nextTick()
+      await persistDbAiPaneState()
+      dbAiPaneStateSaveSuspended = true
+      try {
+        const contextSummary = dbAiPaneContextSummary.value
+        const contextSnapshot = { ...dbAiPaneContext }
+        const activeTabSnapshot = activeSqlTab.value
+        const activeSqlSnapshot = activeTabSnapshot && sqlTabMatchesDbAiPaneContext(activeTabSnapshot, contextSnapshot)
+          ? activeTabSnapshot.sql
+          : ''
+        const activeTableNameSnapshot = activeTabSnapshot && sqlTabMatchesDbAiPaneContext(activeTabSnapshot, contextSnapshot)
+          ? activeTabSnapshot.tableName || ''
+          : ''
+        const messageSnapshot = dbAiPaneMessages.value
+          .filter((message) => message.responseLanguage === responseLanguage)
+          .filter((message) => dbAiPaneMessageMatchesContext(message, contextSnapshot, contextSummary))
+          .map((message) => ({
+            ...message,
+            ...(message.context ? { context: { ...message.context } } : {}),
+            ...(message.sqlAction ? { sqlAction: { ...message.sqlAction, context: { ...message.sqlAction.context } } } : {})
+          }))
+        const conversationIdSnapshot = dbAiPaneConversationId.value
+        const requestInput = dbAiPaneRequestInput({
+          conversationId: conversationIdSnapshot,
+          prompt,
+          action,
+          responseLanguage,
+          context: contextSnapshot,
+          contextSummary,
+          activeSql: activeSqlSnapshot,
+          tableName: activeTableNameSnapshot,
+          messages: messageSnapshot
+        })
+        const createBridge = databaseClient.createDatabaseAiPaneRequest()
+        if (!createBridge) {
+          showNotice('DB AI pane request service unavailable')
+          return
+        }
+        let created: DatabaseAiPaneRequestResult
+        const conversationGeneration = dbAiPaneConversationGeneration
+        try {
+          created = await createBridge(requestInput)
+        } catch (error) {
+          showNotice(bridgeErrorMessage(error, 'DB AI pane request failed'))
+          return
+        }
+        if (conversationGeneration !== dbAiPaneConversationGeneration) return
+        if (!created.ok) {
+          showNotice(created.errorMessage || 'DB AI pane request failed')
+          return
+        }
+        if (!isDbAiPaneRequestData(created.data)) {
+          showNotice('DB AI pane backend returned malformed request data.')
+          return
+        }
+        const targetDialect = normalizeDbAiTargetDialect(contextSnapshot.dbType)
+        const sqlAction = action
+          ? {
+              action,
+              label: dbAiActionLabel(action, responseLanguage),
+              sourceSql: options.sourceSql ?? (action === 'nl2sql' ? rawPrompt : activeSqlSnapshot),
+              generatedSql: '',
+              targetDialect,
+              transport: 'pane' as const,
+              context: {
+                connectionId: contextSnapshot.connectionId,
+                dbType: contextSnapshot.dbType,
+                databaseName: contextSnapshot.catalogName,
+                schemaName: contextSnapshot.schemaName || undefined,
+                contextSummary
+              }
+            }
+          : undefined
+        const userMessage = {
+          ...created.data.userMessage,
+          context: { ...contextSnapshot },
+          ...(sqlAction ? { sqlAction: { ...sqlAction, context: { ...sqlAction.context } } } : {})
+        }
+        const assistantMessage = {
+          ...created.data.assistantMessage,
+          context: { ...contextSnapshot },
+          ...(sqlAction ? { sqlAction: { ...sqlAction, context: { ...sqlAction.context } } } : {})
+        }
+        dbAiPaneMessages.value = [...dbAiPaneMessages.value, userMessage, assistantMessage].slice(-24)
+        if (!promptOverride) dbAiPaneDraft.value = ''
+        dbAiPaneComposerAction.value = null
+        void requestDbAiPaneResponse(
+          assistantMessage.id,
+          prompt,
+          contextSnapshot,
+          contextSummary,
+          created.data.requestId,
+          activeSqlSnapshot,
+          activeTableNameSnapshot,
+          messageSnapshot,
+          sqlAction,
+          responseLanguage,
+          conversationGeneration,
+          conversationIdSnapshot
+        )
+        scrollDbAiPaneMessagesToBottom()
+      } finally {
+        dbAiPaneStateSaveSuspended = false
+        void persistDbAiPaneState()
+      }
+    } finally {
+      dbAiPaneRequestStarting.value = false
     }
-    if (!created.ok) {
-      showNotice(created.errorMessage || 'DB AI pane request failed')
-      return
-    }
-    if (!isDbAiPaneRequestData(created.data)) {
-      showNotice('DB AI pane backend returned malformed request data.')
-      return
-    }
-    const { userMessage, assistantMessage } = created.data
-    dbAiPaneMessages.value = [...dbAiPaneMessages.value, userMessage, assistantMessage]
-    if (!promptOverride) dbAiPaneDraft.value = ''
-    void requestDbAiPaneResponse(assistantMessage.id, prompt, { ...dbAiPaneContext }, contextSummary, created.data.requestId)
+  }
+
+  const failDbAiPaneMessage = (messageId: string, errorMessage: string) => {
+    dbAiPaneMessages.value = dbAiPaneMessages.value.map((message) =>
+      message.id === messageId && message.status !== 'cancelled'
+        ? { ...message, status: 'error', content: errorMessage, updatedAt: Date.now() }
+        : message
+    )
+    showNotice(errorMessage)
     scrollDbAiPaneMessagesToBottom()
   }
 
-  const requestDbAiPaneResponse = async (messageId: string, prompt: string, context: DbAiPaneContext, contextSummary: string, requestId: string) => {
+  const requestDbAiPaneResponse = async (
+    messageId: string,
+    prompt: string,
+    context: DbAiPaneContext,
+    contextSummary: string,
+    requestId: string,
+    activeSql: string,
+    tableName: string,
+    messages: DbAiPaneMessage[],
+    sqlAction: DbAiPaneMessage['sqlAction'] | undefined,
+    responseLanguage: DatabaseAiResponseLanguage,
+    conversationGeneration: number,
+    conversationId: string
+  ) => {
     const startBridge = databaseClient.startDatabaseAiPaneResponse()
     if (!startBridge) {
-      showNotice('DB AI pane start service unavailable')
+      failDbAiPaneMessage(messageId, 'DB AI pane start service unavailable')
       return
     }
     let started: DatabaseAiPaneLifecycleResult
     try {
       started = await startBridge({ requestId, assistantMessageId: messageId })
     } catch (error) {
-      showNotice(bridgeErrorMessage(error, 'DB AI pane request failed to start'))
+      failDbAiPaneMessage(messageId, bridgeErrorMessage(error, 'DB AI pane request failed to start'))
       return
     }
     if (!started.ok) {
-      showNotice(started.errorMessage || 'DB AI pane request failed to start')
+      failDbAiPaneMessage(messageId, started.errorMessage || 'DB AI pane request failed to start')
       return
     }
     if (!isDbAiPaneLifecycleData(started.data, { requestId, assistantMessageId: messageId })) {
-      showNotice('DB AI pane backend returned malformed lifecycle data.')
+      failDbAiPaneMessage(messageId, 'DB AI pane backend returned malformed lifecycle data.')
       return
     }
-    applyDbAiPaneAssistantMessage(started.data.assistantMessage)
+    if (conversationGeneration !== dbAiPaneConversationGeneration) {
+      void persistDbAiPaneState()
+      return
+    }
+    applyDbAiPaneAssistantMessage(started.data.assistantMessage, sqlAction)
     const generateBridge = databaseClient.generateDatabaseAiPaneResponse()
     if (!generateBridge) {
-      showNotice('DB AI pane response service unavailable')
+      failDbAiPaneMessage(messageId, 'DB AI pane response service unavailable')
       return
     }
     try {
       const result = await generateBridge({
         ...dbAiPaneRequestInput({
+          conversationId,
           prompt,
+          action: sqlAction?.action,
+          responseLanguage,
           context,
           contextSummary,
-          activeSql: activeSqlTab.value?.sql ?? '',
-          messages: dbAiPaneMessages.value
+          activeSql,
+          tableName,
+          messages
         }),
         requestId,
         assistantMessageId: messageId
       })
+      if (conversationGeneration !== dbAiPaneConversationGeneration) {
+        void persistDbAiPaneState()
+        return
+      }
       finishDbAiPaneMessage(messageId, result, requestId)
     } catch (error) {
-      showNotice(bridgeErrorMessage(error, 'DB AI pane response failed'))
+      if (conversationGeneration !== dbAiPaneConversationGeneration) {
+        void persistDbAiPaneState()
+        return
+      }
+      failDbAiPaneMessage(messageId, bridgeErrorMessage(error, 'DB AI pane response failed'))
     }
   }
 
-  const applyDbAiPaneAssistantMessage = (assistantMessage: DbAiPaneMessage) => {
+  const applyDbAiPaneAssistantMessage = (assistantMessage: DbAiPaneMessage, sqlAction?: DbAiPaneMessage['sqlAction']) => {
     dbAiPaneMessages.value = dbAiPaneMessages.value.map((message) => {
       if (message.id !== assistantMessage.id) return message
-      return assistantMessage
+      const action = sqlAction ?? message.sqlAction
+      const messageContext = assistantMessage.context ?? message.context
+      return {
+        ...assistantMessage,
+        ...(messageContext ? { context: { ...messageContext } } : {}),
+        ...(action ? { sqlAction: { ...action, context: { ...action.context } } } : {})
+      }
     })
     scrollDbAiPaneMessagesToBottom()
   }
@@ -303,16 +519,32 @@ export const createDatabaseAiPaneWorkspaceRuntime = (
     const hasValidResponseData = isDbAiPaneResponseData(result.data, { requestId, assistantMessageId: messageId })
     const responseData = hasValidResponseData ? result.data : null
     if (result.ok && !hasValidResponseData) {
-      showNotice('DB AI pane backend returned malformed response data.')
+      failDbAiPaneMessage(messageId, 'DB AI pane backend returned malformed response data.')
       return
     }
     if (!result.ok && !hasValidResponseData) {
-      showNotice(result.errorMessage || 'DB AI pane response failed')
+      failDbAiPaneMessage(messageId, result.errorMessage || 'DB AI pane response failed')
       return
     }
     dbAiPaneMessages.value = dbAiPaneMessages.value.map((message) => {
       if (message.id !== messageId || message.status === 'cancelled') return message
-      if (responseData) return responseData.assistantMessage
+      if (responseData) {
+        const sqlAction = message.sqlAction
+        const messageContext = responseData.assistantMessage.context ?? message.context
+        return {
+          ...responseData.assistantMessage,
+          ...(messageContext ? { context: { ...messageContext } } : {}),
+          ...(sqlAction
+            ? {
+                sqlAction: {
+                  ...sqlAction,
+                  generatedSql: sqlAction.action === 'explain' ? '' : extractFencedSql(responseData.assistantMessage.content),
+                  context: { ...sqlAction.context }
+                }
+              }
+            : {})
+        }
+      }
       return message
     })
     scrollDbAiPaneMessagesToBottom()
@@ -348,9 +580,85 @@ export const createDatabaseAiPaneWorkspaceRuntime = (
   }
 
   const resetDbAiPaneConversation = () => {
+    dbAiPaneConversationGeneration += 1
+    dbAiPaneConversationId.value = createDbAiPaneConversationId()
     dbAiPaneMessages.value = []
     dbAiPaneDraft.value = ''
+    dbAiPaneComposerAction.value = null
     showNotice('DB AI pane conversation reset')
+  }
+
+  const syncDbAiPaneActionRequest = (request: DbAiRequest) => {
+    const userId = `dbai-pane-action-${request.id}-user`
+    const assistantId = `dbai-pane-action-${request.id}-assistant`
+    const requestAlreadyMirrored = dbAiPaneMessages.value.some((message) => message.id === userId || message.id === assistantId)
+    const connectionId = String(request.backendContext.connectionId || '')
+    if (!requestAlreadyMirrored && connectionId && findConnection(connectionId)) {
+      applyDbAiPaneContext({
+        connectionId,
+        catalogName: String(request.backendContext.databaseName || ''),
+        schemaName: String(request.backendContext.schemaName || ''),
+        dbType: request.backendContext.dbType || ''
+      }, false)
+    } else if (!requestAlreadyMirrored) {
+      ensureDbAiPaneContextInitialized(false)
+    }
+    const contextSummary = request.contextSummary || dbAiPaneContextSummary.value
+    const responseLanguage: DatabaseAiResponseLanguage = request.responseLanguage === 'zh-CN' ? 'zh-CN' : 'en-US'
+    const sqlAction = {
+      action: request.action,
+      label: request.label,
+      sourceSql: request.sourceSql,
+      generatedSql: dbAiSql(request),
+      targetDialect: request.targetDialect,
+      transport: 'drawer' as const,
+      context: {
+        ...request.backendContext,
+        contextSummary: request.backendContext.contextSummary || contextSummary
+      }
+    }
+    const userMessage: DbAiPaneMessage = {
+      id: userId,
+      requestId: request.id,
+      role: 'user',
+      status: 'done',
+      content: request.label,
+      contextSummary,
+      createdAt: request.createdAt,
+      updatedAt: request.updatedAt,
+      responseLanguage,
+      context: {
+        connectionId: String(request.backendContext.connectionId || ''),
+        catalogName: String(request.backendContext.databaseName || ''),
+        schemaName: String(request.backendContext.schemaName || ''),
+        dbType: request.backendContext.dbType || ''
+      },
+      sqlAction: { ...sqlAction, generatedSql: '', context: { ...sqlAction.context } }
+    }
+    const assistantMessage: DbAiPaneMessage = {
+      id: assistantId,
+      requestId: request.id,
+      role: 'assistant',
+      status: request.status,
+      content: request.text,
+      contextSummary,
+      createdAt: request.createdAt + 1,
+      updatedAt: request.updatedAt,
+      responseLanguage,
+      context: {
+        connectionId: String(request.backendContext.connectionId || ''),
+        catalogName: String(request.backendContext.databaseName || ''),
+        schemaName: String(request.backendContext.schemaName || ''),
+        dbType: request.backendContext.dbType || ''
+      },
+      sqlAction: { ...sqlAction, context: { ...sqlAction.context } }
+    }
+    const next = dbAiPaneMessages.value.filter((message) => message.id !== userId && message.id !== assistantId)
+    dbAiPaneMessages.value = [...next, userMessage, assistantMessage]
+      .sort((left, right) => left.createdAt - right.createdAt)
+      .slice(-24)
+    if (!requestAlreadyMirrored) dbAiPaneOpen.value = true
+    scrollDbAiPaneMessagesToBottom()
   }
 
   const scrollDbAiPaneMessagesToBottom = () => {
@@ -390,6 +698,7 @@ export const createDatabaseAiPaneWorkspaceRuntime = (
 
   const applyDbAiPaneStateSnapshot = (snapshot: DatabaseAiPaneStateSnapshot) => {
     const next = applyRuntimeDbAiPaneStateSnapshot(snapshot, normalizeDbAiPaneContext)
+    dbAiPaneConversationId.value = next.conversationId || createDbAiPaneConversationId()
     dbAiPaneOpen.value = next.open
     dbAiPaneWidth.value = next.width
     if (next.context) applyDbAiPaneContext(next.context, true)
@@ -400,6 +709,7 @@ export const createDatabaseAiPaneWorkspaceRuntime = (
 
   const currentDbAiPaneStateSnapshot = (): DatabaseAiPaneStateSnapshot =>
     currentRuntimeDbAiPaneStateSnapshot({
+      conversationId: dbAiPaneConversationId.value,
       open: dbAiPaneOpen.value,
       width: dbAiPaneWidth.value,
       context: dbAiPaneContext,
@@ -436,33 +746,38 @@ export const createDatabaseAiPaneWorkspaceRuntime = (
     }
   }
 
-  const persistDbAiPaneState = async () => {
-    if (dbAiPaneStateHydrating) return
-    const bridge = databaseClient.saveDatabaseAiPaneState()
-    if (!bridge) {
-      if (!dbAiPaneStateNoticeShown) {
-        dbAiPaneStateNoticeShown = true
-        showNotice('DB AI pane state service unavailable')
-      }
-      return
-    }
-    try {
-      const result = await bridge(currentDbAiPaneStateSnapshot())
-      if (!result.ok && !dbAiPaneStateNoticeShown) {
-        dbAiPaneStateNoticeShown = true
-        showNotice(result.errorMessage || 'DB AI pane state save failed')
+  const persistDbAiPaneState = () => {
+    if (dbAiPaneStateHydrating || dbAiPaneStateSaveSuspended) return Promise.resolve()
+    const snapshot = currentDbAiPaneStateSnapshot()
+    const saveSnapshot = async () => {
+      const bridge = databaseClient.saveDatabaseAiPaneState()
+      if (!bridge) {
+        if (!dbAiPaneStateNoticeShown) {
+          dbAiPaneStateNoticeShown = true
+          showNotice('DB AI pane state service unavailable')
+        }
         return
       }
-      if (result.ok && !isDbAiPaneStateSnapshot(result.data) && !dbAiPaneStateNoticeShown) {
-        dbAiPaneStateNoticeShown = true
-        showNotice('DB AI pane state backend returned malformed result data.')
-      }
-    } catch {
-      if (!dbAiPaneStateNoticeShown) {
-        dbAiPaneStateNoticeShown = true
-        showNotice('DB AI pane state save failed')
+      try {
+        const result = await bridge(snapshot)
+        if (!result.ok && !dbAiPaneStateNoticeShown) {
+          dbAiPaneStateNoticeShown = true
+          showNotice(result.errorMessage || 'DB AI pane state save failed')
+          return
+        }
+        if (result.ok && !isDbAiPaneStateSnapshot(result.data) && !dbAiPaneStateNoticeShown) {
+          dbAiPaneStateNoticeShown = true
+          showNotice('DB AI pane state backend returned malformed result data.')
+        }
+      } catch {
+        if (!dbAiPaneStateNoticeShown) {
+          dbAiPaneStateNoticeShown = true
+          showNotice('DB AI pane state save failed')
+        }
       }
     }
+    dbAiPaneStateSaveQueue = dbAiPaneStateSaveQueue.then(saveSnapshot, saveSnapshot)
+    return dbAiPaneStateSaveQueue
   }
 
   watch(
@@ -470,6 +785,7 @@ export const createDatabaseAiPaneWorkspaceRuntime = (
       dbAiPaneOpen,
       dbAiPaneWidth,
       dbAiPaneDraft,
+      dbAiPaneConversationId,
       dbAiPaneMessages,
       () => [dbAiPaneContext.connectionId, dbAiPaneContext.catalogName, dbAiPaneContext.schemaName, dbAiPaneContext.dbType].join('|')
     ],
@@ -483,6 +799,8 @@ export const createDatabaseAiPaneWorkspaceRuntime = (
     dbAiPaneResizing,
     dbAiPaneContext,
     dbAiPaneDraft,
+    dbAiPaneComposerAction,
+    dbAiPaneComposerPlaceholder,
     dbAiPaneMessages,
     canToggleDbAiPane,
     dbAiPaneConnection,
@@ -498,14 +816,19 @@ export const createDatabaseAiPaneWorkspaceRuntime = (
     syncDbAiPaneContextAfterActiveTabChange,
     syncDbAiPaneContextAfterCatalogChange,
     toggleDbAiPane,
+    openDbAiPane,
     closeDbAiPane,
     useActiveDbAiPaneContext,
+    syncDbAiPaneContextToActiveSqlTab,
     updateDbAiPaneConnection,
     updateDbAiPaneCatalog,
     updateDbAiPaneSchema,
     connectDbAiPaneConnection,
     handleDbAiPaneDraftKeydown,
+    prepareDbAiPaneAction,
+    cancelDbAiPaneActionMode,
     sendDbAiPaneQuickPrompt,
+    syncDbAiPaneActionRequest,
     resetDbAiPaneConversation,
     cancelDbAiPaneResponse,
     sendDbAiPaneMessage,

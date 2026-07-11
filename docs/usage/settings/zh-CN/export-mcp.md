@@ -1,6 +1,6 @@
 # 导出 MCP
 
-本页位于 `设置 -> 导出 MCP`，用于把 aiopsterm 的主机连接、会话和工具能力导出成外部 MCP server。外部 Codex、Claude Code 或其他支持 MCP 的 Agent 可以通过这个 server 调用 aiopsterm 的主机网关、会话和工具接口。
+本页位于 `设置 -> 导出 MCP`，用于把 aiopsterm 的主机连接、会话和经过授权的只读数据库能力导出成外部 MCP server。外部 Codex、Claude Code 或其他支持 MCP 的 Agent 可以通过这个 server 调用 aiopsterm 的主机网关、会话和工具接口。
 
 ## 前置条件
 
@@ -23,6 +23,20 @@ token 默认由 aiopsterm 在首次使用时生成并保存到应用数据目录
 如果确实信任本机外部 Agent，可以在本页开启 `允许外部 Agent 提交 SSH 认证信息`。开启后，外部 Agent 可调用 `submit_ssh_auth_response` 提交密码、验证码或 keyboard-interactive 响应；关闭时该 tool 会返回本地化错误，提示用户可以在 `设置 -> 导出 MCP` 开启该能力，或直接回 aiopsterm 完成认证。
 
 relay-shell 后再 `ssh` 的文本密码提示仍不是结构化 SSH 认证事件。它只在 relay 登录和二次 `ssh` 都不需要交互输入时可用；需要动态口令、密码或 host-key 确认的 relay 流程请使用 aiopsterm 的可见终端完成。
+
+## 数据库读取权限
+
+数据库 MCP tools 会随 `aiopsterm_hosts` 一起被外部 Agent 发现，但数据库读取权限默认关闭。只有在本页开启 `允许外部 Agent 读取数据库` 后，外部 Agent 才能调用：
+
+- `list_database_connections`
+- `search_database_objects`
+- `describe_database_table`
+- `get_database_table_ddl`
+- `query_database_table`
+
+关闭时调用会返回 `DB_MCP_DATABASE_READ_DISABLED`，不会读取 catalog 或连接。连接列表只返回当前进程有效的随机 handle 和受控 label，不返回保存的 ID、用户自定义名称、主机、端口、用户名、URL、文件路径、代理配置或密码；aiopsterm 重启后必须重新发现 handle。DDL 和 table 数据查询还要求非 SQLite 连接已在 Database 工作区打开。
+
+第一阶段不提供任意 SQL 和写操作。`query_database_table` 只接受 base table、有界 scalar column 投影、经过 catalog 校验的结构化过滤、排序和分页，单页最多 100 行；view 与无界 LOB/TEXT/JSON/collection column 会被拒绝或省略，DDL 和总响应大小也有上限。关系型 driver 与 SQLite 支持 strict data query；ClickHouse 和 Presto 无法跨 HTTP 请求持有可移植的 table identity lock，因此 MCP data query 会 fail closed，但 catalog、describe 和脱敏 DDL tools 仍可用。开启此权限仍可能把 database schema 和查询到的 table 数据交给外部 Agent，因此只应对可信的本机 Agent 开启。
 
 ## 为什么需要 Token
 

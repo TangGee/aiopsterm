@@ -12,6 +12,7 @@ import {
 } from '@/services/ai/aiPanelMessageActionRuntime'
 import type { AiPanelCommandSuggestionMessage } from '@/services/ai/aiPanelMessageRuntime'
 import type { TerminalCommandSource, TerminalSecurityDecision } from '@/services/terminal/terminalExecutionRuntime'
+import type { ClineAgentApprovalInput, ClineAgentApprovalResult } from '@shared/contracts/clineAgent'
 
 export type AiPanelActionOrchestrationMessage = AiPanelMessageActionMessage & AiPanelCommandSuggestionMessage
 
@@ -35,6 +36,7 @@ export type AiPanelActionOrchestrationRuntimeOptions<TMessage extends AiPanelAct
   continueAgentCommandLoop: (input: AiPanelCommandActionLoopInput) => Promise<AiPanelCommandActionLoopResult>
   enableAgentReadOnlyAutoRunForCurrentConversation: () => boolean
   syncCurrentConversationSnapshot: (options: { notifyFailure?: boolean; notifyUnavailable?: boolean }) => void | Promise<unknown>
+  respondClineAgentApproval?: (input: ClineAgentApprovalInput) => Promise<ClineAgentApprovalResult>
   closePopups: () => void
   afterDomUpdate: () => void | Promise<void>
 }
@@ -72,7 +74,8 @@ export const createAiPanelActionOrchestrationRuntime = <TMessage extends AiPanel
     runActiveTerminalCommand: options.runActiveTerminalCommand,
     continueAgentCommandLoop: options.continueAgentCommandLoop,
     enableAgentReadOnlyAutoRunForCurrentConversation: options.enableAgentReadOnlyAutoRunForCurrentConversation,
-    syncCurrentConversationSnapshot: options.syncCurrentConversationSnapshot
+    syncCurrentConversationSnapshot: options.syncCurrentConversationSnapshot,
+    respondClineAgentApproval: options.respondClineAgentApproval
   })
 
   const activeCommandAuditMessage = computed(() => aiPanelCommandActionRuntime.activeCommandAuditMessage())

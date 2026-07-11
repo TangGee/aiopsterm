@@ -1,4 +1,4 @@
-import { extractSql, isReadOnlySql } from '@/services/database/databaseSqlEditorRuntime'
+import { extractFencedSql, extractSql, isReadOnlySql, stripFencedSql } from '@/services/database/databaseSqlEditorRuntime'
 import {
   DB_AI_PANE_DEFAULT_WIDTH,
   DB_AI_PANE_MAX_WIDTH,
@@ -13,9 +13,15 @@ import type { SqlConsoleContext, WorkspaceTab } from '@/services/database/databa
 import type {
   DatabaseAiDrawerResponseInput,
   DatabaseAiPaneStateSnapshot,
+  DatabaseAiResponseLanguage,
   DatabaseCatalogInfo,
   DatabaseConnectionInfo
 } from '@shared/contracts/database'
+import {
+  databaseAiPaneActionName,
+  databaseAiPaneHistoryFieldName,
+  databaseAiQuickPrompt
+} from '@shared/databaseAiSqlRuntime'
 import type {
   DbAiAction,
   DbAiBackendContext,
@@ -38,6 +44,11 @@ export const dbAiDialectOptions: Array<{ value: DbAiTargetDialect; label: string
   { value: 'clickhouse', label: 'ClickHouse' },
   { value: 'presto', label: 'Presto' }
 ]
+
+export const dbAiResponseLanguageForLocale = (locale: unknown): DatabaseAiResponseLanguage => locale === 'zh-CN' ? 'zh-CN' : 'en-US'
+
+export const dbAiActionLabel = (action: DbAiAction, responseLanguage: DatabaseAiResponseLanguage) =>
+  databaseAiPaneActionName(action, responseLanguage)
 
 export const emptyDbAiPaneContext = (): DbAiPaneContext => ({ connectionId: '', catalogName: '', schemaName: '', dbType: '' })
 
@@ -89,25 +100,34 @@ export const applyDbAiPaneStateSnapshot = (
   snapshot: DatabaseAiPaneStateSnapshot,
   resolveContext: (context: DbAiPaneContext) => DbAiPaneContext
 ) => ({
+  conversationId: snapshot.conversationId,
   open: snapshot.open === true,
   width: clampDbAiPaneWidth(snapshot.width),
   context: snapshot.context?.connectionId ? resolveContext(snapshot.context) : null,
   draft: snapshot.draft || '',
-  messages: snapshot.messages.map((message) => ({ ...message }))
+  messages: snapshot.messages.map(cloneDbAiPaneMessage)
+})
+
+const cloneDbAiPaneMessage = (message: DbAiPaneMessage): DbAiPaneMessage => ({
+  ...message,
+  ...(message.context ? { context: { ...message.context } } : {}),
+  ...(message.sqlAction ? { sqlAction: { ...message.sqlAction, context: { ...message.sqlAction.context } } } : {})
 })
 
 export const currentDbAiPaneStateSnapshot = (input: {
+  conversationId?: string
   open: boolean
   width: number
   context: DbAiPaneContext
   draft: string
   messages: DbAiPaneMessage[]
 }): DatabaseAiPaneStateSnapshot => ({
+  conversationId: input.conversationId,
   open: input.open,
   width: input.width,
   context: { ...input.context },
   draft: input.draft,
-  messages: input.messages.slice(-24).map((message) => ({ ...message }))
+  messages: input.messages.slice(-24).map(cloneDbAiPaneMessage)
 })
 
 export const dbAiContextParts = (tab: SqlTab, connection?: DatabaseConnectionInfo) => {
@@ -181,10 +201,15 @@ export const dbAiStatusLabel = (status: DbAiStatus | 'idle') => {
 export const dbAiSql = (request: DbAiRequest | null | undefined) => (request?.status === 'done' ? extractSql(request.text) : '')
 
 export const dbAiReasoningText = (text: string) => {
-  const fenceIndex = text.search(/```(?:sql|mysql|postgresql|pgsql|sqlite|oracle|tsql|clickhouse|presto)?\s*\n/i)
-  const reasoning = fenceIndex >= 0 ? text.slice(0, fenceIndex).trim() : text.trim()
-  return reasoning.replace(/^Reasoning\s*\n?/i, '').trim()
+  const reasoning = stripFencedSql(text)
+  return reasoning.replace(/^(?:Reasoning|\u5206\u6790)\s*\n?/i, '').trim()
 }
+
+export const dbAiPaneMessageContent = (message: DbAiPaneMessage) =>
+  message.sqlAction && message.sqlAction.action !== 'explain' ? dbAiReasoningText(message.content) : message.content
+
+export const dbAiPaneMessageGeneratedSql = (message: DbAiPaneMessage) =>
+  message.sqlAction?.generatedSql.trim() || (message.sqlAction && message.sqlAction.action !== 'explain' ? extractFencedSql(message.content) : '')
 
 export const dbAiContentText = (input: { action: DbAiAction; text: string; sql: string; targetDialect: DbAiTargetDialect }) => {
   if (!input.sql || !input.text.trim()) return ''
@@ -219,30 +244,49 @@ export const dbAiDrawerCreateInput = (input: {
   sourceSql: string
   targetDialect: DbAiTargetDialect
   context: DbAiBackendContext
+  responseLanguage: DatabaseAiResponseLanguage
 }): DatabaseAiDrawerResponseInput => ({
   action: input.action,
+  responseLanguage: input.responseLanguage,
   sourceSql: input.sourceSql,
   targetDialect: input.targetDialect,
   context: dbAiBackendContextForIpc(input.context)
 })
 
 export const dbAiPaneRequestInput = (input: {
+  conversationId?: string
   prompt: string
+  action?: DbAiAction
+  responseLanguage: DatabaseAiResponseLanguage
   context: DbAiPaneContext
   contextSummary: string
   activeSql: string
+  tableName?: string
   messages: DbAiPaneMessage[]
 }) => ({
+  conversationId: input.conversationId,
   prompt: input.prompt,
+  ...(input.action ? { action: input.action } : {}),
+  responseLanguage: input.responseLanguage,
   context: {
     connectionId: input.context.connectionId,
     dbType: input.context.dbType || undefined,
     databaseName: input.context.catalogName,
     schemaName: input.context.schemaName,
+    ...(input.tableName ? { tableName: input.tableName } : {}),
     contextSummary: input.contextSummary
   },
   activeSql: input.activeSql,
-  messages: input.messages.slice(-12).map((message) => ({ role: message.role, content: message.content }))
+  messages: input.messages.map((message) => ({
+    role: message.role,
+    content: message.role === 'user' && message.sqlAction?.sourceSql.trim()
+      ? [
+          dbAiActionLabel(message.sqlAction.action, input.responseLanguage),
+          databaseAiPaneHistoryFieldName(message.sqlAction.action, input.responseLanguage),
+          message.sqlAction.sourceSql
+        ].join('\n')
+      : message.content
+  }))
 })
 
 export const planDbAiInsertSql = (sqlText: string, range: { start: number; end: number }, generatedSql: string) => {
@@ -271,8 +315,8 @@ export const formatDbAiRequestTime = (time: number) => {
   return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}:${String(date.getSeconds()).padStart(2, '0')}`
 }
 
-export const dbAiQuickPromptText = (kind: 'explainActive' | 'schemaSummary' | 'selectSample', sql = '') => {
-  if (kind === 'explainActive') return `Explain this SQL and point out execution risks:\n${sql}`
-  if (kind === 'schemaSummary') return 'Summarize the current database schema and list useful query entry points.'
-  return 'Generate a read-only SELECT query for the most useful table in the current context.'
-}
+export const dbAiQuickPromptText = (
+  kind: 'explainActive' | 'schemaSummary' | 'selectSample',
+  sql = '',
+  responseLanguage: DatabaseAiResponseLanguage = 'en-US'
+) => databaseAiQuickPrompt(kind, sql, responseLanguage)

@@ -4,9 +4,16 @@ import {
   type AiPanelEditableRenderOptions
 } from '@/services/ai/aiPanelEditableRuntime'
 import { clipboardHasImageItems } from '@/services/ai/aiPanelMediaRuntime'
+import type { I18nKey } from '@/i18n/messages'
 import type { AiChipContentPart, AiContextKind, AiContextOption } from '@shared/contracts/aiChat'
 
-export type AiPanelChatMode = 'agent' | 'cmd'
+export type AiPanelChatMode = 'agent' | 'cmd' | 'chat'
+
+export type AiPanelChatModeOption = {
+  id: AiPanelChatMode
+  label: string
+  detail: string
+}
 
 export type AiPanelPresentationRuntimeOptions<TIcon = unknown> = {
   icons: {
@@ -18,13 +25,28 @@ export type AiPanelPresentationRuntimeOptions<TIcon = unknown> = {
     fallback: TIcon
   }
   selectedContexts: () => AiContextOption[]
+  translate?: (key: I18nKey) => string
   measureText?: (text: string) => number
 }
 
-export const defaultAiPanelChatModeOptions: Array<{ id: AiPanelChatMode; label: string; detail: string }> = [
+export const defaultAiPanelChatModeOptions: AiPanelChatModeOption[] = [
   { id: 'agent', label: 'Agent', detail: '上下文辅助与工具调用' },
-  { id: 'cmd', label: 'Command', detail: '生成命令与解释' }
+  { id: 'cmd', label: 'Command', detail: '生成命令与解释' },
+  { id: 'chat', label: 'Chat', detail: '无工具调用的对话' }
 ]
+
+const aiPanelChatModeTranslationKeys: Record<AiPanelChatMode, { label: I18nKey; detail: I18nKey }> = {
+  agent: { label: 'ai.classicModeAgent', detail: 'ai.classicModeAgentDetail' },
+  cmd: { label: 'ai.classicModeCommand', detail: 'ai.classicModeCommandDetail' },
+  chat: { label: 'ai.classicModeChat', detail: 'ai.classicModeChatDetail' }
+}
+
+export const localizedAiPanelChatModeOptions = (translate: (key: I18nKey) => string): AiPanelChatModeOption[] =>
+  defaultAiPanelChatModeOptions.map((option) => ({
+    ...option,
+    label: translate(aiPanelChatModeTranslationKeys[option.id].label),
+    detail: translate(aiPanelChatModeTranslationKeys[option.id].detail)
+  }))
 
 export const aiPanelCommandIconMarkup =
   '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m16 18 6-6-6-6"></path><path d="m8 6-6 6 6 6"></path></svg>'
@@ -68,8 +90,12 @@ export const createAiPanelPresentationRuntime = <TIcon = unknown>(options: AiPan
     commandIconMarkup: aiPanelCommandIconMarkup
   }))
 
+  const aiChatModeOptions = computed(() =>
+    options.translate ? localizedAiPanelChatModeOptions(options.translate) : defaultAiPanelChatModeOptions
+  )
+
   return {
-    aiChatModeOptions: defaultAiPanelChatModeOptions,
+    aiChatModeOptions,
     aiContextCategoryIcons,
     clipboardHasImage: (event: ClipboardEvent) => clipboardHasImageItems(event.clipboardData?.items),
     contextById: (id: string) => options.selectedContexts().find((item) => item.id === id) || null,

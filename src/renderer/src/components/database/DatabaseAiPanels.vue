@@ -10,7 +10,7 @@
       :aria-valuemin="dbAiPaneMinWidth"
       :aria-valuemax="dbAiPaneMaxWidth"
       :aria-valuenow="dbAiPaneWidth"
-      title="Resize DB AI pane"
+      :title="t('database.ai.resizePane')"
       @pointerdown="$emit('startDbAiPaneResize', $event)"
       @dblclick="$emit('resetDbAiPaneWidth')"
     />
@@ -20,12 +20,12 @@
           <BrainCircuit />
           <div>
             <strong>DB AI</strong>
-            <span>Database workspace</span>
+            <span>{{ t('database.ai.workspace') }}</span>
           </div>
         </div>
         <button
           type="button"
-          title="Close DB AI Pane"
+          :title="t('database.ai.closePane')"
           @click="$emit('closeDbAiPane')"
         >
           <X />
@@ -34,19 +34,19 @@
 
       <section class="db-ai-pane-context-card">
         <div class="db-ai-pane-context-head">
-          <span>{{ dbAiPaneContextSummary }}</span>
+          <span>{{ localizeContextSummary(dbAiPaneContextSummary) }}</span>
           <button
             type="button"
-            title="Use active tab context"
+            :title="t('database.ai.useActiveContext')"
             @click="$emit('useActiveDbAiPaneContext')"
           >
             <RefreshCw />
-            <span>Use Active</span>
+            <span>{{ t('database.ai.useActive') }}</span>
           </button>
         </div>
         <div class="db-ai-pane-pickers">
           <label>
-            Connection
+            {{ t('database.field.connection') }}
             <select
               class="db-ai-pane-connection"
               :value="dbAiPaneContext.connectionId"
@@ -56,19 +56,19 @@
                 value=""
                 disabled
               >
-                Connection
+                {{ t('database.field.connection') }}
               </option>
               <option
                 v-for="connection in connections"
                 :key="connection.id"
                 :value="connection.id"
               >
-                {{ connection.name }}{{ connection.status === 'testing' ? ' [connecting...]' : '' }}
+                {{ connection.name }}{{ connection.status === 'testing' ? ` [${t('database.connection.connecting')}]` : '' }}
               </option>
             </select>
           </label>
           <label>
-            {{ databaseCatalogFieldLabel(dbAiPaneConnection) }}
+            {{ localizedCatalogFieldLabel }}
             <select
               class="db-ai-pane-database"
               :value="dbAiPaneContext.catalogName"
@@ -79,7 +79,7 @@
                 value=""
                 disabled
               >
-                {{ databaseCatalogFieldLabel(dbAiPaneConnection) }}
+                {{ localizedCatalogFieldLabel }}
               </option>
               <option
                 v-for="catalog in dbAiPaneCatalogOptions"
@@ -91,7 +91,7 @@
             </select>
           </label>
           <label v-if="dbAiPaneRequiresSchema">
-            Schema
+            {{ t('database.field.schema') }}
             <select
               class="db-ai-pane-schema"
               :value="dbAiPaneContext.schemaName"
@@ -102,7 +102,7 @@
                 value=""
                 disabled
               >
-                Schema
+                {{ t('database.field.schema') }}
               </option>
               <option
                 v-for="schema in dbAiPaneSchemaOptions"
@@ -118,13 +118,13 @@
           v-if="dbAiPaneConnectionNeedsConnect"
           class="db-ai-pane-connect-row"
         >
-          <span>{{ dbAiPaneConnection?.name }} is not connected.</span>
+          <span>{{ t('database.ai.connectionNotConnected', { name: dbAiPaneConnection?.name || '' }) }}</span>
           <button
             type="button"
             @click="$emit('connectDbAiPaneConnection')"
           >
             <Zap />
-            <span>Connect</span>
+            <span>{{ t('database.connection.connect') }}</span>
           </button>
         </div>
       </section>
@@ -137,8 +137,8 @@
           v-if="dbAiPaneMessages.length === 0"
           class="db-ai-pane-empty"
         >
-          <strong>{{ dbAiPaneContextTitle }}</strong>
-          <span>Ask about schema, SQL, optimization, or generated read-only queries.</span>
+          <strong>{{ localizeContextSummary(dbAiPaneContextTitle) }}</strong>
+          <span>{{ t('database.ai.emptyDescription') }}</span>
         </div>
         <article
           v-for="message in dbAiPaneMessages"
@@ -149,13 +149,17 @@
           :data-request-id="message.requestId"
         >
           <header>
-            <strong>{{ message.role === 'user' ? 'You' : 'DB AI' }}</strong>
+            <strong>{{ message.role === 'user' ? dbAiUserLabel(message) : 'DB AI' }}</strong>
             <small>{{ formatDbAiRequestTime(message.createdAt) }}</small>
             <span
               v-if="message.role === 'assistant'"
               class="db-ai-pane-message-status"
             >
-              {{ dbAiPaneStatusLabel(message.status) }}
+              <LoaderCircle
+                v-if="message.status === 'queued' || message.status === 'streaming'"
+                class="db-ai-pane-message-spinner"
+              />
+              {{ localizedDbAiPaneStatusLabel(message.status) }}
             </span>
           </header>
           <p
@@ -164,7 +168,102 @@
           >
             {{ message.contextSummary }}
           </p>
-          <pre>{{ message.content }}</pre>
+          <template v-if="message.role === 'user' && message.sqlAction">
+            <p
+              v-if="message.sqlAction.action === 'nl2sql'"
+              class="db-ai-pane-action-prompt"
+            >
+              {{ message.sqlAction.sourceSql }}
+            </p>
+            <pre
+              v-else-if="message.sqlAction.sourceSql"
+              class="db-ai-pane-source-sql"
+            >{{ message.sqlAction.sourceSql }}</pre>
+          </template>
+          <pre v-else-if="message.role === 'user'">{{ message.content }}</pre>
+          <div
+            v-else-if="dbAiPaneMessageContent(message)"
+            class="db-ai-pane-message-content ai-markdown-content"
+            v-html="renderMarkdownDocumentHtml(dbAiPaneMessageContent(message))"
+          />
+          <div
+            v-else-if="message.status === 'queued' || message.status === 'streaming'"
+            class="db-ai-pane-message-working"
+          >
+            {{ t('database.ai.workingOn', { action: dbAiMessageActionLabel(message) }) }}
+          </div>
+          <section
+            v-if="message.role === 'assistant' && (dbAiPaneMessageGeneratedSql(message) || (message.sqlAction?.action === 'convert' && (message.status === 'queued' || message.status === 'streaming')))"
+            class="db-ai-pane-sql-result"
+          >
+            <header>
+              <span class="db-ai-pane-sql-title">
+                <Code2 />
+                <strong>SQL</strong>
+              </span>
+              <select
+                v-if="message.sqlAction?.action === 'convert'"
+                :value="message.sqlAction.targetDialect"
+                :title="t('database.ai.targetDialect')"
+                :aria-label="t('database.ai.targetDialect')"
+                @change="emit('updateDbAiPaneMessageDialect', message, ($event.target as HTMLSelectElement).value as DbAiTargetDialect)"
+              >
+                <option
+                  v-for="dialect in dbAiDialectOptions"
+                  :key="dialect.value"
+                  :value="dialect.value"
+                >
+                  {{ dialect.label }}
+                </option>
+              </select>
+              <span class="db-ai-pane-sql-spacer" />
+              <button
+                type="button"
+                :title="t('database.ai.copySql')"
+                :aria-label="t('database.ai.copySql')"
+                :disabled="!dbAiPaneMessageGeneratedSql(message)"
+                @click="emit('copyDbAiSql', message)"
+              >
+                <Copy />
+              </button>
+              <button
+                type="button"
+                :title="t('database.ai.replaceSelectionOrStatement')"
+                :aria-label="t('database.ai.replaceSelectionOrStatement')"
+                :disabled="!activeSqlAvailable || !dbAiPaneMessageGeneratedSql(message)"
+                @click="emit('replaceDbAiSqlSelection', message)"
+              >
+                <Replace />
+              </button>
+              <button
+                type="button"
+                :title="t('database.ai.insertSql')"
+                :aria-label="t('database.ai.insertSql')"
+                :disabled="!activeSqlAvailable || !dbAiPaneMessageGeneratedSql(message)"
+                @click="emit('insertDbAiSql', message)"
+              >
+                <TextCursorInput />
+              </button>
+              <button
+                type="button"
+                class="db-ai-pane-sql-run"
+                :title="canRunDbAiPaneMessageSql(message) ? t('database.ai.runReadOnlySql') : t('database.ai.runReadOnlySqlDisabled')"
+                :aria-label="t('database.ai.runReadOnlySql')"
+                :disabled="!canRunDbAiPaneMessageSql(message)"
+                @click="emit('runDbAiReadonly', message)"
+              >
+                <Play />
+                <span>{{ t('database.common.run') }}</span>
+              </button>
+            </header>
+            <pre v-if="dbAiPaneMessageGeneratedSql(message)"><code>{{ dbAiPaneMessageGeneratedSql(message) }}</code></pre>
+            <div
+              v-else
+              class="db-ai-pane-sql-pending"
+            >
+              {{ t('database.ai.regeneratingSql', { dialect: dbAiTargetDialectLabel(message) }) }}
+            </div>
+          </section>
         </article>
       </section>
 
@@ -172,35 +271,51 @@
         <div class="db-ai-pane-quick-actions">
           <button
             type="button"
-            :disabled="!activeSqlAvailable"
+            :disabled="!activeSqlExplainAvailable"
             @click="$emit('sendDbAiPaneQuickPrompt', 'explainActive')"
           >
-            Explain SQL
+            {{ t('database.ai.explainSql') }}
           </button>
           <button
             type="button"
             @click="$emit('sendDbAiPaneQuickPrompt', 'schemaSummary')"
           >
-            Schema Summary
+            {{ t('database.ai.schemaSummary') }}
           </button>
           <button
             type="button"
             @click="$emit('sendDbAiPaneQuickPrompt', 'selectSample')"
           >
-            Generate SELECT
+            {{ t('database.ai.generateSelect') }}
+          </button>
+        </div>
+        <div
+          v-if="dbAiPaneComposerAction"
+          class="db-ai-pane-composer-mode"
+        >
+          <FileSearch />
+          <span>{{ dbAiActionLabel(dbAiPaneComposerAction) }}</span>
+          <button
+            type="button"
+            :title="t('database.ai.cancelAction')"
+            :aria-label="t('database.ai.cancelAction')"
+            @click="emit('cancelDbAiPaneActionMode')"
+          >
+            <X />
           </button>
         </div>
         <textarea
+          ref="dbAiPaneComposerRef"
           :value="dbAiPaneDraft"
           rows="3"
-          placeholder="Ask DB AI"
+          :placeholder="localizedComposerPlaceholder"
           @input="$emit('update:dbAiPaneDraft', ($event.target as HTMLTextAreaElement).value)"
           @keydown="$emit('handleDbAiPaneDraftKeydown', $event)"
         />
         <div class="db-ai-pane-composer-actions">
           <button
             type="button"
-            title="Reset conversation"
+            :title="t('database.ai.resetConversation')"
             @click="$emit('resetDbAiPaneConversation')"
           >
             <RefreshCw />
@@ -208,11 +323,11 @@
           <button
             v-if="dbAiPaneIsStreaming"
             type="button"
-            title="Stop response"
+            :title="t('database.ai.stopResponse')"
             @click="$emit('cancelDbAiPaneResponse')"
           >
             <X />
-            <span>Stop</span>
+            <span>{{ t('database.common.stop') }}</span>
           </button>
           <button
             type="button"
@@ -221,179 +336,35 @@
             @click="$emit('sendDbAiPaneMessage')"
           >
             <Play />
-            <span>Send</span>
+            <span>{{ t('database.common.send') }}</span>
           </button>
         </div>
       </footer>
     </div>
   </aside>
-
-  <aside
-    v-if="dbAiOpen"
-    class="db-ai-drawer"
-    :data-request-id="dbAiActiveReqId || undefined"
-  >
-    <header>
-      <div>
-        <strong>DB AI</strong>
-        <span>{{ dbAiActionLabel }}</span>
-      </div>
-      <button
-        type="button"
-        title="Close"
-        @click="$emit('closeDbAiDrawer')"
-      >
-        <X />
-      </button>
-    </header>
-    <nav
-      v-if="dbAiRequestList.length > 1"
-      class="db-ai-request-list"
-    >
-      <button
-        v-for="request in dbAiRequestList"
-        :key="request.id"
-        type="button"
-        :data-request-id="request.id"
-        :class="{ active: request.id === dbAiActiveReqId }"
-        @click="$emit('setActiveDbAiRequest', request.id)"
-      >
-        <span :class="request.status"></span>
-        <strong>{{ request.label }}</strong>
-        <small>{{ formatDbAiRequestTime(request.updatedAt) }}</small>
-      </button>
-    </nav>
-    <section>
-      <p class="db-ai-status">
-        <span :class="dbAiStatus"></span>
-        {{ dbAiStatusLabel }}
-      </p>
-      <div
-        v-if="dbAiContextSummary"
-        class="db-ai-context"
-      >
-        {{ dbAiContextSummary }}
-      </div>
-      <div
-        v-if="dbAiIsConvertAction"
-        class="db-ai-dialect-row"
-      >
-        <label>
-          Target Dialect
-          <select
-            :value="dbAiTargetDialect"
-            @change="$emit('updateDbAiTargetDialect', ($event.target as HTMLSelectElement).value as DbAiTargetDialect)"
-          >
-            <option
-              v-for="dialect in dbAiDialectOptions"
-              :key="dialect.value"
-              :value="dialect.value"
-            >
-              {{ dialect.label }}
-            </option>
-          </select>
-        </label>
-        <span
-          v-if="!dbAiIsExecutableDialect"
-          class="db-ai-hint"
-        >
-          Text-only conversion: target dialect does not match the active connection.
-        </span>
-      </div>
-      <div
-        v-if="dbAiReasoningText"
-        class="db-ai-section"
-      >
-        <header>Reasoning</header>
-        <pre>{{ dbAiReasoningText }}</pre>
-      </div>
-      <div
-        v-if="dbAiContentText"
-        class="db-ai-section"
-      >
-        <header>Response</header>
-        <pre>{{ dbAiContentText }}</pre>
-      </div>
-      <div
-        v-if="dbAiEmptyState"
-        class="db-ai-empty"
-      >
-        No DB AI response is active.
-      </div>
-    </section>
-    <section
-      v-if="dbAiSql"
-      class="db-ai-sql-actions"
-    >
-      <header>
-        <span>Generated SQL</span>
-        <button
-          type="button"
-          @click="$emit('copyDbAiSql')"
-        >
-          Copy
-        </button>
-        <button
-          type="button"
-          :disabled="!activeSqlAvailable"
-          @click="$emit('replaceDbAiSqlSelection')"
-        >
-          Replace Selection
-        </button>
-        <button
-          type="button"
-          :disabled="!activeSqlAvailable"
-          @click="$emit('insertDbAiSql')"
-        >
-          Insert Into Editor
-        </button>
-        <button
-          type="button"
-          :disabled="!dbAiCanRunReadOnly"
-          @click="$emit('runDbAiReadonly')"
-        >
-          Run ReadOnly
-        </button>
-      </header>
-      <pre>{{ dbAiSql }}</pre>
-    </section>
-    <footer>
-      <button
-        v-if="dbAiCanCancel"
-        type="button"
-        @click="$emit('cancelDbAiRequest')"
-      >
-        Cancel
-      </button>
-      <button
-        type="button"
-        @click="$emit('clearDbAiRequest')"
-      >
-        Clear
-      </button>
-    </footer>
-  </aside>
 </template>
 
 <script setup lang="ts">
-import { nextTick, ref } from 'vue'
-import { BrainCircuit, Play, RefreshCw, X, Zap } from 'lucide-vue-next'
+import { computed, nextTick, ref } from 'vue'
+import { BrainCircuit, Code2, Copy, FileSearch, LoaderCircle, Play, RefreshCw, Replace, TextCursorInput, X, Zap } from 'lucide-vue-next'
+import { useI18n } from '@/i18n'
 import type { DatabaseCatalogInfo, DatabaseConnectionInfo } from '@shared/contracts/database'
 import type {
   DbAiPaneContext,
   DbAiPaneMessage,
   DbAiPaneMessageStatus,
-  DbAiRequest,
-  DbAiStatus,
+  DbAiAction,
   DbAiTargetDialect
 } from '@/services/database/databaseBackendGuards'
+import { dbAiPaneMessageContent, dbAiPaneMessageGeneratedSql } from '@/services/database/databaseAiRuntime'
+import { renderMarkdownDocumentHtml } from '@/services/common/markdownRuntime'
 import type { DbAiPaneQuickPrompt } from '@/services/database/databaseWorkspaceTypes'
 import {
   databaseCatalogDisplayName,
   databaseCatalogFieldLabel
 } from '@/services/database/databaseWorkspaceRuntime'
 
-defineProps<{
+const props = defineProps<{
   dbAiPaneOpen: boolean
   dbAiPaneWidth: number
   dbAiPaneMinWidth: number
@@ -409,31 +380,19 @@ defineProps<{
   dbAiPaneConnectionNeedsConnect: boolean
   dbAiPaneMessages: DbAiPaneMessage[]
   dbAiPaneDraft: string
+  dbAiPaneComposerAction: DbAiAction | null
+  dbAiPaneComposerPlaceholder: string
   dbAiPaneIsStreaming: boolean
   dbAiPaneCanSend: boolean
   activeSqlAvailable: boolean
-  dbAiOpen: boolean
-  dbAiActiveReqId: string | null
-  dbAiActionLabel: string
-  dbAiRequestList: DbAiRequest[]
-  dbAiStatus: DbAiStatus | 'idle'
-  dbAiStatusLabel: string
-  dbAiContextSummary: string
-  dbAiIsConvertAction: boolean
-  dbAiTargetDialect: DbAiTargetDialect
+  activeSqlExplainAvailable: boolean
   dbAiDialectOptions: Array<{ value: DbAiTargetDialect; label: string }>
-  dbAiIsExecutableDialect: boolean
-  dbAiReasoningText: string
-  dbAiContentText: string
-  dbAiEmptyState: boolean
-  dbAiSql: string
-  dbAiCanRunReadOnly: boolean
-  dbAiCanCancel: boolean
   formatDbAiRequestTime: (time: number) => string
   dbAiPaneStatusLabel: (status: DbAiPaneMessageStatus) => string
+  canRunDbAiPaneMessageSql: (message: DbAiPaneMessage) => boolean
 }>()
 
-defineEmits<{
+const emit = defineEmits<{
   startDbAiPaneResize: [event: PointerEvent]
   resetDbAiPaneWidth: []
   closeDbAiPane: []
@@ -444,22 +403,31 @@ defineEmits<{
   connectDbAiPaneConnection: []
   'update:dbAiPaneDraft': [value: string]
   handleDbAiPaneDraftKeydown: [event: KeyboardEvent]
+  cancelDbAiPaneActionMode: []
   sendDbAiPaneQuickPrompt: [kind: DbAiPaneQuickPrompt]
   resetDbAiPaneConversation: []
   cancelDbAiPaneResponse: []
   sendDbAiPaneMessage: []
-  closeDbAiDrawer: []
-  setActiveDbAiRequest: [reqId: string]
-  updateDbAiTargetDialect: [value: DbAiTargetDialect]
-  copyDbAiSql: []
-  replaceDbAiSqlSelection: []
-  insertDbAiSql: []
-  runDbAiReadonly: []
-  cancelDbAiRequest: []
-  clearDbAiRequest: []
+  updateDbAiPaneMessageDialect: [message: DbAiPaneMessage, value: DbAiTargetDialect]
+  copyDbAiSql: [message?: DbAiPaneMessage]
+  replaceDbAiSqlSelection: [message?: DbAiPaneMessage]
+  insertDbAiSql: [message?: DbAiPaneMessage]
+  runDbAiReadonly: [message?: DbAiPaneMessage]
 }>()
 
+const { t } = useI18n()
+const localizedCatalogFieldLabel = computed(() => {
+  const label = databaseCatalogFieldLabel(props.dbAiPaneConnection)
+  if (label === 'Catalog') return t('database.field.catalog')
+  if (label === 'Service') return t('database.field.service')
+  return t('database.field.database')
+})
+const localizedComposerPlaceholder = computed(() =>
+  props.dbAiPaneComposerAction === 'nl2sql' ? t('database.ai.describeQuery') : t('database.ai.askPlaceholder')
+)
+
 const dbAiPaneMessageListRef = ref<HTMLElement | null>(null)
+const dbAiPaneComposerRef = ref<HTMLTextAreaElement | null>(null)
 
 function scrollPaneMessagesToBottom() {
   void nextTick(() => {
@@ -468,5 +436,45 @@ function scrollPaneMessagesToBottom() {
   })
 }
 
-defineExpose({ scrollPaneMessagesToBottom })
+function focusPaneComposer() {
+  void nextTick(() => dbAiPaneComposerRef.value?.focus())
+}
+
+function dbAiTargetDialectLabel(message: DbAiPaneMessage) {
+  const targetDialect = message.sqlAction?.targetDialect
+  return props.dbAiDialectOptions.find((dialect) => dialect.value === targetDialect)?.label ?? targetDialect ?? t('database.ai.targetDialectFallback')
+}
+
+function localizeContextSummary(value: string) {
+  return value === 'No database context selected' ? t('database.ai.noContext') : value
+}
+
+function localizedDbAiPaneStatusLabel(status: DbAiPaneMessageStatus) {
+  if (status === 'queued') return t('database.ai.status.queued')
+  if (status === 'streaming') return t('database.ai.status.streaming')
+  if (status === 'cancelled') return t('database.ai.status.cancelled')
+  if (status === 'error') return t('database.ai.status.error')
+  return t('database.ai.status.done')
+}
+
+function dbAiActionLabel(action: DbAiAction) {
+  if (action === 'nl2sql') return t('database.ai.action.nl2sql')
+  if (action === 'explain') return t('database.ai.action.explain')
+  if (action === 'optimize') return t('database.ai.action.optimize')
+  if (action === 'convert') return t('database.ai.action.convert')
+  if (action === 'complete') return t('database.ai.action.complete')
+  if (action === 'diagnose') return t('database.ai.action.diagnose')
+  if (action === 'drop') return t('database.ai.action.drop')
+  return t('database.ai.action.truncate')
+}
+
+function dbAiMessageActionLabel(message: DbAiPaneMessage) {
+  return message.sqlAction ? dbAiActionLabel(message.sqlAction.action) : t('database.ai.yourRequest')
+}
+
+function dbAiUserLabel(message: DbAiPaneMessage) {
+  return message.sqlAction ? dbAiActionLabel(message.sqlAction.action) : t('database.ai.you')
+}
+
+defineExpose({ scrollPaneMessagesToBottom, focusPaneComposer })
 </script>

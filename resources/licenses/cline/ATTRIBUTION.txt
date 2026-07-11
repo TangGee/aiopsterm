@@ -1,0 +1,10 @@
+Cline SDK
+Copyright 2026 Cline Bot Inc.
+
+aiopsterm uses the official @cline/sdk package as its embedded Agent runtime.
+The package is pinned to version 0.0.59, release commit
+0b65506a2b2225d55e5cc827e8296c9b65ff81ef, and is distributed under the
+Apache License 2.0 included beside this file.
+
+Cline is a trademark of Cline Bot Inc. No Cline trademark or product branding
+is used to identify aiopsterm.

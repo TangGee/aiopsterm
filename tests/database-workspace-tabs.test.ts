@@ -1,7 +1,9 @@
 import { mount } from '@vue/test-utils'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { createPinia, setActivePinia, type Pinia } from 'pinia'
 import DatabaseWorkspaceTabs from '@/components/database/DatabaseWorkspaceTabs.vue'
 import type { WorkspaceTab } from '@/services/database/databaseWorkspaceTypes'
+import { useWorkspaceStore } from '@/stores/workspace'
 
 const tabs = [
   { id: 'overview', kind: 'overview', title: 'Overview' },
@@ -9,8 +11,17 @@ const tabs = [
 ] as WorkspaceTab[]
 
 describe('DatabaseWorkspaceTabs', () => {
+  let pinia: Pinia
+
+  beforeEach(() => {
+    pinia = createPinia()
+    setActivePinia(pinia)
+    useWorkspaceStore().config.language = 'en-US'
+  })
+
   it('renders valid tabs with an icon-only close button', async () => {
     const wrapper = mount(DatabaseWorkspaceTabs, {
+      global: { plugins: [pinia] },
       props: {
         tabs,
         activeTabId: 'overview',
@@ -46,6 +57,7 @@ describe('DatabaseWorkspaceTabs', () => {
     window.addEventListener('click', windowClick)
     const wrapper = mount(DatabaseWorkspaceTabs, {
       attachTo: document.body,
+      global: { plugins: [pinia] },
       props: {
         tabs,
         activeTabId: 'overview',
@@ -90,6 +102,7 @@ describe('DatabaseWorkspaceTabs', () => {
     ] as WorkspaceTab[]
     manyTabs[manyTabs.length - 1].title = 'external_agent_config_imports'
     const wrapper = mount(DatabaseWorkspaceTabs, {
+      global: { plugins: [pinia] },
       props: {
         tabs: manyTabs,
         activeTabId: manyTabs.at(-1)!.id,

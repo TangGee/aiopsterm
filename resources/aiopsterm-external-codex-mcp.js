@@ -604,6 +604,143 @@ const tools = [
       'Ask aiopsterm to focus the newest unread managed AI notification, matching the top-bar bell behavior. It does not mark the item read.',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false }
+  },
+  {
+    name: 'list_database_connections',
+    title: 'List aiopsterm database connections',
+    description:
+      'List saved database connections without returning hosts, usernames, URLs, file paths, passwords, or other connection secrets.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Optional case-insensitive filter across generated label, engine, environment, and status.' }
+      },
+      additionalProperties: false
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }
+  },
+  {
+    name: 'search_database_objects',
+    title: 'Search aiopsterm database objects',
+    description: 'Search catalog metadata for tables, views, functions, and procedures on one saved database connection.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        connectionId: {
+          type: 'string',
+          description: 'Process-scoped opaque handle returned by list_database_connections.'
+        },
+        query: { type: 'string', description: 'Optional case-insensitive object, path, or column-name search.' },
+        databaseName: { type: 'string', description: 'Optional exact catalog or database name.' },
+        schemaName: { type: 'string', description: 'Optional exact schema name.' },
+        kinds: {
+          type: 'array',
+          items: { type: 'string', enum: ['table', 'view', 'function', 'procedure'] },
+          description: 'Optional object-kind filter.'
+        },
+        limit: { type: 'integer', minimum: 1, maximum: 200, description: 'Maximum objects to return. Defaults to 100.' }
+      },
+      required: ['connectionId'],
+      additionalProperties: false
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }
+  },
+  {
+    name: 'describe_database_table',
+    title: 'Describe an aiopsterm database table',
+    description:
+      'Return current catalog metadata for one table or view, including column types, nullability, keys, and primary-key columns.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        connectionId: {
+          type: 'string',
+          description: 'Process-scoped opaque handle returned by list_database_connections.'
+        },
+        databaseName: { type: 'string', description: 'Catalog or database name from the saved connection.' },
+        schemaName: { type: 'string', description: 'Optional schema name.' },
+        tableName: { type: 'string', description: 'Exact table or view name.' }
+      },
+      required: ['connectionId', 'databaseName', 'tableName'],
+      additionalProperties: false
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }
+  },
+  {
+    name: 'get_database_table_ddl',
+    title: 'Get aiopsterm database table DDL',
+    description: 'Read a redacted CREATE definition for one catalog-known table or view through the saved aiopsterm connection.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        connectionId: {
+          type: 'string',
+          description: 'Process-scoped opaque handle returned by list_database_connections.'
+        },
+        databaseName: { type: 'string', description: 'Catalog or database name from the saved connection.' },
+        schemaName: { type: 'string', description: 'Optional schema name.' },
+        tableName: { type: 'string', description: 'Exact table or view name.' }
+      },
+      required: ['connectionId', 'databaseName', 'tableName'],
+      additionalProperties: false
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true }
+  },
+  {
+    name: 'query_database_table',
+    title: 'Query an aiopsterm database table',
+    description:
+      'Read a bounded page from one catalog-known table using structured, parameterized filters and sorting. Arbitrary SQL is not accepted.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        connectionId: {
+          type: 'string',
+          description: 'Process-scoped opaque handle returned by list_database_connections.'
+        },
+        databaseName: { type: 'string', description: 'Catalog or database name from the saved connection.' },
+        schemaName: { type: 'string', description: 'Optional schema name.' },
+        tableName: { type: 'string', description: 'Exact base table name. Views cannot be queried.' },
+        columns: {
+          type: 'array',
+          minItems: 1,
+          maxItems: 50,
+          uniqueItems: true,
+          items: { type: 'string' },
+          description: 'Optional bounded scalar columns to return. Unbounded LOB, TEXT, JSON, collection, and String columns cannot be selected.'
+        },
+        filters: {
+          type: 'array',
+          maxItems: 10,
+          description: 'Structured filters combined with AND.',
+          items: {
+            type: 'object',
+            properties: {
+              column: { type: 'string' },
+              operator: { type: 'string', enum: ['like', 'eq', 'neq', 'in', 'isnull', 'notnull'] },
+              value: { type: 'string' },
+              values: { type: 'array', maxItems: 50, items: { type: 'string' } }
+            },
+            required: ['column', 'operator'],
+            additionalProperties: false
+          }
+        },
+        sort: {
+          type: 'object',
+          properties: {
+            column: { type: 'string' },
+            direction: { type: 'string', enum: ['asc', 'desc'] }
+          },
+          required: ['column', 'direction'],
+          additionalProperties: false
+        },
+        page: { type: 'integer', minimum: 1, maximum: 1000, description: 'One-based page number. Defaults to 1 and is capped at 1000.' },
+        pageSize: { type: 'integer', minimum: 1, maximum: 100, description: 'Rows per page. Defaults to 50 and is capped at 100.' }
+      },
+      required: ['connectionId', 'databaseName', 'tableName'],
+      additionalProperties: false
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true }
   }
 ]
 
@@ -638,8 +775,8 @@ const handleCallTool = async (id, params) => {
       structuredContent: bridgeResponse,
       isError: bridgeResponse.ok ? false : true
     })
-  } catch (callError) {
-    result(id, { content: [textContent(callError instanceof Error ? callError.message : String(callError))], isError: true })
+  } catch {
+    result(id, { content: [textContent('aiopsterm external MCP bridge request failed.')], isError: true })
   }
 }
 

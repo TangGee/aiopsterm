@@ -178,26 +178,14 @@
       :db-ai-pane-requires-schema="dbAiPaneRequiresSchema"
       :db-ai-pane-connection-needs-connect="dbAiPaneConnectionNeedsConnect"
       :db-ai-pane-messages="dbAiPaneMessages"
+      :db-ai-pane-composer-action="dbAiPaneComposerAction"
+      :db-ai-pane-composer-placeholder="dbAiPaneComposerPlaceholder"
       :db-ai-pane-is-streaming="dbAiPaneIsStreaming"
       :db-ai-pane-can-send="dbAiPaneCanSend"
       :active-sql-available="Boolean(activeSqlTab)"
-      :db-ai-open="dbAiOpen"
-      :db-ai-active-req-id="dbAiActiveReqId"
-      :db-ai-action-label="dbAiActionLabel"
-      :db-ai-request-list="dbAiRequestList"
-      :db-ai-status="dbAiStatus"
-      :db-ai-status-label="dbAiStatusLabel"
-      :db-ai-context-summary="dbAiContextSummary"
-      :db-ai-is-convert-action="dbAiIsConvertAction"
-      :db-ai-target-dialect="dbAiTargetDialect"
+      :active-sql-explain-available="activeSqlHasText"
+      :can-run-db-ai-pane-message-sql="canRunDbAiPaneMessageSql"
       :db-ai-dialect-options="dbAiDialectOptions"
-      :db-ai-is-executable-dialect="dbAiIsExecutableDialect"
-      :db-ai-reasoning-text="dbAiReasoningText"
-      :db-ai-content-text="dbAiContentText"
-      :db-ai-empty-state="dbAiEmptyState"
-      :db-ai-sql="dbAiSql"
-      :db-ai-can-run-read-only="dbAiCanRunReadOnly"
-      :db-ai-can-cancel="dbAiCanCancel"
       :format-db-ai-request-time="formatDbAiRequestTime"
       :db-ai-pane-status-label="dbAiPaneStatusLabel"
       :add-menu-open="addMenuOpen"
@@ -243,19 +231,16 @@
       @update-db-ai-pane-schema="updateDbAiPaneSchema"
       @connect-db-ai-pane-connection="connectDbAiPaneConnection"
       @handle-db-ai-pane-draft-keydown="handleDbAiPaneDraftKeydown"
+      @cancel-db-ai-pane-action-mode="cancelDbAiPaneActionMode"
       @send-db-ai-pane-quick-prompt="sendDbAiPaneQuickPrompt"
       @reset-db-ai-pane-conversation="resetDbAiPaneConversation"
       @cancel-db-ai-pane-response="cancelDbAiPaneResponse"
       @send-db-ai-pane-message="() => sendDbAiPaneMessage()"
-      @close-db-ai-drawer="dbAiOpen = false"
-      @set-active-db-ai-request="setActiveDbAiRequest"
-      @update-db-ai-target-dialect="dbAiTargetDialect = $event"
+      @update-db-ai-pane-message-dialect="updateDbAiPaneMessageDialect"
       @copy-db-ai-sql="copyDbAiSql"
       @replace-db-ai-sql-selection="replaceDbAiSqlSelection"
       @insert-db-ai-sql="insertDbAiSql"
       @run-db-ai-readonly="runDbAiReadonly"
-      @cancel-db-ai-request="cancelDbAiRequest"
-      @clear-db-ai-request="clearDbAiRequest"
       @add-group="addGroup"
       @open-connection-modal-from-engine="openConnectionModalFromEngine"
       @close-context-submenu-soon="closeContextSubmenuSoon"
@@ -407,9 +392,9 @@ const {
   dbAiPaneResizing,
   dbAiPaneContext,
   dbAiPaneDraft,
+  dbAiPaneComposerAction,
+  dbAiPaneComposerPlaceholder,
   dbAiPaneMessages,
-  dbAiOpen,
-  dbAiActiveReqId,
   sqlDiagnose,
   dbAiDialectOptions,
   canToggleDbAiPane,
@@ -422,20 +407,6 @@ const {
   dbAiPaneContextSummary,
   dbAiPaneIsStreaming,
   dbAiPaneCanSend,
-  dbAiRequestList,
-  dbAiTargetDialect,
-  dbAiActionLabel,
-  dbAiStatus,
-  dbAiContextSummary,
-  dbAiIsConvertAction,
-  dbAiReasoningText,
-  dbAiContentText,
-  dbAiEmptyState,
-  dbAiSql,
-  dbAiIsExecutableDialect,
-  dbAiCanRunReadOnly,
-  dbAiCanCancel,
-  dbAiStatusLabel,
   dbAiPaneStatusLabel,
   toggleDbAiPane,
   closeDbAiPane,
@@ -445,6 +416,7 @@ const {
   updateDbAiPaneSchema,
   connectDbAiPaneConnection,
   handleDbAiPaneDraftKeydown,
+  cancelDbAiPaneActionMode,
   sendDbAiPaneQuickPrompt,
   resetDbAiPaneConversation,
   cancelDbAiPaneResponse,
@@ -452,13 +424,12 @@ const {
   startDbAiPaneResize,
   resetDbAiPaneWidth,
   openDbAiFromToolbar,
-  setActiveDbAiRequest,
   copyDbAiSql,
   replaceDbAiSqlSelection,
   insertDbAiSql,
   runDbAiReadonly,
-  cancelDbAiRequest,
-  clearDbAiRequest,
+  canRunDbAiPaneMessageSql,
+  updateDbAiPaneMessageDialect,
   formatDbAiRequestTime,
   diagnoseSqlError,
   visibleGroupNodes,

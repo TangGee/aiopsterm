@@ -542,6 +542,11 @@ const waitForDatabaseDbAiDone = async () => {
   await flushPromises()
 }
 
+const waitForDatabaseDbAiPaneDone = async () => {
+  await new Promise((resolve) => window.setTimeout(resolve, 760))
+  await flushPromises()
+}
+
 const createTestDataTransfer = () => {
   const data = new Map<string, string>()
   return {
@@ -643,7 +648,9 @@ const buildNonJumpserverOrganizationRefreshData = async () => {
   }
 }
 
-const waitForDatabaseCatalog = async () => {
+const waitForDatabaseCatalog = async (language: 'zh-CN' | 'en-US' = 'en-US') => {
+  const store = useWorkspaceStore()
+  store.config = { ...store.config, language }
   await flushPromises()
   await new Promise((resolve) => window.setTimeout(resolve, 0))
   await flushPromises()
@@ -880,6 +887,7 @@ describe('AppShell', () => {
     ;(globalThis as any).__resetMcpStoreMock?.()
     ;(globalThis as any).__resetConfigStoreMock?.()
     ;(globalThis as any).__resetAiAgentSessionEventMock?.()
+    ;(globalThis as any).__resetClineAgentTaskEventMock?.()
     ;(globalThis as any).__resetTerminalKeyboardInteractiveMock?.()
   })
 
@@ -999,7 +1007,7 @@ describe('AppShell', () => {
     await openTable('orders')
     await openTable('ops_incidents')
     const tabTitlesBeforeSwitch = wrapper.findAll('.db-workspace-tab').map((tab) => tab.text().trim())
-    expect(tabTitlesBeforeSwitch).toEqual(['Overview', 'orders', 'ops_incidents'])
+    expect(tabTitlesBeforeSwitch).toEqual(['概览', 'orders', 'ops_incidents'])
     expect(wrapper.find('.db-workspace-tab.active').text()).toContain('ops_incidents')
     expect(wrapper.find('.db-where-bar').text()).toContain('ops_incidents')
     expect(window.aiops.listDatabaseCatalog).toHaveBeenCalledTimes(1)
@@ -5414,9 +5422,9 @@ describe('AppShell', () => {
     vi.useFakeTimers()
     const pinia = createPinia()
     setActivePinia(pinia)
-    const rail = mount(SideRail, {
+    const rail = mount(SideRail, withTeleportStub({
       global: { plugins: [pinia] }
-    })
+    }))
     const store = useWorkspaceStore()
     await store.refreshUserAccount()
     await rail.vm.$nextTick()
@@ -7161,7 +7169,7 @@ describe('AppShell', () => {
     wrapper.unmount()
   })
 
-  it('renders provider execute_command blocks as runnable backend-owned command cards', async () => {
+  it('routes Cline execute_command approvals through backend-owned command cards', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     const { wrapper, store } = await mountAiPanelWithModels(pinia)
@@ -7185,9 +7193,27 @@ describe('AppShell', () => {
           commandExecution: {
             ip: '10.24.8.12',
             command: 'uptime',
-            requiresApproval: false,
+            requiresApproval: true,
             interactive: false
+          },
+          commandExecutionStatus: 'pending',
+          commandExecutionMessage: '等待操作员确认。',
+          agentTask: {
+            taskId: 'aichat-request-test-1',
+            turnId: 'aichat-request-test-1-assistant',
+            terminalSessionId: 'terminal-command-panel',
+            toolCallId: 'tool-call-uptime',
+            toolName: 'run_host_command',
+            status: 'waiting-approval'
           }
+        },
+        agentTask: {
+          taskId: 'aichat-request-test-1',
+          turnId: 'aichat-request-test-1-assistant',
+          terminalSessionId: 'terminal-command-panel',
+          toolCallId: 'tool-call-uptime',
+          toolName: 'run_host_command',
+          status: 'waiting-approval'
         }
       }
     } as any)
@@ -7217,133 +7243,64 @@ describe('AppShell', () => {
     expect(hostBadge.find('svg').exists()).toBe(true)
     expect(hostBadge.text()).toContain('Host 10.24.8.12')
     expect(commandMessage!.find('[data-testid="ai-message-command-run"]').exists()).toBe(true)
-    expect(commandMessage!.find('[data-testid="ai-message-command-auto-run"]').exists()).toBe(true)
+    expect(commandMessage!.find('[data-testid="ai-message-command-auto-run"]').exists()).toBe(false)
+    expect(commandMessage!.find('[data-testid="ai-message-command-approval-badge"]').exists()).toBe(true)
     expect(commandMessage!.find('[data-testid="ai-message-command-line-count"]').text()).toContain('1 line')
 
+    store.activePanel.sessionId = 'terminal-command-panel'
+    vi.mocked(window.aiops.respondClineAgentApproval!).mockClear()
+    vi.mocked(window.aiops.writeTerminal).mockClear()
     await commandMessage!.find('[data-testid="ai-message-command-run"]').trigger('click')
     await flushPromises()
-    expect(window.aiops.writeTerminal).not.toHaveBeenCalledWith(expect.any(String), 'uptime\n')
-    expect(store.chatMessages.find((message) => message.id === 'aichat-request-test-1-assistant')?.commandExecutionStatus).toBe('failed')
-    expect(wrapper.find('[data-testid="ai-chat-export-notice"]').text()).toContain('终端会话不可用')
+    expect(window.aiops.respondClineAgentApproval).toHaveBeenCalledWith({
+      taskId: 'aichat-request-test-1',
+      turnId: 'aichat-request-test-1-assistant',
+      toolCallId: 'tool-call-uptime',
+      terminalSessionId: 'terminal-command-panel',
+      approved: true,
+      reason: undefined
+    })
+    expect(window.aiops.writeTerminal).not.toHaveBeenCalled()
+    expect(store.chatMessages.find((message) => message.id === 'aichat-request-test-1-assistant')?.commandExecutionStatus).toBe('running')
 
-    store.activePanel.sessionId = 'terminal-command-panel'
-    vi.mocked(window.aiops.writeTerminal).mockClear()
-    const runCommandPromise = commandMessage!.find('[data-testid="ai-message-command-auto-run"]').trigger('click')
-    await flushPromises()
-    expect(window.aiops.writeTerminal).toHaveBeenCalledWith('terminal-command-panel', 'uptime\n')
-    store.appendTerminalOutput('terminal-command-panel', 'uptime\n 12:00:00 up 3 days, 1 user, load average: 0.10, 0.20, 0.30\n')
-    vi.mocked(window.aiops.generateAiChatResponse).mockImplementationOnce(async (input: any) => ({
-      ok: true,
-      data: {
-        text: '负载正常，无需继续执行命令。',
-        provider: 'aiopsterm-local',
-        model: 'aiopsterm-local-agent',
-        durationMs: 1,
-        status: 'done',
-        requestId: input.requestId,
-        assistantMessageId: input.assistantMessageId
-      }
-    }))
-    await runCommandPromise
-    await waitForMockCallCount(vi.mocked(window.aiops.generateAiChatResponse), 2, 'generateAiChatResponse')
-    await flushPromises()
+    const emitClineEvent = (globalThis as any).__emitClineAgentTaskEventMock as (event: any) => void
+    const eventBase = {
+      protocolVersion: 1,
+      sessionId: 'cline-session-test-1',
+      taskId: 'aichat-request-test-1',
+      turnId: 'aichat-request-test-1-assistant',
+      at: '2026-07-11T00:00:00.000Z'
+    }
+    emitClineEvent({
+      ...eventBase,
+      seq: 1,
+      type: 'tool-result',
+      toolCallId: 'tool-call-uptime',
+      toolName: 'run_host_command',
+      output: { stdout: '12:00:00 up 3 days, load average: 0.10, 0.20, 0.30' }
+    })
+    emitClineEvent({
+      ...eventBase,
+      seq: 2,
+      type: 'done',
+      text: '负载正常，无需继续执行命令。',
+      finishReason: 'stop',
+      iterations: 2
+    })
+    await wrapper.vm.$nextTick()
+
     expect(store.chatMessages.find((message) => message.id === 'aichat-request-test-1-assistant')).toMatchObject({
       executedCommand: 'uptime',
       commandExecutionStatus: 'succeeded',
-      commandExecution: {
-        ip: '10.24.8.12',
-        command: 'uptime'
-      }
+      agentTask: { status: 'done' }
     })
-    expect(store.chatMessages).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          say: 'command_output',
-          action: 'approved',
-          text: expect.stringContaining('load average')
-        }),
-        expect.objectContaining({
-          role: 'assistant',
-          state: 'done',
-          text: '负载正常，无需继续执行命令。'
-        })
-      ])
-    )
-    expect(vi.mocked(window.aiops.generateAiChatResponse).mock.calls.at(-1)?.[0]).toMatchObject({
-      mode: 'agent',
-      prompt: expect.stringContaining('Command output from the approved execute_command tool is available.'),
-      messages: expect.arrayContaining([
-        expect.objectContaining({
-          say: 'command_output',
-          action: 'approved',
-          text: expect.stringContaining('load average')
-        })
-      ])
+    expect(store.chatMessages.at(-1)).toMatchObject({
+      role: 'assistant',
+      state: 'done',
+      text: '负载正常，无需继续执行命令。',
+      agentTask: { status: 'done' }
     })
-    expect(commandMessage!.find('[data-testid="ai-message-command-status"]').text()).toContain('命令输出已回传 Agent：uptime')
-
-    vi.mocked(window.aiops.generateAiChatResponse).mockImplementationOnce(async (input: any) => ({
-      ok: true,
-      data: {
-        text: '请求执行 Command 10.24.8.12: df -h。',
-        provider: 'aiopsterm-local',
-        model: 'aiopsterm-local-agent',
-        durationMs: 1,
-        status: 'done',
-        requestId: input.requestId,
-        assistantMessageId: input.assistantMessageId,
-        message: {
-          id: input.assistantMessageId,
-          role: 'assistant',
-          text: 'df -h',
-          state: 'done',
-          ask: 'command',
-          commandExecution: {
-            ip: '10.24.8.12',
-            command: 'df -h',
-            requiresApproval: false,
-            interactive: false
-          }
-        }
-      }
-    } as any))
-    vi.mocked(window.aiops.generateAiChatResponse).mockImplementationOnce(async (input: any) => ({
-      ok: true,
-      data: {
-        text: '磁盘空间正常。',
-        provider: 'aiopsterm-local',
-        model: 'aiopsterm-local-agent',
-        durationMs: 1,
-        status: 'done',
-        requestId: input.requestId,
-        assistantMessageId: input.assistantMessageId
-      }
-    }))
-    vi.mocked(window.aiops.writeTerminal).mockImplementationOnce(async (id: string, data: string) => {
-      store.appendTerminalOutput(id, `${data}/dev/vda1 40G 20G 20G 50% /\n`)
-      return {
-        ok: true,
-        data: {
-          id,
-          bytes: new TextEncoder().encode(data).byteLength
-        }
-      }
-    })
-    input.element.replaceChildren(document.createTextNode('继续检查磁盘'))
-    range.selectNodeContents(input.element)
-    range.collapse(false)
-    selection?.removeAllRanges()
-    selection?.addRange(range)
-    await input.trigger('input')
-    await wrapper.find('.chat-input').trigger('submit')
-    await waitForMockCallCount(vi.mocked(window.aiops.generateAiChatResponse), 3, 'generateAiChatResponse')
-    await flushPromises()
-    expect(window.aiops.writeTerminal).toHaveBeenCalledWith('terminal-command-panel', 'df -h\n')
-    await waitForMockCallCount(vi.mocked(window.aiops.generateAiChatResponse), 4, 'generateAiChatResponse')
-    expect(vi.mocked(window.aiops.generateAiChatResponse).mock.calls.at(-1)?.[0]).toMatchObject({
-      mode: 'agent',
-      prompt: expect.stringContaining('Command output from the approved execute_command tool is available.')
-    })
+    expect(window.aiops.generateAiChatResponse).toHaveBeenCalledTimes(1)
 
     wrapper.unmount()
   })
@@ -7419,10 +7376,11 @@ describe('AppShell', () => {
     expect(wrapper.find('[data-onboarding-id="ai-mode-agent-option"]').exists()).toBe(true)
     expect(wrapper.find('.ai-mode-popup').attributes('style')).toContain('min-width:')
     const modeRows = wrapper.findAll('.ai-mode-popup .select-list button')
-    expect(modeRows).toHaveLength(2)
+    expect(modeRows).toHaveLength(3)
     expect(modeRows[0].text()).toContain('Agent')
     expect(modeRows[0].text()).not.toContain('自动规划并等待确认')
     expect(modeRows[1].text()).toContain('Command')
+    expect(modeRows[2].text()).toContain('Chat')
     await modeRows[1].trigger('click')
     expect(wrapper.find('[data-onboarding-id="ai-mode-select"]').text()).toContain('Command')
     expect(wrapper.find('[data-onboarding-id="ai-mode-select"]').attributes('style')).toBeUndefined()
@@ -10032,7 +9990,7 @@ describe('AppShell', () => {
     expect(wrapper.find('.terminal-grid').classes()).toContain('split-right')
     expect(wrapper.find('.terminal-grid').classes()).not.toContain('split-below')
 
-    store.closePanels('all')
+    await store.closePanels('all')
     store.registerSshSession(store.activePanelId, {
       id: 'asset-split-unit',
       name: 'split-source',
@@ -10196,6 +10154,8 @@ describe('AppShell', () => {
     xterm.emitSelection('systemctl status nginx', { start: { x: 0, y: 5 }, end: { x: 22, y: 5 } })
     await wrapper.vm.$nextTick()
     await aiButton.trigger('click')
+    await waitForMockCall(vi.mocked(window.aiops.createAiChatExchangeRequest), 'createAiChatExchangeRequest')
+    await flushPromises()
     expect(store.rightPanelOpen).toBe(true)
     expect(store.chatMessages.at(-2)?.text).toContain('Terminal output:')
     expect(store.chatMessages.at(-2)?.text).toContain('systemctl status nginx')
@@ -13234,6 +13194,8 @@ describe('AppShell', () => {
     expect(store.k8sActiveTerminal?.cols).toBe(88)
     await workspace.find('.k8s-command-line input').setValue('kubectl get ns')
     await workspace.find('.k8s-terminal-meta button[title="采集命令输出到 AI"]').trigger('click')
+    await flushPromises()
+    await workspace.vm.$nextTick()
     expect(store.chatMessages.at(-2)?.text).toContain('Terminal output')
     expect(store.chatMessages.at(-2)?.hosts?.[0].label).toBe('prod-renamed')
     await workspace.find('.k8s-terminal-meta button[title="结束会话"]').trigger('click')
@@ -13290,6 +13252,8 @@ describe('AppShell', () => {
     await flushPromises()
     expect(store.k8sActiveTerminal?.output).toContain('[aiopsterm kubectl] kubectl logs billing-worker-7f9d6f9dd9-rx8mm -n ops --tail=120')
     await workspace.find('.k8s-resource-output-actions button[title="发送输出到 AI"]').trigger('click')
+    await flushPromises()
+    await workspace.vm.$nextTick()
     expect(store.chatMessages.at(-2)?.text).toContain('Kubernetes 输出')
     await workspace.find('.k8s-resource-output-actions button[title="清空输出"]').trigger('click')
     expect(store.k8sResourceOutputTitle).toBe('资源输出')
@@ -13530,7 +13494,7 @@ describe('AppShell', () => {
 
     const postgresRow = wrapper.findAll('.db-tree-row.connection').find((row) => row.text().includes('orders-postgres'))!
     await postgresRow.trigger('contextmenu')
-    await wrapper.find('.db-context-menu').findAll('button').find((button) => button.text().includes('Editor Source'))!.trigger('click')
+    await wrapper.find('.db-context-menu').findAll('button').find((button) => button.text().includes('Edit Source'))!.trigger('click')
     expect(wrapper.find('.db-connection-modal').text()).toContain('Edit Connection')
     const editInputs = wrapper.findAll('.db-connection-modal input')
     expect((editInputs.at(0)!.element as HTMLInputElement).value).toBe('orders-postgres')
@@ -14136,8 +14100,11 @@ describe('AppShell', () => {
     vi.mocked(window.aiops.cancelDatabaseAiDrawerResponse).mockClear()
     vi.mocked(window.aiops.generateDatabaseAiDrawerResponse).mockClear()
     await wrapper.find('button[title="AI Convert SQL"]').trigger('click')
-    expect(wrapper.find('.db-ai-drawer').text()).toContain('Convert SQL')
-    expect(wrapper.find('.db-ai-drawer').attributes('data-request-id')).toBe('dbai-drawer-request-test-1')
+    await flushPromises()
+    expect(wrapper.find('.db-ai-drawer').exists()).toBe(false)
+    expect(wrapper.find('.db-ai-pane').exists()).toBe(true)
+    expect(wrapper.find('.db-ai-pane-message.user[data-request-id="dbai-drawer-request-test-1"]').text()).toContain('Convert SQL')
+    expect(wrapper.find('.db-ai-pane-source-sql').text()).toBe(selectedConvertSql)
     expect(window.aiops.createDatabaseAiDrawerRequest).toHaveBeenCalledWith(
       expect.objectContaining({
         action: 'convert',
@@ -14152,16 +14119,17 @@ describe('AppShell', () => {
         })
       })
     )
-    await flushPromises()
-    expect(wrapper.find('.db-ai-status').text()).toContain('Streaming')
+    expect(wrapper.find('.db-ai-pane-message.assistant[data-request-id="dbai-drawer-request-test-1"] .db-ai-pane-message-status').text()).toContain('Streaming')
     expect(window.aiops.startDatabaseAiDrawerResponse).toHaveBeenCalledWith({ requestId: 'dbai-drawer-request-test-1' })
     await waitForDatabaseDbAiDone()
-    expect(wrapper.find('.db-ai-status').text()).toContain('Done')
-    expect(wrapper.findAll('.db-ai-section header').map((header) => header.text())).toEqual(['Reasoning', 'Response'])
-    expect(wrapper.find('.db-ai-section').text()).toContain('Read the active database context')
-    expect(wrapper.find('.db-ai-dialect-row').text()).toContain('Target Dialect')
-    expect((wrapper.find('.db-ai-dialect-row select').element as HTMLSelectElement).value).toBe('postgresql')
-    expect(wrapper.findAll('.db-ai-dialect-row option').map((option) => option.text())).toContain('Presto')
+    const convertAssistantSelector = '.db-ai-pane-message.assistant[data-request-id="dbai-drawer-request-test-1"]'
+    expect(wrapper.find(`${convertAssistantSelector} .db-ai-pane-message-status`).text()).toContain('Done')
+    expect(wrapper.find(`${convertAssistantSelector} .db-ai-pane-message-content`).text()).toContain('Read the active database context')
+    expect((wrapper.find(`${convertAssistantSelector} .db-ai-pane-sql-result select[title="Target dialect"]`).element as HTMLSelectElement).value).toBe('postgresql')
+    expect(wrapper.findAll(`${convertAssistantSelector} .db-ai-pane-sql-result option`).map((option) => option.text())).toContain('Presto')
+    expect(wrapper.find(`${convertAssistantSelector} .db-ai-pane-sql-result button[title="Copy SQL"]`).exists()).toBe(true)
+    expect(wrapper.find(`${convertAssistantSelector} .db-ai-pane-sql-result button[title="Replace current selection or statement"]`).exists()).toBe(true)
+    expect(wrapper.find(`${convertAssistantSelector} .db-ai-pane-sql-result button[title="Insert SQL into editor"]`).exists()).toBe(true)
     expect(window.aiops.generateDatabaseAiDrawerResponse).toHaveBeenCalledWith(
       expect.objectContaining({
         requestId: 'dbai-drawer-request-test-1',
@@ -14177,39 +14145,38 @@ describe('AppShell', () => {
         })
       })
     )
-    await wrapper.find('.db-ai-dialect-row select').setValue('mssql')
+    await wrapper.find(`${convertAssistantSelector} .db-ai-pane-sql-result select[title="Target dialect"]`).setValue('mssql')
     await waitForDatabaseDbAiDone()
-    expect(wrapper.find('.db-ai-drawer').text()).toContain('SQL Server')
-    expect(wrapper.find('.db-ai-drawer').text()).toContain('Text-only conversion')
-    expect(wrapper.find('.db-ai-sql-actions pre').text()).toContain('SELECT TOP (100)')
-    expect(wrapper.find('.db-ai-sql-actions pre').text()).toContain('[public].[orders]')
-    expect(wrapper.find('.db-ai-sql-actions').findAll('button').find((button) => button.text().includes('Run ReadOnly'))!.attributes('disabled')).toBeDefined()
+    expect(wrapper.find(`${convertAssistantSelector} .db-ai-pane-message-content`).text()).toContain('SQL Server')
+    expect(wrapper.find(`${convertAssistantSelector} .db-ai-pane-sql-result pre`).text()).toContain('SELECT TOP (100)')
+    expect(wrapper.find(`${convertAssistantSelector} .db-ai-pane-sql-result pre`).text()).toContain('[public].[orders]')
+    expect(wrapper.find(`${convertAssistantSelector} .db-ai-pane-sql-result button[aria-label="Run read-only SQL"]`).attributes('disabled')).toBeDefined()
     expect(window.aiops.generateDatabaseAiDrawerResponse).toHaveBeenLastCalledWith(
       expect.objectContaining({
         action: 'convert',
         targetDialect: 'mssql'
       })
     )
-    await wrapper.find('.db-ai-dialect-row select').setValue('postgresql')
+    await wrapper.find(`${convertAssistantSelector} .db-ai-pane-sql-result select[title="Target dialect"]`).setValue('postgresql')
     await waitForDatabaseDbAiDone()
-    expect(wrapper.find('.db-ai-sql-actions pre').text()).toContain('"public"."orders"')
-    expect(wrapper.find('.db-ai-sql-actions').findAll('button').find((button) => button.text().includes('Run ReadOnly'))!.attributes('disabled')).toBeUndefined()
+    expect(wrapper.find(`${convertAssistantSelector} .db-ai-pane-sql-result pre`).text()).toContain('"public"."orders"')
+    expect(wrapper.find(`${convertAssistantSelector} .db-ai-pane-sql-result button[aria-label="Run read-only SQL"]`).attributes('disabled')).toBeUndefined()
     const readOnlyEditorBefore = (wrapper.find('.db-sql-editor').element as HTMLTextAreaElement).value
-    await wrapper.find('.db-ai-sql-actions').findAll('button').find((button) => button.text().includes('Run ReadOnly'))!.trigger('click')
+    await wrapper.find(`${convertAssistantSelector} .db-ai-pane-sql-result button[aria-label="Run read-only SQL"]`).trigger('click')
     expect((wrapper.find('.db-sql-editor').element as HTMLTextAreaElement).value).toBe(readOnlyEditorBefore)
     await waitForDatabaseSqlResult()
     expect(wrapper.find('.db-result-tabs').text()).toContain('#')
-    await wrapper.find('.db-ai-sql-actions').findAll('button').find((button) => button.text().includes('Replace Selection'))!.trigger('click')
+    await wrapper.find(`${convertAssistantSelector} .db-ai-pane-sql-result button[title="Replace current selection or statement"]`).trigger('click')
     await flushPromises()
     const replacedConvertSql = (wrapper.find('.db-sql-editor').element as HTMLTextAreaElement).value
     expect(replacedConvertSql).toContain('LIMIT 100;')
     expect(replacedConvertSql).toContain('select * from ops.ops_incidents;')
-    expect(replacedConvertSql).not.toBe(wrapper.find('.db-ai-sql-actions pre').text())
+    expect(replacedConvertSql).not.toBe(wrapper.find(`${convertAssistantSelector} .db-ai-pane-sql-result pre`).text())
     await workbenchEditor.setValue('select 1;\n-- marker')
     const insertEditorElement = wrapper.find('.db-sql-editor').element as HTMLTextAreaElement
     const markerOffset = insertEditorElement.value.indexOf('-- marker')
     insertEditorElement.setSelectionRange(markerOffset, markerOffset)
-    await wrapper.find('.db-ai-sql-actions').findAll('button').find((button) => button.text().includes('Insert Into Editor'))!.trigger('click')
+    await wrapper.find(`${convertAssistantSelector} .db-ai-pane-sql-result button[title="Insert SQL into editor"]`).trigger('click')
     await flushPromises()
     const insertedConvertSql = (wrapper.find('.db-sql-editor').element as HTMLTextAreaElement).value
     expect(insertedConvertSql).toContain('select 1;')
@@ -14219,7 +14186,7 @@ describe('AppShell', () => {
     const insertReplaceEditorElement = wrapper.find('.db-sql-editor').element as HTMLTextAreaElement
     const selectedWordStart = insertReplaceEditorElement.value.indexOf('selected')
     insertReplaceEditorElement.setSelectionRange(selectedWordStart, selectedWordStart + 'selected'.length)
-    await wrapper.find('.db-ai-sql-actions').findAll('button').find((button) => button.text().includes('Insert Into Editor'))!.trigger('click')
+    await wrapper.find(`${convertAssistantSelector} .db-ai-pane-sql-result button[title="Insert SQL into editor"]`).trigger('click')
     await flushPromises()
     const insertReplacedSql = (wrapper.find('.db-sql-editor').element as HTMLTextAreaElement).value
     expect(insertReplacedSql).toContain('before select id from "public"."orders"')
@@ -14229,45 +14196,61 @@ describe('AppShell', () => {
     const completeEditorElement = wrapper.find('.db-sql-editor').element as HTMLTextAreaElement
     completeEditorElement.setSelectionRange(completeEditorElement.value.length, completeEditorElement.value.length)
     await wrapper.find('button[title="AI Complete SQL"]').trigger('click')
-    expect(wrapper.find('.db-ai-drawer').text()).toContain('Complete SQL')
-    expect(wrapper.find('.db-ai-context').text()).toContain('cursor prefix')
+    await flushPromises()
+    expect(wrapper.findAll('.db-ai-pane-message.user').at(-1)!.text()).toContain('Complete SQL')
+    expect(wrapper.findAll('.db-ai-pane-message.user').at(-1)!.text()).toContain('cursor prefix')
     await waitForDatabaseDbAiDone()
-    expect(wrapper.find('.db-ai-sql-actions pre').text()).toContain("where status = 'open'")
-    expect(wrapper.find('.db-ai-sql-actions pre').text()).toContain('LIMIT 100')
+    expect(wrapper.findAll('.db-ai-pane-sql-result').at(-1)!.find('pre').text()).toContain("where status = 'open'")
+    expect(wrapper.findAll('.db-ai-pane-sql-result').at(-1)!.find('pre').text()).toContain('LIMIT 100')
     await workbenchEditor.setValue('select 1;\nselect * from ops.ops_incidents;\n-- after cursor')
     const prefixEditorElement = wrapper.find('.db-sql-editor').element as HTMLTextAreaElement
     const prefixOffset = prefixEditorElement.value.indexOf('select * from ops.ops_incidents') + 'select * from ops.ops_incidents'.length
     prefixEditorElement.setSelectionRange(prefixOffset, prefixOffset)
     await wrapper.find('button[title="AI Complete SQL"]').trigger('click')
     await waitForDatabaseDbAiDone()
-    expect(wrapper.find('.db-ai-sql-actions pre').text()).toContain('select 1;')
-    expect(wrapper.find('.db-ai-sql-actions pre').text()).toContain('select * from ops.ops_incidents')
-    expect(wrapper.find('.db-ai-sql-actions pre').text()).not.toContain('after cursor')
+    expect(wrapper.findAll('.db-ai-pane-sql-result').at(-1)!.find('pre').text()).toContain('select 1;')
+    expect(wrapper.findAll('.db-ai-pane-sql-result').at(-1)!.find('pre').text()).toContain('select * from ops.ops_incidents')
+    expect(wrapper.findAll('.db-ai-pane-sql-result').at(-1)!.find('pre').text()).not.toContain('after cursor')
     await wrapper.find('button[title="AI Optimize SQL"]').trigger('click')
     await waitForDatabaseDbAiDone()
-    expect(wrapper.find('.db-ai-request-list').exists()).toBe(true)
-    expect(wrapper.findAll('.db-ai-request-list button').map((button) => button.text()).join(' ')).toContain('Convert SQL')
-    expect(wrapper.findAll('.db-ai-request-list button').map((button) => button.text()).join(' ')).toContain('Optimize SQL')
-    expect(wrapper.findAll('.db-ai-request-list button').map((button) => button.attributes('data-request-id'))).toContain('dbai-drawer-request-test-1')
-    await wrapper.findAll('.db-ai-request-list button').find((button) => button.text().includes('Convert SQL'))!.trigger('click')
-    expect(wrapper.find('.db-ai-drawer').text()).toContain('Convert SQL')
-    expect(wrapper.find('.db-ai-drawer').attributes('data-request-id')).toBe('dbai-drawer-request-test-1')
-    expect((wrapper.find('.db-ai-dialect-row select').element as HTMLSelectElement).value).toBe('postgresql')
-    await wrapper.find('.db-ai-dialect-row select').setValue('mssql')
+    expect(wrapper.find('.db-ai-request-list').exists()).toBe(false)
+    expect(wrapper.find('.db-ai-drawer').exists()).toBe(false)
+    expect(wrapper.findAll('.db-ai-pane-message.user header strong').map((header) => header.text()).join(' ')).toContain('Convert SQL')
+    expect(wrapper.findAll('.db-ai-pane-message.user header strong').map((header) => header.text()).join(' ')).toContain('Optimize SQL')
+    expect(wrapper.find(`${convertAssistantSelector}`).attributes('data-request-id')).toBe('dbai-drawer-request-test-1')
+    expect((wrapper.find(`${convertAssistantSelector} .db-ai-pane-sql-result select[title="Target dialect"]`).element as HTMLSelectElement).value).toBe('postgresql')
+    await wrapper.find(`${convertAssistantSelector} .db-ai-pane-sql-result select[title="Target dialect"]`).setValue('mssql')
     await waitForDatabaseDbAiDone()
-    expect(wrapper.find('.db-ai-sql-actions pre').text()).toContain('[public].[orders]')
-    await wrapper.findAll('.db-ai-request-list button').find((button) => button.text().includes('Optimize SQL'))!.trigger('click')
-    expect(wrapper.find('.db-ai-drawer').text()).toContain('Optimize SQL')
-    await wrapper.findAll('.db-ai-request-list button').find((button) => button.text().includes('Convert SQL'))!.trigger('click')
-    expect((wrapper.find('.db-ai-dialect-row select').element as HTMLSelectElement).value).toBe('mssql')
+    expect(wrapper.find(`${convertAssistantSelector} .db-ai-pane-sql-result pre`).text()).toContain('[public].[orders]')
+    expect(wrapper.findAll('.db-ai-pane-message.user').at(-1)!.text()).toContain('Optimize SQL')
+    expect((wrapper.find(`${convertAssistantSelector} .db-ai-pane-sql-result select[title="Target dialect"]`).element as HTMLSelectElement).value).toBe('mssql')
+    vi.mocked(window.aiops.cancelDatabaseAiPaneResponse).mockClear()
     await wrapper.find('button[title="AI Explain SQL"]').trigger('click')
     await flushPromises()
-    expect(wrapper.find('.db-ai-status').text()).toContain('Streaming')
-    await wrapper.find('.db-ai-drawer footer').findAll('button').find((button) => button.text().includes('Cancel'))!.trigger('click')
-    expect(window.aiops.cancelDatabaseAiDrawerResponse).toHaveBeenCalled()
-    expect(wrapper.find('.db-ai-status').text()).toContain('Cancelled')
-    await waitForDatabaseDbAiDone()
-    expect(wrapper.find('.db-ai-status').text()).toContain('Cancelled')
+    expect(wrapper.findAll('.db-ai-pane-message.assistant').at(-1)!.find('.db-ai-pane-message-status').text()).toContain('Streaming')
+    await wrapper.find('.db-ai-pane-composer-actions button[title="Stop response"]').trigger('click')
+    await flushPromises()
+    expect(window.aiops.cancelDatabaseAiPaneResponse).toHaveBeenCalled()
+    expect(window.aiops.cancelDatabaseAiDrawerResponse).not.toHaveBeenCalled()
+    expect(wrapper.findAll('.db-ai-pane-message.assistant').at(-1)!.find('.db-ai-pane-message-status').text()).toContain('Cancelled')
+
+    await wrapper.find('button[title="AI Explain SQL"]').trigger('click')
+    await waitForDatabaseDbAiPaneDone()
+    const explainAssistant = wrapper.findAll('.db-ai-pane-message.assistant').at(-1)!
+    expect(explainAssistant.find('.db-ai-pane-message-status').text()).toContain('Done')
+    expect(explainAssistant.find('.db-ai-pane-message-content').text()).toContain('Schema summary')
+    expect(explainAssistant.find('.db-ai-pane-sql-result').exists()).toBe(false)
+
+    await wrapper.find('button[title="AI Natural Language to SQL"]').trigger('click')
+    expect(wrapper.find('.db-ai-pane-composer-mode').text()).toContain('Natural language to SQL')
+    expect(wrapper.find('.db-ai-pane-composer textarea').attributes('placeholder')).toBe('Describe the data you want to query')
+    await wrapper.find('.db-ai-pane-composer textarea').setValue('show open orders by update time')
+    await wrapper.find('.db-ai-pane-composer-actions .primary').trigger('click')
+    await waitForDatabaseDbAiPaneDone()
+    expect(wrapper.findAll('.db-ai-pane-message.user').at(-1)!.text()).toContain('Natural language to SQL')
+    expect(wrapper.findAll('.db-ai-pane-message.user').at(-1)!.find('.db-ai-pane-action-prompt').text()).toBe('show open orders by update time')
+    expect(wrapper.findAll('.db-ai-pane-sql-result').at(-1)!.find('pre').text()).toContain('SELECT *')
+    expect(wrapper.findAll('.db-ai-pane-sql-result').at(-1)!.find('button[aria-label="Run read-only SQL"]').attributes('disabled')).toBeUndefined()
 
     const publicSchemaRows = wrapper.findAll('.db-tree-row.schema').filter((row) => row.text().includes('public'))
     expect(publicSchemaRows.length).toBeGreaterThan(0)
@@ -14662,8 +14645,11 @@ describe('AppShell', () => {
     )
     await waitForDatabaseDbAiDone()
     expect(wrapper.text()).toContain('Backend Drop Refresh')
-    expect(wrapper.find('.db-ai-drawer').text()).toContain('DROP TABLE public.orders')
-    expect(wrapper.find('.db-ai-drawer').text()).toContain('Generated SQL')
+    expect(wrapper.find('.db-ai-drawer').exists()).toBe(false)
+    expect(wrapper.findAll('.db-ai-pane-message.user').at(-1)!.text()).toContain('Drop Table')
+    expect(wrapper.findAll('.db-ai-pane-message.user').at(-1)!.find('.db-ai-pane-source-sql').text()).toContain('DROP TABLE public.orders')
+    expect(wrapper.findAll('.db-ai-pane-sql-result').at(-1)!.find('pre').text()).toContain('DROP TABLE public.orders;')
+    expect(wrapper.findAll('.db-ai-pane-sql-result').at(-1)!.find('button[aria-label="Run read-only SQL"]').attributes('disabled')).toBeDefined()
     vi.mocked(navigator.clipboard.writeText).mockRejectedValueOnce(new Error('clipboard unavailable'))
     const originalExecCommand = document.execCommand
     const execCommandSpy = vi.fn(() => true)
@@ -14671,7 +14657,7 @@ describe('AppShell', () => {
       configurable: true,
       value: execCommandSpy
     })
-    await wrapper.find('.db-ai-sql-actions').findAll('button').find((button) => button.text().includes('Copy'))!.trigger('click')
+    await wrapper.findAll('.db-ai-pane-sql-result').at(-1)!.find('button[title="Copy SQL"]').trigger('click')
     await flushPromises()
     expect(execCommandSpy).toHaveBeenCalledWith('copy')
     if (originalExecCommand) {
@@ -14692,7 +14678,7 @@ describe('AppShell', () => {
       configurable: true,
       value: failedExecCommandSpy
     })
-    await wrapper.find('.db-ai-sql-actions').findAll('button').find((button) => button.text().includes('Copy'))!.trigger('click')
+    await wrapper.findAll('.db-ai-pane-sql-result').at(-1)!.find('button[title="Copy SQL"]').trigger('click')
     await flushPromises()
     expect(failedExecCommandSpy).toHaveBeenCalledWith('copy')
     if (originalExecCommandForFailedCopy) {
@@ -14727,14 +14713,13 @@ describe('AppShell', () => {
         tableName: 'orders'
       })
     ).resolves.toMatchObject({ ok: false, errorCode: 'DB_TABLE_NOT_FOUND' })
-    expect(wrapper.findAll('.db-ai-request-list button').some((button) => button.text().includes('Drop Table'))).toBe(true)
+    expect(wrapper.findAll('.db-ai-pane-message.user').some((message) => message.text().includes('Drop Table'))).toBe(true)
     expect(wrapper.findAll('.db-tree-row.table').some((row) => row.text().trim() === 'orders')).toBe(false)
     expect(wrapper.findAll('.db-workspace-tab').some((tab) => tab.text().includes('orders'))).toBe(false)
     expect(wrapper.findAll('.db-workspace-tab').some((tab) => tab.text().includes('DDL: orders'))).toBe(false)
-    expect(
-      wrapper.find('.db-ai-sql-actions').findAll('button').find((button) => button.text().includes('Insert Into Editor'))!.attributes('disabled')
-    ).toBeDefined()
-    await wrapper.findAll('.db-ai-drawer footer button').find((button) => button.text().includes('Clear'))!.trigger('click')
+    expect(wrapper.findAll('.db-ai-pane-sql-result').at(-1)!.find('button[title="Insert SQL into editor"]').exists()).toBe(true)
+    await wrapper.find('.db-ai-pane-composer-actions button[title="Reset conversation"]').trigger('click')
+    expect(wrapper.findAll('.db-ai-pane-message')).toHaveLength(0)
 
     await wrapper.find('button[title="New SQL"]').trigger('click')
     const sqlEditor = wrapper.find('.db-sql-editor')
@@ -14742,7 +14727,7 @@ describe('AppShell', () => {
     await wrapper.find('button[title="Run all"]').trigger('click')
     await waitForDatabaseSqlResult()
     expect(wrapper.find('.db-result-error').text()).toContain('Backend SQL executor rejected')
-    const dbAiRequestCountBeforeDiagnose = wrapper.findAll('.db-ai-request-list button').length
+    const dbAiMessageCountBeforeDiagnose = wrapper.findAll('.db-ai-pane-message').length
     vi.mocked(window.aiops.diagnoseDatabaseSqlError).mockClear()
     vi.mocked(window.aiops.createDatabaseAiDrawerRequest).mockClear()
     vi.mocked(window.aiops.startDatabaseAiDrawerResponse).mockClear()
@@ -14767,7 +14752,7 @@ describe('AppShell', () => {
     expect(window.aiops.generateDatabaseAiDrawerResponse).not.toHaveBeenCalled()
     expect(wrapper.find('.db-result-diagnose-btn').classes()).toContain('loading')
     expect(wrapper.find('.db-result-diagnose-spinner').exists()).toBe(true)
-    expect(wrapper.findAll('.db-ai-request-list button')).toHaveLength(dbAiRequestCountBeforeDiagnose)
+    expect(wrapper.findAll('.db-ai-pane-message')).toHaveLength(dbAiMessageCountBeforeDiagnose)
     await new Promise((resolve) => window.setTimeout(resolve, 190))
     await flushPromises()
     expect(wrapper.find('.db-result-diagnose-success').text()).toContain('Diagnosed and replaced editor SQL')
@@ -15563,7 +15548,7 @@ describe('AppShell', () => {
     wrapper.unmount()
   })
 
-  it('renders backend-owned DB AI drawer error records without generated SQL actions', async () => {
+  it('mirrors backend-owned DB AI action errors into the conversation without SQL tools', async () => {
     const selectedSql = 'select id from "public"."orders"'
     vi.mocked(window.aiops.generateDatabaseAiDrawerResponse).mockResolvedValueOnce({
       ok: false,
@@ -15607,9 +15592,12 @@ describe('AppShell', () => {
     await wrapper.find('button[title="AI Convert SQL"]').trigger('click')
     await waitForDatabaseDbAiDone()
 
-    expect(wrapper.find('.db-ai-status').text()).toContain('Error')
-    expect(wrapper.find('.db-ai-section').text()).toContain('Provider unavailable from backend record.')
-    expect(wrapper.find('.db-ai-sql-actions').exists()).toBe(false)
+    expect(wrapper.find('.db-ai-drawer').exists()).toBe(false)
+    expect(wrapper.find('.db-ai-pane').exists()).toBe(true)
+    const assistantMessage = wrapper.findAll('.db-ai-pane-message.assistant').at(-1)!
+    expect(assistantMessage.find('.db-ai-pane-message-status').text()).toContain('Error')
+    expect(assistantMessage.find('.db-ai-pane-message-content').text()).toContain('Provider unavailable from backend record.')
+    expect(assistantMessage.find('.db-ai-pane-sql-result').exists()).toBe(false)
 
     wrapper.unmount()
   })
@@ -15691,6 +15679,8 @@ describe('AppShell', () => {
 
     await wrapper.find('.db-ai-pane-composer textarea').setValue('Summarize schema and generate a SELECT')
     await wrapper.find('.db-ai-pane-composer-actions .primary').trigger('click')
+    await vi.waitFor(() => expect(window.aiops.createDatabaseAiPaneRequest).toHaveBeenCalledTimes(1))
+    await flushPromises()
     expect(wrapper.findAll('.db-ai-pane-message')).toHaveLength(2)
     expect(wrapper.findAll('.db-ai-pane-message').at(1)!.text()).toContain('Streaming')
     expect(window.aiops.createDatabaseAiPaneRequest).toHaveBeenCalledWith(
@@ -15859,6 +15849,8 @@ describe('AppShell', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('DB AI drawer backend returned malformed request data.')
     expect(wrapper.find('.db-ai-drawer').exists()).toBe(false)
+    expect(wrapper.find('.db-ai-pane').exists()).toBe(true)
+    expect(wrapper.findAll('.db-ai-pane-message')).toHaveLength(0)
 
     vi.mocked(window.aiops.generateDatabaseAiDrawerResponse).mockClear()
     vi.mocked(window.aiops.startDatabaseAiDrawerResponse).mockResolvedValueOnce({
@@ -15867,12 +15859,12 @@ describe('AppShell', () => {
     } as any)
     await wrapper.find('button[title="AI Convert SQL"]').trigger('click')
     await flushPromises()
-    expect(wrapper.find('.db-ai-drawer').exists()).toBe(true)
-    expect(wrapper.find('.db-ai-status').text()).toContain('Queued')
-    expect(wrapper.find('.db-ai-status').text()).not.toContain('Error')
+    expect(wrapper.find('.db-ai-drawer').exists()).toBe(false)
+    expect(wrapper.findAll('.db-ai-pane-message')).toHaveLength(2)
+    expect(wrapper.findAll('.db-ai-pane-message.assistant').at(-1)!.find('.db-ai-pane-message-status').text()).toContain('Error')
     expect(wrapper.text()).toContain('DB AI drawer backend returned malformed lifecycle data.')
     expect(window.aiops.generateDatabaseAiDrawerResponse).not.toHaveBeenCalled()
-    await wrapper.findAll('.db-ai-drawer footer button').find((button) => button.text().includes('Clear'))!.trigger('click')
+    await wrapper.find('.db-ai-pane-composer-actions button[title="Reset conversation"]').trigger('click')
 
     vi.mocked(window.aiops.generateDatabaseAiDrawerResponse).mockResolvedValueOnce({
       ok: true,
@@ -15882,13 +15874,12 @@ describe('AppShell', () => {
     } as any)
     await wrapper.find('button[title="AI Convert SQL"]').trigger('click')
     await waitForDatabaseDbAiDone()
-    expect(wrapper.find('.db-ai-status').text()).toContain('Streaming')
-    expect(wrapper.find('.db-ai-status').text()).not.toContain('Error')
+    expect(wrapper.findAll('.db-ai-pane-message')).toHaveLength(2)
+    expect(wrapper.findAll('.db-ai-pane-message.assistant').at(-1)!.find('.db-ai-pane-message-status').text()).toContain('Error')
     expect(wrapper.text()).toContain('DB AI drawer backend returned malformed response data.')
-    expect(wrapper.find('.db-ai-sql-actions').exists()).toBe(false)
-    await wrapper.findAll('.db-ai-drawer footer button').find((button) => button.text().includes('Clear'))!.trigger('click')
+    expect(wrapper.findAll('.db-ai-pane-message.assistant').at(-1)!.find('.db-ai-pane-sql-result').exists()).toBe(false)
+    await wrapper.find('.db-ai-pane-composer-actions button[title="Reset conversation"]').trigger('click')
 
-    await wrapper.find('button[title="Toggle DB AI Pane"]').trigger('click')
     vi.mocked(window.aiops.createDatabaseAiPaneRequest).mockResolvedValueOnce({
       ok: true,
       data: { requestId: 'dbai-pane-malformed-create' }
@@ -15919,8 +15910,7 @@ describe('AppShell', () => {
     await wrapper.find('.db-ai-pane-composer-actions .primary').trigger('click')
     await flushPromises()
     expect(wrapper.findAll('.db-ai-pane-message')).toHaveLength(2)
-    expect(wrapper.findAll('.db-ai-pane-message').at(1)!.text()).toContain('Queued')
-    expect(wrapper.findAll('.db-ai-pane-message').at(1)!.text()).not.toContain('Error')
+    expect(wrapper.findAll('.db-ai-pane-message').at(1)!.text()).toContain('Error')
     expect(wrapper.text()).toContain('DB AI pane backend returned malformed lifecycle data.')
     expect(window.aiops.generateDatabaseAiPaneResponse).not.toHaveBeenCalled()
     await wrapper.find('.db-ai-pane-composer-actions button[title="Reset conversation"]').trigger('click')
@@ -15938,8 +15928,7 @@ describe('AppShell', () => {
     await wrapper.find('.db-ai-pane-composer-actions .primary').trigger('click')
     await waitForDatabaseDbAiDone()
     expect(wrapper.findAll('.db-ai-pane-message')).toHaveLength(2)
-    expect(wrapper.findAll('.db-ai-pane-message').at(1)!.text()).toContain('Streaming')
-    expect(wrapper.findAll('.db-ai-pane-message').at(1)!.text()).not.toContain('Error')
+    expect(wrapper.findAll('.db-ai-pane-message').at(1)!.text()).toContain('Error')
     expect(wrapper.findAll('.db-ai-pane-message').at(1)!.text()).not.toContain('missing assistant message')
     expect(wrapper.text()).toContain('DB AI pane backend returned malformed response data.')
 
@@ -16060,7 +16049,8 @@ describe('AppShell', () => {
       }
     }))
     await wrapper.find('.db-result-error button').trigger('click')
-    await flushPromises()
+    await vi.waitFor(() => expect(window.aiops.diagnoseDatabaseSqlError).toHaveBeenCalledTimes(2))
+    await vi.waitFor(() => expect((editor.element as HTMLTextAreaElement).value).toBe('SELECT fresh;'))
     const secondRequestId = vi.mocked(window.aiops.diagnoseDatabaseSqlError).mock.calls.at(-1)?.[0]?.requestId
     expect(secondRequestId).toMatch(/^dbai-diagnose-/)
     expect(secondRequestId).not.toBe(firstRequestId)
@@ -16101,6 +16091,8 @@ describe('AppShell', () => {
       await flushPromises()
       expect(wrapper.text()).toContain('DB AI drawer request service unavailable')
       expect(wrapper.find('.db-ai-drawer').exists()).toBe(false)
+      expect(wrapper.find('.db-ai-pane').exists()).toBe(true)
+      expect(wrapper.findAll('.db-ai-pane-message')).toHaveLength(0)
     } finally {
       ;(window.aiops as any).createDatabaseAiDrawerRequest = originalCreateDrawer
     }
@@ -16110,63 +16102,64 @@ describe('AppShell', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('drawer create rejected')
     expect(wrapper.find('.db-ai-drawer').exists()).toBe(false)
+    expect(wrapper.findAll('.db-ai-pane-message')).toHaveLength(0)
 
     vi.mocked(window.aiops.generateDatabaseAiDrawerResponse).mockClear()
     try {
       ;(window.aiops as any).startDatabaseAiDrawerResponse = undefined
       await wrapper.find('button[title="AI Convert SQL"]').trigger('click')
       await flushPromises()
-      expect(wrapper.find('.db-ai-drawer').exists()).toBe(true)
-      expect(wrapper.find('.db-ai-status').text()).toContain('Queued')
-      expect(wrapper.find('.db-ai-status').text()).not.toContain('Error')
+      expect(wrapper.find('.db-ai-drawer').exists()).toBe(false)
+      expect(wrapper.findAll('.db-ai-pane-message')).toHaveLength(2)
+      expect(wrapper.findAll('.db-ai-pane-message.assistant').at(-1)!.find('.db-ai-pane-message-status').text()).toContain('Error')
       expect(wrapper.text()).toContain('DB AI drawer start service unavailable')
       expect(window.aiops.generateDatabaseAiDrawerResponse).not.toHaveBeenCalled()
     } finally {
       ;(window.aiops as any).startDatabaseAiDrawerResponse = originalStartDrawer
     }
-    await wrapper.findAll('.db-ai-drawer footer button').find((button) => button.text().includes('Clear'))!.trigger('click')
+    await wrapper.find('.db-ai-pane-composer-actions button[title="Reset conversation"]').trigger('click')
 
     try {
       ;(window.aiops as any).generateDatabaseAiDrawerResponse = undefined
       await wrapper.find('button[title="AI Convert SQL"]').trigger('click')
       await flushPromises()
-      expect(wrapper.find('.db-ai-status').text()).toContain('Streaming')
-      expect(wrapper.find('.db-ai-status').text()).not.toContain('Error')
+      expect(wrapper.findAll('.db-ai-pane-message')).toHaveLength(2)
+      expect(wrapper.findAll('.db-ai-pane-message.assistant').at(-1)!.find('.db-ai-pane-message-status').text()).toContain('Error')
       expect(wrapper.text()).toContain('DB AI drawer response service unavailable')
     } finally {
       ;(window.aiops as any).generateDatabaseAiDrawerResponse = originalGenerateDrawer
     }
-    await wrapper.findAll('.db-ai-drawer footer button').find((button) => button.text().includes('Clear'))!.trigger('click')
+    await wrapper.find('.db-ai-pane-composer-actions button[title="Reset conversation"]').trigger('click')
 
     vi.mocked(window.aiops.generateDatabaseAiDrawerResponse).mockRejectedValueOnce(new Error('drawer response rejected'))
     await wrapper.find('button[title="AI Convert SQL"]').trigger('click')
     await waitForDatabaseDbAiDone()
-    expect(wrapper.find('.db-ai-status').text()).toContain('Streaming')
-    expect(wrapper.find('.db-ai-status').text()).not.toContain('Error')
+    expect(wrapper.findAll('.db-ai-pane-message')).toHaveLength(2)
+    expect(wrapper.findAll('.db-ai-pane-message.assistant').at(-1)!.find('.db-ai-pane-message-status').text()).toContain('Error')
+    expect(wrapper.findAll('.db-ai-pane-message.assistant').at(-1)!.find('.db-ai-pane-sql-result').exists()).toBe(false)
     expect(wrapper.text()).toContain('drawer response rejected')
-    await wrapper.findAll('.db-ai-drawer footer button').find((button) => button.text().includes('Clear'))!.trigger('click')
+    await wrapper.find('.db-ai-pane-composer-actions button[title="Reset conversation"]').trigger('click')
 
     vi.mocked(window.aiops.generateDatabaseAiDrawerResponse).mockImplementationOnce(() => new Promise(() => {}) as any)
     await wrapper.find('button[title="AI Convert SQL"]').trigger('click')
     await flushPromises()
-    expect(wrapper.find('.db-ai-status').text()).toContain('Streaming')
+    expect(wrapper.findAll('.db-ai-pane-message.assistant').at(-1)!.find('.db-ai-pane-message-status').text()).toContain('Streaming')
     try {
       ;(window.aiops as any).cancelDatabaseAiDrawerResponse = undefined
-      await wrapper.find('.db-ai-drawer footer').findAll('button').find((button) => button.text().includes('Cancel'))!.trigger('click')
+      await wrapper.find('.db-ai-pane-composer-actions button[title="Stop response"]').trigger('click')
       await flushPromises()
-      expect(wrapper.find('.db-ai-status').text()).toContain('Streaming')
+      expect(wrapper.findAll('.db-ai-pane-message.assistant').at(-1)!.find('.db-ai-pane-message-status').text()).toContain('Streaming')
       expect(wrapper.text()).toContain('DB AI drawer cancel service unavailable')
     } finally {
       ;(window.aiops as any).cancelDatabaseAiDrawerResponse = originalCancelDrawer
     }
     vi.mocked(window.aiops.cancelDatabaseAiDrawerResponse).mockRejectedValueOnce(new Error('drawer cancel rejected'))
-    await wrapper.find('.db-ai-drawer footer').findAll('button').find((button) => button.text().includes('Cancel'))!.trigger('click')
+    await wrapper.find('.db-ai-pane-composer-actions button[title="Stop response"]').trigger('click')
     await flushPromises()
-    expect(wrapper.find('.db-ai-status').text()).toContain('Streaming')
+    expect(wrapper.findAll('.db-ai-pane-message.assistant').at(-1)!.find('.db-ai-pane-message-status').text()).toContain('Streaming')
     expect(wrapper.text()).toContain('drawer cancel rejected')
-    await wrapper.findAll('.db-ai-drawer footer button').find((button) => button.text().includes('Clear'))!.trigger('click')
+    await wrapper.find('.db-ai-pane-composer-actions button[title="Reset conversation"]').trigger('click')
 
-    await wrapper.find('button[title="Toggle DB AI Pane"]').trigger('click')
     try {
       ;(window.aiops as any).createDatabaseAiPaneRequest = undefined
       await wrapper.find('.db-ai-pane-composer textarea').setValue('Summarize schema')
@@ -16192,8 +16185,7 @@ describe('AppShell', () => {
       await wrapper.find('.db-ai-pane-composer-actions .primary').trigger('click')
       await flushPromises()
       expect(wrapper.findAll('.db-ai-pane-message')).toHaveLength(2)
-      expect(wrapper.findAll('.db-ai-pane-message').at(1)!.text()).toContain('Queued')
-      expect(wrapper.findAll('.db-ai-pane-message').at(1)!.text()).not.toContain('Error')
+      expect(wrapper.findAll('.db-ai-pane-message').at(1)!.text()).toContain('Error')
       expect(wrapper.text()).toContain('DB AI pane start service unavailable')
       expect(window.aiops.generateDatabaseAiPaneResponse).not.toHaveBeenCalled()
     } finally {
@@ -16206,8 +16198,7 @@ describe('AppShell', () => {
       await wrapper.find('.db-ai-pane-composer textarea').setValue('Generate pane missing')
       await wrapper.find('.db-ai-pane-composer-actions .primary').trigger('click')
       await flushPromises()
-      expect(wrapper.findAll('.db-ai-pane-message').at(1)!.text()).toContain('Streaming')
-      expect(wrapper.findAll('.db-ai-pane-message').at(1)!.text()).not.toContain('Error')
+      expect(wrapper.findAll('.db-ai-pane-message').at(1)!.text()).toContain('Error')
       expect(wrapper.text()).toContain('DB AI pane response service unavailable')
     } finally {
       ;(window.aiops as any).generateDatabaseAiPaneResponse = originalGeneratePane
@@ -16218,9 +16209,8 @@ describe('AppShell', () => {
     await wrapper.find('.db-ai-pane-composer textarea').setValue('Generate pane rejected')
     await wrapper.find('.db-ai-pane-composer-actions .primary').trigger('click')
     await flushPromises()
-    expect(wrapper.findAll('.db-ai-pane-message').at(1)!.text()).toContain('Streaming')
-    expect(wrapper.findAll('.db-ai-pane-message').at(1)!.text()).not.toContain('Error')
-    expect(wrapper.findAll('.db-ai-pane-message').at(1)!.text()).not.toContain('pane response rejected')
+    expect(wrapper.findAll('.db-ai-pane-message').at(1)!.text()).toContain('Error')
+    expect(wrapper.findAll('.db-ai-pane-message').at(1)!.text()).toContain('pane response rejected')
     expect(wrapper.text()).toContain('pane response rejected')
     await wrapper.find('.db-ai-pane-composer-actions button[title="Reset conversation"]').trigger('click')
 
@@ -16260,7 +16250,7 @@ describe('AppShell', () => {
 
     vi.mocked(window.aiops.diagnoseDatabaseSqlError).mockRejectedValueOnce(new Error('diagnosis rejected'))
     await wrapper.find('.db-result-error button').trigger('click')
-    await flushPromises()
+    await vi.waitFor(() => expect(wrapper.find('.db-result-diagnose-error').text()).toContain('diagnosis rejected'))
     expect(wrapper.find('.db-result-diagnose-error').text()).toContain('diagnosis rejected')
     expect((editor.element as HTMLTextAreaElement).value).toBe('syntax_error')
 
@@ -17488,6 +17478,20 @@ describe('AppShell', () => {
     expect(workspace.text()).toContain('Claude Code')
     expect(workspace.text()).toContain('其他 Agent 手动配置')
     expect(workspace.find('.external-codex-mcp-card').text()).toContain('aiopsterm_hosts')
+    const databaseReadToggle = workspace
+      .findAll('.export-mcp-auth-toggle')
+      .find((row) => row.text().includes('允许外部 Agent 读取数据库'))!
+    expect((databaseReadToggle.find('input').element as HTMLInputElement).checked).toBe(false)
+    vi.mocked(window.aiops.saveConfig).mockClear()
+    await databaseReadToggle.find('input').setValue(true)
+    await flushPromises()
+    expect(window.aiops.saveConfig).toHaveBeenCalledWith({
+      exportMcp: {
+        allowAgentSshAuthSubmit: false,
+        allowDatabaseRead: true
+      }
+    })
+    expect(store.config.exportMcp).toEqual({ allowAgentSshAuthSubmit: false, allowDatabaseRead: true })
     expect(workspace.find('.export-mcp-manual-card').text()).toContain('复制 JSON 模板')
     expect(workspace.find('.export-mcp-manual-card').text()).toContain('<aiopsterm-managed-token>')
     vi.mocked(window.aiops.copyExportMcpConfig).mockClear()

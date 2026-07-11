@@ -259,6 +259,7 @@ export type DatabaseTableQueryInput = {
   databaseName: string
   schemaName?: string
   tableName: string
+  columns?: string[]
   filters?: DatabaseColumnFilter[]
   sort?: DatabaseColumnSort | null
   whereRaw?: string | null
@@ -266,6 +267,7 @@ export type DatabaseTableQueryInput = {
   page: number
   pageSize: number
   withTotal?: boolean
+  requireStableBaseTable?: boolean
 }
 
 export type DatabaseTableQueryResult = AiopsMutationResult<{
@@ -380,6 +382,29 @@ export type DatabaseAiPaneMessageInput = {
   content: string
 }
 
+export type DatabaseAiDrawerAction = 'explain' | 'nl2sql' | 'optimize' | 'convert' | 'complete' | 'diagnose' | 'drop' | 'truncate'
+
+export type DatabaseAiTargetDialect = DatabaseEngineCode | 'mssql'
+
+export type DatabaseAiResponseLanguage = 'zh-CN' | 'en-US'
+
+export type DatabaseAiPaneSqlAction = {
+  action: DatabaseAiDrawerAction
+  label: string
+  sourceSql: string
+  generatedSql: string
+  targetDialect: DatabaseAiTargetDialect
+  transport: 'pane' | 'drawer'
+  context: {
+    connectionId?: string
+    dbType?: DatabaseEngineCode | ''
+    databaseName?: string
+    schemaName?: string
+    tableName?: string
+    contextSummary?: string
+  }
+}
+
 export type DatabaseAiPaneMessageRecord = {
   id: string
   requestId: string
@@ -389,6 +414,9 @@ export type DatabaseAiPaneMessageRecord = {
   contextSummary: string
   createdAt: number
   updatedAt: number
+  responseLanguage?: DatabaseAiResponseLanguage
+  context?: DatabaseAiPaneStateContext
+  sqlAction?: DatabaseAiPaneSqlAction
 }
 
 export type DatabaseAiPaneStateContext = {
@@ -399,6 +427,7 @@ export type DatabaseAiPaneStateContext = {
 }
 
 export type DatabaseAiPaneStateSnapshot = {
+  conversationId?: string
   open: boolean
   width: number
   context: DatabaseAiPaneStateContext
@@ -409,14 +438,18 @@ export type DatabaseAiPaneStateSnapshot = {
 export type DatabaseAiPaneStateResult = AiopsMutationResult<DatabaseAiPaneStateSnapshot>
 
 export type DatabaseAiPaneResponseInput = {
+  conversationId?: string
   requestId?: string
   assistantMessageId?: string
   prompt: string
+  action?: DatabaseAiDrawerAction
+  responseLanguage?: DatabaseAiResponseLanguage
   context: {
     connectionId: string
     dbType?: DatabaseEngineCode | ''
     databaseName: string
     schemaName?: string
+    tableName?: string
     contextSummary?: string
   }
   activeSql?: string
@@ -450,13 +483,10 @@ export type DatabaseAiPaneResponseResult = AiopsMutationResult<{
   durationMs: number
 }>
 
-export type DatabaseAiDrawerAction = 'explain' | 'nl2sql' | 'optimize' | 'convert' | 'complete' | 'diagnose' | 'drop' | 'truncate'
-
-export type DatabaseAiTargetDialect = DatabaseEngineCode | 'mssql'
-
 export type DatabaseAiDrawerResponseInput = {
   requestId?: string
   action: DatabaseAiDrawerAction
+  responseLanguage?: DatabaseAiResponseLanguage
   sourceSql: string
   targetDialect?: DatabaseAiTargetDialect
   context: {
@@ -479,6 +509,7 @@ export type DatabaseAiDrawerRequestRecord = {
   sourceSql: string
   text: string
   targetDialect: DatabaseAiTargetDialect
+  responseLanguage?: DatabaseAiResponseLanguage
   backendContext: DatabaseAiDrawerResponseInput['context']
   createdAt: number
   updatedAt: number
@@ -506,6 +537,7 @@ export type DatabaseAiDrawerResponseResult = AiopsMutationResult<{
 export type DatabaseSqlErrorDiagnosisInput = {
   requestId?: string
   sourceSql: string
+  responseLanguage?: DatabaseAiResponseLanguage
   targetDialect?: DatabaseAiTargetDialect
   context: DatabaseAiDrawerResponseInput['context']
   errorMessage: string

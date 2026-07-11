@@ -9,6 +9,7 @@ import { configureAiContextBackendRuntime } from '../ai/aiContext'
 import { configureAiTodoBackendRuntime } from '../ai/aiTodos'
 import { configureAliasBackendRuntime } from '../quick-commands/aliases'
 import { configureAgentHookInstallerRuntime } from '../agent/agentHookInstaller'
+import { configureClineAgentRuntime } from '../agent/clineAgentRuntime'
 import {
   agentHookScriptPathFor,
   configureManagedAiSessionAutoNamingRuntime,
@@ -105,6 +106,15 @@ const controlHelperScriptPath = () => {
 
 export const configureMainBackendRuntimes = (input: ConfigureMainRuntimeInput) => {
   const userDataPath = app.getPath('userData')
+  configureClineAgentRuntime({
+    appPath: app.getAppPath(),
+    resourcesPath: process.resourcesPath || '',
+    userDataPath,
+    isPackaged: app.isPackaged,
+    getConfig: input.getConfig,
+    getWindows: () => BrowserWindow.getAllWindows(),
+    env: process.env
+  })
   configureExportMcpTokenRuntime({
     userDataPath,
     getEnv: () => process.env
@@ -289,6 +299,7 @@ export const configureMainBackendRuntimes = (input: ConfigureMainRuntimeInput) =
     getConfig: input.getConfig,
     listSkills: () => input.loadSkillsFromDisk(),
     localBackendDouble: shouldUseAiChatBackendDouble(),
+    clineEnabled: true,
     callMcpTool: async (toolInput) => {
       const current = input.getConfig()
       return callMcpTool(await input.loadCurrentMcpConfigFile(), toolInput, {

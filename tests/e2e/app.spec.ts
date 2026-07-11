@@ -431,6 +431,7 @@ const startVoiceTranscriptionServer = async () => {
 
 const startOllamaChatServer = async () => {
   const requests: Array<{ method?: string; url?: string; body: Buffer }> = []
+  const content = '当前响应由 E2E Ollama 后端生成。\n\n建议先执行只读检查，再确认是否需要后续修复。'
   const server = createServer((request, response) => {
     const chunks: Buffer[] = []
     request.on('data', (chunk) => chunks.push(Buffer.from(chunk)))
@@ -441,20 +442,32 @@ const startOllamaChatServer = async () => {
         url: request.url,
         body
       })
-      if (request.method !== 'POST' || request.url !== '/api/chat') {
+      if (request.method !== 'POST' || !request.url?.endsWith('/chat/completions')) {
         response.writeHead(400, { 'content-type': 'application/json' })
         response.end(JSON.stringify({ error: 'unexpected chat request' }))
         return
       }
-      response.writeHead(200, { 'content-type': 'application/json' })
+      response.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8' })
       setTimeout(() => {
-        response.end(
-          JSON.stringify({
-            message: {
-              content: '当前响应由 E2E Ollama 后端生成。\n\n建议先执行只读检查，再确认是否需要后续修复。'
-            }
-          })
-        )
+        const chunks = [
+          {
+            id: 'chatcmpl-e2e-final',
+            object: 'chat.completion.chunk',
+            created: 1,
+            model: 'qwen2.5-coder',
+            choices: [{ index: 0, delta: { role: 'assistant', content }, finish_reason: null }]
+          },
+          {
+            id: 'chatcmpl-e2e-final',
+            object: 'chat.completion.chunk',
+            created: 1,
+            model: 'qwen2.5-coder',
+            choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+            usage: { prompt_tokens: 20, completion_tokens: 12, total_tokens: 32 }
+          },
+          '[DONE]'
+        ]
+        response.end(`${chunks.map((chunk) => `data: ${typeof chunk === 'string' ? chunk : JSON.stringify(chunk)}`).join('\n\n')}\n\n`)
       }, 700)
     })
   })
@@ -961,7 +974,29 @@ test('control socket and external Codex MCP expose automation without browser co
 
     const tools = await mcp.request({ jsonrpc: '2.0', id: 'mcp-tools', method: 'tools/list', params: {} })
     expect((tools.result?.tools || []).map((tool: JsonObject) => tool.name)).toEqual(
-      expect.arrayContaining(['list_hosts', 'list_connections', 'disconnect_host', 'list_ai_sessions', 'list_ai_notifications'])
+      expect.arrayContaining([
+        'list_hosts',
+        'list_connections',
+        'disconnect_host',
+        'list_ai_sessions',
+        'list_ai_notifications',
+        'list_database_connections',
+        'search_database_objects',
+        'describe_database_table',
+        'get_database_table_ddl',
+        'query_database_table'
+      ])
+    )
+
+    const databaseReadsDisabled = await mcp.request({
+      jsonrpc: '2.0',
+      id: 'mcp-database-disabled',
+      method: 'tools/call',
+      params: { name: 'list_database_connections', arguments: {} }
+    })
+    expect(databaseReadsDisabled.result?.isError).toBe(true)
+    expect(databaseReadsDisabled.result?.structuredContent).toEqual(
+      expect.objectContaining({ ok: false, errorCode: 'DB_MCP_DATABASE_READ_DISABLED' })
     )
 
     const hosts = await mcp.request({ jsonrpc: '2.0', id: 'mcp-hosts', method: 'tools/call', params: { name: 'list_hosts', arguments: { query: 'prod' } } })
@@ -1571,20 +1606,20 @@ test('aiopsterm primary desktop flows', async () => {
     await expect(page.locator('.k8s-config-cluster-item').filter({ hasText: 'manual-cluster-renamed' })).toHaveCount(0)
 
     await page.getByTitle('数据库').click()
-    await expect(page.locator('.db-sidebar-header').filter({ hasText: 'Database' })).toBeVisible()
+    await expect(page.locator('.db-sidebar-header').filter({ hasText: '数据库' })).toBeVisible()
     await expect(page.locator('.db-tree-row.connection').filter({ hasText: 'orders-postgres' })).toBeVisible()
     await page.locator('.db-tree-row.connection').filter({ hasText: 'orders-postgres' }).click({ button: 'right' })
     const dbConnectionMenu = page.locator('.db-context-menu')
     await expect(dbConnectionMenu).toBeVisible()
-    await expect(dbConnectionMenu.locator('button').filter({ hasText: 'Close Connection' })).toBeVisible()
-    await expect(dbConnectionMenu.locator('button').filter({ hasText: 'Query Console' })).toBeEnabled()
-    await expect(dbConnectionMenu.locator('button').filter({ hasText: 'Create Database' })).toBeEnabled()
-    await dbConnectionMenu.locator('.db-popup-submenu-wrap').filter({ hasText: 'Move To' }).hover()
-    await expect(dbConnectionMenu.locator('.db-popup-submenu button').filter({ hasText: 'Root Group' })).toBeEnabled()
+    await expect(dbConnectionMenu.locator('button').filter({ hasText: '关闭连接' })).toBeVisible()
+    await expect(dbConnectionMenu.locator('button').filter({ hasText: '查询控制台' })).toBeEnabled()
+    await expect(dbConnectionMenu.locator('button').filter({ hasText: '创建数据库' })).toBeEnabled()
+    await dbConnectionMenu.locator('.db-popup-submenu-wrap').filter({ hasText: '移动到' }).hover()
+    await expect(dbConnectionMenu.locator('.db-popup-submenu button').filter({ hasText: '根分组' })).toBeEnabled()
     await expect(dbConnectionMenu.locator('.db-popup-submenu button').filter({ hasText: 'Local Lab' })).toBeVisible()
     await page.locator('.db-sidebar-header').click()
     await expect(dbConnectionMenu).not.toBeVisible()
-    await expect(page.locator('.db-overview').getByText('New Connection')).toBeVisible()
+    await expect(page.locator('.db-overview').getByText('新建连接')).toBeVisible()
     await page.locator('.db-search input').fill('metrics')
     await expect(page.locator('.db-search-clear')).toBeVisible()
     await page.locator('.db-search-clear').click()
@@ -1592,20 +1627,20 @@ test('aiopsterm primary desktop flows', async () => {
     await page.locator('.db-search input').fill('oracle')
     await page.locator('.db-search input').press('Escape')
     await expect(page.locator('.db-search input')).toHaveValue('')
-    await page.locator('.db-sidebar-actions button[title="Add"]').click()
+    await page.locator('.db-sidebar-actions button[title="添加"]').click()
     await expect(page.locator('.db-add-menu')).toBeVisible()
     await page.locator('.db-sidebar-header').click()
     await expect(page.locator('.db-add-menu')).not.toBeVisible()
-    await page.locator('.db-sidebar-actions button[title="Add"]').click()
+    await page.locator('.db-sidebar-actions button[title="添加"]').click()
     await expect(page.locator('.db-add-menu')).toBeVisible()
     await page.locator('.db-add-menu button').filter({ hasText: 'PostgreSQL' }).click()
     const dbConnectionModal = page.locator('.db-connection-modal')
     await expect(dbConnectionModal).toContainText('PostgreSQL')
-    await expect(dbConnectionModal).toContainText('SSL Mode')
+    await expect(dbConnectionModal).toContainText('SSL 模式')
     await dbConnectionModal.locator('input').first().fill('e2e-postgres')
     await dbConnectionModal.locator('select').nth(3).selectOption('verify-full')
     await expect(dbConnectionModal.locator('input').nth(7)).toHaveValue('jdbc:postgresql://127.0.0.1:5432')
-    await dbConnectionModal.locator('footer button').filter({ hasText: 'Test Connection' }).click()
+    await dbConnectionModal.locator('footer button').filter({ hasText: '测试连接' }).click()
     await expect(dbConnectionModal).toContainText('PostgreSQL 16 local backend validation')
     await dbConnectionModal.locator('button[type="submit"]').click()
     await expect(page.locator('.db-tree-row.connection').filter({ hasText: 'e2e-postgres' })).toBeVisible()
@@ -1619,7 +1654,7 @@ test('aiopsterm primary desktop flows', async () => {
     const e2eSqlSavePath = path.join(os.homedir(), 'Downloads', 'Query-1-orders-postgres-orders-public.sql')
     await rm(e2eSqlSavePath, { force: true })
     await sqlSaveAsButton.click()
-    await expect(page.locator('.db-sql-save-state')).toContainText('Saved:')
+    await expect(page.locator('.db-sql-save-state')).toContainText('已保存：')
     await expect
       .poll(async () => {
         try {
@@ -1630,59 +1665,73 @@ test('aiopsterm primary desktop flows', async () => {
       })
       .toContain("select id, service from public.orders where status = 'open'")
     await page.locator('.db-sql-editor').fill("select id from public.orders where status = 'open';")
-    await expect(page.locator('.db-sql-save-state')).toContainText('Unsaved changes')
+    await expect(page.locator('.db-sql-save-state')).toContainText('有未保存的更改')
     await sqlSaveButton.click()
-    await expect(page.locator('.db-sql-save-state')).toContainText('Saved:')
+    await expect(page.locator('.db-sql-save-state')).toContainText('已保存：')
     await expect.poll(async () => readFile(e2eSqlSavePath, 'utf-8')).toContain("select id from public.orders where status = 'open';")
     await rm(e2eSqlSavePath, { force: true })
     await page.locator('.db-sql-editor').fill("select id, service from public.orders where status = 'open' order by updated_at desc limit 5; select * from ops.ops_incidents;")
-    await page.getByTitle('Format').click()
+    await page.getByTitle('格式化').click()
     await expect(page.locator('.db-sql-editor')).toHaveValue(/SELECT\n  id/)
-    await page.getByTitle('Run all').click()
+    await page.getByTitle('运行全部').click()
     await expect(page.locator('.db-result-tabs').filter({ hasText: '#1-1' })).toBeVisible()
     await expect(page.locator('.db-result-table').filter({ hasText: 'payment-api' })).toBeVisible()
-    await page.locator('.db-result-table th').filter({ hasText: 'service' }).getByTitle('Filter').click()
+    await page.locator('.db-result-table th').filter({ hasText: 'service' }).getByTitle('筛选').click()
     await expect(page.locator('.db-filter-popover')).toContainText('payment-api')
     await page.locator('.db-filter-search input').fill('orders')
     await page.locator('.db-filter-popover input[type="checkbox"]').first().check()
     await page.locator('.db-filter-footer .primary').click()
     await expect(page.locator('.db-result-table')).toContainText('orders-worker')
     await expect(page.locator('.db-result-table')).not.toContainText('payment-api')
-    await page.locator('.db-result-table th').filter({ hasText: 'service' }).getByTitle('Filter').click()
+    await page.locator('.db-result-table th').filter({ hasText: 'service' }).getByTitle('筛选').click()
     await page.locator('.db-filter-row.all button').click()
     await expect(page.locator('.db-result-table')).toContainText('payment-api')
-    await page.locator('.db-result-tabs [role="tab"]').filter({ hasText: 'Overview' }).click()
-    await expect(page.locator('.db-sql-overview th')).toHaveText(['SQL', 'Message', 'Time'])
-    await expect(page.locator('.db-sql-overview')).toContainText('Execution OK')
+    await page.locator('.db-result-tabs [role="tab"]').filter({ hasText: '概览' }).click()
+    await expect(page.locator('.db-sql-overview th')).toHaveText(['SQL', '消息', '时间'])
+    await expect(page.locator('.db-sql-overview')).toContainText('执行成功')
     await page.locator('.db-sql-overview tbody tr').first().click()
     await expect(page.locator('.db-result-table').filter({ hasText: 'payment-api' })).toBeVisible()
     await page.locator('.db-sql-editor').evaluate((node: HTMLTextAreaElement) => {
       const offset = node.value.indexOf('ops_incidents')
       node.setSelectionRange(offset, offset)
     })
-    await page.getByTitle('Run current statement').click()
+    await page.getByTitle('运行当前语句').click()
     await expect(page.locator('.db-result-table').filter({ hasText: 'checkout' })).toBeVisible()
     await page.locator('.db-sql-editor').fill('select id from "public"."orders" where status = \'open\';\nselect * from ops.ops_incidents;')
     await page.locator('.db-sql-editor').evaluate((node: HTMLTextAreaElement) => {
       const selected = 'select id from "public"."orders" where status = \'open\''
       node.setSelectionRange(0, selected.length)
     })
-    await page.getByTitle('AI Convert SQL').click()
-    await expect(page.locator('.db-ai-drawer')).toContainText('Convert SQL')
-    await expect(page.locator('.db-ai-section').filter({ hasText: 'Reasoning' })).toBeVisible()
-    await expect(page.locator('.db-ai-section').filter({ hasText: 'Response' })).toBeVisible()
-    await page.locator('.db-ai-dialect-row select').selectOption('mssql')
-    await expect(page.locator('.db-ai-drawer')).toContainText('Text-only conversion')
-    await expect(page.locator('.db-ai-sql-actions pre')).toContainText('SELECT TOP (100)')
-    await expect(page.locator('.db-ai-sql-actions button').filter({ hasText: 'Run ReadOnly' })).toBeDisabled()
-    await page.locator('.db-ai-drawer footer button').filter({ hasText: 'Clear' }).click()
+    await page.getByTitle('AI 解释 SQL').click()
+    await expect(page.locator('.db-ai-pane')).toBeVisible()
+    const firstExplainAssistant = page.locator('.db-ai-pane-message.assistant').last()
+    await expect(firstExplainAssistant.locator('.db-ai-pane-message-status')).toContainText('已完成')
+    await expect(firstExplainAssistant.locator('.db-ai-pane-message-content')).toContainText('当前 SQL 编辑器内容和数据库上下文')
+    await expect(firstExplainAssistant).not.toContainText('DB AI pane request was not found.')
+    await page.getByTitle('重置对话').click()
+    await expect(page.locator('.db-ai-pane-message')).toHaveCount(0)
+    await page.getByTitle('AI 转换 SQL').click()
+    await expect(page.locator('.db-ai-drawer')).toHaveCount(0)
+    await expect(page.locator('.db-ai-pane')).toBeVisible()
+    await expect(page.locator('.db-ai-pane-message.user').last()).toContainText('转换 SQL')
+    await expect(page.locator('.db-ai-pane-message.user').last().locator('.db-ai-pane-source-sql')).toContainText('select id from "public"."orders"')
+    const convertAssistant = page.locator('.db-ai-pane-message.assistant').last()
+    await expect(convertAssistant.locator('.db-ai-pane-message-status')).toContainText('已完成')
+    await expect(convertAssistant.locator('.db-ai-pane-message-content')).toContainText('已通过 aiopsterm 后端边界读取当前数据库上下文')
+    await expect(convertAssistant.locator('.db-ai-pane-sql-result')).toBeVisible()
+    await convertAssistant.locator('.db-ai-pane-sql-result select[title="目标方言"]').selectOption('mssql')
+    await expect(convertAssistant.locator('.db-ai-pane-message-content')).toContainText('SQL Server')
+    await expect(convertAssistant.locator('.db-ai-pane-sql-result pre')).toContainText('SELECT TOP (100)')
+    await expect(convertAssistant.locator('.db-ai-pane-sql-result button[aria-label="运行只读 SQL"]')).toBeDisabled()
+    await page.getByTitle('重置对话').click()
+    await expect(page.locator('.db-ai-pane-message')).toHaveCount(0)
     const ordersTableRow = page.locator('.db-tree-row.table').filter({ hasText: 'orders' }).first()
     await ordersTableRow.locator('button').click()
     await expect(page.locator('.db-tree-row.column').filter({ hasText: 'owner' })).toBeVisible()
     await page.locator('.db-tree-row.column').filter({ hasText: 'owner' }).click()
     await expect(page.locator('.db-tree-row.column').filter({ hasText: 'owner' })).toHaveClass(/selected/)
     await ordersTableRow.click({ button: 'right' })
-    await page.locator('.db-context-menu button').filter({ hasText: 'Query Console' }).click()
+    await page.locator('.db-context-menu button').filter({ hasText: '查询控制台' }).click()
     await expect(page.locator('.db-sql-editor')).toHaveValue('SELECT *\nFROM "public"."orders"\nLIMIT 100;')
     await ordersTableRow.dblclick()
     await expect(page.locator('.db-where-bar').filter({ hasText: 'orders' })).toBeVisible()
@@ -1693,40 +1742,43 @@ test('aiopsterm primary desktop flows', async () => {
     await page.locator('.db-result-table td input').fill('alice-e2e')
     await page.locator('.db-result-table td input').press('Enter')
     await expect(page.locator('.db-result-table tbody tr.updated')).toBeVisible()
-    await expect(page.locator('.db-edit-summary')).toContainText('1 Updated')
+    await expect(page.locator('.db-edit-summary')).toContainText('1 已更新')
     await expect(page.locator('.db-edit-summary pre')).toContainText('UPDATE "public"."orders"')
-    await page.locator('.db-toolbar button[title="Undo"]').click()
+    await page.locator('.db-toolbar button[title="撤销"]').click()
     await expect(page.locator('.db-edit-summary')).not.toBeVisible()
     await expect(page.locator('.db-result-table')).toContainText('alice')
-    await page.locator('.db-toolbar button[title="Add row"]').click()
+    await page.locator('.db-toolbar button[title="添加行"]').click()
     await expect(page.locator('.db-result-table tbody tr.new')).toBeVisible()
-    await expect(page.locator('.db-edit-summary')).toContainText('1 New')
+    await expect(page.locator('.db-edit-summary')).toContainText('1 新增')
     await page.locator('.db-result-table tbody tr.new td').nth(4).dblclick()
     await page.locator('.db-result-table tbody tr.new input').fill('e2e-owner')
     await page.locator('.db-result-table tbody tr.new input').press('Enter')
     await expect(page.locator('.db-edit-summary pre')).toContainText('INSERT INTO "public"."orders"')
     await page.locator('.db-result-table tbody tr.new').click()
-    await page.locator('.db-toolbar button[title="Delete row"]').click()
+    await page.locator('.db-toolbar button[title="删除行"]').click()
     await expect(page.locator('.db-edit-summary')).not.toBeVisible()
     await page.locator('.db-result-table tbody tr').first().click()
-    await page.locator('.db-toolbar button[title="Delete row"]').click()
+    await page.locator('.db-toolbar button[title="删除行"]').click()
     await expect(page.locator('.db-result-table tbody tr.deleted')).toBeVisible()
-    await expect(page.locator('.db-edit-summary')).toContainText('1 Deleted')
+    await expect(page.locator('.db-edit-summary')).toContainText('1 已删除')
     await expect(page.locator('.db-edit-summary pre')).toContainText('DELETE FROM "public"."orders"')
-    await page.locator('.db-edit-summary-actions button').filter({ hasText: 'Discard All' }).click()
+    await page.locator('.db-edit-summary-actions button').filter({ hasText: '全部丢弃' }).click()
     await expect(page.locator('.db-edit-summary')).not.toBeVisible()
     await page.locator('.db-tree-row.table').filter({ hasText: 'orders' }).click({ button: 'right' })
     await expect(page.locator('.db-context-menu')).toBeVisible()
-    await page.locator('.db-context-menu button').filter({ hasText: 'View DDL' }).click()
+    await page.locator('.db-context-menu button').filter({ hasText: '查看 DDL' }).click()
     await expect(page.locator('.db-ddl-modal textarea')).toHaveValue(/CREATE TABLE/)
     await page.locator('.db-ddl-modal header button').click()
     await page.locator('.db-tree-row.table').filter({ hasText: 'orders' }).click({ button: 'right' })
-    await page.locator('.db-context-menu button').filter({ hasText: 'Drop' }).click()
+    await page.locator('.db-context-menu button').filter({ hasText: '删除 table' }).click()
     await expect(page.locator('.db-danger-confirm')).toContainText('DROP TABLE')
     await page.locator('.db-danger-confirm input').fill('orders')
     await page.locator('.db-danger-confirm footer .danger').click()
-    await expect(page.locator('.db-ai-drawer')).toContainText('DROP TABLE public.orders')
-    await expect(page.locator('.db-ai-sql-actions')).toContainText('Generated SQL')
+    await expect(page.locator('.db-ai-drawer')).toHaveCount(0)
+    await expect(page.locator('.db-ai-pane-message.user').last()).toContainText('删除 table')
+    await expect(page.locator('.db-ai-pane-message.user').last().locator('.db-ai-pane-source-sql')).toContainText('DROP TABLE public.orders')
+    await expect(page.locator('.db-ai-pane-sql-result').last().locator('pre')).toContainText('DROP TABLE public.orders;')
+    await expect(page.locator('.db-ai-pane-sql-result').last().locator('button[aria-label="运行只读 SQL"]')).toBeDisabled()
 
     await page.locator('.side-rail .rail-button[title="设置"]').click()
     await expect(page.locator('.settings-workspace-title').getByRole('heading', { name: '设置' })).toBeVisible()
@@ -2030,6 +2082,7 @@ test('aiopsterm primary desktop flows', async () => {
     await expect(page.getByTestId('ai-context-usage-ring')).toBeVisible()
     await expect(page.getByTestId('ai-context-usage-ring')).toHaveAttribute('title', /\d+% - .+ \/ 128\.0K context used/)
     await expect(page.getByText('当前响应由 E2E Ollama 后端生成。')).toBeVisible()
+    expect(aiChatServer.requests.at(-1)?.url).toMatch(/\/chat\/completions$/)
     const finalAiChatRequestBody = aiChatServer.requests.at(-1)?.body.toString('utf8') || ''
     expect(finalAiChatRequestBody).toContain('qwen2.5-coder')
     expect(finalAiChatRequestBody).toContain('检查生产磁盘')

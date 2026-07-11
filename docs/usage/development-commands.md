@@ -22,6 +22,15 @@ npm test
 npm run audit:client-mocks
 ```
 
+Build and validate the official Cline SDK sidecar after changing Agent runtime, provider, tool, protocol, or packaging code:
+
+```bash
+npm run build:cline-sidecar
+npm run audit:cline-sidecar
+```
+
+The build uses exact-pinned Bun `1.3.13` only to bundle `@cline/sdk@0.0.59`; it copies the exact-pinned Node `22.20.0` runtime for the current platform into ignored `build/cline-sidecar/`. The output also includes the metafile, CycloneDX SBOM, complete JavaScript third-party notices, Node's upstream license/third-party notices, and Cline attribution. The audit checks all artifacts, rejects restricted Claude Code/SAP provider dependencies, initializes every retained provider, and runs a deterministic two-request SSE loop through approval, tool execution, tool-result feedback, and final text before shutdown. A runtime built on one OS is not evidence for another target; macOS and Windows packaging must build and run the sidecar on native runners.
+
 `audit:client-mocks` fails if renderer source reintroduces page-level business mock files, imports from `src/renderer/src/data`, backend seed/double switches, shared seed modules, imports from the reference-only `external-reference/` tree, renderer-generated backend business id prefixes, generic string-prefix renderer id helpers, or business fixture exports/fields hidden under `src/renderer/src/config`. It also scans source, scripts, package scripts, and build/package config for `external-reference/` reference-tree paths so the reference implementation cannot be copied, built from, or packaged by aiopsterm; explicit package exclusions such as `!external-reference/**` remain allowed. UI placeholders, static UI config metadata, UI-only id helpers with explicit prefix unions, `.external-reference` plugin package names, and backend/test-only seeds remain allowed behind their existing boundaries.
 
 Run the opt-in live SSH/SFTP backend verification against a real host:
@@ -141,7 +150,7 @@ For a Windows unpacked directory build during package debugging:
 npm run build:win:dir
 ```
 
-`build:linux`, `build:linux:appimage`, and `build:deb` first regenerate the self-owned app icon PNGs from `resources/app-icon-source.png`, then build and audit the bundled Codex package with `build:codex`, run `rebuild:native` with an explicit Electron headers URL, then run electron-builder with automatic rebuild disabled. Linux `build:codex` runs the locally modified `codex/` tree's package builder for the musl target (`x86_64-unknown-linux-musl` on x64), uses the Rust toolchain declared by Codex, and rejects runtimes that still depend on OpenSSL 1.1 dynamic libraries. The Linux build host needs `ca-certificates curl musl-tools pkg-config libcap-dev g++ clang libc++-dev libc++abi-dev lld xz-utils`; CI can also supply `AIOPSTERM_CODEX_BWRAP_BIN` / `AIOPSTERM_CODEX_RG_BIN` for prebuilt helper resources, and `RUSTY_V8_ARCHIVE` plus `RUSTY_V8_SRC_BINDING_PATH` when V8 artifacts are pre-cached. Linux packaging uses the self-owned PNG icon set under `resources/icons`, copies those PNGs into packaged resources for runtime window icons, copies the complete generated Codex package into `resources/codex`, registers the `aiopsterm://` desktop protocol, and trims packaged native-module build-only files through the `afterPack` hook. If the environment cannot download Electron headers or Codex release artifacts, packaging fails before app packaging starts. In that case, rerun the same command after network access is restored or provide the corresponding local caches.
+`build:linux`, `build:linux:appimage`, and `build:deb` first regenerate the self-owned app icon PNGs, build the bundled Codex package, build the current-platform Cline Node runtime plus bundle, run the application build and native rebuild, then invoke electron-builder. Linux packaging copies the sidecar runtime, bundle, SBOM, notices, and attribution beside the application resources while excluding `@cline/*`, raw platform Node npm packages, sidecar TypeScript, and `external-reference/` from `app.asar`. Linux `build:codex` still uses the local Codex tree's musl package builder and its documented native prerequisites. If the environment cannot download Electron headers, Codex release artifacts, npm packages, or Bun, packaging fails before app packaging starts and must be retried with network access or the corresponding caches.
 
 `build:mac` uses the same self-owned build output and electron-builder config, with `dmg` and `zip` targets matching the External reference-style desktop package split. Run it on macOS because macOS targets require the platform signing and packaging toolchain; Linux development machines should use `audit:package-config` to verify the macOS target configuration without attempting to produce a macOS package.
 

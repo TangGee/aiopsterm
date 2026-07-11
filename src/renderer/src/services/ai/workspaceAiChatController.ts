@@ -10,15 +10,14 @@ import {
 } from '@/services/ai/aiChatBackendGuards'
 import { aiChatClient } from '@/services/ai/aiChatClient'
 import {
+  applyClassicClineTaskEvent,
+  isActiveClassicClineTaskMessage
+} from '@/services/ai/classicClineTaskRuntime'
+import {
   hasStructuredAiContentParts,
   plainTextFromAiContentParts,
   sendableAiContentParts
 } from '@/services/ai/aiPanelInputRuntime'
-import {
-  buildAgentCommandOutputMessagesForRequest,
-  buildAgentCommandOutputPrompt,
-  createAgentCommandOutputMessages
-} from '@/services/terminal/terminalAgentLoopRuntime'
 import { createWorkspaceAiChatCatalogRuntime } from '@/services/ai/workspaceAiChatCatalogRuntime'
 import {
   chatHistoryMessageToChatMessage,
@@ -45,6 +44,7 @@ import type {
   AiContentPart,
   AiContextOption
 } from '@shared/contracts/aiChat'
+import type { ClineAgentTaskEvent } from '@shared/contracts/clineAgent'
 
 export type { ChatMessage, ConversationItem, TodoItem } from '@/services/ai/workspaceAiChatTypes'
 
@@ -55,7 +55,6 @@ export const createWorkspaceAiChatController = (
   const {
     mode,
     config,
-    aiPreferences,
     conversations,
     selectedConversationId,
     aiContextCatalog,
@@ -73,12 +72,9 @@ export const createWorkspaceAiChatController = (
   const {
     setTopNotice,
     i18nText,
-    createRendererLocalId,
     resolveAiKnowledgeSearchContexts,
     applyMcpServersSnapshot,
     resolveActiveWritableTerminalPanel,
-    runActiveTerminalCommand,
-    waitForTerminalOutputAfter,
     findKnowledgeNode,
     backendKnowledgeEntryOrNotice,
     uniqueKnowledgeFileName,
@@ -136,6 +132,33 @@ export const createWorkspaceAiChatController = (
     toggleMessageFavorite
   } = chatHistoryRuntime
 
+  const pendingClineEvents = new Map<string, ClineAgentTaskEvent[]>()
+  const shouldPersistClineEvent = (event: ClineAgentTaskEvent) =>
+    event.type === 'approval-requested' ||
+    event.type === 'tool-result' ||
+    event.type === 'done' ||
+    event.type === 'cancelled' ||
+    event.type === 'error'
+  const applyClineEvent = (event: ClineAgentTaskEvent) => {
+    const root = chatMessages.value.find((message) => message.id === event.turnId)
+    if (!root?.agentTask) {
+      const pending = pendingClineEvents.get(event.turnId) || []
+      pending.push(event)
+      pendingClineEvents.set(event.turnId, pending.slice(-128))
+      return false
+    }
+    const applied = applyClassicClineTaskEvent(chatMessages.value, event)
+    if (applied && shouldPersistClineEvent(event)) void updateCurrentConversationSnapshot()
+    return applied
+  }
+  const flushPendingClineEvents = (turnId: string) => {
+    const pending = pendingClineEvents.get(turnId) || []
+    pendingClineEvents.delete(turnId)
+    for (const event of pending) applyClassicClineTaskEvent(chatMessages.value, event)
+    if (pending.some(shouldPersistClineEvent)) void updateCurrentConversationSnapshot()
+  }
+  aiChatClient.onClineAgentTaskEvent()?.(applyClineEvent)
+
   const catalogRuntime = createWorkspaceAiChatCatalogRuntime({
     state: {
       aiContextCatalog,
@@ -156,20 +179,6 @@ export const createWorkspaceAiChatController = (
 
   const buildPlainTextFromAiParts = (parts: AiContentPart[]) => plainTextFromAiContentParts(parts, { mode: 'exchange' })
 
-  const agentAutoRunCommandMessageIds = new Set<string>()
-  const agentReadOnlyAutoRunConversationIds = new Set<string>()
-  let agentReadOnlyAutoRunPendingWithoutConversation = false
-
-  const isAgentReadOnlyCommandMessage = (message: ChatMessage) =>
-    message.role === 'assistant' &&
-    message.ask === 'command' &&
-    message.state === 'done' &&
-    message.action !== 'rejected' &&
-    !message.commandExecutionStatus &&
-    Boolean(message.commandExecution?.command.trim()) &&
-    message.commandExecution?.requiresApproval === false &&
-    message.commandExecution.interactive !== true
-
   const continueAgentCommandLoop = async (input: {
     commandMessageId: string
     command: string
@@ -179,130 +188,11 @@ export const createWorkspaceAiChatController = (
     outputTimeoutMs?: number
     output?: string
   }) => {
-    const command = input.command.trim()
-    const commandMessage = chatMessages.value.find((message) => message.id === input.commandMessageId)
-    if (!command || !commandMessage) return { status: 'unavailable' as const, reason: '命令卡片不可用，无法继续 Agent 循环。' }
-    const outputTimeoutMs = input.outputTimeoutMs ?? Math.max(1000, Math.round(aiPreferences.value.shellIntegrationTimeout * 1000))
-    const output = (input.output ?? (await waitForTerminalOutputAfter(input.terminalPanelId, input.outputStartLength, outputTimeoutMs))).trimEnd()
-    if (!output.trim()) {
-      commandMessage.commandExecutionStatus = 'failed'
-      commandMessage.commandExecutionMessage = '命令已发送，但未捕获到终端输出，未继续 Agent 循环。'
-      await updateCurrentConversationSnapshot(undefined, { notifyFailure: true, notifyUnavailable: true })
-      return { status: 'no-output' as const, reason: commandMessage.commandExecutionMessage }
-    }
-    const requestId = createRendererLocalId('aichat-agent-loop')
-    const { commandOutputMessage, assistantMessage } = createAgentCommandOutputMessages({
-      requestId,
-      command,
-      output,
-      commandExecution: input.commandExecution
-    })
-    chatMessages.value.push(commandOutputMessage, assistantMessage)
-    const filterOptions = { enabled: aiPreferences.value.commandOutputFilteringEnabled }
-    const prompt = buildAgentCommandOutputPrompt(command, output, filterOptions)
-    const messages: AiChatMessageInput[] = buildAgentCommandOutputMessagesForRequest(chatMessages.value.slice(-16), commandOutputMessage.id, filterOptions)
-    void refreshAiTodoSnapshot()
-    void generateAiResponseForMessage(assistantMessage.id, {
-      requestId,
-      assistantMessageId: assistantMessage.id,
-      prompt,
-      messages,
-      model: config.value.modelName,
-      mode: 'agent'
-    })
-    await updateCurrentConversationSnapshot(undefined, { notifyFailure: true, notifyUnavailable: true })
-    return { status: 'continued' as const, output, assistantMessageId: assistantMessage.id, requestId }
+    void input
+    return { status: 'unavailable' as const, reason: 'Classic Agent 命令循环已由 Cline runtime 接管。' }
   }
 
-  const autoRunAgentReadOnlyCommand = async (messageId: string) => {
-    const message = chatMessages.value.find((item) => item.id === messageId)
-    if (!message || !isAgentReadOnlyCommandMessage(message)) return
-    if (agentAutoRunCommandMessageIds.has(message.id)) return
-    agentAutoRunCommandMessageIds.add(message.id)
-    const command = message.commandExecution!.command.trim()
-    const terminalPanel = resolveActiveWritableTerminalPanel()
-    const outputStartLength = terminalPanel?.output.length ?? 0
-    const terminalPanelId = terminalPanel?.id || ''
-    message.commandExecutionStatus = 'running'
-    message.commandExecutionMessage = '查询类命令自动执行中...'
-    void updateCurrentConversationSnapshot(undefined, { notifyFailure: true, notifyUnavailable: true })
-    const decision = await runActiveTerminalCommand(command, 'agent')
-    if (!decision) {
-      message.commandExecutionStatus = 'failed'
-      message.commandExecutionMessage = '终端会话不可用，请先打开本地 shell 或连接 SSH。'
-      await updateCurrentConversationSnapshot(undefined, { notifyFailure: true, notifyUnavailable: true })
-      return
-    }
-    if (decision.status === 'needs-approval') {
-      message.commandExecutionStatus = 'pending'
-      message.commandExecutionMessage = '命令已送入终端安全确认。'
-      await updateCurrentConversationSnapshot(undefined, { notifyFailure: true, notifyUnavailable: true })
-      return
-    }
-    if (decision.status === 'blocked') {
-      message.commandExecutionStatus = 'failed'
-      message.commandExecutionMessage = '命令被安全策略拦截。'
-      await updateCurrentConversationSnapshot(undefined, { notifyFailure: true, notifyUnavailable: true })
-      return
-    }
-    if (decision.status === 'unavailable') {
-      message.commandExecutionStatus = 'failed'
-      message.commandExecutionMessage = decision.reason
-      await updateCurrentConversationSnapshot(undefined, { notifyFailure: true, notifyUnavailable: true })
-      return
-    }
-    if (!terminalPanelId) {
-      message.commandExecutionStatus = 'failed'
-      message.commandExecutionMessage = '终端会话不可用，请先打开本地 shell 或连接 SSH。'
-      await updateCurrentConversationSnapshot(undefined, { notifyFailure: true, notifyUnavailable: true })
-      return
-    }
-    message.executedCommand = command
-    message.commandExecutionStatus = 'running'
-    message.commandExecutionMessage = '查询类命令已发送，正在等待终端输出...'
-    await updateCurrentConversationSnapshot(undefined, { notifyFailure: true, notifyUnavailable: true })
-    const loopResult = await continueAgentCommandLoop({
-      commandMessageId: message.id,
-      command,
-      commandExecution: {
-        ...message.commandExecution!,
-        command
-      },
-      terminalPanelId,
-      outputStartLength
-    })
-    if (loopResult.status === 'continued') {
-      message.commandExecutionStatus = 'succeeded'
-      message.commandExecutionMessage = `命令输出已回传 Agent：${command}`
-      message.executedCommand = command
-    } else {
-      message.commandExecutionStatus = 'failed'
-      message.commandExecutionMessage = loopResult.reason
-    }
-    await updateCurrentConversationSnapshot(undefined, { notifyFailure: true, notifyUnavailable: true })
-  }
-
-  const scheduleAgentReadOnlyAutoRun = (message: ChatMessage, input: AiChatResponseInput) => {
-    const conversationId = selectedConversationId.value.trim()
-    if (conversationId && agentReadOnlyAutoRunPendingWithoutConversation) {
-      agentReadOnlyAutoRunConversationIds.add(conversationId)
-      agentReadOnlyAutoRunPendingWithoutConversation = false
-    }
-    const sessionAutoRunEnabled = conversationId ? agentReadOnlyAutoRunConversationIds.has(conversationId) : agentReadOnlyAutoRunPendingWithoutConversation
-    if (input.mode !== 'agent' || (!aiPreferences.value.autoExecuteReadOnlyCommands && !sessionAutoRunEnabled) || !isAgentReadOnlyCommandMessage(message)) return
-    void autoRunAgentReadOnlyCommand(message.id)
-  }
-
-  const enableAgentReadOnlyAutoRunForCurrentConversation = () => {
-    const conversationId = selectedConversationId.value.trim()
-    if (!conversationId) {
-      agentReadOnlyAutoRunPendingWithoutConversation = true
-      return true
-    }
-    agentReadOnlyAutoRunConversationIds.add(conversationId)
-    agentReadOnlyAutoRunPendingWithoutConversation = false
-    return true
-  }
+  const enableAgentReadOnlyAutoRunForCurrentConversation = () => false
 
   const generateAiResponseForMessage = async (assistantId: string, input: AiChatResponseInput) => {
     const responseBridge = aiChatClient.generateAiChatResponse()
@@ -348,18 +238,58 @@ export const createWorkspaceAiChatController = (
     } else {
       message.state = 'done'
       message.text = data.text
+      message.agentTask = data.agentTask ? cloneStructuredValue(data.agentTask) : undefined
     }
+    if (data?.agentTask && !message.agentTask) message.agentTask = cloneStructuredValue(data.agentTask)
+    if (message.agentTask) flushPendingClineEvents(message.agentTask.turnId)
+    else if (message.state === 'error' || message.state === 'cancelled') pendingClineEvents.delete(assistantId)
     if (requestId && isAiContextUsageForRequest(data?.contextUsage, requestId, assistantMessageId)) {
       applyAiContextUsage(data.contextUsage)
     }
-    scheduleAgentReadOnlyAutoRun(message, input)
     void refreshAiTodoSnapshot()
     void updateCurrentConversationSnapshot()
   }
 
   const cancelStreamingAiChatResponse = async () => {
-    const message = [...chatMessages.value].reverse().find((item) => item.role === 'assistant' && item.state === 'streaming')
+    const message = [...chatMessages.value].reverse().find((item) =>
+      item.role === 'assistant' && (item.state === 'streaming' || isActiveClassicClineTaskMessage(item))
+    )
     if (!message) return false
+    if (isActiveClassicClineTaskMessage(message) && message.agentTask) {
+      const abortBridge = aiChatClient.abortClineAgentTask()
+      if (typeof abortBridge !== 'function') {
+        setTopNotice('Cline Agent 停止服务不可用')
+        return false
+      }
+      const task = { ...message.agentTask }
+      const result = await abortBridge({
+        taskId: task.taskId,
+        turnId: task.turnId,
+        reason: 'The operator stopped the Classic Agent turn.'
+      }).catch((error) => {
+        setTopNotice(aiBridgeErrorMessage(error, 'Cline Agent 停止失败'))
+        return null
+      })
+      if (!result?.ok) {
+        setTopNotice(result?.errorMessage || 'Cline Agent 停止失败')
+        return false
+      }
+      for (const item of chatMessages.value) {
+        if (item.agentTask?.taskId !== task.taskId || item.agentTask.turnId !== task.turnId) continue
+        item.agentTask = { ...item.agentTask, status: 'cancelled' }
+        if (item.ask === 'command' && (item.commandExecutionStatus === 'pending' || item.commandExecutionStatus === 'running')) {
+          item.commandExecutionStatus = 'failed'
+          item.commandExecutionMessage = 'Cline Agent 命令已停止。'
+        }
+        if (item.state === 'streaming') {
+          item.state = 'cancelled'
+          if (!item.text.trim()) item.text = '已停止生成。'
+        }
+      }
+      void refreshAiTodoSnapshot()
+      void updateCurrentConversationSnapshot()
+      return true
+    }
     const cancelBridge = aiChatClient.cancelAiChatResponse()
     if (typeof cancelBridge !== 'function') {
       setTopNotice('AI 生成取消服务不可用')
@@ -413,13 +343,31 @@ export const createWorkspaceAiChatController = (
     const hasStructuredParts = hasStructuredAiContentParts(safeContentParts)
     const prompt = text.trim() || buildPlainTextFromAiParts(safeContentParts).trim()
     if (!prompt && !hasStructuredParts) return false
+    let conversationId = selectedConversationId.value.trim()
+    if (!conversationId || !conversations.value.some((conversation) => conversation.id === conversationId)) {
+      const created = await createConversation()
+      conversationId = created?.id.trim() || ''
+      if (!conversationId) {
+        setTopNotice('会话创建失败')
+        return false
+      }
+    }
     const baseMessageContexts = overrideHosts ? [...overrideHosts, ...selectedContexts.value.filter((item) => item.kind !== 'hosts')] : [...selectedContexts.value]
     const autoKnowledgeContexts = options.skipKnowledgeSearch ? [] : await resolveAiKnowledgeSearchContexts(prompt, baseMessageContexts)
     const messageContexts = [...baseMessageContexts, ...autoKnowledgeContexts]
     const commandDisplay = selectedCommandRef.value?.label || selectedCommandRef.value?.command || selectedCommandId.value
-    const historyForBackend: AiChatMessageInput[] = chatMessages.value.slice(-12).map((message) => ({ role: message.role, text: message.text }))
+    const historyForBackend: AiChatMessageInput[] = chatMessages.value.map((message) => ({
+      role: message.role,
+      text: message.text,
+      ask: message.ask,
+      say: message.say,
+      action: message.action,
+      commandExecution: message.commandExecution ? { ...message.commandExecution } : undefined,
+      agentTask: message.agentTask ? { ...message.agentTask } : undefined
+    }))
     const hostContexts = overrideHosts ?? selectedContexts.value.filter((item) => item.kind === 'hosts')
     const responseMode = options.mode || (mode.value === 'agents' ? 'agent' : 'command')
+    const terminalSessionId = responseMode === 'agent' ? resolveActiveWritableTerminalPanel()?.sessionId?.trim() : undefined
     const exchangeBridge = aiChatClient.createAiChatExchangeRequest()
     if (typeof exchangeBridge !== 'function') {
       setTopNotice('AI 请求创建服务不可用')
@@ -429,6 +377,8 @@ export const createWorkspaceAiChatController = (
     try {
       request = await exchangeBridge({
         text: prompt,
+        conversationId,
+        terminalSessionId,
         hosts: hostContexts.map(hostContextForExchangeRequest).filter(Boolean) as AiChatExchangeRequestInput['hosts'],
         messages: historyForBackend,
         contexts: messageContexts.map((item) => ({

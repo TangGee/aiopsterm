@@ -19,6 +19,7 @@ import {
   isDbAiDrawerRequestRecord,
   isDbAiDrawerResponseData,
   isDbAiPaneLifecycleData,
+  isDbAiPaneMessageRecord,
   isDbAiPaneRequestData,
   isDbAiPaneResponseData,
   isDbAiPaneStateSnapshot,
@@ -92,7 +93,34 @@ const aiMessage: DatabaseAiPaneMessageRecord = {
   content: 'Use the orders primary key.',
   contextSummary: 'orders / public',
   createdAt: 1781884800000,
-  updatedAt: 1781884801000
+  updatedAt: 1781884801000,
+  responseLanguage: 'en-US'
+}
+
+const structuredAiMessage: DatabaseAiPaneMessageRecord = {
+  ...aiMessage,
+  context: {
+    connectionId: connection.id,
+    catalogName: 'orders',
+    schemaName: 'public',
+    dbType: 'postgresql'
+  },
+  sqlAction: {
+    action: 'optimize',
+    label: 'Optimize SQL',
+    sourceSql: 'select * from orders',
+    generatedSql: 'select id from orders',
+    targetDialect: 'postgresql',
+    transport: 'drawer',
+    context: {
+      connectionId: connection.id,
+      dbType: 'postgresql',
+      databaseName: 'orders',
+      schemaName: 'public',
+      tableName: 'orders',
+      contextSummary: 'orders / public'
+    }
+  }
 }
 
 const aiRequest: DatabaseAiDrawerRequestRecord = {
@@ -104,6 +132,7 @@ const aiRequest: DatabaseAiDrawerRequestRecord = {
   sourceSql: 'select * from orders',
   text: 'Explanation',
   targetDialect: 'postgresql',
+  responseLanguage: 'en-US',
   backendContext: { connectionId: connection.id, dbType: 'postgresql', databaseName: 'orders', schemaName: 'public' },
   createdAt: 1781884800000,
   updatedAt: 1781884801000
@@ -165,7 +194,8 @@ describe('databaseBackendGuards', () => {
   it('validates DB AI pane and drawer payload contracts', () => {
     const userMessage = { ...aiMessage, id: 'user-1', role: 'user' as const, content: 'Explain this SQL' }
 
-    expect(isDbAiPaneStateSnapshot({ open: true, width: 420, context: { connectionId: connection.id, catalogName: 'orders', schemaName: 'public', dbType: 'postgresql' }, draft: '', messages: [aiMessage] })).toBe(true)
+    expect(isDbAiPaneMessageRecord(structuredAiMessage)).toBe(true)
+    expect(isDbAiPaneStateSnapshot({ open: true, width: 420, context: { connectionId: connection.id, catalogName: 'orders', schemaName: 'public', dbType: 'postgresql' }, draft: '', messages: [structuredAiMessage] })).toBe(true)
     expect(isDbAiPaneRequestData({ requestId: aiMessage.requestId, userMessage, assistantMessage: aiMessage })).toBe(true)
     expect(isDbAiPaneLifecycleData({ assistantMessage: aiMessage }, { requestId: aiMessage.requestId, assistantMessageId: aiMessage.id })).toBe(true)
     expect(isDbAiPaneResponseData({ requestId: aiMessage.requestId, assistantMessage: aiMessage, text: aiMessage.content, provider: 'aiopsterm-local', durationMs: 16 }, { requestId: aiMessage.requestId, assistantMessageId: aiMessage.id })).toBe(true)
@@ -173,5 +203,19 @@ describe('databaseBackendGuards', () => {
     expect(isDbAiDrawerRequestRecord(aiRequest, aiRequest.id)).toBe(true)
     expect(isDbAiDrawerRequestRecord({ ...aiRequest, targetDialect: 'sqlserver' })).toBe(false)
     expect(isDbAiDrawerResponseData({ request: aiRequest, text: 'Explanation', reasoning: 'Because', sql: 'select * from orders', provider: 'aiopsterm-local', durationMs: 18 }, aiRequest.id)).toBe(true)
+  })
+
+  it('rejects malformed structured SQL action metadata', () => {
+    expect(isDbAiPaneMessageRecord({ ...structuredAiMessage, context: { ...structuredAiMessage.context!, connectionId: 42 } })).toBe(false)
+    expect(isDbAiPaneMessageRecord({ ...structuredAiMessage, sqlAction: { ...structuredAiMessage.sqlAction!, action: 'rewrite' } })).toBe(false)
+    expect(isDbAiPaneMessageRecord({ ...structuredAiMessage, sqlAction: { ...structuredAiMessage.sqlAction!, targetDialect: 'sqlserver' } })).toBe(false)
+    expect(isDbAiPaneMessageRecord({ ...structuredAiMessage, sqlAction: { ...structuredAiMessage.sqlAction!, transport: 'modal' } })).toBe(false)
+    expect(
+      isDbAiPaneMessageRecord({
+        ...structuredAiMessage,
+        sqlAction: { ...structuredAiMessage.sqlAction!, context: { ...structuredAiMessage.sqlAction!.context, connectionId: 42 } }
+      })
+    ).toBe(false)
+    expect(isDbAiPaneMessageRecord({ ...structuredAiMessage, sqlAction: { ...structuredAiMessage.sqlAction!, generatedSql: null } })).toBe(false)
   })
 })

@@ -11,5 +11,8 @@
     "src/renderer/src/**/*.vue",
     "src/renderer/src/**/*.d.ts",
     "tests/**/*.ts"
+  ],
+  "exclude": [
+    "tests/cline-agent-sidecar-runtime.test.ts"
   ]
 }

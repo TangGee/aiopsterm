@@ -3100,6 +3100,8 @@ describe('control socket backend', () => {
       ])
     } finally {
       await agentSessions.__testing.flushManagedAiSessionWrites()
+      const { flushControlSocketDurableEventLog } = await loadControlSocketStateRuntime()
+      await flushControlSocketDurableEventLog()
       backend.closeControlSocketServer()
       await rm(root, { recursive: true, force: true })
     }

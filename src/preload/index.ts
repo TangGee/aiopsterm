@@ -320,6 +320,13 @@ const api: AiopsPreloadApi = {
   createAiChatExchangeRequest: (input) => ipcRenderer.invoke('ai:chat-exchange-request', input),
   generateAiChatResponse: (input) => ipcRenderer.invoke('ai:chat-response', input),
   cancelAiChatResponse: (input) => ipcRenderer.invoke('ai:chat-response:cancel', input),
+  respondClineAgentApproval: (input) => ipcRenderer.invoke('cline-agent:approval:respond', input),
+  abortClineAgentTask: (input) => ipcRenderer.invoke('cline-agent:task:abort', input),
+  onClineAgentTaskEvent: (listener) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, payload: Parameters<typeof listener>[0]) => listener(payload)
+    ipcRenderer.on('cline-agent:task-event', wrapped)
+    return () => ipcRenderer.off('cline-agent:task-event', wrapped)
+  },
   transcribeVoiceInput: (input) => ipcRenderer.invoke('voice:transcribe', input),
   listDatabaseCatalog: () => ipcRenderer.invoke('database:catalog'),
   testDatabaseConnection: (input) => ipcRenderer.invoke('database:test-connection', input),

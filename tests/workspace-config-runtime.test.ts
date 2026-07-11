@@ -311,11 +311,15 @@ describe('workspaceConfigRuntime', () => {
     expect(normalizeAiPreferencesConfig({ ...defaultAiPreferences, enableExtendedThinking: false, thinkingBudgetTokens: 4096 }).normalized.thinkingBudgetTokens).toBe(0)
   })
 
-  it('normalizes Export MCP settings with agent-side SSH auth submission disabled by default', () => {
-    expect(normalizeExportMcpConfig(undefined).normalized).toEqual({ allowAgentSshAuthSubmit: false })
-    expect(normalizeExportMcpConfig({ allowAgentSshAuthSubmit: true }).normalized).toEqual({ allowAgentSshAuthSubmit: true })
-    expect(mergeUserConfig(defaultConfig, { exportMcp: { allowAgentSshAuthSubmit: true } }).exportMcp).toEqual({
-      allowAgentSshAuthSubmit: true
+  it('normalizes sensitive Export MCP capabilities as disabled by default', () => {
+    expect(normalizeExportMcpConfig(undefined).normalized).toEqual({ allowAgentSshAuthSubmit: false, allowDatabaseRead: false })
+    expect(normalizeExportMcpConfig({ allowAgentSshAuthSubmit: true, allowDatabaseRead: true }).normalized).toEqual({
+      allowAgentSshAuthSubmit: true,
+      allowDatabaseRead: true
+    })
+    expect(mergeUserConfig(defaultConfig, { exportMcp: { allowAgentSshAuthSubmit: true, allowDatabaseRead: false } }).exportMcp).toEqual({
+      allowAgentSshAuthSubmit: true,
+      allowDatabaseRead: false
     })
   })
 

@@ -53,6 +53,17 @@ export type AiCommandCatalogResult = AiopsMutationResult<AiCommandCatalog>
 export type AiChatHistoryMessageRole = 'user' | 'assistant' | 'system'
 export type AiChatMessageState = 'streaming' | 'done' | 'cancelled' | 'error'
 
+export type AiChatAgentTaskStatus = 'starting' | 'running' | 'waiting-approval' | 'done' | 'cancelled' | 'error'
+
+export type AiChatAgentTaskRef = {
+  taskId: string
+  turnId: string
+  terminalSessionId?: string
+  toolCallId?: string
+  toolName?: string
+  status: AiChatAgentTaskStatus
+}
+
 export type AiChatHistoryHostContext = {
   id: string
   kind: 'hosts'
@@ -133,6 +144,7 @@ export type AiChatHistoryMessage = {
     requiresApproval: boolean
     interactive: boolean
   }
+  agentTask?: AiChatAgentTaskRef
   mcpToolCall?: {
     serverName: string
     toolName: string
@@ -294,6 +306,7 @@ export type AiChatMessageInput = {
     requiresApproval: boolean
     interactive: boolean
   }
+  agentTask?: AiChatAgentTaskRef
 }
 
 export type AiChatContextInput = {
@@ -333,6 +346,8 @@ export type AiChatContextUsageSnapshot = {
 
 export type AiChatExchangeRequestInput = {
   text: string
+  conversationId?: string
+  terminalSessionId?: string
   hosts?: AiChatHistoryHostContext[]
   messages?: AiChatMessageInput[]
   contexts?: AiChatContextInput[]
@@ -352,6 +367,8 @@ export type AiChatExchangeRequestResult = AiopsMutationResult<{
 export type AiChatResponseInput = {
   requestId?: string
   assistantMessageId?: string
+  conversationId?: string
+  terminalSessionId?: string
   prompt: string
   messages?: AiChatMessageInput[]
   contexts?: AiChatContextInput[]
@@ -370,6 +387,7 @@ export type AiChatResponseResult = AiopsMutationResult<{
   requestId?: string
   assistantMessageId?: string
   message?: AiChatHistoryMessage
+  agentTask?: AiChatAgentTaskRef
   contextUsage?: AiChatContextUsageSnapshot
 }>
 

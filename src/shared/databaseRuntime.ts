@@ -333,6 +333,7 @@ export {
 } from './databaseAi'
 
 export type {
+  DatabaseAiContextLoadInput,
   DatabaseAiProviderTextInput,
   DatabaseAiProviderTextMessage,
   DatabaseAiProviderTextResult

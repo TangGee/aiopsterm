@@ -17,6 +17,14 @@ New user-facing text should prefer explicit `t('...')` keys. Add static catalog 
 
 The audit keeps a hash baseline for the current legacy renderer text in `scripts/i18n-legacy-static-text-baseline.json`. This baseline prevents newly added CJK UI literals from passing only because the generic static-text word replacement can remove every Chinese character. When adding or changing renderer UI text, prefer an explicit i18n key. If an incremental migration needs a static fallback, add an exact entry or an intentional static pattern instead of expanding the legacy baseline.
 
+## Database Language Policy
+
+- Database workspace UI uses explicit `database.*` locale keys. `zh-CN` supplies Simplified Chinese; locale files without database-specific overrides inherit their existing complete base locale.
+- DB AI normalizes the effective renderer locale to a request-scoped response language: `zh-CN` stays `zh-CN`; all other locales become `en-US`.
+- The normalized language is captured when the request is created and is carried through persisted pane and structured-action state. A later settings change does not change the language of an in-flight request.
+- Provider system prompts, generated action prompts, and local backend responses must use that captured language and must explicitly require the same response language. Do not rely on the model to infer the application language from SQL or conversation history.
+- Preserve operator-entered text, SQL, identifiers, schema metadata, and raw database errors verbatim even when the surrounding prompt scaffold uses another language.
+
 ## Tests
 
 Text-dependent E2E tests should either use stable selectors or run with a fixed locale. The current Electron E2E fixtures use fresh user data and the default `zh-CN` language, so existing Chinese text assertions remain deterministic. When adding non-Chinese locale coverage, avoid reusing Chinese `getByText()`, `getByTitle()`, or `hasText` locators without a locale setup step.

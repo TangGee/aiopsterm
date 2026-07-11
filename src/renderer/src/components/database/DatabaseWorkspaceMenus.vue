@@ -9,14 +9,14 @@
       type="button"
       @click="$emit('addGroup')"
     >
-      New Group
+      {{ t('database.menu.newGroup') }}
     </button>
-    <div class="db-popup-subtitle">New Connection</div>
+    <div class="db-popup-subtitle">{{ t('database.menu.newConnection') }}</div>
     <button
       v-for="engine in databaseEngines"
       :key="engine.name"
       type="button"
-      :title="`New ${engine.name} connection`"
+      :title="t('database.overview.newEngineConnection', { name: engine.name })"
       @click="$emit('openConnectionModalFromEngine', engine)"
     >
       <span
@@ -39,7 +39,7 @@
         @mouseenter="$emit('updateContextSubmenu', 'groupConnection')"
       >
         <button type="button">
-          <span>New Connection</span>
+          <span>{{ t('database.menu.newConnection') }}</span>
           <span class="db-popup-arrow">›</span>
         </button>
         <div
@@ -50,7 +50,7 @@
             v-for="engine in databaseEngines"
             :key="`ctx-${engine.name}`"
             type="button"
-            :title="`New ${engine.name} connection`"
+            :title="t('database.overview.newEngineConnection', { name: engine.name })"
             @click="$emit('openConnectionModalFromEngine', engine, contextMenu.groupId)"
           >
             <span
@@ -66,28 +66,28 @@
         @mouseenter="$emit('closeContextSubmenuSoon')"
         @click="$emit('addGroup', contextMenu.groupId)"
       >
-        New Group
+        {{ t('database.menu.newGroup') }}
       </button>
       <button
         type="button"
         @mouseenter="$emit('closeContextSubmenuSoon')"
         @click="$emit('startGroupRename', contextMenu.groupId)"
       >
-        Rename
+        {{ t('database.common.rename') }}
       </button>
       <button
         type="button"
         @mouseenter="$emit('closeContextSubmenuSoon')"
         @click="$emit('copyContextName')"
       >
-        Copy Name
+        {{ t('database.menu.copyName') }}
       </button>
       <div
         class="db-popup-submenu-wrap"
         @mouseenter="$emit('updateContextSubmenu', 'groupMove')"
       >
         <button type="button">
-          <span>Move To</span>
+          <span>{{ t('database.menu.moveTo') }}</span>
           <span class="db-popup-arrow">›</span>
         </button>
         <div
@@ -99,7 +99,7 @@
             :disabled="groupRootMoveDisabled"
             @click="$emit('moveGroupTo', contextMenu.groupId, null)"
           >
-            Root Group
+            {{ t('database.menu.rootGroup') }}
           </button>
           <button
             v-for="target in groupMoveTargets"
@@ -114,7 +114,7 @@
             type="button"
             disabled
           >
-            Current Group
+            {{ t('database.menu.currentGroup') }}
           </button>
         </div>
       </div>
@@ -124,7 +124,7 @@
         @mouseenter="$emit('closeContextSubmenuSoon')"
         @click="$emit('requestDeleteGroup', contextMenu.groupId)"
       >
-        Delete Group
+        {{ t('database.menu.deleteGroup') }}
       </button>
     </template>
     <template v-else-if="contextMenu.type === 'connection'">
@@ -133,7 +133,7 @@
         @mouseenter="$emit('closeContextSubmenuSoon')"
         @click="$emit('connectFromMenu', contextMenu.connectionId)"
       >
-        {{ contextConnectionConnected ? 'Close Connection' : 'Open Connection' }}
+        {{ contextConnectionConnected ? t('database.connection.close') : t('database.connection.open') }}
       </button>
       <div class="db-popup-divider" />
       <button
@@ -142,7 +142,7 @@
         @mouseenter="$emit('closeContextSubmenuSoon')"
         @click="contextConnectionConnected && $emit('openSqlConsole', contextMenu.connectionId)"
       >
-        Query Console
+        {{ t('database.menu.queryConsole') }}
       </button>
       <button
         type="button"
@@ -150,7 +150,7 @@
         @mouseenter="$emit('closeContextSubmenuSoon')"
         @click="contextConnectionCanCreateDatabase && $emit('openCreateDatabaseModal', contextMenu.connectionId)"
       >
-        Create Database
+        {{ t('database.menu.createDatabase') }}
       </button>
       <div class="db-popup-divider" />
       <button
@@ -158,14 +158,14 @@
         @mouseenter="$emit('closeContextSubmenuSoon')"
         @click="$emit('editConnection', contextMenu.connectionId)"
       >
-        Editor Source
+        {{ t('database.menu.editSource') }}
       </button>
       <button
         type="button"
         @mouseenter="$emit('closeContextSubmenuSoon')"
         @click="$emit('copyContextName')"
       >
-        Copy Name
+        {{ t('database.menu.copyName') }}
       </button>
       <div class="db-popup-divider" />
       <div
@@ -173,7 +173,7 @@
         @mouseenter="$emit('updateContextSubmenu', 'connectionMove')"
       >
         <button type="button">
-          <span>Move To</span>
+          <span>{{ t('database.menu.moveTo') }}</span>
           <span class="db-popup-arrow">›</span>
         </button>
         <div
@@ -185,7 +185,7 @@
             :disabled="connectionRootMoveDisabled"
             @click="$emit('moveConnectionToGroup', contextMenu.connectionId, defaultGroupId)"
           >
-            Root Group
+            {{ t('database.menu.rootGroup') }}
           </button>
           <button
             v-for="target in connectionMoveTargets"
@@ -200,7 +200,7 @@
             type="button"
             disabled
           >
-            Current Group
+            {{ t('database.menu.currentGroup') }}
           </button>
         </div>
       </div>
@@ -209,7 +209,7 @@
         @mouseenter="$emit('closeContextSubmenuSoon')"
         @click="$emit('refreshConnectionFromMenu', contextMenu.connectionId)"
       >
-        Refresh
+        {{ t('database.common.refresh') }}
       </button>
       <div class="db-popup-divider" />
       <button
@@ -217,7 +217,7 @@
         @mouseenter="$emit('closeContextSubmenuSoon')"
         @click="$emit('requestRemoveConnection', contextMenu.connectionId)"
       >
-        Remove
+        {{ t('database.common.remove') }}
       </button>
     </template>
     <template v-else>
@@ -226,14 +226,14 @@
         @mouseenter="$emit('closeContextSubmenuSoon')"
         @click="$emit('openContextTable')"
       >
-        Open Table
+        {{ t('database.menu.openTable') }}
       </button>
       <button
         type="button"
         @mouseenter="$emit('closeContextSubmenuSoon')"
         @click="$emit('openContextSql')"
       >
-        Query Console
+        {{ t('database.menu.queryConsole') }}
       </button>
       <div class="db-popup-divider" />
       <button
@@ -241,14 +241,14 @@
         @mouseenter="$emit('closeContextSubmenuSoon')"
         @click="$emit('openDdlModalFromContext')"
       >
-        View DDL
+        {{ t('database.menu.viewDdl') }}
       </button>
       <div
         class="db-popup-submenu-wrap"
         @mouseenter="$emit('updateContextSubmenu', 'tableCopy')"
       >
         <button type="button">
-          <span>Copy Table</span>
+          <span>{{ t('database.menu.copyTable') }}</span>
           <span class="db-popup-arrow">›</span>
         </button>
         <div
@@ -259,19 +259,19 @@
             type="button"
             @click="$emit('copyContextName')"
           >
-            Copy Table Name
+            {{ t('database.menu.copyTableName') }}
           </button>
           <button
             type="button"
             @click="$emit('copySelectSql')"
           >
-            Copy Table SELECT
+            {{ t('database.menu.copyTableSelect') }}
           </button>
           <button
             type="button"
             @click="$emit('copyTableDdlFromContext')"
           >
-            Copy Table DDL
+            {{ t('database.menu.copyTableDdl') }}
           </button>
         </div>
       </div>
@@ -281,7 +281,7 @@
         @mouseenter="$emit('closeContextSubmenuSoon')"
         @click="$emit('requestDangerousTableAction', 'truncate')"
       >
-        Truncate
+        {{ t('database.menu.truncate') }}
       </button>
       <button
         class="danger"
@@ -289,13 +289,14 @@
         @mouseenter="$emit('closeContextSubmenuSoon')"
         @click="$emit('requestDangerousTableAction', 'drop')"
       >
-        Drop
+        {{ t('database.menu.drop') }}
       </button>
     </template>
   </div>
 </template>
 
 <script setup lang="ts">
+import { useI18n } from '@/i18n'
 import type { DatabaseEngineInfo } from '@shared/contracts/database'
 import type { ContextMenu, ContextSubmenu } from '@/services/database/databaseWorkspaceTypes'
 
@@ -313,6 +314,8 @@ defineProps<{
   connectionMoveTargets: Array<{ id: string; name: string }>
   defaultGroupId: string
 }>()
+
+const { t } = useI18n()
 
 defineEmits<{
   addGroup: [parentGroupId?: string | null]

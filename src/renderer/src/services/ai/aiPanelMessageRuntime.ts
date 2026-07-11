@@ -37,6 +37,7 @@ export type AiPanelCommandSuggestionMessage = {
     requiresApproval?: boolean
     interactive?: boolean
   }
+  agentTask?: AiChatHistoryMessage['agentTask']
   executedCommand?: string
   commandExecutionStatus?: AiChatHistoryMessage['commandExecutionStatus']
   commandExecutionMessage?: string
@@ -79,6 +80,7 @@ export const aiPanelChatExportMessage = (
   say: message.say,
   action: message.action,
   commandExecution: message.commandExecution,
+  agentTask: message.agentTask,
   mcpToolCall: message.mcpToolCall,
   mcpResourceAccess: message.mcpResourceAccess,
   followupOptions: message.followupOptions ? [...message.followupOptions] : undefined,
@@ -216,7 +218,8 @@ export const isReadOnlyCommandMessage = (message: AiPanelCommandSuggestionMessag
 export const isCommandTerminalActionDisabled = (message: AiPanelCommandSuggestionMessage) =>
   message.commandExecutionStatus === 'running' || message.commandExecutionStatus === 'succeeded' || message.action === 'rejected'
 
-export const canEditCommandMessage = (message: AiPanelCommandSuggestionMessage | null) => Boolean(message && message.commandExecutionStatus !== 'running')
+export const canEditCommandMessage = (message: AiPanelCommandSuggestionMessage | null) =>
+  Boolean(message && message.commandExecutionStatus !== 'running' && message.agentTask?.status !== 'waiting-approval' && message.agentTask?.status !== 'running')
 
 export const commandHostForMessage = (message: { commandExecution?: { ip?: string } }) => {
   const ip = message.commandExecution?.ip?.trim()

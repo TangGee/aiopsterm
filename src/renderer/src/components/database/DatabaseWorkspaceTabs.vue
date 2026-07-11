@@ -20,13 +20,13 @@
         <LayoutDashboard v-if="tab.kind === 'overview'" />
         <Table2 v-else-if="tab.kind === 'data'" />
         <SquareTerminal v-else />
-        <span>{{ tab.title }}</span>
+        <span>{{ displayTabTitle(tab) }}</span>
         <button
           v-if="tab.kind !== 'overview'"
           class="db-workspace-tab-close"
           type="button"
-          title="Close"
-          :aria-label="`Close ${tab.title}`"
+          :title="t('database.common.close')"
+          :aria-label="t('database.tabs.closeNamed', { title: displayTabTitle(tab) })"
           @click.stop="emit('closeTab', tab.id)"
         >
           <X />
@@ -36,7 +36,7 @@
     <button
       class="db-workspace-add-tab"
       type="button"
-      title="New SQL"
+      :title="t('database.tabs.newSql')"
       @click="emit('openSqlConsole')"
     >
       <Plus />
@@ -46,7 +46,7 @@
         type="button"
         class="db-ai-pane-toggle"
         :class="{ active: dbAiPaneOpen }"
-        title="Toggle DB AI Pane"
+        :title="t('database.tabs.toggleDbAi')"
         :disabled="!canToggleDbAiPane"
         @click="emit('toggleDbAiPane')"
       >
@@ -54,7 +54,7 @@
       </button>
       <button
         type="button"
-        title="Tabs"
+        :title="t('database.tabs.list')"
         @click.stop="emit('update:overflowOpen', !overflowOpen)"
       >
         <MoreHorizontal />
@@ -68,10 +68,10 @@
           v-for="tab in tabs"
           :key="tab.id"
           type="button"
-          :title="tab.title"
+          :title="displayTabTitle(tab)"
           @click="selectOverflowTab(tab.id)"
         >
-          {{ tab.title }}
+          {{ displayTabTitle(tab) }}
         </button>
       </div>
     </div>
@@ -80,6 +80,7 @@
 
 <script setup lang="ts">
 import { nextTick, type ComponentPublicInstance } from 'vue'
+import { useI18n } from '@/i18n'
 import {
   BrainCircuit,
   LayoutDashboard,
@@ -108,6 +109,8 @@ const emit = defineEmits<{
   toggleDbAiPane: []
 }>()
 
+const { t } = useI18n()
+
 const workspaceTabRefs = new Map<string, HTMLElement>()
 
 function registerWorkspaceTabRef(tabId: string, el: Element | ComponentPublicInstance | null) {
@@ -128,6 +131,10 @@ function selectOverflowTab(tabId: string) {
   emit('update:activeTabId', tabId)
   scrollActiveWorkspaceTabIntoView(tabId)
   emit('update:overflowOpen', false)
+}
+
+function displayTabTitle(tab: WorkspaceTab) {
+  return tab.kind === 'overview' ? t('database.overview.title') : tab.title
 }
 
 defineExpose<DatabaseWorkspaceTabsApi>({

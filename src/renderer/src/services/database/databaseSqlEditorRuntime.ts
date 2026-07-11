@@ -212,6 +212,16 @@ export function isReadOnlySql(sql: string) {
 }
 
 export function extractSql(text: string) {
-  const match = text.match(/```(?:sql|mysql|postgresql|pgsql|sqlite|oracle|tsql|clickhouse|presto)?\s*\n([\s\S]*?)```/i)
-  return match?.[1].trim() ?? text
+  return extractFencedSql(text) || text
 }
+
+export function extractFencedSql(text: string) {
+  const match = text.match(SQL_FENCE_PATTERN)
+  return match?.[1].trim() ?? ''
+}
+
+export function stripFencedSql(text: string) {
+  return text.replace(SQL_FENCE_PATTERN, '').trim()
+}
+
+const SQL_FENCE_PATTERN = /```(?:sql|mysql|postgresql|pgsql|sqlite|oracle|mssql|tsql|clickhouse|presto)?[ \t]*\r?\n([\s\S]*?)```/i

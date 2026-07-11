@@ -181,6 +181,12 @@ export const queryDatabaseSeedTable = (input: DatabaseTableQueryInput, startedAt
   const sourceRows = tableRows[tableKey].map((row) => ({ ...row }))
 
   const knownColumns = tableColumns[tableKey]?.slice() ?? columnsForRows(sourceRows)
+  const requestedColumns = (input.columns ?? []).map((column) => knownColumns.find((known) => known.toLowerCase() === trim(column).toLowerCase())).filter(Boolean) as string[]
+  if (input.columns?.length && requestedColumns.length !== input.columns.length) {
+    return { ok: false, errorCode: 'DB_COLUMNS_INVALID', errorMessage: 'One or more selected columns are not available.' }
+  }
+  const selectedColumns = input.columns?.length ? requestedColumns : knownColumns
+  if (!selectedColumns.length) return { ok: false, errorCode: 'DB_COLUMNS_REQUIRED', errorMessage: 'At least one selected column is required.' }
   const filters = [...parseWhereRaw(input.whereRaw), ...(input.filters ?? [])]
   const filteredRows = filterRows(sourceRows, filters)
   const sort = input.sort ?? parseOrderByRaw(input.orderByRaw, knownColumns)
@@ -188,12 +194,14 @@ export const queryDatabaseSeedTable = (input: DatabaseTableQueryInput, startedAt
   const pageSize = Math.max(1, Math.min(1000, Math.floor(Number(input.pageSize) || 100)))
   const page = Math.max(1, Math.floor(Number(input.page) || 1))
   const start = (page - 1) * pageSize
-  const pageRows = rows.slice(start, start + pageSize).map((row) => ({ ...row }))
+  const pageRows = rows.slice(start, start + pageSize).map((row) =>
+    Object.fromEntries(selectedColumns.map((column) => [column, row[column]]))
+  )
 
   return {
     ok: true,
     data: {
-      columns: knownColumns,
+      columns: selectedColumns,
       rows: pageRows,
       rowCount: pageRows.length,
       durationMs: Math.max(1, Date.now() - startedAt),

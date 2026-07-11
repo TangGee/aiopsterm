@@ -10,6 +10,7 @@ import {
 } from '@/services/ai/aiPanelMessageRuntime'
 import type { TerminalCommandSource, TerminalSecurityDecision } from '@/services/terminal/terminalExecutionRuntime'
 import { isTerminalWorkspacePanel } from '@/services/terminal/terminalPanelRuntime'
+import type { ClineAgentApprovalInput, ClineAgentApprovalResult } from '@shared/contracts/clineAgent'
 
 export type AiPanelCommandActionTerminalPanel = {
   id: string
@@ -32,6 +33,7 @@ export type AiPanelCommandActionLabels = {
   commandCopied: () => string
   commandCopyFailed: () => string
   commandUpdated: () => string
+  clineApprovalCommandImmutable: () => string
   commandRejected: () => string
   commandRejectedCannotRun: () => string
   commandRunEmpty: () => string
@@ -90,6 +92,7 @@ export type AiPanelCommandActionRuntimeOptions = {
   continueAgentCommandLoop: (input: AiPanelCommandActionLoopInput) => Promise<AiPanelCommandActionLoopResult>
   enableAgentReadOnlyAutoRunForCurrentConversation: () => boolean
   syncCurrentConversationSnapshot: (options: { notifyFailure?: boolean; notifyUnavailable?: boolean }) => void | Promise<unknown>
+  respondClineAgentApproval?: (input: ClineAgentApprovalInput) => Promise<ClineAgentApprovalResult>
   labels?: Partial<AiPanelCommandActionLabels>
 }
 
@@ -108,6 +111,7 @@ const defaultLabels: AiPanelCommandActionLabels = {
   commandCopied: () => '命令已复制。',
   commandCopyFailed: () => '复制失败。',
   commandUpdated: () => '命令已更新。',
+  clineApprovalCommandImmutable: () => '待审批的 Agent 命令必须原样确认或拒绝。',
   commandRejected: () => '命令已拒绝。',
   commandRejectedCannotRun: () => '命令已拒绝，无法执行。',
   commandRunEmpty: () => '没有可运行的命令。',
@@ -145,7 +149,10 @@ export const createAiPanelCommandActionRuntime = (options: AiPanelCommandActionR
     return message && isAiPanelCommandSuggestionMessage(message) ? message : null
   }
 
-  const canEditActiveCommandAudit = () => canEditCommandMessage(activeCommandAuditMessage())
+  const canEditActiveCommandAudit = () => {
+    const message = activeCommandAuditMessage()
+    return !pendingClineApproval(message) && canEditCommandMessage(message)
+  }
 
   const copyCommandToClipboard = async (message: AiPanelCommandSuggestionMessage) => {
     const command = commandTextForMessage(message).trim()
@@ -174,6 +181,10 @@ export const createAiPanelCommandActionRuntime = (options: AiPanelCommandActionR
   const saveCommandAuditDraft = (input: { silent?: boolean } = {}) => {
     const message = activeCommandAuditMessage()
     if (!message) return false
+    if (pendingClineApproval(message)) {
+      options.notify(labels.clineApprovalCommandImmutable())
+      return false
+    }
     const saved = applyCommandTextToMessage(message, options.state.commandAuditDialog.draft)
     if (!saved) {
       options.notify(labels.commandRunEmpty())
@@ -201,8 +212,62 @@ export const createAiPanelCommandActionRuntime = (options: AiPanelCommandActionR
     return options.enableAgentReadOnlyAutoRunForCurrentConversation()
   }
 
+  const pendingClineApproval = (message: AiPanelCommandSuggestionMessage | null | undefined) => {
+    const task = message?.agentTask
+    if (
+      task?.status !== 'waiting-approval' ||
+      !task.taskId.trim() ||
+      !task.turnId.trim() ||
+      !task.toolCallId?.trim() ||
+      !task.terminalSessionId?.trim()
+    ) return null
+    return {
+      ...task,
+      toolCallId: task.toolCallId,
+      terminalSessionId: task.terminalSessionId
+    }
+  }
+
+  const respondToClineApproval = async (message: AiPanelCommandSuggestionMessage, approved: boolean) => {
+    const task = pendingClineApproval(message)
+    if (!task || !options.respondClineAgentApproval) return false
+    const previousStatus = message.commandExecutionStatus
+    const previousMessage = message.commandExecutionMessage
+    message.commandExecutionStatus = 'running'
+    message.commandExecutionMessage = approved ? 'Cline Agent 正在执行命令...' : '正在拒绝 Cline Agent 命令...'
+    persistCommandExecutionState()
+    let result: ClineAgentApprovalResult
+    try {
+      result = await options.respondClineAgentApproval({
+        taskId: task.taskId,
+        turnId: task.turnId,
+        toolCallId: task.toolCallId,
+        terminalSessionId: task.terminalSessionId,
+        approved,
+        reason: approved ? undefined : 'The operator rejected the host command.'
+      })
+    } catch {
+      result = { ok: false, errorCode: 'CLINE_AGENT_APPROVAL_FAILED', errorMessage: 'Cline Agent 审批服务不可用。' }
+    }
+    if (!result.ok) {
+      message.commandExecutionStatus = previousStatus
+      message.commandExecutionMessage = result.errorMessage || previousMessage || 'Cline Agent 审批失败。'
+      persistCommandExecutionState()
+      options.notify(message.commandExecutionMessage)
+      return false
+    }
+    message.action = approved ? 'approved' : 'rejected'
+    message.agentTask = { ...task, status: approved ? 'running' : 'cancelled' }
+    message.commandExecutionStatus = approved ? 'running' : 'failed'
+    message.commandExecutionMessage = approved ? 'Cline Agent 正在执行命令...' : '已拒绝执行。'
+    persistCommandExecutionState()
+    options.notify(approved ? '命令已批准，Cline Agent 正在继续分析。' : labels.commandRejected())
+    return result.data
+  }
+
   const rejectMessageCommand = (message: AiPanelCommandSuggestionMessage) => {
     if (message.commandExecutionStatus === 'running') return false
+    if (pendingClineApproval(message)) return respondToClineApproval(message, false)
     message.action = 'rejected'
     message.commandExecutionMessage = '已拒绝执行。'
     persistCommandExecutionState()
@@ -211,6 +276,7 @@ export const createAiPanelCommandActionRuntime = (options: AiPanelCommandActionR
   }
 
   const runMessageCommand = async (message: AiPanelCommandSuggestionMessage, input: { autoReadOnly?: boolean } = {}) => {
+    if (message.commandExecutionStatus === 'running') return false
     if (message.action === 'rejected') {
       options.notify(labels.commandRejectedCannotRun())
       return false
@@ -222,6 +288,8 @@ export const createAiPanelCommandActionRuntime = (options: AiPanelCommandActionR
       options.notify(labels.commandRunEmpty())
       return false
     }
+
+    if (pendingClineApproval(message)) return respondToClineApproval(message, true)
 
     const terminalPanel = resolveAiPanelCommandActionTerminalPanel(options.activePanel(), options.panels())
     const outputStartLength = terminalPanel?.output.length ?? 0

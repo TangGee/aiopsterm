@@ -28,6 +28,20 @@ const withAssetDatabase = async <T>(run: (databasePath: string) => Promise<T>) =
   }
 }
 
+const readSqliteStorageArtifacts = async (databasePath: string) => {
+  const artifacts = await Promise.all(
+    [databasePath, `${databasePath}-wal`, `${databasePath}-shm`].map(async (path) => {
+      try {
+        return await readFile(path)
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return Buffer.alloc(0)
+        throw error
+      }
+    })
+  )
+  return Buffer.concat(artifacts).toString('utf-8')
+}
+
 describe('assets sqlite backend seed boundary', () => {
   beforeEach(() => {
     vi.resetModules()
@@ -118,8 +132,7 @@ describe('assets sqlite backend seed boundary', () => {
       expect(savedKeychain.ok).toBe(true)
       expect(savedKeychain.data).toEqual(expect.objectContaining({ hasPrivateKey: true }))
 
-      const rawDatabase = await readFile(databasePath)
-      const rawText = rawDatabase.toString('utf-8')
+      const rawText = await readSqliteStorageArtifacts(databasePath)
       expect(rawText).not.toContain('plain-ssh-password')
       expect(rawText).not.toContain('secret-private-key-material')
       expect(rawText).not.toContain('plain-passphrase')
@@ -249,8 +262,7 @@ describe('assets sqlite backend seed boundary', () => {
         })
       )
 
-      const rawDatabase = await readFile(databasePath)
-      const rawText = rawDatabase.toString('utf-8')
+      const rawText = await readSqliteStorageArtifacts(databasePath)
       expect(rawText).not.toContain('legacy-plain-password')
       expect(rawText).not.toContain('legacy-private-key-material')
       expect(rawText).not.toContain('legacy-passphrase')

@@ -6,6 +6,7 @@ import { tmpdir } from 'os'
 import { join } from 'path'
 import { spawn, type ChildProcessWithoutNullStreams } from 'child_process'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { DATABASE_MCP_TOOL_DEFINITIONS, DATABASE_MCP_TOOL_NAMES } from '../src/shared/databaseMcpRuntime'
 
 vi.mock('electron', () => ({
   app: {
@@ -299,6 +300,119 @@ describe('external Codex MCP bridge runtime', () => {
     )
   })
 
+  it('requires an explicit Export MCP database-read grant', async () => {
+    const { bridge } = await loadBackends()
+    activeBridge = bridge
+    const databaseRuntimePath = '../src/shared/databaseRuntime'
+    const databaseRuntime = await import(databaseRuntimePath)
+    databaseRuntime.resetDatabaseBackendSeed()
+    databaseRuntime.configureDatabaseRuntime({ useSeedData: true })
+    bridge.configureExternalCodexMcpBridgeRuntime({
+      getConfig: () => ({
+        language: 'zh-CN',
+        exportMcp: { allowAgentSshAuthSubmit: false, allowDatabaseRead: false }
+      })
+    })
+
+    const disabled = await bridge.handleExternalCodexMcpBridgeRequest({
+      method: 'list_database_connections',
+      token: 'test-token',
+      params: {}
+    })
+    expect(disabled).toEqual(
+      expect.objectContaining({
+        ok: false,
+        errorCode: 'DB_MCP_DATABASE_READ_DISABLED',
+        errorMessage: expect.stringContaining('设置 -> 导出 MCP'),
+        data: expect.objectContaining({
+          messageKey: 'externalMcp.database.readDisabled',
+          settingsTarget: 'exportMcp',
+          capability: 'databaseRead'
+        })
+      })
+    )
+
+    bridge.configureExternalCodexMcpBridgeRuntime({
+      getConfig: () => {
+        throw new Error('config unavailable')
+      }
+    })
+    await expect(
+      bridge.handleExternalCodexMcpBridgeRequest({
+        method: 'list_database_connections',
+        token: 'test-token',
+        params: {}
+      })
+    ).resolves.toEqual(expect.objectContaining({ ok: false, errorCode: 'DB_MCP_DATABASE_READ_DISABLED' }))
+
+    bridge.configureExternalCodexMcpBridgeRuntime({
+      getConfig: () => ({
+        language: 'zh-CN',
+        exportMcp: { allowAgentSshAuthSubmit: false, allowDatabaseRead: true }
+      })
+    })
+    const enabled = await bridge.handleExternalCodexMcpBridgeRequest({
+      method: 'list_database_connections',
+      token: 'test-token',
+      params: { query: 'postgresql' }
+    })
+    const databaseConnection = (enabled.data?.connections as Array<Record<string, unknown>>)?.[0]
+    const databaseConnectionId = String(databaseConnection?.connectionId || '')
+    expect(enabled).toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
+          connections: expect.arrayContaining([
+            expect.objectContaining({
+              connectionId: expect.stringMatching(/^db-[a-f0-9]{32}$/),
+              label: 'postgresql / Production / 1',
+              dbType: 'postgresql'
+            })
+          ])
+        })
+      })
+    )
+    expect(databaseConnectionId).not.toBe('conn-prod-pg')
+    expect(JSON.stringify(enabled)).not.toContain('10.32.6.9')
+    expect(JSON.stringify(enabled)).not.toContain('orders-postgres')
+
+    const described = await bridge.handleExternalCodexMcpBridgeRequest({
+      method: 'describe_database_table',
+      token: 'test-token',
+      params: {
+        connectionId: databaseConnectionId,
+        databaseName: 'orders',
+        schemaName: 'public',
+        tableName: 'orders'
+      }
+    })
+    expect(described).toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
+          table: expect.objectContaining({
+            path: 'orders.public.orders',
+            primaryKey: ['id'],
+            columns: expect.arrayContaining([expect.objectContaining({ name: 'id', type: 'bigint', key: 'PK' })])
+          })
+        })
+      })
+    )
+
+    await expect(
+      bridge.handleExternalCodexMcpBridgeRequest({
+        method: 'describe_database_table',
+        token: 'test-token',
+        params: {
+          connectionId: 'conn-prod-pg',
+          databaseName: 'orders',
+          schemaName: 'public',
+          tableName: 'orders'
+        }
+      })
+    ).resolves.toMatchObject({ ok: false, errorCode: 'DB_MCP_CONNECTION_NOT_FOUND' })
+  })
+
   it('lists saved hosts without exposing stored secrets', async () => {
     const { assets, bridge } = await loadBackends()
     activeBridge = bridge
@@ -422,7 +536,7 @@ describe('external Codex MCP bridge runtime', () => {
     bridge.configureExternalCodexMcpBridgeRuntime({
       getConfig: () => ({
         language: 'en-US',
-        exportMcp: { allowAgentSshAuthSubmit: false }
+        exportMcp: { allowAgentSshAuthSubmit: false, allowDatabaseRead: false }
       })
     })
     const saved = assets.saveAsset({
@@ -522,7 +636,7 @@ describe('external Codex MCP bridge runtime', () => {
     bridge.configureExternalCodexMcpBridgeRuntime({
       getConfig: () => ({
         language: 'en-US',
-        exportMcp: { allowAgentSshAuthSubmit: false }
+        exportMcp: { allowAgentSshAuthSubmit: false, allowDatabaseRead: false }
       })
     })
     const connectPromise = bridge.handleExternalCodexMcpBridgeRequest({
@@ -565,7 +679,7 @@ describe('external Codex MCP bridge runtime', () => {
     bridge.configureExternalCodexMcpBridgeRuntime({
       getConfig: () => ({
         language: 'en-US',
-        exportMcp: { allowAgentSshAuthSubmit: true }
+        exportMcp: { allowAgentSshAuthSubmit: true, allowDatabaseRead: false }
       })
     })
     const enabledSubmit = await bridge.handleExternalCodexMcpBridgeRequest({
@@ -1332,14 +1446,26 @@ describe('external Codex MCP bridge runtime', () => {
           'dismiss_ai_notification',
           'clear_ai_notifications',
           'open_ai_notification',
-          'jump_to_unread_ai_notification'
+          'jump_to_unread_ai_notification',
+          'list_database_connections',
+          'search_database_objects',
+          'describe_database_table',
+          'get_database_table_ddl',
+          'query_database_table'
         ])
+        expect(tools.result?.tools?.filter((tool) => DATABASE_MCP_TOOL_NAMES.includes(tool.name as any))).toEqual(DATABASE_MCP_TOOL_DEFINITIONS)
         const runCommandTool = tools.result?.tools?.find((tool) => tool.name === 'run_command')
         expect(runCommandTool?.annotations).toEqual(expect.objectContaining({ destructiveHint: true }))
         const listAiSessionsTool = tools.result?.tools?.find((tool) => tool.name === 'list_ai_sessions')
         expect(listAiSessionsTool?.annotations).toEqual(expect.objectContaining({ readOnlyHint: true }))
         const getAiSessionTool = tools.result?.tools?.find((tool) => tool.name === 'get_ai_session')
         expect(getAiSessionTool?.annotations).toEqual(expect.objectContaining({ readOnlyHint: true }))
+        const queryDatabaseTableTool = tools.result?.tools?.find((tool) => tool.name === 'query_database_table')
+        expect(queryDatabaseTableTool?.annotations).toEqual(
+          expect.objectContaining({ readOnlyHint: true, destructiveHint: false, openWorldHint: true })
+        )
+        expect((queryDatabaseTableTool?.inputSchema as any)?.properties?.page).toEqual(expect.objectContaining({ maximum: 1000 }))
+        expect((queryDatabaseTableTool?.inputSchema as any)?.properties?.pageSize).toEqual(expect.objectContaining({ maximum: 100 }))
         const listAiApprovalsTool = tools.result?.tools?.find((tool) => tool.name === 'list_ai_approvals')
         expect(listAiApprovalsTool?.annotations).toEqual(expect.objectContaining({ readOnlyHint: true }))
         const approveAiSessionTool = tools.result?.tools?.find((tool) => tool.name === 'approve_ai_session')

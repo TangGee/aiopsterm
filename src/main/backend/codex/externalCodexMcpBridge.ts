@@ -12,9 +12,11 @@ import type { ManagedAiSessionFocusRequest } from '@shared/contracts/managedAiSe
 import type { AiopsAssetRecord } from '@shared/contracts/assets'
 import type { TerminalKeyboardInteractiveRequest, TerminalKeyboardInteractiveResponse, TerminalKeyboardInteractiveResult, TerminalLifecycleEvent } from '@shared/contracts/terminalSessions'
 import type { UserConfig } from '@shared/contracts/userConfig'
+import { isDatabaseMcpToolName } from '@shared/databaseMcpRuntime'
 import { createSshTerminalSession, resolveSshTerminalTarget, type SshTerminalSession } from '../ssh/sshTerminal'
 import { listAssets } from '../assets/assets'
 import { isWindowsPlatform } from '../app/platformRuntime'
+import { callDatabaseMcpTool } from '../database/databaseMcp'
 import { handleExternalCodexMcpManagedAiRequest } from './externalCodexMcpManagedAiRuntime'
 import {
   cancelExternalMcpAuthRequest,
@@ -146,6 +148,32 @@ const defaultSocketPath = () => {
 }
 
 const bridgeSocketPath = () => cleanText(runtimeConfig.socketPath) || cleanText(process.env.AIOPSTERM_EXTERNAL_CODEX_MCP_SOCKET) || defaultSocketPath()
+
+const databaseReadDisabledResponse = (language?: string) => {
+  const zhCN = language === 'zh-CN'
+  const message = zhCN
+    ? '外部 MCP Agent 的数据库读取权限已关闭。请在“设置 -> 导出 MCP”中开启。'
+    : 'Database reads for external MCP Agents are disabled. Enable them in Settings -> Export MCP.'
+  return fail('DB_MCP_DATABASE_READ_DISABLED', message, {
+    messageKey: 'externalMcp.database.readDisabled',
+    userMessage: message,
+    localizedMessage: {
+      key: 'externalMcp.database.readDisabled',
+      params: {},
+      fallback: message
+    },
+    settingsTarget: 'exportMcp',
+    capability: 'databaseRead'
+  })
+}
+
+const currentRuntimeUserConfig = () => {
+  try {
+    return runtimeConfig.getConfig?.()
+  } catch {
+    return undefined
+  }
+}
 
 export const configureExternalCodexMcpBridgeRuntime = (config: ExternalCodexMcpRuntimeConfig = {}) => {
   runtimeConfig = { ...runtimeConfig, ...config }
@@ -770,6 +798,12 @@ export const handleExternalCodexMcpBridgeRequest = async (request: ExternalCodex
   if (request.method === 'read_file') return readFile(params)
   if (request.method === 'glob_search') return globSearch(params)
   if (request.method === 'grep_search') return grepSearch(params)
+  if (isDatabaseMcpToolName(request.method)) {
+    const userConfig = currentRuntimeUserConfig()
+    if (userConfig?.exportMcp?.allowDatabaseRead !== true) return databaseReadDisabledResponse(userConfig?.language)
+  }
+  const databaseResponse = await callDatabaseMcpTool(request.method || '', params)
+  if (databaseResponse) return databaseResponse
   const managedAiResponse = await handleExternalCodexMcpManagedAiRequest(request.method, params, {
     focusManagedAiSession: runtimeConfig.focusManagedAiSession
   })
@@ -803,13 +837,13 @@ export const ensureExternalCodexMcpBridgeServer = async (config: ExternalCodexMc
         let request: ExternalCodexMcpRequest
         try {
           request = JSON.parse(line) as ExternalCodexMcpRequest
-        } catch (error) {
-          writeSocketResponse(socket, undefined, fail('INVALID_JSON', error instanceof Error ? error.message : String(error)))
+        } catch {
+          writeSocketResponse(socket, undefined, fail('INVALID_JSON', 'External MCP bridge request is not valid JSON.'))
           continue
         }
         void handleExternalCodexMcpBridgeRequest(request)
           .then((response) => writeSocketResponse(socket, request.id, response))
-          .catch((error) => writeSocketResponse(socket, request.id, fail('BRIDGE_REQUEST_FAILED', error instanceof Error ? error.message : String(error))))
+          .catch(() => writeSocketResponse(socket, request.id, fail('BRIDGE_REQUEST_FAILED', 'External MCP bridge request failed.')))
       }
     })
   })

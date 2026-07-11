@@ -7,7 +7,17 @@ import {
   defaultAiPanelChatModeOptions,
   measureAiPanelUiTextWidthPx
 } from '@/services/ai/aiPanelPresentationRuntime'
+import type { I18nKey } from '@/i18n/messages'
 import type { AiContextOption } from '@shared/contracts/aiChat'
+
+const modeTranslations: Partial<Record<I18nKey, string>> = {
+  'ai.classicModeAgent': 'Localized Agent',
+  'ai.classicModeAgentDetail': 'Localized agent detail',
+  'ai.classicModeCommand': 'Localized Command',
+  'ai.classicModeCommandDetail': 'Localized command detail',
+  'ai.classicModeChat': 'Localized Chat',
+  'ai.classicModeChatDetail': 'Localized chat detail'
+}
 
 const hostContext: AiContextOption = {
   id: 'host-1',
@@ -29,7 +39,8 @@ describe('aiPanelPresentationRuntime', () => {
   it('owns static AI panel presentation options and editable icon markup', () => {
     expect(defaultAiPanelChatModeOptions).toEqual([
       { id: 'agent', label: 'Agent', detail: '上下文辅助与工具调用' },
-      { id: 'cmd', label: 'Command', detail: '生成命令与解释' }
+      { id: 'cmd', label: 'Command', detail: '生成命令与解释' },
+      { id: 'chat', label: 'Chat', detail: '无工具调用的对话' }
     ])
     expect(aiPanelCommandIconMarkup).toContain('<svg')
     expect(aiPanelIconMarkupByContextKind.docs).toContain('M14 2')
@@ -49,10 +60,15 @@ describe('aiPanelPresentationRuntime', () => {
         fallback: 'fallback-icon'
       },
       selectedContexts: () => contexts,
+      translate: (key) => modeTranslations[key] || key,
       measureText: (text) => text.length * 12
     })
 
-    expect(runtime.aiChatModeOptions).toBe(defaultAiPanelChatModeOptions)
+    expect(runtime.aiChatModeOptions.value).toEqual([
+      { id: 'agent', label: 'Localized Agent', detail: 'Localized agent detail' },
+      { id: 'cmd', label: 'Localized Command', detail: 'Localized command detail' },
+      { id: 'chat', label: 'Localized Chat', detail: 'Localized chat detail' }
+    ])
     expect(runtime.iconForKind('hosts')).toBe('host-icon')
     expect(runtime.iconForKind('docs')).toBe('doc-icon')
     expect(runtime.contextById('doc-1')).toBe(docContext)

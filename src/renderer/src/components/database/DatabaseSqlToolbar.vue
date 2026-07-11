@@ -3,7 +3,7 @@
     <button
       type="button"
       class="db-sql-toolbar-btn db-sql-toolbar-run"
-      title="Run all"
+      :title="t('database.sql.toolbar.runAll')"
       :disabled="!activeSqlCanRun"
       @click="emit('runSql', 'all')"
     >
@@ -12,7 +12,7 @@
     <button
       type="button"
       class="db-sql-toolbar-btn db-sql-toolbar-run-current"
-      title="Run current statement"
+      :title="t('database.sql.toolbar.runCurrent')"
       :disabled="!activeSqlCanRun"
       @click="emit('runSql', 'current')"
     >
@@ -21,7 +21,7 @@
     <button
       type="button"
       class="db-sql-toolbar-btn db-sql-toolbar-explain"
-      title="Explain"
+      :title="t('database.sql.toolbar.explain')"
       :disabled="!activeSqlCanRun"
       @click="emit('runSql', 'explain')"
     >
@@ -32,7 +32,7 @@
       type="button"
       class="db-sql-toolbar-btn db-sql-toolbar-save"
       :disabled="!activeSqlTab || activeSqlSaving"
-      :title="activeSqlSaveTitle"
+      :title="localizedActiveSqlSaveTitle"
       @click="emit('saveActiveSql', false)"
     >
       <Save />
@@ -41,7 +41,7 @@
       type="button"
       class="db-sql-toolbar-btn db-sql-toolbar-save-as"
       :disabled="!activeSqlTab || activeSqlSaving"
-      title="Save As"
+      :title="t('database.sql.toolbar.saveAs')"
       @click="emit('saveActiveSql', true)"
     >
       <SaveAll />
@@ -50,7 +50,7 @@
       type="button"
       class="db-sql-toolbar-btn db-sql-toolbar-format"
       :disabled="!activeSqlTab.connectionId"
-      title="Format"
+      :title="t('database.sql.toolbar.format')"
       @click="emit('formatSql')"
     >
       <AlignLeft />
@@ -59,7 +59,7 @@
     <span class="db-ai-toolbar">
       <button
         type="button"
-        title="AI Explain SQL"
+        :title="t('database.sql.toolbar.aiExplain')"
         :disabled="!activeSqlHasText"
         @click="emit('openDbAiFromToolbar', 'explain')"
       >
@@ -67,7 +67,7 @@
       </button>
       <button
         type="button"
-        title="AI Optimize SQL"
+        :title="t('database.sql.toolbar.aiOptimize')"
         :disabled="!activeSqlHasText"
         @click="emit('openDbAiFromToolbar', 'optimize')"
       >
@@ -75,7 +75,7 @@
       </button>
       <button
         type="button"
-        title="AI Convert SQL"
+        :title="t('database.sql.toolbar.aiConvert')"
         :disabled="!activeSqlHasText"
         @click="emit('openDbAiFromToolbar', 'convert')"
       >
@@ -83,7 +83,7 @@
       </button>
       <button
         type="button"
-        title="AI Complete SQL"
+        :title="t('database.sql.toolbar.aiComplete')"
         :disabled="!activeSqlTab"
         @click="emit('openDbAiFromToolbar', 'complete')"
       >
@@ -91,7 +91,7 @@
       </button>
       <button
         type="button"
-        title="AI NL2SQL"
+        :title="t('database.sql.toolbar.aiNl2sql')"
         :disabled="!activeSqlTab"
         @click="emit('openDbAiFromToolbar', 'nl2sql')"
       >
@@ -109,14 +109,14 @@
         value=""
         disabled
       >
-        Connection
+        {{ t('database.field.connection') }}
       </option>
       <option
         v-for="connection in connections"
         :key="connection.id"
         :value="connection.id"
       >
-        {{ connection.name }}{{ connection.status === 'testing' ? ' [connecting...]' : '' }}
+        {{ connection.name }}{{ connection.status === 'testing' ? ` [${t('database.connection.connecting')}]` : '' }}
       </option>
     </select>
     <select
@@ -129,7 +129,7 @@
         value=""
         disabled
       >
-        {{ databaseCatalogFieldLabel(activeSqlConnection) }}
+        {{ localizedCatalogFieldLabel }}
       </option>
       <option
         v-for="catalog in currentSqlCatalogs"
@@ -150,7 +150,7 @@
         value=""
         disabled
       >
-        Schema
+        {{ t('database.field.schema') }}
       </option>
       <option
         v-for="schema in currentSqlSchemas"
@@ -178,6 +178,7 @@ import {
   TextCursorInput,
   WandSparkles
 } from 'lucide-vue-next'
+import { useI18n } from '@/i18n'
 import type { DbAiToolbarAction, SqlTab } from '@/components/database/databaseMainWorkspaceTypes'
 import type { DatabaseCatalogInfo, DatabaseConnectionInfo } from '@shared/contracts/database'
 import {
@@ -198,6 +199,18 @@ const props = defineProps<{
 }>()
 
 const activeSqlConnection = computed(() => props.connections.find((connection) => connection.id === props.activeSqlTab.connectionId) ?? null)
+const { t } = useI18n()
+const localizedActiveSqlSaveTitle = computed(() => {
+  if (props.activeSqlSaveTitle === 'Save') return t('database.common.save')
+  if (props.activeSqlSaveTitle === 'Saving') return t('database.common.saving')
+  return props.activeSqlSaveTitle
+})
+const localizedCatalogFieldLabel = computed(() => {
+  const label = databaseCatalogFieldLabel(activeSqlConnection.value)
+  if (label === 'Catalog') return t('database.field.catalog')
+  if (label === 'Service') return t('database.field.service')
+  return t('database.field.database')
+})
 
 const emit = defineEmits<{
   runSql: [mode: 'all' | 'current' | 'explain']

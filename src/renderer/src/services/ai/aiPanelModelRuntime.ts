@@ -1,6 +1,6 @@
 import type { AiModelCatalogOption } from '@shared/contracts/appRuntime'
 
-export type AiPanelChatMode = 'agent' | 'cmd'
+export type AiPanelChatMode = 'agent' | 'cmd' | 'chat'
 
 export type AiPanelChatModeOption = {
   id: AiPanelChatMode

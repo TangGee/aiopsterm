@@ -1990,6 +1990,47 @@ describe('workspace store', () => {
     expect(store.chatMessages.at(-1)?.text).toBe('已停止生成。')
   })
 
+  it('aborts an active Cline Agent command even when its command card is not streaming', async () => {
+    const store = useWorkspaceStore()
+    store.chatMessages = [{
+      id: 'cline-turn-1',
+      role: 'assistant',
+      text: 'journalctl -f -u api',
+      state: 'done',
+      ask: 'command',
+      commandExecutionStatus: 'running',
+      commandExecutionMessage: 'Cline Agent 正在执行命令...',
+      commandExecution: {
+        ip: 'current terminal',
+        command: 'journalctl -f -u api',
+        requiresApproval: true,
+        interactive: false
+      },
+      agentTask: {
+        taskId: 'cline-task-1',
+        turnId: 'cline-turn-1',
+        toolCallId: 'cline-tool-1',
+        toolName: 'run_host_command',
+        terminalSessionId: 'terminal-session-1',
+        status: 'running'
+      }
+    }]
+
+    await expect(store.cancelStreamingAiChatResponse()).resolves.toBe(true)
+    expect(window.aiops.abortClineAgentTask).toHaveBeenCalledWith({
+      taskId: 'cline-task-1',
+      turnId: 'cline-turn-1',
+      reason: 'The operator stopped the Classic Agent turn.'
+    })
+    expect(window.aiops.cancelAiChatResponse).not.toHaveBeenCalled()
+    expect(store.chatMessages[0]).toMatchObject({
+      state: 'done',
+      commandExecutionStatus: 'failed',
+      commandExecutionMessage: 'Cline Agent 命令已停止。',
+      agentTask: { status: 'cancelled' }
+    })
+  })
+
   it('fails closed on malformed AI exchange, response, and cancel result envelopes', async () => {
     const store = useWorkspaceStore()
 
@@ -2476,7 +2517,7 @@ describe('workspace store', () => {
     expect(window.aiops.writeTerminal).toHaveBeenCalledWith('terminal-command-session', 'uptime\n')
   })
 
-  it('continues the agent loop with real terminal output after an approved command', async () => {
+  it('does not continue the legacy renderer agent loop after Cline migration', async () => {
     const store = useWorkspaceStore()
     store.chatMessages = [
       {
@@ -2496,19 +2537,6 @@ describe('workspace store', () => {
     store.activePanel.sessionId = 'terminal-agent-loop-session'
     const outputStartLength = store.activePanel.output.length
     store.appendTerminalOutput('terminal-agent-loop-session', 'uptime\nload average: 0.10, 0.20, 0.30\n')
-    vi.mocked(window.aiops.generateAiChatResponse).mockImplementationOnce(async (input: any) => ({
-      ok: true,
-      data: {
-        text: '负载正常。',
-        provider: 'aiopsterm-local',
-        model: 'aiopsterm-local-agent',
-        durationMs: 1,
-        status: 'done',
-        requestId: input.requestId,
-        assistantMessageId: input.assistantMessageId
-      }
-    }))
-
     const result = await store.continueAgentCommandLoop({
       commandMessageId: 'command-ask',
       command: 'uptime',
@@ -2517,33 +2545,12 @@ describe('workspace store', () => {
       outputStartLength
     })
 
-    expect(result.status).toBe('continued')
-    expect(store.chatMessages).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          say: 'command_output',
-          action: 'approved',
-          executedCommand: 'uptime',
-          text: expect.stringContaining('load average')
-        })
-      ])
-    )
-    expect(window.aiops.generateAiChatResponse).toHaveBeenCalledWith(
-      expect.objectContaining({
-        mode: 'agent',
-        prompt: expect.stringContaining('Command output from the approved execute_command tool is available.'),
-        messages: expect.arrayContaining([
-          expect.objectContaining({
-            say: 'command_output',
-            action: 'approved',
-            text: expect.stringContaining('load average')
-          })
-        ])
-      })
-    )
+    expect(result).toMatchObject({ status: 'unavailable', reason: expect.stringContaining('Cline runtime') })
+    expect(store.chatMessages.some((message) => message.say === 'command_output')).toBe(false)
+    expect(window.aiops.generateAiChatResponse).not.toHaveBeenCalled()
   })
 
-  it('filters long agent command output before sending it back to the provider', async () => {
+  it('does not resend long command output from the renderer after Cline migration', async () => {
     const store = useWorkspaceStore()
     const output = `HEAD-${'a'.repeat(120)}\n${'x'.repeat(14000)}\nTAIL-load average: 0.10`
     store.chatMessages = [
@@ -2561,19 +2568,6 @@ describe('workspace store', () => {
         }
       }
     ]
-    vi.mocked(window.aiops.generateAiChatResponse).mockImplementationOnce(async (input: any) => ({
-      ok: true,
-      data: {
-        text: '已分析压缩输出。',
-        provider: 'aiopsterm-local',
-        model: 'aiopsterm-local-agent',
-        durationMs: 1,
-        status: 'done',
-        requestId: input.requestId,
-        assistantMessageId: input.assistantMessageId
-      }
-    }))
-
     const result = await store.continueAgentCommandLoop({
       commandMessageId: 'command-ask',
       command: 'cat /var/log/app.log',
@@ -2583,23 +2577,12 @@ describe('workspace store', () => {
       output
     })
 
-    expect(result.status).toBe('continued')
-    expect(store.chatMessages.find((message) => message.say === 'command_output')?.text).toBe(output)
-    const responseInput = vi.mocked(window.aiops.generateAiChatResponse).mock.calls.at(-1)?.[0] as any
-    expect(responseInput.prompt).toContain('[aiopsterm omitted')
-    expect(responseInput.prompt).toContain('TAIL-load average')
-    expect(responseInput.prompt.length).toBeLessThan(output.length)
-    expect(responseInput.messages).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          say: 'command_output',
-          text: expect.stringContaining('[aiopsterm omitted')
-        })
-      ])
-    )
+    expect(result.status).toBe('unavailable')
+    expect(store.chatMessages.find((message) => message.say === 'command_output')).toBeUndefined()
+    expect(window.aiops.generateAiChatResponse).not.toHaveBeenCalled()
   })
 
-  it('keeps long agent command output unfiltered when the AI preference is disabled', async () => {
+  it('does not resend unfiltered command output from the renderer after Cline migration', async () => {
     const store = useWorkspaceStore()
     store.aiPreferences.commandOutputFilteringEnabled = false
     const output = `HEAD\n${'x'.repeat(14000)}\nTAIL`
@@ -2618,19 +2601,6 @@ describe('workspace store', () => {
         }
       }
     ]
-    vi.mocked(window.aiops.generateAiChatResponse).mockImplementationOnce(async (input: any) => ({
-      ok: true,
-      data: {
-        text: '已分析完整输出。',
-        provider: 'aiopsterm-local',
-        model: 'aiopsterm-local-agent',
-        durationMs: 1,
-        status: 'done',
-        requestId: input.requestId,
-        assistantMessageId: input.assistantMessageId
-      }
-    }))
-
     await expect(
       store.continueAgentCommandLoop({
         commandMessageId: 'command-ask',
@@ -2639,14 +2609,11 @@ describe('workspace store', () => {
         outputStartLength: store.activePanel.output.length,
         output
       })
-    ).resolves.toMatchObject({ status: 'continued' })
-
-    const responseInput = vi.mocked(window.aiops.generateAiChatResponse).mock.calls.at(-1)?.[0] as any
-    expect(responseInput.prompt).toContain(output)
-    expect(responseInput.prompt).not.toContain('[aiopsterm omitted')
+    ).resolves.toMatchObject({ status: 'unavailable' })
+    expect(window.aiops.generateAiChatResponse).not.toHaveBeenCalled()
   })
 
-  it('auto-runs agent read-only command cards when the global preference is enabled', async () => {
+  it('does not auto-run Agent command cards from the renderer when the global legacy preference is enabled', async () => {
     const store = useWorkspaceStore()
     store.aiPreferences.autoExecuteReadOnlyCommands = true
     store.activePanel.sessionId = 'terminal-agent-auto-run-session'
@@ -2676,59 +2643,21 @@ describe('workspace store', () => {
           }
         }
       } as any)
-      .mockImplementationOnce(async (input: any) => ({
-        ok: true,
-        data: {
-          text: '负载正常。',
-          provider: 'aiopsterm-local',
-          model: 'aiopsterm-local-agent',
-          durationMs: 1,
-          status: 'done',
-          requestId: input.requestId,
-          assistantMessageId: input.assistantMessageId
-        }
-      }))
-    vi.mocked(window.aiops.writeTerminal).mockImplementationOnce(async (id: string, data: string) => {
-      store.appendTerminalOutput(id, `${data}load average: 0.10, 0.20, 0.30\n`)
-      return {
-        ok: true,
-        data: {
-          id,
-          bytes: Buffer.byteLength(data, 'utf8')
-        }
-      }
-    })
 
     await expect(store.sendChat('检查负载', undefined, undefined, { mode: 'agent' })).resolves.toBe(true)
     await Promise.resolve()
     await Promise.resolve()
 
     expect(window.aiops.createAiChatExchangeRequest).toHaveBeenCalledWith(expect.objectContaining({ mode: 'agent' }))
-    expect(window.aiops.writeTerminal).toHaveBeenCalledWith('terminal-agent-auto-run-session', 'uptime\n')
-    expect(window.aiops.generateAiChatResponse).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        mode: 'agent',
-        prompt: expect.stringContaining('Command output from the approved execute_command tool is available.'),
-        messages: expect.arrayContaining([
-          expect.objectContaining({
-            say: 'command_output',
-            action: 'approved',
-            text: expect.stringContaining('load average')
-          })
-        ])
-      })
-    )
-    expect(store.chatMessages.find((message) => message.id === 'aichat-request-test-1-assistant')).toMatchObject({
-      executedCommand: 'uptime',
-      commandExecutionStatus: 'succeeded',
-      commandExecutionMessage: '命令输出已回传 Agent：uptime'
-    })
+    expect(window.aiops.writeTerminal).not.toHaveBeenCalled()
+    expect(window.aiops.generateAiChatResponse).toHaveBeenCalledTimes(1)
+    expect(store.chatMessages.find((message) => message.id === 'aichat-request-test-1-assistant')?.executedCommand).toBeUndefined()
   })
 
-  it('auto-runs later agent read-only command cards after enabling it for the current session', async () => {
+  it('keeps the legacy per-session Agent auto-run toggle disabled after Cline migration', async () => {
     const store = useWorkspaceStore()
     await store.restoreConversation('conv-1')
-    expect(store.enableAgentReadOnlyAutoRunForCurrentConversation()).toBe(true)
+    expect(store.enableAgentReadOnlyAutoRunForCurrentConversation()).toBe(false)
     store.activePanel.sessionId = 'terminal-agent-session-auto-run'
     vi.mocked(window.aiops.generateAiChatResponse)
       .mockResolvedValueOnce({
@@ -2756,54 +2685,16 @@ describe('workspace store', () => {
           }
         }
       } as any)
-      .mockImplementationOnce(async (input: any) => ({
-        ok: true,
-        data: {
-          text: '磁盘空间正常。',
-          provider: 'aiopsterm-local',
-          model: 'aiopsterm-local-agent',
-          durationMs: 1,
-          status: 'done',
-          requestId: input.requestId,
-          assistantMessageId: input.assistantMessageId
-        }
-      }))
-    vi.mocked(window.aiops.writeTerminal).mockImplementationOnce(async (id: string, data: string) => {
-      store.appendTerminalOutput(id, `${data}/dev/vda1  40G  20G  20G  50% /\n`)
-      return {
-        ok: true,
-        data: {
-          id,
-          bytes: Buffer.byteLength(data, 'utf8')
-        }
-      }
-    })
 
     await expect(store.sendChat('继续检查磁盘', undefined, undefined, { mode: 'agent' })).resolves.toBe(true)
     await Promise.resolve()
     await Promise.resolve()
 
-    expect(window.aiops.writeTerminal).toHaveBeenCalledWith('terminal-agent-session-auto-run', 'df -h\n')
-    expect(window.aiops.generateAiChatResponse).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        mode: 'agent',
-        prompt: expect.stringContaining('Command output from the approved execute_command tool is available.'),
-        messages: expect.arrayContaining([
-          expect.objectContaining({
-            say: 'command_output',
-            action: 'approved',
-            text: expect.stringContaining('/dev/vda1')
-          })
-        ])
-      })
-    )
-    expect(store.chatMessages.find((message) => message.id === 'aichat-request-test-1-assistant')).toMatchObject({
-      executedCommand: 'df -h',
-      commandExecutionStatus: 'succeeded'
-    })
+    expect(window.aiops.writeTerminal).not.toHaveBeenCalled()
+    expect(window.aiops.generateAiChatResponse).toHaveBeenCalledTimes(1)
   })
 
-  it('does not continue the agent loop when no terminal output is captured', async () => {
+  it('reports the legacy renderer Agent loop as unavailable without calling the provider', async () => {
     const store = useWorkspaceStore()
     store.chatMessages = [
       {
@@ -2830,12 +2721,9 @@ describe('workspace store', () => {
       outputTimeoutMs: 0
     })
 
-    expect(result.status).toBe('no-output')
+    expect(result.status).toBe('unavailable')
     expect(store.chatMessages.some((message) => message.say === 'command_output')).toBe(false)
-    expect(store.chatMessages.find((message) => message.id === 'command-ask')).toMatchObject({
-      commandExecutionStatus: 'failed',
-      commandExecutionMessage: '命令已发送，但未捕获到终端输出，未继续 Agent 循环。'
-    })
+    expect(store.chatMessages.find((message) => message.id === 'command-ask')).toMatchObject({ commandExecutionStatus: 'running' })
     expect(window.aiops.generateAiChatResponse).not.toHaveBeenCalled()
   })
 

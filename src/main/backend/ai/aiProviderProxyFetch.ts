@@ -79,17 +79,17 @@ class SingleSocketHttpsAgent extends https.Agent {
   }
 }
 
-const createFetchResponse = (status: number, statusText: string, headers: http.IncomingHttpHeaders, body: string): Response =>
-  ({
-    ok: status >= 200 && status < 300,
+const createFetchResponse = (status: number, statusText: string, headers: http.IncomingHttpHeaders, body: Buffer): Response =>
+  new Response(body.length ? new Uint8Array(body) : null, {
     status,
     statusText,
-    headers: new Headers(responseHeaderEntries(headers)),
-    text: async () => body,
-    json: async () => JSON.parse(body)
-  }) as Response
+    headers: responseHeaderEntries(headers)
+  })
 
-export const createAiProviderProxyFetch = (preferences?: AiPreferencesUserConfig): typeof fetch | null => {
+export const createAiProviderProxyFetch = (
+  preferences?: AiPreferencesUserConfig,
+  options: { maxResponseBytes?: number } = {}
+): typeof fetch | null => {
   const proxyConfig = toSshProxyConfig(preferences)
   if (!proxyConfig) return null
 
@@ -132,16 +132,33 @@ export const createAiProviderProxyFetch = (preferences?: AiPreferencesUserConfig
           ...(init.signal ? { signal: init.signal } : {})
         },
         (response) => {
-          let responseBody = ''
-          response.setEncoding('utf8')
+          const responseChunks: Buffer[] = []
+          let responseBytes = 0
           response.on('data', (chunk) => {
-            responseBody += chunk
+            const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+            responseBytes += buffer.byteLength
+            if (options.maxResponseBytes && responseBytes > options.maxResponseBytes) {
+              response.destroy()
+              request?.destroy()
+              settle(() => reject(new Error(`Provider response exceeded ${options.maxResponseBytes} bytes`)))
+              return
+            }
+            responseChunks.push(buffer)
           })
-          response.on('end', () => settle(() => resolve(createFetchResponse(response.statusCode || 0, response.statusMessage || '', response.headers, responseBody))))
+          response.on('end', () => settle(() => resolve(createFetchResponse(
+            response.statusCode || 500,
+            response.statusMessage || '',
+            response.headers,
+            Buffer.concat(responseChunks)
+          ))))
         }
       )
       request.on('error', (error) => settle(() => reject(error)))
       init.signal?.addEventListener('abort', abort, { once: true })
+      if (init.signal?.aborted) {
+        abort()
+        return
+      }
       if (body !== undefined) request.write(body)
       request.end()
     })

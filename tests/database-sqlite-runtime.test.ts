@@ -6,9 +6,11 @@ import type { DatabaseConnectionInfo, DatabaseWorkspaceCatalog } from '../src/sh
 
 const executeSqliteStatementInWorker = vi.fn()
 const executeSqliteTransactionInWorker = vi.fn()
+const executeSqliteGuardedTableQueryInWorker = vi.fn()
 const loadSqliteCatalogsInWorker = vi.fn()
 
 vi.mock('../src/shared/databaseSqliteWorkerRuntime', () => ({
+  executeSqliteGuardedTableQueryInWorker,
   executeSqliteStatementInWorker,
   executeSqliteTransactionInWorker,
   loadSqliteCatalogsInWorker
@@ -45,7 +47,50 @@ describe('databaseSqliteRuntime worker delegation', () => {
   beforeEach(() => {
     executeSqliteStatementInWorker.mockReset()
     executeSqliteTransactionInWorker.mockReset()
+    executeSqliteGuardedTableQueryInWorker.mockReset()
     loadSqliteCatalogsInWorker.mockReset()
+  })
+
+  it('delegates strict reads to the atomic worker guard and rejects a stale view before a data statement runs', async () => {
+    const { sqliteQueryTable } = await loadRuntime()
+    const root = await mkdtemp(join(tmpdir(), 'aiopsterm-sqlite-worker-guard-'))
+    const filePath = join(root, 'worker.sqlite3')
+    await writeFile(filePath, 'sqlite fixture placeholder', 'utf-8')
+    executeSqliteStatementInWorker.mockResolvedValue({ reader: true, columns: [], rows: sqliteColumnRows, truncated: false })
+    executeSqliteGuardedTableQueryInWorker.mockRejectedValue(
+      Object.assign(new Error('Stable SQLite reads are limited to base tables.'), { code: 'DB_TABLE_QUERY_UNSUPPORTED' })
+    )
+
+    try {
+      const result = await sqliteQueryTable(
+        sqliteConnection(filePath),
+        {
+          connectionId: 'conn-worker-sqlite',
+          dbType: 'sqlite',
+          databaseName: 'main',
+          tableName: 'cache_entries',
+          page: 1,
+          pageSize: 20,
+          withTotal: false,
+          requireStableBaseTable: true
+        },
+        Date.now()
+      )
+
+      expect(result).toMatchObject({ ok: false, errorCode: 'DB_TABLE_QUERY_UNSUPPORTED' })
+      expect(executeSqliteGuardedTableQueryInWorker).toHaveBeenCalledWith(
+        expect.objectContaining({
+          filePath,
+          schemaName: 'main',
+          tableName: 'cache_entries',
+          rowStatement: expect.objectContaining({ sql: expect.stringMatching(/^SELECT .* FROM "main"\."cache_entries"/) })
+        })
+      )
+      expect(executeSqliteStatementInWorker).toHaveBeenCalledTimes(1)
+      expect(executeSqliteStatementInWorker.mock.calls.some(([input]) => /^SELECT .* FROM "main"\."cache_entries"/.test(input.sql))).toBe(false)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
   })
 
   it('queries SQLite table pages through the worker boundary', async () => {
@@ -58,7 +103,7 @@ describe('databaseSqliteRuntime worker delegation', () => {
       if (input.sql.startsWith('PRAGMA')) {
         return Promise.resolve({ reader: true, columns: [], rows: sqliteColumnRows, truncated: false })
       }
-      if (input.sql.startsWith('SELECT *')) {
+      if (input.sql.startsWith('SELECT "key", "value", "ttl_seconds"')) {
         return new Promise((resolve) => {
           resolveRows = resolve
         })
@@ -90,7 +135,7 @@ describe('databaseSqliteRuntime worker delegation', () => {
       await vi.waitFor(() => {
         expect(executeSqliteStatementInWorker).toHaveBeenCalledWith(
           expect.objectContaining({
-            sql: 'SELECT * FROM "main"."cache_entries" WHERE "value" LIKE ? ORDER BY "key" DESC LIMIT ? OFFSET ?',
+            sql: 'SELECT "key", "value", "ttl_seconds" FROM "main"."cache_entries" WHERE "value" LIKE ? ORDER BY "key" DESC LIMIT ? OFFSET ?',
             params: ['%abled%', 1, 0]
           })
         )

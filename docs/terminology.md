@@ -39,3 +39,4 @@ This document defines the shared terms used when discussing aiopsterm UI and beh
 - Avoid using `窗口` for panes or tabs. Reserve `窗口` for the Electron/native app window or OS/browser-style windows.
 - When describing split operations, always name the target: `选中的终端窗格`, `当前工作区标签`, or `目标窗格`.
 - When describing default open behavior, distinguish `新建工作区标签` from `拆分当前窗格`.
+- In the Database UI and DB AI text, keep the standard database object term `table` in lowercase English; do not translate it to `表` in Chinese sentences or object labels.

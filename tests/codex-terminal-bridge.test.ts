@@ -223,6 +223,39 @@ describe('Codex terminal bridge runtime', () => {
     }
   })
 
+  it('interrupts and resolves an in-flight command when its owner aborts', async () => {
+    const bridge = await loadBridge()
+    const writes: string[] = []
+    bridge.registerCodexTerminalBridgeSession({
+      id: 'terminal-abort',
+      kind: 'ssh',
+      window: {} as never,
+      write: (data: string | Buffer) => writes.push(String(data))
+    })
+    bridge.setCodexTerminalBridgePreferredSession('terminal-abort')
+
+    const responsePromise = bridge.callCodexTerminalBridgeTool('run_command', {
+      sessionId: 'terminal-abort',
+      commandId: 'cmd-abort',
+      command: 'sleep 60',
+      timeoutMs: 5000,
+      mode: 'wait',
+      execution: 'terminal'
+    })
+    await waitFor(() => writes.length === 1)
+    bridge.appendCodexTerminalBridgeData('terminal-abort', '__AIOPSTERM_CODEX_START_cmd-abort__\npartial output\n')
+
+    expect(bridge.cancelCodexTerminalBridgeCommand('cmd-abort', 'operator stopped the Agent')).toBe(true)
+    await expect(responsePromise).resolves.toMatchObject({
+      ok: false,
+      errorCode: 'COMMAND_ABORTED',
+      errorMessage: 'operator stopped the Agent',
+      data: { commandId: 'cmd-abort', command: 'sleep 60', aborted: true }
+    })
+    expect(writes.at(-1)).toBe('\x03')
+    expect(bridge.cancelCodexTerminalBridgeCommand('cmd-abort')).toBe(false)
+  })
+
   it('filters wrapped command echoes that arrive after the start marker from display output', async () => {
     const bridge = await loadBridge()
     const root = await mkdtemp(join(tmpdir(), 'aiopsterm-codex-bridge-'))

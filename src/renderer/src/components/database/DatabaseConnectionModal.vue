@@ -9,7 +9,7 @@
     >
       <button
         type="button"
-        title="Close"
+        :title="t('database.common.close')"
         @click="emit('close')"
       >
         <X />
@@ -19,10 +19,10 @@
           class="db-engine-large"
           :style="{ background: engineAccent(connectionDraft.dbType) }"
         />
-        <h2>{{ mode === 'edit' ? 'Edit Connection' : engineName(connectionDraft.dbType) }}</h2>
+        <h2>{{ mode === 'edit' ? t('database.connection.editTitle') : engineName(connectionDraft.dbType) }}</h2>
       </header>
       <label>
-        Name
+        {{ t('database.field.name') }}
         <input
           v-model="connectionDraft.name"
           :class="{ error: connectionErrors.includes('name') }"
@@ -30,16 +30,16 @@
         />
       </label>
       <label>
-        Env
+        {{ t('database.field.environment') }}
         <select v-model="connectionDraft.env">
-          <option>Development</option>
-          <option>TEST</option>
-          <option>Staging</option>
-          <option>Production</option>
+          <option value="Development">{{ t('database.environment.development') }}</option>
+          <option value="TEST">{{ t('database.environment.test') }}</option>
+          <option value="Staging">{{ t('database.environment.staging') }}</option>
+          <option value="Production">{{ t('database.environment.production') }}</option>
         </select>
       </label>
       <label>
-        Group
+        {{ t('database.field.group') }}
         <select v-model="connectionDraft.groupId">
           <option
             v-for="group in groups"
@@ -51,7 +51,7 @@
         </select>
       </label>
       <label v-if="connectionDraft.dbType === 'sqlite'">
-        File Path
+        {{ t('database.field.filePath') }}
         <div class="db-connection-file">
           <input
             v-model="connectionDraft.filePath"
@@ -63,23 +63,23 @@
             type="button"
             @click="emit('pickSqliteFile')"
           >
-            Select
+            {{ t('database.common.select') }}
           </button>
         </div>
       </label>
       <label v-if="connectionDraft.dbType === 'sqlite'">
-        Readonly
+        {{ t('database.field.readonly') }}
         <span class="db-connection-check">
           <input
             v-model="connectionDraft.readonly"
             type="checkbox"
           />
-          <span>Open database in readonly mode</span>
+          <span>{{ t('database.connection.readonlyDescription') }}</span>
         </span>
       </label>
       <template v-else>
         <label>
-          Host
+          {{ t('database.field.host') }}
           <input
             v-model="connectionDraft.host"
             :class="{ error: connectionErrors.includes('host') }"
@@ -88,7 +88,7 @@
           />
         </label>
         <label>
-          Port
+          {{ t('database.field.port') }}
           <input
             v-model.number="connectionDraft.port"
             :class="{ error: connectionErrors.includes('port') }"
@@ -100,13 +100,13 @@
           />
         </label>
         <label>
-          Authentication
+          {{ t('database.field.authentication') }}
           <select v-model="connectionDraft.authentication">
-            <option>UserAndPassword</option>
+            <option value="UserAndPassword">{{ t('database.connection.userAndPassword') }}</option>
           </select>
         </label>
         <label>
-          User
+          {{ t('database.field.user') }}
           <input
             v-model="connectionDraft.user"
             :class="{ error: connectionErrors.includes('user') }"
@@ -114,47 +114,47 @@
           />
         </label>
         <label>
-          Password
+          {{ t('database.field.password') }}
           <div class="db-connection-password">
             <input
               v-model="connectionDraft.password"
               :type="passwordVisible ? 'text' : 'password'"
-              :placeholder="mode === 'edit' ? 'Leave empty to keep saved password' : ''"
+              :placeholder="mode === 'edit' ? t('database.connection.keepPasswordPlaceholder') : ''"
               autocomplete="new-password"
             />
             <button
               type="button"
-              :title="passwordVisible ? 'Hide password' : 'Show password'"
+              :title="passwordVisible ? t('database.connection.hidePassword') : t('database.connection.showPassword')"
               @click="emit('update:passwordVisible', !passwordVisible)"
             >
-              {{ passwordVisible ? 'Hide' : 'Show' }}
+              {{ passwordVisible ? t('database.connection.hide') : t('database.connection.show') }}
             </button>
           </div>
         </label>
         <label>
-          {{ databaseCatalogFieldLabel(connectionDraft) }}
+          {{ localizedCatalogFieldLabel }}
           <input
             v-model="connectionDraft.database"
             @input="emit('markConnectionUrlAuto')"
           />
         </label>
         <label>
-          SSH Proxy
+          {{ t('database.field.sshProxy') }}
           <span class="db-connection-check">
             <input
               v-model="connectionDraft.needProxy"
               type="checkbox"
             />
-            <span>Route database traffic through a configured proxy</span>
+            <span>{{ t('database.connection.proxyDescription') }}</span>
           </span>
         </label>
         <label v-if="connectionDraft.needProxy && databaseProxyAvailable">
-          Proxy
+          {{ t('database.field.proxy') }}
           <select
             v-model="connectionDraft.proxyName"
             :class="{ error: connectionErrors.includes('proxyName') }"
           >
-            <option value="">Select proxy</option>
+            <option value="">{{ t('database.connection.selectProxy') }}</option>
             <option
               v-for="proxy in databaseSshProxyOptions"
               :key="proxy.name"
@@ -168,16 +168,16 @@
           v-else-if="connectionDraft.needProxy"
           class="db-modal-hint"
         >
-          No SSH proxy config is available.
+          {{ t('database.connection.proxyUnavailable') }}
           <button
             type="button"
             @click="emit('openSshProxyConfig')"
           >
-            Add Proxy
+            {{ t('database.connection.addProxy') }}
           </button>
         </p>
         <label v-if="isPostgresCompatibleDbType(connectionDraft.dbType)">
-          SSL Mode
+          {{ t('database.field.sslMode') }}
           <select v-model="connectionDraft.sslMode">
             <option value="">-</option>
             <option
@@ -191,7 +191,7 @@
         </label>
       </template>
       <label>
-        {{ connectionDraft.dbType === 'oracle' ? 'Connect String' : 'URL' }}
+        {{ connectionDraft.dbType === 'oracle' ? t('database.field.connectString') : 'URL' }}
         <input
           :value="connectionUrl"
           :class="{ error: connectionErrors.includes('url') }"
@@ -211,7 +211,7 @@
           :disabled="connectionTesting || connectionSaving"
           @click="emit('test')"
         >
-          {{ connectionTesting ? 'Testing...' : 'Test Connection' }}
+          {{ connectionTesting ? t('database.connection.testing') : t('database.connection.test') }}
         </button>
         <span />
         <button
@@ -219,13 +219,13 @@
           :disabled="connectionTesting || connectionSaving"
           @click="emit('close')"
         >
-          Cancel
+          {{ t('database.common.cancel') }}
         </button>
         <button
           type="submit"
           :disabled="connectionTesting || connectionSaving"
         >
-          {{ connectionSaving ? 'Saving...' : 'Save' }}
+          {{ connectionSaving ? t('database.common.saving') : t('database.common.save') }}
         </button>
       </footer>
     </form>
@@ -233,7 +233,9 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import { X } from 'lucide-vue-next'
+import { useI18n } from '@/i18n'
 import type { SshProxyConfig } from '@shared/contracts/appRuntime'
 import type { DatabaseEngineCode, DatabaseGroupInfo } from '@shared/contracts/database'
 import {
@@ -242,7 +244,7 @@ import {
 } from '@/services/database/databaseWorkspaceRuntime'
 import type { DatabaseConnectionDraft } from '@/services/database/databaseWorkspaceTypes'
 
-defineProps<{
+const props = defineProps<{
   open: boolean
   mode: 'create' | 'edit'
   connectionDraft: DatabaseConnectionDraft
@@ -260,6 +262,14 @@ defineProps<{
   engineAccent: (code: DatabaseEngineCode) => string
   engineName: (code: DatabaseEngineCode) => string
 }>()
+
+const { t } = useI18n()
+const localizedCatalogFieldLabel = computed(() => {
+  const label = databaseCatalogFieldLabel(props.connectionDraft)
+  if (label === 'Catalog') return t('database.field.catalog')
+  if (label === 'Service') return t('database.field.service')
+  return t('database.field.database')
+})
 
 const emit = defineEmits<{
   close: []

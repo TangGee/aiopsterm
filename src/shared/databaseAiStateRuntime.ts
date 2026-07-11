@@ -7,7 +7,7 @@ import type {
   DatabaseAiPaneStateContext,
   DatabaseAiPaneStateSnapshot
 } from './contracts/database'
-import { isSupportedDatabaseAiEngine } from './databaseAiSqlRuntime'
+import { isSupportedDatabaseAiEngine, normalizeDatabaseAiResponseLanguage } from './databaseAiSqlRuntime'
 
 const trim = (value: unknown) => (typeof value === 'string' ? value.trim() : '')
 
@@ -24,6 +24,7 @@ const defaultDatabaseAiPaneContext = (): DatabaseAiPaneStateContext => ({
 })
 
 const defaultDatabaseAiPaneState = (): DatabaseAiPaneStateSnapshot => ({
+  conversationId: `dbai-pane-conversation-${randomUUID()}`,
   open: false,
   width: DATABASE_AI_PANE_DEFAULT_WIDTH,
   context: defaultDatabaseAiPaneContext(),
@@ -43,6 +44,8 @@ export const createDatabaseAiPaneMessageRecord = (
     content: string
     contextSummary: string
     createdAt: number
+    responseLanguage?: DatabaseAiPaneMessageRecord['responseLanguage']
+    context?: DatabaseAiPaneStateContext
   },
   id = `dbai-pane-message-${randomUUID()}`
 ): DatabaseAiPaneMessageRecord => ({
@@ -53,10 +56,16 @@ export const createDatabaseAiPaneMessageRecord = (
   content: input.content,
   contextSummary: input.contextSummary,
   createdAt: input.createdAt,
-  updatedAt: input.createdAt
+  updatedAt: input.createdAt,
+  responseLanguage: normalizeDatabaseAiResponseLanguage(input.responseLanguage),
+  ...(input.context ? { context: { ...input.context } } : {})
 })
 
-export const cloneDatabaseAiPaneMessageRecord = (message: DatabaseAiPaneMessageRecord): DatabaseAiPaneMessageRecord => ({ ...message })
+export const cloneDatabaseAiPaneMessageRecord = (message: DatabaseAiPaneMessageRecord): DatabaseAiPaneMessageRecord => ({
+  ...message,
+  ...(message.context ? { context: { ...message.context } } : {}),
+  ...(message.sqlAction ? { sqlAction: { ...message.sqlAction, context: { ...message.sqlAction.context } } } : {})
+})
 
 const normalizeDatabaseAiPaneStateContext = (context?: Partial<DatabaseAiPaneStateContext>): DatabaseAiPaneStateContext => {
   const dbType = context?.dbType && isSupportedDatabaseAiEngine(context.dbType) ? context.dbType : ''
@@ -68,7 +77,10 @@ const normalizeDatabaseAiPaneStateContext = (context?: Partial<DatabaseAiPaneSta
   }
 }
 
-const normalizeDatabaseAiPaneStateMessage = (message: unknown): DatabaseAiPaneMessageRecord | null => {
+const normalizeDatabaseAiPaneStateMessage = (
+  message: unknown,
+  cancelInFlight: boolean
+): DatabaseAiPaneMessageRecord | null => {
   if (!message || typeof message !== 'object') return null
   const raw = message as Partial<DatabaseAiPaneMessageRecord>
   const role = raw.role === 'user' || raw.role === 'assistant' ? raw.role : null
@@ -81,8 +93,38 @@ const normalizeDatabaseAiPaneStateMessage = (message: unknown): DatabaseAiPaneMe
   const createdAt = Number(raw.createdAt)
   const updatedAt = Number(raw.updatedAt)
   if (!Number.isFinite(createdAt) || !Number.isFinite(updatedAt)) return null
-  const status =
-    rawStatus === 'queued' || rawStatus === 'streaming' ? 'cancelled' : (rawStatus as DatabaseAiPaneMessageRecord['status'])
+  const status = cancelInFlight && (rawStatus === 'queued' || rawStatus === 'streaming')
+    ? 'cancelled'
+    : (rawStatus as DatabaseAiPaneMessageRecord['status'])
+  const rawSqlAction = raw.sqlAction && typeof raw.sqlAction === 'object' ? raw.sqlAction : null
+  const context = raw.context && typeof raw.context === 'object'
+    ? normalizeDatabaseAiPaneStateContext(raw.context)
+    : undefined
+  const action = rawSqlAction?.action && ['explain', 'nl2sql', 'optimize', 'convert', 'complete', 'diagnose', 'drop', 'truncate'].includes(rawSqlAction.action)
+    ? rawSqlAction.action
+    : undefined
+  const targetDialect = rawSqlAction?.targetDialect && isSupportedDatabaseAiEngine(rawSqlAction.targetDialect === 'mssql' ? 'sqlserver' : rawSqlAction.targetDialect)
+    ? rawSqlAction.targetDialect
+    : undefined
+  const rawContext = rawSqlAction?.context && typeof rawSqlAction.context === 'object' ? rawSqlAction.context : {}
+  const sqlAction = action && targetDialect && (rawSqlAction?.transport === 'pane' || rawSqlAction?.transport === 'drawer')
+    ? {
+        action,
+        label: trim(rawSqlAction.label),
+        sourceSql: String(rawSqlAction.sourceSql ?? ''),
+        generatedSql: String(rawSqlAction.generatedSql ?? ''),
+        targetDialect,
+        transport: rawSqlAction.transport,
+        context: {
+          ...(trim(rawContext.connectionId) ? { connectionId: trim(rawContext.connectionId) } : {}),
+          ...(rawContext.dbType === '' || (typeof rawContext.dbType === 'string' && isSupportedDatabaseAiEngine(rawContext.dbType)) ? { dbType: rawContext.dbType } : {}),
+          ...(trim(rawContext.databaseName) ? { databaseName: trim(rawContext.databaseName) } : {}),
+          ...(trim(rawContext.schemaName) ? { schemaName: trim(rawContext.schemaName) } : {}),
+          ...(trim(rawContext.tableName) ? { tableName: trim(rawContext.tableName) } : {}),
+          ...(trim(rawContext.contextSummary) ? { contextSummary: trim(rawContext.contextSummary) } : {})
+        }
+      }
+    : undefined
   return {
     id,
     requestId,
@@ -91,16 +133,26 @@ const normalizeDatabaseAiPaneStateMessage = (message: unknown): DatabaseAiPaneMe
     content: String(raw.content ?? ''),
     contextSummary: String(raw.contextSummary ?? ''),
     createdAt,
-    updatedAt
+    updatedAt,
+    responseLanguage: normalizeDatabaseAiResponseLanguage(raw.responseLanguage),
+    ...(context ? { context } : {}),
+    ...(sqlAction ? { sqlAction } : {})
   }
 }
 
-export const normalizeDatabaseAiPaneState = (state?: Partial<DatabaseAiPaneStateSnapshot>): DatabaseAiPaneStateSnapshot => {
+export const normalizeDatabaseAiPaneState = (
+  state?: Partial<DatabaseAiPaneStateSnapshot>,
+  options: { cancelInFlight?: boolean } = {}
+): DatabaseAiPaneStateSnapshot => {
   const width = Number(state?.width)
+  const cancelInFlight = options.cancelInFlight !== false
   const messages = Array.isArray(state?.messages)
-    ? state.messages.map(normalizeDatabaseAiPaneStateMessage).filter((message): message is DatabaseAiPaneMessageRecord => Boolean(message))
+    ? state.messages
+        .map((message) => normalizeDatabaseAiPaneStateMessage(message, cancelInFlight))
+        .filter((message): message is DatabaseAiPaneMessageRecord => Boolean(message))
     : []
   return {
+    conversationId: trim(state?.conversationId) || `dbai-pane-conversation-${randomUUID()}`,
     open: state?.open === true,
     width: Math.min(DATABASE_AI_PANE_MAX_WIDTH, Math.max(DATABASE_AI_PANE_MIN_WIDTH, Number.isFinite(width) ? Math.round(width) : DATABASE_AI_PANE_DEFAULT_WIDTH)),
     context: normalizeDatabaseAiPaneStateContext(state?.context),
@@ -110,6 +162,7 @@ export const normalizeDatabaseAiPaneState = (state?: Partial<DatabaseAiPaneState
 }
 
 const cloneDatabaseAiPaneState = (state: DatabaseAiPaneStateSnapshot): DatabaseAiPaneStateSnapshot => ({
+  conversationId: state.conversationId,
   open: state.open,
   width: state.width,
   context: { ...state.context },
@@ -131,7 +184,7 @@ const syncDatabaseAiPaneStateMessages = () => {
 }
 
 export const replaceDatabaseAiPaneState = (state: DatabaseAiPaneStateSnapshot) => {
-  databaseAiPaneState = normalizeDatabaseAiPaneState(state)
+  databaseAiPaneState = normalizeDatabaseAiPaneState(state, { cancelInFlight: false })
   databaseAiPaneMessages.clear()
   databaseAiPaneState.messages.forEach((message) => {
     databaseAiPaneMessages.set(message.id, cloneDatabaseAiPaneMessageRecord(message))

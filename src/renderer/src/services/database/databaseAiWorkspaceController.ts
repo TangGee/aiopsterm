@@ -3,7 +3,7 @@ import { createDatabaseAiDrawerWorkspaceRuntime } from '@/services/database/data
 import { createDatabaseAiPaneWorkspaceRuntime } from '@/services/database/databaseAiPaneWorkspaceRuntime'
 import { dbAiDialectOptions, type SqlTab } from '@/services/database/databaseAiRuntime'
 import type { SqlConsoleContext } from '@/services/database/databaseWorkspaceTypes'
-import type { DatabaseCatalogInfo, DatabaseConnectionInfo } from '@shared/contracts/database'
+import type { DatabaseAiResponseLanguage, DatabaseCatalogInfo, DatabaseConnectionInfo } from '@shared/contracts/database'
 
 type DatabaseAiWorkspaceControllerState = {
   connections: Ref<DatabaseConnectionInfo[]>
@@ -11,7 +11,8 @@ type DatabaseAiWorkspaceControllerState = {
   activeSqlTab: ComputedRef<SqlTab | null>
   activeSqlCanRun: ComputedRef<boolean>
   currentSqlCatalogs: ComputedRef<DatabaseCatalogInfo[]>
-  databaseAiPanelsRef: Ref<{ scrollPaneMessagesToBottom: () => void } | null>
+  responseLanguage: ComputedRef<DatabaseAiResponseLanguage>
+  databaseAiPanelsRef: Ref<{ scrollPaneMessagesToBottom: () => void; focusPaneComposer?: () => void } | null>
 }
 
 type DatabaseAiWorkspaceControllerDeps = {
@@ -42,6 +43,7 @@ export const createDatabaseAiWorkspaceController = (
     activeSqlTab,
     activeSqlCanRun,
     currentSqlCatalogs,
+    responseLanguage,
     databaseAiPanelsRef
   } = state
   const {
@@ -68,6 +70,8 @@ export const createDatabaseAiWorkspaceController = (
     dbAiPaneResizing,
     dbAiPaneContext,
     dbAiPaneDraft,
+    dbAiPaneComposerAction,
+    dbAiPaneComposerPlaceholder,
     dbAiPaneMessages,
     canToggleDbAiPane,
     dbAiPaneConnection,
@@ -83,16 +87,21 @@ export const createDatabaseAiWorkspaceController = (
     syncDbAiPaneContextAfterActiveTabChange,
     syncDbAiPaneContextAfterCatalogChange,
     toggleDbAiPane,
+    openDbAiPane,
     closeDbAiPane,
     useActiveDbAiPaneContext,
+    syncDbAiPaneContextToActiveSqlTab,
     updateDbAiPaneConnection,
     updateDbAiPaneCatalog,
     updateDbAiPaneSchema,
     connectDbAiPaneConnection,
     handleDbAiPaneDraftKeydown,
+    prepareDbAiPaneAction,
+    cancelDbAiPaneActionMode,
     sendDbAiPaneQuickPrompt,
-    resetDbAiPaneConversation,
-    cancelDbAiPaneResponse,
+    syncDbAiPaneActionRequest,
+    resetDbAiPaneConversation: resetPaneConversation,
+    cancelDbAiPaneResponse: cancelPaneResponse,
     sendDbAiPaneMessage,
     startDbAiPaneResize,
     stopDbAiPaneResize,
@@ -108,6 +117,8 @@ export const createDatabaseAiWorkspaceController = (
       defaultSqlContextForConnection,
       resolveSqlConsoleContext,
       connectConnection,
+      getResponseLanguage: () => responseLanguage.value,
+      getSelectedSqlText,
       getSqlCursorOffset
     }
   )
@@ -130,15 +141,18 @@ export const createDatabaseAiWorkspaceController = (
     dbAiCanRunReadOnly,
     dbAiCanCancel,
     dbAiStatusLabel,
-    openDbAiFromToolbar,
-    openDbAi,
+    openDbAiFromToolbar: openDbAiDrawerFromToolbar,
+    openDbAi: openDbAiDrawer,
     setActiveDbAiRequest,
     copyDbAiSql,
     replaceDbAiSqlSelection,
     insertDbAiSql,
     runDbAiReadonly,
-    cancelDbAiRequest,
+    canRunDbAiPaneMessageSql,
+    updateDbAiPaneMessageDialect,
+    cancelDbAiRequest: cancelDrawerRequest,
     clearDbAiRequest,
+    clearAllDbAiRequests,
     formatDbAiRequestTime,
     clearSqlDiagnoseTimers,
     diagnoseSqlError
@@ -156,9 +170,47 @@ export const createDatabaseAiWorkspaceController = (
       getSqlTextUntilCursor,
       renderDefaultSql,
       setEditorSql,
-      appendSqlExecution
+      appendSqlExecution,
+      getResponseLanguage: () => responseLanguage.value,
+      syncConversationRequest: syncDbAiPaneActionRequest
     }
   )
+
+  const openDbAiFromToolbar = (action: 'explain' | 'nl2sql' | 'optimize' | 'convert' | 'complete') => {
+    syncDbAiPaneContextToActiveSqlTab()
+    if (action === 'explain') {
+      sendDbAiPaneQuickPrompt('explainActive')
+      return
+    }
+    if (action === 'nl2sql') {
+      prepareDbAiPaneAction('nl2sql')
+      return
+    }
+    openDbAiPane()
+    openDbAiDrawerFromToolbar(action)
+  }
+
+  const openDbAi = (...args: Parameters<typeof openDbAiDrawer>) => {
+    openDbAiPane()
+    return openDbAiDrawer(...args)
+  }
+
+  const cancelDbAiPaneResponse = async () => {
+    const activeAssistant = [...dbAiPaneMessages.value]
+      .reverse()
+      .find((message) => message.role === 'assistant' && (message.status === 'queued' || message.status === 'streaming'))
+    if (activeAssistant?.sqlAction?.transport === 'drawer') {
+      await cancelDrawerRequest(activeAssistant.requestId)
+      return
+    }
+    await cancelPaneResponse()
+  }
+
+  const resetDbAiPaneConversation = async () => {
+    await cancelDbAiPaneResponse()
+    resetPaneConversation()
+    clearAllDbAiRequests()
+  }
 
   return {
     dbAiPaneOpen,
@@ -166,6 +218,8 @@ export const createDatabaseAiWorkspaceController = (
     dbAiPaneResizing,
     dbAiPaneContext,
     dbAiPaneDraft,
+    dbAiPaneComposerAction,
+    dbAiPaneComposerPlaceholder,
     dbAiPaneMessages,
     dbAiOpen,
     dbAiActiveReqId,
@@ -206,6 +260,7 @@ export const createDatabaseAiWorkspaceController = (
     updateDbAiPaneSchema,
     connectDbAiPaneConnection,
     handleDbAiPaneDraftKeydown,
+    cancelDbAiPaneActionMode,
     sendDbAiPaneQuickPrompt,
     resetDbAiPaneConversation,
     cancelDbAiPaneResponse,
@@ -222,7 +277,9 @@ export const createDatabaseAiWorkspaceController = (
     replaceDbAiSqlSelection,
     insertDbAiSql,
     runDbAiReadonly,
-    cancelDbAiRequest,
+    canRunDbAiPaneMessageSql,
+    updateDbAiPaneMessageDialect,
+    cancelDbAiRequest: cancelDrawerRequest,
     clearDbAiRequest,
     formatDbAiRequestTime,
     clearSqlDiagnoseTimers,

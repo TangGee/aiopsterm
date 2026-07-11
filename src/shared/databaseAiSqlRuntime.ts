@@ -2,6 +2,7 @@ import type {
   DatabaseAiDrawerAction,
   DatabaseAiDrawerResponseInput,
   DatabaseAiPaneResponseInput,
+  DatabaseAiResponseLanguage,
   DatabaseAiTargetDialect,
   DatabaseEngineCode
 } from './contracts/database'
@@ -24,24 +25,193 @@ export type DatabaseAiTableMetadataRuntime = {
 
 export const isSupportedDatabaseAiEngine = (dbType: string) => supportedEngines.has(dbType)
 
+export const normalizeDatabaseAiResponseLanguage = (value: unknown): DatabaseAiResponseLanguage => value === 'zh-CN' ? 'zh-CN' : 'en-US'
+
+const databaseAiLanguageText = (language: DatabaseAiResponseLanguage | undefined, zhCN: string, enUS: string) =>
+  normalizeDatabaseAiResponseLanguage(language) === 'zh-CN' ? zhCN : enUS
+
 const isMysqlCompatibleDbType = (dbType: DatabaseEngineCode | DatabaseAiTargetDialect | '') => dbType === 'mysql' || dbType === 'mariadb' || dbType === 'oceanbase'
 const isPostgresCompatibleDbType = (dbType: DatabaseEngineCode | DatabaseAiTargetDialect | '') => dbType === 'postgresql' || dbType === 'kingbase'
 
 const unquoteIdentifier = (value: string) => value.replace(/^[`"\[]|[`"\]]$/g, '').replace(/""/g, '"').replace(/``/g, '`').replace(/]]/g, ']')
 
+type DatabaseAiSqlToken = {
+  kind: 'word' | 'identifier' | 'symbol'
+  value: string
+}
+
+export type DatabaseAiSqlTableReference = {
+  parts: string[]
+  tableName: string
+}
+
+const isDatabaseAiSqlWordCharacter = (value: string) => /[\p{L}\p{N}_$#@]/u.test(value)
+
+const databaseAiSqlTokens = (sql: string): DatabaseAiSqlToken[] => {
+  const tokens: DatabaseAiSqlToken[] = []
+  let index = 0
+  while (index < sql.length) {
+    const character = sql[index]
+    if (/\s/.test(character)) {
+      index += 1
+      continue
+    }
+    if (character === '-' && sql[index + 1] === '-') {
+      index += 2
+      while (index < sql.length && sql[index] !== '\n') index += 1
+      continue
+    }
+    if (character === '#') {
+      index += 1
+      while (index < sql.length && sql[index] !== '\n') index += 1
+      continue
+    }
+    if (character === '/' && sql[index + 1] === '*') {
+      const end = sql.indexOf('*/', index + 2)
+      index = end < 0 ? sql.length : end + 2
+      continue
+    }
+    if (character === "'") {
+      index += 1
+      while (index < sql.length) {
+        if (sql[index] !== "'") {
+          index += 1
+          continue
+        }
+        if (sql[index + 1] === "'") {
+          index += 2
+          continue
+        }
+        index += 1
+        break
+      }
+      continue
+    }
+    if (character === '$') {
+      const delimiter = sql.slice(index).match(/^\$[A-Za-z_][A-Za-z0-9_]*\$|^\$\$/)?.[0]
+      if (delimiter) {
+        const end = sql.indexOf(delimiter, index + delimiter.length)
+        index = end < 0 ? sql.length : end + delimiter.length
+        continue
+      }
+    }
+    if (character === '"' || character === '`' || character === '[') {
+      const closing = character === '[' ? ']' : character
+      let value = ''
+      index += 1
+      while (index < sql.length) {
+        if (sql[index] !== closing) {
+          value += sql[index]
+          index += 1
+          continue
+        }
+        if (sql[index + 1] === closing) {
+          value += closing
+          index += 2
+          continue
+        }
+        index += 1
+        break
+      }
+      if (value) tokens.push({ kind: 'identifier', value })
+      continue
+    }
+    if (isDatabaseAiSqlWordCharacter(character)) {
+      let value = character
+      index += 1
+      while (index < sql.length && isDatabaseAiSqlWordCharacter(sql[index])) {
+        value += sql[index]
+        index += 1
+      }
+      tokens.push({ kind: 'word', value })
+      continue
+    }
+    tokens.push({ kind: 'symbol', value: character })
+    index += 1
+  }
+  return tokens
+}
+
+const databaseAiSqlCteNames = (tokens: DatabaseAiSqlToken[]) => {
+  const names = new Set<string>()
+  for (let index = 0; index < tokens.length; index += 1) {
+    if (tokens[index].kind !== 'word' || tokens[index].value.toLowerCase() !== 'with') continue
+    let cursor = index + 1
+    if (tokens[cursor]?.kind === 'word' && tokens[cursor].value.toLowerCase() === 'recursive') cursor += 1
+    while (cursor < tokens.length) {
+      const name = tokens[cursor]
+      if (!name || (name.kind !== 'word' && name.kind !== 'identifier')) break
+      let next = cursor + 1
+      if (tokens[next]?.value === '(') {
+        let depth = 1
+        next += 1
+        while (next < tokens.length && depth > 0) {
+          if (tokens[next].value === '(') depth += 1
+          if (tokens[next].value === ')') depth -= 1
+          next += 1
+        }
+      }
+      if (tokens[next]?.kind !== 'word' || tokens[next].value.toLowerCase() !== 'as') break
+      next += 1
+      if (tokens[next]?.kind === 'word' && tokens[next].value.toLowerCase() === 'not') next += 1
+      if (tokens[next]?.kind === 'word' && tokens[next].value.toLowerCase() === 'materialized') next += 1
+      if (tokens[next]?.value !== '(') break
+      names.add(name.value.toLowerCase())
+      let depth = 1
+      next += 1
+      while (next < tokens.length && depth > 0) {
+        if (tokens[next].value === '(') depth += 1
+        if (tokens[next].value === ')') depth -= 1
+        next += 1
+      }
+      if (tokens[next]?.value !== ',') break
+      cursor = next + 1
+    }
+  }
+  return names
+}
+
+export const databaseAiSqlTableReferences = (sql: string): DatabaseAiSqlTableReference[] => {
+  const tokens = databaseAiSqlTokens(sql)
+  const cteNames = databaseAiSqlCteNames(tokens)
+  const references: DatabaseAiSqlTableReference[] = []
+  const seen = new Set<string>()
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index]
+    if (token.kind !== 'word' || (token.value.toLowerCase() !== 'from' && token.value.toLowerCase() !== 'join')) continue
+    let cursor = index + 1
+    while (tokens[cursor]?.kind === 'word' && ['only', 'lateral'].includes(tokens[cursor].value.toLowerCase())) cursor += 1
+    if (tokens[cursor]?.value === '(') continue
+    const parts: string[] = []
+    const first = tokens[cursor]
+    if (!first || (first.kind !== 'word' && first.kind !== 'identifier')) continue
+    parts.push(first.value)
+    cursor += 1
+    while (tokens[cursor]?.value === '.') {
+      const next = tokens[cursor + 1]
+      if (!next || (next.kind !== 'word' && next.kind !== 'identifier')) break
+      parts.push(next.value)
+      cursor += 2
+    }
+    if (tokens[cursor]?.value === '(') continue
+    const boundedParts = parts.slice(-3)
+    const tableName = boundedParts.at(-1) || ''
+    if (!tableName || (boundedParts.length === 1 && cteNames.has(tableName.toLowerCase()))) continue
+    const key = boundedParts.map((part) => part.toLowerCase()).join('.')
+    if (seen.has(key)) continue
+    seen.add(key)
+    references.push({ parts: boundedParts, tableName })
+  }
+  return references
+}
+
 const tableNameFromSql = (sql: string) => {
-  const match = sql.match(/\bfrom\s+([`"\[]?[\w.-]+[`"\]]?(?:\s*\.\s*[`"\[]?[\w.-]+[`"\]]?)?)/i)
-  if (!match) return ''
-  const parts = match[1]
-    .split('.')
-    .map((part) => unquoteIdentifier(part.trim()))
-    .filter(Boolean)
-  return parts.at(-1) || ''
+  return databaseAiSqlTableReferences(sql)[0]?.tableName || ''
 }
 
 const schemaNameFromSql = (sql: string) => {
-  const match = sql.match(/\bfrom\s+([`"\[]?[\w.-]+[`"\]]?)\s*\.\s*([`"\[]?[\w.-]+[`"\]]?)/i)
-  return match ? unquoteIdentifier(match[1].trim()) : ''
+  const parts = databaseAiSqlTableReferences(sql)[0]?.parts ?? []
+  return parts.length > 1 ? unquoteIdentifier(parts.at(-2) || '') : ''
 }
 
 const keyParts = (key: string) => {
@@ -104,7 +274,9 @@ export const databaseAiPaneSchemaSummaryForContext = (
     databaseName: input.context.databaseName,
     schemaName: input.context.schemaName || ''
   })
-  if (!keys.length) return ['- No table metadata is available behind the local DB AI backend boundary.']
+  if (!keys.length) {
+    return [databaseAiLanguageText(input.responseLanguage, '- 本地 DB AI 后端边界内没有可用的 table metadata。', '- No table metadata is available behind the local DB AI backend boundary.')]
+  }
   const grouped = new Map<string, string[]>()
   keys.forEach((key) => {
     const parts = keyParts(key)
@@ -130,14 +302,16 @@ export const databaseAiFirstTableNameForPaneContext = (
 
 export const databaseAiProviderSchemaSummaryForContext = (
   context: DatabaseAiPaneResponseInput['context'] | DatabaseAiDrawerResponseInput['context'],
-  metadata: DatabaseAiTableMetadataRuntime
+  metadata: DatabaseAiTableMetadataRuntime,
+  responseLanguage: DatabaseAiResponseLanguage = 'en-US'
 ) => {
   const connectionId = trim(context.connectionId)
   const databaseName = trim(context.databaseName)
   const schemaName = trim(context.schemaName)
-  if (!connectionId || !databaseName) return ['- No backend schema metadata is available for this request context.']
+  const unavailable = databaseAiLanguageText(responseLanguage, '- 此请求上下文没有可用的 backend schema metadata。', '- No backend schema metadata is available for this request context.')
+  if (!connectionId || !databaseName) return [unavailable]
   const keys = tableKeysForContext(metadata, { connectionId, databaseName, schemaName })
-  if (!keys.length) return ['- No backend schema metadata is available for this request context.']
+  if (!keys.length) return [unavailable]
   return keys.slice(0, 16).map((key) => {
     const parts = keyParts(key)
     const columns = metadata.columnsForTableKey(key)
@@ -182,7 +356,29 @@ export const databaseAiDialectLabel = (dialect: DatabaseAiTargetDialect) => {
   return dialect
 }
 
-export const databaseAiDrawerActionName = (action: DatabaseAiDrawerAction) => {
+export const databaseAiDrawerActionName = (action: DatabaseAiDrawerAction, responseLanguage: DatabaseAiResponseLanguage = 'en-US') => {
+  if (responseLanguage === 'zh-CN') {
+    switch (action) {
+      case 'explain':
+        return '解释 SQL'
+      case 'nl2sql':
+        return '自然语言转 SQL'
+      case 'optimize':
+        return '优化 SQL'
+      case 'convert':
+        return '转换 SQL'
+      case 'complete':
+        return '补全 SQL'
+      case 'diagnose':
+        return '诊断 SQL'
+      case 'truncate':
+        return '清空 table'
+      case 'drop':
+        return '删除 table'
+      default:
+        return action
+    }
+  }
   switch (action) {
     case 'explain':
       return 'Explain SQL'
@@ -204,6 +400,37 @@ export const databaseAiDrawerActionName = (action: DatabaseAiDrawerAction) => {
       return action
   }
 }
+
+export const databaseAiPaneActionName = (action: DatabaseAiDrawerAction, responseLanguage: DatabaseAiResponseLanguage = 'en-US') =>
+  action === 'nl2sql'
+    ? databaseAiLanguageText(responseLanguage, '生成 SQL', 'Generate SQL')
+    : databaseAiDrawerActionName(action, responseLanguage)
+
+export const databaseAiPaneHistoryFieldName = (action: DatabaseAiDrawerAction, responseLanguage: DatabaseAiResponseLanguage = 'en-US') =>
+  action === 'nl2sql'
+    ? databaseAiLanguageText(responseLanguage, '请求：', 'Request:')
+    : databaseAiLanguageText(responseLanguage, '源 SQL：', 'Source SQL:')
+
+export const databaseAiQuickPrompt = (
+  kind: 'explainActive' | 'schemaSummary' | 'selectSample',
+  sql = '',
+  responseLanguage: DatabaseAiResponseLanguage = 'en-US'
+) => {
+  if (responseLanguage === 'zh-CN') {
+    if (kind === 'explainActive') return `解释以下 SQL，并指出执行风险：\n${sql}`
+    if (kind === 'schemaSummary') return '总结当前 database schema，并列出实用的查询入口。'
+    return '为当前上下文中最有用的 table 生成一条只读 SELECT 查询。'
+  }
+  if (kind === 'explainActive') return `Explain this SQL and point out execution risks:\n${sql}`
+  if (kind === 'schemaSummary') return 'Summarize the current database schema and list useful query entry points.'
+  return 'Generate a read-only SELECT query for the most useful table in the current context.'
+}
+
+export const databaseAiNl2SqlPrompt = (request: string, responseLanguage: DatabaseAiResponseLanguage = 'en-US') =>
+  `${databaseAiLanguageText(responseLanguage, '为以下请求生成一条只读 SQL 查询：', 'Generate a read-only SQL query for this request:')}\n${request}`
+
+export const databaseAiReasoningHeading = (responseLanguage: DatabaseAiResponseLanguage = 'en-US') =>
+  databaseAiLanguageText(responseLanguage, '分析', 'Reasoning')
 
 const stripSqlTerminator = (sql: string) => sql.trim().replace(/;+$/, '').trim()
 
@@ -367,29 +594,40 @@ export const buildDatabaseAiDrawerReasoning = (
   const contextLine =
     trim(input.context.contextSummary) ||
     [input.context.connectionId, input.context.dbType, input.context.databaseName, input.context.schemaName, input.context.tableName].filter(Boolean).join(' · ')
-  const lines = ['Reasoning', '- Read the active database context and selected editor range through the aiopsterm backend boundary.']
-  if (contextLine) lines.push(`- Context: ${contextLine}.`)
-  lines.push('- 当前响应由 aiopsterm DB AI 本地后端生成，未连接远端数据库 AI 服务。')
+  const zhCN = normalizeDatabaseAiResponseLanguage(input.responseLanguage) === 'zh-CN'
+  const lines = zhCN
+    ? ['分析', '- 已通过 aiopsterm 后端边界读取当前数据库上下文和选中的编辑器范围。']
+    : ['Reasoning', '- Read the active database context and selected editor range through the aiopsterm backend boundary.']
+  if (contextLine) lines.push(zhCN ? `- 上下文：${contextLine}。` : `- Context: ${contextLine}.`)
+  lines.push(zhCN
+    ? '- 当前响应由 aiopsterm DB AI 本地后端生成，未连接远端数据库 AI 服务。'
+    : '- This response was generated by the local aiopsterm DB AI backend without a remote database AI service.')
   if (input.action === 'convert') {
-    lines.push(`- Converted the SQL text to ${databaseAiDialectLabel(dialect)} syntax.`)
-    lines.push(isExecutableDrawerDialect(input, dialect) ? '- Target dialect matches the active connection, so read-only execution can be enabled.' : '- Target dialect is text-only for this connection.')
+    lines.push(zhCN ? `- 已将 SQL 文本转换为 ${databaseAiDialectLabel(dialect)} 语法。` : `- Converted the SQL text to ${databaseAiDialectLabel(dialect)} syntax.`)
+    lines.push(isExecutableDrawerDialect(input, dialect)
+      ? (zhCN ? '- 目标方言与当前连接匹配，因此可以启用只读执行。' : '- Target dialect matches the active connection, so read-only execution can be enabled.')
+      : (zhCN ? '- 对当前连接而言，目标方言仅作为文本输出。' : '- Target dialect is text-only for this connection.'))
   } else if (input.action === 'diagnose') {
-    lines.push('- Built a conservative read-only statement that can verify the referenced table.')
-    if (trim(input.errorMessage)) lines.push(`- Diagnosis input error: ${trim(input.errorMessage)}.`)
+    lines.push(zhCN ? '- 已生成一条保守的只读语句，用于验证引用的 table。' : '- Built a conservative read-only statement that can verify the referenced table.')
+    if (trim(input.errorMessage)) lines.push(zhCN ? `- 诊断输入错误：${trim(input.errorMessage)}。` : `- Diagnosis input error: ${trim(input.errorMessage)}.`)
   } else if (input.action === 'drop' || input.action === 'truncate') {
-    lines.push('- Preserved the destructive SQL as generated text only; execution remains blocked by the read-only guard.')
+    lines.push(zhCN ? '- 破坏性 SQL 仅作为生成文本保留；只读保护仍会阻止执行。' : '- Preserved the destructive SQL as generated text only; execution remains blocked by the read-only guard.')
   } else if (input.action === 'nl2sql') {
-    lines.push('- Mapped the request to the first visible table in the current database context.')
+    lines.push(zhCN ? '- 已将请求映射到当前数据库上下文中的第一个可见 table。' : '- Mapped the request to the first visible table in the current database context.')
   } else if (input.action === 'complete') {
-    lines.push('- Completed the current statement with a bounded read-only predicate.')
+    lines.push(zhCN ? '- 已使用有界的只读条件补全当前语句。' : '- Completed the current statement with a bounded read-only predicate.')
   } else if (input.action === 'optimize') {
-    lines.push('- Kept the query read-only and added a safer bounded projection for review.')
+    lines.push(zhCN ? '- 保持查询只读，并添加了更安全的有界投影供审查。' : '- Kept the query read-only and added a safer bounded projection for review.')
   } else {
-    lines.push('- Kept the source SQL available for editor actions and review.')
+    lines.push(zhCN ? '- 已保留源 SQL，供编辑器操作和审查。' : '- Kept the source SQL available for editor actions and review.')
   }
-  lines.push(`- Generated SQL is ${isReadOnlySql(generatedSql) ? 'read-only' : 'not read-only'} before any execution action.`)
+  lines.push(zhCN
+    ? `- 在执行任何操作前，生成的 SQL ${isReadOnlySql(generatedSql) ? '是只读的' : '不是只读的'}。`
+    : `- Generated SQL is ${isReadOnlySql(generatedSql) ? 'read-only' : 'not read-only'} before any execution action.`)
   if (input.sourceSql.trim() && input.sourceSql !== generatedSql) {
-    lines.push('- The original editor SQL remains unchanged until Copy, Replace, Insert, or Run ReadOnly is chosen.')
+    lines.push(zhCN
+      ? '- 在选择复制、替换、插入或只读运行之前，编辑器中的原始 SQL 保持不变。'
+      : '- The original editor SQL remains unchanged until Copy, Replace, Insert, or Run ReadOnly is chosen.')
   }
   return lines.join('\n')
 }

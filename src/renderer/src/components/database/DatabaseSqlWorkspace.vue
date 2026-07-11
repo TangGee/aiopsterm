@@ -59,7 +59,7 @@
       <button
         type="button"
         class="db-sql-splitter"
-        title="Resize SQL editor and results"
+        :title="t('database.sql.resizePanes')"
         role="separator"
         aria-orientation="horizontal"
         :aria-valuemin="sqlPaneMinPercent"
@@ -99,6 +99,7 @@
 
 <script setup lang="ts">
 import { computed, ref, type StyleValue } from 'vue'
+import { useI18n } from '@/i18n'
 import DatabaseSqlEditorPane from '@/components/database/DatabaseSqlEditorPane.vue'
 import DatabaseSqlResultsPane from '@/components/database/DatabaseSqlResultsPane.vue'
 import DatabaseSqlToolbar from '@/components/database/DatabaseSqlToolbar.vue'
@@ -113,6 +114,8 @@ import type { DbFilter } from '@/services/database/databaseGridRuntime'
 import type { SqlHistory, SqlResult, SqlResultViewState } from '@/services/database/databaseWorkspaceTypes'
 import type { TextRange } from '@/services/database/databaseSqlEditorRuntime'
 import type { DatabaseCatalogInfo, DatabaseConnectionInfo } from '@shared/contracts/database'
+
+const { t } = useI18n()
 
 const props = defineProps<{
   activeSqlTab: SqlTab
@@ -154,6 +157,7 @@ const props = defineProps<{
     error: string
     success: boolean
     resultId: string
+    resultTitle: string
     requestId: string
   }
   isSqlHistoryClosed: DatabaseSqlHistoryRules['isSqlHistoryClosed']

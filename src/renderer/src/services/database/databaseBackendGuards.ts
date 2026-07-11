@@ -400,6 +400,15 @@ export function isDbAiPaneMessageRecord(value: unknown, expected?: { role?: 'use
   if (!isDbAiStatus(value.status)) return false
   if (typeof value.content !== 'string' || typeof value.contextSummary !== 'string') return false
   if (!isNonNegativeNumber(value.createdAt) || !isNonNegativeNumber(value.updatedAt)) return false
+  if (value.context !== undefined && !isDbAiPaneStateContext(value.context)) return false
+  if (value.sqlAction !== undefined) {
+    if (!isRecord(value.sqlAction)) return false
+    if (!isDbAiAction(value.sqlAction.action)) return false
+    if (typeof value.sqlAction.label !== 'string' || typeof value.sqlAction.sourceSql !== 'string' || typeof value.sqlAction.generatedSql !== 'string') return false
+    if (!isDbAiTargetDialect(value.sqlAction.targetDialect)) return false
+    if (value.sqlAction.transport !== 'pane' && value.sqlAction.transport !== 'drawer') return false
+    if (!isDbAiBackendContext(value.sqlAction.context)) return false
+  }
   if (expected?.role && value.role !== expected.role) return false
   if (expected?.requestId && value.requestId !== expected.requestId) return false
   if (expected?.id && value.id !== expected.id) return false
@@ -419,6 +428,7 @@ export function isDbAiPaneStateContext(value: unknown): value is DbAiPaneContext
 export function isDbAiPaneStateSnapshot(value: unknown): value is DatabaseAiPaneStateSnapshot {
   return (
     isRecord(value) &&
+    (value.conversationId === undefined || (typeof value.conversationId === 'string' && Boolean(value.conversationId.trim()))) &&
     typeof value.open === 'boolean' &&
     isNonNegativeNumber(value.width) &&
     isDbAiPaneStateContext(value.context) &&

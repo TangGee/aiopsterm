@@ -10,11 +10,11 @@
       :is-dirty="isDataTabDirty(activeDataTab)"
       :edit-disabled-reason="dataEditDisabledReason(activeDataTab)"
       :can-export="!activeDataTab.loading && !activeDataTab.error && pagedDataRows.length > 0"
-      export-title="Export current table page"
+      :export-title="t('database.data.exportCurrentPage')"
       :can-chart="!activeDataTab.loading && !activeDataTab.error && pagedDataRows.length > 0"
-      chart-title="Chart current table page"
+      :chart-title="t('database.data.chartCurrentPage')"
       :can-comment="!activeDataTab.loading && !activeDataTab.error"
-      comment-title="Comment current table page"
+      :comment-title="t('database.data.commentCurrentPage')"
       @goto-page="emit('updateDataPage', $event)"
       @goto-last-page="emit('gotoLastDataPage')"
       @change-page-size="emit('updateDataPageSize', $event)"
@@ -33,15 +33,15 @@
       <i />
       <input
         :value="activeDataTab.whereDraft"
-        aria-label="WHERE condition"
+        :aria-label="t('database.data.whereCondition')"
         :class="{ pending: activeDataWherePending }"
-        placeholder="Input WHERE condition"
+        :placeholder="t('database.data.wherePlaceholder')"
         @input="emit('updateActiveDataWhereDraft', ($event.target as HTMLInputElement).value)"
         @keydown.enter.prevent="emit('applyWhere')"
       />
       <button
         type="button"
-        title="Apply filter"
+        :title="t('database.data.applyFilter')"
         :class="{ pending: activeDataWherePending }"
         @click="emit('applyWhere')"
       >
@@ -54,10 +54,10 @@
       :class="{ error: !!activeDataEditSummary.error, warning: !!activeDataEditSummary.warning && !activeDataEditSummary.error }"
     >
       <div class="db-edit-summary-counts">
-        <span><strong>{{ activeDataEditSummary.newRows }}</strong> New</span>
-        <span><strong>{{ activeDataEditSummary.updatedRows }}</strong> Updated</span>
-        <span><strong>{{ activeDataEditSummary.deletedRows }}</strong> Deleted</span>
-        <span><strong>{{ activeDataEditSummary.undoDepth }}</strong> Undo</span>
+        <span><strong>{{ activeDataEditSummary.newRows }}</strong> {{ t('database.data.edit.new') }}</span>
+        <span><strong>{{ activeDataEditSummary.updatedRows }}</strong> {{ t('database.data.edit.updated') }}</span>
+        <span><strong>{{ activeDataEditSummary.deletedRows }}</strong> {{ t('database.data.edit.deleted') }}</span>
+        <span><strong>{{ activeDataEditSummary.undoDepth }}</strong> {{ t('database.data.edit.undo') }}</span>
         <span><strong>{{ activeDataEditSummary.statementCount }}</strong> SQL</span>
       </div>
       <p
@@ -66,21 +66,21 @@
       >
         {{ activeDataTab.saveError || activeDataEditSummary.error || activeDataEditSummary.warning }}
       </p>
-      <pre>{{ activeDataEditSummary.preview || 'No SQL statement will be generated until a new row contains at least one value.' }}</pre>
+      <pre>{{ activeDataEditSummary.preview || t('database.data.edit.noPreview') }}</pre>
       <div class="db-edit-summary-actions">
         <button
           type="button"
           :disabled="!activeDataEditSummary.preview || activeDataTab.saving"
           @click="emit('copyDataMutationPreview')"
         >
-          Copy Preview
+          {{ t('database.data.edit.copyPreview') }}
         </button>
         <button
           type="button"
           :disabled="activeDataTab.saving"
           @click="emit('discardDataChanges')"
         >
-          Discard All
+          {{ t('database.data.edit.discardAll') }}
         </button>
       </div>
     </section>
@@ -89,7 +89,7 @@
         v-if="activeDataTab.loading"
         class="db-data-loading"
       >
-        Loading table data
+        {{ t('database.data.loading') }}
       </div>
       <div
         v-else-if="activeDataTab.error"
@@ -128,11 +128,14 @@
 
 <script setup lang="ts">
 import { Play, Table2 } from 'lucide-vue-next'
+import { useI18n } from '@/i18n'
 import DataGridToolbar from '@/components/database/DataGridToolbar.vue'
 import DataStatusBar from '@/components/database/DataStatusBar.vue'
 import ResultGrid from '@/components/database/ResultGrid.vue'
 import type { DataTab, DatabaseTablePresenterRules } from '@/components/database/databaseMainWorkspaceTypes'
 import type { DataEditSummary, DbFilter } from '@/services/database/databaseGridRuntime'
+
+const { t } = useI18n()
 
 defineProps<{
   activeDataTab: DataTab

@@ -65,6 +65,7 @@ export const aiPanelChatMessagesSignature = (
     executedCommand?: string
     commandExecutionStatus?: string
     commandExecutionMessage?: string
+    agentTask?: { status?: string; toolCallId?: string }
     contentParts?: unknown[]
   }>
 ) =>
@@ -80,6 +81,7 @@ export const aiPanelChatMessagesSignature = (
         message.executedCommand || '',
         message.commandExecutionStatus || '',
         message.commandExecutionMessage || '',
+        ...(message.agentTask ? [message.agentTask.status || '', message.agentTask.toolCallId || ''] : []),
         message.contentParts?.length || 0
       ].join(':')
     )

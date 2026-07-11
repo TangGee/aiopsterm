@@ -17,6 +17,7 @@ import type {
   DatabaseAiDrawerRequestRecord,
   DatabaseAiPaneMessageRecord,
   DatabaseAiPaneStateSnapshot,
+  DatabaseAiResponseLanguage,
   DatabaseWorkspaceCatalog,
   DatabaseTableMutation,
   DatabaseTableMutationPlanInput,
@@ -27,6 +28,7 @@ import type {
   ManagedAiSessionEvent
 } from '@shared/contracts/managedAiSessions'
 import type { AiChatExportInput, AiTodoItem, AiTodoSnapshotResult } from '@shared/contracts/aiChat'
+import type { ClineAgentTaskEvent } from '@shared/contracts/clineAgent'
 import type { SshAgentKeychainOption } from '@shared/contracts/appRuntime'
 import type { FileTransferTaskEvent } from '@shared/contracts/files'
 import type { McpServerUserConfig } from '@shared/contracts/mcp'
@@ -65,6 +67,7 @@ const managedAiSessionEventListeners = new Set<(event: ManagedAiSessionEvent) =>
 const terminalKeyboardInteractiveRequestListeners = new Set<(event: TerminalKeyboardInteractiveRequest) => void>()
 const terminalKeyboardInteractiveResultListeners = new Set<(event: TerminalKeyboardInteractiveResult) => void>()
 const fileTransferTaskEventListeners = new Set<(event: FileTransferTaskEvent) => void>()
+const clineAgentTaskEventListeners = new Set<(event: ClineAgentTaskEvent) => void>()
 
 const emitAppUpdateProgressMock = (event: TestAppUpdateProgressEvent) => {
   appUpdateProgressListeners.forEach((listener) => listener(event))
@@ -90,6 +93,14 @@ const emitAppUpdateProgressMock = (event: TestAppUpdateProgressEvent) => {
 ;(globalThis as any).__resetAiAgentSessionEventMock = () => {
   aiAgentSessionEventListeners.clear()
   managedAiSessionEventListeners.clear()
+}
+
+;(globalThis as any).__emitClineAgentTaskEventMock = (event: ClineAgentTaskEvent) => {
+  clineAgentTaskEventListeners.forEach((listener) => listener(event))
+}
+
+;(globalThis as any).__resetClineAgentTaskEventMock = () => {
+  clineAgentTaskEventListeners.clear()
 }
 
 ;(globalThis as any).__emitManagedAiSessionEventMock = (event: ManagedAiSessionEvent) => {
@@ -1525,6 +1536,7 @@ function resetDatabaseConnectionsMock() {
 }
 
 const databaseTrimMock = (value: unknown) => (typeof value === 'string' ? value.trim() : '')
+const normalizeDatabaseAiResponseLanguageMock = (value: unknown): DatabaseAiResponseLanguage => value === 'zh-CN' ? 'zh-CN' : 'en-US'
 
 const databaseAiPaneMessageRecordMock = (
   input: {
@@ -1534,6 +1546,7 @@ const databaseAiPaneMessageRecordMock = (
     content: string
     contextSummary: string
     createdAt: number
+    responseLanguage?: DatabaseAiResponseLanguage
   },
   id: string
 ): DatabaseAiPaneMessageRecord => ({
@@ -1544,10 +1557,15 @@ const databaseAiPaneMessageRecordMock = (
   content: input.content,
   contextSummary: input.contextSummary,
   createdAt: input.createdAt,
-  updatedAt: input.createdAt
+  updatedAt: input.createdAt,
+  responseLanguage: normalizeDatabaseAiResponseLanguageMock(input.responseLanguage)
 })
 
-const cloneDatabaseAiPaneMessageMock = (message: DatabaseAiPaneMessageRecord): DatabaseAiPaneMessageRecord => ({ ...message })
+const cloneDatabaseAiPaneMessageMock = (message: DatabaseAiPaneMessageRecord): DatabaseAiPaneMessageRecord => ({
+  ...message,
+  ...(message.context ? { context: { ...message.context } } : {}),
+  ...(message.sqlAction ? { sqlAction: { ...message.sqlAction, context: { ...message.sqlAction.context } } } : {})
+})
 
 const cloneDatabaseAiPaneStateMock = (state: DatabaseAiPaneStateSnapshot): DatabaseAiPaneStateSnapshot => ({
   open: state.open,
@@ -1575,7 +1593,7 @@ const normalizeDatabaseAiPaneStateMock = (state: DatabaseAiPaneStateSnapshot): D
   draft: typeof state.draft === 'string' ? state.draft : '',
   messages: (Array.isArray(state.messages) ? state.messages : []).slice(-24).map((message) => ({
     ...cloneDatabaseAiPaneMessageMock(message),
-    status: message.status === 'queued' || message.status === 'streaming' ? 'cancelled' : message.status
+    responseLanguage: normalizeDatabaseAiResponseLanguageMock(message.responseLanguage)
   }))
 })
 
@@ -1646,6 +1664,7 @@ const databaseAiPaneContextSummaryMock = (input: { context: { contextSummary?: s
 const databaseAiPaneErrorResponseMock = (input: {
   requestId?: string
   assistantMessageId?: string
+  responseLanguage?: DatabaseAiResponseLanguage
   context: { contextSummary?: string; connectionId?: string; databaseName?: string; schemaName?: string; dbType?: string }
 }, errorCode: string, errorMessage: string) => {
   const requestId = input.requestId || `dbai-pane-response-test-${databaseAiPaneRequestSequenceMock++}`
@@ -1662,7 +1681,8 @@ const databaseAiPaneErrorResponseMock = (input: {
               status: 'error',
               content: errorMessage,
               contextSummary: databaseAiPaneContextSummaryMock(input),
-              createdAt: Date.now()
+              createdAt: Date.now(),
+              responseLanguage: input.responseLanguage
             },
             input.assistantMessageId || `${requestId}-assistant`
           )
@@ -1681,7 +1701,17 @@ const databaseAiPaneErrorResponseMock = (input: {
   }
 }
 
-const databaseAiDrawerActionNameMock = (action: TestDatabaseAiDrawerAction) => {
+const databaseAiDrawerActionNameMock = (action: TestDatabaseAiDrawerAction, responseLanguage: DatabaseAiResponseLanguage = 'en-US') => {
+  if (responseLanguage === 'zh-CN') {
+    if (action === 'explain') return '解释 SQL'
+    if (action === 'nl2sql') return '自然语言转 SQL'
+    if (action === 'optimize') return '优化 SQL'
+    if (action === 'convert') return '转换 SQL'
+    if (action === 'complete') return '补全 SQL'
+    if (action === 'diagnose') return '诊断 SQL'
+    if (action === 'truncate') return '清空 table'
+    if (action === 'drop') return '删除 table'
+  }
   switch (action) {
     case 'explain':
       return 'Explain SQL'
@@ -1708,6 +1738,7 @@ const databaseAiDrawerErrorResponseMock = (
   input: {
     requestId?: string
     action: TestDatabaseAiDrawerAction
+    responseLanguage?: DatabaseAiResponseLanguage
     sourceSql: string
     targetDialect?: TestDatabaseAiTargetDialect
     context: { connectionId?: string; contextSummary?: string; dbType?: TestDatabaseAiTargetDialect | ''; databaseName?: string; schemaName?: string; tableName?: string }
@@ -1716,8 +1747,9 @@ const databaseAiDrawerErrorResponseMock = (
   errorMessage: string
 ) => {
   const existing = input.requestId ? findDatabaseAiDrawerRequestMock(input.requestId) : null
+  const responseLanguage = normalizeDatabaseAiResponseLanguageMock(existing?.responseLanguage ?? input.responseLanguage)
   const targetDialect = normalizeDatabaseAiTargetDialectMock(input.targetDialect || existing?.targetDialect || input.context.dbType || 'postgresql')
-  const text = `Reasoning\n- ${errorMessage}`
+  const text = `${responseLanguage === 'zh-CN' ? '分析' : 'Reasoning'}\n- ${errorMessage}`
   const request =
     existing && existing.status !== 'cancelled'
       ? updateDatabaseAiDrawerRequestMock(existing.id, { status: 'error', text, targetDialect })!
@@ -1725,12 +1757,13 @@ const databaseAiDrawerErrorResponseMock = (
         storeDatabaseAiDrawerRequestMock({
           id: input.requestId || `dbai-drawer-response-test-${databaseAiDrawerRequestSequenceMock++}`,
           action: input.action,
-          label: databaseAiDrawerActionNameMock(input.action),
+          label: databaseAiDrawerActionNameMock(input.action, responseLanguage),
           status: 'error',
           contextSummary: input.context.contextSummary || '',
           sourceSql: input.sourceSql,
           text,
           targetDialect,
+          responseLanguage,
           backendContext: {
             connectionId: input.context.connectionId || '',
             dbType: input.context.dbType === 'mssql' ? '' : input.context.dbType,
@@ -2487,28 +2520,34 @@ const generateDatabaseAiDrawerSqlMock = (input: {
 }
 const generateDatabaseAiDrawerTextMock = (input: {
   action: TestDatabaseAiDrawerAction
+  responseLanguage?: DatabaseAiResponseLanguage
   sourceSql: string
   targetDialect?: TestDatabaseAiTargetDialect
   context: { contextSummary?: string; dbType?: TestDatabaseAiTargetDialect | ''; databaseName?: string; schemaName?: string; tableName?: string }
 }) => {
   const dialect = normalizeDatabaseAiTargetDialectMock(input.targetDialect || input.context.dbType || 'postgresql')
   const sql = generateDatabaseAiDrawerSqlMock(input)
+  const zhCN = normalizeDatabaseAiResponseLanguageMock(input.responseLanguage) === 'zh-CN'
   const reasoning = [
-    'Reasoning',
-    '- Read the active database context and selected editor range through the aiopsterm backend boundary.',
-    input.context.contextSummary ? `- Context: ${input.context.contextSummary}.` : '',
-    '- 当前响应由 aiopsterm DB AI 本地后端生成，未连接远端数据库 AI 服务。',
+    zhCN ? '分析' : 'Reasoning',
+    zhCN
+      ? '- 已通过 aiopsterm 后端边界读取当前数据库上下文和选中的编辑器范围。'
+      : '- Read the active database context and selected editor range through the aiopsterm backend boundary.',
+    input.context.contextSummary ? (zhCN ? `- 上下文：${input.context.contextSummary}。` : `- Context: ${input.context.contextSummary}.`) : '',
+    zhCN
+      ? '- 当前响应由 aiopsterm DB AI 本地后端生成，未连接远端数据库 AI 服务。'
+      : '- This response was generated by the local aiopsterm DB AI backend without a remote database AI service.',
     input.action === 'convert'
-      ? `- Converted the SQL text to ${dialect === 'mssql' ? 'SQL Server' : dialect} syntax.`
+      ? (zhCN ? `- 已将 SQL 文本转换为 ${dialect === 'mssql' ? 'SQL Server' : dialect} 语法。` : `- Converted the SQL text to ${dialect === 'mssql' ? 'SQL Server' : dialect} syntax.`)
       : input.action === 'complete'
-        ? '- Completed the current statement with a bounded read-only predicate.'
+        ? (zhCN ? '- 已使用有界的只读条件补全当前语句。' : '- Completed the current statement with a bounded read-only predicate.')
         : input.action === 'optimize'
-          ? '- Kept the query read-only and added a safer bounded projection for review.'
+          ? (zhCN ? '- 保持查询只读，并添加了更安全的有界投影供审查。' : '- Kept the query read-only and added a safer bounded projection for review.')
           : input.action === 'diagnose'
-            ? '- Built a conservative read-only statement that can verify the referenced table.'
+            ? (zhCN ? '- 已生成一条保守的只读语句，用于验证引用的 table。' : '- Built a conservative read-only statement that can verify the referenced table.')
             : input.action === 'drop' || input.action === 'truncate'
-              ? '- Preserved the destructive SQL as generated text only; execution remains blocked by the read-only guard.'
-              : '- Kept the source SQL available for editor actions and review.'
+              ? (zhCN ? '- 破坏性 SQL 仅作为生成文本保留；只读保护仍会阻止执行。' : '- Preserved the destructive SQL as generated text only; execution remains blocked by the read-only guard.')
+              : (zhCN ? '- 已保留源 SQL，供编辑器操作和审查。' : '- Kept the source SQL available for editor actions and review.')
   ]
     .filter(Boolean)
     .join('\n')
@@ -8178,6 +8217,25 @@ Object.defineProperty(window, 'aiops', {
           }, 700)
         })
     ),
+    respondClineAgentApproval: vi.fn(async (input: any) => ({
+      ok: true,
+      data: {
+        taskId: input.taskId,
+        turnId: input.turnId,
+        toolCallId: input.toolCallId,
+        terminalSessionId: input.terminalSessionId,
+        status: input.approved ? 'approved' as const : 'rejected' as const
+      }
+    })),
+    abortClineAgentTask: vi.fn(async (input: any) => ({
+      ok: true,
+      data: { taskId: input.taskId, turnId: input.turnId, status: 'cancelled' as const }
+    })),
+    onClineAgentTaskEvent: vi.fn((listener: (event: ClineAgentTaskEvent) => void) => {
+      clineAgentTaskEventListeners.clear()
+      clineAgentTaskEventListeners.add(listener)
+      return () => clineAgentTaskEventListeners.delete(listener)
+    }),
     cancelAiChatResponse: vi.fn(async (input: { requestId?: string; assistantMessageId?: string }) => {
       const keys = aiChatResponseKeysMock(input)
       if (!keys.length) {
@@ -8237,6 +8295,10 @@ Object.defineProperty(window, 'aiops', {
     getDatabaseAiPaneState: vi.fn(async () => ({ ok: true as const, data: cloneDatabaseAiPaneStateMock(databaseAiPaneStateMock) })),
     saveDatabaseAiPaneState: vi.fn(async (input: DatabaseAiPaneStateSnapshot) => {
       databaseAiPaneStateMock = normalizeDatabaseAiPaneStateMock(input)
+      databaseAiPaneMessagesMock.clear()
+      databaseAiPaneStateMock.messages.forEach((message) => {
+        databaseAiPaneMessagesMock.set(message.id, cloneDatabaseAiPaneMessageMock(message))
+      })
       return { ok: true as const, data: cloneDatabaseAiPaneStateMock(databaseAiPaneStateMock) }
     }),
     testDatabaseConnection: vi.fn(testDatabaseConnectionMock),
@@ -8388,9 +8450,10 @@ Object.defineProperty(window, 'aiops', {
         return { ok: true, data: { affected, durationMs: 1, catalog: databaseWorkspaceCatalogMock(input.connectionId) } }
       }
     ),
-    createDatabaseAiPaneRequest: vi.fn(async (input: { prompt: string; context: { contextSummary?: string; connectionId: string; databaseName: string; schemaName?: string; dbType?: string } }) => {
+    createDatabaseAiPaneRequest: vi.fn(async (input: { prompt: string; responseLanguage?: DatabaseAiResponseLanguage; context: { contextSummary?: string; connectionId: string; databaseName: string; schemaName?: string; dbType?: string } }) => {
       const prompt = databaseTrimMock(input.prompt)
       if (!prompt) return { ok: false, errorCode: 'DB_AI_PROMPT_REQUIRED', errorMessage: 'Prompt is required.' }
+      const responseLanguage = normalizeDatabaseAiResponseLanguageMock(input.responseLanguage)
       const requestId = `dbai-pane-request-test-${databaseAiPaneRequestSequenceMock++}`
       const contextSummary =
         input.context.contextSummary ||
@@ -8398,13 +8461,13 @@ Object.defineProperty(window, 'aiops', {
       const createdAt = Date.now()
       const userMessage = storeDatabaseAiPaneMessageMock(
         databaseAiPaneMessageRecordMock(
-          { requestId, role: 'user', status: 'done', content: prompt, contextSummary, createdAt },
+          { requestId, role: 'user', status: 'done', content: prompt, contextSummary, createdAt, responseLanguage },
           `${requestId}-user`
         )
       )
       const assistantMessage = storeDatabaseAiPaneMessageMock(
         databaseAiPaneMessageRecordMock(
-          { requestId, role: 'assistant', status: 'queued', content: '', contextSummary, createdAt: createdAt + 1 },
+          { requestId, role: 'assistant', status: 'queued', content: '', contextSummary, createdAt: createdAt + 1, responseLanguage },
           `${requestId}-assistant`
         )
       )
@@ -8435,8 +8498,12 @@ Object.defineProperty(window, 'aiops', {
       return { ok: true, data: { assistantMessage } }
     }),
     generateDatabaseAiPaneResponse: vi.fn(
-      (input: { requestId?: string; assistantMessageId?: string; prompt: string; context: { contextSummary?: string; connectionId: string; databaseName: string; schemaName?: string; dbType?: string } }) =>
-        new Promise((resolve) => {
+      (input: { requestId?: string; assistantMessageId?: string; prompt: string; responseLanguage?: DatabaseAiResponseLanguage; context: { contextSummary?: string; connectionId: string; databaseName: string; schemaName?: string; dbType?: string } }) => {
+        const existingBefore = input.requestId
+          ? findDatabaseAiPaneAssistantMessageMock({ requestId: input.requestId, assistantMessageId: input.assistantMessageId })
+          : null
+        const responseLanguage = normalizeDatabaseAiResponseLanguageMock(existingBefore?.responseLanguage ?? input.responseLanguage)
+        return new Promise((resolve) => {
           window.setTimeout(() => {
             if (!databaseTrimMock(input.prompt)) {
               resolve(databaseAiPaneErrorResponseMock(input, 'DB_AI_PROMPT_REQUIRED', 'Prompt is required.'))
@@ -8452,22 +8519,56 @@ Object.defineProperty(window, 'aiops', {
             }
             const requestId = input.requestId || `dbai-pane-response-test-${databaseAiPaneRequestSequenceMock++}`
             const contextSummary = databaseAiPaneContextSummaryMock(input)
-            const text = [
-              `Context: ${contextSummary}`,
-              '当前响应由 aiopsterm DB AI 本地后端生成，未连接远端数据库 AI 服务。',
-              '',
-              'Schema summary:',
-              '- public: orders(5 columns), open_orders_v(5 columns)',
-              '',
-              'Recommended starting point:',
-              '```sql',
-              'SELECT *',
-              'FROM "public"."orders"',
-              'LIMIT 100;',
-              '```'
-            ].join('\n')
+            const text = responseLanguage === 'zh-CN'
+              ? [
+                  `上下文：${contextSummary}`,
+                  '当前响应由 aiopsterm DB AI 本地后端生成，未连接远端数据库 AI 服务。',
+                  '',
+                  '数据库结构摘要：',
+                  '- public: orders(5 列), open_orders_v(5 列)',
+                  '',
+                  '建议的起始查询：',
+                  '```sql',
+                  'SELECT *',
+                  'FROM "public"."orders"',
+                  'LIMIT 100;',
+                  '```'
+                ].join('\n')
+              : [
+                  `Context: ${contextSummary}`,
+                  'This response was generated by the local aiopsterm DB AI backend without a remote database AI service.',
+                  '',
+                  'Schema summary:',
+                  '- public: orders(5 columns), open_orders_v(5 columns)',
+                  '',
+                  'Recommended starting point:',
+                  '```sql',
+                  'SELECT *',
+                  'FROM "public"."orders"',
+                  'LIMIT 100;',
+                  '```'
+                ].join('\n')
             const createdAt = Date.now()
             const existing = findDatabaseAiPaneAssistantMessageMock({ requestId, assistantMessageId: input.assistantMessageId })
+            if (existingBefore && !existing) {
+              const assistantMessage = {
+                ...existingBefore,
+                status: 'cancelled' as const,
+                content: existingBefore.content || 'Response discarded because the conversation was reset.',
+                updatedAt: createdAt
+              }
+              resolve({
+                ok: true,
+                data: {
+                  requestId,
+                  assistantMessage,
+                  text: assistantMessage.content,
+                  provider: 'aiopsterm-local' as const,
+                  durationMs: 1
+                }
+              })
+              return
+            }
             if (existing?.status === 'cancelled') {
               resolve({
                 ok: true,
@@ -8483,7 +8584,7 @@ Object.defineProperty(window, 'aiops', {
             }
             const assistantMessage = storeDatabaseAiPaneMessageMock(
               databaseAiPaneMessageRecordMock(
-                { requestId, role: 'assistant', status: 'done', content: text, contextSummary, createdAt },
+                { requestId, role: 'assistant', status: 'done', content: text, contextSummary, createdAt, responseLanguage },
                 input.assistantMessageId || existing?.id || `${requestId}-assistant`
               )
             )
@@ -8499,11 +8600,13 @@ Object.defineProperty(window, 'aiops', {
             })
           }, 700)
         })
+      }
     ),
     createDatabaseAiDrawerRequest: vi.fn(
       async (input: {
         requestId?: string
         action: TestDatabaseAiDrawerAction
+        responseLanguage?: DatabaseAiResponseLanguage
         sourceSql: string
         targetDialect?: TestDatabaseAiTargetDialect
         context: { connectionId?: string; contextSummary?: string; dbType?: TestDatabaseAiTargetDialect | ''; databaseName?: string; schemaName?: string; tableName?: string }
@@ -8511,17 +8614,19 @@ Object.defineProperty(window, 'aiops', {
         if (!input.context.connectionId) return { ok: false, errorCode: 'DB_CONNECTION_REQUIRED', errorMessage: 'Database connection is required.' }
         const now = Date.now()
         const id = input.requestId || `dbai-drawer-request-test-${databaseAiDrawerRequestSequenceMock++}`
+        const responseLanguage = normalizeDatabaseAiResponseLanguageMock(input.responseLanguage)
         const backendDbType = input.context.dbType && input.context.dbType !== 'mssql' ? input.context.dbType : ''
         const targetDialect = normalizeDatabaseAiTargetDialectMock(input.targetDialect || input.context.dbType || 'postgresql')
         const request: DatabaseAiDrawerRequestRecord = {
           id,
           action: input.action,
-          label: databaseAiDrawerActionNameMock(input.action),
+          label: databaseAiDrawerActionNameMock(input.action, responseLanguage),
           status: 'queued',
           contextSummary: input.context.contextSummary || '',
           sourceSql: input.sourceSql,
           text: '',
           targetDialect,
+          responseLanguage,
           backendContext: {
             connectionId: input.context.connectionId,
             dbType: backendDbType,
@@ -8554,6 +8659,7 @@ Object.defineProperty(window, 'aiops', {
       (input: {
         requestId?: string
         action: TestDatabaseAiDrawerAction
+        responseLanguage?: DatabaseAiResponseLanguage
         sourceSql: string
         targetDialect?: TestDatabaseAiTargetDialect
         context: { connectionId?: string; contextSummary?: string; dbType?: TestDatabaseAiTargetDialect | ''; databaseName?: string; schemaName?: string; tableName?: string }
@@ -8575,6 +8681,7 @@ Object.defineProperty(window, 'aiops', {
               return
             }
             const existing = input.requestId ? findDatabaseAiDrawerRequestMock(input.requestId) : null
+            const responseLanguage = normalizeDatabaseAiResponseLanguageMock(existing?.responseLanguage ?? input.responseLanguage)
             if (existing?.status === 'cancelled') {
               resolve({
                 ok: true,
@@ -8589,7 +8696,7 @@ Object.defineProperty(window, 'aiops', {
               })
               return
             }
-            const data = generateDatabaseAiDrawerTextMock(input)
+            const data = generateDatabaseAiDrawerTextMock({ ...input, responseLanguage })
             const request =
               input.requestId && existing
                 ? updateDatabaseAiDrawerRequestMock(input.requestId, {
@@ -8600,12 +8707,13 @@ Object.defineProperty(window, 'aiops', {
                 : storeDatabaseAiDrawerRequestMock({
                     id: input.requestId || `dbai-drawer-response-test-${databaseAiDrawerRequestSequenceMock++}`,
                     action: input.action,
-                    label: databaseAiDrawerActionNameMock(input.action),
+                    label: databaseAiDrawerActionNameMock(input.action, responseLanguage),
                     status: 'done',
                     contextSummary: input.context.contextSummary || '',
                     sourceSql: input.sourceSql,
                     text: data.text,
                     targetDialect: normalizeDatabaseAiTargetDialectMock(input.targetDialect || input.context.dbType || 'postgresql'),
+                    responseLanguage,
                     backendContext: {
                       connectionId: '',
                       dbType: input.context.dbType === 'mssql' ? '' : input.context.dbType,
@@ -8633,6 +8741,7 @@ Object.defineProperty(window, 'aiops', {
       (input: {
         requestId?: string
         sourceSql: string
+        responseLanguage?: DatabaseAiResponseLanguage
         targetDialect?: TestDatabaseAiTargetDialect
         context: { connectionId?: string; contextSummary?: string; dbType?: TestDatabaseAiTargetDialect | ''; databaseName?: string; schemaName?: string; tableName?: string }
         errorMessage?: string
@@ -8644,6 +8753,7 @@ Object.defineProperty(window, 'aiops', {
             const drawerInput = {
               requestId: input.requestId,
               action: 'diagnose' as const,
+              responseLanguage: normalizeDatabaseAiResponseLanguageMock(input.responseLanguage),
               sourceSql,
               targetDialect: normalizeDatabaseAiTargetDialectMock(input.targetDialect || input.context.dbType || 'postgresql'),
               context: input.context,
@@ -8667,12 +8777,13 @@ Object.defineProperty(window, 'aiops', {
             const request = storeDatabaseAiDrawerRequestMock({
               id: input.requestId || `dbai-drawer-request-test-${databaseAiDrawerRequestSequenceMock++}`,
               action: 'diagnose',
-              label: databaseAiDrawerActionNameMock('diagnose'),
+              label: databaseAiDrawerActionNameMock('diagnose', drawerInput.responseLanguage),
               status: 'streaming',
               contextSummary: input.context.contextSummary || '',
               sourceSql,
               text: '',
               targetDialect,
+              responseLanguage: drawerInput.responseLanguage,
               backendContext: {
                 connectionId: input.context.connectionId || '',
                 dbType: backendDbType,
@@ -8686,6 +8797,7 @@ Object.defineProperty(window, 'aiops', {
             })
             const data = generateDatabaseAiDrawerTextMock({
               action: request.action,
+              responseLanguage: request.responseLanguage,
               sourceSql: request.sourceSql,
               targetDialect: request.targetDialect,
               context: request.backendContext

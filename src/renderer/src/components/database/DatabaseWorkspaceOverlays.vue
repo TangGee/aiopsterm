@@ -16,26 +16,14 @@
     :db-ai-pane-requires-schema="dbAiPaneRequiresSchema"
     :db-ai-pane-connection-needs-connect="dbAiPaneConnectionNeedsConnect"
     :db-ai-pane-messages="dbAiPaneMessages"
+    :db-ai-pane-composer-action="dbAiPaneComposerAction"
+    :db-ai-pane-composer-placeholder="dbAiPaneComposerPlaceholder"
     :db-ai-pane-is-streaming="dbAiPaneIsStreaming"
     :db-ai-pane-can-send="dbAiPaneCanSend"
     :active-sql-available="activeSqlAvailable"
-    :db-ai-open="dbAiOpen"
-    :db-ai-active-req-id="dbAiActiveReqId"
-    :db-ai-action-label="dbAiActionLabel"
-    :db-ai-request-list="dbAiRequestList"
-    :db-ai-status="dbAiStatus"
-    :db-ai-status-label="dbAiStatusLabel"
-    :db-ai-context-summary="dbAiContextSummary"
-    :db-ai-is-convert-action="dbAiIsConvertAction"
-    :db-ai-target-dialect="dbAiTargetDialect"
+    :active-sql-explain-available="activeSqlExplainAvailable"
+    :can-run-db-ai-pane-message-sql="canRunDbAiPaneMessageSql"
     :db-ai-dialect-options="dbAiDialectOptions"
-    :db-ai-is-executable-dialect="dbAiIsExecutableDialect"
-    :db-ai-reasoning-text="dbAiReasoningText"
-    :db-ai-content-text="dbAiContentText"
-    :db-ai-empty-state="dbAiEmptyState"
-    :db-ai-sql="dbAiSql"
-    :db-ai-can-run-read-only="dbAiCanRunReadOnly"
-    :db-ai-can-cancel="dbAiCanCancel"
     :format-db-ai-request-time="formatDbAiRequestTime"
     :db-ai-pane-status-label="dbAiPaneStatusLabel"
     @start-db-ai-pane-resize="emit('startDbAiPaneResize', $event)"
@@ -47,19 +35,16 @@
     @update-db-ai-pane-schema="emit('updateDbAiPaneSchema', $event)"
     @connect-db-ai-pane-connection="emit('connectDbAiPaneConnection')"
     @handle-db-ai-pane-draft-keydown="emit('handleDbAiPaneDraftKeydown', $event)"
+    @cancel-db-ai-pane-action-mode="emit('cancelDbAiPaneActionMode')"
     @send-db-ai-pane-quick-prompt="emit('sendDbAiPaneQuickPrompt', $event)"
     @reset-db-ai-pane-conversation="emit('resetDbAiPaneConversation')"
     @cancel-db-ai-pane-response="emit('cancelDbAiPaneResponse')"
     @send-db-ai-pane-message="emit('sendDbAiPaneMessage')"
-    @close-db-ai-drawer="emit('closeDbAiDrawer')"
-    @set-active-db-ai-request="emit('setActiveDbAiRequest', $event)"
-    @update-db-ai-target-dialect="emit('updateDbAiTargetDialect', $event)"
-    @copy-db-ai-sql="emit('copyDbAiSql')"
-    @replace-db-ai-sql-selection="emit('replaceDbAiSqlSelection')"
-    @insert-db-ai-sql="emit('insertDbAiSql')"
-    @run-db-ai-readonly="emit('runDbAiReadonly')"
-    @cancel-db-ai-request="emit('cancelDbAiRequest')"
-    @clear-db-ai-request="emit('clearDbAiRequest')"
+    @update-db-ai-pane-message-dialect="(message, value) => emit('updateDbAiPaneMessageDialect', message, value)"
+    @copy-db-ai-sql="emit('copyDbAiSql', $event)"
+    @replace-db-ai-sql-selection="emit('replaceDbAiSqlSelection', $event)"
+    @insert-db-ai-sql="emit('insertDbAiSql', $event)"
+    @run-db-ai-readonly="emit('runDbAiReadonly', $event)"
   />
 
   <DatabaseWorkspaceMenus
@@ -167,8 +152,7 @@ import type {
   DbAiPaneContext,
   DbAiPaneMessage,
   DbAiPaneMessageStatus,
-  DbAiRequest,
-  DbAiStatus,
+  DbAiAction,
   DbAiTargetDialect
 } from '@/services/database/databaseBackendGuards'
 import type {
@@ -204,26 +188,14 @@ const props = defineProps<{
   dbAiPaneRequiresSchema: boolean
   dbAiPaneConnectionNeedsConnect: boolean
   dbAiPaneMessages: DbAiPaneMessage[]
+  dbAiPaneComposerAction: DbAiAction | null
+  dbAiPaneComposerPlaceholder: string
   dbAiPaneIsStreaming: boolean
   dbAiPaneCanSend: boolean
   activeSqlAvailable: boolean
-  dbAiOpen: boolean
-  dbAiActiveReqId: string | null
-  dbAiActionLabel: string
-  dbAiRequestList: DbAiRequest[]
-  dbAiStatus: DbAiStatus | 'idle'
-  dbAiStatusLabel: string
-  dbAiContextSummary: string
-  dbAiIsConvertAction: boolean
-  dbAiTargetDialect: DbAiTargetDialect
+  activeSqlExplainAvailable: boolean
+  canRunDbAiPaneMessageSql: (message: DbAiPaneMessage) => boolean
   dbAiDialectOptions: Array<{ value: DbAiTargetDialect; label: string }>
-  dbAiIsExecutableDialect: boolean
-  dbAiReasoningText: string
-  dbAiContentText: string
-  dbAiEmptyState: boolean
-  dbAiSql: string
-  dbAiCanRunReadOnly: boolean
-  dbAiCanCancel: boolean
   formatDbAiRequestTime: (time: number) => string
   dbAiPaneStatusLabel: (status: DbAiPaneMessageStatus) => string
   addMenuOpen: boolean
@@ -281,19 +253,16 @@ const emit = defineEmits<{
   updateDbAiPaneSchema: [event: Event]
   connectDbAiPaneConnection: []
   handleDbAiPaneDraftKeydown: [event: KeyboardEvent]
+  cancelDbAiPaneActionMode: []
   sendDbAiPaneQuickPrompt: [kind: DbAiPaneQuickPrompt]
   resetDbAiPaneConversation: []
   cancelDbAiPaneResponse: []
   sendDbAiPaneMessage: []
-  closeDbAiDrawer: []
-  setActiveDbAiRequest: [reqId: string]
-  updateDbAiTargetDialect: [value: DbAiTargetDialect]
-  copyDbAiSql: []
-  replaceDbAiSqlSelection: []
-  insertDbAiSql: []
-  runDbAiReadonly: []
-  cancelDbAiRequest: []
-  clearDbAiRequest: []
+  updateDbAiPaneMessageDialect: [message: DbAiPaneMessage, value: DbAiTargetDialect]
+  copyDbAiSql: [message?: DbAiPaneMessage]
+  replaceDbAiSqlSelection: [message?: DbAiPaneMessage]
+  insertDbAiSql: [message?: DbAiPaneMessage]
+  runDbAiReadonly: [message?: DbAiPaneMessage]
   addGroup: [parentGroupId?: string | null]
   openConnectionModalFromEngine: [engine: DatabaseEngineInfo, groupId?: string]
   closeContextSubmenuSoon: []
@@ -336,7 +305,10 @@ const emit = defineEmits<{
   confirmOperation: []
 }>()
 
-const databaseAiPanelsRef = ref<{ scrollPaneMessagesToBottom: () => void } | null>(null)
+const databaseAiPanelsRef = ref<{
+  scrollPaneMessagesToBottom: () => void
+  focusPaneComposer: () => void
+} | null>(null)
 
 const dbAiPaneDraftModel = computed({
   get: () => props.dbAiPaneDraft,
@@ -362,5 +334,9 @@ function scrollPaneMessagesToBottom() {
   databaseAiPanelsRef.value?.scrollPaneMessagesToBottom()
 }
 
-defineExpose({ scrollPaneMessagesToBottom })
+function focusPaneComposer() {
+  databaseAiPanelsRef.value?.focusPaneComposer()
+}
+
+defineExpose({ scrollPaneMessagesToBottom, focusPaneComposer })
 </script>
