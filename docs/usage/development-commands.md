@@ -84,13 +84,27 @@ sudo apt-get install -y pkg-config libssl-dev bubblewrap
 
 If `libssl-dev` is missing and sudo is not available, the dev builder can download that development package from the configured apt mirror and unpack it into `.cache/aiopsterm-codex-dev/` for the build. If `/usr/local` exposes older OpenSSL 1.1 headers or pkg-config files, the builder ignores that default and prefers a supported OpenSSL 3 pkg-config path, falling back to the cached `libssl-dev` overlay so Codex does not link against OpenSSL 1.1. The dev and release Codex builders read `codex/codex-rs/rust-toolchain.toml`, install the declared Rust toolchain when needed, and export `RUSTUP_TOOLCHAIN` before running Cargo; this prevents older default Cargo versions from failing on Codex's Rust 2024 edition workspace. Before Cargo starts, they also detect zero-byte Rust artifacts under the active Codex Cargo profile and delete that profile cache, which recovers from interrupted builds or host OS switches that leave invalid `.rlib`, `.rmeta`, or object files in `codex/codex-rs/target`. If rustup's default endpoint is unreachable, the installer retries with the `rsproxy.cn` mirror, or you can preconfigure `RUSTUP_DIST_SERVER` and `RUSTUP_UPDATE_ROOT` yourself. The dev build uses the host GNU target and `dev-small` Cargo profile, not the musl release target; the script disables debug assertions for that profile so embedded Codex preview sessions log recoverable stream-state anomalies instead of panicking. It prefetches Codex-built V8 artifacts through configurable GitHub mirrors; set `AIOPSTERM_GITHUB_MIRROR` to a comma-separated list if the defaults are not reachable from your network. Use `npm run build:start -- --skip-build` to reuse the latest existing aiopsterm build while still rebuilding Codex; use `--skip-codex` only when the Codex dev package is already current. Use `scripts/build-and-start.sh --no-restart` only when you want the script to detect an existing preview and exit without replacing it.
 
-Rebuild native Electron modules explicitly:
+Prepare or verify only the Node/Vitest native runtime:
+
+```bash
+npm run native:ensure:node
+npm run native:ensure:node -- --check
+```
+
+Prepare the Node and Electron SQLite bindings and verify both runtimes:
+
+```bash
+npm run native:ensure:electron
+npm run native:ensure:electron -- --check
+```
+
+Force-refresh the Electron binding used by development and package builds:
 
 ```bash
 npm run rebuild:native
 ```
 
-This rebuilds both `node-pty` and `better-sqlite3` for the pinned Electron runtime. Run it after changing Electron, reinstalling dependencies, switching Node/Electron ABIs, or when SQLite-backed app data such as saved Assets hosts appears unavailable even though `aiopsterm-state.db` still contains rows.
+The Node and Electron processes use different `better-sqlite3` ABI bindings in a development installation. These are managed below the same npm package and still access the same application database. `native:ensure:node` never prepares Electron; `native:ensure:electron` keeps both SQLite bindings valid and verifies `node-pty` in both runtimes. Use `npm run rebuild:native:node` or `npm run rebuild:native:electron` for a forced target refresh after changing runtimes, reinstalling dependencies, switching ABIs, or when SQLite-backed app data appears unavailable even though `aiopsterm-state.db` still contains rows. On Windows, exit processes using the target runtime before a forced rebuild.
 
 Regenerate self-owned app icon PNGs from the local GPT-generated source image:
 

@@ -631,7 +631,8 @@ test('quick architecture migration baseline @quick', async () => {
 
     await expect(page.getByText('aiopsterm', { exact: true })).toBeVisible()
     await expect(page.locator('.terminal-dashboard')).toContainText('与AI对话')
-    await expect(page.locator('.ai-header h2')).toHaveText('AI')
+    await expect(page.getByTestId('ai-panel-mode-open')).toBeVisible()
+    await expect(page.getByTestId('ai-panel-mode-open')).toHaveAttribute('title', /AI 面板模式:/)
     await expect(page.locator('.ai-panel')).toBeVisible()
     await expect(page.locator('.message.assistant').filter({ hasText: '欢迎' })).toHaveCount(0)
 
@@ -981,10 +982,17 @@ test('control socket and external Codex MCP expose automation without browser co
         'list_ai_sessions',
         'list_ai_notifications',
         'list_database_connections',
+        'list_databases',
+        'list_schemas',
+        'list_tables',
         'search_database_objects',
         'describe_database_table',
         'get_database_table_ddl',
-        'query_database_table'
+        'query_database_table',
+        'sample_rows',
+        'count_rows',
+        'inspect_indexes',
+        'explain_plan'
       ])
     )
 
@@ -1126,24 +1134,30 @@ test('aiopsterm primary desktop flows', async () => {
   const extensionStore = await createE2eExtensionStore()
   const voiceServer = await startVoiceTranscriptionServer()
   const aiChatServer = await startOllamaChatServer()
-  const app = await launchApp('primary', {
+  const userDataDir = e2eUserDataDir('primary')
+  const primaryEnv = {
     AIOPSTERM_KUBECTL_PATH: fakeKubectl.filePath,
     AIOPSTERM_EXTENSION_STORE_DIR: extensionStore.dir
-  })
+  }
+  let app = await launchApp('primary', primaryEnv, { userDataDir })
 
   try {
-    const page = await app.firstWindow()
+    let page = await app.firstWindow()
+    await page.waitForLoadState('domcontentloaded')
+    await configureModelSelectorOptions(page, aiChatServer.baseUrl)
+    await page.reload()
     await page.waitForLoadState('domcontentloaded')
     await disableE2eMotion(page)
     await installVoiceRecorderDouble(page)
-    await configureModelSelectorOptions(page, aiChatServer.baseUrl)
 
     await expect(page.getByText('aiopsterm', { exact: true })).toBeVisible()
     await expect(page.locator('.terminal-tab').filter({ hasText: '欢迎' })).toHaveCount(0)
     await expect(page.locator('.terminal-dashboard')).toContainText('与AI对话')
-    await expect(page.locator('.ai-header h2')).toHaveText('AI')
+    await expect(page.getByTestId('ai-panel-mode-open')).toBeVisible()
+    await expect(page.getByTestId('ai-panel-mode-open')).toHaveAttribute('title', /AI 面板模式:/)
     await expect(page.locator('.top-bar[data-onboarding-id="top-layout-controls"]')).toBeVisible()
-    await expect(page.locator('.mode-button')).toHaveCount(1)
+    await expect(page.locator('.mode-button')).toHaveCount(0)
+    await expect(page.getByTestId('agents-mode-entry')).toBeVisible()
     await expect(page.locator('.right-ai-toggle[data-onboarding-id="right-ai-toggle"]')).toBeVisible()
     await expect(page.locator('.top-update-badge')).toContainText('本地版本')
     await page.locator('.top-bar .layout-toggle').first().click()
@@ -1151,9 +1165,9 @@ test('aiopsterm primary desktop flows', async () => {
     await page.locator('.top-bar .layout-toggle').first().click()
     await expect(page.locator('.workspace-tabs')).toBeVisible()
     await page.locator('.right-ai-toggle').click()
-    await expect(page.locator('.ai-header h2')).not.toBeVisible()
+    await expect(page.getByTestId('ai-panel-mode-open')).not.toBeVisible()
     await page.locator('.right-ai-toggle').click()
-    await expect(page.locator('.ai-header h2')).toHaveText('AI')
+    await expect(page.getByTestId('ai-panel-mode-open')).toBeVisible()
     await expect(page.locator('.workspace-tabs button').filter({ hasText: '直接连接' })).toBeVisible()
     await expect(page.locator('.workspace-tabs button').filter({ hasText: '堡垒机资源' })).toBeVisible()
     await expect(page.locator('.workspace-folder-row').filter({ hasText: '最近连接' })).toBeVisible()
@@ -1725,6 +1739,31 @@ test('aiopsterm primary desktop flows', async () => {
     await expect(convertAssistant.locator('.db-ai-pane-sql-result button[aria-label="运行只读 SQL"]')).toBeDisabled()
     await page.getByTitle('重置对话').click()
     await expect(page.locator('.db-ai-pane-message')).toHaveCount(0)
+    await expect
+      .poll(() => page.evaluate(async () => {
+        const api = (window as unknown as { aiops: { getDatabaseAiPaneState: () => Promise<any> } }).aiops
+        const result = await api.getDatabaseAiPaneState()
+        return result?.data?.archivedSessions?.find((session: any) =>
+          session.messages?.some((message: any) => String(message.content || '').includes('当前 SQL 编辑器内容和数据库上下文'))
+        )?.conversationId || ''
+      }))
+      .not.toBe('')
+    const restoredDbAiSessionId = String((await page.evaluate(async () => {
+      const api = (window as unknown as { aiops: { getDatabaseAiPaneState: () => Promise<any> } }).aiops
+      const result = await api.getDatabaseAiPaneState()
+      return result?.data?.archivedSessions?.find((session: any) =>
+        session.messages?.some((message: any) => String(message.content || '').includes('当前 SQL 编辑器内容和数据库上下文'))
+      )?.conversationId || ''
+    })))
+    await page.getByTestId('agents-mode-entry').click()
+    await page.locator('.agents-search input').fill(restoredDbAiSessionId)
+    await page.locator(`.product-session-item[data-session-id="${restoredDbAiSessionId}"] .product-session-main`).click()
+    await expect(page.locator('.db-ai-pane')).toBeVisible()
+    await expect(page.locator('.db-ai-pane-message.assistant').last().locator('.db-ai-pane-message-content')).toContainText(
+      '当前 SQL 编辑器内容和数据库上下文'
+    )
+    await page.getByTitle('重置对话').click()
+    await expect(page.locator('.db-ai-pane-message')).toHaveCount(0)
     const ordersTableRow = page.locator('.db-tree-row.table').filter({ hasText: 'orders' }).first()
     await ordersTableRow.locator('button').click()
     await expect(page.locator('.db-tree-row.column').filter({ hasText: 'owner' })).toBeVisible()
@@ -1792,6 +1831,7 @@ test('aiopsterm primary desktop flows', async () => {
     await expect(page.locator('.onboarding-progress-line')).toContainText('已完成 0 / 4')
     await page.locator('.onboarding-module-card').filter({ hasText: '界面导览' }).click()
     await expect(page.locator('.spotlight-card')).toContainText('模块切换栏')
+    await expect(page.locator('.spotlight-highlight')).toBeVisible()
     await page.locator('.spotlight-card .primary').click()
     await expect(page.locator('.spotlight-card')).toContainText('左侧功能面板')
     await page.locator('.spotlight-close').click()
@@ -1919,12 +1959,29 @@ test('aiopsterm primary desktop flows', async () => {
     await page.locator('.user-login-form .primary').click()
     await expect(page.locator('.user-info-card')).toContainText('E2E Operator')
 
-    await page.getByTitle('切换到 Agents 模式').click()
+    await page.getByTestId('agents-mode-entry').click()
     const agentsSidebar = page.locator('.agents-sidebar')
+    const agentsRightPane = page.locator('[data-layout-pane="agents-right"]')
+    await expect(page.locator('.side-rail')).toBeVisible()
     await expect(page.locator('.agents-search input')).toBeVisible()
-    await expect(agentsSidebar.getByTitle('新建会话')).toBeVisible()
-    await expect(page.locator('.ai-header h2')).toHaveText('Agents')
+    await expect(page.locator('.terminal-workspace')).toBeVisible()
+    await expect(agentsRightPane).toBeVisible()
+    await expect(page.getByTestId('agents-new-session-open')).toBeVisible()
+    await expect(page.getByTestId('ai-panel-mode-open')).toBeVisible()
     await expect(page.locator('.right-ai-toggle')).not.toBeVisible()
+    const [railBox, sidebarBox, terminalBox, aiBox] = await Promise.all([
+      page.locator('.side-rail').boundingBox(),
+      agentsSidebar.boundingBox(),
+      page.locator('.terminal-workspace').boundingBox(),
+      agentsRightPane.boundingBox()
+    ])
+    expect(railBox).not.toBeNull()
+    expect(sidebarBox).not.toBeNull()
+    expect(terminalBox).not.toBeNull()
+    expect(aiBox).not.toBeNull()
+    expect(railBox!.x).toBeLessThan(sidebarBox!.x)
+    expect(sidebarBox!.x).toBeLessThan(terminalBox!.x)
+    expect(terminalBox!.x).toBeLessThan(aiBox!.x)
     await page.locator('.top-bar .layout-toggle').first().click()
     await expect(page.locator('.agents-search input')).not.toBeVisible()
     await page.locator('.top-bar .layout-toggle').first().click()
@@ -1935,9 +1992,8 @@ test('aiopsterm primary desktop flows', async () => {
     await expect(agentsSidebar.getByText('生产巡检')).not.toBeVisible()
     await page.locator('.agents-search input').fill('')
 
-    await agentsSidebar.getByTitle('新建会话').click()
-    await page.getByTestId('ai-panel-mode-open').click()
-    await page.getByTestId('ai-mode-classic').click()
+    await page.getByTestId('agents-new-session-open').click()
+    await page.getByTestId('agents-new-classic').click()
     await expect(page.locator('.ai-empty-chat')).toBeVisible()
     await expect(page.getByText('请输入本次运维目标。')).not.toBeVisible()
     const modeSelect = page.locator('[data-onboarding-id="ai-mode-select"]')
@@ -2090,11 +2146,83 @@ test('aiopsterm primary desktop flows', async () => {
     expect(finalAiChatRequestBody).not.toContain('e2e-chat-attachment.md')
     await expect(page.getByTestId('ai-file-upload-button')).toBeEnabled()
 
+    const classicConversationWithResponseId = await page.locator('.ai-conversation-tab.active').getAttribute('data-conversation-id')
+    expect(classicConversationWithResponseId).toBeTruthy()
+    const classicTabCountBeforeNew = await page.getByTestId('ai-conversation-tab').count()
+    await page.getByTestId('ai-new-chat').click()
+    await expect(page.getByTestId('ai-conversation-tab')).toHaveCount(classicTabCountBeforeNew + 1)
+    const newClassicTab = page.locator('.ai-conversation-tab.active')
+    const newClassicConversationId = await newClassicTab.getAttribute('data-conversation-id')
+    const newClassicConversationTitle = (await newClassicTab.locator('.ai-conversation-tab-title').textContent())?.trim()
+    expect(newClassicConversationId).toBeTruthy()
+    expect(newClassicConversationTitle).toBeTruthy()
+    await newClassicTab.locator('.ai-conversation-tab-close').click()
+    await expect(page.getByTestId('ai-conversation-tab')).toHaveCount(classicTabCountBeforeNew)
+    await page.locator(`.ai-conversation-tab[data-conversation-id="${classicConversationWithResponseId}"]`).click()
+    await expect(page.locator('.message.user').filter({ hasText: '检查生产磁盘' })).toBeVisible()
+    await page.locator('.agents-search input').fill(newClassicConversationId!)
+    const closedClassicSession = page.locator(`.product-session-item[data-session-id="${newClassicConversationId}"]`)
+    await expect(closedClassicSession).toBeVisible()
+    await expect(closedClassicSession).not.toHaveClass(/open/)
+    await closedClassicSession.locator('.product-session-main').click()
+    await expect(page.locator(`.ai-conversation-tab[data-conversation-id="${newClassicConversationId}"]`)).toBeVisible()
+
     await page.screenshot({ path: path.join('test-results', 'aiopsterm-agents.png'), fullPage: true })
-  } finally {
+
+    await page.evaluate(async () => {
+      const api = (window as unknown as {
+        aiops: {
+          createProductSession: (input: Record<string, unknown>) => Promise<any>
+        }
+      }).aiops
+      const open = await api.createProductSession({
+        id: 'e2e-codex-open',
+        surface: 'codex',
+        title: 'E2E Codex open',
+        isOpen: true
+      })
+      const closed = await api.createProductSession({
+        id: 'e2e-codex-closed',
+        surface: 'codex',
+        title: 'E2E Codex resume',
+        isOpen: false,
+        nativeBinding: {
+          engine: 'codex',
+          nativeSessionId: 'e2e-codex-thread',
+          profile: 'embedded-tui'
+        }
+      })
+      if (!open?.ok || !closed?.ok) throw new Error(open?.errorMessage || closed?.errorMessage || 'Codex E2E session setup failed')
+    })
     await app.close()
+    app = await launchApp('primary', primaryEnv, { userDataDir })
+    page = await app.firstWindow()
+    await page.waitForLoadState('domcontentloaded')
+    await disableE2eMotion(page)
+    await expect(page.getByTestId('agents-mode-entry')).toHaveClass(/active/)
+    await expect(page.locator('.side-rail')).toBeVisible()
+    await expect(page.locator('.agents-search input')).toBeVisible()
+    await expect(page.locator('.terminal-workspace')).toBeVisible()
+    await expect(page.locator('[data-layout-pane="agents-right"]')).toBeVisible()
+    await expect(page.getByTestId('ai-codex-tab')).toHaveCount(0)
+    await expect(page.getByTestId('ai-conversation-tab')).toHaveCount(0)
+    await page.locator('.agents-search input').fill('e2e-codex-closed')
+    const closedCodexSession = page.locator('.product-session-item[data-session-id="e2e-codex-closed"]')
+    await expect(closedCodexSession).toBeVisible()
+    await expect(closedCodexSession).not.toHaveClass(/open/)
+    await closedCodexSession.locator('.product-session-main').click()
+    const restoredCodexTab = page.locator('.ai-conversation-tab[data-codex-conversation-id="e2e-codex-closed"]')
+    await expect(restoredCodexTab).toBeVisible()
+    await restoredCodexTab.locator('.ai-conversation-tab-close').click()
+    await expect(restoredCodexTab).toHaveCount(0)
+    await expect(closedCodexSession).not.toHaveClass(/open/)
+    await closedCodexSession.locator('.product-session-main').click()
+    await expect(page.locator('.ai-conversation-tab[data-codex-conversation-id="e2e-codex-closed"]')).toBeVisible()
+  } finally {
+    await app.close().catch(() => undefined)
     await voiceServer.close()
     await aiChatServer.close()
+    await rm(userDataDir, { recursive: true, force: true })
     await rm(filesFixtureDir, { recursive: true, force: true })
     await rm(fakeKubectl.dir, { recursive: true, force: true })
     await rm(extensionStore.dir, { recursive: true, force: true })

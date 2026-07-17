@@ -26,11 +26,13 @@ import {
   deleteDatabaseGroup,
   diagnoseDatabaseSqlError,
   disconnectDatabaseConnection,
+  explainDatabaseTable,
   generateDatabaseAiDrawerResponse,
   generateDatabaseAiPaneResponse,
   executeDatabaseSql,
   getDatabaseAiPaneState,
   getDatabaseTableDdl,
+  inspectDatabaseTableIndexes,
   listDatabaseCatalog,
   moveDatabaseConnection,
   moveDatabaseGroup,
@@ -49,6 +51,31 @@ import {
 } from '@shared/database'
 
 const fieldsForRows = (rows: Array<Record<string, unknown>>) => Object.keys(rows[0] ?? {}).map((name) => ({ name }))
+
+const deferred = <T>() => {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((settle) => {
+    resolve = settle
+  })
+  return { promise, resolve }
+}
+
+const databaseClineTestUserConfig = () => ({
+  modelName: 'ops-db',
+  modelProvider: 'openai-compatible',
+  modelSettings: {
+    addModelSwitch: true,
+    options: [{ name: 'ops-db', locked: false, checked: true, apiProvider: 'openai' }],
+    providers: {
+      openai: {
+        baseUrl: 'https://provider.example',
+        apiKey: 'sk-db',
+        modelId: 'ops-db',
+        apiFormat: 'chat-completions'
+      }
+    }
+  }
+}) as UserConfig
 
 const expectSqlExecutionRecord = (
   execution: unknown,
@@ -857,6 +884,11 @@ let exportDatabaseRowsBackend: (
 let configureDatabaseCommentsRuntimeBackend: (config?: { stateFilePath?: string; now?: () => number }) => void
 let getDatabasePageCommentBackend: (input: DatabasePageCommentKey) => Promise<DatabasePageCommentGetResult>
 let saveDatabasePageCommentBackend: (input: DatabasePageCommentSaveInput) => Promise<DatabasePageCommentSaveResult>
+let callBoundDatabaseAiMcpToolBackend: (
+  name: string,
+  args: Record<string, unknown>,
+  binding: { connectionId: string; databaseName?: string; schemaName?: string }
+) => Promise<any>
 const originalDbAiBackendDouble = process.env.AIOPSTERM_DB_AI_BACKEND_DOUBLE
 const originalDatabaseSeed = process.env.AIOPSTERM_DATABASE_ENABLE_SEED
 
@@ -878,6 +910,8 @@ beforeAll(async () => {
   configureDatabaseCommentsRuntimeBackend = commentsBackend.configureDatabaseCommentsRuntime
   getDatabasePageCommentBackend = commentsBackend.getDatabasePageComment
   saveDatabasePageCommentBackend = commentsBackend.saveDatabasePageComment
+  const databaseMcpModulePath = '../src/main/backend/database/databaseMcp'
+  callBoundDatabaseAiMcpToolBackend = (await import(databaseMcpModulePath)).callBoundDatabaseAiMcpTool
 })
 
 describe('database backend boundary', () => {
@@ -1798,6 +1832,7 @@ describe('database backend boundary', () => {
         severity TEXT NOT NULL,
         created_at TEXT NOT NULL
       );
+      CREATE INDEX idx_cache_entries_value ON cache_entries(value);
       INSERT INTO cache_entries (key, value, ttl_seconds, updated_at) VALUES
         ('feature:checkout', 'enabled', 120, '2026-06-03 10:00:00'),
         ('feature:search', 'disabled', 60, '2026-06-03 10:05:00');
@@ -1894,6 +1929,51 @@ describe('database backend boundary', () => {
       total: 2,
       rows: [expect.objectContaining({ key: 'feature:search', value: 'disabled' })]
     })
+
+    const indexes = await inspectDatabaseTableIndexes({
+      connectionId: 'conn-real-sqlite',
+      dbType: 'sqlite',
+      databaseName: 'main',
+      tableName: 'cache_entries'
+    })
+    expect(indexes).toMatchObject({
+      ok: true,
+      data: {
+        indexes: expect.arrayContaining([
+          expect.objectContaining({ columns: ['key'], unique: true, primary: true }),
+          expect.objectContaining({ name: 'idx_cache_entries_value', columns: ['value'], primary: false })
+        ])
+      }
+    })
+
+    const explained = await explainDatabaseTable({
+      connectionId: 'conn-real-sqlite',
+      dbType: 'sqlite',
+      databaseName: 'main',
+      tableName: 'cache_entries',
+      columns: ['key', 'value'],
+      filters: [{ column: 'value', operator: 'eq', value: 'enabled' }],
+      sort: { column: 'key', direction: 'asc' }
+    })
+    expect(explained).toMatchObject({ ok: true, data: { format: 'text', plan: expect.stringContaining('idx_cache_entries_value') } })
+
+    await expect(callBoundDatabaseAiMcpToolBackend(
+      'inspect_indexes',
+      { tableName: 'cache_entries' },
+      { connectionId: 'conn-real-sqlite', databaseName: 'main' }
+    )).resolves.toMatchObject({ ok: true, data: { count: 2 } })
+    const mcpExplained = await callBoundDatabaseAiMcpToolBackend(
+      'explain_plan',
+      {
+        tableName: 'cache_entries',
+        columns: ['ttl_seconds'],
+        filters: [],
+        sort: { column: 'ttl_seconds', direction: 'asc' }
+      },
+      { connectionId: 'conn-real-sqlite', databaseName: 'main' }
+    )
+    expect(mcpExplained.ok, JSON.stringify(mcpExplained)).toBe(true)
+    expect(mcpExplained).toMatchObject({ ok: true, data: { format: 'text', plan: expect.any(String) } })
   })
 
   it('applies real SQLite table mutations in a backend transaction', async () => {
@@ -2200,7 +2280,8 @@ describe('database backend boundary', () => {
           dbType: ''
         },
         draft: '',
-        messages: []
+        messages: [],
+        archivedSessions: []
       }
     })
 
@@ -2532,7 +2613,9 @@ describe('database backend boundary', () => {
           }
         }) as UserConfig
     })
+    const conversationId = 'dbai-pane-session-context-test'
     const created = await createDatabaseAiPaneRequest({
+      conversationId,
       prompt: 'Explain the active query',
       action: 'explain',
       context: {
@@ -2546,6 +2629,7 @@ describe('database backend boundary', () => {
     })
 
     const result = await generateDatabaseAiPaneResponse({
+      conversationId,
       requestId: created.data!.requestId,
       assistantMessageId: created.data!.assistantMessage.id,
       prompt: 'Explain the active query',
@@ -2569,7 +2653,7 @@ describe('database backend boundary', () => {
     const clineInput = runClineAgentTurn.mock.calls[0][0]
     expect(clineInput).toMatchObject({
       profile: 'database',
-      conversationKey: 'legacy-pane\u0000en-US\u0000conn-prod-pg\u0000orders\u0000public',
+      conversationKey: conversationId,
       provider: { providerId: 'openai-compatible', modelId: 'ops-db' },
       database: { connectionId: 'conn-prod-pg', databaseName: 'orders', schemaName: 'public' },
       maxIterations: 8
@@ -2588,6 +2672,179 @@ describe('database backend boundary', () => {
     const providerMessageContent = [clineInput.systemPrompt, clineInput.prompt].join('\n')
     expect(providerMessageContent).not.toContain('conn-prod-pg')
     expect(providerMessageContent).not.toContain('auto-db-127.0.0.1:5432')
+  })
+
+  it('routes mirrored drawer actions through their explicit DB AI Product Session and isolates standalone actions', async () => {
+    const runClineAgentTurn = vi.fn(async (input: any) => ({
+      status: 'done',
+      result: {
+        sessionId: `db-session-${input.conversationKey}`,
+        taskId: input.taskId,
+        turnId: input.turnId,
+        text: 'Reasoning\n- Generated a read-only candidate.\n\n```sql\nSELECT id FROM public.orders;\n```',
+        finishReason: 'stop',
+        iterations: 1
+      }
+    }))
+    configureDatabaseBackendRuntime({
+      now: () => 35_250,
+      runClineAgentTurn,
+      getConfig: databaseClineTestUserConfig
+    })
+    const conversationId = 'dbai-pane-mirrored-actions'
+    const context = {
+      connectionId: 'conn-prod-pg',
+      dbType: 'postgresql' as const,
+      databaseName: 'orders',
+      schemaName: 'public'
+    }
+    const created = await createDatabaseAiDrawerRequest({
+      conversationId,
+      action: 'optimize',
+      sourceSql: 'select id from public.orders',
+      targetDialect: 'postgresql',
+      context
+    })
+
+    expect(created.data?.conversationId).toBe(conversationId)
+    await generateDatabaseAiDrawerResponse({
+      requestId: created.data!.id,
+      action: created.data!.action,
+      sourceSql: created.data!.sourceSql,
+      targetDialect: created.data!.targetDialect,
+      context: created.data!.backendContext
+    })
+    await generateDatabaseAiDrawerResponse({
+      requestId: 'dbai-standalone-drawer-action',
+      action: 'optimize',
+      sourceSql: 'select id from public.orders',
+      targetDialect: 'postgresql',
+      context
+    })
+
+    expect(runClineAgentTurn).toHaveBeenCalledTimes(2)
+    expect(runClineAgentTurn.mock.calls[0][0]).toMatchObject({
+      profile: 'database',
+      conversationKey: conversationId,
+      database: { connectionId: 'conn-prod-pg', databaseName: 'orders', schemaName: 'public' }
+    })
+    expect(runClineAgentTurn.mock.calls[1][0].conversationKey).toBe('drawer:dbai-standalone-drawer-action')
+  })
+
+  it('keeps a DB AI pane response streaming until both tool calls in one Cline turn complete', async () => {
+    const searchToolResult = deferred<{ objects: string[] }>()
+    const describeToolResult = deferred<{ columns: string[] }>()
+    const completedToolCalls: string[] = []
+    const runClineAgentTurn = vi.fn(async (input: any) => {
+      const searchResult = await searchToolResult.promise
+      completedToolCalls.push('search_database_objects')
+      const describeResult = await describeToolResult.promise
+      completedToolCalls.push('describe_database_table')
+      return {
+        status: 'done',
+        result: {
+          sessionId: 'db-multi-tool-session',
+          taskId: input.taskId,
+          turnId: input.turnId,
+          text: `Found ${searchResult.objects[0]} with columns ${describeResult.columns.join(', ')}.`,
+          finishReason: 'stop',
+          iterations: 3
+        }
+      }
+    })
+    configureDatabaseBackendRuntime({
+      now: () => 35_500,
+      runClineAgentTurn,
+      getConfig: databaseClineTestUserConfig
+    })
+    const context = {
+      connectionId: 'conn-prod-pg',
+      dbType: 'postgresql' as const,
+      databaseName: 'orders',
+      schemaName: 'public'
+    }
+    const created = await createDatabaseAiPaneRequest({
+      conversationId: 'dbai-pane-multi-tool-session',
+      prompt: 'Inspect the orders table',
+      context
+    })
+    const requestId = created.data!.requestId
+    const assistantMessageId = created.data!.assistantMessage.id
+    expect(startDatabaseAiPaneResponse({ requestId, assistantMessageId }).data?.assistantMessage.status).toBe('streaming')
+
+    const responsePromise = generateDatabaseAiPaneResponse({
+      conversationId: 'dbai-pane-multi-tool-session',
+      requestId,
+      assistantMessageId,
+      prompt: 'Inspect the orders table',
+      context
+    })
+    await vi.waitFor(() => expect(runClineAgentTurn).toHaveBeenCalledTimes(1))
+
+    searchToolResult.resolve({ objects: ['public.orders'] })
+    await vi.waitFor(() => expect(completedToolCalls).toEqual(['search_database_objects']))
+    expect(getDatabaseAiPaneState().data?.messages.find((message) => message.id === assistantMessageId)?.status).toBe('streaming')
+
+    describeToolResult.resolve({ columns: ['id', 'status'] })
+    const response = await responsePromise
+
+    expect(completedToolCalls).toEqual(['search_database_objects', 'describe_database_table'])
+    expect(response).toMatchObject({
+      ok: true,
+      data: {
+        assistantMessage: {
+          id: assistantMessageId,
+          status: 'done',
+          content: 'Found public.orders with columns id, status.'
+        }
+      }
+    })
+    expect(getDatabaseAiPaneState().data?.messages.find((message) => message.id === assistantMessageId)?.status).toBe('done')
+    expect(runClineAgentTurn.mock.calls[0][0].tools.map((tool: { name: string }) => tool.name)).toEqual(expect.arrayContaining([
+      'search_database_objects',
+      'describe_database_table'
+    ]))
+  })
+
+  it('moves a DB AI pane response to error when its Cline turn is interrupted', async () => {
+    const runClineAgentTurn = vi.fn(async () => {
+      throw new Error('Cline runtime interrupted after describe_database_table')
+    })
+    configureDatabaseBackendRuntime({
+      now: () => 35_750,
+      runClineAgentTurn,
+      getConfig: databaseClineTestUserConfig
+    })
+    const context = {
+      connectionId: 'conn-prod-pg',
+      dbType: 'postgresql' as const,
+      databaseName: 'orders',
+      schemaName: 'public'
+    }
+    const created = await createDatabaseAiPaneRequest({ prompt: 'Inspect the orders table', context })
+    const requestId = created.data!.requestId
+    const assistantMessageId = created.data!.assistantMessage.id
+    expect(startDatabaseAiPaneResponse({ requestId, assistantMessageId }).data?.assistantMessage.status).toBe('streaming')
+
+    const response = await generateDatabaseAiPaneResponse({
+      requestId,
+      assistantMessageId,
+      prompt: 'Inspect the orders table',
+      context
+    })
+
+    expect(response).toMatchObject({
+      ok: false,
+      errorCode: 'DB_AI_PROVIDER_REQUEST_FAILED',
+      data: {
+        assistantMessage: {
+          id: assistantMessageId,
+          status: 'error',
+          content: 'Cline runtime interrupted after describe_database_table'
+        }
+      }
+    })
+    expect(getDatabaseAiPaneState().data?.messages.find((message) => message.id === assistantMessageId)?.status).toBe('error')
   })
 
   it('aborts active Cline turns when DB AI pane or drawer generation is cancelled', async () => {

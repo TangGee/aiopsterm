@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
+import { isProxy, reactive } from 'vue'
 import {
   aiPanelChatExportMessage,
   aiPanelMessagePlainText,
   applyCommandTextToMessage,
+  canEditCommandMessage,
   commandHostForMessage,
   commandHostTooltipForMessage,
   commandLineCountForMessage,
@@ -81,6 +83,34 @@ describe('aiPanelMessageRuntime', () => {
     expect(chipMessage.commandExecutionMessage).toBe('sending')
   })
 
+  it('disables and locks commands whose Cline approval was stale on restore', () => {
+    const restored = {
+      id: 'restored-cline-command',
+      role: 'assistant',
+      text: 'systemctl restart api',
+      state: 'done',
+      ask: 'command',
+      commandExecutionStatus: 'failed',
+      commandExecutionMessage: '原 Cline Agent 任务已结束，无法恢复旧确认，请重新发起请求。',
+      commandExecution: {
+        ip: 'current terminal',
+        command: 'systemctl restart api',
+        requiresApproval: true,
+        interactive: false
+      },
+      agentTask: {
+        taskId: 'task-restored',
+        turnId: 'turn-restored',
+        toolCallId: 'tool-restored',
+        status: 'cancelled' as const,
+        restored: true
+      }
+    } satisfies AiChatHistoryMessage
+
+    expect(isCommandTerminalActionDisabled(restored)).toBe(true)
+    expect(canEditCommandMessage(restored)).toBe(false)
+  })
+
   it('projects read-only command host metadata and export messages', () => {
     const message = {
       id: 'm2',
@@ -107,6 +137,49 @@ describe('aiPanelMessageRuntime', () => {
     expect(commandHostForMessage(message)).toBe('Host 10.0.0.8')
     expect(commandHostTooltipForMessage(message)).toBe('目标主机：10.0.0.8')
     expect(aiPanelChatExportMessage(message).hosts).toEqual([{ id: 'host-1', kind: 'hosts', label: 'prod', detail: '10.0.0.8' }])
+  })
+
+  it('creates an IPC-cloneable export snapshot from reactive message metadata', () => {
+    const message = reactive({
+      id: 'm-reactive-export',
+      role: 'assistant' as const,
+      text: 'inspect service',
+      contentParts: [{ type: 'chip' as const, chipType: 'command' as const, ref: { command: 'uptime' } }],
+      hosts: [{ id: 'host-reactive', kind: 'hosts', label: 'prod', detail: '10.0.0.8' }],
+      commandExecution: {
+        ip: '10.0.0.8',
+        command: 'uptime',
+        requiresApproval: false,
+        interactive: false
+      },
+      agentTask: {
+        taskId: 'task-reactive',
+        turnId: 'turn-reactive',
+        status: 'done' as const
+      },
+      mcpToolCall: {
+        serverName: 'ops',
+        toolName: 'inspect',
+        arguments: { filters: { service: 'api' } }
+      },
+      mcpResourceAccess: {
+        serverName: 'filesystem',
+        uri: 'file:///tmp/runbook.md'
+      }
+    })
+
+    expect(isProxy(message.contentParts)).toBe(true)
+    expect(isProxy(message.mcpToolCall.arguments)).toBe(true)
+
+    const exported = aiPanelChatExportMessage(message)
+
+    expect(isProxy(exported.contentParts)).toBe(false)
+    expect(isProxy(exported.commandExecution)).toBe(false)
+    expect(isProxy(exported.agentTask)).toBe(false)
+    expect(isProxy(exported.mcpToolCall)).toBe(false)
+    expect(isProxy(exported.mcpToolCall?.arguments)).toBe(false)
+    expect(isProxy(exported.mcpResourceAccess)).toBe(false)
+    expect(() => structuredClone(exported)).not.toThrow()
   })
 
   it('builds display text from structured user content parts', () => {

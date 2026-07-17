@@ -18,7 +18,6 @@ export type AiPanelActionOrchestrationMessage = AiPanelMessageActionMessage & Ai
 
 export type AiPanelActionOrchestrationRuntimeOptions<TMessage extends AiPanelActionOrchestrationMessage> = {
   messages: () => TMessage[]
-  activePanel: () => AiPanelCommandActionTerminalPanel | null | undefined
   panels: () => AiPanelCommandActionTerminalPanel[]
   chatMode: () => string
   copyText: (text: string) => Promise<boolean>
@@ -32,7 +31,7 @@ export type AiPanelActionOrchestrationRuntimeOptions<TMessage extends AiPanelAct
   retryAssistantMessage: (id: string) => boolean
   summarizeMessageToKnowledge: (id: string) => Promise<{ relPath: string } | null>
   summarizeMessageToSkill: (id: string) => Promise<{ name: string } | null>
-  runActiveTerminalCommand: (command: string, source: TerminalCommandSource) => Promise<TerminalSecurityDecision | null>
+  runTerminalCommand?: (panelId: string, command: string, source: TerminalCommandSource) => Promise<TerminalSecurityDecision | null>
   continueAgentCommandLoop: (input: AiPanelCommandActionLoopInput) => Promise<AiPanelCommandActionLoopResult>
   enableAgentReadOnlyAutoRunForCurrentConversation: () => boolean
   syncCurrentConversationSnapshot: (options: { notifyFailure?: boolean; notifyUnavailable?: boolean }) => void | Promise<unknown>
@@ -60,18 +59,19 @@ export const createAiPanelActionOrchestrationRuntime = <TMessage extends AiPanel
     setMessageFeedback: options.setMessageFeedback,
     retryAssistantMessage: options.retryAssistantMessage,
     summarizeMessageToKnowledge: options.summarizeMessageToKnowledge,
-    summarizeMessageToSkill: options.summarizeMessageToSkill
+    summarizeMessageToSkill: options.summarizeMessageToSkill,
+    respondClineAgentApproval: options.respondClineAgentApproval,
+    syncCurrentConversationSnapshot: options.syncCurrentConversationSnapshot
   })
 
   const aiPanelCommandActionRuntime = createAiPanelCommandActionRuntime({
     state: commandActionRuntimeState,
     messages: options.messages,
-    activePanel: options.activePanel,
     panels: options.panels,
     chatMode: options.chatMode,
     copyText: options.copyText,
     notify: options.notify,
-    runActiveTerminalCommand: options.runActiveTerminalCommand,
+    runTerminalCommand: options.runTerminalCommand,
     continueAgentCommandLoop: options.continueAgentCommandLoop,
     enableAgentReadOnlyAutoRunForCurrentConversation: options.enableAgentReadOnlyAutoRunForCurrentConversation,
     syncCurrentConversationSnapshot: options.syncCurrentConversationSnapshot,

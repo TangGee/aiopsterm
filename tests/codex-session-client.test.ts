@@ -5,6 +5,7 @@ import type {
   CodexSessionExitEvent,
   CodexSessionInfo,
   CodexSessionLifecycleEvent,
+  CodexSessionThreadEvent,
   CodexSessionTargetContext
 } from '@shared/contracts/codexSessions'
 
@@ -43,9 +44,11 @@ describe('codexSessionClient', () => {
     const offData = vi.fn()
     const offLifecycle = vi.fn()
     const offExit = vi.fn()
+    const offThread = vi.fn()
     const dataListener = vi.fn<(event: CodexSessionDataEvent) => void>()
     const lifecycleListener = vi.fn<(event: CodexSessionLifecycleEvent) => void>()
     const exitListener = vi.fn<(event: CodexSessionExitEvent) => void>()
+    const threadListener = vi.fn<(event: CodexSessionThreadEvent) => void>()
 
     window.aiops = {
       ...originalAiops,
@@ -63,11 +66,12 @@ describe('codexSessionClient', () => {
       killCodexSession: vi.fn(async (id: string) => ({ ok: true, data: { id } })),
       onCodexSessionData: vi.fn(() => offData),
       onCodexSessionLifecycle: vi.fn(() => offLifecycle),
-      onCodexSessionExit: vi.fn(() => offExit)
+      onCodexSessionExit: vi.fn(() => offExit),
+      onCodexSessionThread: vi.fn(() => offThread)
     }
 
     await expect(codexSessionClient.createCodexSession()?.({ cols: 120, rows: 32, target })).resolves.toEqual(session)
-    await expect(codexSessionClient.setCodexSessionTarget()?.(target)).resolves.toEqual({ ok: true, data: { sessionId: target.sessionId, target, registered: true } })
+    await expect(codexSessionClient.setCodexSessionTarget()?.(session.id, target)).resolves.toEqual({ ok: true, data: { sessionId: target.sessionId, target, registered: true } })
     await expect(codexSessionClient.setCodexSessionPendingContext()?.(session.id, 'target context')).resolves.toEqual({
       ok: true,
       data: { id: session.id, bytes: 14, cleared: false }
@@ -78,9 +82,10 @@ describe('codexSessionClient', () => {
     expect(codexSessionClient.onCodexSessionData()?.(dataListener)).toBe(offData)
     expect(codexSessionClient.onCodexSessionLifecycle()?.(lifecycleListener)).toBe(offLifecycle)
     expect(codexSessionClient.onCodexSessionExit()?.(exitListener)).toBe(offExit)
+    expect(codexSessionClient.onCodexSessionThread()?.(threadListener)).toBe(offThread)
 
     expect(window.aiops.createCodexSession).toHaveBeenCalledWith({ cols: 120, rows: 32, target })
-    expect(window.aiops.setCodexSessionTarget).toHaveBeenCalledWith(target)
+    expect(window.aiops.setCodexSessionTarget).toHaveBeenCalledWith(session.id, target)
     expect(window.aiops.setCodexSessionPendingContext).toHaveBeenCalledWith(session.id, 'target context')
     expect(window.aiops.writeCodexSession).toHaveBeenCalledWith(session.id, 'status\n')
     expect(window.aiops.resizeCodexSession).toHaveBeenCalledWith(session.id, 100, 24)
@@ -88,6 +93,7 @@ describe('codexSessionClient', () => {
     expect(window.aiops.onCodexSessionData).toHaveBeenCalledWith(dataListener)
     expect(window.aiops.onCodexSessionLifecycle).toHaveBeenCalledWith(lifecycleListener)
     expect(window.aiops.onCodexSessionExit).toHaveBeenCalledWith(exitListener)
+    expect(window.aiops.onCodexSessionThread).toHaveBeenCalledWith(threadListener)
 
     window.aiops = {
       ...originalAiops,
@@ -99,7 +105,8 @@ describe('codexSessionClient', () => {
       killCodexSession: undefined as any,
       onCodexSessionData: undefined as any,
       onCodexSessionLifecycle: undefined as any,
-      onCodexSessionExit: undefined as any
+      onCodexSessionExit: undefined as any,
+      onCodexSessionThread: undefined as any
     }
     expect(codexSessionClient.createCodexSession()).toBeUndefined()
     expect(codexSessionClient.setCodexSessionTarget()).toBeUndefined()
@@ -110,5 +117,6 @@ describe('codexSessionClient', () => {
     expect(codexSessionClient.onCodexSessionData()).toBeUndefined()
     expect(codexSessionClient.onCodexSessionLifecycle()).toBeUndefined()
     expect(codexSessionClient.onCodexSessionExit()).toBeUndefined()
+    expect(codexSessionClient.onCodexSessionThread()).toBeUndefined()
   })
 })

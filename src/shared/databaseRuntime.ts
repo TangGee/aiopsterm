@@ -3,6 +3,10 @@ import type {
   DatabaseSqlExecuteResult,
   DatabaseTableDdlInput,
   DatabaseTableDdlResult,
+  DatabaseTableExplainPlanInput,
+  DatabaseTableExplainPlanResult,
+  DatabaseTableIndexInspectionInput,
+  DatabaseTableIndexInspectionResult,
   DatabaseTableMutationInput,
   DatabaseTableMutationPlanInput,
   DatabaseTableMutationPlanResult,
@@ -60,7 +64,9 @@ import {
 } from './databaseSeedTableRuntime'
 import {
   isRealSqliteConnection,
+  sqliteExplainTable,
   sqliteExecute,
+  sqliteInspectTableIndexes,
   sqliteMutationPlan,
   sqliteMutateTable,
   sqliteQueryTable,
@@ -92,6 +98,10 @@ export {
 export type {
   DatabaseRuntimeConfig
 } from './databaseCatalogBackendRuntime'
+
+export type DatabaseReadOptions = {
+  signal?: AbortSignal
+}
 
 export async function executeDatabaseSql(input: DatabaseSqlExecuteInput): Promise<DatabaseSqlExecuteResult> {
   databaseCatalogBackendRuntimeContext.ensureStateLoaded()
@@ -152,7 +162,10 @@ export async function executeDatabaseSql(input: DatabaseSqlExecuteInput): Promis
   )
 }
 
-export async function getDatabaseTableDdl(input: DatabaseTableDdlInput): Promise<DatabaseTableDdlResult> {
+export async function getDatabaseTableDdl(
+  input: DatabaseTableDdlInput,
+  options: DatabaseReadOptions = {}
+): Promise<DatabaseTableDdlResult> {
   databaseCatalogBackendRuntimeContext.ensureStateLoaded()
   if (!trim(input.connectionId)) {
     return { ok: false, errorCode: 'DB_CONNECTION_REQUIRED', errorMessage: 'Database connection is required.' }
@@ -166,7 +179,7 @@ export async function getDatabaseTableDdl(input: DatabaseTableDdlInput): Promise
 
   const connection = databaseCatalogBackendRuntimeContext.findConnection(input.connectionId)
   if (connection?.dbType === 'sqlite' && isRealSqliteConnection(connection)) {
-    return await sqliteTableDdl(connection, input)
+    return await sqliteTableDdl(connection, input, options)
   }
   if (!connection) {
     return { ok: false, errorCode: 'DB_CONNECTION_NOT_FOUND', errorMessage: 'Database connection was not found.' }
@@ -181,7 +194,10 @@ export async function getDatabaseTableDdl(input: DatabaseTableDdlInput): Promise
   return getDatabaseSeedTableDdl(input)
 }
 
-export async function queryDatabaseTable(input: DatabaseTableQueryInput): Promise<DatabaseTableQueryResult> {
+export async function queryDatabaseTable(
+  input: DatabaseTableQueryInput,
+  options: DatabaseReadOptions = {}
+): Promise<DatabaseTableQueryResult> {
   databaseCatalogBackendRuntimeContext.ensureStateLoaded()
   const startedAt = Date.now()
   if (!trim(input.connectionId)) {
@@ -196,7 +212,7 @@ export async function queryDatabaseTable(input: DatabaseTableQueryInput): Promis
 
   const connection = databaseCatalogBackendRuntimeContext.findConnection(input.connectionId)
   if (connection?.dbType === 'sqlite' && isRealSqliteConnection(connection)) {
-    return await sqliteQueryTable(connection, input, startedAt)
+    return await sqliteQueryTable(connection, input, startedAt, options)
   }
   if (!connection) {
     return { ok: false, errorCode: 'DB_CONNECTION_NOT_FOUND', errorMessage: 'Database connection was not found.' }
@@ -209,6 +225,46 @@ export async function queryDatabaseTable(input: DatabaseTableQueryInput): Promis
   }
 
   return queryDatabaseSeedTable(input, startedAt)
+}
+
+export async function inspectDatabaseTableIndexes(
+  input: DatabaseTableIndexInspectionInput,
+  options: DatabaseReadOptions = {}
+): Promise<DatabaseTableIndexInspectionResult> {
+  databaseCatalogBackendRuntimeContext.ensureStateLoaded()
+  if (!trim(input.connectionId)) return { ok: false, errorCode: 'DB_CONNECTION_REQUIRED', errorMessage: 'Database connection is required.' }
+  if (!trim(input.databaseName)) return { ok: false, errorCode: 'DB_DATABASE_REQUIRED', errorMessage: 'Database name is required.' }
+  if (!trim(input.tableName)) return { ok: false, errorCode: 'DB_TABLE_REQUIRED', errorMessage: 'Table name is required.' }
+  const connection = databaseCatalogBackendRuntimeContext.findConnection(input.connectionId)
+  if (!connection) return { ok: false, errorCode: 'DB_CONNECTION_NOT_FOUND', errorMessage: 'Database connection was not found.' }
+  if (connection.dbType === 'sqlite' && isRealSqliteConnection(connection)) {
+    return sqliteInspectTableIndexes(connection, input, options)
+  }
+  return {
+    ok: false,
+    errorCode: 'DB_INDEX_INSPECTION_UNSUPPORTED',
+    errorMessage: 'This database engine does not provide a safe structured index inspection adapter.'
+  }
+}
+
+export async function explainDatabaseTable(
+  input: DatabaseTableExplainPlanInput,
+  options: DatabaseReadOptions = {}
+): Promise<DatabaseTableExplainPlanResult> {
+  databaseCatalogBackendRuntimeContext.ensureStateLoaded()
+  if (!trim(input.connectionId)) return { ok: false, errorCode: 'DB_CONNECTION_REQUIRED', errorMessage: 'Database connection is required.' }
+  if (!trim(input.databaseName)) return { ok: false, errorCode: 'DB_DATABASE_REQUIRED', errorMessage: 'Database name is required.' }
+  if (!trim(input.tableName)) return { ok: false, errorCode: 'DB_TABLE_REQUIRED', errorMessage: 'Table name is required.' }
+  const connection = databaseCatalogBackendRuntimeContext.findConnection(input.connectionId)
+  if (!connection) return { ok: false, errorCode: 'DB_CONNECTION_NOT_FOUND', errorMessage: 'Database connection was not found.' }
+  if (connection.dbType === 'sqlite' && isRealSqliteConnection(connection)) {
+    return sqliteExplainTable(connection, input, options)
+  }
+  return {
+    ok: false,
+    errorCode: 'DB_EXPLAIN_UNSUPPORTED',
+    errorMessage: 'This database engine does not provide a safe structured explain adapter.'
+  }
 }
 
 export async function planDatabaseTableMutation(input: DatabaseTableMutationPlanInput): Promise<DatabaseTableMutationPlanResult> {

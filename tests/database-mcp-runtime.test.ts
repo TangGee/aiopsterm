@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
 import type {
   DatabaseCatalogResult,
+  DatabaseTableExplainPlanInput,
   DatabaseTableDdlInput,
+  DatabaseTableIndexInspectionInput,
   DatabaseTableQueryInput,
   DatabaseWorkspaceCatalog
 } from '../src/shared/contracts/database'
@@ -9,7 +11,8 @@ import {
   createDatabaseMcpToolRuntime,
   DATABASE_MCP_TOOL_NAMES,
   sanitizeDatabaseMcpDdl,
-  sanitizeDatabaseMcpSensitiveText
+  sanitizeDatabaseMcpSensitiveText,
+  type DatabaseMcpDependencyReadOptions
 } from '../src/shared/databaseMcpRuntime'
 
 const catalog: DatabaseWorkspaceCatalog = {
@@ -109,8 +112,10 @@ const catalog: DatabaseWorkspaceCatalog = {
 
 const createRuntime = (overrides: {
   listCatalog?: () => Promise<DatabaseCatalogResult>
-  getTableDdl?: (input: DatabaseTableDdlInput) => Promise<any>
-  queryTable?: (input: DatabaseTableQueryInput) => Promise<any>
+  getTableDdl?: (input: DatabaseTableDdlInput, options?: DatabaseMcpDependencyReadOptions) => Promise<any>
+  queryTable?: (input: DatabaseTableQueryInput, options?: DatabaseMcpDependencyReadOptions) => Promise<any>
+  inspectTableIndexes?: (input: DatabaseTableIndexInspectionInput, options?: DatabaseMcpDependencyReadOptions) => Promise<any>
+  explainTable?: (input: DatabaseTableExplainPlanInput, options?: DatabaseMcpDependencyReadOptions) => Promise<any>
 } = {}) => {
   const getTableDdl = vi.fn(
     overrides.getTableDdl ??
@@ -136,7 +141,9 @@ const createRuntime = (overrides: {
   const runtime = createDatabaseMcpToolRuntime({
     listCatalog: overrides.listCatalog ?? (async () => ({ ok: true, data: catalog })),
     getTableDdl,
-    queryTable
+    queryTable,
+    ...(overrides.inspectTableIndexes ? { inspectTableIndexes: overrides.inspectTableIndexes } : {}),
+    ...(overrides.explainTable ? { explainTable: overrides.explainTable } : {})
   })
   return { runtime, getTableDdl, queryTable }
 }
@@ -232,6 +239,279 @@ describe('database MCP runtime', () => {
     })
   })
 
+  it('lists bounded databases, schemas, and tables from one exact connection scope', async () => {
+    const { runtime } = createRuntime()
+    const connectionId = await listedConnectionHandle(runtime)
+
+    await expect(runtime.callTool('list_databases', { connectionId, databaseName: 'ORDERS' })).resolves.toMatchObject({
+      ok: true,
+      data: {
+        databases: [{ name: 'orders', schemaCount: 2, tableCount: 2, viewCount: 1 }],
+        count: 1
+      }
+    })
+    await expect(runtime.callTool('list_schemas', { connectionId, databaseName: 'orders', query: 'pub' })).resolves.toMatchObject({
+      ok: true,
+      data: { databaseName: 'orders', schemas: [{ name: 'public', tableCount: 1, viewCount: 1 }], count: 1 }
+    })
+    await expect(runtime.callTool('list_tables', {
+      connectionId,
+      databaseName: 'orders',
+      schemaName: 'public',
+      kinds: ['table']
+    })).resolves.toMatchObject({
+      ok: true,
+      data: { tables: [{ path: 'orders.public.orders', kind: 'table', primaryKey: ['id'] }], count: 1 }
+    })
+    await expect(runtime.callTool('list_schemas', { connectionId, databaseName: 'outside' })).resolves.toMatchObject({
+      ok: false,
+      errorCode: 'DB_MCP_DATABASE_NOT_FOUND'
+    })
+  })
+
+  it('samples at most 20 rows and counts through the structured withTotal table boundary', async () => {
+    const queryTable = vi.fn(async (input: DatabaseTableQueryInput) => ({
+      ok: true as const,
+      data: {
+        columns: input.columns || [],
+        rows: [{ id: 1, status: 'open' }],
+        rowCount: 1,
+        durationMs: 3,
+        total: input.withTotal ? 42 : null,
+        knownColumns: ['id', 'status', 'note']
+      }
+    }))
+    const { runtime } = createRuntime({ queryTable })
+    const selector = {
+      connectionId: await listedConnectionHandle(runtime),
+      databaseName: 'orders',
+      schemaName: 'public',
+      tableName: 'orders'
+    }
+
+    await expect(runtime.callTool('sample_rows', { ...selector, limit: 999 })).resolves.toMatchObject({
+      ok: true,
+      data: { rows: [{ id: 1, status: 'open' }], limit: 20 }
+    })
+    expect(queryTable).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      page: 1,
+      pageSize: 20,
+      withTotal: false,
+      requireStableBaseTable: true,
+      whereRaw: null,
+      orderByRaw: null
+    }), expect.objectContaining({ signal: expect.any(AbortSignal) }))
+
+    await expect(runtime.callTool('count_rows', {
+      ...selector,
+      filters: [{ column: 'status', operator: 'eq', value: 'open' }]
+    })).resolves.toMatchObject({ ok: true, data: { count: 42 } })
+    expect(queryTable).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      page: 1,
+      pageSize: 1,
+      withTotal: true,
+      filters: [{ column: 'status', operator: 'eq', value: 'open' }],
+      requireStableBaseTable: true
+    }), expect.objectContaining({ signal: expect.any(AbortSignal) }))
+  })
+
+  it('fails index inspection and explain closed when no structured engine adapter exists', async () => {
+    const { runtime, queryTable } = createRuntime()
+    const selector = {
+      connectionId: await listedConnectionHandle(runtime),
+      databaseName: 'orders',
+      schemaName: 'public',
+      tableName: 'orders'
+    }
+
+    await expect(runtime.callTool('inspect_indexes', selector)).resolves.toMatchObject({
+      ok: false,
+      errorCode: 'DB_MCP_INDEX_INSPECTION_UNSUPPORTED'
+    })
+    await expect(runtime.callTool('explain_plan', { ...selector, sql: 'EXPLAIN DELETE FROM orders' })).resolves.toMatchObject({
+      ok: false,
+      errorCode: 'DB_MCP_EXPLAIN_UNSUPPORTED'
+    })
+    expect(queryTable).not.toHaveBeenCalled()
+    const explainDefinition = runtime.definitions.find((tool) => tool.name === 'explain_plan')
+    expect((explainDefinition?.inputSchema as any).properties).not.toHaveProperty('sql')
+  })
+
+  it('fails an exact count closed when the structured engine adapter returns no total', async () => {
+    const { runtime } = createRuntime()
+    await expect(runtime.callTool('count_rows', {
+      connectionId: await listedConnectionHandle(runtime),
+      databaseName: 'orders',
+      schemaName: 'public',
+      tableName: 'orders'
+    })).resolves.toMatchObject({ ok: false, errorCode: 'DB_MCP_COUNT_UNSUPPORTED' })
+  })
+
+  it('bounds and validates structured index and explain adapter output', async () => {
+    const inspectTableIndexes = vi.fn(async () => ({
+      ok: true as const,
+      data: {
+        indexes: [{ name: 'orders_pkey', columns: ['ID'], unique: true, primary: true, method: 'btree' }],
+        durationMs: 2
+      }
+    }))
+    const explainTable = vi.fn(async (_input: DatabaseTableExplainPlanInput) => ({
+      ok: true as const,
+      data: {
+        format: 'text' as const,
+        plan: 'Index Scan from 10.20.30.40 as private-user using orders_pkey',
+        durationMs: 4
+      }
+    }))
+    const { runtime } = createRuntime({ inspectTableIndexes, explainTable })
+    const selector = {
+      connectionId: await listedConnectionHandle(runtime),
+      databaseName: 'orders',
+      schemaName: 'public',
+      tableName: 'orders'
+    }
+
+    await expect(runtime.callTool('inspect_indexes', selector)).resolves.toMatchObject({
+      ok: true,
+      data: { indexes: [{ name: 'orders_pkey', columns: ['id'], unique: true, primary: true, method: 'btree' }] }
+    })
+    const explained = await runtime.callTool('explain_plan', {
+      ...selector,
+      columns: ['id'],
+      sql: 'EXPLAIN DELETE FROM orders'
+    })
+    expect(explained).toMatchObject({ ok: true, data: { format: 'text', redacted: true } })
+    expect(String(explained?.data?.plan)).not.toContain('10.20.30.40')
+    expect(String(explained?.data?.plan)).not.toContain('private-user')
+    expect(explainTable).toHaveBeenCalledWith(expect.objectContaining({
+      connectionId: 'db-prod',
+      databaseName: 'orders',
+      schemaName: 'public',
+      tableName: 'orders',
+      columns: ['id'],
+      filters: [],
+      sort: null
+    }), expect.objectContaining({ signal: expect.any(AbortSignal) }))
+    expect(explainTable.mock.calls[0]?.[0]).not.toHaveProperty('sql')
+  })
+
+  it('propagates cancellation to an active structured database read', async () => {
+    let dependencySignal: AbortSignal | undefined
+    const queryTable = vi.fn((_input: DatabaseTableQueryInput, options?: DatabaseMcpDependencyReadOptions) => {
+      dependencySignal = options?.signal
+      return new Promise<never>(() => {})
+    })
+    const { runtime } = createRuntime({ queryTable })
+    const controller = new AbortController()
+    const pending = runtime.callTool('sample_rows', {
+      connectionId: await listedConnectionHandle(runtime),
+      databaseName: 'orders',
+      schemaName: 'public',
+      tableName: 'orders'
+    }, { signal: controller.signal })
+    await vi.waitFor(() => expect(queryTable).toHaveBeenCalledTimes(1))
+    expect(dependencySignal?.aborted).toBe(false)
+    controller.abort('operator_cancelled')
+
+    await expect(pending).resolves.toMatchObject({ ok: false, errorCode: 'DB_MCP_REQUEST_CANCELLED' })
+    expect(dependencySignal?.aborted).toBe(true)
+    expect(dependencySignal?.reason).toBe('operator_cancelled')
+  })
+
+  it('releases timed-out leases even when the adapter remains pending', async () => {
+    vi.useFakeTimers()
+    try {
+      const queryTable = vi.fn(() => new Promise<never>(() => {}))
+      const { runtime } = createRuntime({ queryTable })
+      const selector = {
+        connectionId: await listedConnectionHandle(runtime),
+        databaseName: 'orders',
+        schemaName: 'public',
+        tableName: 'orders'
+      }
+      const timedOutReads = Array.from({ length: 4 }, () => runtime.callTool('sample_rows', selector))
+      await vi.advanceTimersByTimeAsync(0)
+      expect(queryTable).toHaveBeenCalledTimes(4)
+
+      await vi.advanceTimersByTimeAsync(30_000)
+      const results = await Promise.all(timedOutReads)
+      expect(results.every((result) => result?.errorCode === 'DB_MCP_READ_TIMEOUT')).toBe(true)
+
+      const controller = new AbortController()
+      const replacement = runtime.callTool('sample_rows', selector, { signal: controller.signal })
+      await vi.advanceTimersByTimeAsync(0)
+      expect(queryTable).toHaveBeenCalledTimes(5)
+      controller.abort()
+      await expect(replacement).resolves.toMatchObject({ ok: false, errorCode: 'DB_MCP_REQUEST_CANCELLED' })
+      expect(vi.getTimerCount()).toBe(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('releases cancelled leases while bounding adapters that ignore cancellation', async () => {
+    const settlePhysicalReads: Array<(result: unknown) => void> = []
+    const queryTable = vi.fn(() => new Promise((resolve) => settlePhysicalReads.push(resolve)))
+    const { runtime } = createRuntime({ queryTable })
+    const connectionId = await listedConnectionHandle(runtime)
+    const selector = {
+      connectionId,
+      databaseName: 'orders',
+      schemaName: 'public',
+      tableName: 'orders'
+    }
+    const controllers = Array.from({ length: 10 }, () => new AbortController())
+    const firstReads = controllers.slice(0, 4).map((controller) =>
+      runtime.callTool('sample_rows', selector, { signal: controller.signal })
+    )
+    await vi.waitFor(() => expect(queryTable).toHaveBeenCalledTimes(4))
+
+    controllers.slice(0, 4).forEach((controller) => controller.abort())
+    await expect(Promise.all(firstReads)).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ ok: false, errorCode: 'DB_MCP_REQUEST_CANCELLED' })
+      ])
+    )
+
+    const replacement = runtime.callTool('sample_rows', selector, { signal: controllers[4].signal })
+    await vi.waitFor(() => expect(queryTable).toHaveBeenCalledTimes(5))
+    controllers[4].abort()
+    await expect(replacement).resolves.toMatchObject({ ok: false, errorCode: 'DB_MCP_REQUEST_CANCELLED' })
+
+    const remainingPhysicalCapacity = controllers.slice(5, 8).map((controller) =>
+      runtime.callTool('sample_rows', selector, { signal: controller.signal })
+    )
+    await vi.waitFor(() => expect(queryTable).toHaveBeenCalledTimes(8))
+    controllers.slice(5, 8).forEach((controller) => controller.abort())
+    await expect(Promise.all(remainingPhysicalCapacity)).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ ok: false, errorCode: 'DB_MCP_REQUEST_CANCELLED' })
+      ])
+    )
+
+    await expect(runtime.callTool('sample_rows', selector, { signal: controllers[8].signal }))
+      .resolves.toMatchObject({ ok: false, errorCode: 'DB_MCP_READ_CHANNEL_ISOLATED' })
+    expect(queryTable).toHaveBeenCalledTimes(8)
+
+    settlePhysicalReads[0]({
+      ok: true,
+      data: {
+        columns: ['id', 'status'],
+        rows: [],
+        rowCount: 0,
+        durationMs: 1,
+        total: null,
+        knownColumns: ['id', 'status', 'note']
+      }
+    })
+    await Promise.resolve()
+    await Promise.resolve()
+    const recovered = runtime.callTool('sample_rows', selector, { signal: controllers[9].signal })
+    await vi.waitFor(() => expect(queryTable).toHaveBeenCalledTimes(9))
+    controllers[9].abort()
+    await expect(recovered).resolves.toMatchObject({ ok: false, errorCode: 'DB_MCP_REQUEST_CANCELLED' })
+  })
+
   it('requires a schema when a table name is ambiguous', async () => {
     const { runtime } = createRuntime()
     const connectionId = await listedConnectionHandle(runtime)
@@ -275,7 +555,7 @@ describe('database MCP runtime', () => {
       pageSize: 100,
       withTotal: false,
       requireStableBaseTable: true
-    })
+    }, expect.objectContaining({ signal: expect.any(AbortSignal) }))
     expect(result?.data).toMatchObject({
       columns: ['id', 'status'],
       omittedColumns: ['note'],
@@ -468,7 +748,7 @@ describe('database MCP runtime', () => {
       databaseName: 'orders',
       schemaName: 'public',
       tableName: 'orders'
-    })
+    }, expect.objectContaining({ signal: expect.any(AbortSignal) }))
   })
 
   it('redacts database-controlled DDL literals, comments, definers, function bodies, and endpoints', () => {
@@ -589,7 +869,10 @@ describe('database MCP runtime', () => {
       tableName: 'orders'
     })
 
-    expect(queryTable).toHaveBeenCalledWith(expect.objectContaining({ columns: ['id', 'status', 'bounded_number'] }))
+    expect(queryTable).toHaveBeenCalledWith(
+      expect.objectContaining({ columns: ['id', 'status', 'bounded_number'] }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    )
     expect(result?.data).toMatchObject({
       columns: ['id', 'status', 'bounded_number'],
       omittedColumns: ['note', 'flags', 'huge_number'],

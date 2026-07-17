@@ -91,8 +91,8 @@ describe('aiPanelConversationRuntime', () => {
     expect(pruneAiConversationTabIds(['conv-1', 'missing', 'conv-3'], conversations)).toEqual(['conv-1', 'conv-3'])
 
     expect(closeAiConversationTab(['conv-1'], [conversations[0]], 'conv-1', 'conv-1')).toEqual({
-      status: 'keep-one',
-      openIds: ['conv-1']
+      status: 'closed',
+      openIds: []
     })
     expect(closeAiConversationTab(['conv-1', 'conv-2'], [conversations[0], conversations[1]], 'conv-1', 'conv-2')).toEqual({
       status: 'closed-inactive',

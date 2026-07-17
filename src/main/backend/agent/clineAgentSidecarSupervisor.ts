@@ -3,6 +3,7 @@ import { existsSync } from 'fs'
 import { join } from 'path'
 import { spawn, type ChildProcessWithoutNullStreams } from 'child_process'
 import {
+  CLINE_AGENT_MAX_PROTOCOL_FRAME_BYTES,
   CLINE_AGENT_PROTOCOL_VERSION,
   CLINE_AGENT_SDK_VERSION,
   type ClineAgentSidecarCallback,
@@ -15,12 +16,10 @@ import {
   type ClineAgentSidecarResponse
 } from '@shared/contracts/clineAgent'
 
-const MAX_PROTOCOL_FRAME_BYTES = 4 * 1024 * 1024
 const MAX_PENDING_REQUESTS = 128
 const MAX_STDERR_TAIL_CHARS = 8 * 1024
 const START_TIMEOUT_MS = 20_000
 const DEFAULT_REQUEST_TIMEOUT_MS = 60_000
-const TURN_REQUEST_TIMEOUT_MS = 30 * 60_000
 const SHUTDOWN_TIMEOUT_MS = 5_000
 const TERMINATE_TIMEOUT_MS = 2_000
 
@@ -35,7 +34,7 @@ type SidecarLaunch = {
 type PendingRequest = {
   resolve: (value: unknown) => void
   reject: (error: Error) => void
-  timer: NodeJS.Timeout
+  timer?: NodeJS.Timeout
 }
 
 export type ClineAgentSidecarSupervisorOptions = {
@@ -112,7 +111,10 @@ const isCallback = (message: ClineAgentSidecarMessage): message is ClineAgentSid
 const errorMessage = (error: unknown) => (error instanceof Error ? error.message : String(error || 'Unknown Cline sidecar error'))
 
 const requestTimeoutFor = (method: ClineAgentSidecarRequestMethod) => {
-  if (method === 'session.send') return TURN_REQUEST_TIMEOUT_MS
+  // A turn may be paused for operator approval. Model, provider, and tool work
+  // have their own bounded deadlines, so a wall-clock request timer must not
+  // expire while the human-owned decision is still pending.
+  if (method === 'session.send') return null
   if (method === 'runtime.shutdown') return SHUTDOWN_TIMEOUT_MS
   return DEFAULT_REQUEST_TIMEOUT_MS
 }
@@ -122,8 +124,10 @@ export class ClineAgentSidecarSupervisor {
   private starting: Promise<ClineAgentSidecarReady> | null = null
   private ready: ClineAgentSidecarReady | null = null
   private inputBuffer = ''
+  private inputBufferBytes = 0
   private stderrTail = ''
   private stopping = false
+  private terminating: Promise<void> | null = null
   private pending = new Map<string, PendingRequest>()
 
   constructor(private readonly options: ClineAgentSidecarSupervisorOptions) {}
@@ -136,12 +140,16 @@ export class ClineAgentSidecarSupervisor {
     if (!this.process || this.process.killed || !this.process.stdin.writable) {
       throw new Error('Cline Agent sidecar is not running.')
     }
-    this.process.stdin.write(`${JSON.stringify(message)}\n`)
+    const encoded = JSON.stringify(message)
+    if (Buffer.byteLength(encoded, 'utf8') > CLINE_AGENT_MAX_PROTOCOL_FRAME_BYTES) {
+      throw new Error('Cline Agent sidecar protocol frame exceeded the size limit.')
+    }
+    this.process.stdin.write(`${encoded}\n`)
   }
 
   private rejectPending(error: Error) {
     for (const request of this.pending.values()) {
-      clearTimeout(request.timer)
+      if (request.timer) clearTimeout(request.timer)
       request.reject(error)
     }
     this.pending.clear()
@@ -151,7 +159,7 @@ export class ClineAgentSidecarSupervisor {
     const request = this.pending.get(message.id)
     if (!request) return
     this.pending.delete(message.id)
-    clearTimeout(request.timer)
+    if (request.timer) clearTimeout(request.timer)
     if (message.ok) request.resolve(message.result)
     else request.reject(new Error(message.error?.message || 'Cline Agent sidecar request failed.'))
   }
@@ -208,15 +216,25 @@ export class ClineAgentSidecarSupervisor {
   }
 
   private handleStdout(chunk: Buffer | string) {
-    this.inputBuffer += chunk.toString()
-    if (Buffer.byteLength(this.inputBuffer, 'utf8') > MAX_PROTOCOL_FRAME_BYTES) {
-      throw new Error('Cline Agent sidecar protocol frame exceeded the size limit.')
-    }
+    const text = chunk.toString()
+    this.inputBuffer += text
+    this.inputBufferBytes += Buffer.byteLength(text, 'utf8')
     for (;;) {
       const newlineIndex = this.inputBuffer.indexOf('\n')
-      if (newlineIndex < 0) return
-      const line = this.inputBuffer.slice(0, newlineIndex).trim()
+      if (newlineIndex < 0) {
+        if (this.inputBufferBytes > CLINE_AGENT_MAX_PROTOCOL_FRAME_BYTES) {
+          throw new Error('Cline Agent sidecar protocol frame exceeded the size limit.')
+        }
+        return
+      }
+      const rawLine = this.inputBuffer.slice(0, newlineIndex)
       this.inputBuffer = this.inputBuffer.slice(newlineIndex + 1)
+      const rawLineBytes = Buffer.byteLength(rawLine, 'utf8')
+      this.inputBufferBytes -= rawLineBytes + 1
+      if (rawLineBytes > CLINE_AGENT_MAX_PROTOCOL_FRAME_BYTES) {
+        throw new Error('Cline Agent sidecar protocol frame exceeded the size limit.')
+      }
+      const line = rawLine.trim()
       if (!line) continue
       let message: ClineAgentSidecarMessage
       try {
@@ -238,7 +256,9 @@ export class ClineAgentSidecarSupervisor {
     this.process = null
     this.ready = null
     this.starting = null
+    this.terminating = null
     this.inputBuffer = ''
+    this.inputBufferBytes = 0
     this.rejectPending(error)
     this.log(wasStopping ? 'info' : 'error', 'cline-agent.sidecar.exit', {
       code,
@@ -286,6 +306,7 @@ export class ClineAgentSidecarSupervisor {
       }) as ChildProcessWithoutNullStreams
       this.process = child
       this.stderrTail = ''
+      child.stdout.setEncoding('utf8')
       this.log('info', 'cline-agent.sidecar.start', { source: launch.source, pid: child.pid })
       child.stdout.on('data', (chunk) => {
         try {
@@ -323,11 +344,13 @@ export class ClineAgentSidecarSupervisor {
     const id = randomUUID()
     return new Promise<T>((resolve, reject) => {
       const timeoutMs = requestTimeoutFor(method)
-      const timer = setTimeout(() => {
-        this.pending.delete(id)
-        reject(new Error(`Cline Agent sidecar request timed out: ${method}`))
-      }, timeoutMs)
-      timer.unref?.()
+      const timer = timeoutMs === null
+        ? undefined
+        : setTimeout(() => {
+            this.pending.delete(id)
+            reject(new Error(`Cline Agent sidecar request timed out: ${method}`))
+          }, timeoutMs)
+      timer?.unref?.()
       this.pending.set(id, {
         resolve: (value) => resolve(value as T),
         reject,
@@ -336,11 +359,68 @@ export class ClineAgentSidecarSupervisor {
       try {
         this.write({ version: CLINE_AGENT_PROTOCOL_VERSION, kind: 'request', id, method, payload })
       } catch (error) {
-        clearTimeout(timer)
+        if (timer) clearTimeout(timer)
         this.pending.delete(id)
         reject(error instanceof Error ? error : new Error(errorMessage(error)))
       }
     })
+  }
+
+  async forceTerminate(reason = 'Cline Agent sidecar isolation requested.') {
+    if (this.terminating) return this.terminating
+    const child = this.process
+    if (!child || child.exitCode !== null) return
+    this.stopping = true
+    this.log('warn', 'cline-agent.sidecar.force-terminate', { reason, pid: child.pid })
+    this.terminating = new Promise<void>((resolve, reject) => {
+      let settled = false
+      let forceTimer: NodeJS.Timeout | undefined
+      let exitTimer: NodeJS.Timeout | undefined
+      const finish = (error?: Error) => {
+        if (settled) return
+        settled = true
+        if (forceTimer) clearTimeout(forceTimer)
+        if (exitTimer) clearTimeout(exitTimer)
+        child.off('exit', onExit)
+        if (error) reject(error)
+        else resolve()
+      }
+      const onExit = () => finish()
+      child.once('exit', onExit)
+      try {
+        if (!child.kill('SIGTERM') && !child.killed && child.exitCode === null) {
+          finish(new Error('Cline Agent sidecar rejected the isolation signal.'))
+          return
+        }
+      } catch (error) {
+        finish(error instanceof Error ? error : new Error(errorMessage(error)))
+        return
+      }
+      forceTimer = setTimeout(() => {
+        if (child.exitCode !== null) {
+          finish()
+          return
+        }
+        try {
+          if (!child.kill('SIGKILL') && !child.killed && child.exitCode === null) {
+            finish(new Error('Cline Agent sidecar did not exit after forced isolation.'))
+            return
+          }
+        } catch (error) {
+          finish(error instanceof Error ? error : new Error(errorMessage(error)))
+          return
+        }
+        exitTimer = setTimeout(() => {
+          if (child.exitCode !== null) finish()
+          else finish(new Error('Cline Agent sidecar did not exit after SIGKILL isolation.'))
+        }, TERMINATE_TIMEOUT_MS)
+        exitTimer.unref?.()
+      }, TERMINATE_TIMEOUT_MS)
+      forceTimer.unref?.()
+    }).finally(() => {
+      this.terminating = null
+    })
+    return this.terminating
   }
 
   async shutdown() {

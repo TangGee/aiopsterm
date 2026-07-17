@@ -177,21 +177,21 @@
 
 .ai-panel-mode-menu {
   position: relative;
-  flex: 0 0 112px;
-  min-width: 88px;
+  flex: 0 0 24px;
+  min-width: 24px;
 }
 
 .ai-panel-mode-trigger {
-  width: 100%;
+  width: 24px;
   height: 24px;
   border: 1px solid var(--theme-module-active-border);
   border-radius: 6px;
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  justify-content: center;
   background: var(--theme-module-active-card-bg);
   color: var(--theme-module-active-text-muted);
-  padding: 0 6px;
+  padding: 0;
   cursor: pointer;
 }
 
@@ -206,19 +206,10 @@
   flex: 0 0 auto;
 }
 
-.ai-panel-mode-trigger span {
-  min-width: 0;
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 11px;
-}
-
 .ai-panel-mode-dropdown {
   position: absolute;
   top: calc(100% + 6px);
-  right: 0;
+  left: 0;
   z-index: 35;
   width: 150px;
   border: 1px solid var(--theme-module-active-border);
@@ -289,18 +280,6 @@
 .app-shell.has-app-background .ai-codex-bind-button:hover,
 .app-shell.has-app-background .ai-codex-target-list button:hover {
   background: color-mix(in srgb, var(--theme-module-active-card-strong-bg) 40%, transparent);
-}
-
-.ai-header-title {
-  flex: 0 0 48px;
-  min-width: 0;
-}
-
-.ai-header-title h2 {
-  max-width: 48px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .ai-header-icon-button {

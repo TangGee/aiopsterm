@@ -1,4 +1,5 @@
 import { defineStore } from 'pinia'
+import { onScopeDispose } from 'vue'
 import { createWorkspaceStoreState } from '@/stores/workspaceState'
 import { createWorkspaceFilesController, type FilesUiMode } from '@/services/files/workspaceFilesController'
 import {
@@ -7,6 +8,7 @@ import {
   type ConversationItem,
   type TodoItem
 } from '@/services/ai/workspaceAiChatController'
+import { resolveClassicHostTerminalPanel } from '@/services/ai/classicSessionContextRuntime'
 import {
   createWorkspaceExtensionsController,
   type WorkspaceAliasCommand,
@@ -92,6 +94,7 @@ import type {
   AiChatContextUsageSnapshot,
   AiContentPart,
 } from '@shared/contracts/aiChat'
+import { MAX_CHAT_IMAGE_ATTACHMENTS_PER_MESSAGE } from '@shared/chatImageAttachment'
 import type {
   AiModelCatalog,
   ModelOptionUserConfig,
@@ -934,6 +937,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     },
     {
       setTopNotice,
+      imageLimitMessage: () => i18nText('ai.imageAttachmentCountLimit', { count: MAX_CHAT_IMAGE_ATTACHMENTS_PER_MESSAGE }),
       openKnowledgeFile,
       syncKnowledgePanelsAfterRename,
       closeKnowledgePanelsForRemoved
@@ -956,11 +960,14 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     cancelStreamingAiChatResponse,
     resendUserMessageFromParts,
     createConversation,
+    deselectConversation,
     deleteConversation,
     selectConversation,
     renameConversation,
     toggleConversationFavorite,
     restoreConversation,
+    loadOlderConversationMessages,
+    disposeClassicContextProjection,
     toggleContext,
     removeContext,
     applyCommandPreset,
@@ -1001,6 +1008,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       resolveAiKnowledgeSearchContexts: (...args) => resolveAiKnowledgeSearchContexts(...args),
       applyMcpServersSnapshot: (...args) => applyMcpServersSnapshot(...args),
       resolveActiveWritableTerminalPanel,
+      resolveClassicHostTerminalPanel: (context) => resolveClassicHostTerminalPanel(panels.value, context),
+      openTerminalForAiHostContext,
+      activateTerminalPanel,
       runActiveTerminalCommand,
       waitForTerminalOutputAfter,
       findKnowledgeNode: (relPath) => findKnowledgeNode(relPath),
@@ -1011,6 +1021,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       createSkill: (...args) => createSkill(...args)
     }
   )
+
+  onScopeDispose(disposeClassicContextProjection)
 
   const {
     filteredExtensionPlugins,
@@ -1848,11 +1860,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     cancelStreamingAiChatResponse,
     resendUserMessageFromParts,
     createConversation,
+    deselectConversation,
     deleteConversation,
     selectConversation,
     renameConversation,
     toggleConversationFavorite,
     restoreConversation,
+    loadOlderConversationMessages,
     toggleContext,
     removeContext,
     applyCommandPreset,

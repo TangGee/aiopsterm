@@ -11,6 +11,7 @@
   border-radius: 8px;
   background: var(--theme-module-active-overlay-bg);
   box-shadow: var(--theme-module-active-shadow);
+  pointer-events: auto;
 }
 
 .select-popup header {
@@ -72,6 +73,36 @@
 
 .select-list button.selected {
   color: var(--theme-module-active-accent);
+}
+
+.context-select-popup .context-option-row {
+  grid-template-columns: 18px minmax(0, 1fr) fit-content(44%);
+}
+
+.context-select-popup .context-option-row > svg,
+.context-select-popup .context-option-tail svg {
+  width: 16px;
+  height: 16px;
+}
+
+.context-select-popup .context-option-row > svg {
+  justify-self: center;
+}
+
+.context-select-popup .context-option-tail {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.context-select-popup .context-option-tail em {
+  min-width: 0;
+}
+
+.context-select-popup .context-option-tail svg {
+  flex: 0 0 16px;
 }
 
 .select-list button span,

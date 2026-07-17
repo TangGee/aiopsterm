@@ -1,8 +1,18 @@
 import { randomUUID } from 'node:crypto'
 import { AsyncLocalStorage } from 'node:async_hooks'
-import { ClineCore, createTool, setClineDir, type AgentTool, type CoreSessionEvent } from '@cline/sdk'
 import {
-  CLINE_AGENT_PROVIDER_FETCH_MAX_BODY_BYTES,
+  ClineCore,
+  createTool,
+  setClineDir,
+  type AgentTool,
+  type ClineCoreStartInput,
+  type CoreSessionEvent,
+  type ToolApprovalRequest
+} from '@cline/sdk'
+import {
+  CLINE_AGENT_MAX_PROTOCOL_FRAME_BYTES,
+  CLINE_AGENT_PROVIDER_FETCH_MAX_REQUEST_BODY_BYTES,
+  CLINE_AGENT_PROVIDER_FETCH_MAX_RESPONSE_BODY_BYTES,
   CLINE_AGENT_PROTOCOL_VERSION,
   CLINE_AGENT_SDK_VERSION,
   type ClineAgentProviderFetchInput,
@@ -20,22 +30,35 @@ import {
   type ClineAgentTurnResult
 } from '../shared/contracts/clineAgent'
 
-const MAX_PROTOCOL_FRAME_BYTES = 4 * 1024 * 1024
 const MAX_PENDING_CALLBACKS = 128
-const CALLBACK_TIMEOUT_MS = 10 * 60_000
+const DEFAULT_CALLBACK_TIMEOUT_MS = 10 * 60_000
 const DEFAULT_MAX_ITERATIONS = 8
 
 type ActiveTurn = {
   taskId: string
   turnId: string
   seq: number
+  abortReason?: string
+  terminalEventType?: 'done' | 'cancelled' | 'error'
+  settled: Promise<void>
+  resolveSettled: () => void
+}
+
+type ProviderFetchContext = Pick<ActiveTurn, 'taskId' | 'turnId' | 'seq'> & {
+  sessionId: string
 }
 
 type PendingCallback = {
+  sessionId?: string
   resolve: (value: unknown) => void
   reject: (error: Error) => void
-  timer: ReturnType<typeof setTimeout>
+  timer?: ReturnType<typeof setTimeout>
   cleanup?: () => void
+}
+
+type CallbackOptions = {
+  signal?: AbortSignal
+  timeoutMs?: number | null
 }
 
 const stderrLog = (...values: unknown[]) => {
@@ -51,10 +74,27 @@ console.info = stderrLog
 console.warn = stderrLog
 
 const writeMessage = (message: ClineAgentSidecarMessage) => {
-  process.stdout.write(`${JSON.stringify(message)}\n`)
+  const encoded = JSON.stringify(message)
+  if (Buffer.byteLength(encoded, 'utf8') > CLINE_AGENT_MAX_PROTOCOL_FRAME_BYTES) {
+    throw new Error('Cline Agent protocol frame exceeded the size limit')
+  }
+  process.stdout.write(`${encoded}\n`)
 }
 
 const errorMessage = (error: unknown) => (error instanceof Error ? error.message : String(error || 'Unknown sidecar error'))
+
+const abortError = (reason: string) => Object.assign(new Error(reason), { name: 'AbortError' })
+
+const isAbortError = (error: unknown) =>
+  error instanceof Error && (error.name === 'AbortError' || /\babort(?:ed|ing)?\b|\bcancell?ed\b/i.test(error.message))
+
+const createActiveTurn = (taskId: string, turnId: string): ActiveTurn => {
+  let resolveSettled: () => void = () => undefined
+  const settled = new Promise<void>((resolve) => {
+    resolveSettled = resolve
+  })
+  return { taskId, turnId, seq: 0, settled, resolveSettled }
+}
 
 const responseError = (request: ClineAgentSidecarRequest, code: string, message: string): ClineAgentSidecarResponse => ({
   version: CLINE_AGENT_PROTOCOL_VERSION,
@@ -77,9 +117,10 @@ export const createClineAgentSidecarRuntime = () => {
   let unsubscribe: (() => void) | null = null
   let shuttingDown = false
   const activeSessions = new Set<string>()
+  const activeSessionSignatures = new Map<string, string>()
   const activeTurns = new Map<string, ActiveTurn>()
   const pendingCallbacks = new Map<string, PendingCallback>()
-  const providerFetchContext = new AsyncLocalStorage<ActiveTurn & { sessionId: string }>()
+  const providerFetchContext = new AsyncLocalStorage<ProviderFetchContext>()
   const hostProxySessions = new Map<string, boolean>()
   const directFetch = globalThis.fetch.bind(globalThis)
 
@@ -89,6 +130,10 @@ export const createClineAgentSidecarRuntime = () => {
   ) => {
     const turn = activeTurns.get(sessionId)
     if (!turn) return
+    if (turn.terminalEventType) return
+    if (event.type === 'done' || event.type === 'cancelled' || event.type === 'error') {
+      turn.terminalEventType = event.type
+    }
     turn.seq += 1
     const payload = {
       protocolVersion: CLINE_AGENT_PROTOCOL_VERSION,
@@ -169,6 +214,19 @@ export const createClineAgentSidecarRuntime = () => {
       return
     }
     if (agentEvent.type === 'error') {
+      if (agentEvent.recoverable) {
+        turnEvent(sessionId, {
+          type: 'status',
+          status: 'running',
+          message: errorMessage(agentEvent.error)
+        })
+        return
+      }
+      const turn = activeTurns.get(sessionId)
+      if (turn?.abortReason) {
+        turnEvent(sessionId, { type: 'cancelled', reason: turn.abortReason })
+        return
+      }
       turnEvent(sessionId, {
         type: 'error',
         errorCode: 'CLINE_AGENT_RUNTIME_ERROR',
@@ -178,35 +236,43 @@ export const createClineAgentSidecarRuntime = () => {
     }
   }
 
-  const callback = (name: ClineAgentSidecarCallback['callback'], payload: unknown, signal?: AbortSignal) =>
+  const callback = (
+    name: ClineAgentSidecarCallback['callback'],
+    payload: unknown,
+    options: CallbackOptions = {}
+  ) =>
     new Promise<unknown>((resolve, reject) => {
       if (pendingCallbacks.size >= MAX_PENDING_CALLBACKS) {
         reject(new Error('Too many pending aiopsterm callbacks'))
         return
       }
       const id = randomUUID()
-      const timer = setTimeout(() => {
-        const pending = pendingCallbacks.get(id)
-        pendingCallbacks.delete(id)
-        pending?.cleanup?.()
-        reject(new Error(`${name} callback timed out`))
-      }, CALLBACK_TIMEOUT_MS)
-      timer.unref?.()
+      const sessionId = isRecord(payload) ? cleanText(payload.sessionId) : ''
+      const timeoutMs = options.timeoutMs === undefined ? DEFAULT_CALLBACK_TIMEOUT_MS : options.timeoutMs
+      const timer = timeoutMs === null
+        ? undefined
+        : setTimeout(() => {
+            const pending = pendingCallbacks.get(id)
+            pendingCallbacks.delete(id)
+            pending?.cleanup?.()
+            reject(new Error(`${name} callback timed out`))
+          }, timeoutMs)
+      timer?.unref?.()
       const abort = () => {
         const pending = pendingCallbacks.get(id)
         if (!pending) return
         pendingCallbacks.delete(id)
-        clearTimeout(timer)
+        if (timer) clearTimeout(timer)
         pending.cleanup?.()
         reject(Object.assign(new Error(`${name} callback was cancelled`), { name: 'AbortError' }))
       }
-      const cleanup = signal ? () => signal.removeEventListener('abort', abort) : undefined
-      pendingCallbacks.set(id, { resolve, reject, timer, cleanup })
-      if (signal?.aborted) {
+      const cleanup = options.signal ? () => options.signal?.removeEventListener('abort', abort) : undefined
+      pendingCallbacks.set(id, { ...(sessionId ? { sessionId } : {}), resolve, reject, timer, cleanup })
+      if (options.signal?.aborted) {
         abort()
         return
       }
-      signal?.addEventListener('abort', abort, { once: true })
+      options.signal?.addEventListener('abort', abort, { once: true })
       writeMessage({
         version: CLINE_AGENT_PROTOCOL_VERSION,
         kind: 'callback',
@@ -215,6 +281,16 @@ export const createClineAgentSidecarRuntime = () => {
         payload
       })
     })
+
+  const cancelPendingCallbacks = (sessionId: string, reason: string) => {
+    for (const [id, pending] of pendingCallbacks) {
+      if (pending.sessionId !== sessionId) continue
+      pendingCallbacks.delete(id)
+      if (pending.timer) clearTimeout(pending.timer)
+      pending.cleanup?.()
+      pending.reject(abortError(reason))
+    }
+  }
 
   const headersRecord = (headers: Headers) => {
     const result: Record<string, string> = {}
@@ -234,8 +310,8 @@ export const createClineAgentSidecarRuntime = () => {
     const body = request.method === 'GET' || request.method === 'HEAD'
       ? Buffer.alloc(0)
       : Buffer.from(await request.clone().arrayBuffer())
-    if (body.byteLength > CLINE_AGENT_PROVIDER_FETCH_MAX_BODY_BYTES) {
-      throw new Error(`Cline Agent provider request body exceeds ${CLINE_AGENT_PROVIDER_FETCH_MAX_BODY_BYTES} bytes`)
+    if (body.byteLength > CLINE_AGENT_PROVIDER_FETCH_MAX_REQUEST_BODY_BYTES) {
+      throw new Error(`Cline Agent provider request body exceeds ${CLINE_AGENT_PROVIDER_FETCH_MAX_REQUEST_BODY_BYTES} bytes`)
     }
     const payload: ClineAgentProviderFetchInput = {
       sessionId: context.sessionId,
@@ -246,7 +322,7 @@ export const createClineAgentSidecarRuntime = () => {
       headers: headersRecord(request.headers),
       ...(body.byteLength ? { bodyBase64: body.toString('base64') } : {})
     }
-    const rawResult = await callback('provider.fetch', payload, request.signal)
+    const rawResult = await callback('provider.fetch', payload, { signal: request.signal })
     if (!isRecord(rawResult)) throw new Error('Invalid Cline Agent provider fetch response')
     const result = rawResult as ClineAgentProviderFetchResult
     const status = Number(result.status)
@@ -254,14 +330,28 @@ export const createClineAgentSidecarRuntime = () => {
       throw new Error('Invalid Cline Agent provider fetch response metadata')
     }
     const responseBody = Buffer.from(cleanText(result.bodyBase64), 'base64')
-    if (responseBody.byteLength > CLINE_AGENT_PROVIDER_FETCH_MAX_BODY_BYTES) {
-      throw new Error(`Cline Agent provider response body exceeds ${CLINE_AGENT_PROVIDER_FETCH_MAX_BODY_BYTES} bytes`)
+    if (responseBody.byteLength > CLINE_AGENT_PROVIDER_FETCH_MAX_RESPONSE_BODY_BYTES) {
+      throw new Error(`Cline Agent provider response body exceeds ${CLINE_AGENT_PROVIDER_FETCH_MAX_RESPONSE_BODY_BYTES} bytes`)
     }
     return new Response(responseBody.byteLength ? new Uint8Array(responseBody) : null, {
       status,
       statusText: cleanText(result.statusText),
       headers: Object.fromEntries(Object.entries(result.headers).map(([key, value]) => [key, String(value)]))
     })
+  }
+
+  const requestAiopstermToolApproval = async (request: ToolApprovalRequest) => {
+    const turn = activeTurns.get(request.sessionId)
+    if (!turn) return { approved: false, reason: 'No active aiopsterm turn owns this approval.' }
+    turnEvent(request.sessionId, { type: 'status', status: 'waiting-approval' })
+    const result = await callback('approval.request', {
+      ...request,
+      taskId: turn.taskId,
+      turnId: turn.turnId
+    }, { timeoutMs: null })
+    return isRecord(result)
+      ? { approved: result.approved === true, reason: cleanText(result.reason) || undefined }
+      : { approved: false, reason: 'Invalid approval response.' }
   }
 
   const ensureCore = async () => {
@@ -276,19 +366,7 @@ export const createClineAgentSidecarRuntime = () => {
       fetch: hostProxyFetch as typeof fetch,
       toolPolicies: { '*': { enabled: false, autoApprove: false } },
       capabilities: {
-        requestToolApproval: async (request) => {
-          const turn = activeTurns.get(request.sessionId)
-          if (!turn) return { approved: false, reason: 'No active aiopsterm turn owns this approval.' }
-          turnEvent(request.sessionId, { type: 'status', status: 'waiting-approval' })
-          const result = await callback('approval.request', {
-            ...request,
-            taskId: turn.taskId,
-            turnId: turn.turnId
-          })
-          return isRecord(result)
-            ? { approved: result.approved === true, reason: cleanText(result.reason) || undefined }
-            : { approved: false, reason: 'Invalid approval response.' }
-        }
+        requestToolApproval: requestAiopstermToolApproval
       }
     })
     unsubscribe = core.subscribe(handleCoreEvent)
@@ -307,15 +385,32 @@ export const createClineAgentSidecarRuntime = () => {
       execute: async (input, context) => {
         const turn = activeTurns.get(sessionId)
         if (!turn) throw new Error('No active aiopsterm turn owns this tool call.')
-        return callback('tool.execute', {
+        const toolCallId = context.toolCallId || ''
+        const payload = {
           sessionId,
           taskId: turn.taskId,
           turnId: turn.turnId,
-          toolCallId: context.toolCallId || '',
+          toolCallId,
           toolName: definition.name,
           input,
           iteration: context.iteration
-        }, context.signal)
+        }
+        if (!definition.autoApprove) {
+          const approval = await requestAiopstermToolApproval({
+            sessionId,
+            agentId: cleanText(context.agentId) || 'aiopsterm',
+            conversationId: cleanText(context.conversationId || context.runId) || sessionId,
+            iteration: Math.max(0, Math.round(Number(context.iteration) || 0)),
+            toolCallId,
+            toolName: definition.name,
+            input,
+            policy: { enabled: true, autoApprove: false }
+          })
+          if (!approval.approved) {
+            throw new Error(approval.reason || `Tool "${definition.name}" was not approved.`)
+          }
+        }
+        return callback('tool.execute', payload, { signal: context.signal })
       }
     })
 
@@ -326,34 +421,56 @@ export const createClineAgentSidecarRuntime = () => {
     const manager = await ensureCore()
     const taskId = cleanText(input.metadata?.taskId)
     const turnId = cleanText(input.metadata?.turnId)
+    const sessionSignature = JSON.stringify([
+      input.profile,
+      input.systemPrompt,
+      input.tools.map((tool) => ({
+        name: tool.name,
+        description: tool.description,
+        inputSchema: tool.inputSchema,
+        autoApprove: tool.autoApprove,
+        completesRun: tool.completesRun,
+        timeoutMs: tool.timeoutMs
+      }))
+    ])
+    const replaceTranscript = input.replaceTranscript === true
+    if (replaceTranscript && activeTurns.has(sessionId)) {
+      throw new Error('Cannot replace a Cline transcript while its turn is still active. Stop the turn and retry.')
+    }
     if (activeSessions.has(sessionId)) {
-      const updateConnection = () => manager.updateSessionConnection(sessionId, {
-        providerId: input.provider.providerId,
-        modelId: input.provider.modelId,
-        apiKey: cleanText(input.provider.apiKey),
-        baseUrl: cleanText(input.provider.baseUrl),
-        providerConfig: input.provider.providerConfig || {
+      if (!replaceTranscript && activeSessionSignatures.get(sessionId) === sessionSignature) {
+        const updateConnection = () => manager.updateSessionConnection(sessionId, {
           providerId: input.provider.providerId,
-          modelId: input.provider.modelId
-        },
-        reasoningEffort: input.provider.reasoningEffort,
-        thinking: input.provider.thinking,
-        thinkingBudgetTokens: input.provider.thinkingBudgetTokens
-      })
-      await (taskId && turnId
-        ? providerFetchContext.run({ sessionId, taskId, turnId, seq: 0 }, updateConnection)
-        : updateConnection())
-      return { sessionId, resumed: true }
+          modelId: input.provider.modelId,
+          apiKey: cleanText(input.provider.apiKey),
+          baseUrl: cleanText(input.provider.baseUrl),
+          providerConfig: input.provider.providerConfig || {
+            providerId: input.provider.providerId,
+            modelId: input.provider.modelId
+          },
+          reasoningEffort: input.provider.reasoningEffort,
+          thinking: input.provider.thinking,
+          thinkingBudgetTokens: input.provider.thinkingBudgetTokens
+        })
+        await (taskId && turnId
+          ? providerFetchContext.run({ sessionId, taskId, turnId, seq: 0 }, updateConnection)
+          : updateConnection())
+        return { sessionId, resumed: true }
+      }
+      await manager.stop(sessionId)
+      activeSessions.delete(sessionId)
+      activeSessionSignatures.delete(sessionId)
     }
 
     let initialMessages: Array<{ role: 'user' | 'assistant'; content: string }> = []
-    try {
+    const persistedSession = await manager.get(sessionId)
+    if (replaceTranscript && persistedSession) {
+      await manager.delete(sessionId)
+    } else if (persistedSession) {
       const persisted = await manager.readMessages(sessionId)
       if (persisted.length) initialMessages = persisted as Array<{ role: 'user' | 'assistant'; content: string }>
-    } catch {
-      // A new session has no persisted transcript.
     }
-    if (!initialMessages.length) {
+    if (replaceTranscript || !initialMessages.length) {
       initialMessages = (input.initialMessages || [])
         .map((message) => ({ role: message.role === 'assistant' ? ('assistant' as const) : ('user' as const), content: cleanText(message.content) }))
         .filter((message) => message.content)
@@ -364,37 +481,43 @@ export const createClineAgentSidecarRuntime = () => {
       '*': { enabled: false, autoApprove: false }
     }
     for (const definition of input.tools) {
-      toolPolicies[definition.name] = { enabled: true, autoApprove: definition.autoApprove }
+      // Approval is enforced inside proxy execution so each tool reaches a
+      // result before the next tool can request approval or execute.
+      toolPolicies[definition.name] = { enabled: true, autoApprove: true }
     }
     const workspaceRoot = cleanText(process.env.AIOPSTERM_CLINE_WORKSPACE_ROOT) || process.cwd()
-    const start = () => manager.start({
-      config: {
-        sessionId,
-        providerId: input.provider.providerId,
-        modelId: input.provider.modelId,
-        apiKey: input.provider.apiKey,
-        baseUrl: input.provider.baseUrl,
-        providerConfig: input.provider.providerConfig,
-        knownModels: input.provider.knownModels,
-        thinking: input.provider.thinking,
-        reasoningEffort: input.provider.reasoningEffort,
-        thinkingBudgetTokens: input.provider.thinkingBudgetTokens,
-        maxTokensPerTurn: input.provider.maxTokensPerTurn,
-        cwd: workspaceRoot,
-        workspaceRoot,
-        systemPrompt: input.systemPrompt,
-        mode: 'act',
-        maxIterations: Math.max(1, Math.min(20, Math.round(input.maxIterations || DEFAULT_MAX_ITERATIONS))),
-        enableTools: false,
-        enableSpawnAgent: false,
-        enableAgentTeams: false,
-        disableMcpSettingsTools: true,
-        execution: {
-          loopDetection: { softThreshold: 3, hardThreshold: 5 }
-        },
-        compaction: { enabled: true, strategy: 'basic' },
-        checkpoint: { enabled: false }
+    // Cline 0.0.59 consumes this AgentConfig field but omits it from the
+    // exported CoreSessionConfig type used by ClineCore.start().
+    const sessionConfig: ClineCoreStartInput['config'] & { maxParallelToolCalls: 1 } = {
+      sessionId,
+      providerId: input.provider.providerId,
+      modelId: input.provider.modelId,
+      apiKey: input.provider.apiKey,
+      baseUrl: input.provider.baseUrl,
+      providerConfig: input.provider.providerConfig,
+      knownModels: input.provider.knownModels,
+      thinking: input.provider.thinking,
+      reasoningEffort: input.provider.reasoningEffort,
+      thinkingBudgetTokens: input.provider.thinkingBudgetTokens,
+      maxTokensPerTurn: input.provider.maxTokensPerTurn,
+      cwd: workspaceRoot,
+      workspaceRoot,
+      systemPrompt: input.systemPrompt,
+      mode: 'act',
+      maxIterations: Math.max(1, Math.min(20, Math.round(input.maxIterations || DEFAULT_MAX_ITERATIONS))),
+      maxParallelToolCalls: 1,
+      enableTools: false,
+      enableSpawnAgent: false,
+      enableAgentTeams: false,
+      disableMcpSettingsTools: true,
+      execution: {
+        loopDetection: { softThreshold: 3, hardThreshold: 5 }
       },
+      compaction: { enabled: true, strategy: 'basic' },
+      checkpoint: { enabled: false }
+    }
+    const start = () => manager.start({
+      config: sessionConfig,
       interactive: true,
       sessionMetadata: {
         owner: 'aiopsterm',
@@ -409,6 +532,7 @@ export const createClineAgentSidecarRuntime = () => {
       ? providerFetchContext.run({ sessionId, taskId, turnId, seq: 0 }, start)
       : start())
     activeSessions.add(sessionId)
+    activeSessionSignatures.set(sessionId, sessionSignature)
     return { sessionId, resumed: initialMessages.length > 0 }
   }
 
@@ -421,12 +545,13 @@ export const createClineAgentSidecarRuntime = () => {
     if (!sessionId || !taskId || !turnId || !prompt) throw new Error('sessionId, taskId, turnId, and prompt are required')
     if (!activeSessions.has(sessionId)) throw new Error(`Session ${sessionId} is not active`)
     if (activeTurns.has(sessionId)) throw new Error(`Session ${sessionId} already has an active turn`)
-    activeTurns.set(sessionId, { taskId, turnId, seq: 0 })
+    const activeTurn = createActiveTurn(taskId, turnId)
+    activeTurns.set(sessionId, activeTurn)
     turnEvent(sessionId, { type: 'status', status: 'running' })
     try {
       const result = await providerFetchContext.run(
         { sessionId, taskId, turnId, seq: 0 },
-        () => manager.send({ sessionId, prompt, mode: 'act' })
+        () => manager.send({ sessionId, prompt, mode: 'act', userImages: input.userImages })
       )
       const normalized: ClineAgentTurnResult = {
         sessionId,
@@ -462,6 +587,20 @@ export const createClineAgentSidecarRuntime = () => {
       } as ClineAgentTaskEventData)
       return normalized
     } catch (error) {
+      const turn = activeTurns.get(sessionId)
+      if (turn?.abortReason || isAbortError(error)) {
+        const reason = turn?.abortReason || errorMessage(error) || 'aborted'
+        turnEvent(sessionId, { type: 'cancelled', reason })
+        return {
+          sessionId,
+          taskId,
+          turnId,
+          text: '',
+          finishReason: 'aborted',
+          iterations: 0,
+          toolCalls: []
+        }
+      }
       turnEvent(sessionId, {
         type: 'error',
         errorCode: 'CLINE_AGENT_TURN_FAILED',
@@ -470,7 +609,8 @@ export const createClineAgentSidecarRuntime = () => {
       })
       throw error
     } finally {
-      activeTurns.delete(sessionId)
+      activeTurn.resolveSettled()
+      if (activeTurns.get(sessionId) === activeTurn) activeTurns.delete(sessionId)
     }
   }
 
@@ -478,7 +618,7 @@ export const createClineAgentSidecarRuntime = () => {
     if (shuttingDown) return
     shuttingDown = true
     for (const pending of pendingCallbacks.values()) {
-      clearTimeout(pending.timer)
+      if (pending.timer) clearTimeout(pending.timer)
       pending.cleanup?.()
       pending.reject(new Error('Cline Agent sidecar is shutting down'))
     }
@@ -488,6 +628,8 @@ export const createClineAgentSidecarRuntime = () => {
     await core?.dispose('aiopsterm_shutdown')
     core = null
     activeSessions.clear()
+    activeSessionSignatures.clear()
+    for (const turn of activeTurns.values()) turn.resolveSettled()
     activeTurns.clear()
     hostProxySessions.clear()
   }
@@ -508,16 +650,50 @@ export const createClineAgentSidecarRuntime = () => {
         const payload = isRecord(request.payload) ? request.payload : {}
         const sessionId = cleanText(payload.sessionId)
         if (!sessionId) throw new Error('sessionId is required')
-        await (await ensureCore()).abort(sessionId, cleanText(payload.reason) || 'aiopsterm_abort')
+        const reason = cleanText(payload.reason) || 'aiopsterm_abort'
+        const activeTurn = activeTurns.get(sessionId)
+        if (activeTurn) activeTurn.abortReason ||= reason
+        cancelPendingCallbacks(sessionId, reason)
+        await (await ensureCore()).abort(sessionId, reason)
+        await activeTurn?.settled
         result = { sessionId, aborted: true }
       } else if (request.method === 'session.stop') {
         const payload = isRecord(request.payload) ? request.payload : {}
         const sessionId = cleanText(payload.sessionId)
         if (!sessionId) throw new Error('sessionId is required')
+        const activeTurn = activeTurns.get(sessionId)
+        if (activeTurn) activeTurn.abortReason ||= 'aiopsterm_stop'
+        cancelPendingCallbacks(sessionId, activeTurn?.abortReason || 'aiopsterm_stop')
         await (await ensureCore()).stop(sessionId)
+        await activeTurn?.settled
         activeSessions.delete(sessionId)
+        activeSessionSignatures.delete(sessionId)
         hostProxySessions.delete(sessionId)
         result = { sessionId, stopped: true }
+      } else if (request.method === 'session.delete') {
+        const payload = isRecord(request.payload) ? request.payload : {}
+        const sessionId = cleanText(payload.sessionId)
+        if (!sessionId) throw new Error('sessionId is required')
+        const manager = await ensureCore()
+        const activeTurn = activeTurns.get(sessionId)
+        if (activeTurn) {
+          activeTurn.abortReason ||= 'aiopsterm_delete'
+          cancelPendingCallbacks(sessionId, activeTurn.abortReason)
+          try {
+            await manager.abort(sessionId, 'aiopsterm_delete')
+          } catch {
+            // ClineCore.delete is authoritative and also handles inactive persisted sessions.
+          }
+        }
+        const deleted = await manager.delete(sessionId)
+        activeSessions.delete(sessionId)
+        activeSessionSignatures.delete(sessionId)
+        if (activeTurn) {
+          activeTurn.resolveSettled()
+          if (activeTurns.get(sessionId) === activeTurn) activeTurns.delete(sessionId)
+        }
+        hostProxySessions.delete(sessionId)
+        result = { sessionId, deleted }
       } else {
         return responseError(request, 'CLINE_AGENT_METHOD_UNKNOWN', `Unknown sidecar method: ${request.method}`)
       }
@@ -533,7 +709,7 @@ export const createClineAgentSidecarRuntime = () => {
       const pending = pendingCallbacks.get(message.id)
       if (!pending) return
       pendingCallbacks.delete(message.id)
-      clearTimeout(pending.timer)
+      if (pending.timer) clearTimeout(pending.timer)
       pending.cleanup?.()
       if (message.ok) pending.resolve(message.result)
       else pending.reject(new Error(message.error?.message || 'Sidecar callback failed'))
@@ -551,6 +727,7 @@ export const createClineAgentSidecarRuntime = () => {
 export const runClineAgentSidecar = () => {
   const runtime = createClineAgentSidecarRuntime()
   let inputBuffer = ''
+  let inputBufferBytes = 0
   let closing = false
 
   const close = async (reason: string) => {
@@ -563,15 +740,24 @@ export const runClineAgentSidecar = () => {
   process.stdin.setEncoding('utf8')
   process.stdin.on('data', (chunk: string) => {
     inputBuffer += chunk
-    if (Buffer.byteLength(inputBuffer, 'utf8') > MAX_PROTOCOL_FRAME_BYTES) {
-      void close('protocol_frame_too_large').finally(() => process.exit(1))
-      return
-    }
+    inputBufferBytes += Buffer.byteLength(chunk, 'utf8')
     for (;;) {
       const newlineIndex = inputBuffer.indexOf('\n')
-      if (newlineIndex < 0) break
-      const line = inputBuffer.slice(0, newlineIndex).trim()
+      if (newlineIndex < 0) {
+        if (inputBufferBytes > CLINE_AGENT_MAX_PROTOCOL_FRAME_BYTES) {
+          void close('protocol_frame_too_large').finally(() => process.exit(1))
+        }
+        break
+      }
+      const rawLine = inputBuffer.slice(0, newlineIndex)
       inputBuffer = inputBuffer.slice(newlineIndex + 1)
+      const rawLineBytes = Buffer.byteLength(rawLine, 'utf8')
+      inputBufferBytes -= rawLineBytes + 1
+      if (rawLineBytes > CLINE_AGENT_MAX_PROTOCOL_FRAME_BYTES) {
+        void close('protocol_frame_too_large').finally(() => process.exit(1))
+        return
+      }
+      const line = rawLine.trim()
       if (!line) continue
       let message: ClineAgentSidecarMessage
       try {

@@ -4,15 +4,6 @@
     data-onboarding-id="top-layout-controls"
   >
     <div class="top-left">
-      <button
-        class="icon-button mode-toggle mode-button"
-        :class="`mode-button-${workspace.mode}`"
-        :title="modeToggleTitle"
-        @click="workspace.toggleMode"
-      >
-        <Code2 v-if="workspace.mode === 'terminal'" />
-        <Bot v-else />
-      </button>
       <div class="brand-mark">ai</div>
       <span class="brand-name">aiopsterm</span>
       <button
@@ -109,10 +100,8 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import {
   Bell,
-  Bot,
   CheckCircle2,
   ChevronRight,
-  Code2,
   CopyMinus,
   Download,
   LoaderCircle,
@@ -139,7 +128,6 @@ const isMac = computed(() => platform.value.includes('darwin'))
 const isLeftCollapsed = computed(() => (workspace.mode === 'agents' ? !workspace.agentsLeftOpen : !workspace.leftPanelOpen))
 const isRightCollapsed = computed(() => !workspace.rightPanelOpen)
 const rightToggleDisabled = computed(() => workspace.activeModule === 'database' || workspace.activeModule === 'user')
-const modeToggleTitle = computed(() => (workspace.mode === 'terminal' ? t('top.modeToAgents') : t('top.modeToTerminal')))
 const leftToggleTitle = computed(() =>
   workspace.mode === 'agents'
     ? isLeftCollapsed.value

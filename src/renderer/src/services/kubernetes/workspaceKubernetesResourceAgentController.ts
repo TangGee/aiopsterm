@@ -418,6 +418,7 @@ export const createWorkspaceKubernetesResourceAgentController = (
       detail: `${cluster.context_name} / ${cluster.default_namespace}`
     }
     const sent = await sendChat(`请分析这个 Kubernetes 输出并给出下一步排查建议：\n\nTerminal output:\n\`\`\`\n${output}\n\`\`\``, undefined, [host], {
+      mode: 'chat',
       skipKnowledgeSearch: true
     })
     if (!sent) return false

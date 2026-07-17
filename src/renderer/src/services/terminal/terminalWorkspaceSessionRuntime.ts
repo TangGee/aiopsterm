@@ -43,6 +43,8 @@ export const createTerminalWorkspaceSessionRuntime = ({
   const panelById = (panelId: string) => workspace.panels.find((panel) => panel.id === panelId || panel.sessionId === panelId)
 
   const writeXtermInput = async (panelId: string, data: string) => {
+    const inputTimestamp = Date.now()
+    const shouldRecordMacroInput = workspace.isMacroRecording
     const panel = panelById(panelId)
     const sessionId = panel?.sessionId
     const bytes = new TextEncoder().encode(data).length
@@ -83,6 +85,7 @@ export const createTerminalWorkspaceSessionRuntime = ({
         })
         return
       }
+      if (shouldRecordMacroInput) workspace.recordMacroTerminalInput(panel.id, data, inputTimestamp)
       writeTerminalDebugLog('renderer.terminal-input.write-accepted', {
         panelId,
         sessionId,

@@ -7,6 +7,7 @@ type ChatHistoryBackend = {
   configureChatHistoryBackendRuntime: (config?: { stateFilePath?: string; useSeedData?: boolean }) => void
   resetChatHistoryForTests: () => void
   listChatConversations: () => any
+  deselectChatConversation: (expectedConversationId: string) => any
   createChatConversation: () => any
   updateChatConversation: (input: any) => any
   deleteChatConversation: (id: string) => any
@@ -83,6 +84,33 @@ describe('AI chat history backend boundary', () => {
     expect(process.env.NODE_ENV).toBe('test')
     expect(data.selectedConversationId).toBe('')
     expect(data.conversations).toEqual([])
+  })
+
+  it('persists an empty selection without deleting the closed conversation history', async () => {
+    const stateFilePath = await useTempRuntime({ useSeedData: false, prefix: 'aiopsterm-chat-history-deselect-' })
+    const created = expectOkData(backend.createChatConversation())
+    expectOkData(backend.updateChatConversation({
+      id: created.conversation.id,
+      messages: [{ id: 'history-user', role: 'user', text: 'keep this history' }]
+    }))
+
+    expect(backend.deselectChatConversation('other-conversation')).toEqual({
+      ok: false,
+      errorCode: 'CHAT_HISTORY_SELECTION_CHANGED',
+      errorMessage: 'Selected conversation changed before it could be closed.'
+    })
+    const deselected = expectOkData(backend.deselectChatConversation(created.conversation.id))
+
+    expect(deselected.selectedConversationId).toBe('')
+    expect(deselected.conversations).toContainEqual(expect.objectContaining({ id: created.conversation.id }))
+    expect(expectOkData(backend.restoreChatConversation(created.conversation.id)).messages).toContainEqual(
+      expect.objectContaining({ id: 'history-user', text: 'keep this history' })
+    )
+    expectOkData(backend.deselectChatConversation(created.conversation.id))
+    await backend.flushChatHistoryWrites()
+    const persisted = JSON.parse(await readFile(stateFilePath, 'utf-8'))
+    expect(persisted.selectedConversationId).toBe('')
+    expect(persisted.conversations).toContainEqual(expect.objectContaining({ id: created.conversation.id }))
   })
 
   it('loads chat history development seeds only when the seed environment switch is enabled', async () => {
@@ -171,6 +199,20 @@ describe('AI chat history backend boundary', () => {
     })
   })
 
+  it('persists a background conversation without changing the selected conversation', () => {
+    const saved = expectOkData(backend.updateChatConversation({
+      id: 'conv-2',
+      messages: [{ id: 'background-result', role: 'assistant', text: '后台任务完成', state: 'done' }],
+      preserveSelection: true
+    }))
+
+    expect(saved.selectedConversationId).toBe('conv-1')
+    expect(expectOkData(backend.listChatConversations()).selectedConversationId).toBe('conv-1')
+    expect(expectOkData(backend.restoreChatConversation('conv-2')).messages).toEqual([
+      { id: 'background-result', role: 'assistant', text: '后台任务完成', state: 'done' }
+    ])
+  })
+
   it('restores backend message snapshots without renderer-generated summaries', async () => {
     const restored = expectOkData(backend.restoreChatConversation('conv-2'))
 
@@ -182,6 +224,124 @@ describe('AI chat history backend boundary', () => {
       kind: 'hosts',
       label: 'prod-cluster'
     })
+  })
+
+  it('downgrades persisted active Cline tasks only in the restore projection', async () => {
+    const stateFilePath = await useTempRuntime({ useSeedData: false, prefix: 'aiopsterm-chat-history-cline-restore-' })
+    const created = expectOkData(backend.createChatConversation())
+    const messages = [
+      {
+        id: 'cline-root',
+        role: 'assistant',
+        text: '正在执行主机检查',
+        state: 'streaming',
+        agentTask: { taskId: 'task-1', turnId: 'turn-1', status: 'running' }
+      },
+      {
+        id: 'cline-pending',
+        role: 'assistant',
+        text: 'systemctl restart api',
+        state: 'done',
+        ask: 'command',
+        commandExecutionStatus: 'pending',
+        commandExecution: {
+          ip: 'current terminal',
+          command: 'systemctl restart api',
+          requiresApproval: true,
+          interactive: false
+        },
+        agentTask: {
+          taskId: 'task-1',
+          turnId: 'turn-1',
+          toolCallId: 'tool-pending',
+          toolName: 'run_host_command',
+          terminalSessionId: 'terminal-1',
+          status: 'waiting-approval'
+        }
+      },
+      {
+        id: 'cline-running',
+        role: 'assistant',
+        text: 'uptime',
+        state: 'done',
+        ask: 'command',
+        commandExecutionStatus: 'running',
+        commandExecution: {
+          ip: 'current terminal',
+          command: 'uptime',
+          requiresApproval: false,
+          interactive: false
+        },
+        agentTask: {
+          taskId: 'task-1',
+          turnId: 'turn-1',
+          toolCallId: 'tool-running',
+          toolName: 'run_host_command',
+          terminalSessionId: 'terminal-1',
+          status: 'running'
+        }
+      },
+      {
+        id: 'classic-proposal',
+        role: 'assistant',
+        text: 'df -h',
+        state: 'done',
+        ask: 'command',
+        commandExecutionStatus: 'pending',
+        commandExecution: {
+          ip: 'current terminal',
+          command: 'df -h',
+          requiresApproval: true,
+          interactive: false
+        },
+        agentTask: {
+          taskId: 'task-proposal',
+          turnId: 'turn-proposal',
+          toolCallId: 'tool-proposal',
+          toolName: 'propose_host_command',
+          targetId: 'asset-prod',
+          targetLabel: 'production',
+          terminalSessionId: 'terminal-prod',
+          status: 'done'
+        }
+      }
+    ]
+    expectOkData(backend.updateChatConversation({ id: created.conversation.id, messages }))
+    await backend.flushChatHistoryWrites()
+
+    const restored = expectOkData(backend.restoreChatConversation(created.conversation.id))
+    expect(restored.messages).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: 'cline-root',
+        state: 'cancelled',
+        agentTask: expect.objectContaining({ status: 'cancelled', restored: true })
+      }),
+      expect.objectContaining({
+        id: 'cline-pending',
+        commandExecutionStatus: 'failed',
+        commandExecutionMessage: '原 Cline Agent 任务已结束，无法恢复旧确认，请重新发起请求。',
+        agentTask: expect.objectContaining({ status: 'cancelled', restored: true })
+      }),
+      expect.objectContaining({
+        id: 'cline-running',
+        commandExecutionStatus: 'failed',
+        commandExecutionMessage: '原 Cline Agent 任务已结束，无法恢复旧确认，请重新发起请求。',
+        agentTask: expect.objectContaining({ status: 'cancelled', restored: true })
+      }),
+      expect.objectContaining({
+        id: 'classic-proposal',
+        commandExecutionStatus: 'pending',
+        agentTask: expect.objectContaining({
+          targetId: 'asset-prod',
+          targetLabel: 'production',
+          terminalSessionId: 'terminal-prod',
+          status: 'done'
+        })
+      })
+    ]))
+
+    const persisted = JSON.parse(await readFile(stateFilePath, 'utf-8'))
+    expect(persisted.messagesByConversationId[created.conversation.id]).toEqual(messages)
   })
 
   it('creates, updates message snapshots, persists state, and deletes conversations behind the boundary', async () => {

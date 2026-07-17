@@ -14,9 +14,14 @@ import type {
   AiChatSkillInput
 } from '@shared/contracts/aiChat'
 import type { UserConfig } from '@shared/contracts/userConfig'
+import {
+  CLINE_AGENT_MAX_HOST_TARGETS,
+  type ClineAgentHostTarget
+} from '@shared/contracts/clineAgent'
 import type { AiPreferencesUserConfig, ModelProviderCheckKey } from '@shared/contracts/appRuntime'
 import type { McpToolCallInput, McpToolCallResult } from '@shared/contracts/mcp'
 import type { SkillUserConfig } from '@shared/contracts/skills'
+import type { UserRuleConfig } from '@shared/contracts/settingsPreferences'
 import { shouldUseAiChatBackendDouble } from '@shared/runtimeSwitches'
 import { createProviderTextRequest, fetchProviderText, resolveModelProvider, type AiProviderTextMessage } from './modelProviderText'
 import { recordAiTodoCancelResult, recordAiTodoExchangeRequest, recordAiTodoResponseResult } from './aiTodos'
@@ -28,6 +33,11 @@ import {
   generateClassicClineResponse,
   type RunClassicClineTurn
 } from './classicClineAiChatRuntime'
+import {
+  classicRichContextPrompt,
+  resolveClassicRichContext,
+  type ClassicRichContextRuntime
+} from './classicRichContext'
 
 export { formatMcpResourceReadContent } from './aiChatActionRuntime'
 
@@ -62,6 +72,8 @@ const defaultAiChatPreferences: AiPreferencesUserConfig = {
 type AiChatRuntimeConfig = {
   getConfig?: () => UserConfig
   listSkills?: () => SkillUserConfig[] | Promise<SkillUserConfig[]>
+  listRules?: () => UserRuleConfig[] | Promise<UserRuleConfig[]>
+  richContext?: ClassicRichContextRuntime
   callMcpTool?: (input: McpToolCallInput) => Promise<McpToolCallResult>
   localBackendDouble?: boolean
   fetch?: typeof fetch
@@ -83,7 +95,6 @@ type AiChatResponseControl = {
   clineTask?: {
     taskId: string
     turnId: string
-    terminalSessionId?: string
   }
 }
 
@@ -301,6 +312,33 @@ const normalizeHostContexts = (hosts?: AiChatExchangeRequestInput['hosts']): AiC
       }
     })
     .filter(Boolean) as AiChatHistoryHostContext[]
+  return normalized
+}
+
+const normalizeClineHostTargets = (hostTargets?: AiChatExchangeRequestInput['hostTargets']): ClineAgentHostTarget[] | undefined => {
+  if (hostTargets === undefined) return undefined
+  if (!Array.isArray(hostTargets) || hostTargets.length > CLINE_AGENT_MAX_HOST_TARGETS) {
+    throw new Error(`At most ${CLINE_AGENT_MAX_HOST_TARGETS} Classic host targets are allowed.`)
+  }
+  const targetIds = new Set<string>()
+  const terminalSessionIds = new Set<string>()
+  const normalized = hostTargets.map((target) => {
+    const targetId = normalizeText(target?.targetId)
+    const terminalSessionId = normalizeText(target?.terminalSessionId)
+    const label = normalizeText(target?.label)
+    const kind = target?.kind
+    const cwd = normalizeText(target?.cwd)
+    if (!targetId || !terminalSessionId || !label || (kind !== 'local' && kind !== 'ssh')) {
+      throw new Error('Each Classic host target requires targetId, terminalSessionId, label, and a valid kind.')
+    }
+    if (targetIds.has(targetId)) throw new Error(`Classic host targetId is duplicated: ${targetId}`)
+    if (terminalSessionIds.has(terminalSessionId)) {
+      throw new Error(`Classic terminalSessionId is duplicated: ${terminalSessionId}`)
+    }
+    targetIds.add(targetId)
+    terminalSessionIds.add(terminalSessionId)
+    return { targetId, terminalSessionId, label, kind, ...(cwd ? { cwd } : {}) }
+  })
   return normalized.length ? normalized : undefined
 }
 
@@ -318,7 +356,11 @@ const normalizeChatContexts = (contexts?: AiChatExchangeRequestInput['contexts']
         label,
         detail: normalizeText(context.detail) || undefined,
         relPath: normalizeText(context.relPath) || undefined,
-        mediaType: normalizeText(context.mediaType) || undefined
+        mediaType: normalizeText(context.mediaType) || undefined,
+        contextSource: context.contextSource === 'knowledge-search' ? 'knowledge-search' : context.contextSource === 'selected' ? 'selected' : undefined,
+        startLine: Number.isInteger(context.startLine) && Number(context.startLine) > 0 ? Number(context.startLine) : undefined,
+        endLine: Number.isInteger(context.endLine) && Number(context.endLine) > 0 ? Number(context.endLine) : undefined,
+        chatSessionId: normalizeText(context.chatSessionId) || undefined
       }
     })
     .filter(Boolean) as AiChatContextInput[]
@@ -416,7 +458,13 @@ const buildBackendContextUsageSnapshot = (input: {
   }
 }
 
-const buildExchangePrompt = (text: string, contexts: AiChatContextInput[], skills: AiChatSkillInput[], command: AiChatCommandInput | null) => {
+const buildExchangePrompt = (
+  text: string,
+  contexts: AiChatContextInput[],
+  skills: AiChatSkillInput[],
+  command: AiChatCommandInput | null,
+  richContext: string
+) => {
   const contextLabel = contexts.length ? `\n\n上下文：${contexts.map((item) => `${item.kind}:${item.label}`).join('、')}` : ''
   const commandLabel = commandDisplay(command) ? `\n命令：${commandDisplay(command)}` : ''
   const selectedKnowledgeDocs = contexts.filter((item) => item.kind === 'docs' && item.relPath)
@@ -433,7 +481,8 @@ const buildExchangePrompt = (text: string, contexts: AiChatContextInput[], skill
         .map((skill) => `# Skill Activated: ${skill.name}\nDescription: ${skill.description || ''}\n\n${skill.content || ''}`.trimEnd())
         .join('\n\n')}`
     : ''
-  return `${text}${contextLabel}${commandLabel}${knowledgeContext}${skillContext}`.trim()
+  const providerContext = richContext ? `\n\n${richContext}` : ''
+  return `${text}${contextLabel}${commandLabel}${knowledgeContext}${skillContext}${providerContext}`.trim()
 }
 
 const buildResponseMessages = (messages: AiChatMessageInput[] | undefined, prompt: string): AiChatMessageInput[] => {
@@ -458,10 +507,33 @@ const buildResponseMessages = (messages: AiChatMessageInput[] | undefined, promp
 
 export const createAiChatExchangeRequest = async (input: AiChatExchangeRequestInput): Promise<AiChatExchangeRequestResult> => {
   const text = normalizeText(input.text)
+  let hostTargets: ClineAgentHostTarget[] | undefined
+  try {
+    hostTargets = normalizeClineHostTargets(input.hostTargets)
+  } catch (error) {
+    return {
+      ok: false,
+      errorCode: 'AI_CHAT_HOST_TARGETS_INVALID',
+      errorMessage: error instanceof Error ? error.message : 'Classic host targets are invalid.'
+    }
+  }
   const contexts = normalizeChatContexts(input.contexts)
   const command = normalizeCommand(input.command)
   const skills = await resolveSelectedSkills(contexts)
-  const prompt = buildExchangePrompt(text, contexts, skills, command)
+  const richContext = await resolveClassicRichContext({
+    conversationId: normalizeText(input.conversationId) || undefined,
+    contexts,
+    contentParts: input.contentParts,
+    runtime: runtimeConfig.richContext
+  })
+  if (richContext.imageErrors.length) {
+    return {
+      ok: false,
+      errorCode: 'AI_CHAT_IMAGE_INVALID',
+      errorMessage: [...new Set(richContext.imageErrors)].join('\n')
+    }
+  }
+  const prompt = buildExchangePrompt(text, contexts, skills, command, classicRichContextPrompt(richContext.entries))
   if (!prompt) return { ok: false, errorCode: 'empty_prompt', errorMessage: 'Prompt is required' }
   const requestId = `aichat-request-${randomUUID()}`
   const assistantMessage = {
@@ -474,14 +546,17 @@ export const createAiChatExchangeRequest = async (input: AiChatExchangeRequestIn
     requestId,
     assistantMessageId: assistantMessage.id,
     conversationId: normalizeText(input.conversationId) || undefined,
-    terminalSessionId: normalizeText(input.terminalSessionId) || undefined,
+    replaceNativeTranscript: input.replaceNativeTranscript === true || undefined,
+    hostTargets,
     prompt,
     messages: buildResponseMessages(input.messages, prompt),
     contexts,
+    userImages: richContext.userImages.length ? richContext.userImages : undefined,
     skills,
     command,
     model: normalizeText(input.model) || undefined,
-    mode: normalizeMode(input.mode)
+    mode: normalizeMode(input.mode),
+    productContext: input.productContext
   }
   const contextUsage = buildBackendContextUsageSnapshot({
     ...responseInput,
@@ -626,14 +701,20 @@ async function generateClineAiChatResponse(
   control: AiChatResponseControl
 ): Promise<AiChatResponseResult> {
   const identity = classicClineTaskIdentity(input)
-  control.clineTask = {
-    ...identity,
-    ...(normalizeText(input.terminalSessionId) ? { terminalSessionId: normalizeText(input.terminalSessionId) } : {})
+  control.clineTask = { ...identity }
+  let operatorRules = config.rules || []
+  if (runtimeConfig.listRules) {
+    try {
+      operatorRules = await runtimeConfig.listRules()
+    } catch {
+      // The config snapshot remains a safe fallback when the preferences store is unavailable.
+    }
   }
   const response = await generateClassicClineResponse({
     request: input,
     config,
     modelName,
+    operatorRules,
     identity,
     runTurn: runtimeConfig.runClineTurn || runClineAgentTurn
   })
@@ -651,6 +732,9 @@ async function generateClineAiChatResponse(
       assistantMessageId: control.assistantMessageId,
       message: response.data.message,
       agentTask: response.data.agentTask,
+      nativeSessionId: response.data.nativeSessionId,
+      nativeProfile: response.data.nativeProfile,
+      nativeScopeKey: response.data.nativeScopeKey,
       contextUsage: contextUsageForResponse(input, control, modelName, response.data.text)
     }
   }

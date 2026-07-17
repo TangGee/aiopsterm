@@ -98,6 +98,59 @@ const aiNotificationSelectorProperties = {
   }
 }
 
+const databaseConnectionIdProperty = {
+  type: 'string',
+  description: 'Process-scoped opaque handle returned by list_database_connections.'
+}
+
+const databaseTableSelectorProperties = {
+  connectionId: databaseConnectionIdProperty,
+  databaseName: { type: 'string', description: 'Catalog or database name from the saved connection.' },
+  schemaName: { type: 'string', description: 'Optional schema name.' },
+  tableName: { type: 'string', description: 'Exact table or view name.' }
+}
+
+const databaseQueryTableSelectorProperties = {
+  ...databaseTableSelectorProperties,
+  tableName: { type: 'string', description: 'Exact base table name. Views cannot be queried.' }
+}
+
+const databaseBoundedColumnsProperty = {
+  type: 'array',
+  minItems: 1,
+  maxItems: 50,
+  uniqueItems: true,
+  items: { type: 'string' },
+  description: 'Optional bounded scalar columns. Unbounded LOB, TEXT, JSON, collection, and String columns are rejected.'
+}
+
+const databaseStructuredFiltersProperty = {
+  type: 'array',
+  maxItems: 10,
+  description: 'Structured filters combined with AND.',
+  items: {
+    type: 'object',
+    properties: {
+      column: { type: 'string' },
+      operator: { type: 'string', enum: ['like', 'eq', 'neq', 'in', 'isnull', 'notnull'] },
+      value: { type: 'string' },
+      values: { type: 'array', maxItems: 50, items: { type: 'string' } }
+    },
+    required: ['column', 'operator'],
+    additionalProperties: false
+  }
+}
+
+const databaseStructuredSortProperty = {
+  type: 'object',
+  properties: {
+    column: { type: 'string' },
+    direction: { type: 'string', enum: ['asc', 'desc'] }
+  },
+  required: ['column', 'direction'],
+  additionalProperties: false
+}
+
 const tools = [
   {
     name: 'list_hosts',
@@ -620,16 +673,67 @@ const tools = [
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }
   },
   {
+    name: 'list_databases',
+    title: 'List databases on an aiopsterm connection',
+    description: 'List bounded catalog or database metadata on one saved connection. No connection secrets are returned.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        connectionId: databaseConnectionIdProperty,
+        databaseName: { type: 'string', description: 'Optional exact database scope.' },
+        query: { type: 'string', description: 'Optional case-insensitive name filter.' },
+        limit: { type: 'integer', minimum: 1, maximum: 100, description: 'Maximum databases to return. Defaults to 100.' }
+      },
+      required: ['connectionId'],
+      additionalProperties: false
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }
+  },
+  {
+    name: 'list_schemas',
+    title: 'List schemas in an aiopsterm database',
+    description: 'List bounded schema metadata from the current catalog snapshot for one exact database.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        connectionId: databaseConnectionIdProperty,
+        databaseName: { type: 'string', description: 'Exact catalog or database name.' },
+        schemaName: { type: 'string', description: 'Optional exact schema scope.' },
+        query: { type: 'string', description: 'Optional case-insensitive name filter.' },
+        limit: { type: 'integer', minimum: 1, maximum: 200, description: 'Maximum schemas to return. Defaults to 100.' }
+      },
+      required: ['connectionId', 'databaseName'],
+      additionalProperties: false
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }
+  },
+  {
+    name: 'list_tables',
+    title: 'List tables in an aiopsterm database',
+    description: 'List bounded table and view metadata in one exact database and optional schema.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        connectionId: databaseConnectionIdProperty,
+        databaseName: { type: 'string', description: 'Exact catalog or database name.' },
+        schemaName: { type: 'string', description: 'Optional exact schema scope.' },
+        query: { type: 'string', description: 'Optional case-insensitive table-name filter.' },
+        kinds: { type: 'array', uniqueItems: true, items: { type: 'string', enum: ['table', 'view'] } },
+        limit: { type: 'integer', minimum: 1, maximum: 500, description: 'Maximum tables and views to return. Defaults to 200.' }
+      },
+      required: ['connectionId', 'databaseName'],
+      additionalProperties: false
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }
+  },
+  {
     name: 'search_database_objects',
     title: 'Search aiopsterm database objects',
     description: 'Search catalog metadata for tables, views, functions, and procedures on one saved database connection.',
     inputSchema: {
       type: 'object',
       properties: {
-        connectionId: {
-          type: 'string',
-          description: 'Process-scoped opaque handle returned by list_database_connections.'
-        },
+        connectionId: databaseConnectionIdProperty,
         query: { type: 'string', description: 'Optional case-insensitive object, path, or column-name search.' },
         databaseName: { type: 'string', description: 'Optional exact catalog or database name.' },
         schemaName: { type: 'string', description: 'Optional exact schema name.' },
@@ -652,15 +756,7 @@ const tools = [
       'Return current catalog metadata for one table or view, including column types, nullability, keys, and primary-key columns.',
     inputSchema: {
       type: 'object',
-      properties: {
-        connectionId: {
-          type: 'string',
-          description: 'Process-scoped opaque handle returned by list_database_connections.'
-        },
-        databaseName: { type: 'string', description: 'Catalog or database name from the saved connection.' },
-        schemaName: { type: 'string', description: 'Optional schema name.' },
-        tableName: { type: 'string', description: 'Exact table or view name.' }
-      },
+      properties: databaseTableSelectorProperties,
       required: ['connectionId', 'databaseName', 'tableName'],
       additionalProperties: false
     },
@@ -672,15 +768,7 @@ const tools = [
     description: 'Read a redacted CREATE definition for one catalog-known table or view through the saved aiopsterm connection.',
     inputSchema: {
       type: 'object',
-      properties: {
-        connectionId: {
-          type: 'string',
-          description: 'Process-scoped opaque handle returned by list_database_connections.'
-        },
-        databaseName: { type: 'string', description: 'Catalog or database name from the saved connection.' },
-        schemaName: { type: 'string', description: 'Optional schema name.' },
-        tableName: { type: 'string', description: 'Exact table or view name.' }
-      },
+      properties: databaseTableSelectorProperties,
       required: ['connectionId', 'databaseName', 'tableName'],
       additionalProperties: false
     },
@@ -694,48 +782,76 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        connectionId: {
-          type: 'string',
-          description: 'Process-scoped opaque handle returned by list_database_connections.'
-        },
-        databaseName: { type: 'string', description: 'Catalog or database name from the saved connection.' },
-        schemaName: { type: 'string', description: 'Optional schema name.' },
-        tableName: { type: 'string', description: 'Exact base table name. Views cannot be queried.' },
-        columns: {
-          type: 'array',
-          minItems: 1,
-          maxItems: 50,
-          uniqueItems: true,
-          items: { type: 'string' },
-          description: 'Optional bounded scalar columns to return. Unbounded LOB, TEXT, JSON, collection, and String columns cannot be selected.'
-        },
-        filters: {
-          type: 'array',
-          maxItems: 10,
-          description: 'Structured filters combined with AND.',
-          items: {
-            type: 'object',
-            properties: {
-              column: { type: 'string' },
-              operator: { type: 'string', enum: ['like', 'eq', 'neq', 'in', 'isnull', 'notnull'] },
-              value: { type: 'string' },
-              values: { type: 'array', maxItems: 50, items: { type: 'string' } }
-            },
-            required: ['column', 'operator'],
-            additionalProperties: false
-          }
-        },
-        sort: {
-          type: 'object',
-          properties: {
-            column: { type: 'string' },
-            direction: { type: 'string', enum: ['asc', 'desc'] }
-          },
-          required: ['column', 'direction'],
-          additionalProperties: false
-        },
+        ...databaseQueryTableSelectorProperties,
+        columns: databaseBoundedColumnsProperty,
+        filters: databaseStructuredFiltersProperty,
+        sort: databaseStructuredSortProperty,
         page: { type: 'integer', minimum: 1, maximum: 1000, description: 'One-based page number. Defaults to 1 and is capped at 1000.' },
         pageSize: { type: 'integer', minimum: 1, maximum: 100, description: 'Rows per page. Defaults to 50 and is capped at 100.' }
+      },
+      required: ['connectionId', 'databaseName', 'tableName'],
+      additionalProperties: false
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true }
+  },
+  {
+    name: 'sample_rows',
+    title: 'Sample rows from an aiopsterm database table',
+    description:
+      'Read at most 20 rows from one catalog-known base table through the structured table-query boundary. Arbitrary SQL is not accepted.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...databaseQueryTableSelectorProperties,
+        columns: databaseBoundedColumnsProperty,
+        filters: databaseStructuredFiltersProperty,
+        sort: databaseStructuredSortProperty,
+        limit: { type: 'integer', minimum: 1, maximum: 20, description: 'Rows to return. Defaults to 5 and is capped at 20.' }
+      },
+      required: ['connectionId', 'databaseName', 'tableName'],
+      additionalProperties: false
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true }
+  },
+  {
+    name: 'count_rows',
+    title: 'Count rows in an aiopsterm database table',
+    description: 'Count rows in one catalog-known base table using optional structured filters. Arbitrary SQL is not accepted.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...databaseQueryTableSelectorProperties,
+        filters: databaseStructuredFiltersProperty
+      },
+      required: ['connectionId', 'databaseName', 'tableName'],
+      additionalProperties: false
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true }
+  },
+  {
+    name: 'inspect_indexes',
+    title: 'Inspect indexes on an aiopsterm database table',
+    description: 'Return structured index metadata for one catalog-known base table when the database engine has a safe index adapter.',
+    inputSchema: {
+      type: 'object',
+      properties: databaseQueryTableSelectorProperties,
+      required: ['connectionId', 'databaseName', 'tableName'],
+      additionalProperties: false
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true }
+  },
+  {
+    name: 'explain_plan',
+    title: 'Explain a structured aiopsterm table query',
+    description:
+      'Return a bounded execution plan for a catalog-validated structured base-table query when the database engine has a safe explain adapter. SQL text is never accepted.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...databaseQueryTableSelectorProperties,
+        columns: databaseBoundedColumnsProperty,
+        filters: databaseStructuredFiltersProperty,
+        sort: databaseStructuredSortProperty
       },
       required: ['connectionId', 'databaseName', 'tableName'],
       additionalProperties: false

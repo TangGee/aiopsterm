@@ -1448,10 +1448,17 @@ describe('external Codex MCP bridge runtime', () => {
           'open_ai_notification',
           'jump_to_unread_ai_notification',
           'list_database_connections',
+          'list_databases',
+          'list_schemas',
+          'list_tables',
           'search_database_objects',
           'describe_database_table',
           'get_database_table_ddl',
-          'query_database_table'
+          'query_database_table',
+          'sample_rows',
+          'count_rows',
+          'inspect_indexes',
+          'explain_plan'
         ])
         expect(tools.result?.tools?.filter((tool) => DATABASE_MCP_TOOL_NAMES.includes(tool.name as any))).toEqual(DATABASE_MCP_TOOL_DEFINITIONS)
         const runCommandTool = tools.result?.tools?.find((tool) => tool.name === 'run_command')

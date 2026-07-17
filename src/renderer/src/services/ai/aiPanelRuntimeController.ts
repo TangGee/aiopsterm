@@ -23,7 +23,10 @@ import { createAiPanelChatNavigationRuntime } from '@/services/ai/aiPanelChatNav
 import { createAiPanelPresentationRuntime } from '@/services/ai/aiPanelPresentationRuntime'
 import { createAiPanelShellAdapterRuntime } from '@/services/ai/aiPanelShellAdapterRuntime'
 import { aiChatClient } from '@/services/ai/aiChatClient'
-import { isActiveClassicClineTaskMessage } from '@/services/ai/classicClineTaskRuntime'
+import {
+  classicClineActivityForMessages,
+  isActiveClassicClineTaskMessage
+} from '@/services/ai/classicClineTaskRuntime'
 import { copyTextToClipboard } from '@/services/app/clipboardRuntime'
 import { codexTargetContextFromPanel } from '@/services/ai/aiPanelCodexRuntime'
 import { createAiPanelCodexConversationRuntime } from '@/services/ai/aiPanelCodexConversationRuntime'
@@ -34,6 +37,7 @@ import {
   type AiPanelOnboardingRequest
 } from '@/services/ai/aiPanelLifecycleRuntime'
 import { useI18n } from '@/i18n'
+import { MAX_CHAT_IMAGE_ATTACHMENTS_PER_MESSAGE } from '@shared/chatImageAttachment'
 import type { AiContextOption } from '@shared/contracts/aiChat'
 
 export type AiPanelContainerRuntimeProps = { agentMode?: boolean }
@@ -46,10 +50,14 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
   const streaming = computed(() => workspace.chatMessages.some((message) =>
     message.state === 'streaming' || isActiveClassicClineTaskMessage(message)
   ))
+  const classicClineActivity = computed(() => classicClineActivityForMessages(workspace.chatMessages))
 
   const shellAdapter = createAiPanelShellAdapterRuntime({
     refreshClassicCatalog: () => workspace.refreshAiModelCatalog({ replaceSettingsOptions: false }),
-    hydrateClassicChatData: () => workspace.hydrateClassicChatData()
+    hydrateClassicChatData: () => workspace.hydrateClassicChatData({
+      restoreIfEmpty: false,
+      restoreSelection: false
+    })
   })
 
   const aiPanelPresentationRuntime = createAiPanelPresentationRuntime({
@@ -161,11 +169,17 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     locale: () => locale.value,
     t,
     createConversation: () => workspace.createConversation(),
+    cancelActiveTurn: () => workspace.cancelStreamingAiChatResponse(),
+    deselectConversation: (expectedConversationId) => workspace.deselectConversation(expectedConversationId),
     restoreConversation: (id) => workspace.restoreConversation(id),
     renameConversation: (id, title) => workspace.renameConversation(id, title),
     deleteConversation: (id) => workspace.deleteConversation(id),
     toggleConversationFavorite: (id) => workspace.toggleConversationFavorite(id),
-    loadConversations: () => workspace.loadChatConversationsFromBackend({ restoreIfEmpty: false }),
+    loadConversations: () => workspace.loadChatConversationsFromBackend({
+      restoreIfEmpty: false,
+      restoreSelection: false
+    }),
+    loadOlderMessages: () => workspace.loadOlderConversationMessages(),
     exportChat: () => aiChatClient.exportChat(),
     closeContextPopup: () => closeContextPopup(),
     closeCommandPopup: () => closeCommandPopup(),
@@ -181,6 +195,7 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     clearTimer: shellAdapter.clearAnyTimer
   })
   const {
+    activateChatViewport,
     cancelChatScrollFrame,
     cancelHistoryTitleEdit,
     chatExportNotice,
@@ -211,6 +226,8 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     findPreviousChatMatch,
     formatHistoryTime,
     groupedVisibleHistory,
+    handleChatScroll,
+    handleChatUserScrollIntent,
     handleChatSearchTermChanged,
     hasMoreHistoryConversations,
     historyFavoriteLabel,
@@ -219,6 +236,7 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     historyMenuOpen,
     historySearchInputRef,
     historySearchTerm,
+    hydrateOpenConversationTabs,
     loadMoreHistoryConversations,
     moreActionsMenuOpen,
     openChatSearch,
@@ -234,24 +252,28 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     toggleHistoryFavorite,
     toggleHistoryMenu,
     toggleMoreActionsMenu,
+    visibleChatMessages,
     visibleConversationTabs
   } = aiPanelChatNavigationRuntime
 
   const aiPanelCodexRuntime = createAiPanelCodexConversationRuntime({
     agentMode: () => Boolean(props.agentMode),
-    activePanelId: () => workspace.activePanelId,
     activePanel: () => workspace.activePanel,
+    activePanelId: () => workspace.activePanelId,
     panels: () => workspace.panels,
     terminalSettings: () => workspace.terminalSettings,
     themeId: () => workspace.config.theme,
     terminalSurfaceMode: () => (workspace.config.background.mode === 'none' ? 'base' : 'withBackground'),
     aiContextCatalog: () => workspace.aiContextCatalog,
-    loadClassicChatData: shellAdapter.loadClassicChatData,
+    loadClassicChatData: async () => {
+      await shellAdapter.loadClassicChatData()
+      await hydrateOpenConversationTabs()
+    },
     closePopups: () => closePopups(),
     showNotice: showChatExportNotice,
     setTopNotice: (message) => workspace.setTopNotice(message),
     refreshAiContextCatalog: () => workspace.refreshAiContextCatalog({ hydrateSelection: false }),
-    openTerminalForAiHostContext: (host) => workspace.openTerminalForAiHostContext(host),
+    openTerminalForAiHostContext: (host, restoreOptions) => workspace.openTerminalForAiHostContext(host, restoreOptions),
     activateTerminalPanel: (panelId) => workspace.activateTerminalPanel(panelId),
     upsertAiAttentionItem: (input) => workspace.upsertAiAttentionItem(input),
     removeAiAttentionItem: (id) => workspace.removeAiAttentionItem(id),
@@ -272,11 +294,14 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     bindHostContextToCodex,
     bindTerminalPanelToCodex,
     closeCodexConversation,
+    closeCodexHistoryMenu,
     closeCodexTargetPicker,
     codexBoundTargetDetail,
     codexBoundTargetLabel,
     codexConversations,
     codexConversationTitle,
+    codexHistoryMenuOpen,
+    codexSessionHistory,
     codexStatusLabel,
     codexTargetPickerOpen,
     codexTargetQuery,
@@ -291,6 +316,7 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     locateCodexBoundTarget,
     panelModeMenuOpen,
     restartCodexSession,
+    restoreCodexProductSession,
     selectAiPanelMode,
     selectCodexConversation,
     setCodexTerminalHostRef,
@@ -300,12 +326,12 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     toggleAiPanelModeMenu,
     toggleAiPanelWorkspaceLinkMode,
     toggleCodexTargetPicker,
+    toggleCodexHistoryMenu,
     unbindCodexTarget
   } = aiPanelCodexRuntime
 
   const aiPanelActionOrchestrationRuntime = createAiPanelActionOrchestrationRuntime({
     messages: () => workspace.chatMessages,
-    activePanel: () => workspace.activePanel,
     panels: () => workspace.panels,
     chatMode: () => chatMode.value,
     copyText: copyTextToClipboard,
@@ -319,7 +345,7 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     retryAssistantMessage: (id) => workspace.retryAssistantMessage(id),
     summarizeMessageToKnowledge: (id) => workspace.summarizeMessageToKnowledge(id),
     summarizeMessageToSkill: (id) => workspace.summarizeMessageToSkill(id),
-    runActiveTerminalCommand: (command, source) => workspace.runActiveTerminalCommand(command, source),
+    runTerminalCommand: (panelId, command, source) => workspace.runTerminalCommand(panelId, command, { source, writeToShell: true }),
     continueAgentCommandLoop: (input) => workspace.continueAgentCommandLoop(input),
     enableAgentReadOnlyAutoRunForCurrentConversation: () => workspace.enableAgentReadOnlyAutoRunForCurrentConversation(),
     syncCurrentConversationSnapshot: (options) => workspace.syncCurrentConversationSnapshot(options),
@@ -386,6 +412,7 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     panels: () => workspace.panels,
     createConversation: () => workspace.createConversation(),
     addKnowledgeFilesToChat: (relPaths) => workspace.addKnowledgeFilesToChat(relPaths),
+    imageLimitMessage: () => t('ai.imageAttachmentCountLimit', { count: MAX_CHAT_IMAGE_ATTACHMENTS_PER_MESSAGE }),
     bindTerminalPanelToCodex,
     bindHostContextToCodex,
     popupState: popupInteractionState,
@@ -394,6 +421,7 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     closeModeMenu,
     closeModelMenu,
     closeCodexTargetPicker,
+    closeCodexHistoryMenu,
     closeMoreActionsMenu: () => {
       moreActionsMenuOpen.value = false
     },
@@ -513,7 +541,7 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     conversationIdsSignature: () => workspace.conversations.map((conversation) => conversation.id).join('|'),
     pruneConversationTabs,
     ensureConversationTab,
-    chatMessagesSignature: () => aiPanelChatMessagesSignature(workspace.chatMessages),
+    chatMessagesSignature: () => `${workspace.selectedConversationId}|${aiPanelChatMessagesSignature(workspace.chatMessages)}`,
     syncSearchForMessages,
     activeCodexTargetSignature: () => activeCodexTargetSignature.value,
     syncActiveCodexTargetContext,
@@ -554,6 +582,7 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     activeCodexConversation,
     activeCodexConversationId,
     activeCommandAuditMessage,
+    activateChatViewport,
     agentMode,
     aiChatModeOptions,
     aiPanelComposerRuntime,
@@ -591,6 +620,8 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     codexBoundTargetLabel,
     codexConversations,
     codexConversationTitle,
+    codexHistoryMenuOpen,
+    codexSessionHistory,
     codexStatusLabel,
     codexTargetPickerOpen,
     codexTargetQuery,
@@ -658,6 +689,8 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     formatMcpToolArguments,
     getChipLabel,
     groupedVisibleHistory,
+    handleChatScroll,
+    handleChatUserScrollIntent,
     handleCommandKeydown,
     handleContextKeydown,
     handleDragEnter,
@@ -713,6 +746,7 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     removeEditHostContext,
     renderedMarkdownParts,
     restartCodexSession,
+    restoreCodexProductSession,
     restoreConversationFromTab,
     restoreHistoryConversation,
     retryAssistantMessage,
@@ -727,6 +761,7 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     selectChatMode,
     selectCodexConversation,
     selectedCommandRef,
+    selectedContextCategory,
     selectedModelLabel,
     selectModel,
     setCodexTerminalHostRef,
@@ -734,12 +769,14 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     setMessageFeedback,
     showNoAvailableModelPrompt,
     streaming,
+    classicClineActivity,
     summarizeMessageToKnowledge,
     summarizeMessageToSkill,
     t,
     toggleAiPanelModeMenu,
     toggleAiPanelWorkspaceLinkMode,
     toggleCodexTargetPicker,
+    toggleCodexHistoryMenu,
     toggleContextPopup,
     toggleHistoryFavorite,
     toggleHistoryMenu,
@@ -749,6 +786,7 @@ export const useAiPanelContainerRuntime = (props: AiPanelContainerRuntimeProps) 
     toggleMoreActionsMenu,
     toggleVoiceInput,
     unbindCodexTarget,
+    visibleChatMessages,
     visibleContextCategories,
     visibleConversationTabs,
     voiceButtonTitle,

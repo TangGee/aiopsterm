@@ -66,6 +66,7 @@ export const createDatabaseAiWorkspaceController = (
 
   const {
     dbAiPaneOpen,
+    dbAiPaneConversationId,
     dbAiPaneWidth,
     dbAiPaneResizing,
     dbAiPaneContext,
@@ -73,6 +74,7 @@ export const createDatabaseAiWorkspaceController = (
     dbAiPaneComposerAction,
     dbAiPaneComposerPlaceholder,
     dbAiPaneMessages,
+    dbAiPaneRestoreIssues,
     canToggleDbAiPane,
     dbAiPaneConnection,
     dbAiPaneCatalogOptions,
@@ -91,16 +93,20 @@ export const createDatabaseAiWorkspaceController = (
     closeDbAiPane,
     useActiveDbAiPaneContext,
     syncDbAiPaneContextToActiveSqlTab,
+    syncDbAiPaneContextForAction,
     updateDbAiPaneConnection,
     updateDbAiPaneCatalog,
     updateDbAiPaneSchema,
     connectDbAiPaneConnection,
+    retryDbAiPaneBinding,
     handleDbAiPaneDraftKeydown,
     prepareDbAiPaneAction,
     cancelDbAiPaneActionMode,
     sendDbAiPaneQuickPrompt,
     syncDbAiPaneActionRequest,
     resetDbAiPaneConversation: resetPaneConversation,
+    restoreDbAiPaneSession,
+    loadOlderDbAiPaneMessages,
     cancelDbAiPaneResponse: cancelPaneResponse,
     sendDbAiPaneMessage,
     startDbAiPaneResize,
@@ -172,6 +178,7 @@ export const createDatabaseAiWorkspaceController = (
       setEditorSql,
       appendSqlExecution,
       getResponseLanguage: () => responseLanguage.value,
+      getConversationId: () => dbAiPaneConversationId.value,
       syncConversationRequest: syncDbAiPaneActionRequest
     }
   )
@@ -191,6 +198,7 @@ export const createDatabaseAiWorkspaceController = (
   }
 
   const openDbAi = (...args: Parameters<typeof openDbAiDrawer>) => {
+    syncDbAiPaneContextForAction(args[3] || {})
     openDbAiPane()
     return openDbAiDrawer(...args)
   }
@@ -221,6 +229,7 @@ export const createDatabaseAiWorkspaceController = (
     dbAiPaneComposerAction,
     dbAiPaneComposerPlaceholder,
     dbAiPaneMessages,
+    dbAiPaneRestoreIssues,
     dbAiOpen,
     dbAiActiveReqId,
     sqlDiagnose,
@@ -259,10 +268,13 @@ export const createDatabaseAiWorkspaceController = (
     updateDbAiPaneCatalog,
     updateDbAiPaneSchema,
     connectDbAiPaneConnection,
+    retryDbAiPaneBinding,
     handleDbAiPaneDraftKeydown,
     cancelDbAiPaneActionMode,
     sendDbAiPaneQuickPrompt,
     resetDbAiPaneConversation,
+    restoreDbAiPaneSession,
+    loadOlderDbAiPaneMessages,
     cancelDbAiPaneResponse,
     sendDbAiPaneMessage,
     startDbAiPaneResize,

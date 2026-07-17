@@ -47,6 +47,43 @@ export const dbAiDialectOptions: Array<{ value: DbAiTargetDialect; label: string
 
 export const dbAiResponseLanguageForLocale = (locale: unknown): DatabaseAiResponseLanguage => locale === 'zh-CN' ? 'zh-CN' : 'en-US'
 
+export const dbAiLocalizedBackendMessage = (input: {
+  responseLanguage: DatabaseAiResponseLanguage
+  errorCode?: unknown
+  errorMessage?: unknown
+  fallback: string
+}) => {
+  const errorCode = String(input.errorCode || '').trim()
+  const errorMessage = String(input.errorMessage || '').trim()
+  if (input.responseLanguage !== 'zh-CN') return errorMessage || input.fallback
+  if (/[㐀-鿿]/u.test(errorMessage)) return errorMessage
+
+  const normalizedMessage = errorMessage.toLocaleLowerCase()
+  if (
+    errorCode.endsWith('_CANCELLED') ||
+    normalizedMessage === 'db_ai_cancelled' ||
+    normalizedMessage === 'aborted' ||
+    /\b(?:cancelled|canceled|stopped|aborted)\b/.test(normalizedMessage)
+  ) return 'DB AI 请求已取消。'
+
+  const knownMessages: Record<string, string> = {
+    DB_AI_PROVIDER_UNAVAILABLE: 'DB AI provider 不可用。',
+    DB_AI_APPROVAL_UNEXPECTED: '只读 DB AI tool 意外请求了操作员审批。',
+    DB_AI_REQUEST_NOT_FOUND: 'DB AI 请求不存在或已结束。',
+    DB_MCP_CONNECTION_REQUIRED: 'DB AI session 未绑定 database 连接。',
+    DB_MCP_DATABASE_SCOPE_MISMATCH: '请求的 database 超出当前 DB AI session 范围。',
+    DB_MCP_SCHEMA_SCOPE_MISMATCH: '请求的 schema 超出当前 DB AI session 范围。',
+    DB_MCP_READ_TIMEOUT: 'Database MCP 读取超过 30 秒限制（DB_MCP_READ_TIMEOUT）。',
+    DB_MCP_READ_CONCURRENCY_LIMIT: 'Database MCP 读取并发已达上限（DB_MCP_READ_CONCURRENCY_LIMIT）。',
+    DB_MCP_READ_CHANNEL_ISOLATED: 'Database MCP 读取通道已隔离（DB_MCP_READ_CHANNEL_ISOLATED）。'
+  }
+  if (knownMessages[errorCode]) return knownMessages[errorCode]
+  if (errorCode.startsWith('DB_MCP_')) return `Database MCP tool 调用失败（${errorCode}）。`
+  if (errorCode.startsWith('DB_AI_')) return `DB AI 请求失败（${errorCode}）。`
+  if (errorCode.startsWith('CLINE_AGENT_')) return `DB AI Agent 运行失败（${errorCode}）。`
+  return input.fallback
+}
+
 export const dbAiActionLabel = (action: DbAiAction, responseLanguage: DatabaseAiResponseLanguage) =>
   databaseAiPaneActionName(action, responseLanguage)
 
@@ -71,8 +108,12 @@ export const normalizeDbAiPaneContext = (
   }
 }
 
-export const dbAiPaneContextSummary = (connection: DatabaseConnectionInfo | null | undefined, context: DbAiPaneContext) => {
-  if (!connection) return 'No database context selected'
+export const dbAiPaneContextSummary = (
+  connection: DatabaseConnectionInfo | null | undefined,
+  context: DbAiPaneContext,
+  responseLanguage: DatabaseAiResponseLanguage = 'en-US'
+) => {
+  if (!connection) return responseLanguage === 'zh-CN' ? '尚未选择 database context' : 'No database context selected'
   const catalogName = databaseCatalogDisplayName(connection, { name: context.catalogName })
   return [connection.name, connection.dbType, catalogName, context.schemaName].filter(Boolean).join(' · ')
 }
@@ -83,7 +124,14 @@ export const dbAiPaneCanSend = (draft: string, context: DbAiPaneContext, isStrea
 export const dbAiPaneIsStreaming = (messages: DbAiPaneMessage[]) =>
   messages.some((message) => message.role === 'assistant' && (message.status === 'queued' || message.status === 'streaming'))
 
-export const dbAiPaneStatusLabel = (status: DbAiPaneMessageStatus) => {
+export const dbAiPaneStatusLabel = (status: DbAiPaneMessageStatus, responseLanguage: DatabaseAiResponseLanguage = 'en-US') => {
+  if (responseLanguage === 'zh-CN') {
+    if (status === 'queued') return '排队中'
+    if (status === 'streaming') return '生成中'
+    if (status === 'cancelled') return '已取消'
+    if (status === 'error') return '错误'
+    return '已完成'
+  }
   if (status === 'queued') return 'Queued'
   if (status === 'streaming') return 'Streaming'
   if (status === 'cancelled') return 'Cancelled'
@@ -105,7 +153,12 @@ export const applyDbAiPaneStateSnapshot = (
   width: clampDbAiPaneWidth(snapshot.width),
   context: snapshot.context?.connectionId ? resolveContext(snapshot.context) : null,
   draft: snapshot.draft || '',
-  messages: snapshot.messages.map(cloneDbAiPaneMessage)
+  messages: snapshot.messages.map(cloneDbAiPaneMessage),
+  archivedSessions: (snapshot.archivedSessions || []).map((session) => ({
+    ...session,
+    context: { ...session.context },
+    messages: session.messages.map(cloneDbAiPaneMessage)
+  }))
 })
 
 const cloneDbAiPaneMessage = (message: DbAiPaneMessage): DbAiPaneMessage => ({
@@ -121,13 +174,19 @@ export const currentDbAiPaneStateSnapshot = (input: {
   context: DbAiPaneContext
   draft: string
   messages: DbAiPaneMessage[]
+  archivedSessions?: NonNullable<DatabaseAiPaneStateSnapshot['archivedSessions']>
 }): DatabaseAiPaneStateSnapshot => ({
   conversationId: input.conversationId,
   open: input.open,
   width: input.width,
   context: { ...input.context },
   draft: input.draft,
-  messages: input.messages.slice(-24).map(cloneDbAiPaneMessage)
+  messages: input.messages.slice(-24).map(cloneDbAiPaneMessage),
+  archivedSessions: (input.archivedSessions || []).map((session) => ({
+    ...session,
+    context: { ...session.context },
+    messages: session.messages.slice(-24).map(cloneDbAiPaneMessage)
+  }))
 })
 
 export const dbAiContextParts = (tab: SqlTab, connection?: DatabaseConnectionInfo) => {
@@ -189,7 +248,15 @@ export const removeDbAiRequestRecord = (requests: Record<string, DbAiRequest>, r
   return { requests: rest, activeReqId: fallback?.id ?? null, open: Boolean(fallback) }
 }
 
-export const dbAiStatusLabel = (status: DbAiStatus | 'idle') => {
+export const dbAiStatusLabel = (status: DbAiStatus | 'idle', responseLanguage: DatabaseAiResponseLanguage = 'en-US') => {
+  if (responseLanguage === 'zh-CN') {
+    if (status === 'queued') return '排队中'
+    if (status === 'streaming') return '生成中'
+    if (status === 'cancelled') return '已取消'
+    if (status === 'error') return '错误'
+    if (status === 'done') return '已完成'
+    return '空闲'
+  }
   if (status === 'queued') return 'Queued'
   if (status === 'streaming') return 'Streaming'
   if (status === 'cancelled') return 'Cancelled'
@@ -211,8 +278,22 @@ export const dbAiPaneMessageContent = (message: DbAiPaneMessage) =>
 export const dbAiPaneMessageGeneratedSql = (message: DbAiPaneMessage) =>
   message.sqlAction?.generatedSql.trim() || (message.sqlAction && message.sqlAction.action !== 'explain' ? extractFencedSql(message.content) : '')
 
-export const dbAiContentText = (input: { action: DbAiAction; text: string; sql: string; targetDialect: DbAiTargetDialect }) => {
+export const dbAiContentText = (input: {
+  action: DbAiAction
+  text: string
+  sql: string
+  targetDialect: DbAiTargetDialect
+  responseLanguage?: DatabaseAiResponseLanguage
+}) => {
   if (!input.sql || !input.text.trim()) return ''
+  if (input.responseLanguage === 'zh-CN') {
+    if (input.action === 'convert') return `已生成 ${dbAiDialectLabel(input.targetDialect)} SQL 预览。`
+    if (input.action === 'diagnose') return '已生成保守的只读 SQL 诊断候选。'
+    if (input.action === 'optimize') return '已生成优化后的只读 SQL 候选。'
+    if (input.action === 'complete') return '已根据当前编辑器上下文补全 SQL 候选。'
+    if (input.action === 'nl2sql') return '已根据自然语言请求和当前 database context 生成 SQL。'
+    return 'SQL 已生成，可按允许的操作复制、替换、插入或执行只读查询。'
+  }
   if (input.action === 'convert') return `Generated ${dbAiDialectLabel(input.targetDialect)} SQL preview.`
   if (input.action === 'diagnose') return 'Generated a conservative read-only SQL diagnosis candidate.'
   if (input.action === 'optimize') return 'Generated an optimized read-only SQL candidate.'
@@ -240,12 +321,14 @@ export const canRunDbAiReadOnly = (input: {
 export const dbAiCanCancel = (status: DbAiStatus | 'idle') => status === 'queued' || status === 'streaming'
 
 export const dbAiDrawerCreateInput = (input: {
+  conversationId?: string
   action: DbAiAction
   sourceSql: string
   targetDialect: DbAiTargetDialect
   context: DbAiBackendContext
   responseLanguage: DatabaseAiResponseLanguage
 }): DatabaseAiDrawerResponseInput => ({
+  ...(String(input.conversationId || '').trim() ? { conversationId: String(input.conversationId).trim() } : {}),
   action: input.action,
   responseLanguage: input.responseLanguage,
   sourceSql: input.sourceSql,
@@ -289,7 +372,12 @@ export const dbAiPaneRequestInput = (input: {
   }))
 })
 
-export const planDbAiInsertSql = (sqlText: string, range: { start: number; end: number }, generatedSql: string) => {
+export const planDbAiInsertSql = (
+  sqlText: string,
+  range: { start: number; end: number },
+  generatedSql: string,
+  responseLanguage: DatabaseAiResponseLanguage = 'en-US'
+) => {
   const before = sqlText.slice(0, range.start)
   const after = sqlText.slice(range.end)
   const replacingSelection = range.start !== range.end
@@ -299,15 +387,25 @@ export const planDbAiInsertSql = (sqlText: string, range: { start: number; end: 
   return {
     nextSql,
     selectionStart: range.start + prefix.length + generatedSql.length,
-    notice: replacingSelection ? 'Editor selection replaced' : 'Generated SQL inserted'
+    notice: responseLanguage === 'zh-CN'
+      ? replacingSelection ? '已替换编辑器选区' : '已插入生成的 SQL'
+      : replacingSelection ? 'Editor selection replaced' : 'Generated SQL inserted'
   }
 }
 
-export const planDbAiReplaceSql = (sqlText: string, range: { start: number; end: number }, generatedSql: string, replacingExplicitSelection: boolean) => ({
+export const planDbAiReplaceSql = (
+  sqlText: string,
+  range: { start: number; end: number },
+  generatedSql: string,
+  replacingExplicitSelection: boolean,
+  responseLanguage: DatabaseAiResponseLanguage = 'en-US'
+) => ({
   nextSql: `${sqlText.slice(0, range.start)}${generatedSql}${sqlText.slice(range.end)}`,
   selectionStart: range.start,
   selectionEnd: range.start + generatedSql.length,
-  notice: replacingExplicitSelection ? 'Editor selection replaced' : 'Current statement replaced'
+  notice: responseLanguage === 'zh-CN'
+    ? replacingExplicitSelection ? '已替换编辑器选区' : '已替换当前 SQL 语句'
+    : replacingExplicitSelection ? 'Editor selection replaced' : 'Current statement replaced'
 })
 
 export const formatDbAiRequestTime = (time: number) => {

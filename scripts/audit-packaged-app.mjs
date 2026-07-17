@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { createRequire } from 'node:module'
-import { join, resolve } from 'node:path'
+import { basename, join, relative, resolve } from 'node:path'
 import { codexBinaryName } from './codex-runtime-paths.mjs'
 
 const require = createRequire(import.meta.url)
@@ -24,6 +24,12 @@ const resourcesDirForPlatform = (unpackedDir) => {
   return join(unpackedDir, 'resources')
 }
 
+const executableForPlatform = (unpackedDir) => {
+  if (platform === 'win32') return join(unpackedDir, 'aiopsterm.exe')
+  if (platform === 'darwin') return join(unpackedDir, 'Contents', 'MacOS', 'aiopsterm')
+  return join(unpackedDir, 'aiopsterm')
+}
+
 const nativeModuleFilesForPlatform = (resourcesDir) => {
   const root = join(resourcesDir, 'app.asar.unpacked', 'node_modules', 'node-pty')
   if (platform === 'win32') {
@@ -38,13 +44,36 @@ const sizeOf = (target) => {
   return readdirSync(target).reduce((size, entry) => size + sizeOf(join(target, entry)), 0)
 }
 
+const listFiles = (target) => {
+  if (!existsSync(target)) return []
+  const stat = statSync(target)
+  if (stat.isFile()) return [target]
+  return readdirSync(target).flatMap((entry) => listFiles(join(target, entry)))
+}
+
+const portableRelative = (root, target) => relative(root, target).replaceAll('\\', '/')
+
+const readJson = (target, label) => {
+  try {
+    return JSON.parse(readFileSync(target, 'utf8'))
+  } catch (error) {
+    throw new Error(`Cannot read ${label}: ${target}\n${error instanceof Error ? error.message : String(error)}`)
+  }
+}
+
 const unpackedDir = unpackedDirForPlatform()
 const resourcesDir = resourcesDirForPlatform(unpackedDir)
+const appExecutable = executableForPlatform(unpackedDir)
 const codexPackage = join(resourcesDir, 'codex')
 const codexBinary = join(codexPackage, 'bin', codexBinaryName(platform))
 const clineSidecar = join(resourcesDir, 'cline-sidecar')
 const clineNode = join(clineSidecar, platform === 'win32' ? 'node.exe' : 'node')
+const sqliteRoot = join(resourcesDir, 'app.asar.unpacked', 'node_modules', 'better-sqlite3')
+const sqlitePackagePath = join(sqliteRoot, 'package.json')
+const sqliteBindingRoot = join(sqliteRoot, 'lib', 'binding')
+const sqliteManifestPath = join(sqliteBindingRoot, 'aiopsterm-native-manifest.json')
 const requiredFiles = [
+  appExecutable,
   join(resourcesDir, 'app.asar'),
   join(resourcesDir, 'app.asar.unpacked'),
   join(codexPackage, 'codex-package.json'),
@@ -59,6 +88,8 @@ const requiredFiles = [
   join(clineSidecar, 'NODE-LICENSE'),
   join(clineSidecar, 'CLINE-LICENSE'),
   join(clineSidecar, 'CLINE-ATTRIBUTION.txt'),
+  sqlitePackagePath,
+  sqliteManifestPath,
   ...nativeModuleFilesForPlatform(resourcesDir)
 ]
 if (platform === 'linux') requiredFiles.push(join(codexPackage, 'codex-resources', 'bwrap'))
@@ -72,6 +103,125 @@ if (platform === 'win32') {
 const missing = requiredFiles.filter((file) => !existsSync(file))
 if (missing.length) {
   throw new Error(`Missing required packaged files for ${platform}:\n${missing.join('\n')}`)
+}
+
+const sqlitePackage = readJson(sqlitePackagePath, 'packaged better-sqlite3 package metadata')
+const sqliteManifest = readJson(sqliteManifestPath, 'packaged better-sqlite3 native manifest')
+const sqliteElectron = sqliteManifest?.electron
+const sqliteModules = String(sqliteElectron?.modules || '')
+const sqliteArch = String(sqliteElectron?.arch || '')
+const sqliteBindingDirName = `node-v${sqliteModules}-${platform}-${sqliteArch}`
+const sqliteBindingRelativePath = `lib/binding/${sqliteBindingDirName}/better_sqlite3.node`
+const sqliteBindingPath = join(sqliteBindingRoot, sqliteBindingDirName, 'better_sqlite3.node')
+
+if (
+  sqliteManifest?.schemaVersion !== 1 ||
+  sqliteManifest?.betterSqlite3Version !== sqlitePackage.version ||
+  sqliteManifest?.electronVersion !== sqliteElectron?.electron ||
+  Object.prototype.hasOwnProperty.call(sqliteManifest, 'node') ||
+  !/^\d+$/.test(sqliteModules) ||
+  !sqliteElectron?.node ||
+  !sqliteElectron?.electron ||
+  sqliteElectron?.platform !== platform ||
+  !sqliteArch ||
+  String(sqliteElectron?.bindingPath || '').replaceAll('\\', '/') !== sqliteBindingRelativePath ||
+  !/^[a-f0-9]{64}$/i.test(sqliteElectron?.sha256 || '')
+) {
+  throw new Error(`Packaged better-sqlite3 native manifest is invalid: ${JSON.stringify(sqliteManifest)}`)
+}
+if (!existsSync(sqliteBindingPath) || !statSync(sqliteBindingPath).isFile()) {
+  throw new Error(`Packaged better-sqlite3 Electron binding is missing: ${sqliteBindingPath}`)
+}
+
+const packagedSha256 = (path) => createHash('sha256').update(readFileSync(path)).digest('hex')
+if (packagedSha256(sqliteBindingPath) !== sqliteElectron.sha256) {
+  throw new Error('Packaged better-sqlite3 Electron binding does not match its manifest hash.')
+}
+
+const shadowSqliteBindings = [
+  join(sqliteRoot, 'build', 'better_sqlite3.node'),
+  join(sqliteRoot, 'build', 'Debug', 'better_sqlite3.node'),
+  join(sqliteRoot, 'build', 'Release', 'better_sqlite3.node'),
+  join(sqliteRoot, 'out', 'Debug', 'better_sqlite3.node'),
+  join(sqliteRoot, 'Debug', 'better_sqlite3.node'),
+  join(sqliteRoot, 'out', 'Release', 'better_sqlite3.node'),
+  join(sqliteRoot, 'Release', 'better_sqlite3.node'),
+  join(sqliteRoot, 'build', 'default', 'better_sqlite3.node'),
+  join(sqliteRoot, 'compiled', sqliteElectron.node, platform, sqliteArch, 'better_sqlite3.node'),
+  join(sqliteRoot, 'addon-build', 'release', 'install-root', 'better_sqlite3.node'),
+  join(sqliteRoot, 'addon-build', 'debug', 'install-root', 'better_sqlite3.node'),
+  join(sqliteRoot, 'addon-build', 'default', 'install-root', 'better_sqlite3.node')
+].filter(existsSync)
+if (shadowSqliteBindings.length) {
+  throw new Error(`Packaged better-sqlite3 contains binding paths that shadow ABI selection:\n${shadowSqliteBindings.join('\n')}`)
+}
+
+const sqliteNativeBindings = listFiles(sqliteRoot).filter((file) => basename(file) === 'better_sqlite3.node')
+const unexpectedSqliteBindings = sqliteNativeBindings.filter((file) => resolve(file) !== resolve(sqliteBindingPath))
+if (sqliteNativeBindings.length !== 1 || unexpectedSqliteBindings.length) {
+  throw new Error(
+    `Packaged better-sqlite3 must contain only its Electron ABI binding:\n${sqliteNativeBindings.join('\n') || '(none)'}`
+  )
+}
+
+const unexpectedBindingEntries = readdirSync(sqliteBindingRoot).filter(
+  (entry) => entry !== 'aiopsterm-native-manifest.json' && entry !== sqliteBindingDirName
+)
+const unexpectedTargetBindingFiles = listFiles(join(sqliteBindingRoot, sqliteBindingDirName)).filter(
+  (file) => portableRelative(join(sqliteBindingRoot, sqliteBindingDirName), file) !== 'better_sqlite3.node'
+)
+if (unexpectedBindingEntries.length || unexpectedTargetBindingFiles.length) {
+  throw new Error(
+    `Packaged better-sqlite3 lib/binding contains unexpected entries: ${[
+      ...unexpectedBindingEntries,
+      ...unexpectedTargetBindingFiles.map((file) => portableRelative(sqliteBindingRoot, file))
+    ].join(', ')}`
+  )
+}
+
+const sqliteProbeEnvironment = { ...process.env, ELECTRON_RUN_AS_NODE: '1' }
+delete sqliteProbeEnvironment.ELECTRON_NO_ASAR
+delete sqliteProbeEnvironment.NODE_BINDINGS_COMPILED_DIR
+const sqliteProbeSource = `
+const Database = require(${JSON.stringify(join(resourcesDir, 'app.asar', 'node_modules', 'better-sqlite3'))})
+const database = new Database(':memory:')
+const row = database.prepare('SELECT 1 AS ok').get()
+database.close()
+if (row.ok !== 1) throw new Error('Unexpected packaged better-sqlite3 SELECT 1 result.')
+process.stdout.write(JSON.stringify({
+  node: process.versions.node,
+  modules: process.versions.modules,
+  electron: process.versions.electron || '',
+  platform: process.platform,
+  arch: process.arch,
+  ok: row.ok
+}))
+`
+let sqliteProbe
+try {
+  sqliteProbe = JSON.parse(
+    execFileSync(appExecutable, ['-e', sqliteProbeSource], {
+      cwd: unpackedDir,
+      encoding: 'utf8',
+      env: sqliteProbeEnvironment,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: 10000,
+      windowsHide: true
+    })
+  )
+} catch (error) {
+  const detail = [error instanceof Error ? error.message : String(error), error?.stderr, error?.stdout].filter(Boolean).join('\n')
+  throw new Error(`Packaged Electron better-sqlite3 probe failed:\n${detail}`)
+}
+if (
+  sqliteProbe.ok !== 1 ||
+  sqliteProbe.modules !== sqliteModules ||
+  sqliteProbe.node !== sqliteElectron.node ||
+  sqliteProbe.electron !== sqliteElectron.electron ||
+  sqliteProbe.platform !== sqliteElectron.platform ||
+  sqliteProbe.arch !== sqliteElectron.arch
+) {
+  throw new Error(`Packaged Electron runtime does not match the better-sqlite3 manifest: ${JSON.stringify(sqliteProbe)}`)
 }
 
 const rawNodeRuntimePrefixes = ['node-linux-', 'node-darwin-', 'node-bin-darwin-', 'node-win-']
@@ -130,7 +280,6 @@ if (
 ) {
   throw new Error(`Packaged Cline sidecar manifest is invalid: ${JSON.stringify(clineManifest)}`)
 }
-const packagedSha256 = (path) => createHash('sha256').update(readFileSync(path)).digest('hex')
 if (
   packagedSha256(clineNode) !== clineManifest.runtimeSha256 ||
   packagedSha256(join(clineSidecar, 'cline-agent-sidecar.cjs')) !== clineManifest.bundleSha256

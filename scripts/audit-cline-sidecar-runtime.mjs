@@ -244,12 +244,26 @@ const toolCallSse = () => sseResponse([
       index: 0,
       delta: {
         role: 'assistant',
-        tool_calls: [{
-          index: 0,
-          id: 'call-audit-command',
-          type: 'function',
-          function: { name: 'run_host_command', arguments: '{"command":"printf loop-audit"}' }
-        }]
+        tool_calls: [
+          {
+            index: 0,
+            id: 'call-audit-uptime',
+            type: 'function',
+            function: { name: 'run_host_command', arguments: '{"command":"printf loop-audit-uptime"}' }
+          },
+          {
+            index: 1,
+            id: 'call-audit-blocked',
+            type: 'function',
+            function: { name: 'run_host_command', arguments: '{"command":"printf loop-audit-blocked"}' }
+          },
+          {
+            index: 2,
+            id: 'call-audit-memory',
+            type: 'function',
+            function: { name: 'run_host_command', arguments: '{"command":"printf loop-audit-memory"}' }
+          }
+        ]
       },
       finish_reason: null
     }]
@@ -308,6 +322,7 @@ const smokeSidecar = async () => {
     let providerFetchCount = 0
     let callbackFailure = null
     const callbackOrder = []
+    const lifecycleOrder = []
     let readyResolve
     let readyReject
     const ready = new Promise((resolveReady, rejectReady) => {
@@ -319,7 +334,14 @@ const smokeSidecar = async () => {
     const pending = new Map()
     const handleCallback = (frame) => {
       const payload = frame.payload || {}
-      callbackOrder.push(frame.callback)
+      const callbackLabel =
+        frame.callback === 'approval.request' || frame.callback === 'tool.execute'
+          ? `${frame.callback}:${payload.toolCallId}`
+          : frame.callback
+      callbackOrder.push(callbackLabel)
+      if (frame.callback === 'approval.request' || frame.callback === 'tool.execute') {
+        lifecycleOrder.push(callbackLabel)
+      }
       if (frame.callback === 'provider.fetch') {
         if (payload.sessionId !== 'audit-agent-loop' || payload.taskId !== 'audit-loop-task' || payload.turnId !== 'audit-loop-turn') {
           throw new Error(`Provider fetch ownership mismatch: ${JSON.stringify(payload)}`)
@@ -337,7 +359,14 @@ const smokeSidecar = async () => {
         }
         if (providerFetchCount === 1) {
           const serializedMessages = JSON.stringify(requestBody.messages || [])
-          if (!serializedMessages.includes('call-audit-command') || !serializedMessages.includes('audit-command-output')) {
+          if (
+            !serializedMessages.includes('call-audit-uptime') ||
+            !serializedMessages.includes('audit-uptime-output') ||
+            !serializedMessages.includes('call-audit-blocked') ||
+            !serializedMessages.includes('sidecar audit rejection') ||
+            !serializedMessages.includes('call-audit-memory') ||
+            !serializedMessages.includes('audit-memory-output')
+          ) {
             throw new Error(`Second provider request omitted the tool result: ${serializedMessages}`)
           }
           providerFetchCount += 1
@@ -346,20 +375,32 @@ const smokeSidecar = async () => {
         throw new Error('The deterministic Agent loop made too many provider requests.')
       }
       if (frame.callback === 'approval.request') {
-        if (payload.toolName !== 'run_host_command' || payload.toolCallId !== 'call-audit-command') {
+        if (
+          payload.toolName !== 'run_host_command' ||
+          !['call-audit-uptime', 'call-audit-blocked', 'call-audit-memory'].includes(payload.toolCallId)
+        ) {
           throw new Error(`Approval ownership mismatch: ${JSON.stringify(payload)}`)
+        }
+        if (payload.toolCallId === 'call-audit-blocked') {
+          return { approved: false, reason: 'sidecar audit rejection' }
         }
         return { approved: true, reason: 'sidecar audit approval' }
       }
       if (frame.callback === 'tool.execute') {
-        if (
-          payload.toolName !== 'run_host_command' ||
-          payload.toolCallId !== 'call-audit-command' ||
-          payload.input?.command !== 'printf loop-audit'
-        ) {
+        const expected = {
+          'call-audit-uptime': {
+            command: 'printf loop-audit-uptime',
+            output: 'audit-uptime-output\n'
+          },
+          'call-audit-memory': {
+            command: 'printf loop-audit-memory',
+            output: 'audit-memory-output\n'
+          }
+        }[payload.toolCallId]
+        if (payload.toolName !== 'run_host_command' || !expected || payload.input?.command !== expected.command) {
           throw new Error(`Tool execution mismatch: ${JSON.stringify(payload)}`)
         }
-        return { stdout: 'audit-command-output\n', stderr: '', exitCode: 0, timedOut: false, truncated: false }
+        return { stdout: expected.output, stderr: '', exitCode: 0, timedOut: false, truncated: false }
       }
       throw new Error(`Unexpected sidecar callback: ${frame.callback}`)
     }
@@ -402,6 +443,9 @@ const smokeSidecar = async () => {
           readyReject(new Error(`Cline sidecar emitted invalid JSON: ${line}`))
           child.kill()
           continue
+        }
+        if (frame.kind === 'event' && frame.event === 'agent.task' && frame.payload?.type === 'tool-result') {
+          lifecycleOrder.push(`tool-result:${frame.payload.toolCallId}`)
         }
         if (frame.kind === 'event' && frame.event === 'runtime.ready') {
           if (frame.version !== 1 || frame.payload?.sdkVersion !== '0.0.59') {
@@ -474,11 +518,11 @@ const smokeSidecar = async () => {
     await request('session.start', {
       sessionId: 'audit-agent-loop',
       profile: 'classic-agent',
-      systemPrompt: 'Use run_host_command once and then report the observed output.',
+      systemPrompt: 'Process every run_host_command call in model order, including rejected calls, then report the observed results.',
       provider: loopProvider,
       tools: [{
         name: 'run_host_command',
-        description: 'Run one deterministic audit command.',
+        description: 'Run one deterministic audit command at a time.',
         inputSchema: {
           type: 'object',
           properties: { command: { type: 'string' } },
@@ -494,22 +538,50 @@ const smokeSidecar = async () => {
       sessionId: 'audit-agent-loop',
       taskId: 'audit-loop-task',
       turnId: 'audit-loop-turn',
-      prompt: 'Run the deterministic audit command.'
+      prompt: 'Process all deterministic audit commands.'
     })
     if (callbackFailure) throw callbackFailure
     if (loopResult?.text !== 'loop-audit-complete' || loopResult?.finishReason !== 'completed' || loopResult?.iterations !== 2) {
       throw new Error(`Deterministic Agent loop returned an unexpected result: ${JSON.stringify(loopResult)}`)
     }
     if (
-      loopResult.toolCalls?.length !== 1 ||
+      loopResult.toolCalls?.length !== 3 ||
+      loopResult.toolCalls[0]?.id !== 'call-audit-uptime' ||
       loopResult.toolCalls[0]?.name !== 'run_host_command' ||
-      loopResult.toolCalls[0]?.output?.stdout !== 'audit-command-output\n'
+      loopResult.toolCalls[0]?.output?.stdout !== 'audit-uptime-output\n' ||
+      loopResult.toolCalls[1]?.id !== 'call-audit-blocked' ||
+      loopResult.toolCalls[1]?.name !== 'run_host_command' ||
+      !JSON.stringify(loopResult.toolCalls[1]?.output).includes('sidecar audit rejection') ||
+      loopResult.toolCalls[2]?.id !== 'call-audit-memory' ||
+      loopResult.toolCalls[2]?.name !== 'run_host_command' ||
+      loopResult.toolCalls[2]?.output?.stdout !== 'audit-memory-output\n'
     ) {
       throw new Error(`Deterministic Agent loop omitted the tool result: ${JSON.stringify(loopResult)}`)
     }
-    const expectedCallbackOrder = ['provider.fetch', 'approval.request', 'tool.execute', 'provider.fetch']
+    const expectedCallbackOrder = [
+      'provider.fetch',
+      'approval.request:call-audit-uptime',
+      'tool.execute:call-audit-uptime',
+      'approval.request:call-audit-blocked',
+      'approval.request:call-audit-memory',
+      'tool.execute:call-audit-memory',
+      'provider.fetch'
+    ]
     if (providerFetchCount !== 2 || JSON.stringify(callbackOrder) !== JSON.stringify(expectedCallbackOrder)) {
       throw new Error(`Deterministic Agent loop callback order mismatch: ${JSON.stringify(callbackOrder)}`)
+    }
+    const expectedLifecycleOrder = [
+      'approval.request:call-audit-uptime',
+      'tool.execute:call-audit-uptime',
+      'tool-result:call-audit-uptime',
+      'approval.request:call-audit-blocked',
+      'tool-result:call-audit-blocked',
+      'approval.request:call-audit-memory',
+      'tool.execute:call-audit-memory',
+      'tool-result:call-audit-memory'
+    ]
+    if (JSON.stringify(lifecycleOrder) !== JSON.stringify(expectedLifecycleOrder)) {
+      throw new Error(`Deterministic Agent loop lifecycle order mismatch: ${JSON.stringify(lifecycleOrder)}`)
     }
     await request('session.stop', { sessionId: 'audit-agent-loop' })
     const shutdown = await request('runtime.shutdown')
@@ -531,5 +603,5 @@ console.log(JSON.stringify({
   nodeVersion: NODE_VERSION,
   bundledComponents: packageCoordinates.size,
   providers: providerConfigs.map((config) => config.name),
-  agentLoop: 'provider.fetch -> approval.request -> tool.execute -> provider.fetch -> final'
+  agentLoop: 'provider.fetch -> approval(A) -> tool(A) -> rejected-result(B) -> approval(C) -> tool(C) -> provider.fetch -> final'
 }))

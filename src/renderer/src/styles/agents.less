@@ -15,7 +15,16 @@
   flex-shrink: 0;
 }
 
+.agents-workspace-toolbar {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .agents-search {
+  min-width: 0;
+  flex: 1;
   height: 32px;
   display: flex;
   align-items: center;
@@ -61,7 +70,7 @@
 }
 
 .new-chat-btn {
-  width: 100%;
+  width: 32px;
   height: 32px;
   border: 1px solid var(--theme-module-active-border);
   border-radius: 7px;
@@ -70,12 +79,71 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
+  flex: 0 0 32px;
   cursor: pointer;
+  padding: 0;
 }
 
-.new-chat-btn:hover {
+.new-chat-btn:hover,
+.new-chat-btn.active {
   background: var(--theme-module-active-card-strong-bg);
+}
+
+.new-chat-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+.agents-new-session-wrap {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.agents-new-session-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 35;
+  width: 164px;
+  padding: 4px;
+  border: 1px solid var(--theme-module-active-border);
+  border-radius: 7px;
+  background: var(--theme-module-active-panel-bg);
+  box-shadow: var(--theme-module-active-shadow-soft);
+}
+
+.agents-new-session-menu button {
+  width: 100%;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  border-radius: 5px;
+  color: var(--theme-module-active-text);
+  background: transparent;
+  padding: 0 8px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.agents-new-session-menu button:hover {
+  background: var(--theme-module-active-card-strong-bg);
+}
+
+.agents-new-session-menu svg {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
+  color: var(--theme-module-active-text-muted);
+}
+
+.agents-new-session-menu span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
 }
 
 .agents-workspace-content {
@@ -95,6 +163,25 @@
   flex-direction: column;
   gap: 2px;
   padding: 6px;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--theme-module-active-text-muted) 45%, transparent) transparent;
+}
+
+.conversation-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.conversation-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.conversation-list::-webkit-scrollbar-thumb {
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--theme-module-active-text-muted) 45%, transparent);
+}
+
+.conversation-list::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--theme-module-active-text-muted) 68%, transparent);
 }
 
 .conversation-item {
@@ -110,6 +197,81 @@
   cursor: pointer;
   text-align: left;
   transition: background 0.18s ease, border-color 0.18s ease;
+}
+
+.product-session-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 20px;
+  min-height: 58px;
+  cursor: default;
+}
+
+.product-session-main {
+  min-width: 0;
+  height: 100%;
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  border-radius: 4px;
+  outline: 0;
+  color: inherit;
+  background: transparent;
+  padding: 0;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.product-session-main:focus-visible {
+  outline: 1px solid var(--theme-module-active-accent);
+  outline-offset: 2px;
+}
+
+.product-session-item.open {
+  background: color-mix(in srgb, var(--theme-module-active-accent) 6%, transparent);
+}
+
+.product-session-icon {
+  position: relative;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--theme-module-active-border);
+  border-radius: 6px;
+  color: var(--theme-module-active-text-muted);
+  background: var(--theme-module-active-card-bg);
+}
+
+.product-session-icon[data-surface='classic'] {
+  color: var(--theme-module-active-accent);
+}
+
+.product-session-icon[data-surface='codex'] {
+  color: var(--theme-core-success);
+}
+
+.product-session-icon[data-surface='database'] {
+  color: var(--theme-core-warning);
+}
+
+.product-session-icon svg {
+  width: 13px;
+  height: 13px;
+}
+
+.product-session-open-dot {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: 7px;
+  height: 7px;
+  border: 1px solid var(--theme-module-active-panel-bg);
+  border-radius: 50%;
+  background: var(--theme-core-success);
 }
 
 .conversation-item.active,
@@ -141,20 +303,48 @@
 }
 
 .conversation-meta {
+  min-width: 0;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   line-height: 1.2;
 }
 
+.product-session-type {
+  flex: 0 0 auto;
+  color: var(--theme-module-active-text-muted);
+  font-size: 10px;
+}
+
 .conversation-time,
-.conversation-ip {
+.conversation-ip,
+.product-session-binding,
+.product-session-scope {
   overflow: hidden;
   color: var(--theme-module-active-text-muted);
   font-size: 10px;
   line-height: 1.2;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.product-session-item .conversation-ip,
+.product-session-binding {
+  min-width: 0;
+  flex: 1;
+}
+
+.product-session-binding[data-binding-kind='connection'] {
+  color: color-mix(in srgb, var(--theme-core-warning) 72%, var(--theme-module-active-text-muted));
+}
+
+.product-session-scope {
+  width: 100%;
+}
+
+.product-session-item .conversation-time {
+  flex: 0 0 auto;
+  margin-left: auto;
 }
 
 .delete-btn {
@@ -179,6 +369,7 @@
 }
 
 .conversation-item:hover .delete-btn,
+.conversation-item:focus-within .delete-btn,
 .conversation-item.active .delete-btn {
   opacity: 1;
 }
@@ -186,6 +377,12 @@
 .delete-btn:hover {
   color: var(--theme-core-danger);
   background: var(--theme-module-active-card-strong-bg);
+}
+
+.delete-btn:focus-visible {
+  outline: 1px solid var(--theme-module-active-accent);
+  outline-offset: 1px;
+  opacity: 1;
 }
 
 .load-more-btn {
@@ -227,16 +424,19 @@
   font-size: 13px;
 }
 
-.agents-stage {
-  min-width: 0;
-  min-height: 0;
-  padding: 14px;
-  background: var(--theme-module-active-workspace-bg);
+.agents-session-loading {
+  width: 13px;
+  height: 13px;
+  animation: agents-session-spin 0.9s linear infinite;
 }
 
-.agents-stage .ai-panel {
-  height: 100%;
-  border: 1px solid var(--theme-module-active-border);
-  border-radius: 8px;
-  box-shadow: var(--theme-module-active-shadow);
+.agents-workspace-content > .empty-state .agents-session-loading {
+  margin-right: 7px;
+  color: var(--theme-module-active-text-muted);
+}
+
+@keyframes agents-session-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }

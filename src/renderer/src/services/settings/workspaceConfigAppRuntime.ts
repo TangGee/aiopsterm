@@ -181,7 +181,7 @@ export const isLayoutPreferencesSnapshot = (
 const knownBackgroundPresetIds = new Set(settingsBackgroundPresets.map((preset) => preset.id))
 
 // preset 目录更换后旧 id 不再存在,归一化时迁移到别名映射的新 preset,
-// 未知 id 迁移到第一个可用 preset,保留用户"有壁纸"的原始意图。
+// 未知 id 迁移到第一个可用 preset,保留用户「有壁纸」的原始意图。
 const migrateBackgroundPresetId = (image: string) => {
   if (!image || knownBackgroundPresetIds.has(image)) return image
   const alias = legacyBackgroundPresetAliases[image]

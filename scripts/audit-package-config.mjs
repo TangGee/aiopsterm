@@ -35,6 +35,10 @@ const requiredScripts = [
   'package:build',
   'package:build:matrix',
   'package:verify',
+  'native:ensure:node',
+  'native:ensure:electron',
+  'rebuild:native:node',
+  'rebuild:native:electron',
   'build:linux:appimage',
   'build:mac',
   'build:mac:dir',
@@ -49,13 +53,13 @@ if (missingScripts.length) {
 }
 
 const packageScriptRequirements = {
-  'build:linux:appimage': ['npm run build:codex', 'npm run build:cline-sidecar', 'electron-builder --linux AppImage'],
-  'build:linux': ['npm run build:codex', 'npm run build:cline-sidecar', 'electron-builder --linux'],
-  'build:deb': ['npm run build:codex', 'npm run build:cline-sidecar', 'electron-builder --linux deb'],
-  'build:mac': ['npm run build:codex', 'npm run build:cline-sidecar', 'electron-builder --mac'],
-  'build:mac:dir': ['npm run build:codex', 'npm run build:cline-sidecar', 'electron-builder --mac --dir'],
-  'build:win': ['npm run build:codex', 'npm run build:cline-sidecar', 'electron-builder --win'],
-  'build:win:dir': ['npm run build:codex', 'npm run build:cline-sidecar', 'electron-builder --win --dir']
+  'build:linux:appimage': ['npm run build:codex', 'npm run build:cline-sidecar', 'npm run rebuild:native', 'electron-builder --linux AppImage'],
+  'build:linux': ['npm run build:codex', 'npm run build:cline-sidecar', 'npm run rebuild:native', 'electron-builder --linux'],
+  'build:deb': ['npm run build:codex', 'npm run build:cline-sidecar', 'npm run rebuild:native', 'electron-builder --linux deb'],
+  'build:mac': ['npm run build:codex', 'npm run build:cline-sidecar', 'npm run rebuild:native', 'electron-builder --mac'],
+  'build:mac:dir': ['npm run build:codex', 'npm run build:cline-sidecar', 'npm run rebuild:native', 'electron-builder --mac --dir'],
+  'build:win': ['npm run build:codex', 'npm run build:cline-sidecar', 'npm run rebuild:native', 'electron-builder --win'],
+  'build:win:dir': ['npm run build:codex', 'npm run build:cline-sidecar', 'npm run rebuild:native', 'electron-builder --win --dir']
 }
 const missingScriptRequirements = Object.entries(packageScriptRequirements).flatMap(([script, snippets]) =>
   snippets.filter((snippet) => !packageScripts[script].includes(snippet)).map((snippet) => `${script}: ${snippet}`)
@@ -149,6 +153,8 @@ const clineAuditEntrypoint = readFileSync(resolve('scripts/audit-cline-sidecar-r
 const codexBuildScript = readFileSync(resolve('scripts/build-codex-cli.sh'), 'utf8')
 const codexDevBuildScript = readFileSync(resolve('scripts/build-codex-dev-package.sh'), 'utf8')
 const buildAndStartScript = readFileSync(resolve('scripts/build-and-start.sh'), 'utf8')
+const nativeRuntimeScript = readFileSync(resolve('scripts/ensure-native-runtime.mjs'), 'utf8')
+const nativeRuntimeHelpersScript = readFileSync(resolve('scripts/native-runtime-helpers.mjs'), 'utf8')
 const afterPackScript = readFileSync(resolve('scripts/prune-packaged-native-modules.mjs'), 'utf8')
 const packageTargetsScript = readFileSync(resolve('scripts/package-targets.mjs'), 'utf8')
 const packagedAppAuditScript = readFileSync(resolve('scripts/audit-packaged-app.mjs'), 'utf8')
@@ -176,6 +182,35 @@ const codexPackagingRequirements = [
   { label: 'linux deb audit entrypoint', source: packageScripts['audit:linux-deb'], text: 'node scripts/audit-linux-deb-package.mjs' },
   { label: 'packaged smoke node entrypoint', source: packageScripts['smoke:packaged'], text: 'node scripts/smoke-packaged-app.mjs' },
   { label: 'packaged e2e entrypoint', source: packageScripts['test:e2e:packaged'], text: 'playwright test -c playwright.packaged.config.ts' },
+  { label: 'Node test native ABI guard', source: packageScripts.test, text: 'npm run native:ensure:node' },
+  { label: 'live SSH test native ABI guard', source: packageScripts['test:live:ssh'], text: 'npm run native:ensure:node' },
+  { label: 'Electron dev native ABI guard', source: packageScripts.dev, text: 'npm run native:ensure:electron' },
+  { label: 'Electron preview native ABI guard', source: packageScripts.start, text: 'npm run native:ensure:electron' },
+  { label: 'Electron e2e native ABI guard', source: packageScripts['test:e2e'], text: 'npm run native:ensure:electron' },
+  { label: 'Electron quick e2e native ABI guard', source: packageScripts['test:e2e:quick'], text: 'npm run native:ensure:electron' },
+  { label: 'native ABI better-sqlite3 probe', source: nativeRuntimeScript, text: "require('better-sqlite3')" },
+  { label: 'native ABI node-pty probe', source: nativeRuntimeScript, text: "require('node-pty')" },
+  { label: 'native ABI Electron probe', source: nativeRuntimeScript, text: "env.ELECTRON_RUN_AS_NODE = '1'" },
+  { label: 'native ABI Electron rebuild', source: nativeRuntimeScript, text: "require.resolve('@electron/rebuild/lib/cli.js')" },
+  { label: 'native ABI-keyed binding path', source: nativeRuntimeScript, text: "`node-v${info.modules}-${info.platform}-${info.arch}`" },
+  { label: 'native ABI manifest', source: nativeRuntimeScript, text: "'aiopsterm-native-manifest.json'" },
+  { label: 'native ABI preparation lock', source: nativeRuntimeScript, text: "'prepare.lock'" },
+  { label: 'native ABI Node-only preparation', source: nativeRuntimeScript, text: "target === 'electron' ? ['node', 'electron'] : ['node']" },
+  { label: 'native ABI owned lock token', source: nativeRuntimeScript, text: 'ownerToken: randomUUID()' },
+  { label: 'native ABI owned lock release', source: nativeRuntimeScript, text: 'lockOwnedBy(contents, owner.ownerToken)' },
+  { label: 'native ABI dead lock recovery', source: nativeRuntimeScript, text: 'shouldRecoverLock({' },
+  { label: 'native ABI shadow binding cleanup', source: nativeRuntimeScript, text: 'removeShadowBindings()' },
+  { label: 'native ABI generated build tree cleanup', source: nativeRuntimeScript, text: "['build', 'out', 'Debug', 'Release', 'compiled', 'addon-build']" },
+  { label: 'native ABI cross-build environment cleanup', source: nativeRuntimeScript, text: 'sanitizeNativeRebuildEnvironment(process.env)' },
+  { label: 'native ABI complete bindings shadow list', source: nativeRuntimeHelpersScript, text: "resolve(sqliteRoot, 'addon-build', 'default', 'install-root', bindingName)" },
+  { label: 'native ABI malformed manifest recovery', source: nativeRuntimeHelpersScript, text: 'parseNativeManifest' },
+  { label: 'native ABI preserved secondary runtime record', source: nativeRuntimeHelpersScript, text: 'mergeNativeManifest' },
+  { label: 'packaged SQLite pruning gate', source: afterPackScript, text: 'prunePackagedSqlite(context)' },
+  { label: 'packaged SQLite Node ABI removal', source: afterPackScript, text: 'delete packagedManifest.node' },
+  { label: 'packaged SQLite manifest requirement', source: packagedAppAuditScript, text: "'aiopsterm-native-manifest.json'" },
+  { label: 'packaged SQLite unique Electron binding gate', source: packagedAppAuditScript, text: 'must contain only its Electron ABI binding' },
+  { label: 'packaged SQLite Electron runtime probe', source: packagedAppAuditScript, text: 'Packaged Electron better-sqlite3 probe failed' },
+  { label: 'packaged SQLite in-memory query', source: packagedAppAuditScript, text: "new Database(':memory:')" },
   { label: 'package build target entrypoint', source: packageScripts['package:build'], text: 'node scripts/build-package-target.mjs' },
   { label: 'package build matrix entrypoint', source: packageScripts['package:build:matrix'], text: 'node scripts/build-package-matrix.mjs' },
   { label: 'package verify target entrypoint', source: packageScripts['package:verify'], text: 'node scripts/verify-package-target.mjs' },
@@ -214,6 +249,7 @@ const codexPackagingRequirements = [
   { label: 'afterPack codex platform output path', source: afterPackScript, text: 'codexPackageDir' },
   { label: 'dev-start codex package build', source: buildAndStartScript, text: 'build-codex-dev-package.sh' },
   { label: 'dev-start codex package env', source: buildAndStartScript, text: 'AIOPSTERM_CODEX_PACKAGE_DIR' },
+  { label: 'dev-start native ABI guard', source: buildAndStartScript, text: 'npm run native:ensure:electron' },
   { label: 'dev-codex target triple', source: codexDevBuildScript, text: 'codexDevTargetTriple' },
   { label: 'dev-codex corrupt cargo cleanup', source: codexDevBuildScript, text: 'aiopsterm_clean_corrupt_codex_cargo_profile' },
   { label: 'dev-codex package builder', source: codexDevBuildScript, text: 'build_codex_package.py' },

@@ -8,10 +8,28 @@ import type {
   CodexSessionKillResult,
   CodexSessionLifecycleEvent,
   CodexSessionPendingContextResult,
+  CodexSessionThreadEvent,
   CodexSessionTargetContext,
   CodexSessionTargetUpdateResult,
   CodexSessionWriteResult
 } from './codexSessions'
+import type {
+  ProductSessionChangeEvent,
+  ProductSessionCreateInput,
+  ProductSessionCloseResult,
+  ProductSessionDeleteResult,
+  ProductSessionListInput,
+  ProductSessionListResult,
+  ProductSessionOptionalRecordResult,
+  ProductSessionProjectionMessageInput,
+  ProductSessionProjectionMutationResult,
+  ProductSessionProjectionPageInput,
+  ProductSessionProjectionPageResult,
+  ProductSessionProjectionRevisionInput,
+  ProductSessionProjectionRevisionResult,
+  ProductSessionRecordResult,
+  ProductSessionUpdateInput
+} from './productSessions'
 import type {
   TerminalBinaryWriteResult,
   TerminalCreateOptions,
@@ -414,6 +432,7 @@ export type AiopsPreloadApi = {
   installAppUpdate: (version?: string) => Promise<AppUpdateInstallResult>
   onAppUpdateProgress: (listener: (event: AppUpdateProgressEvent) => void) => () => void
   listChatConversations: () => Promise<AiChatHistoryListResult>
+  deselectChatConversation: (expectedConversationId: string) => Promise<AiChatHistoryListResult>
   createChatConversation: () => Promise<AiChatConversationMutationResult>
   updateChatConversation: (input: AiChatConversationUpdateInput) => Promise<AiChatConversationMutationResult>
   deleteChatConversation: (id: string) => Promise<AiChatConversationDeleteResult>
@@ -571,11 +590,22 @@ export type AiopsPreloadApi = {
   resizeTerminal: (id: string, cols: number, rows: number) => Promise<void>
   killTerminal: (id: string) => Promise<TerminalKillResult>
   createCodexSession: (options?: CodexSessionCreateOptions) => Promise<CodexSessionInfo>
-  setCodexSessionTarget: (target?: CodexSessionTargetContext) => Promise<CodexSessionTargetUpdateResult>
+  setCodexSessionTarget: (id: string, target?: CodexSessionTargetContext) => Promise<CodexSessionTargetUpdateResult>
   setCodexSessionPendingContext: (id: string, text?: string) => Promise<CodexSessionPendingContextResult>
   writeCodexSession: (id: string, data: string) => Promise<CodexSessionWriteResult>
   resizeCodexSession: (id: string, cols: number, rows: number) => Promise<void>
   killCodexSession: (id: string) => Promise<CodexSessionKillResult>
+  listProductSessions: (input?: ProductSessionListInput) => Promise<ProductSessionListResult>
+  getProductSession: (id: string) => Promise<ProductSessionOptionalRecordResult>
+  createProductSession: (input: ProductSessionCreateInput) => Promise<ProductSessionRecordResult>
+  updateProductSession: (input: ProductSessionUpdateInput) => Promise<ProductSessionRecordResult>
+  deleteProductSession: (id: string) => Promise<ProductSessionDeleteResult>
+  closeProductSession: (id: string) => Promise<ProductSessionCloseResult>
+  listProductSessionProjectionMessages: (id: string, input?: ProductSessionProjectionPageInput) => Promise<ProductSessionProjectionPageResult>
+  replaceProductSessionProjectionMessages: (id: string, messages: ProductSessionProjectionMessageInput[]) => Promise<ProductSessionProjectionMutationResult>
+  upsertProductSessionProjectionMessages: (id: string, messages: ProductSessionProjectionMessageInput[]) => Promise<ProductSessionProjectionMutationResult>
+  reviseProductSessionProjectionMessages: (id: string, input: ProductSessionProjectionRevisionInput) => Promise<ProductSessionProjectionRevisionResult>
+  onProductSessionChanged: (listener: (event: ProductSessionChangeEvent) => void) => () => void
   listAgentHookInstallers: () => Promise<AgentHookInstallerListResult>
   installAgentHook: (input: AgentHookInstallerOperationInput) => Promise<AgentHookInstallerOperationResult>
   uninstallAgentHook: (input: AgentHookInstallerOperationInput) => Promise<AgentHookInstallerOperationResult>
@@ -713,6 +743,7 @@ export type AiopsPreloadApi = {
   onCodexSessionData: (listener: (event: CodexSessionDataEvent) => void) => () => void
   onCodexSessionLifecycle: (listener: (event: CodexSessionLifecycleEvent) => void) => () => void
   onCodexSessionExit: (listener: (event: CodexSessionExitEvent) => void) => () => void
+  onCodexSessionThread: (listener: (event: CodexSessionThreadEvent) => void) => () => void
   onTerminalKeyboardInteractiveRequest: (listener: (event: TerminalKeyboardInteractiveRequest) => void) => () => void
   onTerminalKeyboardInteractiveResult: (listener: (event: TerminalKeyboardInteractiveResult) => void) => () => void
   onKubernetesTerminalData: (listener: (event: KubernetesTerminalDataEvent) => void) => () => void

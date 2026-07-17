@@ -298,9 +298,21 @@ export const k8sResourceSummary = (resources: K8sResource[], clusterId: string |
   return summary
 }
 
+// 与后端 1MiB 会话输出上限保持一致,渲染层长跑终端同样只保留尾部。
+const k8sTerminalTabOutputMaxLength = 1024 * 1024
+
+const capK8sTerminalOutput = (output: string) => (output.length > k8sTerminalTabOutputMaxLength ? output.slice(-k8sTerminalTabOutputMaxLength) : output)
+
 export const appendK8sTerminalOutput = (tab: K8sTerminalTab, text: string): K8sTerminalTab => ({
   ...tab,
-  output: tab.output.endsWith('\n') || !tab.output ? `${tab.output}${text}` : `${tab.output}\n${text}`,
+  output: capK8sTerminalOutput(tab.output.endsWith('\n') || !tab.output ? `${tab.output}${text}` : `${tab.output}\n${text}`),
+  updatedAt: '刚刚'
+})
+
+// PTY 流式数据按字节流原样拼接;带 command 的事件是命令模式的整块输出,保留换行分隔。
+export const appendK8sTerminalStream = (tab: K8sTerminalTab, text: string): K8sTerminalTab => ({
+  ...tab,
+  output: capK8sTerminalOutput(`${tab.output}${text}`),
   updatedAt: '刚刚'
 })
 
@@ -309,7 +321,7 @@ export const applyK8sTerminalDataEvent = (tabs: K8sTerminalTab[], event: Kuberne
     if (tab.sessionId !== event.sessionId || tab.id !== event.id || tab.clusterId !== event.clusterId || tab.status === 'ended' || tab.status === 'error') {
       return tab
     }
-    const next = event.data ? appendK8sTerminalOutput(tab, event.data) : { ...tab }
+    const next = event.data ? (event.command ? appendK8sTerminalOutput(tab, event.data) : appendK8sTerminalStream(tab, event.data)) : { ...tab }
     return {
       ...next,
       lastCommandOutput: event.data,

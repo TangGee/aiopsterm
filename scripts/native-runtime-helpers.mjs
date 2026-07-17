@@ -1,0 +1,110 @@
+import { resolve } from 'node:path'
+
+const nativeRebuildEnvironmentKeys = new Set([
+  'npm_config_runtime',
+  'npm_config_target',
+  'npm_config_arch',
+  'npm_config_target_arch',
+  'npm_config_platform',
+  'npm_config_target_platform',
+  'npm_config_disturl',
+  'npm_config_dist_url',
+  'npm_config_nodedir',
+  'npm_config_devdir'
+])
+
+const isObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value)
+
+export const parseNativeManifest = (raw) => {
+  try {
+    const parsed = JSON.parse(raw)
+    return isObject(parsed) ? parsed : null
+  } catch {
+    return null
+  }
+}
+
+export const sanitizeNativeRebuildEnvironment = (source) => {
+  const env = { ...source }
+  for (const key of Object.keys(env)) {
+    if (nativeRebuildEnvironmentKeys.has(key.toLowerCase()) || key.toUpperCase() === 'ELECTRON_RUN_AS_NODE') {
+      delete env[key]
+    }
+  }
+  return env
+}
+
+export const shadowBindingPaths = ({
+  sqliteRoot,
+  nodeVersion,
+  platform,
+  arch,
+  bindingName = 'better_sqlite3.node'
+}) => [
+  resolve(sqliteRoot, 'build', bindingName),
+  resolve(sqliteRoot, 'build', 'Debug', bindingName),
+  resolve(sqliteRoot, 'build', 'Release', bindingName),
+  resolve(sqliteRoot, 'out', 'Debug', bindingName),
+  resolve(sqliteRoot, 'Debug', bindingName),
+  resolve(sqliteRoot, 'out', 'Release', bindingName),
+  resolve(sqliteRoot, 'Release', bindingName),
+  resolve(sqliteRoot, 'build', 'default', bindingName),
+  resolve(sqliteRoot, 'compiled', nodeVersion, platform, arch, bindingName),
+  resolve(sqliteRoot, 'addon-build', 'release', 'install-root', bindingName),
+  resolve(sqliteRoot, 'addon-build', 'debug', 'install-root', bindingName),
+  resolve(sqliteRoot, 'addon-build', 'default', 'install-root', bindingName)
+]
+
+export const parseLockOwner = (lockContents) => {
+  try {
+    const owner = JSON.parse(lockContents)
+    if (
+      !isObject(owner) ||
+      owner.schemaVersion !== 1 ||
+      !Number.isInteger(owner.pid) ||
+      owner.pid <= 0 ||
+      typeof owner.ownerToken !== 'string' ||
+      owner.ownerToken.length < 8 ||
+      !Number.isFinite(owner.createdAt)
+    ) return null
+    return owner
+  } catch {
+    return null
+  }
+}
+
+export const shouldRecoverLock = ({
+  lockContents,
+  lockMtimeMs,
+  now,
+  staleAfterMs,
+  isProcessAlive
+}) => {
+  const owner = parseLockOwner(lockContents)
+  if (owner) return !isProcessAlive(owner.pid)
+  return Number.isFinite(lockMtimeMs) && now - lockMtimeMs >= staleAfterMs
+}
+
+export const lockOwnedBy = (lockContents, ownerToken) => parseLockOwner(lockContents)?.ownerToken === ownerToken
+
+export const mergeNativeManifest = ({ currentManifest, base, records, isRecordValid }) => {
+  const currentMatchesPackage =
+    isObject(currentManifest) &&
+    currentManifest.schemaVersion === base.schemaVersion &&
+    currentManifest.betterSqlite3Version === base.betterSqlite3Version
+  const merged = { ...base }
+
+  for (const runtime of ['node', 'electron']) {
+    if (records[runtime]) {
+      merged[runtime] = records[runtime]
+      continue
+    }
+    const currentRecord = currentMatchesPackage ? currentManifest[runtime] : null
+    if (currentRecord && isRecordValid(runtime, currentRecord)) merged[runtime] = currentRecord
+  }
+
+  if (!merged.electronVersion && merged.electron && currentMatchesPackage && typeof currentManifest.electronVersion === 'string') {
+    merged.electronVersion = currentManifest.electronVersion
+  }
+  return merged
+}

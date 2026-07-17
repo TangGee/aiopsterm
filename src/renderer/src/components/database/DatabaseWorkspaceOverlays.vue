@@ -15,6 +15,7 @@
     :db-ai-pane-schema-options="dbAiPaneSchemaOptions"
     :db-ai-pane-requires-schema="dbAiPaneRequiresSchema"
     :db-ai-pane-connection-needs-connect="dbAiPaneConnectionNeedsConnect"
+    :db-ai-pane-restore-issues="dbAiPaneRestoreIssues"
     :db-ai-pane-messages="dbAiPaneMessages"
     :db-ai-pane-composer-action="dbAiPaneComposerAction"
     :db-ai-pane-composer-placeholder="dbAiPaneComposerPlaceholder"
@@ -23,6 +24,7 @@
     :active-sql-available="activeSqlAvailable"
     :active-sql-explain-available="activeSqlExplainAvailable"
     :can-run-db-ai-pane-message-sql="canRunDbAiPaneMessageSql"
+    :load-older-db-ai-pane-messages="loadOlderDbAiPaneMessages"
     :db-ai-dialect-options="dbAiDialectOptions"
     :format-db-ai-request-time="formatDbAiRequestTime"
     :db-ai-pane-status-label="dbAiPaneStatusLabel"
@@ -34,6 +36,7 @@
     @update-db-ai-pane-catalog="emit('updateDbAiPaneCatalog', $event)"
     @update-db-ai-pane-schema="emit('updateDbAiPaneSchema', $event)"
     @connect-db-ai-pane-connection="emit('connectDbAiPaneConnection')"
+    @retry-db-ai-pane-binding="emit('retryDbAiPaneBinding')"
     @handle-db-ai-pane-draft-keydown="emit('handleDbAiPaneDraftKeydown', $event)"
     @cancel-db-ai-pane-action-mode="emit('cancelDbAiPaneActionMode')"
     @send-db-ai-pane-quick-prompt="emit('sendDbAiPaneQuickPrompt', $event)"
@@ -187,6 +190,7 @@ const props = defineProps<{
   dbAiPaneSchemaOptions: NonNullable<DatabaseCatalogInfo['schemas']>
   dbAiPaneRequiresSchema: boolean
   dbAiPaneConnectionNeedsConnect: boolean
+  dbAiPaneRestoreIssues: string[]
   dbAiPaneMessages: DbAiPaneMessage[]
   dbAiPaneComposerAction: DbAiAction | null
   dbAiPaneComposerPlaceholder: string
@@ -195,6 +199,7 @@ const props = defineProps<{
   activeSqlAvailable: boolean
   activeSqlExplainAvailable: boolean
   canRunDbAiPaneMessageSql: (message: DbAiPaneMessage) => boolean
+  loadOlderDbAiPaneMessages: () => Promise<number>
   dbAiDialectOptions: Array<{ value: DbAiTargetDialect; label: string }>
   formatDbAiRequestTime: (time: number) => string
   dbAiPaneStatusLabel: (status: DbAiPaneMessageStatus) => string
@@ -252,6 +257,7 @@ const emit = defineEmits<{
   updateDbAiPaneCatalog: [event: Event]
   updateDbAiPaneSchema: [event: Event]
   connectDbAiPaneConnection: []
+  retryDbAiPaneBinding: []
   handleDbAiPaneDraftKeydown: [event: KeyboardEvent]
   cancelDbAiPaneActionMode: []
   sendDbAiPaneQuickPrompt: [kind: DbAiPaneQuickPrompt]

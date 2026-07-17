@@ -47,6 +47,7 @@ const api: AiopsPreloadApi = {
     return () => ipcRenderer.off('app:update-progress', wrapped)
   },
   listChatConversations: () => ipcRenderer.invoke('chat-history:list'),
+  deselectChatConversation: (expectedConversationId: string) => ipcRenderer.invoke('chat-history:deselect', expectedConversationId),
   createChatConversation: () => ipcRenderer.invoke('chat-history:create'),
   updateChatConversation: (input) => ipcRenderer.invoke('chat-history:update', input),
   deleteChatConversation: (id: string) => ipcRenderer.invoke('chat-history:delete', id),
@@ -243,11 +244,26 @@ const api: AiopsPreloadApi = {
   resizeTerminal: (id: string, cols: number, rows: number) => ipcRenderer.invoke('terminal:resize', id, cols, rows),
   killTerminal: (id: string) => ipcRenderer.invoke('terminal:kill', id),
   createCodexSession: (options) => ipcRenderer.invoke('codex:create', options),
-  setCodexSessionTarget: (target) => ipcRenderer.invoke('codex:set-target', target),
+  setCodexSessionTarget: (id: string, target) => ipcRenderer.invoke('codex:set-target', id, target),
   setCodexSessionPendingContext: (id: string, text?: string) => ipcRenderer.invoke('codex:set-pending-context', id, text),
   writeCodexSession: (id: string, data: string) => ipcRenderer.invoke('codex:write', id, data),
   resizeCodexSession: (id: string, cols: number, rows: number) => ipcRenderer.invoke('codex:resize', id, cols, rows),
   killCodexSession: (id: string) => ipcRenderer.invoke('codex:kill', id),
+  listProductSessions: (input) => ipcRenderer.invoke('product-session:list', input),
+  getProductSession: (id: string) => ipcRenderer.invoke('product-session:get', id),
+  createProductSession: (input) => ipcRenderer.invoke('product-session:create', input),
+  updateProductSession: (input) => ipcRenderer.invoke('product-session:update', input),
+  deleteProductSession: (id: string) => ipcRenderer.invoke('product-session:delete', id),
+  closeProductSession: (id: string) => ipcRenderer.invoke('product-session:close', id),
+  listProductSessionProjectionMessages: (id, input) => ipcRenderer.invoke('product-session:projection:list', id, input),
+  replaceProductSessionProjectionMessages: (id, messages) => ipcRenderer.invoke('product-session:projection:replace', id, messages),
+  upsertProductSessionProjectionMessages: (id, messages) => ipcRenderer.invoke('product-session:projection:upsert', id, messages),
+  reviseProductSessionProjectionMessages: (id, input) => ipcRenderer.invoke('product-session:projection:revise', id, input),
+  onProductSessionChanged: (listener) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, changed: Parameters<typeof listener>[0]) => listener(changed)
+    ipcRenderer.on('product-session:changed', wrapped)
+    return () => ipcRenderer.off('product-session:changed', wrapped)
+  },
   listAgentHookInstallers: () => ipcRenderer.invoke('agent-hooks:list'),
   installAgentHook: (input) => ipcRenderer.invoke('agent-hooks:install', input),
   uninstallAgentHook: (input) => ipcRenderer.invoke('agent-hooks:uninstall', input),
@@ -446,6 +462,11 @@ const api: AiopsPreloadApi = {
     const wrapped = (_event: Electron.IpcRendererEvent, payload: Parameters<typeof listener>[0]) => listener(payload)
     ipcRenderer.on('codex:exit', wrapped)
     return () => ipcRenderer.off('codex:exit', wrapped)
+  },
+  onCodexSessionThread: (listener) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, payload: Parameters<typeof listener>[0]) => listener(payload)
+    ipcRenderer.on('codex:thread', wrapped)
+    return () => ipcRenderer.off('codex:thread', wrapped)
   },
   onTerminalKeyboardInteractiveRequest: (listener: (event: TerminalKeyboardInteractiveRequest) => void) => {
     const wrapped = (_event: Electron.IpcRendererEvent, payload: TerminalKeyboardInteractiveRequest) => listener(payload)

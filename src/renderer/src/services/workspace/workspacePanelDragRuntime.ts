@@ -5,6 +5,7 @@ import type {
   WorkspacePanelGroup,
   WorkspacePanelTreeRow
 } from '@/services/assets/workspaceAssetTreeRuntime'
+import { managedAssetDisplayName, managedAssetEndpoint } from '@shared/assetDisplayRuntime'
 
 type WorkspacePanelDragRuntimeInput = {
   visibleTreeRows: ComputedRef<WorkspacePanelTreeRow[]>
@@ -45,16 +46,18 @@ export const createWorkspacePanelDragRuntime = ({
     dragState.kind = 'asset'
     dragState.assetId = asset.id
     dragState.groupKey = ''
+    const displayName = managedAssetDisplayName(asset)
+    const endpoint = managedAssetEndpoint(asset)
     const aiContextPayload = {
       contextType: 'host',
       id: asset.id,
       kind: 'hosts',
-      label: asset.host || asset.ip || asset.name,
-      detail: asset.name || asset.title || asset.group_name,
-      host: asset.host || asset.ip || asset.name,
+      label: displayName,
+      detail: endpoint,
+      host: endpoint || displayName,
       port: Number(asset.port) || 22,
       username: asset.username || 'root',
-      assetName: asset.name || asset.title || asset.host || asset.ip,
+      assetName: displayName,
       isLocalShell: Boolean(asset.isLocalShell)
     }
     const serialized = JSON.stringify(aiContextPayload)
@@ -62,7 +65,7 @@ export const createWorkspacePanelDragRuntime = ({
     event.dataTransfer.setData('application/x-aiopsterm-workspace-asset', asset.id)
     event.dataTransfer.setData('application/x-aiopsterm-context', serialized)
     event.dataTransfer.setData('text/html', `<span data-aiopsterm-context="${encodeURIComponent(serialized)}"></span>`)
-    event.dataTransfer.setData('text/plain', asset.name)
+    event.dataTransfer.setData('text/plain', displayName)
   }
 
   const handleGroupDragStart = (event: DragEvent, group: WorkspacePanelGroup) => {

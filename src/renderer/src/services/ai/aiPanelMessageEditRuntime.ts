@@ -26,6 +26,7 @@ import {
   syncAiPanelEditStateFromParts,
   type AiPanelEditableMessage
 } from '@/services/ai/aiPanelEditRuntime'
+import { MAX_CHAT_IMAGE_ATTACHMENTS_PER_MESSAGE } from '@shared/chatImageAttachment'
 import type { AiChipContentPart, AiContentPart, AiContextOption, AiDocChipContentPart, AiImageContentPart } from '@shared/contracts/aiChat'
 
 export type AiPanelMessageEditRuntimeOptions = {
@@ -38,6 +39,8 @@ export type AiPanelMessageEditRuntimeOptions = {
   requestFrame: (callback: () => void) => number
   fallbackEditTarget: () => HTMLElement | null
   insertPastedImageIntoEdit: () => void | Promise<void>
+  notify?: (message: string) => void
+  imageLimitMessage?: () => string
   resendUserMessageFromParts: (messageId: string, contentParts: AiContentPart[], hostContexts: AiContextOption[]) => Promise<boolean>
 }
 
@@ -166,6 +169,10 @@ export const createAiPanelMessageEditRuntime = (options: AiPanelMessageEditRunti
   }
 
   const insertImageAtEditCursor = (part: AiImageContentPart) => {
+    if (editImageInputParts.value.length >= MAX_CHAT_IMAGE_ATTACHMENTS_PER_MESSAGE) {
+      options.notify?.(options.imageLimitMessage?.() || `Each message can include up to ${MAX_CHAT_IMAGE_ATTACHMENTS_PER_MESSAGE} images.`)
+      return false
+    }
     return insertAiPanelImageIntoEditableCursor(editEditableRef.value, part, () => {
       editImageInputParts.value = [...editImageInputParts.value, part]
       handleEditEditableInput()

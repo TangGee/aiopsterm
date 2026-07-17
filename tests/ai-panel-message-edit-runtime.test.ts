@@ -96,6 +96,7 @@ const createHarness = (input: { clipboardHasImage?: boolean; resendResult?: bool
     closePopups: vi.fn(),
     openContextPopupForTarget: vi.fn(),
     insertPastedImageIntoEdit: vi.fn(),
+    notify: vi.fn(),
     resendUserMessageFromParts: vi.fn(async () => input.resendResult ?? true)
   }
   const runtime = createAiPanelMessageEditRuntime({
@@ -111,6 +112,8 @@ const createHarness = (input: { clipboardHasImage?: boolean; resendResult?: bool
     },
     fallbackEditTarget: () => editable,
     insertPastedImageIntoEdit: calls.insertPastedImageIntoEdit,
+    notify: calls.notify,
+    imageLimitMessage: () => '每条消息最多添加 5 张图片。',
     resendUserMessageFromParts: calls.resendUserMessageFromParts
   })
   runtime.setEditEditableRef(editable)
@@ -232,5 +235,21 @@ describe('aiPanelMessageEditRuntime', () => {
     expect(chip).not.toBeNull()
     expect(createAiPanelChipElement(commandChip, renderOptions).dataset.command).toBe('/rollback')
     expect(runtime.restoreEditInputSelection()).toBe(true)
+  })
+
+  it('keeps five edit images and rejects the sixth with a visible notice', async () => {
+    const { calls, editable, runtime } = createHarness()
+    await runtime.startMessageEdit({ id: 'user-1', role: 'user', text: '' })
+
+    for (let index = 0; index < 5; index += 1) {
+      setCaretAtEnd(editable)
+      expect(runtime.insertImageAtEditCursor({ ...imagePart, name: `diagram-${index + 1}.png` })).toBe(true)
+    }
+
+    setCaretAtEnd(editable)
+    expect(runtime.insertImageAtEditCursor({ ...imagePart, name: 'diagram-6.png' })).toBe(false)
+    expect(runtime.editImageInputParts.value).toHaveLength(5)
+    expect(editable.querySelectorAll('.image-preview-wrapper')).toHaveLength(5)
+    expect(calls.notify).toHaveBeenCalledWith('每条消息最多添加 5 张图片。')
   })
 })

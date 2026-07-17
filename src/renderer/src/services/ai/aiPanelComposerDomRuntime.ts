@@ -16,6 +16,7 @@ import {
   shouldTriggerAiPanelCommandPopupForPendingSlash,
   shouldTriggerAiPanelCommandPopupForSlash
 } from '@/services/ai/aiPanelEditableSelectionRuntime'
+import { MAX_CHAT_IMAGE_ATTACHMENTS_PER_MESSAGE } from '@shared/chatImageAttachment'
 import {
   createAiPanelComposerRuntime,
   isAiPanelComposerEmpty,
@@ -43,6 +44,8 @@ export type AiPanelComposerDomRuntimeOptions = {
   insertPastedImage: () => void | Promise<void>
   closePopups: () => void
   notify: (message: string) => void
+  additionalImageCount?: () => number
+  imageLimitMessage?: () => string
   afterDomUpdate: () => void | Promise<void>
   afterInputSync: () => void | Promise<void>
   requestFrame: (callback: () => void) => number
@@ -164,6 +167,10 @@ export const createAiPanelComposerDomRuntime = (options: AiPanelComposerDomRunti
   const handleEditableInput = () => aiPanelComposerRuntime.handleInput()
 
   const insertImageAtCursor = (part: AiImageContentPart) => {
+    if (imageInputParts.value.length + (options.additionalImageCount?.() || 0) >= MAX_CHAT_IMAGE_ATTACHMENTS_PER_MESSAGE) {
+      options.notify(options.imageLimitMessage?.() || `Each message can include up to ${MAX_CHAT_IMAGE_ATTACHMENTS_PER_MESSAGE} images.`)
+      return false
+    }
     return insertAiPanelImageIntoEditableCursor(editableRef.value, part, () => {
       imageInputParts.value = [...imageInputParts.value, part]
       handleEditableInput()

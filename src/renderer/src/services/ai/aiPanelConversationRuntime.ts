@@ -22,10 +22,6 @@ export type AiPanelHistoryGroup<T extends AiPanelConversationLike> = {
 
 export type AiPanelConversationTabCloseResult =
   | {
-      status: 'keep-one'
-      openIds: string[]
-    }
-  | {
       status: 'closed-inactive'
       openIds: string[]
     }
@@ -81,7 +77,6 @@ export const closeAiConversationTab = <T extends Pick<AiPanelConversationLike, '
   selectedConversationId: string,
   closingId: string
 ): AiPanelConversationTabCloseResult => {
-  if (visibleTabs.length <= 1) return { status: 'keep-one', openIds }
   const nextOpenIds = openIds.filter((openId) => openId !== closingId)
   if (selectedConversationId !== closingId) return { status: 'closed-inactive', openIds: nextOpenIds }
   const closedIndex = visibleTabs.findIndex((conversation) => conversation.id === closingId)

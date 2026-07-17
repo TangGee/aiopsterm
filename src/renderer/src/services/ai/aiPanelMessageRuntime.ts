@@ -2,6 +2,7 @@ import { marked } from 'marked'
 import { highlightAutoValue, hljs } from '@/services/common/highlightRuntime'
 import { sanitizeMarkdownHtml } from '@/services/common/markdownRuntime'
 import { plainTextForAiContentPart } from '@/services/ai/aiPanelInputRuntime'
+import { isRestoredClassicClineTaskMessage } from '@/services/ai/classicClineTaskRuntime'
 import type {
   AiChatExportMessage,
   AiChatHistoryHostContext,
@@ -50,6 +51,8 @@ type AiPanelExportHostInput = {
   detail?: string
 }
 
+const cloneAiPanelExportValue = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T
+
 export const aiPanelChatExportHosts = (message: { hosts?: AiPanelExportHostInput[] }): AiChatHistoryHostContext[] | undefined => {
   const hosts = message.hosts
     ?.filter((host) => host.kind === 'hosts' && host.label.trim())
@@ -68,7 +71,7 @@ export const aiPanelChatExportMessage = (
   id: message.id,
   role: message.role,
   text: message.text,
-  contentParts: message.contentParts,
+  contentParts: message.contentParts ? cloneAiPanelExportValue(message.contentParts) : undefined,
   hosts: aiPanelChatExportHosts(message),
   state: message.state,
   favorite: message.favorite,
@@ -79,10 +82,10 @@ export const aiPanelChatExportMessage = (
   ask: message.ask,
   say: message.say,
   action: message.action,
-  commandExecution: message.commandExecution,
-  agentTask: message.agentTask,
-  mcpToolCall: message.mcpToolCall,
-  mcpResourceAccess: message.mcpResourceAccess,
+  commandExecution: message.commandExecution ? cloneAiPanelExportValue(message.commandExecution) : undefined,
+  agentTask: message.agentTask ? cloneAiPanelExportValue(message.agentTask) : undefined,
+  mcpToolCall: message.mcpToolCall ? cloneAiPanelExportValue(message.mcpToolCall) : undefined,
+  mcpResourceAccess: message.mcpResourceAccess ? cloneAiPanelExportValue(message.mcpResourceAccess) : undefined,
   followupOptions: message.followupOptions ? [...message.followupOptions] : undefined,
   selectedOption: message.selectedOption,
   partial: message.partial
@@ -216,10 +219,19 @@ export const isReadOnlyCommandMessage = (message: AiPanelCommandSuggestionMessag
   message.commandExecution?.requiresApproval === false && message.commandExecution.interactive !== true
 
 export const isCommandTerminalActionDisabled = (message: AiPanelCommandSuggestionMessage) =>
-  message.commandExecutionStatus === 'running' || message.commandExecutionStatus === 'succeeded' || message.action === 'rejected'
+  message.commandExecutionStatus === 'running' ||
+  message.commandExecutionStatus === 'succeeded' ||
+  message.action === 'rejected' ||
+  isRestoredClassicClineTaskMessage(message)
 
 export const canEditCommandMessage = (message: AiPanelCommandSuggestionMessage | null) =>
-  Boolean(message && message.commandExecutionStatus !== 'running' && message.agentTask?.status !== 'waiting-approval' && message.agentTask?.status !== 'running')
+  Boolean(
+    message &&
+    !isRestoredClassicClineTaskMessage(message) &&
+    message.commandExecutionStatus !== 'running' &&
+    message.agentTask?.status !== 'waiting-approval' &&
+    message.agentTask?.status !== 'running'
+  )
 
 export const commandHostForMessage = (message: { commandExecution?: { ip?: string } }) => {
   const ip = message.commandExecution?.ip?.trim()

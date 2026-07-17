@@ -175,7 +175,7 @@ export const useSnippetsPanelRuntime = (options: SnippetsPanelRuntimeOptions) =>
       await stopMacroRecording()
       return
     }
-    workspace.startMacroRecording(workspace.activePanelId)
+    workspace.startMacroRecording()
   }
 
   const groupCount = (uuid: string) => workspace.quickCommands.filter((command) => command.group_uuid === uuid).length

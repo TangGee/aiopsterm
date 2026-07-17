@@ -280,7 +280,7 @@
 
     <AssetFolderFormDialog
       :visible="assetFolderModal.visible"
-      :title="assetFolderModal.parentKey ? '新建子目录' : '新建目录'"
+      :title="assetFolderModal.parentKey ? t('assets.folderDialog.newSubdirTitle') : t('assets.folderDialog.newDirTitle')"
       :name="assetFolderForm.name"
       :description="assetFolderForm.description"
       :error="assetFolderFormError"
@@ -308,6 +308,9 @@
 import { Search, X } from 'lucide-vue-next'
 import AssetFolderFormDialog from '@/components/assets/AssetFolderFormDialog.vue'
 import { useAssetsPanelRuntimeContext } from '@/services/assets/assetsPanelContext'
+import { useI18n } from '@/i18n'
+
+const { t } = useI18n()
 
 const {
   workspace,

@@ -15,6 +15,10 @@ describe('chatHistoryClient', () => {
         ok: true,
         data: { conversations: [], selectedConversationId: '' }
       })),
+      deselectChatConversation: vi.fn(async () => ({
+        ok: true,
+        data: { conversations: [], selectedConversationId: '' }
+      })),
       createChatConversation: vi.fn(async () => ({
         ok: true,
         data: {
@@ -55,6 +59,10 @@ describe('chatHistoryClient', () => {
       ok: true,
       data: { conversations: [], selectedConversationId: '' }
     })
+    await expect(chatHistoryClient.deselectChatConversation()?.('conv-1')).resolves.toEqual({
+      ok: true,
+      data: { conversations: [], selectedConversationId: '' }
+    })
     await expect(chatHistoryClient.createChatConversation()?.()).resolves.toEqual(
       expect.objectContaining({ ok: true, data: expect.objectContaining({ selectedConversationId: 'conv-1' }) })
     )
@@ -73,6 +81,7 @@ describe('chatHistoryClient', () => {
     )
 
     expect(window.aiops.listChatConversations).toHaveBeenCalledTimes(1)
+    expect(window.aiops.deselectChatConversation).toHaveBeenCalledWith('conv-1')
     expect(window.aiops.updateChatConversation).toHaveBeenCalledWith({ id: 'conv-1', title: 'Renamed' })
     expect(window.aiops.deleteChatConversation).toHaveBeenCalledWith('conv-1')
     expect(window.aiops.restoreChatConversation).toHaveBeenCalledWith('conv-2')
@@ -81,6 +90,7 @@ describe('chatHistoryClient', () => {
     window.aiops = {
       ...originalAiops,
       listChatConversations: undefined as any,
+      deselectChatConversation: undefined as any,
       createChatConversation: undefined as any,
       updateChatConversation: undefined as any,
       deleteChatConversation: undefined as any,
@@ -88,6 +98,7 @@ describe('chatHistoryClient', () => {
       saveChatMessageMetadata: undefined as any
     }
     expect(chatHistoryClient.listChatConversations()).toBeUndefined()
+    expect(chatHistoryClient.deselectChatConversation()).toBeUndefined()
     expect(chatHistoryClient.createChatConversation()).toBeUndefined()
     expect(chatHistoryClient.updateChatConversation()).toBeUndefined()
     expect(chatHistoryClient.deleteChatConversation()).toBeUndefined()

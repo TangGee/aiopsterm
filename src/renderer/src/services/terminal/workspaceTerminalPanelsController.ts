@@ -284,7 +284,7 @@ export const createWorkspaceTerminalPanelsController = (
     return panel
   }
 
-  const openTerminalForAiHostContext = async (host: AiContextOption) => {
+  const openTerminalForAiHostContext = async (host: AiContextOption, options: { cwd?: string } = {}) => {
     const previousActivePanelId = activePanelId.value
     const panel = createPanel()
     const panelId = panel.id
@@ -305,6 +305,7 @@ export const createWorkspaceTerminalPanelsController = (
           panelId,
           workspaceId: 'workspace',
           title: label,
+          ...(options.cwd ? { cwd: options.cwd } : {}),
           cols: 100,
           rows: 30,
           terminalType: terminalSettings.value.terminalType
@@ -351,7 +352,14 @@ export const createWorkspaceTerminalPanelsController = (
       }
       activeModule.value = 'workspace'
       activePanelId.value = panelId
-      return panels.value.find((item) => item.id === panelId) || null
+      const connectedPanel = panels.value.find((item) => item.id === panelId) || null
+      if (connectedPanel?.sessionId && options.cwd && connectedPanel.cwd !== options.cwd) {
+        const writeTerminal = terminalClient.writeTerminal()
+        const quotedCwd = `'${options.cwd.replaceAll("'", "'\\''")}'`
+        const changed = writeTerminal ? await writeTerminal(connectedPanel.sessionId, `cd -- ${quotedCwd}\r`) : null
+        if (changed?.ok) connectedPanel.cwd = options.cwd
+      }
+      return connectedPanel
     } catch (error) {
       discardPendingPanel()
       setTopNotice(error instanceof Error ? error.message : 'SSH 终端启动失败')

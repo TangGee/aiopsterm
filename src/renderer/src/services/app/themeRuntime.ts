@@ -33,7 +33,7 @@ export type ThemeId =
 export type ConcreteThemeId = Exclude<ThemeId, 'auto'>
 export type ThemeGroup = 'default' | 'official'
 
-// 材质属性,只决定设置了背景图之后"怎么透":
+// 材质属性,只决定设置了背景图之后「怎么透」:
 // frosted = 毛玻璃,磨砂透出;clear = 亮面,清透无模糊,背景纹理保持锐利。
 // 无背景图时两者没有区别,base 层都是全实面。
 export type ThemeSurfaceFinish = 'frosted' | 'clear'

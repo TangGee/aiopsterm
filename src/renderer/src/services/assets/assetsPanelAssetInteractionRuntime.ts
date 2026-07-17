@@ -3,6 +3,7 @@ import { reactive, ref, type ComputedRef, type Ref } from 'vue'
 import type { useWorkspaceStore } from '@/stores/workspace'
 import { openSshTerminalLaunch } from '@/services/terminal/terminalLaunchRuntime'
 import type { AssetsPanelAsset } from '@/services/assets/assetsPanelTreeRuntime'
+import { managedAssetDisplayName, managedAssetEndpoint } from '@shared/assetDisplayRuntime'
 
 type WorkspaceStore = ReturnType<typeof useWorkspaceStore>
 
@@ -110,9 +111,21 @@ export const createAssetsPanelAssetInteractionRuntime = (deps: AssetsPanelAssetI
       { title: asset.name || asset.title }
     )
     if (!connected) return
+    const displayName = managedAssetDisplayName(asset)
+    const endpoint = managedAssetEndpoint(asset)
     deps.workspace.selectedContexts = [
       ...deps.workspace.selectedContexts.filter((item) => item.id !== asset.id),
-      { id: asset.id, kind: 'hosts', label: asset.host, detail: asset.name || asset.title }
+      {
+        id: asset.id,
+        kind: 'hosts',
+        label: displayName,
+        detail: endpoint,
+        assetId: asset.id,
+        host: endpoint || displayName,
+        port: Number(asset.port) || 22,
+        username: asset.username || 'root',
+        assetName: displayName
+      }
     ]
     deps.editorOpen.value = false
     deps.editMode.value = false

@@ -4,7 +4,15 @@ export type CodexSessionCreateOptions = {
   cols?: number
   rows?: number
   target?: CodexSessionTargetContext
+  productSessionId?: string
+  projectRoot?: string
+  launch?: CodexSessionLaunch
 }
+
+export type CodexSessionLaunch =
+  | { mode: 'new' }
+  | { mode: 'resume'; threadId: string }
+  | { mode: 'fork'; threadId: string }
 
 export type CodexSessionTargetContext = {
   panelId?: string
@@ -15,6 +23,7 @@ export type CodexSessionTargetContext = {
   port?: number
   username?: string
   assetId?: string
+  connectionId?: string
   assetName?: string
   cwd?: string
 }
@@ -42,12 +51,25 @@ export type CodexSessionInfo = {
   codexHome: string
   runtimeKind: 'pty' | 'process'
   lifecycle?: CodexSessionLifecycleEvent
+  launch?: CodexSessionLaunch
+  recoveredFromThreadId?: string
 }
 
 export type CodexSessionDataEvent = {
   id: string
   data: string
   raw?: number[]
+}
+
+export type CodexSessionThreadEvent = {
+  id: string
+  threadId: string
+  previousThreadId?: string | null
+  reason: 'new' | 'resume' | 'fork' | 'switch'
+  at: number
+  title?: string
+  cwd?: string
+  rolloutPath?: string
 }
 
 export type CodexSessionExitEvent = {
@@ -67,6 +89,7 @@ export type CodexSessionKillResult = AiopsMutationResult<{
 }>
 
 export type CodexSessionTargetUpdateResult = AiopsMutationResult<{
+  codexRuntimeId?: string
   sessionId?: string
   target?: CodexSessionTargetContext
   registered: boolean

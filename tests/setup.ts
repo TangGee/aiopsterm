@@ -16,6 +16,7 @@ import type {
   DatabasePageCommentRecord,
   DatabaseAiDrawerRequestRecord,
   DatabaseAiPaneMessageRecord,
+  DatabaseAiPaneSessionSnapshot,
   DatabaseAiPaneStateSnapshot,
   DatabaseAiResponseLanguage,
   DatabaseWorkspaceCatalog,
@@ -32,11 +33,13 @@ import type { ClineAgentTaskEvent } from '@shared/contracts/clineAgent'
 import type { SshAgentKeychainOption } from '@shared/contracts/appRuntime'
 import type { FileTransferTaskEvent } from '@shared/contracts/files'
 import type { McpServerUserConfig } from '@shared/contracts/mcp'
+import type { ProductSessionListInput } from '@shared/contracts/productSessions'
 import type {
   TerminalKeyboardInteractiveRequest,
   TerminalKeyboardInteractiveResult
 } from '@shared/contracts/terminalSessions'
 import { parseAssetImportContent, type ImportedAssetDraft } from '@shared/assetImport'
+import { managedAssetDisplayName, managedAssetEndpoint } from '@shared/assetDisplayRuntime'
 import { buildChatExportMarkdown, sanitizeChatExportFileName } from '@shared/chatExport'
 import { prepareChatImageAttachment, validateChatImageAttachment } from '@shared/chatImageAttachment'
 import { buildDatabaseExportCsv, sanitizeDatabaseExportFileName } from '@shared/databaseExport'
@@ -1281,6 +1284,7 @@ const databaseAiPaneMessagesMock = new Map<string, DatabaseAiPaneMessageRecord>(
 const databaseAiDrawerRequestsMock = new Map<string, DatabaseAiDrawerRequestRecord>()
 const databasePageCommentsMock = new Map<string, DatabasePageCommentRecord>()
 const defaultDatabaseAiPaneStateMock = (): DatabaseAiPaneStateSnapshot => ({
+  conversationId: 'dbai-pane-conversation-test',
   open: false,
   width: 360,
   context: {
@@ -1290,7 +1294,8 @@ const defaultDatabaseAiPaneStateMock = (): DatabaseAiPaneStateSnapshot => ({
     dbType: ''
   },
   draft: '',
-  messages: []
+  messages: [],
+  archivedSessions: []
 })
 let databaseAiPaneStateMock = defaultDatabaseAiPaneStateMock()
 let aiChatExchangeRequestSequenceMock = 1
@@ -1537,6 +1542,8 @@ function resetDatabaseConnectionsMock() {
 
 const databaseTrimMock = (value: unknown) => (typeof value === 'string' ? value.trim() : '')
 const normalizeDatabaseAiResponseLanguageMock = (value: unknown): DatabaseAiResponseLanguage => value === 'zh-CN' ? 'zh-CN' : 'en-US'
+const DATABASE_AI_PANE_MAX_MESSAGES_MOCK = 24
+const DATABASE_AI_PANE_MAX_ARCHIVED_SESSIONS_MOCK = 40
 
 const databaseAiPaneMessageRecordMock = (
   input: {
@@ -1567,12 +1574,20 @@ const cloneDatabaseAiPaneMessageMock = (message: DatabaseAiPaneMessageRecord): D
   ...(message.sqlAction ? { sqlAction: { ...message.sqlAction, context: { ...message.sqlAction.context } } } : {})
 })
 
+const cloneDatabaseAiPaneSessionMock = (session: DatabaseAiPaneSessionSnapshot): DatabaseAiPaneSessionSnapshot => ({
+  ...session,
+  context: { ...session.context },
+  messages: session.messages.map(cloneDatabaseAiPaneMessageMock)
+})
+
 const cloneDatabaseAiPaneStateMock = (state: DatabaseAiPaneStateSnapshot): DatabaseAiPaneStateSnapshot => ({
+  conversationId: state.conversationId,
   open: state.open,
   width: state.width,
   context: { ...state.context },
   draft: state.draft,
-  messages: state.messages.map(cloneDatabaseAiPaneMessageMock)
+  messages: state.messages.map(cloneDatabaseAiPaneMessageMock),
+  archivedSessions: (state.archivedSessions || []).map(cloneDatabaseAiPaneSessionMock)
 })
 
 const isMysqlCompatibleDatabaseMock = (dialect: DatabaseEngineCode | TestDatabaseAiTargetDialect | '') =>
@@ -1581,21 +1596,57 @@ const isMysqlCompatibleDatabaseMock = (dialect: DatabaseEngineCode | TestDatabas
 const isPostgresCompatibleDatabaseMock = (dialect: DatabaseEngineCode | TestDatabaseAiTargetDialect | '') =>
   dialect === 'postgresql' || dialect === 'kingbase'
 
-const normalizeDatabaseAiPaneStateMock = (state: DatabaseAiPaneStateSnapshot): DatabaseAiPaneStateSnapshot => ({
-  open: state.open === true,
-  width: Math.min(720, Math.max(280, Math.round(Number(state.width) || 360))),
-    context: {
-      connectionId: databaseTrimMock(state.context?.connectionId),
-      catalogName: databaseTrimMock(state.context?.catalogName),
-      schemaName: databaseTrimMock(state.context?.schemaName),
-      dbType: ['mysql', 'mariadb', 'oceanbase', 'postgresql', 'kingbase', 'sqlite', 'oracle', 'sqlserver', 'clickhouse', 'presto'].includes(String(state.context?.dbType)) ? state.context.dbType : ''
-    },
-  draft: typeof state.draft === 'string' ? state.draft : '',
-  messages: (Array.isArray(state.messages) ? state.messages : []).slice(-24).map((message) => ({
+const normalizeDatabaseAiPaneContextMock = (context: DatabaseAiPaneStateSnapshot['context'] | undefined) => ({
+  connectionId: databaseTrimMock(context?.connectionId),
+  catalogName: databaseTrimMock(context?.catalogName),
+  schemaName: databaseTrimMock(context?.schemaName),
+  dbType: ['mysql', 'mariadb', 'oceanbase', 'postgresql', 'kingbase', 'sqlite', 'oracle', 'sqlserver', 'clickhouse', 'presto'].includes(String(context?.dbType)) ? context!.dbType : ''
+})
+
+const normalizeDatabaseAiPaneMessagesMock = (messages: DatabaseAiPaneMessageRecord[] | undefined) =>
+  (Array.isArray(messages) ? messages : []).slice(-DATABASE_AI_PANE_MAX_MESSAGES_MOCK).map((message) => ({
     ...cloneDatabaseAiPaneMessageMock(message),
     responseLanguage: normalizeDatabaseAiResponseLanguageMock(message.responseLanguage)
   }))
-})
+
+const normalizeDatabaseAiPaneSessionMock = (session: DatabaseAiPaneSessionSnapshot): DatabaseAiPaneSessionSnapshot | null => {
+  const conversationId = databaseTrimMock(session?.conversationId)
+  const createdAt = Number(session?.createdAt)
+  const updatedAt = Number(session?.updatedAt)
+  if (!conversationId || !Number.isFinite(createdAt) || createdAt < 0 || !Number.isFinite(updatedAt) || updatedAt < createdAt) return null
+  return {
+    conversationId,
+    context: normalizeDatabaseAiPaneContextMock(session.context),
+    draft: typeof session.draft === 'string' ? session.draft : '',
+    messages: normalizeDatabaseAiPaneMessagesMock(session.messages),
+    createdAt,
+    updatedAt
+  }
+}
+
+const normalizeDatabaseAiPaneStateMock = (state: DatabaseAiPaneStateSnapshot): DatabaseAiPaneStateSnapshot => {
+  const conversationId = databaseTrimMock(state.conversationId) || 'dbai-pane-conversation-test'
+  const archivedSessionIds = new Set<string>()
+  const archivedSessions = (Array.isArray(state.archivedSessions) ? state.archivedSessions : [])
+    .map(normalizeDatabaseAiPaneSessionMock)
+    .filter((session): session is DatabaseAiPaneSessionSnapshot => session !== null && session.conversationId !== conversationId)
+    .sort((left, right) => right.updatedAt - left.updatedAt || left.conversationId.localeCompare(right.conversationId))
+    .filter((session) => {
+      if (archivedSessionIds.has(session.conversationId)) return false
+      archivedSessionIds.add(session.conversationId)
+      return true
+    })
+    .slice(0, DATABASE_AI_PANE_MAX_ARCHIVED_SESSIONS_MOCK)
+  return {
+    conversationId,
+    open: state.open === true,
+    width: Math.min(720, Math.max(280, Math.round(Number(state.width) || 360))),
+    context: normalizeDatabaseAiPaneContextMock(state.context),
+    draft: typeof state.draft === 'string' ? state.draft : '',
+    messages: normalizeDatabaseAiPaneMessagesMock(state.messages),
+    archivedSessions
+  }
+}
 
 const storeDatabaseAiPaneMessageMock = (message: DatabaseAiPaneMessageRecord) => {
   databaseAiPaneMessagesMock.set(message.id, cloneDatabaseAiPaneMessageMock(message))
@@ -3891,6 +3942,7 @@ type TestChatConversationUpdateInput = {
   summary?: string
   favorite?: boolean
   messages?: TestChatHistoryMessage[]
+  preserveSelection?: boolean
 }
 
 type TestChatMessageMetadataInput = {
@@ -3949,6 +4001,31 @@ const defaultChatHistoryState = () => ({
 
 let chatHistoryStateMock = defaultChatHistoryState()
 
+const productSessionRecordFromConversation = (conversation: TestChatConversationRecord) => ({
+  id: conversation.id,
+  surface: 'classic' as const,
+  title: conversation.title,
+  isOpen: true,
+  createdAt: conversation.ts,
+  updatedAt: conversation.ts
+})
+
+let productSessionStateMock: Record<string, any> = {}
+
+const resetProductSessionStoreMock = () => {
+  productSessionStateMock = Object.fromEntries(
+    chatHistoryStateMock.conversations.map((conversation) => [conversation.id, productSessionRecordFromConversation(conversation)])
+  )
+}
+
+const closeProductSessionStoreMock = () => {
+  productSessionStateMock = Object.fromEntries(
+    Object.entries(productSessionStateMock).map(([id, session]) => [id, { ...session, isOpen: false }])
+  )
+}
+
+resetProductSessionStoreMock()
+
 const cloneChatConversation = (conversation: TestChatConversationRecord): TestChatConversationRecord => ({ ...conversation })
 const cloneChatMessage = (message: TestChatHistoryMessage): TestChatHistoryMessage => ({
   ...message,
@@ -3972,6 +4049,7 @@ const chatHistoryListResultMock = () => ({
 })
 const resetChatHistoryStoreMock = () => {
   chatHistoryStateMock = defaultChatHistoryState()
+  resetProductSessionStoreMock()
   aiChatExchangeRequestSequenceMock = 1
   cancelledAiChatResponseKeysMock.clear()
   kubernetesTerminalSequenceMock = 1
@@ -3993,6 +4071,7 @@ const setChatHistoryStoreMock = (conversations: TestChatConversationRecord[], me
     ),
     selectedConversationId: selectedConversationId || conversations[0]?.id || ''
   }
+  resetProductSessionStoreMock()
 }
 
 const defaultAiTodoItems: AiTodoItem[] = []
@@ -4145,7 +4224,6 @@ const buildAiChatExchangePromptMock = (
 
 const buildAiChatResponseMessagesMock = (messages: TestAiChatMessageInput[] | undefined, prompt: string): TestAiChatMessageInput[] => {
   const history = (messages || [])
-    .slice(-12)
     .map((message): TestAiChatMessageInput | null => {
       const text = normalizeAiChatTextMock(message.text)
       if (!text) return null
@@ -4649,7 +4727,7 @@ const sortAssetsForAiContextMock = (assets: TestAssetRecord[]) =>
       if (first.status === 'online') return -1
       if (second.status === 'online') return 1
     }
-    return (first.name || first.title || first.host).localeCompare(second.name || second.title || second.host, 'zh-CN', {
+    return managedAssetDisplayName(first).localeCompare(managedAssetDisplayName(second), 'zh-CN', {
       numeric: true,
       sensitivity: 'base'
     })
@@ -4707,17 +4785,21 @@ const aiContextCatalogResultMock = () => {
   const hosts = [
     { id: 'opened-local', kind: 'hosts' as const, label: '127.0.0.1', detail: 'local shell', host: '127.0.0.1', username: '', assetName: 'Local terminal', isLocalShell: true },
     ...sortAssetsForAiContextMock(assetStoreMock)
-      .filter((asset) => !asset.isLocalShell && (asset.host || asset.ip || asset.name))
-      .map((asset) => ({
-        id: asset.id,
-        kind: 'hosts' as const,
-        label: asset.host || asset.ip || asset.name,
-        detail: asset.name || asset.title || asset.group_name,
-        host: asset.host || asset.ip || asset.name,
-        port: Number(asset.port) || 22,
-        username: asset.username || 'root',
-        assetName: asset.name || asset.title || asset.host || asset.ip
-      }))
+      .filter((asset) => !asset.isLocalShell && (asset.host || asset.ip || asset.name || asset.title))
+      .map((asset) => {
+        const label = managedAssetDisplayName(asset)
+        const endpoint = managedAssetEndpoint(asset)
+        return {
+          id: asset.id,
+          kind: 'hosts' as const,
+          label,
+          detail: endpoint || undefined,
+          host: endpoint || label,
+          port: Number(asset.port) || 22,
+          username: asset.username || 'root',
+          assetName: label
+        }
+      })
   ]
   const chats = chatHistoryStateMock.conversations.map((conversation) => ({
     id: `chat:${conversation.id}`,
@@ -4725,7 +4807,6 @@ const aiContextCatalogResultMock = () => {
     label: conversation.title,
     detail: conversation.summary || conversation.ipAddress || conversation.updatedAt
   }))
-  const defaultRemote = hosts.find((host) => host.id !== 'opened-local')
   return {
     ok: true,
     data: {
@@ -4736,7 +4817,7 @@ const aiContextCatalogResultMock = () => {
         { id: 'chats' as const, label: '历史会话', options: chats.map((chat) => ({ ...chat })) }
       ],
       openedHosts: hosts.slice(0, 4).map((host) => ({ ...host })),
-      selectedDefaults: [hosts[0], defaultRemote].filter(Boolean).map((context) => ({ ...(context as (typeof hosts)[number]) }))
+      selectedDefaults: []
     }
   }
 }
@@ -5667,6 +5748,8 @@ Object.assign(globalThis, {
     matchMediaListeners.forEach((listener) => listener(event))
   },
   __resetChatHistoryStoreMock: resetChatHistoryStoreMock,
+  __resetProductSessionStoreMock: resetProductSessionStoreMock,
+  __closeProductSessionsMock: closeProductSessionStoreMock,
   __setChatHistoryStoreMock: setChatHistoryStoreMock,
   __resetAiTodoSnapshotMock: resetAiTodoSnapshotMock,
   __setAiTodoSnapshotMock: setAiTodoSnapshotMock,
@@ -5815,6 +5898,13 @@ Object.defineProperty(window, 'aiops', {
       }
     }),
     listChatConversations: vi.fn(async () => chatHistoryListResultMock()),
+    deselectChatConversation: vi.fn(async (expectedConversationId: string) => {
+      if (chatHistoryStateMock.selectedConversationId !== expectedConversationId) {
+        return { ok: false, errorCode: 'CHAT_HISTORY_SELECTION_CHANGED', errorMessage: 'Selected conversation changed.' }
+      }
+      chatHistoryStateMock.selectedConversationId = ''
+      return chatHistoryListResultMock()
+    }),
     listAiTodoSnapshot: vi.fn(async () => aiTodoSnapshotResultMock()),
     listAiContextCatalog: vi.fn(async () => aiContextCatalogResultMock()),
     listAiCommandCatalog: vi.fn(async () => aiCommandCatalogResultMock()),
@@ -6101,6 +6191,7 @@ Object.defineProperty(window, 'aiops', {
       chatHistoryStateMock.conversations.unshift(conversation)
       chatHistoryStateMock.selectedConversationId = conversation.id
       chatHistoryStateMock.messagesByConversationId[conversation.id] = []
+      productSessionStateMock[conversation.id] = productSessionRecordFromConversation(conversation)
       return {
         ok: true,
         data: {
@@ -6128,7 +6219,14 @@ Object.defineProperty(window, 'aiops', {
       }
       conversation.updatedAt = '刚刚'
       conversation.ts = Math.max(Date.now(), ...chatHistoryStateMock.conversations.map((item) => item.ts), 0) + 1
-      if (savedMessages) chatHistoryStateMock.selectedConversationId = id
+      if (productSessionStateMock[id]) {
+        productSessionStateMock[id] = {
+          ...productSessionStateMock[id],
+          title: conversation.title,
+          updatedAt: conversation.ts
+        }
+      }
+      if (savedMessages && input.preserveSelection !== true) chatHistoryStateMock.selectedConversationId = id
       return {
         ok: true,
         data: {
@@ -6143,6 +6241,7 @@ Object.defineProperty(window, 'aiops', {
       if (!exists) return { ok: false, errorCode: 'CHAT_HISTORY_NOT_FOUND', errorMessage: 'Conversation not found.' }
       chatHistoryStateMock.conversations = chatHistoryStateMock.conversations.filter((conversation) => conversation.id !== id)
       delete chatHistoryStateMock.messagesByConversationId[id]
+      delete productSessionStateMock[id]
       if (chatHistoryStateMock.selectedConversationId === id) {
         chatHistoryStateMock.selectedConversationId = chatHistoryStateMock.conversations[0]?.id || ''
       }
@@ -6195,6 +6294,14 @@ Object.defineProperty(window, 'aiops', {
     createAiChatExchangeRequest: vi.fn(
       async (input: {
         text: string
+        conversationId?: string
+        hostTargets?: Array<{
+          targetId: string
+          terminalSessionId: string
+          label: string
+          kind: 'local' | 'ssh'
+          cwd?: string
+        }>
         hosts?: TestChatHistoryHostContext[]
         messages?: TestAiChatMessageInput[]
         contexts?: TestAiChatContextInput[]
@@ -6213,6 +6320,8 @@ Object.defineProperty(window, 'aiops', {
         const responseInput = {
           requestId,
           assistantMessageId,
+          conversationId: normalizeAiChatTextMock(input.conversationId) || undefined,
+          hostTargets: input.hostTargets?.map((target) => ({ ...target })),
           prompt,
           messages: buildAiChatResponseMessagesMock(input.messages, prompt),
           contexts,
@@ -7491,11 +7600,20 @@ Object.defineProperty(window, 'aiops', {
       const username = options?.ssh?.username || asset?.username || 'local'
       const shell = options?.kind === 'ssh' ? 'ssh' : '/bin/bash'
       const cwd = options?.kind === 'ssh' ? `/home/${username}` : '/'
+      const kind = options?.kind === 'ssh' ? 'ssh' as const : 'local' as const
+      const label = options?.title || asset?.title || asset?.name || (kind === 'ssh' ? host : 'Local terminal')
       return {
         id,
         shell,
         cwd,
-        kind: options?.kind || 'local',
+        kind,
+        classicTarget: {
+          targetId: kind === 'ssh' ? options?.assetId || id : 'opened-local',
+          terminalSessionId: id,
+          label,
+          kind,
+          cwd
+        },
         connection:
           options?.kind === 'ssh'
             ? {
@@ -7504,14 +7622,14 @@ Object.defineProperty(window, 'aiops', {
                 port,
                 username,
                 ...(options.assetId ? { assetId: options.assetId } : {}),
-                assetName: options.title || asset?.title || asset?.name || host,
+                assetName: label,
                 ...(asset?.asset_type ? { assetType: asset.asset_type } : {}),
                 ...(asset?.organizationId || asset?.group_name ? { organizationId: asset.organizationId || asset.group_name } : {}),
                 ...(asset?.auth_type ? { authType: asset.auth_type } : {}),
                 ...(options.ssh?.jumpHostId || asset?.jumpHostId ? { jumpHostId: options.ssh?.jumpHostId || asset?.jumpHostId } : {}),
                 ...(options.ssh?.needProxy || asset?.needProxy ? { needProxy: true } : {}),
                 ...(options.ssh?.proxyName || asset?.proxyName ? { proxyName: options.ssh?.proxyName || asset?.proxyName } : {}),
-                title: options.title || asset?.title || asset?.name || host,
+                title: label,
                 createdAt: 1717200001000,
                 ...(options.ssh?.forkFromConnectionId ? { forkFromConnectionId: options.ssh.forkFromConnectionId } : {})
               }
@@ -7577,9 +7695,10 @@ Object.defineProperty(window, 'aiops', {
         runtimeKind: 'pty' as const
       }
     })),
-    setCodexSessionTarget: vi.fn(async (target?: { sessionId?: string }) => ({
+    setCodexSessionTarget: vi.fn(async (codexRuntimeId: string, target?: { sessionId?: string }) => ({
       ok: true,
       data: {
+        codexRuntimeId,
         sessionId: target?.sessionId,
         target,
         registered: Boolean(target?.sessionId)
@@ -7605,6 +7724,130 @@ Object.defineProperty(window, 'aiops', {
       ok: true,
       data: { id }
     })),
+    listProductSessions: vi.fn(async (input: ProductSessionListInput = {}) => {
+      const sessions = Object.values(productSessionStateMock)
+        .filter((session) => input.surface === undefined || session.surface === input.surface)
+        .filter((session) => input.isOpen === undefined || session.isOpen === input.isOpen)
+        .filter((session) => input.projectRoot === undefined || session.projectRoot === input.projectRoot)
+        .filter((session) => input.targetAssetId === undefined || session.target?.assetId === input.targetAssetId)
+        .filter((session) => input.targetConnectionId === undefined || session.target?.connectionId === input.targetConnectionId)
+        .filter((session) => input.databaseConnectionId === undefined || session.database?.connectionId === input.databaseConnectionId)
+        .filter((session) => input.nativeEngine === undefined || session.nativeBinding?.engine === input.nativeEngine)
+        .sort((left, right) => right.updatedAt - left.updatedAt || String(left.id).localeCompare(String(right.id)))
+      const offset = input.offset ?? 0
+      const limit = Math.min(input.limit ?? 200, 1000)
+      return {
+        ok: true,
+        data: { sessions: sessions.slice(offset, offset + limit).map((session) => ({ ...session })) }
+      }
+    }),
+    getProductSession: vi.fn(async (id: string) => ({
+      ok: true,
+      data: { session: productSessionStateMock[id] ? { ...productSessionStateMock[id] } : null }
+    })),
+    createProductSession: vi.fn(async (input: any) => {
+      const id = String(input.id || 'product-session-test')
+      const session = {
+        ...input,
+        id,
+        surface: input.surface || 'classic',
+        title: input.title || '',
+        isOpen: input.isOpen !== false,
+        createdAt: 1717200001000,
+        updatedAt: 1717200001000
+      }
+      productSessionStateMock[id] = session
+      return { ok: true, data: { session: { ...session } } }
+    }),
+    updateProductSession: vi.fn(async (input: any) => {
+      const id = String(input.id || '')
+      const existing = productSessionStateMock[id]
+      if (!existing) return { ok: false, errorCode: 'PRODUCT_SESSION_NOT_FOUND', errorMessage: 'Product session was not found.' }
+      const session = {
+        ...existing,
+        ...input,
+        updatedAt: 1717200001001
+      }
+      productSessionStateMock[id] = session
+      return { ok: true, data: { session: { ...session } } }
+    }),
+    deleteProductSession: vi.fn(async (id: string) => {
+      const deleted = Boolean(productSessionStateMock[id])
+      delete productSessionStateMock[id]
+      return { ok: true, data: { id, deleted } }
+    }),
+    closeProductSession: vi.fn(async (id: string) => {
+      if (productSessionStateMock[id]) productSessionStateMock[id] = { ...productSessionStateMock[id], isOpen: false }
+      return { ok: true, data: { id, stopped: true } }
+    }),
+    listProductSessionProjectionMessages: vi.fn(async (id: string, input?: { beforeOrdinal?: number; limit?: number }) => {
+      const messages = chatHistoryStateMock.messagesByConversationId[id] || []
+      const beforeOrdinal = input?.beforeOrdinal ?? messages.length
+      const limit = input?.limit ?? 80
+      const start = Math.max(0, beforeOrdinal - limit)
+      return {
+        ok: true,
+        data: {
+          messages: messages.slice(start, beforeOrdinal).map((message, index) => ({
+            messageId: message.id,
+            ordinal: start + index,
+            payload: cloneChatMessage(message),
+            createdAt: 1,
+            updatedAt: 1
+          })),
+          hasMore: start > 0,
+          nextBeforeOrdinal: start > 0 ? start : null,
+          totalMessages: messages.length
+        }
+      }
+    }),
+    replaceProductSessionProjectionMessages: vi.fn(async (id: string, messages: Array<{ payload: TestChatHistoryMessage }>) => {
+      chatHistoryStateMock.messagesByConversationId[id] = messages.map((message) => cloneChatMessage(message.payload))
+      return { ok: true, data: { count: messages.length } }
+    }),
+    upsertProductSessionProjectionMessages: vi.fn(async (id: string, messages: Array<{ messageId: string; payload: TestChatHistoryMessage }>) => {
+      const current = [...(chatHistoryStateMock.messagesByConversationId[id] || [])]
+      for (const message of messages) {
+        const index = current.findIndex((candidate) => candidate.id === message.messageId)
+        if (index >= 0) current[index] = cloneChatMessage(message.payload)
+        else current.push(cloneChatMessage(message.payload))
+      }
+      chatHistoryStateMock.messagesByConversationId[id] = current
+      return { ok: true, data: { count: messages.length } }
+    }),
+    reviseProductSessionProjectionMessages: vi.fn(async (
+      id: string,
+      input: { fromMessageId: string; replacementMessages: Array<{ messageId: string; payload: TestChatHistoryMessage }> }
+    ) => {
+      const current = chatHistoryStateMock.messagesByConversationId[id] || []
+      const fromIndex = current.findIndex((message) => message.id === input.fromMessageId)
+      if (fromIndex < 0) {
+        return { ok: false, errorCode: 'PRODUCT_SESSION_PROJECTION_MESSAGE_NOT_FOUND', errorMessage: 'Projection message was not found.' }
+      }
+      const prefix = current.slice(0, fromIndex)
+      const seed = prefix.slice(-200)
+      const replacement = input.replacementMessages.map((message) => cloneChatMessage(message.payload))
+      chatHistoryStateMock.messagesByConversationId[id] = [...prefix, ...replacement]
+      return {
+        ok: true,
+        data: {
+          deletedMessages: current.length - fromIndex,
+          appendedMessages: replacement.length,
+          totalMessages: prefix.length + replacement.length,
+          seedMessages: seed.map((message, index) => ({
+            messageId: message.id,
+            ordinal: prefix.length - seed.length + index,
+            payload: cloneChatMessage(message),
+            createdAt: 1,
+            updatedAt: 1
+          })),
+          seedTotalMessages: prefix.length,
+          seedOmittedMessages: prefix.length - seed.length,
+          seedPayloadBytes: Buffer.byteLength(JSON.stringify(seed), 'utf8')
+        }
+      }
+    }),
+    onProductSessionChanged: vi.fn(() => () => undefined),
     respondTerminalKeyboardInteractive: vi.fn((id: string, responses: string[]) => {
       void id
       void responses
@@ -8223,6 +8466,8 @@ Object.defineProperty(window, 'aiops', {
         taskId: input.taskId,
         turnId: input.turnId,
         toolCallId: input.toolCallId,
+        targetId: input.targetId,
+        targetLabel: input.targetLabel,
         terminalSessionId: input.terminalSessionId,
         status: input.approved ? 'approved' as const : 'rejected' as const
       }
@@ -8232,7 +8477,6 @@ Object.defineProperty(window, 'aiops', {
       data: { taskId: input.taskId, turnId: input.turnId, status: 'cancelled' as const }
     })),
     onClineAgentTaskEvent: vi.fn((listener: (event: ClineAgentTaskEvent) => void) => {
-      clineAgentTaskEventListeners.clear()
       clineAgentTaskEventListeners.add(listener)
       return () => clineAgentTaskEventListeners.delete(listener)
     }),
@@ -8604,6 +8848,7 @@ Object.defineProperty(window, 'aiops', {
     ),
     createDatabaseAiDrawerRequest: vi.fn(
       async (input: {
+        conversationId?: string
         requestId?: string
         action: TestDatabaseAiDrawerAction
         responseLanguage?: DatabaseAiResponseLanguage
@@ -8619,6 +8864,7 @@ Object.defineProperty(window, 'aiops', {
         const targetDialect = normalizeDatabaseAiTargetDialectMock(input.targetDialect || input.context.dbType || 'postgresql')
         const request: DatabaseAiDrawerRequestRecord = {
           id,
+          ...(databaseTrimMock(input.conversationId) ? { conversationId: databaseTrimMock(input.conversationId) } : {}),
           action: input.action,
           label: databaseAiDrawerActionNameMock(input.action, responseLanguage),
           status: 'queued',
@@ -8657,6 +8903,7 @@ Object.defineProperty(window, 'aiops', {
     }),
     generateDatabaseAiDrawerResponse: vi.fn(
       (input: {
+        conversationId?: string
         requestId?: string
         action: TestDatabaseAiDrawerAction
         responseLanguage?: DatabaseAiResponseLanguage
@@ -8704,8 +8951,9 @@ Object.defineProperty(window, 'aiops', {
                     text: data.text,
                     targetDialect: normalizeDatabaseAiTargetDialectMock(input.targetDialect || existing.targetDialect)
                   })!
-                : storeDatabaseAiDrawerRequestMock({
+                  : storeDatabaseAiDrawerRequestMock({
                     id: input.requestId || `dbai-drawer-response-test-${databaseAiDrawerRequestSequenceMock++}`,
+                    ...(databaseTrimMock(input.conversationId) ? { conversationId: databaseTrimMock(input.conversationId) } : {}),
                     action: input.action,
                     label: databaseAiDrawerActionNameMock(input.action, responseLanguage),
                     status: 'done',
@@ -9466,6 +9714,7 @@ Object.defineProperty(window, 'aiops', {
     onCodexSessionData: vi.fn(() => () => undefined),
     onCodexSessionLifecycle: vi.fn(() => () => undefined),
     onCodexSessionExit: vi.fn(() => () => undefined),
+    onCodexSessionThread: vi.fn(() => () => undefined),
     onTerminalKeyboardInteractiveRequest: vi.fn((listener: (event: TerminalKeyboardInteractiveRequest) => void) => {
       terminalKeyboardInteractiveRequestListeners.add(listener)
       return () => {

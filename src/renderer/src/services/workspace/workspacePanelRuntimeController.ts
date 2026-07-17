@@ -443,7 +443,7 @@ const closeMenusFromDocument = () => closeMenus()
 
 onMounted(() => {
   document.addEventListener('click', closeMenusFromDocument)
-  Promise.all([workspace.hydrateConfig(), refreshAssets(), loadKeychainOptions()]).catch((error) => {
+  Promise.all([refreshAssets(), loadKeychainOptions()]).catch((error) => {
     notice.value = error instanceof Error ? error.message : '资产加载失败'
   })
 })

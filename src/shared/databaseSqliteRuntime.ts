@@ -8,6 +8,11 @@ import type {
   DatabaseConnectionTestInput,
   DatabaseTableDdlInput,
   DatabaseTableDdlResult,
+  DatabaseTableExplainPlanInput,
+  DatabaseTableExplainPlanResult,
+  DatabaseTableIndexInfo,
+  DatabaseTableIndexInspectionInput,
+  DatabaseTableIndexInspectionResult,
   DatabaseTableMutationInput,
   DatabaseTableMutationPlanInput,
   DatabaseTableMutationPlanResult,
@@ -23,6 +28,9 @@ import {
   executeSqliteStatementInWorker,
   executeSqliteTransactionInWorker,
   loadSqliteCatalogsInWorker,
+  type SqliteWorkerExecuteInput,
+  type SqliteWorkerGuardedTableQueryInput,
+  type SqliteWorkerRequestOptions,
   type SqliteWorkerStatementInput
 } from './databaseSqliteWorkerRuntime'
 import {
@@ -51,6 +59,8 @@ type SqliteDatabaseConstructor = new (
 
 type SqliteSchemaTableRow = { name?: string; type?: string }
 type SqliteTableColumnRow = { cid?: number; name?: string; type?: string; notnull?: number; pk?: number; hidden?: number }
+type SqliteIndexListRow = { name?: string; unique?: number; origin?: string }
+type SqliteIndexColumnRow = { seqno?: number; cid?: number; name?: string; key?: number }
 
 export type DatabaseSqliteRuntimeConfig = {
   refreshConnectionCatalog: (connectionId: string, catalogs: DatabaseCatalogInfo[]) => void
@@ -63,6 +73,20 @@ const SQLITE_BUSY_TIMEOUT_MS = 5000
 const SQLITE_EXECUTE_MAX_ROWS = 5000
 let sqliteRuntime: SqliteDatabaseConstructor | null | undefined
 let runtimeConfig: DatabaseSqliteRuntimeConfig | null = null
+
+const executeAbortableSqliteStatement = (
+  input: SqliteWorkerExecuteInput,
+  options: SqliteWorkerRequestOptions
+) => options.signal
+  ? executeSqliteStatementInWorker(input, options)
+  : executeSqliteStatementInWorker(input)
+
+const executeAbortableSqliteGuardedTableQuery = (
+  input: SqliteWorkerGuardedTableQueryInput,
+  options: SqliteWorkerRequestOptions
+) => options.signal
+  ? executeSqliteGuardedTableQueryInWorker(input, options)
+  : executeSqliteGuardedTableQueryInWorker(input)
 
 export const configureDatabaseSqliteRuntime = (config: DatabaseSqliteRuntimeConfig) => {
   runtimeConfig = config
@@ -291,14 +315,19 @@ const sqliteOrderByFor = (sort: DatabaseColumnSort | null | undefined, knownColu
   return ` ORDER BY ${sqliteIdentifier(column)} ${sort.direction === 'desc' ? 'DESC' : 'ASC'}`
 }
 
-const sqliteColumnsForTableInWorker = async (connection: DatabaseConnectionInfo, schemaName: string, tableName: string) => {
-  const outcome = await executeSqliteStatementInWorker({
+const sqliteColumnsForTableInWorker = async (
+  connection: DatabaseConnectionInfo,
+  schemaName: string,
+  tableName: string,
+  options: SqliteWorkerRequestOptions = {}
+) => {
+  const outcome = await executeAbortableSqliteStatement({
     filePath: sqliteFilePathFromConnection(connection),
     readonly: true,
     sql: `PRAGMA ${sqliteIdentifier(schemaName)}.table_xinfo(${sqliteIdentifier(tableName)})`,
     maxRows: 10_000,
     busyTimeoutMs: SQLITE_BUSY_TIMEOUT_MS
-  })
+  }, options)
   if (!outcome.reader) return []
   return (outcome.rows as SqliteTableColumnRow[])
     .filter((row) => trim(row.name) && Number(row.hidden ?? 0) !== 1)
@@ -314,11 +343,120 @@ const sqliteColumnsForTableInWorker = async (connection: DatabaseConnectionInfo,
     })
 }
 
-export const sqliteQueryTable = async (connection: DatabaseConnectionInfo, input: DatabaseTableQueryInput, startedAt: number): Promise<DatabaseTableQueryResult> => {
+export const sqliteInspectTableIndexes = async (
+  connection: DatabaseConnectionInfo,
+  input: DatabaseTableIndexInspectionInput,
+  options: SqliteWorkerRequestOptions = {}
+): Promise<DatabaseTableIndexInspectionResult> => {
+  const startedAt = Date.now()
   try {
     const schemaName = sqliteSchemaNameFor(connection, input.databaseName)
     const tableName = trim(input.tableName)
-    const columns = await sqliteColumnsForTableInWorker(connection, schemaName, tableName)
+    const columns = await sqliteColumnsForTableInWorker(connection, schemaName, tableName, options)
+    if (!columns.length) {
+      return { ok: false, errorCode: 'DB_TABLE_NOT_FOUND', errorMessage: `Table not found: ${input.tableName}` }
+    }
+    const listed = await executeAbortableSqliteStatement({
+      filePath: sqliteFilePathFromConnection(connection),
+      readonly: true,
+      sql: `PRAGMA ${sqliteIdentifier(schemaName)}.index_list(${sqliteIdentifier(tableName)})`,
+      maxRows: 1000,
+      busyTimeoutMs: SQLITE_BUSY_TIMEOUT_MS
+    }, options)
+    const indexes: DatabaseTableIndexInfo[] = []
+    for (const row of listed.reader ? listed.rows as SqliteIndexListRow[] : []) {
+      const name = trim(row.name)
+      if (!name) continue
+      const detailed = await executeAbortableSqliteStatement({
+        filePath: sqliteFilePathFromConnection(connection),
+        readonly: true,
+        sql: `PRAGMA ${sqliteIdentifier(schemaName)}.index_xinfo(${sqliteIdentifier(name)})`,
+        maxRows: 1000,
+        busyTimeoutMs: SQLITE_BUSY_TIMEOUT_MS
+      }, options)
+      const indexColumns = (detailed.reader ? detailed.rows as SqliteIndexColumnRow[] : [])
+        .filter((column) => Number(column.key ?? 1) === 1 && Number(column.cid ?? -1) >= 0 && trim(column.name))
+        .sort((left, right) => Number(left.seqno ?? 0) - Number(right.seqno ?? 0))
+        .map((column) => trim(column.name))
+      if (!indexColumns.length) continue
+      indexes.push({
+        name,
+        columns: indexColumns,
+        unique: Number(row.unique ?? 0) === 1,
+        primary: trim(row.origin).toLowerCase() === 'pk',
+        method: 'btree'
+      })
+    }
+    const primaryColumns = columns.filter((column) => column.key === 'PK').map((column) => column.name)
+    if (primaryColumns.length && !indexes.some((index) => index.primary)) {
+      indexes.unshift({ name: 'PRIMARY', columns: primaryColumns, unique: true, primary: true, method: 'rowid' })
+    }
+    return { ok: true, data: { indexes, durationMs: Math.max(1, Date.now() - startedAt) } }
+  } catch (error) {
+    return {
+      ok: false,
+      errorCode: sqliteErrorCode(error, 'DB_SQLITE_INDEX_INSPECTION_FAILED'),
+      errorMessage: sqliteErrorMessage(error, 'SQLite index inspection failed.')
+    }
+  }
+}
+
+export const sqliteExplainTable = async (
+  connection: DatabaseConnectionInfo,
+  input: DatabaseTableExplainPlanInput,
+  options: SqliteWorkerRequestOptions = {}
+): Promise<DatabaseTableExplainPlanResult> => {
+  const startedAt = Date.now()
+  try {
+    const schemaName = sqliteSchemaNameFor(connection, input.databaseName)
+    const tableName = trim(input.tableName)
+    const columns = await sqliteColumnsForTableInWorker(connection, schemaName, tableName, options)
+    if (!columns.length) {
+      return { ok: false, errorCode: 'DB_TABLE_NOT_FOUND', errorMessage: `Table not found: ${input.tableName}` }
+    }
+    const knownColumns = columns.map((column) => column.name)
+    const requestedColumns = input.columns
+      .map((column) => knownColumns.find((known) => known.toLowerCase() === trim(column).toLowerCase()))
+      .filter((column): column is string => Boolean(column))
+    if (!requestedColumns.length || requestedColumns.length !== input.columns.length) {
+      return { ok: false, errorCode: 'DB_COLUMNS_INVALID', errorMessage: 'One or more selected columns are not available.' }
+    }
+    const where = sqliteWhereForFilters(input.filters, knownColumns)
+    const orderBy = sqliteOrderByFor(input.sort, knownColumns)
+    const selectList = requestedColumns.map(sqliteIdentifier).join(', ')
+    const outcome = await executeAbortableSqliteStatement({
+      filePath: sqliteFilePathFromConnection(connection),
+      readonly: true,
+      sql: `EXPLAIN QUERY PLAN SELECT ${selectList} FROM ${sqliteTableReference(connection, input.databaseName, tableName)}${where.sql}${orderBy} LIMIT 100`,
+      params: where.params,
+      maxRows: 1000,
+      busyTimeoutMs: SQLITE_BUSY_TIMEOUT_MS
+    }, options)
+    const plan = (outcome.reader ? outcome.rows : [])
+      .map((row) => [row.id, row.parent, row.detail].filter((value) => value !== undefined && value !== null).map(String).join(' | '))
+      .filter(Boolean)
+      .join('\n')
+    if (!plan) return { ok: false, errorCode: 'DB_SQLITE_EXPLAIN_RESULT_INVALID', errorMessage: 'SQLite returned an empty explain plan.' }
+    return { ok: true, data: { format: 'text', plan, durationMs: Math.max(1, Date.now() - startedAt) } }
+  } catch (error) {
+    return {
+      ok: false,
+      errorCode: sqliteErrorCode(error, 'DB_SQLITE_EXPLAIN_FAILED'),
+      errorMessage: sqliteErrorMessage(error, 'SQLite explain plan failed.')
+    }
+  }
+}
+
+export const sqliteQueryTable = async (
+  connection: DatabaseConnectionInfo,
+  input: DatabaseTableQueryInput,
+  startedAt: number,
+  options: SqliteWorkerRequestOptions = {}
+): Promise<DatabaseTableQueryResult> => {
+  try {
+    const schemaName = sqliteSchemaNameFor(connection, input.databaseName)
+    const tableName = trim(input.tableName)
+    const columns = await sqliteColumnsForTableInWorker(connection, schemaName, tableName, options)
     if (!columns.length) {
       return { ok: false, errorCode: 'DB_TABLE_NOT_FOUND', errorMessage: `Table not found: ${input.tableName}` }
     }
@@ -351,7 +489,7 @@ export const sqliteQueryTable = async (connection: DatabaseConnectionInfo, input
     let rows: Array<Record<string, unknown>>
     let total: number | null
     if (input.requireStableBaseTable) {
-      const guarded = await executeSqliteGuardedTableQueryInWorker({
+      const guarded = await executeAbortableSqliteGuardedTableQuery({
         filePath: sqliteFilePathFromConnection(connection),
         schemaName,
         tableName,
@@ -359,27 +497,27 @@ export const sqliteQueryTable = async (connection: DatabaseConnectionInfo, input
         ...(totalStatement ? { totalStatement } : {}),
         maxRows: pageSize,
         busyTimeoutMs: SQLITE_BUSY_TIMEOUT_MS
-      })
+      }, options)
       rows = guarded.rows
       total = guarded.total
     } else {
-      const rowsOutcome = await executeSqliteStatementInWorker({
+      const rowsOutcome = await executeAbortableSqliteStatement({
         filePath: sqliteFilePathFromConnection(connection),
         readonly: true,
         ...rowStatement,
         maxRows: pageSize,
         busyTimeoutMs: SQLITE_BUSY_TIMEOUT_MS
-      })
+      }, options)
       rows = rowsOutcome.reader ? rowsOutcome.rows : []
       total = null
       if (totalStatement) {
-        const totalOutcome = await executeSqliteStatementInWorker({
+        const totalOutcome = await executeAbortableSqliteStatement({
           filePath: sqliteFilePathFromConnection(connection),
           readonly: true,
           ...totalStatement,
           maxRows: 1,
           busyTimeoutMs: SQLITE_BUSY_TIMEOUT_MS
-        })
+        }, options)
         total = totalOutcome.reader ? Number((totalOutcome.rows[0]?.total as number | undefined) ?? 0) : 0
       }
     }
@@ -403,17 +541,21 @@ export const sqliteQueryTable = async (connection: DatabaseConnectionInfo, input
   }
 }
 
-export const sqliteTableDdl = async (connection: DatabaseConnectionInfo, input: DatabaseTableDdlInput): Promise<DatabaseTableDdlResult> => {
+export const sqliteTableDdl = async (
+  connection: DatabaseConnectionInfo,
+  input: DatabaseTableDdlInput,
+  options: SqliteWorkerRequestOptions = {}
+): Promise<DatabaseTableDdlResult> => {
   try {
     const schemaName = sqliteSchemaNameFor(connection, input.databaseName)
-    const outcome = await executeSqliteStatementInWorker({
+    const outcome = await executeAbortableSqliteStatement({
       filePath: sqliteFilePathFromConnection(connection),
       readonly: true,
       sql: `SELECT sql FROM ${sqliteIdentifier(schemaName)}.sqlite_schema WHERE type IN ('table', 'view') AND name = ? ORDER BY type LIMIT 1`,
       params: [trim(input.tableName)],
       maxRows: 1,
       busyTimeoutMs: SQLITE_BUSY_TIMEOUT_MS
-    })
+    }, options)
     const ddl = outcome.reader && typeof outcome.rows[0]?.sql === 'string' ? outcome.rows[0].sql : ''
     if (!ddl) return { ok: false, errorCode: 'DB_TABLE_NOT_FOUND', errorMessage: `Table not found: ${input.tableName}` }
     return { ok: true, data: { ddl } }

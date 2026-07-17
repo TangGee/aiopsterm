@@ -402,7 +402,14 @@ describe('terminalPanelRuntime', () => {
         id: 'terminal-local-1',
         shell: '/bin/zsh',
         cwd: '/work',
-        kind: 'local'
+        kind: 'local',
+        classicTarget: {
+          targetId: 'opened-local',
+          terminalSessionId: 'terminal-local-1',
+          label: 'Local terminal',
+          kind: 'local',
+          cwd: '/work'
+        }
       })
     ).toBe(local)
     expect(local).toEqual(
@@ -437,6 +444,13 @@ describe('terminalPanelRuntime', () => {
         shell: 'ssh',
         cwd: '/home/ops',
         kind: 'ssh',
+        classicTarget: {
+          targetId: 'asset-1',
+          terminalSessionId: 'terminal-ssh-1',
+          label: 'prod-host',
+          kind: 'ssh',
+          cwd: '/home/ops'
+        },
         connection: {
           connectionId: 'ssh-connection-1',
           forkFromConnectionId: 'ssh-parent',
@@ -465,7 +479,13 @@ describe('terminalPanelRuntime', () => {
         proxyName: 'corp-proxy'
       })
     )
-    expect(ssh).toEqual(expect.objectContaining({ sessionId: 'terminal-ssh-1', cwd: '/home/ops', title: 'prod-host', status: 'connecting' }))
+    expect(ssh).toEqual(expect.objectContaining({
+      sessionId: 'terminal-ssh-1',
+      cwd: '/home/ops',
+      title: 'prod-host',
+      status: 'connecting',
+      classicTarget: expect.objectContaining({ targetId: 'asset-1', terminalSessionId: 'terminal-ssh-1' })
+    }))
   })
 
   it('applies terminal lifecycle events with kind and SSH endpoint safeguards', () => {

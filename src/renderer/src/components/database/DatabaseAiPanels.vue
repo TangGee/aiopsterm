@@ -23,14 +23,33 @@
             <span>{{ t('database.ai.workspace') }}</span>
           </div>
         </div>
-        <button
-          type="button"
-          :title="t('database.ai.closePane')"
-          @click="$emit('closeDbAiPane')"
-        >
-          <X />
-        </button>
+        <div class="db-ai-pane-header-actions">
+          <button
+            type="button"
+            :title="t('database.ai.closePane')"
+            @click="$emit('closeDbAiPane')"
+          >
+            <X />
+          </button>
+        </div>
       </header>
+
+      <div
+        v-if="dbAiPaneRestoreIssues.length"
+        class="db-ai-pane-restore-warning"
+        role="status"
+        data-testid="db-ai-pane-restore-warning"
+      >
+        <AlertTriangle />
+        <div>
+          <strong>{{ t('database.ai.restoreDegraded') }}</strong>
+          <span v-for="issue in dbAiPaneRestoreIssues" :key="issue">{{ issue }}</span>
+        </div>
+        <button type="button" @click="$emit('retryDbAiPaneBinding')">
+          <RefreshCw />
+          <span>{{ t('database.ai.restoreRetry') }}</span>
+        </button>
+      </div>
 
       <section class="db-ai-pane-context-card">
         <div class="db-ai-pane-context-head">
@@ -132,6 +151,7 @@
       <section
         ref="dbAiPaneMessageListRef"
         class="db-ai-pane-messages"
+        @scroll.passive="handleDbAiPaneMessageScroll"
       >
         <div
           v-if="dbAiPaneMessages.length === 0"
@@ -141,7 +161,7 @@
           <span>{{ t('database.ai.emptyDescription') }}</span>
         </div>
         <article
-          v-for="message in dbAiPaneMessages"
+          v-for="message in visibleDbAiPaneMessages"
           :key="message.id"
           class="db-ai-pane-message"
           :class="[message.role, message.status]"
@@ -249,7 +269,7 @@
                 class="db-ai-pane-sql-run"
                 :title="canRunDbAiPaneMessageSql(message) ? t('database.ai.runReadOnlySql') : t('database.ai.runReadOnlySqlDisabled')"
                 :aria-label="t('database.ai.runReadOnlySql')"
-                :disabled="!canRunDbAiPaneMessageSql(message)"
+                :disabled="dbAiPaneRestoreIssues.length > 0 || !canRunDbAiPaneMessageSql(message)"
                 @click="emit('runDbAiReadonly', message)"
               >
                 <Play />
@@ -271,19 +291,21 @@
         <div class="db-ai-pane-quick-actions">
           <button
             type="button"
-            :disabled="!activeSqlExplainAvailable"
+            :disabled="dbAiPaneRestoreIssues.length > 0 || !activeSqlExplainAvailable"
             @click="$emit('sendDbAiPaneQuickPrompt', 'explainActive')"
           >
             {{ t('database.ai.explainSql') }}
           </button>
           <button
             type="button"
+            :disabled="dbAiPaneRestoreIssues.length > 0"
             @click="$emit('sendDbAiPaneQuickPrompt', 'schemaSummary')"
           >
             {{ t('database.ai.schemaSummary') }}
           </button>
           <button
             type="button"
+            :disabled="dbAiPaneRestoreIssues.length > 0"
             @click="$emit('sendDbAiPaneQuickPrompt', 'selectSample')"
           >
             {{ t('database.ai.generateSelect') }}
@@ -345,8 +367,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, ref } from 'vue'
-import { BrainCircuit, Code2, Copy, FileSearch, LoaderCircle, Play, RefreshCw, Replace, TextCursorInput, X, Zap } from 'lucide-vue-next'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { AlertTriangle, BrainCircuit, Code2, Copy, FileSearch, LoaderCircle, Play, RefreshCw, Replace, TextCursorInput, X, Zap } from 'lucide-vue-next'
 import { useI18n } from '@/i18n'
 import type { DatabaseCatalogInfo, DatabaseConnectionInfo } from '@shared/contracts/database'
 import type {
@@ -363,6 +385,7 @@ import {
   databaseCatalogDisplayName,
   databaseCatalogFieldLabel
 } from '@/services/database/databaseWorkspaceRuntime'
+import { createDatabaseAiPaneScrollRuntime } from '@/services/database/databaseAiPaneScrollRuntime'
 
 const props = defineProps<{
   dbAiPaneOpen: boolean
@@ -378,6 +401,7 @@ const props = defineProps<{
   dbAiPaneSchemaOptions: NonNullable<DatabaseCatalogInfo['schemas']>
   dbAiPaneRequiresSchema: boolean
   dbAiPaneConnectionNeedsConnect: boolean
+  dbAiPaneRestoreIssues: string[]
   dbAiPaneMessages: DbAiPaneMessage[]
   dbAiPaneDraft: string
   dbAiPaneComposerAction: DbAiAction | null
@@ -390,6 +414,7 @@ const props = defineProps<{
   formatDbAiRequestTime: (time: number) => string
   dbAiPaneStatusLabel: (status: DbAiPaneMessageStatus) => string
   canRunDbAiPaneMessageSql: (message: DbAiPaneMessage) => boolean
+  loadOlderDbAiPaneMessages: () => Promise<number>
 }>()
 
 const emit = defineEmits<{
@@ -401,6 +426,7 @@ const emit = defineEmits<{
   updateDbAiPaneCatalog: [event: Event]
   updateDbAiPaneSchema: [event: Event]
   connectDbAiPaneConnection: []
+  retryDbAiPaneBinding: []
   'update:dbAiPaneDraft': [value: string]
   handleDbAiPaneDraftKeydown: [event: KeyboardEvent]
   cancelDbAiPaneActionMode: []
@@ -428,12 +454,22 @@ const localizedComposerPlaceholder = computed(() =>
 
 const dbAiPaneMessageListRef = ref<HTMLElement | null>(null)
 const dbAiPaneComposerRef = ref<HTMLTextAreaElement | null>(null)
+const dbAiPaneScrollRuntime = createDatabaseAiPaneScrollRuntime({
+  root: () => dbAiPaneMessageListRef.value,
+  afterDomUpdate: () => nextTick(),
+  requestFrame: (callback) => window.requestAnimationFrame(callback),
+  cancelFrame: (frame) => window.cancelAnimationFrame(frame),
+  messages: () => props.dbAiPaneMessages,
+  loadOlderMessages: props.loadOlderDbAiPaneMessages
+})
+const visibleDbAiPaneMessages = dbAiPaneScrollRuntime.visibleMessages
 
 function scrollPaneMessagesToBottom() {
-  void nextTick(() => {
-    const el = dbAiPaneMessageListRef.value
-    if (el) el.scrollTop = el.scrollHeight
-  })
+  dbAiPaneScrollRuntime.scheduleScrollToBottom()
+}
+
+function handleDbAiPaneMessageScroll() {
+  void dbAiPaneScrollRuntime.handleScroll()
 }
 
 function focusPaneComposer() {
@@ -475,6 +511,29 @@ function dbAiMessageActionLabel(message: DbAiPaneMessage) {
 function dbAiUserLabel(message: DbAiPaneMessage) {
   return message.sqlAction ? dbAiActionLabel(message.sqlAction.action) : t('database.ai.you')
 }
+
+watch(
+  () => props.dbAiPaneMessages.map((message) => [
+    message.id,
+    message.role,
+    message.status,
+    message.updatedAt,
+    message.content,
+    message.sqlAction?.generatedSql || ''
+  ].join('\u0000')).join('\u0001'),
+  () => dbAiPaneScrollRuntime.syncMessages(props.dbAiPaneMessages),
+  { flush: 'post', immediate: true }
+)
+
+watch(
+  () => props.dbAiPaneOpen,
+  (open) => {
+    if (open) dbAiPaneScrollRuntime.scheduleScrollToBottom(true)
+  },
+  { flush: 'post' }
+)
+
+onBeforeUnmount(() => dbAiPaneScrollRuntime.dispose())
 
 defineExpose({ scrollPaneMessagesToBottom, focusPaneComposer })
 </script>

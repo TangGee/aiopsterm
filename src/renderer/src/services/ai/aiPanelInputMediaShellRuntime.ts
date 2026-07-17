@@ -40,6 +40,9 @@ export type AiPanelInputMediaShellRuntimeOptions<Panel extends { id: string; ses
   editingMessageId: () => string | null
   insertImageAtMainCursor: (part: AiImageContentPart) => boolean | void
   insertImageAtEditCursor: (part: AiImageContentPart) => boolean | void
+  mainImageCount?: () => number
+  editImageCount?: () => number
+  imageLimitMessage?: () => string
   insertFileChipAtMainCursor: (part: AiDocChipContentPart) => boolean
   insertFileChipAtEditCursor: (part: AiDocChipContentPart) => boolean
   restoreMainSelection: () => void | boolean
@@ -92,6 +95,8 @@ export const createAiPanelInputMediaShellRuntime = <Panel extends { id: string; 
     insertImageAtEditCursor: options.insertImageAtEditCursor,
     insertFileChipAtMainCursor: options.insertFileChipAtMainCursor,
     insertFileChipAtEditCursor: options.insertFileChipAtEditCursor,
+    imageCount: (target) => target === 'edit' ? options.editImageCount?.() || 0 : options.mainImageCount?.() || 0,
+    imageLimitMessage: options.imageLimitMessage,
     notify: surfaceRuntime.showInputPlaceholderNotice,
     ...options.attachmentServices
   })

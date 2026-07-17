@@ -3,7 +3,7 @@ import { appRuntimeClient } from '@/services/app/appRuntimeClient'
 import { applyBackgroundToDocument, backgroundStyleVars } from '@/services/app/backgroundRuntime'
 import { managedAiClient } from '@/services/ai/managedAiClient'
 import { terminalClient } from '@/services/terminal/terminalClient'
-import { isTerminalWorkspaceModule } from '@/config/navigation'
+import { isTerminalWorkspaceSurfaceVisible } from '@/config/navigation'
 import { layoutWidthLimits, useWorkspaceStore } from '@/stores/workspace'
 import { applyDocumentLocale, useI18n, type I18nKey, type SupportedLocale } from '@/i18n'
 import { installStaticTextI18n } from '@/i18n/staticText'
@@ -103,9 +103,10 @@ export const createAppShellRuntime = (options: AppShellRuntimeOptions) => {
   const showTerminalRightPane = computed(
     () => workspace.mode === 'terminal' && workspace.isRightVisible && !['assets', 'database', 'user'].includes(workspace.activeModule)
   )
-  const showTerminalWorkspace = computed(() => workspace.mode === 'terminal' && isTerminalWorkspaceModule(workspace.activeModule))
+  const showRightPane = computed(() => workspace.mode === 'agents' || showTerminalRightPane.value)
+  const showTerminalWorkspace = computed(() => isTerminalWorkspaceSurfaceVisible(workspace.mode, workspace.activeModule))
   const hasLeftPane = computed(() => showAgentsLeftPane.value || showTerminalLeftPane.value)
-  const hasRightPane = computed(() => showTerminalRightPane.value)
+  const hasRightPane = computed(() => showRightPane.value)
   const displayLeftPanelWidth = computed(() => draftLeftPanelWidth.value ?? workspace.leftPanelWidth)
   const displayRightPanelWidth = computed(() => draftRightPanelWidth.value ?? workspace.rightPanelWidth)
   const displayAgentsLeftWidth = computed(() => draftAgentsLeftWidth.value ?? workspace.agentsLeftWidth)
@@ -281,7 +282,7 @@ export const createAppShellRuntime = (options: AppShellRuntimeOptions) => {
     if (!side) return
     if (side === 'right') {
       const distanceFromRight = options.windowRef.innerWidth - event.clientX
-      if (distanceFromRight < layoutWidthLimits.quickCloseThreshold) {
+      if (workspace.mode === 'terminal' && distanceFromRight < layoutWidthLimits.quickCloseThreshold) {
         resizeQuickClosed = true
         setDraftWidth(side, null)
         void quickClose(side)
@@ -372,6 +373,7 @@ export const createAppShellRuntime = (options: AppShellRuntimeOptions) => {
     showTerminalLeftPane,
     showTerminalPasswordRemember,
     showTerminalRightPane,
+    showRightPane,
     showTerminalWorkspace,
     startResize,
     submitTerminalMfa,

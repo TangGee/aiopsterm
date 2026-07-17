@@ -48,6 +48,8 @@ const createRuntime = (overrides: Partial<Parameters<typeof createAiPanelAttachm
       insertedEditFiles.push(part)
       return true
     },
+    imageCount: (target) => (target === 'main' ? insertedImages.length : insertedEditImages.length),
+    imageLimitMessage: () => '每条消息最多添加 5 张图片。',
     notify: (message) => notices.push(message),
     ...overrides
   })
@@ -109,6 +111,62 @@ describe('aiPanelAttachmentRuntime', () => {
     expect(missing.notices.at(-1)).toBe('图片上传失败：图片读取服务不可用')
     await missing.runtime.openImagePicker()
     expect(missing.notices.at(-1)).toBe('图片上传失败：文件选择服务不可用')
+  })
+
+  it('accepts five selected images in one message', async () => {
+    const filePaths = Array.from({ length: 5 }, (_, index) => `/tmp/input-${index + 1}.png`)
+    const prepareImageFromFile = vi.fn(async ({ filePath }: { filePath: string }) => imageResult(filePath.split('/').at(-1)))
+    const { runtime, insertedImages, notices } = createRuntime({
+      prepareImageFromFile: () => prepareImageFromFile
+    })
+
+    await runtime.insertImageFilePaths(filePaths)
+
+    expect(prepareImageFromFile).toHaveBeenCalledTimes(5)
+    expect(insertedImages.map((part) => part.name)).toEqual([
+      'input-1.png',
+      'input-2.png',
+      'input-3.png',
+      'input-4.png',
+      'input-5.png'
+    ])
+    expect(notices).toEqual([])
+  })
+
+  it('rejects selections and pasted images that would become the sixth image', async () => {
+    const showOpenDialog = vi.fn(async () => ({
+      canceled: false,
+      filePaths: ['/tmp/fifth.png', '/tmp/sixth.png']
+    }))
+    const prepareImageFromFile = vi.fn(async () => imageResult())
+    const prepareImageFromClipboard = vi.fn(async () => imageResult('clipboard.png'))
+    const main = createRuntime({
+      imageCount: () => 4,
+      showOpenDialog: () => showOpenDialog,
+      prepareImageFromFile: () => prepareImageFromFile,
+      prepareImageFromClipboard: () => prepareImageFromClipboard
+    })
+
+    await main.runtime.openImagePicker()
+
+    expect(prepareImageFromFile).not.toHaveBeenCalled()
+    expect(main.insertedImages).toEqual([])
+    expect(main.notices.at(-1)).toBe('每条消息最多添加 5 张图片。')
+
+    const full = createRuntime({
+      imageCount: () => 5,
+      prepareImageFromClipboard: () => prepareImageFromClipboard
+    })
+    await full.runtime.insertPastedImage()
+    await full.runtime.insertPastedImageIntoEdit()
+
+    expect(prepareImageFromClipboard).not.toHaveBeenCalled()
+    expect(full.insertedImages).toEqual([])
+    expect(full.insertedEditImages).toEqual([])
+    expect(full.notices).toEqual([
+      '每条消息最多添加 5 张图片。',
+      '每条消息最多添加 5 张图片。'
+    ])
   })
 
   it('stages file attachments, targets main or edit insertion, and reports malformed or unavailable services', async () => {

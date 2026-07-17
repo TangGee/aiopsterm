@@ -51,6 +51,7 @@ const createHarness = () => {
     closeModeMenu: vi.fn(),
     closeModelMenu: vi.fn(),
     closeCodexTargetPicker: vi.fn(),
+    closeCodexHistoryMenu: vi.fn(),
     closeMoreActionsMenu: vi.fn(),
     closePanelModeMenu: vi.fn(),
     closeHistoryMenu: vi.fn(),
@@ -220,6 +221,7 @@ describe('aiPanelPopupInteractionRuntime', () => {
 
     runtime.handlePanelKeydown(keyEvent('Escape'), { aiPanelMode: 'codex', chatSearchOpen: false })
     expect(calls.closeCodexTargetPicker).toHaveBeenCalled()
+    expect(calls.closeCodexHistoryMenu).toHaveBeenCalled()
   })
 
   it('resets context keyboard index when query changes', () => {

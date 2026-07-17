@@ -11,7 +11,7 @@
         v-if="terminalTabScrollState.canScrollLeft || terminalTabScrollState.canScrollRight"
         class="terminal-tabs-scroll left"
         :disabled="!terminalTabScrollState.canScrollLeft"
-        title="向左滚动标签"
+        :title="t('terminal.tabs.scrollLeft')"
         @click="scrollTerminalTabs('left')"
       >
         <ChevronLeft />
@@ -89,7 +89,7 @@
         v-if="terminalTabScrollState.canScrollLeft || terminalTabScrollState.canScrollRight"
         class="terminal-tabs-scroll right"
         :disabled="!terminalTabScrollState.canScrollRight"
-        title="向右滚动标签"
+        :title="t('terminal.tabs.scrollRight')"
         @click="scrollTerminalTabs('right')"
       >
         <ChevronRight />
@@ -143,40 +143,40 @@
     >
       <button @click="copySelection(termMenu.panelId)"><span>{{ t('terminal.context.copy') }}</span><kbd>Ctrl+Shift+C</kbd></button>
       <button @click="pasteClipboard(termMenu.panelId)"><span>{{ t('terminal.context.paste') }}</span><kbd>Ctrl+Shift+V</kbd></button>
-      <button @click="openSearchOverlay(termMenu.panelId)"><span>搜索</span><kbd>Ctrl+Alt+F</kbd></button>
+      <button @click="openSearchOverlay(termMenu.panelId)"><span>{{ t('terminal.context.search') }}</span><kbd>Ctrl+Alt+F</kbd></button>
       <i />
       <button @click="togglePanelConnection(termMenu.panelId)">
         {{ connectionActionLabel(panelById(termMenu.panelId)) }}
         <kbd v-if="connectionActionShortcut(panelById(termMenu.panelId))">{{ connectionActionShortcut(panelById(termMenu.panelId)) }}</kbd>
       </button>
       <i />
-      <button @click="openCommandDialogFromTermMenu"><span>AI 命令</span><kbd>Ctrl+Shift+K</kbd></button>
-      <button @click="openCommandLineFromMenu"><span>输入命令</span><kbd>Enter</kbd></button>
-      <button @click="createTerminalFromMenu"><span>新建终端</span><kbd>Ctrl+Shift+T</kbd></button>
+      <button @click="openCommandDialogFromTermMenu"><span>{{ t('terminal.context.aiCommand') }}</span><kbd>Ctrl+Shift+K</kbd></button>
+      <button @click="openCommandLineFromMenu"><span>{{ t('terminal.context.inputCommand') }}</span><kbd>Enter</kbd></button>
+      <button @click="createTerminalFromMenu"><span>{{ t('terminal.context.newTerminal') }}</span><kbd>Ctrl+Shift+T</kbd></button>
       <button
         v-if="canForkTerminalMenuPanel"
         @click="forkFromTermMenu"
       >
         <span>Fork SSH</span><kbd>Ctrl+Shift+Y</kbd>
       </button>
-      <button @click="closeTerminalFromMenu"><span>关闭终端</span><kbd>Ctrl+Shift+W</kbd></button>
-      <button @click="clearTerminal(termMenu.panelId)"><span>清屏</span><kbd>Ctrl+Shift+L</kbd></button>
+      <button @click="closeTerminalFromMenu"><span>{{ t('terminal.context.closeTerminal') }}</span><kbd>Ctrl+Shift+W</kbd></button>
+      <button @click="clearTerminal(termMenu.panelId)"><span>{{ t('terminal.context.clearScreen') }}</span><kbd>Ctrl+Shift+L</kbd></button>
       <i />
-      <button @click="splitFromTermMenu('right')">向右拆分</button>
-      <button @click="splitFromTermMenu('below')">向下拆分</button>
+      <button @click="splitFromTermMenu('right')">{{ t('terminal.context.splitRight') }}</button>
+      <button @click="splitFromTermMenu('below')">{{ t('terminal.context.splitDown') }}</button>
       <button
         v-if="workspace.hasSplitState(termMenu.panelId)"
         @click="unsplitFromTermMenu"
       >
-        取消拆分
+        {{ t('terminal.context.unsplit') }}
       </button>
       <i />
-      <button @click="toggleGlobalInput">{{ globalInputVisible ? '关闭全局执行' : '全局执行' }}</button>
+      <button @click="toggleGlobalInput">{{ globalInputVisible ? t('terminal.context.globalInputOff') : t('terminal.context.globalInputOn') }}</button>
       <i />
-      <button @click="openFileManagerFromMenu"><span>文件管理</span><kbd>Ctrl+Shift+M</kbd></button>
+      <button @click="openFileManagerFromMenu"><span>{{ t('terminal.context.fileManager') }}</span><kbd>Ctrl+Shift+M</kbd></button>
       <i />
-      <button @click="increaseFontFromMenu"><span>字体放大</span><kbd>Ctrl+=</kbd></button>
-      <button @click="decreaseFontFromMenu"><span>字体缩小</span><kbd>Ctrl+-</kbd></button>
+      <button @click="increaseFontFromMenu"><span>{{ t('terminal.context.fontIncrease') }}</span><kbd>Ctrl+=</kbd></button>
+      <button @click="decreaseFontFromMenu"><span>{{ t('terminal.context.fontDecrease') }}</span><kbd>Ctrl+-</kbd></button>
     </div>
 
     <div
@@ -258,11 +258,11 @@
       >
         <div class="terminal-dashboard-icon"><Terminal /></div>
         <div class="terminal-dashboard-shortcuts">
-          <span>与AI对话</span>
-          <span>资产列表 <kbd>Ctrl</kbd><kbd>B</kbd></span>
-          <span>打开设置 <kbd>Ctrl</kbd><kbd>,</kbd></span>
-          <span>内联命令生成 <kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>K</kbd></span>
-          <span>切换布局 (Terminal/Agents) <kbd>Ctrl</kbd><kbd>E</kbd></span>
+          <span>{{ t('terminal.dashboard.chatWithAi') }}</span>
+          <span>{{ t('terminal.dashboard.assetList') }} <kbd>Ctrl</kbd><kbd>B</kbd></span>
+          <span>{{ t('terminal.dashboard.openSettings') }} <kbd>Ctrl</kbd><kbd>,</kbd></span>
+          <span>{{ t('terminal.dashboard.inlineCommand') }} <kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>K</kbd></span>
+          <span>{{ t('terminal.dashboard.toggleLayout') }} <kbd>Ctrl</kbd><kbd>E</kbd></span>
         </div>
       </div>
       <template v-else>

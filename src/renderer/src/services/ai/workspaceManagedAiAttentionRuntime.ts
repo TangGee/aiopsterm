@@ -24,6 +24,20 @@ const attentionPriority = (kind: AiAttentionKind) => {
 
 const controlNotificationAttentionId = (notification: Pick<ControlNotificationRecord, 'id'>) => `notification:${notification.id}`
 
+const sameAiAttentionItem = (first: AiAttentionItem, second: AiAttentionItem) =>
+  first.id === second.id &&
+  first.source === second.source &&
+  first.kind === second.kind &&
+  first.title === second.title &&
+  first.summary === second.summary &&
+  first.priority === second.priority &&
+  first.createdAt === second.createdAt &&
+  first.conversationId === second.conversationId &&
+  first.sessionId === second.sessionId &&
+  first.surfaceId === second.surfaceId &&
+  first.notificationId === second.notificationId &&
+  first.handledAt === second.handledAt
+
 const managedAiNotificationPartsFromId = (id?: string) => {
   if (!id) return null
   const match = id.match(/^managed-ai:([^:]+):(.+)$/)
@@ -75,15 +89,16 @@ export const createWorkspaceManagedAiAttentionRuntime = (input: {
       ...(input.notificationId ? { notificationId: input.notificationId } : {})
     }
     const shouldPlaySound = !next.handledAt && (!existing || Boolean(existing.handledAt))
+    if (existing && sameAiAttentionItem(existing, next)) return existing
     aiAttentionItems.value = existing ? aiAttentionItems.value.map((item) => (item.id === input.id ? next : item)) : [next, ...aiAttentionItems.value]
     if (shouldPlaySound) playAiNotificationSound(notificationSettings.value, { title: next.title, summary: next.summary })
     return next
   }
 
   const removeAiAttentionItem = (id: string) => {
-    const before = aiAttentionItems.value.length
+    if (!aiAttentionItems.value.some((item) => item.id === id)) return false
     aiAttentionItems.value = aiAttentionItems.value.filter((item) => item.id !== id)
-    return aiAttentionItems.value.length !== before
+    return true
   }
 
   const markAiAttentionHandled = (id: string) => {

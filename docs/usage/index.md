@@ -1,5 +1,6 @@
 # Usage Docs
 
+- [Best Practices / 最佳实践 (illustrated series)](best-practices/index.md)
 - [Assets And Workspace Resources](assets-workspace.md)
 - [AI Sessions](ai-sessions.md)
 - [AI Command Tools](ai-command-tools.md)
@@ -12,6 +13,8 @@
 - [Knowledge Base](knowledge-base.md)
 - [MCP Servers](mcp-servers.md)
 - [Package Verification](package-verification.md)
+- [Product Sessions And Agents Mode](product-sessions.md)
+- [Quick Commands](quick-commands.md)
 - [Settings Help](settings/index.md)
 - [Terminal Workspace](terminal-workspace.md)
 - [Troubleshooting](troubleshooting.md)

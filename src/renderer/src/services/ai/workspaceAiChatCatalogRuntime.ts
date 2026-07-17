@@ -10,7 +10,7 @@ import type { WorkspaceAiChatControllerState } from '@/services/ai/workspaceAiCh
 export const createWorkspaceAiChatCatalogRuntime = (input: {
   state: Pick<WorkspaceAiChatControllerState, 'aiContextCatalog' | 'aiCommandOptions' | 'selectedContexts' | 'todoItems'>
   setTopNotice: (message: string) => void
-  loadChatConversationsFromBackend: (options?: { restoreIfEmpty?: boolean }) => Promise<boolean>
+  loadChatConversationsFromBackend: (options?: { restoreIfEmpty?: boolean; restoreSelection?: boolean }) => Promise<boolean>
 }) => {
   const { state, setTopNotice, loadChatConversationsFromBackend } = input
   const { aiContextCatalog, aiCommandOptions, selectedContexts, todoItems } = state
@@ -94,10 +94,13 @@ export const createWorkspaceAiChatCatalogRuntime = (input: {
     return true
   }
 
-  const hydrateClassicChatData = async (options: { restoreIfEmpty?: boolean } = {}) => {
+  const hydrateClassicChatData = async (options: { restoreIfEmpty?: boolean; restoreSelection?: boolean } = {}) => {
     if (classicChatHydrationPromise) return classicChatHydrationPromise
     classicChatHydrationPromise = Promise.all([
-      loadChatConversationsFromBackend({ restoreIfEmpty: options.restoreIfEmpty !== false }),
+      loadChatConversationsFromBackend({
+        restoreIfEmpty: options.restoreIfEmpty !== false,
+        restoreSelection: options.restoreSelection !== false
+      }),
       refreshAiTodoSnapshot(),
       refreshAiContextCatalog({ hydrateSelection: false }),
       refreshAiCommandCatalog()

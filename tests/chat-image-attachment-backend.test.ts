@@ -109,6 +109,35 @@ describe('chat image attachment backend boundary', () => {
     )
   })
 
+  it('accepts exactly 5 MiB and rejects decoded base64 data beyond the limit', () => {
+    const atLimit = Buffer.alloc(MAX_CHAT_IMAGE_ATTACHMENT_BYTES).toString('base64')
+    const overLimit = Buffer.alloc(MAX_CHAT_IMAGE_ATTACHMENT_BYTES + 1).toString('base64')
+
+    expect(
+      prepareChatImageAttachment({
+        mediaType: 'image/png',
+        data: atLimit,
+        name: 'at-limit.png',
+        size: MAX_CHAT_IMAGE_ATTACHMENT_BYTES
+      })
+    ).toEqual(expect.objectContaining({ ok: true }))
+
+    expect(
+      prepareChatImageAttachment({
+        mediaType: 'image/png',
+        data: overLimit,
+        name: 'declared-small.png',
+        size: 1
+      })
+    ).toEqual(
+      expect.objectContaining({
+        ok: false,
+        errorCode: 'CHAT_IMAGE_TOO_LARGE',
+        errorMessage: '图片超过 5 MiB：declared-small.png'
+      })
+    )
+  })
+
   it('prepares image attachments from local file paths in the main backend', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-chat-image-'))
     const filePath = join(dir, 'input.png')
@@ -133,12 +162,56 @@ describe('chat image attachment backend boundary', () => {
     }
   })
 
+  it('accepts a local image exactly at the 5 MiB file boundary', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-chat-image-boundary-'))
+    const filePath = join(dir, 'at-limit.png')
+    const bytes = Buffer.alloc(MAX_CHAT_IMAGE_ATTACHMENT_BYTES)
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(bytes)
+
+    try {
+      await writeFile(filePath, bytes)
+      const result = await backend.prepareChatImageAttachmentFromFile({ filePath })
+
+      expect(result).toMatchObject({
+        ok: true,
+        data: {
+          type: 'image',
+          mediaType: 'image/png',
+          name: 'at-limit.png',
+          size: MAX_CHAT_IMAGE_ATTACHMENT_BYTES
+        }
+      })
+      expect(result.ok && result.data ? Buffer.from(result.data.data, 'base64').byteLength : 0).toBe(MAX_CHAT_IMAGE_ATTACHMENT_BYTES)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
   it('rejects non-image local files before creating image parts', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-chat-image-invalid-'))
     const filePath = join(dir, 'note.txt')
 
     try {
       await writeFile(filePath, 'TEXT')
+      const result = await backend.prepareChatImageAttachmentFromFile({ filePath })
+
+      expect(result).toEqual(
+        expect.objectContaining({
+          ok: false,
+          errorCode: 'CHAT_IMAGE_UNSUPPORTED_TYPE'
+        })
+      )
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects a .png file whose bytes are not a supported image', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-chat-image-spoofed-'))
+    const filePath = join(dir, 'spoofed.png')
+
+    try {
+      await writeFile(filePath, 'not actually a png')
       const result = await backend.prepareChatImageAttachmentFromFile({ filePath })
 
       expect(result).toEqual(

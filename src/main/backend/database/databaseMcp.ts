@@ -1,5 +1,7 @@
 import {
+  explainDatabaseTable,
   getDatabaseTableDdl,
+  inspectDatabaseTableIndexes,
   listDatabaseCatalog,
   queryDatabaseTable
 } from '@shared/databaseRuntime'
@@ -19,7 +21,9 @@ import {
 const databaseMcpToolRuntime = createDatabaseMcpToolRuntime({
   listCatalog: listDatabaseCatalog,
   getTableDdl: getDatabaseTableDdl,
-  queryTable: queryDatabaseTable
+  queryTable: queryDatabaseTable,
+  inspectTableIndexes: inspectDatabaseTableIndexes,
+  explainTable: explainDatabaseTable
 })
 
 const databaseAiMcpToolRuntime = {
@@ -78,7 +82,8 @@ export const callDatabaseMcpTool = async (
 export const callBoundDatabaseAiMcpTool = async (
   name: string,
   args: Record<string, unknown>,
-  binding: { connectionId: string; databaseName?: string; schemaName?: string }
+  binding: { connectionId: string; databaseName?: string; schemaName?: string },
+  options: { signal?: AbortSignal } = {}
 ): Promise<DatabaseMcpToolResult | null> => {
   const connectionId = cleanText(binding.connectionId)
   if (!connectionId) {
@@ -106,7 +111,15 @@ export const callBoundDatabaseAiMcpTool = async (
       errorMessage: 'The requested schema is outside the DB AI session scope.'
     }
   }
-  return databaseMcpToolRuntime.callTool(
+  const signal = options.signal
+  if (signal?.aborted) {
+    return {
+      ok: false,
+      errorCode: 'DB_MCP_REQUEST_CANCELLED',
+      errorMessage: 'Database MCP request was cancelled.'
+    }
+  }
+  const operation = databaseMcpToolRuntime.callTool(
     name,
     {
       ...args,
@@ -114,8 +127,30 @@ export const callBoundDatabaseAiMcpTool = async (
       ...(databaseName ? { databaseName } : {}),
       ...(schemaName ? { schemaName } : {})
     },
-    { allowInternalConnectionId: true }
+    { allowInternalConnectionId: true, signal }
   )
+  if (!signal) return operation
+  return await new Promise<DatabaseMcpToolResult | null>((resolve) => {
+    let settled = false
+    const finish = (result: DatabaseMcpToolResult | null) => {
+      if (settled) return
+      settled = true
+      signal.removeEventListener('abort', cancel)
+      resolve(result)
+    }
+    const cancel = () => finish({
+      ok: false,
+      errorCode: 'DB_MCP_REQUEST_CANCELLED',
+      errorMessage: 'Database MCP request was cancelled.'
+    })
+    signal.addEventListener('abort', cancel, { once: true })
+    if (signal.aborted) cancel()
+    void operation.then(finish, () => finish({
+      ok: false,
+      errorCode: 'DB_MCP_REQUEST_FAILED',
+      errorMessage: 'Database MCP request failed.'
+    }))
+  })
 }
 
 export const redactDatabaseAiProviderError = async (

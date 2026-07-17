@@ -29,6 +29,34 @@ type KnowledgeEditorRuntimeOptions = {
   markdownPreviewRef: Ref<KnowledgeMarkdownPreviewApi | null>
 }
 
+export const knowledgeEditorModeStorageKey = 'aiopsterm.knowledgeEditorMode'
+
+export const isKnowledgeEditorMarkdownPath = (relPath: string) => /\.(md|markdown)$/i.test(relPath)
+
+export const readStoredKnowledgeEditorMode = (): KnowledgeEditorMode | null => {
+  try {
+    const value = window.localStorage.getItem(knowledgeEditorModeStorageKey)
+    return value === 'editor' || value === 'preview' ? value : null
+  } catch {
+    /* localStorage may be unavailable in restricted webviews. */
+    return null
+  }
+}
+
+export const storeKnowledgeEditorMode = (mode: KnowledgeEditorMode) => {
+  try {
+    window.localStorage.setItem(knowledgeEditorModeStorageKey, mode)
+  } catch {
+    /* localStorage may be unavailable in restricted webviews. */
+  }
+}
+
+/** Markdown documents reuse the last user-selected view mode; other files always open in the source editor. */
+export const initialKnowledgeEditorMode = (relPath: string, isImage?: boolean): KnowledgeEditorMode => {
+  if (isImage || !isKnowledgeEditorMarkdownPath(relPath)) return 'editor'
+  return readStoredKnowledgeEditorMode() || 'editor'
+}
+
 export const useKnowledgeEditorRuntime = (props: KnowledgeEditorRuntimeProps, options: KnowledgeEditorRuntimeOptions) => {
   const workspace = useWorkspaceStore()
   const content = ref('')
@@ -37,7 +65,17 @@ export const useKnowledgeEditorRuntime = (props: KnowledgeEditorRuntimeProps, op
   const saving = ref(false)
   const dirty = ref(false)
   const error = ref('')
-  const mode = ref<KnowledgeEditorMode>('editor')
+  // A pending line jump needs the source editor; otherwise markdown reuses the last user-selected view mode.
+  const startupMode = () => (props.startLine ? 'editor' : initialKnowledgeEditorMode(props.relPath, props.isImage))
+  const mode = ref<KnowledgeEditorMode>(startupMode())
+  /** v-model target for the header toggle: user selections persist as the default for later documents. */
+  const modeModel = computed<KnowledgeEditorMode>({
+    get: () => mode.value,
+    set: (value) => {
+      mode.value = value
+      storeKnowledgeEditorMode(value)
+    }
+  })
   const markdownHtml = ref('')
   let saveTimer: number | null = null
   let loadToken = 0
@@ -121,7 +159,7 @@ export const useKnowledgeEditorRuntime = (props: KnowledgeEditorRuntimeProps, op
     const token = ++loadToken
     clearSaveTimer()
     resetImageView()
-    mode.value = 'editor'
+    mode.value = startupMode()
     loading.value = true
     saving.value = false
     dirty.value = false
@@ -265,7 +303,7 @@ export const useKnowledgeEditorRuntime = (props: KnowledgeEditorRuntimeProps, op
     saving,
     dirty,
     error,
-    mode,
+    mode: modeModel,
     markdownHtml,
     relPath,
     isImage,

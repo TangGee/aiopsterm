@@ -109,7 +109,10 @@ export const createWorkspaceLayoutSettingsController = (
 
   const toggleMode = async () => {
     const nextMode = mode.value === 'terminal' ? 'agents' : 'terminal'
-    const saved = await persistLayoutPreferences({ defaultMode: nextMode })
+    const saved = await persistLayoutPreferences({
+      defaultMode: nextMode,
+      ...(nextMode === 'agents' ? { agentsLeftOpen: true } : {})
+    })
     if (!saved) return false
     if (nextMode === 'terminal' && (activeModule.value === 'database' || activeModule.value === 'user')) {
       rightPanelOpen.value = false
@@ -157,11 +160,15 @@ export const createWorkspaceLayoutSettingsController = (
   }
 
   const resizeRightPanel = async (width: number) => {
-    if (mode.value !== 'terminal' || activeModule.value === 'database' || activeModule.value === 'user') return false
+    if (mode.value === 'terminal' && (activeModule.value === 'database' || activeModule.value === 'user')) return false
     const previousWidth = rightPanelWidth.value
     const normalizedWidth = Math.round(numberInRange(width, previousWidth, layoutWidthLimits.min, layoutWidthLimits.max))
     rightPanelWidth.value = normalizedWidth
-    const saved = await persistLayoutPreferences({ rightPanelOpen: true, rightPanelWidth: normalizedWidth })
+    const saved = await persistLayoutPreferences(
+      mode.value === 'agents'
+        ? { rightPanelWidth: normalizedWidth }
+        : { rightPanelOpen: true, rightPanelWidth: normalizedWidth }
+    )
     if (!saved) rightPanelWidth.value = previousWidth
     if (saved) setTopNotice(`AI 侧栏宽度已保存为 ${rightPanelWidth.value}px`)
     return saved

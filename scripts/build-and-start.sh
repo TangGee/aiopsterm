@@ -179,6 +179,8 @@ else
   npm run build
 fi
 
+npm run native:ensure:electron
+
 cmd=(npx electron-vite preview --skipBuild)
 if ((!use_sandbox)); then
   cmd+=(--noSandbox)

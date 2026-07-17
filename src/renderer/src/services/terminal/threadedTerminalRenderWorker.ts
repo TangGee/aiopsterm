@@ -762,7 +762,7 @@ const rememberPaintedSnapshot = (surface: RenderSurface, snapshot: ThreadedTermi
   }
 }
 
-// 滚动搬运必须"先取样、清除目标、再原样贴回",并且全程走整数设备像素:
+// 滚动搬运必须「先取样、清除目标、再原样贴回」,并且全程走整数设备像素:
 // 直接对同一画布 drawImage 会把半透明背景在目标区再叠一层 alpha,
 // 小数目标坐标还会触发重采样,两者都会在背景图模式下产生条纹。
 const scrollSurface = (surface: RenderSurface, deltaRows: number) => {

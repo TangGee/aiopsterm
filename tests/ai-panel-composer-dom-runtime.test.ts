@@ -90,7 +90,7 @@ const flushDomWork = async () => {
   await Promise.resolve()
 }
 
-const createHarness = (input: { clipboardHasImage?: boolean; sendResult?: boolean } = {}) => {
+const createHarness = (input: { clipboardHasImage?: boolean; sendResult?: boolean; additionalImageCount?: number } = {}) => {
   let selectedCommandId: string | null = null
   let selectedCommandRef: { command: string; label?: string; path?: string } | null = null
   let streaming = false
@@ -131,6 +131,8 @@ const createHarness = (input: { clipboardHasImage?: boolean; sendResult?: boolea
     insertPastedImage: calls.insertPastedImage,
     closePopups: calls.closePopups,
     notify: calls.notify,
+    additionalImageCount: () => input.additionalImageCount || 0,
+    imageLimitMessage: () => '每条消息最多添加 5 张图片。',
     afterDomUpdate: calls.afterDomUpdate,
     afterInputSync: calls.afterInputSync,
     requestFrame: calls.requestFrame
@@ -223,6 +225,37 @@ describe('aiPanelComposerDomRuntime', () => {
     setChatMode('agent')
     await runtime.handleSend()
     expect(calls.notify).toHaveBeenCalledWith('请先配置可用模型。')
+  })
+
+  it('keeps five images and rejects the sixth without changing the composer', () => {
+    const editable = createEditable()
+    const { calls, runtime } = createHarness()
+    runtime.editableRef.value = editable
+
+    for (let index = 0; index < 5; index += 1) {
+      setCaretAtEnd(editable)
+      expect(runtime.insertImageAtCursor({ ...imagePart, name: `diagram-${index + 1}.png` })).toBe(true)
+    }
+
+    setCaretAtEnd(editable)
+    expect(runtime.insertImageAtCursor({ ...imagePart, name: 'diagram-6.png' })).toBe(false)
+    expect(runtime.imageInputParts.value).toHaveLength(5)
+    expect(editable.querySelectorAll('.image-preview-wrapper')).toHaveLength(5)
+    expect(calls.notify).toHaveBeenCalledWith('每条消息最多添加 5 张图片。')
+  })
+
+  it('counts selected image contexts toward the five-image composer limit', () => {
+    const editable = createEditable()
+    const { calls, runtime } = createHarness({ additionalImageCount: 4 })
+    runtime.editableRef.value = editable
+
+    setCaretAtEnd(editable)
+    expect(runtime.insertImageAtCursor({ ...imagePart, name: 'fifth.png' })).toBe(true)
+    setCaretAtEnd(editable)
+    expect(runtime.insertImageAtCursor({ ...imagePart, name: 'sixth.png' })).toBe(false)
+
+    expect(runtime.imageInputParts.value.map((part) => part.name)).toEqual(['fifth.png'])
+    expect(calls.notify).toHaveBeenCalledWith('每条消息最多添加 5 张图片。')
   })
 
   it('owns caret helpers, trigger-token cleanup, and voice transcription insertion for the main input', async () => {

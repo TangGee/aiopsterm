@@ -11,6 +11,7 @@ import type { AiCommandCatalogOption, AiContextKind, AiContextOption } from '@sh
 export type AiPanelContextCommandRuntimeOptions = {
   maxHostContexts: number
   contextTarget: () => AiPanelPopupTarget
+  contextLevel: () => 'main' | AiContextKind
   commandTarget: () => AiPanelPopupTarget
   editingMessageId: () => string | null
   draft: () => string
@@ -119,7 +120,9 @@ export const createAiPanelContextCommandRuntime = (options: AiPanelContextComman
 
     options.removeMainTriggerToken('@')
     options.setMainContexts(plan.nextContexts)
-    if (plan.kind === 'main-insert') options.closeContextPopup({ restoreFocus: true })
+    if (plan.kind === 'main-insert' || options.contextLevel() === 'main') {
+      options.closeContextPopup({ restoreFocus: true })
+    }
     renderMainAndMoveCaret()
   }
 

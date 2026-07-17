@@ -50,20 +50,23 @@ const session = (id: string, kind: 'local' | 'ssh' = 'local'): TerminalSessionIn
     : {})
 })
 
-const createHarness = (panels: TerminalPanel[]) => {
+const createHarness = (panels: TerminalPanel[], options: { isMacroRecording?: boolean } = {}) => {
   const notices: string[] = []
   const appliedLocal: Array<{ panelId: string; session: TerminalSessionInfo }> = []
   const appliedSsh: Array<{ panelId: string; session: TerminalSessionInfo; asset: unknown }> = []
   const createTerminal = vi.fn(async (options: TerminalCreateOptions) => session(options.kind === 'ssh' ? 'ssh-session' : 'local-session', options.kind || 'local'))
   const writeTerminal = vi.fn(async (id: string, data: string) => ({ ok: true, data: { id, bytes: new TextEncoder().encode(data).length } }))
   const killTerminal = vi.fn(async (id: string) => ({ ok: true, data: { id } }))
+  const recordMacroTerminalInput = vi.fn()
   const logs: Array<{ level: string; event: string; details?: Record<string, unknown> }> = []
   const workspace = reactive({
     panels,
+    isMacroRecording: Boolean(options.isMacroRecording),
     terminalSettings: { terminalType: 'xterm-256color' },
     setTopNotice: (message: string) => {
       notices.push(message)
     },
+    recordMacroTerminalInput,
     applyLocalTerminalSession: (panelId: string, terminalSession: TerminalSessionInfo) => {
       appliedLocal.push({ panelId, session: terminalSession })
       const panel = panels.find((item) => item.id === panelId)
@@ -103,6 +106,7 @@ const createHarness = (panels: TerminalPanel[]) => {
     killTerminal,
     logs,
     notices,
+    recordMacroTerminalInput,
     runtime,
     workspace,
     writeTerminal
@@ -163,17 +167,23 @@ describe('terminalWorkspaceSessionRuntime', () => {
   it('writes xterm input only when the bridge confirms the exact session and byte count', async () => {
     const panel = localPanel()
     panel.sessionId = 'session-1'
-    const { logs, notices, runtime, writeTerminal } = createHarness([panel])
+    const { logs, notices, recordMacroTerminalInput, runtime, writeTerminal } = createHarness([panel], { isMacroRecording: true })
 
-    await runtime.writeXtermInput('panel-local', 'pwd\n')
+    await runtime.writeXtermInput('session-1', 'pwd\n')
     expect(writeTerminal).toHaveBeenCalledWith('session-1', 'pwd\n')
+    expect(recordMacroTerminalInput).toHaveBeenCalledWith('panel-local', 'pwd\n', expect.any(Number))
     expect(notices).toEqual([])
     expect(logs.map((entry) => entry.event)).not.toContain('renderer.terminal-input.write-accepted')
 
     writeTerminal.mockResolvedValueOnce({ ok: true, data: { id: 'other-session', bytes: 4 } })
     await runtime.writeXtermInput('panel-local', 'date')
     expect(notices.at(-1)).toBe('终端写入服务返回数据无效')
+    expect(recordMacroTerminalInput).toHaveBeenCalledTimes(1)
     expect(logs.map((entry) => entry.event)).toContain('renderer.terminal-input.write-rejected')
+
+    const idle = createHarness([panel])
+    await idle.runtime.writeXtermInput('panel-local', 'echo idle')
+    expect(idle.recordMacroTerminalInput).not.toHaveBeenCalled()
   })
 
   it('disconnects only when kill result belongs to the active terminal session', async () => {

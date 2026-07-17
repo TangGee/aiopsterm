@@ -4,6 +4,7 @@ import { windowControlsClient } from '@/services/app/windowControlsClient'
 import type { TerminalPanel, useWorkspaceStore } from '@/stores/workspace'
 import { isTerminalWorkspacePanel, type PanelDirection } from '@/services/terminal/terminalPanelRuntime'
 import type { TerminalView } from '@/services/terminal/terminalWorkspaceViewRuntime'
+import { managedAssetDisplayName, managedAssetEndpoint } from '@shared/assetDisplayRuntime'
 import {
   terminalShortcutActionForEvent,
   type TerminalShortcutAction
@@ -423,13 +424,22 @@ export const createTerminalWorkspaceShellRuntime = (
     const ssh = forkPanel.sshSession
     if (!ssh) return
     const contextId = pendingSsh?.assetId || ssh.assetId || ssh.connectionId || forkPanel.id
+    const endpoint = managedAssetEndpoint({ host: pendingSsh?.host || ssh.host })
+    const managedName = String(pendingSsh?.assetName || ssh.assetName || '').trim()
+    const displayName = managedName || managedAssetDisplayName({ title: forkPanel.title, host: endpoint, id: contextId })
     workspace.selectedContexts = [
       ...workspace.selectedContexts.filter((item) => item.id !== contextId),
       {
         id: contextId,
         kind: 'hosts',
-        label: pendingSsh?.host || ssh.host,
-        detail: `${pendingSsh?.assetName || ssh.assetName} fork`
+        label: displayName,
+        detail: endpoint,
+        assetId: pendingSsh?.assetId || ssh.assetId,
+        connectionId: ssh.connectionId,
+        host: endpoint,
+        port: pendingSsh?.port || ssh.port,
+        username: pendingSsh?.username || ssh.username,
+        assetName: displayName
       }
     ]
   }

@@ -1,5 +1,6 @@
 import type { ModelProviderCheckKey } from './appRuntime'
 import type { AiopsMutationResult } from './common'
+import type { ClineAgentHostTarget } from './clineAgent'
 import type { McpConfigWriteResult, McpResourceReadResult, McpToolCallResult } from './mcp'
 
 export type AiContextKind = 'hosts' | 'docs' | 'images' | 'skills' | 'chats'
@@ -9,6 +10,8 @@ export type AiContextOption = {
   kind: AiContextKind
   label: string
   detail?: string
+  assetId?: string
+  connectionId?: string
   host?: string
   port?: number
   username?: string
@@ -19,7 +22,14 @@ export type AiContextOption = {
   contextType?: 'file' | 'dir' | 'doc' | 'image'
   content?: string
   mediaType?: string
+  contextSource?: 'selected' | 'knowledge-search'
+  startLine?: number
+  endLine?: number
+  skillName?: string
+  chatSessionId?: string
   data?: string
+  unavailable?: boolean
+  unavailableReason?: string
 }
 
 export type AiContextCategoryInfo = {
@@ -55,13 +65,24 @@ export type AiChatMessageState = 'streaming' | 'done' | 'cancelled' | 'error'
 
 export type AiChatAgentTaskStatus = 'starting' | 'running' | 'waiting-approval' | 'done' | 'cancelled' | 'error'
 
+/**
+ * A task marked as restored was active when its persisted chat snapshot was
+ * loaded, but its in-memory Cline approval/turn no longer exists. It is a
+ * display-only terminal record; a new turn must be started to run the command.
+ */
+export const aiChatStaleClineTaskMessage = '原 Cline Agent 任务已结束，无法恢复旧确认，请重新发起请求。'
+
 export type AiChatAgentTaskRef = {
   taskId: string
   turnId: string
+  targetId?: string
+  targetLabel?: string
   terminalSessionId?: string
   toolCallId?: string
   toolName?: string
   status: AiChatAgentTaskStatus
+  /** Set only on a restore projection whose runtime approval cannot be reattached. */
+  restored?: boolean
 }
 
 export type AiChatHistoryHostContext = {
@@ -218,6 +239,8 @@ export type AiChatConversationUpdateInput = {
   summary?: string
   favorite?: boolean
   messages?: AiChatHistoryMessage[]
+  /** Persist a background conversation without changing the globally selected chat. */
+  preserveSelection?: boolean
 }
 
 export type AiChatMessageMetadataInput = {
@@ -316,6 +339,10 @@ export type AiChatContextInput = {
   detail?: string
   relPath?: string
   mediaType?: string
+  contextSource?: 'selected' | 'knowledge-search'
+  startLine?: number
+  endLine?: number
+  chatSessionId?: string
 }
 
 export type AiChatCommandInput = {
@@ -347,13 +374,22 @@ export type AiChatContextUsageSnapshot = {
 export type AiChatExchangeRequestInput = {
   text: string
   conversationId?: string
-  terminalSessionId?: string
+  /** Replace the bound Cline transcript with `messages` before sending this turn. */
+  replaceNativeTranscript?: boolean
+  hostTargets?: ClineAgentHostTarget[]
   hosts?: AiChatHistoryHostContext[]
   messages?: AiChatMessageInput[]
   contexts?: AiChatContextInput[]
+  contentParts?: AiContentPart[]
   command?: AiChatCommandInput | null
   model?: string
   mode?: 'agent' | 'command' | 'chat'
+  productContext?: AiChatProductSessionContext
+}
+
+export type AiChatProductSessionContext = {
+  projectRoot?: string
+  lastKnownCwd?: string
 }
 
 export type AiChatExchangeRequestResult = AiopsMutationResult<{
@@ -368,14 +404,19 @@ export type AiChatResponseInput = {
   requestId?: string
   assistantMessageId?: string
   conversationId?: string
-  terminalSessionId?: string
+  /** Replace the bound Cline transcript with `messages` before sending this turn. */
+  replaceNativeTranscript?: boolean
+  hostTargets?: ClineAgentHostTarget[]
   prompt: string
   messages?: AiChatMessageInput[]
   contexts?: AiChatContextInput[]
+  /** Main-resolved provider image data URLs. Renderer input is revalidated before Cline receives it. */
+  userImages?: string[]
   skills?: AiChatSkillInput[]
   command?: AiChatCommandInput | null
   model?: string
   mode?: 'agent' | 'command' | 'chat'
+  productContext?: AiChatProductSessionContext
 }
 
 export type AiChatResponseResult = AiopsMutationResult<{
@@ -388,6 +429,9 @@ export type AiChatResponseResult = AiopsMutationResult<{
   assistantMessageId?: string
   message?: AiChatHistoryMessage
   agentTask?: AiChatAgentTaskRef
+  nativeSessionId?: string
+  nativeProfile?: string
+  nativeScopeKey?: string
   contextUsage?: AiChatContextUsageSnapshot
 }>
 

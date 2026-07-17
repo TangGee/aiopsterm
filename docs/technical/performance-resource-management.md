@@ -10,7 +10,7 @@ The renderer keeps heavy optional libraries out of the first-screen bundle.
 - Monaco-based editors call `loadMonaco()` from `src/renderer/src/services/common/monacoRuntime.ts`. File, Knowledge, SQL, and Settings JSON editors mount a lightweight fallback first and load Monaco plus folding/find/basic-language contributions only when the editor component is opened.
 - Knowledge Markdown preview lazy-loads `mermaid` only when the rendered preview contains an unprocessed Mermaid block.
 - Markdown code highlighting uses `src/renderer/src/services/common/highlightRuntime.ts`, which registers only the operational language subset used by aiopsterm. Unlabeled code blocks over 500 lines skip automatic language detection and remain plain text instead of blocking the UI thread.
-- Classic Chat markdown rendering keeps an LRU cache of rendered markdown parts, currently capped at 512 entries. Long AI conversations also use `content-visibility: auto` on message rows so off-screen messages do not pay full layout and paint cost.
+- Classic Chat markdown rendering keeps an LRU cache of rendered markdown parts, currently capped at 512 entries. Long conversations initially mount the newest 80 messages and keep at most 120 live message nodes, shifting the bounded DOM window by 40 with scroll-anchor compensation instead of retaining every off-screen row.
 
 When adding another large renderer-only dependency, prefer a narrow runtime helper with a cached dynamic import. Do not import the dependency from a top-level workspace shell or shared component unless it is needed on first paint.
 

@@ -177,6 +177,7 @@
       :db-ai-pane-schema-options="dbAiPaneSchemaOptions"
       :db-ai-pane-requires-schema="dbAiPaneRequiresSchema"
       :db-ai-pane-connection-needs-connect="dbAiPaneConnectionNeedsConnect"
+      :db-ai-pane-restore-issues="dbAiPaneRestoreIssues"
       :db-ai-pane-messages="dbAiPaneMessages"
       :db-ai-pane-composer-action="dbAiPaneComposerAction"
       :db-ai-pane-composer-placeholder="dbAiPaneComposerPlaceholder"
@@ -185,6 +186,7 @@
       :active-sql-available="Boolean(activeSqlTab)"
       :active-sql-explain-available="activeSqlHasText"
       :can-run-db-ai-pane-message-sql="canRunDbAiPaneMessageSql"
+      :load-older-db-ai-pane-messages="loadOlderDbAiPaneMessages"
       :db-ai-dialect-options="dbAiDialectOptions"
       :format-db-ai-request-time="formatDbAiRequestTime"
       :db-ai-pane-status-label="dbAiPaneStatusLabel"
@@ -230,6 +232,7 @@
       @update-db-ai-pane-catalog="updateDbAiPaneCatalog"
       @update-db-ai-pane-schema="updateDbAiPaneSchema"
       @connect-db-ai-pane-connection="connectDbAiPaneConnection"
+      @retry-db-ai-pane-binding="retryDbAiPaneBinding"
       @handle-db-ai-pane-draft-keydown="handleDbAiPaneDraftKeydown"
       @cancel-db-ai-pane-action-mode="cancelDbAiPaneActionMode"
       @send-db-ai-pane-quick-prompt="sendDbAiPaneQuickPrompt"
@@ -286,10 +289,23 @@
 </template>
 
 <script setup lang="ts">
+import { watch } from 'vue'
 import DatabaseMainWorkspace from '@/components/database/DatabaseMainWorkspace.vue'
 import DatabaseSidebarTree from '@/components/database/DatabaseSidebarTree.vue'
 import DatabaseWorkspaceOverlays from '@/components/database/DatabaseWorkspaceOverlays.vue'
+import type { ProductSessionUiRequest } from '@/components/productSessionUiTypes'
+import { useI18n } from '@/i18n'
 import { useDatabaseWorkspaceRuntime } from '@/services/database/databaseWorkspaceContainerRuntime'
+import { useWorkspaceStore } from '@/stores/workspace'
+
+const props = defineProps<{
+  productSessionRequest?: ProductSessionUiRequest | null
+}>()
+const emit = defineEmits<{
+  productSessionRequestConsumed: [sequence: number]
+}>()
+const { t } = useI18n()
+const workspace = useWorkspaceStore()
 
 const {
   DB_AI_PANE_MIN_WIDTH,
@@ -395,6 +411,7 @@ const {
   dbAiPaneComposerAction,
   dbAiPaneComposerPlaceholder,
   dbAiPaneMessages,
+  dbAiPaneRestoreIssues,
   sqlDiagnose,
   dbAiDialectOptions,
   canToggleDbAiPane,
@@ -415,10 +432,14 @@ const {
   updateDbAiPaneCatalog,
   updateDbAiPaneSchema,
   connectDbAiPaneConnection,
+  retryDbAiPaneBinding,
   handleDbAiPaneDraftKeydown,
   cancelDbAiPaneActionMode,
   sendDbAiPaneQuickPrompt,
   resetDbAiPaneConversation,
+  restoreDbAiPaneSession,
+  loadOlderDbAiPaneMessages,
+  ensureDatabaseWorkspaceSessionReady,
   cancelDbAiPaneResponse,
   sendDbAiPaneMessage,
   startDbAiPaneResize,
@@ -551,4 +572,43 @@ const {
   engineName,
   closeContextSubmenuSoon
 } = useDatabaseWorkspaceRuntime()
+
+let latestProductSessionRequestSequence = 0
+
+const showProductSessionFailure = (request: ProductSessionUiRequest) => {
+  const key = request.action === 'create'
+    ? 'agents.sessionCreateFailed'
+    : request.action === 'focus'
+      ? 'agents.sessionFocusFailed'
+      : 'agents.sessionRestoreFailed'
+  workspace.setTopNotice(t(key))
+}
+
+const applyDatabaseProductSessionRequest = async (request: ProductSessionUiRequest) => {
+  await ensureDatabaseWorkspaceSessionReady()
+  if (request.sequence !== latestProductSessionRequestSequence) return
+  if (request.action === 'create') {
+    if (!dbAiPaneOpen.value) toggleDbAiPane()
+    if (!resetDbAiPaneConversation()) showProductSessionFailure(request)
+    return
+  }
+  if (!request.sessionId || !(await restoreDbAiPaneSession(request.sessionId))) {
+    if (request.sequence === latestProductSessionRequestSequence) showProductSessionFailure(request)
+  }
+}
+
+watch(
+  () => props.productSessionRequest,
+  (request) => {
+    if (
+      !request ||
+      request.surface !== 'database' ||
+      request.sequence === latestProductSessionRequestSequence
+    ) return
+    latestProductSessionRequestSequence = request.sequence
+    emit('productSessionRequestConsumed', request.sequence)
+    void applyDatabaseProductSessionRequest(request)
+  },
+  { immediate: true, flush: 'post' }
+)
 </script>

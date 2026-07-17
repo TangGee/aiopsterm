@@ -31,6 +31,13 @@ const sshSession: TerminalSessionInfo = {
   kind: 'ssh',
   shell: '/bin/bash',
   cwd: '/srv/app',
+  classicTarget: {
+    targetId: 'asset-prod',
+    terminalSessionId: 'terminal-ssh-1',
+    label: 'prod-host',
+    kind: 'ssh',
+    cwd: '/srv/app'
+  },
   lifecycle: sshLifecycle,
   connection: {
     connectionId: 'ssh-connection-1',
@@ -68,8 +75,28 @@ describe('terminalBackendGuards', () => {
     expect(isTerminalExitEvent({ id: 'terminal-ssh-1', code: 0, kind: 'ssh', reason: 'process' })).toBe(true)
     expect(isTerminalExitEvent({ id: 'terminal-ssh-1', code: '0', kind: 'ssh' })).toBe(false)
     expect(isSshTerminalSessionInfo(sshSession)).toBe(true)
+    expect(isSshTerminalSessionInfo({
+      ...sshSession,
+      classicTarget: { ...sshSession.classicTarget!, terminalSessionId: 'terminal-other' }
+    })).toBe(false)
+    expect(isSshTerminalSessionInfo({
+      ...sshSession,
+      classicTarget: { ...sshSession.classicTarget!, kind: 'local' }
+    })).toBe(false)
     expect(isSshTerminalSessionInfo({ ...sshSession, connection: { ...sshSession.connection, assetName: '' } })).toBe(false)
-    expect(isLocalTerminalSessionInfo({ id: 'terminal-local-1', kind: 'local', shell: '/bin/zsh', cwd: '/work' })).toBe(true)
+    expect(isLocalTerminalSessionInfo({
+      id: 'terminal-local-1',
+      kind: 'local',
+      shell: '/bin/zsh',
+      cwd: '/work',
+      classicTarget: {
+        targetId: 'opened-local',
+        terminalSessionId: 'terminal-local-1',
+        label: 'Local terminal',
+        kind: 'local',
+        cwd: '/work'
+      }
+    })).toBe(true)
     expect(isLocalTerminalSessionInfo({ id: 'terminal-local-1', kind: 'ssh', shell: '/bin/zsh', cwd: '/work' })).toBe(false)
   })
 

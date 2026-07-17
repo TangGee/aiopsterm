@@ -31,6 +31,13 @@ const hasOwnField = (record: Record<string, unknown>, key: string) => Object.pro
 const isOptionalField = (record: Record<string, unknown>, key: string, guard: (value: unknown) => boolean) =>
   !hasOwnField(record, key) || record[key] === undefined || guard(record[key])
 const isTerminalKind = (value: unknown): value is 'local' | 'ssh' => value === 'local' || value === 'ssh'
+const isTerminalClassicTarget = (value: unknown, terminalSessionId: string, kind: 'local' | 'ssh') =>
+  isRecord(value) &&
+  isNonEmptyString(value.targetId) &&
+  value.terminalSessionId === terminalSessionId &&
+  isNonEmptyString(value.label) &&
+  value.kind === kind &&
+  isOptionalNonEmptyString(value, 'cwd')
 const isTerminalExitCode = (value: unknown): value is number | null => value === null || (typeof value === 'number' && Number.isFinite(value))
 export const isTerminalPort = (value: unknown): value is number =>
   typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 65535
@@ -124,10 +131,12 @@ export const isLocalTerminalSessionInfo = (value: unknown): value is TerminalSes
   value.kind === 'local' &&
   isNonEmptyString(value.shell) &&
   isNonEmptyString(value.cwd) &&
+  (value.classicTarget === undefined || isTerminalClassicTarget(value.classicTarget, value.id, 'local')) &&
   (value.lifecycle === undefined || isTerminalLifecycleEvent(value.lifecycle, value.id, 'local'))
 
 export const isSshTerminalSessionInfo = (value: unknown): value is TerminalSessionInfo & { connection: TerminalSshConnectionInfo } => {
   if (!isRecord(value) || !isNonEmptyString(value.id) || value.kind !== 'ssh' || !isNonEmptyString(value.shell) || !isNonEmptyString(value.cwd)) return false
+  if (value.classicTarget !== undefined && !isTerminalClassicTarget(value.classicTarget, value.id, 'ssh')) return false
   if (value.lifecycle !== undefined && !isTerminalLifecycleEvent(value.lifecycle, value.id, 'ssh')) return false
   const connection = value.connection
   return (

@@ -5,6 +5,7 @@ const net = require('net')
 const readline = require('readline')
 
 const socketPath = process.env.AIOPSTERM_CODEX_BRIDGE_SOCKET || ''
+const codexRuntimeId = process.env.AIOPSTERM_CODEX_RUNTIME_ID || ''
 let nextBridgeId = 1
 
 const writeMessage = (message) => {
@@ -32,12 +33,15 @@ const callBridge = (method, params) =>
       return
     }
     const id = `bridge-${nextBridgeId++}`
+    const bridgeParams = codexRuntimeId
+      ? { ...(params || {}), __aiopstermCodexRuntimeId: codexRuntimeId }
+      : params
     const socket = net.createConnection(socketPath)
     let buffer = ''
     socket.setEncoding('utf8')
     socket.setTimeout(Number(params?.timeoutMs || 180000) + 5000)
     socket.on('connect', () => {
-      socket.write(`${JSON.stringify({ id, method, params })}\n`)
+      socket.write(`${JSON.stringify({ id, method, params: bridgeParams })}\n`)
     })
     socket.on('data', (chunk) => {
       buffer += chunk

@@ -16,78 +16,78 @@
         { 'has-left-pane': hasLeftPane, 'has-right-pane': hasRightPane }
       ]"
     >
-      <template v-if="workspace.mode === 'agents'">
-        <div
-          v-if="showAgentsLeftPane"
-          class="layout-pane layout-pane-left agents-sidebar-pane"
-          :style="{ width: `${displayAgentsLeftWidth}px` }"
-          data-layout-pane="agents-left"
-        >
-          <AgentsSidebar />
-        </div>
+      <SideRail />
+      <div
+        v-if="showAgentsLeftPane"
+        class="layout-pane layout-pane-left agents-sidebar-pane"
+        :style="{ width: `${displayAgentsLeftWidth}px` }"
+        data-layout-pane="agents-left"
+      >
+        <AgentsSidebar @request-product-session="handleProductSessionRequest" />
+      </div>
+      <button
+        v-if="showAgentsLeftPane"
+        class="layout-resizer layout-resizer-left"
+        :class="{ dragging: draggingSide === 'agents-left' }"
+        data-layout-resizer="agents-left"
+        title="调整会话侧栏宽度"
+        aria-label="调整会话侧栏宽度"
+        @mousedown="startResize('agents-left', $event)"
+      ></button>
+      <div
+        v-if="showTerminalLeftPane"
+        class="layout-pane layout-pane-left module-panel-pane"
+        :style="{ width: `${displayLeftPanelWidth}px` }"
+        data-onboarding-id="left-function-panel"
+        data-layout-pane="terminal-left"
+      >
+        <ModulePanel />
+      </div>
+      <button
+        v-if="showTerminalLeftPane"
+        class="layout-resizer layout-resizer-left"
+        :class="{ dragging: draggingSide === 'left' }"
+        data-layout-resizer="terminal-left"
+        title="调整左侧面板宽度"
+        aria-label="调整左侧面板宽度"
+        @mousedown="startResize('left', $event)"
+      ></button>
+      <FilesWorkspace v-if="workspace.mode === 'terminal' && workspace.activeModule === 'files'" />
+      <AssetsWorkspace v-else-if="workspace.mode === 'terminal' && workspace.activeModule === 'assets'" />
+      <ExtensionsWorkspace v-else-if="workspace.mode === 'terminal' && workspace.activeModule === 'extensions'" />
+      <KubernetesWorkspace v-else-if="workspace.mode === 'terminal' && workspace.activeModule === 'kubernetes'" />
+      <SettingsWorkspace v-else-if="workspace.mode === 'terminal' && workspace.activeModule === 'settings'" />
+      <UserPanel v-else-if="workspace.mode === 'terminal' && workspace.activeModule === 'user'" />
+      <KeepAlive>
+        <DatabaseWorkspace
+          v-if="workspace.mode === 'terminal' && workspace.activeModule === 'database'"
+          :product-session-request="productSessionRequest"
+          @product-session-request-consumed="handleProductSessionRequestConsumed"
+        />
+      </KeepAlive>
+      <TerminalWorkspace v-show="showTerminalWorkspace" />
+      <div
+        v-if="showRightPane"
+        class="layout-pane layout-pane-right ai-panel-pane"
+        :style="{ width: `${displayRightPanelWidth}px` }"
+        data-onboarding-id="right-ai-sidebar"
+        :data-layout-pane="workspace.mode === 'agents' ? 'agents-right' : 'terminal-right'"
+      >
         <button
-          v-if="showAgentsLeftPane"
-          class="layout-resizer layout-resizer-left"
-          :class="{ dragging: draggingSide === 'agents-left' }"
-          data-layout-resizer="agents-left"
-          title="调整会话侧栏宽度"
-          aria-label="调整会话侧栏宽度"
-          @mousedown="startResize('agents-left', $event)"
+          class="layout-resizer layout-resizer-right"
+          :class="{ dragging: draggingSide === 'right' }"
+          :data-layout-resizer="workspace.mode === 'agents' ? 'agents-right' : 'terminal-right'"
+          title="调整 AI 侧栏宽度"
+          aria-label="调整 AI 侧栏宽度"
+          @mousedown="startResize('right', $event)"
         ></button>
-        <section class="agents-stage">
-          <AiPanel agent-mode />
-        </section>
-      </template>
-
-      <template v-else>
-        <SideRail />
-        <div
-          v-if="showTerminalLeftPane"
-          class="layout-pane layout-pane-left module-panel-pane"
-          :style="{ width: `${displayLeftPanelWidth}px` }"
-          data-onboarding-id="left-function-panel"
-          data-layout-pane="terminal-left"
-        >
-          <ModulePanel />
-        </div>
-        <button
-          v-if="showTerminalLeftPane"
-          class="layout-resizer layout-resizer-left"
-          :class="{ dragging: draggingSide === 'left' }"
-          data-layout-resizer="terminal-left"
-          title="调整左侧面板宽度"
-          aria-label="调整左侧面板宽度"
-          @mousedown="startResize('left', $event)"
-        ></button>
-        <FilesWorkspace v-if="workspace.activeModule === 'files'" />
-        <AssetsWorkspace v-else-if="workspace.activeModule === 'assets'" />
-        <ExtensionsWorkspace v-else-if="workspace.activeModule === 'extensions'" />
-        <KubernetesWorkspace v-else-if="workspace.activeModule === 'kubernetes'" />
-        <SettingsWorkspace v-else-if="workspace.activeModule === 'settings'" />
-        <UserPanel v-else-if="workspace.activeModule === 'user'" />
-        <KeepAlive>
-          <DatabaseWorkspace v-if="workspace.activeModule === 'database'" />
-        </KeepAlive>
-        <TerminalWorkspace v-show="showTerminalWorkspace" />
-        <div
-          v-if="showTerminalRightPane"
-          class="layout-pane layout-pane-right ai-panel-pane"
-          :style="{ width: `${displayRightPanelWidth}px` }"
-          data-onboarding-id="right-ai-sidebar"
-          data-layout-pane="terminal-right"
-        >
-          <button
-            class="layout-resizer layout-resizer-right"
-            :class="{ dragging: draggingSide === 'right' }"
-            data-layout-resizer="terminal-right"
-            title="调整 AI 侧栏宽度"
-            aria-label="调整 AI 侧栏宽度"
-            @mousedown="startResize('right', $event)"
-          ></button>
-          <AiPanel />
-        </div>
-        <OnboardingSpotlight />
-      </template>
+        <AiPanel
+          :agent-mode="workspace.mode === 'agents'"
+          :product-session-request="productSessionRequest"
+          @product-session-request-consumed="handleProductSessionRequestConsumed"
+        />
+      </div>
+      <OnboardingSpotlight v-if="workspace.mode === 'terminal'" />
     </main>
     <div
       v-if="terminalMfaDialog.open && terminalMfaDialog.request"
@@ -175,6 +175,7 @@
 </template>
 
 <script setup lang="ts">
+import { nextTick, ref } from 'vue'
 import { X } from 'lucide-vue-next'
 import TopBar from '@/components/TopBar.vue'
 import SideRail from '@/components/SideRail.vue'
@@ -190,6 +191,7 @@ import AgentsSidebar from '@/components/AgentsSidebar.vue'
 import DatabaseWorkspace from '@/components/DatabaseWorkspace.vue'
 import UserPanel from '@/components/panels/UserPanel.vue'
 import OnboardingSpotlight from '@/components/onboarding/OnboardingSpotlight.vue'
+import type { ProductSessionUiRequest, ProductSessionUiRequestInput } from '@/components/productSessionUiTypes'
 import { useAppShellRuntime } from '@/services/app/appShellRuntime'
 
 const {
@@ -205,7 +207,7 @@ const {
   showAgentsLeftPane,
   showTerminalLeftPane,
   showTerminalPasswordRemember,
-  showTerminalRightPane,
+  showRightPane,
   showTerminalWorkspace,
   startResize,
   submitTerminalMfa,
@@ -218,4 +220,27 @@ const {
   t,
   workspace
 } = useAppShellRuntime()
+
+const productSessionRequest = ref<ProductSessionUiRequest | null>(null)
+let productSessionRequestSequence = 0
+
+const handleProductSessionRequest = async (request: ProductSessionUiRequestInput) => {
+  if (request.surface === 'database') {
+    workspace.mode = 'terminal'
+    workspace.setActiveModule('database')
+  } else {
+    workspace.setActiveModule('workspace')
+    workspace.mode = 'agents'
+  }
+  await nextTick()
+  const sessionRequest: ProductSessionUiRequest = {
+    ...request,
+    sequence: ++productSessionRequestSequence
+  }
+  productSessionRequest.value = sessionRequest
+}
+
+const handleProductSessionRequestConsumed = (sequence: number) => {
+  if (productSessionRequest.value?.sequence === sequence) productSessionRequest.value = null
+}
 </script>

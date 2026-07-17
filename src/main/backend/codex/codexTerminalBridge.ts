@@ -22,17 +22,31 @@ type PendingCommand = {
   id: string
   sessionId: string
   command: string
-  startedAt: number
+  queuedAt: number
+  startedAt?: number
+  timeoutMs: number
+  wrappedCommand: string
   markerStart: string
   markerEnd: string
   markerEndPrefix: string
   output: string
+  state: 'queued' | 'active' | 'interrupting'
+  responseSettled: boolean
+  interruptOutputStart?: number
   displayPhase: 'suppress-until-start' | 'forward-until-end' | 'done'
   displayBuffer: string
   displayCommandShown: boolean
   displayPromptPrefix: string
   resolve: (value: CodexBridgeResponse) => void
-  timer: NodeJS.Timeout
+  reject: (error: Error) => void
+  timer?: NodeJS.Timeout
+  interruptTimer?: NodeJS.Timeout
+}
+
+type TerminalCommandQueue = {
+  activeCommandId?: string
+  queuedCommandIds: string[]
+  isolatedReason?: string
 }
 
 type TerminalOutputHistory = {
@@ -65,7 +79,9 @@ type CodexTerminalBridgeRequest = {
 
 const sessions = new Map<string, CodexTerminalBridgeSession>()
 const pendingCommands = new Map<string, PendingCommand>()
+const terminalCommandQueues = new Map<string, TerminalCommandQueue>()
 const terminalOutputHistories = new Map<string, TerminalOutputHistory>()
+const runtimeTargetSelections = new Map<string, { sessionId: string; strict: boolean }>()
 
 let server: Server | null = null
 let socketPath = ''
@@ -75,8 +91,10 @@ let preferredSessionStrict = false
 const terminalOutputHistoryMaxLines = 10000
 // 只发 \r 不发 \n 的进度流（wget/npm 等）不会触发换行落盘，pending 必须有硬上限。
 const terminalOutputHistoryPendingMaxLength = 64 * 1024
+export const codexTerminalBridgeInterruptGraceMs = 2_000
 
 const cleanText = (value: unknown) => (typeof value === 'string' ? value.trim() : '')
+const codexRuntimeIdParam = '__aiopstermCodexRuntimeId'
 
 const normalizeBoolean = (value: unknown, fallback = false) => (typeof value === 'boolean' ? value : fallback)
 
@@ -134,19 +152,36 @@ export const updateCodexTerminalBridgeSessionTarget = (target?: CodexSessionTarg
   }
 }
 
+export const updateCodexTerminalBridgeRuntimeTarget = (
+  runtimeIdInput: string,
+  target?: CodexSessionTargetContext | null
+): CodexTerminalBridgeTargetUpdateResult => {
+  const runtimeId = cleanText(runtimeIdInput)
+  if (!runtimeId) return updateCodexTerminalBridgeSessionTarget(target)
+  const sessionId = cleanText(target?.sessionId)
+  runtimeTargetSelections.set(runtimeId, { sessionId, strict: true })
+  if (!sessionId) return { registered: false, ...(target ? { target } : {}) }
+  const session = sessions.get(sessionId)
+  if (!session) return { sessionId, registered: false, ...(target ? { target } : {}) }
+  if (target) session.target = { ...(session.target || {}), ...target, sessionId }
+  if (target?.cwd) session.cwd = target.cwd
+  if (target?.host) session.host = target.host
+  return { sessionId, target: targetContextForSession(session), registered: true }
+}
+
+export const clearCodexTerminalBridgeRuntimeTarget = (runtimeIdInput: string) => {
+  const runtimeId = cleanText(runtimeIdInput)
+  if (runtimeId) runtimeTargetSelections.delete(runtimeId)
+}
+
 export const unregisterCodexTerminalBridgeSession = (id: string) => {
   sessions.delete(id)
   terminalOutputHistories.delete(id)
-  for (const [commandId, pending] of pendingCommands.entries()) {
-    if (pending.sessionId !== id) continue
-    clearTimeout(pending.timer)
-    pendingCommands.delete(commandId)
-    pending.resolve({
-      ok: false,
-      errorCode: 'TERMINAL_SESSION_CLOSED',
-      errorMessage: 'The selected aiopsterm terminal session closed before command output completed.'
-    })
-  }
+  clearTerminalCommandQueue(id, {
+    ok: false,
+    errorCode: 'TERMINAL_SESSION_CLOSED',
+    errorMessage: 'The selected aiopsterm terminal session closed before command output completed.'
+  })
 }
 
 const newTerminalOutputHistory = (): TerminalOutputHistory => ({
@@ -217,30 +252,35 @@ export const appendCodexTerminalBridgeDisplayData = (sessionId: string, chunk: s
 export const appendCodexTerminalBridgeData = (sessionId: string, chunk: string | Buffer) => {
   const text = Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk || '')
   if (!text) return
-  for (const [commandId, pending] of pendingCommands.entries()) {
-    if (pending.sessionId !== sessionId) continue
-    pending.output += text
-    const completed = extractCompletedMarkedOutput(pending.output, pending.markerStart, pending.markerEndPrefix)
-    if (!completed) continue
-    clearTimeout(pending.timer)
-    pendingCommands.delete(commandId)
-    pending.resolve({
-      ok: true,
-      target: sessions.get(sessionId)?.target,
-      data: {
-        commandId,
-        output: completed.output.trim(),
-        exitCode: completed.exitCode,
-        durationMs: Date.now() - pending.startedAt
-      }
-    })
+  const pending = activePendingCommandForSession(sessionId)
+  if (!pending) return
+  pending.output += text
+  const completed = extractCompletedMarkedOutput(pending.output, pending.markerStart, pending.markerEndPrefix)
+  if (completed) {
+    if (!pending.responseSettled) {
+      settlePendingCommandResponse(pending, {
+        ok: true,
+        target: sessions.get(sessionId)?.target,
+        data: {
+          commandId: pending.id,
+          output: completed.output.trim(),
+          exitCode: completed.exitCode,
+          durationMs: pendingCommandDuration(pending)
+        }
+      })
+    }
+    releaseActiveTerminalCommand(pending)
+    return
+  }
+  if (pending.state === 'interrupting' && hasInterruptedCommandPromptBoundary(pending)) {
+    releaseActiveTerminalCommand(pending)
   }
 }
 
-const firstPendingCommandForSession = (sessionId: string) =>
-  [...pendingCommands.values()]
-    .filter((pending) => pending.sessionId === sessionId && pending.displayPhase !== 'done')
-    .sort((left, right) => left.startedAt - right.startedAt)[0] || null
+const firstPendingCommandForSession = (sessionId: string) => {
+  const pending = activePendingCommandForSession(sessionId)
+  return pending?.displayPhase !== 'done' ? pending : null
+}
 
 const splitNextTerminalLine = (value: string): { line: string; rest: string } | null => {
   const newlineIndex = value.indexOf('\n')
@@ -400,19 +440,204 @@ const targetContextForSession = (session: CodexTerminalBridgeSession): CodexSess
   ...(session.target || {})
 })
 
+const terminalCommandQueueFor = (sessionId: string) => {
+  const existing = terminalCommandQueues.get(sessionId)
+  if (existing) return existing
+  const queue: TerminalCommandQueue = { queuedCommandIds: [] }
+  terminalCommandQueues.set(sessionId, queue)
+  return queue
+}
+
+const pendingCommandDuration = (pending: PendingCommand) =>
+  Math.max(0, Date.now() - (pending.startedAt ?? pending.queuedAt))
+
+const clearPendingCommandTimers = (pending: PendingCommand) => {
+  if (pending.timer) clearTimeout(pending.timer)
+  if (pending.interruptTimer) clearTimeout(pending.interruptTimer)
+  pending.timer = undefined
+  pending.interruptTimer = undefined
+}
+
+const settlePendingCommandResponse = (pending: PendingCommand, response: CodexBridgeResponse) => {
+  if (pending.responseSettled) return
+  pending.responseSettled = true
+  pending.resolve(response)
+}
+
+const rejectPendingCommandResponse = (pending: PendingCommand, error: unknown) => {
+  if (pending.responseSettled) return
+  pending.responseSettled = true
+  pending.reject(error instanceof Error ? error : new Error(String(error)))
+}
+
+const activePendingCommandForSession = (sessionId: string) => {
+  const activeCommandId = terminalCommandQueues.get(sessionId)?.activeCommandId
+  if (!activeCommandId) return null
+  const pending = pendingCommands.get(activeCommandId)
+  return pending && pending.state !== 'queued' ? pending : null
+}
+
+const cleanupIdleTerminalCommandQueue = (sessionId: string) => {
+  const queue = terminalCommandQueues.get(sessionId)
+  if (!queue || queue.isolatedReason || queue.activeCommandId || queue.queuedCommandIds.length) return
+  terminalCommandQueues.delete(sessionId)
+}
+
+const removeQueuedTerminalCommand = (pending: PendingCommand) => {
+  const queue = terminalCommandQueues.get(pending.sessionId)
+  if (!queue) return
+  queue.queuedCommandIds = queue.queuedCommandIds.filter((commandId) => commandId !== pending.id)
+}
+
+const isolatedTerminalCommandResponse = (session: CodexTerminalBridgeSession | undefined, reason: string): CodexBridgeResponse => ({
+  ok: false,
+  errorCode: 'TERMINAL_COMMAND_CHANNEL_ISOLATED',
+  errorMessage: reason,
+  ...(session ? { target: targetContextForSession(session) } : {})
+})
+
+function clearTerminalCommandQueue(sessionId: string, response: CodexBridgeResponse) {
+  const queue = terminalCommandQueues.get(sessionId)
+  const commandIds = new Set([
+    ...(queue?.activeCommandId ? [queue.activeCommandId] : []),
+    ...(queue?.queuedCommandIds || []),
+    ...[...pendingCommands.values()].filter((pending) => pending.sessionId === sessionId).map((pending) => pending.id)
+  ])
+  for (const commandId of commandIds) {
+    const pending = pendingCommands.get(commandId)
+    if (!pending) continue
+    clearPendingCommandTimers(pending)
+    pending.displayPhase = 'done'
+    settlePendingCommandResponse(pending, response)
+    pendingCommands.delete(commandId)
+  }
+  terminalCommandQueues.delete(sessionId)
+}
+
+const isolateTerminalCommandQueue = (pending: PendingCommand, reason: string, error?: unknown) => {
+  const queue = terminalCommandQueueFor(pending.sessionId)
+  const session = sessions.get(pending.sessionId)
+  clearPendingCommandTimers(pending)
+  pending.displayPhase = 'done'
+  queue.activeCommandId = undefined
+  queue.isolatedReason = reason
+  if (error !== undefined) rejectPendingCommandResponse(pending, error)
+  else settlePendingCommandResponse(pending, isolatedTerminalCommandResponse(session, reason))
+  pendingCommands.delete(pending.id)
+
+  const queuedIds = queue.queuedCommandIds.splice(0)
+  for (const commandId of queuedIds) {
+    const queued = pendingCommands.get(commandId)
+    if (!queued) continue
+    clearPendingCommandTimers(queued)
+    settlePendingCommandResponse(queued, isolatedTerminalCommandResponse(session, reason))
+    pendingCommands.delete(commandId)
+  }
+}
+
+const releaseActiveTerminalCommand = (pending: PendingCommand) => {
+  const queue = terminalCommandQueues.get(pending.sessionId)
+  clearPendingCommandTimers(pending)
+  pending.displayPhase = 'done'
+  pendingCommands.delete(pending.id)
+  if (queue?.activeCommandId === pending.id) queue.activeCommandId = undefined
+  dispatchNextTerminalCommand(pending.sessionId)
+  cleanupIdleTerminalCommandQueue(pending.sessionId)
+}
+
+const hasInterruptedCommandPromptBoundary = (pending: PendingCommand) => {
+  const start = pending.interruptOutputStart ?? pending.output.length
+  const output = stripTerminalControl(pending.output.slice(start))
+  return output.split('\n').some((line) => hasShellPrompt(line) || /^PS\s+.+>\s*$/.test(line.trim()))
+}
+
+const beginActiveTerminalCommandInterrupt = (pending: PendingCommand, response: CodexBridgeResponse) => {
+  if (pending.state !== 'active') return
+  const session = sessions.get(pending.sessionId)
+  clearPendingCommandTimers(pending)
+  pending.state = 'interrupting'
+  pending.interruptOutputStart = pending.output.length
+  settlePendingCommandResponse(pending, response)
+  try {
+    if (!session) throw new Error('The selected aiopsterm terminal session is unavailable during interruption.')
+    session.write('\x03')
+  } catch (error) {
+    isolateTerminalCommandQueue(
+      pending,
+      'The terminal command channel was isolated because interruption could not be delivered safely.',
+      error
+    )
+    return
+  }
+  pending.interruptTimer = setTimeout(() => {
+    if (pendingCommands.get(pending.id) !== pending || pending.state !== 'interrupting') return
+    isolateTerminalCommandQueue(
+      pending,
+      'The terminal command channel was isolated because the interrupted command did not reach a reliable shell boundary.'
+    )
+  }, codexTerminalBridgeInterruptGraceMs)
+}
+
+function dispatchNextTerminalCommand(sessionId: string) {
+  const queue = terminalCommandQueues.get(sessionId)
+  if (!queue || queue.activeCommandId || queue.isolatedReason) return
+  const session = sessions.get(sessionId)
+  for (;;) {
+    const commandId = queue.queuedCommandIds.shift()
+    if (!commandId) {
+      cleanupIdleTerminalCommandQueue(sessionId)
+      return
+    }
+    const pending = pendingCommands.get(commandId)
+    if (!pending || pending.state !== 'queued') continue
+    if (!session) {
+      settlePendingCommandResponse(pending, {
+        ok: false,
+        errorCode: 'TERMINAL_SESSION_CLOSED',
+        errorMessage: 'The selected aiopsterm terminal session closed before command execution started.'
+      })
+      pendingCommands.delete(commandId)
+      continue
+    }
+    queue.activeCommandId = commandId
+    pending.state = 'active'
+    pending.startedAt = Date.now()
+    pending.timer = setTimeout(() => {
+      if (pendingCommands.get(commandId) !== pending || pending.state !== 'active') return
+      beginActiveTerminalCommandInterrupt(pending, {
+        ok: false,
+        errorCode: 'COMMAND_TIMEOUT',
+        errorMessage: `Command timed out after ${pending.timeoutMs}ms.`,
+        target: targetContextForSession(session),
+        data: {
+          commandId,
+          command: pending.command,
+          mode: 'wait',
+          output: stripTerminalControl(pending.output).trim(),
+          exitCode: null,
+          durationMs: pendingCommandDuration(pending)
+        }
+      })
+    }, pending.timeoutMs)
+    try {
+      session.write(pending.wrappedCommand)
+    } catch (error) {
+      isolateTerminalCommandQueue(
+        pending,
+        'The terminal command channel was isolated because command delivery failed.',
+        error
+      )
+    }
+    return
+  }
+}
+
 export const cancelCodexTerminalBridgeCommand = (commandId: string, reason = 'The command was cancelled.') => {
   const normalizedId = cleanText(commandId)
   const pending = pendingCommands.get(normalizedId)
-  if (!pending) return false
-  clearTimeout(pending.timer)
-  pendingCommands.delete(normalizedId)
+  if (!pending || pending.state === 'interrupting' || pending.responseSettled) return false
   const session = sessions.get(pending.sessionId)
-  try {
-    session?.write('\x03')
-  } catch {
-    // The command is still resolved as cancelled when the terminal closes during interruption.
-  }
-  pending.resolve({
+  const response: CodexBridgeResponse = {
     ok: false,
     errorCode: 'COMMAND_ABORTED',
     errorMessage: reason,
@@ -423,21 +648,37 @@ export const cancelCodexTerminalBridgeCommand = (commandId: string, reason = 'Th
       mode: 'wait',
       output: stripTerminalControl(pending.output).trim(),
       exitCode: null,
-      durationMs: Date.now() - pending.startedAt,
+      durationMs: pendingCommandDuration(pending),
       aborted: true
     }
-  })
+  }
+  if (pending.state === 'queued') {
+    removeQueuedTerminalCommand(pending)
+    settlePendingCommandResponse(pending, response)
+    pendingCommands.delete(pending.id)
+    cleanupIdleTerminalCommandQueue(pending.sessionId)
+    return true
+  }
+  beginActiveTerminalCommandInterrupt(pending, response)
   return true
 }
 
-const terminalSummaryForSession = (session: CodexTerminalBridgeSession) => {
+const targetSelectionForParams = (params: Record<string, unknown>) => {
+  const runtimeId = cleanText(params[codexRuntimeIdParam])
+  return runtimeId ? runtimeTargetSelections.get(runtimeId) || { sessionId: '', strict: true } : undefined
+}
+
+const terminalSummaryForSession = (
+  session: CodexTerminalBridgeSession,
+  selection = { sessionId: preferredSessionId, strict: preferredSessionStrict }
+) => {
   const target = targetContextForSession(session)
   return {
     sessionId: session.id,
     kind: target.kind || session.kind,
     label: target.label || (session.kind === 'local' ? 'Local terminal' : 'SSH terminal'),
-    selected: session.id === preferredSessionId,
-    strictSelected: session.id === preferredSessionId && preferredSessionStrict,
+    selected: session.id === selection.sessionId,
+    strictSelected: session.id === selection.sessionId && selection.strict,
     ...(target.panelId ? { panelId: target.panelId } : {}),
     ...(target.host ? { host: target.host } : {}),
     ...(target.port ? { port: target.port } : {}),
@@ -451,11 +692,14 @@ const terminalSummaryForSession = (session: CodexTerminalBridgeSession) => {
 const resolveTargetSession = (params: Record<string, unknown>): CodexTerminalBridgeSession | null => {
   const requestedSessionId = cleanText(params.sessionId)
   if (requestedSessionId) return sessions.get(requestedSessionId) || null
-  if (preferredSessionId) {
-    const preferred = sessions.get(preferredSessionId) || null
-    if (preferred || preferredSessionStrict) return preferred
+  const runtimeSelection = targetSelectionForParams(params)
+  const selectedSessionId = runtimeSelection ? runtimeSelection.sessionId : preferredSessionId
+  const strict = runtimeSelection ? runtimeSelection.strict : preferredSessionStrict
+  if (selectedSessionId) {
+    const preferred = sessions.get(selectedSessionId) || null
+    if (preferred || strict) return preferred
   }
-  if (preferredSessionStrict) return null
+  if (strict) return null
   const candidates = [...sessions.values()].filter((session) => session.kind === 'ssh')
   return candidates[candidates.length - 1] || [...sessions.values()][0] || null
 }
@@ -660,6 +904,16 @@ const runTerminalCommand = async (params: Record<string, unknown>): Promise<Code
     return runTerminalCommandInBackground(session, command, commandId, timeoutMs, startedAt)
   }
   if (mode === 'return_immediately') {
+    const queue = terminalCommandQueues.get(session.id)
+    if (queue?.isolatedReason) return isolatedTerminalCommandResponse(session, queue.isolatedReason)
+    if (queue?.activeCommandId || queue?.queuedCommandIds.length) {
+      return {
+        ok: false,
+        errorCode: 'TERMINAL_COMMAND_BUSY',
+        errorMessage: 'The selected terminal is currently owned by another aiopsterm command.',
+        target: targetContextForSession(session)
+      }
+    }
     try {
       return runTerminalCommandImmediately(session, command, commandId, startedAt)
     } catch (error) {
@@ -682,47 +936,43 @@ const runTerminalCommand = async (params: Record<string, unknown>): Promise<Code
   const wrapped = buildWrappedCommand(command, markerStart, markerEnd)
 
   return new Promise<CodexBridgeResponse>((resolve, reject) => {
-    const timer = setTimeout(() => {
-      const pending = pendingCommands.get(commandId)
-      pendingCommands.delete(commandId)
+    if (pendingCommands.has(commandId)) {
       resolve({
         ok: false,
-        errorCode: 'COMMAND_TIMEOUT',
-        errorMessage: `Command timed out after ${timeoutMs}ms.`,
-        target: targetContextForSession(session),
-        data: {
-          commandId,
-          command,
-          mode,
-          output: stripTerminalControl(pending?.output || '').trim(),
-          exitCode: null,
-          durationMs: Date.now() - startedAt
-        }
+        errorCode: 'COMMAND_ID_CONFLICT',
+        errorMessage: 'The aiopsterm command id is already pending.',
+        target: targetContextForSession(session)
       })
-    }, timeoutMs)
-    pendingCommands.set(commandId, {
+      return
+    }
+    const queue = terminalCommandQueueFor(session.id)
+    if (queue.isolatedReason) {
+      resolve(isolatedTerminalCommandResponse(session, queue.isolatedReason))
+      return
+    }
+    const pending: PendingCommand = {
       id: commandId,
       sessionId: session.id,
       command,
-      startedAt,
+      queuedAt: startedAt,
+      timeoutMs,
+      wrappedCommand: wrapped,
       markerStart,
       markerEnd,
       markerEndPrefix,
       output: '',
+      state: 'queued',
+      responseSettled: false,
       displayPhase: 'suppress-until-start',
       displayBuffer: '',
       displayCommandShown: false,
       displayPromptPrefix: '',
       resolve,
-      timer
-    })
-    try {
-      session.write(wrapped)
-    } catch (error) {
-      clearTimeout(timer)
-      pendingCommands.delete(commandId)
-      reject(error instanceof Error ? error : new Error(String(error)))
+      reject
     }
+    pendingCommands.set(commandId, pending)
+    queue.queuedCommandIds.push(commandId)
+    dispatchNextTerminalCommand(session.id)
   }).then((response) => ({
     ...response,
     target: response.target || targetContextForSession(session),
@@ -736,11 +986,7 @@ const runStructuredReadOnlyCommand = async (
   transform: (responseData: Record<string, unknown>) => Record<string, unknown>,
   options: { okExitCodes?: number[]; errorCode: string; errorMessage: string }
 ): Promise<CodexBridgeResponse> => {
-  const response = await runTerminalCommand({
-    sessionId: params.sessionId,
-    timeoutMs: params.timeoutMs,
-    command
-  })
+  const response = await runTerminalCommand({ ...params, command })
   if (!response.ok) return response
   const responseData = response.data || {}
   const exitCode = typeof responseData.exitCode === 'number' ? responseData.exitCode : null
@@ -873,15 +1119,17 @@ const targetContext = (params: Record<string, unknown>): CodexBridgeResponse => 
   return { ok: true, target: targetContextForSession(session) }
 }
 
-const listTerminals = (): CodexBridgeResponse => {
-  const terminals = [...sessions.values()].map(terminalSummaryForSession)
+const listTerminals = (params: Record<string, unknown>): CodexBridgeResponse => {
+  const runtimeSelection = targetSelectionForParams(params)
+  const selection = runtimeSelection || { sessionId: preferredSessionId, strict: preferredSessionStrict }
+  const terminals = [...sessions.values()].map((session) => terminalSummaryForSession(session, selection))
   return {
     ok: true,
     data: {
       terminals,
       count: terminals.length,
-      selectedSessionId: preferredSessionId || undefined,
-      strictSelected: preferredSessionStrict
+      selectedSessionId: selection.sessionId || undefined,
+      strictSelected: selection.strict
     }
   }
 }
@@ -930,7 +1178,7 @@ const readTerminalOutput = (params: Record<string, unknown>): CodexBridgeRespons
 
 const handleBridgeRequest = async (request: CodexTerminalBridgeRequest): Promise<CodexBridgeResponse> => {
   const params = request.params || {}
-  if (request.method === 'list_terminals') return listTerminals()
+  if (request.method === 'list_terminals') return listTerminals(params)
   if (request.method === 'run_command') return runTerminalCommand(params)
   if (request.method === 'read_terminal_output') return readTerminalOutput(params)
   if (request.method === 'read_file') return readRemoteFile(params)
@@ -1010,9 +1258,17 @@ export const ensureCodexTerminalBridgeServer = async (userDataPath: string) => {
 }
 
 export const closeCodexTerminalBridgeServer = () => {
-  for (const pending of pendingCommands.values()) clearTimeout(pending.timer)
+  for (const sessionId of new Set([...terminalCommandQueues.keys(), ...sessions.keys()])) {
+    clearTerminalCommandQueue(sessionId, {
+      ok: false,
+      errorCode: 'TERMINAL_BRIDGE_CLOSED',
+      errorMessage: 'The aiopsterm terminal bridge closed before command output completed.'
+    })
+  }
   pendingCommands.clear()
+  terminalCommandQueues.clear()
   terminalOutputHistories.clear()
+  runtimeTargetSelections.clear()
   sessions.clear()
   preferredSessionId = ''
   preferredSessionStrict = false

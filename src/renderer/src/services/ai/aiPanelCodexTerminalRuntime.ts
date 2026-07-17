@@ -1,4 +1,5 @@
 import type { Terminal as XtermTerminal } from '@xterm/xterm'
+import { markRaw } from 'vue'
 import {
   applyCodexExitEvent,
   applyCodexLifecycleEvent,
@@ -24,7 +25,7 @@ import { isTerminalCopyShortcut } from '@/services/terminal/terminalKeyboardShor
 import type { CodexTargetEventKind } from '@/services/ai/codexTargetRuntime'
 import type { TerminalSettings } from '@/services/settings/workspaceConfigRuntime'
 import type { RuntimeLogLevel } from '@shared/contracts/appRuntime'
-import type { CodexSessionTargetContext } from '@shared/contracts/codexSessions'
+import type { CodexSessionKillResult, CodexSessionTargetContext } from '@shared/contracts/codexSessions'
 import { shouldUseTerminalDebugLogs, shouldUseThreadedTerminal } from '@shared/runtimeSwitches'
 
 type XtermRuntimeOptions = XtermTerminal['options'] & { termName?: string; minimumContrastRatio?: number }
@@ -63,6 +64,9 @@ export type AiPanelCodexTerminalConversation<
   TTerminal extends AiPanelCodexTerminalLike = AiPanelCodexTerminalLike,
   TFit extends AiPanelCodexFitLike = AiPanelCodexFitLike
 > = AiPanelCodexConversationRuntimeState & {
+  nativeThreadId?: string
+  projectRoot?: string
+  launchMode?: 'new' | 'resume' | 'fork'
   host: HTMLElement | null
   terminal: TTerminal | null
   threadedTerminal?: boolean
@@ -76,6 +80,8 @@ export type AiPanelCodexTerminalRuntimeLabels = {
   error: () => string
   bridgeMissing: () => string
   startFailed: () => string
+  exitNonZero: () => string
+  unsavedSessionRecovered: () => string
   threadedUnavailable: () => string
   copyEmpty: () => string
   copySuccess: () => string
@@ -183,6 +189,7 @@ export const createAiPanelCodexTerminalRuntime = <TConversation extends AiPanelC
   const copyText = options.copyText || copyTextToClipboard
   const requestFrame = options.requestFrame || defaultRequestFrame
   const resizeObserverFactory = options.resizeObserverFactory || defaultResizeObserverFactory
+  const terminalUnavailableReasonByConversation = new WeakMap<TConversation, string>()
   const shouldUseInjectedTerminal = () => Boolean(options.terminalConstructor && options.fitConstructor)
   const threadedTerminalUnavailableReason = () => {
     if (!shouldUseThreadedTerminal()) return 'threaded terminal switch is disabled'
@@ -191,8 +198,15 @@ export const createAiPanelCodexTerminalRuntime = <TConversation extends AiPanelC
     return ''
   }
   const markThreadedTerminalUnavailable = (conversation: TConversation, reason: string) => {
+    const error = options.labels.threadedUnavailable()
+    if (
+      terminalUnavailableReasonByConversation.get(conversation) === reason &&
+      conversation.status === 'error' &&
+      conversation.error === error
+    ) return
     conversation.status = 'error'
-    conversation.error = options.labels.threadedUnavailable()
+    conversation.error = error
+    terminalUnavailableReasonByConversation.set(conversation, reason)
     options.syncAttentionState(conversation)
     log('error', 'renderer.codex-threaded-terminal.required', {
       localId: conversation.id,
@@ -204,6 +218,7 @@ export const createAiPanelCodexTerminalRuntime = <TConversation extends AiPanelC
   let offData: (() => void) | null = null
   let offLifecycle: (() => void) | null = null
   let offExit: (() => void) | null = null
+  let offThread: (() => void) | null = null
   const pendingSessionStartConversations: TConversation[] = []
   const pendingConversationBySessionId = new Map<string, TConversation>()
   const outputStates = new Map<string, CodexTerminalOutputState>()
@@ -596,17 +611,20 @@ export const createAiPanelCodexTerminalRuntime = <TConversation extends AiPanelC
     offData?.()
     offLifecycle?.()
     offExit?.()
+    offThread?.()
     offData = null
     offLifecycle = null
     offExit = null
+    offThread = null
   }
 
   const subscribeBridge = () => {
-    if (offData || offLifecycle || offExit) return
+    if (offData || offLifecycle || offExit || offThread) return
     const onCodexSessionData = client.onCodexSessionData()
     const onCodexSessionLifecycle = client.onCodexSessionLifecycle()
     const onCodexSessionExit = client.onCodexSessionExit()
-    if (!onCodexSessionData && !onCodexSessionLifecycle && !onCodexSessionExit) return
+    const onCodexSessionThread = client.onCodexSessionThread()
+    if (!onCodexSessionData && !onCodexSessionLifecycle && !onCodexSessionExit && !onCodexSessionThread) return
     offData = onCodexSessionData?.((event) => {
       const conversation = conversationForSessionId(event.id) || claimPendingSessionConversation(event.id)
       if (conversation) writeCodexDisplayOutput(conversation, event.data)
@@ -614,7 +632,10 @@ export const createAiPanelCodexTerminalRuntime = <TConversation extends AiPanelC
     offLifecycle = onCodexSessionLifecycle?.((event) => {
       const conversation = conversationForSessionId(event.id) || claimPendingSessionConversation(event.id)
       if (!conversation) return
-      applyCodexLifecycleEvent(conversation, event, options.labels.error())
+      const localizedEvent = event.errorCode === 'CODEX_CLI_EXIT_NONZERO'
+        ? { ...event, errorMessage: options.labels.exitNonZero() }
+        : event
+      applyCodexLifecycleEvent(conversation, localizedEvent, options.labels.error())
       if (event.stage === 'ready') {
         options.syncAttentionState(conversation)
         syncThreadedConversationSurface(conversation, { forceGeometry: true })
@@ -627,9 +648,30 @@ export const createAiPanelCodexTerminalRuntime = <TConversation extends AiPanelC
     offExit = onCodexSessionExit?.((event) => {
       const conversation = conversationForSessionId(event.id) || claimPendingSessionConversation(event.id)
       if (!conversation) return
-      applyCodexExitEvent(conversation, event)
+      const localizedEvent = event.errorCode === 'CODEX_CLI_EXIT_NONZERO'
+        ? { ...event, errorMessage: options.labels.exitNonZero() }
+        : event
+      applyCodexExitEvent(conversation, localizedEvent)
+      if (conversation.sessionId === event.id) {
+        conversation.sessionId = ''
+        syncThreadedConversationSurface(conversation, { forceGeometry: true })
+      }
       options.syncAttentionState(conversation)
       removePendingStartConversation(conversation)
+    }) || null
+    offThread = onCodexSessionThread?.((event) => {
+      const conversation = conversationForSessionId(event.id) || claimPendingSessionConversation(event.id)
+      if (!conversation) return
+      conversation.nativeThreadId = event.threadId
+      conversation.launchMode = 'resume'
+      if (event.title?.trim()) conversation.title = event.title.trim()
+      log('info', 'renderer.codex-thread.bound', {
+        localId: conversation.id,
+        sessionId: event.id,
+        threadId: event.threadId,
+        reason: event.reason,
+        ...(event.title ? { title: event.title } : {})
+      })
     }) || null
   }
 
@@ -641,7 +683,7 @@ export const createAiPanelCodexTerminalRuntime = <TConversation extends AiPanelC
     const syncPlan = prepareCodexTargetSync(conversation, target, syncOptions.force)
     if (!syncPlan) return
     try {
-      const result = await setCodexSessionTarget(syncPlan.target)
+      const result = await setCodexSessionTarget(conversation.sessionId, syncPlan.target)
       const fields = {
         sessionId: conversation.sessionId,
         targetSessionId: syncPlan.target.sessionId,
@@ -685,7 +727,7 @@ export const createAiPanelCodexTerminalRuntime = <TConversation extends AiPanelC
   const clearSessionTarget = async (conversation: TConversation, kind: CodexTargetEventKind = 'unbound') => {
     const setCodexSessionTarget = client.setCodexSessionTarget()
     if (!conversation.sessionId || !setCodexSessionTarget) return
-    await setCodexSessionTarget(undefined)
+    await setCodexSessionTarget(conversation.sessionId, undefined)
     await setPendingTargetContext(conversation, kind, null)
   }
 
@@ -729,7 +771,8 @@ export const createAiPanelCodexTerminalRuntime = <TConversation extends AiPanelC
       markThreadedTerminalUnavailable(conversation, unavailableReason)
       return false
     }
-    const terminal = (useInjected
+    terminalUnavailableReasonByConversation.delete(conversation)
+    const terminal = markRaw((useInjected
       ? new options.terminalConstructor!({
           allowTransparency: true,
           cursorBlink: settings.cursorBlink,
@@ -752,9 +795,9 @@ export const createAiPanelCodexTerminalRuntime = <TConversation extends AiPanelC
           visible: isConversationVisible(conversation),
           priority: isConversationVisible(conversation) ? 'active' : 'background',
           logFields: { localId: conversation.id }
-        })) as AiPanelCodexTerminalLike
+        })) as AiPanelCodexTerminalLike)
     conversation.threadedTerminal = !useInjected
-    const fit = useInjected ? new options.fitConstructor!() : new ThreadedTerminalFitAddon()
+    const fit = markRaw(useInjected ? new options.fitConstructor!() : new ThreadedTerminalFitAddon())
     terminal.loadAddon(fit)
     terminal.open(element)
     conversation.terminal = terminal as TConversation['terminal']
@@ -779,7 +822,7 @@ export const createAiPanelCodexTerminalRuntime = <TConversation extends AiPanelC
     const observer = resizeObserverFactory(() => fitTerminal({ conversation }))
     if (observer) {
       conversation.resizeObserver?.disconnect()
-      conversation.resizeObserver = observer
+      conversation.resizeObserver = markRaw(observer)
       observer.observe(element)
     }
     fitTerminal({ force: true, conversation })
@@ -841,7 +884,28 @@ export const createAiPanelCodexTerminalRuntime = <TConversation extends AiPanelC
       const cols = conversation.terminal?.cols || 100
       const rows = conversation.terminal?.rows || 30
       try {
-        const session = await createCodexSession({ cols, rows, target })
+        const launch = conversation.nativeThreadId
+          ? { mode: conversation.launchMode === 'fork' ? 'fork' as const : 'resume' as const, threadId: conversation.nativeThreadId }
+          : { mode: 'new' as const }
+        const session = await createCodexSession({
+          cols,
+          rows,
+          target,
+          productSessionId: conversation.id,
+          projectRoot: conversation.projectRoot || target.cwd,
+          launch
+        })
+        const recoveredFromThreadId = String(session.recoveredFromThreadId || '').trim()
+        if (recoveredFromThreadId && recoveredFromThreadId === conversation.nativeThreadId) {
+          conversation.nativeThreadId = undefined
+          conversation.launchMode = 'new'
+          options.notify(options.labels.unsavedSessionRecovered())
+          log('info', 'renderer.codex-session.unsaved-recovered', {
+            localId: conversation.id,
+            sessionId: session.id,
+            recoveredFromThreadId
+          })
+        }
         pendingConversationBySessionId.set(session.id, conversation)
         applyCodexSessionStarted(conversation, session, target)
         syncThreadedConversationSurface(conversation, { forceGeometry: true })
@@ -874,18 +938,70 @@ export const createAiPanelCodexTerminalRuntime = <TConversation extends AiPanelC
   const stopSession = async (conversation: TConversation | null = options.activeConversation()) => {
     const sessionId = conversation?.sessionId
     const killCodexSession = client.killCodexSession()
-    if (!sessionId || !killCodexSession) return
-    try {
-      await killCodexSession(sessionId)
-    } catch (error) {
+    if (!sessionId) return { ok: true, data: { id: '' } } satisfies CodexSessionKillResult
+    if (!killCodexSession) {
+      const result = {
+        ok: false,
+        errorCode: 'CODEX_SESSION_BRIDGE_MISSING',
+        errorMessage: options.labels.bridgeMissing()
+      } satisfies CodexSessionKillResult
       log('warn', 'renderer.codex-session.kill-failed', {
         sessionId,
-        message: error instanceof Error ? error.message : String(error)
+        errorCode: result.errorCode,
+        message: result.errorMessage
       })
+      return result
+    }
+    try {
+      const result = await killCodexSession(sessionId)
+      if (
+        !result.ok &&
+        result.errorCode === 'CODEX_SESSION_NOT_FOUND' &&
+        (conversation?.status === 'closed' || conversation?.status === 'error')
+      ) {
+        log('info', 'renderer.codex-session.kill-already-stopped', {
+          sessionId,
+          status: conversation.status
+        })
+        return { ok: true, data: { id: sessionId } } satisfies CodexSessionKillResult
+      }
+      if (result.ok && result.data?.id !== sessionId) {
+        log('warn', 'renderer.codex-session.kill-failed', {
+          sessionId,
+          errorCode: 'CODEX_SESSION_KILL_RESULT_INVALID',
+          returnedSessionId: result.data?.id,
+          message: 'Codex kill returned an invalid result.'
+        })
+        return {
+          ok: false,
+          errorCode: 'CODEX_SESSION_KILL_RESULT_INVALID'
+        } satisfies CodexSessionKillResult
+      }
+      if (!result.ok) {
+        log('warn', 'renderer.codex-session.kill-failed', {
+          sessionId,
+          errorCode: result.errorCode,
+          message: result.errorMessage
+        })
+      }
+      return result
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      log('warn', 'renderer.codex-session.kill-failed', {
+        sessionId,
+        errorCode: 'CODEX_SESSION_KILL_FAILED',
+        message
+      })
+      return {
+        ok: false,
+        errorCode: 'CODEX_SESSION_KILL_FAILED',
+        errorMessage: message
+      } satisfies CodexSessionKillResult
     }
   }
 
   const disposeConversation = (conversation: TConversation) => {
+    terminalUnavailableReasonByConversation.delete(conversation)
     conversation.resizeObserver?.disconnect()
     conversation.resizeObserver = null
     clearCodexDisplayOutput(conversation, { dispose: true })

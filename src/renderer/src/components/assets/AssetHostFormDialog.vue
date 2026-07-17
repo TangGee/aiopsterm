@@ -99,7 +99,7 @@
               <button
                 type="button"
                 class="asset-secret-toggle"
-                :title="passwordVisible ? '隐藏密码' : '显示密码'"
+                :title="passwordVisible ? t('assets.hostForm.hidePassword') : t('assets.hostForm.showPassword')"
                 @click="emit('toggle-password')"
               >
                 <EyeOff v-if="passwordVisible" />
@@ -290,6 +290,7 @@
 
 <script setup lang="ts">
 import { Eye, EyeOff, X } from 'lucide-vue-next'
+import { useI18n } from '@/i18n'
 import type { AiopsAssetAuthType, AiopsAssetType } from '@shared/contracts/assets'
 
 export type AssetHostFormOption = { id: string; name: string; label?: string }
@@ -309,6 +310,8 @@ export type AssetHostFormField =
   | 'comment'
   | 'bastionType'
   | 'switchBrand'
+
+const { t } = useI18n()
 
 withDefaults(
   defineProps<{

@@ -116,6 +116,9 @@ export const createWorkspaceKubernetesClusterOperationsController = (
     try {
       const result = await connectKubernetesCluster(id)
       if (!result?.ok) {
+        // 探测失败时后端已把集群标记为 error 并随 data 返回目录快照,同步应用避免 UI 状态滞后。
+        const failedCatalog = result?.data
+        if (failedCatalog && isK8sClusterMutationData(failedCatalog, id)) applyKubernetesCatalog(failedCatalog)
         setK8sNotice(result?.errorMessage || `${cluster.name} 连接失败`)
         return false
       }
@@ -384,7 +387,10 @@ export const createWorkspaceKubernetesClusterOperationsController = (
     return cluster
   }
 
-  const updateK8sCluster = async (id: string, patch: { name?: string; defaultNamespace?: string; autoConnect?: boolean }) => {
+  const updateK8sCluster = async (
+    id: string,
+    patch: { name?: string; defaultNamespace?: string; autoConnect?: boolean; kubeconfigPath?: string | null; kubeconfigContent?: string | null }
+  ) => {
     const cluster = k8sClusters.value.find((item) => item.id === id)
     if (!cluster) return null
     const updateKubernetesCluster = kubernetesClient.updateKubernetesCluster()

@@ -1,6 +1,6 @@
 import type { BrowserWindow } from 'electron'
 import { basename, dirname, extname, isAbsolute, join, posix, resolve, sep } from 'path'
-import { access, mkdir, readFile, readdir, stat, writeFile } from 'fs/promises'
+import { access, copyFile, mkdir, readFile, readdir, stat, writeFile } from 'fs/promises'
 import {
   DEFAULT_KNOWLEDGE_INTERFACE_IMAGE_REL_PATH,
   defaultKnowledgeSeedTree,
@@ -41,11 +41,18 @@ type KnowledgeBaseRuntimeOptions = {
   getConfig: () => UserConfig
   saveKnowledgeBase: (knowledgeBase: KnowledgeBaseUserConfig) => void
   defaultKnowledgeBase: KnowledgeBaseUserConfig
+  /** Absolute path of the bundled best-practices docs directory; empty/missing disables bundled-docs sync. */
+  bundledDocsPath?: () => string
+  /** Version string persisted in the bundled-docs sync marker; sync re-runs when it changes. */
+  bundledDocsVersion?: () => string
 }
+
+export const BUNDLED_DOCS_TARGET_DIR = '使用指南'
 
 export const createKnowledgeBaseRuntime = (options: KnowledgeBaseRuntimeOptions) => {
   const getKnowledgeBasePath = () => join(options.userDataPath(), 'knowledgebase')
   const getKnowledgeBaseInitMarkerPath = () => join(getKnowledgeBasePath(), '.aiopsterm-knowledge-initialized')
+  const getBundledDocsSyncMarkerPath = () => join(getKnowledgeBasePath(), '.aiopsterm-bundled-docs-synced')
 
   const blockedKnowledgeImportExtensions = new Set([
     '.exe',
@@ -404,6 +411,47 @@ export const createKnowledgeBaseRuntime = (options: KnowledgeBaseRuntimeOptions)
     }
   }
 
+  let bundledDocsSyncChecked = false
+
+  const listBundledDocFiles = async (rootAbs: string, relDir = ''): Promise<string[]> => {
+    const entries = await readdir(join(rootAbs, relDir), { withFileTypes: true })
+    const files: string[] = []
+    for (const entry of entries) {
+      if (entry.name.startsWith('.')) continue
+      const childRel = relDir ? posix.join(relDir, entry.name) : entry.name
+      if (entry.isDirectory()) {
+        files.push(...(await listBundledDocFiles(rootAbs, childRel)))
+      } else if (entry.isFile()) {
+        files.push(childRel)
+      }
+    }
+    return files
+  }
+
+  const syncBundledDocsIntoKnowledgeBase = async () => {
+    if (bundledDocsSyncChecked) return
+    bundledDocsSyncChecked = true
+    const bundledRoot = options.bundledDocsPath?.() || ''
+    if (!bundledRoot || !(await pathExists(bundledRoot))) return
+    const syncVersion = options.bundledDocsVersion?.() || 'unversioned'
+    try {
+      const marker = await readFile(getBundledDocsSyncMarkerPath(), 'utf-8').catch(() => '')
+      if (marker.trim() === syncVersion) return
+      const bundledFiles = await listBundledDocFiles(bundledRoot)
+      for (const fileRel of bundledFiles) {
+        const targetRel = posix.join(BUNDLED_DOCS_TARGET_DIR, fileRel)
+        const { absPath: targetAbs } = resolveKnowledgePath(targetRel)
+        if (await pathExists(targetAbs)) continue
+        await mkdir(dirname(targetAbs), { recursive: true })
+        await copyFile(join(bundledRoot, ...fileRel.split('/')), targetAbs)
+      }
+      await writeFile(getBundledDocsSyncMarkerPath(), `${syncVersion}\n`, 'utf-8')
+    } catch {
+      // Bundled docs are best-effort: a failed sync retries on the next app start instead of breaking knowledge APIs.
+      bundledDocsSyncChecked = false
+    }
+  }
+
   const ensureKnowledgeBaseDirectory = async () => {
     const knowledgePath = getKnowledgeBasePath()
     await mkdir(knowledgePath, { recursive: true })
@@ -418,6 +466,7 @@ export const createKnowledgeBaseRuntime = (options: KnowledgeBaseRuntimeOptions)
       await writeFile(getKnowledgeBaseInitMarkerPath(), 'initialized\n', 'utf-8')
     }
     await migrateKnowledgeSeedPlaceholders()
+    await syncBundledDocsIntoKnowledgeBase()
     return knowledgePath
   }
 

@@ -19,7 +19,16 @@ const createHarness = (input: { chatMode?: string; terminalDecision?: TerminalSe
       role: 'assistant',
       text: 'uptime',
       state: 'done',
-      contentParts: [{ type: 'chip', chipType: 'command', ref: { command: 'uptime', label: 'uptime' } }]
+      contentParts: [{ type: 'chip', chipType: 'command', ref: { command: 'uptime', label: 'uptime' } }],
+      agentTask: {
+        taskId: 'task-command',
+        turnId: 'turn-command',
+        toolName: 'propose_host_command',
+        targetId: 'asset-prod',
+        targetLabel: 'production',
+        terminalSessionId: 'session-prod',
+        status: 'done'
+      }
     },
     {
       id: 'tool-1',
@@ -44,6 +53,9 @@ const createHarness = (input: { chatMode?: string; terminalDecision?: TerminalSe
     runActiveTerminalCommand: vi.fn(async () =>
       Object.hasOwn(input, 'terminalDecision') ? input.terminalDecision! : ({ status: 'allow' } as TerminalSecurityDecision)
     ),
+    runTerminalCommand: vi.fn(async () =>
+      Object.hasOwn(input, 'terminalDecision') ? input.terminalDecision! : ({ status: 'allow' } as TerminalSecurityDecision)
+    ),
     setMessageFeedback: vi.fn(async (id: string, feedback: 'up' | 'down') => {
       messages = messages.map((message) => (message.id === id ? { ...message, feedback } : message))
       return true
@@ -56,10 +68,20 @@ const createHarness = (input: { chatMode?: string; terminalDecision?: TerminalSe
       return true
     })
   }
-  const activePanel = { id: 'terminal-1', kind: 'terminal', output: 'prompt\n' }
+  const activePanel = {
+    id: 'terminal-1',
+    kind: 'terminal',
+    sessionId: 'session-prod',
+    classicTarget: {
+      targetId: 'asset-prod',
+      terminalSessionId: 'session-prod',
+      label: 'production',
+      kind: 'ssh' as const
+    },
+    output: 'prompt\n'
+  }
   const runtime = createAiPanelActionOrchestrationRuntime({
     messages: () => messages,
-    activePanel: () => activePanel,
     panels: () => [activePanel],
     chatMode: () => input.chatMode ?? 'cmd',
     copyText: calls.copyText,
@@ -73,7 +95,7 @@ const createHarness = (input: { chatMode?: string; terminalDecision?: TerminalSe
     retryAssistantMessage: calls.retryAssistantMessage,
     summarizeMessageToKnowledge: calls.summarizeMessageToKnowledge,
     summarizeMessageToSkill: calls.summarizeMessageToSkill,
-    runActiveTerminalCommand: calls.runActiveTerminalCommand,
+    runTerminalCommand: calls.runTerminalCommand,
     continueAgentCommandLoop: calls.continueAgentCommandLoop,
     enableAgentReadOnlyAutoRunForCurrentConversation: calls.enableAgentReadOnlyAutoRunForCurrentConversation,
     syncCurrentConversationSnapshot: calls.syncCurrentConversationSnapshot,
@@ -142,7 +164,8 @@ describe('aiPanelActionOrchestrationRuntime', () => {
     expect(calls.copyText).toHaveBeenLastCalledWith('uptime -p')
 
     await expect(runtime.runCommandAuditDraft()).resolves.toMatchObject({ status: 'allow' })
-    expect(calls.runActiveTerminalCommand).toHaveBeenCalledWith('uptime -p', 'agent')
+    expect(calls.runTerminalCommand).toHaveBeenCalledWith('terminal-1', 'uptime -p', 'agent')
+    expect(calls.runActiveTerminalCommand).not.toHaveBeenCalled()
     expect(commandMessage().executedCommand).toBe('uptime -p')
 
     const second = {

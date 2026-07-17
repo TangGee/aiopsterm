@@ -142,8 +142,8 @@ describe('aiPanelMediaRuntime', () => {
       context: {
         id: 'asset-1',
         kind: 'hosts',
-        label: '10.0.0.8',
-        detail: 'Prod',
+        label: 'Prod',
+        detail: '10.0.0.8',
         host: '10.0.0.8',
         username: 'ops',
         assetName: 'Prod'

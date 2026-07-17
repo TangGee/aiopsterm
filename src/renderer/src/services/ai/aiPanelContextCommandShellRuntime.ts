@@ -22,6 +22,7 @@ export type AiPanelContextCommandShellRuntimeOptions<TIcon = unknown> = {
   closeModeMenu: () => void
   closeModelMenu: () => void
   closeCodexTargetPicker: () => void
+  closeCodexHistoryMenu?: () => void
   closeMoreActionsMenu: () => void
   closePanelModeMenu: () => void
   closeHistoryMenu: () => void
@@ -80,6 +81,7 @@ export const createAiPanelContextCommandShellRuntime = <TIcon = unknown>(options
     closeModeMenu: options.closeModeMenu,
     closeModelMenu: options.closeModelMenu,
     closeCodexTargetPicker: options.closeCodexTargetPicker,
+    closeCodexHistoryMenu: options.closeCodexHistoryMenu,
     closeMoreActionsMenu: options.closeMoreActionsMenu,
     closePanelModeMenu: options.closePanelModeMenu,
     closeHistoryMenu: options.closeHistoryMenu,
@@ -93,6 +95,7 @@ export const createAiPanelContextCommandShellRuntime = <TIcon = unknown>(options
   const contextCommandRuntime = createAiPanelContextCommandRuntime({
     maxHostContexts: options.maxHostContexts,
     contextTarget: () => options.state.contextTarget,
+    contextLevel: () => options.state.contextLevel,
     commandTarget: () => options.state.commandTarget,
     editingMessageId: options.editingMessageId,
     draft: options.draft,

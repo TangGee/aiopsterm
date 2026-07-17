@@ -1,4 +1,5 @@
 import type { AiopsMutationResult } from './common'
+import type { ClineAgentHostTarget } from './clineAgent'
 
 export type TerminalCreateOptions = {
   cwd?: string
@@ -48,6 +49,7 @@ export type TerminalSessionInfo = {
   shell: string
   cwd: string
   kind?: 'local' | 'ssh'
+  classicTarget?: ClineAgentHostTarget
   connection?: TerminalSshConnectionInfo
   lifecycle?: TerminalLifecycleEvent
 }

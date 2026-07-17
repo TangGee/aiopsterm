@@ -111,7 +111,7 @@ export const isAiContentPart = (source: unknown): source is AiContentPart => {
 
 export const isAiChatCommandExecution = (source: unknown): source is NonNullable<AiChatHistoryMessage['commandExecution']> =>
   isRecord(source) &&
-  isNonEmptyString(source.ip) &&
+  typeof source.ip === 'string' &&
   isNonEmptyString(source.command) &&
   typeof source.requiresApproval === 'boolean' &&
   typeof source.interactive === 'boolean'
@@ -120,9 +120,12 @@ export const isAiChatAgentTaskRef = (source: unknown): source is NonNullable<AiC
   isRecord(source) &&
   isNonEmptyString(source.taskId) &&
   isNonEmptyString(source.turnId) &&
+  isOptionalString(source.targetId) &&
+  isOptionalString(source.targetLabel) &&
   isOptionalString(source.terminalSessionId) &&
   isOptionalString(source.toolCallId) &&
   isOptionalString(source.toolName) &&
+  isOptionalBoolean(source.restored) &&
   aiChatAgentTaskStatusValues.includes(source.status as NonNullable<AiChatHistoryMessage['agentTask']>['status'])
 
 export const isAiChatHistoryMessage = (source: unknown): source is AiChatHistoryMessage =>
@@ -214,7 +217,11 @@ export const isAiChatContextInput = (source: unknown): source is NonNullable<AiC
   isNonEmptyString(source.label) &&
   isOptionalString(source.detail) &&
   isOptionalString(source.relPath) &&
-  isOptionalString(source.mediaType)
+  isOptionalString(source.mediaType) &&
+  (source.contextSource === undefined || source.contextSource === 'selected' || source.contextSource === 'knowledge-search') &&
+  isOptionalFiniteNumber(source.startLine) &&
+  isOptionalFiniteNumber(source.endLine) &&
+  isOptionalString(source.chatSessionId)
 
 export const isAiChatCommandInput = (source: unknown): source is NonNullable<AiChatResponseInput['command']> => {
   if (!isRecord(source)) return false
@@ -229,6 +236,14 @@ export const isAiChatCommandInput = (source: unknown): source is NonNullable<AiC
 
 export const isAiChatSkillInput = (source: unknown): source is NonNullable<AiChatResponseInput['skills']>[number] =>
   isRecord(source) && isNonEmptyString(source.name) && isOptionalString(source.description) && isOptionalString(source.content)
+
+export const isClineAgentHostTarget = (source: unknown): source is NonNullable<AiChatResponseInput['hostTargets']>[number] =>
+  isRecord(source) &&
+  isNonEmptyString(source.targetId) &&
+  isNonEmptyString(source.terminalSessionId) &&
+  isNonEmptyString(source.label) &&
+  (source.kind === 'local' || source.kind === 'ssh') &&
+  isOptionalString(source.cwd)
 
 export const isAiContextUsageSnapshot = (source: unknown): source is AiContextUsage =>
   isRecord(source) &&
@@ -252,10 +267,11 @@ export const isAiChatResponseInput = (source: unknown): source is AiChatResponse
   isOptionalString(source.requestId) &&
   isOptionalString(source.assistantMessageId) &&
   isOptionalString(source.conversationId) &&
-  isOptionalString(source.terminalSessionId) &&
+  (source.hostTargets === undefined || (Array.isArray(source.hostTargets) && source.hostTargets.every(isClineAgentHostTarget))) &&
   isNonEmptyString(source.prompt) &&
   (source.messages === undefined || (Array.isArray(source.messages) && source.messages.every(isAiChatMessageInput))) &&
   (source.contexts === undefined || (Array.isArray(source.contexts) && source.contexts.every(isAiChatContextInput))) &&
+  (source.userImages === undefined || (Array.isArray(source.userImages) && source.userImages.every(isNonEmptyString))) &&
   (source.skills === undefined || (Array.isArray(source.skills) && source.skills.every(isAiChatSkillInput))) &&
   (source.command === undefined || source.command === null || isAiChatCommandInput(source.command)) &&
   isOptionalString(source.model) &&

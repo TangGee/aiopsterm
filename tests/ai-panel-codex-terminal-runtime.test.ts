@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { isProxy, reactive } from 'vue'
 import { createCodexConversationRecord } from '@/services/ai/aiPanelCodexRuntime'
 import {
   codexTerminalCopyShortcut,
@@ -9,7 +10,15 @@ import {
   type AiPanelCodexSessionClient
 } from '@/services/ai/aiPanelCodexTerminalRuntime'
 import { resolveThemePreset } from '@/services/app/themeRuntime'
-import type { CodexSessionDataEvent, CodexSessionExitEvent, CodexSessionLifecycleEvent, CodexSessionTargetContext } from '@shared/contracts/codexSessions'
+import type {
+  CodexSessionDataEvent,
+  CodexSessionExitEvent,
+  CodexSessionInfo,
+  CodexSessionKillResult,
+  CodexSessionLifecycleEvent,
+  CodexSessionTargetContext,
+  CodexSessionThreadEvent
+} from '@shared/contracts/codexSessions'
 
 type TestConversation = AiPanelCodexTerminalConversation<FakeTerminal, FakeFit>
 
@@ -113,7 +122,8 @@ const createClient = () => {
   let dataHandler: ((event: CodexSessionDataEvent) => void) | undefined
   let lifecycleHandler: ((event: CodexSessionLifecycleEvent) => void) | undefined
   let exitHandler: ((event: CodexSessionExitEvent) => void) | undefined
-  const createCodexSessionBridge = vi.fn(async () => ({
+  let threadHandler: ((event: CodexSessionThreadEvent) => void) | undefined
+  const createCodexSessionBridge = vi.fn(async (): Promise<CodexSessionInfo> => ({
     id: 'codex-session-1',
     cwd: '/repo',
     codexHome: '/tmp/codex',
@@ -135,7 +145,7 @@ const createClient = () => {
     data: { id, bytes: data.length }
   }))
   const resizeCodexSessionBridge = vi.fn(async () => undefined)
-  const killCodexSessionBridge = vi.fn(async (id: string) => ({
+  const killCodexSessionBridge = vi.fn(async (id: string): Promise<CodexSessionKillResult> => ({
     ok: true,
     data: { id }
   }))
@@ -151,6 +161,10 @@ const createClient = () => {
     exitHandler = handler
     return vi.fn()
   })
+  const onThreadBridge = vi.fn((handler) => {
+    threadHandler = handler
+    return vi.fn()
+  })
   const client: AiPanelCodexSessionClient = {
     createCodexSession: vi.fn(() => createCodexSessionBridge),
     setCodexSessionTarget: vi.fn(() => setCodexSessionTargetBridge),
@@ -160,7 +174,8 @@ const createClient = () => {
     killCodexSession: vi.fn(() => killCodexSessionBridge),
     onCodexSessionData: vi.fn(() => onDataBridge),
     onCodexSessionLifecycle: vi.fn(() => onLifecycleBridge),
-    onCodexSessionExit: vi.fn(() => onExitBridge)
+    onCodexSessionExit: vi.fn(() => onExitBridge),
+    onCodexSessionThread: vi.fn(() => onThreadBridge)
   }
   return {
     client,
@@ -173,11 +188,13 @@ const createClient = () => {
       killCodexSessionBridge,
       onDataBridge,
       onLifecycleBridge,
-      onExitBridge
+      onExitBridge,
+      onThreadBridge
     },
     emitData: (event: CodexSessionDataEvent) => dataHandler?.(event),
     emitLifecycle: (event: CodexSessionLifecycleEvent) => lifecycleHandler?.(event),
-    emitExit: (event: CodexSessionExitEvent) => exitHandler?.(event)
+    emitExit: (event: CodexSessionExitEvent) => exitHandler?.(event),
+    emitThread: (event: CodexSessionThreadEvent) => threadHandler?.(event)
   }
 }
 
@@ -199,6 +216,8 @@ const createRuntime = (conversation = createConversation(), clientBundle = creat
       error: () => 'Codex error',
       bridgeMissing: () => 'Bridge missing',
       startFailed: () => 'Start failed',
+      exitNonZero: () => 'Codex exited unexpectedly',
+      unsavedSessionRecovered: () => 'Unsaved Codex session recovered',
       threadedUnavailable: () => 'Threaded terminal unavailable',
       copyEmpty: () => 'Select content first',
       copySuccess: () => 'Copied',
@@ -270,6 +289,20 @@ describe('aiPanelCodexTerminalRuntime', () => {
     expect(FakeResizeObserver.instances[0].observe).toHaveBeenCalledWith(host)
   })
 
+  it('keeps terminal runtime handles raw inside a Vue reactive conversation', () => {
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const conversation = reactive(createConversation()) as TestConversation
+    const { runtime } = createRuntime(conversation)
+
+    runtime.setHostElement(conversation, host)
+
+    expect(isProxy(conversation.terminal)).toBe(false)
+    expect(isProxy(conversation.fit)).toBe(false)
+    expect(isProxy(conversation.resizeObserver)).toBe(false)
+    expect(() => structuredClone(conversation.terminal?.options)).not.toThrow()
+  })
+
   it('creates a terminal, applies settings, copies selections, writes input, and resizes through fit notifications', async () => {
     const host = document.createElement('div')
     document.body.appendChild(host)
@@ -307,7 +340,7 @@ describe('aiPanelCodexTerminalRuntime', () => {
     conversation.sessionId = 'codex-session-1'
     terminal.dataHandler?.('ls\n')
     await flushAsyncHandlers()
-    expect(clientBundle.bridges.setCodexSessionTargetBridge).toHaveBeenCalledWith(target)
+    expect(clientBundle.bridges.setCodexSessionTargetBridge).toHaveBeenCalledWith('codex-session-1', target)
     expect(clientBundle.bridges.writeCodexSessionBridge).toHaveBeenCalledWith('codex-session-1', 'ls\n')
     clientBundle.bridges.setCodexSessionTargetBridge.mockClear()
 
@@ -345,7 +378,14 @@ describe('aiPanelCodexTerminalRuntime', () => {
       status: 'ready',
       pendingTargetSignature: ''
     })
-    expect(clientBundle.bridges.createCodexSessionBridge).toHaveBeenCalledWith({ cols: 120, rows: 40, target })
+    expect(clientBundle.bridges.createCodexSessionBridge).toHaveBeenCalledWith({
+      cols: 120,
+      rows: 40,
+      target,
+      productSessionId: conversation.id,
+      projectRoot: target.cwd,
+      launch: { mode: 'new' }
+    })
     expect(clientBundle.client.onCodexSessionData).toHaveBeenCalledTimes(1)
     expect(clientBundle.client.onCodexSessionLifecycle).toHaveBeenCalledTimes(1)
     expect(clientBundle.client.onCodexSessionExit).toHaveBeenCalledTimes(1)
@@ -359,9 +399,6 @@ describe('aiPanelCodexTerminalRuntime', () => {
     expect(conversation).toMatchObject({ status: 'error', error: 'failed' })
     expect(attention).toHaveBeenCalledWith(conversation)
 
-    clientBundle.emitExit({ id: 'codex-session-1', code: 1, errorCode: 'EFAIL', errorMessage: 'exit failed' })
-    expect(conversation).toMatchObject({ status: 'error', error: 'exit failed' })
-
     const nextTarget: CodexSessionTargetContext = { ...target, sessionId: 'terminal-2', label: 'Next terminal' }
     await runtime.setPendingTargetContext(conversation, 'changed', nextTarget)
     expect(clientBundle.bridges.setCodexSessionPendingContextBridge).toHaveBeenCalledWith(
@@ -369,18 +406,158 @@ describe('aiPanelCodexTerminalRuntime', () => {
       expect.stringContaining('[aiopsterm target changed]')
     )
     await runtime.syncActiveBridgeTarget()
-    expect(clientBundle.bridges.setCodexSessionTargetBridge).toHaveBeenCalledWith(target)
+    expect(clientBundle.bridges.setCodexSessionTargetBridge).toHaveBeenCalledWith('codex-session-1', target)
 
     await runtime.clearSessionTarget(conversation)
-    expect(clientBundle.bridges.setCodexSessionTargetBridge).toHaveBeenCalledWith(undefined)
+    expect(clientBundle.bridges.setCodexSessionTargetBridge).toHaveBeenCalledWith('codex-session-1', undefined)
 
-    await runtime.stopSession(conversation)
+    await expect(runtime.stopSession(conversation)).resolves.toEqual({ ok: true, data: { id: 'codex-session-1' } })
     expect(clientBundle.bridges.killCodexSessionBridge).toHaveBeenCalledWith('codex-session-1')
+
+    clientBundle.emitExit({ id: 'codex-session-1', code: 1, errorCode: 'EFAIL', errorMessage: 'exit failed' })
+    expect(conversation).toMatchObject({ sessionId: '', status: 'error', error: 'exit failed' })
 
     runtime.disposeConversation(conversation)
     expect(FakeResizeObserver.instances[0].disconnect).toHaveBeenCalled()
     expect(conversation.terminal).toBeNull()
     expect(conversation.fit).toBeNull()
+  })
+
+  it('returns and logs a structured Codex kill rejection', async () => {
+    const { runtime, conversation, clientBundle, logs } = createRuntime()
+    conversation.sessionId = 'codex-session-1'
+    clientBundle.bridges.killCodexSessionBridge.mockResolvedValueOnce({
+      ok: false,
+      errorCode: 'CODEX_KILL_REJECTED',
+      errorMessage: 'Codex runtime is still running.'
+    })
+
+    await expect(runtime.stopSession(conversation)).resolves.toEqual({
+      ok: false,
+      errorCode: 'CODEX_KILL_REJECTED',
+      errorMessage: 'Codex runtime is still running.'
+    })
+    expect(logs).toContainEqual({
+      level: 'warn',
+      event: 'renderer.codex-session.kill-failed',
+      fields: {
+        sessionId: 'codex-session-1',
+        errorCode: 'CODEX_KILL_REJECTED',
+        message: 'Codex runtime is still running.'
+      }
+    })
+
+    clientBundle.bridges.killCodexSessionBridge.mockResolvedValueOnce({
+      ok: true,
+      data: { id: 'wrong-codex-session' }
+    })
+    await expect(runtime.stopSession(conversation)).resolves.toEqual({
+      ok: false,
+      errorCode: 'CODEX_SESSION_KILL_RESULT_INVALID'
+    })
+    expect(logs).toContainEqual({
+      level: 'warn',
+      event: 'renderer.codex-session.kill-failed',
+      fields: {
+        sessionId: 'codex-session-1',
+        errorCode: 'CODEX_SESSION_KILL_RESULT_INVALID',
+        returnedSessionId: 'wrong-codex-session',
+        message: 'Codex kill returned an invalid result.'
+      }
+    })
+
+    conversation.status = 'error'
+    clientBundle.bridges.killCodexSessionBridge.mockResolvedValueOnce({
+      ok: false,
+      errorCode: 'CODEX_SESSION_NOT_FOUND',
+      errorMessage: 'Codex session was not found.'
+    })
+    await expect(runtime.stopSession(conversation)).resolves.toEqual({
+      ok: true,
+      data: { id: 'codex-session-1' }
+    })
+    expect(logs).toContainEqual({
+      level: 'info',
+      event: 'renderer.codex-session.kill-already-stopped',
+      fields: {
+        sessionId: 'codex-session-1',
+        status: 'error'
+      }
+    })
+  })
+
+  it('localizes nonzero Codex lifecycle and exit events and clears the matching runtime id', async () => {
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const { runtime, conversation, clientBundle, attention } = createRuntime()
+    runtime.setHostElement(conversation, host)
+    await runtime.startSession(conversation)
+
+    clientBundle.emitLifecycle({
+      id: 'codex-session-1',
+      stage: 'error',
+      at: 2,
+      code: 1,
+      errorCode: 'CODEX_CLI_EXIT_NONZERO',
+      errorMessage: 'raw backend error'
+    })
+    expect(conversation).toMatchObject({ status: 'error', error: 'Codex exited unexpectedly' })
+
+    clientBundle.emitExit({
+      id: 'codex-session-1',
+      code: 1,
+      errorCode: 'CODEX_CLI_EXIT_NONZERO',
+      errorMessage: 'raw backend error'
+    })
+    expect(conversation).toMatchObject({ sessionId: '', status: 'error', error: 'Codex exited unexpectedly' })
+    expect(attention).toHaveBeenCalledWith(conversation)
+  })
+
+  it('switches to the recovered new thread after an unsaved resume target is missing', async () => {
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const conversation = createConversation()
+    conversation.nativeThreadId = 'missing-thread'
+    conversation.launchMode = 'resume'
+    const clientBundle = createClient()
+    clientBundle.bridges.createCodexSessionBridge.mockResolvedValueOnce({
+      id: 'codex-session-recovered',
+      cwd: '/repo',
+      codexHome: '/tmp/codex',
+      runtimeKind: 'pty',
+      binaryPath: '/usr/bin/codex',
+      launch: { mode: 'new' },
+      recoveredFromThreadId: 'missing-thread',
+      lifecycle: {
+        id: 'codex-session-recovered',
+        stage: 'ready',
+        at: 1
+      }
+    })
+    const { runtime, notices, logs } = createRuntime(conversation, clientBundle)
+    runtime.setHostElement(conversation, host)
+
+    await runtime.startSession(conversation)
+
+    expect(clientBundle.bridges.createCodexSessionBridge).toHaveBeenCalledWith(expect.objectContaining({
+      launch: { mode: 'resume', threadId: 'missing-thread' }
+    }))
+    expect(conversation).toMatchObject({
+      sessionId: 'codex-session-recovered',
+      launchMode: 'new',
+      status: 'ready'
+    })
+    expect(conversation.nativeThreadId).toBeUndefined()
+    expect(notices).toEqual(['Unsaved Codex session recovered'])
+    expect(logs).toContainEqual({
+      level: 'info',
+      event: 'renderer.codex-session.unsaved-recovered',
+      fields: {
+        localId: conversation.id,
+        sessionId: 'codex-session-recovered',
+        recoveredFromThreadId: 'missing-thread'
+      }
+    })
   })
 
   it('keeps Codex output emitted before createCodexSession resolves', async () => {
@@ -423,6 +600,46 @@ describe('aiPanelCodexTerminalRuntime', () => {
     expect(conversation).toMatchObject({
       sessionId: 'codex-session-1',
       status: 'ready'
+    })
+  })
+
+  it('updates only the matching renderer tab when a codex:thread event binds a native thread', () => {
+    const first = createConversation()
+    const second = createConversation({ ...target, sessionId: 'terminal-2', panelId: 'panel-2', label: 'Second terminal' })
+    second.id = 'codex-2'
+    second.sessionId = 'codex-session-2'
+    const harness = createRuntime(first)
+    harness.conversations.push(second)
+
+    harness.runtime.subscribeBridge()
+    expect(harness.clientBundle.client.onCodexSessionThread).toHaveBeenCalledTimes(1)
+    expect(harness.clientBundle.bridges.onThreadBridge).toHaveBeenCalledTimes(1)
+
+    harness.clientBundle.emitThread({
+      id: 'codex-session-2',
+      threadId: '0197f123-4567-7890-abcd-ef0123456789',
+      reason: 'new',
+      at: 1780490000001,
+      title: 'Investigate deploy rollback',
+      cwd: '/repo'
+    })
+
+    expect(first.nativeThreadId).toBeUndefined()
+    expect(second).toMatchObject({
+      nativeThreadId: '0197f123-4567-7890-abcd-ef0123456789',
+      launchMode: 'resume',
+      title: 'Investigate deploy rollback'
+    })
+    expect(harness.logs).toContainEqual({
+      level: 'info',
+      event: 'renderer.codex-thread.bound',
+      fields: {
+        localId: 'codex-2',
+        sessionId: 'codex-session-2',
+        threadId: '0197f123-4567-7890-abcd-ef0123456789',
+        reason: 'new',
+        title: 'Investigate deploy rollback'
+      }
     })
   })
 
@@ -479,6 +696,8 @@ describe('aiPanelCodexTerminalRuntime', () => {
         error: () => 'Codex error',
         bridgeMissing: () => 'Bridge missing',
         startFailed: () => 'Start failed',
+        exitNonZero: () => 'Codex exited unexpectedly',
+        unsavedSessionRecovered: () => 'Unsaved Codex session recovered',
         threadedUnavailable: () => 'Threaded terminal unavailable',
         copyEmpty: () => 'Select content first',
         copySuccess: () => 'Copied',
@@ -515,6 +734,10 @@ describe('aiPanelCodexTerminalRuntime', () => {
     expect(terminal.sessionId).toBe('codex-session-1')
     expect(terminal.setVisibility).toHaveBeenCalledWith(true, 'active')
     expect(terminal.ensureSurfaceAttached).toHaveBeenCalledWith({ forceGeometry: true })
+
+    clientBundle.emitExit({ id: 'codex-session-1', code: 0 })
+    expect(conversation.sessionId).toBe('')
+    expect(terminal.setSessionId).toHaveBeenLastCalledWith(undefined)
 
     runtime.disposeConversation(conversation)
     vi.doUnmock('@shared/runtimeSwitches')
@@ -557,6 +780,8 @@ describe('aiPanelCodexTerminalRuntime', () => {
         error: () => 'Codex error',
         bridgeMissing: () => 'Bridge missing',
         startFailed: () => 'Start failed',
+        exitNonZero: () => 'Codex exited unexpectedly',
+        unsavedSessionRecovered: () => 'Unsaved Codex session recovered',
         threadedUnavailable: () => 'Threaded terminal unavailable',
         copyEmpty: () => 'Select content first',
         copySuccess: () => 'Copied',
@@ -614,6 +839,7 @@ describe('aiPanelCodexTerminalRuntime', () => {
     const conversation = createConversation()
     const clientBundle = createClient()
     const logs: Array<{ level: string; event: string; fields?: Record<string, unknown> }> = []
+    const syncAttentionState = vi.fn()
     const runtime = createRuntimeWithoutFallback<TestConversation>({
       conversations: () => [conversation],
       activeConversation: () => conversation,
@@ -621,11 +847,13 @@ describe('aiPanelCodexTerminalRuntime', () => {
       terminalSettings: () => terminalSettings,
       currentBoundTarget: (item) => item.boundTarget,
       isConversationVisible: (item) => item.id === conversation.id,
-      syncAttentionState: vi.fn(),
+      syncAttentionState,
       labels: {
         error: () => 'Codex error',
         bridgeMissing: () => 'Bridge missing',
         startFailed: () => 'Start failed',
+        exitNonZero: () => 'Codex exited unexpectedly',
+        unsavedSessionRecovered: () => 'Unsaved Codex session recovered',
         threadedUnavailable: () => 'Threaded terminal unavailable',
         copyEmpty: () => 'Select content first',
         copySuccess: () => 'Copied',
@@ -641,12 +869,17 @@ describe('aiPanelCodexTerminalRuntime', () => {
     })
 
     runtime.setHostElement(conversation, host)
+    runtime.setHostElement(conversation, host)
+    runtime.setHostElement(conversation, document.createElement('div'))
+    await runtime.startSession(conversation)
 
     expect(conversation.terminal).toBeNull()
     expect(conversation.status).toBe('error')
     expect(conversation.error).toBe('Threaded terminal unavailable')
     expect(createThreadedTerminalHost).not.toHaveBeenCalled()
     expect(FakeTerminal.instances).toHaveLength(0)
+    expect(syncAttentionState).toHaveBeenCalledTimes(1)
+    expect(logs.filter((entry) => entry.event === 'renderer.codex-threaded-terminal.required')).toHaveLength(1)
     expect(logs).toEqual(expect.arrayContaining([
       expect.objectContaining({
         level: 'error',
@@ -690,6 +923,8 @@ describe('aiPanelCodexTerminalRuntime', () => {
         error: () => 'Codex error',
         bridgeMissing: () => 'Bridge missing',
         startFailed: () => 'Start failed',
+        exitNonZero: () => 'Codex exited unexpectedly',
+        unsavedSessionRecovered: () => 'Unsaved Codex session recovered',
         threadedUnavailable: () => 'Threaded terminal unavailable',
         copyEmpty: () => 'Select content first',
         copySuccess: () => 'Copied',
@@ -750,6 +985,8 @@ describe('aiPanelCodexTerminalRuntime', () => {
         error: () => 'Codex error',
         bridgeMissing: () => 'Bridge missing',
         startFailed: () => 'Start failed',
+        exitNonZero: () => 'Codex exited unexpectedly',
+        unsavedSessionRecovered: () => 'Unsaved Codex session recovered',
         threadedUnavailable: () => 'Threaded terminal unavailable',
         copyEmpty: () => 'Select content first',
         copySuccess: () => 'Copied',

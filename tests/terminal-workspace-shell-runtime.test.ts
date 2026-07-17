@@ -453,9 +453,18 @@ describe('terminalWorkspaceShellRuntime', () => {
     )
     expect(state.termMenu.visible).toBe(false)
     expect(calls.focusPanel).toHaveBeenCalledWith('panel-2')
-    expect(workspace.selectedContexts).toEqual([
-      { id: 'asset-relay', kind: 'hosts', label: '10.8.0.6', detail: 'relay-source fork' }
-    ])
+    expect(workspace.selectedContexts).toEqual([{
+      id: 'asset-relay',
+      kind: 'hosts',
+      label: 'relay-source',
+      detail: '10.8.0.6',
+      assetId: 'asset-relay',
+      connectionId: undefined,
+      host: '10.8.0.6',
+      port: 2222,
+      username: 'ops',
+      assetName: 'relay-source'
+    }])
   })
 
   it('forks SSH from Ctrl+Shift+Y when the active terminal is forkable', async () => {

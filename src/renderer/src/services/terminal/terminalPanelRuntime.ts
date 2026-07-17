@@ -4,6 +4,7 @@ import type {
   TerminalSessionInfo,
   TerminalSshConnectionInfo
 } from '@shared/contracts/terminalSessions'
+import type { ClineAgentHostTarget } from '@shared/contracts/clineAgent'
 import type { AiAgentSessionSource } from '@shared/contracts/managedAiSessions'
 import type { TerminalProgress } from '@/services/terminal/terminalOscRuntime'
 
@@ -47,6 +48,7 @@ export type TerminalPanel = {
   splitGroupId?: string
   splitOrder?: number
   sessionId?: string
+  classicTarget?: ClineAgentHostTarget
   knowledge?: {
     relPath: string
     isImage: boolean
@@ -219,6 +221,7 @@ export const resetTerminalPanelToDefault = (panel: TerminalPanel) => {
   panel.status = 'ready'
   clearTerminalPanelSplitState(panel)
   panel.sessionId = undefined
+  panel.classicTarget = undefined
   panel.knowledge = undefined
   panel.managedAiSession = undefined
   panel.sshSession = undefined
@@ -636,6 +639,7 @@ export const applySshTerminalSessionToPanel = (
 ) => {
   const session = terminalSshSessionFromConnection(terminalSession.connection, asset, panel.sshSession)
   panel.sessionId = terminalSession.id
+  panel.classicTarget = terminalSession.classicTarget ? { ...terminalSession.classicTarget } : undefined
   panel.cwd = terminalSession.cwd || panel.cwd
   panel.kind = 'terminal'
   panel.status = 'connecting'
@@ -646,6 +650,7 @@ export const applySshTerminalSessionToPanel = (
 
 export const applyLocalTerminalSessionToPanel = (panel: TerminalPanel, terminalSession: TerminalSessionInfo) => {
   panel.sessionId = terminalSession.id
+  panel.classicTarget = terminalSession.classicTarget ? { ...terminalSession.classicTarget } : undefined
   panel.cwd = terminalSession.cwd || panel.cwd
   panel.title = terminalShellTitle(terminalSession.shell)
   panel.kind = 'terminal'
@@ -723,6 +728,7 @@ export const applyTerminalLifecycleToPanel = (panel: TerminalPanel, event: Termi
   }
   if (panel.sessionId === event.id) {
     panel.sessionId = undefined
+    panel.classicTarget = undefined
   }
   return panel
 }
@@ -732,6 +738,7 @@ export const applyTerminalExitToPanel = (panel: TerminalPanel, event: TerminalEx
   panel.terminalExit = event
   if (panel.sessionId === event.id) {
     panel.sessionId = undefined
+    panel.classicTarget = undefined
   }
   panel.status = event.reason === 'error' || event.reason === 'network' || event.errorMessage ? 'error' : 'closed'
   panel.terminalProgress = undefined

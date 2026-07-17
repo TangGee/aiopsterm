@@ -199,6 +199,7 @@ describe('appShellRuntime', () => {
 
     expect(runtime.showTerminalLeftPane.value).toBe(true)
     expect(runtime.showTerminalRightPane.value).toBe(true)
+    expect(runtime.showRightPane.value).toBe(true)
     expect(runtime.showTerminalWorkspace.value).toBe(true)
     runtime.startResize('left', new MouseEvent('mousedown', { clientX: 286 }))
     expect(bodyClassList.add).toHaveBeenCalledWith('layout-resizing')
@@ -217,7 +218,7 @@ describe('appShellRuntime', () => {
     expect(runtime.draggingSide.value).toBeNull()
   })
 
-  it('keeps terminal workspace mounted only as the terminal main surface', () => {
+  it('keeps the terminal workspace visible for terminal modules and throughout Agents mode', () => {
     ;(['workspace', 'aiSessions', 'snippets', 'knowledge'] as const).forEach((module) => {
       const { runtime } = createHarness({}, { activeModule: module })
       expect(runtime.showTerminalWorkspace.value).toBe(true)
@@ -226,6 +227,36 @@ describe('appShellRuntime', () => {
       const { runtime } = createHarness({}, { activeModule: module })
       expect(runtime.showTerminalWorkspace.value).toBe(false)
     })
+
+    ;(['workspace', 'assets', 'files', 'database', 'user'] as const).forEach((module) => {
+      const { runtime } = createHarness({}, { mode: 'agents', activeModule: module })
+      expect(runtime.showTerminalWorkspace.value).toBe(true)
+    })
+  })
+
+  it('keeps the Agents terminal and right AI pane visible without allowing a drag-to-close', async () => {
+    const { runtime, win, workspace } = createHarness({}, {
+      mode: 'agents',
+      activeModule: 'database',
+      isRightVisible: false
+    })
+
+    expect(runtime.showAgentsLeftPane.value).toBe(true)
+    expect(runtime.showTerminalLeftPane.value).toBe(false)
+    expect(runtime.showTerminalRightPane.value).toBe(false)
+    expect(runtime.showRightPane.value).toBe(true)
+    expect(runtime.showTerminalWorkspace.value).toBe(true)
+    expect(runtime.hasLeftPane.value).toBe(true)
+    expect(runtime.hasRightPane.value).toBe(true)
+
+    runtime.startResize('right', new MouseEvent('mousedown', { clientX: 840 }))
+    win.emit('mousemove', new MouseEvent('mousemove', { clientX: 1170 }))
+    expect(runtime.displayRightPanelWidth.value).toBe(220)
+    expect(workspace.quickCloseRightPanel).not.toHaveBeenCalled()
+    expect(runtime.draggingSide.value).toBe('right')
+    win.emit('mouseup', new MouseEvent('mouseup'))
+    await Promise.resolve()
+    expect(workspace.resizeRightPanel).toHaveBeenCalledWith(220)
   })
 
   it('owns terminal authentication dialog state and response routing', async () => {

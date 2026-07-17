@@ -372,6 +372,31 @@ describe('workspace store', () => {
     expect(store.currentAiAttentionItem?.handledAt).toBeUndefined()
   })
 
+  it('does not replace reactive AI attention state for an identical upsert or missing removal', () => {
+    const store = useWorkspaceStore()
+    const input = {
+      id: 'codex:error:threaded-terminal',
+      source: 'codex' as const,
+      kind: 'error' as const,
+      title: 'Codex unavailable',
+      summary: 'Threaded terminal unavailable',
+      createdAt: 200
+    }
+
+    store.upsertAiAttentionItem(input)
+    const firstItems = store.aiAttentionItems
+    const firstItem = store.aiAttentionItems[0]
+
+    expect(store.upsertAiAttentionItem(input)).toBe(firstItem)
+    expect(store.aiAttentionItems).toBe(firstItems)
+    expect(store.removeAiAttentionItem('missing-attention')).toBe(false)
+    expect(store.aiAttentionItems).toBe(firstItems)
+
+    store.upsertAiAttentionItem({ ...input, summary: 'Updated diagnostic' })
+    expect(store.aiAttentionItems).not.toBe(firstItems)
+    expect(store.aiAttentionItems[0].summary).toBe('Updated diagnostic')
+  })
+
   it('jumps the AI attention bell to the terminal AI surface when the item belongs to the right panel', () => {
     const store = useWorkspaceStore()
     store.mode = 'agents'
@@ -1990,6 +2015,191 @@ describe('workspace store', () => {
     expect(store.chatMessages.at(-1)?.text).toBe('已停止生成。')
   })
 
+  it('keeps a Classic Cline turn attached to its conversation while another chat is selected', async () => {
+    const store = useWorkspaceStore()
+    let resolveResponse: ((result: any) => void) | undefined
+    vi.mocked(window.aiops.generateAiChatResponse).mockImplementationOnce(() => new Promise((resolve) => {
+      resolveResponse = resolve
+    }) as any)
+
+    await expect(store.sendChat('在后台完成巡检')).resolves.toBe(true)
+    const firstConversationId = store.selectedConversationId
+    const firstAssistantId = store.chatMessages.at(-1)?.id || ''
+    expect(firstConversationId).toBeTruthy()
+    expect(firstAssistantId).toBeTruthy()
+
+    const created = await store.createConversation()
+    expect(created).toBeTruthy()
+    expect(store.selectedConversationId).not.toBe(firstConversationId)
+    expect(store.chatMessages).toEqual([])
+
+    resolveResponse?.({
+      ok: true,
+      data: {
+        text: '等待确认 nproc',
+        provider: 'aiopsterm-local',
+        model: 'aiopsterm-local-agent',
+        durationMs: 1,
+        status: 'done',
+        requestId: 'aichat-request-test-1',
+        assistantMessageId: firstAssistantId,
+        message: {
+          id: firstAssistantId,
+          role: 'assistant',
+          text: 'nproc',
+          state: 'done',
+          ask: 'command',
+          commandExecutionStatus: 'pending',
+          commandExecutionMessage: '等待操作员确认。',
+          commandExecution: { ip: 'current terminal', command: 'nproc', requiresApproval: true, interactive: false },
+          agentTask: {
+            taskId: 'aichat-request-test-1',
+            turnId: firstAssistantId,
+            toolCallId: 'tool-background-1',
+            toolName: 'run_host_command',
+            status: 'waiting-approval'
+          }
+        },
+        agentTask: {
+          taskId: 'aichat-request-test-1',
+          turnId: firstAssistantId,
+          toolCallId: 'tool-background-1',
+          toolName: 'run_host_command',
+          status: 'waiting-approval'
+        }
+      }
+    })
+    await flushMicrotasks()
+
+    ;(globalThis as any).__emitClineAgentTaskEventMock({
+      protocolVersion: 1,
+      sessionId: 'cline-background-session',
+      taskId: 'aichat-request-test-1',
+      turnId: firstAssistantId,
+      seq: 20,
+      at: '2026-07-15T00:00:00.000Z',
+      type: 'tool-result',
+      toolCallId: 'tool-background-1',
+      toolName: 'run_host_command',
+      output: { stdout: '8' }
+    })
+    ;(globalThis as any).__emitClineAgentTaskEventMock({
+      protocolVersion: 1,
+      sessionId: 'cline-background-session',
+      taskId: 'aichat-request-test-1',
+      turnId: firstAssistantId,
+      seq: 21,
+      at: '2026-07-15T00:00:01.000Z',
+      type: 'done',
+      text: 'CPU 数量为 8。',
+      finishReason: 'stop',
+      iterations: 1
+    })
+    await flushMicrotasks()
+
+    await expect(store.restoreConversation(firstConversationId)).resolves.toBe(true)
+    expect(store.chatMessages).toEqual(expect.arrayContaining([
+      expect.objectContaining({ text: 'nproc', commandExecutionStatus: 'succeeded' }),
+      expect.objectContaining({ text: 'CPU 数量为 8。', state: 'done' })
+    ]))
+    expect(store.chatMessages.some((message) => message.text.includes('后台完成巡检'))).toBe(true)
+  })
+
+  it('reattaches a cached Cline turn when deleting another conversation restores it', async () => {
+    const store = useWorkspaceStore()
+    let resolveResponse: ((result: any) => void) | undefined
+    vi.mocked(window.aiops.generateAiChatResponse).mockImplementationOnce(() => new Promise((resolve) => {
+      resolveResponse = resolve
+    }) as any)
+
+    await expect(store.sendChat('删除另一个会话后继续后台巡检')).resolves.toBe(true)
+    const firstConversationId = store.selectedConversationId
+    const firstAssistantId = store.chatMessages.at(-1)?.id || ''
+    expect(firstConversationId).toBeTruthy()
+    expect(firstAssistantId).toBeTruthy()
+
+    const created = await store.createConversation()
+    expect(created).toBeTruthy()
+    const secondConversationId = store.selectedConversationId
+    expect(secondConversationId).not.toBe(firstConversationId)
+    expect(store.chatMessages).toEqual([])
+
+    // The history runtime restores the first conversation after deleting the
+    // selected second conversation. The controller must put the live Cline
+    // projection back before late response/task events arrive.
+    await expect(store.deleteConversation(secondConversationId)).resolves.toBe(true)
+    expect(store.selectedConversationId).toBe(firstConversationId)
+
+    resolveResponse?.({
+      ok: true,
+      data: {
+        text: '等待确认 uptime',
+        provider: 'aiopsterm-local',
+        model: 'aiopsterm-local-agent',
+        durationMs: 1,
+        status: 'done',
+        requestId: 'aichat-request-test-1',
+        assistantMessageId: firstAssistantId,
+        message: {
+          id: firstAssistantId,
+          role: 'assistant',
+          text: 'uptime',
+          state: 'done',
+          ask: 'command',
+          commandExecutionStatus: 'pending',
+          commandExecutionMessage: '等待操作员确认。',
+          commandExecution: { ip: 'current terminal', command: 'uptime', requiresApproval: true, interactive: false },
+          agentTask: {
+            taskId: 'aichat-request-test-1',
+            turnId: firstAssistantId,
+            toolCallId: 'tool-delete-restore-1',
+            toolName: 'run_host_command',
+            status: 'waiting-approval'
+          }
+        },
+        agentTask: {
+          taskId: 'aichat-request-test-1',
+          turnId: firstAssistantId,
+          toolCallId: 'tool-delete-restore-1',
+          toolName: 'run_host_command',
+          status: 'waiting-approval'
+        }
+      }
+    })
+    await flushMicrotasks()
+
+    ;(globalThis as any).__emitClineAgentTaskEventMock({
+      protocolVersion: 1,
+      sessionId: 'cline-delete-restore-session',
+      taskId: 'aichat-request-test-1',
+      turnId: firstAssistantId,
+      seq: 20,
+      at: '2026-07-15T00:00:00.000Z',
+      type: 'tool-result',
+      toolCallId: 'tool-delete-restore-1',
+      toolName: 'run_host_command',
+      output: { stdout: 'up 1 day' }
+    })
+    ;(globalThis as any).__emitClineAgentTaskEventMock({
+      protocolVersion: 1,
+      sessionId: 'cline-delete-restore-session',
+      taskId: 'aichat-request-test-1',
+      turnId: firstAssistantId,
+      seq: 21,
+      at: '2026-07-15T00:00:01.000Z',
+      type: 'done',
+      text: '运行时间为 1 天。',
+      finishReason: 'stop',
+      iterations: 1
+    })
+    await flushMicrotasks()
+
+    expect(store.chatMessages).toEqual(expect.arrayContaining([
+      expect.objectContaining({ text: 'uptime', commandExecutionStatus: 'succeeded' }),
+      expect.objectContaining({ text: '运行时间为 1 天。', state: 'done' })
+    ]))
+  })
+
   it('aborts an active Cline Agent command even when its command card is not streaming', async () => {
     const store = useWorkspaceStore()
     store.chatMessages = [{
@@ -2377,6 +2587,7 @@ describe('workspace store', () => {
     vi.mocked(window.aiops.kbEnsureRoot!).mockClear()
     vi.mocked(window.aiops.kbListDir!).mockClear()
     vi.mocked(window.aiops.listKubernetesCatalog!).mockClear()
+    vi.mocked(window.aiops.restoreChatConversation).mockClear()
 
     await store.hydrateConfig()
 
@@ -2390,6 +2601,9 @@ describe('workspace store', () => {
     expect(window.aiops.kbEnsureRoot).not.toHaveBeenCalled()
     expect(window.aiops.kbListDir).not.toHaveBeenCalled()
     expect(window.aiops.listKubernetesCatalog).not.toHaveBeenCalled()
+    expect(window.aiops.restoreChatConversation).not.toHaveBeenCalled()
+    expect(store.selectedConversationId).toBe('')
+    expect(store.chatMessages).toEqual([])
   })
 
   it('hydrates Classic Chat without loading secondary module catalogs when Classic mode is persisted', async () => {
@@ -2405,6 +2619,7 @@ describe('workspace store', () => {
     vi.mocked(window.aiops.kbEnsureRoot!).mockClear()
     vi.mocked(window.aiops.kbListDir!).mockClear()
     vi.mocked(window.aiops.listKubernetesCatalog!).mockClear()
+    vi.mocked(window.aiops.restoreChatConversation).mockClear()
 
     await store.hydrateConfig()
 
@@ -2418,6 +2633,42 @@ describe('workspace store', () => {
     expect(window.aiops.kbEnsureRoot).not.toHaveBeenCalled()
     expect(window.aiops.kbListDir).not.toHaveBeenCalled()
     expect(window.aiops.listKubernetesCatalog).not.toHaveBeenCalled()
+    expect(window.aiops.restoreChatConversation).not.toHaveBeenCalled()
+    expect(store.selectedConversationId).toBe('')
+    expect(store.chatMessages).toEqual([])
+  })
+
+  it('refreshes the Classic catalog without restoring a persisted selection or clearing a valid current selection', async () => {
+    const store = useWorkspaceStore()
+    await expect(store.restoreConversation('conv-1')).resolves.toBe(true)
+    const messagesBefore = JSON.stringify(store.chatMessages)
+
+    await expect(store.loadChatConversationsFromBackend({
+      restoreIfEmpty: false,
+      restoreSelection: false
+    })).resolves.toBe(true)
+
+    expect(store.selectedConversationId).toBe('conv-1')
+    expect(JSON.stringify(store.chatMessages)).toBe(messagesBefore)
+
+    ;(globalThis as any).__setChatHistoryStoreMock?.([
+      {
+        id: 'conv-2',
+        title: 'K8s release failure',
+        summary: 'Inspect Pod events',
+        updatedAt: 'Today',
+        ts: 2,
+        favorite: false
+      }
+    ], undefined, 'conv-2')
+
+    await expect(store.loadChatConversationsFromBackend({
+      restoreIfEmpty: false,
+      restoreSelection: false
+    })).resolves.toBe(true)
+
+    expect(store.selectedConversationId).toBe('')
+    expect(store.chatMessages).toEqual([])
   })
 
   it('approves and rejects AI MCP resource access through the backend bridge', async () => {
@@ -2659,6 +2910,22 @@ describe('workspace store', () => {
     await store.restoreConversation('conv-1')
     expect(store.enableAgentReadOnlyAutoRunForCurrentConversation()).toBe(false)
     store.activePanel.sessionId = 'terminal-agent-session-auto-run'
+    vi.mocked(window.aiops.getProductSession).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        session: {
+          id: 'conv-1',
+          surface: 'classic',
+          title: 'Production inspection',
+          isOpen: true,
+          projectRoot: store.activePanel.cwd,
+          lastKnownCwd: store.activePanel.cwd,
+          target: { kind: 'local' },
+          createdAt: 1,
+          updatedAt: 2
+        }
+      }
+    })
     vi.mocked(window.aiops.generateAiChatResponse)
       .mockResolvedValueOnce({
         ok: true,
@@ -2692,6 +2959,191 @@ describe('workspace store', () => {
 
     expect(window.aiops.writeTerminal).not.toHaveBeenCalled()
     expect(window.aiops.generateAiChatResponse).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([
+    {
+      scope: 'target host',
+      projectRoot: '/srv/orders',
+      cwd: '/srv/orders',
+      previousTarget: {
+        kind: 'ssh' as const,
+        assetId: 'asset-orders-old',
+        connectionId: 'ssh-orders-old',
+        host: '10.24.8.12',
+        port: 22,
+        username: 'ops'
+      },
+      sshSession: {
+        assetId: 'asset-orders-new',
+        connectionId: 'ssh-orders-new',
+        host: '10.24.8.13',
+        port: 22,
+        username: 'ops',
+        assetName: 'orders-new'
+      }
+    },
+    {
+      scope: 'project root',
+      projectRoot: '/srv/orders',
+      cwd: '/srv/billing',
+      previousTarget: {
+        kind: 'local' as const
+      },
+      sshSession: undefined
+    }
+  ])('keeps the Classic Agent product session when obsolete single-target $scope metadata changes', async ({ projectRoot, cwd, previousTarget, sshSession }) => {
+    const store = useWorkspaceStore()
+    await store.restoreConversation('conv-1')
+    store.activePanel.sessionId = 'terminal-agent-rotated'
+    store.activePanel.cwd = cwd
+    store.activePanel.title = sshSession?.assetName || 'local-project'
+    store.activePanel.sshSession = sshSession
+
+    vi.mocked(window.aiops.getProductSession).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        session: {
+          id: 'conv-1',
+          surface: 'classic',
+          title: 'Production inspection',
+          isOpen: true,
+          projectRoot,
+          lastKnownCwd: projectRoot,
+          target: previousTarget,
+          nativeBinding: {
+            engine: 'cline',
+            nativeSessionId: 'classic-native-old',
+            profile: 'classic-agent',
+            scopeKey: 'classic-old-scope'
+          },
+          createdAt: 1,
+          updatedAt: 2
+        }
+      }
+    })
+
+    await expect(store.sendChat('继续检查', undefined, undefined, { mode: 'agent' })).resolves.toBe(true)
+
+    const exchangeInput = vi.mocked(window.aiops.createAiChatExchangeRequest).mock.calls.at(-1)?.[0] as any
+    expect(window.aiops.getProductSession).toHaveBeenCalledWith('conv-1')
+    expect(window.aiops.createChatConversation).not.toHaveBeenCalled()
+    expect(exchangeInput.conversationId).toBe('conv-1')
+    expect(exchangeInput.messages).not.toEqual([])
+    expect(exchangeInput.hostTargets).toEqual([])
+    expect(exchangeInput).not.toHaveProperty('productContext')
+    expect(window.aiops.createTerminal).not.toHaveBeenCalled()
+    expect(window.aiops.createCodexSession).not.toHaveBeenCalled()
+  })
+
+  it('rotates a Classic Agent conversation with history when its product session row is missing', async () => {
+    const store = useWorkspaceStore()
+    await store.restoreConversation('conv-1')
+    store.activePanel.sessionId = 'terminal-agent-missing-product-row'
+    store.activePanel.cwd = '/srv/orders'
+    vi.mocked(window.aiops.getProductSession)
+      .mockResolvedValueOnce({ ok: true, data: { session: null } })
+      .mockImplementationOnce(async (id: string) => ({
+        ok: true,
+        data: {
+          session: {
+            id,
+            surface: 'classic' as const,
+            title: 'Recovered session',
+            isOpen: true,
+            createdAt: 3,
+            updatedAt: 3
+          }
+        }
+      }))
+    vi.mocked(window.aiops.createAiChatExchangeRequest).mockClear()
+
+    await expect(store.sendChat('继续检查', undefined, undefined, { mode: 'agent' })).resolves.toBe(true)
+
+    const exchangeInput = vi.mocked(window.aiops.createAiChatExchangeRequest).mock.calls.at(-1)?.[0] as any
+    expect(window.aiops.createChatConversation).toHaveBeenCalledTimes(1)
+    expect(exchangeInput.conversationId).not.toBe('conv-1')
+    expect(exchangeInput.messages).toEqual([])
+    expect(exchangeInput).not.toHaveProperty('productContext')
+    expect(store.topNotice).toBe('当前会话缺少 session 状态，已创建新的 session。')
+  })
+
+  it('fails closed when the replacement for a missing Classic product row is also unindexed', async () => {
+    const store = useWorkspaceStore()
+    await store.restoreConversation('conv-1')
+    store.activePanel.sessionId = 'terminal-agent-missing-replacement-row'
+    store.activePanel.cwd = '/srv/orders'
+    vi.mocked(window.aiops.getProductSession)
+      .mockResolvedValueOnce({ ok: true, data: { session: null } })
+      .mockResolvedValueOnce({ ok: true, data: { session: null } })
+    vi.mocked(window.aiops.createAiChatExchangeRequest).mockClear()
+
+    await expect(store.sendChat('继续检查', undefined, undefined, { mode: 'agent' })).resolves.toBe(false)
+
+    expect(window.aiops.createChatConversation).toHaveBeenCalledTimes(1)
+    expect(window.aiops.createAiChatExchangeRequest).not.toHaveBeenCalled()
+    expect(store.topNotice).toContain('session 状态不可用')
+  })
+
+  it.each([
+    {
+      state: 'rejected result',
+      arrange: () => vi.mocked(window.aiops.getProductSession).mockResolvedValueOnce({
+        ok: false,
+        errorCode: 'PRODUCT_SESSION_READ_FAILED',
+        errorMessage: 'session read rejected'
+      })
+    },
+    {
+      state: 'bridge exception',
+      arrange: () => vi.mocked(window.aiops.getProductSession).mockRejectedValueOnce(new Error('session read failed'))
+    },
+    {
+      state: 'mismatched row',
+      arrange: () => vi.mocked(window.aiops.getProductSession).mockResolvedValueOnce({
+        ok: true,
+        data: {
+          session: {
+            id: 'another-conversation',
+            surface: 'classic',
+            title: 'Wrong session',
+            isOpen: true,
+            createdAt: 1,
+            updatedAt: 2
+          }
+        }
+      })
+    }
+  ])('fails closed before a Classic Agent request when product session state has a $state', async ({ arrange }) => {
+    const store = useWorkspaceStore()
+    await store.restoreConversation('conv-1')
+    store.activePanel.sessionId = 'terminal-agent-state-check'
+    store.activePanel.cwd = '/srv/orders'
+    arrange()
+    vi.mocked(window.aiops.createAiChatExchangeRequest).mockClear()
+
+    await expect(store.sendChat('继续检查', undefined, undefined, { mode: 'agent' })).resolves.toBe(false)
+
+    expect(window.aiops.createAiChatExchangeRequest).not.toHaveBeenCalled()
+    expect(store.topNotice).toMatch(/session|rejected/i)
+  })
+
+  it('fails closed before a Classic Agent request when the product session bridge is unavailable', async () => {
+    const store = useWorkspaceStore()
+    await store.restoreConversation('conv-1')
+    store.activePanel.sessionId = 'terminal-agent-missing-state-bridge'
+    store.activePanel.cwd = '/srv/orders'
+    const getProductSession = window.aiops.getProductSession
+    ;(window.aiops as { getProductSession?: typeof getProductSession }).getProductSession = undefined
+    vi.mocked(window.aiops.createAiChatExchangeRequest).mockClear()
+    try {
+      await expect(store.sendChat('继续检查', undefined, undefined, { mode: 'agent' })).resolves.toBe(false)
+
+      expect(window.aiops.createAiChatExchangeRequest).not.toHaveBeenCalled()
+      expect(store.topNotice).toContain('session 状态不可用')
+    } finally {
+      window.aiops.getProductSession = getProductSession
+    }
   })
 
   it('reports the legacy renderer Agent loop as unavailable without calling the provider', async () => {
@@ -2819,7 +3271,7 @@ describe('workspace store', () => {
         agentsLeftOpen: true
       })
       await expect(store.toggleMode()).resolves.toBe(true)
-      expect(window.aiops.saveConfig).toHaveBeenLastCalledWith({ defaultMode: 'agents' })
+      expect(window.aiops.saveConfig).toHaveBeenLastCalledWith({ defaultMode: 'agents', agentsLeftOpen: true })
       expect(store.mode).toBe('agents')
       expect(store.config.defaultMode).toBe('agents')
 
@@ -2915,6 +3367,7 @@ describe('workspace store', () => {
         defaultMode: 'agents'
       })
       await expect(store.toggleMode()).resolves.toBe(true)
+      expect(window.aiops.saveConfig).toHaveBeenLastCalledWith({ defaultMode: 'agents', agentsLeftOpen: true })
       vi.mocked(window.aiops.saveConfig!).mockResolvedValueOnce({
         ...store.config,
         agentsLeftOpen: true,
@@ -2923,6 +3376,19 @@ describe('workspace store', () => {
       await expect(store.resizeLeftPanel(340)).resolves.toBe(true)
       expect(window.aiops.saveConfig).toHaveBeenLastCalledWith({ agentsLeftOpen: true, agentsLeftWidth: 340 })
       expect(store.agentsLeftWidth).toBe(340)
+
+      vi.mocked(window.aiops.saveConfig!).mockResolvedValueOnce({
+        ...store.config,
+        rightPanelOpen: false,
+        rightPanelWidth: 420
+      })
+      await expect(store.resizeRightPanel(420)).resolves.toBe(true)
+      expect(window.aiops.saveConfig).toHaveBeenLastCalledWith({ rightPanelWidth: 420 })
+      expect(store.rightPanelWidth).toBe(420)
+      expect(store.rightPanelOpen).toBe(false)
+      await expect(store.toggleRight()).resolves.toBe(false)
+      await expect(store.quickCloseRightPanel()).resolves.toBe(false)
+      expect(store.rightPanelOpen).toBe(false)
 
       ;(window.aiops as any).saveConfig = undefined
       await expect(store.resizeLeftPanel(360)).resolves.toBe(false)
@@ -6740,6 +7206,32 @@ describe('workspace store', () => {
     expect(store.chatMessages).toEqual([])
   })
 
+  it('does not apply a stale empty-selection snapshot over a concurrently created conversation', async () => {
+    const store = useWorkspaceStore()
+    await store.loadChatConversationsFromBackend({ restoreIfEmpty: false })
+    const staleConversations = store.conversations.map((conversation) => ({ ...conversation }))
+    let resolveDeselect!: (value: Awaited<ReturnType<typeof window.aiops.deselectChatConversation>>) => void
+    vi.mocked(window.aiops.deselectChatConversation).mockImplementationOnce(() => new Promise((resolve) => {
+      resolveDeselect = resolve
+    }))
+
+    const deselect = store.deselectConversation('conv-1')
+    const created = await store.createConversation()
+    expect(created).toBeTruthy()
+    resolveDeselect({
+      ok: true,
+      data: {
+        conversations: staleConversations,
+        selectedConversationId: ''
+      }
+    })
+
+    await expect(deselect).resolves.toBe(true)
+    expect(store.selectedConversationId).toBe(created!.id)
+    expect(store.conversations.some((conversation) => conversation.id === created!.id)).toBe(true)
+    expect(store.chatMessages).toEqual([])
+  })
+
   it('accepts bounded AI history restores and surfaces the truncation notice', async () => {
     const store = useWorkspaceStore()
     vi.mocked(window.aiops.restoreChatConversation).mockResolvedValueOnce({
@@ -7062,14 +7554,21 @@ describe('workspace store', () => {
     const retryTarget = store.chatMessages.at(-1)!
     expect(retryTarget.role).toBe('assistant')
     expect(store.retryAssistantMessage(retryTarget.id)).toBe(true)
+    await vi.advanceTimersByTimeAsync(0)
     expect(store.chatMessages.at(-2)?.text).toContain('重新执行发布检查')
+    expect(store.chatMessages.some((message) => message.id === retryTarget.id)).toBe(false)
+    expect(window.aiops.createAiChatExchangeRequest).toHaveBeenLastCalledWith(expect.objectContaining({
+      replaceNativeTranscript: true
+    }))
+    const retriedAssistant = store.chatMessages.at(-1)!
+    expect(retriedAssistant.role).toBe('assistant')
 
-    const knowledgeSummary = await store.summarizeMessageToKnowledge(retryTarget.id)
+    const knowledgeSummary = await store.summarizeMessageToKnowledge(retriedAssistant.id)
     expect(knowledgeSummary?.relPath).toMatch(/^summary\/ai-message-.+\.md$/)
     expect(store.findKnowledgeNode(knowledgeSummary!.relPath)).toEqual(expect.objectContaining({ type: 'file' }))
     expect(store.activePanel.kind).toBe('knowledge')
 
-    const skillSummary = await store.summarizeMessageToSkill(retryTarget.id)
+    const skillSummary = await store.summarizeMessageToSkill(retriedAssistant.id)
     expect(skillSummary?.name).toMatch(/skill$/)
     expect(store.settingsSkills[0].name).toBe(skillSummary?.name)
 
@@ -7453,6 +7952,14 @@ describe('workspace store', () => {
     const rollback = store.quickCommands.find((command) => command.snippet_name === '回滚确认')!
     await store.updateQuickCommand(rollback.id, { snippet_name: '回滚确认更新', snippet_content: 'echo updated', group_uuid: null })
     expect(store.quickCommands.some((command) => command.snippet_name === '回滚确认更新' && command.group_uuid === null)).toBe(true)
+    vi.mocked(window.aiops.planQuickCommandScript).mockClear()
+    vi.mocked(window.aiops.writeTerminal).mockClear()
+    const updatedCommandDecision = await store.runQuickCommand(rollback.id, true)
+    expect(updatedCommandDecision?.status).toBe('allow')
+    expect(window.aiops.planQuickCommandScript).toHaveBeenCalledWith({ snippetId: rollback.id, autoExecute: true })
+    expect(window.aiops.writeTerminal).toHaveBeenCalledTimes(1)
+    expect(window.aiops.writeTerminal).toHaveBeenCalledWith('quick-command-session', 'echo updated\n')
+    expect(window.aiops.writeTerminal).not.toHaveBeenCalledWith('quick-command-session', expect.stringContaining('echo rollback'))
 
     await store.renameSnippetGroup(group!.uuid, '发布命令更新')
     expect(store.snippetGroups.find((item) => item.uuid === group!.uuid)?.group_name).toBe('发布命令更新')
@@ -8054,11 +8561,11 @@ describe('workspace store', () => {
     expect(store.aiContextCatalog.openedHosts).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ id: 'opened-local', label: '127.0.0.1' }),
-        expect.objectContaining({ id: 'asset-1', label: '10.24.8.12' })
+        expect.objectContaining({ id: 'asset-1', label: 'prod-bastion', detail: '10.24.8.12' })
       ])
     )
     expect(store.aiContextCatalog.categories.find((category) => category.id === 'hosts')?.options).toEqual(
-      expect.arrayContaining([expect.objectContaining({ id: 'asset-3', label: '10.32.6.9' })])
+      expect.arrayContaining([expect.objectContaining({ id: 'asset-3', label: 'mysql-primary', detail: '10.32.6.9' })])
     )
     expect(store.aiContextCatalog.categories.find((category) => category.id === 'docs')?.options).toEqual(
       expect.arrayContaining([
@@ -8082,7 +8589,7 @@ describe('workspace store', () => {
     expect(store.selectedContexts).toEqual([])
 
     await store.refreshAiContextCatalog({ hydrateSelection: true })
-    expect(store.selectedContexts.map((context) => context.id)).toEqual(['opened-local', 'asset-1'])
+    expect(store.selectedContexts).toEqual([])
 
     store.selectedContexts = [{ id: 'manual-host', kind: 'hosts', label: '10.0.0.9', detail: 'manual selection' }]
     await store.refreshAiContextCatalog({ hydrateSelection: true })
@@ -8982,6 +9489,24 @@ describe('workspace store', () => {
     const originalUserId = store.chatMessages.at(-2)?.id
     expect(originalUserId).toBeTruthy()
     expect(store.chatMessages.at(-1)?.role).toBe('assistant')
+    vi.mocked(window.aiops.reviseProductSessionProjectionMessages).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        deletedMessages: 2,
+        appendedMessages: 2,
+        totalMessages: 3,
+        seedMessages: [{
+          messageId: 'durable-prefix-user',
+          ordinal: 0,
+          payload: { id: 'durable-prefix-user', role: 'user', text: 'durable prefix outside the DOM window', state: 'done' },
+          createdAt: 1,
+          updatedAt: 1
+        }],
+        seedTotalMessages: 1,
+        seedOmittedMessages: 0,
+        seedPayloadBytes: 64
+      }
+    })
 
     const editedParts = [
       { type: 'text' as const, text: '新消息' },
@@ -8996,6 +9521,23 @@ describe('workspace store', () => {
     expect(store.chatMessages.at(-2)?.contentParts).toEqual(editedParts)
     expect(store.chatMessages.at(-2)?.text).toContain('新消息/rollback-plan')
     expect(store.chatMessages.at(-1)?.role).toBe('assistant')
+    expect(window.aiops.createAiChatExchangeRequest).toHaveBeenLastCalledWith(expect.objectContaining({
+      replaceNativeTranscript: true
+    }))
+    expect(window.aiops.reviseProductSessionProjectionMessages).toHaveBeenLastCalledWith(
+      store.selectedConversationId,
+      expect.objectContaining({
+        fromMessageId: originalUserId,
+        replacementMessages: [
+          expect.objectContaining({ payload: expect.objectContaining({ role: 'user' }) }),
+          expect.objectContaining({ payload: expect.objectContaining({ role: 'assistant', state: 'streaming' }) })
+        ]
+      })
+    )
+    expect(vi.mocked(window.aiops.generateAiChatResponse).mock.calls.at(-1)?.[0].messages).toEqual([
+      expect.objectContaining({ role: 'user', text: 'durable prefix outside the DOM window' }),
+      expect.objectContaining({ role: 'user', text: expect.stringContaining('新消息') })
+    ])
   })
 
   it('truncates and resends with edited host context without mutating selected contexts', async () => {
@@ -9005,14 +9547,36 @@ describe('workspace store', () => {
     const originalUserId = store.chatMessages.at(-2)?.id
     expect(store.chatMessages.at(-2)?.hosts?.map((context) => context.id)).toEqual(originalSelectedContextIds)
 
-    const editedHosts = [{ id: 'asset-3', kind: 'hosts' as const, label: '10.32.6.9', detail: 'mysql-primary' }]
+    const editedHosts = [{ id: 'asset-3', kind: 'hosts' as const, label: 'mysql-primary', detail: '10.32.6.9' }]
     const sent = await store.resendUserMessageFromParts(originalUserId!, [{ type: 'text', text: '改查 MySQL 主机' }], editedHosts)
 
     expect(sent).toBe(true)
     expect(store.selectedContexts.map((context) => context.id)).toEqual(originalSelectedContextIds)
     expect(store.chatMessages.find((message) => message.id === originalUserId)).toBeUndefined()
     expect(store.chatMessages.at(-2)?.hosts).toEqual(editedHosts)
-    expect(store.chatMessages.at(-2)?.text).toContain('hosts:10.32.6.9')
+    expect(store.chatMessages.at(-2)?.text).toContain('hosts:mysql-primary')
+    expect(window.aiops.createAiChatExchangeRequest).toHaveBeenLastCalledWith(expect.objectContaining({
+      replaceNativeTranscript: true
+    }))
+  })
+
+  it('restores the visible branch when an atomic projection revision is rejected', async () => {
+    const store = useWorkspaceStore()
+    await store.sendChat('保留这条分支')
+    await vi.runAllTimersAsync()
+    const before = store.chatMessages.map((message) => ({ ...message }))
+    const userId = before.at(-2)?.role === 'user' ? before.at(-2)?.id : undefined
+    expect(userId).toBeTruthy()
+    vi.mocked(window.aiops.reviseProductSessionProjectionMessages).mockResolvedValueOnce({
+      ok: false,
+      errorCode: 'PRODUCT_SESSION_PROJECTION_MESSAGE_NOT_FOUND',
+      errorMessage: 'Projection message was not found.'
+    })
+
+    await expect(store.resendUserMessageFromParts(userId!, [{ type: 'text', text: '不会覆盖' }])).resolves.toBe(false)
+
+    expect(store.chatMessages.map((message) => message.id)).toEqual(before.map((message) => message.id))
+    expect(store.chatMessages.find((message) => message.id === userId)?.text).toBe(before.find((message) => message.id === userId)?.text)
   })
 
   it('manages External reference-style extension plugin state and alias validation', async () => {

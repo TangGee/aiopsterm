@@ -144,7 +144,7 @@ type HydratedAliasResult = {
 
 type WorkspaceAppSettingsDeps = {
   refreshShortcutRuntime: () => void
-  hydrateClassicChatData: (options?: { restoreIfEmpty?: boolean }) => Promise<boolean>
+  hydrateClassicChatData: (options?: { restoreIfEmpty?: boolean; restoreSelection?: boolean }) => Promise<boolean>
   setupKnowledgeBridgeListeners: () => void
   refreshAgentHookInstallers: (options?: { silent?: boolean }) => Promise<boolean>
   refreshExportMcpInstallers: (options?: { silent?: boolean }) => Promise<boolean>

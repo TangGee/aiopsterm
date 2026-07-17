@@ -332,6 +332,7 @@ export const useDatabaseWorkspaceRuntime = () => {
     dbAiPaneComposerAction,
     dbAiPaneComposerPlaceholder,
     dbAiPaneMessages,
+    dbAiPaneRestoreIssues,
     dbAiOpen,
     dbAiActiveReqId,
     sqlDiagnose,
@@ -370,10 +371,13 @@ export const useDatabaseWorkspaceRuntime = () => {
     updateDbAiPaneCatalog,
     updateDbAiPaneSchema,
     connectDbAiPaneConnection,
+    retryDbAiPaneBinding,
     handleDbAiPaneDraftKeydown,
     cancelDbAiPaneActionMode,
     sendDbAiPaneQuickPrompt,
     resetDbAiPaneConversation,
+    restoreDbAiPaneSession,
+    loadOlderDbAiPaneMessages,
     cancelDbAiPaneResponse,
     sendDbAiPaneMessage,
     startDbAiPaneResize,
@@ -574,9 +578,18 @@ export const useDatabaseWorkspaceRuntime = () => {
     sqlEditorLineHeight
   })
 
+  let databaseWorkspaceSessionReady: Promise<void> | null = null
+  const ensureDatabaseWorkspaceSessionReady = () => {
+    if (!databaseWorkspaceSessionReady) {
+      databaseWorkspaceSessionReady = Promise.resolve(loadDatabaseCatalog())
+        .finally(() => loadDbAiPaneState())
+    }
+    return databaseWorkspaceSessionReady
+  }
+
   registerLifecycle({
-    loadDatabaseCatalog,
-    loadDbAiPaneState,
+    loadDatabaseCatalog: ensureDatabaseWorkspaceSessionReady,
+    loadDbAiPaneState: () => undefined,
     closeMenus,
     stopSqlPaneResize,
     stopDbAiPaneResize,
@@ -698,6 +711,7 @@ export const useDatabaseWorkspaceRuntime = () => {
     dbAiPaneSchemaOptions,
     dbAiPaneRequiresSchema,
     dbAiPaneConnectionNeedsConnect,
+    dbAiPaneRestoreIssues,
     dbAiPaneContextTitle,
     dbAiPaneContextSummary,
     dbAiPaneIsStreaming,
@@ -724,10 +738,14 @@ export const useDatabaseWorkspaceRuntime = () => {
     updateDbAiPaneCatalog,
     updateDbAiPaneSchema,
     connectDbAiPaneConnection,
+    retryDbAiPaneBinding,
     handleDbAiPaneDraftKeydown,
     cancelDbAiPaneActionMode,
     sendDbAiPaneQuickPrompt,
     resetDbAiPaneConversation,
+    restoreDbAiPaneSession,
+    loadOlderDbAiPaneMessages,
+    ensureDatabaseWorkspaceSessionReady,
     cancelDbAiPaneResponse,
     sendDbAiPaneMessage,
     startDbAiPaneResize,

@@ -3,13 +3,22 @@
     v-show="aiPanelMode === 'classic'"
     ref="chatScrollRef"
     class="chat-scroll"
+    @scroll.passive="handleChatScroll"
+    @wheel.passive="handleChatUserScrollIntent"
+    @touchstart.passive="handleChatUserScrollIntent"
+    @touchmove.passive="handleChatUserScrollIntent"
+    @touchend.passive="handleChatUserScrollIntent"
+    @touchcancel.passive="handleChatUserScrollIntent"
+    @pointerdown.self="handleChatUserScrollIntent"
+    @keydown="handleChatUserScrollIntent"
   >
     <AiPanelChatSearchBar />
     <article
-      v-for="message in workspace.chatMessages"
+      v-for="message in visibleChatMessages"
       :key="message.id"
       class="message"
       :class="message.role"
+      :data-message-id="message.id"
     >
       <span class="message-role">{{ message.role }}</span>
       <div
@@ -198,7 +207,7 @@
         data-testid="ai-mcp-tool-call"
       >
         <div class="ai-mcp-tool-call-grid">
-          <span>MCP Server</span>
+          <span>{{ isClineHostInspectionApproval(message) ? 'Target' : 'MCP Server' }}</span>
           <strong>{{ message.mcpToolCall.serverName }}</strong>
           <span>Tool</span>
           <strong>{{ message.mcpToolCall.toolName }}</strong>
@@ -218,6 +227,7 @@
             <span>拒绝</span>
           </button>
           <button
+            v-if="!isClineSensitiveApproval(message)"
             type="button"
             class="secondary"
             data-testid="ai-mcp-tool-auto-approve"
@@ -243,7 +253,7 @@
         >
           <Check v-if="message.action === 'approved'" />
           <X v-else />
-          <span>{{ message.action === 'approved' ? '已批准' : '已拒绝' }}</span>
+          <span>{{ message.commandExecutionMessage || (message.action === 'approved' ? '已批准' : '已拒绝') }}</span>
         </div>
       </div>
       <div
@@ -287,7 +297,7 @@
         >
           <Check v-if="message.action === 'approved'" />
           <X v-else />
-          <span>{{ message.action === 'approved' ? '已批准' : '已拒绝' }}</span>
+          <span>{{ message.commandExecutionMessage || (message.action === 'approved' ? '已批准' : '已拒绝') }}</span>
         </div>
       </div>
       <div
@@ -555,6 +565,7 @@
 </template>
 
 <script setup lang="ts">
+import { onMounted, watch } from 'vue'
 import AiPanelChatSearchBar from '@/components/ai/AiPanelChatSearchBar.vue'
 import {
   BookOpen,
@@ -581,6 +592,7 @@ import {
 import { useAiPanelRuntimeContext } from '@/services/ai/aiPanelContext'
 
 const {
+  activateChatViewport,
   aiPanelMode,
   approveMcpResourceAccess,
   approveMcpToolCall,
@@ -608,6 +620,8 @@ const {
   handleEditEditableKeydown,
   handleEditEditablePaste,
   handleFileUpload,
+  handleChatScroll,
+  handleChatUserScrollIntent,
   iconMarkupByChipType,
   isCommandSuggestionMessage,
   isCommandTerminalActionDisabled,
@@ -631,15 +645,23 @@ const {
   summarizeMessageToSkill,
   t,
   toggleMessageFavorite,
+  visibleChatMessages,
   workspace
 } = useAiPanelRuntimeContext()
-</script>
 
-<style scoped>
-/* 长会话窗口化：视口外消息跳过渲染与布局开销；
-   contain-intrinsic-size 记忆实际高度作屏外占位，保持滚动条与滚动到底部跟随行为 */
-.message {
-  content-visibility: auto;
-  contain-intrinsic-size: auto 120px;
-}
-</style>
+const isClineSensitiveApproval = (message: { agentTask?: { toolName?: string } }) =>
+  message.agentTask?.toolName === 'read_host_file' ||
+  message.agentTask?.toolName === 'search_host_files' ||
+  message.agentTask?.toolName === 'access_mcp_resource'
+
+const isClineHostInspectionApproval = (message: { agentTask?: { toolName?: string } }) =>
+  message.agentTask?.toolName === 'read_host_file' || message.agentTask?.toolName === 'search_host_files'
+
+onMounted(() => {
+  if (aiPanelMode.value === 'classic') activateChatViewport()
+})
+
+watch(aiPanelMode, (mode, previousMode) => {
+  if (mode === 'classic' && previousMode !== 'classic') activateChatViewport()
+})
+</script>

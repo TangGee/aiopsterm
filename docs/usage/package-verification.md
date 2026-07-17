@@ -80,7 +80,7 @@ After a directory or full package build on any platform, run the unpacked resour
 npm run audit:packaged-app
 ```
 
-`audit:packaged-app` checks the current platform's unpacked app resources, the packaged Codex package, the platform `rg` helper name, and the platform `node-pty` runtime files. It also requires every Cline sidecar runtime, bundle, manifest, SBOM, metafile, notice, and license artifact, executes the packaged Node `--version`, and validates the distributable manifest boundary. It does not replace `audit:linux-package` for Linux installer/deb/AppImage checks.
+`audit:packaged-app` checks the current platform's unpacked app resources, the packaged Codex package, the platform `rg` helper name, and the platform `node-pty` runtime files. It requires an Electron-only `better-sqlite3` native manifest, verifies that exactly one ABI-keyed SQLite binding remains, rejects every earlier `bindings` lookup candidate, checks the binding SHA-256, and launches the packaged Electron executable in Node mode to execute a real in-memory `SELECT 1`. It also requires every Cline sidecar runtime, bundle, manifest, SBOM, metafile, notice, and license artifact, executes the packaged Node `--version`, and validates the distributable manifest boundary. It does not replace `audit:linux-package` for Linux installer/deb/AppImage checks.
 
 `audit:linux-package` checks the Linux build output without launching the app. It verifies:
 

@@ -2,9 +2,21 @@ import type { AiopsMutationResult } from './common'
 
 export const CLINE_AGENT_PROTOCOL_VERSION = 1 as const
 export const CLINE_AGENT_SDK_VERSION = '0.0.59' as const
-export const CLINE_AGENT_PROVIDER_FETCH_MAX_BODY_BYTES = 2 * 1024 * 1024
+export const CLINE_AGENT_MAX_PROTOCOL_FRAME_BYTES = 64 * 1024 * 1024
+export const CLINE_AGENT_PROVIDER_FETCH_MAX_REQUEST_BODY_BYTES = 40 * 1024 * 1024
+export const CLINE_AGENT_PROVIDER_FETCH_MAX_RESPONSE_BODY_BYTES = 2 * 1024 * 1024
 
 export type ClineAgentProfile = 'classic-chat' | 'classic-command' | 'classic-agent' | 'database'
+
+export const CLINE_AGENT_MAX_HOST_TARGETS = 5
+
+export type ClineAgentHostTarget = {
+  targetId: string
+  terminalSessionId: string
+  label: string
+  kind: 'local' | 'ssh'
+  cwd?: string
+}
 
 export type ClineAgentProviderConfig = {
   providerId: 'openai-compatible' | 'openai-native' | 'litellm' | 'anthropic' | 'deepseek' | 'ollama' | 'lmstudio' | 'bedrock'
@@ -82,6 +94,8 @@ export type ClineAgentSessionStartInput = {
   provider: ClineAgentProviderConfig
   tools: ClineAgentToolDefinition[]
   initialMessages?: ClineAgentSeedMessage[]
+  /** Delete and recreate this deterministic native session from `initialMessages`. */
+  replaceTranscript?: boolean
   metadata?: Record<string, unknown>
   maxIterations?: number
 }
@@ -91,6 +105,7 @@ export type ClineAgentTurnInput = {
   taskId: string
   turnId: string
   prompt: string
+  userImages?: string[]
 }
 
 export type ClineAgentTurnResult = {
@@ -141,6 +156,9 @@ export type ClineAgentTaskEvent =
       toolCallId: string
       toolName: string
       input: unknown
+      targetId?: string
+      targetLabel?: string
+      terminalSessionId?: string
       iteration?: number
     })
   | (ClineAgentTaskEventBase & {
@@ -161,9 +179,14 @@ export type ClineAgentTaskEvent =
       type: 'approval-requested'
       toolCallId: string
       toolName: string
-      terminalSessionId: string
+      targetId?: string
+      targetLabel?: string
+      terminalSessionId?: string
+      serverName?: string
+      resourceUri?: string
       input: unknown
       iteration: number
+      autoApprovable?: boolean
       reason?: string
     })
   | (ClineAgentTaskEventBase & {
@@ -204,8 +227,14 @@ export type ClineAgentApprovalInput = {
   taskId: string
   turnId: string
   toolCallId: string
-  terminalSessionId: string
+  toolName: string
+  targetId?: string
+  targetLabel?: string
+  terminalSessionId?: string
+  serverName?: string
+  resourceUri?: string
   approved: boolean
+  enableReadOnlyAutoRun?: boolean
   reason?: string
 }
 
@@ -213,8 +242,14 @@ export type ClineAgentApprovalResult = AiopsMutationResult<{
   taskId: string
   turnId: string
   toolCallId: string
-  terminalSessionId: string
+  toolName: string
+  targetId?: string
+  targetLabel?: string
+  terminalSessionId?: string
+  serverName?: string
+  resourceUri?: string
   status: 'approved' | 'rejected'
+  readOnlyAutoRunEnabled?: boolean
 }>
 
 export type ClineAgentAbortInput = {
@@ -242,6 +277,7 @@ export type ClineAgentSidecarRequestMethod =
   | 'session.send'
   | 'session.abort'
   | 'session.stop'
+  | 'session.delete'
 
 export type ClineAgentSidecarRequest = {
   version: typeof CLINE_AGENT_PROTOCOL_VERSION

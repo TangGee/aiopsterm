@@ -18,15 +18,22 @@ The MCP helper never receives a database password, DSN, host, username, URL, fil
 
 ## Read-Only Tools
 
-The first phase exposes five tools:
+The runtime exposes twelve read-only tools. The original generic tools remain available, while the narrower catalog, sampling, and count tools give Agents simpler contracts for common database work:
 
 | Tool | Behavior |
 | --- | --- |
 | `list_database_connections` | Returns a redacted projection containing a process-scoped random handle, generated label, engine, environment, status, readonly flag, and catalog count. |
+| `list_databases` | Lists bounded database/catalog summaries on one connection. |
+| `list_schemas` | Lists bounded schema summaries in one exact database. |
+| `list_tables` | Lists bounded table/view summaries in one exact database and optional schema. |
 | `search_database_objects` | Searches current catalog metadata for table, view, function, and procedure objects. |
 | `describe_database_table` | Returns current catalog column types, nullability, keys, and primary-key columns for one table or view. |
 | `get_database_table_ddl` | Reads bounded DDL for one catalog-known table or view through an open saved connection. |
 | `query_database_table` | Reads bounded scalar columns from a base table through structured parameterized filters and a catalog-validated sort. |
+| `sample_rows` | Reads at most 20 rows through the same strict base-table query boundary. |
+| `count_rows` | Returns an exact count through the structured table-query adapter and optional structured filters. |
+| `inspect_indexes` | Returns bounded structured index metadata only when the engine supplies a safe index adapter. |
+| `explain_plan` | Explains a structured table query only when the engine supplies a safe explain adapter; it never accepts SQL text. |
 
 `execute_sql`, DDL mutation, and row mutation are deliberately absent. The existing general SQL executor is not a read-only security boundary and must not be exposed under a read-only MCP annotation.
 
@@ -41,17 +48,22 @@ The first phase exposes five tools:
 - Application-side validation is not a substitute for database least privilege. Connections exported to an Agent should use a database account whose server-side grants are read-only.
 - Callers may request up to 50 bounded scalar columns. Without an explicit projection, MCP selects only catalog types with a declared size or an intrinsically bounded scalar representation. LOB, `TEXT`, unbounded string, JSON, XML, binary-large-object, and collection columns are omitted; explicitly requesting one is rejected.
 - The runtime projects returned row objects and reapplies the requested page-size limit a second time. An adapter cannot add an unrequested column or extra row to the MCP response even if a driver returns more data than requested.
-- Count queries are not exposed, avoiding an implicit full-table scan through `withTotal`.
+- `sample_rows` is capped at 20 rows and always uses page 1. `count_rows` requests an exact `withTotal` count and may therefore perform a full-table or full-filter scan; it shares the 30-second deadline and concurrency limit. A missing or non-safe integer total fails with `DB_MCP_COUNT_UNSUPPORTED`.
+- `inspect_indexes` and `explain_plan` are capability-gated. An engine without a structured adapter returns `DB_MCP_INDEX_INSPECTION_UNSUPPORTED` or `DB_MCP_EXPLAIN_UNSUPPORTED`; neither tool parses arbitrary SQL, calls the general SQL executor, or fabricates metadata from DDL text.
 - The serialized row payload is capped at 512 KiB. Strings, arrays, and nested objects are bounded; bigint values become strings and binary values become byte-length descriptors.
 - DDL output is capped at 256 KiB. Comments, string literals, dollar-quoted or Oracle q-quoted bodies, definers, credential-like settings, and known connection endpoint values are redacted before the DDL leaves the runtime.
-- At most four external database reads can be active. Each call has a 30-second response deadline; a timed-out underlying read keeps its concurrency slot until the driver operation actually settles.
+- At most four caller-visible database read leases can be active. Each call has a 30-second response deadline, and all four data adapters (DDL, structured query, index inspection, and structured explain) receive the active `AbortSignal`. Cancellation or timeout releases the caller-visible lease immediately, and a late adapter result can never overwrite the cancelled result.
+- Abortable SQLite MCP reads run in a dedicated Node-compatible child process instead of the shared SQLite worker. Cancellation sends an OS-level kill signal and the adapter Promise does not settle until that process exits, so native `better-sqlite3` work, including CPU-bound queries and lock waits, is physically stopped. The shared worker continues to serve ordinary Database workspace reads and writes and is not terminated by an MCP cancellation.
+- The current relational and HTTP adapters do not claim portable physical cancellation. Their cancelled result is isolated while the underlying driver Promise finishes. A separate hard limit of eight physical reads prevents an adapter that ignores cancellation from creating unbounded orphan work; at that limit new reads fail closed with `DB_MCP_READ_CHANNEL_ISOLATED`, and capacity recovers only when an underlying operation actually settles.
 - Non-SQLite DDL and data reads require the connection to be open in aiopsterm. This provides a visible user-consent step and ensures the current process has a verified connection. SQLite uses its local file connection directly.
 - Catalog search and table description use aiopsterm's current catalog snapshot. Refresh the connection in the Database workspace when server metadata has changed.
 - Presto pagination accepts `nextUri` only from the configured endpoint origin before reusing authorization headers. Statement and next-page HTTP requests use manual redirect handling, and every 3xx response is rejected instead of forwarding headers to a redirect target.
 
 ## DB AI Context
 
-DB AI and MCP share the same live connection catalog. DB AI no longer reads seed-table metadata for real saved connection ids. Its Cline profile can call the four object/table tools during the Agent loop; connection enumeration is not exposed to the model.
+DB AI and MCP share the same live connection catalog. DB AI no longer reads seed-table metadata for real saved connection ids. Its Cline profile can call eleven database/catalog tools during the Agent loop; only `list_database_connections` is omitted because Main already owns the session connection binding.
+
+The DB AI tool schemas omit `connectionId`, `databaseName`, and `schemaName`. Electron Main injects the authoritative connection/database and, when present, schema from the Product Session binding, rejects conflicting values before dispatch, and overwrites tool arguments with that scope. The model can select a table and structured filters within the scope, but it cannot switch connection, database, or schema. Every DB AI read-only tool is auto-approved; calls still execute sequentially through the Cline loop and receive the active turn's `AbortSignal`. Expected MCP capability failures remain structured `{ ok: false, errorCode, errorMessage }` tool results so the Agent can adapt; cancellation and unknown-tool protocol errors still abort the callback.
 
 Before a turn, DB AI may preload the same internal read-only tool runtime using the backend-owned current `connectionId`, database, schema, and table:
 

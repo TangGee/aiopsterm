@@ -2,11 +2,13 @@ import {
   isAiChatConversationDeleteData,
   isAiChatConversationMutationData,
   isAiChatConversationRestoreData,
+  isAiChatHistoryMessage,
   isAiChatHistorySnapshotData,
   isAiChatMessageMetadataData
 } from '@/services/ai/aiChatBackendGuards'
 import { malformedAiBackendResultMessage } from '@/services/ai/aiBackendGuards'
 import { chatHistoryClient } from '@/services/ai/chatHistoryClient'
+import { productSessionClient } from '@/services/ai/productSessionClient'
 import type { I18nKey } from '@/i18n/messages'
 import type {
   AiChatConversationRecord,
@@ -14,9 +16,13 @@ import type {
   AiChatHistoryMessage,
   AiContextOption
 } from '@shared/contracts/aiChat'
+import { aiChatStaleClineTaskMessage } from '@shared/contracts/aiChat'
 import type { ChatMessage, ConversationItem, WorkspaceAiChatControllerState } from '@/services/ai/workspaceAiChatTypes'
 
 export type WorkspaceAiChatHistoryRuntime = ReturnType<typeof createWorkspaceAiChatHistoryRuntime>
+
+export const classicProjectionPageSize = 80
+const classicProjectionMergeMarkerId = 'aiopsterm-history-truncated'
 
 const autoNamedConversationTitles = new Set([
   '新会话',
@@ -137,9 +143,63 @@ export const createWorkspaceAiChatHistoryRuntime = (input: {
   state: Pick<WorkspaceAiChatControllerState, 'conversations' | 'selectedConversationId' | 'chatMessages' | 'aiContextUsage'>
   setTopNotice: (message: string) => void
   i18nText: (key: I18nKey, params?: Record<string, string | number>) => string
+  afterConversationRestored?: (id: string) => void | Promise<void>
 }) => {
   const { state, setTopNotice, i18nText } = input
   const { conversations, selectedConversationId, chatMessages, aiContextUsage } = state
+  let projectionConversationId = ''
+  let projectionBeforeOrdinal: number | null = null
+  let projectionHasMore = false
+  let projectionPageLoading = false
+  let projectionSeedStartMessageId = ''
+
+  const resetProjectionCursor = (conversationId = '') => {
+    projectionConversationId = conversationId
+    projectionBeforeOrdinal = null
+    projectionHasMore = false
+    projectionPageLoading = false
+    projectionSeedStartMessageId = ''
+  }
+
+  const reconcileProjectionMessage = (message: AiChatHistoryMessage): AiChatHistoryMessage => {
+    const task = message.agentTask
+    if (!task || !['starting', 'running', 'waiting-approval'].includes(task.status)) return message
+    const restored: AiChatHistoryMessage = {
+      ...message,
+      agentTask: { ...task, status: 'cancelled', restored: true }
+    }
+    if (message.ask === 'command' && (message.commandExecutionStatus === 'pending' || message.commandExecutionStatus === 'running')) {
+      restored.commandExecutionStatus = 'failed'
+      restored.commandExecutionMessage = aiChatStaleClineTaskMessage
+    } else if (message.state === 'streaming') {
+      restored.state = 'cancelled'
+      if (!message.text.trim()) restored.text = aiChatStaleClineTaskMessage
+    }
+    return restored
+  }
+
+  const projectionMessages = (messages: Array<{ payload: unknown }>) =>
+    messages
+      .map((message) => message.payload)
+      .filter(isAiChatHistoryMessage)
+      .map(reconcileProjectionMessage)
+
+  const loadProjectionPage = async (conversationId: string, beforeOrdinal?: number) => {
+    const listProjectionMessages = productSessionClient.listProjectionMessages()
+    if (!listProjectionMessages) return null
+    try {
+      const result = await listProjectionMessages(conversationId, {
+        ...(beforeOrdinal === undefined ? {} : { beforeOrdinal }),
+        limit: classicProjectionPageSize
+      })
+      if (!result?.ok || !result.data) return null
+      const messages = projectionMessages(result.data.messages)
+      if (messages.length !== result.data.messages.length) return null
+      return { ...result.data, messages }
+    } catch {
+      return null
+    }
+  }
 
   const clearAiContextUsage = () => {
     aiContextUsage.value = null
@@ -147,15 +207,46 @@ export const createWorkspaceAiChatHistoryRuntime = (input: {
 
   const currentChatHistoryMessages = () => chatMessages.value.map(chatMessageToHistoryMessage).filter(Boolean) as AiChatHistoryMessage[]
 
+  const currentClineSeedMessages = (includeLoadedPages = false) => {
+    if (includeLoadedPages || projectionConversationId !== selectedConversationId.value || !projectionSeedStartMessageId) {
+      return chatMessages.value
+    }
+    const start = chatMessages.value.findIndex((message) => message.id === projectionSeedStartMessageId)
+    return start < 0 ? chatMessages.value : chatMessages.value.slice(start)
+  }
+
+  const applyProjectionRevisionWindow = () => {
+    projectionConversationId = selectedConversationId.value
+    const start = Math.max(0, chatMessages.value.length - classicProjectionPageSize)
+    projectionSeedStartMessageId = chatMessages.value[start]?.id || ''
+  }
+
+  const persistedChatHistoryMessages = (id: string, messages: ChatMessage[]) => {
+    const normalized = messages.map(chatMessageToHistoryMessage).filter(Boolean) as AiChatHistoryMessage[]
+    if (id !== projectionConversationId || !projectionHasMore || !normalized.length) return normalized
+    const marker: AiChatHistoryMessage = {
+      id: classicProjectionMergeMarkerId,
+      role: 'system',
+      text: 'Earlier UI projection messages remain stored locally.',
+      say: 'context_truncated',
+      partial: true
+    }
+    return [marker, ...normalized]
+  }
+
   const applyChatHistorySnapshot = (snapshot: { conversations: AiChatConversationRecord[]; selectedConversationId: string }) => {
     conversations.value = snapshot.conversations.map(cloneConversationRecord)
-    selectedConversationId.value = conversations.value.some((conversation) => conversation.id === snapshot.selectedConversationId)
-      ? snapshot.selectedConversationId
-      : conversations.value[0]?.id || ''
+    const requestedId = snapshot.selectedConversationId.trim()
+    selectedConversationId.value = requestedId
+      ? conversations.value.some((conversation) => conversation.id === requestedId)
+        ? requestedId
+        : conversations.value[0]?.id || ''
+      : ''
   }
 
   const applyChatMessageSnapshot = (messages: AiChatHistoryMessage[]) => {
     chatMessages.value = messages.map(chatHistoryMessageToChatMessage)
+    resetProjectionCursor(selectedConversationId.value)
     clearAiContextUsage()
   }
 
@@ -169,7 +260,7 @@ export const createWorkspaceAiChatHistoryRuntime = (input: {
     return nextConversation
   }
 
-  const restoreChatMessagesFromBackend = async (id: string) => {
+  const restoreChatMessagesFromBackend = async (id: string, options: { restoreProjection?: boolean } = {}) => {
     const restoreChatConversation = chatHistoryClient.restoreChatConversation()
     if (!restoreChatConversation) {
       setTopNotice('会话历史加载服务不可用')
@@ -192,15 +283,59 @@ export const createWorkspaceAiChatHistoryRuntime = (input: {
     }
     const data = result.data
     upsertConversationRecord(data.conversation)
-    chatMessages.value = data.messages.map(chatHistoryMessageToChatMessage)
-    if (data.truncated) {
+    const projectionPage = await loadProjectionPage(data.conversation.id)
+    const restoredMessages = projectionPage?.messages.length ? projectionPage.messages : data.messages
+    chatMessages.value = restoredMessages.map(chatHistoryMessageToChatMessage)
+    projectionConversationId = data.conversation.id
+    projectionBeforeOrdinal = projectionPage?.nextBeforeOrdinal ?? null
+    projectionHasMore = projectionPage?.hasMore === true
+    projectionSeedStartMessageId = restoredMessages[0]?.id || ''
+    if (!projectionPage?.messages.length && data.messages.length) {
+      const replaceProjection = productSessionClient.replaceProjectionMessages()
+      void replaceProjection?.(
+        data.conversation.id,
+        data.messages.map((message) => ({ messageId: message.id, payload: message }))
+      ).catch(() => undefined)
+    }
+    if (!projectionPage?.messages.length && data.truncated) {
       setTopNotice(i18nText('ai.historyRestoreTruncated', { count: data.returnedMessages ?? data.messages.length }))
     }
     clearAiContextUsage()
+    try {
+      if (options.restoreProjection !== false) await input.afterConversationRestored?.(data.conversation.id)
+    } catch {
+      /* Chat history remains usable when its optional context projection cannot be restored. */
+    }
     return true
   }
 
-  const loadChatConversationsFromBackend = async (options: { restoreIfEmpty?: boolean } = {}) => {
+  const loadOlderConversationMessages = async () => {
+    const conversationId = selectedConversationId.value.trim()
+    if (
+      !conversationId ||
+      projectionConversationId !== conversationId ||
+      !projectionHasMore ||
+      projectionBeforeOrdinal === null ||
+      projectionPageLoading
+    ) return 0
+    projectionPageLoading = true
+    try {
+      const page = await loadProjectionPage(conversationId, projectionBeforeOrdinal)
+      if (!page || selectedConversationId.value !== conversationId) return 0
+      projectionBeforeOrdinal = page.nextBeforeOrdinal
+      projectionHasMore = page.hasMore
+      const existingIds = new Set(chatMessages.value.map((message) => message.id))
+      const older = page.messages
+        .filter((message) => !existingIds.has(message.id))
+        .map(chatHistoryMessageToChatMessage)
+      if (older.length) chatMessages.value = [...older, ...chatMessages.value]
+      return older.length
+    } finally {
+      projectionPageLoading = false
+    }
+  }
+
+  const loadChatConversationsFromBackend = async (options: { restoreIfEmpty?: boolean; restoreSelection?: boolean } = {}) => {
     const listChatConversations = chatHistoryClient.listChatConversations()
     if (!listChatConversations) {
       setTopNotice('会话历史加载服务不可用')
@@ -221,19 +356,85 @@ export const createWorkspaceAiChatHistoryRuntime = (input: {
       setTopNotice(malformedAiBackendResultMessage)
       return false
     }
-    applyChatHistorySnapshot(result.data)
-    if (options.restoreIfEmpty !== false && chatMessages.value.length === 0 && selectedConversationId.value) {
+    const currentSelectedConversationId = selectedConversationId.value.trim()
+    const snapshotSelectedConversationId = options.restoreSelection === false
+      ? result.data.conversations.some((conversation) => conversation.id === currentSelectedConversationId)
+        ? currentSelectedConversationId
+        : ''
+      : result.data.selectedConversationId
+    applyChatHistorySnapshot({
+      ...result.data,
+      selectedConversationId: snapshotSelectedConversationId
+    })
+    if (!selectedConversationId.value) {
+      applyChatMessageSnapshot([])
+    } else if (options.restoreIfEmpty !== false && chatMessages.value.length === 0) {
       await restoreChatMessagesFromBackend(selectedConversationId.value)
     }
     return true
   }
 
-  const updateCurrentConversationSnapshot = async (summary?: string, options: { notifyUnavailable?: boolean; notifyFailure?: boolean } = {}) => {
+  const deselectConversation = async (expectedConversationId: string) => {
+    const deselectChatConversation = chatHistoryClient.deselectChatConversation()
+    if (!deselectChatConversation) return false
+    let result
+    try {
+      result = await deselectChatConversation(expectedConversationId)
+    } catch {
+      return false
+    }
+    if (!result?.ok || !isAiChatHistorySnapshotData(result.data) || result.data.selectedConversationId !== '') return false
+    if (selectedConversationId.value === expectedConversationId) {
+      applyChatHistorySnapshot(result.data)
+      applyChatMessageSnapshot([])
+    }
+    return true
+  }
+
+  const updateConversationSnapshot = async (
+    id: string,
+    messages: ChatMessage[],
+    summary?: string,
+    options: { notifyUnavailable?: boolean; notifyFailure?: boolean; preserveSelection?: boolean } = {}
+  ) => {
     const updateChatConversation = chatHistoryClient.updateChatConversation()
     if (!updateChatConversation) {
       if (options.notifyUnavailable) setTopNotice('会话历史写入服务不可用')
       return false
     }
+    const conversation = conversations.value.find((item) => item.id === id)
+    if (!conversation) return false
+    const nextTitle = summary && isAutoNamedConversationTitle(conversation.title)
+      ? conversationTitleFromPrompt(summary) || conversation.title
+      : conversation.title
+    const result = await updateChatConversation({
+      id,
+      title: nextTitle,
+      summary: summary || conversation.summary,
+      favorite: conversation.favorite,
+      messages: persistedChatHistoryMessages(id, messages),
+      preserveSelection: options.preserveSelection
+    })
+    if (!result?.ok || !isAiChatConversationMutationData(result.data)) {
+      if (options.notifyFailure) setTopNotice(result?.errorMessage || '会话历史写入失败')
+      return false
+    }
+    if (options.preserveSelection) {
+      const currentSelection = selectedConversationId.value
+      conversations.value = result.data.conversations.map(cloneConversationRecord)
+      selectedConversationId.value = conversations.value.some((item) => item.id === currentSelection)
+        ? currentSelection
+        : ''
+    } else {
+      applyChatHistorySnapshot({
+        conversations: result.data.conversations,
+        selectedConversationId: result.data.selectedConversationId
+      })
+    }
+    return true
+  }
+
+  const updateCurrentConversationSnapshot = async (summary?: string, options: { notifyUnavailable?: boolean; notifyFailure?: boolean } = {}) => {
     let id = selectedConversationId.value
     if (!id || !conversations.value.some((conversation) => conversation.id === id)) {
       const createChatConversation = chatHistoryClient.createChatConversation()
@@ -252,25 +453,7 @@ export const createWorkspaceAiChatHistoryRuntime = (input: {
       })
       id = created.data.conversation.id
     }
-    const conversation = conversations.value.find((item) => item.id === id)
-    if (!conversation) return false
-    const nextTitle = summary && isAutoNamedConversationTitle(conversation.title) ? conversationTitleFromPrompt(summary) || conversation.title : conversation.title
-    const result = await updateChatConversation({
-      id,
-      title: nextTitle,
-      summary: summary || conversation.summary,
-      favorite: conversation.favorite,
-      messages: currentChatHistoryMessages()
-    })
-    if (!result?.ok || !isAiChatConversationMutationData(result.data)) {
-      if (options.notifyFailure) setTopNotice(result?.errorMessage || '会话历史写入失败')
-      return false
-    }
-    applyChatHistorySnapshot({
-      conversations: result.data.conversations,
-      selectedConversationId: result.data.selectedConversationId
-    })
-    return true
+    return updateConversationSnapshot(id, chatMessages.value, summary, options)
   }
 
   const syncCurrentConversationSnapshot = (options: { notifyUnavailable?: boolean; notifyFailure?: boolean } = {}) =>
@@ -285,7 +468,7 @@ export const createWorkspaceAiChatHistoryRuntime = (input: {
       conversations: result.data.conversations,
       selectedConversationId: result.data.selectedConversationId
     })
-    await restoreChatMessagesFromBackend(result.data.conversation.id)
+    await restoreChatMessagesFromBackend(result.data.conversation.id, { restoreProjection: false })
     return conversations.value.find((conversation) => conversation.id === result.data!.conversation.id) || cloneConversationRecord(result.data.conversation)
   }
 
@@ -327,7 +510,7 @@ export const createWorkspaceAiChatHistoryRuntime = (input: {
       title: nextTitle,
       summary: conversation.summary,
       favorite: input.favorite ?? conversation.favorite,
-      messages: id === selectedConversationId.value ? currentChatHistoryMessages() : undefined
+      messages: id === selectedConversationId.value ? persistedChatHistoryMessages(id, chatMessages.value) : undefined
     })
     if (!result?.ok || !isAiChatConversationMutationData(result.data)) return false
     applyChatHistorySnapshot({
@@ -347,7 +530,7 @@ export const createWorkspaceAiChatHistoryRuntime = (input: {
   const restoreConversation = async (id: string) => {
     const restored = await restoreChatMessagesFromBackend(id)
     if (restored) return true
-    if (await loadChatConversationsFromBackend({ restoreIfEmpty: false })) {
+    if (await loadChatConversationsFromBackend({ restoreIfEmpty: false, restoreSelection: false })) {
       return restoreChatMessagesFromBackend(id)
     }
     return false
@@ -394,12 +577,17 @@ export const createWorkspaceAiChatHistoryRuntime = (input: {
   return {
     clearAiContextUsage,
     currentChatHistoryMessages,
+    currentClineSeedMessages,
+    applyProjectionRevisionWindow,
     applyChatHistorySnapshot,
     applyChatMessageSnapshot,
     upsertConversationRecord,
     restoreChatMessagesFromBackend,
+    loadOlderConversationMessages,
     loadChatConversationsFromBackend,
+    deselectConversation,
     updateCurrentConversationSnapshot,
+    updateConversationSnapshot,
     syncCurrentConversationSnapshot,
     createConversation,
     deleteConversation,

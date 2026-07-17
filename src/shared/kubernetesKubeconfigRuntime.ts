@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'fs'
 import { homedir } from 'os'
 import { join } from 'path'
+import { parse as parseYamlDocument, parseDocument as parseYamlEditableDocument } from 'yaml'
 import type { KubernetesClusterRecord, KubernetesContextInfo, KubernetesImportContextInfo } from './contracts/kubernetes'
 import type { KubernetesPersistedCatalogState } from './kubernetesCatalogPersistence'
 
@@ -12,105 +13,71 @@ export const expandHomePath = (value: string) => {
   return value
 }
 
-const stripYamlScalar = (value: string) => {
-  const trimmed = value.trim()
-  if (!trimmed) return ''
-  const withoutComment = trimmed.replace(/\s+#.*$/, '').trim()
-  if ((withoutComment.startsWith('"') && withoutComment.endsWith('"')) || (withoutComment.startsWith("'") && withoutComment.endsWith("'"))) {
-    return withoutComment.slice(1, -1)
-  }
-  return withoutComment
-}
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value)
 
-const yamlValueAfter = (line: string, key: string) => {
-  const match = line.match(new RegExp(`^\\s*${key}\\s*:\\s*(.*)$`))
-  return match ? stripYamlScalar(match[1]) : ''
+const textValue = (value: unknown) => (typeof value === 'string' ? value.trim() : typeof value === 'number' ? String(value) : '')
+
+// kubeconfig 是 YAML(JSON 亦为其子集)。kubectl/client-go 序列化时按字母序输出键,
+// 列表项以 `- cluster:`/`- context:` 开头、`name:` 在后,手写解析无法覆盖全部布局,
+// 因此这里必须走真正的 YAML 解析。uniqueKeys 放宽以容忍历史 kubeconfig 中的重复键。
+const parseKubeconfigDocument = (content: string): Record<string, unknown> | null => {
+  try {
+    const parsed = parseYamlDocument(content, { uniqueKeys: false }) as unknown
+    return isRecord(parsed) ? parsed : null
+  } catch {
+    return null
+  }
 }
 
 export const parseKubeconfig = (content: string) => {
-  const lines = content.split(/\r?\n/)
-  const parsedClusters = new Map<string, string>()
-  const parsedContexts: KubernetesImportContextInfo[] = []
-  const currentContext = lines.map((line) => yamlValueAfter(line, 'current-context')).find(Boolean) || ''
-  let section: 'clusters' | 'contexts' | '' = ''
-  let clusterName = ''
-  let contextName = ''
-  let contextCluster = ''
-  let contextNamespace = ''
+  const document = parseKubeconfigDocument(content)
+  if (!document) return { contexts: [] as KubernetesImportContextInfo[], currentContext: '' }
 
-  const flushContext = () => {
-    if (!contextName || !contextCluster) return
+  const serverByClusterName = new Map<string, string>()
+  const rawClusters = Array.isArray(document.clusters) ? document.clusters : []
+  for (const entry of rawClusters) {
+    if (!isRecord(entry)) continue
+    const name = textValue(entry.name)
+    if (!name || serverByClusterName.has(name)) continue
+    const cluster = isRecord(entry.cluster) ? entry.cluster : {}
+    serverByClusterName.set(name, textValue(cluster.server))
+  }
+
+  const parsedContexts: KubernetesImportContextInfo[] = []
+  const rawContexts = Array.isArray(document.contexts) ? document.contexts : []
+  for (const entry of rawContexts) {
+    if (!isRecord(entry)) continue
+    const name = textValue(entry.name)
+    const context = isRecord(entry.context) ? entry.context : {}
+    const cluster = textValue(context.cluster)
+    if (!name || !cluster) continue
     parsedContexts.push({
-      name: contextName,
-      cluster: contextCluster,
-      server: parsedClusters.get(contextCluster) || '',
-      namespace: contextNamespace || 'default'
+      name,
+      cluster,
+      server: serverByClusterName.get(cluster) || '',
+      namespace: textValue(context.namespace) || 'default'
     })
   }
 
-  for (const rawLine of lines) {
-    const line = rawLine.replace(/\t/g, '  ')
-    if (/^\s*clusters\s*:\s*$/.test(line)) {
-      flushContext()
-      section = 'clusters'
-      clusterName = ''
-      contextName = ''
-      contextCluster = ''
-      contextNamespace = ''
-      continue
-    }
-    if (/^\s*contexts\s*:\s*$/.test(line)) {
-      flushContext()
-      section = 'contexts'
-      clusterName = ''
-      contextName = ''
-      contextCluster = ''
-      contextNamespace = ''
-      continue
-    }
-    if (/^\s*(users|preferences|apiVersion|kind)\s*:/.test(line)) {
-      if (section === 'contexts') flushContext()
-      section = ''
-      clusterName = ''
-      contextName = ''
-      contextCluster = ''
-      contextNamespace = ''
-      continue
-    }
-    if (section === 'clusters') {
-      const listName = line.match(/^\s*-\s+name\s*:\s*(.+)$/)
-      if (listName) {
-        clusterName = stripYamlScalar(listName[1])
-        if (!parsedClusters.has(clusterName)) parsedClusters.set(clusterName, '')
-        continue
-      }
-      const server = yamlValueAfter(line, 'server')
-      if (clusterName && server) parsedClusters.set(clusterName, server)
-      continue
-    }
-    if (section === 'contexts') {
-      const listName = line.match(/^\s*-\s+name\s*:\s*(.+)$/)
-      if (listName) {
-        flushContext()
-        contextName = stripYamlScalar(listName[1])
-        contextCluster = ''
-        contextNamespace = ''
-        continue
-      }
-      const cluster = yamlValueAfter(line, 'cluster')
-      if (contextName && cluster) {
-        contextCluster = cluster
-        continue
-      }
-      const namespace = yamlValueAfter(line, 'namespace')
-      if (contextName && namespace) contextNamespace = namespace
-    }
-  }
-  if (section === 'contexts') flushContext()
-
   return {
     contexts: parsedContexts.filter((context, index, list) => list.findIndex((item) => item.name === context.name) === index),
-    currentContext
+    currentContext: textValue(document['current-context'])
+  }
+}
+
+/**
+ * Returns a copy of the kubeconfig content with `current-context` pinned to the requested
+ * context, or null when the content cannot be parsed. Used to build session-scoped
+ * kubeconfig files so terminals never mutate the user's real kubeconfig.
+ */
+export const pinKubeconfigCurrentContext = (content: string, contextName: string): string | null => {
+  try {
+    const document = parseYamlEditableDocument(content, { uniqueKeys: false })
+    if (!isRecord(document.toJS())) return null
+    document.set('current-context', contextName)
+    return String(document)
+  } catch {
+    return null
   }
 }
 

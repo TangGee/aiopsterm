@@ -71,12 +71,15 @@ describe('aiPanelCodexRuntime', () => {
       port: 22,
       username: 'ops',
       assetId: 'asset-1',
+      connectionId: 'conn-1',
       assetName: 'Production',
       cwd: '/srv/app'
     })
 
     const staleTarget: CodexSessionTargetContext = { kind: 'ssh', panelId: 'missing', sessionId: 'old-session', label: 'old host' }
-    expect(currentBoundCodexTarget({ boundTarget: staleTarget }, [localPanel])).toBe(staleTarget)
+    expect(currentBoundCodexTarget({ boundTarget: staleTarget }, [localPanel])).toBeNull()
+    expect(currentBoundCodexTarget({ boundTarget: { panelId: 'panel-local', sessionId: 'terminal-local' } }, [{ ...localPanel, status: 'closed' }])).toBeNull()
+    expect(currentBoundCodexTarget({ boundTarget: { panelId: 'panel-local', sessionId: 'terminal-local' } }, [{ ...localPanel, status: 'error' }])).toBeNull()
     expect(currentBoundCodexTarget({ boundTarget: { panelId: 'panel-ssh', sessionId: 'terminal-ssh' } }, [sshPanel])).toEqual(
       expect.objectContaining({ kind: 'ssh', host: '10.0.0.8' })
     )
@@ -87,7 +90,7 @@ describe('aiPanelCodexRuntime', () => {
     const conversation = createCodexConversationRecord('codex-1', target)
     expect(conversation).toMatchObject({
       id: 'codex-1',
-      title: 'Production',
+      title: '',
       status: 'idle',
       boundTarget: target
     })
@@ -139,14 +142,15 @@ describe('aiPanelCodexRuntime', () => {
     const localTarget = codexTargetContextFromPanel(localPanel)
     const target = codexTargetContextFromPanel(sshPanel)
     const conversation = createCodexConversationRecord('codex-1', localTarget)
+    conversation.title = 'Investigate deploy rollback'
     const previous = applyCodexTargetBinding(conversation, target)
     expect(previous).toEqual(localTarget)
-    expect(conversation).toMatchObject({ title: 'Production', boundTarget: target, lastTargetSignature: '' })
+    expect(conversation).toMatchObject({ title: 'Investigate deploy rollback', boundTarget: target, lastTargetSignature: '' })
     expect(applyCodexTargetUnbinding(conversation, 'Codex CLI')).toEqual(target)
-    expect(conversation).toMatchObject({ title: 'Codex CLI', boundTarget: null })
+    expect(conversation).toMatchObject({ title: 'Investigate deploy rollback', boundTarget: null })
 
     expect(closeCodexConversationRecord([{ id: 'one' }], 'one', 'one')).toEqual(
-      expect.objectContaining({ status: 'keep-one', nextActiveId: 'one' })
+      expect.objectContaining({ status: 'closed-active', nextConversations: [], nextActiveId: '' })
     )
     expect(closeCodexConversationRecord([{ id: 'one' }, { id: 'two' }, { id: 'three' }], 'two', 'two')).toEqual({
       status: 'closed-active',

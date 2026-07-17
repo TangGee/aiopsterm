@@ -100,7 +100,17 @@ describe('assetsPanelAssetInteractionRuntime', () => {
     await runtime.connectAsset('org-1')
     expect(selectedAssetId.value).toBe('org-1')
     expect(openSshTerminalLaunch).toHaveBeenCalled()
-    expect(workspace.selectedContexts).toEqual([{ id: 'org-1', kind: 'hosts', label: '10.0.0.1', detail: 'jumpserver-org' }])
+    expect(workspace.selectedContexts).toEqual([{
+      id: 'org-1',
+      kind: 'hosts',
+      label: 'jumpserver-org',
+      detail: '10.0.0.1',
+      assetId: 'org-1',
+      host: '10.0.0.1',
+      port: 22,
+      username: 'ops',
+      assetName: 'jumpserver-org'
+    }])
     expect(editorOpen.value).toBe(false)
     expect(editMode.value).toBe(false)
     expect(workspace.nextOnboardingStep).toHaveBeenCalled()

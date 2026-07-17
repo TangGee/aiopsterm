@@ -1,5 +1,6 @@
 import { closeAiConversationTab, nextAiHistoryPageAfterDelete, type AiPanelConversationLike } from '@/services/ai/aiPanelConversationRuntime'
 import { isAiChatExportData, malformedAiBackendResultMessage } from '@/services/ai/aiBackendGuards'
+import { productSessionClient } from '@/services/ai/productSessionClient'
 import type { AiChatExportInput, AiChatExportResult } from '@shared/contracts/aiChat'
 
 export type AiPanelHistoryRuntimeState = {
@@ -21,8 +22,9 @@ export type AiPanelHistoryRuntimeLabels = {
   chatCreateFailed: () => string
   chatRestored: () => string
   chatRestoreFailed: () => string
-  keepOneTab: () => string
   tabClosed: () => string
+  tabCloseFailed: () => string
+  tabCloseRollbackFailed: () => string
   historyTitleUpdated: () => string
   historyTitleUpdateFailed: () => string
   chatDeleted: () => string
@@ -46,9 +48,11 @@ export type AiPanelHistoryRuntimeOptions<TConversation extends AiPanelConversati
   visibleHistoryCount: () => number
   chatMessageCount: () => number
   hasActiveTurn: () => boolean
+  cancelActiveTurn?: () => Promise<boolean>
   currentConversationTitle: () => string
   exportMessages: () => AiChatExportInput['messages']
   createConversation: () => Promise<{ id: string } | null | undefined>
+  deselectConversation: (expectedConversationId: string) => Promise<boolean>
   restoreConversation: (id: string) => Promise<boolean>
   renameConversation: (id: string, title: string) => Promise<boolean>
   deleteConversation: (id: string) => Promise<boolean>
@@ -83,6 +87,7 @@ export const createAiPanelHistoryRuntime = <TConversation extends AiPanelConvers
   options: AiPanelHistoryRuntimeOptions<TConversation>
 ) => {
   let noticeTimer: unknown
+  const closingConversationIds = new Set<string>()
 
   const showNotice = (message: string) => {
     options.state.chatExportNotice = message
@@ -149,20 +154,53 @@ export const createAiPanelHistoryRuntime = <TConversation extends AiPanelConvers
     options.state.openConversationTabIds = [...options.state.openConversationTabIds, id]
   }
 
+  const hydrateOpenConversationTabs = async () => {
+    const conversationIds = new Set(options.conversations().map((conversation) => conversation.id))
+    const selectedId = options.selectedConversationId()
+    const selectedIds = selectedId && conversationIds.has(selectedId) ? [selectedId] : []
+    const retainedIds = options.state.openConversationTabIds.filter((id) => conversationIds.has(id))
+    const fallbackIds = [...new Set([...retainedIds, ...selectedIds])]
+    const listProductSessions = productSessionClient.list()
+    if (!listProductSessions) {
+      options.state.openConversationTabIds = fallbackIds
+      return false
+    }
+    let result
+    try {
+      result = await listProductSessions({ surface: 'classic', isOpen: true, limit: 200 })
+    } catch {
+      options.state.openConversationTabIds = fallbackIds
+      return false
+    }
+    if (!result?.ok || !Array.isArray(result.data?.sessions)) {
+      options.state.openConversationTabIds = fallbackIds
+      return false
+    }
+    const openIds = result.data.sessions
+      .filter((session) => session?.surface === 'classic' && session.isOpen === true && conversationIds.has(session.id))
+      .map((session) => session.id)
+    options.state.openConversationTabIds = [...new Set(openIds)]
+    const selectedIsOpen = selectedId ? openIds.includes(selectedId) : false
+    if (selectedIsOpen) return true
+    try {
+      if (openIds.length) {
+        if (await options.restoreConversation(openIds[0])) return true
+        if (selectedId) await options.deselectConversation(selectedId)
+        return false
+      }
+      return selectedId ? options.deselectConversation(selectedId) : true
+    } catch {
+      return false
+    }
+  }
+
   const pruneConversationTabs = () => {
     const existingIds = new Set(options.conversations().map((conversation) => conversation.id))
     const nextIds = options.state.openConversationTabIds.filter((id) => existingIds.has(id))
     if (nextIds.length !== options.state.openConversationTabIds.length) options.state.openConversationTabIds = nextIds
   }
 
-  const blockActiveTurnNavigation = () => {
-    if (!options.hasActiveTurn()) return false
-    showNotice(options.labels.activeTurnNavigationBlocked())
-    return true
-  }
-
   const createNewConversation = async () => {
-    if (blockActiveTurnNavigation()) return false
     const created = await options.createConversation()
     options.state.historySearchTerm = ''
     options.state.historyCurrentPage = 1
@@ -181,7 +219,6 @@ export const createAiPanelHistoryRuntime = <TConversation extends AiPanelConvers
     failureMessage = options.labels.chatRestoreFailed()
   ) => {
     if (options.state.editingHistoryId) return false
-    if (options.selectedConversationId() !== id && blockActiveTurnNavigation()) return false
     const restored = await options.restoreConversation(id)
     if (restored) ensureConversationTab(id)
     showNotice(restored ? successMessage : failureMessage)
@@ -196,18 +233,81 @@ export const createAiPanelHistoryRuntime = <TConversation extends AiPanelConvers
 
   const closeConversationTab = async (id: string) => {
     closeHistoryMenu()
-    if (options.selectedConversationId() === id && blockActiveTurnNavigation()) return
-    const result = closeAiConversationTab(options.state.openConversationTabIds, options.visibleTabs(), options.selectedConversationId(), id)
-    if (result.status === 'keep-one') {
-      showNotice(options.labels.keepOneTab())
-      return
+    if (closingConversationIds.has(id)) return
+    if (options.selectedConversationId() === id && options.hasActiveTurn()) void options.cancelActiveTurn?.()
+    closingConversationIds.add(id)
+    try {
+      const closeProductSession = productSessionClient.close()
+      if (!closeProductSession) {
+        showNotice(options.labels.tabCloseFailed())
+        return
+      }
+      const reopenProductSession = async () => {
+        const updateProductSession = productSessionClient.update()
+        if (!updateProductSession) return false
+        try {
+          const result = await updateProductSession({ id, isOpen: true })
+          return Boolean(result?.ok && result.data?.session?.id === id && result.data.session.isOpen)
+        } catch {
+          return false
+        }
+      }
+      try {
+        const closeResult = await closeProductSession(id)
+        if (!closeResult?.ok || closeResult.data?.id !== id) {
+          const reopened = await reopenProductSession()
+          showNotice(reopened ? closeResult?.errorMessage || options.labels.tabCloseFailed() : options.labels.tabCloseRollbackFailed())
+          return
+        }
+      } catch {
+        const reopened = await reopenProductSession()
+        showNotice(reopened ? options.labels.tabCloseFailed() : options.labels.tabCloseRollbackFailed())
+        return
+      }
+      const result = closeAiConversationTab(
+        options.state.openConversationTabIds,
+        options.visibleTabs(),
+        options.selectedConversationId(),
+        id
+      )
+      const commitClosedTab = () => {
+        options.state.openConversationTabIds = options.state.openConversationTabIds.filter((openId) => openId !== id)
+      }
+      if (result.status === 'closed') {
+        let deselected = false
+        try {
+          deselected = await options.deselectConversation(id)
+        } catch {
+          deselected = false
+        }
+        if (!deselected) {
+          if (options.selectedConversationId() !== id) {
+            commitClosedTab()
+            showNotice(options.labels.tabClosed())
+            return
+          }
+          const reopened = await reopenProductSession()
+          let restored = false
+          if (reopened) {
+            try {
+              restored = await options.restoreConversation(id)
+            } catch {
+              restored = false
+            }
+          }
+          showNotice(reopened && restored ? options.labels.tabCloseFailed() : options.labels.tabCloseRollbackFailed())
+          return
+        }
+      }
+      commitClosedTab()
+      if (result.status === 'closed-inactive' || result.status === 'closed') {
+        showNotice(options.labels.tabClosed())
+        return
+      }
+      await restoreConversationById(result.nextConversationId, options.labels.tabClosed(), options.labels.chatRestoreFailed())
+    } finally {
+      closingConversationIds.delete(id)
     }
-    options.state.openConversationTabIds = result.openIds
-    if (result.status === 'closed-inactive' || result.status === 'closed') {
-      showNotice(options.labels.tabClosed())
-      return
-    }
-    await restoreConversationById(result.nextConversationId, options.labels.tabClosed(), options.labels.chatRestoreFailed())
   }
 
   const restoreHistoryConversation = async (id: string) => {
@@ -236,7 +336,7 @@ export const createAiPanelHistoryRuntime = <TConversation extends AiPanelConvers
   }
 
   const deleteHistoryConversation = async (id: string) => {
-    if (blockActiveTurnNavigation()) return
+    if (id === options.selectedConversationId() && options.hasActiveTurn()) void options.cancelActiveTurn?.()
     const deleted = await options.deleteConversation(id)
     options.state.historyCurrentPage = nextAiHistoryPageAfterDelete(options.visibleHistoryCount(), options.state.historyCurrentPage)
     showNotice(deleted ? options.labels.chatDeleted() : options.labels.chatDeleteFailed())
@@ -304,6 +404,7 @@ export const createAiPanelHistoryRuntime = <TConversation extends AiPanelConvers
     exportCurrentChat,
     loadMoreHistoryConversations,
     openHistoryMenu,
+    hydrateOpenConversationTabs,
     pruneConversationTabs,
     resetHistoryFilters,
     restoreConversationById,

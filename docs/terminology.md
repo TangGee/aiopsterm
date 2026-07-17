@@ -6,11 +6,14 @@ This document defines the shared terms used when discussing aiopsterm UI and beh
 
 | Chinese term | English/code term | Meaning |
 | --- | --- | --- |
-| 模块导航栏 | `SideRail` | The narrow icon-only rail at the far left. It switches top-level modules such as Workspace, Files, Assets, and Database. |
+| 模块导航栏 | `SideRail` | The narrow icon-only rail at the far left. It switches top-level modules such as Workspace, Files, Assets, and Database, and also contains the dedicated Agents mode action. Agents is not a `ModuleKey`. |
 | 左侧功能面板 | `ModulePanel` | The wider left panel next to the module rail. Its contents change with the active module. |
+| Agents 会话列表 | `AgentsSidebar` | The Product Session catalog shown left of the main workspace in Agents mode. It restores or focuses Classic, Codex, and DB AI sessions; it is not a transcript renderer. |
 | 资源面板 | `WorkspacePanel` | The Workspace module's left functional panel for hosts, groups, local connections, recent connections, and related resource actions. It is a concrete type of left functional panel. |
 | 主工作区 | `MainWorkspace` | The central work area where terminal, file, asset, database, and other primary module work happens. In code this is usually represented by module-specific workspace components such as `TerminalWorkspace`, `FilesWorkspace`, and `AssetsWorkspace`. |
 | AI 侧栏 | `AiPanel` | The right-side AI assistant area. It is separate from the main workspace and should not be called a terminal pane. |
+| Agents 模式 | `mode-agents` | The shell layout `SideRail | AgentsSidebar | TerminalWorkspace | AiPanel`. The terminal workspace remains mounted and the right AiPanel is fixed visible. |
+| AI 会话面板 | `AiSessionsPanel` | The managed-agent inbox opened by the `AI 会话` module action. It is distinct from the Agents Product Session catalog. |
 
 ## Workspace Tabs And Panes
 

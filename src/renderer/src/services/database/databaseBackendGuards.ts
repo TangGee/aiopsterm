@@ -425,6 +425,21 @@ export function isDbAiPaneStateContext(value: unknown): value is DbAiPaneContext
   )
 }
 
+function isDbAiPaneSessionSnapshot(value: unknown) {
+  return (
+    isRecord(value) &&
+    typeof value.conversationId === 'string' &&
+    Boolean(value.conversationId.trim()) &&
+    isDbAiPaneStateContext(value.context) &&
+    typeof value.draft === 'string' &&
+    Array.isArray(value.messages) &&
+    value.messages.every((message) => isDbAiPaneMessageRecord(message)) &&
+    isNonNegativeNumber(value.createdAt) &&
+    isNonNegativeNumber(value.updatedAt) &&
+    value.updatedAt >= value.createdAt
+  )
+}
+
 export function isDbAiPaneStateSnapshot(value: unknown): value is DatabaseAiPaneStateSnapshot {
   return (
     isRecord(value) &&
@@ -434,7 +449,10 @@ export function isDbAiPaneStateSnapshot(value: unknown): value is DatabaseAiPane
     isDbAiPaneStateContext(value.context) &&
     typeof value.draft === 'string' &&
     Array.isArray(value.messages) &&
-    value.messages.every((message) => isDbAiPaneMessageRecord(message))
+    value.messages.every((message) => isDbAiPaneMessageRecord(message)) &&
+    (value.archivedSessions === undefined || (
+      Array.isArray(value.archivedSessions) && value.archivedSessions.every(isDbAiPaneSessionSnapshot)
+    ))
   )
 }
 
@@ -467,6 +485,7 @@ export function isDbAiPaneResponseData(
 export function isDbAiDrawerRequestRecord(value: unknown, expectedId?: string): value is DbAiRequest {
   if (!isRecord(value)) return false
   if (typeof value.id !== 'string' || !value.id.trim()) return false
+  if (value.conversationId !== undefined && (typeof value.conversationId !== 'string' || !value.conversationId.trim())) return false
   if (expectedId && value.id !== expectedId) return false
   return (
     isDbAiAction(value.action) &&

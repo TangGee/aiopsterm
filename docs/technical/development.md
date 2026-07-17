@@ -108,21 +108,27 @@ Package and release work should also use the package audits documented in the us
 
 ### Native Module ABI During Tests
 
-`better-sqlite3` and `node-pty` are native Node addons. Their `.node` binaries are compiled for one runtime ABI at a time. `npm run rebuild:native` rebuilds them for the pinned Electron runtime so the app and packaged builds can load them, but Vitest runs under the workspace's ordinary Node runtime. If a test logs an error such as `NODE_MODULE_VERSION 125` versus `NODE_MODULE_VERSION 115`, the installed native binary was built for Electron while the active Node test process needs the Node ABI.
+`better-sqlite3` and `node-pty` are native Node addons. Electron 31 uses module ABI 125, while the repository's Node 22 test runtime uses ABI 127. A single `better_sqlite3.node` cannot serve both processes. A development installation therefore keeps two physical SQLite bindings below `better-sqlite3/lib/binding/node-v<abi>-<platform>-<arch>/`. This is still one npm package, one application database, and one business implementation; only the approximately 2 MiB ABI-specific machine-code binding is duplicated. The existing `bindings` loader selects the matching file from `process.versions.modules`, so Vitest and Electron do not overwrite each other's SQLite binary.
 
-For Node/Vitest SQLite-backed tests, rebuild `better-sqlite3` for the active Node runtime:
-
-```bash
-npm rebuild better-sqlite3
-```
-
-Before running the Electron app or package builds again, rebuild the native modules back for Electron:
+`npm test` prepares and verifies only the Node/Vitest binding. This path does not resolve, launch, rebuild, or otherwise require the Electron runtime, so Node-only CI can run with just its own installed binding. To prepare or verify it explicitly:
 
 ```bash
-npm run rebuild:native
+npm run native:ensure:node
+npm run native:ensure:node -- --check
 ```
 
-This ABI switch is an environment state issue, not by itself a product regression. Treat skipped or failed SQLite-backed tests as incomplete until the native module has been rebuilt for the runtime that is executing the test.
+`npm run dev`, `npm start`, `npm run build:start`, and both source E2E commands prepare the Node and Electron SQLite bindings, then verify both runtimes. Package builds force-refresh the Electron binding before packaging. To prepare or verify Electron explicitly:
+
+```bash
+npm run native:ensure:electron
+npm run native:ensure:electron -- --check
+```
+
+The explicit recovery commands remain `npm run rebuild:native:node` and `npm run rebuild:native:electron`; `npm run rebuild:native` stays as the Electron-refresh alias used by package jobs. Node rebuilds discard inherited Electron/cross-build npm variables. Preparation is serialized with a token-owned workspace lock: a dead PID is recovered immediately, a live owner is never evicted merely because a build is long, malformed lock data must be explicitly stale, and a process removes only its own lock. The versioned manifest supports a Node-only record and preserves another runtime record only when its path and SHA-256 remain valid.
+
+The guard removes and rejects every `bindings@1.5.0` candidate that precedes `lib/binding`, including `build`, `Debug`, `Release`, `out`, `compiled`, and `addon-build` variants. It probes `better-sqlite3` with an in-memory query and verifies `node-pty` in each runtime included by the command, so an ABI mismatch fails before application or test startup. On Windows, stop every process using the target runtime before a forced rebuild or package rebuild; Windows does not allow a loaded `.node` file to be replaced, and the helper preserves the old destination when replacement cannot begin safely.
+
+The development tree needs both SQLite ABI bindings, but an application package does not. The `afterPack` hook validates the manifest and Electron binding hash, deletes the Node binding and all shadow candidates, and writes an Electron-only manifest. `audit:packaged-app` requires that sole binding and uses the packaged Electron executable with `ELECTRON_RUN_AS_NODE=1` to run a real in-memory `SELECT 1`. Treat any guard or packaged probe failure as an environment/build failure, not as a passing product verification.
 
 For background preset changes, regenerate the deterministic WebP assets and review previews:
 

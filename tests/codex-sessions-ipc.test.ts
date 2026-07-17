@@ -59,7 +59,7 @@ const createRegistrationInput = (overrides: Record<string, unknown> = {}) => {
     getUserDataPath: vi.fn(() => '/tmp/aiopsterm-user-data'),
     logRuntimeEvent: vi.fn(),
     ensureCodexTerminalBridgeServer: vi.fn(async () => undefined),
-    updateCodexTerminalBridgeSessionTarget: vi.fn((target?: CodexSessionTargetContext | null) => ({
+    updateCodexTerminalBridgeSessionTarget: vi.fn((_runtimeId: string, target?: CodexSessionTargetContext | null) => ({
       sessionId: target?.sessionId,
       target: target ? { ...target, label: target.label || 'prod-web' } : undefined,
       registered: Boolean(target?.sessionId && target.sessionId !== 'missing-terminal')
@@ -94,6 +94,8 @@ const createRegistrationInput = (overrides: Record<string, unknown> = {}) => {
     sendCodexLifecycle: vi.fn(),
     sendCodexExit: vi.fn(),
     sendCodexData: vi.fn(),
+    sendCodexThread: vi.fn(),
+    bindCodexThread: vi.fn(async () => ({ status: 'bound' as const })),
     ownerWindow,
     ...overrides
   }
@@ -152,11 +154,12 @@ describe('Codex sessions IPC registrar', () => {
 
     await expect(handlers.get('codex:create')?.({ sender: {} }, options)).resolves.toEqual(sessionInfo('codex-ipc-1'))
     expect(input.ensureCodexTerminalBridgeServer).toHaveBeenCalledWith('/tmp/aiopsterm-user-data')
-    expect(input.updateCodexTerminalBridgeSessionTarget).toHaveBeenCalledWith(options.target)
+    expect(input.updateCodexTerminalBridgeSessionTarget).toHaveBeenCalledWith('codex-ipc-1', options.target)
     expect(input.createCodexSession).toHaveBeenCalledWith('codex-ipc-1', options, {
       lifecycle: expect.any(Function),
       exit: expect.any(Function),
       data: expect.any(Function),
+      thread: expect.any(Function),
       closed: expect.any(Function)
     })
     expect(input.sendCodexLifecycle).toHaveBeenCalledWith(input.ownerWindow, lifecycle('codex-ipc-1', { stage: 'starting', runtimeKind: 'pty' }))
@@ -167,8 +170,68 @@ describe('Codex sessions IPC registrar', () => {
       binaryPath: '/repo/codex/bin/codex',
       codexHome: '/tmp/aiopsterm-user-data/codex-agent',
       cwd: '/tmp/aiopsterm-user-data/codex-agent',
-      runtimeKind: 'pty'
+      runtimeKind: 'pty',
+      launchMode: 'new',
+      recoveredFromThreadId: undefined
     })
+  })
+
+  it('uses the prepared launch and reports a recovered missing native session', async () => {
+    const { registerCodexSessionsIpc } = await loadBackend()
+    const { ipcMain, handlers } = createIpcHarness()
+    const requested: CodexSessionCreateOptions = {
+      productSessionId: 'product-codex-1',
+      launch: { mode: 'resume', threadId: 'thread-missing' },
+      target: { kind: 'local', sessionId: 'terminal-1' }
+    }
+    const prepared: CodexSessionCreateOptions = {
+      ...requested,
+      launch: { mode: 'new' }
+    }
+    const prepareCodexSessionLaunch = vi.fn(async () => ({
+      options: prepared,
+      recoveredFromThreadId: 'thread-missing'
+    }))
+    const input = createRegistrationInput({
+      prepareCodexSessionLaunch
+    })
+
+    registerCodexSessionsIpc(ipcMain, input)
+
+    await expect(handlers.get('codex:create')?.({ sender: {} }, requested)).resolves.toEqual({
+      ...sessionInfo('codex-ipc-1'),
+      launch: { mode: 'new' },
+      recoveredFromThreadId: 'thread-missing'
+    })
+    expect(prepareCodexSessionLaunch).toHaveBeenCalledWith(requested)
+    expect(input.createCodexSession).toHaveBeenCalledWith('codex-ipc-1', prepared, expect.any(Object))
+    expect(input.logRuntimeEvent).toHaveBeenCalledWith('warn', 'codex.resume.missing-session-recovered', {
+      id: 'codex-ipc-1',
+      productSessionId: 'product-codex-1',
+      threadId: 'thread-missing',
+      launchMode: 'new'
+    })
+  })
+
+  it('does not initialize the bridge when Codex launch preparation fails', async () => {
+    const { registerCodexSessionsIpc } = await loadBackend()
+    const { ipcMain, handlers } = createIpcHarness()
+    const error = Object.assign(new Error('recovery state changed'), {
+      code: 'CODEX_PRODUCT_SESSION_RECOVERY_FAILED'
+    })
+    const input = createRegistrationInput({
+      prepareCodexSessionLaunch: vi.fn(async () => {
+        throw error
+      })
+    })
+
+    registerCodexSessionsIpc(ipcMain, input)
+
+    await expect(handlers.get('codex:create')?.({ sender: {} }, {
+      launch: { mode: 'resume', threadId: 'thread-stale' }
+    })).rejects.toThrow(error)
+    expect(input.ensureCodexTerminalBridgeServer).not.toHaveBeenCalled()
+    expect(input.createCodexSession).not.toHaveBeenCalled()
   })
 
   it('logs and rethrows Codex creation failures after bridge initialization', async () => {
@@ -188,6 +251,75 @@ describe('Codex sessions IPC registrar', () => {
     expect(input.logRuntimeEvent).toHaveBeenCalledWith('error', 'codex.create.failed', { id: 'codex-ipc-1', error })
   })
 
+  it('forwards native thread bindings to the product registry and renderer', async () => {
+    const { registerCodexSessionsIpc } = await loadBackend()
+    const { ipcMain, handlers } = createIpcHarness()
+    const threadEvent = {
+      id: 'codex-ipc-1',
+      threadId: '0197f123-4567-7890-abcd-ef0123456789',
+      reason: 'resume' as const,
+      at: 1780490000001,
+      cwd: '/tmp/aiopsterm-user-data/codex-agent'
+    }
+    const input = createRegistrationInput({
+      bindCodexThread: vi.fn(async () => ({ status: 'bound' as const })),
+      createCodexSession: vi.fn(async (id: string, _options: CodexSessionCreateOptions, sink: any) => {
+        await sink.thread({ ...threadEvent, id })
+        return sessionInfo(id)
+      })
+    })
+    const options: CodexSessionCreateOptions = {
+      productSessionId: 'product-codex-1',
+      projectRoot: '/srv/app',
+      launch: { mode: 'resume', threadId: threadEvent.threadId }
+    }
+
+    registerCodexSessionsIpc(ipcMain, input)
+    await handlers.get('codex:create')?.({ sender: {} }, options)
+
+    expect(input.bindCodexThread).toHaveBeenCalledWith('product-codex-1', threadEvent, options)
+    expect(input.sendCodexThread).toHaveBeenCalledWith(input.ownerWindow, threadEvent)
+    expect(input.bindCodexThread.mock.invocationCallOrder[0]).toBeLessThan(
+      input.sendCodexThread.mock.invocationCallOrder[0]
+    )
+  })
+
+  it.each([
+    { status: 'closed' as const, errorMessage: undefined },
+    { status: 'failed' as const, errorMessage: 'native binding conflict' }
+  ])('does not forward a $status native thread binding to the renderer', async (bindingResult) => {
+    const { registerCodexSessionsIpc } = await loadBackend()
+    const { ipcMain, handlers } = createIpcHarness()
+    const threadEvent = {
+      id: 'codex-ipc-1',
+      threadId: '0197f123-4567-7890-abcd-ef0123456789',
+      reason: 'switch' as const,
+      at: 1780490000001
+    }
+    const input = createRegistrationInput({
+      bindCodexThread: vi.fn(async () => bindingResult.status === 'failed'
+        ? { status: 'failed' as const, errorMessage: bindingResult.errorMessage! }
+        : { status: 'closed' as const }),
+      createCodexSession: vi.fn(async (id: string, _options: CodexSessionCreateOptions, sink: any) => {
+        await sink.thread({ ...threadEvent, id })
+        return sessionInfo(id)
+      })
+    })
+
+    registerCodexSessionsIpc(ipcMain, input)
+    await handlers.get('codex:create')?.({ sender: {} }, { productSessionId: 'product-codex-1' })
+
+    expect(input.sendCodexThread).not.toHaveBeenCalled()
+    if (bindingResult.status === 'failed') {
+      expect(input.sendCodexLifecycle).toHaveBeenCalledWith(input.ownerWindow, expect.objectContaining({
+        id: threadEvent.id,
+        stage: 'error',
+        errorCode: 'CODEX_PRODUCT_SESSION_BIND_FAILED',
+        errorMessage: bindingResult.errorMessage
+      }))
+    }
+  })
+
   it('updates Codex terminal bridge target and normalizes invalid target payloads', async () => {
     const { registerCodexSessionsIpc } = await loadBackend()
     const { ipcMain, handlers } = createIpcHarness()
@@ -201,30 +333,33 @@ describe('Codex sessions IPC registrar', () => {
 
     registerCodexSessionsIpc(ipcMain, input)
 
-    expect(handlers.get('codex:set-target')?.({}, target)).toEqual({
+    expect(handlers.get('codex:set-target')?.({}, 'codex-runtime-1', target)).toEqual({
       ok: true,
       data: {
+        codexRuntimeId: 'codex-runtime-1',
         sessionId: 'terminal-1',
         target,
         registered: true
       }
     })
     expect(input.logRuntimeEvent).toHaveBeenCalledWith('info', 'codex.target.updated', {
+      id: 'codex-runtime-1',
       sessionId: 'terminal-1',
       targetKind: 'ssh',
       targetLabel: 'prod-web',
       registered: true
     })
 
-    expect(handlers.get('codex:set-target')?.({}, [] as unknown as CodexSessionTargetContext)).toEqual({
+    expect(handlers.get('codex:set-target')?.({}, 'codex-runtime-1', [] as unknown as CodexSessionTargetContext)).toEqual({
       ok: true,
       data: {
+        codexRuntimeId: 'codex-runtime-1',
         sessionId: undefined,
         target: undefined,
         registered: false
       }
     })
-    expect(input.updateCodexTerminalBridgeSessionTarget).toHaveBeenLastCalledWith(undefined)
+    expect(input.updateCodexTerminalBridgeSessionTarget).toHaveBeenLastCalledWith('codex-runtime-1', undefined)
   })
 
   it('sets pending context, writes, resizes, and kills through injected Codex backend operations', async () => {

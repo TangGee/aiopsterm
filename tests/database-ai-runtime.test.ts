@@ -7,6 +7,7 @@ import {
   dbAiActionLabel,
   dbAiBackendContext,
   dbAiBackendContextForIpc,
+  dbAiLocalizedBackendMessage,
   dbAiCanCancel,
   dbAiContentText,
   dbAiContextParts,
@@ -124,6 +125,26 @@ const message = (overrides: Partial<DbAiPaneMessage> = {}): DbAiPaneMessage => (
 })
 
 describe('databaseAiRuntime', () => {
+  it('localizes backend failures and cancellation in zh-CN while retaining technical error codes', () => {
+    expect(dbAiLocalizedBackendMessage({
+      responseLanguage: 'zh-CN',
+      errorCode: 'DB_MCP_QUERY_FAILED',
+      errorMessage: 'Database table query failed.',
+      fallback: 'DB AI 面板回答失败。'
+    })).toBe('Database MCP tool 调用失败（DB_MCP_QUERY_FAILED）。')
+    expect(dbAiLocalizedBackendMessage({
+      responseLanguage: 'zh-CN',
+      errorMessage: 'db_ai_cancelled',
+      fallback: 'DB AI 面板回答失败。'
+    })).toBe('DB AI 请求已取消。')
+    expect(dbAiLocalizedBackendMessage({
+      responseLanguage: 'en-US',
+      errorCode: 'DB_MCP_QUERY_FAILED',
+      errorMessage: 'Database table query failed.',
+      fallback: 'DB AI response failed.'
+    })).toBe('Database table query failed.')
+  })
+
   it('normalizes DB AI pane context, labels, width, snapshot, and pane request inputs', () => {
     expect(normalizeDbAiPaneContext({ connectionId: 'conn-pg', catalogName: 'orders', schemaName: 'missing' }, [postgresConnection, mysqlConnection])).toEqual({
       connectionId: 'conn-pg',
@@ -139,6 +160,10 @@ describe('databaseAiRuntime', () => {
     expect(dbAiPaneCanSend(' explain ', { connectionId: 'conn-pg', catalogName: 'orders', schemaName: 'public', dbType: 'postgresql' }, false)).toBe(true)
     expect(dbAiPaneIsStreaming([message()])).toBe(true)
     expect(dbAiPaneStatusLabel('cancelled')).toBe('Cancelled')
+    expect(dbAiPaneStatusLabel('streaming', 'zh-CN')).toBe('生成中')
+    expect(dbAiPaneContextSummary(undefined, { connectionId: '', catalogName: '', schemaName: '', dbType: '' }, 'zh-CN')).toBe(
+      '尚未选择 database context'
+    )
     expect(clampDbAiPaneWidth(900)).toBe(720)
     expect(clampDbAiPaneWidth(Number.NaN)).toBe(360)
 
@@ -290,7 +315,15 @@ describe('databaseAiRuntime', () => {
     expect(dbAiSql(done)).toBe('select id from orders;')
     expect(dbAiReasoningText(done.text)).toBe('Use index.')
     expect(dbAiContentText({ action: 'convert', text: done.text, sql: dbAiSql(done), targetDialect: 'mysql' })).toBe('Generated MySQL SQL preview.')
+    expect(dbAiContentText({
+      action: 'convert',
+      text: done.text,
+      sql: dbAiSql(done),
+      targetDialect: 'mysql',
+      responseLanguage: 'zh-CN'
+    })).toBe('已生成 MySQL SQL 预览。')
     expect(dbAiStatusLabel('streaming')).toBe('Streaming')
+    expect(dbAiStatusLabel('streaming', 'zh-CN')).toBe('生成中')
     expect(dbAiCanCancel('queued')).toBe(true)
     expect(normalizeDbAiTargetDialect('sqlserver')).toBe('mssql')
     expect(normalizeDbAiTargetDialect('kingbase')).toBe('postgresql')
@@ -315,8 +348,8 @@ describe('databaseAiRuntime', () => {
       'cache.sqlite3'
     ])
     expect(dbAiBackendContextForIpc(context)).toEqual(expect.objectContaining({ connectionId: 'conn-pg', dbType: 'postgresql', databaseName: 'orders', contextSummary: 'summary' }))
-    expect(dbAiDrawerCreateInput({ action: 'explain', sourceSql: 'select 1', targetDialect: 'postgresql', responseLanguage: 'en-US', context })).toEqual(
-      expect.objectContaining({ action: 'explain', sourceSql: 'select 1', targetDialect: 'postgresql', responseLanguage: 'en-US', context: expect.objectContaining({ connectionId: 'conn-pg' }) })
+    expect(dbAiDrawerCreateInput({ conversationId: 'dbai-session-1', action: 'explain', sourceSql: 'select 1', targetDialect: 'postgresql', responseLanguage: 'en-US', context })).toEqual(
+      expect.objectContaining({ conversationId: 'dbai-session-1', action: 'explain', sourceSql: 'select 1', targetDialect: 'postgresql', responseLanguage: 'en-US', context: expect.objectContaining({ connectionId: 'conn-pg' }) })
     )
   })
 
@@ -332,12 +365,16 @@ describe('databaseAiRuntime', () => {
       notice: 'Generated SQL inserted'
     })
     expect(planDbAiInsertSql('select 1', { start: 0, end: 8 }, 'select 2').notice).toBe('Editor selection replaced')
+    expect(planDbAiInsertSql('select 1', { start: 0, end: 8 }, 'select 2', 'zh-CN').notice).toBe('已替换编辑器选区')
     expect(planDbAiReplaceSql('select 1; select 2;', { start: 10, end: 18 }, 'select 3', false)).toEqual({
       nextSql: 'select 1; select 3;',
       selectionStart: 10,
       selectionEnd: 18,
       notice: 'Current statement replaced'
     })
+    expect(planDbAiReplaceSql('select 1; select 2;', { start: 10, end: 18 }, 'select 3', false, 'zh-CN').notice).toBe(
+      '已替换当前 SQL 语句'
+    )
     expect(dbAiQuickPromptText('schemaSummary')).toBe('Summarize the current database schema and list useful query entry points.')
     expect(dbAiQuickPromptText('explainActive', 'select 1')).toContain('select 1')
     expect(dbAiQuickPromptText('schemaSummary', '', 'zh-CN')).toBe('总结当前 database schema，并列出实用的查询入口。')

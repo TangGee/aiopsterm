@@ -112,6 +112,62 @@ describe('ai chat backend response boundary', () => {
     })
   })
 
+  it('attaches valid images and rejects invalid image data before creating an exchange', async () => {
+    const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII='
+    const valid = await createAiChatExchangeRequest({
+      text: 'explain this image',
+      contentParts: [{ type: 'image', mediaType: 'image/png', data: png, name: 'screen.png' }]
+    })
+
+    expect(valid).toMatchObject({
+      ok: true,
+      data: {
+        responseInput: {
+          userImages: [`data:image/png;base64,${png}`]
+        }
+      }
+    })
+
+    const invalid = await createAiChatExchangeRequest({
+      text: 'explain this image',
+      contentParts: [{ type: 'image', mediaType: 'image/jpeg', data: png, name: 'spoofed.jpg' }]
+    })
+
+    expect(invalid).toMatchObject({
+      ok: false,
+      errorCode: 'AI_CHAT_IMAGE_INVALID',
+      errorMessage: expect.stringContaining('不支持的图片类型')
+    })
+    expect(invalid.data).toBeUndefined()
+  })
+
+  it('preserves an explicit native transcript revision request', async () => {
+    const result = await createAiChatExchangeRequest({
+      text: 'revised question',
+      conversationId: 'conversation-revision',
+      replaceNativeTranscript: true,
+      messages: [
+        { role: 'user', text: 'kept question' },
+        { role: 'assistant', text: 'kept answer' }
+      ]
+    })
+
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        responseInput: {
+          conversationId: 'conversation-revision',
+          replaceNativeTranscript: true,
+          messages: [
+            { role: 'user', text: 'kept question' },
+            { role: 'assistant', text: 'kept answer' },
+            { role: 'user', text: 'revised question' }
+          ]
+        }
+      }
+    })
+  })
+
   it('assembles contexts, command, and enabled skill instructions inside the backend exchange boundary', async () => {
     configureAiChatRuntime({
       listSkills: () => [

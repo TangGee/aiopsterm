@@ -4,6 +4,7 @@ import type { AiopsAssetInput } from '@shared/contracts/assets'
 import type { useWorkspaceStore } from '@/stores/workspace'
 import { openLocalTerminalLaunch, openSshTerminalLaunch } from '@/services/terminal/terminalLaunchRuntime'
 import type { WorkspacePanelAsset } from '@/services/assets/workspaceAssetTreeRuntime'
+import { managedAssetDisplayName, managedAssetEndpoint } from '@shared/assetDisplayRuntime'
 
 type WorkspaceStore = ReturnType<typeof useWorkspaceStore>
 
@@ -66,9 +67,24 @@ export const createWorkspacePanelAssetInteractionRuntime = (deps: WorkspacePanel
       const panel = await (deps.openSshTerminalLaunch || openSshTerminalLaunch)(launchContext, asset, { title: asset.name })
       if (!panel) return
     }
+    const displayName = managedAssetDisplayName(asset)
+    const endpoint = managedAssetEndpoint(asset)
+    const context = asset.isLocalShell
+      ? { id: asset.id, kind: 'hosts' as const, label: asset.host, detail: asset.name }
+      : {
+          id: asset.id,
+          kind: 'hosts' as const,
+          label: displayName,
+          detail: endpoint,
+          assetId: asset.id,
+          host: endpoint || displayName,
+          port: Number(asset.port) || 22,
+          username: asset.username || 'root',
+          assetName: displayName
+        }
     deps.workspace.selectedContexts = [
       ...deps.workspace.selectedContexts.filter((item) => item.id !== asset.id),
-      { id: asset.id, kind: 'hosts', label: asset.host, detail: asset.name }
+      context
     ]
     if (!asset.isLocalShell) {
       await deps.workspace.updateWorkspacePreferences({

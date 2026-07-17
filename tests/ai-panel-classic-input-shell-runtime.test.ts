@@ -259,7 +259,7 @@ describe('aiPanelClassicInputShellRuntime', () => {
 
     runtime.applyContext(hostContext)
     expect(selectedContexts()).toEqual([hostContext])
-    runtime.closeContextPopup({ restoreFocus: true })
+    expect(popupState.contextPopupOpen).toBe(false)
     expect(calls.focusInputForTarget).toHaveBeenCalledWith(
       'main',
       expect.objectContaining({

@@ -5,12 +5,14 @@ import type {
   CodexSessionKillResult,
   CodexSessionLifecycleEvent,
   CodexSessionPendingContextResult,
+  CodexSessionThreadEvent,
   CodexSessionTargetContext,
   CodexSessionTargetUpdateResult,
   CodexSessionWriteResult
 } from '@shared/contracts/codexSessions'
 import type { RuntimeLogLevel } from '@shared/contracts/appRuntime'
 import { shouldUseTerminalDebugLogs } from '@shared/runtimeSwitches'
+import type { ProductSessionNativeBindingResult } from '../backend/agent/productSessionBindingLifecycle'
 
 type CodexTerminalBridgeTargetUpdateResult = {
   sessionId?: string
@@ -22,6 +24,7 @@ type CodexSessionEventSink = {
   lifecycle: (event: CodexSessionLifecycleEvent) => void
   exit: (event: CodexSessionLifecycleEvent, code?: number | null) => void
   data: (id: string, chunk: string | Buffer) => void
+  thread?: (event: CodexSessionThreadEvent) => Promise<void> | void
   closed?: (id: string) => void
 }
 
@@ -31,8 +34,13 @@ type RegisterCodexSessionsIpcInput = {
   getUserDataPath: () => string
   logRuntimeEvent: (level: RuntimeLogLevel, event: string, details?: Record<string, unknown>) => void
   ensureCodexTerminalBridgeServer: (userDataPath: string) => Promise<unknown>
-  updateCodexTerminalBridgeSessionTarget: (target?: CodexSessionTargetContext | null) => CodexTerminalBridgeTargetUpdateResult
+  updateCodexTerminalBridgeSessionTarget: (runtimeId: string, target?: CodexSessionTargetContext | null) => CodexTerminalBridgeTargetUpdateResult
+  clearCodexTerminalBridgeSessionTarget?: (runtimeId: string) => void
   createCodexSession: (id: string, options: CodexSessionCreateOptions, sink: CodexSessionEventSink) => Promise<CodexSessionInfo>
+  prepareCodexSessionLaunch?: (options: CodexSessionCreateOptions) => Promise<{
+    options: CodexSessionCreateOptions
+    recoveredFromThreadId?: string
+  }>
   setCodexSessionPendingContext: (id: string, text?: string) => Promise<CodexSessionPendingContextResult>
   writeCodexSession: (id: string, data: string) => CodexSessionWriteResult
   resizeCodexSession: (id: string, cols: number, rows: number) => boolean
@@ -40,6 +48,12 @@ type RegisterCodexSessionsIpcInput = {
   sendCodexLifecycle: (owner: BrowserWindow, lifecycle: CodexSessionLifecycleEvent) => void
   sendCodexExit: (owner: BrowserWindow, lifecycle: CodexSessionLifecycleEvent, code?: number | null) => void
   sendCodexData: (owner: BrowserWindow, id: string, chunk: string | Buffer) => void
+  sendCodexThread: (owner: BrowserWindow, event: CodexSessionThreadEvent) => void
+  bindCodexThread?: (
+    productSessionId: string,
+    event: CodexSessionThreadEvent,
+    options: CodexSessionCreateOptions
+  ) => Promise<ProductSessionNativeBindingResult> | ProductSessionNativeBindingResult
   closeCodexDataSession?: (id: string, reason?: string) => void
 }
 
@@ -83,13 +97,27 @@ export const registerCodexSessionsIpc = (ipcMain: IpcMain, input: RegisterCodexS
       rows: options.rows,
       targetSessionId: options.target?.sessionId,
       targetKind: options.target?.kind,
-      targetLabel: options.target?.label
+      targetLabel: options.target?.label,
+      launchMode: options.launch?.mode || 'new',
+      threadId: options.launch && options.launch.mode !== 'new' ? options.launch.threadId : undefined
     })
     try {
+      const preparation = input.prepareCodexSessionLaunch
+        ? await input.prepareCodexSessionLaunch(options)
+        : null
+      const effectiveOptions = preparation?.options || options
+      if (preparation?.recoveredFromThreadId) {
+        input.logRuntimeEvent('warn', 'codex.resume.missing-session-recovered', {
+          id,
+          productSessionId: effectiveOptions.productSessionId,
+          threadId: preparation.recoveredFromThreadId,
+          launchMode: effectiveOptions.launch?.mode || 'new'
+        })
+      }
       await input.ensureCodexTerminalBridgeServer(input.getUserDataPath())
-      const targetUpdate = input.updateCodexTerminalBridgeSessionTarget(options.target)
-      logTargetUpdate(input, 'codex.target.initialized', 'codex.target.initial-missing', targetUpdate, options.target, { id })
-      const session = await input.createCodexSession(id, options, {
+      const targetUpdate = input.updateCodexTerminalBridgeSessionTarget(id, effectiveOptions.target)
+      logTargetUpdate(input, 'codex.target.initialized', 'codex.target.initial-missing', targetUpdate, effectiveOptions.target, { id })
+      const session = await input.createCodexSession(id, effectiveOptions, {
         lifecycle: (lifecycle) => {
           input.logRuntimeEvent(lifecycle.stage === 'error' ? 'error' : 'info', 'codex.lifecycle', {
             id: lifecycle.id,
@@ -114,7 +142,46 @@ export const registerCodexSessionsIpc = (ipcMain: IpcMain, input: RegisterCodexS
           input.sendCodexExit(owner, lifecycle, code ?? lifecycle.code ?? null)
         },
         data: (sessionId, chunk) => input.sendCodexData(owner, sessionId, chunk),
+        thread: async (threadEvent) => {
+          let bindingResult: ProductSessionNativeBindingResult = { status: 'bound' }
+          if (effectiveOptions.productSessionId) {
+            if (!input.bindCodexThread) {
+              bindingResult = { status: 'failed', errorMessage: 'Codex product session binding is unavailable.' }
+            } else {
+              try {
+                bindingResult = await input.bindCodexThread(effectiveOptions.productSessionId, threadEvent, effectiveOptions)
+              } catch (error) {
+                bindingResult = {
+                  status: 'failed',
+                  errorMessage: error instanceof Error ? error.message : String(error)
+                }
+              }
+            }
+          }
+          input.logRuntimeEvent(bindingResult.status === 'bound' ? 'info' : 'warn', 'codex.thread.bound', {
+            id: threadEvent.id,
+            threadId: threadEvent.threadId,
+            reason: threadEvent.reason,
+            productSessionId: effectiveOptions.productSessionId,
+            bindingStatus: bindingResult.status,
+            ...(bindingResult.status === 'failed' ? { errorMessage: bindingResult.errorMessage } : {})
+          })
+          if (bindingResult.status === 'bound') {
+            input.sendCodexThread(owner, threadEvent)
+            return
+          }
+          if (bindingResult.status === 'failed') {
+            input.sendCodexLifecycle(owner, {
+              id: threadEvent.id,
+              stage: 'error',
+              at: Date.now(),
+              errorCode: 'CODEX_PRODUCT_SESSION_BIND_FAILED',
+              errorMessage: bindingResult.errorMessage
+            })
+          }
+        },
         closed: (sessionId) => {
+          input.clearCodexTerminalBridgeSessionTarget?.(sessionId)
           input.closeCodexDataSession?.(sessionId, 'codex-session-closed')
           input.logRuntimeEvent('info', 'codex.session-removed', { id: sessionId })
         }
@@ -124,9 +191,19 @@ export const registerCodexSessionsIpc = (ipcMain: IpcMain, input: RegisterCodexS
         binaryPath: session.binaryPath,
         codexHome: session.codexHome,
         cwd: session.cwd,
-        runtimeKind: session.runtimeKind
+        runtimeKind: session.runtimeKind,
+        launchMode: effectiveOptions.launch?.mode || 'new',
+        recoveredFromThreadId: preparation?.recoveredFromThreadId
       })
-      return session
+      return preparation
+        ? {
+            ...session,
+            launch: effectiveOptions.launch || { mode: 'new' as const },
+            ...(preparation.recoveredFromThreadId
+              ? { recoveredFromThreadId: preparation.recoveredFromThreadId }
+              : {})
+          }
+        : session
     } catch (error) {
       input.logRuntimeEvent('error', 'codex.create.failed', {
         id,
@@ -136,11 +213,12 @@ export const registerCodexSessionsIpc = (ipcMain: IpcMain, input: RegisterCodexS
     }
   })
 
-  ipcMain.handle('codex:set-target', (_event, target: CodexSessionTargetContext | null | undefined): CodexSessionTargetUpdateResult => {
+  ipcMain.handle('codex:set-target', (_event, id: string, target: CodexSessionTargetContext | null | undefined): CodexSessionTargetUpdateResult => {
     const targetContext = normalizeCodexTargetContext(target)
-    const result = input.updateCodexTerminalBridgeSessionTarget(targetContext)
-    logTargetUpdate(input, 'codex.target.updated', 'codex.target.unavailable', result, targetContext)
-    return { ok: true, data: result }
+    const runtimeId = String(id || '').trim()
+    const result = input.updateCodexTerminalBridgeSessionTarget(runtimeId, targetContext)
+    logTargetUpdate(input, 'codex.target.updated', 'codex.target.unavailable', result, targetContext, { id: runtimeId })
+    return { ok: true, data: { codexRuntimeId: runtimeId || undefined, ...result } }
   })
 
   ipcMain.handle('codex:set-pending-context', async (_event, id: string, text?: string) => {

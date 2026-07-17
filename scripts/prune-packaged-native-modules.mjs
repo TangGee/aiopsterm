@@ -1,10 +1,27 @@
-import { chmodSync, cpSync, existsSync, rmSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { chmodSync, cpSync, existsSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
-import { codexBinaryName, codexPackageDir, packagedCodexBinaryPath, packagedCodexPackageDir } from './codex-runtime-paths.mjs'
+import {
+  codexBinaryName,
+  codexPackageDir,
+  normalizeNodeArch,
+  packagedCodexBinaryPath,
+  packagedCodexPackageDir
+} from './codex-runtime-paths.mjs'
 
 const removeIfExists = (target) => {
   if (existsSync(target)) {
     rmSync(target, { recursive: true, force: true })
+  }
+}
+
+const sha256 = (target) => createHash('sha256').update(readFileSync(target)).digest('hex')
+
+const readJson = (target, label) => {
+  try {
+    return JSON.parse(readFileSync(target, 'utf8'))
+  } catch (error) {
+    throw new Error(`Cannot read ${label}: ${target}\n${error instanceof Error ? error.message : String(error)}`)
   }
 }
 
@@ -58,16 +75,86 @@ const copyCodexCliPackage = (context) => {
   chmodSync(packagedCodexBinaryPath(resourcesDir, platform), 0o755)
 }
 
+const prunePackagedSqlite = (context) => {
+  const platform = context?.electronPlatformName || process.platform
+  const arch = normalizeNodeArch(context?.arch ?? process.arch)
+  const resourcesDir = packagedResourcesDir(context)
+  const sqliteRoot = join(resourcesDir, 'app.asar.unpacked', 'node_modules', 'better-sqlite3')
+  const bindingRoot = join(sqliteRoot, 'lib', 'binding')
+  const manifestPath = join(bindingRoot, 'aiopsterm-native-manifest.json')
+  const packagePath = join(sqliteRoot, 'package.json')
+
+  if (!existsSync(sqliteRoot) || !existsSync(packagePath) || !existsSync(manifestPath)) {
+    throw new Error(`Packaged better-sqlite3 and its native manifest are required: ${sqliteRoot}`)
+  }
+
+  const manifest = readJson(manifestPath, 'packaged better-sqlite3 native manifest')
+  const sqlitePackage = readJson(packagePath, 'packaged better-sqlite3 package metadata')
+  const electron = manifest?.electron
+  const modules = String(electron?.modules || '')
+  const targetBindingDirName = `node-v${modules}-${platform}-${arch}`
+  const targetBindingRelativePath = `lib/binding/${targetBindingDirName}/better_sqlite3.node`
+  const targetBindingPath = join(bindingRoot, targetBindingDirName, 'better_sqlite3.node')
+
+  if (
+    manifest?.schemaVersion !== 1 ||
+    manifest?.betterSqlite3Version !== sqlitePackage.version ||
+    manifest?.electronVersion !== electron?.electron ||
+    !electron ||
+    !/^\d+$/.test(modules) ||
+    !electron.node ||
+    electron.platform !== platform ||
+    electron.arch !== arch ||
+    String(electron.bindingPath || '').replaceAll('\\', '/') !== targetBindingRelativePath ||
+    !existsSync(targetBindingPath) ||
+    !statSync(targetBindingPath).isFile() ||
+    !/^[a-f0-9]{64}$/i.test(electron.sha256 || '') ||
+    sha256(targetBindingPath) !== electron.sha256
+  ) {
+    throw new Error(
+      `The packaged better-sqlite3 Electron binding is missing or does not match ${platform}/${arch}: ${targetBindingPath}`
+    )
+  }
+
+  for (const entry of readdirSync(bindingRoot)) {
+    if (entry !== targetBindingDirName && entry !== 'aiopsterm-native-manifest.json') {
+      removeIfExists(join(bindingRoot, entry))
+    }
+  }
+  for (const entry of readdirSync(dirname(targetBindingPath))) {
+    if (entry !== basename(targetBindingPath)) removeIfExists(join(dirname(targetBindingPath), entry))
+  }
+
+  // bindings@1.5.0 checks these roots before its ABI-keyed lib/binding path.
+  ;['build', 'out', 'Debug', 'Release', 'compiled', 'addon-build'].forEach((entry) => removeIfExists(join(sqliteRoot, entry)))
+  ;['deps', 'src', 'test', 'benchmark', 'binding.gyp'].forEach((entry) => removeIfExists(join(sqliteRoot, entry)))
+
+  const packagedManifest = {
+    ...manifest,
+    electron: {
+      ...electron,
+      bindingPath: targetBindingRelativePath
+    }
+  }
+  delete packagedManifest.node
+  const temporaryManifestPath = `${manifestPath}.tmp-${process.pid}-${Date.now()}`
+  writeFileSync(temporaryManifestPath, `${JSON.stringify(packagedManifest, null, 2)}\n`)
+  rmSync(manifestPath, { force: true })
+  renameSync(temporaryManifestPath, manifestPath)
+}
+
 export default async function prunePackagedNativeModules(context) {
   const appOutDir = context?.appOutDir
-  const platform = context?.electronPlatformName
+  const platform = context?.electronPlatformName || process.platform
   if (!appOutDir) return
 
   copyCodexCliPackage(context)
 
-  if (platform && platform !== 'linux') return
+  prunePackagedSqlite(context)
 
-  const nodePtyRoot = join(appOutDir, 'resources', 'app.asar.unpacked', 'node_modules', 'node-pty')
+  if (platform !== 'linux') return
+
+  const nodePtyRoot = join(packagedResourcesDir(context), 'app.asar.unpacked', 'node_modules', 'node-pty')
   if (!existsSync(nodePtyRoot)) return
 
   const removeEntries = [
@@ -86,16 +173,4 @@ export default async function prunePackagedNativeModules(context) {
   ]
 
   removeEntries.forEach((entry) => removeIfExists(join(nodePtyRoot, entry)))
-
-  const sqliteRoot = join(appOutDir, 'resources', 'app.asar.unpacked', 'node_modules', 'better-sqlite3')
-  if (!existsSync(sqliteRoot)) return
-
-  ;[
-    'deps',
-    'src',
-    'test',
-    'benchmark',
-    'build/node_gyp_bins',
-    'binding.gyp'
-  ].forEach((entry) => removeIfExists(join(sqliteRoot, entry)))
 }

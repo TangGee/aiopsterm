@@ -6,23 +6,46 @@ import type {
   AiChatMessageInput,
   AiChatResponseInput
 } from '@shared/contracts/aiChat'
-import type { ClineAgentRunOutcome, ClineAgentRunInput } from '../agent/clineAgentRuntime'
-import type { ClineAgentSeedMessage, ClineAgentTurnResult } from '@shared/contracts/clineAgent'
+import {
+  clineAgentSessionIdFor,
+  type ClineAgentRunOutcome,
+  type ClineAgentRunInput
+} from '../agent/clineAgentRuntime'
+import type { ClineAgentHostTarget, ClineAgentSeedMessage, ClineAgentTaskEvent, ClineAgentTurnResult } from '@shared/contracts/clineAgent'
 import type { UserConfig } from '@shared/contracts/userConfig'
+import type { UserRuleConfig } from '@shared/contracts/settingsPreferences'
 import {
   CLINE_HOST_PROPOSAL_TOOL,
   classicClineSystemPrompt,
   classicClineTools,
   classicProfileForMode
 } from '../agent/clineAgentProfiles'
+import {
+  CLASSIC_AGENT_ACCESS_MCP_RESOURCE_TOOL,
+  CLASSIC_AGENT_READ_HOST_FILE_TOOL,
+  CLASSIC_AGENT_SEARCH_HOST_FILES_TOOL
+} from '../agent/classicAgentTools'
 import { resolveClineAgentProvider } from '../agent/clineAgentProviderRuntime'
 import { resolveModelProvider } from './modelProviderText'
 import { isInteractiveAiChatCommand, isReadOnlyAiChatCommand } from './aiChatActionRuntime'
+import { validateClassicUserImages } from './classicRichContext'
 
 const cleanText = (value: unknown) => String(value || '').trim()
 
+export const classicClineSessionScopeKey = (conversationId: string) => cleanText(conversationId)
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value && typeof value === 'object' && !Array.isArray(value))
+
+const classicHostTargets = (request: AiChatResponseInput): ClineAgentHostTarget[] => {
+  return (request.hostTargets || []).map((target) => ({
+    targetId: cleanText(target.targetId),
+    terminalSessionId: cleanText(target.terminalSessionId),
+    label: cleanText(target.label),
+    kind: target.kind,
+    ...(cleanText(target.cwd) ? { cwd: cleanText(target.cwd) } : {})
+  }))
+}
 
 export type ClassicClineTaskIdentity = {
   taskId: string
@@ -36,6 +59,9 @@ export type ClassicClineGeneration = {
   message?: AiChatHistoryMessage
   agentTask: AiChatAgentTaskRef
   usage?: Record<string, unknown>
+  nativeSessionId: string
+  nativeProfile: string
+  nativeScopeKey: string
 }
 
 export type ClassicClineGenerationResult =
@@ -43,6 +69,17 @@ export type ClassicClineGenerationResult =
   | { ok: false; errorCode: string; errorMessage: string }
 
 export type RunClassicClineTurn = (input: ClineAgentRunInput) => Promise<ClineAgentRunOutcome>
+
+export const classicClineNativeBinding = (request: AiChatResponseInput, _language?: string) => {
+  const conversationId = cleanText(request.conversationId)
+  const profile = classicProfileForMode(request.mode)
+  const scopeKey = classicClineSessionScopeKey(conversationId)
+  return {
+    profile,
+    scopeKey,
+    nativeSessionId: clineAgentSessionIdFor(profile, scopeKey)
+  }
+}
 
 export const classicClineTaskIdentity = (input: AiChatResponseInput): ClassicClineTaskIdentity => {
   const taskId = cleanText(input.requestId) || `aichat-cline-${randomUUID()}`
@@ -87,14 +124,17 @@ export const classicClineSeedMessages = (
 const toolCallRecord = (result: ClineAgentTurnResult, name: string) =>
   result.toolCalls?.find((toolCall) => toolCall.name === name)
 
-const commandFromProposal = (result: ClineAgentTurnResult) => {
+const commandFromProposal = (result: ClineAgentTurnResult, hostTargets: ClineAgentHostTarget[]) => {
   const proposal = toolCallRecord(result, CLINE_HOST_PROPOSAL_TOOL)
   const output = isRecord(proposal?.output) ? proposal.output : {}
   const input = isRecord(proposal?.input) ? proposal.input : {}
+  const targetId = cleanText(output.targetId || input.targetId)
+  const target = hostTargets.find((candidate) => candidate.targetId === targetId)
   return {
     toolCallId: cleanText(proposal?.id),
     command: cleanText(output.command || input.command),
-    rationale: cleanText(output.rationale || input.rationale)
+    rationale: cleanText(output.rationale || input.rationale),
+    target
   }
 }
 
@@ -113,7 +153,7 @@ const commandCard = (input: {
   commandExecutionStatus: input.task.status === 'waiting-approval' ? 'pending' : undefined,
   commandExecutionMessage: input.task.status === 'waiting-approval' ? '等待操作员确认。' : undefined,
   commandExecution: {
-    ip: 'current terminal',
+    ip: input.task.targetLabel || '',
     command: input.command,
     requiresApproval: input.requiresApproval,
     interactive: isInteractiveAiChatCommand(input.command)
@@ -121,10 +161,58 @@ const commandCard = (input: {
   agentTask: { ...input.task }
 })
 
+type ClineApprovalEvent = Extract<ClineAgentTaskEvent, { type: 'approval-requested' }>
+
+const sensitiveApprovalCard = (
+  event: ClineApprovalEvent,
+  task: AiChatAgentTaskRef,
+  eventInput: Record<string, unknown>
+): AiChatHistoryMessage | null => {
+  if (event.toolName === CLASSIC_AGENT_READ_HOST_FILE_TOOL || event.toolName === CLASSIC_AGENT_SEARCH_HOST_FILES_TOOL) {
+    if (!event.targetId || !event.targetLabel || !event.terminalSessionId) return null
+    const argumentsWithoutTarget = Object.fromEntries(
+      Object.entries(eventInput).filter(([key]) => key !== 'targetId')
+    )
+    const detail = event.toolName === CLASSIC_AGENT_READ_HOST_FILE_TOOL
+      ? cleanText(eventInput.path)
+      : [cleanText(eventInput.kind), cleanText(eventInput.path), cleanText(eventInput.pattern)].filter(Boolean).join(' ')
+    if (!detail) return null
+    return {
+      id: task.turnId,
+      role: 'assistant',
+      text: `${event.toolName}: ${detail}`,
+      state: 'done',
+      ask: 'mcp_tool_call',
+      mcpToolCall: {
+        serverName: event.targetLabel,
+        toolName: event.toolName,
+        arguments: argumentsWithoutTarget
+      },
+      agentTask: { ...task }
+    }
+  }
+  if (event.toolName === CLASSIC_AGENT_ACCESS_MCP_RESOURCE_TOOL) {
+    const serverName = cleanText(event.serverName || eventInput.serverName)
+    const uri = cleanText(event.resourceUri || eventInput.uri)
+    if (!serverName || !uri || serverName !== cleanText(eventInput.serverName) || uri !== cleanText(eventInput.uri)) return null
+    return {
+      id: task.turnId,
+      role: 'assistant',
+      text: `${event.toolName}: ${serverName} ${uri}`,
+      state: 'done',
+      ask: 'mcp_resource_access',
+      mcpResourceAccess: { serverName, uri },
+      agentTask: { ...task }
+    }
+  }
+  return null
+}
+
 export const generateClassicClineResponse = async (input: {
   request: AiChatResponseInput
   config: UserConfig
   modelName: string
+  operatorRules?: UserRuleConfig[]
   runTurn: RunClassicClineTurn
   identity?: ClassicClineTaskIdentity
 }): Promise<ClassicClineGenerationResult> => {
@@ -142,22 +230,19 @@ export const generateClassicClineResponse = async (input: {
     return { ok: false, errorCode: 'AI_CHAT_PROVIDER_UNAVAILABLE', errorMessage: 'AI chat provider is unavailable' }
   }
 
-  const profile = classicProfileForMode(input.request.mode)
-  const terminalSessionId = cleanText(input.request.terminalSessionId)
-  if (profile === 'classic-agent' && !terminalSessionId) {
+  const binding = classicClineNativeBinding(input.request, input.config.language)
+  const profile = binding.profile
+  const hostTargets = classicHostTargets(input.request)
+  const identity = input.identity || classicClineTaskIdentity(input.request)
+  const conversationKey = binding.scopeKey
+  const imageValidation = validateClassicUserImages(input.request.userImages)
+  if (imageValidation.imageErrors.length) {
     return {
       ok: false,
-      errorCode: 'AI_CHAT_TERMINAL_SESSION_REQUIRED',
-      errorMessage: 'Agent mode requires an active local or SSH terminal session.'
+      errorCode: 'AI_CHAT_IMAGE_INVALID',
+      errorMessage: [...new Set(imageValidation.imageErrors)].join('\n')
     }
   }
-  const identity = input.identity || classicClineTaskIdentity(input.request)
-  const localeKey = cleanText(input.config.language).toLowerCase() || 'default'
-  const conversationKey = [
-    conversationId,
-    `locale:${localeKey}`,
-    ...(profile === 'classic-agent' ? [`terminal:${terminalSessionId}`] : [])
-  ].join('\u0000')
   let outcome: ClineAgentRunOutcome
   try {
     outcome = await input.runTurn({
@@ -166,11 +251,17 @@ export const generateClassicClineResponse = async (input: {
       turnId: identity.turnId,
       conversationKey,
       prompt: input.request.prompt,
-      systemPrompt: classicClineSystemPrompt(profile, input.request, input.config.language),
+      userImages: imageValidation.userImages,
+      systemPrompt: classicClineSystemPrompt(profile, { ...input.request, hostTargets }, input.config.language, {
+        rules: input.operatorRules || input.config.rules,
+        customInstructions: input.config.customInstructions,
+        mcpServers: input.config.mcpServers
+      }),
       provider,
-      tools: classicClineTools(profile),
+      tools: classicClineTools(profile, hostTargets),
       initialMessages: classicClineSeedMessages(input.request.messages, input.request.prompt),
-      ...(terminalSessionId ? { terminalSessionId } : {}),
+      replaceTranscript: input.request.replaceNativeTranscript === true || undefined,
+      hostTargets,
       metadata: {
         surface: 'classic',
         conversationId,
@@ -189,31 +280,40 @@ export const generateClassicClineResponse = async (input: {
 
   if (outcome.status === 'approval-required') {
     const eventInput = isRecord(outcome.event.input) ? outcome.event.input : {}
-    const command = cleanText(eventInput.command)
-    if (!command) {
-      return {
-        ok: false,
-        errorCode: 'AI_CHAT_CLINE_APPROVAL_INVALID',
-        errorMessage: 'Cline Agent returned an invalid host command approval request.'
-      }
-    }
     const task: AiChatAgentTaskRef = {
       taskId: identity.taskId,
       turnId: identity.turnId,
-      terminalSessionId: outcome.event.terminalSessionId,
+      ...(outcome.event.targetId ? { targetId: outcome.event.targetId } : {}),
+      ...(outcome.event.targetLabel ? { targetLabel: outcome.event.targetLabel } : {}),
+      ...(outcome.event.terminalSessionId ? { terminalSessionId: outcome.event.terminalSessionId } : {}),
       toolCallId: outcome.event.toolCallId,
       toolName: outcome.event.toolName,
       status: 'waiting-approval'
     }
-    const message = commandCard({ task, command, requiresApproval: true })
+    const command = cleanText(eventInput.command)
+    const message = outcome.event.toolName === 'run_host_command' && command
+      ? commandCard({ task, command, requiresApproval: outcome.event.autoApprovable !== true })
+      : sensitiveApprovalCard(outcome.event, task, eventInput)
+    if (!message) {
+      return {
+        ok: false,
+        errorCode: 'AI_CHAT_CLINE_APPROVAL_INVALID',
+        errorMessage: 'Cline Agent returned an invalid tool approval request.'
+      }
+    }
     return {
       ok: true,
       data: {
-        text: `Host command requires operator approval: ${command}`,
+        text: command
+          ? `Host command requires operator approval: ${command}`
+          : `Tool requires operator approval: ${outcome.event.toolName}`,
         provider: resolvedProvider.provider,
         model: input.modelName,
         message,
-        agentTask: task
+        agentTask: task,
+        nativeSessionId: binding.nativeSessionId,
+        nativeProfile: binding.profile,
+        nativeScopeKey: binding.scopeKey
       }
     }
   }
@@ -221,11 +321,10 @@ export const generateClassicClineResponse = async (input: {
   const task: AiChatAgentTaskRef = {
     taskId: identity.taskId,
     turnId: identity.turnId,
-    ...(terminalSessionId ? { terminalSessionId } : {}),
     status: outcome.result.finishReason === 'aborted' ? 'cancelled' : 'done'
   }
   if (profile === 'classic-command') {
-    const proposal = commandFromProposal(outcome.result)
+    const proposal = commandFromProposal(outcome.result, hostTargets)
     if (!proposal.command) {
       return {
         ok: false,
@@ -233,8 +332,18 @@ export const generateClassicClineResponse = async (input: {
         errorMessage: 'Cline Agent did not return the required command proposal.'
       }
     }
+    if (hostTargets.length && !proposal.target) {
+      return {
+        ok: false,
+        errorCode: 'AI_CHAT_CLINE_COMMAND_TARGET_INVALID',
+        errorMessage: 'Cline Agent did not return a valid targetId for the command proposal.'
+      }
+    }
     task.toolCallId = proposal.toolCallId || undefined
     task.toolName = CLINE_HOST_PROPOSAL_TOOL
+    task.targetId = proposal.target?.targetId
+    task.targetLabel = proposal.target?.label
+    task.terminalSessionId = proposal.target?.terminalSessionId
     const message = commandCard({
       task,
       command: proposal.command,
@@ -249,7 +358,10 @@ export const generateClassicClineResponse = async (input: {
         model: input.modelName,
         message,
         agentTask: task,
-        usage: outcome.result.usage
+        usage: outcome.result.usage,
+        nativeSessionId: binding.nativeSessionId,
+        nativeProfile: binding.profile,
+        nativeScopeKey: binding.scopeKey
       }
     }
   }
@@ -271,7 +383,10 @@ export const generateClassicClineResponse = async (input: {
       provider: resolvedProvider.provider,
       model: input.modelName,
       agentTask: task,
-      usage: outcome.result.usage
+      usage: outcome.result.usage,
+      nativeSessionId: binding.nativeSessionId,
+      nativeProfile: binding.profile,
+      nativeScopeKey: binding.scopeKey
     }
   }
 }

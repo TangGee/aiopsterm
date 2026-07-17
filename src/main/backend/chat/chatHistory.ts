@@ -2,16 +2,17 @@ import { randomUUID } from 'crypto'
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs'
 import { mkdir, rm, writeFile } from 'fs/promises'
 import { dirname, isAbsolute, resolve } from 'path'
-import type {
-  AiChatConversationDeleteResult,
-  AiChatConversationMutationResult,
-  AiChatConversationRecord,
-  AiChatConversationRestoreResult,
-  AiChatConversationUpdateInput,
-  AiChatHistoryListResult,
-  AiChatHistoryMessage,
-  AiChatMessageMetadataInput,
-  AiChatMessageMetadataResult
+import {
+  aiChatStaleClineTaskMessage,
+  type AiChatConversationDeleteResult,
+  type AiChatConversationMutationResult,
+  type AiChatConversationRecord,
+  type AiChatConversationRestoreResult,
+  type AiChatConversationUpdateInput,
+  type AiChatHistoryListResult,
+  type AiChatHistoryMessage,
+  type AiChatMessageMetadataInput,
+  type AiChatMessageMetadataResult
 } from '@shared/contracts/aiChat'
 import type { AiopsMutationResult } from '@shared/contracts/common'
 import { shouldUseChatHistorySeedData } from '@shared/runtimeSwitches'
@@ -167,8 +168,43 @@ const isHistoryTruncationMessage = (message: AiChatHistoryMessage) => message.id
 
 const hasHistoryTruncationMarker = (messages: AiChatHistoryMessage[]) => messages.some(isHistoryTruncationMessage)
 
+const activeClineTaskStatuses = new Set<NonNullable<AiChatHistoryMessage['agentTask']>['status']>([
+  'starting',
+  'running',
+  'waiting-approval'
+])
+
+/**
+ * Persisted Cline approvals are only UI snapshots. The approval promise and
+ * task binding live in the main-process runtime, so they cannot be resumed
+ * after a history restore. Reconcile only the returned clone; the durable
+ * history remains untouched and a live renderer projection can still replace
+ * this snapshot immediately after restore.
+ */
+export const reconcileRestoredClineMessages = (messages: AiChatHistoryMessage[]) => messages.map((message) => {
+  const task = message.agentTask
+  if (!task || !activeClineTaskStatuses.has(task.status)) return message
+
+  const next: AiChatHistoryMessage = {
+    ...message,
+    agentTask: {
+      ...task,
+      status: 'cancelled',
+      restored: true
+    }
+  }
+  if (message.ask === 'command' && (message.commandExecutionStatus === 'pending' || message.commandExecutionStatus === 'running')) {
+    next.commandExecutionStatus = 'failed'
+    next.commandExecutionMessage = aiChatStaleClineTaskMessage
+  } else if (message.state === 'streaming') {
+    next.state = 'cancelled'
+    if (!message.text.trim()) next.text = aiChatStaleClineTaskMessage
+  }
+  return next
+})
+
 const buildRestoreMessages = (messages: AiChatHistoryMessage[]) => {
-  const normalizedMessages = cloneMessages(messages)
+  const normalizedMessages = reconcileRestoredClineMessages(cloneMessages(messages))
   if (normalizedMessages.length <= chatHistoryRestoreMessageLimit) {
     const bytes = normalizedMessages.reduce((total, message) => total + messagePayloadBytes(message), 0)
     if (bytes <= chatHistoryRestorePayloadByteLimit) {
@@ -271,9 +307,12 @@ const normalizeMessages = (messages: unknown): AiChatHistoryMessage[] => {
         ? {
             taskId: normalizeText(item.agentTask.taskId),
             turnId: normalizeText(item.agentTask.turnId),
+            targetId: normalizeText(item.agentTask.targetId) || undefined,
+            targetLabel: normalizeText(item.agentTask.targetLabel) || undefined,
             terminalSessionId: normalizeText(item.agentTask.terminalSessionId) || undefined,
             toolCallId: normalizeText(item.agentTask.toolCallId) || undefined,
             toolName: normalizeText(item.agentTask.toolName) || undefined,
+            restored: item.agentTask.restored === true ? true : undefined,
             status:
               item.agentTask.status === 'starting' ||
               item.agentTask.status === 'running' ||
@@ -661,6 +700,18 @@ export const configureChatHistoryPersistenceHooksForTests = (hooks: ChatHistoryP
 
 export const listChatConversations = (): AiChatHistoryListResult => successSnapshot(getState())
 
+export const deselectChatConversation = (expectedConversationIdInput: string): AiChatHistoryListResult => {
+  const expectedConversationId = normalizeText(expectedConversationIdInput)
+  if (!expectedConversationId) return errorResult('CHAT_HISTORY_ID_REQUIRED', 'Conversation id is required.') as AiChatHistoryListResult
+  const state = getState()
+  if (state.selectedConversationId !== expectedConversationId) {
+    return errorResult('CHAT_HISTORY_SELECTION_CHANGED', 'Selected conversation changed before it could be closed.') as AiChatHistoryListResult
+  }
+  state.selectedConversationId = ''
+  schedulePersistState()
+  return successSnapshot(state)
+}
+
 export const createChatConversation = (): AiChatConversationMutationResult => {
   const state = getState()
   const conversation: AiChatConversationRecord = {
@@ -702,7 +753,7 @@ export const updateChatConversation = (input: AiChatConversationUpdateInput): Ai
   }
   conversation.updatedAt = nowText()
   conversation.ts = Math.max(Date.now(), ...state.conversations.map((item) => item.ts), 0) + 1
-  if (savedMessages) state.selectedConversationId = id
+  if (savedMessages && input.preserveSelection !== true) state.selectedConversationId = id
   schedulePersistState()
   return mutationResult(state, conversation)
 }
@@ -726,6 +777,18 @@ export const deleteChatConversation = (idInput: string): AiChatConversationDelet
       selectedConversationId: state.selectedConversationId
     }
   }
+}
+
+export const deleteChatConversationProjection = (idInput: string) => {
+  const id = normalizeText(idInput)
+  if (!id) return false
+  const state = getState()
+  if (!state.conversations.some((item) => item.id === id)) return false
+  state.conversations = state.conversations.filter((item) => item.id !== id)
+  delete state.messagesByConversationId[id]
+  if (state.selectedConversationId === id) state.selectedConversationId = ''
+  schedulePersistState()
+  return true
 }
 
 export const restoreChatConversation = (idInput: string): AiChatConversationRestoreResult => {

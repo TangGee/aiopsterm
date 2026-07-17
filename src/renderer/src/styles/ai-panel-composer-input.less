@@ -10,6 +10,11 @@
   overflow: visible;
 }
 
+.chat-input.popup-open {
+  z-index: 45;
+  isolation: isolate;
+}
+
 .chat-input.drop-active {
   border-color: color-mix(in srgb, var(--theme-module-active-accent) 62%, var(--theme-module-active-border));
   background: color-mix(in srgb, var(--theme-module-active-accent) 9%, transparent);
@@ -61,6 +66,7 @@
 }
 
 .app-shell.has-app-background .select-popup {
+  background: var(--theme-module-active-modal-bg);
   backdrop-filter: blur(16px);
 }
 

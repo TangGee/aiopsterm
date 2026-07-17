@@ -103,7 +103,8 @@ export const createKubernetesAgentProxyRuntime = (options: { stateDir: () => str
 
   const write = (config: KubernetesAgentProxyConfig) => {
     mkdirSync(options.stateDir(), { recursive: true })
-    writeFileSync(agentProxyConfigPath(), JSON.stringify(config, null, 2), 'utf-8')
+    // agent-proxy.json 可能包含代理口令,收紧到 0600。
+    writeFileSync(agentProxyConfigPath(), JSON.stringify(config, null, 2), { encoding: 'utf-8', mode: 0o600 })
     agentProxyConfigCache = cloneAgentProxyConfig(config)
     return cloneAgentProxyConfig(agentProxyConfigCache)
   }

@@ -1,9 +1,9 @@
-import { randomUUID } from 'crypto'
 import type {
   DatabaseAiDrawerLifecycleInput,
   DatabaseAiDrawerRequestRecord,
   DatabaseAiPaneLifecycleInput,
   DatabaseAiPaneMessageRecord,
+  DatabaseAiPaneSessionSnapshot,
   DatabaseAiPaneStateContext,
   DatabaseAiPaneStateSnapshot
 } from './contracts/database'
@@ -11,10 +11,14 @@ import { isSupportedDatabaseAiEngine, normalizeDatabaseAiResponseLanguage } from
 
 const trim = (value: unknown) => (typeof value === 'string' ? value.trim() : '')
 
+const randomRuntimeId = () =>
+  globalThis.crypto?.randomUUID?.() || `${Date.now().toString(36)}-${Math.random().toString(16).slice(2)}`
+
 const DATABASE_AI_PANE_DEFAULT_WIDTH = 360
 const DATABASE_AI_PANE_MIN_WIDTH = 280
 const DATABASE_AI_PANE_MAX_WIDTH = 720
-const DATABASE_AI_PANE_MAX_MESSAGES = 24
+export const DATABASE_AI_PANE_MAX_MESSAGES = 24
+export const DATABASE_AI_PANE_MAX_ARCHIVED_SESSIONS = 40
 
 const defaultDatabaseAiPaneContext = (): DatabaseAiPaneStateContext => ({
   connectionId: '',
@@ -24,12 +28,13 @@ const defaultDatabaseAiPaneContext = (): DatabaseAiPaneStateContext => ({
 })
 
 const defaultDatabaseAiPaneState = (): DatabaseAiPaneStateSnapshot => ({
-  conversationId: `dbai-pane-conversation-${randomUUID()}`,
+  conversationId: `dbai-pane-conversation-${randomRuntimeId()}`,
   open: false,
   width: DATABASE_AI_PANE_DEFAULT_WIDTH,
   context: defaultDatabaseAiPaneContext(),
   draft: '',
-  messages: []
+  messages: [],
+  archivedSessions: []
 })
 
 const databaseAiPaneMessages = new Map<string, DatabaseAiPaneMessageRecord>()
@@ -47,7 +52,7 @@ export const createDatabaseAiPaneMessageRecord = (
     responseLanguage?: DatabaseAiPaneMessageRecord['responseLanguage']
     context?: DatabaseAiPaneStateContext
   },
-  id = `dbai-pane-message-${randomUUID()}`
+  id = `dbai-pane-message-${randomRuntimeId()}`
 ): DatabaseAiPaneMessageRecord => ({
   id,
   requestId: input.requestId,
@@ -140,6 +145,31 @@ const normalizeDatabaseAiPaneStateMessage = (
   }
 }
 
+const normalizeDatabaseAiPaneSessionSnapshot = (value: unknown): DatabaseAiPaneSessionSnapshot | null => {
+  if (!value || typeof value !== 'object') return null
+  const raw = value as Partial<DatabaseAiPaneSessionSnapshot>
+  const conversationId = trim(raw.conversationId)
+  if (!conversationId) return null
+  const createdAt = Number(raw.createdAt)
+  const updatedAt = Number(raw.updatedAt)
+  if (!Number.isFinite(createdAt) || createdAt < 0 || !Number.isFinite(updatedAt) || updatedAt < createdAt) return null
+  const messages = Array.isArray(raw.messages)
+    ? raw.messages
+        .map((message) => normalizeDatabaseAiPaneStateMessage(message, true))
+        .filter((message): message is DatabaseAiPaneMessageRecord => Boolean(message))
+        .slice(-DATABASE_AI_PANE_MAX_MESSAGES)
+        .map(cloneDatabaseAiPaneMessageRecord)
+    : []
+  return {
+    conversationId,
+    context: normalizeDatabaseAiPaneStateContext(raw.context),
+    draft: typeof raw.draft === 'string' ? raw.draft : '',
+    messages,
+    createdAt,
+    updatedAt
+  }
+}
+
 export const normalizeDatabaseAiPaneState = (
   state?: Partial<DatabaseAiPaneStateSnapshot>,
   options: { cancelInFlight?: boolean } = {}
@@ -151,13 +181,28 @@ export const normalizeDatabaseAiPaneState = (
         .map((message) => normalizeDatabaseAiPaneStateMessage(message, cancelInFlight))
         .filter((message): message is DatabaseAiPaneMessageRecord => Boolean(message))
     : []
+  const conversationId = trim(state?.conversationId) || `dbai-pane-conversation-${randomRuntimeId()}`
+  const archivedSessionIds = new Set<string>()
+  const archivedSessions = Array.isArray(state?.archivedSessions)
+    ? state.archivedSessions
+        .map(normalizeDatabaseAiPaneSessionSnapshot)
+        .filter((session): session is DatabaseAiPaneSessionSnapshot => session !== null && session.conversationId !== conversationId)
+        .sort((left, right) => right.updatedAt - left.updatedAt || left.conversationId.localeCompare(right.conversationId))
+        .filter((session) => {
+          if (archivedSessionIds.has(session.conversationId)) return false
+          archivedSessionIds.add(session.conversationId)
+          return true
+        })
+        .slice(0, DATABASE_AI_PANE_MAX_ARCHIVED_SESSIONS)
+    : []
   return {
-    conversationId: trim(state?.conversationId) || `dbai-pane-conversation-${randomUUID()}`,
+    conversationId,
     open: state?.open === true,
     width: Math.min(DATABASE_AI_PANE_MAX_WIDTH, Math.max(DATABASE_AI_PANE_MIN_WIDTH, Number.isFinite(width) ? Math.round(width) : DATABASE_AI_PANE_DEFAULT_WIDTH)),
     context: normalizeDatabaseAiPaneStateContext(state?.context),
     draft: typeof state?.draft === 'string' ? state.draft : '',
-    messages: messages.slice(-DATABASE_AI_PANE_MAX_MESSAGES).map(cloneDatabaseAiPaneMessageRecord)
+    messages: messages.slice(-DATABASE_AI_PANE_MAX_MESSAGES).map(cloneDatabaseAiPaneMessageRecord),
+    archivedSessions
   }
 }
 
@@ -167,7 +212,12 @@ const cloneDatabaseAiPaneState = (state: DatabaseAiPaneStateSnapshot): DatabaseA
   width: state.width,
   context: { ...state.context },
   draft: state.draft,
-  messages: state.messages.map(cloneDatabaseAiPaneMessageRecord)
+  messages: state.messages.map(cloneDatabaseAiPaneMessageRecord),
+  archivedSessions: (state.archivedSessions || []).map((session) => ({
+    ...session,
+    context: { ...session.context },
+    messages: session.messages.map(cloneDatabaseAiPaneMessageRecord)
+  }))
 })
 
 const sortedDatabaseAiPaneMessages = () =>
@@ -193,6 +243,34 @@ export const replaceDatabaseAiPaneState = (state: DatabaseAiPaneStateSnapshot) =
 }
 
 export const getDatabaseAiPaneStateSnapshot = () => cloneDatabaseAiPaneState(databaseAiPaneState)
+
+export const deleteDatabaseAiPaneSessionProjection = (conversationIdInput: string) => {
+  const conversationId = trim(conversationIdInput)
+  if (!conversationId) return false
+  const currentArchivedSessions = databaseAiPaneState.archivedSessions || []
+  const archivedSessions = currentArchivedSessions.filter(
+    (session) => session.conversationId !== conversationId
+  )
+  if (databaseAiPaneState.conversationId === conversationId) {
+    databaseAiPaneState = {
+      ...defaultDatabaseAiPaneState(),
+      width: databaseAiPaneState.width,
+      archivedSessions: archivedSessions.map((session) => ({
+        ...session,
+        context: { ...session.context },
+        messages: session.messages.map(cloneDatabaseAiPaneMessageRecord)
+      }))
+    }
+    databaseAiPaneMessages.clear()
+    return true
+  }
+  if (archivedSessions.length === currentArchivedSessions.length) return false
+  databaseAiPaneState = {
+    ...databaseAiPaneState,
+    archivedSessions
+  }
+  return true
+}
 
 export const resetDatabaseAiState = () => {
   databaseAiPaneMessages.clear()

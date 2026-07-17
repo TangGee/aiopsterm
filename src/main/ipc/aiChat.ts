@@ -1,11 +1,24 @@
 import type { IpcMain, IpcMainInvokeEvent } from 'electron'
 import { cancelAiChatResponse, createAiChatExchangeRequest, generateAiChatResponse } from '../backend/ai/aiChat'
 import { withClineAgentRendererOwner } from '../backend/agent/clineAgentOwnerRuntime'
-import type { AiChatCancelInput, AiChatExchangeRequestInput, AiChatResponseInput } from '@shared/contracts/aiChat'
+import type {
+  AiChatCancelInput,
+  AiChatExchangeRequestInput,
+  AiChatResponseInput,
+  AiChatResponseResult
+} from '@shared/contracts/aiChat'
+import {
+  CLINE_AGENT_MAX_HOST_TARGETS,
+  type ClineAgentHostTarget
+} from '@shared/contracts/clineAgent'
 
 type RegisterAiChatIpcInput = {
-  isTrustedTerminalSession?: (event: IpcMainInvokeEvent, terminalSessionId: string) => boolean
+  resolveTrustedHostTarget?: (event: IpcMainInvokeEvent, terminalSessionId: string) => ClineAgentHostTarget | null
+  bindProductSession?: (input: AiChatResponseInput, result: AiChatResponseResult) => Promise<void> | void
 }
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value && typeof value === 'object' && !Array.isArray(value))
 
 const terminalSessionError = () => ({
   ok: false as const,
@@ -14,23 +27,74 @@ const terminalSessionError = () => ({
 })
 
 export const registerAiChatIpc = (ipcMain: IpcMain, runtime: RegisterAiChatIpcInput = {}) => {
-  const runWithTrustedTerminal = <T extends { terminalSessionId?: string }>(
+  const runWithTrustedTerminals = <T extends { hostTargets?: unknown }>(
     event: IpcMainInvokeEvent,
     input: T,
-    callback: () => unknown
+    callback: (trustedInput: T) => unknown
   ) => {
-    const terminalSessionId = String(input?.terminalSessionId || '').trim()
-    if (terminalSessionId && runtime.isTrustedTerminalSession && !runtime.isTrustedTerminalSession(event, terminalSessionId)) {
+    const rawTargets = input?.hostTargets
+    if (rawTargets !== undefined && (!Array.isArray(rawTargets) || rawTargets.length > CLINE_AGENT_MAX_HOST_TARGETS)) {
       return terminalSessionError()
     }
-    return withClineAgentRendererOwner(event.sender.id, callback)
+    if (Array.isArray(rawTargets) && rawTargets.length > 0 && !runtime.resolveTrustedHostTarget) {
+      return terminalSessionError()
+    }
+    const targetIds = new Set<string>()
+    const terminalSessionIds = new Set<string>()
+    const trustedTargets: ClineAgentHostTarget[] = []
+    for (const rawTarget of (rawTargets || []) as unknown[]) {
+      if (!isRecord(rawTarget)) return terminalSessionError()
+      const targetId = typeof rawTarget.targetId === 'string' ? rawTarget.targetId.trim() : ''
+      const targetTerminalSessionId = typeof rawTarget.terminalSessionId === 'string'
+        ? rawTarget.terminalSessionId.trim()
+        : ''
+      const label = typeof rawTarget.label === 'string' ? rawTarget.label.trim() : ''
+      const kind = rawTarget.kind
+      if (!targetId || !targetTerminalSessionId || !label || (kind !== 'local' && kind !== 'ssh')) {
+        return terminalSessionError()
+      }
+      const resolved = runtime.resolveTrustedHostTarget?.(event, targetTerminalSessionId)
+      if (runtime.resolveTrustedHostTarget && !resolved) return terminalSessionError()
+      if (!resolved) return terminalSessionError()
+      const trusted = resolved
+      const trustedTargetId = String(trusted.targetId || '').trim()
+      const trustedTerminalSessionId = String(trusted.terminalSessionId || '').trim()
+      const trustedLabel = String(trusted.label || '').trim()
+      if (
+        !trustedTargetId ||
+        !trustedTerminalSessionId ||
+        !trustedLabel ||
+        (trusted.kind !== 'local' && trusted.kind !== 'ssh') ||
+        trustedTerminalSessionId !== targetTerminalSessionId ||
+        trustedTargetId !== targetId ||
+        trusted.kind !== kind ||
+        targetIds.has(trustedTargetId) ||
+        terminalSessionIds.has(trustedTerminalSessionId)
+      ) return terminalSessionError()
+      targetIds.add(trustedTargetId)
+      terminalSessionIds.add(trustedTerminalSessionId)
+      const cwd = String(trusted.cwd || '').trim()
+      trustedTargets.push({
+        targetId: trustedTargetId,
+        terminalSessionId: trustedTerminalSessionId,
+        label: trustedLabel,
+        kind: trusted.kind,
+        ...(cwd ? { cwd } : {})
+      })
+    }
+    const trustedInput = (rawTargets === undefined ? input : { ...input, hostTargets: trustedTargets }) as T
+    return withClineAgentRendererOwner(event.sender.id, () => callback(trustedInput))
   }
 
   ipcMain.handle('ai:chat-exchange-request', (event, input: AiChatExchangeRequestInput) =>
-    runWithTrustedTerminal(event, input, () => createAiChatExchangeRequest(input))
+    runWithTrustedTerminals(event, input, (trustedInput) => createAiChatExchangeRequest(trustedInput))
   )
-  ipcMain.handle('ai:chat-response', (event, input: AiChatResponseInput) =>
-    runWithTrustedTerminal(event, input, () => generateAiChatResponse(input))
+  ipcMain.handle('ai:chat-response', async (event, input: AiChatResponseInput) =>
+    runWithTrustedTerminals(event, input, async (trustedInput) => {
+      const result = await generateAiChatResponse(trustedInput)
+      await runtime.bindProductSession?.(trustedInput, result)
+      return result
+    })
   )
   ipcMain.handle('ai:chat-response:cancel', (event, input: AiChatCancelInput) =>
     withClineAgentRendererOwner(event.sender.id, () => cancelAiChatResponse(input))

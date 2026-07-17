@@ -3,7 +3,7 @@ import { mkdtemp, rm } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { spawn, type ChildProcessWithoutNullStreams } from 'child_process'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 type BridgeResponse = {
   id?: string
@@ -254,6 +254,187 @@ describe('Codex terminal bridge runtime', () => {
     })
     expect(writes.at(-1)).toBe('\x03')
     expect(bridge.cancelCodexTerminalBridgeCommand('cmd-abort')).toBe(false)
+  })
+
+  it('serializes wait commands on one terminal and keeps their output isolated', async () => {
+    const bridge = await loadBridge()
+    const writes: string[] = []
+    bridge.registerCodexTerminalBridgeSession({
+      id: 'terminal-fifo',
+      kind: 'ssh',
+      window: {} as never,
+      write: (data: string | Buffer) => writes.push(String(data))
+    })
+
+    const first = bridge.callCodexTerminalBridgeTool('run_command', {
+      sessionId: 'terminal-fifo',
+      commandId: 'cmd-fifo-first',
+      command: 'printf first',
+      mode: 'wait'
+    })
+    const second = bridge.callCodexTerminalBridgeTool('run_command', {
+      sessionId: 'terminal-fifo',
+      commandId: 'cmd-fifo-second',
+      command: 'printf second',
+      mode: 'wait'
+    })
+
+    expect(writes).toHaveLength(1)
+    bridge.appendCodexTerminalBridgeData(
+      'terminal-fifo',
+      '__AIOPSTERM_CODEX_START_cmd-fifo-first__\nfirst-only\n'
+    )
+    expect(writes).toHaveLength(1)
+    bridge.appendCodexTerminalBridgeData(
+      'terminal-fifo',
+      '__AIOPSTERM_CODEX_END_cmd-fifo-first__:0\n'
+    )
+    await expect(first).resolves.toMatchObject({ ok: true, data: { output: 'first-only' } })
+    expect(writes).toHaveLength(2)
+
+    bridge.appendCodexTerminalBridgeData(
+      'terminal-fifo',
+      [
+        '__AIOPSTERM_CODEX_START_cmd-fifo-second__\n',
+        'second-only\n',
+        '__AIOPSTERM_CODEX_END_cmd-fifo-second__:0\n'
+      ].join('')
+    )
+    await expect(second).resolves.toMatchObject({ ok: true, data: { output: 'second-only' } })
+  })
+
+  it('cancels a queued command without interrupting the active terminal command', async () => {
+    const bridge = await loadBridge()
+    const writes: string[] = []
+    bridge.registerCodexTerminalBridgeSession({
+      id: 'terminal-cancel-queued',
+      kind: 'ssh',
+      window: {} as never,
+      write: (data: string | Buffer) => writes.push(String(data))
+    })
+
+    const active = bridge.callCodexTerminalBridgeTool('run_command', {
+      sessionId: 'terminal-cancel-queued',
+      commandId: 'cmd-active',
+      command: 'sleep 5',
+      mode: 'wait'
+    })
+    const queued = bridge.callCodexTerminalBridgeTool('run_command', {
+      sessionId: 'terminal-cancel-queued',
+      commandId: 'cmd-queued',
+      command: 'hostname',
+      mode: 'wait'
+    })
+
+    expect(writes).toHaveLength(1)
+    expect(bridge.cancelCodexTerminalBridgeCommand('cmd-queued', 'cancel queued')).toBe(true)
+    await expect(queued).resolves.toMatchObject({
+      ok: false,
+      errorCode: 'COMMAND_ABORTED',
+      data: { commandId: 'cmd-queued', aborted: true }
+    })
+    expect(writes).toHaveLength(1)
+    expect(writes).not.toContain('\x03')
+
+    bridge.appendCodexTerminalBridgeData(
+      'terminal-cancel-queued',
+      '__AIOPSTERM_CODEX_START_cmd-active__\n__AIOPSTERM_CODEX_END_cmd-active__:0\n'
+    )
+    await expect(active).resolves.toMatchObject({ ok: true })
+    expect(writes).toHaveLength(1)
+  })
+
+  it('holds the terminal lease after active cancellation until a reliable command boundary', async () => {
+    const bridge = await loadBridge()
+    const writes: string[] = []
+    bridge.registerCodexTerminalBridgeSession({
+      id: 'terminal-cancel-boundary',
+      kind: 'ssh',
+      window: {} as never,
+      write: (data: string | Buffer) => writes.push(String(data))
+    })
+
+    const active = bridge.callCodexTerminalBridgeTool('run_command', {
+      sessionId: 'terminal-cancel-boundary',
+      commandId: 'cmd-interrupted',
+      command: 'sleep 60',
+      mode: 'wait'
+    })
+    const queued = bridge.callCodexTerminalBridgeTool('run_command', {
+      sessionId: 'terminal-cancel-boundary',
+      commandId: 'cmd-after-interrupt',
+      command: 'uptime',
+      mode: 'wait'
+    })
+
+    expect(bridge.cancelCodexTerminalBridgeCommand('cmd-interrupted', 'operator interrupted')).toBe(true)
+    await expect(active).resolves.toMatchObject({ ok: false, errorCode: 'COMMAND_ABORTED' })
+    expect(writes).toHaveLength(2)
+    expect(writes[1]).toBe('\x03')
+
+    bridge.appendCodexTerminalBridgeData('terminal-cancel-boundary', 'still stopping\n')
+    expect(writes).toHaveLength(2)
+    bridge.appendCodexTerminalBridgeData(
+      'terminal-cancel-boundary',
+      '__AIOPSTERM_CODEX_END_cmd-interrupted__:130\n'
+    )
+    expect(writes).toHaveLength(3)
+
+    bridge.appendCodexTerminalBridgeData(
+      'terminal-cancel-boundary',
+      '__AIOPSTERM_CODEX_START_cmd-after-interrupt__\nup 10 days\n__AIOPSTERM_CODEX_END_cmd-after-interrupt__:0\n'
+    )
+    await expect(queued).resolves.toMatchObject({ ok: true, data: { output: 'up 10 days' } })
+  })
+
+  it('isolates a terminal command channel when interruption never reaches a boundary', async () => {
+    vi.useFakeTimers()
+    try {
+      const bridge = await loadBridge()
+      const writes: string[] = []
+      bridge.registerCodexTerminalBridgeSession({
+        id: 'terminal-cancel-isolated',
+        kind: 'ssh',
+        window: {} as never,
+        write: (data: string | Buffer) => writes.push(String(data))
+      })
+
+      const active = bridge.callCodexTerminalBridgeTool('run_command', {
+        sessionId: 'terminal-cancel-isolated',
+        commandId: 'cmd-isolated-active',
+        command: 'trap "" INT; sleep 60',
+        mode: 'wait'
+      })
+      const queued = bridge.callCodexTerminalBridgeTool('run_command', {
+        sessionId: 'terminal-cancel-isolated',
+        commandId: 'cmd-isolated-queued',
+        command: 'hostname',
+        mode: 'wait'
+      })
+      expect(bridge.cancelCodexTerminalBridgeCommand('cmd-isolated-active')).toBe(true)
+      await expect(active).resolves.toMatchObject({ ok: false, errorCode: 'COMMAND_ABORTED' })
+
+      await vi.advanceTimersByTimeAsync(bridge.codexTerminalBridgeInterruptGraceMs)
+      await expect(queued).resolves.toMatchObject({
+        ok: false,
+        errorCode: 'TERMINAL_COMMAND_CHANNEL_ISOLATED'
+      })
+      expect(writes).toHaveLength(2)
+      expect(writes[1]).toBe('\x03')
+
+      await expect(bridge.callCodexTerminalBridgeTool('run_command', {
+        sessionId: 'terminal-cancel-isolated',
+        commandId: 'cmd-isolated-later',
+        command: 'pwd',
+        mode: 'wait'
+      })).resolves.toMatchObject({
+        ok: false,
+        errorCode: 'TERMINAL_COMMAND_CHANNEL_ISOLATED'
+      })
+      expect(writes).toHaveLength(2)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('filters wrapped command echoes that arrive after the start marker from display output', async () => {
@@ -768,6 +949,147 @@ describe('Codex terminal bridge runtime', () => {
       bridge.closeCodexTerminalBridgeServer()
       await rm(root, { recursive: true, force: true })
     }
+  })
+
+  it('keeps selected targets isolated for concurrent Codex runtimes', async () => {
+    const bridge = await loadBridge()
+    const firstWrites: string[] = []
+    const secondWrites: string[] = []
+    bridge.registerCodexTerminalBridgeSession({
+      id: 'terminal-runtime-a',
+      kind: 'ssh',
+      host: 'a.internal',
+      cwd: '/srv/a',
+      window: {} as never,
+      write: (data: string | Buffer) => firstWrites.push(String(data))
+    })
+    bridge.registerCodexTerminalBridgeSession({
+      id: 'terminal-runtime-b',
+      kind: 'ssh',
+      host: 'b.internal',
+      cwd: '/srv/b',
+      window: {} as never,
+      write: (data: string | Buffer) => secondWrites.push(String(data))
+    })
+    bridge.updateCodexTerminalBridgeRuntimeTarget('runtime-a', {
+      kind: 'ssh',
+      sessionId: 'terminal-runtime-a',
+      host: 'a.internal',
+      cwd: '/srv/a'
+    })
+    bridge.updateCodexTerminalBridgeRuntimeTarget('runtime-b', {
+      kind: 'ssh',
+      sessionId: 'terminal-runtime-b',
+      host: 'b.internal',
+      cwd: '/srv/b'
+    })
+
+    const first = await bridge.callCodexTerminalBridgeTool('run_command', {
+      __aiopstermCodexRuntimeId: 'runtime-a',
+      command: 'hostname',
+      mode: 'return_immediately'
+    })
+    const second = await bridge.callCodexTerminalBridgeTool('run_command', {
+      __aiopstermCodexRuntimeId: 'runtime-b',
+      command: 'pwd',
+      mode: 'return_immediately'
+    })
+
+    expect(first.target).toEqual(expect.objectContaining({ sessionId: 'terminal-runtime-a', host: 'a.internal' }))
+    expect(second.target).toEqual(expect.objectContaining({ sessionId: 'terminal-runtime-b', host: 'b.internal' }))
+    expect(firstWrites).toEqual(['hostname\n'])
+    expect(secondWrites).toEqual(['pwd\n'])
+  })
+
+  it('keeps structured read-only tools isolated to each Codex runtime target', async () => {
+    const bridge = await loadBridge()
+    const firstWrites: string[] = []
+    const secondWrites: string[] = []
+    bridge.registerCodexTerminalBridgeSession({
+      id: 'terminal-structured-a',
+      kind: 'ssh',
+      host: 'a.internal',
+      cwd: '/srv/a',
+      window: {} as never,
+      write: (data: string | Buffer) => firstWrites.push(String(data))
+    })
+    bridge.registerCodexTerminalBridgeSession({
+      id: 'terminal-structured-b',
+      kind: 'ssh',
+      host: 'b.internal',
+      cwd: '/srv/b',
+      window: {} as never,
+      write: (data: string | Buffer) => secondWrites.push(String(data))
+    })
+    bridge.setCodexTerminalBridgePreferredSession('terminal-structured-b')
+    bridge.updateCodexTerminalBridgeRuntimeTarget('runtime-structured-a', {
+      kind: 'ssh',
+      sessionId: 'terminal-structured-a',
+      host: 'a.internal',
+      cwd: '/srv/a'
+    })
+    bridge.updateCodexTerminalBridgeRuntimeTarget('runtime-structured-b', {
+      kind: 'ssh',
+      sessionId: 'terminal-structured-b',
+      host: 'b.internal',
+      cwd: '/srv/b'
+    })
+
+    const readPromise = bridge.callCodexTerminalBridgeTool('read_file', {
+      __aiopstermCodexRuntimeId: 'runtime-structured-a',
+      path: '/srv/a/app.conf',
+      timeoutMs: 5000
+    })
+    await waitFor(() => firstWrites.length === 1)
+    expect(secondWrites).toEqual([])
+    const readCommandId = firstWrites[0].match(/__AIOPSTERM_CODEX_START_([a-zA-Z0-9_-]+)__/)?.[1] || ''
+    bridge.appendCodexTerminalBridgeData(
+      'terminal-structured-a',
+      `__AIOPSTERM_CODEX_START_${readCommandId}__\nfrom-a\n__AIOPSTERM_CODEX_END_${readCommandId}__:0\n`
+    )
+    await expect(readPromise).resolves.toMatchObject({
+      ok: true,
+      target: { sessionId: 'terminal-structured-a', host: 'a.internal' },
+      data: { content: 'from-a' }
+    })
+
+    const globPromise = bridge.callCodexTerminalBridgeTool('glob_search', {
+      __aiopstermCodexRuntimeId: 'runtime-structured-b',
+      path: '/srv/b',
+      pattern: '*.log',
+      timeoutMs: 5000
+    })
+    await waitFor(() => secondWrites.length === 1)
+    expect(firstWrites).toHaveLength(1)
+    const globCommandId = secondWrites[0].match(/__AIOPSTERM_CODEX_START_([a-zA-Z0-9_-]+)__/)?.[1] || ''
+    bridge.appendCodexTerminalBridgeData(
+      'terminal-structured-b',
+      `__AIOPSTERM_CODEX_START_${globCommandId}__\n/srv/b/app.log\n__AIOPSTERM_CODEX_END_${globCommandId}__:0\n`
+    )
+    await expect(globPromise).resolves.toMatchObject({
+      ok: true,
+      target: { sessionId: 'terminal-structured-b', host: 'b.internal' },
+      data: { entries: ['/srv/b/app.log'] }
+    })
+
+    const grepPromise = bridge.callCodexTerminalBridgeTool('grep_search', {
+      __aiopstermCodexRuntimeId: 'runtime-structured-a',
+      path: '/srv/a',
+      pattern: 'error',
+      timeoutMs: 5000
+    })
+    await waitFor(() => firstWrites.length === 2)
+    expect(secondWrites).toHaveLength(1)
+    const grepCommandId = firstWrites[1].match(/__AIOPSTERM_CODEX_START_([a-zA-Z0-9_-]+)__/)?.[1] || ''
+    bridge.appendCodexTerminalBridgeData(
+      'terminal-structured-a',
+      `__AIOPSTERM_CODEX_START_${grepCommandId}__\n/srv/a/app.log:1:error\n__AIOPSTERM_CODEX_END_${grepCommandId}__:0\n`
+    )
+    await expect(grepPromise).resolves.toMatchObject({
+      ok: true,
+      target: { sessionId: 'terminal-structured-a', host: 'a.internal' },
+      data: { matches: [{ path: '/srv/a/app.log', line: 1, text: 'error' }] }
+    })
   })
 
   it('does not fall back to another terminal when the selected Codex target has no live session', async () => {

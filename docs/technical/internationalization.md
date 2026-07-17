@@ -6,8 +6,9 @@ aiopsterm keeps renderer-facing UI text behind the renderer i18n boundary.
 
 - `src/renderer/src/i18n/locales/zhCN.ts` is the key source for `I18nKey`.
 - `en-US` is the complete English locale.
-- Other locale files define overrides through `completeLocaleMessages()`, which fills missing keys from a base locale so every supported locale has a complete runtime message object. Non-Chinese locales use `en-US`; `zh-TW` uses `zh-CN`.
-- Placeholder names such as `{count}` and `{title}` must stay identical across all locales.
+- `ja-JP`, `ko-KR`, `de-DE`, `fr-FR`, `it-IT`, `pt-PT`, `ru-RU`, and `ar-AR` are fully translated: each file overrides every key. They still go through `completeLocaleMessages()` (base `en-US`) so a missing key added later falls back to English instead of breaking the complete-locale invariant. When adding a new key, add it to `zh-CN` and `en-US` first; translate it into the other locale files in the same change when feasible.
+- `zh-TW` intentionally stays a small override set on the `zh-CN` base; full Traditional Chinese output comes from the static-text Simplified→Traditional conversion applied at the DOM layer (this behavior is pinned by `tests/i18n-runtime.test.ts`).
+- Placeholder names such as `{count}` and `{title}` must stay identical across all locales (test-enforced).
 
 ## Legacy Static Text
 
@@ -37,4 +38,6 @@ Run the renderer i18n audit before committing UI text changes:
 npm run audit:i18n
 ```
 
-The audit scans tracked renderer Vue/TS files and fails when CJK UI text is not covered by explicit i18n keys or the static text catalog.
+The audit scans tracked renderer Vue/TS files and fails when CJK UI text is not covered by explicit i18n keys or the static text catalog. It also runs automatically as the first step of `npm test` and `npm run build`, so hardcoded CJK regressions fail fast.
+
+Known blind spots: the audit only detects CJK text (hardcoded English is not flagged), and it only scans `src/renderer/src` (main/preload/sidecar are out of scope and currently contain no CJK).

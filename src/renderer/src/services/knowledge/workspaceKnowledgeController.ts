@@ -38,6 +38,12 @@ import {
   type KnowledgeImportJob
 } from '@/services/knowledge/knowledgeRuntime'
 import { knowledgeTreeSize, mergeUserConfig } from '@/services/settings/workspaceConfigRuntime'
+import {
+  chatImageAttachmentBase64ByteLength,
+  MAX_CHAT_IMAGE_ATTACHMENT_BYTES,
+  MAX_CHAT_IMAGE_ATTACHMENTS_PER_MESSAGE,
+  validateChatImageAttachment
+} from '@shared/chatImageAttachment'
 import type { UserConfig } from '@shared/contracts/userConfig'
 import type {
   KnowledgeBaseSearchResult,
@@ -71,6 +77,7 @@ type WorkspaceKnowledgeControllerState = {
 
 type WorkspaceKnowledgeControllerDeps = {
   setTopNotice: (message: string) => void
+  imageLimitMessage?: () => string
   openKnowledgeFile: (relPath: string, range?: { startLine?: number; endLine?: number }) => TerminalPanel | null
   syncKnowledgePanelsAfterRename: (oldRelPath: string, newRelPath: string) => void
   closeKnowledgePanelsForRemoved: (relPaths: string[]) => void
@@ -95,7 +102,7 @@ export const createWorkspaceKnowledgeController = (state: WorkspaceKnowledgeCont
     rightPanelOpen,
     aiPreferences
   } = state
-  const { setTopNotice, openKnowledgeFile, syncKnowledgePanelsAfterRename, closeKnowledgePanelsForRemoved } = deps
+  const { setTopNotice, imageLimitMessage, openKnowledgeFile, syncKnowledgePanelsAfterRename, closeKnowledgePanelsForRemoved } = deps
 
   let kbSearchRequest = 0
   let removeKnowledgeProgressListener: (() => void) | null = null
@@ -237,6 +244,9 @@ export const createWorkspaceKnowledgeController = (state: WorkspaceKnowledgeCont
       kind: 'docs',
       label,
       relPath,
+      contextSource: 'knowledge-search',
+      startLine: result.startLine,
+      endLine: result.endLine,
       detail: `Auto search match lines ${result.startLine}-${result.endLine}, score ${result.score.toFixed(2)}: ${result.snippet.trim()}`
     }
   }
@@ -519,22 +529,45 @@ export const createWorkspaceKnowledgeController = (state: WorkspaceKnowledgeCont
       const node = findKnowledgeNode(relPath)
       const label = node?.title || relPath.split('/').pop() || relPath
       if (isKnowledgeImagePath(relPath)) {
+        const contextId = `kb-image:${relPath}`
+        if (selectedContexts.value.some((context) => context.id === contextId)) continue
+        if (selectedContexts.value.filter((context) => context.kind === 'images').length >= MAX_CHAT_IMAGE_ATTACHMENTS_PER_MESSAGE) {
+          setTopNotice(imageLimitMessage?.() || `Each message can include up to ${MAX_CHAT_IMAGE_ATTACHMENTS_PER_MESSAGE} images.`)
+          continue
+        }
+        const mediaType = mediaTypeFromKnowledgePath(relPath)
+        const metadataValidation = validateChatImageAttachment({ mediaType, name: label, size: node?.size })
+        if (!metadataValidation.ok) {
+          setTopNotice(`图片上传失败：${metadataValidation.errorMessage || metadataValidation.errorCode}`)
+          continue
+        }
         const kbReadFile = knowledgeClient.kbReadFile()
         let imageContext: AiContextOption = {
-          id: `kb-image:${relPath}`,
+          id: contextId,
           kind: 'images',
           label,
           detail: relPath,
           relPath,
-          mediaType: mediaTypeFromKnowledgePath(relPath)
+          mediaType
         }
         if (kbReadFile) {
           try {
             const result = await kbReadFile(relPath, 'base64')
             if (isKnowledgeReadResultData(result, 'base64')) {
+              const resolvedMediaType = result.mimeType || imageContext.mediaType
+              const imageBytes = chatImageAttachmentBase64ByteLength(result.content)
+              const validation = validateChatImageAttachment({
+                mediaType: resolvedMediaType,
+                name: label,
+                size: imageBytes ?? MAX_CHAT_IMAGE_ATTACHMENT_BYTES + 1
+              })
+              if (!validation.ok || imageBytes === null) {
+                setTopNotice(`图片上传失败：${validation.errorMessage || validation.errorCode || '图片数据格式无效。'}`)
+                continue
+              }
               imageContext = {
                 ...imageContext,
-                mediaType: result.mimeType || imageContext.mediaType,
+                mediaType: resolvedMediaType,
                 data: result.content
               }
             } else {
@@ -546,9 +579,7 @@ export const createWorkspaceKnowledgeController = (state: WorkspaceKnowledgeCont
             continue
           }
         }
-        selectedContexts.value = selectedContexts.value.some((context) => context.id === imageContext.id)
-          ? selectedContexts.value
-          : [...selectedContexts.value, imageContext]
+        selectedContexts.value = [...selectedContexts.value, imageContext]
       } else {
         const docContext: AiContextOption = {
           id: `kb-doc:${relPath}`,

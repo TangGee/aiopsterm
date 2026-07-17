@@ -2,7 +2,10 @@
   <form
     v-if="aiPanelMode === 'classic' && !showNoAvailableModelPrompt"
     class="chat-input"
-    :class="{ 'drop-active': dropActive }"
+    :class="{
+      'drop-active': dropActive,
+      'popup-open': contextPopupOpen || commandPopupOpen || modeMenuOpen || modelMenuOpen
+    }"
     data-onboarding-id="ai-input"
     @submit.prevent="handleSend"
     @click.stop
@@ -25,6 +28,9 @@
         v-for="context in workspace.selectedContexts"
         :key="context.id"
         class="context-tag"
+        :data-context-id="context.id"
+        :class="{ 'is-unavailable': context.unavailable }"
+        :title="context.unavailable ? t('ai.contextUnavailable') : undefined"
       >
         {{ context.label }}
         <button
@@ -53,7 +59,7 @@
         class="processing-indicator"
       >
         <span></span>
-        {{ t('ai.processing') }}
+        {{ classicClineActivity === 'waiting-approval' ? t('ai.waitingApproval') : t('ai.processing') }}
       </span>
     </div>
 
@@ -88,6 +94,7 @@
           v-for="(host, index) in displayedOpenedHosts"
           :key="host.id"
           type="button"
+          class="context-option-row"
           :data-onboarding-id="host.id === 'opened-local' ? 'ai-localhost-option' : undefined"
           :class="{ selected: isContextSelectedForPopup(host), 'keyboard-selected': contextKeyboardIndex === index }"
           @mouseover="contextKeyboardIndex = index"
@@ -95,8 +102,10 @@
         >
           <Server />
           <span>{{ host.label }}</span>
-          <em>{{ host.detail }}</em>
-          <Check v-if="isContextSelectedForPopup(host)" />
+          <span class="context-option-tail">
+            <em>{{ host.detail }}</em>
+            <Check v-if="isContextSelectedForPopup(host)" />
+          </span>
         </button>
         <i v-if="displayedOpenedHosts.length"></i>
         <button
@@ -122,6 +131,7 @@
           v-for="(option, index) in filteredContextOptions"
           :key="option.id"
           type="button"
+          class="context-option-row"
           :data-onboarding-id="option.id === 'opened-local' || option.label === '127.0.0.1' ? 'ai-localhost-option' : undefined"
           :class="{ selected: isContextSelectedForPopup(option), 'keyboard-selected': contextKeyboardIndex === index }"
           @mouseover="contextKeyboardIndex = index"
@@ -129,10 +139,16 @@
         >
           <FolderGit2 v-if="option.kind === 'docs' && option.contextType === 'dir'" />
           <FileText v-else-if="option.kind === 'docs'" />
+          <component
+            :is="selectedContextCategory?.icon"
+            v-else
+          />
           <span>{{ option.label }}</span>
-          <em>{{ option.detail }}</em>
-          <ChevronRight v-if="option.kind === 'docs' && option.contextType === 'dir'" />
-          <Check v-else-if="isContextSelectedForPopup(option)" />
+          <span class="context-option-tail">
+            <em>{{ option.detail }}</em>
+            <ChevronRight v-if="option.kind === 'docs' && option.contextType === 'dir'" />
+            <Check v-else-if="isContextSelectedForPopup(option)" />
+          </span>
         </button>
         <small v-if="filteredContextOptions.length === 0">{{ t('ai.noMatchingContext') }}</small>
       </div>
@@ -441,6 +457,7 @@ const {
   commandQuery,
   commandSearchInputRef,
   commandTarget,
+  classicClineActivity,
   composerIsEmpty,
   contextKeyboardIndex,
   contextLevel,
@@ -488,6 +505,7 @@ const {
   selectAllVisibleHostContexts,
   selectChatMode,
   selectedCommandRef,
+  selectedContextCategory,
   selectedModelLabel,
   selectModel,
   showNoAvailableModelPrompt,

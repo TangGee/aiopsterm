@@ -279,6 +279,44 @@ export type DatabaseTableQueryResult = AiopsMutationResult<{
   knownColumns: string[]
 }>
 
+export type DatabaseTableIndexInspectionInput = {
+  connectionId: string
+  dbType?: DatabaseEngineCode
+  databaseName: string
+  schemaName?: string
+  tableName: string
+}
+
+export type DatabaseTableIndexInfo = {
+  name: string
+  columns: string[]
+  unique: boolean
+  primary: boolean
+  method?: string
+}
+
+export type DatabaseTableIndexInspectionResult = AiopsMutationResult<{
+  indexes: DatabaseTableIndexInfo[]
+  durationMs: number
+}>
+
+export type DatabaseTableExplainPlanInput = {
+  connectionId: string
+  dbType?: DatabaseEngineCode
+  databaseName: string
+  schemaName?: string
+  tableName: string
+  columns: string[]
+  filters: DatabaseColumnFilter[]
+  sort: DatabaseColumnSort | null
+}
+
+export type DatabaseTableExplainPlanResult = AiopsMutationResult<{
+  format: 'text'
+  plan: string
+  durationMs: number
+}>
+
 export type DatabaseTableMutation =
   | { kind: 'delete'; rowKey: string; primaryKey: string[]; originalRow?: Record<string, unknown> }
   | { kind: 'update'; rowKey: string; primaryKey: string[]; patch: Record<string, unknown>; originalRow?: Record<string, unknown> }
@@ -426,6 +464,15 @@ export type DatabaseAiPaneStateContext = {
   dbType: DatabaseEngineCode | ''
 }
 
+export type DatabaseAiPaneSessionSnapshot = {
+  conversationId: string
+  context: DatabaseAiPaneStateContext
+  draft: string
+  messages: DatabaseAiPaneMessageRecord[]
+  createdAt: number
+  updatedAt: number
+}
+
 export type DatabaseAiPaneStateSnapshot = {
   conversationId?: string
   open: boolean
@@ -433,6 +480,7 @@ export type DatabaseAiPaneStateSnapshot = {
   context: DatabaseAiPaneStateContext
   draft: string
   messages: DatabaseAiPaneMessageRecord[]
+  archivedSessions?: DatabaseAiPaneSessionSnapshot[]
 }
 
 export type DatabaseAiPaneStateResult = AiopsMutationResult<DatabaseAiPaneStateSnapshot>
@@ -484,6 +532,7 @@ export type DatabaseAiPaneResponseResult = AiopsMutationResult<{
 }>
 
 export type DatabaseAiDrawerResponseInput = {
+  conversationId?: string
   requestId?: string
   action: DatabaseAiDrawerAction
   responseLanguage?: DatabaseAiResponseLanguage
@@ -502,6 +551,7 @@ export type DatabaseAiDrawerResponseInput = {
 
 export type DatabaseAiDrawerRequestRecord = {
   id: string
+  conversationId?: string
   action: DatabaseAiDrawerAction
   label: string
   status: 'queued' | 'streaming' | 'done' | 'error' | 'cancelled'

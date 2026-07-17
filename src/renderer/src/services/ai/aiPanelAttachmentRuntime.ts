@@ -5,6 +5,7 @@ import {
   imagePartFromChatImagePrepareResult
 } from '@/services/ai/aiPanelMediaRuntime'
 import { localFilesClient } from '@/services/app/localFilesClient'
+import { MAX_CHAT_IMAGE_ATTACHMENTS_PER_MESSAGE } from '@shared/chatImageAttachment'
 import type { AiDocChipContentPart, AiImageContentPart } from '@shared/contracts/aiChat'
 import type { ChatAttachmentStageResult, ChatImageAttachmentPrepareResult, OpenDialogOptions, OpenDialogResult } from '@shared/contracts/localFiles'
 
@@ -21,6 +22,8 @@ export type AiPanelAttachmentRuntimeOptions = {
   insertImageAtEditCursor: (part: AiImageContentPart) => boolean | void
   insertFileChipAtMainCursor: (part: AiDocChipContentPart) => boolean
   insertFileChipAtEditCursor: (part: AiDocChipContentPart) => boolean
+  imageCount?: (target: 'main' | 'edit') => number
+  imageLimitMessage?: () => string
   notify: (message: string) => void
   showOpenDialog?: () => ShowOpenDialog | undefined
   prepareImageFromFile?: () => PrepareImageFromFile | undefined
@@ -35,6 +38,12 @@ export const createAiPanelAttachmentRuntime = (options: AiPanelAttachmentRuntime
   const prepareImageFromFile = options.prepareImageFromFile ?? localFilesClient.prepareChatImageAttachmentFromFile
   const prepareImageFromClipboard = options.prepareImageFromClipboard ?? localFilesClient.prepareChatImageAttachmentFromClipboard
   const stageAttachment = options.stageAttachment ?? localFilesClient.stageChatAttachment
+  const imageCount = options.imageCount ?? (() => 0)
+  const hasImageCapacity = (target: 'main' | 'edit', incoming = 1) => {
+    if (imageCount(target) + incoming <= MAX_CHAT_IMAGE_ATTACHMENTS_PER_MESSAGE) return true
+    options.notify(options.imageLimitMessage?.() || `Each message can include up to ${MAX_CHAT_IMAGE_ATTACHMENTS_PER_MESSAGE} images.`)
+    return false
+  }
 
   const processImageFilePath = async (filePath: string): Promise<AiImageContentPart | null> => {
     const prepareImage = prepareImageFromFile()
@@ -74,20 +83,23 @@ export const createAiPanelAttachmentRuntime = (options: AiPanelAttachmentRuntime
 
   const insertImageFilePaths = async (filePaths: string[]) => {
     if (options.streaming()) return
+    if (!hasImageCapacity('main', filePaths.length)) return
     for (const filePath of filePaths) {
       const part = await processImageFilePath(filePath)
-      if (part) options.insertImageAtMainCursor(part)
+      if (part && hasImageCapacity('main')) options.insertImageAtMainCursor(part)
     }
   }
 
   const insertPastedImage = async () => {
+    if (!hasImageCapacity('main')) return
     const part = await preparePastedImagePart()
-    if (part) options.insertImageAtMainCursor(part)
+    if (part && hasImageCapacity('main')) options.insertImageAtMainCursor(part)
   }
 
   const insertPastedImageIntoEdit = async () => {
+    if (!hasImageCapacity('edit')) return
     const part = await preparePastedImagePart()
-    if (part) options.insertImageAtEditCursor(part)
+    if (part && hasImageCapacity('edit')) options.insertImageAtEditCursor(part)
   }
 
   const openImagePicker = async () => {

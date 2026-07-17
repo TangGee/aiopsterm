@@ -50,6 +50,9 @@ export type KubernetesClusterUpdateInput = {
   name?: string
   defaultNamespace?: string
   autoConnect?: boolean
+  /** undefined = 保持不变;null/空串 = 清除;非空 = 替换(证书轮换后无需删除重建)。 */
+  kubeconfigPath?: string | null
+  kubeconfigContent?: string | null
 }
 
 export type KubernetesClusterTestInput = {

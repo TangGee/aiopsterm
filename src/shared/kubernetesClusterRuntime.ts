@@ -18,8 +18,7 @@ import type {
   KubernetesKubeconfigImportInput,
   KubernetesKubeconfigImportResult,
   KubernetesNamespaceInfo,
-  KubernetesResource,
-  KubernetesTerminalRecord
+  KubernetesResource
 } from './contracts/kubernetes'
 import {
   probeKubernetesClusterConnection,
@@ -42,8 +41,10 @@ type KubernetesClusterRuntimeOptions = {
   setResources: (resources: KubernetesResource[]) => void
   importContexts: () => KubernetesImportContextInfo[]
   setImportContexts: (contexts: KubernetesImportContextInfo[]) => void
-  terminalSessions: () => KubernetesTerminalRecord[]
-  setTerminalSessions: (sessions: KubernetesTerminalRecord[]) => void
+  /** 集群连接成功后激活挂起的终端会话(PTY 会话在此刻拉起 shell)。 */
+  activateClusterTerminalSessions: (clusterId: string) => Promise<void>
+  /** 断开/删除集群时释放其终端会话(杀 PTY、清理临时 kubeconfig、发 exit 事件)。 */
+  disposeClusterTerminalSessions: (clusterId: string) => void
   ensureCatalogStateLoaded: () => void
   cloneCatalog: () => KubernetesCatalog
   persistCatalogState: () => void
@@ -318,13 +319,36 @@ export const createKubernetesClusterRuntime = (options: KubernetesClusterRuntime
   const updateCluster = async (id: string, input: KubernetesClusterUpdateInput): Promise<KubernetesClusterMutationResult> =>
     asResult(() => {
       const current = requireCluster(id)
+      const kubeconfigPathProvided = input.kubeconfigPath !== undefined
+      const kubeconfigContentProvided = input.kubeconfigContent !== undefined
+      if ((kubeconfigPathProvided || kubeconfigContentProvided) && (current.source_type === 'jumpserver' || current.auth_type === 'jumpserver')) {
+        throw Object.assign(new Error('JumpServer Kubernetes clusters do not use kubeconfig credentials.'), {
+          code: 'K8S_CLUSTER_KUBECONFIG_NOT_SUPPORTED'
+        })
+      }
+      const nextKubeconfigPath = kubeconfigPathProvided ? input.kubeconfigPath?.trim() || null : current.kubeconfig_path
+      const nextKubeconfigContent = kubeconfigContentProvided ? input.kubeconfigContent?.trim() || null : current.kubeconfig_content
+      const kubeconfigChanged = nextKubeconfigPath !== current.kubeconfig_path || nextKubeconfigContent !== current.kubeconfig_content
       const next: KubernetesClusterRecord = {
         ...current,
         name: input.name?.trim() || current.name,
         default_namespace: input.defaultNamespace?.trim() || current.default_namespace,
         auto_connect: input.autoConnect === undefined ? current.auto_connect : input.autoConnect ? 1 : 0,
+        kubeconfig_path: nextKubeconfigPath,
+        kubeconfig_content: nextKubeconfigContent,
+        // kubeconfig 变更后旧连接状态不再可信,退回 disconnected 促使重新探测。
+        connection_status: kubeconfigChanged ? 'disconnected' : current.connection_status,
         updated_at: options.nowLabel()
       }
+      requireRunnableKubernetesClusterInput({
+        name: next.name,
+        contextName: next.context_name,
+        serverUrl: next.server_url,
+        sourceType: next.source_type,
+        authType: next.auth_type,
+        kubeconfigPath: next.kubeconfig_path,
+        kubeconfigContent: next.kubeconfig_content
+      })
       options.setClusters(options.clusters().map((cluster) => (cluster.id === id ? next : cluster)))
       upsertContextForCluster(next)
       options.persistCatalogState()
@@ -338,10 +362,12 @@ export const createKubernetesClusterRuntime = (options: KubernetesClusterRuntime
     asResult(() => {
       const current = requireCluster(id)
       options.setClusters(options.clusters().filter((cluster) => cluster.id !== id))
-      options.setContexts(options.contexts().filter((context) => context.name !== current.context_name))
+      // context 以 name 全局共享:仅当没有其他集群仍引用同名 context 时才移除,避免删除一个集群导致同 context 的其余集群失联。
+      const contextStillReferenced = options.clusters().some((cluster) => cluster.context_name === current.context_name)
+      if (!contextStillReferenced) options.setContexts(options.contexts().filter((context) => context.name !== current.context_name))
       options.setNamespaces(options.namespaces().filter((namespace) => namespace.clusterId !== id))
       options.setResources(options.resources().filter((resource) => resource.clusterId !== id))
-      options.setTerminalSessions(options.terminalSessions().filter((session) => session.clusterId !== id))
+      options.disposeClusterTerminalSessions(id)
       options.persistCatalogState()
       return options.cloneCatalog()
     })
@@ -388,17 +414,7 @@ export const createKubernetesClusterRuntime = (options: KubernetesClusterRuntime
           updated_at: cluster.id === id ? options.nowLabel() : cluster.updated_at
         }))
       )
-      options.setTerminalSessions(
-        options.terminalSessions().map((session) =>
-          session.clusterId === id && session.status === 'connecting'
-            ? {
-                ...session,
-                status: 'connected',
-                updatedAt: options.nowLabel()
-              }
-            : session
-        )
-      )
+      await options.activateClusterTerminalSessions(id)
       options.setContexts(options.contexts().map((context) => ({ ...context, isActive: context.name === current.context_name })))
       const connected = requireCluster(id)
       options.persistCatalogState()
@@ -424,7 +440,7 @@ export const createKubernetesClusterRuntime = (options: KubernetesClusterRuntime
         updated_at: options.nowLabel()
       }
       options.setClusters(options.clusters().map((cluster) => (cluster.id === id ? next : cluster)))
-      options.setTerminalSessions(options.terminalSessions().filter((session) => session.clusterId !== id))
+      options.disposeClusterTerminalSessions(id)
       options.persistCatalogState()
       return {
         ...options.cloneCatalog(),

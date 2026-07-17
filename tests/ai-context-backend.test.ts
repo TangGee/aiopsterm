@@ -56,7 +56,7 @@ describe('AI context catalog backend boundary', () => {
     }
   })
 
-  it('builds host, chat, and default contexts from backend-owned catalogs', async () => {
+  it('builds host and chat contexts without implicitly selecting execution targets', async () => {
     process.env.AIOPSTERM_CHAT_HISTORY_ENABLE_SEED = '1'
     process.env.AIOPSTERM_ASSETS_ENABLE_SEED = '1'
     const backend = await loadBackend()
@@ -65,18 +65,15 @@ describe('AI context catalog backend boundary', () => {
     expect(result.ok).toBe(true)
     expect(result.data?.openedHosts).toEqual([
       expect.objectContaining({ id: 'opened-local', kind: 'hosts', label: '127.0.0.1' }),
-      expect.objectContaining({ id: 'asset-1', kind: 'hosts', label: '10.24.8.12', detail: 'prod-bastion' }),
-      expect.objectContaining({ id: 'asset-3', kind: 'hosts', label: '10.32.6.9', detail: 'mysql-primary' }),
-      expect.objectContaining({ id: 'asset-2', kind: 'hosts', label: '10.24.12.44', detail: 'staging-api' })
+      expect.objectContaining({ id: 'asset-1', kind: 'hosts', label: 'prod-bastion', detail: '10.24.8.12', host: '10.24.8.12' }),
+      expect.objectContaining({ id: 'asset-3', kind: 'hosts', label: 'mysql-primary', detail: '10.32.6.9', host: '10.32.6.9' }),
+      expect.objectContaining({ id: 'asset-2', kind: 'hosts', label: 'staging-api', detail: '10.24.12.44', host: '10.24.12.44' })
     ])
-    expect(result.data?.selectedDefaults).toEqual([
-      expect.objectContaining({ id: 'opened-local', label: '127.0.0.1' }),
-      expect.objectContaining({ id: 'asset-1', label: '10.24.8.12' })
-    ])
+    expect(result.data?.selectedDefaults).toEqual([])
     expect(result.data?.categories.find((category: AiContextCategoryInfo) => category.id === 'hosts')?.options).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ id: 'asset-1', label: '10.24.8.12' }),
-        expect.objectContaining({ id: 'asset-3', label: '10.32.6.9' })
+        expect.objectContaining({ id: 'asset-1', label: 'prod-bastion', detail: '10.24.8.12' }),
+        expect.objectContaining({ id: 'asset-3', label: 'mysql-primary', detail: '10.32.6.9' })
       ])
     )
     expect(result.data?.categories.find((category: AiContextCategoryInfo) => category.id === 'hosts')?.options).not.toEqual(

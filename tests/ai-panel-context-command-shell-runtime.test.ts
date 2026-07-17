@@ -168,6 +168,15 @@ describe('aiPanelContextCommandShellRuntime', () => {
 
     runtime.openContextPopup()
     expect(state.contextTarget).toBe('main')
+    runtime.applyContext(prod)
+    expect(state.contextPopupOpen).toBe(false)
+    expect(calls.focusInputForTarget).toHaveBeenCalledWith('main')
+
+    runtime.openContextPopup('hosts')
+    runtime.applyContext(prod)
+    expect(state.contextPopupOpen).toBe(true)
+    expect(store.mainContexts).toEqual([])
+
     runtime.selectAllVisibleHostContexts()
     expect(store.mainContexts.map((context) => context.id)).toEqual(['prod'])
     expect(calls.renderEditableFromState).toHaveBeenCalled()

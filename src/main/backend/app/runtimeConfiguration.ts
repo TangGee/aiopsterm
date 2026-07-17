@@ -18,6 +18,7 @@ import {
 } from '../agent/agentSessions'
 import { configureAppUpdateRuntime } from './appUpdate'
 import { configureChatHistoryBackendRuntime } from '../chat/chatHistory'
+import { getChatConversationMessages } from '../chat/chatHistory'
 import { configureCodexCliRuntime, refreshCodexConfig } from '../codex/codexCli'
 import { getCodexTerminalBridgeSocketPath } from '../codex/codexTerminalBridge'
 import { configureExportMcpInstallerRuntime, exportMcpScriptPathFor } from '../codex/exportMcpInstaller'
@@ -30,13 +31,14 @@ import { ensureExternalCodexMcpBridgeServer } from '../codex/externalCodexMcpBri
 import { configureFilesBackendRuntime } from '../files/files'
 import { configureKubernetesBackendRuntime, setKubernetesTerminalEventSink } from '../kubernetes/kubernetes'
 import { configureLocalTerminalBackendRuntime } from '../terminal/localTerminal'
-import { callMcpTool } from '../mcp/mcpRuntime'
+import { callMcpTool, readMcpResource } from '../mcp/mcpRuntime'
 import { createAiProviderProxyFetch } from '../ai/aiProviderProxyFetch'
 import { createProviderTextRequest, fetchProviderText, resolveModelProvider } from '../ai/modelProviderText'
 import { configurePrivacyRuntime } from './privacyRuntime'
 import { configureQuickCommandBackendRuntime } from '../quick-commands/quickCommands'
 import { configureRuntimeLog, logRuntimeEvent } from './runtimeLog'
 import { configureSettingsPreferencesBackendRuntime } from '../settings/settingsPreferences'
+import { getSettingsPreferences } from '../settings/settingsPreferences'
 import { createSshProxySocket } from '../ssh/sshProxy'
 import { configureSshTerminalBackendRuntime } from '../ssh/sshTerminal'
 import { configureSshTunnelBackendRuntime } from '../ssh/sshTunnels'
@@ -68,7 +70,7 @@ import type { ControlNotificationRecord, ControlResponse } from '@shared/contrac
 import type { McpConfigFile } from '@shared/contracts/mcp'
 import type { ManagedAiSessionEvent, ManagedAiSessionFocusRequest } from '@shared/contracts/managedAiSessions'
 import type { SkillUserConfig } from '@shared/contracts/skills'
-import type { KnowledgeBaseEntry, KnowledgeBaseNodeConfig } from '@shared/contracts/knowledgeBase'
+import type { KnowledgeBaseEntry, KnowledgeBaseNodeConfig, KnowledgeBaseSearchResult } from '@shared/contracts/knowledgeBase'
 
 type ConfigureMainRuntimeInput = {
   getConfig: () => UserConfig
@@ -76,8 +78,16 @@ type ConfigureMainRuntimeInput = {
   getLogDirPath: () => string
   focusWindow: (window?: BrowserWindow) => BrowserWindow | null
   loadCurrentMcpConfigFile: () => Promise<McpConfigFile>
+  searchKnowledgeIndex: (
+    query: string,
+    options?: { maxResults?: number; minScore?: number }
+  ) => Promise<KnowledgeBaseSearchResult[]>
   listKnowledgeDir: (relDir: string) => Promise<KnowledgeBaseEntry[]>
   buildKnowledgeTreeFromDisk: () => Promise<KnowledgeBaseNodeConfig[]>
+  resolveKnowledgePath: (relPath: string) => { absPath: string; relPath: string }
+  getKnowledgeMimeType: (relPath: string) => string
+  isKnowledgeImage: (relPath: string) => boolean
+  getChatAttachmentsPath: () => string
   loadSkillsFromDisk: () => Promise<SkillUserConfig[]>
   rememberTerminalPassword: (assetId: string, password: string) => void
   requestTerminalKeyboardInteractive: (request: TerminalKeyboardInteractiveRequest) => Promise<TerminalKeyboardInteractiveResponse>
@@ -112,6 +122,15 @@ export const configureMainBackendRuntimes = (input: ConfigureMainRuntimeInput) =
     userDataPath,
     isPackaged: app.isPackaged,
     getConfig: input.getConfig,
+    searchKnowledgeBase: (query, options) => input.searchKnowledgeIndex(query, options),
+    readMcpResource: async (resourceInput) => {
+      const current = input.getConfig()
+      return readMcpResource(await input.loadCurrentMcpConfigFile(), resourceInput, {
+        servers: current.mcpServers || [],
+        clientName: 'aiopsterm',
+        clientVersion: app.getVersion()
+      })
+    },
     getWindows: () => BrowserWindow.getAllWindows(),
     env: process.env
   })
@@ -298,6 +317,20 @@ export const configureMainBackendRuntimes = (input: ConfigureMainRuntimeInput) =
   configureAiChatRuntime({
     getConfig: input.getConfig,
     listSkills: () => input.loadSkillsFromDisk(),
+    listRules: () => {
+      const result = getSettingsPreferences({
+        rules: input.getConfig().rules,
+        customInstructions: input.getConfig().customInstructions
+      })
+      return result.ok && result.data ? result.data.rules : input.getConfig().rules || []
+    },
+    richContext: {
+      resolveKnowledgePath: input.resolveKnowledgePath,
+      getKnowledgeMimeType: input.getKnowledgeMimeType,
+      isKnowledgeImage: input.isKnowledgeImage,
+      getChatAttachmentsPath: input.getChatAttachmentsPath,
+      getChatConversationMessages
+    },
     localBackendDouble: shouldUseAiChatBackendDouble(),
     clineEnabled: true,
     callMcpTool: async (toolInput) => {

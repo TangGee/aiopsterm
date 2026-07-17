@@ -252,7 +252,7 @@ describe('workspaceKubernetesTerminalController', () => {
         detail: 'prod/admin / default'
       }
     ])
-    expect(subject.sentChats[0].options).toEqual({ skipKnowledgeSearch: true })
+    expect(subject.sentChats[0].options).toEqual({ mode: 'chat', skipKnowledgeSearch: true })
     expect(subject.k8sActiveTerminal.value?.collectingAiOutput).toBe(false)
     expect(subject.notices.value.at(-1)).toBe(`${tab?.name} 命令输出已发送到 AI`)
   })

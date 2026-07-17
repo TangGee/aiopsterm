@@ -11,6 +11,7 @@ import {
   ensureAiAgentSessionServer,
 } from './backend/agent/agentSessions'
 import { closeClineAgentRuntime } from './backend/agent/clineAgentRuntime'
+import { createProductSessionRegistry } from './backend/agent/productSessionRegistry'
 import { configureRuntimeLog, logRuntimeEvent } from './backend/app/runtimeLog'
 import { configureCrashDiagnosticsRuntime, shouldEnableCrashDiagnostics } from './backend/app/crashDiagnosticsRuntime'
 import {
@@ -131,7 +132,12 @@ const knowledgeBaseRuntime = createKnowledgeBaseRuntime({
   userDataPath: () => app.getPath('userData'),
   getConfig,
   defaultKnowledgeBase: defaultKnowledgeBaseUserConfig,
-  saveKnowledgeBase: (knowledgeBase) => store.set('config', mergeConfig(getConfig(), { knowledgeBase }))
+  saveKnowledgeBase: (knowledgeBase) => store.set('config', mergeConfig(getConfig(), { knowledgeBase })),
+  bundledDocsPath: () =>
+    app.isPackaged
+      ? join(process.resourcesPath || '', 'docs', 'best-practices')
+      : join(app.getAppPath(), 'docs', 'usage', 'best-practices'),
+  bundledDocsVersion: () => app.getVersion()
 })
 
 const nativeNotificationRuntime: NativeNotificationRuntime = {
@@ -274,14 +280,21 @@ const showControlNotification = (notification: ControlNotificationRecord) => {
   })
 }
 
+const productSessionRegistry = createProductSessionRegistry({ userDataPath: app.getPath('userData') })
+
 const runtimeConfiguration = configureMainBackendRuntimes({
   getConfig,
   getDefaultShell,
   getLogDirPath,
   focusWindow: appBootstrapRuntime.focusWindow,
   loadCurrentMcpConfigFile: settingsConfigRuntime.loadCurrentMcpConfigFile,
+  searchKnowledgeIndex: knowledgeBaseRuntime.searchKnowledgeIndex,
   listKnowledgeDir: knowledgeBaseRuntime.listKnowledgeDir,
   buildKnowledgeTreeFromDisk: () => knowledgeBaseRuntime.buildKnowledgeTreeFromDisk(),
+  resolveKnowledgePath: knowledgeBaseRuntime.resolveKnowledgePath,
+  getKnowledgeMimeType: knowledgeBaseRuntime.getKnowledgeMimeType,
+  isKnowledgeImage: knowledgeBaseRuntime.isKnowledgeImage,
+  getChatAttachmentsPath,
   loadSkillsFromDisk: skillsRuntime.loadSkillsFromDisk,
   rememberTerminalPassword: terminalRuntime.rememberTerminalPassword,
   requestTerminalKeyboardInteractive: terminalRuntime.requestKeyboardInteractiveFromFocusedWindow,
@@ -320,6 +333,7 @@ app.whenReady().then(async () => {
     knowledgeBaseRuntime,
     settingsConfigRuntime,
     skillsRuntime,
+    productSessionRegistry,
     store,
     runtimeConfiguration,
     getConfig,
@@ -376,6 +390,7 @@ app.on('before-quit', (event) => {
   closeExternalCodexMcpBridgeServer()
   settingsConfigRuntime.stopConfigWatchers()
   skillsRuntime.stopSkillsWatcher()
+  productSessionRegistry.close()
   if (!clineAgentShutdownComplete) {
     event.preventDefault()
     void shutdownClineAgentRuntime().finally(() => app.quit())

@@ -4,8 +4,12 @@ import type {
   DatabaseCatalogResult,
   DatabaseColumnFilter,
   DatabaseConnectionInfo,
+  DatabaseTableExplainPlanInput,
+  DatabaseTableExplainPlanResult,
   DatabaseTableDdlInput,
   DatabaseTableDdlResult,
+  DatabaseTableIndexInspectionInput,
+  DatabaseTableIndexInspectionResult,
   DatabaseTableInfo,
   DatabaseTableQueryInput,
   DatabaseTableQueryResult
@@ -13,10 +17,17 @@ import type {
 
 export const DATABASE_MCP_TOOL_NAMES = [
   'list_database_connections',
+  'list_databases',
+  'list_schemas',
+  'list_tables',
   'search_database_objects',
   'describe_database_table',
   'get_database_table_ddl',
-  'query_database_table'
+  'query_database_table',
+  'sample_rows',
+  'count_rows',
+  'inspect_indexes',
+  'explain_plan'
 ] as const
 
 export type DatabaseMcpToolName = (typeof DATABASE_MCP_TOOL_NAMES)[number]
@@ -38,12 +49,19 @@ export type DatabaseMcpToolResult = AiopsMutationResult<Record<string, unknown>>
 
 export type DatabaseMcpToolCallOptions = {
   allowInternalConnectionId?: boolean
+  signal?: AbortSignal
+}
+
+export type DatabaseMcpDependencyReadOptions = {
+  signal: AbortSignal
 }
 
 export type DatabaseMcpRuntimeDependencies = {
   listCatalog: () => Promise<DatabaseCatalogResult>
-  getTableDdl: (input: DatabaseTableDdlInput) => Promise<DatabaseTableDdlResult>
-  queryTable: (input: DatabaseTableQueryInput) => Promise<DatabaseTableQueryResult>
+  getTableDdl: (input: DatabaseTableDdlInput, options?: DatabaseMcpDependencyReadOptions) => Promise<DatabaseTableDdlResult>
+  queryTable: (input: DatabaseTableQueryInput, options?: DatabaseMcpDependencyReadOptions) => Promise<DatabaseTableQueryResult>
+  inspectTableIndexes?: (input: DatabaseTableIndexInspectionInput, options?: DatabaseMcpDependencyReadOptions) => Promise<DatabaseTableIndexInspectionResult>
+  explainTable?: (input: DatabaseTableExplainPlanInput, options?: DatabaseMcpDependencyReadOptions) => Promise<DatabaseTableExplainPlanResult>
 }
 
 type DatabaseObjectKind = 'table' | 'view' | 'function' | 'procedure'
@@ -58,6 +76,11 @@ type DatabaseObjectRecord = {
 }
 
 const MAX_OBJECT_RESULTS = 200
+const MAX_DATABASE_RESULTS = 100
+const MAX_SCHEMA_RESULTS = 200
+const MAX_TABLE_RESULTS = 500
+const MAX_SAMPLE_ROWS = 20
+const MAX_INDEX_RESULTS = 200
 const MAX_QUERY_PAGE_SIZE = 100
 const MAX_QUERY_PAGE = 1000
 const MAX_QUERY_COLUMNS = 50
@@ -67,9 +90,11 @@ const MAX_FILTER_VALUE_LENGTH = 4096
 const MAX_RESULT_BYTES = 512 * 1024
 const MAX_DDL_BYTES = 256 * 1024
 const MAX_DDL_SOURCE_CHARS = 512 * 1024
+const MAX_EXPLAIN_PLAN_BYTES = 128 * 1024
 const MAX_SENSITIVE_TEXT_CHARS = 16 * 1024
 const MAX_CELL_STRING_LENGTH = 16 * 1024
 const MAX_ACTIVE_DATABASE_READS = 4
+const MAX_PHYSICAL_DATABASE_READS = MAX_ACTIVE_DATABASE_READS * 2
 const DATABASE_READ_DEADLINE_MS = 30_000
 
 const localReadOnlyAnnotations = {
@@ -101,6 +126,42 @@ const queryTableSelectorProperties = {
   tableName: { type: 'string', description: 'Exact base table name. Views cannot be queried.' }
 }
 
+const boundedColumnsProperty = {
+  type: 'array',
+  minItems: 1,
+  maxItems: MAX_QUERY_COLUMNS,
+  uniqueItems: true,
+  items: { type: 'string' },
+  description: 'Optional bounded scalar columns. Unbounded LOB, TEXT, JSON, collection, and String columns are rejected.'
+}
+
+const structuredFiltersProperty = {
+  type: 'array',
+  maxItems: MAX_QUERY_FILTERS,
+  description: 'Structured filters combined with AND.',
+  items: {
+    type: 'object',
+    properties: {
+      column: { type: 'string' },
+      operator: { type: 'string', enum: ['like', 'eq', 'neq', 'in', 'isnull', 'notnull'] },
+      value: { type: 'string' },
+      values: { type: 'array', maxItems: MAX_FILTER_VALUES, items: { type: 'string' } }
+    },
+    required: ['column', 'operator'],
+    additionalProperties: false
+  }
+}
+
+const structuredSortProperty = {
+  type: 'object',
+  properties: {
+    column: { type: 'string' },
+    direction: { type: 'string', enum: ['asc', 'desc'] }
+  },
+  required: ['column', 'direction'],
+  additionalProperties: false
+}
+
 export const DATABASE_MCP_TOOL_DEFINITIONS: DatabaseMcpToolDefinition[] = [
   {
     name: 'list_database_connections',
@@ -111,6 +172,60 @@ export const DATABASE_MCP_TOOL_DEFINITIONS: DatabaseMcpToolDefinition[] = [
       properties: {
         query: { type: 'string', description: 'Optional case-insensitive filter across generated label, engine, environment, and status.' }
       },
+      additionalProperties: false
+    },
+    annotations: localReadOnlyAnnotations
+  },
+  {
+    name: 'list_databases',
+    title: 'List databases on an aiopsterm connection',
+    description: 'List bounded catalog or database metadata on one saved connection. No connection secrets are returned.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        connectionId: connectionIdProperty,
+        databaseName: { type: 'string', description: 'Optional exact database scope.' },
+        query: { type: 'string', description: 'Optional case-insensitive name filter.' },
+        limit: { type: 'integer', minimum: 1, maximum: MAX_DATABASE_RESULTS, description: 'Maximum databases to return. Defaults to 100.' }
+      },
+      required: ['connectionId'],
+      additionalProperties: false
+    },
+    annotations: localReadOnlyAnnotations
+  },
+  {
+    name: 'list_schemas',
+    title: 'List schemas in an aiopsterm database',
+    description: 'List bounded schema metadata from the current catalog snapshot for one exact database.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        connectionId: connectionIdProperty,
+        databaseName: { type: 'string', description: 'Exact catalog or database name.' },
+        schemaName: { type: 'string', description: 'Optional exact schema scope.' },
+        query: { type: 'string', description: 'Optional case-insensitive name filter.' },
+        limit: { type: 'integer', minimum: 1, maximum: MAX_SCHEMA_RESULTS, description: 'Maximum schemas to return. Defaults to 100.' }
+      },
+      required: ['connectionId', 'databaseName'],
+      additionalProperties: false
+    },
+    annotations: localReadOnlyAnnotations
+  },
+  {
+    name: 'list_tables',
+    title: 'List tables in an aiopsterm database',
+    description: 'List bounded table and view metadata in one exact database and optional schema.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        connectionId: connectionIdProperty,
+        databaseName: { type: 'string', description: 'Exact catalog or database name.' },
+        schemaName: { type: 'string', description: 'Optional exact schema scope.' },
+        query: { type: 'string', description: 'Optional case-insensitive table-name filter.' },
+        kinds: { type: 'array', uniqueItems: true, items: { type: 'string', enum: ['table', 'view'] } },
+        limit: { type: 'integer', minimum: 1, maximum: MAX_TABLE_RESULTS, description: 'Maximum tables and views to return. Defaults to 200.' }
+      },
+      required: ['connectionId', 'databaseName'],
       additionalProperties: false
     },
     annotations: localReadOnlyAnnotations
@@ -170,41 +285,73 @@ export const DATABASE_MCP_TOOL_DEFINITIONS: DatabaseMcpToolDefinition[] = [
       type: 'object',
       properties: {
         ...queryTableSelectorProperties,
-        columns: {
-          type: 'array',
-          minItems: 1,
-          maxItems: MAX_QUERY_COLUMNS,
-          uniqueItems: true,
-          items: { type: 'string' },
-          description: 'Optional bounded scalar columns to return. Unbounded LOB, TEXT, JSON, collection, and String columns cannot be selected.'
-        },
-        filters: {
-          type: 'array',
-          maxItems: MAX_QUERY_FILTERS,
-          description: 'Structured filters combined with AND.',
-          items: {
-            type: 'object',
-            properties: {
-              column: { type: 'string' },
-              operator: { type: 'string', enum: ['like', 'eq', 'neq', 'in', 'isnull', 'notnull'] },
-              value: { type: 'string' },
-              values: { type: 'array', maxItems: MAX_FILTER_VALUES, items: { type: 'string' } }
-            },
-            required: ['column', 'operator'],
-            additionalProperties: false
-          }
-        },
-        sort: {
-          type: 'object',
-          properties: {
-            column: { type: 'string' },
-            direction: { type: 'string', enum: ['asc', 'desc'] }
-          },
-          required: ['column', 'direction'],
-          additionalProperties: false
-        },
+        columns: boundedColumnsProperty,
+        filters: structuredFiltersProperty,
+        sort: structuredSortProperty,
         page: { type: 'integer', minimum: 1, maximum: MAX_QUERY_PAGE, description: 'One-based page number. Defaults to 1 and is capped at 1000.' },
         pageSize: { type: 'integer', minimum: 1, maximum: MAX_QUERY_PAGE_SIZE, description: 'Rows per page. Defaults to 50 and is capped at 100.' }
+      },
+      required: ['connectionId', 'databaseName', 'tableName'],
+      additionalProperties: false
+    },
+    annotations: externalReadOnlyAnnotations
+  },
+  {
+    name: 'sample_rows',
+    title: 'Sample rows from an aiopsterm database table',
+    description: 'Read at most 20 rows from one catalog-known base table through the structured table-query boundary. Arbitrary SQL is not accepted.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...queryTableSelectorProperties,
+        columns: boundedColumnsProperty,
+        filters: structuredFiltersProperty,
+        sort: structuredSortProperty,
+        limit: { type: 'integer', minimum: 1, maximum: MAX_SAMPLE_ROWS, description: 'Rows to return. Defaults to 5 and is capped at 20.' }
+      },
+      required: ['connectionId', 'databaseName', 'tableName'],
+      additionalProperties: false
+    },
+    annotations: externalReadOnlyAnnotations
+  },
+  {
+    name: 'count_rows',
+    title: 'Count rows in an aiopsterm database table',
+    description: 'Count rows in one catalog-known base table using optional structured filters. Arbitrary SQL is not accepted.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...queryTableSelectorProperties,
+        filters: structuredFiltersProperty
+      },
+      required: ['connectionId', 'databaseName', 'tableName'],
+      additionalProperties: false
+    },
+    annotations: externalReadOnlyAnnotations
+  },
+  {
+    name: 'inspect_indexes',
+    title: 'Inspect indexes on an aiopsterm database table',
+    description: 'Return structured index metadata for one catalog-known base table when the database engine has a safe index adapter.',
+    inputSchema: {
+      type: 'object',
+      properties: queryTableSelectorProperties,
+      required: ['connectionId', 'databaseName', 'tableName'],
+      additionalProperties: false
+    },
+    annotations: externalReadOnlyAnnotations
+  },
+  {
+    name: 'explain_plan',
+    title: 'Explain a structured aiopsterm table query',
+    description: 'Return a bounded execution plan for a catalog-validated structured base-table query when the database engine has a safe explain adapter. SQL text is never accepted.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...queryTableSelectorProperties,
+        columns: boundedColumnsProperty,
+        filters: structuredFiltersProperty,
+        sort: structuredSortProperty
       },
       required: ['connectionId', 'databaseName', 'tableName'],
       additionalProperties: false
@@ -504,6 +651,15 @@ const resolveTable = (
   return { result: null, object: matches[0] }
 }
 
+const resolveCatalog = (connection: DatabaseConnectionInfo, databaseNameValue: unknown) => {
+  const databaseName = cleanText(databaseNameValue)
+  if (!databaseName) return { result: fail('DB_MCP_DATABASE_REQUIRED', 'databaseName is required.'), catalog: null }
+  const catalog = connection.catalogs.find((item) => sameName(item.name, databaseName)) ?? null
+  return catalog
+    ? { result: null, catalog }
+    : { result: fail('DB_MCP_DATABASE_NOT_FOUND', 'The database was not found in the current connection catalog.'), catalog: null }
+}
+
 const connectionMustBeOpen = (connection: DatabaseConnectionInfo) =>
   connection.status === 'connected' || connection.dbType === 'sqlite'
     ? null
@@ -673,7 +829,8 @@ export const isDatabaseMcpToolName = (value: unknown): value is DatabaseMcpToolN
   DATABASE_MCP_TOOL_NAMES.includes(value as DatabaseMcpToolName)
 
 export function createDatabaseMcpToolRuntime(dependencies: DatabaseMcpRuntimeDependencies) {
-  let activeDatabaseReads = 0
+  let activeDatabaseReadLeases = 0
+  let physicalDatabaseReads = 0
   const connectionHandles = new Map<string, string>()
   const connectionIdsByHandle = new Map<string, string>()
 
@@ -695,28 +852,61 @@ export function createDatabaseMcpToolRuntime(dependencies: DatabaseMcpRuntimeDep
   ) => resolveConnection(dependencies, connectionIdValue, (handle) => connectionIdsByHandle.get(handle), options.allowInternalConnectionId === true)
 
   const runDatabaseRead = async <T>(
-    operation: () => Promise<T>,
-    failure: { errorCode: string; errorMessage: string }
+    operation: (options: DatabaseMcpDependencyReadOptions) => Promise<T>,
+    failure: { errorCode: string; errorMessage: string },
+    signal?: AbortSignal
   ): Promise<{ value?: T; error?: DatabaseMcpToolResult }> => {
-    if (activeDatabaseReads >= MAX_ACTIVE_DATABASE_READS) {
+    if (signal?.aborted) {
+      return { error: fail('DB_MCP_REQUEST_CANCELLED', 'Database MCP request was cancelled.') }
+    }
+    if (physicalDatabaseReads >= MAX_PHYSICAL_DATABASE_READS) {
+      return { error: fail('DB_MCP_READ_CHANNEL_ISOLATED', 'Database MCP reads are isolated because cancelled operations did not stop.') }
+    }
+    if (activeDatabaseReadLeases >= MAX_ACTIVE_DATABASE_READS) {
       return { error: fail('DB_MCP_READ_CONCURRENCY_LIMIT', 'Too many database MCP reads are already running.') }
     }
-    activeDatabaseReads += 1
+    activeDatabaseReadLeases += 1
+    physicalDatabaseReads += 1
+    let leaseReleased = false
+    const releaseLease = () => {
+      if (leaseReleased) return
+      leaseReleased = true
+      activeDatabaseReadLeases = Math.max(0, activeDatabaseReadLeases - 1)
+    }
+    const readController = new AbortController()
     const tracked = Promise.resolve()
-      .then(operation)
+      .then(() => operation({ signal: readController.signal }))
       .then((value) => ({ value }))
       .catch(() => ({ error: fail(failure.errorCode, failure.errorMessage) }))
       .finally(() => {
-        activeDatabaseReads = Math.max(0, activeDatabaseReads - 1)
+        physicalDatabaseReads = Math.max(0, physicalDatabaseReads - 1)
+        releaseLease()
       })
     let timer: NodeJS.Timeout | undefined
     const timeout = new Promise<{ error: DatabaseMcpToolResult }>((resolve) => {
-      timer = setTimeout(() => resolve({ error: fail('DB_MCP_READ_TIMEOUT', 'Database MCP read exceeded the 30 second deadline.') }), DATABASE_READ_DEADLINE_MS)
+      timer = setTimeout(() => {
+        resolve({ error: fail('DB_MCP_READ_TIMEOUT', 'Database MCP read exceeded the 30 second deadline.') })
+        readController.abort('DB_MCP_READ_TIMEOUT')
+      }, DATABASE_READ_DEADLINE_MS)
       timer.unref?.()
     })
-    const result = await Promise.race([tracked, timeout])
-    if (timer) clearTimeout(timer)
-    return result
+    let cancel: (() => void) | undefined
+    const cancelled = new Promise<{ error: DatabaseMcpToolResult }>((resolve) => {
+      if (!signal) return
+      cancel = () => {
+        resolve({ error: fail('DB_MCP_REQUEST_CANCELLED', 'Database MCP request was cancelled.') })
+        readController.abort(signal.reason)
+      }
+      signal.addEventListener('abort', cancel, { once: true })
+      if (signal.aborted) cancel()
+    })
+    try {
+      return await Promise.race([tracked, timeout, cancelled])
+    } finally {
+      if (timer) clearTimeout(timer)
+      if (signal && cancel) signal.removeEventListener('abort', cancel)
+      releaseLease()
+    }
   }
 
   const listConnections = async (params: Record<string, unknown>) => {
@@ -738,6 +928,87 @@ export function createDatabaseMcpToolRuntime(dependencies: DatabaseMcpRuntimeDep
         return [connection.label, connection.dbType, connection.environment, connection.status].some((value) => String(value).toLocaleLowerCase().includes(query))
       })
     return ok({ connections, count: connections.length })
+  }
+
+  const listDatabases = async (params: Record<string, unknown>, options: DatabaseMcpToolCallOptions) => {
+    const resolved = await resolveRuntimeConnection(params.connectionId, options)
+    if (resolved.result || !resolved.connection) return resolved.result as DatabaseMcpToolResult
+    const exactDatabaseName = cleanText(params.databaseName)
+    const query = cleanText(params.query).toLocaleLowerCase()
+    const limit = positiveInteger(params.limit, MAX_DATABASE_RESULTS, MAX_DATABASE_RESULTS)
+    const matches = resolved.connection.catalogs
+      .filter((catalog) => !exactDatabaseName || sameName(catalog.name, exactDatabaseName))
+      .filter((catalog) => !query || catalog.name.toLocaleLowerCase().includes(query))
+      .sort((left, right) => left.name.localeCompare(right.name))
+    if (exactDatabaseName && !matches.length) {
+      return fail('DB_MCP_DATABASE_NOT_FOUND', 'The database was not found in the current connection catalog.')
+    }
+    const databases = matches.slice(0, limit).map((catalog) => ({
+      name: catalog.name,
+      schemaCount: catalog.schemas?.length ?? 0,
+      tableCount: (catalog.tables?.length ?? 0) + (catalog.schemas ?? []).reduce((count, schema) => count + schema.tables.length, 0),
+      viewCount: (catalog.schemas ?? []).reduce((count, schema) => count + (schema.views?.length ?? 0), 0)
+    }))
+    return ok({ databases, count: databases.length, totalMatched: matches.length, truncated: databases.length < matches.length })
+  }
+
+  const listSchemas = async (params: Record<string, unknown>, options: DatabaseMcpToolCallOptions) => {
+    const resolved = await resolveRuntimeConnection(params.connectionId, options)
+    if (resolved.result || !resolved.connection) return resolved.result as DatabaseMcpToolResult
+    const selected = resolveCatalog(resolved.connection, params.databaseName)
+    if (selected.result || !selected.catalog) return selected.result as DatabaseMcpToolResult
+    const exactSchemaName = cleanText(params.schemaName)
+    const query = cleanText(params.query).toLocaleLowerCase()
+    const limit = positiveInteger(params.limit, 100, MAX_SCHEMA_RESULTS)
+    const matches = (selected.catalog.schemas ?? [])
+      .filter((schema) => !exactSchemaName || sameName(schema.name, exactSchemaName))
+      .filter((schema) => !query || schema.name.toLocaleLowerCase().includes(query))
+      .sort((left, right) => left.name.localeCompare(right.name))
+    if (exactSchemaName && !matches.length) {
+      return fail('DB_MCP_SCHEMA_NOT_FOUND', 'The schema was not found in the current database catalog.')
+    }
+    const schemas = matches.slice(0, limit).map((schema) => ({
+      name: schema.name,
+      tableCount: schema.tables.length,
+      viewCount: schema.views?.length ?? 0,
+      functionCount: schema.functions?.length ?? 0,
+      procedureCount: schema.procedures?.length ?? 0
+    }))
+    return ok({ databaseName: selected.catalog.name, schemas, count: schemas.length, totalMatched: matches.length, truncated: schemas.length < matches.length })
+  }
+
+  const listTables = async (params: Record<string, unknown>, options: DatabaseMcpToolCallOptions) => {
+    const resolved = await resolveRuntimeConnection(params.connectionId, options)
+    if (resolved.result || !resolved.connection) return resolved.result as DatabaseMcpToolResult
+    const selected = resolveCatalog(resolved.connection, params.databaseName)
+    if (selected.result || !selected.catalog) return selected.result as DatabaseMcpToolResult
+    const schemaName = cleanText(params.schemaName)
+    const query = cleanText(params.query).toLocaleLowerCase()
+    const kinds = normalizeKinds(params.kinds)
+    if (kinds && (!Array.isArray(params.kinds) || kinds.size !== params.kinds.length || [...kinds].some((kind) => kind !== 'table' && kind !== 'view'))) {
+      return fail('DB_MCP_OBJECT_KINDS_INVALID', 'kinds contains an unsupported database object kind.')
+    }
+    if (schemaName && !(selected.catalog.schemas ?? []).some((schema) => sameName(schema.name, schemaName))) {
+      return fail('DB_MCP_SCHEMA_NOT_FOUND', 'The schema was not found in the current database catalog.')
+    }
+    const limit = positiveInteger(params.limit, 200, MAX_TABLE_RESULTS)
+    const matches = databaseObjectsForConnection(resolved.connection)
+      .filter((object) => object.kind === 'table' || object.kind === 'view')
+      .filter((object) => sameName(object.databaseName, selected.catalog?.name || ''))
+      .filter((object) => !schemaName || sameName(object.schemaName || '', schemaName))
+      .filter((object) => !kinds || kinds.has(object.kind))
+      .filter((object) => !query || `${object.name} ${objectPath(object)}`.toLocaleLowerCase().includes(query))
+      .sort((left, right) => objectPath(left).localeCompare(objectPath(right)))
+    const tables = matches.slice(0, limit).map((object) => ({
+      databaseName: object.databaseName,
+      ...(object.schemaName ? { schemaName: object.schemaName } : {}),
+      name: object.name,
+      kind: object.kind,
+      path: objectPath(object),
+      columnCount: object.table?.columns.length ?? 0,
+      primaryKey: object.table?.primaryKey.slice() ?? []
+    }))
+    return ok({ tables, count: tables.length, totalMatched: matches.length, truncated: tables.length < matches.length })
   }
 
   const searchObjects = async (params: Record<string, unknown>, options: DatabaseMcpToolCallOptions) => {
@@ -782,13 +1053,13 @@ export function createDatabaseMcpToolRuntime(dependencies: DatabaseMcpRuntimeDep
     if (table.result || !table.object) return table.result as DatabaseMcpToolResult
     const connection = resolved.connection
     const object = table.object
-    const read = await runDatabaseRead(() => dependencies.getTableDdl({
+    const read = await runDatabaseRead((readOptions) => dependencies.getTableDdl({
         connectionId: connection.id,
         dbType: connection.dbType,
         databaseName: object.databaseName,
         ...(object.schemaName ? { schemaName: object.schemaName } : {}),
         tableName: object.name
-      }), { errorCode: 'DB_MCP_DDL_FAILED', errorMessage: 'Database table DDL could not be loaded.' })
+      }, readOptions), { errorCode: 'DB_MCP_DDL_FAILED', errorMessage: 'Database table DDL could not be loaded.' }, options.signal)
     if (read.error || !read.value) return read.error as DatabaseMcpToolResult
     const result = read.value
     if (!result.ok || !result.data) return fail(safeDependencyErrorCode(result.errorCode, 'DB_MCP_DDL_FAILED'), 'Database table DDL could not be loaded.')
@@ -810,7 +1081,11 @@ export function createDatabaseMcpToolRuntime(dependencies: DatabaseMcpRuntimeDep
     })
   }
 
-  const queryTable = async (params: Record<string, unknown>, options: DatabaseMcpToolCallOptions) => {
+  const queryTable = async (
+    params: Record<string, unknown>,
+    options: DatabaseMcpToolCallOptions,
+    execution: { withTotal?: boolean; maxPageSize?: number } = {}
+  ) => {
     const resolved = await resolveRuntimeConnection(params.connectionId, options)
     if (resolved.result || !resolved.connection) return resolved.result as DatabaseMcpToolResult
     const openError = connectionMustBeOpen(resolved.connection)
@@ -833,8 +1108,8 @@ export function createDatabaseMcpToolRuntime(dependencies: DatabaseMcpRuntimeDep
     const sort = normalizeSort(params.sort, boundedTableInfo)
     if (sort.result) return sort.result
     const page = positiveInteger(params.page, 1, MAX_QUERY_PAGE)
-    const pageSize = positiveInteger(params.pageSize, 50, MAX_QUERY_PAGE_SIZE)
-    const read = await runDatabaseRead(() => dependencies.queryTable({
+    const pageSize = positiveInteger(params.pageSize, 50, execution.maxPageSize ?? MAX_QUERY_PAGE_SIZE)
+    const read = await runDatabaseRead((readOptions) => dependencies.queryTable({
         connectionId: connection.id,
         dbType: connection.dbType,
         databaseName: object.databaseName,
@@ -847,9 +1122,9 @@ export function createDatabaseMcpToolRuntime(dependencies: DatabaseMcpRuntimeDep
         orderByRaw: null,
         page,
         pageSize,
-        withTotal: false,
+        withTotal: execution.withTotal === true,
         requireStableBaseTable: true
-      }), { errorCode: 'DB_MCP_QUERY_FAILED', errorMessage: 'Database table query failed.' })
+      }, readOptions), { errorCode: 'DB_MCP_QUERY_FAILED', errorMessage: 'Database table query failed.' }, options.signal)
     if (read.error || !read.value) return read.error as DatabaseMcpToolResult
     const result = read.value
     if (!result.ok || !result.data) return fail(safeDependencyErrorCode(result.errorCode, 'DB_MCP_QUERY_FAILED'), 'Database table query failed.')
@@ -872,6 +1147,156 @@ export function createDatabaseMcpToolRuntime(dependencies: DatabaseMcpRuntimeDep
     })
   }
 
+  const sampleRows = async (params: Record<string, unknown>, options: DatabaseMcpToolCallOptions) => {
+    const limit = positiveInteger(params.limit, 5, MAX_SAMPLE_ROWS)
+    const { limit: _limit, ...queryParams } = params
+    const result = await queryTable({ ...queryParams, page: 1, pageSize: limit }, options, { maxPageSize: MAX_SAMPLE_ROWS })
+    if (!result.ok || !result.data) return result
+    return ok({
+      table: result.data.table,
+      columns: result.data.columns,
+      omittedColumns: result.data.omittedColumns,
+      rows: result.data.rows,
+      rowCount: result.data.rowCount,
+      limit,
+      durationMs: result.data.durationMs,
+      resultBytes: result.data.resultBytes,
+      truncated: result.data.truncated
+    })
+  }
+
+  const countRows = async (params: Record<string, unknown>, options: DatabaseMcpToolCallOptions) => {
+    const result = await queryTable({ ...params, page: 1, pageSize: 1 }, options, { withTotal: true, maxPageSize: 1 })
+    if (!result.ok || !result.data) return result
+    const total = result.data.total
+    if (typeof total !== 'number' || !Number.isSafeInteger(total) || total < 0) {
+      return fail('DB_MCP_COUNT_UNSUPPORTED', 'This database engine did not return a safe exact row count.')
+    }
+    return ok({
+      table: result.data.table,
+      count: total,
+      durationMs: result.data.durationMs
+    })
+  }
+
+  const inspectIndexes = async (params: Record<string, unknown>, options: DatabaseMcpToolCallOptions) => {
+    const resolved = await resolveRuntimeConnection(params.connectionId, options)
+    if (resolved.result || !resolved.connection) return resolved.result as DatabaseMcpToolResult
+    const openError = connectionMustBeOpen(resolved.connection)
+    if (openError) return openError
+    const table = resolveTable(resolved.connection, params)
+    if (table.result || !table.object) return table.result as DatabaseMcpToolResult
+    if (table.object.kind !== 'table') return fail('DB_MCP_VIEW_INDEX_UNSUPPORTED', 'Index inspection is limited to base tables.')
+    const inspectTableIndexes = dependencies.inspectTableIndexes
+    if (!inspectTableIndexes) {
+      return fail('DB_MCP_INDEX_INSPECTION_UNSUPPORTED', 'This database engine does not provide a safe structured index inspection adapter.')
+    }
+    const connection = resolved.connection
+    const object = table.object
+    const read = await runDatabaseRead((readOptions) => inspectTableIndexes({
+      connectionId: connection.id,
+      dbType: connection.dbType,
+      databaseName: object.databaseName,
+      ...(object.schemaName ? { schemaName: object.schemaName } : {}),
+      tableName: object.name
+    }, readOptions), { errorCode: 'DB_MCP_INDEX_INSPECTION_FAILED', errorMessage: 'Database index metadata could not be loaded.' }, options.signal)
+    if (read.error || !read.value) return read.error as DatabaseMcpToolResult
+    const result = read.value
+    if (!result.ok || !result.data) {
+      return fail(safeDependencyErrorCode(result.errorCode, 'DB_MCP_INDEX_INSPECTION_FAILED'), 'Database index metadata could not be loaded.')
+    }
+    if (!Array.isArray(result.data.indexes)) {
+      return fail('DB_MCP_INDEX_RESULT_INVALID', 'The database index adapter returned an invalid result.')
+    }
+    const knownColumns = new Map((object.table?.columns ?? []).map((column) => [column.name.toLocaleLowerCase(), column.name]))
+    const indexes = [] as Array<{ name: string; columns: string[]; unique: boolean; primary: boolean; method?: string }>
+    for (const rawIndex of result.data.indexes.slice(0, MAX_INDEX_RESULTS)) {
+      const name = sanitizeDatabaseMcpSensitiveText(rawIndex?.name, [connection.host, connection.user]).slice(0, 256)
+      const columns = Array.isArray(rawIndex?.columns)
+        ? rawIndex.columns.map((column) => knownColumns.get(cleanText(column).toLocaleLowerCase())).filter((column): column is string => Boolean(column))
+        : []
+      if (!name || !Array.isArray(rawIndex?.columns) || columns.length !== rawIndex.columns.length || !columns.length) {
+        return fail('DB_MCP_INDEX_RESULT_INVALID', 'The database index adapter returned an invalid result.')
+      }
+      const method = cleanText(rawIndex.method)
+      indexes.push({
+        name,
+        columns,
+        unique: rawIndex.unique === true,
+        primary: rawIndex.primary === true,
+        ...(method ? { method: sanitizeDatabaseMcpSensitiveText(method).slice(0, 128) } : {})
+      })
+    }
+    return ok({
+      table: publicObject(object, connectionHandleFor),
+      indexes,
+      count: indexes.length,
+      totalMatched: result.data.indexes.length,
+      durationMs: Math.max(0, Math.floor(Number(result.data.durationMs) || 0)),
+      truncated: result.data.indexes.length > indexes.length
+    })
+  }
+
+  const explainPlan = async (params: Record<string, unknown>, options: DatabaseMcpToolCallOptions) => {
+    const resolved = await resolveRuntimeConnection(params.connectionId, options)
+    if (resolved.result || !resolved.connection) return resolved.result as DatabaseMcpToolResult
+    const openError = connectionMustBeOpen(resolved.connection)
+    if (openError) return openError
+    const table = resolveTable(resolved.connection, params)
+    if (table.result || !table.object) return table.result as DatabaseMcpToolResult
+    const connection = resolved.connection
+    const object = table.object
+    if (object.kind !== 'table' || !object.table) return fail('DB_MCP_VIEW_EXPLAIN_UNSUPPORTED', 'Explain plans are limited to base tables.')
+    const explainTable = dependencies.explainTable
+    if (!explainTable) {
+      return fail('DB_MCP_EXPLAIN_UNSUPPORTED', 'This database engine does not provide a safe structured explain adapter.')
+    }
+    const selectedColumns = normalizeSelectedColumns(params.columns, object.table)
+    if (selectedColumns.result) return selectedColumns.result
+    const boundedTableInfo = {
+      ...object.table,
+      columns: object.table.columns.filter((column) => !isPotentiallyUnboundedColumnType(column.type))
+    }
+    const filters = normalizeFilters(params.filters, boundedTableInfo)
+    if (filters.result) return filters.result
+    const sort = normalizeSort(params.sort, boundedTableInfo)
+    if (sort.result) return sort.result
+    const read = await runDatabaseRead((readOptions) => explainTable({
+      connectionId: connection.id,
+      dbType: connection.dbType,
+      databaseName: object.databaseName,
+      ...(object.schemaName ? { schemaName: object.schemaName } : {}),
+      tableName: object.name,
+      columns: selectedColumns.columns,
+      filters: filters.filters,
+      sort: sort.sort
+    }, readOptions), { errorCode: 'DB_MCP_EXPLAIN_FAILED', errorMessage: 'Database explain plan could not be loaded.' }, options.signal)
+    if (read.error || !read.value) return read.error as DatabaseMcpToolResult
+    const result = read.value
+    if (!result.ok || !result.data || result.data.format !== 'text') {
+      return fail(safeDependencyErrorCode(result.errorCode, 'DB_MCP_EXPLAIN_FAILED'), 'Database explain plan could not be loaded.')
+    }
+    const rawPlan = String(result.data.plan || '')
+    if (!rawPlan) return fail('DB_MCP_EXPLAIN_RESULT_INVALID', 'The database explain adapter returned an invalid result.')
+    const sanitized = sanitizeDatabaseMcpSensitiveText(rawPlan, [
+      connection.host,
+      connection.user,
+      connection.url || '',
+      connection.filePath || '',
+      connection.proxyName || ''
+    ])
+    const boundedPlan = boundedUtf8Text(sanitized, MAX_EXPLAIN_PLAN_BYTES)
+    return ok({
+      table: publicObject(object, connectionHandleFor),
+      format: 'text',
+      plan: boundedPlan.value,
+      planBytes: boundedPlan.bytes,
+      durationMs: Math.max(0, Math.floor(Number(result.data.durationMs) || 0)),
+      redacted: true,
+      truncated: boundedPlan.truncated || rawPlan.length > MAX_SENSITIVE_TEXT_CHARS
+    })
+  }
+
   return {
     definitions: DATABASE_MCP_TOOL_DEFINITIONS,
     async callTool(
@@ -883,10 +1308,17 @@ export function createDatabaseMcpToolRuntime(dependencies: DatabaseMcpRuntimeDep
       if (!args || typeof args !== 'object' || Array.isArray(args)) return fail('DB_MCP_ARGUMENTS_INVALID', 'Tool arguments must be a JSON object.')
       try {
         if (name === 'list_database_connections') return await listConnections(args)
+        if (name === 'list_databases') return await listDatabases(args, options)
+        if (name === 'list_schemas') return await listSchemas(args, options)
+        if (name === 'list_tables') return await listTables(args, options)
         if (name === 'search_database_objects') return await searchObjects(args, options)
         if (name === 'describe_database_table') return await describeTable(args, options)
         if (name === 'get_database_table_ddl') return await getTableDdl(args, options)
-        return await queryTable(args, options)
+        if (name === 'query_database_table') return await queryTable(args, options)
+        if (name === 'sample_rows') return await sampleRows(args, options)
+        if (name === 'count_rows') return await countRows(args, options)
+        if (name === 'inspect_indexes') return await inspectIndexes(args, options)
+        return await explainPlan(args, options)
       } catch {
         return fail('DB_MCP_TOOL_FAILED', 'Database MCP tool failed.')
       }

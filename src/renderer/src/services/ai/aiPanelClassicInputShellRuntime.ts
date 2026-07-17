@@ -9,6 +9,7 @@ import type { AiPanelMode } from '@/services/ai/aiPanelModeRuntime'
 import type { AiPanelPopupInteractionState } from '@/services/ai/aiPanelPopupInteractionRuntime'
 import type { AiPanelContextCategoryView, AiPanelPopupTarget } from '@/services/ai/aiPanelPopupRuntime'
 import type { AiChipContentPart } from '@/stores/workspace'
+import { MAX_CHAT_IMAGE_ATTACHMENTS_PER_MESSAGE } from '@shared/chatImageAttachment'
 import type {
   AiChatContextUsageSnapshot,
   AiCommandCatalogOption,
@@ -55,6 +56,7 @@ export type AiPanelClassicInputShellRuntimeOptions<Panel extends { id: string; s
   panels: () => Panel[]
   createConversation: () => Promise<{ id: string } | null | undefined>
   addKnowledgeFilesToChat: (relPaths: string[]) => Promise<unknown>
+  imageLimitMessage?: () => string
   bindTerminalPanelToCodex: (panel: Panel, source: string) => Promise<unknown>
   bindHostContextToCodex: (context: AiContextOption) => Promise<unknown>
   popupState: AiPanelPopupInteractionState
@@ -63,6 +65,7 @@ export type AiPanelClassicInputShellRuntimeOptions<Panel extends { id: string; s
   closeModeMenu: () => void
   closeModelMenu: () => void
   closeCodexTargetPicker: () => void
+  closeCodexHistoryMenu?: () => void
   closeMoreActionsMenu: () => void
   closePanelModeMenu: () => void
   closeHistoryMenu: () => void
@@ -124,6 +127,8 @@ export const createAiPanelClassicInputShellRuntime = <Panel extends { id: string
     insertPastedImage,
     closePopups,
     notify: showInputPlaceholderNotice,
+    additionalImageCount: () => options.selectedContexts().filter((context) => context.kind === 'images').length,
+    imageLimitMessage: options.imageLimitMessage,
     afterDomUpdate: options.afterDomUpdate,
     afterInputSync: options.afterDomUpdate,
     requestFrame: options.requestFrame,
@@ -171,6 +176,8 @@ export const createAiPanelClassicInputShellRuntime = <Panel extends { id: string
     requestFrame: options.requestFrame,
     fallbackEditTarget: options.fallbackEditTarget,
     insertPastedImageIntoEdit,
+    notify: showInputPlaceholderNotice,
+    imageLimitMessage: options.imageLimitMessage,
     resendUserMessageFromParts: options.resendUserMessageFromParts
   })
 
@@ -222,6 +229,9 @@ export const createAiPanelClassicInputShellRuntime = <Panel extends { id: string
     editingMessageId: () => editingMessageId.value,
     insertImageAtMainCursor: insertImageAtEditableCursor,
     insertImageAtEditCursor,
+    mainImageCount: () => imageInputParts.value.length + options.selectedContexts().filter((context) => context.kind === 'images').length,
+    editImageCount: () => editImageInputParts.value.length,
+    imageLimitMessage: options.imageLimitMessage,
     insertFileChipAtMainCursor,
     insertFileChipAtEditCursor,
     restoreMainSelection: () => restoreEditableSelection(),
@@ -282,6 +292,7 @@ export const createAiPanelClassicInputShellRuntime = <Panel extends { id: string
     closeModeMenu: options.closeModeMenu,
     closeModelMenu: options.closeModelMenu,
     closeCodexTargetPicker: options.closeCodexTargetPicker,
+    closeCodexHistoryMenu: options.closeCodexHistoryMenu,
     closeMoreActionsMenu: options.closeMoreActionsMenu,
     closePanelModeMenu: options.closePanelModeMenu,
     closeHistoryMenu: options.closeHistoryMenu,
@@ -293,7 +304,14 @@ export const createAiPanelClassicInputShellRuntime = <Panel extends { id: string
     editHostContexts: () => editHostContexts.value,
     visibleHostContexts: options.visibleHostContexts,
     editCommandTarget,
-    setMainContexts: options.setSelectedContexts,
+    setMainContexts: (contexts) => {
+      const imageCount = imageInputParts.value.length + contexts.filter((context) => context.kind === 'images').length
+      if (imageCount > MAX_CHAT_IMAGE_ATTACHMENTS_PER_MESSAGE) {
+        showInputPlaceholderNotice(options.imageLimitMessage?.() || `Each message can include up to ${MAX_CHAT_IMAGE_ATTACHMENTS_PER_MESSAGE} images.`)
+        return
+      }
+      options.setSelectedContexts(contexts)
+    },
     setEditHostContexts: (contexts) => {
       editHostContexts.value = contexts
     },

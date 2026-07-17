@@ -6,6 +6,7 @@ import {
 } from '@/services/ai/aiBackendGuards'
 import type { AiPanelMode } from '@/services/ai/aiPanelModeRuntime'
 import { chatAttachmentPathSegments, normalizeChatAttachmentPath, normalizeChatAttachmentTaskId, parseChatAttachmentRef } from '@shared/chatAttachment'
+import { managedAssetDisplayName, managedAssetEndpoint } from '@shared/assetDisplayRuntime'
 import type { AiContextKind, AiContextOption, AiDocChipContentPart, AiImageContentPart } from '@shared/contracts/aiChat'
 import type { ChatAttachmentStageResult, ChatImageAttachmentPrepareResult, FileDialogFilter } from '@shared/contracts/localFiles'
 import type { VoiceTranscriptionInput, VoiceTranscriptionResult } from '@shared/contracts/voice'
@@ -242,12 +243,12 @@ export const draggedTerminalPanelId = (dataTransfer: AiPanelDragDataTransfer) =>
 export const hostContextFromDragPayload = (payload: AiopstermDragPayload & { id: string }): AiContextOption => ({
   id: payload.id,
   kind: 'hosts',
-  label: payload.label || payload.host || payload.name || payload.id,
-  detail: payload.detail || payload.name,
+  label: payload.label || managedAssetDisplayName(payload),
+  detail: payload.detail || managedAssetEndpoint(payload),
   host: payload.host,
   port: payload.port,
   username: payload.username,
-  assetName: payload.assetName || payload.name,
+  assetName: payload.assetName || payload.name || payload.label,
   isLocalShell: payload.isLocalShell
 })
 

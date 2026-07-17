@@ -2,7 +2,7 @@
   <Teleport to="body">
     <AssetFolderFormDialog
       :visible="folderModal.visible"
-      :title="folderModal.mode === 'create' ? '创建文件夹' : '编辑文件夹'"
+      :title="folderModal.mode === 'create' ? t('workspace.folderDialog.createTitle') : t('workspace.folderDialog.editTitle')"
       :name="folderForm.name"
       :description="folderForm.description"
       :error="folderFormError"
@@ -95,6 +95,9 @@
 import { X } from 'lucide-vue-next'
 import AssetFolderFormDialog from '@/components/assets/AssetFolderFormDialog.vue'
 import { useWorkspacePanelRuntimeContext } from '@/services/workspace/workspacePanelContext'
+import { useI18n } from '@/i18n'
+
+const { t } = useI18n()
 
 const {
   folderModal,

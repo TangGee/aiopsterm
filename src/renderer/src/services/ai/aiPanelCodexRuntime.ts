@@ -29,12 +29,6 @@ export type AiPanelCodexConversationCloseResult<T extends { id: string }> =
       nextActiveId: string
     }
   | {
-      status: 'keep-one'
-      conversation: T
-      nextConversations: T[]
-      nextActiveId: string
-    }
-  | {
       status: 'closed-inactive'
       conversation: T
       nextConversations: T[]
@@ -94,7 +88,7 @@ export const createCodexConversationRecord = <T extends AiPanelCodexConversation
   ({
     ...(extras || {}),
     id,
-    title: codexTargetTitle(target),
+    title: '',
     sessionId: '',
     status: 'idle',
     error: '',
@@ -120,6 +114,7 @@ export const codexTargetContextFromPanel = (panel?: Pick<TerminalPanel, 'id' | '
       port: ssh.port,
       username: ssh.username,
       ...(ssh.assetId ? { assetId: ssh.assetId } : {}),
+      ...(ssh.connectionId ? { connectionId: ssh.connectionId } : {}),
       assetName: ssh.assetName,
       cwd: panel.cwd
     }
@@ -141,7 +136,7 @@ export const currentBoundCodexTarget = <T extends Pick<TerminalPanel, 'id' | 'se
   if (!target?.sessionId) return null
   const panel = panels.find((item) => item.id === target.panelId || item.sessionId === target.sessionId)
   if (!panel?.sessionId || panel.status === 'closed' || panel.status === 'error') {
-    return target
+    return null
   }
   return codexTargetContextFromPanel(panel)
 }
@@ -196,20 +191,18 @@ export const resetCodexConversationForRestart = (conversation: AiPanelCodexConve
 export const applyCodexTargetBinding = (
   conversation: AiPanelCodexConversationCore,
   target: CodexSessionTargetContext,
-  options: { fallbackLabel?: string } = {}
+  _options: { fallbackLabel?: string } = {}
 ) => {
   const previous = conversation.boundTarget
   conversation.boundTarget = { ...target }
-  conversation.title = codexTargetTitle(target, options.fallbackLabel)
   conversation.error = ''
   conversation.lastTargetSignature = ''
   return previous
 }
 
-export const applyCodexTargetUnbinding = (conversation: AiPanelCodexConversationCore, fallbackLabel = 'Codex CLI') => {
+export const applyCodexTargetUnbinding = (conversation: AiPanelCodexConversationCore, _fallbackLabel = 'Codex CLI') => {
   const previous = conversation.boundTarget
   conversation.boundTarget = null
-  conversation.title = fallbackLabel
   conversation.lastTargetSignature = ''
   return previous
 }
@@ -260,7 +253,6 @@ export const closeCodexConversationRecord = <T extends { id: string }>(
 ): AiPanelCodexConversationCloseResult<T> => {
   const conversation = conversations.find((item) => item.id === closingId)
   if (!conversation) return { status: 'missing', nextConversations: conversations, nextActiveId: activeId }
-  if (conversations.length <= 1) return { status: 'keep-one', conversation, nextConversations: conversations, nextActiveId: activeId }
   const currentIndex = conversations.findIndex((item) => item.id === closingId)
   const nextConversation = conversations[currentIndex + 1] || conversations[currentIndex - 1] || null
   const nextConversations = conversations.filter((item) => item.id !== closingId)

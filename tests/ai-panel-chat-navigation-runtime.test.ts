@@ -17,8 +17,9 @@ const translations: Record<string, string> = {
   'ai.chatCreateFailed': 'chat create failed',
   'ai.chatRestored': 'chat restored',
   'ai.chatRestoreFailed': 'chat restore failed',
-  'ai.keepOneTab': 'keep one tab',
   'ai.tabClosed': 'tab closed',
+  'ai.tabCloseFailed': 'tab close failed',
+  'ai.tabCloseRollbackFailed': 'tab close rollback failed',
   'ai.historyTitleUpdated': 'title updated',
   'ai.historyTitleUpdateFailed': 'title update failed',
   'ai.chatDeleted': 'chat deleted',
@@ -48,7 +49,7 @@ const createHarness = () => {
     }
   }))
   const root = document.createElement('div')
-  root.innerHTML = '<article class="message"><p>hello search</p></article>'
+  root.innerHTML = '<article class="message" data-message-id="message-1"><p>hello search</p></article>'
   Object.defineProperty(root, 'scrollHeight', { value: 320, configurable: true })
   const historySearchInput = document.createElement('input')
   const historyDropdown = document.createElement('div')
@@ -69,6 +70,7 @@ const createHarness = () => {
     closeModelMenu: vi.fn(),
     closePopups: vi.fn(),
     createConversation: vi.fn(async () => ({ id: 'conv-3' })),
+    deselectConversation: vi.fn(async () => true),
     deleteConversation: vi.fn(async (id: string) => {
       conversations = conversations.filter((conversation) => conversation.id !== id)
       return true
@@ -101,6 +103,7 @@ const createHarness = () => {
     locale: () => 'en-US',
     t: (key) => translations[key] || key,
     createConversation: calls.createConversation,
+    deselectConversation: calls.deselectConversation,
     restoreConversation: calls.restoreConversation,
     renameConversation: calls.renameConversation,
     deleteConversation: calls.deleteConversation,
@@ -170,7 +173,7 @@ describe('aiPanelChatNavigationRuntime', () => {
   })
 
   it('composes chat search and viewport behavior with history menu state', async () => {
-    const { calls, frameCallbacks, runtime, timers } = createHarness()
+    const { calls, frameCallbacks, runtime, setMessages, timers } = createHarness()
 
     runtime.toggleMoreActionsMenu()
     expect(runtime.moreActionsMenuOpen.value).toBe(true)
@@ -188,6 +191,10 @@ describe('aiPanelChatNavigationRuntime', () => {
     stop()
 
     await runtime.closeChatSearch()
+    setMessages([
+      { id: 'message-1', role: 'user', text: 'hello', hosts: [{ id: 'host-1', kind: 'hosts', label: 'prod' }] },
+      { id: 'message-2', role: 'user', text: 'new explicit prompt' }
+    ])
     await runtime.syncSearchForMessages()
     await Promise.resolve()
     expect(calls.requestFrame).toHaveBeenCalled()

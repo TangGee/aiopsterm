@@ -1,39 +1,92 @@
 <template>
   <aside class="agents-sidebar">
     <header class="agents-workspace-header">
-      <div class="agents-search">
-        <Search />
-        <input
-          v-model="query"
-          :placeholder="t('agents.searchConversations')"
-          @keydown.esc.prevent="clearSearch"
-        />
-        <button
-          v-if="query"
-          class="agents-search-clear"
-          :title="t('ai.clearSearch')"
-          type="button"
-          @click="clearSearch"
+      <div class="agents-workspace-toolbar">
+        <label class="agents-search">
+          <Search />
+          <input
+            v-model="query"
+            :placeholder="t('agents.searchSessions')"
+            @keydown.esc.prevent="clearSearch"
+          />
+          <button
+            v-if="query"
+            class="agents-search-clear"
+            :title="t('ai.clearSearch')"
+            type="button"
+            @click="clearSearch"
+          >
+            <X />
+          </button>
+        </label>
+        <div
+          class="agents-new-session-wrap"
+          @click.stop
         >
-          <X />
-        </button>
+          <button
+            class="new-chat-btn"
+            type="button"
+            :class="{ active: newSessionMenuOpen }"
+            :title="t('agents.newSession')"
+            :aria-label="t('agents.newSession')"
+            aria-haspopup="menu"
+            :aria-expanded="newSessionMenuOpen"
+            data-testid="agents-new-session-open"
+            @click="newSessionMenuOpen = !newSessionMenuOpen"
+          >
+            <Plus />
+          </button>
+          <div
+            v-if="newSessionMenuOpen"
+            class="agents-new-session-menu"
+            role="menu"
+            data-testid="agents-new-session-menu"
+          >
+            <button
+              type="button"
+              role="menuitem"
+              data-testid="agents-new-classic"
+              @click="requestNewSession('classic')"
+            >
+              <Bot />
+              <span>{{ t('agents.sessionType.classic') }}</span>
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              data-testid="agents-new-codex"
+              @click="requestNewSession('codex')"
+            >
+              <Code2 />
+              <span>{{ t('agents.sessionType.codex') }}</span>
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              data-testid="agents-new-database"
+              @click="requestNewSession('database')"
+            >
+              <Database />
+              <span>{{ t('agents.sessionType.database') }}</span>
+            </button>
+          </div>
+        </div>
       </div>
-      <button
-        class="new-chat-btn"
-        :title="t('ai.newChat')"
-        @click="handleNewChat"
-      >
-        <Plus />
-        <span>{{ t('ai.newChat') }}</span>
-      </button>
     </header>
 
     <div class="agents-workspace-content">
       <div
-        v-if="visibleConversations.length === 0"
+        v-if="loading && sessions.length === 0"
         class="empty-state"
       >
-        <span class="empty-text">{{ t('ai.noData') }}</span>
+        <LoaderCircle class="agents-session-loading" />
+        <span class="empty-text">{{ t('agents.loadingSessions') }}</span>
+      </div>
+      <div
+        v-else-if="visibleSessions.length === 0"
+        class="empty-state"
+      >
+        <span class="empty-text">{{ catalogError || t('agents.noSessions') }}</span>
       </div>
 
       <div
@@ -41,45 +94,80 @@
         class="conversation-list"
       >
         <div
-          v-for="conversation in visibleConversations"
-          :key="conversation.id"
-          role="button"
-          tabindex="0"
-          class="conversation-item"
-          :class="{ active: workspace.selectedConversationId === conversation.id }"
-          @click="handleSelectConversation(conversation.id)"
-          @keydown.enter="handleSelectConversation(conversation.id)"
-          @keydown.delete.prevent="handleDeleteConversation(conversation.id)"
-          @keydown.backspace.prevent="handleDeleteConversation(conversation.id)"
+          v-for="session in visibleSessions"
+          :key="session.id"
+          class="conversation-item product-session-item"
+          :class="{ open: session.isOpen }"
+          :data-session-id="session.id"
+          :data-session-surface="session.surface"
         >
-          <div class="conversation-content">
-            <div class="conversation-title">{{ conversation.title }}</div>
-            <div class="conversation-meta">
-              <span class="conversation-time">{{ formatConversationTime(conversation.ts) }}</span>
-              <span
-                v-if="conversation.ipAddress"
-                class="conversation-ip"
+          <button
+            class="product-session-main"
+            type="button"
+            :aria-label="sessionTitle(session)"
+            @click="requestExistingSession(session)"
+            @keydown.delete.prevent="deleteSession(session)"
+            @keydown.backspace.prevent="deleteSession(session)"
+          >
+            <span
+              class="product-session-icon"
+              :data-surface="session.surface"
+            >
+              <component :is="surfaceIcon(session.surface)" />
+              <i
+                v-if="session.isOpen"
+                class="product-session-open-dot"
+                :title="t('agents.sessionOpen')"
+              />
+            </span>
+            <div class="conversation-content">
+              <div
+                class="conversation-title"
+                :title="sessionTitle(session)"
               >
-                {{ conversation.ipAddress }}
-              </span>
+                {{ sessionTitle(session) }}
+              </div>
+              <div class="conversation-meta">
+                <span class="product-session-type">{{ surfaceLabel(session.surface) }}</span>
+                <span
+                  v-if="visibleBinding(session)"
+                  class="product-session-binding"
+                  :data-binding-kind="visibleBinding(session)?.kind"
+                  :title="visibleBinding(session)?.tooltip"
+                >
+                  {{ visibleBinding(session)?.label }}
+                </span>
+                <span class="conversation-time">{{ formatSessionTime(session.updatedAt) }}</span>
+              </div>
+              <div
+                v-if="visibleScopeLabel(session)"
+                class="product-session-scope"
+                :title="visibleScopeLabel(session)"
+              >
+                {{ visibleScopeLabel(session) }}
+              </div>
             </div>
-          </div>
+          </button>
           <button
             class="delete-btn"
-            :title="t('ai.deleteHistory')"
-            @click.stop="handleDeleteConversation(conversation.id)"
+            type="button"
+            :title="t('agents.deleteSession')"
+            :aria-label="`${t('agents.deleteSession')}: ${sessionTitle(session)}`"
+            :disabled="deletingId === session.id"
+            @click.stop="deleteSession(session)"
           >
-            <Trash2 />
+            <LoaderCircle v-if="deletingId === session.id" class="agents-session-loading" />
+            <Trash2 v-else />
           </button>
         </div>
 
         <button
-          v-if="hasMoreConversations"
+          v-if="hasMoreSessions"
           class="load-more-btn"
-          :disabled="isLoadingMore"
-          @click="loadMoreConversations"
+          type="button"
+          @click="currentPage += 1"
         >
-          {{ isLoadingMore ? t('ai.loadingMore') : t('ai.loadMore') }}
+          {{ t('ai.loadMore') }}
         </button>
       </div>
     </div>
@@ -87,81 +175,345 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
-import { Plus, Search, Trash2, X } from 'lucide-vue-next'
-import { useWorkspaceStore } from '@/stores/workspace'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { Bot, Code2, Database, LoaderCircle, Plus, Search, Trash2, X } from 'lucide-vue-next'
 import { useI18n } from '@/i18n'
+import { productSessionClient } from '@/services/ai/productSessionClient'
+import type { ProductSessionRecord, ProductSessionSurface } from '@shared/contracts/productSessions'
+import type { ProductSessionUiRequestInput } from '@/components/productSessionUiTypes'
 
-const workspace = useWorkspaceStore()
+const emit = defineEmits<{
+  requestProductSession: [request: ProductSessionUiRequestInput]
+}>()
+
 const { locale, t } = useI18n()
 const query = ref('')
-const pageSize = 20
+const sessions = ref<ProductSessionRecord[]>([])
+const loading = ref(false)
+const catalogError = ref('')
+const deletingId = ref('')
+const newSessionMenuOpen = ref(false)
 const currentPage = ref(1)
-const isLoadingMore = ref(false)
-const dayMs = 1000 * 60 * 60 * 24
+const pageSize = 20
+let refreshTimer: ReturnType<typeof setTimeout> | null = null
+let stopProductSessionChanges: (() => void) | undefined
+let refreshRequestedWhileLoading = false
 
-const filteredConversations = computed(() => {
+const sortedSessions = computed(() =>
+  [...sessions.value].sort((first, second) => second.updatedAt - first.updatedAt || first.id.localeCompare(second.id))
+)
+
+type SessionBindingDisplay = {
+  kind: 'host' | 'connection'
+  value: string
+  label: string
+  tooltip: string
+}
+
+const normalizedLabel = (value?: string) => String(value || '').trim().toLocaleLowerCase()
+
+const sessionTarget = (session: ProductSessionRecord) =>
+  session.surface === 'classic' ? undefined : session.target
+
+const classicHostRefs = (session: ProductSessionRecord) =>
+  session.surface === 'classic'
+    ? (session.classicContext?.contexts || []).filter((context) => context.kind === 'hosts')
+    : []
+
+const hostRefEndpoint = (host: ReturnType<typeof classicHostRefs>[number]) => {
+  const hostname = String(host.host || '').trim()
+  if (!hostname) return ''
+  const endpointHost = hostname.includes(':') && !hostname.startsWith('[') ? `[${hostname}]` : hostname
+  return `${host.username ? `${host.username}@` : ''}${endpointHost}${host.port ? `:${host.port}` : ''}`
+}
+
+const hostRefLabel = (host: ReturnType<typeof classicHostRefs>[number]) =>
+  String(host.label || host.detail || hostRefEndpoint(host) || host.host || host.connectionId || host.assetId || host.id).trim()
+
+const targetEndpointFor = (target?: ProductSessionRecord['target']) => {
+  const host = String(target?.host || '').trim()
+  if (!host) return ''
+  const endpointHost = host.includes(':') && !host.startsWith('[') ? `[${host}]` : host
+  return `${target?.username ? `${target.username}@` : ''}${endpointHost}${target?.port ? `:${target.port}` : ''}`
+}
+
+const targetEndpoint = (session: ProductSessionRecord) => targetEndpointFor(sessionTarget(session))
+
+const rawSessionTitle = (session: ProductSessionRecord) => session.title.trim()
+const fallbackSessionTitle = (session: ProductSessionRecord) =>
+  session.surface === 'codex' ? t('ai.codexCliMode') : surfaceLabel(session.surface)
+
+const sessionTitle = (session: ProductSessionRecord) => {
+  const title = rawSessionTitle(session)
+  if (session.surface !== 'codex' || !title) return title || fallbackSessionTitle(session)
+  const target = sessionTarget(session)
+  const legacyTargetTitles = [target?.assetName, target?.label, targetEndpoint(session), target?.host]
+  return legacyTargetTitles.some((value) => normalizedLabel(value) === normalizedLabel(title))
+    ? fallbackSessionTitle(session)
+    : title
+}
+
+const sessionBinding = (session: ProductSessionRecord): SessionBindingDisplay | null => {
+  if (session.surface === 'database') {
+    const connectionId = String(session.database?.connectionId || '').trim()
+    if (!connectionId) return null
+    const label = `${t('database.field.connection')}: ${connectionId}`
+    return { kind: 'connection', value: connectionId, label, tooltip: label }
+  }
+
+  const classicHosts = classicHostRefs(session)
+  if (classicHosts.length) {
+    const labels = classicHosts.map(hostRefLabel).filter(Boolean)
+    if (!labels.length) return null
+    const value = labels[0]
+    const label = labels.length === 1 ? value : `${value} +${labels.length - 1}`
+    const tooltip = classicHosts
+      .map((host) => {
+        const hostLabel = hostRefLabel(host)
+        const endpoint = hostRefEndpoint(host)
+        return endpoint && normalizedLabel(endpoint) !== normalizedLabel(hostLabel)
+          ? `${hostLabel} (${endpoint})`
+          : hostLabel
+      })
+      .filter(Boolean)
+      .join(' · ')
+    return { kind: 'host', value, label, tooltip }
+  }
+
+  const target = sessionTarget(session)
+  if (!target) return null
+  const endpoint = targetEndpoint(session)
+  const value = String(
+    target.assetName ||
+    target.label ||
+    endpoint ||
+    target.host ||
+    target.connectionId ||
+    target.assetId ||
+    ''
+  ).trim()
+  if (!value) return null
+  const tooltip = endpoint && normalizedLabel(endpoint) !== normalizedLabel(value)
+    ? `${t('terminal.tab.host')}: ${value} · ${endpoint}`
+    : value
+  return { kind: 'host', value, label: value, tooltip }
+}
+
+const sessionScopeLabel = (session: ProductSessionRecord) => {
+  if (session.surface === 'database') {
+    return [session.database?.databaseName, session.database?.schemaName]
+      .filter(Boolean)
+      .join(' / ')
+  }
+  return session.lastKnownCwd || session.projectRoot || ''
+}
+
+const visibleBinding = (session: ProductSessionRecord) => {
+  const binding = sessionBinding(session)
+  if (!binding) return null
+  if (binding.kind === 'host' && normalizedLabel(binding.value) === normalizedLabel(sessionTitle(session))) return null
+  return binding
+}
+
+const visibleScopeLabel = (session: ProductSessionRecord) => {
+  const scope = sessionScopeLabel(session).trim()
+  if (!scope) return ''
+  const binding = sessionBinding(session)
+  const duplicates = [sessionTitle(session), binding?.value, binding?.label]
+    .some((value) => normalizedLabel(value) === normalizedLabel(scope))
+  return duplicates ? '' : scope
+}
+
+const searchableText = (session: ProductSessionRecord) => {
+  const targetValues = (target?: ProductSessionRecord['target']) => [
+    target?.label,
+    target?.assetName,
+    target?.assetId,
+    target?.connectionId,
+    target?.host,
+    target?.username,
+    targetEndpointFor(target)
+  ]
+  return [
+    session.title,
+    session.id,
+    surfaceLabel(session.surface),
+    session.projectRoot,
+    session.lastKnownCwd,
+    ...(session.surface === 'classic' ? [] : targetValues(session.target)),
+    ...classicHostRefs(session).flatMap((host) => [
+      host.id,
+      host.label,
+      host.detail,
+      host.assetId,
+      host.connectionId,
+      host.host,
+      host.username,
+      hostRefEndpoint(host)
+    ]),
+    session.database?.connectionId,
+    session.database?.databaseName,
+    session.database?.schemaName
+  ].filter(Boolean).join(' ').toLowerCase()
+}
+
+const filteredSessions = computed(() => {
   const keyword = query.value.trim().toLowerCase()
-  if (!keyword) return workspace.sortedConversations
-  return workspace.sortedConversations.filter((conversation) =>
-    `${conversation.title} ${conversation.id} ${conversation.summary || ''} ${conversation.ipAddress || ''}`.toLowerCase().includes(keyword)
-  )
+  if (!keyword) return sortedSessions.value
+  return sortedSessions.value.filter((session) => searchableText(session).includes(keyword))
 })
 
-const limit = computed(() => currentPage.value * pageSize)
-const visibleConversations = computed(() => filteredConversations.value.slice(0, limit.value))
-const hasMoreConversations = computed(() => limit.value < filteredConversations.value.length)
+const visibleSessions = computed(() => filteredSessions.value.slice(0, currentPage.value * pageSize))
+const hasMoreSessions = computed(() => visibleSessions.value.length < filteredSessions.value.length)
 
-const formatConversationTime = (timestamp: number) => {
+const surfaceIcon = (surface: ProductSessionSurface) => {
+  if (surface === 'codex') return Code2
+  if (surface === 'database') return Database
+  return Bot
+}
+
+const surfaceLabel = (surface: ProductSessionSurface) => {
+  if (surface === 'codex') return t('agents.sessionType.codex')
+  if (surface === 'database') return t('agents.sessionType.database')
+  return t('agents.sessionType.classic')
+}
+
+const formatSessionTime = (timestamp: number) => {
   const date = new Date(timestamp)
   const diff = Date.now() - date.getTime()
-  const days = Math.floor(diff / dayMs)
-
-  if (days === 0) {
-    return date.toLocaleTimeString(locale.value, { hour: '2-digit', minute: '2-digit' })
-  }
-
-  if (days < 7) {
-    return t('ai.historyDaysAgo', { count: days })
-  }
-
+  const days = Math.max(0, Math.floor(diff / (1000 * 60 * 60 * 24)))
+  if (days === 0) return date.toLocaleTimeString(locale.value, { hour: '2-digit', minute: '2-digit' })
+  if (days < 7) return t('ai.historyDaysAgo', { count: days })
   return date.toLocaleDateString(locale.value, { month: '2-digit', day: '2-digit' })
+}
+
+const refreshSessions = async () => {
+  if (loading.value) {
+    refreshRequestedWhileLoading = true
+    return false
+  }
+  const listProductSessions = productSessionClient.list()
+  if (!listProductSessions) {
+    catalogError.value = t('agents.sessionsUnavailable')
+    return false
+  }
+  loading.value = true
+  try {
+    const loaded: ProductSessionRecord[] = []
+    const loadedIds = new Set<string>()
+    const batchSize = 500
+    let offset = 0
+    while (true) {
+      const result = await listProductSessions({ limit: batchSize, offset })
+      if (!result?.ok || !Array.isArray(result.data?.sessions)) {
+        catalogError.value = result?.errorMessage || t('agents.sessionsLoadFailed')
+        return false
+      }
+      let added = 0
+      for (const session of result.data.sessions) {
+        if (loadedIds.has(session.id)) continue
+        loadedIds.add(session.id)
+        loaded.push(session)
+        added += 1
+      }
+      if (result.data.sessions.length < batchSize || added === 0) break
+      offset += result.data.sessions.length
+    }
+    sessions.value = loaded
+    catalogError.value = ''
+    return true
+  } catch {
+    catalogError.value = t('agents.sessionsLoadFailed')
+    return false
+  } finally {
+    loading.value = false
+    if (refreshRequestedWhileLoading) {
+      refreshRequestedWhileLoading = false
+      scheduleRefresh()
+    }
+  }
+}
+
+const scheduleRefresh = () => {
+  if (refreshTimer) clearTimeout(refreshTimer)
+  refreshTimer = setTimeout(() => {
+    refreshTimer = null
+    void refreshSessions()
+  }, 250)
+}
+
+const clearSearch = () => {
+  query.value = ''
+}
+
+const requestNewSession = (surface: ProductSessionSurface) => {
+  query.value = ''
+  currentPage.value = 1
+  newSessionMenuOpen.value = false
+  emit('requestProductSession', { action: 'create', surface })
+  scheduleRefresh()
+}
+
+const requestExistingSession = (session: ProductSessionRecord) => {
+  emit('requestProductSession', {
+    action: session.isOpen ? 'focus' : 'restore',
+    surface: session.surface,
+    sessionId: session.id
+  })
+  scheduleRefresh()
+}
+
+const deleteSession = async (session: ProductSessionRecord) => {
+  if (deletingId.value) return
+  if (!window.confirm(t('agents.deleteSessionConfirm', { title: session.title || surfaceLabel(session.surface) }))) return
+  const deleteProductSession = productSessionClient.delete()
+  if (!deleteProductSession) {
+    catalogError.value = t('agents.sessionsUnavailable')
+    return
+  }
+  deletingId.value = session.id
+  try {
+    const result = await deleteProductSession(session.id)
+    const deleted = Boolean(result?.ok && result.data?.id === session.id && result.data.deleted)
+    if (!deleted) {
+      catalogError.value = result?.errorMessage || t('agents.sessionDeleteFailed')
+      return
+    }
+    sessions.value = sessions.value.filter((candidate) => candidate.id !== session.id)
+    if (visibleSessions.value.length === 0 && currentPage.value > 1) currentPage.value -= 1
+    catalogError.value = ''
+  } catch {
+    catalogError.value = t('agents.sessionDeleteFailed')
+  } finally {
+    deletingId.value = ''
+  }
 }
 
 watch(query, () => {
   currentPage.value = 1
 })
 
-const clearSearch = () => {
-  query.value = ''
+const closeNewSessionMenu = () => {
+  newSessionMenuOpen.value = false
 }
 
-const handleNewChat = async () => {
-  query.value = ''
-  currentPage.value = 1
-  await workspace.createConversation()
+const handleWindowFocus = () => {
+  void refreshSessions()
 }
 
-const handleSelectConversation = async (id: string) => {
-  await workspace.restoreConversation(id)
-}
+onMounted(() => {
+  void refreshSessions()
+  stopProductSessionChanges = productSessionClient.onChanged()?.(() => scheduleRefresh())
+  window.addEventListener('focus', handleWindowFocus)
+  document.addEventListener('click', closeNewSessionMenu)
+})
 
-const handleDeleteConversation = async (id: string) => {
-  await workspace.deleteConversation(id)
-  if (visibleConversations.value.length === 0 && currentPage.value > 1) {
-    currentPage.value -= 1
-  }
-}
+onBeforeUnmount(() => {
+  if (refreshTimer) clearTimeout(refreshTimer)
+  stopProductSessionChanges?.()
+  window.removeEventListener('focus', handleWindowFocus)
+  document.removeEventListener('click', closeNewSessionMenu)
+})
 
-const loadMoreConversations = async () => {
-  if (isLoadingMore.value || !hasMoreConversations.value) return
-  isLoadingMore.value = true
-  try {
-    const refreshed = await workspace.loadChatConversationsFromBackend({ restoreIfEmpty: false })
-    if (!refreshed) return
-    currentPage.value += 1
-  } finally {
-    isLoadingMore.value = false
-  }
-}
+defineExpose({ refreshSessions })
 </script>

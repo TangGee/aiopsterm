@@ -7,6 +7,7 @@ import type {
 import type { AiopsAssetRecord } from '@shared/contracts/assets'
 import type { KnowledgeBaseNodeConfig } from '@shared/contracts/knowledgeBase'
 import type { SkillUserConfig } from '@shared/contracts/skills'
+import { managedAssetDisplayName, managedAssetEndpoint } from '@shared/assetDisplayRuntime'
 import { listAssets } from '../assets/assets'
 import { listChatConversations } from '../chat/chatHistory'
 
@@ -39,16 +40,20 @@ const localHostContext = (): AiContextOption => ({
   isLocalShell: true
 })
 
-const assetToHostContext = (asset: AiopsAssetRecord): AiContextOption => ({
-  id: asset.id,
-  kind: 'hosts',
-  label: asset.host || asset.ip || asset.name,
-  detail: asset.name || asset.title || asset.group_name,
-  host: asset.host || asset.ip || asset.name,
-  port: Number(asset.port) || 22,
-  username: asset.username || 'root',
-  assetName: asset.name || asset.title || asset.host || asset.ip
-})
+const assetToHostContext = (asset: AiopsAssetRecord): AiContextOption => {
+  const label = managedAssetDisplayName(asset)
+  const endpoint = managedAssetEndpoint(asset)
+  return {
+    id: asset.id,
+    kind: 'hosts',
+    label,
+    detail: endpoint || undefined,
+    host: endpoint || label,
+    port: Number(asset.port) || 22,
+    username: asset.username || 'root',
+    assetName: label
+  }
+}
 
 const sortAssetsForContext = (assets: AiopsAssetRecord[]) =>
   [...assets].sort((first, second) => {
@@ -61,14 +66,14 @@ const sortAssetsForContext = (assets: AiopsAssetRecord[]) =>
       if (first.status === 'online') return -1
       if (second.status === 'online') return 1
     }
-    return (first.name || first.title || first.host).localeCompare(second.name || second.title || second.host, 'zh-CN', {
+    return managedAssetDisplayName(first).localeCompare(managedAssetDisplayName(second), 'zh-CN', {
       numeric: true,
       sensitivity: 'base'
     })
   })
 
 const buildHostOptions = () => {
-  const assets = sortAssetsForContext(listAssets().assets.filter((asset) => !asset.isLocalShell && (asset.host || asset.ip || asset.name)))
+  const assets = sortAssetsForContext(listAssets().assets.filter((asset) => !asset.isLocalShell && (asset.host || asset.ip || asset.name || asset.title)))
   const hosts = [localHostContext(), ...assets.map(assetToHostContext)]
   const deduped = new Map<string, AiContextOption>()
   hosts.forEach((host) => {
@@ -177,11 +182,10 @@ export const listAiContextCatalog = async (): Promise<AiContextCatalogResult> =>
     const hosts = buildHostOptions()
     const chats = buildChatOptions()
     const [docs, skills] = await Promise.all([buildDocOptions(), buildSkillOptions()])
-    const defaultRemote = hosts.find((host) => host.id !== 'opened-local')
     const catalog: AiContextCatalog = {
       categories: buildCategories(hosts, docs, skills, chats).map(cloneCategory),
       openedHosts: hosts.slice(0, 4).map(cloneContextOption),
-      selectedDefaults: [hosts[0], defaultRemote].filter(Boolean).map((context) => cloneContextOption(context as AiContextOption))
+      selectedDefaults: []
     }
     return { ok: true, data: catalog }
   } catch (error) {

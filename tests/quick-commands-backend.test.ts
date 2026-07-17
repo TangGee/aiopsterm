@@ -294,7 +294,7 @@ describe('quick commands backend boundary', () => {
   })
 
   it('updates and deletes through backend snapshots', async () => {
-    await useTempRuntime({ useSeedData: false, prefix: 'aiopsterm-quick-commands-update-' })
+    await useTempRuntime({ useSeedData: false, forceFallbackStore: true, prefix: 'aiopsterm-quick-commands-update-' })
     const created = expectOkData(
       backend.saveQuickCommandSnippet({
         snippet_name: '临时命令',
@@ -335,6 +335,16 @@ describe('quick commands backend boundary', () => {
         group_uuid: null
       })
     )
+
+    const updatedPlan = expectOkData(backend.planQuickCommandScript({ snippetId: created.id, autoExecute: true }))
+    expect(updatedPlan).toMatchObject({
+      snippetId: created.id,
+      snippetName: '临时命令更新',
+      securityCommand: 'whoami',
+      commands: ['whoami'],
+      shellText: 'whoami\n'
+    })
+    expect(updatedPlan.segments).toEqual([{ text: 'whoami\n', delayBeforeMs: 0 }])
 
     const deleted = backend.deleteQuickCommandSnippet(created.id)
     expect(deleted.ok).toBe(true)

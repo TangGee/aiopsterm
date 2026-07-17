@@ -41,6 +41,48 @@
   grid-template-rows: auto auto minmax(0, 1fr) auto;
 }
 
+.db-ai-pane-shell:has(.db-ai-pane-restore-warning) {
+  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+}
+
+.db-ai-pane-restore-warning {
+  min-width: 0;
+  padding: 8px 10px;
+  border-bottom: 1px solid color-mix(in srgb, var(--theme-core-warning) 46%, var(--theme-module-active-border));
+  background: color-mix(in srgb, var(--theme-core-warning) 10%, var(--theme-module-active-panel-bg));
+  color: var(--theme-module-active-text);
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 8px;
+}
+
+.db-ai-pane-restore-warning > svg {
+  width: 16px;
+  height: 16px;
+  color: var(--theme-core-warning);
+}
+
+.db-ai-pane-restore-warning > div {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.db-ai-pane-restore-warning strong,
+.db-ai-pane-restore-warning span {
+  overflow-wrap: anywhere;
+}
+
+.db-ai-pane-restore-warning span {
+  color: var(--theme-module-active-text-muted);
+  font-size: 11px;
+}
+
+.db-ai-pane-restore-warning button {
+  white-space: nowrap;
+}
+
 .db-ai-pane-header {
   min-height: 44px;
   padding: 8px 10px 8px 12px;
@@ -79,4 +121,14 @@
 .db-ai-pane-title span {
   color: var(--theme-module-active-text-muted);
   font-size: 11px;
+}
+
+.db-ai-pane-header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.db-ai-pane-header-actions > button.active {
+  background: var(--theme-module-active-card-strong-bg);
 }

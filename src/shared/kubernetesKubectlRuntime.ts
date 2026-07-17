@@ -76,7 +76,7 @@ const namespaceFromCommand = (command: string, fallback: string) => {
   return namespaceMatch?.[1] || fallback
 }
 
-const stripAnsi = (value: string) =>
+export const stripAnsi = (value: string) =>
   value
     .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, '')
     .replace(/\u001b\][^\u0007]*(?:\u0007|\u001b\\)/g, '')
@@ -238,6 +238,23 @@ export const createNonRunnableKubernetesReason = (options: Pick<KubernetesKubect
   }
 }
 
+export const buildKubernetesProxyEnvironment = (proxyConfig: KubernetesAgentProxyConfig): NodeJS.ProcessEnv => {
+  if (!proxyConfig.enabled) return {}
+  const scheme = proxyConfig.type.toLowerCase()
+  const username = proxyConfig.enableProxyIdentity ? encodeURIComponent(proxyConfig.username.trim()) : ''
+  const password = proxyConfig.enableProxyIdentity && proxyConfig.type !== 'SOCKS4' ? `:${encodeURIComponent(proxyConfig.password)}` : ''
+  const auth = username ? `${username}${password}@` : ''
+  const proxyUrl = `${scheme}://${auth}${proxyConfig.host}:${proxyConfig.port}`
+  return {
+    HTTP_PROXY: proxyUrl,
+    HTTPS_PROXY: proxyUrl,
+    ALL_PROXY: proxyUrl,
+    http_proxy: proxyUrl,
+    https_proxy: proxyUrl,
+    all_proxy: proxyUrl
+  }
+}
+
 const createKubectlEnvironment = async (cluster: KubernetesClusterRecord, options: Pick<KubernetesKubectlRuntimeOptions, 'expandHomePath' | 'loadAgentProxyConfig'>) => {
   const env: NodeJS.ProcessEnv = { ...process.env }
   let tempDir = ''
@@ -249,20 +266,7 @@ const createKubectlEnvironment = async (cluster: KubernetesClusterRecord, option
   } else if (cluster.kubeconfig_path?.trim()) {
     env.KUBECONFIG = options.expandHomePath(cluster.kubeconfig_path.trim())
   }
-  const proxyConfig = options.loadAgentProxyConfig()
-  if (proxyConfig.enabled) {
-    const scheme = proxyConfig.type.toLowerCase()
-    const username = proxyConfig.enableProxyIdentity ? encodeURIComponent(proxyConfig.username.trim()) : ''
-    const password = proxyConfig.enableProxyIdentity && proxyConfig.type !== 'SOCKS4' ? `:${encodeURIComponent(proxyConfig.password)}` : ''
-    const auth = username ? `${username}${password}@` : ''
-    const proxyUrl = `${scheme}://${auth}${proxyConfig.host}:${proxyConfig.port}`
-    env.HTTP_PROXY = proxyUrl
-    env.HTTPS_PROXY = proxyUrl
-    env.ALL_PROXY = proxyUrl
-    env.http_proxy = proxyUrl
-    env.https_proxy = proxyUrl
-    env.all_proxy = proxyUrl
-  }
+  Object.assign(env, buildKubernetesProxyEnvironment(options.loadAgentProxyConfig()))
   const cleanup = async () => {
     if (tempDir) await rm(tempDir, { recursive: true, force: true })
   }
@@ -527,6 +531,11 @@ export const renderTerminalCommandOutput = (command: string, output: string, err
   return `[aiopsterm kubectl] ${command}${body ? `\n${body}` : ''}`
 }
 
+// 真实 kubectl 经 tabwriter 输出,列间至少 2 个空格;按多空格切列才能保留含单空格的
+// 单元格(如 RESTARTS 的 "3 (5m ago)"、-o wide 的 "NOMINATED NODE" 表头)。
+// 单空格分隔的表格(如测试替身的 echo 输出)退回按任意空白切列。
+const splitKubectlTableRow = (line: string, wideColumns: boolean) => (wideColumns ? line.split(/\s{2,}|\t/) : line.split(/\s+/))
+
 const parseKubectlTable = (output: string) => {
   const lines = stripAnsi(output)
     .split(/\r?\n/)
@@ -535,12 +544,13 @@ const parseKubectlTable = (output: string) => {
     .filter((line) => !/^warning:/i.test(line))
   const headerIndex = lines.findIndex((line) => /^(?:NAMESPACE\s+)?NAME\s+/.test(line))
   if (headerIndex < 0) return []
-  const headers = lines[headerIndex].split(/\s+/)
+  const wideColumns = /\s{2,}|\t/.test(lines[headerIndex])
+  const headers = splitKubectlTableRow(lines[headerIndex], wideColumns)
   return lines
     .slice(headerIndex + 1)
     .filter((line) => !/^No resources found\b/i.test(line))
     .map((line) => {
-      const cells = line.split(/\s+/)
+      const cells = splitKubectlTableRow(line, wideColumns)
       return headers.reduce<Record<string, string>>((row, header, index) => {
         row[header] = cells[index] || ''
         return row

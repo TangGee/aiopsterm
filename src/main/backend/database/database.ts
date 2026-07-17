@@ -10,12 +10,14 @@ import {
 import type {
   DatabaseAiDrawerLifecycleInput,
   DatabaseAiPaneLifecycleInput,
+  DatabaseAiPaneResponseInput,
   DatabaseConnectionTestInput
 } from '@shared/contracts/database'
 import type { UserConfig } from '@shared/contracts/userConfig'
 import { resolveModelProvider } from '../ai/modelProviderText'
 import {
   abortClineAgentTask,
+  clineAgentSessionIdFor,
   runClineAgentTurn,
   type ClineAgentRunInput
 } from '../agent/clineAgentRuntime'
@@ -25,6 +27,7 @@ import {
   databaseClineTurnPrompt
 } from '../agent/clineAgentProfiles'
 import { resolveClineAgentProvider } from '../agent/clineAgentProviderRuntime'
+import { databaseClineAgentTaskIdentity } from '@shared/clineAgentTaskIdentity'
 import { createSshProxySocket, type SshProxySocket } from '../ssh/sshProxy'
 import { loadDatabaseAiMcpContext, redactDatabaseAiProviderError } from './databaseMcp'
 
@@ -48,6 +51,25 @@ type DatabaseBackendRuntimeConfig = {
 }
 
 const normalizeText = (value: unknown) => String(value || '').trim()
+
+export const databaseClineNativeBinding = (
+  input: {
+    conversationId?: string
+    responseLanguage?: DatabaseAiProviderTextInput['responseLanguage']
+    context: {
+      connectionId?: string
+      databaseName?: string
+      schemaName?: string
+    }
+  }
+) => {
+  const scopeKey = normalizeText(input.conversationId) || 'legacy-pane'
+  return {
+    profile: 'database' as const,
+    scopeKey,
+    nativeSessionId: clineAgentSessionIdFor('database', scopeKey)
+  }
+}
 
 const activeDatabaseAgentTasks = new Map<string, {
   taskId: string
@@ -100,17 +122,10 @@ async function generateDatabaseProviderText(
     }
   }
   const requestId = normalizeText(input.requestId) || normalizeText(input.assistantMessageId) || `${input.surface}-${Date.now()}`
-  const taskId = `dbai-${requestId}`
-  const turnId = requestId
-  const conversationKey = input.surface === 'pane'
-    ? [
-        normalizeText(input.conversationId) || 'legacy-pane',
-        input.responseLanguage,
-        input.context.connectionId,
-        input.context.databaseName,
-        input.context.schemaName
-      ].map(normalizeText).join('\u0000')
-    : `drawer:${requestId}`
+  const { taskId, turnId } = databaseClineAgentTaskIdentity(requestId)
+  const conversationKey = normalizeText(input.conversationId) || (input.surface === 'pane'
+    ? databaseClineNativeBinding(input).scopeKey
+    : `drawer:${requestId}`)
   const activeTask = {
     taskId,
     turnId,
@@ -255,10 +270,12 @@ export {
   diagnoseDatabaseSqlError,
   disconnectDatabaseConnection,
   executeDatabaseSql,
+  explainDatabaseTable,
   generateDatabaseAiDrawerResponse,
   generateDatabaseAiPaneResponse,
   getDatabaseAiPaneState,
   getDatabaseTableDdl,
+  inspectDatabaseTableIndexes,
   listDatabaseCatalog,
   moveDatabaseConnection,
   moveDatabaseGroup,

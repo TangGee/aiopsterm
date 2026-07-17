@@ -44,7 +44,7 @@ Do not describe macOS or Windows as supported until the evidence above exists in
 | --- | --- | --- | --- |
 | Packaged resources | `resources/icons`, `codex-aiopsterm-mcp.js`, `aiopsterm-agent-hook.js`, `aiopsterm-control.js`, Codex package | `electron-builder.yml`, `scripts/prune-packaged-native-modules.mjs`, Codex runtime path helpers | Read-only after packaging. Access through `process.resourcesPath` or injected app/resource path helpers. |
 | User-editable config | `security-config.json`, `keyword-highlight.json`, `setting/mcp_settings.json`, user Skills | `settingsConfigRuntime`, `skillsRuntime` | Store under userData. Renderer displays paths returned from main. File watchers live in main. |
-| Runtime state | `database-workspace.json`, `database-comments.json`, `chat-history.json`, `ai-todos.json`, `user-account.json`, Kubernetes catalog, managed AI sessions | Domain backend runtimes configured from `runtimeConfiguration.ts` | Store under userData with domain-owned load/normalize/persist logic. |
+| Runtime state | `database-workspace.json`, `database-comments.json`, `chat-history.json`, `product-sessions/registry.db`, `cline-agent/`, `codex-agent/`, `ai-todos.json`, `user-account.json`, Kubernetes catalog, managed AI sessions | Domain backend runtimes configured from `runtimeConfiguration.ts` | Store under userData with domain-owned load/normalize/persist logic. Product metadata, UI projections, and engine-native transcripts remain separate ownership layers. |
 | Shared local database | `aiopsterm-state.db` for assets, files catalog, aliases, quick commands | Assets, Files, Alias, Quick Commands runtimes | Keep shared SQLite only for small structured local catalogs. Avoid mixing large blobs or unrelated audit streams into it. |
 | Secrets and keys | asset secrets, database credentials, credential key files | `assetsCredentialRuntime`, `databaseCredentialStorage` | Use Electron `safeStorage` when available. Local AES key fallback is device-local and must be documented as non-portable unless exported with explicit tooling. |
 | Logs and audit | `logs/aiopsterm-runtime.log`, managed AI audit JSONL, control event JSONL | `runtimeLog`, `agentSessionAuditRuntime`, `controlSocketStateRuntime` | Keep under userData. Add rotation, size caps, and diagnostic export before broad desktop distribution. |
@@ -67,6 +67,11 @@ userData/
   database-workspace.json
   database-comments.json
   chat-history.json
+  product-sessions/
+    registry.db
+  cline-agent/
+    db/sessions.db
+    sessions/
   ai-todos.json
   data-sync-runtime.json
   user-account.json

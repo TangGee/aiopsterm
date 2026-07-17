@@ -128,63 +128,6 @@ const writeOrRiskyCommandPattern =
 const commandWritesOutputPattern = /(^|[^<])>>?|<<|(\s|^)(curl|wget)\s+[\s\S]*\s(-o|--output|-O|--post|--request\s+(POST|PUT|PATCH|DELETE)|-X\s*(POST|PUT|PATCH|DELETE)|--data|-d)(\s|$)/i
 const interactiveCommandPattern = /(^|\s)(top|htop|less|more|watch|vim|vi|nano|ssh|mysql|psql|redis-cli)(\s|$)|\b(kubectl|docker|podman)\s+exec\s+(-it|-ti|--interactive|--tty)/i
 
-const autoApprovableReadOnlyExecutables = new Set([
-  'cat',
-  'column',
-  'crictl',
-  'cut',
-  'date',
-  'df',
-  'dig',
-  'dmesg',
-  'docker',
-  'du',
-  'egrep',
-  'fgrep',
-  'file',
-  'free',
-  'grep',
-  'head',
-  'host',
-  'hostname',
-  'id',
-  'iostat',
-  'ip',
-  'jq',
-  'journalctl',
-  'kubectl',
-  'last',
-  'ls',
-  'lsblk',
-  'lscpu',
-  'lsof',
-  'mpstat',
-  'netstat',
-  'nslookup',
-  'pgrep',
-  'pidof',
-  'podman',
-  'printenv',
-  'ps',
-  'pwd',
-  'service',
-  'sort',
-  'ss',
-  'stat',
-  'systemctl',
-  'tail',
-  'traceroute',
-  'uname',
-  'uniq',
-  'uptime',
-  'vmstat',
-  'w',
-  'wc',
-  'who',
-  'whoami',
-  'yq'
-])
-
 export const isInteractiveAiChatCommand = (command: string) => interactiveCommandPattern.test(command)
 
 const stripShellPrompt = (line: string) =>
@@ -287,46 +230,6 @@ export const isReadOnlyAiChatCommand = (command: string) => {
     if (executable === 'sed' && /\s-i(\s|$)/.test(segment)) return false
     return true
   })
-}
-
-const autoApprovableReadOnlySegment = (segment: string) => {
-  const executable = executableName(segment)
-  if (!autoApprovableReadOnlyExecutables.has(executable)) return false
-  if (executable === 'date' && !/^\s*(?:env\s+|command\s+|builtin\s+|time\s+)*date\s*$/i.test(segment)) return false
-  if (executable === 'hostname' && !/^\s*(?:env\s+|command\s+|builtin\s+|time\s+)*hostname\s*$/i.test(segment)) return false
-  if (executable === 'dmesg' && /(?:^|\s)(?:-[^-\s]*[cCwW][^-\s]*|--(?:clear|read-clear|follow|follow-new))(?:\s|$)/i.test(segment)) return false
-  if (executable === 'journalctl') {
-    if (!/(?:^|\s)--no-pager(?:\s|$)/i.test(segment)) return false
-    if (/(?:^|\s)(?:-f|--follow|--rotate|--sync|--flush|--vacuum-|--setup-keys|--relinquish-var|--smart-relinquish-var)(?:\s|=|$)/i.test(segment)) return false
-  }
-  if (executable === 'systemctl') {
-    if (!/^\s*(?:env\s+|command\s+|builtin\s+|time\s+)*systemctl\s+(?:status|is-active|is-enabled|list-|show|cat)\b/i.test(segment)) return false
-    if (!/(?:^|\s)--no-pager(?:\s|$)/i.test(segment)) return false
-  }
-  if (executable === 'service' && !/^\s*(?:env\s+|command\s+|builtin\s+|time\s+)*service\s+\S+\s+status\s*$/i.test(segment)) return false
-  if (executable === 'docker' || executable === 'podman') {
-    const match = segment.match(/^\s*(?:env\s+|command\s+|builtin\s+|time\s+)*(?:docker|podman)\s+(ps|logs|inspect|stats|images|version|info)\b/i)
-    if (!match) return false
-    if (match[1].toLowerCase() === 'logs' && /(?:^|\s)(?:-f|--follow)(?:\s|$)/i.test(segment)) return false
-    if (match[1].toLowerCase() === 'stats' && !/(?:^|\s)--no-stream(?:\s|$)/i.test(segment)) return false
-  }
-  if (executable === 'kubectl') {
-    if (!/^\s*(?:env\s+|command\s+|builtin\s+|time\s+)*kubectl\s+(?:get|describe|logs|top|version|cluster-info|config\s+(?:view|get-contexts|current-context))\b/i.test(segment)) return false
-    if (/(?:^|\s)(?:-f|--follow)(?:\s|$)/i.test(segment)) return false
-  }
-  if (executable === 'crictl' && !/^\s*(?:env\s+|command\s+|builtin\s+|time\s+)*crictl\s+(?:ps|pods|images|inspect|inspectp|logs|stats|statsp|info|version)\b/i.test(segment)) return false
-  if (executable === 'ip' && !/^\s*(?:env\s+|command\s+|builtin\s+|time\s+)*ip\s+(?:(?:addr|address|link|route|rule|neigh|neighbor)\s+(?:show|list|get)|(?:addr|address|link|route|rule|neigh|neighbor)\s*$)/i.test(segment)) return false
-  if (executable === 'ss' && /(?:^|\s)(?:-K|--kill)(?:\s|$)/.test(segment)) return false
-  if (executable === 'tail' && /(?:^|\s)(?:-f|--follow)(?:\s|=|$)/i.test(segment)) return false
-  if (executable === 'yq' && /(?:^|\s)(?:-i|--inplace)(?:\s|$)/i.test(segment)) return false
-  return true
-}
-
-export const isAutoApprovableReadOnlyAiChatCommand = (command: string) => {
-  if (!isReadOnlyAiChatCommand(command) || isInteractiveAiChatCommand(command)) return false
-  if (!command.trim() || /[\r\n;&<>`(){}]/.test(command) || /\$\(|\$\{|\|\|/.test(command)) return false
-  const segments = splitShellSegments(command)
-  return segments.length > 0 && segments.every(autoApprovableReadOnlySegment)
 }
 
 const inferCommandHost = (input: AiChatResponseInput) => {

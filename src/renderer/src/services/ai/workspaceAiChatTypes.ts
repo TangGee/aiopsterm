@@ -21,6 +21,8 @@ import type { UserConfig } from '@shared/contracts/userConfig'
 export type SendChatOptions = {
   mode?: NonNullable<AiChatResponseInput['mode']>
   skipKnowledgeSearch?: boolean
+  replaceNativeTranscript?: boolean
+  revisionFromMessageId?: string
 }
 
 export type AiContextUsage = AiChatContextUsageSnapshot
@@ -73,6 +75,11 @@ export type ConversationItem = {
   favorite?: boolean
 }
 
+export type WorkspaceAiChatTerminalPanel = Pick<
+  TerminalPanel,
+  'id' | 'output' | 'sessionId' | 'cwd' | 'title' | 'status' | 'sshSession' | 'classicTarget'
+>
+
 export type WorkspaceAiChatControllerState = {
   mode: Ref<'terminal' | 'agents'>
   config: Ref<UserConfig>
@@ -98,7 +105,10 @@ export type WorkspaceAiChatControllerDeps = {
   createRendererLocalId: (prefix: 'aichat-agent-loop') => string
   resolveAiKnowledgeSearchContexts: (prompt: string, contexts: AiContextOption[]) => Promise<AiContextOption[]>
   applyMcpServersSnapshot: (snapshot: ReturnType<typeof normalizeMcpServersConfig>) => void
-  resolveActiveWritableTerminalPanel: () => Pick<TerminalPanel, 'id' | 'output' | 'sessionId'> | null | undefined
+  resolveActiveWritableTerminalPanel: () => WorkspaceAiChatTerminalPanel | null | undefined
+  resolveClassicHostTerminalPanel: (context: AiContextOption) => WorkspaceAiChatTerminalPanel | null | undefined
+  openTerminalForAiHostContext: (context: AiContextOption, options?: { cwd?: string }) => Promise<WorkspaceAiChatTerminalPanel | null | undefined>
+  activateTerminalPanel: (panelIdOrSessionId: string) => WorkspaceAiChatTerminalPanel | null | undefined
   runActiveTerminalCommand: (command: string, source?: TerminalCommandSource) => Promise<TerminalSecurityDecision | null>
   waitForTerminalOutputAfter: (panelId: string, startLength: number, timeoutMs?: number) => Promise<string>
   findKnowledgeNode: (relPath: string) => KnowledgeNode | null

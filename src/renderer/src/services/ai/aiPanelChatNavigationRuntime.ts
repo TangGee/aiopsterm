@@ -65,8 +65,9 @@ export type AiPanelChatNavigationI18nKey =
   | 'ai.chatCreateFailed'
   | 'ai.chatRestored'
   | 'ai.chatRestoreFailed'
-  | 'ai.keepOneTab'
   | 'ai.tabClosed'
+  | 'ai.tabCloseFailed'
+  | 'ai.tabCloseRollbackFailed'
   | 'ai.historyTitleUpdated'
   | 'ai.historyTitleUpdateFailed'
   | 'ai.chatDeleted'
@@ -84,6 +85,8 @@ export type AiPanelChatNavigationRuntimeOptions<TConversation extends AiPanelCon
   locale: () => string
   t: (key: AiPanelChatNavigationI18nKey) => string
   createConversation: () => Promise<{ id: string } | null | undefined>
+  cancelActiveTurn?: () => Promise<boolean>
+  deselectConversation: (expectedConversationId: string) => Promise<boolean>
   restoreConversation: (id: string) => Promise<boolean>
   renameConversation: (id: string, title: string) => Promise<boolean>
   deleteConversation: (id: string) => Promise<boolean>
@@ -99,6 +102,7 @@ export type AiPanelChatNavigationRuntimeOptions<TConversation extends AiPanelCon
   cancelFrame: (frame: number) => void
   setTimer: (callback: () => void, delay: number) => unknown
   clearTimer: (timer: unknown) => void
+  loadOlderMessages?: () => Promise<number>
 }
 
 const historyPageSize = 20
@@ -161,8 +165,9 @@ export const createAiPanelChatNavigationRuntime = <
     chatCreateFailed: () => options.t('ai.chatCreateFailed'),
     chatRestored: () => options.t('ai.chatRestored'),
     chatRestoreFailed: () => options.t('ai.chatRestoreFailed'),
-    keepOneTab: () => options.t('ai.keepOneTab'),
     tabClosed: () => options.t('ai.tabClosed'),
+    tabCloseFailed: () => options.t('ai.tabCloseFailed'),
+    tabCloseRollbackFailed: () => options.t('ai.tabCloseRollbackFailed'),
     historyTitleUpdated: () => options.t('ai.historyTitleUpdated'),
     historyTitleUpdateFailed: () => options.t('ai.historyTitleUpdateFailed'),
     chatDeleted: () => options.t('ai.chatDeleted'),
@@ -191,9 +196,11 @@ export const createAiPanelChatNavigationRuntime = <
       message.agentTask?.status === 'running' ||
       message.agentTask?.status === 'waiting-approval'
     ),
+    cancelActiveTurn: options.cancelActiveTurn,
     currentConversationTitle,
     exportMessages: () => options.messages().map(aiPanelChatExportMessage),
     createConversation: options.createConversation,
+    deselectConversation: options.deselectConversation,
     restoreConversation: options.restoreConversation,
     renameConversation: options.renameConversation,
     deleteConversation: options.deleteConversation,
@@ -217,6 +224,8 @@ export const createAiPanelChatNavigationRuntime = <
 
   const aiPanelChatViewportRuntime = createAiPanelChatViewportRuntime({
     historyState: historyRuntimeState,
+    messages: options.messages,
+    selectedConversationId: options.selectedConversationId,
     closePopups: options.closePopups,
     closeMoreActionsMenu: () => {
       moreActionsMenuOpen.value = false
@@ -225,9 +234,11 @@ export const createAiPanelChatNavigationRuntime = <
     requestFrame: options.requestFrame,
     cancelFrame: options.cancelFrame,
     setSearchTimer: options.setTimer,
-    clearSearchTimer: options.clearTimer
+    clearSearchTimer: options.clearTimer,
+    loadOlderMessages: options.loadOlderMessages
   })
   const {
+    activateChatViewport,
     chatScrollRef,
     chatSearchCurrentIndex,
     chatSearchInputRef,
@@ -239,10 +250,14 @@ export const createAiPanelChatNavigationRuntime = <
     closeChatSearch,
     findNextChatMatch,
     findPreviousChatMatch,
-    openChatSearch
+    handleChatScroll,
+    handleChatUserScrollIntent,
+    openChatSearch,
+    visibleChatMessages
   } = aiPanelChatViewportRuntime
 
   return {
+    activateChatViewport,
     cancelChatScrollFrame,
     cancelHistoryTitleEdit: () => aiPanelHistoryRuntime.cancelHistoryTitleEdit(),
     chatExportNotice,
@@ -274,6 +289,8 @@ export const createAiPanelChatNavigationRuntime = <
     formatHistoryTime,
     groupedVisibleHistory,
     handleChatSearchTermChanged: () => aiPanelChatViewportRuntime.handleSearchTermChanged(),
+    handleChatScroll,
+    handleChatUserScrollIntent,
     hasMoreHistoryConversations,
     historyFavoriteLabel,
     historyFavoritesOnly,
@@ -281,6 +298,7 @@ export const createAiPanelChatNavigationRuntime = <
     historyMenuOpen,
     historySearchInputRef,
     historySearchTerm,
+    hydrateOpenConversationTabs: () => aiPanelHistoryRuntime.hydrateOpenConversationTabs(),
     loadMoreHistoryConversations: () => aiPanelHistoryRuntime.loadMoreHistoryConversations(hasMoreHistoryConversations.value),
     moreActionsMenuOpen,
     openChatSearch,
@@ -298,6 +316,7 @@ export const createAiPanelChatNavigationRuntime = <
     toggleHistoryMenu: () => aiPanelHistoryRuntime.toggleHistoryMenu(),
     toggleMoreActionsMenu: () => aiPanelHistoryRuntime.toggleMoreActionsMenu(),
     visibleConversationTabs,
+    visibleChatMessages,
     visibleHistoryConversations
   }
 }

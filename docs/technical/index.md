@@ -10,6 +10,7 @@
 - [Hook Behavior](hook-behavior.md)
 - [Internationalization](internationalization.md)
 - [Managed AI Sessions](managed-ai-sessions.md)
+- [Product Session Registry](product-session-registry.md)
 - [Performance And Resource Management](performance-resource-management.md)
 - [SSH Terminal Runtime](ssh-terminal.md)
 - [Threaded Terminal Renderer](terminal-renderer-architecture.md)

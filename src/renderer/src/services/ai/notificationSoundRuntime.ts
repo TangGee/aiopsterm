@@ -1,4 +1,7 @@
 import type { NotificationSoundPreset, NotificationUserConfig } from '@shared/contracts/appRuntime'
+import { isSupportedLocale } from '@/i18n/runtime'
+import { translateStaticText } from '@/i18n/staticText'
+import type { SupportedLocale } from '@/i18n/messages'
 
 export type NotificationSoundContext = {
   title?: string
@@ -8,6 +11,12 @@ export type NotificationSoundContext = {
 type AudioContextConstructor = typeof AudioContext
 
 const approvalVoiceText = '启禀殿下，AI需要你审批了'
+
+// 通知声音属于独立 runtime,不依赖 store;locale 以 applyDocumentLocale 写入的 document lang 为准。
+const documentLocale = (): SupportedLocale => {
+  const lang = typeof document === 'undefined' ? '' : document.documentElement.lang
+  return isSupportedLocale(lang) ? lang : 'zh-CN'
+}
 
 const audioContextConstructor = (): AudioContextConstructor | null => {
   if (typeof window === 'undefined') return null
@@ -62,8 +71,9 @@ const playCustomSound = (url: string) => {
 const speakApprovalVoice = () => {
   if (typeof window === 'undefined' || !window.speechSynthesis || typeof SpeechSynthesisUtterance === 'undefined') return false
   try {
-    const utterance = new SpeechSynthesisUtterance(approvalVoiceText)
-    utterance.lang = 'zh-CN'
+    const locale = documentLocale()
+    const utterance = new SpeechSynthesisUtterance(translateStaticText(locale, approvalVoiceText))
+    utterance.lang = locale.startsWith('zh') ? locale : 'en-US'
     utterance.rate = 1.02
     utterance.pitch = 1.03
     utterance.volume = 0.96
@@ -93,6 +103,6 @@ export const playAiNotificationSound = (settings: NotificationUserConfig, _conte
 }
 
 export const notificationSoundPreviewContext = (): NotificationSoundContext => ({
-  title: 'AI需要你审批了',
-  summary: approvalVoiceText
+  title: translateStaticText(documentLocale(), 'AI需要你审批了'),
+  summary: translateStaticText(documentLocale(), approvalVoiceText)
 })

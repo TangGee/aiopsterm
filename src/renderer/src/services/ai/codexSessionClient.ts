@@ -12,6 +12,7 @@ type CodexSessionBridge = Pick<
   | 'onCodexSessionData'
   | 'onCodexSessionLifecycle'
   | 'onCodexSessionExit'
+  | 'onCodexSessionThread'
 >
 
 const bridgeMethod = createBridgeMethod<CodexSessionBridge>()
@@ -25,5 +26,6 @@ export const codexSessionClient = {
   killCodexSession: () => bridgeMethod('killCodexSession'),
   onCodexSessionData: () => bridgeMethod('onCodexSessionData'),
   onCodexSessionLifecycle: () => bridgeMethod('onCodexSessionLifecycle'),
-  onCodexSessionExit: () => bridgeMethod('onCodexSessionExit')
+  onCodexSessionExit: () => bridgeMethod('onCodexSessionExit'),
+  onCodexSessionThread: () => bridgeMethod('onCodexSessionThread')
 }

@@ -314,7 +314,8 @@ export const K8sEditClusterModal = defineComponent({
   setup() {
     const store = useWorkspaceStore()
     const cluster = computed(() => store.k8sClusters.find((item) => item.id === store.k8sEditingClusterId) || null)
-    const form = reactive({ name: '', defaultNamespace: '', autoConnect: false })
+    const form = reactive({ name: '', defaultNamespace: '', autoConnect: false, kubeconfigPath: '', kubeconfigContent: '' })
+    const supportsKubeconfig = computed(() => Boolean(cluster.value && cluster.value.source_type !== 'jumpserver' && cluster.value.auth_type !== 'jumpserver'))
     watch(
       cluster,
       (value) => {
@@ -322,16 +323,24 @@ export const K8sEditClusterModal = defineComponent({
         form.name = value.name
         form.defaultNamespace = value.default_namespace
         form.autoConnect = value.auto_connect === 1
+        form.kubeconfigPath = value.kubeconfig_path || ''
+        form.kubeconfigContent = value.kubeconfig_content || ''
       },
       { immediate: true }
     )
     const submit = async () => {
       if (!cluster.value) return
-      await store.updateK8sCluster(cluster.value.id, {
+      const patch: Parameters<typeof store.updateK8sCluster>[1] = {
         name: form.name,
         defaultNamespace: form.defaultNamespace,
         autoConnect: form.autoConnect
-      })
+      }
+      // 仅当字段实际变化时才提交,undefined 表示保持后端原值(证书轮换只改动到的那一项)。
+      if (supportsKubeconfig.value) {
+        if (form.kubeconfigPath !== (cluster.value.kubeconfig_path || '')) patch.kubeconfigPath = form.kubeconfigPath.trim() || null
+        if (form.kubeconfigContent !== (cluster.value.kubeconfig_content || '')) patch.kubeconfigContent = form.kubeconfigContent.trim() ? form.kubeconfigContent : null
+      }
+      await store.updateK8sCluster(cluster.value.id, patch)
     }
     return () =>
       cluster.value
@@ -381,6 +390,31 @@ export const K8sEditClusterModal = defineComponent({
                     }
                   })
                 ]),
+                supportsKubeconfig.value
+                  ? h('label', [
+                      h('span', 'Kubeconfig 路径'),
+                      h('input', {
+                        value: form.kubeconfigPath,
+                        placeholder: '~/.kube/config',
+                        onInput: (event: Event) => {
+                          form.kubeconfigPath = updateInputValue(event)
+                        }
+                      })
+                    ])
+                  : null,
+                supportsKubeconfig.value
+                  ? h('label', [
+                      h('span', 'Kubeconfig 内容'),
+                      h('textarea', {
+                        value: form.kubeconfigContent,
+                        rows: 6,
+                        placeholder: '粘贴 kubeconfig 内容以替换(留空则使用路径)',
+                        onInput: (event: Event) => {
+                          form.kubeconfigContent = updateTextareaValue(event)
+                        }
+                      })
+                    ])
+                  : null,
                 h('div', { class: 'k8s-form-status' }, [h('span', '连接状态'), h(K8sStatusTag, { status: cluster.value.connection_status as KubernetesConnectionStatus })])
               ]),
               h('footer', [

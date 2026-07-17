@@ -52,6 +52,42 @@ export const createWorkspaceKubernetesTerminalController = (
   let removeK8sTerminalDataListener: (() => void) | null = null
   let removeK8sTerminalExitListener: (() => void) | null = null
 
+  // PTY 终端的命令输出经 data 事件流式到达:AI 采集按「末包后静默 idleMs 或总时长 maxMs」聚合。
+  type K8sPendingStreamCollection = {
+    buffer: string
+    feed: (chunk: string) => void
+    settle: () => void
+  }
+  const pendingStreamCollections = new Map<string, K8sPendingStreamCollection>()
+
+  const collectK8sTerminalStreamOutput = (tabId: string, timing: { idleMs?: number; maxMs?: number } = {}) => {
+    const idleMs = timing.idleMs ?? 1200
+    const maxMs = timing.maxMs ?? 8000
+    pendingStreamCollections.get(tabId)?.settle()
+    return new Promise<string>((resolve) => {
+      let idleTimer: ReturnType<typeof setTimeout> | null = null
+      let settled = false
+      const entry: K8sPendingStreamCollection = {
+        buffer: '',
+        feed: (chunk) => {
+          entry.buffer += chunk
+          if (idleTimer) clearTimeout(idleTimer)
+          idleTimer = setTimeout(entry.settle, idleMs)
+        },
+        settle: () => {
+          if (settled) return
+          settled = true
+          if (idleTimer) clearTimeout(idleTimer)
+          clearTimeout(maxTimer)
+          pendingStreamCollections.delete(tabId)
+          resolve(entry.buffer)
+        }
+      }
+      const maxTimer = setTimeout(entry.settle, maxMs)
+      pendingStreamCollections.set(tabId, entry)
+    })
+  }
+
   const activateK8sTerminal = (id: string) => {
     k8sActiveTerminalId.value = id
     k8sTerminalTabs.value = activatedK8sTerminalTabsRuntime(k8sTerminalTabs.value, id)
@@ -72,12 +108,14 @@ export const createWorkspaceKubernetesTerminalController = (
     const tab = k8sTerminalTabs.value.find((item) => item.sessionId === event.sessionId && item.id === event.id && item.clusterId === event.clusterId)
     if (!tab || tab.status === 'ended' || tab.status === 'error') return
     k8sTerminalTabs.value = applyK8sTerminalDataEvent(k8sTerminalTabs.value, event)
+    if (event.data) pendingStreamCollections.get(tab.id)?.feed(event.data)
   }
 
   const handleK8sTerminalExit = (event: KubernetesTerminalExitEvent) => {
     if (!isK8sTerminalExitEvent(event)) return
     const tab = k8sTerminalTabs.value.find((item) => item.sessionId === event.sessionId && item.id === event.id && item.clusterId === event.clusterId)
     if (!tab) return
+    pendingStreamCollections.get(tab.id)?.settle()
     k8sTerminalTabs.value = applyK8sTerminalExitEvent(k8sTerminalTabs.value, event)
     if (event.reason === 'error' && event.error) setK8sNotice(event.error)
   }
@@ -251,7 +289,8 @@ export const createWorkspaceKubernetesTerminalController = (
       return ''
     }
     const writeData = result.data
-    const terminalOutput = writeData.terminalOutput || ''
+    // PTY 模式写入立即返回、输出经 data 事件流式到达;命令模式则同步带回整块输出。
+    const immediateOutput = writeData.terminalOutput || ''
     const latestTab = k8sTerminalTabs.value.find((item) => item.id === tab.id) || tab
     const wasCollectingAiOutput = latestTab.collectingAiOutput
     const updatedTab =
@@ -259,7 +298,11 @@ export const createWorkspaceKubernetesTerminalController = (
         const withCommand = updateK8sTerminalTabCommandResult(item, text, writeData.updatedAt)
         return wasCollectingAiOutput ? stopK8sTerminalAiCollection(withCommand) : withCommand
       }) || latestTab
+    let terminalOutput = immediateOutput
     if (wasCollectingAiOutput) {
+      if (!immediateOutput.trim()) {
+        terminalOutput = await collectK8sTerminalStreamOutput(updatedTab.id)
+      }
       if (!terminalOutput.trim()) {
         setK8sNotice('Kubernetes terminal backend returned no output to send.')
       } else {
@@ -272,11 +315,19 @@ export const createWorkspaceKubernetesTerminalController = (
               detail: `${cluster.context_name} / ${updatedTab.namespace}`
             }
           : undefined
-        void sendChat(`Terminal output:\n\`\`\`\n${terminalOutput}\n\`\`\``, undefined, host ? [host] : undefined, { skipKnowledgeSearch: true })
-        setK8sNotice(`${updatedTab.name} 命令输出已发送到 AI`)
+        const sent = await sendChat(`Terminal output:\n\`\`\`\n${terminalOutput}\n\`\`\``, undefined, host ? [host] : undefined, {
+          mode: 'chat',
+          skipKnowledgeSearch: true
+        })
+        setK8sNotice(sent
+          ? `${updatedTab.name} 命令输出已发送到 AI`
+          : `${updatedTab.name} 命令输出发送到 AI 失败`)
       }
     }
-    return terminalOutput
+    // AI 采集调用方需要真实输出判断成败;普通发送在 PTY 模式下没有同步输出,
+    // 返回命令文本作为“已写入终端”的成功信号。
+    if (wasCollectingAiOutput) return terminalOutput
+    return terminalOutput || text
   }
 
   const executeK8sTerminalAiCommand = async (command: string, tabId?: string) => {

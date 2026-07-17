@@ -135,7 +135,17 @@ describe('workspacePanelAssetInteractionRuntime', () => {
     await runtime.connectAsset('prod')
     expect(selectedAssetId.value).toBe('prod')
     expect(openSshTerminalLaunch).toHaveBeenCalled()
-    expect(workspace.selectedContexts).toEqual([{ id: 'prod', kind: 'hosts', label: '10.0.0.1', detail: 'prod-bastion' }])
+    expect(workspace.selectedContexts).toEqual([{
+      id: 'prod',
+      kind: 'hosts',
+      label: 'prod-bastion',
+      detail: '10.0.0.1',
+      assetId: 'prod',
+      host: '10.0.0.1',
+      port: 22,
+      username: 'ops',
+      assetName: 'prod-bastion'
+    }])
     expect(workspace.updateWorkspacePreferences).toHaveBeenCalledWith({ recentAssetIds: ['prod', 'previous'] })
 
     await runtime.toggleFavorite()

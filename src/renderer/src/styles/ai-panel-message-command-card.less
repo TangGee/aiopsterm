@@ -56,6 +56,22 @@
   background: var(--theme-module-active-accent);
 }
 
+.app-shell.has-app-background .message-command-actions button.primary {
+  color: var(--theme-module-active-panel-bg);
+  background: var(--theme-module-active-accent);
+}
+
+.message-command-actions button.primary:not(:disabled):hover {
+  border-color: var(--theme-module-active-accent);
+  background: color-mix(in srgb, var(--theme-module-active-accent) 86%, var(--theme-module-active-text));
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--theme-module-active-accent) 18%, transparent);
+}
+
+.message-command-actions button.primary:not(:disabled):active {
+  transform: translateY(1px);
+  box-shadow: none;
+}
+
 .message-command-actions button.secondary.success {
   flex: 1.4 1 128px;
 }
@@ -85,6 +101,20 @@
 .message-command-actions button:disabled {
   opacity: 0.68;
   cursor: wait;
+}
+
+.message-command-actions button.primary:disabled,
+.app-shell.has-app-background .message-command-actions button.primary:disabled {
+  opacity: 1;
+  cursor: not-allowed;
+  color: color-mix(in srgb, var(--theme-module-active-text-muted) 72%, var(--theme-module-active-panel-bg));
+  border-color: color-mix(in srgb, var(--theme-module-active-text-muted) 22%, var(--theme-module-active-border));
+  background: color-mix(in srgb, var(--theme-module-active-text-muted) 8%, var(--theme-module-active-card-strong-bg));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--theme-module-active-text-muted) 5%, transparent);
+}
+
+.message-command-actions button.primary:disabled svg {
+  opacity: 0.55;
 }
 
 .message-command-card {

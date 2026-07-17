@@ -45,6 +45,8 @@ extraResources:
     to: aiopsterm-control.js
   - from: build/cline-sidecar
     to: cline-sidecar
+  - from: docs/usage/best-practices
+    to: docs/best-practices
 asar: true
 npmRebuild: false
 afterPack: scripts/prune-packaged-native-modules.mjs

@@ -65,7 +65,7 @@ import {
   jumpserverKubernetesSyncUnavailableMessage
 } from './kubernetesJumpserverRuntime'
 import { createKubernetesCommandRuntime } from './kubernetesCommandRuntime'
-import { createKubernetesTerminalRuntime } from './kubernetesTerminalRuntime'
+import { createKubernetesTerminalRuntime, type KubernetesPtySpawner } from './kubernetesTerminalRuntime'
 import { createKubernetesClusterRuntime } from './kubernetesClusterRuntime'
 import { shouldUseKubernetesSeedData as runtimeShouldUseKubernetesSeedData } from './runtimeSwitches'
 
@@ -76,6 +76,8 @@ type KubernetesBackendRuntimeConfig = {
   useSeedData?: boolean
   defaultKubeconfigPath?: string | null
   refreshOrganizationAssets?: (input: { organizationId?: string }) => AiopsOrganizationAssetRefreshResult | Promise<AiopsOrganizationAssetRefreshResult>
+  /** 测试注入用;null 时终端会话使用 node-pty 默认实现。 */
+  spawnKubernetesTerminalPty?: KubernetesPtySpawner | null
 }
 
 const defaultKubernetesStateDir = () => {
@@ -91,7 +93,8 @@ let runtimeConfig: Required<KubernetesBackendRuntimeConfig> = {
   defaultKubeconfigPath: join(homedir(), '.kube', 'config'),
   refreshOrganizationAssets: () => {
     throw Object.assign(new Error(jumpserverKubernetesSyncUnavailableMessage), { code: 'K8S_BASTION_SYNC_UNAVAILABLE' })
-  }
+  },
+  spawnKubernetesTerminalPty: null
 }
 
 const shouldUseKubernetesSeedData = () => runtimeConfig.useSeedData
@@ -225,7 +228,8 @@ const persistKubernetesCatalogState = () => {
     mkdirSync(runtimeConfig.stateDir, { recursive: true })
     const filePath = kubernetesCatalogStatePath()
     const tempPath = `${filePath}.${process.pid}.${Date.now()}.tmp`
-    writeFileSync(tempPath, JSON.stringify(state, null, 2), 'utf-8')
+    // catalog.json 内含 kubeconfig 凭据(client key/token),必须与 kubeconfig 同级的 0600 权限。
+    writeFileSync(tempPath, JSON.stringify(state, null, 2), { encoding: 'utf-8', mode: 0o600 })
     renameSync(tempPath, filePath)
   } catch {
     /* Persistence must not turn a successful Kubernetes API action into a UI failure. */
@@ -248,7 +252,8 @@ export const configureKubernetesBackendRuntime = (config: KubernetesBackendRunti
       config.refreshOrganizationAssets ||
       (() => {
         throw jumpserverKubernetesSyncUnavailableError()
-      })
+      }),
+    spawnKubernetesTerminalPty: config.spawnKubernetesTerminalPty || null
   }
   agentProxyRuntime.reset()
   terminalSessions = []
@@ -332,9 +337,9 @@ const clusterRuntime = createKubernetesClusterRuntime({
   setImportContexts: (nextImportContexts) => {
     importContexts = nextImportContexts
   },
-  terminalSessions: () => terminalSessions,
-  setTerminalSessions: (sessions) => {
-    terminalSessions = sessions
+  activateClusterTerminalSessions: (clusterId) => terminalRuntime.activateClusterSessions(clusterId),
+  disposeClusterTerminalSessions: (clusterId) => {
+    terminalRuntime.disposeClusterSessions(clusterId)
   },
   ensureCatalogStateLoaded: ensureKubernetesCatalogStateLoaded,
   cloneCatalog,
@@ -363,6 +368,9 @@ const terminalRuntime = createKubernetesTerminalRuntime({
     clusterRuntime.markClusterRuntimeError(cluster, errorMessage)
   },
   executeKubernetesCommand: (input) => executeKubernetesCommand(input),
+  expandHomePath,
+  loadAgentProxyConfig,
+  spawnPty: () => runtimeConfig.spawnKubernetesTerminalPty,
   persistCatalogState: persistKubernetesCatalogState,
   nowLabel
 })

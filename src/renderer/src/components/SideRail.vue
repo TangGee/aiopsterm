@@ -2,10 +2,19 @@
   <aside class="side-rail">
     <nav class="rail-main">
       <button
+        class="rail-button"
+        :class="{ active: workspace.mode === 'agents' }"
+        :title="t('module.agents')"
+        data-testid="agents-mode-entry"
+        @click="openAgentsMode"
+      >
+        <MessageSquareCode />
+      </button>
+      <button
         v-for="item in mainItems"
         :key="item.key"
         class="rail-button"
-        :class="{ active: workspace.activeModule === item.key }"
+        :class="{ active: workspace.mode === 'terminal' && workspace.activeModule === item.key }"
         :data-module-key="item.key"
         :data-onboarding-id="
           item.key === 'assets'
@@ -15,7 +24,7 @@
               : undefined
         "
         :title="t(item.labelKey)"
-        @click="workspace.setActiveModule(item.key)"
+        @click="openModule(item.key)"
       >
         <component :is="item.icon" />
       </button>
@@ -28,10 +37,13 @@
         <button
           v-if="item.key === 'user'"
           class="rail-button user-rail-trigger"
-          :class="{ active: workspace.activeModule === item.key, 'has-avatar': !workspace.userProfile.skippedLogin }"
+          :class="{
+            active: workspace.mode === 'terminal' && workspace.activeModule === item.key,
+            'has-avatar': !workspace.userProfile.skippedLogin
+          }"
           :data-module-key="item.key"
           :title="t(item.labelKey)"
-          @click.stop="userMenuOpen = !userMenuOpen"
+          @click.stop="toggleUserMenu"
         >
           <span
             v-if="!workspace.userProfile.skippedLogin"
@@ -48,7 +60,7 @@
         <button
           v-else
           class="rail-button"
-          :class="{ active: workspace.activeModule === item.key }"
+          :class="{ active: workspace.mode === 'terminal' && workspace.activeModule === item.key }"
           :data-module-key="item.key"
           :data-onboarding-id="item.key === 'settings' ? 'setting-entry' : undefined"
           :title="t(item.labelKey)"
@@ -93,7 +105,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { Gauge, LogIn, LogOut, User } from 'lucide-vue-next'
+import { Gauge, LogIn, LogOut, MessageSquareCode, User } from 'lucide-vue-next'
 import { menuItems, type ModuleKey } from '@/config/navigation'
 import { useI18n } from '@/i18n'
 import { useWorkspaceStore } from '@/stores/workspace'
@@ -110,9 +122,29 @@ const isVipUser = computed(() => {
   return new Date(profile.subscriptionExpiresAt) > new Date()
 })
 
-const openModule = (key: ModuleKey) => {
+const enterTerminalMode = async () => {
+  if (workspace.mode === 'terminal') return true
+  return workspace.toggleMode()
+}
+
+const openAgentsMode = async () => {
   userMenuOpen.value = false
+  if (workspace.mode === 'agents') {
+    if (!workspace.agentsLeftOpen) await workspace.toggleLeft()
+    return
+  }
+  await workspace.toggleMode()
+}
+
+const openModule = async (key: ModuleKey) => {
+  userMenuOpen.value = false
+  if (!(await enterTerminalMode())) return
   workspace.setActiveModule(key)
+}
+
+const toggleUserMenu = async () => {
+  if (!(await enterTerminalMode())) return
+  userMenuOpen.value = !userMenuOpen.value
 }
 
 const login = () => {

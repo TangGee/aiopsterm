@@ -26,6 +26,7 @@ const command = (input: Partial<AiCommandCatalogOption> & Pick<AiCommandCatalogO
 const createHarness = (overrides: Partial<AiPanelContextCommandRuntimeOptions> = {}) => {
   const state = {
     contextTarget: 'main' as 'main' | 'edit',
+    contextLevel: 'main' as 'main' | AiContextOption['kind'],
     commandTarget: 'main' as 'main' | 'edit',
     editingMessageId: null as string | null,
     draft: 'deploy /',
@@ -51,6 +52,7 @@ const createHarness = (overrides: Partial<AiPanelContextCommandRuntimeOptions> =
   const runtime = createAiPanelContextCommandRuntime({
     maxHostContexts: 2,
     contextTarget: () => state.contextTarget,
+    contextLevel: () => state.contextLevel,
     commandTarget: () => state.commandTarget,
     editingMessageId: () => state.editingMessageId,
     draft: () => state.draft,
@@ -141,14 +143,20 @@ describe('aiPanelContextCommandRuntime', () => {
 
     runtime.applyContext(dir)
     expect(calls.enteredDocs).toEqual(['dir'])
+    expect(calls.closedContext).toEqual([])
 
     runtime.applyContext(prod)
     expect(calls.removedMainTokens).toEqual(['@'])
     expect(state.mainContexts.map((context) => context.id)).toEqual(['prod'])
-    expect(calls.closedContext).toEqual([])
+    expect(calls.closedContext).toEqual([{ restoreFocus: true }])
+
+    state.contextLevel = 'hosts'
+    runtime.applyContext(prod)
+    expect(state.mainContexts).toEqual([])
+    expect(calls.closedContext).toHaveLength(1)
 
     runtime.applyContext(runbook)
-    expect(state.mainContexts.map((context) => context.id)).toEqual(['prod', 'runbook'])
+    expect(state.mainContexts.map((context) => context.id)).toEqual(['runbook'])
     expect(calls.closedContext.at(-1)).toEqual({ restoreFocus: true })
 
     state.contextTarget = 'edit'

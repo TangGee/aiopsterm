@@ -438,7 +438,6 @@ vi.mock('mermaid', () => ({
   }
 }))
 import AppShell from '@/components/AppShell.vue'
-import AgentsSidebar from '@/components/AgentsSidebar.vue'
 import AiPanel from '@/components/AiPanel.vue'
 import TopBar from '@/components/TopBar.vue'
 import SideRail from '@/components/SideRail.vue'
@@ -523,7 +522,7 @@ const mountAiPanelWithModels = async (pinia: ReturnType<typeof createPinia>) => 
 }
 
 const switchAiPanelToClassic = async (wrapper: VueWrapper<any>) => {
-  if (wrapper.find('[data-testid="ai-panel-mode-open"]').text().includes('Classic Chat')) return
+  if (wrapper.find('[data-testid="ai-panel-mode-open"]').attributes('title')?.includes('Classic Chat')) return
   await wrapper.find('[data-testid="ai-panel-mode-open"]').trigger('click')
   const classicModeButton = wrapper.find('[data-testid="ai-mode-classic"]')
   if (!classicModeButton.exists()) return
@@ -761,6 +760,11 @@ const waitForAnimationFrames = async (count = 1) => {
   }
 }
 
+const resetTestAnimationFrame = () => {
+  window.requestAnimationFrame = (callback) => window.setTimeout(() => callback(window.performance.now()), 0)
+  window.cancelAnimationFrame = (handle) => window.clearTimeout(handle)
+}
+
 const withMockExecCommand = async <T>(handler: () => boolean, callback: (execCommandSpy: ReturnType<typeof vi.fn>) => Promise<T>) => {
   const originalExecCommand = document.execCommand
   const execCommandSpy = vi.fn(handler)
@@ -869,6 +873,7 @@ let restoreMockVoiceRecorder: (() => void) | undefined
 describe('AppShell', () => {
   beforeEach(() => {
     vi.useRealTimers()
+    resetTestAnimationFrame()
     vi.clearAllMocks()
     window.localStorage.removeItem('aiopsterm.aiPanelMode')
     restoreMockVoiceRecorder = installMockVoiceRecorder()
@@ -881,6 +886,7 @@ describe('AppShell', () => {
     ;(globalThis as any).__resetExtensionPluginStoreMock?.()
     ;(globalThis as any).__resetFileEntriesMock?.()
     ;(globalThis as any).__resetChatHistoryStoreMock?.()
+    ;(globalThis as any).__closeProductSessionsMock?.()
     ;(globalThis as any).__resetAiTodoSnapshotMock?.()
     ;(globalThis as any).__resetUserAccountStoreMock?.()
     ;(globalThis as any).__resetSkillsStoreMock?.()
@@ -914,12 +920,12 @@ describe('AppShell', () => {
     expect(wrapper.text()).toContain('直接连接')
     expect(wrapper.text()).toContain('堡垒机资源')
     expect(wrapper.text()).toContain('prod-bastion')
-    expect(wrapper.find('.ai-header h2').text()).toBe('AI')
+    expect(wrapper.find('.ai-header h2').exists()).toBe(false)
     expect(wrapper.find('[data-testid="ai-codex-shell"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="ai-panel-mode-open"]').text()).toContain('Codex CLI')
+    expect(wrapper.find('[data-testid="ai-panel-mode-open"]').attributes('title')).toContain('Codex CLI')
     expect(wrapper.find('[data-testid="ai-codex-target-bar"]').text()).toContain('未绑定终端')
     expect(wrapper.find('.ai-codex-xterm-stack').classes()).toContain('is-empty')
-    expect(wrapper.find('[data-testid="ai-codex-xterm"]').classes()).toContain('is-empty')
+    expect(wrapper.find('[data-testid="ai-codex-xterm"]').exists()).toBe(false)
     expect(window.aiops.createCodexSession).not.toHaveBeenCalled()
     expect(mockXtermInstances.some((terminal) => terminal.debugInfo?.().surface === 'codex')).toBe(false)
     expect(wrapper.text()).toContain('切换布局')
@@ -966,6 +972,25 @@ describe('AppShell', () => {
 
     expect(wrapper.find('.terminal-workspace').exists()).toBe(true)
     expect(wrapper.find('.terminal-workspace').isVisible()).toBe(true)
+    const terminalWorkspaceElement = wrapper.find('.terminal-workspace').element
+    const aiPanelElement = wrapper.find('.ai-panel').element
+
+    store.mode = 'agents'
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="agents-mode-entry"]').classes()).toContain('active')
+    expect(wrapper.find('[data-layout-pane="agents-left"]').exists()).toBe(true)
+    expect(wrapper.find('[data-layout-pane="agents-right"]').exists()).toBe(true)
+    expect(wrapper.find('.terminal-workspace').isVisible()).toBe(true)
+    expect(wrapper.find('.terminal-workspace').element === terminalWorkspaceElement).toBe(true)
+    expect(wrapper.find('.ai-panel').element === aiPanelElement).toBe(true)
+    expect(wrapper.findComponent(AiPanel).props('agentMode')).toBe(true)
+
+    store.mode = 'terminal'
+    await flushPromises()
+    expect(wrapper.find('.terminal-workspace').element === terminalWorkspaceElement).toBe(true)
+    expect(wrapper.find('.ai-panel').element === aiPanelElement).toBe(true)
+    expect(wrapper.findComponent(AiPanel).props('agentMode')).toBe(false)
 
     store.setActiveModule('settings')
     await flushPromises()
@@ -1712,7 +1737,7 @@ describe('AppShell', () => {
     await wrapper.vm.$nextTick()
 
     expect(wrapper.find('[data-testid="ai-codex-shell"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="ai-panel-mode-open"]').text()).toContain('Codex CLI')
+    expect(wrapper.find('[data-testid="ai-panel-mode-open"]').attributes('title')).toContain('Codex CLI')
     expect(window.aiops.createCodexSession).not.toHaveBeenCalled()
     expect(wrapper.find('[data-testid="ai-codex-target-bar"]').text()).toContain('未绑定终端')
     expect(window.aiops.listChatConversations).not.toHaveBeenCalled()
@@ -1726,6 +1751,14 @@ describe('AppShell', () => {
     await wrapper.vm.$nextTick()
     expect(wrapper.find('[data-testid="ai-codex-target-bar"]').classes()).toContain('picker-open')
     expect(wrapper.find('[data-testid="ai-codex-target-picker"]').exists()).toBe(true)
+    await wrapper.find('[data-testid="ai-more-actions-open"]').trigger('click')
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('[data-testid="ai-codex-target-picker"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="ai-more-actions-menu"]').exists()).toBe(true)
+    await wrapper.find('[data-testid="ai-more-actions-open"]').trigger('click')
+    await wrapper.find('[data-testid="ai-codex-bind-open"]').trigger('click')
+    await flushPromises()
+    await wrapper.vm.$nextTick()
     await wrapper.find('[data-testid="ai-codex-bind-current"]').trigger('click')
     await flushPromises()
     await wrapper.vm.$nextTick()
@@ -1735,7 +1768,6 @@ describe('AppShell', () => {
     expect(codexTerminal.debugInfo?.().surface).toBe('codex')
     const codexHost = wrapper.find('[data-testid="ai-codex-xterm"]')
     expect(codexHost.classes()).toContain('threaded-terminal-host')
-    expect(codexHost.classes()).not.toContain('is-empty')
     expect(codexTerminal.options.termName).toBe('xterm-256color')
     const codexTerminalFont = '"Liberation Mono", "DejaVu Sans Mono", "Noto Sans Mono", monospace'
     await expect(
@@ -1778,7 +1810,7 @@ describe('AppShell', () => {
     await flushPromises()
     await wrapper.vm.$nextTick()
 
-    expect(wrapper.find('[data-testid="ai-panel-mode-open"]').text()).toContain('Classic Chat')
+    expect(wrapper.find('[data-testid="ai-panel-mode-open"]').attributes('title')).toContain('Classic Chat')
     expect(wrapper.find('[data-testid="ai-message-input"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="ai-new-chat"]').exists()).toBe(true)
     expect(window.aiops.listChatConversations).toHaveBeenCalled()
@@ -1801,7 +1833,7 @@ describe('AppShell', () => {
     await flushPromises()
     await wrapper.vm.$nextTick()
 
-    expect(wrapper.find('[data-testid="ai-panel-mode-open"]').text()).toContain('Classic Chat')
+    expect(wrapper.find('[data-testid="ai-panel-mode-open"]').attributes('title')).toContain('Classic Chat')
     expect(wrapper.find('[data-testid="ai-message-input"]').exists()).toBe(true)
     expect(window.aiops.createCodexSession).not.toHaveBeenCalled()
 
@@ -1877,7 +1909,59 @@ describe('AppShell', () => {
     expect(store.activePanelId).toBe(firstPanelId)
   })
 
-  it('keeps Codex target changes hidden and replaces pending target context before user input', async () => {
+  it('keeps Codex binding responsive when safe mode disables the threaded terminal', async () => {
+    const runtimeEnv = ((globalThis as {
+      __AIOPSTERM_RUNTIME_ENV__?: Record<string, string | undefined>
+    }).__AIOPSTERM_RUNTIME_ENV__ ||= {})
+    const previousThreadedTerminal = runtimeEnv.AIOPSTERM_THREADED_TERMINAL
+    runtimeEnv.AIOPSTERM_THREADED_TERMINAL = '0'
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const store = useWorkspaceStore()
+    store.activePanel.sessionId = 'terminal-safe-mode'
+    store.activePanel.cwd = '/root'
+    store.registerSshSession(store.activePanelId, {
+      id: 'asset-safe-mode',
+      name: 'safe-mode-host',
+      host: '10.0.0.30',
+      port: 22,
+      username: 'root'
+    })
+    vi.mocked(window.aiops.createCodexSession).mockClear()
+    vi.mocked(window.aiops.writeRuntimeLog!).mockClear()
+    const wrapper = mount(AiPanel, {
+      attachTo: document.body,
+      props: { agentMode: true },
+      global: { plugins: [pinia] }
+    })
+
+    try {
+      await flushPromises()
+      await wrapper.find('[data-testid="ai-codex-bind-open"]').trigger('click')
+      await wrapper.find('[data-testid="ai-codex-bind-current"]').trigger('click')
+      await flushPromises()
+      await wrapper.vm.$nextTick()
+
+      expect(wrapper.find('[data-testid="ai-codex-target-picker"]').exists()).toBe(false)
+      expect(wrapper.find('[data-testid="ai-codex-target-bar"]').text()).toContain('safe-mode-host')
+      expect(wrapper.find('[data-testid="ai-codex-error"]').exists()).toBe(true)
+      expect(store.aiAttentionUnreadCount).toBe(1)
+      expect(window.aiops.createCodexSession).not.toHaveBeenCalled()
+      expect(vi.mocked(window.aiops.writeRuntimeLog!).mock.calls.filter(([, event]) =>
+        event === 'renderer.codex-threaded-terminal.required'
+      )).toHaveLength(1)
+
+      await wrapper.find('[data-testid="ai-codex-target-change"]').trigger('click')
+      await wrapper.vm.$nextTick()
+      expect(wrapper.find('[data-testid="ai-codex-target-picker"]').exists()).toBe(true)
+    } finally {
+      wrapper.unmount()
+      if (previousThreadedTerminal === undefined) delete runtimeEnv.AIOPSTERM_THREADED_TERMINAL
+      else runtimeEnv.AIOPSTERM_THREADED_TERMINAL = previousThreadedTerminal
+    }
+  })
+
+  it('rotates Codex product sessions when the stable target changes without writing context to the old runtime', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     const store = useWorkspaceStore()
@@ -1917,8 +2001,12 @@ describe('AppShell', () => {
     await wrapper.find('[data-testid="ai-codex-bind-current"]').trigger('click')
     await flushPromises()
     await wrapper.vm.$nextTick()
+    const initialProductSessionId = vi.mocked(window.aiops.createCodexSession).mock.calls.at(-1)?.[0]?.productSessionId
     vi.mocked(window.aiops.setCodexSessionPendingContext).mockClear()
     vi.mocked(window.aiops.writeCodexSession).mockClear()
+    vi.mocked(window.aiops.createCodexSession).mockClear()
+    vi.mocked(window.aiops.closeProductSession).mockClear()
+    vi.mocked(window.aiops.killCodexSession).mockClear()
 
     store.activePanelId = secondPanel.id
     await wrapper.find('[data-testid="ai-codex-target-change"]').trigger('click')
@@ -1937,10 +2025,21 @@ describe('AppShell', () => {
     await wrapper.vm.$nextTick()
 
     expect(window.aiops.writeCodexSession).not.toHaveBeenCalledWith(expect.any(String), expect.stringContaining('[aiopsterm target changed]'))
-    const pendingCalls = vi.mocked(window.aiops.setCodexSessionPendingContext).mock.calls
-    expect(pendingCalls.length).toBe(2)
-    expect(pendingCalls[0]?.[1]).toContain('Current target: second-host')
-    expect(pendingCalls.at(-1)?.[1]).toBe('')
+    expect(window.aiops.setCodexSessionPendingContext).not.toHaveBeenCalled()
+    expect(window.aiops.closeProductSession).toHaveBeenCalledTimes(2)
+    expect(window.aiops.killCodexSession).toHaveBeenCalledTimes(2)
+    expect(window.aiops.createCodexSession).toHaveBeenCalledTimes(2)
+    const rotatedCalls = vi.mocked(window.aiops.createCodexSession).mock.calls.map(([input]) => input)
+    expect(rotatedCalls[0]).toEqual(expect.objectContaining({
+      target: expect.objectContaining({ sessionId: 'terminal-second', host: '10.0.0.20' }),
+      projectRoot: '/srv/app'
+    }))
+    expect(rotatedCalls[1]).toEqual(expect.objectContaining({
+      target: expect.objectContaining({ sessionId: 'terminal-first', host: '10.0.0.10' }),
+      projectRoot: '/root'
+    }))
+    const rotatedProductSessionIds = rotatedCalls.map((input) => input?.productSessionId)
+    expect(new Set([initialProductSessionId, ...rotatedProductSessionIds]).size).toBe(3)
   })
 
   it('registers failed Codex sessions as global AI attention items and focuses them on jump', async () => {
@@ -1982,7 +2081,7 @@ describe('AppShell', () => {
     expect(jumped?.id).toBe(store.currentAiAttentionItem?.id)
     expect(store.mode).toBe('terminal')
     expect(store.rightPanelOpen).toBe(true)
-    expect(wrapper.find('[data-testid="ai-panel-mode-open"]').text()).toContain('Codex CLI')
+    expect(wrapper.find('[data-testid="ai-panel-mode-open"]').attributes('title')).toContain('Codex CLI')
     expect(store.topNotice).toContain('已定位到')
 
     wrapper.unmount()
@@ -2019,9 +2118,20 @@ describe('AppShell', () => {
     await flushPromises()
     await wrapper.vm.$nextTick()
 
-    expect(wrapper.findAll('[data-testid="ai-codex-tab"]')).toHaveLength(2)
+    const codexTabs = wrapper.findAll('[data-testid="ai-codex-tab"]')
+    expect(codexTabs).toHaveLength(2)
+    expect(codexTabs[0].classes()).not.toContain('active')
+    expect(codexTabs[0].attributes('aria-selected')).toBe('false')
+    expect(codexTabs[1].classes()).toContain('active')
+    expect(codexTabs[1].attributes('aria-selected')).toBe('true')
     expect(wrapper.find('[data-testid="ai-codex-tabs"]').exists()).toBe(true)
-    expect(window.aiops.createCodexSession).toHaveBeenCalledTimes(2)
+    expect(wrapper.find('[data-testid="ai-codex-target-bar"]').text()).toContain('未绑定终端')
+    expect(wrapper.find('[data-testid="ai-codex-target-bar"]').text()).not.toContain('main-host')
+    const codexTerminals = wrapper.findAll('[data-testid="ai-codex-xterm"]')
+    expect(codexTerminals).toHaveLength(2)
+    expect(codexTerminals[0].isVisible()).toBe(false)
+    expect(codexTerminals[1].isVisible()).toBe(true)
+    expect(window.aiops.createCodexSession).toHaveBeenCalledTimes(1)
   })
 
   it('opens a new terminal when binding Codex CLI from the host picker', async () => {
@@ -2061,6 +2171,9 @@ describe('AppShell', () => {
         })
       })
     )
+    expect(wrapper.find('.ai-codex-status').text()).toContain('Codex CLI 已连接')
+    expect(wrapper.find('.ai-codex-xterm-stack').classes()).not.toContain('is-empty')
+    expect(wrapper.find('[data-testid="ai-codex-xterm"]').classes()).not.toContain('is-empty')
     expect(wrapper.find('[data-testid="ai-codex-target-bar"]').text()).not.toContain('未绑定终端')
   })
 
@@ -2254,7 +2367,8 @@ describe('AppShell', () => {
     await flushPromises()
     await wrapper.vm.$nextTick()
     await switchAiPanelToClassic(wrapper)
-    expect(wrapper.find('.ai-header h2').text()).toBe('AI')
+    expect(wrapper.find('.ai-header h2').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="ai-panel-mode-open"]').attributes('title')).toContain('Classic Chat')
     expect(wrapper.find('[data-testid="ai-new-chat"]').attributes('title')).toBe('New chat')
     expect(wrapper.find('[data-onboarding-id="ai-input-editable"]').attributes('data-placeholder')).toBe('Describe your operations goal')
     expect(wrapper.text()).toContain('chat with AI')
@@ -2611,7 +2725,7 @@ describe('AppShell', () => {
     wrapper.unmount()
   })
 
-  it('persists External reference-style layout pane resizing and quick-close through backend config snapshots', async () => {
+  it('persists shell pane resizing while keeping the Agents AI pane open', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     const wrapper = mount(AppShell, {
@@ -2629,12 +2743,16 @@ describe('AppShell', () => {
 
     const leftPane = () => wrapper.find('[data-layout-pane="terminal-left"]')
     const rightPane = () => wrapper.find('[data-layout-pane="terminal-right"]')
+    const agentsRightPane = () => wrapper.find('[data-layout-pane="agents-right"]')
     const agentsPane = () => wrapper.find('[data-layout-pane="agents-left"]')
     const leftResizer = () => wrapper.find('[data-layout-resizer="terminal-left"]')
     const rightResizer = () => wrapper.find('[data-layout-resizer="terminal-right"]')
+    const agentsRightResizer = () => wrapper.find('[data-layout-resizer="agents-right"]')
     const agentsResizer = () => wrapper.find('[data-layout-resizer="agents-left"]')
     const styles = appStyles()
     expect(styles).toContain('.layout-pane-right > .layout-resizer-right')
+    expect(styles).toContain('.mode-agents .layout-pane-right')
+    expect(styles).toContain('grid-template-columns: 48px auto 6px minmax(0, 1fr) 6px auto;')
     expect(styles).toContain('left: -10px;')
     expect(styles).toContain('width: 14px;')
 
@@ -2660,6 +2778,8 @@ describe('AppShell', () => {
     await flushPromises()
     expect(store.mode).toBe('agents')
     expect(agentsPane().attributes('style')).toContain('286px')
+    expect(agentsRightPane().attributes('style')).toContain('360px')
+    expect(store.rightPanelOpen).toBe(false)
     await agentsResizer().trigger('mousedown', { clientX: 286 })
     window.dispatchEvent(new MouseEvent('mousemove', { clientX: 386 }))
     await wrapper.vm.$nextTick()
@@ -2669,10 +2789,21 @@ describe('AppShell', () => {
     expect(window.aiops.saveConfig).toHaveBeenLastCalledWith({ agentsLeftOpen: true, agentsLeftWidth: 386 })
     expect(store.agentsLeftWidth).toBe(386)
 
+    await agentsRightResizer().trigger('mousedown', { clientX: 840 })
+    window.dispatchEvent(new MouseEvent('mousemove', { clientX: 1170 }))
+    await wrapper.vm.$nextTick()
+    expect(agentsRightPane().attributes('style')).toContain('220px')
+    expect(agentsRightPane().exists()).toBe(true)
+    window.dispatchEvent(new MouseEvent('mouseup'))
+    await flushPromises()
+    expect(window.aiops.saveConfig).toHaveBeenLastCalledWith({ rightPanelWidth: 220 })
+    expect(store.rightPanelOpen).toBe(false)
+    expect(store.rightPanelWidth).toBe(220)
+
     wrapper.unmount()
   })
 
-  it('matches External reference-style top layout controls for modes, sidebars, update badge, and window controls', async () => {
+  it('keeps mode selection out of the TopBar while retaining pane, update, and window controls', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     const wrapper = mount(TopBar, {
@@ -2682,7 +2813,7 @@ describe('AppShell', () => {
     await wrapper.vm.$nextTick()
 
     expect(wrapper.attributes('data-onboarding-id')).toBe('top-layout-controls')
-    expect(wrapper.findAll('.mode-button')).toHaveLength(1)
+    expect(wrapper.findAll('.mode-button')).toHaveLength(0)
     expect(wrapper.find('.right-ai-toggle').attributes('data-onboarding-id')).toBe('right-ai-toggle')
     expect(wrapper.find('[data-testid="ai-attention-bell"]').exists()).toBe(true)
     expect(wrapper.find('.top-left [data-testid="ai-attention-bell"]').exists()).toBe(true)
@@ -2690,8 +2821,8 @@ describe('AppShell', () => {
     expect(wrapper.find('[data-testid="ai-attention-count"]').exists()).toBe(false)
     expect(wrapper.text()).toContain('本地版本')
 
-    await wrapper.find('.mode-button').trigger('click')
-    await flushPromises()
+    store.mode = 'agents'
+    await wrapper.vm.$nextTick()
     expect(store.mode).toBe('agents')
     expect(wrapper.find('.right-ai-toggle').exists()).toBe(false)
 
@@ -2699,8 +2830,8 @@ describe('AppShell', () => {
     await flushPromises()
     expect(store.agentsLeftOpen).toBe(false)
 
-    await wrapper.find('.mode-button').trigger('click')
-    await flushPromises()
+    store.mode = 'terminal'
+    await wrapper.vm.$nextTick()
     expect(store.mode).toBe('terminal')
     await wrapper.find('.right-ai-toggle').trigger('click')
     await flushPromises()
@@ -2708,6 +2839,47 @@ describe('AppShell', () => {
 
     await wrapper.find('.window-control-button').trigger('click')
     expect(window.aiops.minimizeWindow).toHaveBeenCalled()
+  })
+
+  it('uses a single SideRail Agents entry and exits Agents through normal modules', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const wrapper = mount(SideRail, withTeleportStub({
+      global: { plugins: [pinia] }
+    }))
+    const store = useWorkspaceStore()
+    store.mode = 'terminal'
+    store.agentsLeftOpen = false
+    await wrapper.vm.$nextTick()
+
+    const agentsEntry = wrapper.find('[data-testid="agents-mode-entry"]')
+    expect(agentsEntry.exists()).toBe(true)
+    expect(agentsEntry.attributes('title')).toBe('Agents')
+    expect(wrapper.find('[data-module-key="workspace"]').classes()).toContain('active')
+
+    await agentsEntry.trigger('click')
+    await flushPromises()
+    expect(store.mode).toBe('agents')
+    expect(store.agentsLeftOpen).toBe(true)
+    expect(agentsEntry.classes()).toContain('active')
+    expect(wrapper.findAll('.rail-button.active')).toHaveLength(1)
+    expect(wrapper.find('[data-module-key="workspace"]').classes()).not.toContain('active')
+
+    await wrapper.find('[data-module-key="workspace"]').trigger('click')
+    await flushPromises()
+    expect(store.mode).toBe('terminal')
+    expect(store.activeModule).toBe('workspace')
+    expect(wrapper.find('[data-module-key="workspace"]').classes()).toContain('active')
+    expect(agentsEntry.classes()).not.toContain('active')
+
+    await agentsEntry.trigger('click')
+    await flushPromises()
+    await wrapper.find('[data-module-key="settings"]').trigger('click')
+    await flushPromises()
+    expect(store.mode).toBe('terminal')
+    expect(store.activeModule).toBe('settings')
+
+    wrapper.unmount()
   })
 
   it('shows the AI attention badge and routes the bell click through the workspace store', async () => {
@@ -2848,7 +3020,7 @@ describe('AppShell', () => {
     expect(window.aiops.setBadgeCount).toHaveBeenLastCalledWith(0)
   })
 
-  it('does not fabricate top layout changes when config persistence is unavailable or malformed', async () => {
+  it('does not fabricate persisted layout changes when config persistence is unavailable or malformed', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     const wrapper = mount(TopBar, {
@@ -2863,8 +3035,7 @@ describe('AppShell', () => {
         ...store.config,
         defaultMode: 'terminal'
       })
-      await wrapper.find('.mode-button').trigger('click')
-      await flushPromises()
+      await store.toggleMode()
       expect(store.mode).toBe('terminal')
       expect(store.topNotice).toBe('布局设置保存失败')
 
@@ -2872,8 +3043,7 @@ describe('AppShell', () => {
         ...store.config,
         defaultMode: 'agents'
       })
-      await wrapper.find('.mode-button').trigger('click')
-      await flushPromises()
+      await store.toggleMode()
       expect(store.mode).toBe('agents')
 
       ;(window.aiops as any).saveConfig = undefined
@@ -3814,6 +3984,24 @@ describe('AppShell', () => {
     expect(wrapper.findAll('.workspace-host-row').some((row) => row.text().includes('127.0.0.1'))).toBe(false)
   })
 
+  it('does not rehydrate global layout mode when the Workspace panel mounts', async () => {
+    await window.aiops.saveConfig({ defaultMode: 'agents' })
+    vi.mocked(window.aiops.getConfig).mockClear()
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const store = useWorkspaceStore()
+    store.mode = 'terminal'
+
+    const wrapper = mountWorkspacePanel({
+      global: { plugins: [pinia] }
+    })
+    await flushPromises()
+
+    expect(window.aiops.getConfig).not.toHaveBeenCalled()
+    expect(store.mode).toBe('terminal')
+    wrapper.unmount()
+  })
+
   it('loads saved host passwords for Workspace edits and keeps them auditable before save', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
@@ -4395,6 +4583,8 @@ describe('AppShell', () => {
   it('starts Workspace SSH tunnels with External reference-style typed parameters from the modal', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
+    const store = useWorkspaceStore()
+    await store.hydrateConfig()
     const wrapper = mountWorkspacePanel({
       global: { plugins: [pinia] }
     })
@@ -4604,6 +4794,8 @@ describe('AppShell', () => {
     const malformedMessage = '资产服务返回数据无效'
     const pinia = createPinia()
     setActivePinia(pinia)
+    const store = useWorkspaceStore()
+    await store.hydrateConfig()
     const wrapper = mountWorkspacePanel({
       global: { plugins: [pinia] }
     })
@@ -4891,11 +5083,12 @@ describe('AppShell', () => {
   it('does not visually commit Workspace and Files resource tree preferences before config saves return matching snapshots', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
+    const store = useWorkspaceStore()
+    await store.hydrateConfig()
     const wrapper = mountWorkspacePanel({
       global: { plugins: [pinia] }
     })
     await flushPromises()
-    const store = useWorkspaceStore()
     const savedPreferences = () => ({
       showIpMode: store.workspacePreferences.showIpMode,
       expandedGroups: [...store.workspacePreferences.expandedGroups]
@@ -5637,151 +5830,206 @@ describe('AppShell', () => {
     }
   })
 
-  it('filters, selects, deletes, and creates agent conversations', async () => {
-    vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-06-04T12:00:00+08:00'))
+  it('restores every open Classic product session tab after the AI panel remounts', async () => {
+    const historyConversations = [
+      { id: 'classic-open-1', title: 'Open one', summary: '', updatedAt: 'Today', ts: 20, favorite: false },
+      { id: 'classic-open-2', title: 'Open two', summary: '', updatedAt: 'Today', ts: 10, favorite: false }
+    ]
+    ;(globalThis as any).__setChatHistoryStoreMock?.(historyConversations, {
+      'classic-open-1': [{ id: 'classic-open-1-user', role: 'user', text: 'first' }],
+      'classic-open-2': [{ id: 'classic-open-2-user', role: 'user', text: 'second' }]
+    }, 'classic-open-1')
+    vi.mocked(window.aiops.listProductSessions).mockResolvedValue({
+      ok: true,
+      data: {
+        sessions: historyConversations.map((conversation, index) => ({
+          id: conversation.id,
+          surface: 'classic' as const,
+          title: conversation.title,
+          isOpen: true,
+          createdAt: index + 1,
+          updatedAt: 20 - index
+        }))
+      }
+    })
+
     const pinia = createPinia()
     setActivePinia(pinia)
-    const wrapper = mount(AgentsSidebar, {
+    const mountPanel = async () => {
+      const mounted = await mountAiPanelWithModels(pinia)
+      await flushPromises()
+      return mounted.wrapper
+    }
+
+    const first = await mountPanel()
+    expect(first.findAll('[data-testid="ai-conversation-tab"]').map((tab) => tab.attributes('data-conversation-id'))).toEqual([
+      'classic-open-1',
+      'classic-open-2'
+    ])
+    first.unmount()
+
+    const remounted = await mountPanel()
+    expect(remounted.findAll('[data-testid="ai-conversation-tab"]').map((tab) => tab.attributes('data-conversation-id'))).toEqual([
+      'classic-open-1',
+      'classic-open-2'
+    ])
+    expect(window.aiops.listProductSessions).toHaveBeenCalledWith({ surface: 'classic', isOpen: true, limit: 200 })
+    remounted.unmount()
+  })
+
+  it('keeps Classic cold startup empty while slow catalogs hydrate', async () => {
+    const closedConversation = {
+      id: 'classic-cold-selected',
+      title: 'Previously selected',
+      summary: '',
+      updatedAt: 'Today',
+      ts: 20,
+      favorite: false
+    }
+    ;(globalThis as any).__setChatHistoryStoreMock?.(
+      [closedConversation],
+      { [closedConversation.id]: [{ id: 'cold-user', role: 'user', text: 'old message' }] },
+      closedConversation.id
+    )
+    vi.mocked(window.aiops.listProductSessions).mockResolvedValue({
+      ok: true,
+      data: {
+        sessions: [{
+          id: closedConversation.id,
+          surface: 'classic',
+          title: closedConversation.title,
+          isOpen: false,
+          createdAt: 1,
+          updatedAt: 2
+        }]
+      }
+    })
+    const originalListCommands = window.aiops.listAiCommandCatalog
+    let releaseCommands!: (value: Awaited<ReturnType<typeof originalListCommands>>) => void
+    const commandGate = new Promise<Awaited<ReturnType<typeof originalListCommands>>>((resolve) => {
+      releaseCommands = resolve
+    })
+    window.aiops.listAiCommandCatalog = vi.fn(() => commandGate)
+    window.localStorage.setItem('aiopsterm.aiPanelMode', 'classic')
+    vi.mocked(window.aiops.restoreChatConversation).mockClear()
+
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const store = useWorkspaceStore()
+    await enableCatalogModelOptions(store)
+    const wrapper = mount(AiPanel, {
+      attachTo: document.body,
+      props: { agentMode: true },
       global: { plugins: [pinia] }
     })
-    const store = useWorkspaceStore()
-    try {
-      const pagedConversations = Array.from({ length: 25 }, (_, index) => ({
-        id: `conv-page-${index + 1}`,
-        title: `分页会话 ${index + 1}`,
-        summary: `summary ${index + 1}`,
-        updatedAt: index === 0 ? '刚刚' : '今天',
-        ts: 10_000 - index,
-        ipAddress: index === 0 ? '10.0.0.1' : undefined
-      }))
-      ;(globalThis as any).__setChatHistoryStoreMock?.(pagedConversations)
-      store.conversations = pagedConversations
-      await wrapper.vm.$nextTick()
-      expect(wrapper.findAll('.conversation-item')).toHaveLength(20)
-      expect(wrapper.text()).toContain('分页会话 20')
-      expect(wrapper.text()).not.toContain('分页会话 21')
-      expect(wrapper.text()).not.toContain('summary 1')
+    await vi.waitFor(() => expect(window.aiops.listChatConversations).toHaveBeenCalled())
+    await wrapper.vm.$nextTick()
 
-      vi.mocked(window.aiops.listChatConversations).mockClear()
-      await wrapper.find('.load-more-btn').trigger('click')
-      await flushPromises()
-      await wrapper.vm.$nextTick()
-      expect(window.aiops.listChatConversations).toHaveBeenCalledTimes(1)
-      expect(wrapper.findAll('.conversation-item')).toHaveLength(25)
-      expect(wrapper.text()).toContain('分页会话 25')
-      expect(wrapper.find('.load-more-btn').exists()).toBe(false)
+    expect(store.selectedConversationId).toBe('')
+    expect(store.chatMessages).toEqual([])
+    expect(wrapper.findAll('[data-testid="ai-conversation-tab"]')).toHaveLength(0)
+    expect(window.aiops.restoreChatConversation).not.toHaveBeenCalled()
 
-      await wrapper.find('.agents-search input').setValue('conv-page-2')
-      await wrapper.vm.$nextTick()
-      expect(wrapper.findAll('.conversation-item')).toHaveLength(7)
-      expect(wrapper.find('.agents-search-clear').exists()).toBe(true)
-      expect(wrapper.text()).toContain('分页会话 2')
-      expect(wrapper.text()).toContain('分页会话 25')
-      expect(wrapper.text()).not.toContain('分页会话 1')
+    releaseCommands(await originalListCommands())
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+    expect(store.selectedConversationId).toBe('')
+    expect(wrapper.findAll('[data-testid="ai-conversation-tab"]')).toHaveLength(0)
 
-      await wrapper.find('.agents-search-clear').trigger('click')
-      await wrapper.vm.$nextTick()
-      expect((wrapper.find('.agents-search input').element as HTMLInputElement).value).toBe('')
-      expect(wrapper.find('.agents-search-clear').exists()).toBe(false)
-      expect(wrapper.findAll('.conversation-item')).toHaveLength(20)
-      expect(wrapper.text()).toContain('分页会话 20')
-      expect(wrapper.text()).not.toContain('分页会话 21')
+    wrapper.unmount()
+    window.aiops.listAiCommandCatalog = originalListCommands
+  })
 
-      const actionConversations = [
-        {
-          id: 'conv-1',
-          title: '生产巡检',
-          summary: '分析磁盘、负载和服务状态',
-          updatedAt: '刚刚',
-          ts: new Date('2026-06-04T10:30:00+08:00').getTime(),
-          ipAddress: '10.24.8.12'
-        },
-        {
-          id: 'conv-2',
-          title: 'K8s 发布失败',
-          summary: '检查 Pod 事件和镜像拉取',
-          updatedAt: '今天',
-          ts: new Date('2026-06-01T12:00:00+08:00').getTime(),
-          ipAddress: 'prod-cluster'
-        },
-        {
-          id: 'conv-3',
-          title: '数据库慢查询',
-          summary: '梳理慢日志和索引建议',
-          updatedAt: '昨天',
-          ts: new Date('2026-05-25T10:30:00+08:00').getTime(),
-          ipAddress: '10.32.6.9'
-        }
-      ]
-      ;(globalThis as any).__setChatHistoryStoreMock?.(actionConversations, {
-        'conv-2': [
-          { id: 'hist-conv-2-system', role: 'system', text: '历史会话已从 aiopsterm 后端恢复。' },
-          { id: 'hist-conv-2-user', role: 'user', text: '检查 Pod 事件和镜像拉取' },
-          { id: 'hist-conv-2-assistant', role: 'assistant', text: 'K8s 发布失败历史包含 Pod 事件、镜像拉取状态和回滚检查记录。', state: 'done' }
-        ],
-        'conv-3': [
-          { id: 'hist-conv-3-system', role: 'system', text: '历史会话已从 aiopsterm 后端恢复。' },
-          { id: 'hist-conv-3-user', role: 'user', text: '梳理慢日志和索引建议' },
-          { id: 'hist-conv-3-assistant', role: 'assistant', text: '数据库慢查询历史包含慢日志摘要、疑似缺失索引和 SQL 优化建议。', state: 'done' }
-        ]
-      })
-      store.conversations = actionConversations
-      await wrapper.find('.agents-search input').setValue('')
-      await wrapper.vm.$nextTick()
-      expect(wrapper.text()).toContain('10:30')
-      expect(wrapper.text()).toContain('3天前')
-      expect(wrapper.text()).toContain('05/25')
-
-      await wrapper.find('.agents-search input').setValue('conv-2')
-      expect(wrapper.text()).toContain('K8s 发布失败')
-      expect(wrapper.text()).not.toContain('生产巡检')
-      expect(wrapper.text()).not.toContain('检查 Pod 事件和镜像拉取')
-
-      await wrapper.find('.agents-search input').setValue('索引建议')
-      expect(wrapper.text()).toContain('数据库慢查询')
-      expect(wrapper.text()).not.toContain('K8s 发布失败')
-
-      await wrapper.find('.agents-search input').setValue('prod-cluster')
-      expect(wrapper.text()).toContain('K8s 发布失败')
-      expect(wrapper.text()).not.toContain('数据库慢查询')
-
-      await wrapper.find('.agents-search input').trigger('keydown', { key: 'Escape' })
-      expect((wrapper.find('.agents-search input').element as HTMLInputElement).value).toBe('')
-
-      await wrapper.find('.agents-search input').setValue('conv-2')
-      await wrapper.find('.conversation-item').trigger('click')
-      await flushPromises()
-      expect(store.selectedConversationId).toBe('conv-2')
-      expect(window.aiops.restoreChatConversation).toHaveBeenCalledWith('conv-2')
-      expect(store.chatMessages.at(-1)?.text).toContain('K8s 发布失败历史包含 Pod 事件')
-
-      await wrapper.find('.conversation-item').trigger('keydown', { key: 'Delete' })
-      await flushPromises()
-      expect(store.conversations.some((conversation) => conversation.id === 'conv-2')).toBe(false)
-      expect(window.aiops.deleteChatConversation).toHaveBeenCalledWith('conv-2')
-
-      await wrapper.find('.agents-search input').setValue('conv-3')
-      await wrapper.find('.conversation-item').trigger('click')
-      await flushPromises()
-      expect(store.selectedConversationId).toBe('conv-3')
-      expect(window.aiops.restoreChatConversation).toHaveBeenCalledWith('conv-3')
-      expect(store.chatMessages.at(-1)?.text).toContain('数据库慢查询历史包含慢日志摘要')
-      await wrapper.find('.delete-btn').trigger('click')
-      await flushPromises()
-      expect(store.conversations.some((conversation) => conversation.id === 'conv-3')).toBe(false)
-      expect(window.aiops.deleteChatConversation).toHaveBeenCalledWith('conv-3')
-
-      await wrapper.find('.new-chat-btn').trigger('click')
-      await flushPromises()
-      expect((wrapper.find('.agents-search input').element as HTMLInputElement).value).toBe('')
-      expect(store.selectedConversationId).toMatch(/^conv-/)
-      expect(store.chatMessages).toEqual([])
-      expect(wrapper.text()).not.toContain('请输入本次运维目标')
-      expect(window.aiops.createChatConversation).toHaveBeenCalled()
-    } finally {
-      vi.useRealTimers()
+  it('allows closing the final Classic tab and creates one conversation on the next send', async () => {
+    const closedConversation = {
+      id: 'classic-final-tab',
+      title: '生产巡检',
+      summary: '保留的历史会话',
+      updatedAt: '刚刚',
+      ts: new Date('2026-06-04T10:30:00+08:00').getTime(),
+      favorite: false
     }
+    ;(globalThis as any).__setChatHistoryStoreMock?.(
+      [closedConversation],
+      {
+        'classic-final-tab': [
+          { id: 'classic-final-tab-user', role: 'user', text: '检查生产主机' },
+          { id: 'classic-final-tab-assistant', role: 'assistant', text: '已完成巡检。', state: 'done' }
+        ]
+      },
+      closedConversation.id
+    )
+    vi.mocked(window.aiops.listProductSessions).mockResolvedValue({
+      ok: true,
+      data: {
+        sessions: [{
+          id: closedConversation.id,
+          surface: 'classic' as const,
+          title: closedConversation.title,
+          isOpen: true,
+          createdAt: closedConversation.ts,
+          updatedAt: closedConversation.ts
+        }]
+      }
+    })
+
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const { wrapper, store } = await mountAiPanelWithModels(pinia)
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.findAll('[data-testid="ai-conversation-tab"]')).toHaveLength(1)
+    expect(store.selectedConversationId).toBe(closedConversation.id)
+    expect(store.chatMessages).toHaveLength(2)
+
+    vi.mocked(window.aiops.closeProductSession).mockClear()
+    vi.mocked(window.aiops.deselectChatConversation).mockClear()
+    vi.mocked(window.aiops.deleteChatConversation).mockClear()
+    await wrapper.find(`[data-testid="ai-conversation-tab"][data-conversation-id="${closedConversation.id}"] .ai-conversation-tab-close`).trigger('click')
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+
+    expect(window.aiops.closeProductSession).toHaveBeenCalledTimes(1)
+    expect(window.aiops.closeProductSession).toHaveBeenCalledWith(closedConversation.id)
+    expect(window.aiops.deselectChatConversation).toHaveBeenCalledWith(closedConversation.id)
+    expect(window.aiops.deleteChatConversation).not.toHaveBeenCalled()
+    expect(wrapper.findAll('[data-testid="ai-conversation-tab"]')).toHaveLength(0)
+    expect(wrapper.find('[data-testid="ai-conversation-tabs"]').exists()).toBe(false)
+    expect(store.selectedConversationId).toBe('')
+    expect(store.chatMessages).toEqual([])
+    expect(store.conversations.some((conversation) => conversation.id === closedConversation.id)).toBe(true)
+    expect(wrapper.find('[data-testid="ai-chat-export-notice"]').text()).toContain('标签已关闭')
+    expect(wrapper.text()).not.toContain('至少保留一个会话标签')
+
+    const persistedHistory = await window.aiops.listChatConversations()
+    expect(persistedHistory).toEqual(expect.objectContaining({
+      ok: true,
+      data: expect.objectContaining({
+        selectedConversationId: '',
+        conversations: expect.arrayContaining([expect.objectContaining({ id: closedConversation.id })])
+      })
+    }))
+    expect(wrapper.find('[data-testid="ai-history-open"]').exists()).toBe(false)
+
+    vi.mocked(window.aiops.createChatConversation).mockClear()
+    const input = wrapper.find('[data-testid="ai-message-input"]')
+    input.element.replaceChildren(document.createTextNode('检查新的巡检任务'))
+    await input.trigger('input')
+    await wrapper.find('.chat-input').trigger('submit')
+    await vi.waitFor(() => expect(window.aiops.createChatConversation).toHaveBeenCalledTimes(1))
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+
+    expect(window.aiops.createChatConversation).toHaveBeenCalledTimes(1)
+    expect(store.selectedConversationId).not.toBe('')
+    expect(store.selectedConversationId).not.toBe(closedConversation.id)
+    expect(store.conversations.some((conversation) => conversation.id === closedConversation.id)).toBe(true)
+    expect(store.conversations).toHaveLength(2)
+    expect(wrapper.findAll('[data-testid="ai-conversation-tab"]')).toHaveLength(1)
+    expect(wrapper.find('[data-testid="ai-conversation-tab"]').attributes('data-conversation-id')).toBe(store.selectedConversationId)
+
+    wrapper.unmount()
   })
 
   it('returns External reference-style context submenus to main on Escape and empty Backspace', async () => {
@@ -5816,6 +6064,7 @@ describe('AppShell', () => {
       },
       'history-1'
     )
+    await window.aiops.updateProductSession({ id: 'history-1', isOpen: true })
     store.chatMessages = [
       { id: 'search-system', role: 'system', text: '系统提示：保持审计上下文。' },
       { id: 'search-user', role: 'user', text: '检查生产数据库 rollback 计划', contentParts: [{ type: 'text', text: '检查生产数据库 rollback 计划' }] },
@@ -5840,112 +6089,14 @@ describe('AppShell', () => {
     const styles = appStyles()
     expect(styles).toContain('.ai-header {\n  justify-content: flex-start;\n  gap: 4px;\n  min-width: 0;\n}')
     expect(styles).toContain('.ai-header-actions {\n  gap: 4px;\n  width: auto;')
-    expect(styles).toContain('.ai-panel-mode-menu {\n  position: relative;\n  flex: 0 0 112px;')
-    expect(styles).toContain('.ai-header-title {\n  flex: 0 0 48px;')
+    expect(styles).toContain('.ai-panel-mode-menu {\n  position: relative;\n  flex: 0 0 24px;')
     expect(styles).toContain('.ai-conversation-tabs {\n  flex: 1 1 0;\n  width: 0;\n  min-width: 0;')
     expect(styles).toContain('.ai-conversation-tab {\n  min-width: 42px;')
     await wrapper.find('[data-testid="ai-more-actions-open"]').trigger('click')
     expect(wrapper.find('[data-testid="ai-more-actions-menu"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="ai-more-actions-menu"]').findAll('button')).toHaveLength(3)
-    await wrapper.find('[data-testid="ai-history-open"]').trigger('click')
-    await flushPromises()
-    await wrapper.vm.$nextTick()
-    expect(wrapper.find('[data-testid="ai-history-dropdown"]').exists()).toBe(true)
-    expect(document.activeElement).toBe(wrapper.find('[data-testid="ai-history-search-input"]').element)
-    expect(wrapper.findAll('.ai-history-item')).toHaveLength(20)
-    expect(wrapper.find('[data-testid="ai-history-load-more"]').exists()).toBe(true)
-    vi.mocked(window.aiops.listChatConversations).mockClear()
-    await wrapper.find('[data-testid="ai-history-load-more"]').trigger('click')
-    await flushPromises()
-    await wrapper.vm.$nextTick()
-    expect(window.aiops.listChatConversations).toHaveBeenCalledTimes(1)
-    expect(wrapper.findAll('.ai-history-item')).toHaveLength(23)
-    expect(wrapper.find('[data-testid="ai-history-load-more"]').exists()).toBe(false)
-    await wrapper.find('[data-testid="ai-history-search-input"]').setValue('nginx')
-    expect(wrapper.findAll('.ai-history-item')).toHaveLength(0)
-    expect(wrapper.find('.ai-history-empty').text()).toContain('暂无数据')
-    await wrapper.find('[data-testid="ai-history-search-input"]').setValue('发布回滚会话')
-    expect(wrapper.findAll('.ai-history-item')).toHaveLength(1)
-    expect(wrapper.find('.ai-history-item').text()).toContain('发布回滚会话')
-    await wrapper.find('.ai-history-search button[title="清空搜索"]').trigger('click')
-    expect((wrapper.find('[data-testid="ai-history-search-input"]').element as HTMLInputElement).value).toBe('')
-    await wrapper.find('[data-testid="ai-history-favorites-toggle"]').trigger('click')
-    expect(wrapper.find('.ai-history-date').text()).toContain('收藏')
-    expect(wrapper.findAll('.ai-history-item')).toHaveLength(2)
-    await wrapper.find('[data-testid="ai-history-favorites-toggle"]').trigger('click')
-
-    const firstHistoryItem = wrapper.findAll('.ai-history-item').find((item) => item.text().includes('生产巡检'))!
-    await firstHistoryItem.find('button[title="编辑标题"]').trigger('click')
-    await wrapper.find('[data-testid="ai-history-title-input"]').setValue('生产巡检复盘')
-    await wrapper.find('[data-testid="ai-history-title-input"]').trigger('keydown', { key: 'Enter' })
-    await flushPromises()
-    expect(store.conversations.find((conversation) => conversation.id === 'history-1')?.title).toBe('生产巡检复盘')
-    expect(window.aiops.updateChatConversation).toHaveBeenCalledWith(expect.objectContaining({ id: 'history-1', title: '生产巡检复盘' }))
-    if (!wrapper.find('[data-testid="ai-history-dropdown"]').exists()) {
-      await wrapper.find('[data-testid="ai-more-actions-open"]').trigger('click')
-      await wrapper.vm.$nextTick()
-      await wrapper.find('[data-testid="ai-history-open"]').trigger('click')
-      await flushPromises()
-      await wrapper.vm.$nextTick()
-    }
-
-    await wrapper.find('[data-testid="ai-history-search-input"]').setValue('发布回滚会话')
-    await wrapper.vm.$nextTick()
-    await wrapper.findAll('.ai-history-item').find((item) => item.text().includes('发布回滚会话'))!.find('button[title="收藏"]').trigger('click')
-    await flushPromises()
-    expect(store.conversations.find((conversation) => conversation.id === 'history-2')?.favorite).toBe(true)
-    expect(window.aiops.updateChatConversation).toHaveBeenCalledWith(expect.objectContaining({ id: 'history-2', favorite: true }))
-    await wrapper.findAll('.ai-history-item').find((item) => item.text().includes('发布回滚会话'))!.trigger('click')
-    await flushPromises()
-    expect(store.selectedConversationId).toBe('history-2')
-    expect(window.aiops.restoreChatConversation).toHaveBeenCalledWith('history-2')
-    expect(store.chatMessages[0].text).toContain('历史会话已从 aiopsterm 后端恢复')
-    expect(store.chatMessages.at(-1)?.text).toContain('发布回滚会话后端恢复内容')
-    expect(store.chatMessages.at(-1)?.text).not.toContain('本地历史摘要')
-    expect(wrapper.find('[data-testid="ai-history-dropdown"]').exists()).toBe(false)
-    expect(wrapper.findAll('[data-testid="ai-conversation-tab"]')).toHaveLength(2)
-    expect(wrapper.find('[data-testid="ai-conversation-tab"][data-conversation-id="history-2"]').attributes('aria-selected')).toBe('true')
-    await wrapper.find('[data-testid="ai-conversation-tab"][data-conversation-id="history-1"]').trigger('click')
-    await flushPromises()
-    expect(store.selectedConversationId).toBe('history-1')
-    expect(window.aiops.restoreChatConversation).toHaveBeenCalledWith('history-1')
-    expect(wrapper.find('[data-testid="ai-conversation-tab"][data-conversation-id="history-1"]').attributes('aria-selected')).toBe('true')
-
+    expect(wrapper.find('[data-testid="ai-more-actions-menu"]').findAll('button')).toHaveLength(2)
+    expect(wrapper.find('[data-testid="ai-history-open"]').exists()).toBe(false)
     await wrapper.find('[data-testid="ai-more-actions-open"]').trigger('click')
-    await wrapper.vm.$nextTick()
-    await wrapper.find('[data-testid="ai-history-open"]').trigger('click')
-    await flushPromises()
-    await wrapper.vm.$nextTick()
-    await wrapper.find('[data-testid="ai-history-search-input"]').setValue('历史会话 3')
-    await wrapper.vm.$nextTick()
-    await wrapper.findAll('.ai-history-item').find((item) => item.text().includes('历史会话 3'))!.find('button[title="删除历史"]').trigger('click')
-    await flushPromises()
-    expect(store.conversations.some((conversation) => conversation.id === 'history-3')).toBe(false)
-    expect(window.aiops.deleteChatConversation).toHaveBeenCalledWith('history-3')
-    await wrapper.find('[data-testid="ai-new-chat"]').trigger('click')
-    await flushPromises()
-    expect(store.selectedConversationId).toMatch(/^conv-/)
-    const createdConversationId = store.selectedConversationId
-    expect(store.chatMessages).toEqual([])
-    expect(wrapper.find('.ai-empty-chat').exists()).toBe(true)
-    expect(window.aiops.createChatConversation).toHaveBeenCalled()
-    expect(wrapper.find('[data-testid="ai-history-dropdown"]').exists()).toBe(false)
-    expect(wrapper.find(`[data-testid="ai-conversation-tab"][data-conversation-id="${createdConversationId}"]`).exists()).toBe(true)
-    expect(wrapper.find(`[data-testid="ai-conversation-tab"][data-conversation-id="${createdConversationId}"]`).text()).toContain('新会话')
-    expect(wrapper.find('[data-testid="ai-conversation-tab"][data-conversation-id="history-1"]').exists()).toBe(true)
-    store.conversations = store.conversations.map((conversation) =>
-      conversation.id === createdConversationId ? { ...conversation, title: '排查磁盘容量持续升高' } : conversation
-    )
-    await wrapper.vm.$nextTick()
-    expect(wrapper.find(`[data-testid="ai-conversation-tab"][data-conversation-id="${createdConversationId}"]`).text()).toContain('排查磁盘容量持续升高')
-    vi.mocked(window.aiops.deleteChatConversation).mockClear()
-    await wrapper.find(`[data-testid="ai-conversation-tab"][data-conversation-id="${createdConversationId}"] .ai-conversation-tab-close`).trigger('click')
-    await flushPromises()
-    expect(window.aiops.deleteChatConversation).not.toHaveBeenCalled()
-    expect(store.selectedConversationId).not.toBe(createdConversationId)
-    expect(store.conversations.some((conversation) => conversation.id === createdConversationId)).toBe(true)
-    expect(wrapper.find(`[data-testid="ai-conversation-tab"][data-conversation-id="${createdConversationId}"]`).exists()).toBe(false)
-    expect(wrapper.findAll('[data-testid="ai-conversation-tab"]').length).toBeGreaterThan(0)
     store.selectedConversationId = 'history-1'
     store.chatMessages = [
       { id: 'search-system', role: 'system', text: '系统提示：保持审计上下文。' },
@@ -5989,6 +6140,12 @@ describe('AppShell', () => {
     expect(wrapper.find('.ai-chat-search-highlight').exists()).toBe(false)
 
     store.chatMessages.push(
+      {
+        id: 'export-user-continuation',
+        role: 'user',
+        text: '继续生成导出内容',
+        state: 'done'
+      },
       {
         id: 'export-command',
         role: 'assistant',
@@ -6061,7 +6218,7 @@ describe('AppShell', () => {
     const exportInput = vi.mocked(window.aiops.exportChat).mock.calls.at(-1)?.[0]
     expect(exportInput).toEqual(
       expect.objectContaining({
-        title: '生产巡检复盘',
+        title: '生产巡检',
         messages: expect.arrayContaining([
           expect.objectContaining({ id: 'search-user', role: 'user' }),
           expect.objectContaining({ id: 'export-command', ask: 'command' })
@@ -6173,14 +6330,25 @@ describe('AppShell', () => {
 
     store.activePanelId = 'panel-main'
     await assistantMessage!.find('[data-testid="ai-message-retry"]').trigger('click')
+    await flushPromises()
     await wrapper.vm.$nextTick()
-    expect(store.chatMessages.at(-2)?.text).toContain('检查生产数据库 rollback 计划')
+    expect(store.chatMessages.some(
+      (message) => message.role === 'user' && message.text.includes('检查生产数据库 rollback 计划')
+    )).toBe(true)
 
     store.chatMessages.push({
       id: 'command-assistant',
       role: 'assistant',
       text: 'uptime',
       contentParts: [{ type: 'chip', chipType: 'command', ref: { command: 'uptime', label: 'uptime' } }],
+      agentTask: {
+        taskId: 'command-proposal-task',
+        turnId: 'command-assistant',
+        targetId: 'asset-1',
+        targetLabel: 'prod-bastion',
+        terminalSessionId: 'terminal-command-panel',
+        status: 'done'
+      },
       state: 'done'
     })
     await wrapper.vm.$nextTick()
@@ -6222,6 +6390,13 @@ describe('AppShell', () => {
       })
     )
     store.activePanel.sessionId = 'terminal-command-panel'
+    store.activePanel.classicTarget = {
+      targetId: 'asset-1',
+      terminalSessionId: 'terminal-command-panel',
+      label: 'prod-bastion',
+      kind: 'local',
+      cwd: store.activePanel.cwd
+    } as any
     vi.mocked(window.aiops.writeTerminal).mockClear()
     vi.mocked(window.aiops.updateChatConversation).mockClear()
     await commandMessage!.find('[data-testid="ai-message-command-review"]').trigger('click')
@@ -6318,7 +6493,7 @@ describe('AppShell', () => {
     await contextSearchInput.trigger('keydown', { key: 'ArrowUp' })
     expect(findContextButton('127.0.0.1')?.classes()).toContain('keyboard-selected')
     await contextSearchInput.trigger('keydown', { key: 'ArrowDown' })
-    expect(findContextButton('10.24.8.12')?.classes()).toContain('keyboard-selected')
+    expect(findContextButton('prod-bastion')?.classes()).toContain('keyboard-selected')
     await contextSearchInput.setValue('文档')
     expect(wrapper.find('.context-select-popup .select-list button.keyboard-selected').exists()).toBe(false)
 
@@ -6449,21 +6624,33 @@ describe('AppShell', () => {
     const { wrapper, store } = await mountAiPanelWithModels(pinia)
 
     await wrapper.find('.context-trigger-tag').trigger('click')
+    const quickHost = wrapper.find('[data-onboarding-id="ai-localhost-option"]')
+    expect(quickHost.element.children).toHaveLength(3)
+    await quickHost.trigger('click')
+    expect(wrapper.find('.context-select-popup').exists()).toBe(false)
+    expect(store.selectedContexts.some((context) => context.label === '127.0.0.1')).toBe(true)
+
+    await wrapper.find('.context-trigger-tag').trigger('click')
     await wrapper.find('[data-onboarding-id="ai-context-hosts-menu"]').trigger('click')
     await wrapper.find('.context-select-popup header input').setValue('10.32.6.9')
     expect(wrapper.find('.host-batch-footer').exists()).toBe(true)
     expect(wrapper.find('.host-batch-footer').text()).toContain('全选')
 
     await wrapper.find('.host-batch-footer .batch-action-btn').trigger('click')
-    expect(store.selectedContexts.some((context) => context.label === '10.32.6.9')).toBe(true)
-    expect(wrapper.findAll('.input-context-row .context-tag').some((chip) => chip.text().includes('10.32.6.9'))).toBe(true)
-    expect(wrapper.findAll('.chat-editable .mention-chip').some((chip) => chip.text().includes('10.32.6.9'))).toBe(false)
+    expect(store.selectedContexts.some((context) => context.label === 'mysql-primary')).toBe(true)
+    expect(wrapper.findAll('.input-context-row .context-tag').some((chip) => chip.text().includes('mysql-primary'))).toBe(true)
+    expect(wrapper.findAll('.chat-editable .mention-chip').some((chip) => chip.text().includes('mysql-primary'))).toBe(false)
     expect(wrapper.find('.host-batch-footer').text()).toContain('取消全选')
     expect(wrapper.find('.host-batch-footer').text()).toContain('清空选择')
 
     await wrapper.findAll('.host-batch-footer .batch-action-btn').at(1)!.trigger('click')
     expect(store.selectedContexts.filter((context) => context.kind === 'hosts')).toHaveLength(0)
-    expect(wrapper.findAll('.input-context-row .context-tag').some((chip) => chip.text().includes('10.32.6.9'))).toBe(false)
+    expect(wrapper.findAll('.input-context-row .context-tag').some((chip) => chip.text().includes('mysql-primary'))).toBe(false)
+
+    const filteredHost = wrapper.find('.context-select-popup .context-option-row')
+    await filteredHost.trigger('click')
+    expect(wrapper.find('.context-select-popup').exists()).toBe(true)
+    expect(store.selectedContexts.some((context) => context.label === 'mysql-primary')).toBe(true)
 
     wrapper.unmount()
   })
@@ -6961,6 +7148,106 @@ describe('AppShell', () => {
     wrapper.unmount()
   })
 
+  it('keeps 560 live Classic AI messages in a bounded DOM window while scrolling through older messages', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const { wrapper, store } = await mountAiPanelWithModels(pinia)
+    const messages = Array.from({ length: 560 }, (_, index) => ({
+      id: `window-message-${index}`,
+      role: index % 2 === 0 ? 'user' as const : 'assistant' as const,
+      text: `window message body ${index}`,
+      state: 'done' as const
+    }))
+
+    store.chatMessages.splice(0, store.chatMessages.length, ...messages)
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+
+    expect(store.chatMessages).toHaveLength(560)
+    expect(wrapper.findAll('.chat-scroll > .message')).toHaveLength(80)
+    expect(wrapper.findAll('.chat-scroll > .message')[0].attributes('data-message-id')).toBe('window-message-480')
+    expect(wrapper.findAll('.chat-scroll > .message').at(-1)?.attributes('data-message-id')).toBe('window-message-559')
+
+    const chatScroll = wrapper.find('.chat-scroll')
+    Object.defineProperty(chatScroll.element, 'scrollHeight', { configurable: true, value: 2400 })
+    Object.defineProperty(chatScroll.element, 'clientHeight', { configurable: true, value: 400 })
+    ;(chatScroll.element as HTMLElement).scrollTop = 0
+    await chatScroll.trigger('keydown', { key: 'ArrowUp' })
+    await chatScroll.trigger('scroll')
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+
+    expect(store.chatMessages).toHaveLength(560)
+    expect(wrapper.findAll('.chat-scroll > .message')).toHaveLength(120)
+    expect(wrapper.findAll('.chat-scroll > .message')[0].attributes('data-message-id')).toBe('window-message-440')
+
+    ;(chatScroll.element as HTMLElement).scrollTop = 0
+    await chatScroll.trigger('scroll')
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.findAll('.chat-scroll > .message')).toHaveLength(120)
+    expect(wrapper.findAll('.chat-scroll > .message')[0].attributes('data-message-id')).toBe('window-message-400')
+    expect(wrapper.findAll('.chat-scroll > .message').at(-1)?.attributes('data-message-id')).toBe('window-message-519')
+
+    store.chatMessages.push({
+      id: 'window-message-560',
+      role: 'assistant',
+      text: 'newest live message',
+      state: 'done'
+    })
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+
+    expect(store.chatMessages).toHaveLength(561)
+    expect(wrapper.findAll('.chat-scroll > .message')).toHaveLength(120)
+    expect(wrapper.findAll('.chat-scroll > .message')[0].attributes('data-message-id')).toBe('window-message-400')
+    expect(wrapper.findAll('.chat-scroll > .message').at(-1)?.attributes('data-message-id')).toBe('window-message-519')
+
+    wrapper.unmount()
+  })
+
+  it('follows assistant appends in a long Classic AI conversation while the viewport is at the latest edge', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const { wrapper, store } = await mountAiPanelWithModels(pinia)
+    store.chatMessages.splice(
+      0,
+      store.chatMessages.length,
+      ...Array.from({ length: 560 }, (_, index) => ({
+        id: `following-message-${index}`,
+        role: index % 2 === 0 ? 'user' as const : 'assistant' as const,
+        text: `following message body ${index}`,
+        state: 'done' as const
+      }))
+    )
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+
+    const chatScroll = wrapper.find('.chat-scroll')
+    Object.defineProperty(chatScroll.element, 'scrollHeight', { configurable: true, value: 1400 })
+    Object.defineProperty(chatScroll.element, 'clientHeight', { configurable: true, value: 360 })
+    ;(chatScroll.element as HTMLElement).scrollTop = 1040
+    await chatScroll.trigger('scroll')
+
+    store.chatMessages.push({
+      id: 'following-message-560',
+      role: 'assistant',
+      text: 'latest assistant append',
+      state: 'done'
+    })
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+    await waitForAnimationFrames(1)
+
+    expect(store.chatMessages).toHaveLength(561)
+    expect(wrapper.findAll('.chat-scroll > .message')).toHaveLength(80)
+    expect(wrapper.findAll('.chat-scroll > .message').at(-1)?.attributes('data-message-id')).toBe('following-message-560')
+    expect((chatScroll.element as HTMLElement).scrollTop).toBe(1400)
+
+    wrapper.unmount()
+  })
+
   it('renders malformed AI response envelopes as backend errors instead of fabricated answers', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
@@ -7026,6 +7313,21 @@ describe('AppShell', () => {
     expect(store.chatMessages.some((message) => message.state === 'streaming')).toBe(false)
     expect(wrapper.find('[data-testid="ai-file-upload-button"]').attributes('disabled')).toBeUndefined()
     expect(wrapper.find('[data-testid="ai-voice-button"]').attributes('disabled')).toBeUndefined()
+
+    const emitClineEvent = (globalThis as any).__emitClineAgentTaskEventMock as (event: any) => void
+    emitClineEvent({
+      protocolVersion: 1,
+      sessionId: 'late-failed-session',
+      taskId: 'aichat-request-test-1',
+      turnId: 'aichat-request-test-1-assistant',
+      seq: 1,
+      at: '2026-07-14T00:00:00.000Z',
+      type: 'tool-call',
+      toolCallId: 'late-command',
+      toolName: 'run_host_command',
+      input: { targetId: 'opened-local', command: 'uptime' }
+    })
+    expect(store.chatMessages.some((message) => message.agentTask?.toolCallId === 'late-command')).toBe(false)
 
     wrapper.unmount()
   })
@@ -7173,6 +7475,13 @@ describe('AppShell', () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     const { wrapper, store } = await mountAiPanelWithModels(pinia)
+    store.selectedContexts = [{
+      id: 'asset-1',
+      kind: 'hosts',
+      label: 'prod-bastion',
+      detail: '10.24.8.12',
+      assetId: 'asset-1'
+    }]
 
     vi.mocked(window.aiops.generateAiChatResponse).mockResolvedValueOnce({
       ok: true,
@@ -7193,7 +7502,7 @@ describe('AppShell', () => {
           commandExecution: {
             ip: '10.24.8.12',
             command: 'uptime',
-            requiresApproval: true,
+            requiresApproval: false,
             interactive: false
           },
           commandExecutionStatus: 'pending',
@@ -7201,7 +7510,9 @@ describe('AppShell', () => {
           agentTask: {
             taskId: 'aichat-request-test-1',
             turnId: 'aichat-request-test-1-assistant',
-            terminalSessionId: 'terminal-command-panel',
+            targetId: 'asset-1',
+            targetLabel: '10.24.8.12',
+            terminalSessionId: 'test-session-asset-1',
             toolCallId: 'tool-call-uptime',
             toolName: 'run_host_command',
             status: 'waiting-approval'
@@ -7210,7 +7521,9 @@ describe('AppShell', () => {
         agentTask: {
           taskId: 'aichat-request-test-1',
           turnId: 'aichat-request-test-1-assistant',
-          terminalSessionId: 'terminal-command-panel',
+          targetId: 'asset-1',
+          targetLabel: '10.24.8.12',
+          terminalSessionId: 'test-session-asset-1',
           toolCallId: 'tool-call-uptime',
           toolName: 'run_host_command',
           status: 'waiting-approval'
@@ -7232,6 +7545,20 @@ describe('AppShell', () => {
     await flushPromises()
     await wrapper.vm.$nextTick()
 
+    expect(vi.mocked(window.aiops.generateAiChatResponse).mock.calls.at(-1)?.[0]?.hostTargets).toEqual([{
+      targetId: 'asset-1',
+      terminalSessionId: 'test-session-asset-1',
+      label: '10.24.8.12',
+      kind: 'ssh',
+      cwd: '/home/ops'
+    }])
+    const assistantMessages = store.chatMessages.filter((message) => message.role === 'assistant')
+    expect(assistantMessages.map((message) => message.id)).toEqual(['aichat-request-test-1-assistant'])
+    expect(assistantMessages[0]).toMatchObject({
+      ask: 'command',
+      agentTask: { toolCallId: 'tool-call-uptime', status: 'waiting-approval' }
+    })
+
     const commandMessage = wrapper.findAll('.message.assistant').find((message) => message.text().includes('uptime'))
     expect(commandMessage).toBeTruthy()
     expect(commandMessage!.find('[data-testid="ai-message-command-card"]').exists()).toBe(true)
@@ -7243,25 +7570,28 @@ describe('AppShell', () => {
     expect(hostBadge.find('svg').exists()).toBe(true)
     expect(hostBadge.text()).toContain('Host 10.24.8.12')
     expect(commandMessage!.find('[data-testid="ai-message-command-run"]').exists()).toBe(true)
-    expect(commandMessage!.find('[data-testid="ai-message-command-auto-run"]').exists()).toBe(false)
-    expect(commandMessage!.find('[data-testid="ai-message-command-approval-badge"]').exists()).toBe(true)
+    expect(commandMessage!.find('[data-testid="ai-message-command-auto-run"]').exists()).toBe(true)
+    expect(commandMessage!.find('[data-testid="ai-message-command-approval-badge"]').exists()).toBe(false)
     expect(commandMessage!.find('[data-testid="ai-message-command-line-count"]').text()).toContain('1 line')
 
-    store.activePanel.sessionId = 'terminal-command-panel'
     vi.mocked(window.aiops.respondClineAgentApproval!).mockClear()
     vi.mocked(window.aiops.writeTerminal).mockClear()
-    await commandMessage!.find('[data-testid="ai-message-command-run"]').trigger('click')
+    await commandMessage!.find('[data-testid="ai-message-command-auto-run"]').trigger('click')
     await flushPromises()
     expect(window.aiops.respondClineAgentApproval).toHaveBeenCalledWith({
       taskId: 'aichat-request-test-1',
       turnId: 'aichat-request-test-1-assistant',
       toolCallId: 'tool-call-uptime',
-      terminalSessionId: 'terminal-command-panel',
+      toolName: 'run_host_command',
+      targetId: 'asset-1',
+      targetLabel: '10.24.8.12',
+      terminalSessionId: 'test-session-asset-1',
       approved: true,
+      enableReadOnlyAutoRun: true,
       reason: undefined
     })
     expect(window.aiops.writeTerminal).not.toHaveBeenCalled()
-    expect(store.chatMessages.find((message) => message.id === 'aichat-request-test-1-assistant')?.commandExecutionStatus).toBe('running')
+    expect(store.chatMessages.find((message) => message.agentTask?.toolCallId === 'tool-call-uptime')?.commandExecutionStatus).toBe('running')
 
     const emitClineEvent = (globalThis as any).__emitClineAgentTaskEventMock as (event: any) => void
     const eventBase = {
@@ -7289,18 +7619,238 @@ describe('AppShell', () => {
     })
     await wrapper.vm.$nextTick()
 
-    expect(store.chatMessages.find((message) => message.id === 'aichat-request-test-1-assistant')).toMatchObject({
+    expect(store.chatMessages.find((message) => message.agentTask?.toolCallId === 'tool-call-uptime')).toMatchObject({
       executedCommand: 'uptime',
       commandExecutionStatus: 'succeeded',
       agentTask: { status: 'done' }
     })
-    expect(store.chatMessages.at(-1)).toMatchObject({
+    expect(store.chatMessages.find((message) => message.id === 'aichat-request-test-1-assistant')).toMatchObject({
+      role: 'assistant',
+      ask: 'command',
+      text: 'uptime',
+      agentTask: { toolCallId: 'tool-call-uptime', status: 'done' }
+    })
+    expect(store.chatMessages.find((message) => message.id === 'aichat-request-test-1-assistant-cline-result')).toMatchObject({
       role: 'assistant',
       state: 'done',
       text: '负载正常，无需继续执行命令。',
       agentTask: { status: 'done' }
     })
     expect(window.aiops.generateAiChatResponse).toHaveBeenCalledTimes(1)
+
+    wrapper.unmount()
+  })
+
+  it('does not buffer non-Classic Cline events whose turn is absent from Classic chat', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const { wrapper, store } = await mountAiPanelWithModels(pinia)
+    const emitClineEvent = (globalThis as any).__emitClineAgentTaskEventMock as (event: any) => void
+
+    emitClineEvent({
+      protocolVersion: 1,
+      sessionId: 'database-cline-session',
+      taskId: 'database-task',
+      turnId: 'aichat-request-test-1-assistant',
+      seq: 1,
+      at: '2026-07-14T00:00:00.000Z',
+      type: 'approval-requested',
+      toolCallId: 'database-tool',
+      toolName: 'run_host_command',
+      terminalSessionId: 'database-session',
+      input: { command: 'should-not-enter-classic-chat' },
+      iteration: 1
+    })
+    vi.mocked(window.aiops.generateAiChatResponse).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        text: 'Classic Agent 响应完成。',
+        provider: 'aiopsterm-local',
+        model: 'aiopsterm-local-agent',
+        durationMs: 1,
+        status: 'done',
+        requestId: 'aichat-request-test-1',
+        assistantMessageId: 'aichat-request-test-1-assistant',
+        agentTask: {
+          taskId: 'aichat-request-test-1',
+          turnId: 'aichat-request-test-1-assistant',
+          status: 'done'
+        }
+      }
+    } as any)
+
+    const input = wrapper.find('[data-testid="ai-message-input"]')
+    input.element.replaceChildren(document.createTextNode('检查 Classic 事件隔离'))
+    await input.trigger('input')
+    await wrapper.find('.chat-input').trigger('submit')
+    await waitForMockCall(vi.mocked(window.aiops.generateAiChatResponse), 'generateAiChatResponse')
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+
+    expect(store.chatMessages.find((message) => message.id === 'aichat-request-test-1-assistant')).toMatchObject({
+      text: 'Classic Agent 响应完成。',
+      state: 'done',
+      agentTask: { taskId: 'aichat-request-test-1', status: 'done' }
+    })
+    expect(store.chatMessages.some((message) => message.text === 'should-not-enter-classic-chat')).toBe(false)
+
+    wrapper.unmount()
+  })
+
+  it('projects per-host command cards before the Classic response bridge resolves', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const { wrapper, store } = await mountAiPanelWithModels(pinia)
+    let resolveResponse: (result: any) => void = () => undefined
+    vi.mocked(window.aiops.generateAiChatResponse).mockImplementationOnce(() => new Promise((resolve) => {
+      resolveResponse = resolve
+    }))
+
+    const input = wrapper.find('[data-testid="ai-message-input"]')
+    input.element.replaceChildren(document.createTextNode('检查负载和内存'))
+    await input.trigger('input')
+    await wrapper.find('.chat-input').trigger('submit')
+    await waitForMockCall(vi.mocked(window.aiops.generateAiChatResponse), 'generateAiChatResponse')
+
+    const emitClineEvent = (globalThis as any).__emitClineAgentTaskEventMock as (event: any) => void
+    const eventBase = {
+      protocolVersion: 1,
+      sessionId: 'classic-cline-session',
+      taskId: 'aichat-request-test-1',
+      turnId: 'aichat-request-test-1-assistant',
+      at: '2026-07-14T00:00:00.000Z'
+    }
+    emitClineEvent({
+      ...eventBase,
+      taskId: 'foreign-task-with-same-turn',
+      seq: 1,
+      type: 'tool-call',
+      toolCallId: 'foreign-tool',
+      toolName: 'run_host_command',
+      targetId: 'opened-local',
+      targetLabel: 'Local terminal',
+      terminalSessionId: 'terminal-local',
+      input: { targetId: 'opened-local', command: 'hostname' }
+    })
+    ;[
+      { seq: 1, type: 'status', status: 'running' },
+      {
+        seq: 2,
+        type: 'tool-call',
+        toolCallId: 'tool-uptime',
+        toolName: 'run_host_command',
+        targetId: 'opened-local',
+        targetLabel: 'Local terminal',
+        terminalSessionId: 'terminal-local',
+        input: { targetId: 'opened-local', command: 'uptime' }
+      },
+      { seq: 3, type: 'tool-result', toolCallId: 'tool-uptime', toolName: 'run_host_command', output: { stdout: 'up 10 days' } },
+      {
+        seq: 4,
+        type: 'tool-call',
+        toolCallId: 'tool-free',
+        toolName: 'run_host_command',
+        targetId: 'asset-prod',
+        targetLabel: 'Production host',
+        terminalSessionId: 'terminal-prod',
+        input: { targetId: 'asset-prod', command: 'free -h' }
+      },
+      { seq: 5, type: 'tool-result', toolCallId: 'tool-free', toolName: 'run_host_command', output: { stdout: 'Mem: 46Gi' } },
+      { seq: 6, type: 'done', text: '负载和内存检查完成。', finishReason: 'stop', iterations: 2 }
+    ].forEach((event) => emitClineEvent({ ...eventBase, ...event }))
+
+    const projectedCommands = store.chatMessages.filter((message) => message.ask === 'command')
+    expect(store.chatMessages.some((message) => message.agentTask?.toolCallId === 'foreign-tool')).toBe(false)
+    expect(projectedCommands.map((message) => ({
+      command: message.commandExecution?.command,
+      host: message.commandExecution?.ip,
+      status: message.commandExecutionStatus,
+      toolCallId: message.agentTask?.toolCallId,
+      targetId: message.agentTask?.targetId,
+      terminalSessionId: message.agentTask?.terminalSessionId
+    }))).toEqual([
+      {
+        command: 'uptime',
+        host: 'Local terminal',
+        status: 'succeeded',
+        toolCallId: 'tool-uptime',
+        targetId: 'opened-local',
+        terminalSessionId: 'terminal-local'
+      },
+      {
+        command: 'free -h',
+        host: 'Production host',
+        status: 'succeeded',
+        toolCallId: 'tool-free',
+        targetId: 'asset-prod',
+        terminalSessionId: 'terminal-prod'
+      }
+    ])
+
+    resolveResponse({
+      ok: true,
+      data: {
+        text: '负载和内存检查完成。',
+        provider: 'aiopsterm-local',
+        model: 'aiopsterm-local-agent',
+        durationMs: 1,
+        status: 'done',
+        requestId: 'aichat-request-test-1',
+        assistantMessageId: 'aichat-request-test-1-assistant',
+        agentTask: {
+          taskId: 'aichat-request-test-1',
+          turnId: 'aichat-request-test-1-assistant',
+          status: 'done'
+        }
+      }
+    })
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+
+    const commandMessages = store.chatMessages.filter((message) => message.ask === 'command')
+    expect(commandMessages).toHaveLength(2)
+    expect(commandMessages.map((message) => ({
+      command: message.commandExecution?.command,
+      status: message.commandExecutionStatus,
+      toolCallId: message.agentTask?.toolCallId,
+        taskStatus: message.agentTask?.status,
+        targetId: message.agentTask?.targetId,
+        terminalSessionId: message.agentTask?.terminalSessionId
+    }))).toEqual([
+      {
+        command: 'uptime',
+        status: 'succeeded',
+        toolCallId: 'tool-uptime',
+        taskStatus: 'done',
+        targetId: 'opened-local',
+        terminalSessionId: 'terminal-local'
+      },
+      {
+        command: 'free -h',
+        status: 'succeeded',
+        toolCallId: 'tool-free',
+        taskStatus: 'done',
+        targetId: 'asset-prod',
+        terminalSessionId: 'terminal-prod'
+      }
+    ])
+    expect(store.chatMessages.filter((message) => message.role === 'assistant').map((message) => message.id)).toEqual([
+      'aichat-request-test-1-assistant',
+      'aichat-request-test-1-assistant-cline-command-tool-free',
+      'aichat-request-test-1-assistant-cline-result'
+    ])
+    expect(store.chatMessages.find((message) => message.id === 'aichat-request-test-1-assistant')).toMatchObject({
+      id: 'aichat-request-test-1-assistant',
+      text: 'uptime',
+      ask: 'command',
+      state: 'done',
+      agentTask: { toolCallId: 'tool-uptime', status: 'done' }
+    })
+    expect(store.chatMessages.find((message) => message.id === 'aichat-request-test-1-assistant-cline-result')).toMatchObject({
+      text: '负载和内存检查完成。',
+      state: 'done',
+      agentTask: { status: 'done' }
+    })
 
     wrapper.unmount()
   })
@@ -7647,7 +8197,11 @@ describe('AppShell', () => {
     expect((wrapper.find('[data-testid="ai-message-input"]').element as HTMLElement).textContent).toContain('Provider transcript from test voice backend')
 
     const markdownContext = store.selectedContexts.find((context) => context.label === 'Markdown语法指南.md')!
-    await wrapper.findAll('.input-context-row .context-tag button').find((button) => button.element.closest('.context-tag')?.textContent?.includes('Markdown语法指南.md'))!.trigger('click')
+    const markdownContextTag = wrapper.findAll('.input-context-row .context-tag').find(
+      (tag) => tag.attributes('data-context-id') === markdownContext.id
+    )
+    expect(markdownContextTag).toBeTruthy()
+    await markdownContextTag!.find('button').trigger('click')
     expect(store.selectedContexts.some((context) => context.id === markdownContext.id)).toBe(false)
 
     await wrapper.find('.context-trigger-tag').trigger('click')
@@ -7872,7 +8426,9 @@ describe('AppShell', () => {
     expect(store.activePanel.sshSession?.connectionId).toBe('ssh-test-session-asset-fork-unit')
     expect(store.activePanel.sshSession?.forkFromConnectionId).toBe('ssh-source-fork-unit')
     expect(store.activePanel.sshSession?.jumpHostId).toBe('asset-jump-unit')
-    expect(store.selectedContexts.some((context) => context.id === 'asset-fork-unit' && context.detail === 'fork-source fork')).toBe(true)
+    expect(store.selectedContexts).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'asset-fork-unit', label: 'fork-source', detail: '10.8.0.6' })
+    ]))
 
     store.selectedContexts = []
     const connectedForkPanelId = store.activePanelId
@@ -10327,7 +10883,9 @@ describe('AppShell', () => {
     expect(wrapper.find('.terminal-search-overlay').exists()).toBe(true)
     const searchInput = wrapper.find('.terminal-search-overlay input')
     expect(document.activeElement).toBe(searchInput.element)
-    const searchTerminal = mockXtermInstances.at(-1)!
+    const searchTerminal = mockXtermInstances.find(
+      (terminal) => terminal.debugInfo?.().terminalId === store.activePanelId
+    )!
     const terminalFocusCallsBeforeSearchInputClick = searchTerminal.focus.mock.calls.length
     await searchInput.trigger('mousedown')
     await searchInput.trigger('click')
@@ -10339,7 +10897,7 @@ describe('AppShell', () => {
     await wrapper.vm.$nextTick()
     expect(wrapper.find('.terminal-search-overlay').text()).not.toContain('0/0')
     expect(wrapper.find('.terminal-search-overlay div button[title="清空"]').exists()).toBe(true)
-    const searchAddon = mockXtermInstances.at(-1)!.loadAddon.mock.calls.find(([addon]) => 'findNext' in addon)?.[0]
+    const searchAddon = searchTerminal.loadAddon.mock.calls.find(([addon]) => 'findNext' in addon)?.[0]
     const missingTermFindNextCalls = searchAddon.findNext.mock.calls.length
     await wrapper.find('.terminal-search-overlay input').trigger('keydown', { key: 'Enter' })
     expect(searchAddon.findNext.mock.calls).toHaveLength(missingTermFindNextCalls)
@@ -10377,18 +10935,31 @@ describe('AppShell', () => {
     expect(wrapper.find('.terminal-global-command').exists()).toBe(true)
     const globalCommandInput = wrapper.find('.terminal-global-command input')
     expect(document.activeElement).toBe(globalCommandInput.element)
-    const globalCommandTerminal = mockXtermInstances.at(-1)!
+    const globalCommandTerminal = mockXtermInstances.find(
+      (terminal) => terminal.debugInfo?.().terminalId === store.activePanelId
+    )!
     const terminalFocusCallsBeforeGlobalInputClick = globalCommandTerminal.focus.mock.calls.length
     await globalCommandInput.trigger('mousedown')
     await globalCommandInput.trigger('click')
     expect(globalCommandTerminal.focus).toHaveBeenCalledTimes(terminalFocusCallsBeforeGlobalInputClick)
     expect(document.activeElement).toBe(globalCommandInput.element)
+    const runGlobalTerminalCommand = vi.spyOn(store, 'runGlobalTerminalCommand')
+    const globalTerminalSessionIds = store.panels.flatMap((panel) => panel.sessionId ? [panel.sessionId] : [])
+    expect(globalTerminalSessionIds.length).toBeGreaterThan(0)
+    vi.mocked(window.aiops.writeTerminal).mockClear()
+    store.setTopNotice('')
     await globalCommandInput.setValue('uptime')
     await globalCommandInput.trigger('keydown', { key: 'Enter' })
     await flushPromises()
+    expect(runGlobalTerminalCommand).toHaveBeenCalledWith('uptime')
+    await expect(runGlobalTerminalCommand.mock.results.at(-1)?.value).resolves.toMatchObject({ status: 'allow' })
     expect(store.panels.every((panel) => !panel.output.includes('[aiopsterm] broadcast queued without live sessions: uptime'))).toBe(true)
-    expect(store.topNotice).toBe('终端会话不可用，请先打开本地 shell 或连接 SSH')
-    expect((wrapper.find('.terminal-global-command input').element as HTMLInputElement).value).toBe('uptime')
+    expect(window.aiops.writeTerminal).toHaveBeenCalledTimes(globalTerminalSessionIds.length)
+    globalTerminalSessionIds.forEach((sessionId) => {
+      expect(window.aiops.writeTerminal).toHaveBeenCalledWith(sessionId, 'uptime\n')
+    })
+    expect(store.topNotice).toBe('')
+    expect((wrapper.find('.terminal-global-command input').element as HTMLInputElement).value).toBe('')
 
     vi.mocked(window.aiops.createTerminal).mockClear()
     await openLocalShellFromActiveTab(wrapper)
@@ -10417,7 +10988,9 @@ describe('AppShell', () => {
     expect(store.activePanel.output).not.toContain('[connection reconnected]')
     expect(store.topNotice).toBe('终端已重新连接')
 
-    const terminalAfterReconnect = mockXtermInstances.at(-1)!
+    const terminalAfterReconnect = mockXtermInstances.find(
+      (terminal) => terminal.debugInfo?.().terminalId === store.activePanelId
+    )!
     terminalAfterReconnect.selectedText = 'copied terminal text'
     await wrapper.find('.xterm-host').trigger('contextmenu')
     vi.mocked(navigator.clipboard.writeText).mockClear()
@@ -10461,9 +11034,11 @@ describe('AppShell', () => {
     await wrapper.vm.$nextTick()
     expect(terminalAfterReconnect.write).toHaveBeenCalledWith('Welcome to Ubuntu 24.04 LTS\r\nroot@tlinux:~# ')
     const clearCallsBeforeInput = terminalAfterReconnect.clear.mock.calls.length
+    store.startMacroRecording(store.activePanelId)
     terminalAfterReconnect.emitData('pwd\n')
     await flushPromises()
     expect(window.aiops.writeTerminal).toHaveBeenCalledWith('test-session-local', 'pwd\n')
+    expect(store.recordedCommands).toEqual(['pwd'])
     expect(terminalAfterReconnect.clear.mock.calls).toHaveLength(clearCallsBeforeInput)
     expect(terminalAfterReconnect.write).not.toHaveBeenCalledWith(expect.stringContaining('root@tlinux:~# pWelcome'))
     expect(terminalAfterReconnect.scrollToBottom).toHaveBeenCalled()
@@ -10471,6 +11046,7 @@ describe('AppShell', () => {
       level === 'debug' && ['renderer.terminal-input.write-request', 'renderer.terminal-input.write-accepted'].includes(String(event))
     )).toBe(false)
     expect(store.activePanel.output).not.toContain('pwd')
+    store.cancelMacroRecording()
 
     vi.mocked(window.aiops.writeTerminal).mockClear()
     terminalAfterReconnect.write.mockImplementationOnce(() => {
@@ -12126,8 +12702,27 @@ describe('AppShell', () => {
     expect(store.topNotice).toBe('快捷命令已保存。')
     expect((window.aiops as any).saveQuickCommands).toBeUndefined()
 
-    const commandCard = wrapper.findAll('.snippet-item').find((item) => item.text().includes('磁盘巡检'))!
+    const createdCommand = store.quickCommands.find((command) => command.snippet_name === '新片段')!
+    await wrapper.findAll('.snippet-item').find((item) => item.text().includes('新片段'))!.trigger('contextmenu')
+    await wrapper.find('.snippet-context-menu').findAll('button').find((button) => button.text().includes('编辑'))!.trigger('click')
+    expect(wrapper.text()).toContain('编辑快捷命令')
+    await wrapper.find('.script-editor-container textarea').setValue('echo edited')
+    await wrapper.find('.snippet-edit-panel footer').findAll('button')[1].trigger('click')
+    await flushPromises()
+    expect(store.quickCommands.find((command) => command.id === createdCommand.id)?.snippet_content).toBe('echo edited')
+
     store.panels[0].sessionId = 'snippet-panel-main'
+    vi.mocked(window.aiops.planQuickCommandScript).mockClear()
+    vi.mocked(window.aiops.writeTerminal).mockClear()
+    const editedCommandCard = wrapper.findAll('.snippet-item').find((item) => item.text().includes('新片段'))!
+    await editedCommandCard.find('button[title="运行"]').trigger('click')
+    await flushPromises()
+    expect(window.aiops.planQuickCommandScript).toHaveBeenCalledWith({ snippetId: createdCommand.id, autoExecute: true })
+    expect(window.aiops.writeTerminal).toHaveBeenCalledTimes(1)
+    expect(window.aiops.writeTerminal).toHaveBeenCalledWith('snippet-panel-main', 'echo edited\n')
+    expect(window.aiops.writeTerminal).not.toHaveBeenCalledWith('snippet-panel-main', expect.stringContaining('pwd'))
+
+    const commandCard = wrapper.findAll('.snippet-item').find((item) => item.text().includes('磁盘巡检'))!
     vi.mocked(window.aiops.writeTerminal).mockClear()
     await commandCard.trigger('contextmenu')
     expect(wrapper.find('.snippet-context-menu').exists()).toBe(true)
@@ -14119,6 +14714,8 @@ describe('AppShell', () => {
         })
       })
     )
+    const mirroredDrawerConversationId = vi.mocked(window.aiops.createDatabaseAiDrawerRequest).mock.calls[0][0].conversationId
+    expect(mirroredDrawerConversationId).toMatch(/^dbai-pane-conversation-/)
     expect(wrapper.find('.db-ai-pane-message.assistant[data-request-id="dbai-drawer-request-test-1"] .db-ai-pane-message-status').text()).toContain('Streaming')
     expect(window.aiops.startDatabaseAiDrawerResponse).toHaveBeenCalledWith({ requestId: 'dbai-drawer-request-test-1' })
     await waitForDatabaseDbAiDone()
@@ -14132,6 +14729,7 @@ describe('AppShell', () => {
     expect(wrapper.find(`${convertAssistantSelector} .db-ai-pane-sql-result button[title="Insert SQL into editor"]`).exists()).toBe(true)
     expect(window.aiops.generateDatabaseAiDrawerResponse).toHaveBeenCalledWith(
       expect.objectContaining({
+        conversationId: mirroredDrawerConversationId,
         requestId: 'dbai-drawer-request-test-1',
         action: 'convert',
         sourceSql: selectedConvertSql,
@@ -15677,10 +16275,22 @@ describe('AppShell', () => {
     expect(wrapper.find('.db-ai-pane-context-card').text()).toContain('orders')
     expect(wrapper.find('.db-ai-pane-context-card').text()).toContain('public')
 
+    const messageList = wrapper.find('.db-ai-pane-messages')
+    let messageListScrollHeight = 420
+    Object.defineProperty(messageList.element, 'scrollHeight', {
+      configurable: true,
+      get: () => messageListScrollHeight
+    })
+    Object.defineProperty(messageList.element, 'clientHeight', { configurable: true, value: 100 })
+    ;(messageList.element as HTMLElement).scrollTop = 320
+    await messageList.trigger('scroll')
+
     await wrapper.find('.db-ai-pane-composer textarea').setValue('Summarize schema and generate a SELECT')
     await wrapper.find('.db-ai-pane-composer-actions .primary').trigger('click')
     await vi.waitFor(() => expect(window.aiops.createDatabaseAiPaneRequest).toHaveBeenCalledTimes(1))
     await flushPromises()
+    await new Promise((resolve) => window.requestAnimationFrame(resolve))
+    expect((messageList.element as HTMLElement).scrollTop).toBe(420)
     expect(wrapper.findAll('.db-ai-pane-message')).toHaveLength(2)
     expect(wrapper.findAll('.db-ai-pane-message').at(1)!.text()).toContain('Streaming')
     expect(window.aiops.createDatabaseAiPaneRequest).toHaveBeenCalledWith(
@@ -15712,7 +16322,13 @@ describe('AppShell', () => {
     await new Promise((resolve) => window.setTimeout(resolve, 115))
     await flushPromises()
     expect(wrapper.findAll('.db-ai-pane-message').at(1)!.text()).toContain('Streaming')
+    ;(messageList.element as HTMLElement).scrollTop = 80
+    await messageList.trigger('scroll')
+    messageListScrollHeight = 620
     await wrapper.find('.db-ai-pane-composer-actions button[title="Stop response"]').trigger('click')
+    await flushPromises()
+    await new Promise((resolve) => window.requestAnimationFrame(resolve))
+    expect((messageList.element as HTMLElement).scrollTop).toBe(80)
     expect(window.aiops.cancelDatabaseAiPaneResponse).toHaveBeenCalledWith({
       requestId: 'dbai-pane-request-test-1',
       assistantMessageId: 'dbai-pane-request-test-1-assistant'
@@ -15769,7 +16385,12 @@ describe('AppShell', () => {
           dbType: 'sqlite'
         }),
         draft: 'persist this draft',
-        messages: expect.arrayContaining([expect.objectContaining({ status: 'cancelled' })])
+        messages: [],
+        archivedSessions: expect.arrayContaining([
+          expect.objectContaining({
+            messages: expect.arrayContaining([expect.objectContaining({ status: 'cancelled' })])
+          })
+        ])
       })
     )
     wrapper.unmount()
@@ -15779,11 +16400,20 @@ describe('AppShell', () => {
       global: { plugins: [createPinia()] }
     })
     await waitForDatabaseCatalog()
-    expect(remounted.find('.db-ai-pane').exists()).toBe(true)
-    expect((remounted.find('.db-ai-pane-connection').element as HTMLSelectElement).value).toBe('conn-local-cache')
-    expect((remounted.find('.db-ai-pane-database').element as HTMLSelectElement).value).toBe('cache.db')
-    expect((remounted.find('.db-ai-pane-composer textarea').element as HTMLTextAreaElement).value).toBe('persist this draft')
-    expect(remounted.findAll('.db-ai-pane-message').some((message) => message.text().includes('Cancelled'))).toBe(true)
+    await flushPromises()
+    expect(remounted.find('.db-ai-pane').exists()).toBe(false)
+    const coldState = await window.aiops.getDatabaseAiPaneState()
+    expect(coldState).toEqual(expect.objectContaining({
+      ok: true,
+      data: expect.objectContaining({
+        open: false,
+        draft: '',
+        messages: [],
+        archivedSessions: expect.arrayContaining([
+          expect.objectContaining({ draft: 'persist this draft' })
+        ])
+      })
+    }))
 
     remounted.unmount()
   })
@@ -15847,7 +16477,7 @@ describe('AppShell', () => {
     } as any)
     await wrapper.find('button[title="AI Convert SQL"]').trigger('click')
     await flushPromises()
-    expect(wrapper.text()).toContain('DB AI drawer backend returned malformed request data.')
+    expect(wrapper.text()).toContain('DB AI drawer returned malformed request data.')
     expect(wrapper.find('.db-ai-drawer').exists()).toBe(false)
     expect(wrapper.find('.db-ai-pane').exists()).toBe(true)
     expect(wrapper.findAll('.db-ai-pane-message')).toHaveLength(0)
@@ -15862,7 +16492,7 @@ describe('AppShell', () => {
     expect(wrapper.find('.db-ai-drawer').exists()).toBe(false)
     expect(wrapper.findAll('.db-ai-pane-message')).toHaveLength(2)
     expect(wrapper.findAll('.db-ai-pane-message.assistant').at(-1)!.find('.db-ai-pane-message-status').text()).toContain('Error')
-    expect(wrapper.text()).toContain('DB AI drawer backend returned malformed lifecycle data.')
+    expect(wrapper.text()).toContain('DB AI drawer returned malformed lifecycle data.')
     expect(window.aiops.generateDatabaseAiDrawerResponse).not.toHaveBeenCalled()
     await wrapper.find('.db-ai-pane-composer-actions button[title="Reset conversation"]').trigger('click')
 
@@ -15876,7 +16506,7 @@ describe('AppShell', () => {
     await waitForDatabaseDbAiDone()
     expect(wrapper.findAll('.db-ai-pane-message')).toHaveLength(2)
     expect(wrapper.findAll('.db-ai-pane-message.assistant').at(-1)!.find('.db-ai-pane-message-status').text()).toContain('Error')
-    expect(wrapper.text()).toContain('DB AI drawer backend returned malformed response data.')
+    expect(wrapper.text()).toContain('DB AI drawer returned malformed response data.')
     expect(wrapper.findAll('.db-ai-pane-message.assistant').at(-1)!.find('.db-ai-pane-sql-result').exists()).toBe(false)
     await wrapper.find('.db-ai-pane-composer-actions button[title="Reset conversation"]').trigger('click')
 
@@ -15887,7 +16517,7 @@ describe('AppShell', () => {
     await wrapper.find('.db-ai-pane-composer textarea').setValue('Summarize schema')
     await wrapper.find('.db-ai-pane-composer-actions .primary').trigger('click')
     await flushPromises()
-    expect(wrapper.text()).toContain('DB AI pane backend returned malformed request data.')
+    expect(wrapper.text()).toContain('DB AI pane returned malformed request data.')
     expect(wrapper.findAll('.db-ai-pane-message')).toHaveLength(0)
 
     vi.mocked(window.aiops.generateDatabaseAiPaneResponse).mockClear()
@@ -15911,7 +16541,7 @@ describe('AppShell', () => {
     await flushPromises()
     expect(wrapper.findAll('.db-ai-pane-message')).toHaveLength(2)
     expect(wrapper.findAll('.db-ai-pane-message').at(1)!.text()).toContain('Error')
-    expect(wrapper.text()).toContain('DB AI pane backend returned malformed lifecycle data.')
+    expect(wrapper.text()).toContain('DB AI pane returned malformed lifecycle data.')
     expect(window.aiops.generateDatabaseAiPaneResponse).not.toHaveBeenCalled()
     await wrapper.find('.db-ai-pane-composer-actions button[title="Reset conversation"]').trigger('click')
 
@@ -15930,7 +16560,7 @@ describe('AppShell', () => {
     expect(wrapper.findAll('.db-ai-pane-message')).toHaveLength(2)
     expect(wrapper.findAll('.db-ai-pane-message').at(1)!.text()).toContain('Error')
     expect(wrapper.findAll('.db-ai-pane-message').at(1)!.text()).not.toContain('missing assistant message')
-    expect(wrapper.text()).toContain('DB AI pane backend returned malformed response data.')
+    expect(wrapper.text()).toContain('DB AI pane returned malformed response data.')
 
     await editor.setValue('syntax_error')
     vi.mocked(window.aiops.diagnoseDatabaseSqlError).mockResolvedValueOnce({
@@ -15941,7 +16571,7 @@ describe('AppShell', () => {
     await waitForDatabaseSqlResult()
     await wrapper.find('.db-result-error button').trigger('click')
     await flushPromises()
-    expect(wrapper.find('.db-result-diagnose-error').text()).toContain('DB AI diagnosis backend returned malformed result data.')
+    expect(wrapper.find('.db-result-diagnose-error').text()).toContain('DB AI diagnosis service returned malformed data.')
     expect((editor.element as HTMLTextAreaElement).value).toBe('syntax_error')
 
     vi.mocked(window.aiops.diagnoseDatabaseSqlError).mockImplementationOnce(async (input: any) => ({
@@ -15969,7 +16599,7 @@ describe('AppShell', () => {
     }))
     await wrapper.find('.db-result-error button').trigger('click')
     await flushPromises()
-    expect(wrapper.find('.db-result-diagnose-error').text()).toContain('DB AI diagnosis backend returned malformed result data.')
+    expect(wrapper.find('.db-result-diagnose-error').text()).toContain('DB AI diagnosis service returned malformed data.')
     expect((editor.element as HTMLTextAreaElement).value).toBe('syntax_error')
 
     wrapper.unmount()
@@ -16089,7 +16719,7 @@ describe('AppShell', () => {
       ;(window.aiops as any).createDatabaseAiDrawerRequest = undefined
       await wrapper.find('button[title="AI Convert SQL"]').trigger('click')
       await flushPromises()
-      expect(wrapper.text()).toContain('DB AI drawer request service unavailable')
+      expect(wrapper.text()).toContain('DB AI drawer request service is unavailable')
       expect(wrapper.find('.db-ai-drawer').exists()).toBe(false)
       expect(wrapper.find('.db-ai-pane').exists()).toBe(true)
       expect(wrapper.findAll('.db-ai-pane-message')).toHaveLength(0)
@@ -16112,7 +16742,7 @@ describe('AppShell', () => {
       expect(wrapper.find('.db-ai-drawer').exists()).toBe(false)
       expect(wrapper.findAll('.db-ai-pane-message')).toHaveLength(2)
       expect(wrapper.findAll('.db-ai-pane-message.assistant').at(-1)!.find('.db-ai-pane-message-status').text()).toContain('Error')
-      expect(wrapper.text()).toContain('DB AI drawer start service unavailable')
+      expect(wrapper.text()).toContain('DB AI drawer request service is unavailable')
       expect(window.aiops.generateDatabaseAiDrawerResponse).not.toHaveBeenCalled()
     } finally {
       ;(window.aiops as any).startDatabaseAiDrawerResponse = originalStartDrawer
@@ -16125,7 +16755,7 @@ describe('AppShell', () => {
       await flushPromises()
       expect(wrapper.findAll('.db-ai-pane-message')).toHaveLength(2)
       expect(wrapper.findAll('.db-ai-pane-message.assistant').at(-1)!.find('.db-ai-pane-message-status').text()).toContain('Error')
-      expect(wrapper.text()).toContain('DB AI drawer response service unavailable')
+      expect(wrapper.text()).toContain('DB AI drawer response service is unavailable')
     } finally {
       ;(window.aiops as any).generateDatabaseAiDrawerResponse = originalGenerateDrawer
     }
@@ -16149,7 +16779,7 @@ describe('AppShell', () => {
       await wrapper.find('.db-ai-pane-composer-actions button[title="Stop response"]').trigger('click')
       await flushPromises()
       expect(wrapper.findAll('.db-ai-pane-message.assistant').at(-1)!.find('.db-ai-pane-message-status').text()).toContain('Streaming')
-      expect(wrapper.text()).toContain('DB AI drawer cancel service unavailable')
+      expect(wrapper.text()).toContain('DB AI drawer cancel service is unavailable')
     } finally {
       ;(window.aiops as any).cancelDatabaseAiDrawerResponse = originalCancelDrawer
     }
@@ -16165,7 +16795,7 @@ describe('AppShell', () => {
       await wrapper.find('.db-ai-pane-composer textarea').setValue('Summarize schema')
       await wrapper.find('.db-ai-pane-composer-actions .primary').trigger('click')
       await flushPromises()
-      expect(wrapper.text()).toContain('DB AI pane request service unavailable')
+      expect(wrapper.text()).toContain('DB AI pane request service is unavailable')
       expect(wrapper.findAll('.db-ai-pane-message')).toHaveLength(0)
     } finally {
       ;(window.aiops as any).createDatabaseAiPaneRequest = originalCreatePane
@@ -16186,7 +16816,7 @@ describe('AppShell', () => {
       await flushPromises()
       expect(wrapper.findAll('.db-ai-pane-message')).toHaveLength(2)
       expect(wrapper.findAll('.db-ai-pane-message').at(1)!.text()).toContain('Error')
-      expect(wrapper.text()).toContain('DB AI pane start service unavailable')
+      expect(wrapper.text()).toContain('DB AI pane request service is unavailable')
       expect(window.aiops.generateDatabaseAiPaneResponse).not.toHaveBeenCalled()
     } finally {
       ;(window.aiops as any).startDatabaseAiPaneResponse = originalStartPane
@@ -16199,7 +16829,7 @@ describe('AppShell', () => {
       await wrapper.find('.db-ai-pane-composer-actions .primary').trigger('click')
       await flushPromises()
       expect(wrapper.findAll('.db-ai-pane-message').at(1)!.text()).toContain('Error')
-      expect(wrapper.text()).toContain('DB AI pane response service unavailable')
+      expect(wrapper.text()).toContain('DB AI pane response service is unavailable')
     } finally {
       ;(window.aiops as any).generateDatabaseAiPaneResponse = originalGeneratePane
     }
@@ -16224,7 +16854,7 @@ describe('AppShell', () => {
       await wrapper.find('.db-ai-pane-composer-actions button[title="Stop response"]').trigger('click')
       await flushPromises()
       expect(wrapper.findAll('.db-ai-pane-message').at(1)!.text()).toContain('Streaming')
-      expect(wrapper.text()).toContain('DB AI pane cancel service unavailable')
+      expect(wrapper.text()).toContain('DB AI pane cancel service is unavailable')
     } finally {
       ;(window.aiops as any).cancelDatabaseAiPaneResponse = originalCancelPane
     }
@@ -16242,7 +16872,7 @@ describe('AppShell', () => {
       await waitForDatabaseSqlResult()
       await wrapper.find('.db-result-error button').trigger('click')
       await flushPromises()
-      expect(wrapper.find('.db-result-diagnose-error').text()).toContain('DB AI diagnosis service unavailable')
+      expect(wrapper.find('.db-result-diagnose-error').text()).toContain('DB AI diagnosis service is unavailable')
       expect((editor.element as HTMLTextAreaElement).value).toBe('syntax_error')
     } finally {
       ;(window.aiops as any).diagnoseDatabaseSqlError = originalDiagnose

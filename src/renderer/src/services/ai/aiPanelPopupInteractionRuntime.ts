@@ -37,6 +37,7 @@ export type AiPanelPopupInteractionOptions = {
   closeModeMenu: () => void
   closeModelMenu: () => void
   closeCodexTargetPicker: () => void
+  closeCodexHistoryMenu?: () => void
   closeMoreActionsMenu: () => void
   closePanelModeMenu: () => void
   closeHistoryMenu: () => void
@@ -100,6 +101,7 @@ export const createAiPanelPopupInteractionRuntime = (options: AiPanelPopupIntera
   const closeAuxiliaryMenus = () => {
     options.closeModeMenu()
     options.closeModelMenu()
+    options.closeCodexHistoryMenu?.()
   }
 
   const focusContextSearchInput = () => {
@@ -196,6 +198,7 @@ export const createAiPanelPopupInteractionRuntime = (options: AiPanelPopupIntera
     closeContextPopup({ restoreFocus: input.restoreContextFocus })
     closeCommandPopup({ restoreFocus: input.restoreCommandFocus })
     options.closeCodexTargetPicker()
+    options.closeCodexHistoryMenu?.()
     options.closeMoreActionsMenu()
     options.closeModeMenu()
     options.closePanelModeMenu()

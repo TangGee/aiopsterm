@@ -11,6 +11,7 @@ type IpcHandler = (event: unknown, ...args: any[]) => unknown
 
 type TerminalSessionsIpcBackend = {
   registerTerminalSessionsIpc: (ipcMain: IpcMain, input: any) => void
+  stableClassicSshTargetId: (input: { host: string; port: number; username: string }) => string
 }
 
 type TestTerminalProcess = {
@@ -28,6 +29,13 @@ type TestTerminalSession = {
   window: any
   kind: 'local' | 'ssh'
   host?: string
+  classicTarget?: {
+    targetId: string
+    terminalSessionId: string
+    label: string
+    kind: 'local' | 'ssh'
+    cwd?: string
+  }
 }
 
 const loadBackend = async () => {
@@ -225,6 +233,13 @@ describe('terminal sessions IPC registrar', () => {
       shell: '/bin/bash',
       cwd: '/workspace',
       kind: 'local',
+      classicTarget: {
+        targetId: 'opened-local',
+        terminalSessionId: 'terminal-ipc-local',
+        label: 'Local terminal',
+        kind: 'local',
+        cwd: '/workspace'
+      },
       lifecycle: lifecycle('terminal-ipc-local', 'local', { shell: '/bin/bash', cwd: '/workspace' })
     })
     expect(input.createLocalTerminal).toHaveBeenCalledWith(input.ownerWindow, 'terminal-ipc-local', {
@@ -237,7 +252,14 @@ describe('terminal sessions IPC registrar', () => {
       shell: '/bin/bash',
       cwd: '/workspace',
       kind: 'local',
-      host: 'local'
+      host: 'local',
+      classicTarget: {
+        targetId: 'opened-local',
+        terminalSessionId: 'terminal-ipc-local',
+        label: 'Local terminal',
+        kind: 'local',
+        cwd: '/workspace'
+      }
     })
     expect(input.registerTerminalForCodexBridge).toHaveBeenCalledWith(expect.objectContaining({ id: 'terminal-ipc-local', kind: 'local' }), {
       kind: 'local',
@@ -269,6 +291,13 @@ describe('terminal sessions IPC registrar', () => {
       shell: 'ssh',
       cwd: '/home/ops',
       kind: 'ssh',
+      classicTarget: {
+        targetId: 'asset-prod-db',
+        terminalSessionId: 'terminal-ipc-local',
+        label: 'prod-db',
+        kind: 'ssh',
+        cwd: '/home/ops'
+      },
       connection: {
         connectionId: 'ssh-terminal-ipc-local',
         host: '10.8.0.6',
@@ -284,7 +313,14 @@ describe('terminal sessions IPC registrar', () => {
       shell: 'ssh',
       cwd: '/home/ops',
       kind: 'ssh',
-      host: '10.8.0.6'
+      host: '10.8.0.6',
+      classicTarget: {
+        targetId: 'asset-prod-db',
+        terminalSessionId: 'terminal-ipc-local',
+        label: 'prod-db',
+        kind: 'ssh',
+        cwd: '/home/ops'
+      }
     })
     expect(input.registerTerminalForCodexBridge).toHaveBeenCalledWith(expect.objectContaining({ id: 'terminal-ipc-local', kind: 'ssh' }), {
       kind: 'ssh',
@@ -324,6 +360,33 @@ describe('terminal sessions IPC registrar', () => {
     )
     expect(noSessionInput.sessions.size).toBe(0)
     expect(noSessionInput.registerTerminalForCodexBridge).not.toHaveBeenCalled()
+  })
+
+  it('derives a stable opaque Classic targetId for ad-hoc SSH terminals without an asset', async () => {
+    const { registerTerminalSessionsIpc, stableClassicSshTargetId } = await loadBackend()
+    const { ipcMain, handlers } = createIpcHarness()
+    const input = createRegistrationInput()
+    registerTerminalSessionsIpc(ipcMain, input)
+    const options = {
+      kind: 'ssh' as const,
+      ssh: { host: 'adhoc.internal', port: 2222, username: 'deploy' }
+    }
+
+    const first = handlers.get('terminal:create')?.({ sender: {} }, options) as any
+    const second = handlers.get('terminal:create')?.({ sender: {} }, options) as any
+    const expectedTargetId = stableClassicSshTargetId({ host: 'adhoc.internal', port: 2222, username: 'deploy' })
+
+    expect(first.classicTarget).toMatchObject({
+      targetId: expectedTargetId,
+      terminalSessionId: 'terminal-ipc-local',
+      kind: 'ssh'
+    })
+    expect(second.classicTarget).toMatchObject({
+      targetId: expectedTargetId,
+      terminalSessionId: 'terminal-ipc-ssh',
+      kind: 'ssh'
+    })
+    expect(expectedTargetId).toMatch(/^ssh-[a-f0-9]{32}$/)
   })
 
   it('writes text to local and SSH sessions and records completed command lines', async () => {

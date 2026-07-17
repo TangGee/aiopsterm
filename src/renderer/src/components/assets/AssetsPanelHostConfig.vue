@@ -159,7 +159,7 @@
   <Teleport to="body">
     <AssetHostFormDialog
       :visible="editorOpen"
-      :title="editMode ? '编辑主机' : '新建主机'"
+      :title="editMode ? t('assets.hostConfig.editHostTitle') : t('assets.hostConfig.newHostTitle')"
       :asset-type="form.asset_type"
       :host-title="form.title"
       :host="form.host"
@@ -230,6 +230,9 @@ import {
 import AssetHostFormDialog, { type AssetHostFormField } from '@/components/assets/AssetHostFormDialog.vue'
 import AssetTreeGroupNode from '@/components/assets/AssetTreeGroupNode.vue'
 import { useAssetsPanelRuntimeContext } from '@/services/assets/assetsPanelContext'
+import { useI18n } from '@/i18n'
+
+const { t } = useI18n()
 
 const {
   assetQuery,

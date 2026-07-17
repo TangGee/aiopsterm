@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { PassThrough } from 'node:stream'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import { CLINE_AGENT_MAX_PROTOCOL_FRAME_BYTES } from '../src/shared/contracts/clineAgent'
 
 let ClineAgentSidecarSupervisor: any
 let resolveClineAgentSidecarLaunch: any
@@ -194,6 +195,26 @@ describe('Cline Agent sidecar supervisor', () => {
     expect(harness.onExit).toHaveBeenCalledWith(expect.objectContaining({ code: 0 }))
   })
 
+  it('accepts a complete protocol frame above the former 4 MiB limit', async () => {
+    const harness = createHarness()
+    await harness.supervisor.ensureStarted()
+    const payload = 'x'.repeat(4 * 1024 * 1024)
+    expect(Buffer.byteLength(payload, 'utf8')).toBeLessThan(CLINE_AGENT_MAX_PROTOCOL_FRAME_BYTES)
+    harness.child.sendFrame({
+      version: 1,
+      kind: 'callback',
+      id: 'large-callback',
+      callback: 'tool.execute',
+      payload: { value: payload }
+    })
+
+    await vi.waitFor(() => expect(harness.onCallback).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'large-callback',
+      payload: { value: payload }
+    })))
+    await harness.supervisor.shutdown()
+  })
+
   it('rejects an in-flight turn when the sidecar crashes', async () => {
     const harness = createHarness()
     await harness.supervisor.ensureStarted()
@@ -202,5 +223,73 @@ describe('Cline Agent sidecar supervisor', () => {
     harness.child.exitUnexpectedly()
     await expect(pending).rejects.toThrow('exited unexpectedly with code 7')
     expect(harness.onExit).toHaveBeenCalledWith(expect.objectContaining({ code: 7 }))
+  })
+
+  it('force-terminates an unresponsive sidecar and waits for process exit', async () => {
+    const harness = createHarness()
+    await harness.supervisor.ensureStarted()
+    const pendingStop = harness.supervisor.request('session.stop', { sessionId: 'session-stuck' })
+    void pendingStop.catch(() => undefined)
+    await vi.waitFor(() => expect(harness.writes).toContainEqual(expect.objectContaining({
+      method: 'session.stop',
+      payload: { sessionId: 'session-stuck' }
+    })))
+
+    await expect(harness.supervisor.forceTerminate('session.stop exceeded its grace period')).resolves.toBeUndefined()
+
+    expect(harness.child.kill).toHaveBeenCalledWith('SIGTERM')
+    expect(harness.onExit).toHaveBeenCalledWith(expect.objectContaining({ code: 0 }))
+    await expect(pendingStop).rejects.toThrow('Cline Agent sidecar stopped')
+  })
+
+  it('fails closed when a sidecar does not exit after SIGKILL isolation', async () => {
+    const harness = createHarness()
+    await harness.supervisor.ensureStarted()
+    harness.child.kill.mockImplementation(() => {
+      harness.child.killed = true
+      return true
+    })
+    vi.useFakeTimers()
+    try {
+      const forcing = harness.supervisor.forceTerminate('test an unkillable sidecar')
+      const rejection = expect(forcing).rejects.toThrow('did not exit after SIGKILL isolation')
+      await vi.advanceTimersByTimeAsync(4_000)
+      await rejection
+      expect(harness.child.kill).toHaveBeenNthCalledWith(1, 'SIGTERM')
+      expect(harness.child.kill).toHaveBeenNthCalledWith(2, 'SIGKILL')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('does not expire a session.send request while operator approval may still be pending', async () => {
+    const harness = createHarness()
+    await harness.supervisor.ensureStarted()
+    vi.useFakeTimers()
+    try {
+      let settled = false
+      const pending = harness.supervisor.request('session.send', { sessionId: 'session-1' })
+        .finally(() => {
+          settled = true
+        })
+      await Promise.resolve()
+      const request = harness.writes.find((frame) => frame.kind === 'request' && frame.method === 'session.send')
+      expect(request).toBeTruthy()
+
+      await vi.advanceTimersByTimeAsync(31 * 60_000)
+      expect(settled).toBe(false)
+
+      harness.child.sendFrame({
+        version: 1,
+        kind: 'response',
+        id: request.id,
+        ok: true,
+        result: { sessionId: 'session-1', finishReason: 'stop' }
+      })
+      await expect(pending).resolves.toMatchObject({ sessionId: 'session-1', finishReason: 'stop' })
+    } finally {
+      vi.useRealTimers()
+      await harness.supervisor.shutdown()
+    }
   })
 })

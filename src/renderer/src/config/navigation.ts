@@ -27,6 +27,9 @@ const terminalWorkspaceModules = new Set<ModuleKey>(['workspace', 'aiSessions', 
 
 export const isTerminalWorkspaceModule = (key: ModuleKey) => terminalWorkspaceModules.has(key)
 
+export const isTerminalWorkspaceSurfaceVisible = (mode: 'terminal' | 'agents', key: ModuleKey) =>
+  mode === 'agents' || isTerminalWorkspaceModule(key)
+
 export const menuItems: MenuItem[] = [
   { key: 'workspace', label: '工作区', labelKey: 'module.workspace', icon: Server, position: 'main' },
   { key: 'aiSessions', label: 'AI 会话', labelKey: 'module.aiSessions', icon: Bot, position: 'main' },

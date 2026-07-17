@@ -471,6 +471,7 @@ export const createWorkspaceQuickCommandsController = (
   }
 
   const recordMacroTerminalInput = (panelId: string, data: string, timestamp = Date.now()) => {
+    if (!macroRecording.value.isRecording || !data) return
     const result = recordMacroTerminalInputState(macroRecording.value, {
       panelId,
       data,

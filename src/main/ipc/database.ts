@@ -37,9 +37,11 @@ import type {
   DatabaseAiDrawerLifecycleInput,
   DatabaseAiDrawerRequestInput,
   DatabaseAiDrawerResponseInput,
+  DatabaseAiDrawerResponseResult,
   DatabaseAiPaneLifecycleInput,
   DatabaseAiPaneRequestInput,
   DatabaseAiPaneResponseInput,
+  DatabaseAiPaneResponseResult,
   DatabaseAiPaneStateSnapshot,
   DatabaseConnectionMoveInput,
   DatabaseConnectionSaveInput,
@@ -60,6 +62,9 @@ import type {
 
 type RegisterDatabaseIpcInput = {
   showSaveDialog: (options: { defaultPath: string; filters: Array<{ name: string; extensions: string[] }> }) => Promise<{ canceled?: boolean; filePath?: string }>
+  bindProductSession?: (input: DatabaseAiPaneResponseInput, result: DatabaseAiPaneResponseResult) => Promise<void> | void
+  bindDrawerProductSession?: (input: DatabaseAiDrawerResponseInput, result: DatabaseAiDrawerResponseResult) => Promise<void> | void
+  syncProductSessionState?: (state: DatabaseAiPaneStateSnapshot) => void
 }
 
 export const registerDatabaseIpc = (ipcMain: IpcMain, input: RegisterDatabaseIpcInput) => {
@@ -85,7 +90,11 @@ export const registerDatabaseIpc = (ipcMain: IpcMain, input: RegisterDatabaseIpc
   ipcMain.handle('database:comment:get', (_event, commentInput: DatabasePageCommentKey) => getDatabasePageComment(commentInput))
   ipcMain.handle('database:comment:save', (_event, commentInput: DatabasePageCommentSaveInput) => saveDatabasePageComment(commentInput))
   ipcMain.handle('database:ai-pane-state:get', () => getDatabaseAiPaneState())
-  ipcMain.handle('database:ai-pane-state:save', (_event, stateInput: DatabaseAiPaneStateSnapshot) => saveDatabaseAiPaneState(stateInput))
+  ipcMain.handle('database:ai-pane-state:save', (_event, stateInput: DatabaseAiPaneStateSnapshot) => {
+    const result = saveDatabaseAiPaneState(stateInput)
+    if (result.ok && result.data) input.syncProductSessionState?.(result.data)
+    return result
+  })
   ipcMain.handle('database:ai-pane-request', (event, requestInput: DatabaseAiPaneRequestInput) =>
     withClineAgentRendererOwner(event.sender.id, () => createDatabaseAiPaneRequest(requestInput))
   )
@@ -95,9 +104,14 @@ export const registerDatabaseIpc = (ipcMain: IpcMain, input: RegisterDatabaseIpc
   ipcMain.handle('database:ai-pane-cancel', (event, lifecycleInput: DatabaseAiPaneLifecycleInput) =>
     withClineAgentRendererOwner(event.sender.id, () => cancelDatabaseAiPaneResponse(lifecycleInput))
   )
-  ipcMain.handle('database:ai-pane-response', (event, responseInput: DatabaseAiPaneResponseInput) =>
-    withClineAgentRendererOwner(event.sender.id, () => generateDatabaseAiPaneResponse(responseInput))
-  )
+  ipcMain.handle('database:ai-pane-response', async (event, responseInput: DatabaseAiPaneResponseInput) => {
+    const result = await withClineAgentRendererOwner(
+      event.sender.id,
+      () => generateDatabaseAiPaneResponse(responseInput)
+    )
+    await input.bindProductSession?.(responseInput, result)
+    return result
+  })
   ipcMain.handle('database:ai-drawer-request', (event, requestInput: DatabaseAiDrawerRequestInput) =>
     withClineAgentRendererOwner(event.sender.id, () => createDatabaseAiDrawerRequest(requestInput))
   )
@@ -107,9 +121,18 @@ export const registerDatabaseIpc = (ipcMain: IpcMain, input: RegisterDatabaseIpc
   ipcMain.handle('database:ai-drawer-cancel', (event, lifecycleInput: DatabaseAiDrawerLifecycleInput) =>
     withClineAgentRendererOwner(event.sender.id, () => cancelDatabaseAiDrawerResponse(lifecycleInput))
   )
-  ipcMain.handle('database:ai-drawer-response', (event, responseInput: DatabaseAiDrawerResponseInput) =>
-    withClineAgentRendererOwner(event.sender.id, () => generateDatabaseAiDrawerResponse(responseInput))
-  )
+  ipcMain.handle('database:ai-drawer-response', async (event, responseInput: DatabaseAiDrawerResponseInput) => {
+    const result = await withClineAgentRendererOwner(
+      event.sender.id,
+      () => generateDatabaseAiDrawerResponse(responseInput)
+    )
+    const storedConversationId = result.data?.request.conversationId
+    await input.bindDrawerProductSession?.(
+      storedConversationId ? { ...responseInput, conversationId: storedConversationId } : responseInput,
+      result
+    )
+    return result
+  })
   ipcMain.handle('database:ai-diagnose-sql-error', (event, diagnosisInput: DatabaseSqlErrorDiagnosisInput) =>
     withClineAgentRendererOwner(event.sender.id, () => diagnoseDatabaseSqlError(diagnosisInput))
   )

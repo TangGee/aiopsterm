@@ -12,8 +12,9 @@ const labels: AiPanelHistoryRuntimeLabels = {
   chatCreateFailed: () => 'chat create failed',
   chatRestored: () => 'chat restored',
   chatRestoreFailed: () => 'chat restore failed',
-  keepOneTab: () => 'keep one tab',
   tabClosed: () => 'tab closed',
+  tabCloseFailed: () => 'tab close failed',
+  tabCloseRollbackFailed: () => 'tab close rollback failed',
   historyTitleUpdated: () => 'title updated',
   historyTitleUpdateFailed: () => 'title update failed',
   chatDeleted: () => 'chat deleted',
@@ -55,6 +56,11 @@ const createHarness = () => {
   const timers: Array<() => void> = []
   const calls = {
     createConversation: vi.fn(async () => ({ id: 'conv-new' })),
+    cancelActiveTurn: vi.fn(async () => true),
+    deselectConversation: vi.fn(async (_expectedConversationId: string) => {
+      selectedConversationId = ''
+      return true
+    }),
     restoreConversation: vi.fn(async (id: string) => {
       selectedConversationId = id
       return true
@@ -92,6 +98,8 @@ const createHarness = () => {
     currentConversationTitle: () => 'Current chat',
     exportMessages: calls.exportMessages,
     createConversation: calls.createConversation,
+    cancelActiveTurn: calls.cancelActiveTurn,
+    deselectConversation: calls.deselectConversation,
     restoreConversation: calls.restoreConversation,
     renameConversation: calls.renameConversation,
     deleteConversation: calls.deleteConversation,
@@ -175,8 +183,17 @@ describe('aiPanelHistoryRuntime', () => {
     setSelectedConversationId('conv-1')
     await runtime.closeConversationTab('conv-1')
     expect(state.openConversationTabIds).toEqual(['conv-2'])
+    expect(window.aiops.closeProductSession).toHaveBeenCalledWith('conv-1')
     expect(calls.restoreConversation).toHaveBeenCalledWith('conv-2')
+    expect(vi.mocked(window.aiops.closeProductSession).mock.invocationCallOrder.at(-1)).toBeLessThan(
+      calls.restoreConversation.mock.invocationCallOrder.at(-1)!
+    )
     expect(state.chatExportNotice).toBe('tab closed')
+
+    await runtime.restoreHistoryConversation('conv-1')
+    expect(calls.restoreConversation).toHaveBeenCalledWith('conv-1')
+    expect(state.openConversationTabIds).toEqual(['conv-2', 'conv-1'])
+    expect(state.historyMenuOpen).toBe(false)
 
     await runtime.editHistoryTitle('conv-2')
     expect(state.editingHistoryId).toBe('conv-2')
@@ -208,6 +225,209 @@ describe('aiPanelHistoryRuntime', () => {
     expect(state).toMatchObject({ historyCurrentPage: 1, editingHistoryId: null, editingHistoryTitle: '' })
   })
 
+  it('hydrates only open Classic product rows and reconciles a closed selected conversation', async () => {
+    const { calls, runtime, state } = createHarness()
+    state.openConversationTabIds = []
+    vi.mocked(window.aiops.listProductSessions).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        sessions: [
+          { id: 'conv-2', surface: 'classic', title: 'Second', isOpen: true, createdAt: 1, updatedAt: 4 },
+          { id: 'missing', surface: 'classic', title: 'Missing', isOpen: true, createdAt: 1, updatedAt: 3 },
+          { id: 'conv-1', surface: 'classic', title: 'First', isOpen: false, createdAt: 1, updatedAt: 2 }
+        ]
+      }
+    })
+
+    await expect(runtime.hydrateOpenConversationTabs()).resolves.toBe(true)
+
+    expect(window.aiops.listProductSessions).toHaveBeenCalledWith({ surface: 'classic', isOpen: true, limit: 200 })
+    expect(state.openConversationTabIds).toEqual(['conv-2'])
+    expect(calls.restoreConversation).toHaveBeenCalledWith('conv-2')
+    expect(calls.deselectConversation).not.toHaveBeenCalled()
+  })
+
+  it('clears a stale selected projection when the registry has no open Classic sessions', async () => {
+    const { calls, runtime, state } = createHarness()
+    vi.mocked(window.aiops.listProductSessions).mockResolvedValueOnce({
+      ok: true,
+      data: { sessions: [] }
+    })
+
+    await expect(runtime.hydrateOpenConversationTabs()).resolves.toBe(true)
+
+    expect(state.openConversationTabIds).toEqual([])
+    expect(calls.deselectConversation).toHaveBeenCalledWith('conv-1')
+    expect(calls.restoreConversation).not.toHaveBeenCalled()
+  })
+
+  it('keeps a Classic tab open when product close is rejected', async () => {
+    const { calls, runtime, state } = createHarness()
+    vi.mocked(window.aiops.closeProductSession).mockResolvedValueOnce({
+      ok: false,
+      errorCode: 'PRODUCT_SESSION_CLOSE_FAILED',
+      errorMessage: 'close rejected'
+    })
+
+    await runtime.closeConversationTab('conv-1')
+
+    expect(state.openConversationTabIds).toEqual(['conv-1', 'conv-2'])
+    expect(calls.restoreConversation).not.toHaveBeenCalled()
+    expect(state.chatExportNotice).toBe('close rejected')
+    expect(window.aiops.updateProductSession).toHaveBeenCalledWith({ id: 'conv-1', isOpen: true })
+  })
+
+  it('closes the final Classic tab into a persisted empty selection without deleting history', async () => {
+    const { calls, runtime, state, setSelectedConversationId } = createHarness()
+    state.openConversationTabIds = ['conv-1']
+    setSelectedConversationId('conv-1')
+
+    await runtime.closeConversationTab('conv-1')
+
+    expect(window.aiops.closeProductSession).toHaveBeenCalledWith('conv-1')
+    expect(calls.deselectConversation).toHaveBeenCalledWith('conv-1')
+    expect(calls.createConversation).not.toHaveBeenCalled()
+    expect(calls.deleteConversation).not.toHaveBeenCalled()
+    expect(state.openConversationTabIds).toEqual([])
+    expect(state.chatExportNotice).toBe('tab closed')
+    expect(vi.mocked(window.aiops.closeProductSession).mock.invocationCallOrder.at(-1)).toBeLessThan(
+      calls.deselectConversation.mock.invocationCallOrder.at(-1)!
+    )
+  })
+
+  it('reopens and reselects the final Classic tab when selection clearing fails', async () => {
+    const { calls, runtime, state, setSelectedConversationId } = createHarness()
+    state.openConversationTabIds = ['conv-1']
+    setSelectedConversationId('conv-1')
+    calls.deselectConversation.mockResolvedValueOnce(false)
+
+    await runtime.closeConversationTab('conv-1')
+
+    expect(window.aiops.updateProductSession).toHaveBeenCalledWith({ id: 'conv-1', isOpen: true })
+    expect(calls.restoreConversation).toHaveBeenCalledWith('conv-1')
+    expect(state.openConversationTabIds).toEqual(['conv-1'])
+    expect(state.chatExportNotice).toBe('tab close failed')
+  })
+
+  it('reports when a rejected Classic close cannot restore the product open state', async () => {
+    const { calls, runtime, state } = createHarness()
+    vi.mocked(window.aiops.closeProductSession).mockResolvedValueOnce({
+      ok: false,
+      errorCode: 'PRODUCT_SESSION_CLOSE_FAILED',
+      errorMessage: 'close rejected'
+    })
+    vi.mocked(window.aiops.updateProductSession).mockResolvedValueOnce({
+      ok: false,
+      errorCode: 'PRODUCT_SESSION_UPDATE_FAILED',
+      errorMessage: 'rollback rejected'
+    })
+
+    await runtime.closeConversationTab('conv-1')
+
+    expect(state.openConversationTabIds).toEqual(['conv-1', 'conv-2'])
+    expect(calls.restoreConversation).not.toHaveBeenCalled()
+    expect(state.chatExportNotice).toBe('tab close rollback failed')
+  })
+
+  it('coalesces concurrent Classic tab close requests', async () => {
+    const { runtime, state } = createHarness()
+    let resolveClose!: (value: Awaited<ReturnType<typeof window.aiops.closeProductSession>>) => void
+    vi.mocked(window.aiops.closeProductSession).mockImplementationOnce(() => new Promise((resolve) => {
+      resolveClose = resolve
+    }))
+
+    const firstClose = runtime.closeConversationTab('conv-1')
+    const duplicateClose = runtime.closeConversationTab('conv-1')
+
+    expect(window.aiops.closeProductSession).toHaveBeenCalledTimes(1)
+    expect(state.openConversationTabIds).toEqual(['conv-1', 'conv-2'])
+    resolveClose({ ok: true, data: { id: 'conv-1', stopped: true } })
+    await Promise.all([firstClose, duplicateClose])
+
+    expect(state.openConversationTabIds).toEqual(['conv-2'])
+    expect(window.aiops.updateProductSession).not.toHaveBeenCalled()
+  })
+
+  it('preserves a conversation opened while the final Classic product close is pending', async () => {
+    const { calls, runtime, state, setSelectedConversationId } = createHarness()
+    state.openConversationTabIds = ['conv-1']
+    setSelectedConversationId('conv-1')
+    let resolveClose!: (value: Awaited<ReturnType<typeof window.aiops.closeProductSession>>) => void
+    vi.mocked(window.aiops.closeProductSession).mockImplementationOnce(() => new Promise((resolve) => {
+      resolveClose = resolve
+    }))
+
+    const close = runtime.closeConversationTab('conv-1')
+    await vi.waitFor(() => expect(window.aiops.closeProductSession).toHaveBeenCalledWith('conv-1'))
+    state.openConversationTabIds = ['conv-1', 'conv-2']
+    setSelectedConversationId('conv-2')
+    resolveClose({ ok: true, data: { id: 'conv-1', stopped: true } })
+    await close
+
+    expect(state.openConversationTabIds).toEqual(['conv-2'])
+    expect(calls.deselectConversation).not.toHaveBeenCalled()
+    expect(calls.restoreConversation).not.toHaveBeenCalled()
+    expect(state.chatExportNotice).toBe('tab closed')
+  })
+
+  it('preserves a conversation opened while the final Classic selection clear is pending', async () => {
+    const { calls, runtime, state, setSelectedConversationId } = createHarness()
+    state.openConversationTabIds = ['conv-1']
+    setSelectedConversationId('conv-1')
+    let resolveDeselect!: (value: boolean) => void
+    calls.deselectConversation.mockImplementationOnce(() => new Promise((resolve) => {
+      resolveDeselect = resolve
+    }))
+
+    const close = runtime.closeConversationTab('conv-1')
+    await vi.waitFor(() => expect(calls.deselectConversation).toHaveBeenCalledWith('conv-1'))
+    state.openConversationTabIds = ['conv-1', 'conv-2']
+    setSelectedConversationId('conv-2')
+    resolveDeselect(true)
+    await close
+
+    expect(state.openConversationTabIds).toEqual(['conv-2'])
+    expect(calls.restoreConversation).not.toHaveBeenCalled()
+    expect(window.aiops.updateProductSession).not.toHaveBeenCalled()
+    expect(state.chatExportNotice).toBe('tab closed')
+  })
+
+  it('does not reopen a closed Classic tab when deselection loses a selection race', async () => {
+    const { calls, runtime, state, setSelectedConversationId } = createHarness()
+    state.openConversationTabIds = ['conv-1']
+    setSelectedConversationId('conv-1')
+    let resolveDeselect!: (value: boolean) => void
+    calls.deselectConversation.mockImplementationOnce(() => new Promise((resolve) => {
+      resolveDeselect = resolve
+    }))
+
+    const close = runtime.closeConversationTab('conv-1')
+    await vi.waitFor(() => expect(calls.deselectConversation).toHaveBeenCalledWith('conv-1'))
+    state.openConversationTabIds = ['conv-1', 'conv-2']
+    setSelectedConversationId('conv-2')
+    resolveDeselect(false)
+    await close
+
+    expect(state.openConversationTabIds).toEqual(['conv-2'])
+    expect(calls.restoreConversation).not.toHaveBeenCalled()
+    expect(window.aiops.updateProductSession).not.toHaveBeenCalled()
+    expect(state.chatExportNotice).toBe('tab closed')
+  })
+
+  it('keeps a Classic tab open when the product close bridge is unavailable', async () => {
+    const { calls, runtime, state } = createHarness()
+    const closeProductSession = window.aiops.closeProductSession
+    ;(window.aiops as { closeProductSession?: typeof closeProductSession }).closeProductSession = undefined
+    try {
+      await runtime.closeConversationTab('conv-1')
+      expect(state.openConversationTabIds).toEqual(['conv-1', 'conv-2'])
+      expect(calls.restoreConversation).not.toHaveBeenCalled()
+      expect(state.chatExportNotice).toBe('tab close failed')
+    } finally {
+      window.aiops.closeProductSession = closeProductSession
+    }
+  })
+
   it('exports the current chat through injected bridge validation', async () => {
     const { runtime, state, calls, setChatMessageCount, setExportBridge } = createHarness()
     await runtime.exportCurrentChat()
@@ -233,19 +453,22 @@ describe('aiPanelHistoryRuntime', () => {
     expect(state.chatExportNotice).toBe('export malformed')
   })
 
-  it('keeps the active conversation selected while an AI turn is running', async () => {
-    const { runtime, state, calls, setActiveTurn } = createHarness()
+  it('allows creating, switching, closing, and deleting while an AI turn is active', async () => {
+    const { runtime, state, calls, setActiveTurn, setSelectedConversationId } = createHarness()
     setActiveTurn(true)
 
-    expect(await runtime.createNewConversation()).toBe(false)
+    expect(await runtime.createNewConversation()).toBe(true)
     await runtime.restoreConversationFromTab('conv-2')
+    setSelectedConversationId('conv-1')
     await runtime.closeConversationTab('conv-1')
+    setSelectedConversationId('conv-2')
     await runtime.deleteHistoryConversation('conv-2')
 
-    expect(calls.createConversation).not.toHaveBeenCalled()
-    expect(calls.restoreConversation).not.toHaveBeenCalled()
-    expect(calls.deleteConversation).not.toHaveBeenCalled()
-    expect(state.openConversationTabIds).toEqual(['conv-1', 'conv-2'])
-    expect(state.chatExportNotice).toBe('active turn blocks navigation')
+    expect(calls.createConversation).toHaveBeenCalledOnce()
+    expect(calls.restoreConversation).toHaveBeenCalledWith('conv-2')
+    expect(calls.cancelActiveTurn).toHaveBeenCalledTimes(2)
+    expect(calls.deleteConversation).toHaveBeenCalledWith('conv-2')
+    expect(state.openConversationTabIds).toEqual(['conv-2'])
+    expect(state.chatExportNotice).toBe('chat deleted')
   })
 })

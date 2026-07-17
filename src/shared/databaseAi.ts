@@ -48,6 +48,7 @@ import {
 } from './databaseAiProviderRuntime'
 import {
   createDatabaseAiPaneMessageRecord,
+  deleteDatabaseAiPaneSessionProjection,
   findDatabaseAiDrawerRequest,
   findDatabaseAiPaneAssistantMessage,
   getDatabaseAiPaneStateSnapshot,
@@ -139,6 +140,13 @@ export function saveDatabaseAiPaneState(input: DatabaseAiPaneStateSnapshot): Dat
     ok: true,
     data: getDatabaseAiPaneStateSnapshot()
   }
+}
+
+export function deleteDatabaseAiPaneSession(conversationId: string) {
+  databaseAiEnsureStateLoaded()
+  const deleted = deleteDatabaseAiPaneSessionProjection(conversationId)
+  if (deleted) databaseAiPersistState()
+  return deleted
 }
 
 const databaseAiPaneContextSummary = (input: DatabaseAiPaneResponseInput) =>
@@ -277,6 +285,7 @@ const databaseAiDrawerErrorResponse = (
       existing ??
       storeDatabaseAiDrawerRequest({
         id: requestId || `dbai-drawer-request-${randomUUID()}`,
+        ...(trim(input.conversationId) ? { conversationId: trim(input.conversationId) } : {}),
         action: input.action,
         label: databaseAiDrawerActionName(input.action, responseLanguage),
         status: 'error',
@@ -495,6 +504,7 @@ const storeDatabaseAiDrawerDoneResponse = (
     ? updateDatabaseAiDrawerRequest({ requestId }, { status: 'done', text, targetDialect: dialect }, databaseAiNow)
     : storeDatabaseAiDrawerRequest({
         id: requestId || `dbai-drawer-request-${randomUUID()}`,
+        ...(trim(input.conversationId) ? { conversationId: trim(input.conversationId) } : {}),
         action: input.action,
         label: databaseAiDrawerActionName(input.action, normalizeDatabaseAiResponseLanguage(input.responseLanguage)),
         status: 'done',
@@ -568,6 +578,7 @@ async function generateProviderDatabaseAiDrawerResponse(
   }
   const providerResponse = await generateText({
     surface: 'drawer',
+    ...(trim(input.conversationId) ? { conversationId: trim(input.conversationId) } : {}),
     responseLanguage: normalizeDatabaseAiResponseLanguage(input.responseLanguage),
     modelName,
     prompt: databaseAiDrawerActionName(input.action, normalizeDatabaseAiResponseLanguage(input.responseLanguage)),
@@ -900,6 +911,7 @@ export async function createDatabaseAiDrawerRequest(input: DatabaseAiDrawerReque
 
   const request: DatabaseAiDrawerRequestRecord = {
     id: requestId,
+    ...(trim(input.conversationId) ? { conversationId: trim(input.conversationId) } : {}),
     action,
     label: databaseAiDrawerActionName(action, responseLanguage),
     status: 'queued',
@@ -947,6 +959,7 @@ export async function generateDatabaseAiDrawerResponse(input: DatabaseAiDrawerRe
   const storedRequest = requestId ? findDatabaseAiDrawerRequest({ requestId }) : null
   input = {
     ...input,
+    ...(storedRequest?.conversationId ? { conversationId: storedRequest.conversationId } : {}),
     responseLanguage: normalizeDatabaseAiResponseLanguage(storedRequest?.responseLanguage ?? input.responseLanguage)
   }
   const action = input.action
@@ -998,6 +1011,7 @@ export async function generateDatabaseAiDrawerResponse(input: DatabaseAiDrawerRe
       ? updateDatabaseAiDrawerRequest({ requestId }, { status: 'done', text, targetDialect: dialect }, databaseAiNow)
       : storeDatabaseAiDrawerRequest({
           id: requestId || `dbai-drawer-request-${randomUUID()}`,
+          ...(trim(input.conversationId) ? { conversationId: trim(input.conversationId) } : {}),
           action,
           label: databaseAiDrawerActionName(action, input.responseLanguage),
           status: 'done',

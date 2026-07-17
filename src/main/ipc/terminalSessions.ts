@@ -1,3 +1,4 @@
+import { createHash } from 'crypto'
 import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron'
 import type { UserConfig } from '@shared/contracts/userConfig'
 import type { RuntimeLogLevel } from '@shared/contracts/appRuntime'
@@ -12,6 +13,7 @@ import type {
   TerminalWriteResult
 } from '@shared/contracts/terminalSessions'
 import type { CodexSessionCreateOptions } from '@shared/contracts/codexSessions'
+import type { ClineAgentHostTarget } from '@shared/contracts/clineAgent'
 import { shouldUseTerminalDebugLogs } from '@shared/runtimeSwitches'
 
 type TerminalRuntimeProcess = {
@@ -29,6 +31,7 @@ export type TerminalSession = {
   window: BrowserWindow
   kind: 'local' | 'ssh'
   host?: string
+  classicTarget?: ClineAgentHostTarget
 }
 
 type LocalTerminalCreateResult = {
@@ -123,6 +126,34 @@ const normalizeTerminalCreateOptions = (inputOptions: TerminalCreateOptions, inp
   }
 }
 
+const cleanTargetText = (value: unknown) => String(value || '').trim()
+
+export const stableClassicSshTargetId = (input: { host: string; port: number; username: string }) => {
+  const identity = [cleanTargetText(input.host).toLowerCase(), Math.round(Number(input.port) || 22), cleanTargetText(input.username)].join('\u0000')
+  const digest = createHash('sha256').update(identity, 'utf8').digest('hex').slice(0, 32)
+  return `ssh-${digest}`
+}
+
+const classicSshTarget = (
+  terminalSessionId: string,
+  connection: TerminalSshConnectionInfo,
+  cwd: string
+): ClineAgentHostTarget => ({
+  targetId: cleanTargetText(connection.assetId) || stableClassicSshTargetId(connection),
+  terminalSessionId,
+  label: cleanTargetText(connection.assetName || connection.title) || `${connection.username}@${connection.host}`,
+  kind: 'ssh',
+  ...(cleanTargetText(cwd) ? { cwd: cleanTargetText(cwd) } : {})
+})
+
+const classicLocalTarget = (terminalSessionId: string, cwd: string): ClineAgentHostTarget => ({
+  targetId: 'opened-local',
+  terminalSessionId,
+  label: 'Local terminal',
+  kind: 'local',
+  ...(cleanTargetText(cwd) ? { cwd: cleanTargetText(cwd) } : {})
+})
+
 export const registerTerminalSessionsIpc = (ipcMain: IpcMain, input: RegisterTerminalSessionsIpcInput) => {
   const terminalDebugLogs = shouldUseTerminalDebugLogs()
   const logTerminalDebug = (event: string, details?: Record<string, unknown>) => {
@@ -154,6 +185,7 @@ export const registerTerminalSessionsIpc = (ipcMain: IpcMain, input: RegisterTer
     if (options.kind === 'ssh' || options.ssh || options.assetId) {
       const result = input.createSshTerminal(owner, id, options)
       const connection = input.createSshTerminalConnectionInfo(id, result.connection, options)
+      const classicTarget = result.session ? classicSshTarget(id, connection, result.cwd) : undefined
       if (result.session) {
         const terminalRecord: TerminalSession = {
           id,
@@ -162,7 +194,8 @@ export const registerTerminalSessionsIpc = (ipcMain: IpcMain, input: RegisterTer
           cwd: result.cwd,
           window: owner,
           kind: 'ssh',
-          host: result.connection.host
+          host: result.connection.host,
+          classicTarget
         }
         input.sessions.set(id, terminalRecord)
         input.registerTerminalForCodexBridge(terminalRecord, {
@@ -190,12 +223,14 @@ export const registerTerminalSessionsIpc = (ipcMain: IpcMain, input: RegisterTer
         shell: result.shell,
         cwd: result.cwd,
         kind: 'ssh' as const,
+        ...(classicTarget ? { classicTarget } : {}),
         connection,
         lifecycle: result.lifecycle
       }
     }
 
     const result = input.createLocalTerminal(owner, id, options)
+    const classicTarget = classicLocalTarget(id, result.cwd)
     const terminalRecord: TerminalSession = {
       id,
       process: result.session,
@@ -203,7 +238,8 @@ export const registerTerminalSessionsIpc = (ipcMain: IpcMain, input: RegisterTer
       cwd: result.cwd,
       window: owner,
       kind: 'local',
-      host: 'local'
+      host: 'local',
+      classicTarget
     }
     input.sessions.set(id, terminalRecord)
     input.registerTerminalForCodexBridge(terminalRecord, {
@@ -221,7 +257,7 @@ export const registerTerminalSessionsIpc = (ipcMain: IpcMain, input: RegisterTer
       runtimeKind: result.runtimeKind
     })
 
-    return { id, shell: result.shell, cwd: result.cwd, kind: 'local' as const, lifecycle: result.lifecycle }
+    return { id, shell: result.shell, cwd: result.cwd, kind: 'local' as const, classicTarget, lifecycle: result.lifecycle }
   })
 
   ipcMain.on('terminal:ack-data', (_event, id: string, bytes: number) => {
