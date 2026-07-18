@@ -178,29 +178,37 @@ export const createAiPanelComposerRuntime = (options: AiPanelComposerRuntimeOpti
     insertPlainTextAtCursor(event.clipboardData?.getData('text/plain') || '')
   }
 
-  const send = async () => {
-    const action = planAiPanelComposerSend({
-      streaming: options.streaming(),
-      noModelPrompt: options.noModelPrompt(),
-      chatMode: options.chatMode(),
-      agentMode: options.agentMode()
-    })
-    if (action.kind === 'cancel-streaming') {
-      await options.cancelStreaming()
-      return false
-    }
-    if (action.kind === 'notify-no-model') {
-      options.notify(action.message)
-      return false
-    }
+  let sendInFlight = false
 
-    const sent = await options.sendChat(options.draft(), options.extractContentParts(), action.mode)
-    if (!sent) return false
-    options.setImageInputParts([])
-    options.setFileInputParts([])
-    options.resetDraft('')
-    options.closePopups()
-    return true
+  const send = async () => {
+    if (sendInFlight) return false
+    sendInFlight = true
+    try {
+      const action = planAiPanelComposerSend({
+        streaming: options.streaming(),
+        noModelPrompt: options.noModelPrompt(),
+        chatMode: options.chatMode(),
+        agentMode: options.agentMode()
+      })
+      if (action.kind === 'cancel-streaming') {
+        await options.cancelStreaming()
+        return false
+      }
+      if (action.kind === 'notify-no-model') {
+        options.notify(action.message)
+        return false
+      }
+
+      const sent = await options.sendChat(options.draft(), options.extractContentParts(), action.mode)
+      if (!sent) return false
+      options.setImageInputParts([])
+      options.setFileInputParts([])
+      options.resetDraft('')
+      options.closePopups()
+      return true
+    } finally {
+      sendInFlight = false
+    }
   }
 
   return {

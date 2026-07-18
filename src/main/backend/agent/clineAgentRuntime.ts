@@ -563,7 +563,7 @@ const waitForAbortingTurn = async (sessionId: string, active: ActiveTurn) => {
   logRuntimeEvent('info', 'cline-agent.turn-abort-isolated', { taskId: active.taskId, turnId: active.turnId, sessionId })
 }
 
-const waitForSessionLifecycle = async (sessionId: string) => {
+const waitForSessionLifecycle = async (sessionId: string, register: () => void) => {
   const stopping = sessionStopsById.get(sessionId)
   if (stopping) {
     const stopped = await stopping
@@ -572,6 +572,7 @@ const waitForSessionLifecycle = async (sessionId: string) => {
   const active = activeTurnsBySession.get(sessionId)
   if (active) await waitForAbortingTurn(sessionId, active)
   if (activeTurnsBySession.has(sessionId)) throw new Error('This Cline Agent conversation already has an active turn.')
+  register()
 }
 
 const emitTaskEvent = (event: ClineAgentTaskEvent) => {
@@ -1241,8 +1242,6 @@ export const runClineAgentTurn = async (input: ClineAgentRunInput): Promise<Clin
   }
   const sessionId = safeSessionId(input.profile, input.conversationKey)
   const ownerWebContentsId = currentClineAgentRendererOwner()
-  await waitForSessionLifecycle(sessionId)
-  if (taskBindings.has(taskId)) throw new Error('This Cline Agent task id is already active.')
   const binding: AgentTaskBinding = {
     taskId,
     sessionId,
@@ -1253,7 +1252,6 @@ export const runClineAgentTurn = async (input: ClineAgentRunInput): Promise<Clin
     mcpResources,
     ...(database ? { database } : {})
   }
-  taskBindings.set(taskId, binding)
   let resolveSettled: () => void = () => undefined
   const settled = new Promise<void>((resolve) => {
     resolveSettled = resolve
@@ -1270,7 +1268,11 @@ export const runClineAgentTurn = async (input: ClineAgentRunInput): Promise<Clin
     settled,
     resolveSettled
   }
-  activeTurnsBySession.set(sessionId, active)
+  await waitForSessionLifecycle(sessionId, () => {
+    if (taskBindings.has(taskId)) throw new Error('This Cline Agent task id is already active.')
+    taskBindings.set(taskId, binding)
+    activeTurnsBySession.set(sessionId, active)
+  })
   const startInput: ClineAgentSessionStartInput = {
     sessionId,
     profile: input.profile,
