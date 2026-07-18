@@ -357,12 +357,20 @@ app.whenReady().then(async () => {
     userDataPath: app.getPath('userData'),
     emit: broadcastAiAgentSessionEvent
   })
-  await Promise.all([
-    settingsConfigRuntime.startSecurityConfigWatcher(),
-    settingsConfigRuntime.startKeywordHighlightConfigWatcher(),
-    settingsConfigRuntime.startMcpConfigWatcher(),
-    skillsRuntime.startSkillsWatcher()
-  ])
+  const watcherStarts = [
+    ['security-config', settingsConfigRuntime.startSecurityConfigWatcher()],
+    ['keyword-highlight-config', settingsConfigRuntime.startKeywordHighlightConfigWatcher()],
+    ['mcp-config', settingsConfigRuntime.startMcpConfigWatcher()],
+    ['skills', skillsRuntime.startSkillsWatcher()]
+  ] as const
+  const watcherResults = await Promise.allSettled(watcherStarts.map(([, start]) => start))
+  watcherResults.forEach((result, index) => {
+    if (result.status === 'fulfilled') return
+    logRuntimeEvent('warn', 'app.config-watcher.start-failed', {
+      watcher: watcherStarts[index][0],
+      error: result.reason
+    })
+  })
   appBootstrapRuntime.createWindow()
   appBootstrapRuntime.handleStartupDeepLink()
 
