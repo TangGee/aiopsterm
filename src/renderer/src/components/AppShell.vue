@@ -67,7 +67,7 @@
       </KeepAlive>
       <TerminalWorkspace v-show="showTerminalWorkspace" />
       <div
-        v-if="showRightPane"
+        v-show="showRightPane"
         class="layout-pane layout-pane-right ai-panel-pane"
         :style="{ width: `${displayRightPanelWidth}px` }"
         data-onboarding-id="right-ai-sidebar"
