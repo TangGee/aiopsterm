@@ -5,6 +5,7 @@ import { mkdir } from 'fs/promises'
 import type { BrowserWindow } from 'electron'
 import type { CodexSessionTargetContext } from '@shared/contracts/codexSessions'
 import { platformSocketPath } from '../app/platformRuntime'
+import { logRuntimeEvent } from '../app/runtimeLog'
 import type { TerminalBackgroundCommandOptions, TerminalBackgroundCommandResult } from '../terminal/terminal'
 
 export type CodexTerminalBridgeSession = {
@@ -1198,6 +1199,10 @@ export const callCodexTerminalBridgeTool = (
 ): Promise<CodexBridgeResponse> => handleBridgeRequest({ method, params })
 
 const writeSocketResponse = (socket: Socket, id: string | undefined, response: CodexBridgeResponse) => {
+  if (socket.destroyed || socket.writableEnded) {
+    logRuntimeEvent('warn', 'codex.terminal-bridge.response-dropped', { requestId: id, ok: response.ok, errorCode: response.errorCode })
+    return
+  }
   socket.write(`${JSON.stringify({ id, ...response })}\n`)
 }
 
@@ -1210,6 +1215,10 @@ export const ensureCodexTerminalBridgeServer = async (userDataPath: string) => {
   }
   server = createServer((socket) => {
     let buffer = ''
+    socket.on('error', (error) => {
+      logRuntimeEvent('warn', 'codex.terminal-bridge.socket-error', { error })
+      socket.destroy()
+    })
     socket.on('data', (chunk) => {
       buffer += chunk.toString('utf8')
       for (;;) {

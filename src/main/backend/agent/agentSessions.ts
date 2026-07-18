@@ -449,7 +449,11 @@ const upsertSessionForEvent = (event: AiAgentSessionEvent, raw: Record<string, u
   const nextAutoTitle = event.event === 'stop' ? autoTitleFor(event, existing) : existing?.autoTitle
   const title = existing?.userTitle || nextAutoTitle || event.title || existing?.title || sourceLabel(event.source)
   const handledAt = state === 'needsInput' ? undefined : existing?.handledAt
-  const pendingRequestId = state === 'needsInput' && event.actionable && event.requestId ? event.requestId : undefined
+  const pendingRequestId = state === 'needsInput'
+    ? event.actionable && event.requestId
+      ? event.requestId
+      : existing?.pendingRequestId
+    : undefined
   const requestKind = event.requestKind || existing?.requestKind || 'telemetry'
   const decisionMode = event.decisionMode || existing?.decisionMode || 'telemetry'
   const waitTimeoutMs = event.waitTimeoutMs || existing?.waitTimeoutMs
@@ -821,8 +825,7 @@ const isBlockingAgentEvent = (event: AiAgentSessionEvent, raw: Record<string, un
   event.source === 'claude-code' &&
   (event.requestKind === 'permission' || event.requestKind === 'question' || event.requestKind === 'plan') &&
   event.decisionMode === 'blocking' &&
-  event.actionable === true &&
-  Boolean(event.requestId || cleanOptionalText(raw.requestId || raw.request_id || raw.tool_use_id))
+  event.actionable === true
 
 const questionAnswersFromMessage = (raw: Record<string, unknown>, message?: string) => {
   const text = cleanText(message)
@@ -944,6 +947,9 @@ const publishAiAgentSessionSocketEvent = async (input: AiAgentSessionEventInput,
   const result = normalizeAiAgentSessionEventInput(input)
   if (!result.ok || !result.data) return result
   const raw = input as Record<string, unknown>
+  if (isBlockingAgentEvent(result.data, raw) && !result.data.requestId) {
+    result.data.requestId = randomUUID()
+  }
   const upsert = upsertSessionForEvent(result.data, raw)
   if (!upsert.applied) {
     const response: AgentSessionSocketResponse = { ...result, status: 'acknowledged' }
@@ -1171,6 +1177,8 @@ export const hibernateManagedAiSession = async (input: ManagedAiSessionHibernate
     hibernatedAt: now,
     hibernationReason: cleanOptionalText(input.reason) || 'manual',
     hibernatedTerminalSessionId: cleanOptionalText(input.terminalSessionId) || session.terminalSessionId,
+    panelId: undefined,
+    terminalSessionId: undefined,
     state: session.state === 'working' ? 'idle' : session.state,
     agentLifecycle: session.agentLifecycle === 'running' ? 'idle' : session.agentLifecycle,
     updatedAt: now
@@ -1338,7 +1346,7 @@ export const bulkManagedAiSessions = async (input: ManagedAiSessionBulkInput): P
     })
   } else if (operation === 'clear-ended') {
     sessions.forEach((session, key) => {
-      if (!matches(session) || session.state !== 'ended') return
+      if (!matches(session) || session.state !== 'ended' || session.hibernated) return
       changed += 1
       sessions.delete(key)
     })
@@ -1386,6 +1394,7 @@ export const jumpToUnreadManagedAiNotification = async (): Promise<ManagedAiNoti
 }
 
 const writeSocketResponse = (socket: Socket, response: AgentSessionSocketResponse) => {
+  if (socket.destroyed || socket.writableEnded) return
   socket.write(`${JSON.stringify(response)}\n`)
 }
 
@@ -1450,6 +1459,10 @@ export const ensureAiAgentSessionServer = async ({ userDataPath, emit }: AgentSe
   server = createServer((socket) => {
     socket.setEncoding('utf8')
     let buffer = ''
+    socket.on('error', (error) => {
+      logRuntimeEvent('warn', 'managed_ai.sessions.socket-error', { error })
+      socket.destroy()
+    })
     socket.on('data', (chunk) => {
       buffer += chunk
       let newlineIndex = buffer.indexOf('\n')

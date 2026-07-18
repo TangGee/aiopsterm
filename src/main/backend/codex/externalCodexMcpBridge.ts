@@ -16,6 +16,7 @@ import { isDatabaseMcpToolName } from '@shared/databaseMcpRuntime'
 import { createSshTerminalSession, resolveSshTerminalTarget, type SshTerminalSession } from '../ssh/sshTerminal'
 import { listAssets } from '../assets/assets'
 import { isWindowsPlatform } from '../app/platformRuntime'
+import { logRuntimeEvent } from '../app/runtimeLog'
 import { callDatabaseMcpTool } from '../database/databaseMcp'
 import { handleExternalCodexMcpManagedAiRequest } from './externalCodexMcpManagedAiRuntime'
 import {
@@ -812,6 +813,10 @@ export const handleExternalCodexMcpBridgeRequest = async (request: ExternalCodex
 }
 
 const writeSocketResponse = (socket: Socket, id: string | undefined, response: ExternalCodexMcpResponse) => {
+  if (socket.destroyed || socket.writableEnded) {
+    logRuntimeEvent('warn', 'external-codex-mcp.response-dropped', { requestId: id, ok: response.ok, errorCode: response.errorCode })
+    return
+  }
   socket.write(`${JSON.stringify({ id, ...response })}\n`)
 }
 
@@ -826,6 +831,10 @@ export const ensureExternalCodexMcpBridgeServer = async (config: ExternalCodexMc
   }
   server = createServer((socket) => {
     let buffer = ''
+    socket.on('error', (error) => {
+      logRuntimeEvent('warn', 'external-codex-mcp.socket-error', { error })
+      socket.destroy()
+    })
     socket.on('data', (chunk) => {
       buffer += chunk.toString('utf8')
       for (;;) {

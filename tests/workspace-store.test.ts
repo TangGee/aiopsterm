@@ -2105,6 +2105,37 @@ describe('workspace store', () => {
     expect(store.chatMessages.some((message) => message.text.includes('后台完成巡检'))).toBe(true)
   })
 
+  it('keeps an exchange attached to its originating conversation when selection changes before creation returns', async () => {
+    const store = useWorkspaceStore()
+    const createExchange = vi.mocked(window.aiops.createAiChatExchangeRequest)
+    const defaultImplementation = createExchange.getMockImplementation()!
+    let releaseExchange: (() => void) | undefined
+    createExchange.mockImplementationOnce(async (input) => {
+      await new Promise<void>((resolve) => {
+        releaseExchange = resolve
+      })
+      return defaultImplementation(input)
+    })
+
+    const pendingSend = store.sendChat('保持在原会话')
+    await vi.waitFor(() => expect(releaseExchange).toBeTypeOf('function'))
+    const originatingConversationId = store.selectedConversationId
+    const created = await store.createConversation()
+    expect(created?.id).not.toBe(originatingConversationId)
+    expect(store.chatMessages).toEqual([])
+
+    releaseExchange?.()
+    await expect(pendingSend).resolves.toBe(true)
+    expect(store.selectedConversationId).toBe(created?.id)
+    expect(store.chatMessages).toEqual([])
+
+    await expect(store.restoreConversation(originatingConversationId)).resolves.toBe(true)
+    expect(store.chatMessages).toEqual(expect.arrayContaining([
+      expect.objectContaining({ role: 'user' })
+    ]))
+    expect(store.chatMessages[0].text).toContain('保持在原会话')
+  })
+
   it('reattaches a cached Cline turn when deleting another conversation restores it', async () => {
     const store = useWorkspaceStore()
     let resolveResponse: ((result: any) => void) | undefined

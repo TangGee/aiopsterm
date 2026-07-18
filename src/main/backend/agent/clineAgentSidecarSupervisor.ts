@@ -246,6 +246,17 @@ export class ClineAgentSidecarSupervisor {
     }
   }
 
+  private killStartupChild(child: ChildProcessWithoutNullStreams) {
+    child.kill()
+    const forceTimer = setTimeout(() => {
+      if (child.exitCode !== null || child.signalCode !== null) return
+      this.log('warn', 'cline-agent.sidecar.startup-kill-escalated', { pid: child.pid })
+      child.kill('SIGKILL')
+    }, TERMINATE_TIMEOUT_MS)
+    forceTimer.unref?.()
+    child.once('exit', () => clearTimeout(forceTimer))
+  }
+
   private handleExit(code: number | null, signal: NodeJS.Signals | null) {
     const wasStopping = this.stopping
     const error = new Error(
@@ -306,28 +317,39 @@ export class ClineAgentSidecarSupervisor {
       }) as ChildProcessWithoutNullStreams
       this.process = child
       this.stderrTail = ''
+      this.inputBuffer = ''
+      this.inputBufferBytes = 0
       child.stdout.setEncoding('utf8')
       this.log('info', 'cline-agent.sidecar.start', { source: launch.source, pid: child.pid })
       child.stdout.on('data', (chunk) => {
+        if (this.process !== child) {
+          this.log('debug', 'cline-agent.sidecar.stale-stdout', { pid: child.pid })
+          return
+        }
         try {
           this.handleStdout(chunk)
           if (this.ready) finish(() => resolve(this.ready as ClineAgentSidecarReady))
         } catch (error) {
           finish(() => reject(error instanceof Error ? error : new Error(errorMessage(error))))
-          child.kill()
+          this.killStartupChild(child)
         }
       })
       child.stderr.on('data', (chunk) => {
+        if (this.process !== child) return
         this.stderrTail = `${this.stderrTail}${chunk.toString()}`.slice(-MAX_STDERR_TAIL_CHARS)
       })
       child.once('error', (error) => finish(() => reject(error)))
       child.once('exit', (code, signal) => {
         if (!settled) finish(() => reject(new Error(`Cline Agent sidecar exited before ready: ${this.stderrTail}`)))
+        if (this.process !== child) {
+          this.log('info', 'cline-agent.sidecar.stale-exit', { pid: child.pid, code, signal })
+          return
+        }
         this.handleExit(code, signal)
       })
       timer = setTimeout(() => {
         finish(() => reject(new Error('Cline Agent sidecar startup timed out.')))
-        child.kill()
+        this.killStartupChild(child)
       }, START_TIMEOUT_MS)
       timer.unref?.()
     }).finally(() => {

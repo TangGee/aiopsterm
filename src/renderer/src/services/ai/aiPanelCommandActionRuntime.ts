@@ -467,7 +467,10 @@ export const createAiPanelCommandActionRuntime = (options: AiPanelCommandActionR
       options.notify(sessionAutoRunEnabled ? labels.readOnlyAutoRunOutputReturnedNotice() : labels.commandOutputReturnedNotice())
       return loopResult
     }
-    options.notify(aiPanelCommandLoopResultReason(loopResult) || labels.commandTerminalUnavailable())
+    const failureMessage = aiPanelCommandLoopResultReason(loopResult) || labels.commandTerminalUnavailable()
+    setAiPanelCommandExecutionState(message, 'failed', failureMessage, command)
+    persistCommandExecutionState()
+    options.notify(failureMessage)
     return loopResult
   }
 

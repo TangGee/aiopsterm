@@ -1567,7 +1567,9 @@ describe('agent session backend', () => {
             id: 'codex-hibernate-1',
             hibernated: true,
             hibernationReason: 'manual-test',
-            hibernatedTerminalSessionId: 'terminal-session-1'
+            hibernatedTerminalSessionId: 'terminal-session-1',
+            panelId: undefined,
+            terminalSessionId: undefined
           })
         })
       })
@@ -2448,6 +2450,38 @@ describe('agent session backend', () => {
           })
         ])
       )
+    } finally {
+      closeAiAgentSessionServer()
+    }
+  })
+
+  it('waits for actionable Claude decisions when the hook payload has no request id', async () => {
+    const { ensureAiAgentSessionServer, closeAiAgentSessionServer, listManagedAiSessions, replyManagedAiSession } = await loadBackend()
+    const userDataPath = await mkdtemp(join(tmpdir(), 'aiopsterm-agent-socket-generated-request-'))
+    const socketPath = await ensureAiAgentSessionServer({ userDataPath, emit: vi.fn() })
+    try {
+      const responsePromise = socketRequest(socketPath, {
+        source: 'claude-code',
+        event: 'PermissionRequest',
+        session_id: 'claude-blocking-generated-1',
+        waitForDecision: true,
+        waitTimeoutMs: 5000,
+        actionable: true,
+        tool_name: 'Bash',
+        tool_input: { command: 'npm test' }
+      })
+
+      await vi.waitFor(async () => {
+        const snapshot = (await listManagedAiSessions()) as any
+        expect(snapshot.data.sessions[0]).toMatchObject({
+          id: 'claude-blocking-generated-1',
+          state: 'needsInput',
+          decisionMode: 'blocking'
+        })
+        expect(snapshot.data.sessions[0].pendingRequestId).toEqual(expect.any(String))
+      })
+      await replyManagedAiSession({ source: 'claude-code', sessionId: 'claude-blocking-generated-1', kind: 'allow' })
+      await expect(responsePromise).resolves.toMatchObject({ status: 'resolved' })
     } finally {
       closeAiAgentSessionServer()
     }

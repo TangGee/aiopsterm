@@ -1068,7 +1068,6 @@ export const createAiPanelCodexConversationRuntime = (options: AiPanelCodexConve
     stopProductSessionChanged?.()
     codexConversations.value.forEach((conversation) => {
       options.removeAiAttentionItem(codexAttentionId(conversation))
-      void aiPanelCodexTerminalRuntime.stopSession(conversation)
       aiPanelCodexTerminalRuntime.disposeConversation(conversation)
     })
     aiPanelCodexTerminalRuntime.disposeSubscriptions()

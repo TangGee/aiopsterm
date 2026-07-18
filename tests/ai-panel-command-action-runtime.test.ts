@@ -691,6 +691,19 @@ describe('aiPanelCommandActionRuntime', () => {
     expect(notices.at(-1)).toBe('命令输出已回传 Agent，正在继续分析。')
   })
 
+  it('settles the command as failed when the agent loop does not continue', async () => {
+    const { messages, notices, runtime } = createHarness({
+      chatMode: 'agent',
+      loopResult: { status: 'cancelled', reason: 'Agent loop cancelled.' }
+    })
+    const message = messages()[1]
+
+    await expect(runtime.runMessageCommand(message)).resolves.toMatchObject({ status: 'cancelled' })
+    expect(message.commandExecutionStatus).toBe('failed')
+    expect(message.commandExecutionMessage).toBe('Agent loop cancelled.')
+    expect(notices.at(-1)).toBe('Agent loop cancelled.')
+  })
+
   it('enables read-only auto-run when explicitly requested in agent mode', async () => {
     const { calls, messages, notices, runtime } = createHarness({ chatMode: 'agent' })
     const message = messages()[1]

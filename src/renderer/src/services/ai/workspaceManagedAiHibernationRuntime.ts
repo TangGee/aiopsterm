@@ -111,11 +111,30 @@ export const createWorkspaceManagedAiHibernationRuntime = (input: {
     const targetId = session.panelId || session.terminalSessionId
     const panel = targetId ? panels.value.find((item) => item.id === targetId || item.sessionId === targetId) : null
     const terminalSessionId = panel?.sessionId || session.terminalSessionId
+    const hibernateManagedAiSessionBridge = managedAiClient.hibernateManagedAiSession()
+    if (!hibernateManagedAiSessionBridge) {
+      setTopNotice(i18nText('settings.ai.hibernation.serviceUnavailable'))
+      return false
+    }
     const killTerminal = terminalClient.killTerminal()
     if (terminalSessionId && killTerminal) {
-      const killResult = await killTerminal(terminalSessionId)
-      if (!killResult?.ok) {
-        setTopNotice(killResult?.errorMessage || i18nText('aiSessions.notice.hibernateFailed'))
+      // 先解绑终端引用再杀终端，避免随后的终端关闭事件把休眠会话标记为 ended
+      const previousPanelId = session.panelId
+      const previousTerminalSessionId = session.terminalSessionId
+      session.panelId = undefined
+      session.terminalSessionId = undefined
+      try {
+        const killResult = await killTerminal(terminalSessionId)
+        if (!killResult?.ok) {
+          session.panelId = previousPanelId
+          session.terminalSessionId = previousTerminalSessionId
+          setTopNotice(killResult?.errorMessage || i18nText('aiSessions.notice.hibernateFailed'))
+          return false
+        }
+      } catch (error) {
+        session.panelId = previousPanelId
+        session.terminalSessionId = previousTerminalSessionId
+        setTopNotice(error instanceof Error ? error.message : i18nText('aiSessions.notice.hibernateFailed'))
         return false
       }
       if (panel?.sessionId === terminalSessionId) {
@@ -123,20 +142,20 @@ export const createWorkspaceManagedAiHibernationRuntime = (input: {
         panel.status = 'closed'
       }
     }
-    const hibernateManagedAiSessionBridge = managedAiClient.hibernateManagedAiSession()
-    if (!hibernateManagedAiSessionBridge) {
-      setTopNotice(i18nText('settings.ai.hibernation.serviceUnavailable'))
+    try {
+      const result = (await hibernateManagedAiSessionBridge({ source, sessionId, reason, terminalSessionId })) as ManagedAiSessionHibernateResult
+      if (!result?.ok || !isManagedAiSessionHibernateData(result.data)) {
+        setTopNotice(result?.errorMessage || i18nText('aiSessions.notice.hibernateFailed'))
+        return false
+      }
+      agentHibernationConfig.value = { ...result.data.config }
+      applyManagedAiSessionSnapshot(result.data.snapshot)
+      setTopNotice(i18nText('aiSessions.notice.hibernated'))
+      return true
+    } catch (error) {
+      setTopNotice(error instanceof Error ? error.message : i18nText('aiSessions.notice.hibernateFailed'))
       return false
     }
-    const result = (await hibernateManagedAiSessionBridge({ source, sessionId, reason, terminalSessionId })) as ManagedAiSessionHibernateResult
-    if (!result?.ok || !isManagedAiSessionHibernateData(result.data)) {
-      setTopNotice(result?.errorMessage || i18nText('aiSessions.notice.hibernateFailed'))
-      return false
-    }
-    agentHibernationConfig.value = { ...result.data.config }
-    applyManagedAiSessionSnapshot(result.data.snapshot)
-    setTopNotice(i18nText('aiSessions.notice.hibernated'))
-    return true
   }
 
   const resumeManagedAiSession = async (source: AiAgentSessionSource, sessionId: string) => {

@@ -1025,6 +1025,7 @@ export const createWorkspaceAiChatController = (
         return false
       }
     }
+    const originatingMessages = chatMessages.value.map((message) => cloneStructuredValue(message))
     const responseMode = options.mode || (mode.value === 'agents' ? 'agent' : 'command')
     const initialSelectedContexts = sendableClassicSessionContexts(selectedContexts.value)
     const initialOverrideHosts = overrideHosts ? sendableClassicSessionContexts(overrideHosts) : undefined
@@ -1038,7 +1039,7 @@ export const createWorkspaceAiChatController = (
     )
     if (!productSession) return false
     conversationId = productSession.conversationId
-    const sendableSelectedContexts = sendableClassicSessionContexts(selectedContexts.value)
+    const sendableSelectedContexts = initialSelectedContexts
     const sendableOverrideHosts = initialOverrideHosts
     const baseMessageContexts = sendableOverrideHosts
       ? [...sendableOverrideHosts, ...sendableSelectedContexts.filter((item) => item.kind !== 'hosts')]
@@ -1070,7 +1071,7 @@ export const createWorkspaceAiChatController = (
     const commandDisplay = selectedCommandRef.value?.label || selectedCommandRef.value?.command || selectedCommandId.value
     const revisionFromMessageId = options.revisionFromMessageId?.trim() || ''
     const replaceNativeTranscript = revisionFromMessageId ? true : options.replaceNativeTranscript === true
-    const historyForBackend: AiChatMessageInput[] = currentClineSeedMessages().map(clineSeedInputFromMessage)
+    const historyForBackend: AiChatMessageInput[] = originatingMessages.map(clineSeedInputFromMessage)
     const hostContexts = productSession.hostContexts
     const hostTargets = productSession.hostTargets
     const exchangeBridge = aiChatClient.createAiChatExchangeRequest()
@@ -1162,14 +1163,17 @@ export const createWorkspaceAiChatController = (
         return false
       }
     }
-    chatMessages.value.push(userMessage)
-    chatMessages.value.push(assistantMessage)
-    if (revisionFromMessageId) applyProjectionRevisionWindow()
+    const conversationMessages = selectedConversationId.value === conversationId
+      ? chatMessages.value
+      : originatingMessages
+    conversationMessages.push(userMessage)
+    conversationMessages.push(assistantMessage)
+    if (revisionFromMessageId && selectedConversationId.value === conversationId) applyProjectionRevisionWindow()
     const responseRequestId = request.data.responseInput.requestId?.trim() || request.data.requestId
     registerClineConversationMessages(
       conversationId,
       { taskId: responseRequestId, turnId: assistantMessage.id },
-      chatMessages.value,
+      conversationMessages,
       responseMode
     )
     void refreshAiTodoSnapshot()
@@ -1178,7 +1182,11 @@ export const createWorkspaceAiChatController = (
       requestId: request.data.responseInput.requestId || request.data.requestId,
       assistantMessageId: request.data.responseInput.assistantMessageId || assistantMessage.id
     })
-    await updateCurrentConversationSnapshot(prompt, { notifyFailure: true, notifyUnavailable: true })
+    await updateConversationSnapshot(conversationId, conversationMessages, prompt, {
+      notifyFailure: true,
+      notifyUnavailable: true,
+      preserveSelection: true
+    })
     return true
   }
 

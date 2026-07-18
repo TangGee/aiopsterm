@@ -180,6 +180,7 @@ const textByteLength = (value: string) => new TextEncoder().encode(value).length
 export const createAiPanelCodexTerminalRuntime = <TConversation extends AiPanelCodexTerminalConversation>(
   options: AiPanelCodexTerminalRuntimeOptions<TConversation>
 ) => {
+  const cancelledStarts = new WeakSet<TConversation>()
   const client = options.client || codexSessionClient
   const log = options.log || writeRendererRuntimeLog
   const terminalDebugLogs = shouldUseTerminalDebugLogs()
@@ -854,6 +855,7 @@ export const createAiPanelCodexTerminalRuntime = <TConversation extends AiPanelC
   }
 
   const startSession = async (conversation: TConversation) => {
+    cancelledStarts.delete(conversation)
     const target = options.currentBoundTarget(conversation)
     if (!target) {
       conversation.status = 'idle'
@@ -895,6 +897,14 @@ export const createAiPanelCodexTerminalRuntime = <TConversation extends AiPanelC
           projectRoot: conversation.projectRoot || target.cwd,
           launch
         })
+        if (cancelledStarts.has(conversation)) {
+          cancelledStarts.delete(conversation)
+          const killCodexSession = client.killCodexSession()
+          if (killCodexSession) await killCodexSession(session.id)
+          removePendingStartConversation(conversation)
+          conversation.status = 'closed'
+          return
+        }
         const recoveredFromThreadId = String(session.recoveredFromThreadId || '').trim()
         if (recoveredFromThreadId && recoveredFromThreadId === conversation.nativeThreadId) {
           conversation.nativeThreadId = undefined
@@ -938,7 +948,10 @@ export const createAiPanelCodexTerminalRuntime = <TConversation extends AiPanelC
   const stopSession = async (conversation: TConversation | null = options.activeConversation()) => {
     const sessionId = conversation?.sessionId
     const killCodexSession = client.killCodexSession()
-    if (!sessionId) return { ok: true, data: { id: '' } } satisfies CodexSessionKillResult
+    if (!sessionId) {
+      if (conversation?.startPromise) cancelledStarts.add(conversation)
+      return { ok: true, data: { id: '' } } satisfies CodexSessionKillResult
+    }
     if (!killCodexSession) {
       const result = {
         ok: false,

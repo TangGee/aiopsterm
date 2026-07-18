@@ -603,6 +603,38 @@ describe('aiPanelCodexTerminalRuntime', () => {
     })
   })
 
+  it('kills a session that finishes starting after the conversation was stopped', async () => {
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const conversation = createConversation()
+    const clientBundle = createClient()
+    let resolveCreateSession: ((session: CodexSessionInfo) => void) | undefined
+    clientBundle.bridges.createCodexSessionBridge.mockImplementationOnce(
+      () => new Promise<CodexSessionInfo>((resolve) => {
+        resolveCreateSession = resolve
+      })
+    )
+    const { runtime } = createRuntime(conversation, clientBundle)
+    runtime.setHostElement(conversation, host)
+
+    const starting = runtime.startSession(conversation)
+    await Promise.resolve()
+    await expect(runtime.stopSession(conversation)).resolves.toEqual({ ok: true, data: { id: '' } })
+    resolveCreateSession?.({
+      id: 'codex-session-late',
+      cwd: '/repo',
+      codexHome: '/tmp/codex',
+      runtimeKind: 'pty',
+      binaryPath: '/usr/bin/codex',
+      lifecycle: { id: 'codex-session-late', stage: 'ready', at: 1 }
+    })
+    await starting
+
+    expect(clientBundle.bridges.killCodexSessionBridge).toHaveBeenCalledWith('codex-session-late')
+    expect(conversation.sessionId).toBe('')
+    expect(conversation.status).toBe('closed')
+  })
+
   it('updates only the matching renderer tab when a codex:thread event binds a native thread', () => {
     const first = createConversation()
     const second = createConversation({ ...target, sessionId: 'terminal-2', panelId: 'panel-2', label: 'Second terminal' })

@@ -1496,6 +1496,75 @@ describe('external Codex MCP bridge runtime', () => {
     }
   })
 
+  it('keeps serving after a socket client disconnects before its response is written', async () => {
+    const { assets, sshTerminal, bridge } = await loadBackends()
+    activeBridge = bridge
+    activeSshTerminal = sshTerminal
+    const ssh = createSshRuntime({ manualReady: true })
+    sshTerminal.configureSshTerminalBackendRuntime({
+      ssh2Runtime: ssh.runtime as never,
+      getAsset: (id: string) => assets.getAsset(id),
+      getAssetSecret: (id: string) => assets.getAssetSecret(id),
+      getKeychainSecret: () => ({}),
+      getConfig: () => ({ sshProxyConfigs: [], sshAgentKeys: [], terminal: { sshAgentsStatus: false } })
+    })
+    const root = await mkdtemp(join(tmpdir(), 'aiopsterm-external-mcp-disconnect-'))
+    const socketPath = join(root, 'external.sock')
+    const saved = assets.saveAsset({
+      name: 'disconnect-host',
+      title: 'Disconnect Host',
+      host: '10.91.0.21',
+      username: 'ops',
+      port: 22,
+      asset_type: 'person',
+      auth_type: 'password',
+      group: '测试',
+      group_name: '测试',
+      tags: ['disconnect'],
+      password: 'ops-secret'
+    })
+
+    try {
+      await bridge.ensureExternalCodexMcpBridgeServer({
+        enabled: true,
+        token: 'test-token',
+        socketPath,
+        userDataPath: root
+      })
+
+      const client = createConnection(socketPath)
+      client.on('error', () => undefined)
+      await new Promise<void>((resolve) => client.on('connect', () => resolve()))
+      client.write(
+        `${JSON.stringify({ id: 'connect-drop', method: 'connect_host', token: 'test-token', params: { assetId: saved.data!.id, timeoutMs: 1000 } })}\n`
+      )
+      await waitFor(() => ssh.clients.length === 1)
+      client.destroy()
+
+      await new Promise((resolve) => setTimeout(resolve, 1500))
+      expect(bridge.__getExternalCodexMcpConnectionCountForTests()).toBe(0)
+
+      const listResponse = await socketRequest(socketPath, {
+        id: 'list-hosts-after-drop',
+        method: 'list_hosts',
+        token: 'test-token',
+        params: { query: 'disconnect' }
+      })
+      expect(listResponse).toEqual(
+        expect.objectContaining({
+          id: 'list-hosts-after-drop',
+          ok: true,
+          data: expect.objectContaining({
+            hosts: [expect.objectContaining({ assetId: saved.data!.id })]
+          })
+        })
+      )
+    } finally {
+      bridge.closeExternalCodexMcpBridgeServer()
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   it('uses a stable default socket path across app restarts', async () => {
     const { bridge } = await loadBackends()
     activeBridge = bridge

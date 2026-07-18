@@ -224,7 +224,7 @@ export const createWorkspaceManagedAiSessionRuntime = (input: {
     input: { summary: string; receivedAt?: number; terminalSessionId?: string }
   ) => {
     const current = managedAiSessions.value.find((item) => item.source === session.source && item.id === session.id)
-    if (!current || current.state === 'ended') return false
+    if (!current || current.state === 'ended' || current.hibernated) return false
     const terminalSessionId = input.terminalSessionId || current.terminalSessionId
     const event: AiAgentSessionEvent = {
       source: current.source,
