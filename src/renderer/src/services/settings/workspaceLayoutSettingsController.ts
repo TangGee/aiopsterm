@@ -135,7 +135,7 @@ export const createWorkspaceLayoutSettingsController = (
   }
 
   const toggleRight = async () => {
-    if (mode.value !== 'terminal' || activeModule.value === 'database' || activeModule.value === 'user') return false
+    if (mode.value === 'terminal' && (activeModule.value === 'database' || activeModule.value === 'user')) return false
     const nextOpen = !rightPanelOpen.value
     const saved = await persistLayoutPreferences({ rightPanelOpen: nextOpen })
     if (saved) setTopNotice(`AI 侧栏已${rightPanelOpen.value ? '打开' : '关闭'}`)
@@ -181,7 +181,7 @@ export const createWorkspaceLayoutSettingsController = (
   }
 
   const quickCloseRightPanel = async () => {
-    if (mode.value !== 'terminal' || activeModule.value === 'database' || activeModule.value === 'user') return false
+    if (mode.value === 'terminal' && (activeModule.value === 'database' || activeModule.value === 'user')) return false
     const saved = await persistLayoutPreferences({ rightPanelOpen: false })
     if (saved) setTopNotice('AI 侧栏已关闭')
     return saved

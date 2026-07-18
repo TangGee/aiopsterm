@@ -985,6 +985,17 @@ describe('AppShell', () => {
     expect(wrapper.find('.terminal-workspace').element === terminalWorkspaceElement).toBe(true)
     expect(wrapper.find('.ai-panel').element === aiPanelElement).toBe(true)
     expect(wrapper.findComponent(AiPanel).props('agentMode')).toBe(true)
+    expect(wrapper.find('.right-ai-toggle').exists()).toBe(true)
+
+    await store.toggleRight()
+    await flushPromises()
+    expect(wrapper.find('.ai-panel-pane').isVisible()).toBe(false)
+    expect(wrapper.find('.ai-panel').element === aiPanelElement).toBe(true)
+
+    await store.toggleRight()
+    await flushPromises()
+    expect(wrapper.find('.ai-panel-pane').isVisible()).toBe(true)
+    expect(wrapper.find('.ai-panel').element === aiPanelElement).toBe(true)
 
     store.mode = 'terminal'
     await flushPromises()

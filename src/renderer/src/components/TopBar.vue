@@ -47,7 +47,6 @@
         <PanelLeftClose v-else />
       </button>
       <button
-        v-if="workspace.mode === 'terminal'"
         class="icon-button layout-toggle right-ai-toggle"
         data-onboarding-id="right-ai-toggle"
         :class="{ collapsed: isRightCollapsed }"
@@ -127,7 +126,9 @@ let stopUnmaximized: (() => void) | undefined
 const isMac = computed(() => platform.value.includes('darwin'))
 const isLeftCollapsed = computed(() => (workspace.mode === 'agents' ? !workspace.agentsLeftOpen : !workspace.leftPanelOpen))
 const isRightCollapsed = computed(() => !workspace.rightPanelOpen)
-const rightToggleDisabled = computed(() => workspace.activeModule === 'database' || workspace.activeModule === 'user')
+const rightToggleDisabled = computed(() =>
+  workspace.mode === 'terminal' && (workspace.activeModule === 'database' || workspace.activeModule === 'user')
+)
 const leftToggleTitle = computed(() =>
   workspace.mode === 'agents'
     ? isLeftCollapsed.value
