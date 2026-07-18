@@ -24,7 +24,7 @@ export const zhCN = {
   'common.submit': '提交',
   'common.system': '系统',
   'common.unknown': '未知',
-  'module.agents': 'Agents',
+  'module.agents': '主机 Agents',
   'module.workspace': '工作区',
   'module.aiSessions': 'AI 会话',
   'module.assets': '资产',

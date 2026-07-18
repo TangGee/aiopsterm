@@ -1,33 +1,37 @@
 <template>
   <aside class="side-rail">
     <nav class="rail-main">
-      <button
-        class="rail-button"
-        :class="{ active: workspace.mode === 'agents' }"
-        :title="t('module.agents')"
-        data-testid="agents-mode-entry"
-        @click="openAgentsMode"
-      >
-        <MessageSquareCode />
-      </button>
-      <button
+      <template
         v-for="item in mainItems"
         :key="item.key"
-        class="rail-button"
-        :class="{ active: workspace.mode === 'terminal' && workspace.activeModule === item.key }"
-        :data-module-key="item.key"
-        :data-onboarding-id="
-          item.key === 'assets'
-            ? 'assets-entry'
-            : item.key === 'workspace'
-              ? 'left-module-switcher'
-              : undefined
-        "
-        :title="t(item.labelKey)"
-        @click="openModule(item.key)"
       >
-        <component :is="item.icon" />
-      </button>
+        <button
+          class="rail-button"
+          :class="{ active: workspace.mode === 'terminal' && workspace.activeModule === item.key }"
+          :data-module-key="item.key"
+          :data-onboarding-id="
+            item.key === 'assets'
+              ? 'assets-entry'
+              : item.key === 'workspace'
+                ? 'left-module-switcher'
+                : undefined
+          "
+          :title="t(item.labelKey)"
+          @click="openModule(item.key)"
+        >
+          <component :is="item.icon" />
+        </button>
+        <button
+          v-if="item.key === 'aiSessions'"
+          class="rail-button"
+          :class="{ active: workspace.mode === 'agents' }"
+          :title="t('module.agents')"
+          data-testid="agents-mode-entry"
+          @click="openAgentsMode"
+        >
+          <MonitorCog />
+        </button>
+      </template>
     </nav>
     <nav class="rail-bottom">
       <template
@@ -105,7 +109,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { Gauge, LogIn, LogOut, MessageSquareCode, User } from 'lucide-vue-next'
+import { Gauge, LogIn, LogOut, MonitorCog, User } from 'lucide-vue-next'
 import { menuItems, type ModuleKey } from '@/config/navigation'
 import { useI18n } from '@/i18n'
 import { useWorkspaceStore } from '@/stores/workspace'

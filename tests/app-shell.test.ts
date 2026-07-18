@@ -2878,8 +2878,12 @@ describe('AppShell', () => {
 
     const agentsEntry = wrapper.find('[data-testid="agents-mode-entry"]')
     expect(agentsEntry.exists()).toBe(true)
-    expect(agentsEntry.attributes('title')).toBe('Agents')
+    expect(agentsEntry.attributes('title')).toBe('主机 Agents')
     expect(wrapper.find('[data-module-key="workspace"]').classes()).toContain('active')
+    const mainButtons = wrapper.find('.rail-main').findAll('.rail-button')
+    expect(mainButtons[0].attributes('data-module-key')).toBe('workspace')
+    expect(mainButtons[1].attributes('data-module-key')).toBe('aiSessions')
+    expect(mainButtons[2].attributes('data-testid')).toBe('agents-mode-entry')
 
     await agentsEntry.trigger('click')
     await flushPromises()

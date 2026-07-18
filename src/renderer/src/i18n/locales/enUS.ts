@@ -26,7 +26,7 @@ export const enUS: LocaleMessages = {
   'common.submit': 'Submit',
   'common.system': 'System',
   'common.unknown': 'Unknown',
-  'module.agents': 'Agents',
+  'module.agents': 'Host Agents',
   'module.workspace': 'Workspace',
   'module.aiSessions': 'AI Sessions',
   'module.assets': 'Assets',
