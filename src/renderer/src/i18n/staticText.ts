@@ -270,6 +270,7 @@ const exactEnUS: Record<string, string> = {
   '终端断开失败': 'Failed to disconnect terminal',
   '终端设置保存失败': 'Failed to save terminal settings',
   'AI 上下文加载失败': 'Failed to load AI context',
+  '上下文已不存在或当前不可访问': 'This context no longer exists or is unavailable',
   'AI 命令加载失败': 'Failed to load AI commands',
   'AI 响应生成失败': 'Failed to generate AI response',
   'AI 生成取消失败': 'Failed to cancel AI generation',
