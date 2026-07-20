@@ -22,7 +22,7 @@ export const registerExportMcpIpc = (ipcMain: IpcMain) => {
     try {
       const config = await buildExportMcpManualConfig(input)
       clipboard.writeText(config.text)
-      return { ok: true, data: { kind: config.kind } }
+      return { ok: true, data: { kind: config.kind, serverId: config.serverId } }
     } catch (error) {
       return copyConfigErrorResult(error)
     }

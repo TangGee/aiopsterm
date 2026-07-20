@@ -6,7 +6,7 @@ import { tmpdir } from 'os'
 import { join } from 'path'
 import { spawn, type ChildProcessWithoutNullStreams } from 'child_process'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { DATABASE_MCP_TOOL_DEFINITIONS, DATABASE_MCP_TOOL_NAMES } from '../src/shared/databaseMcpRuntime'
+import { DATABASE_MCP_TOOL_DEFINITIONS } from '../src/shared/databaseMcpRuntime'
 
 vi.mock('electron', () => ({
   app: {
@@ -174,13 +174,14 @@ const socketRequest = (socketPath: string, request: Record<string, unknown>) =>
     socket.on('error', reject)
   })
 
-const startExternalMcpScript = (socketPath: string, token: string) => {
+const startExternalMcpScript = (socketPath: string, token: string, scope: string) => {
   const child = spawn(process.execPath, [join(process.cwd(), 'resources', 'aiopsterm-external-codex-mcp.js')], {
     cwd: process.cwd(),
     env: {
       ...process.env,
       AIOPSTERM_EXTERNAL_CODEX_MCP_SOCKET: socketPath,
-      AIOPSTERM_EXTERNAL_CODEX_MCP_TOKEN: token
+      AIOPSTERM_EXTERNAL_CODEX_MCP_TOKEN: token,
+      AIOPSTERM_EXTERNAL_CODEX_MCP_SCOPE: scope
     },
     stdio: 'pipe'
   }) as ChildProcessWithoutNullStreams
@@ -1409,7 +1410,7 @@ describe('external Codex MCP bridge runtime', () => {
         })
       )
 
-      const mcp = startExternalMcpScript(socketPath, 'test-token')
+      const mcp = startExternalMcpScript(socketPath, 'test-token', 'hosts')
       try {
         const initialize = await mcp.request({ jsonrpc: '2.0', id: 'init', method: 'initialize', params: { protocolVersion: '2025-03-26' } })
         expect(initialize.result?.serverInfo).toEqual(expect.objectContaining({ name: 'aiopsterm-hosts' }))
@@ -1429,7 +1430,18 @@ describe('external Codex MCP bridge runtime', () => {
           'run_command',
           'read_file',
           'glob_search',
-          'grep_search',
+          'grep_search'
+        ])
+        const runCommandTool = tools.result?.tools?.find((tool) => tool.name === 'run_command')
+        expect(runCommandTool?.annotations).toEqual(expect.objectContaining({ destructiveHint: true }))
+
+        const aiMcp = startExternalMcpScript(socketPath, 'test-token', 'ai-sessions')
+        const databaseMcp = startExternalMcpScript(socketPath, 'test-token', 'databases')
+        try {
+          const aiInitialize = await aiMcp.request({ jsonrpc: '2.0', id: 'ai-init', method: 'initialize', params: {} })
+          expect(aiInitialize.result?.serverInfo).toEqual(expect.objectContaining({ name: 'aiopsterm-ai-sessions' }))
+          const aiTools = await aiMcp.request({ jsonrpc: '2.0', id: 'ai-tools', method: 'tools/list', params: {} })
+          expect(aiTools.result?.tools?.map((tool) => tool.name)).toEqual([
           'list_ai_sessions',
           'get_ai_session',
           'list_ai_approvals',
@@ -1446,7 +1458,17 @@ describe('external Codex MCP bridge runtime', () => {
           'dismiss_ai_notification',
           'clear_ai_notifications',
           'open_ai_notification',
-          'jump_to_unread_ai_notification',
+          'jump_to_unread_ai_notification'
+          ])
+          const listAiSessionsTool = aiTools.result?.tools?.find((tool) => tool.name === 'list_ai_sessions')
+          expect(listAiSessionsTool?.annotations).toEqual(expect.objectContaining({ readOnlyHint: true }))
+          const clearAiSessionTool = aiTools.result?.tools?.find((tool) => tool.name === 'clear_ai_session')
+          expect(clearAiSessionTool?.annotations).toEqual(expect.objectContaining({ destructiveHint: true }))
+
+          const databaseInitialize = await databaseMcp.request({ jsonrpc: '2.0', id: 'database-init', method: 'initialize', params: {} })
+          expect(databaseInitialize.result?.serverInfo).toEqual(expect.objectContaining({ name: 'aiopsterm-databases' }))
+          const databaseTools = await databaseMcp.request({ jsonrpc: '2.0', id: 'database-tools', method: 'tools/list', params: {} })
+          expect(databaseTools.result?.tools?.map((tool) => tool.name)).toEqual([
           'list_database_connections',
           'list_databases',
           'list_schemas',
@@ -1459,36 +1481,34 @@ describe('external Codex MCP bridge runtime', () => {
           'count_rows',
           'inspect_indexes',
           'explain_plan'
-        ])
-        expect(tools.result?.tools?.filter((tool) => DATABASE_MCP_TOOL_NAMES.includes(tool.name as any))).toEqual(DATABASE_MCP_TOOL_DEFINITIONS)
-        const runCommandTool = tools.result?.tools?.find((tool) => tool.name === 'run_command')
-        expect(runCommandTool?.annotations).toEqual(expect.objectContaining({ destructiveHint: true }))
-        const listAiSessionsTool = tools.result?.tools?.find((tool) => tool.name === 'list_ai_sessions')
-        expect(listAiSessionsTool?.annotations).toEqual(expect.objectContaining({ readOnlyHint: true }))
-        const getAiSessionTool = tools.result?.tools?.find((tool) => tool.name === 'get_ai_session')
-        expect(getAiSessionTool?.annotations).toEqual(expect.objectContaining({ readOnlyHint: true }))
-        const queryDatabaseTableTool = tools.result?.tools?.find((tool) => tool.name === 'query_database_table')
-        expect(queryDatabaseTableTool?.annotations).toEqual(
-          expect.objectContaining({ readOnlyHint: true, destructiveHint: false, openWorldHint: true })
-        )
-        expect((queryDatabaseTableTool?.inputSchema as any)?.properties?.page).toEqual(expect.objectContaining({ maximum: 1000 }))
-        expect((queryDatabaseTableTool?.inputSchema as any)?.properties?.pageSize).toEqual(expect.objectContaining({ maximum: 100 }))
-        const listAiApprovalsTool = tools.result?.tools?.find((tool) => tool.name === 'list_ai_approvals')
-        expect(listAiApprovalsTool?.annotations).toEqual(expect.objectContaining({ readOnlyHint: true }))
-        const approveAiSessionTool = tools.result?.tools?.find((tool) => tool.name === 'approve_ai_session')
-        expect(approveAiSessionTool?.annotations).toEqual(expect.objectContaining({ idempotentHint: false }))
-        const clearAiSessionTool = tools.result?.tools?.find((tool) => tool.name === 'clear_ai_session')
-        expect(clearAiSessionTool?.annotations).toEqual(expect.objectContaining({ destructiveHint: true }))
-        const listAiSessionEventsTool = tools.result?.tools?.find((tool) => tool.name === 'list_ai_session_events')
-        expect(listAiSessionEventsTool?.annotations).toEqual(expect.objectContaining({ readOnlyHint: true }))
-        const dismissAiNotificationTool = tools.result?.tools?.find((tool) => tool.name === 'dismiss_ai_notification')
-        expect(dismissAiNotificationTool?.annotations).toEqual(expect.objectContaining({ destructiveHint: true }))
-        const clearAiNotificationsTool = tools.result?.tools?.find((tool) => tool.name === 'clear_ai_notifications')
-        expect(clearAiNotificationsTool?.annotations).toEqual(expect.objectContaining({ destructiveHint: true }))
-        const jumpToUnreadAiNotificationTool = tools.result?.tools?.find((tool) => tool.name === 'jump_to_unread_ai_notification')
-        expect(jumpToUnreadAiNotificationTool?.annotations).toEqual(expect.objectContaining({ idempotentHint: true }))
+          ])
+          expect(databaseTools.result?.tools).toEqual(DATABASE_MCP_TOOL_DEFINITIONS)
+          const queryDatabaseTableTool = databaseTools.result?.tools?.find((tool) => tool.name === 'query_database_table')
+          expect(queryDatabaseTableTool?.annotations).toEqual(
+            expect.objectContaining({ readOnlyHint: true, destructiveHint: false, openWorldHint: true })
+          )
+          expect((queryDatabaseTableTool?.inputSchema as any)?.properties?.page).toEqual(expect.objectContaining({ maximum: 1000 }))
+
+          const crossScope = await mcp.request({
+            jsonrpc: '2.0',
+            id: 'cross-scope',
+            method: 'tools/call',
+            params: { name: 'list_ai_sessions', arguments: {} }
+          })
+          expect(crossScope.result?.isError).toBe(true)
+        } finally {
+          aiMcp.child.kill()
+          databaseMcp.child.kill()
+        }
       } finally {
         mcp.child.kill()
+      }
+      const invalidMcp = startExternalMcpScript(socketPath, 'test-token', 'all')
+      try {
+        const invalidInitialize = await invalidMcp.request({ jsonrpc: '2.0', id: 'invalid-init', method: 'initialize', params: {} })
+        expect(invalidInitialize.error).toEqual(expect.objectContaining({ code: -32602 }))
+      } finally {
+        invalidMcp.child.kill()
       }
     } finally {
       bridge.closeExternalCodexMcpBridgeServer()

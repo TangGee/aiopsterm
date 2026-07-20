@@ -5818,16 +5818,23 @@ Object.defineProperty(navigator, 'clipboard', {
 })
 
 type TestExportMcpSource = 'codex' | 'claude-code'
+type TestExportMcpServerId = 'hosts' | 'ai-sessions' | 'databases'
+
+const testExportMcpServers = [
+  { serverId: 'hosts' as const, serverName: 'aiopsterm_hosts' },
+  { serverId: 'ai-sessions' as const, serverName: 'aiopsterm_ai_sessions' },
+  { serverId: 'databases' as const, serverName: 'aiopsterm_databases' }
+]
 
 const exportMcpBridgeMock = () => ({
   enabled: true,
   listening: true,
   tokenConfigured: true,
-  socketPath: '/tmp/aiopsterm-external-codex.sock',
-  serverName: 'aiopsterm_hosts'
+  socketPath: '/tmp/aiopsterm-external-codex.sock'
 })
 
-const exportMcpClientMock = (source: TestExportMcpSource, installed = false) => ({
+const exportMcpClientMock = (source: TestExportMcpSource, serverId: TestExportMcpServerId, installed = false) => ({
+  serverId,
   source,
   label: source === 'codex' ? 'Codex' : 'Claude Code',
   binaryName: source === 'codex' ? 'codex' : 'claude',
@@ -5837,14 +5844,18 @@ const exportMcpClientMock = (source: TestExportMcpSource, installed = false) => 
   installed,
   scriptPath: '/opt/aiopsterm/resources/aiopsterm-external-codex-mcp.js',
   runtimePath: '/opt/aiopsterm/aiopsterm',
-  serverName: 'aiopsterm_hosts',
+  serverName: testExportMcpServers.find((server) => server.serverId === serverId)!.serverName,
   bridge: exportMcpBridgeMock(),
   warnings: []
 })
 
-const exportMcpSnapshotMock = (installedSource?: TestExportMcpSource) => ({
+const exportMcpSnapshotMock = (installedTarget?: { source: TestExportMcpSource; serverId: TestExportMcpServerId }) => ({
   bridge: exportMcpBridgeMock(),
-  clients: [exportMcpClientMock('codex', installedSource === 'codex'), exportMcpClientMock('claude-code', installedSource === 'claude-code')]
+  clients: testExportMcpServers.flatMap((server) =>
+    (['codex', 'claude-code'] as const).map((source) =>
+      exportMcpClientMock(source, server.serverId, installedTarget?.source === source && installedTarget.serverId === server.serverId)
+    )
+  )
 })
 
 Object.defineProperty(window, 'aiops', {
@@ -6034,28 +6045,29 @@ Object.defineProperty(window, 'aiops', {
       ok: true,
       data: exportMcpSnapshotMock()
     })),
-    installExportMcp: vi.fn(async (input: { source: TestExportMcpSource }) => ({
+    installExportMcp: vi.fn(async (input: { source: TestExportMcpSource; serverId: TestExportMcpServerId }) => ({
       ok: true,
       data: {
         operation: 'install' as const,
         source: input.source,
-        status: exportMcpClientMock(input.source, true),
-        snapshot: exportMcpSnapshotMock(input.source)
+        status: exportMcpClientMock(input.source, input.serverId, true),
+        snapshot: exportMcpSnapshotMock(input)
       }
     })),
-    uninstallExportMcp: vi.fn(async (input: { source: TestExportMcpSource }) => ({
+    uninstallExportMcp: vi.fn(async (input: { source: TestExportMcpSource; serverId: TestExportMcpServerId }) => ({
       ok: true,
       data: {
         operation: 'uninstall' as const,
         source: input.source,
-        status: exportMcpClientMock(input.source, false),
+        status: exportMcpClientMock(input.source, input.serverId, false),
         snapshot: exportMcpSnapshotMock()
       }
     })),
-    copyExportMcpConfig: vi.fn(async (input: { kind: 'json' | 'command' }) => ({
+    copyExportMcpConfig: vi.fn(async (input: { kind: 'json' | 'command'; serverId: TestExportMcpServerId }) => ({
       ok: true,
       data: {
-        kind: input.kind
+        kind: input.kind,
+        serverId: input.serverId
       }
     })),
     resetExportMcpToken: vi.fn(async () => ({

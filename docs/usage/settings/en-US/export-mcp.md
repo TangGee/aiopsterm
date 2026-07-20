@@ -1,6 +1,6 @@
 # Export MCP
 
-This page lives under `Settings -> Export MCP`. It exposes aiopsterm host connections, sessions, and explicitly authorized read-only database capabilities as an external MCP server. External Codex, Claude Code, or another MCP-capable Agent can use this server to call the aiopsterm gateway, session, and tool interfaces.
+This page lives under `Settings -> Export MCP`. It exports aiopsterm capabilities as three independent MCP servers so external Codex, Claude Code, or another MCP-capable Agent can install only the tools it needs: `aiopsterm_hosts` for hosts and SSH, `aiopsterm_ai_sessions` for managed AI sessions, and `aiopsterm_databases` for authorized read-only database access.
 
 ## Prerequisites
 
@@ -26,13 +26,20 @@ Relay-shell followed by a second `ssh` still exposes text prompts rather than st
 
 ## Database Read Permission
 
-Database MCP tools are discovered with `aiopsterm_hosts`, but database access is disabled by default. External Agents can call these tools only after `Allow external Agents to read databases` is enabled on this page:
+Database MCP tools are exposed only by `aiopsterm_databases`, and database access is disabled by default. External Agents can call database tools only after installing that server and enabling `Allow external Agents to read databases` on this page:
 
 - `list_database_connections`
+- `list_databases`
+- `list_schemas`
+- `list_tables`
 - `search_database_objects`
 - `describe_database_table`
 - `get_database_table_ddl`
 - `query_database_table`
+- `sample_rows`
+- `count_rows`
+- `inspect_indexes`
+- `explain_plan`
 
 While disabled, calls return `DB_MCP_DATABASE_READ_DISABLED` without reading the catalog or a connection. Connection listings expose a process-scoped random handle and generated label; they omit the saved id, user-defined name, host, port, username, URL, file path, proxy settings, and password. Handles change after aiopsterm restarts and must be rediscovered. DDL and table data reads also require non-SQLite connections to be open in the Database workspace.
 
@@ -48,25 +55,27 @@ Manual copy writes the complete config to the system clipboard, including the cu
 
 ## Built-In Installers
 
-The built-in installer detects local CLI and config state, and only manages the `aiopsterm_hosts` MCP server entry.
+The built-in installer independently detects and manages `aiopsterm_hosts`, `aiopsterm_ai_sessions`, and `aiopsterm_databases`. The settings page shows one capability card per server, with independent Codex and Claude Code install and uninstall actions and no bulk installation.
 
-- Codex: runs `codex mcp remove aiopsterm_hosts`, then `codex mcp add aiopsterm_hosts --env ... -- <aiopsterm-runtime> <helper>`, with `ELECTRON_RUN_AS_NODE=1`.
-- Claude Code: runs `claude mcp remove -s user aiopsterm_hosts`, then `claude mcp add -s user aiopsterm_hosts -e ... -- <aiopsterm-runtime> <helper>`, with `ELECTRON_RUN_AS_NODE=1`.
+- Codex removes and adds only the selected server entry.
+- Claude Code removes and adds only the selected user-scope server entry.
+
+All three entries reuse the same helper, socket, and token, but set `AIOPSTERM_EXTERNAL_CODEX_MCP_SCOPE` to `hosts`, `ai-sessions`, or `databases`. The helper rejects initialization when scope is missing or invalid and never falls back to the aggregate tool list.
 
 The install buttons do not hand-edit Codex or Claude Code config files. Config files are only read for status detection and conflict warnings.
 
-If the page warns that `aiopsterm_hosts` already exists but does not match the current Export MCP settings, the client likely has an older process-id socket path or a stale token. Reinstall from this page to refresh it to the current stable socket and token.
+If the page warns that a server does not match the current Export MCP settings, its socket, token, runtime, helper, or scope differs from the expected values. Reinstall only that entry.
 
 `Regenerate Token` immediately invalidates installed or copied external Agent configs. Reinstall Codex / Claude Code, and copy fresh config for other Agents.
 
 ## Manual Config For Other Agents
 
-Less common Agents may not have a stable MCP CLI. Use the `Manual Config For Other Agents` section:
+Less common Agents may not have a stable MCP CLI. Use the manual config controls inside the required capability card:
 
 - `Copy JSON Template`: for Agents that support `mcpServers` JSON config.
 - `Copy stdio Command Template`: for Agents that let you enter stdio command/env manually.
 
-The page preview hides the token with a placeholder, but the copy buttons write the complete config to the clipboard, including the current token. Copy again after regenerating the token.
+Each copy action produces one server with its corresponding scope. The page preview hides the token with a placeholder, but the copy buttons write the complete config to the clipboard, including the current token. Copy again after regenerating the token.
 
 If `Allow external Agents to submit SSH authentication` is enabled, manually configured Agents also receive the `submit_ssh_auth_response` tool. Paste token-bearing configs only into trusted Agents, because that Agent can submit authentication responses you give it.
 

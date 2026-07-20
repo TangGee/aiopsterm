@@ -30,6 +30,7 @@ import type {
   ExportMcpBridgeStatus,
   ExportMcpClientSource,
   ExportMcpClientStatus,
+  ExportMcpServerId,
   ExportMcpInstallerOperationResult,
   ExportMcpInstallerSnapshot
 } from '@shared/contracts/exportMcp'
@@ -61,6 +62,7 @@ const agentHookInstallerSources = new Set<AgentHookInstallerSource>([
   'rovodev'
 ])
 const exportMcpClientSources = new Set<ExportMcpClientSource>(['codex', 'claude-code'])
+const exportMcpServerIds = new Set<ExportMcpServerId>(['hosts', 'ai-sessions', 'databases'])
 const aiAgentSessionSources = new Set<AiAgentSessionSource>([
   'codex',
   'claude-code',
@@ -111,6 +113,9 @@ export const isAgentHookInstallerSource = (value: unknown): value is AgentHookIn
 
 export const isExportMcpClientSource = (value: unknown): value is ExportMcpClientSource =>
   exportMcpClientSources.has(value as ExportMcpClientSource)
+
+export const isExportMcpServerId = (value: unknown): value is ExportMcpServerId =>
+  exportMcpServerIds.has(value as ExportMcpServerId)
 
 export const isAiAgentSessionSource = (value: unknown): value is AiAgentSessionSource => aiAgentSessionSources.has(value as AiAgentSessionSource)
 
@@ -298,11 +303,11 @@ export const isExportMcpBridgeStatus = (value: unknown): value is ExportMcpBridg
   typeof value.enabled === 'boolean' &&
   typeof value.listening === 'boolean' &&
   typeof value.tokenConfigured === 'boolean' &&
-  isNonEmptyString(value.socketPath) &&
-  isNonEmptyString(value.serverName)
+  isNonEmptyString(value.socketPath)
 
 export const isExportMcpClientStatus = (value: unknown): value is ExportMcpClientStatus =>
   isRecord(value) &&
+  isExportMcpServerId(value.serverId) &&
   isExportMcpClientSource(value.source) &&
   isNonEmptyString(value.label) &&
   isNonEmptyString(value.binaryName) &&

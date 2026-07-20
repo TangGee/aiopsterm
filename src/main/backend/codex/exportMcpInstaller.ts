@@ -8,6 +8,7 @@ import type {
   ExportMcpCopyConfigKind,
   ExportMcpClientSource,
   ExportMcpClientStatus,
+  ExportMcpServerId,
   ExportMcpInstallerOperationInput,
   ExportMcpInstallerOperationResult,
   ExportMcpInstallerSnapshot,
@@ -22,6 +23,11 @@ type ExportMcpClientDefinition = {
   label: string
   binaryName: string
   configPathFor: (env: NodeJS.ProcessEnv) => string
+}
+
+type ExportMcpServerDefinition = {
+  id: ExportMcpServerId
+  name: string
 }
 
 type ExecFileOptions = {
@@ -58,7 +64,11 @@ export class ExportMcpInstallerError extends Error {
   }
 }
 
-export const exportMcpServerName = 'aiopsterm_hosts'
+export const exportMcpServerDefinitions: ExportMcpServerDefinition[] = [
+  { id: 'hosts', name: 'aiopsterm_hosts' },
+  { id: 'ai-sessions', name: 'aiopsterm_ai_sessions' },
+  { id: 'databases', name: 'aiopsterm_databases' }
+]
 const externalMcpScriptName = 'aiopsterm-external-codex-mcp.js'
 
 const runtimeConfig: ExportMcpInstallerRuntimeConfig = {}
@@ -136,11 +146,20 @@ const clientDefinitions: ExportMcpClientDefinition[] = [
 ]
 
 const definitionFor = (source: ExportMcpClientSource) => clientDefinitions.find((definition) => definition.source === source)
+const serverDefinitionFor = (serverId: ExportMcpServerId) => exportMcpServerDefinitions.find((definition) => definition.id === serverId)
 
 const normalizeSource = (value: unknown): ExportMcpClientSource | null => {
   const raw = cleanText(value).toLowerCase().replace(/_/g, '-')
   if (raw === 'codex') return 'codex'
   if (raw === 'claude' || raw === 'claude-code') return 'claude-code'
+  return null
+}
+
+const normalizeServerId = (value: unknown): ExportMcpServerId | null => {
+  const raw = cleanText(value).toLowerCase().replace(/_/g, '-')
+  if (raw === 'hosts') return 'hosts'
+  if (raw === 'ai-sessions') return 'ai-sessions'
+  if (raw === 'databases') return 'databases'
   return null
 }
 
@@ -205,8 +224,7 @@ const bridgeStatus = (): ExportMcpBridgeStatus => {
     enabled: status.enabled,
     listening: status.listening,
     tokenConfigured: status.tokenConfigured,
-    socketPath: status.socketPath,
-    serverName: exportMcpServerName
+    socketPath: status.socketPath
   }
 }
 
@@ -230,10 +248,17 @@ const extractTomlTable = (content: string, tableName: string) => {
   return lines.slice(start, end).join('\n')
 }
 
-const codexConfigHasExportMcp = async (configPath: string, scriptPath: string, socketPath: string, token: string, runtimePath: string) => {
+const codexConfigHasExportMcp = async (
+  configPath: string,
+  scriptPath: string,
+  socketPath: string,
+  token: string,
+  runtimePath: string,
+  server: ExportMcpServerDefinition
+) => {
   if (!(await pathExists(configPath))) return { exists: false, installed: false, conflict: false }
   const raw = String(await getReadFile()(configPath, 'utf-8'))
-  const block = extractTomlTable(raw, `mcp_servers.${exportMcpServerName}`)
+  const block = extractTomlTable(raw, `mcp_servers.${server.name}`)
   if (!block) return { exists: true, installed: false, conflict: false }
   const scriptNamePresent = block.includes(externalMcpScriptName) || Boolean(scriptPath && block.includes(scriptPath))
   const socketPathPresent = !socketPath || block.includes(socketPath)
@@ -245,6 +270,8 @@ const codexConfigHasExportMcp = async (configPath: string, scriptPath: string, s
     socketPathPresent &&
     block.includes('AIOPSTERM_EXTERNAL_CODEX_MCP_SOCKET') &&
     block.includes('AIOPSTERM_EXTERNAL_CODEX_MCP_TOKEN') &&
+    block.includes('AIOPSTERM_EXTERNAL_CODEX_MCP_SCOPE') &&
+    block.includes(tomlString(server.id)) &&
     block.includes(electronRunAsNodeEnvKey) &&
     block.includes(electronRunAsNodeEnvValue) &&
     tokenPresent
@@ -264,27 +291,35 @@ const parseJsonObject = (raw: string, path: string) => {
   }
 }
 
-const claudeConfigHasExportMcp = async (configPath: string, scriptPath: string, socketPath: string, token: string, runtimePath: string) => {
+const claudeConfigHasExportMcp = async (
+  configPath: string,
+  scriptPath: string,
+  socketPath: string,
+  token: string,
+  runtimePath: string,
+  server: ExportMcpServerDefinition
+) => {
   if (!(await pathExists(configPath))) return { exists: false, installed: false, conflict: false }
   const config = parseJsonObject(String(await getReadFile()(configPath, 'utf-8')), configPath)
   const mcpServers = isPlainObject(config.mcpServers) ? config.mcpServers : {}
-  const server = isPlainObject(mcpServers[exportMcpServerName]) ? (mcpServers[exportMcpServerName] as Record<string, unknown>) : null
-  if (!server) return { exists: true, installed: false, conflict: false }
-  const args = Array.isArray(server.args) ? server.args : []
-  const env = isPlainObject(server.env) ? server.env : {}
+  const serverConfig = isPlainObject(mcpServers[server.name]) ? (mcpServers[server.name] as Record<string, unknown>) : null
+  if (!serverConfig) return { exists: true, installed: false, conflict: false }
+  const args = Array.isArray(serverConfig.args) ? serverConfig.args : []
+  const env = isPlainObject(serverConfig.env) ? serverConfig.env : {}
   const scriptNamePresent = args.some((item) => cleanText(item).includes(externalMcpScriptName) || Boolean(scriptPath && cleanText(item) === scriptPath))
   const installed =
-    cleanText(server.type) === 'stdio' &&
-    cleanText(server.command) === runtimePath &&
+    cleanText(serverConfig.type) === 'stdio' &&
+    cleanText(serverConfig.command) === runtimePath &&
     scriptNamePresent &&
     cleanText(env[electronRunAsNodeEnvKey]) === electronRunAsNodeEnvValue &&
     typeof env.AIOPSTERM_EXTERNAL_CODEX_MCP_SOCKET === 'string' &&
     (!socketPath || cleanText(env.AIOPSTERM_EXTERNAL_CODEX_MCP_SOCKET) === socketPath) &&
-    cleanText(env.AIOPSTERM_EXTERNAL_CODEX_MCP_TOKEN) === token
+    cleanText(env.AIOPSTERM_EXTERNAL_CODEX_MCP_TOKEN) === token &&
+    cleanText(env.AIOPSTERM_EXTERNAL_CODEX_MCP_SCOPE) === server.id
   return { exists: true, installed, conflict: !installed }
 }
 
-const statusForDefinition = async (definition: ExportMcpClientDefinition): Promise<ExportMcpClientStatus> => {
+const statusForDefinition = async (definition: ExportMcpClientDefinition, server: ExportMcpServerDefinition): Promise<ExportMcpClientStatus> => {
   const env = getEnv()
   const configPath = definition.configPathFor(env)
   const scriptPath = exportMcpScriptPath()
@@ -292,6 +327,7 @@ const statusForDefinition = async (definition: ExportMcpClientDefinition): Promi
   const bridge = bridgeStatus()
   const token = await getExportMcpToken()
   const status: ExportMcpClientStatus = {
+    serverId: server.id,
     source: definition.source,
     label: definition.label,
     binaryName: definition.binaryName,
@@ -301,7 +337,7 @@ const statusForDefinition = async (definition: ExportMcpClientDefinition): Promi
     installed: false,
     scriptPath,
     runtimePath,
-    serverName: exportMcpServerName,
+    serverName: server.name,
     bridge,
     warnings: []
   }
@@ -316,10 +352,10 @@ const statusForDefinition = async (definition: ExportMcpClientDefinition): Promi
   try {
     const probe =
       definition.source === 'codex'
-        ? await codexConfigHasExportMcp(configPath, scriptPath, bridge.socketPath, token, runtimePath)
-        : await claudeConfigHasExportMcp(configPath, scriptPath, bridge.socketPath, token, runtimePath)
+        ? await codexConfigHasExportMcp(configPath, scriptPath, bridge.socketPath, token, runtimePath, server)
+        : await claudeConfigHasExportMcp(configPath, scriptPath, bridge.socketPath, token, runtimePath, server)
     status.installed = probe.installed
-    if (probe.conflict) status.warnings.push(`${exportMcpServerName} exists but does not match the current aiopsterm export MCP settings`)
+    if (probe.conflict) status.warnings.push(`${server.name} exists but does not match the current aiopsterm export MCP settings`)
   } catch (error) {
     status.error = error instanceof Error ? error.message : String(error)
   }
@@ -329,7 +365,9 @@ const statusForDefinition = async (definition: ExportMcpClientDefinition): Promi
 
 export const listExportMcpInstallers = async (): Promise<ExportMcpInstallerSnapshot> => {
   const bridge = bridgeStatus()
-  const clients = await Promise.all(clientDefinitions.map((definition) => statusForDefinition(definition)))
+  const clients = await Promise.all(
+    exportMcpServerDefinitions.flatMap((server) => clientDefinitions.map((definition) => statusForDefinition(definition, server)))
+  )
   return { bridge, clients }
 }
 
@@ -362,23 +400,28 @@ const assertInstallReady = async (status: ExportMcpClientStatus, token: string) 
   }
 }
 
-const installDefinition = async (definition: ExportMcpClientDefinition): Promise<ExportMcpInstallerOperationResult> => {
-  const status = await statusForDefinition(definition)
+const installDefinition = async (
+  definition: ExportMcpClientDefinition,
+  server: ExportMcpServerDefinition
+): Promise<ExportMcpInstallerOperationResult> => {
+  const status = await statusForDefinition(definition, server)
   const token = await getExportMcpToken()
   await assertInstallReady(status, token)
   await getMkdir()(dirname(status.configPath), { recursive: true })
   const socketPath = status.bridge.socketPath
 
   if (definition.source === 'codex') {
-    await runClientCommand(status.binaryPath, ['mcp', 'remove', exportMcpServerName], { ignoreFailure: true })
+    await runClientCommand(status.binaryPath, ['mcp', 'remove', server.name], { ignoreFailure: true })
     await runClientCommand(status.binaryPath, [
       'mcp',
       'add',
-      exportMcpServerName,
+      server.name,
       '--env',
       `AIOPSTERM_EXTERNAL_CODEX_MCP_SOCKET=${socketPath}`,
       '--env',
       `AIOPSTERM_EXTERNAL_CODEX_MCP_TOKEN=${token}`,
+      '--env',
+      `AIOPSTERM_EXTERNAL_CODEX_MCP_SCOPE=${server.id}`,
       '--env',
       `${electronRunAsNodeEnvKey}=${electronRunAsNodeEnvValue}`,
       '--',
@@ -386,17 +429,19 @@ const installDefinition = async (definition: ExportMcpClientDefinition): Promise
       status.scriptPath
     ])
   } else {
-    await runClientCommand(status.binaryPath, ['mcp', 'remove', '-s', 'user', exportMcpServerName], { ignoreFailure: true })
+    await runClientCommand(status.binaryPath, ['mcp', 'remove', '-s', 'user', server.name], { ignoreFailure: true })
     await runClientCommand(status.binaryPath, [
       'mcp',
       'add',
       '-s',
       'user',
-      exportMcpServerName,
+      server.name,
       '-e',
       `AIOPSTERM_EXTERNAL_CODEX_MCP_SOCKET=${socketPath}`,
       '-e',
       `AIOPSTERM_EXTERNAL_CODEX_MCP_TOKEN=${token}`,
+      '-e',
+      `AIOPSTERM_EXTERNAL_CODEX_MCP_SCOPE=${server.id}`,
       '-e',
       `${electronRunAsNodeEnvKey}=${electronRunAsNodeEnvValue}`,
       '--',
@@ -411,7 +456,7 @@ const installDefinition = async (definition: ExportMcpClientDefinition): Promise
     data: {
       operation: 'install',
       source: definition.source,
-      status: snapshot.clients.find((item) => item.source === definition.source)!,
+      status: snapshot.clients.find((item) => item.source === definition.source && item.serverId === server.id)!,
       snapshot
     }
   }
@@ -426,9 +471,14 @@ const normalizeCopyConfigKind = (value: unknown): ExportMcpCopyConfigKind | null
 
 const shellQuote = (value: string) => `'${value.replace(/'/g, "'\\''")}'`
 
-export const buildExportMcpManualConfig = async (input: ExportMcpCopyConfigInput): Promise<{ kind: ExportMcpCopyConfigKind; text: string }> => {
+export const buildExportMcpManualConfig = async (
+  input: ExportMcpCopyConfigInput
+): Promise<{ kind: ExportMcpCopyConfigKind; serverId: ExportMcpServerId; text: string }> => {
   const kind = normalizeCopyConfigKind(input?.kind)
   if (!kind) throw new ExportMcpInstallerError('EXPORT_MCP_COPY_KIND_INVALID', 'Export MCP copy config kind is not supported.')
+  const serverId = normalizeServerId(input?.serverId)
+  if (!serverId) throw new ExportMcpInstallerError('EXPORT_MCP_SERVER_INVALID', 'Export MCP server is not supported.')
+  const server = serverDefinitionFor(serverId)!
   const scriptPath = exportMcpScriptPath()
   if (!scriptPath || !(await pathExists(scriptPath))) {
     throw new ExportMcpInstallerError('EXPORT_MCP_SCRIPT_MISSING', 'aiopsterm external MCP helper path is unavailable.')
@@ -445,17 +495,19 @@ export const buildExportMcpManualConfig = async (input: ExportMcpCopyConfigInput
   if (kind === 'json') {
     return {
       kind,
+      serverId,
       text: JSON.stringify(
         {
           mcpServers: {
-            [exportMcpServerName]: {
+            [server.name]: {
               type: 'stdio',
               command: runtimePath,
               args: [scriptPath],
               env: {
                 [electronRunAsNodeEnvKey]: electronRunAsNodeEnvValue,
                 AIOPSTERM_EXTERNAL_CODEX_MCP_SOCKET: bridge.socketPath,
-                AIOPSTERM_EXTERNAL_CODEX_MCP_TOKEN: token
+                AIOPSTERM_EXTERNAL_CODEX_MCP_TOKEN: token,
+                AIOPSTERM_EXTERNAL_CODEX_MCP_SCOPE: server.id
               }
             }
           }
@@ -467,23 +519,28 @@ export const buildExportMcpManualConfig = async (input: ExportMcpCopyConfigInput
   }
   return {
     kind,
+    serverId,
     text: [
       `${electronRunAsNodeEnvKey}=${shellQuote(electronRunAsNodeEnvValue)}`,
       `AIOPSTERM_EXTERNAL_CODEX_MCP_SOCKET=${shellQuote(bridge.socketPath)}`,
       `AIOPSTERM_EXTERNAL_CODEX_MCP_TOKEN=${shellQuote(token)}`,
+      `AIOPSTERM_EXTERNAL_CODEX_MCP_SCOPE=${shellQuote(server.id)}`,
       shellQuote(runtimePath),
       shellQuote(scriptPath)
     ].join(' ')
   }
 }
 
-const uninstallDefinition = async (definition: ExportMcpClientDefinition): Promise<ExportMcpInstallerOperationResult> => {
-  const status = await statusForDefinition(definition)
+const uninstallDefinition = async (
+  definition: ExportMcpClientDefinition,
+  server: ExportMcpServerDefinition
+): Promise<ExportMcpInstallerOperationResult> => {
+  const status = await statusForDefinition(definition, server)
   if (!status.binaryPath) throw new ExportMcpInstallerError('EXPORT_MCP_CLIENT_MISSING', `${status.label} CLI was not found on PATH.`)
   if (definition.source === 'codex') {
-    await runClientCommand(status.binaryPath, ['mcp', 'remove', exportMcpServerName])
+    await runClientCommand(status.binaryPath, ['mcp', 'remove', server.name])
   } else {
-    await runClientCommand(status.binaryPath, ['mcp', 'remove', '-s', 'user', exportMcpServerName])
+    await runClientCommand(status.binaryPath, ['mcp', 'remove', '-s', 'user', server.name])
   }
   const snapshot = await listExportMcpInstallers()
   return {
@@ -491,7 +548,7 @@ const uninstallDefinition = async (definition: ExportMcpClientDefinition): Promi
     data: {
       operation: 'uninstall',
       source: definition.source,
-      status: snapshot.clients.find((item) => item.source === definition.source)!,
+      status: snapshot.clients.find((item) => item.source === definition.source && item.serverId === server.id)!,
       snapshot
     }
   }
@@ -515,7 +572,10 @@ export const installExportMcp = async (input: ExportMcpInstallerOperationInput):
     if (!source) throw new ExportMcpInstallerError('EXPORT_MCP_SOURCE_INVALID', 'Export MCP client source is not supported.')
     const definition = definitionFor(source)
     if (!definition) throw new ExportMcpInstallerError('EXPORT_MCP_SOURCE_UNSUPPORTED', `Export MCP client source ${source} is not supported.`)
-    return await installDefinition(definition)
+    const serverId = normalizeServerId(input?.serverId)
+    if (!serverId) throw new ExportMcpInstallerError('EXPORT_MCP_SERVER_INVALID', 'Export MCP server is not supported.')
+    const server = serverDefinitionFor(serverId)!
+    return await installDefinition(definition, server)
   } catch (error) {
     return operationErrorResult(error)
   }
@@ -527,7 +587,10 @@ export const uninstallExportMcp = async (input: ExportMcpInstallerOperationInput
     if (!source) throw new ExportMcpInstallerError('EXPORT_MCP_SOURCE_INVALID', 'Export MCP client source is not supported.')
     const definition = definitionFor(source)
     if (!definition) throw new ExportMcpInstallerError('EXPORT_MCP_SOURCE_UNSUPPORTED', `Export MCP client source ${source} is not supported.`)
-    return await uninstallDefinition(definition)
+    const serverId = normalizeServerId(input?.serverId)
+    if (!serverId) throw new ExportMcpInstallerError('EXPORT_MCP_SERVER_INVALID', 'Export MCP server is not supported.')
+    const server = serverDefinitionFor(serverId)!
+    return await uninstallDefinition(definition, server)
   } catch (error) {
     return operationErrorResult(error)
   }
@@ -551,10 +614,11 @@ export const resetExportMcpToken = async (): Promise<ExportMcpTokenResetResult> 
 
 export const __testing = {
   clientDefinitions,
-  exportMcpServerName,
+  exportMcpServerDefinitions,
   extractTomlTable,
   codexConfigHasExportMcp,
   claudeConfigHasExportMcp,
   normalizeCopyConfigKind,
+  normalizeServerId,
   buildExportMcpManualConfig
 }

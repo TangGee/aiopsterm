@@ -78,14 +78,14 @@ SQL diagnosis keeps the original driver error available to the local Database UI
 
 ## External Export
 
-The existing `aiopsterm_hosts` stdio helper publishes the database tools alongside host and managed-AI tools. The helper continues to use the existing Export MCP socket and token.
+The `aiopsterm_databases` stdio server publishes only database tools. It uses the same packaged helper, Export MCP socket, and token as `aiopsterm_hosts` and `aiopsterm_ai_sessions`, but starts with `AIOPSTERM_EXTERNAL_CODEX_MCP_SCOPE=databases`; the helper does not publish host or managed-AI tools in that process.
 
 External database reads require both:
 
 1. The Export MCP bridge enabled at startup.
 2. `Settings -> Export MCP -> Allow external Agents to read databases` enabled.
 
-`UserConfig.exportMcp.allowDatabaseRead` defaults to `false`. Tools remain visible during MCP discovery so clients can keep a stable cached tool list, but calls fail closed with `DB_MCP_DATABASE_READ_DISABLED` until the setting is enabled. A missing or unreadable config also fails closed.
+`UserConfig.exportMcp.allowDatabaseRead` defaults to `false`. Database tools remain visible within `aiopsterm_databases` during MCP discovery so clients can keep a stable cached list, but calls fail closed with `DB_MCP_DATABASE_READ_DISABLED` until the setting is enabled. Agents that do not install this server receive no database tool schemas. A missing or unreadable config also fails closed.
 
 The Export MCP token authorizes the local Agent process, while the database-read switch authorizes this capability. Only provide the token and enable database reads for a trusted local Agent, because table data returned by an approved query is intentionally visible to that Agent.
 

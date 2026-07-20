@@ -1,16 +1,17 @@
 import type { AiopsMutationResult } from './common'
 
 export type ExportMcpClientSource = 'codex' | 'claude-code'
+export type ExportMcpServerId = 'hosts' | 'ai-sessions' | 'databases'
 
 export type ExportMcpBridgeStatus = {
   enabled: boolean
   listening: boolean
   tokenConfigured: boolean
   socketPath: string
-  serverName: string
 }
 
 export type ExportMcpClientStatus = {
+  serverId: ExportMcpServerId
   source: ExportMcpClientSource
   label: string
   binaryName: string
@@ -33,6 +34,7 @@ export type ExportMcpInstallerSnapshot = {
 
 export type ExportMcpInstallerOperationInput = {
   source: ExportMcpClientSource
+  serverId: ExportMcpServerId
 }
 
 export type ExportMcpInstallerOperation = 'install' | 'uninstall'
@@ -50,10 +52,12 @@ export type ExportMcpCopyConfigKind = 'json' | 'command'
 
 export type ExportMcpCopyConfigInput = {
   kind: ExportMcpCopyConfigKind
+  serverId: ExportMcpServerId
 }
 
 export type ExportMcpCopyConfigResult = AiopsMutationResult<{
   kind: ExportMcpCopyConfigKind
+  serverId: ExportMcpServerId
 }>
 
 export type ExportMcpTokenResetResult = AiopsMutationResult<{

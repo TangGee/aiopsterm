@@ -1,6 +1,6 @@
 # 导出 MCP
 
-本页位于 `设置 -> 导出 MCP`，用于把 aiopsterm 的主机连接、会话和经过授权的只读数据库能力导出成外部 MCP server。外部 Codex、Claude Code 或其他支持 MCP 的 Agent 可以通过这个 server 调用 aiopsterm 的主机网关、会话和工具接口。
+本页位于 `设置 -> 导出 MCP`，用于把 aiopsterm 能力按用途导出成三个独立 MCP server。外部 Codex、Claude Code 或其他支持 MCP 的 Agent 可以只安装需要的服务，避免无关 tools 占用上下文：`aiopsterm_hosts` 提供主机和 SSH 能力，`aiopsterm_ai_sessions` 提供托管 AI 会话能力，`aiopsterm_databases` 提供经过授权的数据库只读能力。
 
 ## 前置条件
 
@@ -26,13 +26,20 @@ relay-shell 后再 `ssh` 的文本密码提示仍不是结构化 SSH 认证事�
 
 ## 数据库读取权限
 
-数据库 MCP tools 会随 `aiopsterm_hosts` 一起被外部 Agent 发现，但数据库读取权限默认关闭。只有在本页开启 `允许外部 Agent 读取数据库` 后，外部 Agent 才能调用：
+数据库 MCP tools 只由 `aiopsterm_databases` 暴露，数据库读取权限默认关闭。只有安装该 server 并在本页开启 `允许外部 Agent 读取数据库` 后，外部 Agent 才能调用数据库 tools：
 
 - `list_database_connections`
+- `list_databases`
+- `list_schemas`
+- `list_tables`
 - `search_database_objects`
 - `describe_database_table`
 - `get_database_table_ddl`
 - `query_database_table`
+- `sample_rows`
+- `count_rows`
+- `inspect_indexes`
+- `explain_plan`
 
 关闭时调用会返回 `DB_MCP_DATABASE_READ_DISABLED`，不会读取 catalog 或连接。连接列表只返回当前进程有效的随机 handle 和受控 label，不返回保存的 ID、用户自定义名称、主机、端口、用户名、URL、文件路径、代理配置或密码；aiopsterm 重启后必须重新发现 handle。DDL 和 table 数据查询还要求非 SQLite 连接已在 Database 工作区打开。
 
@@ -48,25 +55,27 @@ token 用来证明调用方是被授权的外部 MCP 客户端。即使 socket �
 
 ## 内置安装器
 
-内置安装器会检测本机 CLI 和配置状态，并只管理名为 `aiopsterm_hosts` 的 MCP server 条目。
+内置安装器会分别检测并管理 `aiopsterm_hosts`、`aiopsterm_ai_sessions` 和 `aiopsterm_databases`。设置页按能力显示三个卡片，每个卡片内可独立安装或卸载 Codex 与 Claude Code 配置，不提供批量安装。
 
-- Codex：调用 `codex mcp remove aiopsterm_hosts` 后再调用 `codex mcp add aiopsterm_hosts --env ... -- <aiopsterm-runtime> <helper>`，并写入 `ELECTRON_RUN_AS_NODE=1`。
-- Claude Code：调用 `claude mcp remove -s user aiopsterm_hosts` 后再调用 `claude mcp add -s user aiopsterm_hosts -e ... -- <aiopsterm-runtime> <helper>`，并写入 `ELECTRON_RUN_AS_NODE=1`。
+- Codex：只移除并重新添加用户选择的 server 条目。
+- Claude Code：只移除并重新添加用户选择的 user-scope server 条目。
+
+三个条目复用同一个 helper、socket 和 token，但分别写入 `AIOPSTERM_EXTERNAL_CODEX_MCP_SCOPE=hosts`、`ai-sessions` 或 `databases`。helper 缺少合法 scope 时会拒绝初始化，不会回退到聚合 tools。
 
 安装按钮不会直接手写 Codex 或 Claude Code 配置文件；配置文件只用于状态探测和冲突提示。
 
-如果页面提示已有 `aiopsterm_hosts` 但与当前导出 MCP 设置不匹配，通常是旧配置写入了带进程号的 socket 路径，或 token 已重新生成；重新安装即可刷新为当前稳定 socket 和 token。
+如果页面提示某个 server 与当前导出 MCP 设置不匹配，通常是 socket、token、runtime、helper 或 scope 不一致；只需重新安装对应条目。
 
 `重新生成 Token` 会立即让已安装或已复制的外部 Agent 配置失效。Codex / Claude Code 需要重新安装，其他 Agent 需要重新复制配置。
 
 ## 其他 Agent 手动配置
 
-非常见 Agent 不一定有稳定的 MCP CLI。此时使用 `其他 Agent 手动配置` 区域：
+非常见 Agent 不一定有稳定的 MCP CLI。此时在对应能力卡片内使用手动配置入口：
 
 - `复制 JSON 模板`：适合支持 `mcpServers` JSON 配置的 Agent。
 - `复制 stdio 命令模板`：适合支持手动填写 stdio command/env 的 Agent。
 
-页面预览会用占位符隐藏 token，但复制按钮写入剪贴板的是完整配置，包含当前 token。重新生成 token 后需要重新复制。
+每次复制只生成当前能力对应的一个 server，并写入它的 scope。页面预览会用占位符隐藏 token，但复制按钮写入剪贴板的是完整配置，包含当前 token。重新生成 token 后需要重新复制。
 
 如果开启了 `允许外部 Agent 提交 SSH 认证信息`，手动配置的 Agent 也会获得 `submit_ssh_auth_response` tool。请只把包含 token 的配置粘贴到可信 Agent，因为该 Agent 理论上可以提交你交给它的认证响应。
 

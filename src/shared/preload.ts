@@ -150,6 +150,7 @@ export type {
   ExportMcpCopyConfigResult,
   ExportMcpClientSource,
   ExportMcpClientStatus,
+  ExportMcpServerId,
   ExportMcpInstallerListResult,
   ExportMcpInstallerOperation,
   ExportMcpInstallerOperationInput,

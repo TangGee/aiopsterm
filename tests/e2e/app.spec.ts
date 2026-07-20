@@ -178,13 +178,14 @@ type McpJsonRpcResponse = {
   error?: { code: number; message: string }
 }
 
-const startExternalCodexMcpScript = (socketPath: string, token: string) => {
+const startExternalCodexMcpScript = (socketPath: string, token: string, scope: 'hosts' | 'ai-sessions' | 'databases') => {
   const child = spawn(process.execPath, [path.join(process.cwd(), 'resources', 'aiopsterm-external-codex-mcp.js')], {
     cwd: process.cwd(),
     env: {
       ...process.env,
       AIOPSTERM_EXTERNAL_CODEX_MCP_SOCKET: socketPath,
-      AIOPSTERM_EXTERNAL_CODEX_MCP_TOKEN: token
+      AIOPSTERM_EXTERNAL_CODEX_MCP_TOKEN: token,
+      AIOPSTERM_EXTERNAL_CODEX_MCP_SCOPE: scope
     },
     stdio: 'pipe'
   }) as ChildProcessWithoutNullStreams
@@ -887,6 +888,8 @@ test('control socket and external Codex MCP expose automation without browser co
     { userDataDir }
   )
   let mcp: ReturnType<typeof startExternalCodexMcpScript> | null = null
+  let aiMcp: ReturnType<typeof startExternalCodexMcpScript> | null = null
+  let databaseMcp: ReturnType<typeof startExternalCodexMcpScript> | null = null
 
   try {
     const page = await app.firstWindow()
@@ -969,18 +972,28 @@ test('control socket and external Codex MCP expose automation without browser co
     await expect(page.locator('.settings-nav-item').filter({ hasText: '主机Agent' })).toHaveClass(/active/)
 
     await pollValue(() => socketJsonRequest(externalSocketPath, { id: 'external-ping', method: 'list_hosts', params: {}, token: externalToken }), (response) => response.ok === true)
-    mcp = startExternalCodexMcpScript(externalSocketPath, externalToken)
+    mcp = startExternalCodexMcpScript(externalSocketPath, externalToken, 'hosts')
+    aiMcp = startExternalCodexMcpScript(externalSocketPath, externalToken, 'ai-sessions')
+    databaseMcp = startExternalCodexMcpScript(externalSocketPath, externalToken, 'databases')
     const initialize = await mcp.request({ jsonrpc: '2.0', id: 'mcp-init', method: 'initialize', params: { protocolVersion: '2025-03-26' } })
     expect(initialize.result?.serverInfo?.name).toBe('aiopsterm-hosts')
 
     const tools = await mcp.request({ jsonrpc: '2.0', id: 'mcp-tools', method: 'tools/list', params: {} })
+    expect(tools.result?.tools).toHaveLength(14)
     expect((tools.result?.tools || []).map((tool: JsonObject) => tool.name)).toEqual(
+      expect.arrayContaining(['list_hosts', 'list_connections', 'disconnect_host'])
+    )
+
+    const aiTools = await aiMcp.request({ jsonrpc: '2.0', id: 'mcp-ai-tools', method: 'tools/list', params: {} })
+    expect(aiTools.result?.tools).toHaveLength(17)
+    expect((aiTools.result?.tools || []).map((tool: JsonObject) => tool.name)).toEqual(
+      expect.arrayContaining(['list_ai_sessions', 'list_ai_notifications'])
+    )
+
+    const databaseTools = await databaseMcp.request({ jsonrpc: '2.0', id: 'mcp-database-tools', method: 'tools/list', params: {} })
+    expect(databaseTools.result?.tools).toHaveLength(12)
+    expect((databaseTools.result?.tools || []).map((tool: JsonObject) => tool.name)).toEqual(
       expect.arrayContaining([
-        'list_hosts',
-        'list_connections',
-        'disconnect_host',
-        'list_ai_sessions',
-        'list_ai_notifications',
         'list_database_connections',
         'list_databases',
         'list_schemas',
@@ -996,7 +1009,7 @@ test('control socket and external Codex MCP expose automation without browser co
       ])
     )
 
-    const databaseReadsDisabled = await mcp.request({
+    const databaseReadsDisabled = await databaseMcp.request({
       jsonrpc: '2.0',
       id: 'mcp-database-disabled',
       method: 'tools/call',
@@ -1031,10 +1044,25 @@ test('control socket and external Codex MCP expose automation without browser co
     expect(refusedTerminalDisconnect.result?.isError).toBe(true)
     expect(refusedTerminalDisconnect.result?.structuredContent).toEqual(expect.objectContaining({ ok: false, errorCode: 'TERMINAL_OWNED_CONNECTION' }))
 
-    const aiSessions = await mcp.request({ jsonrpc: '2.0', id: 'mcp-ai-sessions', method: 'tools/call', params: { name: 'list_ai_sessions', arguments: { includeEvents: true } } })
+    const aiSessions = await aiMcp.request({ jsonrpc: '2.0', id: 'mcp-ai-sessions', method: 'tools/call', params: { name: 'list_ai_sessions', arguments: { includeEvents: true } } })
     expect(aiSessions.result?.structuredContent).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ sessions: expect.any(Array) }) }))
+
+    const exportSettingsOpen = await socketJsonRequest(controlSocket, {
+      id: 'e2e-export-mcp-settings-open',
+      method: 'settings.open',
+      params: { target: 'export-mcp' }
+    })
+    expect(exportSettingsOpen).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ target: 'exportMcp' }) }))
+    const exportMcpCards = page.locator('.external-codex-mcp-card')
+    await expect(exportMcpCards).toHaveCount(3)
+    await expect(exportMcpCards.nth(0)).toContainText('aiopsterm_hosts')
+    await expect(exportMcpCards.nth(1)).toContainText('aiopsterm_ai_sessions')
+    await expect(exportMcpCards.nth(2)).toContainText('aiopsterm_databases')
+    await expect(page.locator('.export-mcp-installer-row')).toHaveCount(6)
   } finally {
     await mcp?.close()
+    await aiMcp?.close()
+    await databaseMcp?.close()
     await app.close()
     await rm(userDataDir, { recursive: true, force: true })
   }

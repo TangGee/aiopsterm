@@ -48,9 +48,10 @@ aiopsterm 的 MCP 相关能力有两个方向：**接入第三方 MCP Server** �
 
 ![导出 MCP](../images/settings-export-mcp.png)
 
-**设置 -> 导出 MCP** 把 aiopsterm 的主机/资产/数据库等只读能力打包成一个 MCP 入口，供外部 Codex、Claude Code 等代理调用：
+**设置 -> 导出 MCP** 把能力拆成主机与 SSH、托管 AI 会话、数据库只读访问三个独立 MCP Server，供外部 Codex、Claude Code 等代理按需安装：
 
 - 页面提供外部 Agent MCP 安装器与 Token 管理（`重新生成 Token` 后旧 Token 失效）。
+- 三个能力卡片分别安装和卸载，未安装的服务不会向 Agent 提供 tool schema。
 - 帮助脚本通过 aiopsterm 自带运行时执行（`ELECTRON_RUN_AS_NODE=1 <aiopsterm可执行文件> <helper.js>`），**不需要**系统安装 Node.js。
 - 数据库工具走独立的 Export MCP 网关，用进程级随机句柄解析到已保存连接——外部代理拿不到第二份 DSN 或密码。
 

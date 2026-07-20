@@ -240,45 +240,38 @@ export const createSettingsWorkspacePageContext = (workspace: SettingsWorkspaceS
   const exportMcpBridgeFallback: ExportMcpBridgeStatus = {
     enabled: false,
     listening: false,
-    tokenConfigured: false,
-    socketPath: '',
-    serverName: 'aiopsterm_hosts'
-  }
+  tokenConfigured: false,
+  socketPath: ''
+}
 
-  const exportMcpInstallerFallbacks: ExportMcpClientStatus[] = [
-    {
-      source: 'codex',
-      label: 'Codex',
-      binaryName: 'codex',
-      binaryPath: '',
-      configPath: '~/.codex/config.toml',
-      configExists: false,
-      installed: false,
-      scriptPath: '',
-      runtimePath: '',
-      serverName: 'aiopsterm_hosts',
-      bridge: exportMcpBridgeFallback,
-      warnings: []
-    },
-    {
-      source: 'claude-code',
-      label: 'Claude Code',
-      binaryName: 'claude',
-      binaryPath: '',
-      configPath: '~/.claude.json',
-      configExists: false,
-      installed: false,
-      scriptPath: '',
-      runtimePath: '',
-      serverName: 'aiopsterm_hosts',
-      bridge: exportMcpBridgeFallback,
-      warnings: []
-    }
+  const exportMcpServers = [
+    { serverId: 'hosts' as const, serverName: 'aiopsterm_hosts' },
+    { serverId: 'ai-sessions' as const, serverName: 'aiopsterm_ai_sessions' },
+    { serverId: 'databases' as const, serverName: 'aiopsterm_databases' }
   ]
+  const exportMcpClients = [
+    { source: 'codex' as const, label: 'Codex', binaryName: 'codex', configPath: '~/.codex/config.toml' },
+    { source: 'claude-code' as const, label: 'Claude Code', binaryName: 'claude', configPath: '~/.claude.json' }
+  ]
+  const exportMcpInstallerFallbacks: ExportMcpClientStatus[] = exportMcpServers.flatMap((server) =>
+    exportMcpClients.map((client) => ({
+      ...server,
+      ...client,
+      binaryPath: '',
+      configExists: false,
+      installed: false,
+      scriptPath: '',
+      runtimePath: '',
+      bridge: exportMcpBridgeFallback,
+      warnings: []
+    }))
+  )
 
   const exportMcpInstallerRows = () =>
     exportMcpInstallerFallbacks.map((fallback) => {
-      const client = workspace.exportMcpInstallers.find((installer) => installer.source === fallback.source)
+      const client = workspace.exportMcpInstallers.find(
+        (installer) => installer.source === fallback.source && installer.serverId === fallback.serverId
+      )
       if (client) return client
       const bridge = workspace.exportMcpInstallerBridge || exportMcpBridgeFallback
       return { ...fallback, bridge, warnings: [t('settings.ai.exportMcp.statusNotLoaded')] }

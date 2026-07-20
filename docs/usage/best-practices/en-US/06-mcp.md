@@ -48,9 +48,10 @@ Practical rules:
 
 ![Export MCP](../images/settings-export-mcp.png)
 
-**Settings -> 导出 MCP (Export MCP)** packages aiopsterm's read-only host/asset/database capabilities as one MCP entry point for external Codex, Claude Code, and similar agents:
+**Settings -> 导出 MCP (Export MCP)** splits aiopsterm capabilities into three independent MCP servers for hosts and SSH, managed AI sessions, and read-only database access, so external Codex, Claude Code, and similar agents can install only what they need:
 
 - The page provides the external Agent MCP installer and token management (`重新生成 Token` regenerates and invalidates the old token).
+- The three capability cards install and uninstall independently; an uninstalled server contributes no tool schemas to the Agent context.
 - Helper scripts run through aiopsterm's bundled runtime (`ELECTRON_RUN_AS_NODE=1 <aiopsterm-executable> <helper.js>`) — **no system Node.js needed**.
 - Database tools go through the separate Export MCP gateway, resolving process-scoped random handles to saved connections inside the main process — external agents never see a second DSN or password.
 

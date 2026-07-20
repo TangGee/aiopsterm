@@ -102,9 +102,15 @@ By default, aiopsterm generates a persistent token on first use and stores it un
 
 ## Settings Installer
 
-The user-facing entry is `Settings -> Export MCP`. It exposes the same helper as an installable external MCP server named `aiopsterm_hosts`.
+The user-facing entry is `Settings -> Export MCP`. One packaged helper is registered as three independent external MCP servers. They share the same socket and token but expose disjoint tool lists selected by `AIOPSTERM_EXTERNAL_CODEX_MCP_SCOPE`:
 
-Database tools are discovered with the other gateway tools, but database access is independently disabled by default. Enable `Allow external Agents to read databases` only for a trusted local Agent. Calls fail with `DB_MCP_DATABASE_READ_DISABLED` while the setting is off or the config cannot be read. External tools use process-scoped random database handles rather than saved connection ids or user-defined names. Non-SQLite DDL and table queries also require the saved connection to be open in the Database workspace.
+- `aiopsterm_hosts` with scope `hosts`
+- `aiopsterm_ai_sessions` with scope `ai-sessions`
+- `aiopsterm_databases` with scope `databases`
+
+Missing or unknown scope values fail initialization. There is no aggregate 43-tool fallback.
+
+Database tools are discovered only through `aiopsterm_databases`, and database access is independently disabled by default. Enable `Allow external Agents to read databases` only for a trusted local Agent. Calls fail with `DB_MCP_DATABASE_READ_DISABLED` while the setting is off or the config cannot be read. External tools use process-scoped random database handles rather than saved connection ids or user-defined names. Non-SQLite DDL and table queries also require the saved connection to be open in the Database workspace.
 
 Built-in installers use the external client's official CLI rather than hand-editing client config files:
 
@@ -113,6 +119,7 @@ codex mcp remove aiopsterm_hosts
 codex mcp add aiopsterm_hosts \
   --env AIOPSTERM_EXTERNAL_CODEX_MCP_SOCKET=/path/to/aiopsterm-external-codex.sock \
   --env AIOPSTERM_EXTERNAL_CODEX_MCP_TOKEN=<current-aiopsterm-token> \
+  --env AIOPSTERM_EXTERNAL_CODEX_MCP_SCOPE=hosts \
   --env ELECTRON_RUN_AS_NODE=1 \
   -- /path/to/aiopsterm /path/to/aiopsterm-external-codex-mcp.js
 ```
@@ -122,13 +129,14 @@ claude mcp remove -s user aiopsterm_hosts
 claude mcp add -s user aiopsterm_hosts \
   -e AIOPSTERM_EXTERNAL_CODEX_MCP_SOCKET=/path/to/aiopsterm-external-codex.sock \
   -e AIOPSTERM_EXTERNAL_CODEX_MCP_TOKEN=<current-aiopsterm-token> \
+  -e AIOPSTERM_EXTERNAL_CODEX_MCP_SCOPE=hosts \
   -e ELECTRON_RUN_AS_NODE=1 \
   -- /path/to/aiopsterm /path/to/aiopsterm-external-codex-mcp.js
 ```
 
-The installer resolves the current token in the main process and passes it to the external client's official CLI. Status detection treats a stale socket path or stale token as a conflict so the page can prompt the user to reinstall.
+The same command shape is used for the other two server names with their matching scope. Install, uninstall, status detection, and manual copy operate on one selected server at a time. The installer resolves the current token in the main process and passes it to the external client's official CLI. Status detection treats a stale socket path, token, runtime, helper, or scope as a conflict so the page can prompt the user to reinstall only that entry.
 
-For clients without a supported installer, the settings page provides copyable stdio JSON and command configs. The renderer preview intentionally contains a token placeholder, but the copy action is handled by the main process and writes the complete config, including the current token, to the system clipboard.
+For clients without a supported installer, each capability card provides its own copyable stdio JSON and command config. The renderer preview intentionally contains a token placeholder, but the copy action is handled by the main process and writes the complete selected-server config, including the current token, to the system clipboard.
 
 The external stdio MCP script needs the socket path and token. A generic JSON shape is:
 
@@ -142,7 +150,8 @@ The external stdio MCP script needs the socket path and token. A generic JSON sh
       "env": {
         "ELECTRON_RUN_AS_NODE": "1",
         "AIOPSTERM_EXTERNAL_CODEX_MCP_SOCKET": "/path/to/aiopsterm-external-codex.sock",
-        "AIOPSTERM_EXTERNAL_CODEX_MCP_TOKEN": "<current-aiopsterm-token>"
+        "AIOPSTERM_EXTERNAL_CODEX_MCP_TOKEN": "<current-aiopsterm-token>",
+        "AIOPSTERM_EXTERNAL_CODEX_MCP_SCOPE": "hosts"
       }
     }
   }

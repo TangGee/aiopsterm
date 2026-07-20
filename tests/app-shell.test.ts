@@ -18056,6 +18056,7 @@ describe('AppShell', () => {
       })
     )
     await workspace.findAll('.settings-form-row').find((row) => row.text().includes('Keyword Highlighting Configuration'))!.find('button').trigger('click')
+    await flushPromises()
     expect(store.keywordHighlightEditorOpen).toBe(true)
     expect(workspace.text()).toContain('keyword-highlight.json')
     expect(workspace.find('[data-testid="keyword-highlight-json-editor-monaco"]').exists()).toBe(true)
@@ -18135,7 +18136,15 @@ describe('AppShell', () => {
     expect(workspace.text()).toContain('Codex')
     expect(workspace.text()).toContain('Claude Code')
     expect(workspace.text()).toContain('其他 Agent 手动配置')
-    expect(workspace.find('.external-codex-mcp-card').text()).toContain('aiopsterm_hosts')
+    const exportMcpCards = workspace.findAll('.external-codex-mcp-card')
+    expect(exportMcpCards).toHaveLength(3)
+    expect(exportMcpCards.map((card) => card.text())).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('aiopsterm_hosts'),
+        expect.stringContaining('aiopsterm_ai_sessions'),
+        expect.stringContaining('aiopsterm_databases')
+      ])
+    )
     const databaseReadToggle = workspace
       .findAll('.export-mcp-auth-toggle')
       .find((row) => row.text().includes('允许外部 Agent 读取数据库'))!
@@ -18150,12 +18159,12 @@ describe('AppShell', () => {
       }
     })
     expect(store.config.exportMcp).toEqual({ allowAgentSshAuthSubmit: false, allowDatabaseRead: true })
-    expect(workspace.find('.export-mcp-manual-card').text()).toContain('复制 JSON 模板')
-    expect(workspace.find('.export-mcp-manual-card').text()).toContain('<aiopsterm-managed-token>')
+    expect(exportMcpCards[0].text()).toContain('复制 JSON 模板')
+    expect(exportMcpCards[0].text()).toContain('<aiopsterm-managed-token>')
     vi.mocked(window.aiops.copyExportMcpConfig).mockClear()
     vi.mocked(navigator.clipboard.writeText).mockClear()
-    await workspace.find('button[title="复制 JSON 模板"]').trigger('click')
-    expect(window.aiops.copyExportMcpConfig).toHaveBeenCalledWith({ kind: 'json' })
+    await exportMcpCards[0].find('button[title="复制 JSON 模板"]').trigger('click')
+    expect(window.aiops.copyExportMcpConfig).toHaveBeenCalledWith({ kind: 'json', serverId: 'hosts' })
     expect(navigator.clipboard.writeText).not.toHaveBeenCalled()
     const resetConfirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(false)
     vi.mocked(window.aiops.resetExportMcpToken).mockClear()
@@ -18168,11 +18177,11 @@ describe('AppShell', () => {
     expect(window.aiops.resetExportMcpToken).toHaveBeenCalled()
     resetConfirm.mockRestore()
     vi.mocked(window.aiops.installExportMcp).mockClear()
-    const codexExportInstaller = workspace.findAll('.export-mcp-installer-row').find((row) => row.text().includes('Codex'))!
+    const codexExportInstaller = exportMcpCards[0].findAll('.export-mcp-installer-row').find((row) => row.text().includes('Codex'))!
     await codexExportInstaller.findAll('button').find((button) => button.text() === '安装')!.trigger('click')
     await flushPromises()
-    expect(window.aiops.installExportMcp).toHaveBeenCalledWith({ source: 'codex' })
-    expect(store.exportMcpInstallers.find((installer) => installer.source === 'codex')?.installed).toBe(true)
+    expect(window.aiops.installExportMcp).toHaveBeenCalledWith({ source: 'codex', serverId: 'hosts' })
+    expect(store.exportMcpInstallers.find((installer) => installer.source === 'codex' && installer.serverId === 'hosts')?.installed).toBe(true)
     await clickNav('主机Agent')
     await clickAgentTab('MCP')
     await workspace.findAll('.settings-section-title-row .settings-button').find((button) => button.text().includes('Add Server'))!.trigger('click')

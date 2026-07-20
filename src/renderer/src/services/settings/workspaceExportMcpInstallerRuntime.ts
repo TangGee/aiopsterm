@@ -4,7 +4,13 @@ import {
   isExportMcpInstallerSnapshot
 } from '@/services/ai/managedAiBackendGuards'
 import type { I18nKey } from '@/i18n/messages'
-import type { ExportMcpClientSource, ExportMcpClientStatus, ExportMcpCopyConfigKind, ExportMcpInstallerSnapshot } from '@shared/contracts/exportMcp'
+import type {
+  ExportMcpClientSource,
+  ExportMcpClientStatus,
+  ExportMcpCopyConfigKind,
+  ExportMcpInstallerSnapshot,
+  ExportMcpServerId
+} from '@shared/contracts/exportMcp'
 import type { WorkspaceManagedAiControllerState } from '@/services/ai/workspaceManagedAiTypes'
 
 export const createWorkspaceExportMcpInstallerRuntime = (input: {
@@ -66,16 +72,20 @@ export const createWorkspaceExportMcpInstallerRuntime = (input: {
     }
   }
 
-  const runExportMcpInstallerOperation = async (source: ExportMcpClientSource, operation: 'install' | 'uninstall') => {
+  const runExportMcpInstallerOperation = async (
+    source: ExportMcpClientSource,
+    serverId: ExportMcpServerId,
+    operation: 'install' | 'uninstall'
+  ) => {
     const runOperation = operation === 'install' ? exportMcpClient.installExportMcp() : exportMcpClient.uninstallExportMcp()
     if (!runOperation) {
       setTopNotice(i18nText('settings.ai.exportMcp.serviceUnavailable'))
       return false
     }
-    exportMcpInstallerBusySource.value = source
+    exportMcpInstallerBusySource.value = `${serverId}:${source}`
     exportMcpInstallerError.value = ''
     try {
-      const result = await runOperation({ source })
+      const result = await runOperation({ source, serverId })
       if (!result?.ok) {
         const message =
           result?.errorMessage ||
@@ -98,7 +108,7 @@ export const createWorkspaceExportMcpInstallerRuntime = (input: {
       applyExportMcpInstallerSnapshot(result.data.snapshot)
       setTopNotice(
         i18nText(operation === 'install' ? 'settings.ai.exportMcp.installedNotice' : 'settings.ai.exportMcp.uninstalledNotice', {
-          label: result.data.status.label
+          label: `${result.data.status.label} ${result.data.status.serverName}`
         })
       )
       return true
@@ -117,14 +127,14 @@ export const createWorkspaceExportMcpInstallerRuntime = (input: {
     }
   }
 
-  const copyExportMcpConfig = async (kind: ExportMcpCopyConfigKind) => {
+  const copyExportMcpConfig = async (serverId: ExportMcpServerId, kind: ExportMcpCopyConfigKind) => {
     const copyConfig = exportMcpClient.copyExportMcpConfig()
     if (!copyConfig) {
       setTopNotice(i18nText('settings.ai.exportMcp.serviceUnavailable'))
       return false
     }
     try {
-      const result = await copyConfig({ kind })
+      const result = await copyConfig({ kind, serverId })
       if (!result?.ok) {
         const message = result?.errorMessage || i18nText('settings.ai.exportMcp.copyConfigFailed')
         exportMcpInstallerError.value = message
@@ -172,8 +182,10 @@ export const createWorkspaceExportMcpInstallerRuntime = (input: {
 
   return {
     refreshExportMcpInstallers,
-    installExportMcpInstaller: (source: ExportMcpClientSource) => runExportMcpInstallerOperation(source, 'install'),
-    uninstallExportMcpInstaller: (source: ExportMcpClientSource) => runExportMcpInstallerOperation(source, 'uninstall'),
+    installExportMcpInstaller: (source: ExportMcpClientSource, serverId: ExportMcpServerId) =>
+      runExportMcpInstallerOperation(source, serverId, 'install'),
+    uninstallExportMcpInstaller: (source: ExportMcpClientSource, serverId: ExportMcpServerId) =>
+      runExportMcpInstallerOperation(source, serverId, 'uninstall'),
     copyExportMcpConfig,
     resetExportMcpToken
   }

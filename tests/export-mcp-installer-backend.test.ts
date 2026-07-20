@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { ExportMcpClientSource } from '../src/shared/contracts/exportMcp'
+import type { ExportMcpClientSource, ExportMcpServerId } from '../src/shared/contracts/exportMcp'
 
 type ExportMcpInstallerBackend = {
   configureExportMcpInstallerRuntime: (config?: {
@@ -14,10 +14,13 @@ type ExportMcpInstallerBackend = {
     resetExportMcpToken?: () => string
     execFile?: (file: string, args: string[]) => Promise<{ stdout: string; stderr: string }>
   }) => void
-  listExportMcpInstallers: () => Promise<{ clients: Array<{ source: ExportMcpClientSource; installed: boolean; warnings: string[] }> }>
-  installExportMcp: (input: { source: ExportMcpClientSource }) => Promise<{ ok: boolean; errorCode?: string }>
+  listExportMcpInstallers: () => Promise<{
+    clients: Array<{ source: ExportMcpClientSource; serverId: ExportMcpServerId; installed: boolean; warnings: string[] }>
+  }>
+  installExportMcp: (input: { source: ExportMcpClientSource; serverId: ExportMcpServerId }) => Promise<{ ok: boolean; errorCode?: string }>
+  uninstallExportMcp: (input: { source: ExportMcpClientSource; serverId: ExportMcpServerId }) => Promise<{ ok: boolean; errorCode?: string }>
   resetExportMcpToken: () => Promise<{ ok: boolean }>
-  buildExportMcpManualConfig: (input: { kind: 'json' | 'command' }) => Promise<{ kind: 'json' | 'command'; text: string }>
+  buildExportMcpManualConfig: (input: { kind: 'json' | 'command'; serverId: ExportMcpServerId }) => Promise<{ kind: 'json' | 'command'; text: string }>
 }
 
 const bridgeStatusMock = vi.hoisted(() => ({
@@ -101,6 +104,7 @@ args = ["${scriptPath}"]
 ELECTRON_RUN_AS_NODE = "1"
 AIOPSTERM_EXTERNAL_CODEX_MCP_SOCKET = "${socketPath}"
 AIOPSTERM_EXTERNAL_CODEX_MCP_TOKEN = "${token}"
+AIOPSTERM_EXTERNAL_CODEX_MCP_SCOPE = "hosts"
 `,
       'utf-8'
     )
@@ -116,7 +120,8 @@ AIOPSTERM_EXTERNAL_CODEX_MCP_TOKEN = "${token}"
               env: {
                 ELECTRON_RUN_AS_NODE: '1',
                 AIOPSTERM_EXTERNAL_CODEX_MCP_SOCKET: socketPath,
-                AIOPSTERM_EXTERNAL_CODEX_MCP_TOKEN: token
+                AIOPSTERM_EXTERNAL_CODEX_MCP_TOKEN: token,
+                AIOPSTERM_EXTERNAL_CODEX_MCP_SCOPE: 'hosts'
               }
             }
           }
@@ -129,8 +134,10 @@ AIOPSTERM_EXTERNAL_CODEX_MCP_TOKEN = "${token}"
 
     const snapshot = await installer.listExportMcpInstallers()
 
-    expect(snapshot.clients.find((client) => client.source === 'codex')?.installed).toBe(true)
-    expect(snapshot.clients.find((client) => client.source === 'claude-code')?.installed).toBe(true)
+    expect(snapshot.clients).toHaveLength(6)
+    expect(snapshot.clients.find((client) => client.source === 'codex' && client.serverId === 'hosts')?.installed).toBe(true)
+    expect(snapshot.clients.find((client) => client.source === 'claude-code' && client.serverId === 'hosts')?.installed).toBe(true)
+    expect(snapshot.clients.find((client) => client.serverId === 'ai-sessions')?.installed).toBe(false)
   })
 
   it('marks export MCP entries with stale socket paths as conflicts', async () => {
@@ -146,6 +153,7 @@ args = ["${scriptPath}"]
 ELECTRON_RUN_AS_NODE = "1"
 AIOPSTERM_EXTERNAL_CODEX_MCP_SOCKET = "${staleSocketPath}"
 AIOPSTERM_EXTERNAL_CODEX_MCP_TOKEN = "${token}"
+AIOPSTERM_EXTERNAL_CODEX_MCP_SCOPE = "hosts"
 `,
       'utf-8'
     )
@@ -161,7 +169,8 @@ AIOPSTERM_EXTERNAL_CODEX_MCP_TOKEN = "${token}"
               env: {
                 ELECTRON_RUN_AS_NODE: '1',
                 AIOPSTERM_EXTERNAL_CODEX_MCP_SOCKET: staleSocketPath,
-                AIOPSTERM_EXTERNAL_CODEX_MCP_TOKEN: token
+                AIOPSTERM_EXTERNAL_CODEX_MCP_TOKEN: token,
+                AIOPSTERM_EXTERNAL_CODEX_MCP_SCOPE: 'hosts'
               }
             }
           }
@@ -173,8 +182,8 @@ AIOPSTERM_EXTERNAL_CODEX_MCP_TOKEN = "${token}"
     )
 
     const snapshot = await installer.listExportMcpInstallers()
-    const codex = snapshot.clients.find((client) => client.source === 'codex')!
-    const claude = snapshot.clients.find((client) => client.source === 'claude-code')!
+    const codex = snapshot.clients.find((client) => client.source === 'codex' && client.serverId === 'hosts')!
+    const claude = snapshot.clients.find((client) => client.source === 'claude-code' && client.serverId === 'hosts')!
 
     expect(codex.installed).toBe(false)
     expect(claude.installed).toBe(false)
@@ -203,8 +212,8 @@ AIOPSTERM_EXTERNAL_CODEX_MCP_TOKEN = "${token}"
       }
     })
 
-    await expect(installer.installExportMcp({ source: 'codex' })).resolves.toEqual(expect.objectContaining({ ok: true }))
-    await expect(installer.installExportMcp({ source: 'claude-code' })).resolves.toEqual(expect.objectContaining({ ok: true }))
+    await expect(installer.installExportMcp({ source: 'codex', serverId: 'hosts' })).resolves.toEqual(expect.objectContaining({ ok: true }))
+    await expect(installer.installExportMcp({ source: 'claude-code', serverId: 'ai-sessions' })).resolves.toEqual(expect.objectContaining({ ok: true }))
 
     expect(calls.map((call) => call.args)).toEqual([
       ['mcp', 'remove', 'aiopsterm_hosts'],
@@ -217,22 +226,26 @@ AIOPSTERM_EXTERNAL_CODEX_MCP_TOKEN = "${token}"
         '--env',
         `AIOPSTERM_EXTERNAL_CODEX_MCP_TOKEN=${token}`,
         '--env',
+        'AIOPSTERM_EXTERNAL_CODEX_MCP_SCOPE=hosts',
+        '--env',
         'ELECTRON_RUN_AS_NODE=1',
         '--',
         runtimePath,
         scriptPath
       ],
-      ['mcp', 'remove', '-s', 'user', 'aiopsterm_hosts'],
+      ['mcp', 'remove', '-s', 'user', 'aiopsterm_ai_sessions'],
       [
         'mcp',
         'add',
         '-s',
         'user',
-        'aiopsterm_hosts',
+        'aiopsterm_ai_sessions',
         '-e',
         `AIOPSTERM_EXTERNAL_CODEX_MCP_SOCKET=${socketPath}`,
         '-e',
         `AIOPSTERM_EXTERNAL_CODEX_MCP_TOKEN=${token}`,
+        '-e',
+        'AIOPSTERM_EXTERNAL_CODEX_MCP_SCOPE=ai-sessions',
         '-e',
         'ELECTRON_RUN_AS_NODE=1',
         '--',
@@ -242,6 +255,9 @@ AIOPSTERM_EXTERNAL_CODEX_MCP_TOKEN = "${token}"
     ])
     expect(calls[0].file).toContain('/codex')
     expect(calls[2].file).toContain('/claude')
+
+    await expect(installer.uninstallExportMcp({ source: 'codex', serverId: 'databases' })).resolves.toEqual(expect.objectContaining({ ok: true }))
+    expect(calls.at(-1)?.args).toEqual(['mcp', 'remove', 'aiopsterm_databases'])
   })
 
   it('installs clients with the app-managed token when the environment token is missing', async () => {
@@ -263,27 +279,29 @@ AIOPSTERM_EXTERNAL_CODEX_MCP_TOKEN = "${token}"
       }
     })
 
-    await expect(installer.installExportMcp({ source: 'codex' })).resolves.toEqual(expect.objectContaining({ ok: true }))
+    await expect(installer.installExportMcp({ source: 'codex', serverId: 'databases' })).resolves.toEqual(expect.objectContaining({ ok: true }))
     expect(calls.at(-1)?.args).toContain(`AIOPSTERM_EXTERNAL_CODEX_MCP_SOCKET=${socketPath}`)
     expect(calls.at(-1)?.args).toContain('AIOPSTERM_EXTERNAL_CODEX_MCP_TOKEN=managed-token')
+    expect(calls.at(-1)?.args).toContain('AIOPSTERM_EXTERNAL_CODEX_MCP_SCOPE=databases')
   })
 
   it('copies manual MCP config with the current token and rotates token snapshots', async () => {
     const { installer, managedToken, socketPath, scriptPath, runtimePath } = await prepareRuntime()
 
-    await expect(installer.buildExportMcpManualConfig({ kind: 'json' })).resolves.toEqual(
+    await expect(installer.buildExportMcpManualConfig({ kind: 'json', serverId: 'databases' })).resolves.toEqual(
       expect.objectContaining({
         kind: 'json',
-        text: expect.stringContaining(`"AIOPSTERM_EXTERNAL_CODEX_MCP_TOKEN": "${managedToken}"`)
+        serverId: 'databases',
+        text: expect.stringContaining('"aiopsterm_databases"')
       })
     )
-    await expect(installer.buildExportMcpManualConfig({ kind: 'command' })).resolves.toEqual(
+    await expect(installer.buildExportMcpManualConfig({ kind: 'command', serverId: 'ai-sessions' })).resolves.toEqual(
       expect.objectContaining({
         kind: 'command',
-        text: expect.stringContaining(`AIOPSTERM_EXTERNAL_CODEX_MCP_SOCKET='${socketPath}'`)
+        text: expect.stringContaining("AIOPSTERM_EXTERNAL_CODEX_MCP_SCOPE='ai-sessions'")
       })
     )
-    await expect(installer.buildExportMcpManualConfig({ kind: 'command' })).resolves.toEqual(
+    await expect(installer.buildExportMcpManualConfig({ kind: 'command', serverId: 'hosts' })).resolves.toEqual(
       expect.objectContaining({
         text: expect.stringContaining(`'${runtimePath}' '${scriptPath}'`)
       })

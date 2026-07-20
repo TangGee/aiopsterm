@@ -83,11 +83,11 @@ const exportMcpSnapshot: ExportMcpInstallerSnapshot = {
     enabled: true,
     listening: true,
     tokenConfigured: true,
-    socketPath: '/tmp/aiopsterm-external-codex.sock',
-    serverName: 'aiopsterm_hosts'
+    socketPath: '/tmp/aiopsterm-external-codex.sock'
   },
   clients: [
     {
+      serverId: 'hosts',
       source: 'codex',
       label: 'Codex',
       binaryName: 'codex',
@@ -102,8 +102,7 @@ const exportMcpSnapshot: ExportMcpInstallerSnapshot = {
         enabled: true,
         listening: true,
         tokenConfigured: true,
-        socketPath: '/tmp/aiopsterm-external-codex.sock',
-        serverName: 'aiopsterm_hosts'
+        socketPath: '/tmp/aiopsterm-external-codex.sock'
       },
       warnings: []
     }

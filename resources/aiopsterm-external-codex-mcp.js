@@ -6,6 +6,7 @@ const readline = require('readline')
 
 const socketPath = process.env.AIOPSTERM_EXTERNAL_CODEX_MCP_SOCKET || ''
 const token = process.env.AIOPSTERM_EXTERNAL_CODEX_MCP_TOKEN || ''
+const scope = process.env.AIOPSTERM_EXTERNAL_CODEX_MCP_SCOPE || ''
 let nextBridgeId = 1
 
 const writeMessage = (message) => {
@@ -151,7 +152,7 @@ const databaseStructuredSortProperty = {
   additionalProperties: false
 }
 
-const tools = [
+const hostTools = [
   {
     name: 'list_hosts',
     title: 'List aiopsterm hosts',
@@ -373,7 +374,10 @@ const tools = [
       additionalProperties: false
     },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true }
-  },
+  }
+]
+
+const managedAiTools = [
   {
     name: 'list_ai_sessions',
     title: 'List aiopsterm managed AI sessions',
@@ -657,7 +661,10 @@ const tools = [
       'Ask aiopsterm to focus the newest unread managed AI notification, matching the top-bar bell behavior. It does not mark the item read.',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false }
-  },
+  }
+]
+
+const databaseTools = [
   {
     name: 'list_database_connections',
     title: 'List aiopsterm database connections',
@@ -860,24 +867,54 @@ const tools = [
   }
 ]
 
+const serverScopes = {
+  hosts: {
+    name: 'aiopsterm-hosts',
+    title: 'aiopsterm Host Gateway',
+    tools: hostTools
+  },
+  'ai-sessions': {
+    name: 'aiopsterm-ai-sessions',
+    title: 'aiopsterm Managed AI Sessions',
+    tools: managedAiTools
+  },
+  databases: {
+    name: 'aiopsterm-databases',
+    title: 'aiopsterm Database Reader',
+    tools: databaseTools
+  }
+}
+
+const activeServer = serverScopes[scope]
+
 const handleInitialize = (id, params) => {
+  if (!activeServer) {
+    error(id, -32602, 'AIOPSTERM_EXTERNAL_CODEX_MCP_SCOPE must be hosts, ai-sessions, or databases.')
+    return
+  }
   result(id, {
     protocolVersion: params?.protocolVersion || '2025-03-26',
     capabilities: { tools: { listChanged: false } },
     serverInfo: {
-      name: 'aiopsterm-hosts',
-      title: 'aiopsterm Host Gateway',
+      name: activeServer.name,
+      title: activeServer.title,
       version: '0.1.0'
     }
   })
 }
 
-const handleListTools = (id) => result(id, { tools, nextCursor: null })
+const handleListTools = (id) => {
+  if (!activeServer) {
+    error(id, -32602, 'AIOPSTERM_EXTERNAL_CODEX_MCP_SCOPE must be hosts, ai-sessions, or databases.')
+    return
+  }
+  result(id, { tools: activeServer.tools, nextCursor: null })
+}
 
 const handleCallTool = async (id, params) => {
   const name = params?.name
   const args = params?.arguments || {}
-  if (!tools.some((tool) => tool.name === name)) {
+  if (!activeServer || !activeServer.tools.some((tool) => tool.name === name)) {
     result(id, { content: [textContent(`Unknown aiopsterm external Codex tool: ${name || ''}`)], isError: true })
     return
   }
