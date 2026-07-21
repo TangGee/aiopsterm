@@ -159,6 +159,7 @@ Commands:
 
 Short SSH:
   aiossh <managed-host>
+  aiswitch <managed-host>
   aio host switch <managed-host>
   aiossh --complete <prefix>
 `
@@ -1687,7 +1688,7 @@ const nodeForCompletionPath = (tokens) => {
 const cliCompletionPlan = ({ words, index }) => {
   const bin = completionBasename(words[0] || 'aio')
   const currentWord = words[index] || ''
-  if (bin === 'aiossh') {
+  if (bin === 'aiossh' || bin === 'aiswitch') {
     if (String(currentWord).startsWith('-')) return { candidates: completionFilter(managedHostSshOptions, currentWord) }
     return { dynamic: 'managed-host', prefix: currentWord }
   }
@@ -1717,23 +1718,23 @@ _aiopsterm_control_complete() {
   cur="\${COMP_WORDS[COMP_CWORD]}"
   helper="\${COMP_WORDS[0]}"
   bin="\${helper##*/}"
-  if [[ "$bin" == "aiossh" ]]; then
+  if [[ "$bin" == "aiossh" || "$bin" == "aiswitch" ]]; then
     mapfile -t COMPREPLY < <(compgen -W "$("$helper" --complete "$cur" 2>/dev/null)" -- "$cur")
     return 0
   fi
   mapfile -t COMPREPLY < <(compgen -W "$("$helper" complete cli --index "$COMP_CWORD" -- "\${COMP_WORDS[@]}" 2>/dev/null)" -- "$cur")
   return 0
 }
-complete -F _aiopsterm_control_complete aio aictl aiopsterm-control aiossh
+complete -F _aiopsterm_control_complete aio aictl aiopsterm-control aiossh aiswitch
 `
 
-const shellCompletionZsh = () => `#compdef aio aictl aiopsterm-control aiossh
+const shellCompletionZsh = () => `#compdef aio aictl aiopsterm-control aiossh aiswitch
 _aiopsterm_control_complete() {
   local helper bin index
   local -a candidates
   helper="$words[1]"
   bin="\${helper:t}"
-  if [[ "$bin" == "aiossh" ]]; then
+  if [[ "$bin" == "aiossh" || "$bin" == "aiswitch" ]]; then
     candidates=("\${(@f)$("$helper" --complete "$words[CURRENT]" 2>/dev/null)}")
   else
     index=$((CURRENT - 1))
@@ -1741,7 +1742,7 @@ _aiopsterm_control_complete() {
   fi
   compadd -- $candidates
 }
-compdef _aiopsterm_control_complete aio aictl aiopsterm-control aiossh
+compdef _aiopsterm_control_complete aio aictl aiopsterm-control aiossh aiswitch
 `
 
 const shellCompletionFish = () => `# aiopsterm control completion
@@ -1760,7 +1761,7 @@ function __aiopsterm_control_complete
   set -l helper $tokens[1]
   set -l bin (basename -- $helper)
   set -l index (math (count $tokens) - 1)
-  if test "$bin" = "aiossh"
+  if test "$bin" = "aiossh"; or test "$bin" = "aiswitch"
     $helper --complete $current 2>/dev/null
   else
     $helper complete cli --index $index -- $tokens 2>/dev/null
@@ -1770,6 +1771,7 @@ complete -c aio -f -a "(__aiopsterm_control_complete)"
 complete -c aictl -f -a "(__aiopsterm_control_complete)"
 complete -c aiopsterm-control -f -a "(__aiopsterm_control_complete)"
 complete -c aiossh -f -a "(__aiopsterm_control_complete)"
+complete -c aiswitch -f -a "(__aiopsterm_control_complete)"
 `
 
 const shellCompletionMethodParams = (shell) => {
@@ -1819,6 +1821,7 @@ const managedHostSshMethodParams = () => {
 }
 
 const managedHostSwitchMethodParams = () => {
+  if (hasFlag('--complete')) return managedHostCompletionMethodParams()
   const target = workspaceRemoteTargetParams()
   const host = readOption('--asset') || readOption('--host') || readOption('--name') || readOption('--target') || readPositional()
   if (!host) throw new Error('host switch requires a managed host name')

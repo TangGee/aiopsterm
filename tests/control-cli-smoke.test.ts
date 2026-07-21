@@ -218,6 +218,11 @@ describe('aio CLI', () => {
     })
     expect(directAiosshCompletion.stdout).toBe('prod-bastion\nprod-api\n')
 
+    const directAiswitchCompletion = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'complete', 'cli', '--index', '1', '--', 'aiswitch', 'prod'], {
+      cwd: process.cwd()
+    })
+    expect(directAiswitchCompletion.stdout).toBe('prod-bastion\nprod-api\n')
+
     const noSocketCompletion = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', 'ssh', '--complete', 'prod'], {
       cwd: process.cwd(),
       env: { ...process.env, AIOPSTERM_CONTROL_SOCKET: '' }
@@ -228,6 +233,7 @@ describe('aio CLI', () => {
     expect(seen).toEqual([
       expect.objectContaining({ method: 'asset.ssh.connect', params: expect.objectContaining({ target: 'prod-bastion', auto_connect: true, reuse: false }) }),
       expect.objectContaining({ method: 'asset.ssh.connect', params: expect.objectContaining({ target: 'prod-bastion', auto_connect: false, reuse: true, require_existing: true }) }),
+      expect.objectContaining({ method: 'asset.complete', params: expect.objectContaining({ prefix: 'prod', connectable_only: true }) }),
       expect.objectContaining({ method: 'asset.complete', params: expect.objectContaining({ prefix: 'prod', connectable_only: true }) }),
       expect.objectContaining({ method: 'asset.complete', params: expect.objectContaining({ prefix: 'prod', connectable_only: true }) }),
       expect.objectContaining({ method: 'asset.complete', params: expect.objectContaining({ prefix: 'prod', connectable_only: true }) })
@@ -301,14 +307,14 @@ describe('aio CLI', () => {
       env: { ...process.env, AIOPSTERM_CONTROL_SOCKET: '' }
     })
     expect(bash.stdout).toContain('complete cli --index "$COMP_CWORD"')
-    expect(bash.stdout).toContain('complete -F _aiopsterm_control_complete aio aictl aiopsterm-control aiossh')
+    expect(bash.stdout).toContain('complete -F _aiopsterm_control_complete aio aictl aiopsterm-control aiossh aiswitch')
 
     const zsh = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', 'completion', 'zsh'], {
       cwd: process.cwd(),
       env: { ...process.env, AIOPSTERM_CONTROL_SOCKET: '' }
     })
     expect(zsh.stdout).toContain('complete cli --index "$index"')
-    expect(zsh.stdout).toContain('compdef _aiopsterm_control_complete aio aictl aiopsterm-control aiossh')
+    expect(zsh.stdout).toContain('compdef _aiopsterm_control_complete aio aictl aiopsterm-control aiossh aiswitch')
 
     const fish = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', 'completion', 'fish'], {
       cwd: process.cwd(),
@@ -316,6 +322,7 @@ describe('aio CLI', () => {
     })
     expect(fish.stdout).toContain('complete cli --index $index')
     expect(fish.stdout).toContain('complete -c aiopsterm-control')
+    expect(fish.stdout).toContain('complete -c aiswitch')
   })
 
   it('sends control_compat-style system, settings, app, and window requests from the CLI helper', async () => {
