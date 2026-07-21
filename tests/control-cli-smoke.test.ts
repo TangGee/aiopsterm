@@ -199,6 +199,10 @@ describe('aio CLI', () => {
     })
     expect(ssh.stdout).toContain('remote')
 
+    await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'host', 'switch', 'prod-bastion'], {
+      cwd: process.cwd()
+    })
+
     const completion = await execFileAsync(process.execPath, ['resources/aiopsterm-control.js', '--socket', socketPath, 'ssh', '--complete', 'prod'], {
       cwd: process.cwd()
     })
@@ -222,7 +226,8 @@ describe('aio CLI', () => {
     expect(noSocketCompletion.stderr).toBe('')
 
     expect(seen).toEqual([
-      expect.objectContaining({ method: 'asset.ssh.connect', params: expect.objectContaining({ target: 'prod-bastion', auto_connect: true, reuse: true }) }),
+      expect.objectContaining({ method: 'asset.ssh.connect', params: expect.objectContaining({ target: 'prod-bastion', auto_connect: true, reuse: false }) }),
+      expect.objectContaining({ method: 'asset.ssh.connect', params: expect.objectContaining({ target: 'prod-bastion', auto_connect: false, reuse: true, require_existing: true }) }),
       expect.objectContaining({ method: 'asset.complete', params: expect.objectContaining({ prefix: 'prod', connectable_only: true }) }),
       expect.objectContaining({ method: 'asset.complete', params: expect.objectContaining({ prefix: 'prod', connectable_only: true }) }),
       expect.objectContaining({ method: 'asset.complete', params: expect.objectContaining({ prefix: 'prod', connectable_only: true }) })
@@ -270,6 +275,9 @@ describe('aio CLI', () => {
 
     const terminal = await runCliCompletion(['complete', 'cli', '--index', '2', '--', 'aio', 'terminal', ''])
     expect(terminal).toEqual(expect.arrayContaining(['list', 'focus', 'create', 'paste', 'viewport', 'read-screen', 'send-key']))
+
+    const host = await runCliCompletion(['complete', 'cli', '--index', '2', '--', 'aio', 'host', ''])
+    expect(host).toEqual(expect.arrayContaining(['list', 'add', 'ssh', 'switch', 'complete']))
 
     const workspaceRemote = await runCliCompletion(['complete', 'cli', '--index', '3', '--', 'aio', 'workspace', 'remote', ''])
     expect(workspaceRemote).toEqual(expect.arrayContaining(['status', 'configure', 'foreground-auth-ready', 'pty-bridge', 'pty-resize']))

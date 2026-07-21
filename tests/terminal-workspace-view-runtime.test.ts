@@ -368,6 +368,33 @@ describe('terminalWorkspaceViewRuntime', () => {
     expect(terminal.focus).toHaveBeenCalled()
   })
 
+  it('does not let queued terminal focus steal focus from a modal dialog input', async () => {
+    const panel = createEmptyTerminalPanel('panel-1', 'Local')
+    const { runtime } = createRuntime(panel)
+    const dialog = document.createElement('section')
+    dialog.setAttribute('role', 'dialog')
+    dialog.setAttribute('aria-modal', 'true')
+    const input = document.createElement('input')
+    dialog.appendChild(input)
+    document.body.appendChild(dialog)
+    input.focus()
+
+    runtime.focusPanel(panel.id)
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    runtime.setTerminalElement(panel.id, host)
+    await flushFrames(3)
+
+    const terminal = runtime.terminalViews.get(panel.id)?.terminal as unknown as FakeTerminal
+    expect(terminal.focus).not.toHaveBeenCalled()
+    expect(document.activeElement).toBe(input)
+
+    dialog.remove()
+    runtime.focusPanel(panel.id)
+    await flushFrames(2)
+    expect(terminal.focus).toHaveBeenCalled()
+  })
+
   it('applies terminal program title changes without overriding user-owned tab names', async () => {
     const panel = createEmptyTerminalPanel('panel-1', 'Local')
     const { runtime } = createRuntime(panel)

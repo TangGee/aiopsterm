@@ -9552,6 +9552,27 @@ describe('AppShell', () => {
     expect(reused).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ connected: true, reused: true, surfaceId: assetPanelId }) }))
     expect(window.aiops.createTerminal).toHaveBeenCalledTimes(1)
 
+    const createdAgain = await invokeControlHandler({ id: 'asset-connect-new', method: 'asset.ssh.connect', params: { target: 'asset-1', reuse: false } })
+    expect(createdAgain).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ connected: true, created: true, reused: false }) }))
+    expect(createdAgain.data.surfaceId).not.toBe(assetPanelId)
+    expect(window.aiops.createTerminal).toHaveBeenCalledTimes(2)
+
+    const switched = await invokeControlHandler({
+      id: 'asset-switch-existing',
+      method: 'asset.ssh.connect',
+      params: { target: 'asset-1', reuse: true, requireExisting: true, autoConnect: false }
+    })
+    expect(switched).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ reused: true, surfaceId: assetPanelId }) }))
+    expect(store.activePanelId).toBe(assetPanelId)
+    expect(window.aiops.createTerminal).toHaveBeenCalledTimes(2)
+
+    const missingOpenTerminal = await invokeControlHandler({
+      id: 'asset-switch-missing',
+      method: 'asset.ssh.connect',
+      params: { target: 'asset-2', reuse: true, requireExisting: true, autoConnect: false }
+    })
+    expect(missingOpenTerminal).toEqual(expect.objectContaining({ ok: false, errorCode: 'ASSET_TERMINAL_NOT_OPEN' }))
+
     const ambiguous = await invokeControlHandler({ id: 'asset-connect-ambiguous', method: 'asset.ssh.connect', params: { target: '10' } })
     expect(ambiguous).toEqual(expect.objectContaining({ ok: false, errorCode: 'ASSET_TARGET_AMBIGUOUS' }))
 

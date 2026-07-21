@@ -179,8 +179,15 @@ export const createTerminalControlSurfaceAssetHandlers = ({
 
   const connectAsset = async (asset: AiopsAssetRecord, params: Record<string, unknown>) => {
     const reuse = controlBool(params.reuse, true)
+    const requireExisting = controlBool(params.requireExisting ?? params.require_existing, false)
     const autoConnect = controlBool(params.autoConnect ?? params.auto_connect ?? params.connect, true)
-    const existing = reuse ? findExistingAssetPanel(asset) : null
+    const existing = reuse || requireExisting ? findExistingAssetPanel(asset) : null
+    if (requireExisting && !existing) {
+      return controlFail('ASSET_TERMINAL_NOT_OPEN', 'Managed host does not have an open terminal.', {
+        target: assetDisplayName(asset),
+        asset: assetSummaryForControl(asset)
+      })
+    }
     const panel = existing || workspace.createPanel()
     const created = !existing
     const title = assetDisplayName(asset)
@@ -212,6 +219,8 @@ export const createTerminalControlSurfaceAssetHandlers = ({
       configured: true,
       created,
       reused: Boolean(existing),
+      requireExisting,
+      require_existing: requireExisting,
       autoConnect,
       auto_connect: autoConnect,
       asset: assetSummaryForControl(asset),

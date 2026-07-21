@@ -47,7 +47,7 @@ Commands:
   workspace set-auto-title <title> [--workspace <id>|--panel <id>] [--probe]
   workspace remote status|configure|reconnect|disconnect|pty-sessions
   ssh <managed-host>
-  host list|add|complete
+  host list|add|complete|switch
   completion bash|zsh|fish
   workspace group <subcommand>
   workspace-group <subcommand>
@@ -159,6 +159,7 @@ Commands:
 
 Short SSH:
   aiossh <managed-host>
+  aio host switch <managed-host>
   aiossh --complete <prefix>
 `
 
@@ -262,6 +263,7 @@ const managedHostSshOptions = [
   '--no-connect',
   '--configure-only',
   '--new',
+  '--reuse',
   '--no-focus',
   '--background'
 ]
@@ -311,6 +313,7 @@ const completionBooleanOptions = new Set([
   '--names-only',
   '--include-local',
   '--new',
+  '--reuse',
   '--configure-only',
   '--no-connect',
   '--all-read',
@@ -380,6 +383,7 @@ const buildCompletionSpec = () => {
       save: completionLeaf(hostAddOptions),
       ssh: managedHostNode,
       connect: managedHostNode,
+      switch: managedHostCompleteNode,
       complete: managedHostCompleteNode,
       completion: managedHostCompleteNode
     }
@@ -1797,7 +1801,8 @@ const managedHostSshMethodParams = () => {
   const host = readOption('--asset') || readOption('--host') || readOption('--name') || readOption('--target') || readPositional()
   if (!host) throw new Error('aiossh requires a managed host name')
   const connect = !(hasFlag('--no-connect') || hasFlag('--configure-only'))
-  const reuse = !hasFlag('--new')
+  const forceNew = hasFlag('--new')
+  const reuse = hasFlag('--reuse') && !forceNew
   return {
     method: 'asset.ssh.connect',
     params: {
@@ -1809,6 +1814,27 @@ const managedHostSshMethodParams = () => {
       auto_connect: connect,
       reuse,
       focus: !(hasFlag('--no-focus') || hasFlag('--background'))
+    }
+  }
+}
+
+const managedHostSwitchMethodParams = () => {
+  const target = workspaceRemoteTargetParams()
+  const host = readOption('--asset') || readOption('--host') || readOption('--name') || readOption('--target') || readPositional()
+  if (!host) throw new Error('host switch requires a managed host name')
+  return {
+    method: 'asset.ssh.connect',
+    params: {
+      ...target,
+      target: host,
+      query: host,
+      connect: false,
+      autoConnect: false,
+      auto_connect: false,
+      reuse: true,
+      requireExisting: true,
+      require_existing: true,
+      focus: true
     }
   }
 }
@@ -1858,6 +1884,7 @@ const managedHostMethodParams = (subcommand) => {
     }
   }
   if (subcommand === 'ssh' || subcommand === 'connect') return managedHostSshMethodParams()
+  if (subcommand === 'switch') return managedHostSwitchMethodParams()
   throw new Error(`Unknown host command: ${subcommand}`)
 }
 

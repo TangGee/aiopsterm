@@ -393,7 +393,9 @@ export const createTerminalWorkspaceViewRuntime = ({
 
   const activeView = () => terminalViews.get(workspace.activePanelId)
   const isTerminalWorkspaceVisible = () => terminalWorkspaceVisible?.value ?? true
-  const isTerminalFocusSuppressed = (panelId: string) => Boolean(shouldSuppressTerminalFocus?.(panelId))
+  const isTerminalFocusSuppressed = (panelId: string) =>
+    Boolean(shouldSuppressTerminalFocus?.(panelId)) ||
+    (typeof document !== 'undefined' && Boolean(document.querySelector('[role="dialog"][aria-modal="true"]')))
   const visibleTerminalPanelIds = () => new Set(visibleTerminalPanels.value.map((panel) => panel.id))
   const isTerminalPanelRenderable = (panelId: string) => {
     const element = terminalElements.get(panelId)
