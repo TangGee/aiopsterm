@@ -185,8 +185,8 @@ const resolvePython = (env = process.env) => {
   throw new Error('[aiopsterm] Codex package build requires Python 3. Install Python, or set PYTHON to a Python 3 executable.')
 }
 
-const runCodexRuntimeAudit = (projectDir = appRoot, env = process.env) =>
-  spawnSync(process.execPath, [join(projectDir, 'scripts', 'audit-codex-runtime.mjs')], {
+const runCodexRuntimeAudit = (projectDir = appRoot, targetTriple = codexTargetTriple(), env = process.env) =>
+  spawnSync(process.execPath, [join(projectDir, 'scripts', 'audit-codex-runtime.mjs'), '--expected-target', targetTriple], {
     cwd: projectDir,
     stdio: 'inherit',
     env
@@ -196,11 +196,11 @@ const buildCodexPackageOnWindows = (projectDir = appRoot, env = process.env) => 
   const { packageDir, explicitBinary, binaryPath } = codexBuildPaths(projectDir, env)
   if (explicitBinary || env.AIOPSTERM_CODEX_PACKAGE_DIR) {
     assertCodexPackage(projectDir, env)
-    return runCodexRuntimeAudit(projectDir, env)
+    return runCodexRuntimeAudit(projectDir, codexTargetTriple(process.platform, process.arch), env)
   }
   if (existsSync(binaryPath) && statSync(binaryPath).isFile()) {
     console.log(`[aiopsterm] Codex package exists: ${packageDir}`)
-    return runCodexRuntimeAudit(projectDir, env)
+    return runCodexRuntimeAudit(projectDir, codexTargetTriple(process.platform, process.arch), env)
   }
   if (!existsSync(join(projectDir, 'codex', 'scripts', 'codex_package')) || !existsSync(join(projectDir, 'codex', 'codex-rs'))) {
     console.error(`[aiopsterm] Codex source directory is missing: ${join(projectDir, 'codex')}`)
@@ -221,7 +221,11 @@ const buildCodexPackageOnWindows = (projectDir = appRoot, env = process.env) => 
     {
       cwd: projectDir,
       stdio: 'inherit',
-      env: { ...env, RUSTUP_TOOLCHAIN: toolchain }
+      env: {
+        ...env,
+        CARGO_PROFILE_RELEASE_STRIP: env.CARGO_PROFILE_RELEASE_STRIP || 'symbols',
+        RUSTUP_TOOLCHAIN: toolchain
+      }
     }
   )
   if ((build.status ?? 1) !== 0) return build.status ?? 1
@@ -229,7 +233,7 @@ const buildCodexPackageOnWindows = (projectDir = appRoot, env = process.env) => 
     console.error(`[aiopsterm] Codex CLI binary is missing: ${binaryPath}`)
     return 1
   }
-  return runCodexRuntimeAudit(projectDir, env)
+  return runCodexRuntimeAudit(projectDir, targetTriple, env)
 }
 
 const main = () => {

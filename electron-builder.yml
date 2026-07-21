@@ -25,6 +25,7 @@ files:
   - '!node_modules/**/readme.md'
   - '!node_modules/**/CHANGELOG.md'
   - '!node_modules/**/changelog.md'
+  - '!node_modules/@fig/autocomplete-helpers/node_modules/typescript/**'
   - '!node_modules/**/.DS_Store'
   - '!node_modules/**/Thumbs.db'
   - '!node_modules/@cline/**'

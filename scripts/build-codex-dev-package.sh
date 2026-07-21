@@ -355,4 +355,4 @@ if [[ ! -x "${codex_bin}" ]]; then
   exit 1
 fi
 
-node "${APP_ROOT}/scripts/audit-codex-runtime.mjs" "${codex_bin}"
+node "${APP_ROOT}/scripts/audit-codex-runtime.mjs" "${codex_bin}" --expected-target "${target_triple}"

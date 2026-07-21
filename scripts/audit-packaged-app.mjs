@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { basename, join, relative, resolve } from 'node:path'
-import { codexBinaryName } from './codex-runtime-paths.mjs'
+import { codexBinaryName, codexTargetTriple } from './codex-runtime-paths.mjs'
 
 const require = createRequire(import.meta.url)
 const { listPackage } = require('@electron/asar')
@@ -228,6 +228,9 @@ const rawNodeRuntimePrefixes = ['node-linux-', 'node-darwin-', 'node-bin-darwin-
 const duplicateAsarRuntimeFiles = listPackage(join(resourcesDir, 'app.asar')).filter((entry) =>
   rawNodeRuntimePrefixes.some((prefix) => entry.replaceAll('\\', '/').includes(`/node_modules/${prefix}`))
 )
+const unusedFigTypeScriptFiles = listPackage(join(resourcesDir, 'app.asar')).filter((entry) =>
+  entry.replaceAll('\\', '/').includes('/node_modules/@fig/autocomplete-helpers/node_modules/typescript/')
+)
 const unpackedNodeModules = join(resourcesDir, 'app.asar.unpacked', 'node_modules')
 const duplicateUnpackedRuntimes = existsSync(unpackedNodeModules)
   ? readdirSync(unpackedNodeModules).filter((entry) => rawNodeRuntimePrefixes.some((prefix) => entry.startsWith(prefix)))
@@ -237,6 +240,15 @@ if (duplicateAsarRuntimeFiles.length || duplicateUnpackedRuntimes.length) {
     ...duplicateAsarRuntimeFiles,
     ...duplicateUnpackedRuntimes
   ].join(', ')}`)
+}
+if (unusedFigTypeScriptFiles.length) {
+  throw new Error(`Unused Fig TypeScript compiler files were packaged:\n${unusedFigTypeScriptFiles.join('\n')}`)
+}
+
+const codexMetadata = readJson(join(codexPackage, 'codex-package.json'), 'packaged Codex metadata')
+const expectedCodexTarget = codexTargetTriple(platform, process.arch)
+if (codexMetadata?.target !== expectedCodexTarget) {
+  throw new Error(`Packaged Codex target mismatch: expected ${expectedCodexTarget}, found ${codexMetadata?.target || 'missing'}`)
 }
 
 if (platform !== 'win32' && (statSync(codexBinary).mode & 0o111) === 0) {

@@ -8,6 +8,7 @@ const version = packageJson.version
 const distDir = resolve('dist')
 const unpackedDir = join(distDir, 'linux-unpacked')
 const nodePtyRoot = join(unpackedDir, 'resources', 'app.asar.unpacked', 'node_modules', 'node-pty')
+const unpackedNodeModules = join(unpackedDir, 'resources', 'app.asar.unpacked', 'node_modules')
 const appAsar = join(unpackedDir, 'resources', 'app.asar')
 const appAsarUnpacked = join(unpackedDir, 'resources', 'app.asar.unpacked')
 const codexPackage = join(unpackedDir, 'resources', 'codex')
@@ -45,11 +46,23 @@ const forbiddenPaths = [
   join(nodePtyRoot, 'lib', 'testUtils.test.js'),
   join(nodePtyRoot, 'lib', 'unixTerminal.test.js'),
   join(nodePtyRoot, 'lib', 'windowsPtyAgent.test.js'),
-  join(nodePtyRoot, 'lib', 'windowsTerminal.test.js')
+  join(nodePtyRoot, 'lib', 'windowsTerminal.test.js'),
+  join(unpackedNodeModules, 'cpu-features', 'build', 'node_gyp_bins'),
+  join(unpackedNodeModules, 'ssh2', 'lib', 'protocol', 'crypto', 'build', 'node_gyp_bins')
 ]
 
 const missing = requiredFiles.filter((file) => !existsSync(file))
-const presentForbidden = forbiddenPaths.filter((file) => existsSync(file))
+const oracleReleaseDir = join(unpackedNodeModules, 'oracledb', 'build', 'Release')
+const foreignOracleBinaries = existsSync(oracleReleaseDir)
+  ? readdirSync(oracleReleaseDir)
+      .filter(
+        (entry) =>
+          (entry.endsWith('.node') && !entry.endsWith('-linux-x64.node')) ||
+          (entry.endsWith('.node-buildinfo.txt') && !entry.includes('-linux-x64.node-'))
+      )
+      .map((entry) => join(oracleReleaseDir, entry))
+  : []
+const presentForbidden = [...forbiddenPaths.filter((file) => existsSync(file)), ...foreignOracleBinaries]
 
 if (missing.length) {
   throw new Error(`Missing required packaged files:\n${missing.join('\n')}`)
@@ -77,7 +90,7 @@ if (/\blibssl\.so\.1\.1\b|\blibcrypto\.so\.1\.1\b/.test(codexLdd)) {
 }
 
 if (presentForbidden.length) {
-  throw new Error(`Forbidden packaged node-pty files remain:\n${presentForbidden.join('\n')}`)
+  throw new Error(`Forbidden packaged files remain:\n${presentForbidden.join('\n')}`)
 }
 
 const extractDir = mkdtempSync(join(tmpdir(), 'aiopsterm-deb-audit-'))

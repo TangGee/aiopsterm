@@ -4,6 +4,7 @@ import { basename, dirname, join } from 'node:path'
 import {
   codexBinaryName,
   codexPackageDir,
+  codexTargetTriple,
   normalizeNodeArch,
   packagedCodexBinaryPath,
   packagedCodexPackageDir
@@ -61,11 +62,17 @@ const resolveCodexPackageSource = (context) => {
 
 const copyCodexCliPackage = (context) => {
   const platform = context?.electronPlatformName || process.platform
+  const arch = normalizeNodeArch(context?.arch ?? process.arch)
   const sourceDir = resolveCodexPackageSource(context)
   const sourceBinary = process.env.AIOPSTERM_CODEX_BIN || join(sourceDir, 'bin', codexBinaryName(platform))
   const sourceMetadata = join(sourceDir, 'codex-package.json')
   if (!existsSync(sourceDir) || !existsSync(sourceMetadata) || !existsSync(sourceBinary)) {
     throw new Error(`Codex package is required for packaging but was not found: ${sourceDir}`)
+  }
+  const metadata = readJson(sourceMetadata, 'Codex package metadata')
+  const expectedTarget = codexTargetTriple(platform, arch)
+  if (metadata?.target !== expectedTarget) {
+    throw new Error(`Codex package target mismatch: expected ${expectedTarget}, found ${metadata?.target || 'missing'}`)
   }
   const resourcesDir = packagedResourcesDir(context)
   if (!resourcesDir) throw new Error('Cannot resolve packaged resources directory for Codex package.')
@@ -73,6 +80,26 @@ const copyCodexCliPackage = (context) => {
   removeIfExists(targetDir)
   cpSync(sourceDir, targetDir, { recursive: true, force: true })
   chmodSync(packagedCodexBinaryPath(resourcesDir, platform), 0o755)
+}
+
+const prunePackagedNativeBuildNoise = (context) => {
+  const platform = context?.electronPlatformName || process.platform
+  const arch = normalizeNodeArch(context?.arch ?? process.arch)
+  const nodeModules = join(packagedResourcesDir(context), 'app.asar.unpacked', 'node_modules')
+
+  removeIfExists(join(nodeModules, 'cpu-features', 'build', 'node_gyp_bins'))
+  removeIfExists(join(nodeModules, 'ssh2', 'lib', 'protocol', 'crypto', 'build', 'node_gyp_bins'))
+
+  if (platform !== 'linux') return
+  const oracleReleaseDir = join(nodeModules, 'oracledb', 'build', 'Release')
+  if (!existsSync(oracleReleaseDir)) return
+  const keepMarker = `-${platform}-${arch}.node`
+  for (const entry of readdirSync(oracleReleaseDir)) {
+    if (entry.endsWith('.node') && !entry.endsWith(keepMarker)) removeIfExists(join(oracleReleaseDir, entry))
+    if (entry.endsWith('.node-buildinfo.txt') && !entry.includes(`-${platform}-${arch}.node-`)) {
+      removeIfExists(join(oracleReleaseDir, entry))
+    }
+  }
 }
 
 const prunePackagedSqlite = (context) => {
@@ -151,6 +178,7 @@ export default async function prunePackagedNativeModules(context) {
   copyCodexCliPackage(context)
 
   prunePackagedSqlite(context)
+  prunePackagedNativeBuildNoise(context)
 
   if (platform !== 'linux') return
 
