@@ -67,6 +67,7 @@
       </KeepAlive>
       <TerminalWorkspace v-show="showTerminalWorkspace" />
       <div
+        v-if="workspace.mode === 'agents' || !['assets', 'database', 'user'].includes(workspace.activeModule)"
         v-show="showRightPane"
         class="layout-pane layout-pane-right ai-panel-pane"
         :style="{ width: `${displayRightPanelWidth}px` }"
