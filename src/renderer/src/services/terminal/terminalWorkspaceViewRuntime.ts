@@ -933,11 +933,6 @@ export const createTerminalWorkspaceViewRuntime = ({
         const view = terminalViews.get(panelId)
         const element = terminalElements.get(panelId)
         if (view && element?.isConnected && isTerminalPanelRenderable(panelId)) {
-          const activeElement = typeof document === 'undefined' ? null : document.activeElement
-          const editableOutsideTarget = activeElement instanceof Element && !element.contains(activeElement) && Boolean(
-            activeElement.closest('input, textarea, select, [contenteditable=""], [contenteditable="true"], [contenteditable="plaintext-only"], .ai-codex-xterm')
-          )
-          if (editableOutsideTarget) return
           view.terminal.focus()
           return
         }

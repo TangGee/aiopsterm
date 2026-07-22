@@ -345,6 +345,29 @@ describe('terminalWorkspaceViewRuntime', () => {
     expect((terminal.options.theme as { background?: string }).background).toBe('rgba(245, 247, 251, 0.94)')
   })
 
+  it('does not refocus an active terminal when its existing element ref runs again', async () => {
+    const panel = createEmptyTerminalPanel('panel-1', 'Local')
+    const { runtime } = createRuntime(panel)
+    const host = document.createElement('div')
+    const aiInput = document.createElement('textarea')
+    aiInput.className = 'ai-codex-xterm'
+    document.body.append(host, aiInput)
+    runtime.setTerminalElement(panel.id, host)
+    await flushFrames(2)
+    const terminal = runtime.terminalViews.get(panel.id)?.terminal as unknown as FakeTerminal
+    terminal.focus.mockClear()
+    aiInput.focus()
+
+    runtime.setTerminalElement(panel.id, host)
+    await flushFrames(2)
+    expect(terminal.focus).not.toHaveBeenCalled()
+    expect(document.activeElement).toBe(aiInput)
+
+    runtime.focusPanel(panel.id)
+    await flushFrames(2)
+    expect(terminal.focus).toHaveBeenCalled()
+  })
+
   it('does not let queued terminal focus steal focus while an overlay suppresses focus', async () => {
     const panel = createEmptyTerminalPanel('panel-1', 'Local')
     const suppressTerminalFocus = ref(false)
