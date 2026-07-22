@@ -106,6 +106,14 @@ const tailTextByBytes = (value: string, maxBytes: number) => {
   const nextLine = value.indexOf('\n', start)
   return detachText(value.slice(nextLine >= 0 && nextLine + 1 < value.length ? nextLine + 1 : start))
 }
+
+export const shouldFocusNewActiveTerminal = (previousIds: string, nextIds: string, activePanelId: string) => {
+  if (!activePanelId) return false
+  const previous = new Set(previousIds.split('|').filter(Boolean))
+  const next = new Set(nextIds.split('|').filter(Boolean))
+  return next.has(activePanelId) && !previous.has(activePanelId)
+}
+
 export const useTerminalWorkspaceContainerRuntime = () => {
   const workspace = useWorkspaceStore()
   const { t } = useI18n()
@@ -878,7 +886,12 @@ export const useTerminalWorkspaceContainerRuntime = () => {
 
   watch(
     () => workspace.panels.map((panel) => panel.id).join('|'),
-    syncPanelViews
+    (nextIds, previousIds) => {
+      syncPanelViews()
+      const panelId = workspace.activePanelId
+      if (!shouldFocusNewActiveTerminal(previousIds, nextIds, panelId)) return
+      nextTick(() => focusPanel(panelId))
+    }
   )
 
   watch(
