@@ -33,6 +33,7 @@ import type {
   ThreadedTerminalRenderSurfaceRect,
   ThreadedTerminalScreenLine,
   ThreadedTerminalScreenSnapshot,
+  ThreadedTerminalSelectionRange,
   ThreadedTerminalSettings,
   ThreadedTerminalSurface,
   ThreadedTerminalTheme
@@ -998,6 +999,7 @@ export class ThreadedTerminalHost {
   private lastSmallLayoutLogSignature = ''
   private pendingSmallLayoutFrame: number | null = null
   private selection: ThreadedTerminalSelection | null = null
+  private hoveredLinkRange: ThreadedTerminalSelectionRange | null = null
   private modeState: ThreadedTerminalModeState = defaultModeState()
   private cellMetrics: ThreadedTerminalCellMetrics = fallbackTerminalCellMetrics({
     fontSize: 12,
@@ -1244,6 +1246,8 @@ export class ThreadedTerminalHost {
 
   detachSurface() {
     const hadSurface = this.surfaceAttached
+    if (this.host) this.host.style.cursor = ''
+    this.hoveredLinkRange = null
     this.eventController?.abort()
     this.eventController = null
     this.resizeObserver?.disconnect()
@@ -2254,16 +2258,29 @@ export class ThreadedTerminalHost {
     const point = this.pointFromMouseEvent(event)
     let firstRow = point.y
     while (firstRow > this.buffer.active.viewportY && this.screenLineForBufferRow(firstRow)?.wrapped) firstRow -= 1
+    const segments: Array<{ row: number; text: string; offset: number }> = []
     let logicalText = ''
     let pointOffset = 0
     for (let row = firstRow; row < this.buffer.active.viewportY + this.rows; row += 1) {
       const line = this.screenLineForBufferRow(row)
       if (!line) break
+      segments.push({ row, text: line.text, offset: logicalText.length })
       if (row === point.y) pointOffset = logicalText.length + this.charIndexAtCell(row, point.x)
       logicalText += line.text
       if (!this.screenLineForBufferRow(row + 1)?.wrapped) break
     }
-    return terminalHttpLinkAtIndex(logicalText, pointOffset)
+    const link = terminalHttpLinkAtIndex(logicalText, pointOffset)
+    if (!link) return null
+    const segmentForIndex = (index: number) => [...segments].reverse().find((segment) => index >= segment.offset) || segments[0]
+    const start = segmentForIndex(link.start)
+    const end = segmentForIndex(Math.max(link.start, link.end - 1))
+    return {
+      ...link,
+      range: {
+        start: { x: this.cellXForCharIndex(start.row, link.start - start.offset), y: start.row },
+        end: { x: this.cellXForCharIndex(end.row, link.end - end.offset), y: end.row }
+      }
+    }
   }
 
   private viewportCellFromMouseEvent(event: MouseEvent | WheelEvent) {
@@ -2464,9 +2481,27 @@ export class ThreadedTerminalHost {
   private renderSelection() {
     if (!this.selectionLayer) return
     this.selectionLayer.replaceChildren()
+    const viewportY = this.buffer.active.viewportY
+    if (this.hoveredLinkRange) {
+      const firstRow = Math.max(this.hoveredLinkRange.start.y, viewportY)
+      const lastRow = Math.min(this.hoveredLinkRange.end.y, viewportY + this.rows - 1)
+      for (let row = firstRow; row <= lastRow; row += 1) {
+        const startX = row === this.hoveredLinkRange.start.y ? this.hoveredLinkRange.start.x : 0
+        const endX = row === this.hoveredLinkRange.end.y ? this.hoveredLinkRange.end.x : this.cols
+        if (endX <= startX) continue
+        const underline = document.createElement('div')
+        underline.className = 'threaded-terminal-link-underline'
+        underline.style.position = 'absolute'
+        underline.style.left = `${(this.geometry?.paddingLeft || 0) + startX * this.cellMetrics.width}px`
+        underline.style.top = `${(this.geometry?.paddingTop || 0) + (row - viewportY + 1) * this.cellMetrics.height - 2}px`
+        underline.style.width = `${(endX - startX) * this.cellMetrics.width}px`
+        underline.style.height = '1px'
+        underline.style.background = this.theme.foreground
+        this.selectionLayer.appendChild(underline)
+      }
+    }
     const range = this.normalizedSelection()
     if (!range) return
-    const viewportY = this.buffer.active.viewportY
     const firstRow = Math.max(range.start.y, viewportY)
     const lastRow = Math.min(range.end.y, viewportY + this.rows - 1)
     if (lastRow < firstRow) return
@@ -2659,7 +2694,21 @@ export class ThreadedTerminalHost {
       this.emitSelectionChange()
     }, { signal })
     host.addEventListener('mousemove', (event) => {
-      if (!this.selection?.selecting) host.style.cursor = (event.ctrlKey || event.metaKey) && this.linkFromMouseEvent(event) ? 'pointer' : ''
+      if (!this.selection?.selecting) {
+        const link = this.linkFromMouseEvent(event)
+        host.style.cursor = link ? 'pointer' : ''
+        const nextRange = link?.range || null
+        const previousRange = this.hoveredLinkRange
+        const changed =
+          previousRange?.start.x !== nextRange?.start.x ||
+          previousRange?.start.y !== nextRange?.start.y ||
+          previousRange?.end.x !== nextRange?.end.x ||
+          previousRange?.end.y !== nextRange?.end.y
+        if (changed) {
+          this.hoveredLinkRange = nextRange
+          this.renderSelection()
+        }
+      }
       if (this.mouseTrackingActive() && !this.selection?.selecting) {
         this.sendMouseEventToCore(event, { action: 'move', button: this.mouseButtonFromButtons(event) })
         return
@@ -2667,6 +2716,12 @@ export class ThreadedTerminalHost {
       if (!this.selection?.selecting) return
       event.preventDefault()
       this.updateSelectionFromMouseEvent(event)
+    }, { signal })
+    host.addEventListener('mouseleave', () => {
+      host.style.cursor = ''
+      if (!this.hoveredLinkRange) return
+      this.hoveredLinkRange = null
+      this.renderSelection()
     }, { signal })
     window.addEventListener('mouseup', (event) => {
       if (this.scrollbarDrag) {

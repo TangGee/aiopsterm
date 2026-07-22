@@ -987,6 +987,42 @@ describe('threadedTerminalRuntime', () => {
     host.dispose()
   })
 
+  it('underlines a hovered HTTP link and clears the decoration on mouse leave', () => {
+    installOffscreenCanvasSupport()
+    const host = createHost()
+    const element = createHostElement()
+    Object.defineProperty(element, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({ left: 0, top: 0, width: 800, height: 400, right: 800, bottom: 400, x: 0, y: 0, toJSON: () => ({}) })
+    })
+    host.open(element)
+    host.applySnapshot({
+      terminalId: 'panel-1',
+      seq: 1,
+      cols: 80,
+      rows: 10,
+      cursorX: 0,
+      cursorY: 9,
+      cursorAbsoluteY: 9,
+      viewportY: 0,
+      baseY: 0,
+      lines: [{ y: 0, text: 'open https://example.com/path', cells: [] }],
+      dirtyRows: [0],
+      full: true,
+      visible: true,
+      priority: 'active'
+    })
+
+    element.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: 12 * 8, clientY: 2 }))
+    expect(element.style.cursor).toBe('pointer')
+    expect(element.querySelectorAll('.threaded-terminal-link-underline').length).toBe(1)
+
+    element.dispatchEvent(new MouseEvent('mouseleave'))
+    expect(element.style.cursor).toBe('')
+    expect(element.querySelectorAll('.threaded-terminal-link-underline').length).toBe(0)
+    host.dispose()
+  })
+
   it('sends mouse events to mouse-aware terminal apps unless Shift forces selection', async () => {
     installOffscreenCanvasSupport()
     const host = createHost()
