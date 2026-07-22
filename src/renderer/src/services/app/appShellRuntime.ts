@@ -104,7 +104,7 @@ export const createAppShellRuntime = (options: AppShellRuntimeOptions) => {
   const showTerminalRightPane = computed(
     () => workspace.mode === 'terminal' && workspace.isRightVisible && !['assets', 'database', 'user'].includes(workspace.activeModule)
   )
-  const showRightPane = computed(() => workspace.mode === 'agents' ? workspace.rightPanelOpen : showTerminalRightPane.value)
+  const showRightPane = computed(() => workspace.mode === 'agents' ? true : showTerminalRightPane.value)
   const showTerminalWorkspace = computed(() => isTerminalWorkspaceSurfaceVisible(workspace.mode, workspace.activeModule))
   const hasLeftPane = computed(() => showAgentsLeftPane.value || showTerminalLeftPane.value)
   const hasRightPane = computed(() => showRightPane.value)
