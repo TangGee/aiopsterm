@@ -330,6 +330,64 @@ describe('threadedTerminalRenderWorker', () => {
     expect(messages).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'frame', terminalId: 'render-worker-terminal', seq: 1 })]))
   })
 
+  it('redraws the ASCII character addressed by a block cursor after a wide glyph', async () => {
+    const current = snapshot()
+    current.cursorX = 3
+    current.lines[0] = {
+      y: 0,
+      text: 'a你>8',
+      runs: [{ x: 0, text: 'a你>8', chars: ['a', '你', '>', '8'], widths: [1, 2, 1, 1], columns: 5 }],
+      cells: []
+    }
+
+    send(attachGroupMessage(canvas))
+    send(attachMessage())
+    send({ type: 'screen', snapshot: current })
+
+    await vi.advanceTimersByTimeAsync(16)
+
+    expect(canvas.context.operations).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'fillText', text: '>', x: 24, fillStyle: '#000000' }),
+      expect.objectContaining({ type: 'fillRect', x: 24, y: 1, width: 8, height: 11, fillStyle: '#ff00ff' })
+    ]))
+    expect(canvas.context.operations).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'fillText', text: '8', x: 24, fillStyle: '#000000' })
+    ]))
+  })
+
+  it.each([1, 2])('anchors a block cursor in column %s to the full wide glyph', async (cursorX) => {
+    const current = snapshot()
+    current.cursorX = cursorX
+
+    send(attachGroupMessage(canvas))
+    send(attachMessage())
+    send({ type: 'screen', snapshot: current })
+
+    await vi.advanceTimersByTimeAsync(16)
+
+    expect(canvas.context.operations).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'fillText', text: '你', x: 8, fillStyle: '#000000' }),
+      expect.objectContaining({ type: 'fillRect', x: 8, y: 1, width: 16, height: 11, fillStyle: '#ff00ff' })
+    ]))
+  })
+
+  it('underlines the full width of a wide glyph', async () => {
+    const current = snapshot()
+    current.cursorX = 1
+    const message = attachMessage()
+    if (message.type === 'attach') message.options.settings.cursorStyle = 'underline'
+
+    send(attachGroupMessage(canvas))
+    send(message)
+    send({ type: 'screen', snapshot: current })
+
+    await vi.advanceTimersByTimeAsync(16)
+
+    expect(canvas.context.operations).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'fillRect', x: 8, y: 10, width: 16, height: 2, fillStyle: '#ff00ff' })
+    ]))
+  })
+
   it('paints cursor-addressed ANSI style changes with the new RGB foreground', async () => {
     send(attachGroupMessage(canvas))
     const message = attachMessage()

@@ -675,10 +675,27 @@ const drawPlainLineText = (surface: RenderSurface, line: ThreadedTerminalScreenL
   if (segment) drawTextCells(surface, segment, segmentStart, line.y)
 }
 
-const charAtCell = (line: ThreadedTerminalScreenLine | undefined, x: number) => {
-  if (!line) return ' '
-  const chars = Array.from(line.text || '')
-  return chars[x] || ' '
+type CursorCell = {
+  char: string
+  x: number
+  width: number
+}
+
+const cursorCellAt = (line: ThreadedTerminalScreenLine | undefined, x: number): CursorCell => {
+  for (const run of line?.runs || []) {
+    const columns = runColumns(run)
+    if (x < run.x || x >= run.x + columns) continue
+    const chars = runChars(run)
+    const widths = runWidths(run)
+    let cellX = run.x
+    for (let index = 0; index < chars.length; index += 1) {
+      const width = widths[index]
+      if (x >= cellX && x < cellX + width) return { char: chars[index], x: cellX, width }
+      cellX += width
+    }
+  }
+  const chars = Array.from(line?.text || '')
+  return { char: chars[x] || ' ', x, width: 1 }
 }
 
 const drawCursor = (surface: RenderSurface, snapshot: ThreadedTerminalScreenSnapshot) => {
@@ -690,12 +707,27 @@ const drawCursor = (surface: RenderSurface, snapshot: ThreadedTerminalScreenSnap
   if (surface.settings.cursorStyle === 'bar') {
     context.fillRect(x, y + 2, 2, Math.max(2, surface.cellHeight - 4))
   } else if (surface.settings.cursorStyle === 'underline') {
-    context.fillRect(x, y + surface.cellHeight - 3, surface.cellWidth, 2)
+    const cursorCell = cursorCellAt(surface.screenLines[snapshot.cursorY], snapshot.cursorX)
+    context.fillRect(
+      surface.geometry.paddingLeft + cursorCell.x * surface.cellWidth,
+      y + surface.cellHeight - 3,
+      cursorCell.width * surface.cellWidth,
+      2
+    )
   } else {
-    context.fillRect(x, y + 1, surface.cellWidth, Math.max(2, surface.cellHeight - 2))
-    drawTextCells(surface, charAtCell(surface.screenLines[snapshot.cursorY], snapshot.cursorX), snapshot.cursorX, snapshot.cursorY, {
+    const cursorCell = cursorCellAt(surface.screenLines[snapshot.cursorY], snapshot.cursorX)
+    context.fillRect(
+      surface.geometry.paddingLeft + cursorCell.x * surface.cellWidth,
+      y + 1,
+      cursorCell.width * surface.cellWidth,
+      Math.max(2, surface.cellHeight - 2)
+    )
+    drawTextCells(surface, cursorCell.char, cursorCell.x, snapshot.cursorY, {
       fg: surface.settings.theme.cursorAccent || surface.settings.theme.background,
-      bg: surface.settings.theme.cursor
+      bg: surface.settings.theme.cursor,
+      chars: [cursorCell.char],
+      widths: [cursorCell.width],
+      columns: cursorCell.width
     })
   }
 }
