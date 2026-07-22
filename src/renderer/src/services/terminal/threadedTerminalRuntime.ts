@@ -2252,8 +2252,18 @@ export class ThreadedTerminalHost {
 
   private linkFromMouseEvent(event: MouseEvent) {
     const point = this.pointFromMouseEvent(event)
-    const text = this.screenLineForBufferRow(point.y)?.text || ''
-    return terminalHttpLinkAtIndex(text, this.charIndexAtCell(point.y, point.x))
+    let firstRow = point.y
+    while (firstRow > this.buffer.active.viewportY && this.screenLineForBufferRow(firstRow)?.wrapped) firstRow -= 1
+    let logicalText = ''
+    let pointOffset = 0
+    for (let row = firstRow; row < this.buffer.active.viewportY + this.rows; row += 1) {
+      const line = this.screenLineForBufferRow(row)
+      if (!line) break
+      if (row === point.y) pointOffset = logicalText.length + this.charIndexAtCell(row, point.x)
+      logicalText += line.text
+      if (!this.screenLineForBufferRow(row + 1)?.wrapped) break
+    }
+    return terminalHttpLinkAtIndex(logicalText, pointOffset)
   }
 
   private viewportCellFromMouseEvent(event: MouseEvent | WheelEvent) {

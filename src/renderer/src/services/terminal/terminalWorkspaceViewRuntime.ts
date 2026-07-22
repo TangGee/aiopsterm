@@ -35,7 +35,7 @@ import { findTerminalHttpLinks, isTerminalLinkActivation, terminalColumnAtTextIn
 type WorkspaceStore = ReturnType<typeof useWorkspaceStore>
 type XtermRuntimeOptions = XtermTerminal['options'] & { termName?: string; minimumContrastRatio?: number }
 type TerminalSuggestion = TerminalCommandSuggestion
-type TerminalBufferLineLike = { translateToString: (trimRight?: boolean) => string }
+type TerminalBufferLineLike = { translateToString: (trimRight?: boolean) => string; isWrapped?: boolean }
 type XtermLike = {
   cols: number
   rows: number
@@ -482,19 +482,42 @@ export const createTerminalWorkspaceViewRuntime = ({
     })
     const linkDisposable = view.terminal.registerLinkProvider?.({
       provideLinks: (lineNumber, callback) => {
-        const line = view.terminal.buffer.active.getLine?.(lineNumber - 1)
-        const text = line?.translateToString(true) || ''
-        const links = findTerminalHttpLinks(text).map((link) => ({
+        const getLine = view.terminal.buffer.active.getLine
+        if (!getLine) return callback(undefined)
+        let firstLine = lineNumber - 1
+        while (firstLine > 0 && getLine(firstLine)?.isWrapped) firstLine -= 1
+        const lines: Array<{ line: number; text: string; offset: number }> = []
+        let logicalText = ''
+        for (let index = firstLine; ; index += 1) {
+          const bufferLine = getLine(index)
+          if (!bufferLine) break
+          const text = bufferLine.translateToString(true)
+          lines.push({ line: index + 1, text, offset: logicalText.length })
+          logicalText += text
+          if (!getLine(index + 1)?.isWrapped) break
+        }
+        const segmentForIndex = (index: number) => [...lines].reverse().find((item) => index >= item.offset) || lines[0]
+        const links = findTerminalHttpLinks(logicalText)
+          .filter((link) => {
+            const current = lines.find((item) => item.line === lineNumber)
+            return Boolean(current && link.end > current.offset && link.start < current.offset + current.text.length)
+          })
+          .map((link) => {
+          const start = segmentForIndex(link.start)
+          const end = segmentForIndex(Math.max(link.start, link.end - 1))
+          const endIndex = link.end - end.offset
+          return {
           range: {
-            start: { x: terminalColumnAtTextIndex(text, link.start) + 1, y: lineNumber },
-            end: { x: terminalColumnAtTextIndex(text, link.end), y: lineNumber }
+            start: { x: terminalColumnAtTextIndex(start.text, link.start - start.offset) + 1, y: start.line },
+            end: { x: terminalColumnAtTextIndex(end.text, endIndex), y: end.line }
           },
           text: link.text,
           activate: (event: MouseEvent, url: string) => {
             if (isTerminalLinkActivation(event)) void window.aiops.openExternalUrl(url)
           },
           decorations: { pointerCursor: true, underline: true }
-        }))
+        }
+        })
         callback(links.length ? links : undefined)
       }
     })
