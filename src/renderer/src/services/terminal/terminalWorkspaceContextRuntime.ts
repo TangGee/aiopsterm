@@ -44,7 +44,6 @@ export const createTerminalWorkspaceContextRuntime = ({ workspace, activeTermina
   }
 
   const terminalTabKindBadge = (panel: TerminalPanel) => {
-    if (panel.kind === 'knowledge') return 'editor'
     if (panel.kind === 'managed-ai-session') return 'AI'
     return ''
   }

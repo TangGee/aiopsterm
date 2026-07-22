@@ -1,4 +1,4 @@
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch, type Ref } from 'vue'
 
 import type { AiopsAssetGroupRecord, AiopsAssetInput, AiopsKeychainRecord } from '@shared/contracts/assets'
 import { useWorkspaceStore } from '@/stores/workspace'
@@ -29,6 +29,25 @@ import { createWorkspacePanelAssetActionRuntime } from '@/services/workspace/wor
 import { createWorkspacePanelContextRuntime } from '@/services/workspace/workspacePanelContextRuntime'
 import { createWorkspacePanelAssetInteractionRuntime } from '@/services/workspace/workspacePanelAssetInteractionRuntime'
 
+export const bindAutoClearingWorkspaceNotice = (notice: Ref<string>, delayMs = 2400) => {
+  let timer: ReturnType<typeof setTimeout> | null = null
+  const stop = watch(notice, (value) => {
+    if (timer) clearTimeout(timer)
+    timer = null
+    if (!value) return
+    const expected = value
+    timer = setTimeout(() => {
+      if (notice.value === expected) notice.value = ''
+      timer = null
+    }, delayMs)
+  })
+  return () => {
+    stop()
+    if (timer) clearTimeout(timer)
+    timer = null
+  }
+}
+
 export const useWorkspacePanelRuntime = () => {
   const workspace = useWorkspaceStore()
 
@@ -41,6 +60,7 @@ export const useWorkspacePanelRuntime = () => {
   const searchValue = ref('')
   const selectedAssetId = ref<string | null>(null)
   const notice = ref('')
+  const disposeNoticeAutoClear = bindAutoClearingWorkspaceNotice(notice)
 
   const workspaceAssets = ref<WorkspacePanelAsset[]>([])
 
@@ -450,6 +470,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   document.removeEventListener('click', closeMenusFromDocument)
+  disposeNoticeAutoClear()
 })
 
 watch(activeWorkspace, () => {

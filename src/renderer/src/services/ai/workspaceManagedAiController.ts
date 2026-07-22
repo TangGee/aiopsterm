@@ -27,7 +27,6 @@ export const createWorkspaceManagedAiController = (
   const {
     mode,
     activeModule,
-    leftPanelOpen,
     rightPanelOpen,
     agentsLeftOpen,
     aiAttentionFocusRequest
@@ -113,7 +112,6 @@ export const createWorkspaceManagedAiController = (
       (request.terminalSessionId ? sessionRuntime.focusManagedAiSession(request.terminalSessionId) : null)
     if (!focused) return false
     activeModule.value = 'aiSessions'
-    leftPanelOpen.value = true
     return true
   }
 
@@ -135,7 +133,6 @@ export const createWorkspaceManagedAiController = (
     if (!item) {
       mode.value = 'terminal'
       activeModule.value = 'aiSessions'
-      leftPanelOpen.value = true
       setTopNotice(i18nText('aiSessions.notice.noPendingMessages'))
       return null
     }
@@ -143,7 +140,6 @@ export const createWorkspaceManagedAiController = (
     const managedSession = item.id.startsWith('managed-ai:') && item.sessionId ? sessionRuntime.focusManagedAiSession(item.sessionId) : null
     if (managedSession) {
       activeModule.value = 'aiSessions'
-      leftPanelOpen.value = true
     } else if (item.notificationId) {
       void attentionRuntime.openControlNotification(item.notificationId)
     } else if (item.surfaceId === 'terminal-ai-panel') {

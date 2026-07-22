@@ -431,15 +431,18 @@ describe('workspace store', () => {
     const store = useWorkspaceStore()
     store.mode = 'terminal'
     store.agentsLeftOpen = false
+    store.leftPanelOpen = false
 
     expect(store.jumpToNextAiAttention()).toBeNull()
     expect(store.mode).toBe('terminal')
     expect(store.activeModule).toBe('aiSessions')
+    expect(store.leftPanelOpen).toBe(false)
     expect(store.topNotice).toBe('没有待处理的 AI 消息')
   })
 
   it('tracks stock Codex permission hooks as terminal attention', () => {
     const store = useWorkspaceStore()
+    store.leftPanelOpen = false
     store.applyLocalTerminalSession('panel-main', {
       id: 'terminal-session-1',
       kind: 'local',
@@ -554,11 +557,13 @@ describe('workspace store', () => {
       kind: 'approval'
     })
 
+    store.leftPanelOpen = false
     const item = store.jumpToNextAiAttention()
 
     expect(item?.id).toBe('managed-ai:claude-code:claude-session-1')
     expect(store.mode).toBe('terminal')
     expect(store.activeModule).toBe('aiSessions')
+    expect(store.leftPanelOpen).toBe(false)
     expect(store.activePanelId).toBe('panel-main')
     expect(store.selectedManagedAiSessionKey).toBe('claude-code:claude-session-1')
     expect(store.managedAiSessionFocusRequest.session?.id).toBe('claude-session-1')
@@ -755,6 +760,7 @@ describe('workspace store', () => {
 
   it('routes managed AI control notifications to the AI session panel', () => {
     const store = useWorkspaceStore()
+    store.leftPanelOpen = false
     store.applyLocalTerminalSession('panel-main', {
       id: 'terminal-session-1',
       kind: 'local',
@@ -775,6 +781,7 @@ describe('workspace store', () => {
       receivedAt: 600
     })
 
+    store.leftPanelOpen = false
     expect(
       store.focusControlNotification({
         notification: {
@@ -798,7 +805,7 @@ describe('workspace store', () => {
 
     expect(store.mode).toBe('terminal')
     expect(store.activeModule).toBe('aiSessions')
-    expect(store.leftPanelOpen).toBe(true)
+    expect(store.leftPanelOpen).toBe(false)
     expect(store.activePanelId).toBe('panel-main')
     expect(store.selectedManagedAiSessionKey).toBe('claude-code:claude-session-1')
     expect(store.managedAiSessionFocusRequest.session?.id).toBe('claude-session-1')

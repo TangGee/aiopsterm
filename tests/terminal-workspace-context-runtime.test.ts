@@ -120,7 +120,7 @@ describe('terminalWorkspaceContextRuntime', () => {
     expect(runtime.terminalTabTooltip(panels[1])).toContain('Progress: Running 58%')
 
     expect(runtime.terminalTabMeta(panels[2])).toBe('runbooks/deploy.md')
-    expect(runtime.terminalTabKindBadge(panels[2])).toBe('editor')
+    expect(runtime.terminalTabKindBadge(panels[2])).toBe('')
     expect(runtime.terminalStatusLabel(panels[2])).toBe('Editor')
 
     expect(runtime.pendingAiSessionsForPanel(panels[1]).map((session) => session.title)).toEqual(['Approve deployment'])
