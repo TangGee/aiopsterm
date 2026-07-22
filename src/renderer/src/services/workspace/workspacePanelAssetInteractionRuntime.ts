@@ -44,7 +44,7 @@ export const createWorkspacePanelAssetInteractionRuntime = (deps: WorkspacePanel
     }
     const previousActivePanelId = deps.workspace.activePanelId
     deps.workspace.createPanel()
-    deps.workspace.renamePanel(deps.workspace.activePanelId, asset.name)
+    deps.workspace.renamePanel(deps.workspace.activePanelId, asset.name, 'auto')
     deps.workspace.replaceTerminalOutput(deps.workspace.activePanelId, '')
     const panelId = deps.workspace.activePanelId
     const discardPendingPanel = () => deps.workspace.discardPendingTerminalPanel(panelId, previousActivePanelId)

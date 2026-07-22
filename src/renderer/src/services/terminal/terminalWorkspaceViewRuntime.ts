@@ -12,6 +12,7 @@ import {
 } from '@/services/terminal/terminalKeyboardShortcuts'
 import {
   normalizeTerminalProgramTitle,
+  parseTerminalCurrentDirectoryOsc,
   parseTerminalProgressOsc,
   type TerminalProgress
 } from '@/services/terminal/terminalOscRuntime'
@@ -29,6 +30,7 @@ import type { TerminalPanel, TerminalSettings, useWorkspaceStore } from '@/store
 import { isTerminalWorkspacePanel } from '@/services/terminal/terminalPanelRuntime'
 import type { TerminalCommandSuggestion } from '@shared/contracts/terminalTools'
 import { shouldUseTerminalDebugLogs, shouldUseThreadedTerminal } from '@shared/runtimeSwitches'
+import { findTerminalHttpLinks, isTerminalLinkActivation, terminalColumnAtTextIndex } from '@/services/terminal/terminalLinkRuntime'
 
 type WorkspaceStore = ReturnType<typeof useWorkspaceStore>
 type XtermRuntimeOptions = XtermTerminal['options'] & { termName?: string; minimumContrastRatio?: number }
@@ -74,6 +76,15 @@ type XtermLike = {
   onSelectionChange: (handler: () => void) => unknown
   onTitleChange?: (handler: (title: string) => void) => unknown
   onProgressChange?: (handler: (progress: TerminalProgress | null) => void) => unknown
+  onCwdChange?: (handler: (cwd: string) => void) => unknown
+  registerLinkProvider?: (provider: {
+    provideLinks: (line: number, callback: (links: Array<{
+      range: { start: { x: number; y: number }; end: { x: number; y: number } }
+      text: string
+      activate: (event: MouseEvent, text: string) => void
+      decorations?: { pointerCursor?: boolean; underline?: boolean }
+    }> | undefined) => void) => void
+  }) => { dispose: () => void }
 }
 type AddonLike = {
   activate: (terminal: any) => void
@@ -246,6 +257,7 @@ export const createTerminalWorkspaceViewRuntime = ({
   const terminalViews = new Map<string, TerminalView>()
   const terminalViewPanels = new Map<string, TerminalPanel>()
   let terminalKeyboardShortcutHandler: TerminalKeyboardShortcutHandler | null = null
+  let terminalFocusIntent = 0
 
   const requestOutputFlush = (callback: () => void) =>
     typeof window !== 'undefined' && typeof window.setTimeout === 'function' ? window.setTimeout(callback, 0) : setTimeout(callback, 0)
@@ -441,6 +453,17 @@ export const createTerminalWorkspaceViewRuntime = ({
     view.terminal.onProgressChange?.((progress) => {
       workspace.setPanelProgress(panel.id, progress)
     })
+    const updateLocalCwd = (cwd: string) => {
+      if (panel.sshSession || !cwd.startsWith('/')) return
+      panel.cwd = cwd
+    }
+    view.terminal.onCwdChange?.(updateLocalCwd)
+    view.terminal.parser?.registerOscHandler?.(7, (data) => {
+      const cwd = parseTerminalCurrentDirectoryOsc(data)
+      if (!cwd) return false
+      updateLocalCwd(cwd)
+      return true
+    })
     view.terminal.parser?.registerOscHandler?.(9, (data) => {
       const change = parseTerminalProgressOsc(data)
       if (change.action === 'ignore') return false
@@ -457,6 +480,25 @@ export const createTerminalWorkspaceViewRuntime = ({
       }
       void writeXtermInput(panel.id, data)
     })
+    const linkDisposable = view.terminal.registerLinkProvider?.({
+      provideLinks: (lineNumber, callback) => {
+        const line = view.terminal.buffer.active.getLine?.(lineNumber - 1)
+        const text = line?.translateToString(true) || ''
+        const links = findTerminalHttpLinks(text).map((link) => ({
+          range: {
+            start: { x: terminalColumnAtTextIndex(text, link.start) + 1, y: lineNumber },
+            end: { x: terminalColumnAtTextIndex(text, link.end), y: lineNumber }
+          },
+          text: link.text,
+          activate: (event: MouseEvent, url: string) => {
+            if (isTerminalLinkActivation(event)) void window.aiops.openExternalUrl(url)
+          },
+          decorations: { pointerCursor: true, underline: true }
+        }))
+        callback(links.length ? links : undefined)
+      }
+    })
+    if (linkDisposable) view.domDisposables = [...(view.domDisposables || []), () => linkDisposable.dispose()]
     const openedElement = view.openedElement
     if (openedElement && !isThreadedTerminalHost(view.terminal)) {
       const handleFileDrag = (event: DragEvent) => {
@@ -883,13 +925,19 @@ export const createTerminalWorkspaceViewRuntime = ({
       .forEach((panel) => scheduleTerminalFit(panel.id, options))
   }
 
-  const scheduleTerminalFocus = (panelId: string, frames = 6) => {
+  const scheduleTerminalFocus = (panelId: string, intent: number, frames = 6) => {
     const run = (remaining: number) => {
       nextTick(() => {
+        if (intent !== terminalFocusIntent) return
         if (isTerminalFocusSuppressed(panelId)) return
         const view = terminalViews.get(panelId)
         const element = terminalElements.get(panelId)
         if (view && element?.isConnected && isTerminalPanelRenderable(panelId)) {
+          const activeElement = typeof document === 'undefined' ? null : document.activeElement
+          const editableOutsideTarget = activeElement instanceof Element && !element.contains(activeElement) && Boolean(
+            activeElement.closest('input, textarea, select, [contenteditable=""], [contenteditable="true"], [contenteditable="plaintext-only"], .ai-codex-xterm')
+          )
+          if (editableOutsideTarget) return
           view.terminal.focus()
           return
         }
@@ -1039,7 +1087,6 @@ export const createTerminalWorkspaceViewRuntime = ({
             existing.terminal.ensureSurfaceAttached({ forceGeometry: true })
             scheduleTerminalFit(panel.id, { scrollToBottom: true, frames: 4, forceGeometry: true })
           }
-          if (panel.id === workspace.activePanelId) scheduleTerminalFocus(panel.id)
           return
         }
         writeTerminalDebugLog('renderer.terminal-view.threaded-attach-existing', {
@@ -1065,13 +1112,11 @@ export const createTerminalWorkspaceViewRuntime = ({
           existing.resizeObserver = undefined
         }
         scheduleTerminalFit(panel.id, { scrollToBottom: true, frames: 2, forceGeometry: true })
-        if (panel.id === workspace.activePanelId) scheduleTerminalFocus(panel.id)
         return
       }
       if (terminalViewPanels.get(panel.id) !== panel) {
         disposeTerminalView(panel.id, 'panel-replaced')
       } else {
-        if (panel.id === workspace.activePanelId) scheduleTerminalFocus(panel.id)
         return
       }
     }
@@ -1143,7 +1188,6 @@ export const createTerminalWorkspaceViewRuntime = ({
     } else {
       scheduleTerminalFit(panel.id, { scrollToBottom: true, frames: 2 })
     }
-    if (panel.id === workspace.activePanelId) scheduleTerminalFocus(panel.id)
     if (!openedThreaded) bindTerminalViewEvents(panel, view)
     if (!isThreadedTerminalHost(view.terminal)) element.querySelector('.xterm-viewport')?.addEventListener(
       'scroll',
@@ -1239,7 +1283,8 @@ export const createTerminalWorkspaceViewRuntime = ({
   }
 
   const focusPanel = (panelId: string) => {
-    scheduleTerminalFocus(panelId)
+    terminalFocusIntent += 1
+    scheduleTerminalFocus(panelId, terminalFocusIntent)
   }
 
   const getTerminalElement = (panelId: string) => terminalElements.get(panelId) || null

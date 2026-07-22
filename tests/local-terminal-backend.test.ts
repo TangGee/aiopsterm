@@ -288,6 +288,8 @@ describe('local terminal backend runtime', () => {
     expect(readFileSync(bashRcPath, 'utf8')).toContain('. /etc/profile')
     expect(readFileSync(bashRcPath, 'utf8')).toContain('PATH="$AIOPSTERM_CONTROL_BIN_DIR:$PATH"; export PATH')
     expect(readFileSync(bashRcPath, 'utf8')).toContain('. "$AIOPSTERM_CONTROL_COMPLETION_BASH"')
+    expect(readFileSync(bashRcPath, 'utf8')).toContain('__aiopsterm_report_cwd')
+    expect(readFileSync(bashRcPath, 'utf8')).toContain(']7;file://%s%s')
   })
 
   it('starts managed bash with the generated rcfile so aio completion is loaded after user startup files', async () => {

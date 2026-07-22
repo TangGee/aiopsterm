@@ -284,6 +284,7 @@ export type ThreadedTerminalCoreResponse =
   | { type: 'resize'; terminalId: string; cols: number; rows: number }
   | { type: 'data'; terminalId: string; data: string }
   | { type: 'title'; terminalId: string; title: string }
+  | { type: 'cwd'; terminalId: string; cwd: string }
   | { type: 'progress'; terminalId: string; progress: TerminalProgress | null }
   | { type: 'read-screen-result'; requestId: string; terminalId: string; text: string; cols: number; rows: number }
   | { type: 'read-selection-result'; requestId: string; terminalId: string; text: string }

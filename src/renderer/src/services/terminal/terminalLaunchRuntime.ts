@@ -26,7 +26,7 @@ type TerminalLaunchContext = {
   applyLocalTerminalSession: (panelId: string, session: TerminalSessionInfo) => unknown | null | undefined
   applySshTerminalSession: (panelId: string, session: TerminalSessionInfo, asset: TerminalLaunchAsset) => unknown | null | undefined
   registerSshSession: (panelId: string, asset: TerminalLaunchAsset) => unknown
-  renamePanel?: (panelId: string, title: string) => void
+  renamePanel?: (panelId: string, title: string, source?: 'user' | 'auto' | 'system') => void
 }
 
 export const openLocalTerminalLaunch = async (
@@ -58,7 +58,7 @@ export const openLocalTerminalLaunch = async (
       context.discardPendingPanel()
       return null
     }
-    context.renamePanel?.(context.panelId, options.title)
+    context.renamePanel?.(context.panelId, options.title, 'auto')
     return panel
   } catch (error) {
     context.setNotice(error instanceof Error ? error.message : failureMessage)

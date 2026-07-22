@@ -38,12 +38,14 @@ import type {
   ThreadedTerminalTheme
 } from '@/services/terminal/threadedTerminalProtocol'
 import type { TerminalProgress } from '@/services/terminal/terminalOscRuntime'
+import { isTerminalLinkActivation, terminalHttpLinkAtIndex } from '@/services/terminal/terminalLinkRuntime'
 
 type DisposableLike = { dispose: () => void }
 type EventHandler<T> = (value: T) => void
 type ResizeHandler = (size: { cols: number; rows: number }) => unknown
 type SelectionHandler = () => void
 type ProgressHandler = (progress: TerminalProgress | null) => void
+type CwdHandler = (cwd: string) => void
 type RenderFrameAck = Extract<ThreadedTerminalRenderResponse, { type: 'frame' }> & { at: number }
 type ThreadedTerminalSearchOptions = { caseSensitive?: boolean; incremental?: boolean }
 type ThreadedTerminalSearchHost = {
@@ -633,6 +635,10 @@ const handleCoreMessage = (handle: ThreadedTerminalCoreHandle, message: Threaded
     hostMap.get(message.terminalId)?.emitTitleChange(message.title)
     return
   }
+  if (message.type === 'cwd') {
+    hostMap.get(message.terminalId)?.emitCwdChange(message.cwd)
+    return
+  }
   if (message.type === 'progress') {
     hostMap.get(message.terminalId)?.emitProgressChange(message.progress)
     return
@@ -971,6 +977,7 @@ export class ThreadedTerminalHost {
   private selectionHandlers = new Set<SelectionHandler>()
   private titleHandlers = new Set<EventHandler<string>>()
   private progressHandlers = new Set<ProgressHandler>()
+  private cwdHandlers = new Set<CwdHandler>()
   private customKeyHandler: ((event: KeyboardEvent) => boolean) | null = null
   private snapshotLines: string[] = []
   private snapshotScreenLines: ThreadedTerminalScreenLine[] = []
@@ -1228,6 +1235,7 @@ export class ThreadedTerminalHost {
     this.selectionHandlers.clear()
     this.titleHandlers.clear()
     this.progressHandlers.clear()
+    this.cwdHandlers.clear()
     this.rejectFrameWaiters('Threaded terminal disposed.')
     if (this.coreCreated) postCore(this.coreHandle, { type: 'dispose', terminalId: this.terminalId })
     this.coreHandle.terminals.delete(this.terminalId)
@@ -1418,6 +1426,11 @@ export class ThreadedTerminalHost {
     return createDisposable(() => this.progressHandlers.delete(handler))
   }
 
+  onCwdChange(handler: CwdHandler) {
+    this.cwdHandlers.add(handler)
+    return createDisposable(() => this.cwdHandlers.delete(handler))
+  }
+
   emitData(data: string) {
     this.dataHandlers.forEach((handler) => handler(data))
   }
@@ -1434,6 +1447,10 @@ export class ThreadedTerminalHost {
 
   emitProgressChange(progress: TerminalProgress | null) {
     this.progressHandlers.forEach((handler) => handler(progress))
+  }
+
+  emitCwdChange(cwd: string) {
+    this.cwdHandlers.forEach((handler) => handler(cwd))
   }
 
   setSessionId(sessionId?: string) {
@@ -2233,6 +2250,12 @@ export class ThreadedTerminalHost {
     return { x, y: this.buffer.active.viewportY + y }
   }
 
+  private linkFromMouseEvent(event: MouseEvent) {
+    const point = this.pointFromMouseEvent(event)
+    const text = this.screenLineForBufferRow(point.y)?.text || ''
+    return terminalHttpLinkAtIndex(text, this.charIndexAtCell(point.y, point.x))
+  }
+
   private viewportCellFromMouseEvent(event: MouseEvent | WheelEvent) {
     const rect = this.terminalContentRect()
     const left = (rect?.left || 0) + (this.geometry?.paddingLeft || 0)
@@ -2607,6 +2630,13 @@ export class ThreadedTerminalHost {
       if ((event.target as HTMLElement | null)?.closest?.('.threaded-terminal-scrollbar')) return
       event.preventDefault()
       this.focusInput()
+      if (isTerminalLinkActivation(event)) {
+        const link = this.linkFromMouseEvent(event)
+        if (link) {
+          void window.aiops.openExternalUrl(link.text)
+          return
+        }
+      }
       if (this.mouseTrackingActive() && !event.shiftKey) {
         this.sendMouseEventToCore(event, { action: 'down', button: this.mouseButtonFromEvent(event) })
         return
@@ -2619,6 +2649,7 @@ export class ThreadedTerminalHost {
       this.emitSelectionChange()
     }, { signal })
     host.addEventListener('mousemove', (event) => {
+      if (!this.selection?.selecting) host.style.cursor = (event.ctrlKey || event.metaKey) && this.linkFromMouseEvent(event) ? 'pointer' : ''
       if (this.mouseTrackingActive() && !this.selection?.selecting) {
         this.sendMouseEventToCore(event, { action: 'move', button: this.mouseButtonFromButtons(event) })
         return

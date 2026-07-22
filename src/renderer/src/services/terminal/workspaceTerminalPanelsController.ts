@@ -289,7 +289,7 @@ export const createWorkspaceTerminalPanelsController = (
     const panel = createPanel()
     const panelId = panel.id
     const label = host.assetName || host.detail || host.label || 'Terminal'
-    renamePanel(panelId, label)
+    renamePanel(panelId, label, 'auto')
     replaceTerminalOutput(panelId, '')
     const discardPendingPanel = () => discardPendingTerminalPanel(panelId, previousActivePanelId)
     const createTerminal = terminalClient.createTerminal()
@@ -316,7 +316,7 @@ export const createWorkspaceTerminalPanelsController = (
           setTopNotice('本地终端启动失败')
           return null
         }
-        renamePanel(panelId, label)
+        renamePanel(panelId, label, 'auto')
         activeModule.value = 'workspace'
         activePanelId.value = panelId
         return connected
@@ -372,7 +372,7 @@ export const createWorkspaceTerminalPanelsController = (
     const panel = createPanel()
     const panelId = panel.id
     const label = options.title?.trim() || 'Local terminal'
-    renamePanel(panelId, label)
+    renamePanel(panelId, label, 'auto')
     replaceTerminalOutput(panelId, '')
     const discardPendingPanel = () => discardPendingTerminalPanel(panelId, previousActivePanelId)
     const createTerminal = terminalClient.createTerminal()

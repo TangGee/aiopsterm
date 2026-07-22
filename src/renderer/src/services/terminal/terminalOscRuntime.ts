@@ -39,6 +39,20 @@ export const normalizeTerminalProgramTitle = (title: string) => {
   return isTerminalUserHostTitle(trimmed) ? '' : trimmed
 }
 
+export const parseTerminalCurrentDirectoryOsc = (data: string) => {
+  const value = String(data || '').trim()
+  if (!value || /[\u0000-\u001f\u007f]/.test(value)) return null
+  try {
+    const url = new URL(value)
+    if (url.protocol !== 'file:' || url.username || url.password || url.search || url.hash) return null
+    const pathname = decodeURIComponent(url.pathname)
+    if (!pathname.startsWith('/') || /[\u0000-\u001f\u007f]/.test(pathname)) return null
+    return pathname
+  } catch {
+    return null
+  }
+}
+
 const terminalProgressStatusForCode = (code: number): TerminalProgressStatus | null => {
   if (code === 1) return 'running'
   if (code === 2) return 'error'

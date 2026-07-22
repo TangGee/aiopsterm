@@ -25,6 +25,7 @@ import {
 } from '@/services/terminal/threadedTerminalKeywordHighlight'
 import {
   normalizeTerminalProgramTitle,
+  parseTerminalCurrentDirectoryOsc,
   parseTerminalProgressOsc
 } from '@/services/terminal/terminalOscRuntime'
 
@@ -911,6 +912,12 @@ const installTerminalEvents = (record: CoreTerminalRecord) => {
     const change = parseTerminalProgressOsc(data)
     if (change.action === 'ignore') return false
     post({ type: 'progress', terminalId: record.terminalId, progress: change.action === 'set' ? change.progress : null })
+    return true
+  })
+  record.terminal.parser.registerOscHandler(7, (data) => {
+    const cwd = parseTerminalCurrentDirectoryOsc(data)
+    if (!cwd) return false
+    post({ type: 'cwd', terminalId: record.terminalId, cwd })
     return true
   })
 }
