@@ -47,6 +47,7 @@
         <PanelLeftClose v-else />
       </button>
       <button
+        v-if="workspace.mode === 'terminal'"
         class="icon-button layout-toggle right-ai-toggle"
         data-onboarding-id="right-ai-toggle"
         :class="{ collapsed: isRightCollapsed }"

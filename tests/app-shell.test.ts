@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
+import { enableAutoUnmount, flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { readFileSync } from 'fs'
 import { dirname, join } from 'path'
+
+enableAutoUnmount(afterEach)
 
 type MockSelectionPosition = { start: { x: number; y: number }; end: { x: number; y: number } }
 type MockXtermInstance = {
@@ -985,15 +987,8 @@ describe('AppShell', () => {
     expect(wrapper.find('.terminal-workspace').element === terminalWorkspaceElement).toBe(true)
     expect(wrapper.find('.ai-panel').element === aiPanelElement).toBe(true)
     expect(wrapper.findComponent(AiPanel).props('agentMode')).toBe(true)
-    expect(wrapper.find('.right-ai-toggle').exists()).toBe(true)
-
-    await store.toggleRight()
-    await flushPromises()
-    expect(wrapper.find('.ai-panel-pane').isVisible()).toBe(false)
-    expect(wrapper.find('.ai-panel').element === aiPanelElement).toBe(true)
-
-    await store.toggleRight()
-    await flushPromises()
+    expect(wrapper.find('.right-ai-toggle').exists()).toBe(false)
+    await expect(store.toggleRight()).resolves.toBe(false)
     expect(wrapper.find('.ai-panel-pane').isVisible()).toBe(true)
     expect(wrapper.find('.ai-panel').element === aiPanelElement).toBe(true)
 
@@ -2395,7 +2390,7 @@ describe('AppShell', () => {
     expect(wrapper.find('[data-testid="ai-panel-mode-open"]').attributes('title')).toContain('Classic Chat')
     expect(wrapper.find('[data-testid="ai-new-chat"]').attributes('title')).toBe('New chat')
     expect(wrapper.find('[data-onboarding-id="ai-input-editable"]').attributes('data-placeholder')).toBe('Describe your operations goal')
-    expect(wrapper.text()).toContain('chat with AI')
+    expect(wrapper.text()).toContain('Chat with AI')
 
     vi.mocked(window.aiops.saveConfig).mockResolvedValueOnce({
       ...store.config,
@@ -2796,7 +2791,7 @@ describe('AppShell', () => {
     await flushPromises()
     expect(window.aiops.saveConfig).toHaveBeenLastCalledWith({ rightPanelOpen: false })
     expect(store.rightPanelOpen).toBe(false)
-    expect(rightPane().exists()).toBe(false)
+    expect(rightPane().isVisible()).toBe(false)
 
     await store.toggleMode()
     await flushPromises()

@@ -10788,7 +10788,10 @@ describe('workspace store', () => {
         updatedAt: '刚刚'
       }
     })
-    await expect(store.sendK8sTerminalCommand('kubectl get events')).resolves.toBe('')
+    const emptyTerminalOutput = store.sendK8sTerminalCommand('kubectl get events')
+    await flushMicrotasks()
+    await vi.advanceTimersByTimeAsync(8_000)
+    await expect(emptyTerminalOutput).resolves.toBe('')
     expect(store.k8sActiveTerminal?.collectingAiOutput).toBe(false)
     expect(store.chatMessages).toHaveLength(chatCountBefore)
     expect(store.k8sClusterNotice).toBe('Kubernetes terminal backend returned no output to send.')

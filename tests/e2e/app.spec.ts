@@ -840,6 +840,11 @@ test('managed AI session notifications flow through real local terminal hooks', 
     await expect(questionRow).toHaveClass(/active/)
     await expect(page.getByTestId('ai-attention-count')).toHaveText('1')
 
+    const terminalTabCount = await page.locator('.terminal-tab').count()
+    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+Shift+T' : 'Control+Shift+T')
+    await expect(page.locator('.terminal-tab')).toHaveCount(terminalTabCount + 1)
+    await expect(page.locator('.terminal-pane.active .xterm-host')).toBeVisible()
+
     await sendTerminalCommand(
       page,
       runInstalledHookCommand(claudeNotificationCommand, {
@@ -2079,11 +2084,11 @@ test('aiopsterm primary desktop flows', async () => {
     await expect(page.locator('.host-batch-footer')).toContainText('全选')
     await page.locator('.context-select-popup header input').fill('10.32.6.9')
     await page.locator('.host-batch-footer .batch-action-btn').first().click()
-    await expect(page.locator('.context-tag').filter({ hasText: '10.32.6.9' })).toBeVisible()
+    await expect(page.locator('.context-tag').filter({ hasText: 'mysql-primary' })).toBeVisible()
     await expect(page.locator('.host-batch-footer')).toContainText('取消全选')
     await expect(page.locator('.host-batch-footer')).toContainText('清空选择')
     await page.locator('.host-batch-footer .batch-action-btn').filter({ hasText: '清空选择' }).click()
-    await expect(page.locator('.context-tag').filter({ hasText: '10.32.6.9' })).not.toBeVisible()
+    await expect(page.locator('.context-tag').filter({ hasText: 'mysql-primary' })).not.toBeVisible()
     await page.locator('.context-select-popup header input').press('Escape')
     await page.locator('.context-select-popup header input').press('Escape')
     await page.locator('.context-trigger-tag').click()

@@ -1031,6 +1031,7 @@ export const createWorkspaceAiChatController = (
     const initialOverrideHosts = overrideHosts ? sendableClassicSessionContexts(overrideHosts) : undefined
     const initialHostContexts = initialOverrideHosts ?? initialSelectedContexts.filter((item) => item.kind === 'hosts')
     const configuredHostContexts = overrideHosts ?? selectedContexts.value
+    const conversationIdBeforeProductResolution = conversationId
     const productSession = await resolveClassicProductContext(
       conversationId,
       responseMode,
@@ -1071,7 +1072,9 @@ export const createWorkspaceAiChatController = (
     const commandDisplay = selectedCommandRef.value?.label || selectedCommandRef.value?.command || selectedCommandId.value
     const revisionFromMessageId = options.revisionFromMessageId?.trim() || ''
     const replaceNativeTranscript = revisionFromMessageId ? true : options.replaceNativeTranscript === true
-    const historyForBackend: AiChatMessageInput[] = originatingMessages.map(clineSeedInputFromMessage)
+    const historyForBackend: AiChatMessageInput[] = productSession.conversationId === conversationIdBeforeProductResolution
+      ? originatingMessages.map(clineSeedInputFromMessage)
+      : []
     const hostContexts = productSession.hostContexts
     const hostTargets = productSession.hostTargets
     const exchangeBridge = aiChatClient.createAiChatExchangeRequest()
