@@ -1,4 +1,5 @@
 import { execFile, spawn, type ChildProcessWithoutNullStreams } from 'child_process'
+import { createHash } from 'crypto'
 import { existsSync } from 'fs'
 import { mkdir, readFile, readdir, realpath, rm, stat, writeFile } from 'fs/promises'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'path'
@@ -164,6 +165,28 @@ const codexPendingContextPath = (codexHome: string, id: string) => join(codexHom
 export const codexThreadInfoPath = (codexHome: string, id: string) => join(codexHome, 'aiopsterm-thread-info', `${id}.json`)
 
 const codexSavedSessionRoots = (codexHome: string) => [join(codexHome, 'sessions'), join(codexHome, 'archived_sessions')]
+
+const codexWorkspaceIdentity = (options: CodexSessionCreateOptions) => {
+  const target = options.target
+  if (target?.kind === 'local') return 'local'
+  if (target?.kind === 'ssh') {
+    if (target.assetId?.trim()) return `asset:${target.assetId.trim()}`
+    return `ssh:${target.username?.trim() || 'unknown'}@${target.host?.trim() || 'unknown'}:${target.port || 22}`
+  }
+  return 'unbound'
+}
+
+export const codexWorkspaceDirectory = (codexHome: string, options: CodexSessionCreateOptions) => {
+  const identity = codexWorkspaceIdentity(options)
+  if (identity === 'local') return join(codexHome, 'workspaces', 'local')
+  const readable = identity
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 48) || 'workspace'
+  const digest = createHash('sha256').update(identity).digest('hex').slice(0, 12)
+  return join(codexHome, 'workspaces', `${readable}-${digest}`)
+}
 const codexThreadIdPattern = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i
 const codexRolloutTimestampPattern = /^\d{4}-\d{2}-\d{2}t\d{2}-\d{2}-\d{2}$/
 const codexThreadInfoPollMs = 250
@@ -663,7 +686,7 @@ export const createCodexSession = async (
   const pendingContextPath = codexPendingContextPath(codexHome, id)
   const threadInfoPath = codexThreadInfoPath(codexHome, id)
   const launchArgs = codexLaunchArgs(options)
-  const cwd = codexHome
+  const cwd = codexWorkspaceDirectory(codexHome, options)
   const cols = Math.max(20, Math.min(400, Math.round(Number(options.cols) || 100)))
   const rows = Math.max(8, Math.min(120, Math.round(Number(options.rows) || 30)))
   const codexProvider = resolveCodexProviderConfig()
@@ -681,6 +704,7 @@ export const createCodexSession = async (
   })
 
   await getMkdir()(codexHome, { recursive: true })
+  await getMkdir()(cwd, { recursive: true })
   await getMkdir()(dirname(pendingContextPath), { recursive: true })
   await getMkdir()(dirname(threadInfoPath), { recursive: true })
   await getWriteFile()(pendingContextPath, '', 'utf-8')

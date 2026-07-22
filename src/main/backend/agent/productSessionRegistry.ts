@@ -103,7 +103,7 @@ type ProductSessionProjectionMessageRow = {
 }
 
 const requireNative = createRequire(__filename)
-const PRODUCT_SESSION_SCHEMA_VERSION = 4
+const PRODUCT_SESSION_SCHEMA_VERSION = 5
 const MAX_LIST_LIMIT = 1000
 const MAX_PROJECTION_PAGE_LIMIT = 200
 const MAX_PROJECTION_MESSAGE_BYTES = 40 * 1024 * 1024
@@ -711,7 +711,8 @@ const initializeSchema = (db: ProductSessionRegistrySqliteDatabase) => {
       db.exec('ALTER TABLE product_sessions ADD COLUMN classic_context_json TEXT;')
     }
     db.exec(`
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_product_sessions_native_binding
+    DROP INDEX IF EXISTS idx_product_sessions_native_binding;
+    CREATE INDEX IF NOT EXISTS idx_product_sessions_native_lookup
       ON product_sessions(native_engine, native_session_id)
       WHERE native_engine IS NOT NULL AND native_session_id IS NOT NULL;
     CREATE INDEX IF NOT EXISTS idx_product_sessions_updated_at ON product_sessions(updated_at DESC, id ASC);
@@ -798,17 +799,6 @@ class SqliteProductSessionRegistry implements ProductSessionRegistry {
     }
   }
 
-  private assertNativeBindingAvailable(binding: ProductSessionNativeBinding | undefined, ownerId: string) {
-    if (!binding) return
-    const existing = this.findByNativeBinding(binding)
-    if (existing && existing.id !== ownerId) {
-      invalid(
-        'PRODUCT_SESSION_NATIVE_BINDING_CONFLICT',
-        `Native session ${binding.engine}:${binding.nativeSessionId} is already bound to another product session.`
-      )
-    }
-  }
-
   create(input: ProductSessionCreateInput): ProductSessionRecord {
     this.assertOpen()
     const id = input.id === undefined
@@ -836,7 +826,6 @@ class SqliteProductSessionRegistry implements ProductSessionRegistry {
       createdAt,
       updatedAt: createdAt
     }
-    this.assertNativeBindingAvailable(record.nativeBinding, record.id)
     try {
       this.db
         .prepare(`
@@ -853,7 +842,6 @@ class SqliteProductSessionRegistry implements ProductSessionRegistry {
     } catch (error) {
       if (!isSqliteConstraintError(error)) throw error
       if (this.get(record.id)) invalid('PRODUCT_SESSION_ID_CONFLICT', `Product session already exists: ${record.id}`)
-      this.assertNativeBindingAvailable(record.nativeBinding, record.id)
       invalid('PRODUCT_SESSION_WRITE_CONFLICT', 'Product session could not be created because its identity changed concurrently.')
     }
     const created = cloneRecord(record)
@@ -951,7 +939,6 @@ class SqliteProductSessionRegistry implements ProductSessionRegistry {
       createdAt: existing.createdAt,
       updatedAt: this.nextTimestamp(existing.updatedAt)
     }
-    this.assertNativeBindingAvailable(nativeBinding, existing.id)
     let result: SqliteRunResult | null = null
     try {
       result = this.db
@@ -968,7 +955,6 @@ class SqliteProductSessionRegistry implements ProductSessionRegistry {
         .run(...recordParams(next).slice(1), next.id, existing.updatedAt)
     } catch (error) {
       if (!isSqliteConstraintError(error)) throw error
-      this.assertNativeBindingAvailable(nativeBinding, existing.id)
       invalid('PRODUCT_SESSION_UPDATE_CONFLICT', 'Product session could not be updated because its binding changed concurrently.')
     }
     const updateResult = result ?? invalid('PRODUCT_SESSION_UPDATE_FAILED', 'Product session update did not return a result.')
@@ -1008,7 +994,7 @@ class SqliteProductSessionRegistry implements ProductSessionRegistry {
     const engine = requiredText(selector.engine, 'nativeBinding.engine', 128)
     const nativeSessionId = requiredExactText(selector.nativeSessionId, 'nativeBinding.nativeSessionId', 1024)
     const row = this.db
-      .prepare('SELECT * FROM product_sessions WHERE native_engine = ? AND native_session_id = ?')
+      .prepare('SELECT * FROM product_sessions WHERE native_engine = ? AND native_session_id = ? ORDER BY updated_at DESC, id ASC LIMIT 1')
       .get(engine, nativeSessionId) as ProductSessionRow | undefined
     return row ? rowToRecord(row) : null
   }

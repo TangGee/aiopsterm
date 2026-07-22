@@ -163,6 +163,24 @@ describe('Codex CLI backend runtime', () => {
     backend.configureCodexCliRuntime()
   })
 
+  it('uses stable and isolated working directories for Codex targets', async () => {
+    const backend = await loadBackend()
+    const home = '/tmp/codex-home'
+    const first = backend.codexWorkspaceDirectory(home, {
+      target: { kind: 'ssh', username: 'root', host: 'prod/example', port: 22 }
+    })
+    const same = backend.codexWorkspaceDirectory(home, {
+      target: { kind: 'ssh', username: 'root', host: 'prod/example', port: 22 }
+    })
+    const other = backend.codexWorkspaceDirectory(home, {
+      target: { kind: 'ssh', username: 'root', host: 'prod/example', port: 2202 }
+    })
+    expect(first).toBe(same)
+    expect(other).not.toBe(first)
+    expect(first).toMatch(/^\/tmp\/codex-home\/workspaces\/[a-z0-9._-]+$/)
+    expect(backend.codexWorkspaceDirectory(home, { target: { kind: 'local' } })).toBe('/tmp/codex-home/workspaces/local')
+  })
+
   afterEach(async () => {
     await Promise.all(temporaryDirectories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })))
   })
@@ -200,9 +218,7 @@ describe('Codex CLI backend runtime', () => {
       })
     })
 
-    const session = await backend.createCodexSession(
-      'codex-test-1',
-      {
+    const createOptions = {
         cwd: '/tmp/forged-client-cwd',
         cols: 120,
         rows: 40,
@@ -214,7 +230,11 @@ describe('Codex CLI backend runtime', () => {
           port: 22,
           username: 'root'
         }
-      } as CodexCreateOptionsForTest,
+      } as CodexCreateOptionsForTest
+    const expectedCwd = backend.codexWorkspaceDirectory('/tmp/aiopsterm-user-data/codex-agent', createOptions)
+    const session = await backend.createCodexSession(
+      'codex-test-1',
+      createOptions,
       createSink(events)
     )
     const write = backend.writeCodexSession(session.id, 'hello\n')
@@ -226,13 +246,14 @@ describe('Codex CLI backend runtime', () => {
       expect.objectContaining({
         id: 'codex-test-1',
         binaryPath: CODEX_PACKAGE_BINARY,
-        cwd: '/tmp/aiopsterm-user-data/codex-agent',
+        cwd: expectedCwd,
         codexHome: '/tmp/aiopsterm-user-data/codex-agent',
         runtimeKind: 'pty'
       })
     )
     expect(mkdirCalls).toEqual([
       '/tmp/aiopsterm-user-data/codex-agent',
+      expectedCwd,
       '/tmp/aiopsterm-user-data/codex-agent/aiopsterm-pending-context',
       '/tmp/aiopsterm-user-data/codex-agent/aiopsterm-thread-info'
     ])
@@ -304,7 +325,7 @@ describe('Codex CLI backend runtime', () => {
         file: CODEX_PACKAGE_BINARY,
         args: [],
         options: expect.objectContaining({
-          cwd: '/tmp/aiopsterm-user-data/codex-agent',
+          cwd: expectedCwd,
           cols: 120,
           rows: 40,
           env: expect.objectContaining({

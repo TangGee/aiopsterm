@@ -432,6 +432,20 @@ describe('Codex terminal bridge runtime', () => {
         errorCode: 'TERMINAL_COMMAND_CHANNEL_ISOLATED'
       })
       expect(writes).toHaveLength(2)
+
+      bridge.appendCodexTerminalBridgeData('terminal-cancel-isolated', '[root@prod hqrf-frame]# ')
+      const recovered = bridge.callCodexTerminalBridgeTool('run_command', {
+        sessionId: 'terminal-cancel-isolated',
+        commandId: 'cmd-isolated-recovered',
+        command: 'pwd',
+        mode: 'wait'
+      })
+      expect(writes).toHaveLength(3)
+      bridge.appendCodexTerminalBridgeData(
+        'terminal-cancel-isolated',
+        '__AIOPSTERM_CODEX_START_cmd-isolated-recovered__\n/root\n__AIOPSTERM_CODEX_END_cmd-isolated-recovered__:0\n'
+      )
+      await expect(recovered).resolves.toMatchObject({ ok: true, data: { output: '/root' } })
     } finally {
       vi.useRealTimers()
     }

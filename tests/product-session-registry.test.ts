@@ -839,7 +839,7 @@ describe('product session registry', () => {
     expect(events[0].session).toMatchObject({ id: 'observed', title: 'listener mutation' })
   })
 
-  it('enforces one product owner for each engine-native session binding', async () => {
+  it('allows multiple product sessions to share an engine-native session binding', async () => {
     const { registry } = await createFixture()
     registry.create({
       id: 'first',
@@ -849,12 +849,12 @@ describe('product session registry', () => {
     registry.create({ id: 'second', surface: 'database' })
 
     expect(registry.findByNativeBinding({ engine: 'cline', nativeSessionId: 'shared-native-id' })?.id).toBe('first')
-    expect(() =>
-      registry.update({
-        id: 'second',
-        nativeBinding: { engine: 'cline', nativeSessionId: 'shared-native-id' }
-      })
-    ).toThrowError(expect.objectContaining({ code: 'PRODUCT_SESSION_NATIVE_BINDING_CONFLICT' }))
+    const updated = registry.update({
+      id: 'second',
+      nativeBinding: { engine: 'cline', nativeSessionId: 'shared-native-id' }
+    })
+    expect(updated?.nativeBinding?.nativeSessionId).toBe('shared-native-id')
+    expect(registry.findByNativeBinding({ engine: 'cline', nativeSessionId: 'shared-native-id' })?.id).toBe('second')
   })
 
   it('deletes only the selected product session and validates required binding context', async () => {
@@ -1057,6 +1057,35 @@ describe('product session registry', () => {
       String(productSessionRegistrySchemaVersion)
     )
     inspected.close()
+  })
+
+  it('migrates the version four unique native binding index to a shared lookup index', async () => {
+    const fixture = await createFixture()
+    fixture.registry.create({
+      id: 'v4-first',
+      surface: 'classic',
+      nativeBinding: { engine: 'codex', nativeSessionId: 'shared-v4' }
+    })
+    fixture.registry.close()
+    openRegistries.splice(openRegistries.indexOf(fixture.registry), 1)
+    const legacy = new TestSqliteDatabase(fixture.databasePath)
+    legacy.exec(`
+      DROP INDEX IF EXISTS idx_product_sessions_native_lookup;
+      CREATE UNIQUE INDEX idx_product_sessions_native_binding
+        ON product_sessions(native_engine, native_session_id)
+        WHERE native_engine IS NOT NULL AND native_session_id IS NOT NULL;
+      UPDATE product_session_registry_meta SET value = '4' WHERE key = 'schema_version';
+    `)
+    legacy.close()
+
+    const migrated = createProductSessionRegistry({ databasePath: fixture.databasePath, sqliteFactory: TestSqliteDatabase })
+    openRegistries.push(migrated)
+    migrated.create({
+      id: 'v4-second',
+      surface: 'codex',
+      nativeBinding: { engine: 'codex', nativeSessionId: 'shared-v4' }
+    })
+    expect(migrated.findByNativeBinding({ engine: 'codex', nativeSessionId: 'shared-v4' })?.id).toBe('v4-second')
   })
 
   it('opens the default SQLite driver or reports a stable availability error', async () => {

@@ -48,6 +48,7 @@ type TerminalCommandQueue = {
   activeCommandId?: string
   queuedCommandIds: string[]
   isolatedReason?: string
+  isolatedOutput?: string
 }
 
 type TerminalOutputHistory = {
@@ -254,7 +255,18 @@ export const appendCodexTerminalBridgeData = (sessionId: string, chunk: string |
   const text = Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk || '')
   if (!text) return
   const pending = activePendingCommandForSession(sessionId)
-  if (!pending) return
+  if (!pending) {
+    const queue = terminalCommandQueues.get(sessionId)
+    if (!queue?.isolatedReason) return
+    queue.isolatedOutput = `${queue.isolatedOutput || ''}${text}`.slice(-8192)
+    const output = stripTerminalControl(queue.isolatedOutput)
+    if (output.split('\n').some((line) => isReliableShellPromptBoundary(line))) {
+      queue.isolatedReason = undefined
+      queue.isolatedOutput = undefined
+      cleanupIdleTerminalCommandQueue(sessionId)
+    }
+    return
+  }
   pending.output += text
   const completed = extractCompletedMarkedOutput(pending.output, pending.markerStart, pending.markerEndPrefix)
   if (completed) {
@@ -308,7 +320,19 @@ const commandEchoFragments = (command: string) =>
     .map((line) => line.trim())
     .filter(Boolean)
 
-const hasShellPrompt = (line: string) => /(?:^|\s)[^\s@]+@[^:\s]+:.*(?:[$#])\s+/.test(line) || /^>\s*/.test(line)
+const hasShellPromptPrefix = (line: string) =>
+  /(?:^|\s)[^\s@]+@[^:\s]+:.*(?:[$#%])\s+/.test(line) ||
+  /^\[[^\]\r\n]+@[^\]\r\n]+\s+[^\]\r\n]*\][#$%]\s+/.test(line) ||
+  /^>\s*/.test(line)
+
+const isReliableShellPromptBoundary = (line: string) => {
+  const text = line.trim()
+  return (
+    /^\[[^\]\r\n]+@[^\]\r\n]+\s+[^\]\r\n]*\][#$%]\s*$/.test(text) ||
+    /^[^\s@]+@[^\s:]+(?::[^\r\n]*)?[#$%]\s*$/.test(text) ||
+    /^PS\s+.+>\s*$/.test(text)
+  )
+}
 
 const isCodexBridgeWrapperLine = (line: string, pending: PendingCommand) => {
   const text = lineText(line)
@@ -317,7 +341,7 @@ const isCodexBridgeWrapperLine = (line: string, pending: PendingCommand) => {
 
 const codexBridgeInputEchoPromptPrefix = (line: string, pending: PendingCommand) => {
   const text = terminalLineText(line).trimEnd()
-  if (!text || !hasShellPrompt(text)) return null
+  if (!text || !hasShellPromptPrefix(text)) return null
   const markerIndex = text.indexOf(pending.markerStart)
   if (markerIndex >= 0) {
     const echoIndex = text.lastIndexOf('echo ', markerIndex)
@@ -522,6 +546,7 @@ const isolateTerminalCommandQueue = (pending: PendingCommand, reason: string, er
   pending.displayPhase = 'done'
   queue.activeCommandId = undefined
   queue.isolatedReason = reason
+  queue.isolatedOutput = ''
   if (error !== undefined) rejectPendingCommandResponse(pending, error)
   else settlePendingCommandResponse(pending, isolatedTerminalCommandResponse(session, reason))
   pendingCommands.delete(pending.id)
@@ -549,7 +574,7 @@ const releaseActiveTerminalCommand = (pending: PendingCommand) => {
 const hasInterruptedCommandPromptBoundary = (pending: PendingCommand) => {
   const start = pending.interruptOutputStart ?? pending.output.length
   const output = stripTerminalControl(pending.output.slice(start))
-  return output.split('\n').some((line) => hasShellPrompt(line) || /^PS\s+.+>\s*$/.test(line.trim()))
+  return output.split('\n').some((line) => isReliableShellPromptBoundary(line))
 }
 
 const beginActiveTerminalCommandInterrupt = (pending: PendingCommand, response: CodexBridgeResponse) => {
