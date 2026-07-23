@@ -1803,9 +1803,28 @@ describe('AppShell', () => {
     expect(codexTerminal.options.fontSize).toBe(16)
     codexTerminal.emitSelection('codex copied text')
     vi.mocked(navigator.clipboard.writeText).mockClear()
-    await wrapper.find('[data-testid="ai-codex-xterm"]').trigger('contextmenu')
+    const codexShell = wrapper.find('[data-testid="ai-codex-shell"]')
+    codexShell.element.getBoundingClientRect = () =>
+      ({
+        x: 100,
+        y: 50,
+        top: 50,
+        left: 100,
+        right: 500,
+        bottom: 550,
+        width: 400,
+        height: 500,
+        toJSON: () => ({})
+      }) as DOMRect
+    await wrapper.find('[data-testid="ai-codex-xterm"]').trigger('contextmenu', {
+      clientX: 250,
+      clientY: 300
+    })
     await wrapper.vm.$nextTick()
-    expect(wrapper.find('[data-testid="ai-codex-terminal-menu"]').exists()).toBe(true)
+    const codexTerminalMenu = wrapper.find('[data-testid="ai-codex-terminal-menu"]')
+    expect(codexTerminalMenu.exists()).toBe(true)
+    expect(codexTerminalMenu.attributes('style')).toContain('left: 150px')
+    expect(codexTerminalMenu.attributes('style')).toContain('top: 250px')
     await wrapper.find('[data-testid="ai-codex-terminal-copy"]').trigger('click')
     await flushPromises()
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith('codex copied text')

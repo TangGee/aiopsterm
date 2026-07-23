@@ -1,10 +1,16 @@
 .ai-codex-shell {
+  position: relative;
   min-height: 0;
   min-width: 0;
   height: 100%;
   display: grid;
   grid-template-rows: auto auto auto minmax(0, 1fr) auto;
   gap: 8px;
+}
+
+.ai-codex-shell > .terminal-context-menu {
+  position: absolute;
+  z-index: 80;
 }
 
 .ai-codex-shell.drop-active .ai-codex-target-bar {

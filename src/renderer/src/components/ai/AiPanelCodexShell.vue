@@ -228,8 +228,17 @@ const closeCodexTerminalMenu = () => {
 }
 
 const openCodexTerminalMenu = (event: MouseEvent) => {
-  codexTerminalMenu.x = Math.max(0, Math.min(event.clientX, window.innerWidth - 240))
-  codexTerminalMenu.y = Math.max(0, Math.min(event.clientY, window.innerHeight - 100))
+  const eventTarget = event.currentTarget instanceof HTMLElement
+    ? event.currentTarget
+    : event.target instanceof HTMLElement
+      ? event.target
+      : null
+  const shell = eventTarget?.closest<HTMLElement>('.ai-codex-shell')
+  const bounds = shell?.getBoundingClientRect()
+  const relativeX = event.clientX - (bounds?.left || 0)
+  const relativeY = event.clientY - (bounds?.top || 0)
+  codexTerminalMenu.x = Math.max(0, Math.min(relativeX, Math.max(0, (bounds?.width || window.innerWidth) - 214)))
+  codexTerminalMenu.y = Math.max(0, Math.min(relativeY, Math.max(0, (bounds?.height || window.innerHeight) - 76)))
   codexTerminalMenu.visible = true
 }
 
