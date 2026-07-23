@@ -1003,6 +1003,7 @@ export const ptPT = completeLocaleMessages({
   'terminal.dashboard.openSettings': 'Abrir definições',
   'terminal.dashboard.inlineCommand': 'Geração de comandos inline',
   'terminal.dashboard.toggleLayout': 'Alternar layout (Terminal/Agents)',
+  'terminal.dashboard.knowledgeDocs': 'Guia da base de conhecimento',
   'terminal.mfaTitle': 'Autenticação SSH de dois fatores',
   'terminal.mfaDescription': 'O anfitrião remoto {target} requer uma palavra-passe dinâmica ou um código de verificação. Introduza-o para continuar o início de sessão SSH atual.',
   'terminal.mfaPromptFallback': 'Código de verificação ou palavra-passe dinâmica',

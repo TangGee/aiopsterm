@@ -47,6 +47,7 @@ export const zhTW = completeLocaleMessages({
   'settings.general.openOnboarding': '開啟入門導覽',
   'settings.general.editor': '編輯器設定',
   'settings.general.editorScope': '這些設定會套用到檔案、知識庫、SQL 和設定 JSON 等程式碼編輯器；終端字型請在「終端設定」中調整，AI 輸入框不受影響。',
+  'terminal.dashboard.knowledgeDocs': '知識庫使用文件',
   'ai.newChat': '新建對話',
   'ai.moreActions': '更多',
   'ai.history': '對話歷史',

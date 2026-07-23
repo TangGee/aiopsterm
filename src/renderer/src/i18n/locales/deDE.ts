@@ -1003,6 +1003,7 @@ export const deDE = completeLocaleMessages({
   'terminal.dashboard.openSettings': 'Einstellungen öffnen',
   'terminal.dashboard.inlineCommand': 'Inline-Befehlsgenerierung',
   'terminal.dashboard.toggleLayout': 'Layout umschalten (Terminal/Agents)',
+  'terminal.dashboard.knowledgeDocs': 'Knowledge-Base-Anleitung',
   'terminal.mfaTitle': 'SSH-Zwei-Faktor-Authentifizierung',
   'terminal.mfaDescription': 'Der Remote-Host {target} erfordert ein dynamisches Passwort oder einen Bestätigungscode. Nach der Eingabe wird die aktuelle SSH-Anmeldung fortgesetzt.',
   'terminal.mfaPromptFallback': 'Bestätigungscode oder dynamisches Passwort',

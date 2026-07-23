@@ -1003,6 +1003,7 @@ export const arAR = completeLocaleMessages({
   'terminal.dashboard.openSettings': 'فتح الإعدادات',
   'terminal.dashboard.inlineCommand': 'توليد الأوامر المضمّن',
   'terminal.dashboard.toggleLayout': 'تبديل التخطيط (Terminal/Agents)',
+  'terminal.dashboard.knowledgeDocs': 'دليل قاعدة المعرفة',
   'terminal.mfaTitle': 'مصادقة SSH الثنائية',
   'terminal.mfaDescription': 'يتطلب المضيف البعيد {target} كلمة مرور ديناميكية أو رمز تحقق. أدخله لمتابعة تسجيل دخول SSH الحالي.',
   'terminal.mfaPromptFallback': 'رمز التحقق أو كلمة المرور الديناميكية',

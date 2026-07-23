@@ -1003,6 +1003,7 @@ export const frFR = completeLocaleMessages({
   'terminal.dashboard.openSettings': 'Ouvrir les paramètres',
   'terminal.dashboard.inlineCommand': 'Génération de commande en ligne',
   'terminal.dashboard.toggleLayout': 'Basculer la disposition (Terminal/Agents)',
+  'terminal.dashboard.knowledgeDocs': 'Guide de la base de connaissances',
   'terminal.mfaTitle': 'Authentification SSH à deux facteurs',
   'terminal.mfaDescription': 'L’hôte distant {target} requiert un mot de passe dynamique ou un code de vérification. Saisissez-le pour poursuivre la connexion SSH en cours.',
   'terminal.mfaPromptFallback': 'Code de vérification ou mot de passe dynamique',

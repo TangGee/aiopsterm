@@ -58,6 +58,41 @@
         <PanelRightOpen v-if="isRightCollapsed" />
         <PanelRightClose v-else />
       </button>
+      <div
+        ref="languageMenuRoot"
+        class="top-language"
+      >
+        <button
+          class="icon-button"
+          :title="t('settings.general.language')"
+          :aria-label="t('settings.general.language')"
+          aria-haspopup="menu"
+          :aria-expanded="languageMenuOpen"
+          data-testid="top-language-button"
+          @click="languageMenuOpen = !languageMenuOpen"
+        >
+          <Globe2 />
+        </button>
+        <div
+          v-if="languageMenuOpen"
+          class="top-language-menu"
+          role="menu"
+          data-testid="top-language-menu"
+        >
+          <button
+            v-for="option in settingsLanguageOptions"
+            :key="option.value"
+            type="button"
+            role="menuitemradio"
+            :aria-checked="workspace.config.language === option.value"
+            @click="selectLanguage(option.value)"
+          >
+            <Check v-if="workspace.config.language === option.value" />
+            <span v-else class="top-language-check-placeholder"></span>
+            <span>{{ option.labelKey ? t(option.labelKey) : option.label }}</span>
+          </button>
+        </div>
+      </div>
       <span
         v-if="workspace.topNotice"
         class="top-notice"
@@ -100,10 +135,12 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import {
   Bell,
+  Check,
   CheckCircle2,
   ChevronRight,
   CopyMinus,
   Download,
+  Globe2,
   LoaderCircle,
   Minus,
   PanelLeftClose,
@@ -116,11 +153,14 @@ import {
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useI18n } from '@/i18n'
 import { windowControlsClient } from '@/services/app/windowControlsClient'
+import { settingsLanguageOptions } from '@/config/settings'
 
 const workspace = useWorkspaceStore()
 const { t } = useI18n()
 const platform = ref('')
 const isMaximized = ref(false)
+const languageMenuOpen = ref(false)
+const languageMenuRoot = ref<HTMLElement | null>(null)
 let stopMaximized: (() => void) | undefined
 let stopUnmaximized: (() => void) | undefined
 
@@ -197,7 +237,17 @@ const closeWindow = () => {
   windowControlsClient.closeWindow()?.()
 }
 
+const selectLanguage = async (language: string) => {
+  await workspace.updateLanguage(language)
+  languageMenuOpen.value = false
+}
+
+const closeLanguageMenuFromDocument = (event: MouseEvent) => {
+  if (!languageMenuRoot.value?.contains(event.target as Node)) languageMenuOpen.value = false
+}
+
 onMounted(async () => {
+  document.addEventListener('mousedown', closeLanguageMenuFromDocument)
   platform.value = (await windowControlsClient.platform()?.()) || ''
   isMaximized.value = (await windowControlsClient.isMaximized()?.()) || false
   stopMaximized = windowControlsClient.onMaximized()?.(() => {
@@ -210,6 +260,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  document.removeEventListener('mousedown', closeLanguageMenuFromDocument)
   stopMaximized?.()
   stopUnmaximized?.()
 })

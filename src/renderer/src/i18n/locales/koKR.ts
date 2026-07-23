@@ -1003,6 +1003,7 @@ export const koKR = completeLocaleMessages({
   'terminal.dashboard.openSettings': '설정 열기',
   'terminal.dashboard.inlineCommand': '인라인 명령 생성',
   'terminal.dashboard.toggleLayout': '레이아웃 전환 (Terminal/Agents)',
+  'terminal.dashboard.knowledgeDocs': '지식 베이스 사용 안내',
   'terminal.mfaTitle': 'SSH 2단계 인증',
   'terminal.mfaDescription': '원격 호스트 {target}에 동적 비밀번호 또는 확인 코드가 필요합니다. 입력하면 현재 SSH 로그인을 계속합니다.',
   'terminal.mfaPromptFallback': '확인 코드 또는 동적 비밀번호',

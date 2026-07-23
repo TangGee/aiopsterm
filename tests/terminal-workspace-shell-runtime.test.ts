@@ -110,6 +110,7 @@ const createWorkspace = (panel = createPanel()) => {
 
 const createRuntime = (options: {
   copyToClipboard?: (text: string) => Promise<boolean>
+  dashboardVisible?: boolean
   readClipboard?: () => Promise<ClipboardTextReadResult>
   selection?: string
   workspace?: WorkspaceStore
@@ -131,6 +132,10 @@ const createRuntime = (options: {
     hideSuggestions: vi.fn(),
     clearSearchFromButton: vi.fn(),
     openCommandDialog: vi.fn(),
+    openTerminalDashboardAssets: vi.fn(),
+    openTerminalDashboardSettings: vi.fn(),
+    openTerminalDashboardInlineCommand: vi.fn(),
+    toggleTerminalDashboardLayout: vi.fn(),
     openSearchOverlay: vi.fn(),
     reconnectTerminalPanel: vi.fn(async (panel: TerminalPanel) => {
       panel.sessionId = 'session-1'
@@ -152,6 +157,7 @@ const createRuntime = (options: {
       workspace,
       state,
       terminalViews,
+      terminalDashboardVisible: ref(Boolean(options.dashboardVisible)),
       searchOverlayPanelId: ref(''),
       commandDialog,
       ...calls
@@ -311,6 +317,36 @@ describe('terminalWorkspaceShellRuntime', () => {
     expect(calls.closeSearchOverlay).toHaveBeenCalledTimes(1)
     expect(calls.closeCommandDialog).toHaveBeenCalledTimes(1)
     expect(calls.hideSuggestions).toHaveBeenCalled()
+  })
+
+  it('routes dashboard shortcuts without taking plain control keys from an active shell', async () => {
+    const dashboard = createRuntime({ dashboardVisible: true })
+
+    const assetsShortcut = createKeyboardEvent({ ctrlKey: true, key: 'b' })
+    await dashboard.runtime.handleShortcut(assetsShortcut)
+    expect(assetsShortcut.preventDefault).toHaveBeenCalledTimes(1)
+    expect(assetsShortcut.stopPropagation).toHaveBeenCalledTimes(1)
+    expect(dashboard.calls.openTerminalDashboardAssets).toHaveBeenCalledTimes(1)
+
+    await dashboard.runtime.handleShortcut(createKeyboardEvent({ ctrlKey: true, key: ',' }))
+    expect(dashboard.calls.openTerminalDashboardSettings).toHaveBeenCalledTimes(1)
+
+    await dashboard.runtime.handleShortcut(createKeyboardEvent({ ctrlKey: true, key: 'e' }))
+    expect(dashboard.calls.toggleTerminalDashboardLayout).toHaveBeenCalledTimes(1)
+
+    await dashboard.runtime.handleShortcut(createKeyboardEvent({ ctrlKey: true, shiftKey: true, key: 'k' }))
+    expect(dashboard.calls.openTerminalDashboardInlineCommand).toHaveBeenCalledTimes(1)
+    expect(dashboard.calls.openCommandDialog).not.toHaveBeenCalled()
+
+    const shell = createRuntime()
+    const shellControlB = createKeyboardEvent({ ctrlKey: true, key: 'b' })
+    const shellControlE = createKeyboardEvent({ ctrlKey: true, key: 'e' })
+    await shell.runtime.handleShortcut(shellControlB)
+    await shell.runtime.handleShortcut(shellControlE)
+    expect(shellControlB.preventDefault).not.toHaveBeenCalled()
+    expect(shellControlE.preventDefault).not.toHaveBeenCalled()
+    expect(shell.calls.openTerminalDashboardAssets).not.toHaveBeenCalled()
+    expect(shell.calls.toggleTerminalDashboardLayout).not.toHaveBeenCalled()
   })
 
   it('keeps overflowing terminal tabs scrollable and scrolls the active tab into view', () => {

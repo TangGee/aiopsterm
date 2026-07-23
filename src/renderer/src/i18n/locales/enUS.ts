@@ -1004,6 +1004,7 @@ export const enUS: LocaleMessages = {
   'terminal.dashboard.openSettings': 'Open settings',
   'terminal.dashboard.inlineCommand': 'Inline command generation',
   'terminal.dashboard.toggleLayout': 'Toggle layout (Terminal/Agents)',
+  'terminal.dashboard.knowledgeDocs': 'Knowledge Base guide',
   'terminal.mfaTitle': 'SSH two-factor authentication',
   'terminal.mfaDescription': 'Remote host {target} requires a dynamic password or verification code. Submit it to continue the SSH login.',
   'terminal.mfaPromptFallback': 'Verification code or dynamic password',

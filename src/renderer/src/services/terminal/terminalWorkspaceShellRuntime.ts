@@ -25,6 +25,11 @@ type TerminalWorkspaceShellRuntimeInput = {
   state: TerminalWorkspaceShellState
   terminalViews: Map<string, TerminalView>
   terminalWorkspaceVisible?: Ref<boolean> | ComputedRef<boolean>
+  terminalDashboardVisible?: Ref<boolean> | ComputedRef<boolean>
+  openTerminalDashboardAssets?: () => unknown | Promise<unknown>
+  openTerminalDashboardSettings?: () => unknown | Promise<unknown>
+  openTerminalDashboardInlineCommand?: () => unknown | Promise<unknown>
+  toggleTerminalDashboardLayout?: () => unknown | Promise<unknown>
   searchOverlayPanelId: Ref<string>
   commandDialog: TerminalCommandDialogState
   closeCommandDialog: () => void
@@ -88,6 +93,11 @@ export const createTerminalWorkspaceShellRuntime = (
     state,
     terminalViews,
     terminalWorkspaceVisible,
+    terminalDashboardVisible,
+    openTerminalDashboardAssets,
+    openTerminalDashboardSettings,
+    openTerminalDashboardInlineCommand,
+    toggleTerminalDashboardLayout,
     searchOverlayPanelId,
     commandDialog,
     closeCommandDialog,
@@ -793,14 +803,32 @@ export const createTerminalWorkspaceShellRuntime = (
 
   const handleShortcut = async (event: KeyboardEvent) => {
     if (workspace.shortcutRecording.actionId) return
+    const key = event.key.toLowerCase()
+    const hasPrimaryModifier = event.ctrlKey || event.metaKey
+    if (terminalDashboardVisible?.value && hasPrimaryModifier && !event.altKey) {
+      const action =
+        !event.shiftKey && key === 'b'
+          ? openTerminalDashboardAssets
+          : !event.shiftKey && event.key === ','
+            ? openTerminalDashboardSettings
+            : !event.shiftKey && key === 'e'
+              ? toggleTerminalDashboardLayout
+              : event.shiftKey && key === 'k'
+                ? openTerminalDashboardInlineCommand
+                : undefined
+      if (action) {
+        event.preventDefault()
+        event.stopPropagation()
+        await action()
+        return
+      }
+    }
     const terminalAction = terminalShortcutActionForEvent(event)
     if (terminalAction && isTerminalKeyboardTarget(event) && handleTerminalKeyboardShortcut(workspace.activePanelId, terminalAction, event)) {
       event.preventDefault()
       event.stopPropagation()
       return
     }
-    const key = event.key.toLowerCase()
-    const hasPrimaryModifier = event.ctrlKey || event.metaKey
     if (event.key === 'Escape') {
       menu.visible = false
       termMenu.visible = false

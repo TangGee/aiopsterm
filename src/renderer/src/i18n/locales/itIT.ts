@@ -1003,6 +1003,7 @@ export const itIT = completeLocaleMessages({
   'terminal.dashboard.openSettings': 'Apri impostazioni',
   'terminal.dashboard.inlineCommand': 'Generazione comando inline',
   'terminal.dashboard.toggleLayout': 'Cambia layout (Terminal/Agents)',
+  'terminal.dashboard.knowledgeDocs': 'Guida alla knowledge base',
   'terminal.mfaTitle': 'Autenticazione SSH a due fattori',
   'terminal.mfaDescription': 'L’host remoto {target} richiede una password dinamica o un codice di verifica. Inseriscilo per continuare l’accesso SSH corrente.',
   'terminal.mfaPromptFallback': 'Codice di verifica o password dinamica',

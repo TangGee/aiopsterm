@@ -55,11 +55,28 @@
   backdrop-filter: var(--theme-module-active-backdrop-filter);
 }
 
-.terminal-dashboard-shortcuts span {
+.terminal-dashboard-shortcuts button {
   display: grid;
   grid-template-columns: 260px auto auto;
   gap: 6px;
   align-items: center;
+  min-height: 28px;
+  margin: 0;
+  padding: 2px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.terminal-dashboard-shortcuts button:hover,
+.terminal-dashboard-shortcuts button:focus-visible {
+  color: var(--theme-module-active-text);
+  background: color-mix(in srgb, var(--theme-module-active-text) 8%, transparent);
+  outline: none;
 }
 
 .terminal-grid.split-right {

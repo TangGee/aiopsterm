@@ -1003,6 +1003,7 @@ export const jaJP = completeLocaleMessages({
   'terminal.dashboard.openSettings': '設定を開く',
   'terminal.dashboard.inlineCommand': 'インラインコマンド生成',
   'terminal.dashboard.toggleLayout': 'レイアウトを切り替え (Terminal/Agents)',
+  'terminal.dashboard.knowledgeDocs': 'ナレッジベースガイド',
   'terminal.mfaTitle': 'SSH 二要素認証',
   'terminal.mfaDescription': 'リモートホスト {target} は動的パスワードまたは確認コードを必要としています。入力すると現在の SSH ログインを続行します。',
   'terminal.mfaPromptFallback': '確認コードまたは動的パスワード',

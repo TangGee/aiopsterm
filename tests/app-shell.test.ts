@@ -2867,7 +2867,18 @@ describe('AppShell', () => {
     expect(wrapper.find('.top-left [data-testid="ai-attention-bell"]').exists()).toBe(true)
     expect(wrapper.find('.top-actions [data-testid="ai-attention-bell"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="ai-attention-count"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="top-language-button"]').exists()).toBe(true)
     expect(wrapper.text()).toContain('本地版本')
+
+    await wrapper.find('[data-testid="top-language-button"]').trigger('click')
+    expect(wrapper.find('[data-testid="top-language-menu"]').exists()).toBe(true)
+    const english = wrapper.findAll('[data-testid="top-language-menu"] button').find((button) => button.text().includes('English'))
+    expect(english).toBeDefined()
+    await english!.trigger('click')
+    await flushPromises()
+    expect(window.aiops.saveConfig).toHaveBeenCalledWith({ language: 'en-US' })
+    expect(store.config.language).toBe('en-US')
+    expect(wrapper.find('[data-testid="top-language-menu"]').exists()).toBe(false)
 
     store.mode = 'agents'
     await wrapper.vm.$nextTick()
@@ -10260,6 +10271,8 @@ describe('AppShell', () => {
 
     expect(wrapper.find('.terminal-dashboard').exists()).toBe(true)
     expect(wrapper.text()).toContain('与AI对话')
+    expect(wrapper.text()).toContain('知识库使用文档')
+    expect(wrapper.findAll('.terminal-dashboard-shortcuts button')).toHaveLength(6)
     expect(wrapper.findAll('.terminal-pane')).toHaveLength(0)
     expect(wrapper.findAll('.terminal-tab')).toHaveLength(0)
     expect(wrapper.text()).not.toContain('欢迎')
@@ -10684,6 +10697,31 @@ describe('AppShell', () => {
     expect(store.activePanel.sshSession?.connectionId).toBe('ssh-test-session-asset-split-unit')
     expect(store.activePanel.output).not.toContain('aiopsterm ssh')
     expect(wrapper.find('.terminal-grid').classes()).toContain('split-below')
+
+    wrapper.unmount()
+  })
+
+  it('opens the dashboard knowledge guide for the active language', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const wrapper = mount(TerminalWorkspace, {
+      attachTo: document.body,
+      global: { plugins: [pinia] }
+    })
+    const store = useWorkspaceStore()
+    store.config = { ...store.config, language: 'en-US' }
+    vi.mocked(window.aiops.openSettingsDocumentation).mockClear()
+    await wrapper.vm.$nextTick()
+
+    const guideButton = wrapper.findAll('.terminal-dashboard-shortcuts button').find((button) => button.text().includes('Knowledge Base guide'))
+    expect(guideButton).toBeDefined()
+    await guideButton!.trigger('click')
+    await flushPromises()
+
+    expect(store.activeModule).toBe('settings')
+    expect(window.aiops.openSettingsDocumentation).toHaveBeenCalledWith({
+      documentPath: 'usage/best-practices/en-US/05-knowledge-base.md'
+    })
 
     wrapper.unmount()
   })

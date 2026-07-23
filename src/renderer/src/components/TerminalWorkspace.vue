@@ -258,11 +258,24 @@
       >
         <div class="terminal-dashboard-icon"><Terminal /></div>
         <div class="terminal-dashboard-shortcuts">
-          <span>{{ t('terminal.dashboard.chatWithAi') }}</span>
-          <span>{{ t('terminal.dashboard.assetList') }} <kbd>Ctrl</kbd><kbd>B</kbd></span>
-          <span>{{ t('terminal.dashboard.openSettings') }} <kbd>Ctrl</kbd><kbd>,</kbd></span>
-          <span>{{ t('terminal.dashboard.inlineCommand') }} <kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>K</kbd></span>
-          <span>{{ t('terminal.dashboard.toggleLayout') }} <kbd>Ctrl</kbd><kbd>E</kbd></span>
+          <button type="button" @click="openTerminalDashboardChat">
+            <span>{{ t('terminal.dashboard.chatWithAi') }}</span>
+          </button>
+          <button type="button" @click="openTerminalDashboardAssets">
+            <span>{{ t('terminal.dashboard.assetList') }}</span><kbd>Ctrl</kbd><kbd>B</kbd>
+          </button>
+          <button type="button" @click="openTerminalDashboardSettings">
+            <span>{{ t('terminal.dashboard.openSettings') }}</span><kbd>Ctrl</kbd><kbd>,</kbd>
+          </button>
+          <button type="button" @click="openTerminalDashboardInlineCommand">
+            <span>{{ t('terminal.dashboard.inlineCommand') }}</span><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>K</kbd>
+          </button>
+          <button type="button" @click="toggleTerminalDashboardLayout">
+            <span>{{ t('terminal.dashboard.toggleLayout') }}</span><kbd>Ctrl</kbd><kbd>E</kbd>
+          </button>
+          <button type="button" @click="openKnowledgeBaseDocumentation">
+            <span>{{ t('terminal.dashboard.knowledgeDocs') }}</span>
+          </button>
         </div>
       </div>
       <template v-else>
@@ -601,7 +614,12 @@ const {
   openCommandDialogFromTermMenu,
   openCommandLineFromMenu,
   openFileManagerFromMenu,
+  openKnowledgeBaseDocumentation,
   openMenu,
+  openTerminalDashboardAssets,
+  openTerminalDashboardChat,
+  openTerminalDashboardInlineCommand,
+  openTerminalDashboardSettings,
   openSearchOverlay,
   panelById,
   paneDragOverPanelId,
@@ -647,6 +665,7 @@ const {
   terminalTabStateLabel,
   terminalTabTooltip,
   toggleGlobalInput,
+  toggleTerminalDashboardLayout,
   togglePanelConnection,
   toggleTabConnectionFromMenu,
   scrollTerminalTabs,

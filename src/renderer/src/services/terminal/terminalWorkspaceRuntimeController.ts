@@ -116,7 +116,7 @@ export const shouldFocusNewActiveTerminal = (previousIds: string, nextIds: strin
 
 export const useTerminalWorkspaceContainerRuntime = () => {
   const workspace = useWorkspaceStore()
-  const { t } = useI18n()
+  const { locale, t } = useI18n()
   const runtimeToken = Symbol('terminal-workspace-runtime')
   const shellState = createTerminalWorkspaceShellState()
   const {
@@ -622,6 +622,39 @@ export const useTerminalWorkspaceContainerRuntime = () => {
     updateSuggestionsPosition
   })
 
+  const openTerminalDashboardChat = () => {
+    workspace.rightPanelOpen = true
+  }
+
+  const openTerminalDashboardAssets = () => {
+    workspace.openAssetManagement()
+  }
+
+  const openTerminalDashboardSettings = () => {
+    workspace.mode = 'terminal'
+    workspace.setActiveModule('settings')
+    workspace.rightPanelOpen = false
+    workspace.setActiveSettingsSection('general')
+  }
+
+  const openTerminalDashboardInlineCommand = async () => {
+    const panel = await workspace.openLocalTerminalPanel()
+    if (!panel) return
+    await nextTick()
+    await openCommandDialog(panel.id)
+  }
+
+  const toggleTerminalDashboardLayout = () => workspace.toggleMode()
+
+  const openKnowledgeBaseDocumentation = async () => {
+    workspace.mode = 'terminal'
+    workspace.setActiveModule('settings')
+    workspace.rightPanelOpen = false
+    workspace.setActiveSettingsSection('general')
+    const documentationLocale = locale.value === 'zh-CN' || locale.value === 'zh-TW' ? 'zh-CN' : 'en-US'
+    await workspace.openSettingsDocumentationFile(`usage/best-practices/${documentationLocale}/05-knowledge-base.md`)
+  }
+
   const {
     activatePanel,
     canForkTerminalMenuPanel,
@@ -671,6 +704,11 @@ export const useTerminalWorkspaceContainerRuntime = () => {
     state: shellState,
     terminalViews,
     terminalWorkspaceVisible,
+    terminalDashboardVisible: showTerminalDashboard,
+    openTerminalDashboardAssets,
+    openTerminalDashboardSettings,
+    openTerminalDashboardInlineCommand,
+    toggleTerminalDashboardLayout,
     searchOverlayPanelId,
     commandDialog,
     closeCommandDialog,
@@ -1142,6 +1180,11 @@ export const useTerminalWorkspaceContainerRuntime = () => {
     openCommandLineFromMenu,
     openFileManagerFromMenu,
     openMenu,
+    openKnowledgeBaseDocumentation,
+    openTerminalDashboardAssets,
+    openTerminalDashboardChat,
+    openTerminalDashboardInlineCommand,
+    openTerminalDashboardSettings,
     openSearchOverlay,
     panelById,
     paneDragOverPanelId,
@@ -1188,6 +1231,7 @@ export const useTerminalWorkspaceContainerRuntime = () => {
     terminalTabStateLabel,
     terminalTabTooltip,
     toggleGlobalInput,
+    toggleTerminalDashboardLayout,
     togglePanelConnection,
     toggleTabConnectionFromMenu,
     scrollTerminalTabs,

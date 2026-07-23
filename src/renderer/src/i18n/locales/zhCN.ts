@@ -1002,6 +1002,7 @@ export const zhCN = {
   'terminal.dashboard.openSettings': '打开设置',
   'terminal.dashboard.inlineCommand': '内联命令生成',
   'terminal.dashboard.toggleLayout': '切换布局 (Terminal/Agents)',
+  'terminal.dashboard.knowledgeDocs': '知识库使用文档',
   'terminal.mfaTitle': 'SSH 二次认证',
   'terminal.mfaDescription': '远程主机 {target} 需要动态密码或验证码。输入后将继续当前 SSH 登录。',
   'terminal.mfaPromptFallback': '验证码或动态密码',

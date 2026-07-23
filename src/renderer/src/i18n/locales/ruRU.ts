@@ -1003,6 +1003,7 @@ export const ruRU = completeLocaleMessages({
   'terminal.dashboard.openSettings': 'Открыть настройки',
   'terminal.dashboard.inlineCommand': 'Встроенная генерация команд',
   'terminal.dashboard.toggleLayout': 'Переключить макет (Terminal/Agents)',
+  'terminal.dashboard.knowledgeDocs': 'Руководство по базе знаний',
   'terminal.mfaTitle': 'Двухфакторная аутентификация SSH',
   'terminal.mfaDescription': 'Удалённому хосту {target} требуется динамический пароль или код подтверждения. Введите его, чтобы продолжить текущий вход по SSH.',
   'terminal.mfaPromptFallback': 'Код подтверждения или динамический пароль',
