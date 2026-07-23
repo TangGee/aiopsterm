@@ -1324,6 +1324,13 @@ export class ThreadedTerminalHost {
     postCore(this.coreHandle, { type: 'input', terminalId: this.terminalId, data })
   }
 
+  paste(data: string) {
+    const prepared = data.replace(/\r?\n/g, '\r')
+    this.input(this.modeState.bracketedPasteMode
+      ? `\x1b[200~${prepared}\x1b[201~`
+      : prepared)
+  }
+
   resize(cols: number, rows: number) {
     const nextCols = Math.max(2, Math.floor(cols))
     const nextRows = Math.max(1, Math.floor(rows))
@@ -2063,7 +2070,7 @@ export class ThreadedTerminalHost {
 
   private async pasteFromClipboard() {
     const clipboardRead = await readTextFromClipboard()
-    if (clipboardRead.ok && clipboardRead.text) this.input(clipboardRead.text)
+    if (clipboardRead.ok && clipboardRead.text) this.paste(clipboardRead.text)
   }
 
   private handleKeyboardEvent(event: KeyboardEvent) {
@@ -2781,7 +2788,7 @@ export class ThreadedTerminalHost {
       if (!text) return
       event.preventDefault()
       this.resetInputElement()
-      this.input(text)
+      this.paste(text)
     }, { signal })
     inputElement?.addEventListener('compositionstart', () => {
       this.composing = true

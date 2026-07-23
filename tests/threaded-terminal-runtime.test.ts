@@ -732,6 +732,49 @@ describe('threadedTerminalRuntime', () => {
     host.dispose()
   })
 
+  it('matches xterm bracketed paste and newline normalization for terminal apps that enable it', async () => {
+    installOffscreenCanvasSupport()
+    const host = createHost()
+    const element = createHostElement()
+    host.open(element)
+    host.applySnapshot({
+      terminalId: 'panel-1',
+      seq: 1,
+      cols: 80,
+      rows: 10,
+      cursorX: 0,
+      cursorY: 9,
+      cursorAbsoluteY: 9,
+      viewportY: 0,
+      baseY: 0,
+      lines: [{ y: 0, text: '', cells: [] }],
+      dirtyRows: [0],
+      full: true,
+      visible: true,
+      priority: 'active',
+      modes: {
+        applicationCursorKeysMode: false,
+        applicationKeypadMode: false,
+        bracketedPasteMode: true,
+        mouseTrackingMode: 'none',
+        activeBufferType: 'normal'
+      }
+    })
+
+    const before = await workerMessages()
+    host.paste('first\nsecond\r\nthird')
+    const after = await workerMessages()
+
+    expect(after.core.slice(before.core.length)).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: 'input',
+        terminalId: 'panel-1',
+        data: '\x1b[200~first\rsecond\rthird\x1b[201~'
+      })
+    ]))
+    host.dispose()
+  })
+
   it('quotes dropped local file paths and writes them to terminal input', async () => {
     installOffscreenCanvasSupport()
     const host = createHost()
