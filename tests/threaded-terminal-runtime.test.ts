@@ -312,6 +312,32 @@ describe('threadedTerminalRuntime', () => {
     )
   })
 
+  it('marks only backend writes with their immutable flow-control session', async () => {
+    installOffscreenCanvasSupport()
+    const host = createHost()
+    host.open(createHostElement())
+    host.write('display-only\n')
+    expect(host.writeBackendData('session-backend', 'backend\n')).toBe(true)
+
+    const messages = await workerMessages()
+    expect(messages.core).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: 'data',
+        terminalId: 'panel-1',
+        data: 'display-only\n'
+      }),
+      expect.objectContaining({
+        type: 'data',
+        terminalId: 'panel-1',
+        sessionId: 'session-backend',
+        data: 'backend\n'
+      })
+    ]))
+    const displayMessage = messages.core.find((message: any) => message.type === 'data' && message.data === 'display-only\n') as any
+    expect(displayMessage.sessionId).toBeUndefined()
+    host.dispose()
+  })
+
   it('emits title and progress changes received from the core worker', async () => {
     installOffscreenCanvasSupport()
     const host = createHost()

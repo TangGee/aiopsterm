@@ -85,8 +85,11 @@ type CoreTerminalRecord = {
   keywordHighlightRules: ReturnType<typeof compileThreadedKeywordHighlightRules>
   search: CoreSearchState
   seq: number
-  pendingChunks: string[]
-  pendingChunkBytes: number[]
+  pendingChunks: Array<{
+    data: string
+    bytes: number
+    sessionId?: string
+  }>
   pendingBytes: number
   contentEpoch: number
   scheduled: boolean
@@ -962,7 +965,6 @@ const createRecord = (options: ThreadedTerminalCreateOptions): CoreTerminalRecor
     search: newSearchState(),
     seq: 0,
     pendingChunks: [],
-    pendingChunkBytes: [],
     pendingBytes: 0,
     contentEpoch: 0,
     scheduled: false,
@@ -1007,27 +1009,31 @@ const applyKeywordHighlight = (record: CoreTerminalRecord, config: ThreadedTermi
   scheduleSnapshot(record, true, 'settings')
 }
 
-const enqueueChunk = (record: CoreTerminalRecord, chunk: string) => {
+const enqueueChunk = (record: CoreTerminalRecord, chunk: string, sessionId?: string) => {
   const bytes = textByteLength(chunk)
-  record.pendingChunks.push(chunk)
-  record.pendingChunkBytes.push(bytes)
+  record.pendingChunks.push({
+    data: chunk,
+    bytes,
+    sessionId: sessionId || undefined
+  })
   record.pendingBytes += bytes
 }
 
 const takeBatch = (record: CoreTerminalRecord) => {
   const chunks: string[] = []
   let bytes = 0
+  const sessionId = record.pendingChunks[0]?.sessionId
   while (record.pendingChunks.length) {
-    const chunkBytes = record.pendingChunkBytes[0]
-    if (chunks.length && bytes + chunkBytes > defaultBatchBytes) break
-    chunks.push(record.pendingChunks[0])
-    bytes += chunkBytes
+    const chunk = record.pendingChunks[0]
+    if (chunk.sessionId !== sessionId) break
+    if (chunks.length && bytes + chunk.bytes > defaultBatchBytes) break
+    chunks.push(chunk.data)
+    bytes += chunk.bytes
     record.pendingChunks.shift()
-    record.pendingChunkBytes.shift()
-    record.pendingBytes = Math.max(0, record.pendingBytes - chunkBytes)
+    record.pendingBytes = Math.max(0, record.pendingBytes - chunk.bytes)
     if (bytes >= defaultBatchBytes) break
   }
-  return { data: chunks.join(''), bytes }
+  return { data: chunks.join(''), bytes, sessionId }
 }
 
 const scheduleFlush = (record: CoreTerminalRecord) => {
@@ -1052,7 +1058,7 @@ const flushRecord = (record: CoreTerminalRecord) => {
     return
   }
   const flushStartedAt = nowMs()
-  const { data, bytes } = takeBatch(record)
+  const { data, bytes, sessionId } = takeBatch(record)
   const beforeBuffer = record.terminal.buffer.active
   const beforeCursorAbsoluteY = absoluteCursorRow(beforeBuffer)
   const beforeViewportY = beforeBuffer.viewportY
@@ -1070,7 +1076,7 @@ const flushRecord = (record: CoreTerminalRecord) => {
     try {
       record.perf.parseMs += nowMs() - parseStartedAt
       record.perf.flushMs += nowMs() - flushStartedAt
-      post({ type: 'consumed', terminalId: record.terminalId, sessionId: record.sessionId, bytes })
+      if (sessionId) post({ type: 'consumed', terminalId: record.terminalId, sessionId, bytes })
       if (shouldFollowOutput && !isAtScrollBottom(record)) {
         record.terminal.scrollToBottom()
       }
@@ -1261,7 +1267,7 @@ const handleMessage = (message: ThreadedTerminalCoreRequest) => {
     }
     if (message.type === 'data') {
       if (!message.data) return
-      enqueueChunk(record, message.data)
+      enqueueChunk(record, message.data, message.sessionId)
       record.perf.maxPendingBytes = Math.max(record.perf.maxPendingBytes, record.pendingBytes)
       scheduleFlush(record)
       return
@@ -1318,7 +1324,6 @@ const handleMessage = (message: ThreadedTerminalCoreRequest) => {
     }
     if (message.type === 'clear') {
       record.pendingChunks = []
-      record.pendingChunkBytes = []
       record.pendingBytes = 0
       record.contentEpoch += 1
       record.search = newSearchState()

@@ -120,6 +120,30 @@ describe('threadedTerminalCoreWorker', () => {
     expect(visibleText(next)).toContain('after-find')
   })
 
+  it('only acknowledges flow-controlled batches and preserves their session identity', async () => {
+    await createTerminal()
+    send({ type: 'data', terminalId: createOptions().terminalId, data: 'display-only\n' })
+    send({ type: 'data', terminalId: createOptions().terminalId, sessionId: 'session-a', data: 'backend-a\n' })
+    send({ type: 'session', terminalId: createOptions().terminalId, sessionId: 'session-b' })
+    send({ type: 'data', terminalId: createOptions().terminalId, sessionId: 'session-b', data: 'backend-b\n' })
+
+    await waitFor(() => messages.filter((message) => message.type === 'consumed').length === 2)
+    expect(messages.filter((message) => message.type === 'consumed')).toEqual([
+      {
+        type: 'consumed',
+        terminalId: createOptions().terminalId,
+        sessionId: 'session-a',
+        bytes: new TextEncoder().encode('backend-a\n').length
+      },
+      {
+        type: 'consumed',
+        terminalId: createOptions().terminalId,
+        sessionId: 'session-b',
+        bytes: new TextEncoder().encode('backend-b\n').length
+      }
+    ])
+  })
+
   it('keeps incremental dirty rows narrow after a full scroll snapshot', async () => {
     await createTerminal()
     send({

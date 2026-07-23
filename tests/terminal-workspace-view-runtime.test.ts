@@ -41,6 +41,7 @@ const threadedTerminalMocks = vi.hoisted(() => {
     })
     startCoreOnly = vi.fn()
     setVisibility = vi.fn()
+    setSessionId = vi.fn()
     ensureSurfaceAttached = vi.fn(() => {
       this.surfaceAttached = true
       return true
@@ -52,6 +53,11 @@ const threadedTerminalMocks = vi.hoisted(() => {
     write = vi.fn((data: string, callback?: () => void) => {
       this.output += data
       callback?.()
+    })
+    writeBackendData = vi.fn((sessionId: string, data: string) => {
+      if (!sessionId || !data) return false
+      this.output += data
+      return true
     })
     constructor() {
       FakeThreadedTerminal.instances.push(this)
@@ -506,6 +512,24 @@ describe('terminalWorkspaceViewRuntime', () => {
     expect(terminal.updateSettings).not.toHaveBeenCalled()
     expect(fit.fit).not.toHaveBeenCalled()
     expect(logs.some((entry) => entry.event === 'renderer.terminal-view.threaded-attach-existing')).toBe(false)
+  })
+
+  it('rebinds an existing threaded terminal before writing live backend data', async () => {
+    threadedTerminalMocks.threadedEnabled = true
+    const panel = createEmptyTerminalPanel('panel-1', 'Local')
+    const { runtime } = createRuntime(panel, undefined, { threaded: true })
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    runtime.setTerminalElement(panel.id, host)
+    await flushFrames(3)
+    const terminal = runtime.terminalViews.get(panel.id)?.terminal as InstanceType<typeof threadedTerminalMocks.FakeThreadedTerminal>
+
+    panel.sessionId = 'terminal-live-1'
+    expect(runtime.writeLiveTerminalData(panel.id, panel.sessionId, 'live output\n')).toBe(true)
+    expect(terminal.setSessionId).toHaveBeenLastCalledWith('terminal-live-1')
+    expect(terminal.writeBackendData).toHaveBeenCalledWith('terminal-live-1', 'live output\n')
+    expect(runtime.writeLiveTerminalData(panel.id, 'terminal-stale', 'stale\n')).toBe(false)
   })
 
   it('does not create a terminal view while the terminal workspace is hidden', async () => {

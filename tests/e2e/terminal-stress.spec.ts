@@ -1,5 +1,5 @@
 import { _electron as electron, expect, test, type ElectronApplication, type Page } from '@playwright/test'
-import { mkdir, rm, writeFile } from 'fs/promises'
+import { mkdir, readFile, rm, writeFile } from 'fs/promises'
 import os from 'os'
 import path from 'path'
 
@@ -101,6 +101,31 @@ type StressResult = {
   paintFullReasons: Record<string, number>
   paintRepaintReasons: Record<string, number>
   realEchoLatency: StressMetricSummary & { available: boolean; error?: string }
+  realCat: {
+    enabled: boolean
+    requested: number
+    started: number
+    completed: number
+    durationMs: number
+    fileBytes: number
+    terminals: Array<{
+      panelId: string
+      sessionId: string
+      terminalIndex: number
+      bytes: number
+      iterations: number
+      completed: boolean
+      echoLatencyMs?: number
+      error?: string
+    }>
+    errors: string[]
+  }
+  flow: {
+    paused: number
+    resumed: number
+    safetyResumed: number
+    bySession: Record<string, { paused: number; resumed: number; safetyResumed: number }>
+  }
   regressions: Record<string, {
     ok: boolean
     details?: Record<string, unknown>
@@ -222,7 +247,7 @@ type HeapProfilerHandle = {
 }
 
 test.skip(!stressEnabled, 'Set AIOPSTERM_TERMINAL_STRESS=1 to run the 10 foreground + 40 background terminal stress test.')
-test.setTimeout(Math.max(120_000, stressDurationMs + 120_000))
+test.setTimeout(Math.max(180_000, stressDurationMs + 240_000))
 
 const launchStressApp = async () => {
   const userDataDir = path.join(os.tmpdir(), `aiopsterm-terminal-stress-${Date.now()}`)
@@ -244,14 +269,98 @@ const launchStressApp = async () => {
   return { app, userDataDir }
 }
 
-const injectStressHarness = async (page: Page, options: { foreground: number; background: number; durationMs: number; switchIntervalMs: number; profile: string }) =>
-  page.evaluate(async ({ foreground, background, durationMs, switchIntervalMs, profile }) => {
+const createRealCatFixture = async (userDataDir: string) => {
+  const filePath = path.join(userDataDir, 'terminal-stress-100000-lines.txt')
+  const scriptPath = path.join(userDataDir, 'terminal-stress-cat.sh')
+  const payload = 'x'.repeat(232)
+  const content = Array.from({ length: 100_000 }, (_item, index) =>
+    `${String(index + 1).padStart(6, '0')} ${payload}\n`
+  ).join('')
+  const script = [
+    'input_file=$1',
+    'duration_seconds=$2',
+    'terminal_index=$3',
+    'deadline=$(( $(date +%s) + duration_seconds ))',
+    'iteration=0',
+    'while [ "$(date +%s)" -lt "$deadline" ]; do',
+    '  cat -- "$input_file" || exit 31',
+    '  iteration=$((iteration + 1))',
+    '  printf "\\n__AIOPSTERM_CAT_ITER_%s_%s__\\n" "$terminal_index" "$iteration"',
+    'done',
+    'printf "__AIOPSTERM_CAT_DONE_%s_%s__\\n" "$terminal_index" "$iteration"',
+    ''
+  ].join('\n')
+  await Promise.all([
+    writeFile(filePath, content, 'utf8'),
+    writeFile(scriptPath, script, 'utf8')
+  ])
+  return {
+    filePath,
+    scriptPath,
+    fileBytes: Buffer.byteLength(content, 'utf8')
+  }
+}
+
+const injectStressHarness = async (
+  page: Page,
+  options: {
+    foreground: number
+    background: number
+    durationMs: number
+    switchIntervalMs: number
+    profile: string
+    catFilePath: string
+    catScriptPath: string
+    catFileBytes: number
+    catTerminalCount: number
+  }
+) =>
+  page.evaluate(async ({ foreground, background, durationMs, switchIntervalMs, profile, catFilePath, catScriptPath, catFileBytes, catTerminalCount }) => {
     const harness = (window as any).__AIOPSTERM_TERMINAL_STRESS__
     if (!harness?.run) throw new Error('Terminal stress harness is unavailable.')
-    const result = await harness.run({ foreground, background, durationMs, switchIntervalMs, profile })
+    const result = await harness.run({
+      foreground,
+      background,
+      durationMs,
+      switchIntervalMs,
+      profile,
+      catFilePath,
+      catScriptPath,
+      catFileBytes,
+      catTerminalCount
+    })
     ;(window as any).__AIOPSTERM_TERMINAL_STRESS_RESULT__ = result
     return result
   }, options) as Promise<StressResult>
+
+const readTerminalFlowSummary = async (userDataDir: string, sessionIds: string[]) => {
+  await new Promise((resolve) => setTimeout(resolve, 500))
+  const logText = await readFile(path.join(userDataDir, 'logs', 'aiopsterm-runtime.log'), 'utf8').catch(() => '')
+  const tracked = new Set(sessionIds)
+  const bySession: Record<string, { paused: number; resumed: number; safetyResumed: number }> = {}
+  tracked.forEach((sessionId) => {
+    bySession[sessionId] = { paused: 0, resumed: 0, safetyResumed: 0 }
+  })
+  for (const line of logText.split('\n')) {
+    if (!line.trim()) continue
+    let entry: { event?: string; id?: string }
+    try {
+      entry = JSON.parse(line) as { event?: string; id?: string }
+    } catch {
+      continue
+    }
+    if (!entry.id || !tracked.has(entry.id)) continue
+    if (entry.event === 'terminal.flow.paused') bySession[entry.id].paused += 1
+    if (entry.event === 'terminal.flow.resumed') bySession[entry.id].resumed += 1
+    if (entry.event === 'terminal.flow.safety-resume') bySession[entry.id].safetyResumed += 1
+  }
+  return {
+    paused: Object.values(bySession).reduce((total, item) => total + item.paused, 0),
+    resumed: Object.values(bySession).reduce((total, item) => total + item.resumed, 0),
+    safetyResumed: Object.values(bySession).reduce((total, item) => total + item.safetyResumed, 0),
+    bySession
+  }
+}
 
 const mb = (bytes?: number) => (typeof bytes === 'number' ? Math.round((bytes / 1024 / 1024) * 10) / 10 : undefined)
 const heapObjectSize = (artifacts: StressHeapArtifacts, type: string, name: string) =>
@@ -423,6 +532,17 @@ const logStressResult = (result: StressResult) => {
     paintFullReasons: result.paintFullReasons,
     paintRepaintReasons: result.paintRepaintReasons,
     realEchoLatency: result.realEchoLatency,
+    realCat: {
+      enabled: result.realCat.enabled,
+      requested: result.realCat.requested,
+      started: result.realCat.started,
+      completed: result.realCat.completed,
+      durationMs: result.realCat.durationMs,
+      fileMb: mb(result.realCat.fileBytes),
+      terminals: result.realCat.terminals,
+      errors: result.realCat.errors
+    },
+    flow: result.flow,
     regressions,
     memory: {
       samples: result.memory.samples.length,
@@ -480,14 +600,23 @@ test('threaded terminal renderer keeps foreground frames healthy under 10 foregr
   try {
     const page = await app.firstWindow()
     await page.waitForFunction(() => Boolean((window as any).__AIOPSTERM_TERMINAL_STRESS__?.run), undefined, { timeout: 30_000 })
+    const catFixture = await createRealCatFixture(userDataDir)
     const heapProfiler = await startHeapProfiler(app, page)
     const result = await injectStressHarness(page, {
       foreground: foregroundTerms,
       background: backgroundTerms,
       durationMs: stressDurationMs,
       switchIntervalMs,
-      profile: stressProfile
+      profile: stressProfile,
+      catFilePath: catFixture.filePath,
+      catScriptPath: catFixture.scriptPath,
+      catFileBytes: catFixture.fileBytes,
+      catTerminalCount: 5
     })
+    result.flow = await readTerminalFlowSummary(
+      userDataDir,
+      result.realCat.terminals.map((terminal) => terminal.sessionId)
+    )
     await page.evaluate(() => {
       delete (window as any).__AIOPSTERM_TERMINAL_STRESS_RESULT__
     })
@@ -530,6 +659,27 @@ test('threaded terminal renderer keeps foreground frames healthy under 10 foregr
     }
     expect(result.realEchoLatency.available, result.realEchoLatency.error || result.errors.join('\n')).toBe(true)
     expect(result.realEchoLatency.p95).toBeLessThan(150)
+    expect(result.realCat.enabled).toBe(true)
+    expect(result.realCat.requested).toBe(5)
+    expect(result.realCat.started, result.realCat.errors.join('\n')).toBe(5)
+    expect(result.realCat.completed, result.realCat.errors.join('\n')).toBe(5)
+    expect(result.realCat.durationMs).toBe(stressDurationMs)
+    expect(result.realCat.fileBytes).toBe(catFixture.fileBytes)
+    expect(new Set(result.realCat.terminals.map((terminal) => terminal.sessionId)).size).toBe(5)
+    result.realCat.terminals.forEach((terminal) => {
+      expect(terminal.completed, terminal.error).toBe(true)
+      expect(terminal.iterations, terminal.error).toBeGreaterThanOrEqual(1)
+      expect(terminal.bytes, terminal.error).toBeGreaterThanOrEqual(catFixture.fileBytes)
+      expect(terminal.echoLatencyMs, terminal.error).toBeLessThan(3000)
+      expect(terminal.error).toBeUndefined()
+    })
+    expect(result.realCat.errors).toEqual([])
+    expect(result.flow.safetyResumed).toBe(0)
+    expect(result.flow.paused).toBe(result.flow.resumed)
+    Object.values(result.flow.bySession).forEach((flow) => {
+      expect(flow.safetyResumed).toBe(0)
+      expect(flow.paused).toBe(flow.resumed)
+    })
     expect(result.memory.samples.length).toBeGreaterThanOrEqual(2)
     expect(result.memory.gcSupported).toBe(true)
     expect(result.memory.gcRuns).toBeGreaterThanOrEqual(2)

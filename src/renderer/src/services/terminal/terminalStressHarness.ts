@@ -153,6 +153,40 @@ type TerminalStressRegressionSummary = {
   keyboardInputFocus: TerminalStressRegressionProbe
 }
 
+type TerminalStressRealCatTerminal = {
+  panelId: string
+  sessionId: string
+  terminalIndex: number
+  bytes: number
+  iterations: number
+  completed: boolean
+  echoLatencyMs?: number
+  error?: string
+}
+
+type TerminalStressRealCatSummary = {
+  enabled: boolean
+  requested: number
+  started: number
+  completed: number
+  durationMs: number
+  fileBytes: number
+  terminals: TerminalStressRealCatTerminal[]
+  errors: string[]
+}
+
+type TerminalStressHarnessOptions = {
+  foreground?: number
+  background?: number
+  durationMs?: number
+  switchIntervalMs?: number
+  profile?: TerminalStressProfileName
+  catFilePath?: string
+  catScriptPath?: string
+  catFileBytes?: number
+  catTerminalCount?: number
+}
+
 export type TerminalStressHarnessResult = {
   profile: TerminalStressProfileName
   foreground: number
@@ -176,6 +210,7 @@ export type TerminalStressHarnessResult = {
   paintFullReasons: Record<string, number>
   paintRepaintReasons: Record<string, number>
   realEchoLatency: TerminalStressMetricSummary & { available: boolean; error?: string }
+  realCat: TerminalStressRealCatSummary
   regressions: TerminalStressRegressionSummary
   memory: TerminalStressMemorySummary
   queues: TerminalStressQueueSummary
@@ -214,7 +249,7 @@ export type TerminalStressHarnessInput = {
 declare global {
   interface Window {
     __AIOPSTERM_TERMINAL_STRESS__?: {
-      run: (options?: { foreground?: number; background?: number; durationMs?: number; switchIntervalMs?: number; profile?: TerminalStressProfileName }) => Promise<TerminalStressHarnessResult>
+      run: (options?: TerminalStressHarnessOptions) => Promise<TerminalStressHarnessResult>
     }
   }
 }
@@ -290,6 +325,194 @@ const nextStressAnimationFrame = () =>
     }
     window.setTimeout(resolve, 16)
   })
+
+const quoteShellArgument = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`
+
+const startRealCatStress = async (
+  input: TerminalStressHarnessInput,
+  candidates: TerminalPanel[],
+  options: {
+    durationMs: number
+    filePath?: string
+    scriptPath?: string
+    fileBytes?: number
+    terminalCount: number
+  }
+) => {
+  const requested = Math.max(0, Math.min(options.terminalCount, candidates.length))
+  const summary: TerminalStressRealCatSummary = {
+    enabled: Boolean(requested && options.filePath && options.scriptPath),
+    requested,
+    started: 0,
+    completed: 0,
+    durationMs: options.durationMs,
+    fileBytes: Math.max(0, options.fileBytes || 0),
+    terminals: [],
+    errors: []
+  }
+  const panelIds = new Set<string>()
+  if (!summary.enabled || !options.filePath || !options.scriptPath) {
+    if (requested) summary.errors.push('Real PTY cat fixture paths are unavailable.')
+    return {
+      panelIds,
+      summary,
+      waitForCompletion: async () => undefined,
+      probeEcho: async () => undefined,
+      kill: async () => undefined,
+      dispose: () => undefined
+    }
+  }
+
+  const selected = candidates.slice(0, requested)
+  selected.forEach((panel) => {
+    panel.sessionId = undefined
+    panel.status = 'ready'
+    panelIds.add(panel.id)
+  })
+  await nextTick()
+  await syncStressPanelViews(input)
+
+  const connected = await Promise.all(selected.map(async (panel, terminalIndex) => {
+    try {
+      const started = await input.startLocalTerminalForPanel(panel)
+      const sessionId = panel.sessionId
+      if (!started || !sessionId || sessionId.startsWith('stress-')) {
+        throw new Error(`Local terminal ${terminalIndex + 1} did not receive a real session id.`)
+      }
+      input.syncTerminalView(panel)
+      return { panel, sessionId, terminalIndex }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      summary.errors.push(message)
+      return null
+    }
+  }))
+  const live = connected.filter((item): item is NonNullable<typeof item> => Boolean(item))
+  const states = new Map<string, {
+    result: TerminalStressRealCatTerminal
+    tail: string
+  }>()
+  live.forEach(({ panel, sessionId, terminalIndex }) => {
+    const result: TerminalStressRealCatTerminal = {
+      panelId: panel.id,
+      sessionId,
+      terminalIndex,
+      bytes: 0,
+      iterations: 0,
+      completed: false
+    }
+    summary.terminals.push(result)
+    states.set(sessionId, { result, tail: '' })
+  })
+  summary.started = live.length
+
+  const unsubscribe = terminalClient.onTerminalData()?.((event) => {
+    const state = states.get(event.id)
+    if (!state) return
+    const data = event.data || ''
+    state.result.bytes += textByteLength(data)
+    state.tail = `${state.tail}${data}`.slice(-2048)
+    const iterationPattern = new RegExp(`__AIOPSTERM_CAT_ITER_${state.result.terminalIndex}_(\\d+)__`, 'g')
+    let iterationMatch: RegExpExecArray | null
+    while ((iterationMatch = iterationPattern.exec(state.tail))) {
+      state.result.iterations = Math.max(state.result.iterations, Number(iterationMatch[1]) || 0)
+    }
+    const donePattern = new RegExp(`__AIOPSTERM_CAT_DONE_${state.result.terminalIndex}_(\\d+)__`)
+    const doneMatch = state.tail.match(donePattern)
+    if (doneMatch) {
+      state.result.iterations = Math.max(state.result.iterations, Number(doneMatch[1]) || 0)
+      state.result.completed = true
+    }
+  })
+
+  const writeTerminal = terminalClient.writeTerminal()
+  if (!writeTerminal) {
+    summary.errors.push('Terminal write bridge unavailable for real PTY cat stress.')
+  } else {
+    const durationSeconds = Math.max(1, Math.ceil(options.durationMs / 1000))
+    await Promise.all(live.map(async ({ sessionId, terminalIndex }) => {
+      const command = [
+        '/bin/sh',
+        quoteShellArgument(options.scriptPath || ''),
+        quoteShellArgument(options.filePath || ''),
+        String(durationSeconds),
+        String(terminalIndex)
+      ].join(' ')
+      try {
+        const result = await writeTerminal(sessionId, `${command}\r`)
+        if (!result?.ok) throw new Error(result?.errorMessage || `Real PTY cat command ${terminalIndex + 1} was rejected.`)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        const state = states.get(sessionId)
+        if (state) state.result.error = message
+        summary.errors.push(message)
+      }
+    }))
+  }
+
+  const waitForCompletion = async (timeoutMs: number) => {
+    const deadline = nowMs() + Math.max(1000, timeoutMs)
+    while (nowMs() < deadline && summary.terminals.some((terminal) => !terminal.completed && !terminal.error)) {
+      await new Promise((resolve) => window.setTimeout(resolve, 100))
+    }
+    summary.terminals.forEach((terminal) => {
+      if (!terminal.completed && !terminal.error) {
+        terminal.error = `Timed out waiting for real PTY cat terminal ${terminal.terminalIndex + 1}.`
+        summary.errors.push(terminal.error)
+      }
+    })
+    summary.completed = summary.terminals.filter((terminal) => terminal.completed).length
+  }
+
+  const probeEcho = async () => {
+    if (!writeTerminal) return
+    await Promise.all(summary.terminals.filter((terminal) => terminal.completed).map(async (terminal) => {
+      const state = states.get(terminal.sessionId)
+      if (!state) return
+      const marker = `__AIOPSTERM_CAT_ECHO_${terminal.terminalIndex}_${Date.now()}__`
+      state.tail = ''
+      const startedAt = nowMs()
+      try {
+        const result = await writeTerminal(terminal.sessionId, `printf '%s\\n' ${quoteShellArgument(marker)}\r`)
+        if (!result?.ok) throw new Error(result?.errorMessage || 'Final real PTY echo was rejected.')
+        const deadline = nowMs() + 3000
+        while (nowMs() < deadline && !state.tail.includes(marker)) {
+          await new Promise((resolve) => window.setTimeout(resolve, 20))
+        }
+        if (!state.tail.includes(marker)) throw new Error(`Timed out waiting for final echo from cat terminal ${terminal.terminalIndex + 1}.`)
+        terminal.echoLatencyMs = nowMs() - startedAt
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        terminal.error = terminal.error || message
+        summary.errors.push(message)
+      }
+    }))
+  }
+
+  const kill = async () => {
+    const killTerminal = terminalClient.killTerminal()
+    if (!killTerminal) {
+      summary.errors.push('Terminal kill bridge unavailable for real PTY cat cleanup.')
+      return
+    }
+    await Promise.all(summary.terminals.map(async (terminal) => {
+      try {
+        await killTerminal(terminal.sessionId)
+      } catch (error) {
+        summary.errors.push(error instanceof Error ? error.message : String(error))
+      }
+    }))
+  }
+
+  return {
+    panelIds,
+    summary,
+    waitForCompletion,
+    probeEcho,
+    kill,
+    dispose: () => unsubscribe?.()
+  }
+}
 
 const findLastStressSample = (samples: TerminalStressMemorySample[], phase: string) => {
   for (let index = samples.length - 1; index >= 0; index -= 1) {
@@ -1016,7 +1239,7 @@ const runTerminalRegressionProbes = async (
 
 const runTerminalStressHarness = async (
   input: TerminalStressHarnessInput,
-  stressOptions: { foreground?: number; background?: number; durationMs?: number; switchIntervalMs?: number; profile?: TerminalStressProfileName } = {}
+  stressOptions: TerminalStressHarnessOptions = {}
 ): Promise<TerminalStressHarnessResult> => {
   const foreground = Math.max(1, stressOptions.foreground || 10)
   const background = Math.max(0, stressOptions.background || 40)
@@ -1073,6 +1296,15 @@ const runTerminalStressHarness = async (
     if (running) window.requestAnimationFrame(trackFrame)
   }
   window.requestAnimationFrame(trackFrame)
+  const realCatCandidates = [...foregroundPanels, ...backgroundPanels]
+    .filter((panel, index, panels) => panels.findIndex((candidate) => candidate.id === panel.id) === index)
+  const realCat = await startRealCatStress(input, realCatCandidates, {
+    durationMs,
+    filePath: stressOptions.catFilePath,
+    scriptPath: stressOptions.catScriptPath,
+    fileBytes: stressOptions.catFileBytes,
+    terminalCount: stressOptions.catTerminalCount ?? 5
+  })
   const makeStressChunk = (prefix: string, panelIndex: number, burstIndex: number, lines: number, payloadBytes: number) => {
     const payload = 'x'.repeat(Math.max(1, payloadBytes))
     return Array.from({ length: Math.max(1, lines) }, (_line, lineIndex) =>
@@ -1129,7 +1361,7 @@ const runTerminalStressHarness = async (
     throw new Error(`Timed out waiting for paintable threaded terminal ${panelId}. last=${JSON.stringify(lastDebug)} element=${JSON.stringify(lastElementBox)}`)
   }
   const foregroundTimer = window.setInterval(() => {
-    currentForegroundPanels().forEach((panel, index) =>
+    currentForegroundPanels().filter((panel) => !realCat.panelIds.has(panel.id)).forEach((panel, index) =>
       writePanel(panel, 'fg', index, {
         chunks: profile.foregroundChunks,
         linesPerChunk: profile.foregroundLinesPerChunk,
@@ -1140,7 +1372,7 @@ const runTerminalStressHarness = async (
   const backgroundTimer = window.setInterval(() => {
     const visibleIds = new Set(visibleTerminalPanels.value.map((panel) => panel.id))
     terminalPanels
-      .filter((panel) => !visibleIds.has(panel.id))
+      .filter((panel) => !visibleIds.has(panel.id) && !realCat.panelIds.has(panel.id))
       .slice(0, background)
       .forEach((panel, index) =>
         writePanel(panel, 'bg', index, {
@@ -1250,6 +1482,8 @@ const runTerminalStressHarness = async (
   if (switchTimer !== null) window.clearInterval(switchTimer)
   input.flushAllTerminalIngressBatches()
   input.flushAllTerminalHistoryBatches()
+  await realCat.waitForCompletion(Math.max(30_000, Math.min(120_000, Math.floor(durationMs / 5))))
+  await realCat.probeEcho()
   queueSamples.push(input.sampleQueues())
   await measureCurrentForegroundPaintLatency()
   const regressions = await runTerminalRegressionProbes(input, {
@@ -1265,6 +1499,9 @@ const runTerminalStressHarness = async (
   const realEcho = await measureRealEchoLatency(input, errors)
   const threaded = getThreadedTerminalDebugStats()
   const gpu = await sampleGpuSummary(threaded.renderGroups)
+  await realCat.kill()
+  realCat.dispose()
+  errors.push(...realCat.summary.errors)
   const teardown = await runTerminalStressTeardown(input, teardownBaseline, errors)
   const sorted = rafIntervals.slice(5).sort((a, b) => a - b)
   const percentile = (value: number) => sorted[Math.min(sorted.length - 1, Math.max(0, Math.floor(sorted.length * value)))] || 0
@@ -1303,6 +1540,7 @@ const runTerminalStressHarness = async (
       available: realEcho.available,
       error: realEcho.error
     },
+    realCat: realCat.summary,
     regressions,
     memory,
     queues: summarizeQueues(queueSamples),
@@ -1323,7 +1561,7 @@ const runTerminalStressHarness = async (
 }
 
 export const installTerminalStressHarness = (input: TerminalStressHarnessInput) => {
-  const run = (options?: { foreground?: number; background?: number; durationMs?: number; switchIntervalMs?: number; profile?: TerminalStressProfileName }) =>
+  const run = (options?: TerminalStressHarnessOptions) =>
     runTerminalStressHarness(input, options)
   window.__AIOPSTERM_TERMINAL_STRESS__ = { run }
   return () => {

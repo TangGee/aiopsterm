@@ -257,7 +257,7 @@ export type ThreadedTerminalExportedState = {
 
 export type ThreadedTerminalCoreRequest =
   | { type: 'create'; requestId?: string; options: ThreadedTerminalCreateOptions; initialData?: string }
-  | { type: 'data'; terminalId: string; data: string }
+  | { type: 'data'; terminalId: string; data: string; sessionId?: string }
   | { type: 'input'; terminalId: string; data: string }
   | { type: 'resize'; terminalId: string; cols: number; rows: number }
   | { type: 'session'; terminalId: string; sessionId?: string }

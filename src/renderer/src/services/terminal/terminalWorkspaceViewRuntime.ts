@@ -55,6 +55,8 @@ type XtermLike = {
   clear: () => void
   dispose: () => void
   write: (data: string, callback?: () => void) => void
+  writeBackendData?: (sessionId: string, data: string) => boolean
+  setSessionId?: (sessionId?: string) => void
   input?: (data: string, wasUserInput?: boolean) => void
   attachCustomKeyEventHandler?: (handler: (event: KeyboardEvent) => boolean) => void
   scrollLines?: (amount: number) => void
@@ -1014,6 +1016,7 @@ export const createTerminalWorkspaceViewRuntime = ({
     if (!view) return false
     if (!isTerminalPanelRenderable(panel.id)) return false
     if (isThreadedTerminalHost(view.terminal)) {
+      view.terminal.setSessionId(panel.sessionId)
       view.terminal.setVisibility(true, terminalPriorityForPanel(panel.id))
       view.terminal.ensureSurfaceAttached({ forceGeometry: options.refit })
       if (options.refit) scheduleTerminalFit(panel.id, { scrollToBottom: true, frames: 3, forceGeometry: true })
@@ -1056,16 +1059,17 @@ export const createTerminalWorkspaceViewRuntime = ({
     return true
   }
 
-  const writeLiveTerminalData = (sessionOrPanelId: string, data: string) => {
-    if (!data) return false
-    const panel = workspace.panels.find((item) => item.id === sessionOrPanelId || item.sessionId === sessionOrPanelId)
+  const writeLiveTerminalData = (panelId: string, sessionId: string, data: string) => {
+    if (!data || !sessionId) return false
+    const panel = workspace.panels.find((item) => item.id === panelId)
     if (!panel || !isTerminalWorkspacePanel(panel)) return false
+    if (panel.sessionId !== sessionId) return false
     const view = terminalViews.get(panel.id)
     if (!view || !isThreadedTerminalHost(view.terminal)) return false
     const visible = isTerminalPanelRenderable(panel.id)
+    view.terminal.setSessionId(sessionId)
     view.terminal.setVisibility(visible, terminalPriorityForPanel(panel.id))
-    view.terminal.write(data)
-    return true
+    return view.terminal.writeBackendData(sessionId, data)
   }
 
   const terminalOutputMirrorText = (panel: TerminalPanel) => {
@@ -1097,6 +1101,7 @@ export const createTerminalWorkspaceViewRuntime = ({
     if (existing) {
       if (isThreadedTerminalHost(existing.terminal)) {
         terminalViewPanels.set(panel.id, panel)
+        existing.terminal.setSessionId(panel.sessionId)
         const visible = isTerminalPanelRenderable(panel.id)
         existing.terminal.setVisibility(visible, terminalPriorityForPanel(panel.id))
         if (existing.openedElement === element) {
@@ -1245,9 +1250,13 @@ export const createTerminalWorkspaceViewRuntime = ({
       workspace.panels.filter((panel) => isTerminalWorkspacePanel(panel)).forEach((panel) => {
         const existing = terminalViews.get(panel.id)
         if (existing && terminalViewPanels.get(panel.id) !== panel) {
-          if (isThreadedTerminalHost(existing.terminal)) terminalViewPanels.set(panel.id, panel)
+          if (isThreadedTerminalHost(existing.terminal)) {
+            existing.terminal.setSessionId(panel.sessionId)
+            terminalViewPanels.set(panel.id, panel)
+          }
           else disposeTerminalView(panel.id, 'panel-replaced')
         }
+        if (existing && isThreadedTerminalHost(existing.terminal)) existing.terminal.setSessionId(panel.sessionId)
         const element = terminalElements.get(panel.id)
         if (isTerminalWorkspaceVisible() && element && visibleTerminalPanelIds().has(panel.id)) createTerminalView(panel, element)
         else if (isTerminalWorkspaceVisible() && canUseThreadedTerminal() && !terminalViews.has(panel.id)) {

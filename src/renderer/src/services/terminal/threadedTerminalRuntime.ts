@@ -1318,6 +1318,21 @@ export class ThreadedTerminalHost {
     callback?.()
   }
 
+  writeBackendData(sessionId: string, data: string) {
+    const normalizedSessionId = sessionId.trim()
+    if (this.disposed || !data || !normalizedSessionId) return false
+    this.setSessionId(normalizedSessionId)
+    if (!this.coreCreated) this.createCore(this.initialData)
+    this.coreHandle.pendingBytes += textByteLength(data)
+    postCore(this.coreHandle, {
+      type: 'data',
+      terminalId: this.terminalId,
+      sessionId: normalizedSessionId,
+      data
+    })
+    return true
+  }
+
   input(data: string) {
     if (this.disposed || !data) return
     if (!this.coreCreated) this.createCore(this.initialData)

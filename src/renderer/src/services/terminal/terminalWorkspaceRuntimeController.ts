@@ -272,7 +272,7 @@ export const useTerminalWorkspaceContainerRuntime = () => {
     if (!data) return 0
     const appendStartedAt = nowMs()
     const panel = workspace.panels.find((item) => item.id === sessionId || item.sessionId === sessionId)
-    const handledLive = panel ? writeLiveTerminalData(sessionId, data) : false
+    const handledLive = panel ? writeLiveTerminalData(panel.id, sessionId, data) : false
     if (handledLive) {
       appendTerminalHistoryBatched(sessionId, data)
     } else {
@@ -743,7 +743,7 @@ export const useTerminalWorkspaceContainerRuntime = () => {
         }
       }
       const appendStartedAt = nowMs()
-      const handledLive = writeLiveTerminalData(threaded.panel.id, event.data)
+      const handledLive = writeLiveTerminalData(threaded.panel.id, threaded.sessionId, event.data)
       const appendMs = nowMs() - appendStartedAt
       if (handledLive) {
         appendTerminalHistoryBatched(threaded.sessionId, event.data, {
