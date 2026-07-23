@@ -8,6 +8,7 @@ import {
   isTerminalLifecycleEvent
 } from '@/services/terminal/terminalBackendGuards'
 import { applyKeywordHighlight } from '@/services/settings/keywordHighlightRuntime'
+import { isClassicLocalHostContext } from '@/services/ai/classicSessionContextRuntime'
 import { getKnowledgeParent, isKnowledgeImagePath } from '@/services/knowledge/knowledgeRuntime'
 import {
   applyLocalTerminalSessionToPanel,
@@ -298,7 +299,7 @@ export const createWorkspaceTerminalPanelsController = (
       setTopNotice('终端启动服务不可用')
       return null
     }
-    if (host.isLocalShell || host.id === 'opened-local') {
+    if (isClassicLocalHostContext(host)) {
       try {
         const session = await createTerminal({
           kind: 'local',

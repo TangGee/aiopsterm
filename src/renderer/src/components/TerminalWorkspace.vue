@@ -425,6 +425,7 @@
         <div
           :ref="(element) => setTerminalElement(panel.id, element)"
           class="xterm-host"
+          data-terminal-surface="workspace"
           @contextmenu.prevent="handleTerminalContextMenu(panel.id, $event)"
           @mousedown="handleTerminalMouseDown(panel.id, $event)"
           @mouseup="handleTerminalMouseUp(panel.id, $event)"

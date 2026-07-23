@@ -1804,9 +1804,19 @@ describe('AppShell', () => {
     codexTerminal.emitSelection('codex copied text')
     vi.mocked(navigator.clipboard.writeText).mockClear()
     await wrapper.find('[data-testid="ai-codex-xterm"]').trigger('contextmenu')
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('[data-testid="ai-codex-terminal-menu"]').exists()).toBe(true)
+    await wrapper.find('[data-testid="ai-codex-terminal-copy"]').trigger('click')
     await flushPromises()
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith('codex copied text')
     expect(store.topNotice).toBe('Codex 终端内容已复制')
+
+    vi.mocked(window.aiops.writeCodexSession).mockClear()
+    await wrapper.find('[data-testid="ai-codex-xterm"]').trigger('contextmenu')
+    await wrapper.vm.$nextTick()
+    await wrapper.find('[data-testid="ai-codex-terminal-paste"]').trigger('click')
+    await flushPromises()
+    expect(window.aiops.writeCodexSession).toHaveBeenCalledWith('test-codex-session', 'clipboard-command')
 
     codexTerminal.emitSelection('codex shortcut text')
     vi.mocked(navigator.clipboard.writeText).mockClear()
@@ -8426,14 +8436,14 @@ describe('AppShell', () => {
     vi.mocked(window.aiops.createTerminal).mockClear()
     await wrapper.find('.terminal-context-menu').findAll('button').find((button) => button.text().includes('Fork SSH'))!.trigger('click')
     await flushPromises()
-    expect(store.activePanel.title).toBe('fork-source fork')
+    expect(store.activePanel.title).toBe('fork-source')
     expect(store.activePanel.output).not.toContain('aiopsterm ssh ops@10.8.0.6:2222')
     expect(store.activePanel.outputSegments).toEqual([])
     expect(window.aiops.createTerminal).toHaveBeenCalledWith(
       expect.objectContaining({
         kind: 'ssh',
         assetId: 'asset-fork-unit',
-        title: 'fork-source fork',
+        title: 'fork-source',
         ssh: expect.objectContaining({
           host: '10.8.0.6',
           port: 2222,
@@ -8520,7 +8530,7 @@ describe('AppShell', () => {
       expect.objectContaining({
         kind: 'ssh',
         assetId: 'asset-fork-unit',
-        title: 'fork-source fork',
+        title: 'fork-source',
         ssh: expect.objectContaining({
           host: '10.8.0.6',
           port: 2222,

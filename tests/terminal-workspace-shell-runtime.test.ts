@@ -250,6 +250,7 @@ describe('terminalWorkspaceShellRuntime', () => {
     state.termMenu.visible = true
     const terminalHost = document.createElement('div')
     terminalHost.className = 'xterm-host'
+    terminalHost.dataset.terminalSurface = 'workspace'
 
     const searchShortcut = createKeyboardEvent({ ctrlKey: true, altKey: true, key: 'f', target: terminalHost })
     await runtime.handleShortcut(searchShortcut)
@@ -278,6 +279,14 @@ describe('terminalWorkspaceShellRuntime', () => {
     expect(inputSearchShortcut.preventDefault).not.toHaveBeenCalled()
     expect(inputSearchShortcut.stopPropagation).not.toHaveBeenCalled()
     expect(calls.openSearchOverlay).not.toHaveBeenCalled()
+
+    const codexHost = document.createElement('div')
+    codexHost.className = 'xterm-host'
+    codexHost.dataset.terminalSurface = 'codex'
+    const codexPasteShortcut = createKeyboardEvent({ ctrlKey: true, shiftKey: true, key: 'v', target: codexHost })
+    await runtime.handleShortcut(codexPasteShortcut)
+    expect(codexPasteShortcut.preventDefault).not.toHaveBeenCalled()
+    expect(workspace.runTerminalCommand).not.toHaveBeenCalled()
 
     await runtime.pasteClipboard('panel-1')
     expect(workspace.setTopNotice).toHaveBeenCalledWith('终端剪贴板读取服务不可用')
@@ -375,6 +384,7 @@ describe('terminalWorkspaceShellRuntime', () => {
     const { runtime } = createRuntime({ workspace })
     const terminalHost = document.createElement('div')
     terminalHost.className = 'xterm-host'
+    terminalHost.dataset.terminalSurface = 'workspace'
 
     const event = createKeyboardEvent({ ctrlKey: true, shiftKey: true, key: 'T', target: terminalHost })
     await runtime.handleShortcut(event)
@@ -505,6 +515,7 @@ describe('terminalWorkspaceShellRuntime', () => {
     const { calls, runtime } = createRuntime({ workspace })
     const terminalHost = document.createElement('div')
     terminalHost.className = 'xterm-host'
+    terminalHost.dataset.terminalSurface = 'workspace'
 
     const event = createKeyboardEvent({ ctrlKey: true, shiftKey: true, key: 'Y', target: terminalHost })
     await runtime.handleShortcut(event)

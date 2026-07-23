@@ -11,7 +11,7 @@ import {
   type AiPanelCodexConversationRuntimeState
 } from '@/services/ai/aiPanelCodexRuntime'
 import { codexSessionClient } from '@/services/ai/codexSessionClient'
-import { copyTextToClipboard } from '@/services/app/clipboardRuntime'
+import { copyTextToClipboard, readTextFromClipboard } from '@/services/app/clipboardRuntime'
 import { writeRendererRuntimeLog } from '@/services/app/runtimeLogClient'
 import { terminalThemeForAppTheme, type TerminalSurfaceMode } from '@/services/terminal/terminalThemeRuntime'
 import {
@@ -21,7 +21,7 @@ import {
   threadedTerminalCapability,
   type ThreadedTerminalHost
 } from '@/services/terminal/threadedTerminalRuntime'
-import { isTerminalCopyShortcut } from '@/services/terminal/terminalKeyboardShortcuts'
+import { isTerminalCopyShortcut, isTerminalPasteShortcut } from '@/services/terminal/terminalKeyboardShortcuts'
 import type { CodexTargetEventKind } from '@/services/ai/codexTargetRuntime'
 import type { TerminalSettings } from '@/services/settings/workspaceConfigRuntime'
 import type { RuntimeLogLevel } from '@shared/contracts/appRuntime'
@@ -45,6 +45,8 @@ export type AiPanelCodexTerminalLike = {
   clear: () => void
   dispose: () => void
   write: (data: string, callback?: () => void) => void
+  input?: (data: string) => void
+  paste?: (data: string) => void
   getSelection: () => string
   attachCustomKeyEventHandler: (handler: (event: KeyboardEvent) => boolean) => void
   onData: (handler: (data: string) => void) => unknown
@@ -102,6 +104,7 @@ export type AiPanelCodexTerminalRuntimeOptions<TConversation extends AiPanelCode
   notify: (message: string) => void
   afterDomUpdate: () => void | Promise<void>
   copyText?: (text: string) => Promise<boolean>
+  readClipboard?: () => ReturnType<typeof readTextFromClipboard>
   log?: (level: RuntimeLogLevel, event: string, fields?: Record<string, unknown>) => void
   client?: AiPanelCodexSessionClient
   requestFrame?: (callback: () => void) => unknown
@@ -151,6 +154,7 @@ type CodexTerminalOutputState = {
 }
 
 export const codexTerminalCopyShortcut = isTerminalCopyShortcut
+export const codexTerminalPasteShortcut = isTerminalPasteShortcut
 
 const setXtermTermName = (terminal: AiPanelCodexTerminalLike, terminalType: string) => {
   terminal.options.termName = terminalType || 'xterm-256color'
@@ -188,6 +192,7 @@ export const createAiPanelCodexTerminalRuntime = <TConversation extends AiPanelC
     if (terminalDebugLogs) log('debug', event, fields)
   }
   const copyText = options.copyText || copyTextToClipboard
+  const readClipboard = options.readClipboard || readTextFromClipboard
   const requestFrame = options.requestFrame || defaultRequestFrame
   const resizeObserverFactory = options.resizeObserverFactory || defaultResizeObserverFactory
   const terminalUnavailableReasonByConversation = new WeakMap<TConversation, string>()
@@ -579,7 +584,25 @@ export const createAiPanelCodexTerminalRuntime = <TConversation extends AiPanelC
   }
 
   const copySelection = async (source: 'contextmenu' | 'keyboard') => {
-    const selectedText = options.activeConversation()?.terminal?.getSelection() || ''
+    const terminal = options.activeConversation()?.terminal
+    if (
+      terminal &&
+      isThreadedTerminalHost(terminal) &&
+      typeof terminal.copySelectionToClipboard === 'function'
+    ) {
+      const selectedText = terminal.getSelection()
+      const copied = await terminal.copySelectionToClipboard()
+      options.notify(copied ? options.labels.copySuccess() : options.labels.copyEmpty())
+      if (copied) {
+        logDebug('renderer.codex.copy', {
+          source,
+          bytes: new TextEncoder().encode(selectedText).length,
+          threaded: true
+        })
+      }
+      return copied
+    }
+    const selectedText = terminal?.getSelection() || ''
     if (!selectedText) {
       options.notify(options.labels.copyEmpty())
       logDebug('renderer.codex.copy.empty', { source })
@@ -601,11 +624,41 @@ export const createAiPanelCodexTerminalRuntime = <TConversation extends AiPanelC
     return copied
   }
 
-  const copySelectionFromContextMenu = (event: MouseEvent) => {
-    event.preventDefault()
-    event.stopPropagation()
+  const copySelectionFromContextMenu = () => {
     focusActiveTerminal()
     void copySelection('contextmenu')
+  }
+
+  const pasteClipboard = async () => {
+    const conversation = options.activeConversation()
+    const terminal = conversation?.terminal
+    if (!conversation?.sessionId || !terminal) return false
+    const clipboard = await readClipboard()
+    if (!clipboard.ok || !clipboard.text) {
+      if (!clipboard.ok) {
+        log('warn', 'renderer.codex.paste.failed', {
+          sessionId: conversation.sessionId,
+          error: clipboard.error,
+          message: clipboard.message
+        })
+      }
+      return false
+    }
+    focusActiveTerminal()
+    if (typeof terminal.paste === 'function') terminal.paste(clipboard.text)
+    else if (typeof terminal.input === 'function') terminal.input(clipboard.text)
+    else {
+      const writeCodexSession = client.writeCodexSession()
+      if (!writeCodexSession) return false
+      await syncTargetContext({ conversation })
+      markPendingTargetDelivered(conversation)
+      await writeCodexSession(conversation.sessionId, clipboard.text)
+    }
+    return true
+  }
+
+  const pasteClipboardFromContextMenu = () => {
+    void pasteClipboard()
   }
 
   const disposeSubscriptions = () => {
@@ -805,10 +858,11 @@ export const createAiPanelCodexTerminalRuntime = <TConversation extends AiPanelC
     conversation.fit = fit as TConversation['fit']
     applyTerminalSettings(conversation, settings, { refit: false })
     terminal.attachCustomKeyEventHandler((event) => {
-      if (!codexTerminalCopyShortcut(event)) return true
+      if (!codexTerminalCopyShortcut(event) && !codexTerminalPasteShortcut(event)) return true
       event.preventDefault()
       event.stopPropagation()
-      void copySelection('keyboard')
+      if (codexTerminalCopyShortcut(event)) void copySelection('keyboard')
+      else void pasteClipboard()
       return false
     })
     terminal.onData((data) => {
@@ -1047,6 +1101,8 @@ export const createAiPanelCodexTerminalRuntime = <TConversation extends AiPanelC
     clearSessionTarget,
     copySelection,
     copySelectionFromContextMenu,
+    pasteClipboard,
+    pasteClipboardFromContextMenu,
     clearConversationOutput,
     disposeConversation,
     disposeSubscriptions,

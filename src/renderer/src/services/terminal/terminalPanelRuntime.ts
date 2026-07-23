@@ -234,10 +234,11 @@ export const resetTerminalPanelToDefault = (panel: TerminalPanel) => {
 export const createForkSshTerminalPanel = (id: string, source: TerminalPanel): TerminalPanel | null => {
   if (!source.sshSession?.connectionId) return null
   const sourceSession = source.sshSession
-  const sourceTitle = sourceSession.assetName || source.title
+  const sourceTitle = source.title || sourceSession.assetName
   return {
     id,
-    title: `${sourceTitle} fork`,
+    title: sourceTitle,
+    titleSource: source.titleSource,
     cwd: source.cwd,
     kind: 'terminal',
     output: '',

@@ -180,6 +180,8 @@ export type ThreadedTerminalScreenLine = {
   cells?: ThreadedTerminalCellRun[]
   highlights?: ThreadedTerminalHighlightRun[]
   wrapped?: boolean
+  logicalStartRow?: number
+  logicalEndRow?: number
 }
 
 export type ThreadedTerminalCellRun = {

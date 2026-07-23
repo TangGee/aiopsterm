@@ -4,6 +4,7 @@ import { windowControlsClient } from '@/services/app/windowControlsClient'
 import type { TerminalPanel, useWorkspaceStore } from '@/stores/workspace'
 import { isTerminalWorkspacePanel, type PanelDirection } from '@/services/terminal/terminalPanelRuntime'
 import type { TerminalView } from '@/services/terminal/terminalWorkspaceViewRuntime'
+import { isThreadedTerminalHost } from '@/services/terminal/threadedTerminalRuntime'
 import { managedAssetDisplayName, managedAssetEndpoint } from '@shared/assetDisplayRuntime'
 import {
   terminalShortcutActionForEvent,
@@ -137,7 +138,9 @@ export const createTerminalWorkspaceShellRuntime = (
   }
   const isTerminalKeyboardTarget = (event: KeyboardEvent) => {
     const target = keyboardEventTargetElement(event)
-    if (target?.closest('.xterm-host, .threaded-terminal-host')) return true
+    const terminalSurface = target?.closest<HTMLElement>('[data-terminal-surface]')?.dataset.terminalSurface
+    if (terminalSurface) return terminalSurface === 'workspace'
+    if (target?.closest('.xterm-host, .threaded-terminal-host')) return false
     if (terminalWorkspaceVisible && !terminalWorkspaceVisible.value) return false
     return !isEditableKeyboardTarget(event)
   }
@@ -453,7 +456,19 @@ export const createTerminalWorkspaceShellRuntime = (
   }
 
   const copySelection = async (panelId = workspace.activePanelId) => {
-    const selectedText = terminalViews.get(panelId)?.terminal.getSelection()
+    const terminal = terminalViews.get(panelId)?.terminal
+    if (
+      terminal &&
+      isThreadedTerminalHost(terminal) &&
+      typeof terminal.copySelectionToClipboard === 'function'
+    ) {
+      const copied = await terminal.copySelectionToClipboard()
+      if (copied) workspace.setTopNotice('终端内容已复制')
+      menu.visible = false
+      termMenu.visible = false
+      return
+    }
+    const selectedText = terminal?.getSelection()
     if (selectedText) {
       const copied = await copyToClipboard(selectedText)
       workspace.setTopNotice(copied ? '终端内容已复制' : '终端复制失败')

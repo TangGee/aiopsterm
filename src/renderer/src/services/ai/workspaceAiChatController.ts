@@ -336,6 +336,7 @@ export const createWorkspaceAiChatController = (
   const classicContextByConversationId = new Map<string, ProductSessionClassicContext | null>()
   const classicProductSessionById = new Map<string, ProductSessionRecord>()
   const classicContextPersistQueues = new Map<string, Promise<boolean>>()
+  const classicHostOpenQueues = new Map<string, Promise<ReturnType<typeof resolveClassicHostTerminalPanel>>>()
   let classicContextRestoreGeneration = 0
   let applyingClassicContextProjection = false
   let stopSelectedContextsWatch: () => void = () => undefined
@@ -493,7 +494,17 @@ export const createWorkspaceAiChatController = (
         let panel = resolveClassicHostTerminalPanel(context)
         let canonicalTarget = exactCanonicalTarget(panel)
         if (!canonicalTarget) {
-          panel = await openTerminalForAiHostContext(context)
+          let pendingOpen = classicHostOpenQueues.get(expectedTargetId)
+          if (!pendingOpen) {
+            pendingOpen = Promise.resolve(openTerminalForAiHostContext(context))
+              .finally(() => {
+                if (classicHostOpenQueues.get(expectedTargetId) === pendingOpen) {
+                  classicHostOpenQueues.delete(expectedTargetId)
+                }
+              })
+            classicHostOpenQueues.set(expectedTargetId, pendingOpen)
+          }
+          panel = await pendingOpen
           canonicalTarget = exactCanonicalTarget(panel)
         }
         const terminalSessionId = panel?.sessionId?.trim()

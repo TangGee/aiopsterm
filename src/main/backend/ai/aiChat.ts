@@ -463,9 +463,20 @@ const buildExchangePrompt = (
   contexts: AiChatContextInput[],
   skills: AiChatSkillInput[],
   command: AiChatCommandInput | null,
-  richContext: string
+  richContext: string,
+  hostTargets: ClineAgentHostTarget[] = []
 ) => {
   const contextLabel = contexts.length ? `\n\n上下文：${contexts.map((item) => `${item.kind}:${item.label}`).join('、')}` : ''
+  const hostContextTargets = contexts
+    .filter((context) => context.kind === 'hosts')
+    .map((context) => {
+      const target = hostTargets.find((candidate) => candidate.label === context.label)
+      return target ? `- hosts:${context.label} uses targetId ${target.targetId}` : ''
+    })
+    .filter(Boolean)
+  const hostTargetMapping = hostContextTargets.length
+    ? `\n\nSelected host target mapping:\n${hostContextTargets.join('\n')}`
+    : ''
   const commandLabel = commandDisplay(command) ? `\n命令：${commandDisplay(command)}` : ''
   const selectedKnowledgeDocs = contexts.filter((item) => item.kind === 'docs' && item.relPath)
   const selectedKnowledgeImages = contexts.filter((item) => item.kind === 'images' && item.relPath)
@@ -482,7 +493,7 @@ const buildExchangePrompt = (
         .join('\n\n')}`
     : ''
   const providerContext = richContext ? `\n\n${richContext}` : ''
-  return `${text}${contextLabel}${commandLabel}${knowledgeContext}${skillContext}${providerContext}`.trim()
+  return `${text}${contextLabel}${hostTargetMapping}${commandLabel}${knowledgeContext}${skillContext}${providerContext}`.trim()
 }
 
 const buildResponseMessages = (messages: AiChatMessageInput[] | undefined, prompt: string): AiChatMessageInput[] => {
@@ -533,7 +544,14 @@ export const createAiChatExchangeRequest = async (input: AiChatExchangeRequestIn
       errorMessage: [...new Set(richContext.imageErrors)].join('\n')
     }
   }
-  const prompt = buildExchangePrompt(text, contexts, skills, command, classicRichContextPrompt(richContext.entries))
+  const prompt = buildExchangePrompt(
+    text,
+    contexts,
+    skills,
+    command,
+    classicRichContextPrompt(richContext.entries),
+    hostTargets
+  )
   if (!prompt) return { ok: false, errorCode: 'empty_prompt', errorMessage: 'Prompt is required' }
   const requestId = `aichat-request-${randomUUID()}`
   const assistantMessage = {

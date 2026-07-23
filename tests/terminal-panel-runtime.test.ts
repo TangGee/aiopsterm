@@ -182,7 +182,8 @@ describe('terminalPanelRuntime', () => {
     expect(fork).toEqual(
       expect.objectContaining({
         id: 'panel-fork',
-        title: 'prod-host fork',
+        title: 'Prod shell',
+        titleSource: 'user',
         cwd: '/srv/app',
         kind: 'terminal',
         status: 'ready',
@@ -324,7 +325,7 @@ describe('terminalPanelRuntime', () => {
     expect(canForkSshTerminalPanel(source)).toBe(true)
 
     const fork = createForkSshTerminalPanelInCollection(panels, source.id, 'forked-panel')
-    expect(fork).toEqual(expect.objectContaining({ id: 'forked-panel', title: 'prod-host fork' }))
+    expect(fork).toEqual(expect.objectContaining({ id: 'forked-panel', title: 'Auto title', titleSource: 'auto' }))
     expect(panels.at(-1)).toBe(fork)
     expect(createForkSshTerminalPanelInCollection(panels, 'plain', 'forked-plain')).toBeNull()
     expect(terminalPanelIds(panels)).toEqual(['panel-source', 'plain', 'forked-panel'])

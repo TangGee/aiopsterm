@@ -1008,7 +1008,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       resolveAiKnowledgeSearchContexts: (...args) => resolveAiKnowledgeSearchContexts(...args),
       applyMcpServersSnapshot: (...args) => applyMcpServersSnapshot(...args),
       resolveActiveWritableTerminalPanel,
-      resolveClassicHostTerminalPanel: (context) => resolveClassicHostTerminalPanel(panels.value, context),
+      resolveClassicHostTerminalPanel: (context) => resolveClassicHostTerminalPanel(panels.value, context, activePanelId.value),
       openTerminalForAiHostContext,
       activateTerminalPanel,
       runActiveTerminalCommand,

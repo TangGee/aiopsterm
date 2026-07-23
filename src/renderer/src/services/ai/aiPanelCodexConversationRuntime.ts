@@ -1118,6 +1118,7 @@ export const createAiPanelCodexConversationRuntime = (options: AiPanelCodexConve
     codexTargetQuery,
     codexWorkspaceLinkNotice,
     copyCodexSelectionFromContextMenu: aiPanelCodexTerminalRuntime.copySelectionFromContextMenu,
+    pasteCodexClipboardFromContextMenu: aiPanelCodexTerminalRuntime.pasteClipboardFromContextMenu,
     createNewCodexConversation,
     currentAiPanelModeLabel,
     currentPanelTarget,

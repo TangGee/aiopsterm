@@ -753,6 +753,15 @@ const modeState = (record: CoreTerminalRecord): ThreadedTerminalModeState => ({
   activeBufferType: record.terminal.buffer.active.type === 'alternate' ? 'alternate' : 'normal'
 })
 
+const logicalLineBounds = (record: CoreTerminalRecord, row: number) => {
+  const buffer = record.terminal.buffer.active
+  let start = row
+  let end = row
+  while (start > 0 && buffer.getLine(start)?.isWrapped) start -= 1
+  while (end + 1 < buffer.length && buffer.getLine(end + 1)?.isWrapped) end += 1
+  return { start, end }
+}
+
 const buildSnapshot = (record: CoreTerminalRecord, forceFull = false, fullReason?: ThreadedTerminalFullReason): ThreadedTerminalScreenSnapshot => {
   const startedAt = nowMs()
   refreshSearchMatches(record)
@@ -777,6 +786,7 @@ const buildSnapshot = (record: CoreTerminalRecord, forceFull = false, fullReason
     const line = buffer.getLine(lineIndex)
     const text = line?.translateToString(false, 0, record.terminal.cols) || ''
     const runs = extractPlainLineRuns(record, lineIndex)
+    const logicalBounds = logicalLineBounds(record, lineIndex)
     const keywordHighlights = extractKeywordHighlightRuns(record, text, runs)
     const searchHighlights = extractSearchHighlightRuns(record, lineIndex, text, runs)
     return {
@@ -785,7 +795,9 @@ const buildSnapshot = (record: CoreTerminalRecord, forceFull = false, fullReason
       runs,
       cells: extractLineRuns(record, lineIndex),
       highlights: [...keywordHighlights, ...searchHighlights],
-      wrapped: Boolean(line?.isWrapped)
+      wrapped: Boolean(line?.isWrapped),
+      logicalStartRow: logicalBounds.start,
+      logicalEndRow: logicalBounds.end
     }
   })
   record.dirtyRows.clear()

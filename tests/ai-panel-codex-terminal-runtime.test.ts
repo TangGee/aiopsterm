@@ -68,6 +68,9 @@ class FakeTerminal implements AiPanelCodexTerminalLike {
     this.output += data
     callback?.()
   })
+  paste = vi.fn((data: string) => {
+    this.dataHandler?.(data)
+  })
   getSelection = vi.fn(() => '')
   attachCustomKeyEventHandler = vi.fn((handler: (event: KeyboardEvent) => boolean) => {
     this.keyHandler = handler
@@ -226,6 +229,7 @@ const createRuntime = (conversation = createConversation(), clientBundle = creat
     notify: (message) => notices.push(message),
     afterDomUpdate: () => Promise.resolve(),
     copyText: vi.fn(async () => true),
+    readClipboard: vi.fn(async () => ({ ok: true as const, text: 'clipboard input' })),
     log: (level, event, fields) => logs.push({ level, event, fields }),
     client: clientBundle.client,
     requestFrame: (callback) => callback(),
@@ -348,6 +352,12 @@ describe('aiPanelCodexTerminalRuntime', () => {
     await flushAsyncHandlers()
     expect(clientBundle.bridges.setCodexSessionTargetBridge).not.toHaveBeenCalled()
     expect(clientBundle.bridges.writeCodexSessionBridge).toHaveBeenCalledWith('codex-session-1', 'pwd\n')
+
+    const pasteKeyEvent = new KeyboardEvent('keydown', { key: 'V', shiftKey: true, ctrlKey: true })
+    expect(terminal.keyHandler?.(pasteKeyEvent)).toBe(false)
+    await flushAsyncHandlers()
+    expect(terminal.paste).toHaveBeenCalledWith('clipboard input')
+    expect(clientBundle.bridges.writeCodexSessionBridge).toHaveBeenCalledWith('codex-session-1', 'clipboard input')
 
     clientBundle.bridges.resizeCodexSessionBridge.mockClear()
     terminal.cols = 100

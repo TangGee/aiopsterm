@@ -145,8 +145,31 @@
           'is-empty': !conversation.sessionId && conversation.status !== 'ready'
         }"
         data-testid="ai-codex-xterm"
-        @contextmenu.prevent.stop="copyCodexSelectionFromContextMenu"
+        data-terminal-surface="codex"
+        @contextmenu.prevent.stop="openCodexTerminalMenu"
       ></div>
+    </div>
+    <div
+      v-if="codexTerminalMenu.visible"
+      class="terminal-context-menu"
+      :style="{ left: `${codexTerminalMenu.x}px`, top: `${codexTerminalMenu.y}px` }"
+      data-testid="ai-codex-terminal-menu"
+      @click.stop
+    >
+      <button
+        type="button"
+        data-testid="ai-codex-terminal-copy"
+        @click="copyFromCodexTerminalMenu"
+      >
+        <span>{{ t('terminal.context.copy') }}</span><kbd>Ctrl+Shift+C</kbd>
+      </button>
+      <button
+        type="button"
+        data-testid="ai-codex-terminal-paste"
+        @click="pasteFromCodexTerminalMenu"
+      >
+        <span>{{ t('terminal.context.paste') }}</span><kbd>Ctrl+Shift+V</kbd>
+      </button>
     </div>
     <div
       v-if="activeCodexConversation?.error"
@@ -167,6 +190,7 @@ import {
   Server,
   X
 } from 'lucide-vue-next'
+import { onBeforeUnmount, onMounted, reactive } from 'vue'
 import { useAiPanelRuntimeContext } from '@/services/ai/aiPanelContext'
 
 const {
@@ -190,9 +214,35 @@ const {
   filteredCodexHostTargets,
   focusCodexTerminal,
   locateCodexBoundTarget,
+  pasteCodexClipboardFromContextMenu,
   setCodexTerminalHostRef,
   t,
   toggleCodexTargetPicker,
   unbindCodexTarget
 } = useAiPanelRuntimeContext()
+
+const codexTerminalMenu = reactive({ visible: false, x: 0, y: 0 })
+
+const closeCodexTerminalMenu = () => {
+  codexTerminalMenu.visible = false
+}
+
+const openCodexTerminalMenu = (event: MouseEvent) => {
+  codexTerminalMenu.x = Math.max(0, Math.min(event.clientX, window.innerWidth - 240))
+  codexTerminalMenu.y = Math.max(0, Math.min(event.clientY, window.innerHeight - 100))
+  codexTerminalMenu.visible = true
+}
+
+const copyFromCodexTerminalMenu = () => {
+  copyCodexSelectionFromContextMenu()
+  closeCodexTerminalMenu()
+}
+
+const pasteFromCodexTerminalMenu = () => {
+  pasteCodexClipboardFromContextMenu()
+  closeCodexTerminalMenu()
+}
+
+onMounted(() => document.addEventListener('click', closeCodexTerminalMenu))
+onBeforeUnmount(() => document.removeEventListener('click', closeCodexTerminalMenu))
 </script>

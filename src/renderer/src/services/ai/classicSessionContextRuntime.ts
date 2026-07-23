@@ -18,16 +18,28 @@ export type ClassicTerminalPanelLike = {
 }
 
 const text = (value: unknown) => String(value || '').trim()
+type ClassicHostIdentity = Pick<AiContextOption, 'id'> &
+  Partial<Pick<AiContextOption, 'label' | 'host' | 'assetId' | 'connectionId' | 'isLocalShell'>>
 
 const isLiveTerminalPanel = (panel: ClassicTerminalPanelLike) =>
   Boolean(text(panel.sessionId)) && panel.status !== 'closed' && panel.status !== 'error'
 
-const isLocalHostContext = (context: Pick<AiContextOption, 'id' | 'isLocalShell'>) =>
-  context.isLocalShell === true || context.id === 'opened-local'
+export const isClassicLocalHostContext = (
+  context: ClassicHostIdentity
+) => {
+  const id = text(context.id).toLowerCase()
+  const label = text(context.label).toLowerCase()
+  const host = text(context.host).toLowerCase()
+  return context.isLocalShell === true ||
+    id === 'opened-local' ||
+    id === 'hosts.127.0.0.1' ||
+    label === '127.0.0.1' ||
+    host === '127.0.0.1'
+}
 
 export const classicHostTargetId = (
-  context: Pick<AiContextOption, 'id' | 'assetId' | 'connectionId' | 'isLocalShell'>
-) => isLocalHostContext(context)
+  context: ClassicHostIdentity
+) => isClassicLocalHostContext(context)
   ? 'opened-local'
   : text(context.assetId) || text(context.connectionId) || text(context.id)
 
@@ -37,25 +49,28 @@ const skillNameFor = (context: Pick<AiContextOption, 'id' | 'label' | 'skillName
 const chatSessionIdFor = (context: Pick<AiContextOption, 'id' | 'chatSessionId'>) =>
   text(context.chatSessionId) || (context.id.startsWith('chat:') ? text(context.id.slice('chat:'.length)) : '')
 
-export const classicSessionContextRef = (context: AiContextOption): ProductSessionContextRef => ({
-  id: context.id,
-  kind: context.kind,
-  label: context.label,
-  ...(text(context.detail) ? { detail: context.detail } : {}),
-  ...(text(context.assetId) ? { assetId: context.assetId } : {}),
-  ...(text(context.connectionId) ? { connectionId: context.connectionId } : {}),
-  ...(text(context.host) ? { host: context.host } : {}),
-  ...(Number.isInteger(context.port) ? { port: context.port } : {}),
-  ...(text(context.username) ? { username: context.username } : {}),
-  ...(text(context.relPath) ? { relPath: context.relPath } : {}),
-  ...(context.contextType ? { contextType: context.contextType } : {}),
-  ...(text(context.mediaType) ? { mediaType: context.mediaType } : {}),
-  ...(context.kind === 'hosts' && !context.isLocalShell && !text(context.assetId) && text(context.id)
-    ? { assetId: context.id }
-    : {}),
-  ...(context.kind === 'skills' && skillNameFor(context) ? { skillName: skillNameFor(context) } : {}),
-  ...(context.kind === 'chats' && chatSessionIdFor(context) ? { chatSessionId: chatSessionIdFor(context) } : {})
-})
+export const classicSessionContextRef = (context: AiContextOption): ProductSessionContextRef => {
+  const localHost = context.kind === 'hosts' && isClassicLocalHostContext(context)
+  return {
+    id: localHost ? 'opened-local' : context.id,
+    kind: context.kind,
+    label: context.label,
+    ...(text(context.detail) ? { detail: context.detail } : {}),
+    ...(!localHost && text(context.assetId) ? { assetId: context.assetId } : {}),
+    ...(!localHost && text(context.connectionId) ? { connectionId: context.connectionId } : {}),
+    ...(text(context.host) ? { host: context.host } : {}),
+    ...(Number.isInteger(context.port) ? { port: context.port } : {}),
+    ...(text(context.username) ? { username: context.username } : {}),
+    ...(text(context.relPath) ? { relPath: context.relPath } : {}),
+    ...(context.contextType ? { contextType: context.contextType } : {}),
+    ...(text(context.mediaType) ? { mediaType: context.mediaType } : {}),
+    ...(context.kind === 'hosts' && !localHost && !text(context.assetId) && text(context.id)
+      ? { assetId: context.id }
+      : {}),
+    ...(context.kind === 'skills' && skillNameFor(context) ? { skillName: skillNameFor(context) } : {}),
+    ...(context.kind === 'chats' && chatSessionIdFor(context) ? { chatSessionId: chatSessionIdFor(context) } : {})
+  }
+}
 
 export const classicSessionContextRefs = (contexts: AiContextOption[]) => contexts.map(classicSessionContextRef)
 
@@ -76,10 +91,13 @@ const sameHostRef = (ref: ProductSessionContextRef, candidate: AiContextOption) 
 }
 
 const matchingCatalogOption = (ref: ProductSessionContextRef, options: AiContextOption[]) => {
+  if (ref.kind === 'hosts' && isClassicLocalHostContext(ref)) {
+    return options.find((candidate) => candidate.kind === 'hosts' && isClassicLocalHostContext(candidate))
+  }
   const exact = options.find((candidate) => candidate.kind === ref.kind && candidate.id === ref.id)
   if (exact && ref.kind !== 'hosts') return exact
   if (exact && ref.kind === 'hosts' && (
-    (ref.id === 'opened-local' && isLocalHostContext(exact)) || sameHostRef(ref, exact)
+    (ref.id === 'opened-local' && isClassicLocalHostContext(exact)) || sameHostRef(ref, exact)
   )) return exact
   if (ref.kind === 'hosts') return options.find((candidate) => candidate.kind === 'hosts' && sameHostRef(ref, candidate))
   if (ref.kind === 'docs') {
@@ -96,18 +114,31 @@ const matchingCatalogOption = (ref: ProductSessionContextRef, options: AiContext
   return options.find((candidate) => candidate.kind === 'chats' && chatSessionIdFor(candidate) === text(ref.chatSessionId))
 }
 
-const availableContext = (ref: ProductSessionContextRef, candidate: AiContextOption): AiContextOption => ({
-  ...candidate,
-  id: candidate.kind === ref.kind ? candidate.id : ref.id,
-  kind: ref.kind,
-  ...(ref.kind === 'images' && ref.mediaType ? { mediaType: ref.mediaType } : {}),
-  ...(ref.assetId ? { assetId: ref.assetId } : {}),
-  ...(ref.connectionId ? { connectionId: ref.connectionId } : {}),
-  ...(ref.skillName ? { skillName: ref.skillName } : {}),
-  ...(ref.chatSessionId ? { chatSessionId: ref.chatSessionId } : {}),
-  unavailable: false,
-  unavailableReason: undefined
-})
+const availableContext = (ref: ProductSessionContextRef, candidate: AiContextOption): AiContextOption => {
+  if (ref.kind === 'hosts' && isClassicLocalHostContext(ref)) {
+    return {
+      ...candidate,
+      id: 'opened-local',
+      kind: 'hosts',
+      label: candidate.label || ref.label || '127.0.0.1',
+      isLocalShell: true,
+      unavailable: false,
+      unavailableReason: undefined
+    }
+  }
+  return {
+    ...candidate,
+    id: candidate.kind === ref.kind ? candidate.id : ref.id,
+    kind: ref.kind,
+    ...(ref.kind === 'images' && ref.mediaType ? { mediaType: ref.mediaType } : {}),
+    ...(ref.assetId ? { assetId: ref.assetId } : {}),
+    ...(ref.connectionId ? { connectionId: ref.connectionId } : {}),
+    ...(ref.skillName ? { skillName: ref.skillName } : {}),
+    ...(ref.chatSessionId ? { chatSessionId: ref.chatSessionId } : {}),
+    unavailable: false,
+    unavailableReason: undefined
+  }
+}
 
 const unavailableContext = (ref: ProductSessionContextRef): AiContextOption => ({
   ...ref,
@@ -131,11 +162,14 @@ export const sendableClassicSessionContexts = (contexts: AiContextOption[]) =>
 
 export const resolveClassicHostTerminalPanel = <Panel extends ClassicTerminalPanelLike>(
   panels: Panel[],
-  context: AiContextOption
+  context: AiContextOption,
+  activePanelId = ''
 ) => {
   if (context.kind !== 'hosts' || context.unavailable === true) return null
-  const livePanels = panels.filter(isLiveTerminalPanel)
-  if (isLocalHostContext(context)) {
+  const livePanels = panels
+    .filter(isLiveTerminalPanel)
+    .sort((first, second) => Number(second.id === activePanelId) - Number(first.id === activePanelId))
+  if (isClassicLocalHostContext(context)) {
     return livePanels.find((panel) => !panel.sshSession) || null
   }
   const assetId = text(context.assetId) || text(context.id)

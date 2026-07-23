@@ -2046,7 +2046,7 @@ export class ThreadedTerminalHost {
     this.inputElement.style.font = terminalFontSpec(this.options)
   }
 
-  private async copySelectionToClipboard(event?: ClipboardEvent | KeyboardEvent) {
+  async copySelectionToClipboard(event?: ClipboardEvent | KeyboardEvent) {
     const range = this.normalizedSelection()
     if (!range) return false
     const fallbackText = this.selectionText()
@@ -2434,6 +2434,13 @@ export class ThreadedTerminalHost {
   }
 
   private paragraphSelectionAt(point: ThreadedTerminalSelectionPoint) {
+    const line = this.screenLineForBufferRow(point.y)
+    if (Number.isInteger(line?.logicalStartRow) && Number.isInteger(line?.logicalEndRow)) {
+      return {
+        start: { x: 0, y: line!.logicalStartRow! },
+        end: { x: this.cols, y: line!.logicalEndRow! }
+      }
+    }
     let startRow = point.y
     let endRow = point.y
     while (startRow > this.buffer.active.viewportY && this.screenLineForBufferRow(startRow)?.wrapped) startRow -= 1

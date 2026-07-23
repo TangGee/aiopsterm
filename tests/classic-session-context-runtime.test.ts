@@ -174,6 +174,7 @@ describe('Classic session context runtime', () => {
     expect(classicHostTargetId({ id: 'asset-prod', assetId: 'asset-prod' })).toBe('asset-prod')
     expect(classicHostTargetId({ id: 'connection-prod', connectionId: 'connection-prod' })).toBe('connection-prod')
     expect(classicHostTargetId({ id: 'opened-local', isLocalShell: true })).toBe('opened-local')
+    expect(classicHostTargetId({ id: 'hosts.127.0.0.1', label: '127.0.0.1' })).toBe('opened-local')
     expect(restoreClassicSessionContexts([{
       id: 'opened-local',
       kind: 'hosts',
@@ -187,5 +188,17 @@ describe('Classic session context runtime', () => {
         isLocalShell: true
       }]
     })).toEqual([expect.objectContaining({ id: 'opened-local', unavailable: false })])
+  })
+
+  it('prefers the active local terminal for the built-in local host context', () => {
+    const panels = [
+      { id: 'local-first', sessionId: 'session-first', status: 'running' },
+      { id: 'local-active', sessionId: 'session-active', status: 'running' }
+    ]
+    expect(resolveClassicHostTerminalPanel(panels, {
+      id: 'hosts.127.0.0.1',
+      kind: 'hosts',
+      label: '127.0.0.1'
+    }, 'local-active')).toEqual(expect.objectContaining({ id: 'local-active' }))
   })
 })

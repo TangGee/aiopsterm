@@ -1287,6 +1287,46 @@ describe('threadedTerminalRuntime', () => {
     host.dispose()
   })
 
+  it('keeps a triple-click logical line range outside the visible viewport', () => {
+    installOffscreenCanvasSupport()
+    const host = createHost()
+    const element = createHostElement()
+    Object.defineProperty(element, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({ left: 0, top: 0, width: 800, height: 400, right: 800, bottom: 400, x: 0, y: 0, toJSON: () => ({}) })
+    })
+    host.open(element)
+    host.applySnapshot({
+      terminalId: 'panel-1',
+      seq: 1,
+      cols: 80,
+      rows: 10,
+      cursorX: 0,
+      cursorY: 5,
+      cursorAbsoluteY: 105,
+      viewportY: 100,
+      baseY: 100,
+      lines: [{
+        y: 5,
+        text: 'visible wrapped segment',
+        cells: [],
+        wrapped: true,
+        logicalStartRow: 96,
+        logicalEndRow: 108
+      }],
+      dirtyRows: [5],
+      full: true,
+      visible: true,
+      priority: 'active'
+    })
+
+    element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0, detail: 3, clientX: 24, clientY: 75 }))
+    window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0, detail: 3, clientX: 24, clientY: 75 }))
+
+    expect(host.getSelectionPosition()).toEqual({ start: { x: 0, y: 96 }, end: { x: 80, y: 108 } })
+    host.dispose()
+  })
+
   it('selects wide-glyph words from terminal cell coordinates', () => {
     installOffscreenCanvasSupport()
     const host = createHost()
