@@ -112,6 +112,7 @@ export type TerminalView = {
 }
 
 export type TerminalKeyboardShortcutHandler = (panelId: string, action: TerminalShortcutAction, event: KeyboardEvent) => boolean
+export type TerminalFocusReason = 'pointer' | 'keyboard-navigation' | 'topology' | 'overlay-close' | 'external-request'
 
 type TerminalOutputPerfSummary = {
   chunks: number
@@ -407,9 +408,24 @@ export const createTerminalWorkspaceViewRuntime = ({
 
   const activeView = () => terminalViews.get(workspace.activePanelId)
   const isTerminalWorkspaceVisible = () => terminalWorkspaceVisible?.value ?? true
-  const isTerminalFocusSuppressed = (panelId: string) =>
-    Boolean(shouldSuppressTerminalFocus?.(panelId)) ||
-    (typeof document !== 'undefined' && Boolean(document.querySelector('[role="dialog"][aria-modal="true"]')))
+  const isTerminalFocusHardBlocked = () =>
+    typeof document !== 'undefined' && Boolean(document.querySelector('[role="dialog"][aria-modal="true"]'))
+  const isTerminalFocusSoftBlocked = (panelId: string) => {
+    if (Boolean(shouldSuppressTerminalFocus?.(panelId))) return true
+    if (typeof document === 'undefined') return false
+    const activeElement = document.activeElement
+    return Boolean(
+      activeElement instanceof Element &&
+      activeElement.closest(
+        '[data-terminal-focus-guard], input, textarea, select, button, a[href], [contenteditable=""], [contenteditable="true"], [contenteditable="plaintext-only"]'
+      )
+    )
+  }
+  const canApplyTerminalFocus = (panelId: string, reason: TerminalFocusReason) => {
+    if (isTerminalFocusHardBlocked()) return false
+    if (reason === 'topology' && isTerminalFocusSoftBlocked(panelId)) return false
+    return true
+  }
   const visibleTerminalPanelIds = () => new Set(visibleTerminalPanels.value.map((panel) => panel.id))
   const isTerminalPanelRenderable = (panelId: string) => {
     const element = terminalElements.get(panelId)
@@ -950,11 +966,11 @@ export const createTerminalWorkspaceViewRuntime = ({
       .forEach((panel) => scheduleTerminalFit(panel.id, options))
   }
 
-  const scheduleTerminalFocus = (panelId: string, intent: number, frames = 6) => {
+  const scheduleTerminalFocus = (panelId: string, reason: TerminalFocusReason, intent: number, frames = 6) => {
     const run = (remaining: number) => {
       nextTick(() => {
         if (intent !== terminalFocusIntent) return
-        if (isTerminalFocusSuppressed(panelId)) return
+        if (!canApplyTerminalFocus(panelId, reason)) return
         const view = terminalViews.get(panelId)
         const element = terminalElements.get(panelId)
         if (view && element?.isConnected && isTerminalPanelRenderable(panelId)) {
@@ -1309,9 +1325,13 @@ export const createTerminalWorkspaceViewRuntime = ({
     scheduleTerminalFit(panelId, { scrollToBottom: true, frames: 4, forceGeometry: true })
   }
 
-  const focusPanel = (panelId: string) => {
+  const focusPanel = (panelId: string, reason: TerminalFocusReason = 'topology') => {
     terminalFocusIntent += 1
-    scheduleTerminalFocus(panelId, terminalFocusIntent)
+    scheduleTerminalFocus(panelId, reason, terminalFocusIntent)
+  }
+
+  const cancelPendingTerminalFocus = () => {
+    terminalFocusIntent += 1
   }
 
   const getTerminalElement = (panelId: string) => terminalElements.get(panelId) || null
@@ -1343,6 +1363,7 @@ export const createTerminalWorkspaceViewRuntime = ({
   return {
     activeView,
     applyTerminalSettingsToAll,
+    cancelPendingTerminalFocus,
     dispose,
     estimateTerminalCellSize,
     focusActivePanel,

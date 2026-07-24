@@ -5,6 +5,7 @@ import type {
   ControlWorkspaceGroupSummary
 } from '@shared/contracts/control'
 import type { TerminalKillResult } from '@shared/contracts/terminalSessions'
+import type { TerminalFocusReason } from '@/services/terminal/terminalWorkspaceViewRuntime'
 
 export type WorkspaceStore = ReturnType<typeof useWorkspaceStore>
 
@@ -36,6 +37,7 @@ export type TerminalControlSurfaceDependencies = {
   startSshTerminalForPanel: (panel: TerminalPanel) => Promise<boolean>
   disconnectTerminalPanel: (panel: TerminalPanel) => Promise<boolean>
   scheduleVisibleTerminalFit: (options?: TerminalFitOptions) => void
+  focusTerminalPanel?: (panelId: string, reason: TerminalFocusReason) => void
 }
 
 export type ControlWorkspaceGroupState = Omit<ControlWorkspaceGroupSummary, 'ref' | 'memberCount' | 'active'>

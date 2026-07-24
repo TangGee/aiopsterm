@@ -28,7 +28,8 @@ export const createTerminalControlSurfaceRuntime = ({
   terminalViewSize,
   startSshTerminalForPanel,
   disconnectTerminalPanel,
-  scheduleVisibleTerminalFit
+  scheduleVisibleTerminalFit,
+  focusTerminalPanel
 }: TerminalControlSurfaceDependencies) => {
   const state = createTerminalControlSurfaceState({
     workspace,
@@ -50,7 +51,8 @@ export const createTerminalControlSurfaceRuntime = ({
   const mobileControlHandlers = createTerminalControlSurfaceMobileHandlers({
     workspace,
     terminalViews,
-    terminalSummaryForControl: state.terminalSummaryForControl
+    terminalSummaryForControl: state.terminalSummaryForControl,
+    focusTerminalPanel
   })
 
   const remoteControlHandlers = createTerminalControlSurfaceRemoteHandlers({
@@ -103,7 +105,8 @@ export const createTerminalControlSurfaceRuntime = ({
     surfaceSummaryForControl: state.surfaceSummaryForControl,
     surfaceTelemetrySummaryForControl: state.surfaceTelemetrySummaryForControl,
     workspaceSnapshotForControl: state.workspaceSnapshotForControl,
-    scheduleVisibleTerminalFit
+    scheduleVisibleTerminalFit,
+    focusTerminalPanel
   })
 
   const resumeControlHandlers = createTerminalControlSurfaceResumeHandlers({
@@ -135,7 +138,8 @@ export const createTerminalControlSurfaceRuntime = ({
     resolveControlSourceSurfacePanel: state.resolveControlSourceSurfacePanel,
     panelRefForControl: state.panelRefForControl,
     surfaceSummaryForControl: state.surfaceSummaryForControl,
-    workspaceSnapshotForControl: state.workspaceSnapshotForControl
+    workspaceSnapshotForControl: state.workspaceSnapshotForControl,
+    focusTerminalPanel
   })
 
   const workspaceControlHandlers = createTerminalControlSurfaceWorkspaceHandlers({

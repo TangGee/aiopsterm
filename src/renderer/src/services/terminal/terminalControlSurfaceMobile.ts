@@ -13,17 +13,20 @@ import {
 } from '@/services/terminal/terminalControlSurfaceCore'
 import { terminalBracketedPasteText, terminalSubmitKeyData, writeControlTerminalText } from '@/services/terminal/terminalControlRuntime'
 import type { ControlResponse, ControlTerminalSummary } from '@shared/contracts/control'
+import type { TerminalFocusReason } from '@/services/terminal/terminalWorkspaceViewRuntime'
 
 type TerminalControlSurfaceMobileDependencies = {
   workspace: WorkspaceStore
   terminalViews: Map<string, TerminalControlSurfaceView>
   terminalSummaryForControl: (panel: TerminalPanel) => ControlTerminalSummary
+  focusTerminalPanel?: (panelId: string, reason: TerminalFocusReason) => void
 }
 
 export const createTerminalControlSurfaceMobileHandlers = ({
   workspace,
   terminalViews,
-  terminalSummaryForControl
+  terminalSummaryForControl,
+  focusTerminalPanel
 }: TerminalControlSurfaceMobileDependencies) => {
   const resolveControlTerminalPanel = (params: Record<string, unknown> = {}) => {
     const panelId = controlText(params.panelId || params.panel_id || params.surfaceId || params.surface_id || params.terminalId || params.terminal_id || params.tabId || params.tab_id)
@@ -133,7 +136,8 @@ export const createTerminalControlSurfaceMobileHandlers = ({
     workspace.activeModule = 'workspace'
     workspace.activePanelId = panel.id
     await nextTick()
-    terminalViews.get(panel.id)?.terminal.focus()
+    if (focusTerminalPanel) focusTerminalPanel(panel.id, 'external-request')
+    else terminalViews.get(panel.id)?.terminal.focus()
     return controlOk({ terminal: terminalSummaryForControl(panel) })
   }
 

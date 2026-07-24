@@ -205,6 +205,26 @@ describe('terminalWorkspaceShellRuntime', () => {
     expect(state.renamingId.value).toBe('')
   })
 
+  it('activates a pane without focusing xterm when the pointer targets an overlay control', () => {
+    const { calls, runtime, workspace } = createRuntime()
+    const pane = document.createElement('div')
+    const overlay = document.createElement('div')
+    overlay.dataset.terminalFocusGuard = ''
+    const input = document.createElement('textarea')
+    overlay.appendChild(input)
+    pane.appendChild(overlay)
+
+    runtime.activatePanelFromPointer(createMouseEvent({ target: input, currentTarget: pane }), workspace.panels[0])
+    expect(workspace.activePanelId).toBe('panel-1')
+    expect(calls.focusPanel).not.toHaveBeenCalled()
+
+    const terminalHost = document.createElement('div')
+    terminalHost.className = 'xterm-host'
+    pane.appendChild(terminalHost)
+    runtime.activatePanelFromPointer(createMouseEvent({ target: terminalHost, currentTarget: pane }), workspace.panels[0])
+    expect(calls.focusPanel).toHaveBeenCalledWith('panel-1', 'pointer')
+  })
+
   it('owns terminal copy, paste, clear, font, and selection-to-AI shell actions', async () => {
     const { calls, runtime, state, terminalView, workspace } = createRuntime({
       selection: 'selected output',

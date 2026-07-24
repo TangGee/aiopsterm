@@ -12,6 +12,7 @@ import {
   type WorkspaceStore
 } from '@/services/terminal/terminalControlSurfaceCore'
 import type { ControlSurfaceSummary, ControlWorkspaceSnapshot } from '@shared/contracts/control'
+import type { TerminalFocusReason } from '@/services/terminal/terminalWorkspaceViewRuntime'
 
 type TerminalControlSurfaceProjectFileDependencies = {
   workspace: WorkspaceStore
@@ -21,6 +22,7 @@ type TerminalControlSurfaceProjectFileDependencies = {
   panelRefForControl: (panelId: string) => string
   surfaceSummaryForControl: (panel: TerminalPanel) => ControlSurfaceSummary
   workspaceSnapshotForControl: () => ControlWorkspaceSnapshot
+  focusTerminalPanel?: (panelId: string, reason: TerminalFocusReason) => void
 }
 
 export const createTerminalControlSurfaceProjectFileHandlers = ({
@@ -30,7 +32,8 @@ export const createTerminalControlSurfaceProjectFileHandlers = ({
   resolveControlSourceSurfacePanel,
   panelRefForControl,
   surfaceSummaryForControl,
-  workspaceSnapshotForControl
+  workspaceSnapshotForControl,
+  focusTerminalPanel
 }: TerminalControlSurfaceProjectFileDependencies) => {
   const normalizeControlKnowledgePath = (value: unknown) => {
     const text = controlText(value)
@@ -62,7 +65,10 @@ export const createTerminalControlSurfaceProjectFileHandlers = ({
     workspace.activeModule = 'workspace'
     workspace.activePanelId = panel.id
     await nextTick()
-    if (requestedFocus && isTerminalWorkspacePanel(panel)) terminalViews.get(panel.id)?.terminal.focus()
+    if (requestedFocus && isTerminalWorkspacePanel(panel)) {
+      if (focusTerminalPanel) focusTerminalPanel(panel.id, 'external-request')
+      else terminalViews.get(panel.id)?.terminal.focus()
+    }
   }
 
   const controlFileOpenRawPaths = (params: Record<string, unknown>) => {

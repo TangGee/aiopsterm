@@ -16,6 +16,7 @@ import type {
   ControlSurfaceTelemetrySummary,
   ControlWorkspaceSnapshot
 } from '@shared/contracts/control'
+import type { TerminalFocusReason } from '@/services/terminal/terminalWorkspaceViewRuntime'
 
 type TerminalControlSurfaceOperationDependencies = {
   workspace: WorkspaceStore
@@ -35,6 +36,7 @@ type TerminalControlSurfaceOperationDependencies = {
   surfaceTelemetrySummaryForControl: (state?: ControlSurfaceTelemetryState) => ControlSurfaceTelemetrySummary | undefined
   workspaceSnapshotForControl: () => ControlWorkspaceSnapshot
   scheduleVisibleTerminalFit: (options?: { scrollToBottom?: boolean; frames?: number; forceGeometry?: boolean }) => void
+  focusTerminalPanel?: (panelId: string, reason: TerminalFocusReason) => void
 }
 
 export const normalizePaneLayoutDirection = (value: unknown) => {
@@ -60,8 +62,13 @@ export const createTerminalControlSurfaceOperationHandlers = ({
   surfaceSummaryForControl,
   surfaceTelemetrySummaryForControl,
   workspaceSnapshotForControl,
-  scheduleVisibleTerminalFit
+  scheduleVisibleTerminalFit,
+  focusTerminalPanel
 }: TerminalControlSurfaceOperationDependencies) => {
+  const requestExternalTerminalFocus = (panelId: string) => {
+    if (focusTerminalPanel) focusTerminalPanel(panelId, 'external-request')
+    else terminalViews.get(panelId)?.terminal.focus()
+  }
   let controlFlashTimer: number | null = null
 
   const surfaceOperationPayload = (panel: TerminalPanel, action: string, extra: Record<string, unknown> = {}) => {
@@ -383,7 +390,7 @@ export const createTerminalControlSurfaceOperationHandlers = ({
       workspace.activeModule = 'workspace'
       workspace.activePanelId = panel.id
       await nextTick()
-      if (isTerminalWorkspacePanel(panel)) terminalViews.get(panel.id)?.terminal.focus()
+      if (controlBool(params.focus, false) && isTerminalWorkspacePanel(panel)) requestExternalTerminalFocus(panel.id)
       return surfaceOperationPayload(panel, 'surface.trigger_flash', { flashed: true })
     }
 
@@ -410,7 +417,7 @@ export const createTerminalControlSurfaceOperationHandlers = ({
         workspace.activePanelId = previousActivePanelId
       }
       await nextTick()
-      if (controlBool(params.focus, false) && isTerminalWorkspacePanel(panel)) terminalViews.get(panel.id)?.terminal.focus()
+      if (controlBool(params.focus, false) && isTerminalWorkspacePanel(panel)) requestExternalTerminalFocus(panel.id)
       return surfaceOperationPayload(panel, method === 'surface.move' ? 'surface.move' : 'surface.reorder', {
         changed,
         moved: changed,
@@ -435,7 +442,7 @@ export const createTerminalControlSurfaceOperationHandlers = ({
         workspace.activePanelId = previousActivePanelId
       }
       await nextTick()
-      if (controlBool(params.focus, false) && isTerminalWorkspacePanel(panel)) terminalViews.get(panel.id)?.terminal.focus()
+      if (controlBool(params.focus, false) && isTerminalWorkspacePanel(panel)) requestExternalTerminalFocus(panel.id)
       return surfaceOperationPayload(panel, 'surface.split_off', {
         changed,
         splitOff: changed,

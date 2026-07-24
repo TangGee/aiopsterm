@@ -9322,9 +9322,15 @@ describe('AppShell', () => {
     const refreshResponse = await invokeControlHandler({ id: 'refresh-surfaces', method: 'surface.refresh', params: {} })
     expect(refreshResponse).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ refreshed: expect.any(Number) }) }))
 
+    mockXtermInstances.forEach((terminal) => terminal.focus.mockClear())
     const flashResponse = await invokeControlHandler({ id: 'trigger-flash', method: 'surface.trigger_flash', params: { surfaceId: sidecarPanel!.id } })
     expect(flashResponse).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ flashed: true, surfaceId: sidecarPanel!.id }) }))
     expect(store.activePanelId).toBe(sidecarPanel!.id)
+    expect(mockXtermInstances.every((terminal) => terminal.focus.mock.calls.length === 0)).toBe(true)
+
+    await invokeControlHandler({ id: 'trigger-flash-focus', method: 'surface.trigger_flash', params: { surfaceId: sidecarPanel!.id, focus: true } })
+    await waitForAnimationFrames(2)
+    expect(mockXtermInstances.some((terminal) => terminal.focus.mock.calls.length > 0)).toBe(true)
 
     const promptResponse = await invokeControlHandler({ id: 'prompt-submit', method: 'workspace.prompt_submit', params: { workspaceId: sidecarPanel!.id, message: 'echo from control' } })
     expect(promptResponse).toEqual(expect.objectContaining({ ok: true, data: expect.objectContaining({ status: expect.stringMatching(/allow|needs-approval|unavailable|blocked/) }) }))
@@ -10722,6 +10728,32 @@ describe('AppShell', () => {
     expect(window.aiops.openSettingsDocumentation).toHaveBeenCalledWith({
       documentPath: 'usage/best-practices/en-US/05-knowledge-base.md'
     })
+
+    wrapper.unmount()
+  })
+
+  it('keeps focus in the inline command dialog opened from the dashboard', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const wrapper = mount(TerminalWorkspace, {
+      attachTo: document.body,
+      global: { plugins: [pinia] }
+    })
+
+    const commandButton = wrapper.findAll('.terminal-dashboard-shortcuts button').find((button) => button.text().includes('内联命令生成'))
+    expect(commandButton).toBeDefined()
+    await commandButton!.trigger('click')
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+
+    const input = wrapper.find('.terminal-command-dialog textarea')
+    expect(input.exists()).toBe(true)
+    ;(input.element as HTMLTextAreaElement).focus()
+    await input.setValue('检查磁盘空间')
+    await waitForAnimationFrames(8)
+
+    expect(document.activeElement).toBe(input.element)
+    expect((input.element as HTMLTextAreaElement).value).toBe('检查磁盘空间')
 
     wrapper.unmount()
   })

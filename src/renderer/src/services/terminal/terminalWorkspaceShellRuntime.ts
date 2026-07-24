@@ -3,7 +3,7 @@ import { copyTextToClipboard, readTextFromClipboard, type ClipboardTextReadResul
 import { windowControlsClient } from '@/services/app/windowControlsClient'
 import type { TerminalPanel, useWorkspaceStore } from '@/stores/workspace'
 import { isTerminalWorkspacePanel, type PanelDirection } from '@/services/terminal/terminalPanelRuntime'
-import type { TerminalView } from '@/services/terminal/terminalWorkspaceViewRuntime'
+import type { TerminalFocusReason, TerminalView } from '@/services/terminal/terminalWorkspaceViewRuntime'
 import { isThreadedTerminalHost } from '@/services/terminal/threadedTerminalRuntime'
 import { managedAssetDisplayName, managedAssetEndpoint } from '@shared/assetDisplayRuntime'
 import {
@@ -39,7 +39,7 @@ type TerminalWorkspaceShellRuntimeInput = {
   findPrevious: () => void
   focusActivePanel: () => void
   focusCommandDialogInput: () => void
-  focusPanel: (panelId: string) => void
+  focusPanel: (panelId: string, reason?: TerminalFocusReason) => void
   getCommandDialogInput: () => HTMLTextAreaElement | null
   hideSuggestions: () => void
   clearSearchFromButton: () => void
@@ -247,7 +247,21 @@ export const createTerminalWorkspaceShellRuntime = (
 
   const activatePanel = (panelId: string) => {
     workspace.activePanelId = panelId
-    focusPanel(panelId)
+    focusPanel(panelId, 'keyboard-navigation')
+  }
+
+  const activatePanelFromPointer = (event: MouseEvent, panel: TerminalPanel) => {
+    workspace.activePanelId = panel.id
+    if (!isTerminalWorkspacePanel(panel)) return
+    const target = event.target instanceof Element ? event.target : null
+    if (
+      target?.closest(
+        '[data-terminal-focus-guard], input, textarea, select, button, a[href], [contenteditable=""], [contenteditable="true"], [contenteditable="plaintext-only"], .monaco-editor'
+      )
+    ) {
+      return
+    }
+    focusPanel(panel.id, 'pointer')
   }
 
   const openMenu = (event: MouseEvent, panelId: string) => {
@@ -391,7 +405,7 @@ export const createTerminalWorkspaceShellRuntime = (
     const panel = workspace.createPanel(direction)
     await afterDomUpdate()
     focusPanel(panel.id)
-    void connectSplitPanelFromSource(panel, sourcePanel).finally(() => focusPanel(panel.id))
+    void connectSplitPanelFromSource(panel, sourcePanel)
     return panel
   }
 
@@ -689,7 +703,7 @@ export const createTerminalWorkspaceShellRuntime = (
       case 'commandDialog':
         if (commandDialog.visible) {
           const activeInput = getCommandDialogInput()
-          if (document.activeElement === activeInput) focusPanel(commandDialog.panelId)
+          if (document.activeElement === activeInput) focusPanel(commandDialog.panelId, 'keyboard-navigation')
           else focusCommandDialogInput()
         } else {
           void openCommandDialog(panelId)
@@ -842,7 +856,7 @@ export const createTerminalWorkspaceShellRuntime = (
       if (commandDialog.visible) {
         const activeInput = getCommandDialogInput()
         if (document.activeElement === activeInput) {
-          focusPanel(commandDialog.panelId)
+          focusPanel(commandDialog.panelId, 'keyboard-navigation')
         } else {
           focusCommandDialogInput()
         }
@@ -874,6 +888,7 @@ export const createTerminalWorkspaceShellRuntime = (
 
   return {
     activatePanel,
+    activatePanelFromPointer,
     canForkTerminalMenuPanel,
     canForkSelected,
     chatSelectionToAi,

@@ -182,6 +182,7 @@
     <div
       v-if="globalInputVisible"
       class="terminal-global-command"
+      data-terminal-focus-guard
       @click.stop
       @mousedown.stop
     >
@@ -285,7 +286,7 @@
         class="terminal-pane"
         :class="{ active: panel.id === workspace.activePanelId, below: panel.split === 'below', 'knowledge-pane': panel.kind === 'knowledge', 'managed-ai-session-pane': panel.kind === 'managed-ai-session', 'with-pane-title': workspace.hasSplitState(panel.id), 'drag-over': paneDragOverPanelId === panel.id, 'ai-attention': panelNeedsAiAttention(panel), 'control-flash': controlFlashingPanelIds.includes(panel.id) }"
         :style="style"
-        @click="activatePanel(panel.id)"
+        @click="activatePanelFromPointer($event, panel)"
         @dragenter.prevent="handlePaneDragEnter($event, panel)"
         @dragover.prevent="handlePaneDragOver($event, panel)"
         @dragleave="handlePaneDragLeave(panel.id)"
@@ -309,6 +310,7 @@
         <div
           v-if="searchOverlayPanelId === panel.id"
           class="terminal-search-overlay"
+          data-terminal-focus-guard
           @click.stop
           @mousedown.stop
         >
@@ -356,9 +358,12 @@
           v-if="commandDialog.visible && commandDialog.panelId === panel.id"
           ref="commandDialogRef"
           class="terminal-command-dialog"
+          data-terminal-focus-guard
           :class="{ loading: commandDialog.loading }"
           :style="commandDialogStyle(panel.id)"
           tabindex="-1"
+          @click.stop
+          @mousedown.stop
           @keydown.esc.stop.prevent="closeCommandDialog"
         >
           <div class="command-dialog-card">
@@ -412,7 +417,10 @@
         <div
           v-if="commandLinePanelId === panel.id"
           class="command-line floating"
+          data-terminal-focus-guard
           :style="commandLineStyle(panel.id)"
+          @click.stop
+          @mousedown.stop
         >
           <span>$</span>
           <input
@@ -454,7 +462,7 @@
           class="terminal-chat-ai-button"
           :style="{ top: `${aiButtonPosition.top}px`, right: `${aiButtonPosition.right}px` }"
           @mousedown.prevent
-          @click="chatSelectionToAi(panel.id)"
+          @click.stop="chatSelectionToAi(panel.id)"
         >
           <span>Chat to AI</span>
         </button>
@@ -541,6 +549,7 @@ import { useTerminalWorkspaceContainerRuntime } from '@/services/terminal/termin
 const {
   activeSuggestion,
   activatePanel,
+  activatePanelFromPointer,
   aiButtonPanelId,
   aiButtonPosition,
   aiSuggestLoading,

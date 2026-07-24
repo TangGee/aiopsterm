@@ -479,7 +479,7 @@ export const useTerminalWorkspaceContainerRuntime = () => {
     if (!panel || !isTerminalWorkspacePanel(panel)) return
     workspace.activeModule = 'workspace'
     workspace.activePanelId = panel.id
-    focusPanel(panel.id)
+    focusPanel(panel.id, 'pointer')
   }
   const copyActiveTerminalContext = async () => {
     const context = activeTerminalContextBar.value
@@ -511,6 +511,7 @@ export const useTerminalWorkspaceContainerRuntime = () => {
   const {
     activeView,
     applyTerminalSettingsToAll,
+    cancelPendingTerminalFocus,
     dispose: disposeTerminalViews,
     estimateTerminalCellSize,
     focusActivePanel,
@@ -545,8 +546,26 @@ export const useTerminalWorkspaceContainerRuntime = () => {
     suggestionItems,
     aiSuggestLoading,
     writeXtermInput: (panelId, data) => writeXtermInput(panelId, data),
-    shouldSuppressTerminalFocus: (panelId) => searchOverlayPanelId.value === panelId || globalInputVisible.value
+    shouldSuppressTerminalFocus: (panelId) =>
+      searchOverlayPanelId.value === panelId ||
+      commandLinePanelId.value === panelId ||
+      (commandDialog.visible && commandDialog.panelId === panelId) ||
+      globalInputVisible.value
   })
+
+  watch(
+    () =>
+      Boolean(
+        searchOverlayPanelId.value ||
+        commandLinePanelId.value ||
+        commandDialog.visible ||
+        globalInputVisible.value
+      ),
+    (overlayVisible) => {
+      if (overlayVisible) cancelPendingTerminalFocus()
+    },
+    { flush: 'sync' }
+  )
 
   const threadedDirectIngressForEvent = (event: TerminalDataEvent): TerminalThreadedDirectIngress | null => {
     const data = event.data || ''
@@ -614,8 +633,8 @@ export const useTerminalWorkspaceContainerRuntime = () => {
     aiButtonPanelId,
     activeView,
     estimateTerminalCellSize,
-    focusActivePanel,
-    focusPanel,
+    focusActivePanel: () => focusPanel(workspace.activePanelId, 'overlay-close'),
+    focusPanel: (panelId) => focusPanel(panelId, 'overlay-close'),
     getTerminalElement,
     syncTerminalView,
     terminalViews,
@@ -657,6 +676,7 @@ export const useTerminalWorkspaceContainerRuntime = () => {
 
   const {
     activatePanel,
+    activatePanelFromPointer,
     canForkTerminalMenuPanel,
     canForkSelected,
     chatSelectionToAi,
@@ -746,7 +766,8 @@ export const useTerminalWorkspaceContainerRuntime = () => {
     terminalViewSize,
     startSshTerminalForPanel,
     disconnectTerminalPanel,
-    scheduleVisibleTerminalFit
+    scheduleVisibleTerminalFit,
+    focusTerminalPanel: focusPanel
   })
   const controlFlashingPanelIds = terminalControlSurface.controlFlashingPanelIds
   const handleControlRequest = terminalControlSurface.handleControlRequest
@@ -1102,6 +1123,7 @@ export const useTerminalWorkspaceContainerRuntime = () => {
     activeSuggestion,
     activeTerminalContextBar,
     activatePanel,
+    activatePanelFromPointer,
     aiButtonPanelId,
     aiButtonPosition,
     aiSuggestLoading,

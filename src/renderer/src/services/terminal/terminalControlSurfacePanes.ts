@@ -23,6 +23,7 @@ import type {
   ControlSurfaceTelemetrySummary,
   ControlWorkspaceSnapshot
 } from '@shared/contracts/control'
+import type { TerminalFocusReason } from '@/services/terminal/terminalWorkspaceViewRuntime'
 
 type TerminalControlSurfacePaneDependencies = {
   workspace: WorkspaceStore
@@ -43,6 +44,7 @@ type TerminalControlSurfacePaneDependencies = {
   surfaceTelemetrySummaryForControl: (state?: ControlSurfaceTelemetryState) => ControlSurfaceTelemetrySummary | undefined
   workspaceSnapshotForControl: () => ControlWorkspaceSnapshot
   scheduleVisibleTerminalFit: (options?: { scrollToBottom?: boolean; frames?: number; forceGeometry?: boolean }) => void
+  focusTerminalPanel?: (panelId: string, reason: TerminalFocusReason) => void
 }
 
 export const createTerminalControlSurfacePaneHandlers = ({
@@ -63,8 +65,13 @@ export const createTerminalControlSurfacePaneHandlers = ({
   surfaceSummaryForControl,
   surfaceTelemetrySummaryForControl,
   workspaceSnapshotForControl,
-  scheduleVisibleTerminalFit
+  scheduleVisibleTerminalFit,
+  focusTerminalPanel
 }: TerminalControlSurfacePaneDependencies) => {
+  const requestExternalTerminalFocus = (panelId: string) => {
+    if (focusTerminalPanel) focusTerminalPanel(panelId, 'external-request')
+    else terminalViews.get(panelId)?.terminal.focus()
+  }
   const paneLayoutPayload = (panel?: TerminalPanel | null, targetPanel?: TerminalPanel | null, extra: Record<string, unknown> = {}) =>
     controlOk({
       ...(panel ? { pane: surfaceSummaryForControl(panel), surface: surfaceSummaryForControl(panel), surfaceId: panel.id, surface_id: panel.id } : {}),
@@ -146,7 +153,8 @@ export const createTerminalControlSurfacePaneHandlers = ({
     surfaceSummaryForControl,
     surfaceTelemetrySummaryForControl,
     workspaceSnapshotForControl,
-    scheduleVisibleTerminalFit
+    scheduleVisibleTerminalFit,
+    focusTerminalPanel
   })
 
   const focusControlPanel = async (panel: TerminalPanel, action: string) => {
@@ -154,7 +162,7 @@ export const createTerminalControlSurfacePaneHandlers = ({
     workspace.activeModule = 'workspace'
     workspace.activePanelId = panel.id
     await nextTick()
-    if (isTerminalWorkspacePanel(panel)) terminalViews.get(panel.id)?.terminal.focus()
+    if (isTerminalWorkspacePanel(panel)) requestExternalTerminalFocus(panel.id)
     return selectedPanePayload(panel, action, previousActivePanelId)
   }
 
@@ -306,7 +314,7 @@ export const createTerminalControlSurfacePaneHandlers = ({
         workspace.activePanelId = previousActivePanelId
       }
       await nextTick()
-      if (focus) terminalViews.get(panel.id)?.terminal.focus()
+      if (focus) requestExternalTerminalFocus(panel.id)
       return managementPanelPayload(panel, 'surface.create', 'createdPane', {
         workspaceId: 'main',
         workspace_id: 'main',
@@ -436,7 +444,7 @@ export const createTerminalControlSurfacePaneHandlers = ({
         workspace.activePanelId = previousActivePanelId
       }
       await nextTick()
-      if (controlBool(params.focus, false)) terminalViews.get(panel.id)?.terminal.focus()
+      if (controlBool(params.focus, false)) requestExternalTerminalFocus(panel.id)
       return paneLayoutPayload(panel, null, { changed, broken: changed })
     }
 
@@ -452,7 +460,7 @@ export const createTerminalControlSurfacePaneHandlers = ({
         workspace.activePanelId = previousActivePanelId
       }
       await nextTick()
-      if (controlBool(params.focus, false)) terminalViews.get(panel.id)?.terminal.focus()
+      if (controlBool(params.focus, false)) requestExternalTerminalFocus(panel.id)
       return paneLayoutPayload(panel, targetPanel, { changed, joined: changed })
     }
 
@@ -487,7 +495,7 @@ export const createTerminalControlSurfacePaneHandlers = ({
         workspace.activePanelId = previousActivePanelId
       }
       await nextTick()
-      terminalViews.get(workspace.activePanelId)?.terminal.focus()
+      if (controlBool(params.focus, false)) requestExternalTerminalFocus(workspace.activePanelId)
       return paneLayoutPayload(panel, targetPanel, { changed: true, swapped: true })
     }
 

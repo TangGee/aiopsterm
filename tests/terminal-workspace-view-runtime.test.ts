@@ -369,7 +369,7 @@ describe('terminalWorkspaceViewRuntime', () => {
     expect(terminal.focus).not.toHaveBeenCalled()
     expect(document.activeElement).toBe(aiInput)
 
-    runtime.focusPanel(panel.id)
+    runtime.focusPanel(panel.id, 'pointer')
     await flushFrames(2)
     expect(terminal.focus).toHaveBeenCalled()
   })
@@ -419,6 +419,25 @@ describe('terminalWorkspaceViewRuntime', () => {
     expect(document.activeElement).toBe(input)
 
     dialog.remove()
+    terminal.focus.mockClear()
+    const terminalOverlay = document.createElement('section')
+    terminalOverlay.dataset.terminalFocusGuard = ''
+    const overlayInput = document.createElement('textarea')
+    terminalOverlay.appendChild(overlayInput)
+    document.body.appendChild(terminalOverlay)
+    overlayInput.focus()
+
+    runtime.focusPanel(panel.id)
+    await flushFrames(2)
+    expect(terminal.focus).not.toHaveBeenCalled()
+    expect(document.activeElement).toBe(overlayInput)
+
+    runtime.focusPanel(panel.id, 'pointer')
+    await flushFrames(2)
+    expect(terminal.focus).toHaveBeenCalledTimes(1)
+
+    terminalOverlay.remove()
+    terminal.focus.mockClear()
     runtime.focusPanel(panel.id)
     await flushFrames(2)
     expect(terminal.focus).toHaveBeenCalled()
