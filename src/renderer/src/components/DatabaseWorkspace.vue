@@ -1,6 +1,9 @@
 <template>
   <section
     class="database-workspace"
+    data-ui-focus-scope="database"
+    data-ui-focus-primary
+    tabindex="-1"
     :class="{
       'db-ai-pane-visible': dbAiPaneOpen,
       'db-ai-pane-resizing': dbAiPaneResizing

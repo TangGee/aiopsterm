@@ -23,6 +23,7 @@ import { useI18n } from '@/i18n'
 import type { TerminalStressQueueSample } from '@/services/terminal/terminalStressHarness'
 import type { TerminalDataEvent } from '@shared/contracts/terminalSessions'
 import { shouldUseTerminalDebugLogs, shouldUseTerminalStressHarness } from '@shared/runtimeSwitches'
+import { registerUiFocusScope } from '@/services/app/uiFocusCoordinator'
 
 type TerminalDataPerfSummary = {
   chunks: number
@@ -56,7 +57,7 @@ type TerminalThreadedDirectIngress = {
   bytes: number
 }
 
-let activeTerminalWorkspaceRuntimeToken: symbol | null = null
+  let activeTerminalWorkspaceRuntimeToken: symbol | null = null
 
 const terminalDataSummaryDebugIntervalMs = 1000
 const terminalDataSummaryFormalIntervalMs = 10_000
@@ -160,6 +161,7 @@ export const useTerminalWorkspaceContainerRuntime = () => {
   let offControlRequest: (() => void) | null = null
   let terminalRuntimeMounted = false
   let uninstallTerminalStressHarness: (() => void) | null = null
+  let unregisterTerminalFocusScope: (() => void) | null = null
   const terminalDataPerf = new Map<string, TerminalDataPerfSummary>()
   const terminalHistoryBatches = new Map<string, TerminalHistoryBatch>()
   const terminalIngressBatches = new Map<string, TerminalIngressBatch>()
@@ -850,6 +852,32 @@ export const useTerminalWorkspaceContainerRuntime = () => {
   onMounted(() => {
     terminalRuntimeMounted = true
     activeTerminalWorkspaceRuntimeToken = runtimeToken
+    unregisterTerminalFocusScope = registerUiFocusScope({
+      id: 'workspace-terminal',
+      root: () => document.querySelector<HTMLElement>('.terminal-workspace'),
+      isActive: () => terminalWorkspaceVisible.value,
+      focusPrimary: () => {
+        const panel = workspace.panels.find((item) => item.id === workspace.activePanelId)
+        if (panel && isTerminalWorkspacePanel(panel)) {
+          focusPanel(panel.id, 'navigation')
+          return true
+        }
+        const activePane = document.querySelector<HTMLElement>('.terminal-workspace .terminal-pane.active')
+        const editable = activePane?.querySelector<HTMLElement>(
+          'textarea:not([disabled]), input:not([disabled]), [contenteditable="true"], .monaco-editor textarea'
+        )
+        if (editable) {
+          editable.focus({ preventScroll: true })
+          return true
+        }
+        if (activePane) {
+          activePane.tabIndex = -1
+          activePane.focus({ preventScroll: true })
+          return true
+        }
+        return false
+      }
+    })
     offData = terminalClient.onTerminalData()?.(handleTerminalData) || null
     setThreadedTerminalDataConsumedSink((sessionId, bytes) => {
       terminalClient.ackTerminalData()?.(sessionId, bytes)
@@ -895,6 +923,8 @@ export const useTerminalWorkspaceContainerRuntime = () => {
   onUnmounted(() => {
     setThreadedTerminalDataConsumedSink(null)
     terminalRuntimeMounted = false
+    unregisterTerminalFocusScope?.()
+    unregisterTerminalFocusScope = null
     uninstallTerminalStressHarness?.()
     uninstallTerminalStressHarness = null
     offData?.()

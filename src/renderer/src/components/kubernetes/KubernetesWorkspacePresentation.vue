@@ -1,5 +1,10 @@
 <template>
-  <section class="k8s-workspace">
+  <section
+    class="k8s-workspace"
+    data-ui-focus-scope="kubernetes"
+    data-ui-focus-primary
+    tabindex="-1"
+  >
     <KubernetesContextStrip />
     <div class="k8s-main-grid">
       <KubernetesTerminalSurface />

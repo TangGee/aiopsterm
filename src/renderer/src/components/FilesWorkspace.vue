@@ -1,5 +1,10 @@
 <template>
-  <section class="files-workspace">
+  <section
+    class="files-workspace"
+    data-ui-focus-scope="files"
+    data-ui-focus-primary
+    tabindex="-1"
+  >
     <div class="files-mode-switch">
       <button
         :class="{ active: workspace.filesUiMode === 'transfer' }"

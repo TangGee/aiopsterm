@@ -32,14 +32,19 @@ describe('clipboard runtime', () => {
 
   it('falls back to textarea copy for user-visible copy actions', async () => {
     vi.mocked(navigator.clipboard.writeText).mockRejectedValueOnce(new Error('clipboard denied'))
+    const source = document.createElement('textarea')
+    document.body.appendChild(source)
+    source.focus()
 
     await withMockExecCommand(
       () => true,
       async (execCommandSpy) => {
         await expect(copyTextToClipboard('visible copy')).resolves.toBe(true)
         expect(execCommandSpy).toHaveBeenCalledWith('copy')
+        expect(document.activeElement).toBe(source)
       }
     )
+    source.remove()
   })
 
   it('returns false when both user-visible clipboard paths fail', async () => {

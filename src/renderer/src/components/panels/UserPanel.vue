@@ -1,5 +1,10 @@
 <template>
-  <section class="user-info-workspace">
+  <section
+    class="user-info-workspace"
+    data-ui-focus-scope="user"
+    data-ui-focus-primary
+    tabindex="-1"
+  >
     <header class="user-info-title">
       <h2>个人信息</h2>
       <button

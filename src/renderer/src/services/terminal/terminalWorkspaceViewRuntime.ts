@@ -112,7 +112,7 @@ export type TerminalView = {
 }
 
 export type TerminalKeyboardShortcutHandler = (panelId: string, action: TerminalShortcutAction, event: KeyboardEvent) => boolean
-export type TerminalFocusReason = 'pointer' | 'keyboard-navigation' | 'topology' | 'overlay-close' | 'external-request'
+export type TerminalFocusReason = 'pointer' | 'keyboard-navigation' | 'navigation' | 'topology' | 'overlay-close' | 'external-request'
 
 type TerminalOutputPerfSummary = {
   chunks: number

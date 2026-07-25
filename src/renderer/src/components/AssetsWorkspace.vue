@@ -1,5 +1,10 @@
 <template>
-  <section class="assets-workspace">
+  <section
+    class="assets-workspace"
+    data-ui-focus-scope="assets"
+    data-ui-focus-primary
+    tabindex="-1"
+  >
     <AssetsPanel
       query=""
       mode="workspace"

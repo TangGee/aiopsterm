@@ -1,5 +1,10 @@
 <template>
-  <section class="extensions-workspace">
+  <section
+    class="extensions-workspace"
+    data-ui-focus-scope="extensions"
+    data-ui-focus-primary
+    tabindex="-1"
+  >
     <template v-if="workspace.selectedExtension">
       <ExtensionAliasConfig v-if="workspace.selectedExtension.pluginId === 'Alias'" />
       <ExtensionJumpserverDetail

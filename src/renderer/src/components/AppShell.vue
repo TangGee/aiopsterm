@@ -176,7 +176,7 @@
 </template>
 
 <script setup lang="ts">
-import { nextTick, ref } from 'vue'
+import { nextTick, ref, watch } from 'vue'
 import { X } from 'lucide-vue-next'
 import TopBar from '@/components/TopBar.vue'
 import SideRail from '@/components/SideRail.vue'
@@ -194,6 +194,8 @@ import UserPanel from '@/components/panels/UserPanel.vue'
 import OnboardingSpotlight from '@/components/onboarding/OnboardingSpotlight.vue'
 import type { ProductSessionUiRequest, ProductSessionUiRequestInput } from '@/components/productSessionUiTypes'
 import { useAppShellRuntime } from '@/services/app/appShellRuntime'
+import { isTerminalWorkspaceSurfaceVisible } from '@/config/navigation'
+import { requestUiFocus } from '@/services/app/uiFocusCoordinator'
 
 const {
   appBackgroundStyle,
@@ -224,6 +226,25 @@ const {
 
 const productSessionRequest = ref<ProductSessionUiRequest | null>(null)
 let productSessionRequestSequence = 0
+
+const activeFocusScope = () => {
+  if (workspace.mode === 'agents' || isTerminalWorkspaceSurfaceVisible(workspace.mode, workspace.activeModule)) {
+    return 'workspace-terminal'
+  }
+  return workspace.activeModule
+}
+
+watch(
+  () => `${workspace.mode}:${workspace.activeModule}`,
+  () => {
+    requestUiFocus({
+      scopeId: activeFocusScope(),
+      policy: 'target-primary',
+      cause: 'navigation'
+    })
+  },
+  { immediate: true, flush: 'post' }
+)
 
 const handleProductSessionRequest = async (request: ProductSessionUiRequestInput) => {
   if (request.surface === 'database') {

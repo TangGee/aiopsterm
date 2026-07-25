@@ -714,6 +714,49 @@ test('quick architecture migration baseline @quick', async () => {
   }
 })
 
+test('focus ownership survives module and window transitions @quick', async () => {
+  test.setTimeout(120_000)
+  const userDataDir = e2eUserDataDir('focus-ownership')
+  const app = await launchApp('focus-ownership', {}, { userDataDir })
+
+  try {
+    const page = await app.firstWindow()
+    await page.waitForLoadState('domcontentloaded')
+    await disableE2eMotion(page)
+
+    await page.locator('.workspace-search input').fill('127.0.0.1')
+    const localRow = page.locator('.workspace-host-row').filter({ hasText: '127.0.0.1' }).first()
+    await expect(localRow).toBeVisible()
+    await localRow.dblclick()
+    const terminalHost = page.locator('.terminal-pane.active .xterm-host')
+    await expect(terminalHost).toBeVisible()
+    await terminalHost.click()
+    await expect
+      .poll(() => page.evaluate(() => Boolean(document.activeElement?.closest('.terminal-pane.active .xterm-host'))))
+      .toBe(true)
+
+    await page.locator('[data-module-key="settings"]').click()
+    await expect(page.locator('[data-ui-focus-scope="settings"]')).toBeVisible()
+    await expect
+      .poll(() => page.evaluate(() => document.activeElement?.getAttribute('data-ui-focus-scope') || ''))
+      .toBe('settings')
+
+    await page.locator('[data-module-key="workspace"]').click()
+    await expect(terminalHost).toBeVisible()
+    await expect
+      .poll(() => page.evaluate(() => Boolean(document.activeElement?.closest('.terminal-pane.active .xterm-host'))))
+      .toBe(true)
+
+    await page.locator('.window-control-button').nth(1).click()
+    await expect
+      .poll(() => page.evaluate(() => Boolean(document.activeElement?.closest('.terminal-pane.active .xterm-host'))))
+      .toBe(true)
+  } finally {
+    await app.close().catch(() => undefined)
+    await rm(userDataDir, { recursive: true, force: true })
+  }
+})
+
 test('managed AI session notifications flow through real local terminal hooks', async () => {
   test.setTimeout(120_000)
   const hasCodex = await commandExists('codex')

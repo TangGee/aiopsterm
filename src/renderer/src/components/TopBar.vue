@@ -2,6 +2,7 @@
   <header
     class="top-bar"
     data-onboarding-id="top-layout-controls"
+    data-ui-focus-chrome
   >
     <div class="top-left">
       <div class="brand-mark">ai</div>
@@ -107,6 +108,7 @@
         <button
           class="window-control-button"
           :title="t('top.windowMinimize')"
+          @pointerdown="preserveContentFocusOnPointerDown"
           @click="minimizeWindow"
         >
           <Minus />
@@ -114,6 +116,7 @@
         <button
           class="window-control-button"
           :title="isMaximized ? t('top.windowRestore') : t('top.windowMaximize')"
+          @pointerdown="preserveContentFocusOnPointerDown"
           @click="toggleMaximize"
         >
           <CopyMinus v-if="isMaximized" />
@@ -122,6 +125,7 @@
         <button
           class="window-control-button close"
           :title="t('top.windowClose')"
+          @pointerdown="preserveContentFocusOnPointerDown"
           @click="closeWindow"
         >
           <X />
@@ -153,6 +157,7 @@ import {
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useI18n } from '@/i18n'
 import { windowControlsClient } from '@/services/app/windowControlsClient'
+import { preserveContentFocusOnPointerDown } from '@/services/app/uiFocusCoordinator'
 import { settingsLanguageOptions } from '@/config/settings'
 
 const workspace = useWorkspaceStore()

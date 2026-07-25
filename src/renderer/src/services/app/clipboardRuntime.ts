@@ -1,3 +1,5 @@
+import { captureUiFocus, restoreUiFocus } from '@/services/app/uiFocusCoordinator'
+
 export const copyTextToClipboard = async (text: string): Promise<boolean> => {
   if (navigator.clipboard?.writeText) {
     try {
@@ -12,6 +14,7 @@ export const copyTextToClipboard = async (text: string): Promise<boolean> => {
   if (!execCopy) return false
 
   const textarea = document.createElement('textarea')
+  const focusSnapshot = captureUiFocus()
   textarea.value = text
   textarea.setAttribute('readonly', '')
   textarea.style.position = 'fixed'
@@ -26,6 +29,7 @@ export const copyTextToClipboard = async (text: string): Promise<boolean> => {
     return false
   } finally {
     document.body.removeChild(textarea)
+    restoreUiFocus(focusSnapshot)
   }
 }
 

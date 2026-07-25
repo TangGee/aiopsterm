@@ -1,5 +1,8 @@
 <template>
-  <section class="terminal-workspace">
+  <section
+    class="terminal-workspace"
+    data-ui-focus-scope="workspace-terminal"
+  >
     <div
       class="terminal-tabs-frame"
       :class="{ 'drag-restore': tabBarDragOver, 'can-scroll-left': terminalTabScrollState.canScrollLeft, 'can-scroll-right': terminalTabScrollState.canScrollRight }"

@@ -1,5 +1,8 @@
 <template>
-  <aside class="side-rail">
+  <aside
+    class="side-rail"
+    data-ui-focus-chrome
+  >
     <nav class="rail-main">
       <template
         v-for="item in mainItems"

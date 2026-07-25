@@ -1,5 +1,10 @@
 <template>
-  <section class="settings-workspace">
+  <section
+    class="settings-workspace"
+    data-ui-focus-scope="settings"
+    data-ui-focus-primary
+    tabindex="-1"
+  >
     <header class="settings-workspace-title">
       <h2>{{ t('common.settings') }}</h2>
       <button
