@@ -16,6 +16,7 @@
       spellcheck="false"
       @input="handleFallbackInput"
       @keydown="handleFallbackKeydown"
+      @blur="emit('blur')"
     />
   </div>
 </template>
@@ -24,18 +25,21 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type * as monaco from 'monaco-editor/esm/vs/editor/editor.api'
 import { editorLineHeightPx, resolveEditorFontFamily } from '@/services/common/editorRuntime'
-import { loadMonaco, type MonacoModule } from '@/services/common/monacoRuntime'
+import { loadMonaco, resolveMonacoLanguageId, type MonacoModule } from '@/services/common/monacoRuntime'
 import { useWorkspaceStore } from '@/stores/workspace'
 
 const props = defineProps<{
   modelValue: string
-  language: string
+  language?: string
+  filePath?: string
+  minimap?: boolean
   readonly?: boolean
 }>()
 
 const emit = defineEmits<{
   (event: 'update:modelValue', value: string): void
   (event: 'save'): void
+  (event: 'blur'): void
 }>()
 
 const workspace = useWorkspaceStore()
@@ -46,9 +50,9 @@ let monacoApi: MonacoModule | null = null
 let editor: monaco.editor.IStandaloneCodeEditor | null = null
 let suppressEditorEmit = false
 let suppressFallbackEmit = false
+const resolvedLanguage = ref('plaintext')
 
 const monacoTheme = computed(() => (workspace.config.theme === 'light' || document.documentElement.dataset.theme === 'light' ? 'vs' : 'vs-dark'))
-const normalizedLanguage = computed(() => (props.language === 'text' ? 'plaintext' : props.language || 'plaintext'))
 const editorOptions = computed<monaco.editor.IStandaloneEditorConstructionOptions>(() => {
   const settings = workspace.editorSettings
   return {
@@ -57,12 +61,23 @@ const editorOptions = computed<monaco.editor.IStandaloneEditorConstructionOption
     lineHeight: editorLineHeightPx(settings),
     tabSize: settings.tabSize,
     wordWrap: settings.wordWrap,
-    minimap: { enabled: settings.minimap },
+    minimap: { enabled: props.minimap ?? settings.minimap },
     mouseWheelZoom: settings.mouseWheelZoom,
     theme: monacoTheme.value,
     readOnly: !!props.readonly
   }
 })
+
+const updateResolvedLanguage = () => {
+  const requested = props.language?.trim()
+  if (requested && requested !== 'auto') {
+    resolvedLanguage.value = requested === 'text' ? 'plaintext' : requested
+    return
+  }
+  resolvedLanguage.value = monacoApi
+    ? resolveMonacoLanguageId(monacoApi.languages.getLanguages(), props.filePath || '', props.modelValue)
+    : 'plaintext'
+}
 
 const applyModelOptions = () => {
   const model = editor?.getModel()
@@ -86,7 +101,7 @@ const createEditor = () => {
   if (!containerRef.value || editor || !monacoApi) return
   editor = monacoApi.editor.create(containerRef.value, {
     value: props.modelValue,
-    language: normalizedLanguage.value,
+    language: resolvedLanguage.value,
     automaticLayout: true,
     scrollBeyondLastLine: false,
     smoothScrolling: true,
@@ -117,6 +132,7 @@ const createEditor = () => {
     syncFallbackValue(value)
     if (value !== props.modelValue) emit('update:modelValue', value)
   })
+  editor.onDidBlurEditorWidget?.(() => emit('blur'))
   monacoReady.value = true
 }
 
@@ -150,6 +166,7 @@ const focus = () => {
 onMounted(async () => {
   syncFallbackValue(props.modelValue)
   monacoApi = await loadMonaco()
+  updateResolvedLanguage()
   await nextTick()
   createEditor()
 })
@@ -166,11 +183,12 @@ watch(
 )
 
 watch(
-  normalizedLanguage,
-  (language) => {
+  () => [props.language, props.filePath, props.modelValue.split(/\r?\n/, 1)[0]],
+  () => {
+    updateResolvedLanguage()
     const model = editor?.getModel()
     if (!model || !monacoApi) return
-    monacoApi.editor.setModelLanguage(model, language)
+    monacoApi.editor.setModelLanguage(model, resolvedLanguage.value)
   }
 )
 

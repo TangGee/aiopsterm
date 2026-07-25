@@ -1,4 +1,4 @@
-import { randomUUID } from 'crypto'
+import { createHash, randomUUID } from 'crypto'
 import { watch, type FSWatcher } from 'fs'
 import { lstat, mkdir, readFile, readdir, realpath, rename, stat, writeFile } from 'fs/promises'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'path'
@@ -99,6 +99,7 @@ const watchDebounce = new Map<string, NodeJS.Timeout>()
 const cleanText = (value: unknown) => (typeof value === 'string' ? value.trim() : '')
 const slashPath = (value: string) => value.split(sep).join('/')
 const failure = (errorCode: string, errorMessage: string) => ({ ok: false as const, errorCode, errorMessage })
+const contentHash = (content: Buffer | string) => createHash('sha256').update(content).digest('hex')
 
 const trackingCapabilityFor = (source: string): ProjectFileTrackingCapability =>
   adapterSources.has(source) ? 'adapter' : 'limited'
@@ -426,6 +427,7 @@ export const readProjectFile = async (input: ProjectFileReadInput): Promise<Proj
         projectRoot: context.projectRoot,
         relativePath: path.relativePath,
         content: buffer.toString('utf8'),
+        contentHash: contentHash(buffer),
         size: metadata.size,
         mtimeMs: metadata.mtimeMs
       }
@@ -457,10 +459,29 @@ export const writeProjectFile = async (input: ProjectFileWriteInput): Promise<Pr
       if (before && input.expectedMtimeMs !== undefined && Math.abs(before.mtimeMs - input.expectedMtimeMs) > 1) {
         return failure('PROJECT_FILE_CONFLICT', 'The file changed on disk.')
       }
+      if (before && input.expectedContentHash !== undefined) {
+        const currentHash = contentHash(await readFile(path.absolutePath))
+        if (currentHash !== input.expectedContentHash) {
+          return failure('PROJECT_FILE_CONFLICT', 'The file changed on disk.')
+        }
+      }
     }
     await mkdir(dirname(path.absolutePath), { recursive: true })
     await writeFile(path.absolutePath, content, 'utf8')
+    const writtenContentHash = contentHash(content)
+    const persistedContentHash = contentHash(await readFile(path.absolutePath))
+    if (persistedContentHash !== writtenContentHash) {
+      return failure('PROJECT_FILE_CONFLICT', 'The file changed while it was being saved.')
+    }
     const after = await stat(path.absolutePath)
+    for (const parent of parentWatches.values()) {
+      for (const target of parent.targets.values()) {
+        if (target.absolutePath !== path.absolutePath) continue
+        target.existed = true
+        target.lastMtimeMs = after.mtimeMs
+        target.lastSize = after.size
+      }
+    }
     await recordProjectFileChange(
       {
         protocolVersion: 1,
@@ -476,6 +497,7 @@ export const writeProjectFile = async (input: ProjectFileWriteInput): Promise<Pr
       data: {
         projectRoot: context.projectRoot,
         relativePath: path.relativePath,
+        contentHash: writtenContentHash,
         size: after.size,
         mtimeMs: after.mtimeMs,
         created: !before

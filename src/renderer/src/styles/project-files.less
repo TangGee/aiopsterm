@@ -318,12 +318,14 @@
 .project-file-editor {
   min-width: 0;
   min-height: 0;
-  display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
   background: var(--theme-module-active-panel-bg);
 }
 
 .project-file-editor > header {
+  flex: 0 0 auto;
   min-height: 45px;
   justify-content: space-between;
   gap: 12px;
@@ -340,6 +342,7 @@
 }
 
 .project-file-conflict {
+  flex: 0 0 auto;
   min-height: 36px;
   gap: 8px;
   padding: 5px 10px;
@@ -352,16 +355,20 @@
 }
 
 .project-file-error {
+  flex: 0 0 auto;
   padding: 18px;
   color: #dc6b6b;
 }
 
 .project-file-editor .files-monaco-editor {
+  flex: 1 1 auto;
   min-height: 0;
-  height: 100%;
+  height: auto;
+  background: var(--theme-module-active-modal-bg);
 }
 
 .project-file-editor > footer {
+  flex: 0 0 auto;
   min-height: 24px;
   justify-content: space-between;
   gap: 10px;
@@ -369,4 +376,17 @@
   border-top: 1px solid var(--theme-module-active-border);
   color: var(--theme-module-active-text-muted);
   font-size: 10px;
+}
+
+.project-file-editor > footer .saving,
+.project-file-editor > footer .dirty {
+  color: var(--theme-module-active-accent);
+}
+
+.project-file-editor > footer .conflict {
+  color: #d5a83f;
+}
+
+.project-file-editor > footer .error {
+  color: #dc6b6b;
 }

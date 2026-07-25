@@ -45,6 +45,7 @@ import {
   type TerminalSessionAsset
 } from '@/services/terminal/terminalPanelRuntime'
 import { isTerminalWorkspaceModule, type ModuleKey } from '@/config/navigation'
+import { flushProjectFileEditor } from '@/services/files/projectFileEditorSaveRegistry'
 import type { ExtensionSettings, KeywordHighlightSettings, TerminalSettings } from '@/services/settings/workspaceConfigRuntime'
 import type { TerminalProgress } from '@/services/terminal/terminalOscRuntime'
 import type { AiContextOption } from '@shared/contracts/aiChat'
@@ -157,35 +158,37 @@ export const createWorkspaceTerminalPanelsController = (
     }
   }
 
-  const closePanel = (id = activePanelId.value) => {
+  const closePanel = async (id = activePanelId.value) => {
     const targetPanel = panels.value.find((panel) => panel.id === id)
-    if (targetPanel?.kind === 'project-file' && targetPanel.projectFile?.dirty &&
-      typeof window !== 'undefined' && !window.confirm('This file has unsaved changes. Close it anyway?')) {
-      return Promise.resolve({ closed: false, panelId: id, terminalStatus: 'none' as const })
+    if (targetPanel?.kind === 'project-file' && targetPanel.projectFile?.dirty) {
+      await flushProjectFileEditor(id)
+      if (targetPanel.projectFile.dirty &&
+        typeof window !== 'undefined' && !window.confirm('This file could not be saved. Close it anyway?')) {
+        return { closed: false, panelId: id, terminalStatus: 'none' as const }
+      }
     }
     const descriptor = closedPanelDescriptors(
       panels.value.filter((panel) => panel.id === id || (panels.value.length === 1 && isTerminalWorkspacePanel(panel)))
     )[0]
-    if (!descriptor) return Promise.resolve({ closed: false, panelId: id, terminalStatus: 'none' as const })
-    if (!descriptor.sessionId) return Promise.resolve(removeClosedPanel(descriptor, 'none'))
+    if (!descriptor) return { closed: false, panelId: id, terminalStatus: 'none' as const }
+    if (!descriptor.sessionId) return removeClosedPanel(descriptor, 'none')
 
     const killTerminal = terminalClient.killTerminal()
     if (!killTerminal) {
       setTopNotice(i18nText('aiSessions.notice.terminalCloseUnavailable'))
-      return Promise.resolve({ closed: false, panelId: descriptor.id, terminalSessionId: descriptor.sessionId, terminalStatus: 'failed' as const })
+      return { closed: false, panelId: descriptor.id, terminalSessionId: descriptor.sessionId, terminalStatus: 'failed' as const }
     }
     const sessionId = descriptor.sessionId
-    return killTerminal(sessionId)
-      .then((result) => {
-        if (result?.ok && result.data?.id === sessionId) return removeClosedPanel(descriptor, 'killed')
-        if (!result?.ok && result?.errorCode === 'TERMINAL_SESSION_NOT_FOUND') return removeClosedPanel(descriptor, 'missing')
-        setTopNotice(result?.errorMessage || i18nText('aiSessions.notice.terminalCloseFailed'))
-        return { closed: false, panelId: descriptor.id, terminalSessionId: sessionId, terminalStatus: 'failed' as const }
-      })
-      .catch((error) => {
-        setTopNotice(error instanceof Error && error.message.trim() ? error.message : i18nText('aiSessions.notice.terminalCloseFailed'))
-        return { closed: false, panelId: descriptor.id, terminalSessionId: sessionId, terminalStatus: 'failed' as const }
-      })
+    try {
+      const result = await killTerminal(sessionId)
+      if (result?.ok && result.data?.id === sessionId) return removeClosedPanel(descriptor, 'killed')
+      if (!result?.ok && result?.errorCode === 'TERMINAL_SESSION_NOT_FOUND') return removeClosedPanel(descriptor, 'missing')
+      setTopNotice(result?.errorMessage || i18nText('aiSessions.notice.terminalCloseFailed'))
+      return { closed: false, panelId: descriptor.id, terminalSessionId: sessionId, terminalStatus: 'failed' as const }
+    } catch (error) {
+      setTopNotice(error instanceof Error && error.message.trim() ? error.message : i18nText('aiSessions.notice.terminalCloseFailed'))
+      return { closed: false, panelId: descriptor.id, terminalSessionId: sessionId, terminalStatus: 'failed' as const }
+    }
   }
 
   const discardPendingTerminalPanel = (id: string, preferredActiveId?: string) => {

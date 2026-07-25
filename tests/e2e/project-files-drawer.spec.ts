@@ -1,5 +1,5 @@
 import { _electron as electron, expect, test } from '@playwright/test'
-import { mkdir, rm, writeFile } from 'fs/promises'
+import { mkdir, readFile, rm, writeFile } from 'fs/promises'
 import os from 'os'
 import path from 'path'
 
@@ -142,12 +142,52 @@ test('project files uses a contextual drawer inside the persistent AI panel', as
     expect(panelBox?.y).toBe(aiBox?.y)
     expect(drawerBox!.y).toBeGreaterThan(headerBox!.y + headerBox!.height)
 
+    await drawer.locator('.project-files-tree-row').filter({ hasText: 'src' }).click()
+    const mainFileRow = drawer.locator('.project-files-tree-row').filter({ hasText: 'main.ts' })
+    await expect(mainFileRow).toBeVisible()
+    await mainFileRow.click()
+
+    const projectEditor = page.locator('.project-file-editor')
+    const monacoEditor = projectEditor.locator('.files-monaco-editor')
+    await expect(projectEditor).toBeVisible()
+    await expect(monacoEditor).toHaveClass(/monaco-ready/)
+    const editorGeometry = await Promise.all([
+      projectEditor.boundingBox(),
+      projectEditor.locator('header').boundingBox(),
+      monacoEditor.boundingBox(),
+      projectEditor.locator('footer').boundingBox()
+    ])
+    const [projectEditorBox, projectEditorHeaderBox, monacoEditorBox, projectEditorFooterBox] = editorGeometry
+    expect(monacoEditorBox!.height).toBeGreaterThan(projectEditorBox!.height * 0.7)
+    expect(monacoEditorBox!.y).toBeGreaterThanOrEqual(projectEditorHeaderBox!.y + projectEditorHeaderBox!.height - 1)
+    expect(projectEditorFooterBox!.y + projectEditorFooterBox!.height).toBeGreaterThanOrEqual(
+      projectEditorBox!.y + projectEditorBox!.height - 1
+    )
+    await expect(projectEditor.locator('.minimap')).toBeHidden()
+
+    await projectEditor.locator('.view-lines').click()
+    await page.keyboard.press('Control+A')
+    await page.keyboard.insertText('export const autosaved = true\n')
+    await expect.poll(() => readFile(path.join(projectRoot, 'src', 'main.ts'), 'utf8')).toBe('export const autosaved = true\n')
+    await expect(projectEditor.locator('footer')).toContainText('Saved')
+
+    await projectEditor.locator('.view-lines').click()
+    await page.keyboard.press('Control+End')
+    await page.keyboard.insertText('// local pending\n')
+    await writeFile(path.join(projectRoot, 'src', 'main.ts'), 'export const agent = true\n', 'utf8')
+    await expect(projectEditor.locator('.project-file-conflict')).toBeVisible()
+    await expect(projectEditor.locator('footer')).toContainText('Conflict')
+    await page.waitForTimeout(1200)
+    await expect.poll(() => readFile(path.join(projectRoot, 'src', 'main.ts'), 'utf8')).toBe('export const agent = true\n')
+
     const capturePath = process.env.AIOPSTERM_PROJECT_FILES_CAPTURE
     if (capturePath) await page.screenshot({ path: capturePath })
 
+    await page.locator('.side-rail .rail-button[title="AI 会话"]').click()
     const secondSessionRow = page.locator('.ai-session-row').filter({
       has: page.locator('.ai-session-row-title').getByText('Second project files E2E', { exact: true })
     })
+    await expect(secondSessionRow).toBeVisible()
     await secondSessionRow.click()
     await expect(drawer).toBeVisible()
     await expect(drawer.locator('.project-files-header-title strong')).toHaveText(path.basename(secondProjectRoot))

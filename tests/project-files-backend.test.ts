@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -21,7 +21,7 @@ afterEach(async () => {
   await Promise.all(cleanup.splice(0).map((path) => rm(path, { recursive: true, force: true })))
 })
 
-const setupRuntime = async () => {
+const setupRuntime = async (emitWatchEvent?: (event: Record<string, unknown>) => void) => {
   const projectFiles = await loadBackend()
   const userDataPath = await mkdtemp(join(tmpdir(), 'aiopsterm-project-files-user-'))
   const projectRoot = await mkdtemp(join(tmpdir(), 'aiopsterm-project-files-root-'))
@@ -45,7 +45,8 @@ const setupRuntime = async () => {
       if (sessionId === 'session-2') return secondSession
       return null
     },
-    findProductSession: () => null
+    findProductSession: () => null,
+    emitWatchEvent
   })
   return { projectRoot, projectFiles }
 }
@@ -143,6 +144,68 @@ describe('project files backend', () => {
       overwrite: true
     })
     expect(saved).toMatchObject({ ok: true, data: { created: false, size: 7 } })
+  })
+
+  it('rejects same-size external edits through the content hash revision', async () => {
+    const { projectRoot, projectFiles } = await setupRuntime()
+    const filePath = join(projectRoot, 'same-size.ts')
+    await writeFile(filePath, 'first\n')
+
+    const read = await projectFiles.readProjectFile({
+      source: 'codex',
+      sessionId: 'session-1',
+      relativePath: 'same-size.ts'
+    })
+    await writeFile(filePath, 'other\n')
+    const changed = await stat(filePath)
+
+    const conflict = await projectFiles.writeProjectFile({
+      source: 'codex',
+      sessionId: 'session-1',
+      relativePath: 'same-size.ts',
+      content: 'local\n',
+      expectedMtimeMs: changed.mtimeMs,
+      expectedSize: changed.size,
+      expectedContentHash: read.data?.contentHash
+    })
+
+    expect(conflict).toMatchObject({ ok: false, errorCode: 'PROJECT_FILE_CONFLICT' })
+  })
+
+  it('suppresses watcher notifications for editor writes but still reports external writes', async () => {
+    const events: Array<Record<string, unknown>> = []
+    const { projectRoot, projectFiles } = await setupRuntime((event) => events.push(event))
+    const filePath = join(projectRoot, 'watched.ts')
+    await writeFile(filePath, 'first\n')
+    const read = await projectFiles.readProjectFile({
+      source: 'codex',
+      sessionId: 'session-1',
+      relativePath: 'watched.ts'
+    })
+    await projectFiles.startProjectFileWatch({
+      source: 'codex',
+      sessionId: 'session-1',
+      relativePath: 'watched.ts',
+      watchId: 'watch-editor'
+    })
+
+    await projectFiles.writeProjectFile({
+      source: 'codex',
+      sessionId: 'session-1',
+      relativePath: 'watched.ts',
+      content: 'saved\n',
+      expectedMtimeMs: read.data?.mtimeMs,
+      expectedSize: read.data?.size,
+      expectedContentHash: read.data?.contentHash
+    })
+    await new Promise((resolve) => setTimeout(resolve, 180))
+    expect(events).toEqual([])
+
+    await writeFile(filePath, 'agent\n')
+    await new Promise((resolve) => setTimeout(resolve, 180))
+    expect(events).toEqual([
+      expect.objectContaining({ watchId: 'watch-editor', relativePath: 'watched.ts', kind: 'modified' })
+    ])
   })
 
   it('shares non-recursive parent watchers and releases the last lease', async () => {

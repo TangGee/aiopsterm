@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createFilesWorkspaceEditorRuntime, filesWorkspaceEditorLanguage } from '@/services/files/filesWorkspaceEditorRuntime'
+import { resolveMonacoLanguageId } from '@/services/common/monacoRuntime'
 import type { FileSessionInfo, FileTransferTask } from '@shared/contracts/files'
 
 const transferTask = (input: Partial<FileTransferTask> & Pick<FileTransferTask, 'id'>): FileTransferTask => ({
@@ -23,6 +24,26 @@ const session = (input: Partial<FileSessionInfo> & Pick<FileSessionInfo, 'id' | 
 })
 
 describe('filesWorkspaceEditorRuntime', () => {
+  it('resolves registered Monaco languages by filename, pattern, longest extension, and first line', () => {
+    const languages = [
+      { id: 'dockerfile', filenames: ['Dockerfile'] },
+      { id: 'typescript', extensions: ['.ts', '.d.ts'] },
+      { id: 'javascript', extensions: ['.js'], firstLine: '^#!.*\\bnode' },
+      { id: 'python', extensions: ['.py'], firstLine: '^#!/.*\\bpython[0-9.-]*\\b' },
+      { id: 'yaml', filenamePatterns: ['*.workflow.yml'], extensions: ['.yml'] },
+      { id: 'html', extensions: ['.html'] },
+      { id: 'css', extensions: ['.css'] }
+    ]
+
+    expect(resolveMonacoLanguageId(languages, '/work/Dockerfile')).toBe('dockerfile')
+    expect(resolveMonacoLanguageId(languages, '/work/types/app.d.ts')).toBe('typescript')
+    expect(resolveMonacoLanguageId(languages, '/work/build.workflow.yml')).toBe('yaml')
+    expect(resolveMonacoLanguageId(languages, '/work/index.html')).toBe('html')
+    expect(resolveMonacoLanguageId(languages, '/work/styles.css')).toBe('css')
+    expect(resolveMonacoLanguageId(languages, '/work/tool', '#!/usr/bin/env python3\nprint(1)')).toBe('python')
+    expect(resolveMonacoLanguageId(languages, '/work/README.unknown', 'plain text')).toBe('plaintext')
+  })
+
   it('opens files through injected bridge dependencies, reuses existing editors, and saves backend-confirmed content', async () => {
     const task = transferTask({ id: 'save-task' })
     const readFileContent = vi.fn(async () => ({

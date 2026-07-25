@@ -85,6 +85,7 @@ export type ProjectFileReadResult = AiopsMutationResult<{
   projectRoot: string
   relativePath: string
   content: string
+  contentHash: string
   size: number
   mtimeMs: number
 }>
@@ -93,12 +94,14 @@ export type ProjectFileWriteInput = ProjectFileReadInput & {
   content: string
   expectedMtimeMs?: number
   expectedSize?: number
+  expectedContentHash?: string
   overwrite?: boolean
 }
 
 export type ProjectFileWriteResult = AiopsMutationResult<{
   projectRoot: string
   relativePath: string
+  contentHash: string
   size: number
   mtimeMs: number
   created: boolean
