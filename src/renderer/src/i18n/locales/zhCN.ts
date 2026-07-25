@@ -746,6 +746,8 @@ export const zhCN = {
   'ai.emptyNoModelConfigure': '请配置可用模型',
   'ai.configureModel': '配置模型',
   'ai.addContext': '@ 添加上下文',
+  'ai.openedHosts': '已打开主机',
+  'ai.hostContextHint': '主机上下文：{host}。Agent 执行时将复用或打开终端。',
   'ai.removeContext': '移除上下文',
   'ai.inputPlaceholder': '描述你的运维目标',
   'ai.classicModeAgent': 'Agent',

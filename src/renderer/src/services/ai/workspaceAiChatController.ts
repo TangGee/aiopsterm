@@ -103,6 +103,8 @@ export const createWorkspaceAiChatController = (
     i18nText,
     resolveAiKnowledgeSearchContexts,
     applyMcpServersSnapshot,
+    openedHostContexts = () => [],
+    activeHostContext = () => null,
     resolveActiveWritableTerminalPanel,
     resolveClassicHostTerminalPanel,
     openTerminalForAiHostContext,
@@ -323,11 +325,13 @@ export const createWorkspaceAiChatController = (
       todoItems
     },
     setTopNotice,
-    loadChatConversationsFromBackend
+    loadChatConversationsFromBackend,
+    openedHostContexts
   })
 
   const {
     refreshAiContextCatalog: refreshAiContextCatalogFromBackend,
+    syncOpenedHostContexts,
     refreshAiCommandCatalog,
     refreshAiTodoSnapshot,
     hydrateClassicChatData
@@ -339,7 +343,10 @@ export const createWorkspaceAiChatController = (
   const classicHostOpenQueues = new Map<string, Promise<ReturnType<typeof resolveClassicHostTerminalPanel>>>()
   let classicContextRestoreGeneration = 0
   let applyingClassicContextProjection = false
+  let classicAutoFollowActiveHost = true
   let stopSelectedContextsWatch: () => void = () => undefined
+  let stopOpenedHostsWatch: () => void = () => undefined
+  let stopActiveHostWatch: () => void = () => undefined
 
   const onProductSessionChanged = productSessionClient.onChanged()
   const stopProductSessionChanged = onProductSessionChanged?.((event) => {
@@ -352,7 +359,9 @@ export const createWorkspaceAiChatController = (
       if (selectedConversationId.value === event.id) {
         selectedConversationId.value = ''
         chatMessages.value = []
-        selectedContexts.value = []
+        classicAutoFollowActiveHost = true
+        applyClassicContexts([])
+        syncAutoFollowHostContext()
         clearAiContextUsage()
       }
       return
@@ -366,12 +375,15 @@ export const createWorkspaceAiChatController = (
   })
   const disposeClassicContextProjection = () => {
     stopSelectedContextsWatch()
+    stopOpenedHostsWatch()
+    stopActiveHostWatch()
     stopProductSessionChanged?.()
     clineTaskEventLifecycle.dispose()
   }
 
   const cloneClassicContext = (context: ProductSessionClassicContext): ProductSessionClassicContext => ({
-    contexts: context.contexts.map((item) => ({ ...item }))
+    contexts: context.contexts.map((item) => ({ ...item })),
+    ...(context.autoFollowActiveHost !== undefined ? { autoFollowActiveHost: context.autoFollowActiveHost } : {})
   })
 
   const readClassicProductSession = async (
@@ -412,13 +424,32 @@ export const createWorkspaceAiChatController = (
     }
   }
 
+  const hostContextSignature = (contexts: AiContextOption[]) =>
+    contexts
+      .filter((context) => context.kind === 'hosts')
+      .map((context) => classicHostTargetId(context))
+      .join('\u0000')
+
+  const hasClassicUserMessage = () => chatMessages.value.some((message) => message.role === 'user')
+
+  const applyAutoFollowHostContext = () => {
+    if (!classicAutoFollowActiveHost || hasClassicUserMessage()) return false
+    const host = activeHostContext()
+    const nonHosts = selectedContexts.value.filter((context) => context.kind !== 'hosts')
+    const nextContexts = host ? [{ ...host }, ...nonHosts] : nonHosts
+    if (hostContextSignature(nextContexts) === hostContextSignature(selectedContexts.value)) return false
+    applyClassicContexts(nextContexts)
+    return true
+  }
+
   const persistClassicContextProjection = (
     id: string,
-    input: { contexts?: AiContextOption[]; notifyFailure?: boolean } = {}
+    input: { contexts?: AiContextOption[]; autoFollowActiveHost?: boolean; notifyFailure?: boolean } = {}
   ) => {
     const conversationId = id.trim()
     if (!conversationId) return Promise.resolve(false)
     const contextRefs = classicSessionContextRefs(input.contexts || selectedContexts.value)
+    const autoFollowActiveHost = input.autoFollowActiveHost ?? classicAutoFollowActiveHost
     const previous = classicContextPersistQueues.get(conversationId) || Promise.resolve(true)
     const pending = previous
       .catch(() => false)
@@ -432,7 +463,8 @@ export const createWorkspaceAiChatController = (
           )
         }
         const classicContext: ProductSessionClassicContext = {
-          contexts: contextRefs.map((context) => ({ ...context }))
+          contexts: contextRefs.map((context) => ({ ...context })),
+          autoFollowActiveHost
         }
         const updateProductSession = productSessionClient.update()
         if (!updateProductSession) {
@@ -458,6 +490,12 @@ export const createWorkspaceAiChatController = (
       })
     classicContextPersistQueues.set(conversationId, pending)
     return pending
+  }
+
+  const syncAutoFollowHostContext = () => {
+    if (!applyAutoFollowHostContext()) return
+    const id = selectedConversationId.value.trim()
+    if (id) void persistClassicContextProjection(id)
   }
 
   const resolveClassicHostTargets = async (
@@ -533,7 +571,9 @@ export const createWorkspaceAiChatController = (
     if (generation !== classicContextRestoreGeneration || selectedConversationId.value !== id || session === undefined) return
     if (!session) {
       classicContextByConversationId.set(id, null)
+      classicAutoFollowActiveHost = !hasClassicUserMessage()
       applyClassicContexts([])
+      syncAutoFollowHostContext()
       return
     }
     const projection = session.classicContext ? cloneClassicContext(session.classicContext) : null
@@ -543,26 +583,16 @@ export const createWorkspaceAiChatController = (
         ? aiContextCatalog.value
         : { categories: [], openedHosts: [] }
       const restoredContexts = restoreClassicSessionContexts(projection.contexts, catalog)
+      const legacyEmptyProjection = projection.autoFollowActiveHost === undefined && projection.contexts.length === 0
+      classicAutoFollowActiveHost = (projection.autoFollowActiveHost === true || legacyEmptyProjection) && !hasClassicUserMessage()
       applyClassicContexts(restoredContexts)
-      const configuredHosts = restoredContexts.filter((context) => context.kind === 'hosts')
-      const sendableHosts = sendableClassicSessionContexts(configuredHosts)
-      const expectedTargetIds = sendableHosts.map(classicHostTargetId).filter(Boolean)
-      const expectedTargetCount = new Set(expectedTargetIds).size
-      const restoredTargets = await resolveClassicHostTargets(sendableHosts, {
-        isCurrent: () => generation === classicContextRestoreGeneration && selectedConversationId.value === id
-      })
-      if (configuredHosts.length > 0 && (
-        sendableHosts.length !== configuredHosts.length ||
-        configuredHosts.length > CLINE_AGENT_MAX_HOST_TARGETS ||
-        expectedTargetCount !== configuredHosts.length ||
-        restoredTargets.length !== expectedTargetCount
-      )) {
-        setTopNotice(i18nText('ai.classicHostTargetsRequired'))
-      }
+      syncAutoFollowHostContext()
       return
     }
+    classicAutoFollowActiveHost = !hasClassicUserMessage()
     applyClassicContexts([])
-    void persistClassicContextProjection(id)
+    syncAutoFollowHostContext()
+    void persistClassicContextProjection(id, { autoFollowActiveHost: classicAutoFollowActiveHost })
   }
 
   const refreshAiContextCatalog = async (options: { hydrateSelection?: boolean } = { hydrateSelection: false }) => {
@@ -574,29 +604,53 @@ export const createWorkspaceAiChatController = (
     })
     if (refreshed && hasProjection && selectedConversationId.value === id) {
       applyClassicContexts(restoreClassicSessionContexts(refs, aiContextCatalog.value))
+      syncAutoFollowHostContext()
     }
     return refreshed
   }
 
   stopSelectedContextsWatch = watch(
     selectedContexts,
-    (contexts) => {
+    (contexts, previousContexts) => {
+      if (
+        !applyingClassicContextProjection &&
+        hostContextSignature(contexts) !== hostContextSignature(previousContexts || [])
+      ) {
+        classicAutoFollowActiveHost = false
+      }
       const id = selectedConversationId.value.trim()
       if (!id || applyingClassicContextProjection) return
       void persistClassicContextProjection(id, { contexts })
     },
     { deep: true, flush: 'sync' }
   )
+  stopOpenedHostsWatch = watch(
+    openedHostContexts,
+    () => syncOpenedHostContexts(),
+    { deep: true, immediate: true }
+  )
+  stopActiveHostWatch = watch(
+    activeHostContext,
+    () => syncAutoFollowHostContext(),
+    { deep: true, immediate: true }
+  )
 
   const createConversation = async () => {
-    const initialContexts = selectedConversationId.value.trim()
-      ? []
+    const startsFromExistingConversation = Boolean(selectedConversationId.value.trim())
+    const activeHost = startsFromExistingConversation ? activeHostContext() : null
+    const initialContexts = startsFromExistingConversation
+      ? (activeHost ? [{ ...activeHost }] : [])
       : selectedContexts.value.map((context) => ({ ...context }))
+    const previousAutoFollowActiveHost = classicAutoFollowActiveHost
     const created = await createConversationHistory()
     if (!created) return null
+    if (startsFromExistingConversation) classicAutoFollowActiveHost = true
     classicContextByConversationId.set(created.id, null)
     applyClassicContexts(initialContexts)
-    void persistClassicContextProjection(created.id, { contexts: initialContexts })
+    void persistClassicContextProjection(created.id, {
+      contexts: initialContexts,
+      autoFollowActiveHost: startsFromExistingConversation ? true : previousAutoFollowActiveHost
+    })
     return created
   }
 
@@ -612,7 +666,9 @@ export const createWorkspaceAiChatController = (
   const deselectConversation = async (expectedConversationId: string) => {
     const deselected = await deselectConversationHistory(expectedConversationId)
     if (deselected && !selectedConversationId.value) {
+      classicAutoFollowActiveHost = true
       applyClassicContexts([])
+      syncAutoFollowHostContext()
     }
     return deselected
   }
@@ -1036,6 +1092,8 @@ export const createWorkspaceAiChatController = (
         return false
       }
     }
+    const autoFollowActiveHostAtSend = classicAutoFollowActiveHost
+    const classicContextsAtSend = selectedContexts.value.map((context) => ({ ...context }))
     const originatingMessages = chatMessages.value.map((message) => cloneStructuredValue(message))
     const responseMode = options.mode || (mode.value === 'agents' ? 'agent' : 'command')
     const initialSelectedContexts = sendableClassicSessionContexts(selectedContexts.value)
@@ -1180,6 +1238,13 @@ export const createWorkspaceAiChatController = (
     const conversationMessages = selectedConversationId.value === conversationId
       ? chatMessages.value
       : originatingMessages
+    if (autoFollowActiveHostAtSend) {
+      if (selectedConversationId.value === conversationId) classicAutoFollowActiveHost = false
+      void persistClassicContextProjection(conversationId, {
+        contexts: selectedConversationId.value === conversationId ? selectedContexts.value : classicContextsAtSend,
+        autoFollowActiveHost: false
+      })
+    }
     conversationMessages.push(userMessage)
     conversationMessages.push(assistantMessage)
     if (revisionFromMessageId && selectedConversationId.value === conversationId) applyProjectionRevisionWindow()

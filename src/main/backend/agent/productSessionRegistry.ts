@@ -411,8 +411,12 @@ const normalizeClassicContext = (
     )
   }
   const contexts = value.contexts.map(normalizeContextRef)
+  if (value.autoFollowActiveHost !== undefined && typeof value.autoFollowActiveHost !== 'boolean') {
+    return invalid('PRODUCT_SESSION_CLASSIC_CONTEXT_INVALID', 'classicContext.autoFollowActiveHost must be a boolean.')
+  }
   const normalized: ProductSessionClassicContext = {
-    contexts
+    contexts,
+    ...(value.autoFollowActiveHost !== undefined ? { autoFollowActiveHost: value.autoFollowActiveHost } : {})
   }
   if (Buffer.byteLength(JSON.stringify(normalized), 'utf8') > MAX_CLASSIC_CONTEXT_JSON_BYTES) {
     return invalid(
@@ -431,7 +435,10 @@ const cloneRecord = (record: ProductSessionRecord): ProductSessionRecord => ({
   ...(record.classicContext
     ? {
         classicContext: {
-          contexts: record.classicContext.contexts.map((context) => ({ ...context }))
+          contexts: record.classicContext.contexts.map((context) => ({ ...context })),
+          ...(record.classicContext.autoFollowActiveHost !== undefined
+            ? { autoFollowActiveHost: record.classicContext.autoFollowActiveHost }
+            : {})
         }
       }
     : {})

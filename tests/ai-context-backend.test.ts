@@ -63,12 +63,7 @@ describe('AI context catalog backend boundary', () => {
     const result = await backend.listAiContextCatalog()
 
     expect(result.ok).toBe(true)
-    expect(result.data?.openedHosts).toEqual([
-      expect.objectContaining({ id: 'opened-local', kind: 'hosts', label: '127.0.0.1' }),
-      expect.objectContaining({ id: 'asset-1', kind: 'hosts', label: 'prod-bastion', detail: '10.24.8.12', host: '10.24.8.12' }),
-      expect.objectContaining({ id: 'asset-3', kind: 'hosts', label: 'mysql-primary', detail: '10.32.6.9', host: '10.32.6.9' }),
-      expect.objectContaining({ id: 'asset-2', kind: 'hosts', label: 'staging-api', detail: '10.24.12.44', host: '10.24.12.44' })
-    ])
+    expect(result.data?.openedHosts).toEqual([])
     expect(result.data?.selectedDefaults).toEqual([])
     expect(result.data?.categories.find((category: AiContextCategoryInfo) => category.id === 'hosts')?.options).toEqual(
       expect.arrayContaining([

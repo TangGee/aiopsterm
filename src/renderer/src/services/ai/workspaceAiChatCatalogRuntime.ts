@@ -6,15 +6,24 @@ import {
 } from '@/services/ai/aiBackendGuards'
 import { aiCatalogClient } from '@/services/ai/aiCatalogClient'
 import type { WorkspaceAiChatControllerState } from '@/services/ai/workspaceAiChatTypes'
+import type { AiContextOption } from '@shared/contracts/aiChat'
 
 export const createWorkspaceAiChatCatalogRuntime = (input: {
   state: Pick<WorkspaceAiChatControllerState, 'aiContextCatalog' | 'aiCommandOptions' | 'selectedContexts' | 'todoItems'>
   setTopNotice: (message: string) => void
   loadChatConversationsFromBackend: (options?: { restoreIfEmpty?: boolean; restoreSelection?: boolean }) => Promise<boolean>
+  openedHostContexts: () => AiContextOption[]
 }) => {
-  const { state, setTopNotice, loadChatConversationsFromBackend } = input
+  const { state, setTopNotice, loadChatConversationsFromBackend, openedHostContexts } = input
   const { aiContextCatalog, aiCommandOptions, selectedContexts, todoItems } = state
   let classicChatHydrationPromise: Promise<boolean> | null = null
+
+  const syncOpenedHostContexts = () => {
+    aiContextCatalog.value = {
+      ...aiContextCatalog.value,
+      openedHosts: openedHostContexts().map((host) => ({ ...host }))
+    }
+  }
 
   const refreshAiContextCatalog = async (options: { hydrateSelection?: boolean } = { hydrateSelection: false }) => {
     const listAiContextCatalog = aiCatalogClient.listAiContextCatalog()
@@ -42,7 +51,7 @@ export const createWorkspaceAiChatCatalogRuntime = (input: {
         ...category,
         options: category.options.map((option) => ({ ...option }))
       })),
-      openedHosts: result.data.openedHosts.map((host) => ({ ...host })),
+      openedHosts: openedHostContexts().map((host) => ({ ...host })),
       selectedDefaults: result.data.selectedDefaults.map((context) => ({ ...context }))
     }
     if (options.hydrateSelection === true && selectedContexts.value.length === 0) {
@@ -114,6 +123,7 @@ export const createWorkspaceAiChatCatalogRuntime = (input: {
 
   return {
     refreshAiContextCatalog,
+    syncOpenedHostContexts,
     refreshAiCommandCatalog,
     refreshAiTodoSnapshot,
     hydrateClassicChatData

@@ -723,6 +723,8 @@ export const deDE = completeLocaleMessages({
   'ai.emptyNoModelConfigure': 'Verfügbares Modell konfigurieren',
   'ai.configureModel': 'Modell konfigurieren',
   'ai.addContext': '@ Kontext hinzufügen',
+  'ai.openedHosts': 'Geöffnete Hosts',
+  'ai.hostContextHint': 'Host-Kontext: {host}. Der Agent verwendet ein Terminal erneut oder öffnet eines.',
   'ai.removeContext': 'Kontext entfernen',
   'ai.inputPlaceholder': 'Beschreiben Sie Ihr Betriebsziel',
   'ai.classicModeAgent': 'Agent',

@@ -723,6 +723,8 @@ export const ruRU = completeLocaleMessages({
   'ai.emptyNoModelConfigure': 'Настроить доступную модель',
   'ai.configureModel': 'Настроить модель',
   'ai.addContext': '@ Добавить контекст',
+  'ai.openedHosts': 'Открытые хосты',
+  'ai.hostContextHint': 'Контекст хоста: {host}. Agent использует существующий или открывает новый терминал.',
   'ai.removeContext': 'Убрать контекст',
   'ai.inputPlaceholder': 'Опишите вашу операционную цель',
   'ai.classicModeAgent': 'Agent',

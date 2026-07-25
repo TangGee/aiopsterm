@@ -8593,15 +8593,32 @@ describe('workspace store', () => {
     expect(store.aiContextCatalog.categories).toEqual([])
     expect(store.selectedContexts).toEqual([])
 
+    store.panels[0].sessionId = 'terminal-open-local'
+    store.panels[0].status = 'running'
+    store.panels.push({
+      ...store.panels[0],
+      id: 'panel-open-prod',
+      title: 'Production terminal',
+      output: '',
+      outputSegments: [],
+      sessionId: 'terminal-open-prod',
+      sshSession: {
+        connectionId: 'connection-open-prod',
+        host: '10.24.8.12',
+        port: 22,
+        username: 'ops',
+        assetId: 'asset-1',
+        assetName: 'prod-bastion'
+      }
+    })
+    store.activePanelId = 'panel-open-prod'
     await store.refreshAiContextCatalog()
 
     expect(window.aiops.listAiContextCatalog).toHaveBeenCalled()
-    expect(store.aiContextCatalog.openedHosts).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ id: 'opened-local', label: '127.0.0.1' }),
-        expect.objectContaining({ id: 'asset-1', label: 'prod-bastion', detail: '10.24.8.12' })
-      ])
-    )
+    expect(store.aiContextCatalog.openedHosts).toEqual([
+      expect.objectContaining({ id: 'asset-1', label: 'prod-bastion', detail: 'ops@10.24.8.12' }),
+      expect.objectContaining({ id: 'opened-local', label: '127.0.0.1' })
+    ])
     expect(store.aiContextCatalog.categories.find((category) => category.id === 'hosts')?.options).toEqual(
       expect.arrayContaining([expect.objectContaining({ id: 'asset-3', label: 'mysql-primary', detail: '10.32.6.9' })])
     )
@@ -8624,14 +8641,124 @@ describe('workspace store', () => {
     expect(store.aiContextCatalog.categories.find((category) => category.id === 'chats')?.options).toEqual(
       expect.arrayContaining([expect.objectContaining({ id: 'chat:conv-2', label: 'K8s 发布失败' })])
     )
-    expect(store.selectedContexts).toEqual([])
+    expect(store.selectedContexts).toEqual([
+      expect.objectContaining({ id: 'asset-1', kind: 'hosts', label: 'prod-bastion' })
+    ])
 
     await store.refreshAiContextCatalog({ hydrateSelection: true })
-    expect(store.selectedContexts).toEqual([])
+    expect(store.selectedContexts).toEqual([
+      expect.objectContaining({ id: 'asset-1', kind: 'hosts', label: 'prod-bastion' })
+    ])
+
+    store.activePanelId = store.panels[0].id
+    await flushMicrotasks()
+    expect(store.selectedContexts).toEqual([
+      expect.objectContaining({ id: 'opened-local', kind: 'hosts', label: '127.0.0.1' })
+    ])
+
+    store.activePanelId = 'panel-open-prod'
+    await flushMicrotasks()
+    expect(store.selectedContexts).toEqual([
+      expect.objectContaining({ id: 'asset-1', kind: 'hosts', label: 'prod-bastion' })
+    ])
 
     store.selectedContexts = [{ id: 'manual-host', kind: 'hosts', label: '10.0.0.9', detail: 'manual selection' }]
+    store.activePanelId = store.panels[0].id
+    await flushMicrotasks()
     await store.refreshAiContextCatalog({ hydrateSelection: true })
     expect(store.selectedContexts.map((context) => context.id)).toEqual(['manual-host'])
+  })
+
+  it('restores a saved host context without opening a terminal', async () => {
+    const store = useWorkspaceStore()
+    await store.refreshAiContextCatalog()
+    vi.mocked(window.aiops.getProductSession).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        session: {
+          id: 'conv-1',
+          surface: 'classic',
+          title: 'Production inspection',
+          isOpen: true,
+          classicContext: {
+            contexts: [{
+              id: 'asset-1',
+              kind: 'hosts',
+              label: 'prod-bastion',
+              assetId: 'asset-1',
+              host: '10.24.8.12',
+              port: 22,
+              username: 'ops'
+            }],
+            autoFollowActiveHost: false
+          },
+          createdAt: 1,
+          updatedAt: 2
+        }
+      }
+    } as any)
+    vi.mocked(window.aiops.createTerminal).mockClear()
+
+    await expect(store.restoreConversation('conv-1')).resolves.toBe(true)
+    await vi.waitFor(() => {
+      expect(store.selectedContexts).toEqual([
+        expect.objectContaining({ id: 'asset-1', kind: 'hosts', label: 'prod-bastion' })
+      ])
+    })
+
+    expect(window.aiops.createTerminal).not.toHaveBeenCalled()
+  })
+
+  it('stops following the active host after the first successful send', async () => {
+    const store = useWorkspaceStore()
+    store.activePanel.sessionId = 'terminal-auto-follow-local'
+    store.activePanel.status = 'running'
+    store.activePanel.classicTarget = {
+      targetId: 'opened-local',
+      terminalSessionId: 'terminal-auto-follow-local',
+      label: '127.0.0.1',
+      kind: 'local'
+    }
+    await flushMicrotasks()
+    expect(store.selectedContexts).toEqual([
+      expect.objectContaining({ id: 'opened-local', kind: 'hosts' })
+    ])
+
+    await expect(store.sendChat('检查当前主机', undefined, undefined, { mode: 'command' })).resolves.toBe(true)
+    await flushMicrotasks()
+    expect(window.aiops.updateProductSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: expect.any(String),
+        classicContext: expect.objectContaining({ autoFollowActiveHost: false })
+      })
+    )
+
+    store.panels.push({
+      ...store.activePanel,
+      id: 'panel-auto-follow-remote',
+      title: 'Remote terminal',
+      sessionId: 'terminal-auto-follow-remote',
+      classicTarget: {
+        targetId: 'asset-auto-follow-remote',
+        terminalSessionId: 'terminal-auto-follow-remote',
+        label: 'remote-host',
+        kind: 'ssh'
+      },
+      sshSession: {
+        connectionId: 'connection-auto-follow-remote',
+        host: '10.0.0.10',
+        port: 22,
+        username: 'ops',
+        assetId: 'asset-auto-follow-remote',
+        assetName: 'remote-host'
+      }
+    })
+    store.activePanelId = 'panel-auto-follow-remote'
+    await flushMicrotasks()
+
+    expect(store.selectedContexts).toEqual([
+      expect.objectContaining({ id: 'opened-local', kind: 'hosts' })
+    ])
   })
 
   it('loads AI slash command candidates from the backend bridge instead of the renderer knowledge tree', async () => {

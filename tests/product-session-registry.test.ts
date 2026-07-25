@@ -448,6 +448,7 @@ describe('product session registry', () => {
       id: 'classic-projection',
       surface: 'classic',
       classicContext: {
+        autoFollowActiveHost: true,
         contexts: [
           {
             id: 'asset-prod',
@@ -485,6 +486,7 @@ describe('product session registry', () => {
     })
 
     expect(registry.get(created.id)?.classicContext).toEqual(created.classicContext)
+    expect(registry.get(created.id)?.classicContext?.autoFollowActiveHost).toBe(true)
     expect(registry.list({ surface: 'classic' })[0].classicContext?.contexts.map((context) => context.id)).toEqual([
       'asset-prod',
       'kb-doc:runbooks/deploy.md',
@@ -521,6 +523,14 @@ describe('product session registry', () => {
         contexts: [{ id: 'host-1', kind: 'hosts', label: 'Host', port: 70000 }]
       }
     })).toThrowError(expect.objectContaining({ code: 'PRODUCT_SESSION_FIELD_INVALID' }))
+    expect(() => registry.create({
+      id: 'invalid-auto-follow',
+      surface: 'classic',
+      classicContext: {
+        contexts: [],
+        autoFollowActiveHost: 'yes'
+      } as any
+    })).toThrowError(expect.objectContaining({ code: 'PRODUCT_SESSION_CLASSIC_CONTEXT_INVALID' }))
 
     registry.create({ id: 'corrupt-classic-context', surface: 'classic' })
     const corruptor = new TestSqliteDatabase(databasePath)

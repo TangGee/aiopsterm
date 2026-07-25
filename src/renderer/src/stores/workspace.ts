@@ -8,7 +8,11 @@ import {
   type ConversationItem,
   type TodoItem
 } from '@/services/ai/workspaceAiChatController'
-import { resolveClassicHostTerminalPanel } from '@/services/ai/classicSessionContextRuntime'
+import {
+  classicActiveHostContext,
+  classicOpenedHostContexts,
+  resolveClassicHostTerminalPanel
+} from '@/services/ai/classicSessionContextRuntime'
 import {
   createWorkspaceExtensionsController,
   type WorkspaceAliasCommand,
@@ -1008,6 +1012,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       createRendererLocalId,
       resolveAiKnowledgeSearchContexts: (...args) => resolveAiKnowledgeSearchContexts(...args),
       applyMcpServersSnapshot: (...args) => applyMcpServersSnapshot(...args),
+      openedHostContexts: () => classicOpenedHostContexts(panels.value, activePanelId.value),
+      activeHostContext: () => classicActiveHostContext(panels.value, activePanelId.value),
       resolveActiveWritableTerminalPanel,
       resolveClassicHostTerminalPanel: (context) => resolveClassicHostTerminalPanel(panels.value, context, activePanelId.value),
       openTerminalForAiHostContext,

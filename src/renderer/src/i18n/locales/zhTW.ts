@@ -80,6 +80,8 @@ export const zhTW = completeLocaleMessages({
   'ai.emptyNoModelConfigure': '請設定可用模型',
   'ai.configureModel': '設定模型',
   'ai.addContext': '@ 加入上下文',
+  'ai.openedHosts': '已開啟主機',
+  'ai.hostContextHint': '主機上下文：{host}。Agent 執行時將重用或開啟終端。',
   'ai.inputPlaceholder': '描述你的運維目標',
   'ai.processing': '處理中'
 }, zhCN)

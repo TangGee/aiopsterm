@@ -723,6 +723,8 @@ export const ptPT = completeLocaleMessages({
   'ai.emptyNoModelConfigure': 'Configurar um modelo disponível',
   'ai.configureModel': 'Configurar modelo',
   'ai.addContext': '@ Adicionar contexto',
+  'ai.openedHosts': 'Anfitriões abertos',
+  'ai.hostContextHint': 'Contexto do anfitrião: {host}. O Agent reutiliza ou abre um terminal ao executar.',
   'ai.removeContext': 'Remover contexto',
   'ai.inputPlaceholder': 'Descreva o seu objetivo operacional',
   'ai.classicModeAgent': 'Agent',

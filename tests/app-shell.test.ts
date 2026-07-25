@@ -523,6 +523,39 @@ const mountAiPanelWithModels = async (pinia: ReturnType<typeof createPinia>) => 
   return { wrapper, store }
 }
 
+const exposeOpenedClassicHosts = async (store: ReturnType<typeof useWorkspaceStore>) => {
+  store.activePanel.sessionId = 'terminal-context-local'
+  store.activePanel.status = 'running'
+  store.activePanel.classicTarget = {
+    targetId: 'opened-local',
+    terminalSessionId: 'terminal-context-local',
+    label: '127.0.0.1',
+    kind: 'local'
+  }
+  store.panels.push({
+    ...store.activePanel,
+    id: 'panel-context-prod',
+    title: 'prod-bastion',
+    sessionId: 'terminal-context-prod',
+    classicTarget: {
+      targetId: 'asset-1',
+      terminalSessionId: 'terminal-context-prod',
+      label: 'prod-bastion',
+      kind: 'ssh'
+    },
+    sshSession: {
+      connectionId: 'connection-context-prod',
+      host: '10.24.8.12',
+      port: 22,
+      username: 'ops',
+      assetId: 'asset-1',
+      assetName: 'prod-bastion'
+    }
+  })
+  store.activePanelId = 'panel-context-prod'
+  await flushPromises()
+}
+
 const switchAiPanelToClassic = async (wrapper: VueWrapper<any>) => {
   if (wrapper.find('[data-testid="ai-panel-mode-open"]').attributes('title')?.includes('Classic Chat')) return
   await wrapper.find('[data-testid="ai-panel-mode-open"]').trigger('click')
@@ -6540,6 +6573,8 @@ describe('AppShell', () => {
     expect(wrapper.find('[data-testid="ai-chat-export-notice"]').text()).toContain('命令已更新')
     await wrapper.find('[data-testid="ai-command-audit-close"]').trigger('click')
 
+    await exposeOpenedClassicHosts(store)
+    await wrapper.vm.$nextTick()
     const findContextButton = (label: string) =>
       wrapper.findAll('.context-select-popup .select-list button').find((button) => button.text().includes(label))
     const expectContextMainMenu = () => {
@@ -6554,9 +6589,9 @@ describe('AppShell', () => {
     let contextSearchInput = wrapper.find('.context-select-popup header input')
     expect(document.activeElement).toBe(contextSearchInput.element)
     await contextSearchInput.trigger('keydown', { key: 'ArrowUp' })
-    expect(findContextButton('127.0.0.1')?.classes()).toContain('keyboard-selected')
-    await contextSearchInput.trigger('keydown', { key: 'ArrowDown' })
     expect(findContextButton('prod-bastion')?.classes()).toContain('keyboard-selected')
+    await contextSearchInput.trigger('keydown', { key: 'ArrowDown' })
+    expect(findContextButton('127.0.0.1')?.classes()).toContain('keyboard-selected')
     await contextSearchInput.setValue('文档')
     expect(wrapper.find('.context-select-popup .select-list button.keyboard-selected').exists()).toBe(false)
 
@@ -6685,6 +6720,8 @@ describe('AppShell', () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     const { wrapper, store } = await mountAiPanelWithModels(pinia)
+    await exposeOpenedClassicHosts(store)
+    await wrapper.vm.$nextTick()
 
     await wrapper.find('.context-trigger-tag').trigger('click')
     const quickHost = wrapper.find('[data-onboarding-id="ai-localhost-option"]')

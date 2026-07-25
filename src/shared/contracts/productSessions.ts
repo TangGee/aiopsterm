@@ -51,6 +51,7 @@ export type ProductSessionContextRef = {
 
 export type ProductSessionClassicContext = {
   contexts: ProductSessionContextRef[]
+  autoFollowActiveHost?: boolean
 }
 
 export type ProductSessionRecord = {

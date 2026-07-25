@@ -748,6 +748,8 @@ export const enUS: LocaleMessages = {
   'ai.emptyNoModelConfigure': 'Configure an available model',
   'ai.configureModel': 'Configure model',
   'ai.addContext': '@ Add context',
+  'ai.openedHosts': 'Open hosts',
+  'ai.hostContextHint': 'Host context: {host}. Agent reuses or opens a terminal when it runs.',
   'ai.removeContext': 'Remove context',
   'ai.inputPlaceholder': 'Describe your operations goal',
   'ai.classicModeAgent': 'Agent',

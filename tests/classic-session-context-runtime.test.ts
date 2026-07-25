@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
+  classicActiveHostContext,
   classicHostTargetId,
+  classicOpenedHostContexts,
   classicSessionContextRefs,
   resolveClassicHostTerminalPanel,
   restoreClassicSessionContexts,
@@ -200,5 +202,126 @@ describe('Classic session context runtime', () => {
       kind: 'hosts',
       label: '127.0.0.1'
     }, 'local-active')).toEqual(expect.objectContaining({ id: 'local-active' }))
+  })
+
+  it('derives opened hosts only from live terminals with the active host first', () => {
+    const opened = classicOpenedHostContexts([
+      {
+        id: 'remote-first',
+        sessionId: 'session-first',
+        status: 'running',
+        title: 'Production first',
+        sshSession: {
+          assetId: 'asset-prod',
+          connectionId: 'connection-first',
+          assetName: 'Production',
+          host: '10.0.0.8',
+          port: 22,
+          username: 'ops'
+        }
+      },
+      {
+        id: 'closed',
+        sessionId: 'session-closed',
+        status: 'closed',
+        sshSession: {
+          assetId: 'asset-closed',
+          assetName: 'Closed',
+          host: '10.0.0.9',
+          port: 22,
+          username: 'ops'
+        }
+      },
+      {
+        id: 'managed-session',
+        kind: 'managed-ai-session',
+        sessionId: 'managed-session-id',
+        status: 'running',
+        title: 'Managed AI session'
+      },
+      {
+        id: 'remote-active',
+        sessionId: 'session-active',
+        status: 'running',
+        title: 'Production active',
+        sshSession: {
+          assetId: 'asset-prod',
+          connectionId: 'connection-active',
+          assetName: 'Production',
+          host: '10.0.0.8',
+          port: 2222,
+          username: 'admin'
+        }
+      },
+      {
+        id: 'local',
+        sessionId: 'session-local',
+        status: 'running',
+        title: 'Local shell'
+      }
+    ], 'remote-active')
+
+    expect(opened).toEqual([
+      expect.objectContaining({
+        id: 'asset-prod',
+        assetId: 'asset-prod',
+        connectionId: 'connection-active',
+        label: 'Production',
+        detail: 'admin@10.0.0.8:2222'
+      }),
+      expect.objectContaining({
+        id: 'opened-local',
+        label: '127.0.0.1',
+        isLocalShell: true
+      })
+    ])
+    expect(classicActiveHostContext([
+      {
+        id: 'remote-active',
+        sessionId: 'session-active',
+        status: 'running',
+        sshSession: {
+          assetId: 'asset-prod',
+          assetName: 'Production',
+          host: '10.0.0.8',
+          port: 22,
+          username: 'ops'
+        }
+      }
+    ], 'remote-active')).toEqual(expect.objectContaining({ id: 'asset-prod', host: '10.0.0.8' }))
+  })
+
+  it('limits opened hosts and ignores terminals without stable host identity', () => {
+    const panels = Array.from({ length: 6 }, (_, index) => ({
+      id: `remote-${index}`,
+      sessionId: `session-${index}`,
+      status: 'running',
+      sshSession: {
+        assetId: `asset-${index}`,
+        assetName: `Host ${index}`,
+        host: `10.0.0.${index}`,
+        port: 22,
+        username: 'ops'
+      }
+    }))
+    panels.unshift({
+      id: 'unowned',
+      sessionId: 'session-unowned',
+      status: 'running',
+      sshSession: {
+        assetId: '',
+        assetName: 'Unowned',
+        host: '10.0.0.99',
+        port: 22,
+        username: 'ops'
+      }
+    })
+
+    expect(classicOpenedHostContexts(panels, '', 4).map((context) => context.id)).toEqual([
+      'asset-0',
+      'asset-1',
+      'asset-2',
+      'asset-3'
+    ])
   })
 })

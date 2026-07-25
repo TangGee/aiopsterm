@@ -184,7 +184,7 @@ export const listAiContextCatalog = async (): Promise<AiContextCatalogResult> =>
     const [docs, skills] = await Promise.all([buildDocOptions(), buildSkillOptions()])
     const catalog: AiContextCatalog = {
       categories: buildCategories(hosts, docs, skills, chats).map(cloneCategory),
-      openedHosts: hosts.slice(0, 4).map(cloneContextOption),
+      openedHosts: [],
       selectedDefaults: []
     }
     return { ok: true, data: catalog }

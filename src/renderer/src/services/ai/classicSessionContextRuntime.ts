@@ -3,6 +3,7 @@ import type { ProductSessionContextRef } from '@shared/contracts/productSessions
 
 export type ClassicTerminalPanelLike = {
   id: string
+  kind?: 'terminal' | 'knowledge' | 'managed-ai-session' | 'project-file'
   sessionId?: string | null
   title?: string
   cwd?: string
@@ -22,7 +23,15 @@ type ClassicHostIdentity = Pick<AiContextOption, 'id'> &
   Partial<Pick<AiContextOption, 'label' | 'host' | 'assetId' | 'connectionId' | 'isLocalShell'>>
 
 const isLiveTerminalPanel = (panel: ClassicTerminalPanelLike) =>
-  Boolean(text(panel.sessionId)) && panel.status !== 'closed' && panel.status !== 'error'
+  (panel.kind === undefined || panel.kind === 'terminal') &&
+  Boolean(text(panel.sessionId)) &&
+  panel.status !== 'closed' &&
+  panel.status !== 'error'
+
+const terminalHostDetail = (host: string, port?: number, username?: string) => {
+  const endpoint = port && port !== 22 ? `${host}:${port}` : host
+  return username ? `${username}@${endpoint}` : endpoint
+}
 
 export const isClassicLocalHostContext = (
   context: ClassicHostIdentity
@@ -42,6 +51,70 @@ export const classicHostTargetId = (
 ) => isClassicLocalHostContext(context)
   ? 'opened-local'
   : text(context.assetId) || text(context.connectionId) || text(context.id)
+
+export const classicHostContextFromTerminalPanel = (
+  panel: ClassicTerminalPanelLike
+): AiContextOption | null => {
+  if (!isLiveTerminalPanel(panel)) return null
+  if (!panel.sshSession) {
+    return {
+      id: 'opened-local',
+      kind: 'hosts',
+      label: '127.0.0.1',
+      detail: 'local shell',
+      host: '127.0.0.1',
+      assetName: text(panel.title) || 'Local terminal',
+      isLocalShell: true
+    }
+  }
+  const assetId = text(panel.sshSession.assetId)
+  const connectionId = text(panel.sshSession.connectionId)
+  const id = assetId || connectionId
+  const host = text(panel.sshSession.host)
+  if (!id || !host) return null
+  const port = Number(panel.sshSession.port) || 22
+  const username = text(panel.sshSession.username)
+  return {
+    id,
+    kind: 'hosts',
+    label: text(panel.sshSession.assetName) || text(panel.title) || host,
+    detail: terminalHostDetail(host, port, username),
+    ...(assetId ? { assetId } : {}),
+    ...(connectionId ? { connectionId } : {}),
+    host,
+    port,
+    ...(username ? { username } : {}),
+    assetName: text(panel.sshSession.assetName) || text(panel.title) || host
+  }
+}
+
+export const classicOpenedHostContexts = (
+  panels: ClassicTerminalPanelLike[],
+  activePanelId = '',
+  limit = 4
+) => {
+  const opened = new Map<string, AiContextOption>()
+  const maximum = Math.max(0, Math.floor(limit))
+  if (!maximum) return []
+  const ordered = [...panels].sort((first, second) => Number(second.id === activePanelId) - Number(first.id === activePanelId))
+  for (const panel of ordered) {
+    const context = classicHostContextFromTerminalPanel(panel)
+    if (!context) continue
+    const targetId = classicHostTargetId(context)
+    if (!targetId || opened.has(targetId)) continue
+    opened.set(targetId, context)
+    if (opened.size >= maximum) break
+  }
+  return [...opened.values()]
+}
+
+export const classicActiveHostContext = (
+  panels: ClassicTerminalPanelLike[],
+  activePanelId = ''
+) => {
+  const panel = panels.find((candidate) => candidate.id === activePanelId)
+  return panel ? classicHostContextFromTerminalPanel(panel) : null
+}
 
 const skillNameFor = (context: Pick<AiContextOption, 'id' | 'label' | 'skillName'>) =>
   text(context.skillName) || (context.id.startsWith('skill:') ? text(context.id.slice('skill:'.length)) : text(context.label))

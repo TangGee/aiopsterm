@@ -723,6 +723,8 @@ export const frFR = completeLocaleMessages({
   'ai.emptyNoModelConfigure': 'Configurer un modèle disponible',
   'ai.configureModel': 'Configurer le modèle',
   'ai.addContext': '@ Ajouter un contexte',
+  'ai.openedHosts': 'Hôtes ouverts',
+  'ai.hostContextHint': 'Contexte hôte : {host}. Agent réutilise ou ouvre un terminal lors de l’exécution.',
   'ai.removeContext': 'Retirer le contexte',
   'ai.inputPlaceholder': 'Décrivez votre objectif opérationnel',
   'ai.classicModeAgent': 'Agent',

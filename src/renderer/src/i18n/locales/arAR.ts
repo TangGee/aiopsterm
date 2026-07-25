@@ -723,6 +723,8 @@ export const arAR = completeLocaleMessages({
   'ai.emptyNoModelConfigure': 'إعداد نموذج متاح',
   'ai.configureModel': 'إعداد النموذج',
   'ai.addContext': '@ إضافة سياق',
+  'ai.openedHosts': 'المضيفون المفتوحون',
+  'ai.hostContextHint': 'سياق المضيف: {host}. يعيد Agent استخدام طرفية أو يفتح طرفية عند التنفيذ.',
   'ai.removeContext': 'إزالة السياق',
   'ai.inputPlaceholder': 'صف هدف التشغيل لديك',
   'ai.classicModeAgent': 'Agent',

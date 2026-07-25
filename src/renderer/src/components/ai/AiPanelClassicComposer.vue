@@ -19,7 +19,7 @@
         type="button"
         class="context-trigger-tag"
         data-onboarding-id="ai-context-trigger"
-        title="添加上下文"
+        :title="t('ai.addContext')"
         @click.stop="toggleContextPopup"
       >
         {{ workspace.selectedContexts.length ? '@' : t('ai.addContext') }}
@@ -30,7 +30,11 @@
         class="context-tag"
         :data-context-id="context.id"
         :class="{ 'is-unavailable': context.unavailable }"
-        :title="context.unavailable ? t('ai.contextUnavailable') : undefined"
+        :title="context.unavailable
+          ? t('ai.contextUnavailable')
+          : context.kind === 'hosts'
+            ? t('ai.hostContextHint', { host: context.detail || context.host || context.label })
+            : undefined"
       >
         {{ context.label }}
         <button
@@ -90,6 +94,12 @@
         v-if="contextLevel === 'main'"
         class="select-list"
       >
+        <small
+          v-if="displayedOpenedHosts.length"
+          class="context-section-label"
+        >
+          {{ t('ai.openedHosts') }}
+        </small>
         <button
           v-for="(host, index) in displayedOpenedHosts"
           :key="host.id"

@@ -723,6 +723,8 @@ export const koKR = completeLocaleMessages({
   'ai.emptyNoModelConfigure': '사용 가능한 모델 구성',
   'ai.configureModel': '모델 설정',
   'ai.addContext': '@ 컨텍스트 추가',
+  'ai.openedHosts': '열린 호스트',
+  'ai.hostContextHint': '호스트 컨텍스트: {host}. Agent는 실행할 때 터미널을 재사용하거나 엽니다.',
   'ai.removeContext': '컨텍스트 제거',
   'ai.inputPlaceholder': '운영 목표를 설명하세요',
   'ai.classicModeAgent': 'Agent',

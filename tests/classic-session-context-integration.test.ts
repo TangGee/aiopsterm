@@ -130,7 +130,10 @@ describe('Classic session context integration', () => {
     expect(store.selectedContexts).toEqual([])
     expect(window.aiops.updateProductSession).toHaveBeenCalledWith({
       id: 'conv-2',
-      classicContext: { contexts: [] }
+      classicContext: {
+        contexts: [],
+        autoFollowActiveHost: false
+      }
     })
     expect(window.aiops.createTerminal).not.toHaveBeenCalledWith(expect.objectContaining({ assetId: 'asset-default' }))
   })
@@ -172,7 +175,7 @@ describe('Classic session context integration', () => {
     expect(request).not.toHaveProperty('terminalSessionId')
   })
 
-  it('reopens a stable matching panel when its canonical Classic target is missing', async () => {
+  it('reopens a stable matching panel at send time when its canonical Classic target is missing', async () => {
     vi.mocked(window.aiops.getProductSession).mockResolvedValue({
       ok: true,
       data: {
@@ -199,17 +202,18 @@ describe('Classic session context integration', () => {
 
     await expect(store.restoreConversation('conv-2')).resolves.toBe(true)
 
-    expect(window.aiops.createTerminal).toHaveBeenCalledWith(expect.objectContaining({ kind: 'ssh', assetId: 'asset-1' }))
+    expect(window.aiops.createTerminal).not.toHaveBeenCalled()
     vi.mocked(window.aiops.createAiChatExchangeRequest).mockClear()
     await expect(
       store.sendChat('检查主机', undefined, undefined, { mode: 'agent', skipKnowledgeSearch: true })
     ).resolves.toBe(true)
+    expect(window.aiops.createTerminal).toHaveBeenCalledWith(expect.objectContaining({ kind: 'ssh', assetId: 'asset-1' }))
     expect(vi.mocked(window.aiops.createAiChatExchangeRequest).mock.calls.at(-1)?.[0].hostTargets).toEqual([
       expect.objectContaining({ targetId: 'asset-1', terminalSessionId: 'test-session-asset-1' })
     ])
   })
 
-  it('restores multiple selected hosts, reconnects them in order, and sends explicit targets', async () => {
+  it('restores multiple selected hosts and reconnects them in order only when sending', async () => {
     vi.mocked(window.aiops.getProductSession).mockResolvedValue({
       ok: true,
       data: {
@@ -230,13 +234,14 @@ describe('Classic session context integration', () => {
 
     await expect(store.restoreConversation('conv-2')).resolves.toBe(true)
 
-    expect(vi.mocked(window.aiops.createTerminal).mock.calls.map(([input]) => input?.assetId)).toEqual(['asset-1', 'asset-2'])
+    expect(window.aiops.createTerminal).not.toHaveBeenCalled()
     expect(store.activePanel.id).toBe(originalPanelId)
     vi.mocked(window.aiops.createAiChatExchangeRequest).mockClear()
     await expect(
       store.sendChat('分别检查两台主机', undefined, undefined, { mode: 'agent', skipKnowledgeSearch: true })
     ).resolves.toBe(true)
 
+    expect(vi.mocked(window.aiops.createTerminal).mock.calls.map(([input]) => input?.assetId)).toEqual(['asset-1', 'asset-2'])
     const request = vi.mocked(window.aiops.createAiChatExchangeRequest).mock.calls.at(-1)?.[0]
     expect(request?.hostTargets).toEqual([
       expect.objectContaining({ targetId: 'asset-1', terminalSessionId: 'test-session-asset-1', label: 'prod-bastion', kind: 'ssh' }),

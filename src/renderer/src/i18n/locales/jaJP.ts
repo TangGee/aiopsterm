@@ -723,6 +723,8 @@ export const jaJP = completeLocaleMessages({
   'ai.emptyNoModelConfigure': '利用可能なモデルを設定',
   'ai.configureModel': 'モデルを設定',
   'ai.addContext': '@ コンテキストを追加',
+  'ai.openedHosts': '開いているホスト',
+  'ai.hostContextHint': 'ホストコンテキスト: {host}。Agent は実行時にターミナルを再利用または開きます。',
   'ai.removeContext': 'コンテキストを削除',
   'ai.inputPlaceholder': '運用目標を入力してください',
   'ai.classicModeAgent': 'Agent',
