@@ -44,14 +44,19 @@ export const shellSingleQuote = (value: string) => `'${value.replace(/'/g, `'\\'
 
 export const sshDestination = (target: Pick<SshTerminalTarget, 'username' | 'host'>) => `${target.username}@${target.host}`
 
-export const sshKeepaliveIntervalSeconds = () => Math.max(1, Math.ceil(getSshKeepaliveIntervalMs() / 1000))
+export const sshKeepaliveIntervalSeconds = () => Math.max(0, Math.ceil(getSshKeepaliveIntervalMs() / 1000))
 
-export const sshKeepaliveOptions = () => [
-  '-o',
-  `ServerAliveInterval=${sshKeepaliveIntervalSeconds()}`,
-  '-o',
-  `ServerAliveCountMax=${defaultSshKeepaliveCountMax}`
-]
+export const sshKeepaliveOptions = () => {
+  const interval = sshKeepaliveIntervalSeconds()
+  return interval > 0
+    ? [
+        '-o',
+        `ServerAliveInterval=${interval}`,
+        '-o',
+        `ServerAliveCountMax=${defaultSshKeepaliveCountMax}`
+      ]
+    : []
+}
 
 export const relayShellSshArgs = (jumpTarget: SshTerminalTarget) => [
   '-F',

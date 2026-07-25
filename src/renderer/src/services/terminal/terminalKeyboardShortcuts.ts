@@ -32,6 +32,7 @@ export type TerminalShortcutAction =
   | { type: 'scrollBottom' }
   | { type: 'previousCommand' }
   | { type: 'nextCommand' }
+  | { type: 'reconnect' }
 
 const keyName = (event: TerminalKeyboardEvent) => event.key.toLowerCase()
 const hasPrimaryModifier = (event: TerminalKeyboardEvent) => event.ctrlKey || event.metaKey
@@ -58,6 +59,7 @@ export const terminalShortcutActionForEvent = (event: TerminalKeyboardEvent): Te
   const key = keyName(event)
   const primary = hasPrimaryModifier(event)
 
+  if (!primary && !event.shiftKey && !event.altKey && key === 'enter') return { type: 'reconnect' }
   if (!primary && !event.shiftKey && !event.altKey && key === 'f11') return { type: 'fullscreen' }
 
   if (isTerminalCopyShortcut(event)) return { type: 'copy' }

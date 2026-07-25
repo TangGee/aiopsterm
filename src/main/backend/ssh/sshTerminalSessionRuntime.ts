@@ -375,6 +375,8 @@ export const createSshTerminalSession = (
   let targetConnectionTransport: TerminalLifecycleEvent['sshTransport'] = 'direct'
   let targetConnectionJump: SshTerminalTarget | null = null
   let relayShellJumpTarget: SshTerminalTarget | null = null
+  let detachActiveTargetClientEvents: (() => void) | null = null
+  let reusedShellRetryUsed = false
   const staleTargetClients = new Set<SshTerminalClient>()
 
   let lifecycle = sendLifecycle(id, sink, {
@@ -426,6 +428,8 @@ export const createSshTerminalSession = (
   ) => {
     if (closed) return
     closed = true
+    detachActiveTargetClientEvents?.()
+    detachActiveTargetClientEvents = null
     cleanupTransports()
     sink.closed?.(id)
     lifecycle = sendLifecycle(id, sink, {
@@ -456,6 +460,8 @@ export const createSshTerminalSession = (
   ) => {
     if (closed) return
     closed = true
+    detachActiveTargetClientEvents?.()
+    detachActiveTargetClientEvents = null
     cleanupTransports()
     sink.closed?.(id)
     lifecycle = sendErrorLifecycle(id, sink, error, {
@@ -553,8 +559,44 @@ export const createSshTerminalSession = (
     return methods.length ? methods.join(',') : 'none'
   }
 
+  const retryFreshClientAfterReusedShellFailure = (authClient: SshTerminalClient, error: unknown) => {
+    if (closed || reusedShellRetryUsed || targetConnectionReuse !== 'reused') return false
+    reusedShellRetryUsed = true
+    staleTargetClients.add(authClient)
+    detachActiveTargetClientEvents?.()
+    detachActiveTargetClientEvents = null
+    removePooledClientAliases(pooledTargetClients, authClient)
+    try {
+      authClient.end()
+    } catch {}
+    if (client === authClient) client = null
+    stream = null
+    targetClientIsPooled = false
+    lifecycle = sendLifecycle(id, sink, {
+      ...lifecycleBase,
+      stage: 'connecting',
+      sshTransport: targetConnectionTransport,
+      connectionReuse: 'created',
+      targetHost: target.host,
+      targetPort: target.port,
+      targetUsername: target.username,
+      errorMessage: error instanceof Error ? error.message : String(error || 'SSH pooled connection is unavailable.'),
+      message: `SSH pooled connection is unavailable; reconnecting ${target.username}@${target.host}:${target.port}`
+    })
+    void openTargetTransportAndConnect().catch((nextError) => {
+      fail(nextError, 'SSH connection preparation failed.', 1)
+    })
+    return true
+  }
+
+  const handleShellOpenFailure = (authClient: SshTerminalClient, error: unknown) => {
+    if (retryFreshClientAfterReusedShellFailure(authClient, error)) return
+    fail(error, 'SSH shell failed.', 1)
+  }
+
   const openShellOnClient = (authClient: SshTerminalClient) => {
-    if (closed) return
+    if (closed || authClient !== client) return
+    attachActiveTargetClientEvents(authClient)
     authRuntime.sendActiveKeyboardResult('target', { status: 'success' })
     authRuntime.commitRememberedPassword('target')
     if (targetClientPoolable) {
@@ -588,36 +630,50 @@ export const createSshTerminalSession = (
           ? `SSH connection reused ${target.username}@${target.host}:${target.port}`
           : `SSH connected ${target.username}@${target.host}:${target.port}`
     })
-    authClient.shell({ term: terminalType, cols, rows }, (error, channel) => {
-      if (error) {
-        fail(error, 'SSH shell failed.', 1)
-        return
-      }
-      stream = channel
-      lifecycle = sendLifecycle(id, sink, {
-        ...lifecycleBase,
-        stage: 'shell-ready',
-        sshTransport: targetConnectionTransport,
-        connectionReuse: targetConnectionReuse,
-        ...(targetConnectionJump
-          ? {
-              jumpHost: targetConnectionJump.host,
-              jumpPort: targetConnectionJump.port,
-              jumpUsername: targetConnectionJump.username
-            }
-          : {}),
-        targetHost: target.host,
-        targetPort: target.port,
-        targetUsername: target.username,
-        message: `SSH shell ready ${target.username}@${target.host}:${target.port}`
+    try {
+      authClient.shell({ term: terminalType, cols, rows }, (error, channel) => {
+        if (error) {
+          handleShellOpenFailure(authClient, error)
+          return
+        }
+        stream = channel
+        lifecycle = sendLifecycle(id, sink, {
+          ...lifecycleBase,
+          stage: 'shell-ready',
+          sshTransport: targetConnectionTransport,
+          connectionReuse: targetConnectionReuse,
+          ...(targetConnectionJump
+            ? {
+                jumpHost: targetConnectionJump.host,
+                jumpPort: targetConnectionJump.port,
+                jumpUsername: targetConnectionJump.username
+              }
+            : {}),
+          targetHost: target.host,
+          targetPort: target.port,
+          targetUsername: target.username,
+          message: `SSH shell ready ${target.username}@${target.host}:${target.port}`
+        })
+        while (pendingWrites.length) {
+          stream.write(pendingWrites.shift() || '')
+        }
+        channel.on('data', (chunk: Buffer | string) => sink.data(chunk))
+        channel.stderr.on('data', (chunk: Buffer | string) => sink.data(chunk))
+        channel.on('close', (code?: number | null) =>
+          finish(Number.isFinite(code) ? Number(code) : 0, 'process', {
+            message: isPooledClientByKeys(
+              pooledTargetClients,
+              [targetClientPoolKey, targetClientAuthenticatedPoolKey],
+              authClient
+            )
+              ? 'SSH shell session exited; connection remains reusable.'
+              : 'SSH shell session exited.'
+          })
+        )
       })
-      while (pendingWrites.length) {
-        stream.write(pendingWrites.shift() || '')
-      }
-      channel.on('data', (chunk: Buffer | string) => sink.data(chunk))
-      channel.stderr.on('data', (chunk: Buffer | string) => sink.data(chunk))
-      channel.on('close', () => finish(0, 'process'))
-    })
+    } catch (error) {
+      handleShellOpenFailure(authClient, error)
+    }
   }
 
   const createConnectConfig = (authTarget: SshTerminalTarget) => {
@@ -1182,49 +1238,56 @@ export const createSshTerminalSession = (
     }
   }
 
+  const attachActiveTargetClientEvents = (authClient: SshTerminalClient) => {
+    detachActiveTargetClientEvents?.()
+    const handleError = (error: Error) => {
+      if (closed || staleTargetClients.has(authClient) || authClient !== client) return
+      if (targetClientPoolable) removePooledClientAliases(pooledTargetClients, authClient)
+      const diagnosticEvent = sshConnectionErrorEvent(error)
+      if (stream) {
+        fail(error, 'SSH connection lost.', 1, diagnosticEvent)
+        return
+      }
+      authRuntime.sendActiveKeyboardResult('target', {
+        status: 'failed',
+        final: true,
+        errorMessage: diagnosticEvent.errorMessage || (error instanceof Error ? error.message : 'SSH authentication failed.')
+      })
+      void (async () => {
+        if (await retryTargetPassword(authClient, diagnosticEvent)) return
+        fail(error, 'SSH connection failed.', 1, diagnosticEvent)
+      })()
+    }
+    const handleTransportClose = () => {
+      if (closed || staleTargetClients.has(authClient) || authClient !== client) return
+      if (targetClientPoolable) removePooledClientAliases(pooledTargetClients, authClient)
+      if (stream) {
+        finish(null, 'network', {
+          isNetworkDisconnect: true,
+          errorCode: 'SSH_TRANSPORT_CLOSED',
+          errorMessage: 'SSH transport closed.',
+          message: 'SSH transport closed.'
+        })
+        return
+      }
+      finish(null, 'unknown')
+    }
+    authClient.on('error', handleError)
+    authClient.on('close', handleTransportClose)
+    authClient.on('end', handleTransportClose)
+    detachActiveTargetClientEvents = () => {
+      authClient.off?.('error', handleError)
+      authClient.off?.('close', handleTransportClose)
+      authClient.off?.('end', handleTransportClose)
+    }
+  }
+
   const attachTargetClient = (authClient: SshTerminalClient) => {
     authRuntime.attachKeyboardInteractive(authClient, target, 'target')
-
-    authClient
-      .on('ready', () => {
-        openShellOnClient(authClient)
-      })
-      .on('error', (error) => {
-        if (targetClientPoolable) removePooledClientAliases(pooledTargetClients, authClient)
-        if (targetClientIsPooled && authClient === client && stream) return
-        const diagnosticEvent = sshConnectionErrorEvent(error)
-        authRuntime.sendActiveKeyboardResult('target', {
-          status: 'failed',
-          final: true,
-          errorMessage: diagnosticEvent.errorMessage || (error instanceof Error ? error.message : 'SSH authentication failed.')
-        })
-        void (async () => {
-          if (await retryTargetPassword(authClient, diagnosticEvent)) return
-          fail(error, 'SSH connection failed.', 1, diagnosticEvent)
-        })()
-      })
-      .on('close', () => {
-        if (targetClientPoolable) removePooledClientAliases(pooledTargetClients, authClient)
-        if (
-          targetClientIsPooled &&
-          authClient === client &&
-          (stream || isPooledClientByKeys(pooledTargetClients, [targetClientPoolKey, targetClientAuthenticatedPoolKey], authClient))
-        )
-          return
-        if (staleTargetClients.has(authClient) || authClient !== client) return
-        finish(null, 'unknown')
-      })
-      .on('end', () => {
-        if (targetClientPoolable) removePooledClientAliases(pooledTargetClients, authClient)
-        if (
-          targetClientIsPooled &&
-          authClient === client &&
-          (stream || isPooledClientByKeys(pooledTargetClients, [targetClientPoolKey, targetClientAuthenticatedPoolKey], authClient))
-        )
-          return
-        if (staleTargetClients.has(authClient) || authClient !== client) return
-        finish(null, 'unknown')
-      })
+    attachActiveTargetClientEvents(authClient)
+    authClient.on('ready', () => {
+      openShellOnClient(authClient)
+    })
   }
 
   const createTargetClient = () => {

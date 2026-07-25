@@ -62,6 +62,8 @@ export type SshTerminalClient = {
   on(event: 'ready', listener: () => void): SshTerminalClient
   on(event: 'error', listener: (error: Error) => void): SshTerminalClient
   on(event: 'close' | 'end', listener: () => void): SshTerminalClient
+  off?(event: 'error', listener: (error: Error) => void): SshTerminalClient
+  off?(event: 'close' | 'end', listener: () => void): SshTerminalClient
   on(
     event: 'keyboard-interactive',
     listener: (

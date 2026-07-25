@@ -2,7 +2,7 @@ import type { TerminalCreateOptions, TerminalLifecycleEvent } from '@shared/cont
 import { shouldUseSshTerminalBackendDouble } from '@shared/runtimeSwitches'
 import { createSshProxySocketForAsset } from './sshProxy'
 import { loadSsh2 } from './ssh2Runtime'
-import { defaultSshKeepaliveIntervalMs, defaultSshReadyTimeoutMs } from './sshDefaults'
+import { defaultSshInteractiveKeepaliveIntervalMs, defaultSshReadyTimeoutMs } from './sshDefaults'
 import { createTerminalErrorLifecycleEvent, createTerminalLifecycleEvent } from '../terminal/terminal'
 import type { AssetSecret, SshTerminalCreateResult, SshTerminalEventSink, SshTerminalPtyRuntime, SshTerminalRuntimeConfig, SshTerminalSsh2Runtime, SshTerminalTarget } from './sshTerminalTypes'
 
@@ -60,7 +60,7 @@ export const getTerminalType = (options: TerminalCreateOptions) => {
 
 export const getSshReadyTimeoutMs = () => runtimeConfig.readyTimeoutMs || defaultSshReadyTimeoutMs
 
-export const getSshKeepaliveIntervalMs = () => runtimeConfig.keepaliveIntervalMs || defaultSshKeepaliveIntervalMs
+export const getSshKeepaliveIntervalMs = () => runtimeConfig.keepaliveIntervalMs ?? defaultSshInteractiveKeepaliveIntervalMs
 
 export const getConfiguredSshControlDir = () => cleanText(runtimeConfig.getSshControlDir?.())
 

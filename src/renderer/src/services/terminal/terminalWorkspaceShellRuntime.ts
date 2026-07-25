@@ -155,6 +155,7 @@ export const createTerminalWorkspaceShellRuntime = (
     return !isEditableKeyboardTarget(event)
   }
   const compactShortcut = (shortcut: string) => shortcut.replace(/\s+/g, '').toLowerCase()
+  const pendingPanelConnectionIds = new Set<string>()
   const terminalDefaultShortcutOverridden = (actionId: string, defaultShortcut: string) => {
     const shortcut = workspace.settingsShortcuts.find((item) => item.id === actionId)?.shortcut
     return Boolean(shortcut && compactShortcut(shortcut) !== compactShortcut(defaultShortcut))
@@ -746,6 +747,10 @@ export const createTerminalWorkspaceShellRuntime = (
         return jumpToKnownCommand(panelId, -1)
       case 'nextCommand':
         return jumpToKnownCommand(panelId, 1)
+      case 'reconnect':
+        if (panel.sessionId || !panel.sshSession || (panel.status !== 'closed' && panel.status !== 'error')) return false
+        void togglePanelConnection(panelId)
+        return true
     }
     event?.preventDefault()
     return false
@@ -756,8 +761,14 @@ export const createTerminalWorkspaceShellRuntime = (
     if (!panel || !isTerminalWorkspacePanel(panel)) return
     const wasNeverConnected = !panel.sessionId && panel.status === 'ready'
     if (!panel.sessionId) {
-      const connected = await reconnectTerminalPanel(panel)
-      if (connected) workspace.setTopNotice(wasNeverConnected && !panel.sshSession ? '本地 shell 已打开' : '终端已重新连接')
+      if (pendingPanelConnectionIds.has(panelId)) return
+      pendingPanelConnectionIds.add(panelId)
+      try {
+        const connected = await reconnectTerminalPanel(panel)
+        if (connected) workspace.setTopNotice(wasNeverConnected && !panel.sshSession ? '本地 shell 已打开' : '终端已重新连接')
+      } finally {
+        pendingPanelConnectionIds.delete(panelId)
+      }
     } else {
       const disconnected = await disconnectTerminalPanel(panel)
       if (disconnected) workspace.setTopNotice('终端已断开连接')

@@ -339,6 +339,60 @@ describe('terminalWorkspaceShellRuntime', () => {
     expect(calls.hideSuggestions).toHaveBeenCalled()
   })
 
+  it('reuses the existing connection action when Enter is pressed on a disconnected SSH terminal', async () => {
+    const panel = createPanel({
+      status: 'closed',
+      sshSession: {
+        connectionId: 'ssh-old',
+        host: '10.0.0.8',
+        port: 22,
+        username: 'ops',
+        assetName: 'prod'
+      }
+    })
+    const { calls, runtime } = createRuntime({ workspace: createWorkspace(panel) })
+    const terminalHost = document.createElement('div')
+    terminalHost.className = 'xterm-host'
+    terminalHost.dataset.terminalSurface = 'workspace'
+    const reconnect = createKeyboardEvent({ key: 'Enter', target: terminalHost })
+
+    await runtime.handleShortcut(reconnect)
+    await vi.waitFor(() => expect(calls.reconnectTerminalPanel).toHaveBeenCalledTimes(1))
+
+    expect(reconnect.preventDefault).toHaveBeenCalledTimes(1)
+    expect(reconnect.stopPropagation).toHaveBeenCalledTimes(1)
+    expect(panel.sessionId).toBe('session-1')
+    expect(panel.output).toBe('existing output')
+
+    const activeEnter = createKeyboardEvent({ key: 'Enter', target: terminalHost })
+    await runtime.handleShortcut(activeEnter)
+    expect(activeEnter.preventDefault).not.toHaveBeenCalled()
+
+    panel.sessionId = undefined
+    panel.status = 'closed'
+    let finishReconnect: (value: boolean) => void = () => {}
+    calls.reconnectTerminalPanel.mockImplementationOnce(
+      () =>
+        new Promise<boolean>((resolve) => {
+          finishReconnect = resolve
+        })
+    )
+    const firstRetry = createKeyboardEvent({ key: 'Enter', target: terminalHost })
+    const duplicateRetry = createKeyboardEvent({ key: 'Enter', target: terminalHost })
+    await runtime.handleShortcut(firstRetry)
+    await runtime.handleShortcut(duplicateRetry)
+    expect(calls.reconnectTerminalPanel).toHaveBeenCalledTimes(2)
+    finishReconnect(false)
+    await Promise.resolve()
+
+    const localPanel = createPanel({ status: 'closed' })
+    const localRuntime = createRuntime({ workspace: createWorkspace(localPanel) })
+    const localEnter = createKeyboardEvent({ key: 'Enter', target: terminalHost })
+    await localRuntime.runtime.handleShortcut(localEnter)
+    expect(localEnter.preventDefault).not.toHaveBeenCalled()
+    expect(localRuntime.calls.reconnectTerminalPanel).not.toHaveBeenCalled()
+  })
+
   it('routes dashboard shortcuts without taking plain control keys from an active shell', async () => {
     const dashboard = createRuntime({ dashboardVisible: true })
 

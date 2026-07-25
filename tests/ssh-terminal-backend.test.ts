@@ -104,7 +104,7 @@ const createPtyRuntime = () => {
 }
 
 const createSshRuntime = (
-  options: { failConnect?: Error | Array<Error | null | undefined>; failShell?: Error; failForwardOut?: Error; manualReady?: boolean } = {}
+  options: { failConnect?: Error | Array<Error | null | undefined>; failShell?: Error | Array<Error | undefined>; failForwardOut?: Error; manualReady?: boolean } = {}
 ) => {
   const clients: MockSshClient[] = []
   const connectConfigs: Array<Record<string, unknown>> = []
@@ -133,7 +133,8 @@ const createSshRuntime = (
       const channel = new MockSshChannel()
       channels.push(channel)
       queueMicrotask(() => {
-        callback(options.failShell, channel)
+        const failShell = Array.isArray(options.failShell) ? options.failShell.shift() : options.failShell
+        callback(failShell, channel)
       })
     }
 
@@ -287,7 +288,7 @@ describe('ssh terminal backend runtime', () => {
         username: 'deploy',
         password: 'secret',
         readyTimeout: 120000,
-        keepaliveInterval: 10000,
+        keepaliveInterval: 0,
         keepaliveCountMax: 3
       })
     ])
@@ -330,6 +331,8 @@ describe('ssh terminal backend runtime', () => {
       createSink(firstEvents)
     )
     await waitForMicrotasks(4)
+    ssh.channels[0].emit('close', 0)
+    await waitForMicrotasks(1)
     const second = backend.createSshTerminalSession(
       'ssh-reuse-direct-2',
       { kind: 'ssh', ssh: { host: '10.71.0.8', username: 'deploy', port: 2222, password: 'secret' }, cols: 120, rows: 36 },
@@ -348,7 +351,12 @@ describe('ssh terminal backend runtime', () => {
     expect(firstEvents.lifecycle).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ stage: 'connected', sshTransport: 'direct', connectionReuse: 'created' }),
-        expect.objectContaining({ stage: 'shell-ready', sshTransport: 'direct', connectionReuse: 'created' })
+        expect.objectContaining({ stage: 'shell-ready', sshTransport: 'direct', connectionReuse: 'created' }),
+        expect.objectContaining({
+          stage: 'closed',
+          reason: 'process',
+          message: 'SSH shell session exited; connection remains reusable.'
+        })
       ])
     )
     expect(secondEvents.lifecycle).toEqual(
@@ -365,6 +373,91 @@ describe('ssh terminal backend runtime', () => {
     first.session?.kill()
     await waitForMicrotasks(1)
     expect(ssh.clients[0].endCalls).toBe(0)
+  })
+
+  it('falls back to a fresh SSH client when a pooled client cannot open another shell', async () => {
+    const backend = await loadSshTerminalBackend()
+    const ssh = createSshRuntime({ failShell: [undefined, new Error('Not connected'), undefined] })
+    const firstEvents = createRecorder()
+    const secondEvents = createRecorder()
+    backend.configureSshTerminalBackendRuntime({
+      ssh2Runtime: asRuntime(ssh.runtime),
+      getAsset: () => null,
+      getAssetSecret: () => ({}),
+      getKeychainSecret: () => ({}),
+      getConfig: () => runtimeConfig(),
+      getEnv: () => ({ SSH_AUTH_SOCK: '' })
+    })
+
+    backend.createSshTerminalSession(
+      'ssh-stale-pool-1',
+      { kind: 'ssh', ssh: { host: '10.71.0.8', username: 'deploy', port: 2222, password: 'secret' } },
+      createSink(firstEvents)
+    )
+    await waitForMicrotasks(4)
+    ssh.channels[0].emit('close', 0)
+    await waitForMicrotasks(1)
+
+    const second = backend.createSshTerminalSession(
+      'ssh-stale-pool-2',
+      { kind: 'ssh', ssh: { host: '10.71.0.8', username: 'deploy', port: 2222, password: 'secret' } },
+      createSink(secondEvents)
+    )
+    await waitForMicrotasks(8)
+
+    expect(second.session).toBeTruthy()
+    expect(ssh.clients).toHaveLength(2)
+    expect(ssh.connectConfigs).toHaveLength(2)
+    expect(ssh.clients[0].endCalls).toBe(1)
+    expect(secondEvents.lifecycle).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ stage: 'connected', connectionReuse: 'reused' }),
+        expect.objectContaining({
+          stage: 'connecting',
+          connectionReuse: 'created',
+          errorMessage: 'Not connected'
+        }),
+        expect.objectContaining({ stage: 'shell-ready', connectionReuse: 'created' })
+      ])
+    )
+    expect(secondEvents.exit).toEqual([])
+  })
+
+  it('reports an active SSH transport failure as a network disconnect', async () => {
+    const backend = await loadSshTerminalBackend()
+    const ssh = createSshRuntime()
+    const events = createRecorder()
+    backend.configureSshTerminalBackendRuntime({
+      ssh2Runtime: asRuntime(ssh.runtime),
+      getAsset: () => null,
+      getAssetSecret: () => ({}),
+      getKeychainSecret: () => ({}),
+      getConfig: () => runtimeConfig(),
+      getEnv: () => ({ SSH_AUTH_SOCK: '' })
+    })
+
+    backend.createSshTerminalSession(
+      'ssh-active-network-error',
+      { kind: 'ssh', ssh: { host: '10.71.0.8', username: 'deploy', port: 2222, password: 'secret' } },
+      createSink(events)
+    )
+    await waitForMicrotasks(4)
+    ssh.clients[0].emit('error', Object.assign(new Error('Keepalive timeout'), { level: 'client-timeout' }))
+    ssh.channels[0].emit('close')
+    await waitForMicrotasks(1)
+
+    expect(events.lifecycle.at(-1)).toEqual(
+      expect.objectContaining({
+        stage: 'error',
+        reason: 'network',
+        isNetworkDisconnect: true,
+        errorCode: 'SSH_NETWORK_ERROR',
+        errorMessage: 'Keepalive timeout',
+        message: 'SSH connection lost.'
+      })
+    )
+    expect(events.exit).toEqual([{ event: events.lifecycle.at(-1), code: 1 }])
+    expect(events.closed).toEqual(['ssh-active-network-error'])
   })
 
   it('runs background commands through an independent ssh exec channel without visible shell writes', async () => {
@@ -1105,8 +1198,6 @@ describe('ssh terminal backend runtime', () => {
         '/dev/null',
         'ControlMaster=auto',
         'ControlPersist=yes',
-        'ServerAliveInterval=10',
-        'ServerAliveCountMax=3',
         'HostKeyAlgorithms=+ssh-rsa',
         'PubkeyAcceptedAlgorithms=+ssh-rsa',
         '-tt',
@@ -1137,7 +1228,7 @@ describe('ssh terminal backend runtime', () => {
     pty.processes[0].emitData('ops@relay:~$ ')
     expect(pty.processes[0].writes).toHaveLength(1)
     const command = pty.processes[0].writes[0]
-    expect(command).toBe("ssh -o ServerAliveInterval=10 -o ServerAliveCountMax=3 -tt -p 22 -- 'root@target.internal'\n")
+    expect(command).toBe("ssh -tt -p 22 -- 'root@target.internal'\n")
     expect(command).not.toContain('queued-before-relay')
     expect(command).not.toContain('__AIO_CTX')
     expect(command).not.toContain('printf')
@@ -1253,14 +1344,14 @@ describe('ssh terminal backend runtime', () => {
     await waitForMicrotasks(4)
     pty.processes[0].emitData('ops@relay:~$ ')
     pty.processes[0].emitData('target login banner\n[root@target.internal ~]# ')
-    expect(pty.processes[0].writes).toEqual(["ssh -o ServerAliveInterval=10 -o ServerAliveCountMax=3 -tt -p 22 -- 'root@target.internal'\n"])
+    expect(pty.processes[0].writes).toEqual(["ssh -tt -p 22 -- 'root@target.internal'\n"])
 
     const backgroundPromise = result.session!.runBackgroundCommand!({ command: 'pwd && hostname', cwd: '/root', timeoutMs: 5000 })
     expect(pty.spawnCalls).toHaveLength(2)
     const hidden = pty.processes[1]
     expect(hidden).not.toBe(pty.processes[0])
     hidden.emitData('ops@relay:~$ ')
-    expect(hidden.writes).toEqual(["ssh -o ServerAliveInterval=10 -o ServerAliveCountMax=3 -tt -p 22 -- 'root@target.internal'\n"])
+    expect(hidden.writes).toEqual(["ssh -tt -p 22 -- 'root@target.internal'\n"])
     hidden.emitData('target login banner\n[root@target.internal ~]# ')
     expect(hidden.writes).toHaveLength(2)
     const command = hidden.writes[1]
@@ -1272,7 +1363,7 @@ describe('ssh terminal backend runtime', () => {
     hidden.emitData(`__AIOPSTERM_BACKGROUND_START_${commandId}__\n/root\ntarget.internal\n__AIOPSTERM_BACKGROUND_END_${commandId}__:0\n[root@target.internal ~]# `)
     const background = await backgroundPromise
 
-    expect(pty.processes[0].writes).toEqual(["ssh -o ServerAliveInterval=10 -o ServerAliveCountMax=3 -tt -p 22 -- 'root@target.internal'\n"])
+    expect(pty.processes[0].writes).toEqual(["ssh -tt -p 22 -- 'root@target.internal'\n"])
     expect(background).toEqual(
       expect.objectContaining({
         output: '/root\ntarget.internal',
