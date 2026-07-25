@@ -1,7 +1,8 @@
 import { computed, defineComponent, h, ref } from 'vue'
 import { Brain, Copy, Eye, EyeOff, LockKeyhole, Upload, Volume2, X } from 'lucide-vue-next'
 import type { AgentHookInstallerStatus } from '@shared/contracts/agentHooks'
-import type { NotificationSoundPreset } from '@shared/contracts/appRuntime'
+import type { ModelProviderCheckResult, NotificationSoundPreset } from '@shared/contracts/appRuntime'
+import { resolveModelProviderEndpoint, suggestModelProviderEndpoint, type ModelProviderEndpointSuggestion } from '@shared/modelProviderEndpoint'
 import type { SettingsModelProviderKey, SettingsWorkspacePageContext, SettingsWorkspaceStore, SettingsWorkspaceTranslate } from '@/services/settings/settingsWorkspacePageContext'
 
 export const createSettingsWorkspaceModelAiPages = (
@@ -673,31 +674,84 @@ export const createSettingsWorkspaceModelAiPages = (
     },
     setup(props) {
       const visibleSecrets = ref<Record<string, boolean>>({})
+      const endpointSuggestion = ref<ModelProviderEndpointSuggestion | null>(null)
+      const endpointUndo = ref<{ baseUrl: string; apiPathMode: 'auto' | 'v1' | 'none' } | null>(null)
+      const endpointAutoCorrected = ref(false)
       const providerState = computed(() => workspace.modelProviders[props.provider])
       const checkLabel = computed(() => (workspace.modelCheckState[props.provider] === 'checking' ? 'Checking' : 'Check'))
-      const openAiUrlPreview = computed(() => {
-        if (props.provider !== 'openai') return ''
-        const url = providerState.value.baseUrl.trim()
-        if (!url) return ''
-        let baseUrl = url
-        const skipVersionPrefix = url.endsWith('#')
-        if (skipVersionPrefix) {
-          baseUrl = url.slice(0, -1)
-        } else {
-          let hasV1 = false
-          try {
-            hasV1 = new URL(url).pathname.split('/').filter(Boolean).some((segment) => /^v\d+$/i.test(segment))
-          } catch {
-            hasV1 = false
-          }
-          if (!hasV1) {
-            baseUrl = `${url}${url.endsWith('/') ? '' : '/'}v1`
+      const supportsEndpointMode = computed(() => props.provider !== 'bedrock')
+      const endpointPreview = computed(() => {
+        if (!supportsEndpointMode.value) return ''
+        return resolveModelProviderEndpoint(props.provider, providerState.value).endpoint
+      })
+      const update = (patch: Partial<typeof providerState.value>, manual = false) => {
+        if (manual) {
+          endpointSuggestion.value = null
+          endpointUndo.value = null
+          endpointAutoCorrected.value = false
+        }
+        workspace.updateModelProviderConfig(props.provider, patch)
+      }
+      const captureRemoteSuggestion = (result: ModelProviderCheckResult | null | undefined) => {
+        if (!result?.ok || !result.data?.suggestion) return
+        endpointSuggestion.value = {
+          originalBaseUrl: providerState.value.baseUrl,
+          suggestedBaseUrl: result.data.suggestion.baseUrl,
+          apiPathMode: result.data.suggestion.apiPathMode || providerState.value.apiPathMode || 'auto',
+          apiFormat: result.data.suggestion.apiFormat,
+          reasons: result.data.suggestion.reasons,
+          endpoint: result.data.suggestion.endpoint
+        }
+      }
+      const runProviderCheck = async () => {
+        if (providerState.value.endpointMode !== 'exact') {
+          const suggestion = suggestModelProviderEndpoint(props.provider, providerState.value)
+          if (suggestion) {
+            endpointSuggestion.value = suggestion
+            return
           }
         }
-        const apiPath = providerState.value.apiFormat === 'responses' ? 'responses' : 'chat/completions'
-        return `${baseUrl}${baseUrl.endsWith('/') ? '' : '/'}${apiPath}`
-      })
-      const update = (patch: Partial<typeof providerState.value>) => workspace.updateModelProviderConfig(props.provider, patch)
+        endpointSuggestion.value = null
+        const result = await workspace.checkModelProvider(props.provider)
+        captureRemoteSuggestion(result)
+      }
+      const applyEndpointSuggestion = async () => {
+        const suggestion = endpointSuggestion.value
+        if (!suggestion) return
+        endpointUndo.value = {
+          baseUrl: providerState.value.baseUrl,
+          apiPathMode: providerState.value.apiPathMode || 'auto'
+        }
+        endpointSuggestion.value = null
+        endpointAutoCorrected.value = true
+        update({
+          baseUrl: suggestion.suggestedBaseUrl,
+          apiPathMode: suggestion.apiPathMode,
+          ...(suggestion.apiFormat ? { apiFormat: suggestion.apiFormat } : {}),
+          endpointMode: 'auto'
+        })
+        captureRemoteSuggestion(await workspace.checkModelProvider(props.provider))
+      }
+      const keepExactEndpoint = async () => {
+        endpointSuggestion.value = null
+        endpointUndo.value = null
+        endpointAutoCorrected.value = false
+        update({ endpointMode: 'exact' })
+        await workspace.checkModelProvider(props.provider)
+      }
+      const undoEndpointCorrection = () => {
+        const previous = endpointUndo.value
+        if (!previous) return
+        endpointUndo.value = null
+        endpointAutoCorrected.value = false
+        update({ baseUrl: previous.baseUrl, apiPathMode: previous.apiPathMode })
+      }
+      const saveProvider = async () => {
+        const saved = await workspace.saveModelProvider(props.provider)
+        if (!saved) return
+        endpointUndo.value = null
+        endpointAutoCorrected.value = false
+      }
       const field = (label: string, key: keyof typeof providerState.value, options: { type?: string; placeholder?: string; wide?: boolean } = {}) => {
         const secretKey = `${props.provider}:${String(key)}`
         const isPassword = options.type === 'password'
@@ -706,7 +760,7 @@ export const createSettingsWorkspaceModelAiPages = (
           type: isPassword && visibleSecrets.value[secretKey] ? 'text' : options.type || 'text',
           value: providerState.value[key] as string,
           placeholder: options.placeholder,
-          onChange: (event: Event) => update({ [key]: (event.target as HTMLInputElement).value })
+          onChange: (event: Event) => update({ [key]: (event.target as HTMLInputElement).value }, key === 'baseUrl')
         })
         return h('label', { class: ['provider-field', { wide: options.wide }] }, [
           h('span', label),
@@ -744,6 +798,77 @@ export const createSettingsWorkspaceModelAiPages = (
           }),
           label
         ])
+      const endpointControls = () => {
+        if (!supportsEndpointMode.value) return null
+        const reasonLabels: Record<string, string> = {
+          'legacy-hash': t('settings.models.endpoint.reasonLegacyHash'),
+          protocol: t('settings.models.endpoint.reasonProtocol'),
+          'operation-path': t('settings.models.endpoint.reasonOperationPath'),
+          'trailing-slash': t('settings.models.endpoint.reasonTrailingSlash'),
+          v1: t('settings.models.endpoint.reasonV1'),
+          'verified-compatible-route': t('settings.models.endpoint.reasonCompatibleRoute')
+        }
+        return h('div', { class: ['provider-endpoint-controls', { corrected: endpointAutoCorrected.value }] }, [
+          h('label', { class: 'provider-field' }, [
+            h('span', t('settings.models.endpoint.mode')),
+            h(
+              'select',
+              {
+                class: 'settings-select',
+                value: providerState.value.endpointMode || 'auto',
+                onChange: (event: Event) => update({ endpointMode: (event.target as HTMLSelectElement).value as 'auto' | 'exact' }, true)
+              },
+              [
+                h('option', { value: 'auto' }, t('settings.models.endpoint.auto')),
+                h('option', { value: 'exact' }, t('settings.models.endpoint.exact'))
+              ]
+            )
+          ]),
+          endpointPreview.value
+            ? h('small', { class: 'provider-help url-preview' }, t('settings.models.endpoint.finalAddress', { endpoint: endpointPreview.value }))
+            : null,
+          endpointAutoCorrected.value
+            ? h('div', { class: 'provider-endpoint-status' }, [
+                h('span', t('settings.models.endpoint.corrected')),
+                endpointUndo.value
+                  ? h('button', { type: 'button', class: 'settings-button', onClick: undoEndpointCorrection }, t('settings.models.endpoint.undo'))
+                  : null
+              ])
+            : null,
+          providerState.value.endpointMode === 'exact'
+            ? h('small', { class: 'provider-help' }, t('settings.models.endpoint.exactHelp'))
+            : null,
+          endpointSuggestion.value
+            ? h('div', { class: 'provider-endpoint-suggestion' }, [
+                h('strong', t('settings.models.endpoint.suggestionTitle')),
+                h('div', [h('span', t('settings.models.endpoint.current')), h('code', endpointSuggestion.value.originalBaseUrl)]),
+                h('div', [h('span', t('settings.models.endpoint.suggested')), h('code', endpointSuggestion.value.suggestedBaseUrl)]),
+                endpointSuggestion.value.apiFormat && endpointSuggestion.value.apiFormat !== providerState.value.apiFormat
+                  ? h(
+                      'div',
+                      t('settings.models.endpoint.formatChange', {
+                        current: providerState.value.apiFormat || 'chat-completions',
+                        suggested: endpointSuggestion.value.apiFormat
+                      })
+                    )
+                  : null,
+                h('small', endpointSuggestion.value.reasons.map((reason) => reasonLabels[reason] || reason).join(', ')),
+                h('div', { class: 'provider-endpoint-actions' }, [
+                  h(
+                    'button',
+                    { type: 'button', class: 'settings-button primary', onClick: applyEndpointSuggestion },
+                    t('settings.models.endpoint.applyAndCheck')
+                  ),
+                  h(
+                    'button',
+                    { type: 'button', class: 'settings-button', onClick: keepExactEndpoint },
+                    t('settings.models.endpoint.keepExact')
+                  )
+                ])
+              ])
+            : null
+        ])
+      }
       return () =>
         h('div', { class: 'settings-section-card provider-card' }, [
           h('header', [h('h4', props.title)]),
@@ -751,8 +876,7 @@ export const createSettingsWorkspaceModelAiPages = (
           props.provider === 'openai'
             ? [
                 field('OpenAI Base URL', 'baseUrl', { placeholder: 'https://api.openai.com/v1', wide: true }),
-                h('small', { class: 'provider-help' }, '末尾追加 # 可跳过自动 /v1 拼接。Codex CLI 只支持 Responses。'),
-                openAiUrlPreview.value ? h('small', { class: 'provider-help url-preview' }, `Preview: ${openAiUrlPreview.value}`) : null,
+                h('small', { class: 'provider-help' }, t('settings.models.endpoint.openAiHelp')),
                 h('label', { class: 'provider-field' }, [
                   h('span', 'API Format'),
                   h(
@@ -795,7 +919,9 @@ export const createSettingsWorkspaceModelAiPages = (
                 checkbox('Cross Region Inference', 'awsUseCrossRegionInference')
               ]
             : null,
-          props.provider === 'deepseek' ? field('DeepSeek API Key', 'apiKey', { type: 'password' }) : null,
+          props.provider === 'deepseek'
+            ? [field('DeepSeek Base URL', 'baseUrl', { placeholder: 'https://api.deepseek.com', wide: true }), field('DeepSeek API Key', 'apiKey', { type: 'password' })]
+            : null,
           props.provider === 'anthropic'
             ? [field('Anthropic Base URL', 'baseUrl', { placeholder: 'https://api.anthropic.com', wide: true }), field('Anthropic API Key', 'apiKey', { type: 'password' })]
             : null,
@@ -808,6 +934,7 @@ export const createSettingsWorkspaceModelAiPages = (
                 h('small', { class: 'provider-help' }, '需要 LM Studio 启用 OpenAI Compatible Server。Codex CLI 使用内置 lmstudio provider。')
               ]
             : null,
+          endpointControls(),
           props.provider === 'litellm' || props.provider === 'openai' ? field('API Key', 'apiKey', { type: 'password' }) : null,
           h('label', { class: 'provider-field' }, [
             h('span', 'Model'),
@@ -822,11 +949,11 @@ export const createSettingsWorkspaceModelAiPages = (
                 {
                   class: 'settings-button',
                   disabled: workspace.modelCheckState[props.provider] === 'checking',
-                  onClick: () => workspace.checkModelProvider(props.provider)
+                  onClick: runProviderCheck
                 },
                 checkLabel.value
               ),
-              h('button', { class: 'settings-button primary', onClick: () => workspace.saveModelProvider(props.provider) }, 'Save')
+              h('button', { class: 'settings-button primary', onClick: saveProvider }, 'Save')
             ])
           ])
         ])

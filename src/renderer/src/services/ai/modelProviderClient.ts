@@ -106,17 +106,36 @@ export const isModelProviderCheckDataForRequest = (
   source: unknown,
   provider: ModelProviderCheckKey,
   expectedConfig: ModelProviderUserConfig
-): source is ModelProviderCheckData =>
-  isRecord(source) &&
-  source.provider === provider &&
-  typeof source.label === 'string' &&
-  source.label.trim() !== '' &&
-  typeof source.modelId === 'string' &&
-  source.modelId.trim() === expectedConfig.modelId.trim() &&
-  typeof source.endpoint === 'string' &&
-  source.endpoint.trim() !== '' &&
-  typeof source.message === 'string' &&
-  source.message.trim() !== '' &&
-  typeof source.durationMs === 'number' &&
-  Number.isFinite(source.durationMs) &&
-  source.durationMs >= 0
+): source is ModelProviderCheckData => {
+  if (
+    !isRecord(source) ||
+    source.provider !== provider ||
+    typeof source.label !== 'string' ||
+    source.label.trim() === '' ||
+    typeof source.modelId !== 'string' ||
+    source.modelId.trim() !== expectedConfig.modelId.trim() ||
+    typeof source.endpoint !== 'string' ||
+    source.endpoint.trim() === '' ||
+    typeof source.message !== 'string' ||
+    source.message.trim() === '' ||
+    typeof source.durationMs !== 'number' ||
+    !Number.isFinite(source.durationMs) ||
+    source.durationMs < 0
+  ) {
+    return false
+  }
+  if (source.suggestion === undefined) return true
+  if (!isRecord(source.suggestion)) return false
+  const apiFormat = source.suggestion.apiFormat
+  const apiPathMode = source.suggestion.apiPathMode
+  return (
+    typeof source.suggestion.baseUrl === 'string' &&
+    source.suggestion.baseUrl.trim() !== '' &&
+    typeof source.suggestion.endpoint === 'string' &&
+    source.suggestion.endpoint.trim() !== '' &&
+    Array.isArray(source.suggestion.reasons) &&
+    source.suggestion.reasons.every((reason) => typeof reason === 'string' && reason.trim() !== '') &&
+    (apiFormat === undefined || apiFormat === 'chat-completions' || apiFormat === 'responses') &&
+    (apiPathMode === undefined || apiPathMode === 'auto' || apiPathMode === 'v1' || apiPathMode === 'none')
+  )
+}

@@ -10,6 +10,7 @@ import type {
   ModelProviderUserConfig,
   ModelSettingsUserConfig
 } from '@shared/contracts/appRuntime'
+import { resolveModelProviderEndpoint } from '@shared/modelProviderEndpoint'
 
 const defaultSettingsModelOptions: ModelOptionUserConfig[] = []
 
@@ -116,22 +117,6 @@ const buildModelCatalog = (input: AiModelCatalogInput = {}): AiModelCatalog => {
 
 export const listAiModels = async (input: AiModelCatalogInput = {}): Promise<AiModelCatalog> => cloneModelCatalog(buildModelCatalog(input))
 
-const defaultEndpoints: Record<ModelProviderCheckKey, string> = {
-  litellm: 'http://localhost:4000',
-  openai: 'https://api.openai.com/v1',
-  bedrock: 'bedrock-runtime',
-  deepseek: 'https://api.deepseek.com',
-  anthropic: 'https://api.anthropic.com',
-  ollama: 'http://localhost:11434',
-  lmstudio: 'http://localhost:1234'
-}
-
-const normalizeOpenAiEndpoint = (baseUrl: string, apiFormat: ModelProviderUserConfig['apiFormat']) => {
-  if (!baseUrl) return ''
-  const path = apiFormat === 'responses' ? 'responses' : 'chat/completions'
-  return normalizeOpenAiOperationEndpoint(baseUrl, path)
-}
-
 const appendEndpointPath = (baseUrl: string, path: string) => {
   try {
     const parsed = new URL(baseUrl)
@@ -147,27 +132,6 @@ const appendEndpointPath = (baseUrl: string, path: string) => {
   } catch {
     return baseUrl
   }
-}
-
-const normalizeOpenAiBaseUrl = (baseUrl: string) => {
-  if (!baseUrl) return ''
-  const skipVersionPrefix = baseUrl.endsWith('#')
-  const normalizedBaseUrl = skipVersionPrefix ? baseUrl.slice(0, -1) : baseUrl
-  try {
-    const parsed = new URL(normalizedBaseUrl)
-    const hasVersionSegment = parsed.pathname.split('/').filter(Boolean).some((segment) => /^v\d+$/i.test(segment))
-    if (!skipVersionPrefix && !hasVersionSegment) parsed.pathname = `${parsed.pathname.replace(/\/$/, '')}/v1`
-    parsed.search = ''
-    parsed.hash = ''
-    return parsed.toString().replace(/\/$/, '')
-  } catch {
-    return normalizedBaseUrl
-  }
-}
-
-const normalizeOpenAiOperationEndpoint = (baseUrl: string, path: string) => {
-  const normalized = normalizeOpenAiBaseUrl(baseUrl)
-  return appendEndpointPath(normalized, path)
 }
 
 const validateUrl = (value: string, field: string): string | null => {
@@ -191,9 +155,6 @@ const missingSecretMessage = (provider: ModelProviderCheckKey, config: ModelProv
 }
 
 const endpointFor = (provider: ModelProviderCheckKey, config: ModelProviderUserConfig) => {
-  const baseUrl = normalizeText(config.baseUrl)
-  if (provider === 'openai') return normalizeOpenAiEndpoint(baseUrl || defaultEndpoints.openai, config.apiFormat)
-  if (provider === 'litellm') return normalizeOpenAiOperationEndpoint(baseUrl || defaultEndpoints.litellm, 'chat/completions')
   if (provider === 'bedrock') {
     const region = normalizeText(config.awsRegion) || 'us-east-1'
     const baseEndpoint =
@@ -202,11 +163,7 @@ const endpointFor = (provider: ModelProviderCheckKey, config: ModelProviderUserC
         : `https://bedrock-runtime.${region}.amazonaws.com`
     return appendEndpointPath(baseEndpoint, `model/${encodeURIComponent(normalizeText(config.modelId))}/invoke`)
   }
-  if (provider === 'deepseek') return normalizeOpenAiOperationEndpoint(baseUrl || defaultEndpoints.deepseek, 'chat/completions')
-  if (provider === 'anthropic') return appendEndpointPath(baseUrl || defaultEndpoints.anthropic, 'v1/messages')
-  if (provider === 'ollama') return appendEndpointPath(baseUrl || defaultEndpoints.ollama, 'api/tags')
-  if (provider === 'lmstudio') return normalizeOpenAiOperationEndpoint(baseUrl || defaultEndpoints.lmstudio, 'chat/completions')
-  return baseUrl || defaultEndpoints[provider]
+  return resolveModelProviderEndpoint(provider, config).endpoint
 }
 
 const validateProviderConfig = (
@@ -317,7 +274,8 @@ const successResult = (
   label: string,
   endpoint: string,
   modelId: string,
-  startedAt: number
+  startedAt: number,
+  suggestion?: NonNullable<NonNullable<ModelProviderCheckResult['data']>['suggestion']>
 ): ModelProviderCheckResult => ({
   ok: true,
   data: {
@@ -326,7 +284,8 @@ const successResult = (
     modelId,
     endpoint,
     message: `${label} configuration validated against the live provider endpoint.`,
-    durationMs: Math.max(1, Date.now() - startedAt)
+    durationMs: Math.max(1, Date.now() - startedAt),
+    ...(suggestion ? { suggestion } : {})
   }
 })
 
@@ -434,14 +393,14 @@ const performProviderCheck = async (
 ) => {
   if (provider === 'ollama') {
     const response = await fetchWithTimeout(endpoint, { method: 'GET' }, timeoutMs)
-    if (!response.ok) return { ok: false as const, message: await parseErrorMessage(response) }
+    if (!response.ok) return { ok: false as const, message: await parseErrorMessage(response), status: response.status }
     const payload = (await response.json().catch(() => null)) as { models?: Array<{ name?: string; model?: string }> } | null
     const models = Array.isArray(payload?.models) ? payload.models : []
     const modelId = normalizeText(config.modelId)
     const exists = models.some((model) => model.name === modelId || model.model === modelId)
     if (!exists) {
       const available = models.map((model) => model.name || model.model).filter(Boolean).join(', ')
-      return { ok: false as const, message: `Model '${modelId}' not found.${available ? ` Available models: ${available}` : ''}` }
+      return { ok: false as const, message: `Model '${modelId}' not found.${available ? ` Available models: ${available}` : ''}`, status: 404 }
     }
     return { ok: true as const }
   }
@@ -465,9 +424,43 @@ const performProviderCheck = async (
     },
     timeoutMs
   )
-  if (!response.ok) return { ok: false as const, message: await parseErrorMessage(response) }
+  if (!response.ok) return { ok: false as const, message: await parseErrorMessage(response), status: response.status }
   await response.text().catch(() => '')
   return { ok: true as const }
+}
+
+const fallbackConfigsFor = (provider: ModelProviderCheckKey, config: ModelProviderUserConfig) => {
+  if (config.endpointMode === 'exact' || !['litellm', 'openai', 'deepseek', 'lmstudio'].includes(provider)) return []
+  const candidates: ModelProviderUserConfig[] = []
+  const seen = new Set<string>()
+  const add = (candidate: ModelProviderUserConfig) => {
+    const key = `${candidate.baseUrl}|${candidate.apiFormat || ''}|${candidate.apiPathMode || 'auto'}`
+    if (seen.has(key)) return
+    seen.add(key)
+    candidates.push(candidate)
+  }
+  let baseWithoutV1 = normalizeText(config.baseUrl)
+  try {
+    const parsed = new URL(baseWithoutV1)
+    const segments = parsed.pathname.split('/').filter(Boolean)
+    if (segments[segments.length - 1]?.toLowerCase() === 'v1') {
+      parsed.pathname = `/${segments.slice(0, -1).join('/')}`
+      baseWithoutV1 = parsed.toString().replace(/\/$/, '')
+    }
+  } catch {
+    baseWithoutV1 = ''
+  }
+  const formats =
+    provider === 'openai'
+      ? [config.apiFormat || 'chat-completions', config.apiFormat === 'responses' ? 'chat-completions' : 'responses'] as const
+      : [config.apiFormat] as const
+  formats.forEach((apiFormat) => {
+    add({ ...config, apiFormat })
+  })
+  if (baseWithoutV1 && baseWithoutV1 !== config.baseUrl) {
+    formats.forEach((apiFormat) => add({ ...config, baseUrl: baseWithoutV1, apiFormat, apiPathMode: 'none' }))
+  }
+  return candidates.filter((candidate) => endpointFor(provider, candidate) !== endpointFor(provider, config))
 }
 
 export const checkModelProvider = async (input: ModelProviderCheckInput): Promise<ModelProviderCheckResult> => {
@@ -490,7 +483,23 @@ export const checkModelProvider = async (input: ModelProviderCheckInput): Promis
   const modelId = normalizeText(config.modelId)
   try {
     const check = await performProviderCheck(provider, config, endpoint, clampTimeoutMs(input.timeoutMs))
-    if (!check.ok) return failureResult(provider, label, endpoint, modelId, startedAt, check.message)
+    if (!check.ok) {
+      if ([400, 404, 405, 422].includes(check.status)) {
+        for (const candidate of fallbackConfigsFor(provider, config)) {
+          const candidateEndpoint = endpointFor(provider, candidate)
+          const candidateCheck = await performProviderCheck(provider, candidate, candidateEndpoint, clampTimeoutMs(input.timeoutMs))
+          if (!candidateCheck.ok) continue
+          return successResult(provider, label, candidateEndpoint, modelId, startedAt, {
+            baseUrl: candidate.baseUrl,
+            endpoint: candidateEndpoint,
+            apiFormat: candidate.apiFormat,
+            apiPathMode: candidate.apiPathMode,
+            reasons: ['verified-compatible-route']
+          })
+        }
+      }
+      return failureResult(provider, label, endpoint, modelId, startedAt, check.message)
+    }
     return successResult(provider, label, endpoint, modelId, startedAt)
   } catch (error) {
     if (error instanceof Error && error.name === 'AbortError') {

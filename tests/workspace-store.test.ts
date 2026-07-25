@@ -6587,7 +6587,7 @@ describe('workspace store', () => {
       expect.arrayContaining([expect.objectContaining({ text: expect.stringContaining('[file manager]') })])
     )
 
-    store.updateModelProviderConfig('openai', { baseUrl: 'https://gateway.local', modelId: 'ops-model', apiFormat: 'chat-completions' })
+    store.updateModelProviderConfig('openai', { baseUrl: 'https://gateway.local/v1', modelId: 'ops-model', apiFormat: 'chat-completions' })
     await expect(store.saveModelProvider('openai')).resolves.toBe(true)
     expect(store.terminalCommandModelOptions).toContain('ops-model')
     expect(store.terminalCommandModelOptions).not.toContain('gpt-5-Thinking')
@@ -12114,8 +12114,8 @@ describe('workspace store', () => {
 
     await store.refreshAiModelCatalog()
     vi.mocked(window.aiops.saveConfig).mockClear()
-    store.updateModelProviderConfig('openai', { baseUrl: 'https://gateway.local', modelId: 'ops-model', apiFormat: 'chat-completions' })
-    expect(store.modelProviders.openai.baseUrl).toBe('https://gateway.local')
+    store.updateModelProviderConfig('openai', { baseUrl: 'https://gateway.local/v1', modelId: 'ops-model', apiFormat: 'chat-completions' })
+    expect(store.modelProviders.openai.baseUrl).toBe('https://gateway.local/v1')
     expect(window.aiops.saveConfig).not.toHaveBeenCalled()
     await expect(store.saveModelProvider('openai')).resolves.toBe(true)
     expect(store.config.modelProvider).toBe('openai-compatible')
@@ -12128,7 +12128,7 @@ describe('workspace store', () => {
     expect(window.aiops.saveConfig).toHaveBeenCalledWith(
       expect.objectContaining({
         modelProvider: 'openai-compatible',
-        modelEndpoint: 'https://gateway.local',
+        modelEndpoint: 'https://gateway.local/v1',
         modelName: 'ops-model',
         modelSettings: expect.objectContaining({
           providers: expect.objectContaining({
@@ -12333,7 +12333,7 @@ describe('workspace store', () => {
   it('does not fabricate model provider Check success when the bridge is unavailable or malformed', async () => {
     const store = useWorkspaceStore()
     const originalCheckModelProvider = window.aiops.checkModelProvider
-    store.updateModelProviderConfig('openai', { baseUrl: 'https://gateway.local', modelId: 'ops-model', apiFormat: 'chat-completions' })
+    store.updateModelProviderConfig('openai', { baseUrl: 'https://gateway.local/v1', modelId: 'ops-model', apiFormat: 'chat-completions' })
 
     try {
       ;(window.aiops as any).checkModelProvider = undefined
@@ -12385,10 +12385,33 @@ describe('workspace store', () => {
       expect(store.modelCheckState.openai).toBe('error')
       expect(store.settingsNotice).toBe('模型 Provider 检查服务返回数据无效')
 
+      vi.mocked(window.aiops.checkModelProvider!).mockResolvedValueOnce({
+        ok: true,
+        data: {
+          provider: 'openai',
+          label: 'OpenAI Compatible',
+          modelId: 'ops-model',
+          endpoint: 'https://gateway.local/v1/responses',
+          message: 'Compatible route verified.',
+          durationMs: 1,
+          suggestion: {
+            baseUrl: 'https://gateway.local/v1',
+            endpoint: 'https://gateway.local/v1/responses',
+            apiFormat: 'responses',
+            apiPathMode: 'auto',
+            reasons: ['verified-compatible-route']
+          }
+        }
+      })
+      const suggestedCheck = await store.checkModelProvider('openai')
+      expect(suggestedCheck?.ok && suggestedCheck.data?.suggestion?.apiFormat).toBe('responses')
+      expect(store.modelCheckState.openai).toBe('idle')
+      expect(store.settingsNotice).toBe('Compatible route verified.')
+
       await store.checkModelProvider('openai')
       expect(window.aiops.checkModelProvider).toHaveBeenLastCalledWith({
         provider: 'openai',
-        config: expect.objectContaining({ baseUrl: 'https://gateway.local', modelId: 'ops-model' })
+        config: expect.objectContaining({ baseUrl: 'https://gateway.local/v1', modelId: 'ops-model' })
       })
       expect(store.modelCheckState.openai).toBe('success')
       expect(store.settingsNotice).toBe('OpenAI Compatible configuration validated by test backend.')
@@ -12405,7 +12428,7 @@ describe('workspace store', () => {
     const initialEndpoint = store.config.modelEndpoint
     const initialModelName = store.config.modelName
 
-    store.updateModelProviderConfig('openai', { baseUrl: 'https://gateway.local', modelId: 'ops-model', apiFormat: 'chat-completions' })
+    store.updateModelProviderConfig('openai', { baseUrl: 'https://gateway.local/v1', modelId: 'ops-model', apiFormat: 'chat-completions' })
     await Promise.resolve()
     const editedSettings = JSON.stringify(store.config.modelSettings)
     vi.mocked(window.aiops.saveConfig).mockClear()
@@ -12430,7 +12453,7 @@ describe('workspace store', () => {
 
       vi.mocked(window.aiops.saveConfig!).mockResolvedValueOnce({
         modelProvider: 'litellm',
-        modelEndpoint: 'https://gateway.local',
+        modelEndpoint: 'https://gateway.local/v1',
         modelName: 'ops-model',
         modelSettings: {
           ...store.config.modelSettings,
@@ -12460,7 +12483,7 @@ describe('workspace store', () => {
       await expect(store.saveModelProvider('openai')).resolves.toBe(true)
       expect(store.settingsNotice).toBe('OpenAI Compatible Save 成功')
       expect(store.config.modelProvider).toBe('openai-compatible')
-      expect(store.config.modelEndpoint).toBe('https://gateway.local')
+      expect(store.config.modelEndpoint).toBe('https://gateway.local/v1')
       expect(store.config.modelName).toBe('ops-model')
       expect(store.config.modelSettings?.providers.openai).toEqual(expect.objectContaining({ modelId: 'ops-model' }))
     } finally {

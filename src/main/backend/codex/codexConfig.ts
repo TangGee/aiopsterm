@@ -2,6 +2,7 @@ import { existsSync } from 'fs'
 import { join } from 'path'
 import type { CodexSessionTargetContext } from '@shared/contracts/codexSessions'
 import type { UserConfig } from '@shared/contracts/userConfig'
+import { resolveEquivalentClientBaseUrl } from '@shared/modelProviderEndpoint'
 import { resolveModelProvider } from '../ai/modelProviderText'
 
 const codexOpenAiProviderId = 'aiopsterm_openai_responses'
@@ -385,6 +386,7 @@ export const resolveAiopstermCodexProviderConfig = (config?: UserConfig | null):
   if (!config) return null
   const resolved = resolveModelProvider(config)
   if (resolved?.provider === 'ollama') {
+    if (resolved.config.endpointMode === 'exact') return null
     const model = normalizeText(resolved.config.modelId) || normalizeText(resolved.modelName)
     if (model) {
       return {
@@ -397,6 +399,7 @@ export const resolveAiopstermCodexProviderConfig = (config?: UserConfig | null):
     }
   }
   if (resolved?.provider === 'lmstudio') {
+    if (resolved.config.endpointMode === 'exact') return null
     const model = normalizeText(resolved.config.modelId) || normalizeText(resolved.modelName)
     if (model) {
       return {
@@ -417,7 +420,11 @@ export const resolveAiopstermCodexProviderConfig = (config?: UserConfig | null):
   if (!providerConfig || providerConfig.apiFormat !== 'responses') return null
   const model = normalizeText(providerConfig.modelId) || (resolved?.provider === 'openai' ? normalizeText(resolved.modelName) : '')
   const apiKey = normalizeText(providerConfig.apiKey)
-  const baseUrl = normalizeCodexResponsesBaseUrl(normalizeText(providerConfig.baseUrl) || 'https://api.openai.com')
+  const baseUrl =
+    resolveEquivalentClientBaseUrl('openai', {
+      ...providerConfig,
+      baseUrl: normalizeText(providerConfig.baseUrl) || 'https://api.openai.com'
+    }) || ''
   if (!model || !apiKey || !baseUrl) return null
   return {
     providerId: codexOpenAiProviderId,

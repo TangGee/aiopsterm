@@ -6,6 +6,7 @@ import {
 } from '@shared/voice'
 import type { UserConfig } from '@shared/contracts/userConfig'
 import type { ModelProviderCheckKey, ModelProviderUserConfig } from '@shared/contracts/appRuntime'
+import { resolveModelProviderEndpoint } from '@shared/modelProviderEndpoint'
 import { resolveModelProvider } from './modelProviderText'
 
 type VoiceBackendRuntimeConfig = {
@@ -16,42 +17,6 @@ type VoiceBackendRuntimeConfig = {
 
 const normalizeText = (value: unknown) => String(value || '').trim()
 const openAiSpeechProviders = new Set<ModelProviderCheckKey>(['openai', 'litellm'])
-
-const appendEndpointPath = (baseUrl: string, path: string): string => {
-  try {
-    const parsed = new URL(baseUrl)
-    const existing = parsed.pathname.split('/').filter(Boolean)
-    const segments = path.split('/').filter(Boolean)
-    if (!segments.every((segment, index) => existing[existing.length - segments.length + index] === segment)) {
-      parsed.pathname = `${parsed.pathname.replace(/\/$/, '')}/${segments.join('/')}`
-    }
-    parsed.search = ''
-    parsed.hash = ''
-    return parsed.toString().replace(/\/$/, '')
-  } catch {
-    return baseUrl
-  }
-}
-
-const normalizeOpenAiBaseUrl = (baseUrl: string): string => {
-  if (!baseUrl) return ''
-  try {
-    const parsed = new URL(baseUrl)
-    const hasV1 = parsed.pathname.split('/').filter(Boolean).includes('v1')
-    if (!hasV1) parsed.pathname = `${parsed.pathname.replace(/\/$/, '')}/v1`
-    parsed.search = ''
-    parsed.hash = ''
-    return parsed.toString().replace(/\/$/, '')
-  } catch {
-    return baseUrl
-  }
-}
-
-const speechBaseUrl = (provider: ModelProviderCheckKey, config: ModelProviderUserConfig) => {
-  const baseUrl = normalizeText(config.baseUrl)
-  if (provider === 'litellm') return normalizeOpenAiBaseUrl(baseUrl || 'http://localhost:4000')
-  return normalizeOpenAiBaseUrl(baseUrl || 'https://api.openai.com')
-}
 
 const audioMimeType = (format: string) => {
   switch (format) {
@@ -172,7 +137,7 @@ async function transcribeWithModelProvider(
     `voice-input.${audioFileExtension(input.audioFormat)}`
   )
 
-  const endpoint = appendEndpointPath(speechBaseUrl(providerConfig.provider, providerConfig.config), 'audio/transcriptions')
+  const endpoint = resolveModelProviderEndpoint(providerConfig.provider, providerConfig.config, 'audio/transcriptions').endpoint
   const fetchImpl = config.fetch || fetch
   const timeoutMs = Math.max(500, Math.min(120_000, Math.round(config.timeoutMs || 60_000)))
   const controller = new AbortController()

@@ -168,5 +168,28 @@ describe('modelProviderClient', () => {
     expect(isModelProviderCheckDataForRequest({ ...validResult, modelId: 'other-model' }, 'openai', expectedConfig)).toBe(false)
     expect(isModelProviderCheckDataForRequest({ ...validResult, message: '   ' }, 'openai', expectedConfig)).toBe(false)
     expect(isModelProviderCheckDataForRequest({ ...validResult, durationMs: -1 }, 'openai', expectedConfig)).toBe(false)
+    expect(
+      isModelProviderCheckDataForRequest(
+        {
+          ...validResult,
+          suggestion: {
+            baseUrl: 'https://gateway.local/v1',
+            endpoint: 'https://gateway.local/v1/responses',
+            apiFormat: 'responses',
+            apiPathMode: 'auto',
+            reasons: ['verified fallback']
+          }
+        },
+        'openai',
+        expectedConfig
+      )
+    ).toBe(true)
+    expect(
+      isModelProviderCheckDataForRequest(
+        { ...validResult, suggestion: { baseUrl: '', endpoint: 'https://gateway.local/v1/responses', reasons: [] } },
+        'openai',
+        expectedConfig
+      )
+    ).toBe(false)
   })
 })

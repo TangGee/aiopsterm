@@ -36,6 +36,8 @@ export type ModelProviderSettings = {
   apiKey: string
   modelId: string
   apiFormat?: 'chat-completions' | 'responses'
+  endpointMode?: 'auto' | 'exact'
+  apiPathMode?: 'auto' | 'v1' | 'none'
   awsAccessKey?: string
   awsSecretKey?: string
   awsSessionToken?: string
@@ -381,6 +383,8 @@ export const legacyTerminalFontFamilies = new Set([
   '"Source Code Pro", "Courier New", Courier, monospace'
 ])
 export const modelApiFormats: NonNullable<ModelProviderSettings['apiFormat']>[] = ['chat-completions', 'responses']
+export const modelEndpointModes: NonNullable<ModelProviderSettings['endpointMode']>[] = ['auto', 'exact']
+export const modelApiPathModes: NonNullable<ModelProviderSettings['apiPathMode']>[] = ['auto', 'v1', 'none']
 export const modelOptionTypes: NonNullable<ModelOptionUserConfig['type']>[] = ['standard', 'custom']
 export const editorWordWrapValues: EditorSettings['wordWrap'][] = ['on', 'off']
 export const keywordHighlightScopes: KeywordHighlightRuleConfig['scope'][] = ['output', 'input', 'both']

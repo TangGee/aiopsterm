@@ -1,26 +1,9 @@
 import type { ClineAgentProviderConfig } from '@shared/contracts/clineAgent'
 import type { UserConfig } from '@shared/contracts/userConfig'
+import { resolveEquivalentClientBaseUrl } from '@shared/modelProviderEndpoint'
 import { resolveModelProvider } from '../ai/modelProviderText'
 
 const cleanText = (value: unknown) => String(value || '').trim()
-
-const normalizeOpenAiBaseUrl = (rawValue: string) => {
-  const raw = cleanText(rawValue)
-  if (!raw) return ''
-  const skipVersionPrefix = raw.endsWith('#')
-  const value = skipVersionPrefix ? raw.slice(0, -1) : raw
-  try {
-    const parsed = new URL(value)
-    if (!skipVersionPrefix && !parsed.pathname.split('/').filter(Boolean).some((segment) => /^v\d+$/i.test(segment))) {
-      parsed.pathname = `${parsed.pathname.replace(/\/$/, '')}/v1`
-    }
-    parsed.search = ''
-    parsed.hash = ''
-    return parsed.toString().replace(/\/$/, '')
-  } catch {
-    return value
-  }
-}
 
 export const resolveClineAgentProvider = (
   config: UserConfig,
@@ -44,7 +27,8 @@ export const resolveClineAgentProvider = (
   if (resolved.provider === 'openai') {
     const responses = providerConfig.apiFormat === 'responses'
     const providerId = responses ? 'openai-native' : 'openai-compatible'
-    const baseUrl = normalizeOpenAiBaseUrl(providerConfig.baseUrl)
+    const baseUrl = resolveEquivalentClientBaseUrl('openai', providerConfig) || ''
+    if (providerConfig.endpointMode === 'exact' && !baseUrl) return null
     const knownModels: NonNullable<ClineAgentProviderConfig['knownModels']> = {
       [common.modelId]: {
         id: common.modelId,

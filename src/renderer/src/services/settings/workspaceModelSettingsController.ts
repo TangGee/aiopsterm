@@ -27,6 +27,9 @@ import type {
   ModelSettingsUserConfig
 } from '@shared/contracts/appRuntime'
 import type { UserConfig } from '@shared/contracts/userConfig'
+import { isValidModelProviderUrl, suggestModelProviderEndpoint } from '@shared/modelProviderEndpoint'
+import { resolveLocale, translateWithLocale } from '@/i18n/runtime'
+import type { I18nKey } from '@/i18n/messages'
 
 type WorkspaceModelSettingsControllerState = {
   config: Ref<UserConfig>
@@ -61,6 +64,11 @@ export const createWorkspaceModelSettingsController = (
     modelCheckRequestSeq
   } = state
   const { setSettingsNotice, setTopNotice } = deps
+  const modelSettingsText = (key: I18nKey) =>
+    translateWithLocale(
+      resolveLocale(config.value.language, typeof navigator === 'undefined' ? [] : navigator.languages || [navigator.language]),
+      key
+    )
 
   let aiModelCatalogLoadPromise: Promise<AiModelCatalog> | null = null
 
@@ -303,6 +311,11 @@ export const createWorkspaceModelSettingsController = (
 
   const updateModelProviderConfig = (provider: ModelProviderKey, patch: Partial<ModelProviderSettings>) => {
     modelProviders.value[provider] = { ...modelProviders.value[provider], ...patch }
+    modelCheckRequestSeq.value = {
+      ...modelCheckRequestSeq.value,
+      [provider]: (modelCheckRequestSeq.value[provider] || 0) + 1
+    }
+    modelCheckState.value = { ...modelCheckState.value, [provider]: 'idle' }
   }
 
   const checkModelProvider = async (provider: ModelProviderKey) => {
@@ -315,7 +328,7 @@ export const createWorkspaceModelSettingsController = (
       if (modelCheckRequestSeq.value[provider] !== requestSeq) return
       modelCheckState.value = { ...modelCheckState.value, [provider]: 'error' }
       setSettingsNotice('模型 Provider 检查服务不可用')
-      return
+      return null
     }
     try {
       const result = await checkProviderBridge({ provider, config: providerConfig })
@@ -324,18 +337,21 @@ export const createWorkspaceModelSettingsController = (
         if (!isModelProviderCheckDataForRequest(result.data, provider, providerConfig)) {
           modelCheckState.value = { ...modelCheckState.value, [provider]: 'error' }
           setSettingsNotice(malformedModelProviderResultMessage)
-          return
+          return null
         }
-        modelCheckState.value = { ...modelCheckState.value, [provider]: 'success' }
+        modelCheckState.value = { ...modelCheckState.value, [provider]: result.data.suggestion ? 'idle' : 'success' }
         setSettingsNotice(result.data.message)
+        return result
       } else {
         modelCheckState.value = { ...modelCheckState.value, [provider]: 'error' }
         setSettingsNotice(result.errorMessage || `${provider} Check 失败`)
+        return result
       }
     } catch (error) {
       if (modelCheckRequestSeq.value[provider] !== requestSeq) return
       modelCheckState.value = { ...modelCheckState.value, [provider]: 'error' }
       setSettingsNotice(`模型 Provider 检查失败：${error instanceof Error ? error.message : String(error)}`)
+      return null
     }
   }
 
@@ -346,6 +362,24 @@ export const createWorkspaceModelSettingsController = (
       return false
     }
     const configPatch = modelProviders.value[provider]
+    if (provider !== 'bedrock') {
+      const baseUrl = configPatch.baseUrl.trim()
+      if (configPatch.endpointMode === 'exact' && !isValidModelProviderUrl(baseUrl)) {
+        setSettingsNotice(modelSettingsText('settings.models.endpoint.invalidExact'))
+        return false
+      }
+      if (configPatch.endpointMode !== 'exact' && suggestModelProviderEndpoint(provider, configPatch)) {
+        setSettingsNotice(modelSettingsText('settings.models.endpoint.applyBeforeSave'))
+        return false
+      }
+      if (baseUrl && !isValidModelProviderUrl(baseUrl)) {
+        const suggestion = suggestModelProviderEndpoint(provider, configPatch)
+        setSettingsNotice(
+          modelSettingsText(suggestion ? 'settings.models.endpoint.fixBeforeSave' : 'settings.models.endpoint.invalidUrl')
+        )
+        return false
+      }
+    }
     const providerName: Record<ModelProviderKey, UserConfig['modelProvider']> = {
       litellm: 'litellm',
       openai: 'openai-compatible',

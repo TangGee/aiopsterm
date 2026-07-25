@@ -220,6 +220,111 @@ describe('model provider backend boundary', () => {
     })
   })
 
+  it('uses a user-forced exact OpenAI endpoint without hidden rewriting', async () => {
+    const server = await startProviderServer((_request, response) => {
+      sendJson(response, 200, { id: 'resp-test' })
+    })
+    const endpoint = `${server.baseUrl}/custom/responses`
+    const result = await checkModelProvider({
+      provider: 'openai',
+      config: {
+        baseUrl: endpoint,
+        apiKey: 'sk-test',
+        modelId: 'gpt-5',
+        apiFormat: 'responses',
+        endpointMode: 'exact'
+      },
+      timeoutMs: 1000
+    })
+
+    expect(result.ok).toBe(true)
+    expect(result.data?.endpoint).toBe(endpoint)
+    expect(server.requests).toHaveLength(1)
+    expect(server.requests[0]).toMatchObject({ method: 'POST', url: '/custom/responses' })
+  })
+
+  it('probes an alternate OpenAI format only for route-level failures', async () => {
+    const server = await startProviderServer((request, response) => {
+      if (request.url === '/v1/chat/completions') {
+        sendJson(response, 200, { choices: [{ message: { content: 'OK' } }] })
+        return
+      }
+      sendJson(response, 404, { error: { message: 'route not found' } })
+    })
+    const result = await checkModelProvider({
+      provider: 'openai',
+      config: {
+        baseUrl: `${server.baseUrl}/v1`,
+        apiKey: 'sk-test',
+        modelId: 'gpt-5',
+        apiFormat: 'responses',
+        endpointMode: 'auto',
+        apiPathMode: 'auto'
+      },
+      timeoutMs: 1000
+    })
+
+    expect(result.ok).toBe(true)
+    expect(result.data?.suggestion).toMatchObject({
+      baseUrl: `${server.baseUrl}/v1`,
+      endpoint: `${server.baseUrl}/v1/chat/completions`,
+      apiFormat: 'chat-completions'
+    })
+    expect(server.requests.map((request) => request.url)).toEqual(['/v1/responses', '/v1/chat/completions'])
+  })
+
+  it('does not guess alternate routes after an authentication failure', async () => {
+    const server = await startProviderServer((_request, response) => {
+      sendJson(response, 401, { error: { message: 'invalid token' } })
+    })
+    const result = await checkModelProvider({
+      provider: 'openai',
+      config: {
+        baseUrl: `${server.baseUrl}/v1`,
+        apiKey: 'bad-key',
+        modelId: 'gpt-5',
+        apiFormat: 'responses',
+        endpointMode: 'auto'
+      },
+      timeoutMs: 1000
+    })
+
+    expect(result.ok).toBe(false)
+    expect(result.errorMessage).toContain('invalid token')
+    expect(server.requests.map((request) => request.url)).toEqual(['/v1/responses'])
+  })
+
+  it('proposes removing v1 only after the non-versioned route succeeds', async () => {
+    const server = await startProviderServer((request, response) => {
+      if (request.url === '/responses') {
+        sendJson(response, 200, { id: 'resp-test' })
+        return
+      }
+      sendJson(response, 404, { error: { message: 'route not found' } })
+    })
+    const result = await checkModelProvider({
+      provider: 'openai',
+      config: {
+        baseUrl: `${server.baseUrl}/v1`,
+        apiKey: 'sk-test',
+        modelId: 'gpt-5',
+        apiFormat: 'responses',
+        endpointMode: 'auto',
+        apiPathMode: 'auto'
+      },
+      timeoutMs: 1000
+    })
+
+    expect(result.ok).toBe(true)
+    expect(result.data?.suggestion).toMatchObject({
+      baseUrl: server.baseUrl,
+      endpoint: `${server.baseUrl}/responses`,
+      apiFormat: 'responses',
+      apiPathMode: 'none'
+    })
+    expect(server.requests.map((request) => request.url)).toEqual(['/v1/responses', '/v1/chat/completions', '/responses'])
+  })
+
   it('validates Ollama by listing live models instead of accepting configuration only', async () => {
     const server = await startProviderServer((_request, response) => {
       sendJson(response, 200, { models: [{ name: 'llama3.1' }] })

@@ -1,6 +1,7 @@
 import { createHash, createHmac } from 'crypto'
 import type { UserConfig } from '@shared/contracts/userConfig'
 import type { AiPreferencesUserConfig, ModelProviderCheckKey, ModelProviderUserConfig } from '@shared/contracts/appRuntime'
+import { resolveModelProviderEndpoint } from '@shared/modelProviderEndpoint'
 
 export type AiProviderResolvedConfig = {
   provider: ModelProviderCheckKey
@@ -86,27 +87,6 @@ function appendEndpointPath(baseUrl: string, path: string): string {
   }
 }
 
-function normalizeOpenAiBaseUrl(baseUrl: string): string {
-  if (!baseUrl) return ''
-  const skipVersionPrefix = baseUrl.endsWith('#')
-  const normalizedBaseUrl = skipVersionPrefix ? baseUrl.slice(0, -1) : baseUrl
-  try {
-    const parsed = new URL(normalizedBaseUrl)
-    const hasVersionSegment = parsed.pathname.split('/').filter(Boolean).some((segment) => /^v\d+$/i.test(segment))
-    if (!skipVersionPrefix && !hasVersionSegment) parsed.pathname = `${parsed.pathname.replace(/\/$/, '')}/v1`
-    parsed.search = ''
-    parsed.hash = ''
-    return parsed.toString().replace(/\/$/, '')
-  } catch {
-    return normalizedBaseUrl
-  }
-}
-
-function normalizeOpenAiOperationEndpoint(baseUrl: string, path: string): string {
-  const normalized = normalizeOpenAiBaseUrl(baseUrl)
-  return appendEndpointPath(normalized, path)
-}
-
 const normalizeMessages = (messagesOrUserPrompt: string | AiProviderTextMessage[]): AiProviderTextMessage[] => {
   const messages = typeof messagesOrUserPrompt === 'string' ? [{ role: 'user' as const, content: messagesOrUserPrompt }] : messagesOrUserPrompt
   return messages
@@ -173,13 +153,12 @@ export function createProviderTextRequest(
 ): AiProviderTextRequest | null {
   const model = normalizeText(input.config.modelId)
   const apiKey = normalizeText(input.config.apiKey)
-  const baseUrl = normalizeText(input.config.baseUrl)
   const messages = normalizeMessages(messagesOrUserPrompt)
   const reasoningEffort = options.preferences?.reasoningEffort
   if (!model || !messages.length) return null
 
   if (input.provider === 'ollama') {
-    const endpoint = appendEndpointPath(baseUrl || 'http://localhost:11434', 'api/chat')
+    const endpoint = resolveModelProviderEndpoint(input.provider, input.config, 'api/chat').endpoint
     return {
       provider: input.provider,
       config: input.config,
@@ -200,7 +179,7 @@ export function createProviderTextRequest(
 
   if (input.provider === 'anthropic') {
     if (!apiKey) return null
-    const endpoint = appendEndpointPath(baseUrl || 'https://api.anthropic.com', 'v1/messages')
+    const endpoint = resolveModelProviderEndpoint(input.provider, input.config).endpoint
     return {
       provider: input.provider,
       config: input.config,
@@ -254,7 +233,7 @@ export function createProviderTextRequest(
   }
 
   if (input.provider === 'lmstudio') {
-    const endpoint = normalizeOpenAiOperationEndpoint(baseUrl || 'http://localhost:1234', 'chat/completions')
+    const endpoint = resolveModelProviderEndpoint(input.provider, input.config).endpoint
     return {
       provider: input.provider,
       config: input.config,
@@ -279,14 +258,7 @@ export function createProviderTextRequest(
 
   if (!apiKey) return null
 
-  const endpoint =
-    input.provider === 'litellm'
-      ? normalizeOpenAiOperationEndpoint(baseUrl || 'http://localhost:4000', 'chat/completions')
-      : input.provider === 'deepseek'
-        ? normalizeOpenAiOperationEndpoint(baseUrl || 'https://api.deepseek.com', 'chat/completions')
-        : input.config.apiFormat === 'responses'
-          ? normalizeOpenAiOperationEndpoint(baseUrl || 'https://api.openai.com', 'responses')
-          : normalizeOpenAiOperationEndpoint(baseUrl || 'https://api.openai.com', 'chat/completions')
+  const endpoint = resolveModelProviderEndpoint(input.provider, input.config).endpoint
 
   const useResponses = input.provider === 'openai' && input.config.apiFormat === 'responses'
   return {

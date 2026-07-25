@@ -17361,17 +17361,26 @@ describe('AppShell', () => {
     expect(workspace.text()).toContain('Ollama')
     const providerInputs = workspace.findAll('.provider-card .settings-input')
     await providerInputs[0].setValue('http://litellm.internal')
-    await workspace.findAll('.provider-card').at(0)!.findAll('button').find((button) => button.text() === 'Save')!.trigger('click')
+    const liteLlmCard = workspace.findAll('.provider-card').at(0)!
+    await liteLlmCard.findAll('button').find((button) => button.text() === 'Check')!.trigger('click')
+    await workspace.vm.$nextTick()
+    expect(liteLlmCard.text()).toContain('检测到可用的地址修正')
+    expect(liteLlmCard.text()).toContain('http://litellm.internal/v1')
+    await liteLlmCard.findAll('button').find((button) => button.text() === '应用并检测')!.trigger('click')
+    await flushPromises()
+    expect(store.modelProviders.litellm.baseUrl).toBe('http://litellm.internal/v1')
+    expect(liteLlmCard.text()).toContain('已自动修正')
+    await liteLlmCard.findAll('button').find((button) => button.text() === 'Save')!.trigger('click')
     await flushPromises()
     expect(store.config.modelProvider).toBe('litellm')
-    expect(store.config.modelEndpoint).toBe('http://litellm.internal')
+    expect(store.config.modelEndpoint).toBe('http://litellm.internal/v1')
     expect(window.aiops.saveConfig).toHaveBeenCalledWith(
       expect.objectContaining({
         modelProvider: 'litellm',
-        modelEndpoint: 'http://litellm.internal',
+        modelEndpoint: 'http://litellm.internal/v1',
         modelSettings: expect.objectContaining({
           providers: expect.objectContaining({
-            litellm: expect.objectContaining({ baseUrl: 'http://litellm.internal' })
+            litellm: expect.objectContaining({ baseUrl: 'http://litellm.internal/v1' })
           })
         })
       })
@@ -17389,7 +17398,7 @@ describe('AppShell', () => {
     expect(bedrockCard.text()).toContain('Bedrock Endpoint')
 
     const openAiCard = workspace.findAll('.provider-card').find((card) => card.text().includes('OpenAI Compatible & Responses'))!
-    expect(openAiCard.text()).toContain('Preview:')
+    expect(openAiCard.text()).toContain('最终请求地址:')
     expect(openAiCard.text()).toContain('/responses')
     const openAiInputs = openAiCard.findAll('.settings-input')
     const openAiApiKeyInput = openAiInputs[1]
@@ -17404,12 +17413,12 @@ describe('AppShell', () => {
     expect((openAiApiKeyInput.element as HTMLInputElement).type).toBe('password')
     await openAiInputs[0].setValue('https://ark.example.test/api/coding/v3#')
     await workspace.vm.$nextTick()
-    expect(openAiCard.text()).toContain('Preview: https://ark.example.test/api/coding/v3/responses')
+    expect(openAiCard.text()).toContain('最终请求地址: https://ark.example.test/api/coding/v3/responses')
     const openAiFormatSelect = openAiCard.find('.settings-select')
     await openAiFormatSelect.setValue('chat-completions')
     await workspace.vm.$nextTick()
-    expect(openAiCard.text()).toContain('Preview: https://ark.example.test/api/coding/v3/chat/completions')
-    await openAiInputs[0].setValue('https://api.openai.com')
+    expect(openAiCard.text()).toContain('最终请求地址: https://ark.example.test/api/coding/v3/chat/completions')
+    await openAiInputs[0].setValue('https://api.openai.com/v1')
     await openAiFormatSelect.setValue('responses')
     await openAiApiKeyInput.setValue('')
     await workspace.vm.$nextTick()
@@ -17440,7 +17449,7 @@ describe('AppShell', () => {
     expect(window.aiops.checkModelProvider).toHaveBeenCalledWith({
       provider: 'openai',
       config: expect.objectContaining({
-        baseUrl: 'https://api.openai.com',
+        baseUrl: 'https://api.openai.com/v1',
         modelId: 'gpt-5',
         apiFormat: 'responses'
       })
@@ -17527,6 +17536,7 @@ describe('AppShell', () => {
     await flushPromises()
     expect(store.aiPreferences.autoExecuteReadOnlyCommands).toBe(true)
     await workspace.findAll('.security-config-row button').find((button) => button.text().includes('打开安全配置'))!.trigger('click')
+    await flushPromises()
     expect(store.securityConfigEditorOpen).toBe(true)
     expect(workspace.text()).toContain('security-config.json')
     expect(workspace.find('[data-testid="security-config-json-editor-monaco"]').exists()).toBe(true)

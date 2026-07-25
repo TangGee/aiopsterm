@@ -198,6 +198,8 @@ export type ModelProviderUserConfig = {
   apiKey: string
   modelId: string
   apiFormat?: 'chat-completions' | 'responses'
+  endpointMode?: 'auto' | 'exact'
+  apiPathMode?: 'auto' | 'v1' | 'none'
   awsAccessKey?: string
   awsSecretKey?: string
   awsSessionToken?: string
@@ -222,6 +224,13 @@ export type ModelProviderCheckResult = AiopsMutationResult<{
   endpoint: string
   message: string
   durationMs: number
+  suggestion?: {
+    baseUrl: string
+    endpoint: string
+    apiFormat?: 'chat-completions' | 'responses'
+    apiPathMode?: 'auto' | 'v1' | 'none'
+    reasons: string[]
+  }
 }>
 
 export type AiModelCatalogOption = {

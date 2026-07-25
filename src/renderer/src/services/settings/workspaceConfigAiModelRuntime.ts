@@ -172,6 +172,16 @@ export const normalizeModelProviderConfig = (source: unknown, fallback: ModelPro
           apiFormat: stringFromOptions(incoming.apiFormat, modelApiFormats, fallback.apiFormat || 'chat-completions')
         }
       : {}),
+    ...(fallback.endpointMode || incoming.endpointMode
+      ? {
+          endpointMode: stringFromOptions(incoming.endpointMode, ['auto', 'exact'] as const, fallback.endpointMode || 'auto')
+        }
+      : {}),
+    ...(fallback.apiPathMode || incoming.apiPathMode
+      ? {
+          apiPathMode: stringFromOptions(incoming.apiPathMode, ['auto', 'v1', 'none'] as const, fallback.apiPathMode || 'auto')
+        }
+      : {}),
     ...(fallback.awsAccessKey !== undefined || incoming.awsAccessKey !== undefined
       ? {
           awsAccessKey: typeof incoming.awsAccessKey === 'string' ? incoming.awsAccessKey : fallback.awsAccessKey || ''
