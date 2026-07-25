@@ -36,6 +36,12 @@ test('project files uses a contextual drawer inside the persistent AI panel', as
       content: '*, *::before, *::after { animation-duration: 0s !important; transition-duration: 0s !important; }'
     })
 
+    await page.locator('.side-rail .rail-button[title="设置"]').click()
+    await expect(page.locator('.settings-bg-tile.preset').first()).toBeVisible()
+    await page.locator('.settings-bg-tile.preset').nth(1).click()
+    await expect(page.locator('.app-shell')).toHaveClass(/has-app-background/)
+    await page.locator('.side-rail .rail-button[title="工作区"]').click()
+
     await expect(page.locator('.right-assistant-panel')).toBeVisible()
     await expect(page.locator('.right-assistant-tabs')).toHaveCount(0)
     await expect(page.getByTestId('ai-project-files-toggle')).toHaveCount(0)
@@ -109,6 +115,22 @@ test('project files uses a contextual drawer inside the persistent AI panel', as
 
     const drawer = page.locator('.project-files-drawer')
     await expect(drawer).toBeVisible()
+    const drawerSurface = await drawer.evaluate((element) => {
+      const color = getComputedStyle(element).backgroundColor
+      const canvas = document.createElement('canvas')
+      canvas.width = 1
+      canvas.height = 1
+      const context = canvas.getContext('2d')
+      if (!context) return { color, alpha: 0 }
+      context.clearRect(0, 0, 1, 1)
+      context.fillStyle = color
+      context.fillRect(0, 0, 1, 1)
+      return {
+        color,
+        alpha: context.getImageData(0, 0, 1, 1).data[3] / 255
+      }
+    })
+    expect(drawerSurface.alpha).toBe(1)
     await expect(page.locator('.ai-header')).toBeVisible()
     await expect(drawer.locator('.project-files-header-title strong')).toHaveText(path.basename(projectRoot))
     await expect(drawer.locator('.project-files-tree-row').filter({ hasText: 'src' })).toBeVisible()
