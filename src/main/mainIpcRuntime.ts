@@ -61,6 +61,7 @@ import { registerMcpConfigIpc } from './ipc/mcpConfig'
 import { registerModelsIpc } from './ipc/models'
 import { registerQuickCommandsIpc } from './ipc/quickCommands'
 import { registerProductSessionsIpc } from './ipc/productSessions'
+import { registerProjectFilesIpc } from './ipc/projectFiles'
 import { registerSettingsPreferencesIpc } from './ipc/settingsPreferences'
 import { registerSkillsIpc } from './ipc/skills'
 import { registerTerminalSessionsIpc } from './ipc/terminalSessions'
@@ -394,6 +395,10 @@ export const registerMainIpcRuntime = (input: MainIpcRuntimeInput) => {
     openExternal: (url) => shell.openExternal(url)
   })
   registerFilesIpc(ipcMain)
+  registerProjectFilesIpc(ipcMain, {
+    userDataPath: app.getPath('userData'),
+    productSessionRegistry: input.productSessionRegistry
+  })
   registerKubernetesIpc(ipcMain)
   registerManagedAiSessionsIpc(ipcMain, {
     emitAgentSessionEvent: input.broadcastAiAgentSessionEvent,

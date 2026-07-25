@@ -20,7 +20,7 @@ const pathBaseName = (value?: string) => {
 
 export const createTerminalWorkspaceContextRuntime = ({ workspace, activeTerminalPanel, isWelcomePlaceholderPanel, t }: TerminalWorkspaceContextRuntimeInput) => {
   const terminalStatusLabel = (panel: TerminalPanel) => {
-    if (panel.kind === 'knowledge') return t('terminal.status.editor')
+    if (panel.kind === 'knowledge' || panel.kind === 'project-file') return t('terminal.status.editor')
     if (panel.kind === 'managed-ai-session') return t('terminal.status.aiSessionContent')
     if (panel.status === 'connecting') return t('terminal.status.connecting')
     if (panel.status === 'error') return t('terminal.status.error')
@@ -37,6 +37,7 @@ export const createTerminalWorkspaceContextRuntime = ({ workspace, activeTermina
 
   const terminalTabMeta = (panel: TerminalPanel) => {
     if (panel.kind === 'knowledge') return panel.knowledge?.relPath || panel.cwd || ''
+    if (panel.kind === 'project-file') return panel.projectFile?.relativePath || panel.cwd || ''
     if (panel.kind === 'managed-ai-session') return panel.managedAiSession ? `${panel.managedAiSession.source}:${panel.managedAiSession.sessionId}` : panel.cwd
     const sshTarget = terminalSshTargetLabel(panel)
     if (sshTarget) return sshTarget
@@ -45,6 +46,7 @@ export const createTerminalWorkspaceContextRuntime = ({ workspace, activeTermina
 
   const terminalTabKindBadge = (panel: TerminalPanel) => {
     if (panel.kind === 'managed-ai-session') return 'AI'
+    if (panel.kind === 'project-file') return 'FILE'
     return ''
   }
 
@@ -76,7 +78,7 @@ export const createTerminalWorkspaceContextRuntime = ({ workspace, activeTermina
   const terminalTabTooltip = (panel: TerminalPanel) => {
     const lines = [
       panel.title,
-      `${t('terminal.tab.type')}: ${panel.kind === 'knowledge' ? t('terminal.status.editor') : panel.kind === 'managed-ai-session' ? t('terminal.kind.aiSessionContent') : panel.sshSession ? 'SSH' : t('terminal.kind.localTerminal')}`,
+      `${t('terminal.tab.type')}: ${panel.kind === 'knowledge' || panel.kind === 'project-file' ? t('terminal.status.editor') : panel.kind === 'managed-ai-session' ? t('terminal.kind.aiSessionContent') : panel.sshSession ? 'SSH' : t('terminal.kind.localTerminal')}`,
       `${t('terminal.tab.status')}: ${terminalStatusLabel(panel)}`
     ]
     if (panel.terminalProgress) lines.push(`${t('terminal.tab.progress')}: ${terminalTabStateLabel(panel)}`)
@@ -84,12 +86,13 @@ export const createTerminalWorkspaceContextRuntime = ({ workspace, activeTermina
     if (sshTarget) lines.push(`${t('terminal.tab.host')}: ${sshTarget}`)
     if (panel.cwd) lines.push(`${t('terminal.tab.path')}: ${panel.cwd}`)
     if (panel.knowledge?.relPath) lines.push(`${t('terminal.tab.file')}: ${panel.knowledge.relPath}`)
+    if (panel.projectFile?.relativePath) lines.push(`${t('terminal.tab.file')}: ${panel.projectFile.relativePath}`)
     if (panel.sessionId) lines.push(`${t('terminal.tab.session')}: ${panel.sessionId}`)
     return lines.filter(Boolean).join('\n')
   }
 
   const terminalContextKindLabel = (panel: TerminalPanel) => {
-    if (panel.kind === 'knowledge') return t('terminal.kind.editor')
+    if (panel.kind === 'knowledge' || panel.kind === 'project-file') return t('terminal.kind.editor')
     if (panel.kind === 'managed-ai-session') return t('terminal.kind.aiSessionContent')
     if (panel.sshSession) return 'SSH'
     return t('terminal.kind.local')
@@ -109,6 +112,7 @@ export const createTerminalWorkspaceContextRuntime = ({ workspace, activeTermina
       terminalSshTargetLabel(panel) ? `Host: ${terminalSshTargetLabel(panel)}` : '',
       panel.cwd ? `CWD: ${panel.cwd}` : '',
       panel.knowledge?.relPath ? `File: ${panel.knowledge.relPath}` : '',
+      panel.projectFile?.relativePath ? `File: ${panel.projectFile.relativePath}` : '',
       panel.sessionId ? `Terminal Session: ${panel.sessionId}` : '',
       pendingSessions.length ? `Pending AI: ${pendingSessions.map((session) => `${session.source}/${session.title}`).join(', ')}` : ''
     ]
@@ -128,7 +132,7 @@ export const createTerminalWorkspaceContextRuntime = ({ workspace, activeTermina
       kindLabel: terminalContextKindLabel(panel),
       statusLabel: terminalStatusLabel(panel),
       target: terminalSshTargetLabel(panel),
-      path: panel.knowledge?.relPath || panel.cwd,
+      path: panel.knowledge?.relPath || panel.projectFile?.relativePath || panel.cwd,
       pendingAiCount,
       focusable: !panel.kind || panel.kind === 'terminal',
       text: terminalContextText(panel)

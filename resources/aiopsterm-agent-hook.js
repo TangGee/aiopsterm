@@ -153,11 +153,11 @@ const createEvent = (payload) => {
     cleanText(process.env.AIOPSTERM_AGENT_SESSION_ID) ||
     cleanText(process.env.AIOPSTERM_TERMINAL_SESSION_ID)
   const panelId =
-    cleanText(options['panel-id'] || payload.panelId || payload.panel_id || payload.surfaceId || payload.surface_id) ||
-    cleanText(process.env.AIOPSTERM_PANEL_ID || process.env.AIOPSTERM_SURFACE_ID)
+    cleanText(process.env.AIOPSTERM_PANEL_ID || process.env.AIOPSTERM_SURFACE_ID) ||
+    cleanText(options['panel-id'] || payload.panelId || payload.panel_id || payload.surfaceId || payload.surface_id)
   const terminalSessionId =
-    cleanText(options['terminal-session-id'] || payload.terminalSessionId || payload.terminal_session_id || payload.terminalId || payload.terminal_id) ||
-    cleanText(process.env.AIOPSTERM_TERMINAL_SESSION_ID)
+    cleanText(process.env.AIOPSTERM_TERMINAL_SESSION_ID) ||
+    cleanText(options['terminal-session-id'] || payload.terminalSessionId || payload.terminal_session_id || payload.terminalId || payload.terminal_id)
   const cwd =
     cleanText(options.cwd || payload.cwd || payload.workingDirectory || payload.working_directory || payload.project_dir || payload.projectDir) ||
     cleanText(process.cwd())
@@ -181,7 +181,7 @@ const createEvent = (payload) => {
     summary: cleanText(options.summary) || buildSummary(payload) || undefined,
     panelId: panelId || undefined,
     terminalSessionId: terminalSessionId || undefined,
-    workspaceId: cleanText(options['workspace-id'] || payload.workspaceId || payload.workspace_id || process.env.AIOPSTERM_WORKSPACE_ID) || undefined,
+    workspaceId: cleanText(process.env.AIOPSTERM_WORKSPACE_ID || options['workspace-id'] || payload.workspaceId || payload.workspace_id) || undefined,
     cwd: cwd || undefined,
     transcriptPath: cleanText(options['transcript-path'] || payload.transcriptPath || payload.transcript_path) || undefined,
     turnId: turnId || undefined,
@@ -269,7 +269,7 @@ const main = async () => {
     finish(strict ? 1 : 0, { ok: false, error: 'source, event, and sessionId are required' })
   }
   try {
-    const response = await publishEvent(socketPath, event)
+    const response = await publishEvent(socketPath, { method: 'agent.hook', params: event })
     finish(strict && response && response.ok === false ? 1 : 0, response)
   } catch (error) {
     finish(strict ? 1 : 0, { ok: false, error: error instanceof Error ? error.message : String(error) })

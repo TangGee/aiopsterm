@@ -60,6 +60,7 @@ export const hookDefinitions: AgentHookDefinition[] = [
       { agentEvent: 'UserPromptSubmit', hookEvent: 'UserPromptSubmit', timeout: 5 },
       { agentEvent: 'Stop', hookEvent: 'Stop', timeout: 5 },
       { agentEvent: 'PreToolUse', hookEvent: 'PreToolUse', timeout: 5 },
+      { agentEvent: 'PostToolUse', hookEvent: 'PostToolUse', timeout: 5 },
       { agentEvent: 'PermissionRequest', hookEvent: 'PermissionRequest', timeout: 5 },
       { agentEvent: 'AskUserQuestion', hookEvent: 'AskUserQuestion', timeout: 5 }
     ]
@@ -76,6 +77,7 @@ export const hookDefinitions: AgentHookDefinition[] = [
       { agentEvent: 'Stop', hookEvent: 'Stop', timeout: 5 },
       { agentEvent: 'Notification', hookEvent: 'Notification', timeout: 5 },
       { agentEvent: 'PreToolUse', hookEvent: 'PreToolUse', timeout: 5 },
+      { agentEvent: 'PostToolUse', hookEvent: 'PostToolUse', timeout: 5 },
       { agentEvent: 'PermissionRequest', hookEvent: 'PermissionRequest', timeout: 125 },
       { agentEvent: 'AskUserQuestion', hookEvent: 'AskUserQuestion', timeout: 125 }
     ]
@@ -237,7 +239,7 @@ export const hookDefinitions: AgentHookDefinition[] = [
       { agentEvent: 'userPromptSubmit', hookEvent: 'prompt_submit', timeout: 5 },
       { agentEvent: 'stop', hookEvent: 'stop', timeout: 5 },
       { agentEvent: 'preToolUse', hookEvent: 'PreToolUse', timeout: 5 },
-      { agentEvent: 'postToolUse', hookEvent: 'pre_tool_use', timeout: 5 }
+      { agentEvent: 'postToolUse', hookEvent: 'PostToolUse', timeout: 5 }
     ]
   },
   {
@@ -372,7 +374,7 @@ module.exports = async function aiopstermOpenCodePlugin(app) {
   on('session.start', (event) => report('SessionStart', event || {}))
   on('message.part.updated', (event) => report('lifecycle', { ...(event || {}), status: 'running' }))
   on('tool.execute.before', (event) => report('PreToolUse', event || {}))
-  on('tool.execute.after', (event) => report('stop', event || {}))
+  on('tool.execute.after', (event) => report('PostToolUse', event || {}))
   on('session.idle', (event) => report('lifecycle', { ...(event || {}), status: 'idle' }))
 }
 `

@@ -11,6 +11,7 @@ import {
   ensureAiAgentSessionServer,
 } from './backend/agent/agentSessions'
 import { closeClineAgentRuntime } from './backend/agent/clineAgentRuntime'
+import { closeProjectFilesRuntime } from './backend/files/projectFiles'
 import { createProductSessionRegistry } from './backend/agent/productSessionRegistry'
 import { configureRuntimeLog, logRuntimeEvent } from './backend/app/runtimeLog'
 import { configureCrashDiagnosticsRuntime, shouldEnableCrashDiagnostics } from './backend/app/crashDiagnosticsRuntime'
@@ -383,6 +384,7 @@ app.whenReady().then(async () => {
 
 app.on('window-all-closed', () => {
   closeAiAgentSessionServer()
+  void closeProjectFilesRuntime()
   closeControlSocketServer()
   closeCodexTerminalBridgeServer()
   closeExternalCodexMcpBridgeServer()
@@ -393,6 +395,7 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', (event) => {
+  void closeProjectFilesRuntime()
   closeControlSocketServer()
   closeCodexTerminalBridgeServer()
   closeExternalCodexMcpBridgeServer()

@@ -47,6 +47,11 @@ import {
   normalizeRecordEvent
 } from './agentSessionNormalization'
 import { createAgentSessionNotificationRuntime } from './agentSessionNotificationRuntime'
+import {
+  clearProjectFileAgentAdapterState,
+  handleProjectFileAgentHook
+} from './projectFileChangeAdapters'
+import { recordProjectFileChange } from '../files/projectFiles'
 import type {
   AiAgentSessionEvent,
   AiAgentSessionEventInput,
@@ -86,6 +91,7 @@ import type {
   ManagedAiSessionContentUpdateInput,
   ManagedAiSessionContentUpdateResult
 } from '@shared/contracts/managedAiSessionContent'
+import type { ProjectFileChangeV1 } from '@shared/contracts/projectFiles'
 
 export { normalizeAiAgentSessionEventInput } from './agentSessionNormalization'
 export type { ManagedAiSessionAutoNamingInput, ManagedAiSessionAutoNamingRuntime } from './agentSessionAutoNamingRuntime'
@@ -978,6 +984,14 @@ export const listManagedAiSessions = async (): Promise<ManagedAiSessionListResul
   return { ok: true, data: snapshot() }
 }
 
+export const findManagedAiSessionRecord = async (sourceInput: AiAgentSessionSource, sessionIdInput: string) => {
+  await loadStoreIfNeeded()
+  const source = normalizeSource(sourceInput)
+  const sessionId = cleanOptionalText(sessionIdInput)
+  if (!source || !sessionId) return null
+  return sessions.get(sessionKey(source, sessionId)) || null
+}
+
 const prepareManagedAiContentAccess = async (input: Pick<ManagedAiSessionContentListInput, 'source' | 'sessionId'>) => {
   await loadStoreIfNeeded()
   const source = normalizeSource(input?.source)
@@ -1393,7 +1407,7 @@ export const jumpToUnreadManagedAiNotification = async (): Promise<ManagedAiNoti
   return notificationRuntime.jumpToUnread()
 }
 
-const writeSocketResponse = (socket: Socket, response: AgentSessionSocketResponse) => {
+const writeSocketResponse = (socket: Socket, response: unknown) => {
   if (socket.destroyed || socket.writableEnded) return
   socket.write(`${JSON.stringify(response)}\n`)
 }
@@ -1411,7 +1425,33 @@ const handleSocketLine = async (socket: Socket, line: string, emit: AgentSession
       agentSessionEventStreamRuntime.startEventStream(socket, parsed)
       return
     }
-    writeSocketResponse(socket, await publishAiAgentSessionSocketEvent(parsed as AiAgentSessionEventInput, emit))
+    const method = cleanText(parsed.method || parsed.command).toLowerCase()
+    if (method === 'project.file_change.record') {
+      const params = isRecord(parsed.params) ? parsed.params : parsed
+      const source = normalizeSource(params.source)
+      const sessionId = cleanOptionalText(params.sessionId || params.session_id)
+      const terminalSessionId = cleanOptionalText(params.terminalSessionId || params.terminal_session_id)
+      const managedSession = source && sessionId ? await findManagedAiSessionRecord(source, sessionId) : null
+      if (!managedSession || !terminalSessionId ||
+        (managedSession.terminalSessionId !== terminalSessionId && managedSession.hibernatedTerminalSessionId !== terminalSessionId)) {
+        writeSocketResponse(socket, {
+          ok: false,
+          errorCode: 'PROJECT_FILE_TERMINAL_BINDING_INVALID',
+          errorMessage: 'The file change must originate from the terminal bound to the managed AI session.'
+        })
+        return
+      }
+      writeSocketResponse(socket, await recordProjectFileChange(params as ProjectFileChangeV1, 'native'))
+      return
+    }
+    const input = (isRecord(parsed.params) && method === 'agent.hook' ? parsed.params : parsed) as AiAgentSessionEventInput
+    const adapterHandled = await handleProjectFileAgentHook(input)
+    const response = await publishAiAgentSessionSocketEvent(input, emit)
+    if (!response.ok && adapterHandled) {
+      writeSocketResponse(socket, { ok: true, status: 'acknowledged' })
+      return
+    }
+    writeSocketResponse(socket, response)
   } catch {
     writeSocketResponse(socket, {
       ok: false,
@@ -1489,6 +1529,7 @@ export const ensureAiAgentSessionServer = async ({ userDataPath, emit }: AgentSe
 }
 
 export const closeAiAgentSessionServer = () => {
+  clearProjectFileAgentAdapterState()
   void disposeAgentSessionContentWorker()
   flushPersistSnapshotNow()
   const existing = server

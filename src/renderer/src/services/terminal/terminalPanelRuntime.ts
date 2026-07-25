@@ -42,7 +42,7 @@ export type TerminalPanel = {
   output: string
   outputSegments: TerminalOutputSegment[]
   status: 'ready' | 'connecting' | 'running' | 'closed' | 'error'
-  kind?: 'terminal' | 'knowledge' | 'managed-ai-session'
+  kind?: 'terminal' | 'knowledge' | 'managed-ai-session' | 'project-file'
   split?: PanelDirection
   splitSourceId?: string
   splitGroupId?: string
@@ -59,6 +59,13 @@ export type TerminalPanel = {
   managedAiSession?: {
     source: AiAgentSessionSource
     sessionId: string
+  }
+  projectFile?: {
+    source: AiAgentSessionSource
+    sessionId: string
+    projectRoot: string
+    relativePath: string
+    dirty?: boolean
   }
   sshSession?: TerminalSshSession
   terminalLifecycle?: TerminalLifecycleEvent
@@ -224,6 +231,7 @@ export const resetTerminalPanelToDefault = (panel: TerminalPanel) => {
   panel.classicTarget = undefined
   panel.knowledge = undefined
   panel.managedAiSession = undefined
+  panel.projectFile = undefined
   panel.sshSession = undefined
   panel.terminalLifecycle = undefined
   panel.terminalExit = undefined

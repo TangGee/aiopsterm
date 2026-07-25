@@ -1,0 +1,305 @@
+.right-assistant-panel {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: 34px minmax(0, 1fr);
+}
+
+.right-assistant-tabs {
+  display: flex;
+  align-items: end;
+  gap: 4px;
+  padding: 4px 10px 0;
+  border-bottom: 1px solid var(--theme-module-active-border);
+  background: var(--theme-module-active-toolbar-bg);
+}
+
+.right-assistant-tabs button {
+  height: 29px;
+  padding: 0 12px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--theme-module-active-text-muted);
+}
+
+.right-assistant-tabs button.active {
+  color: var(--theme-module-active-text);
+  border-bottom-color: var(--theme-module-active-accent);
+}
+
+.right-assistant-content {
+  min-width: 0;
+  min-height: 0;
+}
+
+.project-files-panel {
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--theme-module-active-panel-bg);
+  color: var(--theme-module-active-text);
+}
+
+.project-files-header,
+.project-files-section-title,
+.project-file-editor > header,
+.project-file-editor > footer,
+.project-file-conflict {
+  display: flex;
+  align-items: center;
+}
+
+.project-files-header {
+  min-height: 58px;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--theme-module-active-border);
+}
+
+.project-files-header > div,
+.project-file-editor > header > div {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.project-files-header small,
+.project-file-editor small {
+  overflow: hidden;
+  color: var(--theme-module-active-text-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-files-capability {
+  border: 1px solid var(--theme-module-active-border);
+  border-radius: 999px;
+  padding: 2px 7px;
+  color: var(--theme-module-active-text-muted);
+  font-size: 10px;
+}
+
+.project-files-capability.adapter,
+.project-files-capability.native {
+  color: var(--theme-module-active-accent);
+  border-color: color-mix(in srgb, var(--theme-module-active-accent) 45%, var(--theme-module-active-border));
+}
+
+.project-files-recent,
+.project-files-tree {
+  min-height: 0;
+  overflow: auto;
+}
+
+.project-files-tree {
+  flex: 1 1 auto;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.project-files-section-title {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  min-height: 34px;
+  justify-content: space-between;
+  padding: 0 10px;
+  background: var(--theme-module-active-toolbar-bg);
+  color: var(--theme-module-active-text-muted);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.project-files-section-title button {
+  border: 0;
+  background: transparent;
+  color: var(--theme-module-active-text-muted);
+  font-size: 11px;
+}
+
+.project-files-recent-row,
+.project-files-tree-row,
+.project-files-load-more {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--theme-module-active-text);
+  text-align: left;
+}
+
+.project-files-recent-row {
+  height: 30px;
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+}
+
+.project-files-recent-row > span:nth-child(2),
+.project-files-tree-row > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-files-recent-row small {
+  color: var(--theme-module-active-text-muted);
+  font-size: 10px;
+}
+
+.project-files-recent-row:hover,
+.project-files-tree-row:hover,
+.project-files-load-more:hover {
+  background: var(--theme-module-active-card-bg);
+}
+
+.project-file-change-kind {
+  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  color: var(--theme-module-active-text-muted);
+}
+
+.project-file-change-kind.created {
+  color: #46b37b;
+}
+
+.project-file-change-kind.modified,
+.project-file-change-kind.renamed {
+  color: #d5a83f;
+}
+
+.project-file-change-kind.deleted {
+  color: #dc6b6b;
+}
+
+.project-files-splitter {
+  flex: 0 0 5px;
+  width: 100%;
+  border: 0;
+  border-top: 1px solid var(--theme-module-active-border);
+  border-bottom: 1px solid var(--theme-module-active-border);
+  background: transparent;
+  cursor: row-resize;
+}
+
+.project-files-tree-scroll {
+  min-height: 0;
+  overflow: auto;
+}
+
+.project-files-tree-row {
+  height: 27px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding-right: 8px;
+}
+
+.project-files-tree-row svg {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  color: var(--theme-module-active-icon);
+}
+
+.project-files-tree-row svg:first-child {
+  width: 11px;
+  transition: transform 0.12s ease;
+}
+
+.project-files-tree-row svg:first-child.expanded {
+  transform: rotate(90deg);
+}
+
+.project-files-load-more {
+  height: 27px;
+  color: var(--theme-module-active-accent);
+}
+
+.project-files-empty,
+.project-files-unavailable {
+  padding: 18px;
+  color: var(--theme-module-active-text-muted);
+  text-align: center;
+}
+
+.project-files-unavailable {
+  flex: 1 1 auto;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 8px;
+}
+
+.project-files-unavailable svg {
+  width: 34px;
+  height: 34px;
+}
+
+.terminal-pane.project-file-pane {
+  grid-template-rows: minmax(0, 1fr);
+  background: var(--theme-module-active-panel-bg);
+}
+
+.project-file-editor {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  background: var(--theme-module-active-panel-bg);
+}
+
+.project-file-editor > header {
+  min-height: 45px;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--theme-module-active-border);
+}
+
+.project-file-editor button {
+  min-height: 27px;
+  border: 1px solid var(--theme-module-active-border);
+  border-radius: 6px;
+  background: var(--theme-module-active-card-bg);
+  color: var(--theme-module-active-text);
+}
+
+.project-file-conflict {
+  min-height: 36px;
+  gap: 8px;
+  padding: 5px 10px;
+  background: color-mix(in srgb, #d5a83f 14%, var(--theme-module-active-panel-bg));
+  color: var(--theme-module-active-text);
+}
+
+.project-file-conflict span {
+  flex: 1 1 auto;
+}
+
+.project-file-error {
+  padding: 18px;
+  color: #dc6b6b;
+}
+
+.project-file-editor .files-monaco-editor {
+  min-height: 0;
+  height: 100%;
+}
+
+.project-file-editor > footer {
+  min-height: 24px;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0 9px;
+  border-top: 1px solid var(--theme-module-active-border);
+  color: var(--theme-module-active-text-muted);
+  font-size: 10px;
+}

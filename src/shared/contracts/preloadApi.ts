@@ -31,6 +31,20 @@ import type {
   ProductSessionUpdateInput
 } from './productSessions'
 import type {
+  ProjectDirectoryListInput,
+  ProjectDirectoryListResult,
+  ProjectFileContext,
+  ProjectFileContextInput,
+  ProjectFileContextResult,
+  ProjectFileReadInput,
+  ProjectFileReadResult,
+  ProjectFileWatchEvent,
+  ProjectFileWatchInput,
+  ProjectFileWatchResult,
+  ProjectFileWriteInput,
+  ProjectFileWriteResult
+} from './projectFiles'
+import type {
   TerminalBinaryWriteResult,
   TerminalCreateOptions,
   TerminalDataEvent,
@@ -733,6 +747,14 @@ export type AiopsPreloadApi = {
   cancelFileTransferTask: (input: FileTransferTaskCancelInput) => Promise<FileTransferTaskCancelResult>
   listFileTransferTasks: () => Promise<FileTransferTask[]>
   onFileTransferTaskEvent: (listener: (event: FileTransferTaskEvent) => void) => () => void
+  getProjectFileContext: (input: ProjectFileContextInput) => Promise<ProjectFileContextResult>
+  listProjectDirectory: (input: ProjectDirectoryListInput) => Promise<ProjectDirectoryListResult>
+  readProjectFile: (input: ProjectFileReadInput) => Promise<ProjectFileReadResult>
+  writeProjectFile: (input: ProjectFileWriteInput) => Promise<ProjectFileWriteResult>
+  startProjectFileWatch: (input: ProjectFileWatchInput) => Promise<ProjectFileWatchResult>
+  stopProjectFileWatch: (watchId: string) => Promise<ProjectFileWatchResult>
+  onProjectFileWatchEvent: (listener: (event: ProjectFileWatchEvent) => void) => () => void
+  onProjectFilesChanged: (listener: (context: ProjectFileContext) => void) => () => void
   onTerminalData: (listener: (event: TerminalDataEvent) => void) => () => void
   onTerminalLifecycle: (listener: (event: TerminalLifecycleEvent) => void) => () => void
   onTerminalExit: (listener: (event: TerminalExitEvent) => void) => () => void

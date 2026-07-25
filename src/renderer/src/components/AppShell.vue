@@ -82,7 +82,7 @@
           aria-label="调整 AI 侧栏宽度"
           @mousedown="startResize('right', $event)"
         ></button>
-        <AiPanel
+        <RightAssistantPanel
           :agent-mode="workspace.mode === 'agents'"
           :product-session-request="productSessionRequest"
           @product-session-request-consumed="handleProductSessionRequestConsumed"
@@ -187,7 +187,7 @@ import AssetsWorkspace from '@/components/AssetsWorkspace.vue'
 import ExtensionsWorkspace from '@/components/ExtensionsWorkspace.vue'
 import KubernetesWorkspace from '@/components/KubernetesWorkspace.vue'
 import SettingsWorkspace from '@/components/SettingsWorkspace.vue'
-import AiPanel from '@/components/AiPanel.vue'
+import RightAssistantPanel from '@/components/RightAssistantPanel.vue'
 import AgentsSidebar from '@/components/AgentsSidebar.vue'
 import DatabaseWorkspace from '@/components/DatabaseWorkspace.vue'
 import UserPanel from '@/components/panels/UserPanel.vue'

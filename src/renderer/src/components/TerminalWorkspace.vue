@@ -31,7 +31,7 @@
           role="button"
           tabindex="0"
           :title="terminalTabTooltip(panel)"
-          :draggable="panel.kind === 'terminal' || panel.kind === 'knowledge' || panel.kind === 'managed-ai-session'"
+          :draggable="panel.kind === 'terminal' || panel.kind === 'knowledge' || panel.kind === 'managed-ai-session' || panel.kind === 'project-file'"
           @click="activatePanel(panel.id)"
           @keydown.enter.prevent="activatePanel(panel.id)"
           @keydown.space.prevent="activatePanel(panel.id)"
@@ -284,7 +284,7 @@
         v-for="{ panel, style } in splitLayoutItems"
         :key="panel.id"
         class="terminal-pane"
-        :class="{ active: panel.id === workspace.activePanelId, below: panel.split === 'below', 'knowledge-pane': panel.kind === 'knowledge', 'managed-ai-session-pane': panel.kind === 'managed-ai-session', 'with-pane-title': workspace.hasSplitState(panel.id), 'drag-over': paneDragOverPanelId === panel.id, 'ai-attention': panelNeedsAiAttention(panel), 'control-flash': controlFlashingPanelIds.includes(panel.id) }"
+        :class="{ active: panel.id === workspace.activePanelId, below: panel.split === 'below', 'knowledge-pane': panel.kind === 'knowledge', 'managed-ai-session-pane': panel.kind === 'managed-ai-session', 'project-file-pane': panel.kind === 'project-file', 'with-pane-title': workspace.hasSplitState(panel.id), 'drag-over': paneDragOverPanelId === panel.id, 'ai-attention': panelNeedsAiAttention(panel), 'control-flash': controlFlashingPanelIds.includes(panel.id) }"
         :style="style"
         @click="activatePanelFromPointer($event, panel)"
         @dragenter.prevent="handlePaneDragEnter($event, panel)"
@@ -305,6 +305,10 @@
           :source="panel.managedAiSession.source"
           :session-id="panel.managedAiSession.sessionId"
           :panel-title="panel.title"
+        />
+        <ProjectFileEditor
+          v-else-if="panel.kind === 'project-file' && panel.projectFile"
+          :panel="panel"
         />
         <template v-else>
         <div
@@ -544,6 +548,7 @@ import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Clock, ListTree, Loa
 import TransferProgress from '@/components/files/TransferProgress.vue'
 import KnowledgeCenterEditor from '@/components/KnowledgeCenterEditor.vue'
 import ManagedAiSessionContentWorkspace from '@/components/ManagedAiSessionContentWorkspace.vue'
+import ProjectFileEditor from '@/components/files/ProjectFileEditor.vue'
 import { useTerminalWorkspaceContainerRuntime } from '@/services/terminal/terminalWorkspaceContainerRuntime'
 
 const {

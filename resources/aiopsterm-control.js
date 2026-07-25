@@ -60,6 +60,7 @@ Commands:
   remote tmux sessions|attach|detach|state|mirror|window
   agent-hibernation on|off|status|preview|sweep [--no-confirm]
   agent hibernate|resume --session <id> [--source <source>]
+  agent file-change record --event-json <json>
   agent session list|show|reply|approve|deny|handle|rename|clear [--session <id>] [--source <source>]
   agent vault register|list|get|remove|render|identify|scan
   agent team launch [--source codex|claude-code|custom] [--count <n>] [--cwd <path>] [--prompt <text>] [--command <shell>]
@@ -1104,6 +1105,26 @@ const methodParams = () => {
   if (command === 'agent') {
     const subcommand = args.shift() || 'status'
     if (subcommand === 'status') return { method: 'agent.status', params: {} }
+    if (subcommand === 'file-change' || subcommand === 'file_change') {
+      const action = args.shift() || 'record'
+      if (action !== 'record') throw new Error(`Unknown agent file-change command: ${action}`)
+      const eventJson = readOption('--event-json') || readOption('--json-event') || readOption('--params-json')
+      const parsed = eventJson ? JSON.parse(eventJson) : {}
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('agent file-change record requires a JSON object')
+      return {
+        method: 'project.file_change.record',
+        params: {
+          protocolVersion: parsed.protocolVersion || 1,
+          eventId: parsed.eventId || `aio-${process.pid}-${Date.now()}`,
+          source: parsed.source || readOption('--source') || readOption('--agent'),
+          sessionId: parsed.sessionId || parsed.session_id || readOption('--session') || readOption('--session-id'),
+          terminalSessionId: process.env.AIOPSTERM_TERMINAL_SESSION_ID,
+          cwd: parsed.cwd || readOption('--cwd') || process.cwd(),
+          changes: parsed.changes
+        },
+        agentSocket: true
+      }
+    }
     if (subcommand === 'hooks' || subcommand === 'hook') return agentHooksMethodParams(args.shift() || 'list')
     if (subcommand === 'session' || subcommand === 'sessions' || subcommand === 'ai-session') return agentSessionMethodParams(args.shift() || 'list')
     if (subcommand === 'vault' || subcommand === 'agent-vault') return agentVaultMethodParams(args.shift() || 'list')
@@ -4153,13 +4174,22 @@ if ('localPrint' in request) {
   process.exit(0)
 }
 
-if (!socketPath) {
+const requestSocketPath = request.agentSocket
+  ? process.env.AIOPSTERM_AGENT_SOCKET_PATH || ''
+  : socketPath
+
+if (request.agentSocket && process.env.AIOPSTERM_MANAGED_TERMINAL !== '1') {
+  process.stderr.write('agent file-change record is only available inside an aiopsterm managed terminal.\n')
+  process.exit(2)
+}
+
+if (!requestSocketPath) {
   if (request.silentOnNoSocket) process.exit(0)
   process.stderr.write('AIOPSTERM_CONTROL_SOCKET is not set. Start this CLI inside an aiopsterm managed local terminal or pass --socket.\n')
   process.exit(2)
 }
 
-const socket = net.createConnection(socketPath)
+const socket = net.createConnection(requestSocketPath)
 let buffer = ''
 let completed = false
 let streamEventCount = 0

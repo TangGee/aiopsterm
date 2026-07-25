@@ -158,6 +158,11 @@ export const createWorkspaceTerminalPanelsController = (
   }
 
   const closePanel = (id = activePanelId.value) => {
+    const targetPanel = panels.value.find((panel) => panel.id === id)
+    if (targetPanel?.kind === 'project-file' && targetPanel.projectFile?.dirty &&
+      typeof window !== 'undefined' && !window.confirm('This file has unsaved changes. Close it anyway?')) {
+      return Promise.resolve({ closed: false, panelId: id, terminalStatus: 'none' as const })
+    }
     const descriptor = closedPanelDescriptors(
       panels.value.filter((panel) => panel.id === id || (panels.value.length === 1 && isTerminalWorkspacePanel(panel)))
     )[0]
@@ -498,6 +503,42 @@ export const createWorkspaceTerminalPanelsController = (
     return panel
   }
 
+  const openProjectFile = (input: {
+    source: AiAgentSessionSource
+    sessionId: string
+    projectRoot: string
+    relativePath: string
+  }) => {
+    const existing = panels.value.find(
+      (panel) =>
+        panel.kind === 'project-file' &&
+        panel.projectFile?.projectRoot === input.projectRoot &&
+        panel.projectFile.relativePath === input.relativePath
+    )
+    if (existing) {
+      mode.value = 'terminal'
+      activeModule.value = 'workspace'
+      activePanelId.value = existing.id
+      return existing
+    }
+    const title = input.relativePath.split('/').filter(Boolean).at(-1) || input.relativePath
+    const panel: TerminalPanel = {
+      id: createRendererLocalId('panel'),
+      title,
+      cwd: input.projectRoot,
+      kind: 'project-file',
+      status: 'ready',
+      output: '',
+      outputSegments: [],
+      projectFile: { ...input }
+    }
+    panels.value.push(panel)
+    mode.value = 'terminal'
+    activeModule.value = 'workspace'
+    activePanelId.value = panel.id
+    return panel
+  }
+
   const syncKnowledgePanelsAfterRename = (oldRelPath: string, newRelPath: string) => {
     panels.value.forEach((panel) => {
       if (panel.kind !== 'knowledge' || !panel.knowledge?.relPath) return
@@ -582,6 +623,7 @@ export const createWorkspaceTerminalPanelsController = (
     applyLocalTerminalSession,
     openKnowledgeFile,
     openManagedAiSessionContent,
+    openProjectFile,
     syncKnowledgePanelsAfterRename,
     closeKnowledgePanelsForRemoved,
     appendTerminalOutput,

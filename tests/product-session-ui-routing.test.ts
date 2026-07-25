@@ -54,8 +54,8 @@ const makeRuntime = () => {
 
 describe('AppShell product session routing', () => {
   const databaseRequests: unknown[] = []
-  const PassiveAiPanel = defineComponent({
-    name: 'PassiveAiPanel',
+  const PassiveRightAssistantPanel = defineComponent({
+    name: 'PassiveRightAssistantPanel',
     props: ['agentMode', 'productSessionRequest'],
     emits: ['productSessionRequestConsumed'],
     template: '<div />'
@@ -78,7 +78,7 @@ describe('AppShell product session routing', () => {
   const mountShell = () => shallowMount(AppShell, {
     global: {
       stubs: {
-        AiPanel: PassiveAiPanel,
+        RightAssistantPanel: PassiveRightAssistantPanel,
         DatabaseWorkspace: PassiveDatabaseWorkspace,
         KeepAlive: { template: '<div><slot /></div>' }
       }
@@ -95,26 +95,26 @@ describe('AppShell product session routing', () => {
     const sidebar = wrapper.findComponent(AgentsSidebar)
 
     sidebar.vm.$emit('requestProductSession', { action: 'restore', surface: 'classic', sessionId: 'classic-1' })
-    const aiPanel = wrapper.findComponent(PassiveAiPanel)
-    await vi.waitFor(() => expect(aiPanel.props('productSessionRequest')).toEqual({
+    const assistantPanel = wrapper.findComponent(PassiveRightAssistantPanel)
+    await vi.waitFor(() => expect(assistantPanel.props('productSessionRequest')).toEqual({
       action: 'restore', surface: 'classic', sessionId: 'classic-1', sequence: 1
     }))
-    expect(aiPanel.props('agentMode')).toBe(true)
+    expect(assistantPanel.props('agentMode')).toBe(true)
     expect(appShellContext.runtime.workspace.setActiveModule).toHaveBeenCalledWith('workspace')
-    aiPanel.vm.$emit('productSessionRequestConsumed', 1)
+    assistantPanel.vm.$emit('productSessionRequestConsumed', 1)
     await wrapper.vm.$nextTick()
-    expect(aiPanel.props('productSessionRequest')).toBeNull()
+    expect(assistantPanel.props('productSessionRequest')).toBeNull()
 
     sidebar.vm.$emit('requestProductSession', { action: 'restore', surface: 'codex', sessionId: 'codex-1' })
-    await vi.waitFor(() => expect(aiPanel.props('productSessionRequest')).toEqual({
+    await vi.waitFor(() => expect(assistantPanel.props('productSessionRequest')).toEqual({
       action: 'restore',
       surface: 'codex',
       sessionId: 'codex-1',
       sequence: 2
     }))
-    aiPanel.vm.$emit('productSessionRequestConsumed', 2)
+    assistantPanel.vm.$emit('productSessionRequestConsumed', 2)
     await wrapper.vm.$nextTick()
-    expect(aiPanel.props('productSessionRequest')).toBeNull()
+    expect(assistantPanel.props('productSessionRequest')).toBeNull()
   })
 
   it('switches to Database and forwards the same central request', async () => {
@@ -127,7 +127,7 @@ describe('AppShell product session routing', () => {
     expect(appShellContext.runtime.workspace.setActiveModule).toHaveBeenCalledWith('database')
     expect(appShellContext.runtime.workspace.mode).toBe('terminal')
     await wrapper.vm.$nextTick()
-    expect(wrapper.findComponent(PassiveAiPanel).exists()).toBe(false)
+    expect(wrapper.findComponent(PassiveRightAssistantPanel).exists()).toBe(false)
     const databaseWorkspace = wrapper.findComponent(PassiveDatabaseWorkspace)
     await vi.waitFor(() => expect(databaseRequests).toContainEqual({
       action: 'focus',

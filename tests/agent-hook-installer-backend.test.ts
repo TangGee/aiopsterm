@@ -167,6 +167,7 @@ describe('agent hook installer backend', () => {
       timeout_ms: 5000
     })
     expect(hooks.preToolUse[0].command).toBe(agentHookCommandFor('kiro', 'PreToolUse', '/opt/aiopsterm/aiopsterm-agent-hook.js'))
+    expect(hooks.postToolUse[0].command).toBe(agentHookCommandFor('kiro', 'PostToolUse', '/opt/aiopsterm/aiopsterm-agent-hook.js'))
   })
 
   it('generates marked plugin and YAML hook files for plugin-style agents', async () => {
@@ -177,6 +178,7 @@ describe('agent hook installer backend', () => {
 
     expect(__testing.pluginFileContentFor(opencode)).toContain(__testing.fileHookMarker)
     expect(__testing.pluginFileContentFor(opencode)).toContain('source = "opencode"')
+    expect(__testing.pluginFileContentFor(opencode)).toContain("report('PostToolUse'")
     expect(__testing.pluginFileContentFor(amp)).toContain('source = "amp"')
 
     const yaml = __testing.rovoDevYamlHooksBlock(rovodev, '/opt/aiopsterm/aiopsterm-agent-hook.js')

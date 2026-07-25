@@ -1697,6 +1697,73 @@ describe('aio CLI', () => {
     ])
   })
 
+  it('records project file changes only through a managed terminal agent socket', async () => {
+    const seen: Record<string, unknown>[] = []
+    const socketPath = await startControlServer((request) => {
+      seen.push(request)
+      return {
+        id: request.id,
+        ok: true,
+        data: {
+          projectRoot: '/work/project',
+          accepted: 1,
+          rejected: 0,
+          duplicate: 0,
+          recent: []
+        }
+      }
+    })
+    const event = {
+      protocolVersion: 1,
+      eventId: 'change-1',
+      source: 'codex',
+      sessionId: 'codex-session-1',
+      cwd: '/work/project',
+      changes: [{ path: 'src/app.ts', kind: 'modified' }]
+    }
+
+    await execFileAsync(
+      process.execPath,
+      ['resources/aiopsterm-control.js', 'agent', 'file-change', 'record', '--event-json', JSON.stringify(event)],
+      {
+        cwd: process.cwd(),
+        env: {
+          ...process.env,
+          AIOPSTERM_AGENT_SOCKET_PATH: socketPath,
+          AIOPSTERM_MANAGED_TERMINAL: '1',
+          AIOPSTERM_TERMINAL_SESSION_ID: 'terminal-1'
+        }
+      }
+    )
+    expect(seen).toEqual([
+      expect.objectContaining({
+        method: 'project.file_change.record',
+        params: expect.objectContaining({
+          ...event,
+          terminalSessionId: 'terminal-1'
+        })
+      })
+    ])
+
+    await expect(
+      execFileAsync(
+        process.execPath,
+        ['resources/aiopsterm-control.js', 'agent', 'file-change', 'record', '--event-json', JSON.stringify(event)],
+        {
+          cwd: process.cwd(),
+          env: {
+            ...process.env,
+            AIOPSTERM_AGENT_SOCKET_PATH: socketPath,
+            AIOPSTERM_MANAGED_TERMINAL: '0'
+          }
+        }
+      )
+    ).rejects.toMatchObject({
+      code: 2,
+      stderr: expect.stringContaining('only available inside an aiopsterm managed terminal')
+    })
+  })
+
   it('sends agent team launch requests over the configured socket', async () => {
     const seen: Record<string, unknown>[] = []
     const socketPath = await startControlServer((request) => {

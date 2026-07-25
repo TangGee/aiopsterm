@@ -417,6 +417,22 @@ const api: AiopsPreloadApi = {
     ipcRenderer.on('files:transfer-task-event', wrapped)
     return () => ipcRenderer.off('files:transfer-task-event', wrapped)
   },
+  getProjectFileContext: (input) => ipcRenderer.invoke('project-files:context', input),
+  listProjectDirectory: (input) => ipcRenderer.invoke('project-files:list', input),
+  readProjectFile: (input) => ipcRenderer.invoke('project-files:read', input),
+  writeProjectFile: (input) => ipcRenderer.invoke('project-files:write', input),
+  startProjectFileWatch: (input) => ipcRenderer.invoke('project-files:watch:start', input),
+  stopProjectFileWatch: (watchId: string) => ipcRenderer.invoke('project-files:watch:stop', watchId),
+  onProjectFileWatchEvent: (listener) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, payload: Parameters<typeof listener>[0]) => listener(payload)
+    ipcRenderer.on('project-files:watch-event', wrapped)
+    return () => ipcRenderer.off('project-files:watch-event', wrapped)
+  },
+  onProjectFilesChanged: (listener) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, payload: Parameters<typeof listener>[0]) => listener(payload)
+    ipcRenderer.on('project-files:changed', wrapped)
+    return () => ipcRenderer.off('project-files:changed', wrapped)
+  },
   onTerminalData: (listener: (event: TerminalDataEvent) => void) => {
     const wrapped = (_event: Electron.IpcRendererEvent, payload: TerminalDataEvent) => listener(payload)
     ipcRenderer.on('terminal:data', wrapped)

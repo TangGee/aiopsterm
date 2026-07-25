@@ -27,7 +27,10 @@ const startSocketServer = async () => {
       const newlineIndex = buffer.indexOf('\n')
       if (newlineIndex < 0) return
       const line = buffer.slice(0, newlineIndex).trim()
-      if (line) received.push(JSON.parse(line))
+      if (line) {
+        const parsed = JSON.parse(line)
+        received.push(parsed?.method === 'agent.hook' ? parsed.params : parsed)
+      }
       socket.write(`${JSON.stringify({ ok: true })}\n`)
       socket.end()
     })
@@ -62,7 +65,10 @@ const startDecisionSocketServer = async (response: Record<string, unknown>) => {
       const newlineIndex = buffer.indexOf('\n')
       if (newlineIndex < 0) return
       const line = buffer.slice(0, newlineIndex).trim()
-      if (line) received.push(JSON.parse(line))
+      if (line) {
+        const parsed = JSON.parse(line)
+        received.push(parsed?.method === 'agent.hook' ? parsed.params : parsed)
+      }
       socket.write(`${JSON.stringify(response)}\n`)
       socket.end()
     })
