@@ -1,44 +1,24 @@
 <template>
   <section class="right-assistant-panel">
-    <nav class="right-assistant-tabs" role="tablist" aria-label="Right panel">
-      <button
-        type="button"
-        :class="{ active: activeTab === 'ai' }"
-        role="tab"
-        :aria-selected="activeTab === 'ai'"
-        @click="selectTab('ai')"
-      >
-        AI
-      </button>
-      <button
-        type="button"
-        :class="{ active: activeTab === 'files' }"
-        role="tab"
-        :aria-selected="activeTab === 'files'"
-        @click="selectTab('files')"
-      >
-        Files
-      </button>
-    </nav>
     <AiPanel
-      v-show="activeTab === 'ai'"
       class="right-assistant-content"
       :agent-mode="agentMode"
       :product-session-request="productSessionRequest"
+      :project-files-available="projectFilesAvailable"
+      :project-files-active="projectFilesActive"
+      @toggle-project-files="toggleProjectFiles"
+      @close-project-files="projectFilesActive = false"
       @product-session-request-consumed="$emit('productSessionRequestConsumed', $event)"
-    />
-    <ProjectFilesPanel
-      v-show="activeTab === 'files'"
-      class="right-assistant-content"
     />
   </section>
 </template>
 
 <script setup lang="ts">
-import { nextTick, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import AiPanel from '@/components/AiPanel.vue'
-import ProjectFilesPanel from '@/components/files/ProjectFilesPanel.vue'
 import type { ProductSessionUiRequest } from '@/components/productSessionUiTypes'
+import { projectFilesClient } from '@/services/files/projectFilesClient'
+import { useWorkspaceStore } from '@/stores/workspace'
 
 const props = defineProps<{
   agentMode?: boolean
@@ -48,22 +28,60 @@ defineEmits<{
   productSessionRequestConsumed: [sequence: number]
 }>()
 
-const storedTab = localStorage.getItem('aiopsterm.rightAssistantTab')
-const activeTab = ref<'ai' | 'files'>(storedTab === 'files' ? 'files' : 'ai')
+const workspace = useWorkspaceStore()
+const projectFilesAvailable = ref(false)
+const projectFilesActive = ref(false)
+let availabilityGeneration = 0
 
-const selectTab = async (tab: 'ai' | 'files') => {
-  activeTab.value = tab
-  localStorage.setItem('aiopsterm.rightAssistantTab', tab)
-  if (tab === 'ai') {
-    await nextTick()
-    window.dispatchEvent(new Event('resize'))
+const selectedSessionSignature = computed(() => {
+  const session = workspace.selectedManagedAiSession
+  if (!session) return ''
+  return [
+    session.source,
+    session.id,
+    session.terminalSessionId || '',
+    session.hibernatedTerminalSessionId || '',
+    session.cwd || '',
+    session.canonicalCwd || ''
+  ].join(':')
+})
+
+const refreshProjectFilesAvailability = async () => {
+  const session = workspace.selectedManagedAiSession
+  const requestGeneration = ++availabilityGeneration
+  projectFilesAvailable.value = false
+  if (!session) {
+    projectFilesActive.value = false
+    return
+  }
+  const getContext = projectFilesClient.getContext()
+  if (!getContext) {
+    projectFilesActive.value = false
+    return
+  }
+  try {
+    const result = await getContext({ source: session.source, sessionId: session.id })
+    if (requestGeneration !== availabilityGeneration) return
+    projectFilesAvailable.value = Boolean(result.ok && result.data)
+    if (!projectFilesAvailable.value) projectFilesActive.value = false
+  } catch {
+    if (requestGeneration !== availabilityGeneration) return
+    projectFilesAvailable.value = false
+    projectFilesActive.value = false
   }
 }
+
+const toggleProjectFiles = () => {
+  if (!projectFilesAvailable.value) return
+  projectFilesActive.value = !projectFilesActive.value
+}
+
+watch(selectedSessionSignature, () => void refreshProjectFilesAvailability(), { immediate: true })
 
 watch(
   () => props.productSessionRequest?.sequence,
   (sequence) => {
-    if (sequence) void selectTab('ai')
+    if (sequence) projectFilesActive.value = false
   }
 )
 </script>

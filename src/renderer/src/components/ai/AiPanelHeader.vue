@@ -142,6 +142,19 @@
       >
         <Plus />
       </button>
+      <button
+        v-if="projectFilesAvailable"
+        type="button"
+        class="ai-header-icon-button"
+        :class="{ active: projectFilesActive }"
+        :title="t('module.files')"
+        :aria-label="t('module.files')"
+        :aria-pressed="projectFilesActive"
+        data-testid="ai-project-files-toggle"
+        @click.stop="$emit('toggleProjectFiles')"
+      >
+        <FolderTree />
+      </button>
       <div
         class="ai-history-menu-wrap"
         @click.stop
@@ -212,6 +225,7 @@ import {
   Code2,
   Download,
   Ellipsis,
+  FolderTree,
   Link,
   Plus,
   RefreshCw,
@@ -221,6 +235,14 @@ import {
   X
 } from 'lucide-vue-next'
 import { useAiPanelRuntimeContext } from '@/services/ai/aiPanelContext'
+
+defineProps<{
+  projectFilesAvailable?: boolean
+  projectFilesActive?: boolean
+}>()
+defineEmits<{
+  toggleProjectFiles: []
+}>()
 
 const {
   activeCodexConversationId,

@@ -8,10 +8,14 @@
     @dragover.prevent="handleDragOver"
     @dragleave="handleDragLeave"
     @drop.prevent="handleDrop"
-    @keydown="handlePanelKeydown"
+    @keydown="handlePresentationKeydown"
   >
     <div class="ai-panel-top">
-      <AiPanelHeader />
+      <AiPanelHeader
+        :project-files-available="projectFilesAvailable"
+        :project-files-active="projectFilesActive"
+        @toggle-project-files="$emit('toggleProjectFiles')"
+      />
     </div>
 
     <AiPanelCodexShell />
@@ -29,6 +33,14 @@
     <AiPanelClassicComposer />
 
     <AiPanelCommandAuditDialog />
+
+    <Transition name="project-files-drawer">
+      <ProjectFilesPanel
+        v-if="projectFilesActive"
+        class="project-files-drawer"
+        @close="$emit('closeProjectFiles')"
+      />
+    </Transition>
   </aside>
 </template>
 
@@ -38,7 +50,17 @@ import AiPanelClassicConversation from '@/components/ai/AiPanelClassicConversati
 import AiPanelCodexShell from '@/components/ai/AiPanelCodexShell.vue'
 import AiPanelCommandAuditDialog from '@/components/ai/AiPanelCommandAuditDialog.vue'
 import AiPanelHeader from '@/components/ai/AiPanelHeader.vue'
+import ProjectFilesPanel from '@/components/files/ProjectFilesPanel.vue'
 import { useAiPanelRuntimeContext } from '@/services/ai/aiPanelContext'
+
+const props = defineProps<{
+  projectFilesAvailable?: boolean
+  projectFilesActive?: boolean
+}>()
+const emit = defineEmits<{
+  toggleProjectFiles: []
+  closeProjectFiles: []
+}>()
 
 const {
   agentMode,
@@ -51,4 +73,14 @@ const {
   handleDrop,
   handlePanelKeydown
 } = useAiPanelRuntimeContext()
+
+const handlePresentationKeydown = (event: KeyboardEvent) => {
+  if (props.projectFilesActive && event.key === 'Escape') {
+    event.preventDefault()
+    event.stopPropagation()
+    emit('closeProjectFiles')
+    return
+  }
+  handlePanelKeydown(event)
+}
 </script>

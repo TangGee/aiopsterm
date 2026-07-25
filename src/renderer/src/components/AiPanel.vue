@@ -1,5 +1,10 @@
 <template>
-  <AiPanelPresentation />
+  <AiPanelPresentation
+    :project-files-available="projectFilesAvailable"
+    :project-files-active="projectFilesActive"
+    @toggle-project-files="$emit('toggleProjectFiles')"
+    @close-project-files="$emit('closeProjectFiles')"
+  />
 </template>
 
 <script setup lang="ts">
@@ -12,9 +17,13 @@ import { useAiPanelContainerRuntime } from '@/services/ai/aiPanelContainerRuntim
 const props = defineProps<{
   agentMode?: boolean
   productSessionRequest?: ProductSessionUiRequest | null
+  projectFilesAvailable?: boolean
+  projectFilesActive?: boolean
 }>()
 const emit = defineEmits<{
   productSessionRequestConsumed: [sequence: number]
+  toggleProjectFiles: []
+  closeProjectFiles: []
 }>()
 
 const runtime = useAiPanelContainerRuntime(props)

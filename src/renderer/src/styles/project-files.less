@@ -3,36 +3,44 @@
   height: 100%;
   min-width: 0;
   min-height: 0;
-  display: grid;
-  grid-template-rows: 34px minmax(0, 1fr);
-}
-
-.right-assistant-tabs {
-  display: flex;
-  align-items: end;
-  gap: 4px;
-  padding: 4px 10px 0;
-  border-bottom: 1px solid var(--theme-module-active-border);
-  background: var(--theme-module-active-toolbar-bg);
-}
-
-.right-assistant-tabs button {
-  height: 29px;
-  padding: 0 12px;
-  border: 0;
-  border-bottom: 2px solid transparent;
-  background: transparent;
-  color: var(--theme-module-active-text-muted);
-}
-
-.right-assistant-tabs button.active {
-  color: var(--theme-module-active-text);
-  border-bottom-color: var(--theme-module-active-accent);
+  display: block;
 }
 
 .right-assistant-content {
+  width: 100%;
+  height: 100%;
   min-width: 0;
   min-height: 0;
+}
+
+.ai-panel {
+  position: relative;
+}
+
+.project-files-drawer {
+  position: absolute;
+  z-index: 20;
+  top: 48px;
+  right: 14px;
+  bottom: 14px;
+  left: 14px;
+  width: auto;
+  height: auto;
+  border: 1px solid var(--theme-module-active-border);
+  border-radius: 7px;
+  box-shadow: var(--theme-module-active-shadow);
+  overflow: hidden;
+}
+
+.project-files-drawer-enter-active,
+.project-files-drawer-leave-active {
+  transition: opacity 0.12s ease, transform 0.12s ease;
+}
+
+.project-files-drawer-enter-from,
+.project-files-drawer-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
 }
 
 .project-files-panel {
@@ -55,21 +63,86 @@
 }
 
 .project-files-header {
-  min-height: 58px;
+  min-height: 36px;
   justify-content: space-between;
-  gap: 10px;
-  padding: 8px 12px;
+  gap: 8px;
+  padding: 0 7px 0 10px;
   border-bottom: 1px solid var(--theme-module-active-border);
+  background: var(--theme-module-active-toolbar-bg);
 }
 
-.project-files-header > div,
+.project-files-header-title {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.project-files-header-title > svg {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  color: var(--theme-module-active-accent);
+}
+
+.project-files-header-title > strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.project-files-header-actions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.project-files-header-actions button {
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  background: transparent;
+  color: var(--theme-module-active-text-muted);
+}
+
+.project-files-header-actions button:hover {
+  color: var(--theme-module-active-text);
+  background: var(--theme-module-active-card-strong-bg);
+}
+
+.project-files-header-actions button:disabled {
+  opacity: 0.55;
+}
+
+.project-files-header-actions svg {
+  width: 13px;
+  height: 13px;
+}
+
+.project-files-header-actions svg.rotating {
+  animation: project-files-spin 0.8s linear infinite;
+}
+
+@keyframes project-files-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .project-file-editor > header > div {
   min-width: 0;
   display: grid;
   gap: 3px;
 }
 
-.project-files-header small,
 .project-file-editor small {
   overflow: hidden;
   color: var(--theme-module-active-text-muted);
@@ -78,11 +151,13 @@
 }
 
 .project-files-capability {
+  flex: 0 0 auto;
   border: 1px solid var(--theme-module-active-border);
   border-radius: 999px;
-  padding: 2px 7px;
+  padding: 1px 5px;
   color: var(--theme-module-active-text-muted);
-  font-size: 10px;
+  font-size: 9px;
+  line-height: 14px;
 }
 
 .project-files-capability.adapter,
@@ -108,19 +183,11 @@
   top: 0;
   z-index: 1;
   min-height: 34px;
-  justify-content: space-between;
   padding: 0 10px;
   background: var(--theme-module-active-toolbar-bg);
   color: var(--theme-module-active-text-muted);
   font-size: 11px;
   text-transform: uppercase;
-}
-
-.project-files-section-title button {
-  border: 0;
-  background: transparent;
-  color: var(--theme-module-active-text-muted);
-  font-size: 11px;
 }
 
 .project-files-recent-row,

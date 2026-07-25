@@ -1,18 +1,40 @@
 <template>
   <section class="project-files-panel">
     <header class="project-files-header">
-      <div>
-        <strong>Project files</strong>
-        <small v-if="context">{{ context.projectRoot }}</small>
-        <small v-else>{{ emptyMessage }}</small>
-      </div>
-      <span
-        v-if="context"
-        class="project-files-capability"
-        :class="context.capability"
+      <div
+        class="project-files-header-title"
+        :title="context?.projectRoot || emptyMessage"
       >
-        {{ capabilityLabel }}
-      </span>
+        <FolderTree />
+        <strong>{{ projectName }}</strong>
+        <span
+          v-if="context"
+          class="project-files-capability"
+          :class="context.capability"
+        >
+          {{ capabilityLabel }}
+        </span>
+      </div>
+      <div class="project-files-header-actions">
+        <button
+          type="button"
+          :disabled="loadingContext"
+          title="Refresh"
+          aria-label="Refresh project files"
+          @click="refreshAll"
+        >
+          <RefreshCw :class="{ rotating: loadingContext }" />
+        </button>
+        <button
+          type="button"
+          title="Close"
+          aria-label="Close project files"
+          data-testid="project-files-close"
+          @click="$emit('close')"
+        >
+          <X />
+        </button>
+      </div>
     </header>
 
     <template v-if="context">
@@ -22,7 +44,6 @@
       >
         <div class="project-files-section-title">
           <span>Recent changes</span>
-          <button type="button" :disabled="loadingContext" @click="refreshContext">Refresh</button>
         </div>
         <button
           v-for="entry in context.recent"
@@ -49,7 +70,6 @@
       <section class="project-files-tree">
         <div class="project-files-section-title">
           <span>Project tree</span>
-          <button type="button" @click="reloadTree">Refresh</button>
         </div>
         <div class="project-files-tree-scroll">
           <template v-for="row in flatRows" :key="row.key">
@@ -94,7 +114,16 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
-import { ChevronRight, FileText, Folder, FolderOpen, Link as LinkIcon } from 'lucide-vue-next'
+import {
+  ChevronRight,
+  FileText,
+  Folder,
+  FolderOpen,
+  FolderTree,
+  Link as LinkIcon,
+  RefreshCw,
+  X
+} from 'lucide-vue-next'
 import { projectFilesClient } from '@/services/files/projectFilesClient'
 import { useWorkspaceStore } from '@/stores/workspace'
 import type {
@@ -113,6 +142,10 @@ type FlatRow =
   | { kind: 'entry'; key: string; entry: ProjectDirectoryEntry; depth: number }
   | { kind: 'more'; key: string; directory: string; depth: number }
 
+defineEmits<{
+  close: []
+}>()
+
 const workspace = useWorkspaceStore()
 const context = ref<ProjectFileContext | null>(null)
 const emptyMessage = ref('Select a managed AI session that is bound to a local terminal.')
@@ -127,6 +160,10 @@ let offChanged: (() => void) | null = null
 const selectedSession = computed(() => workspace.selectedManagedAiSession)
 const selectedKey = computed(() => selectedSession.value ? `${selectedSession.value.source}:${selectedSession.value.id}` : '')
 const treeLoading = computed(() => directories.get('')?.loading === true)
+const projectName = computed(() => {
+  if (!context.value?.projectRoot) return 'Project files'
+  return context.value.projectRoot.split(/[\\/]/).filter(Boolean).at(-1) || context.value.projectRoot
+})
 const capabilityLabel = computed(() => {
   if (context.value?.capability === 'native') return 'Native'
   if (context.value?.capability === 'adapter') return 'Adapter'
@@ -196,7 +233,7 @@ const loadDirectory = async (relativeDirectory: string, append = false) => {
   if (!input || !list) return
   const current = directories.get(relativeDirectory)
   if (current?.loading) return
-  const state: DirectoryState = current || { entries: [], loading: false }
+  const state: DirectoryState = current || reactive({ entries: [], loading: false })
   state.loading = true
   directories.set(relativeDirectory, state)
   treeError.value = ''
@@ -249,6 +286,12 @@ const reloadTree = () => {
   directories.clear()
   expandedDirectories.clear()
   void loadDirectory('')
+}
+
+const refreshAll = async () => {
+  const previousRoot = context.value?.projectRoot
+  await refreshContext()
+  if (context.value?.projectRoot === previousRoot) reloadTree()
 }
 
 const changeKindLabel = (kind: ProjectFileChangeKind) => ({

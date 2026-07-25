@@ -22,7 +22,8 @@ const translations: Record<string, string> = {
   'ai.exportChat': 'Export chat',
   'ai.codexWorkspaceLinkOn': 'Follow workspace',
   'ai.codexWorkspaceLinkOff': 'Manual target',
-  'ai.codexRestart': 'Restart Codex'
+  'ai.codexRestart': 'Restart Codex',
+  'module.files': 'Files'
 }
 
 const makeRuntime = () => ({
@@ -92,6 +93,31 @@ describe('AiPanelHeader compact controls', () => {
 
     await wrapper.find('.ai-conversation-tab-close').trigger('click')
     expect(context.runtime.closeConversationTab).toHaveBeenCalledWith('classic-1')
+  })
+
+  it('shows the project files action only when the selected managed session supports it', async () => {
+    const wrapper = mount(AiPanelHeader, {
+      props: {
+        projectFilesAvailable: false,
+        projectFilesActive: false
+      }
+    })
+
+    expect(wrapper.find('[data-testid="ai-project-files-toggle"]').exists()).toBe(false)
+
+    await wrapper.setProps({
+      projectFilesAvailable: true,
+      projectFilesActive: false
+    })
+    const toggle = wrapper.get('[data-testid="ai-project-files-toggle"]')
+    expect(toggle.attributes('aria-pressed')).toBe('false')
+
+    await toggle.trigger('click')
+    expect(wrapper.emitted('toggleProjectFiles')).toHaveLength(1)
+
+    await wrapper.setProps({ projectFilesActive: true })
+    expect(wrapper.get('[data-testid="ai-project-files-toggle"]').classes()).toContain('active')
+    expect(wrapper.get('[data-testid="ai-project-files-toggle"]').attributes('aria-pressed')).toBe('true')
   })
 
   it('puts Codex target-link and restart actions under More and supports zero tabs', async () => {
