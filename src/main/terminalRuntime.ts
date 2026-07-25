@@ -8,6 +8,14 @@ import {
 } from './backend/codex/codexTerminalBridge'
 import { logRuntimeEvent } from './backend/app/runtimeLog'
 import { createTerminalDataCoalescer, type TerminalDataCoalescerFlush } from './backend/terminal/terminalDataCoalescer'
+import {
+  acknowledgeTerminalFlow,
+  createTerminalFlowState,
+  resetTerminalFlowAfterSafetyResume,
+  terminalFlowMaximumBudgetBytes,
+  trackTerminalFlowSend as trackTerminalFlowSendState,
+  type TerminalFlowState
+} from './backend/terminal/terminalFlowControl'
 import { createLocalTerminalSession, type LocalTerminalSession } from './backend/terminal/localTerminal'
 import { createTerminalDataLogSummary, type TerminalDataLogSummary } from './backend/terminal/terminalDataLogSummary'
 import { createSshTerminalSession, type SshTerminalSession } from './backend/ssh/sshTerminal'
@@ -156,21 +164,13 @@ export const createMainTerminalRuntime = (input: TerminalRuntimeInput) => {
     })
   }
 
-  // 输出链路背压:主进程按未确认字节数暂停/恢复数据源(pty/ssh channel),
-  // 渲染端在 core worker 消费后回 ack。字节计量双方统一用 data 字符串的 UTF-8 长度。
-  const terminalFlowHighWatermarkBytes = 2 * 1024 * 1024
-  const terminalFlowLowWatermarkBytes = 512 * 1024
+  // 输出链路背压:主进程按渲染端实际消费速度调整读取预算。
+  // pty 和 SSH 共用同一套预算,字节计量双方统一用 data 字符串的 UTF-8 长度。
   const terminalFlowPauseSafetyMs = 15_000
-  type TerminalFlowState = {
-    unacked: number
-    sentBytes: number
-    ackedBytes: number
-    pauseCount: number
-    paused: boolean
-    pausedAt: number
+  type RuntimeTerminalFlowState = TerminalFlowState & {
     safetyTimer: NodeJS.Timeout | null
   }
-  const terminalFlows = new Map<string, TerminalFlowState>()
+  const terminalFlows = new Map<string, RuntimeTerminalFlowState>()
 
   const setTerminalSourcePaused = (id: string, paused: boolean) => {
     const session = sessions.get(id)
@@ -182,7 +182,7 @@ export const createMainTerminalRuntime = (input: TerminalRuntimeInput) => {
     } catch {}
   }
 
-  const clearTerminalFlowSafetyTimer = (flow: TerminalFlowState) => {
+  const clearTerminalFlowSafetyTimer = (flow: RuntimeTerminalFlowState) => {
     if (!flow.safetyTimer) return
     clearTimeout(flow.safetyTimer)
     flow.safetyTimer = null
@@ -204,9 +204,8 @@ export const createMainTerminalRuntime = (input: TerminalRuntimeInput) => {
     if (!flow.paused) return
     const pausedMs = flow.pausedAt ? Math.max(0, Date.now() - flow.pausedAt) : 0
     const unacked = flow.unacked
-    flow.unacked = 0
-    flow.paused = false
-    flow.pausedAt = 0
+    const budgetBytes = flow.budgetBytes
+    resetTerminalFlowAfterSafetyResume(flow)
     if (!sessions.has(id)) {
       terminalFlows.delete(id)
       return
@@ -216,6 +215,8 @@ export const createMainTerminalRuntime = (input: TerminalRuntimeInput) => {
       id,
       pausedMs,
       unacked,
+      budgetBytes,
+      resetBudgetBytes: flow.budgetBytes,
       sentBytes: flow.sentBytes,
       ackedBytes: flow.ackedBytes,
       pauseCount: flow.pauseCount
@@ -224,22 +225,9 @@ export const createMainTerminalRuntime = (input: TerminalRuntimeInput) => {
 
   const trackTerminalFlowSend = (id: string, bytes: number) => {
     if (!id || bytes <= 0) return
-    const flow = terminalFlows.get(id) || {
-      unacked: 0,
-      sentBytes: 0,
-      ackedBytes: 0,
-      pauseCount: 0,
-      paused: false,
-      pausedAt: 0,
-      safetyTimer: null
-    }
-    flow.unacked += bytes
-    flow.sentBytes += bytes
+    const flow = terminalFlows.get(id) || { ...createTerminalFlowState(), safetyTimer: null }
     terminalFlows.set(id, flow)
-    if (!flow.paused && flow.unacked >= terminalFlowHighWatermarkBytes) {
-      flow.paused = true
-      flow.pausedAt = Date.now()
-      flow.pauseCount += 1
+    if (trackTerminalFlowSendState(flow, bytes, Date.now())) {
       setTerminalSourcePaused(id, true)
       clearTerminalFlowSafetyTimer(flow)
       flow.safetyTimer = setTimeout(() => forceResumeTerminalFlow(id), terminalFlowPauseSafetyMs)
@@ -247,6 +235,8 @@ export const createMainTerminalRuntime = (input: TerminalRuntimeInput) => {
       logRuntimeEvent('info', 'terminal.flow.paused', {
         id,
         unacked: flow.unacked,
+        budgetBytes: flow.budgetBytes,
+        maximumBudgetBytes: terminalFlowMaximumBudgetBytes,
         sentBytes: flow.sentBytes,
         ackedBytes: flow.ackedBytes,
         pauseCount: flow.pauseCount
@@ -257,19 +247,20 @@ export const createMainTerminalRuntime = (input: TerminalRuntimeInput) => {
   const ackTerminalData = (id: string, bytes: number) => {
     const flow = terminalFlows.get(id)
     if (!flow) return
-    const acknowledged = Math.min(flow.unacked, Math.max(0, Math.floor(Number(bytes) || 0)))
-    flow.unacked = Math.max(0, flow.unacked - acknowledged)
-    flow.ackedBytes += acknowledged
-    if (flow.paused && flow.unacked <= terminalFlowLowWatermarkBytes) {
-      const pausedMs = flow.pausedAt ? Math.max(0, Date.now() - flow.pausedAt) : 0
-      flow.paused = false
-      flow.pausedAt = 0
+    const pausedAt = flow.pausedAt
+    const acknowledgement = acknowledgeTerminalFlow(flow, bytes, Date.now())
+    if (acknowledgement.shouldResume) {
+      const pausedMs = pausedAt ? Math.max(0, Date.now() - pausedAt) : 0
       clearTerminalFlowSafetyTimer(flow)
       setTerminalSourcePaused(id, false)
       logRuntimeEvent('info', 'terminal.flow.resumed', {
         id,
         pausedMs,
         unacked: flow.unacked,
+        epochBytes: acknowledgement.epochBytes,
+        epochDurationMs: acknowledgement.epochDurationMs,
+        previousBudgetBytes: acknowledgement.previousBudgetBytes,
+        budgetBytes: acknowledgement.budgetBytes,
         sentBytes: flow.sentBytes,
         ackedBytes: flow.ackedBytes,
         pauseCount: flow.pauseCount

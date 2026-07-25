@@ -30,7 +30,6 @@ import {
   replaceChatConversationMessages,
 } from './backend/chat/chatHistory'
 import { logRuntimeEvent } from './backend/app/runtimeLog'
-import { recordTerminalCommandHistory } from './backend/terminal/terminalSuggestions'
 import {
   createSshTerminalConnectionInfo,
   createTerminalBinaryWriteResult,
@@ -524,7 +523,6 @@ export const registerMainIpcRuntime = (input: MainIpcRuntimeInput) => {
     createTerminalKillResult,
     createLocalTerminal: input.terminalRuntime.createLocalTerminal,
     registerTerminalForCodexBridge: input.terminalRuntime.registerTerminalForCodexBridge,
-    recordTerminalCommandHistory,
     ackTerminalData: input.terminalRuntime.ackTerminalData
   })
 

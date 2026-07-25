@@ -389,7 +389,7 @@ describe('terminal sessions IPC registrar', () => {
     expect(expectedTargetId).toMatch(/^ssh-[a-f0-9]{32}$/)
   })
 
-  it('writes text to local and SSH sessions and records completed command lines', async () => {
+  it('writes text to local and SSH sessions without scanning interactive input as command history', async () => {
     const { registerTerminalSessionsIpc } = await loadBackend()
     const { ipcMain, handlers } = createIpcHarness()
     const input = createRegistrationInput()
@@ -423,11 +423,10 @@ describe('terminal sessions IPC registrar', () => {
     })
     expect(handlers.get('terminal:write')?.({}, 'local-1', 'pwd\nnext-part')).toEqual({ ok: true, data: { id: 'local-1', bytes: 13 } })
     expect(localProcess.write).toHaveBeenCalledWith('pwd\nnext-part')
-    expect(input.recordTerminalCommandHistory).toHaveBeenCalledWith('pwd', { host: 'local' })
 
     expect(handlers.get('terminal:write')?.({}, 'ssh-1', 'whoami\r')).toEqual({ ok: true, data: { id: 'ssh-1', bytes: 7 } })
     expect(sshProcess.write).toHaveBeenCalledWith('whoami\r')
-    expect(input.recordTerminalCommandHistory).toHaveBeenCalledWith('whoami', { host: '10.8.0.6' })
+    expect(input.recordTerminalCommandHistory).not.toHaveBeenCalled()
   })
 
   it('writes binary payloads and reports empty, missing, and unsupported cases', async () => {

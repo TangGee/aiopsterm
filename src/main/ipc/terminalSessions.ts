@@ -58,10 +58,6 @@ type SshTerminalCreateResult = {
   lifecycle: TerminalLifecycleEvent
 }
 
-type TerminalCommandHistoryContext = {
-  host?: string
-}
-
 type RegisterTerminalSessionsIpcInput = {
   sessions: Map<string, TerminalSession>
   getConfig: () => UserConfig
@@ -77,7 +73,6 @@ type RegisterTerminalSessionsIpcInput = {
   createTerminalBinaryWriteResult: (id: string, bytes: number, exists: boolean) => TerminalBinaryWriteResult
   createTerminalKillResult: (id: string, exists: boolean) => TerminalKillResult
   registerTerminalForCodexBridge: (session: TerminalSession, target?: CodexSessionCreateOptions['target']) => void
-  recordTerminalCommandHistory: (command: string, context?: TerminalCommandHistoryContext) => void
   ackTerminalData: (id: string, bytes: number) => void
 }
 
@@ -273,7 +268,6 @@ export const registerTerminalSessionsIpc = (ipcMain: IpcMain, input: RegisterTer
     }
     logTerminalDebug('terminal.write.request', { id, kind: session.kind, bytes })
     writeTerminal(session, data)
-    terminalHistoryLinesFromWrite(data).forEach((command) => input.recordTerminalCommandHistory(command, { host: session.host }))
     logTerminalDebug('terminal.write.accepted', { id, kind: session.kind, bytes })
     return input.createTerminalWriteResult(id, data, true)
   })
