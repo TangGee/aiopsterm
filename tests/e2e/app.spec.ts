@@ -21,7 +21,6 @@ const launchApp = async (name: string, env: NodeJS.ProcessEnv = {}, options: { u
       AIOPSTERM_USER_DATA_DIR: userDataDir,
       AIOPSTERM_CHAT_HISTORY_ENABLE_SEED: '1',
       AIOPSTERM_QUICK_COMMANDS_ENABLE_SEED: '1',
-      AIOPSTERM_ALIASES_ENABLE_SEED: '1',
       AIOPSTERM_ASSETS_ENABLE_SEED: '1',
       AIOPSTERM_DATABASE_ENABLE_SEED: '1',
       AIOPSTERM_FILES_ENABLE_SEED: '1',
@@ -1561,36 +1560,12 @@ test('aiopsterm primary desktop flows', async () => {
     await page.getByTitle('扩展').click()
     await expect(page.locator('.extension_panel').getByRole('heading', { name: '插件' })).toBeVisible()
     await expect(page.locator('.extension_item').filter({ hasText: 'Jumpserver Support' })).toBeVisible()
-    await expect(page.locator('.extension_item').filter({ hasText: 'Alias' })).toBeVisible()
     await page.locator('.extension_item').filter({ hasText: 'Jumpserver Support' }).click()
     await expect(page.locator('.plugin_detail_view').getByRole('heading', { name: 'Jumpserver Support', level: 1 })).toBeVisible()
     await expect(page.locator('.jumpserver_asset_summary')).toContainText('Jumpserver 数据源')
     await expect(page.locator('.jumpserver_source_row').filter({ hasText: 'jumpserver-org' })).toBeVisible()
     await page.locator('.jumpserver_asset_actions button').filter({ hasText: '刷新组织资产' }).click()
     await expect(page.locator('.jumpserver_synced_asset').filter({ hasText: 'jumpserver-org-synced-asset' })).toBeVisible()
-    await page.locator('.extension_search_box input').fill('Alias')
-    await expect(page.locator('.extension_item').filter({ hasText: 'Alias' })).toBeVisible()
-    await expect(page.locator('.extension_item').filter({ hasText: 'Cloud Assets' })).not.toBeVisible()
-    await page.locator('.extension_item').filter({ hasText: 'Alias' }).click()
-    await expect(page.locator('.alias-config-table')).toBeVisible()
-    await page.locator('.alias-search-input input').fill('gst')
-    await expect(page.locator('.alias-config-table input').first()).toHaveValue('gst')
-    await page.locator('.alias-search-input input').fill('')
-    await page.locator('.alias-config-toolbar button').click()
-    await page.locator('.alias-config-table tbody tr').first().locator('input').fill('e2ealias')
-    await page.locator('.alias-config-table tbody tr').first().locator('textarea').fill('echo e2e')
-    await page.locator('.alias-config-table tbody tr').first().getByTitle('保存').click()
-    await expect(page.locator('.alias-config-table input').first()).toHaveValue('e2ealias')
-    await page.locator('.alias-config-table tbody tr').first().getByTitle('编辑').click()
-    await page.locator('.alias-config-table tbody tr').first().locator('input').fill('e2ealias2')
-    await page.locator('.alias-config-table tbody tr').first().locator('textarea').fill('echo e2e2')
-    await page.locator('.alias-config-table tbody tr').first().getByTitle('取消').click()
-    await expect(page.locator('.alias-config-table input').first()).toHaveValue('e2ealias')
-    await expect(page.locator('.alias-config-table textarea').first()).toHaveValue('echo e2e')
-    await page.locator('.alias-config-table tbody tr').first().getByTitle('删除').click()
-    await page.locator('.alias-search-input input').fill('e2ealias')
-    await expect(page.locator('.alias-config-table input')).toHaveCount(0)
-    await page.locator('.alias-search-input input').fill('')
     await page.locator('.extension_search_box input').fill('Runbook')
     await page.locator('.extension_item').filter({ hasText: 'Ops Runbook' }).click()
     await expect(page.locator('.plugin_detail_view').getByRole('heading', { name: 'Ops Runbook' })).toBeVisible()

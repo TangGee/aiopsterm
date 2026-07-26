@@ -1,10 +1,4 @@
 import type {
-  AliasCommandConfig,
-  AliasCommandDeleteResult,
-  AliasCommandListResult,
-  AliasCommandMutationResult
-} from '@shared/contracts/aliases'
-import type {
   ExtensionInstallProgress,
   ExtensionPluginCancelResult,
   ExtensionPluginListResult,
@@ -15,9 +9,8 @@ import type {
 } from '@shared/contracts/extensions'
 
 export const malformedExtensionBackendResultMessage = '扩展服务返回数据无效'
-export const malformedAliasBackendResultMessage = 'Alias 服务返回数据无效'
 
-const extensionIconKeys = new Set(['jumpserver', 'alias', 'runbook', 'cloud', 'private', 'local'])
+const extensionIconKeys = new Set(['jumpserver', 'runbook', 'cloud', 'private', 'local'])
 const extensionSources = new Set(['preinstalled', 'store', 'local'])
 const extensionOperations = new Set<ExtensionPluginOperation>(['install', 'update', 'uninstall', 'package'])
 const extensionInstallStages = new Set(['downloading', 'verifying', 'installing', 'done', 'error', 'cancelled', ''])
@@ -101,21 +94,3 @@ export const isExtensionInstallProgressData = (value: unknown): value is Extensi
     isOptionalString(value.requestId)
   )
 }
-
-export const isAliasCommandConfig = (value: unknown): value is AliasCommandConfig => {
-  if (!isRecord(value)) return false
-  if (!isNonEmptyString(value.id) || !isNonEmptyString(value.alias) || !isNonEmptyString(value.command)) return false
-  return value.createdAt === undefined || isNonNegativeFiniteNumber(value.createdAt)
-}
-
-export type AliasCommandMutationData = NonNullable<AliasCommandMutationResult['data']>
-export type AliasCommandDeleteData = NonNullable<AliasCommandDeleteResult['data']>
-
-export const isAliasCommandListData = (value: unknown): value is NonNullable<AliasCommandListResult['data']> =>
-  Array.isArray(value) && value.every(isAliasCommandConfig)
-
-export const isAliasCommandMutationData = (value: unknown): value is AliasCommandMutationData =>
-  isRecord(value) && isAliasCommandConfig(value.command) && isAliasCommandListData(value.commands)
-
-export const isAliasCommandDeleteData = (value: unknown): value is AliasCommandDeleteData =>
-  isRecord(value) && isAliasCommandConfig(value.deleted) && isAliasCommandListData(value.commands)

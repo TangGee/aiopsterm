@@ -9,7 +9,7 @@ type ExtensionPlugin = {
   pluginId: string
   name: string
   description: string
-  iconKey: 'jumpserver' | 'alias' | 'runbook' | 'cloud' | 'private' | 'local'
+  iconKey: 'jumpserver' | 'runbook' | 'cloud' | 'private' | 'local'
   tabName: string
   show: boolean
   isPlugin: boolean
@@ -301,11 +301,7 @@ describe('extension plugin backend boundary', () => {
     const result = await listExtensionPlugins()
 
     expect(result.ok).toBe(true)
-    expect(result.data.map((plugin: ExtensionPlugin) => plugin.pluginId)).toEqual(['jumpserverSupport', 'Alias'])
-    expect(result.data.find((plugin: ExtensionPlugin) => plugin.pluginId === 'Alias')).toMatchObject({
-      source: 'preinstalled',
-      isPlugin: false
-    })
+    expect(result.data.map((plugin: ExtensionPlugin) => plugin.pluginId)).toEqual(['jumpserverSupport'])
     expect(result.data.find((plugin: ExtensionPlugin) => plugin.pluginId === 'ops-runbook')).toBeUndefined()
     expect(result.data.find((plugin: ExtensionPlugin) => plugin.pluginId === 'local-shell-tools')).toBeUndefined()
     expect(result.data.find((plugin: ExtensionPlugin) => plugin.pluginId === 'cloud-assets')).toBeUndefined()

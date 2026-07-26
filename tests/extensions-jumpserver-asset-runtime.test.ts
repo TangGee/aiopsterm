@@ -110,7 +110,7 @@ describe('extensionsJumpserverAssetRuntime', () => {
       ...originalAiops,
       listAssets: vi.fn(async () => makeSnapshot())
     }
-    const runtime = createExtensionsJumpserverAssetRuntime({ selectedPluginId: () => 'Alias' })
+    const runtime = createExtensionsJumpserverAssetRuntime({ selectedPluginId: () => 'ops-runbook' })
 
     await expect(runtime.loadJumpserverAssetSnapshot()).resolves.toBe(false)
     expect(window.aiops.listAssets).not.toHaveBeenCalled()

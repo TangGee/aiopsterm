@@ -27,7 +27,6 @@ import {
   mergeUserConfig,
   modelOptionProviderForSavedProvider,
   modelSettingsSnapshotsMatch,
-  normalizeAliasCommandsConfig,
   normalizeAiPreferencesConfig,
   normalizeBackgroundConfig,
   normalizeCatalogModelProvider,
@@ -508,13 +507,6 @@ describe('workspaceConfigRuntime', () => {
     expect(knowledgeTreeSize(knowledge.normalized.tree)).toBe(12)
     expect(createKbRelPath('Runbook', 'next.md')).toBe('Runbook/next.md')
 
-    const aliases = normalizeAliasCommandsConfig([
-      { id: ' a1 ', alias: ' ll ', command: ' ls -la ', createdAt: 1 },
-      { id: 'a2', alias: 'll', command: 'ignored' },
-      { id: 'new', alias: 'bad', command: 'ignored' }
-    ] as any)
-    expect(aliases.normalized).toEqual([{ id: 'a1', alias: 'll', command: 'ls -la', createdAt: 1 }])
-
     const shortcuts = normalizeShortcutsConfig([
       { id: 'openSettings', action: ' openSettings ', shortcut: ' Ctrl+, ', extra: true },
       { id: 'switchToSpecificTab', action: 'switchToSpecificTab', shortcut: 'Ctrl+1' },
@@ -678,7 +670,6 @@ describe('workspaceConfigRuntime', () => {
       modelName: ' gpt-ops ',
       background: { mode: 'none', image: 'should-clear', opacity: 0.7, brightness: 0.9 },
       knowledgeBase: { tree: [{ id: '', key: '', relPath: '', title: 'kb.md', type: 'file', size: 5 }], usedBytes: 0, totalBytes: 100 },
-      aliasCommands: [{ id: 'a1', alias: 'k', command: 'kubectl get pods' }],
       shortcuts: [{ id: 'openSettings', action: 'openSettings', shortcut: 'Ctrl+,' }],
       rules: [{ id: 'r1', content: 'Check status', enabled: true }],
       skills: [{ name: 'Ops', description: 'Ops skill', enabled: true, editable: true, content: 'Run checks' }],
@@ -691,7 +682,6 @@ describe('workspaceConfigRuntime', () => {
     expect(merged.modelName).toBe('gpt-ops')
     expect(merged.background.image).toBe('')
     expect(merged.knowledgeBase?.usedBytes).toBe(0)
-    expect(merged.aliasCommands).toEqual([{ id: 'a1', alias: 'k', command: 'kubectl get pods' }])
     expect(merged.mcpToolStates).toEqual({ 'fs:read': true })
     expect(merged.onboarding?.completedModules.interfaceGuide).toBe(true)
 
@@ -700,17 +690,15 @@ describe('workspaceConfigRuntime', () => {
       {
         quickCommands: { groups: [{ id: 1, uuid: 'g', group_name: 'G' }], snippets: [] },
         knowledgeBase: { tree: [], usedBytes: 1, totalBytes: 2 },
-        aliasCommands: [{ id: 'a', alias: 'a', command: 'a' }],
         watermark: 'close'
       },
       { language: 'system' }
     )
     expect(generic.quickCommands).toEqual(defaultConfig.quickCommands)
     expect(generic.knowledgeBase).toEqual(defaultConfig.knowledgeBase)
-    expect(generic.aliasCommands).toEqual(defaultConfig.aliasCommands)
     expect(generic.watermark).toBe('close')
     expect(generic.language).toBe('system')
-    expect(stripBusinessDataConfig({ quickCommands: { groups: [], snippets: [] }, knowledgeBase: { tree: [], usedBytes: 0, totalBytes: 1 }, aliasCommands: [], theme: 'dark' })).toEqual({
+    expect(stripBusinessDataConfig({ quickCommands: { groups: [], snippets: [] }, knowledgeBase: { tree: [], usedBytes: 0, totalBytes: 1 }, theme: 'dark' })).toEqual({
       theme: 'dark'
     })
   })

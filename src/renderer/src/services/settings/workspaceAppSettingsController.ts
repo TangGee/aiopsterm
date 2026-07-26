@@ -137,11 +137,6 @@ type WorkspaceAppSettingsState = {
   settingsNotice: Ref<string>
 }
 
-type HydratedAliasResult = {
-  normalizedAliasCommands: NonNullable<UserConfig['aliasCommands']>
-  aliasCommandsLoadedFromBridge: boolean
-}
-
 type WorkspaceAppSettingsDeps = {
   refreshShortcutRuntime: () => void
   hydrateClassicChatData: (options?: { restoreIfEmpty?: boolean; restoreSelection?: boolean }) => Promise<boolean>
@@ -149,7 +144,6 @@ type WorkspaceAppSettingsDeps = {
   refreshAgentHookInstallers: (options?: { silent?: boolean }) => Promise<boolean>
   refreshExportMcpInstallers: (options?: { silent?: boolean }) => Promise<boolean>
   refreshUserAccount: () => Promise<boolean>
-  hydrateAliasCommands: () => Promise<HydratedAliasResult>
   hydrateSettingsPreferences: (savedConfig: UserConfig) => Promise<{
     normalizedShortcuts: NonNullable<UserConfig['shortcuts']>
     normalizedRules: NonNullable<UserConfig['rules']>
@@ -507,7 +501,6 @@ export const createWorkspaceAppSettingsController = (state: WorkspaceAppSettings
       refreshAgentHookInstallers: deps.refreshAgentHookInstallers,
       refreshExportMcpInstallers: deps.refreshExportMcpInstallers,
       refreshUserAccount: deps.refreshUserAccount,
-      hydrateAliasCommands: deps.hydrateAliasCommands,
       hydrateSettingsPreferences: deps.hydrateSettingsPreferences,
       hydrateSkills: deps.hydrateSkills,
       readMcpServersSnapshotFromBridge: deps.readMcpServersSnapshotFromBridge,

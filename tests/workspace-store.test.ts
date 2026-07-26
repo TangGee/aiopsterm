@@ -261,7 +261,7 @@ const defaultMcpToolStates = {
   'ops-inventory:lookup_asset': false
 }
 
-const businessDataConfigKeys = ['quickCommands', 'knowledgeBase', 'aliasCommands'] as const
+const businessDataConfigKeys = ['quickCommands', 'knowledgeBase'] as const
 const malformedQuickCommandsBackendResultMessage = '快捷命令服务返回数据无效'
 const malformedKnowledgeBackendResultMessage = '知识库服务返回数据无效'
 const malformedSkillsBackendResultMessage = 'Skills 服务返回数据无效'
@@ -3564,7 +3564,6 @@ describe('workspace store', () => {
       extensionSettings: {
         autoCompleteStatus: true,
         quickVimStatus: true,
-        aliasStatus: true,
         highlightStatus: true
       },
       keywordHighlight: defaultKeywordHighlight,
@@ -3622,7 +3621,6 @@ describe('workspace store', () => {
         extensionSettings: {
           autoCompleteStatus: true,
           quickVimStatus: true,
-          aliasStatus: true,
           highlightStatus: true
         },
         keywordHighlight: defaultKeywordHighlight,
@@ -3709,7 +3707,6 @@ describe('workspace store', () => {
         extensionSettings: {
           autoCompleteStatus: true,
           quickVimStatus: true,
-          aliasStatus: true,
           highlightStatus: true
         },
         keywordHighlight: defaultKeywordHighlight,
@@ -3782,7 +3779,6 @@ describe('workspace store', () => {
       extensionSettings: {
         autoCompleteStatus: true,
         quickVimStatus: true,
-        aliasStatus: true,
         highlightStatus: true
       },
       keywordHighlight: defaultKeywordHighlight,
@@ -3808,9 +3804,6 @@ describe('workspace store', () => {
         usedBytes: 0,
         totalBytes: 1073741824
       },
-      aliasCommands: [
-        { id: 'alias-ll', alias: 'll', command: 'ls -alF', createdAt: 1717200000000 }
-      ],
       onboarding: {
         version: 2,
         guideTabAutoOpened: false,
@@ -3916,7 +3909,6 @@ describe('workspace store', () => {
       extensionSettings: {
         autoCompleteStatus: true,
         quickVimStatus: true,
-        aliasStatus: true,
         highlightStatus: true
       },
       privacy: {
@@ -3940,9 +3932,6 @@ describe('workspace store', () => {
         usedBytes: 0,
         totalBytes: 1073741824
       },
-      aliasCommands: [
-        { id: 'alias-ll', alias: 'll', command: 'ls -alF', createdAt: 1717200000000 }
-      ],
       onboarding: {
         version: 2,
         guideTabAutoOpened: false,
@@ -4049,7 +4038,6 @@ describe('workspace store', () => {
       extensionSettings: {
         autoCompleteStatus: true,
         quickVimStatus: true,
-        aliasStatus: true,
         highlightStatus: true
       },
       privacy: {
@@ -4073,9 +4061,6 @@ describe('workspace store', () => {
         usedBytes: 0,
         totalBytes: 1073741824
       },
-      aliasCommands: [
-        { id: 'alias-ll', alias: 'll', command: 'ls -alF', createdAt: 1717200000000 }
-      ],
       onboarding: {
         version: 2,
         guideTabAutoOpened: false,
@@ -4300,7 +4285,6 @@ describe('workspace store', () => {
       extensionSettings: {
         autoCompleteStatus: true,
         quickVimStatus: true,
-        aliasStatus: true,
         highlightStatus: true
       },
       privacy: {
@@ -4326,9 +4310,6 @@ describe('workspace store', () => {
         usedBytes: 0,
         totalBytes: 1073741824
       },
-      aliasCommands: [
-        { id: 'alias-ll', alias: 'll', command: 'ls -alF', createdAt: 1717200000000 }
-      ],
       onboarding: {
         version: 2,
         guideTabAutoOpened: false,
@@ -4403,7 +4384,6 @@ describe('workspace store', () => {
       extensionSettings: {
         autoCompleteStatus: true,
         quickVimStatus: true,
-        aliasStatus: true,
         highlightStatus: true
       },
       privacy: {
@@ -4457,9 +4437,6 @@ describe('workspace store', () => {
         usedBytes: 0,
         totalBytes: 1073741824
       },
-      aliasCommands: [
-        { id: 'alias-ll', alias: 'll', command: 'ls -alF', createdAt: 1717200000000 }
-      ],
       onboarding: {
         version: 2,
         guideTabAutoOpened: false,
@@ -4527,7 +4504,6 @@ describe('workspace store', () => {
       extensionSettings: {
         autoCompleteStatus: true,
         quickVimStatus: true,
-        aliasStatus: true,
         highlightStatus: true
       },
       privacy: {
@@ -4575,9 +4551,6 @@ describe('workspace store', () => {
         usedBytes: 0,
         totalBytes: 1073741824
       },
-      aliasCommands: [
-        { id: 'alias-ll', alias: 'll', command: 'ls -alF', createdAt: 1717200000000 }
-      ],
       onboarding: {
         version: 2,
         guideTabAutoOpened: false,
@@ -4671,7 +4644,6 @@ describe('workspace store', () => {
       extensionSettings: {
         autoCompleteStatus: true,
         quickVimStatus: true,
-        aliasStatus: true,
         highlightStatus: true
       },
       privacy: {
@@ -4695,9 +4667,6 @@ describe('workspace store', () => {
         usedBytes: 0,
         totalBytes: 1073741824
       },
-      aliasCommands: [
-        { id: 'alias-ll', alias: 'll', command: 'ls -alF', createdAt: 1717200000000 }
-      ],
       onboarding: {
         version: 2,
         guideTabAutoOpened: false,
@@ -4773,7 +4742,6 @@ describe('workspace store', () => {
       extensionSettings: {
         autoCompleteStatus: true,
         quickVimStatus: true,
-        aliasStatus: true,
         highlightStatus: true
       },
       privacy: {
@@ -4818,9 +4786,6 @@ describe('workspace store', () => {
         usedBytes: 0,
         totalBytes: 1073741824
       },
-      aliasCommands: [
-        { id: 'alias-ll', alias: 'll', command: 'ls -alF', createdAt: 1717200000000 }
-      ],
       onboarding: {
         version: 2,
         guideTabAutoOpened: false,
@@ -4940,7 +4905,6 @@ describe('workspace store', () => {
       extensionSettings: {
         autoCompleteStatus: true,
         quickVimStatus: true,
-        aliasStatus: true,
         highlightStatus: true
       },
       keywordHighlight: defaultKeywordHighlight,
@@ -4972,9 +4936,6 @@ describe('workspace store', () => {
         usedBytes: 0,
         totalBytes: 1073741824
       },
-      aliasCommands: [
-        { id: 'alias-ll', alias: 'll', command: 'ls -alF', createdAt: 1717200000000 }
-      ],
       onboarding: {
         version: 2,
         guideTabAutoOpened: false,
@@ -5076,7 +5037,6 @@ describe('workspace store', () => {
       extensionSettings: {
         autoCompleteStatus: true,
         quickVimStatus: true,
-        aliasStatus: true,
         highlightStatus: true
       },
       keywordHighlight: defaultKeywordHighlight,
@@ -5117,10 +5077,6 @@ describe('workspace store', () => {
         usedBytes: 0,
         totalBytes: 1073741824
       },
-      aliasCommands: [
-        { alias: 'legacy-no-id', command: 'echo legacy', createdAt: 1780487300000 },
-        { id: 'alias-backend-owned', alias: 'backend', command: 'echo backend', createdAt: 1780487400000 }
-      ],
       onboarding: {
         version: 2,
         guideTabAutoOpened: false,
@@ -5133,13 +5089,6 @@ describe('workspace store', () => {
       }
     } as any)
     vi.mocked(window.aiops.getQuickCommands).mockResolvedValueOnce({ groups: [], snippets: [] })
-    vi.mocked(window.aiops.listAliasCommands).mockResolvedValueOnce({
-      ok: true,
-      data: [
-        { alias: 'legacy-no-id', command: 'echo legacy', createdAt: 1780487300000 },
-        { id: 'alias-backend-owned', alias: 'backend', command: 'echo backend', createdAt: 1780487400000 }
-      ]
-    } as any)
     vi.mocked(window.aiops.getSettingsPreferences).mockResolvedValueOnce({
       ok: true,
       data: {
@@ -5156,15 +5105,11 @@ describe('workspace store', () => {
     expect(store.snippetGroups).toEqual([])
     expect(store.quickCommands).toEqual([])
     expect(store.config.quickCommands).toEqual({ groups: [], snippets: [] })
-    expect(store.aliasCommands).toEqual([])
-    expect(store.aliasCommands.some((alias) => alias.alias === 'legacy-no-id')).toBe(false)
-    expect(store.config.aliasCommands).toEqual([{ id: 'alias-backend-owned', alias: 'backend', command: 'echo backend', createdAt: 1780487400000 }])
     expect(store.settingsRules).toEqual([{ id: 'rule-backend-owned', content: 'backend-owned rule', enabled: false, isEditing: false }])
     expect(store.config.rules).toEqual([{ id: 'rule-backend-owned', content: 'backend-owned rule', enabled: false }])
     expect(store.topNotice).toBe('')
-    expect(store.extensionNotice).toBe('Alias 服务返回数据无效')
     expect(store.settingsNotice).toBe('设置服务返回数据无效')
-    expectNoBusinessDataConfigWrites(['quickCommands', 'aliasCommands'])
+    expectNoBusinessDataConfigWrites(['quickCommands'])
   })
 
   it('refreshes file transfer task snapshots from the backend boundary', async () => {
@@ -5370,307 +5315,6 @@ describe('workspace store', () => {
     expect(vi.mocked(window.aiops.listFileTransferTasks)).toHaveBeenCalledTimes(1)
   })
 
-  it('hydrates persisted External reference-style alias commands', async () => {
-    const store = useWorkspaceStore()
-    vi.mocked(window.aiops.getConfig).mockResolvedValueOnce({
-      language: 'zh-CN',
-      theme: 'dark',
-      defaultMode: 'terminal',
-      leftPanelOpen: true,
-      rightPanelOpen: true,
-      agentsLeftOpen: true,
-      modelProvider: 'local',
-      modelEndpoint: '',
-      modelName: 'aiopsterm-local-agent',
-      watermark: 'open',
-      background: {
-        mode: 'none',
-        image: '',
-        opacity: 0.15,
-        brightness: 0.45
-      },
-      terminal: {
-        terminalType: 'xterm-256color',
-        fontFamily: '"DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", monospace',
-        fontSize: 12,
-        scrollBack: 1000,
-        cursorStyle: 'block',
-        cursorBlink: true,
-        lineHeight: 1,
-        pinchZoomStatus: true,
-        showCloseButton: true,
-        sshAgentsStatus: false,
-        middleMouseEvent: 'paste',
-        rightMouseEvent: 'contextMenu'
-      },
-      workspacePreferences: {
-        expandedGroups: ['recent_connections'],
-        showIpMode: false
-      },
-      editorSettings: defaultEditorSettings,
-      sshProxyConfigs: defaultSshProxyConfigs,
-      sshAgentKeys: defaultSshAgentKeys,
-      extensionSettings: {
-        autoCompleteStatus: true,
-        quickVimStatus: true,
-        aliasStatus: true,
-        highlightStatus: true
-      },
-      keywordHighlight: defaultKeywordHighlight,
-      securityConfig: defaultSecurityConfig,
-      privacy: {
-        telemetry: 'enabled',
-        secretRedaction: 'disabled',
-        dataSync: 'disabled'
-      },
-      aiPreferences: defaultAiPreferences,
-      modelSettings: defaultModelSettings,
-      shortcuts: defaultShortcuts,
-      rules: defaultRules,
-      skills: defaultSkills,
-      mcpServers: defaultMcpServers,
-      mcpToolStates: defaultMcpToolStates,
-      quickCommands: {
-        groups: [],
-        snippets: []
-      },
-      knowledgeBase: {
-        tree: [],
-        usedBytes: 0,
-        totalBytes: 1073741824
-      },
-      aliasCommands: [
-        { id: 'alias-stale', alias: 'stale', command: 'echo stale config alias', createdAt: 1780487300000 }
-      ],
-      onboarding: {
-        version: 2,
-        guideTabAutoOpened: false,
-        completedModules: {
-          interfaceGuide: false,
-          systemSettings: false,
-          addAndConnectHost: false,
-          aiChat: false
-        }
-      }
-    })
-
-    vi.mocked(window.aiops.listAliasCommands).mockResolvedValueOnce({
-      ok: true,
-      data: [
-        { id: 'alias-hosts', alias: 'hosts', command: 'cat /etc/hosts', createdAt: 1780487400000 },
-        { id: 'alias-df', alias: 'dfh', command: 'df -h', createdAt: 1780487401000 }
-      ]
-    })
-
-    await store.hydrateConfig()
-
-    expect(store.aliasCommands).toEqual([
-      expect.objectContaining({ id: 'alias-hosts', alias: 'hosts', command: 'cat /etc/hosts', edit: false }),
-      expect.objectContaining({ id: 'alias-df', alias: 'dfh', command: 'df -h', edit: false })
-    ])
-    expect(store.aliasCommands.some((alias) => alias.alias === 'stale')).toBe(false)
-    expect(window.aiops.listAliasCommands).toHaveBeenCalled()
-    expect(window.aiops.saveConfig).not.toHaveBeenCalled()
-  })
-
-  it('does not hydrate aliases from renderer config when the backend bridge is unavailable', async () => {
-    const store = useWorkspaceStore()
-    const originalListAliasCommands = window.aiops.listAliasCommands
-
-    try {
-      ;(window.aiops as any).listAliasCommands = undefined
-
-      await store.hydrateConfig()
-
-      expect(store.aliasCommands).toEqual([])
-      expect(store.extensionNotice).toBe('Alias 服务不可用')
-      const saveConfigPatches = vi.mocked(window.aiops.saveConfig).mock.calls.map(([patch]) => patch)
-      expect(saveConfigPatches.every((patch) => !Object.prototype.hasOwnProperty.call(patch, 'aliasCommands'))).toBe(true)
-    } finally {
-      ;(window.aiops as any).listAliasCommands = originalListAliasCommands
-    }
-  })
-
-  it('accepts an empty backend alias snapshot without falling back to renderer config aliases', async () => {
-    const store = useWorkspaceStore()
-
-    vi.mocked(window.aiops.getConfig).mockResolvedValueOnce({
-      language: 'zh-CN',
-      theme: 'dark',
-      defaultMode: 'terminal',
-      leftPanelOpen: true,
-      rightPanelOpen: true,
-      agentsLeftOpen: true,
-      modelProvider: 'local',
-      modelEndpoint: '',
-      modelName: 'aiopsterm-local-agent',
-      watermark: 'open',
-      background: {
-        mode: 'none',
-        image: '',
-        opacity: 0.15,
-        brightness: 0.45
-      },
-      terminal: defaultTerminalSettings,
-      workspacePreferences: {
-        expandedGroups: ['recent_connections'],
-        showIpMode: false
-      },
-      editorSettings: defaultEditorSettings,
-      sshProxyConfigs: defaultSshProxyConfigs,
-      sshAgentKeys: defaultSshAgentKeys,
-      extensionSettings: {
-        autoCompleteStatus: true,
-        quickVimStatus: true,
-        aliasStatus: true,
-        highlightStatus: true
-      },
-      keywordHighlight: defaultKeywordHighlight,
-      securityConfig: defaultSecurityConfig,
-      privacy: {
-        telemetry: 'enabled',
-        secretRedaction: 'disabled',
-        dataSync: 'disabled'
-      },
-      aiPreferences: defaultAiPreferences,
-      modelSettings: defaultModelSettings,
-      shortcuts: defaultShortcuts,
-      rules: defaultRules,
-      skills: defaultSkills,
-      mcpServers: defaultMcpServers,
-      mcpToolStates: defaultMcpToolStates,
-      quickCommands: {
-        groups: [],
-        snippets: []
-      },
-      knowledgeBase: {
-        tree: [],
-        usedBytes: 0,
-        totalBytes: 1073741824
-      },
-      aliasCommands: [
-        { id: 'alias-legacy-ll', alias: 'll', command: 'ls -alF', createdAt: 1717200000000 },
-        { id: 'alias-stale', alias: 'stale', command: 'echo stale config alias', createdAt: 1780487300000 }
-      ],
-      onboarding: {
-        version: 2,
-        guideTabAutoOpened: false,
-        completedModules: {
-          interfaceGuide: false,
-          systemSettings: false,
-          addAndConnectHost: false,
-          aiChat: false
-        }
-      }
-    })
-    vi.mocked(window.aiops.listAliasCommands).mockResolvedValueOnce({ ok: true, data: [] })
-
-    await store.hydrateConfig()
-
-    expect(store.aliasCommands).toEqual([])
-    expect(store.config.aliasCommands).toEqual([])
-    expect(store.extensionNotice).toBe('')
-    expect(window.aiops.listAliasCommands).toHaveBeenCalled()
-    expect(window.aiops.saveConfig).not.toHaveBeenCalled()
-  })
-
-  it('hydrates External reference-referenced extension switches and hides Alias when disabled', async () => {
-    const store = useWorkspaceStore()
-    vi.mocked(window.aiops.getConfig).mockResolvedValueOnce({
-      language: 'zh-CN',
-      theme: 'dark',
-      defaultMode: 'terminal',
-      leftPanelOpen: true,
-      rightPanelOpen: true,
-      agentsLeftOpen: true,
-      modelProvider: 'local',
-      modelEndpoint: '',
-      modelName: 'aiopsterm-local-agent',
-      watermark: 'open',
-      background: {
-        mode: 'none',
-        image: '',
-        opacity: 0.15,
-        brightness: 0.45
-      },
-      terminal: {
-        terminalType: 'xterm-256color',
-        fontFamily: '"DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", monospace',
-        fontSize: 12,
-        scrollBack: 1000,
-        cursorStyle: 'block',
-        cursorBlink: true,
-        lineHeight: 1,
-        pinchZoomStatus: true,
-        showCloseButton: true,
-        sshAgentsStatus: false,
-        middleMouseEvent: 'paste',
-        rightMouseEvent: 'contextMenu'
-      },
-      workspacePreferences: {
-        expandedGroups: ['recent_connections'],
-        showIpMode: false
-      },
-      editorSettings: defaultEditorSettings,
-      sshProxyConfigs: defaultSshProxyConfigs,
-      sshAgentKeys: defaultSshAgentKeys,
-      extensionSettings: {
-        autoCompleteStatus: false,
-        quickVimStatus: false,
-        aliasStatus: false,
-        highlightStatus: true
-      },
-      keywordHighlight: defaultKeywordHighlight,
-      securityConfig: defaultSecurityConfig,
-      privacy: {
-        telemetry: 'enabled',
-        secretRedaction: 'disabled',
-        dataSync: 'disabled'
-      },
-      aiPreferences: defaultAiPreferences,
-      modelSettings: defaultModelSettings,
-      shortcuts: defaultShortcuts,
-      rules: defaultRules,
-      skills: defaultSkills,
-      mcpServers: defaultMcpServers,
-      mcpToolStates: defaultMcpToolStates,
-      quickCommands: {
-        groups: [],
-        snippets: []
-      },
-      knowledgeBase: {
-        tree: [],
-        usedBytes: 0,
-        totalBytes: 1073741824
-      },
-      aliasCommands: [
-        { id: 'alias-ll', alias: 'll', command: 'ls -alF', createdAt: 1717200000000 }
-      ],
-      onboarding: {
-        version: 2,
-        guideTabAutoOpened: false,
-        completedModules: {
-          interfaceGuide: false,
-          systemSettings: false,
-          addAndConnectHost: false,
-          aiChat: false
-        }
-      }
-    })
-
-    await store.hydrateConfig()
-
-    expect(store.extensionSettings).toEqual({
-      autoCompleteStatus: false,
-      quickVimStatus: false,
-      aliasStatus: false,
-      highlightStatus: true
-    })
-    expect(store.filteredExtensionPlugins.some((plugin) => plugin.pluginId === 'Alias')).toBe(false)
-    expect(store.selectedExtensionId).toBe('jumpserverSupport')
-    expect(window.aiops.saveConfig).not.toHaveBeenCalled()
-  })
-
   it('hydrates and migrates External reference-style keyword highlight config', async () => {
     const store = useWorkspaceStore()
     vi.mocked(window.aiops.getConfig).mockResolvedValueOnce({
@@ -5714,7 +5358,6 @@ describe('workspace store', () => {
       extensionSettings: {
         autoCompleteStatus: true,
         quickVimStatus: true,
-        aliasStatus: true,
         highlightStatus: true
       },
       keywordHighlight: {
@@ -5780,9 +5423,6 @@ describe('workspace store', () => {
         usedBytes: 0,
         totalBytes: 1073741824
       },
-      aliasCommands: [
-        { id: 'alias-ll', alias: 'll', command: 'ls -alF', createdAt: 1717200000000 }
-      ],
       onboarding: {
         version: 2,
         guideTabAutoOpened: false,
@@ -5890,7 +5530,6 @@ describe('workspace store', () => {
       extensionSettings: {
         autoCompleteStatus: true,
         quickVimStatus: true,
-        aliasStatus: true,
         highlightStatus: true
       },
       keywordHighlight: defaultKeywordHighlight,
@@ -5934,9 +5573,6 @@ describe('workspace store', () => {
         usedBytes: 0,
         totalBytes: 1073741824
       },
-      aliasCommands: [
-        { id: 'alias-ll', alias: 'll', command: 'ls -alF', createdAt: 1717200000000 }
-      ],
       onboarding: {
         version: 2,
         guideTabAutoOpened: false,
@@ -6032,7 +5668,6 @@ describe('workspace store', () => {
       extensionSettings: {
         autoCompleteStatus: true,
         quickVimStatus: true,
-        aliasStatus: true,
         highlightStatus: true
       },
       privacy: {
@@ -6056,9 +5691,6 @@ describe('workspace store', () => {
         usedBytes: 0,
         totalBytes: 1073741824
       },
-      aliasCommands: [
-        { id: 'alias-ll', alias: 'll', command: 'ls -alF', createdAt: 1717200000000 }
-      ],
       onboarding: {
         version: 2,
         guideTabAutoOpened: false,
@@ -6142,7 +5774,6 @@ describe('workspace store', () => {
       extensionSettings: {
         autoCompleteStatus: true,
         quickVimStatus: true,
-        aliasStatus: true,
         highlightStatus: true
       },
       keywordHighlight: defaultKeywordHighlight,
@@ -6187,9 +5818,6 @@ describe('workspace store', () => {
         usedBytes: 0,
         totalBytes: 1073741824
       },
-      aliasCommands: [
-        { id: 'alias-ll', alias: 'll', command: 'ls -alF', createdAt: 1717200000000 }
-      ],
       onboarding: {
         version: 2,
         guideTabAutoOpened: false,
@@ -6321,7 +5949,6 @@ describe('workspace store', () => {
       extensionSettings: {
         autoCompleteStatus: true,
         quickVimStatus: true,
-        aliasStatus: true,
         highlightStatus: true
       },
       keywordHighlight: defaultKeywordHighlight,
@@ -6365,9 +5992,6 @@ describe('workspace store', () => {
         usedBytes: 4096,
         totalBytes: 53687091200
       },
-      aliasCommands: [
-        { id: 'alias-ll', alias: 'll', command: 'ls -alF', createdAt: 1717200000000 }
-      ],
       onboarding: {
         version: 2,
         guideTabAutoOpened: false,
@@ -9744,7 +9368,7 @@ describe('workspace store', () => {
     expect(store.chatMessages.find((message) => message.id === userId)?.text).toBe(before.find((message) => message.id === userId)?.text)
   })
 
-  it('manages External reference-style extension plugin state and alias validation', async () => {
+  it('manages extension plugin state', async () => {
     const store = useWorkspaceStore()
 
     ;(globalThis as any).__loadExtensionPluginStoreFixtureMock?.()
@@ -9755,11 +9379,7 @@ describe('workspace store', () => {
     expect(jumpserver?.guideSteps).toEqual(expect.arrayContaining(['同步资产并确认主机分组。']))
     expect(jumpserver?.connectionLog).toBeUndefined()
 
-    expect(store.filteredExtensionPlugins[0].name).toBe('Alias')
-    await expect(store.updateExtensionSettings({ aliasStatus: false })).resolves.toBe(true)
-    expect(store.filteredExtensionPlugins.some((plugin) => plugin.pluginId === 'Alias')).toBe(false)
-    await expect(store.updateExtensionSettings({ aliasStatus: true })).resolves.toBe(true)
-    expect(store.filteredExtensionPlugins[0].name).toBe('Alias')
+    expect(store.filteredExtensionPlugins[0].name).toBe('Jumpserver Support')
 
     const installPromise = store.installExtensionPlugin('cloud-assets')
     expect(store.extensionInstallLoadingMap['cloud-assets']).toBe(true)
@@ -9812,40 +9432,6 @@ describe('workspace store', () => {
     }))
     expect(store.selectedExtensionId).toContain('local-local-pack')
 
-    vi.mocked(window.aiops.saveConfig).mockClear()
-    store.createAliasCommand()
-    store.updateAliasDraft('new', { alias: 'll', command: 'ls' })
-    expect((await store.saveAliasCommand('new')).reason).toBe('duplicate')
-    store.updateAliasDraft('new', { alias: 'hosts', command: 'cat /etc/hosts' })
-    expect((await store.saveAliasCommand('new')).ok).toBe(true)
-    expect(window.aiops.saveAliasCommand).toHaveBeenCalledWith({
-      id: undefined,
-      previousAlias: undefined,
-      alias: 'hosts',
-      command: 'cat /etc/hosts',
-      createdAt: undefined
-    })
-    expect(store.aliasCommands.some((alias) => alias.alias === 'hosts')).toBe(true)
-    expectNoBusinessDataConfigWrites(['aliasCommands'])
-
-    const hosts = store.aliasCommands.find((alias) => alias.alias === 'hosts')!
-    store.startAliasEdit(hosts.id)
-    store.updateAliasDraft(hosts.id, { alias: 'hostsfile', command: 'cat /etc/hosts | head' })
-    expect((await store.saveAliasCommand(hosts.id)).ok).toBe(true)
-    expect(window.aiops.saveAliasCommand).toHaveBeenCalledWith({
-      id: hosts.id,
-      previousAlias: 'hosts',
-      alias: 'hostsfile',
-      command: 'cat /etc/hosts | head',
-      createdAt: expect.any(Number)
-    })
-    expect(store.aliasCommands.some((alias) => alias.alias === 'hostsfile' && alias.command === 'cat /etc/hosts | head')).toBe(true)
-    expectNoBusinessDataConfigWrites(['aliasCommands'])
-
-    expect((await store.deleteAliasCommand(hosts.id)).ok).toBe(true)
-    expect(window.aiops.deleteAliasCommand).toHaveBeenCalledWith({ id: hosts.id, alias: 'hostsfile' })
-    expect(store.aliasCommands.some((alias) => alias.alias === 'hostsfile')).toBe(false)
-    expectNoBusinessDataConfigWrites(['aliasCommands'])
   })
 
   it('deduplicates concurrent extension plugin catalog refreshes', async () => {
@@ -10183,84 +9769,13 @@ describe('workspace store', () => {
     expect(store.selectedExtensionId).toBe('local-race-pack')
   })
 
-  it('does not mutate persisted aliases when required backend operations are unavailable or fail', async () => {
-    const store = useWorkspaceStore()
-    await store.refreshAliasCommands()
-    vi.mocked(window.aiops.saveConfig).mockClear()
-
-    const originalAiops = {
-      listAliasCommands: window.aiops.listAliasCommands,
-      saveAliasCommand: window.aiops.saveAliasCommand,
-      deleteAliasCommand: window.aiops.deleteAliasCommand
-    }
-    const persistedAliasSnapshot = () => JSON.stringify(store.aliasCommands.filter((alias) => alias.id !== 'new').map(({ edit, ...alias }) => alias))
-    const initialSnapshot = persistedAliasSnapshot()
-
-    try {
-      ;(window.aiops as any).listAliasCommands = undefined
-      await expect(store.refreshAliasCommands()).resolves.toBe(false)
-      expect(store.extensionNotice).toBe('Alias 服务不可用')
-      expect(persistedAliasSnapshot()).toBe(initialSnapshot)
-      expect(window.aiops.saveConfig).not.toHaveBeenCalled()
-
-      ;(window.aiops as any).listAliasCommands = originalAiops.listAliasCommands
-      vi.mocked(window.aiops.listAliasCommands!).mockRejectedValueOnce(new Error('aliases offline'))
-      await expect(store.refreshAliasCommands()).resolves.toBe(false)
-      expect(store.extensionNotice).toBe('aliases offline')
-      expect(persistedAliasSnapshot()).toBe(initialSnapshot)
-      expect(window.aiops.saveConfig).not.toHaveBeenCalled()
-
-      store.createAliasCommand()
-      store.updateAliasDraft('new', { alias: 'no-bridge-alias', command: 'echo no bridge' })
-
-      ;(window.aiops as any).saveAliasCommand = undefined
-      await expect(store.saveAliasCommand('new')).resolves.toEqual({ ok: false, reason: 'backend' })
-      expect(store.extensionNotice).toBe('Alias 保存服务不可用')
-      expect(persistedAliasSnapshot()).toBe(initialSnapshot)
-      expect(store.aliasCommands.some((alias) => alias.id !== 'new' && alias.alias === 'no-bridge-alias')).toBe(false)
-      expect(window.aiops.saveConfig).not.toHaveBeenCalled()
-
-      ;(window.aiops as any).saveAliasCommand = originalAiops.saveAliasCommand
-      vi.mocked(window.aiops.saveAliasCommand!).mockRejectedValueOnce(new Error('alias write failed'))
-      await expect(store.saveAliasCommand('new')).resolves.toEqual({ ok: false, reason: 'backend' })
-      expect(store.extensionNotice).toBe('alias write failed')
-      expect(persistedAliasSnapshot()).toBe(initialSnapshot)
-      expect(store.aliasCommands.some((alias) => alias.id !== 'new' && alias.alias === 'no-bridge-alias')).toBe(false)
-
-      store.updateAliasDraft('new', { alias: 'bridge-alias', command: 'echo bridge' })
-      await expect(store.saveAliasCommand('new')).resolves.toEqual({ ok: true, reason: 'saved' })
-      const bridgeAlias = store.aliasCommands.find((alias) => alias.alias === 'bridge-alias')!
-      expect(bridgeAlias).toBeTruthy()
-      const afterSavedSnapshot = persistedAliasSnapshot()
-      vi.mocked(window.aiops.saveConfig).mockClear()
-
-      ;(window.aiops as any).deleteAliasCommand = undefined
-      await expect(store.deleteAliasCommand(bridgeAlias.id)).resolves.toEqual({ ok: false, reason: 'backend' })
-      expect(store.extensionNotice).toBe('Alias 删除服务不可用')
-      expect(persistedAliasSnapshot()).toBe(afterSavedSnapshot)
-      expect(store.aliasCommands.some((alias) => alias.alias === 'bridge-alias')).toBe(true)
-      expect(window.aiops.saveConfig).not.toHaveBeenCalled()
-
-      ;(window.aiops as any).deleteAliasCommand = originalAiops.deleteAliasCommand
-      vi.mocked(window.aiops.deleteAliasCommand!).mockRejectedValueOnce(new Error('alias delete failed'))
-      await expect(store.deleteAliasCommand(bridgeAlias.id)).resolves.toEqual({ ok: false, reason: 'backend' })
-      expect(store.extensionNotice).toBe('alias delete failed')
-      expect(persistedAliasSnapshot()).toBe(afterSavedSnapshot)
-      expect(store.aliasCommands.some((alias) => alias.alias === 'bridge-alias')).toBe(true)
-    } finally {
-      Object.assign(window.aiops, originalAiops)
-    }
-  })
-
-  it('fails closed on malformed successful extension and alias backend envelopes', async () => {
+  it('fails closed on malformed successful extension backend envelopes', async () => {
     const store = useWorkspaceStore()
     ;(globalThis as any).__loadExtensionPluginStoreFixtureMock?.()
     await store.refreshExtensionPlugins()
-    await store.refreshAliasCommands()
     vi.mocked(window.aiops.saveConfig).mockClear()
 
     const malformedExtensionMessage = '扩展服务返回数据无效'
-    const malformedAliasMessage = 'Alias 服务返回数据无效'
     Object.assign(store.extensionPlugins.find((item) => item.pluginId === 'ops-runbook')!, {
       installed: true,
       hasUpdate: true,
@@ -10293,18 +9808,12 @@ describe('workspace store', () => {
       updateExtensionPlugin: window.aiops.updateExtensionPlugin,
       installExtensionPackage: window.aiops.installExtensionPackage,
       uninstallExtensionPlugin: window.aiops.uninstallExtensionPlugin,
-      openExtensionSubscription: window.aiops.openExtensionSubscription,
-      listAliasCommands: window.aiops.listAliasCommands,
-      saveAliasCommand: window.aiops.saveAliasCommand,
-      deleteAliasCommand: window.aiops.deleteAliasCommand
+      openExtensionSubscription: window.aiops.openExtensionSubscription
     }
     const catalogSnapshot = () => JSON.stringify(store.extensionPlugins)
-    const persistedAliasSnapshot = () => JSON.stringify(store.aliasCommands.filter((alias) => alias.id !== 'new').map(({ edit, ...alias }) => alias))
     const initialCatalogSnapshot = catalogSnapshot()
-    const initialAliasSnapshot = persistedAliasSnapshot()
     const plugin = (pluginId: string) => store.extensionPlugins.find((item) => item.pluginId === pluginId)
     const expectCatalogUnchanged = () => expect(catalogSnapshot()).toBe(initialCatalogSnapshot)
-    const expectAliasesUnchanged = () => expect(persistedAliasSnapshot()).toBe(initialAliasSnapshot)
 
     try {
       vi.mocked(window.aiops.listExtensionPlugins!).mockResolvedValueOnce({ ok: true, data: [{ pluginId: 'broken-plugin' }] } as any)
@@ -10398,39 +9907,6 @@ describe('workspace store', () => {
       await updatePromise
       expect(store.extensionUpdateLoadingMap['ops-runbook']).toBeUndefined()
 
-      vi.mocked(window.aiops.listAliasCommands!).mockResolvedValueOnce({ ok: true, data: [{ id: 'alias-broken', alias: 'broken' }] } as any)
-      await expect(store.refreshAliasCommands()).resolves.toBe(false)
-      expect(store.extensionNotice).toBe(malformedAliasMessage)
-      expectAliasesUnchanged()
-      expect(window.aiops.saveConfig).not.toHaveBeenCalled()
-
-      store.createAliasCommand()
-      store.updateAliasDraft('new', { alias: 'malformed-alias', command: 'echo malformed' })
-      vi.mocked(window.aiops.saveAliasCommand!).mockResolvedValueOnce({
-        ok: true,
-        data: {
-          command: { id: 'alias-malformed' },
-          commands: [{ id: 'alias-malformed', alias: 'malformed-alias', command: 'echo malformed', createdAt: 1 }]
-        }
-      } as any)
-      await expect(store.saveAliasCommand('new')).resolves.toEqual({ ok: false, reason: 'backend' })
-      expect(store.extensionNotice).toBe(malformedAliasMessage)
-      expectAliasesUnchanged()
-      expect(store.aliasCommands.some((alias) => alias.id !== 'new' && alias.alias === 'malformed-alias')).toBe(false)
-      expect(store.aliasCommands.some((alias) => alias.id === 'new' && alias.alias === 'malformed-alias')).toBe(true)
-
-      const existingAlias = store.aliasCommands.find((alias) => alias.id !== 'new')!
-      vi.mocked(window.aiops.deleteAliasCommand!).mockResolvedValueOnce({
-        ok: true,
-        data: {
-          deleted: { id: existingAlias.id, alias: existingAlias.alias, command: existingAlias.command, createdAt: existingAlias.createdAt },
-          commands: [{ id: 'alias-broken', alias: 'broken' }]
-        }
-      } as any)
-      await expect(store.deleteAliasCommand(existingAlias.id)).resolves.toEqual({ ok: false, reason: 'backend' })
-      expect(store.extensionNotice).toBe(malformedAliasMessage)
-      expectAliasesUnchanged()
-      expect(store.aliasCommands.some((alias) => alias.id === existingAlias.id)).toBe(true)
     } finally {
       Object.assign(window.aiops, originalAiops)
     }
@@ -13104,10 +12580,6 @@ describe('workspace store', () => {
           usedBytes: store.kbUsedBytes,
           totalBytes: store.kbTotalBytes,
           config: store.config.knowledgeBase
-        },
-        aliasCommands: {
-          rows: store.aliasCommands.filter((alias) => alias.id !== 'new').map(({ edit, ...alias }) => alias),
-          config: store.config.aliasCommands
         }
       })
     const initialBusinessSnapshot = businessSnapshot()
@@ -13124,8 +12596,7 @@ describe('workspace store', () => {
           tree: [{ id: 'stale-kb', key: 'stale.md', relPath: 'stale.md', title: 'stale.md', type: 'file', size: 1 }],
           usedBytes: 1,
           totalBytes: 1
-        },
-        aliasCommands: [{ id: 'stale-alias', alias: 'stale', command: 'echo stale', createdAt: 1 }]
+        }
       } as any)
 
       await expect(store.updateLanguage('en-US')).resolves.toBe(true)
@@ -13354,11 +12825,9 @@ describe('workspace store', () => {
     await store.hydrateConfig()
     await store.refreshExtensionPlugins()
     const originalSaveConfig = window.aiops.saveConfig
-    store.selectExtension('Alias')
     const initialSnapshot = JSON.stringify({
       config: store.config.extensionSettings,
       settings: store.extensionSettings,
-      aliasVisible: store.filteredExtensionPlugins.some((plugin) => plugin.pluginId === 'Alias'),
       selectedExtensionId: store.selectedExtensionId
     })
     const assertExtensionsUnchanged = () => {
@@ -13366,7 +12835,6 @@ describe('workspace store', () => {
         JSON.stringify({
           config: store.config.extensionSettings,
           settings: store.extensionSettings,
-          aliasVisible: store.filteredExtensionPlugins.some((plugin) => plugin.pluginId === 'Alias'),
           selectedExtensionId: store.selectedExtensionId
         })
       ).toBe(initialSnapshot)
@@ -13374,13 +12842,13 @@ describe('workspace store', () => {
 
     try {
       ;(window.aiops as any).saveConfig = undefined
-      await expect(store.updateExtensionSettings({ aliasStatus: false })).resolves.toBe(false)
+      await expect(store.updateExtensionSettings({ highlightStatus: false })).resolves.toBe(false)
       expect(store.settingsNotice).toBe('扩展设置保存服务不可用')
       assertExtensionsUnchanged()
 
       ;(window.aiops as any).saveConfig = originalSaveConfig
       vi.mocked(window.aiops.saveConfig!).mockResolvedValueOnce({} as any)
-      await expect(store.updateExtensionSettings({ aliasStatus: false })).resolves.toBe(false)
+      await expect(store.updateExtensionSettings({ highlightStatus: false })).resolves.toBe(false)
       expect(store.settingsNotice).toBe('扩展设置保存失败')
       assertExtensionsUnchanged()
 
@@ -13388,29 +12856,26 @@ describe('workspace store', () => {
         extensionSettings: {
           autoCompleteStatus: true,
           quickVimStatus: true,
-          aliasStatus: true,
           highlightStatus: true
         }
       } as any)
-      await expect(store.updateExtensionSettings({ aliasStatus: false })).resolves.toBe(false)
+      await expect(store.updateExtensionSettings({ highlightStatus: false })).resolves.toBe(false)
       expect(store.settingsNotice).toBe('扩展设置保存失败')
       assertExtensionsUnchanged()
 
       vi.mocked(window.aiops.saveConfig!).mockRejectedValueOnce(new Error('extension save offline'))
-      await expect(store.updateExtensionSettings({ aliasStatus: false })).resolves.toBe(false)
+      await expect(store.updateExtensionSettings({ highlightStatus: false })).resolves.toBe(false)
       expect(store.settingsNotice).toBe('extension save offline')
       assertExtensionsUnchanged()
 
-      await expect(store.updateExtensionSettings({ aliasStatus: false })).resolves.toBe(true)
+      await expect(store.updateExtensionSettings({ highlightStatus: false })).resolves.toBe(true)
       expect(store.settingsNotice).toBe('扩展设置已保存')
-      expect(store.extensionSettings.aliasStatus).toBe(false)
-      expect(store.filteredExtensionPlugins.some((plugin) => plugin.pluginId === 'Alias')).toBe(false)
+      expect(store.extensionSettings.highlightStatus).toBe(false)
       expect(store.selectedExtensionId).toBe('jumpserverSupport')
       expect(store.config.extensionSettings).toEqual({
         autoCompleteStatus: true,
         quickVimStatus: true,
-        aliasStatus: false,
-        highlightStatus: true
+        highlightStatus: false
       })
     } finally {
       window.aiops.saveConfig = originalSaveConfig
@@ -13423,27 +12888,17 @@ describe('workspace store', () => {
     await store.refreshUserAccount()
     await store.refreshExtensionPlugins()
 
-    store.selectExtension('Alias')
-    expect(store.selectedExtensionId).toBe('Alias')
-    await expect(store.updateExtensionSettings({ aliasStatus: false })).resolves.toBe(true)
-    expect(store.extensionSettings.aliasStatus).toBe(false)
-    expect(store.selectedExtensionId).toBe('jumpserverSupport')
-    expect(store.filteredExtensionPlugins.some((plugin) => plugin.pluginId === 'Alias')).toBe(false)
+    await expect(store.updateExtensionSettings({ highlightStatus: false })).resolves.toBe(true)
+    expect(store.extensionSettings.highlightStatus).toBe(false)
     expect(window.aiops.saveConfig).toHaveBeenCalledWith(
       expect.objectContaining({
         extensionSettings: {
           autoCompleteStatus: true,
           quickVimStatus: true,
-          aliasStatus: false,
-          highlightStatus: true
+          highlightStatus: false
         }
       })
     )
-    store.selectExtension('Alias')
-    expect(store.selectedExtensionId).toBe('jumpserverSupport')
-    await expect(store.updateExtensionSettings({ aliasStatus: true })).resolves.toBe(true)
-    expect(store.filteredExtensionPlugins.some((plugin) => plugin.pluginId === 'Alias')).toBe(true)
-
     vi.mocked(window.aiops.saveConfig).mockClear()
     vi.mocked(window.aiops.readKeywordHighlightConfig).mockResolvedValueOnce(JSON.stringify(defaultKeywordHighlight, null, 2))
     const keywordHighlightFileListeners: Array<(content: string) => void> = []

@@ -13628,12 +13628,11 @@ describe('AppShell', () => {
     }
   })
 
-  it('matches External reference-style extension list, plugin details, built-ins, and Alias CRUD', async () => {
+  it('matches the extension list, plugin details, and built-ins', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     const store = useWorkspaceStore()
     await store.refreshExtensionPlugins()
-    await store.refreshAliasCommands()
     const panel = mount(ExtensionsPanel, {
       global: { plugins: [pinia] }
     })
@@ -13641,7 +13640,6 @@ describe('AppShell', () => {
     expect(panel.text()).toContain('插件')
     expect(panel.text()).toContain('Jumpserver Support')
     expect(panel.text()).toContain('支持资产同步与资产直连')
-    expect(panel.text()).toContain('Alias')
     expect(panel.text()).toContain('系统')
     expect(panel.text()).not.toContain('Store')
     expect(panel.text()).not.toContain('Private')
@@ -13690,7 +13688,7 @@ describe('AppShell', () => {
       fileName: 'local-tools.external-reference',
       filePath: '/tmp/local-tools.external-reference',
       size: 4096,
-      existingPluginIds: expect.arrayContaining(['jumpserverSupport', 'Alias', 'cloud-assets'])
+      existingPluginIds: expect.arrayContaining(['jumpserverSupport', 'cloud-assets'])
     }))
     expect(store.extensionInstallLoadingMap['local-local-tools']).toBe(true)
     expect(store.extensionInstallProgressMap['local-local-tools']).toMatchObject({ stage: 'installing', percent: 100 })
@@ -13702,75 +13700,10 @@ describe('AppShell', () => {
     expect(store.selectedExtensionId).toBe('local-local-tools')
     expect(store.extensionPlugins.some((plugin) => plugin.pluginId === 'local-local-tools' && plugin.installed)).toBe(true)
 
-    await panel.find('.extension_search_box input').setValue('Alias')
-    expect(panel.text()).toContain('Alias')
-    expect(panel.text()).not.toContain('Cloud Assets')
-
-    await panel.find('.extension_item').trigger('click')
-    expect(store.selectedExtensionId).toBe('Alias')
-
-    await expect(store.updateExtensionSettings({ aliasStatus: false })).resolves.toBe(true)
-    await panel.vm.$nextTick()
-    expect(panel.text()).not.toContain('Alias')
-    expect(store.selectedExtensionId).toBe('jumpserverSupport')
-    await expect(store.updateExtensionSettings({ aliasStatus: true })).resolves.toBe(true)
-    await panel.find('.extension_search_box input').setValue('Alias')
-    expect(panel.text()).toContain('Alias')
-    await panel.find('.extension_item').trigger('click')
-    expect(store.selectedExtensionId).toBe('Alias')
-
+    store.selectExtension('jumpserverSupport')
     const workspace = mount(ExtensionsWorkspace, {
       global: { plugins: [pinia] }
     })
-    expect(workspace.text()).toContain('添加命令')
-    expect(store.aliasCommands.some((alias) => alias.alias === 'll')).toBe(true)
-    expect(store.aliasCommands.some((alias) => alias.command === 'git status')).toBe(true)
-
-    await workspace.find('.alias-search-input input').setValue('gst')
-    const filteredAliasInputs = workspace.findAll('.alias-config-table tbody tr input').map((input) => (input.element as HTMLInputElement).value)
-    const filteredCommandInputs = workspace.findAll('.alias-config-table tbody tr textarea').map((input) => (input.element as HTMLTextAreaElement).value)
-    expect(filteredAliasInputs).toEqual(['gst'])
-    expect(filteredCommandInputs).toEqual(['git status'])
-    await workspace.find('.alias-search-input input').setValue('')
-
-    await workspace.find('.alias-search-input input').setValue('no-hit')
-    await workspace.find('.alias-config-toolbar button').trigger('click')
-    expect(store.aliasSearchQuery).toBe('')
-    expect(workspace.findAll('.alias-config-table tbody tr')[0].find('input').element).toBeTruthy()
-    await workspace.findAll('.alias-config-table tbody tr')[0].find('button[title="保存"]').trigger('click')
-    expect(store.extensionNotice).toContain('不能为空')
-    await workspace.findAll('.alias-config-table tbody tr')[0].find('input').setValue('ll')
-    await workspace.findAll('.alias-config-table tbody tr')[0].find('textarea').setValue('ls')
-    await workspace.findAll('.alias-config-table tbody tr')[0].find('button[title="保存"]').trigger('click')
-    expect(store.extensionNotice).toContain('已存在')
-    await workspace.findAll('.alias-config-table tbody tr')[0].find('button[title="取消"]').trigger('click')
-
-    await workspace.find('.alias-config-toolbar button').trigger('click')
-    const newRow = workspace.findAll('.alias-config-table tbody tr')[0]
-    await newRow.find('input').setValue('ports')
-    await newRow.find('textarea').setValue('ss -tulpn')
-    await newRow.find('button[title="保存"]').trigger('click')
-    await workspace.vm.$nextTick()
-    expect(store.aliasCommands.some((alias) => alias.alias === 'ports' && alias.command === 'ss -tulpn')).toBe(true)
-
-    const aliasRow = workspace.findAll('.alias-config-table tbody tr').find((row) => (row.find('input').element as HTMLInputElement).value === 'ports')!
-    await aliasRow.find('button[title="编辑"]').trigger('click')
-    await aliasRow.find('input').setValue('ports2')
-    await aliasRow.find('textarea').setValue('netstat -tunlp')
-    await aliasRow.find('button[title="取消"]').trigger('click')
-    expect(store.aliasCommands.some((alias) => alias.alias === 'ports' && alias.command === 'ss -tulpn')).toBe(true)
-    expect(store.aliasCommands.some((alias) => alias.alias === 'ports2')).toBe(false)
-
-    await workspace.find('.alias-config-toolbar button').trigger('click')
-    await workspace.find('.alias-config-toolbar button').trigger('click')
-    expect(store.aliasCommands.filter((alias) => alias.id === 'new')).toHaveLength(1)
-    await workspace.findAll('.alias-config-table tbody tr')[0].find('button[title="取消"]').trigger('click')
-    expect(store.aliasCommands.some((alias) => alias.id === 'new')).toBe(false)
-
-    await aliasRow.find('button[title="删除"]').trigger('click')
-    expect(store.aliasCommands.some((alias) => alias.alias === 'ports')).toBe(false)
-
-    store.selectExtension('jumpserverSupport')
     await flushPromises()
     await workspace.vm.$nextTick()
     expect(workspace.text()).toContain('Jumpserver Support')
@@ -17974,7 +17907,6 @@ describe('AppShell', () => {
       extensionSettings: {
         autoCompleteStatus: true,
         quickVimStatus: true,
-        aliasStatus: true,
         highlightStatus: true
       }
     })
@@ -18218,7 +18150,6 @@ describe('AppShell', () => {
       expect.objectContaining({
         extensionSettings: expect.objectContaining({
           autoCompleteStatus: false,
-          aliasStatus: true
         })
       })
     )

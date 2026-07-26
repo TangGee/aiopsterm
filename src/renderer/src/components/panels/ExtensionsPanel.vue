@@ -143,7 +143,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, type Component } from 'vue'
-import { Cloud, CloudDownload, Crown, FileText, Layers, LoaderCircle, PackageOpen, Pencil, RefreshCw, Search, ShieldCheck, WandSparkles } from 'lucide-vue-next'
+import { Cloud, CloudDownload, Crown, FileText, Layers, LoaderCircle, PackageOpen, RefreshCw, Search, ShieldCheck, WandSparkles } from 'lucide-vue-next'
 import { useWorkspaceStore } from '@/stores/workspace'
 import type { ExtensionIconKey, ExtensionInstallStage, ExtensionPluginRuntimeConfig } from '@shared/contracts/extensions'
 
@@ -153,7 +153,6 @@ const workspace = useWorkspaceStore()
 
 const iconMap: Record<ExtensionIconKey, Component> = {
   jumpserver: Layers,
-  alias: Pencil,
   runbook: FileText,
   cloud: Cloud,
   private: ShieldCheck,

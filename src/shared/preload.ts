@@ -256,14 +256,6 @@ export type {
   QuickCommandsUserConfig
 } from './contracts/quickCommands'
 export type {
-  AliasCommandConfig,
-  AliasCommandDeleteInput,
-  AliasCommandDeleteResult,
-  AliasCommandListResult,
-  AliasCommandMutationResult,
-  AliasCommandSaveInput
-} from './contracts/aliases'
-export type {
   McpConfigFile,
   McpConfigFileServer,
   McpConfigWriteResult,

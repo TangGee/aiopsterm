@@ -23,7 +23,6 @@ import {
   Cloud,
   FileText,
   Layers,
-  Pencil,
   ShieldCheck,
   WandSparkles
 } from 'lucide-vue-next'
@@ -37,7 +36,6 @@ const props = defineProps<{
 
 const iconMap: Record<ExtensionIconKey, Component> = {
   jumpserver: Layers,
-  alias: Pencil,
   runbook: FileText,
   cloud: Cloud,
   private: ShieldCheck,

@@ -15,7 +15,6 @@ import {
 } from '@/services/ai/classicSessionContextRuntime'
 import {
   createWorkspaceExtensionsController,
-  type WorkspaceAliasCommand,
   type WorkspaceExtensionInstallProgress,
   type WorkspaceExtensionPlugin
 } from '@/services/extensions/workspaceExtensionsController'
@@ -251,8 +250,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     extensionDragActive,
     extensionInstallingPackageName,
     assetManagementOpenRequest,
-    aliasCommands,
-    aliasSearchQuery,
     k8sContexts,
     k8sClusters,
     k8sBastions,
@@ -1070,7 +1067,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     filteredExtensionPlugins,
     selectedExtension,
     selectedExtensionInstallProgress,
-    filteredAliasCommands,
     ensureSelectedExtensionVisible,
     selectExtension,
     setExtensionNotice,
@@ -1081,19 +1077,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     uninstallExtensionPlugin,
     subscribeExtensionPlugin,
     cancelExtensionInstall,
-    dropExtensionPackage,
-    getAliasCommandsSnapshot,
-    refreshAliasCommands,
-    hydrateAliasCommands,
-    createAliasCommand,
-    startAliasEdit,
-    updateAliasDraft,
-    saveAliasCommand,
-    cancelAliasEdit,
-    deleteAliasCommand
+    dropExtensionPackage
   } = createWorkspaceExtensionsController({
-    config,
-    extensionSettings,
     extensionSearchQuery,
     extensionPlugins,
     selectedExtensionId,
@@ -1103,9 +1088,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     extensionUpdateLoadingMap,
     extensionInstallProgressMap,
     extensionDragActive,
-    extensionInstallingPackageName,
-    aliasCommands,
-    aliasSearchQuery
+    extensionInstallingPackageName
   })
 
   const {
@@ -1269,7 +1252,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       refreshAgentHookInstallers,
       refreshExportMcpInstallers,
       refreshUserAccount,
-      hydrateAliasCommands,
       hydrateSettingsPreferences,
       hydrateSkills,
       readMcpServersSnapshotFromBridge,
@@ -1450,10 +1432,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     extensionDragActive,
     extensionInstallingPackageName,
     assetManagementOpenRequest,
-    aliasCommands,
-    refreshAliasCommands,
-    aliasSearchQuery,
-    filteredAliasCommands,
     k8sContexts,
     k8sClusters,
     k8sBastions,
@@ -1803,12 +1781,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     subscribeExtensionPlugin,
     cancelExtensionInstall,
     dropExtensionPackage,
-    createAliasCommand,
-    startAliasEdit,
-    updateAliasDraft,
-    saveAliasCommand,
-    cancelAliasEdit,
-    deleteAliasCommand,
     refreshKubernetesCatalog,
     switchK8sContext,
     reloadK8sConfig,

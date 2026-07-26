@@ -17,7 +17,6 @@ import type {
   TerminalUserConfig,
   WorkspaceUserConfig
 } from '@shared/contracts/appRuntime'
-import type { AliasCommandConfig } from '@shared/contracts/aliases'
 import type { ExtensionUserConfig } from '@shared/contracts/extensions'
 import type { KnowledgeBaseUserConfig } from '@shared/contracts/knowledgeBase'
 import type { McpServerUserConfig, McpToolStatesUserConfig } from '@shared/contracts/mcp'
@@ -149,7 +148,6 @@ export const defaultConfig: UserConfig = {
   extensionSettings: {
     autoCompleteStatus: true,
     quickVimStatus: true,
-    aliasStatus: true,
     highlightStatus: true
   },
   keywordHighlight: {
@@ -221,7 +219,6 @@ export const defaultConfig: UserConfig = {
     usedBytes: 0,
     totalBytes: 1024 * 1024 * 1024
   },
-  aliasCommands: [],
   onboarding: {
     version: 2,
     guideTabAutoOpened: false,
@@ -359,7 +356,6 @@ export const defaultKnowledgeBase: KnowledgeBaseUserConfig = {
   totalBytes: defaultConfig.knowledgeBase!.totalBytes
 }
 
-export const defaultAliasCommands: AliasCommandConfig[] = []
 export const defaultShortcuts: ShortcutUserConfig[] = []
 export const defaultRules: UserRuleConfig[] = []
 export const defaultSkills: SkillUserConfig[] = []

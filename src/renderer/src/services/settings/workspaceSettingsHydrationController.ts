@@ -56,11 +56,6 @@ import type { UserConfig } from '@shared/contracts/userConfig'
 
 export type WorkspaceMcpSnapshot = ReturnType<typeof normalizeMcpServersConfig>
 
-type HydratedAliasResult = {
-  normalizedAliasCommands: NonNullable<UserConfig['aliasCommands']>
-  aliasCommandsLoadedFromBridge: boolean
-}
-
 type WorkspaceSettingsHydrationState = {
   mode: Ref<'terminal' | 'agents'>
   activeModule: Ref<ModuleKey>
@@ -110,7 +105,6 @@ type WorkspaceSettingsHydrationDeps = {
   refreshAgentHookInstallers: (options?: { silent?: boolean }) => Promise<boolean>
   refreshExportMcpInstallers: (options?: { silent?: boolean }) => Promise<boolean>
   refreshUserAccount: () => Promise<boolean>
-  hydrateAliasCommands: () => Promise<HydratedAliasResult>
   hydrateSettingsPreferences: (savedConfig: UserConfig) => Promise<{
     normalizedShortcuts: NonNullable<UserConfig['shortcuts']>
     normalizedRules: NonNullable<UserConfig['rules']>
@@ -175,7 +169,6 @@ export const createWorkspaceSettingsHydrationController = (
     refreshAgentHookInstallers,
     refreshExportMcpInstallers,
     refreshUserAccount,
-    hydrateAliasCommands,
     hydrateSettingsPreferences,
     hydrateSkills,
     readMcpServersSnapshotFromBridge,
@@ -288,7 +281,6 @@ export const createWorkspaceSettingsHydrationController = (
     knowledgeTree.value = cloneKnowledgeNodes(normalizedKnowledgeBase.tree)
     kbUsedBytes.value = normalizedKnowledgeBase.usedBytes
     kbTotalBytes.value = normalizedKnowledgeBase.totalBytes
-    const { normalizedAliasCommands, aliasCommandsLoadedFromBridge } = await hydrateAliasCommands()
     const { normalizedShortcuts, normalizedRules } = await hydrateSettingsPreferences(savedConfig)
     const { normalizedSkills, skillsChanged } = await hydrateSkills(savedConfig.skills)
     const savedMcpSnapshot = normalizeMcpServersConfig(savedConfig.mcpServers, savedConfig.mcpToolStates)
@@ -314,7 +306,6 @@ export const createWorkspaceSettingsHydrationController = (
       modelSettings: normalizedModelSettings,
       quickCommands: normalizedQuickCommands,
       knowledgeBase: normalizedKnowledgeBase as KnowledgeBaseUserConfig,
-      ...(aliasCommandsLoadedFromBridge ? { aliasCommands: normalizedAliasCommands } : {}),
       shortcuts: normalizedShortcuts,
       rules: normalizedRules,
       skills: normalizedSkills,

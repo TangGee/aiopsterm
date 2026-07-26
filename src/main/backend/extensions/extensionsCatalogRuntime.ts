@@ -87,21 +87,6 @@ const builtinExtensionCatalog: ExtensionPluginRuntimeConfig[] = [
       '同步资产并确认主机分组。',
       '从终端或文件管理中选择资产直连。'
     ]
-  },
-  {
-    pluginId: 'Alias',
-    name: 'Alias',
-    description: '全局Alias配置',
-    iconKey: 'alias',
-    tabName: 'aliasConfig',
-    show: true,
-    isPlugin: false,
-    installed: false,
-    hasUpdate: false,
-    installedVersion: '',
-    latestVersion: '',
-    source: 'preinstalled',
-    categories: ['Tools']
   }
 ]
 

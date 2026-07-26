@@ -6,9 +6,8 @@
     tabindex="-1"
   >
     <template v-if="workspace.selectedExtension">
-      <ExtensionAliasConfig v-if="workspace.selectedExtension.pluginId === 'Alias'" />
       <ExtensionJumpserverDetail
-        v-else-if="workspace.selectedExtension.pluginId === 'jumpserverSupport'"
+        v-if="workspace.selectedExtension.pluginId === 'jumpserverSupport'"
         :plugin="workspace.selectedExtension"
         :active-tab="workspace.extensionDetailTab"
         :asset-loading="jumpserverAssetLoading"
@@ -49,7 +48,6 @@
 
 <script setup lang="ts">
 import { computed, onMounted, watch } from 'vue'
-import ExtensionAliasConfig from '@/components/extensions/ExtensionAliasConfig.vue'
 import ExtensionGenericDetail from '@/components/extensions/ExtensionGenericDetail.vue'
 import ExtensionJumpserverDetail from '@/components/extensions/ExtensionJumpserverDetail.vue'
 import { createExtensionsJumpserverAssetRuntime } from '@/services/extensions/extensionsJumpserverAssetRuntime'

@@ -1,4 +1,3 @@
-import type { AliasCommandConfig } from './aliases'
 import type { ExtensionUserConfig } from './extensions'
 import type { KnowledgeBaseUserConfig } from './knowledgeBase'
 import type { McpServerUserConfig, McpToolStatesUserConfig } from './mcp'
@@ -62,7 +61,6 @@ export type UserConfig = {
   mcpToolStates?: McpToolStatesUserConfig
   quickCommands?: QuickCommandsUserConfig
   knowledgeBase?: KnowledgeBaseUserConfig
-  aliasCommands?: AliasCommandConfig[]
   onboarding?: {
     version: number
     guideTabAutoOpened: boolean

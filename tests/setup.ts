@@ -351,25 +351,9 @@ const cloneKnowledgeNodeWithPaths = (node: TestKnowledgeNode, dstRelDir: string)
   return cloned
 }
 
-const defaultAliasCommands = [
-  { id: 'alias-ll', alias: 'll', command: 'ls -alF', createdAt: 1717200000000 },
-  { id: 'alias-gst', alias: 'gst', command: 'git status', createdAt: 1717286400000 },
-  { id: 'alias-kctx', alias: 'kctx', command: 'kubectl config current-context', createdAt: 1717372800000 }
-]
-
-type TestAliasCommand = {
-  id: string
-  alias: string
-  command: string
-  createdAt?: number
-}
-
-const cloneAliasCommands = (commands: TestAliasCommand[] = defaultAliasCommands) => commands.map((alias) => ({ ...alias }))
-
 const defaultExtensionSettings = {
   autoCompleteStatus: true,
   quickVimStatus: true,
-  aliasStatus: true,
   highlightStatus: true
 }
 
@@ -740,7 +724,7 @@ type TestExtensionPlugin = {
   pluginId: string
   name: string
   description: string
-  iconKey: 'jumpserver' | 'alias' | 'runbook' | 'cloud' | 'private' | 'local'
+  iconKey: 'jumpserver' | 'runbook' | 'cloud' | 'private' | 'local'
   tabName: string
   show: boolean
   isPlugin: boolean
@@ -796,21 +780,6 @@ const defaultExtensionPluginCatalog: TestExtensionPlugin[] = [
       '同步资产并确认主机分组。',
       '从终端或文件管理中选择资产直连。'
     ]
-  },
-  {
-    pluginId: 'Alias',
-    name: 'Alias',
-    description: '全局Alias配置',
-    iconKey: 'alias',
-    tabName: 'aliasConfig',
-    show: true,
-    isPlugin: false,
-    installed: false,
-    hasUpdate: false,
-    installedVersion: '',
-    latestVersion: '',
-    source: 'preinstalled',
-    categories: ['Tools']
   }
 ]
 
@@ -4712,7 +4681,6 @@ let quickCommandStoreMock = cloneQuickCommands()
 let quickCommandGroupSequenceMock = 1
 let quickCommandSnippetSequenceMock = 1
 let settingsRuleSequenceMock = 1
-let aliasStoreMock = cloneAliasCommands()
 let settingsPreferencesStoreMock: TestSettingsPreferences | null = null
 let fileSessionFolderSequenceMock = 1
 
@@ -4972,7 +4940,6 @@ const resetAssetStoreMock = () => {
   quickCommandGroupSequenceMock = 1
   quickCommandSnippetSequenceMock = 1
   settingsRuleSequenceMock = 1
-  aliasStoreMock = cloneAliasCommands()
   settingsPreferencesStoreMock = null
   fileSessionFolderSequenceMock = 1
   fileEntriesMock = []
@@ -5527,7 +5494,6 @@ const createDefaultConfigMock = () => ({
   mcpToolStates: getMcpToolStatesMock(mcpServersMock),
   quickCommands: defaultQuickCommands,
   knowledgeBase: defaultKnowledgeBase,
-  aliasCommands: defaultAliasCommands,
   onboarding: {
     version: 2,
     guideTabAutoOpened: false,
@@ -7576,33 +7542,6 @@ Object.defineProperty(window, 'aiops', {
         return { ok: false, errorCode: 'QUICK_COMMAND_BACKEND_ERROR', errorMessage: 'Quick command script content is required' }
       }
       return { ok: true, data: planQuickCommandScriptMock(input.snippetContent, autoExecute) }
-    }),
-    listAliasCommands: vi.fn(async (query?: string) => {
-      const normalized = String(query || '').trim().toLowerCase()
-      const commands = normalized
-        ? aliasStoreMock.filter((item) => item.alias.toLowerCase().includes(normalized) || item.command.toLowerCase().includes(normalized))
-        : aliasStoreMock
-      return { ok: true, data: commands.map((item) => ({ ...item })) }
-    }),
-    saveAliasCommand: vi.fn(async (input: { id?: string; previousAlias?: string; alias: string; command: string; createdAt?: number }) => {
-      const alias = String(input.alias || '').trim()
-      const command = String(input.command || '').trim()
-      if (!alias || !command) return { ok: false, errorCode: 'ALIAS_REQUIRED', errorMessage: 'Alias and command are required.' }
-      const existing = aliasStoreMock.find((item) => (input.id && item.id === input.id) || (input.previousAlias && item.alias === input.previousAlias))
-      const id = existing?.id || input.id || `alias-test-${Date.now()}-${aliasStoreMock.length}`
-      const duplicate = aliasStoreMock.find((item) => item.alias === alias && item.id !== id)
-      if (duplicate) return { ok: false, errorCode: 'ALIAS_DUPLICATE', errorMessage: 'Alias already exists.' }
-      const saved = { id, alias, command, createdAt: existing?.createdAt || input.createdAt || Date.now() }
-      aliasStoreMock = [...aliasStoreMock.filter((item) => item.id !== id && item.alias !== input.previousAlias), saved].sort(
-        (a, b) => (b.createdAt || 0) - (a.createdAt || 0)
-      )
-      return { ok: true, data: { command: { ...saved }, commands: aliasStoreMock.map((item) => ({ ...item })) } }
-    }),
-    deleteAliasCommand: vi.fn(async (input: { id?: string; alias?: string }) => {
-      const deleted = aliasStoreMock.find((item) => (input.id && item.id === input.id) || (input.alias && item.alias === input.alias))
-      if (!deleted) return { ok: false, errorCode: 'ALIAS_NOT_FOUND', errorMessage: 'Alias not found.' }
-      aliasStoreMock = aliasStoreMock.filter((item) => item.id !== deleted.id)
-      return { ok: true, data: { deleted: { ...deleted }, commands: aliasStoreMock.map((item) => ({ ...item })) } }
     }),
     createTerminal: vi.fn(async (options?: TestTerminalCreateOptions) => {
       const id = `test-session-${options?.assetId || options?.kind || 'local'}`

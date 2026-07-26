@@ -1,5 +1,4 @@
 import { computed, ref, type Ref } from 'vue'
-import { createWorkspaceAliasController, type WorkspaceAliasCommand } from '@/services/extensions/workspaceAliasController'
 import {
   isExtensionInstallProgressData,
   isExtensionPluginCancelData,
@@ -9,16 +8,12 @@ import {
   malformedExtensionBackendResultMessage
 } from '@/services/extensions/extensionBackendGuards'
 import { extensionsClient } from '@/services/extensions/extensionsClient'
-import type { ExtensionSettings } from '@/services/settings/workspaceConfigRuntime'
 import type {
   ExtensionInstallProgress as BackendExtensionInstallProgress,
   ExtensionInstallStage,
   ExtensionPluginOperation,
   ExtensionPluginRuntimeConfig
 } from '@shared/contracts/extensions'
-import type { UserConfig } from '@shared/contracts/userConfig'
-
-export type { WorkspaceAliasCommand } from '@/services/extensions/workspaceAliasController'
 
 export type WorkspaceExtensionInstallProgress = {
   pluginId: string
@@ -29,8 +24,6 @@ export type WorkspaceExtensionInstallProgress = {
 export type WorkspaceExtensionPlugin = ExtensionPluginRuntimeConfig
 
 type WorkspaceExtensionsControllerState = {
-  config: Ref<UserConfig>
-  extensionSettings: Ref<ExtensionSettings>
   extensionSearchQuery: Ref<string>
   extensionPlugins: Ref<WorkspaceExtensionPlugin[]>
   selectedExtensionId: Ref<string>
@@ -41,14 +34,10 @@ type WorkspaceExtensionsControllerState = {
   extensionInstallProgressMap: Ref<Record<string, WorkspaceExtensionInstallProgress>>
   extensionDragActive: Ref<boolean>
   extensionInstallingPackageName: Ref<string>
-  aliasCommands: Ref<WorkspaceAliasCommand[]>
-  aliasSearchQuery: Ref<string>
 }
 
 export const createWorkspaceExtensionsController = (state: WorkspaceExtensionsControllerState) => {
   const {
-    config,
-    extensionSettings,
     extensionSearchQuery,
     extensionPlugins,
     selectedExtensionId,
@@ -58,9 +47,7 @@ export const createWorkspaceExtensionsController = (state: WorkspaceExtensionsCo
     extensionUpdateLoadingMap,
     extensionInstallProgressMap,
     extensionDragActive,
-    extensionInstallingPackageName,
-    aliasCommands,
-    aliasSearchQuery
+    extensionInstallingPackageName
   } = state
 
   const extensionActiveOperations = ref<Record<string, ExtensionPluginOperation>>({})
@@ -73,7 +60,7 @@ export const createWorkspaceExtensionsController = (state: WorkspaceExtensionsCo
 
   const visibleExtensionPlugins = computed(() =>
     extensionPlugins.value
-      .filter((plugin) => plugin.show && (plugin.pluginId !== 'Alias' || extensionSettings.value.aliasStatus))
+      .filter((plugin) => plugin.show)
       .sort((a, b) => {
         const rank = (plugin: WorkspaceExtensionPlugin) => {
           if (!plugin.isPlugin) return 0
@@ -122,28 +109,6 @@ export const createWorkspaceExtensionsController = (state: WorkspaceExtensionsCo
       if (extensionNotice.value === text) extensionNotice.value = ''
     }, 2400)
   }
-
-  const {
-    filteredAliasCommands,
-    getAliasCommandsSnapshot,
-    refreshAliasCommands,
-    hydrateAliasCommands,
-    createAliasCommand,
-    startAliasEdit,
-    updateAliasDraft,
-    saveAliasCommand,
-    cancelAliasEdit,
-    deleteAliasCommand
-  } = createWorkspaceAliasController(
-    {
-      config,
-      aliasCommands,
-      aliasSearchQuery
-    },
-    {
-      setExtensionNotice
-    }
-  )
 
   const setExtensionDragActive = (active: boolean) => {
     extensionDragActive.value = active
@@ -549,7 +514,6 @@ export const createWorkspaceExtensionsController = (state: WorkspaceExtensionsCo
     filteredExtensionPlugins,
     selectedExtension,
     selectedExtensionInstallProgress,
-    filteredAliasCommands,
     ensureSelectedExtensionVisible,
     selectExtension,
     setExtensionNotice,
@@ -560,15 +524,6 @@ export const createWorkspaceExtensionsController = (state: WorkspaceExtensionsCo
     uninstallExtensionPlugin,
     subscribeExtensionPlugin,
     cancelExtensionInstall,
-    dropExtensionPackage,
-    getAliasCommandsSnapshot,
-    refreshAliasCommands,
-    hydrateAliasCommands,
-    createAliasCommand,
-    startAliasEdit,
-    updateAliasDraft,
-    saveAliasCommand,
-    cancelAliasEdit,
-    deleteAliasCommand
+    dropExtensionPackage
   }
 }

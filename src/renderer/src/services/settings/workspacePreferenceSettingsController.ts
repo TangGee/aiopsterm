@@ -114,7 +114,6 @@ export const createWorkspacePreferenceSettingsController = (
       if (
         savedSettings.autoCompleteStatus !== normalizedSettings.autoCompleteStatus ||
         savedSettings.quickVimStatus !== normalizedSettings.quickVimStatus ||
-        savedSettings.aliasStatus !== normalizedSettings.aliasStatus ||
         savedSettings.highlightStatus !== normalizedSettings.highlightStatus
       ) {
         setSettingsNotice('扩展设置保存失败')

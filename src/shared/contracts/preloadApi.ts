@@ -217,14 +217,6 @@ import type {
   QuickCommandsUserConfig
 } from './quickCommands'
 import type {
-  AliasCommandConfig,
-  AliasCommandDeleteInput,
-  AliasCommandDeleteResult,
-  AliasCommandListResult,
-  AliasCommandMutationResult,
-  AliasCommandSaveInput
-} from './aliases'
-import type {
   McpConfigWriteResult,
   McpResourceReadResult,
   McpServerUserConfig,
@@ -596,9 +588,6 @@ export type AiopsPreloadApi = {
   deleteQuickCommandSnippet: (id: number) => Promise<QuickCommandSnippetDeleteResult>
   reorderQuickCommands: (input: QuickCommandReorderInput) => Promise<QuickCommandReorderResult>
   planQuickCommandScript: (input: QuickCommandScriptPlanInput) => Promise<QuickCommandScriptPlanResult>
-  listAliasCommands: (query?: string) => Promise<AliasCommandListResult>
-  saveAliasCommand: (input: AliasCommandSaveInput) => Promise<AliasCommandMutationResult>
-  deleteAliasCommand: (input: AliasCommandDeleteInput) => Promise<AliasCommandDeleteResult>
   createTerminal: (options?: TerminalCreateOptions) => Promise<TerminalSessionInfo>
   writeTerminal: (id: string, data: string) => Promise<TerminalWriteResult>
   ackTerminalData: (id: string, bytes: number) => void

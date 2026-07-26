@@ -40,7 +40,6 @@ import { registerAiCatalogIpc } from './ipc/aiCatalog'
 import { registerAiChatIpc } from './ipc/aiChat'
 import { registerAiChatActionsIpc } from './ipc/aiChatActions'
 import { registerAgentHooksIpc } from './ipc/agentHooks'
-import { registerAliasesIpc } from './ipc/aliases'
 import { registerAppRuntimeIpc } from './ipc/appRuntime'
 import { registerAppUpdateIpc } from './ipc/appUpdate'
 import { registerAssetsIpc } from './ipc/assets'
@@ -368,7 +367,6 @@ export const registerMainIpcRuntime = (input: MainIpcRuntimeInput) => {
     getCustomNotificationSoundsPath: input.getCustomNotificationSoundsPath,
     customBackgroundUrlForPath: input.appBootstrapRuntime.customBackgroundUrlForPath
   })
-  registerAliasesIpc(ipcMain)
   registerChatHistoryIpc(ipcMain, {
     syncProductSession: syncClassicProductSession,
     deleteProductSession: permanentlyDeleteProductSession

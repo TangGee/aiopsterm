@@ -1,11 +1,9 @@
-import type { AliasCommandConfig } from '@shared/contracts/aliases'
 import type { KnowledgeBaseUserConfig, KnowledgeNode } from '@shared/contracts/knowledgeBase'
 import type { McpConfigFile, McpServerUserConfig, McpToolStatesUserConfig } from '@shared/contracts/mcp'
 import type { QuickCommandGroupConfig, QuickCommandSnippetConfig, QuickCommandsUserConfig } from '@shared/contracts/quickCommands'
 import type { ShortcutUserConfig, UserRuleConfig } from '@shared/contracts/settingsPreferences'
 import type { SkillUserConfig } from '@shared/contracts/skills'
 import {
-  defaultAliasCommands,
   defaultKnowledgeBase,
   defaultMcpServers,
   defaultMcpToolStates,
@@ -217,37 +215,6 @@ export const normalizeKnowledgeBaseConfig = (source?: Partial<KnowledgeBaseUserC
     typeof incoming.usedBytes !== 'number' ||
     typeof incoming.totalBytes !== 'number' ||
     JSON.stringify(comparable) !== JSON.stringify(normalized)
-
-  return {
-    normalized,
-    changed
-  }
-}
-
-export const normalizeAliasCommandsConfig = (source?: AliasCommandConfig[]) => {
-  const rawCommands = Array.isArray(source) ? source : defaultAliasCommands
-  const seenAliases = new Set<string>()
-  const seenIds = new Set<string>()
-  const normalized: AliasCommandConfig[] = []
-
-  rawCommands.forEach((item, index) => {
-    if (!isRecord(item)) return
-    const alias = typeof item.alias === 'string' ? item.alias.trim() : ''
-    const command = typeof item.command === 'string' ? item.command.trim() : ''
-    if (!alias || !command || seenAliases.has(alias)) return
-    let id = typeof item.id === 'string' && item.id.trim() && item.id !== 'new' ? item.id.trim() : ''
-    if (!id) return
-    while (seenIds.has(id)) id = `${id}-${index + 1}`
-    seenAliases.add(alias)
-    seenIds.add(id)
-    const commandConfig: AliasCommandConfig = { id, alias, command }
-    if (typeof item.createdAt === 'number' && Number.isFinite(item.createdAt)) {
-      commandConfig.createdAt = item.createdAt
-    }
-    normalized.push(commandConfig)
-  })
-
-  const changed = !Array.isArray(source) || JSON.stringify(source) !== JSON.stringify(normalized)
 
   return {
     normalized,

@@ -3,7 +3,6 @@ import type { AiopsMutationResult } from './common'
 export type ExtensionUserConfig = {
   autoCompleteStatus: boolean
   quickVimStatus: boolean
-  aliasStatus: boolean
   highlightStatus: boolean
 }
 
@@ -11,7 +10,7 @@ export type ExtensionInstallStage = 'downloading' | 'verifying' | 'installing' |
 
 export type ExtensionPluginSource = 'preinstalled' | 'store' | 'local'
 
-export type ExtensionIconKey = 'jumpserver' | 'alias' | 'runbook' | 'cloud' | 'private' | 'local'
+export type ExtensionIconKey = 'jumpserver' | 'runbook' | 'cloud' | 'private' | 'local'
 
 export type ExtensionFunctionConfig = {
   title: string

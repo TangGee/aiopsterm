@@ -134,22 +134,6 @@ import type {
   QuickCommandsUserConfig as QuickCommandsUserConfigPreload
 } from '../src/shared/preload'
 import type {
-  AliasCommandConfig as AliasCommandConfigContract,
-  AliasCommandDeleteInput as AliasCommandDeleteInputContract,
-  AliasCommandDeleteResult as AliasCommandDeleteResultContract,
-  AliasCommandListResult as AliasCommandListResultContract,
-  AliasCommandMutationResult as AliasCommandMutationResultContract,
-  AliasCommandSaveInput as AliasCommandSaveInputContract
-} from '../src/shared/contracts/aliases'
-import type {
-  AliasCommandConfig as AliasCommandConfigPreload,
-  AliasCommandDeleteInput as AliasCommandDeleteInputPreload,
-  AliasCommandDeleteResult as AliasCommandDeleteResultPreload,
-  AliasCommandListResult as AliasCommandListResultPreload,
-  AliasCommandMutationResult as AliasCommandMutationResultPreload,
-  AliasCommandSaveInput as AliasCommandSaveInputPreload
-} from '../src/shared/preload'
-import type {
   McpConfigFile as McpConfigFileContract,
   McpConfigWriteResult as McpConfigWriteResultContract,
   McpResourceReadInput as McpResourceReadInputContract,
@@ -523,18 +507,6 @@ type QuickCommandSnippetMutationPreloadMatchesContract = AssertAssignable<QuickC
 type QuickCommandSnippetMutationContractMatchesPreload = AssertAssignable<QuickCommandSnippetMutationResultPreload, QuickCommandSnippetMutationResultContract>
 type QuickCommandScriptPlanPreloadMatchesContract = AssertAssignable<QuickCommandScriptPlanResultContract, QuickCommandScriptPlanResultPreload>
 type QuickCommandScriptPlanContractMatchesPreload = AssertAssignable<QuickCommandScriptPlanResultPreload, QuickCommandScriptPlanResultContract>
-type AliasCommandPreloadMatchesContract = AssertAssignable<AliasCommandConfigContract, AliasCommandConfigPreload>
-type AliasCommandContractMatchesPreload = AssertAssignable<AliasCommandConfigPreload, AliasCommandConfigContract>
-type AliasSaveInputPreloadMatchesContract = AssertAssignable<AliasCommandSaveInputContract, AliasCommandSaveInputPreload>
-type AliasSaveInputContractMatchesPreload = AssertAssignable<AliasCommandSaveInputPreload, AliasCommandSaveInputContract>
-type AliasListResultPreloadMatchesContract = AssertAssignable<AliasCommandListResultContract, AliasCommandListResultPreload>
-type AliasListResultContractMatchesPreload = AssertAssignable<AliasCommandListResultPreload, AliasCommandListResultContract>
-type AliasMutationPreloadMatchesContract = AssertAssignable<AliasCommandMutationResultContract, AliasCommandMutationResultPreload>
-type AliasMutationContractMatchesPreload = AssertAssignable<AliasCommandMutationResultPreload, AliasCommandMutationResultContract>
-type AliasDeleteInputPreloadMatchesContract = AssertAssignable<AliasCommandDeleteInputContract, AliasCommandDeleteInputPreload>
-type AliasDeleteInputContractMatchesPreload = AssertAssignable<AliasCommandDeleteInputPreload, AliasCommandDeleteInputContract>
-type AliasDeleteResultPreloadMatchesContract = AssertAssignable<AliasCommandDeleteResultContract, AliasCommandDeleteResultPreload>
-type AliasDeleteResultContractMatchesPreload = AssertAssignable<AliasCommandDeleteResultPreload, AliasCommandDeleteResultContract>
 type McpConfigFilePreloadMatchesContract = AssertAssignable<McpConfigFileContract, McpConfigFilePreload>
 type McpConfigFileContractMatchesPreload = AssertAssignable<McpConfigFilePreload, McpConfigFileContract>
 type McpServerPreloadMatchesContract = AssertAssignable<McpServerUserConfigContract, McpServerUserConfigPreload>
@@ -935,25 +907,6 @@ describe('shared contract compatibility exports', () => {
     ] = [true, true, true, true, true, true, true, true]
 
     expect(checks).toEqual([true, true, true, true, true, true, true, true])
-  })
-
-  it('keeps Alias contracts compatible through the preload export', () => {
-    const checks: [
-      AliasCommandPreloadMatchesContract,
-      AliasCommandContractMatchesPreload,
-      AliasSaveInputPreloadMatchesContract,
-      AliasSaveInputContractMatchesPreload,
-      AliasListResultPreloadMatchesContract,
-      AliasListResultContractMatchesPreload,
-      AliasMutationPreloadMatchesContract,
-      AliasMutationContractMatchesPreload,
-      AliasDeleteInputPreloadMatchesContract,
-      AliasDeleteInputContractMatchesPreload,
-      AliasDeleteResultPreloadMatchesContract,
-      AliasDeleteResultContractMatchesPreload
-    ] = [true, true, true, true, true, true, true, true, true, true, true, true]
-
-    expect(checks).toEqual([true, true, true, true, true, true, true, true, true, true, true, true])
   })
 
   it('keeps MCP contracts compatible through the preload export', () => {

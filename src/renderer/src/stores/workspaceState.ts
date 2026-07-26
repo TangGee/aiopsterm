@@ -4,7 +4,6 @@ import { createWorkspaceKubernetesState } from '@/stores/workspaceKubernetesStat
 import { type FilesUiMode } from '@/services/files/workspaceFilesController'
 import { type ChatMessage, type ConversationItem, type TodoItem } from '@/services/ai/workspaceAiChatController'
 import {
-  type WorkspaceAliasCommand,
   type WorkspaceExtensionInstallProgress,
   type WorkspaceExtensionPlugin
 } from '@/services/extensions/workspaceExtensionsController'
@@ -218,8 +217,6 @@ export const createWorkspaceStoreState = () => {
   const extensionDragActive = ref(false)
   const extensionInstallingPackageName = ref('')
   const assetManagementOpenRequest = ref<AssetManagementOpenRequest>({ sequence: 0, action: 'none' })
-  const aliasCommands = ref<WorkspaceAliasCommand[]>([])
-  const aliasSearchQuery = ref('')
   const k8sState = createWorkspaceKubernetesState()
   const activeSettingsSection = ref<SettingSectionKey>('general')
   const editorSettings = ref<EditorSettings>({ ...defaultEditorSettings })
@@ -460,8 +457,6 @@ export const createWorkspaceStoreState = () => {
     extensionDragActive,
     extensionInstallingPackageName,
     assetManagementOpenRequest,
-    aliasCommands,
-    aliasSearchQuery,
     ...k8sState,
     activeSettingsSection,
     editorSettings,

@@ -5,7 +5,6 @@ import { defaultSettingsRulesConfig } from '@shared/settingsPreferencesSeed'
 import { defaultSkillsConfig } from '@shared/skillsSeed'
 import { defaultWorkspacePreferencesConfig } from '@shared/workspacePreferencesSeed'
 import { normalizeConfigModelName, normalizeConfigModelProvider } from './backend/app/configBoundary'
-import type { AliasCommandConfig } from '@shared/contracts/aliases'
 import type {
   EditorUserConfig,
   ExportMcpUserConfig,
@@ -109,7 +108,6 @@ export const defaultConfig: UserConfig = {
   extensionSettings: {
     autoCompleteStatus: true,
     quickVimStatus: true,
-    aliasStatus: true,
     highlightStatus: true
   },
   keywordHighlight: defaultKeywordHighlightConfig,
@@ -191,9 +189,6 @@ const cloneKnowledgeBase = (source?: KnowledgeBaseUserConfig): KnowledgeBaseUser
         totalBytes: source.totalBytes
       }
     : undefined
-
-const cloneAliasCommands = (commands?: AliasCommandConfig[]): AliasCommandConfig[] | undefined =>
-  commands?.map((command) => ({ ...command }))
 
 const cloneShortcuts = (shortcuts?: ShortcutUserConfig[]): ShortcutUserConfig[] | undefined =>
   shortcuts?.map((shortcut) => ({ ...shortcut }))
@@ -508,7 +503,6 @@ export const mergeConfig = (base: UserConfig, patch: Partial<UserConfig> = {}): 
         }
       : undefined,
   knowledgeBase: cloneKnowledgeBase(patch.knowledgeBase || base.knowledgeBase),
-  aliasCommands: cloneAliasCommands(patch.aliasCommands || base.aliasCommands),
   shortcuts: cloneShortcuts(patch.shortcuts || base.shortcuts),
   rules: cloneRules(patch.rules || base.rules),
   skills: cloneSkills(patch.skills || base.skills),

@@ -8,7 +8,6 @@ import { configureAiChatRuntime } from '../ai/aiChat'
 import { configureAiCommandBackendRuntime } from '../ai/aiCommands'
 import { configureAiContextBackendRuntime } from '../ai/aiContext'
 import { configureAiTodoBackendRuntime } from '../ai/aiTodos'
-import { configureAliasBackendRuntime } from '../quick-commands/aliases'
 import { configureAgentHookInstallerRuntime } from '../agent/agentHookInstaller'
 import { configureClineAgentRuntime } from '../agent/clineAgentRuntime'
 import {
@@ -49,7 +48,6 @@ import { configureVoiceBackendRuntime } from '../ai/voice'
 import {
   shouldUseAiChatBackendDouble,
   shouldUseAiTodoSeedData,
-  shouldUseAliasesSeedData,
   shouldUseAssetsSeedData,
   shouldUseChatHistorySeedData,
   shouldUseDataSyncBackendDouble,
@@ -290,10 +288,6 @@ export const configureMainBackendRuntimes = (input: ConfigureMainRuntimeInput) =
   configureQuickCommandBackendRuntime({
     databasePath: join(userDataPath, 'aiopsterm-state.db'),
     useSeedData: shouldUseQuickCommandsSeedData()
-  })
-  configureAliasBackendRuntime({
-    databasePath: join(userDataPath, 'aiopsterm-state.db'),
-    useSeedData: shouldUseAliasesSeedData()
   })
   configureAppUpdateRuntime({
     installer: async (update) => {

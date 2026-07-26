@@ -29,7 +29,6 @@ export const createSettingsWorkspaceAdvancedPages = (
           settingsPageTitle('扩展', 'extensions'),
           h('div', { class: 'settings-form-card' }, [
             switchRow('自动补全', workspace.extensionSettings.autoCompleteStatus, (checked) => workspace.updateExtensionSettings({ autoCompleteStatus: checked })),
-            switchRow('Alias', workspace.extensionSettings.aliasStatus, (checked) => workspace.updateExtensionSettings({ aliasStatus: checked })),
             switchRow('关键词高亮', workspace.extensionSettings.highlightStatus, (checked) => workspace.updateExtensionSettings({ highlightStatus: checked })),
             h('div', { class: 'settings-form-row' }, [
               h('label', 'Keyword Highlighting Configuration'),

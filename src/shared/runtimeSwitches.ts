@@ -26,8 +26,6 @@ const envFlagDisabled = (name: string) => envValue(name) === '0'
 
 export const shouldUseAiChatBackendDouble = () => envFlagEnabled('AIOPSTERM_AI_CHAT_BACKEND_DOUBLE')
 
-export const shouldUseAliasesSeedData = () => envFlagEnabled('AIOPSTERM_ALIASES_ENABLE_SEED')
-
 export const shouldUseAiTodoSeedData = () => envFlagEnabled('AIOPSTERM_AI_TODO_ENABLE_SEED')
 
 export const shouldUseAssetsSeedData = () => envFlagEnabled('AIOPSTERM_ASSETS_ENABLE_SEED')

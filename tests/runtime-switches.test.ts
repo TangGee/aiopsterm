@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it } from 'vitest'
 import {
   shouldRunMcpDiscovery,
   shouldUseAiChatBackendDouble,
-  shouldUseAliasesSeedData,
   shouldUseAiTodoSeedData,
   shouldUseAssetsSeedData,
   shouldUseChatHistorySeedData,
@@ -33,7 +32,6 @@ const originalNodeEnv = process.env.NODE_ENV
 const originalRuntimeEnv = (globalThis as { __AIOPSTERM_RUNTIME_ENV__?: Record<string, string | undefined> }).__AIOPSTERM_RUNTIME_ENV__
 const runtimeSwitches = [
   ['AIOPSTERM_AI_CHAT_BACKEND_DOUBLE', shouldUseAiChatBackendDouble],
-  ['AIOPSTERM_ALIASES_ENABLE_SEED', shouldUseAliasesSeedData],
   ['AIOPSTERM_AI_TODO_ENABLE_SEED', shouldUseAiTodoSeedData],
   ['AIOPSTERM_ASSETS_ENABLE_SEED', shouldUseAssetsSeedData],
   ['AIOPSTERM_CHAT_HISTORY_ENABLE_SEED', shouldUseChatHistorySeedData],

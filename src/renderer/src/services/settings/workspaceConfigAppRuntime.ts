@@ -28,7 +28,6 @@ import {
   normalizeSshProxyConfigs
 } from './workspaceConfigPreferenceRuntime'
 import {
-  normalizeAliasCommandsConfig,
   normalizeKnowledgeBaseConfig,
   normalizeMcpServersConfig,
   normalizeRulesConfig,
@@ -290,10 +289,9 @@ export const normalizeOnboardingConfig = (source?: UserConfig['onboarding']) => 
 }
 
 export const stripBusinessDataConfig = (source: Partial<UserConfig>): Partial<UserConfig> => {
-  const { quickCommands, knowledgeBase, aliasCommands, ...rest } = source
+  const { quickCommands, knowledgeBase, ...rest } = source
   void quickCommands
   void knowledgeBase
-  void aliasCommands
   return rest
 }
 
@@ -389,7 +387,6 @@ export const mergeUserConfig = (base: UserConfig, patch: Partial<UserConfig> = {
           }
         : undefined,
     knowledgeBase: patch.knowledgeBase || base.knowledgeBase ? normalizeKnowledgeBaseConfig(patch.knowledgeBase || base.knowledgeBase).normalized : undefined,
-    aliasCommands: patch.aliasCommands || base.aliasCommands ? normalizeAliasCommandsConfig(patch.aliasCommands || base.aliasCommands).normalized : undefined,
     shortcuts: normalizeShortcutsConfig(patch.shortcuts || base.shortcuts).normalized,
     rules: normalizeRulesConfig(patch.rules || base.rules, patch.customInstructions !== undefined ? patch.customInstructions : base.customInstructions).normalized,
     skills: normalizeSkillsConfig(patch.skills || base.skills).normalized,

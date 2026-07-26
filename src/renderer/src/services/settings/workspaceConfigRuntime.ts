@@ -15,7 +15,6 @@ export type {
 } from './workspaceConfigDefaults'
 export {
   defaultAiPreferences,
-  defaultAliasCommands,
   defaultConfig,
   defaultEditorSettings,
   defaultExportMcpSettings,
@@ -103,7 +102,6 @@ export {
   knowledgeNodeSize,
   knowledgeTreeSize,
   mcpConfigFilesMatch,
-  normalizeAliasCommandsConfig,
   normalizeKnowledgeBaseConfig,
   normalizeMcpConfigFile,
   normalizeMcpServersConfig,
