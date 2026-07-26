@@ -58,6 +58,7 @@
           class="project-files-recent-row"
           :disabled="entry.kind === 'deleted'"
           @click="openFile(entry.path)"
+          @contextmenu.prevent.stop="openRecentEntryMenu($event, entry)"
         >
           <span class="project-file-change-kind" :class="entry.kind">{{ changeKindLabel(entry.kind) }}</span>
           <span :title="entry.path">{{ entry.path }}</span>
@@ -142,29 +143,31 @@
       <span>{{ emptyMessage }}</span>
     </div>
 
-    <ProjectFilesContextMenu
-      v-if="contextMenu.visible"
-      :x="contextMenu.x"
-      :y="contextMenu.y"
-      :entry="contextMenu.entry"
-      @create-file="openCreateDialog"
-      @rename="openRenameDialog"
-      @delete-file="openDeleteDialog"
-      @copy-relative-path="copyEntryPath(false)"
-      @copy-absolute-path="copyEntryPath(true)"
-    />
+    <Teleport to="body">
+      <ProjectFilesContextMenu
+        v-if="contextMenu.visible"
+        :x="contextMenu.x"
+        :y="contextMenu.y"
+        :entry="contextMenu.entry"
+        @create-file="openCreateDialog"
+        @rename="openRenameDialog"
+        @delete-file="openDeleteDialog"
+        @copy-relative-path="copyEntryPath(false)"
+        @copy-absolute-path="copyEntryPath(true)"
+      />
 
-    <ProjectFilesMutationDialog
-      v-if="mutationDialog.visible"
-      :kind="mutationDialog.kind"
-      :value="mutationDialog.value"
-      :message="mutationDialog.message"
-      :error="mutationDialog.error"
-      :busy="mutationDialog.busy"
-      @update:value="mutationDialog.value = $event"
-      @confirm="confirmMutationDialog"
-      @cancel="closeMutationDialog"
-    />
+      <ProjectFilesMutationDialog
+        v-if="mutationDialog.visible"
+        :kind="mutationDialog.kind"
+        :value="mutationDialog.value"
+        :message="mutationDialog.message"
+        :error="mutationDialog.error"
+        :busy="mutationDialog.busy"
+        @update:value="mutationDialog.value = $event"
+        @confirm="confirmMutationDialog"
+        @cancel="closeMutationDialog"
+      />
+    </Teleport>
   </section>
 </template>
 
@@ -200,7 +203,8 @@ import type {
   ProjectDirectoryEntry,
   ProjectEntryMutationInput,
   ProjectFileContext,
-  ProjectFileChangeKind
+  ProjectFileChangeKind,
+  ProjectFileRecentEntry
 } from '@shared/contracts/projectFiles'
 import type { ManagedAiSessionRecord } from '@shared/contracts/managedAiSessions'
 
@@ -341,6 +345,18 @@ const openEntryMenu = (event: MouseEvent, entry: ProjectDirectoryEntry) => {
     entry,
     entry.type === 'directory' ? entry.relativePath : projectRelativeDirname(entry.relativePath)
   )
+}
+
+const openRecentEntryMenu = (event: MouseEvent, entry: ProjectFileRecentEntry) => {
+  if (entry.kind === 'deleted') return
+  const directoryEntry: ProjectDirectoryEntry = {
+    name: projectRelativeBasename(entry.path),
+    relativePath: entry.path,
+    type: 'file',
+    size: 0,
+    modifiedAt: entry.changedAt
+  }
+  openEntryMenu(event, directoryEntry)
 }
 
 const openMutationDialog = (
@@ -685,20 +701,22 @@ offChanged = onChanged?.((nextContext: ProjectFileContext) => {
 
 const handleGlobalPointerDown = () => closeContextMenu()
 const handleGlobalKeydown = (event: KeyboardEvent) => {
-  if (event.key !== 'Escape') return
+  if (event.key !== 'Escape' || (!contextMenu.visible && !mutationDialog.visible)) return
+  event.preventDefault()
+  event.stopPropagation()
   closeContextMenu()
   closeMutationDialog()
 }
 
 onMounted(() => {
   document.addEventListener('pointerdown', handleGlobalPointerDown)
-  document.addEventListener('keydown', handleGlobalKeydown)
+  document.addEventListener('keydown', handleGlobalKeydown, true)
 })
 
 onBeforeUnmount(() => {
   if (noticeTimer) clearTimeout(noticeTimer)
   document.removeEventListener('pointerdown', handleGlobalPointerDown)
-  document.removeEventListener('keydown', handleGlobalKeydown)
+  document.removeEventListener('keydown', handleGlobalKeydown, true)
   offChanged?.()
 })
 </script>

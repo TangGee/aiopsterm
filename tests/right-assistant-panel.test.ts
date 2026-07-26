@@ -230,6 +230,56 @@ describe('RightAssistantPanel', () => {
     expect(wrapper.find('[data-testid="project-files-drawer"]').exists()).toBe(true)
   })
 
+  it('keeps the files drawer mounted while the same terminal refreshes project availability', async () => {
+    getProjectFileContext.mockResolvedValueOnce({
+      ok: true,
+      data: {
+        source: 'codex',
+        sessionId: 'before-refresh',
+        projectRoot: '/work/before-refresh',
+        capability: 'adapter',
+        recent: []
+      }
+    })
+
+    const wrapper = mountPanel()
+    selectManagedSession('before-refresh', '/work/before-refresh')
+    const workspace = useWorkspaceStore()
+    await flushPromises()
+    await wrapper.get('[data-testid="project-files-toggle"]').trigger('click')
+
+    let resolveRefresh: (value: unknown) => void = () => undefined
+    getProjectFileContext.mockImplementationOnce(() => new Promise((resolve) => {
+      resolveRefresh = resolve
+    }))
+    workspace.upsertManagedAiSession({
+      source: 'codex',
+      event: 'session_start',
+      sessionId: 'during-refresh',
+      title: 'during-refresh',
+      summary: '',
+      terminalSessionId: 'terminal-before-refresh',
+      cwd: '/work/during-refresh',
+      receivedAt: Date.now() + 1
+    })
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.find('[data-testid="project-files-drawer"]').exists()).toBe(true)
+
+    resolveRefresh({
+      ok: true,
+      data: {
+        source: 'codex',
+        sessionId: 'during-refresh',
+        projectRoot: '/work/during-refresh',
+        capability: 'adapter',
+        recent: []
+      }
+    })
+    await flushPromises()
+    expect(wrapper.find('[data-testid="project-files-drawer"]').exists()).toBe(true)
+  })
+
   it('keeps the terminal preference when the panel component is remounted', async () => {
     getProjectFileContext.mockResolvedValue({
       ok: true,

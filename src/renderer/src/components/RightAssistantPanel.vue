@@ -33,6 +33,7 @@ defineEmits<{
 
 const workspace = useWorkspaceStore()
 const projectFilesAvailable = ref(false)
+const projectFilesAvailableTerminalSessionId = ref('')
 let availabilityGeneration = 0
 
 const activeManagedAiSession = computed(() => {
@@ -71,14 +72,19 @@ const activeSessionSignature = computed(() => {
 const activeTerminalSessionId = computed(() => activeManagedAiSession.value?.terminalSessionId || '')
 const projectFilesActive = computed(() =>
   projectFilesAvailable.value &&
+  projectFilesAvailableTerminalSessionId.value === activeTerminalSessionId.value &&
   workspace.rightAssistantSurfaceForTerminal(activeTerminalSessionId.value) === 'files'
 )
 
 const refreshProjectFilesAvailability = async (contextSignature: string) => {
   const session = activeManagedAiSession.value
   const requestGeneration = ++availabilityGeneration
-  projectFilesAvailable.value = false
   if (!session) return
+  const terminalSessionId = session.terminalSessionId || ''
+  if (projectFilesAvailableTerminalSessionId.value !== terminalSessionId) {
+    projectFilesAvailable.value = false
+    projectFilesAvailableTerminalSessionId.value = ''
+  }
   const getContext = projectFilesClient.getContext()
   const logFields = {
     source: session.source,
@@ -98,6 +104,7 @@ const refreshProjectFilesAvailability = async (contextSignature: string) => {
       return
     }
     projectFilesAvailable.value = Boolean(result.ok && result.data)
+    projectFilesAvailableTerminalSessionId.value = projectFilesAvailable.value ? terminalSessionId : ''
     writeRendererRuntimeLog(
       projectFilesAvailable.value ? 'debug' : 'warn',
       projectFilesAvailable.value
@@ -114,6 +121,7 @@ const refreshProjectFilesAvailability = async (contextSignature: string) => {
   } catch (error) {
     if (requestGeneration !== availabilityGeneration) return
     projectFilesAvailable.value = false
+    projectFilesAvailableTerminalSessionId.value = ''
     writeRendererRuntimeLog('warn', 'renderer.project-files.context.failed', {
       ...logFields,
       errorMessage: error instanceof Error ? error.message : String(error)
@@ -140,6 +148,7 @@ watch(
     if (!contextSignature) {
       availabilityGeneration += 1
       projectFilesAvailable.value = false
+      projectFilesAvailableTerminalSessionId.value = ''
       return
     }
     void refreshProjectFilesAvailability(contextSignature)
