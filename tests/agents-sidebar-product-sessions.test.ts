@@ -213,7 +213,7 @@ describe('AgentsSidebar product sessions', () => {
   })
 
   it('requires confirmation before permanent deletion', async () => {
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true).mockReturnValueOnce(true)
+    const nativeConfirm = vi.spyOn(window, 'confirm')
     const wrapper = mount(AgentsSidebar)
     await flushPromises()
 
@@ -221,15 +221,24 @@ describe('AgentsSidebar product sessions', () => {
     await deleteButton.trigger('keydown', { key: ' ', code: 'Space' })
     expect(wrapper.emitted('requestProductSession')).toBeUndefined()
     await deleteButton.trigger('click')
+    const dialog = () => document.querySelector<HTMLElement>('[data-testid="agents-delete-dialog"]')
+    expect(dialog()).not.toBeNull()
+    expect(dialog()?.textContent).toContain('Production check')
+    expect(document.activeElement?.textContent).toContain('Cancel')
+    dialog()?.querySelector<HTMLButtonElement>('footer button')?.click()
+    await flushPromises()
     expect(window.aiops.deleteProductSession).not.toHaveBeenCalled()
+    expect(dialog()).toBeNull()
 
     await deleteButton.trigger('click')
+    dialog()?.querySelector<HTMLButtonElement>('footer button.danger')?.click()
     await flushPromises()
-    expect(confirm).toHaveBeenCalledTimes(2)
+    expect(nativeConfirm).not.toHaveBeenCalled()
     expect(window.aiops.deleteProductSession).toHaveBeenCalledWith('classic-open')
     expect(wrapper.find('[data-session-id="classic-open"]').exists()).toBe(false)
 
     await wrapper.find('[data-session-id="codex-closed"] .delete-btn').trigger('click')
+    dialog()?.querySelector<HTMLButtonElement>('footer button.danger')?.click()
     await flushPromises()
     expect(window.aiops.deleteProductSession).toHaveBeenLastCalledWith('codex-closed')
     wrapper.unmount()

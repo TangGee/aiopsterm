@@ -106,8 +106,8 @@
             type="button"
             :aria-label="sessionTitle(session)"
             @click="requestExistingSession(session)"
-            @keydown.delete.prevent="deleteSession(session)"
-            @keydown.backspace.prevent="deleteSession(session)"
+            @keydown.delete.prevent="requestDeleteSession(session)"
+            @keydown.backspace.prevent="requestDeleteSession(session)"
           >
             <span
               class="product-session-icon"
@@ -154,7 +154,7 @@
             :title="t('agents.deleteSession')"
             :aria-label="`${t('agents.deleteSession')}: ${sessionTitle(session)}`"
             :disabled="deletingId === session.id"
-            @click.stop="deleteSession(session)"
+            @click.stop="requestDeleteSession(session)"
           >
             <LoaderCircle v-if="deletingId === session.id" class="agents-session-loading" />
             <Trash2 v-else />
@@ -171,11 +171,65 @@
         </button>
       </div>
     </div>
+
+    <Teleport to="body">
+      <div
+        v-if="pendingDeleteSession"
+        class="agents-delete-dialog-backdrop"
+        data-testid="agents-delete-dialog"
+        @mousedown.self="cancelDeleteSession"
+      >
+        <section
+          class="agents-delete-dialog"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="agents-delete-dialog-title"
+          aria-describedby="agents-delete-dialog-description"
+          @keydown.esc.stop.prevent="cancelDeleteSession"
+        >
+          <header>
+            <span class="agents-delete-dialog-icon">
+              <Trash2 />
+            </span>
+            <div>
+              <strong id="agents-delete-dialog-title">{{ t('agents.deleteSession') }}</strong>
+              <p id="agents-delete-dialog-description">
+                {{
+                  t('agents.deleteSessionConfirm', {
+                    title: sessionTitle(pendingDeleteSession)
+                  })
+                }}
+              </p>
+            </div>
+          </header>
+          <footer>
+            <button
+              ref="deleteCancelButton"
+              type="button"
+              :disabled="Boolean(deletingId)"
+              @click="cancelDeleteSession"
+            >
+              {{ t('common.cancel') }}
+            </button>
+            <button
+              class="danger"
+              type="button"
+              :disabled="Boolean(deletingId)"
+              @click="confirmDeleteSession"
+            >
+              <LoaderCircle v-if="deletingId" class="agents-session-loading" />
+              <Trash2 v-else />
+              {{ t('common.delete') }}
+            </button>
+          </footer>
+        </section>
+      </div>
+    </Teleport>
   </aside>
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Bot, Code2, Database, LoaderCircle, Plus, Search, Trash2, X } from 'lucide-vue-next'
 import { useI18n } from '@/i18n'
 import { productSessionClient } from '@/services/ai/productSessionClient'
@@ -192,6 +246,8 @@ const sessions = ref<ProductSessionRecord[]>([])
 const loading = ref(false)
 const catalogError = ref('')
 const deletingId = ref('')
+const pendingDeleteSession = ref<ProductSessionRecord | null>(null)
+const deleteCancelButton = ref<HTMLButtonElement | null>(null)
 const newSessionMenuOpen = ref(false)
 const currentPage = ref(1)
 const pageSize = 20
@@ -463,12 +519,25 @@ const requestExistingSession = (session: ProductSessionRecord) => {
   scheduleRefresh()
 }
 
-const deleteSession = async (session: ProductSessionRecord) => {
+const requestDeleteSession = async (session: ProductSessionRecord) => {
+  if (deletingId.value || pendingDeleteSession.value) return
+  pendingDeleteSession.value = session
+  await nextTick()
+  deleteCancelButton.value?.focus()
+}
+
+const cancelDeleteSession = () => {
   if (deletingId.value) return
-  if (!window.confirm(t('agents.deleteSessionConfirm', { title: session.title || surfaceLabel(session.surface) }))) return
+  pendingDeleteSession.value = null
+}
+
+const confirmDeleteSession = async () => {
+  const session = pendingDeleteSession.value
+  if (!session || deletingId.value) return
   const deleteProductSession = productSessionClient.delete()
   if (!deleteProductSession) {
     catalogError.value = t('agents.sessionsUnavailable')
+    pendingDeleteSession.value = null
     return
   }
   deletingId.value = session.id
@@ -486,6 +555,7 @@ const deleteSession = async (session: ProductSessionRecord) => {
     catalogError.value = t('agents.sessionDeleteFailed')
   } finally {
     deletingId.value = ''
+    pendingDeleteSession.value = null
   }
 }
 

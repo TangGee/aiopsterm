@@ -385,6 +385,133 @@
   opacity: 1;
 }
 
+.agents-delete-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--app-z-modal);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: color-mix(in srgb, #000 58%, transparent);
+}
+
+.agents-delete-dialog {
+  width: min(420px, calc(100vw - 36px));
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--theme-core-danger) 34%, var(--theme-module-active-border));
+  border-radius: 9px;
+  background: var(--theme-module-active-modal-surface-bg);
+  background-size: var(--theme-module-active-modal-surface-size);
+  background-position: var(--theme-module-active-modal-surface-position);
+  background-repeat: var(--theme-module-active-modal-surface-repeat);
+  box-shadow: var(--theme-module-active-shadow-strong);
+  color: var(--theme-module-active-text);
+}
+
+.agents-delete-dialog header {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  align-items: start;
+  gap: 11px;
+  padding: 16px;
+}
+
+.agents-delete-dialog header > div {
+  min-width: 0;
+}
+
+.agents-delete-dialog-icon {
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid color-mix(in srgb, var(--theme-core-danger) 34%, var(--theme-module-active-border));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--theme-core-danger) 11%, var(--theme-module-active-modal-card-bg));
+  color: var(--theme-core-danger);
+}
+
+.agents-delete-dialog-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.agents-delete-dialog strong {
+  display: block;
+  color: var(--theme-module-active-text);
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.agents-delete-dialog p {
+  margin: 6px 0 0;
+  color: var(--theme-module-active-text-muted);
+  font-size: 12px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.agents-delete-dialog footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  border-top: 1px solid var(--theme-module-active-border);
+  padding: 11px 14px;
+  background: color-mix(in srgb, var(--theme-module-active-modal-card-bg) 34%, transparent);
+}
+
+.agents-delete-dialog footer button {
+  min-width: 72px;
+  height: 30px;
+  border: 1px solid var(--theme-module-active-border);
+  border-radius: 6px;
+  background: var(--theme-module-active-modal-strong-bg);
+  color: var(--theme-module-active-text);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 12px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.agents-delete-dialog footer button:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--theme-module-active-accent) 48%, var(--theme-module-active-border));
+  background: var(--theme-module-active-card-strong-bg);
+}
+
+.agents-delete-dialog footer button:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--theme-module-active-accent) 70%, transparent);
+  outline-offset: 2px;
+}
+
+.agents-delete-dialog footer button.danger {
+  border-color: color-mix(in srgb, var(--theme-core-danger) 64%, var(--theme-module-active-border));
+  background: var(--theme-core-danger);
+  color: #fff;
+}
+
+.agents-delete-dialog footer button.danger:hover:not(:disabled) {
+  border-color: var(--theme-core-danger);
+  background: color-mix(in srgb, var(--theme-core-danger) 86%, #000);
+}
+
+.agents-delete-dialog footer button:disabled {
+  cursor: default;
+  opacity: 0.62;
+}
+
+.agents-delete-dialog footer svg {
+  width: 13px;
+  height: 13px;
+}
+
 .load-more-btn {
   flex: 0 0 auto;
   min-height: 30px;
