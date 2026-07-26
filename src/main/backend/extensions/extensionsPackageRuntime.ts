@@ -19,7 +19,8 @@ import {
   normalizeAbsoluteHttpUrl,
   normalizeExtensionIconKey,
   normalizeSha256,
-  parseFirstContributedViewName,
+  parseManifestAssetProviders,
+  parseManifestCommands,
   parseManifestFunctions,
   parseStringArray,
   trimText,
@@ -43,6 +44,7 @@ let runtimeConfig: ExtensionPackageRuntimeConfig = {
   extensionRootDir: '',
   storePackageDir: '',
   remotePackageCacheDir: '',
+  appVersion: '0.0.0',
   fetch: async () => {
     throw new Error('Extension package runtime is not configured.')
   }
@@ -53,6 +55,120 @@ export const configureExtensionPackageRuntime = (config: ExtensionPackageRuntime
 }
 
 export const localPackageErrorResult = extensionPluginOperationError
+
+const versionParts = (value: string) => value.split(/[.-]/).map((part) => Number.parseInt(part, 10) || 0)
+
+const compareEngineVersion = (left: string, right: string) => {
+  const leftParts = versionParts(left)
+  const rightParts = versionParts(right)
+  const length = Math.max(leftParts.length, rightParts.length)
+  for (let index = 0; index < length; index += 1) {
+    const difference = (leftParts[index] || 0) - (rightParts[index] || 0)
+    if (difference) return difference
+  }
+  return 0
+}
+
+const supportsAiopstermVersion = (range: string, appVersion: string) => {
+  const normalized = range.trim()
+  if (normalized === '*') return true
+  const versionPattern = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/
+  if (!versionPattern.test(appVersion)) return false
+  if (normalized.startsWith('>=')) {
+    const minimumVersion = normalized.slice(2).trim()
+    return versionPattern.test(minimumVersion) && compareEngineVersion(appVersion, minimumVersion) >= 0
+  }
+  if (!versionPattern.test(normalized)) return false
+  return compareEngineVersion(appVersion, normalized) === 0
+}
+
+type PluginFromManifestOptions = {
+  source: 'builtin' | 'local' | 'store'
+  packagePath?: string
+  storePackagePath?: string
+  packageSize?: number
+  readme?: string
+  lastUpdated?: string
+  basePlugin?: ExtensionPluginRuntimeConfig
+}
+
+export const pluginFromAiopstermManifest = (
+  manifest: LocalExtensionPackageManifest,
+  options: PluginFromManifestOptions
+): ExtensionPluginRuntimeConfig | ExtensionPluginOperationResult => {
+  const pluginId = trimText(manifest.id)
+  const version = trimText(manifest.version)
+  const displayName = trimText(manifest.displayName) || trimText(manifest.name) || pluginId
+  const kind = manifest.kind === 'content' || manifest.kind === 'provider' ? manifest.kind : ''
+  const engineRange = trimText(manifest.engines?.aiopsterm)
+  if (manifest.manifestVersion !== 1) {
+    return localPackageErrorResult('EXTENSION_PACKAGE_MANIFEST_INVALID', 'aiopsterm.plugin.json must use manifestVersion 1.')
+  }
+  if (!pluginId) return localPackageErrorResult('EXTENSION_PACKAGE_MANIFEST_INVALID', 'aiopsterm.plugin.json must include an id.')
+  if (!trimText(manifest.displayName)) {
+    return localPackageErrorResult('EXTENSION_PACKAGE_MANIFEST_INVALID', 'aiopsterm.plugin.json must include a displayName.')
+  }
+  if (!version) return localPackageErrorResult('EXTENSION_PACKAGE_MANIFEST_INVALID', 'aiopsterm.plugin.json must include a version.')
+  if (!kind) return localPackageErrorResult('EXTENSION_PACKAGE_MANIFEST_INVALID', 'aiopsterm.plugin.json must use kind "content" or "provider".')
+  if (!engineRange) {
+    return localPackageErrorResult('EXTENSION_PACKAGE_ENGINE_REQUIRED', 'aiopsterm.plugin.json must declare engines.aiopsterm.')
+  }
+  if (!supportsAiopstermVersion(engineRange, runtimeConfig.appVersion)) {
+    return localPackageErrorResult(
+      'EXTENSION_PACKAGE_ENGINE_UNSUPPORTED',
+      `Plugin requires aiopsterm ${engineRange}, current version is ${runtimeConfig.appVersion}.`
+    )
+  }
+  const commands = parseManifestCommands(manifest)
+  const assetProviders = parseManifestAssetProviders(manifest)
+  if (kind === 'content' && !commands.length) {
+    return localPackageErrorResult('EXTENSION_PACKAGE_CONTRIBUTIONS_REQUIRED', 'Content plugins must contribute at least one command.')
+  }
+  if (kind === 'provider' && !assetProviders.length) {
+    return localPackageErrorResult('EXTENSION_PACKAGE_CONTRIBUTIONS_REQUIRED', 'Provider plugins must contribute at least one asset provider.')
+  }
+  const basePlugin = options.basePlugin
+  const categories = parseStringArray(manifest.categories)
+  const functions = parseManifestFunctions(manifest.functions)
+  const storeFlags = extractStoreManifestFlags(manifest)
+  const packageDownloadSource = extractPackageManifestSource(manifest)
+  const builtin = options.source === 'builtin'
+  return {
+    pluginId,
+    name: options.source === 'store' ? basePlugin?.name || displayName : displayName,
+    description: trimText(manifest.description) || basePlugin?.description || `${displayName} aiopsterm plugin.`,
+    kind,
+    iconKey: normalizeExtensionIconKey(basePlugin?.iconKey || manifest.iconKey),
+    tabName: basePlugin?.tabName || displayName,
+    show: true,
+    isPlugin: true,
+    installed: builtin,
+    hasUpdate: false,
+    installedVersion: builtin ? version : '',
+    latestVersion: version,
+    installable: builtin ? false : options.source === 'store' ? storeFlags.installable : true,
+    required: builtin || basePlugin?.required,
+    isPrivate: builtin ? false : options.source === 'store' ? storeFlags.isPrivate : basePlugin?.isPrivate,
+    isDraggedOnly: options.source === 'local',
+    source: options.source,
+    lastUpdated: options.lastUpdated || new Date().toISOString(),
+    size: options.packageSize,
+    readme: options.readme || trimText(manifest.readme) || `${displayName} aiopsterm plugin.`,
+    categories: categories.length
+      ? categories
+      : basePlugin?.categories
+        ? [...basePlugin.categories]
+        : [builtin ? 'Built-in' : options.source === 'store' ? 'Store' : 'Local'],
+    functions: functions.length ? functions : basePlugin?.functions?.map((item) => ({ ...item })),
+    commands,
+    assetProviders,
+    packagePath: options.packagePath,
+    storePackagePath: options.storePackagePath,
+    packageUrl: options.source === 'store' ? packageDownloadSource.packageUrl || basePlugin?.packageUrl : undefined,
+    packageSha256: options.source === 'store' ? packageDownloadSource.packageSha256 || basePlugin?.packageSha256 : undefined,
+    subscriptionUrl: options.source === 'store' ? storeFlags.subscriptionUrl || basePlugin?.subscriptionUrl : undefined
+  }
+}
 
 export const installedExtensionDir = (pluginId: string, version: string) => join(runtimeConfig.extensionRootDir, 'installed', pluginId, version)
 
@@ -218,7 +334,7 @@ export const removeInstalledExtensionPackageFiles = (plugin: ExtensionPluginRunt
 
 export const createPackageInputFromPath = (filePath: string): ExtensionPackageInstallInput | null => {
   const resolvedPath = resolve(filePath)
-  if (!basename(resolvedPath).toLowerCase().endsWith('.external-reference')) return null
+  if (!basename(resolvedPath).toLowerCase().endsWith('.aiopsterm-plugin')) return null
   return {
     fileName: basename(resolvedPath),
     filePath: resolvedPath
@@ -227,7 +343,7 @@ export const createPackageInputFromPath = (filePath: string): ExtensionPackageIn
 
 const packageFileNameFromPlugin = (plugin: ExtensionPluginRuntimeConfig) => {
   const version = trimText(plugin.latestVersion) || trimText(plugin.installedVersion) || 'latest'
-  return `${safePackagePathSegment(plugin.pluginId)}-${safePackagePathSegment(version)}.external-reference`
+  return `${safePackagePathSegment(plugin.pluginId)}-${safePackagePathSegment(version)}.aiopsterm-plugin`
 }
 
 const resolveRemotePackageCachePath = (plugin: ExtensionPluginRuntimeConfig) =>
@@ -249,9 +365,9 @@ export const resolveStorePackageInput = (plugin: ExtensionPluginRuntimeConfig): 
   const storePackageDir = trimText(runtimeConfig.storePackageDir)
   if (storePackageDir) {
     candidates.push(
-      join(storePackageDir, pluginId, `${version}.external-reference`),
-      join(storePackageDir, `${pluginId}-${version}.external-reference`),
-      join(storePackageDir, `${pluginId}.external-reference`)
+      join(storePackageDir, pluginId, `${version}.aiopsterm-plugin`),
+      join(storePackageDir, `${pluginId}-${version}.aiopsterm-plugin`),
+      join(storePackageDir, `${pluginId}.aiopsterm-plugin`)
     )
   }
 
@@ -281,7 +397,7 @@ export const resolveStorePackageInput = (plugin: ExtensionPluginRuntimeConfig): 
 
   return localPackageErrorResult(
     'EXTENSION_STORE_PACKAGE_UNAVAILABLE',
-    `${plugin.name} requires a real .external-reference package before it can be installed.`
+    `${plugin.name} requires a real .aiopsterm-plugin package before it can be installed.`
   )
 }
 
@@ -429,15 +545,15 @@ export const parsePackageManifestFromInput = (
 ): ParsedExtensionPackageInput | ExtensionPluginOperationResult => {
   const fileName = trimText(input?.fileName)
   if (!fileName) return localPackageErrorResult('EXTENSION_PACKAGE_REQUIRED', 'Plugin package file is required.')
-  if (!fileName.toLowerCase().endsWith('.external-reference')) {
-    return localPackageErrorResult('EXTENSION_PACKAGE_FORMAT_INVALID', 'Plugin package must use the .external-reference extension.')
+  if (!fileName.toLowerCase().endsWith('.aiopsterm-plugin')) {
+    return localPackageErrorResult('EXTENSION_PACKAGE_FORMAT_INVALID', 'Plugin package must use the .aiopsterm-plugin extension.')
   }
 
   const filePath = trimText(input?.filePath)
   if (!filePath) return localPackageErrorResult('EXTENSION_PACKAGE_PATH_REQUIRED', 'Plugin package file path is required.')
   if (!isAbsolute(filePath)) return localPackageErrorResult('EXTENSION_PACKAGE_PATH_INVALID', 'Plugin package file path must be absolute.')
-  if (!basename(filePath).toLowerCase().endsWith('.external-reference')) {
-    return localPackageErrorResult('EXTENSION_PACKAGE_FORMAT_INVALID', 'Plugin package must use the .external-reference extension.')
+  if (!basename(filePath).toLowerCase().endsWith('.aiopsterm-plugin')) {
+    return localPackageErrorResult('EXTENSION_PACKAGE_FORMAT_INVALID', 'Plugin package must use the .aiopsterm-plugin extension.')
   }
 
   let packageSize = 0
@@ -462,16 +578,16 @@ export const parsePackageManifestFromInput = (
     )
   }
 
-  const manifestEntry = findZipEntry(zipEntries, 'plugin.json')
+  const manifestEntry = findZipEntry(zipEntries, 'aiopsterm.plugin.json')
   if (!manifestEntry) {
-    return localPackageErrorResult('EXTENSION_PACKAGE_MANIFEST_MISSING', 'Plugin package must contain plugin.json.')
+    return localPackageErrorResult('EXTENSION_PACKAGE_MANIFEST_MISSING', 'Plugin package must contain aiopsterm.plugin.json.')
   }
 
   try {
     const parsed = JSON.parse(readZipEntryText(manifestEntry))
     const manifestRecord = asRecord(parsed)
     if (!manifestRecord) {
-      return localPackageErrorResult('EXTENSION_PACKAGE_MANIFEST_INVALID', 'plugin.json must be a JSON object.')
+      return localPackageErrorResult('EXTENSION_PACKAGE_MANIFEST_INVALID', 'aiopsterm.plugin.json must be a JSON object.')
     }
     return {
       manifest: manifestRecord as LocalExtensionPackageManifest,
@@ -482,7 +598,7 @@ export const parsePackageManifestFromInput = (
   } catch (error) {
     return localPackageErrorResult(
       'EXTENSION_PACKAGE_MANIFEST_INVALID',
-      error instanceof Error ? error.message : 'plugin.json could not be parsed.'
+      error instanceof Error ? error.message : 'aiopsterm.plugin.json could not be parsed.'
     )
   }
 }
@@ -494,8 +610,8 @@ const parsePackageManifestFromBuffer = (
 ): ParsedExtensionPackageInput | ExtensionPluginOperationResult => {
   const normalizedFileName = trimText(fileName)
   if (!normalizedFileName) return localPackageErrorResult('EXTENSION_PACKAGE_REQUIRED', 'Plugin package file is required.')
-  if (!normalizedFileName.toLowerCase().endsWith('.external-reference')) {
-    return localPackageErrorResult('EXTENSION_PACKAGE_FORMAT_INVALID', 'Plugin package must use the .external-reference extension.')
+  if (!normalizedFileName.toLowerCase().endsWith('.aiopsterm-plugin')) {
+    return localPackageErrorResult('EXTENSION_PACKAGE_FORMAT_INVALID', 'Plugin package must use the .aiopsterm-plugin extension.')
   }
 
   let zipEntries: LocalZipEntry[]
@@ -508,16 +624,16 @@ const parsePackageManifestFromBuffer = (
     )
   }
 
-  const manifestEntry = findZipEntry(zipEntries, 'plugin.json')
+  const manifestEntry = findZipEntry(zipEntries, 'aiopsterm.plugin.json')
   if (!manifestEntry) {
-    return localPackageErrorResult('EXTENSION_PACKAGE_MANIFEST_MISSING', 'Plugin package must contain plugin.json.')
+    return localPackageErrorResult('EXTENSION_PACKAGE_MANIFEST_MISSING', 'Plugin package must contain aiopsterm.plugin.json.')
   }
 
   try {
     const parsed = JSON.parse(readZipEntryText(manifestEntry))
     const manifestRecord = asRecord(parsed)
     if (!manifestRecord) {
-      return localPackageErrorResult('EXTENSION_PACKAGE_MANIFEST_INVALID', 'plugin.json must be a JSON object.')
+      return localPackageErrorResult('EXTENSION_PACKAGE_MANIFEST_INVALID', 'aiopsterm.plugin.json must be a JSON object.')
     }
     return {
       manifest: manifestRecord as LocalExtensionPackageManifest,
@@ -528,7 +644,7 @@ const parsePackageManifestFromBuffer = (
   } catch (error) {
     return localPackageErrorResult(
       'EXTENSION_PACKAGE_MANIFEST_INVALID',
-      error instanceof Error ? error.message : 'plugin.json could not be parsed.'
+      error instanceof Error ? error.message : 'aiopsterm.plugin.json could not be parsed.'
     )
   }
 }
@@ -548,14 +664,6 @@ export const parseLocalPackageManifest = (
   const { manifest, entries: zipEntries, filePath, packageSize } = parsedPackage
 
   const pluginId = trimText(manifest.id)
-  const version = trimText(manifest.version)
-  const mainEntryName = normalizePackageEntryName(trimText(manifest.main))
-  if (!pluginId) return localPackageErrorResult('EXTENSION_PACKAGE_MANIFEST_INVALID', 'plugin.json must include an id.')
-  if (!version) return localPackageErrorResult('EXTENSION_PACKAGE_MANIFEST_INVALID', 'plugin.json must include a version.')
-  if (!mainEntryName) return localPackageErrorResult('EXTENSION_PACKAGE_MANIFEST_INVALID', 'plugin.json must include a valid main entry.')
-  if (!findZipEntry(zipEntries, mainEntryName)) {
-    return localPackageErrorResult('EXTENSION_PACKAGE_MAIN_MISSING', `Plugin package main entry "${mainEntryName}" was not found.`)
-  }
 
   if (packageSource === 'store' && allowedPluginId && pluginId !== allowedPluginId) {
     return localPackageErrorResult(
@@ -569,57 +677,19 @@ export const parseLocalPackageManifest = (
     return localPackageErrorResult('EXTENSION_PACKAGE_PLUGIN_CONFLICT', 'Plugin package id conflicts with an existing non-local extension.')
   }
 
-  const displayName = trimText(manifest.displayName) || trimText(manifest.name) || pluginId
-  const viewName = parseFirstContributedViewName(manifest)
-  const categories = parseStringArray(manifest.categories)
-  const functions = parseManifestFunctions(manifest.functions)
-  const storeFlags = extractStoreManifestFlags(manifest)
-  const packageDownloadSource = extractPackageManifestSource(manifest)
   const readmeEntry = findReadmeZipEntry(zipEntries, manifest)
-  const fallbackReadme =
-    packageSource === 'store'
-      ? `${basePlugin?.name || displayName} installed from a verified .external-reference package through the aiopsterm backend boundary.`
-      : 'Local package installed through the aiopsterm backend plugin boundary.'
-  const readme = readmeEntry ? readZipEntryText(readmeEntry) : fallbackReadme
-  const fallbackFunctions =
-    packageSource === 'store' && basePlugin?.functions?.length
-      ? basePlugin.functions.map((item) => ({ ...item }))
-      : [{ title: packageSource === 'store' ? 'Store plugin' : 'Local plugin', desc: 'Installed from a .external-reference package through the backend boundary.' }]
-  const fallbackCategories =
-    packageSource === 'store' && basePlugin?.categories?.length ? [...basePlugin.categories] : [packageSource === 'store' ? 'Store' : 'Local']
+  const plugin = pluginFromAiopstermManifest(manifest, {
+    source: packageSource,
+    basePlugin,
+    storePackagePath: packageSource === 'store' ? filePath : undefined,
+    packageSize,
+    readme: readmeEntry ? readZipEntryText(readmeEntry) : undefined
+  })
+  if ('ok' in plugin) return plugin
 
   return {
     entries: zipEntries,
-    plugin: {
-      pluginId,
-      name: packageSource === 'store' ? basePlugin?.name || displayName : displayName,
-      description:
-        trimText(manifest.description) ||
-        basePlugin?.description ||
-        (packageSource === 'store' ? 'Installed from a store .external-reference package.' : 'Installed from a local .external-reference package.'),
-      iconKey: packageSource === 'store' ? normalizeExtensionIconKey(basePlugin?.iconKey || manifest.iconKey) : 'local',
-      tabName: viewName || basePlugin?.tabName || displayName,
-      show: true,
-      isPlugin: true,
-      installed: false,
-      hasUpdate: false,
-      installedVersion: '',
-      latestVersion: version,
-      installable: packageSource === 'store' ? storeFlags.installable : basePlugin?.installable === false ? false : true,
-      required: basePlugin?.required,
-      isPrivate: packageSource === 'store' ? storeFlags.isPrivate : basePlugin?.isPrivate,
-      isDraggedOnly: packageSource === 'local',
-      source: packageSource,
-      lastUpdated: new Date().toISOString(),
-      size: packageSize,
-      readme,
-      categories: categories.length ? categories : fallbackCategories,
-      functions: functions.length ? functions : fallbackFunctions,
-      storePackagePath: packageSource === 'store' ? filePath : undefined,
-      packageUrl: packageSource === 'store' ? packageDownloadSource.packageUrl || basePlugin?.packageUrl : undefined,
-      packageSha256: packageSource === 'store' ? packageDownloadSource.packageSha256 || basePlugin?.packageSha256 : undefined,
-      subscriptionUrl: packageSource === 'store' ? storeFlags.subscriptionUrl || basePlugin?.subscriptionUrl : undefined
-    }
+    plugin
   }
 }
 
@@ -629,42 +699,15 @@ export const storePluginFromPackage = (filePath: string): ExtensionPluginRuntime
   const parsedPackage = parsePackageManifestFromInput(input)
   if ('ok' in parsedPackage) return null
   const { manifest, entries, packageSize } = parsedPackage
-  const pluginId = trimText(manifest.id)
-  const version = trimText(manifest.version)
-  const mainEntryName = normalizePackageEntryName(trimText(manifest.main))
-  if (!pluginId || !version || !mainEntryName || !findZipEntry(entries, mainEntryName)) return null
-  const displayName = trimText(manifest.displayName) || trimText(manifest.name) || pluginId
-  const viewName = parseFirstContributedViewName(manifest)
-  const categories = parseStringArray(manifest.categories)
-  const functions = parseManifestFunctions(manifest.functions)
   const readmeEntry = findReadmeZipEntry(entries, manifest)
-  const storeFlags = extractStoreManifestFlags(manifest)
-  const packageSource = extractPackageManifestSource(manifest)
-  return {
-    pluginId,
-    name: displayName,
-    description: trimText(manifest.description) || 'Discovered from a real .external-reference package in the aiopsterm extension store directory.',
-    iconKey: normalizeExtensionIconKey(manifest.iconKey),
-    tabName: viewName || displayName,
-    show: true,
-    isPlugin: true,
-    installed: false,
-    hasUpdate: false,
-    installedVersion: '',
-    latestVersion: version,
-    installable: storeFlags.installable,
-    isPrivate: storeFlags.isPrivate,
+  const plugin = pluginFromAiopstermManifest(manifest, {
     source: 'store',
-    lastUpdated: new Date(statSync(filePath).mtimeMs).toISOString(),
-    size: packageSize,
-    readme: readmeEntry ? readZipEntryText(readmeEntry) : `${displayName} is available from a verified .external-reference package.`,
-    categories: categories.length ? categories : ['Store'],
-    functions: functions.length ? functions : [{ title: 'Store plugin', desc: 'Discovered from a real .external-reference package through the backend boundary.' }],
     storePackagePath: filePath,
-    packageUrl: packageSource.packageUrl || undefined,
-    packageSha256: packageSource.packageSha256 || undefined,
-    subscriptionUrl: storeFlags.subscriptionUrl || undefined
-  }
+    packageSize,
+    readme: readmeEntry ? readZipEntryText(readmeEntry) : undefined,
+    lastUpdated: new Date(statSync(filePath).mtimeMs).toISOString()
+  })
+  return 'ok' in plugin ? null : plugin
 }
 
 export const walkStorePackageFiles = (rootDir: string, depth = 0): string[] => {
@@ -682,7 +725,7 @@ export const walkStorePackageFiles = (rootDir: string, depth = 0): string[] => {
       files.push(...walkStorePackageFiles(fullPath, depth + 1))
       continue
     }
-    if (!entry.isFile() || extname(entry.name).toLowerCase() !== '.external-reference') continue
+    if (!entry.isFile() || extname(entry.name).toLowerCase() !== '.aiopsterm-plugin') continue
     files.push(fullPath)
   }
   return files.sort((left, right) => left.localeCompare(right))

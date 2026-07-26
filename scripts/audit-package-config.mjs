@@ -97,6 +97,8 @@ const mustContain = [
   'to: aiopsterm-external-codex-mcp.js',
   'from: resources/aiopsterm-agent-hook.js',
   'to: aiopsterm-agent-hook.js',
+  'from: resources/builtin-plugins',
+  'to: builtin-plugins',
   'from: build/cline-sidecar',
   'to: cline-sidecar',
   'afterPack: scripts/prune-packaged-native-modules.mjs',

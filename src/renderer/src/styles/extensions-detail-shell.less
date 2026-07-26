@@ -129,6 +129,56 @@
   padding: 14px 0 24px;
 }
 
+.extension_contribution_section {
+  display: grid;
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.extension_contribution_section h3,
+.extension_contribution_section p {
+  margin: 0;
+}
+
+.extension_contribution_card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 14px;
+  border: 1px solid var(--theme-module-active-border);
+  border-radius: 8px;
+  background: var(--theme-module-active-card-bg);
+}
+
+.extension_contribution_card div {
+  min-width: 0;
+}
+
+.extension_contribution_card code {
+  display: block;
+  margin-top: 8px;
+  overflow: auto;
+  color: var(--theme-module-active-accent);
+}
+
+.extension_provider_field {
+  display: grid;
+  gap: 6px;
+}
+
+.extension_provider_field textarea {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  border: 1px solid var(--theme-module-active-border);
+  border-radius: 8px;
+  padding: 10px;
+  background: var(--theme-module-active-card-bg);
+  color: var(--theme-module-active-text);
+  font-family: var(--theme-font-mono);
+}
+
 .plugin_install_progress {
   position: relative;
   height: 30px;

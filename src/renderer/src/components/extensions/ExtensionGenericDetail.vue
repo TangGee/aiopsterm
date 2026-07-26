@@ -67,6 +67,56 @@
           <div class="rendered_markdown">
             <p>{{ plugin.readme || '暂无 README' }}</p>
           </div>
+          <section
+            v-if="plugin.commands?.length"
+            class="extension_contribution_section"
+          >
+            <h3>终端命令</h3>
+            <article
+              v-for="command in plugin.commands"
+              :key="command.id"
+              class="extension_contribution_card"
+            >
+              <div>
+                <strong>{{ command.title }}</strong>
+                <p>{{ command.description }}</p>
+                <code>{{ command.command }}</code>
+              </div>
+              <button
+                class="op_btn"
+                @click="$emit('runCommand', command.command)"
+              >
+                发送到终端
+              </button>
+            </article>
+          </section>
+          <section
+            v-for="provider in plugin.assetProviders || []"
+            :key="provider.id"
+            class="extension_contribution_section"
+          >
+            <h3>{{ provider.name }}</h3>
+            <p>{{ provider.description }}</p>
+            <label
+              v-for="field in provider.fields"
+              :key="field.key"
+              class="extension_provider_field"
+            >
+              <span>{{ field.label }}</span>
+              <textarea
+                :value="providerValues[`${provider.id}:${field.key}`] ?? field.defaultValue ?? ''"
+                rows="12"
+                @input="$emit('updateProviderValue', provider.id, field.key, ($event.target as HTMLTextAreaElement).value)"
+              ></textarea>
+            </label>
+            <button
+              class="op_btn primary"
+              :disabled="providerLoading"
+              @click="$emit('syncProvider', provider.id)"
+            >
+              {{ providerLoading ? '正在导入' : '导入资产' }}
+            </button>
+          </section>
           <div
             v-if="installProgress"
             class="plugin_install_progress"
@@ -116,6 +166,8 @@ defineProps<{
   source: string
   size: string
   tags: string[]
+  providerValues: Record<string, string>
+  providerLoading: boolean
 }>()
 
 defineEmits<{
@@ -125,5 +177,8 @@ defineEmits<{
   uninstall: [pluginId: string]
   subscribe: [pluginId: string]
   cancel: [pluginId: string]
+  runCommand: [command: string]
+  updateProviderValue: [providerId: string, fieldKey: string, value: string]
+  syncProvider: [providerId: string]
 }>()
 </script>

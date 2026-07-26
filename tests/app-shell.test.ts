@@ -13679,13 +13679,13 @@ describe('AppShell', () => {
     expect(store.extensionDragActive).toBe(true)
 
     const validDrop = new Event('drop', { bubbles: true, cancelable: true }) as DragEvent
-    Object.defineProperty(validDrop, 'dataTransfer', { configurable: true, value: { files: [{ name: 'local-tools.external-reference', path: '/tmp/local-tools.external-reference', size: 4096 }] } })
+    Object.defineProperty(validDrop, 'dataTransfer', { configurable: true, value: { files: [{ name: 'local-tools.aiopsterm-plugin', path: '/tmp/local-tools.aiopsterm-plugin', size: 4096 }] } })
     panel.element.dispatchEvent(validDrop)
     await panel.vm.$nextTick()
     expect(store.extensionDragActive).toBe(false)
     expect(window.aiops.installExtensionPackage).toHaveBeenCalledWith(expect.objectContaining({
-      fileName: 'local-tools.external-reference',
-      filePath: '/tmp/local-tools.external-reference',
+      fileName: 'local-tools.aiopsterm-plugin',
+      filePath: '/tmp/local-tools.aiopsterm-plugin',
       size: 4096,
       existingPluginIds: expect.arrayContaining(['cloud-assets', 'ops-runbook'])
     }))
@@ -13741,7 +13741,7 @@ describe('AppShell', () => {
     expect(store.extensionInstallLoadingMap['cloud-assets']).toBeUndefined()
     expect(store.extensionInstallProgressMap['cloud-assets']?.stage).toBe('error')
     expect(store.extensionPlugins.find((plugin) => plugin.pluginId === 'cloud-assets')?.installed).toBe(false)
-    expect(store.extensionNotice).toContain('requires a real .external-reference package')
+    expect(store.extensionNotice).toContain('requires a real .aiopsterm-plugin package')
     expect(workspace.text()).toContain('Error')
   })
 

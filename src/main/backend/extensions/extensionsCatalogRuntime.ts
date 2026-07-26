@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'fs'
 import { isAbsolute, join, resolve } from 'path'
 import type { ExtensionPluginListResult, ExtensionPluginRuntimeConfig } from '@shared/contracts/extensions'
 import {
@@ -9,7 +9,8 @@ import {
   isVersionNewer,
   normalizeAbsoluteHttpUrl,
   normalizeExtensionIconKey,
-  parseFirstContributedViewName,
+  parseManifestAssetProviders,
+  parseManifestCommands,
   parseManifestFunctions,
   parseStringArray,
   trimText,
@@ -19,7 +20,12 @@ import {
   type RemoteExtensionCatalogManifest,
   type RemoteExtensionCatalogPluginManifest
 } from './extensionsRuntimeCore'
-import { configureExtensionPackageRuntime, latestStorePluginsFromPackageDir, walkStorePackageFiles } from './extensionsPackageRuntime'
+import {
+  configureExtensionPackageRuntime,
+  latestStorePluginsFromPackageDir,
+  pluginFromAiopstermManifest,
+  walkStorePackageFiles
+} from './extensionsPackageRuntime'
 
 export const defaultExtensionRootDir = () => {
   const envRoot = String(process.env.AIOPSTERM_EXTENSIONS_DIR || '').trim()
@@ -49,19 +55,28 @@ const resolveOptionalPath = (value: unknown, fallback = '') => {
   return text ? (isAbsolute(text) ? text : resolve(text)) : fallback
 }
 
-type RuntimeConfig = Required<ExtensionBackendRuntimeConfig>
+type RuntimeConfig = {
+  extensionRootDir: string
+  builtinPluginDir: string
+  storePackageDir: string
+  storeCatalogUrl: string
+  remotePackageCacheDir: string
+  appVersion: string
+  fetch: ExtensionFetch
+  saveAsset?: ExtensionBackendRuntimeConfig['saveAsset']
+}
 
 let runtimeConfig: RuntimeConfig = {
   extensionRootDir: defaultExtensionRootDir(),
+  builtinPluginDir: '',
   storePackageDir: defaultStorePackageDir(),
   storeCatalogUrl: defaultStoreCatalogUrl(),
   remotePackageCacheDir: defaultRemotePackageCacheDir(),
+  appVersion: '0.0.0',
   fetch: defaultExtensionFetch
 }
 
-const builtinExtensionCatalog: ExtensionPluginRuntimeConfig[] = []
-
-let extensionCatalog = builtinExtensionCatalog.map(clonePlugin)
+let extensionCatalog: ExtensionPluginRuntimeConfig[] = []
 
 const syncPackageRuntime = () => {
   configureExtensionPackageRuntime(packageRuntimeConfig())
@@ -86,9 +101,13 @@ const normalizeLocalRegistryPlugins = (value: unknown): ExtensionPluginRuntimeCo
     if (!pluginId || !name || !installedVersion || !packagePath) continue
     const catalogPlugin = extensionCatalog.find((plugin) => plugin.pluginId === pluginId)
     const source = trimText(record.source) === 'store' ? 'store' : 'local'
+    const kind = record.kind === 'provider' ? 'provider' : record.kind === 'content' ? 'content' : null
+    if (!kind) continue
     const isLocal = source === 'local'
     const categories = parseStringArray(record.categories)
     const functions = parseManifestFunctions(record.functions)
+    const commands = parseManifestCommands({ contributes: { commands: record.commands } })
+    const assetProviders = parseManifestAssetProviders({ contributes: { assetProviders: record.assetProviders } })
     const latestVersion =
       source === 'store'
         ? trimText(catalogPlugin?.latestVersion) || trimText(record.latestVersion) || installedVersion
@@ -99,7 +118,8 @@ const normalizeLocalRegistryPlugins = (value: unknown): ExtensionPluginRuntimeCo
     plugins.push({
       pluginId,
       name,
-      description: trimText(record.description) || catalogPlugin?.description || 'Installed from a .external-reference package.',
+      description: trimText(record.description) || catalogPlugin?.description || 'Installed from an aiopsterm plugin package.',
+      kind,
       iconKey: normalizeExtensionIconKey(record.iconKey || catalogPlugin?.iconKey),
       tabName: trimText(record.tabName) || name,
       show: record.show === false ? false : true,
@@ -125,7 +145,9 @@ const normalizeLocalRegistryPlugins = (value: unknown): ExtensionPluginRuntimeCo
         ? functions
         : catalogPlugin?.functions
           ? catalogPlugin.functions.map((catalogFunction) => ({ ...catalogFunction }))
-          : [{ title: 'Installed plugin', desc: 'Installed from a .external-reference package through the backend boundary.' }]
+          : [{ title: 'Installed plugin', desc: 'Installed from an aiopsterm plugin package through the backend boundary.' }],
+      commands,
+      assetProviders
     })
   }
   return plugins
@@ -183,45 +205,50 @@ const readStoreExtensionCatalog = (): ExtensionPluginRuntimeConfig[] => {
   return plugins
 }
 
+const readBuiltinExtensionCatalog = (): ExtensionPluginRuntimeConfig[] => {
+  const rootDir = trimText(runtimeConfig.builtinPluginDir)
+  if (!rootDir || !existsSync(rootDir)) return []
+  let entries
+  try {
+    entries = readdirSync(rootDir, { withFileTypes: true })
+  } catch {
+    return []
+  }
+  const plugins: ExtensionPluginRuntimeConfig[] = []
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue
+    const packagePath = join(rootDir, entry.name)
+    const manifestPath = join(packagePath, 'aiopsterm.plugin.json')
+    try {
+      const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as RemoteExtensionCatalogPluginManifest
+      const plugin = pluginFromAiopstermManifest(manifest, {
+        source: 'builtin',
+        packagePath,
+        lastUpdated: new Date(statSync(manifestPath).mtimeMs).toISOString()
+      })
+      if (!('ok' in plugin)) plugins.push(plugin)
+    } catch {}
+  }
+  return plugins.sort((left, right) => left.name.localeCompare(right.name))
+}
+
 const remoteCatalogPluginFromManifest = (
   manifest: RemoteExtensionCatalogPluginManifest,
   catalogUrl: string
 ): ExtensionPluginRuntimeConfig | null => {
-  const pluginId = trimText(manifest.id)
-  const version = trimText(manifest.version)
-  const displayName = trimText(manifest.displayName) || trimText(manifest.name) || pluginId
-  if (!pluginId || !version || !displayName) return null
   const packageSource = extractPackageManifestSource(manifest, catalogUrl)
   if (!packageSource.packageUrl) return null
-  const categories = parseStringArray(manifest.categories)
-  const functions = parseManifestFunctions(manifest.functions)
-  const storeFlags = extractStoreManifestFlags(manifest)
-  const viewName = parseFirstContributedViewName(manifest)
   const packageSize = Number(manifest.size)
-  return {
-    pluginId,
-    name: displayName,
-    description: trimText(manifest.description) || 'Available from a remote aiopsterm extension catalog.',
-    iconKey: normalizeExtensionIconKey(manifest.iconKey),
-    tabName: viewName || displayName,
-    show: true,
-    isPlugin: true,
-    installed: false,
-    hasUpdate: false,
-    installedVersion: '',
-    latestVersion: version,
-    installable: storeFlags.installable,
-    isPrivate: storeFlags.isPrivate,
+  const plugin = pluginFromAiopstermManifest(manifest, {
     source: 'store',
-    lastUpdated: trimText(manifest.lastUpdated) || undefined,
-    size: Number.isFinite(packageSize) && packageSize >= 0 ? packageSize : undefined,
-    readme: trimText(manifest.readme) || `${displayName} is available from a remote aiopsterm extension catalog.`,
-    categories: categories.length ? categories : ['Store'],
-    functions: functions.length ? functions : [{ title: 'Remote store plugin', desc: 'Available from a real remote .external-reference package catalog.' }],
-    packageUrl: packageSource.packageUrl,
-    packageSha256: packageSource.packageSha256 || undefined,
-    subscriptionUrl: storeFlags.subscriptionUrl || undefined
-  }
+    packageSize: Number.isFinite(packageSize) && packageSize >= 0 ? packageSize : undefined,
+    readme: trimText(manifest.readme) || undefined,
+    lastUpdated: trimText(manifest.lastUpdated) || undefined
+  })
+  if ('ok' in plugin) return null
+  plugin.packageUrl = packageSource.packageUrl
+  plugin.packageSha256 = packageSource.packageSha256
+  return plugin
 }
 
 const readRemoteExtensionCatalog = async (): Promise<ExtensionPluginRuntimeConfig[]> => {
@@ -284,13 +311,13 @@ export const upsertExtensionCatalogPlugin = (plugin: ExtensionPluginRuntimeConfi
 }
 
 const reloadExtensionCatalog = () => {
-  extensionCatalog = builtinExtensionCatalog.map(clonePlugin)
+  extensionCatalog = readBuiltinExtensionCatalog()
   for (const plugin of readStoreExtensionCatalog()) upsertExtensionCatalogPlugin(plugin, { persist: false })
   for (const plugin of readLocalExtensionRegistry()) upsertExtensionCatalogPlugin(plugin, { persist: false })
 }
 
 const reloadExtensionCatalogFromSources = async () => {
-  extensionCatalog = builtinExtensionCatalog.map(clonePlugin)
+  extensionCatalog = readBuiltinExtensionCatalog()
   for (const plugin of readStoreExtensionCatalog()) upsertExtensionCatalogPlugin(plugin, { persist: false })
   for (const plugin of await readRemoteExtensionCatalog()) upsertExtensionCatalogPlugin(plugin, { persist: false })
   for (const plugin of readLocalExtensionRegistry()) upsertExtensionCatalogPlugin(plugin, { persist: false })
@@ -298,14 +325,18 @@ const reloadExtensionCatalogFromSources = async () => {
 
 export const configureExtensionBackendRuntimeState = (config: ExtensionBackendRuntimeConfig = {}) => {
   const extensionRootDir = resolveOptionalPath(config.extensionRootDir, defaultExtensionRootDir())
+  const builtinPluginDir = resolveOptionalPath(config.builtinPluginDir)
   const storePackageDir = resolveOptionalPath(config.storePackageDir, defaultStorePackageDir())
   const storeCatalogUrl = trimText(config.storeCatalogUrl) || defaultStoreCatalogUrl()
   const remotePackageCacheDir = resolveOptionalPath(config.remotePackageCacheDir, join(extensionRootDir, 'cache'))
   runtimeConfig = {
     extensionRootDir,
+    builtinPluginDir,
     storePackageDir,
     storeCatalogUrl,
     remotePackageCacheDir,
+    appVersion: trimText(config.appVersion) || '0.0.0',
+    saveAsset: config.saveAsset,
     fetch: config.fetch || defaultExtensionFetch
   }
   syncPackageRuntime()
@@ -339,12 +370,16 @@ export const resolveOperationPlugin = (plugin: ExtensionPluginRuntimeConfig) => 
 
 export const findExtensionCatalogPlugin = (pluginId: string) => extensionCatalog.find((plugin) => plugin.pluginId === pluginId)
 
+export const saveExtensionProviderAsset = (input: Parameters<NonNullable<ExtensionBackendRuntimeConfig['saveAsset']>>[0]) =>
+  runtimeConfig.saveAsset?.(input)
+
 export const cloneExtensionCatalog = () => extensionCatalog.map(clonePlugin)
 
 export const packageRuntimeConfig = (): ExtensionPackageRuntimeConfig => ({
   extensionRootDir: runtimeConfig.extensionRootDir,
   storePackageDir: runtimeConfig.storePackageDir,
   remotePackageCacheDir: runtimeConfig.remotePackageCacheDir,
+  appVersion: runtimeConfig.appVersion,
   fetch: runtimeConfig.fetch
 })
 

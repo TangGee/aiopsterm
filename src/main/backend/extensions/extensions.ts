@@ -2,6 +2,8 @@ import type {
   ExtensionPackageDownloadInput,
   ExtensionPackageDownloadResult,
   ExtensionPackageInstallInput,
+  ExtensionAssetProviderSyncInput,
+  ExtensionAssetProviderSyncResult,
   ExtensionPluginCancelResult,
   ExtensionPluginListResult,
   ExtensionPluginOperation,
@@ -12,6 +14,7 @@ import type {
   ExtensionSubscriptionInput,
   ExtensionSubscriptionResult
 } from '@shared/contracts/extensions'
+import type { AiopsAssetInput, AiopsAssetRecord } from '@shared/contracts/assets'
 import { normalizeExternalHttpUrl } from '@shared/externalUrl'
 import {
   clonePlugin,
@@ -31,6 +34,7 @@ import {
   listExtensionPluginCatalog,
   resetExtensionPluginCatalogState,
   resolveOperationPlugin,
+  saveExtensionProviderAsset,
   upsertExtensionCatalogPlugin
 } from './extensionsCatalogRuntime'
 import {
@@ -65,6 +69,114 @@ export const resetExtensionPluginCatalogForTests = () => {
 export const listExtensionPlugins = async (): Promise<ExtensionPluginListResult> => listExtensionPluginCatalog()
 
 const errorResult = extensionPluginOperationError
+
+const providerText = (value: unknown) => (typeof value === 'string' ? value.trim() : '')
+
+const providerRecord = (value: unknown): Record<string, unknown> | null =>
+  value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null
+
+const providerAssetId = (pluginId: string, providerId: string, externalId: string) => {
+  const segment = externalId.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '')
+  return `${pluginId}-${providerId}-${segment || 'asset'}`
+}
+
+export const syncExtensionAssetProvider = async (
+  input: ExtensionAssetProviderSyncInput
+): Promise<ExtensionAssetProviderSyncResult> => {
+  const pluginId = providerText(input?.pluginId)
+  const providerId = providerText(input?.providerId)
+  const plugin = findExtensionCatalogPlugin(pluginId)
+  if (!plugin || !plugin.installed || plugin.kind !== 'provider') {
+    return { ok: false, errorCode: 'EXTENSION_PROVIDER_UNAVAILABLE', errorMessage: 'Installed provider plugin was not found.' }
+  }
+  const provider = plugin.assetProviders?.find((item) => item.id === providerId)
+  if (!provider || provider.adapter !== 'json-assets') {
+    return { ok: false, errorCode: 'EXTENSION_PROVIDER_UNAVAILABLE', errorMessage: 'Asset provider contribution was not found.' }
+  }
+  const payload = providerText(input?.values?.payload)
+  if (!payload) return { ok: false, errorCode: 'EXTENSION_PROVIDER_INPUT_REQUIRED', errorMessage: 'CMDB JSON is required.' }
+  if (Buffer.byteLength(payload, 'utf8') > 2 * 1024 * 1024) {
+    return { ok: false, errorCode: 'EXTENSION_PROVIDER_INPUT_TOO_LARGE', errorMessage: 'CMDB JSON must not exceed 2 MiB.' }
+  }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(payload)
+  } catch {
+    return { ok: false, errorCode: 'EXTENSION_PROVIDER_INPUT_INVALID', errorMessage: 'CMDB JSON is invalid.' }
+  }
+  const root = providerRecord(parsed)
+  const rows = Array.isArray(parsed) ? parsed : Array.isArray(root?.assets) ? root.assets : null
+  if (!rows) {
+    return { ok: false, errorCode: 'EXTENSION_PROVIDER_INPUT_INVALID', errorMessage: 'CMDB JSON must be an array or contain an assets array.' }
+  }
+  if (rows.length > 1000) {
+    return { ok: false, errorCode: 'EXTENSION_PROVIDER_INPUT_TOO_LARGE', errorMessage: 'CMDB JSON must not contain more than 1000 assets.' }
+  }
+  const assetsToSave: AiopsAssetInput[] = []
+  const assetIds = new Set<string>()
+  for (const value of rows) {
+    const row = providerRecord(value)
+    if (!row) {
+      return { ok: false, errorCode: 'EXTENSION_PROVIDER_INPUT_INVALID', errorMessage: 'Every CMDB asset must be an object.' }
+    }
+    const externalId = providerText(row.externalId || row.id)
+    const name = providerText(row.name || row.title)
+    const host = providerText(row.host || row.address || row.ip)
+    if (!externalId || !name || !host) {
+      return {
+        ok: false,
+        errorCode: 'EXTENSION_PROVIDER_INPUT_INVALID',
+        errorMessage: 'Every CMDB asset must include externalId, name, and host.'
+      }
+    }
+    const portValue = Number(row.port || 22)
+    const port = Number.isInteger(portValue) && portValue > 0 && portValue <= 65535 ? portValue : 22
+    const rowTags = Array.isArray(row.tags) ? row.tags.map(providerText).filter(Boolean) : []
+    const id = providerAssetId(pluginId, providerId, externalId)
+    if (assetIds.has(id)) {
+      return { ok: false, errorCode: 'EXTENSION_PROVIDER_INPUT_INVALID', errorMessage: `Duplicate CMDB asset id "${externalId}".` }
+    }
+    assetIds.add(id)
+    assetsToSave.push({
+      id,
+      name,
+      title: name,
+      host,
+      ip: host,
+      group: providerText(row.group) || 'CMDB',
+      group_name: providerText(row.group) || 'CMDB',
+      status: row.status === 'offline' || row.status === 'unknown' ? row.status : 'online',
+      username: providerText(row.username) || 'root',
+      port,
+      asset_type: 'person',
+      auth_type: 'password',
+      comment: providerText(row.comment) || `Imported by ${plugin.name}`,
+      data_source: 'refresh',
+      tags: [...new Set([...rowTags, `plugin:${pluginId}`, `provider:${providerId}`])]
+    })
+  }
+  const imported: AiopsAssetRecord[] = []
+  for (const asset of assetsToSave) {
+    const result = saveExtensionProviderAsset(asset)
+    if (!result?.ok || !result.data) {
+      return {
+        ok: false,
+        errorCode: result?.errorCode || 'EXTENSION_PROVIDER_IMPORT_FAILED',
+        errorMessage: result?.errorMessage || 'CMDB asset could not be saved.'
+      }
+    }
+    imported.push(result.data)
+  }
+  return {
+    ok: true,
+    data: {
+      pluginId,
+      providerId,
+      imported: imported.length,
+      assets: imported
+    }
+  }
+}
 
 const downloadErrorResult = (errorCode: string, errorMessage: string): ExtensionPackageDownloadResult => ({
   ok: false,
@@ -340,6 +452,7 @@ export const installExtensionPluginFromUrl = (
           pluginId,
           name: pluginId,
           description: 'Remote extension package.',
+          kind: 'content' as const,
           iconKey: 'local' as const,
           tabName: pluginId,
           show: true,
@@ -348,7 +461,7 @@ export const installExtensionPluginFromUrl = (
           hasUpdate: false,
           source: 'store' as const,
           categories: ['Store'],
-          functions: [{ title: 'Remote store plugin', desc: 'Installed from a remote .external-reference package URL.' }]
+          functions: [{ title: 'Remote store plugin', desc: 'Installed from a remote .aiopsterm-plugin package URL.' }]
         }),
     pluginId,
     latestVersion: version,

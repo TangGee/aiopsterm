@@ -88,6 +88,8 @@ const requiredFiles = [
   join(clineSidecar, 'NODE-LICENSE'),
   join(clineSidecar, 'CLINE-LICENSE'),
   join(clineSidecar, 'CLINE-ATTRIBUTION.txt'),
+  join(resourcesDir, 'builtin-plugins', 'linux-incident-runbook', 'aiopsterm.plugin.json'),
+  join(resourcesDir, 'builtin-plugins', 'generic-cmdb-assets', 'aiopsterm.plugin.json'),
   sqlitePackagePath,
   sqliteManifestPath,
   ...nativeModuleFilesForPlatform(resourcesDir)

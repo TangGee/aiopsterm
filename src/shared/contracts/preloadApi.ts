@@ -189,6 +189,8 @@ import type {
 import type { UserConfig } from './userConfig'
 import type {
   ExtensionInstallProgress,
+  ExtensionAssetProviderSyncInput,
+  ExtensionAssetProviderSyncResult,
   ExtensionPackageDownloadInput,
   ExtensionPackageDownloadResult,
   ExtensionPackageInstallInput,
@@ -653,6 +655,7 @@ export type AiopsPreloadApi = {
   listAiModels: (input?: AiModelCatalogInput) => Promise<AiModelCatalog>
   checkModelProvider: (input: ModelProviderCheckInput) => Promise<ModelProviderCheckResult>
   listExtensionPlugins: () => Promise<ExtensionPluginListResult>
+  syncExtensionAssetProvider: (input: ExtensionAssetProviderSyncInput) => Promise<ExtensionAssetProviderSyncResult>
   installExtensionPlugin: (input: ExtensionPluginOperationInput) => Promise<ExtensionPluginOperationResult>
   updateExtensionPlugin: (input: ExtensionPluginOperationInput) => Promise<ExtensionPluginOperationResult>
   installExtensionPackage: (input: ExtensionPackageInstallInput) => Promise<ExtensionPluginOperationResult>

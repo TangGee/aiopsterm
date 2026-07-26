@@ -4,6 +4,7 @@ import { createBridgeMethod } from '@/services/common/preloadBridgeClient'
 type ExtensionsBridge = Pick<
   AiopsPreloadApi,
   | 'listExtensionPlugins'
+  | 'syncExtensionAssetProvider'
   | 'installExtensionPlugin'
   | 'updateExtensionPlugin'
   | 'installExtensionPackage'
@@ -19,6 +20,7 @@ const bridgeMethod = createBridgeMethod<ExtensionsBridge>()
 
 export const extensionsClient = {
   listExtensionPlugins: () => bridgeMethod('listExtensionPlugins'),
+  syncExtensionAssetProvider: () => bridgeMethod('syncExtensionAssetProvider'),
   installExtensionPlugin: () => bridgeMethod('installExtensionPlugin'),
   updateExtensionPlugin: () => bridgeMethod('updateExtensionPlugin'),
   installExtensionPackage: () => bridgeMethod('installExtensionPackage'),

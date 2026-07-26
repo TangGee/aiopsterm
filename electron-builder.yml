@@ -44,6 +44,8 @@ extraResources:
     to: aiopsterm-agent-hook.js
   - from: resources/aiopsterm-control.js
     to: aiopsterm-control.js
+  - from: resources/builtin-plugins
+    to: builtin-plugins
   - from: build/cline-sidecar
     to: cline-sidecar
   - from: docs/usage/best-practices

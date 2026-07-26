@@ -1,4 +1,5 @@
 import type { AiopsMutationResult } from './common'
+import type { AiopsAssetRecord } from './assets'
 
 export type ExtensionUserConfig = {
   autoCompleteStatus: boolean
@@ -8,13 +9,38 @@ export type ExtensionUserConfig = {
 
 export type ExtensionInstallStage = 'downloading' | 'verifying' | 'installing' | 'done' | 'error' | 'cancelled' | ''
 
-export type ExtensionPluginSource = 'preinstalled' | 'store' | 'local'
+export type ExtensionPluginSource = 'builtin' | 'store' | 'local'
+
+export type ExtensionPluginKind = 'content' | 'provider'
 
 export type ExtensionIconKey = 'runbook' | 'cloud' | 'private' | 'local'
 
 export type ExtensionFunctionConfig = {
   title: string
   desc: string
+}
+
+export type ExtensionCommandContribution = {
+  id: string
+  title: string
+  description: string
+  command: string
+}
+
+export type ExtensionProviderField = {
+  key: string
+  label: string
+  type: 'textarea'
+  required: boolean
+  defaultValue?: string
+}
+
+export type ExtensionAssetProviderContribution = {
+  id: string
+  name: string
+  description: string
+  adapter: 'json-assets'
+  fields: ExtensionProviderField[]
 }
 
 export type ExtensionConnectionLogConfig = {
@@ -27,6 +53,7 @@ export type ExtensionPluginRuntimeConfig = {
   pluginId: string
   name: string
   description: string
+  kind: ExtensionPluginKind
   iconKey: ExtensionIconKey
   tabName: string
   show: boolean
@@ -51,6 +78,8 @@ export type ExtensionPluginRuntimeConfig = {
   readme?: string
   categories?: string[]
   functions?: ExtensionFunctionConfig[]
+  commands?: ExtensionCommandContribution[]
+  assetProviders?: ExtensionAssetProviderContribution[]
   detailSummary?: string
   guideSteps?: string[]
   connectionLog?: ExtensionConnectionLogConfig[]
@@ -121,4 +150,17 @@ export type ExtensionPluginCancelResult = AiopsMutationResult<{
   stage: Extract<ExtensionInstallStage, 'cancelled'>
   percent: 0
   message: string
+}>
+
+export type ExtensionAssetProviderSyncInput = {
+  pluginId: string
+  providerId: string
+  values: Record<string, string>
+}
+
+export type ExtensionAssetProviderSyncResult = AiopsMutationResult<{
+  pluginId: string
+  providerId: string
+  imported: number
+  assets: AiopsAssetRecord[]
 }>

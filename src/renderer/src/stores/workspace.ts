@@ -1774,6 +1774,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     addKnowledgeFilesToChat,
     refreshExtensionPlugins,
     selectExtension,
+    setExtensionNotice,
     setExtensionDragActive,
     installExtensionPlugin,
     updateExtensionPlugin,

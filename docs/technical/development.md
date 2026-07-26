@@ -84,6 +84,18 @@ npm run audit:i18n
 
 This checks that tracked renderer UI text is covered by explicit i18n keys or the static legacy text catalog.
 
+For plugin manifest, runtime, contribution, or packaging changes, run:
+
+```bash
+npm run typecheck
+npx vitest run tests/extensions-backend.test.ts tests/extensions-client.test.ts
+npm run audit:i18n
+npm run audit:package-config
+npm run audit:client-mocks
+```
+
+Built-in plugin manifests live under `resources/builtin-plugins`. External plugin package development is documented in the [Developer Integration Guides](../developer/index.md), and runtime trust boundaries are documented in [Plugin Runtime](plugin-runtime.md).
+
 For runtime or user-visible behavior changes, add focused tests at the changed boundary and run the relevant test command. Full end-to-end verification remains the release-level regression gate:
 
 ```bash

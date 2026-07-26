@@ -9384,14 +9384,14 @@ describe('workspace store', () => {
         pluginId: 'cloud-assets',
         installed: false,
         latestVersion: '0.9.1',
-        packageUrl: 'https://aiopsterm.local/extensions/cloud-assets-0.9.1.external-reference',
+        packageUrl: 'https://aiopsterm.local/extensions/cloud-assets-0.9.1.aiopsterm-plugin',
         packageSha256: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
       })
     })
     expect(store.extensionPlugins.find((plugin) => plugin.pluginId === 'cloud-assets')?.installed).toBe(false)
     expect(store.extensionInstallLoadingMap['cloud-assets']).toBeUndefined()
     expect(store.extensionInstallProgressMap['cloud-assets']?.stage).toBe('error')
-    expect(store.extensionNotice).toContain('requires a real .external-reference package')
+    expect(store.extensionNotice).toContain('requires a real .aiopsterm-plugin package')
     expect(store.extensionPlugins.find((plugin) => plugin.pluginId === 'ops-runbook')).toMatchObject({
       installed: false,
       hasUpdate: false
@@ -9410,17 +9410,17 @@ describe('workspace store', () => {
     expect(store.extensionNotice).toContain('订阅')
 
     await expect(store.dropExtensionPackage('bad.zip')).resolves.toBe(false)
-    expect(store.extensionNotice).toContain('.external-reference')
-    await expect(store.dropExtensionPackage('local-pack.external-reference')).resolves.toBe(false)
+    expect(store.extensionNotice).toContain('.aiopsterm-plugin')
+    await expect(store.dropExtensionPackage('local-pack.aiopsterm-plugin')).resolves.toBe(false)
     expect(store.extensionNotice).toContain('真实本地路径')
-    expect(window.aiops.installExtensionPackage).not.toHaveBeenCalledWith(expect.objectContaining({ fileName: 'local-pack.external-reference' }))
-    const dropPromise = store.dropExtensionPackage({ name: 'local-pack.external-reference', path: '/tmp/local-pack.external-reference', size: 4096 })
+    expect(window.aiops.installExtensionPackage).not.toHaveBeenCalledWith(expect.objectContaining({ fileName: 'local-pack.aiopsterm-plugin' }))
+    const dropPromise = store.dropExtensionPackage({ name: 'local-pack.aiopsterm-plugin', path: '/tmp/local-pack.aiopsterm-plugin', size: 4096 })
     expect(store.extensionInstallingPackageName).toBe('local pack')
     await vi.runOnlyPendingTimersAsync()
     await expect(dropPromise).resolves.toBe(true)
     expect(window.aiops.installExtensionPackage).toHaveBeenCalledWith(expect.objectContaining({
-      fileName: 'local-pack.external-reference',
-      filePath: '/tmp/local-pack.external-reference',
+      fileName: 'local-pack.aiopsterm-plugin',
+      filePath: '/tmp/local-pack.aiopsterm-plugin',
       size: 4096,
       existingPluginIds: expect.arrayContaining(['cloud-assets', 'ops-runbook']),
       requestId: expect.stringMatching(/^extension-package-install-\d+$/)
@@ -9453,6 +9453,7 @@ describe('workspace store', () => {
       pluginId: 'local-shell-tools',
       name: 'Local Shell Tools',
       description: '本地 shell 辅助工具集合。',
+      kind: 'content',
       iconKey: 'local',
       tabName: 'Local Shell Tools',
       show: true,
@@ -9465,7 +9466,7 @@ describe('workspace store', () => {
       source: 'local',
       lastUpdated: '2026-05-30',
       size: 702464,
-      readme: '从本地 .external-reference 包安装的工具插件，当前不在插件商店内。',
+      readme: '从本地 .aiopsterm-plugin 包安装的工具插件，当前不在插件商店内。',
       categories: ['Tools', 'Local'],
       functions: [{ title: '本地工具', desc: '提供路径检查、环境变量快照和日志定位入口。' }]
     })
@@ -9650,7 +9651,7 @@ describe('workspace store', () => {
       await finishPendingUpdate(malformedCancelUpdate)
 
       const selectedBeforePackage = store.selectedExtensionId
-      const clientLocalPackage = { name: 'client-local.external-reference', path: '/tmp/client-local.external-reference', size: 2048 }
+      const clientLocalPackage = { name: 'client-local.aiopsterm-plugin', path: '/tmp/client-local.aiopsterm-plugin', size: 2048 }
       ;(window.aiops as any).installExtensionPackage = undefined
       await expect(store.dropExtensionPackage(clientLocalPackage)).resolves.toBe(false)
       expect(store.extensionNotice).toBe('client local 安装服务不可用')
@@ -9695,12 +9696,12 @@ describe('workspace store', () => {
         }) as any
     )
 
-    const dropPromise = store.dropExtensionPackage({ name: 'race-pack.external-reference', path: '/tmp/race-pack.external-reference', size: 8192 })
+    const dropPromise = store.dropExtensionPackage({ name: 'race-pack.aiopsterm-plugin', path: '/tmp/race-pack.aiopsterm-plugin', size: 8192 })
     expect(store.extensionInstallingPackageName).toBe('race pack')
     expect(packageInput).toEqual(
       expect.objectContaining({
-        fileName: 'race-pack.external-reference',
-        filePath: '/tmp/race-pack.external-reference',
+        fileName: 'race-pack.aiopsterm-plugin',
+        filePath: '/tmp/race-pack.aiopsterm-plugin',
         size: 8192,
         requestId: expect.stringMatching(/^extension-package-install-\d+$/)
       })
@@ -9736,7 +9737,8 @@ describe('workspace store', () => {
     const packagePlugin = {
       pluginId: 'local-race-pack',
       name: 'race pack',
-      description: 'Installed from a local .external-reference package.',
+      description: 'Installed from a local .aiopsterm-plugin package.',
+      kind: 'content' as const,
       iconKey: 'local' as const,
       tabName: 'race pack',
       show: true,
@@ -9748,7 +9750,7 @@ describe('workspace store', () => {
       installable: true,
       source: 'local' as const,
       categories: ['Local', 'Tools'],
-      functions: [{ title: 'Local plugin', desc: 'Installed from a .external-reference package through the backend boundary.' }]
+      functions: [{ title: 'Local plugin', desc: 'Installed from a .aiopsterm-plugin package through the backend boundary.' }]
     }
     finishPackageInstall({
       ok: true,
@@ -9781,6 +9783,7 @@ describe('workspace store', () => {
       pluginId: 'local-shell-tools',
       name: 'Local Shell Tools',
       description: '本地 shell 辅助工具集合。',
+      kind: 'content',
       iconKey: 'local',
       tabName: 'Local Shell Tools',
       show: true,
@@ -9793,7 +9796,7 @@ describe('workspace store', () => {
       source: 'local',
       lastUpdated: '2026-05-30',
       size: 702464,
-      readme: '从本地 .external-reference 包安装的工具插件，当前不在插件商店内。',
+      readme: '从本地 .aiopsterm-plugin 包安装的工具插件，当前不在插件商店内。',
       categories: ['Tools', 'Local'],
       functions: [{ title: '本地工具', desc: '提供路径检查、环境变量快照和日志定位入口。' }]
     })
@@ -9862,7 +9865,7 @@ describe('workspace store', () => {
         ok: true,
         data: { operation: 'package', plugin: { pluginId: 'local-malformed-pack' }, message: 'malformed package success' }
       } as any)
-      await expect(store.dropExtensionPackage({ name: 'malformed-pack.external-reference', path: '/tmp/malformed-pack.external-reference', size: 512 })).resolves.toBe(false)
+      await expect(store.dropExtensionPackage({ name: 'malformed-pack.aiopsterm-plugin', path: '/tmp/malformed-pack.aiopsterm-plugin', size: 512 })).resolves.toBe(false)
       expect(store.extensionNotice).toBe(malformedExtensionMessage)
       expect(store.extensionInstallingPackageName).toBe('')
       expect(store.selectedExtensionId).toBe(selectedBeforePackage)

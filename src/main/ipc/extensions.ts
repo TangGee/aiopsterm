@@ -7,12 +7,14 @@ import {
   installExtensionPluginFromUrl,
   listExtensionPlugins,
   openExtensionSubscription,
+  syncExtensionAssetProvider,
   uninstallExtensionPlugin,
   updateExtensionPlugin
 } from '../backend/extensions/extensions'
 import { sendWebContentsEvent } from '@shared/windowEvents'
 import type {
   ExtensionInstallProgress,
+  ExtensionAssetProviderSyncInput,
   ExtensionPackageDownloadInput,
   ExtensionPackageInstallInput,
   ExtensionPluginOperationInput,
@@ -26,6 +28,9 @@ type RegisterExtensionsIpcInput = {
 
 export const registerExtensionsIpc = (ipcMain: IpcMain, input: RegisterExtensionsIpcInput) => {
   ipcMain.handle('extensions:list', () => listExtensionPlugins())
+  ipcMain.handle('extensions:provider:sync-assets', (_event, syncInput: ExtensionAssetProviderSyncInput) =>
+    syncExtensionAssetProvider(syncInput)
+  )
   ipcMain.handle('extensions:install-plugin', (event, installInput: ExtensionPluginOperationInput) => {
     const emit = (progress: ExtensionInstallProgress) => sendWebContentsEvent(event.sender, 'extensions:install-progress', progress)
     return installExtensionPlugin(installInput, emit)

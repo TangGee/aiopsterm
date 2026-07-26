@@ -15,6 +15,7 @@ const plugin: ExtensionPluginRuntimeConfig = {
   pluginId: 'ops-runbook',
   name: 'Ops Runbook',
   description: 'Runbook helpers',
+  kind: 'content',
   iconKey: 'runbook',
   tabName: 'Runbooks',
   show: true,
@@ -23,7 +24,7 @@ const plugin: ExtensionPluginRuntimeConfig = {
   hasUpdate: false,
   installable: true,
   source: 'store',
-  packageUrl: 'https://example.invalid/ops-runbook.external-reference'
+  packageUrl: 'https://example.invalid/ops-runbook.aiopsterm-plugin'
 }
 
 const operationResult = (operation: ExtensionPluginOperation, nextPlugin: ExtensionPluginRuntimeConfig = plugin): ExtensionPluginOperationResult => ({
@@ -49,6 +50,10 @@ describe('extensionsClient', () => {
     window.aiops = {
       ...originalAiops,
       listExtensionPlugins: vi.fn(async () => ({ ok: true, data: [plugin] })),
+      syncExtensionAssetProvider: vi.fn(async (input) => ({
+        ok: true,
+        data: { pluginId: input.pluginId, providerId: input.providerId, imported: 0, assets: [] }
+      })),
       installExtensionPlugin: vi.fn(async () => operationResult('install')),
       updateExtensionPlugin: vi.fn(async () => operationResult('update', { ...plugin, installed: true, hasUpdate: true })),
       installExtensionPackage: vi.fn(async (input) =>
@@ -84,18 +89,25 @@ describe('extensionsClient', () => {
     }
 
     await expect(extensionsClient.listExtensionPlugins()?.()).resolves.toEqual({ ok: true, data: [plugin] })
+    await expect(
+      extensionsClient.syncExtensionAssetProvider()?.({
+        pluginId: 'aiopsterm.generic-cmdb-assets',
+        providerId: 'generic-cmdb-json',
+        values: { payload: '[]' }
+      })
+    ).resolves.toEqual(expect.objectContaining({ data: expect.objectContaining({ imported: 0 }) }))
     await expect(extensionsClient.installExtensionPlugin()?.({ plugin })).resolves.toEqual(expect.objectContaining({ data: expect.objectContaining({ operation: 'install' }) }))
     await expect(extensionsClient.updateExtensionPlugin()?.({ plugin: { ...plugin, installed: true, hasUpdate: true } })).resolves.toEqual(
       expect.objectContaining({ data: expect.objectContaining({ operation: 'update' }) })
     )
     await expect(
-      extensionsClient.installExtensionPackage()?.({ fileName: 'ops-runbook.external-reference', filePath: '/tmp/ops-runbook.external-reference', requestId: 'request-1' })
+      extensionsClient.installExtensionPackage()?.({ fileName: 'ops-runbook.aiopsterm-plugin', filePath: '/tmp/ops-runbook.aiopsterm-plugin', requestId: 'request-1' })
     ).resolves.toEqual(expect.objectContaining({ data: expect.objectContaining({ operation: 'package' }) }))
-    await expect(extensionsClient.downloadExtensionPackage()?.({ pluginId: plugin.pluginId, url: 'https://example.invalid/ops-runbook.external-reference' })).resolves.toEqual(
+    await expect(extensionsClient.downloadExtensionPackage()?.({ pluginId: plugin.pluginId, url: 'https://example.invalid/ops-runbook.aiopsterm-plugin' })).resolves.toEqual(
       expect.objectContaining({ data: expect.objectContaining({ bytes: 3, data: [1, 2, 3] }) })
     )
     await expect(
-      extensionsClient.installExtensionPluginFromUrl()?.({ pluginId: plugin.pluginId, url: 'https://example.invalid/ops-runbook.external-reference' })
+      extensionsClient.installExtensionPluginFromUrl()?.({ pluginId: plugin.pluginId, url: 'https://example.invalid/ops-runbook.aiopsterm-plugin' })
     ).resolves.toEqual(expect.objectContaining({ data: expect.objectContaining({ operation: 'install' }) }))
     await expect(extensionsClient.uninstallExtensionPlugin()?.({ plugin: { ...plugin, installed: true } })).resolves.toEqual(
       expect.objectContaining({ data: expect.objectContaining({ operation: 'uninstall' }) })
@@ -111,10 +123,15 @@ describe('extensionsClient', () => {
     expect(extensionsClient.onExtensionInstallProgress()?.(listener)).toBe(unsubscribe)
     expect(listener).toHaveBeenCalledWith({ pluginId: plugin.pluginId, stage: 'installing', percent: 50, operation: 'install' })
     expect(window.aiops.installExtensionPlugin).toHaveBeenCalledWith({ plugin })
+    expect(window.aiops.syncExtensionAssetProvider).toHaveBeenCalledWith({
+      pluginId: 'aiopsterm.generic-cmdb-assets',
+      providerId: 'generic-cmdb-json',
+      values: { payload: '[]' }
+    })
     expect(window.aiops.updateExtensionPlugin).toHaveBeenCalledWith({ plugin: { ...plugin, installed: true, hasUpdate: true } })
-    expect(window.aiops.installExtensionPackage).toHaveBeenCalledWith({ fileName: 'ops-runbook.external-reference', filePath: '/tmp/ops-runbook.external-reference', requestId: 'request-1' })
-    expect(window.aiops.downloadExtensionPackage).toHaveBeenCalledWith({ pluginId: plugin.pluginId, url: 'https://example.invalid/ops-runbook.external-reference' })
-    expect(window.aiops.installExtensionPluginFromUrl).toHaveBeenCalledWith({ pluginId: plugin.pluginId, url: 'https://example.invalid/ops-runbook.external-reference' })
+    expect(window.aiops.installExtensionPackage).toHaveBeenCalledWith({ fileName: 'ops-runbook.aiopsterm-plugin', filePath: '/tmp/ops-runbook.aiopsterm-plugin', requestId: 'request-1' })
+    expect(window.aiops.downloadExtensionPackage).toHaveBeenCalledWith({ pluginId: plugin.pluginId, url: 'https://example.invalid/ops-runbook.aiopsterm-plugin' })
+    expect(window.aiops.installExtensionPluginFromUrl).toHaveBeenCalledWith({ pluginId: plugin.pluginId, url: 'https://example.invalid/ops-runbook.aiopsterm-plugin' })
     expect(window.aiops.uninstallExtensionPlugin).toHaveBeenCalledWith({ plugin: { ...plugin, installed: true } })
     expect(window.aiops.openExtensionSubscription).toHaveBeenCalledWith({ plugin })
     expect(window.aiops.cancelExtensionInstall).toHaveBeenCalledWith(plugin.pluginId)
@@ -123,6 +140,7 @@ describe('extensionsClient', () => {
     window.aiops = {
       ...originalAiops,
       listExtensionPlugins: undefined as any,
+      syncExtensionAssetProvider: undefined as any,
       installExtensionPlugin: undefined as any,
       updateExtensionPlugin: undefined as any,
       installExtensionPackage: undefined as any,

@@ -3,7 +3,7 @@ import { existsSync } from 'fs'
 import { join } from 'path'
 import { configureAssetBackendRuntime, getAsset, getAssetSecret, getKeychainSecret } from '../assets/assets'
 import { createJumpserverSeedFetch } from '@shared/jumpserverClient'
-import type { refreshOrganizationAssets } from '../assets/assets'
+import type { refreshOrganizationAssets, saveAsset } from '../assets/assets'
 import { configureAiChatRuntime } from '../ai/aiChat'
 import { configureAiCommandBackendRuntime } from '../ai/aiCommands'
 import { configureAiContextBackendRuntime } from '../ai/aiContext'
@@ -94,6 +94,7 @@ type ConfigureMainRuntimeInput = {
   sendTerminalKeyboardInteractiveResult: (result: TerminalKeyboardInteractiveResult) => void
   dismissTerminalKeyboardInteractive: (id: string, message?: string) => void
   refreshOrganizationAssets: typeof refreshOrganizationAssets
+  saveAsset: typeof saveAsset
   writeTerminalBySessionId: (sessionId: string, data: string) => Promise<ControlResponse> | ControlResponse
   showControlNotification: (notification: ControlNotificationRecord) => void
   broadcastManagedAiSessionFocusRequest: (request: ManagedAiSessionFocusRequest) => void
@@ -256,6 +257,11 @@ export const configureMainBackendRuntimes = (input: ConfigureMainRuntimeInput) =
     })
   configureExtensionBackendRuntime({
     extensionRootDir: join(userDataPath, 'extensions'),
+    builtinPluginDir: app.isPackaged
+      ? join(process.resourcesPath || '', 'builtin-plugins')
+      : join(app.getAppPath(), 'resources', 'builtin-plugins'),
+    appVersion: app.getVersion(),
+    saveAsset: input.saveAsset,
     fetch: (url, init) => net.fetch(url, init)
   })
   configureKubernetesBackendRuntime({

@@ -368,24 +368,28 @@ const createE2eExtensionStore = async () => {
   const dir = path.join(os.tmpdir(), `aiopsterm-e2e-extension-store-${Date.now()}`)
   await mkdir(dir, { recursive: true })
   const manifest = {
+    manifestVersion: 1,
     id: 'ops-runbook',
     displayName: 'Ops Runbook',
     version: '1.3.0',
     description: '本地维护流程和技能模板。',
-    main: 'main.js',
+    kind: 'content',
+    engines: { aiopsterm: '>=0.1.0' },
     iconKey: 'runbook',
     categories: ['Tools', 'Runbook'],
     functions: [
       { title: '巡检模板', desc: '生成磁盘、负载、服务状态的检查清单。' },
       { title: '发布守卫', desc: '把发布前后验证步骤整理为可复用流程。' }
     ],
-    contributes: { views: [{ id: 'opsRunbook', name: 'Ops Runbook' }] }
+    contributes: {
+      commands: [{ id: 'ops-runbook.check', title: '巡检模板', description: '生成基础巡检结果。', command: 'uptime' }]
+    }
   }
   await writeFile(
-    path.join(dir, 'ops-runbook-1.3.0.external-reference'),
+    path.join(dir, 'ops-runbook-1.3.0.aiopsterm-plugin'),
     createZipFixture([
-      { name: 'plugin.json', content: JSON.stringify(manifest) },
-      { name: 'main.js', content: 'module.exports = {}' },
+      { name: 'aiopsterm.plugin.json', content: JSON.stringify(manifest) },
+      { name: 'content.txt', content: 'declarative plugin content' },
       { name: 'README.md', content: '# Ops Runbook\n\nE2E store package.' }
     ])
   )

@@ -10,6 +10,7 @@ For supported third-party boundaries and examples, start with the [Developer Int
 - [Database MCP](database-mcp.md)
 - [Cline Agent Runtime](cline-agent-runtime.md)
 - [Hook Behavior](hook-behavior.md)
+- [Plugin Runtime](plugin-runtime.md)
 - [Internationalization](internationalization.md)
 - [Managed AI Sessions](managed-ai-sessions.md)
 - [Product Session Registry](product-session-registry.md)

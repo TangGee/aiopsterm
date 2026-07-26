@@ -317,6 +317,7 @@ const api: AiopsPreloadApi = {
   listAiModels: (input) => ipcRenderer.invoke('models:list', input),
   checkModelProvider: (input) => ipcRenderer.invoke('models:check-provider', input),
   listExtensionPlugins: () => ipcRenderer.invoke('extensions:list'),
+  syncExtensionAssetProvider: (input) => ipcRenderer.invoke('extensions:provider:sync-assets', input),
   installExtensionPlugin: (input) => ipcRenderer.invoke('extensions:install-plugin', input),
   updateExtensionPlugin: (input) => ipcRenderer.invoke('extensions:update-plugin', input),
   installExtensionPackage: (input) => ipcRenderer.invoke('extensions:install-package', input),

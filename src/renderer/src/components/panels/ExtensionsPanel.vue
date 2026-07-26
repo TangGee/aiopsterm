@@ -160,8 +160,8 @@ const iconMap: Record<ExtensionIconKey, Component> = {
 
 const dragPlaceholderText = computed(() => {
   if (workspace.extensionInstallingPackageName) return `正在安装 ${workspace.extensionInstallingPackageName}`
-  if (workspace.extensionDragActive) return '松开安装 .external-reference 插件包'
-  return '拖入 .external-reference 插件包'
+  if (workspace.extensionDragActive) return '松开安装 .aiopsterm-plugin 插件包'
+  return '拖入 .aiopsterm-plugin 插件包'
 })
 
 const stageText = (stage: ExtensionInstallStage) => {
@@ -179,7 +179,7 @@ const pluginProgress = (pluginId: string) => workspace.extensionInstallProgressM
 const isPluginBusy = (pluginId: string) => Boolean(workspace.extensionInstallLoadingMap[pluginId] || workspace.extensionUpdateLoadingMap[pluginId])
 
 const sourceText = (plugin: ExtensionPlugin) => {
-  if (plugin.source === 'preinstalled') return 'Preinstalled'
+  if (plugin.source === 'builtin') return 'Built-in'
   if (plugin.source === 'local') return 'Local'
   return 'Store'
 }

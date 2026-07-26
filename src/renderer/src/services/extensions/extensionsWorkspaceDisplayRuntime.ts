@@ -1,7 +1,7 @@
 import type { ExtensionInstallStage, ExtensionPluginRuntimeConfig } from '@shared/contracts/extensions'
 
 export const extensionPluginSourceText = (plugin: ExtensionPluginRuntimeConfig) => {
-  if (plugin.source === 'preinstalled') return 'Preinstalled'
+  if (plugin.source === 'builtin') return 'Built-in'
   if (plugin.source === 'local') return 'Local'
   return 'Store'
 }

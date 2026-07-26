@@ -1,4 +1,6 @@
 import type {
+  ExtensionAssetProviderContribution,
+  ExtensionCommandContribution,
   ExtensionInstallProgress,
   ExtensionInstallStage,
   ExtensionPackageInstallInput,
@@ -6,6 +8,8 @@ import type {
   ExtensionPluginOperationResult,
   ExtensionPluginRuntimeConfig
 } from '@shared/contracts/extensions'
+import type { AiopsAssetInput, AiopsAssetRecord } from '@shared/contracts/assets'
+import type { AiopsMutationResult } from '@shared/contracts/common'
 import { normalizeExternalHttpUrl } from '@shared/externalUrl'
 
 export type ExtensionProgressEmitter = (progress: ExtensionInstallProgress) => void
@@ -15,12 +19,16 @@ export type ExtensionOperationOptions = {
 }
 
 export type LocalExtensionPackageManifest = {
+  manifestVersion?: unknown
   id?: unknown
   name?: unknown
   displayName?: unknown
   version?: unknown
+  kind?: unknown
   description?: unknown
-  main?: unknown
+  engines?: {
+    aiopsterm?: unknown
+  }
   categories?: unknown
   readme?: unknown
   functions?: unknown
@@ -46,7 +54,8 @@ export type LocalExtensionPackageManifest = {
     packageSha256?: unknown
   }
   contributes?: {
-    views?: unknown
+    commands?: unknown
+    assetProviders?: unknown
   }
 }
 
@@ -105,16 +114,20 @@ export type ExtensionFetch = (url: string, init?: { signal?: AbortSignal }) => P
 
 export type ExtensionBackendRuntimeConfig = {
   extensionRootDir?: string
+  builtinPluginDir?: string
   storePackageDir?: string
   storeCatalogUrl?: string
   remotePackageCacheDir?: string
+  appVersion?: string
   fetch?: ExtensionFetch
+  saveAsset?: (input: AiopsAssetInput) => AiopsMutationResult<AiopsAssetRecord>
 }
 
 export type ExtensionPackageRuntimeConfig = {
   extensionRootDir: string
   storePackageDir: string
   remotePackageCacheDir: string
+  appVersion: string
   fetch: ExtensionFetch
 }
 
@@ -162,6 +175,13 @@ export const clonePlugin = (plugin: ExtensionPluginRuntimeConfig): ExtensionPlug
   ...plugin,
   categories: plugin.categories ? [...plugin.categories] : undefined,
   functions: plugin.functions ? plugin.functions.map((item) => ({ ...item })) : undefined,
+  commands: plugin.commands ? plugin.commands.map((item) => ({ ...item })) : undefined,
+  assetProviders: plugin.assetProviders
+    ? plugin.assetProviders.map((provider) => ({
+        ...provider,
+        fields: provider.fields.map((field) => ({ ...field }))
+      }))
+    : undefined,
   guideSteps: plugin.guideSteps ? [...plugin.guideSteps] : undefined,
   connectionLog: plugin.connectionLog ? plugin.connectionLog.map((item) => ({ ...item })) : undefined,
   storePackagePath: trimText(plugin.storePackagePath) || undefined,
@@ -207,6 +227,71 @@ export const parseManifestFunctions = (value: unknown): Array<{ title: string; d
     .filter((item): item is { title: string; desc: string } => Boolean(item))
 }
 
+export const parseManifestCommands = (manifest: LocalExtensionPackageManifest): ExtensionCommandContribution[] => {
+  const contributes = asRecord(manifest.contributes)
+  const commands = contributes?.commands
+  if (!Array.isArray(commands)) return []
+  const parsed: ExtensionCommandContribution[] = []
+  const ids = new Set<string>()
+  for (const item of commands) {
+    const record = asRecord(item)
+    if (!record) continue
+    const id = trimText(record.id)
+    const title = trimText(record.title)
+    const command = trimText(record.command)
+    if (!id || !title || !command || ids.has(id)) continue
+    ids.add(id)
+    parsed.push({
+      id,
+      title,
+      description: trimText(record.description),
+      command
+    })
+  }
+  return parsed
+}
+
+export const parseManifestAssetProviders = (manifest: LocalExtensionPackageManifest): ExtensionAssetProviderContribution[] => {
+  const contributes = asRecord(manifest.contributes)
+  const providers = contributes?.assetProviders
+  if (!Array.isArray(providers)) return []
+  const parsed: ExtensionAssetProviderContribution[] = []
+  const ids = new Set<string>()
+  for (const item of providers) {
+    const record = asRecord(item)
+    if (!record) continue
+    const id = trimText(record.id)
+    const name = trimText(record.name)
+    if (!id || !name || record.adapter !== 'json-assets' || ids.has(id) || !Array.isArray(record.fields)) continue
+    const fields: ExtensionAssetProviderContribution['fields'] = []
+    for (const field of record.fields) {
+      const fieldRecord = asRecord(field)
+      if (!fieldRecord) continue
+      const key = trimText(fieldRecord.key)
+      const label = trimText(fieldRecord.label)
+      if (!key || !label || fieldRecord.type !== 'textarea') continue
+      const defaultValue = trimText(fieldRecord.defaultValue)
+      fields.push({
+        key,
+        label,
+        type: 'textarea',
+        required: fieldRecord.required === true,
+        ...(defaultValue ? { defaultValue } : {})
+      })
+    }
+    if (!fields.length || !fields.some((field) => field.key === 'payload') || new Set(fields.map((field) => field.key)).size !== fields.length) continue
+    ids.add(id)
+    parsed.push({
+      id,
+      name,
+      description: trimText(record.description),
+      adapter: 'json-assets',
+      fields
+    })
+  }
+  return parsed
+}
+
 export const extractStoreManifestFlags = (manifest: LocalExtensionPackageManifest) => {
   const store = asRecord(manifest.store)
   const privateFlag =
@@ -222,15 +307,6 @@ export const extractStoreManifestFlags = (manifest: LocalExtensionPackageManifes
     installable,
     subscriptionUrl
   }
-}
-
-export const parseFirstContributedViewName = (manifest: LocalExtensionPackageManifest) => {
-  const contributes = asRecord(manifest.contributes)
-  const views = contributes ? contributes.views : undefined
-  if (!Array.isArray(views)) return ''
-  const firstView = views.map(asRecord).find(Boolean)
-  if (!firstView) return ''
-  return trimText(firstView.name || firstView.id)
 }
 
 export const extractPackageManifestSource = (manifest: LocalExtensionPackageManifest, baseUrl?: string) => {

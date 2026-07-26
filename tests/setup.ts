@@ -724,6 +724,7 @@ type TestExtensionPlugin = {
   pluginId: string
   name: string
   description: string
+  kind: 'content' | 'provider'
   iconKey: 'runbook' | 'cloud' | 'private' | 'local'
   tabName: string
   show: boolean
@@ -735,7 +736,7 @@ type TestExtensionPlugin = {
   installable?: boolean
   required?: boolean
   isDraggedOnly?: boolean
-  source?: 'preinstalled' | 'store' | 'local'
+  source?: 'builtin' | 'store' | 'local'
   isPrivate?: boolean
   lastUpdated?: string
   storePackagePath?: string
@@ -759,6 +760,7 @@ const extensionPluginStoreFixtureCatalog: TestExtensionPlugin[] = [
     pluginId: 'ops-runbook',
     name: 'Ops Runbook',
     description: '本地维护流程和技能模板。',
+    kind: 'content',
     iconKey: 'runbook',
     tabName: 'Ops Runbook',
     show: true,
@@ -781,7 +783,8 @@ const extensionPluginStoreFixtureCatalog: TestExtensionPlugin[] = [
   {
     pluginId: 'cloud-assets',
     name: 'Cloud Assets',
-    description: '云资产发现和同步插件，需要真实 .external-reference 包后安装。',
+    description: '云资产发现和同步插件，需要真实 .aiopsterm-plugin 包后安装。',
+    kind: 'content',
     iconKey: 'cloud',
     tabName: 'Cloud Assets',
     show: true,
@@ -794,9 +797,9 @@ const extensionPluginStoreFixtureCatalog: TestExtensionPlugin[] = [
     source: 'store',
   lastUpdated: '2026-05-28',
   size: 2310144,
-  packageUrl: 'https://aiopsterm.local/extensions/cloud-assets-0.9.1.external-reference',
+  packageUrl: 'https://aiopsterm.local/extensions/cloud-assets-0.9.1.aiopsterm-plugin',
   packageSha256: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-  readme: 'Cloud Assets 需要来自插件仓库或本地拖入的真实 .external-reference 包。未配置真实包时，后端不会模拟安装成功。',
+  readme: 'Cloud Assets 需要来自插件仓库或本地拖入的真实 .aiopsterm-plugin 包。未配置真实包时，后端不会模拟安装成功。',
     categories: ['Cloud', 'Assets'],
     functions: [
       { title: '云资产同步', desc: '按账号和地域拉取云主机列表。' },
@@ -807,6 +810,7 @@ const extensionPluginStoreFixtureCatalog: TestExtensionPlugin[] = [
     pluginId: 'private-automation-pack',
     name: 'Private Automation Pack',
     description: '私有自动化插件，需要订阅后安装。',
+    kind: 'content',
     iconKey: 'private',
     tabName: 'Private Automation Pack',
     show: true,
@@ -920,11 +924,11 @@ const finishExtensionOperationMock = (
 const storePackageUnavailableMock = (plugin: TestExtensionPlugin) => ({
   ok: false,
   errorCode: 'EXTENSION_STORE_PACKAGE_UNAVAILABLE',
-  errorMessage: `${plugin.name} requires a real .external-reference package before it can be installed.`
+  errorMessage: `${plugin.name} requires a real .aiopsterm-plugin package before it can be installed.`
 })
 
 const createPackagePluginMock = (input: { fileName: string; filePath?: string; size?: number; existingPluginIds?: string[] }): TestExtensionPlugin => {
-  const pluginName = input.fileName.replace(/\.external-reference$/i, '').replace(/[-_]+/g, ' ').trim() || 'Local Plugin'
+  const pluginName = input.fileName.replace(/\.aiopsterm-plugin$/i, '').replace(/[-_]+/g, ' ').trim() || 'Local Plugin'
   const slug = pluginName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'plugin'
   const existing = input.existingPluginIds || []
   const baseId = `local-${slug}`
@@ -934,7 +938,8 @@ const createPackagePluginMock = (input: { fileName: string; filePath?: string; s
   return {
     pluginId,
     name: pluginName,
-    description: 'Installed from a local .external-reference package.',
+    description: 'Installed from a local .aiopsterm-plugin package.',
+    kind: 'content',
     iconKey: 'local',
     tabName: pluginName,
     show: true,
@@ -950,7 +955,7 @@ const createPackagePluginMock = (input: { fileName: string; filePath?: string; s
     size: input.size || 524288,
     readme: 'Local package installed through the aiopsterm backend plugin boundary.',
     categories: ['Local', 'Tools'],
-    functions: [{ title: 'Local plugin', desc: 'Installed from a .external-reference package through the backend boundary.' }]
+    functions: [{ title: 'Local plugin', desc: 'Installed from a .aiopsterm-plugin package through the backend boundary.' }]
   }
 }
 
@@ -8213,12 +8218,21 @@ Object.defineProperty(window, 'aiops', {
       ok: true,
       data: extensionPluginStoreMock.map(cloneTestExtensionPlugin)
     })),
+    syncExtensionAssetProvider: vi.fn(async (input: { pluginId: string; providerId: string }) => ({
+      ok: true,
+      data: {
+        pluginId: input.pluginId,
+        providerId: input.providerId,
+        imported: 0,
+        assets: []
+      }
+    })),
     installExtensionPlugin: vi.fn(async (input: { plugin: TestExtensionPlugin }) => storePackageUnavailableMock(input.plugin)),
     updateExtensionPlugin: vi.fn(async (input: { plugin: TestExtensionPlugin }) => storePackageUnavailableMock(input.plugin)),
     installExtensionPackage: vi.fn(
       async (input: { fileName: string; filePath?: string; size?: number; existingPluginIds?: string[]; requestId?: string }) => {
-        if (!input.fileName.toLowerCase().endsWith('.external-reference')) {
-          return { ok: false, errorCode: 'EXTENSION_PACKAGE_FORMAT_INVALID', errorMessage: 'Plugin package must use the .external-reference extension.' }
+        if (!input.fileName.toLowerCase().endsWith('.aiopsterm-plugin')) {
+          return { ok: false, errorCode: 'EXTENSION_PACKAGE_FORMAT_INVALID', errorMessage: 'Plugin package must use the .aiopsterm-plugin extension.' }
         }
         if (!input.filePath) {
           return { ok: false, errorCode: 'EXTENSION_PACKAGE_PATH_REQUIRED', errorMessage: 'Plugin package file path is required.' }
@@ -8243,6 +8257,7 @@ Object.defineProperty(window, 'aiops', {
           pluginId: input.pluginId,
           name: input.pluginId,
           description: 'Remote extension package.',
+          kind: 'content',
           iconKey: 'local',
           tabName: input.pluginId,
           show: true,

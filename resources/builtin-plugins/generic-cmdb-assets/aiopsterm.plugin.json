@@ -1,0 +1,46 @@
+{
+  "manifestVersion": 1,
+  "id": "aiopsterm.generic-cmdb-assets",
+  "displayName": "Generic CMDB Assets",
+  "version": "1.0.0",
+  "kind": "provider",
+  "description": "将标准 JSON 资产列表导入 aiopsterm，用于验证受控 Provider 插件能力。",
+  "engines": {
+    "aiopsterm": ">=0.1.0"
+  },
+  "iconKey": "cloud",
+  "categories": [
+    "Assets",
+    "CMDB"
+  ],
+  "readme": "Generic CMDB Assets 是 aiopsterm 自有的内置 Provider 插件。插件只提交 JSON 数据，解析、校验、ID 生成和资产写入全部由宿主后端完成。",
+  "functions": [
+    {
+      "title": "CMDB JSON 导入",
+      "desc": "验证并导入主机名称、地址、端口、用户、分组和标签。"
+    },
+    {
+      "title": "后端所有权",
+      "desc": "资产 ID、字段归一化和持久化由 aiopsterm 后端负责。"
+    }
+  ],
+  "contributes": {
+    "assetProviders": [
+      {
+        "id": "generic-cmdb-json",
+        "name": "Generic CMDB JSON",
+        "description": "粘贴 JSON 数组或包含 assets 数组的对象。",
+        "adapter": "json-assets",
+        "fields": [
+          {
+            "key": "payload",
+            "label": "CMDB JSON",
+            "type": "textarea",
+            "required": true,
+            "defaultValue": "[\n  {\n    \"externalId\": \"demo-web-01\",\n    \"name\": \"demo-web-01\",\n    \"host\": \"192.0.2.10\",\n    \"username\": \"ops\",\n    \"port\": 22,\n    \"group\": \"CMDB Demo\",\n    \"tags\": [\"demo\", \"linux\"]\n  }\n]"
+          }
+        ]
+      }
+    ]
+  }
+}

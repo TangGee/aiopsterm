@@ -211,6 +211,10 @@ export const createWorkspaceExtensionsController = (state: WorkspaceExtensionsCo
     ...plugin,
     categories: plugin.categories ? [...plugin.categories] : undefined,
     functions: plugin.functions ? plugin.functions.map((item) => ({ ...item })) : undefined,
+    commands: plugin.commands ? plugin.commands.map((item) => ({ ...item })) : undefined,
+    assetProviders: plugin.assetProviders
+      ? plugin.assetProviders.map((provider) => ({ ...provider, fields: provider.fields.map((field) => ({ ...field })) }))
+      : undefined,
     guideSteps: plugin.guideSteps ? [...plugin.guideSteps] : undefined,
     connectionLog: plugin.connectionLog ? plugin.connectionLog.map((item) => ({ ...item })) : undefined,
     packageUrl: plugin.packageUrl || undefined,
@@ -223,6 +227,10 @@ export const createWorkspaceExtensionsController = (state: WorkspaceExtensionsCo
       iconKey: plugin.iconKey || 'local',
       categories: plugin.categories ? [...plugin.categories] : undefined,
       functions: plugin.functions ? plugin.functions.map((item) => ({ ...item })) : undefined,
+      commands: plugin.commands ? plugin.commands.map((item) => ({ ...item })) : undefined,
+      assetProviders: plugin.assetProviders
+        ? plugin.assetProviders.map((provider) => ({ ...provider, fields: provider.fields.map((field) => ({ ...field })) }))
+        : undefined,
       guideSteps: plugin.guideSteps ? [...plugin.guideSteps] : undefined,
       connectionLog: plugin.connectionLog ? plugin.connectionLog.map((item) => ({ ...item })) : undefined,
       packageUrl: plugin.packageUrl || undefined,
@@ -265,6 +273,10 @@ export const createWorkspaceExtensionsController = (state: WorkspaceExtensionsCo
           iconKey: plugin.iconKey || 'local',
           categories: plugin.categories ? [...plugin.categories] : undefined,
           functions: plugin.functions ? plugin.functions.map((item) => ({ ...item })) : undefined,
+          commands: plugin.commands ? plugin.commands.map((item) => ({ ...item })) : undefined,
+          assetProviders: plugin.assetProviders
+            ? plugin.assetProviders.map((provider) => ({ ...provider, fields: provider.fields.map((field) => ({ ...field })) }))
+            : undefined,
           guideSteps: plugin.guideSteps ? [...plugin.guideSteps] : undefined,
           connectionLog: plugin.connectionLog ? plugin.connectionLog.map((item) => ({ ...item })) : undefined,
           packageUrl: plugin.packageUrl || undefined,
@@ -455,13 +467,13 @@ export const createWorkspaceExtensionsController = (state: WorkspaceExtensionsCo
     const pathFileName = rawPath.split(/[\\/]/).pop() || ''
     const fileName = typeof file === 'string' ? pathFileName || file : file?.name || pathFileName
     const size = typeof file === 'string' ? undefined : file?.size
-    if (!fileName.endsWith('.external-reference')) {
-      setExtensionNotice('插件包格式错误，请拖入 .external-reference 文件')
+    if (!fileName.endsWith('.aiopsterm-plugin')) {
+      setExtensionNotice('插件包格式错误，请拖入 .aiopsterm-plugin 文件')
       return false
     }
-    const packageName = fileName.replace(/\.external-reference$/i, '').replace(/[-_]+/g, ' ').trim() || 'Local Plugin'
+    const packageName = fileName.replace(/\.aiopsterm-plugin$/i, '').replace(/[-_]+/g, ' ').trim() || 'Local Plugin'
     if (!filePath) {
-      setExtensionNotice(`${packageName} 安装需要真实本地路径，请从桌面客户端拖入 .external-reference 文件`)
+      setExtensionNotice(`${packageName} 安装需要真实本地路径，请从桌面客户端拖入 .aiopsterm-plugin 文件`)
       return false
     }
     const installExtensionPackageBridge = extensionsClient.installExtensionPackage()

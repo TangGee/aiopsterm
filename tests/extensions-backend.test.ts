@@ -9,6 +9,7 @@ type ExtensionPlugin = {
   pluginId: string
   name: string
   description: string
+  kind: 'content' | 'provider'
   iconKey: 'runbook' | 'cloud' | 'private' | 'local'
   tabName: string
   show: boolean
@@ -18,7 +19,8 @@ type ExtensionPlugin = {
   installedVersion?: string
   latestVersion?: string
   installable?: boolean
-  source?: 'preinstalled' | 'store' | 'local'
+  required?: boolean
+  source?: 'builtin' | 'store' | 'local'
   installedAt?: string
   packagePath?: string
   storePackagePath?: string
@@ -29,6 +31,14 @@ type ExtensionPlugin = {
   size?: number
   categories?: string[]
   functions?: Array<{ title: string; desc: string }>
+  commands?: Array<{ id: string; title: string; description: string; command: string }>
+  assetProviders?: Array<{
+    id: string
+    name: string
+    description: string
+    adapter: 'json-assets'
+    fields: Array<{ key: string; label: string; type: 'textarea'; required: boolean; defaultValue?: string }>
+  }>
   isPrivate?: boolean
   detailSummary?: string
   guideSteps?: string[]
@@ -55,20 +65,25 @@ let listExtensionPlugins: () => Promise<any>
 let resetExtensionPluginCatalogForTests: () => void
 let configureExtensionBackendRuntime: (config?: {
   extensionRootDir?: string
+  builtinPluginDir?: string
   storePackageDir?: string
   storeCatalogUrl?: string
   remotePackageCacheDir?: string
+  appVersion?: string
+  saveAsset?: (input: any) => any
   fetch?: (url: string, init?: { signal?: AbortSignal }) => Promise<any>
 }) => void
 let cancelExtensionInstall: (pluginId: string) => any
 let openExtensionSubscription: (input: { plugin: ExtensionPlugin }, openExternal?: (url: string) => Promise<void> | void) => Promise<any>
 let downloadExtensionPackage: (input: { url: string }) => Promise<any>
 let installExtensionPluginFromUrl: (input: { pluginId: string; version?: string; url: string; sha256?: string }, emit?: (progress: ExtensionProgress) => void, options?: { stepDelayMs?: number }) => Promise<any>
+let syncExtensionAssetProvider: (input: { pluginId: string; providerId: string; values: Record<string, string> }) => Promise<any>
 
 const basePlugin = (patch: Partial<ExtensionPlugin> = {}): ExtensionPlugin => ({
   pluginId: 'cloud-assets',
   name: 'Cloud Assets',
   description: 'Cloud asset sync plugin.',
+  kind: 'content',
   iconKey: 'cloud',
   tabName: 'Cloud Assets',
   show: true,
@@ -196,27 +211,31 @@ const createLocalPackage = async (
   options: { includeManifest?: boolean; includeMain?: boolean; readme?: string } = {}
 ) => {
   const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-extension-'))
-  const filePath = join(dir, `${String(patch.id || 'local-tools')}.external-reference`)
+  const filePath = join(dir, `${String(patch.id || 'local-tools')}.aiopsterm-plugin`)
   const manifest = {
+    manifestVersion: 1,
     id: 'local-tools',
     displayName: 'Local Tools',
     version: '2.4.0',
     description: 'Local package tools from manifest.',
-    main: 'main.js',
+    kind: 'content',
+    engines: { aiopsterm: '>=0.1.0' },
     categories: ['Local', 'Tools'],
     functions: [{ title: 'Path check', desc: 'Inspect local path state.' }],
-    contributes: { views: [{ id: 'localTools', name: 'Local Tools' }] },
+    contributes: {
+      commands: [{ id: 'local-tools.path-check', title: 'Path check', description: 'Inspect local path state.', command: 'pwd' }]
+    },
     ...patch
   }
   const entries: Array<{ name: string; content: string }> = []
-  if (options.includeManifest !== false) entries.push({ name: 'plugin.json', content: JSON.stringify(manifest) })
-  if (options.includeMain !== false) entries.push({ name: String(manifest.main || 'main.js'), content: 'module.exports = {}' })
+  if (options.includeManifest !== false) entries.push({ name: 'aiopsterm.plugin.json', content: JSON.stringify(manifest) })
+  if (options.includeMain !== false) entries.push({ name: 'content.txt', content: 'declarative plugin content' })
   if (options.readme !== undefined) entries.push({ name: 'README.md', content: options.readme })
   await writeFile(filePath, createZipFixture(entries))
   return {
     dir,
     filePath,
-    fileName: filePath.split(/[\\/]/).pop() || 'local-tools.external-reference'
+    fileName: filePath.split(/[\\/]/).pop() || 'local-tools.aiopsterm-plugin'
   }
 }
 
@@ -229,11 +248,13 @@ beforeAll(async () => {
   uninstallExtensionPlugin = backend.uninstallExtensionPlugin as typeof uninstallExtensionPlugin
   listExtensionPlugins = backend.listExtensionPlugins as typeof listExtensionPlugins
   resetExtensionPluginCatalogForTests = backend.resetExtensionPluginCatalogForTests as typeof resetExtensionPluginCatalogForTests
-  configureExtensionBackendRuntime = backend.configureExtensionBackendRuntime as typeof configureExtensionBackendRuntime
+  configureExtensionBackendRuntime = (config = {}) =>
+    backend.configureExtensionBackendRuntime({ ...config, appVersion: config.appVersion || '0.1.0' })
   cancelExtensionInstall = backend.cancelExtensionInstall as typeof cancelExtensionInstall
   openExtensionSubscription = backend.openExtensionSubscription as typeof openExtensionSubscription
   downloadExtensionPackage = backend.downloadExtensionPackage as typeof downloadExtensionPackage
   installExtensionPluginFromUrl = backend.installExtensionPluginFromUrl as typeof installExtensionPluginFromUrl
+  syncExtensionAssetProvider = backend.syncExtensionAssetProvider as typeof syncExtensionAssetProvider
 })
 
 describe('extension plugin backend boundary', () => {
@@ -251,12 +272,12 @@ describe('extension plugin backend boundary', () => {
 
   const useExtensionRoot = async () => {
     extensionRootDir = await mkdtemp(join(tmpdir(), 'aiopsterm-extension-root-'))
-    configureExtensionBackendRuntime({ extensionRootDir })
+    configureExtensionBackendRuntime({ extensionRootDir, appVersion: '0.1.0' })
     return extensionRootDir
   }
 
   const configureStorePackageDir = (storePackageDir: string) => {
-    configureExtensionBackendRuntime({ extensionRootDir, storePackageDir })
+    configureExtensionBackendRuntime({ extensionRootDir, storePackageDir, appVersion: '0.1.0' })
   }
 
   const createStorePackage = async (
@@ -265,21 +286,25 @@ describe('extension plugin backend boundary', () => {
     options: { includeManifest?: boolean; includeMain?: boolean; readme?: string } = {}
   ) => {
     const manifest = {
+      manifestVersion: 1,
       id: 'cloud-assets',
       displayName: 'Cloud Assets',
       version: '0.9.1',
       description: 'Store package from manifest.',
-      main: 'main.js',
+      kind: 'content',
+      engines: { aiopsterm: '>=0.1.0' },
       categories: ['Cloud', 'Assets'],
       functions: [{ title: 'Cloud sync', desc: 'Sync cloud hosts from a real package.' }],
-      contributes: { views: [{ id: 'cloudAssets', name: 'Cloud Assets' }] },
+      contributes: {
+        commands: [{ id: 'cloud-assets.sync', title: 'Cloud sync', description: 'Sync cloud assets.', command: 'echo sync' }]
+      },
       ...patch
     }
-    const fileName = `${String(manifest.id)}-${String(manifest.version)}.external-reference`
+    const fileName = `${String(manifest.id)}-${String(manifest.version)}.aiopsterm-plugin`
     const filePath = join(storePackageDir, fileName)
     const entries: Array<{ name: string; content: string }> = []
-    if (options.includeManifest !== false) entries.push({ name: 'plugin.json', content: JSON.stringify(manifest) })
-    if (options.includeMain !== false) entries.push({ name: String(manifest.main || 'main.js'), content: 'module.exports = {}' })
+    if (options.includeManifest !== false) entries.push({ name: 'aiopsterm.plugin.json', content: JSON.stringify(manifest) })
+    if (options.includeMain !== false) entries.push({ name: 'content.txt', content: 'declarative plugin content' })
     if (options.readme !== undefined) entries.push({ name: 'README.md', content: options.readme })
     await writeFile(filePath, createZipFixture(entries))
     return {
@@ -307,6 +332,94 @@ describe('extension plugin backend boundary', () => {
     expect(result.data.find((plugin: ExtensionPlugin) => plugin.pluginId === 'cloud-assets')).toBeUndefined()
   })
 
+  it('discovers both aiopsterm built-in plugin kinds from app resources', async () => {
+    configureExtensionBackendRuntime({
+      extensionRootDir,
+      builtinPluginDir: join(process.cwd(), 'resources', 'builtin-plugins')
+    })
+
+    const result = await listExtensionPlugins()
+
+    expect(result.ok).toBe(true)
+    expect(result.data).toHaveLength(2)
+    expect(result.data.find((plugin: ExtensionPlugin) => plugin.pluginId === 'aiopsterm.linux-incident-runbook')).toMatchObject({
+      kind: 'content',
+      source: 'builtin',
+      installed: true,
+      required: true,
+      installable: false,
+      commands: expect.arrayContaining([expect.objectContaining({ id: 'linux.overview', command: expect.stringContaining('uptime') })])
+    })
+    expect(result.data.find((plugin: ExtensionPlugin) => plugin.pluginId === 'aiopsterm.generic-cmdb-assets')).toMatchObject({
+      kind: 'provider',
+      source: 'builtin',
+      installed: true,
+      required: true,
+      assetProviders: [expect.objectContaining({ id: 'generic-cmdb-json', adapter: 'json-assets' })]
+    })
+  })
+
+  it('imports assets through the host-owned built-in provider adapter', async () => {
+    const savedAssets: any[] = []
+    configureExtensionBackendRuntime({
+      extensionRootDir,
+      builtinPluginDir: join(process.cwd(), 'resources', 'builtin-plugins'),
+      saveAsset: (input: any) => {
+        const asset = { ...input, uuid: `uuid-${savedAssets.length + 1}` }
+        savedAssets.push(asset)
+        return { ok: true, data: asset }
+      }
+    })
+
+    const result = await syncExtensionAssetProvider({
+      pluginId: 'aiopsterm.generic-cmdb-assets',
+      providerId: 'generic-cmdb-json',
+      values: {
+        payload: JSON.stringify([
+          {
+            externalId: 'web-01',
+            name: 'web-01',
+            host: '192.0.2.20',
+            username: 'ops',
+            tags: ['linux']
+          }
+        ])
+      }
+    })
+
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        imported: 1,
+        assets: [expect.objectContaining({
+          id: 'aiopsterm.generic-cmdb-assets-generic-cmdb-json-web-01',
+          host: '192.0.2.20',
+          data_source: 'refresh',
+          tags: expect.arrayContaining([
+            'linux',
+            'plugin:aiopsterm.generic-cmdb-assets',
+            'provider:generic-cmdb-json'
+          ])
+        })]
+      }
+    })
+    expect(savedAssets).toHaveLength(1)
+
+    savedAssets.length = 0
+    const invalidResult = await syncExtensionAssetProvider({
+      pluginId: 'aiopsterm.generic-cmdb-assets',
+      providerId: 'generic-cmdb-json',
+      values: {
+        payload: JSON.stringify([
+          { externalId: 'valid-first', name: 'valid-first', host: '192.0.2.21' },
+          { externalId: 'invalid-second', name: 'invalid-second' }
+        ])
+      }
+    })
+    expect(invalidResult).toMatchObject({ ok: false, errorCode: 'EXTENSION_PROVIDER_INPUT_INVALID' })
+    expect(savedAssets).toHaveLength(0)
+  })
+
   it('discovers store plugin catalog rows from configured real package directories', async () => {
     const storePackageDir = await mkdtemp(join(tmpdir(), 'aiopsterm-extension-store-'))
     try {
@@ -331,19 +444,24 @@ describe('extension plugin backend boundary', () => {
   })
 
   it('discovers remote store catalog rows from a backend-owned manifest URL', async () => {
-    const packageUrl = 'https://extensions.aiopsterm.test/cloud-assets-0.9.1.external-reference'
+    const packageUrl = 'https://extensions.aiopsterm.test/cloud-assets-0.9.1.aiopsterm-plugin'
     const packageBuffer = createZipFixture([
       {
-        name: 'plugin.json',
+        name: 'aiopsterm.plugin.json',
         content: JSON.stringify({
+          manifestVersion: 1,
           id: 'cloud-assets',
           displayName: 'Cloud Assets',
           version: '0.9.1',
           description: 'Remote catalog package.',
-          main: 'main.js',
+          kind: 'content',
+          engines: { aiopsterm: '>=0.1.0' },
           iconKey: 'cloud',
           categories: ['Cloud', 'Remote'],
-          functions: [{ title: 'Remote sync', desc: 'Sync from a remote package catalog.' }]
+          functions: [{ title: 'Remote sync', desc: 'Sync from a remote package catalog.' }],
+          contributes: {
+            commands: [{ id: 'cloud-assets.sync', title: 'Remote sync', description: 'Sync cloud assets.', command: 'echo sync' }]
+          }
         })
       },
       { name: 'main.js', content: 'module.exports = {}' }
@@ -359,15 +477,21 @@ describe('extension plugin backend boundary', () => {
           JSON.stringify({
             plugins: [
               {
+                manifestVersion: 1,
                 id: 'cloud-assets',
                 displayName: 'Cloud Assets',
                 version: '0.9.1',
+                kind: 'content',
+                engines: { aiopsterm: '>=0.1.0' },
                 description: 'Remote catalog package.',
                 iconKey: 'cloud',
                 packageUrl,
                 packageSha256,
                 categories: ['Cloud', 'Remote'],
-                functions: [{ title: 'Remote sync', desc: 'Sync from a remote package catalog.' }]
+                functions: [{ title: 'Remote sync', desc: 'Sync from a remote package catalog.' }],
+                contributes: {
+                  commands: [{ id: 'cloud-assets.sync', title: 'Remote sync', description: 'Sync cloud assets.', command: 'echo sync' }]
+                }
               }
             ]
           })
@@ -448,8 +572,8 @@ describe('extension plugin backend boundary', () => {
       })
       expect(progress.map((event) => event.stage)).toEqual(['verifying', 'installing', 'done'])
       expect(progress.every((event) => event.operation === 'install')).toBe(true)
-      await access(join(result.data.plugin.packagePath, 'plugin.json'))
-      await access(join(result.data.plugin.packagePath, 'main.js'))
+      await access(join(result.data.plugin.packagePath, 'aiopsterm.plugin.json'))
+      await access(join(result.data.plugin.packagePath, 'content.txt'))
       const catalog = await listExtensionPlugins()
       expect(catalog.data.find((plugin: ExtensionPlugin) => plugin.pluginId === 'cloud-assets')).toMatchObject({
         installed: true,
@@ -496,22 +620,27 @@ describe('extension plugin backend boundary', () => {
   })
 
   it('downloads, verifies and installs a remote store plugin package', async () => {
-    const packageUrl = 'https://extensions.aiopsterm.test/cloud-assets-0.9.1.external-reference'
+    const packageUrl = 'https://extensions.aiopsterm.test/cloud-assets-0.9.1.aiopsterm-plugin'
     const packageBuffer = createZipFixture([
       {
-        name: 'plugin.json',
+        name: 'aiopsterm.plugin.json',
         content: JSON.stringify({
+          manifestVersion: 1,
           id: 'cloud-assets',
           displayName: 'Cloud Assets',
           version: '0.9.1',
           description: 'Remote package from catalog.',
-          main: 'main.js',
+          kind: 'content',
+          engines: { aiopsterm: '>=0.1.0' },
           iconKey: 'cloud',
           categories: ['Cloud', 'Remote'],
-          functions: [{ title: 'Remote sync', desc: 'Sync cloud hosts from a remote package.' }]
+          functions: [{ title: 'Remote sync', desc: 'Sync cloud hosts from a remote package.' }],
+          contributes: {
+            commands: [{ id: 'cloud-assets.sync', title: 'Remote sync', description: 'Sync cloud assets.', command: 'echo sync' }]
+          }
         })
       },
-      { name: 'main.js', content: 'module.exports = {}' },
+      { name: 'content.txt', content: 'declarative plugin content' },
       { name: 'README.md', content: '# Cloud Assets\n\nRemote package readme.' }
     ])
     const packageSha256 = sha256Hex(packageBuffer)
@@ -546,14 +675,14 @@ describe('extension plugin backend boundary', () => {
       packageUrl,
       packageSha256,
       packagePath: expect.stringContaining(join('cloud-assets', '0.9.1')),
-      storePackagePath: expect.stringContaining(join('cache', 'cloud-assets', 'cloud-assets-0.9.1.external-reference')),
+      storePackagePath: expect.stringContaining(join('cache', 'cloud-assets', 'cloud-assets-0.9.1.aiopsterm-plugin')),
       readme: expect.stringContaining('Remote package readme.'),
       categories: ['Cloud', 'Remote'],
       functions: [{ title: 'Remote sync', desc: 'Sync cloud hosts from a remote package.' }]
     })
     expect(progress.map((event) => event.stage)).toEqual(expect.arrayContaining(['downloading', 'verifying', 'installing', 'done']))
     expect(progress.some((event) => event.stage === 'downloading' && event.percent > 0)).toBe(true)
-    await access(join(result.data.plugin.packagePath, 'plugin.json'))
+    await access(join(result.data.plugin.packagePath, 'aiopsterm.plugin.json'))
     await access(join(result.data.plugin.storePackagePath))
     const registry = JSON.parse(await readFile(join(extensionRootDir, 'registry.json'), 'utf8')) as { plugins: ExtensionPlugin[] }
     expect(registry.plugins[0]).toMatchObject({
@@ -564,10 +693,10 @@ describe('extension plugin backend boundary', () => {
   })
 
   it('rejects remote store packages with a mismatched checksum before installing', async () => {
-    const packageUrl = 'https://extensions.aiopsterm.test/cloud-assets-0.9.1.external-reference'
+    const packageUrl = 'https://extensions.aiopsterm.test/cloud-assets-0.9.1.aiopsterm-plugin'
     const packageBuffer = createZipFixture([
       {
-        name: 'plugin.json',
+        name: 'aiopsterm.plugin.json',
         content: JSON.stringify({
           id: 'cloud-assets',
           displayName: 'Cloud Assets',
@@ -601,20 +730,25 @@ describe('extension plugin backend boundary', () => {
     await expect(stat(join(extensionRootDir, 'registry.json'))).rejects.toThrow()
   })
 
-  it('supports External reference-style explicit URL download and install APIs', async () => {
-    const packageUrl = 'https://extensions.aiopsterm.test/direct-runbook-1.0.0.external-reference'
+  it('supports aiopsterm explicit URL download and install APIs', async () => {
+    const packageUrl = 'https://extensions.aiopsterm.test/direct-runbook-1.0.0.aiopsterm-plugin'
     const packageBuffer = createZipFixture([
       {
-        name: 'plugin.json',
+        name: 'aiopsterm.plugin.json',
         content: JSON.stringify({
+          manifestVersion: 1,
           id: 'direct-runbook',
           displayName: 'Direct Runbook',
           version: '1.0.0',
-          main: 'main.js',
-          categories: ['Tools']
+          kind: 'content',
+          engines: { aiopsterm: '>=0.1.0' },
+          categories: ['Tools'],
+          contributes: {
+            commands: [{ id: 'direct-runbook.check', title: 'Direct check', description: 'Run direct check.', command: 'uptime' }]
+          }
         })
       },
-      { name: 'main.js', content: 'module.exports = {}' }
+      { name: 'content.txt', content: 'declarative plugin content' }
     ])
     const packageSha256 = sha256Hex(packageBuffer)
     configureExtensionBackendRuntime({
@@ -658,10 +792,10 @@ describe('extension plugin backend boundary', () => {
     const storePackageDir = await mkdtemp(join(tmpdir(), 'aiopsterm-extension-store-'))
     try {
       await writeFile(
-        join(storePackageDir, 'cloud-assets-0.9.1.external-reference'),
+        join(storePackageDir, 'cloud-assets-0.9.1.aiopsterm-plugin'),
         createZipFixture([
           {
-            name: 'plugin.json',
+            name: 'aiopsterm.plugin.json',
             content: JSON.stringify({
               id: 'wrong-plugin',
               displayName: 'Cloud Assets',
@@ -701,6 +835,7 @@ describe('extension plugin backend boundary', () => {
                 pluginId: 'ops-runbook',
                 name: 'Ops Runbook',
                 description: 'Installed runbook package.',
+                kind: 'content',
                 iconKey: 'runbook',
                 tabName: 'Ops Runbook',
                 show: true,
@@ -712,7 +847,8 @@ describe('extension plugin backend boundary', () => {
                 installable: true,
                 source: 'store',
                 packagePath: oldPackagePath,
-                categories: ['Tools', 'Runbook']
+                categories: ['Tools', 'Runbook'],
+                commands: [{ id: 'ops-runbook.check', title: 'Runbook check', description: 'Run checks.', command: 'uptime' }]
               }
             ]
           },
@@ -763,15 +899,20 @@ describe('extension plugin backend boundary', () => {
   it('rejects a store package whose version does not match the catalog version', async () => {
     const storePackageDir = await mkdtemp(join(tmpdir(), 'aiopsterm-extension-store-'))
     try {
-      const mismatchedPackagePath = join(storePackageDir, 'cloud-assets-0.8.0.external-reference')
+      const mismatchedPackagePath = join(storePackageDir, 'cloud-assets-0.8.0.aiopsterm-plugin')
       await writeFile(mismatchedPackagePath, createZipFixture([
         {
-          name: 'plugin.json',
+          name: 'aiopsterm.plugin.json',
           content: JSON.stringify({
+            manifestVersion: 1,
             id: 'cloud-assets',
             displayName: 'Cloud Assets',
             version: '0.8.0',
-            main: 'main.js'
+            kind: 'content',
+            engines: { aiopsterm: '>=0.1.0' },
+            contributes: {
+              commands: [{ id: 'cloud-assets.sync', title: 'Cloud sync', description: 'Sync cloud assets.', command: 'echo sync' }]
+            }
           })
         },
         { name: 'main.js', content: 'module.exports = {}' }
@@ -801,6 +942,7 @@ describe('extension plugin backend boundary', () => {
               pluginId: 'ops-runbook',
               name: 'Ops Runbook',
               description: 'Installed runbook package.',
+              kind: 'content',
               iconKey: 'runbook',
               tabName: 'Ops Runbook',
               show: true,
@@ -813,6 +955,8 @@ describe('extension plugin backend boundary', () => {
               source: 'store',
               packagePath: oldPackagePath,
               categories: ['Tools', 'Runbook']
+              ,
+              commands: [{ id: 'ops-runbook.check', title: 'Runbook check', description: 'Run checks.', command: 'uptime' }]
             }
           ]
         },
@@ -843,12 +987,22 @@ describe('extension plugin backend boundary', () => {
     expect(result).toEqual({
       ok: false,
       errorCode: 'EXTENSION_PACKAGE_FORMAT_INVALID',
-      errorMessage: 'Plugin package must use the .external-reference extension.'
+      errorMessage: 'Plugin package must use the .aiopsterm-plugin extension.'
+    })
+  })
+
+  it('rejects legacy External reference plugin packages', async () => {
+    const result = await installExtensionPackage({ fileName: 'legacy.external-reference', filePath: '/tmp/legacy.external-reference' })
+
+    expect(result).toEqual({
+      ok: false,
+      errorCode: 'EXTENSION_PACKAGE_FORMAT_INVALID',
+      errorMessage: 'Plugin package must use the .aiopsterm-plugin extension.'
     })
   })
 
   it('rejects local package installs without a real package path', async () => {
-    const result = await installExtensionPackage({ fileName: 'local-tools.external-reference' }, undefined, { stepDelayMs: 0 })
+    const result = await installExtensionPackage({ fileName: 'local-tools.aiopsterm-plugin' }, undefined, { stepDelayMs: 0 })
 
     expect(result).toEqual({
       ok: false,
@@ -857,7 +1011,25 @@ describe('extension plugin backend boundary', () => {
     })
   })
 
-  it('installs local package plugin metadata from plugin.json behind the backend boundary', async () => {
+  it('rejects plugins that require an unsupported aiopsterm version', async () => {
+    const localPackage = await createLocalPackage({ engines: { aiopsterm: '>=99.0.0' } })
+    try {
+      const result = await installExtensionPackage({
+        fileName: localPackage.fileName,
+        filePath: localPackage.filePath
+      })
+
+      expect(result).toEqual({
+        ok: false,
+        errorCode: 'EXTENSION_PACKAGE_ENGINE_UNSUPPORTED',
+        errorMessage: 'Plugin requires aiopsterm >=99.0.0, current version is 0.1.0.'
+      })
+    } finally {
+      await rm(localPackage.dir, { recursive: true, force: true })
+    }
+  })
+
+  it('installs local package plugin metadata from aiopsterm.plugin.json behind the backend boundary', async () => {
     const localPackage = await createLocalPackage({}, { readme: '# Local Tools\n\nReal package readme.' })
     const progress: ExtensionProgress[] = []
     try {
@@ -894,8 +1066,8 @@ describe('extension plugin backend boundary', () => {
       expect(progress.map((event) => event.stage)).toEqual(['verifying', 'installing', 'done'])
       expect(progress.every((event) => event.pluginId === 'local-tools' && event.operation === 'package')).toBe(true)
       expect(progress.every((event) => event.requestId === 'extension-package-install-backend-test')).toBe(true)
-      await access(join(result.data.plugin.packagePath, 'plugin.json'))
-      await access(join(result.data.plugin.packagePath, 'main.js'))
+      await access(join(result.data.plugin.packagePath, 'aiopsterm.plugin.json'))
+      await access(join(result.data.plugin.packagePath, 'content.txt'))
       expect(await readFile(join(result.data.plugin.packagePath, 'README.md'), 'utf8')).toContain('Real package readme.')
       const registry = JSON.parse(await readFile(join(extensionRootDir, 'registry.json'), 'utf8')) as { plugins: ExtensionPlugin[] }
       expect(registry.plugins).toHaveLength(1)
@@ -920,7 +1092,7 @@ describe('extension plugin backend boundary', () => {
     }
   })
 
-  it('rejects local packages without plugin.json', async () => {
+  it('rejects local packages without aiopsterm.plugin.json', async () => {
     const localPackage = await createLocalPackage({}, { includeManifest: false })
     try {
       const result = await installExtensionPackage({ fileName: localPackage.fileName, filePath: localPackage.filePath }, undefined, { stepDelayMs: 0 })
@@ -928,22 +1100,28 @@ describe('extension plugin backend boundary', () => {
       expect(result).toEqual({
         ok: false,
         errorCode: 'EXTENSION_PACKAGE_MANIFEST_MISSING',
-        errorMessage: 'Plugin package must contain plugin.json.'
+        errorMessage: 'Plugin package must contain aiopsterm.plugin.json.'
       })
     } finally {
       await rm(localPackage.dir, { recursive: true, force: true })
     }
   })
 
-  it('rejects local packages when the manifest main entry is missing', async () => {
+  it('installs declarative local packages without executable main entries', async () => {
     const localPackage = await createLocalPackage({}, { includeMain: false })
     try {
       const result = await installExtensionPackage({ fileName: localPackage.fileName, filePath: localPackage.filePath }, undefined, { stepDelayMs: 0 })
 
-      expect(result).toEqual({
-        ok: false,
-        errorCode: 'EXTENSION_PACKAGE_MAIN_MISSING',
-        errorMessage: 'Plugin package main entry "main.js" was not found.'
+      expect(result).toMatchObject({
+        ok: true,
+        data: {
+          operation: 'package',
+          plugin: {
+            pluginId: 'local-tools',
+            kind: 'content',
+            installed: true
+          }
+        }
       })
     } finally {
       await rm(localPackage.dir, { recursive: true, force: true })
@@ -1020,7 +1198,7 @@ describe('extension plugin backend boundary', () => {
   })
 
   it('aborts an active remote package download when installation is cancelled', async () => {
-    const packageUrl = 'https://extensions.aiopsterm.test/cloud-assets-0.9.1.external-reference'
+    const packageUrl = 'https://extensions.aiopsterm.test/cloud-assets-0.9.1.aiopsterm-plugin'
     const progress: ExtensionProgress[] = []
     let aborted = false
     configureExtensionBackendRuntime({

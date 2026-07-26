@@ -5,13 +5,15 @@ import type {
   ExtensionPluginOperation,
   ExtensionPluginOperationResult,
   ExtensionPluginRuntimeConfig,
+  ExtensionAssetProviderSyncResult,
   ExtensionSubscriptionResult
 } from '@shared/contracts/extensions'
 
 export const malformedExtensionBackendResultMessage = '扩展服务返回数据无效'
 
 const extensionIconKeys = new Set(['runbook', 'cloud', 'private', 'local'])
-const extensionSources = new Set(['preinstalled', 'store', 'local'])
+const extensionSources = new Set(['builtin', 'store', 'local'])
+const extensionKinds = new Set(['content', 'provider'])
 const extensionOperations = new Set<ExtensionPluginOperation>(['install', 'update', 'uninstall', 'package'])
 const extensionInstallStages = new Set(['downloading', 'verifying', 'installing', 'done', 'error', 'cancelled', ''])
 const extensionConnectionLogStatuses = new Set(['progress', 'success', 'error'])
@@ -33,9 +35,34 @@ const isExtensionFunctionConfig = (value: unknown) => isRecord(value) && isNonEm
 const isExtensionConnectionLogConfig = (value: unknown) =>
   isRecord(value) && typeof value.time === 'string' && extensionConnectionLogStatuses.has(String(value.status)) && typeof value.message === 'string'
 
+const isExtensionCommandContribution = (value: unknown) =>
+  isRecord(value) &&
+  isNonEmptyString(value.id) &&
+  isNonEmptyString(value.title) &&
+  typeof value.description === 'string' &&
+  isNonEmptyString(value.command)
+
+const isExtensionProviderField = (value: unknown) =>
+  isRecord(value) &&
+  isNonEmptyString(value.key) &&
+  isNonEmptyString(value.label) &&
+  value.type === 'textarea' &&
+  typeof value.required === 'boolean' &&
+  isOptionalString(value.defaultValue)
+
+const isExtensionAssetProviderContribution = (value: unknown) =>
+  isRecord(value) &&
+  isNonEmptyString(value.id) &&
+  isNonEmptyString(value.name) &&
+  typeof value.description === 'string' &&
+  value.adapter === 'json-assets' &&
+  Array.isArray(value.fields) &&
+  value.fields.every(isExtensionProviderField)
+
 export const isExtensionPluginRuntimeConfig = (value: unknown): value is ExtensionPluginRuntimeConfig => {
   if (!isRecord(value)) return false
   if (!isNonEmptyString(value.pluginId) || !isNonEmptyString(value.name) || !isNonEmptyString(value.description)) return false
+  if (!extensionKinds.has(String(value.kind))) return false
   if (!extensionIconKeys.has(String(value.iconKey)) || !isNonEmptyString(value.tabName)) return false
   if (typeof value.show !== 'boolean' || typeof value.isPlugin !== 'boolean') return false
   if (typeof value.installed !== 'boolean' || typeof value.hasUpdate !== 'boolean') return false
@@ -56,6 +83,8 @@ export const isExtensionPluginRuntimeConfig = (value: unknown): value is Extensi
   if (value.categories !== undefined && !isStringArray(value.categories)) return false
   if (value.guideSteps !== undefined && !isStringArray(value.guideSteps)) return false
   if (value.functions !== undefined && (!Array.isArray(value.functions) || !value.functions.every(isExtensionFunctionConfig))) return false
+  if (value.commands !== undefined && (!Array.isArray(value.commands) || !value.commands.every(isExtensionCommandContribution))) return false
+  if (value.assetProviders !== undefined && (!Array.isArray(value.assetProviders) || !value.assetProviders.every(isExtensionAssetProviderContribution))) return false
   if (value.connectionLog !== undefined && (!Array.isArray(value.connectionLog) || !value.connectionLog.every(isExtensionConnectionLogConfig))) return false
   return true
 }
@@ -82,6 +111,17 @@ export const isExtensionSubscriptionData = (value: unknown): value is ExtensionS
 
 export const isExtensionPluginCancelData = (value: unknown): value is ExtensionPluginCancelData =>
   isRecord(value) && isNonEmptyString(value.pluginId) && value.stage === 'cancelled' && value.percent === 0 && isNonEmptyString(value.message)
+
+export const isExtensionAssetProviderSyncData = (
+  value: unknown
+): value is NonNullable<ExtensionAssetProviderSyncResult['data']> =>
+  isRecord(value) &&
+  isNonEmptyString(value.pluginId) &&
+  isNonEmptyString(value.providerId) &&
+  Number.isInteger(value.imported) &&
+  Number(value.imported) >= 0 &&
+  Array.isArray(value.assets) &&
+  value.assets.length === value.imported
 
 export const isExtensionInstallProgressData = (value: unknown): value is ExtensionInstallProgress => {
   if (!isRecord(value)) return false

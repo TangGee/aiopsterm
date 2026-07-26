@@ -1,7 +1,7 @@
 import { app, BrowserWindow, crashReporter, Notification, shell } from 'electron'
 import { join } from 'path'
 import Store from 'electron-store'
-import { refreshOrganizationAssets } from './backend/assets/assets'
+import { refreshOrganizationAssets, saveAsset } from './backend/assets/assets'
 import {
   closeCodexTerminalBridgeServer
 } from './backend/codex/codexTerminalBridge'
@@ -303,6 +303,7 @@ const runtimeConfiguration = configureMainBackendRuntimes({
   sendTerminalKeyboardInteractiveResult: terminalRuntime.sendKeyboardInteractiveResult,
   dismissTerminalKeyboardInteractive: terminalRuntime.dismissKeyboardInteractiveRequest,
   refreshOrganizationAssets,
+  saveAsset,
   writeTerminalBySessionId: terminalRuntime.writeTerminalBySessionId,
   showControlNotification,
   broadcastManagedAiSessionFocusRequest,
