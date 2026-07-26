@@ -42,10 +42,10 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import ExtensionGenericDetail from '@/components/extensions/ExtensionGenericDetail.vue'
+import { useI18n } from '@/i18n'
 import { isExtensionAssetProviderSyncData } from '@/services/extensions/extensionBackendGuards'
 import { extensionsClient } from '@/services/extensions/extensionsClient'
 import {
-  extensionInstallStageText,
   extensionPluginSourceText,
   extensionPluginTags,
   extensionPluginVersion,
@@ -54,6 +54,7 @@ import {
 import { useWorkspaceStore } from '@/stores/workspace'
 
 const workspace = useWorkspaceStore()
+const { t } = useI18n()
 const providerValues = ref<Record<string, string>>({})
 const providerLoading = ref(false)
 const activeProviderId = ref('')
@@ -63,17 +64,26 @@ const isSelectedBusy = computed(() => {
   return Boolean(id && (workspace.extensionInstallLoadingMap[id] || workspace.extensionUpdateLoadingMap[id]))
 })
 
-const selectedStageText = computed(() => extensionInstallStageText(workspace.selectedExtensionInstallProgress?.stage))
-const progressStageText = computed(() => selectedStageText.value || 'Installing')
+const isSelectedUpdating = computed(() => {
+  const id = workspace.selectedExtension?.pluginId
+  return Boolean(id && workspace.extensionUpdateLoadingMap[id])
+})
+const progressStageText = computed(() => {
+  const stage = workspace.selectedExtensionInstallProgress?.stage
+  if (stage === 'error') return t('terminal.status.error')
+  if (stage === 'cancelled') return t('common.cancel')
+  if (stage === 'verifying' || stage === 'done') return t('common.processing')
+  return isSelectedUpdating.value ? t('extensions.detail.updating') : t('extensions.detail.installing')
+})
 const downloadProgressVisible = computed(() => workspace.selectedExtensionInstallProgress?.stage === 'downloading')
 const downloadProgressButtonStyle = computed(() => ({ '--download-progress': `${workspace.selectedExtensionInstallProgress?.percent || 0}%` }))
 const installButtonText = computed(() => {
-  if (!isSelectedBusy.value) return '安装'
-  return selectedStageText.value || 'Installing'
+  if (!isSelectedBusy.value) return t('common.install')
+  return t('extensions.detail.installing')
 })
 const updateButtonText = computed(() => {
-  if (!isSelectedBusy.value) return '更新'
-  return selectedStageText.value || 'Updating'
+  if (!isSelectedBusy.value) return t('extensions.detail.update')
+  return t('extensions.detail.updating')
 })
 
 const selectedVersion = computed(() => (workspace.selectedExtension ? extensionPluginVersion(workspace.selectedExtension) : '0.0.0'))
@@ -99,7 +109,7 @@ const updateProviderValue = (providerId: string, fieldKey: string, value: string
 
 const runPluginCommand = async (command: string) => {
   const result = await workspace.runActiveTerminalCommand(command, 'snippet')
-  workspace.setExtensionNotice(result ? '命令已发送到当前终端' : '请先打开一个可写终端')
+  workspace.setExtensionNotice(result ? t('extensions.notice.commandSent') : t('extensions.notice.openWritableTerminal'))
 }
 
 const syncProvider = async (providerId: string) => {
@@ -107,7 +117,7 @@ const syncProvider = async (providerId: string) => {
   if (!plugin || providerLoading.value) return
   const bridge = extensionsClient.syncExtensionAssetProvider()
   if (!bridge) {
-    workspace.setExtensionNotice('资产导入服务不可用')
+    workspace.setExtensionNotice(t('extensions.notice.assetServiceUnavailable'))
     return
   }
   const values: Record<string, string> = {}
@@ -120,16 +130,16 @@ const syncProvider = async (providerId: string) => {
   try {
     const result = await bridge({ pluginId: plugin.pluginId, providerId, values })
     if (!result?.ok) {
-      workspace.setExtensionNotice(result?.errorMessage || '资产导入失败')
+      workspace.setExtensionNotice(result?.errorMessage || t('extensions.notice.assetImportFailed'))
       return
     }
     if (!isExtensionAssetProviderSyncData(result.data) || result.data.pluginId !== plugin.pluginId || result.data.providerId !== providerId) {
-      workspace.setExtensionNotice('扩展服务返回数据无效')
+      workspace.setExtensionNotice(t('extensions.notice.invalidServiceData'))
       return
     }
-    workspace.setExtensionNotice(`已导入 ${result.data.imported} 个资产`)
+    workspace.setExtensionNotice(t('extensions.notice.importedAssets', { count: result.data.imported }))
   } catch (error) {
-    workspace.setExtensionNotice(error instanceof Error ? error.message : '资产导入失败')
+    workspace.setExtensionNotice(error instanceof Error ? error.message : t('extensions.notice.assetImportFailed'))
   } finally {
     providerLoading.value = false
     activeProviderId.value = ''
@@ -141,7 +151,9 @@ const cancelProvider = async (providerId: string) => {
   const bridge = extensionsClient.cancelExtensionAssetProvider()
   if (!plugin || !bridge || activeProviderId.value !== providerId) return
   const result = await bridge({ pluginId: plugin.pluginId, providerId })
-  workspace.setExtensionNotice(result?.data?.cancelled ? '正在取消资产导入' : '没有正在运行的资产导入')
+  workspace.setExtensionNotice(
+    result?.data?.cancelled ? t('extensions.notice.cancellingAssetImport') : t('extensions.notice.noAssetImport')
+  )
 }
 
 onMounted(() => {

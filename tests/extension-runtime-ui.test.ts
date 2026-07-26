@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
+import { createPinia } from 'pinia'
 import ExtensionRuntimeFeatures from '@/components/extensions/ExtensionRuntimeFeatures.vue'
 import type { ExtensionPluginRuntimeConfig } from '@shared/contracts/extensions'
 
@@ -83,7 +84,10 @@ describe('ExtensionRuntimeFeatures', () => {
       onExtensionRuntimeEvent: vi.fn(() => stop)
     }
 
-    const wrapper = mount(ExtensionRuntimeFeatures, { props: { plugin } })
+    const wrapper = mount(ExtensionRuntimeFeatures, {
+      props: { plugin },
+      global: { plugins: [createPinia()] }
+    })
     await flushPromises()
 
     expect(wrapper.text()).toContain('Runtime view is ready.')

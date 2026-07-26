@@ -22,7 +22,7 @@
           :disabled="isBusy"
           @click="$emit('subscribe', plugin.pluginId)"
         >
-          订阅
+          {{ t('extensions.detail.subscribe') }}
         </button>
         <template v-else-if="plugin.isPlugin">
           <button
@@ -31,7 +31,7 @@
             :disabled="isBusy"
             @click="$emit('uninstall', plugin.pluginId)"
           >
-            卸载
+            {{ t('common.uninstall') }}
           </button>
           <button
             v-if="plugin.hasUpdate"
@@ -49,7 +49,7 @@
           class="op_btn"
           @click="$emit('cancel', plugin.pluginId)"
         >
-          取消
+          {{ t('common.cancel') }}
         </button>
       </template>
     </ExtensionPluginHeader>
@@ -65,13 +65,13 @@
           class="markdown_readme_container"
         >
           <div class="rendered_markdown">
-            <p>{{ plugin.readme || '暂无 README' }}</p>
+            <p>{{ plugin.readme || t('extensions.detail.noReadme') }}</p>
           </div>
           <section
             v-if="plugin.commands?.length"
             class="extension_contribution_section"
           >
-            <h3>终端命令</h3>
+            <h3>{{ t('extensions.detail.terminalCommands') }}</h3>
             <article
               v-for="command in plugin.commands"
               :key="command.id"
@@ -87,7 +87,7 @@
                 class="op_btn"
                 @click="$emit('runCommand', command.command || '')"
               >
-                发送到终端
+                {{ t('extensions.detail.sendToTerminal') }}
               </button>
             </article>
           </section>
@@ -121,14 +121,14 @@
               :disabled="providerLoading"
               @click="$emit('syncProvider', provider.id)"
             >
-              {{ providerLoading ? '正在导入' : '导入资产' }}
+              {{ providerLoading ? t('extensions.detail.importing') : t('extensions.detail.importAssets') }}
             </button>
             <button
               v-if="providerLoading"
               class="op_btn"
               @click="$emit('cancelProvider', provider.id)"
             >
-              取消导入
+              {{ t('extensions.detail.cancelImport') }}
             </button>
           </section>
           <div
@@ -159,6 +159,7 @@
 
 <script setup lang="ts">
 import type { StyleValue } from 'vue'
+import { useI18n } from '@/i18n'
 import ExtensionDetailTabs from '@/components/extensions/ExtensionDetailTabs.vue'
 import ExtensionFeatureList from '@/components/extensions/ExtensionFeatureList.vue'
 import ExtensionPluginHeader from '@/components/extensions/ExtensionPluginHeader.vue'
@@ -166,6 +167,8 @@ import ExtensionPluginSidebar from '@/components/extensions/ExtensionPluginSideb
 import ExtensionRuntimeFeatures from '@/components/extensions/ExtensionRuntimeFeatures.vue'
 import type { WorkspaceExtensionInstallProgress } from '@/services/extensions/workspaceExtensionsController'
 import type { ExtensionPluginRuntimeConfig } from '@shared/contracts/extensions'
+
+const { t } = useI18n()
 
 defineProps<{
   plugin: ExtensionPluginRuntimeConfig

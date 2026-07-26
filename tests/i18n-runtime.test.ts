@@ -4,17 +4,27 @@ import { join } from 'path'
 import { localeDirection, localeMessages, resolveLocale, supportedLocales, translateWithLocale } from '../src/renderer/src/i18n'
 import { hasStaticTextTranslation, installStaticTextI18n, translateStaticText } from '../src/renderer/src/i18n/staticText'
 
-const external-referenceSupportedLocales = ['zh-CN', 'zh-TW', 'en-US', 'ja-JP', 'ko-KR', 'de-DE', 'fr-FR', 'it-IT', 'pt-PT', 'ru-RU', 'ar-AR']
+const expectedSupportedLocales = ['zh-CN', 'zh-TW', 'en-US', 'ja-JP', 'ko-KR', 'de-DE', 'fr-FR', 'it-IT', 'pt-PT', 'ru-RU', 'ar-AR']
+const explicitLocaleFiles = ['enUS', 'jaJP', 'koKR', 'deDE', 'frFR', 'itIT', 'ptPT', 'ruRU', 'arAR']
 
 describe('renderer i18n runtime', () => {
-  it('matches the External reference-supported locale set', () => {
-    expect([...supportedLocales]).toEqual(external-referenceSupportedLocales)
+  it('matches the supported locale set', () => {
+    expect([...supportedLocales]).toEqual(expectedSupportedLocales)
   })
 
   it('keeps every locale complete against zh-CN keys', () => {
     const requiredKeys = Object.keys(localeMessages['zh-CN'])
     for (const locale of supportedLocales) {
       expect(Object.keys(localeMessages[locale]).sort()).toEqual([...requiredKeys].sort())
+    }
+  })
+
+  it('requires every independently translated locale source to declare every key', () => {
+    const requiredKeys = new Set(Object.keys(localeMessages['zh-CN']))
+    for (const file of explicitLocaleFiles) {
+      const source = readFileSync(join(process.cwd(), 'src', 'renderer', 'src', 'i18n', 'locales', `${file}.ts`), 'utf8')
+      const declaredKeys = new Set([...source.matchAll(/^\s*'([^']+)':/gm)].map((match) => match[1]))
+      expect([...requiredKeys].filter((key) => !declaredKeys.has(key)), file).toEqual([])
     }
   })
 
@@ -37,9 +47,11 @@ describe('renderer i18n runtime', () => {
     }
   })
 
-  it('keeps Traditional Chinese fallback on the Chinese base locale', () => {
-    expect(localeMessages['zh-TW']['common.add']).toBe(localeMessages['zh-CN']['common.add'])
+  it('converts the complete Simplified Chinese fallback to Taiwan Traditional Chinese', () => {
+    expect(localeMessages['zh-TW']['common.add']).toBe('新增')
     expect(localeMessages['zh-TW']['common.add']).not.toBe(localeMessages['en-US']['common.add'])
+    expect(localeMessages['zh-TW']['extensions.runtime.secretPlaceholder']).toContain('儲存')
+    expect(localeMessages['zh-TW']['extensions.runtime.secretPlaceholder']).not.toContain('保存')
   })
 
   it('resolves explicit and system locale settings with fallback', () => {
@@ -52,6 +64,8 @@ describe('renderer i18n runtime', () => {
   it('translates core shell labels and sets RTL only for Arabic', () => {
     expect(translateWithLocale('en-US', 'settings.nav.general')).toBe('General')
     expect(translateWithLocale('ja-JP', 'module.workspace')).toBe('ワークスペース')
+    expect(translateWithLocale('de-DE', 'extensions.runtime.title')).toBe('Plugin-Laufzeit')
+    expect(translateWithLocale('ar-AR', 'extensions.detail.importAssets')).toBe('استيراد الأصول')
     expect(translateWithLocale('en-US', 'ai.classicModeChatDetail')).toBe('Conversation without tool access')
     expect(translateWithLocale('zh-CN', 'ai.classicModeChatDetail')).toBe('无工具调用的对话')
     expect(localeDirection('ar-AR')).toBe('rtl')

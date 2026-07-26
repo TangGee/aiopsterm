@@ -1,4 +1,5 @@
 import type { SupportedLocale } from './messages'
+import { toTraditionalChinese } from './traditionalChinese'
 
 type StaticTextRuntimeOptions = {
   root: ParentNode
@@ -1127,44 +1128,6 @@ const genericEnUS: Array<[RegExp, string]> = [
 const applyGenericEnglish = (text: string) =>
   genericEnUS.reduce((next, [pattern, replacement]) => next.replace(pattern, replacement), text).replace(/\s+/g, ' ').trim()
 
-const simplifiedToTraditional: Array<[RegExp, string]> = [
-  [/设置/g, '設定'],
-  [/文件夹/g, '資料夾'],
-  [/文件/g, '檔案'],
-  [/知识库/g, '知識庫'],
-  [/终端/g, '終端'],
-  [/会话/g, '會話'],
-  [/资产/g, '資產'],
-  [/扩展/g, '擴充'],
-  [/数据库/g, '資料庫'],
-  [/用户/g, '使用者'],
-  [/主机/g, '主機'],
-  [/路径/g, '路徑'],
-  [/状态/g, '狀態'],
-  [/连接/g, '連線'],
-  [/编辑/g, '編輯'],
-  [/删除/g, '刪除'],
-  [/保存/g, '儲存'],
-  [/复制/g, '複製'],
-  [/搜索/g, '搜尋'],
-  [/刷新/g, '重新整理'],
-  [/导入/g, '匯入'],
-  [/导出/g, '匯出'],
-  [/上传/g, '上傳'],
-  [/下载/g, '下載'],
-  [/启用/g, '啟用'],
-  [/关闭/g, '關閉'],
-  [/开启/g, '開啟'],
-  [/失败/g, '失敗'],
-  [/成功/g, '成功'],
-  [/不可用/g, '不可用'],
-  [/请输入/g, '請輸入'],
-  [/暂无/g, '暫無'],
-  [/当前/g, '目前'],
-  [/这个/g, '此'],
-  [/操作/g, '操作']
-]
-
 const translatableTextPattern = /[\u3400-\u9fff]/
 
 const shouldSkipNode = (node: Node) => {
@@ -1213,7 +1176,7 @@ export const hasStaticTextTranslation = (text: string) => {
 const translateToTraditional = (text: string) => {
   const exact = exactZhTW[text]
   if (exact) return exact
-  return simplifiedToTraditional.reduce((next, [pattern, replacement]) => next.replace(pattern, replacement), text)
+  return toTraditionalChinese(text)
 }
 
 export const translateStaticText = (locale: SupportedLocale, text: string) => {

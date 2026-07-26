@@ -2,9 +2,9 @@
   <section class="extension_contribution_section extension_runtime_section">
     <header class="extension_runtime_header">
       <div>
-        <h3>插件运行时</h3>
+        <h3>{{ t('extensions.runtime.title') }}</h3>
         <p>
-          状态: {{ plugin.runtimeStatus || 'inactive' }}
+          {{ t('extensions.runtime.status', { status: plugin.runtimeStatus || 'inactive' }) }}
           <span v-if="plugin.runtimeError">, {{ plugin.runtimeError }}</span>
         </p>
       </div>
@@ -15,7 +15,7 @@
           :disabled="runtimeBusy"
           @click="runRuntimeAction('enable')"
         >
-          启用
+          {{ t('extensions.runtime.enable') }}
         </button>
         <button
           v-else
@@ -23,14 +23,14 @@
           :disabled="runtimeBusy || plugin.required"
           @click="runRuntimeAction('disable')"
         >
-          禁用
+          {{ t('extensions.runtime.disable') }}
         </button>
         <button
           class="op_btn"
           :disabled="runtimeBusy || plugin.enabled === false"
           @click="runRuntimeAction('reload')"
         >
-          重新加载
+          {{ t('extensions.runtime.reload') }}
         </button>
       </div>
     </header>
@@ -77,7 +77,7 @@
             class="op_btn"
             @click="loadChildren(view.id)"
           >
-            刷新
+            {{ t('common.refresh') }}
           </button>
         </span>
       </header>
@@ -158,7 +158,7 @@
         :disabled="configurationBusy"
         type="submit"
       >
-        保存配置
+        {{ t('extensions.runtime.saveConfiguration') }}
       </button>
     </form>
   </section>
@@ -166,6 +166,7 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { useI18n } from '@/i18n'
 import { extensionsClient } from '@/services/extensions/extensionsClient'
 import type {
   ExtensionConfigurationField,
@@ -177,6 +178,7 @@ import type {
 } from '@shared/contracts/extensions'
 
 const props = defineProps<{ plugin: ExtensionPluginRuntimeConfig }>()
+const { t } = useI18n()
 const emit = defineEmits<{
   notice: [message: string]
   runTerminalText: [command: string]
@@ -197,7 +199,7 @@ const commandTitle = (commandId: string) =>
   props.plugin.commands?.find((command) => command.id === commandId)?.title || commandId
 
 const configurationPlaceholder = (field: ExtensionConfigurationField) =>
-  field.type === 'password' && configurationValues[field.key] === true ? '已保存，留空保持不变' : ''
+  field.type === 'password' && configurationValues[field.key] === true ? t('extensions.runtime.secretPlaceholder') : ''
 
 const evaluateWhen = (expression: string | undefined, viewId?: string, contextValue?: string) => {
   const value = String(expression || '').trim()
@@ -236,7 +238,7 @@ const executeCommand = async (commandId: string, ...args: unknown[]) => {
   try {
     const result = await bridge({ commandId, args })
     if (!result.ok) {
-      emit('notice', result.errorMessage || '插件命令执行失败')
+      emit('notice', result.errorMessage || t('extensions.runtime.commandFailed'))
       return
     }
     const value = result.data?.value
@@ -247,7 +249,7 @@ const executeCommand = async (commandId: string, ...args: unknown[]) => {
       emit('notice', String((value as { message: unknown }).message || ''))
     }
   } catch (error) {
-    emit('notice', error instanceof Error ? error.message : '插件命令执行失败')
+    emit('notice', error instanceof Error ? error.message : t('extensions.runtime.commandFailed'))
   }
 }
 
@@ -256,7 +258,7 @@ const loadChildren = async (viewId: string, parentId?: string) => {
   if (!bridge) return
   const result = await bridge({ viewId, parentId })
   if (!result.ok || !result.data) {
-    viewErrors[viewId] = result.errorMessage || '插件视图加载失败'
+    viewErrors[viewId] = result.errorMessage || t('extensions.runtime.viewFailed')
     return
   }
   if (parentId) childTreeItems[`${viewId}:${parentId}`] = result.data.items
@@ -313,7 +315,10 @@ const saveConfiguration = async () => {
   configurationBusy.value = true
   try {
     const result = await bridge({ pluginId: props.plugin.pluginId, values })
-    emit('notice', result.ok ? '插件配置已保存，重新加载插件后生效' : result.errorMessage || '插件配置保存失败')
+    emit(
+      'notice',
+      result.ok ? t('extensions.runtime.configurationSaved') : result.errorMessage || t('extensions.runtime.configurationSaveFailed')
+    )
     if (result.ok) await runRuntimeAction('reload')
   } finally {
     configurationBusy.value = false
@@ -326,7 +331,10 @@ const runRuntimeAction = async (action: ExtensionRuntimeAction) => {
   runtimeBusy.value = true
   try {
     const result = await bridge({ pluginId: props.plugin.pluginId, action })
-    emit('notice', result.ok ? result.data?.message || '插件运行状态已更新' : result.errorMessage || '插件运行操作失败')
+    emit(
+      'notice',
+      result.ok ? result.data?.message || t('extensions.runtime.updated') : result.errorMessage || t('extensions.runtime.actionFailed')
+    )
     emit('refreshPlugins')
   } finally {
     runtimeBusy.value = false
@@ -346,7 +354,10 @@ onMounted(() => {
     if (event.type === 'context-changed') void loadContexts()
     if (event.type === 'message' && event.pluginId === props.plugin.pluginId) emit('notice', event.message)
     if (event.type === 'provider-progress' && event.pluginId === props.plugin.pluginId) {
-      emit('notice', event.message ? `${event.percent}% ${event.message}` : `资产导入进度 ${event.percent}%`)
+      emit(
+        'notice',
+        event.message ? `${event.percent}% ${event.message}` : t('extensions.runtime.assetProgress', { percent: event.percent })
+      )
     }
     if (event.type === 'runtime-changed' && event.pluginId === props.plugin.pluginId) emit('refreshPlugins')
   })

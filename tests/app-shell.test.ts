@@ -13745,7 +13745,7 @@ describe('AppShell', () => {
     expect(store.extensionInstallProgressMap['cloud-assets']?.stage).toBe('error')
     expect(store.extensionPlugins.find((plugin) => plugin.pluginId === 'cloud-assets')?.installed).toBe(false)
     expect(store.extensionNotice).toContain('requires a real .aiopsterm-plugin package')
-    expect(workspace.text()).toContain('Error')
+    expect(workspace.text()).toContain('异常')
   })
 
   it('matches External reference-style Kubernetes contexts, cluster sidebar, config, terminal, and modals', async () => {

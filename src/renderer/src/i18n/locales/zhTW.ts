@@ -1,5 +1,6 @@
 import { completeLocaleMessages } from './complete'
 import { zhCN } from './zhCN'
+import { toTraditionalChineseMessages } from '../traditionalChinese'
 
 export const zhTW = completeLocaleMessages({
   'module.workspace': '工作區',
@@ -84,4 +85,4 @@ export const zhTW = completeLocaleMessages({
   'ai.hostContextHint': '主機上下文：{host}。Agent 執行時將重用或開啟終端。',
   'ai.inputPlaceholder': '描述你的運維目標',
   'ai.processing': '處理中'
-}, zhCN)
+}, toTraditionalChineseMessages(zhCN))

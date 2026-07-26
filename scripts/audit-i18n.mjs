@@ -17,6 +17,11 @@ const staticPatternSources = [...staticTextSource.matchAll(/\[\/\^([^/]+?)\/,\s*
 const staticPatterns = staticPatternSources.map((source) => new RegExp(`^${source.replace(/\\\//g, '/')}`))
 const legacyStaticTextBaseline = JSON.parse(readFileSync('scripts/i18n-legacy-static-text-baseline.json', 'utf8'))
 const registeredLegacyStaticTextHashes = new Set(Array.isArray(legacyStaticTextBaseline.hashes) ? legacyStaticTextBaseline.hashes : [])
+const localeDirectory = 'src/renderer/src/i18n/locales'
+const explicitLocaleFiles = ['enUS', 'jaJP', 'koKR', 'deDE', 'frFR', 'itIT', 'ptPT', 'ruRU', 'arAR']
+const localeKeys = (file) =>
+  new Set([...readFileSync(`${localeDirectory}/${file}.ts`, 'utf8').matchAll(/^\s*'([^']+)':/gm)].map((match) => match[1]))
+const requiredLocaleKeys = localeKeys('zhCN')
 
 const stripTemplateExpressions = (value) => value.replace(/\{\{[^}]+?\}\}/g, ' ').replace(/\$\{[^}]+?\}/g, ' ')
 const normalize = (value) => stripTemplateExpressions(value).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
@@ -72,7 +77,15 @@ const extractTemplateText = (line) => {
 }
 
 const findings = []
+const localeFindings = []
 let currentFile = ''
+
+for (const file of explicitLocaleFiles) {
+  const declaredKeys = localeKeys(file)
+  for (const key of requiredLocaleKeys) {
+    if (!declaredKeys.has(key)) localeFindings.push(`${file}.ts: missing ${key}`)
+  }
+}
 
 for (const file of trackedFiles) {
   const lines = readFileSync(file, 'utf8').split('\n')
@@ -90,7 +103,11 @@ for (const file of trackedFiles) {
   })
 }
 
-if (findings.length) {
+if (localeFindings.length || findings.length) {
+  if (localeFindings.length) {
+    console.error('Renderer i18n audit found locale source files with missing explicit translations:')
+    console.error(localeFindings.slice(0, 200).join('\n'))
+  }
   console.error('Renderer i18n audit found CJK UI text that is not covered by explicit i18n keys, exact static text entries, registered legacy static text, or static text patterns:')
   console.error([...new Set(findings)].slice(0, 200).join('\n'))
   if (findings.length > 200) console.error(`... ${findings.length - 200} more`)
