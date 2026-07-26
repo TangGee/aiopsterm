@@ -16,6 +16,7 @@ export type AssetSecret = {
   password?: string
   privateKey?: string
   passphrase?: string
+  jumpserverToken?: string
 }
 
 export type AssetStoreShape = {
@@ -88,6 +89,12 @@ export const defaultAssetKeychainSecrets: Record<string, AssetSecret> = {
   'key-2': {
     privateKey: 'seed-rsa-private-key-placeholder',
     passphrase: ''
+  }
+}
+
+export const defaultAssetSecrets: Record<string, AssetSecret> = {
+  'asset-5': {
+    jumpserverToken: 'seed-private-token'
   }
 }
 
@@ -192,6 +199,8 @@ export const defaultAssets: AiopsAssetRecord[] = [
     keychainId: 'key-1',
     comment: '同步资产',
     data_source: 'refresh',
+    bastionType: 'jumpserver',
+    jumpserverApiUrl: 'https://jumpserver.seed.local',
     favorite: true
   }
 ]
@@ -220,6 +229,8 @@ const cloneSecret = (secret: AssetSecret): AssetSecret => ({ ...secret })
 
 export const seedKeychainSecrets = () => Object.fromEntries(Object.entries(defaultAssetKeychainSecrets).map(([id, secret]) => [id, cloneSecret(secret)]))
 
+export const seedAssetSecrets = () => Object.fromEntries(Object.entries(defaultAssetSecrets).map(([id, secret]) => [id, cloneSecret(secret)]))
+
 export const emptySeedlessStore = (): AssetStoreShape => ({
   assets: [],
   folders: [],
@@ -231,7 +242,7 @@ export const emptySeedlessStore = (): AssetStoreShape => ({
 export const seededStore = (): AssetStoreShape => ({
   assets: seedAssets(),
   folders: seedFolders(),
-  secrets: {},
+  secrets: seedAssetSecrets(),
   keychains: seedKeychains(),
   keychainSecrets: seedKeychainSecrets()
 })
@@ -263,7 +274,8 @@ export const isUnmodifiedSeedKeychain = (keychain: AiopsKeychainRecord, secret?:
 export const sanitizeAsset = (asset: AiopsAssetRecord, secret?: AssetSecret): AiopsAssetRecord => ({
   ...cloneAsset(asset),
   hasPassword: Boolean(secret?.password || asset.hasPassword),
-  hasPrivateKey: Boolean(secret?.privateKey || asset.keychainId || asset.hasPrivateKey)
+  hasPrivateKey: Boolean(secret?.privateKey || asset.keychainId || asset.hasPrivateKey),
+  hasJumpserverToken: Boolean(secret?.jumpserverToken || asset.hasJumpserverToken)
 })
 
 export const sanitizeKeychain = (keychain: AiopsKeychainRecord, secret?: AssetSecret, includeSecret = false): AiopsKeychainRecord => ({
@@ -339,6 +351,11 @@ export const normalizeAssetInput = (input: AiopsAssetInput, existing?: AiopsAsse
     proxyName: hasOwn(input, 'proxyName') ? input.proxyName : existing?.proxyName,
     keychainId: hasOwn(input, 'keychainId') ? input.keychainId : existing?.keychainId,
     jumpHostId: hasOwn(input, 'jumpHostId') ? input.jumpHostId : existing?.jumpHostId,
+    bastionType: hasOwn(input, 'bastionType') ? input.bastionType : existing?.bastionType,
+    jumpserverApiUrl: hasOwn(input, 'jumpserverApiUrl') ? input.jumpserverApiUrl?.trim() : existing?.jumpserverApiUrl,
+    jumpserverOrgId: hasOwn(input, 'jumpserverOrgId') ? input.jumpserverOrgId?.trim() : existing?.jumpserverOrgId,
+    jumpserverAssetId: hasOwn(input, 'jumpserverAssetId') ? input.jumpserverAssetId?.trim() : existing?.jumpserverAssetId,
+    hasJumpserverToken: hasOwn(input, 'jumpserverToken') ? Boolean(input.jumpserverToken) : Boolean(existing?.hasJumpserverToken),
     hasPassword,
     hasPrivateKey
   }
@@ -357,6 +374,10 @@ export const mergeAssetSecretInput = (existingSecret: AssetSecret, input: AiopsA
   if (hasOwn(input, 'passphrase')) {
     if (input.passphrase) secret.passphrase = input.passphrase
     else delete secret.passphrase
+  }
+  if (hasOwn(input, 'jumpserverToken')) {
+    if (input.jumpserverToken) secret.jumpserverToken = input.jumpserverToken
+    else delete secret.jumpserverToken
   }
   return secret
 }

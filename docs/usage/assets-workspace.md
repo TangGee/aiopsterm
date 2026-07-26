@@ -18,6 +18,22 @@ The Assets module opens as a main workspace, not as a narrow left-side panel.
 - The host form no longer accepts pasted private-key text directly. Keys are managed as KeyChain records through the backend keychain boundary.
 - Asset import, export, organization refresh, organization asset table edits, modal key management, modal proxy management, and connection tests use backend-owned result envelopes. Import help opens a full modal; clicking import itself does not emit a toast unless a backend error or import result needs to be shown.
 
+## JumpServer Resource Refresh
+
+To configure a real JumpServer datasource, create or edit a bastion asset, select `JumpServer`, and fill in the JumpServer root URL, a Private Token, and the optional JumpServer organization ID. Use a root URL such as `https://jumpserver.example.com`; aiopsterm requests `GET /api/v1/assets/hosts/` itself. When an organization ID is present, the request includes it in the `X-JMS-ORG` header. The bastion host, SSH username, port, and password or key remain the SSH connection settings for the bastion itself.
+
+The Private Token is saved through the backend credential store. It is encrypted before SQLite or fallback-store persistence, loaded only through the editable-secret boundary, and represented as `hasJumpserverToken` in normal asset snapshots. It is not included in asset exports.
+
+Use `刷新组织资产` from the Workspace bastion menu, Assets organization management, or the Jumpserver Support extension page. A refresh:
+
+- authenticates with `Authorization: PrivateToken <token>`;
+- follows same-origin JumpServer pagination, with a 30-second timeout per page and a 100-page safety limit;
+- maps each JumpServer host ID, name, address, SSH port, node path, status, type, category, and comment into a backend-owned aiopsterm asset;
+- creates or updates stable local rows bound to the selected bastion and reports created, updated, and deleted counts;
+- removes only stale rows previously marked as JumpServer-synced for that organization, leaving manually managed assets untouched.
+
+Authentication, network, HTTP, pagination, non-JSON, or malformed-host failures return a visible backend error. The selected organization's existing synchronized rows are preserved when the remote list cannot be validated.
+
 The Workspace resource tree is the terminal-side resource launcher.
 
 - `直接连接` and `堡垒机资源` are tree tabs with nested groups.

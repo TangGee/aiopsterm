@@ -55,7 +55,12 @@ const loadBackend = async (options: { useDefaultRuntime?: boolean } = {}) => {
   const modulePath = '../src/main/backend/assets/assets'
   const backend = await import(modulePath)
   if (!options.useDefaultRuntime) {
-    backend.configureAssetBackendRuntime({ useSeedData: true, forceFallbackStore: true })
+    const { createJumpserverSeedFetch } = await import('../src/shared/jumpserverClient')
+    backend.configureAssetBackendRuntime({
+      useSeedData: true,
+      forceFallbackStore: true,
+      jumpserverFetch: createJumpserverSeedFetch()
+    })
   }
   return backend
 }
@@ -621,30 +626,30 @@ describe('assets backend boundary', () => {
 
   it('refreshes organization assets and returns a backend-owned snapshot', async () => {
     const backend = await loadBackend()
-    const refreshed = backend.refreshOrganizationAssets({ organizationId: 'asset-5' })
+    const refreshed = await backend.refreshOrganizationAssets({ organizationId: 'asset-5' })
 
     expect(refreshed.ok).toBe(true)
-    expect(refreshed.data).toMatchObject({ organizationId: 'org-1', refreshed: 1, created: 1, updated: 0 })
+    expect(refreshed.data).toMatchObject({ organizationId: 'org-1', refreshed: 1, created: 1, updated: 0, deleted: 0 })
     expect(refreshed.data?.assets).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          id: 'asset-5-synced',
+          id: 'jumpserver-org-1-seed-asset',
           title: 'jumpserver-org-synced-asset',
           data_source: 'refresh',
           organizationId: 'org-1',
-          tags: ['jumpserver', 'synced']
+          tags: expect.arrayContaining(['jumpserver', 'synced'])
         })
       ])
     )
 
-    const refreshedAgain = backend.refreshOrganizationAssets({ organizationId: 'asset-5' })
-    expect(refreshedAgain.data).toMatchObject({ organizationId: 'org-1', refreshed: 1, created: 0, updated: 1 })
-    expect(refreshedAgain.data?.assets.filter((asset: { id: string }) => asset.id === 'asset-5-synced')).toHaveLength(1)
+    const refreshedAgain = await backend.refreshOrganizationAssets({ organizationId: 'asset-5' })
+    expect(refreshedAgain.data).toMatchObject({ organizationId: 'org-1', refreshed: 1, created: 0, updated: 1, deleted: 0 })
+    expect(refreshedAgain.data?.assets.filter((asset: { id: string }) => asset.id === 'jumpserver-org-1-seed-asset')).toHaveLength(1)
   })
 
   it('rejects organization refresh for an unknown organization id', async () => {
     const backend = await loadBackend()
-    const refreshed = backend.refreshOrganizationAssets({ organizationId: 'missing-org' })
+    const refreshed = await backend.refreshOrganizationAssets({ organizationId: 'missing-org' })
 
     expect(refreshed).toEqual({
       ok: false,
@@ -652,6 +657,94 @@ describe('assets backend boundary', () => {
       errorMessage: 'Organization asset not found: missing-org'
     })
     expect(backend.listAssets().assets.some((asset: { id: string }) => asset.id.includes('missing-org-synced'))).toBe(false)
+  })
+
+  it('deletes stale JumpServer-synced assets without deleting manual organization assets', async () => {
+    const backend = await loadBackend()
+    const stale = backend.saveAsset({
+      id: 'jumpserver-org-1-stale',
+      name: 'stale-host',
+      title: 'stale-host',
+      host: '10.90.0.99',
+      ip: '10.90.0.99',
+      group: '企业',
+      group_name: '企业',
+      username: 'ops',
+      port: 22,
+      asset_type: 'person',
+      auth_type: 'password',
+      comment: '',
+      data_source: 'refresh',
+      status: 'online',
+      tags: ['jumpserver', 'synced'],
+      organizationId: 'org-1',
+      jumpserverAssetId: 'stale'
+    })
+    expect(stale.ok).toBe(true)
+    backend.configureAssetBackendRuntime({
+      useSeedData: true,
+      forceFallbackStore: true,
+      jumpserverFetch: vi.fn(async () =>
+        new Response(JSON.stringify({ count: 0, next: null, results: [] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' }
+        })
+      ) as typeof fetch
+    })
+
+    const refreshed = await backend.refreshOrganizationAssets({ organizationId: 'asset-5' })
+
+    expect(refreshed).toMatchObject({ ok: true, data: { refreshed: 0, created: 0, updated: 0, deleted: 1 } })
+    expect(refreshed.data?.assets.some((asset: { id: string }) => asset.id === 'jumpserver-org-1-stale')).toBe(false)
+    expect(refreshed.data?.assets.some((asset: { id: string }) => asset.id === 'asset-1')).toBe(true)
+  })
+
+  it('preserves existing assets when JumpServer authentication fails', async () => {
+    const backend = await loadBackend()
+    const before = backend.listAssets()
+    backend.configureAssetBackendRuntime({
+      useSeedData: true,
+      forceFallbackStore: true,
+      jumpserverFetch: vi.fn(async () =>
+        new Response(JSON.stringify({ detail: 'Invalid token' }), {
+          status: 401,
+          headers: { 'Content-Type': 'application/json' }
+        })
+      ) as typeof fetch
+    })
+
+    const refreshed = await backend.refreshOrganizationAssets({ organizationId: 'asset-5' })
+
+    expect(refreshed).toEqual({
+      ok: false,
+      errorCode: 'JUMPSERVER_API_AUTH_FAILED',
+      errorMessage: 'JumpServer API 请求失败，HTTP 401：Invalid token'
+    })
+    expect(backend.listAssets()).toEqual(before)
+  })
+
+  it('preserves existing assets when JumpServer returns a malformed host', async () => {
+    const backend = await loadBackend()
+    const before = backend.listAssets()
+    backend.configureAssetBackendRuntime({
+      useSeedData: true,
+      forceFallbackStore: true,
+      jumpserverFetch: vi.fn(async () =>
+        new Response(JSON.stringify({ count: 1, next: null, results: [{ id: 'missing-address', name: 'invalid' }] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' }
+        })
+      ) as typeof fetch
+    })
+
+    const refreshed = await backend.refreshOrganizationAssets({ organizationId: 'asset-5' })
+
+    expect(refreshed).toEqual({
+      ok: false,
+      errorCode: 'JUMPSERVER_API_MALFORMED',
+      errorMessage: 'JumpServer 返回的资产缺少 ID 或地址，本次刷新未写入。'
+    })
+    expect(backend.listAssets()).toEqual(before)
   })
 
   it('previews asset imports in the backend without exposing imported secrets', async () => {

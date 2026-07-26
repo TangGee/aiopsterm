@@ -73,7 +73,11 @@ export const createWorkspacePanelHostRuntime = ({
     password: '',
     keychainId: '',
     proxyName: '',
-    jumpHostId: ''
+    jumpHostId: '',
+    bastionType: 'jumpserver' as 'jumpserver' | 'teleport',
+    jumpserverApiUrl: '',
+    jumpserverToken: '',
+    jumpserverOrgId: ''
   })
   const hostFormError = ref('')
   const hostTestLoading = ref(false)
@@ -328,6 +332,10 @@ export const createWorkspacePanelHostRuntime = ({
     hostForm.keychainId = ''
     hostForm.proxyName = ''
     hostForm.jumpHostId = ''
+    hostForm.bastionType = 'jumpserver'
+    hostForm.jumpserverApiUrl = ''
+    hostForm.jumpserverToken = ''
+    hostForm.jumpserverOrgId = ''
     hostFormError.value = ''
     resetHostConnectionTest()
     closeContextMenu()
@@ -343,6 +351,9 @@ export const createWorkspacePanelHostRuntime = ({
     hostForm.keychainId = ''
     hostForm.proxyName = ''
     hostForm.jumpHostId = ''
+    hostForm.jumpserverApiUrl = ''
+    hostForm.jumpserverToken = ''
+    hostForm.jumpserverOrgId = ''
     hostFormError.value = ''
     closeHostChildModal()
     resetHostConnectionTest()
@@ -356,8 +367,12 @@ export const createWorkspacePanelHostRuntime = ({
       if (requestId !== hostSecretRequestId || hostModal.assetId !== assetId || !hostModal.visible || hostModal.mode === 'create') return
       if (!result?.ok) return
       hostForm.password = result.data?.password || ''
+      hostForm.jumpserverToken = result.data?.jumpserverToken || ''
     } catch {
-      if (requestId === hostSecretRequestId && hostModal.assetId === assetId) hostForm.password = ''
+      if (requestId === hostSecretRequestId && hostModal.assetId === assetId) {
+        hostForm.password = ''
+        hostForm.jumpserverToken = ''
+      }
     }
   }
 
@@ -380,10 +395,16 @@ export const createWorkspacePanelHostRuntime = ({
     hostForm.keychainId = asset?.keychainId || ''
     hostForm.proxyName = asset?.proxyName || ''
     hostForm.jumpHostId = asset?.jumpHostId || ''
+    hostForm.bastionType = asset?.bastionType || 'jumpserver'
+    hostForm.jumpserverApiUrl = asset?.jumpserverApiUrl || ''
+    hostForm.jumpserverToken = ''
+    hostForm.jumpserverOrgId = asset?.jumpserverOrgId || ''
     hostFormError.value = ''
     resetHostConnectionTest()
     closeContextMenu()
-    if ((mode === 'edit' || mode === 'clone') && asset?.id && hostForm.authType === 'password') void loadHostEditablePassword(secretRequestId, asset.id)
+    if ((mode === 'edit' || mode === 'clone') && asset?.id && (hostForm.authType === 'password' || asset.asset_type === 'organization')) {
+      void loadHostEditablePassword(secretRequestId, asset.id)
+    }
   }
 
   const openKeyManagementFromHostForm = () => {
@@ -461,7 +482,7 @@ export const createWorkspacePanelHostRuntime = ({
       auth_type: hostForm.authType,
       comment: String(hostForm.comment || '').trim(),
       data_source: hostForm.assetType === 'organization' ? 'refresh' : sourceAsset?.data_source || 'manual',
-      tags: hostForm.assetType === 'organization' ? ['jumpserver'] : ['ssh'],
+      tags: hostForm.assetType === 'organization' ? [hostForm.bastionType] : ['ssh'],
       favorite: sourceAsset?.favorite ?? false,
       tunnelState: sourceAsset?.tunnelState,
       organizationId:
@@ -477,6 +498,12 @@ export const createWorkspacePanelHostRuntime = ({
       proxyName: proxyName || undefined,
       keychainId: hostForm.authType === 'keyBased' && keychainId ? keychainId : undefined,
       jumpHostId: jumpHostId || undefined,
+      bastionType: hostForm.assetType === 'organization' ? hostForm.bastionType : undefined,
+      jumpserverApiUrl: hostForm.assetType === 'organization' ? hostForm.jumpserverApiUrl.trim() : undefined,
+      jumpserverOrgId: hostForm.assetType === 'organization' ? hostForm.jumpserverOrgId.trim() : undefined,
+      ...(hostForm.assetType === 'organization' && hostForm.bastionType === 'jumpserver'
+        ? { jumpserverToken: hostForm.jumpserverToken }
+        : {}),
       ...(targetPatch.group ? { group: targetPatch.group, group_name: targetPatch.group_name || targetPatch.group } : {}),
       ...(hostForm.authType === 'password' ? { password: hostForm.password } : {})
     }
@@ -536,6 +563,16 @@ export const createWorkspacePanelHostRuntime = ({
     if (!title || !host || !username) {
       hostFormError.value = '请填写主机名、地址和用户名'
       return
+    }
+    if (hostForm.assetType === 'organization' && hostForm.bastionType === 'jumpserver') {
+      if (!hostForm.jumpserverApiUrl.trim()) {
+        hostFormError.value = '请填写 JumpServer API 地址'
+        return
+      }
+      if (!hostForm.jumpserverToken.trim()) {
+        hostFormError.value = '请填写 JumpServer Private Token'
+        return
+      }
     }
     if (port === null) return
     const duplicate = workspaceAssets.value.some((asset) => asset.id !== hostModal.assetId && asset.name === title)

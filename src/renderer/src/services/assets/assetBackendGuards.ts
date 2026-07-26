@@ -68,7 +68,16 @@ export const isAiopsAssetRecord = (value: unknown): value is AiopsAssetRecord =>
   if (value.tunnelState !== undefined && !sshTunnelStates.has(String(value.tunnelState))) return false
   if (!isOptionalBoolean(value.needProxy)) return false
   if (!isOptionalString(value.proxyName) || !isOptionalString(value.keychainId) || !isOptionalString(value.jumpHostId)) return false
-  if (!isOptionalBoolean(value.hasPassword) || !isOptionalBoolean(value.hasPrivateKey) || !isOptionalBoolean(value.isLocalShell)) return false
+  if (value.bastionType !== undefined && value.bastionType !== 'jumpserver' && value.bastionType !== 'teleport') return false
+  if (!isOptionalString(value.jumpserverApiUrl) || !isOptionalString(value.jumpserverOrgId) || !isOptionalString(value.jumpserverAssetId)) return false
+  if (
+    !isOptionalBoolean(value.hasPassword) ||
+    !isOptionalBoolean(value.hasPrivateKey) ||
+    !isOptionalBoolean(value.hasJumpserverToken) ||
+    !isOptionalBoolean(value.isLocalShell)
+  ) {
+    return false
+  }
   return true
 }
 
@@ -139,6 +148,10 @@ export const isAiopsSavedAssetRecord = (value: unknown, input: AiopsAssetInput):
   if (!optionalPresentStringMatches(value.proxyName, input, 'proxyName')) return false
   if (!optionalPresentStringMatches(value.keychainId, input, 'keychainId')) return false
   if (!optionalPresentStringMatches(value.jumpHostId, input, 'jumpHostId')) return false
+  if (!optionalExactMatches(value.bastionType, input.bastionType)) return false
+  if (!optionalPresentStringMatches(value.jumpserverApiUrl, input, 'jumpserverApiUrl')) return false
+  if (!optionalPresentStringMatches(value.jumpserverOrgId, input, 'jumpserverOrgId')) return false
+  if (!optionalPresentStringMatches(value.jumpserverAssetId, input, 'jumpserverAssetId')) return false
   return true
 }
 
@@ -219,6 +232,7 @@ export const isAiopsOrganizationAssetRefreshData = (
   if (!isAiopsAssetSnapshot(value) || !isRecord(value)) return false
   const record = value as Record<string, unknown>
   if (!isNonNegativeInteger(record.refreshed) || !isNonNegativeInteger(record.created) || !isNonNegativeInteger(record.updated)) return false
+  if (record.deleted !== undefined && !isNonNegativeInteger(record.deleted)) return false
   if (record.refreshed !== record.created + record.updated) return false
 
   const requestedId = expectedOrganizationId?.trim()

@@ -17,6 +17,11 @@
       :jump-host-id="hostForm.jumpHostId"
       :group="hostForm.group"
       :comment="hostForm.comment"
+      :bastion-type="hostForm.bastionType"
+      :jumpserver-api-url="hostForm.jumpserverApiUrl"
+      :jumpserver-token="hostForm.jumpserverToken"
+      :jumpserver-org-id="hostForm.jumpserverOrgId"
+      :jumpserver-token-placeholder="hostModal.mode === 'create' ? '' : '填写已保存的 Private Token'"
       :error="hostFormError"
       :test-loading="hostTestLoading"
       :test-message="hostTestMessage"
@@ -26,6 +31,7 @@
       :proxy-options="workspaceProxyOptions"
       :jump-host-options="workspaceJumpHostOptions"
       :show-group="hostModal.mode !== 'create'"
+      :show-bastion-type="hostForm.assetType === 'organization'"
       show-comment
       group-datalist-id="workspace-host-group-options"
       test-connection-test-id="workspace-host-test-connection"
@@ -130,6 +136,17 @@ const updateWorkspaceHostField = (field: AssetHostFormField, value: string | num
       hostForm.comment = String(value)
       break
     case 'bastionType':
+      hostForm.bastionType = String(value) as 'jumpserver' | 'teleport'
+      break
+    case 'jumpserverApiUrl':
+      hostForm.jumpserverApiUrl = String(value)
+      break
+    case 'jumpserverToken':
+      hostForm.jumpserverToken = String(value)
+      break
+    case 'jumpserverOrgId':
+      hostForm.jumpserverOrgId = String(value)
+      break
     case 'switchBrand':
       break
   }

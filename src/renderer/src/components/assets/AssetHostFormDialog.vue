@@ -42,6 +42,41 @@
               <option value="teleport">Teleport</option>
             </select>
           </label>
+          <label
+            v-if="showBastionType && bastionType === 'jumpserver'"
+            class="workspace-host-form-wide"
+          >
+            <span>JumpServer API 地址 *</span>
+            <input
+              :value="jumpserverApiUrl"
+              placeholder="https://jumpserver.example.com"
+              @input="emit('field-change', 'jumpserverApiUrl', ($event.target as HTMLInputElement).value)"
+            />
+          </label>
+          <label
+            v-if="showBastionType && bastionType === 'jumpserver'"
+            class="workspace-host-form-wide"
+          >
+            <span>JumpServer Private Token *</span>
+            <input
+              :value="jumpserverToken"
+              type="password"
+              :placeholder="jumpserverTokenPlaceholder"
+              autocomplete="new-password"
+              @input="emit('field-change', 'jumpserverToken', ($event.target as HTMLInputElement).value)"
+            />
+          </label>
+          <label
+            v-if="showBastionType && bastionType === 'jumpserver'"
+            class="workspace-host-form-wide"
+          >
+            <span>JumpServer 组织 ID</span>
+            <input
+              :value="jumpserverOrgId"
+              placeholder="留空使用当前用户默认组织"
+              @input="emit('field-change', 'jumpserverOrgId', ($event.target as HTMLInputElement).value)"
+            />
+          </label>
           <label v-if="showSwitchBrand">
             <span>交换机品牌</span>
             <select
@@ -309,6 +344,9 @@ export type AssetHostFormField =
   | 'group'
   | 'comment'
   | 'bastionType'
+  | 'jumpserverApiUrl'
+  | 'jumpserverToken'
+  | 'jumpserverOrgId'
   | 'switchBrand'
 
 const { t } = useI18n()
@@ -331,6 +369,10 @@ withDefaults(
     group?: string
     comment?: string
     bastionType?: string
+    jumpserverApiUrl?: string
+    jumpserverToken?: string
+    jumpserverOrgId?: string
+    jumpserverTokenPlaceholder?: string
     switchBrand?: string
     error?: string
     testLoading?: boolean
@@ -361,6 +403,10 @@ withDefaults(
     group: '',
     comment: '',
     bastionType: 'jumpserver',
+    jumpserverApiUrl: '',
+    jumpserverToken: '',
+    jumpserverOrgId: '',
+    jumpserverTokenPlaceholder: '',
     switchBrand: 'cisco',
     error: '',
     testLoading: false,

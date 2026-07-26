@@ -50,6 +50,11 @@ import {
   type AssetSecret,
   type AssetStoreRuntimeConfig
 } from './assetsStoreRuntime'
+import {
+  fetchJumpserverHosts,
+  jumpserverHostToAssetInput,
+  type JumpserverFetch
+} from '@shared/jumpserverClient'
 
 
 type AssetSshTestClient = Pick<Client, 'connect' | 'end' | 'on' | 'off' | 'once'>
@@ -61,7 +66,9 @@ type AssetConnectionRuntimeConfig = {
   timeoutMs?: number
 }
 
-type AssetBackendRuntimeConfig = AssetConnectionRuntimeConfig & AssetStoreRuntimeConfig
+type AssetBackendRuntimeConfig = AssetConnectionRuntimeConfig & AssetStoreRuntimeConfig & {
+  jumpserverFetch?: JumpserverFetch
+}
 
 type ResolvedAssetConnectionTarget = {
   assetId?: string
@@ -90,6 +97,7 @@ class AssetConnectionTestError extends Error {
 }
 
 const assetConnectionRuntime: AssetConnectionRuntimeConfig = {}
+let jumpserverFetchRuntime: JumpserverFetch = globalThis.fetch
 
 export const configureAssetConnectionRuntime = (config: AssetConnectionRuntimeConfig = {}) => {
   assetConnectionRuntime.getConfig = config.getConfig
@@ -101,6 +109,7 @@ export const configureAssetConnectionRuntime = (config: AssetConnectionRuntimeCo
 export const configureAssetBackendRuntime = (config: AssetBackendRuntimeConfig = {}) => {
   configureAssetStoreRuntime(config)
   configureAssetConnectionRuntime(config)
+  jumpserverFetchRuntime = config.jumpserverFetch || globalThis.fetch
 }
 
 const getStore = getAssetStore
@@ -302,32 +311,24 @@ const asResult = <T>(fn: () => T): AiopsMutationResult<T> => {
   }
 }
 
-const assertUserEditableAsset = (id?: string) => {
-  if (id === LOCAL_SHELL_ASSET_ID) throw new Error('本地连接是系统资产，不能编辑或删除')
+const asAsyncResult = async <T>(fn: () => Promise<T>): Promise<AiopsMutationResult<T>> => {
+  try {
+    return { ok: true, data: await fn() }
+  } catch (error) {
+    const errorCode =
+      error && typeof error === 'object' && typeof (error as { code?: unknown }).code === 'string'
+        ? String((error as { code: string }).code)
+        : 'ASSET_BACKEND_ERROR'
+    return {
+      ok: false,
+      errorCode,
+      errorMessage: error instanceof Error ? error.message : String(error)
+    }
+  }
 }
 
-const refreshedAssetForOrganization = (organization: AiopsAssetRecord, index: number): AiopsAssetInput => {
-  const baseName = organization.title || organization.name || organization.host || 'organization'
-  const hostOctet = 15 + index
-  return {
-    id: `${organization.id}-synced`,
-    name: `${baseName}-synced-asset`,
-    title: `${baseName}-synced-asset`,
-    host: `10.90.0.${hostOctet}`,
-    ip: `10.90.0.${hostOctet}`,
-    group: organization.group || organization.group_name || '企业',
-    group_name: organization.group_name || organization.group || '企业',
-    status: 'online',
-    tags: ['jumpserver', 'synced'],
-    username: 'jump',
-    port: 22,
-    asset_type: 'person',
-    auth_type: 'keyBased',
-    comment: '刷新来源资产',
-    data_source: 'refresh',
-    organizationId: organization.uuid || organization.id,
-    keychainId: organization.keychainId
-  }
+const assertUserEditableAsset = (id?: string) => {
+  if (id === LOCAL_SHELL_ASSET_ID) throw new Error('本地连接是系统资产，不能编辑或删除')
 }
 
 export const listAssets = (): AiopsAssetSnapshot => getStore().list()
@@ -343,7 +344,8 @@ export const getAssetEditableSecret = (id: string): AiopsMutationResult<AiopsAss
     const secret = getStore().getSecret(assetId)
     return {
       assetId,
-      ...(typeof secret.password === 'string' && secret.password ? { password: secret.password } : {})
+      ...(typeof secret.password === 'string' && secret.password ? { password: secret.password } : {}),
+      ...(typeof secret.jumpserverToken === 'string' && secret.jumpserverToken ? { jumpserverToken: secret.jumpserverToken } : {})
     }
   })
 export const getKeychainSecret = (id: string): AssetSecret => getStore().getKeychainSecret(id)
@@ -491,8 +493,10 @@ export const deleteAssetGroup = (input: AiopsAssetGroupDeleteInput): AiopsMutati
     if (!updated) throw new Error(`Asset group not found: ${name}`)
     return store.list()
   })
-export const refreshOrganizationAssets = (input: AiopsOrganizationAssetRefreshInput = {}): AiopsOrganizationAssetRefreshResult =>
-  asResult(() => {
+export const refreshOrganizationAssets = (
+  input: AiopsOrganizationAssetRefreshInput = {}
+): Promise<AiopsOrganizationAssetRefreshResult> =>
+  asAsyncResult(async () => {
     const store = getStore()
     const snapshot = store.list()
     const organizations = snapshot.assets.filter(
@@ -505,21 +509,65 @@ export const refreshOrganizationAssets = (input: AiopsOrganizationAssetRefreshIn
     }
     let created = 0
     let updated = 0
+    let deleted = 0
 
-    organizations.forEach((organization, index) => {
-      const draft = refreshedAssetForOrganization(organization, index)
-      const existing = store.getAsset(draft.id!)
-      store.save(draft)
-      if (existing) updated += 1
-      else created += 1
-    })
+    for (const organization of organizations) {
+      const isJumpserver =
+        organization.bastionType === 'jumpserver' ||
+        (!organization.bastionType && organization.tags.some((tag) => tag.trim().toLowerCase() === 'jumpserver'))
+      if (!isJumpserver) {
+        if (input.organizationId) {
+          throw Object.assign(new Error('当前堡垒机不是 JumpServer 数据源。'), { code: 'JUMPSERVER_TYPE_UNSUPPORTED' })
+        }
+        continue
+      }
+      const apiUrl = organization.jumpserverApiUrl || (/^https?:\/\//i.test(organization.host) ? organization.host : `https://${organization.host}`)
+      const remoteHosts = await fetchJumpserverHosts(jumpserverFetchRuntime, {
+        apiUrl,
+        privateToken: store.getSecret(organization.id).jumpserverToken || '',
+        organizationId: organization.jumpserverOrgId
+      })
+      const drafts = remoteHosts
+        .map((host) => jumpserverHostToAssetInput(organization, host))
+        .filter((draft): draft is AiopsAssetInput => Boolean(draft))
+      if (drafts.length !== remoteHosts.length) {
+        throw Object.assign(new Error('JumpServer 返回的资产缺少 ID 或地址，本次刷新未写入。'), {
+          code: 'JUMPSERVER_API_MALFORMED'
+        })
+      }
+      const remoteIds = new Set(drafts.map((draft) => draft.id!))
+      const organizationId = organization.uuid || organization.id
+      const staleIds = store
+        .list()
+        .assets.filter(
+          (asset) =>
+            asset.asset_type !== 'organization' &&
+            asset.organizationId === organizationId &&
+            asset.data_source === 'refresh' &&
+            asset.tags.includes('jumpserver') &&
+            asset.tags.includes('synced') &&
+            !remoteIds.has(asset.id)
+        )
+        .map((asset) => asset.id)
+      for (const id of staleIds) {
+        store.delete(id)
+        deleted += 1
+      }
+      for (const draft of drafts) {
+        const existing = store.getAsset(draft.id!)
+        store.save(draft)
+        if (existing) updated += 1
+        else created += 1
+      }
+    }
 
     return {
       ...store.list(),
       ...(input.organizationId && organizations[0] ? { organizationId: organizations[0].uuid || organizations[0].id } : {}),
       refreshed: created + updated,
       created,
-      updated
+      updated,
+      deleted
     }
   })
 

@@ -6,6 +6,7 @@ export type AssetSecret = {
   password?: string
   privateKey?: string
   passphrase?: string
+  jumpserverToken?: string
 }
 
 type AssetSafeStorageLike = {
@@ -21,7 +22,7 @@ export type AssetCredentialRuntimeConfig = {
 
 const safeStorageCredentialPrefix = 'as1:'
 const localKeyCredentialPrefix = 'ak1:'
-const credentialFields = ['password', 'privateKey', 'passphrase'] as const
+const credentialFields = ['password', 'privateKey', 'passphrase', 'jumpserverToken'] as const
 
 let runtimeConfig: AssetCredentialRuntimeConfig = {}
 let cachedCredentialKeyPath = ''
@@ -137,13 +138,15 @@ const decryptCredentialValue = (value: unknown) => {
 export const decryptAssetSecret = (secret: AssetSecret = {}): AssetSecret => ({
   ...(hasOwn(secret, 'password') ? { password: decryptCredentialValue(secret.password) } : {}),
   ...(hasOwn(secret, 'privateKey') ? { privateKey: decryptCredentialValue(secret.privateKey) } : {}),
-  ...(hasOwn(secret, 'passphrase') ? { passphrase: decryptCredentialValue(secret.passphrase) } : {})
+  ...(hasOwn(secret, 'passphrase') ? { passphrase: decryptCredentialValue(secret.passphrase) } : {}),
+  ...(hasOwn(secret, 'jumpserverToken') ? { jumpserverToken: decryptCredentialValue(secret.jumpserverToken) } : {})
 })
 
 export const encryptAssetSecretForStorage = (secret: AssetSecret = {}): AssetSecret => ({
   ...(hasOwn(secret, 'password') ? { password: encryptCredentialValue(secret.password) } : {}),
   ...(hasOwn(secret, 'privateKey') ? { privateKey: encryptCredentialValue(secret.privateKey) } : {}),
-  ...(hasOwn(secret, 'passphrase') ? { passphrase: encryptCredentialValue(secret.passphrase) } : {})
+  ...(hasOwn(secret, 'passphrase') ? { passphrase: encryptCredentialValue(secret.passphrase) } : {}),
+  ...(hasOwn(secret, 'jumpserverToken') ? { jumpserverToken: encryptCredentialValue(secret.jumpserverToken) } : {})
 })
 
 export const assetSecretNeedsEncryption = (secret: AssetSecret = {}) =>

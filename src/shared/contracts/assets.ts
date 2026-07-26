@@ -59,6 +59,11 @@ export type AiopsAssetRecord = {
   proxyName?: string
   keychainId?: string
   jumpHostId?: string
+  bastionType?: 'jumpserver' | 'teleport'
+  jumpserverApiUrl?: string
+  jumpserverOrgId?: string
+  jumpserverAssetId?: string
+  hasJumpserverToken?: boolean
   hasPassword?: boolean
   hasPrivateKey?: boolean
   isLocalShell?: boolean
@@ -108,6 +113,11 @@ export type AiopsAssetInput = {
   proxyName?: string
   keychainId?: string
   jumpHostId?: string
+  bastionType?: 'jumpserver' | 'teleport'
+  jumpserverApiUrl?: string
+  jumpserverOrgId?: string
+  jumpserverAssetId?: string
+  jumpserverToken?: string
   password?: string
   privateKey?: string
   passphrase?: string
@@ -137,6 +147,7 @@ export type AiopsAssetConnectionTestResult = AiopsMutationResult<AiopsAssetConne
 export type AiopsAssetEditableSecret = {
   assetId: string
   password?: string
+  jumpserverToken?: string
 }
 
 export type AiopsKeychainType = 'rsa' | 'ed25519' | 'ecdsa'
@@ -193,6 +204,7 @@ export type AiopsOrganizationAssetRefreshResult = AiopsMutationResult<
     refreshed: number
     created: number
     updated: number
+    deleted?: number
   }
 >
 

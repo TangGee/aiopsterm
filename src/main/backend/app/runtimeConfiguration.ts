@@ -1,7 +1,8 @@
 import { BrowserWindow, app, net, screen, shell } from 'electron'
 import { existsSync } from 'fs'
 import { join } from 'path'
-import { configureAssetBackendRuntime, configureAssetConnectionRuntime, getAsset, getAssetSecret, getKeychainSecret } from '../assets/assets'
+import { configureAssetBackendRuntime, getAsset, getAssetSecret, getKeychainSecret } from '../assets/assets'
+import { createJumpserverSeedFetch } from '@shared/jumpserverClient'
 import type { refreshOrganizationAssets } from '../assets/assets'
 import { configureAiChatRuntime } from '../ai/aiChat'
 import { configureAiCommandBackendRuntime } from '../ai/aiCommands'
@@ -144,7 +145,6 @@ export const configureMainBackendRuntimes = (input: ConfigureMainRuntimeInput) =
     // Export MCP will surface token storage errors when the user opens or uses its settings page.
   }
   configureTerminalSuggestionsRuntime({ getConfig: input.getConfig })
-  configureAssetConnectionRuntime({ getConfig: input.getConfig })
   configureDatabaseBackendRuntime({
     getConfig: input.getConfig,
     fetch,
@@ -158,6 +158,8 @@ export const configureMainBackendRuntimes = (input: ConfigureMainRuntimeInput) =
   })
   configureVoiceBackendRuntime({ getConfig: input.getConfig })
   configureAssetBackendRuntime({
+    getConfig: input.getConfig,
+    jumpserverFetch: shouldUseAssetsSeedData() ? createJumpserverSeedFetch() : net.fetch as typeof fetch,
     useSeedData: shouldUseAssetsSeedData()
   })
   configureFilesBackendRuntime({

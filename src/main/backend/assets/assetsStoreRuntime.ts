@@ -27,6 +27,7 @@ import {
   assetGroupName,
   cloneAsset,
   cloneFolder,
+  defaultAssetSecrets,
   defaultAssetKeychainSecrets,
   defaultAssetStoreShape,
   isUnmodifiedSeedAsset,
@@ -42,6 +43,7 @@ import {
   sanitizeAsset,
   sanitizeKeychain,
   seedAssets,
+  seedAssetSecrets,
   seedFolders,
   seedKeychains,
   seedKeychainSecrets,
@@ -151,6 +153,7 @@ class FallbackAssetStore {
   constructor() {
     if (runtimeConfig.useSeedData) {
       if (!(this.store.get('assets') || []).filter((asset) => !asset.isLocalShell).length) this.store.set('assets', seedAssets())
+      if (!Object.keys(this.store.get('secrets') || {}).length) this.store.set('secrets', seedAssetSecrets())
       if (!(this.store.get('folders') || []).length) this.store.set('folders', seedFolders())
       if (!(this.store.get('keychains') || []).length) this.store.set('keychains', seedKeychains())
       if (!Object.keys(this.store.get('keychainSecrets') || {}).length) this.store.set('keychainSecrets', seedKeychainSecrets())
@@ -378,7 +381,9 @@ class SqliteAssetStore {
     const nonLocalAssetCount = this.rawAssets().filter(({ asset }) => !asset.isLocalShell && asset.id !== LOCAL_SHELL_ASSET_ID && asset.uuid !== LOCAL_SHELL_ASSET_ID).length
     if (!nonLocalAssetCount) {
       for (const asset of seedAssets()) {
-        this.db.prepare('INSERT INTO assets (id, data, secret) VALUES (?, ?, ?)').run(asset.id, JSON.stringify(asset), '{}')
+        this.db
+          .prepare('INSERT INTO assets (id, data, secret) VALUES (?, ?, ?)')
+          .run(asset.id, JSON.stringify(asset), JSON.stringify(encryptAssetSecretForStorage(defaultAssetSecrets[asset.id] || {})))
       }
     }
     const folderCount = this.db.prepare('SELECT COUNT(*) as count FROM asset_folders').get() as { count: number }

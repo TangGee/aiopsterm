@@ -125,20 +125,38 @@ describe('assets sqlite backend seed boundary', () => {
         privateKey: '-----BEGIN OPENSSH PRIVATE KEY-----\nsecret-private-key-material\n-----END OPENSSH PRIVATE KEY-----',
         passphrase: 'plain-passphrase'
       })
+      const savedJumpserver = backend.saveAsset({
+        name: 'jumpserver-encrypted',
+        title: 'jumpserver-encrypted',
+        host: 'jumpserver.example.com',
+        username: 'api-user',
+        port: 22,
+        asset_type: 'organization',
+        auth_type: 'password',
+        group: '企业',
+        group_name: '企业',
+        tags: ['jumpserver'],
+        bastionType: 'jumpserver',
+        jumpserverApiUrl: 'https://jumpserver.example.com',
+        jumpserverToken: 'plain-jumpserver-token'
+      })
 
       expect(savedAsset.ok).toBe(true)
       expect(savedAsset.data).toEqual(expect.objectContaining({ hasPassword: true }))
       expect(savedAsset.data).toEqual(expect.not.objectContaining({ password: 'plain-ssh-password' }))
       expect(savedKeychain.ok).toBe(true)
       expect(savedKeychain.data).toEqual(expect.objectContaining({ hasPrivateKey: true }))
+      expect(savedJumpserver.data).toEqual(expect.objectContaining({ hasJumpserverToken: true }))
 
       const rawText = await readSqliteStorageArtifacts(databasePath)
       expect(rawText).not.toContain('plain-ssh-password')
       expect(rawText).not.toContain('secret-private-key-material')
       expect(rawText).not.toContain('plain-passphrase')
+      expect(rawText).not.toContain('plain-jumpserver-token')
       expect(rawText).toContain('ak1:')
 
       expect(backend.getAssetSecret(savedAsset.data!.id)).toEqual(expect.objectContaining({ password: 'plain-ssh-password' }))
+      expect(backend.getAssetSecret(savedJumpserver.data!.id)).toEqual(expect.objectContaining({ jumpserverToken: 'plain-jumpserver-token' }))
       expect(backend.getKeychainSecret(savedKeychain.data!.id)).toEqual(
         expect.objectContaining({
           privateKey: expect.stringContaining('secret-private-key-material'),

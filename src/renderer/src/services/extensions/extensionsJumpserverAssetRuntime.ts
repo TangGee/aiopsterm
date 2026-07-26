@@ -84,7 +84,7 @@ export const createExtensionsJumpserverAssetRuntime = (deps: ExtensionsJumpserve
       if (!isAiopsJumpserverOrganizationAssetRefreshData(result.data, targetOrganizationId)) throw new Error(malformedAssetBackendResultMessage)
       applyJumpserverRefreshSnapshot(result.data)
       jumpserverAssetError.value = ''
-      jumpserverAssetNotice.value = `刷新完成：新增 ${result.data.created}，更新 ${result.data.updated}`
+      jumpserverAssetNotice.value = `刷新完成：新增 ${result.data.created}，更新 ${result.data.updated}，删除 ${result.data.deleted || 0}`
       return true
     } catch (error) {
       jumpserverAssetError.value = error instanceof Error ? error.message : '组织资产刷新失败'

@@ -148,7 +148,7 @@ describe('extensionsJumpserverAssetRuntime', () => {
     await expect(runtime.refreshJumpserverAssets()).resolves.toBe(true)
     expect(window.aiops.refreshOrganizationAssets).toHaveBeenCalledWith({ organizationId: organization.id })
     expect(runtime.jumpserverSyncedAssets.value.map((asset) => asset.id)).toEqual([refreshedAsset.id])
-    expect(runtime.jumpserverAssetNotice.value).toBe('刷新完成：新增 1，更新 0')
+    expect(runtime.jumpserverAssetNotice.value).toBe('刷新完成：新增 1，更新 0，删除 0')
   })
 
   it('fails closed for missing bridges and malformed refresh payloads', async () => {

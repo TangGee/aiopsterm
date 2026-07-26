@@ -174,6 +174,10 @@
       :jump-host-id="form.jumpHostId"
       :group="form.group"
       :bastion-type="form.bastionType"
+      :jumpserver-api-url="form.jumpserverApiUrl"
+      :jumpserver-token="form.jumpserverToken"
+      :jumpserver-org-id="form.jumpserverOrgId"
+      :jumpserver-token-placeholder="editMode ? '填写已保存的 Private Token' : ''"
       :switch-brand="form.switchBrand"
       :error="assetFormError"
       :test-loading="assetTestLoading"
@@ -309,6 +313,9 @@ type AssetHostDraft = Partial<{
   jumpHostId: string
   group: string
   bastionType: string
+  jumpserverApiUrl: string
+  jumpserverToken: string
+  jumpserverOrgId: string
   switchBrand: string
 }>
 
@@ -371,6 +378,15 @@ const updateAssetHostField = (field: AssetHostFormField, value: string | number)
       break
     case 'bastionType':
       assetHostDraft.bastionType = String(value)
+      break
+    case 'jumpserverApiUrl':
+      assetHostDraft.jumpserverApiUrl = String(value)
+      break
+    case 'jumpserverToken':
+      assetHostDraft.jumpserverToken = String(value)
+      break
+    case 'jumpserverOrgId':
+      assetHostDraft.jumpserverOrgId = String(value)
       break
     case 'switchBrand':
       assetHostDraft.switchBrand = String(value)

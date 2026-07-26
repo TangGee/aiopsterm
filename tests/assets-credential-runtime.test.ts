@@ -7,6 +7,7 @@ type AssetSecret = {
   password?: string
   privateKey?: string
   passphrase?: string
+  jumpserverToken?: string
 }
 
 type AssetCredentialRuntimeModule = {
@@ -61,22 +62,26 @@ describe('asset credential runtime', () => {
         [passwordField]: 'runtime-password-material',
         privateKey: 'runtime-private-material',
         passphrase: '',
+        jumpserverToken: 'runtime-jumpserver-token',
         extra: 'ignored'
       } as AssetSecret & { extra: string })
 
       expect(encrypted.password).toMatch(/^ak1:/)
       expect(encrypted.privateKey).toMatch(/^ak1:/)
       expect(encrypted.passphrase).toBe('')
+      expect(encrypted.jumpserverToken).toMatch(/^ak1:/)
       expect(encrypted).not.toHaveProperty('extra')
       expect(encrypted.password).not.toContain('runtime-password-material')
       expect(encrypted.privateKey).not.toContain('runtime-private-material')
+      expect(encrypted.jumpserverToken).not.toContain('runtime-jumpserver-token')
       expect(assetSecretNeedsEncryption(encrypted)).toBe(false)
       expect(isAssetCredentialCiphertext(encrypted.password)).toBe(true)
 
       expect(decryptAssetSecret(encrypted)).toEqual({
         [passwordField]: 'runtime-password-material',
         privateKey: 'runtime-private-material',
-        passphrase: ''
+        passphrase: '',
+        jumpserverToken: 'runtime-jumpserver-token'
       })
       expect(await readFile(credentialKeyPath)).toHaveLength(32)
       expect((await stat(credentialKeyPath)).mode & 0o777).toBe(0o600)

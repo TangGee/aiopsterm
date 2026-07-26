@@ -60,6 +60,9 @@ export const createAssetsPanelHostFormRuntime = ({
     proxyName: '',
     jumpHostId: '',
     bastionType: 'jumpserver',
+    jumpserverApiUrl: '',
+    jumpserverToken: '',
+    jumpserverOrgId: '',
     switchBrand: 'cisco'
   })
 
@@ -90,6 +93,9 @@ export const createAssetsPanelHostFormRuntime = ({
       proxyName: '',
       jumpHostId: '',
       bastionType: 'jumpserver',
+      jumpserverApiUrl: '',
+      jumpserverToken: '',
+      jumpserverOrgId: '',
       switchBrand: 'cisco'
     })
   }
@@ -174,8 +180,12 @@ export const createAssetsPanelHostFormRuntime = ({
       if (requestId !== assetSecretRequestId || !editorOpen.value || (!stillEditingSource && !stillCloningSource)) return
       if (!result?.ok) return
       form.password = result.data?.password || ''
+      form.jumpserverToken = result.data?.jumpserverToken || ''
     } catch {
-      if (requestId === assetSecretRequestId && ((mode === 'edit' && form.id === assetId) || (mode === 'clone' && !form.id))) form.password = ''
+      if (requestId === assetSecretRequestId && ((mode === 'edit' && form.id === assetId) || (mode === 'clone' && !form.id))) {
+        form.password = ''
+        form.jumpserverToken = ''
+      }
     }
   }
 
@@ -203,11 +213,14 @@ export const createAssetsPanelHostFormRuntime = ({
       keyId: asset.keychainId || '',
       proxyName: resolveAssetProxyName(asset),
       jumpHostId: '',
-      bastionType: asset.asset_type === 'organization' ? 'jumpserver' : 'jumpserver',
+      bastionType: asset.bastionType || 'jumpserver',
+      jumpserverApiUrl: asset.jumpserverApiUrl || '',
+      jumpserverToken: '',
+      jumpserverOrgId: asset.jumpserverOrgId || '',
       switchBrand: asset.asset_type === 'switch' ? 'cisco' : 'cisco'
     })
     editorOpen.value = true
-    if (asset.auth_type === 'password') void loadAssetEditablePassword(secretRequestId, asset.id)
+    if (asset.auth_type === 'password' || asset.asset_type === 'organization') void loadAssetEditablePassword(secretRequestId, asset.id)
   }
 
   const cloneAsset = (assetId: string | null) => {
@@ -234,11 +247,14 @@ export const createAssetsPanelHostFormRuntime = ({
       keyId: asset.keychainId || '',
       proxyName: resolveAssetProxyName(asset),
       jumpHostId: '',
-      bastionType: 'jumpserver',
+      bastionType: asset.bastionType || 'jumpserver',
+      jumpserverApiUrl: asset.jumpserverApiUrl || '',
+      jumpserverToken: '',
+      jumpserverOrgId: asset.jumpserverOrgId || '',
       switchBrand: 'cisco'
     })
     editorOpen.value = true
-    if (asset.auth_type === 'password') void loadAssetEditablePassword(secretRequestId, asset.id, 'clone')
+    if (asset.auth_type === 'password' || asset.asset_type === 'organization') void loadAssetEditablePassword(secretRequestId, asset.id, 'clone')
   }
 
   const buildAssetFormInput = (): { asset: AiopsAssetInput; title: string } | null => {
@@ -253,6 +269,16 @@ export const createAssetsPanelHostFormRuntime = ({
     if (form.auth_type === 'keyBased' && !form.keyId) {
       assetFormError.value = '请选择密钥链。'
       return null
+    }
+    if (form.asset_type === 'organization' && form.bastionType === 'jumpserver') {
+      if (!form.jumpserverApiUrl.trim()) {
+        assetFormError.value = '请填写 JumpServer API 地址。'
+        return null
+      }
+      if (!form.jumpserverToken.trim()) {
+        assetFormError.value = '请填写 JumpServer Private Token。'
+        return null
+      }
     }
     const selectedProxyName = form.proxyName.trim()
     const selectedProxy = selectedProxyName ? workspace.sshProxyConfigs.find((config) => config.name.trim() === selectedProxyName) : undefined
@@ -272,7 +298,7 @@ export const createAssetsPanelHostFormRuntime = ({
         ip: host,
         ...(group ? { group, group_name: group } : {}),
         status: 'online',
-        tags: [form.auth_type === 'keyBased' ? 'key' : 'ssh'],
+        tags: form.asset_type === 'organization' ? [form.bastionType] : [form.auth_type === 'keyBased' ? 'key' : 'ssh'],
         username,
         port,
         asset_type: form.asset_type,
@@ -281,6 +307,10 @@ export const createAssetsPanelHostFormRuntime = ({
         data_source: form.asset_type === 'organization' ? 'refresh' : 'manual',
         keychainId: form.auth_type === 'keyBased' ? form.keyId || undefined : undefined,
         jumpHostId: form.jumpHostId || undefined,
+        bastionType: form.asset_type === 'organization' ? form.bastionType as 'jumpserver' | 'teleport' : undefined,
+        jumpserverApiUrl: form.asset_type === 'organization' ? form.jumpserverApiUrl.trim() : undefined,
+        jumpserverOrgId: form.asset_type === 'organization' ? form.jumpserverOrgId.trim() : undefined,
+        ...(form.asset_type === 'organization' && form.bastionType === 'jumpserver' ? { jumpserverToken: form.jumpserverToken } : {}),
         needProxy: Boolean(selectedProxy),
         proxyName: selectedProxy ? selectedProxyName : '',
         ...(form.auth_type === 'password' ? { password: form.password } : {})
