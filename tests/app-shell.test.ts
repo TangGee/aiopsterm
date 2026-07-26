@@ -13283,11 +13283,16 @@ describe('AppShell', () => {
     await flushPromises()
     await workspace.vm.$nextTick()
     expect(workspace.text()).toContain('diagnose.md')
-    expect(monacoMocks.editorInstance.setSelection).toHaveBeenCalledWith({
-      startLineNumber: 2,
-      startColumn: 1,
-      endLineNumber: 8,
-      endColumn: 80
+    await vi.waitFor(() => {
+      expect(monacoMocks.create).toHaveBeenCalled()
+    }, { timeout: 5000 })
+    await vi.waitFor(() => {
+      expect(monacoMocks.editorInstance.setSelection).toHaveBeenCalledWith({
+        startLineNumber: 2,
+        startColumn: 1,
+        endLineNumber: 8,
+        endColumn: 80
+      })
     })
     const diagnosePanelId = store.activePanelId
     store.openKnowledgeFile('commands/diagnose.md', { startLine: 5, endLine: 6 })
@@ -13993,7 +13998,7 @@ describe('AppShell', () => {
     await workspace.find('.k8s-agent-bar button').trigger('click')
     expect(store.k8sResourceOutput).toContain('Server Version')
     await vi.advanceTimersByTimeAsync(160)
-    await workspace.findAll('.k8s-agent-bar button').find((button) => button.text().includes('Namespaces'))!.trigger('click')
+    await workspace.findAll('.k8s-agent-bar button').find((button) => button.text().includes('命名空间'))!.trigger('click')
     expect(store.k8sResourceOutput).toContain('kubectl get namespaces')
     expect(store.k8sResourceOutput).toContain('ingress-nginx')
     await workspace.find('.k8s-agent-command input').setValue('kubectl get deployments -A')
@@ -14003,7 +14008,7 @@ describe('AppShell', () => {
     expect(workspace.find('.k8s-agent-history').text()).toContain('kubectl get deployments -A')
     await workspace.find('.k8s-agent-bar select').setValue('k8s-2')
     expect(store.k8sAgentCurrentCluster).toMatchObject({ clusterId: 'k8s-2', contextName: 'staging/devops' })
-    await workspace.findAll('.k8s-agent-bar button').find((button) => button.text().includes('Cleanup'))!.trigger('click')
+    await workspace.findAll('.k8s-agent-bar button').find((button) => button.text().includes('清理'))!.trigger('click')
     expect(store.k8sAgentStatus).toBe('idle')
     await workspace.find('.k8s-resource-filter select').setValue('ops')
     expect(store.k8sResourceNamespace).toBe('ops')

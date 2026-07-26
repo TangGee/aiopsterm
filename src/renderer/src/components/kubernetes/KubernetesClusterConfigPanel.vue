@@ -131,7 +131,10 @@
         >
           <header>
             <h3>{{ workspace.k8sSelectedCluster.name }}</h3>
-            <button @click="workspace.selectK8sCluster(null)">
+            <button
+              title="关闭"
+              @click="workspace.selectK8sCluster(null)"
+            >
               <X />
             </button>
           </header>
