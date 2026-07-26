@@ -66,6 +66,8 @@ let unregisterFlush: (() => void) | null = null
 let autosaveTimer: ReturnType<typeof setTimeout> | null = null
 let inFlightSave: Promise<boolean> | null = null
 let conflictEpoch = 0
+let mounted = false
+let watchedRelativePath = ''
 
 const projectFile = computed(() => props.panel.projectFile)
 const dirty = computed(() => content.value !== originContent.value)
@@ -232,15 +234,32 @@ const handleWindowBlur = () => {
   if (dirty.value) void save(false, true)
 }
 
+const restartWatch = async () => {
+  const relativePath = projectFile.value?.relativePath || ''
+  if (!mounted || !relativePath || relativePath === watchedRelativePath) return
+  const stopWatch = projectFilesClient.stopWatch()
+  if (watchedRelativePath && stopWatch) await stopWatch(watchId)
+  watchedRelativePath = ''
+  const startWatch = projectFilesClient.startWatch()
+  if (!startWatch || !projectFile.value) return
+  const result = await startWatch({ ...contextInput(), watchId })
+  if (result.ok) watchedRelativePath = relativePath
+}
+
 onMounted(async () => {
+  mounted = true
   unregisterFlush = registerProjectFileEditorFlush(props.panel.id, () => save(false, true))
   window.addEventListener('blur', handleWindowBlur)
   await reload(true)
   const onWatch = projectFilesClient.onWatchEvent()
   offWatch = onWatch?.(handleWatchEvent) || null
-  const startWatch = projectFilesClient.startWatch()
-  if (startWatch && projectFile.value) await startWatch({ ...contextInput(), watchId })
+  await restartWatch()
 })
+
+watch(
+  () => projectFile.value?.relativePath,
+  () => { void restartWatch() }
+)
 
 watch(
   () => workspace.activePanelId,
@@ -250,6 +269,7 @@ watch(
 )
 
 onBeforeUnmount(() => {
+  mounted = false
   clearAutosave()
   window.removeEventListener('blur', handleWindowBlur)
   unregisterFlush?.()

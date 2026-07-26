@@ -419,6 +419,7 @@ const api: AiopsPreloadApi = {
   },
   getProjectFileContext: (input) => ipcRenderer.invoke('project-files:context', input),
   listProjectDirectory: (input) => ipcRenderer.invoke('project-files:list', input),
+  mutateProjectEntry: (input) => ipcRenderer.invoke('project-files:mutate', input),
   readProjectFile: (input) => ipcRenderer.invoke('project-files:read', input),
   writeProjectFile: (input) => ipcRenderer.invoke('project-files:write', input),
   startProjectFileWatch: (input) => ipcRenderer.invoke('project-files:watch:start', input),

@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -172,6 +172,112 @@ describe('project files backend', () => {
     expect(conflict).toMatchObject({ ok: false, errorCode: 'PROJECT_FILE_CONFLICT' })
   })
 
+  it('creates, renames, moves, and deletes project entries safely', async () => {
+    const { projectRoot, projectFiles } = await setupRuntime()
+    await mkdir(join(projectRoot, 'src'))
+    await mkdir(join(projectRoot, 'target'))
+
+    const created = await projectFiles.mutateProjectEntry({
+      source: 'codex',
+      sessionId: 'session-1',
+      kind: 'create-file',
+      relativePath: 'src/new.ts'
+    })
+    expect(created).toMatchObject({
+      ok: true,
+      data: { kind: 'create-file', relativePath: 'src/new.ts', entryType: 'file' }
+    })
+    await expect(readFile(join(projectRoot, 'src', 'new.ts'), 'utf8')).resolves.toBe('')
+
+    const duplicate = await projectFiles.mutateProjectEntry({
+      source: 'codex',
+      sessionId: 'session-1',
+      kind: 'create-file',
+      relativePath: 'src/new.ts'
+    })
+    expect(duplicate).toMatchObject({ ok: false, errorCode: 'PROJECT_ENTRY_EXISTS' })
+
+    const renamed = await projectFiles.mutateProjectEntry({
+      source: 'codex',
+      sessionId: 'session-1',
+      kind: 'rename',
+      relativePath: 'src/new.ts',
+      targetRelativePath: 'src/renamed.ts'
+    })
+    expect(renamed).toMatchObject({
+      ok: true,
+      data: { previousPath: 'src/new.ts', relativePath: 'src/renamed.ts' }
+    })
+
+    const moved = await projectFiles.mutateProjectEntry({
+      source: 'codex',
+      sessionId: 'session-1',
+      kind: 'move',
+      relativePath: 'src/renamed.ts',
+      targetRelativePath: 'target/renamed.ts'
+    })
+    expect(moved).toMatchObject({
+      ok: true,
+      data: { previousPath: 'src/renamed.ts', relativePath: 'target/renamed.ts' }
+    })
+    await expect(stat(join(projectRoot, 'target', 'renamed.ts'))).resolves.toMatchObject({ size: 0 })
+
+    const deleted = await projectFiles.mutateProjectEntry({
+      source: 'codex',
+      sessionId: 'session-1',
+      kind: 'delete-file',
+      relativePath: 'target/renamed.ts'
+    })
+    expect(deleted).toMatchObject({ ok: true, data: { relativePath: 'target/renamed.ts' } })
+    await expect(stat(join(projectRoot, 'target', 'renamed.ts'))).rejects.toMatchObject({ code: 'ENOENT' })
+
+    const context = await projectFiles.getProjectFileContext({ source: 'codex', sessionId: 'session-1' })
+    expect(context.data?.recent.map((entry: { kind: string; path: string; previousPath?: string }) => ({
+      kind: entry.kind,
+      path: entry.path,
+      previousPath: entry.previousPath
+    }))).toEqual([
+      { kind: 'deleted', path: 'target/renamed.ts', previousPath: undefined }
+    ])
+  })
+
+  it('rejects destructive directory deletion, traversal, collisions, and self moves', async () => {
+    const { projectRoot, projectFiles } = await setupRuntime()
+    await mkdir(join(projectRoot, 'src', 'nested'), { recursive: true })
+    await writeFile(join(projectRoot, 'src', 'existing.ts'), 'existing\n')
+    await writeFile(join(projectRoot, 'collision.ts'), 'collision\n')
+
+    await expect(projectFiles.mutateProjectEntry({
+      source: 'codex',
+      sessionId: 'session-1',
+      kind: 'delete-file',
+      relativePath: 'src'
+    })).resolves.toMatchObject({
+      ok: false,
+      errorCode: 'PROJECT_ENTRY_DELETE_DIRECTORY_UNSUPPORTED'
+    })
+    await expect(projectFiles.mutateProjectEntry({
+      source: 'codex',
+      sessionId: 'session-1',
+      kind: 'move',
+      relativePath: 'src',
+      targetRelativePath: 'src/nested/src'
+    })).resolves.toMatchObject({ ok: false, errorCode: 'PROJECT_ENTRY_TARGET_INVALID' })
+    await expect(projectFiles.mutateProjectEntry({
+      source: 'codex',
+      sessionId: 'session-1',
+      kind: 'rename',
+      relativePath: 'src/existing.ts',
+      targetRelativePath: 'collision.ts'
+    })).resolves.toMatchObject({ ok: false, errorCode: 'PROJECT_ENTRY_EXISTS' })
+    await expect(projectFiles.mutateProjectEntry({
+      source: 'codex',
+      sessionId: 'session-1',
+      kind: 'create-file',
+      relativePath: '../outside.ts'
+    })).resolves.toMatchObject({ ok: false, errorCode: 'PROJECT_ENTRY_PATH_INVALID' })
+  })
+
   it('suppresses watcher notifications for editor writes but still reports external writes', async () => {
     const events: Array<Record<string, unknown>> = []
     const { projectRoot, projectFiles } = await setupRuntime((event) => events.push(event))
@@ -221,6 +327,37 @@ describe('project files backend', () => {
     expect(projectFiles.getProjectFilesRuntimeSnapshotForTests()).toMatchObject({ parentWatcherCount: 1, watchedTargetCount: 1 })
     projectFiles.stopProjectFileWatch('watch-b')
     expect(projectFiles.getProjectFilesRuntimeSnapshotForTests()).toMatchObject({ parentWatcherCount: 0, watchedTargetCount: 0 })
+  })
+
+  it('replaces an existing watch lease when the same editor moves to another directory', async () => {
+    const { projectRoot, projectFiles } = await setupRuntime()
+    await mkdir(join(projectRoot, 'first'))
+    await mkdir(join(projectRoot, 'second'))
+    await writeFile(join(projectRoot, 'first', 'a.ts'), 'a\n')
+    await writeFile(join(projectRoot, 'second', 'a.ts'), 'a\n')
+
+    await projectFiles.startProjectFileWatch({
+      source: 'codex',
+      sessionId: 'session-1',
+      relativePath: 'first/a.ts',
+      watchId: 'watch-editor'
+    })
+    await projectFiles.startProjectFileWatch({
+      source: 'codex',
+      sessionId: 'session-1',
+      relativePath: 'second/a.ts',
+      watchId: 'watch-editor'
+    })
+
+    expect(projectFiles.getProjectFilesRuntimeSnapshotForTests()).toMatchObject({
+      parentWatcherCount: 1,
+      watchedTargetCount: 1
+    })
+    projectFiles.stopProjectFileWatch('watch-editor')
+    expect(projectFiles.getProjectFilesRuntimeSnapshotForTests()).toMatchObject({
+      parentWatcherCount: 0,
+      watchedTargetCount: 0
+    })
   })
 
   it('caps parent watchers and falls back without consuming more watcher resources', async () => {

@@ -77,6 +77,22 @@ export type ProjectDirectoryListResult = AiopsMutationResult<{
   nextOffset?: number
 }>
 
+export type ProjectEntryMutationKind = 'create-file' | 'rename' | 'move' | 'delete-file'
+
+export type ProjectEntryMutationInput = ProjectFileContextInput & {
+  kind: ProjectEntryMutationKind
+  relativePath: string
+  targetRelativePath?: string
+}
+
+export type ProjectEntryMutationResult = AiopsMutationResult<{
+  kind: ProjectEntryMutationKind
+  projectRoot: string
+  relativePath: string
+  previousPath?: string
+  entryType: ProjectDirectoryEntry['type']
+}>
+
 export type ProjectFileReadInput = ProjectFileContextInput & {
   relativePath: string
 }

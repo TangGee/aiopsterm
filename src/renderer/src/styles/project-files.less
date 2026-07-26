@@ -127,6 +127,18 @@
   height: 13px;
 }
 
+.project-files-notice {
+  flex: 0 0 auto;
+  min-height: 28px;
+  display: flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--theme-module-active-border);
+  background: var(--theme-module-active-card-strong-bg);
+  color: var(--theme-module-active-text-muted);
+  font-size: 11px;
+}
+
 .project-files-header-actions svg.rotating {
   animation: project-files-spin 0.8s linear infinite;
 }
@@ -261,6 +273,12 @@
   overflow: auto;
 }
 
+.project-files-tree-scroll.drop-target {
+  outline: 1px solid var(--theme-module-active-accent);
+  outline-offset: -2px;
+  background: color-mix(in srgb, var(--theme-module-active-accent) 7%, transparent);
+}
+
 .project-files-tree-row {
   height: 27px;
   display: flex;
@@ -283,6 +301,12 @@
 
 .project-files-tree-row svg:first-child.expanded {
   transform: rotate(90deg);
+}
+
+.project-files-tree-row.drop-target {
+  background: color-mix(in srgb, var(--theme-module-active-accent) 18%, var(--theme-module-active-card-bg));
+  outline: 1px solid color-mix(in srgb, var(--theme-module-active-accent) 65%, transparent);
+  outline-offset: -1px;
 }
 
 .project-files-load-more {
@@ -389,4 +413,149 @@
 
 .project-file-editor > footer .error {
   color: #dc6b6b;
+}
+
+.project-files-context-menu {
+  position: fixed;
+  z-index: 80;
+  width: 216px;
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+  padding: 5px;
+  border: 1px solid var(--theme-module-active-border);
+  border-radius: 8px;
+  background: var(--theme-module-active-modal-bg);
+  box-shadow: var(--theme-module-active-shadow);
+}
+
+.project-files-context-menu button {
+  width: 100%;
+  min-height: 30px;
+  border: 0;
+  border-radius: 5px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 0 8px;
+  background: transparent;
+  color: var(--theme-module-active-text);
+  text-align: left;
+}
+
+.project-files-context-menu button:hover {
+  background: var(--theme-module-active-card-strong-bg);
+}
+
+.project-files-context-menu button.danger {
+  color: #dc6b6b;
+}
+
+.project-files-context-menu svg {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+}
+
+.project-files-context-menu i {
+  display: block;
+  height: 1px;
+  margin: 4px;
+  background: var(--theme-module-active-border);
+}
+
+.project-files-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: grid;
+  place-items: center;
+  background: rgb(0 0 0 / 0.42);
+}
+
+.project-files-dialog {
+  width: min(360px, calc(100vw - 32px));
+  border: 1px solid var(--theme-module-active-border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--theme-module-active-modal-bg);
+  box-shadow: var(--theme-module-active-shadow);
+}
+
+.project-files-dialog > header {
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--theme-module-active-border);
+}
+
+.project-files-dialog-body {
+  display: grid;
+  gap: 10px;
+  padding: 14px 12px;
+}
+
+.project-files-dialog-body p {
+  margin: 0;
+  color: var(--theme-module-active-text-muted);
+}
+
+.project-files-dialog-body label {
+  display: grid;
+  gap: 6px;
+}
+
+.project-files-dialog-body label span {
+  color: var(--theme-module-active-text-muted);
+  font-size: 11px;
+}
+
+.project-files-dialog-body input {
+  width: 100%;
+  height: 32px;
+  border: 1px solid var(--theme-module-active-border);
+  border-radius: 6px;
+  padding: 0 9px;
+  background: var(--theme-module-active-card-bg);
+  color: var(--theme-module-active-text);
+  outline: none;
+}
+
+.project-files-dialog-body input:focus {
+  border-color: var(--theme-module-active-accent);
+}
+
+.project-files-dialog-body small {
+  color: #dc6b6b;
+}
+
+.project-files-dialog > footer {
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--theme-module-active-border);
+}
+
+.project-files-dialog > footer button {
+  min-width: 72px;
+  height: 30px;
+  border: 1px solid var(--theme-module-active-border);
+  border-radius: 6px;
+  background: var(--theme-module-active-card-bg);
+  color: var(--theme-module-active-text);
+}
+
+.project-files-dialog > footer button.primary {
+  border-color: var(--theme-module-active-accent);
+  background: var(--theme-module-active-accent);
+  color: #fff;
+}
+
+.project-files-dialog > footer button.primary.danger {
+  border-color: #b94d4d;
+  background: #b94d4d;
 }

@@ -10,6 +10,7 @@ test('project files uses a contextual drawer inside the persistent AI panel', as
   const projectRoot = path.join(os.tmpdir(), `aiopsterm-e2e-project-files-root-${runId}`)
   const secondProjectRoot = path.join(os.tmpdir(), `aiopsterm-e2e-project-files-second-${runId}`)
   await mkdir(path.join(projectRoot, 'src'), { recursive: true })
+  await mkdir(path.join(projectRoot, 'move-target'), { recursive: true })
   await mkdir(path.join(secondProjectRoot, 'lib'), { recursive: true })
   await writeFile(path.join(projectRoot, 'src', 'main.ts'), 'export const ready = true\n', 'utf8')
   await writeFile(path.join(secondProjectRoot, 'lib', 'index.ts'), 'export const second = true\n', 'utf8')
@@ -179,6 +180,68 @@ test('project files uses a contextual drawer inside the persistent AI panel', as
     await expect(projectEditor.locator('footer')).toContainText('Conflict')
     await page.waitForTimeout(1200)
     await expect.poll(() => readFile(path.join(projectRoot, 'src', 'main.ts'), 'utf8')).toBe('export const agent = true\n')
+    await projectEditor.getByRole('button', { name: 'Reload from disk' }).click()
+    await expect(projectEditor.locator('.project-file-conflict')).toHaveCount(0)
+
+    const treeScroll = drawer.locator('.project-files-tree-scroll')
+    await treeScroll.evaluate((element) => {
+      const rect = element.getBoundingClientRect()
+      element.dispatchEvent(new MouseEvent('contextmenu', {
+        bubbles: true,
+        cancelable: true,
+        clientX: rect.left + 120,
+        clientY: rect.bottom - 24
+      }))
+    })
+    let contextMenu = page.locator('.project-files-context-menu')
+    await contextMenu.getByRole('button', { name: 'New file' }).click()
+    let mutationDialog = page.locator('.project-files-dialog')
+    await mutationDialog.locator('input').fill('scratch.ts')
+    await mutationDialog.getByRole('button', { name: 'Create', exact: true }).click()
+    await expect.poll(() => readFile(path.join(projectRoot, 'scratch.ts'), 'utf8')).toBe('')
+    await expect(projectEditor.locator('header')).toContainText('scratch.ts')
+
+    let scratchRow = drawer.locator('.project-files-tree-row').filter({ hasText: 'scratch.ts' })
+    await expect(scratchRow).toBeVisible()
+    await scratchRow.click({ button: 'right' })
+    await contextMenu.getByRole('button', { name: 'Copy relative path' }).click()
+    await expect.poll(() => app.evaluate(({ clipboard }) => clipboard.readText())).toBe('scratch.ts')
+
+    await scratchRow.click({ button: 'right' })
+    await contextMenu.getByRole('button', { name: 'Copy absolute path' }).click()
+    await expect.poll(() => app.evaluate(({ clipboard }) => clipboard.readText())).toBe(path.join(projectRoot, 'scratch.ts'))
+
+    await scratchRow.click({ button: 'right' })
+    await contextMenu.getByRole('button', { name: 'Rename' }).click()
+    mutationDialog = page.locator('.project-files-dialog')
+    await mutationDialog.locator('input').fill('renamed.ts')
+    await mutationDialog.getByRole('button', { name: 'Rename', exact: true }).click()
+    await expect.poll(() => readFile(path.join(projectRoot, 'renamed.ts'), 'utf8')).toBe('')
+    await expect(projectEditor.locator('header')).toContainText('renamed.ts')
+
+    const renamedRow = drawer.locator('.project-files-tree-row').filter({ hasText: 'renamed.ts' })
+    const moveTargetRow = drawer.locator('.project-files-tree-row').filter({ hasText: 'move-target' })
+    await expect(renamedRow).toBeVisible()
+    await expect(moveTargetRow).toBeVisible()
+    await renamedRow.dragTo(moveTargetRow)
+    await expect.poll(() => readFile(path.join(projectRoot, 'move-target', 'renamed.ts'), 'utf8')).toBe('')
+    await expect(projectEditor.locator('header')).toContainText('move-target/renamed.ts')
+
+    await moveTargetRow.click()
+    const movedRow = drawer.locator('.project-files-tree-row').filter({ hasText: 'renamed.ts' })
+    await expect(movedRow).toBeVisible()
+    await movedRow.click({ button: 'right' })
+    await contextMenu.getByRole('button', { name: 'Delete' }).click()
+    mutationDialog = page.locator('.project-files-dialog')
+    await mutationDialog.getByRole('button', { name: 'Delete', exact: true }).click()
+    await expect.poll(async () => {
+      try {
+        await readFile(path.join(projectRoot, 'move-target', 'renamed.ts'), 'utf8')
+        return false
+      } catch {
+        return true
+      }
+    }).toBe(true)
 
     const capturePath = process.env.AIOPSTERM_PROJECT_FILES_CAPTURE
     if (capturePath) await page.screenshot({ path: capturePath })

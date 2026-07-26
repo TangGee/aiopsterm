@@ -5,6 +5,7 @@ type ProjectFilesBridge = Pick<
   AiopsPreloadApi,
   | 'getProjectFileContext'
   | 'listProjectDirectory'
+  | 'mutateProjectEntry'
   | 'readProjectFile'
   | 'writeProjectFile'
   | 'startProjectFileWatch'
@@ -18,6 +19,7 @@ const bridgeMethod = createBridgeMethod<ProjectFilesBridge>()
 export const projectFilesClient = {
   getContext: () => bridgeMethod('getProjectFileContext'),
   listDirectory: () => bridgeMethod('listProjectDirectory'),
+  mutateEntry: () => bridgeMethod('mutateProjectEntry'),
   readFile: () => bridgeMethod('readProjectFile'),
   writeFile: () => bridgeMethod('writeProjectFile'),
   startWatch: () => bridgeMethod('startProjectFileWatch'),

@@ -6,6 +6,7 @@ import {
   configureProjectFilesRuntime,
   getProjectFileContext,
   listProjectDirectory,
+  mutateProjectEntry,
   readProjectFile,
   startProjectFileWatch,
   stopProjectFileWatch,
@@ -13,6 +14,7 @@ import {
 } from '../backend/files/projectFiles'
 import type {
   ProjectDirectoryListInput,
+  ProjectEntryMutationInput,
   ProjectFileContextInput,
   ProjectFileReadInput,
   ProjectFileWatchInput,
@@ -38,6 +40,7 @@ export const registerProjectFilesIpc = (
   })
   ipcMain.handle('project-files:context', (_event, context: ProjectFileContextInput) => getProjectFileContext(context))
   ipcMain.handle('project-files:list', (_event, listInput: ProjectDirectoryListInput) => listProjectDirectory(listInput))
+  ipcMain.handle('project-files:mutate', (_event, mutationInput: ProjectEntryMutationInput) => mutateProjectEntry(mutationInput))
   ipcMain.handle('project-files:read', (_event, readInput: ProjectFileReadInput) => readProjectFile(readInput))
   ipcMain.handle('project-files:write', (_event, writeInput: ProjectFileWriteInput) => writeProjectFile(writeInput))
   ipcMain.handle('project-files:watch:start', (_event, watchInput: ProjectFileWatchInput) => startProjectFileWatch(watchInput))

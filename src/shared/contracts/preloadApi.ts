@@ -33,6 +33,8 @@ import type {
 import type {
   ProjectDirectoryListInput,
   ProjectDirectoryListResult,
+  ProjectEntryMutationInput,
+  ProjectEntryMutationResult,
   ProjectFileContext,
   ProjectFileContextInput,
   ProjectFileContextResult,
@@ -749,6 +751,7 @@ export type AiopsPreloadApi = {
   onFileTransferTaskEvent: (listener: (event: FileTransferTaskEvent) => void) => () => void
   getProjectFileContext: (input: ProjectFileContextInput) => Promise<ProjectFileContextResult>
   listProjectDirectory: (input: ProjectDirectoryListInput) => Promise<ProjectDirectoryListResult>
+  mutateProjectEntry: (input: ProjectEntryMutationInput) => Promise<ProjectEntryMutationResult>
   readProjectFile: (input: ProjectFileReadInput) => Promise<ProjectFileReadResult>
   writeProjectFile: (input: ProjectFileWriteInput) => Promise<ProjectFileWriteResult>
   startProjectFileWatch: (input: ProjectFileWatchInput) => Promise<ProjectFileWatchResult>

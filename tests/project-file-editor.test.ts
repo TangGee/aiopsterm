@@ -212,4 +212,29 @@ describe('ProjectFileEditor', () => {
     expect(projectFiles.write).toHaveBeenCalledTimes(1)
     expect(projectFiles.write).toHaveBeenCalledWith(expect.objectContaining({ content: 'close flush\n' }))
   })
+
+  it('rebinds its file watcher after an open file is renamed or moved', async () => {
+    const { wrapper, targetPanel } = await mountEditor()
+    expect(projectFiles.startWatch).toHaveBeenCalledWith(expect.objectContaining({
+      relativePath: 'src/main.ts',
+      watchId: 'project-file-editor-project-panel-1'
+    }))
+
+    await wrapper.setProps({
+      panel: {
+        ...targetPanel,
+        projectFile: {
+          ...targetPanel.projectFile!,
+          relativePath: 'lib/renamed.ts'
+        }
+      }
+    })
+    await flushPromises()
+
+    expect(projectFiles.stopWatch).toHaveBeenCalledWith('project-file-editor-project-panel-1')
+    expect(projectFiles.startWatch).toHaveBeenLastCalledWith(expect.objectContaining({
+      relativePath: 'lib/renamed.ts',
+      watchId: 'project-file-editor-project-panel-1'
+    }))
+  })
 })

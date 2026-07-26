@@ -1,11 +1,13 @@
 import { createHash, randomUUID } from 'crypto'
 import { watch, type FSWatcher } from 'fs'
-import { lstat, mkdir, readFile, readdir, realpath, rename, stat, writeFile } from 'fs/promises'
+import { lstat, mkdir, open, readFile, readdir, realpath, rename, stat, unlink, writeFile } from 'fs/promises'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'path'
 import type {
   ProjectDirectoryEntry,
   ProjectDirectoryListInput,
   ProjectDirectoryListResult,
+  ProjectEntryMutationInput,
+  ProjectEntryMutationResult,
   ProjectFileChangeOrigin,
   ProjectFileChangeRecordResult,
   ProjectFileChangeV1,
@@ -410,6 +412,130 @@ export const listProjectDirectory = async (input: ProjectDirectoryListInput): Pr
   }
 }
 
+const projectEntryType = (metadata: Awaited<ReturnType<typeof lstat>>): ProjectDirectoryEntry['type'] =>
+  metadata.isDirectory() ? 'directory' : metadata.isSymbolicLink() ? 'link' : 'file'
+
+const existingProjectEntry = async (absolutePath: string) => lstat(absolutePath).catch((error) => {
+  if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
+  throw error
+})
+
+const requireProjectDestinationParent = async (absolutePath: string) => {
+  const parent = await stat(dirname(absolutePath)).catch(() => null)
+  return Boolean(parent?.isDirectory())
+}
+
+export const mutateProjectEntry = async (input: ProjectEntryMutationInput): Promise<ProjectEntryMutationResult> => {
+  if (!(['create-file', 'rename', 'move', 'delete-file'] as const).includes(input.kind)) {
+    return failure('PROJECT_ENTRY_MUTATION_INVALID', 'The requested project entry operation is invalid.')
+  }
+  const context = await resolveProjectContext(input)
+  if (!context) return failure('PROJECT_FILE_CONTEXT_UNAVAILABLE', 'The selected managed AI session has no eligible local project.')
+  const source = await resolveProjectPath(context.projectRoot, input.relativePath, '', input.kind !== 'create-file')
+  if (!source) return failure('PROJECT_ENTRY_PATH_INVALID', 'The requested project path is invalid.')
+
+  try {
+    if (input.kind === 'create-file') {
+      if (await existingProjectEntry(source.absolutePath)) {
+        return failure('PROJECT_ENTRY_EXISTS', 'A project entry already exists at the requested path.')
+      }
+      if (!await requireProjectDestinationParent(source.absolutePath)) {
+        return failure('PROJECT_ENTRY_PARENT_INVALID', 'The target directory does not exist.')
+      }
+      const handle = await open(source.absolutePath, 'wx')
+      await handle.close()
+      await recordProjectFileChange({
+        protocolVersion: 1,
+        eventId: randomUUID(),
+        source: context.source,
+        sessionId: context.sessionId,
+        changes: [{ path: source.relativePath, kind: 'created' }]
+      }, 'editor')
+      return {
+        ok: true,
+        data: {
+          kind: input.kind,
+          projectRoot: context.projectRoot,
+          relativePath: source.relativePath,
+          entryType: 'file'
+        }
+      }
+    }
+
+    const sourceMetadata = await lstat(source.absolutePath)
+    const entryType = projectEntryType(sourceMetadata)
+    if (input.kind === 'delete-file') {
+      if (entryType === 'directory') {
+        return failure('PROJECT_ENTRY_DELETE_DIRECTORY_UNSUPPORTED', 'Project directory deletion is not supported.')
+      }
+      await unlink(source.absolutePath)
+      await recordProjectFileChange({
+        protocolVersion: 1,
+        eventId: randomUUID(),
+        source: context.source,
+        sessionId: context.sessionId,
+        changes: [{ path: source.relativePath, kind: 'deleted' }]
+      }, 'editor')
+      return {
+        ok: true,
+        data: {
+          kind: input.kind,
+          projectRoot: context.projectRoot,
+          relativePath: source.relativePath,
+          entryType
+        }
+      }
+    }
+
+    const target = await resolveProjectPath(context.projectRoot, input.targetRelativePath || '')
+    if (!target) return failure('PROJECT_ENTRY_TARGET_INVALID', 'The target project path is invalid.')
+    if (target.relativePath === source.relativePath) {
+      return {
+        ok: true,
+        data: {
+          kind: input.kind,
+          projectRoot: context.projectRoot,
+          relativePath: source.relativePath,
+          previousPath: source.relativePath,
+          entryType
+        }
+      }
+    }
+    if (entryType === 'directory' && withinRoot(source.absolutePath, target.absolutePath)) {
+      return failure('PROJECT_ENTRY_TARGET_INVALID', 'A directory cannot be moved into itself.')
+    }
+    if (await existingProjectEntry(target.absolutePath)) {
+      return failure('PROJECT_ENTRY_EXISTS', 'A project entry already exists at the target path.')
+    }
+    if (!await requireProjectDestinationParent(target.absolutePath)) {
+      return failure('PROJECT_ENTRY_PARENT_INVALID', 'The target directory does not exist.')
+    }
+    await rename(source.absolutePath, target.absolutePath)
+    await recordProjectFileChange({
+      protocolVersion: 1,
+      eventId: randomUUID(),
+      source: context.source,
+      sessionId: context.sessionId,
+      changes: [{ path: target.relativePath, previousPath: source.relativePath, kind: 'renamed' }]
+    }, 'editor')
+    return {
+      ok: true,
+      data: {
+        kind: input.kind,
+        projectRoot: context.projectRoot,
+        relativePath: target.relativePath,
+        previousPath: source.relativePath,
+        entryType
+      }
+    }
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code
+    if (code === 'EEXIST') return failure('PROJECT_ENTRY_EXISTS', 'A project entry already exists at the requested path.')
+    if (code === 'ENOENT') return failure('PROJECT_ENTRY_NOT_FOUND', 'The requested project entry no longer exists.')
+    return failure('PROJECT_ENTRY_MUTATION_FAILED', error instanceof Error ? error.message : String(error))
+  }
+}
+
 export const readProjectFile = async (input: ProjectFileReadInput): Promise<ProjectFileReadResult> => {
   const context = await resolveProjectContext(input)
   if (!context) return failure('PROJECT_FILE_CONTEXT_UNAVAILABLE', 'The selected managed AI session has no eligible local project.')
@@ -556,6 +682,7 @@ export const startProjectFileWatch = async (input: ProjectFileWatchInput): Promi
   if (!context) return failure('PROJECT_FILE_CONTEXT_UNAVAILABLE', 'The selected managed AI session has no eligible local project.')
   const path = await resolveProjectPath(context.projectRoot, input.relativePath)
   if (!path || !cleanText(input.watchId)) return failure('PROJECT_FILE_WATCH_INVALID', 'A valid project file and watchId are required.')
+  stopProjectFileWatch(input.watchId)
   const parentPath = dirname(path.absolutePath)
   let parent = parentWatches.get(parentPath)
   if (!parent) {
