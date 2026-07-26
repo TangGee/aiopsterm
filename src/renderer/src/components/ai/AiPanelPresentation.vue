@@ -38,6 +38,7 @@
       <ProjectFilesPanel
         v-if="projectFilesActive"
         class="project-files-drawer"
+        :session="projectFilesSession"
         @close="$emit('closeProjectFiles')"
       />
     </Transition>
@@ -52,10 +53,12 @@ import AiPanelCommandAuditDialog from '@/components/ai/AiPanelCommandAuditDialog
 import AiPanelHeader from '@/components/ai/AiPanelHeader.vue'
 import ProjectFilesPanel from '@/components/files/ProjectFilesPanel.vue'
 import { useAiPanelRuntimeContext } from '@/services/ai/aiPanelContext'
+import type { ManagedAiSessionRecord } from '@shared/contracts/managedAiSessions'
 
 const props = defineProps<{
   projectFilesAvailable?: boolean
   projectFilesActive?: boolean
+  projectFilesSession?: ManagedAiSessionRecord | null
 }>()
 const emit = defineEmits<{
   toggleProjectFiles: []

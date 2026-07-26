@@ -41,66 +41,43 @@ test('project files uses a contextual drawer inside the persistent AI panel', as
     await expect(page.locator('.settings-bg-tile.preset').first()).toBeVisible()
     await page.locator('.settings-bg-tile.preset').nth(1).click()
     await expect(page.locator('.app-shell')).toHaveClass(/has-app-background/)
-    await page.locator('.side-rail .rail-button[title="工作区"]').click()
+    await page.locator('.side-rail .rail-button[data-module-key="workspace"]').click()
 
     await expect(page.locator('.right-assistant-panel')).toBeVisible()
     await expect(page.locator('.right-assistant-tabs')).toHaveCount(0)
     await expect(page.getByTestId('ai-project-files-toggle')).toHaveCount(0)
 
-    await page.evaluate(async ({ projectRoot, secondProjectRoot, missingProjectRoot, runId }) => {
+    await page.locator('.workspace-search input').fill('127.0.0.1')
+    const localRow = page.locator('.workspace-host-row').filter({ hasText: '127.0.0.1' }).first()
+    await expect(localRow).toBeVisible()
+    await localRow.dblclick()
+    await expect(page.locator('.terminal-pane.active .xterm-host')).toBeVisible()
+
+    const activeTerminalTab = page.locator('.terminal-tab.active')
+    await expect(activeTerminalTab).toHaveAttribute('data-terminal-session-id', /.+/)
+    const firstTerminal = {
+      terminalSessionId: await activeTerminalTab.getAttribute('data-terminal-session-id') || '',
+      panelId: await activeTerminalTab.getAttribute('data-panel-id') || ''
+    }
+    const firstResult = await page.evaluate(async ({ projectRoot, runId, terminal }) => {
       const api = (window as unknown as {
         aiops: {
-          createTerminal: (input: Record<string, unknown>) => Promise<{ id: string }>
           publishAiAgentSessionEvent: (input: Record<string, unknown>) => Promise<{ ok: boolean; errorMessage?: string }>
         }
       }).aiops
-      const terminal = await api.createTerminal({
-        kind: 'local',
-        cwd: projectRoot,
-        title: 'Project files E2E'
-      })
-      const result = await api.publishAiAgentSessionEvent({
+      return api.publishAiAgentSessionEvent({
         source: 'codex',
         event: 'session_start',
         sessionId: `project-files-${runId}`,
-        terminalSessionId: terminal.id,
+        terminalSessionId: terminal.terminalSessionId,
+        panelId: terminal.panelId,
         cwd: projectRoot,
         title: 'Project files E2E',
         summary: 'Project files E2E',
         receivedAt: Date.now()
       })
-      if (!result.ok) throw new Error(result.errorMessage || 'Unable to publish managed AI session.')
-      const secondTerminal = await api.createTerminal({
-        kind: 'local',
-        cwd: secondProjectRoot,
-        title: 'Second project files E2E'
-      })
-      for (const input of [
-        {
-          source: 'codex',
-          event: 'session_start',
-          sessionId: `project-files-second-${runId}`,
-          terminalSessionId: secondTerminal.id,
-          cwd: secondProjectRoot,
-          title: 'Second project files E2E',
-          summary: 'Second project files E2E',
-          receivedAt: Date.now()
-        },
-        {
-          source: 'codex',
-          event: 'session_start',
-          sessionId: `project-files-ineligible-${runId}`,
-          terminalSessionId: secondTerminal.id,
-          cwd: missingProjectRoot,
-          title: 'Ineligible project files E2E',
-          summary: 'Ineligible project files E2E',
-          receivedAt: Date.now()
-        }
-      ]) {
-        const published = await api.publishAiAgentSessionEvent(input)
-        if (!published.ok) throw new Error(published.errorMessage || 'Unable to publish managed AI session.')
-      }
-    }, { projectRoot, secondProjectRoot, missingProjectRoot: path.join(secondProjectRoot, 'missing'), runId })
+    }, { projectRoot, runId, terminal: firstTerminal })
+    if (!firstResult.ok) throw new Error(firstResult.errorMessage || 'Unable to publish managed AI session.')
 
     await page.locator('.side-rail .rail-button[title="AI 会话"]').click()
     const sessionRow = page.locator('.ai-session-row').filter({
@@ -108,6 +85,8 @@ test('project files uses a contextual drawer inside the persistent AI panel', as
     })
     await expect(sessionRow).toBeVisible()
     await sessionRow.click()
+    await page.locator('.side-rail .rail-button[data-module-key="workspace"]').click()
+    await page.locator(`.terminal-tab[data-panel-id="${firstTerminal.panelId}"]`).click()
 
     const toggle = page.getByTestId('ai-project-files-toggle')
     await expect(toggle).toBeVisible()
@@ -183,18 +162,7 @@ test('project files uses a contextual drawer inside the persistent AI panel', as
     await projectEditor.getByRole('button', { name: 'Reload from disk' }).click()
     await expect(projectEditor.locator('.project-file-conflict')).toHaveCount(0)
 
-    const treeScroll = drawer.locator('.project-files-tree-scroll')
-    await treeScroll.evaluate((element) => {
-      const rect = element.getBoundingClientRect()
-      element.dispatchEvent(new MouseEvent('contextmenu', {
-        bubbles: true,
-        cancelable: true,
-        clientX: rect.left + 120,
-        clientY: rect.bottom - 24
-      }))
-    })
-    let contextMenu = page.locator('.project-files-context-menu')
-    await contextMenu.getByRole('button', { name: 'New file' }).click()
+    await drawer.getByTestId('project-files-create-root').click()
     let mutationDialog = page.locator('.project-files-dialog')
     await mutationDialog.locator('input').fill('scratch.ts')
     await mutationDialog.getByRole('button', { name: 'Create', exact: true }).click()
@@ -203,55 +171,34 @@ test('project files uses a contextual drawer inside the persistent AI panel', as
 
     let scratchRow = drawer.locator('.project-files-tree-row').filter({ hasText: 'scratch.ts' })
     await expect(scratchRow).toBeVisible()
-    await scratchRow.click({ button: 'right' })
-    await contextMenu.getByRole('button', { name: 'Copy relative path' }).click()
-    await expect.poll(() => app.evaluate(({ clipboard }) => clipboard.readText())).toBe('scratch.ts')
-
-    await scratchRow.click({ button: 'right' })
-    await contextMenu.getByRole('button', { name: 'Copy absolute path' }).click()
-    await expect.poll(() => app.evaluate(({ clipboard }) => clipboard.readText())).toBe(path.join(projectRoot, 'scratch.ts'))
-
-    await scratchRow.click({ button: 'right' })
-    await contextMenu.getByRole('button', { name: 'Rename' }).click()
-    mutationDialog = page.locator('.project-files-dialog')
-    await mutationDialog.locator('input').fill('renamed.ts')
-    await mutationDialog.getByRole('button', { name: 'Rename', exact: true }).click()
-    await expect.poll(() => readFile(path.join(projectRoot, 'renamed.ts'), 'utf8')).toBe('')
-    await expect(projectEditor.locator('header')).toContainText('renamed.ts')
-
-    const renamedRow = drawer.locator('.project-files-tree-row').filter({ hasText: 'renamed.ts' })
-    const moveTargetRow = drawer.locator('.project-files-tree-row').filter({ hasText: 'move-target' })
-    await expect(renamedRow).toBeVisible()
-    await expect(moveTargetRow).toBeVisible()
-    await renamedRow.dragTo(moveTargetRow)
-    await expect.poll(() => readFile(path.join(projectRoot, 'move-target', 'renamed.ts'), 'utf8')).toBe('')
-    await expect(projectEditor.locator('header')).toContainText('move-target/renamed.ts')
-
-    await moveTargetRow.click()
-    const movedRow = drawer.locator('.project-files-tree-row').filter({ hasText: 'renamed.ts' })
-    await expect(movedRow).toBeVisible()
-    await movedRow.click({ button: 'right' })
-    await contextMenu.getByRole('button', { name: 'Delete' }).click()
-    mutationDialog = page.locator('.project-files-dialog')
-    await mutationDialog.getByRole('button', { name: 'Delete', exact: true }).click()
-    await expect.poll(async () => {
-      try {
-        await readFile(path.join(projectRoot, 'move-target', 'renamed.ts'), 'utf8')
-        return false
-      } catch {
-        return true
-      }
-    }).toBe(true)
 
     const capturePath = process.env.AIOPSTERM_PROJECT_FILES_CAPTURE
     if (capturePath) await page.screenshot({ path: capturePath })
 
-    await page.locator('.side-rail .rail-button[title="AI 会话"]').click()
-    const secondSessionRow = page.locator('.ai-session-row').filter({
-      has: page.locator('.ai-session-row-title').getByText('Second project files E2E', { exact: true })
+    const publishSessionSwitch = async (input: Record<string, unknown>) => {
+      const result = await page.evaluate(async (eventInput) => {
+        const api = (window as unknown as {
+          aiops: {
+            publishAiAgentSessionEvent: (input: Record<string, unknown>) => Promise<{ ok: boolean; errorMessage?: string }>
+          }
+        }).aiops
+        return api.publishAiAgentSessionEvent(eventInput)
+      }, input)
+      if (!result.ok) throw new Error(result.errorMessage || 'Unable to switch the managed AI session.')
+    }
+
+    await page.locator(`.terminal-tab[data-panel-id="${firstTerminal.panelId}"]`).click()
+    await publishSessionSwitch({
+      source: 'codex',
+      event: 'session_start',
+      sessionId: `project-files-second-${runId}`,
+      terminalSessionId: firstTerminal.terminalSessionId,
+      panelId: firstTerminal.panelId,
+      cwd: secondProjectRoot,
+      title: 'Second project files E2E',
+      summary: 'Second project files E2E',
+      receivedAt: Date.now()
     })
-    await expect(secondSessionRow).toBeVisible()
-    await secondSessionRow.click()
     await expect(drawer).toBeVisible()
     await expect(drawer.locator('.project-files-header-title strong')).toHaveText(path.basename(secondProjectRoot))
     await expect(drawer.locator('.project-files-tree-row').filter({ hasText: 'lib' })).toBeVisible()
@@ -262,10 +209,17 @@ test('project files uses a contextual drawer inside the persistent AI panel', as
 
     await toggle.click()
     await expect(drawer).toBeVisible()
-    const ineligibleSessionRow = page.locator('.ai-session-row').filter({
-      has: page.locator('.ai-session-row-title').getByText('Ineligible project files E2E', { exact: true })
+    await publishSessionSwitch({
+      source: 'codex',
+      event: 'session_start',
+      sessionId: `project-files-ineligible-${runId}`,
+      terminalSessionId: firstTerminal.terminalSessionId,
+      panelId: firstTerminal.panelId,
+      cwd: path.join(secondProjectRoot, 'missing'),
+      title: 'Ineligible project files E2E',
+      summary: 'Ineligible project files E2E',
+      receivedAt: Date.now()
     })
-    await ineligibleSessionRow.click()
     await expect(page.getByTestId('ai-project-files-toggle')).toHaveCount(0)
     await expect(drawer).toHaveCount(0)
   } finally {

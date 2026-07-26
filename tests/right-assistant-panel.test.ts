@@ -12,7 +12,8 @@ const PassivePanel = defineComponent({
     'agentMode',
     'productSessionRequest',
     'projectFilesAvailable',
-    'projectFilesActive'
+    'projectFilesActive',
+    'projectFilesSession'
   ],
   emits: [
     'productSessionRequestConsumed',
@@ -52,6 +53,9 @@ const mountPanel = () => {
 
 const selectManagedSession = (sessionId: string, cwd: string) => {
   const workspace = useWorkspaceStore()
+  const panel = workspace.panels.find((item) => item.id === workspace.activePanelId)!
+  panel.sessionId = `terminal-${sessionId}`
+  panel.cwd = cwd
   workspace.upsertManagedAiSession({
     source: 'codex',
     event: 'session_start',
@@ -63,7 +67,7 @@ const selectManagedSession = (sessionId: string, cwd: string) => {
     cwd,
     receivedAt: Date.now()
   })
-  workspace.selectedManagedAiSessionKey = `codex:${sessionId}`
+  workspace.activePanelId = panel.id
 }
 
 describe('RightAssistantPanel', () => {
@@ -73,7 +77,7 @@ describe('RightAssistantPanel', () => {
     Object.assign(window.aiops, { getProjectFileContext })
   })
 
-  it('keeps project files hidden without a selected managed AI session', async () => {
+  it('keeps project files hidden without a managed AI session bound to the active terminal', async () => {
     const wrapper = mountPanel()
     await flushPromises()
 
@@ -111,6 +115,40 @@ describe('RightAssistantPanel', () => {
 
     expect(wrapper.find('[data-testid="project-files-toggle"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="project-files-drawer"]').exists()).toBe(false)
+  })
+
+  it('follows the active terminal instead of the AI inbox selection', async () => {
+    getProjectFileContext.mockImplementation(async ({ sessionId }: { sessionId: string }) => ({
+      ok: true,
+      data: {
+        source: 'codex',
+        sessionId,
+        projectRoot: `/work/${sessionId}`,
+        capability: 'adapter',
+        recent: []
+      }
+    }))
+    const wrapper = mountPanel()
+    selectManagedSession('terminal-owner', '/work/terminal-owner')
+    const workspace = useWorkspaceStore()
+    workspace.upsertManagedAiSession({
+      source: 'claude-code',
+      event: 'session_start',
+      sessionId: 'inbox-selection',
+      title: 'Inbox selection',
+      summary: '',
+      terminalSessionId: 'terminal-other',
+      cwd: '/work/inbox-selection',
+      receivedAt: Date.now() + 1
+    })
+    workspace.selectedManagedAiSessionKey = 'claude-code:inbox-selection'
+    await flushPromises()
+
+    expect(getProjectFileContext).toHaveBeenLastCalledWith({
+      source: 'codex',
+      sessionId: 'terminal-owner'
+    })
+    expect(wrapper.find('[data-testid="project-files-toggle"]').exists()).toBe(true)
   })
 
   it('closes project files when a product session request takes focus', async () => {

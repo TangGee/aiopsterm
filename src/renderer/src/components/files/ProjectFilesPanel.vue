@@ -74,8 +74,21 @@
       ></button>
 
       <section class="project-files-tree">
-        <div class="project-files-section-title">
+        <div
+          class="project-files-section-title"
+          data-testid="project-files-tree-header"
+          @contextmenu.prevent="openContextMenu($event, null, '')"
+        >
           <span>Project tree</span>
+          <button
+            type="button"
+            data-testid="project-files-create-root"
+            title="New file"
+            aria-label="New file"
+            @click.stop="openMutationDialog('create-file', null, '')"
+          >
+            <FilePlus2 />
+          </button>
         </div>
         <div
           class="project-files-tree-scroll"
@@ -159,6 +172,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import {
   ChevronRight,
+  FilePlus2,
   FileText,
   Folder,
   FolderOpen,
@@ -188,6 +202,7 @@ import type {
   ProjectFileContext,
   ProjectFileChangeKind
 } from '@shared/contracts/projectFiles'
+import type { ManagedAiSessionRecord } from '@shared/contracts/managedAiSessions'
 
 type DirectoryState = {
   entries: ProjectDirectoryEntry[]
@@ -201,6 +216,9 @@ type FlatRow =
 
 defineEmits<{
   close: []
+}>()
+const props = defineProps<{
+  session?: ManagedAiSessionRecord | null
 }>()
 
 const workspace = useWorkspaceStore()
@@ -250,8 +268,15 @@ let generation = 0
 let offChanged: (() => void) | null = null
 let noticeTimer: ReturnType<typeof setTimeout> | null = null
 
-const selectedSession = computed(() => workspace.selectedManagedAiSession)
-const selectedKey = computed(() => selectedSession.value ? `${selectedSession.value.source}:${selectedSession.value.id}` : '')
+const selectedKey = computed(() => props.session
+  ? [
+      props.session.source,
+      props.session.id,
+      props.session.terminalSessionId || '',
+      props.session.cwd || '',
+      props.session.canonicalCwd || ''
+    ].join(':')
+  : '')
 const treeLoading = computed(() => directories.get('')?.loading === true)
 const projectName = computed(() => {
   if (!context.value?.projectRoot) return 'Project files'
@@ -279,8 +304,8 @@ const flatRows = computed(() => {
   return rows
 })
 
-const sessionInput = () => selectedSession.value
-  ? { source: selectedSession.value.source, sessionId: selectedSession.value.id }
+const sessionInput = () => props.session
+  ? { source: props.session.source, sessionId: props.session.id }
   : null
 
 const showNotice = (message: string) => {
@@ -482,7 +507,7 @@ const activateTreeEntry = (entry: ProjectDirectoryEntry) => {
 }
 
 const openFile = (relativePath: string) => {
-  const session = selectedSession.value
+  const session = props.session
   if (!session || !context.value) return
   workspace.openProjectFile({
     source: session.source,

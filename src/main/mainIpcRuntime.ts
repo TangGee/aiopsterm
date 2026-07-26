@@ -57,6 +57,7 @@ import { registerKubernetesIpc } from './ipc/kubernetes'
 import { registerKnowledgeBaseIpc } from './ipc/knowledgeBase'
 import { registerLocalFilesIpc } from './ipc/localFiles'
 import { registerManagedAiSessionsIpc } from './ipc/managedAiSessions'
+import { releaseManagedAiTerminalBinding } from './backend/agent/agentSessions'
 import { registerMcpConfigIpc } from './ipc/mcpConfig'
 import { registerModelsIpc } from './ipc/models'
 import { registerQuickCommandsIpc } from './ipc/quickCommands'
@@ -528,7 +529,8 @@ export const registerMainIpcRuntime = (input: MainIpcRuntimeInput) => {
     createTerminalKillResult,
     createLocalTerminal: input.terminalRuntime.createLocalTerminal,
     registerTerminalForCodexBridge: input.terminalRuntime.registerTerminalForCodexBridge,
-    ackTerminalData: input.terminalRuntime.ackTerminalData
+    ackTerminalData: input.terminalRuntime.ackTerminalData,
+    releaseManagedAiTerminalBinding
   })
 
   registerCodexSessionsIpc(ipcMain, {

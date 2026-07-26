@@ -27,6 +27,7 @@ import type {
 import { projectFileChangeProtocolVersion } from '@shared/contracts/projectFiles'
 import type { AiAgentSessionSource, ManagedAiSessionRecord } from '@shared/contracts/managedAiSessions'
 import type { ProductSessionRecord } from '@shared/contracts/productSessions'
+import { projectFileTrackingForAgent } from '../agent/agentIntegrationAdapters'
 
 type ProjectFilesRuntimeConfig = {
   userDataPath: string
@@ -74,22 +75,6 @@ const defaultDirectoryPage = 200
 const maxTextBytes = 1024 * 1024
 const maxParentWatchers = 64
 
-const adapterSources = new Set([
-  'codex',
-  'claude-code',
-  'opencode',
-  'kiro',
-  'gemini',
-  'copilot',
-  'grok',
-  'codebuddy',
-  'factory',
-  'qoder',
-  'amp',
-  'pi',
-  'omp'
-])
-
 let runtime: ProjectFilesRuntimeConfig | null = null
 let historyLoaded = false
 let history = new Map<string, { touchedAt: number; recent: ProjectFileRecentEntry[] }>()
@@ -104,7 +89,7 @@ const failure = (errorCode: string, errorMessage: string) => ({ ok: false as con
 const contentHash = (content: Buffer | string) => createHash('sha256').update(content).digest('hex')
 
 const trackingCapabilityFor = (source: string): ProjectFileTrackingCapability =>
-  adapterSources.has(source) ? 'adapter' : 'limited'
+  projectFileTrackingForAgent(source)
 
 const historyPath = () => join(runtime!.userDataPath, 'project-file-history.json')
 

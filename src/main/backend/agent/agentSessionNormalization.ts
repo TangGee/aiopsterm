@@ -16,6 +16,7 @@ import type {
   ManagedAiSessionState,
   ManagedAiSessionTimelineEvent
 } from '@shared/contracts/managedAiSessions'
+import { normalizeAgentIntegrationSource } from './agentIntegrationAdapters'
 
 const maxRawKeys = 80
 const maxEventsPerSession = 200
@@ -30,26 +31,6 @@ export const defaultAgentHibernationConfig: AgentHibernationConfig = {
   maxLiveTerminals: 12,
   confirmationSeconds: 60
 }
-
-const supportedSources = new Set<AiAgentSessionSource>([
-  'codex',
-  'claude-code',
-  'cursor',
-  'gemini',
-  'copilot',
-  'grok',
-  'opencode',
-  'codebuddy',
-  'factory',
-  'qoder',
-  'antigravity',
-  'kiro',
-  'hermes-agent',
-  'rovodev',
-  'amp',
-  'pi',
-  'omp'
-])
 
 const supportedEvents = new Set<AiAgentSessionEventName>([
   'session_start',
@@ -99,29 +80,7 @@ export const managedAiNotificationId = (source: AiAgentSessionSource, sessionId:
 export const pendingDecisionKey = (source: AiAgentSessionSource, sessionId: string, requestId: string) => `${source}:${sessionId}:${requestId}`
 
 export const normalizeSource = (value: unknown): AiAgentSessionSource | null => {
-  const source = cleanText(value).toLowerCase().replace(/_/g, '-')
-  if (!source) return null
-  const aliases: Record<string, AiAgentSessionSource> = {
-    claude: 'claude-code',
-    claude_code: 'claude-code',
-    claude_code_cli: 'claude-code',
-    'claude-code-cli': 'claude-code',
-    cursoragent: 'cursor',
-    cursor_agent: 'cursor',
-    'cursor-agent': 'cursor',
-    gemini_cli: 'gemini',
-    'gemini-cli': 'gemini',
-    github_copilot: 'copilot',
-    'github-copilot': 'copilot',
-    agy: 'antigravity',
-    rovo: 'rovodev',
-    rovo_dev: 'rovodev',
-    'rovo-dev': 'rovodev',
-    hermes: 'hermes-agent',
-    hermes_agent: 'hermes-agent'
-  }
-  const normalized = aliases[source] || (source as AiAgentSessionSource)
-  return supportedSources.has(normalized) ? normalized : null
+  return normalizeAgentIntegrationSource(value)
 }
 
 const normalizeBoolean = (value: unknown) => {

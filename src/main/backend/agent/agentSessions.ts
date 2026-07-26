@@ -51,6 +51,11 @@ import {
   clearProjectFileAgentAdapterState,
   handleProjectFileAgentHook
 } from './projectFileChangeAdapters'
+import { adaptAgentSessionEventInput } from './agentIntegrationAdapters'
+import {
+  createAgentTerminalBindingRuntime,
+  type AgentTerminalBindingChange
+} from './agentTerminalBindingRuntime'
 import { recordProjectFileChange } from '../files/projectFiles'
 import type {
   AiAgentSessionEvent,
@@ -132,6 +137,7 @@ let agentHibernationConfig: AgentHibernationConfig = { ...defaultAgentHibernatio
 let pendingDecisions = new Map<string, PendingAgentDecision>()
 let emitManagedAiSessionEvent: (event: ManagedAiSessionEvent) => void = () => undefined
 let isManagedAiTerminalSessionLive: ((sessionId: string) => boolean) | null = null
+const agentTerminalBindingRuntime = createAgentTerminalBindingRuntime()
 
 export const configureManagedAiSessionTerminalLiveness = (resolver?: (sessionId: string) => boolean) => {
   isManagedAiTerminalSessionLive = resolver || null
@@ -332,6 +338,7 @@ export const configureAiAgentSessionStore = async (userDataPath: string) => {
   lastGitRefreshCompletedAt = 0
   flushPersistSnapshotNow()
   storeUserDataPath = userDataPath
+  agentTerminalBindingRuntime.clear()
   codexTranscriptMonitorRuntime.reset()
   auditRuntime.configure(auditPathFor(userDataPath))
   importRuntime.configure({
@@ -541,6 +548,103 @@ const upsertSessionForEvent = (event: AiAgentSessionEvent, raw: Record<string, u
   publishAgentEventStreamFrame(event, record)
   autoNamingRuntime.maybeRunAutoNaming(record, event)
   return { record, applied: true }
+}
+
+const withoutTerminalBinding = (record: ManagedAiSessionRecord, updatedAt = Date.now()): ManagedAiSessionRecord => {
+  const {
+    panelId: _panelId,
+    terminalSessionId: _terminalSessionId,
+    workspaceId: _workspaceId,
+    ...remaining
+  } = record
+  return { ...remaining, updatedAt }
+}
+
+const updateRecordsForTerminalBindingChange = (
+  change: AgentTerminalBindingChange,
+  activeEvent?: AiAgentSessionEvent
+) => {
+  if (!change.changed) return
+  const previous = change.previous
+  if (previous &&
+    (!change.current ||
+      previous.agentId !== change.current.agentId ||
+      previous.sessionId !== change.current.sessionId)) {
+    const previousSource = normalizeSource(previous.agentId)
+    const previousRecord = previousSource
+      ? sessions.get(sessionKey(previousSource, previous.sessionId))
+      : null
+    if (previousRecord) {
+      sessions.set(
+        sessionKey(previousRecord.source, previousRecord.id),
+        withoutTerminalBinding(previousRecord, activeEvent?.receivedAt || Date.now())
+      )
+    }
+  }
+}
+
+const terminalBindingChangeForEvent = (event: AiAgentSessionEvent) => {
+  if (event.sessionKind === 'subagent' || event.sessionKind === 'internal') return null
+  const terminalSessionId = cleanOptionalText(event.terminalSessionId)
+  if (!terminalSessionId) return null
+  if (event.event === 'session_start' || event.event === 'prompt_submit') {
+    if (isManagedAiTerminalSessionLive && !isManagedAiTerminalSessionLive(terminalSessionId)) return null
+    return agentTerminalBindingRuntime.apply({
+      kind: 'activate',
+      agentId: event.source,
+      sessionId: event.sessionId,
+      terminalSessionId,
+      panelId: event.panelId,
+      workspaceId: event.workspaceId,
+      cwd: event.canonicalCwd || event.cwd,
+      at: event.receivedAt
+    })
+  }
+  if (event.event === 'session_end') {
+    return agentTerminalBindingRuntime.apply({
+      kind: 'end',
+      agentId: event.source,
+      sessionId: event.sessionId,
+      terminalSessionId,
+      at: event.receivedAt
+    })
+  }
+  return null
+}
+
+const applyTerminalBindingForEvent = (event: AiAgentSessionEvent) => {
+  const change = terminalBindingChangeForEvent(event)
+  if (!change?.changed) return change
+  updateRecordsForTerminalBindingChange(change, event)
+  return change
+}
+
+const publishTerminalBindingChange = (
+  change: AgentTerminalBindingChange | null | undefined,
+  record: ManagedAiSessionRecord
+) => {
+  if (!change?.changed) return
+  publishManagedAiStreamFrame('managed_ai.terminal_binding.changed', record, {
+    terminalSessionId: change.current?.terminalSessionId || change.previous?.terminalSessionId,
+    previousSource: change.previous?.agentId,
+    previousSessionId: change.previous?.sessionId,
+    source: change.current?.agentId,
+    sessionId: change.current?.sessionId,
+    bound: Boolean(change.current)
+  })
+}
+
+export const releaseManagedAiTerminalBinding = (terminalSessionId: string) => {
+  const change = agentTerminalBindingRuntime.releaseTerminal(terminalSessionId)
+  if (!change.changed || !change.previous) return false
+  const source = normalizeSource(change.previous.agentId)
+  const record = source ? sessions.get(sessionKey(source, change.previous.sessionId)) : null
+  if (!record) return true
+  const detached = withoutTerminalBinding(record)
+  sessions.set(sessionKey(detached.source, detached.id), detached)
+  persistSnapshot()
+  publishTerminalBindingChange(change, detached)
+  return true
 }
 
 const mergeImportedSession = (imported: ImportedAgentSession) => {
@@ -768,14 +872,23 @@ const flushScheduledGitRefresh = async () => {
 }
 
 export function publishAiAgentSessionEvent(input: AiAgentSessionEventInput, emit: AgentSessionEventSink | null = eventSink) {
-  const result = normalizeAiAgentSessionEventInput(input)
+  const adapted = adaptAgentSessionEventInput(input)
+  const result = normalizeAiAgentSessionEventInput(adapted?.input || input)
   if (!result.ok || !result.data) return result
-  const raw = input as Record<string, unknown>
+  const raw = (adapted?.input || input) as Record<string, unknown>
   const upsert = upsertSessionForEvent(result.data, raw)
+  const bindingChange = upsert.applied ? applyTerminalBindingForEvent(result.data) : null
+  if (result.data.event === 'session_end') {
+    const detached = withoutTerminalBinding(upsert.record, result.data.receivedAt)
+    sessions.set(sessionKey(detached.source, detached.id), detached)
+    persistSnapshot()
+    upsert.record = detached
+  }
   if (upsert.applied) {
     emit?.(result.data)
     updateCodexTranscriptMonitor(result.data, raw)
   }
+  publishTerminalBindingChange(bindingChange, upsert.record)
   return result
 }
 
@@ -950,14 +1063,24 @@ const waitForAgentDecision = (event: AiAgentSessionEvent, raw: Record<string, un
   })
 
 const publishAiAgentSessionSocketEvent = async (input: AiAgentSessionEventInput, emit: AgentSessionEventSink | null): Promise<AgentSessionSocketResponse> => {
-  const result = normalizeAiAgentSessionEventInput(input)
+  const adapted = adaptAgentSessionEventInput(input)
+  const eventInput = adapted?.input || input
+  const result = normalizeAiAgentSessionEventInput(eventInput)
   if (!result.ok || !result.data) return result
-  const raw = input as Record<string, unknown>
+  const raw = eventInput as Record<string, unknown>
   if (isBlockingAgentEvent(result.data, raw) && !result.data.requestId) {
     result.data.requestId = randomUUID()
   }
   const upsert = upsertSessionForEvent(result.data, raw)
+  const bindingChange = upsert.applied ? applyTerminalBindingForEvent(result.data) : null
+  if (result.data.event === 'session_end') {
+    const detached = withoutTerminalBinding(upsert.record, result.data.receivedAt)
+    sessions.set(sessionKey(detached.source, detached.id), detached)
+    persistSnapshot()
+    upsert.record = detached
+  }
   if (!upsert.applied) {
+    publishTerminalBindingChange(bindingChange, upsert.record)
     const response: AgentSessionSocketResponse = { ...result, status: 'acknowledged' }
     auditSocketCompleted(result.data, response)
     return response
@@ -965,6 +1088,7 @@ const publishAiAgentSessionSocketEvent = async (input: AiAgentSessionEventInput,
   const waiter = isBlockingAgentEvent(result.data, raw) ? waitForAgentDecision(result.data, raw) : null
   emit?.(result.data)
   updateCodexTranscriptMonitor(result.data, raw)
+  publishTerminalBindingChange(bindingChange, upsert.record)
   if (!waiter) {
     const response: AgentSessionSocketResponse = { ...result, status: 'acknowledged' }
     auditSocketCompleted(result.data, response)
@@ -1445,8 +1569,10 @@ const handleSocketLine = async (socket: Socket, line: string, emit: AgentSession
       return
     }
     const input = (isRecord(parsed.params) && method === 'agent.hook' ? parsed.params : parsed) as AiAgentSessionEventInput
-    const adapterHandled = await handleProjectFileAgentHook(input)
-    const response = await publishAiAgentSessionSocketEvent(input, emit)
+    const adapted = adaptAgentSessionEventInput(input)
+    const eventInput = adapted?.input || input
+    const adapterHandled = await handleProjectFileAgentHook(eventInput)
+    const response = await publishAiAgentSessionSocketEvent(eventInput, emit)
     if (!response.ok && adapterHandled) {
       writeSocketResponse(socket, { ok: true, status: 'acknowledged' })
       return

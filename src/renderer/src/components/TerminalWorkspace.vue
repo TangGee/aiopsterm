@@ -29,6 +29,8 @@
           v-for="panel in visibleTerminalTabPanels"
           :key="panel.id"
           class="terminal-tab"
+          :data-panel-id="panel.id"
+          :data-terminal-session-id="panel.sessionId || ''"
           :class="{ active: panel.id === workspace.activePanelId, 'drag-over': tabDragOverPanelId === panel.id, 'ai-attention': panelNeedsAiAttention(panel), 'control-flash': controlFlashingPanelIds.includes(panel.id) }"
           :style="terminalTabProgressStyle(panel)"
           role="button"

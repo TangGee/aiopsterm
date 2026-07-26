@@ -1,6 +1,7 @@
 import { createHash } from 'crypto'
 import type { AgentHookInstallerSource } from '@shared/contracts/agentHooks'
 import { isWindowsPlatform, type PlatformRuntime } from '../app/platformRuntime'
+import { normalizeAgentIntegrationSource } from './agentIntegrationAdapters'
 
 export type HookCommandEvent = {
   agentEvent: string
@@ -266,23 +267,10 @@ const windowsCommandDoubleQuote = (value: string) => `"${value.replace(/"/g, '\\
 const defaultJsRuntimeExecutable = () => cleanText(process.env.APPIMAGE) || process.execPath
 
 export const normalizeSource = (value: unknown): AgentHookInstallerSource | null => {
-  const raw = cleanText(value).toLowerCase().replace(/_/g, '-')
-  if (raw === 'codex') return 'codex'
-  if (raw === 'claude' || raw === 'claude-code' || raw === 'claude_code') return 'claude-code'
-  if (raw === 'cursor' || raw === 'cursor-agent') return 'cursor'
-  if (raw === 'gemini' || raw === 'gemini-cli') return 'gemini'
-  if (raw === 'copilot' || raw === 'github-copilot') return 'copilot'
-  if (raw === 'grok') return 'grok'
-  if (raw === 'opencode' || raw === 'open-code') return 'opencode'
-  if (raw === 'codebuddy') return 'codebuddy'
-  if (raw === 'factory') return 'factory'
-  if (raw === 'qoder') return 'qoder'
-  if (raw === 'amp') return 'amp'
-  if (raw === 'pi') return 'pi'
-  if (raw === 'omp') return 'omp'
-  if (raw === 'kiro' || raw === 'kiro-cli') return 'kiro'
-  if (raw === 'rovodev' || raw === 'rovo' || raw === 'rovo-dev') return 'rovodev'
-  return null
+  const source = normalizeAgentIntegrationSource(value)
+  return hookDefinitions.some((definition) => definition.source === source)
+    ? source as AgentHookInstallerSource
+    : null
 }
 
 export const agentHookCommandFor = (

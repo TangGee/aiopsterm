@@ -31,6 +31,7 @@ type AgentSessionsBackend = {
   setAgentHibernationConfig: (input: Record<string, unknown>) => Promise<unknown>
   hibernateManagedAiSession: (input: Record<string, unknown>) => Promise<unknown>
   wakeManagedAiSession: (input: Record<string, unknown>) => Promise<unknown>
+  releaseManagedAiTerminalBinding: (terminalSessionId: string) => boolean
   configureManagedAiSessionAutoNamingRuntime: (config?: Record<string, unknown>) => void
   __testing: {
     auditPathFor: (userDataPath: string) => string
@@ -521,6 +522,60 @@ describe('agent session backend', () => {
       expect(second.data?.sessions?.find((session) => session.id === 'codex-live-detached')).toEqual(
         expect.objectContaining({ state: 'ended', summary: 'Terminal no longer exists', agentLifecycle: 'ended' })
       )
+    } finally {
+      configureManagedAiSessionTerminalLiveness()
+    }
+  })
+
+  it('keeps exactly one top-level agent session bound to a managed terminal across session switches', async () => {
+    const {
+      configureAiAgentSessionStore,
+      configureManagedAiSessionTerminalLiveness,
+      listManagedAiSessions,
+      publishAiAgentSessionEvent,
+      releaseManagedAiTerminalBinding
+    } = await loadBackend()
+    await configureAiAgentSessionStore(await mkdtemp(join(tmpdir(), 'aiopsterm-agent-terminal-binding-')))
+    configureManagedAiSessionTerminalLiveness((sessionId) => sessionId === 'terminal-switch')
+    try {
+      publishAiAgentSessionEvent({
+        source: 'codex',
+        event: 'session_start',
+        sessionId: 'session-a',
+        terminalSessionId: 'terminal-switch',
+        panelId: 'panel-switch',
+        cwd: '/work/a',
+        receivedAt: 100
+      }, null)
+      publishAiAgentSessionEvent({
+        source: 'codex',
+        event: 'session_start',
+        sessionId: 'session-b',
+        terminalSessionId: 'terminal-switch',
+        panelId: 'panel-switch',
+        cwd: '/work/b',
+        receivedAt: 200
+      }, null)
+
+      let response = (await listManagedAiSessions()) as { data?: { sessions?: Array<Record<string, unknown>> } }
+      expect(response.data?.sessions?.find((session) => session.id === 'session-a')?.terminalSessionId).toBeUndefined()
+      expect(response.data?.sessions?.find((session) => session.id === 'session-b')).toEqual(
+        expect.objectContaining({ terminalSessionId: 'terminal-switch', panelId: 'panel-switch' })
+      )
+
+      publishAiAgentSessionEvent({
+        source: 'codex',
+        event: 'session_end',
+        sessionId: 'session-a',
+        terminalSessionId: 'terminal-switch',
+        receivedAt: 300
+      }, null)
+      response = (await listManagedAiSessions()) as { data?: { sessions?: Array<Record<string, unknown>> } }
+      expect(response.data?.sessions?.find((session) => session.id === 'session-b')?.terminalSessionId).toBe('terminal-switch')
+
+      expect(releaseManagedAiTerminalBinding('terminal-switch')).toBe(true)
+      response = (await listManagedAiSessions()) as { data?: { sessions?: Array<Record<string, unknown>> } }
+      expect(response.data?.sessions?.find((session) => session.id === 'session-b')?.terminalSessionId).toBeUndefined()
     } finally {
       configureManagedAiSessionTerminalLiveness()
     }

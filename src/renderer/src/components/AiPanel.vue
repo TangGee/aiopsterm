@@ -2,6 +2,7 @@
   <AiPanelPresentation
     :project-files-available="projectFilesAvailable"
     :project-files-active="projectFilesActive"
+    :project-files-session="projectFilesSession"
     @toggle-project-files="$emit('toggleProjectFiles')"
     @close-project-files="$emit('closeProjectFiles')"
   />
@@ -11,6 +12,7 @@
 import { watch } from 'vue'
 import AiPanelPresentation from '@/components/ai/AiPanelPresentation.vue'
 import type { ProductSessionUiRequest } from '@/components/productSessionUiTypes'
+import type { ManagedAiSessionRecord } from '@shared/contracts/managedAiSessions'
 import { provideAiPanelRuntime } from '@/services/ai/aiPanelContext'
 import { useAiPanelContainerRuntime } from '@/services/ai/aiPanelContainerRuntime'
 
@@ -19,6 +21,7 @@ const props = defineProps<{
   productSessionRequest?: ProductSessionUiRequest | null
   projectFilesAvailable?: boolean
   projectFilesActive?: boolean
+  projectFilesSession?: ManagedAiSessionRecord | null
 }>()
 const emit = defineEmits<{
   productSessionRequestConsumed: [sequence: number]

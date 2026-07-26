@@ -74,6 +74,7 @@ type RegisterTerminalSessionsIpcInput = {
   createTerminalKillResult: (id: string, exists: boolean) => TerminalKillResult
   registerTerminalForCodexBridge: (session: TerminalSession, target?: CodexSessionCreateOptions['target']) => void
   ackTerminalData: (id: string, bytes: number) => void
+  releaseManagedAiTerminalBinding?: (terminalSessionId: string) => void
 }
 
 export const terminalHistoryLinesFromWrite = (data: string) => {
@@ -310,6 +311,7 @@ export const registerTerminalSessionsIpc = (ipcMain: IpcMain, input: RegisterTer
       return input.createTerminalKillResult(id, false)
     }
     input.logRuntimeEvent('info', 'terminal.kill.request', { id, kind: session.kind })
+    input.releaseManagedAiTerminalBinding?.(id)
     killTerminal(session)
     return input.createTerminalKillResult(id, true)
   })
