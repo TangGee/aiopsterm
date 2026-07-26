@@ -13628,7 +13628,7 @@ describe('AppShell', () => {
     }
   })
 
-  it('matches the extension list, plugin details, and built-ins', async () => {
+  it('matches the extension list and plugin details', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     const store = useWorkspaceStore()
@@ -13638,14 +13638,13 @@ describe('AppShell', () => {
     })
 
     expect(panel.text()).toContain('插件')
-    expect(panel.text()).toContain('Jumpserver Support')
-    expect(panel.text()).toContain('支持资产同步与资产直连')
-    expect(panel.text()).toContain('系统')
+    expect(panel.text()).not.toContain('Jumpserver Support')
     expect(panel.text()).not.toContain('Store')
     expect(panel.text()).not.toContain('Private')
     expect(panel.find('button[title="安装"]').exists()).toBe(false)
     expect(panel.find('button[title="订阅"]').exists()).toBe(false)
 
+    await flushPromises()
     ;(globalThis as any).__loadExtensionPluginStoreFixtureMock?.()
     await store.refreshExtensionPlugins()
     await panel.vm.$nextTick()
@@ -13688,69 +13687,23 @@ describe('AppShell', () => {
       fileName: 'local-tools.external-reference',
       filePath: '/tmp/local-tools.external-reference',
       size: 4096,
-      existingPluginIds: expect.arrayContaining(['jumpserverSupport', 'cloud-assets'])
+      existingPluginIds: expect.arrayContaining(['cloud-assets', 'ops-runbook'])
     }))
     expect(store.extensionInstallLoadingMap['local-local-tools']).toBe(true)
     expect(store.extensionInstallProgressMap['local-local-tools']).toMatchObject({ stage: 'installing', percent: 100 })
     expect(panel.text()).toContain('正在安装 local tools')
-    expect(store.selectedExtensionId).toBe('jumpserverSupport')
+    expect(store.selectedExtensionId).toBe('cloud-assets')
     await new Promise((resolve) => setTimeout(resolve, 140))
     await flushPromises()
     await panel.vm.$nextTick()
     expect(store.selectedExtensionId).toBe('local-local-tools')
     expect(store.extensionPlugins.some((plugin) => plugin.pluginId === 'local-local-tools' && plugin.installed)).toBe(true)
 
-    store.selectExtension('jumpserverSupport')
     const workspace = mount(ExtensionsWorkspace, {
       global: { plugins: [pinia] }
     })
     await flushPromises()
     await workspace.vm.$nextTick()
-    expect(workspace.text()).toContain('Jumpserver Support')
-    expect(workspace.text()).toContain('同步资产并确认主机分组')
-    expect(window.aiops.listAssets).toHaveBeenCalled()
-    expect(workspace.text()).toContain('资产同步状态')
-    expect(workspace.text()).toContain('Jumpserver 数据源')
-    expect(workspace.text()).toContain('已同步主机')
-    expect(workspace.text()).toContain('jumpserver-org')
-    expect(workspace.text()).not.toContain('prod-bastion')
-    expect(workspace.text()).not.toContain('connected to bastion host')
-    expect(workspace.find('.connection_log_terminal').exists()).toBe(false)
-    expect(workspace.find('.mock_terminal').exists()).toBe(false)
-    const wrongOrganizationAssets = await window.aiops.listAssets()
-    vi.mocked(window.aiops.refreshOrganizationAssets).mockClear()
-    vi.mocked(window.aiops.refreshOrganizationAssets).mockResolvedValueOnce({
-      ok: true,
-      data: {
-        ...wrongOrganizationAssets,
-        organizationId: 'other-org',
-        refreshed: 1,
-        created: 1,
-        updated: 0
-      }
-    } as any)
-    await workspace.findAll('.jumpserver_asset_actions button').find((button) => button.text().includes('刷新组织资产'))!.trigger('click')
-    await flushPromises()
-    expect(window.aiops.refreshOrganizationAssets).toHaveBeenCalledWith({ organizationId: 'asset-5' })
-    expect(workspace.text()).toContain('资产服务返回数据无效')
-    expect(workspace.text()).not.toContain('jumpserver-org-synced-asset')
-    vi.mocked(window.aiops.refreshOrganizationAssets).mockResolvedValueOnce({
-      ok: true,
-      data: await buildNonJumpserverOrganizationRefreshData()
-    } as any)
-    await workspace.findAll('.jumpserver_asset_actions button').find((button) => button.text().includes('刷新组织资产'))!.trigger('click')
-    await flushPromises()
-    expect(workspace.text()).toContain('资产服务返回数据无效')
-    expect(workspace.text()).toContain('jumpserver-org')
-    expect(workspace.text()).not.toContain('not-jumpserver-org')
-    expect(workspace.text()).not.toContain('jumpserver-org-synced-asset')
-    await workspace.findAll('.jumpserver_asset_actions button').find((button) => button.text().includes('刷新组织资产'))!.trigger('click')
-    await flushPromises()
-    expect(workspace.text()).toContain('jumpserver-org-synced-asset')
-    await workspace.findAll('.jumpserver_asset_actions button').find((button) => button.text().includes('打开资产管理'))!.trigger('click')
-    expect(store.activeModule).toBe('assets')
-    expect(store.assetManagementOpenRequest.organizationId).toBe('asset-5')
-
     store.selectExtension('ops-runbook')
     await workspace.vm.$nextTick()
     expect(workspace.text()).toContain('Ops Runbook')

@@ -10,7 +10,7 @@ export type ExtensionInstallStage = 'downloading' | 'verifying' | 'installing' |
 
 export type ExtensionPluginSource = 'preinstalled' | 'store' | 'local'
 
-export type ExtensionIconKey = 'jumpserver' | 'runbook' | 'cloud' | 'private' | 'local'
+export type ExtensionIconKey = 'runbook' | 'cloud' | 'private' | 'local'
 
 export type ExtensionFunctionConfig = {
   title: string

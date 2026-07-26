@@ -136,7 +136,7 @@ export const booleanFromUnknown = (value: unknown): boolean | undefined => {
   return undefined
 }
 
-const extensionIconKeys = new Set(['jumpserver', 'runbook', 'cloud', 'private', 'local'])
+const extensionIconKeys = new Set(['runbook', 'cloud', 'private', 'local'])
 
 export const normalizeExtensionIconKey = (value: unknown): ExtensionPluginRuntimeConfig['iconKey'] => {
   const key = trimText(value)

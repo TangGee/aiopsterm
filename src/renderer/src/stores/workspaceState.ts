@@ -208,7 +208,7 @@ export const createWorkspaceStoreState = () => {
   const kbTotalBytes = ref(1024 * 1024 * 1024)
   const extensionSearchQuery = ref('')
   const extensionPlugins = ref<WorkspaceExtensionPlugin[]>([])
-  const selectedExtensionId = ref<string>('jumpserverSupport')
+  const selectedExtensionId = ref<string>('')
   const extensionDetailTab = ref<'details' | 'features'>('details')
   const extensionNotice = ref('')
   const extensionInstallLoadingMap = ref<Record<string, boolean>>({})

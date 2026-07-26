@@ -59,36 +59,7 @@ let runtimeConfig: RuntimeConfig = {
   fetch: defaultExtensionFetch
 }
 
-const builtinExtensionCatalog: ExtensionPluginRuntimeConfig[] = [
-  {
-    pluginId: 'jumpserverSupport',
-    name: 'Jumpserver Support',
-    description: '支持资产同步与资产直连',
-    iconKey: 'jumpserver',
-    tabName: 'jumpserverSupport',
-    show: true,
-    isPlugin: false,
-    installed: false,
-    hasUpdate: false,
-    installedVersion: '',
-    latestVersion: '',
-    source: 'preinstalled',
-    categories: ['SSH', 'Tools'],
-    detailSummary: '支持资产同步与资产直连，保留堡垒机连接、目标资产连接、认证和代理阶段的运行状态。',
-    functions: [
-      { title: '资产同步', desc: '从堡垒机同步组织、主机和账号信息。' },
-      { title: '资产直连', desc: '在终端中选择同步资产后直接建立 SSH 会话。' },
-      { title: '认证联动', desc: '保留 Jumpserver 会话认证、审计和代理链路状态。' },
-      { title: '同步状态', desc: '展示后端资产同步数量、数据源和已同步主机状态。' }
-    ],
-    guideSteps: [
-      '在资产管理中新增 Jumpserver 数据源。',
-      '填写堡垒机地址、组织和认证信息。',
-      '同步资产并确认主机分组。',
-      '从终端或文件管理中选择资产直连。'
-    ]
-  }
-]
+const builtinExtensionCatalog: ExtensionPluginRuntimeConfig[] = []
 
 let extensionCatalog = builtinExtensionCatalog.map(clonePlugin)
 

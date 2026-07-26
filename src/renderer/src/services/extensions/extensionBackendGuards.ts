@@ -10,7 +10,7 @@ import type {
 
 export const malformedExtensionBackendResultMessage = '扩展服务返回数据无效'
 
-const extensionIconKeys = new Set(['jumpserver', 'runbook', 'cloud', 'private', 'local'])
+const extensionIconKeys = new Set(['runbook', 'cloud', 'private', 'local'])
 const extensionSources = new Set(['preinstalled', 'store', 'local'])
 const extensionOperations = new Set<ExtensionPluginOperation>(['install', 'update', 'uninstall', 'package'])
 const extensionInstallStages = new Set(['downloading', 'verifying', 'installing', 'done', 'error', 'cancelled', ''])

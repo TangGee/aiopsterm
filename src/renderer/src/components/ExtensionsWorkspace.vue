@@ -6,22 +6,7 @@
     tabindex="-1"
   >
     <template v-if="workspace.selectedExtension">
-      <ExtensionJumpserverDetail
-        v-if="workspace.selectedExtension.pluginId === 'jumpserverSupport'"
-        :plugin="workspace.selectedExtension"
-        :active-tab="workspace.extensionDetailTab"
-        :asset-loading="jumpserverAssetLoading"
-        :asset-error="jumpserverAssetError"
-        :asset-notice="jumpserverAssetNotice"
-        :organizations="jumpserverOrganizations"
-        :synced-assets="jumpserverSyncedAssets"
-        :online-synced-assets="jumpserverOnlineSyncedAssets"
-        @update:active-tab="workspace.extensionDetailTab = $event"
-        @refresh-assets="refreshJumpserverAssets"
-        @open-asset-management="openJumpserverAssetManagement"
-      />
       <ExtensionGenericDetail
-        v-else
         :plugin="workspace.selectedExtension"
         :active-tab="workspace.extensionDetailTab"
         :is-busy="isSelectedBusy"
@@ -47,10 +32,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, watch } from 'vue'
+import { computed, onMounted } from 'vue'
 import ExtensionGenericDetail from '@/components/extensions/ExtensionGenericDetail.vue'
-import ExtensionJumpserverDetail from '@/components/extensions/ExtensionJumpserverDetail.vue'
-import { createExtensionsJumpserverAssetRuntime } from '@/services/extensions/extensionsJumpserverAssetRuntime'
 import {
   extensionInstallStageText,
   extensionPluginSourceText,
@@ -61,19 +44,6 @@ import {
 import { useWorkspaceStore } from '@/stores/workspace'
 
 const workspace = useWorkspaceStore()
-
-const {
-  jumpserverAssetLoading,
-  jumpserverAssetError,
-  jumpserverAssetNotice,
-  jumpserverOrganizations,
-  jumpserverSyncedAssets,
-  jumpserverOnlineSyncedAssets,
-  loadJumpserverAssetSnapshot,
-  refreshJumpserverAssets
-} = createExtensionsJumpserverAssetRuntime({
-  selectedPluginId: () => workspace.selectedExtension?.pluginId
-})
 
 const isSelectedBusy = computed(() => {
   const id = workspace.selectedExtension?.pluginId
@@ -97,18 +67,6 @@ const selectedVersion = computed(() => (workspace.selectedExtension ? extensionP
 const selectedSource = computed(() => (workspace.selectedExtension ? extensionPluginSourceText(workspace.selectedExtension) : 'Store'))
 const selectedSize = computed(() => formatExtensionPluginSize(workspace.selectedExtension?.size))
 const selectedTags = computed(() => (workspace.selectedExtension ? extensionPluginTags(workspace.selectedExtension) : []))
-
-const openJumpserverAssetManagement = () => {
-  workspace.openAssetManagement(jumpserverOrganizations.value[0]?.id)
-}
-
-watch(
-  () => workspace.selectedExtension?.pluginId,
-  (pluginId) => {
-    if (pluginId === 'jumpserverSupport') void loadJumpserverAssetSnapshot()
-  },
-  { immediate: true }
-)
 
 onMounted(() => {
   if (workspace.extensionPlugins.length === 0) void workspace.refreshExtensionPlugins()

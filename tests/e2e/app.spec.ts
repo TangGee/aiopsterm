@@ -1559,13 +1559,6 @@ test('aiopsterm primary desktop flows', async () => {
 
     await page.getByTitle('扩展').click()
     await expect(page.locator('.extension_panel').getByRole('heading', { name: '插件' })).toBeVisible()
-    await expect(page.locator('.extension_item').filter({ hasText: 'Jumpserver Support' })).toBeVisible()
-    await page.locator('.extension_item').filter({ hasText: 'Jumpserver Support' }).click()
-    await expect(page.locator('.plugin_detail_view').getByRole('heading', { name: 'Jumpserver Support', level: 1 })).toBeVisible()
-    await expect(page.locator('.jumpserver_asset_summary')).toContainText('Jumpserver 数据源')
-    await expect(page.locator('.jumpserver_source_row').filter({ hasText: 'jumpserver-org' })).toBeVisible()
-    await page.locator('.jumpserver_asset_actions button').filter({ hasText: '刷新组织资产' }).click()
-    await expect(page.locator('.jumpserver_synced_asset').filter({ hasText: 'jumpserver-org-synced-asset' })).toBeVisible()
     await page.locator('.extension_search_box input').fill('Runbook')
     await page.locator('.extension_item').filter({ hasText: 'Ops Runbook' }).click()
     await expect(page.locator('.plugin_detail_view').getByRole('heading', { name: 'Ops Runbook' })).toBeVisible()

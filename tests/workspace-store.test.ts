@@ -9374,12 +9374,7 @@ describe('workspace store', () => {
     ;(globalThis as any).__loadExtensionPluginStoreFixtureMock?.()
     await store.refreshExtensionPlugins()
 
-    const jumpserver = store.extensionPlugins.find((plugin) => plugin.pluginId === 'jumpserverSupport')
-    expect(jumpserver?.detailSummary).toContain('资产同步')
-    expect(jumpserver?.guideSteps).toEqual(expect.arrayContaining(['同步资产并确认主机分组。']))
-    expect(jumpserver?.connectionLog).toBeUndefined()
-
-    expect(store.filteredExtensionPlugins[0].name).toBe('Jumpserver Support')
+    expect(store.filteredExtensionPlugins[0].name).toBe('Cloud Assets')
 
     const installPromise = store.installExtensionPlugin('cloud-assets')
     expect(store.extensionInstallLoadingMap['cloud-assets']).toBe(true)
@@ -9436,6 +9431,7 @@ describe('workspace store', () => {
 
   it('deduplicates concurrent extension plugin catalog refreshes', async () => {
     const store = useWorkspaceStore()
+    ;(globalThis as any).__loadExtensionPluginStoreFixtureMock?.()
 
     const results = await Promise.all([store.refreshExtensionPlugins(), store.refreshExtensionPlugins()])
 
@@ -12871,7 +12867,7 @@ describe('workspace store', () => {
       await expect(store.updateExtensionSettings({ highlightStatus: false })).resolves.toBe(true)
       expect(store.settingsNotice).toBe('扩展设置已保存')
       expect(store.extensionSettings.highlightStatus).toBe(false)
-      expect(store.selectedExtensionId).toBe('jumpserverSupport')
+      expect(store.selectedExtensionId).toBe('')
       expect(store.config.extensionSettings).toEqual({
         autoCompleteStatus: true,
         quickVimStatus: true,
