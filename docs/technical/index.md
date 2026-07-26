@@ -1,5 +1,7 @@
 # Technical Docs
 
+For supported third-party boundaries and examples, start with the [Developer Integration Guides](../developer/index.md).
+
 - [Self-Owned Clone Architecture](self-owned-clone-architecture.md)
 - [External reference Reference Workflow](external-reference-reference-workflow.md)
 - [Codex CLI AI Panel](codex-cli-ai-panel.md)
