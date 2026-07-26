@@ -47,6 +47,7 @@
         <div
           v-if="workspace.k8sConfigTab === 'local'"
           class="k8s-config-list"
+          :class="{ empty: workspace.localK8sClusters.length === 0 }"
         >
           <button
             v-for="cluster in workspace.localK8sClusters"

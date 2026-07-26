@@ -8,29 +8,39 @@
           <span v-if="workspace.k8sResourceCluster">/ {{ workspace.k8sResourceCluster.context_name }}</span>
         </p>
       </div>
-      <button
-        class="k8s-workspace-button"
-        :disabled="workspace.k8sResourceLoading"
-        @click="workspace.refreshK8sResources"
-      >
-        <LoaderCircle v-if="workspace.k8sResourceLoading" />
-        <RefreshCw v-else />
-        刷新
-      </button>
+      <div class="k8s-resource-header-actions">
+        <button
+          class="k8s-workspace-button"
+          :class="{ active: outputOpen }"
+          :aria-expanded="outputOpen"
+          @click="outputOpen = !outputOpen"
+        >
+          输出
+        </button>
+        <button
+          class="k8s-workspace-button"
+          :disabled="workspace.k8sResourceLoading"
+          @click="workspace.refreshK8sResources"
+        >
+          <LoaderCircle v-if="workspace.k8sResourceLoading" />
+          <RefreshCw v-else />
+          刷新
+        </button>
+      </div>
     </header>
 
     <div class="k8s-agent-bar">
       <div class="k8s-agent-current">
         <strong>Agent</strong>
-        <span>{{ workspace.k8sAgentCluster?.name || 'No cluster' }}</span>
+        <span>{{ workspace.k8sAgentCluster?.name || '未选择集群' }}</span>
         <small>{{ workspace.k8sAgentCurrentCluster.contextName || '-' }}</small>
-        <em :class="workspace.k8sAgentStatus">{{ workspace.k8sAgentStatus }}</em>
+        <em :class="workspace.k8sAgentStatus">{{ agentStatusLabels[workspace.k8sAgentStatus] }}</em>
       </div>
       <select
         :value="workspace.k8sAgentClusterId || ''"
         @change="handleK8sAgentClusterChange"
       >
-        <option value="">No cluster</option>
+        <option value="">未选择集群</option>
         <option
           v-for="cluster in workspace.k8sClusters"
           :key="cluster.id"
@@ -44,20 +54,20 @@
         @click="workspace.testK8sAgentConnection"
       >
         <LoaderCircle v-if="workspace.k8sAgentTesting" />
-        Test
+        测试
       </button>
-      <button @click="workspace.refreshK8sAgentNamespaces">Namespaces</button>
+      <button @click="workspace.refreshK8sAgentNamespaces">命名空间</button>
       <form
         class="k8s-agent-command"
         @submit.prevent="runAgentCommand"
       >
         <input
           v-model="workspace.k8sAgentCommandDraft"
-          placeholder="kubectl command"
+          placeholder="输入 kubectl 命令"
         />
-        <button type="submit">Run</button>
+        <button type="submit">执行</button>
       </form>
-      <button @click="workspace.cleanupK8sAgent">Cleanup</button>
+      <button @click="workspace.cleanupK8sAgent">清理</button>
     </div>
 
     <div
@@ -75,13 +85,13 @@
 
     <div class="k8s-resource-toolbar">
       <label class="k8s-resource-filter">
-        <span>Namespace</span>
+        <span>命名空间</span>
         <select
           :value="workspace.k8sResourceNamespace"
           :disabled="workspace.k8sResourceKind === 'nodes'"
           @change="handleK8sNamespaceChange"
         >
-          <option value="all">All namespaces</option>
+          <option value="all">全部命名空间</option>
           <option
             v-for="namespace in workspace.k8sActiveNamespaces"
             :key="namespace"
@@ -113,7 +123,10 @@
       </label>
     </div>
 
-    <div class="k8s-resource-layout">
+    <div
+      class="k8s-resource-layout"
+      :class="{ 'output-open': outputOpen }"
+    >
       <div class="k8s-resource-table-wrap">
         <table class="k8s-resource-table">
           <thead>
@@ -190,7 +203,10 @@
         </table>
       </div>
 
-      <aside class="k8s-resource-output">
+      <aside
+        v-if="outputOpen"
+        class="k8s-resource-output"
+      >
         <header>
           <strong>{{ workspace.k8sResourceOutputTitle }}</strong>
           <span v-if="workspace.k8sCopiedCommand">已复制: {{ workspace.k8sCopiedCommand }}</span>
@@ -228,6 +244,7 @@
 </template>
 
 <script setup lang="ts">
+import { ref, watch } from 'vue'
 import { useKubernetesWorkspaceRuntimeContext } from '@/services/kubernetes/kubernetesWorkspaceContext'
 
 const {
@@ -246,4 +263,19 @@ const {
   Terminal,
   X
 } = useKubernetesWorkspaceRuntimeContext()
+
+const outputOpen = ref(workspace.k8sResourceOutputTitle !== '资源输出')
+const agentStatusLabels = {
+  idle: '空闲',
+  ready: '就绪',
+  running: '运行中',
+  error: '错误'
+} as const
+
+watch(
+  () => workspace.k8sResourceOutputTitle,
+  (title) => {
+    outputOpen.value = title !== '资源输出'
+  }
+)
 </script>

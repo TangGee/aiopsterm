@@ -177,3 +177,80 @@
   max-width: 320px;
   margin-left: auto;
 }
+
+@container k8s-workspace (max-width: 980px) {
+  .k8s-agent-bar {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+  }
+
+  .k8s-agent-current {
+    grid-column: 1 / -1;
+  }
+
+  .k8s-agent-command {
+    grid-column: 1 / 3;
+  }
+
+  .k8s-agent-history {
+    overflow-x: auto;
+  }
+}
+
+@container k8s-workspace (max-width: 700px) {
+  .k8s-resource-toolbar {
+    display: grid;
+    grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr);
+  }
+
+  .k8s-resource-kind-tabs {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+
+  .k8s-resource-search {
+    width: 100%;
+    max-width: none;
+    margin-left: 0;
+  }
+}
+
+@container k8s-workspace (max-width: 620px) {
+  .k8s-agent-bar {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+  }
+
+  .k8s-agent-bar > select {
+    grid-column: 1 / -1;
+  }
+
+  .k8s-resource-filter,
+  .k8s-resource-search {
+    width: 100%;
+    max-width: none;
+    margin-left: 0;
+  }
+
+  .k8s-resource-filter,
+  .k8s-resource-search,
+  .k8s-resource-kind-tabs {
+    grid-column: 1 / -1;
+  }
+
+  .k8s-resource-filter {
+    grid-row: 1;
+  }
+
+  .k8s-resource-kind-tabs {
+    grid-row: 2;
+  }
+
+  .k8s-resource-search {
+    grid-row: 3;
+  }
+
+  .k8s-resource-kind-tabs {
+    width: 100%;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+  }
+}

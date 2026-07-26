@@ -109,7 +109,7 @@ const runtime = () => ({
 })
 
 describe('KubernetesWorkspacePresentation', () => {
-  it('composes Kubernetes workspace subdomain presenters through the shared runtime context', () => {
+  it('composes Kubernetes workspace subdomain presenters through the shared runtime context', async () => {
     const Harness = defineComponent({
       setup() {
         provideKubernetesWorkspaceRuntime(runtime() as any)
@@ -128,5 +128,12 @@ describe('KubernetesWorkspacePresentation', () => {
     expect(wrapper.find('.k8s-terminal-surface').exists()).toBe(true)
     expect(wrapper.find('.k8s-cluster-config-container').exists()).toBe(true)
     expect(wrapper.find('.k8s-resource-workspace').text()).toContain('资源概览')
+    expect(wrapper.find('.k8s-config-list.empty').exists()).toBe(true)
+    expect(wrapper.find('.k8s-resource-output').exists()).toBe(false)
+
+    const outputButton = wrapper.findAll('.k8s-resource-header button').find((button) => button.text().trim() === '输出')
+    expect(outputButton).toBeDefined()
+    await outputButton!.trigger('click')
+    expect(wrapper.find('.k8s-resource-output').exists()).toBe(true)
   })
 })

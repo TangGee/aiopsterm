@@ -56,7 +56,10 @@
         End
       </button>
     </div>
-    <div class="k8s-terminal-container">
+    <div
+      class="k8s-terminal-container"
+      :class="{ empty: !workspace.k8sActiveTerminal }"
+    >
       <pre v-if="workspace.k8sActiveTerminal">{{ workspace.k8sActiveTerminal.output }}</pre>
       <div
         v-else

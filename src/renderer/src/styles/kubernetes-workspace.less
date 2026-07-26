@@ -3,7 +3,9 @@
   min-width: 0;
   min-height: 0;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto minmax(170px, 0.55fr) minmax(300px, 1.45fr);
+  container-name: k8s-workspace;
+  container-type: inline-size;
   background: var(--theme-module-active-workspace-bg);
   overflow: hidden;
 }
@@ -43,6 +45,18 @@
   border-color: color-mix(in srgb, var(--theme-module-active-accent) 48%, var(--theme-module-active-border));
 }
 
+.k8s-context-empty {
+  min-height: 38px;
+  border: 1px dashed var(--theme-module-active-border);
+  border-radius: 7px;
+  color: var(--theme-module-active-text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 6px 4px 10px;
+}
+
 .k8s-context-item strong {
   display: flex;
   align-items: center;
@@ -80,7 +94,7 @@
 .k8s-main-grid {
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(320px, 42%) minmax(0, 1fr);
+  grid-template-columns: minmax(260px, 42%) minmax(280px, 1fr);
   gap: 10px;
   padding: 10px;
 }
@@ -111,6 +125,17 @@
   border-bottom: 1px solid var(--theme-module-active-border);
 }
 
+.k8s-resource-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.k8s-resource-header-actions .k8s-workspace-button.active {
+  border-color: color-mix(in srgb, var(--theme-module-active-accent) 48%, var(--theme-module-active-border));
+  background: color-mix(in srgb, var(--theme-module-active-accent) 12%, var(--theme-module-active-card-bg));
+}
+
 .k8s-resource-header h3,
 .k8s-resource-header p {
   margin: 0;
@@ -131,4 +156,16 @@
 
 .k8s-resource-header button svg.lucide-loader-circle {
   animation: spin 0.9s linear infinite;
+}
+
+@container k8s-workspace (max-width: 760px) {
+  .k8s-main-grid {
+    grid-template-columns: minmax(240px, 1fr) minmax(260px, 1fr);
+  }
+}
+
+@container k8s-workspace (max-width: 540px) {
+  .k8s-main-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
 }

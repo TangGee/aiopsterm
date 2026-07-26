@@ -11,7 +11,7 @@
 
 .k8s-terminal-surface {
   display: grid;
-  grid-template-rows: 36px 32px minmax(0, 1fr) 34px 30px;
+  grid-template-rows: auto auto minmax(0, 1fr) auto auto;
 }
 
 .k8s-terminal-tabs {
@@ -124,6 +124,12 @@
   padding: 10px;
 }
 
+.k8s-terminal-container.empty {
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+}
+
 .k8s-terminal-container pre {
   margin: 0;
   color: #d7dae3;
@@ -134,12 +140,14 @@
 }
 
 .k8s-command-line {
+  min-height: 34px;
   border-radius: 0;
   border-width: 1px 0 0;
   background: var(--theme-module-active-panel-bg);
 }
 
 .k8s-terminal-history {
+  min-height: 30px;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -262,4 +270,27 @@
 .k8s-right-section.collapsed {
   display: grid;
   place-items: center;
+}
+
+@container k8s-workspace (max-width: 920px) {
+  .k8s-split-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .k8s-split-layout:has(.k8s-right-section.collapsed) .k8s-right-section,
+  .k8s-split-layout:has(.k8s-right-section:not(.collapsed)) .k8s-left-section {
+    display: none;
+  }
+
+  .k8s-right-section {
+    border-left: 0;
+  }
+
+  .k8s-search-header {
+    flex-wrap: wrap;
+  }
+
+  .k8s-search-header .k8s-search {
+    flex-basis: 140px;
+  }
 }

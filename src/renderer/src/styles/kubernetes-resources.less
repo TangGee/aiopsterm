@@ -1,7 +1,12 @@
 
 .k8s-resource-layout {
+  position: relative;
   min-height: 0;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.k8s-resource-layout.output-open {
   grid-template-columns: minmax(0, 1.7fr) minmax(280px, 0.85fr);
 }
 
@@ -13,6 +18,7 @@
 
 .k8s-resource-table {
   width: 100%;
+  min-width: 760px;
   border-collapse: collapse;
   font-size: 12px;
 }
@@ -32,6 +38,7 @@
   background: var(--theme-module-active-panel-bg);
   color: var(--theme-module-active-text-muted);
   font-weight: 500;
+  white-space: nowrap;
 }
 
 .k8s-resource-table td:first-child {
@@ -180,4 +187,19 @@
   font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
   font-size: 12px;
   line-height: 1.55;
+}
+
+@container k8s-workspace (max-width: 900px) {
+  .k8s-resource-layout.output-open {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .k8s-resource-output {
+    position: absolute;
+    z-index: 4;
+    inset: 0 0 0 auto;
+    width: min(420px, 100%);
+    border-left: 1px solid var(--theme-module-active-border);
+    box-shadow: var(--theme-module-active-shadow);
+  }
 }

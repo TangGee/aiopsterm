@@ -32,9 +32,16 @@
     </div>
     <div
       v-else
-      class="empty-state"
+      class="k8s-context-empty"
     >
-      暂无 Kubernetes contexts
+      <span>尚未添加 Kubernetes 集群</span>
+      <button
+        class="k8s-workspace-button"
+        @click="workspace.k8sAddModalOpen = true"
+      >
+        <Plus />
+        添加集群
+      </button>
     </div>
   </div>
 </template>
@@ -42,5 +49,5 @@
 <script setup lang="ts">
 import { useKubernetesWorkspaceRuntimeContext } from '@/services/kubernetes/kubernetesWorkspaceContext'
 
-const { workspace, RefreshCw } = useKubernetesWorkspaceRuntimeContext()
+const { workspace, Plus, RefreshCw } = useKubernetesWorkspaceRuntimeContext()
 </script>
