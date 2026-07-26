@@ -104,10 +104,8 @@ describe('terminalWorkspaceContextRuntime', () => {
 
     expect(runtime.terminalStatusLabel({ ...panels[0], status: 'closed' })).toBe('Closed')
     expect(runtime.terminalTabMeta(panels[0])).toBe('current')
-    expect(runtime.terminalTabKindBadge(panels[0])).toBe('')
 
     expect(runtime.terminalTabMeta(panels[1])).toBe('ops@10.0.0.8:2222')
-    expect(runtime.terminalTabKindBadge(panels[1])).toBe('')
     expect(runtime.terminalTabShowsState(panels[1])).toBe(false)
     expect(runtime.terminalTabTooltip(panels[1])).toContain('Host: ops@10.0.0.8:2222')
     expect(runtime.terminalTabTooltip(panels[1])).toContain('Session: session-ssh')
@@ -120,7 +118,6 @@ describe('terminalWorkspaceContextRuntime', () => {
     expect(runtime.terminalTabTooltip(panels[1])).toContain('Progress: Running 58%')
 
     expect(runtime.terminalTabMeta(panels[2])).toBe('runbooks/deploy.md')
-    expect(runtime.terminalTabKindBadge(panels[2])).toBe('')
     expect(runtime.terminalStatusLabel(panels[2])).toBe('Editor')
 
     expect(runtime.pendingAiSessionsForPanel(panels[1]).map((session) => session.title)).toEqual(['Approve deployment'])

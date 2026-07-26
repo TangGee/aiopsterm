@@ -44,12 +44,6 @@ export const createTerminalWorkspaceContextRuntime = ({ workspace, activeTermina
     return pathBaseName(panel.cwd) || 'local'
   }
 
-  const terminalTabKindBadge = (panel: TerminalPanel) => {
-    if (panel.kind === 'managed-ai-session') return 'AI'
-    if (panel.kind === 'project-file') return 'FILE'
-    return ''
-  }
-
   const terminalTabShowsState = (panel: TerminalPanel) =>
     Boolean(panel.terminalProgress || panel.status === 'connecting' || panel.status === 'error' || panel.status === 'closed')
 
@@ -147,7 +141,6 @@ export const createTerminalWorkspaceContextRuntime = ({ workspace, activeTermina
     terminalContextText,
     terminalStatusLabel,
     terminalSshTargetLabel,
-    terminalTabKindBadge,
     terminalTabMeta,
     terminalTabProgressStyle,
     terminalTabShowsState,

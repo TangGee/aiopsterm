@@ -191,6 +191,14 @@ test('project files uses a contextual drawer inside the persistent AI panel', as
     const monacoEditor = projectEditor.locator('.files-monaco-editor')
     await expect(projectEditor).toBeVisible()
     await expect(monacoEditor).toHaveClass(/monaco-ready/)
+    const projectFileTab = page.locator('.terminal-tab.active')
+    await expect(projectFileTab.locator('.terminal-tab-kind')).toHaveCount(0)
+    await expect(projectFileTab.locator('.terminal-tab-icon')).toHaveAttribute('data-terminal-tab-kind', 'project-file')
+    const [projectFileIconBox, projectFileCloseBox] = await Promise.all([
+      projectFileTab.locator('.terminal-tab-icon').boundingBox(),
+      projectFileTab.locator('.terminal-tab-close').boundingBox()
+    ])
+    expect(projectFileIconBox!.x + projectFileIconBox!.width).toBeLessThan(projectFileCloseBox!.x)
     const editorGeometry = await Promise.all([
       projectEditor.boundingBox(),
       projectEditor.locator('header').boundingBox(),

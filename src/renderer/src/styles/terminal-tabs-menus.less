@@ -186,12 +186,6 @@
   display: block;
 }
 
-.terminal-tab.active .terminal-tab-label,
-.terminal-tab:hover .terminal-tab-label,
-.terminal-tab:focus-within .terminal-tab-label {
-  padding-right: 23px;
-}
-
 .terminal-tab-title {
   display: block;
   min-width: 0;
@@ -203,16 +197,20 @@
   line-height: 1.2;
 }
 
-.terminal-tab-kind {
-  flex: 0 0 auto;
+.terminal-tab-icon {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
   align-self: center;
-  padding: 1px 3px;
-  border: 1px solid color-mix(in srgb, var(--theme-module-active-border) 76%, transparent);
-  border-radius: 4px;
-  background: color-mix(in srgb, var(--theme-module-active-panel-bg) 32%, transparent);
-  font-size: 9.5px;
-  line-height: 1.2;
-  text-transform: uppercase;
+  display: grid;
+  place-items: center;
+  color: color-mix(in srgb, currentColor 86%, var(--theme-module-active-accent));
+}
+
+.terminal-tab-icon svg {
+  width: 14px;
+  height: 14px;
+  stroke-width: 1.75;
 }
 
 .terminal-tab-state {
@@ -274,12 +272,9 @@
 }
 
 .terminal-tab-close {
-  position: absolute;
-  right: 4px;
-  top: 50%;
-  transform: translateY(-50%);
   width: 20px;
   height: 20px;
+  flex: 0 0 20px;
   border: 0;
   border-radius: 5px;
   display: grid;

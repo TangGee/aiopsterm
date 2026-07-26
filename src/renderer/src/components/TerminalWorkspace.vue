@@ -49,6 +49,17 @@
           @dragend="handleTabDragEnd"
         >
           <span
+            class="terminal-tab-icon"
+            :data-terminal-tab-kind="panel.kind === 'project-file' ? 'project-file' : panel.kind === 'knowledge' ? 'knowledge' : panel.kind === 'managed-ai-session' ? 'managed-ai-session' : panel.sshSession ? 'ssh' : 'local'"
+            aria-hidden="true"
+          >
+            <FileCode2 v-if="panel.kind === 'project-file'" />
+            <BookOpenText v-else-if="panel.kind === 'knowledge'" />
+            <Bot v-else-if="panel.kind === 'managed-ai-session'" />
+            <Server v-else-if="panel.sshSession" />
+            <Terminal v-else />
+          </span>
+          <span
             v-if="renamingId !== panel.id"
             class="terminal-tab-label"
             @dblclick.stop="startRename(panel.id, panel.title)"
@@ -69,10 +80,6 @@
             :title="terminalTabStateLabel(panel)"
             aria-hidden="true"
           ></span>
-          <span
-            v-if="terminalTabKindBadge(panel)"
-            class="terminal-tab-kind"
-          >{{ terminalTabKindBadge(panel) }}</span>
           <span
             v-if="panel.terminalProgress?.value !== undefined"
             class="terminal-tab-progress-bar"
@@ -549,7 +556,7 @@
 
 <script setup lang="ts">
 import '@xterm/xterm/css/xterm.css'
-import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Clock, ListTree, LoaderCircle, RadioTower, Search, Sparkles, Terminal, X } from 'lucide-vue-next'
+import { BookOpenText, Bot, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Clock, FileCode2, ListTree, LoaderCircle, RadioTower, Search, Server, Sparkles, Terminal, X } from 'lucide-vue-next'
 import TransferProgress from '@/components/files/TransferProgress.vue'
 import KnowledgeCenterEditor from '@/components/KnowledgeCenterEditor.vue'
 import ManagedAiSessionContentWorkspace from '@/components/ManagedAiSessionContentWorkspace.vue'
@@ -676,7 +683,6 @@ const {
   terminalTabScrollState,
   terminalOutputMirrorText,
   terminalStatusLabel,
-  terminalTabKindBadge,
   terminalTabMeta,
   terminalTabProgressStyle,
   terminalTabShowsState,

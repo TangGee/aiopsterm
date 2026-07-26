@@ -10467,6 +10467,7 @@ describe('AppShell', () => {
     expect(localTab.find('.terminal-tab-title').text()).toBe('API shell')
     expect(localTab.find('.terminal-tab-meta').exists()).toBe(false)
     expect(localTab.find('.terminal-tab-kind').exists()).toBe(false)
+    expect(localTab.find('.terminal-tab-icon').attributes('data-terminal-tab-kind')).toBe('local')
     expect(localTab.attributes('title')).toContain('本地终端')
     expect(localTab.attributes('title')).toContain('/srv/projects/api')
 
@@ -10488,6 +10489,7 @@ describe('AppShell', () => {
     expect(sshTab.find('.terminal-tab-title').text()).toBe('Prod SSH')
     expect(sshTab.find('.terminal-tab-meta').exists()).toBe(false)
     expect(sshTab.find('.terminal-tab-kind').exists()).toBe(false)
+    expect(sshTab.find('.terminal-tab-icon').attributes('data-terminal-tab-kind')).toBe('ssh')
     expect(sshTab.attributes('title')).toContain('SSH')
     expect(sshTab.attributes('title')).toContain('状态:')
     expect(sshTab.attributes('title')).toContain('主机: ops@10.0.0.8:2222')
