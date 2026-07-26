@@ -2,6 +2,8 @@
 
 This page controls AI session discovery, notifications, hibernation, external notification protocol alerts, and notification automation entries for local-connection terminals.
 
+For operator workflows, see [AI Assistant And Sessions](../../best-practices/en-US/03-ai-assistant.md). Custom agent and script authors should use the [AI Session, File Change, And Notification Integration Guide](../../../developer/en-US/ai-notification-integration.md).
+
 ## Notification Preferences
 
 - Desktop Notifications: Controls system desktop notifications from the external notification protocol and AI session events. In-app notification history, AI Sessions, and event records remain available when this is off.

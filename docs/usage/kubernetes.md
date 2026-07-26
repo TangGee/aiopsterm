@@ -1,5 +1,7 @@
 # Kubernetes
 
+For the operator workflow from kubeconfig import through logs and terminal access, start with [Kubernetes Daily Operations](best-practices/en-US/12-kubernetes.md).
+
 Kubernetes clusters are added from a real kubeconfig source.
 
 - Use **导入 Kubeconfig** to choose a kubeconfig file. aiopsterm reads the file in the main process, parses it with a real YAML parser (canonical kubectl/client-go layouts and JSON kubeconfigs are supported), lists discovered contexts, and fills the cluster name, context, server URL, and default namespace from the selected context.

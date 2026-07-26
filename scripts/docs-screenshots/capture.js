@@ -83,6 +83,10 @@ async function scene(name, fn) {
 ;(async () => {
   fs.mkdirSync(OUT, { recursive: true })
   const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aiopsterm-docs-shots-'))
+  const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'aiopsterm-docs-project-'))
+  fs.mkdirSync(path.join(projectRoot, 'src'), { recursive: true })
+  fs.writeFileSync(path.join(projectRoot, 'README.md'), '# Service API\n\nDocumentation screenshot project.\n')
+  fs.writeFileSync(path.join(projectRoot, 'src', 'server.ts'), 'export const status = "ready"\n')
   log('launching built app...')
   const app = await _electron.launch({
     args: ['.', '--no-sandbox'],
@@ -182,6 +186,45 @@ async function scene(name, fn) {
     ])
   })
 
+  await scene('06b-ai-project-files', async () => {
+    const activeTab = page.locator('.terminal-tab.active').first()
+    const terminalSessionId = await activeTab.getAttribute('data-terminal-session-id')
+    const panelId = await activeTab.getAttribute('data-panel-id')
+    await page.evaluate(async ({ cwd, terminalSessionId, panelId }) => {
+      await window.aiops.publishAiAgentSessionEvent({
+        source: 'codex',
+        sessionId: 'docs-project-session',
+        event: 'SessionStart',
+        title: 'Service API changes',
+        summary: 'Updating server status',
+        cwd,
+        terminalSessionId,
+        panelId
+      })
+    }, { cwd: projectRoot, terminalSessionId, panelId })
+    await page.waitForTimeout(1800)
+    await page.evaluate(async () => {
+      await window.aiops.mutateProjectEntry({
+        source: 'codex',
+        sessionId: 'docs-project-session',
+        kind: 'create-file',
+        relativePath: 'src/generated.ts'
+      })
+    })
+    await page.waitForTimeout(1200)
+    await page.locator('[data-testid="ai-project-files-toggle"]').click()
+    await page.locator('.project-files-panel').waitFor({ state: 'visible', timeout: 10000 })
+    await snap(page, '06b-ai-project-files', [
+      ['toggle', '[data-testid="ai-project-files-toggle"]'],
+      ['header', '.project-files-header'],
+      ['recent', '.project-files-recent'],
+      ['recentRow', '.project-files-recent-row'],
+      ['tree', '.project-files-tree'],
+      ['treeRow', '.project-files-tree-row']
+    ])
+    await page.locator('[data-testid="project-files-close"]').click()
+  })
+
   await scene('07-agents-mode', async () => {
     await page.locator('[data-testid="agents-mode-entry"]').click()
     await page.locator('.agents-search input').waitFor({ state: 'visible', timeout: 15000 })
@@ -279,6 +322,33 @@ async function scene(name, fn) {
     ])
   })
 
+  await scene('11b-database-workspace', async () => {
+    await rail('数据库').click()
+    await page.locator('.database-workspace').waitFor({ state: 'visible', timeout: 10000 })
+    await page.waitForTimeout(2200)
+    await snap(page, '11b-database-workspace', [
+      ['workspace', '.database-workspace'],
+      ['sidebar', '.db-sidebar'],
+      ['tree', '.db-tree'],
+      ['main', '.db-main'],
+      ['tabs', '.db-workspace-tabs'],
+      ['overview', '.db-overview']
+    ])
+  })
+
+  await scene('11c-kubernetes-workspace', async () => {
+    await rail('Kubernetes').click()
+    await page.locator('.k8s-workspace').waitFor({ state: 'visible', timeout: 10000 })
+    await page.waitForTimeout(2200)
+    await snap(page, '11c-kubernetes-workspace', [
+      ['workspace', '.k8s-workspace'],
+      ['contexts', '.k8s-context-strip'],
+      ['terminal', '.k8s-terminal-surface'],
+      ['clusterConfig', '.k8s-cluster-config-container'],
+      ['resources', '.k8s-resource-workspace']
+    ])
+  })
+
   const settingsPage = async (navText, shotName, extra) => {
     await rail('设置').click()
     await page.waitForTimeout(1200)
@@ -297,8 +367,17 @@ async function scene(name, fn) {
   ]))
   await scene('14-settings-models', () => settingsPage('模型', '14-settings-models', []))
   await scene('15-settings-shortcuts', () => settingsPage('快捷键', '15-settings-shortcuts', []))
-  await scene('16b-settings-export-mcp', () => settingsPage('导出 MCP', '16b-settings-export-mcp', []))
+  await scene('16b-settings-export-mcp', () => settingsPage('导出 MCP', '16b-settings-export-mcp', [
+    ['bridgeCard', '.export-mcp-card >> nth=0'],
+    ['hostsHeader', '.external-codex-mcp-card .agent-hook-card-header', 'aiopsterm_hosts']
+  ]))
   await scene('17-settings-about', () => settingsPage('关于', '17-settings-about', []))
+  await scene('18-settings-ai-notifications', () => settingsPage('AI 通知', '18-settings-ai-notifications', [
+    ['preferences', '.settings-section-card >> nth=0'],
+    ['soundRow', '.settings-checkbox-item', '通知声音'],
+    ['customSound', '.notification-sound-row'],
+    ['hookInstaller', '.agent-hook-card-header']
+  ]))
 
   await scene('hostagent-and-mcp', async () => {
     await rail('设置').click()

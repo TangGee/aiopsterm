@@ -2,6 +2,8 @@
 
 本页位于 `设置 -> 导出 MCP`，用于把 aiopsterm 能力按用途导出成三个独立 MCP server。外部 Codex、Claude Code 或其他支持 MCP 的 Agent 可以只安装需要的服务，避免无关 tools 占用上下文：`aiopsterm_hosts` 提供主机和 SSH 能力，`aiopsterm_ai_sessions` 提供托管 AI 会话能力，`aiopsterm_databases` 提供经过授权的数据库只读能力。
 
+按任务选择和安装三个服务的流程见 [MCP 集成最佳实践](../../best-practices/zh-CN/06-mcp.md)。
+
 ## 前置条件
 
 导出 MCP 由 aiopsterm 启动环境变量控制：

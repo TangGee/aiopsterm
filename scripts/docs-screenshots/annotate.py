@@ -150,6 +150,11 @@ FIGS = [
   dict(src='08-ai-sessions', out='ai-sessions-inbox', crop=(0, 30, 460, 560), scale=1.5, callouts=[
     dict(n=1, box=dict(x=6, y=38, w=34, h=34), side='right', dist=55),
   ]),
+  dict(src='06b-ai-project-files', out='ai-project-files', crop=(930, 30, 1440, 900), scale=1.2, callouts=[
+    dict(n=1, key='header', side='left', dist=50),
+    dict(n=2, key='recent', side='left', dist=50),
+    dict(n=3, key='tree', side='left', dist=50),
+  ]),
   # ---- quick commands ----
   dict(src='09-quick-commands', out='quick-commands', crop=(0, 30, 460, 640), scale=1.5, callouts=[
     dict(n=1, key='toolbarLeft', side='bottom', dist=45),
@@ -167,6 +172,18 @@ FIGS = [
     dict(n=1, key='tree', side='right', dist=50, pad=2),
     dict(n=2, key='modeToggle', side='bottom-left', dist=55),
     dict(n=3, key='editor', side='bottom-left', dist=1, outline=False),
+  ]),
+  # ---- database and kubernetes ----
+  dict(src='11b-database-workspace', out='database-workspace', callouts=[
+    dict(n=1, key='sidebar', side='right', dist=50, pad=2),
+    dict(n=2, key='tabs', side='bottom', dist=40),
+    dict(n=3, key='overview', side='top-left', dist=1, outline=False),
+  ]),
+  dict(src='11c-kubernetes-workspace', out='kubernetes-workspace', callouts=[
+    dict(n=1, key='contexts', side='bottom', dist=40),
+    dict(n=2, key='terminal', side='bottom', dist=40, pad=2),
+    dict(n=3, key='clusterConfig', side='bottom', dist=40, pad=2),
+    dict(n=4, key='resources', side='top', dist=40, pad=2),
   ]),
   # ---- settings ----
   dict(src='12-settings-general', out='settings-general', callouts=[
@@ -195,6 +212,14 @@ FIGS = [
   ]),
   dict(src='16b-settings-export-mcp', out='settings-export-mcp', callouts=[
     dict(n=1, key='nav', side='right', dist=60),
+    dict(n=2, key='bridgeCard', side='left', dist=45),
+    dict(n=3, key='hostsHeader', side='left', dist=45),
+  ]),
+  dict(src='18-settings-ai-notifications', out='settings-ai-notifications', callouts=[
+    dict(n=1, key='nav', side='right', dist=60),
+    dict(n=2, key='soundRow', side='right', dist=55),
+    dict(n=3, key='customSound', side='right', dist=55),
+    dict(n=4, key='hookInstaller', side='left', dist=45),
   ]),
   dict(src='20-settings-rules', out='settings-rules', callouts=[
     dict(n=1, key='tabs', side='bottom', dist=45),

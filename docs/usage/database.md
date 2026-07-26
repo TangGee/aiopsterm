@@ -1,5 +1,7 @@
 # Database Workspace
 
+For connection, SQL, DB AI, and exported read-only MCP workflows, start with [Database And SQL](best-practices/en-US/11-database-sql.md).
+
 The Database workspace manages saved connections, schema browsing, table data, and SQL consoles through backend-owned runtimes.
 
 - Database workspace labels follow the effective application language through explicit locale keys. Simplified Chinese (`zh-CN`) uses Chinese labels; locales without a database-specific translation use their existing base locale.

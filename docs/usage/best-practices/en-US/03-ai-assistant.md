@@ -68,6 +68,44 @@ Everyday actions: double-click a row to locate its terminal (or restore an idle 
 
 > Tip: after editing a transcript, restart that AI conversation — a running agent keeps its old context in memory.
 
+## Observe And Edit Files Changed By AI
+
+![AI project files](../images/ai-project-files.png)
+
+In the image, **①** identifies the project and capability, **②** shows recent changes, and **③** is the lazy project tree.
+
+When a managed AI session is bound to a local project, open **Project Files** from the right-side AI-session toolbar. The drawer keeps the agent state and the real files on disk in one workspace:
+
+- **Recent changes** groups files reported as created, modified, deleted, or renamed by an Agent Hook or an explicit file-change event.
+- The **project tree** loads folders on demand and supports creating, renaming, moving, and deleting files inside the project.
+- Click a file to edit it in Monaco. Changes auto-save after about one second of inactivity or when the editor loses focus.
+- The editor watches the disk revision. If the agent or another process changes the same file while you are editing, it asks you to **Reload** or **Overwrite** instead of silently losing either version.
+
+The session reports `Native`, `Adapter`, or `Limited` file capability. Every operation is restricted to the canonical project root; paths that escape it are rejected. Recent changes come from native agent events, recognized file tools, or explicit reporting. aiopsterm does not guess that arbitrary shell commands represent agent file edits.
+
+A practical review loop:
+
+1. Open the target session under **Running** and verify its project path.
+2. Review renames and deletions in **Recent changes** before sampling modified files.
+3. Edit corrections in place. On conflict, reload and merge first; overwrite only when your editor content is intentionally authoritative.
+4. Return to the terminal, run tests, and use the session state or notification to confirm completion.
+
+## Notifications And Custom Sounds
+
+![AI notification settings](../images/settings-ai-notifications.png)
+
+Open **① AI Notifications**, enable or disable notification sound at **②**, import or preview custom audio at **③**, and manage coding-agent Hooks at **④**.
+
+Open **Settings -> AI Notifications** to install the matching Agent Hook and configure desktop notifications, the control-bar bell, and sounds. Choose a built-in sound or import an MP3, WAV, OGG, M4A, AAC, FLAC, or WebM file. Imported audio is copied into `notification-sounds/` under the app user-data directory, so moving the original file does not break the setting. Preview it before saving.
+
+Tune interruption by event severity:
+
+- Keep routine progress in the AI Sessions list only.
+- Use desktop notifications plus a short sound for approvals, questions, and confirmations.
+- Give completion and failure different sounds so you can judge urgency while away from the screen.
+
+The top-bar bell prioritizes managed AI sessions that need input and cycles through them. Generic notifications sent by developer tools through `aio notify` may also appear in the control notification queue, but the two stores are distinct: a generic notification does not create or update a managed AI session.
+
 ## Rules And Models
 
 - User Rules enabled under Settings -> Host Agent -> Rules are injected into every Classic conversation. They shape style and workflow but cannot override the host allowlist, terminal security policy, or approval requirements.

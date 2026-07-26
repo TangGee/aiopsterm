@@ -2,6 +2,8 @@
 
 This page manages embedded Host Agent capabilities. Its secondary tabs are `Conversation & Hosts`, `MCP`, `Skills`, and `Rules`. External Agent Hooks, AI Session Hibernation, desktop alerts, and Control Socket entries are configured in [AI Notifications](ai-notifications.md); MCP export for external Agents is configured in [Export MCP](export-mcp.md).
 
+For the end-to-end workflow, see [Use AI On Remote Hosts](../../best-practices/en-US/09-host-agent.md).
+
 ## Conversation & Hosts
 
 This subpage manages command execution, context enrichment, security approval, and terminal wait behavior for embedded Codex and embedded AI chat.

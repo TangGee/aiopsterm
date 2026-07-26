@@ -1,5 +1,7 @@
 # AI Command Tools
 
+For choosing between direct input, AI Command, Classic Agent, Quick Commands, and broadcast execution, start with [Quick Commands And Macro Recording](best-practices/en-US/04-quick-commands.md) and [Use AI On Remote Hosts](best-practices/en-US/09-host-agent.md).
+
 Classic host-management AI runs on the official Cline SDK through an aiopsterm sidecar. The three profiles expose different capabilities:
 
 | Mode | Cline tools | Behavior |

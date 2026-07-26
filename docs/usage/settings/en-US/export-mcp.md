@@ -2,6 +2,8 @@
 
 This page lives under `Settings -> Export MCP`. It exports aiopsterm capabilities as three independent MCP servers so external Codex, Claude Code, or another MCP-capable Agent can install only the tools it needs: `aiopsterm_hosts` for hosts and SSH, `aiopsterm_ai_sessions` for managed AI sessions, and `aiopsterm_databases` for authorized read-only database access.
 
+For task-based selection and installation, see [MCP Integration Best Practices](../../best-practices/en-US/06-mcp.md).
+
 ## Prerequisites
 
 Export MCP is controlled by aiopsterm startup environment variables:

@@ -1,6 +1,19 @@
 # Quick Commands And Macro Recording
 
-Quick Commands keep named command scripts in the main-process backend, runnable from anywhere. Macro recording turns a real terminal interaction into a replayable quick command.
+aiopsterm offers several command paths, from one command to multi-host operations. Quick Commands keep reusable scripts in the main-process backend, macro recording turns real terminal input into a replayable script, and AI Command or Agent handles one-off generation and multi-step diagnosis.
+
+## Choose The Right Command Path
+
+| Need | Recommended entry | Execution model |
+| --- | --- | --- |
+| You know the command and want a fast input | Terminal context menu -> Input Command | Floating input closes after a successful write |
+| Ask AI for one command | Terminal context menu -> AI Command, or Classic Command | Shows an editable command card before manual execution |
+| Run a multi-step diagnosis | Classic Agent or Host Agent | Calls tools step by step under the security and approval policy |
+| Repeat a fixed operation | Quick Commands | Run submits all steps; Paste leaves the final step for confirmation |
+| Run one diagnostic in several terminals | Global Execution | Broadcasts only to the terminals you selected |
+| Call desktop capabilities from automation | `aio` control commands | Uses the local control socket for execution and notifications |
+
+> Safety: before Global Execution, verify every target terminal's host, user, and working directory. Never broadcast destructive writes across mixed environments.
 
 ## Panel Overview
 
@@ -35,3 +48,9 @@ Organization tips:
 ## Referencing In AI Chat
 
 Type `/` in the AI composer to insert a quick command as a mention, letting the AI explain or adapt your existing scripts.
+
+## Multi-Terminal And Automation Scenarios
+
+- **Global Execution** in the terminal context menu works well for the same read-only check across comparable hosts. Open or split the intended terminals, select the exact scope, then send.
+- Classic Command creates one proposal. Switch to Agent when the next step depends on observed output instead of compressing a multi-step workflow into one opaque shell command.
+- External scripts can use the `aio` CLI to inspect surfaces, write terminal commands, and send notifications. See the [Control CLI Tutorial](../../control-cli-tutorial.md) for parameters and safety boundaries.

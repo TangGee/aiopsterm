@@ -2,6 +2,8 @@
 
 本页集中管理主机内嵌 AI Agent 能力。顶部二级入口包含 `对话与主机`、`MCP`、`Skills` 和 `规则`。外部 Agent Hook、AI 会话休眠、桌面提醒和 Control Socket 在 [AI 通知](ai-notifications.md) 中配置；外部 Agent 使用的 MCP 导出在 [导出 MCP](export-mcp.md) 中配置。
 
+实际操作流程见[用 AI 操作远程主机](../../best-practices/zh-CN/09-host-agent.md)。
+
 ## 对话与主机
 
 该子页管理内嵌 Codex 和内嵌 AI 对话中的命令执行、上下文增强、安全审批和终端等待行为。
