@@ -158,7 +158,7 @@ export const fetchJumpserverHosts = async (
         method: 'GET',
         headers: {
           Accept: 'application/json',
-          Authorization: `PrivateToken ${token}`,
+          Authorization: `Token ${token}`,
           ...(config.organizationId?.trim() ? { 'X-JMS-ORG': config.organizationId.trim() } : {})
         },
         signal: controller.signal

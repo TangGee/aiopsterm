@@ -34,6 +34,7 @@
     "package:verify": "node scripts/verify-package-target.mjs",
     "typecheck": "vue-tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.sidecar.json",
     "test": "npm run audit:i18n && npm run native:ensure:node && vitest run",
+    "test:live:jumpserver": "npm run native:ensure:node && vitest run tests/live-jumpserver-backend.test.ts",
     "test:live:ssh": "npm run native:ensure:node && vitest run tests/live-ssh-backend.test.ts",
     "e2e": "npm run test:e2e",
     "test:e2e": "npm run build && npm run native:ensure:electron && playwright test",

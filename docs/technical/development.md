@@ -122,6 +122,21 @@ The controller status check expects HTTP 200 from the Web entry point and HTTP
 and authentication boundary are available, but it does not prove an authorized
 asset synchronization.
 
+Run the opt-in live backend test with a disposable administrator Private Token:
+
+```bash
+AIOPSTERM_LIVE_JUMPSERVER_URL=http://127.0.0.1:8080 \
+AIOPSTERM_LIVE_JUMPSERVER_TOKEN='<private-token>' \
+npm run test:live:jumpserver
+```
+
+The test uses the actual JumpServer and aiopsterm SQLite backends. It creates a
+uniquely named Linux host in JumpServer, refreshes it into an isolated temporary
+aiopsterm database, renames it remotely and verifies an in-place update, deletes
+it remotely and verifies stale-record removal, then removes all temporary local
+state. JumpServer calls the credential a Private Token, but its HTTP
+authentication scheme is `Authorization: Token <private-token>`.
+
 For an end-to-end refresh test:
 
 1. Open `http://127.0.0.1:8080`, sign in with the initial administrator

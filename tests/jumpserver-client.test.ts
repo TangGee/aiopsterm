@@ -29,7 +29,7 @@ const organization: AiopsAssetRecord = {
 }
 
 describe('JumpServer API client', () => {
-  it('loads all host pages with PrivateToken and organization headers', async () => {
+  it('loads all host pages with the JumpServer Token authorization scheme and organization headers', async () => {
     const calls: Array<{ url: string; headers: Headers }> = []
     const fetchRuntime = vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
       const url = String(input)
@@ -62,7 +62,7 @@ describe('JumpServer API client', () => {
 
     expect(hosts).toHaveLength(2)
     expect(calls[0].url).toContain('/api/v1/assets/hosts/?limit=100&offset=0')
-    expect(calls[0].headers.get('Authorization')).toBe('PrivateToken private-token')
+    expect(calls[0].headers.get('Authorization')).toBe('Token private-token')
     expect(calls[0].headers.get('X-JMS-ORG')).toBe('org-id')
     expect(calls[1].url).toBe('https://jumpserver.example.com/api/v1/assets/hosts/?limit=1&offset=1')
   })
