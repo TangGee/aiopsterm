@@ -8,7 +8,7 @@
       :project-files-active="projectFilesActive"
       :project-files-session="activeManagedAiSession"
       @toggle-project-files="toggleProjectFiles"
-      @close-project-files="projectFilesActive = false"
+      @close-project-files="closeProjectFiles"
       @product-session-request-consumed="$emit('productSessionRequestConsumed', $event)"
     />
   </section>
@@ -32,7 +32,6 @@ defineEmits<{
 
 const workspace = useWorkspaceStore()
 const projectFilesAvailable = ref(false)
-const projectFilesActive = ref(false)
 let availabilityGeneration = 0
 
 const activeManagedAiSession = computed(() => {
@@ -68,34 +67,39 @@ const activeSessionSignature = computed(() => {
   ].join(':')
 })
 
+const activeTerminalSessionId = computed(() => activeManagedAiSession.value?.terminalSessionId || '')
+const projectFilesActive = computed(() =>
+  projectFilesAvailable.value &&
+  workspace.rightAssistantSurfaceForTerminal(activeTerminalSessionId.value) === 'files'
+)
+
 const refreshProjectFilesAvailability = async () => {
   const session = activeManagedAiSession.value
   const requestGeneration = ++availabilityGeneration
   projectFilesAvailable.value = false
-  if (!session) {
-    projectFilesActive.value = false
-    return
-  }
+  if (!session) return
   const getContext = projectFilesClient.getContext()
-  if (!getContext) {
-    projectFilesActive.value = false
-    return
-  }
+  if (!getContext) return
   try {
     const result = await getContext({ source: session.source, sessionId: session.id })
     if (requestGeneration !== availabilityGeneration) return
     projectFilesAvailable.value = Boolean(result.ok && result.data)
-    if (!projectFilesAvailable.value) projectFilesActive.value = false
   } catch {
     if (requestGeneration !== availabilityGeneration) return
     projectFilesAvailable.value = false
-    projectFilesActive.value = false
   }
 }
 
 const toggleProjectFiles = () => {
   if (!projectFilesAvailable.value) return
-  projectFilesActive.value = !projectFilesActive.value
+  workspace.setRightAssistantSurfaceForTerminal(
+    activeTerminalSessionId.value,
+    projectFilesActive.value ? 'ai' : 'files'
+  )
+}
+
+const closeProjectFiles = () => {
+  workspace.setRightAssistantSurfaceForTerminal(activeTerminalSessionId.value, 'ai')
 }
 
 watch(activeSessionSignature, () => void refreshProjectFilesAvailability(), { immediate: true })
@@ -103,7 +107,7 @@ watch(activeSessionSignature, () => void refreshProjectFilesAvailability(), { im
 watch(
   () => props.productSessionRequest?.sequence,
   (sequence) => {
-    if (sequence) projectFilesActive.value = false
+    if (sequence) closeProjectFiles()
   }
 )
 </script>

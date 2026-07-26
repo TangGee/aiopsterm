@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { onScopeDispose } from 'vue'
+import { onScopeDispose, ref, watch } from 'vue'
 import { createWorkspaceStoreState } from '@/stores/workspaceState'
 import { createWorkspaceFilesController, type FilesUiMode } from '@/services/files/workspaceFilesController'
 import {
@@ -169,6 +169,8 @@ export type {
   WorkspaceBillingSettings as BillingSettings,
   WorkspaceUserLoginTab as UserLoginTab
 } from '@/services/user/workspaceUserController'
+
+export type RightAssistantSurface = 'ai' | 'files'
 
 export const useWorkspaceStore = defineStore('workspace', () => {
   const {
@@ -401,6 +403,39 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     userLoginCodeCountdown,
     userLoginCodeSending
   } = createWorkspaceStoreState()
+
+  const rightAssistantSurfaceByTerminal = ref<Record<string, RightAssistantSurface>>({})
+  const normalizedRightAssistantTerminalId = (terminalSessionId: string) => terminalSessionId.trim()
+  const rightAssistantSurfaceForTerminal = (terminalSessionId: string): RightAssistantSurface => {
+    const normalized = normalizedRightAssistantTerminalId(terminalSessionId)
+    return normalized ? rightAssistantSurfaceByTerminal.value[normalized] || 'ai' : 'ai'
+  }
+  const setRightAssistantSurfaceForTerminal = (
+    terminalSessionId: string,
+    surface: RightAssistantSurface
+  ) => {
+    const normalized = normalizedRightAssistantTerminalId(terminalSessionId)
+    if (!normalized || !panels.value.some((panel) => panel.sessionId === normalized)) return false
+    rightAssistantSurfaceByTerminal.value[normalized] = surface
+    return true
+  }
+  const releaseRightAssistantSurfaceForTerminal = (terminalSessionId: string) => {
+    const normalized = normalizedRightAssistantTerminalId(terminalSessionId)
+    if (!normalized || !(normalized in rightAssistantSurfaceByTerminal.value)) return false
+    delete rightAssistantSurfaceByTerminal.value[normalized]
+    return true
+  }
+
+  watch(
+    () => panels.value.map((panel) => panel.sessionId || '').filter(Boolean),
+    (liveTerminalSessionIds) => {
+      const live = new Set(liveTerminalSessionIds)
+      Object.keys(rightAssistantSurfaceByTerminal.value).forEach((terminalSessionId) => {
+        if (!live.has(terminalSessionId)) delete rightAssistantSurfaceByTerminal.value[terminalSessionId]
+      })
+    },
+    { flush: 'sync' }
+  )
 
   const {
     isUserSubscriptionActive,
@@ -1340,6 +1375,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     panels,
     activePanelId,
     activePanel,
+    rightAssistantSurfaceByTerminal,
+    rightAssistantSurfaceForTerminal,
+    setRightAssistantSurfaceForTerminal,
+    releaseRightAssistantSurfaceForTerminal,
     isLeftVisible,
     isRightVisible,
     conversations,

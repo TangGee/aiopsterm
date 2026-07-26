@@ -34,8 +34,7 @@ const PassivePanel = defineComponent({
   `
 })
 
-const mountPanel = () => {
-  const pinia = createPinia()
+const mountPanel = (pinia = createPinia()) => {
   setActivePinia(pinia)
   return mount(RightAssistantPanel, {
     props: {
@@ -149,6 +148,124 @@ describe('RightAssistantPanel', () => {
       sessionId: 'terminal-owner'
     })
     expect(wrapper.find('[data-testid="project-files-toggle"]').exists()).toBe(true)
+  })
+
+  it('remembers the selected surface independently for each terminal', async () => {
+    getProjectFileContext.mockImplementation(async ({ sessionId }: { sessionId: string }) => ({
+      ok: true,
+      data: {
+        source: 'codex',
+        sessionId,
+        projectRoot: `/work/${sessionId}`,
+        capability: 'adapter',
+        recent: []
+      }
+    }))
+
+    const wrapper = mountPanel()
+    selectManagedSession('first', '/work/first')
+    const workspace = useWorkspaceStore()
+    const firstPanelId = workspace.activePanelId
+    await flushPromises()
+    await wrapper.get('[data-testid="project-files-toggle"]').trigger('click')
+    expect(wrapper.find('[data-testid="project-files-drawer"]').exists()).toBe(true)
+
+    const secondPanel = workspace.createPanel()
+    secondPanel.sessionId = 'terminal-second'
+    workspace.upsertManagedAiSession({
+      source: 'codex',
+      event: 'session_start',
+      sessionId: 'second',
+      title: 'second',
+      summary: '',
+      panelId: secondPanel.id,
+      terminalSessionId: 'terminal-second',
+      cwd: '/work/second',
+      receivedAt: Date.now() + 1
+    })
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="project-files-toggle"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="project-files-drawer"]').exists()).toBe(false)
+
+    workspace.activePanelId = firstPanelId
+    await flushPromises()
+    expect(wrapper.find('[data-testid="project-files-drawer"]').exists()).toBe(true)
+  })
+
+  it('keeps the files surface when the same terminal changes managed session', async () => {
+    getProjectFileContext.mockImplementation(async ({ sessionId }: { sessionId: string }) => ({
+      ok: true,
+      data: {
+        source: 'codex',
+        sessionId,
+        projectRoot: `/work/${sessionId}`,
+        capability: 'adapter',
+        recent: []
+      }
+    }))
+
+    const wrapper = mountPanel()
+    selectManagedSession('before-resume', '/work/before-resume')
+    const workspace = useWorkspaceStore()
+    await flushPromises()
+    await wrapper.get('[data-testid="project-files-toggle"]').trigger('click')
+
+    workspace.upsertManagedAiSession({
+      source: 'codex',
+      event: 'session_start',
+      sessionId: 'after-resume',
+      title: 'after-resume',
+      summary: '',
+      terminalSessionId: 'terminal-before-resume',
+      cwd: '/work/after-resume',
+      receivedAt: Date.now() + 1
+    })
+    await flushPromises()
+
+    expect(getProjectFileContext).toHaveBeenLastCalledWith({
+      source: 'codex',
+      sessionId: 'after-resume'
+    })
+    expect(wrapper.find('[data-testid="project-files-drawer"]').exists()).toBe(true)
+  })
+
+  it('keeps the terminal preference when the panel component is remounted', async () => {
+    getProjectFileContext.mockResolvedValue({
+      ok: true,
+      data: {
+        source: 'codex',
+        sessionId: 'eligible',
+        projectRoot: '/work/eligible',
+        capability: 'adapter',
+        recent: []
+      }
+    })
+
+    const pinia = createPinia()
+    const firstWrapper = mountPanel(pinia)
+    selectManagedSession('eligible', '/work/eligible')
+    await flushPromises()
+    await firstWrapper.get('[data-testid="project-files-toggle"]').trigger('click')
+    firstWrapper.unmount()
+
+    const secondWrapper = mountPanel(pinia)
+    await flushPromises()
+    expect(secondWrapper.find('[data-testid="project-files-drawer"]').exists()).toBe(true)
+  })
+
+  it('releases the remembered surface when the terminal session closes', async () => {
+    const wrapper = mountPanel()
+    selectManagedSession('eligible', '/work/eligible')
+    const workspace = useWorkspaceStore()
+    workspace.setRightAssistantSurfaceForTerminal('terminal-eligible', 'files')
+
+    const panel = workspace.panels.find((item) => item.id === workspace.activePanelId)!
+    panel.sessionId = undefined
+    await flushPromises()
+
+    expect(workspace.rightAssistantSurfaceForTerminal('terminal-eligible')).toBe('ai')
+    expect(wrapper.find('[data-testid="project-files-drawer"]').exists()).toBe(false)
   })
 
   it('closes project files when a product session request takes focus', async () => {

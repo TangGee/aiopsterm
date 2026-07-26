@@ -115,6 +115,13 @@ test('project files uses a contextual drawer inside the persistent AI panel', as
     await expect(drawer.locator('.project-files-header-title strong')).toHaveText(path.basename(projectRoot))
     await expect(drawer.locator('.project-files-tree-row').filter({ hasText: 'src' })).toBeVisible()
 
+    await page.locator('.side-rail .rail-button[data-module-key="assets"]').click()
+    await expect(page.locator('.right-assistant-panel')).toHaveCount(0)
+    await page.locator('.side-rail .rail-button[data-module-key="workspace"]').click()
+    await page.locator(`.terminal-tab[data-panel-id="${firstTerminal.panelId}"]`).click()
+    await expect(drawer).toBeVisible()
+    await expect(toggle).toHaveAttribute('aria-pressed', 'true')
+
     const panelBox = await page.locator('.right-assistant-panel').boundingBox()
     const aiBox = await page.locator('.ai-panel').boundingBox()
     const headerBox = await page.locator('.ai-header').boundingBox()
