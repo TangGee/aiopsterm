@@ -90,6 +90,59 @@ For runtime or user-visible behavior changes, add focused tests at the changed b
 npm run test:e2e
 ```
 
+## Local JumpServer Integration Lab
+
+The current development workstation has an isolated JumpServer v4.10.17 lab for
+testing the real asset refresh integration. The VM disk and JumpServer data are
+stored on the internal Samsung SSD at:
+
+```text
+/media/tlinux/0e309940-ef14-4090-84c0-346ff5b89a2d/jumpserver-lab
+```
+
+Do not move this lab to `/media/tlinux/sdd`; that mount is a slower removable
+disk. The lab runs in a 4 vCPU, 8 GiB QEMU/KVM virtual machine so it does not
+consume the host Docker data directory. Its host ports are bound to loopback
+only:
+
+- Web and API: `http://127.0.0.1:8080`
+- JumpServer SSH gateway: `127.0.0.1:2222`
+- VM maintenance SSH: `127.0.0.1:10022`
+
+Use the lab controller to manage and inspect it:
+
+```bash
+/media/tlinux/0e309940-ef14-4090-84c0-346ff5b89a2d/jumpserver-lab/labctl.sh start
+/media/tlinux/0e309940-ef14-4090-84c0-346ff5b89a2d/jumpserver-lab/labctl.sh status
+/media/tlinux/0e309940-ef14-4090-84c0-346ff5b89a2d/jumpserver-lab/labctl.sh stop
+```
+
+The controller status check expects HTTP 200 from the Web entry point and HTTP
+401 from the asset API when no token is supplied. This proves that the service
+and authentication boundary are available, but it does not prove an authorized
+asset synchronization.
+
+For an end-to-end refresh test:
+
+1. Open `http://127.0.0.1:8080`, sign in with the initial administrator
+   account, and replace the default password.
+2. Create a JumpServer Private Token for the test administrator.
+3. Create one Linux host asset with a unique name, address, platform, and node.
+4. In aiopsterm, configure the JumpServer API URL as
+   `http://127.0.0.1:8080` and save the Private Token.
+5. Run Refresh JumpServer Resources and confirm that the host appears once with
+   its JumpServer asset id, address, platform, and node path.
+6. Rename the host in JumpServer, refresh again, and confirm the existing local
+   record is updated instead of duplicated.
+7. Disable or delete the host in JumpServer, refresh again, and confirm the
+   product's documented stale-resource behavior.
+
+The VM currently enables only the components needed for asset API testing:
+Core, Celery, Web, PostgreSQL, and Redis. Koko, Lion, and Chen are disabled, so
+interactive protocol-gateway testing requires a separate lab configuration.
+`labctl.sh` and the VM files are workstation-local artifacts and are not part of
+the application package.
+
 ## Cline Agent Sidecar Verification
 
 Electron 31 cannot load the Node 22-oriented Cline SDK directly. Classic host management and DB AI therefore use an independent bundle executed by the exact-pinned Node `22.20.0` runtime. Bun `1.3.13` is only the bundler and is not distributed. After changing Agent contracts, profiles, provider mapping, tool bridges, persistence, approvals, abort handling, or packaging, run:
