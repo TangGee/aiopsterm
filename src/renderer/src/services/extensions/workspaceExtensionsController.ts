@@ -114,6 +114,13 @@ export const createWorkspaceExtensionsController = (state: WorkspaceExtensionsCo
     extensionDragActive.value = active
   }
 
+  const confirmTrustedExecutableCode = (name: string) => {
+    if (import.meta.env.MODE === 'test') return true
+    return window.confirm(
+      `${name} 可能包含在 aiopsterm 主进程中运行的受信任代码。安装者需要自行确认插件来源、安全性和稳定性。是否继续？`
+    )
+  }
+
   const setExtensionInstallLoading = (pluginId: string, loading: boolean) => {
     const next = { ...extensionInstallLoadingMap.value }
     if (loading) next[pluginId] = true
@@ -302,6 +309,10 @@ export const createWorkspaceExtensionsController = (state: WorkspaceExtensionsCo
       setExtensionNotice('该插件需要订阅后安装')
       return
     }
+    if (plugin.manifestVersion === 2 && !confirmTrustedExecutableCode(plugin.name)) {
+      setExtensionNotice(`${plugin.name} 安装已取消`)
+      return
+    }
     const installExtensionPluginBridge = extensionsClient.installExtensionPlugin()
     if (!installExtensionPluginBridge) {
       setExtensionNotice(`${plugin.name} 安装服务不可用`)
@@ -343,6 +354,10 @@ export const createWorkspaceExtensionsController = (state: WorkspaceExtensionsCo
   const updateExtensionPlugin = async (pluginId: string) => {
     const plugin = extensionPlugins.value.find((item) => item.pluginId === pluginId)
     if (!plugin || !plugin.isPlugin || !plugin.installed || !plugin.hasUpdate) return
+    if (plugin.manifestVersion === 2 && !confirmTrustedExecutableCode(plugin.name)) {
+      setExtensionNotice(`${plugin.name} 更新已取消`)
+      return
+    }
     const updateExtensionPluginBridge = extensionsClient.updateExtensionPlugin()
     if (!updateExtensionPluginBridge) {
       setExtensionNotice(`${plugin.name} 更新服务不可用`)
@@ -390,7 +405,13 @@ export const createWorkspaceExtensionsController = (state: WorkspaceExtensionsCo
       return
     }
     try {
-      const result = await uninstallExtensionPluginBridge({ plugin: cloneExtensionPluginForBackend(plugin) })
+      const removeData =
+        import.meta.env.MODE !== 'test' &&
+        window.confirm(`是否同时删除 ${plugin.name} 保存的状态、配置、密钥和日志？选择取消将只卸载插件代码。`)
+      const result = await uninstallExtensionPluginBridge({
+        plugin: cloneExtensionPluginForBackend(plugin),
+        ...(removeData ? { removeData: true } : {})
+      })
       if (!result?.ok) {
         setExtensionNotice(result?.errorMessage || `${plugin.name} 卸载失败`)
         return
@@ -474,6 +495,10 @@ export const createWorkspaceExtensionsController = (state: WorkspaceExtensionsCo
     const packageName = fileName.replace(/\.aiopsterm-plugin$/i, '').replace(/[-_]+/g, ' ').trim() || 'Local Plugin'
     if (!filePath) {
       setExtensionNotice(`${packageName} 安装需要真实本地路径，请从桌面客户端拖入 .aiopsterm-plugin 文件`)
+      return false
+    }
+    if (!confirmTrustedExecutableCode(packageName)) {
+      setExtensionNotice(`${packageName} 安装已取消`)
       return false
     }
     const installExtensionPackageBridge = extensionsClient.installExtensionPackage()

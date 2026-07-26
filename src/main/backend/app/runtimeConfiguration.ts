@@ -26,7 +26,7 @@ import { configureExportMcpTokenRuntime, getEffectiveExportMcpToken, rotateStore
 import { configureControlSocketRuntime, getControlSocketPath } from '../control/controlSocket'
 import { configureDatabaseBackendRuntime } from '../database/database'
 import { configureDatabaseCommentsRuntime } from '../database/databaseComments'
-import { configureExtensionBackendRuntime } from '../extensions/extensions'
+import { activateInstalledExtensions, configureExtensionBackendRuntime, runExtensionBastionAction } from '../extensions/extensions'
 import { ensureExternalCodexMcpBridgeServer } from '../codex/externalCodexMcpBridge'
 import { configureFilesBackendRuntime } from '../files/files'
 import { configureKubernetesBackendRuntime, setKubernetesTerminalEventSink } from '../kubernetes/kubernetes'
@@ -159,7 +159,20 @@ export const configureMainBackendRuntimes = (input: ConfigureMainRuntimeInput) =
   configureAssetBackendRuntime({
     getConfig: input.getConfig,
     jumpserverFetch: shouldUseAssetsSeedData() ? createJumpserverSeedFetch() : net.fetch as typeof fetch,
-    useSeedData: shouldUseAssetsSeedData()
+    useSeedData: shouldUseAssetsSeedData(),
+    refreshBastionAssets: async (type, organization) => {
+      const result = await runExtensionBastionAction(type, 'refreshAssets', { organization })
+      if (!result.ok) throw Object.assign(new Error(result.errorMessage || 'Bastion Provider refresh failed.'), { code: result.errorCode })
+      const data = result.data
+      const assets =
+        Array.isArray(data)
+          ? data
+          : data && typeof data === 'object' && Array.isArray((data as { assets?: unknown }).assets)
+            ? (data as { assets: unknown[] }).assets
+            : null
+      if (!assets) throw new Error('Bastion Provider refreshAssets must return an asset array.')
+      return assets as Parameters<typeof saveAsset>[0][]
+    }
   })
   configureFilesBackendRuntime({
     getConfig: input.getConfig,
@@ -262,8 +275,25 @@ export const configureMainBackendRuntimes = (input: ConfigureMainRuntimeInput) =
       : join(app.getAppPath(), 'resources', 'builtin-plugins'),
     appVersion: app.getVersion(),
     saveAsset: input.saveAsset,
-    fetch: (url, init) => net.fetch(url, init)
+    fetch: (url, init) => net.fetch(url, init),
+    emitRuntimeEvent: (event) => broadcastWindowEvent(BrowserWindow.getAllWindows(), 'extensions:runtime-event', event),
+    executeCoreCommand: async (commandId, args) => {
+      if (commandId === 'aiopsterm.terminal.write') {
+        const sessionId = String(args[0] || '').trim()
+        const data = String(args[1] || '')
+        if (!sessionId || !data) throw new Error('Terminal session id and data are required.')
+        return input.writeTerminalBySessionId(sessionId, data)
+      }
+      if (commandId === 'aiopsterm.openExternal') {
+        const url = String(args[0] || '').trim()
+        if (!url) throw new Error('External URL is required.')
+        await shell.openExternal(url)
+        return true
+      }
+      throw new Error(`Core command "${commandId}" is not registered.`)
+    }
   })
+  void activateInstalledExtensions()
   configureKubernetesBackendRuntime({
     stateDir: join(userDataPath, 'kubernetes'),
     useSeedData: shouldUseKubernetesSeedData(),

@@ -31,6 +31,9 @@
         @run-command="runPluginCommand"
         @update-provider-value="updateProviderValue"
         @sync-provider="syncProvider"
+        @cancel-provider="cancelProvider"
+        @notice="workspace.setExtensionNotice"
+        @refresh-plugins="workspace.refreshExtensionPlugins"
       />
     </template>
   </section>
@@ -53,6 +56,7 @@ import { useWorkspaceStore } from '@/stores/workspace'
 const workspace = useWorkspaceStore()
 const providerValues = ref<Record<string, string>>({})
 const providerLoading = ref(false)
+const activeProviderId = ref('')
 
 const isSelectedBusy = computed(() => {
   const id = workspace.selectedExtension?.pluginId
@@ -112,6 +116,7 @@ const syncProvider = async (providerId: string) => {
     for (const field of provider.fields) values[field.key] = providerValues.value[`${providerId}:${field.key}`] || ''
   }
   providerLoading.value = true
+  activeProviderId.value = providerId
   try {
     const result = await bridge({ pluginId: plugin.pluginId, providerId, values })
     if (!result?.ok) {
@@ -127,7 +132,16 @@ const syncProvider = async (providerId: string) => {
     workspace.setExtensionNotice(error instanceof Error ? error.message : '资产导入失败')
   } finally {
     providerLoading.value = false
+    activeProviderId.value = ''
   }
+}
+
+const cancelProvider = async (providerId: string) => {
+  const plugin = workspace.selectedExtension
+  const bridge = extensionsClient.cancelExtensionAssetProvider()
+  if (!plugin || !bridge || activeProviderId.value !== providerId) return
+  const result = await bridge({ pluginId: plugin.pluginId, providerId })
+  workspace.setExtensionNotice(result?.data?.cancelled ? '正在取消资产导入' : '没有正在运行的资产导入')
 }
 
 onMounted(() => {

@@ -318,6 +318,7 @@ const api: AiopsPreloadApi = {
   checkModelProvider: (input) => ipcRenderer.invoke('models:check-provider', input),
   listExtensionPlugins: () => ipcRenderer.invoke('extensions:list'),
   syncExtensionAssetProvider: (input) => ipcRenderer.invoke('extensions:provider:sync-assets', input),
+  cancelExtensionAssetProvider: (input) => ipcRenderer.invoke('extensions:provider:cancel', input),
   installExtensionPlugin: (input) => ipcRenderer.invoke('extensions:install-plugin', input),
   updateExtensionPlugin: (input) => ipcRenderer.invoke('extensions:update-plugin', input),
   installExtensionPackage: (input) => ipcRenderer.invoke('extensions:install-package', input),
@@ -326,6 +327,20 @@ const api: AiopsPreloadApi = {
   uninstallExtensionPlugin: (input) => ipcRenderer.invoke('extensions:uninstall-plugin', input),
   openExtensionSubscription: (input) => ipcRenderer.invoke('extensions:open-subscription', input),
   cancelExtensionInstall: (pluginId: string) => ipcRenderer.invoke('extensions:cancel-install', pluginId),
+  runExtensionRuntimeAction: (input) => ipcRenderer.invoke('extensions:runtime-action', input),
+  executeExtensionCommand: (input) => ipcRenderer.invoke('extensions:execute-command', input),
+  listExtensionTreeChildren: (input) => ipcRenderer.invoke('extensions:tree-children', input),
+  listExtensionContexts: () => ipcRenderer.invoke('extensions:contexts'),
+  getExtensionConfiguration: (pluginId: string) => ipcRenderer.invoke('extensions:configuration:get', pluginId),
+  saveExtensionConfiguration: (input) => ipcRenderer.invoke('extensions:configuration:save', input),
+  listExtensionVersions: () => ipcRenderer.invoke('extensions:versions'),
+  listExtensionBastions: () => ipcRenderer.invoke('extensions:bastions'),
+  invokeExtensionBastion: (type: string, method: string, input) => ipcRenderer.invoke('extensions:bastion:invoke', type, method, input),
+  onExtensionRuntimeEvent: (listener) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, payload: Parameters<typeof listener>[0]) => listener(payload)
+    ipcRenderer.on('extensions:runtime-event', wrapped)
+    return () => ipcRenderer.off('extensions:runtime-event', wrapped)
+  },
   onExtensionInstallProgress: (listener) => {
     const wrapped = (_event: Electron.IpcRendererEvent, payload: Parameters<typeof listener>[0]) => listener(payload)
     ipcRenderer.on('extensions:install-progress', wrapped)

@@ -9,7 +9,7 @@ type ExtensionPlugin = {
   pluginId: string
   name: string
   description: string
-  kind: 'content' | 'provider'
+  kind: 'content' | 'provider' | 'runtime'
   iconKey: 'runbook' | 'cloud' | 'private' | 'local'
   tabName: string
   show: boolean
@@ -31,12 +31,12 @@ type ExtensionPlugin = {
   size?: number
   categories?: string[]
   functions?: Array<{ title: string; desc: string }>
-  commands?: Array<{ id: string; title: string; description: string; command: string }>
+  commands?: Array<{ id: string; title: string; description: string; command?: string }>
   assetProviders?: Array<{
     id: string
     name: string
     description: string
-    adapter: 'json-assets'
+    adapter: 'json-assets' | 'runtime'
     fields: Array<{ key: string; label: string; type: 'textarea'; required: boolean; defaultValue?: string }>
   }>
   isPrivate?: boolean
@@ -332,7 +332,7 @@ describe('extension plugin backend boundary', () => {
     expect(result.data.find((plugin: ExtensionPlugin) => plugin.pluginId === 'cloud-assets')).toBeUndefined()
   })
 
-  it('discovers both aiopsterm built-in plugin kinds from app resources', async () => {
+  it('discovers both executable aiopsterm built-in plugins from app resources', async () => {
     configureExtensionBackendRuntime({
       extensionRootDir,
       builtinPluginDir: join(process.cwd(), 'resources', 'builtin-plugins')
@@ -342,82 +342,49 @@ describe('extension plugin backend boundary', () => {
 
     expect(result.ok).toBe(true)
     expect(result.data).toHaveLength(2)
-    expect(result.data.find((plugin: ExtensionPlugin) => plugin.pluginId === 'aiopsterm.linux-incident-runbook')).toMatchObject({
-      kind: 'content',
+    expect(result.data.find((plugin: ExtensionPlugin) => plugin.pluginId === 'aiopsterm.operations-toolkit')).toMatchObject({
+      kind: 'runtime',
       source: 'builtin',
       installed: true,
-      required: true,
+      required: false,
       installable: false,
-      commands: expect.arrayContaining([expect.objectContaining({ id: 'linux.overview', command: expect.stringContaining('uptime') })])
+      manifestVersion: 2,
+      main: 'main.cjs',
+      runtimeStatus: 'active',
+      commands: expect.arrayContaining([expect.objectContaining({ id: 'aiopsterm.operations-toolkit.run' })]),
+      views: [expect.objectContaining({ id: 'aiopsterm.operations-toolkit.checks' })]
     })
-    expect(result.data.find((plugin: ExtensionPlugin) => plugin.pluginId === 'aiopsterm.generic-cmdb-assets')).toMatchObject({
-      kind: 'provider',
+    expect(result.data.find((plugin: ExtensionPlugin) => plugin.pluginId === 'aiopsterm.http-cmdb-provider')).toMatchObject({
+      kind: 'runtime',
       source: 'builtin',
       installed: true,
-      required: true,
-      assetProviders: [expect.objectContaining({ id: 'generic-cmdb-json', adapter: 'json-assets' })]
+      required: false,
+      manifestVersion: 2,
+      runtimeStatus: 'active',
+      assetProviders: [expect.objectContaining({ id: 'aiopsterm.http-cmdb-provider.assets', adapter: 'runtime' })],
+      configuration: expect.objectContaining({ title: 'HTTP CMDB 配置' })
     })
   })
 
-  it('imports assets through the host-owned built-in provider adapter', async () => {
-    const savedAssets: any[] = []
+  it('runs the executable Operations Toolkit command and tree provider', async () => {
     configureExtensionBackendRuntime({
       extensionRootDir,
-      builtinPluginDir: join(process.cwd(), 'resources', 'builtin-plugins'),
-      saveAsset: (input: any) => {
-        const asset = { ...input, uuid: `uuid-${savedAssets.length + 1}` }
-        savedAssets.push(asset)
-        return { ok: true, data: asset }
-      }
+      builtinPluginDir: join(process.cwd(), 'resources', 'builtin-plugins')
     })
 
-    const result = await syncExtensionAssetProvider({
-      pluginId: 'aiopsterm.generic-cmdb-assets',
-      providerId: 'generic-cmdb-json',
-      values: {
-        payload: JSON.stringify([
-          {
-            externalId: 'web-01',
-            name: 'web-01',
-            host: '192.0.2.20',
-            username: 'ops',
-            tags: ['linux']
-          }
-        ])
-      }
-    })
-
-    expect(result).toMatchObject({
+    const modulePath = '../src/main/backend/extensions/extensions'
+    const backend = await import(modulePath)
+    await backend.activateInstalledExtensions()
+    await expect(backend.listPluginTreeChildren({ viewId: 'aiopsterm.operations-toolkit.checks' })).resolves.toMatchObject({
       ok: true,
-      data: {
-        imported: 1,
-        assets: [expect.objectContaining({
-          id: 'aiopsterm.generic-cmdb-assets-generic-cmdb-json-web-01',
-          host: '192.0.2.20',
-          data_source: 'refresh',
-          tags: expect.arrayContaining([
-            'linux',
-            'plugin:aiopsterm.generic-cmdb-assets',
-            'provider:generic-cmdb-json'
-          ])
-        })]
-      }
+      data: { items: expect.arrayContaining([expect.objectContaining({ id: 'overview', contextValue: 'runnable' })]) }
     })
-    expect(savedAssets).toHaveLength(1)
-
-    savedAssets.length = 0
-    const invalidResult = await syncExtensionAssetProvider({
-      pluginId: 'aiopsterm.generic-cmdb-assets',
-      providerId: 'generic-cmdb-json',
-      values: {
-        payload: JSON.stringify([
-          { externalId: 'valid-first', name: 'valid-first', host: '192.0.2.21' },
-          { externalId: 'invalid-second', name: 'invalid-second' }
-        ])
-      }
+    await expect(
+      backend.executePluginCommand({ commandId: 'aiopsterm.operations-toolkit.run', args: ['overview'] })
+    ).resolves.toMatchObject({
+      ok: true,
+      data: { value: { terminalText: expect.stringContaining('uptime') } }
     })
-    expect(invalidResult).toMatchObject({ ok: false, errorCode: 'EXTENSION_PROVIDER_INPUT_INVALID' })
-    expect(savedAssets).toHaveLength(0)
   })
 
   it('discovers store plugin catalog rows from configured real package directories', async () => {
@@ -1125,6 +1092,163 @@ describe('extension plugin backend boundary', () => {
       })
     } finally {
       await rm(localPackage.dir, { recursive: true, force: true })
+    }
+  })
+
+  it('installs and activates a V2 executable package from its declared main entry', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-extension-v2-'))
+    const filePath = join(dir, 'example-runtime.aiopsterm-plugin')
+    const manifest = {
+      manifestVersion: 2,
+      id: 'example.runtime-package',
+      displayName: 'Example Runtime Package',
+      version: '1.0.0',
+      description: 'Executable package fixture.',
+      engines: { aiopsterm: '>=0.1.0' },
+      main: 'main.cjs',
+      contributes: {
+        commands: [
+          {
+            id: 'example.runtime-package.hello',
+            title: 'Hello',
+            description: 'Return a runtime value.'
+          }
+        ],
+        views: [
+          {
+            id: 'example.runtime-package.tree',
+            name: 'Runtime Tree'
+          }
+        ]
+      }
+    }
+    await writeFile(
+      filePath,
+      createZipFixture([
+        { name: 'aiopsterm.plugin.json', content: JSON.stringify(manifest) },
+        {
+          name: 'main.cjs',
+          content:
+            "exports.activate = function (context) { context.subscriptions.push(context.commands.registerCommand('example.runtime-package.hello', function () { return 'hello' })); context.subscriptions.push(context.views.registerTreeDataProvider('example.runtime-package.tree', { getChildren: function () { return [{ id: 'node', label: 'Node' }] } })) }"
+        }
+      ])
+    )
+
+    try {
+      const result = await installExtensionPackage(
+        { fileName: 'example-runtime.aiopsterm-plugin', filePath },
+        undefined,
+        { stepDelayMs: 0 }
+      )
+      expect(result).toMatchObject({
+        ok: true,
+        data: {
+          plugin: {
+            pluginId: 'example.runtime-package',
+            manifestVersion: 2,
+            kind: 'runtime',
+            runtimeStatus: 'active'
+          }
+        }
+      })
+      const modulePath = '../src/main/backend/extensions/extensions'
+      const backend = await import(modulePath)
+      await expect(backend.executePluginCommand({ commandId: 'example.runtime-package.hello' })).resolves.toEqual({
+        ok: true,
+        data: { commandId: 'example.runtime-package.hello', value: 'hello' }
+      })
+      await expect(backend.listPluginTreeChildren({ viewId: 'example.runtime-package.tree' })).resolves.toMatchObject({
+        ok: true,
+        data: { items: [{ id: 'node', label: 'Node' }] }
+      })
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects V2 packages with missing main entries or unnamespaced contributions', async () => {
+    const missingMain = await createLocalPackage({
+      manifestVersion: 2,
+      id: 'example.missing-main',
+      displayName: 'Missing Main',
+      main: 'main.cjs',
+      kind: undefined,
+      contributes: {
+        commands: [{ id: 'example.missing-main.run', title: 'Run', description: 'Run' }]
+      }
+    })
+    const unnamespacedDir = await mkdtemp(join(tmpdir(), 'aiopsterm-extension-v2-invalid-'))
+    const unnamespacedPath = join(unnamespacedDir, 'unnamespaced.aiopsterm-plugin')
+    await writeFile(
+      unnamespacedPath,
+      createZipFixture([
+        {
+          name: 'aiopsterm.plugin.json',
+          content: JSON.stringify({
+            manifestVersion: 2,
+            id: 'example.namespaced',
+            displayName: 'Namespaced',
+            version: '1.0.0',
+            engines: { aiopsterm: '>=0.1.0' },
+            main: 'main.cjs',
+            contributes: {
+              commands: [{ id: 'other.run', title: 'Run', description: 'Run' }]
+            }
+          })
+        },
+        { name: 'main.cjs', content: 'exports.activate = function () {}' }
+      ])
+    )
+
+    try {
+      await expect(
+        installExtensionPackage({ fileName: missingMain.fileName, filePath: missingMain.filePath }, undefined, { stepDelayMs: 0 })
+      ).resolves.toMatchObject({ ok: false, errorCode: 'EXTENSION_PACKAGE_MAIN_MISSING' })
+      await expect(
+        installExtensionPackage({ fileName: 'unnamespaced.aiopsterm-plugin', filePath: unnamespacedPath }, undefined, { stepDelayMs: 0 })
+      ).resolves.toMatchObject({ ok: false, errorCode: 'EXTENSION_PACKAGE_CONTRIBUTION_ID_INVALID' })
+    } finally {
+      await rm(missingMain.dir, { recursive: true, force: true })
+      await rm(unnamespacedDir, { recursive: true, force: true })
+    }
+  })
+
+  it('rolls back an executable package when activation fails', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'aiopsterm-extension-v2-failure-'))
+    const filePath = join(dir, 'activation-failure.aiopsterm-plugin')
+    await writeFile(
+      filePath,
+      createZipFixture([
+        {
+          name: 'aiopsterm.plugin.json',
+          content: JSON.stringify({
+            manifestVersion: 2,
+            id: 'example.activation-failure',
+            displayName: 'Activation Failure',
+            version: '1.0.0',
+            engines: { aiopsterm: '>=0.1.0' },
+            main: 'main.cjs',
+            contributes: {
+              commands: [{ id: 'example.activation-failure.run', title: 'Run', description: 'Run' }]
+            }
+          })
+        },
+        { name: 'main.cjs', content: "exports.activate = function () { throw new Error('fixture activation failure') }" }
+      ])
+    )
+
+    try {
+      await expect(
+        installExtensionPackage({ fileName: 'activation-failure.aiopsterm-plugin', filePath }, undefined, { stepDelayMs: 0 })
+      ).resolves.toMatchObject({
+        ok: false,
+        errorCode: 'EXTENSION_PLUGIN_ACTIVATION_FAILED',
+        errorMessage: 'fixture activation failure'
+      })
+      const catalog = await listExtensionPlugins()
+      expect(catalog.data.find((plugin: ExtensionPlugin) => plugin.pluginId === 'example.activation-failure')).toBeUndefined()
+    } finally {
+      await rm(dir, { recursive: true, force: true })
     }
   })
 

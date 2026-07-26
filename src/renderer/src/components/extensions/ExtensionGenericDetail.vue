@@ -26,7 +26,7 @@
         </button>
         <template v-else-if="plugin.isPlugin">
           <button
-            v-if="!plugin.required"
+            v-if="!plugin.required && plugin.source !== 'builtin' && plugin.source !== 'development'"
             class="op_btn danger"
             :disabled="isBusy"
             @click="$emit('uninstall', plugin.pluginId)"
@@ -83,13 +83,20 @@
                 <code>{{ command.command }}</code>
               </div>
               <button
+                v-if="command.command"
                 class="op_btn"
-                @click="$emit('runCommand', command.command)"
+                @click="$emit('runCommand', command.command || '')"
               >
                 发送到终端
               </button>
             </article>
           </section>
+          <ExtensionRuntimeFeatures
+            :plugin="plugin"
+            @notice="$emit('notice', $event)"
+            @run-terminal-text="$emit('runCommand', $event)"
+            @refresh-plugins="$emit('refreshPlugins')"
+          />
           <section
             v-for="provider in plugin.assetProviders || []"
             :key="provider.id"
@@ -115,6 +122,13 @@
               @click="$emit('syncProvider', provider.id)"
             >
               {{ providerLoading ? '正在导入' : '导入资产' }}
+            </button>
+            <button
+              v-if="providerLoading"
+              class="op_btn"
+              @click="$emit('cancelProvider', provider.id)"
+            >
+              取消导入
             </button>
           </section>
           <div
@@ -149,6 +163,7 @@ import ExtensionDetailTabs from '@/components/extensions/ExtensionDetailTabs.vue
 import ExtensionFeatureList from '@/components/extensions/ExtensionFeatureList.vue'
 import ExtensionPluginHeader from '@/components/extensions/ExtensionPluginHeader.vue'
 import ExtensionPluginSidebar from '@/components/extensions/ExtensionPluginSidebar.vue'
+import ExtensionRuntimeFeatures from '@/components/extensions/ExtensionRuntimeFeatures.vue'
 import type { WorkspaceExtensionInstallProgress } from '@/services/extensions/workspaceExtensionsController'
 import type { ExtensionPluginRuntimeConfig } from '@shared/contracts/extensions'
 
@@ -180,5 +195,8 @@ defineEmits<{
   runCommand: [command: string]
   updateProviderValue: [providerId: string, fieldKey: string, value: string]
   syncProvider: [providerId: string]
+  cancelProvider: [providerId: string]
+  notice: [message: string]
+  refreshPlugins: []
 }>()
 </script>

@@ -1,46 +1,73 @@
 {
-  "manifestVersion": 1,
-  "id": "aiopsterm.generic-cmdb-assets",
-  "displayName": "Generic CMDB Assets",
-  "version": "1.0.0",
-  "kind": "provider",
-  "description": "将标准 JSON 资产列表导入 aiopsterm，用于验证受控 Provider 插件能力。",
+  "manifestVersion": 2,
+  "id": "aiopsterm.http-cmdb-provider",
+  "displayName": "HTTP CMDB Provider",
+  "version": "2.0.0",
+  "description": "从标准 HTTP JSON 接口同步 SSH 资产。",
   "engines": {
     "aiopsterm": ">=0.1.0"
   },
+  "main": "main.cjs",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "required": false,
   "iconKey": "cloud",
   "categories": [
     "Assets",
     "CMDB"
   ],
-  "readme": "Generic CMDB Assets 是 aiopsterm 自有的内置 Provider 插件。插件只提交 JSON 数据，解析、校验、ID 生成和资产写入全部由宿主后端完成。",
+  "readme": "HTTP CMDB Provider 从用户配置的 HTTP JSON 接口获取资产。访问令牌由宿主加密保存，资产校验和持久化由 aiopsterm 后端完成。",
   "functions": [
     {
-      "title": "CMDB JSON 导入",
-      "desc": "验证并导入主机名称、地址、端口、用户、分组和标签。"
+      "title": "HTTP CMDB 同步",
+      "desc": "支持数组或包含 assets 数组的 JSON 响应。"
     },
     {
-      "title": "后端所有权",
-      "desc": "资产 ID、字段归一化和持久化由 aiopsterm 后端负责。"
+      "title": "加密认证信息",
+      "desc": "Bearer Token 通过插件 secrets 存储。"
     }
   ],
   "contributes": {
+    "commands": [
+      {
+        "id": "aiopsterm.http-cmdb-provider.test",
+        "title": "测试 CMDB 连接",
+        "description": "请求已配置的 CMDB 地址并返回资产数量。"
+      }
+    ],
     "assetProviders": [
       {
-        "id": "generic-cmdb-json",
-        "name": "Generic CMDB JSON",
-        "description": "粘贴 JSON 数组或包含 assets 数组的对象。",
-        "adapter": "json-assets",
-        "fields": [
-          {
-            "key": "payload",
-            "label": "CMDB JSON",
-            "type": "textarea",
-            "required": true,
-            "defaultValue": "[\n  {\n    \"externalId\": \"demo-web-01\",\n    \"name\": \"demo-web-01\",\n    \"host\": \"192.0.2.10\",\n    \"username\": \"ops\",\n    \"port\": 22,\n    \"group\": \"CMDB Demo\",\n    \"tags\": [\"demo\", \"linux\"]\n  }\n]"
-          }
-        ]
+        "id": "aiopsterm.http-cmdb-provider.assets",
+        "name": "HTTP CMDB",
+        "description": "从已配置的 HTTP JSON 接口同步资产。",
+        "adapter": "runtime",
+        "fields": []
       }
-    ]
+    ],
+    "configuration": {
+      "title": "HTTP CMDB 配置",
+      "properties": [
+        {
+          "key": "endpoint",
+          "title": "CMDB 地址",
+          "description": "返回资产数组或包含 assets 数组的 HTTP 地址。",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "token",
+          "title": "Bearer Token",
+          "description": "可选认证令牌，由宿主加密保存。",
+          "type": "password"
+        },
+        {
+          "key": "defaultGroup",
+          "title": "默认分组",
+          "type": "text",
+          "defaultValue": "CMDB"
+        }
+      ]
+    }
   }
 }

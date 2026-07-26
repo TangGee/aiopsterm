@@ -59,7 +59,7 @@ export type AiopsAssetRecord = {
   proxyName?: string
   keychainId?: string
   jumpHostId?: string
-  bastionType?: 'jumpserver' | 'teleport'
+  bastionType?: string
   jumpserverApiUrl?: string
   jumpserverOrgId?: string
   jumpserverAssetId?: string
@@ -113,7 +113,7 @@ export type AiopsAssetInput = {
   proxyName?: string
   keychainId?: string
   jumpHostId?: string
-  bastionType?: 'jumpserver' | 'teleport'
+  bastionType?: string
   jumpserverApiUrl?: string
   jumpserverOrgId?: string
   jumpserverAssetId?: string

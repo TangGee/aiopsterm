@@ -10,6 +10,7 @@ import type {
 } from '@shared/contracts/extensions'
 import {
   asRecord,
+  booleanFromUnknown,
   clonePlugin,
   emitExtensionProgress,
   extensionPluginOperationError,
@@ -20,9 +21,14 @@ import {
   normalizeExtensionIconKey,
   normalizeSha256,
   parseManifestAssetProviders,
+  parseManifestBastionProviders,
   parseManifestCommands,
+  parseManifestConfiguration,
   parseManifestFunctions,
+  parseManifestMenus,
   parseStringArray,
+  parseManifestViews,
+  parseManifestViewsWelcome,
   trimText,
   type ExtensionFetchResponse,
   type ExtensionPackageRuntimeConfig,
@@ -83,7 +89,7 @@ const supportsAiopstermVersion = (range: string, appVersion: string) => {
 }
 
 type PluginFromManifestOptions = {
-  source: 'builtin' | 'local' | 'store'
+  source: 'builtin' | 'local' | 'store' | 'development'
   packagePath?: string
   storePackagePath?: string
   packageSize?: number
@@ -92,17 +98,44 @@ type PluginFromManifestOptions = {
   basePlugin?: ExtensionPluginRuntimeConfig
 }
 
+const extensionLocaleCandidates = () => {
+  const raw = String(process.env.LC_ALL || process.env.LC_MESSAGES || process.env.LANG || 'en-US')
+    .split('.')[0]
+    .replace('_', '-')
+  const language = raw.split('-')[0]
+  return [...new Set([raw, language, 'en-US', 'en'])]
+}
+
+const localizedManifestValue = (manifest: LocalExtensionPackageManifest, key: 'displayName' | 'description') => {
+  const i18n = asRecord(manifest.i18n)
+  if (!i18n) return ''
+  for (const locale of extensionLocaleCandidates()) {
+    const localized = asRecord(i18n[locale]) || asRecord(i18n[locale.toLowerCase()])
+    const value = trimText(localized?.[key])
+    if (value) return value
+  }
+  return ''
+}
+
 export const pluginFromAiopstermManifest = (
   manifest: LocalExtensionPackageManifest,
   options: PluginFromManifestOptions
 ): ExtensionPluginRuntimeConfig | ExtensionPluginOperationResult => {
   const pluginId = trimText(manifest.id)
   const version = trimText(manifest.version)
-  const displayName = trimText(manifest.displayName) || trimText(manifest.name) || pluginId
-  const kind = manifest.kind === 'content' || manifest.kind === 'provider' ? manifest.kind : ''
+  const displayName = localizedManifestValue(manifest, 'displayName') || trimText(manifest.displayName) || trimText(manifest.name) || pluginId
+  const localizedDescription = localizedManifestValue(manifest, 'description')
+  const manifestVersion = manifest.manifestVersion === 2 ? 2 : manifest.manifestVersion === 1 ? 1 : 0
+  const main = trimText(manifest.main)
+  const kind =
+    manifestVersion === 2
+      ? 'runtime'
+      : manifest.kind === 'content' || manifest.kind === 'provider'
+        ? manifest.kind
+        : ''
   const engineRange = trimText(manifest.engines?.aiopsterm)
-  if (manifest.manifestVersion !== 1) {
-    return localPackageErrorResult('EXTENSION_PACKAGE_MANIFEST_INVALID', 'aiopsterm.plugin.json must use manifestVersion 1.')
+  if (!manifestVersion) {
+    return localPackageErrorResult('EXTENSION_PACKAGE_MANIFEST_INVALID', 'aiopsterm.plugin.json must use manifestVersion 1 or 2.')
   }
   if (!pluginId) return localPackageErrorResult('EXTENSION_PACKAGE_MANIFEST_INVALID', 'aiopsterm.plugin.json must include an id.')
   if (!trimText(manifest.displayName)) {
@@ -110,6 +143,12 @@ export const pluginFromAiopstermManifest = (
   }
   if (!version) return localPackageErrorResult('EXTENSION_PACKAGE_MANIFEST_INVALID', 'aiopsterm.plugin.json must include a version.')
   if (!kind) return localPackageErrorResult('EXTENSION_PACKAGE_MANIFEST_INVALID', 'aiopsterm.plugin.json must use kind "content" or "provider".')
+  if (manifestVersion === 2 && (!main || !normalizePackageEntryName(main) || !/\.(?:cjs|js)$/i.test(main))) {
+    return localPackageErrorResult(
+      'EXTENSION_PACKAGE_MAIN_INVALID',
+      'Executable plugins must declare a relative JavaScript main entry.'
+    )
+  }
   if (!engineRange) {
     return localPackageErrorResult('EXTENSION_PACKAGE_ENGINE_REQUIRED', 'aiopsterm.plugin.json must declare engines.aiopsterm.')
   }
@@ -121,10 +160,15 @@ export const pluginFromAiopstermManifest = (
   }
   const commands = parseManifestCommands(manifest)
   const assetProviders = parseManifestAssetProviders(manifest)
-  if (kind === 'content' && !commands.length) {
+  const views = parseManifestViews(manifest)
+  const menus = parseManifestMenus(manifest)
+  const viewsWelcome = parseManifestViewsWelcome(manifest)
+  const configuration = parseManifestConfiguration(manifest)
+  const bastionProviders = parseManifestBastionProviders(manifest)
+  if (manifestVersion === 1 && kind === 'content' && !commands.length) {
     return localPackageErrorResult('EXTENSION_PACKAGE_CONTRIBUTIONS_REQUIRED', 'Content plugins must contribute at least one command.')
   }
-  if (kind === 'provider' && !assetProviders.length) {
+  if (manifestVersion === 1 && kind === 'provider' && !assetProviders.length) {
     return localPackageErrorResult('EXTENSION_PACKAGE_CONTRIBUTIONS_REQUIRED', 'Provider plugins must contribute at least one asset provider.')
   }
   const basePlugin = options.basePlugin
@@ -133,21 +177,36 @@ export const pluginFromAiopstermManifest = (
   const storeFlags = extractStoreManifestFlags(manifest)
   const packageDownloadSource = extractPackageManifestSource(manifest)
   const builtin = options.source === 'builtin'
+  const development = options.source === 'development'
+  const activationEvents = parseStringArray(manifest.activationEvents)
+  if (manifestVersion === 2) {
+    const contributedIds = [
+      ...commands.map((item) => item.id),
+      ...views.map((item) => item.id),
+      ...assetProviders.map((item) => item.id)
+    ]
+    if (contributedIds.some((id) => id !== pluginId && !id.startsWith(`${pluginId}.`))) {
+      return localPackageErrorResult(
+        'EXTENSION_PACKAGE_CONTRIBUTION_ID_INVALID',
+        `Executable plugin contribution ids must start with "${pluginId}.".`
+      )
+    }
+  }
   return {
     pluginId,
     name: options.source === 'store' ? basePlugin?.name || displayName : displayName,
-    description: trimText(manifest.description) || basePlugin?.description || `${displayName} aiopsterm plugin.`,
+    description: localizedDescription || trimText(manifest.description) || basePlugin?.description || `${displayName} aiopsterm plugin.`,
     kind,
     iconKey: normalizeExtensionIconKey(basePlugin?.iconKey || manifest.iconKey),
     tabName: basePlugin?.tabName || displayName,
     show: true,
     isPlugin: true,
-    installed: builtin,
+    installed: builtin || development,
     hasUpdate: false,
-    installedVersion: builtin ? version : '',
+    installedVersion: builtin || development ? version : '',
     latestVersion: version,
-    installable: builtin ? false : options.source === 'store' ? storeFlags.installable : true,
-    required: builtin || basePlugin?.required,
+    installable: builtin || development ? false : options.source === 'store' ? storeFlags.installable : true,
+    required: booleanFromUnknown(manifest.required) ?? (builtin ? true : development ? false : basePlugin?.required),
     isPrivate: builtin ? false : options.source === 'store' ? storeFlags.isPrivate : basePlugin?.isPrivate,
     isDraggedOnly: options.source === 'local',
     source: options.source,
@@ -158,10 +217,21 @@ export const pluginFromAiopstermManifest = (
       ? categories
       : basePlugin?.categories
         ? [...basePlugin.categories]
-        : [builtin ? 'Built-in' : options.source === 'store' ? 'Store' : 'Local'],
+        : [builtin ? 'Built-in' : development ? 'Development' : options.source === 'store' ? 'Store' : 'Local'],
     functions: functions.length ? functions : basePlugin?.functions?.map((item) => ({ ...item })),
     commands,
     assetProviders,
+    manifestVersion,
+    ...(main ? { main } : {}),
+    activationEvents: activationEvents.length ? activationEvents : manifestVersion === 2 ? ['onStartupFinished'] : undefined,
+    enabled: basePlugin?.enabled ?? true,
+    runtimeStatus: manifestVersion === 2 ? (basePlugin?.enabled === false ? 'disabled' : 'inactive') : undefined,
+    views,
+    menus,
+    viewsWelcome,
+    configuration,
+    bastionProviders,
+    installHint: trimText(manifest.installHint) || undefined,
     packagePath: options.packagePath,
     storePackagePath: options.storePackagePath,
     packageUrl: options.source === 'store' ? packageDownloadSource.packageUrl || basePlugin?.packageUrl : undefined,
@@ -190,6 +260,7 @@ const readUInt16LE = (buffer: Buffer, offset: number) => {
 }
 
 const parseLocalZipEntries = (buffer: Buffer): LocalZipEntry[] => {
+  if (buffer.byteLength > 50 * 1024 * 1024) throw new Error('Plugin package exceeds the 50 MiB compressed size limit.')
   const entries: LocalZipEntry[] = []
   let endOffset = -1
   const searchStart = Math.max(0, buffer.length - 0xffff - 22)
@@ -206,8 +277,10 @@ const parseLocalZipEntries = (buffer: Buffer): LocalZipEntry[] => {
   if (entryCount < 0 || centralDirectoryOffset < 0 || centralDirectoryOffset >= buffer.length) {
     throw new Error('Invalid ZIP central directory.')
   }
+  if (entryCount > 2000) throw new Error('Plugin package contains too many entries.')
 
   let cursor = centralDirectoryOffset
+  let totalUncompressedSize = 0
   for (let index = 0; index < entryCount; index++) {
     if (readUInt32LE(buffer, cursor) !== 0x02014b50) throw new Error('Invalid ZIP central directory entry.')
     const method = readUInt16LE(buffer, cursor + 10)
@@ -220,6 +293,9 @@ const parseLocalZipEntries = (buffer: Buffer): LocalZipEntry[] => {
     if ([method, compressedSize, uncompressedSize, fileNameLength, extraLength, commentLength, localHeaderOffset].some((value) => value < 0)) {
       throw new Error('Invalid ZIP entry header.')
     }
+    if (uncompressedSize > 50 * 1024 * 1024) throw new Error('Plugin package entry exceeds the 50 MiB size limit.')
+    totalUncompressedSize += uncompressedSize
+    if (totalUncompressedSize > 200 * 1024 * 1024) throw new Error('Plugin package exceeds the 200 MiB extracted size limit.')
 
     const nameStart = cursor + 46
     const nameEnd = nameStart + fileNameLength
@@ -264,7 +340,18 @@ export const findReadmeZipEntry = (zipEntries: LocalZipEntry[], manifest: LocalE
     const entry = findZipEntry(zipEntries, manifestReadme)
     if (entry) return entry
   }
-  return zipEntries.find((entry) => !entry.isDirectory && entry.entryName.replace(/\\/g, '/').toLowerCase() === 'readme.md') || null
+  const candidates = extensionLocaleCandidates().flatMap((locale) => [
+    `readme_${locale}.md`.toLowerCase(),
+    `readme.${locale}.md`.toLowerCase()
+  ])
+  candidates.push('readme.md')
+  for (const candidate of candidates) {
+    const entry = zipEntries.find(
+      (item) => !item.isDirectory && item.entryName.replace(/\\/g, '/').toLowerCase() === candidate
+    )
+    if (entry) return entry
+  }
+  return null
 }
 
 export const readZipEntryText = (entry: { getData: () => Buffer }) => entry.getData().toString('utf8')
@@ -686,6 +773,12 @@ export const parseLocalPackageManifest = (
     readme: readmeEntry ? readZipEntryText(readmeEntry) : undefined
   })
   if ('ok' in plugin) return plugin
+  if (plugin.manifestVersion === 2 && (!plugin.main || !findZipEntry(zipEntries, plugin.main))) {
+    return localPackageErrorResult(
+      'EXTENSION_PACKAGE_MAIN_MISSING',
+      `Executable plugin main entry "${plugin.main || ''}" was not found in the package.`
+    )
+  }
 
   return {
     entries: zipEntries,

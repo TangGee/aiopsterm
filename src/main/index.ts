@@ -12,6 +12,7 @@ import {
 } from './backend/agent/agentSessions'
 import { closeClineAgentRuntime } from './backend/agent/clineAgentRuntime'
 import { closeProjectFilesRuntime } from './backend/files/projectFiles'
+import { shutdownExtensions } from './backend/extensions/extensions'
 import { createProductSessionRegistry } from './backend/agent/productSessionRegistry'
 import { configureRuntimeLog, logRuntimeEvent } from './backend/app/runtimeLog'
 import { configureCrashDiagnosticsRuntime, shouldEnableCrashDiagnostics } from './backend/app/crashDiagnosticsRuntime'
@@ -384,6 +385,7 @@ app.whenReady().then(async () => {
 })
 
 app.on('window-all-closed', () => {
+  void shutdownExtensions()
   closeAiAgentSessionServer()
   void closeProjectFilesRuntime()
   closeControlSocketServer()
@@ -396,6 +398,7 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', (event) => {
+  void shutdownExtensions()
   void closeProjectFilesRuntime()
   closeControlSocketServer()
   closeCodexTerminalBridgeServer()

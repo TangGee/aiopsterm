@@ -2,6 +2,8 @@ import type {
   ExtensionPackageDownloadInput,
   ExtensionPackageDownloadResult,
   ExtensionPackageInstallInput,
+  ExtensionAssetProviderCancelInput,
+  ExtensionAssetProviderCancelResult,
   ExtensionAssetProviderSyncInput,
   ExtensionAssetProviderSyncResult,
   ExtensionPluginCancelResult,
@@ -46,6 +48,34 @@ import {
   removeInstalledExtensionPackageFiles,
   resolveStorePackageInput
 } from './extensionsPackageRuntime'
+import {
+  activateExtension,
+  cancelRuntimeAssetProvider,
+  configureExtensionHostRuntime,
+  deleteExtensionData,
+  deactivateExtension,
+  decorateExtensionPlugin,
+  executeExtensionCommand,
+  getExtensionConfiguration,
+  getExtensionBastionDefinitions,
+  getExtensionContexts,
+  getExtensionTreeChildren,
+  getExtensionVersions,
+  invokeExtensionBastion,
+  reloadExtension,
+  resetExtensionHostRuntimeForTests,
+  setExtensionEnabled,
+  shutdownExtensionHostRuntime,
+  syncRuntimeAssetProvider,
+  updateExtensionConfiguration
+} from './extensionHostRuntime'
+import type {
+  ExtensionCommandExecuteInput,
+  ExtensionConfigurationUpdateInput,
+  ExtensionRuntimeActionInput,
+  ExtensionRuntimeActionResult,
+  ExtensionTreeChildrenInput
+} from '@shared/contracts/extensions'
 
 export const EXTENSION_INSTALL_STEP_DELAY_MS = 120
 
@@ -59,14 +89,37 @@ const activeOperations = new Map<string, ActiveExtensionOperation>()
 
 export const configureExtensionBackendRuntime = (config: ExtensionBackendRuntimeConfig = {}) => {
   configureExtensionBackendRuntimeState(config)
+  configureExtensionHostRuntime({
+    rootDir: config.extensionRootDir,
+    saveAsset: config.saveAsset,
+    emit: config.emitRuntimeEvent,
+    executeCoreCommand: config.executeCoreCommand
+  })
 }
 
 export const resetExtensionPluginCatalogForTests = () => {
   resetExtensionPluginCatalogState()
+  resetExtensionHostRuntimeForTests()
   activeOperations.clear()
 }
 
-export const listExtensionPlugins = async (): Promise<ExtensionPluginListResult> => listExtensionPluginCatalog()
+export const listExtensionPlugins = async (): Promise<ExtensionPluginListResult> => {
+  const result = await listExtensionPluginCatalog()
+  if (!result.ok || !result.data) return result
+  await Promise.all(
+    result.data
+      .filter((plugin) => plugin.installed && plugin.manifestVersion === 2)
+      .map((plugin) => activateExtension(plugin))
+  )
+  return { ok: true, data: result.data.map(decorateExtensionPlugin) }
+}
+
+export const activateInstalledExtensions = async () => {
+  const result = await listExtensionPluginCatalog()
+  for (const plugin of result.data || []) {
+    if (plugin.installed && plugin.manifestVersion === 2) await activateExtension(plugin)
+  }
+}
 
 const errorResult = extensionPluginOperationError
 
@@ -90,9 +143,10 @@ export const syncExtensionAssetProvider = async (
     return { ok: false, errorCode: 'EXTENSION_PROVIDER_UNAVAILABLE', errorMessage: 'Installed provider plugin was not found.' }
   }
   const provider = plugin.assetProviders?.find((item) => item.id === providerId)
-  if (!provider || provider.adapter !== 'json-assets') {
+  if (!provider) {
     return { ok: false, errorCode: 'EXTENSION_PROVIDER_UNAVAILABLE', errorMessage: 'Asset provider contribution was not found.' }
   }
+  if (provider.adapter === 'runtime') return syncRuntimeAssetProvider(pluginId, providerId, input.values || {})
   const payload = providerText(input?.values?.payload)
   if (!payload) return { ok: false, errorCode: 'EXTENSION_PROVIDER_INPUT_REQUIRED', errorMessage: 'CMDB JSON is required.' }
   if (Buffer.byteLength(payload, 'utf8') > 2 * 1024 * 1024) {
@@ -178,6 +232,17 @@ export const syncExtensionAssetProvider = async (
   }
 }
 
+export const cancelExtensionAssetProvider = (
+  input: ExtensionAssetProviderCancelInput
+): ExtensionAssetProviderCancelResult => {
+  const pluginId = providerText(input?.pluginId)
+  const providerId = providerText(input?.providerId)
+  if (!pluginId || !providerId) {
+    return { ok: false, errorCode: 'EXTENSION_PROVIDER_INPUT_REQUIRED', errorMessage: 'Plugin id and provider id are required.' }
+  }
+  return cancelRuntimeAssetProvider(pluginId, providerId)
+}
+
 const downloadErrorResult = (errorCode: string, errorMessage: string): ExtensionPackageDownloadResult => ({
   ok: false,
   errorCode,
@@ -201,6 +266,9 @@ const validatePluginOperation = (operation: ExtensionPluginOperation, plugin: Ex
   if (!trimText(plugin.pluginId)) return errorResult('EXTENSION_PLUGIN_ID_REQUIRED', 'Plugin id is required.')
   if (!trimText(plugin.name)) return errorResult('EXTENSION_PLUGIN_NAME_REQUIRED', 'Plugin name is required.')
   if (!plugin.isPlugin) return errorResult('EXTENSION_PLUGIN_SYSTEM_ITEM', 'System extension entries cannot be installed as plugins.')
+  if ((plugin.source === 'builtin' || plugin.source === 'development') && operation === 'uninstall') {
+    return errorResult('EXTENSION_PLUGIN_BUILTIN', 'Built-in and development plugins cannot be uninstalled.')
+  }
   if (plugin.required && operation === 'uninstall') return errorResult('EXTENSION_PLUGIN_REQUIRED', 'Required plugins cannot be uninstalled.')
   if (operation === 'install' && plugin.installable === false) return errorResult('EXTENSION_PLUGIN_NOT_INSTALLABLE', 'Plugin is not installable.')
   if (operation === 'update' && (!plugin.installed || !plugin.hasUpdate)) {
@@ -309,7 +377,9 @@ export const runExtensionPluginOperation = async (
   if (validation) return validation
 
   if (operation === 'uninstall') {
+    await deactivateExtension(plugin.pluginId)
     removeInstalledExtensionPackageFiles(plugin)
+    if (input.removeData) deleteExtensionData(plugin.pluginId)
     const next = applyOperation(operation, plugin)
     upsertExtensionCatalogPlugin(next)
     return successResult(operation, next, `${plugin.name} uninstalled by aiopsterm backend.`)
@@ -364,6 +434,15 @@ export const runExtensionPluginOperation = async (
     emitExtensionProgress(emit, pluginId, operation, 'error', 0, packageConfig.errorMessage)
     return packageConfig
   }
+  if (packageInput.kind === 'remote' && packageConfig.plugin.manifestVersion === 2 && !packageInput.sha256) {
+    activeOperations.delete(pluginId)
+    const result = errorResult(
+      'EXTENSION_EXECUTABLE_CHECKSUM_REQUIRED',
+      'Remote executable plugin packages must declare a SHA-256 checksum.'
+    )
+    emitExtensionProgress(emit, pluginId, operation, 'error', 0, result.errorMessage)
+    return result
+  }
   const expectedVersion = trimText(plugin.latestVersion) || trimText(plugin.installedVersion)
   const packageVersion = trimText(packageConfig.plugin.latestVersion)
   if (expectedVersion && packageVersion && packageVersion !== expectedVersion) {
@@ -393,11 +472,76 @@ export const runExtensionPluginOperation = async (
 
   const next = applyOperation(operation, installedPlugin)
   upsertExtensionCatalogPlugin(next)
+  const activated = await activateExtension(next)
+  if (activated.runtimeStatus === 'error') {
+    await deactivateExtension(activated.pluginId)
+    removeInstalledExtensionPackageFiles(activated)
+    const rollback =
+      plugin.installed && plugin.packagePath && plugin.packagePath !== activated.packagePath
+        ? await activateExtension(plugin)
+        : { ...plugin, installed: false, installedVersion: '', packagePath: undefined, runtimeStatus: 'inactive' as const }
+    upsertExtensionCatalogPlugin(rollback)
+    activeOperations.delete(pluginId)
+    const result = errorResult(
+      'EXTENSION_PLUGIN_ACTIVATION_FAILED',
+      activated.runtimeError || `${activated.name} could not be activated.`
+    )
+    emitExtensionProgress(emit, pluginId, operation, 'error', 0, result.errorMessage)
+    return result
+  }
+  upsertExtensionCatalogPlugin(activated)
   emitExtensionProgress(emit, pluginId, operation, 'done', 100, `${next.name} operation completed.`)
   activeOperations.delete(pluginId)
   const verb = operation === 'update' ? 'updated' : 'installed'
-  return successResult(operation, next, `${next.name} ${verb} by aiopsterm backend.`)
+  return successResult(operation, activated, `${next.name} ${verb} by aiopsterm backend.`)
 }
+
+export const executePluginCommand = (input: ExtensionCommandExecuteInput) =>
+  executeExtensionCommand(trimText(input?.commandId), Array.isArray(input?.args) ? input.args : [])
+
+export const listPluginTreeChildren = (input: ExtensionTreeChildrenInput) =>
+  getExtensionTreeChildren(trimText(input?.viewId), trimText(input?.parentId) || undefined)
+
+export const listPluginContexts = () => getExtensionContexts()
+
+export const getPluginConfiguration = async (pluginId: string) => {
+  const plugin = findExtensionCatalogPlugin(trimText(pluginId))
+  if (!plugin) return { ok: false as const, errorCode: 'EXTENSION_PLUGIN_NOT_FOUND', errorMessage: 'Plugin was not found.' }
+  return getExtensionConfiguration(plugin)
+}
+
+export const savePluginConfiguration = async (input: ExtensionConfigurationUpdateInput) => {
+  const plugin = findExtensionCatalogPlugin(trimText(input?.pluginId))
+  if (!plugin) return { ok: false as const, errorCode: 'EXTENSION_PLUGIN_NOT_FOUND', errorMessage: 'Plugin was not found.' }
+  return updateExtensionConfiguration(plugin, input)
+}
+
+export const runExtensionRuntimeAction = async (input: ExtensionRuntimeActionInput): Promise<ExtensionRuntimeActionResult> => {
+  const plugin = findExtensionCatalogPlugin(trimText(input?.pluginId))
+  if (!plugin || !plugin.installed || plugin.manifestVersion !== 2) {
+    return { ok: false, errorCode: 'EXTENSION_RUNTIME_UNAVAILABLE', errorMessage: 'Executable plugin was not found.' }
+  }
+  if (plugin.required && input.action === 'disable') {
+    return { ok: false, errorCode: 'EXTENSION_PLUGIN_REQUIRED', errorMessage: 'Required plugins cannot be disabled.' }
+  }
+  let next: ExtensionPluginRuntimeConfig
+  if (input.action === 'disable') next = await setExtensionEnabled(plugin, false)
+  else if (input.action === 'enable') next = await setExtensionEnabled(plugin, true)
+  else if (input.action === 'reload') next = await reloadExtension(plugin)
+  else return { ok: false, errorCode: 'EXTENSION_RUNTIME_ACTION_INVALID', errorMessage: 'Plugin runtime action is invalid.' }
+  upsertExtensionCatalogPlugin(next)
+  return { ok: true, data: { plugin: decorateExtensionPlugin(next), message: `${plugin.name} ${input.action} completed.` } }
+}
+
+export const runExtensionBastionAction = (
+  type: string,
+  method: 'connect' | 'openShell' | 'write' | 'resize' | 'disconnect' | 'refreshAssets',
+  input: Record<string, unknown>
+) => invokeExtensionBastion(trimText(type), method, input || {})
+
+export const listExtensionVersions = () => getExtensionVersions()
+export const listExtensionBastions = () => getExtensionBastionDefinitions()
+export const shutdownExtensions = () => shutdownExtensionHostRuntime()
 
 export const installExtensionPlugin = (
   input: ExtensionPluginOperationInput,
@@ -484,6 +628,7 @@ export const installExtensionPackage = async (
   if ('ok' in packageConfig) return packageConfig
 
   const pluginId = packageConfig.plugin.pluginId
+  const previousPlugin = findExtensionCatalogPlugin(pluginId)
   const requestId = trimText(input?.requestId)
   if (activeOperations.has(pluginId)) {
     return errorResult('EXTENSION_PLUGIN_OPERATION_BUSY', 'Plugin operation is already running.')
@@ -518,9 +663,34 @@ export const installExtensionPackage = async (
 
   const next = applyOperation('package', installedPlugin)
   upsertExtensionCatalogPlugin(next)
+  const activated = await activateExtension(next)
+  if (activated.runtimeStatus === 'error') {
+    await deactivateExtension(activated.pluginId)
+    removeInstalledExtensionPackageFiles(activated)
+    if (previousPlugin?.installed && previousPlugin.packagePath && previousPlugin.packagePath !== activated.packagePath) {
+      upsertExtensionCatalogPlugin(await activateExtension(previousPlugin))
+    } else {
+      upsertExtensionCatalogPlugin({
+        ...activated,
+        installed: false,
+        installedVersion: '',
+        packagePath: undefined,
+        runtimeStatus: 'inactive',
+        runtimeError: undefined,
+        ...(activated.source === 'local' ? { show: false } : {})
+      })
+    }
+    activeOperations.delete(pluginId)
+    emitExtensionProgress(emit, pluginId, 'package', 'error', 0, activated.runtimeError, requestId)
+    return errorResult(
+      'EXTENSION_PLUGIN_ACTIVATION_FAILED',
+      activated.runtimeError || `${activated.name} could not be activated.`
+    )
+  }
+  upsertExtensionCatalogPlugin(activated)
   emitExtensionProgress(emit, pluginId, 'package', 'done', 100, `${next.name} operation completed.`, requestId)
   activeOperations.delete(pluginId)
-  return successResult('package', next, `${next.name} installed by aiopsterm backend.`)
+  return successResult('package', activated, `${next.name} installed by aiopsterm backend.`)
 }
 
 export const cancelExtensionInstall = (pluginId: string): ExtensionPluginCancelResult => {

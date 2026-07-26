@@ -52,6 +52,8 @@
     "audit:linux-package": "node scripts/audit-linux-package.mjs",
     "audit:package-config": "node scripts/audit-package-config.mjs",
     "audit:client-mocks": "node scripts/audit-client-mocks.mjs",
+    "plugin:check": "node scripts/plugin-cli.mjs check",
+    "plugin:pack": "node scripts/plugin-cli.mjs pack",
     "build:start": "scripts/build-and-start.sh",
     "test:live:k8s": "npm run native:ensure:node && vitest run tests/live-k8s-backend.test.ts",
     "test:live:k8s:pty": "npm run native:ensure:node && vitest run tests/live-k8s-sandbox.test.ts"

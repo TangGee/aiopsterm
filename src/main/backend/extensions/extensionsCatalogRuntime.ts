@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'fs'
-import { isAbsolute, join, resolve } from 'path'
+import { delimiter, isAbsolute, join, resolve } from 'path'
 import type { ExtensionPluginListResult, ExtensionPluginRuntimeConfig } from '@shared/contracts/extensions'
 import {
   asRecord,
@@ -10,8 +10,13 @@ import {
   normalizeAbsoluteHttpUrl,
   normalizeExtensionIconKey,
   parseManifestAssetProviders,
+  parseManifestBastionProviders,
   parseManifestCommands,
+  parseManifestConfiguration,
   parseManifestFunctions,
+  parseManifestMenus,
+  parseManifestViews,
+  parseManifestViewsWelcome,
   parseStringArray,
   trimText,
   type ExtensionBackendRuntimeConfig,
@@ -101,13 +106,21 @@ const normalizeLocalRegistryPlugins = (value: unknown): ExtensionPluginRuntimeCo
     if (!pluginId || !name || !installedVersion || !packagePath) continue
     const catalogPlugin = extensionCatalog.find((plugin) => plugin.pluginId === pluginId)
     const source = trimText(record.source) === 'store' ? 'store' : 'local'
-    const kind = record.kind === 'provider' ? 'provider' : record.kind === 'content' ? 'content' : null
+    const kind = record.kind === 'provider' ? 'provider' : record.kind === 'content' ? 'content' : record.kind === 'runtime' ? 'runtime' : null
     if (!kind) continue
     const isLocal = source === 'local'
     const categories = parseStringArray(record.categories)
     const functions = parseManifestFunctions(record.functions)
     const commands = parseManifestCommands({ contributes: { commands: record.commands } })
     const assetProviders = parseManifestAssetProviders({ contributes: { assetProviders: record.assetProviders } })
+    const views = parseManifestViews({ contributes: { views: record.views } })
+    const menus = parseManifestMenus({ contributes: { menus: record.menus } })
+    const viewsWelcome = parseManifestViewsWelcome({ contributes: { viewsWelcome: record.viewsWelcome } })
+    const configuration = parseManifestConfiguration({
+      displayName: name,
+      contributes: { configuration: record.configuration }
+    })
+    const bastionProviders = parseManifestBastionProviders({ contributes: { bastionProviders: record.bastionProviders } })
     const latestVersion =
       source === 'store'
         ? trimText(catalogPlugin?.latestVersion) || trimText(record.latestVersion) || installedVersion
@@ -147,7 +160,18 @@ const normalizeLocalRegistryPlugins = (value: unknown): ExtensionPluginRuntimeCo
           ? catalogPlugin.functions.map((catalogFunction) => ({ ...catalogFunction }))
           : [{ title: 'Installed plugin', desc: 'Installed from an aiopsterm plugin package through the backend boundary.' }],
       commands,
-      assetProviders
+      assetProviders,
+      manifestVersion: record.manifestVersion === 2 ? 2 : 1,
+      main: trimText(record.main) || undefined,
+      activationEvents: parseStringArray(record.activationEvents),
+      enabled: record.enabled !== false,
+      runtimeStatus: record.manifestVersion === 2 ? 'inactive' : undefined,
+      views,
+      menus,
+      viewsWelcome,
+      configuration,
+      bastionProviders,
+      installHint: trimText(record.installHint) || undefined
     })
   }
   return plugins
@@ -232,6 +256,28 @@ const readBuiltinExtensionCatalog = (): ExtensionPluginRuntimeConfig[] => {
   return plugins.sort((left, right) => left.name.localeCompare(right.name))
 }
 
+const readDevelopmentExtensionCatalog = (): ExtensionPluginRuntimeConfig[] => {
+  const paths = String(process.env.AIOPSTERM_DEV_PLUGIN_DIRS || '')
+    .split(delimiter)
+    .map((value) => value.trim())
+    .filter(Boolean)
+  const plugins: ExtensionPluginRuntimeConfig[] = []
+  for (const directory of paths) {
+    const packagePath = isAbsolute(directory) ? directory : resolve(directory)
+    const manifestPath = join(packagePath, 'aiopsterm.plugin.json')
+    try {
+      const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as RemoteExtensionCatalogPluginManifest
+      const plugin = pluginFromAiopstermManifest(manifest, {
+        source: 'development',
+        packagePath,
+        lastUpdated: new Date(statSync(manifestPath).mtimeMs).toISOString()
+      })
+      if (!('ok' in plugin)) plugins.push(plugin)
+    } catch {}
+  }
+  return plugins
+}
+
 const remoteCatalogPluginFromManifest = (
   manifest: RemoteExtensionCatalogPluginManifest,
   catalogUrl: string
@@ -312,12 +358,14 @@ export const upsertExtensionCatalogPlugin = (plugin: ExtensionPluginRuntimeConfi
 
 const reloadExtensionCatalog = () => {
   extensionCatalog = readBuiltinExtensionCatalog()
+  for (const plugin of readDevelopmentExtensionCatalog()) upsertExtensionCatalogPlugin(plugin, { persist: false })
   for (const plugin of readStoreExtensionCatalog()) upsertExtensionCatalogPlugin(plugin, { persist: false })
   for (const plugin of readLocalExtensionRegistry()) upsertExtensionCatalogPlugin(plugin, { persist: false })
 }
 
 const reloadExtensionCatalogFromSources = async () => {
   extensionCatalog = readBuiltinExtensionCatalog()
+  for (const plugin of readDevelopmentExtensionCatalog()) upsertExtensionCatalogPlugin(plugin, { persist: false })
   for (const plugin of readStoreExtensionCatalog()) upsertExtensionCatalogPlugin(plugin, { persist: false })
   for (const plugin of await readRemoteExtensionCatalog()) upsertExtensionCatalogPlugin(plugin, { persist: false })
   for (const plugin of readLocalExtensionRegistry()) upsertExtensionCatalogPlugin(plugin, { persist: false })

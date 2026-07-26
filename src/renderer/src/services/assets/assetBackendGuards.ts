@@ -68,7 +68,7 @@ export const isAiopsAssetRecord = (value: unknown): value is AiopsAssetRecord =>
   if (value.tunnelState !== undefined && !sshTunnelStates.has(String(value.tunnelState))) return false
   if (!isOptionalBoolean(value.needProxy)) return false
   if (!isOptionalString(value.proxyName) || !isOptionalString(value.keychainId) || !isOptionalString(value.jumpHostId)) return false
-  if (value.bastionType !== undefined && value.bastionType !== 'jumpserver' && value.bastionType !== 'teleport') return false
+  if (value.bastionType !== undefined && !isNonEmptyString(value.bastionType)) return false
   if (!isOptionalString(value.jumpserverApiUrl) || !isOptionalString(value.jumpserverOrgId) || !isOptionalString(value.jumpserverAssetId)) return false
   if (
     !isOptionalBoolean(value.hasPassword) ||

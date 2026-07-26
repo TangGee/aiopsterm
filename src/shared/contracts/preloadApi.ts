@@ -189,6 +189,13 @@ import type {
 import type { UserConfig } from './userConfig'
 import type {
   ExtensionInstallProgress,
+  ExtensionCommandExecuteInput,
+  ExtensionCommandExecuteResult,
+  ExtensionConfigurationGetResult,
+  ExtensionConfigurationUpdateInput,
+  ExtensionContextSnapshotResult,
+  ExtensionAssetProviderCancelInput,
+  ExtensionAssetProviderCancelResult,
   ExtensionAssetProviderSyncInput,
   ExtensionAssetProviderSyncResult,
   ExtensionPackageDownloadInput,
@@ -201,6 +208,12 @@ import type {
   ExtensionPluginUrlInstallInput,
   ExtensionSubscriptionInput,
   ExtensionSubscriptionResult,
+  ExtensionRuntimeActionInput,
+  ExtensionRuntimeActionResult,
+  ExtensionRuntimeEvent,
+  ExtensionRegisteredBastionDefinition,
+  ExtensionTreeChildrenInput,
+  ExtensionTreeChildrenResult,
   ExtensionUserConfig
 } from './extensions'
 import type {
@@ -656,6 +669,7 @@ export type AiopsPreloadApi = {
   checkModelProvider: (input: ModelProviderCheckInput) => Promise<ModelProviderCheckResult>
   listExtensionPlugins: () => Promise<ExtensionPluginListResult>
   syncExtensionAssetProvider: (input: ExtensionAssetProviderSyncInput) => Promise<ExtensionAssetProviderSyncResult>
+  cancelExtensionAssetProvider: (input: ExtensionAssetProviderCancelInput) => Promise<ExtensionAssetProviderCancelResult>
   installExtensionPlugin: (input: ExtensionPluginOperationInput) => Promise<ExtensionPluginOperationResult>
   updateExtensionPlugin: (input: ExtensionPluginOperationInput) => Promise<ExtensionPluginOperationResult>
   installExtensionPackage: (input: ExtensionPackageInstallInput) => Promise<ExtensionPluginOperationResult>
@@ -664,6 +678,16 @@ export type AiopsPreloadApi = {
   uninstallExtensionPlugin: (input: ExtensionPluginOperationInput) => Promise<ExtensionPluginOperationResult>
   openExtensionSubscription: (input: ExtensionSubscriptionInput) => Promise<ExtensionSubscriptionResult>
   cancelExtensionInstall: (pluginId: string) => Promise<ExtensionPluginCancelResult>
+  runExtensionRuntimeAction: (input: ExtensionRuntimeActionInput) => Promise<ExtensionRuntimeActionResult>
+  executeExtensionCommand: (input: ExtensionCommandExecuteInput) => Promise<ExtensionCommandExecuteResult>
+  listExtensionTreeChildren: (input: ExtensionTreeChildrenInput) => Promise<ExtensionTreeChildrenResult>
+  listExtensionContexts: () => Promise<ExtensionContextSnapshotResult>
+  getExtensionConfiguration: (pluginId: string) => Promise<ExtensionConfigurationGetResult>
+  saveExtensionConfiguration: (input: ExtensionConfigurationUpdateInput) => Promise<ExtensionConfigurationGetResult>
+  listExtensionVersions: () => Promise<Record<string, unknown>>
+  listExtensionBastions: () => Promise<ExtensionRegisteredBastionDefinition[]>
+  invokeExtensionBastion: (type: string, method: string, input: Record<string, unknown>) => Promise<AiopsMutationResult<unknown>>
+  onExtensionRuntimeEvent: (listener: (event: ExtensionRuntimeEvent) => void) => () => void
   onExtensionInstallProgress: (listener: (event: ExtensionInstallProgress) => void) => () => void
   createAiChatExchangeRequest: (input: AiChatExchangeRequestInput) => Promise<AiChatExchangeRequestResult>
   generateAiChatResponse: (input: AiChatResponseInput) => Promise<AiChatResponseResult>

@@ -3,6 +3,7 @@ import type { ExtensionInstallStage, ExtensionPluginRuntimeConfig } from '@share
 export const extensionPluginSourceText = (plugin: ExtensionPluginRuntimeConfig) => {
   if (plugin.source === 'builtin') return 'Built-in'
   if (plugin.source === 'local') return 'Local'
+  if (plugin.source === 'development') return 'Development'
   return 'Store'
 }
 

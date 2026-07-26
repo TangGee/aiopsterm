@@ -10,6 +10,7 @@ import type {
 } from '@shared/contracts/extensions'
 import type { AiopsAssetInput, AiopsAssetRecord } from '@shared/contracts/assets'
 import type { AiopsMutationResult } from '@shared/contracts/common'
+import type { ExtensionRuntimeEvent } from '@shared/contracts/extensions'
 import { normalizeExternalHttpUrl } from '@shared/externalUrl'
 
 export type ExtensionProgressEmitter = (progress: ExtensionInstallProgress) => void
@@ -25,6 +26,10 @@ export type LocalExtensionPackageManifest = {
   displayName?: unknown
   version?: unknown
   kind?: unknown
+  main?: unknown
+  activationEvents?: unknown
+  required?: unknown
+  installHint?: unknown
   description?: unknown
   engines?: {
     aiopsterm?: unknown
@@ -56,7 +61,13 @@ export type LocalExtensionPackageManifest = {
   contributes?: {
     commands?: unknown
     assetProviders?: unknown
+    views?: unknown
+    menus?: unknown
+    viewsWelcome?: unknown
+    configuration?: unknown
+    bastionProviders?: unknown
   }
+  i18n?: unknown
 }
 
 export type RemoteExtensionCatalogPluginManifest = LocalExtensionPackageManifest & {
@@ -121,6 +132,8 @@ export type ExtensionBackendRuntimeConfig = {
   appVersion?: string
   fetch?: ExtensionFetch
   saveAsset?: (input: AiopsAssetInput) => AiopsMutationResult<AiopsAssetRecord>
+  emitRuntimeEvent?: (event: ExtensionRuntimeEvent) => void
+  executeCoreCommand?: (commandId: string, args: unknown[]) => unknown | Promise<unknown>
 }
 
 export type ExtensionPackageRuntimeConfig = {
@@ -176,6 +189,22 @@ export const clonePlugin = (plugin: ExtensionPluginRuntimeConfig): ExtensionPlug
   categories: plugin.categories ? [...plugin.categories] : undefined,
   functions: plugin.functions ? plugin.functions.map((item) => ({ ...item })) : undefined,
   commands: plugin.commands ? plugin.commands.map((item) => ({ ...item })) : undefined,
+  activationEvents: plugin.activationEvents ? [...plugin.activationEvents] : undefined,
+  views: plugin.views ? plugin.views.map((item) => ({ ...item })) : undefined,
+  menus: plugin.menus
+    ? Object.fromEntries(Object.entries(plugin.menus).map(([key, items]) => [key, items.map((item) => ({ ...item }))]))
+    : undefined,
+  viewsWelcome: plugin.viewsWelcome ? plugin.viewsWelcome.map((item) => ({ ...item })) : undefined,
+  configuration: plugin.configuration
+    ? {
+        ...plugin.configuration,
+        properties: plugin.configuration.properties.map((item) => ({
+          ...item,
+          options: item.options?.map((option) => ({ ...option }))
+        }))
+      }
+    : undefined,
+  bastionProviders: plugin.bastionProviders ? plugin.bastionProviders.map((item) => ({ ...item })) : undefined,
   assetProviders: plugin.assetProviders
     ? plugin.assetProviders.map((provider) => ({
         ...provider,
@@ -239,13 +268,13 @@ export const parseManifestCommands = (manifest: LocalExtensionPackageManifest): 
     const id = trimText(record.id)
     const title = trimText(record.title)
     const command = trimText(record.command)
-    if (!id || !title || !command || ids.has(id)) continue
+    if (!id || !title || ids.has(id)) continue
     ids.add(id)
     parsed.push({
       id,
       title,
       description: trimText(record.description),
-      command
+      ...(command ? { command } : {})
     })
   }
   return parsed
@@ -262,7 +291,19 @@ export const parseManifestAssetProviders = (manifest: LocalExtensionPackageManif
     if (!record) continue
     const id = trimText(record.id)
     const name = trimText(record.name)
-    if (!id || !name || record.adapter !== 'json-assets' || ids.has(id) || !Array.isArray(record.fields)) continue
+    if (!id || !name || !['json-assets', 'runtime'].includes(String(record.adapter)) || ids.has(id)) continue
+    if (record.adapter === 'runtime') {
+      ids.add(id)
+      parsed.push({
+        id,
+        name,
+        description: trimText(record.description),
+        adapter: 'runtime',
+        fields: []
+      })
+      continue
+    }
+    if (!Array.isArray(record.fields)) continue
     const fields: ExtensionAssetProviderContribution['fields'] = []
     for (const field of record.fields) {
       const fieldRecord = asRecord(field)
@@ -290,6 +331,134 @@ export const parseManifestAssetProviders = (manifest: LocalExtensionPackageManif
     })
   }
   return parsed
+}
+
+export const parseManifestViews = (manifest: LocalExtensionPackageManifest) => {
+  const contributes = asRecord(manifest.contributes)
+  if (!Array.isArray(contributes?.views)) return []
+  const ids = new Set<string>()
+  return contributes.views
+    .map((item) => {
+      const record = asRecord(item)
+      if (!record) return null
+      const id = trimText(record.id)
+      const name = trimText(record.name)
+      if (!id || !name || ids.has(id)) return null
+      ids.add(id)
+      const location = record.location === 'sidebar' ? ('sidebar' as const) : ('extensions' as const)
+      const icon = trimText(record.icon)
+      return { id, name, location, ...(icon ? { icon } : {}) }
+    })
+    .filter((item): item is NonNullable<typeof item> => Boolean(item))
+}
+
+export const parseManifestMenus = (manifest: LocalExtensionPackageManifest) => {
+  const contributes = asRecord(manifest.contributes)
+  const menus = asRecord(contributes?.menus)
+  if (!menus) return {}
+  const result: Record<string, Array<{ command: string; when?: string; group?: string }>> = {}
+  for (const [location, value] of Object.entries(menus)) {
+    if (!Array.isArray(value)) continue
+    const items = value
+      .map((item) => {
+        const record = asRecord(item)
+        if (!record) return null
+        const command = trimText(record.command)
+        if (!command) return null
+        const when = trimText(record.when)
+        const group = trimText(record.group)
+        return { command, ...(when ? { when } : {}), ...(group ? { group } : {}) }
+      })
+      .filter((item): item is NonNullable<typeof item> => Boolean(item))
+    if (items.length) result[location] = items
+  }
+  return result
+}
+
+export const parseManifestViewsWelcome = (manifest: LocalExtensionPackageManifest) => {
+  const contributes = asRecord(manifest.contributes)
+  if (!Array.isArray(contributes?.viewsWelcome)) return []
+  return contributes.viewsWelcome
+    .map((item) => {
+      const record = asRecord(item)
+      if (!record) return null
+      const view = trimText(record.view)
+      const content = trimText(record.content)
+      const when = trimText(record.when)
+      return view && content ? { view, content, ...(when ? { when } : {}) } : null
+    })
+    .filter((item): item is NonNullable<typeof item> => Boolean(item))
+}
+
+export const parseManifestConfiguration = (manifest: LocalExtensionPackageManifest) => {
+  const contributes = asRecord(manifest.contributes)
+  const configuration = asRecord(contributes?.configuration)
+  if (!configuration || !Array.isArray(configuration.properties)) return undefined
+  const supportedTypes = new Set(['text', 'password', 'textarea', 'checkbox', 'select'])
+  const keys = new Set<string>()
+  const properties = configuration.properties
+    .map((item) => {
+      const record = asRecord(item)
+      if (!record) return null
+      const key = trimText(record.key)
+      const title = trimText(record.title)
+      const type = trimText(record.type)
+      if (!key || !title || keys.has(key) || !supportedTypes.has(type)) return null
+      keys.add(key)
+      const description = trimText(record.description)
+      const options = Array.isArray(record.options)
+        ? record.options
+            .map((option) => {
+              const optionRecord = asRecord(option)
+              const label = trimText(optionRecord?.label)
+              const value = trimText(optionRecord?.value)
+              return label && value ? { label, value } : null
+            })
+            .filter((option): option is NonNullable<typeof option> => Boolean(option))
+        : undefined
+      const defaultValue =
+        typeof record.defaultValue === 'boolean' || typeof record.defaultValue === 'string' ? record.defaultValue : undefined
+      return {
+        key,
+        title,
+        type: type as 'text' | 'password' | 'textarea' | 'checkbox' | 'select',
+        ...(description ? { description } : {}),
+        ...(record.required === true ? { required: true } : {}),
+        ...(defaultValue !== undefined ? { defaultValue } : {}),
+        ...(options?.length ? { options } : {})
+      }
+    })
+    .filter((item): item is NonNullable<typeof item> => Boolean(item))
+  if (!properties.length) return undefined
+  return { title: trimText(configuration.title) || trimText(manifest.displayName) || trimText(manifest.id), properties }
+}
+
+export const parseManifestBastionProviders = (manifest: LocalExtensionPackageManifest) => {
+  const contributes = asRecord(manifest.contributes)
+  if (!Array.isArray(contributes?.bastionProviders)) return []
+  const types = new Set<string>()
+  return contributes.bastionProviders
+    .map((item) => {
+      const record = asRecord(item)
+      if (!record) return null
+      const type = trimText(record.type)
+      const displayName = trimText(record.displayName)
+      if (!type || !displayName || types.has(type)) return null
+      types.add(type)
+      const authPolicy = ['password', 'keyBased', 'either'].includes(String(record.authPolicy))
+        ? (record.authPolicy as 'password' | 'keyBased' | 'either')
+        : 'either'
+      const description = trimText(record.description)
+      return {
+        type,
+        displayName,
+        authPolicy,
+        supportsRefresh: record.supportsRefresh === true,
+        supportsShell: record.supportsShell !== false,
+        ...(description ? { description } : {})
+      }
+    })
+    .filter((item): item is NonNullable<typeof item> => Boolean(item))
 }
 
 export const extractStoreManifestFlags = (manifest: LocalExtensionPackageManifest) => {

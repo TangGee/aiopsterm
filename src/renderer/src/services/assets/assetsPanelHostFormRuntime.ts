@@ -307,7 +307,7 @@ export const createAssetsPanelHostFormRuntime = ({
         data_source: form.asset_type === 'organization' ? 'refresh' : 'manual',
         keychainId: form.auth_type === 'keyBased' ? form.keyId || undefined : undefined,
         jumpHostId: form.jumpHostId || undefined,
-        bastionType: form.asset_type === 'organization' ? form.bastionType as 'jumpserver' | 'teleport' : undefined,
+        bastionType: form.asset_type === 'organization' ? form.bastionType : undefined,
         jumpserverApiUrl: form.asset_type === 'organization' ? form.jumpserverApiUrl.trim() : undefined,
         jumpserverOrgId: form.asset_type === 'organization' ? form.jumpserverOrgId.trim() : undefined,
         ...(form.asset_type === 'organization' && form.bastionType === 'jumpserver' ? { jumpserverToken: form.jumpserverToken } : {}),

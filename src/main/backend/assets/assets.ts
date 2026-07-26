@@ -68,6 +68,7 @@ type AssetConnectionRuntimeConfig = {
 
 type AssetBackendRuntimeConfig = AssetConnectionRuntimeConfig & AssetStoreRuntimeConfig & {
   jumpserverFetch?: JumpserverFetch
+  refreshBastionAssets?: (type: string, organization: AiopsAssetRecord) => Promise<AiopsAssetInput[]>
 }
 
 type ResolvedAssetConnectionTarget = {
@@ -98,6 +99,7 @@ class AssetConnectionTestError extends Error {
 
 const assetConnectionRuntime: AssetConnectionRuntimeConfig = {}
 let jumpserverFetchRuntime: JumpserverFetch = globalThis.fetch
+let refreshBastionAssetsRuntime: AssetBackendRuntimeConfig['refreshBastionAssets']
 
 export const configureAssetConnectionRuntime = (config: AssetConnectionRuntimeConfig = {}) => {
   assetConnectionRuntime.getConfig = config.getConfig
@@ -110,6 +112,7 @@ export const configureAssetBackendRuntime = (config: AssetBackendRuntimeConfig =
   configureAssetStoreRuntime(config)
   configureAssetConnectionRuntime(config)
   jumpserverFetchRuntime = config.jumpserverFetch || globalThis.fetch
+  refreshBastionAssetsRuntime = config.refreshBastionAssets
 }
 
 const getStore = getAssetStore
@@ -515,28 +518,45 @@ export const refreshOrganizationAssets = (
       const isJumpserver =
         organization.bastionType === 'jumpserver' ||
         (!organization.bastionType && organization.tags.some((tag) => tag.trim().toLowerCase() === 'jumpserver'))
-      if (!isJumpserver) {
-        if (input.organizationId) {
-          throw Object.assign(new Error('当前堡垒机不是 JumpServer 数据源。'), { code: 'JUMPSERVER_TYPE_UNSUPPORTED' })
+      const organizationId = organization.uuid || organization.id
+      const sourceType = isJumpserver ? 'jumpserver' : String(organization.bastionType || '').trim()
+      let drafts: AiopsAssetInput[]
+      if (isJumpserver) {
+        const apiUrl = organization.jumpserverApiUrl || (/^https?:\/\//i.test(organization.host) ? organization.host : `https://${organization.host}`)
+        const remoteHosts = await fetchJumpserverHosts(jumpserverFetchRuntime, {
+          apiUrl,
+          privateToken: store.getSecret(organization.id).jumpserverToken || '',
+          organizationId: organization.jumpserverOrgId
+        })
+        drafts = remoteHosts
+          .map((host) => jumpserverHostToAssetInput(organization, host))
+          .filter((draft): draft is AiopsAssetInput => Boolean(draft))
+        if (drafts.length !== remoteHosts.length) {
+          throw Object.assign(new Error('JumpServer 返回的资产缺少 ID 或地址，本次刷新未写入。'), {
+            code: 'JUMPSERVER_API_MALFORMED'
+          })
         }
-        continue
+      } else {
+        if (!sourceType || !refreshBastionAssetsRuntime) {
+          if (input.organizationId) {
+            throw Object.assign(new Error('当前堡垒机没有可用的数据源 Provider。'), { code: 'BASTION_PROVIDER_UNAVAILABLE' })
+          }
+          continue
+        }
+        drafts = await refreshBastionAssetsRuntime(sourceType, organization)
       }
-      const apiUrl = organization.jumpserverApiUrl || (/^https?:\/\//i.test(organization.host) ? organization.host : `https://${organization.host}`)
-      const remoteHosts = await fetchJumpserverHosts(jumpserverFetchRuntime, {
-        apiUrl,
-        privateToken: store.getSecret(organization.id).jumpserverToken || '',
-        organizationId: organization.jumpserverOrgId
-      })
-      const drafts = remoteHosts
-        .map((host) => jumpserverHostToAssetInput(organization, host))
-        .filter((draft): draft is AiopsAssetInput => Boolean(draft))
-      if (drafts.length !== remoteHosts.length) {
-        throw Object.assign(new Error('JumpServer 返回的资产缺少 ID 或地址，本次刷新未写入。'), {
-          code: 'JUMPSERVER_API_MALFORMED'
+      drafts = drafts.map((draft) => ({
+        ...draft,
+        organizationId,
+        data_source: 'refresh',
+        tags: [...new Set([...(draft.tags || []), sourceType, 'synced'])]
+      }))
+      if (drafts.some((draft) => !draft.id || !draft.name || !draft.host)) {
+        throw Object.assign(new Error('堡垒机 Provider 返回的资产缺少 ID、名称或地址，本次刷新未写入。'), {
+          code: 'BASTION_PROVIDER_MALFORMED'
         })
       }
       const remoteIds = new Set(drafts.map((draft) => draft.id!))
-      const organizationId = organization.uuid || organization.id
       const staleIds = store
         .list()
         .assets.filter(
@@ -544,7 +564,7 @@ export const refreshOrganizationAssets = (
             asset.asset_type !== 'organization' &&
             asset.organizationId === organizationId &&
             asset.data_source === 'refresh' &&
-            asset.tags.includes('jumpserver') &&
+            asset.tags.includes(sourceType) &&
             asset.tags.includes('synced') &&
             !remoteIds.has(asset.id)
         )

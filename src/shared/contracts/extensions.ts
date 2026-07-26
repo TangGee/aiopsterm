@@ -9,9 +9,11 @@ export type ExtensionUserConfig = {
 
 export type ExtensionInstallStage = 'downloading' | 'verifying' | 'installing' | 'done' | 'error' | 'cancelled' | ''
 
-export type ExtensionPluginSource = 'builtin' | 'store' | 'local'
+export type ExtensionPluginSource = 'builtin' | 'store' | 'local' | 'development'
 
-export type ExtensionPluginKind = 'content' | 'provider'
+export type ExtensionPluginKind = 'content' | 'provider' | 'runtime'
+
+export type ExtensionRuntimeStatus = 'inactive' | 'activating' | 'active' | 'disabled' | 'error'
 
 export type ExtensionIconKey = 'runbook' | 'cloud' | 'private' | 'local'
 
@@ -24,7 +26,43 @@ export type ExtensionCommandContribution = {
   id: string
   title: string
   description: string
+  command?: string
+}
+
+export type ExtensionViewContribution = {
+  id: string
+  name: string
+  icon?: string
+  location?: 'sidebar' | 'extensions'
+}
+
+export type ExtensionMenuContribution = {
   command: string
+  when?: string
+  group?: string
+}
+
+export type ExtensionViewWelcomeContribution = {
+  view: string
+  content: string
+  when?: string
+}
+
+export type ExtensionConfigurationFieldType = 'text' | 'password' | 'textarea' | 'checkbox' | 'select'
+
+export type ExtensionConfigurationField = {
+  key: string
+  title: string
+  description?: string
+  type: ExtensionConfigurationFieldType
+  required?: boolean
+  defaultValue?: string | boolean
+  options?: Array<{ label: string; value: string }>
+}
+
+export type ExtensionConfigurationContribution = {
+  title: string
+  properties: ExtensionConfigurationField[]
 }
 
 export type ExtensionProviderField = {
@@ -39,9 +77,87 @@ export type ExtensionAssetProviderContribution = {
   id: string
   name: string
   description: string
-  adapter: 'json-assets'
+  adapter: 'json-assets' | 'runtime'
   fields: ExtensionProviderField[]
 }
+
+export type ExtensionBastionProviderContribution = {
+  type: string
+  displayName: string
+  description?: string
+  authPolicy?: 'password' | 'keyBased' | 'either'
+  supportsRefresh?: boolean
+  supportsShell?: boolean
+}
+
+export type ExtensionRegisteredBastionDefinition = ExtensionBastionProviderContribution & {
+  pluginId: string
+}
+
+export type ExtensionTreeItem = {
+  id: string
+  label: string
+  description?: string
+  tooltip?: string
+  icon?: string
+  collapsibleState?: 'none' | 'collapsed' | 'expanded'
+  contextValue?: string
+  command?: string
+  commandArgs?: unknown[]
+}
+
+export type ExtensionTreeChildrenInput = {
+  viewId: string
+  parentId?: string
+}
+
+export type ExtensionTreeChildrenResult = AiopsMutationResult<{
+  viewId: string
+  parentId?: string
+  items: ExtensionTreeItem[]
+}>
+
+export type ExtensionCommandExecuteInput = {
+  commandId: string
+  args?: unknown[]
+  workspaceId?: string
+}
+
+export type ExtensionCommandExecuteResult = AiopsMutationResult<{
+  commandId: string
+  value?: unknown
+}>
+
+export type ExtensionContextSnapshotResult = AiopsMutationResult<Record<string, boolean | string | number>>
+
+export type ExtensionConfigurationValue = string | boolean
+
+export type ExtensionConfigurationGetResult = AiopsMutationResult<Record<string, ExtensionConfigurationValue>>
+
+export type ExtensionConfigurationUpdateInput = {
+  pluginId: string
+  values: Record<string, ExtensionConfigurationValue>
+}
+
+export type ExtensionRuntimeAction = 'enable' | 'disable' | 'reload'
+
+export type ExtensionRuntimeActionInput = {
+  pluginId: string
+  action: ExtensionRuntimeAction
+}
+
+export type ExtensionRuntimeActionResult = AiopsMutationResult<{
+  plugin: ExtensionPluginRuntimeConfig
+  message: string
+}>
+
+export type ExtensionRuntimeEvent =
+  | { type: 'catalog-changed'; pluginId?: string }
+  | { type: 'runtime-changed'; pluginId: string; status: ExtensionRuntimeStatus; errorMessage?: string }
+  | { type: 'view-refresh'; pluginId: string; viewId: string }
+  | { type: 'context-changed'; pluginId: string; key: string; value: boolean | string | number }
+  | { type: 'message'; pluginId: string; level: 'info' | 'warning' | 'error'; message: string }
+  | { type: 'provider-progress'; pluginId: string; providerId: string; percent: number; message?: string }
 
 export type ExtensionConnectionLogConfig = {
   time: string
@@ -83,12 +199,25 @@ export type ExtensionPluginRuntimeConfig = {
   detailSummary?: string
   guideSteps?: string[]
   connectionLog?: ExtensionConnectionLogConfig[]
+  manifestVersion?: 1 | 2
+  main?: string
+  activationEvents?: string[]
+  enabled?: boolean
+  runtimeStatus?: ExtensionRuntimeStatus
+  runtimeError?: string
+  views?: ExtensionViewContribution[]
+  menus?: Record<string, ExtensionMenuContribution[]>
+  viewsWelcome?: ExtensionViewWelcomeContribution[]
+  configuration?: ExtensionConfigurationContribution
+  bastionProviders?: ExtensionBastionProviderContribution[]
+  installHint?: string
 }
 
 export type ExtensionPluginOperation = 'install' | 'update' | 'uninstall' | 'package'
 
 export type ExtensionPluginOperationInput = {
   plugin: ExtensionPluginRuntimeConfig
+  removeData?: boolean
 }
 
 export type ExtensionSubscriptionInput = {
@@ -163,4 +292,15 @@ export type ExtensionAssetProviderSyncResult = AiopsMutationResult<{
   providerId: string
   imported: number
   assets: AiopsAssetRecord[]
+}>
+
+export type ExtensionAssetProviderCancelInput = {
+  pluginId: string
+  providerId: string
+}
+
+export type ExtensionAssetProviderCancelResult = AiopsMutationResult<{
+  pluginId: string
+  providerId: string
+  cancelled: boolean
 }>

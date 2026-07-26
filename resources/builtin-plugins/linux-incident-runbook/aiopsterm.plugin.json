@@ -1,48 +1,74 @@
 {
-  "manifestVersion": 1,
-  "id": "aiopsterm.linux-incident-runbook",
-  "displayName": "Linux Incident Runbook",
-  "version": "1.0.0",
-  "kind": "content",
-  "description": "提供常用 Linux 故障检查命令，用于验证声明式内容插件能力。",
+  "manifestVersion": 2,
+  "id": "aiopsterm.operations-toolkit",
+  "displayName": "Operations Toolkit",
+  "version": "2.0.0",
+  "description": "提供可扩展的 Linux 运维检查树和终端操作。",
   "engines": {
     "aiopsterm": ">=0.1.0"
   },
+  "main": "main.cjs",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "required": false,
   "iconKey": "runbook",
   "categories": [
     "Operations",
     "Runbook"
   ],
-  "readme": "Linux Incident Runbook 是 aiopsterm 自有的内置内容插件。命令通过现有终端安全策略执行，不获得文件系统、网络或应用内部 API 权限。",
+  "readme": "Operations Toolkit 使用可执行插件 SDK 注册动态树、命令、上下文、状态和版本信息。选择检查项后，命令会通过宿主发送到当前终端。",
   "functions": [
     {
-      "title": "系统负载检查",
-      "desc": "检查运行时间、负载、内存和磁盘使用情况。"
+      "title": "动态运维检查树",
+      "desc": "由插件运行时提供 Linux 系统、服务、网络和日志检查项。"
     },
     {
-      "title": "服务故障检查",
-      "desc": "查看失败的 systemd 服务和最近的高优先级日志。"
+      "title": "状态与上下文",
+      "desc": "记录使用次数并通过上下文控制视图菜单。"
     }
   ],
   "contributes": {
     "commands": [
       {
-        "id": "linux.overview",
-        "title": "Linux 系统概览",
-        "description": "输出运行时间、内存、磁盘和进程概览。",
-        "command": "uptime && free -h && df -h && ps aux --sort=-%cpu | head -n 15"
+        "id": "aiopsterm.operations-toolkit.run",
+        "title": "运行检查",
+        "description": "把选中的运维检查命令发送到当前终端。"
       },
       {
-        "id": "linux.failed-services",
-        "title": "失败服务检查",
-        "description": "列出失败的 systemd 服务。",
-        "command": "systemctl --failed --no-pager"
-      },
+        "id": "aiopsterm.operations-toolkit.refresh",
+        "title": "刷新检查项",
+        "description": "刷新 Operations Toolkit 树。"
+      }
+    ],
+    "views": [
       {
-        "id": "linux.critical-logs",
-        "title": "最近严重日志",
-        "description": "读取本次启动后的高优先级系统日志。",
-        "command": "journalctl -b -p err --no-pager -n 100"
+        "id": "aiopsterm.operations-toolkit.checks",
+        "name": "运维检查",
+        "location": "extensions"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "aiopsterm.operations-toolkit.refresh",
+          "when": "view == aiopsterm.operations-toolkit.checks",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "aiopsterm.operations-toolkit.run",
+          "when": "viewItem == runnable",
+          "group": "inline"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "aiopsterm.operations-toolkit.checks",
+        "content": "选择检查项后会将只读诊断命令发送到当前终端。",
+        "when": "aiopsterm.operations-toolkit.ready"
       }
     ]
   }

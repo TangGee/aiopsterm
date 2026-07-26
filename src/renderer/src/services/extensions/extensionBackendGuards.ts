@@ -12,8 +12,8 @@ import type {
 export const malformedExtensionBackendResultMessage = '扩展服务返回数据无效'
 
 const extensionIconKeys = new Set(['runbook', 'cloud', 'private', 'local'])
-const extensionSources = new Set(['builtin', 'store', 'local'])
-const extensionKinds = new Set(['content', 'provider'])
+const extensionSources = new Set(['builtin', 'store', 'local', 'development'])
+const extensionKinds = new Set(['content', 'provider', 'runtime'])
 const extensionOperations = new Set<ExtensionPluginOperation>(['install', 'update', 'uninstall', 'package'])
 const extensionInstallStages = new Set(['downloading', 'verifying', 'installing', 'done', 'error', 'cancelled', ''])
 const extensionConnectionLogStatuses = new Set(['progress', 'success', 'error'])
@@ -40,7 +40,7 @@ const isExtensionCommandContribution = (value: unknown) =>
   isNonEmptyString(value.id) &&
   isNonEmptyString(value.title) &&
   typeof value.description === 'string' &&
-  isNonEmptyString(value.command)
+  (value.command === undefined || isNonEmptyString(value.command))
 
 const isExtensionProviderField = (value: unknown) =>
   isRecord(value) &&
@@ -55,7 +55,7 @@ const isExtensionAssetProviderContribution = (value: unknown) =>
   isNonEmptyString(value.id) &&
   isNonEmptyString(value.name) &&
   typeof value.description === 'string' &&
-  value.adapter === 'json-assets' &&
+  (value.adapter === 'json-assets' || value.adapter === 'runtime') &&
   Array.isArray(value.fields) &&
   value.fields.every(isExtensionProviderField)
 

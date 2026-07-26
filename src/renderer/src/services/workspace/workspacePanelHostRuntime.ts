@@ -74,7 +74,7 @@ export const createWorkspacePanelHostRuntime = ({
     keychainId: '',
     proxyName: '',
     jumpHostId: '',
-    bastionType: 'jumpserver' as 'jumpserver' | 'teleport',
+    bastionType: 'jumpserver' as string,
     jumpserverApiUrl: '',
     jumpserverToken: '',
     jumpserverOrgId: ''
