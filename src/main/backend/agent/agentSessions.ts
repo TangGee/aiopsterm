@@ -84,6 +84,7 @@ import type {
   ManagedAiSessionRecord,
   ManagedAiSessionRenameInput,
   ManagedAiSessionReplyInput,
+  ManagedAiSessionTerminalBindInput,
   ManagedAiSessionSnapshot
 } from '@shared/contracts/managedAiSessions'
 import type {
@@ -1370,6 +1371,54 @@ export const wakeManagedAiSession = async (input: ManagedAiSessionHibernateInput
   })
   publishManagedAiStreamFrame('managed_ai.session.woke', next, { reason: cleanOptionalText(input.reason) || 'manual' })
   return { ok: true, data: { session: next, snapshot: snapshot(), config: { ...agentHibernationConfig } } }
+}
+
+export const bindManagedAiSessionTerminal = async (
+  input: ManagedAiSessionTerminalBindInput
+): Promise<ManagedAiSessionMutationResult> => {
+  await loadStoreIfNeeded()
+  const source = normalizeSource(input?.source)
+  const sessionId = cleanOptionalText(input?.sessionId)
+  const terminalSessionId = cleanOptionalText(input?.terminalSessionId)
+  if (!source || !sessionId || !terminalSessionId) {
+    return mutationError('MANAGED_AI_SESSION_TERMINAL_BINDING_INVALID', 'Managed AI session source, sessionId, and terminalSessionId are required.')
+  }
+  const session = sessions.get(sessionKey(source, sessionId))
+  if (!session) return mutationError('MANAGED_AI_SESSION_NOT_FOUND', 'Managed AI session was not found.')
+  if (session.sessionKind === 'subagent' || session.sessionKind === 'internal') {
+    return mutationError('MANAGED_AI_SESSION_NOT_RESTORABLE', 'Review-only managed AI sessions cannot bind a terminal.')
+  }
+  if (isManagedAiTerminalSessionLive && !isManagedAiTerminalSessionLive(terminalSessionId)) {
+    return mutationError('MANAGED_AI_SESSION_TERMINAL_NOT_LIVE', 'The target terminal session is not live.')
+  }
+  const now = Date.now()
+  const bindingChange = agentTerminalBindingRuntime.apply({
+    kind: 'activate',
+    agentId: source,
+    sessionId,
+    terminalSessionId,
+    panelId: cleanOptionalText(input.panelId),
+    workspaceId: cleanOptionalText(input.workspaceId),
+    cwd: cleanOptionalText(input.cwd) || session.canonicalCwd || session.cwd,
+    at: now
+  })
+  if (!bindingChange.current) {
+    return mutationError('MANAGED_AI_SESSION_TERMINAL_BINDING_INVALID', 'Managed AI session terminal binding could not be established.')
+  }
+  updateRecordsForTerminalBindingChange(bindingChange)
+  const next: ManagedAiSessionRecord = {
+    ...session,
+    panelId: cleanOptionalText(input.panelId) || undefined,
+    terminalSessionId,
+    ...(cleanOptionalText(input.workspaceId) ? { workspaceId: cleanOptionalText(input.workspaceId) } : {}),
+    ...(cleanOptionalText(input.cwd) ? { cwd: cleanOptionalText(input.cwd) } : {}),
+    terminalActivityAt: now,
+    updatedAt: now
+  }
+  sessions.set(sessionKey(source, sessionId), next)
+  persistSnapshot()
+  publishTerminalBindingChange(bindingChange, next)
+  return { ok: true, data: { session: next, snapshot: snapshot() } }
 }
 
 export const replyManagedAiSession = async (input: ManagedAiSessionReplyInput): Promise<ManagedAiSessionMutationResult> => {

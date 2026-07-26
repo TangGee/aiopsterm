@@ -116,50 +116,6 @@ describe('RightAssistantPanel', () => {
     expect(wrapper.find('[data-testid="project-files-drawer"]').exists()).toBe(false)
   })
 
-  it('retries availability when the binding hook arrives after an optimistic terminal resume', async () => {
-    getProjectFileContext
-      .mockResolvedValueOnce({
-        ok: false,
-        errorCode: 'SESSION_NOT_BOUND',
-        errorMessage: 'The managed session is not bound yet.'
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        data: {
-          source: 'codex',
-          sessionId: 'resumed',
-          projectRoot: '/work/resumed',
-          capability: 'adapter',
-          recent: []
-        }
-      })
-
-    const wrapper = mountPanel()
-    selectManagedSession('resumed', '/work/resumed')
-    const workspace = useWorkspaceStore()
-    await flushPromises()
-
-    expect(getProjectFileContext).toHaveBeenCalledTimes(1)
-    expect(wrapper.find('[data-testid="project-files-toggle"]').exists()).toBe(false)
-
-    const session = workspace.managedAiSessions.find((item) => item.id === 'resumed')!
-    workspace.upsertManagedAiSession({
-      source: 'codex',
-      event: 'session_start',
-      sessionId: 'resumed',
-      title: 'resumed',
-      summary: '',
-      panelId: session.panelId,
-      terminalSessionId: session.terminalSessionId,
-      cwd: session.cwd,
-      receivedAt: session.lastActivityAt + 1
-    })
-    await flushPromises()
-
-    expect(getProjectFileContext).toHaveBeenCalledTimes(2)
-    expect(wrapper.find('[data-testid="project-files-toggle"]').exists()).toBe(true)
-  })
-
   it('follows the active terminal instead of the AI inbox selection', async () => {
     getProjectFileContext.mockImplementation(async ({ sessionId }: { sessionId: string }) => ({
       ok: true,

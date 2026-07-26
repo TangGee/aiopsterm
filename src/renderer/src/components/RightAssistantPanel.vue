@@ -68,12 +68,6 @@ const activeSessionSignature = computed(() => {
   ].join(':')
 })
 
-const activeAvailabilityTrigger = computed(() => {
-  const session = activeManagedAiSession.value
-  if (!session) return ''
-  return `${activeSessionSignature.value}:${session.lastActivityAt}`
-})
-
 const activeTerminalSessionId = computed(() => activeManagedAiSession.value?.terminalSessionId || '')
 const projectFilesActive = computed(() =>
   projectFilesAvailable.value &&
@@ -83,6 +77,7 @@ const projectFilesActive = computed(() =>
 const refreshProjectFilesAvailability = async (contextSignature: string) => {
   const session = activeManagedAiSession.value
   const requestGeneration = ++availabilityGeneration
+  projectFilesAvailable.value = false
   if (!session) return
   const getContext = projectFilesClient.getContext()
   const logFields = {
@@ -138,22 +133,13 @@ const closeProjectFiles = () => {
   workspace.setRightAssistantSurfaceForTerminal(activeTerminalSessionId.value, 'ai')
 }
 
-let checkedContextSignature = ''
 watch(
-  activeAvailabilityTrigger,
+  activeSessionSignature,
   () => {
     const contextSignature = activeSessionSignature.value
     if (!contextSignature) {
       availabilityGeneration += 1
-      checkedContextSignature = ''
       projectFilesAvailable.value = false
-      return
-    }
-    if (contextSignature !== checkedContextSignature) {
-      availabilityGeneration += 1
-      checkedContextSignature = contextSignature
-      projectFilesAvailable.value = false
-    } else if (projectFilesAvailable.value) {
       return
     }
     void refreshProjectFilesAvailability(contextSignature)

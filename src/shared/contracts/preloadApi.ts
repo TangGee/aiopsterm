@@ -115,7 +115,8 @@ import type {
   ManagedAiSessionListResult,
   ManagedAiSessionMutationResult,
   ManagedAiSessionRenameInput,
-  ManagedAiSessionReplyInput
+  ManagedAiSessionReplyInput,
+  ManagedAiSessionTerminalBindInput
 } from './managedAiSessions'
 import type {
   ManagedAiSessionContentDeleteInput,
@@ -639,6 +640,7 @@ export type AiopsPreloadApi = {
   setAgentHibernationConfig: (input: Partial<AgentHibernationConfig> & { enabled?: boolean }) => Promise<AgentHibernationConfigResult>
   hibernateManagedAiSession: (input: ManagedAiSessionHibernateInput) => Promise<ManagedAiSessionHibernateResult>
   wakeManagedAiSession: (input: ManagedAiSessionHibernateInput) => Promise<ManagedAiSessionHibernateResult>
+  bindManagedAiSessionTerminal: (input: ManagedAiSessionTerminalBindInput) => Promise<ManagedAiSessionMutationResult>
   replyManagedAiSession: (input: ManagedAiSessionReplyInput) => Promise<ManagedAiSessionMutationResult>
   renameManagedAiSession: (input: ManagedAiSessionRenameInput) => Promise<ManagedAiSessionMutationResult>
   clearManagedAiSession: (input: ManagedAiSessionClearInput) => Promise<ManagedAiSessionMutationResult>

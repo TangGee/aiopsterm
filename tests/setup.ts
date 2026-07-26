@@ -6101,6 +6101,12 @@ Object.defineProperty(window, 'aiops', {
         }
       }
     })),
+    bindManagedAiSessionTerminal: vi.fn(async () => ({
+      ok: true,
+      data: {
+        snapshot: { sessions: [] }
+      }
+    })),
     replyManagedAiSession: vi.fn(async () => ({
       ok: true,
       data: {

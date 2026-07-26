@@ -1,6 +1,7 @@
 import type { IpcMain } from 'electron'
 import {
   bulkManagedAiSessions,
+  bindManagedAiSessionTerminal,
   clearManagedAiNotifications,
   clearManagedAiSession,
   configureManagedAiSessionTerminalLiveness,
@@ -40,6 +41,7 @@ export const registerManagedAiSessionsIpc = (ipcMain: IpcMain, input: RegisterMa
   ipcMain.handle('ai-agent:hibernation:config:set', (_event, configInput) => setAgentHibernationConfig(configInput))
   ipcMain.handle('ai-agent:sessions:hibernate', (_event, sessionInput) => hibernateManagedAiSession(sessionInput))
   ipcMain.handle('ai-agent:sessions:wake', (_event, sessionInput) => wakeManagedAiSession(sessionInput))
+  ipcMain.handle('ai-agent:sessions:bind-terminal', (_event, bindingInput) => bindManagedAiSessionTerminal(bindingInput))
   ipcMain.handle('ai-agent:sessions:reply', (_event, replyInput) => replyManagedAiSession(replyInput))
   ipcMain.handle('ai-agent:sessions:rename', (_event, renameInput) => renameManagedAiSession(renameInput))
   ipcMain.handle('ai-agent:sessions:clear', (_event, clearInput) => clearManagedAiSession(clearInput))

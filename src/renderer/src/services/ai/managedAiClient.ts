@@ -17,6 +17,7 @@ type ManagedAiBridge = Pick<
   | 'setAgentHibernationConfig'
   | 'hibernateManagedAiSession'
   | 'wakeManagedAiSession'
+  | 'bindManagedAiSessionTerminal'
   | 'onAiAgentSessionEvent'
   | 'onManagedAiSessionEvent'
   | 'onManagedAiSessionFocusRequest'
@@ -39,6 +40,7 @@ export const managedAiClient = {
   setAgentHibernationConfig: () => bridgeMethod('setAgentHibernationConfig'),
   hibernateManagedAiSession: () => bridgeMethod('hibernateManagedAiSession'),
   wakeManagedAiSession: () => bridgeMethod('wakeManagedAiSession'),
+  bindManagedAiSessionTerminal: () => bridgeMethod('bindManagedAiSessionTerminal'),
   onAiAgentSessionEvent: () => bridgeMethod('onAiAgentSessionEvent'),
   onManagedAiSessionEvent: () => bridgeMethod('onManagedAiSessionEvent'),
   onManagedAiSessionFocusRequest: () => bridgeMethod('onManagedAiSessionFocusRequest')

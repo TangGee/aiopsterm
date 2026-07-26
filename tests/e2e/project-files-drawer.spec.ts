@@ -65,6 +65,41 @@ test('project files uses a contextual drawer inside the persistent AI panel', as
     await page.getByTestId('ai-more-actions-open').click()
     await expect(moreActionsMenu).toHaveCount(0)
 
+    const restoredSessionResult = await page.evaluate(async ({ projectRoot, runId }) => {
+      const api = (window as unknown as {
+        aiops: {
+          publishAiAgentSessionEvent: (input: Record<string, unknown>) => Promise<{ ok: boolean; errorMessage?: string }>
+        }
+      }).aiops
+      return api.publishAiAgentSessionEvent({
+        source: 'qoder',
+        event: 'session_start',
+        sessionId: `restored-project-files-${runId}`,
+        cwd: projectRoot,
+        title: 'Restored project files E2E',
+        summary: 'Historical session without a live terminal',
+        receivedAt: Date.now()
+      })
+    }, { projectRoot, runId })
+    if (!restoredSessionResult.ok) {
+      throw new Error(restoredSessionResult.errorMessage || 'Unable to publish restorable managed AI session.')
+    }
+
+    await page.locator('.side-rail .rail-button[title="AI 会话"]').click()
+    const restoredSessionRow = page.locator('.ai-session-row').filter({
+      has: page.locator('.ai-session-row-title').getByText('Restored project files E2E', { exact: true })
+    })
+    await expect(restoredSessionRow).toBeVisible()
+    await restoredSessionRow.dblclick()
+    await expect(page.locator('.terminal-pane.active .xterm-host')).toBeVisible()
+    const restoredToggle = page.getByTestId('ai-project-files-toggle')
+    await expect(restoredToggle).toBeVisible()
+    await restoredToggle.click()
+    const restoredDrawer = page.locator('.project-files-drawer')
+    await expect(restoredDrawer.locator('.project-files-header-title strong')).toHaveText(path.basename(projectRoot))
+    await restoredDrawer.getByTestId('project-files-close').click()
+
+    await page.locator('.side-rail .rail-button[data-module-key="workspace"]').click()
     await page.locator('.workspace-search input').fill('127.0.0.1')
     const localRow = page.locator('.workspace-host-row').filter({ hasText: '127.0.0.1' }).first()
     await expect(localRow).toBeVisible()

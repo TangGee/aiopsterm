@@ -122,6 +122,25 @@ describe('managedAiClient', () => {
           config: hibernationConfig
         }
       })),
+      bindManagedAiSessionTerminal: vi.fn(async (input) => ({
+        ok: true,
+        data: {
+          session: {
+            ...managedAiSnapshot.sessions[0],
+            panelId: input.panelId,
+            terminalSessionId: input.terminalSessionId,
+            cwd: input.cwd
+          },
+          snapshot: {
+            sessions: [{
+              ...managedAiSnapshot.sessions[0],
+              panelId: input.panelId,
+              terminalSessionId: input.terminalSessionId,
+              cwd: input.cwd
+            }]
+          }
+        }
+      })),
       deleteManagedAiSessionContentRecord: vi.fn(async (input) => ({
         ok: true,
         data: {
@@ -229,6 +248,18 @@ describe('managedAiClient', () => {
         })
       })
     )
+    await expect(managedAiClient.bindManagedAiSessionTerminal()?.({
+      source: 'claude-code',
+      sessionId: 'claude-session-1',
+      terminalSessionId: 'terminal-session-2',
+      panelId: 'panel-2',
+      cwd: '/work/project'
+    })).resolves.toEqual(expect.objectContaining({
+      ok: true,
+      data: expect.objectContaining({
+        session: expect.objectContaining({ terminalSessionId: 'terminal-session-2' })
+      })
+    }))
     await expect(
       managedAiClient.deleteManagedAiSessionContentRecord()?.({
         source: 'claude-code',
@@ -259,6 +290,13 @@ describe('managedAiClient', () => {
       terminalSessionId: 'terminal-session-1'
     })
     expect(window.aiops.wakeManagedAiSession).toHaveBeenCalledWith({ source: 'claude-code', sessionId: 'claude-session-1', reason: 'resume' })
+    expect(window.aiops.bindManagedAiSessionTerminal).toHaveBeenCalledWith({
+      source: 'claude-code',
+      sessionId: 'claude-session-1',
+      terminalSessionId: 'terminal-session-2',
+      panelId: 'panel-2',
+      cwd: '/work/project'
+    })
     expect(window.aiops.deleteManagedAiSessionContentRecord).toHaveBeenCalledWith({
       source: 'claude-code',
       sessionId: 'claude-session-1',
@@ -281,6 +319,7 @@ describe('managedAiClient', () => {
       setAgentHibernationConfig: undefined as any,
       hibernateManagedAiSession: undefined as any,
       wakeManagedAiSession: undefined as any,
+      bindManagedAiSessionTerminal: undefined as any,
       deleteManagedAiSessionContentRecord: undefined as any,
       onAiAgentSessionEvent: undefined as any,
       onManagedAiSessionEvent: undefined as any,
@@ -296,6 +335,7 @@ describe('managedAiClient', () => {
     expect(managedAiClient.setAgentHibernationConfig()).toBeUndefined()
     expect(managedAiClient.hibernateManagedAiSession()).toBeUndefined()
     expect(managedAiClient.wakeManagedAiSession()).toBeUndefined()
+    expect(managedAiClient.bindManagedAiSessionTerminal()).toBeUndefined()
     expect(managedAiClient.deleteManagedAiSessionContentRecord()).toBeUndefined()
     expect(managedAiClient.onAiAgentSessionEvent()).toBeUndefined()
     expect(managedAiClient.onManagedAiSessionEvent()).toBeUndefined()

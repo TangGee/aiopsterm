@@ -292,6 +292,15 @@ export type ManagedAiSessionMutationResult = AiopsMutationResult<{
   snapshot: ManagedAiSessionSnapshot
 }>
 
+export type ManagedAiSessionTerminalBindInput = {
+  source: AiAgentSessionSource
+  sessionId: string
+  terminalSessionId: string
+  panelId?: string
+  workspaceId?: string
+  cwd?: string
+}
+
 export type ManagedAiSessionBulkResult = AiopsMutationResult<{
   changed: number
   snapshot: ManagedAiSessionSnapshot

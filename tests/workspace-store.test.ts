@@ -1516,6 +1516,13 @@ describe('workspace store', () => {
       })
     )
     expect(window.aiops.writeTerminal).toHaveBeenCalledWith('test-session-local', "cd '/work/history-project' && codex resume 'codex-history-1'\n")
+    expect(window.aiops.bindManagedAiSessionTerminal).toHaveBeenCalledWith({
+      source: 'codex',
+      sessionId: 'codex-history-1',
+      terminalSessionId: 'test-session-local',
+      panelId: store.activePanel.id,
+      cwd: '/work/history-project'
+    })
     expect(store.activePanel).toEqual(expect.objectContaining({ sessionId: 'test-session-local', title: 'Fix history restore', cwd: '/' }))
     expect(store.managedAiSessions[0]).toEqual(
       expect.objectContaining({

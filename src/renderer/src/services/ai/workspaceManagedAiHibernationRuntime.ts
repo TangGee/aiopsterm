@@ -1,7 +1,8 @@
 import { managedAiClient } from '@/services/ai/managedAiClient'
 import {
   isAgentHibernationConfigData,
-  isManagedAiSessionHibernateData
+  isManagedAiSessionHibernateData,
+  isManagedAiSessionMutationData
 } from '@/services/ai/managedAiBackendGuards'
 import { terminalClient } from '@/services/terminal/terminalClient'
 import type { I18nKey } from '@/i18n/messages'
@@ -186,13 +187,6 @@ export const createWorkspaceManagedAiHibernationRuntime = (input: {
         preserveActiveModule: true
       })
       panel = opened ? panels.value.find((item) => item.id === opened.id || item.sessionId === opened.sessionId) || opened : null
-      if (panel?.sessionId) {
-        session.panelId = panel.id
-        session.terminalSessionId = panel.sessionId
-        session.terminalActivityAt = Date.now()
-        session.updatedAt = Date.now()
-        focusManagedAiSession(session.id)
-      }
     }
     if (!panel?.sessionId) {
       setTopNotice(i18nText('aiSessions.notice.resumeNeedsTerminal'))
@@ -208,6 +202,30 @@ export const createWorkspaceManagedAiHibernationRuntime = (input: {
           applyManagedAiSessionSnapshot(result.data.snapshot)
         }
       }
+      const bindManagedAiSessionTerminal = managedAiClient.bindManagedAiSessionTerminal()
+      if (!bindManagedAiSessionTerminal) {
+        setTopNotice(i18nText('settings.ai.hibernation.serviceUnavailable'))
+        return false
+      }
+      const bindingResult = await bindManagedAiSessionTerminal({
+        source,
+        sessionId,
+        panelId: panel.id,
+        terminalSessionId: panel.sessionId,
+        cwd: session.canonicalCwd || session.cwd
+      })
+      if (!bindingResult?.ok || !isManagedAiSessionMutationData(bindingResult.data)) {
+        setTopNotice(bindingResult?.errorMessage || i18nText('aiSessions.notice.resumeNeedsTerminal'))
+        return false
+      }
+      const boundSession = managedAiSessions.value.find((item) => item.source === source && item.id === sessionId)
+      if (boundSession) {
+        boundSession.panelId = panel.id
+        boundSession.terminalSessionId = panel.sessionId
+        boundSession.terminalActivityAt = Date.now()
+        boundSession.updatedAt = Date.now()
+      }
+      focusManagedAiSession(session.id)
       setTopNotice(i18nText('aiSessions.notice.resumeCommandWritten'))
       return true
     }

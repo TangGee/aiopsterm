@@ -274,6 +274,7 @@ const api: AiopsPreloadApi = {
   setAgentHibernationConfig: (input) => ipcRenderer.invoke('ai-agent:hibernation:config:set', input),
   hibernateManagedAiSession: (input) => ipcRenderer.invoke('ai-agent:sessions:hibernate', input),
   wakeManagedAiSession: (input) => ipcRenderer.invoke('ai-agent:sessions:wake', input),
+  bindManagedAiSessionTerminal: (input) => ipcRenderer.invoke('ai-agent:sessions:bind-terminal', input),
   replyManagedAiSession: (input) => ipcRenderer.invoke('ai-agent:sessions:reply', input),
   renameManagedAiSession: (input) => ipcRenderer.invoke('ai-agent:sessions:rename', input),
   clearManagedAiSession: (input) => ipcRenderer.invoke('ai-agent:sessions:clear', input),

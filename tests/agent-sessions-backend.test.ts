@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from 'vitest'
 type AgentSessionsBackend = {
   configureAiAgentSessionStore: (userDataPath: string) => Promise<void>
   configureManagedAiSessionTerminalLiveness: (resolver?: (sessionId: string) => boolean) => void
+  findManagedAiSessionRecord: (source: string, sessionId: string) => Promise<any>
   listManagedAiSessions: () => Promise<unknown>
   listManagedAiSessionContent: (input: Record<string, unknown>) => Promise<unknown>
   configureManagedAiSessionImportRuntime: (config?: Record<string, unknown> & { importSessions?: () => Promise<unknown[]> }) => void
@@ -31,6 +32,7 @@ type AgentSessionsBackend = {
   setAgentHibernationConfig: (input: Record<string, unknown>) => Promise<unknown>
   hibernateManagedAiSession: (input: Record<string, unknown>) => Promise<unknown>
   wakeManagedAiSession: (input: Record<string, unknown>) => Promise<unknown>
+  bindManagedAiSessionTerminal: (input: Record<string, unknown>) => Promise<unknown>
   releaseManagedAiTerminalBinding: (terminalSessionId: string) => boolean
   configureManagedAiSessionAutoNamingRuntime: (config?: Record<string, unknown>) => void
   __testing: {
@@ -47,6 +49,16 @@ type AgentSessionsBackend = {
 const loadBackend = async () => {
   const modulePath = '../src/main/backend/agent/agentSessions'
   return (await import(modulePath)) as AgentSessionsBackend
+}
+
+type ProjectFilesBackend = {
+  configureProjectFilesRuntime: (input: Record<string, unknown>) => void
+  getProjectFileContext: (input: Record<string, unknown>) => Promise<unknown>
+}
+
+const loadProjectFilesBackend = async () => {
+  const modulePath = '../src/main/backend/files/projectFiles'
+  return (await import(modulePath)) as ProjectFilesBackend
 }
 
 const socketRequest = (socketPath: string, payload: Record<string, unknown>) =>
@@ -1644,6 +1656,98 @@ describe('agent session backend', () => {
         })
       })
     )
+  })
+
+  it('binds a restored managed session to its new live terminal without waiting for an agent hook', async () => {
+    const {
+      bindManagedAiSessionTerminal,
+      configureAiAgentSessionStore,
+      configureManagedAiSessionTerminalLiveness,
+      findManagedAiSessionRecord,
+      listManagedAiSessions,
+      publishAiAgentSessionEvent
+    } = await loadBackend()
+    const userDataPath = await mkdtemp(join(tmpdir(), 'aiopsterm-agent-restore-binding-'))
+    const projectRoot = await mkdtemp(join(tmpdir(), 'aiopsterm-agent-restored-project-'))
+    await configureAiAgentSessionStore(userDataPath)
+    configureManagedAiSessionTerminalLiveness((terminalSessionId) => terminalSessionId === 'terminal-restored')
+    const projectFiles = await loadProjectFilesBackend()
+    projectFiles.configureProjectFilesRuntime({
+      userDataPath,
+      getManagedSession: findManagedAiSessionRecord,
+      findProductSession: () => null
+    })
+
+    publishAiAgentSessionEvent(
+      {
+        source: 'codex',
+        event: 'session_start',
+        sessionId: 'codex-restored',
+        cwd: projectRoot,
+        resumeCommand: `cd '${projectRoot}' && codex resume 'codex-restored'`,
+        receivedAt: 500
+      },
+      null
+    )
+    await expect(projectFiles.getProjectFileContext({
+      source: 'codex',
+      sessionId: 'codex-restored'
+    })).resolves.toEqual(expect.objectContaining({
+      ok: false,
+      errorCode: 'PROJECT_FILE_CONTEXT_UNAVAILABLE'
+    }))
+
+    await expect(bindManagedAiSessionTerminal({
+      source: 'codex',
+      sessionId: 'codex-restored',
+      terminalSessionId: 'terminal-missing',
+      panelId: 'panel-missing',
+      cwd: projectRoot
+    })).resolves.toEqual(expect.objectContaining({
+      ok: false,
+      errorCode: 'MANAGED_AI_SESSION_TERMINAL_NOT_LIVE'
+    }))
+
+    await expect(bindManagedAiSessionTerminal({
+      source: 'codex',
+      sessionId: 'codex-restored',
+      terminalSessionId: 'terminal-restored',
+      panelId: 'panel-restored',
+      cwd: projectRoot
+    })).resolves.toEqual(expect.objectContaining({
+      ok: true,
+      data: expect.objectContaining({
+        session: expect.objectContaining({
+          id: 'codex-restored',
+          terminalSessionId: 'terminal-restored',
+          panelId: 'panel-restored',
+          cwd: projectRoot
+        })
+      })
+    }))
+    await expect(listManagedAiSessions()).resolves.toEqual(expect.objectContaining({
+      data: expect.objectContaining({
+        sessions: [
+          expect.objectContaining({
+            id: 'codex-restored',
+            terminalSessionId: 'terminal-restored',
+            panelId: 'panel-restored'
+          })
+        ]
+      })
+    }))
+    await expect(projectFiles.getProjectFileContext({
+      source: 'codex',
+      sessionId: 'codex-restored'
+    })).resolves.toEqual(expect.objectContaining({
+      ok: true,
+      data: expect.objectContaining({
+        source: 'codex',
+        sessionId: 'codex-restored',
+        projectRoot
+      })
+    }))
+    configureManagedAiSessionTerminalLiveness()
   })
 
   it('does not let late events roll back a newer ended managed AI session', async () => {
