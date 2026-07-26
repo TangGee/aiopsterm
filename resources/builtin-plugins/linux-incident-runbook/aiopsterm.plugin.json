@@ -1,8 +1,7 @@
 {
-  "manifestVersion": 2,
   "id": "aiopsterm.operations-toolkit",
   "displayName": "Operations Toolkit",
-  "version": "2.0.0",
+  "version": "0.1.0",
   "description": "提供可扩展的 Linux 运维检查树和终端操作。",
   "engines": {
     "aiopsterm": ">=0.1.0"

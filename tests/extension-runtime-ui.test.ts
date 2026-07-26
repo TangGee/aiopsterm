@@ -19,7 +19,6 @@ const plugin: ExtensionPluginRuntimeConfig = {
   installedVersion: '1.0.0',
   latestVersion: '1.0.0',
   source: 'local',
-  manifestVersion: 2,
   main: 'main.cjs',
   enabled: true,
   runtimeStatus: 'active',

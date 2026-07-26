@@ -15,7 +15,7 @@ const plugin: ExtensionPluginRuntimeConfig = {
   pluginId: 'ops-runbook',
   name: 'Ops Runbook',
   description: 'Runbook helpers',
-  kind: 'content',
+  kind: 'runtime',
   iconKey: 'runbook',
   tabName: 'Runbooks',
   show: true,

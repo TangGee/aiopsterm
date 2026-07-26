@@ -108,7 +108,7 @@ export const listExtensionPlugins = async (): Promise<ExtensionPluginListResult>
   if (!result.ok || !result.data) return result
   await Promise.all(
     result.data
-      .filter((plugin) => plugin.installed && plugin.manifestVersion === 2)
+      .filter((plugin) => plugin.installed)
       .map((plugin) => activateExtension(plugin))
   )
   return { ok: true, data: result.data.map(decorateExtensionPlugin) }
@@ -117,7 +117,7 @@ export const listExtensionPlugins = async (): Promise<ExtensionPluginListResult>
 export const activateInstalledExtensions = async () => {
   const result = await listExtensionPluginCatalog()
   for (const plugin of result.data || []) {
-    if (plugin.installed && plugin.manifestVersion === 2) await activateExtension(plugin)
+    if (plugin.installed) await activateExtension(plugin)
   }
 }
 
@@ -139,7 +139,7 @@ export const syncExtensionAssetProvider = async (
   const pluginId = providerText(input?.pluginId)
   const providerId = providerText(input?.providerId)
   const plugin = findExtensionCatalogPlugin(pluginId)
-  if (!plugin || !plugin.installed || plugin.kind !== 'provider') {
+  if (!plugin || !plugin.installed) {
     return { ok: false, errorCode: 'EXTENSION_PROVIDER_UNAVAILABLE', errorMessage: 'Installed provider plugin was not found.' }
   }
   const provider = plugin.assetProviders?.find((item) => item.id === providerId)
@@ -434,7 +434,7 @@ export const runExtensionPluginOperation = async (
     emitExtensionProgress(emit, pluginId, operation, 'error', 0, packageConfig.errorMessage)
     return packageConfig
   }
-  if (packageInput.kind === 'remote' && packageConfig.plugin.manifestVersion === 2 && !packageInput.sha256) {
+  if (packageInput.kind === 'remote' && !packageInput.sha256) {
     activeOperations.delete(pluginId)
     const result = errorResult(
       'EXTENSION_EXECUTABLE_CHECKSUM_REQUIRED',
@@ -518,7 +518,7 @@ export const savePluginConfiguration = async (input: ExtensionConfigurationUpdat
 
 export const runExtensionRuntimeAction = async (input: ExtensionRuntimeActionInput): Promise<ExtensionRuntimeActionResult> => {
   const plugin = findExtensionCatalogPlugin(trimText(input?.pluginId))
-  if (!plugin || !plugin.installed || plugin.manifestVersion !== 2) {
+  if (!plugin || !plugin.installed) {
     return { ok: false, errorCode: 'EXTENSION_RUNTIME_UNAVAILABLE', errorMessage: 'Executable plugin was not found.' }
   }
   if (plugin.required && input.action === 'disable') {
@@ -596,7 +596,7 @@ export const installExtensionPluginFromUrl = (
           pluginId,
           name: pluginId,
           description: 'Remote extension package.',
-          kind: 'content' as const,
+          kind: 'runtime' as const,
           iconKey: 'local' as const,
           tabName: pluginId,
           show: true,

@@ -1,8 +1,5 @@
 <template>
-  <section
-    v-if="plugin.manifestVersion === 2"
-    class="extension_contribution_section extension_runtime_section"
-  >
+  <section class="extension_contribution_section extension_runtime_section">
     <header class="extension_runtime_header">
       <div>
         <h3>插件运行时</h3>

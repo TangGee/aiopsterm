@@ -20,12 +20,10 @@ export type ExtensionOperationOptions = {
 }
 
 export type LocalExtensionPackageManifest = {
-  manifestVersion?: unknown
   id?: unknown
   name?: unknown
   displayName?: unknown
   version?: unknown
-  kind?: unknown
   main?: unknown
   activationEvents?: unknown
   required?: unknown

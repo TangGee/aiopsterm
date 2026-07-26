@@ -724,7 +724,7 @@ type TestExtensionPlugin = {
   pluginId: string
   name: string
   description: string
-  kind: 'content' | 'provider'
+  kind: 'runtime'
   iconKey: 'runbook' | 'cloud' | 'private' | 'local'
   tabName: string
   show: boolean
@@ -760,7 +760,7 @@ const extensionPluginStoreFixtureCatalog: TestExtensionPlugin[] = [
     pluginId: 'ops-runbook',
     name: 'Ops Runbook',
     description: '本地维护流程和技能模板。',
-    kind: 'content',
+    kind: 'runtime',
     iconKey: 'runbook',
     tabName: 'Ops Runbook',
     show: true,
@@ -784,7 +784,7 @@ const extensionPluginStoreFixtureCatalog: TestExtensionPlugin[] = [
     pluginId: 'cloud-assets',
     name: 'Cloud Assets',
     description: '云资产发现和同步插件，需要真实 .aiopsterm-plugin 包后安装。',
-    kind: 'content',
+    kind: 'runtime',
     iconKey: 'cloud',
     tabName: 'Cloud Assets',
     show: true,
@@ -810,7 +810,7 @@ const extensionPluginStoreFixtureCatalog: TestExtensionPlugin[] = [
     pluginId: 'private-automation-pack',
     name: 'Private Automation Pack',
     description: '私有自动化插件，需要订阅后安装。',
-    kind: 'content',
+    kind: 'runtime',
     iconKey: 'private',
     tabName: 'Private Automation Pack',
     show: true,
@@ -939,7 +939,7 @@ const createPackagePluginMock = (input: { fileName: string; filePath?: string; s
     pluginId,
     name: pluginName,
     description: 'Installed from a local .aiopsterm-plugin package.',
-    kind: 'content',
+    kind: 'runtime',
     iconKey: 'local',
     tabName: pluginName,
     show: true,
@@ -8257,7 +8257,7 @@ Object.defineProperty(window, 'aiops', {
           pluginId: input.pluginId,
           name: input.pluginId,
           description: 'Remote extension package.',
-          kind: 'content',
+          kind: 'runtime',
           iconKey: 'local',
           tabName: input.pluginId,
           show: true,

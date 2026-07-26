@@ -103,11 +103,19 @@ const normalizeLocalRegistryPlugins = (value: unknown): ExtensionPluginRuntimeCo
     const name = trimText(record.name)
     const installedVersion = trimText(record.installedVersion)
     const packagePath = trimText(record.packagePath)
-    if (!pluginId || !name || !installedVersion || !packagePath) continue
+    const main = trimText(record.main)
+    if (
+      !pluginId ||
+      !name ||
+      !installedVersion ||
+      !packagePath ||
+      !main ||
+      record.kind !== 'runtime' ||
+      Object.prototype.hasOwnProperty.call(record, 'manifestVersion')
+    ) continue
     const catalogPlugin = extensionCatalog.find((plugin) => plugin.pluginId === pluginId)
     const source = trimText(record.source) === 'store' ? 'store' : 'local'
-    const kind = record.kind === 'provider' ? 'provider' : record.kind === 'content' ? 'content' : record.kind === 'runtime' ? 'runtime' : null
-    if (!kind) continue
+    const kind = 'runtime'
     const isLocal = source === 'local'
     const categories = parseStringArray(record.categories)
     const functions = parseManifestFunctions(record.functions)
@@ -161,11 +169,10 @@ const normalizeLocalRegistryPlugins = (value: unknown): ExtensionPluginRuntimeCo
           : [{ title: 'Installed plugin', desc: 'Installed from an aiopsterm plugin package through the backend boundary.' }],
       commands,
       assetProviders,
-      manifestVersion: record.manifestVersion === 2 ? 2 : 1,
-      main: trimText(record.main) || undefined,
+      main,
       activationEvents: parseStringArray(record.activationEvents),
       enabled: record.enabled !== false,
-      runtimeStatus: record.manifestVersion === 2 ? 'inactive' : undefined,
+      runtimeStatus: 'inactive',
       views,
       menus,
       viewsWelcome,

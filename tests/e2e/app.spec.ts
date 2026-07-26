@@ -368,12 +368,11 @@ const createE2eExtensionStore = async () => {
   const dir = path.join(os.tmpdir(), `aiopsterm-e2e-extension-store-${Date.now()}`)
   await mkdir(dir, { recursive: true })
   const manifest = {
-    manifestVersion: 1,
     id: 'ops-runbook',
     displayName: 'Ops Runbook',
     version: '1.3.0',
     description: '本地维护流程和技能模板。',
-    kind: 'content',
+    main: 'main.cjs',
     engines: { aiopsterm: '>=0.1.0' },
     iconKey: 'runbook',
     categories: ['Tools', 'Runbook'],
@@ -389,7 +388,7 @@ const createE2eExtensionStore = async () => {
     path.join(dir, 'ops-runbook-1.3.0.aiopsterm-plugin'),
     createZipFixture([
       { name: 'aiopsterm.plugin.json', content: JSON.stringify(manifest) },
-      { name: 'content.txt', content: 'declarative plugin content' },
+      { name: 'main.cjs', content: 'exports.activate = function () {}' },
       { name: 'README.md', content: '# Ops Runbook\n\nE2E store package.' }
     ])
   )

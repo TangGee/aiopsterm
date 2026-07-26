@@ -101,7 +101,6 @@ exports.deactivate = function deactivate() {}
     latestVersion: '1.0.0',
     source: 'local',
     packagePath: pluginPath,
-    manifestVersion: 2,
     main: 'main.cjs',
     enabled: true,
     runtimeStatus: 'inactive',

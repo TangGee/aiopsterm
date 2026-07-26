@@ -1,8 +1,7 @@
 {
-  "manifestVersion": 2,
   "id": "aiopsterm.http-cmdb-provider",
   "displayName": "HTTP CMDB Provider",
-  "version": "2.0.0",
+  "version": "0.1.0",
   "description": "从标准 HTTP JSON 接口同步 SSH 资产。",
   "engines": {
     "aiopsterm": ">=0.1.0"

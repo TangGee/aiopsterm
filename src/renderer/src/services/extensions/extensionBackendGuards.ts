@@ -13,7 +13,7 @@ export const malformedExtensionBackendResultMessage = '扩展服务返回数据�
 
 const extensionIconKeys = new Set(['runbook', 'cloud', 'private', 'local'])
 const extensionSources = new Set(['builtin', 'store', 'local', 'development'])
-const extensionKinds = new Set(['content', 'provider', 'runtime'])
+const extensionKinds = new Set(['runtime'])
 const extensionOperations = new Set<ExtensionPluginOperation>(['install', 'update', 'uninstall', 'package'])
 const extensionInstallStages = new Set(['downloading', 'verifying', 'installing', 'done', 'error', 'cancelled', ''])
 const extensionConnectionLogStatuses = new Set(['progress', 'success', 'error'])

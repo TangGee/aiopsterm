@@ -11,16 +11,16 @@ const validate = (directory) => {
   const manifestPath = join(directory, 'aiopsterm.plugin.json')
   if (!existsSync(manifestPath)) throw new Error('aiopsterm.plugin.json was not found')
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
-  if (manifest.manifestVersion !== 1 && manifest.manifestVersion !== 2) throw new Error('manifestVersion must be 1 or 2')
+  if (Object.prototype.hasOwnProperty.call(manifest, 'manifestVersion') || Object.prototype.hasOwnProperty.call(manifest, 'kind')) {
+    throw new Error('manifestVersion and kind are not supported')
+  }
   if (!String(manifest.id || '').trim()) throw new Error('id is required')
   if (!String(manifest.displayName || '').trim()) throw new Error('displayName is required')
   if (!String(manifest.version || '').trim()) throw new Error('version is required')
   if (!String(manifest.engines?.aiopsterm || '').trim()) throw new Error('engines.aiopsterm is required')
-  if (manifest.manifestVersion === 2) {
-    const main = String(manifest.main || '').trim()
-    if (!main || main.startsWith('/') || main.split(/[\\/]/).includes('..')) throw new Error('main must be a safe relative path')
-    if (!existsSync(join(directory, main)) || !statSync(join(directory, main)).isFile()) throw new Error(`main entry was not found: ${main}`)
-  }
+  const main = String(manifest.main || '').trim()
+  if (!main || main.startsWith('/') || main.split(/[\\/]/).includes('..')) throw new Error('main must be a safe relative path')
+  if (!existsSync(join(directory, main)) || !statSync(join(directory, main)).isFile()) throw new Error(`main entry was not found: ${main}`)
   return manifest
 }
 

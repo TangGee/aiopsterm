@@ -125,25 +125,21 @@ export const pluginFromAiopstermManifest = (
   const version = trimText(manifest.version)
   const displayName = localizedManifestValue(manifest, 'displayName') || trimText(manifest.displayName) || trimText(manifest.name) || pluginId
   const localizedDescription = localizedManifestValue(manifest, 'description')
-  const manifestVersion = manifest.manifestVersion === 2 ? 2 : manifest.manifestVersion === 1 ? 1 : 0
   const main = trimText(manifest.main)
-  const kind =
-    manifestVersion === 2
-      ? 'runtime'
-      : manifest.kind === 'content' || manifest.kind === 'provider'
-        ? manifest.kind
-        : ''
+  const kind = 'runtime'
   const engineRange = trimText(manifest.engines?.aiopsterm)
-  if (!manifestVersion) {
-    return localPackageErrorResult('EXTENSION_PACKAGE_MANIFEST_INVALID', 'aiopsterm.plugin.json must use manifestVersion 1 or 2.')
+  if (Object.prototype.hasOwnProperty.call(manifest, 'manifestVersion') || Object.prototype.hasOwnProperty.call(manifest, 'kind')) {
+    return localPackageErrorResult(
+      'EXTENSION_PACKAGE_MANIFEST_INVALID',
+      'aiopsterm.plugin.json must not declare manifestVersion or kind.'
+    )
   }
   if (!pluginId) return localPackageErrorResult('EXTENSION_PACKAGE_MANIFEST_INVALID', 'aiopsterm.plugin.json must include an id.')
   if (!trimText(manifest.displayName)) {
     return localPackageErrorResult('EXTENSION_PACKAGE_MANIFEST_INVALID', 'aiopsterm.plugin.json must include a displayName.')
   }
   if (!version) return localPackageErrorResult('EXTENSION_PACKAGE_MANIFEST_INVALID', 'aiopsterm.plugin.json must include a version.')
-  if (!kind) return localPackageErrorResult('EXTENSION_PACKAGE_MANIFEST_INVALID', 'aiopsterm.plugin.json must use kind "content" or "provider".')
-  if (manifestVersion === 2 && (!main || !normalizePackageEntryName(main) || !/\.(?:cjs|js)$/i.test(main))) {
+  if (!main || !normalizePackageEntryName(main) || !/\.(?:cjs|js)$/i.test(main)) {
     return localPackageErrorResult(
       'EXTENSION_PACKAGE_MAIN_INVALID',
       'Executable plugins must declare a relative JavaScript main entry.'
@@ -165,12 +161,6 @@ export const pluginFromAiopstermManifest = (
   const viewsWelcome = parseManifestViewsWelcome(manifest)
   const configuration = parseManifestConfiguration(manifest)
   const bastionProviders = parseManifestBastionProviders(manifest)
-  if (manifestVersion === 1 && kind === 'content' && !commands.length) {
-    return localPackageErrorResult('EXTENSION_PACKAGE_CONTRIBUTIONS_REQUIRED', 'Content plugins must contribute at least one command.')
-  }
-  if (manifestVersion === 1 && kind === 'provider' && !assetProviders.length) {
-    return localPackageErrorResult('EXTENSION_PACKAGE_CONTRIBUTIONS_REQUIRED', 'Provider plugins must contribute at least one asset provider.')
-  }
   const basePlugin = options.basePlugin
   const categories = parseStringArray(manifest.categories)
   const functions = parseManifestFunctions(manifest.functions)
@@ -179,18 +169,16 @@ export const pluginFromAiopstermManifest = (
   const builtin = options.source === 'builtin'
   const development = options.source === 'development'
   const activationEvents = parseStringArray(manifest.activationEvents)
-  if (manifestVersion === 2) {
-    const contributedIds = [
-      ...commands.map((item) => item.id),
-      ...views.map((item) => item.id),
-      ...assetProviders.map((item) => item.id)
-    ]
-    if (contributedIds.some((id) => id !== pluginId && !id.startsWith(`${pluginId}.`))) {
-      return localPackageErrorResult(
-        'EXTENSION_PACKAGE_CONTRIBUTION_ID_INVALID',
-        `Executable plugin contribution ids must start with "${pluginId}.".`
-      )
-    }
+  const contributedIds = [
+    ...commands.map((item) => item.id),
+    ...views.map((item) => item.id),
+    ...assetProviders.map((item) => item.id)
+  ]
+  if (contributedIds.some((id) => id !== pluginId && !id.startsWith(`${pluginId}.`))) {
+    return localPackageErrorResult(
+      'EXTENSION_PACKAGE_CONTRIBUTION_ID_INVALID',
+      `Plugin contribution ids must start with "${pluginId}.".`
+    )
   }
   return {
     pluginId,
@@ -221,11 +209,10 @@ export const pluginFromAiopstermManifest = (
     functions: functions.length ? functions : basePlugin?.functions?.map((item) => ({ ...item })),
     commands,
     assetProviders,
-    manifestVersion,
-    ...(main ? { main } : {}),
-    activationEvents: activationEvents.length ? activationEvents : manifestVersion === 2 ? ['onStartupFinished'] : undefined,
+    main,
+    activationEvents: activationEvents.length ? activationEvents : ['onStartupFinished'],
     enabled: basePlugin?.enabled ?? true,
-    runtimeStatus: manifestVersion === 2 ? (basePlugin?.enabled === false ? 'disabled' : 'inactive') : undefined,
+    runtimeStatus: basePlugin?.enabled === false ? 'disabled' : 'inactive',
     views,
     menus,
     viewsWelcome,
@@ -773,7 +760,7 @@ export const parseLocalPackageManifest = (
     readme: readmeEntry ? readZipEntryText(readmeEntry) : undefined
   })
   if ('ok' in plugin) return plugin
-  if (plugin.manifestVersion === 2 && (!plugin.main || !findZipEntry(zipEntries, plugin.main))) {
+  if (!plugin.main || !findZipEntry(zipEntries, plugin.main)) {
     return localPackageErrorResult(
       'EXTENSION_PACKAGE_MAIN_MISSING',
       `Executable plugin main entry "${plugin.main || ''}" was not found in the package.`

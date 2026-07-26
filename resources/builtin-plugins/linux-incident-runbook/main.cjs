@@ -64,7 +64,7 @@ exports.activate = async function activate(context) {
   })
 
   const version = context.versions.registerProvider(function provideVersion() {
-    return { plugin: '2.0.0', checks: checks.length }
+    return { plugin: '0.1.0', checks: checks.length }
   })
 
   context.subscriptions.push(run, refresh, view, version)

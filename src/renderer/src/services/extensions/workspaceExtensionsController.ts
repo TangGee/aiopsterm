@@ -309,7 +309,7 @@ export const createWorkspaceExtensionsController = (state: WorkspaceExtensionsCo
       setExtensionNotice('该插件需要订阅后安装')
       return
     }
-    if (plugin.manifestVersion === 2 && !confirmTrustedExecutableCode(plugin.name)) {
+    if (!confirmTrustedExecutableCode(plugin.name)) {
       setExtensionNotice(`${plugin.name} 安装已取消`)
       return
     }
@@ -354,7 +354,7 @@ export const createWorkspaceExtensionsController = (state: WorkspaceExtensionsCo
   const updateExtensionPlugin = async (pluginId: string) => {
     const plugin = extensionPlugins.value.find((item) => item.pluginId === pluginId)
     if (!plugin || !plugin.isPlugin || !plugin.installed || !plugin.hasUpdate) return
-    if (plugin.manifestVersion === 2 && !confirmTrustedExecutableCode(plugin.name)) {
+    if (!confirmTrustedExecutableCode(plugin.name)) {
       setExtensionNotice(`${plugin.name} 更新已取消`)
       return
     }

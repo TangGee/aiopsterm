@@ -11,7 +11,7 @@ export type ExtensionInstallStage = 'downloading' | 'verifying' | 'installing' |
 
 export type ExtensionPluginSource = 'builtin' | 'store' | 'local' | 'development'
 
-export type ExtensionPluginKind = 'content' | 'provider' | 'runtime'
+export type ExtensionPluginKind = 'runtime'
 
 export type ExtensionRuntimeStatus = 'inactive' | 'activating' | 'active' | 'disabled' | 'error'
 
@@ -199,7 +199,6 @@ export type ExtensionPluginRuntimeConfig = {
   detailSummary?: string
   guideSteps?: string[]
   connectionLog?: ExtensionConnectionLogConfig[]
-  manifestVersion?: 1 | 2
   main?: string
   activationEvents?: string[]
   enabled?: boolean

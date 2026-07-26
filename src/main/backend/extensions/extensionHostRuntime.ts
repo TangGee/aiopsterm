@@ -416,7 +416,7 @@ export const configureExtensionHostRuntime = (config: ExtensionHostRuntimeConfig
 }
 
 export const activateExtension = async (plugin: ExtensionPluginRuntimeConfig) => {
-  if (plugin.manifestVersion !== 2 || !plugin.main || !plugin.packagePath) return plugin
+  if (!plugin.main || !plugin.packagePath) return plugin
   const enabled = storedState.enabled[plugin.pluginId] ?? plugin.enabled !== false
   if (!enabled) return { ...plugin, enabled: false, runtimeStatus: 'disabled' as const }
   const existing = runtimes.get(plugin.pluginId)
@@ -528,7 +528,6 @@ export const reloadExtension = async (plugin: ExtensionPluginRuntimeConfig) => {
 }
 
 export const decorateExtensionPlugin = (plugin: ExtensionPluginRuntimeConfig): ExtensionPluginRuntimeConfig => {
-  if (plugin.manifestVersion !== 2) return plugin
   const runtime = runtimes.get(plugin.pluginId)
   const enabled = storedState.enabled[plugin.pluginId] ?? plugin.enabled !== false
   return {
