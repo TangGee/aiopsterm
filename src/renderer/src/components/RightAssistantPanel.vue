@@ -18,6 +18,7 @@
 import { computed, ref, watch } from 'vue'
 import AiPanel from '@/components/AiPanel.vue'
 import type { ProductSessionUiRequest } from '@/components/productSessionUiTypes'
+import { writeRendererRuntimeLog } from '@/services/app/runtimeLogClient'
 import { projectFilesClient } from '@/services/files/projectFilesClient'
 import { isTerminalWorkspacePanel } from '@/services/terminal/terminalPanelRuntime'
 import { useWorkspaceStore } from '@/stores/workspace'
@@ -67,26 +68,61 @@ const activeSessionSignature = computed(() => {
   ].join(':')
 })
 
+const activeAvailabilityTrigger = computed(() => {
+  const session = activeManagedAiSession.value
+  if (!session) return ''
+  return `${activeSessionSignature.value}:${session.lastActivityAt}`
+})
+
 const activeTerminalSessionId = computed(() => activeManagedAiSession.value?.terminalSessionId || '')
 const projectFilesActive = computed(() =>
   projectFilesAvailable.value &&
   workspace.rightAssistantSurfaceForTerminal(activeTerminalSessionId.value) === 'files'
 )
 
-const refreshProjectFilesAvailability = async () => {
+const refreshProjectFilesAvailability = async (contextSignature: string) => {
   const session = activeManagedAiSession.value
   const requestGeneration = ++availabilityGeneration
-  projectFilesAvailable.value = false
   if (!session) return
   const getContext = projectFilesClient.getContext()
-  if (!getContext) return
+  const logFields = {
+    source: session.source,
+    sessionId: session.id,
+    terminalSessionId: session.terminalSessionId || '',
+    generation: requestGeneration
+  }
+  if (!getContext) {
+    writeRendererRuntimeLog('warn', 'renderer.project-files.context.bridge-missing', logFields)
+    return
+  }
+  writeRendererRuntimeLog('debug', 'renderer.project-files.context.requested', logFields)
   try {
     const result = await getContext({ source: session.source, sessionId: session.id })
-    if (requestGeneration !== availabilityGeneration) return
+    if (requestGeneration !== availabilityGeneration || contextSignature !== activeSessionSignature.value) {
+      writeRendererRuntimeLog('debug', 'renderer.project-files.context.stale', logFields)
+      return
+    }
     projectFilesAvailable.value = Boolean(result.ok && result.data)
-  } catch {
+    writeRendererRuntimeLog(
+      projectFilesAvailable.value ? 'debug' : 'warn',
+      projectFilesAvailable.value
+        ? 'renderer.project-files.context.available'
+        : 'renderer.project-files.context.unavailable',
+      {
+        ...logFields,
+        ...(result.data?.projectRoot ? { projectRoot: result.data.projectRoot } : {}),
+        ...(result.data?.capability ? { capability: result.data.capability } : {}),
+        ...(result.errorCode ? { errorCode: result.errorCode } : {}),
+        ...(result.errorMessage ? { errorMessage: result.errorMessage } : {})
+      }
+    )
+  } catch (error) {
     if (requestGeneration !== availabilityGeneration) return
     projectFilesAvailable.value = false
+    writeRendererRuntimeLog('warn', 'renderer.project-files.context.failed', {
+      ...logFields,
+      errorMessage: error instanceof Error ? error.message : String(error)
+    })
   }
 }
 
@@ -102,7 +138,28 @@ const closeProjectFiles = () => {
   workspace.setRightAssistantSurfaceForTerminal(activeTerminalSessionId.value, 'ai')
 }
 
-watch(activeSessionSignature, () => void refreshProjectFilesAvailability(), { immediate: true })
+let checkedContextSignature = ''
+watch(
+  activeAvailabilityTrigger,
+  () => {
+    const contextSignature = activeSessionSignature.value
+    if (!contextSignature) {
+      availabilityGeneration += 1
+      checkedContextSignature = ''
+      projectFilesAvailable.value = false
+      return
+    }
+    if (contextSignature !== checkedContextSignature) {
+      availabilityGeneration += 1
+      checkedContextSignature = contextSignature
+      projectFilesAvailable.value = false
+    } else if (projectFilesAvailable.value) {
+      return
+    }
+    void refreshProjectFilesAvailability(contextSignature)
+  },
+  { immediate: true }
+)
 
 watch(
   () => props.productSessionRequest?.sequence,

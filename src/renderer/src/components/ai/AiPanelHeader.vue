@@ -160,6 +160,7 @@
         @click.stop
       >
         <button
+          ref="moreActionsTriggerRef"
           type="button"
           class="ai-header-icon-button"
           :class="{ active: moreActionsMenuOpen }"
@@ -169,11 +170,21 @@
         >
           <Ellipsis />
         </button>
-        <div
-          v-if="moreActionsMenuOpen"
-          class="ai-more-actions-menu"
-          data-testid="ai-more-actions-menu"
-        >
+      </div>
+    </div>
+    <Teleport to="body">
+      <div
+        v-if="moreActionsMenuOpen"
+        ref="moreActionsMenuRef"
+        class="ai-more-actions-menu ai-more-actions-menu-floating"
+        :class="{ ready: moreActionsMenuPosition.ready }"
+        :style="{
+          left: `${moreActionsMenuPosition.left}px`,
+          top: `${moreActionsMenuPosition.top}px`
+        }"
+        data-testid="ai-more-actions-menu"
+        @click.stop
+      >
           <template v-if="aiPanelMode === 'classic'">
             <button
               type="button"
@@ -212,14 +223,13 @@
               <span>{{ t('ai.codexRestart') }}</span>
             </button>
           </template>
-        </div>
       </div>
-    </div>
+    </Teleport>
   </header>
 </template>
 
 <script setup lang="ts">
-import { nextTick, watch, type ComponentPublicInstance } from 'vue'
+import { nextTick, onBeforeUnmount, reactive, ref, watch, type ComponentPublicInstance } from 'vue'
 import {
   Bot,
   Code2,
@@ -275,6 +285,59 @@ const {
 } = useAiPanelRuntimeContext()
 
 const codexTabRefs = new Map<string, HTMLElement>()
+const moreActionsTriggerRef = ref<HTMLElement | null>(null)
+const moreActionsMenuRef = ref<HTMLElement | null>(null)
+const moreActionsMenuPosition = reactive({
+  left: 0,
+  top: 0,
+  ready: false
+})
+const menuViewportPadding = 8
+const menuGap = 6
+
+const updateMoreActionsMenuPosition = () => {
+  const trigger = moreActionsTriggerRef.value
+  const menu = moreActionsMenuRef.value
+  if (!trigger || !menu) return
+  const triggerRect = trigger.getBoundingClientRect()
+  const menuRect = menu.getBoundingClientRect()
+  const maxMenuWidth = Math.max(0, window.innerWidth - menuViewportPadding * 2)
+  const menuWidth = Math.min(menuRect.width || menu.offsetWidth || 132, maxMenuWidth)
+  const menuHeight = menuRect.height || menu.offsetHeight
+  const maxLeft = Math.max(menuViewportPadding, window.innerWidth - menuWidth - menuViewportPadding)
+  const left = Math.min(
+    Math.max(triggerRect.right - menuWidth, menuViewportPadding),
+    maxLeft
+  )
+  const belowTop = triggerRect.bottom + menuGap
+  const aboveTop = triggerRect.top - menuHeight - menuGap
+  const preferredTop = belowTop + menuHeight <= window.innerHeight || aboveTop < menuViewportPadding
+    ? belowTop
+    : aboveTop
+  const maxTop = Math.max(menuViewportPadding, window.innerHeight - menuHeight - menuViewportPadding)
+  moreActionsMenuPosition.left = Math.min(Math.max(left, menuViewportPadding), maxLeft)
+  moreActionsMenuPosition.top = Math.min(Math.max(preferredTop, menuViewportPadding), maxTop)
+  moreActionsMenuPosition.ready = true
+}
+
+const onMoreActionsOutsidePointerDown = (event: PointerEvent) => {
+  const target = event.target
+  if (!(target instanceof Node)) return
+  if (moreActionsTriggerRef.value?.contains(target) || moreActionsMenuRef.value?.contains(target)) return
+  toggleMoreActionsMenu()
+}
+
+const addMoreActionsMenuListeners = () => {
+  window.addEventListener('resize', updateMoreActionsMenuPosition)
+  window.addEventListener('scroll', updateMoreActionsMenuPosition, true)
+  document.addEventListener('pointerdown', onMoreActionsOutsidePointerDown)
+}
+
+const removeMoreActionsMenuListeners = () => {
+  window.removeEventListener('resize', updateMoreActionsMenuPosition)
+  window.removeEventListener('scroll', updateMoreActionsMenuPosition, true)
+  document.removeEventListener('pointerdown', onMoreActionsOutsidePointerDown)
+}
 
 const registerCodexTabRef = (conversationId: string, element: Element | ComponentPublicInstance | null) => {
   if (element instanceof HTMLElement) codexTabRefs.set(conversationId, element)
@@ -291,6 +354,23 @@ watch(
   },
   { flush: 'post' }
 )
+
+watch(
+  moreActionsMenuOpen,
+  (open) => {
+    removeMoreActionsMenuListeners()
+    moreActionsMenuPosition.ready = false
+    if (!open) return
+    void nextTick(() => {
+      if (!moreActionsMenuOpen.value) return
+      updateMoreActionsMenuPosition()
+      addMoreActionsMenuListeners()
+    })
+  },
+  { flush: 'post' }
+)
+
+onBeforeUnmount(removeMoreActionsMenuListeners)
 
 const toggleHeaderMoreActionsMenu = () => {
   if (moreActionsMenuOpen.value) {

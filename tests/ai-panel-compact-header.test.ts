@@ -1,6 +1,8 @@
-import { mount } from '@vue/test-utils'
+import { DOMWrapper, enableAutoUnmount, mount } from '@vue/test-utils'
 import { reactive, ref } from 'vue'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+enableAutoUnmount(afterEach)
 
 const context = vi.hoisted(() => ({ runtime: null as any }))
 
@@ -63,6 +65,8 @@ const makeRuntime = () => ({
   workspace: reactive({ selectedConversationId: '' })
 })
 
+const bodyWrapper = () => new DOMWrapper(document.body)
+
 describe('AiPanelHeader compact controls', () => {
   beforeEach(() => {
     context.runtime = makeRuntime()
@@ -87,9 +91,9 @@ describe('AiPanelHeader compact controls', () => {
     expect(context.runtime.closePopups.mock.invocationCallOrder[0]).toBeLessThan(
       context.runtime.toggleMoreActionsMenu.mock.invocationCallOrder[0]
     )
-    expect(wrapper.findAll('[data-testid="ai-more-actions-menu"] button')).toHaveLength(2)
-    expect(wrapper.find('[data-testid="ai-chat-search-open"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="ai-chat-export"]').exists()).toBe(true)
+    expect(bodyWrapper().findAll('[data-testid="ai-more-actions-menu"] button')).toHaveLength(2)
+    expect(bodyWrapper().find('[data-testid="ai-chat-search-open"]').exists()).toBe(true)
+    expect(bodyWrapper().find('[data-testid="ai-chat-export"]').exists()).toBe(true)
 
     await wrapper.find('.ai-conversation-tab-close').trigger('click')
     expect(context.runtime.closeConversationTab).toHaveBeenCalledWith('classic-1')
@@ -136,19 +140,48 @@ describe('AiPanelHeader compact controls', () => {
     await wrapper.find('[data-testid="ai-more-actions-open"]').trigger('click')
     expect(context.runtime.closePopups).toHaveBeenCalledTimes(1)
     expect(wrapper.find('[data-testid="ai-panel-mode-dropdown"]').exists()).toBe(false)
-    expect(wrapper.findAll('[data-testid="ai-more-actions-menu"] button')).toHaveLength(2)
-    expect(wrapper.find('[data-testid="ai-codex-workspace-link"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="ai-codex-restart"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="ai-chat-search-open"]').exists()).toBe(false)
+    expect(bodyWrapper().findAll('[data-testid="ai-more-actions-menu"] button')).toHaveLength(2)
+    expect(bodyWrapper().find('[data-testid="ai-codex-workspace-link"]').exists()).toBe(true)
+    expect(bodyWrapper().find('[data-testid="ai-codex-restart"]').exists()).toBe(true)
+    expect(bodyWrapper().find('[data-testid="ai-chat-search-open"]').exists()).toBe(false)
 
     await wrapper.find('[data-testid="ai-more-actions-open"]').trigger('click')
     expect(context.runtime.closePopups).toHaveBeenCalledTimes(1)
-    expect(wrapper.find('[data-testid="ai-more-actions-menu"]').exists()).toBe(false)
+    expect(bodyWrapper().find('[data-testid="ai-more-actions-menu"]').exists()).toBe(false)
 
     await wrapper.find('[data-testid="ai-more-actions-open"]').trigger('click')
 
-    await wrapper.find('[data-testid="ai-codex-restart"]').trigger('click')
+    await bodyWrapper().find('[data-testid="ai-codex-restart"]').trigger('click')
     expect(context.runtime.restartCodexSession).toHaveBeenCalledTimes(1)
+  })
+
+  it('renders More as a viewport-clamped global overlay', async () => {
+    const wrapper = mount(AiPanelHeader)
+    const trigger = wrapper.get('[data-testid="ai-more-actions-open"]')
+    vi.spyOn(trigger.element, 'getBoundingClientRect').mockReturnValue({
+      x: 84,
+      y: 20,
+      left: 84,
+      right: 108,
+      top: 20,
+      bottom: 44,
+      width: 24,
+      height: 24,
+      toJSON: () => ({})
+    })
+    const originalInnerWidth = window.innerWidth
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 120 })
+    try {
+      await trigger.trigger('click')
+      await wrapper.vm.$nextTick()
+      const menu = bodyWrapper().get('[data-testid="ai-more-actions-menu"]')
+      expect(menu.classes()).toContain('ai-more-actions-menu-floating')
+      expect(menu.classes()).toContain('ready')
+      expect(menu.attributes('style')).toContain('left: 8px')
+      expect(wrapper.find('[data-testid="ai-more-actions-menu"]').exists()).toBe(false)
+    } finally {
+      Object.defineProperty(window, 'innerWidth', { configurable: true, value: originalInnerWidth })
+    }
   })
 
   it('scrolls a newly active Codex conversation tab into view', async () => {

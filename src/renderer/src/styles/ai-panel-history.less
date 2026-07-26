@@ -15,6 +15,21 @@
   padding: 4px;
 }
 
+.ai-more-actions-menu-floating {
+  position: fixed;
+  top: auto;
+  right: auto;
+  z-index: 240;
+  width: min(132px, calc(100vw - 16px));
+  background: var(--theme-module-active-readable-strong-bg);
+  backdrop-filter: var(--theme-module-active-backdrop-filter);
+  visibility: hidden;
+}
+
+.ai-more-actions-menu-floating.ready {
+  visibility: visible;
+}
+
 .ai-more-actions-menu button {
   width: 100%;
   height: 28px;

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { enableAutoUnmount, flushPromises, mount, type VueWrapper } from '@vue/test-utils'
+import { DOMWrapper, enableAutoUnmount, flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { readFileSync } from 'fs'
 import { dirname, join } from 'path'
@@ -473,6 +473,7 @@ import type { FileSessionInfo } from '@shared/contracts/files'
 import type { TerminalCreateOptions, TerminalKeyboardInteractiveRequest, TerminalSessionInfo } from '@shared/contracts/terminalSessions'
 
 const prodKeychainSshAgentFingerprint = 'SHA256:KW/btgUSM+Gu9ht4gyd2CMSZB/1setTDE0+Uik88xGE'
+const bodyWrapper = () => new DOMWrapper(document.body)
 const teleportStub = { teleport: true }
 const withTeleportStub = (options: Record<string, any> = {}) => ({
   ...options,
@@ -1806,7 +1807,7 @@ describe('AppShell', () => {
     await wrapper.find('[data-testid="ai-more-actions-open"]').trigger('click')
     await wrapper.vm.$nextTick()
     expect(wrapper.find('[data-testid="ai-codex-target-picker"]').exists()).toBe(false)
-    expect(wrapper.find('[data-testid="ai-more-actions-menu"]').exists()).toBe(true)
+    expect(bodyWrapper().find('[data-testid="ai-more-actions-menu"]').exists()).toBe(true)
     await wrapper.find('[data-testid="ai-more-actions-open"]').trigger('click')
     await wrapper.find('[data-testid="ai-codex-bind-open"]').trigger('click')
     await flushPromises()
@@ -6175,8 +6176,8 @@ describe('AppShell', () => {
     expect(wrapper.findAll('.ai-header > .ai-header-actions > .ai-header-icon-button')).toHaveLength(1)
     expect(wrapper.find('[data-testid="ai-more-actions-open"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="ai-history-open"]').exists()).toBe(false)
-    expect(wrapper.find('[data-testid="ai-chat-search-open"]').exists()).toBe(false)
-    expect(wrapper.find('[data-testid="ai-chat-export"]').exists()).toBe(false)
+    expect(bodyWrapper().find('[data-testid="ai-chat-search-open"]').exists()).toBe(false)
+    expect(bodyWrapper().find('[data-testid="ai-chat-export"]').exists()).toBe(false)
     expect(wrapper.findAll('[data-testid="ai-conversation-tab"]')).toHaveLength(1)
     expect(wrapper.find('[data-testid="ai-conversation-tab"][data-conversation-id="history-1"]').text()).toContain('生产巡检')
     expect(wrapper.find('[data-testid="ai-conversation-tab"][data-conversation-id="history-1"]').attributes('aria-selected')).toBe('true')
@@ -6189,8 +6190,8 @@ describe('AppShell', () => {
     expect(styles).toContain('.ai-conversation-tabs {\n  flex: 1 1 0;\n  width: 0;\n  min-width: 0;')
     expect(styles).toContain('.ai-conversation-tab {\n  min-width: 42px;')
     await wrapper.find('[data-testid="ai-more-actions-open"]').trigger('click')
-    expect(wrapper.find('[data-testid="ai-more-actions-menu"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="ai-more-actions-menu"]').findAll('button')).toHaveLength(2)
+    expect(bodyWrapper().find('[data-testid="ai-more-actions-menu"]').exists()).toBe(true)
+    expect(bodyWrapper().find('[data-testid="ai-more-actions-menu"]').findAll('button')).toHaveLength(2)
     expect(wrapper.find('[data-testid="ai-history-open"]').exists()).toBe(false)
     await wrapper.find('[data-testid="ai-more-actions-open"]').trigger('click')
     store.selectedConversationId = 'history-1'
@@ -6211,7 +6212,7 @@ describe('AppShell', () => {
 
     await wrapper.find('[data-testid="ai-more-actions-open"]').trigger('click')
     await wrapper.vm.$nextTick()
-    await wrapper.find('[data-testid="ai-chat-search-open"]').trigger('click')
+    await bodyWrapper().find('[data-testid="ai-chat-search-open"]').trigger('click')
     await wrapper.vm.$nextTick()
     expect(wrapper.find('.ai-chat-search-bar').exists()).toBe(true)
     expect(document.activeElement).toBe(wrapper.find('[data-testid="ai-chat-search-input"]').element)
@@ -6309,7 +6310,7 @@ describe('AppShell', () => {
 
     await wrapper.find('[data-testid="ai-more-actions-open"]').trigger('click')
     await wrapper.vm.$nextTick()
-    await wrapper.find('[data-testid="ai-chat-export"]').trigger('click')
+    await bodyWrapper().find('[data-testid="ai-chat-export"]').trigger('click')
     await flushPromises()
     const exportInput = vi.mocked(window.aiops.exportChat).mock.calls.at(-1)?.[0]
     expect(exportInput).toEqual(
@@ -6956,7 +6957,7 @@ describe('AppShell', () => {
       } as any)
       await wrapper.find('[data-testid="ai-more-actions-open"]').trigger('click')
       await wrapper.vm.$nextTick()
-      await wrapper.find('[data-testid="ai-chat-export"]').trigger('click')
+      await bodyWrapper().find('[data-testid="ai-chat-export"]').trigger('click')
       await flushPromises()
       await wrapper.vm.$nextTick()
       expect(wrapper.find('[data-testid="ai-chat-export-notice"]').text()).toContain('导出失败：AI 服务返回数据无效')
@@ -6972,7 +6973,7 @@ describe('AppShell', () => {
       } as any)
       await wrapper.find('[data-testid="ai-more-actions-open"]').trigger('click')
       await wrapper.vm.$nextTick()
-      await wrapper.find('[data-testid="ai-chat-export"]').trigger('click')
+      await bodyWrapper().find('[data-testid="ai-chat-export"]').trigger('click')
       await flushPromises()
       await wrapper.vm.$nextTick()
       expect(wrapper.find('[data-testid="ai-chat-export-notice"]').text()).toContain('导出失败：AI 服务返回数据无效')

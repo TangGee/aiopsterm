@@ -47,6 +47,24 @@ test('project files uses a contextual drawer inside the persistent AI panel', as
     await expect(page.locator('.right-assistant-tabs')).toHaveCount(0)
     await expect(page.getByTestId('ai-project-files-toggle')).toHaveCount(0)
 
+    await page.getByTestId('ai-more-actions-open').click()
+    const moreActionsMenu = page.getByTestId('ai-more-actions-menu')
+    await expect(moreActionsMenu).toBeVisible()
+    const moreActionsGeometry = await moreActionsMenu.evaluate((element) => {
+      const bounds = element.getBoundingClientRect()
+      return {
+        parentIsBody: element.parentElement === document.body,
+        left: bounds.left,
+        right: bounds.right,
+        viewportWidth: window.innerWidth
+      }
+    })
+    expect(moreActionsGeometry.parentIsBody).toBe(true)
+    expect(moreActionsGeometry.left).toBeGreaterThanOrEqual(8)
+    expect(moreActionsGeometry.right).toBeLessThanOrEqual(moreActionsGeometry.viewportWidth - 8)
+    await page.getByTestId('ai-more-actions-open').click()
+    await expect(moreActionsMenu).toHaveCount(0)
+
     await page.locator('.workspace-search input').fill('127.0.0.1')
     const localRow = page.locator('.workspace-host-row').filter({ hasText: '127.0.0.1' }).first()
     await expect(localRow).toBeVisible()
