@@ -31,6 +31,7 @@
     "build:win:dir": "npm run generate:icons && npm run build:codex && npm run build:cline-sidecar && npm run build && npm run rebuild:native && electron-builder --win --dir --config electron-builder.yml",
     "package:build": "node scripts/build-package-target.mjs",
     "package:build:matrix": "node scripts/build-package-matrix.mjs",
+    "package:source": "bash scripts/package-source.sh",
     "package:verify": "node scripts/verify-package-target.mjs",
     "typecheck": "vue-tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.sidecar.json",
     "test": "npm run audit:i18n && npm run native:ensure:node && vitest run",
